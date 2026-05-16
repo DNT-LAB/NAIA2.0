@@ -1128,10 +1128,6 @@ class ModernMainWindow(QMainWindow):
         self.auto_generation_in_progress = False
         self.last_auto_generation_time = 0
         self.last_image_generation_time = 0
-        self._auto_generation_waiting_for_thread = False
-        self.webui_fast_auto_gen_enabled = False
-        self._webui_fast_auto_gen_prepare_requested = False
-        self._webui_fast_auto_gen_preparing = False
 
         #  검색 결과를 저장할 변수 및 컨트롤러 초기화
         self.search_results = SearchResultModel()
@@ -3206,7 +3202,6 @@ class ModernMainWindow(QMainWindow):
             info_text = result.get("info", "")
             source_row = result.get("source_row")
             raw_bytes = result.get("raw_bytes")
-            skip_auto_generate_check = bool(result.get("_skip_update_ui_auto_generate_check"))
 
             if image_object is None:
                 print("❌ image_object가 None입니다.")
@@ -3319,7 +3314,7 @@ class ModernMainWindow(QMainWindow):
             # 메인 스레드를 ~수백 ms 잡는다. broadcast 가 그 뒤로 밀리면 Web Shell 페인트도 늦어진다.
             self.app_context.publish("generation_result_available", result)
 
-            # 히스토리 추가는 스레드 종료/Auto Gen 재개 뒤로 밀어 메인 이벤트 루프 점유를 피한다.
+            # 히스토리 추가는 한 frame 늦춰서 broadcast 큐잉 + 첫 페인트가 먼저 일어나게 한다.
             def _deferred_add_to_history(
                 _image=image_object,
                 _raw=raw_bytes,
@@ -3343,7 +3338,7 @@ class ModernMainWindow(QMainWindow):
                     print(f"❌ 히스토리 추가 실패: {e}")
                     import traceback
                     traceback.print_exc()
-            QTimer.singleShot(50, _deferred_add_to_history)
+            QTimer.singleShot(0, _deferred_add_to_history)
             
             # 자동화 모듈 처리 (안전하게)
             if self.automation_module:
@@ -3355,41 +3350,38 @@ class ModernMainWindow(QMainWindow):
                     print(f"❌ 자동화 모듈 notify_generation_completed 실패: {e}")
                     return
 
-            if skip_auto_generate_check:
-                print("[AUTO] Auto Gen은 스레드 종료 경로에서 이미 예약됨.")
-            else:
-                # 자동 생성 체크
-                try:
-                    # 자동 생성이 활성화되어 있고, 자동화가 실행 중일 때만 지연시간 적용
-                    auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
-                    if (auto_generate_checkbox and auto_generate_checkbox.isChecked() and
-                        self.automation_module and self.automation_module.automation_controller.is_running):
-                        delay = self.automation_module.get_generation_delay()
-                        if delay > 0:
-                            print(f"⏱️ 생성 지연: {delay:.1f}초")
-                            # 카운트다운 스레드를 사용하여 지연 시각화
-                            if hasattr(self.automation_module, 'start_delay_countdown'):
-                                # 카운트다운 완료 시 자동 생성 트리거를 연결
-                                self.automation_module.countdown_thread = None  # 기존 연결 해제를 위해 초기화
-                                self.automation_module.start_delay_countdown_for_new_prompt(delay)
-                            else:
-                                # 폴백: 기존 방식 사용
-                                if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
-                                    self.automation_module.delay_info_label.setText(f"⏱️ 지연: {delay:.1f}초 후 다음 생성")
-                                # 모듈 레벨 import (line 40) 사용 — 함수-로컬 import 는
-                                # 같은 함수 위쪽에서 QTimer 참조 시 UnboundLocalError 유발하므로 금지.
-                                QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
+            # 자동 생성 체크
+            try:
+                # 자동 생성이 활성화되어 있고, 자동화가 실행 중일 때만 지연시간 적용
+                auto_generate_checkbox = self.generation_checkboxes.get("자동 생성")
+                if (auto_generate_checkbox and auto_generate_checkbox.isChecked() and
+                    self.automation_module and self.automation_module.automation_controller.is_running):
+                    delay = self.automation_module.get_generation_delay()
+                    if delay > 0:
+                        print(f"⏱️ 생성 지연: {delay:.1f}초")
+                        # 카운트다운 스레드를 사용하여 지연 시각화
+                        if hasattr(self.automation_module, 'start_delay_countdown'):
+                            # 카운트다운 완료 시 자동 생성 트리거를 연결
+                            self.automation_module.countdown_thread = None  # 기존 연결 해제를 위해 초기화
+                            self.automation_module.start_delay_countdown_for_new_prompt(delay)
                         else:
+                            # 폴백: 기존 방식 사용
                             if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
-                                self.automation_module.delay_info_label.setText("⚡ 지연 없음")
-                            self._check_and_trigger_auto_generation()
+                                self.automation_module.delay_info_label.setText(f"⏱️ 지연: {delay:.1f}초 후 다음 생성")
+                            # 모듈 레벨 import (line 40) 사용 — 함수-로컬 import 는
+                            # 같은 함수 위쪽에서 QTimer 참조 시 UnboundLocalError 유발하므로 금지.
+                            QTimer.singleShot(int(delay * 1000), self._check_and_trigger_auto_generation)
                     else:
-                        # 자동화가 비활성화된 경우 지연 없이 즉시 실행
-                        if self.automation_module and hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
-                            self.automation_module.delay_info_label.setText("")
+                        if hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                            self.automation_module.delay_info_label.setText("⚡ 지연 없음")
                         self._check_and_trigger_auto_generation()
-                except Exception as e:
-                    print(f"❌ 자동 생성 체크 실패: {e}")
+                else:
+                    # 자동화가 비활성화된 경우 지연 없이 즉시 실행
+                    if self.automation_module and hasattr(self.automation_module, 'delay_info_label') and self.automation_module.delay_info_label:
+                        self.automation_module.delay_info_label.setText("")
+                    self._check_and_trigger_auto_generation()
+            except Exception as e:
+                print(f"❌ 자동 생성 체크 실패: {e}")
 
             # 🆕 Autosave: 특수 요청이 아닌 일반 생성 완료 시에만 자동 저장
             try:
@@ -3406,7 +3398,7 @@ class ModernMainWindow(QMainWindow):
                 )
 
                 if not is_special_request:
-                    QTimer.singleShot(50, self._perform_autosave_on_generation)
+                    self._perform_autosave_on_generation()
             except Exception as e:
                 # 자동 저장 실패해도 프로그램은 계속 동작
                 print(f"⚠️ [Autosave] 트리거 실패: {e}")
@@ -3424,7 +3416,6 @@ class ModernMainWindow(QMainWindow):
         prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
         
         if not auto_generate_checkbox.isChecked():
-            self._auto_generation_waiting_for_thread = False
             return  # 자동 생성 체크박스가 없으면 종료
 
         try:
@@ -3445,7 +3436,13 @@ class ModernMainWindow(QMainWindow):
             if (hasattr(self, 'generation_controller') and
                 self.generation_controller.is_generating):
                 print("🔄 이미지 생성 중이므로 자동 생성 건너뜀")
-                self._auto_generation_waiting_for_thread = True
+                # 약간의 지연 후 다시 시도 (최대 재시도 횟수 제한)
+                self._auto_gen_retry_count = getattr(self, '_auto_gen_retry_count', 0) + 1
+                if self._auto_gen_retry_count > 30:
+                    print("⚠️ 자동 생성 재시도 상한 도달. 루프를 중단합니다.")
+                    self._auto_gen_retry_count = 0
+                    return
+                QTimer.singleShot(800, self._check_and_trigger_auto_generation)
                 return
 
             # [추가] 스레드 상태 확인
@@ -3453,12 +3450,11 @@ class ModernMainWindow(QMainWindow):
                 self.generation_controller.generation_thread and
                 self.generation_controller.generation_thread.isRunning()):
                 print("🔄 이전 스레드가 아직 실행 중이므로 잠시 대기...")
-                self._auto_generation_waiting_for_thread = True
+                QTimer.singleShot(200, self._check_and_trigger_auto_generation)
                 return
 
             # 정상 진입 — 재시도 카운터 리셋
             self._auto_gen_retry_count = 0
-            self._auto_generation_waiting_for_thread = False
 
             # [신규] 반복 생성 중인지 확인 - 반복 중이면 자동 생성 건너뛰기
             if (self.automation_module and
@@ -5189,96 +5185,6 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage(f"❌ 자동 이미지 생성 오류: {e}")
             print(f"자동 이미지 생성 오류: {e}")
 
-    def is_webui_fast_auto_gen_enabled(self, api_mode: str | None = None) -> bool:
-        """WEBUI Fast Auto Gen이 현재 실제로 사용할 수 있는지 확인합니다."""
-        try:
-            current_mode = str(api_mode or self.get_current_api_mode() or "").upper()
-            return bool(
-                self.webui_fast_auto_gen_enabled
-                and current_mode == "WEBUI"
-                and self.generation_checkboxes.get("자동 생성")
-                and self.generation_checkboxes["자동 생성"].isChecked()
-            )
-        except Exception:
-            return False
-
-    def prepare_fast_webui_auto_generation(self, api_mode: str | None = None) -> bool:
-        """현재 WEBUI 생성 중 다음 Auto Gen 프롬프트를 미리 큐에 넣습니다."""
-        try:
-            if not self.is_webui_fast_auto_gen_enabled(api_mode):
-                return False
-            if self._webui_fast_auto_gen_preparing:
-                return False
-
-            prompt_fixed_checkbox = self.generation_checkboxes.get("프롬프트 고정")
-            if prompt_fixed_checkbox and prompt_fixed_checkbox.isChecked():
-                return False
-
-            queue_manager = self.app_context.generation_queue_manager
-            if queue_manager and ((not queue_manager.is_empty()) or queue_manager.is_paused()):
-                return False
-
-            if self.search_results.is_empty() and not self.generation_checkboxes["와일드카드 단독 모드"].isChecked():
-                if not self._restore_from_snapshot():
-                    return False
-
-            import time
-            self._webui_fast_auto_gen_preparing = True
-            self._webui_fast_auto_gen_prepare_requested = True
-            self.auto_generation_in_progress = True
-            self.last_auto_generation_time = time.time()
-
-            comfyui_sampling_mode = "eps"
-            if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
-                comfyui_sampling_mode = "anima"
-            elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
-                comfyui_sampling_mode = "v_prediction"
-            elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
-                comfyui_sampling_mode = "eps"
-
-            settings = {
-                'prompt_fixed': False,
-                'auto_generate': True,
-                'turbo_mode': self.generation_checkboxes["터보 옵션"].isChecked(),
-                'wildcard_standalone': self.generation_checkboxes["와일드카드 단독 모드"].isChecked(),
-                "auto_fit_resolution": self.auto_fit_resolution_checkbox.isChecked(),
-                'api_mode': "WEBUI",
-                'comfyui_sampling_mode': comfyui_sampling_mode,
-                'webui_fast_auto_gen': True,
-            }
-
-            self.status_bar.showMessage("⚡ WEBUI Fast Auto Gen: 다음 프롬프트 준비 중...")
-            remote_ratings = getattr(self.app_context, 'remote_active_ratings', None)
-            self.prompt_gen_controller.generate_next_prompt(
-                self.search_results,
-                settings,
-                active_ratings=remote_ratings,
-            )
-            return True
-        except Exception as e:
-            self._webui_fast_auto_gen_prepare_requested = False
-            self._webui_fast_auto_gen_preparing = False
-            self.auto_generation_in_progress = False
-            print(f"⚠️ WEBUI Fast Auto Gen 준비 실패: {e}")
-            return False
-
-    def cancel_webui_fast_auto_generation(self):
-        """WEBUI Fast Auto Gen 준비 상태와 아직 대기 중인 Fast 큐 요청을 정리합니다."""
-        self._webui_fast_auto_gen_prepare_requested = False
-        self._webui_fast_auto_gen_preparing = False
-        try:
-            queue_manager = self.app_context.generation_queue_manager
-            get_all_requests = getattr(queue_manager, "get_all_requests", None)
-            remove_request = getattr(queue_manager, "remove_request", None)
-            if not (callable(get_all_requests) and callable(remove_request)):
-                return
-            for request in list(get_all_requests()):
-                params = getattr(request, "params", None)
-                if isinstance(params, dict) and params.get("_webui_fast_auto_gen"):
-                    remove_request(request.request_id)
-        except Exception as e:
-            print(f"⚠️ WEBUI Fast Auto Gen 큐 정리 실패: {e}")
-
     def on_prompt_generated(self, prompt_text: str):
         """컨트롤러로부터 생성된 프롬프트를 받아 UI에 업데이트"""
         self.main_prompt_textedit.setPlainText(prompt_text)
@@ -5298,20 +5204,6 @@ class ModernMainWindow(QMainWindow):
 
         # [신규] 자동 생성 플래그 해제
         self.auto_generation_in_progress = False
-
-        if self._webui_fast_auto_gen_prepare_requested:
-            self._webui_fast_auto_gen_prepare_requested = False
-            try:
-                if hasattr(self.prompt_gen_controller, 'auto_generation_requested'):
-                    self.prompt_gen_controller.auto_generation_requested = False
-                self.generation_controller._enqueue_current_request(
-                    {"_webui_fast_auto_gen": True},
-                    priority=0,
-                )
-                self.status_bar.showMessage("⚡ WEBUI Fast Auto Gen: 다음 요청 큐 준비 완료")
-            finally:
-                self._webui_fast_auto_gen_preparing = False
-            return
         
         # [수정] 자동 생성 모드인지 확인하고 처리
         if hasattr(self.prompt_gen_controller, 'auto_generation_requested') and self.prompt_gen_controller.auto_generation_requested:
@@ -5334,9 +5226,9 @@ class ModernMainWindow(QMainWindow):
             
             self.status_bar.showMessage("🔄 자동 생성: 프롬프트 생성 완료, 이미지 생성 시작...")
             
-            # 자동으로 이미지 생성 실행 (현재 이벤트 처리 직후 실행)
+            # 자동으로 이미지 생성 실행 (약간의 지연을 두어 UI 업데이트 완료 후 실행)
             from PyQt6.QtCore import QTimer
-            QTimer.singleShot(0, self._trigger_auto_image_generation)
+            QTimer.singleShot(100, self._trigger_auto_image_generation)
         else:
             # 수동 생성인 경우
             self.status_bar.showMessage("✅ 다음 프롬프트 생성 완료!", 3000)
@@ -5349,8 +5241,6 @@ class ModernMainWindow(QMainWindow):
         """프롬프트 생성 중 오류 발생 시 호출"""
         # [신규] 오류 시 플래그 해제
         self.auto_generation_in_progress = False
-        self._webui_fast_auto_gen_prepare_requested = False
-        self._webui_fast_auto_gen_preparing = False
 
         self.status_bar.showMessage(f"❌ 생성 오류: {error_message}", 5000)
         self.random_prompt_btn.setEnabled(True)

@@ -9,13 +9,13 @@ import piexif.helper
 import json
 import re, random
 from pathlib import Path
-from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer, QCoreApplication, QThreadPool, Qt
+from PyQt6.QtCore import QThread, QObject, pyqtSignal, QTimer, QCoreApplication, QThreadPool
 import pandas as pd
 import gc
 import requests
 from utils.comfyui_png_metadata import enrich_comfyui_png_bytes
 
-def _force_cleanup_all_threads(wait_ms: int = 1000, process_events_passes: int = 5):
+def _force_cleanup_all_threads():
     """
     모든 종류의 스레드 풀과 연결을 강제로 정리하는 함수
 
@@ -49,8 +49,7 @@ def _force_cleanup_all_threads(wait_ms: int = 1000, process_events_passes: int =
         try:
             thread_pool = QThreadPool.globalInstance()
             thread_pool.clear()
-            if wait_ms > 0:
-                thread_pool.waitForDone(wait_ms)
+            thread_pool.waitForDone(1000)  # 1초 대기
         except Exception:
             pass
 
@@ -59,7 +58,7 @@ def _force_cleanup_all_threads(wait_ms: int = 1000, process_events_passes: int =
 
         # 5. Qt 이벤트 루프 강제 처리 (직접 호출)
         # ✅ 수정: QTimer.singleShot 제거 → 타이머 충돌 해결
-        for _ in range(max(0, process_events_passes)):
+        for _ in range(5):
             QCoreApplication.processEvents()
 
     except Exception:
@@ -308,11 +307,8 @@ class GenerationWorker(QObject):
         except Exception as e:
             print(f"⚠️ ComfyUI PNG 메타데이터 보강 실패: {e}")
 
-class GenerationController(QObject):
-    _thread_finished_signal = pyqtSignal(object, object)
-
+class GenerationController:
     def __init__(self, context: 'AppContext', module_instances: list):
-        super().__init__()
         self.context = context
         self.module_instances = module_instances
         self.workflow_manager = self.context.comfyui_workflow_manager # AppContext에서 참조
@@ -334,21 +330,6 @@ class GenerationController(QObject):
         # 🆕 스레드 안전 관리를 위한 추가 변수
         self._thread_cleanup_in_progress = False  # 스레드 정리 중 여부
         self._pending_thread_refs = []  # 정리 대기 중인 스레드 참조
-        self._thread_finished_signal.connect(
-            self._on_thread_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
-
-    def _has_running_generation_thread(self) -> bool:
-        thread = self.generation_thread
-        if thread is None:
-            return False
-        try:
-            return bool(thread.isRunning())
-        except RuntimeError:
-            if self.generation_thread is thread:
-                self.generation_thread = None
-            return False
 
     def _prepare_comfyui_workflow_with_wildcards(self, params: dict) -> bool:
         """
@@ -408,11 +389,6 @@ class GenerationController(QObject):
         # 이미 생성 중인 경우 → 큐에 추가
         if self.is_generating and not from_queue:
             print(f"[QUEUE] 생성 중이므로 요청을 큐에 추가합니다 (우선순위: {priority})")
-            self._enqueue_current_request(overrides, priority)
-            return
-        if (not from_queue) and self._has_running_generation_thread():
-            print(f"[QUEUE] 이전 생성 스레드 정리 중이므로 요청을 큐에 추가합니다 (우선순위: {priority})")
-            self.is_generating = True
             self._enqueue_current_request(overrides, priority)
             return
 
@@ -611,7 +587,7 @@ class GenerationController(QObject):
                 self.context.publish("prompt_generated", self.context.current_prompt_context)
 
             # --- 5. 스레드에서 API 호출 시작 ---
-            self._start_threaded_generation(params, source_row, priority=priority)
+            self._start_threaded_generation(params, source_row)
 
         except Exception as e:
             self.context.main_window.status_bar.showMessage(f"❌ 생성 준비 오류: {e}")
@@ -639,12 +615,6 @@ class GenerationController(QObject):
         try:
             # ✅ Phase 2: 통합된 파라미터 수집 메서드 사용
             params = self._collect_generation_params()
-            fast_webui_request = bool(overrides and overrides.get("_webui_fast_auto_gen"))
-            if fast_webui_request and self._api_mode_from_mapping(params) != "WEBUI":
-                self.context.main_window.status_bar.showMessage(
-                    "⚡ WEBUI Fast Auto Gen: 현재 모드가 WEBUI가 아니어서 큐 요청을 취소했습니다."
-                )
-                return
 
             # 인증 정보 확인
             api_mode = params.get('api_mode', 'NAI')
@@ -771,26 +741,6 @@ class GenerationController(QObject):
             # 다음 요청 처리
             self._process_next_queue_request()
 
-    def _enqueue_prepared_request(self, params: dict, source_row, priority: int = 0) -> str:
-        """이미 수집된 생성 파라미터를 큐에 넣는다."""
-        nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params)
-        request = GenerationRequest(
-            params=params,
-            source_row=source_row,
-            priority=priority,
-            max_retries=0,
-            nai_characters=nai_characters,
-            nai_vibe_transfer=nai_vibe_transfer,
-            nai_character_reference=nai_character_reference,
-        )
-        queue_manager = self.context.generation_queue_manager
-        if priority > 0:
-            request_id = queue_manager.enqueue_with_priority(request)
-        else:
-            request_id = queue_manager.enqueue_request(request)
-        self._update_button_with_queue_size()
-        return request_id
-
     def _update_button_with_queue_size(self):
         """생성 버튼 텍스트를 큐 크기로 업데이트합니다."""
         queue_manager = self.context.generation_queue_manager
@@ -817,33 +767,28 @@ class GenerationController(QObject):
             if hasattr(self.context.main_window, 'detached_generate_btn'):
                 self.context.main_window.detached_generate_btn.setText(btn_text)
 
-    def _start_threaded_generation(self, params: dict, source_row, priority: int = 0):
+    def _start_threaded_generation(self, params: dict, source_row):
         """별도 스레드에서 생성 작업을 시작합니다."""
         # 🆕 안전장치 0: 앱 종료 중이면 새 생성 차단
         if self._thread_cleanup_in_progress:
             print("⚠️ [THREAD] 앱 종료 중입니다. 새 생성이 차단됩니다.")
             return
 
-        # 이전 스레드가 아직 running이면 메인 스레드를 block/terminate하지 않고 큐로 넘긴다.
-        # WEBUI 완료 직후 연속 클릭에서는 finished 신호와 새 generate 요청이 교차할 수 있다.
-        previous_thread = self.generation_thread
-        previous_worker = self.generation_worker
-        if previous_thread is not None:
-            try:
-                if previous_thread.isRunning():
-                    request_id = self._enqueue_prepared_request(params, source_row, priority=priority)
-                    self.is_generating = True
-                    print(f"⚠️ [THREAD] 이전 스레드 정리 중입니다. 새 생성 요청을 큐에 추가: {request_id[:8]}...")
-                    return
-            except RuntimeError:
-                if self.generation_thread is previous_thread:
-                    self.generation_thread = None
-                previous_thread = None
+        # 🆕 안전장치 1: 이전 스레드가 아직 실행 중인지 확인
+        if self.generation_thread is not None:
+            if self.generation_thread.isRunning():
+                print("⚠️ [THREAD] 이전 스레드가 아직 실행 중입니다. 안전하게 종료를 기다립니다...")
+                # 최대 5초 대기 (긴급 상황에서 무한 대기 방지)
+                if not self.generation_thread.wait(5000):
+                    print("❌ [THREAD] 이전 스레드 종료 대기 시간 초과. 강제 종료 시도...")
+                    self.generation_thread.terminate()
+                    self.generation_thread.wait(1000)
 
-            if previous_thread is not None:
-                self._pending_thread_refs.append(previous_thread)
-            if previous_worker is not None:
-                self._pending_thread_refs.append(previous_worker)
+            # 🆕 안전장치 2: 이전 참조를 정리 대기 목록에 추가 (GC가 나중에 정리)
+            if self.generation_thread is not None:
+                self._pending_thread_refs.append(self.generation_thread)
+            if self.generation_worker is not None:
+                self._pending_thread_refs.append(self.generation_worker)
 
         # 새 스레드와 워커 생성
         self.generation_thread = QThread()
@@ -854,22 +799,10 @@ class GenerationController(QObject):
         self.generation_worker.moveToThread(self.generation_thread)
 
         # 시그널 연결
-        self.generation_worker.generation_started.connect(
-            self._on_generation_started,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self.generation_worker.generation_progress.connect(
-            self._on_generation_progress,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self.generation_worker.generation_finished.connect(
-            self._on_generation_finished,
-            Qt.ConnectionType.QueuedConnection,
-        )
-        self.generation_worker.generation_error.connect(
-            self._on_generation_error,
-            Qt.ConnectionType.QueuedConnection,
-        )
+        self.generation_worker.generation_started.connect(self._on_generation_started)
+        self.generation_worker.generation_progress.connect(self._on_generation_progress)
+        self.generation_worker.generation_finished.connect(self._on_generation_finished)
+        self.generation_worker.generation_error.connect(self._on_generation_error)
 
         # 스레드 시작/종료 연결
         self.generation_thread.started.connect(self.generation_worker.run_generation)
@@ -878,11 +811,7 @@ class GenerationController(QObject):
 
         # 🔧 올바른 deleteLater 연결 - 스레드 종료 시 해당 객체의 소유 스레드에서 안전하게 삭제
         # 🆕 안전장치 3: finished 시그널에서 먼저 _on_thread_finished를 호출하고, 그 후에 deleteLater 처리
-        thread_ref = self.generation_thread
-        worker_ref = self.generation_worker
-        self.generation_thread.finished.connect(
-            lambda thread=thread_ref, worker=worker_ref: self._thread_finished_signal.emit(thread, worker)
-        )
+        self.generation_thread.finished.connect(self._on_thread_finished)
         # deleteLater는 _on_thread_finished 내부에서 지연 호출로 처리 (아래 참조 해제 후)
 
         # 파라미터 설정 및 스레드 시작
@@ -961,15 +890,6 @@ class GenerationController(QObject):
         self._update_button_with_queue_size()
 
         self.context.main_window.status_bar.showMessage("🚀 생성 시작...")
-        try:
-            active_api_mode = self._api_mode_from_mapping(self.current_generation_params)
-            if (
-                active_api_mode == "WEBUI"
-                and hasattr(self.context.main_window, "prepare_fast_webui_auto_generation")
-            ):
-                self.context.main_window.prepare_fast_webui_auto_generation(active_api_mode)
-        except Exception as e:
-            print(f"⚠️ WEBUI Fast Auto Gen 준비 요청 실패: {e}")
     
     def _on_generation_progress(self, message: str):
         """생성 진행 상황 업데이트 슬롯 (메인 스레드에서 실행)"""
@@ -985,8 +905,6 @@ class GenerationController(QObject):
         """생성 완료 시 호출되는 슬롯"""
         # 🆕 성공 시 재시도 카운터 리셋
         self.auto_retry_count = 0
-        finished_params = self.current_generation_params if isinstance(self.current_generation_params, dict) else None
-        finished_api_mode = self._api_mode_from_mapping(finished_params) or self._api_mode_from_mapping(result)
         if isinstance(self.current_generation_params, dict):
             current_request = self.current_generation_params.get("_generation_request")
             if current_request:
@@ -1003,24 +921,11 @@ class GenerationController(QObject):
 
         self.context.publish("generation_finished", result)
 
-        queue_manager = self.context.generation_queue_manager
-        fast_auto_gen_queued = finished_api_mode == "WEBUI" and self._has_webui_fast_auto_gen_queue(queue_manager)
-        if fast_auto_gen_queued and isinstance(result, dict):
-            result["_skip_update_ui_auto_generate_check"] = True
-        prearmed_auto_gen = self._prearm_auto_generation_after_thread_finish(
-            result,
-            queue_manager,
-            finished_api_mode,
-        )
-
         # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
-        # Fast/일반 Auto Gen은 다음 생성 재개가 Qt 이미지/CRUD 후처리에 막히지 않도록 한 틱 뒤로 미룬다.
-        if prearmed_auto_gen or fast_auto_gen_queued:
-            QTimer.singleShot(50, lambda result=result: self.context.main_window.update_ui_with_result(result))
-        else:
-            self.context.main_window.update_ui_with_result(result)
+        self.context.main_window.update_ui_with_result(result)
 
         # 🆕 큐에 대기 중인 요청이 있으면 다음 요청 처리
+        queue_manager = self.context.generation_queue_manager
         if not queue_manager.is_empty() and not queue_manager.is_paused():
             # 🔒 큐가 있으면 is_generating을 유지하여 자동생성 차단
             print(f"[QUEUE] 생성 완료. 큐 우선 처리... (남은 큐: {queue_manager.get_queue_size()})")
@@ -1035,70 +940,6 @@ class GenerationController(QObject):
                 print("[QUEUE] 큐 비어있음. 자동생성 즉시 가능.")
             else:
                 print("[QUEUE] 큐가 일시정지 상태입니다.")
-
-    @staticmethod
-    def _api_mode_from_mapping(mapping) -> str:
-        if not isinstance(mapping, dict):
-            return ""
-        mode = mapping.get("api_mode")
-        if not mode and isinstance(mapping.get("generation_params"), dict):
-            mode = mapping["generation_params"].get("api_mode")
-        return str(mode or "").strip().upper()
-
-    def _prearm_auto_generation_after_thread_finish(
-        self,
-        result: dict,
-        queue_manager,
-        completed_api_mode: str = "",
-    ) -> bool:
-        """일반 Auto Gen을 Qt 결과 UI/CRUD 후처리보다 먼저 재개하도록 준비한다."""
-        try:
-            if str(completed_api_mode or "").upper() != "WEBUI":
-                return False
-            if not queue_manager.is_empty() and not queue_manager.is_paused():
-                return False
-
-            main_window = getattr(self.context, "main_window", None)
-            if main_window is None:
-                return False
-
-            auto_generate_checkbox = getattr(main_window, "generation_checkboxes", {}).get("자동 생성")
-            if not (auto_generate_checkbox and auto_generate_checkbox.isChecked()):
-                return False
-            if not (
-                hasattr(main_window, "is_webui_fast_auto_gen_enabled")
-                and main_window.is_webui_fast_auto_gen_enabled(completed_api_mode)
-            ):
-                return False
-
-            automation_module = getattr(main_window, "automation_module", None)
-            automation_controller = getattr(automation_module, "automation_controller", None)
-            if automation_controller and getattr(automation_controller, "is_running", False):
-                return False
-
-            main_window._auto_generation_waiting_for_thread = True
-            if isinstance(result, dict):
-                result["_skip_update_ui_auto_generate_check"] = True
-            print("[AUTO] 결과 UI 후처리 전 Auto Gen 재개 예약.")
-            return True
-        except Exception as e:
-            print(f"[AUTO] Auto Gen 사전 예약 실패: {e}")
-            return False
-
-    def _has_webui_fast_auto_gen_queue(self, queue_manager) -> bool:
-        try:
-            if queue_manager is None or queue_manager.is_empty() or queue_manager.is_paused():
-                return False
-            peek_next = getattr(queue_manager, "peek_next_request", None)
-            next_request = peek_next() if callable(peek_next) else None
-            params = getattr(next_request, "params", None)
-            return (
-                isinstance(params, dict)
-                and self._api_mode_from_mapping(params) == "WEBUI"
-                and bool(params.get("_webui_fast_auto_gen"))
-            )
-        except Exception:
-            return False
 
     def _on_generation_error(self, error_message: str):
         """생성 오류 시 호출되는 슬롯 - 🆕 자동 재시도 로직 추가"""
@@ -1378,17 +1219,15 @@ class GenerationController(QObject):
             self.context.main_window.status_bar.showMessage(f"❌ 재시도 중 오류: {e}")
             self.auto_retry_count = 0
 
-    def _on_thread_finished(self, finished_thread=None, finished_worker=None):
+    def _on_thread_finished(self):
         """스레드 완료 시 정리 작업 - 🆕 안전한 스레드 정리 로직"""
         # 🆕 안전한 스레드 정리: 참조를 먼저 로컬 변수에 저장
-        thread_to_cleanup = finished_thread if finished_thread is not None else self.generation_thread
-        worker_to_cleanup = finished_worker if finished_worker is not None else self.generation_worker
-        is_current_thread = finished_thread is None or finished_thread is self.generation_thread
+        thread_to_cleanup = self.generation_thread
+        worker_to_cleanup = self.generation_worker
 
         # 🆕 참조 해제를 먼저 수행 (새 스레드 생성에 영향 없도록)
-        if is_current_thread:
-            self.generation_thread = None
-            self.generation_worker = None
+        self.generation_thread = None
+        self.generation_worker = None
 
         # 🔧 스레드 정리 함수 (지연 실행) - 별도 플래그 없이 안전하게 처리
         def _safe_cleanup():
@@ -1412,9 +1251,9 @@ class GenerationController(QObject):
                     try:
                         # 스레드가 아직 실행 중인지 확인
                         if thread_to_cleanup.isRunning():
-                            print("⚠️ [THREAD] 스레드가 아직 실행 중입니다. 정리를 보류합니다.")
-                        else:
-                            thread_to_cleanup.deleteLater()
+                            print("⚠️ [THREAD] 스레드가 아직 실행 중입니다. 대기...")
+                            thread_to_cleanup.wait(500)  # 최대 500ms 대기
+                        thread_to_cleanup.deleteLater()
                     except RuntimeError as e:
                         print(f"[THREAD] 스레드 이미 삭제됨: {e}")
                     except Exception as e:
@@ -1429,18 +1268,14 @@ class GenerationController(QObject):
                     except Exception:
                         pass
 
-                # 일반 생성 완료 경로에서는 메인 스레드를 1초씩 막지 않도록 가볍게 정리한다.
-                _force_cleanup_all_threads(wait_ms=0, process_events_passes=0)
+                # 강력한 스레드 정리 실행
+                _force_cleanup_all_threads()
 
             except Exception as e:
                 print(f"[THREAD] 정리 중 예외 발생: {e}")
 
         # 🆕 안전장치: 지연 실행으로 이벤트 루프에서 안전하게 처리
         QTimer.singleShot(100, _safe_cleanup)
-
-        if not is_current_thread:
-            print("[THREAD] 오래된 스레드 finished 신호 무시")
-            return
 
         # Per-request P.Eng/Conditional 오버라이드 안전망 (cancel 등으로 finished/error 콜백 누락 시)
         if getattr(self.context, 'session_p_eng_override', None) is not None:
@@ -1472,21 +1307,12 @@ class GenerationController(QObject):
                     self.auto_retry_pending = False
                     print("[AUTO] 보류된 자동 재시도 실행.")
                     QTimer.singleShot(0, self._retry_auto_generation)
-                else:
-                    main_window = getattr(self.context, "main_window", None)
-                    waiting_auto_gen = bool(getattr(main_window, "_auto_generation_waiting_for_thread", False))
-                    if waiting_auto_gen:
-                        main_window._auto_generation_waiting_for_thread = False
-                        auto_gen_cb = getattr(main_window, "generation_checkboxes", {}).get("자동 생성")
-                        if auto_gen_cb and auto_gen_cb.isChecked():
-                            print("[AUTO] 스레드 종료. 대기 중 자동생성 실행.")
-                            QTimer.singleShot(0, main_window._check_and_trigger_auto_generation)
-                    elif was_holding:
-                        # 큐 처리 완료 후 자동생성 복귀: 자동생성이 켜져 있으면 재개
-                        auto_gen_cb = self.context.main_window.generation_checkboxes.get("자동 생성")
-                        if auto_gen_cb and auto_gen_cb.isChecked():
-                            print("[AUTO] 큐 처리 완료. 자동생성 복귀.")
-                            QTimer.singleShot(0, self.context.main_window._check_and_trigger_auto_generation)
+                elif was_holding:
+                    # 큐 처리 완료 후 자동생성 복귀: 자동생성이 켜져 있으면 재개
+                    auto_gen_cb = self.context.main_window.generation_checkboxes.get("자동 생성")
+                    if auto_gen_cb and auto_gen_cb.isChecked():
+                        print("[AUTO] 큐 처리 완료. 자동생성 복귀.")
+                        QTimer.singleShot(0, self.context.main_window._check_and_trigger_auto_generation)
 
             # UI 상태 업데이트
             self._update_button_with_queue_size()

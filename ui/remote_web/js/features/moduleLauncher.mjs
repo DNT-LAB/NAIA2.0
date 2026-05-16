@@ -87,12 +87,14 @@ const MODULE_REGISTRY = {
     modes: ['COMFYUI'],
     className: 'module-comfyui-tool',
   },
-  webui_fast_auto_gen: {
-    label: 'Fast Auto Gen',
-    title: 'WEBUI Auto Gen을 다음 프롬프트 선준비 모드로 실행',
+  webui_tools_unavailable: {
+    label: '사용 가능한 도구 없음',
+    title: 'WEBUI 전용 도구는 현재 기본 사용 불가',
     category: 'webui_tools',
-    action: 'module',
+    action: 'placeholder',
     modes: ['WEBUI'],
+    disabled: true,
+    disabledReason: '현재 기본 사용 불가',
   },
   ollama: {
     label: 'Ollama',
@@ -132,8 +134,8 @@ const CATEGORY_REGISTRY = [
   {
     id: 'webui_tools',
     label: 'WEBUI 전용 도구',
-    title: 'WEBUI 전용 도구',
-    moduleIds: ['webui_fast_auto_gen'],
+    title: 'WEBUI 전용 도구 (기본 사용 불가)',
+    moduleIds: ['webui_tools_unavailable'],
   },
   {
     id: 'assistant_tools',

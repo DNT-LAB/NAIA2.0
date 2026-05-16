@@ -1582,6 +1582,8 @@ const paramEls = {
   model: $('pModel'), sampler: $('pSampler'), scheduler: $('pScheduler'),
   resolution: $('pResolution'), steps: $('pSteps'), cfg_scale: $('pCfgScale'),
   cfg_rescale: $('pCfgRescale'), seed: $('pSeed'),
+  hr_scale: $('pHrScale'), hr_upscaler: $('pHrUpscaler'),
+  denoising_strength: $('pDenoise'), hires_steps: $('pHiresSteps'), hr_cfg: $('pHrCfg'),
 };
 const qResolution = $('qResolution');
 const qRndRes = $('qRndRes');
@@ -3152,6 +3154,15 @@ function applyMetadataFlag(key, value) {
   return true;
 }
 
+function applyMetadataCheckboxParamValue(key, value, elementId) {
+  if (value === undefined || value === null || value === '') return false;
+  const enabled = normalizeMetadataBoolean(value);
+  const target = $(elementId);
+  if (target) target.checked = enabled;
+  setParam(key, String(enabled));
+  return true;
+}
+
 function applyMetadataSettings(payload, options = {}) {
   const params = payload && payload.params ? payload.params : {};
   let applied = 0;
@@ -3164,9 +3175,15 @@ function applyMetadataSettings(payload, options = {}) {
     ['sampler', params.sampler],
     ['scheduler', params.scheduler],
     ['model', params.model],
+    ['hr_scale', params.hr_scale],
+    ['hr_upscaler', params.hr_upscaler],
+    ['denoising_strength', params.denoising_strength],
+    ['hires_steps', params.hires_steps],
+    ['hr_cfg', params.hr_cfg],
   ].forEach(([key, value]) => {
     if (applyMetadataParamValue(key, value)) applied += 1;
   });
+  if (applyMetadataCheckboxParamValue('enable_hr', params.enable_hr, 'pEnableHr')) applied += 1;
   [
     ['SMEA', params.sm],
     ['DYN', params.sm_dyn],

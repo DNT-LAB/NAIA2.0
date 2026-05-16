@@ -2987,10 +2987,22 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                     settings['hr_upscaler'] = 'Lanczos'
 
                 # denoising_strength도 저장
-                if hasattr(main_window, 'denoising_strength_slider'):
+                if hasattr(main_window, 'denoising_strength_spinbox'):
+                    settings['denoising_strength'] = main_window.denoising_strength_spinbox.value()
+                elif hasattr(main_window, 'denoising_strength_slider'):
                     settings['denoising_strength'] = main_window.denoising_strength_slider.value() / 100.0
                 else:
                     settings['denoising_strength'] = 0.5
+
+                if hasattr(main_window, 'hires_steps_spinbox'):
+                    settings['hires_steps'] = main_window.hires_steps_spinbox.value()
+                else:
+                    settings['hires_steps'] = 10
+
+                if hasattr(main_window, 'hr_cfg_spinbox'):
+                    settings['hr_cfg'] = main_window.hr_cfg_spinbox.value()
+                else:
+                    settings['hr_cfg'] = 7.0
             elif target_mode == "COMFYUI":
                 if hasattr(main_window, 'cfg_scale_slider'):
                     settings['cfg_scale'] = main_window.cfg_scale_slider.value() / 10.0
@@ -3214,11 +3226,22 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
                         print(f"        WEBUI hr_upscaler: {settings['hr_upscaler']}")
 
                 # denoising_strength 설정 적용
-                if 'denoising_strength' in settings and hasattr(main_window, 'denoising_strength_slider'):
+                if 'denoising_strength' in settings and hasattr(main_window, 'denoising_strength_spinbox'):
+                    main_window.denoising_strength_spinbox.setValue(float(settings['denoising_strength']))
+                    print(f"        WEBUI denoising_strength: {settings['denoising_strength']}")
+                elif 'denoising_strength' in settings and hasattr(main_window, 'denoising_strength_slider'):
                     # 0.0~1.0 값을 0~100 슬라이더 값으로 변환
                     slider_value = int(float(settings['denoising_strength']) * 100)
                     main_window.denoising_strength_slider.setValue(slider_value)
                     print(f"        WEBUI denoising_strength: {settings['denoising_strength']}")
+
+                if 'hires_steps' in settings and hasattr(main_window, 'hires_steps_spinbox'):
+                    main_window.hires_steps_spinbox.setValue(int(settings['hires_steps']))
+                    print(f"        WEBUI hires_steps: {settings['hires_steps']}")
+
+                if 'hr_cfg' in settings and hasattr(main_window, 'hr_cfg_spinbox'):
+                    main_window.hr_cfg_spinbox.setValue(float(settings['hr_cfg']))
+                    print(f"        WEBUI hr_cfg: {settings['hr_cfg']}")
 
             # ComfyUI 모드 설정
             elif mode == "COMFYUI":

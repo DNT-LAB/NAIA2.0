@@ -227,7 +227,9 @@ class GenerationParamsManager:
             else:
                 settings["hr_upscaler"] = "Lanczos"
             
-            if hasattr(mw, 'denoising_strength_slider'):
+            if hasattr(mw, 'denoising_strength_spinbox'):
+                settings["denoising_strength"] = mw.denoising_strength_spinbox.value()
+            elif hasattr(mw, 'denoising_strength_slider'):
                 settings["denoising_strength"] = mw.denoising_strength_slider.value() / 100.0
             else:
                 settings["denoising_strength"] = 0.5
@@ -237,6 +239,11 @@ class GenerationParamsManager:
                 settings["hires_steps"] = mw.hires_steps_spinbox.value()
             else:
                 settings["hires_steps"] = 0
+
+            if hasattr(mw, 'hr_cfg_spinbox'):
+                settings["hr_cfg"] = mw.hr_cfg_spinbox.value()
+            else:
+                settings["hr_cfg"] = 7.0
             
             return settings
             
@@ -310,6 +317,7 @@ class GenerationParamsManager:
             "hr_upscaler": "Lanczos",
             "denoising_strength": 0.5,
             "hires_steps": 14,  # 🔥 추가
+            "hr_cfg": 7.0,
         }
 
     
@@ -441,13 +449,18 @@ class GenerationParamsManager:
                     mw.hr_upscaler_combo.setCurrentIndex(index)
                     print(f"✅ 업스케일러 설정 적용: {hr_upscaler}")
             
-            if hasattr(mw, 'denoising_strength_slider'):
-                denoising_value = int(settings.get("denoising_strength", 0.5) * 100)
+            if hasattr(mw, 'denoising_strength_spinbox'):
+                mw.denoising_strength_spinbox.setValue(float(settings.get("denoising_strength", 0.5)))
+            elif hasattr(mw, 'denoising_strength_slider'):
+                denoising_value = int(float(settings.get("denoising_strength", 0.5)) * 100)
                 mw.denoising_strength_slider.setValue(denoising_value)
             
             # 🔥 추가: hires_steps 파라미터 적용
             if hasattr(mw, 'hires_steps_spinbox'):
                 mw.hires_steps_spinbox.setValue(settings.get("hires_steps", 0))
+
+            if hasattr(mw, 'hr_cfg_spinbox'):
+                mw.hr_cfg_spinbox.setValue(float(settings.get("hr_cfg", 7.0)))
 
             # ComfyUI 샘플링 모드 라디오 버튼 설정
             if hasattr(mw, 'eps_radio') and hasattr(mw, 'v_pred_radio') and hasattr(mw, 'anima_radio'):

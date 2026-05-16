@@ -4697,6 +4697,12 @@ class ModernMainWindow(QMainWindow):
                         index = self.hr_upscaler_combo.findText(params['hr_upscaler'])
                         if index >= 0:
                             self.hr_upscaler_combo.setCurrentIndex(index)
+                    if 'denoising_strength' in params and hasattr(self, 'denoising_strength_spinbox'):
+                        self.denoising_strength_spinbox.setValue(float(params['denoising_strength']))
+                    if 'hires_steps' in params and hasattr(self, 'hires_steps_spinbox'):
+                        self.hires_steps_spinbox.setValue(int(params['hires_steps']))
+                    if 'hr_cfg' in params and hasattr(self, 'hr_cfg_spinbox'):
+                        self.hr_cfg_spinbox.setValue(float(params['hr_cfg']))
 
                 # 체크박스들
                 if 'random_resolution' in params:
@@ -7171,6 +7177,10 @@ class ModernMainWindow(QMainWindow):
                 compat['hr_upscaler'] = settings['hr_upscaler']
             if 'denoising_strength' in settings:
                 compat['denoising_strength'] = float(settings['denoising_strength'])
+            if 'hires_steps' in settings:
+                compat['hires_steps'] = int(settings['hires_steps'])
+            if 'hr_cfg' in settings:
+                compat['hr_cfg'] = float(settings['hr_cfg'])
         
         # 해상도
         if 'width' in settings and 'height' in settings:
@@ -7303,10 +7313,21 @@ class ModernMainWindow(QMainWindow):
                 print(f"    ✓ HR Upscaler: {settings['hr_upscaler']}")
         
         # Denoising strength
-        if 'denoising_strength' in settings and hasattr(self, 'denoising_strength_slider'):
+        if 'denoising_strength' in settings and hasattr(self, 'denoising_strength_spinbox'):
+            self.denoising_strength_spinbox.setValue(float(settings['denoising_strength']))
+            print(f"    ✓ Denoising Strength: {settings['denoising_strength']}")
+        elif 'denoising_strength' in settings and hasattr(self, 'denoising_strength_slider'):
             slider_value = int(float(settings['denoising_strength']) * 100)
             self.denoising_strength_slider.setValue(slider_value)
             print(f"    ✓ Denoising Strength: {settings['denoising_strength']}")
+
+        if 'hires_steps' in settings and hasattr(self, 'hires_steps_spinbox'):
+            self.hires_steps_spinbox.setValue(int(settings['hires_steps']))
+            print(f"    ✓ HR Steps: {settings['hires_steps']}")
+
+        if 'hr_cfg' in settings and hasattr(self, 'hr_cfg_spinbox'):
+            self.hr_cfg_spinbox.setValue(float(settings['hr_cfg']))
+            print(f"    ✓ HR CFG: {settings['hr_cfg']}")
         
         # Model
         if 'model' in settings and hasattr(self, 'model_combo'):

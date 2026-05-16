@@ -115,6 +115,12 @@ export function createResultImageActions({
       ['sm_dyn', findMetadataActionValue(data, ['sm_dyn'])],
       ['VAR+', findMetadataActionValue(data, ['VAR+', 'skip_cfg_above_sigma'])],
       ['model', findMetadataActionValue(data, ['model', 'Model', 'model_name', 'checkpoint'])],
+      ['enable_hr', findMetadataActionValue(data, ['enable_hr'])],
+      ['hr_scale', findMetadataActionValue(data, ['hr_scale'])],
+      ['hr_upscaler', findMetadataActionValue(data, ['hr_upscaler', 'hires_upscaler'])],
+      ['denoising_strength', findMetadataActionValue(data, ['denoising_strength', 'denoise'])],
+      ['hires_steps', findMetadataActionValue(data, ['hires_steps', 'hr_second_pass_steps'])],
+      ['hr_cfg', findMetadataActionValue(data, ['hr_cfg'])],
     ].forEach(([key, value]) => {
       if (isMetadataActionPresent(value)) params[key] = value;
     });

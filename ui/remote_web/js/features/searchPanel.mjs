@@ -13,6 +13,13 @@ export function createSearchPanel({
   let ratingState = { g: true, s: true, q: true, e: true };
   let cachedRatingCounts = null;
   let parquetPickMode = 'load';
+  const draftSearch = {
+    query: null,
+    exclude: null,
+    protected: false,
+    awaitingEcho: false,
+    focusedInputId: null,
+  };
 
   document.addEventListener('click', event => {
     if (!event.target.closest('.search-parquet-control')) closeParquetMenu();
@@ -80,14 +87,78 @@ export function createSearchPanel({
     };
   }
 
+  function updateDraftSearch(query, exclude, options = {}) {
+    if (query !== undefined) draftSearch.query = String(query || '');
+    if (exclude !== undefined) draftSearch.exclude = String(exclude || '');
+    if (options.protect) draftSearch.protected = true;
+    if (options.awaitEcho) draftSearch.awaitingEcho = true;
+  }
+
+  function captureVisibleSearchDraft() {
+    const queryEl = document.getElementById('searchQuery');
+    const excludeEl = document.getElementById('searchExclude');
+    if (queryEl || excludeEl) {
+      updateDraftSearch(
+        queryEl ? queryEl.value : undefined,
+        excludeEl ? excludeEl.value : undefined,
+      );
+    }
+  }
+
+  function setDraftFocus(id, focused) {
+    if (focused) {
+      draftSearch.focusedInputId = id;
+    } else if (draftSearch.focusedInputId === id) {
+      draftSearch.focusedInputId = null;
+    }
+  }
+
+  function serverSearchText(message, key) {
+    const hasDirect = message && Object.prototype.hasOwnProperty.call(message, key);
+    const direct = hasDirect
+      ? String(message[key] || '')
+      : '';
+    if (hasDirect) return direct;
+    const preferences = message && message.filter_preferences;
+    if (preferences && Object.prototype.hasOwnProperty.call(preferences, key)) {
+      return String(preferences[key] || '');
+    }
+    return direct;
+  }
+
+  function resolveSearchTexts(message) {
+    const server = {
+      query: serverSearchText(message, 'query'),
+      exclude: serverSearchText(message, 'exclude'),
+    };
+    const hasDraft = draftSearch.query !== null || draftSearch.exclude !== null;
+    const draftMatchesServer = hasDraft
+      && (draftSearch.query ?? '') === server.query
+      && (draftSearch.exclude ?? '') === server.exclude;
+    if (draftMatchesServer) {
+      draftSearch.protected = false;
+      draftSearch.awaitingEcho = false;
+    }
+    if (hasDraft && (draftSearch.protected || draftSearch.awaitingEcho || draftSearch.focusedInputId)) {
+      return {
+        query: draftSearch.query ?? server.query,
+        exclude: draftSearch.exclude ?? server.exclude,
+      };
+    }
+    updateDraftSearch(server.query, server.exclude);
+    return server;
+  }
+
   function saveFilterState(extra = {}) {
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({
+    const state = {
       type: 'save_search_filter_state',
       ...collectFilterState(),
       ...extra,
-    }));
+    };
+    updateDraftSearch(state.query, state.exclude, {protect: true, awaitEcho: true});
+    ws.send(JSON.stringify(state));
   }
 
   function jsString(value) {
@@ -258,6 +329,8 @@ export function createSearchPanel({
   }
 
   function renderSearch(message) {
+    captureVisibleSearchDraft();
+    const searchText = resolveSearchTexts(message);
     const ratingItems = [
       ['e', 'Explicit'], ['q', 'NSFW'], ['s', 'Sensitive'], ['g', 'General']
     ].map(([key, label]) =>
@@ -293,11 +366,11 @@ export function createSearchPanel({
     </div>
     <div>
       <div class="mod-section-label">Search Keyword</div>
-      <input class="mod-input" id="searchQuery" type="text" value="${escHtml(message.query)}" placeholder="tags, keywords...">
+      <input class="mod-input" id="searchQuery" type="text" value="${escHtml(searchText.query)}" placeholder="tags, keywords...">
     </div>
     <div>
       <div class="mod-section-label">Exclude Keyword</div>
-      <input class="mod-input" id="searchExclude" type="text" value="${escHtml(message.exclude)}" placeholder="exclude tags...">
+      <input class="mod-input" id="searchExclude" type="text" value="${escHtml(searchText.exclude)}" placeholder="exclude tags...">
     </div>
     <div>
       <div class="mod-section-label">Ratings</div>
@@ -315,13 +388,25 @@ export function createSearchPanel({
       <div class="search-parquet-list collapsed">${parquets}</div>
     </div>` : ''}
   `;
+    draftSearch.focusedInputId = null;
 
     ['searchQuery', 'searchExclude'].forEach(id => {
       const element = moduleBody.querySelector(`#${id}`);
       if (element) {
         bindTagAssist(element, { excludeE621: true });
+        element.addEventListener('input', () => {
+          updateDraftSearch(
+            id === 'searchQuery' ? element.value : undefined,
+            id === 'searchExclude' ? element.value : undefined,
+            {protect: true},
+          );
+        });
+        element.addEventListener('focus', () => setDraftFocus(id, true));
         element.addEventListener('change', () => saveFilterState());
-        element.addEventListener('blur', () => saveFilterState());
+        element.addEventListener('blur', () => {
+          setDraftFocus(id, false);
+          saveFilterState();
+        });
       }
     });
     for (const key of ['e','q','s','g']) {
@@ -341,6 +426,7 @@ export function createSearchPanel({
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const query = (document.getElementById('searchQuery') || {}).value || '';
     const exclude = (document.getElementById('searchExclude') || {}).value || '';
+    updateDraftSearch(query, exclude, {protect: true, awaitEcho: true});
     for (const key of ['e','q','s','g']) {
       const element = document.getElementById('sr_' + key);
       if (element) ratingState[key] = element.checked;

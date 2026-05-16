@@ -189,6 +189,8 @@ class APIService:
         return max(1, int(math.floor((source * scale) + 0.5)))
 
     def _fit_webui_hiresfix_assist_scale(self, payload: Dict[str, Any], scale: float) -> float:
+        # Policy: use the lower result between the user's selected Assist base
+        # resolution multiplied by HR Scale and the fixed 1536^2 final-area cap.
         final_width = self._webui_scaled_dimension(payload.get("width"), scale)
         final_height = self._webui_scaled_dimension(payload.get("height"), scale)
         if final_width * final_height <= self.WEBUI_HIRES_ASSIST_MAX_PIXELS:

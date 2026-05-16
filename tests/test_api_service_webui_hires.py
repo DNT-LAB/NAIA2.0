@@ -136,6 +136,28 @@ def test_webui_hiresfix_assist_reduces_hr_scale_until_final_size_is_safe():
     assert 1254 * 1792 <= 1536 * 1536
 
 
+def test_webui_hiresfix_assist_caps_768_target_scaled_square_to_1536():
+    service = APIService(app_context=None)
+    payload = {"width": 1024, "height": 1024}
+
+    service._apply_webui_hires_params(
+        payload,
+        {
+            "enable_hr": True,
+            "hr_scale": 2.5,
+            "webui_hiresfix_assist": True,
+            "webui_hiresfix_assist_target": 768,
+        },
+        is_img2img=False,
+    )
+
+    assert payload["width"] == 768
+    assert payload["height"] == 768
+    assert payload["hr_scale"] == 2.0
+    assert round(payload["width"] * payload["hr_scale"]) == 1536
+    assert round(payload["height"] * payload["hr_scale"]) == 1536
+
+
 def test_webui_hiresfix_assist_keeps_safe_hr_scale():
     service = APIService(app_context=None)
     payload = {"width": 832, "height": 1216}

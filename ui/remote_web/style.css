@@ -7404,6 +7404,12 @@ body.resizing-result-info {
 .activated-summary-part.webui-hires {
   color: #75cfff;
 }
+.activated-summary-part.webui-hires-assist {
+  color: #a7efa9;
+}
+.activated-summary-part.webui-hires-assist-off {
+  color: #ff8f88;
+}
 .activated-summary-part.comfyui-workflow-basic {
   color: #75cfff;
 }
@@ -7531,6 +7537,7 @@ body.resizing-result-info {
 .params-grid {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 1px;
   background: var(--border-dim);
   border-radius: 6px;
@@ -8238,14 +8245,257 @@ body.resizing-result-info {
   color: rgba(138,151,191,0.72);
 }
 .webui-hires-scroll {
-  max-height: 320px;
+  max-height: min(240px, 42dvh);
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   /* 스크롤 영역임을 시각적으로 살짝 구분 */
   border-top: 1px solid rgba(255,255,255,0.05);
   margin-top: 2px;
   /* 스크롤바 폭 보정 (내부 행이 살짝 끼이지 않도록) */
   scrollbar-gutter: stable;
+}
+/* Preset Swap 행 — select 와 Edit 버튼을 함께 배치 */
+.webui-hires-preset-control {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
+  position: relative;
+}
+.webui-hires-preset-control .param-select {
+  flex: 1;
+  min-width: 0;
+}
+.webui-hires-edit-btn {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.webui-hires-edit-btn:hover:not(:disabled) {
+  color: #a7ddff;
+  background: rgba(117,207,255,0.10);
+  border-color: rgba(117,207,255,0.30);
+}
+.webui-hires-edit-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+/* Mismatch badge / tooltip — Preset Swap 행 위에 떠 있음 */
+.webui-hires-mismatch-anchor {
+  position: absolute;
+  top: 0;
+  right: 0;
+  pointer-events: none;
+}
+.webui-hires-mismatch-badge {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  transform: translateY(-2px);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: #f5d27a;
+  background: rgba(40,28,8,0.78);
+  border: 1px solid rgba(245,210,122,0.40);
+  border-radius: 999px;
+  cursor: help;
+  white-space: nowrap;
+  z-index: 5;
+}
+.webui-hires-mismatch-badge::before {
+  content: "⚠";
+}
+.webui-hires-mismatch-tooltip {
+  position: absolute;
+  bottom: calc(100% + 24px);
+  right: 0;
+  min-width: 240px;
+  max-width: 360px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: #f4ecd9;
+  background: #1f1611;
+  border: 1px solid rgba(245,210,122,0.42);
+  border-radius: 6px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+  z-index: 10;
+  white-space: normal;
+}
+.webui-hires-mismatch-tooltip[hidden] { display: none; }
+.webui-hires-mismatch-tooltip .group-title {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+.webui-hires-mismatch-tooltip .group-added .group-title { color: #f5d27a; }
+.webui-hires-mismatch-tooltip .group-missing .group-title { color: #c9b58a; }
+.webui-hires-mismatch-tooltip .group-list {
+  margin: 0 0 8px 14px;
+  padding: 0;
+  list-style: disc;
+}
+.webui-hires-mismatch-tooltip .group-list:last-child { margin-bottom: 0; }
+.webui-hires-mismatch-tooltip .wc-token {
+  font-family: var(--font-mono);
+  color: #e5d5a9;
+}
+/* Hires Overlay Editor — module-popup 변형 (크기만 오버라이드; display 는 base의 .open 토글에 위임) */
+.module-popup.module-popup-hires-overlay {
+  width: min(520px, 92vw);
+  height: min(86vh, 760px);
+  flex-direction: column;
+}
+.module-popup.module-popup-hires-overlay .module-popup-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.hires-overlay-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow-y: auto;
+  height: 100%;
+  box-sizing: border-box;
+}
+.hires-overlay-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.hires-overlay-hint code {
+  font-family: var(--font-mono);
+  color: #a7ddff;
+}
+.hires-overlay-wcdiff {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: rgba(245, 210, 122, 0.06);
+  border: 1px solid rgba(245, 210, 122, 0.20);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.hires-overlay-wcdiff[hidden] { display: none; }
+.hires-overlay-wcdiff .wcdiff-headline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: #f5d27a;
+  margin-bottom: 6px;
+}
+.hires-overlay-wcdiff .wcdiff-headline::before {
+  content: "⚠";
+  font-size: 12px;
+}
+.hires-overlay-wcdiff .group-added .group-title { color: #f5d27a; }
+.hires-overlay-wcdiff .group-missing .group-title { color: #c9b58a; }
+.hires-overlay-wcdiff .group-title {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin: 4px 0 2px;
+}
+.hires-overlay-wcdiff .group-list {
+  margin: 0 0 4px 14px;
+  padding: 0;
+  list-style: disc;
+}
+.hires-overlay-wcdiff .group-list:last-child { margin-bottom: 0; }
+.hires-overlay-wcdiff .wc-token {
+  font-family: var(--font-mono);
+  color: #e5d5a9;
+}
+.hires-overlay-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+.hires-overlay-textarea {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: rgba(0,0,0,0.30);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+.hires-overlay-textarea:focus {
+  outline: none;
+  border-color: rgba(117,207,255,0.45);
+}
+.hires-overlay-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.hires-overlay-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.hires-overlay-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.hires-overlay-status.overlay-active {
+  color: #a7ddff;
+}
+/* Save 버튼: Cancel/Reset 와 동일 톤 + accent 강조 */
+.mod-btn-secondary.mod-btn-secondary--accent {
+  border-color: rgba(117, 207, 255, 0.45);
+  color: #a7ddff;
+}
+.mod-btn-secondary.mod-btn-secondary--accent:hover {
+  border-color: #a7ddff;
+  background: rgba(117, 207, 255, 0.08);
 }
 .webui-hires-scroll::-webkit-scrollbar {
   width: 8px;

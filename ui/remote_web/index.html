@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260516-hires-preset-swap2">
+<link rel="stylesheet" href="style.css?v=20260516-hires-overlay5">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -150,6 +150,34 @@
     </div>
   </div>
   <div class="module-popup-body" id="modulePopupBody"></div>
+</div>
+
+<!-- Hires Preset Overlay Editor -->
+<div class="module-popup module-popup-hires-overlay" id="hiresOverlayPopup">
+  <div class="module-popup-header">
+    <span class="module-popup-title" id="hiresOverlayTitle">Hires Overlay</span>
+    <div class="module-popup-actions">
+      <button class="history-close" onclick="closeHiresOverlayEditor()">&times;</button>
+    </div>
+  </div>
+  <div class="module-popup-body hires-overlay-body">
+    <div class="hires-overlay-hint">선택한 프리셋의 <strong>PREFIX / POSTFIX / NEGATIVE</strong> 만 Hires 패스에서 갈음. 저장하면 <code>&lt;preset&gt;.hires.json</code> 사이드카로 보존됩니다.</div>
+    <div class="hires-overlay-wcdiff" id="hiresOverlayWildcardDiff" hidden></div>
+    <label class="hires-overlay-label">PREFIX PROMPT</label>
+    <textarea class="hires-overlay-textarea" id="hiresOverlayPrefix" rows="5" placeholder="(비워두면 hires 패스에서 prefix 가 비어있게 됩니다)"></textarea>
+    <label class="hires-overlay-label">POSTFIX PROMPT</label>
+    <textarea class="hires-overlay-textarea" id="hiresOverlayPostfix" rows="5" placeholder="(비워두면 hires 패스에서 postfix 가 비어있게 됩니다)"></textarea>
+    <label class="hires-overlay-label">NEGATIVE PROMPT</label>
+    <textarea class="hires-overlay-textarea" id="hiresOverlayNegative" rows="4" placeholder="(비워두면 hires 패스에서 메인 네거티브를 재사용합니다)"></textarea>
+    <div class="hires-overlay-footer">
+      <span class="hires-overlay-status" id="hiresOverlayStatus"></span>
+      <div class="hires-overlay-actions">
+        <button type="button" class="mod-btn-danger" onclick="resetHiresOverlayEditor()">Reset to Original</button>
+        <button type="button" class="mod-btn-secondary" onclick="closeHiresOverlayEditor()">Cancel</button>
+        <button type="button" class="mod-btn-secondary mod-btn-secondary--accent" onclick="saveHiresOverlayEditor()">Save</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Refine (Depth Search) floating panel -->
@@ -377,14 +405,19 @@
                   </div>
                 </div>
               </div>
-              <div class="param-row">
+              <div class="param-row webui-hires-preset-row">
                 <span class="param-label param-sublabel" title="Hires.fix 패스에 다른 프리셋을 적용합니다. 와일드카드 선택값은 메인 패스 그대로 재사용됩니다.">Preset Swap</span>
-                <select class="param-select" id="pHiresPresetSwap"
-                        data-preview-kind="prompt-preset"
-                        data-preview-actions="none"
-                        onchange="setParam('hires_preset_swap', this.value)">
-                  <option value="">현재 프리셋 사용</option>
-                </select>
+                <div class="webui-hires-preset-control">
+                  <div class="webui-hires-mismatch-anchor" id="hiresPresetMismatchAnchor"></div>
+                  <select class="param-select" id="pHiresPresetSwap"
+                          data-preview-kind="prompt-preset"
+                          data-preview-actions="none"
+                          onchange="setParam('hires_preset_swap', this.value);refreshHiresPresetMismatchBadge();refreshHiresEditButtonState();syncHiresOverlayEditorIfOpen(this.value)">
+                    <option value="">현재 프리셋 사용</option>
+                  </select>
+                  <button type="button" class="webui-hires-edit-btn" id="hiresPresetEditBtn"
+                          onclick="openHiresOverlayEditor()" disabled title="선택한 프리셋의 Prefix / Postfix / Negative 만 Hires 패스에서 갈음">Edit</button>
+                </div>
               </div>
               <div class="param-row">
                 <span class="param-label">HR Scale</span>
@@ -890,6 +923,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260516-hires-preset-swap2"></script>
+<script src="app.js?v=20260516-hires-overlay5"></script>
 </body>
 </html>

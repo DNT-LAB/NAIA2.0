@@ -893,6 +893,26 @@ class GenerationController:
     # ------------------------------------------------------------
     # WEBUI Hires Preset Swap
     # ------------------------------------------------------------
+    @staticmethod
+    def _sanitize_prompt_for_api(text: str) -> str:
+        """
+        파이프라인 산출물의 `\\n\\n` 구분자 마커 / `#` 주석 토큰을 제거하고
+        콤마-스페이스 단일 구분자로 정규화한다.
+
+        `core.api_service.call_generation_api()` 가 메인 `parameters['input']` 에
+        대해 수행하는 정리와 동일한 규칙. `hr_prompt` / `hr_negative_prompt` 는
+        api_service 의 정리 경로를 타지 않으므로 호출부(여기)에서 직접 적용한다.
+        """
+        if not isinstance(text, str):
+            return ''
+        cleaned: list[str] = []
+        for raw_tag in text.split(','):
+            tag = raw_tag.replace('\n', '').strip()
+            if not tag or tag.startswith('#'):
+                continue
+            cleaned.append(tag)
+        return ', '.join(cleaned)
+
     def _apply_hires_preset_swap(self, params: dict) -> None:
         """
         WEBUI Hires.fix 단계에서만 사용될 hr_prompt / hr_negative_prompt 를
@@ -950,6 +970,24 @@ class GenerationController:
             'preprocessing_options': dict(module_settings.get('preprocessing_options') or {}),
         }
 
+        # 네거티브는 파이프라인 외부값. 프리셋의 main_settings 에서 추출 (sidecar 가 덮어쓸 수 있음).
+        preset_negative = main_settings.get('negative') or main_settings.get('negative_prompt') or ''
+
+        # Hires overlay sidecar — `<preset>.hires.json` 이 있으면 prefix/postfix/negative 3 필드를 갈음.
+        # 의미: sidecar 존재 = 사용자가 명시적으로 편집한 것. 빈 문자열도 의도된 값.
+        # 부재 = 원본 프리셋 그대로.
+        sidecar_path = preset_path.with_suffix('.hires.json')
+        if sidecar_path.exists():
+            try:
+                overlay = json.loads(sidecar_path.read_text(encoding='utf-8'))
+                if isinstance(overlay, dict):
+                    peng_payload['pre_prompt'] = str(overlay.get('prefix_prompt', ''))
+                    peng_payload['post_prompt'] = str(overlay.get('postfix_prompt', ''))
+                    preset_negative = str(overlay.get('negative_prompt', ''))
+                    print(f"🧩 [HIRES SWAP] '{swap_name}' overlay 적용 ({sidecar_path.name})")
+            except Exception as e:
+                print(f"⚠️ [HIRES SWAP] overlay 파싱 실패 ({sidecar_path.name}): {e}")
+
         # wildcard_override (list-consumable) — 메인 패스의 선택값을 그대로 재현.
         wc_override_payload = {
             key: list(values)
@@ -970,15 +1008,25 @@ class GenerationController:
             silent_prompt = prompt_gen.generate_instant_source_silent(source_row_dict, silent_settings)
 
             if isinstance(silent_prompt, str) and silent_prompt.strip():
-                params['hr_prompt'] = silent_prompt
-                print(f"🧩 [HIRES SWAP] '{swap_name}' 프리셋으로 hr_prompt 생성 ({len(silent_prompt)} chars)")
+                sanitized = self._sanitize_prompt_for_api(silent_prompt)
+                if sanitized:
+                    params['hr_prompt'] = sanitized
+                    print(
+                        f"🧩 [HIRES SWAP] '{swap_name}' 프리셋으로 hr_prompt 생성 "
+                        f"({len(silent_prompt)} → {len(sanitized)} chars, sanitized)"
+                    )
+                else:
+                    print(f"⚠️ [HIRES SWAP] sanitize 후 빈 문자열 — hr_prompt 미설정")
             else:
                 print(f"⚠️ [HIRES SWAP] silent 생성 결과 비어있음 — hr_prompt 미설정")
 
-            # 네거티브는 파이프라인 외부값. 프리셋이 보유 시 hr_negative_prompt 로 통과.
-            preset_negative = main_settings.get('negative') or main_settings.get('negative_prompt')
+            # 네거티브는 파이프라인 외부값. 비어있지 않을 때만 통과. `\n\n` 마커가
+            # 끼어들 가능성은 낮지만, 사용자가 textarea 줄바꿈으로 작성했을 수 있으므로
+            # 동일 cleanup 으로 정규화한다.
             if isinstance(preset_negative, str) and preset_negative.strip():
-                params['hr_negative_prompt'] = preset_negative
+                sanitized_neg = self._sanitize_prompt_for_api(preset_negative)
+                if sanitized_neg:
+                    params['hr_negative_prompt'] = sanitized_neg
         finally:
             self.context.session_p_eng_override = saved_peng
             self.context.wildcard_override = saved_wco

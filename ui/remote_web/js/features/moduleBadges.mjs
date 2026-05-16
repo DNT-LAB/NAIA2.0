@@ -26,6 +26,8 @@ export function createModuleBadges({
   const webUiStatus = {
     enableHr: false,
     hrScale: '1',
+    hiresfixAssistEnabled: true,
+    hiresfixAssistTarget: 512,
   };
   let weightPopover = null;
   let weightInput = null;
@@ -65,6 +67,10 @@ export function createModuleBadges({
     const parsed = Number(text);
     if (!Number.isFinite(parsed)) return '1';
     return parsed.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function normalizeHiresfixAssistTarget(value) {
+    return Number(value) === 768 ? 768 : 512;
   }
 
   function getActivatedTone() {
@@ -234,7 +240,14 @@ export function createModuleBadges({
     activatedSummary.append(createParamsPart('webui-mode', 'Mode : WEBUI'));
     if (webUiStatus.enableHr) {
       appendBullet();
-      activatedSummary.append(createParamsPart('webui-hires', `Hirefix x${formatHiresScale(webUiStatus.hrScale)}`));
+      activatedSummary.append(createParamsPart('webui-hires', `Hiresfix x${formatHiresScale(webUiStatus.hrScale)}`));
+      appendBullet();
+      activatedSummary.append(createParamsPart(
+        webUiStatus.hiresfixAssistEnabled ? 'webui-hires-assist' : 'webui-hires-assist-off',
+        webUiStatus.hiresfixAssistEnabled
+          ? `Assist ${webUiStatus.hiresfixAssistTarget}^2`
+          : 'Assist OFF'
+      ));
     }
     appendBullet();
     activatedSummary.append(createWeightPart(`가중치 : ${formatAnimaWeight(comfyUiStatus.animaWeight)}`));
@@ -424,11 +437,22 @@ export function createModuleBadges({
     else if ('anima_weight_raw' in m) comfyUiStatus.animaWeight = formatAnimaWeight(m.anima_weight_raw);
     if ('enable_hr' in m) webUiStatus.enableHr = normalizeBoolean(m.enable_hr);
     if ('hr_scale' in m) webUiStatus.hrScale = formatHiresScale(m.hr_scale);
+    if ('webui_hiresfix_assist' in m) webUiStatus.hiresfixAssistEnabled = normalizeBoolean(m.webui_hiresfix_assist);
+    if ('webui_hiresfix_assist_target' in m) {
+      webUiStatus.hiresfixAssistTarget = normalizeHiresfixAssistTarget(m.webui_hiresfix_assist_target);
+    }
     if (m.comfyui_workflow && typeof m.comfyui_workflow === 'object') {
       updateComfyUiWorkflowState(m.comfyui_workflow);
       return;
     }
     updateComfyUiWorkflowState(m);
+    renderActivatedSummary();
+  }
+
+  function updateWebUiHiresfixAssist(m) {
+    if (!m || typeof m !== 'object') return;
+    if ('enabled' in m) webUiStatus.hiresfixAssistEnabled = normalizeBoolean(m.enabled);
+    if ('target' in m) webUiStatus.hiresfixAssistTarget = normalizeHiresfixAssistTarget(m.target);
     renderActivatedSummary();
   }
 
@@ -439,6 +463,7 @@ export function createModuleBadges({
     updateVibe,
     updateComfyUiParams,
     updateComfyUiWorkflowState,
+    updateWebUiHiresfixAssist,
     updateModeState() {
       renderActivatedSummary();
       updatePromptTokenEstimate();

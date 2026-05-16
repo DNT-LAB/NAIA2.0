@@ -60,6 +60,17 @@ class _FakeTextEdit:
         self.text = text
 
 
+class _FakeLineEdit:
+    def __init__(self, text=""):
+        self._text = text
+
+    def text(self):
+        return self._text
+
+    def setText(self, text):
+        self._text = str(text)
+
+
 class _FakeComboBox:
     def __init__(self, items=None, current=""):
         self.items = list(items or [])
@@ -369,6 +380,43 @@ def test_prompt_engineering_state_exposes_randomized_manage_pool():
     assert state["randomized_available_presets"] == ["beta", "gamma"]
     assert state["preset_can_save_current"] is False
     assert state["preset_can_delete"] is False
+
+
+def test_prompt_engineering_state_exposes_webui_presets_separately(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    webui_dir = tmp_path / "save" / "presets" / "WEBUI"
+    nai_dir = tmp_path / "save" / "presets" / "NAI"
+    webui_dir.mkdir(parents=True)
+    nai_dir.mkdir(parents=True)
+    (webui_dir / "default.json").write_text(json.dumps({
+        "api_mode": "WEBUI",
+        "module_settings": {"pre_prompt": "webui default"},
+    }), encoding="utf-8")
+    (webui_dir / "fast1.json").write_text(json.dumps({
+        "api_mode": "WEBUI",
+        "module_settings": {"pre_prompt": "webui fast"},
+    }), encoding="utf-8")
+    (webui_dir / "fast1.hires.json").write_text("{}", encoding="utf-8")
+    (nai_dir / "260108.json").write_text(json.dumps({
+        "api_mode": "NAI",
+        "module_settings": {"pre_prompt": "nai only"},
+    }), encoding="utf-8")
+
+    ctx = _AppContext()
+    module = PromptEngineeringModule()
+    module.preset_combo = _FakeComboBox(["*randomized", "default", "260108"], "260108")
+    ctx.middle_section_controller = SimpleNamespace(module_instances=[module])
+    bridge = RemoteBridge(ctx)
+
+    state = bridge._read_prompt_engineering()
+
+    assert "260108" in state["preset_options"]
+    assert state["webui_preset_options"] == ["default", "fast1"]
+    assert {s["name"]: s["api_mode"] for s in state["webui_preset_summaries"]} == {
+        "default": "WEBUI",
+        "fast1": "WEBUI",
+    }
+    assert {s["name"]: s["pre_prompt_preview"] for s in state["webui_preset_summaries"]}["fast1"] == "webui fast"
 
 
 def test_prompt_engineering_randomized_manage_commands_update_pool():
@@ -1205,6 +1253,47 @@ def test_web_random_passes_session_overrides_to_prompt_generation():
     }]
     assert bridge._pending_overrides[ws]["params"] == overrides
     assert bridge._pending_overrides[ws]["auto_generate"] is True
+
+
+def test_remote_web_ui_state_persists_hires_assist_and_random_prompt_weight(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    bridge = RemoteBridge(ctx)
+
+    assert bridge._read_webui_hiresfix_assist() == {
+        "type": "module_state",
+        "module_id": "webui_hiresfix_assist",
+        "enabled": True,
+        "target": 512,
+    }
+
+    bridge._set_webui_hiresfix_assist("enabled", "false")
+    bridge._set_webui_hiresfix_assist("target", "768")
+    bridge._save_remote_web_ui_state(random_prompt_weight="0.85")
+
+    saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
+    assert saved["remote_web"]["webui_hiresfix_assist"] == {"enabled": False, "target": 768}
+    assert saved["remote_web"]["random_prompt_weight"] == "0.85"
+
+    restarted = RemoteBridge(ctx)
+    assert restarted._read_webui_hiresfix_assist()["enabled"] is False
+    assert restarted._read_webui_hiresfix_assist()["target"] == 768
+    schema = restarted.get_generation_param_schema()
+    assert schema["random_prompt_weight"] == "0.85"
+    assert schema["anima_weight"] == "0.85"
+
+
+def test_remote_web_anima_weight_param_is_saved_for_next_session(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(anima_weight_edit=_FakeLineEdit("1"))
+    bridge = RemoteBridge(ctx)
+
+    bridge._do_set_param("anima_weight", "0.850")
+
+    assert ctx.main_window.anima_weight_edit.text() == "0.85"
+    saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
+    assert saved["remote_web"]["random_prompt_weight"] == "0.85"
 
 
 def test_generation_param_schema_strips_desktop_selected_values():

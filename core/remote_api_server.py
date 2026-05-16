@@ -586,7 +586,8 @@ class RemoteBridge(QObject):
         self._cached_params: dict = {}
         self._cached_options: dict = {}
         self._cached_result_enhance_config: dict = {}
-        self._webui_hiresfix_assist: dict = {"enabled": False, "target": 512}
+        self._remote_web_ui_state: dict = self._load_remote_web_ui_state()
+        self._webui_hiresfix_assist: dict = dict(self._remote_web_ui_state["webui_hiresfix_assist"])
         # api_status 는 per-ws 평가(setup_allowed 가 IP별로 다름)라 캐시하지 않음.
         # 태그 검색 인덱스 (ui/interactive/interactive 기반)
         self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
@@ -717,6 +718,123 @@ class RemoteBridge(QObject):
 
     def _search_filter_state_path(self) -> Path:
         return Path("save") / "remote_web_filter_state.json"
+
+    def _root_app_settings_path(self) -> Path:
+        return Path("app_settings.json")
+
+    def _default_remote_web_ui_state(self) -> dict:
+        return {
+            "version": 1,
+            "webui_hiresfix_assist": {"enabled": True, "target": 512},
+            "random_prompt_weight": "1",
+        }
+
+    def _normalize_webui_hiresfix_assist_state(self, raw) -> dict:
+        state = raw if isinstance(raw, dict) else {}
+        try:
+            target = 768 if int(float(state.get("target") or 512)) == 768 else 512
+        except (TypeError, ValueError):
+            target = 512
+        return {
+            "enabled": self._coerce_bool(state.get("enabled", True)),
+            "target": target,
+        }
+
+    def _normalize_remote_web_ui_state(self, raw) -> dict:
+        state = self._default_remote_web_ui_state()
+        if isinstance(raw, dict):
+            try:
+                state["version"] = int(raw.get("version") or state["version"])
+            except (TypeError, ValueError):
+                pass
+            state["webui_hiresfix_assist"] = self._normalize_webui_hiresfix_assist_state(
+                raw.get("webui_hiresfix_assist")
+            )
+            state["random_prompt_weight"] = self._format_anima_weight(
+                raw.get("random_prompt_weight", state["random_prompt_weight"])
+            )
+        return state
+
+    def _get_settings_module(self):
+        """SettingsTabModule 인스턴스 반환."""
+        try:
+            mw = self.app_context.main_window
+            right_view = getattr(mw, "image_window", None)
+            tab_controller = getattr(right_view, "tab_controller", None)
+            if tab_controller and hasattr(tab_controller, "get_tab_instance"):
+                return tab_controller.get_tab_instance("SettingsTabModule")
+        except Exception:
+            pass
+        return None
+
+    def _read_root_app_settings(self) -> dict:
+        settings_module = self._get_settings_module()
+        module_data = getattr(settings_module, "settings_data", None) if settings_module else None
+        if isinstance(module_data, dict) and module_data:
+            return copy.deepcopy(module_data)
+
+        path = self._root_app_settings_path()
+        try:
+            if path.exists():
+                with path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data if isinstance(data, dict) else {}
+        except Exception as e:
+            print(f"🌐 Remote: app_settings 로드 실패 — {e}")
+        return {}
+
+    def _write_root_app_settings(self, settings: dict):
+        settings_data = settings if isinstance(settings, dict) else {}
+        settings_module = self._get_settings_module()
+        if settings_module is not None and hasattr(settings_module, "settings_data"):
+            try:
+                settings_module.settings_data = copy.deepcopy(settings_data)
+                if hasattr(settings_module, "save_settings"):
+                    settings_module.save_settings()
+                    return
+            except Exception as e:
+                print(f"🌐 Remote: SettingsTab 저장 실패 — {e}")
+
+        try:
+            path = self._root_app_settings_path()
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(settings_data, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            tmp_path.replace(path)
+        except Exception as e:
+            print(f"🌐 Remote: app_settings 저장 실패 — {e}")
+
+    def _load_remote_web_ui_state(self) -> dict:
+        settings = self._read_root_app_settings()
+        return self._normalize_remote_web_ui_state(settings.get("remote_web"))
+
+    def _write_remote_web_ui_state(self):
+        settings = self._read_root_app_settings()
+        settings["remote_web"] = self._normalize_remote_web_ui_state(
+            getattr(self, "_remote_web_ui_state", None)
+        )
+        self._write_root_app_settings(settings)
+
+    def _save_remote_web_ui_state(self, **updates):
+        state = self._normalize_remote_web_ui_state(getattr(self, "_remote_web_ui_state", None))
+        if "webui_hiresfix_assist" in updates:
+            state["webui_hiresfix_assist"] = self._normalize_webui_hiresfix_assist_state(
+                updates.get("webui_hiresfix_assist")
+            )
+        if "random_prompt_weight" in updates:
+            state["random_prompt_weight"] = self._format_anima_weight(updates.get("random_prompt_weight"))
+        self._remote_web_ui_state = state
+        self._write_remote_web_ui_state()
+
+    def _remote_web_generation_param_defaults(self) -> dict:
+        state = self._normalize_remote_web_ui_state(getattr(self, "_remote_web_ui_state", None))
+        weight = state["random_prompt_weight"]
+        return {
+            "anima_weight": weight,
+            "anima_weight_raw": weight,
+            "random_prompt_weight": weight,
+        }
 
     def _normalize_rating_list(self, ratings=None) -> list[str]:
         source = ratings if ratings is not None else ['g', 's', 'q', 'e']
@@ -1088,13 +1206,9 @@ class RemoteBridge(QObject):
     def _get_settings_widget(self):
         """SettingsWidget 인스턴스 반환."""
         try:
-            mw = self.app_context.main_window
-            right_view = getattr(mw, "image_window", None)
-            tab_controller = getattr(right_view, "tab_controller", None)
-            if tab_controller and hasattr(tab_controller, "get_tab_instance"):
-                settings_module = tab_controller.get_tab_instance("SettingsTabModule")
-                if settings_module:
-                    return getattr(settings_module, "settings_widget", None)
+            settings_module = self._get_settings_module()
+            if settings_module:
+                return getattr(settings_module, "settings_widget", None)
         except Exception:
             pass
         return None
@@ -6908,7 +7022,9 @@ class RemoteBridge(QObject):
 
     def get_generation_param_schema(self) -> dict:
         """Return selectable parameter metadata without desktop-selected values."""
-        return self._strip_generation_param_values(self.get_generation_params())
+        schema = self._strip_generation_param_values(self.get_generation_params())
+        schema.update(self._remote_web_generation_param_defaults())
+        return schema
 
     def get_generation_params(self) -> dict:
         """현재 생성 파라미터 + 선택 가능 옵션 목록 반환"""
@@ -7041,8 +7157,11 @@ class RemoteBridge(QObject):
                         mw._on_sampling_mode_changed(button)
             elif key == "rescale_cfg" and hasattr(mw, 'comfyui_rescale_slider'):
                 mw.comfyui_rescale_slider.setValue(int(float(value) * 100))
-            elif key == "anima_weight" and hasattr(mw, 'anima_weight_edit'):
-                mw.anima_weight_edit.setText(value)
+            elif key == "anima_weight":
+                normalized_weight = self._format_anima_weight(value)
+                if hasattr(mw, 'anima_weight_edit'):
+                    mw.anima_weight_edit.setText(normalized_weight)
+                self._save_remote_web_ui_state(random_prompt_weight=normalized_weight)
             self._syncing_param = False
         except Exception as e:
             self._syncing_param = False
@@ -7456,16 +7575,13 @@ class RemoteBridge(QObject):
         self._broadcast_json(self._read_event_stream())
 
     def _read_webui_hiresfix_assist(self) -> dict:
-        state = dict(getattr(self, "_webui_hiresfix_assist", {}) or {})
-        try:
-            target = 768 if int(float(state.get("target") or 512)) == 768 else 512
-        except (TypeError, ValueError):
-            target = 512
+        state = self._normalize_webui_hiresfix_assist_state(
+            getattr(self, "_webui_hiresfix_assist", None)
+        )
         return {
             "type": "module_state",
             "module_id": "webui_hiresfix_assist",
-            "enabled": self._coerce_bool(state.get("enabled", False)),
-            "target": target,
+            **state,
         }
 
     def _broadcast_webui_hiresfix_assist_state(self):
@@ -7632,12 +7748,19 @@ class RemoteBridge(QObject):
                 self._prompt_engineering_preset_summary(m, preset_name)
                 for preset_name in presets
             ]
+            webui_presets = self._prompt_engineering_preset_names_for_mode("WEBUI")
+            webui_preset_summaries = [
+                self._prompt_engineering_preset_summary(m, preset_name, mode="WEBUI")
+                for preset_name in webui_presets
+            ]
             return {
                 "type": "module_state",
                 "module_id": "prompt_engineering",
                 "preset": current_preset,
                 "preset_options": presets,
                 "preset_summaries": preset_summaries,
+                "webui_preset_options": webui_presets,
+                "webui_preset_summaries": webui_preset_summaries,
                 "randomized_active": current_preset == "*randomized",
                 "randomized_preset_list": randomized_pool,
                 "randomized_available_presets": randomized_available,
@@ -7654,6 +7777,30 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: 모듈 상태 읽기 실패 — {e}")
             return {}
+
+    def _prompt_engineering_preset_names_for_mode(self, mode: str) -> list[str]:
+        """Return real prompt-engineering preset files for one API mode."""
+        try:
+            mode_key = self._normalize_prompt_engineering_preset_mode(mode)
+        except ValueError:
+            return []
+        preset_dir = Path("save") / "presets" / mode_key
+        if not preset_dir.is_dir():
+            return []
+        names = []
+        for path in sorted(preset_dir.glob("*.json")):
+            if not path.is_file():
+                continue
+            if path.name.endswith(".hires.json"):
+                continue
+            name = path.stem
+            if not name or name == "*randomized" or name.endswith(".hires"):
+                continue
+            names.append(name)
+        if "default" in names:
+            names.remove("default")
+            names.insert(0, "default")
+        return names
 
     def _prompt_engineering_preview_candidates(self, preset_name: str, mode: str = "") -> list[Path]:
         safe_name = Path(str(preset_name or "").strip()).name
@@ -7900,10 +8047,13 @@ class RemoteBridge(QObject):
             if done:
                 done.set()
 
-    def _prompt_engineering_preset_summary(self, module, preset_name: str) -> dict:
+    def _prompt_engineering_preset_summary(self, module, preset_name: str, mode: str = "") -> dict:
         name = str(preset_name or "")
         try:
-            current_mode = self._normalize_prompt_engineering_preset_mode(self._current_api_mode(), allow_empty=True) or "NAI"
+            current_mode = self._normalize_prompt_engineering_preset_mode(
+                mode or self._current_api_mode(),
+                allow_empty=True,
+            ) or "NAI"
         except ValueError:
             current_mode = "NAI"
         summary = {
@@ -7921,7 +8071,14 @@ class RemoteBridge(QObject):
             return summary
 
         try:
-            preset_file = module.get_preset_dir() / f"{name}.json"
+            if mode:
+                try:
+                    preset_dir = module.get_preset_dir(current_mode)
+                except TypeError:
+                    preset_dir = Path("save") / "presets" / current_mode
+            else:
+                preset_dir = module.get_preset_dir()
+            preset_file = preset_dir / f"{name}.json"
             if preset_file.exists():
                 with open(preset_file, "r", encoding="utf-8") as f:
                     preset_data = json.load(f)
@@ -7956,6 +8113,103 @@ class RemoteBridge(QObject):
         state = self._read_prompt_engineering()
         if state:
             self._broadcast_json(state)
+
+    # ------------------------------------------------------------
+    # Hires Preset Overlay (sidecar: <name>.hires.json) — Edit 기능 백엔드
+    # ------------------------------------------------------------
+    HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
+
+    def _hires_overlay_path(self, preset_name: str) -> Optional[Path]:
+        """sidecar 경로 반환. 경로 탈출 / 예약 이름 / 비-WEBUI 모드면 None."""
+        name = (preset_name or "").strip()
+        if name in self.HIRES_OVERLAY_DISALLOWED_NAMES:
+            return None
+        safe_name = Path(name).name
+        if safe_name != name:
+            return None  # 경로 탈출 방지
+        try:
+            mode = self.app_context.get_api_mode() or "WEBUI"
+        except Exception:
+            mode = "WEBUI"
+        if mode != "WEBUI":
+            return None
+        return Path("save") / "presets" / mode / f"{safe_name}.hires.json"
+
+    def _hires_overlay_response(self, preset_name: str) -> dict:
+        """Edit 모달용 — 원본 + overlay 동시 반환."""
+        name = (preset_name or "").strip()
+        response = {
+            "type": "hires_preset_overlay",
+            "preset_name": name,
+            "original": {"prefix_prompt": "", "postfix_prompt": "", "negative_prompt": ""},
+            "overlay": None,
+            "editable": False,
+        }
+        path = self._hires_overlay_path(name)
+        if path is None:
+            return response
+        response["editable"] = True
+
+        # 원본 프리셋 로드 (sidecar 경로 옆 동일 이름의 .json)
+        try:
+            preset_path = path.parent / f"{name}.json"
+            if preset_path.exists():
+                preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
+                module_settings = preset_data.get("module_settings", {}) or {}
+                main_settings = preset_data.get("main_settings", {}) or {}
+                response["original"] = {
+                    "prefix_prompt": str(module_settings.get("pre_prompt", "") or ""),
+                    "postfix_prompt": str(module_settings.get("post_prompt", "") or ""),
+                    "negative_prompt": str(
+                        main_settings.get("negative") or main_settings.get("negative_prompt") or ""
+                    ),
+                }
+        except Exception as e:
+            print(f"🌐 Remote: hires overlay 원본 로드 실패 — {name}: {e}")
+
+        # Overlay 로드 (있을 때만)
+        if path.exists():
+            try:
+                overlay = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(overlay, dict):
+                    response["overlay"] = {
+                        "prefix_prompt": str(overlay.get("prefix_prompt", "") or ""),
+                        "postfix_prompt": str(overlay.get("postfix_prompt", "") or ""),
+                        "negative_prompt": str(overlay.get("negative_prompt", "") or ""),
+                    }
+            except Exception as e:
+                print(f"🌐 Remote: hires overlay 파싱 실패 — {name}: {e}")
+
+        return response
+
+    def _write_hires_overlay(self, preset_name: str, body: dict) -> tuple[bool, str]:
+        path = self._hires_overlay_path(preset_name)
+        if path is None:
+            return False, "WEBUI 모드의 일반 프리셋만 편집할 수 있습니다."
+        payload = {
+            "schema_version": 1,
+            "prefix_prompt": str((body or {}).get("prefix_prompt", "") or ""),
+            "postfix_prompt": str((body or {}).get("postfix_prompt", "") or ""),
+            "negative_prompt": str((body or {}).get("negative_prompt", "") or ""),
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            return True, f"Overlay saved: {path.name}"
+        except Exception as e:
+            return False, f"저장 실패: {e}"
+
+    def _reset_hires_overlay(self, preset_name: str) -> tuple[bool, str]:
+        path = self._hires_overlay_path(preset_name)
+        if path is None:
+            return False, "WEBUI 모드의 일반 프리셋만 편집할 수 있습니다."
+        try:
+            if path.exists():
+                path.unlink()
+                return True, f"Overlay removed: {path.name}"
+            return True, "Overlay already absent."
+        except Exception as e:
+            return False, f"삭제 실패: {e}"
 
     @staticmethod
     def _coerce_bool(value) -> bool:
@@ -9052,7 +9306,9 @@ class RemoteBridge(QObject):
 
     def _set_webui_hiresfix_assist(self, key: str, value: str):
         try:
-            state = dict(getattr(self, "_webui_hiresfix_assist", {}) or {})
+            state = self._normalize_webui_hiresfix_assist_state(
+                getattr(self, "_webui_hiresfix_assist", None)
+            )
             if key == "enabled":
                 state["enabled"] = self._coerce_bool(value)
             elif key == "target":
@@ -9063,6 +9319,7 @@ class RemoteBridge(QObject):
             else:
                 return
             self._webui_hiresfix_assist = state
+            self._save_remote_web_ui_state(webui_hiresfix_assist=state)
             self._broadcast_webui_hiresfix_assist_state()
         except Exception as e:
             print(f"🌐 Remote: webui_hiresfix_assist 설정 실패 — {key}={value}: {e}")
@@ -16271,6 +16528,29 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                 bridge.request_set_module.emit(mid, mkey, mval)
                                 continue
                             bridge.request_set_module.emit(mid, mkey, mval)
+                        elif cmd_type == "read_hires_preset_overlay":
+                            preset_name = str(cmd.get("preset_name", "") or "")
+                            response = await asyncio.to_thread(bridge._hires_overlay_response, preset_name)
+                            await ws.send_text(json.dumps(response))
+                        elif cmd_type == "write_hires_preset_overlay":
+                            preset_name = str(cmd.get("preset_name", "") or "")
+                            action = str(cmd.get("action", "save") or "save")
+                            if action == "reset":
+                                ok, msg = await asyncio.to_thread(bridge._reset_hires_overlay, preset_name)
+                            else:
+                                ok, msg = await asyncio.to_thread(
+                                    bridge._write_hires_overlay,
+                                    preset_name,
+                                    cmd.get("body") if isinstance(cmd.get("body"), dict) else {},
+                                )
+                            await ws.send_text(json.dumps({
+                                "type": "toast",
+                                "message": msg,
+                                "level": "success" if ok else "error",
+                            }))
+                            if ok:
+                                response = await asyncio.to_thread(bridge._hires_overlay_response, preset_name)
+                                await ws.send_text(json.dumps(response))
                         elif cmd_type in ("get_search_state", "search", "load_parquet", "merge_parquet",
                                            "search_parquet_action", "depth_action", "get_depth_state", "restore_snapshot"):
                             if cmd_type == "get_search_state":

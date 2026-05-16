@@ -72,7 +72,7 @@ let resultUnsavedActionBusy = false;
 let promptHighlighter = null;
 let moduleBadges = null;
 let moduleLauncherControl = null;
-let webUiHiresfixAssistState = {enabled: false, target: 512};
+let webUiHiresfixAssistState = {enabled: true, target: 512};
 let comfyuiWorkflowState = {
   has_custom: false,
   workflow_label: 'Basic Workflow',
@@ -588,7 +588,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs')
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260516-webui-hires1')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260516-hires-assist-persist1')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -1174,6 +1174,9 @@ function updateWebUiHiresfixAssistControls(state = null) {
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   updateWebUiHrScaleHint();
+  if (moduleBadges && typeof moduleBadges.updateWebUiHiresfixAssist === 'function') {
+    moduleBadges.updateWebUiHiresfixAssist(normalized);
+  }
 }
 
 function setWebUiHiresfixAssistEnabled(enabled) {
@@ -1234,16 +1237,43 @@ function refreshHiresPresetSwapOptions(m) {
   const select = document.getElementById('pHiresPresetSwap');
   if (!select) return;
   const prevValue = select.value;
-  const presets = Array.isArray(m?.preset_options) ? m.preset_options : [];
-  const summaries = Array.isArray(m?.preset_summaries) ? m.preset_summaries : [];
+  const presets = Array.isArray(m?.webui_preset_options)
+    ? m.webui_preset_options
+    : (Array.isArray(m?.preset_options) ? m.preset_options : []);
+  const summaries = Array.isArray(m?.webui_preset_summaries)
+    ? m.webui_preset_summaries
+    : (Array.isArray(m?.preset_summaries) ? m.preset_summaries : []);
   const summaryMap = new Map();
-  summaries.forEach(s => { if (s && s.name) summaryMap.set(String(s.name), s); });
+  summaries.forEach(s => {
+    if (!s || !s.name) return;
+    const mode = String(s.api_mode || '').toUpperCase();
+    if (mode && mode !== 'WEBUI') return;
+    summaryMap.set(String(s.name), s);
+  });
+  // 와일드카드 정합성 평가용 raw 본문 캐시 — 잘리지 않은 전문을 보관.
+  _hiresPresetFullTextCache = new Map();
+  _hiresCurrentPresetName = String(m?.preset || '');
+  const currentSummary = _hiresCurrentPresetName && summaryMap.get(_hiresCurrentPresetName);
+  _hiresPresetFullTextCache.set('__main__', currentSummary ? {
+    pre: String(currentSummary.pre_prompt_preview || ''),
+    post: String(currentSummary.post_prompt_preview || ''),
+  } : { pre: '', post: '' });
 
   const opts = ['<option value="">현재 프리셋 사용</option>'];
+  const validValues = new Set(['']);
   for (const raw of presets) {
     const name = String(raw || '');
     if (!name || name === '*randomized' || name === '(프리셋 없음)') continue;
     const s = summaryMap.get(name);
+    if (s && String(s.api_mode || '').toUpperCase() !== 'WEBUI') continue;
+    if (!s && Array.isArray(m?.preset_summaries)) continue;
+    validValues.add(name);
+    if (s) {
+      _hiresPresetFullTextCache.set(name, {
+        pre: String(s.pre_prompt_preview || ''),
+        post: String(s.post_prompt_preview || ''),
+      });
+    }
     const attrs = s ? [
       `data-preview-name="${escHtml(s.name || name)}"`,
       `data-preview-mode="${escHtml(s.api_mode || '')}"`,
@@ -1254,8 +1284,269 @@ function refreshHiresPresetSwapOptions(m) {
     opts.push(`<option value="${escHtml(name)}" ${attrs}>${escHtml(name)}</option>`);
   }
   select.innerHTML = opts.join('');
-  const validValues = new Set(['', ...presets.map(String)]);
   select.value = validValues.has(prevValue) ? prevValue : '';
+  refreshHiresPresetMismatchBadge();
+  refreshHiresEditButtonState();
+}
+
+// Hires Preset Overlay editor — 전역 상태
+let _hiresPresetFullTextCache = new Map();
+let _hiresCurrentPresetName = '';
+let _hiresOverlayEditorPreset = '';
+let _hiresOverlayOverlayMap = new Map(); // preset_name → overlay body (서버 응답 캐시)
+
+function refreshHiresEditButtonState() {
+  const btn = document.getElementById('hiresPresetEditBtn');
+  const sel = document.getElementById('pHiresPresetSwap');
+  if (!btn || !sel) return;
+  btn.disabled = !sel.value;
+}
+
+// __wildcard__ 토큰 추출 (단순 표면 비교용 — fuzzy match 는 서버 와일드카드 해석에 위임)
+function extractWildcardTokens(text) {
+  if (!text) return new Set();
+  const tokens = new Set();
+  // 양옆 __ 로 감싸진 토큰. *prefix / $master:slave 같은 변종 prefix 도 핵심 키만 추출.
+  // lazy 본문은 \s, , 만 금지하고 단일 underscore 는 허용 (예: __original_character__).
+  // 본문 안에 또 다른 __ 가 들어가면 닫는 구분자로 우선 매칭 (lazy quantifier 보장).
+  const re = /__(\*?\$?[^\s,_][^\s,]*?)__/g;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    let key = match[1];
+    // 종속 와일드카드: $master:slave → slave 만
+    if (key.startsWith('$')) {
+      const colonIdx = key.indexOf(':');
+      if (colonIdx > 0) key = key.slice(colonIdx + 1);
+      else key = key.slice(1);
+    }
+    if (key.startsWith('*')) key = key.slice(1);
+    if (key) tokens.add(key);
+  }
+  return tokens;
+}
+
+function computeHiresWildcardDiff(mainPresetName, swapPresetName) {
+  const swap = _hiresPresetFullTextCache.get(swapPresetName);
+  const main = _hiresPresetFullTextCache.get('__main__');
+  if (!swap) return { added: [], missing: [] };
+  // Overlay 가 있으면 그것을 우선 사용
+  const overlay = _hiresOverlayOverlayMap.get(swapPresetName);
+  const swapPre = overlay ? overlay.prefix_prompt : swap.pre;
+  const swapPost = overlay ? overlay.postfix_prompt : swap.post;
+  const mainTokens = main ? new Set([
+    ...extractWildcardTokens(main.pre),
+    ...extractWildcardTokens(main.post),
+  ]) : new Set();
+  const swapTokens = new Set([
+    ...extractWildcardTokens(swapPre),
+    ...extractWildcardTokens(swapPost),
+  ]);
+  const added = [...swapTokens].filter(t => !mainTokens.has(t));
+  const missing = [...mainTokens].filter(t => !swapTokens.has(t));
+  return { added, missing };
+}
+
+function refreshHiresPresetMismatchBadge() {
+  const anchor = document.getElementById('hiresPresetMismatchAnchor');
+  const sel = document.getElementById('pHiresPresetSwap');
+  if (!anchor || !sel) return;
+  anchor.innerHTML = '';
+  const swapName = sel.value;
+  if (!swapName) return;
+  const { added, missing } = computeHiresWildcardDiff(_hiresCurrentPresetName, swapName);
+  if (added.length === 0 && missing.length === 0) return;
+
+  const count = added.length + missing.length;
+  const badge = document.createElement('div');
+  badge.className = 'webui-hires-mismatch-badge';
+  badge.title = '와일드카드 정합성 경고 (호버해서 상세 확인)';
+  badge.textContent = String(count);
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'webui-hires-mismatch-tooltip';
+  tooltip.hidden = true;
+  const sections = [];
+  if (added.length) {
+    sections.push(`
+      <div class="group-added">
+        <span class="group-title">추가됨 — Hires 에서 새로 롤됨</span>
+        <ul class="group-list">${added.map(t => `<li><span class="wc-token">__${escHtml(t)}__</span></li>`).join('')}</ul>
+      </div>`);
+  }
+  if (missing.length) {
+    sections.push(`
+      <div class="group-missing">
+        <span class="group-title">누락됨 — 메인의 효과가 Hires 에서 사라짐</span>
+        <ul class="group-list">${missing.map(t => `<li><span class="wc-token">__${escHtml(t)}__</span></li>`).join('')}</ul>
+      </div>`);
+  }
+  tooltip.innerHTML = sections.join('');
+
+  badge.addEventListener('mouseenter', () => { tooltip.hidden = false; });
+  badge.addEventListener('mouseleave', () => { tooltip.hidden = true; });
+  badge.addEventListener('focus', () => { tooltip.hidden = false; });
+  badge.addEventListener('blur', () => { tooltip.hidden = true; });
+  badge.tabIndex = 0;
+
+  anchor.append(badge, tooltip);
+}
+
+function refreshHiresOverlayWildcardDiff(presetName) {
+  const box = document.getElementById('hiresOverlayWildcardDiff');
+  if (!box) return;
+  const name = String(presetName || '');
+  if (!name) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  const { added, missing } = computeHiresWildcardDiff(_hiresCurrentPresetName, name);
+  if (added.length === 0 && missing.length === 0) {
+    box.hidden = true;
+    box.innerHTML = '';
+    return;
+  }
+  const sections = [`<div class="wcdiff-headline">와일드카드 정합성 경고 · ${added.length + missing.length}건</div>`];
+  if (added.length) {
+    sections.push(`
+      <div class="group-added">
+        <span class="group-title">추가됨 — Hires 에서 새로 롤됨</span>
+        <ul class="group-list">${added.map(t => `<li><span class="wc-token">__${escHtml(t)}__</span></li>`).join('')}</ul>
+      </div>`);
+  }
+  if (missing.length) {
+    sections.push(`
+      <div class="group-missing">
+        <span class="group-title">누락됨 — 메인의 효과가 Hires 에서 사라짐</span>
+        <ul class="group-list">${missing.map(t => `<li><span class="wc-token">__${escHtml(t)}__</span></li>`).join('')}</ul>
+      </div>`);
+  }
+  box.innerHTML = sections.join('');
+  box.hidden = false;
+}
+
+function _loadHiresOverlayForPreset(preset) {
+  _hiresOverlayEditorPreset = preset;
+  document.getElementById('hiresOverlayTitle').textContent = `Hires Overlay — ${preset}`;
+  document.getElementById('hiresOverlayStatus').textContent = '서버에서 로드 중…';
+  ['hiresOverlayPrefix', 'hiresOverlayPostfix', 'hiresOverlayNegative'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  refreshHiresOverlayWildcardDiff(preset);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'read_hires_preset_overlay', preset_name: preset}));
+  }
+}
+
+function openHiresOverlayEditor() {
+  const sel = document.getElementById('pHiresPresetSwap');
+  const preset = sel?.value || '';
+  if (!preset) {
+    showToast('먼저 Hires 패스에 사용할 프리셋을 선택하세요.', 'warning');
+    return;
+  }
+  document.getElementById('hiresOverlayPopup').classList.add('open');
+  _loadHiresOverlayForPreset(preset);
+}
+
+function syncHiresOverlayEditorIfOpen(newPresetName) {
+  const popup = document.getElementById('hiresOverlayPopup');
+  if (!popup || !popup.classList.contains('open')) return;
+  const preset = String(newPresetName || '');
+  if (!preset) {
+    closeHiresOverlayEditor();
+    return;
+  }
+  if (preset === _hiresOverlayEditorPreset) return;
+  _loadHiresOverlayForPreset(preset);
+}
+
+function closeHiresOverlayEditor() {
+  document.getElementById('hiresOverlayPopup').classList.remove('open');
+  _hiresOverlayEditorPreset = '';
+  const box = document.getElementById('hiresOverlayWildcardDiff');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+}
+
+function _readHiresOverlayBodyFromUI() {
+  return {
+    prefix_prompt: document.getElementById('hiresOverlayPrefix')?.value || '',
+    postfix_prompt: document.getElementById('hiresOverlayPostfix')?.value || '',
+    negative_prompt: document.getElementById('hiresOverlayNegative')?.value || '',
+  };
+}
+
+function saveHiresOverlayEditor() {
+  const preset = _hiresOverlayEditorPreset;
+  if (!preset) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    showToast('WS 연결이 끊겨 저장할 수 없습니다.', 'error');
+    return;
+  }
+  ws.send(JSON.stringify({
+    type: 'write_hires_preset_overlay',
+    preset_name: preset,
+    action: 'save',
+    body: _readHiresOverlayBodyFromUI(),
+  }));
+  // 저장 성공 응답이 오면 모달은 닫지 않고 status 만 갱신.
+}
+
+function resetHiresOverlayEditor() {
+  const preset = _hiresOverlayEditorPreset;
+  if (!preset) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    showToast('WS 연결이 끊겨 리셋할 수 없습니다.', 'error');
+    return;
+  }
+  ws.send(JSON.stringify({
+    type: 'write_hires_preset_overlay',
+    preset_name: preset,
+    action: 'reset',
+  }));
+}
+
+function _applyHiresOverlayResponse(payload) {
+  const preset = String(payload?.preset_name || '');
+  const original = payload?.original || {};
+  const overlay = payload?.overlay; // null 이면 sidecar 없음
+  // 캐시 갱신
+  if (overlay) {
+    _hiresOverlayOverlayMap.set(preset, {
+      prefix_prompt: String(overlay.prefix_prompt || ''),
+      postfix_prompt: String(overlay.postfix_prompt || ''),
+      negative_prompt: String(overlay.negative_prompt || ''),
+    });
+  } else {
+    _hiresOverlayOverlayMap.delete(preset);
+  }
+  // 모달이 이 프리셋을 편집 중이면 UI 채우기
+  if (_hiresOverlayEditorPreset === preset) {
+    const fillFrom = overlay || original;
+    const pre = document.getElementById('hiresOverlayPrefix');
+    const post = document.getElementById('hiresOverlayPostfix');
+    const neg = document.getElementById('hiresOverlayNegative');
+    if (pre) pre.value = String(fillFrom.prefix_prompt || '');
+    if (post) post.value = String(fillFrom.postfix_prompt || '');
+    if (neg) neg.value = String(fillFrom.negative_prompt || '');
+    const status = document.getElementById('hiresOverlayStatus');
+    if (status) {
+      if (overlay) {
+        status.textContent = '● Overlay 활성 (sidecar 저장됨)';
+        status.classList.add('overlay-active');
+      } else {
+        status.textContent = '○ Overlay 없음 — 원본 프리셋 표시 중';
+        status.classList.remove('overlay-active');
+      }
+    }
+  }
+  // mismatch 배지 재계산
+  refreshHiresPresetMismatchBadge();
+  // 편집 모달 안의 wildcard diff 도 overlay 반영 후 재계산
+  if (_hiresOverlayEditorPreset === preset) {
+    refreshHiresOverlayWildcardDiff(preset);
+  }
 }
 
 function currentComfyUiSamplingMode() {
@@ -1529,6 +1820,7 @@ const wsMessageHandlers = {
   probe_result: onProbeResult,
   anlas_update: onAnlasUpdate,
   module_state: onModuleState,
+  hires_preset_overlay: _applyHiresOverlayResponse,
   prompt_engineering_preset_thumbnail_updated: onPromptEngineeringPresetThumbnailUpdated,
   search_state: onSearchState,
   rating_update: onRatingUpdate,

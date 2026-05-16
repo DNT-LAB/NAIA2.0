@@ -5187,22 +5187,23 @@ class ModernMainWindow(QMainWindow):
             self.status_bar.showMessage(f"❌ 자동 이미지 생성 오류: {e}")
             print(f"자동 이미지 생성 오류: {e}")
 
-    def is_webui_fast_auto_gen_enabled(self) -> bool:
+    def is_webui_fast_auto_gen_enabled(self, api_mode: str | None = None) -> bool:
         """WEBUI Fast Auto Gen이 현재 실제로 사용할 수 있는지 확인합니다."""
         try:
+            current_mode = str(api_mode or self.get_current_api_mode() or "").upper()
             return bool(
                 self.webui_fast_auto_gen_enabled
-                and self.get_current_api_mode() == "WEBUI"
+                and current_mode == "WEBUI"
                 and self.generation_checkboxes.get("자동 생성")
                 and self.generation_checkboxes["자동 생성"].isChecked()
             )
         except Exception:
             return False
 
-    def prepare_fast_webui_auto_generation(self) -> bool:
+    def prepare_fast_webui_auto_generation(self, api_mode: str | None = None) -> bool:
         """현재 WEBUI 생성 중 다음 Auto Gen 프롬프트를 미리 큐에 넣습니다."""
         try:
-            if not self.is_webui_fast_auto_gen_enabled():
+            if not self.is_webui_fast_auto_gen_enabled(api_mode):
                 return False
             if self._webui_fast_auto_gen_preparing:
                 return False

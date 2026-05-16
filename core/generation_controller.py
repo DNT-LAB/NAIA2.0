@@ -639,6 +639,12 @@ class GenerationController(QObject):
         try:
             # ✅ Phase 2: 통합된 파라미터 수집 메서드 사용
             params = self._collect_generation_params()
+            fast_webui_request = bool(overrides and overrides.get("_webui_fast_auto_gen"))
+            if fast_webui_request and self._api_mode_from_mapping(params) != "WEBUI":
+                self.context.main_window.status_bar.showMessage(
+                    "⚡ WEBUI Fast Auto Gen: 현재 모드가 WEBUI가 아니어서 큐 요청을 취소했습니다."
+                )
+                return
 
             # 인증 정보 확인
             api_mode = params.get('api_mode', 'NAI')
@@ -956,8 +962,12 @@ class GenerationController(QObject):
 
         self.context.main_window.status_bar.showMessage("🚀 생성 시작...")
         try:
-            if hasattr(self.context.main_window, "prepare_fast_webui_auto_generation"):
-                self.context.main_window.prepare_fast_webui_auto_generation()
+            active_api_mode = self._api_mode_from_mapping(self.current_generation_params)
+            if (
+                active_api_mode == "WEBUI"
+                and hasattr(self.context.main_window, "prepare_fast_webui_auto_generation")
+            ):
+                self.context.main_window.prepare_fast_webui_auto_generation(active_api_mode)
         except Exception as e:
             print(f"⚠️ WEBUI Fast Auto Gen 준비 요청 실패: {e}")
     
@@ -975,6 +985,8 @@ class GenerationController(QObject):
         """생성 완료 시 호출되는 슬롯"""
         # 🆕 성공 시 재시도 카운터 리셋
         self.auto_retry_count = 0
+        finished_params = self.current_generation_params if isinstance(self.current_generation_params, dict) else None
+        finished_api_mode = self._api_mode_from_mapping(finished_params) or self._api_mode_from_mapping(result)
         if isinstance(self.current_generation_params, dict):
             current_request = self.current_generation_params.get("_generation_request")
             if current_request:
@@ -992,10 +1004,14 @@ class GenerationController(QObject):
         self.context.publish("generation_finished", result)
 
         queue_manager = self.context.generation_queue_manager
-        fast_auto_gen_queued = self._has_webui_fast_auto_gen_queue(queue_manager)
+        fast_auto_gen_queued = finished_api_mode == "WEBUI" and self._has_webui_fast_auto_gen_queue(queue_manager)
         if fast_auto_gen_queued and isinstance(result, dict):
             result["_skip_update_ui_auto_generate_check"] = True
-        prearmed_auto_gen = self._prearm_auto_generation_after_thread_finish(result, queue_manager)
+        prearmed_auto_gen = self._prearm_auto_generation_after_thread_finish(
+            result,
+            queue_manager,
+            finished_api_mode,
+        )
 
         # UI 업데이트 (update_ui_with_result 내부에서 automation_module 처리)
         # Fast/일반 Auto Gen은 다음 생성 재개가 Qt 이미지/CRUD 후처리에 막히지 않도록 한 틱 뒤로 미룬다.
@@ -1020,9 +1036,25 @@ class GenerationController(QObject):
             else:
                 print("[QUEUE] 큐가 일시정지 상태입니다.")
 
-    def _prearm_auto_generation_after_thread_finish(self, result: dict, queue_manager) -> bool:
+    @staticmethod
+    def _api_mode_from_mapping(mapping) -> str:
+        if not isinstance(mapping, dict):
+            return ""
+        mode = mapping.get("api_mode")
+        if not mode and isinstance(mapping.get("generation_params"), dict):
+            mode = mapping["generation_params"].get("api_mode")
+        return str(mode or "").strip().upper()
+
+    def _prearm_auto_generation_after_thread_finish(
+        self,
+        result: dict,
+        queue_manager,
+        completed_api_mode: str = "",
+    ) -> bool:
         """일반 Auto Gen을 Qt 결과 UI/CRUD 후처리보다 먼저 재개하도록 준비한다."""
         try:
+            if str(completed_api_mode or "").upper() != "WEBUI":
+                return False
             if not queue_manager.is_empty() and not queue_manager.is_paused():
                 return False
 
@@ -1035,7 +1067,7 @@ class GenerationController(QObject):
                 return False
             if not (
                 hasattr(main_window, "is_webui_fast_auto_gen_enabled")
-                and main_window.is_webui_fast_auto_gen_enabled()
+                and main_window.is_webui_fast_auto_gen_enabled(completed_api_mode)
             ):
                 return False
 
@@ -1060,7 +1092,11 @@ class GenerationController(QObject):
             peek_next = getattr(queue_manager, "peek_next_request", None)
             next_request = peek_next() if callable(peek_next) else None
             params = getattr(next_request, "params", None)
-            return isinstance(params, dict) and bool(params.get("_webui_fast_auto_gen"))
+            return (
+                isinstance(params, dict)
+                and self._api_mode_from_mapping(params) == "WEBUI"
+                and bool(params.get("_webui_fast_auto_gen"))
+            )
         except Exception:
             return False
 

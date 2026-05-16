@@ -123,6 +123,26 @@ def test_prepared_queue_request_keeps_nai_early_binding():
     assert request.nai_character_reference is sentinels[2]
 
 
+def test_fast_webui_enqueue_is_cancelled_if_current_mode_is_nai():
+    queue = _QueueManager()
+    messages = []
+    controller = GenerationController.__new__(GenerationController)
+    controller.context = SimpleNamespace(
+        generation_queue_manager=queue,
+        main_window=SimpleNamespace(
+            status_bar=SimpleNamespace(showMessage=lambda message: messages.append(message)),
+        ),
+    )
+    controller._collect_generation_params = lambda: {"api_mode": "NAI", "credential": "nai-token"}
+
+    controller._enqueue_current_request({"_webui_fast_auto_gen": True}, priority=0)
+
+    assert queue.requests == []
+    assert messages == [
+        "⚡ WEBUI Fast Auto Gen: 현재 모드가 WEBUI가 아니어서 큐 요청을 취소했습니다."
+    ]
+
+
 def test_thread_finished_resumes_pending_auto_generation(monkeypatch):
     auto_calls = []
     timer_calls = []
@@ -183,7 +203,7 @@ def test_generation_finished_prearms_normal_autogen_before_ui_when_fast_mode_ena
     main_window = SimpleNamespace(
         _auto_generation_waiting_for_thread=False,
         generation_checkboxes={"자동 생성": _CheckBox(True)},
-        is_webui_fast_auto_gen_enabled=lambda: True,
+        is_webui_fast_auto_gen_enabled=lambda *_args: True,
         automation_module=SimpleNamespace(
             automation_controller=SimpleNamespace(is_running=False)
         ),
@@ -202,7 +222,7 @@ def test_generation_finished_prearms_normal_autogen_before_ui_when_fast_mode_ena
     controller.auto_retry_count = 1
     controller._update_button_with_queue_size = lambda: None
 
-    result = {"image": object(), "generation_params": {}}
+    result = {"image": object(), "generation_params": {"api_mode": "WEBUI"}}
 
     controller._on_generation_finished(result)
 
@@ -231,7 +251,7 @@ def test_generation_finished_does_not_prearm_normal_autogen_when_fast_mode_disab
     main_window = SimpleNamespace(
         _auto_generation_waiting_for_thread=False,
         generation_checkboxes={"자동 생성": _CheckBox(True)},
-        is_webui_fast_auto_gen_enabled=lambda: False,
+        is_webui_fast_auto_gen_enabled=lambda *_args: False,
         automation_module=SimpleNamespace(
             automation_controller=SimpleNamespace(is_running=False)
         ),
@@ -250,7 +270,7 @@ def test_generation_finished_does_not_prearm_normal_autogen_when_fast_mode_disab
     controller.auto_retry_count = 1
     controller._update_button_with_queue_size = lambda: None
 
-    result = {"image": object(), "generation_params": {}}
+    result = {"image": object(), "generation_params": {"api_mode": "WEBUI"}}
 
     controller._on_generation_finished(result)
 
@@ -271,11 +291,11 @@ def test_generation_finished_defers_ui_for_webui_fast_auto_gen_queue(monkeypatch
     )
 
     queue = _QueueManager()
-    queue.requests.append(SimpleNamespace(params={"_webui_fast_auto_gen": True}))
+    queue.requests.append(SimpleNamespace(params={"api_mode": "WEBUI", "_webui_fast_auto_gen": True}))
     main_window = SimpleNamespace(
         _auto_generation_waiting_for_thread=False,
         generation_checkboxes={"자동 생성": _CheckBox(True)},
-        is_webui_fast_auto_gen_enabled=lambda: True,
+        is_webui_fast_auto_gen_enabled=lambda *_args: True,
         automation_module=SimpleNamespace(
             automation_controller=SimpleNamespace(is_running=False)
         ),
@@ -294,7 +314,7 @@ def test_generation_finished_defers_ui_for_webui_fast_auto_gen_queue(monkeypatch
     controller.auto_retry_count = 1
     controller._update_button_with_queue_size = lambda: None
 
-    result = {"image": object(), "generation_params": {}}
+    result = {"image": object(), "generation_params": {"api_mode": "WEBUI"}}
 
     controller._on_generation_finished(result)
 
@@ -306,6 +326,77 @@ def test_generation_finished_defers_ui_for_webui_fast_auto_gen_queue(monkeypatch
     scheduled[0][1]()
 
     assert ("ui", result) in events
+
+
+def test_generation_finished_keeps_nai_on_legacy_auto_gen_path(monkeypatch):
+    scheduled = []
+    events = []
+
+    monkeypatch.setattr(
+        generation_controller_module.QTimer,
+        "singleShot",
+        lambda ms, fn: scheduled.append((ms, fn)),
+    )
+
+    queue = _QueueManager()
+    queue.requests.append(SimpleNamespace(params={"api_mode": "WEBUI", "_webui_fast_auto_gen": True}))
+    main_window = SimpleNamespace(
+        _auto_generation_waiting_for_thread=False,
+        generation_checkboxes={"자동 생성": _CheckBox(True)},
+        is_webui_fast_auto_gen_enabled=lambda *_args: True,
+        automation_module=SimpleNamespace(
+            automation_controller=SimpleNamespace(is_running=False)
+        ),
+        update_ui_with_result=lambda result: events.append(("ui", result)),
+    )
+
+    controller = GenerationController.__new__(GenerationController)
+    controller.context = SimpleNamespace(
+        main_window=main_window,
+        generation_queue_manager=queue,
+        publish=lambda name, payload: events.append((name, payload)),
+        session_p_eng_override=None,
+        session_cond_override=None,
+    )
+    controller.current_generation_params = {"api_mode": "NAI"}
+    controller.auto_retry_count = 1
+    controller._update_button_with_queue_size = lambda: None
+
+    result = {"image": object(), "generation_params": {"api_mode": "NAI"}}
+
+    controller._on_generation_finished(result)
+
+    assert "_skip_update_ui_auto_generate_check" not in result
+    assert main_window._auto_generation_waiting_for_thread is False
+    assert ("ui", result) in events
+    assert not scheduled
+
+
+def test_generation_started_prepares_fast_mode_only_for_webui_request():
+    calls = []
+    events = []
+
+    main_window = SimpleNamespace(
+        status_bar=SimpleNamespace(showMessage=lambda *_args: None),
+        prepare_fast_webui_auto_generation=lambda api_mode=None: calls.append(api_mode),
+    )
+    controller = GenerationController.__new__(GenerationController)
+    controller.context = SimpleNamespace(
+        main_window=main_window,
+        publish=lambda name, payload: events.append((name, payload)),
+        generation_queue_manager=_QueueManager(),
+    )
+    controller.current_generation_params = {"api_mode": "NAI"}
+    controller._update_button_with_queue_size = lambda: None
+
+    controller._on_generation_started()
+
+    assert calls == []
+
+    controller.current_generation_params = {"api_mode": "WEBUI"}
+    controller._on_generation_started()
+
+    assert calls == ["WEBUI"]
 
 
 def test_stale_thread_finished_signal_does_not_clear_current_generation(monkeypatch):

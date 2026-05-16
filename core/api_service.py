@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from modules.character_module import CharacterModule
 
 class APIService:
+    WEBUI_HIRES_ASSIST_MAX_PIXELS = 1536 * 1536
+
     # [추가] 생성자에서 AppContext를 받도록 수정
     def __init__(self, app_context: 'AppContext'):
         self.app_context = app_context
@@ -178,6 +180,46 @@ class APIService:
                 f"(target={self._normalize_hiresfix_assist_target(target)}^2)"
             )
 
+    @staticmethod
+    def _webui_scaled_dimension(value: Any, scale: float) -> int:
+        try:
+            source = float(value)
+        except (TypeError, ValueError):
+            source = 1.0
+        return max(1, int(math.floor((source * scale) + 0.5)))
+
+    def _fit_webui_hiresfix_assist_scale(self, payload: Dict[str, Any], scale: float) -> float:
+        final_width = self._webui_scaled_dimension(payload.get("width"), scale)
+        final_height = self._webui_scaled_dimension(payload.get("height"), scale)
+        if final_width * final_height <= self.WEBUI_HIRES_ASSIST_MAX_PIXELS:
+            return scale
+
+        scale_tenths = max(10, int(math.floor((scale * 10) + 1e-9)) - 1)
+        while scale_tenths > 10:
+            candidate = scale_tenths / 10
+            final_width = self._webui_scaled_dimension(payload.get("width"), candidate)
+            final_height = self._webui_scaled_dimension(payload.get("height"), candidate)
+            if final_width * final_height <= self.WEBUI_HIRES_ASSIST_MAX_PIXELS:
+                return candidate
+            scale_tenths -= 1
+        return 1.0
+
+    def _apply_webui_hiresfix_assist_scale_limit(self, payload: Dict[str, Any], params: Dict[str, Any]) -> None:
+        if not self._coerce_bool_param(params.get("webui_hiresfix_assist"), False):
+            return
+        scale = self._coerce_float_param(params.get("hr_scale"), 2.0)
+        adjusted = self._fit_webui_hiresfix_assist_scale(payload, scale)
+        if adjusted == scale:
+            return
+        payload["hr_scale"] = adjusted
+        final_width = self._webui_scaled_dimension(payload.get("width"), adjusted)
+        final_height = self._webui_scaled_dimension(payload.get("height"), adjusted)
+        print(
+            f"🧩 [WEBUI Hiresfix Assist] HR Scale 제한: "
+            f"{scale:.1f} → {adjusted:.1f} "
+            f"({payload.get('width')}x{payload.get('height')} → {final_width}x{final_height})"
+        )
+
     def _apply_webui_hires_params(self, payload: Dict[str, Any], params: Dict[str, Any], *, is_img2img: bool) -> None:
         """Apply AUTOMATIC1111 txt2img Hires.fix fields to a payload."""
         if is_img2img:
@@ -203,6 +245,7 @@ class APIService:
             "hr_additional_modules": params.get("hr_additional_modules") or ["Use same choices"],
             "hr_cfg": self._coerce_float_param(params.get("hr_cfg"), 7.0),
         })
+        self._apply_webui_hiresfix_assist_scale_limit(payload, params)
 
         # Hires Preset Swap 결과(메인 스레드에서 사전 계산됨)를 payload에 통과.
         # 비어있으면 키 자체를 보내지 않아 Forge가 메인 프롬프트를 재사용하도록 함.

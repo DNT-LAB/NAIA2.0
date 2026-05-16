@@ -1198,10 +1198,33 @@ function getWebUiHiresfixAssistBaseResolution() {
   return nearestWebUiHiresfixAssistResolution(selected.width, selected.height, state.target);
 }
 
+function webUiHiresFinalSize(base, scale) {
+  return {
+    width: Math.max(1, Math.round(base.width * scale)),
+    height: Math.max(1, Math.round(base.height * scale)),
+  };
+}
+
+function fitWebUiHiresfixAssistScale(base, scale) {
+  const maxPixels = 1536 * 1536;
+  const original = webUiHiresFinalSize(base, scale);
+  if (original.width * original.height <= maxPixels) return scale;
+
+  let tenths = Math.max(10, Math.floor(scale * 10 + 1e-9) - 1);
+  while (tenths > 10) {
+    const candidate = tenths / 10;
+    const size = webUiHiresFinalSize(base, candidate);
+    if (size.width * size.height <= maxPixels) return candidate;
+    tenths -= 1;
+  }
+  return 1;
+}
+
 function updateWebUiHrScaleHint() {
   const hint = $('webuiHrScaleHint');
   if (!hint) return;
   const base = getWebUiHiresfixAssistBaseResolution();
+  const assistState = getWebUiHiresfixAssistState();
   const scale = Number($('pHrScale')?.value || 2);
   if (!base || !Number.isFinite(scale) || scale <= 0) {
     hint.textContent = '';
@@ -1209,12 +1232,14 @@ function updateWebUiHrScaleHint() {
     hint.classList.remove('warning');
     return;
   }
-  const finalWidth = Math.max(1, Math.round(base.width * scale));
-  const finalHeight = Math.max(1, Math.round(base.height * scale));
+  const effectiveScale = assistState.enabled ? fitWebUiHiresfixAssistScale(base, scale) : scale;
+  const {width: finalWidth, height: finalHeight} = webUiHiresFinalSize(base, effectiveScale);
   const text = `(${base.width} x ${base.height} to ${finalWidth} x ${finalHeight})`;
   const exceedsSafeArea = finalWidth * finalHeight > 1536 * 1536;
   hint.textContent = text;
-  hint.title = text;
+  hint.title = effectiveScale === scale
+    ? text
+    : `${text} / HR Scale ${scale.toFixed(1)} -> ${effectiveScale.toFixed(1)}`;
   hint.classList.toggle('warning', exceedsSafeArea);
 }
 

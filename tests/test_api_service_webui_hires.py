@@ -113,6 +113,47 @@ def test_webui_hiresfix_assist_uses_64_multiple_ratio_match():
     assert payload["height"] % 64 == 0
 
 
+def test_webui_hiresfix_assist_reduces_hr_scale_until_final_size_is_safe():
+    service = APIService(app_context=None)
+    payload = {"width": 832, "height": 1216}
+
+    service._apply_webui_hires_params(
+        payload,
+        {
+            "enable_hr": True,
+            "hr_scale": 3.0,
+            "webui_hiresfix_assist": True,
+            "webui_hiresfix_assist_target": 512,
+        },
+        is_img2img=False,
+    )
+
+    assert payload["width"] == 448
+    assert payload["height"] == 640
+    assert payload["hr_scale"] == 2.8
+    assert round(payload["width"] * payload["hr_scale"]) == 1254
+    assert round(payload["height"] * payload["hr_scale"]) == 1792
+    assert 1254 * 1792 <= 1536 * 1536
+
+
+def test_webui_hiresfix_assist_keeps_safe_hr_scale():
+    service = APIService(app_context=None)
+    payload = {"width": 832, "height": 1216}
+
+    service._apply_webui_hires_params(
+        payload,
+        {
+            "enable_hr": True,
+            "hr_scale": 2.7,
+            "webui_hiresfix_assist": True,
+            "webui_hiresfix_assist_target": 512,
+        },
+        is_img2img=False,
+    )
+
+    assert payload["hr_scale"] == 2.7
+
+
 def test_webui_hiresfix_assist_requires_hires_enabled():
     service = APIService(app_context=None)
     payload = {"width": 1024, "height": 1024}

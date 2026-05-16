@@ -2209,6 +2209,50 @@ def test_artist_thumb_nai_data_load_syncs_missing_favorite_thumbnail_cache(tmp_p
     assert cache["items"]["c"]["thumbnail"] == "thumb_c"
 
 
+def test_artist_thumb_anima_mode_uses_configured_local_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path("data").mkdir()
+    Path("data/artist_thumbnail_anima.json").write_text(
+        json.dumps({"a": ["thumb_a"]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    bridge = RemoteBridge(_AppContext())
+    bridge._artist_thumb_artist_weights = lambda: {"a": 10}
+
+    state = bridge._build_artist_thumb_state()
+    anima = next(mode for mode in state["modes"] if mode["key"] == "ANIMA-7000")
+
+    assert anima["available"] is True
+    assert anima["size_mb"] >= 0
+    assert bridge._load_artist_thumb_data("ANIMA-7000") == {"a": ["thumb_a"]}
+
+
+def test_artist_thumb_options_are_scoped_by_api_mode(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    bridge = RemoteBridge(_AppContext())
+
+    bridge._save_artist_thumb_options({
+        "mode": "NAI",
+        "prefix": "nai prefix",
+        "postfix": "nai postfix",
+    })
+    bridge._save_artist_thumb_options({
+        "mode": "WEBUI",
+        "prefix": "webui prefix",
+        "postfix": "webui postfix",
+    })
+
+    assert bridge._load_artist_thumb_options("NAI")["prefix"] == "nai prefix"
+    assert bridge._load_artist_thumb_options("NAI")["postfix"] == "nai postfix"
+    assert bridge._load_artist_thumb_options("WEBUI")["prefix"] == "webui prefix"
+    assert bridge._load_artist_thumb_options("WEBUI")["postfix"] == "webui postfix"
+
+    data = json.loads(Path("artist_thumb/generate_options.json").read_text(encoding="utf-8"))
+    assert data["modes"]["NAI"]["prefix"] == "nai prefix"
+    assert data["modes"]["WEBUI"]["postfix"] == "webui postfix"
+    assert data["modes"]["COMFYUI"] == {"prefix": "", "postfix": ""}
+
+
 def test_artist_thumb_cached_nai_data_syncs_missing_favorite_thumbnail_cache(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     Path("artist_thumb").mkdir()

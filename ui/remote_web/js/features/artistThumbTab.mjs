@@ -9,6 +9,7 @@ export function createArtistThumbController({
   setPromptFields,
   getGenerationMode = () => 'NAI',
   isComfyUiAnimaMode = () => false,
+  isAnimaArtistMode = null,
 }) {
   const modeEl = document.getElementById('artistThumbMode');
   const filterEl = document.getElementById('artistThumbFilter');
@@ -94,6 +95,8 @@ export function createArtistThumbController({
   let artistQueueMode = '';
   let artistQueueSerial = 0;
   let activeArtistQueueEntry = null;
+  let activeOptionsMode = '';
+  let optionsSaveSerial = 0;
 
   function setStatus(message, tone = '') {
     if (!statusEl) return;
@@ -125,8 +128,20 @@ export function createArtistThumbController({
     return String(getGenerationMode?.() || 'NAI').trim().toUpperCase();
   }
 
+  function currentOptionsMode() {
+    const mode = currentGenerationMode();
+    return ['NAI', 'WEBUI', 'COMFYUI'].includes(mode) ? mode : 'NAI';
+  }
+
   function escapeStableDiffusionArtistName(artist) {
     return String(artist || '').replace(/[()]/g, '\\$&');
+  }
+
+  function usesAnimaArtistSyntax() {
+    const checker = typeof isAnimaArtistMode === 'function'
+      ? isAnimaArtistMode
+      : isComfyUiAnimaMode;
+    return Boolean(checker?.());
   }
 
   function baseArtistPrompt(artist) {
@@ -135,7 +150,7 @@ export function createArtistThumbController({
     const generationMode = currentGenerationMode();
     if (generationMode === 'NAI') return `artist:${name}`;
     const escaped = escapeStableDiffusionArtistName(name);
-    if (generationMode === 'COMFYUI' && isComfyUiAnimaMode?.()) return `@${escaped}`;
+    if (usesAnimaArtistSyntax()) return `@${escaped}`;
     return escaped;
   }
 
@@ -160,7 +175,7 @@ export function createArtistThumbController({
       if (!formattedWeight) return baseArtistPrompt(name);
       if (currentGenerationMode() === 'NAI') return `${formattedWeight}::artist:${name} ::`;
       const escaped = escapeStableDiffusionArtistName(name);
-      if (currentGenerationMode() === 'COMFYUI' && isComfyUiAnimaMode?.()) {
+      if (usesAnimaArtistSyntax()) {
         return `(@${escaped}:${formattedWeight})`;
       }
       return `(${escaped}:${formattedWeight})`;
@@ -170,6 +185,7 @@ export function createArtistThumbController({
   }
 
   function syncPromptFormat() {
+    syncOptionsForCurrentMode();
     if (!selected || !positiveEl) return;
     const nextValue = formatArtistPrompt(selected.artist);
     if (!positiveAutoValue || positiveEl.value === positiveAutoValue) {
@@ -524,14 +540,7 @@ export function createArtistThumbController({
       `).join('');
       filterEl.value = filters.some(filter => filter.key === previous) ? previous : 'all';
     }
-    if (prefixEl && !prefixEl.dataset.seeded) {
-      prefixEl.value = state.options?.prefix || '';
-      prefixEl.dataset.seeded = '1';
-    }
-    if (postfixEl && !postfixEl.dataset.seeded) {
-      postfixEl.value = state.options?.postfix || '';
-      postfixEl.dataset.seeded = '1';
-    }
+    syncOptionsForCurrentMode();
     setSummary(`${Number(state.artist_count || 0).toLocaleString()} artists`);
     updateDownloadUi();
     updateArtistActionAvailability();
@@ -1017,15 +1026,135 @@ export function createArtistThumbController({
     window.addEventListener('resize', closeContextMenu);
   }
 
-  function currentOptionsPayload() {
+  function ensureOptionsState() {
+    if (!state) return null;
+    const source = state.options && typeof state.options === 'object' ? state.options : {};
+    const legacy = {
+      prefix: String(source.prefix || ''),
+      postfix: String(source.postfix || ''),
+    };
+    const rawModes = source.modes && typeof source.modes === 'object' ? source.modes : {};
+    const modes = {};
+    for (const mode of ['NAI', 'WEBUI', 'COMFYUI']) {
+      const values = rawModes[mode] && typeof rawModes[mode] === 'object' ? rawModes[mode] : {};
+      modes[mode] = {
+        prefix: Object.prototype.hasOwnProperty.call(values, 'prefix') ? String(values.prefix || '') : legacy.prefix,
+        postfix: Object.prototype.hasOwnProperty.call(values, 'postfix') ? String(values.postfix || '') : legacy.postfix,
+      };
+    }
+    const mode = ['NAI', 'WEBUI', 'COMFYUI'].includes(String(source.mode || '').toUpperCase())
+      ? String(source.mode || '').toUpperCase()
+      : currentOptionsMode();
+    state.options = {
+      ...source,
+      version: 2,
+      mode,
+      prefix: modes[mode]?.prefix || '',
+      postfix: modes[mode]?.postfix || '',
+      modes,
+    };
+    return state.options;
+  }
+
+  function readOptionFields() {
     return {
       prefix: prefixEl?.value || '',
       postfix: postfixEl?.value || '',
     };
   }
 
+  function writeOptionFields(values) {
+    if (prefixEl) {
+      prefixEl.value = values?.prefix || '';
+      prefixEl.dataset.seeded = '1';
+    }
+    if (postfixEl) {
+      postfixEl.value = values?.postfix || '';
+      postfixEl.dataset.seeded = '1';
+    }
+  }
+
+  function optionValuesForMode(mode) {
+    const options = ensureOptionsState();
+    return options?.modes?.[mode] || {prefix: '', postfix: ''};
+  }
+
+  function cacheOptionFields(mode, values = readOptionFields()) {
+    const modeKey = ['NAI', 'WEBUI', 'COMFYUI'].includes(String(mode || '').toUpperCase())
+      ? String(mode || '').toUpperCase()
+      : currentOptionsMode();
+    const options = ensureOptionsState();
+    if (!options) return values;
+    options.modes[modeKey] = {
+      prefix: String(values.prefix || ''),
+      postfix: String(values.postfix || ''),
+    };
+    if (options.mode === modeKey) {
+      options.prefix = options.modes[modeKey].prefix;
+      options.postfix = options.modes[modeKey].postfix;
+    }
+    return options.modes[modeKey];
+  }
+
+  function currentOptionsPayload(mode = activeOptionsMode || currentOptionsMode(), values = readOptionFields()) {
+    return {
+      mode,
+      prefix: values.prefix || '',
+      postfix: values.postfix || '',
+    };
+  }
+
+  async function saveOptionsForMode(mode = activeOptionsMode || currentOptionsMode(), values = readOptionFields()) {
+    const serial = ++optionsSaveSerial;
+    const payload = currentOptionsPayload(mode, values);
+    cacheOptionFields(payload.mode, payload);
+    const saved = await postJson('/api/artist-thumb/options', payload);
+    if (saved && typeof saved === 'object') {
+      const activeMode = activeOptionsMode || currentOptionsMode();
+      const activeValues = readOptionFields();
+      const savedModes = saved.modes && typeof saved.modes === 'object' ? {...saved.modes} : {};
+      if (payload.mode !== activeMode || serial !== optionsSaveSerial) {
+        savedModes[activeMode] = {
+          ...(savedModes[activeMode] && typeof savedModes[activeMode] === 'object' ? savedModes[activeMode] : {}),
+          prefix: activeValues.prefix || '',
+          postfix: activeValues.postfix || '',
+        };
+      }
+      state = {
+        ...(state || {}),
+        options: {
+          ...saved,
+          modes: savedModes,
+        },
+      };
+      ensureOptionsState();
+      if (payload.mode !== activeMode || serial !== optionsSaveSerial) {
+        cacheOptionFields(activeMode, activeValues);
+      }
+    }
+    return saved;
+  }
+
   function saveCurrentOptions() {
-    return postJson('/api/artist-thumb/options', currentOptionsPayload());
+    return saveOptionsForMode(activeOptionsMode || currentOptionsMode(), readOptionFields());
+  }
+
+  function syncOptionsForCurrentMode() {
+    if (!state || (!prefixEl && !postfixEl)) return;
+    const nextMode = currentOptionsMode();
+    if (!activeOptionsMode) {
+      writeOptionFields(optionValuesForMode(nextMode));
+      activeOptionsMode = nextMode;
+      return;
+    }
+    if (activeOptionsMode === nextMode) return;
+    const previousMode = activeOptionsMode;
+    const previousValues = readOptionFields();
+    cacheOptionFields(previousMode, previousValues);
+    saveOptionsForMode(previousMode, previousValues)
+      .catch(error => console.warn('Artist Thumb options save failed', error));
+    writeOptionFields(optionValuesForMode(nextMode));
+    activeOptionsMode = nextMode;
   }
 
   function setArtistWeight(value) {

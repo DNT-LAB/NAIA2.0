@@ -551,7 +551,13 @@ class RemoteBridge(QObject):
             "path": Path("data/artist_thumbnail.json"),
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail",
         },
+        "ANIMA-7000": {
+            "label": "ANIMA-7000",
+            "path": Path("data/artist_thumbnail_anima.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima.json",
+        },
     }
+    ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
     DEFAULT_RESOLUTIONS = [
         "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
         "1088 x 960", "1152 x 896", "1216 x 832",
@@ -2717,6 +2723,41 @@ class RemoteBridge(QObject):
     def _artist_thumb_options_path(self) -> Path:
         return Path("artist_thumb") / "generate_options.json"
 
+    def _artist_thumb_options_mode(self, mode: str = "") -> str:
+        mode_key = str(mode or "").strip().upper()
+        if mode_key in self.ARTIST_THUMB_OPTION_MODES:
+            return mode_key
+        current_mode = str(self._current_api_mode() or "").strip().upper()
+        if current_mode in self.ARTIST_THUMB_OPTION_MODES:
+            return current_mode
+        return "NAI"
+
+    def _normalize_artist_thumb_options(self, data, mode: str = "") -> dict:
+        source = data if isinstance(data, dict) else {}
+        legacy = {
+            "prefix": str(source.get("prefix") or ""),
+            "postfix": str(source.get("postfix") or ""),
+        }
+        raw_modes = source.get("modes") if isinstance(source.get("modes"), dict) else {}
+        modes = {}
+        for mode_key in self.ARTIST_THUMB_OPTION_MODES:
+            values = raw_modes.get(mode_key) if isinstance(raw_modes.get(mode_key), dict) else {}
+            prefix = values.get("prefix") if "prefix" in values else legacy["prefix"]
+            postfix = values.get("postfix") if "postfix" in values else legacy["postfix"]
+            modes[mode_key] = {
+                "prefix": str(prefix or ""),
+                "postfix": str(postfix or ""),
+            }
+        mode_key = self._artist_thumb_options_mode(mode)
+        selected = modes.get(mode_key, modes["NAI"])
+        return {
+            "version": 2,
+            "mode": mode_key,
+            "prefix": selected["prefix"],
+            "postfix": selected["postfix"],
+            "modes": modes,
+        }
+
     def _artist_thumb_favorite_thumbnail_cache_path(self) -> Path:
         return Path("artist_thumb") / "favorite_thumbnail_cache.json"
 
@@ -2870,34 +2911,38 @@ class RemoteBridge(QObject):
             })
         return filters
 
-    def _load_artist_thumb_options(self) -> dict:
+    def _load_artist_thumb_options(self, mode: str = "") -> dict:
         path = self._artist_thumb_options_path()
         if not path.exists():
-            return {"prefix": "", "postfix": ""}
+            return self._normalize_artist_thumb_options({}, mode)
         try:
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            if not isinstance(data, dict):
-                data = {}
-            return {
-                "prefix": str(data.get("prefix") or ""),
-                "postfix": str(data.get("postfix") or ""),
-            }
+            return self._normalize_artist_thumb_options(data, mode)
         except Exception as e:
             print(f"🌐 Remote: artist thumb 옵션 로드 실패 — {e}")
-            return {"prefix": "", "postfix": ""}
+            return self._normalize_artist_thumb_options({}, mode)
 
     def _save_artist_thumb_options(self, options: dict) -> dict:
-        current = self._load_artist_thumb_options()
+        requested_mode = options.get("mode") if isinstance(options, dict) else ""
+        mode = self._artist_thumb_options_mode(requested_mode)
+        current = self._load_artist_thumb_options(mode)
         if isinstance(options, dict):
+            mode_values = current["modes"].setdefault(mode, {"prefix": "", "postfix": ""})
             if "prefix" in options:
-                current["prefix"] = str(options.get("prefix") or "")
+                mode_values["prefix"] = str(options.get("prefix") or "")
             if "postfix" in options:
-                current["postfix"] = str(options.get("postfix") or "")
+                mode_values["postfix"] = str(options.get("postfix") or "")
+        selected = current["modes"].get(mode, {"prefix": "", "postfix": ""})
+        current["version"] = 2
+        current["mode"] = mode
+        current["prefix"] = selected.get("prefix", "")
+        current["postfix"] = selected.get("postfix", "")
         path = self._artist_thumb_options_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as f:
             json.dump(current, f, ensure_ascii=False, indent=2)
+            f.write("\n")
         return current
 
     def _normalize_artist_thumb_thumbnail_cache(self, data) -> dict:

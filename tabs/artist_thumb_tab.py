@@ -64,6 +64,23 @@ from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from artist_dictionary import artist_dict
 
 
+ARTIST_THUMB_MODES = {
+    "NAID4.5F-31000": {
+        "path": Path("data/artist_thumbnail_nai.json"),
+        "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID4.5_artist_thumbnail_31000/artist_thumbnail_nai",
+    },
+    "NoobNAI-XL-33000": {
+        "path": Path("data/artist_thumbnail.json"),
+        "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail",
+    },
+    "ANIMA-7000": {
+        "path": Path("data/artist_thumbnail_anima.json"),
+        "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima.json",
+    },
+}
+ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
+
+
 class StableImageWidget(QWidget):
     """
     이미지 표시 위젯 - Assets Tab에서 가져옴
@@ -220,10 +237,9 @@ class ThumbnailDownloadWorker(QThread):
         self.target_path = target_path
         self._cancelled = False  # 취소 플래그
 
-        # HuggingFace URLs
         self.urls = {
-            "NAID4.5F-31000": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAID4.5_artist_thumbnail_31000/artist_thumbnail_nai",
-            "NoobNAI-XL-33000": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail"
+            mode: str(info.get("url") or "")
+            for mode, info in ARTIST_THUMB_MODES.items()
         }
 
     def cancel(self):
@@ -235,7 +251,10 @@ class ThumbnailDownloadWorker(QThread):
         try:
             url = self.urls.get(self.mode)
             if not url:
-                self.download_finished.emit(False, f"알 수 없는 모드: {self.mode}")
+                if self.mode in self.urls:
+                    self.download_finished.emit(False, f"다운로드 URL이 아직 설정되지 않았습니다: {self.mode}")
+                else:
+                    self.download_finished.emit(False, f"알 수 없는 모드: {self.mode}")
                 return
                 
             self.progress_updated.emit(0, "다운로드 준비 중...")
@@ -315,7 +334,12 @@ def generate_artist_randomizer_string(rule_data, artist_list=None):
     result_list, _ = generate_artist_randomizer_string_with_selection(rule_data, artist_list, [])
     return result_list
 
-def generate_artist_randomizer_string_with_selection(rule_data, artist_list=None, favorite_artists=None):
+def generate_artist_randomizer_string_with_selection(
+    rule_data,
+    artist_list=None,
+    favorite_artists=None,
+    anima_artist_syntax=False,
+):
     """
     아티스트 랜더마이저 규칙에 따라 문자열 생성 및 선택된 아티스트 반환
     
@@ -479,6 +503,8 @@ def generate_artist_randomizer_string_with_selection(rule_data, artist_list=None
             # 로컬 모드: f"({랜덤아이템}:{가중치})"
             # 괄호 이스케이프 처리
             escaped_item = selected_item.replace('(', '\\(').replace(')', '\\)')
+            if anima_artist_syntax and is_artist:
+                escaped_item = f"@{escaped_item}"
             result_str = f"({escaped_item}:{weight})"
         
         results.append(result_str)
@@ -1560,6 +1586,7 @@ class ArtistThumbModule(BaseTabModule):
         self.artist_data = {}
         self.nai_data = {}
         self.noob_data = {}
+        self.thumbnail_mode_data = {}
         self.artist_list = []
         self.current_artist = None
         self.search_popup = None      # ✅ QListWidget 팝업
@@ -1569,6 +1596,8 @@ class ArtistThumbModule(BaseTabModule):
         self.mode_placeholder_text = "모드를 선택하세요..."
         self._previous_mode = self.mode_placeholder_text
         self._download_canceled = False  # 다운로드 취소 플래그
+        self._generate_options_mode = "NAI"
+        self._last_auto_artist_tag_by_mode = {}
         
         # 관심/제외 작가 리스트
         self.favorite_artists = []
@@ -1605,8 +1634,7 @@ class ArtistThumbModule(BaseTabModule):
         self.mode_combo.clear()
         self.mode_combo.addItems([
             self.mode_placeholder_text,
-            "NAID4.5F-31000",
-            "NoobNAI-XL-33000"
+            *ARTIST_THUMB_MODES.keys(),
         ])
         self.mode_combo.setCurrentText(self.mode_placeholder_text)
         self.mode_combo.blockSignals(False)
@@ -1671,6 +1699,7 @@ class ArtistThumbModule(BaseTabModule):
         
         # 관심/제외 작가 목록 로드
         self._load_artist_lists()
+        self._subscribe_api_mode_changed()
         
         # artist_dict만으로 기본 리스트 초기화
         if artist_dict:
@@ -1749,7 +1778,7 @@ class ArtistThumbModule(BaseTabModule):
         """)
         
         # 초기에는 기본 항목만 추가 (파일 체크는 탭 활성화 시)
-        self.mode_combo.addItems([self.mode_placeholder_text, "NAID4.5F-31000", "NoobNAI-XL-33000"])
+        self.mode_combo.addItems([self.mode_placeholder_text, *ARTIST_THUMB_MODES.keys()])
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
         layout.addWidget(self.mode_combo)
 
@@ -2390,28 +2419,18 @@ class ArtistThumbModule(BaseTabModule):
         if mode == self.mode_placeholder_text:
             return
 
-        if mode == "NAID4.5F-31000" and self.nai_data:
+        if mode in self.thumbnail_mode_data:
             self.current_mode = mode
-            self.artist_data = self.nai_data
-            self._previous_mode = mode
-            self._update_artist_list_from_data()
-            return
-
-        if mode == "NoobNAI-XL-33000" and self.noob_data:
-            self.current_mode = mode
-            self.artist_data = self.noob_data
+            self.artist_data = self.thumbnail_mode_data[mode]
             self._previous_mode = mode
             self._update_artist_list_from_data()
             return
 
         # 파일 경로 결정
-        data_path = Path("data")
-        if mode == "NAID4.5F-31000":
-            file_path = data_path / "artist_thumbnail_nai.json"
-        elif mode == "NoobNAI-XL-33000":
-            file_path = data_path / "artist_thumbnail.json"
-        else:
+        mode_info = ARTIST_THUMB_MODES.get(mode)
+        if not mode_info:
             return
+        file_path = Path(mode_info["path"])
 
         # 파일 존재 확인
         if not file_path.exists():
@@ -2480,12 +2499,9 @@ class ArtistThumbModule(BaseTabModule):
         if success:
             QMessageBox.information(self.widget, "다운로드 완료", message)
             # 파일 로드
-            data_path = Path("data")
-            if self.current_mode == "NAID4.5F-31000":
-                file_path = data_path / "artist_thumbnail_nai.json"
-            else:
-                file_path = data_path / "artist_thumbnail.json"
-            self._load_thumbnail_data(self.current_mode, file_path)
+            mode_info = ARTIST_THUMB_MODES.get(self.current_mode)
+            if mode_info:
+                self._load_thumbnail_data(self.current_mode, Path(mode_info["path"]))
         else:
             QMessageBox.critical(self.widget, "다운로드 실패", f"다운로드 중 오류가 발생했습니다:\n{message}")
             # 실패 시 콤보박스 및 current_mode 롤백
@@ -2548,12 +2564,12 @@ class ArtistThumbModule(BaseTabModule):
 
         # 데이터 저장 + 상태 갱신
         mode = self._load_mode
+        self.thumbnail_mode_data[mode] = data
         if mode == "NAID4.5F-31000":
             self.nai_data = data
-            self.artist_data = self.nai_data
-        else:
+        elif mode == "NoobNAI-XL-33000":
             self.noob_data = data
-            self.artist_data = self.noob_data
+        self.artist_data = data
 
         self.current_mode = mode
         self._previous_mode = mode
@@ -2654,6 +2670,7 @@ class ArtistThumbModule(BaseTabModule):
             return
         
         # 이제 리스트에는 아티스트명만 있으므로 직접 사용
+        previous_artist = self.current_artist
         artist_name = current_item.text()
         self.current_artist = artist_name
 
@@ -2723,11 +2740,20 @@ class ArtistThumbModule(BaseTabModule):
                 print(f"🎲 랜더마이저 활성 상태 - 아티스트 태그 자동 추가 비활성")
             else:
                 current_positive = self.positive_prompt.toPlainText()
-                # 기존 아티스트 태그 제거
-                lines = current_positive.split(',')
-                lines = [line.strip() for line in lines if not line.strip().startswith('artist:')]
+                current_mode = self._current_options_mode()
+                previous_auto_tag = self._last_auto_artist_tag_by_mode.get(current_mode, "")
+                lines = [line.strip() for line in current_positive.split(',')]
+                if previous_auto_tag:
+                    lines = [line for line in lines if line != previous_auto_tag]
+                elif previous_artist:
+                    previous_tags = set(self._artist_prompt_tag_variants(previous_artist))
+                    lines = [line for line in lines if line not in previous_tags]
+                else:
+                    lines = [line for line in lines if not line.startswith('artist:')]
+                lines = [line for line in lines if line]
                 # 새 아티스트 태그 추가
-                artist_tag = f"artist:{artist_name}"
+                artist_tag = self._format_artist_prompt_tag(artist_name)
+                self._last_auto_artist_tag_by_mode[current_mode] = artist_tag
                 if lines:
                     self.positive_prompt.setPlainText(f"{artist_tag}, {', '.join(lines)}")
                 else:
@@ -3049,6 +3075,9 @@ class ArtistThumbModule(BaseTabModule):
     
     def cleanup(self):
         """탭 종료 시 정리"""
+        self._save_generate_options()
+        self._unsubscribe_api_mode_changed()
+
         # 연속생성 중지
         if hasattr(self, 'continuous_generation_checkbox'):
             self.continuous_generation_checkbox.setChecked(False)
@@ -3121,35 +3150,124 @@ class ArtistThumbModule(BaseTabModule):
             for artist in self.banned_artists:
                 f.write(f"{artist}\n")
     
-    def _load_generate_options(self):
+    def _current_options_mode(self, mode: str = "") -> str:
+        mode_key = str(mode or "").strip().upper()
+        if mode_key in ARTIST_THUMB_OPTION_MODES:
+            return mode_key
+        current_mode = str(self._current_api_mode() or "").strip().upper()
+        if current_mode in ARTIST_THUMB_OPTION_MODES:
+            return current_mode
+        return "NAI"
+
+    def _normalize_generate_options(self, data, mode: str = "") -> dict:
+        source = data if isinstance(data, dict) else {}
+        legacy = {
+            'prefix': str(source.get('prefix') or ''),
+            'postfix': str(source.get('postfix') or ''),
+        }
+        raw_modes = source.get('modes') if isinstance(source.get('modes'), dict) else {}
+        modes = {}
+        for mode_key in ARTIST_THUMB_OPTION_MODES:
+            values = raw_modes.get(mode_key) if isinstance(raw_modes.get(mode_key), dict) else {}
+            prefix = values.get('prefix') if 'prefix' in values else legacy['prefix']
+            postfix = values.get('postfix') if 'postfix' in values else legacy['postfix']
+            modes[mode_key] = {
+                'prefix': str(prefix or ''),
+                'postfix': str(postfix or ''),
+            }
+        mode_key = self._current_options_mode(mode)
+        selected = modes.get(mode_key, modes['NAI'])
+        return {
+            'version': 2,
+            'mode': mode_key,
+            'prefix': selected['prefix'],
+            'postfix': selected['postfix'],
+            'modes': modes,
+        }
+
+    def _load_generate_options(self, mode: str = ""):
         """생성 옵션 파일 로드"""
+        mode_key = self._current_options_mode(mode)
+        options = self._normalize_generate_options({}, mode_key)
         options_file = os.path.join('artist_thumb', 'generate_options.json')
         if os.path.exists(options_file):
             try:
                 with open(options_file, 'r', encoding='utf-8') as f:
-                    options = json.load(f)
-                    if hasattr(self, 'prefix_textedit'):
-                        self.prefix_textedit.setPlainText(options.get('prefix', ''))
-                    if hasattr(self, 'postfix_textedit'):
-                        self.postfix_textedit.setPlainText(options.get('postfix', ''))
+                    options = self._normalize_generate_options(json.load(f), mode_key)
             except Exception as e:
                 print(f"생성 옵션 로드 실패: {e}")
+        if hasattr(self, 'prefix_textedit'):
+            self.prefix_textedit.setPlainText(options.get('prefix', ''))
+        if hasattr(self, 'postfix_textedit'):
+            self.postfix_textedit.setPlainText(options.get('postfix', ''))
+        self._generate_options_mode = mode_key
     
-    def _save_generate_options(self):
+    def _save_generate_options(self, mode: str = ""):
         """생성 옵션을 파일에 저장"""
+        if not (hasattr(self, 'prefix_textedit') or hasattr(self, 'postfix_textedit')):
+            return
         os.makedirs('artist_thumb', exist_ok=True)
         options_file = os.path.join('artist_thumb', 'generate_options.json')
-        
-        options = {
-            'prefix': self.prefix_textedit.toPlainText().strip() if hasattr(self, 'prefix_textedit') else '',
-            'postfix': self.postfix_textedit.toPlainText().strip() if hasattr(self, 'postfix_textedit') else ''
-        }
-        
+        mode_key = self._current_options_mode(mode or self._generate_options_mode)
+        current = {}
+        if os.path.exists(options_file):
+            try:
+                with open(options_file, 'r', encoding='utf-8') as f:
+                    current = json.load(f)
+            except Exception as e:
+                print(f"생성 옵션 기존 파일 로드 실패: {e}")
+        options = self._normalize_generate_options(current, mode_key)
+        mode_values = options['modes'].setdefault(mode_key, {'prefix': '', 'postfix': ''})
+        if hasattr(self, 'prefix_textedit'):
+            mode_values['prefix'] = self.prefix_textedit.toPlainText().strip()
+        if hasattr(self, 'postfix_textedit'):
+            mode_values['postfix'] = self.postfix_textedit.toPlainText().strip()
+        selected = options['modes'][mode_key]
+        options['version'] = 2
+        options['mode'] = mode_key
+        options['prefix'] = selected.get('prefix', '')
+        options['postfix'] = selected.get('postfix', '')
+
         try:
             with open(options_file, 'w', encoding='utf-8') as f:
                 json.dump(options, f, ensure_ascii=False, indent=2)
+                f.write("\n")
         except Exception as e:
             print(f"생성 옵션 저장 실패: {e}")
+
+    def _subscribe_api_mode_changed(self):
+        try:
+            if not self.app_context or not hasattr(self.app_context, 'subscribe'):
+                return
+            subs = getattr(self.app_context, 'subscribers', {}).get('api_mode_changed', [])
+            if self._on_api_mode_changed not in subs:
+                self.app_context.subscribe('api_mode_changed', self._on_api_mode_changed)
+        except Exception as e:
+            print(f"API 모드 변경 구독 실패: {e}")
+
+    def _unsubscribe_api_mode_changed(self):
+        try:
+            if not self.app_context:
+                return
+            if hasattr(self.app_context, 'unsubscribe'):
+                self.app_context.unsubscribe('api_mode_changed', self._on_api_mode_changed)
+                return
+            subs = getattr(self.app_context, 'subscribers', {}).get('api_mode_changed', [])
+            while self._on_api_mode_changed in subs:
+                subs.remove(self._on_api_mode_changed)
+        except Exception as e:
+            print(f"API 모드 변경 구독 해제 실패: {e}")
+
+    def _on_api_mode_changed(self, payload=None):
+        if not (hasattr(self, 'prefix_textedit') or hasattr(self, 'postfix_textedit')):
+            return
+        data = payload if isinstance(payload, dict) else {}
+        old_mode = self._current_options_mode(data.get('old_mode') or self._generate_options_mode)
+        new_mode = self._current_options_mode(data.get('new_mode'))
+        if old_mode == new_mode:
+            return
+        self._save_generate_options(old_mode)
+        self._load_generate_options(new_mode)
     
     def _open_gallery_window(self):
         """갤러리 윈도우 열기 - filter_combo 옵션에 따라 다른 아티스트 리스트 표시"""
@@ -3600,8 +3718,60 @@ class ArtistThumbModule(BaseTabModule):
         
         # 문자열과 선택된 아티스트 생성
         result_list, selected_artists = generate_artist_randomizer_string_with_selection(
-            rule_data, artist_list, favorite_artists
+            rule_data,
+            artist_list,
+            favorite_artists,
+            anima_artist_syntax=self._uses_anima_artist_syntax(),
         )
         
         # ", "로 연결하여 반환
         return ", ".join(result_list), selected_artists
+
+    def _current_api_mode(self) -> str:
+        try:
+            if self.app_context and hasattr(self.app_context, 'get_api_mode'):
+                return str(self.app_context.get_api_mode() or '').upper()
+            return str(getattr(self.app_context, 'current_api_mode', '') or '').upper()
+        except Exception:
+            return ''
+
+    def _current_model_name(self) -> str:
+        try:
+            main_window = getattr(self.app_context, 'main_window', None)
+            model_combo = getattr(main_window, 'model_combo', None)
+            if model_combo is not None:
+                return str(model_combo.currentText() or '')
+        except Exception:
+            pass
+        return ''
+
+    def _uses_anima_artist_syntax(self) -> bool:
+        mode = self._current_api_mode()
+        if mode == "WEBUI":
+            return "anima" in self._current_model_name().lower()
+        if mode == "COMFYUI":
+            try:
+                main_window = getattr(self.app_context, 'main_window', None)
+                anima_radio = getattr(main_window, 'anima_radio', None)
+                return bool(anima_radio and anima_radio.isChecked())
+            except Exception:
+                return False
+        return False
+
+    def _artist_prompt_tag_variants(self, artist_name: str) -> list[str]:
+        name = str(artist_name or '').strip()
+        if not name:
+            return []
+        escaped = name.replace('(', '\\(').replace(')', '\\)')
+        return [f"artist:{name}", escaped, f"@{escaped}"]
+
+    def _format_artist_prompt_tag(self, artist_name: str) -> str:
+        name = str(artist_name or '').strip()
+        if not name:
+            return ''
+        if self._current_api_mode() == "NAI":
+            return f"artist:{name}"
+        escaped = name.replace('(', '\\(').replace(')', '\\)')
+        if self._uses_anima_artist_syntax():
+            return f"@{escaped}"
+        return escaped

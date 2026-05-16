@@ -297,6 +297,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs')
       setPromptFields: applyPromptFields,
       getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
       isComfyUiAnimaMode,
+      isAnimaArtistMode,
     });
   })
   .catch(error => {
@@ -1851,6 +1852,9 @@ function updateParams(m) {
     if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
   }
   updateRandomPromptWeightRow(mode, mode === 'COMFYUI' && 'sampling_mode' in m ? m.sampling_mode : null);
+  if (artistThumbControl && typeof artistThumbControl.syncPromptFormat === 'function') {
+    artistThumbControl.syncPromptFormat();
+  }
   if ('comfyui_workflow' in m || 'comfyui_workflow_has_custom' in m) onComfyUiWorkflowState(m);
   if (moduleBadges) moduleBadges.updateComfyUiParams(m);
   if (studioTabControl) studioTabControl.onParamsChanged();
@@ -3579,6 +3583,19 @@ function updateModuleHeaderAction(moduleId) {
 function isComfyUiAnimaMode() {
   return (currentMode || modeSelect.value) === 'COMFYUI'
     && Boolean($('flagAnima')?.classList.contains('on'));
+}
+
+function currentWebUiModelName() {
+  return String(paramEls?.model?.value || '').trim();
+}
+
+function isWebUiAnimaModel() {
+  return String(currentMode || modeSelect.value || '').toUpperCase() === 'WEBUI'
+    && currentWebUiModelName().toLowerCase().includes('anima');
+}
+
+function isAnimaArtistMode() {
+  return isComfyUiAnimaMode() || isWebUiAnimaModel();
 }
 
 function requestModuleState(moduleId) {

@@ -153,6 +153,7 @@ app_settings.json
 /tabs/assets/characters
 data/artist_thumbnail.json
 data/artist_thumbnail_nai.json
+data/artist_thumbnail_anima.json
 GEMINI.md
 *.md
 !CLAUDE.md

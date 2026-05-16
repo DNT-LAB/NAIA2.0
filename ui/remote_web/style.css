@@ -8234,6 +8234,111 @@ body.resizing-result-info {
   justify-content: space-between;
   min-height: 28px;
 }
+.param-sublabel {
+  color: rgba(138,151,191,0.72);
+}
+.webui-hires-assist-row {
+  min-height: 32px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.webui-hires-assist-control {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(130px, 176px);
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.webui-hires-assist-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 22px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.webui-hires-assist-toggle input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: #75cfff;
+}
+.webui-hires-assist-toggle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.webui-hires-assist-toggle input:checked + span {
+  color: #a7ddff;
+}
+.webui-hires-assist-targets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid rgba(117,207,255,0.20);
+  border-radius: 5px;
+  background: rgba(0,0,0,0.14);
+}
+.webui-hires-assist-target {
+  min-width: 0;
+  min-height: 24px;
+  border: 0;
+  border-right: 1px solid rgba(117,207,255,0.16);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.webui-hires-assist-target:last-child {
+  border-right: 0;
+}
+.webui-hires-assist-target:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.045);
+}
+.webui-hires-assist-target.active {
+  color: #e5f6ff;
+  background: rgba(117,207,255,0.22);
+  box-shadow: inset 0 -2px 0 #75cfff;
+}
+.webui-hr-scale-hint {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  color: rgba(138,151,191,0.72);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.webui-hr-scale-hint.warning {
+  color: #ff7777;
+  text-shadow: 0 0 8px rgba(255,80,80,0.28);
+}
+.webui-hr-scale-input {
+  flex: 0 0 54px;
+  max-width: 54px;
+}
+@media (max-width: 420px) {
+  .webui-hires-assist-control {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .webui-hr-scale-hint {
+    padding: 0 6px;
+    font-size: 9px;
+  }
+}
 .module-event-stream-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

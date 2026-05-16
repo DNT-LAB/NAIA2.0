@@ -105,6 +105,77 @@ class APIService:
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _normalize_hiresfix_assist_target(value: Any) -> int:
+        try:
+            target = int(float(value))
+        except (TypeError, ValueError):
+            return 512
+        return 768 if target == 768 else 512
+
+    @staticmethod
+    def _nearest_hiresfix_assist_resolution(width: Any, height: Any, target: Any) -> tuple[int, int]:
+        target_side = APIService._normalize_hiresfix_assist_target(target)
+        target_pixels = target_side * target_side
+        multiple = 64
+
+        try:
+            source_width = int(float(width))
+            source_height = int(float(height))
+        except (TypeError, ValueError):
+            return target_side, target_side
+        if source_width <= 0 or source_height <= 0:
+            return target_side, target_side
+
+        source_ratio = source_width / source_height
+        ideal_width = math.sqrt(target_pixels * source_ratio)
+        ideal_height = math.sqrt(target_pixels / source_ratio)
+
+        def nearby_multiples(value: float) -> list[int]:
+            base = int(math.floor(value / multiple) * multiple)
+            return sorted({
+                max(multiple, base + (offset * multiple))
+                for offset in range(-3, 5)
+            })
+
+        width_candidates = nearby_multiples(ideal_width)
+        height_candidates = nearby_multiples(ideal_height)
+
+        def score(candidate: tuple[int, int]) -> tuple[float, int, float, int]:
+            cand_width, cand_height = candidate
+            cand_ratio = cand_width / cand_height
+            ratio_delta = abs(math.log(cand_ratio / source_ratio))
+            area_delta = abs(math.log((cand_width * cand_height) / target_pixels))
+            orientation_penalty = int((source_width >= source_height) != (cand_width >= cand_height))
+            dimension_delta = abs(cand_width - ideal_width) + abs(cand_height - ideal_height)
+            return ratio_delta + area_delta, orientation_penalty, area_delta, int(dimension_delta)
+
+        return min(
+            ((candidate_width, candidate_height)
+             for candidate_width in width_candidates
+             for candidate_height in height_candidates),
+            key=score,
+        )
+
+    def _apply_webui_hiresfix_assist_resolution(self, payload: Dict[str, Any], params: Dict[str, Any]) -> None:
+        if not self._coerce_bool_param(params.get("webui_hiresfix_assist"), False):
+            return
+        target = params.get("webui_hiresfix_assist_target", params.get("hiresfix_assist_target", 512))
+        width, height = self._nearest_hiresfix_assist_resolution(
+            payload.get("width"),
+            payload.get("height"),
+            target,
+        )
+        original = (payload.get("width"), payload.get("height"))
+        payload["width"] = width
+        payload["height"] = height
+        if original != (width, height):
+            print(
+                f"🧩 [WEBUI Hiresfix Assist] 해상도 보정: "
+                f"{original[0]}x{original[1]} → {width}x{height} "
+                f"(target={self._normalize_hiresfix_assist_target(target)}^2)"
+            )
+
     def _apply_webui_hires_params(self, payload: Dict[str, Any], params: Dict[str, Any], *, is_img2img: bool) -> None:
         """Apply AUTOMATIC1111 txt2img Hires.fix fields to a payload."""
         if is_img2img:
@@ -114,6 +185,8 @@ class APIService:
         payload["enable_hr"] = enable_hr
         if not enable_hr:
             return
+
+        self._apply_webui_hiresfix_assist_resolution(payload, params)
 
         payload.update({
             "denoising_strength": self._coerce_float_param(params.get("denoising_strength"), 0.5),

@@ -119,6 +119,7 @@ export function createEventPresetPanel({
   showToast,
   escHtml,
   onGenerateStateChange,
+  getGenerationOverrides,
 } = {}) {
   const root = document?.getElementById('eventPresetPanel');
   const overlay = document?.getElementById('eventPresetOverlay');
@@ -4434,6 +4435,15 @@ export function createEventPresetPanel({
           || focusedClothesTags().length
         );
       const requestPayload = useComposite ? compositePayload() : selectedPayload({includeRecommendedTags: true});
+      const generationOverrides = typeof getGenerationOverrides === 'function'
+        ? getGenerationOverrides()
+        : null;
+      if (generationOverrides && Object.keys(generationOverrides).length) {
+        const currentOverrides = requestPayload.overrides && typeof requestPayload.overrides === 'object'
+          ? requestPayload.overrides
+          : {};
+        requestPayload.overrides = {...currentOverrides, ...generationOverrides};
+      }
       const payload = useComposite
         ? await provider.generateComposite(requestPayload)
         : await provider.generate(requestPayload);

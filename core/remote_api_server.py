@@ -586,6 +586,7 @@ class RemoteBridge(QObject):
         self._cached_params: dict = {}
         self._cached_options: dict = {}
         self._cached_result_enhance_config: dict = {}
+        self._webui_hiresfix_assist: dict = {"enabled": False, "target": 512}
         # api_status 는 per-ws 평가(setup_allowed 가 IP별로 다름)라 캐시하지 않음.
         # 태그 검색 인덱스 (ui/interactive/interactive 기반)
         self._kr_tags_raw: dict = {}  # tag_lower → full info dict (relations, _kw_lower, _desc_lower 포함)
@@ -3801,15 +3802,18 @@ class RemoteBridge(QObject):
         source_row = pd.Series(source_row_data, name=f"event_preset:{request_id}")
         rating = str(source_row_data.get("rating") or "").strip()
         active_ratings = {rating} if rating in {"g", "s", "q", "e"} else set(self._active_ratings)
+        request_overrides = payload.get("overrides") if isinstance(payload.get("overrides"), dict) else {}
+        overrides = dict(request_overrides)
+        overrides.update({
+            "event_preset_request": True,
+            "event_preset_request_id": request_id,
+        })
         self._pending_random_requests.append({
             "ws": None,
             "source_row": source_row,
             "active_ratings": active_ratings,
             "event_preset_request_id": request_id,
-            "overrides": {
-                "event_preset_request": True,
-                "event_preset_request_id": request_id,
-            },
+            "overrides": overrides,
         })
         self.request_random.emit()
         return {
@@ -3845,7 +3849,10 @@ class RemoteBridge(QObject):
         source_row = pd.Series(source_row_data, name=source_name)
         rating = str(source_row_data.get("rating") or "").strip()
         active_ratings = {rating} if rating in {"g", "s", "q", "e"} else set(self._active_ratings)
-        overrides = result.get("overrides") if isinstance(result.get("overrides"), dict) else {}
+        request_overrides = payload.get("overrides") if isinstance(payload.get("overrides"), dict) else {}
+        result_overrides = result.get("overrides") if isinstance(result.get("overrides"), dict) else {}
+        overrides = dict(request_overrides)
+        overrides.update(result_overrides)
         self._pending_random_requests.append({
             "ws": None,
             "source_row": source_row,
@@ -7403,6 +7410,8 @@ class RemoteBridge(QObject):
             return self._read_conditional_prompt(ws=ws)
         elif module_id == "event_stream":
             return self._read_event_stream()
+        elif module_id == "webui_hiresfix_assist":
+            return self._read_webui_hiresfix_assist()
         elif module_id == "character_reference":
             return self._read_character_reference()
         elif module_id == "vibe_transfer":
@@ -7445,6 +7454,24 @@ class RemoteBridge(QObject):
         if not self._has_clients():
             return
         self._broadcast_json(self._read_event_stream())
+
+    def _read_webui_hiresfix_assist(self) -> dict:
+        state = dict(getattr(self, "_webui_hiresfix_assist", {}) or {})
+        try:
+            target = 768 if int(float(state.get("target") or 512)) == 768 else 512
+        except (TypeError, ValueError):
+            target = 512
+        return {
+            "type": "module_state",
+            "module_id": "webui_hiresfix_assist",
+            "enabled": self._coerce_bool(state.get("enabled", False)),
+            "target": target,
+        }
+
+    def _broadcast_webui_hiresfix_assist_state(self):
+        if not self._has_clients():
+            return
+        self._broadcast_json(self._read_webui_hiresfix_assist())
 
     def _read_save_directory(self, ws=None) -> dict:
         try:
@@ -8951,6 +8978,8 @@ class RemoteBridge(QObject):
             self._set_conditional_prompt(key, value)
         elif module_id == "event_stream":
             self._set_event_stream(key, value)
+        elif module_id == "webui_hiresfix_assist":
+            self._set_webui_hiresfix_assist(key, value)
         elif module_id == "character_reference":
             self._set_character_reference(key, value)
         elif module_id == "vibe_transfer":
@@ -9009,6 +9038,23 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: event_stream 설정 실패 — {key}={value}: {e}")
             self._broadcast_json({"type": "toast", "message": f"이벤트 스트림 설정 실패: {e}", "level": "error"})
+
+    def _set_webui_hiresfix_assist(self, key: str, value: str):
+        try:
+            state = dict(getattr(self, "_webui_hiresfix_assist", {}) or {})
+            if key == "enabled":
+                state["enabled"] = self._coerce_bool(value)
+            elif key == "target":
+                try:
+                    state["target"] = 768 if int(float(value)) == 768 else 512
+                except (TypeError, ValueError):
+                    state["target"] = 512
+            else:
+                return
+            self._webui_hiresfix_assist = state
+            self._broadcast_webui_hiresfix_assist_state()
+        except Exception as e:
+            print(f"🌐 Remote: webui_hiresfix_assist 설정 실패 — {key}={value}: {e}")
 
     def _set_auto_save_settings(self, key: str, value: str):
         try:

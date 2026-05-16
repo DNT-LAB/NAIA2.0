@@ -72,6 +72,7 @@ let resultUnsavedActionBusy = false;
 let promptHighlighter = null;
 let moduleBadges = null;
 let moduleLauncherControl = null;
+let webUiHiresfixAssistState = {enabled: false, target: 512};
 let comfyuiWorkflowState = {
   has_custom: false,
   workflow_label: 'Basic Workflow',
@@ -671,7 +672,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
-const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260511-expression-hover-shortcut1')
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260516-hires-assist1')
   .then(({createEventPresetPanel}) => {
     eventPresetPanel = createEventPresetPanel({
       document,
@@ -682,6 +683,7 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260511-e
       showToast,
       escHtml,
       onGenerateStateChange: updateGenerateButtonMode,
+      getGenerationOverrides: () => collectWebUiHiresfixAssistOverrides(currentMode || modeSelect.value || 'NAI'),
     });
     syncPromptTabStateFromDom();
   })
@@ -1066,6 +1068,7 @@ function _collectCurrentParams() {
       p.anima_weight = promptWeight;
       p.random_prompt_weight = promptWeight;
     }
+    Object.assign(p, collectWebUiHiresfixAssistOverrides(mode));
   }
 
   if (mode === 'COMFYUI') {
@@ -1082,6 +1085,141 @@ function _collectCurrentParams() {
     p._comfyui_workflow_mode = comfyuiWorkflowState?.has_custom ? 'custom' : 'basic';
   }
   return p;
+}
+
+function normalizeWebUiHiresfixAssistTarget(value) {
+  return Number(value) === 768 ? 768 : 512;
+}
+
+function normalizeWebUiHiresfixAssistState(state = {}) {
+  return {
+    enabled: Boolean(state.enabled),
+    target: normalizeWebUiHiresfixAssistTarget(state.target),
+  };
+}
+
+function parseResolutionText(value) {
+  const match = String(value || '').match(/(\d+)\s*x\s*(\d+)/i);
+  if (!match) return null;
+  const width = parseInt(match[1], 10);
+  const height = parseInt(match[2], 10);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return {width, height};
+}
+
+function nearestWebUiHiresfixAssistResolution(width, height, target) {
+  const targetSide = normalizeWebUiHiresfixAssistTarget(target);
+  const targetPixels = targetSide * targetSide;
+  const multiple = 64;
+  const sourceWidth = Number(width);
+  const sourceHeight = Number(height);
+  if (!Number.isFinite(sourceWidth) || !Number.isFinite(sourceHeight) || sourceWidth <= 0 || sourceHeight <= 0) {
+    return {width: targetSide, height: targetSide};
+  }
+  const sourceRatio = sourceWidth / sourceHeight;
+  const idealWidth = Math.sqrt(targetPixels * sourceRatio);
+  const idealHeight = Math.sqrt(targetPixels / sourceRatio);
+  const nearbyMultiples = value => {
+    const base = Math.floor(value / multiple) * multiple;
+    return Array.from(new Set(Array.from({length: 8}, (_, index) => Math.max(multiple, base + ((index - 3) * multiple)))))
+      .sort((a, b) => a - b);
+  };
+  const widthCandidates = nearbyMultiples(idealWidth);
+  const heightCandidates = nearbyMultiples(idealHeight);
+  let best = {width: targetSide, height: targetSide};
+  let bestScore = null;
+  const isBetterScore = (score, previous) => {
+    if (!previous) return true;
+    for (let index = 0; index < score.length; index += 1) {
+      if (score[index] < previous[index]) return true;
+      if (score[index] > previous[index]) return false;
+    }
+    return false;
+  };
+  for (const candidateWidth of widthCandidates) {
+    for (const candidateHeight of heightCandidates) {
+      const candidateRatio = candidateWidth / candidateHeight;
+      const ratioDelta = Math.abs(Math.log(candidateRatio / sourceRatio));
+      const areaDelta = Math.abs(Math.log((candidateWidth * candidateHeight) / targetPixels));
+      const orientationPenalty = Number((sourceWidth >= sourceHeight) !== (candidateWidth >= candidateHeight));
+      const dimensionDelta = Math.abs(candidateWidth - idealWidth) + Math.abs(candidateHeight - idealHeight);
+      const score = [ratioDelta + areaDelta, orientationPenalty, areaDelta, Math.trunc(dimensionDelta)];
+      if (isBetterScore(score, bestScore)) {
+        bestScore = score;
+        best = {width: candidateWidth, height: candidateHeight};
+      }
+    }
+  }
+  return best;
+}
+
+function getCurrentSelectedResolution() {
+  return parseResolutionText(paramEls?.resolution?.value || qResolution?.value || '');
+}
+
+function getWebUiHiresfixAssistState() {
+  return normalizeWebUiHiresfixAssistState(webUiHiresfixAssistState);
+}
+
+function updateWebUiHiresfixAssistControls(state = null) {
+  if (state) webUiHiresfixAssistState = normalizeWebUiHiresfixAssistState({...webUiHiresfixAssistState, ...state});
+  const normalized = getWebUiHiresfixAssistState();
+  const toggle = $('webuiHiresfixAssistToggle');
+  if (toggle && toggle.checked !== normalized.enabled) toggle.checked = normalized.enabled;
+  document.querySelectorAll('[data-webui-hiresfix-assist-target]').forEach(button => {
+    const active = normalizeWebUiHiresfixAssistTarget(button.dataset.webuiHiresfixAssistTarget) === normalized.target;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  updateWebUiHrScaleHint();
+}
+
+function setWebUiHiresfixAssistEnabled(enabled) {
+  updateWebUiHiresfixAssistControls({enabled});
+  setModuleParam('webui_hiresfix_assist', 'enabled', String(Boolean(enabled)));
+}
+
+function setWebUiHiresfixAssistTarget(target) {
+  const normalizedTarget = normalizeWebUiHiresfixAssistTarget(target);
+  updateWebUiHiresfixAssistControls({target: normalizedTarget});
+  setModuleParam('webui_hiresfix_assist', 'target', String(normalizedTarget));
+}
+
+function getWebUiHiresfixAssistBaseResolution() {
+  const selected = getCurrentSelectedResolution();
+  if (!selected) return null;
+  const state = getWebUiHiresfixAssistState();
+  if (!state.enabled) return selected;
+  return nearestWebUiHiresfixAssistResolution(selected.width, selected.height, state.target);
+}
+
+function updateWebUiHrScaleHint() {
+  const hint = $('webuiHrScaleHint');
+  if (!hint) return;
+  const base = getWebUiHiresfixAssistBaseResolution();
+  const scale = Number($('pHrScale')?.value || 2);
+  if (!base || !Number.isFinite(scale) || scale <= 0) {
+    hint.textContent = '';
+    hint.title = '';
+    hint.classList.remove('warning');
+    return;
+  }
+  const finalWidth = Math.max(1, Math.round(base.width * scale));
+  const finalHeight = Math.max(1, Math.round(base.height * scale));
+  const text = `(${base.width} x ${base.height} to ${finalWidth} x ${finalHeight})`;
+  const exceedsSafeArea = finalWidth * finalHeight > 1536 * 1536;
+  hint.textContent = text;
+  hint.title = text;
+  hint.classList.toggle('warning', exceedsSafeArea);
+}
+
+function collectWebUiHiresfixAssistOverrides(mode = currentMode || modeSelect?.value || 'NAI') {
+  if (String(mode || '').toUpperCase() !== 'WEBUI') return {};
+  const state = getWebUiHiresfixAssistState();
+  return {
+    webui_hiresfix_assist: Boolean(state.enabled),
+    webui_hiresfix_assist_target: state.target,
+  };
 }
 
 function currentComfyUiSamplingMode() {
@@ -1312,6 +1450,7 @@ function onInitComplete() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'get_search_state'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
+    ws.send(JSON.stringify({type: 'get_module_state', module_id: 'webui_hiresfix_assist'}));
   }
 }
 
@@ -1404,6 +1543,7 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
         setLauncherConn(true);
         socket.send(JSON.stringify({type: 'get_search_state'}));
         socket.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
+        socket.send(JSON.stringify({type: 'get_module_state', module_id: 'webui_hiresfix_assist'}));
         // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
       },
       onClose: () => {
@@ -1854,6 +1994,8 @@ function updateParams(m) {
     if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
     if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
     if ('anima_weight' in m) $('pAnimaWeight').value = m.anima_weight;
+    updateWebUiHiresfixAssistControls();
+    updateWebUiHrScaleHint();
   }
 
   // ComfyUI sampling mode — 서버가 명시적으로 보낸 경우에만 적용 (EPS 기본값 리셋 방지)
@@ -1883,6 +2025,9 @@ function setParam(key, value) {
   if (key === 'resolution') {
     paramEls.resolution.value = value;
     qResolution.value = value;
+    updateWebUiHrScaleHint();
+  } else if (key === 'hr_scale') {
+    updateWebUiHrScaleHint();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));
@@ -3515,7 +3660,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260516-hires-assist2')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -3905,6 +4050,8 @@ function onModuleState(m) {
   else if (m.module_id === 'event_stream') {
     if (moduleLauncherControl) moduleLauncherControl.updateEventStreamState(m);
     if (eventStreamPanel) eventStreamPanel.setState(m);
+  } else if (m.module_id === 'webui_hiresfix_assist') {
+    updateWebUiHiresfixAssistControls(m);
   }
 
   if (m.module_id === 'prompt_engineering') {

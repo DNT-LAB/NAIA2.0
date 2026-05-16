@@ -93,15 +93,6 @@ const MODULE_REGISTRY = {
     modes: ['COMFYUI'],
     className: 'module-comfyui-tool',
   },
-  webui_tools_unavailable: {
-    label: '사용 가능한 도구 없음',
-    title: 'WEBUI 전용 도구는 현재 기본 사용 불가',
-    category: 'webui_tools',
-    action: 'placeholder',
-    modes: ['WEBUI'],
-    disabled: true,
-    disabledReason: '현재 기본 사용 불가',
-  },
   ollama: {
     label: 'Ollama',
     title: 'Ollama',
@@ -136,12 +127,6 @@ const CATEGORY_REGISTRY = [
     label: 'COMFYUI 전용 도구',
     title: 'COMFYUI 전용 도구',
     moduleIds: ['comfyui_workflow_default', 'comfyui_workflow_upload', 'comfyui_open_web'],
-  },
-  {
-    id: 'webui_tools',
-    label: 'WEBUI 전용 도구',
-    title: 'WEBUI 전용 도구 (기본 사용 불가)',
-    moduleIds: ['webui_tools_unavailable'],
   },
   {
     id: 'assistant_tools',
@@ -232,6 +217,14 @@ export function createModuleLauncher({
 
   function moduleTitle(moduleId) {
     return MODULE_REGISTRY[moduleId]?.title || moduleId;
+  }
+
+  function sendModuleParam(moduleId, key, value) {
+    if (typeof setModuleParam === 'function') {
+      setModuleParam(moduleId, key, value);
+    } else if (typeof globalThis.setModuleParam === 'function') {
+      globalThis.setModuleParam(moduleId, key, value);
+    }
   }
 
   function isBlocked(moduleId) {
@@ -441,7 +434,6 @@ export function createModuleLauncher({
         checkbox.checked = Boolean(eventStreamState.active);
       }
     });
-
     CATEGORY_REGISTRY.forEach(category => {
       const categoryEl = root.querySelector(`.module-category[data-module-category="${category.id}"]`);
       if (!categoryEl) return;
@@ -507,11 +499,7 @@ export function createModuleLauncher({
       event.preventDefault();
       eventStreamState = {...eventStreamState, active: Boolean(toggle.checked)};
       updateState();
-      if (typeof setModuleParam === 'function') {
-        setModuleParam('event_stream', 'active', String(Boolean(toggle.checked)));
-      } else if (typeof globalThis.setModuleParam === 'function') {
-        globalThis.setModuleParam('event_stream', 'active', String(Boolean(toggle.checked)));
-      }
+      sendModuleParam('event_stream', 'active', String(Boolean(toggle.checked)));
     });
     document.addEventListener('pointerdown', event => {
       if (!root.contains(event.target)) closeMenus();

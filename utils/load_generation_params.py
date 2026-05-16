@@ -337,6 +337,12 @@ class GenerationParamsManager:
             # 해상도 설정
             if hasattr(mw, 'resolution_combo') and mw.resolution_combo:
                 resolution = settings.get("resolution", "1024 x 1024")
+                if hasattr(mw, '_apply_resolutions_for_mode'):
+                    try:
+                        current_mode = mw.app_context.get_api_mode() if hasattr(mw, 'app_context') else None
+                        mw._apply_resolutions_for_mode(current_mode, resolution)
+                    except Exception as e:
+                        print(f"⚠️ 모드별 해상도 목록 적용 실패: {e}")
                 index = mw.resolution_combo.findText(resolution)
                 if index >= 0:
                     mw.resolution_combo.setCurrentIndex(index)

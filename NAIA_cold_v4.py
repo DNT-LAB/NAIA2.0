@@ -1093,6 +1093,8 @@ class Img2ImgWindowManager:
 
 
 class ModernMainWindow(QMainWindow):
+    RESOLUTION_MODES = ("NAI", "WEBUI", "COMFYUI")
+
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
@@ -5733,48 +5735,103 @@ class ModernMainWindow(QMainWindow):
         self.resolution_is_detected = True
         self.status_bar.showMessage(f"✅ 해상도 자동 맞춤: {resolution_str}", 3000)
 
-    def _load_resolutions(self) -> list:
-        """JSON 파일에서 해상도 목록을 로드합니다."""
-        resolutions_file = "save/resolutions.json"
-        default_resolutions = [
+    def _load_resolutions(self, mode: str | None = None) -> list:
+        """현재 API 모드의 해상도 목록을 로드합니다."""
+        mode = self._normalize_resolution_mode(mode)
+        resolutions_by_mode = self._load_resolutions_by_mode()
+        resolutions = list(resolutions_by_mode.get(mode) or self._default_resolutions())
+        print(f"✅ 해상도 로드 완료: {mode} {len(resolutions)}개 항목")
+        return resolutions
+
+    def _default_resolutions(self) -> list:
+        return [
             "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
             "1088 x 960", "1152 x 896", "1216 x 832"
         ]
+
+    def _normalize_resolution_mode(self, mode: str | None = None) -> str:
+        if mode is None:
+            try:
+                mode = self.app_context.get_api_mode()
+            except Exception:
+                mode = "NAI"
+        normalized = str(mode or "NAI").strip().upper()
+        return normalized if normalized in self.RESOLUTION_MODES else "NAI"
+
+    def _normalize_resolution_list_for_storage(self, values) -> list:
+        if not isinstance(values, list):
+            return []
+        normalized = []
+        seen = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            normalized.append(text)
+        return normalized
+
+    def _resolution_store_path(self) -> str:
+        return "save/resolutions.json"
+
+    def _load_resolutions_by_mode(self) -> dict:
+        """모드별 해상도 목록을 로드합니다. legacy list 파일은 모든 모드에 복제합니다."""
+        resolutions_file = "save/resolutions.json"
+        default_resolutions = self._default_resolutions()
+        mode_map = {mode: list(default_resolutions) for mode in self.RESOLUTION_MODES}
 
         try:
             if os.path.exists(resolutions_file):
                 with open(resolutions_file, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
-                    # 유효성 검사: 리스트이고 비어있지 않은지
-                    if isinstance(loaded, list) and len(loaded) > 0:
-                        print(f"✅ 해상도 로드 완료: {len(loaded)}개 항목")
-                        return loaded
-                    else:
-                        print("⚠️ 저장된 해상도 목록이 비어있거나 유효하지 않음. 기본값 사용")
-                        return default_resolutions
+
+                legacy_items = []
+                if isinstance(loaded, list):
+                    legacy_items = self._normalize_resolution_list_for_storage(loaded)
+                elif isinstance(loaded, dict):
+                    legacy_items = self._normalize_resolution_list_for_storage(loaded.get("resolutions"))
+
+                if legacy_items:
+                    for mode in self.RESOLUTION_MODES:
+                        mode_map[mode] = list(legacy_items)
+
+                if isinstance(loaded, dict):
+                    for mode in self.RESOLUTION_MODES:
+                        items = self._normalize_resolution_list_for_storage(loaded.get(mode))
+                        if items:
+                            mode_map[mode] = items
             else:
-                print("ℹ️ 해상도 파일 없음. 기본값 사용 및 저장")
-                # 기본값으로 파일 생성
-                self._save_resolutions(default_resolutions)
-                return default_resolutions
+                print("ℹ️ 해상도 파일 없음. 모드별 기본값 사용 및 저장")
+                self._write_resolutions_by_mode(mode_map)
+
+            self.resolutions_by_mode = mode_map
+            return mode_map
 
         except Exception as e:
             print(f"❌ 해상도 로드 실패: {e}. 기본값 사용")
-            return default_resolutions
+            self.resolutions_by_mode = mode_map
+            return mode_map
 
-    def _save_resolutions(self, resolutions: list):
-        """해상도 목록을 JSON 파일에 저장합니다."""
-        resolutions_file = "save/resolutions.json"
+    def _write_resolutions_by_mode(self, resolutions_by_mode: dict):
+        resolutions_file = self._resolution_store_path()
+        os.makedirs("save", exist_ok=True)
+        with open(resolutions_file, 'w', encoding='utf-8') as f:
+            json.dump(resolutions_by_mode, f, ensure_ascii=False, indent=2)
+
+    def _save_resolutions(self, resolutions: list, mode: str | None = None):
+        """현재 또는 지정된 API 모드의 해상도 목록을 JSON 파일에 저장합니다."""
+        mode = self._normalize_resolution_mode(mode)
 
         try:
             # print(f"[DEBUG] _save_resolutions 시작")
             # print(f"[DEBUG] 저장할 해상도: {resolutions}")
             # print(f"[DEBUG] 저장 경로: {resolutions_file}")
 
-            # save 디렉토리 생성
-            # print(f"[DEBUG] save 디렉토리 생성 시도...")
-            os.makedirs("save", exist_ok=True)
-            # print(f"[DEBUG] save 디렉토리 생성 완료 (또는 이미 존재)")
+            resolutions_by_mode = self._load_resolutions_by_mode()
+            cleaned = self._normalize_resolution_list_for_storage(resolutions)
+            if not cleaned:
+                cleaned = self._default_resolutions()
+            resolutions_by_mode[mode] = cleaned
 
             # 절대 경로 확인
             # abs_path = os.path.abspath(resolutions_file)
@@ -5782,8 +5839,8 @@ class ModernMainWindow(QMainWindow):
 
             # JSON 저장
             # print(f"[DEBUG] JSON 파일 쓰기 시작...")
-            with open(resolutions_file, 'w', encoding='utf-8') as f:
-                json.dump(resolutions, f, ensure_ascii=False, indent=2)
+            self._write_resolutions_by_mode(resolutions_by_mode)
+            self.resolutions_by_mode = resolutions_by_mode
             # print(f"[DEBUG] JSON 파일 쓰기 완료")
 
             # 파일 존재 확인
@@ -5793,21 +5850,46 @@ class ModernMainWindow(QMainWindow):
             # else:
             #     print(f"[DEBUG] ⚠️ 파일이 생성되지 않았음!")
 
-            print(f"✅ 해상도 저장 완료: {len(resolutions)}개 항목")
+            print(f"✅ 해상도 저장 완료: {mode} {len(cleaned)}개 항목")
 
         except Exception as e:
             print(f"❌ 해상도 저장 실패: {e}")
             import traceback
             traceback.print_exc()
 
+    def _replace_resolution_combo_items(self, combo, resolutions: list, preferred: str = ""):
+        if combo is None:
+            return
+        was_blocked = combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItems(resolutions)
+            if preferred and preferred in resolutions:
+                combo.setCurrentText(preferred)
+            elif resolutions:
+                combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(was_blocked)
+
+    def _apply_resolutions_for_mode(self, mode: str | None = None, preferred_resolution: str = ""):
+        """현재 UI 콤보박스를 지정 모드의 해상도 목록으로 교체합니다."""
+        mode = self._normalize_resolution_mode(mode)
+        resolutions_by_mode = self._load_resolutions_by_mode()
+        resolutions = list(resolutions_by_mode.get(mode) or self._default_resolutions())
+        current_selection = preferred_resolution
+        if not current_selection and hasattr(self, 'resolution_combo'):
+            current_selection = self.resolution_combo.currentText()
+
+        self.resolutions = resolutions
+        self._replace_resolution_combo_items(getattr(self, 'resolution_combo', None), resolutions, current_selection)
+        self._replace_resolution_combo_items(getattr(self, 'detached_resolution_combo', None), resolutions, current_selection)
+        return self.resolution_combo.currentText() if hasattr(self, 'resolution_combo') else ""
+
     def open_resolution_manager(self):
         """해상도 관리 다이얼로그를 열고, 결과를 반영합니다.
         TODO(web-dialog): 원래 ResolutionManagerDialog.exec() — 해상도 목록 편집 모달.
         Web Shell 측 해상도 관리 화면으로 재구현 필요. 현재는 호출 차단."""
-        default_resolutions = [
-            "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
-            "1088 x 960", "1152 x 896", "1216 x 832"
-        ]
+        default_resolutions = self._default_resolutions()
         print("[Dialog/SKIPPED] ResolutionManagerDialog 모달 차단 — Web Shell 해상도 편집 UI 재구현 예정")
         return
         # 아래 원본 흐름 (Web Shell 재구현 시 참고용):

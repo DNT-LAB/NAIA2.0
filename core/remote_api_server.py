@@ -7034,35 +7034,50 @@ class RemoteBridge(QObject):
             lambda f=future, r=result: (f.set_result(r) if not f.done() else None)
         )
 
-    def _resolution_multiple_for_current_mode(self) -> int:
-        return 64 if str(self._current_api_mode() or "").upper() == "NAI" else 8
+    def _normalize_resolution_mode(self, mode: str | None = None) -> str:
+        normalized = str(mode or self._current_api_mode() or "NAI").strip().upper()
+        return normalized if normalized in {"NAI", "WEBUI", "COMFYUI"} else "NAI"
 
-    def _current_resolution_items(self) -> list[str]:
+    def _resolution_multiple_for_mode(self, mode: str | None = None) -> int:
+        return 64 if self._normalize_resolution_mode(mode) == "NAI" else 8
+
+    def _current_resolution_items(self, mode: str | None = None) -> list[str]:
+        mode = self._normalize_resolution_mode(mode)
         mw = getattr(self.app_context, "main_window", None)
         combo = getattr(mw, "resolution_combo", None)
-        items = self._combo_items(combo) if combo is not None else []
-        if items:
-            return items
+        if mode == self._normalize_resolution_mode() and combo is not None:
+            items = self._combo_items(combo)
+            if items:
+                return items
+        if hasattr(mw, "_load_resolutions"):
+            try:
+                items = mw._load_resolutions(mode)
+                if items:
+                    return [str(item) for item in items if str(item).strip()]
+            except Exception as exc:
+                print(f"🌐 Remote: {mode} 해상도 목록 로드 실패 — {exc}")
         stored = getattr(mw, "resolutions", None)
-        if isinstance(stored, list) and stored:
+        if mode == self._normalize_resolution_mode() and isinstance(stored, list) and stored:
             return [str(item) for item in stored if str(item).strip()]
         return list(self.DEFAULT_RESOLUTIONS)
 
-    def _resolution_manager_state(self) -> dict:
+    def _resolution_manager_state(self, mode: str | None = None) -> dict:
+        mode = self._normalize_resolution_mode(mode)
         mw = getattr(self.app_context, "main_window", None)
         combo = getattr(mw, "resolution_combo", None)
         current = ""
         try:
-            current = combo.currentText() if combo is not None else ""
+            if mode == self._normalize_resolution_mode() and combo is not None:
+                current = combo.currentText()
         except Exception:
             current = ""
-        resolutions = self._current_resolution_items()
+        resolutions = self._current_resolution_items(mode)
         if current not in resolutions:
             current = resolutions[0] if resolutions else ""
         return {
             "ok": True,
-            "api_mode": self._current_api_mode(),
-            "multiple": self._resolution_multiple_for_current_mode(),
+            "api_mode": mode,
+            "multiple": self._resolution_multiple_for_mode(mode),
             "max_value": 8192,
             "warning_pixel_area": 1024 * 1024,
             "defaults": list(self.DEFAULT_RESOLUTIONS),
@@ -7070,10 +7085,11 @@ class RemoteBridge(QObject):
             "current_resolution": current,
         }
 
-    def _normalize_resolution_items_for_save(self, raw_items) -> list[str]:
+    def _normalize_resolution_items_for_save(self, raw_items, mode: str | None = None) -> list[str]:
         if not isinstance(raw_items, list):
             raise ValueError("resolutions must be a list")
-        multiple = self._resolution_multiple_for_current_mode()
+        mode = self._normalize_resolution_mode(mode)
+        multiple = self._resolution_multiple_for_mode(mode)
         normalized = []
         seen = set()
         for item in raw_items:
@@ -7094,26 +7110,35 @@ class RemoteBridge(QObject):
             raise ValueError("resolution list cannot be empty")
         return normalized
 
-    def _apply_resolution_items(self, resolutions: list[str]) -> dict:
+    def _apply_resolution_items(self, resolutions: list[str], mode: str | None = None) -> dict:
+        mode = self._normalize_resolution_mode(mode)
         mw = getattr(self.app_context, "main_window", None)
         if mw is None:
             raise RuntimeError("main window is unavailable")
         combo = getattr(mw, "resolution_combo", None)
         current = combo.currentText() if combo is not None else ""
-        mw.resolutions = list(resolutions)
         if hasattr(mw, "_save_resolutions"):
-            mw._save_resolutions(mw.resolutions)
+            mw._save_resolutions(resolutions, mode)
+
+        if mode != self._normalize_resolution_mode():
+            return self._resolution_manager_state(mode)
+
+        mw.resolutions = list(resolutions)
 
         for target_combo in (combo, getattr(mw, "detached_resolution_combo", None)):
             if target_combo is None:
                 continue
             try:
-                target_combo.clear()
-                target_combo.addItems(mw.resolutions)
-                if current in mw.resolutions:
-                    target_combo.setCurrentText(current)
-                else:
-                    target_combo.setCurrentIndex(0)
+                was_blocked = target_combo.blockSignals(True)
+                try:
+                    target_combo.clear()
+                    target_combo.addItems(mw.resolutions)
+                    if current in mw.resolutions:
+                        target_combo.setCurrentText(current)
+                    else:
+                        target_combo.setCurrentIndex(0)
+                finally:
+                    target_combo.blockSignals(was_blocked)
             except Exception as exc:
                 print(f"🌐 Remote: 해상도 콤보 갱신 실패 — {exc}")
 
@@ -7129,12 +7154,13 @@ class RemoteBridge(QObject):
             return
         payload = request.get("payload") or {}
         action = str(payload.get("action") or "get").strip().lower()
+        mode = self._normalize_resolution_mode(payload.get("api_mode") or payload.get("mode"))
         try:
             if action == "get":
-                result = self._resolution_manager_state()
+                result = self._resolution_manager_state(mode)
             elif action == "save":
-                resolutions = self._normalize_resolution_items_for_save(payload.get("resolutions"))
-                result = self._apply_resolution_items(resolutions)
+                resolutions = self._normalize_resolution_items_for_save(payload.get("resolutions"), mode)
+                result = self._apply_resolution_items(resolutions, mode)
             else:
                 result = {"ok": False, "error": "unsupported resolution action"}
         except Exception as exc:
@@ -14412,8 +14438,11 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         return await asyncio.to_thread(bridge._build_queue_state)
 
     @app.get("/api/resolutions")
-    async def api_resolutions():
-        result = await bridge._request_resolution_action({"action": "get"})
+    async def api_resolutions(req: Request):
+        result = await bridge._request_resolution_action({
+            "action": "get",
+            "api_mode": req.query_params.get("mode") or req.query_params.get("api_mode"),
+        })
         if not result.get("ok"):
             return JSONResponse({"error": result.get("error") or "Resolution state unavailable"}, status_code=500)
         return result
@@ -14428,6 +14457,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             payload = {}
         result = await bridge._request_resolution_action({
             "action": "save",
+            "api_mode": payload.get("api_mode") or payload.get("mode"),
             "resolutions": payload.get("resolutions"),
         })
         if not result.get("ok"):

@@ -69,7 +69,10 @@ export function createResolutionManagerPanel({
   }
 
   async function loadState() {
-    const response = await fetch('/api/resolutions', {cache: 'no-store'});
+    const mode = normalizeMode(getApiMode?.() || state.apiMode);
+    state.apiMode = mode;
+    const query = mode ? `?mode=${encodeURIComponent(mode)}` : '';
+    const response = await fetch(`/api/resolutions${query}`, {cache: 'no-store'});
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.error) {
       throw new Error(payload.error || `Failed to load resolutions (${response.status})`);
@@ -81,7 +84,10 @@ export function createResolutionManagerPanel({
     const response = await fetch('/api/resolutions', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({resolutions: state.resolutions}),
+      body: JSON.stringify({
+        api_mode: normalizeMode(state.apiMode || getApiMode?.()),
+        resolutions: state.resolutions,
+      }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.error) {

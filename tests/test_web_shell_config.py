@@ -1,4 +1,6 @@
 from core.web_shell_config import (
+    DEFAULT_WEB_SHELL_BIND_HOST,
+    DEFAULT_WEB_SHELL_HOST,
     DEFAULT_WEB_SHELL_PORT,
     build_web_shell_url,
     normalize_web_shell_port,
@@ -22,6 +24,12 @@ def test_normalize_web_shell_port_falls_back_for_invalid_values():
 def test_build_web_shell_url_marks_embedded_desktop_shell():
     assert build_web_shell_url("127.0.0.1", 7243) == "http://127.0.0.1:7243/?desktop_shell=1"
     assert build_web_shell_url("localhost", 7243, embedded=False) == "http://localhost:7243/"
+
+
+def test_default_web_shell_separates_load_host_from_bind_host():
+    assert DEFAULT_WEB_SHELL_HOST == "127.0.0.1"
+    assert DEFAULT_WEB_SHELL_BIND_HOST == "0.0.0.0"
+    assert build_web_shell_url(DEFAULT_WEB_SHELL_HOST, 7243) == "http://127.0.0.1:7243/?desktop_shell=1"
 
 
 def test_default_launcher_prefers_web_shell():

@@ -15,6 +15,7 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 from core.web_shell_config import (
+    DEFAULT_WEB_SHELL_BIND_HOST,
     DEFAULT_WEB_SHELL_HOST,
     DEFAULT_WEB_SHELL_PORT,
     build_web_shell_url,
@@ -205,6 +206,7 @@ class WebWrapperWindow(QMainWindow):
         app_context,
         *,
         host: str = DEFAULT_WEB_SHELL_HOST,
+        bind_host: str = DEFAULT_WEB_SHELL_BIND_HOST,
         port: int = DEFAULT_WEB_SHELL_PORT,
         stop_server_on_close: bool = True,
         quit_on_close: bool = True,
@@ -212,6 +214,7 @@ class WebWrapperWindow(QMainWindow):
         super().__init__()
         self.app_context = app_context
         self.host = host or DEFAULT_WEB_SHELL_HOST
+        self.bind_host = bind_host or DEFAULT_WEB_SHELL_BIND_HOST
         self.port = normalize_web_shell_port(port)
         self.stop_server_on_close = stop_server_on_close
         self.quit_on_close = quit_on_close
@@ -322,7 +325,7 @@ class WebWrapperWindow(QMainWindow):
 
         server = remote_api_server.start_remote_server(
             self.app_context,
-            host=self.host,
+            host=self.bind_host,
             port=self.port,
         )
         config = getattr(server, "config", None)
@@ -330,7 +333,7 @@ class WebWrapperWindow(QMainWindow):
         if actual_port:
             self.port = normalize_web_shell_port(actual_port)
         self._server_started = True
-        print(f"NAIA Web Shell backend: http://{self.host}:{self.port}")
+        print(f"NAIA Web Shell backend: http://{self.host}:{self.port} (bind {self.bind_host})")
 
     def _load_shell(self):
         self._remote_load_started = True

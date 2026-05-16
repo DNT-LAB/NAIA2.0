@@ -553,7 +553,7 @@ class SettingsWidget(QWidget):
                 from core.remote_api_server import start_remote_server
                 self._force_web_session_autosave()
                 self.web_session_checkbox.setEnabled(False)
-                server = start_remote_server(self.app_context, host="127.0.0.1", port=port)
+                server = start_remote_server(self.app_context, host="0.0.0.0", port=port)
                 actual_port = getattr(getattr(server, "config", None), "port", port)
                 if actual_port != port:
                     port = actual_port

@@ -1380,6 +1380,26 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
 
     def process_and_update_view(self) -> PromptContext:
         """와일드카드를 처리하고 UI를 업데이트하는 핵심 메소드"""
+        event_stream = getattr(self.app_context, "event_stream_runtime", None)
+        if (
+            event_stream
+            and event_stream.should_freeze_character_prompts()
+            and event_stream.has_freeze_snapshot()
+        ):
+            frozen_params = event_stream.get_frozen_character_params()
+            if frozen_params is not None:
+                frozen_copy = copy.deepcopy(frozen_params)
+                self.last_processed_data = {
+                    'characters': frozen_copy.get('characters') or [],
+                    'uc': frozen_copy.get('uc') or [],
+                }
+                self.modifiable_clone = copy.deepcopy(self.last_processed_data)
+                self.update_processed_display(
+                    self.last_processed_data['characters'],
+                    self.last_processed_data['uc'],
+                )
+                return self.get_or_create_context()
+
         if not self.activate_checkbox or not self.activate_checkbox.isChecked():
             self.processed_prompt_display.clear()
             self.last_processed_data = {'characters': [], 'uc': []}
@@ -1405,12 +1425,22 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
 
     def on_random_prompt_triggered(self):
         """'랜덤 프롬프트' 버튼 클릭 시 호출되는 이벤트 핸들러"""
+        event_stream = getattr(self.app_context, "event_stream_runtime", None)
+        if event_stream and event_stream.should_freeze_random_prompt_side_effects():
+            print("🔒 Event Stream: 랜덤 프롬프트 캐릭터 리롤을 동결합니다.")
+            return
         if self.activate_checkbox.isChecked() and not self.reroll_on_generate_checkbox.isChecked():
             print("🔄️ 랜덤 프롬프트 요청으로 캐릭터 와일드카드를 갱신합니다.")
             self.process_and_update_view()
 
     def get_parameters(self) -> dict:
         """모듈의 파라미터를 반환합니다."""
+        event_stream = getattr(self.app_context, "event_stream_runtime", None)
+        if event_stream and event_stream.should_freeze_character_prompts():
+            frozen_params = event_stream.get_frozen_character_params()
+            if frozen_params is not None:
+                return frozen_params
+
         if not self.activate_checkbox or not self.activate_checkbox.isChecked():
             return {"characters": None}
 

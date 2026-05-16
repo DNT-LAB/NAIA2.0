@@ -428,10 +428,12 @@ class GenerationController:
             api_mode = self.context.main_window.get_current_api_mode()
             if api_mode == "NAI": 
                 token = 'nai_token'
+                event_stream = getattr(self.context, "event_stream_runtime", None)
                 char_module = self.context.middle_section_controller.get_module_instance("CharacterModule")
                 if (char_module and 
                     char_module.activate_checkbox.isChecked() and 
-                    char_module.reroll_on_generate_checkbox.isChecked()):
+                    char_module.reroll_on_generate_checkbox.isChecked() and
+                    not (event_stream and event_stream.should_freeze_character_prompts())):
                     
                     print("🔄️ 생성 시 Reroll: 캐릭터 와일드카드를 갱신합니다.")
                     char_module.process_and_update_view()
@@ -1754,10 +1756,12 @@ class GenerationController:
         if api_mode == "NAI":
             token = 'nai_token'
             # NAI 모드에서 캐릭터 리롤 처리
+            event_stream = getattr(self.context, "event_stream_runtime", None)
             char_module = self.context.middle_section_controller.get_module_instance("CharacterModule")
             if (char_module and
                 char_module.activate_checkbox.isChecked() and
-                char_module.reroll_on_generate_checkbox.isChecked()):
+                char_module.reroll_on_generate_checkbox.isChecked() and
+                not (event_stream and event_stream.should_freeze_character_prompts())):
                 print("🔄️ 생성 시 Reroll: 캐릭터 와일드카드를 갱신합니다.")
                 char_module.process_and_update_view()
         elif api_mode == "COMFYUI":

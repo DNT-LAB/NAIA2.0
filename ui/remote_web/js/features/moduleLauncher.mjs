@@ -35,6 +35,12 @@ const MODULE_REGISTRY = {
     category: 'prompt_tools',
     action: 'module',
   },
+  event_stream: {
+    label: '이벤트 스트림 설정',
+    title: '이벤트 스트림 설정',
+    category: 'prompt_tools',
+    action: 'module',
+  },
   character: {
     label: 'Character',
     title: 'NAID4 Character',
@@ -116,7 +122,7 @@ const CATEGORY_REGISTRY = [
     id: 'prompt_tools',
     label: '프롬프트 도구',
     title: '프롬프트 도구',
-    moduleIds: ['e621_event', 'wildcard', 'chunk', 'conditional_prompt', 'danbooru_browser'],
+    moduleIds: ['event_stream', 'e621_event', 'wildcard', 'chunk', 'conditional_prompt', 'danbooru_browser'],
   },
   {
     id: 'character_tools',
@@ -158,12 +164,14 @@ export function createModuleLauncher({
   switchComfyUiWorkflowDefault,
   uploadComfyUiWorkflow,
   openComfyUiWeb,
+  setModuleParam,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
   let updateQueued = false;
   let tooltipEl = null;
   let tooltipOwner = null;
+  let eventStreamState = {active: false};
 
   function tooltipAttr(text) {
     return String(text || '')
@@ -259,6 +267,20 @@ export function createModuleLauncher({
   function renderModuleButton(moduleId, extraClass = '') {
     const config = MODULE_REGISTRY[moduleId];
     if (!config) return '';
+    if (moduleId === 'event_stream') {
+      const tooltip = tooltipAttr(config.title);
+      return `
+        <div class="module-event-stream-row" data-module-event-stream>
+          <button type="button" class="module-btn module-menu-item module-event-stream-settings" data-module="event_stream" aria-label="${tooltip}" data-module-tooltip="${tooltip}" data-module-static-disabled="0">
+            <span>${config.label}</span>
+          </button>
+          <label class="module-event-stream-toggle" data-module-tooltip="이벤트 스트림 활성">
+            <input type="checkbox" data-event-stream-toggle aria-label="이벤트 스트림 활성">
+            <span>활성</span>
+          </label>
+        </div>
+      `;
+    }
     const badge = config.badgeId
       ? `<span class="module-badge hidden" id="${config.badgeId}"></span>`
       : '';
@@ -408,8 +430,16 @@ export function createModuleLauncher({
       button.classList.toggle('nai-only-disabled', blocked);
       button.classList.toggle('module-static-disabled', button.dataset.moduleStaticDisabled === '1');
       button.classList.toggle('module-workflow-active', visible && isActiveWorkflowMode(moduleId));
+      button.classList.toggle('event-stream-enabled', moduleId === 'event_stream' && Boolean(eventStreamState.active));
       button.disabled = blocked;
       button.classList.toggle('active', visible && moduleIsActive(moduleId));
+    });
+    root.querySelectorAll('[data-module-event-stream]').forEach(row => {
+      row.classList.toggle('active', Boolean(eventStreamState.active));
+      const checkbox = row.querySelector('[data-event-stream-toggle]');
+      if (checkbox && checkbox.checked !== Boolean(eventStreamState.active)) {
+        checkbox.checked = Boolean(eventStreamState.active);
+      }
     });
 
     CATEGORY_REGISTRY.forEach(category => {
@@ -426,6 +456,7 @@ export function createModuleLauncher({
       const anyActive = visibleModules.some(moduleIsActive);
       const allBlocked = visibleModules.length > 0 && visibleModules.every(isBlocked);
       const hasStatus = visibleModules.some(moduleId => {
+        if (moduleId === 'event_stream' && eventStreamState.active) return true;
         const leaf = root.querySelector(`.module-btn[data-module="${moduleId}"]`);
         return leaf?.classList.contains('auto-active')
           || leaf?.classList.contains('char-active')
@@ -457,6 +488,7 @@ export function createModuleLauncher({
   function bind() {
     if (!root) return;
     root.addEventListener('click', event => {
+      if (event.target.closest('[data-event-stream-toggle]')) return;
       const categoryToggle = event.target.closest('[data-category-toggle]');
       if (categoryToggle && root.contains(categoryToggle)) {
         event.preventDefault();
@@ -467,6 +499,18 @@ export function createModuleLauncher({
       if (moduleButton && root.contains(moduleButton)) {
         event.preventDefault();
         launchModule(moduleButton.dataset.module);
+      }
+    });
+    root.addEventListener('change', event => {
+      const toggle = event.target.closest('[data-event-stream-toggle]');
+      if (!toggle || !root.contains(toggle)) return;
+      event.preventDefault();
+      eventStreamState = {...eventStreamState, active: Boolean(toggle.checked)};
+      updateState();
+      if (typeof setModuleParam === 'function') {
+        setModuleParam('event_stream', 'active', String(Boolean(toggle.checked)));
+      } else if (typeof globalThis.setModuleParam === 'function') {
+        globalThis.setModuleParam('event_stream', 'active', String(Boolean(toggle.checked)));
       }
     });
     document.addEventListener('pointerdown', event => {
@@ -519,6 +563,10 @@ export function createModuleLauncher({
     closeMenus,
     openCategory: toggleCategory,
     updateState,
+    updateEventStreamState(state = {}) {
+      eventStreamState = {...eventStreamState, ...state, active: Boolean(state.active)};
+      updateState();
+    },
     moduleTitle,
   };
 }

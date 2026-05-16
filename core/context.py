@@ -56,6 +56,8 @@ class AppContext:
         self.clothes_preset_service = None
         self.expression_preset_service = None
         self.preset_services_revision: int = 0
+        from core.event_tree import EventStreamRuntime
+        self.event_stream_runtime = EventStreamRuntime(self)
 
         # ✅ 세션 타임스탬프를 인스턴스 속성으로 명시적 저장
         self.session_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

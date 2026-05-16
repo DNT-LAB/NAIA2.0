@@ -39,6 +39,9 @@ class PromptGenerationController(QObject):
         general_str = source_row.get('general', '')
         if pd.notna(general_str) and isinstance(general_str, str):
             context.main_tags = split_tags_smart(general_str)
+        event_stream = getattr(self.app_context, "event_stream_runtime", None)
+        if event_stream and event_stream.is_active:
+            event_stream.apply_context_freeze(context)
         return context
 
     def _handle_processed_context(self, context):
@@ -64,6 +67,9 @@ class PromptGenerationController(QObject):
                     main_window.resolution_is_detected = False
             
             # 최종 프롬프트 시그널 발생
+            event_stream = getattr(self.app_context, "event_stream_runtime", None)
+            if event_stream and event_stream.is_active:
+                event_stream.record_generated_context(context)
             self.prompt_generated.emit(final_prompt)
             
             # ✅ 와일드카드 상태 뷰를 위한 이벤트 발행

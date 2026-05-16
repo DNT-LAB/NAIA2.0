@@ -199,6 +199,7 @@ function initNaiaTitleTooltips() {
 let automationPanel = null;
 let characterPanel = null;
 let conditionalPromptPanel = null;
+let eventStreamPanel = null;
 let wildcardPanel = null;
 let wildcardManagerPanel = null;
 let instantWildcardPanel = null;
@@ -761,6 +762,17 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
   .catch(error => {
     console.error('Failed to initialize conditional prompt panel module', error);
   });
+const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs')
+  .then(({createEventStreamPanel}) => {
+    eventStreamPanel = createEventStreamPanel({
+      document,
+      escHtml,
+      setModuleParam,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize event stream panel module', error);
+  });
 const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
   .then(({createWildcardPanel}) => {
     wildcardPanel = createWildcardPanel({
@@ -1298,6 +1310,7 @@ function onInitComplete() {
   if (resultHistory) resultHistory.prepareInitialHistory();
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'get_search_state'}));
+    ws.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
   }
 }
 
@@ -1389,6 +1402,7 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
         if (setupController) setupController.resetInitialProbe();
         setLauncherConn(true);
         socket.send(JSON.stringify({type: 'get_search_state'}));
+        socket.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
         // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
       },
       onClose: () => {
@@ -2120,6 +2134,7 @@ function setNaiHighlightMode(mode) {
 
 const DETACHED_MODULE_GEOMETRY = {
   prompt_engineering: {width: 640, height: 860},
+  event_stream: {width: 520, height: 640},
   character: {width: 760, height: 860},
   conditional_prompt: {width: 1560, height: 900},
   wildcard: {width: 680, height: 780},
@@ -3493,6 +3508,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs')
       switchComfyUiWorkflowDefault,
       uploadComfyUiWorkflow,
       openComfyUiWeb,
+      setModuleParam,
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();
@@ -3629,6 +3645,7 @@ function openModule(moduleId, options = {}) {
     vibe_transfer: 'Vibe Transfer',
     img2img: 'Img2Img',
     conditional_prompt: '조건부 프롬프트',
+    event_stream: 'Event Stream',
     wildcard: '와일드카드 관리',
     instant_wildcard: 'Instant Wildcard',
     chunk: '와일드카드 청크',
@@ -3850,6 +3867,10 @@ function onModuleState(m) {
   else if (m.module_id === 'character_reference') updateCharRefBadge(m);
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
   else if (m.module_id === 'save_directory' && saveDirectoryPanel) saveDirectoryPanel.setState(m);
+  else if (m.module_id === 'event_stream') {
+    if (moduleLauncherControl) moduleLauncherControl.updateEventStreamState(m);
+    if (eventStreamPanel) eventStreamPanel.setState(m);
+  }
 
   if (m.module_id === 'prompt_engineering') {
     lastPromptEngineeringState = m;
@@ -3874,6 +3895,7 @@ function renderModuleState(m) {
   else if (m.module_id === 'automation') renderAutomation(m);
   else if (m.module_id === 'character') renderCharacter(m);
   else if (m.module_id === 'conditional_prompt') renderConditionalPrompt(m);
+  else if (m.module_id === 'event_stream') renderEventStream(m);
   else if (m.module_id === 'character_reference') renderCharacterReference(m);
   else if (m.module_id === 'vibe_transfer') renderVibeTransfer(m);
   else if (m.module_id === 'img2img') renderImg2Img(m);
@@ -4197,6 +4219,11 @@ function syncCondScroll(el) {
 
 function renderConditionalPrompt(m) {
   if (conditionalPromptPanel) conditionalPromptPanel.render(m);
+}
+
+// ---- Event Stream module ----
+function renderEventStream(m) {
+  if (eventStreamPanel) eventStreamPanel.render(m);
 }
 
 // ---- Wildcard Module ----
@@ -4985,6 +5012,7 @@ Promise.all([
   automationPanelReady,
   characterPanelReady,
   conditionalPromptPanelReady,
+  eventStreamPanelReady,
   wildcardPanelReady,
   wildcardManagerPanelReady,
   instantWildcardPanelReady,

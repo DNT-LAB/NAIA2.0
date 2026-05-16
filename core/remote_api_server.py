@@ -7356,6 +7356,8 @@ class RemoteBridge(QObject):
             return self._read_character()
         elif module_id == "conditional_prompt":
             return self._read_conditional_prompt(ws=ws)
+        elif module_id == "event_stream":
+            return self._read_event_stream()
         elif module_id == "character_reference":
             return self._read_character_reference()
         elif module_id == "vibe_transfer":
@@ -7375,6 +7377,29 @@ class RemoteBridge(QObject):
         elif module_id == "ollama":
             return self._read_ollama()
         return {}
+
+    def _read_event_stream(self) -> dict:
+        try:
+            runtime = getattr(self.app_context, "event_stream_runtime", None)
+            state = runtime.get_state() if runtime and hasattr(runtime, "get_state") else {}
+            return {
+                "type": "module_state",
+                "module_id": "event_stream",
+                **state,
+            }
+        except Exception as e:
+            print(f"🌐 Remote: event_stream 상태 읽기 실패 — {e}")
+            return {
+                "type": "module_state",
+                "module_id": "event_stream",
+                "active": False,
+                "error": str(e),
+            }
+
+    def _broadcast_event_stream_state(self, _payload=None):
+        if not self._has_clients():
+            return
+        self._broadcast_json(self._read_event_stream())
 
     def _read_save_directory(self, ws=None) -> dict:
         try:
@@ -8879,6 +8904,8 @@ class RemoteBridge(QObject):
             self._set_character(key, value)
         elif module_id == "conditional_prompt":
             self._set_conditional_prompt(key, value)
+        elif module_id == "event_stream":
+            self._set_event_stream(key, value)
         elif module_id == "character_reference":
             self._set_character_reference(key, value)
         elif module_id == "vibe_transfer":
@@ -8895,6 +8922,48 @@ class RemoteBridge(QObject):
             self._set_e621_event(key, value)
         elif module_id == "ollama":
             self._set_ollama(key, value)
+
+    def _set_event_stream(self, key: str, value: str):
+        try:
+            runtime = getattr(self.app_context, "event_stream_runtime", None)
+            if not runtime:
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": "Event Stream runtime is not available.",
+                    "level": "error",
+                })
+                return
+
+            if key == "active":
+                enabled = self._coerce_bool(value)
+                if enabled and not runtime.is_active:
+                    runtime.start_linear()
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": "이벤트 스트림 활성화",
+                        "level": "success",
+                    })
+                elif not enabled and runtime.is_active:
+                    runtime.stop()
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": "이벤트 스트림 비활성화",
+                        "level": "success",
+                    })
+            elif key == "restart":
+                runtime.start_linear()
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": "이벤트 스트림을 기본 노드 시퀀스로 재시작했습니다.",
+                    "level": "success",
+                })
+            else:
+                return
+
+            self._broadcast_event_stream_state()
+        except Exception as e:
+            print(f"🌐 Remote: event_stream 설정 실패 — {key}={value}: {e}")
+            self._broadcast_json({"type": "toast", "message": f"이벤트 스트림 설정 실패: {e}", "level": "error"})
 
     def _set_auto_save_settings(self, key: str, value: str):
         try:
@@ -16667,6 +16736,8 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
     app_context.subscribe("cloudflared_status_changed", bridge.on_cloudflared_status_changed)
     app_context.subscribe("save_directory_changed", bridge.on_save_directory_changed)
     app_context.subscribe("comfyui_workflow_changed", bridge.on_comfyui_workflow_changed)
+    app_context.subscribe("event_stream_started", bridge._broadcast_event_stream_state)
+    app_context.subscribe("event_stream_stopped", bridge._broadcast_event_stream_state)
 
     # NAI 모드에서 시작된 경우 Anlas 타이머 부트 + 초기 fetch
     try:

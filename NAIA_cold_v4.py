@@ -3517,6 +3517,28 @@ class ModernMainWindow(QMainWindow):
                 # 프롬프트 생성 컨트롤러에 자동 생성 플래그 설정
                 self.prompt_gen_controller.auto_generation_requested = True
 
+                # Remote Web Session GSQE 필터 동기화
+                # Tag filter는 search_results 자체에 반영 (depth search assign 방식)
+                remote_ratings = getattr(self.app_context, 'remote_active_ratings', None)
+                source_row_override = None
+                event_stream_request = None
+                event_stream_runtime = getattr(self.app_context, "event_stream_runtime", None)
+                if event_stream_runtime and event_stream_runtime.is_active:
+                    event_stream_request = event_stream_runtime.prepare_random_prompt_request(
+                        self.search_results,
+                        settings,
+                        active_ratings=remote_ratings,
+                    )
+                    if event_stream_request.error_message:
+                        self.auto_generation_in_progress = False
+                        self.status_bar.showMessage(f"⚠️ {event_stream_request.error_message}", 5000)
+                        if self.automation_module and self.automation_module.automation_controller.is_running:
+                            self.automation_module.stop_automation()
+                        return
+                    settings = event_stream_request.settings
+                    remote_ratings = event_stream_request.active_ratings
+                    source_row_override = event_stream_request.source_row_override
+
                 #1009 변경사항 -> NAI 캐릭터 프롬프트 처리 위치 변경
                 char_module = self.middle_section_controller.get_module_instance("CharacterModule")
                 if (char_module and 
@@ -3528,20 +3550,19 @@ class ModernMainWindow(QMainWindow):
 
                 if (char_module and
                     char_module.activate_checkbox.isChecked() and
-                    not char_module.reroll_on_generate_checkbox.isChecked()):
+                    not char_module.reroll_on_generate_checkbox.isChecked() and
+                    not (event_stream_request and event_stream_request.skip_random_prompt_events)):
 
                     print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")
                     char_module.process_and_update_view()
 
                 # 프리셋 랜더마이저 신호 발행 (자동 생성 시 랜덤 프리셋 적용)
-                self.app_context.publish("random_prompt_triggered_preset_randomizer")
-
-                # Remote Web Session GSQE 필터 동기화
-                # Tag filter는 search_results 자체에 반영 (depth search assign 방식)
-                remote_ratings = getattr(self.app_context, 'remote_active_ratings', None)
+                if not (event_stream_request and event_stream_request.skip_random_prompt_events):
+                    self.app_context.publish("random_prompt_triggered_preset_randomizer")
                 self.prompt_gen_controller.generate_next_prompt(
                     self.search_results, settings,
-                    active_ratings=remote_ratings)
+                    active_ratings=remote_ratings,
+                    source_row_override=source_row_override)
             elif auto_generate_checkbox.isChecked() and prompt_fixed_checkbox.isChecked():
                 self.auto_generation_in_progress = True
                 self.last_auto_generation_time = current_time
@@ -5141,7 +5162,6 @@ class ModernMainWindow(QMainWindow):
         }
         if settings_override:
             settings.update(settings_override)
-        self.app_context.publish("random_prompt_triggered")
 
         # Tag filter 경로: source_row가 이미 준비되어 있으면 snapshot 복원 불필요
         if source_row_override is None:
@@ -5154,11 +5174,59 @@ class ModernMainWindow(QMainWindow):
                     self.status_bar.showMessage("⚠️ 검색 결과가 없습니다. 먼저 검색을 실행해 주세요.", 5000)
                     return
 
+        event_stream_request = None
+        event_stream_runtime = getattr(self.app_context, "event_stream_runtime", None)
+        if event_stream_runtime and event_stream_runtime.is_active:
+            event_stream_request = event_stream_runtime.prepare_random_prompt_request(
+                self.search_results,
+                settings,
+                active_ratings=active_ratings,
+                source_row_override=source_row_override,
+            )
+            if event_stream_request.error_message:
+                self.random_prompt_btn.setEnabled(True)
+                if hasattr(self, 'detached_random_btn'):
+                    self.detached_random_btn.setEnabled(True)
+                self.status_bar.showMessage(f"⚠️ {event_stream_request.error_message}", 5000)
+                return
+            settings = event_stream_request.settings
+            active_ratings = event_stream_request.active_ratings
+            source_row_override = event_stream_request.source_row_override
+            if event_stream_request.status_message:
+                self.status_bar.showMessage(event_stream_request.status_message)
+
+        if not (event_stream_request and event_stream_request.skip_random_prompt_events):
+            self.app_context.publish("random_prompt_triggered")
+
         # [수정] 수동 생성 시에는 자동 생성 플래그를 False로 설정
         self.prompt_gen_controller.auto_generation_requested = False
         self.prompt_gen_controller.generate_next_prompt(self.search_results, settings,
                                                          active_ratings=active_ratings,
                                                          source_row_override=source_row_override)
+
+    def start_event_stream_mode(self, nodes=None, run_id: str = None) -> str:
+        """내부 Event Stream 모드를 시작한다.
+
+        UI는 아직 없지만, 이 엔트리포인트를 통해 이후 Storyteller/Node 편집기가
+        선형 node 목록을 주입할 수 있다.
+        """
+        runtime = getattr(self.app_context, "event_stream_runtime", None)
+        if runtime is None:
+            raise RuntimeError("Event Stream runtime이 초기화되지 않았습니다.")
+        started_run_id = runtime.start_linear(nodes, run_id=run_id)
+        self.status_bar.showMessage("Event Stream 모드 활성화")
+        return started_run_id
+
+    def stop_event_stream_mode(self):
+        """내부 Event Stream 모드를 중지한다."""
+        runtime = getattr(self.app_context, "event_stream_runtime", None)
+        if runtime is not None:
+            runtime.stop()
+        self.status_bar.showMessage("Event Stream 모드 비활성화", 3000)
+
+    def is_event_stream_mode_active(self) -> bool:
+        runtime = getattr(self.app_context, "event_stream_runtime", None)
+        return bool(runtime and runtime.is_active)
 
     def _trigger_auto_image_generation(self):
         """자동 생성 모드에서 이미지 생성을 트리거합니다."""

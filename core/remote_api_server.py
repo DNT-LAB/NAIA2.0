@@ -7603,6 +7603,17 @@ class RemoteBridge(QObject):
             if not m:
                 return {}
 
+            # 콤보가 현재 API 모드의 프리셋 폴더와 동기화돼 있음을 보장한다.
+            # api_mode_changed 이벤트가 일부 경로(예: 웹 트리거 모드 전환)에서 늦거나 누락되면
+            # preset_combo 가 이전 모드의 항목을 들고 있어 Hires Preset Swap 등 후행 소비자가
+            # 잘못된 목록을 받게 된다. load_preset_list 는 blockSignals + 선택값 보존이 되어 있어
+            # 데스크탑 UI 에 부작용 없이 idempotent 하게 갱신된다.
+            try:
+                if hasattr(m, "load_preset_list"):
+                    m.load_preset_list()
+            except Exception as e:
+                print(f"⚠️ Remote: preset_combo 동기화 실패 — {e}")
+
             preprocessing = {}
             for label, cb in m.preprocessing_checkboxes.items():
                 key = m.option_key_map.get(label, label)

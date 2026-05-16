@@ -150,6 +150,9 @@ tabs/storyteller/save.json
 CLAUDE.md
 app_settings.json
 .claude/settings.local.json
+.claude/launch.json
+.claude/scheduled_tasks.lock
+.claude/_screens/
 /tabs/assets/characters
 data/artist_thumbnail.json
 data/artist_thumbnail_nai.json

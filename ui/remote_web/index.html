@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260516-hires-assist2">
+<link rel="stylesheet" href="style.css?v=20260516-hires-preset-swap2">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -363,6 +363,7 @@
                 <span class="param-label">Hires-fix</span>
                 <input type="checkbox" class="param-check" id="pEnableHr" onchange="setParam('enable_hr',String(this.checked))">
               </div>
+              <div class="webui-hires-scroll">
               <div class="param-row webui-hires-assist-row">
                 <span class="param-label param-sublabel">Assist</span>
                 <div class="webui-hires-assist-control">
@@ -375,6 +376,15 @@
                     <button type="button" class="webui-hires-assist-target" data-webui-hiresfix-assist-target="768" aria-pressed="false" onclick="setWebUiHiresfixAssistTarget(768)">768^2</button>
                   </div>
                 </div>
+              </div>
+              <div class="param-row">
+                <span class="param-label param-sublabel" title="Hires.fix 패스에 다른 프리셋을 적용합니다. 와일드카드 선택값은 메인 패스 그대로 재사용됩니다.">Preset Swap</span>
+                <select class="param-select" id="pHiresPresetSwap"
+                        data-preview-kind="prompt-preset"
+                        data-preview-actions="none"
+                        onchange="setParam('hires_preset_swap', this.value)">
+                  <option value="">현재 프리셋 사용</option>
+                </select>
               </div>
               <div class="param-row">
                 <span class="param-label">HR Scale</span>
@@ -396,6 +406,7 @@
               <div class="param-row">
                 <span class="param-label">HR CFG</span>
                 <input class="param-input" id="pHrCfg" type="number" step="0.1" min="0" max="30" value="7" onchange="setParam('hr_cfg',this.value)">
+              </div>
               </div>
             </div>
             <!-- ComfyUI controls -->
@@ -879,6 +890,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260516-hires-assist2"></script>
+<script src="app.js?v=20260516-hires-preset-swap2"></script>
 </body>
 </html>

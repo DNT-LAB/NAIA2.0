@@ -308,9 +308,13 @@ class WildcardProcessor:
         total_entries = len(entries)
 
         # 🔒 오버라이드 확인 (모든 모드 공통, 카운터 동결)
+        # list 형태는 큐처럼 앞에서 한 개씩 소비하고, 소진 시 일반 분기로 폴백한다.
+        # str 형태는 기존 동작과 같이 단일 고정값을 반환한다.
         ctx_ref = getattr(self.wildcard_manager, '_app_context_ref', None)
         ctx = ctx_ref() if ctx_ref else None
         override_val = ctx.wildcard_override.get(actual_wildcard_key) if ctx else None
+        if isinstance(override_val, list):
+            override_val = override_val.pop(0) if override_val else None
 
         if override_val is not None:
             chosen_line = override_val

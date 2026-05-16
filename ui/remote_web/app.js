@@ -1063,6 +1063,8 @@ function _collectCurrentParams() {
     if (denoise) p.denoising_strength = parseNumber(denoise.value, 0.5);
     if (hiresSteps) p.hires_steps = Math.trunc(parseNumber(hiresSteps.value, 10));
     if (hrCfg) p.hr_cfg = parseNumber(hrCfg.value, 7.0);
+    const presetSwap = ($('pHiresPresetSwap')?.value || '').trim();
+    if (presetSwap) p.hires_preset_swap = presetSwap;
     const promptWeight = $('pAnimaWeight')?.value?.trim();
     if (promptWeight) {
       p.anima_weight = promptWeight;
@@ -1220,6 +1222,40 @@ function collectWebUiHiresfixAssistOverrides(mode = currentMode || modeSelect?.v
     webui_hiresfix_assist: Boolean(state.enabled),
     webui_hiresfix_assist_target: state.target,
   };
+}
+
+function _compactHiresPreviewText(text, limit) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > limit ? `${normalized.slice(0, Math.max(0, limit - 3))}...` : normalized;
+}
+
+function refreshHiresPresetSwapOptions(m) {
+  const select = document.getElementById('pHiresPresetSwap');
+  if (!select) return;
+  const prevValue = select.value;
+  const presets = Array.isArray(m?.preset_options) ? m.preset_options : [];
+  const summaries = Array.isArray(m?.preset_summaries) ? m.preset_summaries : [];
+  const summaryMap = new Map();
+  summaries.forEach(s => { if (s && s.name) summaryMap.set(String(s.name), s); });
+
+  const opts = ['<option value="">현재 프리셋 사용</option>'];
+  for (const raw of presets) {
+    const name = String(raw || '');
+    if (!name || name === '*randomized' || name === '(프리셋 없음)') continue;
+    const s = summaryMap.get(name);
+    const attrs = s ? [
+      `data-preview-name="${escHtml(s.name || name)}"`,
+      `data-preview-mode="${escHtml(s.api_mode || '')}"`,
+      `data-preview-prefix="${escHtml(_compactHiresPreviewText(s.pre_prompt_preview, 1200))}"`,
+      `data-preview-description="${escHtml(_compactHiresPreviewText(s.description, 300))}"`,
+      `data-preview-thumbnail="${escHtml(s.thumbnail_url || '')}"`,
+    ].join(' ') : '';
+    opts.push(`<option value="${escHtml(name)}" ${attrs}>${escHtml(name)}</option>`);
+  }
+  select.innerHTML = opts.join('');
+  const validValues = new Set(['', ...presets.map(String)]);
+  select.value = validValues.has(prevValue) ? prevValue : '';
 }
 
 function currentComfyUiSamplingMode() {
@@ -1451,7 +1487,10 @@ function onInitComplete() {
     ws.send(JSON.stringify({type: 'get_search_state'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'webui_hiresfix_assist'}));
+    ws.send(JSON.stringify({type: 'get_module_state', module_id: 'prompt_engineering'}));
   }
+  const cachedPe = moduleStateCache.get('prompt_engineering');
+  if (cachedPe) refreshHiresPresetSwapOptions(cachedPe);
 }
 
 function afterWsJsonMessage(m) {
@@ -1544,6 +1583,7 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
         socket.send(JSON.stringify({type: 'get_search_state'}));
         socket.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
         socket.send(JSON.stringify({type: 'get_module_state', module_id: 'webui_hiresfix_assist'}));
+        socket.send(JSON.stringify({type: 'get_module_state', module_id: 'prompt_engineering'}));
         // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
       },
       onClose: () => {
@@ -4057,6 +4097,7 @@ function onModuleState(m) {
   if (m.module_id === 'prompt_engineering') {
     lastPromptEngineeringState = m;
     syncPromptEngineeringPopups();
+    refreshHiresPresetSwapOptions(m);
   }
   if (m.module_id === 'chunk' && isChunkOpen()) {
     renderChunk(m);

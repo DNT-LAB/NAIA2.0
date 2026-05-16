@@ -6,6 +6,7 @@ from core.wildcard_processor import split_tags_smart
 from PIL import Image
 import piexif
 import piexif.helper
+import copy
 import json
 import re, random
 from pathlib import Path
@@ -879,8 +880,109 @@ class GenerationController:
         except Exception:
             self.generation_worker._scoped_wildcard_history = {}
 
+        # 📌 메인 스레드에서 WEBUI Hires Preset Swap 사전 계산.
+        # 워커 스레드의 api_service 는 결과 문자열만 읽어 payload 에 통과시키므로
+        # 파이프라인 훅의 UI 위젯 접근을 메인 스레드로 한정한다.
+        try:
+            self._apply_hires_preset_swap(params)
+        except Exception as e:
+            print(f"⚠️ [HIRES SWAP] 사전 계산 중 예외 — 스왑 없이 진행: {e}")
+
         self.generation_thread.start()
-    
+
+    # ------------------------------------------------------------
+    # WEBUI Hires Preset Swap
+    # ------------------------------------------------------------
+    def _apply_hires_preset_swap(self, params: dict) -> None:
+        """
+        WEBUI Hires.fix 단계에서만 사용될 hr_prompt / hr_negative_prompt 를
+        메인 패스와 동일한 source_row + 동일한 와일드카드 선택값으로 다른 프리셋을
+        적용해 사전 생성한다. 워커는 결과 문자열만 payload 에 실어 보낸다.
+
+        스왑 적용 조건:
+            - WEBUI 모드 + enable_hr + img2img 아님 + hires_preset_swap 비어있지 않음
+            - current_prompt_context 가 살아있고 wildcard_history 가 캡처되어 있음
+            - 메인 윈도우 prompt_gen_controller 접근 가능
+            - 프리셋 파일 존재
+        """
+        swap_name = str(params.get('hires_preset_swap') or '').strip()
+        if not swap_name:
+            return
+        if str(params.get('api_mode') or '').upper() != 'WEBUI':
+            return
+        if not bool(params.get('enable_hr')):
+            return
+        if params.get('image_bytes'):
+            # img2img / inpaint 는 Hires 비대상.
+            return
+
+        ctx = getattr(self.context, 'current_prompt_context', None)
+        if ctx is None or ctx.source_row is None:
+            print("⚠️ [HIRES SWAP] current_prompt_context 미존재 — 스왑 스킵")
+            return
+
+        main_window = getattr(self.context, 'main_window', None)
+        prompt_gen = getattr(main_window, 'prompt_gen_controller', None) if main_window else None
+        if prompt_gen is None:
+            print("⚠️ [HIRES SWAP] prompt_gen_controller 접근 불가 — 스왑 스킵")
+            return
+
+        api_mode = self.context.get_api_mode() or 'WEBUI'
+        preset_path = Path('save') / 'presets' / api_mode / f"{swap_name}.json"
+        if not preset_path.exists():
+            print(f"⚠️ [HIRES SWAP] 프리셋 파일 없음: {preset_path}")
+            return
+
+        try:
+            preset_data = json.loads(preset_path.read_text(encoding='utf-8'))
+        except Exception as e:
+            print(f"⚠️ [HIRES SWAP] 프리셋 파싱 실패 ({swap_name}): {e}")
+            return
+
+        module_settings = preset_data.get('module_settings') or {}
+        main_settings = preset_data.get('main_settings') or {}
+
+        # session_p_eng_override 페이로드 — prompt_engineering_module 의 훅이 UI 대신 읽음.
+        peng_payload = {
+            'pre_prompt': module_settings.get('pre_prompt', ''),
+            'post_prompt': module_settings.get('post_prompt', ''),
+            'auto_hide': module_settings.get('auto_hide_prompt', ''),
+            'preprocessing_options': dict(module_settings.get('preprocessing_options') or {}),
+        }
+
+        # wildcard_override (list-consumable) — 메인 패스의 선택값을 그대로 재현.
+        wc_override_payload = {
+            key: list(values)
+            for key, values in (ctx.wildcard_history or {}).items()
+            if values
+        }
+
+        saved_peng = getattr(self.context, 'session_p_eng_override', None)
+        saved_wco = copy.deepcopy(getattr(self.context, 'wildcard_override', {}) or {})
+        try:
+            self.context.session_p_eng_override = peng_payload
+            self.context.wildcard_override = wc_override_payload
+
+            silent_settings = dict(ctx.settings or {})
+            silent_settings.setdefault('api_mode', api_mode)
+
+            source_row_dict = ctx.source_row.to_dict()
+            silent_prompt = prompt_gen.generate_instant_source_silent(source_row_dict, silent_settings)
+
+            if isinstance(silent_prompt, str) and silent_prompt.strip():
+                params['hr_prompt'] = silent_prompt
+                print(f"🧩 [HIRES SWAP] '{swap_name}' 프리셋으로 hr_prompt 생성 ({len(silent_prompt)} chars)")
+            else:
+                print(f"⚠️ [HIRES SWAP] silent 생성 결과 비어있음 — hr_prompt 미설정")
+
+            # 네거티브는 파이프라인 외부값. 프리셋이 보유 시 hr_negative_prompt 로 통과.
+            preset_negative = main_settings.get('negative') or main_settings.get('negative_prompt')
+            if isinstance(preset_negative, str) and preset_negative.strip():
+                params['hr_negative_prompt'] = preset_negative
+        finally:
+            self.context.session_p_eng_override = saved_peng
+            self.context.wildcard_override = saved_wco
+
     def _on_generation_started(self):
         """생성 시작 시 호출되는 슬롯"""
         self.is_generating = True

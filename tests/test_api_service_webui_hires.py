@@ -128,3 +128,58 @@ def test_webui_hiresfix_assist_requires_hires_enabled():
     )
 
     assert payload == {"width": 1024, "height": 1024, "enable_hr": False}
+
+
+def test_webui_hires_preset_swap_passes_hr_prompts_to_payload():
+    service = APIService(app_context=None)
+    payload = {"width": 512, "height": 512}
+
+    service._apply_webui_hires_params(
+        payload,
+        {
+            "enable_hr": True,
+            "hr_prompt": "best quality, detailed face, sharp focus",
+            "hr_negative_prompt": "blurry, soft focus",
+        },
+        is_img2img=False,
+    )
+
+    assert payload["hr_prompt"] == "best quality, detailed face, sharp focus"
+    assert payload["hr_negative_prompt"] == "blurry, soft focus"
+
+
+def test_webui_hires_preset_swap_omits_empty_hr_prompts():
+    service = APIService(app_context=None)
+    payload = {"width": 512, "height": 512}
+
+    service._apply_webui_hires_params(
+        payload,
+        {
+            "enable_hr": True,
+            "hr_prompt": "",
+            "hr_negative_prompt": "   ",
+        },
+        is_img2img=False,
+    )
+
+    # 빈 값은 키 자체를 보내지 않아 Forge 가 메인 프롬프트를 그대로 재사용하도록 한다.
+    assert "hr_prompt" not in payload
+    assert "hr_negative_prompt" not in payload
+
+
+def test_webui_hires_preset_swap_skipped_when_img2img():
+    service = APIService(app_context=None)
+    payload = {"width": 512, "height": 512}
+
+    service._apply_webui_hires_params(
+        payload,
+        {
+            "enable_hr": True,
+            "hr_prompt": "should not appear",
+            "hr_negative_prompt": "should not appear",
+        },
+        is_img2img=True,
+    )
+
+    assert "hr_prompt" not in payload
+    assert "hr_negative_prompt" not in payload

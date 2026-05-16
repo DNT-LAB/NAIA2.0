@@ -2,9 +2,11 @@ import requests
 import zipfile
 import io, time, re, json
 import base64
+import copy
 import math
 import numpy as np
 import gc
+from pathlib import Path
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from typing import Dict, Any, TYPE_CHECKING, List
@@ -201,6 +203,15 @@ class APIService:
             "hr_additional_modules": params.get("hr_additional_modules") or ["Use same choices"],
             "hr_cfg": self._coerce_float_param(params.get("hr_cfg"), 7.0),
         })
+
+        # Hires Preset Swap 결과(메인 스레드에서 사전 계산됨)를 payload에 통과.
+        # 비어있으면 키 자체를 보내지 않아 Forge가 메인 프롬프트를 재사용하도록 함.
+        hr_prompt = params.get("hr_prompt")
+        if isinstance(hr_prompt, str) and hr_prompt.strip():
+            payload["hr_prompt"] = hr_prompt
+        hr_negative = params.get("hr_negative_prompt")
+        if isinstance(hr_negative, str) and hr_negative.strip():
+            payload["hr_negative_prompt"] = hr_negative
 
     def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
         """

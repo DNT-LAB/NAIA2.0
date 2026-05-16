@@ -8237,6 +8237,26 @@ body.resizing-result-info {
 .param-sublabel {
   color: rgba(138,151,191,0.72);
 }
+.webui-hires-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* 스크롤 영역임을 시각적으로 살짝 구분 */
+  border-top: 1px solid rgba(255,255,255,0.05);
+  margin-top: 2px;
+  /* 스크롤바 폭 보정 (내부 행이 살짝 끼이지 않도록) */
+  scrollbar-gutter: stable;
+}
+.webui-hires-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.webui-hires-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 4px;
+}
+.webui-hires-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.16);
+}
 .webui-hires-assist-row {
   min-height: 32px;
   padding-top: 5px;

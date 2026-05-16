@@ -836,6 +836,15 @@ class RemoteBridge(QObject):
             "random_prompt_weight": weight,
         }
 
+    def get_webui_hiresfix_assist_params(self) -> dict:
+        state = self._normalize_webui_hiresfix_assist_state(
+            getattr(self, "_webui_hiresfix_assist", None)
+        )
+        return {
+            "webui_hiresfix_assist": bool(state["enabled"]),
+            "webui_hiresfix_assist_target": state["target"],
+        }
+
     def _normalize_rating_list(self, ratings=None) -> list[str]:
         source = ratings if ratings is not None else ['g', 's', 'q', 'e']
         if isinstance(source, str):

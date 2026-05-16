@@ -332,6 +332,25 @@ class GenerationController:
         self._thread_cleanup_in_progress = False  # 스레드 정리 중 여부
         self._pending_thread_refs = []  # 정리 대기 중인 스레드 참조
 
+    def _apply_webui_hiresfix_assist_defaults(self, params: dict) -> None:
+        if str(params.get('api_mode') or '').upper() != "WEBUI":
+            return
+        bridge = getattr(self.context, "remote_bridge", None)
+        getter = getattr(bridge, "get_webui_hiresfix_assist_params", None)
+        if not callable(getter):
+            return
+        try:
+            defaults = getter()
+        except Exception as e:
+            print(f"⚠️ WEBUI Hiresfix Assist 설정 읽기 실패: {e}")
+            return
+        if not isinstance(defaults, dict):
+            return
+        if "webui_hiresfix_assist" in defaults:
+            params.setdefault("webui_hiresfix_assist", defaults["webui_hiresfix_assist"])
+        if "webui_hiresfix_assist_target" in defaults:
+            params.setdefault("webui_hiresfix_assist_target", defaults["webui_hiresfix_assist_target"])
+
     def _prepare_comfyui_workflow_with_wildcards(self, params: dict) -> bool:
         """
         🌉 ComfyUI 전용 브릿지: 와일드카드 확장 → 워크플로우 생성
@@ -464,6 +483,8 @@ class GenerationController:
             for module in self.module_instances:
                 module_params = module.get_parameters()
                 if module_params: params.update(module_params)
+
+            self._apply_webui_hiresfix_assist_defaults(params)
 
             # 랜덤 해상도 처리
             if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:
@@ -1931,6 +1952,8 @@ class GenerationController:
             module_params = module.get_parameters()
             if module_params:
                 params.update(module_params)
+
+        self._apply_webui_hiresfix_assist_defaults(params)
 
         # 랜덤 해상도 처리
         if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:

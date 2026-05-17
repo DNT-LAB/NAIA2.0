@@ -7183,7 +7183,9 @@ class RemoteBridge(QObject):
                     params["sampling_mode"] = "anima"
             if hasattr(mw, 'comfyui_rescale_slider'):
                 params["rescale_cfg"] = round(mw.comfyui_rescale_slider.value() / 100.0, 2)
-            if hasattr(mw, 'anima_weight_edit'):
+            if mode == "WEBUI":
+                params.update(self._remote_web_generation_param_defaults())
+            elif hasattr(mw, 'anima_weight_edit'):
                 raw_anima_weight = mw.anima_weight_edit.text().strip()
                 params["anima_weight_raw"] = raw_anima_weight
                 params["anima_weight"] = self._format_anima_weight(raw_anima_weight)

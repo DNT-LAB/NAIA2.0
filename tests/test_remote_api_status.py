@@ -1341,6 +1341,63 @@ def test_remote_web_anima_weight_param_is_saved_for_next_session(tmp_path, monke
     assert saved["remote_web"]["random_prompt_weight"] == "0.85"
 
 
+def test_webui_desktop_snapshot_uses_saved_remote_prompt_weight(tmp_path, monkeypatch):
+    class _ValueWidget:
+        def __init__(self, value, minimum=1, maximum=50):
+            self._value = value
+            self._minimum = minimum
+            self._maximum = maximum
+
+        def value(self):
+            return self._value
+
+        def minimum(self):
+            return self._minimum
+
+        def maximum(self):
+            return self._maximum
+
+    class _WebuiContext(_AppContext):
+        def get_api_mode(self):
+            return "WEBUI"
+
+    monkeypatch.chdir(tmp_path)
+    Path("app_settings.json").write_text(
+        json.dumps({"remote_web": {"random_prompt_weight": "0.85"}}),
+        encoding="utf-8",
+    )
+    ctx = _WebuiContext()
+    ctx.main_window = SimpleNamespace(
+        model_combo=_FakeComboBox(["desktop-webui-model"], "desktop-webui-model"),
+        sampler_combo=_FakeComboBox(["Euler a"], "Euler a"),
+        scheduler_combo=_FakeComboBox(["Automatic"], "Automatic"),
+        resolution_combo=_FakeComboBox(["832 x 1216"], "832 x 1216"),
+        steps_spinbox=_ValueWidget(28),
+        cfg_scale_slider=_ValueWidget(50),
+        cfg_rescale_slider=_ValueWidget(40),
+        seed_input=_FakeLineEdit("-1"),
+        seed_fix_checkbox=_FakeCheckBox(False),
+        random_resolution_checkbox=_FakeCheckBox(False),
+        auto_fit_resolution_checkbox=_FakeCheckBox(False),
+        advanced_checkboxes={},
+        enable_hr_checkbox=_FakeCheckBox(True),
+        hr_scale_spinbox=_ValueWidget(3.0),
+        hr_upscaler_combo=_FakeComboBox(["Latent"], "Latent"),
+        denoising_strength_spinbox=_ValueWidget(0.5),
+        hires_steps_spinbox=_ValueWidget(12),
+        hr_cfg_spinbox=_ValueWidget(7.0),
+        anima_weight_edit=_FakeLineEdit("1"),
+    )
+    bridge = RemoteBridge(ctx)
+
+    params = bridge.get_generation_params()
+
+    assert params["api_mode"] == "WEBUI"
+    assert params["anima_weight"] == "0.85"
+    assert params["anima_weight_raw"] == "0.85"
+    assert params["random_prompt_weight"] == "0.85"
+
+
 def test_generation_param_schema_strips_desktop_selected_values():
     params = {
         "type": "params",

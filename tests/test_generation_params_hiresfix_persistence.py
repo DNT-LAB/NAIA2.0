@@ -43,14 +43,27 @@ class _ComboWidget:
         self._current = self._values[index]
 
 
+class _LineWidget:
+    def __init__(self, text):
+        self._text = text
+
+    def text(self):
+        return self._text
+
+    def setText(self, text):
+        self._text = str(text)
+
+
 def _webui_window():
     return SimpleNamespace(
+        get_current_api_mode=lambda: "WEBUI",
         enable_hr_checkbox=_CheckWidget(True),
         hr_scale_spinbox=_ValueWidget(3.0),
         hr_upscaler_combo=_ComboWidget(["Lanczos", "Latent (nearest-exact)"], "Latent (nearest-exact)"),
         denoising_strength_spinbox=_ValueWidget(0.42),
         hires_steps_spinbox=_ValueWidget(12),
         hr_cfg_spinbox=_ValueWidget(6.0),
+        anima_weight_edit=_LineWidget("0.85"),
     )
 
 
@@ -65,6 +78,8 @@ def test_webui_hiresfix_params_are_collected_from_current_widgets():
     assert settings["denoising_strength"] == 0.42
     assert settings["hires_steps"] == 12
     assert settings["hr_cfg"] == 6.0
+    assert settings["anima_weight"] == "0.85"
+    assert settings["random_prompt_weight"] == "0.85"
 
 
 def test_webui_hiresfix_params_are_restored_to_current_widgets():
@@ -86,3 +101,15 @@ def test_webui_hiresfix_params_are_restored_to_current_widgets():
     assert window.denoising_strength_spinbox.value() == 0.65
     assert window.hires_steps_spinbox.value() == 18
     assert window.hr_cfg_spinbox.value() == 5.5
+    assert window.anima_weight_edit.text() == "0.85"
+
+
+def test_webui_prompt_weight_is_restored_when_present():
+    window = _webui_window()
+    manager = GenerationParamsManager(window)
+
+    manager.apply_settings({
+        "random_prompt_weight": "0.7",
+    })
+
+    assert window.anima_weight_edit.text() == "0.7"

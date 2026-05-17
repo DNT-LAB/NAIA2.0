@@ -225,8 +225,39 @@ class PromptProcessor:
                 context = module_hook.execute_pipeline_hook(context)
             except Exception as e:
                 print(f"파이프라인 훅 실행 중 오류 ({module_hook.get_title()}): {e}")
-                
+
         return context
+
+    def _apply_remote_auto_resolution_preset_defaults(self, settings: dict, api_mode: str) -> None:
+        """Remote Web Auto Gen also needs the server-owned resolution preset state."""
+        normalized_mode = str(api_mode or '').strip().upper()
+        if normalized_mode not in {'WEBUI', 'COMFYUI'}:
+            return
+        if 'resolution_preset_enabled' in settings or 'resolution_preset' in settings:
+            return
+        if not settings.get('auto_generate', False):
+            return
+        bridge = getattr(self.app_context, 'remote_bridge', None)
+        enabled_getter = getattr(bridge, 'is_remote_auto_generate_enabled', None)
+        if not callable(enabled_getter):
+            return
+        try:
+            if not bool(enabled_getter()):
+                return
+        except Exception:
+            return
+        preset_getter = getattr(bridge, 'get_resolution_preset_params', None)
+        if not callable(preset_getter):
+            return
+        try:
+            defaults = preset_getter(normalized_mode)
+        except Exception:
+            return
+        if not isinstance(defaults, dict) or not defaults.get('resolution_preset_enabled'):
+            return
+        settings.setdefault('resolution_preset_enabled', True)
+        if 'resolution_preset' in defaults:
+            settings.setdefault('resolution_preset', defaults['resolution_preset'])
 
     def _step_2_fit_resolution(self, context: PromptContext) -> PromptContext:
         """[신규] 해상도 자동 맞춤 로직을 파이프라인의 한 단계로 추가합니다."""
@@ -245,6 +276,7 @@ class PromptProcessor:
                         settings.get('api_mode')
                         or getattr(getattr(self, 'app_context', None), 'current_api_mode', '')
                     )
+                    self._apply_remote_auto_resolution_preset_defaults(settings, api_mode)
                     if (
                         str(api_mode or '').strip().upper() in {'WEBUI', 'COMFYUI'}
                         and settings.get('resolution_preset_enabled')

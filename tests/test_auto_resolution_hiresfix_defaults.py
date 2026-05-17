@@ -128,6 +128,61 @@ def test_webui_resolution_preset_draft_auto_fit_preserves_portrait():
     assert context.metadata["detected_resolution"] == (448, 640)
 
 
+def test_remote_web_auto_gen_auto_fit_uses_remote_resolution_preset():
+    processor = PromptProcessor.__new__(PromptProcessor)
+    processor.app_context = SimpleNamespace(
+        current_api_mode="",
+        remote_bridge=SimpleNamespace(
+            is_remote_auto_generate_enabled=lambda: True,
+            get_resolution_preset_params=lambda mode=None: {
+                "resolution_preset_enabled": True,
+                "resolution_preset": "max",
+            },
+        ),
+    )
+    context = PromptContext(
+        source_row=pd.Series({"image_width": 2496, "image_height": 3648}),
+        settings={
+            "auto_fit_resolution": True,
+            "auto_generate": True,
+            "api_mode": "WEBUI",
+        },
+    )
+
+    processor._step_2_fit_resolution(context)
+
+    assert context.settings["resolution_preset_enabled"] is True
+    assert context.settings["resolution_preset"] == "max"
+    assert context.metadata["detected_resolution"] == (1216, 1792)
+
+
+def test_desktop_auto_gen_auto_fit_does_not_use_remote_resolution_preset():
+    processor = PromptProcessor.__new__(PromptProcessor)
+    processor.app_context = SimpleNamespace(
+        current_api_mode="",
+        remote_bridge=SimpleNamespace(
+            is_remote_auto_generate_enabled=lambda: False,
+            get_resolution_preset_params=lambda mode=None: {
+                "resolution_preset_enabled": True,
+                "resolution_preset": "max",
+            },
+        ),
+    )
+    context = PromptContext(
+        source_row=pd.Series({"image_width": 2496, "image_height": 3648}),
+        settings={
+            "auto_fit_resolution": True,
+            "auto_generate": True,
+            "api_mode": "WEBUI",
+        },
+    )
+
+    processor._step_2_fit_resolution(context)
+
+    assert "resolution_preset_enabled" not in context.settings
+    assert context.metadata["detected_resolution"] == (832, 1216)
+
+
 def test_webui_resolution_preset_default_uses_square_without_touching_main_combo():
     controller, combo = _controller_with_resolution_combo()
     params = {
@@ -174,6 +229,30 @@ def test_webui_resolution_preset_random_res_uses_selected_preset(monkeypatch):
         "resolution_preset_enabled": True,
         "resolution_preset": "quality",
         "random_resolution": True,
+    }
+
+    controller._apply_random_resolution(params)
+
+    assert params["resolution"] == "1088 x 1600"
+    assert params["width"] == 1088
+    assert params["height"] == 1600
+    assert combo.set_current_index_calls == []
+
+
+def test_webui_resolution_preset_random_res_ignores_stale_detected_flag_when_auto_res_off(monkeypatch):
+    controller, combo = _controller_with_resolution_combo()
+    controller.context.main_window.resolution_is_detected = True
+    controller.context.main_window.detected_resolution_override = (832, 1216)
+    monkeypatch.setattr(
+        "core.generation_controller.random.choice",
+        lambda values: "1088 x 1600",
+    )
+    params = {
+        "api_mode": "WEBUI",
+        "resolution_preset_enabled": True,
+        "resolution_preset": "quality",
+        "random_resolution": True,
+        "auto_fit_resolution": False,
     }
 
     controller._apply_random_resolution(params)

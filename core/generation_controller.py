@@ -535,8 +535,24 @@ class GenerationController:
                     combo.setCurrentIndex(index)
         return True
 
+    def _has_active_detected_resolution(self, params: dict) -> bool:
+        if not bool(params.get("auto_fit_resolution")):
+            return False
+        main_window = getattr(self.context, "main_window", None)
+        if not bool(getattr(main_window, "resolution_is_detected", False)):
+            return False
+        detected = getattr(main_window, "detected_resolution_override", None)
+        if not detected:
+            return False
+        try:
+            width_raw, height_raw = detected
+            width, height = int(width_raw), int(height_raw)
+        except (TypeError, ValueError):
+            return False
+        return width > 0 and height > 0
+
     def _apply_resolution_preset_default(self, params: dict) -> None:
-        if params.get("random_resolution") or self.context.main_window.resolution_is_detected:
+        if params.get("random_resolution") or self._has_active_detected_resolution(params):
             return
         if not self._resolution_preset_labels_for_params(params):
             return
@@ -548,7 +564,7 @@ class GenerationController:
         self._apply_resolution_label_to_params(params, label)
 
     def _apply_random_resolution(self, params: dict) -> None:
-        if not params.get('random_resolution', False) or self.context.main_window.resolution_is_detected:
+        if not params.get('random_resolution', False) or self._has_active_detected_resolution(params):
             return
         preset_labels = self._resolution_preset_labels_for_params(params)
         if preset_labels:

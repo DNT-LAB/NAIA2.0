@@ -395,7 +395,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260509_mo
   .catch(error => {
     console.error('Failed to initialize result history module', error);
   });
-const resultEnhanceReady = import('./js/features/resultEnhance.mjs?v=20260517-webui-enhance-menu1')
+const resultEnhanceReady = import('./js/features/resultEnhance.mjs?v=20260517-webui-enhance-queue1')
   .then(({createResultEnhanceController}) => {
     resultEnhance = createResultEnhanceController({
       document,

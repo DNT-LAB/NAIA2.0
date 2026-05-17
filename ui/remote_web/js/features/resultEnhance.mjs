@@ -98,7 +98,7 @@ export function createResultEnhanceController({
   }
 
   function getDisabledReason(meta = currentMeta) {
-    if (running) return 'Enhance is running';
+    if (running && !isWebUiMode()) return 'Enhance is running';
     if (!meta) return 'No generated image is selected';
     if (!isSupportedMode()) return 'Enhance is available in NAI or WEBUI mode only';
     if (!meta.can_enhance) {
@@ -116,7 +116,7 @@ export function createResultEnhanceController({
     const disabledReason = getDisabledReason();
     button.disabled = !!disabledReason;
     button.classList.toggle('running', running);
-    button.textContent = running ? 'Enhancing...' : label();
+    button.textContent = running && !isWebUiMode() ? 'Enhancing...' : label();
     button.title = disabledReason || (isWebUiMode()
       ? 'Run WEBUI Hires.fix Enhance on the current desktop result'
       : 'Run NAI Enhance on the current desktop result');

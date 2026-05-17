@@ -2187,6 +2187,102 @@ def test_webui_result_enhance_queues_generation_request_when_generation_is_busy(
     assert sent == [{"type": "toast", "message": "Enhance queued", "level": "success"}]
 
 
+def test_webui_result_enhance_allows_multiple_queue_requests_while_running():
+    image = Image.new("RGB", (320, 384), "white")
+    item = SimpleNamespace(
+        image=image,
+        generation_params={
+            "input": "1girl",
+            "negative_prompt": "",
+            "seed": 123,
+            "width": 512,
+            "height": 640,
+        },
+        source_row=None,
+    )
+    image_window = SimpleNamespace(
+        auto_save_checkbox=object(),
+        current_history_item=item,
+    )
+    queue_manager = _EnhanceQueueManager()
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "WEBUI"
+    ctx.secure_token_manager = _TokenManager({"webui_url": "127.0.0.1:7860"})
+    ctx.generation_queue_manager = queue_manager
+    ctx.main_window = SimpleNamespace(
+        image_window=image_window,
+        generation_controller=SimpleNamespace(
+            is_generating=True,
+            _process_next_queue_request=lambda: None,
+        ),
+    )
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    sent = []
+    bridge._broadcast_json = broadcasts.append
+    bridge._send_json_to = lambda ws, data: sent.append(data)
+    payload = json.dumps({
+        "mode": "WEBUI",
+        "hires_settings": {
+            "hr_scale": 3,
+            "hr_upscaler": "Latent (nearest-exact)",
+            "denoising_strength": 0.7,
+            "hires_steps": 10,
+            "hr_cfg": 5.5,
+        },
+    })
+
+    bridge._do_result_enhance(ws=_ws("127.0.0.1"), payload_json=payload)
+    bridge._do_result_enhance(ws=_ws("127.0.0.1"), payload_json=payload)
+
+    assert len(queue_manager.requests) == 2
+    assert len({request.request_id for request in queue_manager.requests}) == 2
+    assert {request.request_id for request in queue_manager.requests} == bridge._remote_webui_enhance_request_ids
+    assert bridge._remote_enhance_in_flight is True
+    assert [data["message"] for data in broadcasts if data.get("type") == "result_enhance_state"] == [
+        "Enhance queued",
+        "Enhance queued",
+    ]
+    assert sent == [
+        {"type": "toast", "message": "Enhance queued", "level": "success"},
+        {"type": "toast", "message": "Enhance queued", "level": "success"},
+    ]
+
+
+def test_webui_result_enhance_completion_keeps_state_running_until_tracked_queue_empty():
+    bridge = RemoteBridge(_AppContext())
+    bridge._remote_enhance_in_flight = True
+    bridge._remote_enhance_api_mode = "WEBUI"
+    bridge._remote_webui_enhance_request_ids = {"enhance-1", "enhance-2"}
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge.on_result_enhance_completed(True, "Enhance complete", "enhance-1")
+
+    assert bridge._remote_enhance_in_flight is True
+    assert bridge._remote_enhance_api_mode == "WEBUI"
+    assert bridge._remote_webui_enhance_request_ids == {"enhance-2"}
+    assert broadcasts[-1] == {
+        "type": "result_enhance_state",
+        "running": True,
+        "success": True,
+        "message": "Enhance complete",
+    }
+
+    bridge.on_result_enhance_completed(True, "Enhance complete", "enhance-2")
+
+    assert bridge._remote_enhance_in_flight is False
+    assert bridge._remote_enhance_api_mode == ""
+    assert bridge._remote_enhance_request_id == ""
+    assert bridge._remote_webui_enhance_request_ids == set()
+    assert broadcasts[-1] == {
+        "type": "result_enhance_state",
+        "running": False,
+        "success": True,
+        "message": "Enhance complete",
+    }
+
+
 def test_webui_result_enhance_queue_remove_clears_enhance_state():
     queue_manager = _EnhanceQueueManager()
     request = SimpleNamespace(

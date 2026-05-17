@@ -28,7 +28,7 @@ def test_nearest_standard_1mp_resolution_upscales_small_portrait_to_standard():
 def test_anima_resolution_presets_cover_requested_bounds():
     assert ANIMA_RESOLUTION_LABELS[0] == "512 x 512"
     assert "1536 x 1536" in ANIMA_RESOLUTION_LABELS
-    assert len(ANIMA_RESOLUTIONS) == 49
+    assert len(ANIMA_RESOLUTIONS) == 43
     for width, height in ANIMA_RESOLUTIONS:
         assert width % 64 == 0
         assert height % 64 == 0
@@ -46,8 +46,8 @@ def test_nearest_anima_resolution_fits_to_anima_ladder():
 
 
 def test_anima_resolution_preset_candidates_stay_within_selected_size():
-    assert "512 x 768" in anima_resolution_preset_labels("draft")
-    assert nearest_anima_preset_resolution(640, 960, "draft") == (512, 768)
+    assert anima_resolution_preset_labels("draft") == ("512 x 512",)
+    assert nearest_anima_preset_resolution(640, 960, "draft") == (512, 512)
     assert anima_resolution_preset_labels("quality")[0] == "1344 x 1344"
     assert "1536 x 1536" not in anima_resolution_preset_labels("quality")
     assert nearest_anima_preset_resolution(2496, 3648, "quality") == (1088, 1600)

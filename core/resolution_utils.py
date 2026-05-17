@@ -22,12 +22,6 @@ ANIMA_MAX_PIXELS = 1536 * 1536
 ANIMA_MAX_DIMENSION = 1792
 ANIMA_RESOLUTIONS: tuple[tuple[int, int], ...] = (
     (512, 512),
-    (512, 576),
-    (512, 640),
-    (512, 768),
-    (576, 512),
-    (640, 512),
-    (768, 512),
     (768, 768),
     (704, 832),
     (704, 896),
@@ -77,12 +71,6 @@ ANIMA_RESOLUTION_LABELS: tuple[str, ...] = tuple(
 ANIMA_RESOLUTION_PRESETS: dict[str, tuple[tuple[int, int], ...]] = {
     "draft": (
         (512, 512),
-        (512, 576),
-        (512, 640),
-        (512, 768),
-        (576, 512),
-        (640, 512),
-        (768, 512),
     ),
     "compact": (
         (768, 768),

@@ -1836,7 +1836,7 @@ const paramEls = {
   denoising_strength: $('pDenoise'), hires_steps: $('pHiresSteps'), hr_cfg: $('pHrCfg'),
 };
 const RESOLUTION_PRESET_DEFS = [
-  {id: 'draft', label: '512^2', resolutions: ['512 x 512', '512 x 576', '512 x 640', '512 x 768', '576 x 512', '640 x 512', '768 x 512']},
+  {id: 'draft', label: '512^2', resolutions: ['512 x 512']},
   {id: 'compact', label: '768^2', resolutions: ['768 x 768', '704 x 832', '704 x 896', '640 x 960', '832 x 704', '896 x 704', '960 x 640']},
   {id: 'standard', label: '1024^2', resolutions: ['1024 x 1024', '960 x 1088', '896 x 1152', '832 x 1216', '1088 x 960', '1152 x 896', '1216 x 832']},
   {id: 'hd', label: '1152^2', resolutions: ['1152 x 1152', '1088 x 1216', '1024 x 1280', '960 x 1408', '1216 x 1088', '1280 x 1024', '1408 x 960']},

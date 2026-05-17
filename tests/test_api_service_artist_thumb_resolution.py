@@ -40,3 +40,19 @@ def test_api_service_clamps_artist_thumbnail_resolution(monkeypatch):
 
     assert captured["width"] == 1152
     assert captured["height"] == 896
+
+
+def test_api_service_keeps_artist_thumbnail_active_resolution(monkeypatch):
+    service, captured = _service_with_captured_nai(monkeypatch)
+
+    service.call_generation_api({
+        "api_mode": "NAI",
+        "input": "prompt",
+        "width": 1536,
+        "height": 1536,
+        "artist_thumb_request": True,
+        "artist_thumb_use_active_resolution": True,
+    })
+
+    assert captured["width"] == 1536
+    assert captured["height"] == 1536

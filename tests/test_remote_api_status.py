@@ -2885,6 +2885,43 @@ def test_artist_thumb_generate_coerces_invalid_resolution_to_standard_1mp(tmp_pa
     assert overrides["height"] == 1024
 
 
+def test_artist_thumb_generate_keeps_active_resolution_request(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    ctx.generation_queue_manager = _QueueManager(empty=True)
+    ctx.main_window = SimpleNamespace(
+        negative_prompt_textedit=_TextEdit(""),
+        generation_checkboxes={"자동 생성": _ToggleButton(False)},
+        generation_controller=_GenerationController(),
+        resolution_combo=_ResolutionCombo(["832 x 1216"]),
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._broadcast_json = lambda payload: None
+    bridge._broadcast_queue_state = lambda: None
+
+    bridge._do_artist_thumb_generate({
+        "request_id": "req",
+        "artist": "artist",
+        "positive": "1girl",
+        "api_mode": "WEBUI",
+        "resolution": "1536 x 1536",
+        "width": 1536,
+        "height": 1536,
+        "resolution_preset_enabled": True,
+        "resolution_preset": "max",
+        "artist_thumb_use_active_resolution": True,
+    })
+
+    overrides, priority = ctx.main_window.generation_controller.executed[0]
+    assert priority == 0
+    assert overrides["width"] == 1536
+    assert overrides["height"] == 1536
+    assert overrides["resolution"] == "1536 x 1536"
+    assert overrides["resolution_preset_enabled"] is True
+    assert overrides["resolution_preset"] == "max"
+    assert overrides["artist_thumb_use_active_resolution"] is True
+
+
 def test_artist_thumb_state_counts_visible_artists_after_bans(tmp_path, monkeypatch):
     bridge = _bridge_with_artist_thumb_lists(tmp_path, monkeypatch)
 

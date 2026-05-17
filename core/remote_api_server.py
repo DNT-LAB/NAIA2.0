@@ -3866,7 +3866,9 @@ class RemoteBridge(QObject):
                 height = int(payload.get("height") or 1216)
             except Exception:
                 width, height = 832, 1216
-            width, height = self._coerce_artist_thumb_resolution(width, height)
+            use_active_resolution = self._coerce_bool(payload.get("artist_thumb_use_active_resolution"))
+            if not use_active_resolution:
+                width, height = self._coerce_artist_thumb_resolution(width, height)
 
             overrides = {
                 "input": final_positive,
@@ -3874,12 +3876,37 @@ class RemoteBridge(QObject):
                 "negative_prompt": str(negative or ""),
                 "width": width,
                 "height": height,
-                "random_resolution": False,
                 "artist_thumb_request": True,
                 "artist_thumb_request_id": str(payload.get("request_id") or uuid.uuid4().hex),
                 "_remote_queue_source": "Artist Thumb",
                 "_remote_queue_label": str(payload.get("artist") or "").strip(),
             }
+            if use_active_resolution:
+                for key in (
+                    "api_mode",
+                    "resolution",
+                    "random_resolution",
+                    "auto_fit_resolution",
+                    "resolution_preset_enabled",
+                    "resolution_preset",
+                    "enable_hr",
+                    "hr_scale",
+                    "hr_upscaler",
+                    "denoising_strength",
+                    "hires_steps",
+                    "hr_cfg",
+                    "hires_preset_swap",
+                    "webui_hiresfix_assist",
+                    "webui_hiresfix_assist_target",
+                ):
+                    if key in payload:
+                        overrides[key] = payload.get(key)
+                overrides["width"] = width
+                overrides["height"] = height
+                overrides.setdefault("resolution", f"{width} x {height}")
+                overrides["artist_thumb_use_active_resolution"] = True
+            else:
+                overrides["random_resolution"] = False
 
             mw = getattr(self.app_context, "main_window", None)
             if not mw:

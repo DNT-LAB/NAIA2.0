@@ -287,7 +287,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260517-artist-active-resolution1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -299,6 +299,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs')
       onPromptEdit,
       setPromptFields: applyPromptFields,
       getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
+      getCurrentGenerationParams: () => _collectCurrentParams(),
       isComfyUiAnimaMode,
       isAnimaArtistMode,
     });
@@ -1221,6 +1222,7 @@ function setResolutionPresetEnabled(mode, enabled) {
   if (String(mode || '').toUpperCase() === 'WEBUI' && enabled) {
     updateWebUiHiresfixAssistControls({enabled: false});
     setModuleParam('webui_hiresfix_assist', 'enabled', 'false');
+    setWebUiHiresfixEnabled(false);
   }
   syncResolutionPresetControls(mode, enabled, activeResolutionPresetState(mode)?.preset || 'standard');
   refreshResolutionPresetDisplay(mode);
@@ -1228,9 +1230,16 @@ function setResolutionPresetEnabled(mode, enabled) {
 }
 
 function setResolutionPreset(mode, presetId) {
-  syncResolutionPresetControls(mode, activeResolutionPresetState(mode)?.enabled || false, presetId);
+  const normalizedPreset = normalizeResolutionPresetId(presetId);
+  if (String(mode || '').toUpperCase() === 'WEBUI') {
+    updateWebUiHiresfixAssistControls({enabled: false});
+    setModuleParam('webui_hiresfix_assist', 'enabled', 'false');
+    setWebUiHiresfixEnabled(false);
+  }
+  syncResolutionPresetControls(mode, true, normalizedPreset);
   refreshResolutionPresetDisplay(mode);
-  setParam('resolution_preset', normalizeResolutionPresetId(presetId));
+  setParam('resolution_preset_enabled', 'true');
+  setParam('resolution_preset', normalizedPreset);
 }
 
 function nearestWebUiHiresfixAssistResolution(width, height, target) {
@@ -1287,6 +1296,13 @@ function getWebUiHiresfixAssistState() {
   return normalizeWebUiHiresfixAssistState(webUiHiresfixAssistState);
 }
 
+function setWebUiHiresfixEnabled(enabled) {
+  const nextEnabled = Boolean(enabled);
+  const enableHr = $('pEnableHr');
+  if (enableHr) enableHr.checked = nextEnabled;
+  setParam('enable_hr', String(nextEnabled));
+}
+
 function updateWebUiHiresfixAssistControls(state = null) {
   if (state) webUiHiresfixAssistState = normalizeWebUiHiresfixAssistState({...webUiHiresfixAssistState, ...state});
   const normalized = getWebUiHiresfixAssistState();
@@ -1321,6 +1337,7 @@ function setWebUiHiresfixAssistEnabled(enabled) {
     }
   }
   updateWebUiHiresfixAssistControls({enabled});
+  setWebUiHiresfixEnabled(Boolean(enabled));
   setModuleParam('webui_hiresfix_assist', 'enabled', String(Boolean(enabled)));
 }
 
@@ -2605,6 +2622,7 @@ function updateParams(m) {
     syncResolutionPresetControls(mode, nextEnabled, nextPreset);
     if (mode === 'WEBUI' && nextEnabled) {
       updateWebUiHiresfixAssistControls({enabled: false});
+      setWebUiHiresfixEnabled(false);
     }
   }
   refreshResolutionPresetDisplay(mode, m.resolution);
@@ -2695,6 +2713,16 @@ function setParam(key, value) {
     updateWebUiHrScaleHint();
   } else if (key === 'hr_scale') {
     updateWebUiHrScaleHint();
+  } else if (key === 'enable_hr') {
+    const enabled = value === true || String(value).toLowerCase() === 'true';
+    const enableHr = $('pEnableHr');
+    if (enableHr) enableHr.checked = enabled;
+    if (!enabled && getWebUiHiresfixAssistState().enabled) {
+      updateWebUiHiresfixAssistControls({enabled: false});
+      setModuleParam('webui_hiresfix_assist', 'enabled', 'false');
+    }
+    updateWebUiHrScaleHint();
+    refreshHiresfixResolutionDisplay();
   } else if (key === 'hires_preset_swap') {
     _hiresPresetSwapValue = String(value || '').trim();
     _hiresPresetSwapValueKnown = true;
@@ -4743,7 +4771,16 @@ function onModuleState(m) {
     if (moduleLauncherControl) moduleLauncherControl.updateEventStreamState(m);
     if (eventStreamPanel) eventStreamPanel.setState(m);
   } else if (m.module_id === 'webui_hiresfix_assist') {
+    if (m.enabled) {
+      const presetState = activeResolutionPresetState('WEBUI');
+      if (presetState?.enabled) {
+        syncResolutionPresetControls('WEBUI', false, presetState.preset);
+        refreshResolutionPresetDisplay('WEBUI');
+        setParam('resolution_preset_enabled', 'false');
+      }
+    }
     updateWebUiHiresfixAssistControls(m);
+    if ('enabled' in m) setWebUiHiresfixEnabled(getWebUiHiresfixAssistState().enabled);
   }
 
   if (m.module_id === 'prompt_engineering') {

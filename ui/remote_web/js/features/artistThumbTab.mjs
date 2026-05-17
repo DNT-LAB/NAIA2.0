@@ -8,6 +8,7 @@ export function createArtistThumbController({
   onPromptEdit,
   setPromptFields,
   getGenerationMode = () => 'NAI',
+  getCurrentGenerationParams = null,
   isComfyUiAnimaMode = () => false,
   isAnimaArtistMode = null,
 }) {
@@ -53,10 +54,31 @@ export function createArtistThumbController({
   const MAX_RESULT_MEMORY = 128;
   const ARTIST_QUEUE_RESULT_TIMEOUT_MS = 20 * 60 * 1000;
   const ARTIST_RANDOM_PROMPT_TIMEOUT_MS = 55 * 1000;
-  const GENERATE_LABEL = 'Generate 832 x 1216';
+  const FALLBACK_GENERATE_WIDTH = 832;
+  const FALLBACK_GENERATE_HEIGHT = 1216;
+  const GENERATE_LABEL = 'Generate';
   const RANDOM_GENERATE_LABEL = 'Generate with Random Prompt';
   const BATCH_LABEL = '일괄생성';
   const BATCH_CANCEL_LABEL = '생성 취소';
+  const ACTIVE_RESOLUTION_PARAM_KEYS = [
+    'api_mode',
+    'resolution',
+    'width',
+    'height',
+    'random_resolution',
+    'auto_fit_resolution',
+    'resolution_preset_enabled',
+    'resolution_preset',
+    'enable_hr',
+    'hr_scale',
+    'hr_upscaler',
+    'denoising_strength',
+    'hires_steps',
+    'hr_cfg',
+    'hires_preset_swap',
+    'webui_hiresfix_assist',
+    'webui_hiresfix_assist_target',
+  ];
   let state = null;
   let statePromise = null;
   let listRequestId = 0;
@@ -1291,17 +1313,68 @@ export function createArtistThumbController({
     onPromptEdit?.();
   }
 
+  function parsePositiveInt(value) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  function parseResolutionLabel(value) {
+    const match = String(value || '').match(/(\d+)\s*x\s*(\d+)/i);
+    if (!match) return null;
+    const width = parsePositiveInt(match[1]);
+    const height = parsePositiveInt(match[2]);
+    return width && height ? {width, height} : null;
+  }
+
+  function currentActiveResolutionOverrides() {
+    if (typeof getCurrentGenerationParams !== 'function') return {};
+    let params = null;
+    try {
+      params = getCurrentGenerationParams();
+    } catch (error) {
+      console.warn('Artist Thumbnail generation params unavailable', error);
+      return {};
+    }
+    if (!params || typeof params !== 'object') return {};
+
+    const overrides = {};
+    ACTIVE_RESOLUTION_PARAM_KEYS.forEach(key => {
+      if (Object.prototype.hasOwnProperty.call(params, key)) {
+        overrides[key] = params[key];
+      }
+    });
+
+    let width = parsePositiveInt(overrides.width);
+    let height = parsePositiveInt(overrides.height);
+    if ((!width || !height) && overrides.resolution) {
+      const parsed = parseResolutionLabel(overrides.resolution);
+      if (parsed) {
+        width = parsed.width;
+        height = parsed.height;
+      }
+    }
+    if (!width || !height) return {};
+
+    overrides.width = width;
+    overrides.height = height;
+    overrides.artist_thumb_use_active_resolution = true;
+    return overrides;
+  }
+
   function generationPayloadForItem(item, requestId, overrides = {}) {
     const artistPrompt = formatArtistPrompt(item.artist);
+    const activeResolution = currentActiveResolutionOverrides();
+    const mergedOverrides = {...activeResolution, ...overrides};
     return {
+      ...activeResolution,
       request_id: requestId,
       artist: item.artist,
-      prefix: overrides.prefix != null ? overrides.prefix : (prefixEl?.value || ''),
-      positive: overrides.positive != null ? overrides.positive : (positiveEl?.value || artistPrompt),
-      postfix: overrides.postfix != null ? overrides.postfix : (postfixEl?.value || ''),
-      negative_prompt: overrides.negative_prompt != null ? overrides.negative_prompt : (negEdit?.value || ''),
-      width: overrides.width != null ? overrides.width : 832,
-      height: overrides.height != null ? overrides.height : 1216,
+      prefix: mergedOverrides.prefix != null ? mergedOverrides.prefix : (prefixEl?.value || ''),
+      positive: mergedOverrides.positive != null ? mergedOverrides.positive : (positiveEl?.value || artistPrompt),
+      postfix: mergedOverrides.postfix != null ? mergedOverrides.postfix : (postfixEl?.value || ''),
+      negative_prompt: mergedOverrides.negative_prompt != null ? mergedOverrides.negative_prompt : (negEdit?.value || ''),
+      width: parsePositiveInt(mergedOverrides.width) || FALLBACK_GENERATE_WIDTH,
+      height: parsePositiveInt(mergedOverrides.height) || FALLBACK_GENERATE_HEIGHT,
     };
   }
 
@@ -1376,8 +1449,6 @@ export function createArtistThumbController({
       const positive = String(randomPrompt.prompt || '');
       if (!positive.trim()) throw new Error('Random prompt is empty');
       const negative = String(randomPrompt.negative_prompt || negEdit?.value || '');
-      const width = Number.parseInt(randomPrompt.width, 10) || 832;
-      const height = Number.parseInt(randomPrompt.height, 10) || 1216;
 
       if (resultTitleEl) resultTitleEl.textContent = `${item.artist} · generating`;
       if (randomGenerateBtn) randomGenerateBtn.textContent = 'Requesting...';
@@ -1387,8 +1458,6 @@ export function createArtistThumbController({
         positive,
         postfix: '',
         negative_prompt: negative,
-        width,
-        height,
       }), {suppressPreview: true, autoExpand: true});
       showToast?.('랜덤 프롬프트 생성 요청을 보냈습니다.', 'success');
     } catch (error) {
@@ -1424,8 +1493,6 @@ export function createArtistThumbController({
       positive,
       postfix: '',
       negative_prompt: negative,
-      width: Number.parseInt(randomPrompt.width, 10) || 832,
-      height: Number.parseInt(randomPrompt.height, 10) || 1216,
     });
   }
 

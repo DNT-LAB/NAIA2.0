@@ -364,7 +364,11 @@ class APIService:
 
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
 
-        if parameters.get('artist_thumb_request') and parameters.get('image_bytes') is None:
+        if (
+            parameters.get('artist_thumb_request')
+            and not self._coerce_bool_param(parameters.get('artist_thumb_use_active_resolution'), False)
+            and parameters.get('image_bytes') is None
+        ):
             try:
                 changed, original, normalized = normalize_artist_thumbnail_resolution(parameters)
                 if changed:

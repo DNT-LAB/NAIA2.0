@@ -3683,20 +3683,20 @@ class RemoteBridge(QObject):
         with self._artist_thumb_lock:
             info = self._artist_thumb_mode_info(key)
             file_state = self._artist_thumb_file_state(info)
-            if not file_state["available"]:
-                self._artist_thumb_data_cache.pop(key, None)
-                path = Path(info["path"])
-                if file_state["needs_update"]:
-                    raise RuntimeError(f"Artist thumbnail data needs update: {path}")
-                raise FileNotFoundError(f"Artist thumbnail data not found: {path}")
             cached = self._artist_thumb_data_cache.get(key)
-            if cached is not None:
+            if cached is not None and not file_state["needs_update"]:
                 if key == "NAID4.5F-31000":
                     try:
                         self._sync_artist_thumb_favorite_thumbnail_cache(key, cached)
                     except Exception as e:
                         print(f"🌐 Remote: artist thumb favorite thumbnail cache sync failed — {e}")
                 return cached
+            if not file_state["available"]:
+                self._artist_thumb_data_cache.pop(key, None)
+                path = Path(info["path"])
+                if file_state["needs_update"]:
+                    raise RuntimeError(f"Artist thumbnail data needs update: {path}")
+                raise FileNotFoundError(f"Artist thumbnail data not found: {path}")
             path = self._artist_thumb_mode_path(key)
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)

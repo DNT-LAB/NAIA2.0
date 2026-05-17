@@ -1513,8 +1513,10 @@ class RemoteBridge(QObject):
             return False, "Cloudflared 터널 활성 중 — 저장 디렉토리 변경이 차단됩니다."
         return True, ""
 
-    def _result_enhance_gate(self, ws) -> tuple[bool, str]:
-        """Result Enhance는 로컬 호스트 단독 세션에서만 허용."""
+    def _result_enhance_gate(self, ws, mode: str | None = None) -> tuple[bool, str]:
+        """NAI Result Enhance stays local-only; WEBUI Enhance queues normal generation."""
+        if str(mode or "").strip().upper() == "WEBUI":
+            return True, ""
         host = self._ws_client_host(ws)
         if host not in ("127.0.0.1", "::1"):
             return False, "Result Enhance는 로컬(127.0.0.1) 접속에서만 가능합니다."
@@ -2159,11 +2161,6 @@ class RemoteBridge(QObject):
     def _do_result_enhance(self, ws=None, payload_json: str = "{}"):
         """현재/저장 ImageWindow 히스토리 항목에 Result Enhance를 실행."""
         try:
-            allowed, reason = self._result_enhance_gate(ws)
-            if not allowed:
-                self._send_result_enhance_error(ws, reason)
-                return
-
             try:
                 payload = json.loads(payload_json) if isinstance(payload_json, str) else dict(payload_json or {})
             except Exception:
@@ -2176,6 +2173,10 @@ class RemoteBridge(QObject):
             requested_mode = str(payload.get("mode") or "").upper()
             if requested_mode in {"NAI", "WEBUI"} and requested_mode != current_mode:
                 self._send_result_enhance_error(ws, "Enhance mode changed; refresh the result selection")
+                return
+            allowed, reason = self._result_enhance_gate(ws, current_mode)
+            if not allowed:
+                self._send_result_enhance_error(ws, reason)
                 return
             if self._remote_enhance_in_flight and current_mode != "WEBUI":
                 self._send_result_enhance_error(ws, "Enhance is already running")

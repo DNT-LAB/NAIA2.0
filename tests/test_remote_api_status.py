@@ -2187,6 +2187,82 @@ def test_webui_result_enhance_queues_generation_request_when_generation_is_busy(
     assert sent == [{"type": "toast", "message": "Enhance queued", "level": "success"}]
 
 
+def test_webui_result_enhance_allows_remote_edge_queue_request():
+    image = Image.new("RGB", (320, 384), "white")
+    item = SimpleNamespace(
+        image=image,
+        generation_params={
+            "input": "1girl",
+            "negative_prompt": "",
+            "seed": 123,
+            "width": 512,
+            "height": 640,
+        },
+        source_row=None,
+    )
+    image_window = SimpleNamespace(
+        auto_save_checkbox=object(),
+        current_history_item=item,
+    )
+    queue_manager = _EnhanceQueueManager()
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "WEBUI"
+    ctx.secure_token_manager = _TokenManager({"webui_url": "127.0.0.1:7860"})
+    ctx.generation_queue_manager = queue_manager
+    ctx.main_window = SimpleNamespace(
+        image_window=image_window,
+        generation_controller=SimpleNamespace(
+            is_generating=True,
+            _process_next_queue_request=lambda: None,
+        ),
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._is_cloudflared_active = lambda: True
+    sent = []
+    bridge._broadcast_json = lambda _data: None
+    bridge._send_json_to = lambda ws, data: sent.append(data)
+
+    bridge._do_result_enhance(
+        ws=_ws("203.0.113.10"),
+        payload_json=json.dumps({
+            "mode": "WEBUI",
+            "hires_settings": {
+                "hr_scale": 3,
+                "hr_upscaler": "Latent (nearest-exact)",
+                "denoising_strength": 0.7,
+                "hires_steps": 10,
+                "hr_cfg": 5.5,
+            },
+        }),
+    )
+
+    assert len(queue_manager.requests) == 1
+    assert queue_manager.requests[0].params["result_enhance_backend"] == "WEBUI"
+    assert sent == [{"type": "toast", "message": "Enhance queued", "level": "success"}]
+
+
+def test_nai_result_enhance_stays_blocked_for_remote_edge():
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "NAI"
+    bridge = RemoteBridge(ctx)
+    sent = []
+    bridge._send_json_to = lambda ws, data: sent.append(data)
+
+    bridge._do_result_enhance(ws=_ws("203.0.113.10"), payload_json=json.dumps({"mode": "NAI"}))
+
+    assert sent[0] == {
+        "type": "result_enhance_state",
+        "running": False,
+        "success": False,
+        "message": "Result Enhance는 로컬(127.0.0.1) 접속에서만 가능합니다.",
+    }
+    assert sent[1] == {
+        "type": "toast",
+        "message": "Result Enhance는 로컬(127.0.0.1) 접속에서만 가능합니다.",
+        "level": "error",
+    }
+
+
 def test_webui_result_enhance_allows_multiple_queue_requests_while_running():
     image = Image.new("RGB", (320, 384), "white")
     item = SimpleNamespace(

@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260516-hires-overlay5">
+<link rel="stylesheet" href="style.css?v=20260517-resolution-preset-tools4">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -387,6 +387,16 @@
             </div>
             <!-- WEBUI HR controls -->
             <div class="mode-webui" id="webuiParams" style="display:none">
+              <div class="param-row resolution-preset-row">
+                <span class="param-label">Res Preset</span>
+                <div class="resolution-preset-control">
+                  <label class="resolution-preset-toggle" title="선택한 단계의 해상도 프리셋을 Random Res / Auto Res에 사용">
+                    <input type="checkbox" id="pWebuiResolutionPresetEnabled" onchange="setResolutionPresetEnabled('WEBUI', this.checked)">
+                    <span>Use</span>
+                  </label>
+                  <select class="param-select" id="pWebuiResolutionPreset" onchange="setResolutionPreset('WEBUI', this.value)"></select>
+                </div>
+              </div>
               <div class="param-row">
                 <span class="param-label">Hires-fix</span>
                 <input type="checkbox" class="param-check" id="pEnableHr" onchange="setParam('enable_hr',String(this.checked))">
@@ -396,7 +406,7 @@
                 <span class="param-label param-sublabel">Assist</span>
                 <div class="webui-hires-assist-control">
                   <label class="webui-hires-assist-toggle" title="WEBUI Hires-fix 생성 해상도를 선택한 base로 자동 매칭">
-                    <input type="checkbox" id="webuiHiresfixAssistToggle" aria-label="Hiresfix Assist" onchange="setWebUiHiresfixAssistEnabled(this.checked)">
+                    <input type="checkbox" id="webuiHiresfixAssistToggle" data-webui-hiresfix-assist-enabled aria-label="Hiresfix Assist" onchange="setWebUiHiresfixAssistEnabled(this.checked)">
                     <span>Hiresfix Assist</span>
                   </label>
                   <div class="webui-hires-assist-targets" role="group" aria-label="Hiresfix Assist base resolution">
@@ -444,6 +454,16 @@
             </div>
             <!-- ComfyUI controls -->
             <div class="mode-comfyui" id="comfyuiParams" style="display:none">
+              <div class="param-row resolution-preset-row">
+                <span class="param-label">Res Preset</span>
+                <div class="resolution-preset-control">
+                  <label class="resolution-preset-toggle" title="선택한 단계의 해상도 프리셋을 Random Res / Auto Res에 사용">
+                    <input type="checkbox" id="pComfyuiResolutionPresetEnabled" onchange="setResolutionPresetEnabled('COMFYUI', this.checked)">
+                    <span>Use</span>
+                  </label>
+                  <select class="param-select" id="pComfyuiResolutionPreset" onchange="setResolutionPreset('COMFYUI', this.value)"></select>
+                </div>
+              </div>
               <div class="param-flags" style="padding:7px 10px;background:var(--bg-deep)">
                 <span class="param-flag" data-key="sampling_mode" data-val="eps" id="flagEps" onclick="setSamplingMode('eps')">EPS</span>
                 <span class="param-flag" data-key="sampling_mode" data-val="v_prediction" id="flagVpred" onclick="setSamplingMode('v_prediction')">V-Pred</span>
@@ -923,6 +943,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260516-hires-preset-swap-autogen"></script>
+<script src="app.js?v=20260517-resolution-preset-tools6"></script>
 </body>
 </html>

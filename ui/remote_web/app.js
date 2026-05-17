@@ -15,6 +15,8 @@ let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 // 사용자가 로컬 편집을 했지만 아직 서버로 flush되지 않은 상태 — 서버 브로드캐스트 덮어쓰기 차단
 let _localPromptDirty = false;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
+let pendingRandomRequestId = '';
+let randomRequestSerial = 0;
 let sessionId = null;
 const urlParams = new URLSearchParams(location.search);
 const isDesktopShell = urlParams.get('desktop_shell') === '1';
@@ -347,7 +349,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260512-api-dialog
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260514-randomized-preview1')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260517-hiresfix-display1')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -1018,12 +1020,7 @@ function _collectCurrentParams() {
     ? resolutionOptions[Math.floor(Math.random() * resolutionOptions.length)]
     : (paramEls.resolution.value || qResolution?.value || '');
   if (resolution) {
-    p.resolution = resolution;
-    const match = String(resolution).match(/(\d+)\s*x\s*(\d+)/i);
-    if (match) {
-      p.width = parseInt(match[1], 10);
-      p.height = parseInt(match[2], 10);
-    }
+    applyResolutionLabelToParams(p, resolution);
   }
   const steps = parseNumber(paramEls.steps.value);
   const cfgScale = parseNumber(paramEls.cfg_scale.value);
@@ -1049,6 +1046,7 @@ function _collectCurrentParams() {
   p.auto_fit_resolution = autoFitResolution;
   p.prompt_fixed = getOptionChecked('prompt_fixed');
   p.wildcard_standalone = getOptionChecked('wildcard_standalone');
+  applyResolutionPresetToParams(p, mode, randomResolution);
 
   if (mode === 'WEBUI') {
     const enableHr = $('pEnableHr');
@@ -1109,6 +1107,132 @@ function parseResolutionText(value) {
   return {width, height};
 }
 
+function normalizeResolutionPresetId(value) {
+  const id = String(value || '').trim().toLowerCase().replace(/-/g, '_');
+  return RESOLUTION_PRESET_MAP.has(id) ? id : 'standard';
+}
+
+function resolutionPresetDef(value) {
+  return RESOLUTION_PRESET_MAP.get(normalizeResolutionPresetId(value)) || RESOLUTION_PRESET_MAP.get('standard');
+}
+
+function resolutionPresetResolutionOptions(mode = currentMode || modeSelect?.value || 'NAI') {
+  const state = activeResolutionPresetState(mode);
+  if (!state?.enabled) return null;
+  return resolutionPresetDef(state.preset)?.resolutions || null;
+}
+
+function isResolutionPresetEnabled(mode = currentMode || modeSelect?.value || 'NAI') {
+  return Boolean(activeResolutionPresetState(mode)?.enabled);
+}
+
+function resolutionPresetControlSets(mode = currentMode || modeSelect?.value || 'NAI') {
+  const normalized = String(mode || '').toUpperCase();
+  const controls = [];
+  const seen = new Set();
+  const addControls = (enabled, preset) => {
+    if (!enabled && !preset) return;
+    const key = preset || enabled;
+    if (seen.has(key)) return;
+    seen.add(key);
+    controls.push({enabled, preset});
+  };
+  if (normalized === 'WEBUI') {
+    addControls($('pWebuiResolutionPresetEnabled'), $('pWebuiResolutionPreset'));
+  }
+  if (normalized === 'COMFYUI') {
+    addControls($('pComfyuiResolutionPresetEnabled'), $('pComfyuiResolutionPreset'));
+  }
+  document.querySelectorAll(`[data-resolution-preset-select="${normalized}"]`).forEach(preset => {
+    const scope = preset.closest('[data-resolution-preset-mode]') || document;
+    const enabled = scope.querySelector(`[data-resolution-preset-enabled="${normalized}"]`);
+    addControls(enabled, preset);
+  });
+  return controls;
+}
+
+function resolutionPresetControls(mode = currentMode || modeSelect?.value || 'NAI') {
+  return resolutionPresetControlSets(mode)[0] || {enabled: null, preset: null};
+}
+
+function ensureResolutionPresetOptions() {
+  for (const mode of ['WEBUI', 'COMFYUI']) {
+    for (const {preset} of resolutionPresetControlSets(mode)) {
+      if (!preset) continue;
+      const existing = Array.from(preset.options || []).map(option => option.value);
+      if (existing.length === RESOLUTION_PRESET_DEFS.length && existing.every((value, index) => value === RESOLUTION_PRESET_DEFS[index].id)) {
+        continue;
+      }
+      preset.innerHTML = RESOLUTION_PRESET_DEFS
+        .map(item => `<option value="${item.id}">${item.label}</option>`)
+        .join('');
+    }
+  }
+}
+
+function syncResolutionPresetControls(mode, enabled, presetId) {
+  ensureResolutionPresetOptions();
+  for (const {enabled: enabledEl, preset} of resolutionPresetControlSets(mode)) {
+    if (enabledEl) enabledEl.checked = Boolean(enabled);
+    if (preset) preset.value = normalizeResolutionPresetId(presetId);
+    const scope = preset?.closest('[data-resolution-preset-mode]') || enabledEl?.closest('.resolution-preset-row');
+    scope?.classList.toggle('active', Boolean(enabled));
+  }
+}
+
+function activeResolutionPresetState(mode = currentMode || modeSelect?.value || 'NAI') {
+  const normalized = String(mode || '').toUpperCase();
+  if (normalized !== 'WEBUI' && normalized !== 'COMFYUI') return null;
+  ensureResolutionPresetOptions();
+  const {enabled, preset} = resolutionPresetControls(normalized);
+  return {
+    enabled: Boolean(enabled?.checked),
+    preset: normalizeResolutionPresetId(preset?.value),
+  };
+}
+
+function applyResolutionLabelToParams(params, label) {
+  const parsed = parseResolutionText(label);
+  if (!parsed) return false;
+  params.resolution = label;
+  params.width = parsed.width;
+  params.height = parsed.height;
+  return true;
+}
+
+function applyResolutionPresetToParams(params, mode, randomResolution) {
+  const state = activeResolutionPresetState(mode);
+  if (!state?.enabled) return false;
+  const preset = resolutionPresetDef(state.preset);
+  const candidates = preset?.resolutions || [];
+  if (!candidates.length) return false;
+  let label = candidates[0];
+  if (randomResolution) {
+    label = candidates[Math.floor(Math.random() * candidates.length)];
+  } else if (params.resolution && candidates.includes(params.resolution)) {
+    label = params.resolution;
+  }
+  params.resolution_preset_enabled = true;
+  params.resolution_preset = preset.id;
+  return applyResolutionLabelToParams(params, label);
+}
+
+function setResolutionPresetEnabled(mode, enabled) {
+  if (String(mode || '').toUpperCase() === 'WEBUI' && enabled) {
+    updateWebUiHiresfixAssistControls({enabled: false});
+    setModuleParam('webui_hiresfix_assist', 'enabled', 'false');
+  }
+  syncResolutionPresetControls(mode, enabled, activeResolutionPresetState(mode)?.preset || 'standard');
+  refreshResolutionPresetDisplay(mode);
+  setParam('resolution_preset_enabled', String(Boolean(enabled)));
+}
+
+function setResolutionPreset(mode, presetId) {
+  syncResolutionPresetControls(mode, activeResolutionPresetState(mode)?.enabled || false, presetId);
+  refreshResolutionPresetDisplay(mode);
+  setParam('resolution_preset', normalizeResolutionPresetId(presetId));
+}
+
 function nearestWebUiHiresfixAssistResolution(width, height, target) {
   const targetSide = normalizeWebUiHiresfixAssistTarget(target);
   const targetPixels = targetSide * targetSide;
@@ -1166,12 +1290,20 @@ function getWebUiHiresfixAssistState() {
 function updateWebUiHiresfixAssistControls(state = null) {
   if (state) webUiHiresfixAssistState = normalizeWebUiHiresfixAssistState({...webUiHiresfixAssistState, ...state});
   const normalized = getWebUiHiresfixAssistState();
-  const toggle = $('webuiHiresfixAssistToggle');
-  if (toggle && toggle.checked !== normalized.enabled) toggle.checked = normalized.enabled;
+  if (normalized.enabled && isResolutionPresetEnabled('WEBUI')) {
+    normalized.enabled = false;
+    webUiHiresfixAssistState = normalized;
+  }
+  document.querySelectorAll('[data-webui-hiresfix-assist-enabled]').forEach(toggle => {
+    if (toggle.checked !== normalized.enabled) toggle.checked = normalized.enabled;
+  });
   document.querySelectorAll('[data-webui-hiresfix-assist-target]').forEach(button => {
     const active = normalizeWebUiHiresfixAssistTarget(button.dataset.webuiHiresfixAssistTarget) === normalized.target;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  document.querySelectorAll('.webui-hires-assist-row, .module-hiresfix-assist-row').forEach(row => {
+    row.classList.toggle('active', normalized.enabled);
   });
   updateWebUiHrScaleHint();
   if (moduleBadges && typeof moduleBadges.updateWebUiHiresfixAssist === 'function') {
@@ -1180,6 +1312,14 @@ function updateWebUiHiresfixAssistControls(state = null) {
 }
 
 function setWebUiHiresfixAssistEnabled(enabled) {
+  if (enabled) {
+    const presetState = activeResolutionPresetState('WEBUI');
+    if (presetState?.enabled) {
+      syncResolutionPresetControls('WEBUI', false, presetState.preset);
+      refreshResolutionPresetDisplay('WEBUI');
+      setParam('resolution_preset_enabled', 'false');
+    }
+  }
   updateWebUiHiresfixAssistControls({enabled});
   setModuleParam('webui_hiresfix_assist', 'enabled', String(Boolean(enabled)));
 }
@@ -1241,6 +1381,7 @@ function updateWebUiHrScaleHint() {
     ? text
     : `${text} / HR Scale ${scale.toFixed(1)} -> ${effectiveScale.toFixed(1)}`;
   hint.classList.toggle('warning', exceedsSafeArea);
+  refreshHiresfixResolutionDisplay();
 }
 
 function collectWebUiHiresfixAssistOverrides(mode = currentMode || modeSelect?.value || 'NAI') {
@@ -1614,9 +1755,21 @@ const paramEls = {
   hr_scale: $('pHrScale'), hr_upscaler: $('pHrUpscaler'),
   denoising_strength: $('pDenoise'), hires_steps: $('pHiresSteps'), hr_cfg: $('pHrCfg'),
 };
+const RESOLUTION_PRESET_DEFS = [
+  {id: 'draft', label: '512^2', resolutions: ['512 x 512', '512 x 576', '512 x 640', '512 x 768', '576 x 512', '640 x 512', '768 x 512']},
+  {id: 'compact', label: '768^2', resolutions: ['768 x 768', '704 x 832', '704 x 896', '640 x 960', '832 x 704', '896 x 704', '960 x 640']},
+  {id: 'standard', label: '1024^2', resolutions: ['1024 x 1024', '960 x 1088', '896 x 1152', '832 x 1216', '1088 x 960', '1152 x 896', '1216 x 832']},
+  {id: 'hd', label: '1152^2', resolutions: ['1152 x 1152', '1088 x 1216', '1024 x 1280', '960 x 1408', '1216 x 1088', '1280 x 1024', '1408 x 960']},
+  {id: 'hd_plus', label: '1216^2', resolutions: ['1216 x 1216', '1152 x 1280', '1088 x 1344', '960 x 1472', '1280 x 1152', '1344 x 1088', '1472 x 960']},
+  {id: 'quality', label: '1344^2', resolutions: ['1344 x 1344', '1280 x 1472', '1216 x 1536', '1088 x 1600', '1472 x 1280', '1536 x 1216', '1600 x 1088']},
+  {id: 'max', label: '1536^2', resolutions: ['1536 x 1536', '1408 x 1600', '1344 x 1728', '1216 x 1792', '1600 x 1408', '1728 x 1344', '1792 x 1216']},
+];
+const RESOLUTION_PRESET_MAP = new Map(RESOLUTION_PRESET_DEFS.map(item => [item.id, item]));
 const qResolution = $('qResolution');
 const qRndRes = $('qRndRes');
 const qAutoRes = $('qAutoRes');
+let baseResolutionOptions = [];
+let baseResolutionValue = '';
 let syncingParams = false;
 const resultInfoContent = $('resultInfoContent');
 const statsGenCount  = $('statsGenCount');
@@ -2168,8 +2321,32 @@ function applyPromptTokenPayload(m) {
   if (tokenDisplayControl) tokenDisplayControl.applyPromptTokenPayload(m);
 }
 
-function unlockRandomButton() {
+function createRandomRequestId() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  randomRequestSerial += 1;
+  return `random-${Date.now().toString(36)}-${randomRequestSerial.toString(36)}`;
+}
+
+function randomRequestIdFromMessage(message = {}) {
+  return String(
+    message.random_request_id
+    || message.remote_random_request_id
+    || message.requestId
+    || ''
+  ).trim();
+}
+
+function isExpectedRandomPrompt(message = {}) {
+  const requestId = randomRequestIdFromMessage(message);
+  if (requestId) return !!pendingRandomRequestId && requestId === pendingRandomRequestId;
+  return awaitingMyRandom;
+}
+
+function unlockRandomButton({clearRequest = true} = {}) {
   awaitingMyRandom = false;
+  if (clearRequest) pendingRandomRequestId = '';
   if (window._randomTimeout) {
     clearTimeout(window._randomTimeout);
     window._randomTimeout = null;
@@ -2184,6 +2361,31 @@ function onRandomFailed(m) {
   if (m && m.message) showToast(m.message, m.level || 'error', true);
 }
 
+function resolutionLabelFromMessage(message = {}) {
+  if (message.resolution) return String(message.resolution);
+  const detected = message.detected_resolution;
+  if (detected && typeof detected === 'object') {
+    const width = Number(detected.width ?? detected[0]);
+    const height = Number(detected.height ?? detected[1]);
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      return `${Math.trunc(width)} x ${Math.trunc(height)}`;
+    }
+  }
+  return '';
+}
+
+function applyGeneratedResolutionUpdate(message = {}) {
+  const label = resolutionLabelFromMessage(message);
+  if (!label) return;
+  ensureSelectValue(paramEls.resolution, label);
+  ensureSelectValue(qResolution, label);
+  paramEls.resolution.value = label;
+  qResolution.value = label;
+  baseResolutionValue = label;
+  refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI', label);
+  updateWebUiHrScaleHint();
+}
+
 function updatePromptOnly(messageOrPrompt, sourceArg) {
   const message = (typeof messageOrPrompt === 'object' && messageOrPrompt !== null)
     ? messageOrPrompt
@@ -2191,8 +2393,9 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   const prompt = message.prompt == null ? '' : String(message.prompt);
   const source = message.source;
   const isPresetSource = source === 'event_preset' || source === 'preset';
+  const acceptsRandomPrompt = source === 'random' && isExpectedRandomPrompt(message);
   const acceptsGeneratedPrompt = (
-    (source === 'random' && awaitingMyRandom)
+    acceptsRandomPrompt
     || isPresetSource
     || source === 'auto_generate'
     || source === 'result_reroll'
@@ -2225,14 +2428,13 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     syncingPrompt = true;
     promptEdit.value = prompt;
     syncingPrompt = false;
+    applyGeneratedResolutionUpdate(message);
     updatePromptHighlight();
     applyPromptHighlightState();
     applyPromptTokenPayload(message);
     // Show new-content dot if drawer is closed
     if (promptDrawerControl) promptDrawerControl.showNewContentDot();
   }
-  // Random 완료 → 버튼 복원 (source 무관)
-  if (source === 'random') unlockRandomButton();
 }
 
 // ---- Params ----
@@ -2247,6 +2449,74 @@ function populateSelect(el, options, current) {
   }
   if (current !== undefined) el.value = current;
   else if (previous && Array.from(el.options).some(option => option.value === previous)) el.value = previous;
+}
+
+function refreshResolutionPresetDisplay(mode = currentMode || modeSelect?.value || 'NAI', preferred = undefined) {
+  const presetOptions = resolutionPresetResolutionOptions(mode);
+  const active = Array.isArray(presetOptions) && presetOptions.length > 0;
+  const options = active ? presetOptions : baseResolutionOptions;
+  let current = preferred !== undefined ? preferred : (active ? paramEls.resolution?.value : baseResolutionValue);
+  if (current && options.length && !options.includes(String(current))) current = undefined;
+  if (current === undefined && active) current = options[0];
+  if (current === undefined && !active) current = baseResolutionValue || options[0];
+
+  populateSelect(paramEls.resolution, options, current);
+  populateSelect(qResolution, options, current);
+  [paramEls.resolution, qResolution].forEach(select => {
+    select?.classList.toggle('resolution-preset-active', active);
+    if (select) {
+      select.dataset.resolutionPresetActive = active ? 'true' : 'false';
+    }
+  });
+  refreshHiresfixResolutionDisplay();
+  if (typeof customSelectsControl?.scan === 'function') customSelectsControl.scan();
+}
+
+function resetResolutionOptionLabels(select) {
+  Array.from(select?.options || []).forEach(option => {
+    option.textContent = option.value;
+  });
+}
+
+function plannedWebUiHiresfixFinalResolution() {
+  if (String(currentMode || modeSelect?.value || '').toUpperCase() !== 'WEBUI') return null;
+  if (isResolutionPresetEnabled('WEBUI')) return null;
+  const state = getWebUiHiresfixAssistState();
+  if (!state.enabled) return null;
+  const base = getWebUiHiresfixAssistBaseResolution();
+  const scale = Number($('pHrScale')?.value || 2);
+  if (!base || !Number.isFinite(scale) || scale <= 0) return null;
+  const effectiveScale = fitWebUiHiresfixAssistScale(base, scale);
+  const finalSize = webUiHiresFinalSize(base, effectiveScale);
+  return {
+    base,
+    finalSize,
+    label: `${finalSize.width} x ${finalSize.height}`,
+  };
+}
+
+function refreshHiresfixResolutionDisplay() {
+  const planned = plannedWebUiHiresfixFinalResolution();
+  [paramEls.resolution, qResolution].forEach(select => {
+    if (!select) return;
+    resetResolutionOptionLabels(select);
+    select.classList.toggle('resolution-hiresfix-active', Boolean(planned));
+    select.dataset.resolutionHiresfixActive = planned ? 'true' : 'false';
+    if (planned) {
+      const baseLabel = `${planned.base.width}x${planned.base.height}`;
+      const finalLabel = `${planned.finalSize.width}x${planned.finalSize.height}`;
+      select.dataset.customSelectLabel = `HR ${finalLabel}`;
+      select.dataset.customSelectTitle = `${planned.base.width} x ${planned.base.height} -> ${planned.label}`;
+      select.dataset.resolutionHiresfixFinal = planned.label;
+      select.dataset.resolutionHiresfixBase = `${planned.base.width} x ${planned.base.height}`;
+    } else {
+      delete select.dataset.customSelectLabel;
+      delete select.dataset.customSelectTitle;
+      delete select.dataset.resolutionHiresfixFinal;
+      delete select.dataset.resolutionHiresfixBase;
+    }
+  });
+  if (typeof customSelectsControl?.scan === 'function') customSelectsControl.scan();
 }
 
 function setSelectWithFallback(el, preferred, fallbacks = []) {
@@ -2298,12 +2568,16 @@ function onComfyUiWorkflowState(m) {
 function updateParams(m) {
   const schemaOnly = !!m.schema_only;
   syncingParams = true;
+  ensureResolutionPresetOptions();
   populateSelect(paramEls.model, m.options_model, m.model);
   populateSelect(paramEls.sampler, m.options_sampler, m.sampler);
   populateSelect(paramEls.scheduler, m.options_scheduler, m.scheduler);
-  populateSelect(paramEls.resolution, m.options_resolution, m.resolution);
-  // Quick controls 동기화
-  populateSelect(qResolution, m.options_resolution, m.resolution);
+  if (Array.isArray(m.options_resolution) && m.options_resolution.length) {
+    baseResolutionOptions = m.options_resolution.slice();
+  }
+  if (m.resolution !== undefined) {
+    baseResolutionValue = m.resolution;
+  }
   if (m.steps !== undefined) paramEls.steps.value = m.steps;
   if (m.cfg_scale !== undefined) paramEls.cfg_scale.value = m.cfg_scale;
   if (m.cfg_rescale !== undefined) paramEls.cfg_rescale.value = m.cfg_rescale;
@@ -2317,6 +2591,23 @@ function updateParams(m) {
   document.querySelectorAll('.mode-nai').forEach(el => el.style.display = mode === 'NAI' ? '' : 'none');
   $('webuiParams').style.display = mode === 'WEBUI' ? '' : 'none';
   $('comfyuiParams').style.display = mode === 'COMFYUI' ? '' : 'none';
+  if (
+    (mode === 'WEBUI' || mode === 'COMFYUI')
+    && ('resolution_preset_enabled' in m || 'resolution_preset' in m)
+  ) {
+    const currentPresetState = activeResolutionPresetState(mode) || {enabled: false, preset: 'standard'};
+    const nextEnabled = 'resolution_preset_enabled' in m
+      ? Boolean(m.resolution_preset_enabled)
+      : currentPresetState.enabled;
+    const nextPreset = 'resolution_preset' in m
+      ? m.resolution_preset
+      : currentPresetState.preset;
+    syncResolutionPresetControls(mode, nextEnabled, nextPreset);
+    if (mode === 'WEBUI' && nextEnabled) {
+      updateWebUiHiresfixAssistControls({enabled: false});
+    }
+  }
+  refreshResolutionPresetDisplay(mode, m.resolution);
 
   // 플래그 (공통 + NAI)
   const flags = [];
@@ -2399,12 +2690,16 @@ function setParam(key, value) {
   if (key === 'resolution') {
     paramEls.resolution.value = value;
     qResolution.value = value;
+    if (!resolutionPresetResolutionOptions()) baseResolutionValue = value;
+    if (typeof customSelectsControl?.scan === 'function') customSelectsControl.scan();
     updateWebUiHrScaleHint();
   } else if (key === 'hr_scale') {
     updateWebUiHrScaleHint();
   } else if (key === 'hires_preset_swap') {
     _hiresPresetSwapValue = String(value || '').trim();
     _hiresPresetSwapValueKnown = true;
+  } else if (key === 'model' && artistThumbControl && typeof artistThumbControl.syncPromptFormat === 'function') {
+    artistThumbControl.syncPromptFormat();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));
@@ -3421,15 +3716,17 @@ function send(cmd) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     btnRnd.disabled = true;
     awaitingMyRandom = true;
+    pendingRandomRequestId = createRandomRequestId();
     // 타임아웃 안전망: 일반 응답은 0.2초 내외이므로 2초면 충분합니다.
     if (window._randomTimeout) clearTimeout(window._randomTimeout);
     window._randomTimeout = setTimeout(() => {
       if (awaitingMyRandom) {
-        unlockRandomButton();
+        unlockRandomButton({clearRequest: false});
       }
     }, 2000);
     ws.send(JSON.stringify({
       type: 'random',
+      random_request_id: pendingRandomRequestId,
       ratings: getActiveRatings(),
       overrides: _collectCurrentParams(),
     }));
@@ -4052,7 +4349,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260516-hires-assist2')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260517-resolution-preset-tools2')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -4071,6 +4368,9 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260516-
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();
+    ensureResolutionPresetOptions();
+    updateWebUiHiresfixAssistControls();
+    refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI');
   })
   .catch(error => {
     console.error('Failed to initialize module launcher', error);
@@ -4144,9 +4444,9 @@ function currentWebUiModelName() {
   return String(paramEls?.model?.value || '').trim();
 }
 
-function isWebUiAnimaModel() {
-  return String(currentMode || modeSelect.value || '').toUpperCase() === 'WEBUI'
-    && currentWebUiModelName().toLowerCase().includes('anima');
+function isWebUiAnimaModel(mode = currentMode || modeSelect.value || '', modelName = currentWebUiModelName()) {
+  return String(mode || '').toUpperCase() === 'WEBUI'
+    && String(modelName || '').toLowerCase().includes('anima');
 }
 
 function isAnimaArtistMode() {

@@ -71,6 +71,29 @@ const MODULE_REGISTRY = {
     categoryBadgeLabel: 'V',
     categoryBadgeClass: 'vibe',
   },
+  webui_resolution_preset: {
+    label: '해상도 프리셋',
+    title: 'WEBUI 해상도 프리셋',
+    category: 'webui_tools',
+    action: 'resolution_preset',
+    modes: ['WEBUI'],
+    presetMode: 'WEBUI',
+  },
+  webui_hiresfix_assist: {
+    label: 'Hiresfix Assist',
+    title: 'WEBUI Hiresfix Assist',
+    category: 'webui_tools',
+    action: 'webui_hiresfix_assist',
+    modes: ['WEBUI'],
+  },
+  comfyui_resolution_preset: {
+    label: '해상도 프리셋',
+    title: 'COMFYUI 해상도 프리셋',
+    category: 'comfyui_tools',
+    action: 'resolution_preset',
+    modes: ['COMFYUI'],
+    presetMode: 'COMFYUI',
+  },
   comfyui_workflow_default: {
     label: '기본 워크플로우 전환',
     title: '기본 ComfyUI 워크플로우로 전환',
@@ -123,10 +146,16 @@ const CATEGORY_REGISTRY = [
     splitBadges: true,
   },
   {
+    id: 'webui_tools',
+    label: 'WEBUI 전용 도구',
+    title: 'WEBUI 전용 도구',
+    moduleIds: ['webui_hiresfix_assist', 'webui_resolution_preset'],
+  },
+  {
     id: 'comfyui_tools',
     label: 'COMFYUI 전용 도구',
     title: 'COMFYUI 전용 도구',
-    moduleIds: ['comfyui_workflow_default', 'comfyui_workflow_upload', 'comfyui_open_web'],
+    moduleIds: ['comfyui_resolution_preset', 'comfyui_workflow_default', 'comfyui_workflow_upload', 'comfyui_open_web'],
   },
   {
     id: 'assistant_tools',
@@ -260,6 +289,34 @@ export function createModuleLauncher({
   function renderModuleButton(moduleId, extraClass = '') {
     const config = MODULE_REGISTRY[moduleId];
     if (!config) return '';
+    if (config.action === 'resolution_preset') {
+      const mode = tooltipAttr(config.presetMode || '');
+      const tooltip = tooltipAttr(config.title);
+      return `
+        <div class="module-resolution-preset-row" data-module="${moduleId}" data-resolution-preset-mode="${mode}" data-module-tooltip="${tooltip}">
+          <label class="module-resolution-preset-toggle">
+            <input type="checkbox" data-resolution-preset-enabled="${mode}" onchange="setResolutionPresetEnabled('${mode}', this.checked)">
+            <span>${config.label}</span>
+          </label>
+          <select class="param-select module-resolution-preset-select" data-resolution-preset-select="${mode}" onchange="setResolutionPreset('${mode}', this.value)"></select>
+        </div>
+      `;
+    }
+    if (config.action === 'webui_hiresfix_assist') {
+      const tooltip = tooltipAttr(config.title);
+      return `
+        <div class="module-hiresfix-assist-row" data-module="${moduleId}" data-module-tooltip="${tooltip}">
+          <label class="module-hiresfix-assist-toggle">
+            <input type="checkbox" data-webui-hiresfix-assist-enabled onchange="setWebUiHiresfixAssistEnabled(this.checked)">
+            <span>${config.label}</span>
+          </label>
+          <div class="module-hiresfix-assist-targets" role="group" aria-label="Hiresfix Assist base resolution">
+            <button type="button" class="module-hiresfix-assist-target" data-webui-hiresfix-assist-target="512" aria-pressed="false" onclick="setWebUiHiresfixAssistTarget(512)">512^2</button>
+            <button type="button" class="module-hiresfix-assist-target" data-webui-hiresfix-assist-target="768" aria-pressed="false" onclick="setWebUiHiresfixAssistTarget(768)">768^2</button>
+          </div>
+        </div>
+      `;
+    }
     if (moduleId === 'event_stream') {
       const tooltip = tooltipAttr(config.title);
       return `

@@ -53,6 +53,8 @@ from core.tag_search_index import TagSearchIndex, normalize_search_query
 from core.resolution_utils import (
     MAX_1MP_PIXELS,
     STANDARD_1MP_RESOLUTIONS,
+    STANDARD_1MP_RESOLUTION_LABELS,
+    normalize_anima_resolution_preset_id,
     nearest_standard_1mp_resolution,
     parse_resolution_pair,
 )
@@ -560,10 +562,7 @@ class RemoteBridge(QObject):
         },
     }
     ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
-    DEFAULT_RESOLUTIONS = [
-        "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
-        "1088 x 960", "1152 x 896", "1216 x 832",
-    ]
+    DEFAULT_RESOLUTIONS = list(STANDARD_1MP_RESOLUTION_LABELS)
     PROMPT_ENGINEERING_PRESET_MODES = ("NAI", "WEBUI", "COMFYUI")
 
     def __init__(self, app_context):
@@ -729,6 +728,10 @@ class RemoteBridge(QObject):
         return {
             "version": 1,
             "webui_hiresfix_assist": {"enabled": True, "target": 512},
+            "resolution_preset": {
+                "WEBUI": {"enabled": False, "preset": "standard"},
+                "COMFYUI": {"enabled": False, "preset": "standard"},
+            },
             "hires_preset_swap": "",
             "random_prompt_weight": "1",
         }
@@ -743,6 +746,32 @@ class RemoteBridge(QObject):
             "enabled": self._coerce_bool(state.get("enabled", True)),
             "target": target,
         }
+
+    def _normalize_resolution_preset_state(self, raw) -> dict:
+        state = raw if isinstance(raw, dict) else {}
+        return {
+            "enabled": self._coerce_bool(state.get("enabled", False)),
+            "preset": normalize_anima_resolution_preset_id(state.get("preset")),
+        }
+
+    def _normalize_resolution_preset_map(self, raw) -> dict:
+        data = raw if isinstance(raw, dict) else {}
+        defaults = self._default_remote_web_ui_state()["resolution_preset"]
+        return {
+            mode: self._normalize_resolution_preset_state(data.get(mode, defaults[mode]))
+            for mode in ("WEBUI", "COMFYUI")
+        }
+
+    def _enforce_webui_resolution_tool_exclusion(self, state: dict) -> dict:
+        """WEBUI Res Preset and Hiresfix Assist are mutually exclusive."""
+        try:
+            preset_state = state["resolution_preset"]["WEBUI"]
+            hires_state = state["webui_hiresfix_assist"]
+            if preset_state.get("enabled") and hires_state.get("enabled"):
+                hires_state["enabled"] = False
+        except Exception:
+            pass
+        return state
 
     @staticmethod
     def _normalize_hires_preset_swap_name(raw) -> str:
@@ -768,13 +797,16 @@ class RemoteBridge(QObject):
             state["webui_hiresfix_assist"] = self._normalize_webui_hiresfix_assist_state(
                 raw.get("webui_hiresfix_assist")
             )
+            state["resolution_preset"] = self._normalize_resolution_preset_map(
+                raw.get("resolution_preset")
+            )
             state["hires_preset_swap"] = self._normalize_hires_preset_swap_name(
                 raw.get("hires_preset_swap", state["hires_preset_swap"])
             )
             state["random_prompt_weight"] = self._format_anima_weight(
                 raw.get("random_prompt_weight", state["random_prompt_weight"])
             )
-        return state
+        return self._enforce_webui_resolution_tool_exclusion(state)
 
     def _get_settings_module(self):
         """SettingsTabModule 인스턴스 반환."""
@@ -843,24 +875,75 @@ class RemoteBridge(QObject):
             state["webui_hiresfix_assist"] = self._normalize_webui_hiresfix_assist_state(
                 updates.get("webui_hiresfix_assist")
             )
+        if "resolution_preset" in updates:
+            state["resolution_preset"] = self._normalize_resolution_preset_map(
+                updates.get("resolution_preset")
+            )
         if "hires_preset_swap" in updates:
             state["hires_preset_swap"] = self._normalize_hires_preset_swap_name(
                 updates.get("hires_preset_swap")
             )
         if "random_prompt_weight" in updates:
             state["random_prompt_weight"] = self._format_anima_weight(updates.get("random_prompt_weight"))
+        state = self._enforce_webui_resolution_tool_exclusion(state)
         self._remote_web_ui_state = state
+        self._webui_hiresfix_assist = dict(state["webui_hiresfix_assist"])
         self._write_remote_web_ui_state()
 
-    def _remote_web_generation_param_defaults(self) -> dict:
+    def _resolution_preset_defaults_for_mode(self, mode: str | None = None) -> dict:
+        normalized_mode = self._normalize_resolution_mode(mode)
+        if normalized_mode not in {"WEBUI", "COMFYUI"}:
+            return {}
         state = self._normalize_remote_web_ui_state(getattr(self, "_remote_web_ui_state", None))
-        weight = state["random_prompt_weight"]
+        preset_state = state["resolution_preset"].get(normalized_mode, {})
+        normalized = self._normalize_resolution_preset_state(preset_state)
         return {
-            "anima_weight": weight,
-            "anima_weight_raw": weight,
-            "random_prompt_weight": weight,
-            "hires_preset_swap": state["hires_preset_swap"],
+            "resolution_preset_enabled": bool(normalized["enabled"]),
+            "resolution_preset": normalized["preset"],
         }
+
+    def get_resolution_preset_params(self, mode: str | None = None) -> dict:
+        return self._resolution_preset_defaults_for_mode(mode or self._current_api_mode())
+
+    def _save_resolution_preset_param(self, key: str, value: str):
+        mode = self._normalize_resolution_mode()
+        if mode not in {"WEBUI", "COMFYUI"}:
+            return
+        state = self._normalize_remote_web_ui_state(getattr(self, "_remote_web_ui_state", None))
+        preset_map = state["resolution_preset"]
+        current = self._normalize_resolution_preset_state(preset_map.get(mode))
+        if key == "resolution_preset_enabled":
+            current["enabled"] = self._coerce_bool(value)
+        elif key == "resolution_preset":
+            current["preset"] = normalize_anima_resolution_preset_id(value)
+        preset_map[mode] = current
+        updates = {"resolution_preset": preset_map}
+        should_broadcast_hiresfix = False
+        if mode == "WEBUI" and current.get("enabled"):
+            hires_state = self._normalize_webui_hiresfix_assist_state(
+                getattr(self, "_webui_hiresfix_assist", None)
+            )
+            if hires_state.get("enabled"):
+                hires_state["enabled"] = False
+                updates["webui_hiresfix_assist"] = hires_state
+                should_broadcast_hiresfix = True
+        self._save_remote_web_ui_state(**updates)
+        if should_broadcast_hiresfix:
+            self._broadcast_webui_hiresfix_assist_state()
+
+    def _remote_web_generation_param_defaults(self, mode: str | None = None) -> dict:
+        state = self._normalize_remote_web_ui_state(getattr(self, "_remote_web_ui_state", None))
+        normalized_mode = self._normalize_resolution_mode(mode)
+        defaults = self._resolution_preset_defaults_for_mode(normalized_mode)
+        if normalized_mode == "WEBUI":
+            weight = state["random_prompt_weight"]
+            defaults.update({
+                "anima_weight": weight,
+                "anima_weight_raw": weight,
+                "random_prompt_weight": weight,
+                "hires_preset_swap": state["hires_preset_swap"],
+            })
+        return defaults
 
     def get_webui_hiresfix_assist_params(self) -> dict:
         state = self._normalize_webui_hiresfix_assist_state(
@@ -5655,6 +5738,7 @@ class RemoteBridge(QObject):
             comfyui_request_id = req.get("comfyui_request_id")
             event_preset_request_id = req.get("event_preset_request_id")
             remote_preset_request_id = req.get("remote_preset_request_id")
+            remote_random_request_id = str(req.get("remote_random_request_id") or "")
             force_skip = bool(req.get("force_naia_skip_generate", False))
             respect_autogen = bool(req.get("respect_naia_autogen", True))
             comfyui_peng_override = req.get("peng_override")  # dict or None
@@ -5707,6 +5791,7 @@ class RemoteBridge(QObject):
                     "negative": None,
                     "source": "random",
                     "auto_generate": auto_gen_checked,
+                    "remote_random_request_id": remote_random_request_id,
                 }
 
             if source_row is None and ws and self._ws_manager:
@@ -7125,7 +7210,7 @@ class RemoteBridge(QObject):
     def get_generation_param_schema(self) -> dict:
         """Return selectable parameter metadata without desktop-selected values."""
         schema = self._strip_generation_param_values(self.get_generation_params())
-        schema.update(self._remote_web_generation_param_defaults())
+        schema.update(self._remote_web_generation_param_defaults(self._current_api_mode()))
         return schema
 
     def get_generation_params(self) -> dict:
@@ -7183,8 +7268,9 @@ class RemoteBridge(QObject):
                     params["sampling_mode"] = "anima"
             if hasattr(mw, 'comfyui_rescale_slider'):
                 params["rescale_cfg"] = round(mw.comfyui_rescale_slider.value() / 100.0, 2)
+            params.update(self._resolution_preset_defaults_for_mode(mode))
             if mode == "WEBUI":
-                params.update(self._remote_web_generation_param_defaults())
+                params.update(self._remote_web_generation_param_defaults(mode))
             elif hasattr(mw, 'anima_weight_edit'):
                 raw_anima_weight = mw.anima_weight_edit.text().strip()
                 params["anima_weight_raw"] = raw_anima_weight
@@ -7206,6 +7292,10 @@ class RemoteBridge(QObject):
                 self._save_remote_web_ui_state(hires_preset_swap=value)
                 self._syncing_param = False
                 return
+            if key in {"resolution_preset_enabled", "resolution_preset"}:
+                self._save_resolution_preset_param(key, value)
+                self._syncing_param = False
+                return
             mw = self.app_context.main_window
             if key == "model":
                 idx = mw.model_combo.findText(value)
@@ -7217,6 +7307,8 @@ class RemoteBridge(QObject):
                 idx = mw.scheduler_combo.findText(value)
                 if idx >= 0: mw.scheduler_combo.setCurrentIndex(idx)
             elif key == "resolution":
+                if hasattr(mw, "clear_detected_resolution_override"):
+                    mw.clear_detected_resolution_override()
                 idx = mw.resolution_combo.findText(value)
                 if idx >= 0: mw.resolution_combo.setCurrentIndex(idx)
             elif key == "steps":
@@ -7233,6 +7325,8 @@ class RemoteBridge(QObject):
                 mw.random_resolution_checkbox.setChecked(value == "true")
             elif key == "auto_fit_resolution":
                 mw.auto_fit_resolution_checkbox.setChecked(value == "true")
+                if value != "true" and hasattr(mw, "clear_detected_resolution_override"):
+                    mw.clear_detected_resolution_override()
             elif key in ("SMEA", "DYN", "VAR+", "DECRISP"):
                 cb = mw.advanced_checkboxes.get(key)
                 if cb: cb.setChecked(value == "true")
@@ -7401,6 +7495,16 @@ class RemoteBridge(QObject):
 
         if mode != self._normalize_resolution_mode():
             return self._resolution_manager_state(mode)
+
+        if hasattr(mw, "_apply_resolutions_for_mode"):
+            try:
+                mw._apply_resolutions_for_mode(mode, current)
+                if hasattr(mw, "status_bar") and mw.status_bar:
+                    mw.status_bar.showMessage("✅ 해상도 목록이 저장되었습니다.", 3000)
+                self._broadcast_params()
+                return self._resolution_manager_state(mode)
+            except Exception as exc:
+                print(f"🌐 Remote: 모드별 해상도 적용 실패 — {exc}")
 
         mw.resolutions = list(resolutions)
 
@@ -9426,9 +9530,26 @@ class RemoteBridge(QObject):
                     state["target"] = 512
             else:
                 return
+            updates = {"webui_hiresfix_assist": state}
+            should_broadcast_params = False
+            if key == "enabled" and state.get("enabled"):
+                ui_state = self._normalize_remote_web_ui_state(
+                    getattr(self, "_remote_web_ui_state", None)
+                )
+                preset_map = ui_state["resolution_preset"]
+                webui_preset = self._normalize_resolution_preset_state(
+                    preset_map.get("WEBUI")
+                )
+                if webui_preset.get("enabled"):
+                    webui_preset["enabled"] = False
+                    preset_map["WEBUI"] = webui_preset
+                    updates["resolution_preset"] = preset_map
+                    should_broadcast_params = True
             self._webui_hiresfix_assist = state
-            self._save_remote_web_ui_state(webui_hiresfix_assist=state)
+            self._save_remote_web_ui_state(**updates)
             self._broadcast_webui_hiresfix_assist_state()
+            if should_broadcast_params:
+                self._broadcast_params()
         except Exception as e:
             print(f"🌐 Remote: webui_hiresfix_assist 설정 실패 — {key}={value}: {e}")
 
@@ -14590,9 +14711,11 @@ class RemoteBridge(QObject):
             )
             event_preset_request_id = prompt_event_preset_request_id
             remote_preset_request_id = prompt_remote_preset_request_id
+            remote_random_request_id = ""
             if auto_ws:
                 pending = self._pending_overrides.pop(auto_ws, {})
                 source = pending.get("source", "random")
+                remote_random_request_id = str(pending.get("remote_random_request_id") or "")
                 event_preset_request_id = str(
                     pending.get("event_preset_request_id")
                     or event_preset_request_id
@@ -14605,6 +14728,21 @@ class RemoteBridge(QObject):
                 )
                 pending_neg = pending.get("negative")
                 pending_params = pending.get("params")
+                if pending_params and isinstance(pending_params, dict):
+                    detected_resolution = None
+                    try:
+                        detected_resolution = (getattr(prompt_context, "metadata", {}) or {}).get("detected_resolution")
+                    except Exception:
+                        detected_resolution = None
+                    if detected_resolution and len(detected_resolution) == 2:
+                        try:
+                            width, height = int(detected_resolution[0]), int(detected_resolution[1])
+                            if width > 0 and height > 0:
+                                pending_params["width"] = width
+                                pending_params["height"] = height
+                                pending_params["resolution"] = f"{width} x {height}"
+                        except (TypeError, ValueError):
+                            pass
                 # seed_fixed가 아닌 경우 → 랜덤 시드로 교체
                 if pending_params and "seed" in pending_params:
                     if not self._coerce_bool(pending_params.get("seed_fixed")):
@@ -14644,9 +14782,19 @@ class RemoteBridge(QObject):
                         and ws_key[0] in {"event_preset", "preset"}
                     ):
                         continue
-                    if pending.get("source"):
-                        source = pending.pop("source")
-                        if not pending:  # 빈 dict면 제거
+                    pending_source = pending.get("source")
+                    if pending_source:
+                        source = pending_source
+                        remote_random_request_id = str(
+                            pending.get("remote_random_request_id")
+                            or remote_random_request_id
+                            or ""
+                        )
+                        if pending_source == "random" and not pending.get("auto_generate"):
+                            self._pending_overrides.pop(ws_key, None)
+                        else:
+                            pending.pop("source", None)
+                        if ws_key in self._pending_overrides and not pending:  # 빈 dict면 제거
                             self._pending_overrides.pop(ws_key, None)
                         break
 
@@ -14661,6 +14809,18 @@ class RemoteBridge(QObject):
             if self._loop and self._ws_manager:
                 data = {"type": "prompt_generated", "prompt": prompt, "remaining": remaining,
                         "source": source, "rating_counts": rating_counts}
+                if source == "random" and remote_random_request_id:
+                    data["random_request_id"] = remote_random_request_id
+                    data["requestId"] = remote_random_request_id
+                detected_resolution = (getattr(prompt_context, "metadata", {}) or {}).get("detected_resolution")
+                if detected_resolution and len(detected_resolution) == 2:
+                    try:
+                        width, height = int(detected_resolution[0]), int(detected_resolution[1])
+                        if width > 0 and height > 0:
+                            data["detected_resolution"] = {"width": width, "height": height}
+                            data["resolution"] = f"{width} x {height}"
+                    except (TypeError, ValueError):
+                        pass
                 if event_preset_request_id:
                     data["event_preset_request_id"] = event_preset_request_id
                 if remote_preset_request_id:
@@ -16578,11 +16738,13 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                             valid = set(r for r in ratings if r in 'gsqe')
                             active = valid if valid else set(bridge._active_ratings)
                             overrides = cmd.get("overrides") if isinstance(cmd.get("overrides"), dict) else None
+                            random_request_id = str(cmd.get("random_request_id") or cmd.get("requestId") or "")
                             bridge._pending_random_requests.append({
                                 "ws": ws,
                                 "source_row": None,
                                 "active_ratings": active,
                                 "overrides": overrides,
+                                "remote_random_request_id": random_request_id,
                             })
                             bridge.request_random.emit()
                         elif cmd_type == "set_option":

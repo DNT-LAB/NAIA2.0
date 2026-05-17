@@ -132,6 +132,7 @@ from core.autocomplete_manager import AutoCompleteManager
 from core.tag_data_manager import TagDataManager
 from core.wildcard_manager import WildcardManager
 from core.prompt_generation_controller import PromptGenerationController
+from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
 from utils.load_generation_params import GenerationParamsManager
 from ui.img2img_popup import Img2ImgPopup
 from ui.img2img_panel import Img2ImgPanel
@@ -1994,6 +1995,7 @@ class ModernMainWindow(QMainWindow):
         self.resolution_combo.addItems(self.resolutions)
         self.resolution_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         self.disable_wheel_event(self.resolution_combo)
+        self.resolution_combo.currentTextChanged.connect(self.clear_detected_resolution_override)
         params_grid.addWidget(self.resolution_combo, 1, 1)
 
         self.random_resolution_checkbox = QCheckBox("랜덤 해상도")
@@ -2139,6 +2141,9 @@ class ModernMainWindow(QMainWindow):
 
         self.auto_fit_resolution_checkbox = QCheckBox("자동 해상도 맞춤")
         self.auto_fit_resolution_checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
+        self.auto_fit_resolution_checkbox.toggled.connect(
+            lambda checked: None if checked else self.clear_detected_resolution_override()
+        )
         seed_controls_layout.addWidget(self.auto_fit_resolution_checkbox)
 
         seed_controls_layout.addStretch()
@@ -3076,6 +3081,15 @@ class ModernMainWindow(QMainWindow):
             else:
                 # 기본값 설정
                 width, height = 1024, 1024
+
+            detected_resolution = getattr(self, 'detected_resolution_override', None)
+            auto_fit_enabled = (
+                hasattr(self, 'auto_fit_resolution_checkbox')
+                and self.auto_fit_resolution_checkbox.isChecked()
+            )
+            if auto_fit_enabled and getattr(self, 'resolution_is_detected', False) and detected_resolution:
+                width, height = detected_resolution
+                resolution_text = f"{width} x {height}"
             
             # 시드 처리
             if self.seed_fix_checkbox.isChecked():
@@ -3103,7 +3117,7 @@ class ModernMainWindow(QMainWindow):
                 "model": self.model_combo.currentText(),
                 "scheduler": self.scheduler_combo.currentText(),
                 "sampler": self.sampler_combo.currentText(),
-                "resolution": self.resolution_combo.currentText(),  # UI 표시용
+                "resolution": resolution_text,  # UI 표시용
                 "width": width,
                 "height": height,
                 "seed": seed_value,
@@ -4966,6 +4980,7 @@ class ModernMainWindow(QMainWindow):
     def sync_resolution_to_main(self, text):
         """분리된 창의 해상도를 메인 윈도우에 동기화"""
         if hasattr(self, 'resolution_combo'):
+            self.clear_detected_resolution_override()
             self.resolution_combo.setCurrentText(text)
     
     def sync_random_resolution_to_main(self, checked):
@@ -4977,6 +4992,8 @@ class ModernMainWindow(QMainWindow):
         """분리된 창의 자동 맞춤을 메인 윈도우에 동기화"""
         if hasattr(self, 'auto_fit_resolution_checkbox'):
             self.auto_fit_resolution_checkbox.setChecked(checked)
+            if not checked:
+                self.clear_detected_resolution_override()
     
     def sync_seed_fix_to_main(self, checked):
         """분리된 창의 시드 고정을 메인 윈도우에 동기화"""
@@ -5727,21 +5744,26 @@ class ModernMainWindow(QMainWindow):
         resolution_str = f"{width} x {height}"
         self.resolution_combo.setCurrentText(resolution_str)
         self.resolution_is_detected = True
+        self.detected_resolution_override = (width, height)
         self.status_bar.showMessage(f"✅ 해상도 자동 맞춤: {resolution_str}", 3000)
+
+    def clear_detected_resolution_override(self, *_args):
+        self.resolution_is_detected = False
+        self.detected_resolution_override = None
 
     def _load_resolutions(self, mode: str | None = None) -> list:
         """현재 API 모드의 해상도 목록을 로드합니다."""
         mode = self._normalize_resolution_mode(mode)
         resolutions_by_mode = self._load_resolutions_by_mode()
-        resolutions = list(resolutions_by_mode.get(mode) or self._default_resolutions())
+        resolutions = list(resolutions_by_mode.get(mode) or self._base_default_resolutions())
         print(f"✅ 해상도 로드 완료: {mode} {len(resolutions)}개 항목")
         return resolutions
 
-    def _default_resolutions(self) -> list:
-        return [
-            "1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216",
-            "1088 x 960", "1152 x 896", "1216 x 832"
-        ]
+    def _base_default_resolutions(self) -> list:
+        return list(STANDARD_1MP_RESOLUTION_LABELS)
+
+    def _default_resolutions(self, mode: str | None = None) -> list:
+        return self._base_default_resolutions()
 
     def _normalize_resolution_mode(self, mode: str | None = None) -> str:
         if mode is None:
@@ -5771,7 +5793,7 @@ class ModernMainWindow(QMainWindow):
     def _load_resolutions_by_mode(self) -> dict:
         """모드별 해상도 목록을 로드합니다. legacy list 파일은 모든 모드에 복제합니다."""
         resolutions_file = "save/resolutions.json"
-        default_resolutions = self._default_resolutions()
+        default_resolutions = self._base_default_resolutions()
         mode_map = {mode: list(default_resolutions) for mode in self.RESOLUTION_MODES}
 
         try:
@@ -5824,7 +5846,7 @@ class ModernMainWindow(QMainWindow):
             resolutions_by_mode = self._load_resolutions_by_mode()
             cleaned = self._normalize_resolution_list_for_storage(resolutions)
             if not cleaned:
-                cleaned = self._default_resolutions()
+                cleaned = self._base_default_resolutions()
             resolutions_by_mode[mode] = cleaned
 
             # 절대 경로 확인
@@ -5869,7 +5891,7 @@ class ModernMainWindow(QMainWindow):
         """현재 UI 콤보박스를 지정 모드의 해상도 목록으로 교체합니다."""
         mode = self._normalize_resolution_mode(mode)
         resolutions_by_mode = self._load_resolutions_by_mode()
-        resolutions = list(resolutions_by_mode.get(mode) or self._default_resolutions())
+        resolutions = list(resolutions_by_mode.get(mode) or self._base_default_resolutions())
         current_selection = preferred_resolution
         if not current_selection and hasattr(self, 'resolution_combo'):
             current_selection = self.resolution_combo.currentText()

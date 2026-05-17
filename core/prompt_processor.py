@@ -5,7 +5,11 @@ from typing import Dict, Any
 from core.prompt_context import PromptContext
 from core.wildcard_processor import WildcardProcessor # 이전 단계에서 생성
 from core.context import AppContext
-from core.resolution_utils import MAX_1MP_PIXELS, nearest_standard_1mp_resolution
+from core.resolution_utils import (
+    MAX_1MP_PIXELS,
+    nearest_anima_preset_resolution,
+    nearest_standard_1mp_resolution,
+)
 
 # 가중치 구문 감지 정규식 (C-2: \d+\.?\d* 로 정밀화)
 _WEIGHT_WEBUI_RE = re.compile(r'^\(.*:\d+\.?\d*\)$')   # (tag:1.2) — A1111 개별 가중치
@@ -237,7 +241,20 @@ class PromptProcessor:
                 width = int(source_row['image_width'])
                 height = int(source_row['image_height'])
                 if width > 0 and height > 0:
-                    if width * height > MAX_1MP_PIXELS:
+                    api_mode = (
+                        settings.get('api_mode')
+                        or getattr(getattr(self, 'app_context', None), 'current_api_mode', '')
+                    )
+                    if (
+                        str(api_mode or '').strip().upper() in {'WEBUI', 'COMFYUI'}
+                        and settings.get('resolution_preset_enabled')
+                    ):
+                        width, height = nearest_anima_preset_resolution(
+                            width,
+                            height,
+                            settings.get('resolution_preset'),
+                        )
+                    elif width * height > MAX_1MP_PIXELS:
                         width, height = nearest_standard_1mp_resolution(width, height)
                     context.metadata['detected_resolution'] = (width, height)
             except (ValueError, TypeError):

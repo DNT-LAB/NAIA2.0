@@ -3,6 +3,12 @@ from core.generation_request import GenerationRequest
 from core.sequence_parser import SequenceParser
 from core.vibe_cluster_resolver import VibeClusterPromptError, apply_vibe_cluster_prompt_override
 from core.wildcard_processor import split_tags_smart
+from core.resolution_utils import (
+    anima_resolution_preset_candidates,
+    anima_resolution_preset_labels,
+    anima_resolution_preset_square_label,
+    parse_resolution_pair,
+)
 from PIL import Image
 import piexif
 import piexif.helper
@@ -399,6 +405,105 @@ class GenerationController:
         if "hires_preset_swap" in swap_defaults:
             params.setdefault("hires_preset_swap", swap_defaults["hires_preset_swap"])
 
+    def _should_apply_remote_web_resolution_preset_default(self, params: dict) -> bool:
+        if "resolution_preset_enabled" in params or "resolution_preset" in params:
+            return False
+        api_mode = str(params.get('api_mode') or '').upper()
+        if api_mode not in {"WEBUI", "COMFYUI"}:
+            return False
+        if bool(params.get("_remote_web_session_params")):
+            return True
+
+        prompt_settings = {}
+        try:
+            prompt_context = getattr(self.context, "current_prompt_context", None)
+            prompt_settings = getattr(prompt_context, "settings", {}) or {}
+        except Exception:
+            prompt_settings = {}
+        is_auto_generate_prompt = bool(params.get("auto_generate")) or bool(
+            prompt_settings.get("auto_generate")
+        )
+        if not is_auto_generate_prompt:
+            return False
+
+        bridge = getattr(self.context, "remote_bridge", None)
+        getter = getattr(bridge, "is_remote_auto_generate_enabled", None)
+        if not callable(getter):
+            return False
+        try:
+            return bool(getter())
+        except Exception:
+            return False
+
+    def _apply_remote_web_resolution_preset_default(self, params: dict) -> None:
+        if not self._should_apply_remote_web_resolution_preset_default(params):
+            return
+        bridge = getattr(self.context, "remote_bridge", None)
+        preset_getter = getattr(bridge, "get_resolution_preset_params", None)
+        if not callable(preset_getter):
+            return
+        try:
+            defaults = preset_getter(params.get("api_mode"))
+        except Exception as e:
+            print(f"⚠️ Remote Web 해상도 프리셋 설정 읽기 실패: {e}")
+            return
+        if not isinstance(defaults, dict):
+            return
+        if not defaults.get("resolution_preset_enabled"):
+            return
+        params.setdefault("resolution_preset_enabled", True)
+        if "resolution_preset" in defaults:
+            params.setdefault("resolution_preset", defaults["resolution_preset"])
+
+    def _resolution_preset_labels_for_params(self, params: dict) -> list[str]:
+        api_mode = str(params.get("api_mode") or "").strip().upper()
+        if api_mode not in {"WEBUI", "COMFYUI"}:
+            return []
+        if not bool(params.get("resolution_preset_enabled")):
+            return []
+        return list(anima_resolution_preset_labels(params.get("resolution_preset")))
+
+    def _apply_resolution_label_to_params(self, params: dict, label: str, *, update_combo: bool = False) -> bool:
+        pair = parse_resolution_pair(label)
+        if not pair:
+            return False
+        width, height = pair
+        params["resolution"] = f"{width} x {height}"
+        params["width"] = width
+        params["height"] = height
+        if update_combo:
+            combo = getattr(self.context.main_window, "resolution_combo", None)
+            if combo is not None:
+                index = combo.findText(params["resolution"])
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+        return True
+
+    def _apply_resolution_preset_default(self, params: dict) -> None:
+        if params.get("random_resolution") or self.context.main_window.resolution_is_detected:
+            return
+        if not self._resolution_preset_labels_for_params(params):
+            return
+        current_pair = parse_resolution_pair(params.get("resolution"))
+        if current_pair in anima_resolution_preset_candidates(params.get("resolution_preset")):
+            self._apply_resolution_label_to_params(params, f"{current_pair[0]} x {current_pair[1]}")
+            return
+        label = anima_resolution_preset_square_label(params.get("resolution_preset"))
+        self._apply_resolution_label_to_params(params, label)
+
+    def _apply_random_resolution(self, params: dict) -> None:
+        if not params.get('random_resolution', False) or self.context.main_window.resolution_is_detected:
+            return
+        preset_labels = self._resolution_preset_labels_for_params(params)
+        if preset_labels:
+            selected_value = random.choice(preset_labels)
+        else:
+            random_index = random.randint(0, self.context.main_window.resolution_combo.count() - 1)
+            self.context.main_window.resolution_combo.setCurrentIndex(random_index)
+            selected_value = self.context.main_window.resolution_combo.currentText()
+        if self._apply_resolution_label_to_params(params, selected_value):
+            print(f"랜덤 해상도 설정: {params['width']}x{params['height']}")
+
     def _prepare_comfyui_workflow_with_wildcards(self, params: dict) -> bool:
         """
         🌉 ComfyUI 전용 브릿지: 와일드카드 확장 → 워크플로우 생성
@@ -534,16 +639,14 @@ class GenerationController:
 
             self._apply_webui_hiresfix_assist_defaults(params)
             self._apply_remote_web_hires_preset_swap_default(params)
+            self._apply_remote_web_resolution_preset_default(params)
 
-            # 랜덤 해상도 처리
-            if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:
-                random_index = random.randint(0, self.context.main_window.resolution_combo.count() - 1)
-                self.context.main_window.resolution_combo.setCurrentIndex(random_index)
-                selected_value = self.context.main_window.resolution_combo.currentText()
-                width, height = map(int, selected_value.split('x'))
-                params['width'] = width
-                params['height'] = height
-                print(f"랜덤 해상도 설정: {width}x{height}")
+            if overrides:
+                print(f"🔄 Workshop 파라미터로 덮어쓰기: {list(overrides.keys())}")
+                params.update(overrides)
+
+            self._apply_resolution_preset_default(params)
+            self._apply_random_resolution(params)
 
             # 자동 해상도 관리 해제
             self.context.main_window.resolution_is_detected = False
@@ -552,10 +655,6 @@ class GenerationController:
             if img2img_params:
                 print("🖼️ Img2Img 패널 활성화됨. 파라미터를 추가합니다.")
                 params.update(img2img_params)
-
-            if overrides:
-                print(f"🔄 Workshop 파라미터로 덮어쓰기: {list(overrides.keys())}")
-                params.update(overrides)
 
             is_valid, error_msg = self.validate_parameters(params)
             if not is_valid:
@@ -704,6 +803,9 @@ class GenerationController:
             # 덮어쓰기 적용
             if overrides:
                 params.update(overrides)
+
+            self._apply_resolution_preset_default(params)
+            self._apply_random_resolution(params)
 
             if not self._apply_vibe_cluster_prompt_override(params):
                 return
@@ -2004,16 +2106,10 @@ class GenerationController:
 
         self._apply_webui_hiresfix_assist_defaults(params)
         self._apply_remote_web_hires_preset_swap_default(params)
+        self._apply_remote_web_resolution_preset_default(params)
 
-        # 랜덤 해상도 처리
-        if params.get('random_resolution', False) and not self.context.main_window.resolution_is_detected:
-            random_index = random.randint(0, self.context.main_window.resolution_combo.count() - 1)
-            self.context.main_window.resolution_combo.setCurrentIndex(random_index)
-            selected_value = self.context.main_window.resolution_combo.currentText()
-            width, height = map(int, selected_value.split('x'))
-            params['width'] = width
-            params['height'] = height
-            print(f"랜덤 해상도 설정: {width}x{height}")
+        self._apply_resolution_preset_default(params)
+        self._apply_random_resolution(params)
 
         # Img2Img 파라미터
         img2img_params = self.context.main_window.img2img_panel.get_parameters()

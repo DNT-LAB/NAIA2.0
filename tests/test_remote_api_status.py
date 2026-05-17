@@ -540,6 +540,7 @@ def test_auto_generated_prompt_broadcast_uses_auto_generate_source(monkeypatch):
         final_prompt="auto prompt",
         settings={"auto_generate": True},
         source_row=SimpleNamespace(name=""),
+        metadata={"detected_resolution": (640, 960)},
         wildcard_history={},
         wildcard_state={},
     )
@@ -552,6 +553,8 @@ def test_auto_generated_prompt_broadcast_uses_auto_generate_source(monkeypatch):
     assert ws_manager.messages[0]["type"] == "prompt_generated"
     assert ws_manager.messages[0]["source"] == "auto_generate"
     assert ws_manager.messages[0]["prompt"] == "auto prompt"
+    assert ws_manager.messages[0]["resolution"] == "640 x 960"
+    assert ws_manager.messages[0]["detected_resolution"] == {"width": 640, "height": 960}
 
 
 def test_web_random_pending_keeps_random_source_when_auto_gen_checked(monkeypatch):
@@ -572,6 +575,7 @@ def test_web_random_pending_keeps_random_source_when_auto_gen_checked(monkeypatc
         "negative": None,
         "source": "random",
         "auto_generate": True,
+        "remote_random_request_id": "rid-random-auto",
     }
     bridge._build_prompt_token_payload = lambda *_args, **_kwargs: {}
     bridge._read_wildcard = lambda: None
@@ -597,6 +601,61 @@ def test_web_random_pending_keeps_random_source_when_auto_gen_checked(monkeypatc
         loop.close()
 
     assert ws_manager.messages[0]["source"] == "random"
+    assert ws_manager.messages[0]["random_request_id"] == "rid-random-auto"
+    assert ws_manager.messages[0]["requestId"] == "rid-random-auto"
+
+
+def test_web_random_pending_echoes_request_id_after_button_timeout(monkeypatch):
+    ctx = _AppContext()
+    ctx.current_prompt_context = None
+    ctx.main_window = SimpleNamespace(
+        search_results=None,
+        generation_controller=SimpleNamespace(is_generating=False),
+    )
+    bridge = RemoteBridge(ctx)
+    ws_manager = _FakeWsManager()
+    loop = asyncio.new_event_loop()
+    ws = object()
+    bridge.set_ws_manager(ws_manager)
+    bridge.set_event_loop(loop)
+    bridge._pending_overrides[ws] = {
+        "params": None,
+        "negative": None,
+        "source": "random",
+        "auto_generate": False,
+        "remote_random_request_id": "rid-random-late",
+    }
+    bridge._build_prompt_token_payload = lambda *_args, **_kwargs: {}
+    bridge._read_wildcard = lambda: None
+    bridge._read_prompt_engineering = lambda: None
+    bridge._read_character = lambda: None
+
+    def run_now(coro, target_loop):
+        target_loop.run_until_complete(coro)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(remote_api_server.asyncio, "run_coroutine_threadsafe", run_now)
+    prompt_context = SimpleNamespace(
+        final_prompt="late web random",
+        settings={},
+        source_row=SimpleNamespace(name=""),
+        metadata={"detected_resolution": (704, 832)},
+        wildcard_history={},
+        wildcard_state={},
+    )
+
+    try:
+        bridge.on_prompt_generated(prompt_context)
+    finally:
+        loop.close()
+
+    message = ws_manager.messages[0]
+    assert message["source"] == "random"
+    assert message["random_request_id"] == "rid-random-late"
+    assert message["requestId"] == "rid-random-late"
+    assert message["resolution"] == "704 x 832"
+    assert message["detected_resolution"] == {"width": 704, "height": 832}
+    assert ws not in bridge._pending_overrides
 
 
 def test_web_random_auto_generate_respects_boolean_seed_fixed(monkeypatch):
@@ -1244,6 +1303,7 @@ def test_web_random_passes_session_overrides_to_prompt_generation():
         "source_row": None,
         "active_ratings": {"g", "s"},
         "overrides": overrides,
+        "remote_random_request_id": "rid-random-click",
     })
 
     bridge._do_random()
@@ -1255,11 +1315,16 @@ def test_web_random_passes_session_overrides_to_prompt_generation():
     }]
     assert bridge._pending_overrides[ws]["params"] == overrides
     assert bridge._pending_overrides[ws]["auto_generate"] is True
+    assert bridge._pending_overrides[ws]["remote_random_request_id"] == "rid-random-click"
 
 
 def test_remote_web_ui_state_persists_hires_assist_and_random_prompt_weight(tmp_path, monkeypatch):
+    class _WebuiContext(_AppContext):
+        def get_api_mode(self):
+            return "WEBUI"
+
     monkeypatch.chdir(tmp_path)
-    ctx = _AppContext()
+    ctx = _WebuiContext()
     bridge = RemoteBridge(ctx)
 
     assert bridge._read_webui_hiresfix_assist() == {
@@ -1274,10 +1339,15 @@ def test_remote_web_ui_state_persists_hires_assist_and_random_prompt_weight(tmp_
     bridge._save_remote_web_ui_state(
         hires_preset_swap="prev5",
         random_prompt_weight="0.85",
+        resolution_preset={
+            "WEBUI": {"enabled": True, "preset": "quality"},
+            "COMFYUI": {"enabled": False, "preset": "standard"},
+        },
     )
 
     saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
     assert saved["remote_web"]["webui_hiresfix_assist"] == {"enabled": False, "target": 768}
+    assert saved["remote_web"]["resolution_preset"]["WEBUI"] == {"enabled": True, "preset": "quality"}
     assert saved["remote_web"]["hires_preset_swap"] == "prev5"
     assert saved["remote_web"]["random_prompt_weight"] == "0.85"
 
@@ -1288,6 +1358,73 @@ def test_remote_web_ui_state_persists_hires_assist_and_random_prompt_weight(tmp_
     assert schema["hires_preset_swap"] == "prev5"
     assert schema["random_prompt_weight"] == "0.85"
     assert schema["anima_weight"] == "0.85"
+    assert schema["resolution_preset_enabled"] is True
+    assert schema["resolution_preset"] == "quality"
+
+
+def test_remote_web_ui_state_normalizes_conflicting_resolution_tools(tmp_path, monkeypatch):
+    class _WebuiContext(_AppContext):
+        def get_api_mode(self):
+            return "WEBUI"
+
+    monkeypatch.chdir(tmp_path)
+    ctx = _WebuiContext()
+    bridge = RemoteBridge(ctx)
+
+    bridge._save_remote_web_ui_state(
+        webui_hiresfix_assist={"enabled": True, "target": 768},
+        resolution_preset={
+            "WEBUI": {"enabled": True, "preset": "quality"},
+            "COMFYUI": {"enabled": False, "preset": "standard"},
+        },
+    )
+
+    saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
+    assert saved["remote_web"]["webui_hiresfix_assist"] == {"enabled": False, "target": 768}
+    assert saved["remote_web"]["resolution_preset"]["WEBUI"] == {"enabled": True, "preset": "quality"}
+    assert bridge._read_webui_hiresfix_assist()["enabled"] is False
+
+
+def test_remote_web_resolution_preset_enabling_disables_hiresfix_server_state(tmp_path, monkeypatch):
+    class _WebuiContext(_AppContext):
+        def get_api_mode(self):
+            return "WEBUI"
+
+    monkeypatch.chdir(tmp_path)
+    ctx = _WebuiContext()
+    bridge = RemoteBridge(ctx)
+    bridge._set_webui_hiresfix_assist("target", "768")
+
+    bridge._do_set_param("resolution_preset_enabled", "true")
+
+    saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
+    assert saved["remote_web"]["resolution_preset"]["WEBUI"]["enabled"] is True
+    assert saved["remote_web"]["webui_hiresfix_assist"] == {"enabled": False, "target": 768}
+    assert bridge._read_webui_hiresfix_assist()["enabled"] is False
+
+
+def test_remote_web_hiresfix_enabling_disables_webui_resolution_preset_server_state(tmp_path, monkeypatch):
+    class _WebuiContext(_AppContext):
+        def get_api_mode(self):
+            return "WEBUI"
+
+    monkeypatch.chdir(tmp_path)
+    ctx = _WebuiContext()
+    bridge = RemoteBridge(ctx)
+    bridge._save_remote_web_ui_state(
+        webui_hiresfix_assist={"enabled": False, "target": 768},
+        resolution_preset={
+            "WEBUI": {"enabled": True, "preset": "quality"},
+            "COMFYUI": {"enabled": False, "preset": "standard"},
+        },
+    )
+
+    bridge._set_webui_hiresfix_assist("enabled", "true")
+
+    saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
+    assert saved["remote_web"]["webui_hiresfix_assist"] == {"enabled": True, "target": 768}
+    assert saved["remote_web"]["resolution_preset"]["WEBUI"] == {"enabled": False, "preset": "quality"}
+    assert bridge.get_generation_param_schema()["resolution_preset_enabled"] is False
 
 
 def test_remote_web_hires_preset_swap_param_is_saved_for_auto_generation(tmp_path, monkeypatch):
@@ -1396,6 +1533,71 @@ def test_webui_desktop_snapshot_uses_saved_remote_prompt_weight(tmp_path, monkey
     assert params["anima_weight"] == "0.85"
     assert params["anima_weight_raw"] == "0.85"
     assert params["random_prompt_weight"] == "0.85"
+
+
+def test_remote_web_resolution_state_keeps_saved_webui_items_with_anima_model(tmp_path, monkeypatch):
+    class _WebuiContext(_AppContext):
+        def get_api_mode(self):
+            return "WEBUI"
+
+    monkeypatch.chdir(tmp_path)
+    ctx = _WebuiContext()
+    ctx.main_window = SimpleNamespace(
+        model_combo=_FakeComboBox(["anima-preview3-base"], "anima-preview3-base"),
+        resolution_combo=_FakeComboBox(["1024 x 1024"], "1024 x 1024"),
+        resolutions=["640 x 640"],
+        _load_resolutions=lambda mode=None: ["640 x 640"],
+    )
+    bridge = RemoteBridge(ctx)
+
+    state = bridge._resolution_manager_state("WEBUI")
+
+    assert state["api_mode"] == "WEBUI"
+    assert state["current_resolution"] == "1024 x 1024"
+    assert state["resolutions"] == ["1024 x 1024"]
+    assert state["defaults"] == bridge.DEFAULT_RESOLUTIONS
+
+
+def test_remote_web_resolution_preset_param_is_saved_by_mode(tmp_path, monkeypatch):
+    class _ComfyContext(_AppContext):
+        def get_api_mode(self):
+            return "COMFYUI"
+
+    monkeypatch.chdir(tmp_path)
+    ctx = _ComfyContext()
+    bridge = RemoteBridge(ctx)
+
+    bridge._do_set_param("resolution_preset_enabled", "true")
+    bridge._do_set_param("resolution_preset", "max")
+
+    saved = json.loads(Path("app_settings.json").read_text(encoding="utf-8"))
+    assert saved["remote_web"]["resolution_preset"]["COMFYUI"] == {
+        "enabled": True,
+        "preset": "max",
+    }
+    assert bridge.get_generation_param_schema()["resolution_preset_enabled"] is True
+    assert bridge.get_generation_param_schema()["resolution_preset"] == "max"
+
+
+def test_remote_web_resolution_param_clears_detected_auto_resolution(tmp_path, monkeypatch):
+    class _WebuiContext(_AppContext):
+        def get_api_mode(self):
+            return "WEBUI"
+
+    monkeypatch.chdir(tmp_path)
+    cleared = []
+    ctx = _WebuiContext()
+    ctx.main_window = SimpleNamespace(
+        resolution_combo=_FakeComboBox(["1024 x 1024"], "1024 x 1024"),
+        auto_fit_resolution_checkbox=_FakeCheckBox(True),
+        clear_detected_resolution_override=lambda: cleared.append(True),
+    )
+    bridge = RemoteBridge(ctx)
+
+    bridge._do_set_param("resolution", "1024 x 1024")
+    bridge._do_set_param("auto_fit_resolution", "false")
+
+    assert len(cleared) == 2
 
 
 def test_generation_param_schema_strips_desktop_selected_values():

@@ -128,7 +128,10 @@ export function createCustomSelectController({
     }
 
     const selectedOption = select.selectedOptions?.[0] || select.options[select.selectedIndex] || select.options[0];
-    label.textContent = selectedOption ? selectedOption.textContent : '';
+    const displayLabel = String(select.dataset.customSelectLabel || '').trim()
+      || (selectedOption ? selectedOption.textContent : '');
+    label.textContent = displayLabel;
+    button.title = String(select.dataset.customSelectTitle || '').trim() || displayLabel;
     button.disabled = select.disabled;
     wrapper.classList.toggle('is-disabled', select.disabled);
     button.setAttribute('aria-expanded', openState?.select === select ? 'true' : 'false');

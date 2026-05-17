@@ -507,6 +507,7 @@ def test_prompt_engineering_ignores_legacy_randomized_preset_file(monkeypatch, t
             _FakePresetPath("*randomized"),
             _FakePresetPath("default"),
             _FakePresetPath("alpha"),
+            _FakePresetPath("alpha.hires"),
         ]
     )
 

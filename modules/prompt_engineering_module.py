@@ -208,6 +208,11 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         def execute_pipeline_hook(self, context):
             return self._parent._execute_outfit_context_resolver(context)
 
+    @staticmethod
+    def _is_user_preset_file(preset_file) -> bool:
+        name = getattr(preset_file, "stem", "")
+        return bool(name) and name != "*randomized" and not name.endswith(".hires")
+
     def __init__(self):
         BaseMiddleModule.__init__(self)
         ModeAwareModule.__init__(self)
@@ -2158,7 +2163,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
         # JSON 파일 목록 가져오기
         json_files = sorted(preset_dir.glob("*.json"))
-        preset_names = [f.stem for f in json_files if f.stem != "*randomized"]
+        preset_names = [f.stem for f in json_files if self._is_user_preset_file(f)]
 
         # default를 맨 앞으로
         if "default" in preset_names:
@@ -2573,6 +2578,8 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         preset_dir = self.get_preset_dir()
         preset_data = {}
         for preset_file in sorted(preset_dir.glob("*.json")):
+            if not self._is_user_preset_file(preset_file):
+                continue
             list_widget.addItem(preset_file.stem)
             try:
                 with open(preset_file, 'r', encoding='utf-8') as f:

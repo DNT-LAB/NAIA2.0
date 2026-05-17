@@ -1976,6 +1976,52 @@ def test_webui_result_enhance_context_uses_current_hires_settings_snapshot():
     assert "type" not in params
 
 
+def test_webui_result_enhance_caps_final_size_with_hiresfix_limit():
+    from core.api_service import APIService
+
+    image = Image.new("RGB", (512, 768), "white")
+    item = SimpleNamespace(
+        image=image,
+        generation_params={
+            "input": "1girl",
+            "negative_prompt": "",
+            "seed": 123,
+            "width": 512,
+            "height": 768,
+        },
+    )
+    image_window = SimpleNamespace(
+        auto_save_checkbox=object(),
+        current_history_item=item,
+    )
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "WEBUI"
+    ctx.secure_token_manager = _TokenManager({"webui_url": "127.0.0.1:7860"})
+    ctx.main_window = SimpleNamespace(image_window=image_window)
+    ctx.api_service = APIService(ctx)
+    bridge = RemoteBridge(ctx)
+
+    context = bridge._prepare_result_enhance_context({
+        "mode": "WEBUI",
+        "hires_settings": {
+            "hr_scale": 3,
+            "hr_upscaler": "Latent (nearest-exact)",
+            "denoising_strength": 0.7,
+            "hires_steps": 10,
+            "hr_cfg": 5.5,
+        },
+    }, mode="WEBUI")
+
+    params = context["params"]
+    assert params["width"] == 512
+    assert params["height"] == 768
+    assert params["hr_scale"] == 2.4
+    assert context["upscale"] == 2.4
+    assert context["new_w"] * context["new_h"] <= 1536 * 1536
+    assert context["new_w"] == 1229
+    assert context["new_h"] == 1843
+
+
 class _EnhanceQueueManager:
     def __init__(self, paused=False):
         self.requests = []

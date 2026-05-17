@@ -1933,7 +1933,7 @@ class RemoteBridge(QObject):
             return int(fallback)
         return max(1, number)
 
-    def _preview_webui_result_enhance_size(self, params: dict, base_w: int, base_h: int) -> tuple[int, int]:
+    def _apply_webui_result_enhance_size_policy(self, params: dict, base_w: int, base_h: int) -> tuple[int, int, float]:
         payload = {"width": base_w, "height": base_h}
         scale = self._clamp_result_enhance_number(params.get("hr_scale"), 1.0, 4.0, 2.0)
         api_service = getattr(self.app_context, "api_service", None)
@@ -1950,9 +1950,20 @@ class RemoteBridge(QObject):
                     scale = fit_scale(payload, scale)
                 except Exception:
                     pass
-        new_w = max(1, int(round(float(payload.get("width") or base_w) * scale)))
-        new_h = max(1, int(round(float(payload.get("height") or base_h) * scale)))
-        return new_w, new_h
+        payload_w = self._webui_result_enhance_dimension(payload.get("width"), base_w)
+        payload_h = self._webui_result_enhance_dimension(payload.get("height"), base_h)
+        scale = round(self._clamp_result_enhance_number(scale, 1.0, 4.0, 2.0), 1)
+        params["width"] = payload_w
+        params["height"] = payload_h
+        params["hr_scale"] = scale
+        scaled_dimension = getattr(api_service, "_webui_scaled_dimension", None) if api_service is not None else None
+        if callable(scaled_dimension):
+            new_w = scaled_dimension(payload_w, scale)
+            new_h = scaled_dimension(payload_h, scale)
+        else:
+            new_w = max(1, int(round(float(payload_w) * scale)))
+            new_h = max(1, int(round(float(payload_h) * scale)))
+        return new_w, new_h, scale
 
     def _prepare_webui_result_enhance_context(self, payload: dict) -> dict:
         import copy
@@ -1985,9 +1996,8 @@ class RemoteBridge(QObject):
         params["api_mode"] = "WEBUI"
         params["credential"] = credential
 
-        new_w, new_h = self._preview_webui_result_enhance_size(params, base_w, base_h)
+        new_w, new_h, upscale = self._apply_webui_result_enhance_size_policy(params, base_w, base_h)
         strength = hires_settings["denoising_strength"]
-        upscale = hires_settings["hr_scale"]
 
         context.update({
             "params": params,

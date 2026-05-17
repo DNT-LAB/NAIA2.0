@@ -111,7 +111,7 @@ def test_webui_resolution_preset_auto_fit_uses_selected_preset():
     assert context.metadata["detected_resolution"] == (1216, 1792)
 
 
-def test_webui_resolution_preset_draft_auto_fit_uses_square_only():
+def test_webui_resolution_preset_draft_auto_fit_preserves_portrait():
     processor = PromptProcessor.__new__(PromptProcessor)
     context = PromptContext(
         source_row=pd.Series({"image_width": 640, "image_height": 960}),
@@ -125,7 +125,7 @@ def test_webui_resolution_preset_draft_auto_fit_uses_square_only():
 
     processor._step_2_fit_resolution(context)
 
-    assert context.metadata["detected_resolution"] == (512, 512)
+    assert context.metadata["detected_resolution"] == (448, 640)
 
 
 def test_webui_resolution_preset_default_uses_square_without_touching_main_combo():

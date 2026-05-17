@@ -17,11 +17,17 @@ STANDARD_1MP_RESOLUTION_LABELS: tuple[str, ...] = tuple(
     f"{width} x {height}" for width, height in STANDARD_1MP_RESOLUTIONS
 )
 
-ANIMA_MIN_PIXELS = 512 * 512
+ANIMA_MIN_PIXELS = 384 * 640
 ANIMA_MAX_PIXELS = 1536 * 1536
 ANIMA_MAX_DIMENSION = 1792
 ANIMA_RESOLUTIONS: tuple[tuple[int, int], ...] = (
     (512, 512),
+    (448, 576),
+    (448, 640),
+    (384, 640),
+    (576, 448),
+    (640, 448),
+    (640, 384),
     (768, 768),
     (704, 832),
     (704, 896),
@@ -71,6 +77,12 @@ ANIMA_RESOLUTION_LABELS: tuple[str, ...] = tuple(
 ANIMA_RESOLUTION_PRESETS: dict[str, tuple[tuple[int, int], ...]] = {
     "draft": (
         (512, 512),
+        (448, 576),
+        (448, 640),
+        (384, 640),
+        (576, 448),
+        (640, 448),
+        (640, 384),
     ),
     "compact": (
         (768, 768),

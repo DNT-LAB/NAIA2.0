@@ -97,18 +97,18 @@ export function createResultEnhanceController({
     return `Enhance x${formatUpscale(config.upscale)} | ${config.strength.toFixed(1)}`;
   }
 
-  function getDisabledReason() {
+  function getDisabledReason(meta = currentMeta) {
     if (running) return 'Enhance is running';
-    if (!currentMeta) return 'No generated image is selected';
+    if (!meta) return 'No generated image is selected';
     if (!isSupportedMode()) return 'Enhance is available in NAI or WEBUI mode only';
-    if (!currentMeta.can_enhance) {
+    if (!meta.can_enhance) {
       return 'Generation parameters are unavailable';
     }
     return '';
   }
 
-  function canRequest() {
-    return !getDisabledReason();
+  function canRequest(meta = currentMeta) {
+    return !getDisabledReason(meta);
   }
 
   function update() {
@@ -404,9 +404,10 @@ export function createResultEnhanceController({
     }
   }
 
-  function request() {
-    if (!canRequest()) {
-      const reason = getDisabledReason();
+  function request(metaOverride = null) {
+    const requestMeta = metaOverride ? {...metaOverride} : currentMeta;
+    if (!canRequest(requestMeta)) {
+      const reason = getDisabledReason(requestMeta);
       if (reason && showToast) showToast(reason, 'error', true);
       update();
       return;
@@ -424,9 +425,9 @@ export function createResultEnhanceController({
       const payload = {
         type: 'result_enhance',
         mode: currentMode(),
-        source: currentMeta?.source || '',
-        path: currentMeta?.source === 'current' ? '' : (currentMeta?.path || ''),
-        file_path: currentMeta?.file_path || currentMeta?.filePath || '',
+        source: requestMeta?.source || '',
+        path: requestMeta?.source === 'current' ? '' : (requestMeta?.path || ''),
+        file_path: requestMeta?.file_path || requestMeta?.filePath || '',
       };
       if (isWebUiMode()) {
         payload.hires_settings = normalizeWebUiHiresSettings();

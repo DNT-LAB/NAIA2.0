@@ -10,6 +10,7 @@ const ACTION_SAVE_IMAGE = 'save_image';
 const ACTION_COPY_IMAGE = 'copy_image';
 const ACTION_UPSCALE_NAI = 'upscale_nai';
 const ACTION_METADATA_DETACHED = 'show_metadata_detached';
+const ACTION_WEBUI_ENHANCE = 'webui_enhance';
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -22,6 +23,7 @@ const DEFAULT_CAPABILITIES = {
   open_file: false,
   save_image: false,
   copy_png: false,
+  enhance: false,
   upscale_nai: false,
   inpaint: false,
   character_reference: false,
@@ -48,6 +50,7 @@ const MAIN_IMAGE_MENU = [
   ...MAIN_IMAGE_ACTIONS,
   {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
   {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
+  {label: 'WEBUI Enhance', action: ACTION_WEBUI_ENHANCE, capability: 'enhance', modes: ['WEBUI']},
   {type: 'separator'},
   {
     label: '큐 앞에 추가',
@@ -99,6 +102,7 @@ const THUMBNAIL_MENU = [
   ...THUMBNAIL_IMAGE_ACTIONS,
   {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
   {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
+  {label: 'WEBUI Enhance', action: ACTION_WEBUI_ENHANCE, capability: 'enhance', modes: ['WEBUI']},
   {type: 'separator'},
   {
     label: '큐 앞에 추가',
@@ -160,6 +164,7 @@ export function createResultContextMenu({
   onSaveImage = null,
   onCopyImage = null,
   onUpscaleNai = null,
+  onWebUiEnhance = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
   canUseDesktopImg2Img = () => true,
@@ -251,6 +256,9 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_UPSCALE_NAI) {
       return typeof onUpscaleNai === 'function';
+    }
+    if (item.action === ACTION_WEBUI_ENHANCE) {
+      return typeof onWebUiEnhance === 'function';
     }
     if (item.action === ACTION_IMAGE_ACTION) {
       if (!hasCapability(context, 'image_action')) return false;
@@ -477,6 +485,8 @@ export function createResultContextMenu({
           onCopyImage(context, button.dataset.copyFormat || 'png');
         } else if (action === ACTION_UPSCALE_NAI) {
           onUpscaleNai(context);
+        } else if (action === ACTION_WEBUI_ENHANCE) {
+          onWebUiEnhance(context);
         } else if (action === ACTION_IMAGE_ACTION) {
           onImageAction(context, button.dataset.imageAction || '');
         }
@@ -618,6 +628,7 @@ export function createResultContextMenu({
       imageSrc: asset.image_url ?? asset.imageUrl ?? context.imageSrc,
       hasImage: Boolean(asset.has_image ?? asset.hasImage ?? context.hasImage),
       hasMetadata: Boolean(asset.has_metadata ?? asset.hasMetadata ?? context.hasMetadata),
+      can_enhance: Boolean(asset.can_enhance ?? asset.canEnhance ?? capabilities.enhance ?? context.can_enhance ?? context.canEnhance),
       capabilities,
     };
   }

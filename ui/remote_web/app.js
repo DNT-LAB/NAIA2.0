@@ -395,7 +395,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260509_mo
   .catch(error => {
     console.error('Failed to initialize result history module', error);
   });
-const resultEnhanceReady = import('./js/features/resultEnhance.mjs?v=20260517-webui-hiresfix1')
+const resultEnhanceReady = import('./js/features/resultEnhance.mjs?v=20260517-webui-enhance-menu1')
   .then(({createResultEnhanceController}) => {
     resultEnhance = createResultEnhanceController({
       document,
@@ -536,7 +536,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs')
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260517-webui-enhance-menu1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -560,6 +560,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs')
       onSaveImage: context => callResultImageAction('saveImageFromContext', context),
       onCopyImage: (context, format) => callResultImageAction('copyImageFromContext', context, format),
       onUpscaleNai: context => callResultImageAction('upscaleFromContext', context),
+      onWebUiEnhance: context => requestResultEnhanceFromContext(context),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       canUseDesktopImg2Img,
     });
@@ -2204,6 +2205,17 @@ function enhanceMetaFromAsset(asset, fallback = {}) {
     height: asset?.height ?? fallback.height,
     can_enhance: Boolean(asset?.can_enhance ?? asset?.canEnhance ?? capabilities.enhance ?? fallback.can_enhance ?? fallback.canEnhance),
   };
+}
+
+function requestResultEnhanceFromContext(context = {}) {
+  if (!resultEnhance) {
+    showToast('Enhance is not ready', 'error');
+    return;
+  }
+  const capabilities = context?.capabilities || {};
+  resultEnhance.request(enhanceMetaFromAsset(context, {
+    can_enhance: Boolean(context?.can_enhance ?? context?.canEnhance ?? capabilities.enhance),
+  }));
 }
 
 async function updateResultEnhanceForSavedPath(relPath = '') {

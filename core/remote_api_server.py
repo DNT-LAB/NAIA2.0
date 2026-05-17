@@ -627,6 +627,8 @@ class RemoteBridge(QObject):
         self._anlas_fetch_in_flight: bool = False
         self._anlas_refresh_interval_ms: int = 5 * 60 * 1000  # 5분
         self._remote_enhance_in_flight: bool = False
+        self._remote_enhance_api_mode: str = ""
+        self._remote_enhance_request_id: str = ""
         self._remote_enhance_thread = None
         self._remote_enhance_worker = None
         self._remote_upscale_in_flight: bool = False
@@ -1272,6 +1274,29 @@ class RemoteBridge(QObject):
         if self._has_clients():
             self._broadcast_json(self._build_queue_state())
 
+    def _is_queued_webui_result_enhance(self, queue_manager, request_id: str = "") -> bool:
+        try:
+            for request in queue_manager.get_all_requests():
+                if request_id and getattr(request, "request_id", "") != request_id:
+                    continue
+                params = getattr(request, "params", {}) or {}
+                if params.get("result_enhance_request") and params.get("result_enhance_backend") == "WEBUI":
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _clear_queued_result_enhance_state(self, message: str = "Enhance canceled"):
+        self._remote_enhance_in_flight = False
+        self._remote_enhance_api_mode = ""
+        self._remote_enhance_request_id = ""
+        self._broadcast_json({
+            "type": "result_enhance_state",
+            "running": False,
+            "success": False,
+            "message": message,
+        })
+
     def _do_queue_action(self, payload_json: str = "{}"):
         try:
             payload = json.loads(payload_json) if payload_json else {}
@@ -1283,19 +1308,24 @@ class RemoteBridge(QObject):
         request_id = str(payload.get("request_id") or payload.get("id") or "").strip()
         queue_manager = self.app_context.generation_queue_manager
         try:
+            queued_enhance_canceled = False
             if action == "pause":
                 queue_manager.pause_queue()
             elif action == "resume":
                 queue_manager.resume_queue()
             elif action == "clear":
+                queued_enhance_canceled = self._is_queued_webui_result_enhance(queue_manager)
                 queue_manager.clear_queue()
             elif action == "remove":
                 if not request_id:
                     raise ValueError("request_id is required")
                 if not queue_manager.remove_request(request_id):
                     raise ValueError("queue item not found")
+                queued_enhance_canceled = request_id == self._remote_enhance_request_id
             else:
                 raise ValueError("unsupported queue action")
+            if queued_enhance_canceled:
+                self._clear_queued_result_enhance_state()
             self._broadcast_queue_state()
         except Exception as e:
             self._broadcast_json({"type": "toast", "message": f"Queue action failed: {e}", "level": "error"})
@@ -1983,6 +2013,65 @@ class RemoteBridge(QObject):
             return self._prepare_webui_result_enhance_context(payload)
         return self._prepare_nai_result_enhance_context(payload)
 
+    @staticmethod
+    def _result_enhance_source_row(context: dict):
+        item = context.get("item")
+        source_row = getattr(item, "source_row", None) if item is not None else None
+        if source_row is not None:
+            return source_row
+        import pandas as pd
+
+        return pd.Series(
+            {"general": None, "character": None, "copyright": None, "artist": None, "meta": None},
+            name="webui_result_enhance",
+        )
+
+    def _queue_webui_result_enhance(self, context: dict, ws=None):
+        from core.generation_request import GenerationRequest
+
+        gc = getattr(getattr(self.app_context, "main_window", None), "generation_controller", None)
+        queue_manager = getattr(self.app_context, "generation_queue_manager", None)
+        if gc is None or queue_manager is None:
+            raise RuntimeError("generation queue is not available")
+
+        params = copy.deepcopy(context.get("params") or {})
+        params.update({
+            "result_enhance_request": True,
+            "result_enhance_backend": "WEBUI",
+            "result_enhance_upscale": context.get("upscale", params.get("hr_scale", 2.0)),
+            "result_enhance_strength": context.get("strength", params.get("denoising_strength", 0.5)),
+            "result_enhance_hr_upscaler": context.get("hr_upscaler", params.get("hr_upscaler", "")),
+            "result_enhance_hires_steps": context.get("hires_steps", params.get("hires_steps", 10)),
+            "result_enhance_hr_cfg": context.get("hr_cfg", params.get("hr_cfg", 7.0)),
+            "result_enhance_source_size": [context.get("orig_w"), context.get("orig_h")],
+            "result_enhance_preview_size": [context.get("new_w"), context.get("new_h")],
+            "_remote_queue_source": "WEBUI Enhance",
+            "_raw_input": params.get("input", ""),
+        })
+
+        request = GenerationRequest(
+            params=params,
+            source_row=self._result_enhance_source_row(context),
+            priority=0,
+            max_retries=0,
+        )
+        params["result_enhance_request_id"] = request.request_id
+        queue_id = queue_manager.enqueue_request(request)
+        self._remote_enhance_in_flight = True
+        self._remote_enhance_api_mode = "WEBUI"
+        self._remote_enhance_request_id = queue_id
+        self._broadcast_json({
+            "type": "result_enhance_state",
+            "running": True,
+            "message": "Enhance queued",
+        })
+        self._send_json_to(ws, {"type": "toast", "message": "Enhance queued", "level": "success"})
+        self._broadcast_queue_state()
+
+        if not getattr(gc, "is_generating", False) and not queue_manager.is_paused():
+            QTimer.singleShot(0, gc._process_next_queue_request)
+        print(f"🌐 Remote: WEBUI Enhance 큐 추가됨 ({queue_id[:8]}...)")
+
     def _do_result_enhance(self, ws=None, payload_json: str = "{}"):
         """현재/저장 ImageWindow 히스토리 항목에 Result Enhance를 실행."""
         try:
@@ -2012,6 +2101,10 @@ class RemoteBridge(QObject):
             context = self._prepare_result_enhance_context(payload, mode=current_mode)
             image_window = context["image_window"]
 
+            if context.get("api_mode") == "WEBUI":
+                self._queue_webui_result_enhance(context, ws=ws)
+                return
+
             if context.get("api_mode") == "NAI" and context["upscale"] == 1.0:
                 gen_ctrl = getattr(self.app_context, "generation_controller", None)
                 if gen_ctrl and getattr(gen_ctrl, "is_generating", False):
@@ -2036,6 +2129,8 @@ class RemoteBridge(QObject):
                     self.finished.emit(result)
 
             self._remote_enhance_in_flight = True
+            self._remote_enhance_api_mode = "NAI"
+            self._remote_enhance_request_id = ""
             self._broadcast_json({"type": "result_enhance_state", "running": True})
             if hasattr(image_window, "enhance_button"):
                 image_window.enhance_button.setEnabled(False)
@@ -2055,6 +2150,8 @@ class RemoteBridge(QObject):
             print("🌐 Remote: Enhance 트리거됨")
         except Exception as e:
             self._remote_enhance_in_flight = False
+            self._remote_enhance_api_mode = ""
+            self._remote_enhance_request_id = ""
             message = f"Enhance request failed: {e}"
             self._send_result_enhance_error(ws, message)
             print(f"🌐 Remote: Enhance 트리거 실패 — {e}")
@@ -7779,6 +7876,9 @@ class RemoteBridge(QObject):
                 "requestId": str(payload.get("remote_preset_request_id") or ""),
                 "message": str(payload.get("message") or "Preset generation failed"),
             })
+        if payload.get("result_enhance_request"):
+            scoped_error = True
+            self.on_result_enhance_completed(False, str(payload.get("message") or "Enhance failed"))
         if not scoped_error:
             self._broadcast_json({
                 "type": "toast",
@@ -15069,6 +15169,12 @@ class RemoteBridge(QObject):
         image = result.get("image")
         if image is None:
             return
+        try:
+            gen_params = result.get("generation_params", {}) or {}
+            if gen_params.get("result_enhance_request"):
+                self.on_result_enhance_completed(True, "Enhance complete")
+        except Exception:
+            pass
         # 메인 스레드는 worker 시작만 — image.save(WEBP method=4) 가 ~수백 ms 잡으면 GUI 정지
         threading.Thread(
             target=self._encode_and_broadcast_result,
@@ -15196,6 +15302,8 @@ class RemoteBridge(QObject):
     def on_result_enhance_completed(self, success: bool = False, message: str = ""):
         """ImageWindow Enhance 완료 상태를 Web Result 버튼에 반영."""
         self._remote_enhance_in_flight = False
+        self._remote_enhance_api_mode = ""
+        self._remote_enhance_request_id = ""
         payload = {
             "type": "result_enhance_state",
             "running": False,

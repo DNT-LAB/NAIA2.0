@@ -3,6 +3,8 @@ import base64
 import hashlib
 import io
 import json
+import sys
+import types
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +20,16 @@ from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 from core.search_result_model import SearchResultModel
 from modules.prompt_engineering_module import PromptEngineeringModule as RealPromptEngineeringModule
+
+if "piexif" not in sys.modules:
+    piexif_stub = types.ModuleType("piexif")
+    piexif_stub.ExifIFD = SimpleNamespace(UserComment=0)
+    piexif_stub.load = lambda _data: {}
+    piexif_helper_stub = types.ModuleType("piexif.helper")
+    piexif_helper_stub.UserComment = SimpleNamespace(load=lambda _value: "")
+    piexif_stub.helper = piexif_helper_stub
+    sys.modules["piexif"] = piexif_stub
+    sys.modules["piexif.helper"] = piexif_helper_stub
 
 
 class _TokenManager:
@@ -1964,6 +1976,152 @@ def test_webui_result_enhance_context_uses_current_hires_settings_snapshot():
     assert "type" not in params
 
 
+class _EnhanceQueueManager:
+    def __init__(self, paused=False):
+        self.requests = []
+        self._paused = paused
+
+    def enqueue_request(self, request):
+        self.requests.append(request)
+        return request.request_id
+
+    def remove_request(self, request_id):
+        for index, request in enumerate(self.requests):
+            if request.request_id == request_id:
+                del self.requests[index]
+                return True
+        return False
+
+    def clear_queue(self):
+        self.requests.clear()
+
+    def is_paused(self):
+        return self._paused
+
+    def is_empty(self):
+        return not self.requests
+
+    def get_queue_size(self):
+        return len(self.requests)
+
+    def get_all_requests(self):
+        return list(self.requests)
+
+    def get_queue_stats(self):
+        return {
+            "is_paused": self._paused,
+            "total": len(self.requests),
+            "has_urgent": False,
+            "priority_counts": {0: len(self.requests)},
+        }
+
+
+def test_webui_result_enhance_queues_generation_request_when_generation_is_busy():
+    image = Image.new("RGB", (320, 384), "white")
+    item = SimpleNamespace(
+        image=image,
+        generation_params={
+            "input": "1girl",
+            "negative_prompt": "",
+            "seed": 123,
+            "width": 512,
+            "height": 640,
+        },
+        source_row=None,
+    )
+    image_window = SimpleNamespace(
+        auto_save_checkbox=object(),
+        current_history_item=item,
+    )
+    queue_manager = _EnhanceQueueManager()
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "WEBUI"
+    ctx.secure_token_manager = _TokenManager({"webui_url": "127.0.0.1:7860"})
+    ctx.generation_queue_manager = queue_manager
+    ctx.main_window = SimpleNamespace(
+        image_window=image_window,
+        generation_controller=SimpleNamespace(
+            is_generating=True,
+            _process_next_queue_request=lambda: None,
+        ),
+    )
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    sent = []
+    bridge._broadcast_json = broadcasts.append
+    bridge._send_json_to = lambda ws, data: sent.append(data)
+
+    bridge._do_result_enhance(
+        ws=_ws("127.0.0.1"),
+        payload_json=json.dumps({
+            "mode": "WEBUI",
+            "hires_settings": {
+                "hr_scale": 3,
+                "hr_upscaler": "Latent (nearest-exact)",
+                "denoising_strength": 0.7,
+                "hires_steps": 10,
+                "hr_cfg": 5.5,
+            },
+        }),
+    )
+
+    assert len(queue_manager.requests) == 1
+    params = queue_manager.requests[0].params
+    assert params["api_mode"] == "WEBUI"
+    assert params["result_enhance_request"] is True
+    assert params["result_enhance_backend"] == "WEBUI"
+    assert params["enable_hr"] is True
+    assert params["hr_scale"] == 3.0
+    assert params["denoising_strength"] == 0.7
+    assert params["_remote_queue_source"] == "WEBUI Enhance"
+    assert "image_bytes" not in params
+    assert "mask_bytes" not in params
+    assert bridge._remote_enhance_in_flight is True
+    assert broadcasts[0] == {
+        "type": "result_enhance_state",
+        "running": True,
+        "message": "Enhance queued",
+    }
+    assert sent == [{"type": "toast", "message": "Enhance queued", "level": "success"}]
+
+
+def test_webui_result_enhance_queue_remove_clears_enhance_state():
+    queue_manager = _EnhanceQueueManager()
+    request = SimpleNamespace(
+        request_id="enhance-1",
+        params={"result_enhance_request": True, "result_enhance_backend": "WEBUI"},
+        priority=0,
+        status="pending",
+        created_at=None,
+        started_at=None,
+        completed_at=None,
+    )
+    queue_manager.requests.append(request)
+    ctx = _AppContext()
+    ctx.generation_queue_manager = queue_manager
+    bridge = RemoteBridge(ctx)
+    bridge._remote_enhance_in_flight = True
+    bridge._remote_enhance_api_mode = "WEBUI"
+    bridge._remote_enhance_request_id = "enhance-1"
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._do_queue_action(json.dumps({"action": "remove", "request_id": "enhance-1"}))
+
+    assert queue_manager.requests == []
+    assert bridge._remote_enhance_in_flight is False
+    assert bridge._remote_enhance_api_mode == ""
+    assert bridge._remote_enhance_request_id == ""
+    assert broadcasts == [
+        {
+            "type": "result_enhance_state",
+            "running": False,
+            "success": False,
+            "message": "Enhance canceled",
+        }
+    ]
+
+
 def test_webui_result_enhance_completion_records_webui_metadata_without_credential():
     source_item = SimpleNamespace(
         image=Image.new("RGB", (320, 384), "white"),
@@ -2029,6 +2187,64 @@ def test_webui_result_enhance_completion_records_webui_metadata_without_credenti
     assert "credential" not in params
     assert generation_result["api_metadata"]["enhance_backend"] == "WEBUI"
     assert generation_result["api_metadata"]["result_size"] == (960, 1152)
+
+
+def test_generation_worker_records_webui_result_enhance_metadata_without_credential():
+    from core.generation_controller import GenerationWorker
+
+    worker = GenerationWorker(SimpleNamespace())
+    worker.params = {
+        "input": "1girl",
+        "negative_prompt": "",
+        "credential": "http://127.0.0.1:7860",
+        "api_mode": "WEBUI",
+        "result_enhance_request": True,
+        "result_enhance_backend": "WEBUI",
+        "result_enhance_upscale": 3.0,
+        "result_enhance_strength": 0.7,
+        "result_enhance_hr_upscaler": "Latent (nearest-exact)",
+        "result_enhance_hires_steps": 10,
+        "result_enhance_hr_cfg": 5.5,
+        "result_enhance_source_size": [320, 384],
+    }
+    worker.source_row = pd.Series({"general": None}, name="webui_result_enhance")
+    worker._main_prompt_text = "1girl"
+    result = {
+        "image": Image.new("RGB", (960, 1152), "white"),
+        "info": "source",
+    }
+
+    worker._collect_enhanced_metadata(result)
+
+    params = result["generation_params"]
+    assert "credential" not in params
+    assert params["result_enhance_request"] is True
+    assert result["backend_type"] == "WEBUI"
+    assert "Enhanced: x3" in result["info"]
+    assert "denoise=0.7" in result["info"]
+    assert result["api_metadata"]["enhanced"] is True
+    assert result["api_metadata"]["enhance_backend"] == "WEBUI"
+    assert result["api_metadata"]["source_size"] == (320, 384)
+    assert result["api_metadata"]["result_size"] == (960, 1152)
+
+
+def test_result_enhance_generation_error_clears_enhance_state_without_duplicate_toast():
+    bridge = RemoteBridge(_AppContext())
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge.on_generation_error({"message": "WEBUI failed", "result_enhance_request": True})
+
+    assert broadcasts == [
+        {
+            "type": "result_enhance_state",
+            "running": False,
+            "success": False,
+            "message": "WEBUI failed",
+        },
+        {"type": "toast", "message": "WEBUI failed", "level": "error"},
+        {"type": "status", "is_generating": False},
+    ]
 
 
 def _comfy_generation_params(**overrides):

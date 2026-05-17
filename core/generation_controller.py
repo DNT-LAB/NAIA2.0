@@ -276,6 +276,47 @@ class GenerationWorker(QObject):
             # 생성 시각과 백엔드 타입
             result['creation_timestamp'] = time.strftime('%Y-%m-%d %H:%M:%S')
             result['backend_type'] = self.params.get('api_mode', 'NAI')
+
+            if params_copy.get('result_enhance_request'):
+                image = result.get('image')
+                result_size = getattr(image, 'size', None)
+                source_size = params_copy.get('result_enhance_source_size') or []
+                enhance_backend = params_copy.get('result_enhance_backend') or result['backend_type']
+                enhance_upscale = params_copy.get('result_enhance_upscale', params_copy.get('hr_scale', 2.0))
+                enhance_strength = params_copy.get(
+                    'result_enhance_strength',
+                    params_copy.get('denoising_strength', 0.5),
+                )
+                try:
+                    enhance_upscale_text = f"{float(enhance_upscale):g}"
+                except (TypeError, ValueError):
+                    enhance_upscale_text = str(enhance_upscale)
+                try:
+                    enhance_strength_text = f"{float(enhance_strength):g}"
+                except (TypeError, ValueError):
+                    enhance_strength_text = str(enhance_strength)
+                if not isinstance(source_size, (list, tuple)):
+                    source_size = []
+                result['api_metadata'].update({
+                    'enhanced': True,
+                    'enhance_backend': enhance_backend,
+                    'enhance_upscale': enhance_upscale,
+                    'enhance_strength': enhance_strength,
+                    'enhance_hr_upscaler': params_copy.get('result_enhance_hr_upscaler', params_copy.get('hr_upscaler', '')),
+                    'enhance_hires_steps': params_copy.get('result_enhance_hires_steps', params_copy.get('hires_steps', 10)),
+                    'enhance_hr_cfg': params_copy.get('result_enhance_hr_cfg', params_copy.get('hr_cfg', 7.0)),
+                    'source_size': tuple(source_size[:2]) if len(source_size) >= 2 else None,
+                    'result_size': tuple(result_size) if result_size else None,
+                })
+                info_text = result.get('info', '') or ''
+                suffix = (
+                    f"\nEnhanced: x{enhance_upscale_text}, "
+                    f"denoise={enhance_strength_text}, "
+                    f"upscaler={params_copy.get('result_enhance_hr_upscaler', params_copy.get('hr_upscaler', ''))} "
+                )
+                if result_size:
+                    suffix += f"({result_size[0]}x{result_size[1]})"
+                result['info'] = info_text + suffix
             
             print(f"✅ 확장된 메타데이터 수집 완료: {result['backend_type']}")
             
@@ -1284,6 +1325,19 @@ class GenerationController:
 
         # 특수 요청 에러 라우팅
         if self.current_generation_params:
+            is_result_enhance = self.current_generation_params.get("result_enhance_request", False)
+            if is_result_enhance:
+                print("📈 Result Enhance 에러 감지 - 전용 에러 이벤트 발행")
+                self.context.publish("generation_error", {
+                    "message": error_message,
+                    "result_enhance_request": True,
+                    "result_enhance_request_id": str(
+                        self.current_generation_params.get("result_enhance_request_id") or ""
+                    ),
+                })
+                self.current_generation_params = None
+                return
+
             # Composite Remote Preset 요청인 경우 전용 에러 이벤트 발행
             is_remote_preset = self.current_generation_params.get("remote_preset_request", False)
             if is_remote_preset:

@@ -3841,6 +3841,7 @@ function setGen(v) {
     } else {
       updateGenerateButtonMode();
     }
+    if (resultEnhance) resultEnhance.update();
     return;
   }
   generating = next;
@@ -3865,6 +3866,7 @@ function setGen(v) {
     finishProgress();
     updateGenerateButtonMode();
   }
+  if (resultEnhance) resultEnhance.update();
 }
 
 function updateGenerateButtonMode() {

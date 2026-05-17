@@ -490,6 +490,8 @@ export function createArtistThumbController({
     randomBtn.disabled = artistQueueRunning;
     if (!mode) {
       randomBtn.title = '모드를 선택한 뒤 랜덤 작가를 불러올 수 있습니다.';
+    } else if (info?.needs_update) {
+      randomBtn.title = '데이터 업데이트 후 랜덤 작가를 불러올 수 있습니다.';
     } else if (info && !info.available) {
       randomBtn.title = '데이터 다운로드 후 랜덤 작가를 불러올 수 있습니다.';
     } else {
@@ -503,14 +505,14 @@ export function createArtistThumbController({
     const download = state?.download || {};
     const mode = currentMode();
     const activeForMode = Boolean(download.active && download.mode === mode);
-    const needsDownload = Boolean(info && !info.available);
+    const needsDownload = Boolean(info && (!info.available || info.needs_update));
     downloadBtn.hidden = !needsDownload && !activeForMode;
     downloadBtn.disabled = artistQueueRunning || activeForMode || !mode;
     if (activeForMode) {
       const percent = Number(download.percent || 0);
       downloadBtn.textContent = percent > 0 ? `${percent}%` : 'Downloading...';
     } else {
-      downloadBtn.textContent = 'Download';
+      downloadBtn.textContent = info?.needs_update ? 'Update' : 'Download';
     }
   }
 
@@ -523,10 +525,12 @@ export function createArtistThumbController({
         '<option value="">모드 선택...</option>',
         ...modes.map(mode => {
           const label = mode.label || mode.key;
-          const suffix = mode.available ? '' : ' (download)';
-          const title = mode.available
-            ? `${label} · ${Number(mode.size_mb || 0).toLocaleString()} MB`
-            : `${label} · data missing`;
+          const suffix = mode.needs_update ? ' (update)' : (mode.available ? '' : ' (download)');
+          const title = mode.needs_update
+            ? `${label} · update required · ${Number(mode.size_mb || 0).toLocaleString()} / ${Number(mode.expected_size_mb || 0).toLocaleString()} MB`
+            : (mode.available
+              ? `${label} · ${Number(mode.size_mb || 0).toLocaleString()} MB`
+              : `${label} · data missing`);
           return `<option value="${escHtml(mode.key)}" title="${escHtml(title)}">${escHtml(label + suffix)}</option>`;
         }),
       ].join('');
@@ -658,10 +662,11 @@ export function createArtistThumbController({
     const requestId = ++listRequestId;
     const mode = currentMode();
     const info = currentModeInfo();
-    if (info && !info.available) {
+    if (info && (!info.available || info.needs_update)) {
       randomViewActive = false;
       currentPage = 0;
       totalPages = 1;
+      clearSelectedArtist();
       renderGrid([]);
       updatePager();
       updateDownloadUi();
@@ -669,6 +674,8 @@ export function createArtistThumbController({
       const download = state?.download || {};
       if (download.active && download.mode === mode) {
         setStatus(download.message || 'Artist Thumbnail 데이터 다운로드 중...', 'busy');
+      } else if (info.needs_update) {
+        setStatus(`${info.label || mode} 데이터 업데이트가 필요합니다. Update 버튼으로 갱신할 수 있습니다.`, 'error');
       } else {
         setStatus(`${info.label || mode} 데이터가 없습니다. Download 버튼으로 받을 수 있습니다.`, 'error');
       }
@@ -754,8 +761,8 @@ export function createArtistThumbController({
       showToast?.('모드를 먼저 선택하세요.', 'error');
       return;
     }
-    if (info && !info.available) {
-      showToast?.('데이터 다운로드 후 사용할 수 있습니다.', 'error');
+    if (info && (!info.available || info.needs_update)) {
+      showToast?.(info.needs_update ? '데이터 업데이트 후 사용할 수 있습니다.' : '데이터 다운로드 후 사용할 수 있습니다.', 'error');
       return;
     }
     await loadPage(currentPage, {anchor: 'top', random: true});
@@ -1710,7 +1717,7 @@ export function createArtistThumbController({
       showToast?.('다운로드할 모드를 선택하세요.', 'error');
       return;
     }
-    if (info.available) {
+    if (info.available && !info.needs_update) {
       showToast?.('이미 다운로드된 모드입니다.', 'success');
       return;
     }

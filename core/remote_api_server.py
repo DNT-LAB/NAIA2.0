@@ -551,10 +551,12 @@ class RemoteBridge(QObject):
             "path": Path("data/artist_thumbnail.json"),
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail",
         },
-        "ANIMA-7000": {
-            "label": "ANIMA-7000",
+        "ANIMA-14000": {
+            "label": "ANIMA-14000",
             "path": Path("data/artist_thumbnail_anima.json"),
             "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima.json",
+            "expected_size": 1699850378,
+            "sha256": "ACD01B81AB1E3078E2F2F1607D53382D0312B0661C0E7F620F28D7FFBD818A8C",
         },
     }
     ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
@@ -2469,6 +2471,48 @@ class RemoteBridge(QObject):
     def _artist_thumb_mode_path(self, mode: str) -> Path:
         return Path(self._artist_thumb_mode_info(mode)["path"])
 
+    def _artist_thumb_file_state(self, info: dict) -> dict:
+        path = Path(info["path"])
+        exists = path.exists()
+        size = path.stat().st_size if exists else 0
+        expected_size = int(info.get("expected_size") or 0)
+        needs_update = bool(exists and expected_size and size != expected_size)
+        return {
+            "exists": exists,
+            "available": bool(exists and not needs_update),
+            "needs_update": needs_update,
+            "size": size,
+            "expected_size": expected_size,
+            "size_mb": round(size / (1024 * 1024), 1) if exists else 0,
+            "expected_size_mb": round(expected_size / (1024 * 1024), 1) if expected_size else 0,
+            "sha256": str(info.get("sha256") or ""),
+        }
+
+    def _artist_thumb_file_sha256(self, path: Path) -> str:
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest().upper()
+
+    def _validate_artist_thumb_download_file(self, mode: str, path: Path) -> int:
+        file_size = Path(path).stat().st_size
+        if file_size < (1024 * 1024):
+            raise ValueError(f"다운로드된 파일이 너무 작습니다 ({file_size / 1024:.1f} KB)")
+        mode_info = self._artist_thumb_mode_info(mode)
+        expected_size = int(mode_info.get("expected_size") or 0)
+        if expected_size and file_size != expected_size:
+            raise ValueError(
+                f"다운로드된 파일 크기가 예상과 다릅니다 ({file_size} / {expected_size} bytes)"
+            )
+        expected_sha256 = str(mode_info.get("sha256") or "").upper()
+        if expected_sha256:
+            self._set_artist_thumb_download_state(message="다운로드 파일을 검증하는 중...")
+            actual_sha256 = self._artist_thumb_file_sha256(Path(path))
+            if actual_sha256 != expected_sha256:
+                raise ValueError(f"다운로드된 파일 해시가 예상과 다릅니다 ({actual_sha256})")
+        return file_size
+
     def _artist_thumb_download_snapshot(self) -> dict:
         with self._artist_thumb_lock:
             return dict(self._artist_thumb_download_state)
@@ -2486,13 +2530,14 @@ class RemoteBridge(QObject):
         url = str(info.get("url") or "")
         if not url:
             raise ValueError(f"download url is not configured: {key}")
-        if path.exists():
+        file_state = self._artist_thumb_file_state(info)
+        if file_state["available"]:
             return self._set_artist_thumb_download_state(
                 active=False,
                 mode=key,
                 percent=100,
-                downloaded_mb=round(path.stat().st_size / (1024 * 1024), 1),
-                total_mb=round(path.stat().st_size / (1024 * 1024), 1),
+                downloaded_mb=file_state["size_mb"],
+                total_mb=file_state["size_mb"],
                 message="이미 다운로드되어 있습니다.",
                 error="",
                 done=True,
@@ -2565,9 +2610,7 @@ class RemoteBridge(QObject):
                             )
                             last_update = now
 
-            file_size = temp_path.stat().st_size
-            if file_size < (1024 * 1024):
-                raise ValueError(f"다운로드된 파일이 너무 작습니다 ({file_size / 1024:.1f} KB)")
+            file_size = self._validate_artist_thumb_download_file(mode, temp_path)
             temp_path.replace(target_path)
             with self._artist_thumb_lock:
                 self._artist_thumb_data_cache.clear()
@@ -3276,6 +3319,14 @@ class RemoteBridge(QObject):
         if not key:
             return {}
         with self._artist_thumb_lock:
+            info = self._artist_thumb_mode_info(key)
+            file_state = self._artist_thumb_file_state(info)
+            if not file_state["available"]:
+                self._artist_thumb_data_cache.pop(key, None)
+                path = Path(info["path"])
+                if file_state["needs_update"]:
+                    raise RuntimeError(f"Artist thumbnail data needs update: {path}")
+                raise FileNotFoundError(f"Artist thumbnail data not found: {path}")
             cached = self._artist_thumb_data_cache.get(key)
             if cached is not None:
                 if key == "NAID4.5F-31000":
@@ -3285,8 +3336,6 @@ class RemoteBridge(QObject):
                         print(f"🌐 Remote: artist thumb favorite thumbnail cache sync failed — {e}")
                 return cached
             path = self._artist_thumb_mode_path(key)
-            if not path.exists():
-                raise FileNotFoundError(f"Artist thumbnail data not found: {path}")
             with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
@@ -3390,13 +3439,18 @@ class RemoteBridge(QObject):
             }
         modes = []
         for key, info in self.ARTIST_THUMB_MODES.items():
-            path = Path(info["path"])
+            file_state = self._artist_thumb_file_state(info)
             modes.append({
                 "key": key,
                 "label": str(info.get("label") or key),
-                "available": path.exists(),
-                "loaded": key in self._artist_thumb_data_cache,
-                "size_mb": round(path.stat().st_size / (1024 * 1024), 1) if path.exists() else 0,
+                "available": file_state["available"],
+                "needs_update": file_state["needs_update"],
+                "loaded": key in self._artist_thumb_data_cache and file_state["available"],
+                "size": file_state["size"],
+                "expected_size": file_state["expected_size"],
+                "size_mb": file_state["size_mb"],
+                "expected_size_mb": file_state["expected_size_mb"],
+                "sha256": file_state["sha256"],
             })
         return {
             "modes": modes,

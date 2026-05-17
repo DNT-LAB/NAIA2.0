@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import hashlib
 import io
 import re
 import ssl
@@ -64,6 +65,14 @@ from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from artist_dictionary import artist_dict
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
 ARTIST_THUMB_MODES = {
     "NAID4.5F-31000": {
         "path": Path("data/artist_thumbnail_nai.json"),
@@ -73,9 +82,11 @@ ARTIST_THUMB_MODES = {
         "path": Path("data/artist_thumbnail.json"),
         "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail",
     },
-    "ANIMA-7000": {
+    "ANIMA-14000": {
         "path": Path("data/artist_thumbnail_anima.json"),
         "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima.json",
+        "expected_size": 1699850378,
+        "sha256": "ACD01B81AB1E3078E2F2F1607D53382D0312B0661C0E7F620F28D7FFBD818A8C",
     },
 }
 ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
@@ -307,11 +318,28 @@ class ThumbnailDownloadWorker(QThread):
                 temp_path.unlink()
                 self.download_finished.emit(False, f"다운로드된 파일이 너무 작습니다 ({file_size/1024:.1f} KB)")
                 return
+            expected_size = int(ARTIST_THUMB_MODES.get(self.mode, {}).get("expected_size") or 0)
+            if expected_size and file_size != expected_size:
+                temp_path.unlink()
+                self.download_finished.emit(
+                    False,
+                    f"다운로드된 파일 크기가 예상과 다릅니다 ({file_size} / {expected_size} bytes)",
+                )
+                return
+            expected_sha256 = str(ARTIST_THUMB_MODES.get(self.mode, {}).get("sha256") or "").upper()
+            if expected_sha256:
+                self.progress_updated.emit(99, "다운로드 파일을 검증하는 중...")
+                actual_sha256 = _sha256_file(temp_path)
+                if actual_sha256 != expected_sha256:
+                    temp_path.unlink()
+                    self.download_finished.emit(
+                        False,
+                        f"다운로드된 파일 해시가 예상과 다릅니다 ({actual_sha256})",
+                    )
+                    return
                 
             # 임시 파일을 최종 경로로 이동
-            if self.target_path.exists():
-                self.target_path.unlink()
-            temp_path.rename(self.target_path)
+            temp_path.replace(self.target_path)
             
             self.progress_updated.emit(100, "다운로드 완료!")
             self.download_finished.emit(True, f"성공적으로 다운로드됨 ({file_size/(1024*1024):.1f} MB)")
@@ -2402,6 +2430,30 @@ class ArtistThumbModule(BaseTabModule):
 
         return panel
     
+    def _thumbnail_mode_file_state(self, mode: str) -> dict:
+        mode_info = ARTIST_THUMB_MODES.get(mode) or {}
+        if not mode_info:
+            return {
+                "path": Path(),
+                "exists": False,
+                "available": False,
+                "needs_update": False,
+                "size": 0,
+                "expected_size": 0,
+            }
+        file_path = Path(mode_info.get("path") or "")
+        exists = file_path.exists()
+        size = file_path.stat().st_size if exists else 0
+        expected_size = int(mode_info.get("expected_size") or 0)
+        needs_update = bool(exists and expected_size and size != expected_size)
+        return {
+            "path": file_path,
+            "exists": exists,
+            "available": bool(exists and not needs_update),
+            "needs_update": needs_update,
+            "size": size,
+            "expected_size": expected_size,
+        }
     
     def _update_artist_list_from_data(self):
         """현재 artist_data로부터 아티스트 리스트 업데이트"""
@@ -2419,24 +2471,28 @@ class ArtistThumbModule(BaseTabModule):
         if mode == self.mode_placeholder_text:
             return
 
-        if mode in self.thumbnail_mode_data:
+        file_state = self._thumbnail_mode_file_state(mode)
+        if mode in self.thumbnail_mode_data and file_state["available"]:
             self.current_mode = mode
             self.artist_data = self.thumbnail_mode_data[mode]
             self._previous_mode = mode
             self._update_artist_list_from_data()
             return
+        if mode in self.thumbnail_mode_data and not file_state["available"]:
+            self.thumbnail_mode_data.pop(mode, None)
 
         # 파일 경로 결정
         mode_info = ARTIST_THUMB_MODES.get(mode)
         if not mode_info:
             return
-        file_path = Path(mode_info["path"])
+        file_path = file_state["path"]
 
         # 파일 존재 확인
-        if not file_path.exists():
+        if not file_state["available"]:
+            status = "업데이트 필요" if file_state["needs_update"] else "데이터 없음"
             # TODO(web-dialog): 원래 QMessageBox(Yes/No) 다운로드 confirm (~2.6GB) — Web Shell confirm 모달로 재구현 필요.
             # 안전 기본값: 다운로드 차단, 이전 모드로 복귀.
-            print(f"[Dialog/CONFIRM(skipped→No)] 썸네일 데이터 다운로드 ({mode}, ~2.6GB) — Web Shell 재구현 예정")
+            print(f"[Dialog/CONFIRM(skipped→No)] 썸네일 데이터 {status} ({mode}) — Web Shell 재구현 예정")
             self.mode_combo.blockSignals(True)
             self.mode_combo.setCurrentText(self._previous_mode)
             self.mode_combo.blockSignals(False)
@@ -2512,6 +2568,16 @@ class ArtistThumbModule(BaseTabModule):
     
     def _load_thumbnail_data(self, mode: str, file_path: Path):
         """썸네일 데이터 파일 로드 (비동기)"""
+        file_state = self._thumbnail_mode_file_state(mode)
+        if not file_state["available"]:
+            status = "업데이트가 필요합니다" if file_state["needs_update"] else "파일이 없습니다"
+            QMessageBox.warning(self.widget, "데이터 로드 불가", f"{mode} 썸네일 데이터 {status}.")
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentText(self._previous_mode)
+            self.mode_combo.blockSignals(False)
+            self.current_mode = self._previous_mode if self._previous_mode != self.mode_placeholder_text else None
+            return
+
         # 로딩 다이얼로그 표시
         self._load_dialog = QProgressDialog(self.widget)
         self._load_dialog.setWindowTitle("데이터 로드")

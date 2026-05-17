@@ -21,6 +21,7 @@ import pandas as pd
 import gc
 import requests
 from utils.comfyui_png_metadata import enrich_comfyui_png_bytes
+from utils.webui_generation_info import extract_webui_infotext, extract_webui_seed
 
 def _force_cleanup_all_threads():
     """
@@ -244,6 +245,18 @@ class GenerationWorker(QObject):
             if 'credential' in params_copy:
                 del params_copy['credential']  # 보안을 위해 토큰 제거
             params_copy.pop('_comfyui_workflow_ui', None)  # PNG workflow 청크에 별도 저장
+
+            webui_seed = None
+            if params_copy.get('api_mode') == 'WEBUI':
+                webui_info = result.get('generation_info') or result.get('info')
+                webui_seed = extract_webui_seed(webui_info)
+                if webui_seed is not None:
+                    params_copy['seed'] = webui_seed
+                    params_copy['seed_fixed'] = True
+                webui_infotext = extract_webui_infotext(webui_info)
+                current_info = str(result.get('info') or '')
+                if webui_infotext and "Seed:" not in current_info:
+                    result['info'] = webui_infotext
             
             result['generation_params'] = params_copy
             
@@ -272,6 +285,8 @@ class GenerationWorker(QObject):
                 'api_version': result.get('api_version', ''),
                 'generation_timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
             }
+            if webui_seed is not None:
+                result['api_metadata']['webui_seed'] = webui_seed
             
             # 생성 시각과 백엔드 타입
             result['creation_timestamp'] = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -686,13 +701,17 @@ class GenerationController:
                 print(f"🔄 Workshop 파라미터로 덮어쓰기: {list(overrides.keys())}")
                 params.update(overrides)
 
-            self._apply_resolution_preset_default(params)
-            self._apply_random_resolution(params)
+            is_result_enhance_request = bool(params.get('result_enhance_request'))
+            if not is_result_enhance_request:
+                self._apply_resolution_preset_default(params)
+                self._apply_random_resolution(params)
 
             # 자동 해상도 관리 해제
             self.context.main_window.resolution_is_detected = False
 
-            img2img_params = self.context.main_window.img2img_panel.get_parameters()
+            img2img_params = {}
+            if not is_result_enhance_request:
+                img2img_params = self.context.main_window.img2img_panel.get_parameters()
             if img2img_params:
                 print("🖼️ Img2Img 패널 활성화됨. 파라미터를 추가합니다.")
                 params.update(img2img_params)

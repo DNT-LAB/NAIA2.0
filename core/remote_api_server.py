@@ -60,6 +60,7 @@ from core.resolution_utils import (
 )
 from utils.translator import korean_to_english
 from utils.clipboard_image import clipboard_png_bytes, set_png_clipboard_bytes
+from utils.webui_generation_info import extract_webui_seed
 from ui.event_preset.download_worker import DOWNLOAD_URL as EVENT_PRESET_DOWNLOAD_URL
 from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONTEXT
 from ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
@@ -1965,6 +1966,48 @@ class RemoteBridge(QObject):
             new_h = max(1, int(round(float(payload_h) * scale)))
         return new_w, new_h, scale
 
+    @staticmethod
+    def _resolve_webui_result_enhance_seed(item, params: dict) -> int | None:
+        candidates = [
+            params,
+            getattr(item, "generation_params", None),
+            getattr(item, "api_metadata", None),
+            getattr(item, "metadata", None),
+            getattr(item, "prompt_context", None),
+            getattr(item, "info_text", None),
+        ]
+
+        image = getattr(item, "image", None)
+        image_info = getattr(image, "info", None)
+        if image_info:
+            candidates.append(dict(image_info))
+
+        raw_bytes = getattr(item, "raw_bytes", None)
+        if raw_bytes:
+            try:
+                from PIL import Image
+
+                with Image.open(io.BytesIO(raw_bytes)) as raw_image:
+                    candidates.append(dict(getattr(raw_image, "info", {}) or {}))
+            except Exception:
+                pass
+
+        for candidate in candidates:
+            seed = extract_webui_seed(candidate)
+            if seed is not None:
+                return seed
+        return None
+
+    def _lock_webui_result_enhance_replay_params(self, item, params: dict, base_w: int, base_h: int) -> None:
+        seed = self._resolve_webui_result_enhance_seed(item, params)
+        if seed is None:
+            raise RuntimeError("WEBUI result seed is unavailable; cannot reproduce source image for Enhance")
+        params["seed"] = seed
+        params["seed_fixed"] = True
+        params["random_resolution"] = False
+        params["resolution_preset_enabled"] = False
+        params["resolution"] = f"{base_w} x {base_h}"
+
     def _prepare_webui_result_enhance_context(self, payload: dict) -> dict:
         import copy
 
@@ -1992,6 +2035,7 @@ class RemoteBridge(QObject):
         base_h = self._webui_result_enhance_dimension(params.get("height"), orig_h)
         params["width"] = base_w
         params["height"] = base_h
+        self._lock_webui_result_enhance_replay_params(item, params, base_w, base_h)
         params.update(hires_settings)
         params["api_mode"] = "WEBUI"
         params["credential"] = credential

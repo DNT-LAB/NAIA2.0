@@ -1976,6 +1976,62 @@ def test_webui_result_enhance_context_uses_current_hires_settings_snapshot():
     assert "type" not in params
 
 
+def test_webui_result_enhance_context_locks_random_seed_and_resolution():
+    image = Image.new("RGB", (512, 640), "white")
+    item = SimpleNamespace(
+        image=image,
+        info_text=(
+            "1girl\n"
+            "Negative prompt: bad\n"
+            "Steps: 28, Sampler: Euler a, CFG scale: 5, "
+            "Seed: 987654321, Size: 512x640"
+        ),
+        generation_params={
+            "input": "1girl",
+            "negative_prompt": "bad",
+            "seed": -1,
+            "seed_fixed": False,
+            "width": 512,
+            "height": 640,
+            "resolution": "512 x 640",
+            "random_resolution": True,
+            "resolution_preset_enabled": True,
+            "resolution_preset": "draft",
+        },
+    )
+    image_window = SimpleNamespace(
+        auto_save_checkbox=object(),
+        current_history_item=item,
+    )
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "WEBUI"
+    ctx.secure_token_manager = _TokenManager({"webui_url": "127.0.0.1:7860"})
+    ctx.main_window = SimpleNamespace(image_window=image_window)
+    bridge = RemoteBridge(ctx)
+
+    context = bridge._prepare_result_enhance_context({
+        "mode": "WEBUI",
+        "hires_settings": {
+            "hr_scale": 2,
+            "hr_upscaler": "Latent",
+            "denoising_strength": 0.55,
+            "hires_steps": 12,
+            "hr_cfg": 6,
+        },
+    }, mode="WEBUI")
+
+    params = context["params"]
+    assert params["seed"] == 987654321
+    assert params["seed_fixed"] is True
+    assert params["random_resolution"] is False
+    assert params["resolution_preset_enabled"] is False
+    assert params["resolution"] == "512 x 640"
+    assert params["width"] == 512
+    assert params["height"] == 640
+    assert context["new_w"] == 1024
+    assert context["new_h"] == 1280
+
+
 def test_webui_result_enhance_caps_final_size_with_hiresfix_limit():
     from core.api_service import APIService
 
@@ -2272,6 +2328,44 @@ def test_generation_worker_records_webui_result_enhance_metadata_without_credent
     assert result["api_metadata"]["enhance_backend"] == "WEBUI"
     assert result["api_metadata"]["source_size"] == (320, 384)
     assert result["api_metadata"]["result_size"] == (960, 1152)
+
+
+def test_generation_worker_promotes_webui_response_seed_for_replay():
+    from core.generation_controller import GenerationWorker
+
+    worker = GenerationWorker(SimpleNamespace())
+    worker.params = {
+        "input": "1girl",
+        "negative_prompt": "bad",
+        "credential": "http://127.0.0.1:7860",
+        "api_mode": "WEBUI",
+        "seed": -1,
+        "seed_fixed": False,
+    }
+    worker.source_row = pd.Series({"general": None}, name="webui")
+    worker._main_prompt_text = "1girl"
+    infotext = (
+        "1girl\n"
+        "Negative prompt: bad\n"
+        "Steps: 28, Sampler: Euler a, CFG scale: 5, "
+        "Seed: 246813579, Size: 512x640"
+    )
+    result = {
+        "image": Image.new("RGB", (512, 640), "white"),
+        "info": "AI 생성 이미지가 아니거나, 인식할 수 있는 메타데이터가 없습니다.",
+        "generation_info": json.dumps({
+            "all_seeds": [246813579],
+            "infotexts": [infotext],
+        }),
+    }
+
+    worker._collect_enhanced_metadata(result)
+
+    params = result["generation_params"]
+    assert params["seed"] == 246813579
+    assert params["seed_fixed"] is True
+    assert result["info"] == infotext
+    assert result["api_metadata"]["webui_seed"] == 246813579
 
 
 def test_result_enhance_generation_error_clears_enhance_state_without_duplicate_toast():

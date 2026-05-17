@@ -1903,6 +1903,134 @@ def test_result_enhance_request_payload_overrides_desktop_config():
     assert context["params"]["noise"] == 0.1
 
 
+def test_webui_result_enhance_context_uses_current_hires_settings_snapshot():
+    image = Image.new("RGB", (320, 384), "white")
+    item = SimpleNamespace(
+        image=image,
+        generation_params={
+            "input": "1girl",
+            "negative_prompt": "",
+            "seed": 123,
+            "width": 512,
+            "height": 640,
+            "type": "inpaint",
+            "image_bytes": b"stale",
+            "mask_bytes": b"stale-mask",
+            "hr_scale": 1.1,
+            "denoising_strength": 0.2,
+            "hires_steps": 4,
+            "hr_cfg": 3.0,
+        },
+    )
+    image_window = SimpleNamespace(
+        auto_save_checkbox=object(),
+        current_history_item=item,
+    )
+    ctx = _AppContext()
+    ctx.get_api_mode = lambda: "WEBUI"
+    ctx.secure_token_manager = _TokenManager({"webui_url": "127.0.0.1:7860"})
+    ctx.main_window = SimpleNamespace(image_window=image_window)
+    bridge = RemoteBridge(ctx)
+
+    context = bridge._prepare_result_enhance_context({
+        "mode": "WEBUI",
+        "hires_settings": {
+            "hr_scale": 3,
+            "hr_upscaler": "Latent (nearest-exact)",
+            "denoising_strength": 0.7,
+            "hires_steps": 10,
+            "hr_cfg": 5.5,
+            "webui_hiresfix_assist": True,
+            "webui_hiresfix_assist_target": 768,
+        },
+    }, mode="WEBUI")
+
+    params = context["params"]
+    assert context["api_mode"] == "WEBUI"
+    assert context["upscale"] == 3.0
+    assert context["strength"] == 0.7
+    assert context["hr_upscaler"] == "Latent (nearest-exact)"
+    assert params["api_mode"] == "WEBUI"
+    assert params["credential"] == "127.0.0.1:7860"
+    assert params["enable_hr"] is True
+    assert params["hr_scale"] == 3.0
+    assert params["denoising_strength"] == 0.7
+    assert params["hires_steps"] == 10
+    assert params["hr_cfg"] == 5.5
+    assert params["webui_hiresfix_assist"] is True
+    assert params["webui_hiresfix_assist_target"] == 768
+    assert "image_bytes" not in params
+    assert "mask_bytes" not in params
+    assert "type" not in params
+
+
+def test_webui_result_enhance_completion_records_webui_metadata_without_credential():
+    source_item = SimpleNamespace(
+        image=Image.new("RGB", (320, 384), "white"),
+        info_text="source",
+        source_row=None,
+        generation_params={"input": "1girl"},
+        prompt_context={},
+        api_metadata={},
+    )
+    history = []
+    image_window = SimpleNamespace(
+        add_to_history=lambda *args, **kwargs: history.append(kwargs["generation_result"]),
+    )
+    ctx = _AppContext()
+    published = []
+    ctx.publish = lambda event, payload: published.append((event, payload))
+    bridge = RemoteBridge(ctx)
+    completions = []
+    bridge.on_result_enhance_completed = lambda success, message: completions.append((success, message))
+    context = {
+        "api_mode": "WEBUI",
+        "image_window": image_window,
+        "item": source_item,
+        "params": {
+            "input": "1girl",
+            "credential": "http://127.0.0.1:7860",
+            "enable_hr": True,
+            "hr_scale": 3.0,
+            "hr_upscaler": "Latent (nearest-exact)",
+            "denoising_strength": 0.7,
+            "hires_steps": 10,
+            "hr_cfg": 5.5,
+            "api_mode": "WEBUI",
+        },
+        "orig_w": 320,
+        "orig_h": 384,
+        "new_w": 960,
+        "new_h": 1152,
+        "upscale": 3.0,
+        "strength": 0.7,
+        "hr_upscaler": "Latent (nearest-exact)",
+        "hires_steps": 10,
+        "hr_cfg": 5.5,
+    }
+
+    bridge._handle_remote_result_enhance(
+        {"status": "success", "image": Image.new("RGB", (960, 1152), "white")},
+        context,
+    )
+
+    generation_result = history[0]
+    params = generation_result["generation_params"]
+    assert completions == [(True, "Enhance complete")]
+    assert published == [("generation_result_available", generation_result)]
+    assert generation_result["backend_type"] == "WEBUI"
+    assert "denoise=0.7" in generation_result["info"]
+    assert params["api_mode"] == "WEBUI"
+    assert params["width"] == 960
+    assert params["height"] == 1152
+    assert params["enable_hr"] is True
+    assert params["hr_scale"] == 3.0
+    assert params["denoising_strength"] == 0.7
+    assert "credential" not in params
+    assert generation_result["api_metadata"]["enhance_backend"] == "WEBUI"
+    assert generation_result["api_metadata"]["result_size"] == (960, 1152)
+
+
 def _comfy_generation_params(**overrides):
     params = {
         "input": "1girl",
@@ -2213,15 +2341,27 @@ def test_current_result_asset_blocks_nai_image_actions_outside_nai_mode(tmp_path
     assert asset["capabilities"]["upscale_nai"] is False
 
 
-def test_saved_result_asset_blocks_nai_image_actions_outside_nai_mode(tmp_path):
+def test_current_result_asset_allows_webui_enhance_but_blocks_nai_image_actions(tmp_path):
+    bridge, _image_path = _bridge_with_history(tmp_path, mode="WEBUI")
+
+    asset = bridge._build_current_result_asset_payload()
+
+    assert asset["can_enhance"] is True
+    assert asset["capabilities"]["image_action"] is False
+    assert asset["capabilities"]["inpaint"] is False
+    assert asset["capabilities"]["enhance"] is True
+    assert asset["capabilities"]["upscale_nai"] is False
+
+
+def test_saved_result_asset_allows_webui_enhance_but_blocks_nai_image_actions(tmp_path):
     bridge, _image_path = _bridge_with_history(tmp_path, mode="WEBUI")
     history_key = bridge._scan_memory_history()[0]["rel_path"]
 
     asset = bridge._build_saved_result_asset_payload(history_key)
 
-    assert asset["can_enhance"] is False
+    assert asset["can_enhance"] is True
     assert asset["capabilities"]["image_action"] is False
-    assert asset["capabilities"]["enhance"] is False
+    assert asset["capabilities"]["enhance"] is True
     assert asset["capabilities"]["upscale_nai"] is False
 
 

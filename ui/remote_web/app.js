@@ -395,7 +395,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260509_mo
   .catch(error => {
     console.error('Failed to initialize result history module', error);
   });
-const resultEnhanceReady = import('./js/features/resultEnhance.mjs')
+const resultEnhanceReady = import('./js/features/resultEnhance.mjs?v=20260517-webui-hiresfix1')
   .then(({createResultEnhanceController}) => {
     resultEnhance = createResultEnhanceController({
       document,
@@ -404,6 +404,9 @@ const resultEnhanceReady = import('./js/features/resultEnhance.mjs')
       getWs: () => ws,
       getMode: () => currentMode,
       showToast,
+      getWebUiHiresSettings: () => getWebUiResultEnhanceSettings(),
+      setWebUiHiresSetting: (key, value) => setWebUiResultEnhanceSetting(key, value),
+      getWebUiHiresUpscalerOptions: () => getWebUiResultEnhanceUpscalerOptions(),
     });
     if (pendingResultEnhanceConfig) resultEnhance.setConfig(pendingResultEnhanceConfig);
   })
@@ -1000,14 +1003,16 @@ const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs'
     console.error('Failed to initialize resolution manager module', error);
   });
 
+function parseParamNumber(value, fallback = null) {
+  if (value === undefined || value === null || String(value).trim() === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function _collectCurrentParams() {
   const p = {};
   const mode = currentMode || modeSelect?.value || 'NAI';
-  const parseNumber = (value, fallback = null) => {
-    if (value === undefined || value === null || String(value).trim() === '') return fallback;
-    const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
-  };
+  const parseNumber = parseParamNumber;
   const flagState = key => {
     const el = paramFlags?.querySelector?.(`[data-key="${key}"]`);
     return !!el?.classList.contains('on');
@@ -1408,6 +1413,64 @@ function collectWebUiHiresfixAssistOverrides(mode = currentMode || modeSelect?.v
     webui_hiresfix_assist: Boolean(state.enabled),
     webui_hiresfix_assist_target: state.target,
   };
+}
+
+function getWebUiResultEnhanceSettings() {
+  const hrUpscaler = $('pHrUpscaler');
+  return {
+    enable_hr: Boolean($('pEnableHr')?.checked),
+    hr_scale: parseParamNumber($('pHrScale')?.value, 2.0),
+    hr_upscaler: hrUpscaler?.value || 'Latent (nearest-exact)',
+    denoising_strength: parseParamNumber($('pDenoise')?.value, 0.5),
+    hires_steps: Math.trunc(parseParamNumber($('pHiresSteps')?.value, 10)),
+    hr_cfg: parseParamNumber($('pHrCfg')?.value, 7.0),
+    ...collectWebUiHiresfixAssistOverrides('WEBUI'),
+  };
+}
+
+function getWebUiResultEnhanceUpscalerOptions() {
+  return Array.from($('pHrUpscaler')?.options || [])
+    .map(option => option.value)
+    .filter(value => String(value || '').trim());
+}
+
+function setWebUiResultEnhanceSetting(key, value) {
+  const normalizedKey = String(key || '');
+  let normalizedValue = value;
+  if (normalizedKey === 'hr_upscaler') {
+    const select = $('pHrUpscaler');
+    normalizedValue = String(value || '').trim();
+    if (select && normalizedValue) {
+      const hasOption = Array.from(select.options || []).some(option => option.value === normalizedValue);
+      if (!hasOption) {
+        const option = document.createElement('option');
+        option.value = normalizedValue;
+        option.textContent = normalizedValue;
+        select.appendChild(option);
+      }
+      select.value = normalizedValue;
+    }
+  } else if (normalizedKey === 'hr_scale') {
+    const input = $('pHrScale');
+    normalizedValue = String(parseParamNumber(value, 2.0));
+    if (input) input.value = normalizedValue;
+  } else if (normalizedKey === 'denoising_strength') {
+    const input = $('pDenoise');
+    normalizedValue = String(parseParamNumber(value, 0.5));
+    if (input) input.value = normalizedValue;
+  } else if (normalizedKey === 'hires_steps') {
+    const input = $('pHiresSteps');
+    normalizedValue = String(Math.trunc(parseParamNumber(value, 10)));
+    if (input) input.value = normalizedValue;
+  } else if (normalizedKey === 'hr_cfg') {
+    const input = $('pHrCfg');
+    normalizedValue = String(parseParamNumber(value, 7.0));
+    if (input) input.value = normalizedValue;
+  } else {
+    return;
+  }
+  setParam(normalizedKey, normalizedValue);
+  if (normalizedKey === 'hr_scale') updateWebUiHrScaleHint();
 }
 
 function _compactHiresPreviewText(text, limit) {
@@ -2700,6 +2763,7 @@ function updateParams(m) {
   if (studioTabControl) studioTabControl.onParamsChanged();
   updateModuleHeaderAction(currentModuleId);
   syncingParams = false;
+  if (resultEnhance) resultEnhance.update();
 }
 
 function setParam(key, value) {
@@ -2734,6 +2798,9 @@ function setParam(key, value) {
   }
   if (moduleBadges && ['enable_hr', 'hr_scale', 'anima_weight'].includes(key)) {
     moduleBadges.updateComfyUiParams(_collectCurrentParams());
+  }
+  if (resultEnhance && ['enable_hr', 'hr_scale', 'hr_upscaler', 'denoising_strength', 'hires_steps', 'hr_cfg'].includes(key)) {
+    resultEnhance.update();
   }
 }
 

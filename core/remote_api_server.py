@@ -1716,6 +1716,58 @@ class RemoteBridge(QObject):
             "noise": noise,
         }
 
+    @staticmethod
+    def _coerce_result_enhance_bool(value, fallback: bool = False) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return fallback
+        text = str(value).strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return fallback
+
+    def _normalize_webui_result_enhance_hires_settings(self, payload: dict | None = None) -> dict:
+        """WEBUI Result Enhance reuses the current Params Hires.fix fields."""
+        payload = payload or {}
+        current_params = {}
+        try:
+            if str(self._current_api_mode() or "").upper() == "WEBUI":
+                current_params = self.get_generation_params() or {}
+        except Exception:
+            current_params = {}
+        payload_settings = payload.get("hires_settings") if isinstance(payload.get("hires_settings"), dict) else {}
+        merged = {**current_params, **payload_settings}
+        return {
+            "enable_hr": True,
+            "hr_scale": round(
+                self._clamp_result_enhance_number(merged.get("hr_scale"), 1.0, 4.0, 2.0),
+                1,
+            ),
+            "hr_upscaler": str(merged.get("hr_upscaler") or "Latent (nearest-exact)").strip()
+                or "Latent (nearest-exact)",
+            "denoising_strength": round(
+                self._clamp_result_enhance_number(merged.get("denoising_strength"), 0.0, 1.0, 0.5),
+                2,
+            ),
+            "hires_steps": int(
+                self._clamp_result_enhance_number(merged.get("hires_steps"), 0, 150, 10)
+            ),
+            "hr_cfg": round(
+                self._clamp_result_enhance_number(merged.get("hr_cfg"), 0.0, 30.0, 7.0),
+                1,
+            ),
+            "webui_hiresfix_assist": self._coerce_result_enhance_bool(
+                merged.get("webui_hiresfix_assist"),
+                False,
+            ),
+            "webui_hiresfix_assist_target": 768
+                if str(merged.get("webui_hiresfix_assist_target") or "").strip() == "768"
+                else 512,
+        }
+
     def _result_enhance_config_payload(self) -> dict:
         return self._normalize_result_enhance_config()
 
@@ -1791,7 +1843,7 @@ class RemoteBridge(QObject):
             "generation_params": copy.deepcopy(getattr(item, "generation_params", {}) or {}),
         }
 
-    def _prepare_result_enhance_context(self, payload: dict) -> dict:
+    def _prepare_nai_result_enhance_context(self, payload: dict) -> dict:
         import copy
 
         context = self._resolve_result_enhance_source(payload)
@@ -1839,11 +1891,100 @@ class RemoteBridge(QObject):
             "upscale": upscale,
             "strength": strength,
             "noise": noise,
+            "api_mode": "NAI",
         })
         return context
 
+    @staticmethod
+    def _webui_result_enhance_dimension(value, fallback: int) -> int:
+        try:
+            number = int(float(value))
+        except (TypeError, ValueError):
+            return int(fallback)
+        return max(1, number)
+
+    def _preview_webui_result_enhance_size(self, params: dict, base_w: int, base_h: int) -> tuple[int, int]:
+        payload = {"width": base_w, "height": base_h}
+        scale = self._clamp_result_enhance_number(params.get("hr_scale"), 1.0, 4.0, 2.0)
+        api_service = getattr(self.app_context, "api_service", None)
+        if api_service is not None:
+            apply_resolution = getattr(api_service, "_apply_webui_hiresfix_assist_resolution", None)
+            if callable(apply_resolution):
+                try:
+                    apply_resolution(payload, params)
+                except Exception:
+                    payload = {"width": base_w, "height": base_h}
+            fit_scale = getattr(api_service, "_fit_webui_hiresfix_assist_scale", None)
+            if callable(fit_scale):
+                try:
+                    scale = fit_scale(payload, scale)
+                except Exception:
+                    pass
+        new_w = max(1, int(round(float(payload.get("width") or base_w) * scale)))
+        new_h = max(1, int(round(float(payload.get("height") or base_h) * scale)))
+        return new_w, new_h
+
+    def _prepare_webui_result_enhance_context(self, payload: dict) -> dict:
+        import copy
+
+        context = self._resolve_result_enhance_source(payload)
+        item = context["item"]
+        image = item.image
+        orig_w, orig_h = image.size
+
+        credential = ""
+        token_manager = getattr(self.app_context, "secure_token_manager", None)
+        if token_manager is not None:
+            credential = str(token_manager.get_token("webui_url") or "").strip()
+        if not credential:
+            raise RuntimeError("WEBUI URL is not configured")
+
+        hires_settings = self._normalize_webui_result_enhance_hires_settings(payload)
+        params = copy.deepcopy(context["generation_params"])
+        params.pop("type", None)
+        params.pop("image_bytes", None)
+        params.pop("mask_bytes", None)
+        params.pop("strength", None)
+        params.pop("noise", None)
+
+        base_w = self._webui_result_enhance_dimension(params.get("width"), orig_w)
+        base_h = self._webui_result_enhance_dimension(params.get("height"), orig_h)
+        params["width"] = base_w
+        params["height"] = base_h
+        params.update(hires_settings)
+        params["api_mode"] = "WEBUI"
+        params["credential"] = credential
+
+        new_w, new_h = self._preview_webui_result_enhance_size(params, base_w, base_h)
+        strength = hires_settings["denoising_strength"]
+        upscale = hires_settings["hr_scale"]
+
+        context.update({
+            "params": params,
+            "orig_w": orig_w,
+            "orig_h": orig_h,
+            "base_w": base_w,
+            "base_h": base_h,
+            "new_w": new_w,
+            "new_h": new_h,
+            "upscale": upscale,
+            "strength": strength,
+            "noise": 0.0,
+            "api_mode": "WEBUI",
+            "hr_upscaler": hires_settings["hr_upscaler"],
+            "hires_steps": hires_settings["hires_steps"],
+            "hr_cfg": hires_settings["hr_cfg"],
+        })
+        return context
+
+    def _prepare_result_enhance_context(self, payload: dict, mode: str | None = None) -> dict:
+        enhance_mode = str(mode or (payload or {}).get("mode") or self._current_api_mode() or "").upper()
+        if enhance_mode == "WEBUI":
+            return self._prepare_webui_result_enhance_context(payload)
+        return self._prepare_nai_result_enhance_context(payload)
+
     def _do_result_enhance(self, ws=None, payload_json: str = "{}"):
-        """현재/저장 ImageWindow 히스토리 항목에 NAI Enhance를 실행."""
+        """현재/저장 ImageWindow 히스토리 항목에 Result Enhance를 실행."""
         try:
             allowed, reason = self._result_enhance_gate(ws)
             if not allowed:
@@ -1854,23 +1995,24 @@ class RemoteBridge(QObject):
                 self._send_result_enhance_error(ws, "Enhance is already running")
                 return
 
-            current_mode = ""
-            if hasattr(self.app_context, "get_api_mode"):
-                current_mode = self.app_context.get_api_mode()
-            else:
-                current_mode = getattr(self.app_context, "current_api_mode", "")
-            if current_mode != "NAI":
-                self._send_result_enhance_error(ws, "Enhance is available in NAI mode only")
-                return
-
             try:
                 payload = json.loads(payload_json) if isinstance(payload_json, str) else dict(payload_json or {})
             except Exception:
                 payload = {}
-            context = self._prepare_result_enhance_context(payload)
+
+            current_mode = str(self._current_api_mode() or "").upper()
+            if current_mode not in {"NAI", "WEBUI"}:
+                self._send_result_enhance_error(ws, "Enhance is available in NAI or WEBUI mode only")
+                return
+            requested_mode = str(payload.get("mode") or "").upper()
+            if requested_mode in {"NAI", "WEBUI"} and requested_mode != current_mode:
+                self._send_result_enhance_error(ws, "Enhance mode changed; refresh the result selection")
+                return
+
+            context = self._prepare_result_enhance_context(payload, mode=current_mode)
             image_window = context["image_window"]
 
-            if context["upscale"] == 1.0:
+            if context.get("api_mode") == "NAI" and context["upscale"] == 1.0:
                 gen_ctrl = getattr(self.app_context, "generation_controller", None)
                 if gen_ctrl and getattr(gen_ctrl, "is_generating", False):
                     self._send_result_enhance_error(ws, "Enhance is unavailable while generation is running")
@@ -1951,31 +2093,61 @@ class RemoteBridge(QObject):
                 pil_image.save(buffer, format="PNG")
                 raw_bytes = buffer.getvalue()
 
+            api_mode = str(context.get("api_mode") or context.get("params", {}).get("api_mode") or "NAI").upper()
+            result_w, result_h = getattr(pil_image, "size", (context.get("new_w"), context.get("new_h")))
             info_text = getattr(source_item, "info_text", "") or ""
-            info_text += (
-                f"\nEnhanced: x{context.get('upscale', 1.5):g}, "
-                f"strength={context.get('strength', 0.2):.1f}, "
-                f"noise={context.get('noise', 0.0):.1f} "
-                f"({context.get('new_w')}x{context.get('new_h')})"
-            )
+            if api_mode == "WEBUI":
+                info_text += (
+                    f"\nEnhanced: x{context.get('upscale', 2.0):g}, "
+                    f"denoise={context.get('strength', 0.5):g}, "
+                    f"upscaler={context.get('hr_upscaler') or 'Latent (nearest-exact)'} "
+                    f"({result_w}x{result_h})"
+                )
+            else:
+                info_text += (
+                    f"\nEnhanced: x{context.get('upscale', 1.5):g}, "
+                    f"strength={context.get('strength', 0.2):.1f}, "
+                    f"noise={context.get('noise', 0.0):.1f} "
+                    f"({result_w}x{result_h})"
+                )
 
             enhanced_params = copy.deepcopy(context.get("params") or {})
             enhanced_params.pop("image_bytes", None)
-            enhanced_params["width"] = context.get("new_w")
-            enhanced_params["height"] = context.get("new_h")
-            enhanced_params["strength"] = context.get("strength", 0.2)
-            enhanced_params["noise"] = context.get("noise", 0.0)
-            enhanced_params["api_mode"] = "NAI"
+            enhanced_params.pop("credential", None)
+            enhanced_params["width"] = result_w
+            enhanced_params["height"] = result_h
+            enhanced_params["api_mode"] = api_mode
+            if api_mode == "WEBUI":
+                enhanced_params["enable_hr"] = True
+                enhanced_params["hr_scale"] = context.get("upscale", enhanced_params.get("hr_scale", 2.0))
+                enhanced_params["hr_upscaler"] = context.get("hr_upscaler", enhanced_params.get("hr_upscaler", "Latent (nearest-exact)"))
+                enhanced_params["denoising_strength"] = context.get(
+                    "strength",
+                    enhanced_params.get("denoising_strength", 0.5),
+                )
+                enhanced_params["hires_steps"] = context.get("hires_steps", enhanced_params.get("hires_steps", 10))
+                enhanced_params["hr_cfg"] = context.get("hr_cfg", enhanced_params.get("hr_cfg", 7.0))
+            else:
+                enhanced_params["strength"] = context.get("strength", 0.2)
+                enhanced_params["noise"] = context.get("noise", 0.0)
 
             api_metadata = copy.deepcopy(getattr(source_item, "api_metadata", {}) or {})
             api_metadata.update({
                 "enhanced": True,
+                "enhance_backend": api_mode,
                 "enhance_upscale": context.get("upscale", 1.5),
                 "enhance_strength": context.get("strength", 0.2),
-                "enhance_noise": context.get("noise", 0.0),
                 "source_size": (context.get("orig_w"), context.get("orig_h")),
-                "result_size": (context.get("new_w"), context.get("new_h")),
+                "result_size": (result_w, result_h),
             })
+            if api_mode == "WEBUI":
+                api_metadata.update({
+                    "enhance_hr_upscaler": context.get("hr_upscaler", ""),
+                    "enhance_hires_steps": context.get("hires_steps", 10),
+                    "enhance_hr_cfg": context.get("hr_cfg", 7.0),
+                })
+            else:
+                api_metadata["enhance_noise"] = context.get("noise", 0.0)
 
             generation_result = {
                 "image": pil_image,
@@ -1986,7 +2158,7 @@ class RemoteBridge(QObject):
                 "prompt_context": copy.deepcopy(getattr(source_item, "prompt_context", {}) or {}),
                 "api_metadata": api_metadata,
                 "creation_timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "backend_type": "NAI",
+                "backend_type": api_mode,
             }
             image_window.add_to_history(
                 pil_image,
@@ -2000,7 +2172,7 @@ class RemoteBridge(QObject):
             completion_message = "Enhance complete"
             print(
                 f"✅ Remote Enhance 성공: "
-                f"{context.get('orig_w')}x{context.get('orig_h')} → {context.get('new_w')}x{context.get('new_h')}"
+                f"{context.get('orig_w')}x{context.get('orig_h')} → {result_w}x{result_h}"
             )
         finally:
             self.on_result_enhance_completed(success, completion_message)
@@ -5644,10 +5816,11 @@ class RemoteBridge(QObject):
         )
         mode = str(self._current_api_mode() or "").upper()
         nai_mode = mode == "NAI"
+        webui_mode = mode == "WEBUI"
         has_image = has_item_image or has_latest_image
         has_metadata = bool(metadata_payload or rel_path)
         can_use_nai_img2img = bool(has_image and nai_mode)
-        can_enhance = bool(has_item_image and has_generation_params and nai_mode)
+        can_enhance = bool(has_item_image and has_generation_params and (nai_mode or webui_mode))
 
         return {
             "id": "current",
@@ -5703,9 +5876,11 @@ class RemoteBridge(QObject):
         has_source_row = self._source_row_available(matched_source_row)
         has_generation_params = bool(getattr(matched_item, "generation_params", None)) if matched_item else False
         has_history_image = bool(matched_item and getattr(matched_item, "image", None))
-        nai_mode = str(self._current_api_mode() or "").upper() == "NAI"
+        mode = str(self._current_api_mode() or "").upper()
+        nai_mode = mode == "NAI"
+        webui_mode = mode == "WEBUI"
         can_use_nai_img2img = bool(has_history_image and nai_mode)
-        can_enhance = bool(matched_item and getattr(matched_item, "image", None) and has_generation_params and nai_mode)
+        can_enhance = bool(matched_item and getattr(matched_item, "image", None) and has_generation_params and (nai_mode or webui_mode))
         history_urls = self._history_item_public_urls(matched_item) if matched_item else {}
         label = target.name if target else self._history_item_filename(matched_item)
         file_path = str(target) if target else ""

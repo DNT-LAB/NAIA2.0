@@ -10919,6 +10919,15 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: character 설정 실패 — {key}={value}: {e}")
 
+    def _load_conditional_prompt_module_for_action(self):
+        module = self._find_loaded_module_instance("PromptListModifierModule")
+        if module is not None:
+            return module
+        middle_controller = getattr(self.app_context, "middle_section_controller", None)
+        if middle_controller is None or not hasattr(middle_controller, "get_module_instance"):
+            return None
+        return middle_controller.get_module_instance("PromptListModifierModule")
+
     def _set_conditional_prompt_headless(self, key: str, value: str):
         store = self._conditional_prompt_headless_store
         settings = store.collect_settings()
@@ -10999,6 +11008,12 @@ class RemoteBridge(QObject):
                     "level": "success",
                 })
             else:
+                module = self._load_conditional_prompt_module_for_action()
+                if module is not None:
+                    if hasattr(module, "apply_settings"):
+                        module.apply_settings(settings)
+                    self._set_conditional_prompt(key, value)
+                    return
                 self._broadcast_json({
                     "type": "toast",
                     "message": "Conditional Prompt action requires the desktop module.",

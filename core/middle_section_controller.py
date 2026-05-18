@@ -15,7 +15,12 @@ MIDDLE_MODULE_SPECS = (
     {"file": "automation_module", "class": "AutomationModule", "web_session_lazy": True},
     {"file": "character_module", "class": "CharacterModule", "web_session_lazy": True},
     {"file": "character_reference_module", "class": "CharacterReferenceModule", "web_session_lazy": True},
-    {"file": "conditional_prompt_module", "class": "PromptListModifierModule", "web_session_headless_widget": True},
+    {
+        "file": "conditional_prompt_module",
+        "class": "PromptListModifierModule",
+        "web_session_lazy": True,
+        "web_session_headless_hook": "conditional_prompt",
+    },
     {"file": "e621_event_module", "class": "E621EventModuleV2", "web_session_lazy": True},
     {"file": "instant_wildcard_module", "class": "InstantWildcardModule", "web_session_lazy": True},
     {"file": "ollama_module", "class": "OllamaModule", "web_session_lazy": True},
@@ -210,6 +215,17 @@ class MiddleSectionController:
                 from core.prompt_engineering_runtime import register_prompt_engineering_headless_runtime
 
                 register_prompt_engineering_headless_runtime(self.app_context)
+                self._deferred_headless_hook_classes.add(module_spec["class"])
+                print(f"✅ Web Session headless middle hook 등록: {module_spec['class']}")
+            except Exception as e:
+                print(f"⚠️ Web Session headless middle hook 등록 실패 ({module_spec['class']}): {e}")
+            return
+
+        if hook_id == "conditional_prompt":
+            try:
+                from core.conditional_prompt_runtime import register_conditional_prompt_headless_runtime
+
+                register_conditional_prompt_headless_runtime(self.app_context)
                 self._deferred_headless_hook_classes.add(module_spec["class"])
                 print(f"✅ Web Session headless middle hook 등록: {module_spec['class']}")
             except Exception as e:

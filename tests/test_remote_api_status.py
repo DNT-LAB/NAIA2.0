@@ -222,10 +222,9 @@ def test_character_reference_state_loads_widget_only_on_explicit_read():
 
 def test_disabling_character_reference_does_not_wake_deferred_module():
     class MiddleController:
-        module_instances = []
-
         def __init__(self):
             self.requested = []
+            self.module_instances = []
 
         def get_module_instance(self, class_name):
             self.requested.append(class_name)
@@ -449,6 +448,76 @@ def test_conditional_prompt_state_uses_store_without_loading_module(tmp_path, mo
     assert state["enabled"] is True
     assert state["rules"] == "(e):main+=dramatic lighting"
     assert controller.requested == []
+    assert broadcasts[-1]["module_id"] == "conditional_prompt"
+
+
+def test_conditional_prompt_headless_action_loads_deferred_module(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    class PromptListModifierModule:
+        enable_checkbox = None
+        rules_textedit = None
+        log_textedit = None
+
+        def __init__(self):
+            self.tested = False
+            self.settings = {
+                "enabled": True,
+                "rules": "(e):main+=old",
+                "rules_v2": "",
+                "editor_mode": "legacy",
+                "engine_options": {"max_passes": 1, "stop_on_match": False},
+                "active_preset": "",
+            }
+
+        def collect_current_settings(self):
+            return dict(self.settings)
+
+        def apply_settings(self, settings):
+            self.settings.update(settings)
+
+        def get_editor_mode(self):
+            return self.settings["editor_mode"]
+
+        def get_v2_dsl(self):
+            return self.settings["rules_v2"]
+
+        def get_engine_options(self):
+            return dict(self.settings["engine_options"])
+
+        def test_rules(self):
+            self.tested = True
+
+    module = PromptListModifierModule()
+
+    class MiddleController:
+        module_instances = []
+
+        def __init__(self):
+            self.requested = []
+
+        def get_loaded_module_instance(self, class_name):
+            if class_name == "PromptListModifierModule" and self.module_instances:
+                return self.module_instances[0]
+            return None
+
+        def get_module_instance(self, class_name):
+            assert class_name == "PromptListModifierModule"
+            self.requested.append(class_name)
+            self.module_instances.append(module)
+            return module
+
+    controller = MiddleController()
+    ctx = _AppContext()
+    ctx.middle_section_controller = controller
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = lambda payload: broadcasts.append(payload)
+
+    bridge._set_conditional_prompt("test", "1")
+
+    assert controller.requested == ["PromptListModifierModule"]
+    assert module.tested is True
     assert broadcasts[-1]["module_id"] == "conditional_prompt"
 
 

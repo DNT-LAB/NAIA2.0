@@ -281,3 +281,11 @@
 - `RemoteBridge._read_conditional_prompt()`은 loaded `PromptListModifierModule`이 있으면 기존 module state를 사용하고, 없으면 core store로 동일한 `module_state` payload를 만든다.
 - `RemoteBridge._set_conditional_prompt()`은 loaded module이 없을 때도 Remote Web의 enabled/rules/editor/engine option/preset-load 변경을 core store에 반영하고 상태를 broadcast한다.
 - registry는 아직 바꾸지 않았다. `PromptListModifierModule`은 generation `after_wildcard` hook owner라서 full lazy 전환 전 `core.conditional_prompt_runtime` 분리가 필요하다.
+
+### Round 27 Conditional Prompt lazy runtime
+
+- `core.conditional_prompt_runtime`을 추가해 hidden WebSession startup에서 `PromptListModifierModule` import/instance 생성을 지연시켰다.
+- middle registry의 `PromptListModifierModule`은 `web_session_lazy=True`, `web_session_headless_hook="conditional_prompt"`로 전환됐다.
+- headless hook은 저장된 조건부 프롬프트 설정이 disabled이거나 실행 규칙이 비어 있으면 아무 모듈도 깨우지 않는다.
+- 조건부 규칙이 실제로 enabled 상태에서 generation에 들어갈 때는 기존 `PromptListModifierModule`을 on-demand 로드해 기존 룰 엔진에 위임한다. 따라서 startup 병목은 제거하지만, enabled conditional generation의 PyQt-free rule engine 분리는 다음 단계로 남는다.
+- RemoteBridge의 store-backed 설정 변경은 계속 PyQt-free로 처리하고, `simulate_v2` 같은 고급 동작은 명시적 사용자 액션 시 deferred module을 로드해 기존 동작을 보존한다.

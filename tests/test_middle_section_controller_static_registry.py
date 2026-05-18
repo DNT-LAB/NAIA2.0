@@ -112,7 +112,8 @@ def test_web_session_lazy_registry_keeps_generation_modules_eager():
     assert specs["AutomationModule"]["web_session_lazy"] is True
     assert specs["CharacterReferenceModule"]["web_session_lazy"] is True
     assert specs["VibeTransferModule"]["web_session_lazy"] is True
-    assert specs["PromptListModifierModule"]["web_session_headless_widget"] is True
+    assert specs["PromptListModifierModule"]["web_session_lazy"] is True
+    assert specs["PromptListModifierModule"]["web_session_headless_hook"] == "conditional_prompt"
     assert specs["PromptEngineeringModule"]["web_session_lazy"] is True
     assert specs["PromptEngineeringModule"]["web_session_headless_hook"] == "prompt_engineering"
 
@@ -296,6 +297,99 @@ raise RuntimeError('prompt engineering module should stay deferred')
         "random_prompt_triggered",
         "random_prompt_triggered_preset_randomizer",
     ]
+
+
+def test_web_session_conditional_prompt_registers_headless_hook_without_import(tmp_path, monkeypatch):
+    marker_path = tmp_path / "conditional_prompt_imported.txt"
+    (tmp_path / "conditional_prompt_module.py").write_text(
+        f"""
+from pathlib import Path
+Path({str(marker_path)!r}).write_text('imported', encoding='utf-8')
+from interfaces.base_module import BaseMiddleModule
+
+class PromptListModifierModule(BaseMiddleModule):
+    def __init__(self):
+        super().__init__()
+        self.initialized = False
+        self.settings = {{}}
+
+    def initialize_with_context(self, app_context):
+        self.app_context = app_context
+
+    def on_initialize(self):
+        self.initialized = True
+
+    def get_title(self):
+        return "Conditional"
+
+    def create_widget(self, parent):
+        return None
+
+    def apply_settings(self, settings):
+        self.settings = dict(settings)
+
+    def execute_pipeline_hook(self, context):
+        context.main_tags.append("conditional-loaded")
+        return context
+
+    def get_pipeline_hook_info(self):
+        return {{"target_pipeline": "PromptProcessor", "hook_point": "after_wildcard", "priority": 2}}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        middle_controller,
+        "MIDDLE_MODULE_SPECS",
+        (
+            {
+                "file": "conditional_prompt_module",
+                "class": "PromptListModifierModule",
+                "web_session_lazy": True,
+                "web_session_headless_hook": "conditional_prompt",
+            },
+        ),
+    )
+    monkeypatch.setenv("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW", "1")
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    controller = MiddleSectionController(str(tmp_path), ctx)
+    ctx.middle_section_controller = controller
+
+    controller.load_modules()
+
+    assert controller.module_classes == []
+    assert controller.module_instances == []
+    assert not marker_path.exists()
+    assert len(ctx.hooks) == 1
+    hook_info, hook = ctx.hooks[0]
+    assert hook.get_title() == "Conditional Prompt Headless"
+    assert hook_info == {
+        "target_pipeline": "PromptProcessor",
+        "hook_point": "after_wildcard",
+        "priority": 2,
+    }
+
+    context = SimpleNamespace(settings={}, prefix_tags=[], main_tags=[], postfix_tags=[])
+    hook.execute_pipeline_hook(context)
+
+    assert not marker_path.exists()
+    assert controller.module_instances == []
+    assert context.main_tags == []
+
+    from core.conditional_prompt_settings import get_conditional_prompt_store
+
+    get_conditional_prompt_store(ctx).apply_settings({
+        "enabled": True,
+        "rules": "(e):main+=dramatic lighting",
+        "editor_mode": "legacy",
+    })
+    hook.execute_pipeline_hook(context)
+
+    assert marker_path.exists()
+    assert len(controller.module_instances) == 1
+    assert controller.module_instances[0].initialized is True
+    assert context.main_tags == ["conditional-loaded"]
+    assert len(ctx.hooks) == 1
 
 
 def test_web_session_prompt_engineering_lazy_load_does_not_double_register_post_hook(tmp_path, monkeypatch):

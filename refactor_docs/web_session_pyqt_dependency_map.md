@@ -60,6 +60,13 @@
 - `TurboEventSequenceTabModule`은 Remote Web에 없는 PyQt 탭이지만 생성 경로에 `turbo_sequence_request` 처리 흔적이 남아 있어 단순 이동은 위험하다.
 - `tabs/comic_generator_tab.py`와 `tabs/comic_generator/`는 gitignored prototype이어도 `tabs/` 아래라 startup import 후보가 된다. 다음 격리 라운드에서 가장 먼저 `not_implement/` 이동 또는 explicit skip 대상이다.
 
+### Round 02 격리 결정
+
+- `tabs/comic_generator_tab.py`는 ignored local prototype root proxy이므로 `PROTOTYPE_TAB_FILES`로 startup import를 차단한다.
+- ignored prototype 파일은 사용자 작업물일 수 있어 삭제/이동하지 않고, tracked loader guard로만 startup-visible 표면을 줄인다.
+- `TurboEventSequenceTabModule`은 `NAIA_cold_v4.py`의 명시적 `add_tab_by_name("TurboEventSequenceTabModule")` 호출과 `turbo_sequence_request` generation path가 남아 있으므로 이번 라운드에서는 유지한다.
+- 이 결정은 Remote Web 기능 보존을 우선하고, WebSession에 없는 prototype 탭이 숨김 웹셸 startup에서 PyQt6 위젯/의존성을 끌어오는 문제만 제거한다.
+
 ## 1차 분리 원칙
 
 1. WebSession 필수 기능이 사용하는 상태를 먼저 유지한다.

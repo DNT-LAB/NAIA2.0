@@ -36,6 +36,24 @@ class DummyTabModule(BaseTabModule):
     assert [cls.__name__ for cls in controller.module_classes] == ["DummyTabModule"]
 
 
+def test_prototype_tab_files_are_not_imported_on_startup(tmp_path, qtbot):
+    prototype_file = tmp_path / "comic_generator_tab.py"
+    prototype_file.write_text(
+        "raise RuntimeError('prototype tab imported during startup')\n",
+        encoding="utf-8",
+    )
+
+    tab_widget = QTabWidget()
+    qtbot.addWidget(tab_widget)
+    controller = TabController(str(tmp_path), app_context=None, tab_widget=tab_widget)
+    qtbot.addWidget(controller)
+
+    controller.initialize_tabs()
+
+    assert tab_widget.count() == 0
+    assert controller.module_classes == []
+
+
 def test_removed_tab_modules_cannot_be_added(qtbot):
     tab_widget = QTabWidget()
     qtbot.addWidget(tab_widget)

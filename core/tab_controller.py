@@ -25,6 +25,10 @@ REMOVED_TAB_FILES = {
     'assets_tab',
 }
 
+PROTOTYPE_TAB_FILES = {
+    'comic_generator_tab',
+}
+
 
 TAB_MODULE_SPECS = {
     'ImageViewerModule': {
@@ -114,7 +118,7 @@ TAB_MODULE_SPECS = {
 }
 
 
-STARTUP_SKIPPED_TAB_FILES = REMOVED_TAB_FILES | {
+STARTUP_SKIPPED_TAB_FILES = REMOVED_TAB_FILES | PROTOTYPE_TAB_FILES | {
     spec['file']
     for spec in TAB_MODULE_SPECS.values()
     if spec.get('lazy') or spec.get('tab_type') != 'core'

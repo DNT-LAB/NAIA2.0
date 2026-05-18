@@ -266,3 +266,11 @@
 - Closed Eyes Sync는 NAI request characters와 이미 로드된 CharacterModule clone만 동기화한다. CharacterModule이 아직 lazy 상태라면 이 hook 때문에 새로 로드하지 않는다.
 - CDP 검증에서 hidden WebShell startup은 `Web Session headless middle hook 등록: PromptEngineeringModule`만 기록했고, `모듈 로드 성공: prompt_engineering_module -> PromptEngineeringModule` 또는 `지연 middle 모듈 로드 완료: PromptEngineeringModule`은 발생하지 않았다.
 - 남은 eager middle module은 `PromptListModifierModule`이다. 현재는 saved conditional rules를 generation hook에 적용하기 위해 instance/hook은 유지하고 widget만 생략한다. full lazy 전환은 conditional-prompt core hook/service 분리 후 진행해야 한다.
+
+### Round 25 Character token count loaded-only path
+
+- Round 24 runtime 로그에서 hidden WebSession startup 후 `ModernMainWindow.update_token_count()`가 `get_module_instance("CharacterModule")`를 호출해 deferred `CharacterModule`을 깨우는 경로가 확인됐다.
+- hidden WebSession에서는 token count가 이제 `get_loaded_module_instance("CharacterModule")`만 조회하고, loaded module이 없으면 `core.character_settings.character_params_from_settings()`로 저장된 active character prompt를 읽는다.
+- desktop runtime에서는 기존처럼 `get_module_instance("CharacterModule")` 경로를 유지한다.
+- WebShell 로그 검증에서 Remote API server startup 전까지 module instance count는 1개로 유지됐다. 이후 Remote Web client가 character state를 명시적으로 요청하면 `CharacterModule`은 on-demand 로드될 수 있으며, 이는 panel/action 사용 시 허용된 lazy-load 경로다.
+- 남은 큰 blocker는 `PromptListModifierModule` full lazy 전환이다. 별도 분석 결과, 단순 registry lazy로는 generation hook이 사라지므로 `core.conditional_prompt_settings`와 `core.conditional_prompt_runtime` 분리가 먼저 필요하다.

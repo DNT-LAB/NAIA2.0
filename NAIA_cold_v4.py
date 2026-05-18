@@ -6578,11 +6578,25 @@ class ModernMainWindow(QMainWindow):
             character_prompt = ""
             if current_mode == "NAI":
                 try:
-                    character_module = self.middle_section_controller.get_module_instance("CharacterModule")
+                    if self._is_hidden_web_session_runtime() and hasattr(
+                        self.middle_section_controller, "get_loaded_module_instance"
+                    ):
+                        character_module = self.middle_section_controller.get_loaded_module_instance("CharacterModule")
+                    else:
+                        character_module = self.middle_section_controller.get_module_instance("CharacterModule")
                     if character_module and hasattr(character_module, 'modifiable_clone'):
                         characters = character_module.modifiable_clone.get('characters', [])
-                        if characters and character_module.activate_checkbox.isChecked():
+                        activate_checkbox = getattr(character_module, "activate_checkbox", None)
+                        is_active = bool(activate_checkbox and activate_checkbox.isChecked())
+                        if characters and is_active:
                             # Join all character strings into one
+                            character_prompt = ' '.join(str(char) for char in characters if char)
+                    elif self._is_hidden_web_session_runtime():
+                        from core.character_settings import character_params_from_settings
+
+                        char_params = character_params_from_settings(self.app_context, mode="NAI")
+                        characters = char_params.get("characters") or []
+                        if characters:
                             character_prompt = ' '.join(str(char) for char in characters if char)
                 except Exception as e:
                     print(f"Warning: Could not get character module data: {e}")

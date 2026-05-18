@@ -255,3 +255,14 @@
 - `RemoteBridge._set_prompt_engineering()`은 loaded module이 없을 때도 prefix/postfix/auto-hide/preprocessing toggle, preset save/create/delete, randomized pool, e621/Danbooru settings를 core store로 처리한다.
 - Artist Thumbnail random Prompt Engineering override도 loaded module이 없으면 core store settings를 사용한다.
 - 이 라운드는 full lazy 전환의 선행 단계다. hidden WebSession startup에서는 아직 `PromptEngineeringModule` instance와 hooks가 남아 있으며, post/after-wildcard hook owner와 `*randomized` subscriber를 core runtime으로 분리해야 import 자체를 지연할 수 있다.
+
+### Round 24 Prompt Engineering lazy runtime
+
+- `core.prompt_engineering_runtime`을 추가해 hidden WebSession의 Prompt Engineering `post_processing` hook, four after-wildcard hooks, `*randomized` subscriber를 PyQt-free owner로 분리했다.
+- `PromptEngineeringModule`은 hidden WebSession registry에서 `web_session_lazy=True`가 되었고 startup import/instance/widget 생성 대상에서 빠졌다.
+- `MiddleSectionController`는 `web_session_headless_hook="prompt_engineering"`을 만나면 core runtime hooks를 등록하고, 나중에 `PromptEngineeringModule`이 on-demand 로드되더라도 post hook을 중복 등록하지 않는다.
+- headless post hook의 option precedence는 Event Stream frozen options, session override, already-loaded module, core store 순서다. 이로써 Event Stream freeze와 Remote Web per-request override는 기존 우선순위를 유지한다.
+- advanced e621/Danbooru 처리는 metadata predicate가 있을 때만 module을 on-demand 로드한다. 일반 Prompt Engineering panel open/state refresh/random prompt generation은 module을 깨우지 않는다.
+- Closed Eyes Sync는 NAI request characters와 이미 로드된 CharacterModule clone만 동기화한다. CharacterModule이 아직 lazy 상태라면 이 hook 때문에 새로 로드하지 않는다.
+- CDP 검증에서 hidden WebShell startup은 `Web Session headless middle hook 등록: PromptEngineeringModule`만 기록했고, `모듈 로드 성공: prompt_engineering_module -> PromptEngineeringModule` 또는 `지연 middle 모듈 로드 완료: PromptEngineeringModule`은 발생하지 않았다.
+- 남은 eager middle module은 `PromptListModifierModule`이다. 현재는 saved conditional rules를 generation hook에 적용하기 위해 instance/hook은 유지하고 widget만 생략한다. full lazy 전환은 conditional-prompt core hook/service 분리 후 진행해야 한다.

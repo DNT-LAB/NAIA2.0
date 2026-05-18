@@ -9,9 +9,10 @@ class _AppContext:
     def __init__(self):
         self.mode_manager = SimpleNamespace(register_module=lambda _module: None)
         self.hooks = []
+        self.subscribers = []
 
-    def subscribe(self, *_args, **_kwargs):
-        pass
+    def subscribe(self, *args, **_kwargs):
+        self.subscribers.append(args)
 
     def get_api_mode(self):
         return "NAI"
@@ -112,7 +113,8 @@ def test_web_session_lazy_registry_keeps_generation_modules_eager():
     assert specs["CharacterReferenceModule"]["web_session_lazy"] is True
     assert specs["VibeTransferModule"]["web_session_lazy"] is True
     assert specs["PromptListModifierModule"]["web_session_headless_widget"] is True
-    assert specs["PromptEngineeringModule"]["web_session_headless_widget"] is True
+    assert specs["PromptEngineeringModule"]["web_session_lazy"] is True
+    assert specs["PromptEngineeringModule"]["web_session_headless_hook"] == "prompt_engineering"
 
 
 def test_web_session_lazy_middle_module_defers_import_until_requested(tmp_path, monkeypatch):
@@ -249,3 +251,96 @@ raise RuntimeError('reference inset module should stay deferred')
     hook.execute_pipeline_hook(context)
 
     assert context.main_tags == ["1girl", "reference inset", "solo"]
+
+
+def test_web_session_prompt_engineering_registers_headless_runtime_without_import(tmp_path, monkeypatch):
+    marker_path = tmp_path / "prompt_engineering_imported.txt"
+    (tmp_path / "prompt_engineering_module.py").write_text(
+        f"""
+from pathlib import Path
+Path({str(marker_path)!r}).write_text('imported', encoding='utf-8')
+raise RuntimeError('prompt engineering module should stay deferred')
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        middle_controller,
+        "MIDDLE_MODULE_SPECS",
+        (
+            {
+                "file": "prompt_engineering_module",
+                "class": "PromptEngineeringModule",
+                "web_session_lazy": True,
+                "web_session_headless_hook": "prompt_engineering",
+            },
+        ),
+    )
+    monkeypatch.setenv("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW", "1")
+    ctx = _AppContext()
+    controller = MiddleSectionController(str(tmp_path), ctx)
+
+    controller.load_modules()
+
+    assert controller.module_classes == []
+    assert controller.module_instances == []
+    assert not marker_path.exists()
+    assert len(ctx.hooks) == 5
+    assert [hook_info["hook_point"] for hook_info, _hook in ctx.hooks] == [
+        "post_processing",
+        "after_wildcard",
+        "after_wildcard",
+        "after_wildcard",
+        "after_wildcard",
+    ]
+    assert [args[0] for args in ctx.subscribers if args[0].startswith("random_prompt_triggered")] == [
+        "random_prompt_triggered",
+        "random_prompt_triggered_preset_randomizer",
+    ]
+
+
+def test_web_session_prompt_engineering_lazy_load_does_not_double_register_post_hook(tmp_path, monkeypatch):
+    (tmp_path / "prompt_engineering_module.py").write_text(
+        """
+from interfaces.base_module import BaseMiddleModule
+
+class PromptEngineeringModule(BaseMiddleModule):
+    def __init__(self):
+        super().__init__()
+        self.initialized = False
+
+    def get_title(self):
+        return "Prompt Engineering"
+
+    def create_widget(self, parent):
+        return None
+
+    def on_initialize(self):
+        self.initialized = True
+
+    def get_pipeline_hook_info(self):
+        return {"target_pipeline": "PromptProcessor", "hook_point": "post_processing", "priority": 10}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        middle_controller,
+        "MIDDLE_MODULE_SPECS",
+        (
+            {
+                "file": "prompt_engineering_module",
+                "class": "PromptEngineeringModule",
+                "web_session_lazy": True,
+                "web_session_headless_hook": "prompt_engineering",
+            },
+        ),
+    )
+    monkeypatch.setenv("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW", "1")
+    ctx = _AppContext()
+    controller = MiddleSectionController(str(tmp_path), ctx)
+    controller.load_modules()
+
+    module = controller.get_module_instance("PromptEngineeringModule")
+
+    assert module.initialized is True
+    assert len(ctx.hooks) == 5
+    assert [hook.__class__.__name__ for _hook_info, hook in ctx.hooks].count("PromptEngineeringHeadlessPostHook") == 1

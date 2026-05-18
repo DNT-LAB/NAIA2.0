@@ -66,7 +66,7 @@ from core.kr_tag_loader import format_kr_tag_load_summary, load_kr_tag_records
 from core.preset_input_bridge import PresetInputBridge, update_app_preset_context
 from core.preset_composer_service import PresetComposerService
 from core.prompt_engineering_settings import (
-    PromptEngineeringHeadlessStore,
+    get_prompt_engineering_store,
     save_danbooru_weight_settings,
     save_e621_settings,
 )
@@ -751,7 +751,7 @@ class RemoteBridge(QObject):
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
         self._remote_automation_state: dict = automation_state_from_settings(load_automation_settings())
         self._automation_signals_connected = False
-        self._prompt_engineering_headless_store = PromptEngineeringHeadlessStore(self._current_api_mode)
+        self._prompt_engineering_headless_store = get_prompt_engineering_store(app_context)
         self._instant_wildcard_save_path = DEFAULT_INSTANT_WILDCARD_SAVE_PATH
         self._instant_wildcard_json_data: dict = {}
         self._instant_wildcard_dict: dict = {}

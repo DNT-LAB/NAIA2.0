@@ -416,3 +416,13 @@ class PromptEngineeringHeadlessStore:
         self.state(mode_key)["randomized_preset_list"] = []
         save_randomized_pool(mode_key, [])
         return True, ""
+
+
+def get_prompt_engineering_store(app_context) -> PromptEngineeringHeadlessStore:
+    store = getattr(app_context, "prompt_engineering_headless_store", None)
+    if isinstance(store, PromptEngineeringHeadlessStore):
+        return store
+    mode_getter = getattr(app_context, "get_api_mode", None)
+    store = PromptEngineeringHeadlessStore(mode_getter if callable(mode_getter) else None)
+    setattr(app_context, "prompt_engineering_headless_store", store)
+    return store

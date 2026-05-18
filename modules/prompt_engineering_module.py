@@ -408,7 +408,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.app_context = context  # 새로운 모드 시스템용
 
         # 랜덤 프리셋 선택용 신호 구독
-        if self.app_context:
+        if self.app_context and not getattr(self.app_context, "prompt_engineering_headless_runtime_registered", False):
             self.app_context.subscribe("random_prompt_triggered", self._on_random_prompt_triggered)
             self.app_context.subscribe("random_prompt_triggered_preset_randomizer", self._on_random_prompt_triggered)
 

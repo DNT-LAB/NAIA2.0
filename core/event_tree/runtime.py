@@ -8,6 +8,7 @@ from typing import Any, Optional
 import pandas as pd
 
 from core.search_result_model import SearchResultModel
+from core.prompt_engineering_settings import get_prompt_engineering_store
 from core.wildcard_processor import split_tags_smart
 
 
@@ -367,11 +368,20 @@ class EventStreamRuntime:
 
     def _capture_prompt_engineering_options(self) -> Optional[dict[str, Any]]:
         controller = getattr(self.app_context, "middle_section_controller", None)
-        if not controller:
-            return None
-        module = controller.get_module_instance("PromptEngineeringModule")
+        module = None
+        if controller:
+            if hasattr(controller, "get_loaded_module_instance"):
+                module = controller.get_loaded_module_instance("PromptEngineeringModule")
+            elif hasattr(controller, "get_module_instance"):
+                module = controller.get_module_instance("PromptEngineeringModule")
         if not module or not hasattr(module, "get_parameters"):
-            return None
+            settings = get_prompt_engineering_store(self.app_context).collect_settings()
+            return {
+                "pre_prompt": split_tags_smart(settings.get("pre_prompt", "")),
+                "post_prompt": split_tags_smart(settings.get("post_prompt", "")),
+                "auto_hide": split_tags_smart(settings.get("auto_hide_prompt", "")),
+                "preprocessing_options": dict(settings.get("preprocessing_options") or {}),
+            }
         try:
             return copy.deepcopy(module.get_parameters())
         except Exception as exc:

@@ -298,6 +298,19 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.randomized_combo = None  # 프리셋 선택 복제 콤보박스
         self.randomized_add_btn = None  # [추가] 버튼
         self.randomized_remove_btn = None  # [제거] 버튼
+        self._headless_after_wildcard_hooks_registered = False
+        self._headless_settings = {
+            "pre_prompt": "",
+            "post_prompt": "",
+            "auto_hide_prompt": "",
+            "preprocessing_options": {
+                key: False
+                for key in self.option_key_map.values()
+                if key
+            },
+            "e621_settings": dict(self._e621_settings),
+            "danbooru_weight_settings": dict(self._danbooru_weight_settings),
+        }
 
     def get_title(self) -> str:
         return "🔧 프롬프트 엔지니어링/자동화/프리셋"
@@ -312,7 +325,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
     def collect_current_settings(self) -> Dict[str, Any]:
         """현재 UI 상태에서 설정 수집"""
         if not all([self.pre_textedit, self.post_textedit, self.auto_hide_textedit]):
-            return {}
+            return copy.deepcopy(self._headless_settings)
 
         settings = {
             "pre_prompt": self.pre_textedit.toPlainText(),
@@ -325,10 +338,33 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             "e621_settings": self._e621_settings,
             "danbooru_weight_settings": self._danbooru_weight_settings,
         }
+        self._headless_settings = copy.deepcopy(settings)
         return settings
 
     def apply_settings(self, settings: Dict[str, Any]):
         """설정을 UI에 적용"""
+        pre_prompt = settings.get("pre_prompt", "")
+        post_prompt = settings.get("post_prompt", "")
+        auto_hide = settings.get("auto_hide_prompt", "")
+        options = settings.get("preprocessing_options", {})
+        if not isinstance(options, dict):
+            options = {}
+        headless_options = dict(self._headless_settings.get("preprocessing_options", {}))
+        for key, value in options.items():
+            headless_options[key] = bool(value)
+        if "e621_settings" in settings:
+            self._e621_settings = dict(settings.get("e621_settings") or {})
+        if "danbooru_weight_settings" in settings:
+            self._danbooru_weight_settings = dict(settings.get("danbooru_weight_settings") or {})
+        self._headless_settings.update({
+            "pre_prompt": str(pre_prompt or ""),
+            "post_prompt": str(post_prompt or ""),
+            "auto_hide_prompt": str(auto_hide or ""),
+            "preprocessing_options": headless_options,
+            "e621_settings": dict(self._e621_settings or {}),
+            "danbooru_weight_settings": dict(self._danbooru_weight_settings or {}),
+        })
+
         if not all([self.pre_textedit, self.post_textedit, self.auto_hide_textedit]):
             print("    ⚠️ UI 위젯이 아직 준비되지 않음")
             return
@@ -336,10 +372,6 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         print(f"    - 모듈 설정 적용:")
 
         # 텍스트 설정 적용
-        pre_prompt = settings.get("pre_prompt", "")
-        post_prompt = settings.get("post_prompt", "")
-        auto_hide = settings.get("auto_hide_prompt", "")
-
         print(f"      pre_prompt 길이: {len(pre_prompt)}")
         print(f"      post_prompt 길이: {len(post_prompt)}")
         print(f"      auto_hide 길이: {len(auto_hide)}")
@@ -349,7 +381,6 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.auto_hide_textedit.setText(auto_hide)
 
         # 체크박스 설정 적용
-        options = settings.get("preprocessing_options", {})
         print(f"      preprocessing_options: {options}")
 
         for text, cb in self.preprocessing_checkboxes.items():
@@ -381,26 +412,33 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             self.app_context.subscribe("random_prompt_triggered", self._on_random_prompt_triggered)
             self.app_context.subscribe("random_prompt_triggered_preset_randomizer", self._on_random_prompt_triggered)
 
+    def register_headless_hooks(self):
+        """Register non-widget pipeline hooks required by hidden WebSession."""
+        if not hasattr(self, 'app_context') or not self.app_context:
+            return
+        if self._headless_after_wildcard_hooks_registered:
+            return
+        self.app_context.register_pipeline_hook(
+            {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 5},
+            self._ClosedEyesSyncAfterWildcardHook(self),
+        )
+        self.app_context.register_pipeline_hook(
+            {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 10},
+            self._E621AfterWildcardHook(self),
+        )
+        self.app_context.register_pipeline_hook(
+            {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 15},
+            self._DanbooruAfterWildcardHook(self),
+        )
+        self.app_context.register_pipeline_hook(
+            {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 20},
+            self._OutfitContextResolverHook(self),
+        )
+        self._headless_after_wildcard_hooks_registered = True
+
     def create_widget(self, parent: QWidget) -> QWidget:
         # after_wildcard hook 등록 (와일드카드 단독 + e621 동시 사용 대응)
-        if hasattr(self, 'app_context') and self.app_context:
-            self.app_context.register_pipeline_hook(
-                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 5},
-                self._ClosedEyesSyncAfterWildcardHook(self),
-            )
-            self.app_context.register_pipeline_hook(
-                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 10},
-                self._E621AfterWildcardHook(self),
-            )
-            self.app_context.register_pipeline_hook(
-                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 15},
-                self._DanbooruAfterWildcardHook(self),
-            )
-            # priority 20: e621/Danbooru 가중치 처리 이후, 최종 포맷 직전에 의상 충돌 해결
-            self.app_context.register_pipeline_hook(
-                {'target_pipeline': 'PromptProcessor', 'hook_point': 'after_wildcard', 'priority': 20},
-                self._OutfitContextResolverHook(self),
-            )
+        self.register_headless_hooks()
 
         widget = QWidget(parent)
         layout = QVBoxLayout(widget)
@@ -2053,6 +2091,15 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
     def get_parameters(self) -> Dict[str, Any]:
         """프롬프트 엔지니어링 모듈의 현재 파라미터를 수집하여 반환합니다."""
+        if not all([self.pre_textedit, self.post_textedit, self.auto_hide_textedit]):
+            settings = self.collect_current_settings()
+            return {
+                "pre_prompt": split_tags_smart(settings.get("pre_prompt", "")),
+                "post_prompt": split_tags_smart(settings.get("post_prompt", "")),
+                "auto_hide": split_tags_smart(settings.get("auto_hide_prompt", "")),
+                "preprocessing_options": dict(settings.get("preprocessing_options", {}) or {}),
+            }
+
         # 각 체크박스의 상태를 수집
         options = {}
         for text, checkbox in self.preprocessing_checkboxes.items():
@@ -2117,11 +2164,12 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             print(f"📂 기본 프리셋 로드: default")
 
         # 프리셋 로드 및 적용
-        if preset_to_load and self.preset_combo:
+        if preset_to_load:
             # 신호를 차단하고 프리셋 설정
-            self.preset_combo.blockSignals(True)
-            self.preset_combo.setCurrentText(preset_to_load)
-            self.preset_combo.blockSignals(False)
+            if self.preset_combo:
+                self.preset_combo.blockSignals(True)
+                self.preset_combo.setCurrentText(preset_to_load)
+                self.preset_combo.blockSignals(False)
 
             # 프리셋 로드
             self.load_preset(preset_to_load)
@@ -2156,9 +2204,6 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
     def load_preset_list(self):
         """프리셋 목록을 로드하고 콤보박스에 설정"""
-        if not self.preset_combo:
-            return
-
         preset_dir = self.get_preset_dir()
 
         # JSON 파일 목록 가져오기
@@ -2174,6 +2219,9 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
         self.preset_list = preset_names
         self._load_randomized_preset_list()
         self._prune_randomized_preset_list(persist=True)
+
+        if not self.preset_combo:
+            return
 
         # 콤보박스 업데이트
         current_text = self.preset_combo.currentText()
@@ -3696,17 +3744,18 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
             if "module_settings" in preset_data:
                 module_settings = preset_data["module_settings"]
 
-                # UI 위젯 확인
-                if not all([self.pre_textedit, self.post_textedit]):
-                    print("⚠️ UI 위젯이 준비되지 않음")
-                    return
-
                 # pre_prompt, post_prompt만 적용 (auto_hide, preprocessing_options 무시)
                 pre_prompt = module_settings.get("pre_prompt", "")
                 post_prompt = module_settings.get("post_prompt", "")
 
-                self.pre_textedit.setText(pre_prompt)
-                self.post_textedit.setText(post_prompt)
+                if all([self.pre_textedit, self.post_textedit]):
+                    self.pre_textedit.setText(pre_prompt)
+                    self.post_textedit.setText(post_prompt)
+                else:
+                    settings = self.collect_current_settings()
+                    settings["pre_prompt"] = pre_prompt
+                    settings["post_prompt"] = post_prompt
+                    self.apply_settings(settings)
 
                 print(f"🎲 랜덤 프리셋 모듈 설정 적용: {preset_name} (pre: {len(pre_prompt)}자, post: {len(post_prompt)}자)")
 

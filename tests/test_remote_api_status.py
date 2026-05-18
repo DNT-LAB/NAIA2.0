@@ -920,6 +920,43 @@ def test_prompt_engineering_state_exposes_randomized_manage_pool():
     assert state["preset_can_delete"] is False
 
 
+def test_prompt_engineering_state_uses_headless_settings_without_widget(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "save" / "presets" / "NAI").mkdir(parents=True)
+    (tmp_path / "save" / "presets" / "NAI" / "default.json").write_text(
+        json.dumps({"api_mode": "NAI", "module_settings": {"pre_prompt": "default pre"}}),
+        encoding="utf-8",
+    )
+
+    ctx = _AppContext()
+    module = RealPromptEngineeringModule()
+    module.app_context = ctx
+    module.apply_settings({
+        "pre_prompt": "headless pre",
+        "post_prompt": "headless post",
+        "auto_hide_prompt": "hide tag",
+        "preprocessing_options": {"remove_author": True},
+    })
+    ctx.middle_section_controller = SimpleNamespace(module_instances=[module])
+    bridge = RemoteBridge(ctx)
+    bridge._broadcast_prompt_engineering_state = lambda: None
+
+    state = bridge._read_prompt_engineering()
+
+    assert state["pre_prompt"] == "headless pre"
+    assert state["post_prompt"] == "headless post"
+    assert state["auto_hide"] == "hide tag"
+    assert state["preprocessing"]["remove_author"] is True
+    assert "default" in state["preset_options"]
+
+    bridge._set_prompt_engineering("pre_prompt", "updated pre")
+    bridge._set_prompt_engineering("pp_remove_author", "false")
+    settings = module.collect_current_settings()
+
+    assert settings["pre_prompt"] == "updated pre"
+    assert settings["preprocessing_options"]["remove_author"] is False
+
+
 def test_prompt_engineering_state_exposes_webui_presets_separately(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     webui_dir = tmp_path / "save" / "presets" / "WEBUI"

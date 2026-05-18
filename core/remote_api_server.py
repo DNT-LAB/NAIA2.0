@@ -4380,13 +4380,11 @@ class RemoteBridge(QObject):
                 "preprocessing_options": {},
             }
 
-        pre_prompt = module.pre_textedit.toPlainText() if module.pre_textedit else ""
-        post_prompt = module.post_textedit.toPlainText() if module.post_textedit else ""
-        auto_hide = module.auto_hide_textedit.toPlainText() if module.auto_hide_textedit else ""
-        preprocessing = {}
-        for label, checkbox in module.preprocessing_checkboxes.items():
-            key = module.option_key_map.get(label, label)
-            preprocessing[key] = checkbox.isChecked()
+        module_settings = module.collect_current_settings() if hasattr(module, "collect_current_settings") else {}
+        pre_prompt = module_settings.get("pre_prompt", "")
+        post_prompt = module_settings.get("post_prompt", "")
+        auto_hide = module_settings.get("auto_hide_prompt", "")
+        preprocessing = dict(module_settings.get("preprocessing_options") or {})
 
         pre_prompt = str(pre_prompt or "").strip()
         return {
@@ -8666,12 +8664,15 @@ class RemoteBridge(QObject):
             except Exception as e:
                 print(f"⚠️ Remote: preset_combo 동기화 실패 — {e}")
 
-            preprocessing = {}
-            for label, cb in m.preprocessing_checkboxes.items():
-                key = m.option_key_map.get(label, label)
-                preprocessing[key] = cb.isChecked()
-            presets = [m.preset_combo.itemText(i) for i in range(m.preset_combo.count())]
-            current_preset = m.preset_combo.currentText()
+            module_settings = m.collect_current_settings() if hasattr(m, "collect_current_settings") else {}
+            preprocessing = dict(module_settings.get("preprocessing_options") or {})
+            preset_combo = getattr(m, "preset_combo", None)
+            if preset_combo:
+                presets = [preset_combo.itemText(i) for i in range(preset_combo.count())]
+                current_preset = preset_combo.currentText()
+            else:
+                presets = ["*randomized", *list(getattr(m, "preset_list", []) or [])]
+                current_preset = getattr(m, "current_preset", "")
             randomized_pool = list(getattr(m, "randomized_preset_list", []) or [])
             if hasattr(m, "get_randomized_available_presets"):
                 randomized_available = list(m.get_randomized_available_presets())
@@ -8700,9 +8701,9 @@ class RemoteBridge(QObject):
                 "randomized_active": current_preset == "*randomized",
                 "randomized_preset_list": randomized_pool,
                 "randomized_available_presets": randomized_available,
-                "pre_prompt": m.pre_textedit.toPlainText(),
-                "post_prompt": m.post_textedit.toPlainText(),
-                "auto_hide": m.auto_hide_textedit.toPlainText(),
+                "pre_prompt": module_settings.get("pre_prompt", ""),
+                "post_prompt": module_settings.get("post_prompt", ""),
+                "auto_hide": module_settings.get("auto_hide_prompt", ""),
                 "preprocessing": preprocessing,
                 "e621_settings": dict(getattr(m, "_e621_settings", {}) or {}),
                 "danbooru_settings": dict(getattr(m, "_danbooru_weight_settings", {}) or {}),
@@ -10487,16 +10488,33 @@ class RemoteBridge(QObject):
             m = self._find_module("prompt_engineering")
             if not m:
                 return
+            def update_settings(**updates):
+                settings = m.collect_current_settings() if hasattr(m, "collect_current_settings") else {}
+                settings.update(updates)
+                if hasattr(m, "apply_settings"):
+                    m.apply_settings(settings)
+
             if key == "pre_prompt":
-                m.pre_textedit.setPlainText(value)
+                if getattr(m, "pre_textedit", None):
+                    m.pre_textedit.setPlainText(value)
+                update_settings(pre_prompt=value)
             elif key == "post_prompt":
-                m.post_textedit.setPlainText(value)
+                if getattr(m, "post_textedit", None):
+                    m.post_textedit.setPlainText(value)
+                update_settings(post_prompt=value)
             elif key == "auto_hide":
-                m.auto_hide_textedit.setPlainText(value)
+                if getattr(m, "auto_hide_textedit", None):
+                    m.auto_hide_textedit.setPlainText(value)
+                update_settings(auto_hide_prompt=value)
             elif key == "preset":
-                idx = m.preset_combo.findText(value)
-                if idx >= 0:
-                    m.preset_combo.setCurrentIndex(idx)
+                preset_combo = getattr(m, "preset_combo", None)
+                if preset_combo:
+                    idx = preset_combo.findText(value)
+                    if idx >= 0:
+                        preset_combo.setCurrentIndex(idx)
+                        self._broadcast_prompt_engineering_state()
+                elif value in ("*randomized", *list(getattr(m, "preset_list", []) or [])):
+                    m.on_preset_changed(value)
                     self._broadcast_prompt_engineering_state()
             elif key == "preset_save_current":
                 current_preset = m.preset_combo.currentText() if m.preset_combo else getattr(m, "current_preset", "")
@@ -10597,7 +10615,11 @@ class RemoteBridge(QObject):
                         cb = m.preprocessing_checkboxes.get(label)
                         if cb:
                             cb.setChecked(value == "true")
-                            self._broadcast_prompt_engineering_state()
+                        settings = m.collect_current_settings() if hasattr(m, "collect_current_settings") else {}
+                        preprocessing = dict(settings.get("preprocessing_options") or {})
+                        preprocessing[pp_key] = value == "true"
+                        update_settings(preprocessing_options=preprocessing)
+                        self._broadcast_prompt_engineering_state()
                         break
         except Exception as e:
             print(f"🌐 Remote: 모듈 설정 실패 — {key}={value}: {e}")

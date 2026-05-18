@@ -237,3 +237,13 @@
 - `RemoteBridge._read_conditional_prompt()`와 `_set_conditional_prompt()`는 widget-backed state가 없을 때 `collect_current_settings()`/`apply_settings()`를 사용해 Remote Web panel state와 edits를 유지한다.
 - 이 라운드는 full lazy 전환이 아니다. full lazy는 saved conditional rules가 generation에서 사라지지 않도록 별도 headless conditional hook/service가 먼저 필요하다.
 - 남은 큰 PyQt blocker는 `PromptEngineeringModule`이다. initial Remote Web state, `*randomized` random-prompt side effect, post/after-wildcard hooks를 PyQt-free service로 분리한 뒤에만 lazy 전환이 안전하다.
+
+### Round 22 Prompt Engineering headless widget skip
+
+- `PromptEngineeringModule`은 Remote Web initial state, `*randomized` random-prompt side effect, PromptProcessor `post_processing` hook, `after_wildcard` hooks를 모두 소유하므로 단순 lazy 처리하면 WebSession generation 결과가 바뀔 수 있었다.
+- hidden WebSession에서는 module import/instance와 hook registration은 유지하되, PyQt widget tree 생성만 `web_session_headless_widget`으로 생략한다.
+- `PromptEngineeringModule`은 `_headless_settings`를 통해 `pre_prompt`, `post_prompt`, `auto_hide_prompt`, `preprocessing_options`, e621/Danbooru settings를 widget 없이 보존한다.
+- `register_headless_hooks()`를 추가해 Closed Eyes Sync, e621 Auto-Boost, Danbooru Auto-Weight, Outfit Context Resolver `after_wildcard` hooks를 desktop widget creation과 hidden WebSession이 공유한다.
+- `RemoteBridge._read_prompt_engineering()`과 `_set_prompt_engineering()`은 textedit/checkbox 직접 접근 대신 `collect_current_settings()`/`apply_settings()` 기반으로 동작한다. 따라서 Remote Web Prompt Engineering panel은 PyQt widget 없이도 서버 state를 읽고 수정할 수 있다.
+- `load_preset_list()`와 `load_preset_random()`은 combo/textedit widget이 없는 headless path에서도 preset list와 `*randomized` pre/post prompt application을 유지한다.
+- 이 라운드는 full lazy 전환이 아니다. 다음 단계는 Prompt Engineering preset/headless hook owner를 `core` service로 분리해 hidden WebSession startup에서 `modules.prompt_engineering_module` import 자체를 지연하는 것이다.

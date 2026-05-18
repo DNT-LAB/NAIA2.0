@@ -19,7 +19,7 @@ MIDDLE_MODULE_SPECS = (
     {"file": "e621_event_module", "class": "E621EventModuleV2", "web_session_lazy": True},
     {"file": "instant_wildcard_module", "class": "InstantWildcardModule", "web_session_lazy": True},
     {"file": "ollama_module", "class": "OllamaModule", "web_session_lazy": True},
-    {"file": "prompt_engineering_module", "class": "PromptEngineeringModule"},
+    {"file": "prompt_engineering_module", "class": "PromptEngineeringModule", "web_session_headless_widget": True},
     {
         "file": "reference_inset_module",
         "class": "ReferenceInsetAutoInjectModule",
@@ -282,6 +282,8 @@ class MiddleSectionController:
                     print(f"⚠️ 모듈 초기화 오류 ({module_instance.__class__.__name__}): {e}")
 
                 if self._should_skip_widget_for_module(module_instance):
+                    if hasattr(module_instance, "register_headless_hooks"):
+                        module_instance.register_headless_hooks()
                     self._register_module_pipeline_hook(module_instance)
                     print(f"⏭️ Web Session middle 모듈 UI 생성 생략: {module_instance.__class__.__name__}")
                     continue

@@ -1472,9 +1472,28 @@ def test_remote_auto_generate_owner_tracks_remote_toggle_and_desktop_off(tmp_pat
     assert bridge.is_remote_auto_generate_enabled() is True
 
     auto_generate.setChecked(False)
-    bridge.broadcast_options()
+    bridge._on_option_toggled_slot(False)
 
     assert bridge.is_remote_auto_generate_enabled() is False
+
+
+def test_remote_options_use_server_state_between_desktop_events(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt_fixed = _ToggleButton(True)
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={"프롬프트 고정": prompt_fixed}
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._update_cache_all()
+
+    prompt_fixed.setChecked(False)
+
+    assert bridge.get_options()["prompt_fixed"] is True
+
+    bridge._on_option_toggled_slot(False)
+
+    assert bridge.get_options()["prompt_fixed"] is False
 
 
 def test_remote_web_anima_weight_param_is_saved_for_next_session(tmp_path, monkeypatch):
@@ -1610,6 +1629,33 @@ def test_remote_web_resolution_param_clears_detected_auto_resolution(tmp_path, m
     bridge._do_set_param("auto_fit_resolution", "false")
 
     assert len(cleared) == 2
+
+
+def test_remote_param_broadcast_preserves_false_bool_type(tmp_path, monkeypatch):
+    class _WebuiContext(_AppContext):
+        def get_api_mode(self):
+            return "WEBUI"
+
+    monkeypatch.chdir(tmp_path)
+    cleared = []
+    ctx = _WebuiContext()
+    ctx.main_window = SimpleNamespace(
+        resolution_combo=_FakeComboBox(["1024 x 1024"], "1024 x 1024"),
+        auto_fit_resolution_checkbox=_FakeCheckBox(True),
+        clear_detected_resolution_override=lambda: cleared.append(True),
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._cached_params = {"type": "params", "api_mode": "WEBUI", "schema_only": True}
+    bridge._has_clients = lambda: True
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._do_set_param("auto_fit_resolution", "false")
+
+    assert ctx.main_window.auto_fit_resolution_checkbox.isChecked() is False
+    assert broadcasts[-1]["type"] == "params"
+    assert broadcasts[-1]["schema_only"] is False
+    assert broadcasts[-1]["auto_fit_resolution"] is False
 
 
 def test_generation_param_schema_strips_desktop_selected_values():

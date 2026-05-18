@@ -81,3 +81,11 @@
 3. `PromptGenerationController.generate_next_prompt()`에서 순수 prompt service를 분리해 Remote Web이 `ModernMainWindow` mutation 없이 prompt를 만들 수 있게 한다.
 4. `GenerationController.execute_generation_pipeline()`의 early return을 `started/queued/rejected` 결과나 `generation_error` publish로 명시해 웹 status가 잘못 `true`로 남지 않게 한다.
 5. 중간 모듈은 hook 등록과 widget creation을 나눠 숨김 WebSession에서는 hook-capable logic만 먼저 로드한다.
+
+### Round 03 상태 축소 결정
+
+- `get_generation_params()`는 여전히 데스크톱 full snapshot reader로 유지한다. 이 함수는 mode 변경과 preset load에서 desktop-authoritative reset payload를 만드는 계약에 쓰인다.
+- `get_options()`는 server-owned `_remote_option_state`를 반환하도록 변경한다. 실제 Qt checkbox 읽기는 `_read_desktop_options()`로 분리하고, desktop-origin toggle slot에서만 state로 adopt한다.
+- Web-origin `set_param`은 `_remote_param_values`를 먼저 갱신하고 타입을 보존한 full params payload를 broadcast한다. 특히 bool 값은 `"false"` 문자열이 아니라 `False`로 유지한다.
+- `_cached_params`는 schema-only cache로 유지해 WebSocket init의 선택지/schema 경로와 full selected-state 경로를 분리한다.
+- 이 라운드는 `RemoteBridge(QObject)` 자체를 제거하지 않고, FastAPI/WS thread가 반복적으로 Qt widget을 읽는 표면을 줄이는 중간 단계다.

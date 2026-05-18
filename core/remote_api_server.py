@@ -539,6 +539,22 @@ class RemoteBridge(QObject):
         "auto_generate": "자동 생성",
         "wildcard_standalone": "와일드카드 단독 모드",
     }
+    PARAM_BOOL_KEYS = frozenset({
+        "seed_fixed", "random_resolution", "auto_fit_resolution",
+        "SMEA", "DYN", "VAR+", "DECRISP", "enable_hr",
+        "resolution_preset_enabled",
+    })
+    PARAM_INT_KEYS = frozenset({"steps", "hires_steps"})
+    PARAM_FLOAT_KEYS = frozenset({
+        "cfg_scale", "cfg_rescale", "hr_scale", "denoising_strength",
+        "hr_cfg", "rescale_cfg",
+    })
+    PARAM_TEXT_KEYS = frozenset({
+        "model", "sampler", "scheduler", "resolution", "seed",
+        "hr_upscaler", "sampling_mode", "anima_weight", "anima_weight_raw",
+        "random_prompt_weight", "hires_preset_swap", "resolution_preset",
+    })
+    PARAM_VALUE_KEYS = PARAM_BOOL_KEYS | PARAM_INT_KEYS | PARAM_FLOAT_KEYS | PARAM_TEXT_KEYS
     MEMORY_HISTORY_PATH_PREFIX = "__history__/"
     HISTORY_ITEM_PATH_PREFIX = "__history_item__/"
     STYLE_THUMBNAILS_PATH = Path("data/taglist/style_thumbnails.json")
@@ -589,6 +605,8 @@ class RemoteBridge(QObject):
         self._cached_options: dict = {}
         self._cached_result_enhance_config: dict = {}
         self._remote_web_ui_state: dict = self._load_remote_web_ui_state()
+        self._remote_option_state: dict = {}
+        self._remote_param_values: dict = {}
         self._webui_hiresfix_assist: dict = dict(self._remote_web_ui_state["webui_hiresfix_assist"])
         self._remote_auto_generate_enabled = False
         # api_status 는 per-ws 평가(setup_allowed 가 IP별로 다름)라 캐시하지 않음.
@@ -1634,6 +1652,8 @@ class RemoteBridge(QObject):
         로 직접 생성한다.
         """
         self._cached_prompts = {}
+        self._ensure_remote_option_state()
+        self._seed_remote_param_state_from_desktop()
         self._cached_options = {}
         self._cached_params = self.get_generation_param_schema()
         self._cached_result_enhance_config = {}
@@ -1651,6 +1671,7 @@ class RemoteBridge(QObject):
         """Desktop checkbox changes update the shared Web Shell option state."""
         if self._syncing_option:
             return
+        self._adopt_desktop_options()
         self.broadcast_options()
 
     def _on_param_changed_slot(self, *args):
@@ -6300,8 +6321,10 @@ class RemoteBridge(QObject):
         """웹에서 토글한 옵션을 메인 앱 체크박스에 반영"""
         try:
             checked = self._coerce_bool(checked)
+            state = self._ensure_remote_option_state()
             # auto_save: image_window 체크박스 (OPTION_KEYS 외)
             if key == "auto_save":
+                state[key] = checked
                 auto_save_checkbox = self._get_auto_save_checkbox()
                 if auto_save_checkbox and auto_save_checkbox.isChecked() != checked:
                     self._syncing_option = True
@@ -6317,6 +6340,7 @@ class RemoteBridge(QObject):
             label = self.OPTION_KEYS.get(key)
             if not label:
                 return
+            state[key] = checked
             if key == "auto_generate":
                 self._remote_auto_generate_enabled = checked
             mw = self.app_context.main_window
@@ -6331,10 +6355,9 @@ class RemoteBridge(QObject):
                     print(f"🌐 Remote: {label} → {checked}")
                 self._sync_detached_option_widget(key, checked)
                 self._refresh_generation_option_ui(key, cb)
-            if cb:
-                # setChecked() emits toggled synchronously while _syncing_option is True;
-                # broadcast the shared server state after the Qt widget has settled.
-                self.broadcast_options()
+            # setChecked() emits toggled synchronously while _syncing_option is True;
+            # broadcast the shared server state after the Qt widget has settled.
+            self.broadcast_options()
         except Exception as e:
             self._syncing_option = False
             print(f"🌐 Remote: 옵션 설정 실패 — {e}")
@@ -6663,8 +6686,8 @@ class RemoteBridge(QObject):
             reason = str(data.get("reason") or reason)
         self._queue_desktop_control_snapshot_broadcast(reason)
 
-    def get_options(self) -> dict:
-        """현재 옵션 상태 반환"""
+    def _read_desktop_options(self) -> dict:
+        """Qt widgets에서 현재 option snapshot을 읽는다. Qt thread에서만 호출한다."""
         try:
             mw = self.app_context.main_window
             opts = {
@@ -6678,6 +6701,31 @@ class RemoteBridge(QObject):
             return opts
         except Exception:
             return {}
+
+    def _ensure_remote_option_state(self) -> dict:
+        state = getattr(self, "_remote_option_state", None)
+        if not isinstance(state, dict):
+            state = {}
+
+        if not state:
+            state.update(self._read_desktop_options())
+
+        for key in (*self.OPTION_KEYS.keys(), "auto_save"):
+            state.setdefault(key, False)
+
+        self._remote_option_state = state
+        return state
+
+    def _adopt_desktop_options(self) -> dict:
+        state = self._ensure_remote_option_state()
+        desktop_options = self._read_desktop_options()
+        if desktop_options:
+            state.update(desktop_options)
+        return state
+
+    def get_options(self) -> dict:
+        """현재 WebSession option 상태 반환."""
+        return dict(self._ensure_remote_option_state())
 
     def broadcast_options(self):
         """Broadcast the shared generation-option state to all Web Shell sessions."""
@@ -6795,6 +6843,7 @@ class RemoteBridge(QObject):
         try:
             params = self.get_generation_params()
             if params:
+                self._adopt_desktop_generation_params(params)
                 params_payload = dict(params)
                 params_payload["desktop_sync"] = True
                 params_payload["sync_reason"] = reason
@@ -7590,6 +7639,70 @@ class RemoteBridge(QObject):
         schema["schema_only"] = True
         return schema
 
+    def _coerce_remote_param_value(self, key: str, value):
+        if key in self.PARAM_BOOL_KEYS:
+            return self._coerce_bool(value)
+        if key in self.PARAM_INT_KEYS:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+        if key in self.PARAM_FLOAT_KEYS:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+        if key in {"anima_weight", "anima_weight_raw", "random_prompt_weight"}:
+            return self._format_anima_weight(value)
+        return "" if value is None else str(value)
+
+    def _remember_remote_param_value(self, key: str, value):
+        if key not in self.PARAM_VALUE_KEYS:
+            return value
+        normalized = self._coerce_remote_param_value(key, value)
+        state = getattr(self, "_remote_param_values", None)
+        if not isinstance(state, dict):
+            state = {}
+        state[key] = normalized
+        self._remote_param_values = state
+        return normalized
+
+    def _selected_generation_param_values(self, params: dict) -> dict:
+        if not isinstance(params, dict):
+            return {}
+        return {
+            key: self._coerce_remote_param_value(key, params[key])
+            for key in self.PARAM_VALUE_KEYS
+            if key in params
+        }
+
+    def _adopt_desktop_generation_params(self, params: dict):
+        values = self._selected_generation_param_values(params)
+        if values:
+            self._remote_param_values = values
+
+    def _seed_remote_param_state_from_desktop(self):
+        state = getattr(self, "_remote_param_values", None)
+        if isinstance(state, dict) and state:
+            return
+        self._adopt_desktop_generation_params(self.get_generation_params())
+
+    def _remote_param_payload(self) -> dict:
+        schema = dict(getattr(self, "_cached_params", {}) or {})
+        if not schema or schema.get("type") != "params":
+            schema = self.get_generation_param_schema()
+        payload = dict(schema or {})
+        payload.update(getattr(self, "_remote_param_values", {}) or {})
+        payload["type"] = "params"
+        payload["schema_only"] = False
+        return payload
+
+    def _broadcast_remote_params(self):
+        payload = self._remote_param_payload()
+        if self._has_clients():
+            self._broadcast_json(payload)
+        return payload
+
     def get_generation_param_schema(self) -> dict:
         """Return selectable parameter metadata without desktop-selected values."""
         schema = self._strip_generation_param_values(self.get_generation_params())
@@ -7671,12 +7784,17 @@ class RemoteBridge(QObject):
         """웹에서 변경한 생성 파라미터를 메인 앱 위젯에 반영"""
         try:
             self._syncing_param = True
+            self._remember_remote_param_value(key, value)
             if key == "hires_preset_swap":
                 self._save_remote_web_ui_state(hires_preset_swap=value)
+                self._remote_param_values.update(self.get_webui_hires_preset_swap_params())
+                self._broadcast_remote_params()
                 self._syncing_param = False
                 return
             if key in {"resolution_preset_enabled", "resolution_preset"}:
                 self._save_resolution_preset_param(key, value)
+                self._remote_param_values.update(self._resolution_preset_defaults_for_mode())
+                self._broadcast_remote_params()
                 self._syncing_param = False
                 return
             mw = self.app_context.main_window
@@ -7747,6 +7865,10 @@ class RemoteBridge(QObject):
                 if hasattr(mw, 'anima_weight_edit'):
                     mw.anima_weight_edit.setText(normalized_weight)
                 self._save_remote_web_ui_state(random_prompt_weight=normalized_weight)
+                self._remote_param_values["anima_weight"] = normalized_weight
+                self._remote_param_values["anima_weight_raw"] = normalized_weight
+                self._remote_param_values["random_prompt_weight"] = normalized_weight
+            self._broadcast_remote_params()
             self._syncing_param = False
         except Exception as e:
             self._syncing_param = False

@@ -607,6 +607,7 @@ class RemoteBridge(QObject):
         self._remote_web_ui_state: dict = self._load_remote_web_ui_state()
         self._remote_option_state: dict = {}
         self._remote_param_values: dict = {}
+        self._remote_is_generating = False
         self._webui_hiresfix_assist: dict = dict(self._remote_web_ui_state["webui_hiresfix_assist"])
         self._remote_auto_generate_enabled = False
         # api_status 는 per-ws 평가(setup_allowed 가 IP별로 다름)라 캐시하지 않음.
@@ -1734,13 +1735,13 @@ class RemoteBridge(QObject):
                 gc._enqueue_current_request(session_overrides, priority=0)
                 if not gc.is_generating and not queue_manager.is_paused():
                     QTimer.singleShot(0, gc._process_next_queue_request)
-                self._send_json_to(ws, {"type": "status", "is_generating": bool(gc.is_generating), "message": "queued"})
+                self._send_generation_status(bool(gc.is_generating), "queued", ws=ws)
                 self._broadcast_queue_state()
                 print("🌐 Remote: 생성 요청을 큐에 추가")
                 return
 
             gc.execute_generation_pipeline(overrides=session_overrides, priority=0)
-            self._broadcast_json({"type": "status", "is_generating": True})
+            self._send_generation_status(True)
             self._broadcast_queue_state()
             print("🌐 Remote: 생성 트리거됨")
         except Exception as e:
@@ -4302,12 +4303,12 @@ class RemoteBridge(QObject):
                     gc._enqueue_current_request(overrides, priority=0)
                     if not gc.is_generating and not queue_manager.is_paused():
                         QTimer.singleShot(0, gc._process_next_queue_request)
-                    self._broadcast_json({"type": "status", "is_generating": bool(gc.is_generating), "message": "queued"})
+                    self._send_generation_status(bool(gc.is_generating), "queued")
                     self._broadcast_queue_state()
                     return
 
                 gc.execute_generation_pipeline(overrides=overrides, priority=0)
-                self._broadcast_json({"type": "status", "is_generating": True})
+                self._send_generation_status(True)
                 self._broadcast_queue_state()
             finally:
                 if (
@@ -4655,12 +4656,12 @@ class RemoteBridge(QObject):
                     gc._enqueue_current_request(overrides, priority=0)
                     if not gc.is_generating and not queue_manager.is_paused():
                         QTimer.singleShot(0, gc._process_next_queue_request)
-                    self._broadcast_json({"type": "status", "is_generating": bool(gc.is_generating), "message": "queued"})
+                    self._send_generation_status(bool(gc.is_generating), "queued")
                     self._broadcast_queue_state()
                     return
 
                 gc.execute_generation_pipeline(overrides=overrides, priority=0)
-                self._broadcast_json({"type": "status", "is_generating": True})
+                self._send_generation_status(True)
                 self._broadcast_queue_state()
             finally:
                 if (
@@ -8057,10 +8058,25 @@ class RemoteBridge(QObject):
 
     # --- 생성 상태 동기화 (메인 UI 포함) ---
 
+    def _generation_status_payload(self, is_generating: bool, message: str | None = None) -> dict:
+        self._remote_is_generating = bool(is_generating)
+        payload = {"type": "status", "is_generating": self._remote_is_generating}
+        if message:
+            payload["message"] = str(message)
+        return payload
+
+    def _send_generation_status(self, is_generating: bool, message: str | None = None, ws=None) -> dict:
+        payload = self._generation_status_payload(is_generating, message)
+        if ws is not None:
+            self._send_json_to(ws, payload)
+        else:
+            self._broadcast_json(payload)
+        return payload
+
     def _on_generation_started_signal(self, data=None):
         """generation_started 이벤트 → 웹에 상태 전송"""
         if self._has_clients():
-            self._broadcast_json({"type": "status", "is_generating": True})
+            self._send_generation_status(True)
             self._broadcast_queue_state()
 
     def on_generation_error(self, data=None):
@@ -8095,7 +8111,7 @@ class RemoteBridge(QObject):
                 "message": str(payload.get("message") or "Generation failed"),
                 "level": "error",
             })
-        self._broadcast_json({"type": "status", "is_generating": False})
+        self._send_generation_status(False)
 
     # --- 모듈 상태 (Qt 메인 스레드에서 실행) ---
 
@@ -15121,7 +15137,7 @@ class RemoteBridge(QObject):
                             gc_cf.execute_generation_pipeline(
                                 overrides=cf_pending.get("params"), priority=0,
                             )
-                            self._broadcast_json({"type": "status", "is_generating": True})
+                            self._send_generation_status(True)
                     except Exception as e:
                         print(f"🌐 ComfyUI: NAIA generate 실패 — {e}")
 
@@ -15270,7 +15286,7 @@ class RemoteBridge(QObject):
                 gc = self.app_context.main_window.generation_controller
                 if not gc.is_generating:
                     gc.execute_generation_pipeline(overrides=pending_params, priority=0)
-                    self._broadcast_json({"type": "status", "is_generating": True})
+                    self._send_generation_status(True)
                     print("🌐 Remote: 자동생성 트리거됨")
                 elif source == "event_preset" and event_preset_request_id:
                     self._broadcast_json({
@@ -15497,7 +15513,7 @@ class RemoteBridge(QObject):
 
             # 3. broadcast 우선 — 메인 스레드/클라이언트가 이미지를 빨리 받도록
             if self._has_clients():
-                self._broadcast_json({"type": "status", "is_generating": False})
+                self._send_generation_status(False)
                 if self._loop and self._ws_manager:
                     asyncio.run_coroutine_threadsafe(
                         self._ws_manager.broadcast_image(webp_bytes, metadata),

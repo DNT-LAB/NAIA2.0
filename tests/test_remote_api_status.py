@@ -358,6 +358,19 @@ def test_generation_error_clears_remote_generation_status():
     ]
 
 
+def test_generation_status_payload_tracks_server_state():
+    bridge = RemoteBridge(_AppContext())
+    broadcasts = []
+    bridge._has_clients = lambda: True
+    bridge._broadcast_json = broadcasts.append
+
+    payload = bridge._send_generation_status(True, "queued")
+
+    assert payload == {"type": "status", "is_generating": True, "message": "queued"}
+    assert bridge._remote_is_generating is True
+    assert broadcasts == [payload]
+
+
 def test_event_preset_generation_error_keeps_scoped_error_and_clears_status():
     bridge = RemoteBridge(_AppContext())
     broadcasts = []

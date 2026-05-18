@@ -89,3 +89,9 @@
 - Web-origin `set_param`은 `_remote_param_values`를 먼저 갱신하고 타입을 보존한 full params payload를 broadcast한다. 특히 bool 값은 `"false"` 문자열이 아니라 `False`로 유지한다.
 - `_cached_params`는 schema-only cache로 유지해 WebSocket init의 선택지/schema 경로와 full selected-state 경로를 분리한다.
 - 이 라운드는 `RemoteBridge(QObject)` 자체를 제거하지 않고, FastAPI/WS thread가 반복적으로 Qt widget을 읽는 표면을 줄이는 중간 단계다.
+
+### Round 04 상태 축소 결정
+
+- 생성 status payload는 `_generation_status_payload()`와 `_send_generation_status()`로 중앙화한다.
+- `_remote_is_generating`을 RemoteBridge의 server-owned state로 두고, status 송신 시마다 갱신한다.
+- 큐 실행 조건, 이미지 결과 WebP broadcast, `generation_error` scoped payload는 그대로 유지한다.

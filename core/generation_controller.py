@@ -1171,7 +1171,7 @@ class GenerationController:
         스왑 적용 조건:
             - WEBUI 모드 + enable_hr + img2img 아님 + hires_preset_swap 비어있지 않음
             - current_prompt_context 가 살아있고 wildcard_history 가 캡처되어 있음
-            - 메인 윈도우 prompt_gen_controller 접근 가능
+            - PyQt-free prompt_generation_service 접근 가능
             - 프리셋 파일 존재
         """
         swap_name = str(params.get('hires_preset_swap') or '').strip()
@@ -1190,11 +1190,15 @@ class GenerationController:
             print("⚠️ [HIRES SWAP] current_prompt_context 미존재 — 스왑 스킵")
             return
 
-        main_window = getattr(self.context, 'main_window', None)
-        prompt_gen = getattr(main_window, 'prompt_gen_controller', None) if main_window else None
+        prompt_gen = getattr(self.context, 'prompt_generation_service', None)
         if prompt_gen is None:
-            print("⚠️ [HIRES SWAP] prompt_gen_controller 접근 불가 — 스왑 스킵")
-            return
+            try:
+                from core.prompt_generation_service import PromptGenerationService
+                prompt_gen = PromptGenerationService(self.context)
+                self.context.prompt_generation_service = prompt_gen
+            except Exception as e:
+                print(f"⚠️ [HIRES SWAP] prompt_generation_service 접근 불가 — 스왑 스킵 ({e})")
+                return
 
         api_mode = self.context.get_api_mode() or 'WEBUI'
         preset_path = Path('save') / 'presets' / api_mode / f"{swap_name}.json"

@@ -723,6 +723,14 @@ class RemoteBridge(QObject):
         self._pending_artist_thumb_random_peng_requests: dict = {}
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
 
+    def _get_prompt_generation_service(self):
+        service = getattr(self.app_context, "prompt_generation_service", None)
+        if service is None:
+            from core.prompt_generation_service import PromptGenerationService
+            service = PromptGenerationService(self.app_context)
+            self.app_context.prompt_generation_service = service
+        return service
+
     def _publish_preset_services(self) -> None:
         """Expose already-loaded preset services to prompt-time shortcut expansion."""
         try:
@@ -2656,15 +2664,15 @@ class RemoteBridge(QObject):
         if not isinstance(tags, dict):
             return ""
 
-        main_window = getattr(self.app_context, "main_window", None)
-        controller = getattr(main_window, "prompt_gen_controller", None) if main_window else None
-        if controller and hasattr(controller, "generate_instant_source_silent"):
-            try:
-                prompt = controller.generate_instant_source_silent(tags, self._collect_prompt_reopen_settings())
-                if prompt:
-                    return str(prompt)
-            except Exception as e:
-                print(f"🌐 Remote: Danbooru prompt preview failed — {e}")
+        try:
+            prompt = self._get_prompt_generation_service().generate_instant_source_silent(
+                tags,
+                self._collect_prompt_reopen_settings(),
+            )
+            if prompt:
+                return str(prompt)
+        except Exception as e:
+            print(f"🌐 Remote: Danbooru prompt preview failed — {e}")
 
         general_tags = tags.get("general") if isinstance(tags.get("general"), list) else []
         return ", ".join(map(str, general_tags))
@@ -2674,9 +2682,7 @@ class RemoteBridge(QObject):
         return ", ".join(map(str, general_tags))
 
     def _request_danbooru_prompt_preview(self, tags: dict) -> str:
-        main_window = getattr(self.app_context, "main_window", None)
-        controller = getattr(main_window, "prompt_gen_controller", None) if main_window else None
-        if not controller or not self._danbooru_prompt_preview_bridge_connected:
+        if not self._danbooru_prompt_preview_bridge_connected:
             return self._fallback_danbooru_prompt(tags)
 
         event = threading.Event()
@@ -5373,7 +5379,7 @@ class RemoteBridge(QObject):
         return mode
 
     def _collect_prompt_reopen_settings(self) -> dict:
-        mw = self.app_context.main_window
+        mw = getattr(self.app_context, "main_window", None)
         comfyui_sampling_mode = "eps"
         if hasattr(mw, "anima_radio") and mw.anima_radio.isChecked():
             comfyui_sampling_mode = "anima"
@@ -5382,12 +5388,16 @@ class RemoteBridge(QObject):
         elif hasattr(mw, "eps_radio") and mw.eps_radio.isChecked():
             comfyui_sampling_mode = "eps"
 
+        generation_checkboxes = getattr(mw, "generation_checkboxes", {}) if mw else {}
+        turbo_checkbox = generation_checkboxes.get("터보 옵션") if isinstance(generation_checkboxes, dict) else None
+        auto_fit_checkbox = getattr(mw, "auto_fit_resolution_checkbox", None) if mw else None
+
         return {
             "prompt_fixed": False,
             "auto_generate": False,
-            "turbo_mode": bool(mw.generation_checkboxes.get("터보 옵션") and mw.generation_checkboxes["터보 옵션"].isChecked()),
+            "turbo_mode": bool(turbo_checkbox and turbo_checkbox.isChecked()),
             "wildcard_standalone": False,
-            "auto_fit_resolution": bool(getattr(mw, "auto_fit_resolution_checkbox", None) and mw.auto_fit_resolution_checkbox.isChecked()),
+            "auto_fit_resolution": bool(auto_fit_checkbox and auto_fit_checkbox.isChecked()),
             "api_mode": self.app_context.get_api_mode(),
             "comfyui_sampling_mode": comfyui_sampling_mode,
         }
@@ -5486,7 +5496,7 @@ class RemoteBridge(QObject):
                     self._broadcast_queue_state()
                     return
                 settings = self._collect_prompt_reopen_settings()
-                prompt = self.app_context.main_window.prompt_gen_controller.generate_instant_source_silent(source_row, settings)
+                prompt = self._get_prompt_generation_service().generate_instant_source_silent(source_row, settings)
                 if not prompt:
                     self._broadcast_json({"type": "toast", "message": "P.Eng / WC reopen failed", "level": "error"})
                     self._broadcast_queue_state()

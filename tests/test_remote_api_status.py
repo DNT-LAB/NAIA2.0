@@ -1343,6 +1343,29 @@ def test_web_random_passes_session_overrides_to_prompt_generation():
     assert bridge._pending_overrides[ws]["remote_random_request_id"] == "rid-random-click"
 
 
+def test_danbooru_prompt_preview_uses_core_service_without_prompt_controller():
+    calls = []
+    ctx = _AppContext()
+    ctx.main_window = None
+    ctx.prompt_generation_service = SimpleNamespace(
+        generate_instant_source_silent=lambda tags, settings: calls.append((tags, settings)) or "core prompt"
+    )
+    bridge = RemoteBridge(ctx)
+
+    prompt = bridge._build_danbooru_prompt_preview({"general": ["alpha", "beta"]})
+
+    assert prompt == "core prompt"
+    assert calls == [({"general": ["alpha", "beta"]}, {
+        "prompt_fixed": False,
+        "auto_generate": False,
+        "turbo_mode": False,
+        "wildcard_standalone": False,
+        "auto_fit_resolution": False,
+        "api_mode": "NAI",
+        "comfyui_sampling_mode": "eps",
+    })]
+
+
 def test_remote_web_ui_state_persists_hires_assist_and_random_prompt_weight(tmp_path, monkeypatch):
     class _WebuiContext(_AppContext):
         def get_api_mode(self):

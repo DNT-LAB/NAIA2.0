@@ -95,3 +95,11 @@
 - 생성 status payload는 `_generation_status_payload()`와 `_send_generation_status()`로 중앙화한다.
 - `_remote_is_generating`을 RemoteBridge의 server-owned state로 두고, status 송신 시마다 갱신한다.
 - 큐 실행 조건, 이미지 결과 WebP broadcast, `generation_error` scoped payload는 그대로 유지한다.
+
+### Round 05 prompt core 분리 결정
+
+- `PromptGenerationController(QObject)`는 데스크톱 UI signal wrapper로 남기되, 실제 PromptContext 생성, source row 정규화, silent prompt 생성, next-source 준비는 `core.prompt_generation_service.PromptGenerationService`로 이동한다.
+- `PromptGenerationService`는 PyQt6를 import하지 않고, `PromptProcessor`도 실제 processing 호출 시점에 lazy 생성한다. 따라서 Remote Web 경로가 service 객체를 준비하는 것만으로 `main_window.wildcard_manager`를 즉시 요구하지 않는다.
+- `RemoteBridge`의 Danbooru prompt preview와 result queue reopen prompt는 더 이상 `app_context.main_window.prompt_gen_controller.generate_instant_source_silent()`를 직접 호출하지 않고, `app_context.prompt_generation_service`를 통해 처리한다.
+- WEBUI Hires preset swap도 `main_window.prompt_gen_controller` 직접 접근 대신 `prompt_generation_service`를 사용한다.
+- `_do_random()`은 아직 `ModernMainWindow.trigger_random_prompt()`를 유지한다. 이 호출을 바로 제거하면 snapshot restore, Event Stream prepare, UI 버튼 상태, auto-generation 연결을 동시에 재구현해야 하므로 별도 라운드로 분리한다.

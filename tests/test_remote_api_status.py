@@ -241,6 +241,69 @@ def test_disabling_character_reference_does_not_wake_deferred_module():
     assert controller.requested == []
 
 
+def test_vibe_transfer_state_loads_widget_only_on_explicit_read():
+    class VibeTransferModule:
+        def __init__(self):
+            self.widget = None
+            self.vibe_frames = []
+            self.encoding_worker = None
+            self._encoding_target_frame = None
+            self.normalize_checkbox = _FakeCheckBox(False)
+            self.created = False
+            self.initialized = False
+
+        def create_widget(self, parent):
+            self.created = True
+            return object()
+
+        def on_initialize(self):
+            self.initialized = True
+
+    module = VibeTransferModule()
+
+    class MiddleController:
+        module_instances = []
+
+        def get_module_instance(self, class_name):
+            assert class_name == "VibeTransferModule"
+            return module
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = MiddleController()
+    bridge = RemoteBridge(ctx)
+
+    state = bridge._read_vibe_transfer()
+
+    assert state["module_id"] == "vibe_transfer"
+    assert state["frame_count"] == 0
+    assert state["enabled_count"] == 0
+    assert module.created is True
+    assert module.initialized is True
+
+
+def test_active_vibe_count_does_not_wake_deferred_module():
+    class MiddleController:
+        module_instances = []
+
+        def __init__(self):
+            self.requested = []
+
+        def get_loaded_module_instance(self, class_name):
+            return None
+
+        def get_module_instance(self, class_name):
+            self.requested.append(class_name)
+            raise AssertionError(f"unexpected module load: {class_name}")
+
+    controller = MiddleController()
+    ctx = _AppContext()
+    ctx.middle_section_controller = controller
+    bridge = RemoteBridge(ctx)
+
+    assert bridge._active_vibe_transfer_count_for_generation() == 0
+    assert controller.requested == []
+
+
 def test_instant_wildcard_state_reads_headlessly_without_loading_module(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     save_dir = tmp_path / "save" / "instant_wildcard"

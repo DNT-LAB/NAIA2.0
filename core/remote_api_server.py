@@ -8297,6 +8297,8 @@ class RemoteBridge(QObject):
 
     def _find_loaded_module_instance(self, module_class_name: str):
         msc = getattr(self.app_context, 'middle_section_controller', None)
+        if msc and hasattr(msc, "get_loaded_module_instance"):
+            return msc.get_loaded_module_instance(module_class_name)
         for module in getattr(msc, "module_instances", []) if msc else []:
             if module.__class__.__name__ == module_class_name:
                 return module
@@ -8306,7 +8308,7 @@ class RemoteBridge(QObject):
         if not module:
             return None
         try:
-            if getattr(module, "widget", None) is not None:
+            if getattr(module, "widget", None) is not None or not hasattr(module, "create_widget"):
                 return module
             parent = getattr(self.app_context, "main_window", None)
             widget = module.create_widget(parent)
@@ -8824,7 +8826,7 @@ class RemoteBridge(QObject):
 
     def _active_vibe_transfer_count_for_generation(self) -> int:
         try:
-            module = self._find_module("vibe_transfer")
+            module = self._find_loaded_module_instance("VibeTransferModule")
             if not module:
                 return 0
             frames = getattr(module, "vibe_frames", []) or []
@@ -11224,7 +11226,7 @@ class RemoteBridge(QObject):
 
     def _read_vibe_transfer(self) -> dict:
         try:
-            m = self._find_module("vibe_transfer")
+            m = self._ensure_module_widget(self._find_module("vibe_transfer"))
             if not m:
                 return {}
             frames = []
@@ -11356,7 +11358,7 @@ class RemoteBridge(QObject):
         prev_stealth = getattr(self.app_context, 'stealth_mode', False)
         self.app_context.stealth_mode = True
         try:
-            m = self._find_module("vibe_transfer")
+            m = self._ensure_module_widget(self._find_module("vibe_transfer"))
             if not m:
                 return
 
@@ -17555,7 +17557,6 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             # Send module badge states (automation countdown, character count)
             bridge.request_get_module.emit(None, "automation")
             bridge.request_get_module.emit(None, "character")
-            bridge.request_get_module.emit(None, "vibe_transfer")
 
             # 보류된 초기 메시지를 메인 루프에 재주입
             # (get_search_state 등 초기화 단계에서 소비된 메시지)

@@ -207,3 +207,12 @@
 - `RemoteBridge._read_character_reference()`와 `_set_character_reference()`는 사용자가 Character Reference 패널을 열거나 이미지를 조작할 때만 deferred module을 로드하고 숨김 widget을 준비한다.
 - Character Reference/Vibe Transfer 상호 배타 비활성화는 loaded-only module만 대상으로 바꿔 deferred module을 반대쪽 액션 때문에 깨우지 않는다.
 - 이 라운드는 Character Reference의 PyQt frame implementation을 제거하지 않는다. Remote Web에서 실제 업로드, storage 적용, frame 조정이 필요할 때 기존 wrapper를 on-demand로 사용하는 중간 단계다.
+
+### Round 19 Vibe Transfer loaded-only late binding
+
+- `VibeTransferModule`은 Remote Web 초기 badge 요청뿐 아니라 NAI generation late-binding에서도 `get_module_instance("VibeTransferModule")`로 deferred module을 깨울 수 있었다.
+- `MiddleSectionController.get_loaded_module_instance()`를 추가해 이미 로드된 module만 조회하는 경로를 만들었다.
+- WebSocket 초기 badge refresh에서 `vibe_transfer` 요청을 제거하고, hidden WebSession에서는 `VibeTransferModule`을 lazy 대상으로 표시했다.
+- `RemoteBridge._read_vibe_transfer()`와 `_set_vibe_transfer()`는 explicit panel open/action 시에만 deferred module을 로드하고 숨김 widget을 준비한다.
+- `APIService`의 Vibe late-binding과 Prompt Engineering thumbnail의 active vibe count는 loaded-only 조회로 바뀌어, Vibe 패널을 열지 않은 plain WebSession generation에서는 module import/widget 비용을 내지 않는다.
+- 이 라운드는 Vibe frame/encoding implementation을 core로 대체하지 않는다. 실제 Vibe 사용 시에는 기존 PyQt wrapper를 on-demand로 사용한다.

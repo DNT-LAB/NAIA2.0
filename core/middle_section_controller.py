@@ -26,7 +26,7 @@ MIDDLE_MODULE_SPECS = (
         "web_session_lazy": True,
         "web_session_headless_hook": "reference_inset",
     },
-    {"file": "vibe_transfer_module", "class": "VibeTransferModule"},
+    {"file": "vibe_transfer_module", "class": "VibeTransferModule", "web_session_lazy": True},
     {"file": "wildcard_status_module", "class": "WildcardStatusModule", "web_session_lazy": True},
 )
 
@@ -490,6 +490,13 @@ class MiddleSectionController:
             return deferred
         
         print(f"⚠️ 모듈 인스턴스를 찾을 수 없습니다: {module_class_name}")
+        return None
+
+    def get_loaded_module_instance(self, module_class_name: str) -> Optional[BaseMiddleModule]:
+        """클래스 이름으로 이미 로드된 모듈만 반환합니다."""
+        for instance in self.module_instances:
+            if instance.__class__.__name__ == module_class_name:
+                return instance
         return None
 
     def save_all_module_settings(self):

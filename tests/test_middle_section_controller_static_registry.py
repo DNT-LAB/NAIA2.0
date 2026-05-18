@@ -109,6 +109,7 @@ def test_web_session_lazy_registry_keeps_generation_modules_eager():
     assert specs["InstantWildcardModule"]["web_session_lazy"] is True
     assert specs["AutomationModule"]["web_session_lazy"] is True
     assert specs["CharacterReferenceModule"]["web_session_lazy"] is True
+    assert specs["VibeTransferModule"]["web_session_lazy"] is True
 
 
 def test_web_session_lazy_middle_module_defers_import_until_requested(tmp_path, monkeypatch):

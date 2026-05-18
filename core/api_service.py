@@ -774,7 +774,18 @@ class APIService:
                 if params.get('_skip_vibe_transfer_late_binding'):
                     print("⏭️ [LateBinding] Vibe Transfer skipped")
                 else:
-                    vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
+                    middle_controller = getattr(self.app_context, "middle_section_controller", None)
+                    if hasattr(middle_controller, "get_loaded_module_instance"):
+                        vibe_module = middle_controller.get_loaded_module_instance("VibeTransferModule")
+                    else:
+                        vibe_module = next(
+                            (
+                                module
+                                for module in getattr(middle_controller, "module_instances", []) or []
+                                if module.__class__.__name__ == "VibeTransferModule"
+                            ),
+                            None,
+                        )
                     if vibe_module:
                         vibe_data = vibe_module.get_vibe_transfer_multiple_data()
                         if vibe_data and vibe_data.get('reference_image_multiple'):

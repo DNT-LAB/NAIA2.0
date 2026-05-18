@@ -199,3 +199,11 @@
 - Remote Web의 delay/random/repeat/type/timer/count/notify 변경은 headless state와 JSON 설정에 저장되며, `AutomationModule` import/constructor/widget 생성 없이 broadcast된다.
 - Remote Web `start`/`stop`은 기존 automation controller와 main window callback 계약을 보존하기 위해서만 `AutomationModule`을 on-demand 로드하고 숨김 widget을 만든다.
 - hidden WebSession startup에서는 `AutomationModule` import/constructor/widget 생성을 지연한다. Desktop 런타임은 기존 자동화 UI와 설정 동작을 유지한다.
+
+### Round 18 Character Reference on-demand widget
+
+- `CharacterReferenceModule`은 Remote Web 초기 badge 요청이 `_find_module("character_reference")`를 호출해 hidden WebSession startup에서 module import/widget 생성을 유발하던 image module이었다.
+- WebSocket 초기 badge refresh에서 `character_reference` 요청을 제거하고, hidden WebSession에서는 `CharacterReferenceModule`을 lazy 대상으로 표시했다.
+- `RemoteBridge._read_character_reference()`와 `_set_character_reference()`는 사용자가 Character Reference 패널을 열거나 이미지를 조작할 때만 deferred module을 로드하고 숨김 widget을 준비한다.
+- Character Reference/Vibe Transfer 상호 배타 비활성화는 loaded-only module만 대상으로 바꿔 deferred module을 반대쪽 액션 때문에 깨우지 않는다.
+- 이 라운드는 Character Reference의 PyQt frame implementation을 제거하지 않는다. Remote Web에서 실제 업로드, storage 적용, frame 조정이 필요할 때 기존 wrapper를 on-demand로 사용하는 중간 단계다.

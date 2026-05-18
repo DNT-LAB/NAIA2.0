@@ -180,6 +180,67 @@ def test_automation_setting_updates_headless_state_and_persists_without_loading_
     assert broadcasts[-1]["auto_type"] == 2
 
 
+def test_character_reference_state_loads_widget_only_on_explicit_read():
+    class CharacterReferenceModule:
+        def __init__(self):
+            self.widget = None
+            self.character_frames = []
+            self.created = False
+            self.initialized = False
+
+        def create_widget(self, parent):
+            self.created = True
+            return object()
+
+        def on_initialize(self):
+            self.initialized = True
+
+        def _is_naid45_model(self):
+            return True
+
+    module = CharacterReferenceModule()
+
+    class MiddleController:
+        module_instances = []
+
+        def get_module_instance(self, class_name):
+            assert class_name == "CharacterReferenceModule"
+            return module
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = MiddleController()
+    bridge = RemoteBridge(ctx)
+
+    state = bridge._read_character_reference()
+
+    assert state["module_id"] == "character_reference"
+    assert state["is_naid45"] is True
+    assert state["frames"] == []
+    assert module.created is True
+    assert module.initialized is True
+
+
+def test_disabling_character_reference_does_not_wake_deferred_module():
+    class MiddleController:
+        module_instances = []
+
+        def __init__(self):
+            self.requested = []
+
+        def get_module_instance(self, class_name):
+            self.requested.append(class_name)
+            raise AssertionError(f"unexpected module load: {class_name}")
+
+    controller = MiddleController()
+    ctx = _AppContext()
+    ctx.middle_section_controller = controller
+    bridge = RemoteBridge(ctx)
+
+    bridge._disable_all_char_ref_frames()
+
+    assert controller.requested == []
+
+
 def test_instant_wildcard_state_reads_headlessly_without_loading_module(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     save_dir = tmp_path / "save" / "instant_wildcard"

@@ -8302,6 +8302,23 @@ class RemoteBridge(QObject):
                 return module
         return None
 
+    def _ensure_module_widget(self, module):
+        if not module:
+            return None
+        try:
+            if getattr(module, "widget", None) is not None:
+                return module
+            parent = getattr(self.app_context, "main_window", None)
+            widget = module.create_widget(parent)
+            if getattr(module, "widget", None) is None:
+                module.widget = widget
+            if hasattr(module, "on_initialize"):
+                module.on_initialize()
+        except Exception as e:
+            print(f"🌐 Remote: module widget 준비 실패 ({module.__class__.__name__}): {e}")
+            return None
+        return module
+
     def _get_image_viewer_module(self):
         """RightView 내부의 ImageViewerModule 인스턴스를 반환."""
         try:
@@ -11164,7 +11181,7 @@ class RemoteBridge(QObject):
 
     def _read_character_reference(self) -> dict:
         try:
-            m = self._find_module("character_reference")
+            m = self._ensure_module_widget(self._find_module("character_reference"))
             if not m:
                 return {}
             frames = []
@@ -11279,7 +11296,7 @@ class RemoteBridge(QObject):
         prev_stealth = getattr(self.app_context, 'stealth_mode', False)
         self.app_context.stealth_mode = True
         try:
-            m = self._find_module("character_reference")
+            m = self._ensure_module_widget(self._find_module("character_reference"))
             if not m:
                 return
             if key == "upload_image":
@@ -12405,7 +12422,7 @@ class RemoteBridge(QObject):
     def _disable_all_vibe_frames(self):
         """Vibe Transfer 전체 프레임 비활성 + 상태 브로드캐스트"""
         try:
-            vm = self._find_module("vibe_transfer")
+            vm = self._find_loaded_module_instance("VibeTransferModule")
             if not vm:
                 return
             changed = False
@@ -12423,7 +12440,7 @@ class RemoteBridge(QObject):
     def _disable_all_char_ref_frames(self):
         """Character Reference 전체 프레임 비활성 + 상태 브로드캐스트"""
         try:
-            cm = self._find_module("character_reference")
+            cm = self._find_loaded_module_instance("CharacterReferenceModule")
             if not cm:
                 return
             changed = False
@@ -17538,7 +17555,6 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             # Send module badge states (automation countdown, character count)
             bridge.request_get_module.emit(None, "automation")
             bridge.request_get_module.emit(None, "character")
-            bridge.request_get_module.emit(None, "character_reference")
             bridge.request_get_module.emit(None, "vibe_transfer")
 
             # 보류된 초기 메시지를 메인 루프에 재주입

@@ -140,3 +140,11 @@
 - `ModernMainWindow._on_turbo_mode_selected()`도 숨김 WebSession 런타임에서는 no-op 처리해 직접 호출 경로를 막았다.
 - WebSession 미지원 PyQt 탭 목록은 `not_implement/web_session_unsupported_tabs.md`에 기록했다.
 - 이 라운드는 `tabs/turbo_event_sequence/` 구현 자체를 이동하지 않는다. 해당 구현은 generation path의 `turbo_sequence_request`와 연결되어 있어 desktop 제거는 별도 제품 결정과 더 넓은 회귀 검증이 필요하다.
+
+### Round 11 middle module static registry 전환
+
+- `core.middle_section_controller`가 더 이상 `modules/*_module.py`를 glob discovery로 전부 import하지 않는다.
+- 지원 middle module 목록은 `MIDDLE_MODULE_SPECS`의 `{file, class}` registry로 고정했다.
+- registry에 없는 local/prototype `*_module.py`는 startup-visible하지 않으며, 등록된 파일 안에서도 지정 class만 middle module로 노출된다.
+- 기존 지원 모듈 11개는 모두 registry에 포함되어 Remote Web module-state API와 generation hook 표면을 보존한다.
+- 아직 숨김 WebSession에서도 middle module widget 생성은 남아 있다. 이 부분은 각 모듈의 state/hook headless contract를 분리한 뒤 단계적으로 줄여야 한다.

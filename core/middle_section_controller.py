@@ -1,10 +1,8 @@
 # core/middle_section_controller.py (수정된 버전)
 
 import os
-import glob
 import importlib.util
 import traceback
-from pathlib import Path
 from typing import Optional
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 from ui.collapsible import EnhancedCollapsibleBox  # 수정된 import
@@ -12,6 +10,21 @@ from ui.detached_window import DetachedWindow  # 추가 import
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext 
+
+MIDDLE_MODULE_SPECS = (
+    {"file": "automation_module", "class": "AutomationModule"},
+    {"file": "character_module", "class": "CharacterModule"},
+    {"file": "character_reference_module", "class": "CharacterReferenceModule"},
+    {"file": "conditional_prompt_module", "class": "PromptListModifierModule"},
+    {"file": "e621_event_module", "class": "E621EventModuleV2"},
+    {"file": "instant_wildcard_module", "class": "InstantWildcardModule"},
+    {"file": "ollama_module", "class": "OllamaModule"},
+    {"file": "prompt_engineering_module", "class": "PromptEngineeringModule"},
+    {"file": "reference_inset_module", "class": "ReferenceInsetAutoInjectModule"},
+    {"file": "vibe_transfer_module", "class": "VibeTransferModule"},
+    {"file": "wildcard_status_module", "class": "WildcardStatusModule"},
+)
+
 
 class MiddleSectionController:
     """
@@ -67,48 +80,45 @@ class MiddleSectionController:
                 print(f"  - '{title}' 모듈 가시성 설정: {visibility_status}")
 
     def load_modules(self) -> None:
-        """모듈 디렉토리에서 *_module.py 파일들을 로드"""
+        """명시된 middle module registry에서 지원 모듈만 로드."""
         print(f"🔍 모듈 로드 시작: {self.modules_dir}")
-        
-        pattern = os.path.join(self.modules_dir, "*_module.py")
-        module_files = glob.glob(pattern)
-        
-        if not module_files:
-            print("❌ 모듈 파일이 없습니다.")
-            print("💡 다음 파일들을 modules/ 디렉토리에 복사하세요:")
-            expected_modules = [
-                'automation_module.py',
-                'turbo_module.py', 
-                'character_module.py',
-                'prompt_engineering_module.py'
-            ]
-            for module in expected_modules:
-                print(f"  - {module}")
-            return
-        
-        print(f"📋 발견된 모듈 파일: {[os.path.basename(f) for f in module_files]}")
-        
-        for path in module_files:
-            name = Path(path).stem
+        print(f"📋 지원 middle 모듈 registry: {[spec['file'] for spec in MIDDLE_MODULE_SPECS]}")
+
+        for module_spec in MIDDLE_MODULE_SPECS:
+            name = module_spec["file"]
+            class_name = module_spec["class"]
+            path = os.path.join(self.modules_dir, f"{name}.py")
+            if not os.path.exists(path):
+                print(f"⚠️ 등록된 middle 모듈 파일 없음: {name}.py")
+                continue
             try:
-                spec = importlib.util.spec_from_file_location(name, path)
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
-                    
-                    # 모듈에서 BaseMiddleModule을 상속한 클래스 찾기
-                    for attr in dir(module):
-                        obj = getattr(module, attr)
-                        if (isinstance(obj, type) and 
-                            issubclass(obj, BaseMiddleModule) and 
-                            obj is not BaseMiddleModule):
-                            self.module_classes.append(obj)
-                            print(f"✅ 모듈 로드 성공: {name} -> {obj.__name__}")
+                loaded = self._load_registered_module_class(name, path, class_name)
+                if loaded:
+                    print(f"✅ 모듈 로드 성공: {name} -> {loaded.__name__}")
                             
             except Exception as e:
                 print(f"❌ 모듈 로드 실패 ({name}): {e}")
                 traceback.print_exc()
                 continue
+
+    def _load_registered_module_class(self, name: str, path: str, class_name: str):
+        spec = importlib.util.spec_from_file_location(name, path)
+        if not spec or not spec.loader:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        obj = getattr(module, class_name, None)
+        if not (
+            isinstance(obj, type)
+            and issubclass(obj, BaseMiddleModule)
+            and obj is not BaseMiddleModule
+        ):
+            print(f"❌ 등록된 middle 모듈 클래스 없음: {name}.py::{class_name}")
+            return None
+
+        self.module_classes.append(obj)
+        return obj
 
     def initialize_modules_with_context(self, app_context):
         """모듈 인스턴스들에 컨텍스트를 주입하고 ModeAwareModule들을 등록합니다."""

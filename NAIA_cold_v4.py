@@ -1212,6 +1212,9 @@ class ModernMainWindow(QMainWindow):
         # workflow_manager 는 즉시 필요할 수 있어 동기 유지.
         self.autocomplete_manager = None
         self.workflow_manager = self.app_context.comfyui_workflow_manager
+        self._desktop_post_show_initialized = False
+        self._desktop_post_show_scheduled = False
+        self._desktop_background_timers_scheduled = False
 
         self.main_prompt_textedit.installEventFilter(self)
         self.negative_prompt_textedit.installEventFilter(self)
@@ -1227,11 +1230,30 @@ class ModernMainWindow(QMainWindow):
         # 초기 체크박스 색상 설정 (기본 모델에 따라)
         QTimer.singleShot(300, self.update_naid_checkbox_colors)
 
+        if self._is_hidden_web_session_runtime():
+            print("🌐 Web Session: 데스크톱 전용 후처리 초기화를 표시 시점까지 지연합니다.")
+        else:
+            self._schedule_desktop_background_timers()
+            self._schedule_desktop_post_show_initialization()
+
+    def _is_hidden_web_session_runtime(self) -> bool:
+        return os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1"
+
+    def _schedule_desktop_background_timers(self):
+        if self._desktop_background_timers_scheduled:
+            return
+        self._desktop_background_timers_scheduled = True
+
         # 프로그램 시작 시 업데이트 확인 (UI 초기화 완료 후 충분한 시간 뒤에)
         QTimer.singleShot(2000, self.check_for_updates)  # 2초 후 시작
 
         # 🆕 멀티 NAI 계정 알림 (업데이트 확인 후)
         QTimer.singleShot(3000, self._show_multi_account_notification)  # 3초 후 시작
+
+    def _schedule_desktop_post_show_initialization(self):
+        if self._desktop_post_show_initialized or self._desktop_post_show_scheduled:
+            return
+        self._desktop_post_show_scheduled = True
 
         # show() 이후 deferred 초기화: 마지막 검색 상태 + 자동완성 매니저
         # showEvent → _publish_desktop_window_visibility 가 먼저 발행되도록 0ms 후 처리
@@ -1239,6 +1261,13 @@ class ModernMainWindow(QMainWindow):
 
     def _post_show_initialization(self):
         """show() 직후 처리해야 하는 비핵심 초기화 (UI 즉시 표시를 우선)."""
+        self._desktop_post_show_scheduled = False
+        if self._desktop_post_show_initialized:
+            return
+        if self._is_hidden_web_session_runtime() and not self.isVisible():
+            return
+        self._desktop_post_show_initialized = True
+
         # 마지막 검색 상태 — UI 즉각 영향 없음
         try:
             self.load_last_search_state()
@@ -1255,6 +1284,8 @@ class ModernMainWindow(QMainWindow):
     def showEvent(self, event: QShowEvent):
         super().showEvent(event)
         self._publish_desktop_window_visibility()
+        self._schedule_desktop_background_timers()
+        self._schedule_desktop_post_show_initialization()
 
     def hideEvent(self, event: QHideEvent):
         super().hideEvent(event)

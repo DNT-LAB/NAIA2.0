@@ -148,6 +148,47 @@ def test_wildcard_reset_sequential_is_headless(tmp_path, monkeypatch):
     assert broadcasts[-1]["state"] == []
 
 
+def test_e621_generate_uses_main_window_direct_callback_when_signal_unwired():
+    generated = []
+
+    class _BrokenSignal:
+        def emit(self, _payload):
+            raise AssertionError("lazy E621 signal should not be required for Remote Web generate")
+
+    module = SimpleNamespace(
+        data={},
+        current_category=None,
+        current_level2=None,
+        current_level3=None,
+        _remote_testbench_text="",
+        signals=SimpleNamespace(generation_requested=_BrokenSignal()),
+    )
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(on_instant_generation_requested=generated.append)
+    bridge = RemoteBridge(ctx)
+    bridge._find_module = lambda module_id: module if module_id == "e621_event" else None
+    bridge._ensure_e621_loaded = lambda _module: True
+    bridge._broadcast_e621_event_state = lambda: None
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._set_e621_event("generate", "tail, paw pads")
+
+    assert generated == [{
+        "id": 10000000,
+        "artist": [],
+        "copyright": [],
+        "character": [],
+        "general": ["tail", "paw pads"],
+        "meta": [],
+    }]
+    assert broadcasts == [{
+        "type": "toast",
+        "message": "E621 generation requested (2 tags)",
+        "level": "success",
+    }]
+
+
 class _FakeComboBox:
     def __init__(self, items=None, current=""):
         self.items = list(items or [])

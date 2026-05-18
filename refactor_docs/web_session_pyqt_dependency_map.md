@@ -165,3 +165,11 @@
 - Remote Web의 `wildcard.prompt_squeeze`, `reload`, `reset_sequential`, wildcard file-tree/read/save/delete/create/preview 액션은 서버 상태와 `WildcardManager` 기반으로 처리한다. `open_manager`처럼 실제 PyQt 창이 필요한 액션만 deferred module을 on-demand 로드한다.
 - `InstantWildcardModule`은 생성 파라미터와 instant wildcard dictionary를 제공하므로 이번 라운드에서 eager 상태로 유지한다.
 - 다음 lazy 후보는 `E621EventModuleV2`이다. Remote Web launcher/on-demand 표면이고 초기 state 요청 대상은 아니지만, constructor의 e621 data check/download side effect와 `_read_e621_event()` cache 계약을 별도 라운드에서 먼저 검증해야 한다.
+
+### Round 14 E621 event module WebSession lazy loading
+
+- `E621EventModuleV2`는 Remote Web 초기 handshake 대상이 아니며, 사용자가 E621 연구모듈을 열 때만 필요한 prompt-tool surface이다.
+- hidden WebSession startup에서는 `E621EventModuleV2` import/constructor/widget 생성을 지연한다. 이로써 startup 중 `data/e621_data` 존재 확인 및 E621 widget setup을 생략한다.
+- Remote Web의 `get_module_state:e621_event` 또는 E621 launcher open 시에는 기존 `RemoteBridge._find_module()` deferred lookup으로 모듈을 on-demand 로드하고, 기존 `_read_e621_event()` state builder를 유지한다.
+- lazy 로드된 E621 모듈은 startup 시점의 `MainController.connect_e621_event_signals()` 연결 루프를 지나치므로, Remote Web `e621_event.generate`는 module signal에 의존하지 않고 `main_window.on_instant_generation_requested(tags_data)`를 직접 호출한다. direct callback이 없는 비정상 context에서만 기존 signal fallback을 사용한다.
+- Desktop 런타임은 `web_session_lazy` 조건에 걸리지 않으므로 기존 즉시 로드와 signal 연결을 유지한다.

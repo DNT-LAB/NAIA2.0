@@ -101,6 +101,7 @@ def test_checked_in_middle_module_registry_files_exist():
 def test_web_session_lazy_registry_keeps_generation_modules_eager():
     specs = {spec["class"]: spec for spec in middle_controller.MIDDLE_MODULE_SPECS}
 
+    assert specs["E621EventModuleV2"]["web_session_lazy"] is True
     assert specs["WildcardStatusModule"]["web_session_lazy"] is True
     assert specs["OllamaModule"]["web_session_lazy"] is True
     assert specs["InstantWildcardModule"].get("web_session_lazy") is not True

@@ -11001,7 +11001,11 @@ class RemoteBridge(QObject):
                     "general": tags,
                     "meta": [],
                 }
-                if hasattr(m, "signals") and hasattr(m.signals, "generation_requested"):
+                main_window = getattr(self.app_context, "main_window", None)
+                direct_generate = getattr(main_window, "on_instant_generation_requested", None)
+                if callable(direct_generate):
+                    direct_generate(tags_data)
+                elif hasattr(m, "signals") and hasattr(m.signals, "generation_requested"):
                     m.signals.generation_requested.emit(tags_data)
                 self._broadcast_json({
                     "type": "toast",

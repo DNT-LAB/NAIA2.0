@@ -16,7 +16,7 @@ MIDDLE_MODULE_SPECS = (
     {"file": "character_module", "class": "CharacterModule"},
     {"file": "character_reference_module", "class": "CharacterReferenceModule"},
     {"file": "conditional_prompt_module", "class": "PromptListModifierModule"},
-    {"file": "e621_event_module", "class": "E621EventModuleV2"},
+    {"file": "e621_event_module", "class": "E621EventModuleV2", "web_session_lazy": True},
     {"file": "instant_wildcard_module", "class": "InstantWildcardModule"},
     {"file": "ollama_module", "class": "OllamaModule", "web_session_lazy": True},
     {"file": "prompt_engineering_module", "class": "PromptEngineeringModule"},

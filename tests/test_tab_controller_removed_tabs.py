@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QTabWidget
 
-from core.tab_controller import REMOVED_TAB_MODULES, TabController
+from core.tab_controller import REMOVED_TAB_MODULES, WEB_SESSION_UNSUPPORTED_TAB_MODULES, TabController
 
 
 def test_removed_tab_files_are_not_imported(tmp_path, qtbot):
@@ -114,6 +114,74 @@ class Img2ImgTabModule(BaseTabModule):
 
     assert tab_widget.count() == 1
     assert "Img2ImgTabModule" in controller.module_instances
+
+
+def test_web_session_unsupported_dynamic_tab_is_not_imported_when_requested(tmp_path, qtbot, monkeypatch):
+    marker_path = tmp_path / "turbo_imported.txt"
+    dynamic_file = tmp_path / "turbo_event_sequence_tab.py"
+    dynamic_file.write_text(
+        f"""
+from pathlib import Path
+Path({str(marker_path)!r}).write_text('imported', encoding='utf-8')
+from PyQt6.QtWidgets import QLabel
+from interfaces.base_tab_module import BaseTabModule
+
+class TurboEventSequenceTabModule(BaseTabModule):
+    def get_tab_title(self):
+        return "Turbo Test"
+
+    def get_tab_type(self):
+        return "closable"
+
+    def create_widget(self, parent):
+        return QLabel("loaded", parent)
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW", "1")
+    tab_widget = QTabWidget()
+    qtbot.addWidget(tab_widget)
+    controller = TabController(str(tmp_path), app_context=None, tab_widget=tab_widget)
+    qtbot.addWidget(controller)
+
+    controller.add_tab_by_name("TurboEventSequenceTabModule")
+
+    assert tab_widget.count() == 0
+    assert not marker_path.exists()
+    assert "TurboEventSequenceTabModule" in WEB_SESSION_UNSUPPORTED_TAB_MODULES
+
+
+def test_web_session_unsupported_dynamic_tab_stays_desktop_loadable(tmp_path, qtbot, monkeypatch):
+    dynamic_file = tmp_path / "turbo_event_sequence_tab.py"
+    dynamic_file.write_text(
+        """
+from PyQt6.QtWidgets import QLabel
+from interfaces.base_tab_module import BaseTabModule
+
+class TurboEventSequenceTabModule(BaseTabModule):
+    def get_tab_title(self):
+        return "Turbo Test"
+
+    def get_tab_type(self):
+        return "closable"
+
+    def create_widget(self, parent):
+        return QLabel("loaded", parent)
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW", raising=False)
+    tab_widget = QTabWidget()
+    qtbot.addWidget(tab_widget)
+    controller = TabController(str(tmp_path), app_context=None, tab_widget=tab_widget)
+    qtbot.addWidget(controller)
+
+    controller.add_tab_by_name("TurboEventSequenceTabModule")
+
+    assert tab_widget.count() == 1
+    assert "TurboEventSequenceTabModule" in controller.module_instances
 
 
 def test_lazy_tab_load_is_not_reentrant_during_tab_replacement(tmp_path, qtbot):

@@ -29,6 +29,10 @@ PROTOTYPE_TAB_FILES = {
     'comic_generator_tab',
 }
 
+WEB_SESSION_UNSUPPORTED_TAB_MODULES = {
+    'TurboEventSequenceTabModule',
+}
+
 
 TAB_MODULE_SPECS = {
     'ImageViewerModule': {
@@ -125,6 +129,10 @@ STARTUP_SKIPPED_TAB_FILES = REMOVED_TAB_FILES | PROTOTYPE_TAB_FILES | {
 }
 
 
+def is_hidden_web_session_runtime() -> bool:
+    return os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1"
+
+
 class TabController(QWidget):
     """
     RightView의 탭들을 동적으로 로드, 생성 및 관리하는 컨트롤러.
@@ -173,6 +181,9 @@ class TabController(QWidget):
                 traceback.print_exc()
 
         for class_name, spec in TAB_MODULE_SPECS.items():
+            if self._is_runtime_unsupported_tab(class_name):
+                print(f"  -> Web Session 미지원 탭 placeholder 생략: {class_name}")
+                continue
             if spec.get('tab_type') == 'core' and spec.get('lazy') and self._tab_file_exists(spec):
                 startup_entries.append({
                     'kind': 'lazy',
@@ -251,12 +262,21 @@ class TabController(QWidget):
                     if obj.__name__ in REMOVED_TAB_MODULES:
                         print(f"  -> 제거된 탭 클래스 건너뜀: {obj.__name__}")
                         continue
+                    if self._is_runtime_unsupported_tab(obj.__name__):
+                        print(f"  -> Web Session 미지원 탭 클래스 건너뜀: {obj.__name__}")
+                        continue
                     if obj.__name__ not in self._module_class_by_name:
                         self.module_classes.append(obj)
                         self._module_class_by_name[obj.__name__] = obj
                         print(f"  -> 탭 모듈 클래스 발견: {obj.__name__}")
                     loaded_classes.append(obj)
         return loaded_classes
+
+    def _is_runtime_unsupported_tab(self, module_class_name: str) -> bool:
+        return (
+            is_hidden_web_session_runtime()
+            and module_class_name in WEB_SESSION_UNSUPPORTED_TAB_MODULES
+        )
 
     def _tab_file_exists(self, spec: dict) -> bool:
         return os.path.exists(os.path.join(self.tabs_dir, f"{spec['file']}.py"))
@@ -282,6 +302,10 @@ class TabController(QWidget):
         return placeholder
 
     def _get_module_class(self, module_class_name: str) -> Optional[Type[BaseTabModule]]:
+        if self._is_runtime_unsupported_tab(module_class_name):
+            print(f"⚠️ Web Session 런타임에서 미지원 탭 '{module_class_name}' 로드를 차단했습니다.")
+            return None
+
         if module_class_name in self._module_class_by_name:
             return self._module_class_by_name[module_class_name]
 
@@ -444,6 +468,10 @@ class TabController(QWidget):
         클래스 이름을 기반으로 탭을 동적으로 추가하고 활성화합니다.
         이미 탭이 열려있으면 해당 탭으로 전환합니다.
         """
+        if self._is_runtime_unsupported_tab(module_class_name):
+            print(f"⚠️ Web Session 런타임에서 미지원 탭 '{module_class_name}' 추가를 차단했습니다.")
+            return
+
         if module_class_name in REMOVED_TAB_MODULES:
             print(f"⚠️ 제거된 탭 '{module_class_name}'은 추가할 수 없습니다.")
             return

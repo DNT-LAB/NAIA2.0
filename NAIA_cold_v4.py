@@ -2599,6 +2599,10 @@ class ModernMainWindow(QMainWindow):
         """터보 모드 선택됨"""
         dialog.accept()
 
+        if self._is_hidden_web_session_runtime():
+            print("[Dialog/SKIPPED] Turbo Sequence 탭 생성 차단 — Web Session 미지원 PyQt 탭")
+            return
+
         if mode == 'inpaint':
             # TurboEventSequenceTabModule 동적 탭 생성
             if self.image_window and hasattr(self.image_window, 'tab_controller'):

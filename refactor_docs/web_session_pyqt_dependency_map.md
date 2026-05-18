@@ -132,3 +132,11 @@
 - `RemoteBridge`의 기존 private method 이름은 wrapper로 유지해 FastAPI route와 기존 테스트 계약을 보존한다.
 - 저장 경로 검증, history item 탐색, 파일 thumbnail disk cache는 아직 `RemoteBridge`에 남아 있다. 이 부분은 `ImageWindow`/history widget 접근과 연결되어 있어 별도 상태 저장소 분리 후 다음 라운드에서 줄여야 한다.
 - 이 라운드 이후 결과 이미지 bytes 변환과 메모리 history thumbnail 생성은 PyQt bridge 밖의 pure service에서 검증할 수 있다.
+
+### Round 10 WebSession 미지원 PyQt 탭 격리
+
+- `TurboEventSequenceTabModule`은 desktop dynamic tab으로는 유지하되, 숨김 WebSession 런타임에서는 `TabController`가 import/생성을 차단한다.
+- 차단 기준은 `NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW=1`과 `WEB_SESSION_UNSUPPORTED_TAB_MODULES`이며, desktop 런타임의 `add_tab_by_name()` 경로는 유지된다.
+- `ModernMainWindow._on_turbo_mode_selected()`도 숨김 WebSession 런타임에서는 no-op 처리해 직접 호출 경로를 막았다.
+- WebSession 미지원 PyQt 탭 목록은 `not_implement/web_session_unsupported_tabs.md`에 기록했다.
+- 이 라운드는 `tabs/turbo_event_sequence/` 구현 자체를 이동하지 않는다. 해당 구현은 generation path의 `turbo_sequence_request`와 연결되어 있어 desktop 제거는 별도 제품 결정과 더 넓은 회귀 검증이 필요하다.

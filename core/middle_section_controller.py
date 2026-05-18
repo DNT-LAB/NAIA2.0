@@ -15,7 +15,7 @@ MIDDLE_MODULE_SPECS = (
     {"file": "automation_module", "class": "AutomationModule", "web_session_lazy": True},
     {"file": "character_module", "class": "CharacterModule", "web_session_lazy": True},
     {"file": "character_reference_module", "class": "CharacterReferenceModule", "web_session_lazy": True},
-    {"file": "conditional_prompt_module", "class": "PromptListModifierModule"},
+    {"file": "conditional_prompt_module", "class": "PromptListModifierModule", "web_session_headless_widget": True},
     {"file": "e621_event_module", "class": "E621EventModuleV2", "web_session_lazy": True},
     {"file": "instant_wildcard_module", "class": "InstantWildcardModule", "web_session_lazy": True},
     {"file": "ollama_module", "class": "OllamaModule", "web_session_lazy": True},
@@ -138,6 +138,18 @@ class MiddleSectionController:
 
     def _should_defer_module_spec(self, module_spec: dict) -> bool:
         return bool(module_spec.get("web_session_lazy")) and is_hidden_web_session_runtime()
+
+    def _module_spec_for_class_name(self, module_class_name: str) -> dict:
+        for spec in MIDDLE_MODULE_SPECS:
+            if spec.get("class") == module_class_name:
+                return spec
+        return {}
+
+    def _should_skip_widget_for_module(self, module_instance) -> bool:
+        if not is_hidden_web_session_runtime():
+            return False
+        spec = self._module_spec_for_class_name(module_instance.__class__.__name__)
+        return bool(spec.get("web_session_headless_widget"))
 
     def _initialize_module_instance(self, module_instance):
         module_instance.initialize_with_context(self.app_context)
@@ -268,6 +280,11 @@ class MiddleSectionController:
                     module_instance.on_initialize()
                 except Exception as e:
                     print(f"⚠️ 모듈 초기화 오류 ({module_instance.__class__.__name__}): {e}")
+
+                if self._should_skip_widget_for_module(module_instance):
+                    self._register_module_pipeline_hook(module_instance)
+                    print(f"⏭️ Web Session middle 모듈 UI 생성 생략: {module_instance.__class__.__name__}")
+                    continue
                 
                 # 4. EnhancedCollapsibleBox 생성 (분리 가능)
                 module_title = module_instance.get_title()

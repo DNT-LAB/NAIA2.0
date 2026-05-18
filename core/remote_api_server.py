@@ -9471,6 +9471,13 @@ class RemoteBridge(QObject):
         return rulebook_from_dict(data), data
 
     def _cond_state_values_from_module(self, module) -> dict:
+        settings = {}
+        try:
+            if hasattr(module, "collect_current_settings"):
+                settings = module.collect_current_settings() or {}
+        except Exception:
+            settings = {}
+
         legacy_rules = ""
         rules_textedit = getattr(module, "rules_textedit", None)
         if rules_textedit is not None:
@@ -9478,17 +9485,21 @@ class RemoteBridge(QObject):
                 legacy_rules = rules_textedit.toPlainText()
             except Exception:
                 legacy_rules = ""
+        else:
+            legacy_rules = str(settings.get("rules") or "")
 
         try:
             editor_mode = module.get_editor_mode() if hasattr(module, "get_editor_mode") else getattr(module, "_editor_mode", "legacy")
         except Exception:
             editor_mode = "legacy"
+        editor_mode = str(settings.get("editor_mode") or editor_mode)
         editor_mode = editor_mode if editor_mode in ("legacy", "v2") else "legacy"
 
         try:
             rules_v2 = module.get_v2_dsl() if hasattr(module, "get_v2_dsl") else getattr(module, "_rules_v2_dsl", "")
         except Exception:
             rules_v2 = ""
+        rules_v2 = settings.get("rules_v2", rules_v2)
         rules_v2 = rules_v2 if isinstance(rules_v2, str) else ""
 
         active_rules = rules_v2 if editor_mode == "v2" else legacy_rules
@@ -9500,14 +9511,15 @@ class RemoteBridge(QObject):
                 active_preset = getattr(module, "_active_preset_name", None)
         except Exception:
             active_preset = None
+        active_preset = settings.get("active_preset") or active_preset
 
         enable_checkbox = getattr(module, "enable_checkbox", None)
-        enabled = False
+        enabled = bool(settings.get("enabled", False))
         if enable_checkbox is not None:
             try:
                 enabled = bool(enable_checkbox.isChecked())
             except Exception:
-                enabled = False
+                pass
 
         return {
             "enabled": enabled,
@@ -9517,7 +9529,7 @@ class RemoteBridge(QObject):
             "rules_legacy": legacy_rules,
             "rules_v2": rules_v2,
             "rules_v2_book": self._cond_rulebook_dict_from_dsl(rules_v2, module),
-            "engine_options": self._cond_engine_options(module),
+            "engine_options": settings.get("engine_options") or self._cond_engine_options(module),
             "active_preset": active_preset or "",
             "presets": self._cond_preset_infos(),
         }
@@ -10770,8 +10782,23 @@ class RemoteBridge(QObject):
             if not m:
                 return
             should_broadcast = False
+
+            def update_settings(**updates):
+                settings = {}
+                try:
+                    if hasattr(m, "collect_current_settings"):
+                        settings = m.collect_current_settings() or {}
+                except Exception:
+                    settings = {}
+                settings.update(updates)
+                if hasattr(m, "apply_settings"):
+                    m.apply_settings(settings)
+                else:
+                    for update_key, update_value in updates.items():
+                        setattr(m, update_key, update_value)
+
             if key == "enabled":
-                m.enable_checkbox.setChecked(value == "true")
+                update_settings(enabled=value == "true")
                 should_broadcast = True
             elif key in ("editor_mode", "mode"):
                 if value in ("legacy", "v2"):
@@ -10779,15 +10806,18 @@ class RemoteBridge(QObject):
                         m.set_editor_mode(value)
                     else:
                         m._editor_mode = value
+                    update_settings(editor_mode=value)
                     should_broadcast = True
             elif key == "rules_legacy":
                 if getattr(m, "rules_textedit", None) is not None:
                     m.rules_textedit.setPlainText(value)
+                update_settings(rules=value)
             elif key == "rules_v2":
                 if hasattr(m, "set_v2_dsl"):
                     m.set_v2_dsl(value)
                 elif getattr(m, "rules_textedit", None) is not None:
                     m.rules_textedit.setPlainText(value)
+                update_settings(rules_v2=value)
             elif key == "rules_v2_book":
                 from modules.conditional.dsl_serializer import serialize_rulebook
 
@@ -10811,12 +10841,22 @@ class RemoteBridge(QObject):
                     m.set_editor_mode("v2")
                 else:
                     m._editor_mode = "v2"
+                update_settings(
+                    editor_mode="v2",
+                    rules_v2=dsl,
+                    engine_options=opts,
+                )
             elif key == "rules":
                 mode = m.get_editor_mode() if hasattr(m, "get_editor_mode") else getattr(m, "_editor_mode", "legacy")
+                current_settings = m.collect_current_settings() if hasattr(m, "collect_current_settings") else {}
                 if mode == "v2" and hasattr(m, "set_v2_dsl"):
                     m.set_v2_dsl(value)
+                    update_settings(rules=current_settings.get("rules", ""), rules_v2=value)
                 elif getattr(m, "rules_textedit", None) is not None:
                     m.rules_textedit.setPlainText(value)
+                    update_settings(rules=value, rules_v2=current_settings.get("rules_v2", ""))
+                else:
+                    update_settings(rules=value, rules_v2=current_settings.get("rules_v2", ""))
             elif key in ("engine_options", "max_passes", "stop_on_match"):
                 opts = self._cond_engine_options(m)
                 if key == "engine_options":
@@ -10837,6 +10877,7 @@ class RemoteBridge(QObject):
                     )
                 else:
                     m._engine_options = opts
+                update_settings(engine_options=opts)
                 should_broadcast = True
             elif key == "preset_load":
                 loaded = False
@@ -10916,6 +10957,8 @@ class RemoteBridge(QObject):
                         if book is not None:
                             storage.save(name, book)
                             m._active_preset_name = name
+                            if hasattr(m, "_update_headless_settings"):
+                                m._update_headless_settings(active_preset=name)
                             if activate:
                                 from modules.conditional.dsl_serializer import serialize_rulebook
 
@@ -10951,6 +10994,8 @@ class RemoteBridge(QObject):
                 if name and get_default_storage().delete(name):
                     if getattr(m, "_active_preset_name", None) == name:
                         m._active_preset_name = None
+                        if hasattr(m, "_update_headless_settings"):
+                            m._update_headless_settings(active_preset=None)
                     should_broadcast = True
                     self._broadcast_json({
                         "type": "toast",

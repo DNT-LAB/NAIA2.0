@@ -125,6 +125,21 @@ def test_conditional_non_char_rules_do_not_load_deferred_character_module():
     assert controller.requested == []
 
 
+def test_conditional_execute_pipeline_hook_uses_headless_settings():
+    module, row, _neg_edit = _conditional_module()
+    module.apply_settings({
+        "enabled": True,
+        "rules": "(e):main+=dramatic lighting",
+        "editor_mode": "legacy",
+        "engine_options": {"max_passes": 1, "stop_on_match": False},
+    })
+    context = PromptContext(source_row=row, settings={}, main_tags=["1girl"])
+
+    result = module.execute_pipeline_hook(context)
+
+    assert "dramatic lighting" in result.main_tags
+
+
 def test_generation_controller_publishes_generation_finished_event():
     events = []
 

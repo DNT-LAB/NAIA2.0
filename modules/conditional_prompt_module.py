@@ -188,6 +188,18 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         # diff 로 added_tags 를 계산하여 final_prompt 에서 강조하기 위함.
         self._simulate_before_tags: Optional[Dict[str, List[str]]] = None
         self._simulate_after_tags: Optional[Dict[str, List[str]]] = None
+        self._headless_settings: Dict[str, Any] = {
+            "enabled": False,
+            "rules": "",
+            "rules_v2": "",
+            "editor_mode": "legacy",
+            "engine_options": dict(self._engine_options),
+            "active_preset": None,
+        }
+
+    def _update_headless_settings(self, **updates) -> None:
+        if hasattr(self, "_headless_settings"):
+            self._headless_settings.update(updates)
 
     def set_engine_options(self, *, max_passes: int = 1,
                            stop_on_match: bool = False):
@@ -200,6 +212,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             'max_passes': max(1, int(max_passes)),
             'stop_on_match': bool(stop_on_match),
         }
+        self._update_headless_settings(engine_options=dict(self._engine_options))
 
     def get_engine_options(self) -> Dict[str, Any]:
         """현재 엔진 옵션 조회 (프리셋 저장/편집기 표시용)."""
@@ -504,9 +517,9 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         레거시 설정 파일(필드 없음)은 apply_settings 기본값으로 흡수.
         """
         if not all([self.enable_checkbox, self.rules_textedit]):
-            return {}
+            return dict(self._headless_settings)
 
-        return {
+        settings = {
             "enabled": self.enable_checkbox.isChecked(),
             "rules": self.rules_textedit.toPlainText(),
             "rules_v2": self._rules_v2_dsl,
@@ -514,14 +527,13 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             "engine_options": dict(self._engine_options),
             "active_preset": self._active_preset_name,
         }
+        self._headless_settings.update(settings)
+        return settings
 
     def apply_settings(self, settings: Dict[str, Any]):
         """설정을 UI에 적용 (Sub-phase 1.8: 모드/옵션/프리셋 필드 포함)."""
-        if not all([self.enable_checkbox, self.rules_textedit]):
-            return
-
-        self.enable_checkbox.setChecked(settings.get("enabled", False))
-        self.rules_textedit.setText(settings.get("rules", ""))
+        enabled = bool(settings.get("enabled", False))
+        rules = str(settings.get("rules", ""))
 
         # 174 hotfix: v2 DSL 복원 (기존 설정 파일에는 없음)
         rules_v2 = settings.get("rules_v2", "")
@@ -542,6 +554,20 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
         # 1.8: 활성 프리셋 이름
         self._active_preset_name = settings.get("active_preset") or None
+        self._headless_settings.update({
+            "enabled": enabled,
+            "rules": rules,
+            "rules_v2": self._rules_v2_dsl,
+            "editor_mode": self._editor_mode,
+            "engine_options": dict(self._engine_options),
+            "active_preset": self._active_preset_name,
+        })
+
+        if not all([self.enable_checkbox, self.rules_textedit]):
+            return
+
+        self.enable_checkbox.setChecked(enabled)
+        self.rules_textedit.setText(rules)
 
     # ====================================================================
     # Sub-phase 1.8 — 모드 토글 + 프리셋 로드 + 레거시 변환 도구 API
@@ -555,6 +581,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         """
         if mode in ("legacy", "v2"):
             self._editor_mode = mode
+            self._update_headless_settings(editor_mode=self._editor_mode)
             self._sync_mode_ui()
 
     def get_editor_mode(self) -> str:
@@ -567,6 +594,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
     def set_v2_dsl(self, text: str) -> None:
         """편집기(v2) 전용 DSL 기록. 레거시 rules_textedit 은 건드리지 않음."""
         self._rules_v2_dsl = text or ""
+        self._update_headless_settings(rules_v2=self._rules_v2_dsl)
 
     def _active_rules_text(self) -> str:
         """실행에 쓰일 DSL 을 현재 모드 기준으로 반환.
@@ -576,8 +604,16 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         if self._editor_mode == "v2":
             return (self._rules_v2_dsl or "").strip()
         if self.rules_textedit is None:
-            return ""
+            return str(self._headless_settings.get("rules") or "").strip()
         return self.rules_textedit.toPlainText().strip()
+
+    def _is_enabled(self) -> bool:
+        if self.enable_checkbox is not None:
+            try:
+                return bool(self.enable_checkbox.isChecked())
+            except Exception:
+                return False
+        return bool(self._headless_settings.get("enabled", False))
 
     def _sync_mode_ui(self) -> None:
         """라디오 버튼과 rules_textedit 편집 가능 여부를 모드에 맞춰 동기화.
@@ -650,6 +686,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         self.set_v2_dsl(dsl)
         self.set_editor_mode("v2")
         self._active_preset_name = name
+        self._update_headless_settings(active_preset=self._active_preset_name)
         return True
 
     def convert_legacy_to_preset(
@@ -719,7 +756,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             rules_text = cond_override.get("rules", "").strip()
             opts = cond_override.get("engine_options") or self._engine_options or {}
         else:
-            if not self.enable_checkbox or not self.enable_checkbox.isChecked():
+            if not self._is_enabled():
                 return context
             # 174 hotfix (FR-02/10): 활성 모드가 'v2' 면 _rules_v2_dsl, 아니면 rules_textedit
             rules_text = self._active_rules_text()
@@ -2558,7 +2595,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
 
     def get_parameters(self) -> Dict[str, Any]:
         """생성 파라미터 반환"""
-        if not self.enable_checkbox or not self.enable_checkbox.isChecked():
+        if not self._is_enabled():
             return {}
 
         # 174 hotfix: 원격 / 쉐어 서버 파이프라인도 활성 모드의 DSL 을 그대로 받도록.

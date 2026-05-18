@@ -227,3 +227,13 @@
 - `PromptListModifierModule`의 cycle-start character snapshot은 loaded-only 조회로 바꿔, char/uc 규칙이 아닌 일반 조건부 프롬프트 규칙이 CharacterModule을 깨우지 않는다.
 - Remote Web Character 편집/preview 액션은 기존 PyQt widget behavior가 필요하므로 `_set_character()`에서만 deferred module을 on-demand 로드하고 숨김 widget을 준비한다.
 - 남은 eager middle module은 `PromptEngineeringModule`과 `PromptListModifierModule`이다. 두 모듈은 active prompt hooks, random prompt side effects, initial Remote Web prompt-engineering state를 분리한 뒤 lazy/headless 전환해야 한다.
+
+### Round 21 Conditional prompt headless widget skip
+
+- `PromptListModifierModule`은 saved conditional rules를 generation `after_wildcard` hook에서 적용하므로, module instance와 hook registration은 hidden WebSession startup에서도 유지해야 한다.
+- 하지만 Remote Web startup에서 PyQt `QTextEdit`, radio controls, syntax highlighter, log widget, collapsible box를 만들 필요는 없으므로 `web_session_headless_widget` registry flag를 추가했다.
+- hidden WebSession `MiddleSectionController.build_ui()`는 해당 flag가 있는 module에 대해 context injection, `on_initialize()`, pipeline hook registration만 수행하고 `create_widget()`을 생략한다.
+- `PromptListModifierModule`은 `_headless_settings`를 통해 checkbox/textedit 없이도 enabled, legacy/v2 DSL, editor mode, engine options, active preset을 유지한다.
+- `RemoteBridge._read_conditional_prompt()`와 `_set_conditional_prompt()`는 widget-backed state가 없을 때 `collect_current_settings()`/`apply_settings()`를 사용해 Remote Web panel state와 edits를 유지한다.
+- 이 라운드는 full lazy 전환이 아니다. full lazy는 saved conditional rules가 generation에서 사라지지 않도록 별도 headless conditional hook/service가 먼저 필요하다.
+- 남은 큰 PyQt blocker는 `PromptEngineeringModule`이다. initial Remote Web state, `*randomized` random-prompt side effect, post/after-wildcard hooks를 PyQt-free service로 분리한 뒤에만 lazy 전환이 안전하다.

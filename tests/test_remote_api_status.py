@@ -329,6 +329,77 @@ def test_character_set_action_prepares_widget_on_demand():
     assert module.activate_checkbox.isChecked() is True
 
 
+def test_conditional_prompt_state_uses_headless_settings_without_widget():
+    class ConditionalModule:
+        enable_checkbox = None
+        rules_textedit = None
+        log_textedit = None
+
+        def __init__(self):
+            self.settings = {
+                "enabled": False,
+                "rules": "(e):main+=old",
+                "rules_v2": "",
+                "editor_mode": "legacy",
+                "engine_options": {"max_passes": 1, "stop_on_match": False},
+                "active_preset": "",
+            }
+
+        def collect_current_settings(self):
+            return dict(self.settings)
+
+        def apply_settings(self, settings):
+            self.settings.update(settings)
+
+        def get_editor_mode(self):
+            return self.settings["editor_mode"]
+
+        def set_editor_mode(self, mode):
+            self.settings["editor_mode"] = mode
+
+        def get_v2_dsl(self):
+            return self.settings["rules_v2"]
+
+        def set_v2_dsl(self, text):
+            self.settings["rules_v2"] = text
+
+        def get_engine_options(self):
+            return dict(self.settings["engine_options"])
+
+        def set_engine_options(self, *, max_passes=1, stop_on_match=False):
+            self.settings["engine_options"] = {
+                "max_passes": int(max_passes),
+                "stop_on_match": bool(stop_on_match),
+            }
+
+    module = ConditionalModule()
+
+    class MiddleController:
+        module_instances = [module]
+
+        def get_module_instance(self, class_name):
+            assert class_name == "PromptListModifierModule"
+            return module
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = MiddleController()
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = lambda payload: broadcasts.append(payload)
+
+    state = bridge._read_conditional_prompt()
+    assert state["enabled"] is False
+    assert state["rules"] == "(e):main+=old"
+
+    bridge._set_conditional_prompt("enabled", "true")
+    bridge._set_conditional_prompt("rules_legacy", "(e):main+=dramatic lighting")
+    state = bridge._read_conditional_prompt()
+
+    assert state["enabled"] is True
+    assert state["rules"] == "(e):main+=dramatic lighting"
+    assert broadcasts[-1]["module_id"] == "conditional_prompt"
+
+
 def test_vibe_transfer_state_loads_widget_only_on_explicit_read():
     class VibeTransferModule:
         def __init__(self):

@@ -117,3 +117,10 @@
 - 이 직접 실행은 plain WebSocket random 요청에만 적용한다. ComfyUI random, Event Preset, Remote Preset 요청은 기존 scoped pending 계약이 더 넓으므로 유지한다.
 - Event Stream이 활성화된 경우에는 기존 desktop wrapper 경로로 fallback한다.
 - normal random처럼 desktop `search_results`에서 pop하거나 snapshot restore가 필요한 경로는 아직 fallback으로 남긴다.
+
+### Round 08 normal random 직접 실행
+
+- source row가 없는 plain WebSocket random도 `search_results` 또는 memory snapshot에서 source row를 준비할 수 있으면 `PromptGenerationService`로 직접 실행한다.
+- memory snapshot, `data/naia_temp_rows.parquet`, `data/tags/tags_129.parquet` fallback은 UI label/status 변경 없이 `SearchResultModel`만 복원한다.
+- `ModernMainWindow.trigger_random_prompt()` fallback은 Event Stream 활성 경로, preset/comfyui scoped 경로, 비정상/테스트 context처럼 `search_results` 표면이 없는 경우에만 남는다.
+- 이 라운드 이후 plain Remote Web random의 일반 경로는 더 이상 desktop button/status wrapper를 통과하지 않는다.

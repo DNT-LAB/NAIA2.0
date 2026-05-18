@@ -1450,6 +1450,130 @@ def test_web_random_with_source_row_uses_core_service_without_trigger():
     assert ("prompt_generated", (generated_context,)) in events
 
 
+def test_web_random_without_source_row_uses_core_search_results_directly():
+    events = []
+    search_results = SearchResultModel(pd.DataFrame([
+        {"general": "alpha, beta", "rating": "g"},
+    ]))
+    ctx = _AppContext()
+    ctx.current_source_row = None
+    ctx.current_prompt_context = None
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={},
+        search_results=search_results,
+        trigger_random_prompt=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("desktop trigger_random_prompt should not be called")
+        ),
+    )
+
+    captured = {}
+
+    class _PromptService:
+        def prepare_next_source(self, model, settings, active_ratings=None, source_row_override=None):
+            row = model.pop_random_row(active_ratings)
+            return SimpleNamespace(source_row=row, remaining_count=model.get_count(), error=None)
+
+        def set_current_context(self, row, settings):
+            captured["row"] = row
+            captured["settings"] = settings
+            ctx.current_prompt_context = SimpleNamespace(
+                final_prompt="core search prompt",
+                settings=settings,
+                source_row=row,
+                metadata={},
+                wildcard_history={},
+                wildcard_state={},
+            )
+            return ctx.current_prompt_context
+
+        def process_current_context(self):
+            return SimpleNamespace(
+                context=ctx.current_prompt_context,
+                final_prompt=ctx.current_prompt_context.final_prompt,
+                error=None,
+                detected_resolution=None,
+                reset_resolution_detected=False,
+            )
+
+    ctx.prompt_generation_service = _PromptService()
+    bridge = RemoteBridge(ctx)
+    ctx.publish = lambda event, *args: events.append((event, args))
+    ws = object()
+    bridge._pending_random_requests.append({
+        "ws": ws,
+        "source_row": None,
+        "active_ratings": {"g"},
+        "overrides": {"auto_generate": False},
+    })
+
+    bridge._do_random()
+
+    assert captured["row"]["general"] == "alpha, beta"
+    assert search_results.is_empty()
+    assert captured["settings"]["auto_generate"] is False
+    assert ("random_prompt_triggered", ()) in events
+    assert ("prompt_generated", (ctx.current_prompt_context,)) in events
+
+
+def test_web_random_direct_restores_memory_snapshot_without_desktop_restore():
+    events = []
+    snapshot = pd.DataFrame([
+        {"general": "snapshot prompt", "rating": "s"},
+    ])
+    ctx = _AppContext()
+    ctx.current_source_row = None
+    ctx.current_prompt_context = None
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={},
+        search_results=SearchResultModel(pd.DataFrame()),
+        _search_results_snapshot=snapshot,
+        trigger_random_prompt=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("desktop trigger_random_prompt should not be called")
+        ),
+    )
+
+    class _PromptService:
+        def prepare_next_source(self, model, settings, active_ratings=None, source_row_override=None):
+            row = model.pop_random_row(active_ratings)
+            return SimpleNamespace(source_row=row, remaining_count=model.get_count(), error=None)
+
+        def set_current_context(self, row, settings):
+            ctx.current_prompt_context = SimpleNamespace(
+                final_prompt="snapshot prompt",
+                settings=settings,
+                source_row=row,
+                metadata={},
+                wildcard_history={},
+                wildcard_state={},
+            )
+            return ctx.current_prompt_context
+
+        def process_current_context(self):
+            return SimpleNamespace(
+                context=ctx.current_prompt_context,
+                final_prompt=ctx.current_prompt_context.final_prompt,
+                error=None,
+                detected_resolution=None,
+                reset_resolution_detected=False,
+            )
+
+    ctx.prompt_generation_service = _PromptService()
+    bridge = RemoteBridge(ctx)
+    ctx.publish = lambda event, *args: events.append((event, args))
+    ws = object()
+    bridge._pending_random_requests.append({
+        "ws": ws,
+        "source_row": None,
+        "active_ratings": {"s"},
+        "overrides": {"auto_generate": False},
+    })
+
+    bridge._do_random()
+
+    assert ctx.current_prompt_context.source_row["general"] == "snapshot prompt"
+    assert ("prompt_generated", (ctx.current_prompt_context,)) in events
+
+
 def test_danbooru_prompt_preview_uses_core_service_without_prompt_controller():
     calls = []
     ctx = _AppContext()

@@ -1033,6 +1033,71 @@ class RemoteBridge(QObject):
         event_stream_runtime = getattr(self.app_context, "event_stream_runtime", None)
         return bool(event_stream_runtime and event_stream_runtime.is_active)
 
+    def _ensure_remote_random_search_results(self, settings: dict) -> bool:
+        if settings.get("wildcard_standalone", False):
+            return True
+
+        mw = getattr(self.app_context, "main_window", None)
+        if not mw:
+            return False
+        if not hasattr(mw, "search_results") and not hasattr(mw, "_search_results_snapshot"):
+            return False
+
+        search_results = getattr(mw, "search_results", None)
+        if search_results is not None and not search_results.is_empty():
+            return True
+
+        try:
+            from core.search_result_model import SearchResultModel
+            snapshot = getattr(mw, "_search_results_snapshot", None)
+            if snapshot is not None and not snapshot.empty:
+                if search_results is None:
+                    mw.search_results = SearchResultModel()
+                    search_results = mw.search_results
+                search_results.set_dataframe(snapshot.copy())
+                print(f"🌐 Remote: search_results restored from memory snapshot ({search_results.get_count()} rows)")
+                return True
+
+            temp_path = Path("data") / "naia_temp_rows.parquet"
+            if temp_path.exists():
+                import pandas as pd
+                temp_df = pd.read_parquet(temp_path)
+                if not temp_df.empty:
+                    if search_results is None:
+                        mw.search_results = SearchResultModel()
+                        search_results = mw.search_results
+                    search_results.set_dataframe(temp_df)
+                    mw._search_results_snapshot = temp_df.copy()
+                    print(f"🌐 Remote: search_results restored from temp parquet ({search_results.get_count()} rows)")
+                    return True
+
+            fallback_path = Path("data") / "tags" / "tags_129.parquet"
+            if fallback_path.exists():
+                import pandas as pd
+                fallback_df = pd.read_parquet(fallback_path)
+                if "rating" in fallback_df.columns:
+                    fallback_df = fallback_df[fallback_df["rating"] == "s"]
+                if not fallback_df.empty:
+                    fallback_df = fallback_df.reset_index(drop=True)
+                    if search_results is None:
+                        mw.search_results = SearchResultModel()
+                        search_results = mw.search_results
+                    search_results.set_dataframe(fallback_df)
+                    mw._search_results_snapshot = fallback_df.copy()
+                    print(f"🌐 Remote: search_results restored from fallback parquet ({search_results.get_count()} rows)")
+                    return True
+        except Exception as e:
+            print(f"🌐 Remote: search_results restore failed — {e}")
+
+        return False
+
+    def _remote_random_search_results(self):
+        mw = getattr(self.app_context, "main_window", None)
+        if mw and getattr(mw, "search_results", None) is not None:
+            return mw.search_results
+        from core.search_result_model import SearchResultModel
+        return SearchResultModel()
+
     def _publish_remote_random_context(self, prompt_context) -> None:
         publish = getattr(self.app_context, "publish", None)
         if callable(publish):
@@ -1052,6 +1117,50 @@ class RemoteBridge(QObject):
             return False
 
         settings = self._remote_random_settings(request_overrides, auto_generate)
+        return self._run_remote_random_direct(
+            ws=ws,
+            source_row=source_row,
+            settings=settings,
+        )
+
+    def _try_generate_remote_random_from_search(
+        self,
+        *,
+        ws,
+        request_overrides: dict | None,
+        active_ratings: set,
+        auto_generate: bool,
+    ) -> bool:
+        if ws is None or self._remote_random_direct_blocked():
+            return False
+
+        settings = self._remote_random_settings(request_overrides, auto_generate)
+        if not self._ensure_remote_random_search_results(settings):
+            return False
+
+        service = self._get_prompt_generation_service()
+        preparation = service.prepare_next_source(
+            self._remote_random_search_results(),
+            settings,
+            active_ratings=active_ratings,
+            source_row_override=None,
+        )
+        if preparation.error:
+            self._pending_overrides.pop(ws, None)
+            self._send_json_to(ws, {
+                "type": "random_failed",
+                "message": preparation.error,
+                "level": "error",
+            })
+            return True
+
+        return self._run_remote_random_direct(
+            ws=ws,
+            source_row=preparation.source_row,
+            settings=settings,
+        )
+
+    def _run_remote_random_direct(self, *, ws, source_row, settings: dict) -> bool:
         publish = getattr(self.app_context, "publish", None)
         if callable(publish):
             publish("random_prompt_triggered")
@@ -1060,6 +1169,7 @@ class RemoteBridge(QObject):
         service.set_current_context(source_row, settings)
         result = service.process_current_context()
         if result.error:
+            self._pending_overrides.pop(ws, None)
             self._send_json_to(ws, {
                 "type": "random_failed",
                 "message": result.error,
@@ -6317,6 +6427,21 @@ class RemoteBridge(QObject):
                 )
             ):
                 print("🌐 Remote: core 랜덤 프롬프트 생성됨")
+                return
+
+            if (
+                source_row is None
+                and not comfyui_request_id
+                and not event_preset_request_id
+                and not remote_preset_request_id
+                and self._try_generate_remote_random_from_search(
+                    ws=ws,
+                    request_overrides=request_overrides,
+                    active_ratings=active_ratings,
+                    auto_generate=auto_gen_checked,
+                )
+            ):
+                print("🌐 Remote: core search 랜덤 프롬프트 생성됨")
                 return
 
             self.app_context.main_window.trigger_random_prompt(settings_override=request_overrides,

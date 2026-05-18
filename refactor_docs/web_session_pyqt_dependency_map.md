@@ -274,3 +274,10 @@
 - desktop runtime에서는 기존처럼 `get_module_instance("CharacterModule")` 경로를 유지한다.
 - WebShell 로그 검증에서 Remote API server startup 전까지 module instance count는 1개로 유지됐다. 이후 Remote Web client가 character state를 명시적으로 요청하면 `CharacterModule`은 on-demand 로드될 수 있으며, 이는 panel/action 사용 시 허용된 lazy-load 경로다.
 - 남은 큰 blocker는 `PromptListModifierModule` full lazy 전환이다. 별도 분석 결과, 단순 registry lazy로는 generation hook이 사라지므로 `core.conditional_prompt_settings`와 `core.conditional_prompt_runtime` 분리가 먼저 필요하다.
+
+### Round 26 Conditional Prompt headless store
+
+- `core.conditional_prompt_settings`를 추가해 조건부 프롬프트의 enabled, legacy rules, v2 DSL, editor mode, engine options, active preset을 PyQt 없이 모드별 파일에서 읽고 쓸 수 있게 했다.
+- `RemoteBridge._read_conditional_prompt()`은 loaded `PromptListModifierModule`이 있으면 기존 module state를 사용하고, 없으면 core store로 동일한 `module_state` payload를 만든다.
+- `RemoteBridge._set_conditional_prompt()`은 loaded module이 없을 때도 Remote Web의 enabled/rules/editor/engine option/preset-load 변경을 core store에 반영하고 상태를 broadcast한다.
+- registry는 아직 바꾸지 않았다. `PromptListModifierModule`은 generation `after_wildcard` hook owner라서 full lazy 전환 전 `core.conditional_prompt_runtime` 분리가 필요하다.

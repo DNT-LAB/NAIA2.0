@@ -48,6 +48,10 @@ from core.character_settings import (
     character_state_from_settings,
     load_character_settings,
 )
+from core.conditional_prompt_settings import (
+    get_conditional_prompt_store,
+    normalize_conditional_engine_options,
+)
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.character_viewer_service import CharacterViewerService
 from core.clothes_preset_service import ClothesPresetService
@@ -752,6 +756,7 @@ class RemoteBridge(QObject):
         self._remote_automation_state: dict = automation_state_from_settings(load_automation_settings())
         self._automation_signals_connected = False
         self._prompt_engineering_headless_store = get_prompt_engineering_store(app_context)
+        self._conditional_prompt_headless_store = get_conditional_prompt_store(app_context)
         self._instant_wildcard_save_path = DEFAULT_INSTANT_WILDCARD_SAVE_PATH
         self._instant_wildcard_json_data: dict = {}
         self._instant_wildcard_dict: dict = {}
@@ -9420,14 +9425,7 @@ class RemoteBridge(QObject):
                 raw = None
         if not isinstance(raw, dict):
             raw = {}
-        try:
-            max_passes = int(raw.get("max_passes", 1))
-        except Exception:
-            max_passes = 1
-        return {
-            "max_passes": min(20, max(1, max_passes)),
-            "stop_on_match": bool(raw.get("stop_on_match", False)),
-        }
+        return normalize_conditional_engine_options(raw)
 
     def _cond_preset_infos(self) -> list:
         try:
@@ -9446,7 +9444,7 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: conditional preset 목록 읽기 실패 — {e}")
             return []
 
-    def _cond_rulebook_dict_from_dsl(self, dsl_text: str, module=None) -> dict:
+    def _cond_rulebook_dict_from_dsl(self, dsl_text: str, module=None, engine_options=None) -> dict:
         """조건부 v2 DSL을 웹 편집기가 쓰는 RuleBook JSON으로 변환."""
         try:
             from dataclasses import asdict
@@ -9454,7 +9452,7 @@ class RemoteBridge(QObject):
             from modules.conditional.preset_io import SCHEMA_VERSION
 
             book = parse_rulebook(dsl_text or "")
-            opts = self._cond_engine_options(module) if module is not None else {}
+            opts = self._cond_engine_options(module, source=engine_options)
             book.max_passes = int(opts.get("max_passes", book.max_passes))
             book.stop_on_match = bool(opts.get("stop_on_match", book.stop_on_match))
             return {
@@ -9473,7 +9471,7 @@ class RemoteBridge(QObject):
                 "schema_version": 1,
                 "name": "",
                 "description": "",
-                "engine_options": self._cond_engine_options(module) if module is not None else {},
+                "engine_options": self._cond_engine_options(module, source=engine_options),
                 "rules": [],
             }
 
@@ -9551,14 +9549,41 @@ class RemoteBridge(QObject):
             "presets": self._cond_preset_infos(),
         }
 
+    def _cond_state_values_from_settings(self, settings: dict) -> dict:
+        editor_mode = str(settings.get("editor_mode") or "legacy")
+        editor_mode = editor_mode if editor_mode in ("legacy", "v2") else "legacy"
+        legacy_rules = str(settings.get("rules") or "")
+        rules_v2 = str(settings.get("rules_v2") or "")
+        active_rules = rules_v2 if editor_mode == "v2" else legacy_rules
+        engine_options = self._cond_engine_options(source=settings.get("engine_options") or {})
+        return {
+            "enabled": bool(settings.get("enabled", False)),
+            "editor_mode": editor_mode,
+            "rules": active_rules,
+            "active_rules": active_rules,
+            "rules_legacy": legacy_rules,
+            "rules_v2": rules_v2,
+            "rules_v2_book": self._cond_rulebook_dict_from_dsl(
+                rules_v2,
+                engine_options=engine_options,
+            ),
+            "engine_options": engine_options,
+            "active_preset": str(settings.get("active_preset") or ""),
+            "presets": self._cond_preset_infos(),
+        }
+
     def _read_conditional_prompt(self, ws=None) -> dict:
         try:
-            m = self._find_module("conditional_prompt")
-            if not m:
-                return {}
-            values = self._cond_state_values_from_module(m)
+            m = self._find_loaded_module_instance("PromptListModifierModule")
+            values = (
+                self._cond_state_values_from_module(m)
+                if m
+                else self._cond_state_values_from_settings(
+                    self._conditional_prompt_headless_store.collect_settings()
+                )
+            )
             log = ""
-            log_textedit = getattr(m, "log_textedit", None)
+            log_textedit = getattr(m, "log_textedit", None) if m else None
             if log_textedit is not None:
                 try:
                     log = log_textedit.toPlainText()
@@ -10894,10 +10919,104 @@ class RemoteBridge(QObject):
         except Exception as e:
             print(f"🌐 Remote: character 설정 실패 — {key}={value}: {e}")
 
+    def _set_conditional_prompt_headless(self, key: str, value: str):
+        store = self._conditional_prompt_headless_store
+        settings = store.collect_settings()
+        should_broadcast = False
+
+        def update_store(**updates):
+            nonlocal should_broadcast
+            store.apply_settings({**settings, **updates})
+            settings.update(updates)
+            should_broadcast = True
+
+        try:
+            if key == "enabled":
+                update_store(enabled=value == "true")
+            elif key in ("editor_mode", "mode"):
+                if value in ("legacy", "v2"):
+                    update_store(editor_mode=value)
+            elif key == "rules_legacy":
+                update_store(rules=value)
+            elif key == "rules_v2":
+                update_store(rules_v2=value)
+            elif key == "rules_v2_book":
+                from modules.conditional.dsl_serializer import serialize_rulebook
+
+                book, data = self._cond_book_from_json_value(value)
+                opts = self._cond_engine_options(source=data.get("engine_options") or {})
+                book.max_passes = opts["max_passes"]
+                book.stop_on_match = opts["stop_on_match"]
+                update_store(
+                    editor_mode="v2",
+                    rules_v2=serialize_rulebook(book),
+                    engine_options=opts,
+                )
+            elif key == "rules":
+                if settings.get("editor_mode") == "v2":
+                    update_store(rules_v2=value)
+                else:
+                    update_store(rules=value)
+            elif key in ("engine_options", "max_passes", "stop_on_match"):
+                opts = self._cond_engine_options(source=settings.get("engine_options") or {})
+                if key == "engine_options":
+                    try:
+                        opts = self._cond_engine_options(source=json.loads(value or "{}"))
+                    except Exception:
+                        opts = self._cond_engine_options(source={})
+                elif key == "max_passes":
+                    opts["max_passes"] = value
+                    opts = self._cond_engine_options(source=opts)
+                elif key == "stop_on_match":
+                    opts["stop_on_match"] = value == "true"
+                    opts = self._cond_engine_options(source=opts)
+                update_store(engine_options=opts)
+            elif key == "preset_load":
+                from modules.conditional.dsl_serializer import serialize_rulebook
+                from modules.conditional.preset_io import get_default_storage
+
+                try:
+                    book = get_default_storage().load(value)
+                except FileNotFoundError:
+                    self._broadcast_json({
+                        "type": "toast",
+                        "message": f"조건부 프리셋을 찾을 수 없습니다: {value}",
+                        "level": "error",
+                    })
+                    return
+                update_store(
+                    editor_mode="v2",
+                    rules_v2=serialize_rulebook(book),
+                    engine_options={
+                        "max_passes": book.max_passes,
+                        "stop_on_match": book.stop_on_match,
+                    },
+                    active_preset=value,
+                )
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": f"조건부 프리셋 로드: {value}",
+                    "level": "success",
+                })
+            else:
+                self._broadcast_json({
+                    "type": "toast",
+                    "message": "Conditional Prompt action requires the desktop module.",
+                    "level": "error",
+                })
+
+            if should_broadcast:
+                state = self._read_conditional_prompt()
+                if state:
+                    self._broadcast_json(state)
+        except Exception as e:
+            print(f"🌐 Remote: conditional_prompt headless 설정 실패 — {key}={value}: {e}")
+
     def _set_conditional_prompt(self, key: str, value: str):
         try:
-            m = self._find_module("conditional_prompt")
+            m = self._find_loaded_module_instance("PromptListModifierModule")
             if not m:
+                self._set_conditional_prompt_headless(key, value)
                 return
             should_broadcast = False
 

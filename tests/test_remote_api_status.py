@@ -330,7 +330,7 @@ def test_character_set_action_prepares_widget_on_demand():
 
 
 def test_conditional_prompt_state_uses_headless_settings_without_widget():
-    class ConditionalModule:
+    class PromptListModifierModule:
         enable_checkbox = None
         rules_textedit = None
         log_textedit = None
@@ -372,7 +372,7 @@ def test_conditional_prompt_state_uses_headless_settings_without_widget():
                 "stop_on_match": bool(stop_on_match),
             }
 
-    module = ConditionalModule()
+    module = PromptListModifierModule()
 
     class MiddleController:
         module_instances = [module]
@@ -397,6 +397,58 @@ def test_conditional_prompt_state_uses_headless_settings_without_widget():
 
     assert state["enabled"] is True
     assert state["rules"] == "(e):main+=dramatic lighting"
+    assert broadcasts[-1]["module_id"] == "conditional_prompt"
+
+
+def test_conditional_prompt_state_uses_store_without_loading_module(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "save").mkdir()
+    (tmp_path / "save" / "PromptListModifierModule_NAI.json").write_text(
+        json.dumps({
+            "NAI": {
+                "enabled": False,
+                "rules": "(e):main+=old",
+                "rules_v2": "",
+                "editor_mode": "legacy",
+                "engine_options": {"max_passes": 1, "stop_on_match": False},
+                "active_preset": "",
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    class MiddleController:
+        module_instances = []
+
+        def __init__(self):
+            self.requested = []
+
+        def get_loaded_module_instance(self, class_name):
+            return None
+
+        def get_module_instance(self, class_name):
+            self.requested.append(class_name)
+            raise AssertionError(f"unexpected module load: {class_name}")
+
+    controller = MiddleController()
+    ctx = _AppContext()
+    ctx.middle_section_controller = controller
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = lambda payload: broadcasts.append(payload)
+
+    state = bridge._read_conditional_prompt()
+    assert state["enabled"] is False
+    assert state["rules"] == "(e):main+=old"
+    assert controller.requested == []
+
+    bridge._set_conditional_prompt("enabled", "true")
+    bridge._set_conditional_prompt("rules_legacy", "(e):main+=dramatic lighting")
+    state = bridge._read_conditional_prompt()
+
+    assert state["enabled"] is True
+    assert state["rules"] == "(e):main+=dramatic lighting"
+    assert controller.requested == []
     assert broadcasts[-1]["module_id"] == "conditional_prompt"
 
 

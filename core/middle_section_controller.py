@@ -20,7 +20,12 @@ MIDDLE_MODULE_SPECS = (
     {"file": "instant_wildcard_module", "class": "InstantWildcardModule"},
     {"file": "ollama_module", "class": "OllamaModule", "web_session_lazy": True},
     {"file": "prompt_engineering_module", "class": "PromptEngineeringModule"},
-    {"file": "reference_inset_module", "class": "ReferenceInsetAutoInjectModule"},
+    {
+        "file": "reference_inset_module",
+        "class": "ReferenceInsetAutoInjectModule",
+        "web_session_lazy": True,
+        "web_session_headless_hook": "reference_inset",
+    },
     {"file": "vibe_transfer_module", "class": "VibeTransferModule"},
     {"file": "wildcard_status_module", "class": "WildcardStatusModule", "web_session_lazy": True},
 )
@@ -43,6 +48,7 @@ class MiddleSectionController:
         self.module_classes = []
         self.module_instances = []
         self._deferred_module_specs = {}
+        self._deferred_headless_hook_classes = set()
 
         # 분리된 모듈들을 추적하기 위한 딕셔너리
         self.detached_modules = {}  # {module_title: DetachedWindow}
@@ -94,6 +100,7 @@ class MiddleSectionController:
             class_name = module_spec["class"]
             if self._should_defer_module_spec(module_spec):
                 self._deferred_module_specs[class_name] = module_spec
+                self._register_deferred_headless_support(module_spec)
                 print(f"⏳ Web Session middle 모듈 지연 로드: {name} -> {class_name}")
                 continue
             path = os.path.join(self.modules_dir, f"{name}.py")
@@ -164,6 +171,25 @@ class MiddleSectionController:
         if hook_info:
             self.app_context.register_pipeline_hook(hook_info, module_instance)
 
+    def _register_deferred_headless_support(self, module_spec: dict) -> None:
+        hook_id = module_spec.get("web_session_headless_hook")
+        if not hook_id:
+            return
+
+        if hook_id == "reference_inset":
+            try:
+                from core.reference_inset_service import ReferenceInsetAutoInjectHook
+
+                hook = ReferenceInsetAutoInjectHook(self.app_context)
+                self.app_context.register_pipeline_hook(hook.get_pipeline_hook_info(), hook)
+                self._deferred_headless_hook_classes.add(module_spec["class"])
+                print(f"✅ Web Session headless middle hook 등록: {module_spec['class']}")
+            except Exception as e:
+                print(f"⚠️ Web Session headless middle hook 등록 실패 ({module_spec['class']}): {e}")
+            return
+
+        print(f"⚠️ 알 수 없는 Web Session headless middle hook: {hook_id}")
+
     def _load_deferred_module_instance(self, module_class_name: str):
         module_spec = self._deferred_module_specs.get(module_class_name)
         if not module_spec:
@@ -182,7 +208,8 @@ class MiddleSectionController:
             module_instance = TargetModuleClass()
             self.module_instances.append(module_instance)
             self._initialize_module_instance(module_instance)
-            self._register_module_pipeline_hook(module_instance)
+            if module_class_name not in self._deferred_headless_hook_classes:
+                self._register_module_pipeline_hook(module_instance)
             self._deferred_module_specs.pop(module_class_name, None)
             print(f"✅ 지연 middle 모듈 로드 완료: {module_class_name}")
             return module_instance

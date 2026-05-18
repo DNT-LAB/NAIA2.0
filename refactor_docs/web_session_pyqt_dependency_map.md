@@ -173,3 +173,11 @@
 - Remote Web의 `get_module_state:e621_event` 또는 E621 launcher open 시에는 기존 `RemoteBridge._find_module()` deferred lookup으로 모듈을 on-demand 로드하고, 기존 `_read_e621_event()` state builder를 유지한다.
 - lazy 로드된 E621 모듈은 startup 시점의 `MainController.connect_e621_event_signals()` 연결 루프를 지나치므로, Remote Web `e621_event.generate`는 module signal에 의존하지 않고 `main_window.on_instant_generation_requested(tags_data)`를 직접 호출한다. direct callback이 없는 비정상 context에서만 기존 signal fallback을 사용한다.
 - Desktop 런타임은 `web_session_lazy` 조건에 걸리지 않으므로 기존 즉시 로드와 signal 연결을 유지한다.
+
+### Round 15 Reference Inset headless hook
+
+- `ReferenceInsetAutoInjectModule`은 Remote Web 초기 badge/status 대상이 아니고, 필수 런타임 동작은 PromptProcessor `final_hookpoint`에서 `reference inset` 태그를 삽입하는 pure PromptContext mutation이다.
+- 이 로직을 `core.reference_inset_service`로 분리했다. service는 PyQt를 import하지 않으며, PromptContext hook과 APIService 생성 시점 문자열 안전망이 같은 구현을 공유한다.
+- hidden WebSession에서는 `ReferenceInsetAutoInjectModule` import/constructor/widget 생성을 지연하고, 대신 `ReferenceInsetAutoInjectHook`을 headless pipeline hook으로 등록한다.
+- Desktop 런타임에서는 기존 PyQt module UI와 checkbox 토글을 유지한다.
+- `AutomationModule`은 이번 감사에서 lazy 후보에서 제외했다. Remote Web 초기 handshake와 server startup signal wiring이 `_find_module("automation")`을 통해 모듈을 깨우며, generation parameter 기본값도 모듈 인스턴스에 묶여 있기 때문이다. Automation lazy 전환은 별도 headless state/default parameter service가 선행되어야 한다.

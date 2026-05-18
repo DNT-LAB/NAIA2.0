@@ -104,7 +104,10 @@ def test_web_session_lazy_registry_keeps_generation_modules_eager():
     assert specs["E621EventModuleV2"]["web_session_lazy"] is True
     assert specs["WildcardStatusModule"]["web_session_lazy"] is True
     assert specs["OllamaModule"]["web_session_lazy"] is True
+    assert specs["ReferenceInsetAutoInjectModule"]["web_session_lazy"] is True
+    assert specs["ReferenceInsetAutoInjectModule"]["web_session_headless_hook"] == "reference_inset"
     assert specs["InstantWildcardModule"].get("web_session_lazy") is not True
+    assert specs["AutomationModule"].get("web_session_lazy") is not True
 
 
 def test_web_session_lazy_middle_module_defers_import_until_requested(tmp_path, monkeypatch):
@@ -189,3 +192,55 @@ class LazyModule(BaseMiddleModule):
 
     assert marker_path.exists()
     assert [cls.__name__ for cls in controller.module_classes] == ["LazyModule"]
+
+
+def test_web_session_reference_inset_registers_headless_hook_without_import(tmp_path, monkeypatch):
+    marker_path = tmp_path / "reference_inset_imported.txt"
+    (tmp_path / "reference_inset_module.py").write_text(
+        f"""
+from pathlib import Path
+Path({str(marker_path)!r}).write_text('imported', encoding='utf-8')
+raise RuntimeError('reference inset module should stay deferred')
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        middle_controller,
+        "MIDDLE_MODULE_SPECS",
+        (
+            {
+                "file": "reference_inset_module",
+                "class": "ReferenceInsetAutoInjectModule",
+                "web_session_lazy": True,
+                "web_session_headless_hook": "reference_inset",
+            },
+        ),
+    )
+    monkeypatch.setenv("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW", "1")
+    ctx = _AppContext()
+    controller = MiddleSectionController(str(tmp_path), ctx)
+
+    controller.load_modules()
+
+    assert controller.module_classes == []
+    assert controller.module_instances == []
+    assert not marker_path.exists()
+    assert len(ctx.hooks) == 1
+
+    hook_info, hook = ctx.hooks[0]
+    assert hook_info == {
+        "target_pipeline": "PromptProcessor",
+        "hook_point": "final_hookpoint",
+        "priority": 90,
+    }
+
+    context = SimpleNamespace(
+        settings={"reference_inset_tag_required": True},
+        metadata={},
+        prefix_tags=[],
+        main_tags=["1girl", "solo"],
+        postfix_tags=[],
+    )
+    hook.execute_pipeline_hook(context)
+
+    assert context.main_tags == ["1girl", "reference inset", "solo"]

@@ -18,6 +18,11 @@ from core.resolution_utils import (
     apply_resolution_to_comfyui_workflow,
     normalize_artist_thumbnail_resolution,
 )
+from core.reference_inset_service import (
+    inject_reference_inset_into_prompt,
+    reference_inset_should_inject_params,
+    strip_nai_weight_for_match,
+)
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 
 if TYPE_CHECKING:
@@ -615,10 +620,8 @@ class APIService:
             # 시점에만 동작하므로, 사용자가 textbox 의 캐시 프롬프트로 바로 [생성]을
             # 누르면 훅을 우회한다. 여기서 한 번 더 문자열 매칭으로 안전망을 친다.
             try:
-                if self._reference_inset_should_inject(params):
-                    cleaned_input = self._inject_reference_inset_into_prompt(
-                        params.get('input', '') or ''
-                    )
+                if reference_inset_should_inject_params(params, app_context=self.app_context):
+                    cleaned_input = inject_reference_inset_into_prompt(params.get('input', '') or '')
                     if cleaned_input != params.get('input', ''):
                         params['input'] = cleaned_input
                         print(f"🩹 reference inset 자동 삽입 (생성 시점): {cleaned_input[:80]}...")
@@ -1276,82 +1279,18 @@ class APIService:
             return base64.b64encode(mask_bytes).decode()
 
     # ─── Reference Inset 생성 시점 가드 ─────────────────────────────────
-    _REFERENCE_INSET_TAG = "reference inset"
-    _REFERENCE_INSET_PERSON_TAGS = (
-        "1boy", "2boys", "3boys", "4boys", "5boys", "6+boys",
-        "1girl", "2girls", "3girls", "4girls", "5girls", "6+girls",
-        "1other", "2others", "3others", "4others", "5others", "6+others",
-    )
-
     def _reference_inset_should_inject(self, params: Dict[str, Any]) -> bool:
-        """생성 시점에 reference inset 삽입이 필요한지 판단.
-
-        트리거:
-        1) params['reference_inset_tag_required'] == True (img2img_panel.get_parameters 주입)
-        2) main_window.img2img_panel._comic_panel_mode == True (백업 — params 누락 시)
-        """
-        if params.get('reference_inset_tag_required'):
-            return True
-        try:
-            mw = getattr(self.app_context, 'main_window', None)
-            panel = getattr(mw, 'img2img_panel', None) if mw else None
-            if panel is not None and getattr(panel, '_comic_panel_mode', False):
-                return True
-        except Exception:
-            pass
-        return False
+        """생성 시점에 reference inset 삽입이 필요한지 판단."""
+        return reference_inset_should_inject_params(params, app_context=self.app_context)
 
     def _inject_reference_inset_into_prompt(self, prompt: str) -> str:
-        """프롬프트 문자열에 'reference inset' 이 없으면 첫 person 토큰 직후에 삽입.
-
-        NAI 가중치 구문(`0.5::tag ::`) 보존을 위해 콤마 분리된 토큰 단위로만 조작.
-        person 토큰을 찾지 못하면 맨 앞에 삽입(폴백).
-        """
-        if not prompt:
-            return prompt
-        # 이미 존재하면 변경 없음 (가중치 래핑 / 대소문자 모두 포함하기 위해 lower contains).
-        if self._REFERENCE_INSET_TAG in prompt.lower():
-            return prompt
-
-        # 콤마 단위 split — 줄바꿈/주석(#랜덤프롬프트 등)도 토큰의 일부로 보존됨.
-        tokens = [t for t in prompt.split(',')]
-        # 첫 person 태그 인덱스 탐색 (양쪽 공백 무시).
-        insert_at = None
-        for i, raw in enumerate(tokens):
-            stripped = raw.strip()
-            # NAI 가중치 구문 제거 후 비교: '0.5::1girl ::' 도 잡기 위해.
-            cleaned = self._strip_nai_weight_for_match(stripped)
-            if cleaned in self._REFERENCE_INSET_PERSON_TAGS:
-                insert_at = i + 1
-                break
-
-        if insert_at is None:
-            # person 태그 없음 → 맨 앞 삽입
-            return f"{self._REFERENCE_INSET_TAG}, {prompt}"
-
-        # tokens[insert_at] 자리에 삽입. 앞 토큰의 trailing 공백 패턴을 살짝 따라가
-        # 자연스러운 ", reference inset, " 모양이 되도록.
-        new_tokens = tokens[:insert_at] + [f" {self._REFERENCE_INSET_TAG}"] + tokens[insert_at:]
-        return ",".join(new_tokens)
+        """프롬프트 문자열에 'reference inset' 이 없으면 첫 person 토큰 직후에 삽입."""
+        return inject_reference_inset_into_prompt(prompt)
 
     @staticmethod
     def _strip_nai_weight_for_match(token: str) -> str:
         """'0.5::1girl ::' / '1girl ::' / '1girl' 형태 모두에서 본문 태그만 추출."""
-        s = token.strip()
-        # trailing '::' 제거
-        while s.endswith('::'):
-            s = s[:-2].rstrip()
-        # leading 'NUM::' 제거 (NAI 가중치)
-        # 정규식 대신 단순 파서로 처리: 첫 '::' 이전이 숫자/소수점이면 잘라냄
-        idx = s.find('::')
-        if idx > 0:
-            head = s[:idx].strip()
-            try:
-                float(head)
-                s = s[idx + 2:].lstrip()
-            except ValueError:
-                pass
-        return s.strip()
+        return strip_nai_weight_for_match(token)
 
     def _process_mask_data(self, mask_bytes: bytes, is_nai: bool = True) -> str:
         """

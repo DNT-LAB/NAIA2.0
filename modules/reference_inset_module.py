@@ -17,25 +17,15 @@ from typing import TYPE_CHECKING, Any, Dict
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QCheckBox, QLabel
 
 from interfaces.base_module import BaseMiddleModule
+from core.reference_inset_service import (
+    REFERENCE_INSET_HOOK_INFO,
+    apply_reference_inset_to_prompt_context,
+)
 from ui.theme import DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 if TYPE_CHECKING:
     from core.prompt_context import PromptContext
-
-
-_PERSON_TAGS = frozenset({
-    '1boy', '2boys', '3boys', '4boys', '5boys', '6+boys',
-    '1girl', '2girls', '3girls', '4girls', '5girls', '6+girls',
-    '1other', '2others', '3others', '4others', '5others', '6+others',
-})
-
-_TARGET_TAG = 'reference inset'
-
-_TRIGGER_KEYS = (
-    'reference_inset_tag_required',
-    'cropped_image_request',
-)
 
 
 class ReferenceInsetAutoInjectModule(BaseMiddleModule):
@@ -84,21 +74,13 @@ class ReferenceInsetAutoInjectModule(BaseMiddleModule):
         return widget
 
     def get_pipeline_hook_info(self) -> Dict[str, Any]:
-        return {
-            'target_pipeline': 'PromptProcessor',
-            'hook_point': 'final_hookpoint',
-            'priority': 90,
-        }
+        return dict(REFERENCE_INSET_HOOK_INFO)
 
     def execute_pipeline_hook(self, context: 'PromptContext') -> 'PromptContext':
         try:
             if not self._is_enabled():
                 return context
-            if not self._should_inject(context):
-                return context
-            if self._already_present(context):
-                return context
-            self._inject_after_first_person_tag(context)
+            return apply_reference_inset_to_prompt_context(context, app_context=self.app_context)
         except Exception as e:
             print(f"⚠️ ReferenceInsetAutoInjectModule hook 실패: {e}")
         return context
@@ -108,57 +90,3 @@ class ReferenceInsetAutoInjectModule(BaseMiddleModule):
         if self._enabled_checkbox is None:
             return True
         return bool(self._enabled_checkbox.isChecked())
-
-    def _should_inject(self, context) -> bool:
-        # 1) settings 트리거 (생성 시점에 img2img_panel.get_parameters 가 주입)
-        s = getattr(context, 'settings', None) or {}
-        for k in _TRIGGER_KEYS:
-            if s.get(k):
-                return True
-        # 2) metadata 트리거 (외부에서 임의 주입한 케이스)
-        meta = getattr(context, 'metadata', None) or {}
-        if meta.get('reference_inset'):
-            return True
-        # 3) 메인 윈도우의 img2img_panel 상태 직접 조회.
-        #    settings 가 비어 있는 미리보기/Estimated Tokens 경로에서도 Comic Panel
-        #    이 활성이면 동일하게 트리거되도록 한다.
-        try:
-            mw = getattr(self.app_context, 'main_window', None) if self.app_context else None
-            panel = getattr(mw, 'img2img_panel', None) if mw else None
-            if panel is not None and getattr(panel, '_comic_panel_mode', False):
-                return True
-        except Exception:
-            pass
-        return False
-
-    @staticmethod
-    def _already_present(context) -> bool:
-        target_lc = _TARGET_TAG.lower()
-        for bag_name in ('prefix_tags', 'main_tags', 'postfix_tags'):
-            bag = getattr(context, bag_name, None) or []
-            for t in bag:
-                if isinstance(t, str) and target_lc in t.lower():
-                    return True
-        return False
-
-    @staticmethod
-    def _inject_after_first_person_tag(context) -> None:
-        # 1순위: main_tags 첫 person 직후
-        main_tags = getattr(context, 'main_tags', None)
-        if isinstance(main_tags, list):
-            for i, tag in enumerate(main_tags):
-                if isinstance(tag, str) and tag in _PERSON_TAGS:
-                    main_tags.insert(i + 1, _TARGET_TAG)
-                    return
-        # 2순위: prefix_tags 첫 person 직후 (캐릭터 모듈 등이 prefix 에 1girl 주입한 경우)
-        prefix_tags = getattr(context, 'prefix_tags', None)
-        if isinstance(prefix_tags, list):
-            for i, tag in enumerate(prefix_tags):
-                if isinstance(tag, str) and tag in _PERSON_TAGS:
-                    prefix_tags.insert(i + 1, _TARGET_TAG)
-                    return
-        # 3순위: 폴백 — main_tags 시작
-        if isinstance(main_tags, list):
-            main_tags.insert(0, _TARGET_TAG)
-        elif isinstance(prefix_tags, list):
-            prefix_tags.insert(0, _TARGET_TAG)

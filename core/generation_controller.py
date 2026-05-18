@@ -173,9 +173,10 @@ class GenerationWorker(QObject):
         if image.info.get("Software", "") == "NovelAI":
             try:
                 comment_data = json.loads(image.info.get("Comment", "{}"))
+                prompt_text = self.params.get('input') or image.info.get('Description', '')
                 # NAI 형식에 맞춰 문자열 재구성
                 info_string = (
-                    f"{image.info.get('Description', '')}\n"
+                    f"{prompt_text}\n"
                     f"Negative prompt: {comment_data.get('uc', '')}\n"
                     f"Steps: {comment_data.get('steps', 'N/A')}, Sampler: {comment_data.get('sampler', 'N/A')}, "
                     f"CFG scale: {comment_data.get('scale', 'N/A')}, Seed: {comment_data.get('seed', 'N/A')}"
@@ -1986,24 +1987,31 @@ class GenerationController:
                 print("[SEQUENCE] 오류: 프롬프트 세트가 비어있습니다.")
                 return
 
-            # 디버깅: 생성된 프롬프트 출력
-            for i, prompt in enumerate(prompt_sets, 1):
-                print(f"[SEQUENCE] #{i}: {prompt[:80]}{'...' if len(prompt) > 80 else ''}")
-
             # 4. 해상도 결정
             fixed_resolution = self._determine_fixed_resolution(prompt_sets[0])
             print(f"[SEQUENCE] 고정 해상도: {fixed_resolution[0]}x{fixed_resolution[1]}")
 
-            # 5. 큐에 일괄 추가
-            print("[SEQUENCE] 큐에 요청 추가 중...")
-            self._enqueue_sequence_requests(prompt_sets, fixed_resolution, overrides, priority)
+            # 5. 공통 구간 와일드카드 고정
+            base_params = self._collect_generation_params()
+            if overrides and 'negative_prompt' in overrides:
+                base_params['negative_prompt'] = overrides['negative_prompt']
+            parsed = self._expand_sequence_static_sections(parsed, base_params)
+            prompt_sets = SequenceParser.generate_prompt_sets(parsed)
 
-            # 6. 상태바 업데이트
+            # 디버깅: 실제 큐에 들어갈 프롬프트 출력
+            for i, prompt in enumerate(prompt_sets, 1):
+                print(f"[SEQUENCE] #{i}: {prompt[:80]}{'...' if len(prompt) > 80 else ''}")
+
+            # 6. 큐에 일괄 추가
+            print("[SEQUENCE] 큐에 요청 추가 중...")
+            self._enqueue_sequence_requests(prompt_sets, fixed_resolution, overrides, priority, base_params)
+
+            # 7. 상태바 업데이트
             self.context.main_window.status_bar.showMessage(
                 f"✅ 시퀀스 생성: {len(prompt_sets)}개 요청이 큐에 추가되었습니다."
             )
 
-            # 7. 큐 처리 시작
+            # 8. 큐 처리 시작
             print("[SEQUENCE] 큐 처리 시작...")
             QTimer.singleShot(0, self._process_next_queue_request)
 
@@ -2016,6 +2024,25 @@ class GenerationController:
             print(f"[SEQUENCE] 생성 오류: {e}")
             import traceback
             traceback.print_exc()
+
+    def _expand_sequence_static_sections(self, parsed: dict, base_params: dict) -> dict:
+        """
+        시퀀스 공통 구간(prefix/begin/end)의 와일드카드를 큐 등록 전에 한 번만 확장합니다.
+
+        :seq 내부 와일드카드는 각 프레임에서 의도적으로 바뀔 수 있도록 남겨둡니다.
+        """
+        expanded = dict(parsed)
+        negative_prompt = base_params.get('negative_prompt', '')
+
+        for section in ("prefix", "begin", "end"):
+            text = expanded.get(section, "")
+            if not text:
+                continue
+            expanded_text, negative_prompt = self._expand_wildcards_in_input(text, negative_prompt)
+            expanded[section] = expanded_text
+
+        base_params['negative_prompt'] = negative_prompt
+        return expanded
 
     def _determine_fixed_resolution(self, first_prompt: str) -> tuple[int, int]:
         """
@@ -2050,7 +2077,8 @@ class GenerationController:
         prompt_sets: list,
         fixed_resolution: tuple[int, int],
         overrides: dict = None,
-        priority: int = 0
+        priority: int = 0,
+        base_params: dict = None
     ):
         """
         🆕 시퀀스 요청을 큐에 일괄 추가
@@ -2067,7 +2095,8 @@ class GenerationController:
 
         # 🔧 FIX HIGH-1: 파라미터를 루프 밖에서 한 번만 수집
         # (캐릭터 리롤이 각 시퀀스마다 반복되지 않도록)
-        base_params = self._collect_generation_params()
+        if base_params is None:
+            base_params = self._collect_generation_params()
 
         # 🆕 API 모드 확인 (시드 처리 분기용)
         api_mode = base_params.get('api_mode', 'NAI')
@@ -2099,16 +2128,18 @@ class GenerationController:
                 # TODO: 시퀀스 생성에서도 cfg_scale:, cfg_rescale:, sampler:, scheduler: 인라인 파라미터 지원 예정
                 # 참고: api_service.py의 call_generation_api()에 구현된 파싱 로직 참조
 
-                # 프롬프트 설정 (메인 프롬프트를 각 시퀀스 프롬프트로 대체)
-                params['input'] = prompt
-
                 # 해상도 설정 (고정)
                 params['width'] = fixed_resolution[0]
                 params['height'] = fixed_resolution[1]
 
                 # 덮어쓰기 적용
+                sequence_input = prompt
+                sequence_negative_prompt = params.get('negative_prompt')
                 if overrides:
                     params.update(overrides)
+                params['input'] = sequence_input
+                if sequence_negative_prompt is not None:
+                    params['negative_prompt'] = sequence_negative_prompt
 
                 if not self._apply_vibe_cluster_prompt_override(params):
                     continue

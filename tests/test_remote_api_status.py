@@ -84,6 +84,17 @@ class _FakeLineEdit:
         self._text = str(text)
 
 
+class _FakeWildcardManager:
+    def __init__(self):
+        self.wildcard_dict_tree = {}
+        self.instant_wildcard_dict = {}
+        self.instant_wildcard_tree = {}
+
+    def update_instant_wildcards(self, instant_dict, instant_tree=None):
+        self.instant_wildcard_dict = dict(instant_dict)
+        self.instant_wildcard_tree = dict(instant_tree or {})
+
+
 def test_find_module_uses_controller_lookup_for_deferred_modules():
     sentinel = object()
 
@@ -103,6 +114,55 @@ def test_find_module_uses_controller_lookup_for_deferred_modules():
 
     assert bridge._find_module("ollama") is sentinel
     assert ctx.middle_section_controller.requested == "OllamaModule"
+
+
+def test_instant_wildcard_state_reads_headlessly_without_loading_module(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    save_dir = tmp_path / "save" / "instant_wildcard"
+    save_dir.mkdir(parents=True)
+    (save_dir / "default.json").write_text('{"quality": "best quality"}', encoding="utf-8")
+    (save_dir / "group.json").write_text('{"pose": "standing"}', encoding="utf-8")
+
+    class MiddleController:
+        module_instances = []
+
+        def get_module_instance(self, class_name):
+            raise AssertionError(f"unexpected module load: {class_name}")
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = MiddleController()
+    ctx.wildcard_manager = _FakeWildcardManager()
+
+    bridge = RemoteBridge(ctx)
+    state = bridge._read_instant_wildcard()
+
+    assert state["module_id"] == "instant_wildcard"
+    assert state["flat_count"] == 2
+    assert state["current_file"] == "default.json"
+    assert state["current_key"] == "quality"
+    assert ctx.wildcard_manager.instant_wildcard_tree["group"] == {"pose": "standing"}
+
+
+def test_instant_wildcard_upsert_is_headless_and_updates_wildcard_manager(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    save_dir = tmp_path / "save" / "instant_wildcard"
+    save_dir.mkdir(parents=True)
+    (save_dir / "default.json").write_text('{"quality": "best quality"}', encoding="utf-8")
+    ctx = _AppContext()
+    ctx.wildcard_manager = _FakeWildcardManager()
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._set_instant_wildcard(
+        "upsert",
+        json.dumps({"file": "custom", "key": "hero", "value": "1girl, sword"}),
+    )
+
+    saved = json.loads((save_dir / "custom.json").read_text(encoding="utf-8"))
+    assert saved == {"hero": "1girl, sword"}
+    assert ctx.wildcard_manager.instant_wildcard_tree["custom"] == {"hero": "1girl, sword"}
+    assert any(payload.get("module_id") == "instant_wildcard" for payload in broadcasts)
 
 
 def test_wildcard_prompt_squeeze_set_is_headless_and_persisted(tmp_path, monkeypatch):

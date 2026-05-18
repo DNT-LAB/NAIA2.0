@@ -18,6 +18,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QObject
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage
 
+from core.instant_wildcard_service import (
+    DEFAULT_INSTANT_WILDCARD_TEMPLATES,
+    ensure_instant_wildcard_defaults,
+    load_instant_wildcards,
+)
 from interfaces.base_module import BaseMiddleModule
 from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
@@ -317,28 +322,7 @@ class InstantWildcardModule(BaseMiddleModule):
         self.is_editing = False
         
         # 기본 파일 템플릿
-        self.default_templates = {
-            "default.json": {
-                "quality": "masterpiece, best quality",
-                "negative": "lowres, bad anatomy, bad hands",
-                "style": "anime style, digital art"
-            },
-            "캐릭터.json": {
-                "girl": "1girl, solo",
-                "boy": "1boy, solo", 
-                "multiple": "multiple girls"
-            },
-            "의상.json": {
-                "school": "school uniform, skirt",
-                "casual": "casual clothes, jeans",
-                "formal": "formal wear, suit"
-            },
-            "장소.json": {
-                "outdoor": "outdoors, sky, clouds",
-                "indoor": "indoors, room",
-                "city": "city, street, buildings"
-            }
-        }
+        self.default_templates = DEFAULT_INSTANT_WILDCARD_TEMPLATES
         
     def get_title(self) -> str:
         return "☑️ 인스턴트 와일드카드"
@@ -507,51 +491,14 @@ class InstantWildcardModule(BaseMiddleModule):
     
     def create_initial_files(self):
         """초기 JSON 파일들 생성"""
-        for filename, content in self.default_templates.items():
-            filepath = self.save_path / filename
-            try:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    json.dump(content, f, ensure_ascii=False, indent=2)
-                print(f"[OK] Initial file created: {filename}")
-            except Exception as e:
-                print(f"[ERROR] Failed to create file {filename}: {e}")
+        ensure_instant_wildcard_defaults(self.save_path, self.default_templates)
     
     def load_all_wildcards(self):
         """모든 와일드카드 파일 로드"""
-        self.json_data.clear()
-        self.instant_wildcard_dict.clear()
-        self.instant_wildcard_tree.clear()
-        
-        # JSON 파일 목록 가져오기 (메타데이터 파일 제외)
-        json_files = sorted([f.name for f in self.save_path.glob("*.json") if f.name != "wc_metadata.json"])
-        
-        # default.json을 우선 로드
-        if "default.json" in json_files:
-            json_files.remove("default.json")
-            json_files.insert(0, "default.json")
-        
-        # 파일별로 로드
-        for filename in json_files:
-            filepath = self.save_path / filename
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.json_data[filename] = data
-                    
-                    # instant_wildcard_tree에 파일별로 그룹화
-                    basename = filename.replace('.json', '')
-                    self.instant_wildcard_tree[basename] = data.copy()
-                    
-                    # instant_wildcard_dict에 추가
-                    for key, value in data.items():
-                        # 중복 키 처리
-                        if key in self.instant_wildcard_dict:
-                            if basename != "default":
-                                key = f"{key} ({basename})"
-                        self.instant_wildcard_dict[key] = value
-                        
-            except Exception as e:
-                print(f"[ERROR] Failed to load file {filename}: {e}")
+        store = load_instant_wildcards(self.save_path)
+        self.json_data = store["json_data"]
+        self.instant_wildcard_dict = store["instant_wildcard_dict"]
+        self.instant_wildcard_tree = store["instant_wildcard_tree"]
         
         # UI 업데이트
         self.update_ui()

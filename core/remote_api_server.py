@@ -42,6 +42,15 @@ from core.character_viewer_service import CharacterViewerService
 from core.clothes_preset_service import ClothesPresetService
 from core.event_preset_service import EventPresetService
 from core.expression_preset_service import ExpressionPresetService
+from core.instant_wildcard_service import (
+    DEFAULT_INSTANT_WILDCARD_SAVE_PATH,
+    instant_wildcard_file_signature,
+    instant_wildcard_group_name,
+    load_instant_wildcards,
+    normalize_instant_wildcard_filename,
+    select_instant_wildcard_item,
+    write_instant_wildcard_file,
+)
 from core.kr_tag_loader import format_kr_tag_load_summary, load_kr_tag_records
 from core.preset_input_bridge import PresetInputBridge, update_app_preset_context
 from core.preset_composer_service import PresetComposerService
@@ -724,6 +733,14 @@ class RemoteBridge(QObject):
         self._result_history_actions_lock = threading.Lock()
         self._pending_artist_thumb_random_peng_requests: dict = {}
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
+        self._instant_wildcard_save_path = DEFAULT_INSTANT_WILDCARD_SAVE_PATH
+        self._instant_wildcard_json_data: dict = {}
+        self._instant_wildcard_dict: dict = {}
+        self._instant_wildcard_tree: dict = {}
+        self._instant_wildcard_current_file: str | None = None
+        self._instant_wildcard_current_key: str | None = None
+        self._instant_wildcard_file_signature: tuple | None = None
+        self._reload_instant_wildcards(None, force=True)
 
     def _get_prompt_generation_service(self):
         service = getattr(self.app_context, "prompt_generation_service", None)
@@ -11771,27 +11788,22 @@ class RemoteBridge(QObject):
     # --- Instant Wildcard Module ---
 
     def _instant_wildcard_filename(self, name: str) -> str:
-        filename = Path(str(name or "").strip()).name
-        if not filename:
-            return ""
-        if not filename.endswith(".json"):
-            filename += ".json"
-        return filename
+        return normalize_instant_wildcard_filename(name)
 
     def _instant_wildcard_file_signature(self, module) -> tuple:
-        try:
-            module.save_path.mkdir(parents=True, exist_ok=True)
-            entries = []
-            for item in sorted(module.save_path.glob("*.json"), key=lambda path: path.name):
-                if item.name == "wc_metadata.json":
-                    continue
-                stat = item.stat()
-                entries.append((item.name, stat.st_mtime_ns, stat.st_size))
-            return tuple(entries)
-        except Exception:
-            return ()
+        save_path = getattr(module, "save_path", self._instant_wildcard_save_path)
+        return instant_wildcard_file_signature(save_path)
 
     def _ensure_instant_wildcard_selection(self, module):
+        if module is None:
+            self._instant_wildcard_current_file, self._instant_wildcard_current_key = (
+                select_instant_wildcard_item(
+                    self._instant_wildcard_json_data,
+                    self._instant_wildcard_current_file,
+                    self._instant_wildcard_current_key,
+                )
+            )
+            return
         if module.json_data:
             if module.current_file not in module.json_data:
                 module.current_file = next(iter(module.json_data.keys()))
@@ -11804,67 +11816,50 @@ class RemoteBridge(QObject):
             module.current_file = None
             module.current_key = None
 
-    def _reload_instant_wildcards(self, module, *, force: bool = False) -> bool:
+    def _sync_loaded_instant_wildcard_module(self):
+        module = self._find_loaded_module_instance("InstantWildcardModule")
         if not module:
-            return False
+            return
+        module.json_data = copy.deepcopy(self._instant_wildcard_json_data)
+        module.instant_wildcard_dict = copy.deepcopy(self._instant_wildcard_dict)
+        module.instant_wildcard_tree = copy.deepcopy(self._instant_wildcard_tree)
+        module.current_file = self._instant_wildcard_current_file
+        module.current_key = self._instant_wildcard_current_key
         try:
-            module.save_path.mkdir(parents=True, exist_ok=True)
-            default_file = module.save_path / "default.json"
-            if not default_file.exists() and hasattr(module, "create_initial_files"):
-                module.create_initial_files()
+            module._remote_iw_file_signature = self._instant_wildcard_file_signature
+            if getattr(module, "widget", None) is not None and hasattr(module, "update_ui"):
+                module.update_ui()
+            if hasattr(module, "signals") and hasattr(module.signals, "wildcards_updated"):
+                module.signals.wildcards_updated.emit(module.instant_wildcard_dict)
+        except Exception as e:
+            print(f"🌐 Remote: loaded instant wildcard module sync 실패 — {e}")
 
-            signature = self._instant_wildcard_file_signature(module)
+    def _reload_instant_wildcards(self, module, *, force: bool = False) -> bool:
+        try:
+            save_path = getattr(module, "save_path", self._instant_wildcard_save_path)
+            signature = instant_wildcard_file_signature(save_path)
             if (
                 not force
-                and getattr(module, "_remote_iw_file_signature", None) == signature
-                and getattr(module, "json_data", None)
+                and self._instant_wildcard_file_signature == signature
+                and self._instant_wildcard_json_data
             ):
-                self._ensure_instant_wildcard_selection(module)
+                self._ensure_instant_wildcard_selection(None)
                 return True
 
-            if getattr(module, "file_combo", None) is not None and getattr(module, "key_combo", None) is not None:
-                module.load_all_wildcards()
-            else:
-                module.json_data.clear()
-                module.instant_wildcard_dict.clear()
-                module.instant_wildcard_tree.clear()
-                json_files = sorted([
-                    item.name for item in module.save_path.glob("*.json")
-                    if item.name != "wc_metadata.json"
-                ])
-                if "default.json" in json_files:
-                    json_files.remove("default.json")
-                    json_files.insert(0, "default.json")
-
-                for filename in json_files:
-                    filepath = module.save_path / filename
-                    try:
-                        with open(filepath, "r", encoding="utf-8") as handle:
-                            data = json.load(handle)
-                        if not isinstance(data, dict):
-                            data = {}
-                        module.json_data[filename] = data
-                        basename = filename[:-5] if filename.endswith(".json") else filename
-                        module.instant_wildcard_tree[basename] = data.copy()
-                        for key, value in data.items():
-                            flat_key = key
-                            if flat_key in module.instant_wildcard_dict and basename != "default":
-                                flat_key = f"{flat_key} ({basename})"
-                            module.instant_wildcard_dict[flat_key] = value
-                    except Exception as e:
-                        print(f"🌐 Remote: instant wildcard 파일 로드 실패 — {filename}: {e}")
-
-                if hasattr(module, "signals") and hasattr(module.signals, "wildcards_updated"):
-                    module.signals.wildcards_updated.emit(module.instant_wildcard_dict)
-                wildcard_manager = getattr(getattr(module, "app_context", None), "wildcard_manager", None)
-                if wildcard_manager:
-                    wildcard_manager.update_instant_wildcards(
-                        module.instant_wildcard_dict,
-                        module.instant_wildcard_tree,
-                    )
-
-            module._remote_iw_file_signature = signature
-            self._ensure_instant_wildcard_selection(module)
+            store = load_instant_wildcards(save_path)
+            self._instant_wildcard_save_path = Path(store.get("save_path") or save_path)
+            self._instant_wildcard_json_data = store["json_data"]
+            self._instant_wildcard_dict = store["instant_wildcard_dict"]
+            self._instant_wildcard_tree = store["instant_wildcard_tree"]
+            self._instant_wildcard_file_signature = store["signature"]
+            self._ensure_instant_wildcard_selection(None)
+            wildcard_manager = getattr(self.app_context, "wildcard_manager", None)
+            if wildcard_manager:
+                wildcard_manager.update_instant_wildcards(
+                    self._instant_wildcard_dict,
+                    self._instant_wildcard_tree,
+                )
+            self._sync_loaded_instant_wildcard_module()
             return True
         except Exception as e:
             print(f"🌐 Remote: instant_wildcard reload 실패 — {e}")
@@ -11875,12 +11870,15 @@ class RemoteBridge(QObject):
         if not filename:
             return False
         try:
-            module.save_path.mkdir(parents=True, exist_ok=True)
-            filepath = module.save_path / filename
-            data = module.json_data.get(filename, {})
-            with open(filepath, "w", encoding="utf-8") as handle:
-                json.dump(data, handle, ensure_ascii=False, indent=2)
-            self._reload_instant_wildcards(module, force=True)
+            if module is not None:
+                self._instant_wildcard_json_data = copy.deepcopy(getattr(module, "json_data", {}))
+            if not write_instant_wildcard_file(
+                self._instant_wildcard_json_data,
+                filename,
+                self._instant_wildcard_save_path,
+            ):
+                return False
+            self._reload_instant_wildcards(None, force=True)
             return True
         except Exception as e:
             print(f"🌐 Remote: instant_wildcard 저장 실패 — {filename}: {e}")
@@ -11888,34 +11886,34 @@ class RemoteBridge(QObject):
 
     def _read_instant_wildcard(self) -> dict:
         try:
-            module = self._find_module("instant_wildcard")
-            if not module:
-                return {}
-            self._reload_instant_wildcards(module)
+            self._reload_instant_wildcards(None)
             files = []
-            for filename in sorted(module.json_data.keys(), key=lambda name: (name != "default.json", name)):
-                data = module.json_data.get(filename, {})
-                group = filename[:-5] if filename.endswith(".json") else filename
+            for filename in sorted(self._instant_wildcard_json_data.keys(), key=lambda name: (name != "default.json", name)):
+                data = self._instant_wildcard_json_data.get(filename, {})
+                group = instant_wildcard_group_name(filename)
                 files.append({
                     "name": filename,
                     "group": group,
                     "count": len(data) if isinstance(data, dict) else 0,
-                    "selected": filename == module.current_file,
+                    "selected": filename == self._instant_wildcard_current_file,
                 })
 
-            current_file = module.current_file
-            current_data = module.json_data.get(current_file, {}) if current_file else {}
+            current_file = self._instant_wildcard_current_file
+            current_data = self._instant_wildcard_json_data.get(current_file, {}) if current_file else {}
             items = []
             if isinstance(current_data, dict):
                 for key in sorted(current_data.keys()):
                     items.append({
                         "key": key,
                         "value": current_data.get(key, ""),
-                        "selected": key == module.current_key,
+                        "selected": key == self._instant_wildcard_current_key,
                     })
             current_value = ""
-            if current_file and module.current_key:
-                current_value = module.json_data.get(current_file, {}).get(module.current_key, "")
+            if current_file and self._instant_wildcard_current_key:
+                current_value = self._instant_wildcard_json_data.get(current_file, {}).get(
+                    self._instant_wildcard_current_key,
+                    "",
+                )
 
             return {
                 "type": "module_state",
@@ -11923,11 +11921,11 @@ class RemoteBridge(QObject):
                 "files": files,
                 "items": items,
                 "current_file": current_file,
-                "current_group": current_file[:-5] if current_file and current_file.endswith(".json") else current_file,
-                "current_key": module.current_key,
+                "current_group": instant_wildcard_group_name(current_file) if current_file else current_file,
+                "current_key": self._instant_wildcard_current_key,
                 "current_value": current_value,
-                "flat_count": len(getattr(module, "instant_wildcard_dict", {})),
-                "save_path": str(getattr(module, "save_path", "")),
+                "flat_count": len(self._instant_wildcard_dict),
+                "save_path": str(self._instant_wildcard_save_path),
             }
         except Exception as e:
             print(f"🌐 Remote: instant_wildcard 상태 읽기 실패 — {e}")
@@ -11946,37 +11944,36 @@ class RemoteBridge(QObject):
 
     def _set_instant_wildcard(self, key: str, value: str):
         try:
-            module = self._find_module("instant_wildcard")
-            if not module:
-                return
-            self._reload_instant_wildcards(module)
+            self._reload_instant_wildcards(None)
             should_broadcast = True
 
             if key == "reload":
-                self._reload_instant_wildcards(module, force=True)
+                self._reload_instant_wildcards(None, force=True)
             elif key == "select_file":
                 filename = self._instant_wildcard_filename(value)
-                if filename in module.json_data:
-                    module.current_file = filename
-                    data = module.json_data.get(filename, {})
-                    module.current_key = next(iter(sorted(data.keys()))) if data else None
-                    if getattr(module, "file_combo", None) is not None:
-                        module.file_combo.setCurrentText(filename)
+                if filename in self._instant_wildcard_json_data:
+                    self._instant_wildcard_current_file = filename
+                    data = self._instant_wildcard_json_data.get(filename, {})
+                    self._instant_wildcard_current_key = next(iter(sorted(data.keys()))) if data else None
             elif key == "select_key":
                 item_key = value.strip()
-                if module.current_file and item_key in module.json_data.get(module.current_file, {}):
-                    module.current_key = item_key
-                    if getattr(module, "key_combo", None) is not None:
-                        module.key_combo.setCurrentText(item_key)
-                    if getattr(module, "value_edit", None) is not None:
-                        module.value_edit.setPlainText(module.json_data[module.current_file][item_key])
+                if (
+                    self._instant_wildcard_current_file
+                    and item_key in self._instant_wildcard_json_data.get(self._instant_wildcard_current_file, {})
+                ):
+                    self._instant_wildcard_current_key = item_key
             elif key == "value":
-                if module.current_file and module.current_key:
-                    module.json_data.setdefault(module.current_file, {})[module.current_key] = value
-                    self._write_instant_wildcard_file(module, module.current_file)
+                if self._instant_wildcard_current_file and self._instant_wildcard_current_key:
+                    self._instant_wildcard_json_data.setdefault(
+                        self._instant_wildcard_current_file,
+                        {},
+                    )[self._instant_wildcard_current_key] = value
+                    self._write_instant_wildcard_file(None, self._instant_wildcard_current_file)
             elif key == "upsert":
                 payload = json.loads(value)
-                filename = self._instant_wildcard_filename(payload.get("file") or module.current_file)
+                filename = self._instant_wildcard_filename(
+                    payload.get("file") or self._instant_wildcard_current_file
+                )
                 item_key = str(payload.get("key", "")).strip()
                 item_value = str(payload.get("value", ""))
                 if not filename or not item_key:
@@ -11986,10 +11983,10 @@ class RemoteBridge(QObject):
                         "level": "error",
                     })
                     return
-                module.json_data.setdefault(filename, {})[item_key] = item_value
-                module.current_file = filename
-                module.current_key = item_key
-                saved = self._write_instant_wildcard_file(module, filename)
+                self._instant_wildcard_json_data.setdefault(filename, {})[item_key] = item_value
+                self._instant_wildcard_current_file = filename
+                self._instant_wildcard_current_key = item_key
+                saved = self._write_instant_wildcard_file(None, filename)
                 self._broadcast_json({
                     "type": "toast",
                     "message": f"Chunk saved: {item_key}" if saved else "Chunk save failed",
@@ -11999,50 +11996,62 @@ class RemoteBridge(QObject):
                     should_broadcast = False
             elif key == "delete":
                 payload = json.loads(value)
-                filename = self._instant_wildcard_filename(payload.get("file") or module.current_file)
+                filename = self._instant_wildcard_filename(
+                    payload.get("file") or self._instant_wildcard_current_file
+                )
                 item_key = str(payload.get("key", "")).strip()
-                if filename in module.json_data and item_key in module.json_data[filename]:
-                    del module.json_data[filename][item_key]
-                    image_path = Path("save") / "instant_wildcard" / "images" / filename[:-5] / f"{item_key}.png"
+                if filename in self._instant_wildcard_json_data and item_key in self._instant_wildcard_json_data[filename]:
+                    del self._instant_wildcard_json_data[filename][item_key]
+                    image_path = Path("save") / "instant_wildcard" / "images" / instant_wildcard_group_name(filename) / f"{item_key}.png"
                     if image_path.exists():
                         try:
                             image_path.unlink()
                         except Exception as e:
                             print(f"🌐 Remote: instant wildcard 이미지 삭제 실패 — {e}")
-                    if module.current_file == filename and module.current_key == item_key:
-                        remaining = module.json_data.get(filename, {})
-                        module.current_key = next(iter(sorted(remaining.keys()))) if remaining else None
-                    self._write_instant_wildcard_file(module, filename)
+                    if self._instant_wildcard_current_file == filename and self._instant_wildcard_current_key == item_key:
+                        remaining = self._instant_wildcard_json_data.get(filename, {})
+                        self._instant_wildcard_current_key = next(iter(sorted(remaining.keys()))) if remaining else None
+                    self._write_instant_wildcard_file(None, filename)
             elif key == "rename":
                 payload = json.loads(value)
-                filename = self._instant_wildcard_filename(payload.get("file") or module.current_file)
+                filename = self._instant_wildcard_filename(
+                    payload.get("file") or self._instant_wildcard_current_file
+                )
                 old_key = str(payload.get("old_key", "")).strip()
                 new_key = str(payload.get("new_key", "")).strip()
-                if filename in module.json_data and old_key in module.json_data[filename] and new_key:
+                if (
+                    filename in self._instant_wildcard_json_data
+                    and old_key in self._instant_wildcard_json_data[filename]
+                    and new_key
+                ):
                     if new_key != old_key:
-                        module.json_data[filename][new_key] = module.json_data[filename].pop(old_key)
-                        old_image = Path("save") / "instant_wildcard" / "images" / filename[:-5] / f"{old_key}.png"
-                        new_image = Path("save") / "instant_wildcard" / "images" / filename[:-5] / f"{new_key}.png"
+                        self._instant_wildcard_json_data[filename][new_key] = (
+                            self._instant_wildcard_json_data[filename].pop(old_key)
+                        )
+                        image_group = instant_wildcard_group_name(filename)
+                        old_image = Path("save") / "instant_wildcard" / "images" / image_group / f"{old_key}.png"
+                        new_image = Path("save") / "instant_wildcard" / "images" / image_group / f"{new_key}.png"
                         if old_image.exists():
                             try:
                                 new_image.parent.mkdir(parents=True, exist_ok=True)
                                 old_image.rename(new_image)
                             except Exception as e:
                                 print(f"🌐 Remote: instant wildcard 이미지 이름 변경 실패 — {e}")
-                    module.current_file = filename
-                    module.current_key = new_key
-                    self._write_instant_wildcard_file(module, filename)
+                    self._instant_wildcard_current_file = filename
+                    self._instant_wildcard_current_key = new_key
+                    self._write_instant_wildcard_file(None, filename)
             elif key == "add_group":
                 filename = self._instant_wildcard_filename(value)
                 if filename:
-                    if filename not in module.json_data:
-                        module.json_data[filename] = {}
-                        self._write_instant_wildcard_file(module, filename)
-                    module.current_file = filename
-                    module.current_key = None
+                    if filename not in self._instant_wildcard_json_data:
+                        self._instant_wildcard_json_data[filename] = {}
+                        self._write_instant_wildcard_file(None, filename)
+                    self._instant_wildcard_current_file = filename
+                    self._instant_wildcard_current_key = None
             else:
                 should_broadcast = False
 
+            self._sync_loaded_instant_wildcard_module()
             if should_broadcast:
                 self._broadcast_instant_wildcard_state()
         except Exception as e:
@@ -14408,11 +14417,9 @@ class RemoteBridge(QObject):
     def _search_chunks(self, query: str, limit: int = 12) -> list:
         """인스턴트 와일드카드 Chunk 검색 ($key / $group: 용)."""
         try:
-            module = self._find_module("instant_wildcard")
-            if not module:
-                return []
-            self._reload_instant_wildcards(module)
-            flat_dict, tree = module.get_wildcards()
+            self._reload_instant_wildcards(None)
+            flat_dict = dict(self._instant_wildcard_dict)
+            tree = dict(self._instant_wildcard_tree)
             raw = str(query or "").strip()
             if raw.startswith("$"):
                 raw = raw[1:].strip()
@@ -14626,10 +14633,8 @@ class RemoteBridge(QObject):
     def _read_chunk(self) -> dict:
         """Chunk 모듈: 인스턴트 와일드카드 트리 전체 반환"""
         try:
-            iw_module = self._find_module("instant_wildcard")
-            if not iw_module:
-                return {"type": "module_state", "module_id": "chunk", "groups": []}
-            flat_dict, tree = iw_module.get_wildcards()
+            self._reload_instant_wildcards(None)
+            tree = dict(self._instant_wildcard_tree)
             groups = []
             for fname, items in tree.items():
                 group_name = fname.replace('.json', '') if fname.endswith('.json') else fname

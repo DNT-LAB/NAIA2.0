@@ -86,6 +86,8 @@ class AppContext:
         self.wildcard_override: dict = {}
         from core.wildcard_status_settings import apply_wildcard_status_settings
         apply_wildcard_status_settings(self)
+        from core.instant_wildcard_service import apply_instant_wildcards_to_context
+        apply_instant_wildcards_to_context(self)
 
         # 🆕 임시 생성 창 모드 플래그 (FR-2-1, FR-3-1)
         self.temp_window_mode = False  # 임시 창 생성 중인지 여부

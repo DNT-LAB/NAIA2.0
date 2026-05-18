@@ -163,7 +163,7 @@
 - 단순 lazy 처리만 하면 `prompt_squeeze_enabled`와 `scoped_wildcard` 설정 로드가 사라져 생성 동작이 바뀔 수 있으므로, `core.wildcard_status_settings`를 추가해 `AppContext` 생성 시 PyQt 없이 설정을 적용한다.
 - `RemoteBridge._read_wildcard()`는 더 이상 `WildcardStatusModule`을 찾거나 깨우지 않고, `AppContext.current_prompt_context`와 `WildcardManager`만 읽어 module-state payload를 만든다.
 - Remote Web의 `wildcard.prompt_squeeze`, `reload`, `reset_sequential`, wildcard file-tree/read/save/delete/create/preview 액션은 서버 상태와 `WildcardManager` 기반으로 처리한다. `open_manager`처럼 실제 PyQt 창이 필요한 액션만 deferred module을 on-demand 로드한다.
-- `InstantWildcardModule`은 생성 파라미터와 instant wildcard dictionary를 제공하므로 이번 라운드에서 eager 상태로 유지한다.
+- `InstantWildcardModule`은 `$...` chunk expansion에 필요한 instant wildcard dictionary/tree를 제공하므로 이 라운드에서는 eager 상태로 유지한다. Round 16에서 해당 JSON store가 PyQt-free service로 분리되면서 lazy 대상이 되었다.
 - 다음 lazy 후보는 `E621EventModuleV2`이다. Remote Web launcher/on-demand 표면이고 초기 state 요청 대상은 아니지만, constructor의 e621 data check/download side effect와 `_read_e621_event()` cache 계약을 별도 라운드에서 먼저 검증해야 한다.
 
 ### Round 14 E621 event module WebSession lazy loading
@@ -181,3 +181,12 @@
 - hidden WebSession에서는 `ReferenceInsetAutoInjectModule` import/constructor/widget 생성을 지연하고, 대신 `ReferenceInsetAutoInjectHook`을 headless pipeline hook으로 등록한다.
 - Desktop 런타임에서는 기존 PyQt module UI와 checkbox 토글을 유지한다.
 - `AutomationModule`은 이번 감사에서 lazy 후보에서 제외했다. Remote Web 초기 handshake와 server startup signal wiring이 `_find_module("automation")`을 통해 모듈을 깨우며, generation parameter 기본값도 모듈 인스턴스에 묶여 있기 때문이다. Automation lazy 전환은 별도 headless state/default parameter service가 선행되어야 한다.
+
+### Round 16 Instant Wildcard headless store
+
+- `InstantWildcardModule`은 Remote Web 초기 badge 대상이 아니고 `get_parameters()`도 빈 dict지만, `$group`/`$key` chunk expansion은 `WildcardManager.instant_wildcard_dict/tree`를 읽는다.
+- `core.instant_wildcard_service`를 추가해 `save/instant_wildcard/*.json` 로드, default template 생성, duplicate key suffix 처리, file write, AppContext 적용을 PyQt 없이 수행한다.
+- `AppContext` 생성 시 instant wildcard store를 `WildcardManager`에 먼저 반영하므로, hidden WebSession에서 PyQt module을 깨우지 않아도 최초 생성 전 `$...` expansion 데이터가 준비된다.
+- `RemoteBridge`의 instant wildcard state/edit, chunk state, `$` autocomplete search는 server-owned headless store를 사용하고 더 이상 `_find_module("instant_wildcard")`를 호출하지 않는다.
+- `AutoCompleteManager`는 먼저 `WildcardManager` 캐시를 사용하고, 비어 있을 때만 desktop PyQt module fallback을 호출한다.
+- hidden WebSession startup에서는 `InstantWildcardModule` import/constructor/widget 생성을 지연한다. Desktop 런타임은 기존 UI wrapper를 유지하며 JSON 로딩만 core service에 위임한다.

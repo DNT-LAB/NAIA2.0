@@ -106,7 +106,7 @@ def test_web_session_lazy_registry_keeps_generation_modules_eager():
     assert specs["OllamaModule"]["web_session_lazy"] is True
     assert specs["ReferenceInsetAutoInjectModule"]["web_session_lazy"] is True
     assert specs["ReferenceInsetAutoInjectModule"]["web_session_headless_hook"] == "reference_inset"
-    assert specs["InstantWildcardModule"].get("web_session_lazy") is not True
+    assert specs["InstantWildcardModule"]["web_session_lazy"] is True
     assert specs["AutomationModule"].get("web_session_lazy") is not True
 
 

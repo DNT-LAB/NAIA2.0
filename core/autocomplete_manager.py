@@ -1087,6 +1087,13 @@ class AutoCompleteManager(QObject):
            dict_data = wildcard_manager.get_instant_wildcard_dict()
         """
         try:
+            app_context = getattr(self.main_window, "app_context", None) if self.main_window else None
+            wildcard_manager = getattr(app_context, "wildcard_manager", None) if app_context else None
+            if wildcard_manager:
+                dict_data, tree_data = wildcard_manager.get_instant_wildcards()
+                if dict_data or tree_data:
+                    return dict_data, tree_data
+
             # middle_section_controller를 통해 InstantWildcardModule 접근
             if self.main_window and hasattr(self.main_window, 'middle_section_controller'):
                 instant_module = self.main_window.middle_section_controller.get_module_instance("InstantWildcardModule")

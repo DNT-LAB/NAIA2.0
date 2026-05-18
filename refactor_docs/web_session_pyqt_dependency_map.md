@@ -124,3 +124,11 @@
 - memory snapshot, `data/naia_temp_rows.parquet`, `data/tags/tags_129.parquet` fallback은 UI label/status 변경 없이 `SearchResultModel`만 복원한다.
 - `ModernMainWindow.trigger_random_prompt()` fallback은 Event Stream 활성 경로, preset/comfyui scoped 경로, 비정상/테스트 context처럼 `search_results` 표면이 없는 경우에만 남는다.
 - 이 라운드 이후 plain Remote Web random의 일반 경로는 더 이상 desktop button/status wrapper를 통과하지 않는다.
+
+### Round 09 result image payload helper 분리
+
+- `/api/result/image/png`, `/api/history/image/*`, `/api/history/thumb/*`, `/api/history/meta/*`가 쓰는 PNG/WEBP/media-type/metadata summary helper를 `core.result_image_payload_service`로 분리했다.
+- 새 helper는 PyQt/QObject를 import하지 않고, PIL과 PNG metadata utility는 실제 이미지 변환 시점에만 lazy import한다.
+- `RemoteBridge`의 기존 private method 이름은 wrapper로 유지해 FastAPI route와 기존 테스트 계약을 보존한다.
+- 저장 경로 검증, history item 탐색, 파일 thumbnail disk cache는 아직 `RemoteBridge`에 남아 있다. 이 부분은 `ImageWindow`/history widget 접근과 연결되어 있어 별도 상태 저장소 분리 후 다음 라운드에서 줄여야 한다.
+- 이 라운드 이후 결과 이미지 bytes 변환과 메모리 history thumbnail 생성은 PyQt bridge 밖의 pure service에서 검증할 수 있다.

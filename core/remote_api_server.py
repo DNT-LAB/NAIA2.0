@@ -36,6 +36,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, Qt, QTimer, QThread, QCoreApplicat
 from PyQt6.QtWidgets import QFileDialog
 
 from core import api_verification
+from core import result_image_payload_service as result_images
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.character_viewer_service import CharacterViewerService
 from core.clothes_preset_service import ClothesPresetService
@@ -5988,36 +5989,16 @@ class RemoteBridge(QObject):
             subprocess.Popen(["xdg-open", str(path.parent)])
 
     def _result_png_filename(self, source_name: str = "") -> str:
-        raw_name = Path(str(source_name or "")).name
-        raw_name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", raw_name).strip()
-        stem = Path(raw_name).stem if raw_name else ""
-        return f"{stem or 'naia-result'}.png"
+        return result_images.result_png_filename(source_name)
 
     def _download_content_disposition(self, filename: str) -> str:
-        ascii_name = re.sub(r"[^A-Za-z0-9._ -]+", "_", filename).strip(" ._")
-        ascii_name = ascii_name or "naia-result.png"
-        return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename)}'
+        return result_images.download_content_disposition(filename)
 
     def _image_media_type_for_path(self, image_path: 'Path') -> str:
-        ext = Path(image_path).suffix.lower()
-        return {
-            ".webp": "image/webp",
-            ".jpg": "image/jpeg",
-            ".jpeg": "image/jpeg",
-            ".gif": "image/gif",
-            ".bmp": "image/bmp",
-        }.get(ext, "image/png")
+        return result_images.image_media_type_for_path(image_path)
 
     def _image_media_type_for_bytes(self, image_bytes: bytes) -> str:
-        if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-            return "image/png"
-        if image_bytes.startswith(b"\xff\xd8\xff"):
-            return "image/jpeg"
-        if image_bytes.startswith(b"RIFF") and len(image_bytes) >= 12 and image_bytes[8:12] == b"WEBP":
-            return "image/webp"
-        if image_bytes.startswith(b"GIF87a") or image_bytes.startswith(b"GIF89a"):
-            return "image/gif"
-        return "application/octet-stream"
+        return result_images.image_media_type_for_bytes(image_bytes)
 
     def _resolve_result_original_file(self, source: str = "", rel_path: str = "") -> 'Path | None':
         source = str(source or "").strip().lower()
@@ -6040,25 +6021,12 @@ class RemoteBridge(QObject):
         return None
 
     def _is_png_bytes(self, image_bytes: bytes) -> bool:
-        if not image_bytes or not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-            return False
-        try:
-            from PIL import Image
-
-            with Image.open(io.BytesIO(image_bytes)) as opened:
-                return (opened.format or "").upper() == "PNG"
-        except Exception:
-            return False
+        return result_images.is_png_bytes(image_bytes)
 
     def _pil_image_to_png_bytes(self, image) -> bytes:
-        from utils.comfyui_png_metadata import build_pnginfo, image_to_png_bytes
-
-        pnginfo = build_pnginfo(dict(getattr(image, "info", {}) or {}))
-        return image_to_png_bytes(image, pnginfo=pnginfo)
+        return result_images.pil_image_to_png_bytes(image)
 
     def _build_result_png_payload(self, source: str = "", rel_path: str = "") -> tuple[bytes, str]:
-        from PIL import Image
-
         source = str(source or "").strip().lower()
         rel_path = str(rel_path or "").strip()
 
@@ -6066,46 +6034,23 @@ class RemoteBridge(QObject):
             history_item = self._find_history_item_by_rel_path(rel_path)
             if history_item and getattr(history_item, "image", None):
                 label = str(getattr(history_item, "filepath", "") or self._history_item_filename(history_item))
-                raw_bytes = getattr(history_item, "raw_bytes", None)
-                if raw_bytes:
-                    raw_bytes = bytes(raw_bytes)
-                    if self._is_png_bytes(raw_bytes):
-                        return raw_bytes, self._result_png_filename(label)
-                filepath = str(getattr(history_item, "filepath", "") or "")
-                if filepath and Path(filepath).is_file() and Path(filepath).suffix.lower() == ".png":
-                    return Path(filepath).read_bytes(), self._result_png_filename(filepath)
-                return self._pil_image_to_png_bytes(history_item.image), self._result_png_filename(label)
+                return result_images.history_item_png_payload(history_item, label=label)
 
             target = self._validate_viewer_path(rel_path)
             if not target and source != "current":
                 raise FileNotFoundError("Image file is unavailable")
-            if target and target.suffix.lower() == ".png":
-                return target.read_bytes(), self._result_png_filename(target.name)
             if target:
-                with Image.open(str(target)) as opened:
-                    opened.load()
-                    image = opened.convert("RGBA").copy()
-                return self._pil_image_to_png_bytes(image), self._result_png_filename(target.name)
+                return result_images.image_file_to_png_payload(target)
 
         image_window = self._get_image_window_widget()
         item = getattr(image_window, "current_history_item", None) if image_window else None
         if item and getattr(item, "image", None):
             filepath = str(getattr(item, "filepath", "") or "")
             label = filepath or "naia-result.png"
-            raw_bytes = getattr(item, "raw_bytes", None)
-            if raw_bytes:
-                raw_bytes = bytes(raw_bytes)
-                if self._is_png_bytes(raw_bytes):
-                    return raw_bytes, self._result_png_filename(label)
-            if filepath and Path(filepath).is_file() and Path(filepath).suffix.lower() == ".png":
-                return Path(filepath).read_bytes(), self._result_png_filename(filepath)
-            return self._pil_image_to_png_bytes(item.image), self._result_png_filename(label)
+            return result_images.history_item_png_payload(item, label=label)
 
         if self.latest_webp:
-            with Image.open(io.BytesIO(self.latest_webp)) as opened:
-                opened.load()
-                image = opened.convert("RGBA").copy()
-            return self._pil_image_to_png_bytes(image), "naia-result.png"
+            return result_images.image_bytes_to_png_payload(self.latest_webp, "naia-result.png")
 
         raise FileNotFoundError("No image is selected")
 
@@ -7536,70 +7481,25 @@ class RemoteBridge(QObject):
         return cache_root / digest[:2] / f"{digest}.{size_token}.thumb.webp"
 
     def _history_item_image_payload(self, item) -> tuple[bytes, str]:
-        raw_bytes = getattr(item, "raw_bytes", None)
-        if isinstance(raw_bytes, bytearray):
-            raw_bytes = bytes(raw_bytes)
-        if isinstance(raw_bytes, bytes) and raw_bytes:
-            return raw_bytes, self._image_media_type_for_bytes(raw_bytes)
-
-        image = getattr(item, "image", None)
-        if image is None:
-            raise FileNotFoundError("History image is unavailable")
-        buf = io.BytesIO()
-        image.save(buf, format="PNG")
-        return buf.getvalue(), "image/png"
+        return result_images.history_item_image_payload(item)
 
     def _history_item_thumbnail(self, item, max_side: int = 0) -> bytes:
         path = self._history_item_file_path(item)
         if path:
             return self._get_or_create_thumbnail(path, max_side)
 
-        image = getattr(item, "image", None)
-        if image is None:
-            return b""
-        try:
-            from PIL import Image
-
-            thumb = image.copy()
-            if max_side <= 0:
-                max_side = 256
-            max_side = min(max(max_side, 50), 1024)
-            thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-            buf = io.BytesIO()
-            thumb.save(buf, format="WEBP", quality=85, method=4)
-            return buf.getvalue()
-        except Exception as e:
-            print(f"🌐 Viewer: 메모리 히스토리 썸네일 생성 실패 — {e}")
-            return b""
+        return result_images.memory_history_thumbnail_payload(
+            item,
+            max_side,
+            on_error=lambda exc: print(f"🌐 Viewer: 메모리 히스토리 썸네일 생성 실패 — {exc}"),
+        )
 
     def _history_item_meta_payload(self, item, include_full: bool = False) -> dict:
-        gen_params = getattr(item, "generation_params", {}) or {}
-        prompt_context = getattr(item, "prompt_context", {}) or {}
-        raw = {
-            "generation_params": gen_params,
-            "prompt_context": prompt_context,
-            "api_metadata": getattr(item, "api_metadata", {}) or {},
-        }
-        prompt = ""
-        negative = ""
-        if isinstance(prompt_context, dict):
-            prompt = str(prompt_context.get("main_prompt") or prompt_context.get("final_prompt") or "")
-        if isinstance(gen_params, dict):
-            prompt = prompt or str(gen_params.get("input") or gen_params.get("prompt") or "")
-            negative = str(gen_params.get("negative_prompt") or gen_params.get("uc") or "")
-
-        result = {}
-        if prompt:
-            result["prompt"] = prompt
-        if negative:
-            result["negative"] = negative
-        characters = prompt_context.get("characters") if isinstance(prompt_context, dict) else None
-        if characters:
-            result["characters"] = characters
-        if include_full:
-            result["summary"] = dict(result)
-            result["raw"] = self._metadata_json_safe(raw)
-        return result
+        return result_images.history_item_meta_payload(
+            item,
+            include_full=include_full,
+            metadata_json_safe=self._metadata_json_safe,
+        )
 
     def _on_image_saved(self, data: dict):
         """image_saved는 저장 폴더 캐시만 무효화한다.

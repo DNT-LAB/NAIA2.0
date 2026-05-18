@@ -12,7 +12,7 @@ from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext 
 
 MIDDLE_MODULE_SPECS = (
-    {"file": "automation_module", "class": "AutomationModule"},
+    {"file": "automation_module", "class": "AutomationModule", "web_session_lazy": True},
     {"file": "character_module", "class": "CharacterModule"},
     {"file": "character_reference_module", "class": "CharacterReferenceModule"},
     {"file": "conditional_prompt_module", "class": "PromptListModifierModule"},

@@ -8,8 +8,11 @@ from PyQt6.QtWidgets import QApplication
 from interfaces.base_module import BaseMiddleModule
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
-import os
-import json
+from core.automation_settings import (
+    AUTOMATION_SETTINGS_PATH,
+    load_automation_settings,
+    save_automation_settings,
+)
 import random
 import subprocess
 import platform
@@ -183,7 +186,7 @@ class AutomationModule(BaseMiddleModule):
         self.get_auto_generate_status_callback = None
         self.get_automation_active_status_callback = None
         self.automation_controller = AutomationController()
-        self.settings_file = os.path.join('save', 'AutomationModule.json')
+        self.settings_file = str(AUTOMATION_SETTINGS_PATH)
         
         # 설정 변수들
         self.delay_seconds = 2.0
@@ -974,22 +977,18 @@ class AutomationModule(BaseMiddleModule):
         }
 
         try:
-            os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4, ensure_ascii=False)
-            print(f"✅ '{self.get_title()}' 설정 저장 완료")
+            if save_automation_settings(settings, self.settings_file):
+                print(f"✅ '{self.get_title()}' 설정 저장 완료")
+            else:
+                print(f"❌ '{self.get_title()}' 설정 저장 실패")
         except Exception as e:
             print(f"❌ '{self.get_title()}' 설정 저장 실패: {e}")
     
     def load_settings(self):
         """JSON 파일에서 설정 로드"""
         try:
-            if not os.path.exists(self.settings_file):
-                return
-            
-            with open(self.settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
-            
+            settings = load_automation_settings(self.settings_file)
+
             if self.delay_input:
                 self.delay_input.setText(str(settings.get("delay_seconds", 2.0)))
                 self.random_delay_checkbox.setChecked(settings.get("random_delay", False))

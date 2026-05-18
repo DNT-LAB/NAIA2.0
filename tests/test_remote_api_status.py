@@ -116,6 +116,70 @@ def test_find_module_uses_controller_lookup_for_deferred_modules():
     assert ctx.middle_section_controller.requested == "OllamaModule"
 
 
+def test_automation_state_reads_headlessly_without_loading_module(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    settings_dir = tmp_path / "save"
+    settings_dir.mkdir()
+    (settings_dir / "AutomationModule.json").write_text(
+        json.dumps({
+            "delay_seconds": 4.5,
+            "random_delay": True,
+            "timer_minutes": 12,
+            "count_limit": 9,
+            "notify_on_finish": False,
+            "automation_type": "timer",
+        }),
+        encoding="utf-8",
+    )
+
+    class MiddleController:
+        module_instances = []
+
+        def get_module_instance(self, class_name):
+            raise AssertionError(f"unexpected module load: {class_name}")
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = MiddleController()
+
+    bridge = RemoteBridge(ctx)
+    state = bridge._read_automation()
+
+    assert state["module_id"] == "automation"
+    assert state["delay"] == "4.5"
+    assert state["random_delay"] is True
+    assert state["timer_minutes"] == "12"
+    assert state["count_limit"] == "9"
+    assert state["notify"] is False
+    assert state["auto_type"] == 1
+
+
+def test_automation_setting_updates_headless_state_and_persists_without_loading_module(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    class MiddleController:
+        module_instances = []
+
+        def get_module_instance(self, class_name):
+            raise AssertionError(f"unexpected module load: {class_name}")
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = MiddleController()
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._set_automation("delay", "6.25")
+    bridge._set_automation("random_delay", "true")
+    bridge._set_automation("auto_type", "2")
+
+    saved = json.loads((tmp_path / "save" / "AutomationModule.json").read_text(encoding="utf-8"))
+    assert saved["delay_seconds"] == 6.25
+    assert saved["random_delay"] is True
+    assert saved["automation_type"] == "count"
+    assert broadcasts[-1]["module_id"] == "automation"
+    assert broadcasts[-1]["auto_type"] == 2
+
+
 def test_instant_wildcard_state_reads_headlessly_without_loading_module(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     save_dir = tmp_path / "save" / "instant_wildcard"

@@ -190,3 +190,12 @@
 - `RemoteBridge`의 instant wildcard state/edit, chunk state, `$` autocomplete search는 server-owned headless store를 사용하고 더 이상 `_find_module("instant_wildcard")`를 호출하지 않는다.
 - `AutoCompleteManager`는 먼저 `WildcardManager` 캐시를 사용하고, 비어 있을 때만 desktop PyQt module fallback을 호출한다.
 - hidden WebSession startup에서는 `InstantWildcardModule` import/constructor/widget 생성을 지연한다. Desktop 런타임은 기존 UI wrapper를 유지하며 JSON 로딩만 core service에 위임한다.
+
+### Round 17 Automation headless state
+
+- `AutomationModule`은 Remote Web 초기 handshake와 `start_remote_server()` signal wiring이 `_find_module("automation")`을 호출해 hidden WebSession startup에서 즉시 로드되던 마지막 lazy blocker였다.
+- `core.automation_settings`를 추가해 `save/AutomationModule.json`의 default/normalize/load/save와 Remote Web module-state 변환을 PyQt 없이 처리한다.
+- `RemoteBridge`는 `_remote_automation_state`를 서버 소유 상태로 보유하고, `_read_automation()`은 이미 로드된 `AutomationModule`만 읽는다. 초기 WebSocket `get_module_state:automation`은 module을 깨우지 않는다.
+- Remote Web의 delay/random/repeat/type/timer/count/notify 변경은 headless state와 JSON 설정에 저장되며, `AutomationModule` import/constructor/widget 생성 없이 broadcast된다.
+- Remote Web `start`/`stop`은 기존 automation controller와 main window callback 계약을 보존하기 위해서만 `AutomationModule`을 on-demand 로드하고 숨김 widget을 만든다.
+- hidden WebSession startup에서는 `AutomationModule` import/constructor/widget 생성을 지연한다. Desktop 런타임은 기존 자동화 UI와 설정 동작을 유지한다.

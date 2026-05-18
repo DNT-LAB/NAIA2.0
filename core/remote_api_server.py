@@ -37,6 +37,12 @@ from PyQt6.QtWidgets import QFileDialog
 
 from core import api_verification
 from core import result_image_payload_service as result_images
+from core.automation_settings import (
+    automation_state_from_settings,
+    load_automation_settings,
+    save_automation_settings,
+    settings_from_automation_state,
+)
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.character_viewer_service import CharacterViewerService
 from core.clothes_preset_service import ClothesPresetService
@@ -733,6 +739,8 @@ class RemoteBridge(QObject):
         self._result_history_actions_lock = threading.Lock()
         self._pending_artist_thumb_random_peng_requests: dict = {}
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
+        self._remote_automation_state: dict = automation_state_from_settings(load_automation_settings())
+        self._automation_signals_connected = False
         self._instant_wildcard_save_path = DEFAULT_INSTANT_WILDCARD_SAVE_PATH
         self._instant_wildcard_json_data: dict = {}
         self._instant_wildcard_dict: dict = {}
@@ -9169,32 +9177,118 @@ class RemoteBridge(QObject):
         )
         return settings
 
-    def _read_automation(self) -> dict:
+    def _connect_automation_module_signals(self, module) -> None:
+        if not module or self._automation_signals_connected:
+            return
         try:
-            m = self._find_module("automation")
-            if not m:
-                return {}
-            # automation type: 0=unlimited, 1=timer, 2=count
+            controller = getattr(module, "automation_controller", None)
+            if not controller:
+                return
+            controller.automation_finished.connect(self._broadcast_automation_state)
+            controller.progress_updated.connect(self._broadcast_automation_state)
+            self._automation_signals_connected = True
+        except Exception as e:
+            print(f"🌐 Remote: automation signal 연결 실패 — {e}")
+
+    def _apply_remote_automation_state_to_module(self, module) -> None:
+        if not module:
+            return
+        state = dict(getattr(self, "_remote_automation_state", {}) or {})
+        try:
+            if getattr(module, "delay_input", None) is not None:
+                module.delay_input.setText(str(state.get("delay", "2.0")))
+            else:
+                try:
+                    module.delay_seconds = float(state.get("delay", 2.0) or 2.0)
+                except (TypeError, ValueError):
+                    module.delay_seconds = 2.0
+            if getattr(module, "random_delay_checkbox", None) is not None:
+                module.random_delay_checkbox.setChecked(bool(state.get("random_delay", False)))
+            if getattr(module, "repeat_input", None) is not None:
+                module.repeat_input.setText(str(state.get("repeat", "1")))
+            auto_type = int(state.get("auto_type", 0) or 0)
+            if auto_type == 0 and getattr(module, "unlimited_radio", None) is not None:
+                module.unlimited_radio.setChecked(True)
+            elif auto_type == 1 and getattr(module, "timer_radio", None) is not None:
+                module.timer_radio.setChecked(True)
+            elif auto_type == 2 and getattr(module, "count_radio", None) is not None:
+                module.count_radio.setChecked(True)
+            if getattr(module, "timer_input", None) is not None:
+                module.timer_input.setText(str(state.get("timer_minutes", "60")))
+            if getattr(module, "count_input", None) is not None:
+                module.count_input.setText(str(state.get("count_limit", "100")))
+            if getattr(module, "notify_checkbox", None) is not None:
+                module.notify_checkbox.setChecked(bool(state.get("notify", True)))
+            if hasattr(module, "update_condition_widgets_visibility"):
+                module.update_condition_widgets_visibility()
+        except Exception as e:
+            print(f"🌐 Remote: automation state module 적용 실패 — {e}")
+
+    def _sync_remote_automation_state_from_module(self, module) -> dict:
+        state = dict(self._remote_automation_state)
+        if not module:
+            return state
+        try:
             auto_type = 0
-            if m.timer_radio and m.timer_radio.isChecked():
+            if getattr(module, "timer_radio", None) is not None and module.timer_radio.isChecked():
                 auto_type = 1
-            elif m.count_radio and m.count_radio.isChecked():
+            elif getattr(module, "count_radio", None) is not None and module.count_radio.isChecked():
                 auto_type = 2
-            return {
+            state.update({
                 "type": "module_state",
                 "module_id": "automation",
-                "delay": m.delay_input.text() if m.delay_input else "0",
-                "random_delay": m.random_delay_checkbox.isChecked() if m.random_delay_checkbox else False,
-                "repeat": m.repeat_input.text() if m.repeat_input else "1",
+                "delay": module.delay_input.text() if getattr(module, "delay_input", None) is not None else str(getattr(module, "delay_seconds", 2.0)),
+                "random_delay": module.random_delay_checkbox.isChecked() if getattr(module, "random_delay_checkbox", None) is not None else bool(getattr(module, "random_delay", False)),
+                "repeat": module.repeat_input.text() if getattr(module, "repeat_input", None) is not None else "1",
                 "auto_type": auto_type,
-                "timer_minutes": m.timer_input.text() if m.timer_input else "30",
-                "count_limit": m.count_input.text() if m.count_input else "100",
-                "notify": m.notify_checkbox.isChecked() if m.notify_checkbox else False,
-                "is_running": m.automation_controller.is_running if m.automation_controller else False,
-                "status": m.automation_count_label.text() if m.automation_count_label else "",
-                "repeat_info": m.repeat_info_label.text() if hasattr(m, 'repeat_info_label') and m.repeat_info_label else "",
-                "delay_info": m.delay_info_label.text() if hasattr(m, 'delay_info_label') and m.delay_info_label else "",
-            }
+                "timer_minutes": module.timer_input.text() if getattr(module, "timer_input", None) is not None else state.get("timer_minutes", "60"),
+                "count_limit": module.count_input.text() if getattr(module, "count_input", None) is not None else state.get("count_limit", "100"),
+                "notify": module.notify_checkbox.isChecked() if getattr(module, "notify_checkbox", None) is not None else state.get("notify", True),
+                "is_running": module.automation_controller.is_running if getattr(module, "automation_controller", None) is not None else False,
+                "status": module.automation_count_label.text() if getattr(module, "automation_count_label", None) is not None else state.get("status", ""),
+                "repeat_info": module.repeat_info_label.text() if getattr(module, "repeat_info_label", None) is not None else state.get("repeat_info", ""),
+                "delay_info": module.delay_info_label.text() if getattr(module, "delay_info_label", None) is not None else state.get("delay_info", ""),
+            })
+            self._remote_automation_state = state
+        except Exception as e:
+            print(f"🌐 Remote: automation module state 동기화 실패 — {e}")
+        return state
+
+    def _ensure_automation_module_for_action(self):
+        module = self._find_module("automation")
+        if not module:
+            return None
+        try:
+            if getattr(module, "delay_input", None) is None or getattr(module, "widget", None) is None:
+                parent = getattr(self.app_context, "main_window", None)
+                module.create_widget(parent)
+                if hasattr(module, "load_settings"):
+                    module.load_settings()
+            self._apply_remote_automation_state_to_module(module)
+            main_window = getattr(self.app_context, "main_window", None)
+            if main_window is not None:
+                main_window.automation_module = module
+                try:
+                    module.set_automation_status_callback(main_window.update_automation_status)
+                    module.set_generation_delay_callback(main_window.on_generation_delay_changed)
+                    module.set_auto_generate_status_callback(main_window.get_auto_generate_status)
+                    module.set_automation_active_status_callback(main_window.get_automation_active_status)
+                except Exception as e:
+                    print(f"🌐 Remote: automation main_window callback 연결 실패 — {e}")
+            self._connect_automation_module_signals(module)
+        except Exception as e:
+            print(f"🌐 Remote: automation module 준비 실패 — {e}")
+            return None
+        return module
+
+    def _read_automation(self) -> dict:
+        try:
+            loaded = self._find_loaded_module_instance("AutomationModule")
+            if loaded:
+                return self._sync_remote_automation_state_from_module(loaded)
+            state = dict(self._remote_automation_state)
+            state["is_running"] = False
+            return state
         except Exception as e:
             print(f"🌐 Remote: automation 상태 읽기 실패 — {e}")
             return {}
@@ -10460,49 +10554,49 @@ class RemoteBridge(QObject):
 
     def _set_automation(self, key: str, value: str):
         try:
-            m = self._find_module("automation")
-            if not m:
-                return
             should_broadcast = False
             if key == "delay":
-                m.delay_input.setText(value)
+                self._remote_automation_state["delay"] = str(value)
                 should_broadcast = True
             elif key == "random_delay":
-                m.random_delay_checkbox.setChecked(value == "true")
+                self._remote_automation_state["random_delay"] = self._coerce_bool(value)
                 should_broadcast = True
             elif key == "repeat":
-                m.repeat_input.setText(value)
+                self._remote_automation_state["repeat"] = str(value or "1")
                 should_broadcast = True
             elif key == "auto_type":
                 v = int(value)
-                if v == 0 and m.unlimited_radio:
-                    m.unlimited_radio.setChecked(True)
-                    should_broadcast = True
-                elif v == 1 and m.timer_radio:
-                    m.timer_radio.setChecked(True)
-                    should_broadcast = True
-                elif v == 2 and m.count_radio:
-                    m.count_radio.setChecked(True)
+                if v in {0, 1, 2}:
+                    self._remote_automation_state["auto_type"] = v
                     should_broadcast = True
             elif key == "timer_minutes":
-                if m.timer_input:
-                    m.timer_input.setText(value)
-                    should_broadcast = True
+                self._remote_automation_state["timer_minutes"] = str(value or "60")
+                should_broadcast = True
             elif key == "count_limit":
-                if m.count_input:
-                    m.count_input.setText(value)
-                    should_broadcast = True
+                self._remote_automation_state["count_limit"] = str(value or "100")
+                should_broadcast = True
             elif key == "notify":
-                if m.notify_checkbox:
-                    m.notify_checkbox.setChecked(value == "true")
-                    should_broadcast = True
+                self._remote_automation_state["notify"] = self._coerce_bool(value)
+                should_broadcast = True
             elif key == "start":
+                m = self._ensure_automation_module_for_action()
+                if not m:
+                    return
                 m.start_automation()
                 should_broadcast = True
             elif key == "stop":
+                m = self._ensure_automation_module_for_action()
+                if not m:
+                    return
                 m.stop_automation()
                 should_broadcast = True
             if should_broadcast:
+                loaded = self._find_loaded_module_instance("AutomationModule")
+                if loaded and key not in {"start", "stop"}:
+                    self._apply_remote_automation_state_to_module(loaded)
+                    self._sync_remote_automation_state_from_module(loaded)
+                if key not in {"start", "stop"}:
+                    save_automation_settings(settings_from_automation_state(self._remote_automation_state))
                 self._broadcast_automation_state()
         except Exception as e:
             print(f"🌐 Remote: automation 설정 실패 — {key}={value}: {e}")
@@ -18107,12 +18201,9 @@ def start_remote_server(app_context, host: str = "0.0.0.0", port: int = 7243):
         mw.search_controller.search_progress.connect(bridge._on_search_progress)
         mw.search_controller.search_complete.connect(bridge._on_search_complete)
 
-    # 자동화 모듈 시그널 연결 (메인 UI에서 start/stop 시 웹 동기화)
-    auto_module = bridge._find_module("automation")
-    if auto_module and hasattr(auto_module, 'automation_controller'):
-        ac = auto_module.automation_controller
-        ac.automation_finished.connect(bridge._broadcast_automation_state)
-        ac.progress_updated.connect(bridge._broadcast_automation_state)
+    # 자동화 모듈 시그널 연결 (이미 로드된 desktop module만 연결; hidden WebSession에서는 깨우지 않음)
+    auto_module = bridge._find_loaded_module_instance("AutomationModule")
+    bridge._connect_automation_module_signals(auto_module)
 
     # TabController tab_added 시그널 연결 (심층검색 탭 생성 감지)
     if mw and hasattr(mw, 'image_window') and mw.image_window:

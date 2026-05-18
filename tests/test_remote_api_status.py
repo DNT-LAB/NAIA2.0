@@ -1388,6 +1388,68 @@ def test_web_random_auto_generate_uses_server_state_without_checkbox():
     assert bridge._pending_overrides[ws]["auto_generate"] is True
 
 
+def test_web_random_with_source_row_uses_core_service_without_trigger():
+    events = []
+    source_row = pd.Series({"general": "alpha, beta"}, name="row1")
+    ctx = _AppContext()
+    ctx.current_source_row = None
+    ctx.current_prompt_context = None
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={},
+        search_results=None,
+        trigger_random_prompt=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("desktop trigger_random_prompt should not be called")
+        ),
+    )
+
+    generated_context = SimpleNamespace(
+        final_prompt="core direct prompt",
+        settings={},
+        source_row=source_row,
+        metadata={},
+        wildcard_history={},
+        wildcard_state={},
+    )
+    captured = {}
+
+    class _PromptService:
+        def set_current_context(self, row, settings):
+            captured["row"] = row
+            captured["settings"] = settings
+            generated_context.settings = settings
+            ctx.current_source_row = row
+            ctx.current_prompt_context = generated_context
+            return generated_context
+
+        def process_current_context(self):
+            return SimpleNamespace(
+                context=generated_context,
+                final_prompt=generated_context.final_prompt,
+                error=None,
+                detected_resolution=None,
+                reset_resolution_detected=False,
+            )
+
+    ctx.prompt_generation_service = _PromptService()
+    bridge = RemoteBridge(ctx)
+    ctx.publish = lambda event, *args: events.append((event, args))
+    ws = object()
+    bridge._pending_random_requests.append({
+        "ws": ws,
+        "source_row": source_row,
+        "active_ratings": {"g"},
+        "overrides": {"auto_generate": False, "random_prompt_weight": "0.85"},
+    })
+
+    bridge._do_random()
+
+    assert captured["row"] is source_row
+    assert captured["settings"]["random_prompt_weight"] == "0.85"
+    assert captured["settings"]["auto_generate"] is False
+    assert ("random_prompt_triggered", ()) in events
+    assert ("prompt_generated", (generated_context,)) in events
+
+
 def test_danbooru_prompt_preview_uses_core_service_without_prompt_controller():
     calls = []
     ctx = _AppContext()

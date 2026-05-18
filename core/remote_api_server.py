@@ -1010,6 +1010,71 @@ class RemoteBridge(QObject):
         options = self._ensure_remote_option_state()
         return bool(options.get("auto_generate"))
 
+    def _remote_random_settings(self, request_overrides: dict | None, auto_generate: bool) -> dict:
+        settings = self._collect_prompt_reopen_settings()
+        option_state = getattr(self, "_remote_option_state", None)
+        if isinstance(option_state, dict):
+            for key in ("prompt_fixed", "wildcard_standalone"):
+                if key in option_state:
+                    settings[key] = bool(option_state.get(key))
+
+        remote_params = getattr(self, "_remote_param_values", None)
+        if isinstance(remote_params, dict) and "auto_fit_resolution" in remote_params:
+            settings["auto_fit_resolution"] = self._coerce_bool(remote_params.get("auto_fit_resolution"))
+
+        settings["auto_generate"] = bool(auto_generate)
+        settings["api_mode"] = self.app_context.get_api_mode()
+        if isinstance(request_overrides, dict):
+            settings.update(request_overrides)
+        settings["auto_generate"] = self._coerce_bool(settings.get("auto_generate", auto_generate))
+        return settings
+
+    def _remote_random_direct_blocked(self) -> bool:
+        event_stream_runtime = getattr(self.app_context, "event_stream_runtime", None)
+        return bool(event_stream_runtime and event_stream_runtime.is_active)
+
+    def _publish_remote_random_context(self, prompt_context) -> None:
+        publish = getattr(self.app_context, "publish", None)
+        if callable(publish):
+            publish("prompt_generated", prompt_context)
+        else:
+            self.on_prompt_generated(prompt_context)
+
+    def _try_generate_remote_random_direct(
+        self,
+        *,
+        ws,
+        source_row,
+        request_overrides: dict | None,
+        auto_generate: bool,
+    ) -> bool:
+        if ws is None or source_row is None or self._remote_random_direct_blocked():
+            return False
+
+        settings = self._remote_random_settings(request_overrides, auto_generate)
+        publish = getattr(self.app_context, "publish", None)
+        if callable(publish):
+            publish("random_prompt_triggered")
+
+        service = self._get_prompt_generation_service()
+        service.set_current_context(source_row, settings)
+        result = service.process_current_context()
+        if result.error:
+            self._send_json_to(ws, {
+                "type": "random_failed",
+                "message": result.error,
+                "level": "error",
+            })
+            return True
+
+        if result.reset_resolution_detected:
+            main_window = getattr(self.app_context, "main_window", None)
+            if hasattr(main_window, "resolution_is_detected"):
+                main_window.resolution_is_detected = False
+
+        self._publish_remote_random_context(result.context)
+        return True
+
     def _normalize_rating_list(self, ratings=None) -> list[str]:
         source = ratings if ratings is not None else ['g', 's', 'q', 'e']
         if isinstance(source, str):
@@ -6239,6 +6304,20 @@ class RemoteBridge(QObject):
                     )
                     print("🌐 Remote: 랜덤 프롬프트 생성 실패 — 후보 없음")
                     return
+
+            if (
+                not comfyui_request_id
+                and not event_preset_request_id
+                and not remote_preset_request_id
+                and self._try_generate_remote_random_direct(
+                    ws=ws,
+                    source_row=source_row,
+                    request_overrides=request_overrides,
+                    auto_generate=auto_gen_checked,
+                )
+            ):
+                print("🌐 Remote: core 랜덤 프롬프트 생성됨")
+                return
 
             self.app_context.main_window.trigger_random_prompt(settings_override=request_overrides,
                                                                active_ratings=active_ratings,

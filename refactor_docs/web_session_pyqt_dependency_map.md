@@ -110,3 +110,10 @@
 - request override가 없으면 server-owned `_remote_option_state["auto_generate"]`와 `_remote_auto_generate_enabled`를 사용하고, 마지막 fallback으로만 데스크톱 option snapshot을 읽는다.
 - `_do_random()`은 더 이상 pending override의 `auto_generate` 결정을 위해 `main_window.generation_checkboxes["자동 생성"]`을 직접 읽지 않는다.
 - `ModernMainWindow.trigger_random_prompt()` 호출은 여전히 남아 있으므로, 다음 단계에서는 snapshot/event-stream/UI side effect를 core runner와 UI wrapper로 나눠야 한다.
+
+### Round 07 prepared-source random 직접 실행
+
+- Remote random 요청에서 `source_row`가 이미 준비된 경우에는 `ModernMainWindow.trigger_random_prompt()`를 거치지 않고 `PromptGenerationService`로 직접 PromptContext를 생성한다.
+- 이 직접 실행은 plain WebSocket random 요청에만 적용한다. ComfyUI random, Event Preset, Remote Preset 요청은 기존 scoped pending 계약이 더 넓으므로 유지한다.
+- Event Stream이 활성화된 경우에는 기존 desktop wrapper 경로로 fallback한다.
+- normal random처럼 desktop `search_results`에서 pop하거나 snapshot restore가 필요한 경로는 아직 fallback으로 남긴다.

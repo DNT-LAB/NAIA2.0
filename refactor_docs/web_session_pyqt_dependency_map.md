@@ -247,3 +247,11 @@
 - `RemoteBridge._read_prompt_engineering()`과 `_set_prompt_engineering()`은 textedit/checkbox 직접 접근 대신 `collect_current_settings()`/`apply_settings()` 기반으로 동작한다. 따라서 Remote Web Prompt Engineering panel은 PyQt widget 없이도 서버 state를 읽고 수정할 수 있다.
 - `load_preset_list()`와 `load_preset_random()`은 combo/textedit widget이 없는 headless path에서도 preset list와 `*randomized` pre/post prompt application을 유지한다.
 - 이 라운드는 full lazy 전환이 아니다. 다음 단계는 Prompt Engineering preset/headless hook owner를 `core` service로 분리해 hidden WebSession startup에서 `modules.prompt_engineering_module` import 자체를 지연하는 것이다.
+
+### Round 23 Prompt Engineering core state store
+
+- `core.prompt_engineering_settings`를 추가해 mode-aware Prompt Engineering settings, preset list, last-used preset, randomized pool, e621/Danbooru settings를 PyQt 없이 읽고 쓸 수 있게 했다.
+- `RemoteBridge._read_prompt_engineering()`은 loaded module을 우선 사용하되, loaded `PromptEngineeringModule`이 없으면 core store로 같은 `module_state` payload를 만든다.
+- `RemoteBridge._set_prompt_engineering()`은 loaded module이 없을 때도 prefix/postfix/auto-hide/preprocessing toggle, preset save/create/delete, randomized pool, e621/Danbooru settings를 core store로 처리한다.
+- Artist Thumbnail random Prompt Engineering override도 loaded module이 없으면 core store settings를 사용한다.
+- 이 라운드는 full lazy 전환의 선행 단계다. hidden WebSession startup에서는 아직 `PromptEngineeringModule` instance와 hooks가 남아 있으며, post/after-wildcard hook owner와 `*randomized` subscriber를 core runtime으로 분리해야 import 자체를 지연할 수 있다.

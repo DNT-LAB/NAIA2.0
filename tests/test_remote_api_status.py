@@ -957,6 +957,56 @@ def test_prompt_engineering_state_uses_headless_settings_without_widget(tmp_path
     assert settings["preprocessing_options"]["remove_author"] is False
 
 
+def test_prompt_engineering_state_uses_core_store_without_loaded_module(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    preset_dir = tmp_path / "save" / "presets" / "NAI"
+    preset_dir.mkdir(parents=True)
+    (preset_dir / "default.json").write_text(json.dumps({
+        "api_mode": "NAI",
+        "module_settings": {"pre_prompt": "default pre"},
+    }), encoding="utf-8")
+    (preset_dir / "alpha.json").write_text(json.dumps({
+        "api_mode": "NAI",
+        "module_settings": {
+            "pre_prompt": "alpha pre",
+            "post_prompt": "alpha post",
+            "preprocessing_options": {"remove_author": True},
+        },
+    }), encoding="utf-8")
+    (preset_dir / "beta.json").write_text(json.dumps({
+        "api_mode": "NAI",
+        "module_settings": {"pre_prompt": "beta pre"},
+    }), encoding="utf-8")
+    (tmp_path / "save" / "presets" / "last_used_preset.json").write_text(
+        json.dumps({"NAI": "alpha"}),
+        encoding="utf-8",
+    )
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = SimpleNamespace(module_instances=[])
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    state = bridge._read_prompt_engineering()
+
+    assert state["preset"] == "alpha"
+    assert state["preset_options"] == ["*randomized", "default", "alpha", "beta"]
+    assert state["pre_prompt"] == "alpha pre"
+    assert state["post_prompt"] == "alpha post"
+    assert state["preprocessing"]["remove_author"] is True
+
+    bridge._set_prompt_engineering("post_prompt", "edited post")
+    bridge._set_prompt_engineering("pp_remove_author", "false")
+    bridge._set_prompt_engineering("randomized_add", "beta")
+    updated = bridge._read_prompt_engineering()
+
+    assert updated["post_prompt"] == "edited post"
+    assert updated["preprocessing"]["remove_author"] is False
+    assert updated["randomized_preset_list"] == ["beta"]
+    assert broadcasts[-1]["module_id"] == "prompt_engineering"
+
+
 def test_prompt_engineering_state_exposes_webui_presets_separately(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     webui_dir = tmp_path / "save" / "presets" / "WEBUI"

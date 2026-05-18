@@ -65,6 +65,11 @@ from core.instant_wildcard_service import (
 from core.kr_tag_loader import format_kr_tag_load_summary, load_kr_tag_records
 from core.preset_input_bridge import PresetInputBridge, update_app_preset_context
 from core.preset_composer_service import PresetComposerService
+from core.prompt_engineering_settings import (
+    PromptEngineeringHeadlessStore,
+    save_danbooru_weight_settings,
+    save_e621_settings,
+)
 from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
 from core.wildcard_status_settings import save_wildcard_status_settings
@@ -746,6 +751,7 @@ class RemoteBridge(QObject):
         self._artist_thumb_random_peng_requests_lock = threading.Lock()
         self._remote_automation_state: dict = automation_state_from_settings(load_automation_settings())
         self._automation_signals_connected = False
+        self._prompt_engineering_headless_store = PromptEngineeringHeadlessStore(self._current_api_mode)
         self._instant_wildcard_save_path = DEFAULT_INSTANT_WILDCARD_SAVE_PATH
         self._instant_wildcard_json_data: dict = {}
         self._instant_wildcard_dict: dict = {}
@@ -4371,16 +4377,10 @@ class RemoteBridge(QObject):
         if not artist_value:
             raise ValueError("artist_prompt is required")
 
-        module = self._find_module("prompt_engineering")
-        if not module:
-            return {
-                "pre_prompt": artist_value,
-                "post_prompt": "",
-                "auto_hide": "",
-                "preprocessing_options": {},
-            }
-
+        module = self._find_loaded_module_instance("PromptEngineeringModule")
         module_settings = module.collect_current_settings() if hasattr(module, "collect_current_settings") else {}
+        if not module_settings:
+            module_settings = self._prompt_engineering_headless_store.collect_settings()
         pre_prompt = module_settings.get("pre_prompt", "")
         post_prompt = module_settings.get("post_prompt", "")
         auto_hide = module_settings.get("auto_hide_prompt", "")
@@ -8649,38 +8649,51 @@ class RemoteBridge(QObject):
 
     def _read_prompt_engineering(self, ws=None) -> dict:
         try:
-            m = self._find_module("prompt_engineering")
-            if not m:
-                return {}
+            m = self._find_loaded_module_instance("PromptEngineeringModule")
 
             # 콤보가 현재 API 모드의 프리셋 폴더와 동기화돼 있음을 보장한다.
             # api_mode_changed 이벤트가 일부 경로(예: 웹 트리거 모드 전환)에서 늦거나 누락되면
             # preset_combo 가 이전 모드의 항목을 들고 있어 Hires Preset Swap 등 후행 소비자가
             # 잘못된 목록을 받게 된다. load_preset_list 는 blockSignals + 선택값 보존이 되어 있어
             # 데스크탑 UI 에 부작용 없이 idempotent 하게 갱신된다.
-            try:
-                if hasattr(m, "load_preset_list"):
-                    m.load_preset_list()
-            except Exception as e:
-                print(f"⚠️ Remote: preset_combo 동기화 실패 — {e}")
+            if m:
+                try:
+                    if hasattr(m, "load_preset_list"):
+                        m.load_preset_list()
+                except Exception as e:
+                    print(f"⚠️ Remote: preset_combo 동기화 실패 — {e}")
 
-            module_settings = m.collect_current_settings() if hasattr(m, "collect_current_settings") else {}
-            preprocessing = dict(module_settings.get("preprocessing_options") or {})
-            preset_combo = getattr(m, "preset_combo", None)
-            if preset_combo:
-                presets = [preset_combo.itemText(i) for i in range(preset_combo.count())]
-                current_preset = preset_combo.currentText()
+                module_settings = m.collect_current_settings() if hasattr(m, "collect_current_settings") else {}
+                preprocessing = dict(module_settings.get("preprocessing_options") or {})
+                preset_combo = getattr(m, "preset_combo", None)
+                if preset_combo:
+                    presets = [preset_combo.itemText(i) for i in range(preset_combo.count())]
+                    current_preset = preset_combo.currentText()
+                else:
+                    presets = ["*randomized", *list(getattr(m, "preset_list", []) or [])]
+                    current_preset = getattr(m, "current_preset", "")
+                randomized_pool = list(getattr(m, "randomized_preset_list", []) or [])
+                if hasattr(m, "get_randomized_available_presets"):
+                    randomized_available = list(m.get_randomized_available_presets())
+                else:
+                    randomized_available = [
+                        preset_name for preset_name in getattr(m, "preset_list", [])
+                        if preset_name not in ("", "*randomized", "default", *randomized_pool)
+                    ]
+                e621_settings = dict(getattr(m, "_e621_settings", {}) or {})
+                danbooru_settings = dict(getattr(m, "_danbooru_weight_settings", {}) or {})
+                debug_snapshot = m.get_debug_snapshot() if hasattr(m, "get_debug_snapshot") else {}
             else:
-                presets = ["*randomized", *list(getattr(m, "preset_list", []) or [])]
-                current_preset = getattr(m, "current_preset", "")
-            randomized_pool = list(getattr(m, "randomized_preset_list", []) or [])
-            if hasattr(m, "get_randomized_available_presets"):
-                randomized_available = list(m.get_randomized_available_presets())
-            else:
-                randomized_available = [
-                    preset_name for preset_name in getattr(m, "preset_list", [])
-                    if preset_name not in ("", "*randomized", "default", *randomized_pool)
-                ]
+                headless = self._prompt_engineering_headless_store
+                module_settings = headless.collect_settings()
+                preprocessing = dict(module_settings.get("preprocessing_options") or {})
+                presets = headless.preset_options()
+                current_preset = headless.state()["current_preset"]
+                randomized_pool = list(headless.state()["randomized_preset_list"])
+                randomized_available = headless.randomized_available_presets()
+                e621_settings = dict(module_settings.get("e621_settings") or {})
+                danbooru_settings = dict(module_settings.get("danbooru_weight_settings") or {})
+                debug_snapshot = {}
             preset_summaries = [
                 self._prompt_engineering_preset_summary(m, preset_name)
                 for preset_name in presets
@@ -8705,9 +8718,9 @@ class RemoteBridge(QObject):
                 "post_prompt": module_settings.get("post_prompt", ""),
                 "auto_hide": module_settings.get("auto_hide_prompt", ""),
                 "preprocessing": preprocessing,
-                "e621_settings": dict(getattr(m, "_e621_settings", {}) or {}),
-                "danbooru_settings": dict(getattr(m, "_danbooru_weight_settings", {}) or {}),
-                "debug_snapshot": m.get_debug_snapshot() if hasattr(m, "get_debug_snapshot") else {},
+                "e621_settings": e621_settings,
+                "danbooru_settings": danbooru_settings,
+                "debug_snapshot": debug_snapshot,
                 "preset_can_save_current": current_preset not in ("", "(프리셋 없음)", "*randomized"),
                 "preset_can_delete": current_preset not in ("", "(프리셋 없음)", "*randomized", "default"),
             }
@@ -9009,12 +9022,15 @@ class RemoteBridge(QObject):
 
         try:
             if mode:
-                try:
-                    preset_dir = module.get_preset_dir(current_mode)
-                except TypeError:
+                if module and hasattr(module, "get_preset_dir"):
+                    try:
+                        preset_dir = module.get_preset_dir(current_mode)
+                    except TypeError:
+                        preset_dir = Path("save") / "presets" / current_mode
+                else:
                     preset_dir = Path("save") / "presets" / current_mode
             else:
-                preset_dir = module.get_preset_dir()
+                preset_dir = module.get_preset_dir() if module and hasattr(module, "get_preset_dir") else Path("save") / "presets" / current_mode
             preset_file = preset_dir / f"{name}.json"
             if preset_file.exists():
                 with open(preset_file, "r", encoding="utf-8") as f:
@@ -10483,10 +10499,90 @@ class RemoteBridge(QObject):
             print(f"🌐 Remote: save_directory 설정 실패 — {key}={value}: {e}")
             self._broadcast_json({"type": "toast", "message": f"저장 디렉토리 설정 실패: {e}", "level": "error"})
 
+    def _set_prompt_engineering_headless(self, key: str, value: str):
+        store = self._prompt_engineering_headless_store
+        if key == "pre_prompt":
+            store.apply_settings({"pre_prompt": value})
+            self._broadcast_prompt_engineering_state()
+        elif key == "post_prompt":
+            store.apply_settings({"post_prompt": value})
+            self._broadcast_prompt_engineering_state()
+        elif key == "auto_hide":
+            store.apply_settings({"auto_hide_prompt": value})
+            self._broadcast_prompt_engineering_state()
+        elif key == "preset":
+            if store.set_preset(value):
+                self._broadcast_prompt_engineering_state()
+            else:
+                self._broadcast_json({"type": "toast", "message": f"프리셋을 찾을 수 없습니다: {value}", "level": "error"})
+        elif key == "preset_save_current":
+            ok, result = store.save_current_preset()
+            if ok:
+                self._broadcast_json({"type": "toast", "message": f"프리셋 저장: {result}", "level": "success"})
+                self._broadcast_prompt_engineering_state()
+            else:
+                self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+        elif key == "preset_create":
+            ok, result = store.create_preset(value)
+            if ok:
+                self._broadcast_json({"type": "toast", "message": f"프리셋 저장: {result}", "level": "success"})
+                self._broadcast_prompt_engineering_state()
+            else:
+                self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+        elif key == "preset_delete":
+            ok, result = store.delete_preset(value or store.state()["current_preset"])
+            if ok:
+                self._broadcast_json({"type": "toast", "message": f"프리셋 삭제: {result}", "level": "success"})
+                self._broadcast_prompt_engineering_state()
+            else:
+                self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+        elif key == "randomized_add":
+            ok, result = store.add_randomized_preset(value)
+            if ok:
+                self._broadcast_prompt_engineering_state()
+            else:
+                self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+        elif key == "randomized_remove":
+            ok, result = store.remove_randomized_preset(value)
+            if ok:
+                self._broadcast_prompt_engineering_state()
+            else:
+                self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+        elif key == "randomized_clear":
+            ok, result = store.clear_randomized_presets()
+            if ok:
+                self._broadcast_prompt_engineering_state()
+            else:
+                self._broadcast_json({"type": "toast", "message": result, "level": "error"})
+        elif key == "e621_settings":
+            current = store.collect_settings().get("e621_settings", {})
+            settings = self._sanitize_remote_e621_settings(json.loads(value or "{}"), current)
+            store.apply_settings({"e621_settings": settings})
+            save_e621_settings(settings)
+            self._broadcast_prompt_engineering_state()
+        elif key == "danbooru_settings":
+            current = store.collect_settings().get("danbooru_weight_settings", {})
+            settings = self._sanitize_remote_danbooru_settings(json.loads(value or "{}"), current)
+            store.apply_settings({"danbooru_weight_settings": settings})
+            save_danbooru_weight_settings(settings)
+            self._broadcast_prompt_engineering_state()
+        elif key == "debug_refresh":
+            self._broadcast_prompt_engineering_state()
+        elif key.startswith("pp_"):
+            pp_key = key[3:]
+            settings = store.collect_settings()
+            preprocessing = dict(settings.get("preprocessing_options") or {})
+            preprocessing[pp_key] = value == "true"
+            store.apply_settings({"preprocessing_options": preprocessing})
+            self._broadcast_prompt_engineering_state()
+        else:
+            self._broadcast_json({"type": "toast", "message": "Prompt Engineering action requires the desktop module.", "level": "error"})
+
     def _set_prompt_engineering(self, key: str, value: str):
         try:
-            m = self._find_module("prompt_engineering")
+            m = self._find_loaded_module_instance("PromptEngineeringModule")
             if not m:
+                self._set_prompt_engineering_headless(key, value)
                 return
             def update_settings(**updates):
                 settings = m.collect_current_settings() if hasattr(m, "collect_current_settings") else {}

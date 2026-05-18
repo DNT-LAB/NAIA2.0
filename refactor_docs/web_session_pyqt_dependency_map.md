@@ -216,3 +216,14 @@
 - `RemoteBridge._read_vibe_transfer()`와 `_set_vibe_transfer()`는 explicit panel open/action 시에만 deferred module을 로드하고 숨김 widget을 준비한다.
 - `APIService`의 Vibe late-binding과 Prompt Engineering thumbnail의 active vibe count는 loaded-only 조회로 바뀌어, Vibe 패널을 열지 않은 plain WebSession generation에서는 module import/widget 비용을 내지 않는다.
 - 이 라운드는 Vibe frame/encoding implementation을 core로 대체하지 않는다. 실제 Vibe 사용 시에는 기존 PyQt wrapper를 on-demand로 사용한다.
+
+### Round 20 Character headless settings
+
+- `CharacterModule`은 saved active state가 NAI generation params에 직접 들어가므로 단순 lazy 처리만 하면 WebSession 생성 결과가 바뀔 수 있었다.
+- `core.character_settings`를 추가해 `save/CharacterModule_<MODE>.json`에서 mode-aware 설정을 PyQt 없이 읽고, active/cold slot count와 `characters`/`uc` generation params를 만든다.
+- hidden WebSession startup에서는 `CharacterModule` import/constructor/widget 생성을 지연한다. 초기 WebSocket `module_state:character`는 headless settings payload로 응답하고 module을 깨우지 않는다.
+- `GenerationController`와 `APIService`의 Character late-binding은 loaded-only module 조회 후 headless settings fallback을 사용한다. 따라서 Character 패널을 열지 않은 WebSession generation도 저장된 active character params를 유지한다.
+- 상태 미리보기는 별도 `PromptContext`로 계산해 Remote Web state refresh가 기존 sequential wildcard context를 전진시키지 않게 했다.
+- `PromptListModifierModule`의 cycle-start character snapshot은 loaded-only 조회로 바꿔, char/uc 규칙이 아닌 일반 조건부 프롬프트 규칙이 CharacterModule을 깨우지 않는다.
+- Remote Web Character 편집/preview 액션은 기존 PyQt widget behavior가 필요하므로 `_set_character()`에서만 deferred module을 on-demand 로드하고 숨김 widget을 준비한다.
+- 남은 eager middle module은 `PromptEngineeringModule`과 `PromptListModifierModule`이다. 두 모듈은 active prompt hooks, random prompt side effects, initial Remote Web prompt-engineering state를 분리한 뒤 lazy/headless 전환해야 한다.

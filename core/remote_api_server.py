@@ -43,6 +43,11 @@ from core.automation_settings import (
     save_automation_settings,
     settings_from_automation_state,
 )
+from core.character_settings import (
+    character_params_from_settings,
+    character_state_from_settings,
+    load_character_settings,
+)
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.character_viewer_service import CharacterViewerService
 from core.clothes_preset_service import ClothesPresetService
@@ -5620,7 +5625,7 @@ class RemoteBridge(QObject):
         }
 
     def _apply_current_character_params(self, params: dict) -> dict:
-        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+        char_module = self._find_loaded_module_instance("CharacterModule")
         if char_module and hasattr(char_module, "activate_checkbox") and char_module.activate_checkbox.isChecked():
             char_params = char_module.get_parameters()
             if char_params and char_params.get("characters"):
@@ -5628,6 +5633,16 @@ class RemoteBridge(QObject):
                 params["uc"] = char_params["uc"]
                 params["character_positions"] = char_params.get("character_positions", [])
                 return params
+
+        headless_params = character_params_from_settings(
+            self.app_context,
+            mode=self._current_api_mode(),
+        )
+        if headless_params.get("characters"):
+            params["characters"] = headless_params["characters"]
+            params["uc"] = headless_params.get("uc", [])
+            params.pop("character_positions", None)
+            return params
 
         params.pop("characters", None)
         params.pop("uc", None)
@@ -9314,9 +9329,13 @@ class RemoteBridge(QObject):
 
     def _read_character(self) -> dict:
         try:
-            m = self._find_module("character")
+            m = self._find_loaded_module_instance("CharacterModule")
             if not m:
-                return {}
+                return character_state_from_settings(
+                    load_character_settings(self._current_api_mode()),
+                    app_context=self.app_context,
+                    mode=self._current_api_mode(),
+                )
             characters = []
             for w in m.character_widgets:
                 if hasattr(m, "_slot_state_for_widget"):
@@ -10632,7 +10651,7 @@ class RemoteBridge(QObject):
 
     def _set_character(self, key: str, value: str):
         try:
-            m = self._find_module("character")
+            m = self._ensure_module_widget(self._find_module("character"))
             if not m:
                 return
             if key == "activated":

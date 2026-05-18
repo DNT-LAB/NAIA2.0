@@ -13,7 +13,7 @@ from core.context import AppContext
 
 MIDDLE_MODULE_SPECS = (
     {"file": "automation_module", "class": "AutomationModule", "web_session_lazy": True},
-    {"file": "character_module", "class": "CharacterModule"},
+    {"file": "character_module", "class": "CharacterModule", "web_session_lazy": True},
     {"file": "character_reference_module", "class": "CharacterReferenceModule", "web_session_lazy": True},
     {"file": "conditional_prompt_module", "class": "PromptListModifierModule"},
     {"file": "e621_event_module", "class": "E621EventModuleV2", "web_session_lazy": True},

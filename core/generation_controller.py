@@ -1,5 +1,6 @@
 ﻿from core.context import AppContext
 from core.generation_request import GenerationRequest
+from core.character_settings import character_params_from_settings
 from core.sequence_parser import SequenceParser
 from core.vibe_cluster_resolver import VibeClusterPromptError, apply_vibe_cluster_prompt_override
 from core.wildcard_processor import split_tags_smart
@@ -22,6 +23,28 @@ import gc
 import requests
 from utils.comfyui_png_metadata import enrich_comfyui_png_bytes
 from utils.webui_generation_info import extract_webui_infotext, extract_webui_seed
+
+
+def _get_loaded_middle_module(context: AppContext, class_name: str):
+    controller = getattr(context, "middle_section_controller", None)
+    if hasattr(controller, "get_loaded_module_instance"):
+        return controller.get_loaded_module_instance(class_name)
+    for module in getattr(controller, "module_instances", []) or []:
+        if module.__class__.__name__ == class_name:
+            return module
+    return None
+
+
+def _apply_headless_character_params(context: AppContext, params: dict, api_mode: str) -> None:
+    if api_mode != "NAI":
+        return
+    if _get_loaded_middle_module(context, "CharacterModule") is not None:
+        return
+    if params.get("characters"):
+        return
+    headless_params = character_params_from_settings(context, mode=api_mode)
+    if headless_params.get("characters"):
+        params.update(headless_params)
 
 def _force_cleanup_all_threads():
     """
@@ -675,7 +698,7 @@ class GenerationController:
             if api_mode == "NAI": 
                 token = 'nai_token'
                 event_stream = getattr(self.context, "event_stream_runtime", None)
-                char_module = self.context.middle_section_controller.get_module_instance("CharacterModule")
+                char_module = _get_loaded_middle_module(self.context, "CharacterModule")
                 if (char_module and 
                     char_module.activate_checkbox.isChecked() and 
                     char_module.reroll_on_generate_checkbox.isChecked() and
@@ -709,6 +732,8 @@ class GenerationController:
             for module in self.module_instances:
                 module_params = module.get_parameters()
                 if module_params: params.update(module_params)
+
+            _apply_headless_character_params(self.context, params, api_mode)
 
             self._apply_webui_hiresfix_assist_defaults(params)
             self._apply_remote_web_hires_preset_swap_default(params)
@@ -1099,7 +1124,7 @@ class GenerationController:
                         char_prompts.append({'prompt': p, 'uc': p_ucs[i] if i < len(p_ucs) else ''})
                 elif hasattr(self.context, 'main_window') and hasattr(self.context.main_window, 'middle_section_controller'):
                     # 메인 UI CharacterModule (Late Binding)
-                    char_module = self.context.main_window.middle_section_controller.get_module_instance("CharacterModule")
+                    char_module = _get_loaded_middle_module(self.context, "CharacterModule")
                     if char_module and hasattr(char_module, 'character_widgets'):
                         for w in char_module.character_widgets:
                             if w.active_checkbox.isChecked():
@@ -2203,7 +2228,7 @@ class GenerationController:
             token = 'nai_token'
             # NAI 모드에서 캐릭터 리롤 처리
             event_stream = getattr(self.context, "event_stream_runtime", None)
-            char_module = self.context.middle_section_controller.get_module_instance("CharacterModule")
+            char_module = _get_loaded_middle_module(self.context, "CharacterModule")
             if (char_module and
                 char_module.activate_checkbox.isChecked() and
                 char_module.reroll_on_generate_checkbox.isChecked() and
@@ -2227,6 +2252,8 @@ class GenerationController:
             module_params = module.get_parameters()
             if module_params:
                 params.update(module_params)
+
+        _apply_headless_character_params(self.context, params, api_mode)
 
         self._apply_webui_hiresfix_assist_defaults(params)
         self._apply_remote_web_hires_preset_swap_default(params)

@@ -96,6 +96,35 @@ def test_conditional_negative_fallback_restores_before_next_cycle():
     assert neg_edit.toPlainText() == "base negative, nsfw, rating:explicit"
 
 
+def test_conditional_non_char_rules_do_not_load_deferred_character_module():
+    class MiddleController:
+        module_instances = []
+
+        def __init__(self):
+            self.requested = []
+
+        def get_loaded_module_instance(self, class_name):
+            return None
+
+        def get_module_instance(self, class_name):
+            self.requested.append(class_name)
+            raise AssertionError(f"unexpected module load: {class_name}")
+
+    module, row, _neg_edit = _conditional_module()
+    controller = MiddleController()
+    module.app_context.middle_section_controller = controller
+
+    module._apply_rules(
+        PromptContext(source_row=row, settings={}, main_tags=["1girl"]),
+        "(e):main+=dramatic lighting",
+        [],
+        max_passes=1,
+        stop_on_match=False,
+    )
+
+    assert controller.requested == []
+
+
 def test_generation_controller_publishes_generation_finished_event():
     events = []
 

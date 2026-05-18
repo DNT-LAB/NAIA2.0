@@ -241,6 +241,94 @@ def test_disabling_character_reference_does_not_wake_deferred_module():
     assert controller.requested == []
 
 
+def test_character_state_reads_headlessly_without_loading_module(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    settings_dir = tmp_path / "save"
+    settings_dir.mkdir()
+    (settings_dir / "CharacterModule_NAI.json").write_text(
+        json.dumps({
+            "NAI": {
+                "is_active": True,
+                "reroll_on_generate": True,
+                "character_frames": [
+                    {"prompt": "girl, blue eyes", "uc": "bad anatomy", "slot_state": "active"},
+                    {"prompt": "saved", "uc": "", "slot_state": "cold"},
+                ],
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    class MiddleController:
+        module_instances = []
+
+        def __init__(self):
+            self.requested = []
+
+        def get_loaded_module_instance(self, class_name):
+            return None
+
+        def get_module_instance(self, class_name):
+            self.requested.append(class_name)
+            raise AssertionError(f"unexpected module load: {class_name}")
+
+    controller = MiddleController()
+    ctx = _AppContext()
+    ctx.middle_section_controller = controller
+    ctx.wildcard_manager = _FakeWildcardManager()
+    bridge = RemoteBridge(ctx)
+
+    state = bridge._read_character()
+
+    assert state["module_id"] == "character"
+    assert state["activated"] is True
+    assert state["reroll_on_generate"] is True
+    assert state["active_count"] == 1
+    assert state["cold_count"] == 1
+    assert state["processed_characters"] == ["girl, blue eyes"]
+    assert controller.requested == []
+
+
+def test_character_set_action_prepares_widget_on_demand():
+    class CharacterModule:
+        def __init__(self):
+            self.widget = None
+            self.character_widgets = []
+            self.created = False
+            self.activate_checkbox = _FakeCheckBox(False)
+            self.reroll_on_generate_checkbox = _FakeCheckBox(False)
+            self.processed_prompt_display = _FakeTextEdit("")
+
+        def create_widget(self, parent):
+            self.created = True
+            return object()
+
+        def on_initialize(self):
+            pass
+
+        def process_and_update_view(self):
+            pass
+
+    module = CharacterModule()
+
+    class MiddleController:
+        module_instances = []
+
+        def get_module_instance(self, class_name):
+            assert class_name == "CharacterModule"
+            return module
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = MiddleController()
+    bridge = RemoteBridge(ctx)
+    bridge._broadcast_character_state = lambda: None
+
+    bridge._set_character("activated", "true")
+
+    assert module.created is True
+    assert module.activate_checkbox.isChecked() is True
+
+
 def test_vibe_transfer_state_loads_widget_only_on_explicit_read():
     class VibeTransferModule:
         def __init__(self):

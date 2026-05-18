@@ -768,7 +768,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         if self._negative_snapshot is not None:
             if self._restore_negative_snapshot():
                 print("[Conditional] 이전 사이클 네거티브 원상복원")
-        self._char_snapshot = CharStateSnapshot(self._get_character_module())
+        self._char_snapshot = CharStateSnapshot(self._get_character_module(load_if_needed=False))
 
         rules = self._parse_rules(rules_text)
         prefix_tags = context.prefix_tags.copy()
@@ -1329,7 +1329,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 pass
         return None
 
-    def _get_character_module(self):
+    def _get_character_module(self, *, load_if_needed: bool = True):
         """CharacterModule 인스턴스를 안전하게 반환 (없으면 None)."""
         app_ctx = getattr(self, 'app_context', None)
         if app_ctx is None:
@@ -1338,6 +1338,13 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         if controller is None:
             return None
         try:
+            if not load_if_needed:
+                if hasattr(controller, "get_loaded_module_instance"):
+                    return controller.get_loaded_module_instance("CharacterModule")
+                for module in getattr(controller, "module_instances", []) or []:
+                    if module.__class__.__name__ == "CharacterModule":
+                        return module
+                return None
             return controller.get_module_instance("CharacterModule")
         except Exception:
             return None

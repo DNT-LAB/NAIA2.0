@@ -23,7 +23,18 @@ from core.reference_inset_service import (
     reference_inset_should_inject_params,
     strip_nai_weight_for_match,
 )
+from core.character_settings import character_params_from_settings
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
+
+
+def _get_loaded_middle_module(app_context, class_name: str):
+    controller = getattr(app_context, "middle_section_controller", None)
+    if hasattr(controller, "get_loaded_module_instance"):
+        return controller.get_loaded_module_instance(class_name)
+    for module in getattr(controller, "module_instances", []) or []:
+        if module.__class__.__name__ == class_name:
+            return module
+    return None
 
 if TYPE_CHECKING:
     from core.context import AppContext
@@ -713,7 +724,7 @@ class APIService:
 
                     else:
                         # 5) Late Binding — 메인 UI CharacterModule (직접 생성)
-                        char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")
+                        char_module = _get_loaded_middle_module(self.app_context, "CharacterModule")
                         if char_module and hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
                             char_params = char_module.get_parameters()
                             if char_params and char_params.get("characters"):
@@ -721,6 +732,16 @@ class APIService:
                                 characters = char_params["characters"]
                                 ucs = char_params["uc"]
                                 character_positions = char_params.get("character_positions", [])
+                        if not characters:
+                            char_params = character_params_from_settings(
+                                self.app_context,
+                                mode=params.get("api_mode", "NAI"),
+                            )
+                            if char_params and char_params.get("characters"):
+                                char_source = "HeadlessSettings"
+                                characters = char_params["characters"]
+                                ucs = char_params.get("uc", [])
+                                character_positions = []
 
                 # 공통 적용: 정규화된 캐릭터 데이터를 v4_prompt에 추가
                 if characters:

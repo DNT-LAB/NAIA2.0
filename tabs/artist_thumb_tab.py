@@ -82,11 +82,11 @@ ARTIST_THUMB_MODES = {
         "path": Path("data/artist_thumbnail.json"),
         "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Noob_artist_thumbnail_33000/artist_thumbnail",
     },
-    "ANIMA-14000": {
+    "ANIMA-22000": {
         "path": Path("data/artist_thumbnail_anima.json"),
         "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima.json",
-        "expected_size": 1699850378,
-        "sha256": "ACD01B81AB1E3078E2F2F1607D53382D0312B0661C0E7F620F28D7FFBD818A8C",
+        "expected_size": 2656390724,
+        "sha256": "C831A5B186176AEBED394F320C3E5B75B3ACEB78AF2D97B84D04C277C276252E",
     },
 }
 ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")

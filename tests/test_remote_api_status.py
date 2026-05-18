@@ -3278,18 +3278,18 @@ def test_artist_thumb_anima_mode_uses_configured_local_file(tmp_path, monkeypatc
         encoding="utf-8",
     )
     bridge = RemoteBridge(_AppContext())
-    mode_info = dict(bridge.ARTIST_THUMB_MODES["ANIMA-14000"])
+    mode_info = dict(bridge.ARTIST_THUMB_MODES["ANIMA-22000"])
     mode_info["expected_size"] = Path("data/artist_thumbnail_anima.json").stat().st_size
-    monkeypatch.setitem(bridge.ARTIST_THUMB_MODES, "ANIMA-14000", mode_info)
+    monkeypatch.setitem(bridge.ARTIST_THUMB_MODES, "ANIMA-22000", mode_info)
     bridge._artist_thumb_artist_weights = lambda: {"a": 10}
 
     state = bridge._build_artist_thumb_state()
-    anima = next(mode for mode in state["modes"] if mode["key"] == "ANIMA-14000")
+    anima = next(mode for mode in state["modes"] if mode["key"] == "ANIMA-22000")
 
     assert anima["available"] is True
     assert anima["needs_update"] is False
     assert anima["size_mb"] >= 0
-    assert bridge._load_artist_thumb_data("ANIMA-14000") == {"a": ["thumb_a"]}
+    assert bridge._load_artist_thumb_data("ANIMA-22000") == {"a": ["thumb_a"]}
 
 
 def test_artist_thumb_anima_mode_reports_update_for_old_local_file(tmp_path, monkeypatch):
@@ -3301,14 +3301,14 @@ def test_artist_thumb_anima_mode_reports_update_for_old_local_file(tmp_path, mon
     bridge._artist_thumb_artist_weights = lambda: {"a": 10}
 
     state = bridge._build_artist_thumb_state()
-    anima = next(mode for mode in state["modes"] if mode["key"] == "ANIMA-14000")
+    anima = next(mode for mode in state["modes"] if mode["key"] == "ANIMA-22000")
 
     assert anima["available"] is False
     assert anima["needs_update"] is True
     assert anima["size"] == old_file.stat().st_size
-    assert anima["expected_size"] == 1699850378
+    assert anima["expected_size"] == 2656390724
     with pytest.raises(RuntimeError, match="needs update"):
-        bridge._load_artist_thumb_data("ANIMA-14000")
+        bridge._load_artist_thumb_data("ANIMA-22000")
 
 
 def test_artist_thumb_download_validation_checks_sha256(tmp_path, monkeypatch):
@@ -3318,17 +3318,17 @@ def test_artist_thumb_download_validation_checks_sha256(tmp_path, monkeypatch):
     target = Path("data/artist_thumbnail_anima.json.tmp")
     target.write_bytes(payload)
     bridge = RemoteBridge(_AppContext())
-    mode_info = dict(bridge.ARTIST_THUMB_MODES["ANIMA-14000"])
+    mode_info = dict(bridge.ARTIST_THUMB_MODES["ANIMA-22000"])
     mode_info["expected_size"] = len(payload)
     mode_info["sha256"] = hashlib.sha256(payload).hexdigest().upper()
-    monkeypatch.setitem(bridge.ARTIST_THUMB_MODES, "ANIMA-14000", mode_info)
+    monkeypatch.setitem(bridge.ARTIST_THUMB_MODES, "ANIMA-22000", mode_info)
 
-    assert bridge._validate_artist_thumb_download_file("ANIMA-14000", target) == len(payload)
+    assert bridge._validate_artist_thumb_download_file("ANIMA-22000", target) == len(payload)
 
     mode_info["sha256"] = "0" * 64
-    monkeypatch.setitem(bridge.ARTIST_THUMB_MODES, "ANIMA-14000", mode_info)
+    monkeypatch.setitem(bridge.ARTIST_THUMB_MODES, "ANIMA-22000", mode_info)
     with pytest.raises(ValueError, match="해시"):
-        bridge._validate_artist_thumb_download_file("ANIMA-14000", target)
+        bridge._validate_artist_thumb_download_file("ANIMA-22000", target)
 
 
 def test_artist_thumb_options_are_scoped_by_api_mode(tmp_path, monkeypatch):

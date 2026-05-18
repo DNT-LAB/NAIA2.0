@@ -103,3 +103,10 @@
 - `RemoteBridge`의 Danbooru prompt preview와 result queue reopen prompt는 더 이상 `app_context.main_window.prompt_gen_controller.generate_instant_source_silent()`를 직접 호출하지 않고, `app_context.prompt_generation_service`를 통해 처리한다.
 - WEBUI Hires preset swap도 `main_window.prompt_gen_controller` 직접 접근 대신 `prompt_generation_service`를 사용한다.
 - `_do_random()`은 아직 `ModernMainWindow.trigger_random_prompt()`를 유지한다. 이 호출을 바로 제거하면 snapshot restore, Event Stream prepare, UI 버튼 상태, auto-generation 연결을 동시에 재구현해야 하므로 별도 라운드로 분리한다.
+
+### Round 06 random auto-generate 판정 축소
+
+- Remote Web random 요청의 auto-generate 판정은 요청 overrides의 `auto_generate`를 최우선으로 사용한다.
+- request override가 없으면 server-owned `_remote_option_state["auto_generate"]`와 `_remote_auto_generate_enabled`를 사용하고, 마지막 fallback으로만 데스크톱 option snapshot을 읽는다.
+- `_do_random()`은 더 이상 pending override의 `auto_generate` 결정을 위해 `main_window.generation_checkboxes["자동 생성"]`을 직접 읽지 않는다.
+- `ModernMainWindow.trigger_random_prompt()` 호출은 여전히 남아 있으므로, 다음 단계에서는 snapshot/event-stream/UI side effect를 core runner와 UI wrapper로 나눠야 한다.

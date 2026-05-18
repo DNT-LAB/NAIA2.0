@@ -995,6 +995,21 @@ class RemoteBridge(QObject):
     def is_remote_auto_generate_enabled(self) -> bool:
         return bool(getattr(self, "_remote_auto_generate_enabled", False))
 
+    def _random_request_auto_generate_enabled(self, request_overrides: dict | None = None) -> bool:
+        """Resolve Remote random auto-generate from request/server state before desktop widgets."""
+        if isinstance(request_overrides, dict) and "auto_generate" in request_overrides:
+            return self._coerce_bool(request_overrides.get("auto_generate"))
+
+        raw_options = getattr(self, "_remote_option_state", None)
+        if isinstance(raw_options, dict) and "auto_generate" in raw_options:
+            return bool(raw_options.get("auto_generate"))
+
+        if self.is_remote_auto_generate_enabled():
+            return True
+
+        options = self._ensure_remote_option_state()
+        return bool(options.get("auto_generate"))
+
     def _normalize_rating_list(self, ratings=None) -> list[str]:
         source = ratings if ratings is not None else ['g', 's', 'q', 'e']
         if isinstance(source, str):
@@ -6144,11 +6159,6 @@ class RemoteBridge(QObject):
             source_row = req.get("source_row")
             active_ratings = req.get("active_ratings", set(self._active_ratings))
 
-            # WS별 pending 저장 (on_prompt_generated에서 auto-generate용)
-            mw = self.app_context.main_window
-            auto_gen = mw.generation_checkboxes.get("자동 생성")
-            auto_gen_checked = bool(auto_gen and auto_gen.isChecked())
-
             # ComfyUI sync 요청 처리 — ws=None 이지만 request_id로 격리
             comfyui_request_id = req.get("comfyui_request_id")
             event_preset_request_id = req.get("event_preset_request_id")
@@ -6158,6 +6168,7 @@ class RemoteBridge(QObject):
             respect_autogen = bool(req.get("respect_naia_autogen", True))
             comfyui_peng_override = req.get("peng_override")  # dict or None
             request_overrides = req.get("overrides") if isinstance(req.get("overrides"), dict) else None
+            auto_gen_checked = self._random_request_auto_generate_enabled(request_overrides)
 
             if comfyui_request_id:
                 will_naia_generate = (
@@ -6229,9 +6240,9 @@ class RemoteBridge(QObject):
                     print("🌐 Remote: 랜덤 프롬프트 생성 실패 — 후보 없음")
                     return
 
-            mw.trigger_random_prompt(settings_override=request_overrides,
-                                     active_ratings=active_ratings,
-                                     source_row_override=source_row)
+            self.app_context.main_window.trigger_random_prompt(settings_override=request_overrides,
+                                                               active_ratings=active_ratings,
+                                                               source_row_override=source_row)
             print("🌐 Remote: 랜덤 프롬프트 생성됨")
         except Exception as e:
             if comfyui_request_id:

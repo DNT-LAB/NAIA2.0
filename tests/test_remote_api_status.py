@@ -1343,6 +1343,51 @@ def test_web_random_passes_session_overrides_to_prompt_generation():
     assert bridge._pending_overrides[ws]["remote_random_request_id"] == "rid-random-click"
 
 
+def test_web_random_auto_generate_uses_request_override_before_desktop_widget():
+    triggered = []
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={"자동 생성": _ToggleButton(False)},
+        trigger_random_prompt=lambda **kwargs: triggered.append(kwargs),
+    )
+    bridge = RemoteBridge(ctx)
+    ws = object()
+    bridge._pending_random_requests.append({
+        "ws": ws,
+        "source_row": None,
+        "active_ratings": {"g"},
+        "overrides": {"auto_generate": True},
+    })
+
+    bridge._do_random()
+
+    assert triggered
+    assert bridge._pending_overrides[ws]["auto_generate"] is True
+
+
+def test_web_random_auto_generate_uses_server_state_without_checkbox():
+    triggered = []
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={},
+        trigger_random_prompt=lambda **kwargs: triggered.append(kwargs),
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._remote_option_state = {"auto_generate": True}
+    ws = object()
+    bridge._pending_random_requests.append({
+        "ws": ws,
+        "source_row": None,
+        "active_ratings": {"g"},
+        "overrides": {"random_prompt_weight": "0.85"},
+    })
+
+    bridge._do_random()
+
+    assert triggered
+    assert bridge._pending_overrides[ws]["auto_generate"] is True
+
+
 def test_danbooru_prompt_preview_uses_core_service_without_prompt_controller():
     calls = []
     ctx = _AppContext()

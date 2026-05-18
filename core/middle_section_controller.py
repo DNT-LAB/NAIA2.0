@@ -18,12 +18,16 @@ MIDDLE_MODULE_SPECS = (
     {"file": "conditional_prompt_module", "class": "PromptListModifierModule"},
     {"file": "e621_event_module", "class": "E621EventModuleV2"},
     {"file": "instant_wildcard_module", "class": "InstantWildcardModule"},
-    {"file": "ollama_module", "class": "OllamaModule"},
+    {"file": "ollama_module", "class": "OllamaModule", "web_session_lazy": True},
     {"file": "prompt_engineering_module", "class": "PromptEngineeringModule"},
     {"file": "reference_inset_module", "class": "ReferenceInsetAutoInjectModule"},
     {"file": "vibe_transfer_module", "class": "VibeTransferModule"},
     {"file": "wildcard_status_module", "class": "WildcardStatusModule"},
 )
+
+
+def is_hidden_web_session_runtime() -> bool:
+    return os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1"
 
 
 class MiddleSectionController:
@@ -38,6 +42,7 @@ class MiddleSectionController:
         self.parent_widget = parent
         self.module_classes = []
         self.module_instances = []
+        self._deferred_module_specs = {}
 
         # 분리된 모듈들을 추적하기 위한 딕셔너리
         self.detached_modules = {}  # {module_title: DetachedWindow}
@@ -87,6 +92,10 @@ class MiddleSectionController:
         for module_spec in MIDDLE_MODULE_SPECS:
             name = module_spec["file"]
             class_name = module_spec["class"]
+            if self._should_defer_module_spec(module_spec):
+                self._deferred_module_specs[class_name] = module_spec
+                print(f"⏳ Web Session middle 모듈 지연 로드: {name} -> {class_name}")
+                continue
             path = os.path.join(self.modules_dir, f"{name}.py")
             if not os.path.exists(path):
                 print(f"⚠️ 등록된 middle 모듈 파일 없음: {name}.py")
@@ -120,45 +129,74 @@ class MiddleSectionController:
         self.module_classes.append(obj)
         return obj
 
+    def _should_defer_module_spec(self, module_spec: dict) -> bool:
+        return bool(module_spec.get("web_session_lazy")) and is_hidden_web_session_runtime()
+
+    def _initialize_module_instance(self, module_instance):
+        module_instance.initialize_with_context(self.app_context)
+
+        if isinstance(module_instance, ModeAwareModule):
+            self.app_context.mode_manager.register_module(module_instance)
+            current_mode = self.app_context.get_api_mode()
+            module_instance.current_mode = current_mode
+            print(f"🔗 모드 대응 모듈 초기화: {module_instance.get_title()}")
+            print(f"   - NAI 호환: {module_instance.NAI_compatibility}")
+            print(f"   - WEBUI 호환: {module_instance.WEBUI_compatibility}")
+        else:
+            current_mode = self.app_context.get_api_mode()
+            if hasattr(module_instance, 'widget') and hasattr(module_instance, 'NAI_compatibility'):
+                should_be_visible = (
+                    (current_mode == "NAI" and getattr(module_instance, 'NAI_compatibility', True)) or
+                    (current_mode == "WEBUI" and getattr(module_instance, 'WEBUI_compatibility', True)) or
+                    (current_mode == "COMFYUI" and getattr(module_instance, 'COMFYUI_compatibility', True))
+                )
+                if module_instance.widget and hasattr(module_instance.widget, 'setVisible'):
+                    module_instance.widget.setVisible(should_be_visible)
+
+        if hasattr(module_instance, 'on_initialize'):
+            try:
+                module_instance.on_initialize()
+            except Exception as e:
+                print(f"⚠️ 모듈 초기화 오류 ({module_instance.__class__.__name__}): {e}")
+
+    def _register_module_pipeline_hook(self, module_instance):
+        hook_info = module_instance.get_pipeline_hook_info()
+        if hook_info:
+            self.app_context.register_pipeline_hook(hook_info, module_instance)
+
+    def _load_deferred_module_instance(self, module_class_name: str):
+        module_spec = self._deferred_module_specs.get(module_class_name)
+        if not module_spec:
+            return None
+
+        name = module_spec["file"]
+        path = os.path.join(self.modules_dir, f"{name}.py")
+        if not os.path.exists(path):
+            print(f"⚠️ 지연 middle 모듈 파일 없음: {name}.py")
+            return None
+
+        try:
+            TargetModuleClass = self._load_registered_module_class(name, path, module_class_name)
+            if not TargetModuleClass:
+                return None
+            module_instance = TargetModuleClass()
+            self.module_instances.append(module_instance)
+            self._initialize_module_instance(module_instance)
+            self._register_module_pipeline_hook(module_instance)
+            self._deferred_module_specs.pop(module_class_name, None)
+            print(f"✅ 지연 middle 모듈 로드 완료: {module_class_name}")
+            return module_instance
+        except Exception as e:
+            print(f"❌ 지연 middle 모듈 로드 실패 ({module_class_name}): {e}")
+            traceback.print_exc()
+            return None
+
     def initialize_modules_with_context(self, app_context):
         """모듈 인스턴스들에 컨텍스트를 주입하고 ModeAwareModule들을 등록합니다."""
         print(f"🔗 {len(self.module_instances)}개 모듈에 컨텍스트 주입 시작...")
         
         for module_instance in self.module_instances:  # ✅ .values() 제거 (리스트이므로)
-            # 🆕 app_context 설정
-            module_instance.app_context = app_context
-            
-            # ModeAwareModule을 상속한 모듈들을 자동으로 등록
-            if isinstance(module_instance, ModeAwareModule):
-                app_context.mode_manager.register_module(module_instance)
-                
-                # 초기 모드 설정
-                current_mode = app_context.get_api_mode()
-                module_instance.current_mode = current_mode
-                
-                print(f"🔗 모드 대응 모듈 초기화: {module_instance.get_title()}")
-                print(f"   - NAI 호환: {module_instance.NAI_compatibility}")
-                print(f"   - WEBUI 호환: {module_instance.WEBUI_compatibility}")
-            
-            # 🆕 일반 모듈도 가시성 제어를 위해 app_context 설정
-            else:
-                # 현재 모드에 따른 가시성 설정
-                current_mode = app_context.get_api_mode()
-                if hasattr(module_instance, 'widget') and hasattr(module_instance, 'NAI_compatibility'):
-                    should_be_visible = (
-                        (current_mode == "NAI" and getattr(module_instance, 'NAI_compatibility', True)) or
-                        (current_mode == "WEBUI" and getattr(module_instance, 'WEBUI_compatibility', True)) or
-                        (current_mode == "COMFYUI" and getattr(module_instance, 'COMFYUI_compatibility', True))
-                    )
-                    if module_instance.widget and hasattr(module_instance.widget, 'setVisible'):
-                        module_instance.widget.setVisible(should_be_visible)
-            
-            # 기존 on_initialize 호출 (이미 build_ui에서 호출되었지만 안전을 위해)
-            if hasattr(module_instance, 'on_initialize'):
-                try:
-                    module_instance.on_initialize()
-                except Exception as e:
-                    print(f"⚠️ 모듈 재초기화 오류 ({module_instance.__class__.__name__}): {e}")
+            self._initialize_module_instance(module_instance)
         
         print(f"✅ 컨텍스트 주입 완료. 등록된 ModeAware 모듈: {len(app_context.mode_manager.registered_modules)}개")
 
@@ -419,6 +457,10 @@ class MiddleSectionController:
         for instance in self.module_instances:
             if instance.__class__.__name__ == module_class_name:
                 return instance
+
+        deferred = self._load_deferred_module_instance(module_class_name)
+        if deferred is not None:
+            return deferred
         
         print(f"⚠️ 모듈 인스턴스를 찾을 수 없습니다: {module_class_name}")
         return None

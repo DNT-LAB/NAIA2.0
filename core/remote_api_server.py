@@ -8260,6 +8260,10 @@ class RemoteBridge(QObject):
         target_class = class_map.get(module_id)
         if not target_class:
             return None
+        if hasattr(msc, "get_module_instance"):
+            module = msc.get_module_instance(target_class)
+            if module is not None:
+                return module
         for module in msc.module_instances:
             if module.__class__.__name__ == target_class:
                 return module

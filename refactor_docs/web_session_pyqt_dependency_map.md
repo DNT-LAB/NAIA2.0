@@ -148,3 +148,11 @@
 - registry에 없는 local/prototype `*_module.py`는 startup-visible하지 않으며, 등록된 파일 안에서도 지정 class만 middle module로 노출된다.
 - 기존 지원 모듈 11개는 모두 registry에 포함되어 Remote Web module-state API와 generation hook 표면을 보존한다.
 - 아직 숨김 WebSession에서도 middle module widget 생성은 남아 있다. 이 부분은 각 모듈의 state/hook headless contract를 분리한 뒤 단계적으로 줄여야 한다.
+
+### Round 12 Ollama middle module WebSession lazy loading
+
+- `OllamaModule`은 generation parameter/hook surface가 없고 Remote Web에서 Ollama 패널 요청 시에만 필요하므로 hidden WebSession startup에서는 import/instance 생성을 지연한다.
+- Desktop 런타임에서는 기존처럼 즉시 로드된다.
+- `MiddleSectionController.get_module_instance()`가 deferred module을 on-demand import/initialize/hook-register 할 수 있게 되었고, `RemoteBridge._find_module()`은 이 lookup path를 사용한다.
+- Remote Web Ollama 상태/액션은 기존 `_remote_*` fallback state와 worker path를 유지해 widget 없이도 동작 가능한 경로를 사용한다.
+- 다음 후보는 `OllamaModule`처럼 pipeline hook이 없거나 Remote Web initial state에 불필요한 모듈을 추가 식별해 같은 lazy flag를 확대하는 것이다.

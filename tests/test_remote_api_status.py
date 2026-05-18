@@ -84,6 +84,27 @@ class _FakeLineEdit:
         self._text = str(text)
 
 
+def test_find_module_uses_controller_lookup_for_deferred_modules():
+    sentinel = object()
+
+    class MiddleController:
+        module_instances = []
+
+        def __init__(self):
+            self.requested = None
+
+        def get_module_instance(self, class_name):
+            self.requested = class_name
+            return sentinel
+
+    ctx = _AppContext()
+    ctx.middle_section_controller = MiddleController()
+    bridge = RemoteBridge(ctx)
+
+    assert bridge._find_module("ollama") is sentinel
+    assert ctx.middle_section_controller.requested == "OllamaModule"
+
+
 class _FakeComboBox:
     def __init__(self, items=None, current=""):
         self.items = list(items or [])

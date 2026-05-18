@@ -98,6 +98,14 @@ def test_checked_in_middle_module_registry_files_exist():
         assert (Path("modules") / f"{spec['file']}.py").is_file()
 
 
+def test_web_session_lazy_registry_keeps_generation_modules_eager():
+    specs = {spec["class"]: spec for spec in middle_controller.MIDDLE_MODULE_SPECS}
+
+    assert specs["WildcardStatusModule"]["web_session_lazy"] is True
+    assert specs["OllamaModule"]["web_session_lazy"] is True
+    assert specs["InstantWildcardModule"].get("web_session_lazy") is not True
+
+
 def test_web_session_lazy_middle_module_defers_import_until_requested(tmp_path, monkeypatch):
     marker_path = tmp_path / "lazy_imported.txt"
     (tmp_path / "lazy_module.py").write_text(

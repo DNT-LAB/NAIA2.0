@@ -47,6 +47,7 @@ from core.preset_input_bridge import PresetInputBridge, update_app_preset_contex
 from core.preset_composer_service import PresetComposerService
 from core.tag_relation_ranker import TagRelationRanker
 from core.vibe_cluster_resolver import is_valid_vibe_cluster_name, search_vibe_clusters
+from core.wildcard_status_settings import save_wildcard_status_settings
 from core.kr_phrase_canonicalizer import match_kr_phrase_canonical_tags
 from core.kr_sentence_reconstructor import reconstruct_kr_tag_queries
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
@@ -8269,6 +8270,13 @@ class RemoteBridge(QObject):
                 return module
         return None
 
+    def _find_loaded_module_instance(self, module_class_name: str):
+        msc = getattr(self.app_context, 'middle_section_controller', None)
+        for module in getattr(msc, "module_instances", []) if msc else []:
+            if module.__class__.__name__ == module_class_name:
+                return module
+        return None
+
     def _get_image_viewer_module(self):
         """RightView 내부의 ImageViewerModule 인스턴스를 반환."""
         try:
@@ -12039,12 +12047,9 @@ class RemoteBridge(QObject):
     def _read_wildcard(self) -> dict:
         """와일드카드 모듈 상태 읽기"""
         try:
-            m = self._find_module("wildcard")
-            if not m:
-                return {}
             # 히스토리 엔트리
             history = []
-            ctx = self.app_context.current_prompt_context
+            ctx = getattr(self.app_context, "current_prompt_context", None)
             if ctx and ctx.wildcard_history:
                 for name, values in ctx.wildcard_history.items():
                     history.append({"name": name, "value": values[-1]})
@@ -12053,41 +12058,81 @@ class RemoteBridge(QObject):
             if ctx and ctx.wildcard_state:
                 for name, state in ctx.wildcard_state.items():
                     state_lines.append({"name": name, "current": state['current'], "total": state['total']})
+            wildcard_manager = getattr(self.app_context, "wildcard_manager", None)
+            wildcard_tree = getattr(wildcard_manager, "wildcard_dict_tree", {}) if wildcard_manager else {}
             return {
                 "type": "module_state",
                 "module_id": "wildcard",
                 "history": history,
                 "state": state_lines,
                 "prompt_squeeze": getattr(self.app_context, 'prompt_squeeze_enabled', True),
-                "wildcard_count": len(self.app_context.wildcard_manager.wildcard_dict_tree),
+                "wildcard_count": len(wildcard_tree or {}),
             }
         except Exception as e:
             print(f"🌐 Remote: wildcard 상태 읽기 실패: {e}")
             return {}
 
+    def _persist_wildcard_status_settings(self) -> None:
+        save_wildcard_status_settings({
+            "prompt_squeeze_enabled": getattr(self.app_context, "prompt_squeeze_enabled", True),
+            "scoped_wildcard": getattr(self.app_context, "scoped_wildcard", ""),
+        })
+
+    def _set_wildcard_prompt_squeeze(self, value: str):
+        enabled = self._coerce_bool(value)
+        self.app_context.prompt_squeeze_enabled = enabled
+        self._persist_wildcard_status_settings()
+
+        module = self._find_loaded_module_instance("WildcardStatusModule")
+        checkbox = getattr(module, "prompt_squeeze_checkbox", None) if module else None
+        if checkbox:
+            checkbox.setChecked(enabled)
+
+    def _reset_wildcard_sequential_state(self):
+        ctx = getattr(self.app_context, "current_prompt_context", None)
+        if ctx:
+            counters = getattr(ctx, "sequential_counters", None)
+            wildcard_state = getattr(ctx, "wildcard_state", None)
+            old_counter_count = len(counters or {})
+            old_state_count = len(wildcard_state or {})
+            if counters is not None:
+                counters.clear()
+            if wildcard_state is not None:
+                wildcard_state.clear()
+            print(f"🔄 순차 와일드카드 리셋 완료: 카운터 {old_counter_count}개, 상태 {old_state_count}개 초기화")
+            placeholder = "순차 카운터가 리셋되었습니다. 다음 생성부터 새로 시작합니다."
+        else:
+            print("⚠️ 현재 프롬프트 컨텍스트가 없어 리셋할 항목이 없습니다.")
+            placeholder = "리셋할 순차 와일드카드가 없습니다."
+
+        module = self._find_loaded_module_instance("WildcardStatusModule")
+        textbox = getattr(module, "state_textbox", None) if module else None
+        if textbox:
+            textbox.clear()
+            textbox.setPlaceholderText(placeholder)
+
     def _set_wildcard(self, key: str, value: str):
         """와일드카드 모듈 파라미터 설정"""
         try:
-            m = self._find_module("wildcard")
-            if not m:
-                return
             if key == "prompt_squeeze":
-                if hasattr(m, 'prompt_squeeze_checkbox') and m.prompt_squeeze_checkbox:
-                    m.prompt_squeeze_checkbox.setChecked(value == "true")
+                self._set_wildcard_prompt_squeeze(value)
+                state = self._read_wildcard()
+                if state:
+                    self._broadcast_json(state)
+                return
             elif key == "reload":
-                m.reload_wildcards()
+                wildcard_manager = getattr(self.app_context, "wildcard_manager", None)
+                if wildcard_manager:
+                    wildcard_manager.reload_wildcards()
                 state = self._read_wildcard()
                 if state:
                     self._broadcast_json(state)
                 return
             elif key == "reset_sequential":
-                m.reset_sequential_wildcards()
+                self._reset_wildcard_sequential_state()
                 state = self._read_wildcard()
                 if state:
                     self._broadcast_json(state)
-                return
-            elif key == "open_manager":
-                m.open_wildcard_manager()
                 return
             elif key == "get_file_tree":
                 tree = self._scan_wildcard_tree()
@@ -12116,6 +12161,12 @@ class RemoteBridge(QObject):
             elif key == "preview_wildcard":
                 result = self._preview_wildcard(value)
                 self._broadcast_json({"type": "wildcard_manager", "action": "preview_result", "name": value, "result": result})
+                return
+            m = self._find_module("wildcard")
+            if not m:
+                return
+            if key == "open_manager":
+                m.open_wildcard_manager()
                 return
             # 일반 파라미터 변경 시 상태 브로드캐스트
             state = self._read_wildcard()

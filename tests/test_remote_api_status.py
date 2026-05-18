@@ -105,6 +105,49 @@ def test_find_module_uses_controller_lookup_for_deferred_modules():
     assert ctx.middle_section_controller.requested == "OllamaModule"
 
 
+def test_wildcard_prompt_squeeze_set_is_headless_and_persisted(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    ctx.prompt_squeeze_enabled = True
+    ctx.scoped_wildcard = "hair"
+    ctx.current_prompt_context = None
+    ctx.wildcard_manager = SimpleNamespace(wildcard_dict_tree={"hair": ["blue"]})
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._set_wildcard("prompt_squeeze", "false")
+
+    assert ctx.prompt_squeeze_enabled is False
+    assert broadcasts[-1]["module_id"] == "wildcard"
+    assert broadcasts[-1]["prompt_squeeze"] is False
+    saved = json.loads(Path("save/wildcard_status_settings.json").read_text(encoding="utf-8"))
+    assert saved == {"prompt_squeeze_enabled": False, "scoped_wildcard": "hair"}
+
+
+def test_wildcard_reset_sequential_is_headless(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    prompt_context = SimpleNamespace(
+        wildcard_history={},
+        wildcard_state={"hair": {"current": 2, "total": 4}},
+        sequential_counters={"hair": 2},
+    )
+    ctx = _AppContext()
+    ctx.prompt_squeeze_enabled = True
+    ctx.current_prompt_context = prompt_context
+    ctx.wildcard_manager = SimpleNamespace(wildcard_dict_tree={})
+    bridge = RemoteBridge(ctx)
+    broadcasts = []
+    bridge._broadcast_json = broadcasts.append
+
+    bridge._set_wildcard("reset_sequential", "")
+
+    assert prompt_context.sequential_counters == {}
+    assert prompt_context.wildcard_state == {}
+    assert broadcasts[-1]["module_id"] == "wildcard"
+    assert broadcasts[-1]["state"] == []
+
+
 class _FakeComboBox:
     def __init__(self, items=None, current=""):
         self.items = list(items or [])

@@ -156,3 +156,12 @@
 - `MiddleSectionController.get_module_instance()`가 deferred module을 on-demand import/initialize/hook-register 할 수 있게 되었고, `RemoteBridge._find_module()`은 이 lookup path를 사용한다.
 - Remote Web Ollama 상태/액션은 기존 `_remote_*` fallback state와 worker path를 유지해 widget 없이도 동작 가능한 경로를 사용한다.
 - 다음 후보는 `OllamaModule`처럼 pipeline hook이 없거나 Remote Web initial state에 불필요한 모듈을 추가 식별해 같은 lazy flag를 확대하는 것이다.
+
+### Round 13 Wildcard status WebSession lazy loading
+
+- `WildcardStatusModule`은 pipeline hook이 없고 Remote Web 초기 handshake 대상도 아니므로 hidden WebSession startup에서는 import/instance/widget 생성을 지연한다.
+- 단순 lazy 처리만 하면 `prompt_squeeze_enabled`와 `scoped_wildcard` 설정 로드가 사라져 생성 동작이 바뀔 수 있으므로, `core.wildcard_status_settings`를 추가해 `AppContext` 생성 시 PyQt 없이 설정을 적용한다.
+- `RemoteBridge._read_wildcard()`는 더 이상 `WildcardStatusModule`을 찾거나 깨우지 않고, `AppContext.current_prompt_context`와 `WildcardManager`만 읽어 module-state payload를 만든다.
+- Remote Web의 `wildcard.prompt_squeeze`, `reload`, `reset_sequential`, wildcard file-tree/read/save/delete/create/preview 액션은 서버 상태와 `WildcardManager` 기반으로 처리한다. `open_manager`처럼 실제 PyQt 창이 필요한 액션만 deferred module을 on-demand 로드한다.
+- `InstantWildcardModule`은 생성 파라미터와 instant wildcard dictionary를 제공하므로 이번 라운드에서 eager 상태로 유지한다.
+- 다음 lazy 후보는 `E621EventModuleV2`이다. Remote Web launcher/on-demand 표면이고 초기 state 요청 대상은 아니지만, constructor의 e621 data check/download side effect와 `_read_e621_event()` cache 계약을 별도 라운드에서 먼저 검증해야 한다.

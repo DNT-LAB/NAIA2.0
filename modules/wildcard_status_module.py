@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from interfaces.base_module import BaseMiddleModule
 from core.context import AppContext
 from core.prompt_context import PromptContext
+from core.wildcard_status_settings import load_wildcard_status_settings, save_wildcard_status_settings
 from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
 from ui.modern_menu import setModernStyle
@@ -284,35 +285,24 @@ class WildcardStatusModule(BaseMiddleModule):
         self._save_settings()
 
     def _load_settings(self):
-        enabled = True
-        scoped = ''
-        try:
-            with open(self.SETTINGS_PATH, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            enabled = data.get('prompt_squeeze_enabled', True)
-            scoped = data.get('scoped_wildcard', '')
-            # 하위 호환: 기존 scoped_wildcards(리스트) → scoped_wildcard(단일 str) 마이그레이션
-            if not scoped and 'scoped_wildcards' in data:
-                old_list = data['scoped_wildcards']
-                if old_list and isinstance(old_list, list):
-                    scoped = old_list[0]
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.prompt_squeeze_checkbox.setChecked(True)
-            self.context.prompt_squeeze_enabled = True
-            self._save_settings()
-            return
+        settings = load_wildcard_status_settings(self.SETTINGS_PATH)
+        enabled = settings['prompt_squeeze_enabled']
+        scoped = settings['scoped_wildcard']
         self.prompt_squeeze_checkbox.setChecked(enabled)
         self.context.prompt_squeeze_enabled = enabled
         self.context.scoped_wildcard = scoped
 
     def _save_settings(self):
         try:
-            os.makedirs(os.path.dirname(self.SETTINGS_PATH), exist_ok=True)
-            with open(self.SETTINGS_PATH, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'prompt_squeeze_enabled': self.prompt_squeeze_checkbox.isChecked(),
-                    'scoped_wildcard': self.context.scoped_wildcard
-                }, f, ensure_ascii=False, indent=2)
+            enabled = (
+                self.prompt_squeeze_checkbox.isChecked()
+                if self.prompt_squeeze_checkbox
+                else getattr(self.context, 'prompt_squeeze_enabled', True)
+            )
+            save_wildcard_status_settings({
+                'prompt_squeeze_enabled': enabled,
+                'scoped_wildcard': self.context.scoped_wildcard
+            }, self.SETTINGS_PATH)
         except Exception as e:
             print(f"⚠️ wildcard_status 설정 저장 실패: {e}")
 
@@ -337,13 +327,15 @@ class WildcardStatusModule(BaseMiddleModule):
 
                 print(f"🔄 순차 와일드카드 리셋 완료: 카운터 {old_counter_count}개, 상태 {old_state_count}개 초기화")
 
-                self.state_textbox.clear()
-                self.state_textbox.setPlaceholderText("순차 카운터가 리셋되었습니다. 다음 생성부터 새로 시작합니다.")
+                if self.state_textbox:
+                    self.state_textbox.clear()
+                    self.state_textbox.setPlaceholderText("순차 카운터가 리셋되었습니다. 다음 생성부터 새로 시작합니다.")
 
             else:
                 print("⚠️ 현재 프롬프트 컨텍스트가 없어 리셋할 항목이 없습니다.")
-                self.state_textbox.clear()
-                self.state_textbox.setPlaceholderText("리셋할 순차 와일드카드가 없습니다.")
+                if self.state_textbox:
+                    self.state_textbox.clear()
+                    self.state_textbox.setPlaceholderText("리셋할 순차 와일드카드가 없습니다.")
 
         except Exception as e:
             print(f"❌ 순차 와일드카드 리셋 중 오류 발생: {e}")

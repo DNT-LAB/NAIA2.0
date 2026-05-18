@@ -22,7 +22,7 @@ MIDDLE_MODULE_SPECS = (
     {"file": "prompt_engineering_module", "class": "PromptEngineeringModule"},
     {"file": "reference_inset_module", "class": "ReferenceInsetAutoInjectModule"},
     {"file": "vibe_transfer_module", "class": "VibeTransferModule"},
-    {"file": "wildcard_status_module", "class": "WildcardStatusModule"},
+    {"file": "wildcard_status_module", "class": "WildcardStatusModule", "web_session_lazy": True},
 )
 
 

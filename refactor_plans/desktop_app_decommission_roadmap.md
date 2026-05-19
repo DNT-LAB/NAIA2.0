@@ -34,19 +34,25 @@ Build the authoritative inventory of Desktop App dependencies and assign an owne
 
 ### TODO Checklist
 
-- [ ] List all supported entrypoints and launch scripts:
+- [x] List all supported entrypoints and launch scripts:
   - `NAIA_cold_v4.py`
   - `NAIA_web_headless.py`
   - `run_NAIA.bat`
   - `run_NAIA_web.bat`
   - `.command` launchers
-- [ ] List all runtime requirements that exist only for Desktop App support.
-- [ ] Generate a PyQt import inventory for `core/`, `modules/`, `tabs/`, `ui/`, `tools/`, and `tests/`.
-- [ ] Build a workflow matrix with columns: workflow, current owner, Remote Web replacement, decision, blocker, validation.
-- [ ] Classify every tab in `TAB_MODULE_SPECS`.
-- [ ] Classify every middle module in `MIDDLE_MODULE_SPECS`.
-- [ ] Classify every RemoteBridge websocket/API feature as headless-owned, migrate, retire, or legacy-only.
-- [ ] Save the inventory under `refactor_docs/`.
+- [x] List all runtime requirements that exist only for Desktop App support.
+- [x] Generate a PyQt import inventory for `core/`, `modules/`, `tabs/`, `ui/`, `tools/`, and `tests/`.
+- [x] Build a workflow matrix with columns: workflow, current owner, Remote Web replacement, decision, blocker, validation.
+- [x] Classify every tab in `TAB_MODULE_SPECS`.
+- [x] Classify every middle module in `MIDDLE_MODULE_SPECS`.
+- [x] Classify every RemoteBridge websocket/API feature as headless-owned, migrate, retire, or legacy-only.
+- [x] Save the inventory under `refactor_docs/`.
+
+### Round 41 Result
+
+- Inventory: `refactor_docs/round_41_desktop_dependency_inventory.md`.
+- Decision: Round 42 should make `NAIA_web_headless.py` the default Web launch path and mark `NAIA_cold_v4.py` as explicit legacy.
+- Decision: deletion/archive waits until RemoteBridge, generation/result, module, tab, and shared-core Qt surfaces are migrated or retired.
 
 ### When Done
 

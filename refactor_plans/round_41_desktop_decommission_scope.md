@@ -19,14 +19,30 @@ The concrete multi-round execution plan now lives in `refactor_plans/desktop_app
 
 - [x] Create the Desktop App decommission roadmap.
 - [x] Define round-level TODO lists and When Done gates.
-- [ ] Build a Desktop App dependency inventory from entrypoints, imports, dynamic registries, and packaging requirements.
-- [ ] Classify PyQt surfaces as `migrate`, `retire`, `archive`, or `keep-as-separate-desktop-package`.
-- [ ] Decide the default launcher contract: headless Remote Web by default, desktop launcher removed or explicitly legacy.
-- [ ] Identify all `PyQt6` imports that remain in supported Remote Web runtime paths.
-- [ ] Identify all user-visible workflows that still require Desktop App fallback.
+- [x] Build a Desktop App dependency inventory from entrypoints, imports, dynamic registries, and packaging requirements.
+- [x] Classify PyQt surfaces as `migrate`, `retire`, `archive`, or `keep-as-separate-desktop-package`.
+- [x] Decide the default launcher contract: headless Remote Web by default, desktop launcher removed or explicitly legacy.
+- [x] Identify all `PyQt6` imports that remain in supported Remote Web runtime paths.
+- [x] Identify all user-visible workflows that still require Desktop App fallback.
 - [ ] Add tests that fail if supported headless launch imports `PyQt6`.
 - [ ] Add a removal checklist for `core.remote_api_server.RemoteBridge`, desktop tab/module controllers, and PyQt wrappers.
 - [ ] Run CDP validation after each workflow migration or retirement.
+
+## Round 41 Result
+
+- Added `refactor_docs/round_41_desktop_dependency_inventory.md`.
+- Confirmed `NAIA_web_headless.py` should become the default Web Session launch path in Round 42.
+- Confirmed `NAIA_cold_v4.py` and the Desktop App should be marked legacy before archive/removal.
+- Recorded PyQt import counts by bucket:
+  - `core/`: 14
+  - `interfaces/`: 2
+  - `modules/`: 12
+  - `tabs/`: 45
+  - `ui/`: 81
+  - `tools/`: 1
+  - `tests/`: 6
+  - `NAIA_cold_v4.py`: 1
+- Classified dynamic tabs, middle modules, RemoteBridge feature groups, requirements, and user-visible workflows.
 
 ## When Done
 

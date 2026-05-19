@@ -55,7 +55,7 @@
 - `core/middle_section_controller.py`는 `modules/*_module.py`를 discovery/import한다. 따라서 `modules/` 아래 새 `*_module.py`는 숨김 WebSession에서도 startup-visible하다.
 - `core/tab_controller.py`는 `TAB_MODULE_SPECS`와 root `tabs/*.py` scan을 함께 사용한다. lazy tab은 일부 적용됐지만 root proxy 파일은 여전히 startup import 후보가 된다.
 - `ui/remote_web/app.js`는 discovery가 아니라 명시적 JS import와 module registry를 쓴다. 데스크톱 탭 추가는 Remote Web 기능 추가가 아니다.
-- `not_implement/`는 이미 자동 로딩 경로 밖에 있으며, `not_implement/turbo_module.py`가 placeholder로 존재한다.
+- `not_implement/`는 이미 자동 로딩 경로 밖에 있다. Round 40에서 unused PyQt placeholder였던 `not_implement/turbo_module.py`는 제거했다.
 - `StorytellerTabModule`, `HookerTabModule`, `AssetsTabModule`은 `TabController`에서 이미 removed guard로 차단된다.
 - `TurboEventSequenceTabModule`은 Remote Web에 없는 PyQt 탭이지만 생성 경로에 `turbo_sequence_request` 처리 흔적이 남아 있어 단순 이동은 위험하다.
 - `tabs/comic_generator_tab.py`와 `tabs/comic_generator/`는 gitignored prototype이어도 `tabs/` 아래라 startup import 후보가 된다. 다음 격리 라운드에서 가장 먼저 `not_implement/` 이동 또는 explicit skip 대상이다.

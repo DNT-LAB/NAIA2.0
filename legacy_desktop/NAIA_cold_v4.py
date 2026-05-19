@@ -2807,7 +2807,7 @@ class ModernMainWindow(QMainWindow):
                     
                     # 스텔스 모드: API 관리 탭이 없으면 임시로 생성
                     if not api_management:
-                        from tabs.api_management_window import APIManagementWindow
+                        from legacy_desktop.tabs.api_management_window import APIManagementWindow
                         api_management = APIManagementWindow(self.app_context, self)
                     
                     if api_management and hasattr(api_management, 'webui_url_input'):
@@ -2935,7 +2935,7 @@ class ModernMainWindow(QMainWindow):
                     
                     # 스텔스 모드: API 관리 탭이 없으면 임시로 생성
                     if not api_management:
-                        from tabs.api_management_window import APIManagementWindow
+                        from legacy_desktop.tabs.api_management_window import APIManagementWindow
                         api_management = APIManagementWindow(self.app_context, self)
                     
                     if api_management and hasattr(api_management, 'comfyui_url_input'):
@@ -5136,7 +5136,7 @@ class ModernMainWindow(QMainWindow):
 
         # 백그라운드에서 tags_string 빌드 후 탭 생성
         from PyQt6.QtWidgets import QProgressDialog
-        from tabs.depth_search_window import TagsStringBuildThread
+        from legacy_desktop.tabs.depth_search_window import TagsStringBuildThread
 
         progress = QProgressDialog("심층 검색 데이터 준비 중...", "취소", 0, 0, self)
         progress.setWindowTitle("심층 검색")

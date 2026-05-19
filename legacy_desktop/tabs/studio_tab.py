@@ -13,15 +13,15 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 
 from interfaces.base_tab_module import BaseTabModule
-from tabs.studio.manager import ResultImageFrameManager
-from tabs.studio.dialogs.prompt_dialog import PromptSettingDialog
-from tabs.studio.dialogs.detached_textedit_dialog import DetachedTextEditDialog
-from tabs.studio.dialogs.export_dialog import ExportViewsDialog
-from tabs.studio.dialogs.save_preset_dialog import SavePresetDialog
-from tabs.studio.dialogs.open_preset_dialog import OpenPresetDialog
-from tabs.studio.dialogs.events_dialog import EventsDialog
-from tabs.studio.dialogs.wildcard_selector_dialog import WildcardSelectorDialog
-from tabs.studio.widgets.wildcard_nav_panel import WildcardNavPanel
+from legacy_desktop.tabs.studio.manager import ResultImageFrameManager
+from legacy_desktop.tabs.studio.dialogs.prompt_dialog import PromptSettingDialog
+from legacy_desktop.tabs.studio.dialogs.detached_textedit_dialog import DetachedTextEditDialog
+from legacy_desktop.tabs.studio.dialogs.export_dialog import ExportViewsDialog
+from legacy_desktop.tabs.studio.dialogs.save_preset_dialog import SavePresetDialog
+from legacy_desktop.tabs.studio.dialogs.open_preset_dialog import OpenPresetDialog
+from legacy_desktop.tabs.studio.dialogs.events_dialog import EventsDialog
+from legacy_desktop.tabs.studio.dialogs.wildcard_selector_dialog import WildcardSelectorDialog
+from legacy_desktop.tabs.studio.widgets.wildcard_nav_panel import WildcardNavPanel
 from ui.theme import DARK_COLORS, DARK_STYLES, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
@@ -666,7 +666,7 @@ class StudioTab(BaseTabModule):
         layout.addWidget(global_res_label)
 
         # Global resolution combo
-        from tabs.studio.frame import ResultImageFrame
+        from legacy_desktop.tabs.studio.frame import ResultImageFrame
         self.global_resolution_combo = QComboBox()
         self.global_resolution_combo.setFixedWidth(get_scaled_size(100))
         self.global_resolution_combo.setStyleSheet(f"""
@@ -1373,7 +1373,7 @@ class StudioTab(BaseTabModule):
     def _on_wc1_clicked(self):
         """Open wildcard selector for WC1"""
         try:
-            from tabs.studio.dialogs.wildcard_selector_dialog_simple import WildcardSelectorDialogSimple
+            from legacy_desktop.tabs.studio.dialogs.wildcard_selector_dialog_simple import WildcardSelectorDialogSimple
             from core.wildcard_manager import WildcardManager
         except ImportError as e:
             self._show_styled_message("Error", f"Import error: {e}", QMessageBox.Icon.Critical)
@@ -1403,7 +1403,7 @@ class StudioTab(BaseTabModule):
     def _on_wc2_clicked(self):
         """Open wildcard selector for WC2"""
         try:
-            from tabs.studio.dialogs.wildcard_selector_dialog_simple import WildcardSelectorDialogSimple
+            from legacy_desktop.tabs.studio.dialogs.wildcard_selector_dialog_simple import WildcardSelectorDialogSimple
             from core.wildcard_manager import WildcardManager
         except ImportError as e:
             self._show_styled_message("Error", f"Import error: {e}", QMessageBox.Icon.Critical)

@@ -9,7 +9,7 @@ import pandas as pd
 
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.detached_window import DetachedWindow
-from core.tab_controller import TabController
+from legacy_desktop.core.tab_controller import TabController
 from ui.scaling_manager import get_scaled_font_size
 
 class EnhancedTabWidget(QTabWidget):
@@ -80,7 +80,7 @@ class RightView(QWidget):
         
         # ✅ TabController를 통해 모든 탭을 동적으로 설정
         self.tab_controller = TabController(
-            tabs_dir='tabs',  # 탭 모듈이 위치한 디렉토리
+            tabs_dir='legacy_desktop/tabs',  # 탭 모듈이 위치한 디렉토리
             app_context=self.app_context,
             tab_widget=self.tab_widget,
             parent=self

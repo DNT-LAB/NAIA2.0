@@ -3337,7 +3337,7 @@ class ArtistThumbModule(BaseTabModule):
     
     def _open_gallery_window(self):
         """갤러리 윈도우 열기 - filter_combo 옵션에 따라 다른 아티스트 리스트 표시"""
-        from tabs.artist_thumb.gallery_window import ArtistGalleryWindow
+        from legacy_desktop.tabs.artist_thumb.gallery_window import ArtistGalleryWindow
         from artist_dictionary import artist_dict
 
         # 현재 필터 옵션 확인

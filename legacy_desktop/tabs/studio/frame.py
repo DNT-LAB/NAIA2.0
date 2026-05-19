@@ -638,7 +638,7 @@ class ResultImageFrame(QFrame):
         if not self.image_stack:
             return
 
-        from tabs.studio.dialogs.preview_dialog import PreviewDialog
+        from legacy_desktop.tabs.studio.dialogs.preview_dialog import PreviewDialog
 
         # Callback to set selected stack index
         def on_image_selected(stack_index: int):

@@ -8,5 +8,6 @@ Current archive contents:
 - `core/remote_api_server.py`: legacy Desktop-backed RemoteBridge/FastAPI bridge.
 - `core/*_controller.py`, `core/api_validator.py`, `core/comfyui_utils.py`, `core/ollama_service.py`: PyQt Desktop controllers and helper services that are no longer part of the supported `core/` runtime.
 - `modules/`: PyQt middle module wrappers and conditional editor UI. Supported headless module behavior lives in PyQt-free `core/*_settings.py`, `core/*_runtime.py`, and `WebSessionContext` instead.
+- `tabs/`: PyQt tab modules. Supported Remote Web tab behavior is served by headless FastAPI services and `ui/remote_web`.
 
 Supported Remote Web code must not import this package. Keep new headless behavior in `core/web_session_app.py`, `core/web_session_context.py`, and PyQt-free services under `core/`.

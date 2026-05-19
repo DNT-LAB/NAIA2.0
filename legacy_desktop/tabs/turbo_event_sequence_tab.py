@@ -15,7 +15,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 # 이제 절대 임포트 사용 가능
-from tabs.turbo_event_sequence import TurboEventSequenceTabModule
+from legacy_desktop.tabs.turbo_event_sequence import TurboEventSequenceTabModule
 
 # TabController가 클래스를 발견할 수 있도록 노출
 __all__ = ['TurboEventSequenceTabModule']

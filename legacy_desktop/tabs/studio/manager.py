@@ -15,9 +15,9 @@ from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap
 from PIL import Image
 
-from tabs.studio.frame import ResultImageFrame
-from tabs.studio.wildcard_mode_state import WildcardModeState, WildcardAxisInfo
-from tabs.studio.wildcard_combination_generator import WildcardCombinationGenerator
+from legacy_desktop.tabs.studio.frame import ResultImageFrame
+from legacy_desktop.tabs.studio.wildcard_mode_state import WildcardModeState, WildcardAxisInfo
+from legacy_desktop.tabs.studio.wildcard_combination_generator import WildcardCombinationGenerator
 from ui.theme import DARK_COLORS, get_dynamic_styles, show_info, show_warning, show_error
 from ui.scaling_manager import get_scaled_size
 

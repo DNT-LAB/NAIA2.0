@@ -2978,7 +2978,7 @@ class RemoteBridge(QObject):
     def _create_danbooru_browser_window(self):
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QApplication, QMainWindow
-        from tabs.web_view import BrowserTab
+        from legacy_desktop.tabs.web_view import BrowserTab
 
         main_window = getattr(self.app_context, "main_window", None)
         window = QMainWindow(parent=None)

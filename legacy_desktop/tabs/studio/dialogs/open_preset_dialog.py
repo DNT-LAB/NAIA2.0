@@ -731,8 +731,8 @@ class OpenPresetDialog(QDialog):
         if not self.preset_data:
             return
 
-        from tabs.studio.sequence_generator import generate_sequence_text_from_preset
-        from tabs.studio.dialogs.sequence_text_dialog import SequenceTextDialog
+        from legacy_desktop.tabs.studio.sequence_generator import generate_sequence_text_from_preset
+        from legacy_desktop.tabs.studio.dialogs.sequence_text_dialog import SequenceTextDialog
 
         # Generate sequence text
         sequence_text = generate_sequence_text_from_preset(self.preset_data)

@@ -14,7 +14,7 @@ from ui.theme import DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 if TYPE_CHECKING:
-    from tabs.studio.manager import ResultImageFrameManager
+    from legacy_desktop.tabs.studio.manager import ResultImageFrameManager
 
 
 class EventRowWidget(QFrame):
@@ -301,8 +301,8 @@ class EventsDialog(QDialog):
 
     def _on_get_sequence(self):
         """Generate and display :sequence text from current events"""
-        from tabs.studio.sequence_generator import generate_sequence_text
-        from tabs.studio.dialogs.sequence_text_dialog import SequenceTextDialog
+        from legacy_desktop.tabs.studio.sequence_generator import generate_sequence_text
+        from legacy_desktop.tabs.studio.dialogs.sequence_text_dialog import SequenceTextDialog
 
         # Collect current data from event rows (including any edits made)
         frames_data = []

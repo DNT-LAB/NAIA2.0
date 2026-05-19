@@ -15,7 +15,8 @@ Physically move the first Desktop App entrypoints out of the supported runtime t
 - [x] Run focused tests and static checks.
 - [x] Move or retire remaining PyQt controllers from `core/`.
 - [x] Move PyQt middle module wrappers from `modules/`.
-- [ ] Move or retire remaining PyQt tab/UI wrappers from `tabs/` and `ui/`.
+- [x] Move PyQt tab wrappers from `tabs/`.
+- [ ] Move or retire remaining PyQt UI wrappers from `ui/`.
 
 ## When Done
 
@@ -63,3 +64,17 @@ Validation:
 - `python -m pytest tests\test_web_session_app.py tests\test_requirements_split.py tests\test_web_shell_config.py -q`
 - `python -m pytest tests\test_middle_section_controller_static_registry.py tests\test_conditional_prompt_restore.py tests\test_prompt_engineering_preset_schema.py tests\test_character_settings.py tests\test_vibe_transfer_clipboard.py -q`
 - CDP validation: `refactor_docs/round_49_modules_archive_validation.md`
+
+## Round 49D Tab Archive
+
+Moved tracked `tabs/` runtime files to `legacy_desktop/tabs/`. The root `tabs/` tree now has no tracked files; ignored local assets/cache may still exist but are not part of the supported runtime.
+
+Updated legacy-only imports from `tabs.*` to `legacy_desktop.tabs.*`, including archived RemoteBridge browser-tab helpers and the legacy `RightView` tab directory.
+
+Validation:
+
+- `python -m compileall -q legacy_desktop\tabs`
+- `python -m py_compile legacy_desktop\NAIA_cold_v4.py legacy_desktop\core\tab_controller.py legacy_desktop\core\remote_api_server.py ui\right_view.py`
+- `python -m pytest tests\test_web_session_app.py tests\test_requirements_split.py tests\test_web_shell_config.py -q`
+- `python -m pytest tests\test_tab_controller_removed_tabs.py -q`
+- CDP validation: `refactor_docs/round_49_tabs_archive_validation.md`

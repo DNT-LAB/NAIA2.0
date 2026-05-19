@@ -6,6 +6,8 @@ Clarify the next target after Headless Web Session migration. The current codeba
 
 Round 41 is the planning and guardrail round for actual decommission work. It should not delete `NAIA_cold_v4.py` or PyQt surfaces yet; it should identify which workflows still depend on them and define the removal gates.
 
+The concrete multi-round execution plan now lives in `refactor_plans/desktop_app_decommission_roadmap.md`.
+
 ## Current Reality
 
 - Remote Web core workflow can run headlessly through `NAIA_web_headless.py`.
@@ -15,6 +17,8 @@ Round 41 is the planning and guardrail round for actual decommission work. It sh
 
 ## TODO Checklist
 
+- [x] Create the Desktop App decommission roadmap.
+- [x] Define round-level TODO lists and When Done gates.
 - [ ] Build a Desktop App dependency inventory from entrypoints, imports, dynamic registries, and packaging requirements.
 - [ ] Classify PyQt surfaces as `migrate`, `retire`, `archive`, or `keep-as-separate-desktop-package`.
 - [ ] Decide the default launcher contract: headless Remote Web by default, desktop launcher removed or explicitly legacy.

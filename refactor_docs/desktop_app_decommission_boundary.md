@@ -33,6 +33,8 @@ The Desktop App still exists and still works:
 
 This is not a contradiction in the completed Headless Web Session roadmap. It is the remaining scope for a separate Desktop App decommission roadmap.
 
+The execution roadmap is `refactor_plans/desktop_app_decommission_roadmap.md`.
+
 ## Decommission Gate
 
 Desktop App removal is complete only when:

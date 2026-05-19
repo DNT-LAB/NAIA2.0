@@ -21,7 +21,11 @@ Round 32 is complete: `NAIA_web_headless.py` can start a PyQt-free FastAPI app, 
 
 Round 33 is complete: API setup status, verify/save, disconnect, probe, and Cloudflared state/control are now owned by PyQt-free services and wired into the headless websocket command path.
 
-The full Headless Web Session migration is not complete yet. The new headless entrypoint intentionally does not wire Random prompt execution, Generate dispatch, results, history, or optional modules. Rounds 34-39 remain the concrete cutover work needed before the roadmap can be marked complete.
+Round 34 is complete: Random prompt requests now run through a PyQt-free core/headless prompt service and update Remote Web without `RemoteBridge`, `MiddleSectionController`, `ModernMainWindow`, or `ImageWindow`.
+
+Round 35 is complete: Generate requests now normalize into queue-ready `GenerationRequest` objects from Remote Web payload plus server state without reading desktop widgets.
+
+The full Headless Web Session migration is not complete yet. The new headless entrypoint intentionally does not execute image API calls, results, history, or optional modules. Rounds 36-39 remain the concrete cutover work needed before the roadmap can be marked complete.
 
 ## Final Target
 
@@ -225,11 +229,11 @@ Boundary for later rounds: the conditional prompt hook is now registered through
 
 ### TODO Checklist
 
-- [ ] Define a normalized `GenerationRequest` schema for Remote Web.
-- [ ] Make Remote Web request payload plus saved settings the source of generation parameters.
-- [ ] Remove reads from `generation_checkboxes`, combo boxes, text edits, and `MainController` from the Remote Web generation path.
-- [ ] Preserve per-mode NAI/WEBUI/COMFYUI parameter behavior.
-- [ ] Add contract tests for request normalization and backend dispatch payloads.
+- [x] Define a normalized `GenerationRequest` schema for Remote Web.
+- [x] Make Remote Web request payload plus saved settings the source of generation parameters.
+- [x] Remove reads from `generation_checkboxes`, combo boxes, text edits, and `MainController` from the Remote Web generation path.
+- [x] Preserve per-mode NAI/WEBUI/COMFYUI parameter behavior.
+- [x] Add contract tests for request normalization and backend dispatch payloads.
 
 ### When Done
 
@@ -237,6 +241,24 @@ Boundary for later rounds: the conditional prompt hook is now registered through
 - NAI generation request dispatch is visible in logs from the headless process.
 - Existing desktop generation still works through a desktop adapter path.
 - Regression tests cover at least NAI mode and one non-NAI mode contract.
+
+### Round 35 Result
+
+- Added `core.headless_generation_service.HeadlessGenerationService`.
+- `core.web_session_app` now handles websocket `generate` commands in the headless path and returns a `generation_dispatched` payload, a `status` payload, and refreshed `queue_state`.
+- Remote Web generation parameters are normalized from the server-owned parameter schema, Remote Web payload overrides, current prompt/negative text, and mode-specific credentials.
+- The headless generation request path preserves NAI, WEBUI, and COMFYUI mode selection without reading `generation_checkboxes`, combo boxes, text edits, `MainController`, `ModernMainWindow`, `ImageWindow`, or `RemoteBridge`.
+- Generated dispatch payloads intentionally do not echo credentials back to the browser; credentials stay inside the queued `GenerationRequest.params`.
+- Missing credentials now return a controlled websocket error/toast instead of falling through to a desktop status bar path.
+- Focused tests cover NAI normalization, WEBUI normalization, missing credentials, and a fresh-process generate dispatch with no `PyQt6` import.
+- CDP validation on `http://127.0.0.1:7284/` confirmed:
+  - Generate button sent a websocket `generate` frame from the real Remote Web UI.
+  - The server returned `generation_dispatched` with `api_mode: NAI`, `queued: true`, and `credential_configured: true`.
+  - The server returned `queue_state` with one queued request.
+  - Server logs contained `Headless Remote: generation request queued ... mode=NAI size=832x1216`.
+  - The page did not show the old `not wired` path or credential setup error.
+
+Boundary for later rounds: Round 35 queues a normalized generation request but does not execute the image API or produce result/history payloads. Round 36 must move API execution, image save, PNG-to-WEBP, latest image, and history broadcasting into PyQt-free services.
 
 ## Round 36 - Result, History, and Image Pipeline Services
 

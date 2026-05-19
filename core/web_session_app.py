@@ -13,6 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.web_session_context import WebSessionContext
 
@@ -99,6 +100,14 @@ def _random_service(context: WebSessionContext) -> HeadlessRandomPromptService:
     return service
 
 
+def _generation_service(context: WebSessionContext) -> HeadlessGenerationService:
+    service = getattr(context, "headless_generation_service", None)
+    if service is None:
+        service = HeadlessGenerationService(context)
+        context.headless_generation_service = service
+    return service
+
+
 async def _handle_random_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -114,6 +123,34 @@ async def _handle_random_command(
         random_request_id=request_id,
     )
     await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
+
+
+async def _handle_generate_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    command: dict[str, Any] | None = None,
+) -> None:
+    command = command if isinstance(command, dict) else {}
+    result = await _to_thread(_generation_service(context).enqueue_remote_request, command)
+    await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
+    if not result.ok:
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "error",
+            "message": result.blocked_reason,
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps({
+            "type": "status",
+            "is_generating": False,
+            "message": "blocked",
+        }, ensure_ascii=False))
+        return
+    await ws.send_text(json.dumps({
+        "type": "status",
+        "is_generating": False,
+        "message": "queued",
+    }, ensure_ascii=False))
+    await ws.send_text(json.dumps(context.queue_state_payload(), ensure_ascii=False))
 
 
 async def _handle_json_command(
@@ -223,11 +260,7 @@ async def _handle_json_command(
     elif command_type == "random":
         await _handle_random_command(ws, context, command)
     elif command_type == "generate":
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "error",
-            "message": f"{command_type} is not wired in the headless entrypoint yet.",
-        }, ensure_ascii=False))
+        await _handle_generate_command(ws, context, command)
     else:
         await ws.send_text(json.dumps({
             "type": "toast",
@@ -249,11 +282,7 @@ async def _handle_text_command(
         await _handle_random_command(ws, context)
         return
     if data == "generate":
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "error",
-            "message": f"{data} is not wired in the headless entrypoint yet.",
-        }, ensure_ascii=False))
+        await _handle_generate_command(ws, context)
         return
     await ws.send_text(json.dumps({
         "type": "toast",

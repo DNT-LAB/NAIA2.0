@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import mimetypes
 import uuid
 from pathlib import Path
@@ -18,7 +19,10 @@ from core.web_session_context import WebSessionContext
 def _client_host(ws: WebSocket) -> str:
     try:
         if ws.client is not None:
-            return str(ws.client.host or "")
+            host = str(ws.client.host or "")
+            if host == "testclient":
+                return "127.0.0.1"
+            return host
     except Exception:
         pass
     return ""
@@ -43,15 +47,6 @@ def _prompt_highlight_empty_index() -> dict[str, Any]:
             "source": "headless",
             "total": 0,
         },
-    }
-
-
-def _probe_results(context: WebSessionContext) -> dict[str, bool | None]:
-    status = context.api_status_payload()
-    return {
-        "NAI": True if status.get("nai_configured") else None,
-        "WEBUI": True if status.get("webui_url") else None,
-        "COMFYUI": True if status.get("comfyui_url") else None,
     }
 
 
@@ -108,11 +103,68 @@ async def _handle_json_command(
             "negative": context.negative_prompt_text,
         }, ensure_ascii=False))
     elif command_type == "probe_api":
+        allowed, reason = context.setup_gate(client_host)
+        if not allowed:
+            await ws.send_text(json.dumps({
+                "type": "setup_blocked",
+                "command": "probe_api",
+                "reason": reason,
+            }, ensure_ascii=False))
+            return
+        results = await _to_thread(context.probe_api)
         await ws.send_text(json.dumps({
             "type": "probe_result",
             "command": "probe_api",
-            "results": _probe_results(context),
+            "results": results,
         }, ensure_ascii=False))
+    elif command_type in {"verify_nai", "verify_webui", "verify_comfyui"}:
+        allowed, reason = context.setup_gate(client_host)
+        if not allowed:
+            await ws.send_text(json.dumps({
+                "type": "setup_blocked",
+                "command": command_type,
+                "reason": reason,
+            }, ensure_ascii=False))
+            return
+        mode = {
+            "verify_nai": "NAI",
+            "verify_webui": "WEBUI",
+            "verify_comfyui": "COMFYUI",
+        }[command_type]
+        raw_value = command.get("token") if mode == "NAI" else command.get("url")
+        result = await _to_thread(context.verify_api, mode, str(raw_value or ""))
+        await ws.send_text(json.dumps(result, ensure_ascii=False))
+        await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
+    elif command_type == "clear_api":
+        allowed, reason = context.setup_gate(client_host)
+        if not allowed:
+            await ws.send_text(json.dumps({
+                "type": "setup_blocked",
+                "command": command_type,
+                "reason": reason,
+            }, ensure_ascii=False))
+            return
+        result = await _to_thread(context.clear_api, str(command.get("mode") or ""))
+        await ws.send_text(json.dumps(result, ensure_ascii=False))
+        await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
+    elif command_type == "set_cloudflared_enabled":
+        allowed, reason = context.cloudflared_gate(client_host)
+        if not allowed:
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "error",
+                "message": reason,
+                "reason": reason,
+            }, ensure_ascii=False))
+            return
+        result = await _to_thread(context.set_cloudflared_enabled, bool(command.get("enabled", False)))
+        if not result.get("success", False):
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "error",
+                "message": result.get("error") or result.get("status_text") or "Cloudflared failed",
+            }, ensure_ascii=False))
+        await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
     elif command_type == "get_search_state":
         await ws.send_text(json.dumps({
             "type": "search_state",
@@ -165,6 +217,10 @@ async def _handle_text_command(
         "level": "info",
         "message": f"Headless command ignored: {data}",
     }, ensure_ascii=False))
+
+
+async def _to_thread(func, /, *args, **kwargs):
+    return await asyncio.to_thread(func, *args, **kwargs)
 
 
 def create_headless_app(

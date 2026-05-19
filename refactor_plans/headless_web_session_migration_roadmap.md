@@ -19,7 +19,9 @@ Round 31 is complete: a PyQt-free `WebSessionContext` skeleton now owns headless
 
 Round 32 is complete: `NAIA_web_headless.py` can start a PyQt-free FastAPI app, serve the Remote Web shell, return `/api/status`, and complete a CDP first-paint check with Random/Generate controls visible.
 
-The full Headless Web Session migration is not complete yet. The new headless entrypoint intentionally does not wire Random prompt execution, Generate dispatch, results, history, API setup persistence, or optional modules. Rounds 33-39 remain the concrete cutover work needed before the roadmap can be marked complete.
+Round 33 is complete: API setup status, verify/save, disconnect, probe, and Cloudflared state/control are now owned by PyQt-free services and wired into the headless websocket command path.
+
+The full Headless Web Session migration is not complete yet. The new headless entrypoint intentionally does not wire Random prompt execution, Generate dispatch, results, history, or optional modules. Rounds 34-39 remain the concrete cutover work needed before the roadmap can be marked complete.
 
 ## Final Target
 
@@ -159,11 +161,11 @@ This is a startup/first-paint cutover point only. Random and Generate intentiona
 
 ### TODO Checklist
 
-- [ ] Move NAI/WebUI/ComfyUI credential read/write into PyQt-free services.
-- [ ] Move API status check, disconnect, and verify-and-save behavior behind server APIs.
-- [ ] Move cloudflared start/stop/status behind a PyQt-free service.
-- [ ] Keep the Remote Web API settings modal server-authoritative.
-- [ ] Make desktop Settings tab consume the same service or stay as a separate desktop adapter.
+- [x] Move NAI/WebUI/ComfyUI credential read/write into PyQt-free services.
+- [x] Move API status check, disconnect, and verify-and-save behavior behind server APIs.
+- [x] Move cloudflared start/stop/status behind a PyQt-free service.
+- [x] Keep the Remote Web API settings modal server-authoritative.
+- [x] Make desktop Settings tab consume the same service or stay as a separate desktop adapter.
 
 ### When Done
 
@@ -171,6 +173,15 @@ This is a startup/first-paint cutover point only. Random and Generate intentiona
 - NAI/WebUI/ComfyUI status is persisted and broadcast without Settings tab objects.
 - Cloudflared status can be queried and changed without desktop UI.
 - Desktop mode still preserves existing API setup behavior.
+
+### Round 33 Result
+
+- Added `core.api_config_service.ApiConfigService` for NAI/WebUI/ComfyUI credential status, verify/save, clear, probe, setup gate, and timestamp persistence.
+- Added `core.api_config_service.CloudflaredService` for PyQt-free Cloudflared status and start/stop control.
+- `WebSessionContext` now owns an `ApiConfigService` and delegates `api_status`, setup gates, cloudflared gates, verify, clear, probe, and cloudflared toggle operations to it.
+- `core.web_session_app` now handles `verify_nai`, `verify_webui`, `verify_comfyui`, `clear_api`, `probe_api`, and `set_cloudflared_enabled` directly in the headless websocket path.
+- Desktop-backed WebShell remains unchanged and still uses the existing `RemoteBridge`/SettingsWidget adapter path.
+- CDP validation opened the API modal on the headless server and confirmed stored NAI/WebUI/ComfyUI status plus Cloudflared status rendered from server state.
 
 ## Round 34 - Server-Owned Random Prompt
 

@@ -16,6 +16,8 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Protocol
 
+from core.api_config_service import ApiConfigService, CloudflaredService
+
 
 SUPPORTED_API_MODES = ("NAI", "WEBUI", "COMFYUI")
 REMOTE_OPTION_DEFAULTS = {
@@ -129,6 +131,7 @@ class WebSessionContext:
     remote_params: dict[str, Any] = field(default_factory=dict)
     autocomplete_state: AutocompleteRuntimeState = field(default_factory=AutocompleteRuntimeState)
     desktop_adapter: Any = None
+    api_config_service: ApiConfigService | None = None
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -142,6 +145,14 @@ class WebSessionContext:
         self.pipeline_hooks: dict[str, dict[str, list[tuple[int, Any]]]] = {}
         self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.subscribers = self.event_bus.subscribers
+        if self.api_config_service is None:
+            cloudflared = CloudflaredService(port=self.remote_params.get("web_session_port", 7243))
+            cloudflared.set_status(
+                active=self.cloudflared_active,
+                url=self.cloudflared_tunnel_url,
+                status_text=self.cloudflared_status_text,
+            )
+            self.api_config_service = ApiConfigService(self.secure_token_manager, cloudflared=cloudflared)
         self.generation_queue_manager = self._create_queue_manager()
 
     def _default_token_manager(self) -> TokenStore:
@@ -205,40 +216,11 @@ class WebSessionContext:
         return self.autocomplete_state.to_payload()
 
     def api_status_payload(self, client_host: str | None = None) -> dict[str, Any]:
-        token_manager = self.secure_token_manager
-        nai_token = (token_manager.get_token("nai_token") or "").strip()
-        webui_url = token_manager.get_token("webui_url") or ""
-        comfyui_url = token_manager.get_token("comfyui_url") or ""
-        setup_required = not any((nai_token, webui_url, comfyui_url))
-        payload = {
-            "type": "api_status",
-            "nai_configured": bool(nai_token),
-            "nai_token_preview": nai_token[:7] if len(nai_token) >= 7 else nai_token,
-            "webui_url": webui_url,
-            "comfyui_url": comfyui_url,
-            "comfyui_default_model": token_manager.get_token("comfyui_default_model") or "",
-            "comfyui_sampling_mode": token_manager.get_token("comfyui_sampling_mode") or "",
-            "active_mode": self.get_api_mode(),
-            "setup_required": setup_required,
-            "last_verified": {
-                "nai": token_manager.get_token("nai_token_last_verified") or "",
-                "webui": token_manager.get_token("webui_url_last_verified") or "",
-                "comfyui": token_manager.get_token("comfyui_url_last_verified") or "",
-            },
-            "autocomplete": self.autocomplete_status_payload(),
-            "cloudflared_active": bool(self.cloudflared_active),
-            "cloudflared_url": self.cloudflared_tunnel_url or "",
-            "cloudflared_status_text": self.cloudflared_tunnel_url or self.cloudflared_status_text or "",
-        }
-        if client_host is not None:
-            setup_allowed, setup_reason = self.setup_gate(client_host)
-            payload["setup_allowed"] = setup_allowed
-            payload["setup_block_reason"] = setup_reason
-            payload["setup_required"] = setup_required and setup_allowed
-            cloudflared_allowed, cloudflared_reason = self.cloudflared_gate(client_host)
-            payload["cloudflared_control_allowed"] = cloudflared_allowed
-            payload["cloudflared_control_block_reason"] = cloudflared_reason
-        return payload
+        return self.api_config_service.status_payload(
+            active_mode=self.get_api_mode(),
+            autocomplete=self.autocomplete_status_payload(),
+            client_host=client_host,
+        )
 
     def http_status_payload(self) -> dict[str, Any]:
         return {
@@ -315,16 +297,32 @@ class WebSessionContext:
         return messages
 
     def setup_gate(self, client_host: str) -> tuple[bool, str]:
-        if not self._is_loopback_host(client_host):
-            return False, "Initial setup is allowed from localhost only."
-        if self.cloudflared_active:
-            return False, "Initial setup is blocked while Cloudflared is active."
-        return True, ""
+        return self.api_config_service.setup_gate(client_host)
 
     def cloudflared_gate(self, client_host: str) -> tuple[bool, str]:
-        if not self._is_loopback_host(client_host):
-            return False, "Cloudflared control is allowed from localhost only."
-        return True, ""
+        return self.api_config_service.cloudflared_gate(client_host)
+
+    def verify_api(self, mode: str, value: str) -> dict[str, Any]:
+        result = self.api_config_service.verify(mode, value)
+        self.publish("api_status_changed", self.api_status_payload())
+        return result
+
+    def clear_api(self, mode: str) -> dict[str, Any]:
+        result = self.api_config_service.clear(mode)
+        self.publish("api_status_changed", self.api_status_payload())
+        return result
+
+    def probe_api(self) -> dict[str, bool | None]:
+        return self.api_config_service.probe()
+
+    def set_cloudflared_enabled(self, enabled: bool) -> dict[str, Any]:
+        result = self.api_config_service.cloudflared.set_enabled(enabled)
+        status = self.api_config_service.cloudflared.status()
+        self.cloudflared_active = bool(status.get("active"))
+        self.cloudflared_tunnel_url = str(status.get("url") or "")
+        self.cloudflared_status_text = str(status.get("status_text") or "")
+        self.publish("cloudflared_status_changed", status)
+        return result
 
     @staticmethod
     def _is_loopback_host(host: str) -> bool:
@@ -341,6 +339,8 @@ class WebSessionContext:
 
 __all__ = [
     "AutocompleteRuntimeState",
+    "ApiConfigService",
+    "CloudflaredService",
     "InMemoryTokenManager",
     "REMOTE_OPTION_DEFAULTS",
     "SUPPORTED_API_MODES",

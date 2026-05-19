@@ -333,3 +333,12 @@
 - websocket 초기화는 `WebSessionContext.initial_websocket_messages()`를 사용하며, Remote Web boot indicator가 완료되도록 `lazy_indices_ready`를 즉시 전송한다.
 - CDP first-paint 검증에서 headless server root는 `NAIA Remote`로 로드됐고 `#btnRnd`, `#btnGen`이 존재했으며 boot indicator가 hidden 상태로 전환됐다.
 - Random prompt와 Generate dispatch는 아직 headless path에 연결하지 않았다. 이 둘은 Round 34/35에서 `RemoteBridge`와 desktop widget read를 제거하면서 이관한다.
+
+### Round 33 API setup and Cloudflared ownership
+
+- `core.api_config_service.ApiConfigService`를 추가해 NAI/WebUI/ComfyUI credential read/write, verify/save, clear, probe, setup gate, verify timestamp persistence를 PyQt 없이 수행한다.
+- `core.api_config_service.CloudflaredService`를 추가해 Cloudflared quick tunnel status/start/stop을 SettingsWidget 밖의 service boundary로 분리했다.
+- `WebSessionContext.api_status_payload()`는 이제 `ApiConfigService.status_payload()`에 위임한다. 따라서 headless app은 Settings tab이나 `RemoteBridge` 없이 같은 `api_status` contract를 만들 수 있다.
+- `core.web_session_app`은 headless websocket에서 `verify_nai`, `verify_webui`, `verify_comfyui`, `clear_api`, `probe_api`, `set_cloudflared_enabled`를 직접 처리한다.
+- Desktop WebShell은 아직 기존 `RemoteBridge`와 SettingsWidget adapter path를 유지한다. 이 라운드는 headless path ownership을 추가한 것이며 desktop code를 강제로 전환하지 않는다.
+- CDP 검증에서 `NAIA_web_headless.py`로 띄운 Remote Web API modal이 열렸고, 저장된 NAI/WebUI/ComfyUI 상태와 Cloudflared 상태가 서버 상태에서 렌더링됐다.

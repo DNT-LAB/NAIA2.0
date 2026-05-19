@@ -5,6 +5,8 @@ import sys
 
 from fastapi.testclient import TestClient
 
+from core.api_config_service import ApiConfigService, CloudflaredService
+from core.api_verification import VerifyResult
 from core.web_session_app import create_headless_app
 from core.web_session_context import InMemoryTokenManager, WebSessionContext
 
@@ -113,3 +115,78 @@ def test_headless_websocket_sends_initial_remote_web_state():
     assert messages[4]["model"] == "NAID4.5F"
     assert messages[6]["webui_url"] == "http://127.0.0.1:7860"
     assert sync_mode == {"type": "mode", "mode": "NAI"}
+
+
+def test_headless_websocket_verify_and_clear_api(tmp_path):
+    tokens = InMemoryTokenManager()
+    context = WebSessionContext(
+        token_manager=tokens,
+        api_config_service=ApiConfigService(
+            tokens,
+            timestamp_path=tmp_path / "timestamps.json",
+            verify_nai_token=lambda token: VerifyResult(True, "verified", "info", value=token),
+        ),
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "verify_nai", "token": "pst-headless-token"})
+        verify_result = ws.receive_json()
+        api_status = ws.receive_json()
+        ws.send_json({"type": "clear_api", "mode": "NAI"})
+        clear_result = ws.receive_json()
+        cleared_status = ws.receive_json()
+
+    assert verify_result["type"] == "verify_result"
+    assert verify_result["success"] is True
+    assert api_status["type"] == "api_status"
+    assert api_status["nai_configured"] is True
+    assert api_status["setup_required"] is False
+    assert clear_result["type"] == "clear_api_result"
+    assert clear_result["success"] is True
+    assert cleared_status["nai_configured"] is False
+    assert cleared_status["setup_required"] is True
+
+
+def test_headless_websocket_probe_and_cloudflared_state(tmp_path):
+    tokens = InMemoryTokenManager({"webui_url": "http://127.0.0.1:7860"})
+    cloudflared = CloudflaredService(
+        port=7281,
+        start_tunnel=lambda _port, on_progress=None: type(
+            "Info",
+            (),
+            {"tunnel_url": "https://headless.trycloudflare.com"},
+        )(),
+        stop_tunnel=lambda _port: None,
+    )
+    context = WebSessionContext(
+        token_manager=tokens,
+        api_config_service=ApiConfigService(
+            tokens,
+            timestamp_path=tmp_path / "timestamps.json",
+            cloudflared=cloudflared,
+            verify_webui_url=lambda _url: VerifyResult(True, "webui ok", "info"),
+        ),
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "probe_api"})
+        probe = ws.receive_json()
+        ws.send_json({"type": "set_cloudflared_enabled", "enabled": True})
+        cloudflared_status = ws.receive_json()
+        ws.send_json({"type": "set_cloudflared_enabled", "enabled": False})
+        stopped_status = ws.receive_json()
+
+    assert probe["type"] == "probe_result"
+    assert probe["results"] == {"NAI": None, "WEBUI": True, "COMFYUI": None}
+    assert cloudflared_status["type"] == "api_status"
+    assert cloudflared_status["cloudflared_active"] is True
+    assert cloudflared_status["cloudflared_url"] == "https://headless.trycloudflare.com"
+    assert stopped_status["cloudflared_active"] is False

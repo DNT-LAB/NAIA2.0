@@ -88,6 +88,12 @@ ARTIST_THUMB_MODES = {
         "expected_size": 2656390724,
         "sha256": "C831A5B186176AEBED394F320C3E5B75B3ACEB78AF2D97B84D04C277C276252E",
     },
+    "ANIMA-29000": {
+        "path": Path("data/artist_thumbnail_anima_bucket2.json"),
+        "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima_bucket2.json",
+        "expected_size": 832318089,
+        "sha256": "C50184C3DA2B0387F70567F581B2A9343B8FF227EAD9C2E8734C0D96936B621A",
+    },
 }
 ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
 
@@ -2445,7 +2451,7 @@ class ArtistThumbModule(BaseTabModule):
         exists = file_path.exists()
         size = file_path.stat().st_size if exists else 0
         expected_size = int(mode_info.get("expected_size") or 0)
-        needs_update = bool(exists and expected_size and size != expected_size)
+        needs_update = bool(expected_size and (not exists or size != expected_size))
         return {
             "path": file_path,
             "exists": exists,

@@ -157,6 +157,7 @@ app_settings.json
 data/artist_thumbnail.json
 data/artist_thumbnail_nai.json
 data/artist_thumbnail_anima.json
+data/artist_thumbnail_anima_bucket2.json
 GEMINI.md
 *.md
 !CLAUDE.md

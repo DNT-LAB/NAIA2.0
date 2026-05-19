@@ -16,8 +16,8 @@ Clean up startup log warnings that are now expected after middle modules were re
 
 - Hidden WebSession startup no longer emits:
   - `⚠️ 로드된 모듈이 없습니다.`
-- `⚠️ 자동화 모듈을 찾을 수 없습니다.`
-- `⚠️ [SETTINGS] module_boxes가 비어있습니다.`
-- `⚠️ AutoCompleteManager가 아직 초기화되지 않았습니다.`
+  - `⚠️ 자동화 모듈을 찾을 수 없습니다.`
+  - `⚠️ [SETTINGS] module_boxes가 비어있습니다.`
+  - `⚠️ AutoCompleteManager가 아직 초기화되지 않았습니다.`
 - Desktop-mode diagnostics remain available when modules are genuinely absent.
 - Remote Web server still starts and responds on `http://127.0.0.1:7243/`.

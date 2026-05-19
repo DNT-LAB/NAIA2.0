@@ -305,3 +305,13 @@
 - Settings 탭의 saved desktop autocomplete replay도 hidden WebSession에서는 생략한다. `AutoCompleteManager`는 desktop 표시 이후 초기화되는 surface라 WebSession startup warning 대상이 아니다.
 - `ModernMainWindow`와 `MainController`의 AutomationModule lookup은 desktop 진단 경고를 유지하되, hidden WebSession에서는 on-demand lazy module 안내로 낮췄다.
 - 이번 정리는 기능 경로 변경이 아니라 제거/지연 로드된 PyQt surface에 남아 있던 desktop 기준 경고를 WebSession 런타임 계약에 맞춘 것이다.
+
+### Round 30 Headless Web baseline measurement
+
+- `tools/measure_web_session_startup.py`를 추가해 현재 desktop-backed WebShell의 startup, `/api/status`, Remote Web first paint, Random, Generate dispatch, RSS, dependency audit을 같은 방식으로 반복 측정할 수 있게 했다.
+- 기준선 측정은 `NAIA_cold_v4.py --web-shell`을 venv Python으로 실행하고, Chrome/CDP로 실제 Remote Web UI의 Random/Generate 버튼을 클릭한다.
+- 결과는 `refactor_docs/round_30_headless_web_baseline.md`와 `logs/round30_web_session_baseline.json`에 기록됐다.
+- 측정된 기준선은 FastAPI listen 11.11초, `/api/status` 12.797초, first paint 13.485초, Random prompt update 3.641초, Generate dispatch 0.093초다.
+- RSS는 action-ready 1797.31 MB, random 이후 1890.16 MB, generate dispatch 이후 1890.62 MB까지 올라갔다.
+- dependency audit은 현재 WebShell이 아직 `PyQt6`를 import하고 `ModernMainWindow`, `ImageWindow`, `MiddleSectionController`, `RemoteBridge`를 construct한다는 사실을 확인했다.
+- 따라서 Round 30은 Headless 전환 완료가 아니라, 이후 Round 31-39에서 제거해야 할 desktop-backed WebShell 기준선을 확정한 라운드다.

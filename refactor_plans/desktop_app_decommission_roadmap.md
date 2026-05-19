@@ -269,7 +269,7 @@ Remove Qt imports from shared `core/` modules that remain in the supported headl
 
 ### TODO Checklist
 
-- [ ] Audit every `core/*.py` `PyQt6` import.
+- [x] Audit every `core/*.py` `PyQt6` import.
 - [ ] Split Qt worker/signal code from shared services:
   - `core.generation_controller`
   - `core.prompt_generation_controller`
@@ -280,7 +280,15 @@ Remove Qt imports from shared `core/` modules that remain in the supported headl
   - `core.temp_window_manager`
 - [ ] Replace Qt signals with service events for supported headless paths.
 - [ ] Keep any remaining Qt classes inside legacy desktop-only modules.
-- [ ] Add fresh-process import tests for all supported `core` services.
+- [x] Add fresh-process import tests for all supported `core` services.
+
+### Round 48 Result
+
+- Documented supported headless core imports and legacy desktop core imports in `refactor_docs/round_48_core_qt_import_inventory.md`.
+- Added a fresh-process import guard that blocks `PyQt6`, `core.remote_api_server`, `core.middle_section_controller`, `core.tab_controller`, `core.main_controller`, `core.generation_controller`, `core.prompt_generation_controller`, `core.search_controller`, `core.autocomplete_manager`, `core.ui_state_manager`, `core.temp_window_manager`, and `NAIA_cold_v4` while importing supported headless core services.
+- CDP startup/random validation passed on port `7306`; import audit again reported no PyQt, RemoteBridge, middle controller, or middle module imports.
+- Physical split/archive of Qt worker/signal modules remains deferred to Round 49 because it is a destructive desktop-tree operation.
+- Validation docs: `refactor_docs/round_48_core_import_contract_validation.md`, `refactor_docs/round_48_core_qt_import_inventory.md`.
 
 ### When Done
 

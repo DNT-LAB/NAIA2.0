@@ -122,3 +122,74 @@ print(json.dumps({
         "title": "NAIA Remote Headless",
         "entrypoint": "NAIA_web_headless",
     }
+
+
+def test_supported_headless_core_services_import_with_qt_blocked():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    code = r"""
+import importlib
+import importlib.abc
+import json
+import sys
+
+blocked = {
+    "core.remote_api_server",
+    "core.middle_section_controller",
+    "core.tab_controller",
+    "core.main_controller",
+    "core.generation_controller",
+    "core.prompt_generation_controller",
+    "core.search_controller",
+    "core.autocomplete_manager",
+    "core.ui_state_manager",
+    "core.temp_window_manager",
+    "NAIA_cold_v4",
+}
+modules = [
+    "core.web_session_app",
+    "core.web_session_context",
+    "core.api_config_service",
+    "core.api_service",
+    "core.headless_random_prompt_service",
+    "core.headless_generation_service",
+    "core.headless_result_service",
+    "core.style_thumbnail_service",
+    "core.character_viewer_service",
+    "core.prompt_generation_service",
+    "core.prompt_engineering_runtime",
+    "core.conditional_prompt_runtime",
+    "core.reference_inset_service",
+    "core.wildcard_manager",
+    "core.filter_data_manager",
+]
+
+class BlockDesktopImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "PyQt6" or fullname.startswith("PyQt6.") or fullname in blocked:
+            raise ImportError(f"blocked desktop import: {fullname}")
+        return None
+
+sys.meta_path.insert(0, BlockDesktopImports())
+for name in modules:
+    importlib.import_module(name)
+print(json.dumps({
+    "ok": True,
+    "modules": len(modules),
+    "pyqt_imported": "PyQt6" in sys.modules,
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload == {
+        "ok": True,
+        "modules": 15,
+        "pyqt_imported": False,
+    }

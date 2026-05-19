@@ -30,6 +30,14 @@ REMOTE_OPTION_DEFAULTS = {
     "wildcard_standalone": False,
     "auto_save": False,
 }
+SUPPORTED_RATINGS = ("g", "s", "q", "e")
+REMOTE_BOOLEAN_PARAMS = {
+    "seed_fixed",
+    "random_resolution",
+    "auto_fit_resolution",
+    "resolution_preset_enabled",
+    "webui_hiresfix_assist_enabled",
+}
 
 
 class TokenStore(Protocol):
@@ -240,6 +248,48 @@ class WebSessionContext:
         options.update({key: bool(value) for key, value in self.remote_options.items() if key in options})
         return options
 
+    def set_param(self, key: str, value: Any) -> None:
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            return
+        self.remote_params[clean_key] = self._coerce_remote_param(clean_key, value)
+        self.publish("remote_params_changed", self.generation_param_schema_payload())
+
+    def set_active_ratings(self, ratings: Any) -> set[str]:
+        if isinstance(ratings, str):
+            ratings = list(ratings)
+        if not isinstance(ratings, (list, tuple, set)):
+            normalized = set(SUPPORTED_RATINGS)
+        else:
+            normalized = {
+                str(item).strip().lower()
+                for item in ratings
+                if str(item).strip().lower() in SUPPORTED_RATINGS
+            }
+            if not normalized:
+                normalized = set(SUPPORTED_RATINGS)
+        self.remote_active_ratings = normalized
+        self.publish("remote_active_ratings_changed", self.search_state_payload())
+        return normalized
+
+    def get_active_ratings(self) -> set[str]:
+        ratings = self.remote_active_ratings
+        if not ratings:
+            return set(SUPPORTED_RATINGS)
+        return {rating for rating in SUPPORTED_RATINGS if rating in ratings} or set(SUPPORTED_RATINGS)
+
+    def search_state_payload(self) -> dict[str, Any]:
+        active_ratings = self.get_active_ratings()
+        rating_counts = self.search_results.get_count_by_rating()
+        count = self.search_results.get_filtered_count(active_ratings) if active_ratings else self.search_results.get_count()
+        return {
+            "type": "search_state",
+            "count": int(count or 0),
+            "active_ratings": [rating for rating in SUPPORTED_RATINGS if rating in active_ratings],
+            "rating_counts": rating_counts,
+            "filter_preferences": {},
+        }
+
     def autocomplete_status_payload(self) -> dict[str, Any]:
         return self.autocomplete_state.to_payload()
 
@@ -303,6 +353,14 @@ class WebSessionContext:
         }
         payload.update(self.remote_params)
         return payload
+
+    @staticmethod
+    def _coerce_remote_param(key: str, value: Any) -> Any:
+        if key in REMOTE_BOOLEAN_PARAMS:
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in {"1", "true", "yes", "on"}
+        return value
 
     def initial_websocket_messages(
         self,

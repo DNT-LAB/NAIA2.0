@@ -132,12 +132,22 @@ Remove remaining supported Web Session behavior from `core.remote_api_server.Rem
 
 ### TODO Checklist
 
-- [ ] Compare `refactor_docs/round_37_remote_bridge_event_contract.md` with the current Remote Web UI feature set.
-- [ ] For each still-supported RemoteBridge endpoint/event, create or reuse a PyQt-free service.
-- [ ] Move server-owned state into `WebSessionContext` or dedicated service objects.
-- [ ] Remove direct Remote Web reliance on desktop widgets, desktop signals, and `_find_loaded_module_instance`.
-- [ ] Add tests for migrated websocket and REST contracts.
-- [ ] Mark retired RemoteBridge features as unsupported in `not_implement/` or decommission docs.
+- [x] Compare `refactor_docs/round_37_remote_bridge_event_contract.md` with the current Remote Web UI feature set.
+- [x] For each still-supported RemoteBridge endpoint/event, create or reuse a PyQt-free service.
+- [x] Move server-owned state into `WebSessionContext` or dedicated service objects.
+- [x] Remove direct Remote Web reliance on desktop widgets, desktop signals, and `_find_loaded_module_instance`.
+- [x] Add tests for migrated websocket and REST contracts.
+- [x] Mark retired RemoteBridge features as unsupported in `not_implement/` or decommission docs.
+
+### Round 44 Result
+
+- Migrated `set_param`, `set_active_ratings`, and `get_search_state` into `WebSessionContext`.
+- Headless Random now uses server-owned active rating state if the browser command omits explicit ratings.
+- Added explicit headless unavailable/retired responses for Hires overlay and module mutation commands.
+- Documented deferred RemoteBridge features in `refactor_docs/round_44_remote_bridge_migration_notes.md` and `not_implement/remote_bridge_retired_headless_features.md`.
+- CDP validation passed on port `7297`: first paint `2.188s`, Random prompt update `6.047s`, Generate dispatch `0.109s`.
+- Import audit again reported no PyQt, RemoteBridge, desktop window, image window, middle controller, or middle module imports.
+- Validation doc: `refactor_docs/round_44_headless_remote_bridge_migration_validation.md`.
 
 ### When Done
 

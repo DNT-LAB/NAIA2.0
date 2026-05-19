@@ -142,9 +142,10 @@ async def _handle_random_command(
     command = command if isinstance(command, dict) else {}
     overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
     request_id = str(command.get("random_request_id") or command.get("requestId") or "")
+    active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
     result = await _to_thread(
         _random_service(context).generate,
-        active_ratings=_active_ratings_from_command(command),
+        active_ratings=active_ratings,
         overrides=overrides,
         random_request_id=request_id,
     )
@@ -247,6 +248,12 @@ async def _handle_json_command(
             "prompt": context.prompt_text,
             "negative": context.negative_prompt_text,
         }, ensure_ascii=False))
+    elif command_type == "set_param":
+        context.set_param(str(command.get("key") or ""), command.get("value"))
+        await ws.send_text(json.dumps(context.generation_param_schema_payload(), ensure_ascii=False))
+    elif command_type == "set_active_ratings":
+        context.set_active_ratings(command.get("ratings"))
+        await ws.send_text(json.dumps(context.search_state_payload(), ensure_ascii=False))
     elif command_type == "probe_api":
         allowed, reason = context.setup_gate(client_host)
         if not allowed:
@@ -311,12 +318,22 @@ async def _handle_json_command(
             }, ensure_ascii=False))
         await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
     elif command_type == "get_search_state":
+        await ws.send_text(json.dumps(context.search_state_payload(), ensure_ascii=False))
+    elif command_type == "read_hires_preset_overlay":
         await ws.send_text(json.dumps({
-            "type": "search_state",
-            "count": 0,
-            "active_ratings": ["g", "s", "q", "e"],
-            "rating_counts": {},
-            "filter_preferences": {},
+            "type": "hires_preset_overlay",
+            "preset_name": str(command.get("preset_name") or ""),
+            "original": {},
+            "overlay": None,
+            "headless": True,
+            "available": False,
+        }, ensure_ascii=False))
+    elif command_type in {"write_hires_preset_overlay", "set_module_param"}:
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "info",
+            "message": f"Headless command retired: {command_type}",
+            "headless": True,
         }, ensure_ascii=False))
     elif command_type == "get_module_state":
         module_id = str(command.get("module_id") or "")

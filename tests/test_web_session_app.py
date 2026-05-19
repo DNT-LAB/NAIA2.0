@@ -221,6 +221,84 @@ def test_headless_websocket_sends_initial_remote_web_state():
     assert sync_mode == {"type": "mode", "mode": "NAI"}
 
 
+def test_headless_websocket_set_param_updates_server_owned_params():
+    context = WebSessionContext(token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "set_param", "key": "steps", "value": "31"})
+        steps_payload = ws.receive_json()
+        ws.send_json({"type": "set_param", "key": "auto_fit_resolution", "value": "true"})
+        auto_fit_payload = ws.receive_json()
+
+    assert steps_payload["type"] == "params"
+    assert steps_payload["steps"] == "31"
+    assert context.remote_params["steps"] == "31"
+    assert auto_fit_payload["auto_fit_resolution"] is True
+    assert context.remote_params["auto_fit_resolution"] is True
+
+
+def test_headless_websocket_active_ratings_update_search_state_and_random():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager(),
+        wildcard_manager=_WildcardManager(),
+        filter_data_manager=False,
+        search_results=SearchResultModel(pd.DataFrame([
+            {"general": "general-only-tag", "rating": "g"},
+            {"general": "sensitive-only-tag", "rating": "s"},
+        ])),
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "set_active_ratings", "ratings": ["s"]})
+        state = ws.receive_json()
+        ws.send_json({"type": "random", "random_request_id": "rating-filter"})
+        random_msg = ws.receive_json()
+
+    assert state["type"] == "search_state"
+    assert state["active_ratings"] == ["s"]
+    assert state["count"] == 1
+    assert state["rating_counts"] == {"g": 1, "s": 1, "q": 0, "e": 0}
+    assert random_msg["type"] == "prompt_generated"
+    assert random_msg["random_request_id"] == "rating-filter"
+    assert "sensitive-only-tag" in random_msg["prompt"]
+    assert "general-only-tag" not in random_msg["prompt"]
+
+
+def test_headless_websocket_retired_desktop_commands_are_explicit():
+    context = WebSessionContext(token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "read_hires_preset_overlay", "preset_name": "legacy-preset"})
+        overlay = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "prompt_engineering", "key": "x", "value": "y"})
+        retired = ws.receive_json()
+
+    assert overlay == {
+        "type": "hires_preset_overlay",
+        "preset_name": "legacy-preset",
+        "original": {},
+        "overlay": None,
+        "headless": True,
+        "available": False,
+    }
+    assert retired["type"] == "toast"
+    assert retired["level"] == "info"
+    assert retired["headless"] is True
+    assert "set_module_param" in retired["message"]
+
+
 def test_headless_websocket_verify_and_clear_api(tmp_path):
     tokens = InMemoryTokenManager()
     context = WebSessionContext(

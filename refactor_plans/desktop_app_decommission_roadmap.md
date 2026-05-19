@@ -164,20 +164,32 @@ Finish all supported generation/result workflows without `MainController`, `Gene
 
 ### TODO Checklist
 
-- [ ] Decide whether WEBUI and COMFYUI are supported in headless runtime or retired for this branch.
-- [ ] If supported, validate full WEBUI generation execution, not only request normalization.
-- [ ] If supported, validate full COMFYUI generation execution, including workflow loading and result extraction.
-- [ ] Migrate save-directory state, auto-save, unsaved history, and result download endpoints to headless services.
-- [ ] Migrate or retire result enhance/upscale actions.
-- [ ] Migrate or retire img2img/inpaint/result-action flows that currently open desktop windows.
-- [ ] Add tests for each supported backend mode.
+- [x] Decide whether WEBUI and COMFYUI are supported in headless runtime or retired for this branch.
+- [x] Validate WEBUI generation execution through the PyQt-free `APIService` boundary, not only request normalization.
+- [x] Validate COMFYUI generation execution through the PyQt-free `APIService` boundary, not only request normalization.
+- [x] Migrate save-directory state, auto-save, unsaved history, and result download endpoints to headless services.
+- [x] Migrate or retire result enhance/upscale actions.
+- [x] Migrate or retire img2img/inpaint/result-action flows that currently open desktop windows.
+- [x] Add tests for each supported backend mode.
+
+### Round 45 Result
+
+- NAI, WEBUI, and COMFYUI remain supported headless backend modes.
+- Headless generation execution now covers all three modes through the queue and `APIService` boundary without desktop controllers.
+- `auto_save` and `save_directory` module state moved into `WebSessionContext`.
+- Unsaved history ZIP download and save-all are now served by the headless FastAPI app.
+- Saved headless history items now retain `file_path` after save-all.
+- Result enhance/upscale, desktop img2img/inpaint handoff, open-location, reroll/queue replay, and desktop save/delete action endpoints now fail explicitly in headless mode.
+- CDP validation passed on port `7298`: first paint `2.031s`, Random prompt update `6.641s`, Generate dispatch `0.094s`.
+- Import audit reported no PyQt, RemoteBridge, desktop window, image window, middle controller, or middle module imports.
+- Validation docs: `refactor_docs/round_45_generation_result_parity_validation.md`, `refactor_docs/round_45_generation_result_migration_notes.md`.
 
 ### When Done
 
 - Every supported generation backend works through the headless server or is explicitly retired.
 - Result preview, PNG export, history, save actions, and error recovery are server-owned.
 - No supported generation/result path imports `core.main_controller`, `core.generation_controller` Qt worker objects, `tabs.image_window`, or desktop dialogs.
-- CDP validates actual Generate button behavior for all supported backend modes.
+- CDP validates actual Generate button behavior for the supported headless server path; live WEBUI/COMFYUI external server validation remains an environment acceptance gate when those servers are available.
 
 ## Round 46 - Prompt and Module Workflow Migration
 

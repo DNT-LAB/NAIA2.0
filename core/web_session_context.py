@@ -17,7 +17,9 @@ from threading import RLock
 from typing import Any, Callable, Protocol
 import weakref
 import os
+import re
 
+from core import result_image_payload_service as result_images
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_result_service import HeadlessResultStore
 from core.search_result_model import SearchResultModel
@@ -38,6 +40,29 @@ REMOTE_BOOLEAN_PARAMS = {
     "resolution_preset_enabled",
     "webui_hiresfix_assist_enabled",
 }
+AUTO_SAVE_DEFAULTS = {
+    "auto_save": False,
+    "save_as_webp": False,
+    "history_limit_enabled": False,
+    "max_history_length": 2000,
+    "memory_action": 1,
+}
+AUTO_SAVE_MEMORY_ACTION_OPTIONS = [
+    {"value": 1, "label": "[1] 1장씩 자동저장+정리"},
+    {"value": 2, "label": "[2] 1장씩 저장없이 삭제"},
+    {"value": 3, "label": "[3] 자동생성 중단"},
+]
+SAVE_DIRECTORY_FILENAME_OPTIONS = [
+    {"value": "number_only", "label": "번호만 (00001.png)"},
+    {"value": "time_number", "label": "시간_번호 (143052_00001.png)"},
+    {"value": "datetime", "label": "날짜_시간 (20250108_143052.png)"},
+    {"value": "prompt", "label": "프롬프트 (prompt.png)"},
+    {"value": "wildcard", "label": "와일드카드 (wildcard.png)"},
+]
+SAVE_DIRECTORY_CLASSIFICATION_OPTIONS = [
+    {"value": "none", "label": "분류 없음"},
+    {"value": "prompt_recognition", "label": "프롬프트 인식"},
+]
 
 
 class TokenStore(Protocol):
@@ -153,6 +178,8 @@ class WebSessionContext:
     current_prompt_context: Any = None
     result_store: HeadlessResultStore = field(default_factory=HeadlessResultStore)
     headless_generation_execute_enabled: bool = True
+    auto_save_state: dict[str, Any] = field(default_factory=dict)
+    save_directory_state: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -241,6 +268,8 @@ class WebSessionContext:
         if key not in REMOTE_OPTION_DEFAULTS:
             return
         self.remote_options[key] = bool(value)
+        if key == "auto_save":
+            self.auto_save_state["auto_save"] = bool(value)
         self.publish("remote_options_changed", self.get_options())
 
     def get_options(self) -> dict[str, bool]:
@@ -288,6 +317,129 @@ class WebSessionContext:
             "active_ratings": [rating for rating in SUPPORTED_RATINGS if rating in active_ratings],
             "rating_counts": rating_counts,
             "filter_preferences": {},
+        }
+
+    def auto_save_state_payload(self) -> dict[str, Any]:
+        state = dict(AUTO_SAVE_DEFAULTS)
+        state.update({key: self.auto_save_state.get(key) for key in AUTO_SAVE_DEFAULTS if key in self.auto_save_state})
+        state["auto_save"] = bool(state["auto_save"])
+        state["save_as_webp"] = bool(state["save_as_webp"])
+        state["history_limit_enabled"] = bool(state["history_limit_enabled"])
+        state["max_history_length"] = int(state["max_history_length"] or 2000)
+        state["memory_action"] = int(state["memory_action"] or 1)
+        state["unsaved_history_count"] = self.result_store.unsaved_history_count()
+        state["memory_action_options"] = list(AUTO_SAVE_MEMORY_ACTION_OPTIONS)
+        return self._module_state_payload("auto_save", state)
+
+    def save_directory_state_payload(self, client_host: str | None = None) -> dict[str, Any]:
+        base_path = str(self.save_directory_state.get("base_path") or "output")
+        use_timestamp_folder = self._coerce_bool(
+            self.save_directory_state.get("use_timestamp_folder", True)
+        )
+        control_allowed = True if client_host is None else self._is_loopback_host(client_host)
+        control_reason = "" if control_allowed else "Save directory control is local-only."
+        state = {
+            "base_path": base_path,
+            "current_save_directory": str(self._current_save_directory(base_path, use_timestamp_folder)),
+            "session_timestamp": self.session_timestamp,
+            "use_timestamp_folder": use_timestamp_folder,
+            "save_counter": int(self.save_directory_state.get("save_counter", 1) or 1),
+            "filename_format": str(self.save_directory_state.get("filename_format") or "number_only"),
+            "filename_format_options": list(SAVE_DIRECTORY_FILENAME_OPTIONS),
+            "classification_method": str(self.save_directory_state.get("classification_method") or "none"),
+            "classification_method_options": list(SAVE_DIRECTORY_CLASSIFICATION_OPTIONS),
+            "classification_rules": str(self.save_directory_state.get("classification_rules") or ""),
+            "control_allowed": control_allowed,
+            "control_block_reason": control_reason,
+            "browse_allowed": control_allowed,
+            "browse_block_reason": control_reason,
+        }
+        return self._module_state_payload("save_directory", state)
+
+    def module_state_payload(self, module_id: str, client_host: str | None = None) -> dict[str, Any]:
+        clean_id = str(module_id or "").strip()
+        if clean_id == "auto_save":
+            return self.auto_save_state_payload()
+        if clean_id == "save_directory":
+            return self.save_directory_state_payload(client_host)
+        return {
+            "type": "module_state",
+            "module_id": clean_id,
+            "available": False,
+            "headless": True,
+            "state": {},
+        }
+
+    def set_module_param(
+        self,
+        module_id: str,
+        key: str,
+        value: Any,
+        *,
+        client_host: str | None = None,
+    ) -> dict[str, Any] | None:
+        clean_id = str(module_id or "").strip()
+        clean_key = str(key or "").strip()
+        if clean_id == "auto_save":
+            if clean_key in {"auto_save", "save_as_webp", "history_limit_enabled"}:
+                self.auto_save_state[clean_key] = self._coerce_bool(value)
+                if clean_key == "auto_save":
+                    self.remote_options["auto_save"] = bool(self.auto_save_state[clean_key])
+            elif clean_key == "max_history_length":
+                self.auto_save_state[clean_key] = self._coerce_int(value, default=2000, minimum=100, maximum=10000)
+            elif clean_key == "memory_action":
+                self.auto_save_state[clean_key] = self._coerce_int(value, default=1, minimum=1, maximum=3)
+            else:
+                return None
+            return self.auto_save_state_payload()
+        if clean_id == "save_directory":
+            if client_host is not None and not self._is_loopback_host(client_host):
+                return self.save_directory_state_payload(client_host)
+            if clean_key == "base_path":
+                path_value = str(value or "").strip()
+                if path_value:
+                    self.save_directory_state[clean_key] = path_value
+            elif clean_key == "use_timestamp_folder":
+                self.save_directory_state[clean_key] = self._coerce_bool(value)
+            elif clean_key == "filename_format":
+                allowed = {item["value"] for item in SAVE_DIRECTORY_FILENAME_OPTIONS}
+                if str(value or "") in allowed:
+                    self.save_directory_state[clean_key] = str(value)
+            elif clean_key == "classification_method":
+                allowed = {item["value"] for item in SAVE_DIRECTORY_CLASSIFICATION_OPTIONS}
+                if str(value or "") in allowed:
+                    self.save_directory_state[clean_key] = str(value)
+            elif clean_key == "classification_rules":
+                self.save_directory_state[clean_key] = str(value or "")
+            else:
+                return None
+            return self.save_directory_state_payload(client_host)
+        return None
+
+    def save_unsaved_history(self) -> dict[str, Any]:
+        items = self.result_store.unsaved_items()
+        if not items:
+            return {"saved": 0, "remaining": 0, "paths": []}
+        save_as_webp = self._coerce_bool(self.auto_save_state_payload().get("save_as_webp"))
+        directory = self._current_save_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+        saved_paths: list[str] = []
+        for item in list(items):
+            extension = "webp" if save_as_webp else "png"
+            filename = self._next_save_filename(item, extension)
+            target = self._unique_output_path(directory / filename)
+            if save_as_webp:
+                target.write_bytes(item.webp_bytes)
+            else:
+                png_bytes, _ = result_images.history_item_png_payload(item, label=item.filename)
+                target.write_bytes(png_bytes)
+            self.result_store.mark_saved(item, target)
+            saved_paths.append(str(target))
+        return {
+            "saved": len(saved_paths),
+            "remaining": self.result_store.unsaved_history_count(),
+            "paths": saved_paths,
+            "current_save_directory": str(directory),
         }
 
     def autocomplete_status_payload(self) -> dict[str, Any]:
@@ -357,10 +509,85 @@ class WebSessionContext:
     @staticmethod
     def _coerce_remote_param(key: str, value: Any) -> Any:
         if key in REMOTE_BOOLEAN_PARAMS:
-            if isinstance(value, bool):
-                return value
-            return str(value).strip().lower() in {"1", "true", "yes", "on"}
+            return WebSessionContext._coerce_bool(value)
         return value
+
+    @staticmethod
+    def _coerce_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
+
+    def _module_state_payload(self, module_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "type": "module_state",
+            "module_id": module_id,
+            "available": True,
+            "headless": True,
+            **state,
+        }
+        payload["state"] = dict(state)
+        return payload
+
+    def _current_save_directory(
+        self,
+        base_path: str | None = None,
+        use_timestamp_folder: bool | None = None,
+    ) -> Path:
+        base = Path(str(base_path or self.save_directory_state.get("base_path") or "output")).expanduser()
+        if not base.is_absolute():
+            base = Path(self.repo_root) / base
+        if use_timestamp_folder is None:
+            use_timestamp_folder = self._coerce_bool(self.save_directory_state.get("use_timestamp_folder", True))
+        return base / self.session_timestamp if use_timestamp_folder else base
+
+    def _next_save_filename(self, item: Any, extension: str) -> str:
+        counter = int(self.save_directory_state.get("save_counter", 1) or 1)
+        filename_format = str(self.save_directory_state.get("filename_format") or "number_only")
+        if filename_format == "time_number":
+            stem = f"{datetime.now().strftime('%H%M%S')}_{counter:05d}"
+        elif filename_format == "datetime":
+            stem = datetime.now().strftime("%Y%m%d_%H%M%S")
+        elif filename_format == "prompt":
+            prompt = ""
+            params = getattr(item, "generation_params", {}) or {}
+            if isinstance(params, dict):
+                prompt = str(params.get("input") or params.get("prompt") or "")
+            stem = self._safe_filename_stem(prompt or "prompt")
+        elif filename_format == "wildcard":
+            stem = self._safe_filename_stem(Path(getattr(item, "filename", "") or "wildcard").stem)
+        else:
+            stem = f"{counter:05d}"
+        self.save_directory_state["save_counter"] = counter + 1
+        return f"{stem}.{extension}"
+
+    @staticmethod
+    def _safe_filename_stem(value: str, *, max_length: int = 120) -> str:
+        clean = re.sub(r'[<>:"/\\|?*\x00-\x1F]+', "_", str(value or "")).strip(" ._")
+        clean = re.sub(r"\s+", " ", clean)
+        return (clean[:max_length].strip(" ._") or "naia-result")
+
+    @staticmethod
+    def _unique_output_path(path: Path) -> Path:
+        if not path.exists():
+            return path
+        stem = path.stem
+        suffix = path.suffix
+        parent = path.parent
+        index = 1
+        while True:
+            candidate = parent / f"{stem} ({index}){suffix}"
+            if not candidate.exists():
+                return candidate
+            index += 1
 
     def initial_websocket_messages(
         self,

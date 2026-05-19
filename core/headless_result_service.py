@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 import io
+from pathlib import Path
 import uuid
+import zipfile
 from typing import Any
 
 from PIL import Image
@@ -95,14 +97,35 @@ class HeadlessResultStore:
     def history_total(self) -> int:
         return len(self._items)
 
+    def unsaved_items(self) -> list[HeadlessHistoryItem]:
+        return [item for item in self._items if not item.filepath]
+
+    def unsaved_history_count(self) -> int:
+        return len(self.unsaved_items())
+
+    def mark_saved(self, item: HeadlessHistoryItem, filepath: str | Path) -> None:
+        item.filepath = str(filepath)
+
+    def unsaved_zip_payload(self) -> tuple[bytes, str]:
+        items = self.unsaved_items()
+        if not items:
+            raise FileNotFoundError("No unsaved history")
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for item in items:
+                png_bytes, filename = result_images.history_item_png_payload(item, label=item.filename)
+                archive.writestr(filename, png_bytes)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return buffer.getvalue(), f"naia_unsaved_history_{timestamp}.zip"
+
     def history_summary(self, item: HeadlessHistoryItem, index: int = 0) -> dict[str, Any]:
         mtime = item.created_at.timestamp()
         return {
             "rel_path": item.rel_path,
             "history_id": item.history_id,
             "filename": item.filename,
-            "file_path": "",
-            "source": "memory",
+            "file_path": item.filepath,
+            "source": "file" if item.filepath else "memory",
             "size_bytes": len(item.raw_bytes or item.webp_bytes or b""),
             "mtime": mtime,
             "mtime_iso": item.created_at.isoformat(),

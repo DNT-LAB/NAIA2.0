@@ -328,21 +328,76 @@ async def _handle_json_command(
             "headless": True,
             "available": False,
         }, ensure_ascii=False))
-    elif command_type in {"write_hires_preset_overlay", "set_module_param"}:
+    elif command_type == "write_hires_preset_overlay":
         await ws.send_text(json.dumps({
             "type": "toast",
             "level": "info",
             "message": f"Headless command retired: {command_type}",
             "headless": True,
         }, ensure_ascii=False))
+    elif command_type == "set_module_param":
+        module_state = context.set_module_param(
+            str(command.get("module_id") or ""),
+            str(command.get("key") or ""),
+            command.get("value"),
+            client_host=client_host,
+        )
+        if module_state is None:
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "info",
+                "message": "Headless command retired: set_module_param",
+                "headless": True,
+            }, ensure_ascii=False))
+        else:
+            await ws.send_text(json.dumps(module_state, ensure_ascii=False))
     elif command_type == "get_module_state":
         module_id = str(command.get("module_id") or "")
+        await ws.send_text(json.dumps(context.module_state_payload(module_id, client_host), ensure_ascii=False))
+    elif command_type == "result_upscale":
         await ws.send_text(json.dumps({
-            "type": "module_state",
-            "module_id": module_id,
+            "type": "result_upscale_state",
+            "running": False,
+            "success": False,
+            "message": "NAI 2x upscale is not available in the headless runtime yet.",
+            "headless": True,
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "info",
+            "message": "Headless command retired: result_upscale",
+            "headless": True,
+        }, ensure_ascii=False))
+    elif command_type == "result_enhance":
+        await ws.send_text(json.dumps({
+            "type": "result_enhance_state",
+            "running": False,
+            "success": False,
+            "message": "Result enhance is not available in the headless runtime yet.",
+            "headless": True,
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "info",
+            "message": "Headless command retired: result_enhance",
+            "headless": True,
+        }, ensure_ascii=False))
+    elif command_type == "set_result_enhance_config":
+        await ws.send_text(json.dumps({
+            "type": "result_enhance_config",
+            "upscale": command.get("upscale", 1.5),
+            "strength": command.get("strength", 0.2),
+            "noise": command.get("noise", 0.0),
             "available": False,
             "headless": True,
-            "state": {},
+        }, ensure_ascii=False))
+    elif command_type == "result_image_action":
+        action = str(command.get("action") or "image_action")
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "info",
+            "message": f"Headless command retired: result_image_action/{action}",
+            "headless": True,
         }, ensure_ascii=False))
     elif command_type == "random":
         await _handle_random_command(ws, context, command)
@@ -490,6 +545,67 @@ def create_headless_app(
             return session_context.result_store.history_meta_payload(history_id, include_full=full)
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
+
+    @app.post("/api/history/unsaved/save-all")
+    async def api_history_unsaved_save_all():
+        try:
+            return session_context.save_unsaved_history()
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @app.get("/api/history/unsaved/download")
+    async def api_history_unsaved_download():
+        try:
+            zip_bytes, filename = session_context.result_store.unsaved_zip_payload()
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": result_images.download_content_disposition(filename)},
+        )
+
+    @app.post("/api/result/open-location")
+    async def api_result_open_location():
+        return JSONResponse({
+            "error": "Open location is a desktop-only action in the headless runtime.",
+            "headless": True,
+        }, status_code=400)
+
+    @app.post("/api/result/action/reroll")
+    async def api_result_action_reroll():
+        return JSONResponse({
+            "error": "Result reroll from saved desktop state is not available in the headless runtime yet.",
+            "headless": True,
+        }, status_code=400)
+
+    @app.post("/api/result/action/queue")
+    async def api_result_action_queue():
+        return JSONResponse({
+            "error": "Result queue replay from saved desktop state is not available in the headless runtime yet.",
+            "headless": True,
+        }, status_code=400)
+
+    @app.post("/api/result/action/save")
+    async def api_result_action_save():
+        return JSONResponse({
+            "error": "Desktop result save action is retired; use auto-save or unsaved history save-all.",
+            "headless": True,
+        }, status_code=400)
+
+    @app.post("/api/result/action/delete")
+    async def api_result_action_delete():
+        return JSONResponse({
+            "error": "Desktop result delete action is retired in the headless runtime.",
+            "headless": True,
+        }, status_code=400)
+
+    @app.post("/api/image-action/{action}")
+    async def api_image_action(action: str):
+        return JSONResponse({
+            "error": f"Image action '{action}' is desktop-only in the headless runtime.",
+            "headless": True,
+        }, status_code=400)
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):

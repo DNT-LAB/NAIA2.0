@@ -2,6 +2,8 @@ import json
 import os
 import subprocess
 import sys
+import io
+import zipfile
 
 from fastapi.testclient import TestClient
 import pandas as pd
@@ -284,6 +286,11 @@ def test_headless_websocket_retired_desktop_commands_are_explicit():
         overlay = ws.receive_json()
         ws.send_json({"type": "set_module_param", "module_id": "prompt_engineering", "key": "x", "value": "y"})
         retired = ws.receive_json()
+        ws.send_json({"type": "result_upscale", "source": "current"})
+        upscale_state = ws.receive_json()
+        upscale_retired = ws.receive_json()
+        ws.send_json({"type": "result_image_action", "action": "img2img", "source": "current"})
+        image_action_retired = ws.receive_json()
 
     assert overlay == {
         "type": "hires_preset_overlay",
@@ -297,6 +304,48 @@ def test_headless_websocket_retired_desktop_commands_are_explicit():
     assert retired["level"] == "info"
     assert retired["headless"] is True
     assert "set_module_param" in retired["message"]
+    assert upscale_state["type"] == "result_upscale_state"
+    assert upscale_state["success"] is False
+    assert upscale_state["headless"] is True
+    assert upscale_retired["type"] == "toast"
+    assert "result_upscale" in upscale_retired["message"]
+    assert image_action_retired["type"] == "toast"
+    assert "result_image_action/img2img" in image_action_retired["message"]
+
+
+def test_headless_websocket_auto_save_and_save_directory_state_are_server_owned(tmp_path):
+    context = WebSessionContext(token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "auto_save"})
+        auto_save = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "auto_save", "key": "save_as_webp", "value": "true"})
+        updated_auto_save = ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "save_directory"})
+        save_directory = ws.receive_json()
+        ws.send_json({
+            "type": "set_module_param",
+            "module_id": "save_directory",
+            "key": "base_path",
+            "value": str(tmp_path),
+        })
+        updated_save_directory = ws.receive_json()
+
+    assert auto_save["type"] == "module_state"
+    assert auto_save["module_id"] == "auto_save"
+    assert auto_save["available"] is True
+    assert auto_save["unsaved_history_count"] == 0
+    assert updated_auto_save["save_as_webp"] is True
+    assert context.auto_save_state["save_as_webp"] is True
+    assert save_directory["module_id"] == "save_directory"
+    assert save_directory["available"] is True
+    assert save_directory["control_allowed"] is True
+    assert updated_save_directory["base_path"] == str(tmp_path)
+    assert str(tmp_path) in updated_save_directory["current_save_directory"]
 
 
 def test_headless_websocket_verify_and_clear_api(tmp_path):
@@ -645,6 +694,100 @@ def test_headless_generate_executes_result_store_and_history_without_imagewindow
     meta = client.get(f"/api/history/meta/{history_id}?full=true")
     assert meta.status_code == 200
     assert meta.json()["prompt"] == "result prompt"
+
+
+def test_headless_generate_executes_non_nai_backend_modes_without_desktop_controllers():
+    backends = [
+        ("WEBUI", "webui_url", "http://127.0.0.1:7860"),
+        ("COMFYUI", "comfyui_url", "http://127.0.0.1:8188"),
+    ]
+    for mode, token_key, token_value in backends:
+        context = WebSessionContext(token_manager=InMemoryTokenManager({token_key: token_value}))
+        context.set_api_mode(mode)
+        context.api_service = _FakeApiService()
+        app = create_headless_app(context)
+        client = TestClient(app)
+
+        with client.websocket_connect("/ws") as ws:
+            for _ in range(9):
+                ws.receive_json()
+            ws.send_json({
+                "type": "generate",
+                "prompt": f"{mode.lower()} result prompt",
+                "negative_prompt": "",
+                "overrides": {"resolution": "16 x 12", "seed": -1},
+            })
+            seen = []
+            blob_seen = False
+            for _ in range(10):
+                message = ws.receive()
+                if "text" in message:
+                    payload = json.loads(message["text"])
+                    seen.append(payload.get("type"))
+                    if payload.get("type") == "viewer_new_image":
+                        break
+                elif "bytes" in message:
+                    blob_seen = True
+
+        assert "image_meta" in seen
+        assert "viewer_new_image" in seen
+        assert blob_seen is True
+        assert context.api_service.calls[0]["api_mode"] == mode
+        assert context.api_service.calls[0]["credential"] == token_value
+        assert context.result_store.history_total() == 1
+        assert context.main_window is None
+        assert context.remote_bridge is None
+
+
+def test_headless_unsaved_history_download_and_save_all_are_server_owned(tmp_path):
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+    )
+    context.api_service = _FakeApiService()
+    context.set_module_param("save_directory", "base_path", str(tmp_path), client_host="127.0.0.1")
+    context.set_module_param("save_directory", "use_timestamp_folder", "false", client_host="127.0.0.1")
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "generate",
+            "prompt": "unsaved prompt",
+            "overrides": {"resolution": "16 x 12", "seed": 99, "seed_fixed": True},
+        })
+        for _ in range(9):
+            message = ws.receive()
+            if "text" in message and json.loads(message["text"]).get("type") == "viewer_new_image":
+                break
+
+    auto_state = context.auto_save_state_payload()
+    assert auto_state["unsaved_history_count"] == 1
+
+    download = client.get("/api/history/unsaved/download")
+    assert download.status_code == 200
+    assert download.headers["content-type"].startswith("application/zip")
+    with zipfile.ZipFile(io.BytesIO(download.content)) as archive:
+        names = archive.namelist()
+        assert len(names) == 1
+        assert names[0].endswith(".png")
+        assert archive.read(names[0]).startswith(b"\x89PNG")
+
+    save_all = client.post("/api/history/unsaved/save-all")
+    assert save_all.status_code == 200
+    save_payload = save_all.json()
+    assert save_payload["saved"] == 1
+    assert save_payload["remaining"] == 0
+    assert len(save_payload["paths"]) == 1
+    assert os.path.isfile(save_payload["paths"][0])
+
+    history = client.get("/api/history/list").json()
+    assert history["images"][0]["file_path"] == save_payload["paths"][0]
+    assert history["images"][0]["source"] == "file"
+
+    empty_download = client.get("/api/history/unsaved/download")
+    assert empty_download.status_code == 404
 
 
 def test_api_service_import_does_not_import_pyqt_in_fresh_process():

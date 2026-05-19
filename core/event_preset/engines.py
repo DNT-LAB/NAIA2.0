@@ -1047,7 +1047,7 @@ class QuickSearchComboProvider:
             return None
 
         try:
-            from ui.interactive.quick_search_data import SinglePartitionStore
+            from core.event_preset.quick_search_data import SinglePartitionStore
             store = SinglePartitionStore.load(str(tgp_path))
         except Exception:
             return None

@@ -16,6 +16,7 @@ Physically move the first Desktop App entrypoints out of the supported runtime t
 - [x] Move or retire remaining PyQt controllers from `core/`.
 - [x] Move PyQt middle module wrappers from `modules/`.
 - [x] Move PyQt tab wrappers from `tabs/`.
+- [x] Extract Event Preset headless data/engine helpers from `ui/` before moving PyQt UI wrappers.
 - [ ] Move or retire remaining PyQt UI wrappers from `ui/`.
 
 ## When Done
@@ -78,3 +79,19 @@ Validation:
 - `python -m pytest tests\test_web_session_app.py tests\test_requirements_split.py tests\test_web_shell_config.py -q`
 - `python -m pytest tests\test_tab_controller_removed_tabs.py -q`
 - CDP validation: `refactor_docs/round_49_tabs_archive_validation.md`
+
+## Round 49E Headless Event Preset Extraction
+
+Moved server-used Event Preset helpers out of the `ui/` namespace:
+
+- `ui/event_preset/data_manager.py` -> `core/event_preset/data_manager.py`
+- `ui/event_preset/engines.py` -> `core/event_preset/engines.py`
+- `ui/event_preset/preload_all_partitions.py` -> `core/event_preset/preload_all_partitions.py`
+- `ui/event_preset/event_preset_category_translations_ko.json` -> `core/event_preset/event_preset_category_translations_ko.json`
+- `ui/interactive/quick_search_data.py` -> `core/event_preset/quick_search_data.py`
+
+When done for this extraction:
+
+- Supported `core.event_preset_service` no longer imports `ui.event_preset.*`.
+- Event Preset data path prefers `data/event_preset/naia_prompt_preset` and falls back to the legacy local `ui/event_preset/naia_prompt_preset` ZIP if present.
+- Remaining root `ui/` imports are PyQt UI wrappers, not supported headless service dependencies.

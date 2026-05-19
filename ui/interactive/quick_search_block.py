@@ -36,7 +36,7 @@ except ImportError:
     np = None
     HAS_NUMPY = False
 
-from ui.interactive.quick_search_data import SinglePartitionStore
+from core.event_preset.quick_search_data import SinglePartitionStore
 
 # SSL 인증서 검증
 try:

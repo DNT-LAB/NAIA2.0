@@ -40,9 +40,9 @@ from PyQt6.QtWidgets import (
 from ui.theme import DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
-from .data_manager import EventPresetDataManager
+from core.event_preset.data_manager import EventPresetDataManager
 from .download_worker import EventPresetDownloadDialog, EventPresetDownloadWorker, ThumbnailDownloadWorker
-from .engines import (
+from core.event_preset.engines import (
     MAX_STAGED,
     PERSON_PARTITION_LABELS,
     PERSON_PARTITION_ORDER,

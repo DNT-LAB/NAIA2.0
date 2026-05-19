@@ -15,9 +15,19 @@ from typing import Any
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# 데이터 파일 경로 (기본: 같은 디렉터리의 naia_prompt_preset)
+# 데이터 파일 경로.
+#
+# 새 headless 위치는 data/event_preset/naia_prompt_preset 이지만,
+# 기존 개발 환경에는 대용량 ZIP이 ui/event_preset 아래에 남아있을 수 있다.
 # ---------------------------------------------------------------------------
-DATA_ZIP_PATH = Path(__file__).resolve().parent / "naia_prompt_preset"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_PREFERRED_DATA_ZIP_PATH = _REPO_ROOT / "data" / "event_preset" / "naia_prompt_preset"
+_LEGACY_DATA_ZIP_PATH = _REPO_ROOT / "ui" / "event_preset" / "naia_prompt_preset"
+DATA_ZIP_PATH = (
+    _PREFERRED_DATA_ZIP_PATH
+    if _PREFERRED_DATA_ZIP_PATH.exists() or not _LEGACY_DATA_ZIP_PATH.exists()
+    else _LEGACY_DATA_ZIP_PATH
+)
 
 # ---------------------------------------------------------------------------
 # 필수/선택 파일 목록

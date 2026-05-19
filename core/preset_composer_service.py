@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 try:
-    from ui.event_preset.engines import PERSON_PARTITION_ORDER, PERSON_TAG_MAP
+    from core.event_preset.engines import PERSON_PARTITION_ORDER, PERSON_TAG_MAP
 except Exception:  # pragma: no cover - fallback keeps tests isolated from event assets
     PERSON_PARTITION_ORDER = [
         "1girl_solo",

@@ -309,7 +309,9 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - [x] Move or delete `NAIA_cold_v4.py`.
 - [x] Move or delete `core.remote_api_server.py` if all supported features are migrated.
 - [x] Move or delete `core.middle_section_controller.py`, `core.tab_controller.py`, `core.main_controller.py`, and desktop-only controllers.
-- [ ] Move or delete PyQt-only `tabs/`, `modules/`, and `ui/` files that are not part of a separate package.
+- [x] Move or delete PyQt-only `tabs/` and `modules/` files that are not part of a separate package.
+- [x] Extract headless Event Preset helpers out of `ui/` before the UI wrapper archive.
+- [ ] Move or delete remaining PyQt-only `ui/` files that are not part of a separate package.
 - [x] Update imports and tests after the move.
 - [ ] Update docs so Desktop App is no longer presented as supported.
 
@@ -347,6 +349,13 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - Root `tabs/` has no tracked files remaining.
 - CDP validation passed on port `7311`: first paint `2.218s`, Random prompt update `7.578s`, Generate dispatch `0.094s`; import audit reported `pyqt6_imported=False`, `legacy_desktop_imported=False`, `remote_api_server_imported=False`, and `middle_module_imports_count=0`.
 - Validation doc: `refactor_docs/round_49_tabs_archive_validation.md`.
+
+### Round 49E Result
+
+- Moved server-used Event Preset data/engine code from `ui/` into `core/event_preset/`.
+- Updated `core.event_preset_service`, `core.preset_composer_service`, and remaining PyQt UI callers to import the extracted core helpers.
+- Preserved compatibility with the existing local `ui/event_preset/naia_prompt_preset` ZIP while preferring the future `data/event_preset/naia_prompt_preset` data location.
+- Deferred: archive the remaining PyQt `ui/` wrappers after this dependency split is validated.
 
 ### When Done
 

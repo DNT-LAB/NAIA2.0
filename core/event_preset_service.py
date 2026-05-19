@@ -14,8 +14,8 @@ from urllib.parse import quote
 
 import pandas as pd
 
-from ui.event_preset.data_manager import EventPresetDataManager
-from ui.event_preset.engines import (
+from core.event_preset.data_manager import EventPresetDataManager
+from core.event_preset.engines import (
     PERSON_PARTITION_LABELS,
     PERSON_PARTITION_ORDER,
     PERSON_TAG_MAP,
@@ -72,8 +72,10 @@ class EventPresetService:
 
     def __init__(self, repo_root: Path | str):
         self.repo_root = Path(repo_root)
-        self.data_path = self.repo_root / "ui" / "event_preset" / "naia_prompt_preset"
-        self.translation_path = self.repo_root / "ui" / "event_preset" / "event_preset_category_translations_ko.json"
+        preferred_data_path = self.repo_root / "data" / "event_preset" / "naia_prompt_preset"
+        legacy_data_path = self.repo_root / "ui" / "event_preset" / "naia_prompt_preset"
+        self.data_path = preferred_data_path if preferred_data_path.exists() or not legacy_data_path.exists() else legacy_data_path
+        self.translation_path = self.repo_root / "core" / "event_preset" / "event_preset_category_translations_ko.json"
         self.thumbnail_path = self.repo_root / "data" / "event_preset_thumbnail"
         self._data_manager = EventPresetDataManager(self.data_path)
         self._taxonomy: TaxonomyEngine | None = None

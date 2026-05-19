@@ -2,7 +2,7 @@
 Event Preset - Preload all partitions sequentially.
 
 Usage:
-    python -m ui.event_preset.preload_all_partitions
+    python -m core.event_preset.preload_all_partitions
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from ui.event_preset.data_manager import EventPresetDataManager
+from core.event_preset.data_manager import EventPresetDataManager
 
 
 def preload_all(

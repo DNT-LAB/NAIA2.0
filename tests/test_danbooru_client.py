@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from core import danbooru_client
 from core.danbooru_client import extract_danbooru_post_id, normalize_danbooru_post_payload
-from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
+from legacy_desktop.core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 
 
 class _TokenManager:

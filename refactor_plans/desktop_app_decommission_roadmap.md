@@ -305,13 +305,24 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 
 ### TODO Checklist
 
-- [ ] Choose one strategy: delete, `legacy_desktop/`, or `not_implement/desktop_archive/`.
-- [ ] Move or delete `NAIA_cold_v4.py`.
-- [ ] Move or delete `core.remote_api_server.py` if all supported features are migrated.
+- [x] Choose one strategy: delete, `legacy_desktop/`, or `not_implement/desktop_archive/`.
+- [x] Move or delete `NAIA_cold_v4.py`.
+- [x] Move or delete `core.remote_api_server.py` if all supported features are migrated.
 - [ ] Move or delete `core.middle_section_controller.py`, `core.tab_controller.py`, `core.main_controller.py`, and desktop-only controllers.
 - [ ] Move or delete PyQt-only `tabs/`, `modules/`, and `ui/` files that are not part of a separate package.
-- [ ] Update imports and tests after the move.
+- [x] Update imports and tests after the move.
 - [ ] Update docs so Desktop App is no longer presented as supported.
+
+### Round 49A Result
+
+- Selected the non-destructive `legacy_desktop/` archive strategy.
+- Moved the root Desktop entrypoint to `legacy_desktop/NAIA_cold_v4.py`.
+- Moved the legacy Desktop-backed RemoteBridge server to `legacy_desktop/core/remote_api_server.py`.
+- Updated legacy desktop launchers and desktop comparison tooling to point at the archived path.
+- Added headless import guards for the `legacy_desktop` package.
+- Notes: `refactor_docs/round_49_desktop_legacy_archive_notes.md`.
+- Plan: `refactor_plans/round_49_desktop_legacy_archive.md`.
+- Deferred: remaining desktop controllers and PyQt tab/module wrappers need a broader package move or explicit retirement of the legacy desktop launcher.
 
 ### When Done
 

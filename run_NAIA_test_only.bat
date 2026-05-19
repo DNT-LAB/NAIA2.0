@@ -25,10 +25,10 @@ echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
 echo Installing required packages from requirements.txt...
-pip install -r requirements.txt
+pip install -r requirements-desktop-legacy.txt
 
 echo Starting NAIA...
-python NAIA_cold_v4.py
+python legacy_desktop\NAIA_cold_v4.py --desktop
 
 rem 프로그램 종료 후에도 창을 닫지 않고 대기
 pause

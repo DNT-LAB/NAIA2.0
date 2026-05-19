@@ -1,5 +1,5 @@
-from core import remote_api_server
-from core.remote_api_server import RemoteBridge
+from legacy_desktop.core import remote_api_server
+from legacy_desktop.core.remote_api_server import RemoteBridge
 
 
 def assert_autocomplete_candidate_schema(

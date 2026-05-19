@@ -512,6 +512,7 @@ with client.websocket_connect("/ws") as ws:
 
 forbidden = [
     "PyQt6",
+    "legacy_desktop",
     "core.remote_api_server",
     "core.middle_section_controller",
     "modules.prompt_engineering_module",
@@ -1162,6 +1163,7 @@ with client.websocket_connect("/ws") as ws:
 
 forbidden = [
     "PyQt6",
+    "legacy_desktop",
     "core.remote_api_server",
     "core.middle_section_controller",
     "core.tab_controller",

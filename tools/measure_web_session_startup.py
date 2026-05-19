@@ -1,7 +1,7 @@
 """Measure the Remote WebSession startup path.
 
 This migration tool measures the supported headless Remote Web path by default.
-The old `NAIA_cold_v4.py --web-shell` path remains available through
+The old `legacy_desktop/NAIA_cold_v4.py --web-shell` path remains available through
 `--entrypoint desktop` for legacy comparison only.
 """
 
@@ -122,6 +122,7 @@ def write_sitecustomize(temp_dir: Path, audit_path: Path) -> None:
     prefixes = [
         "PyQt6",
         "NAIA_cold_v4",
+        "legacy_desktop",
         "NAIA_web_headless",
         "core.remote_api_server",
         "core.middle_section_controller",
@@ -581,7 +582,14 @@ def parse_import_audit(path: Path, stdout_text: str) -> dict[str, Any]:
     middle_module_imports = [name for name in unique_imports if name.startswith("modules")]
     return {
         "pyqt6_imported": any(name == "PyQt6" or name.startswith("PyQt6.") for name in unique_imports),
-        "remote_api_server_imported": any(name.startswith("core.remote_api_server") for name in unique_imports),
+        "legacy_desktop_imported": any(
+            name == "legacy_desktop" or name.startswith("legacy_desktop.") for name in unique_imports
+        ),
+        "remote_api_server_imported": any(
+            name.startswith("core.remote_api_server")
+            or name.startswith("legacy_desktop.core.remote_api_server")
+            for name in unique_imports
+        ),
         "middle_section_controller_imported": any(name.startswith("core.middle_section_controller") for name in unique_imports),
         "middle_module_imports_count": len(middle_module_imports),
         "middle_module_imports_sample": middle_module_imports[:40],
@@ -637,6 +645,7 @@ Command:
 
 {markdown_table({
     "pyqt6_imported": dep.get("pyqt6_imported"),
+    "legacy_desktop_imported": dep.get("legacy_desktop_imported"),
     "remote_api_server_imported": dep.get("remote_api_server_imported"),
     "middle_section_controller_imported": dep.get("middle_section_controller_imported"),
     "modern_main_window_constructed": dep.get("modern_main_window_constructed"),
@@ -700,7 +709,7 @@ def measure(args: argparse.Namespace) -> Measurement:
         command = [
             python_exe,
             "-u",
-            "NAIA_cold_v4.py",
+            "legacy_desktop/NAIA_cold_v4.py",
             "--web-shell",
             "--web-shell-port",
             str(args.port),

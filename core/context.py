@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path       
 
 if TYPE_CHECKING:
-    from NAIA_cold_v4 import ModernMainWindow
+    from legacy_desktop.NAIA_cold_v4 import ModernMainWindow
     from core.middle_section_controller import MiddleSectionController
     from interfaces.mode_aware_module import ModeAwareModule
 

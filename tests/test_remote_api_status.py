@@ -15,9 +15,9 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
-import core.remote_api_server as remote_api_server
+import legacy_desktop.core.remote_api_server as remote_api_server
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
-from core.remote_api_server import RemoteBridge, WebSocketManager, create_app
+from legacy_desktop.core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 from core.search_result_model import SearchResultModel
 from modules.prompt_engineering_module import PromptEngineeringModule as RealPromptEngineeringModule
 
@@ -2786,7 +2786,7 @@ def test_desktop_snapshot_ws_send_is_ordered_before_followup_messages():
 
 
 def test_mode_change_broadcasts_schema_then_desktop_snapshot(monkeypatch):
-    import core.remote_api_server as remote_api_server
+    import legacy_desktop.core.remote_api_server as remote_api_server
 
     bridge = RemoteBridge(_AppContext())
     schema = {"type": "params", "api_mode": "WEBUI", "schema_only": True}
@@ -2820,7 +2820,7 @@ def test_mode_change_broadcasts_schema_then_desktop_snapshot(monkeypatch):
 
 
 def test_prompt_preset_loaded_broadcasts_desktop_snapshot(monkeypatch):
-    import core.remote_api_server as remote_api_server
+    import legacy_desktop.core.remote_api_server as remote_api_server
 
     bridge = RemoteBridge(_AppContext())
     full_params = {

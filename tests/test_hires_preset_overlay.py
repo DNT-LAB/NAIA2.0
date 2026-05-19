@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from core.remote_api_server import RemoteBridge
+from legacy_desktop.core.remote_api_server import RemoteBridge
 
 
 class _TokenManager:

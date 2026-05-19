@@ -187,9 +187,9 @@ fi
 
 echo ""
 
-# NAIA_cold_v4.py 파일 확인
-if [ ! -f "NAIA_cold_v4.py" ]; then
-    echo -e "${RED}❌ NAIA_cold_v4.py 파일이 없습니다.${NC}"
+# Legacy Desktop entrypoint 확인
+if [ ! -f "legacy_desktop/NAIA_cold_v4.py" ]; then
+    echo -e "${RED}❌ legacy_desktop/NAIA_cold_v4.py 파일이 없습니다.${NC}"
     echo "   NAIA 프로젝트 폴더에서 실행해주세요."
     read -p "엔터를 눌러 종료..."
     exit 1
@@ -204,7 +204,7 @@ echo -e "${CYAN}💡 터미널 창을 닫지 마세요. NAIA가 실행 중입니
 echo ""
 
 # Python 스크립트 실행
-python NAIA_cold_v4.py --desktop
+python legacy_desktop/NAIA_cold_v4.py --desktop
 
 # 실행 결과 확인
 EXIT_CODE=$?

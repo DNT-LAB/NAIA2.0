@@ -24,4 +24,4 @@ pip install -r requirements-desktop-legacy.txt
 
 echo Starting NAIA 2.0 Legacy Desktop App...
 
-python NAIA_cold_v4.py --desktop
+python legacy_desktop\NAIA_cold_v4.py --desktop

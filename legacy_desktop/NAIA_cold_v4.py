@@ -1,8 +1,14 @@
-import __init__
-import core.dll_fix  # Windows DLL 로드 문제 해결
 import sys
 import os
 import subprocess
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+import __init__
+import core.dll_fix  # Windows DLL 로드 문제 해결
 
 # 과학 연산 라이브러리 스레드 제한 (메모리 누수 방지용)
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -174,7 +180,7 @@ class ParquetLoader(QObject):
 def load_custom_fonts():
     """Pretendard 폰트 로드"""
     # 실행 경로에서 폰트 파일 찾기
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+    current_dir = str(PROJECT_ROOT)
     regular_font_path = os.path.join(current_dir, "Pretendard-Regular.otf")
     bold_font_path = os.path.join(current_dir, "Pretendard-Bold.otf")
     
@@ -248,7 +254,7 @@ class GitHubUpdateChecker(QThread):
         self.repo = repo
         self.branch = branch
         self.current_sha = current_sha
-        self.project_dir = project_dir or os.path.dirname(__file__)
+        self.project_dir = project_dir or str(PROJECT_ROOT)
         self.request_url = None  # run()에서 branch 확정 후 빌드
         self.is_running = True
 
@@ -1897,7 +1903,7 @@ class ModernMainWindow(QMainWindow):
     def _build_module_section(self, parent_layout):
         """모듈 섹션: MiddleSectionController의 모듈들을 직접 parent_layout에 추가"""
         try:
-            modules_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'modules')
+            modules_dir = str(PROJECT_ROOT / 'modules')
             self.middle_section_controller = MiddleSectionController(modules_dir, self.app_context, parent=self)
             self.middle_section_controller.build_ui(parent_layout)
 
@@ -5489,7 +5495,7 @@ class ModernMainWindow(QMainWindow):
         """
         try:
             # .git 폴더가 있는지 확인 (ZIP 다운로드 등의 경우 없을 수 있음)
-            git_dir = os.path.join(os.path.dirname(__file__), '.git')
+            git_dir = str(PROJECT_ROOT / '.git')
             if not os.path.exists(git_dir):
                 print("⚠️ .git 폴더가 없습니다. (ZIP 다운로드 또는 Git 저장소가 아님)")
                 self.has_git = False
@@ -5508,7 +5514,7 @@ class ModernMainWindow(QMainWindow):
                 ['git', 'branch', '--show-current'],
                 capture_output=True,
                 text=True,
-                cwd=os.path.dirname(__file__),
+                cwd=str(PROJECT_ROOT),
                 startupinfo=startupinfo
             )
             
@@ -5517,7 +5523,7 @@ class ModernMainWindow(QMainWindow):
                 ['git', 'rev-parse', '--short', 'HEAD'],
                 capture_output=True,
                 text=True,
-                cwd=os.path.dirname(__file__),
+                cwd=str(PROJECT_ROOT),
                 startupinfo=startupinfo
             )
             
@@ -5526,7 +5532,7 @@ class ModernMainWindow(QMainWindow):
                 ['git', 'show', '-s', '--format=%cd', '--date=format:%Y%m%d', 'HEAD'],
                 capture_output=True,
                 text=True,
-                cwd=os.path.dirname(__file__),
+                cwd=str(PROJECT_ROOT),
                 startupinfo=startupinfo
             )
             
@@ -5568,7 +5574,7 @@ class ModernMainWindow(QMainWindow):
             repo=self.github_repo_name,
             branch=self.github_branch,
             current_sha=None,  # 워커 내부에서 git CLI로 조회
-            project_dir=os.path.dirname(__file__),
+            project_dir=str(PROJECT_ROOT),
         )
         self.update_checker_thread.local_version_resolved.connect(self._on_local_version_resolved)
         self.update_checker_thread.update_available.connect(self.on_version_checked)
@@ -5713,7 +5719,7 @@ class ModernMainWindow(QMainWindow):
         try:
             # Remote API 서버 + Cloudflared 종료
             try:
-                from core.remote_api_server import stop_remote_server
+                from legacy_desktop.core.remote_api_server import stop_remote_server
                 stop_remote_server()
                 settings_tab = self.image_window.tab_controller.get_tab_instance('SettingsTabModule')
                 if settings_tab and settings_tab.settings_widget:

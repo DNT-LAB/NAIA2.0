@@ -3,7 +3,7 @@ import os
 from typing import Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from NAIA_cold_v4 import NAIAColdV4  # 순환 import 방지
+    from legacy_desktop.NAIA_cold_v4 import ModernMainWindow as NAIAColdV4  # 순환 import 방지
 
 class GenerationParamsManager:
     """메인 생성 파라미터를 모드별로 저장/로드하는 유틸리티 클래스"""

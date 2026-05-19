@@ -85,12 +85,19 @@ blocked = {
     "core.remote_api_server",
     "core.middle_section_controller",
     "core.tab_controller",
+    "legacy_desktop",
     "NAIA_cold_v4",
 }
 
 class BlockDesktopImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "PyQt6" or fullname.startswith("PyQt6.") or fullname in blocked:
+        if (
+            fullname == "PyQt6"
+            or fullname.startswith("PyQt6.")
+            or fullname == "legacy_desktop"
+            or fullname.startswith("legacy_desktop.")
+            or fullname in blocked
+        ):
             raise ImportError(f"blocked desktop import: {fullname}")
         return None
 
@@ -144,6 +151,7 @@ blocked = {
     "core.autocomplete_manager",
     "core.ui_state_manager",
     "core.temp_window_manager",
+    "legacy_desktop",
     "NAIA_cold_v4",
 }
 modules = [
@@ -166,7 +174,13 @@ modules = [
 
 class BlockDesktopImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "PyQt6" or fullname.startswith("PyQt6.") or fullname in blocked:
+        if (
+            fullname == "PyQt6"
+            or fullname.startswith("PyQt6.")
+            or fullname == "legacy_desktop"
+            or fullname.startswith("legacy_desktop.")
+            or fullname in blocked
+        ):
             raise ImportError(f"blocked desktop import: {fullname}")
         return None
 

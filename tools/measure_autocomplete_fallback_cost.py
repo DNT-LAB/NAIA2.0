@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.remote_api_server import RemoteBridge
+from legacy_desktop.core.remote_api_server import RemoteBridge
 from core.tag_search_index import normalize_search_query
 
 

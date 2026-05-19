@@ -550,7 +550,7 @@ class SettingsWidget(QWidget):
         if checked:
             port = self._get_remote_port()
             try:
-                from core.remote_api_server import start_remote_server
+                from legacy_desktop.core.remote_api_server import start_remote_server
                 self._force_web_session_autosave()
                 self.web_session_checkbox.setEnabled(False)
                 server = start_remote_server(self.app_context, host="0.0.0.0", port=port)
@@ -588,7 +588,7 @@ class SettingsWidget(QWidget):
                 self.cloudflared_checkbox.setChecked(False)
             self.cloudflared_checkbox.setEnabled(False)
             try:
-                from core.remote_api_server import stop_remote_server
+                from legacy_desktop.core.remote_api_server import stop_remote_server
                 stop_remote_server()
             except Exception:
                 pass
@@ -672,7 +672,7 @@ class SettingsWidget(QWidget):
             self._stop_cloudflared()
         if self.web_session_checkbox.isChecked():
             try:
-                from core.remote_api_server import stop_remote_server
+                from legacy_desktop.core.remote_api_server import stop_remote_server
                 stop_remote_server()
             except Exception:
                 pass

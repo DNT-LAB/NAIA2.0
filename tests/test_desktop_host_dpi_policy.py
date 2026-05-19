@@ -35,7 +35,7 @@ def _assigned_os_environ_key(target):
 
 
 def test_desktop_host_does_not_force_qt_dpi_environment():
-    source = Path("NAIA_cold_v4.py").read_text(encoding="utf-8")
+    source = Path("legacy_desktop/NAIA_cold_v4.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
 
     forced_keys = set()
@@ -50,7 +50,7 @@ def test_desktop_host_does_not_force_qt_dpi_environment():
 
 
 def test_desktop_host_does_not_call_legacy_high_dpi_apis():
-    source = Path("NAIA_cold_v4.py").read_text(encoding="utf-8")
+    source = Path("legacy_desktop/NAIA_cold_v4.py").read_text(encoding="utf-8")
 
     for api_name in BLOCKED_QT_DPI_APIS:
         assert api_name not in source

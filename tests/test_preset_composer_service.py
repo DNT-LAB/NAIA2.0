@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from core.preset_composer_service import PresetComposerService
-from core.remote_api_server import RemoteBridge
+from legacy_desktop.core.remote_api_server import RemoteBridge
 
 
 class _TokenManager:

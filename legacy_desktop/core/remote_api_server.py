@@ -98,11 +98,9 @@ from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONT
 from ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _AUTOCOMPLETE_TRANSLATION_RULES_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "data"
-    / "tag_index"
-    / "autocomplete_translation_rules.json"
+    _REPO_ROOT / "data" / "tag_index" / "autocomplete_translation_rules.json"
 )
 _AUTOCOMPLETE_RESULT_CACHE_MAX = 128
 
@@ -712,7 +710,7 @@ class RemoteBridge(QObject):
             "updated_at": "",
         }
         self._ensure_artist_thumb_state()
-        self._repo_root = Path(__file__).resolve().parent.parent
+        self._repo_root = _REPO_ROOT
         self._character_viewer_service = CharacterViewerService(self._repo_root)
         self._event_preset_service = EventPresetService(self._repo_root)
         self._clothes_preset_service = ClothesPresetService(self._repo_root)
@@ -12890,7 +12888,7 @@ class RemoteBridge(QObject):
                 try:
                     repo_root = object.__getattribute__(self, "_repo_root")
                 except (AttributeError, RuntimeError):
-                    repo_root = Path(__file__).resolve().parent.parent
+                    repo_root = _REPO_ROOT
                 result = load_kr_tag_records(repo_root)
                 for warning in result.warnings:
                     print(f"🌐 Remote: {warning}")
@@ -12983,7 +12981,7 @@ class RemoteBridge(QObject):
                 print(f"🌐 Remote: prompt highlight taglist load failed ({path}): {e}")
             return tags
 
-        root_dir = Path(__file__).resolve().parent.parent
+        root_dir = _REPO_ROOT
         taglist_dir = root_dir / "data" / "taglist"
 
         high_value = set()
@@ -13050,7 +13048,7 @@ class RemoteBridge(QObject):
         if self._char_analysis:
             return
         try:
-            analysis_path = Path(__file__).resolve().parent.parent / "data" / "character_analysis.json"
+            analysis_path = _REPO_ROOT / "data" / "character_analysis.json"
             if not analysis_path.exists():
                 print("🌐 Remote: character_analysis.json 없음 — 캐릭터 상세 비활성")
                 return
@@ -16201,7 +16199,7 @@ class RemoteBridge(QObject):
 def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     app = FastAPI(title="NAIA Remote")
 
-    web_dir = Path(__file__).parent.parent / "ui" / "remote_web"
+    web_dir = _REPO_ROOT / "ui" / "remote_web"
     # Windows registry MIME mappings can report .mjs as text/plain, which
     # Chromium rejects for module scripts.
     mimetypes.add_type("text/javascript", ".mjs")

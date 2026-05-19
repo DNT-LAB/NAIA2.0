@@ -321,7 +321,7 @@ class WebWrapperWindow(QMainWindow):
         self._load_shell()
 
     def _start_remote_backend(self):
-        from core import remote_api_server
+        from legacy_desktop.core import remote_api_server
 
         server = remote_api_server.start_remote_server(
             self.app_context,
@@ -359,7 +359,7 @@ class WebWrapperWindow(QMainWindow):
 
         self._server_started = False
         try:
-            from core.remote_api_server import stop_remote_server
+            from legacy_desktop.core.remote_api_server import stop_remote_server
 
             stop_remote_server()
         except Exception as exc:

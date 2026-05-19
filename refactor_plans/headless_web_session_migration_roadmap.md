@@ -27,7 +27,9 @@ Round 35 is complete: Generate requests now normalize into queue-ready `Generati
 
 Round 36 is complete: the headless path can execute a queued NAI generation request, encode the result to WebP for Remote Web, expose PNG export/latest-image endpoints, and maintain in-memory history without `ImageWindow`.
 
-The full Headless Web Session migration is not complete yet. Optional modules, RemoteBridge decomposition, desktop-only isolation, and final performance/cutover review remain. Rounds 37-39 are the concrete cutover work needed before the roadmap can be marked complete.
+Round 37 is complete: the RemoteBridge websocket event contract is documented, core server-owned events are handled by the headless FastAPI path, and tests prove result broadcasts run without importing the desktop bridge.
+
+The full Headless Web Session migration is not complete yet. Desktop-only isolation and final performance/cutover review remain. Rounds 38-39 are the concrete cutover work needed before the roadmap can be marked complete.
 
 ## Final Target
 
@@ -315,17 +317,25 @@ Boundary for later rounds: Round 36 validates NAI result execution. WEBUI and CO
 
 ### TODO Checklist
 
-- [ ] List every websocket event currently emitted by `RemoteBridge`.
-- [ ] Move server-owned events to the headless event bus.
-- [ ] Restrict desktop signal relay to desktop mode.
-- [ ] Remove or replace `QObject` requirements from the headless server path.
-- [ ] Add tests for websocket state broadcasts without desktop signals.
+- [x] List every websocket event currently emitted by `RemoteBridge`.
+- [x] Move server-owned events to the headless event bus.
+- [x] Restrict desktop signal relay to desktop mode.
+- [x] Remove or replace `QObject` requirements from the headless server path.
+- [x] Add tests for websocket state broadcasts without desktop signals.
 
 ### When Done
 
 - Headless Remote Web can run without constructing `RemoteBridge(QObject)`.
 - Websocket startup state, generation status, queue state, prompt updates, and result updates are emitted from server services.
 - Desktop mode still receives equivalent updates through its adapter.
+
+### Round 37 Result
+
+- Added `refactor_docs/round_37_remote_bridge_event_contract.md`.
+- Extracted 52 unique websocket `type` values from `core.remote_api_server.RemoteBridge` and classified them as headless-owned, desktop-adapter-only, or legacy/optional.
+- Confirmed the headless path now owns startup/session, API setup, random prompt, generate dispatch, status, queue, image result, latest image, PNG export, and in-memory history events without `RemoteBridge(QObject)`.
+- Kept desktop signal relay in the existing desktop-backed WebShell path; `NAIA_web_headless.py` does not import or construct `RemoteBridge`.
+- Added a fresh-process websocket result broadcast test proving a headless Generate result reaches `image_meta`, binary WebP, and `viewer_new_image` without importing `PyQt6`, `core.remote_api_server`, `ModernMainWindow`, or `ImageWindow`.
 
 ## Round 38 - Desktop-Only Feature Isolation
 

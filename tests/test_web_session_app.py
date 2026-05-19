@@ -592,3 +592,67 @@ print(json.dumps({
     payload = json.loads(result.stdout.strip().splitlines()[-1])
 
     assert payload == {"pyqt_imported": False, "api_service": "APIService"}
+
+
+def test_headless_generation_result_broadcast_does_not_import_desktop_bridge_in_fresh_process():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    code = r"""
+import json
+import sys
+from fastapi.testclient import TestClient
+from PIL import Image
+from core.web_session_app import create_headless_app
+from core.web_session_context import InMemoryTokenManager, WebSessionContext
+
+class FakeApiService:
+    def call_generation_api(self, params, progress_callback=None):
+        return {"status": "success", "image": Image.new("RGB", (8, 8), (1, 2, 3))}
+
+context = WebSessionContext(token_manager=InMemoryTokenManager({"nai_token": "pst-token"}))
+context.api_service = FakeApiService()
+app = create_headless_app(context)
+client = TestClient(app)
+with client.websocket_connect("/ws") as ws:
+    for _ in range(9):
+        ws.receive_json()
+    ws.send_json({"type": "generate", "prompt": "bridge-free", "overrides": {"resolution": "8 x 8"}})
+    seen = []
+    blob_seen = False
+    for _ in range(10):
+        message = ws.receive()
+        if "text" in message:
+            payload = json.loads(message["text"])
+            seen.append(payload.get("type"))
+            if payload.get("type") == "viewer_new_image":
+                break
+        elif "bytes" in message:
+            blob_seen = True
+print(json.dumps({
+    "pyqt_imported": "PyQt6" in sys.modules,
+    "remote_bridge_imported": "core.remote_api_server" in sys.modules,
+    "modern_main_imported": "ui.main_window" in sys.modules,
+    "image_window_imported": "ui.image_window" in sys.modules,
+    "seen": seen,
+    "blob_seen": blob_seen,
+    "history_total": context.result_store.history_total(),
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert payload["pyqt_imported"] is False
+    assert payload["remote_bridge_imported"] is False
+    assert payload["modern_main_imported"] is False
+    assert payload["image_window_imported"] is False
+    assert "image_meta" in payload["seen"]
+    assert "viewer_new_image" in payload["seen"]
+    assert payload["blob_seen"] is True
+    assert payload["history_total"] == 1

@@ -324,3 +324,12 @@
 - token access는 `TokenStore` protocol 뒤로 숨겼고, 테스트/비영구 scaffolding용 `InMemoryTokenManager`를 제공한다. 실제 runtime은 필요할 때 기존 `SecureTokenManager`를 lazy import한다.
 - `tests/test_web_session_context.py`는 fresh Python subprocess에서 container를 import/construct하고 `PyQt6`가 `sys.modules`에 들어오지 않았음을 확인한다.
 - 이 라운드는 FastAPI cutover가 아니다. Round 32가 이 container를 PyQt-free FastAPI app/entrypoint에 연결해야 한다.
+
+### Round 32 Headless FastAPI entrypoint
+
+- `core.web_session_app.create_headless_app()`와 `NAIA_web_headless.py`를 추가해 PyQt-free FastAPI Remote Web startup path를 만들었다.
+- 이 path는 `core.remote_api_server`를 import하지 않으므로 `RemoteBridge(QObject)`, `QTimer`, `QFileDialog`, desktop signal binding, `ModernMainWindow`, `ImageWindow`를 생성하지 않는다.
+- headless app은 `ui/remote_web` 정적 asset과 `/api/status`, `/api/queue/state`, `/api/prompt-highlight-index`, `/api/latest-image`, `/ws`를 제공한다.
+- websocket 초기화는 `WebSessionContext.initial_websocket_messages()`를 사용하며, Remote Web boot indicator가 완료되도록 `lazy_indices_ready`를 즉시 전송한다.
+- CDP first-paint 검증에서 headless server root는 `NAIA Remote`로 로드됐고 `#btnRnd`, `#btnGen`이 존재했으며 boot indicator가 hidden 상태로 전환됐다.
+- Random prompt와 Generate dispatch는 아직 headless path에 연결하지 않았다. 이 둘은 Round 34/35에서 `RemoteBridge`와 desktop widget read를 제거하면서 이관한다.

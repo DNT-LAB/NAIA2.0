@@ -17,7 +17,9 @@ Round 30 is complete: the desktop-backed WebShell now has a repeatable timing, m
 
 Round 31 is complete: a PyQt-free `WebSessionContext` skeleton now owns headless Remote Web startup state, event publication, API status payloads, queue state payloads, and initial websocket message assembly.
 
-The full Headless Web Session migration is not complete yet. The measured baseline confirms that the current WebShell still imports PyQt6 and constructs `ModernMainWindow`, `ImageWindow`, `MiddleSectionController`, and `RemoteBridge`. Rounds 32-39 remain the concrete cutover work needed before the roadmap can be marked complete.
+Round 32 is complete: `NAIA_web_headless.py` can start a PyQt-free FastAPI app, serve the Remote Web shell, return `/api/status`, and complete a CDP first-paint check with Random/Generate controls visible.
+
+The full Headless Web Session migration is not complete yet. The new headless entrypoint intentionally does not wire Random prompt execution, Generate dispatch, results, history, API setup persistence, or optional modules. Rounds 33-39 remain the concrete cutover work needed before the roadmap can be marked complete.
 
 ## Final Target
 
@@ -123,11 +125,11 @@ This proves that the current WebShell is still desktop-backed. It is a valid bas
 
 ### TODO Checklist
 
-- [ ] Add a headless entrypoint such as `NAIA_web_headless.py` or `core/web_session_app.py`.
-- [ ] Start FastAPI/uvicorn from the headless service container.
-- [ ] Serve `ui/remote_web` static assets from the headless entrypoint.
-- [ ] Wire `/api/status` and websocket connection without `ModernMainWindow`.
-- [ ] Keep the existing desktop/web-shell entrypoint working during transition.
+- [x] Add a headless entrypoint such as `NAIA_web_headless.py` or `core/web_session_app.py`.
+- [x] Start FastAPI/uvicorn from the headless service container.
+- [x] Serve `ui/remote_web` static assets from the headless entrypoint.
+- [x] Wire `/api/status` and websocket connection without `ModernMainWindow`.
+- [x] Keep the existing desktop/web-shell entrypoint working during transition.
 
 ### When Done
 
@@ -135,6 +137,23 @@ This proves that the current WebShell is still desktop-backed. It is a valid bas
 - `/api/status` returns 200 from the headless process.
 - CDP opens the Remote Web root and sees Random/Generate controls.
 - Dependency audit shows no `ModernMainWindow()` or `ImageWindow` construction.
+
+### Round 32 Result
+
+- Added `core.web_session_app.create_headless_app()`.
+- Added `NAIA_web_headless.py`.
+- The headless app serves `/`, `/style.css`, `/app.js`, `/js/*`, `/guides/*`, `/api/status`, `/api/queue/state`, `/api/prompt-highlight-index`, `/api/latest-image`, and `/ws`.
+- Websocket startup sends session, desktop-window state, mode, options, params, queue state, api status, `init_complete`, and `lazy_indices_ready`.
+- Focused tests import the app factory and entrypoint in a fresh process and assert `PyQt6` is not imported.
+- CDP validation on `http://127.0.0.1:7281/` confirmed:
+  - title: `NAIA Remote`
+  - readyState: `complete`
+  - `#btnRnd` present
+  - `#btnGen` present
+  - boot indicator hidden
+  - active mode: `NAI`
+
+This is a startup/first-paint cutover point only. Random and Generate intentionally return a headless "not wired yet" toast until Rounds 34-35 move those contracts out of the desktop bridge.
 
 ## Round 33 - API Setup and Cloudflared Server Ownership
 

@@ -273,6 +273,23 @@ class WebSessionContext:
             "type": "params",
             "api_mode": self.get_api_mode(),
             "schema_only": False,
+            "model": "NAID4.5F",
+            "sampler": "k_euler_ancestral",
+            "scheduler": "karras",
+            "resolution": "832 x 1216",
+            "steps": 28,
+            "cfg_scale": 5.0,
+            "cfg_rescale": 0.0,
+            "seed": "",
+            "seed_fixed": False,
+            "random_resolution": False,
+            "auto_fit_resolution": False,
+            "options_model": ["NAID4.5F"],
+            "options_sampler": ["k_euler_ancestral"],
+            "options_scheduler": ["karras"],
+            "options_resolution": ["832 x 1216", "1216 x 832", "1024 x 1024"],
+            "steps_range": [1, 50],
+            "nai_flags_enabled": {},
         }
         payload.update(self.remote_params)
         return payload

@@ -1,0 +1,254 @@
+"""PyQt-free FastAPI app for the headless Remote Web Session path."""
+
+from __future__ import annotations
+
+import json
+import mimetypes
+import uuid
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+
+from core.web_session_context import WebSessionContext
+
+
+def _client_host(ws: WebSocket) -> str:
+    try:
+        if ws.client is not None:
+            return str(ws.client.host or "")
+    except Exception:
+        pass
+    return ""
+
+
+def _no_cache_headers() -> dict[str, str]:
+    return {"Cache-Control": "no-store, max-age=0"}
+
+
+def _web_file(path: Path, media_type: str):
+    if not path.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(str(path), media_type=media_type, headers=_no_cache_headers())
+
+
+def _prompt_highlight_empty_index() -> dict[str, Any]:
+    return {
+        "version": "headless-empty",
+        "groups": {},
+        "tags": {},
+        "stats": {
+            "source": "headless",
+            "total": 0,
+        },
+    }
+
+
+def _probe_results(context: WebSessionContext) -> dict[str, bool | None]:
+    status = context.api_status_payload()
+    return {
+        "NAI": True if status.get("nai_configured") else None,
+        "WEBUI": True if status.get("webui_url") else None,
+        "COMFYUI": True if status.get("comfyui_url") else None,
+    }
+
+
+async def _send_startup_messages(
+    ws: WebSocket,
+    context: WebSessionContext,
+    *,
+    session_id: str,
+    client_host: str,
+) -> None:
+    for message in context.initial_websocket_messages(
+        session_id=session_id,
+        client_host=client_host,
+    ):
+        await ws.send_text(json.dumps(message, ensure_ascii=False))
+    await ws.send_text(json.dumps({"type": "lazy_indices_ready"}))
+
+
+async def _send_sync_messages(ws: WebSocket, context: WebSessionContext, client_host: str) -> None:
+    messages = [
+        {"type": "mode", "mode": context.get_api_mode()},
+        {"type": "options", **context.get_options()},
+        context.generation_param_schema_payload(),
+        context.queue_state_payload(),
+        context.api_status_payload(client_host),
+        {"type": "lazy_indices_ready"},
+    ]
+    for message in messages:
+        await ws.send_text(json.dumps(message, ensure_ascii=False))
+
+
+async def _handle_json_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    client_host: str,
+    command: dict[str, Any],
+) -> None:
+    command_type = str(command.get("type") or "").strip()
+    if command_type == "sync":
+        await _send_sync_messages(ws, context, client_host)
+    elif command_type == "set_option":
+        context.set_option(str(command.get("key") or ""), command.get("value"))
+        await ws.send_text(json.dumps({"type": "options", **context.get_options()}))
+    elif command_type == "set_mode":
+        context.set_api_mode(str(command.get("mode") or ""))
+        await ws.send_text(json.dumps({"type": "mode", "mode": context.get_api_mode()}))
+        await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
+    elif command_type == "set_prompt":
+        context.prompt_text = str(command.get("prompt") or "")
+        context.negative_prompt_text = str(command.get("negative") or "")
+        await ws.send_text(json.dumps({
+            "type": "prompt_sync",
+            "prompt": context.prompt_text,
+            "negative": context.negative_prompt_text,
+        }, ensure_ascii=False))
+    elif command_type == "probe_api":
+        await ws.send_text(json.dumps({
+            "type": "probe_result",
+            "command": "probe_api",
+            "results": _probe_results(context),
+        }, ensure_ascii=False))
+    elif command_type == "get_search_state":
+        await ws.send_text(json.dumps({
+            "type": "search_state",
+            "count": 0,
+            "active_ratings": ["g", "s", "q", "e"],
+            "rating_counts": {},
+            "filter_preferences": {},
+        }, ensure_ascii=False))
+    elif command_type == "get_module_state":
+        module_id = str(command.get("module_id") or "")
+        await ws.send_text(json.dumps({
+            "type": "module_state",
+            "module_id": module_id,
+            "available": False,
+            "headless": True,
+            "state": {},
+        }, ensure_ascii=False))
+    elif command_type in {"random", "generate"}:
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "error",
+            "message": f"{command_type} is not wired in the headless entrypoint yet.",
+        }, ensure_ascii=False))
+    else:
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "info",
+            "message": f"Headless command ignored: {command_type or 'unknown'}",
+        }, ensure_ascii=False))
+
+
+async def _handle_text_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    client_host: str,
+    data: str,
+) -> None:
+    if data == "sync":
+        await _send_sync_messages(ws, context, client_host)
+        return
+    if data in {"random", "generate"}:
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "error",
+            "message": f"{data} is not wired in the headless entrypoint yet.",
+        }, ensure_ascii=False))
+        return
+    await ws.send_text(json.dumps({
+        "type": "toast",
+        "level": "info",
+        "message": f"Headless command ignored: {data}",
+    }, ensure_ascii=False))
+
+
+def create_headless_app(
+    context: WebSessionContext | None = None,
+    *,
+    web_dir: Path | str | None = None,
+) -> FastAPI:
+    """Create the PyQt-free Remote Web FastAPI app."""
+
+    session_context = context or WebSessionContext()
+    app = FastAPI(title="NAIA Remote Headless")
+    app.state.web_session_context = session_context
+
+    root_web_dir = Path(web_dir) if web_dir is not None else Path(__file__).resolve().parent.parent / "ui" / "remote_web"
+    mimetypes.add_type("text/javascript", ".mjs")
+
+    js_dir = root_web_dir / "js"
+    if js_dir.exists():
+        app.mount("/js", StaticFiles(directory=str(js_dir)), name="remote_js")
+    guides_dir = root_web_dir / "guides"
+    if guides_dir.exists():
+        app.mount("/guides", StaticFiles(directory=str(guides_dir), html=True), name="remote_guides")
+
+    @app.get("/")
+    async def index():
+        return _web_file(root_web_dir / "index.html", "text/html")
+
+    @app.get("/style.css")
+    async def serve_css():
+        return _web_file(root_web_dir / "style.css", "text/css")
+
+    @app.get("/app.js")
+    async def serve_js():
+        return _web_file(root_web_dir / "app.js", "application/javascript")
+
+    @app.get("/api/status")
+    async def api_status():
+        return session_context.http_status_payload()
+
+    @app.get("/api/queue/state")
+    async def api_queue_state():
+        return session_context.queue_state_payload()
+
+    @app.get("/api/prompt-highlight-index")
+    async def api_prompt_highlight_index():
+        return Response(
+            content=json.dumps(_prompt_highlight_empty_index(), ensure_ascii=False),
+            media_type="application/json",
+            headers=_no_cache_headers(),
+        )
+
+    @app.get("/api/latest-image")
+    async def api_latest_image():
+        return JSONResponse({"error": "No image generated yet"}, status_code=404)
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(ws: WebSocket):
+        await ws.accept()
+        session_id = uuid.uuid4().hex[:8]
+        client_host = _client_host(ws)
+        try:
+            await _send_startup_messages(
+                ws,
+                session_context,
+                session_id=session_id,
+                client_host=client_host,
+            )
+            while True:
+                data = await ws.receive_text()
+                if data.startswith("{"):
+                    try:
+                        command = json.loads(data)
+                    except json.JSONDecodeError:
+                        command = {"type": ""}
+                    if isinstance(command, dict):
+                        await _handle_json_command(ws, session_context, client_host, command)
+                    else:
+                        await _handle_text_command(ws, session_context, client_host, data)
+                else:
+                    await _handle_text_command(ws, session_context, client_host, data)
+        except WebSocketDisconnect:
+            return
+
+    return app
+
+
+__all__ = ["create_headless_app"]

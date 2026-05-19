@@ -315,3 +315,12 @@
 - RSS는 action-ready 1797.31 MB, random 이후 1890.16 MB, generate dispatch 이후 1890.62 MB까지 올라갔다.
 - dependency audit은 현재 WebShell이 아직 `PyQt6`를 import하고 `ModernMainWindow`, `ImageWindow`, `MiddleSectionController`, `RemoteBridge`를 construct한다는 사실을 확인했다.
 - 따라서 Round 30은 Headless 전환 완료가 아니라, 이후 Round 31-39에서 제거해야 할 desktop-backed WebShell 기준선을 확정한 라운드다.
+
+### Round 31 Headless service container
+
+- `core.web_session_context.WebSessionContext`를 추가해 Remote Web의 API mode, shared options, API status, queue state, autocomplete status, generation param schema, initial websocket messages를 PyQt 없이 구성할 수 있게 했다.
+- `WebSessionEventBus`는 `AppContext.subscribe/unsubscribe/publish`와 같은 기본 contract를 제공하므로, 이후 prompt/generation/result service가 desktop `AppContext` 없이도 event-driven으로 이관될 수 있다.
+- `main_window`, `middle_section_controller`, `remote_bridge`는 headless container에서 `None`으로 유지되어 desktop-only adapter boundary가 명시된다.
+- token access는 `TokenStore` protocol 뒤로 숨겼고, 테스트/비영구 scaffolding용 `InMemoryTokenManager`를 제공한다. 실제 runtime은 필요할 때 기존 `SecureTokenManager`를 lazy import한다.
+- `tests/test_web_session_context.py`는 fresh Python subprocess에서 container를 import/construct하고 `PyQt6`가 `sys.modules`에 들어오지 않았음을 확인한다.
+- 이 라운드는 FastAPI cutover가 아니다. Round 32가 이 container를 PyQt-free FastAPI app/entrypoint에 연결해야 한다.

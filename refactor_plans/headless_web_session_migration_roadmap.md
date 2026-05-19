@@ -15,7 +15,9 @@ The practical goal is therefore not more small lazy-loading, but a separate head
 
 Round 30 is complete: the desktop-backed WebShell now has a repeatable timing, memory, CDP, generation-dispatch, and dependency-audit baseline.
 
-The full Headless Web Session migration is not complete yet. The measured baseline confirms that the current WebShell still imports PyQt6 and constructs `ModernMainWindow`, `ImageWindow`, `MiddleSectionController`, and `RemoteBridge`. Rounds 31-39 remain the concrete cutover work needed before the roadmap can be marked complete.
+Round 31 is complete: a PyQt-free `WebSessionContext` skeleton now owns headless Remote Web startup state, event publication, API status payloads, queue state payloads, and initial websocket message assembly.
+
+The full Headless Web Session migration is not complete yet. The measured baseline confirms that the current WebShell still imports PyQt6 and constructs `ModernMainWindow`, `ImageWindow`, `MiddleSectionController`, and `RemoteBridge`. Rounds 32-39 remain the concrete cutover work needed before the roadmap can be marked complete.
 
 ## Final Target
 
@@ -96,17 +98,26 @@ This proves that the current WebShell is still desktop-backed. It is a valid bas
 
 ### TODO Checklist
 
-- [ ] Define a `WebSessionContext` or equivalent server-side service container.
-- [ ] Move the minimum shared event bus needed by Remote Web into a PyQt-free service.
-- [ ] Provide PyQt-free access to settings, API backend status, prompt settings, queue state, result state, and history state.
-- [ ] Define adapter boundaries for desktop-only objects that still exist.
-- [ ] Add tests that import the service container without importing `PyQt6`.
+- [x] Define a `WebSessionContext` or equivalent server-side service container.
+- [x] Move the minimum shared event bus needed by Remote Web into a PyQt-free service.
+- [x] Provide PyQt-free access to settings, API backend status, prompt settings, queue state, result state, and history state.
+- [x] Define adapter boundaries for desktop-only objects that still exist.
+- [x] Add tests that import the service container without importing `PyQt6`.
 
 ### When Done
 
 - A unit test can construct the headless service container without `QApplication`.
 - The service container exposes enough state for `/api/status` and initial websocket state.
 - Desktop code can still use the existing `AppContext` path.
+
+### Round 31 Result
+
+- Added `core.web_session_context.WebSessionContext`.
+- Added `WebSessionEventBus` as the minimum AppContext-compatible event bus for headless Remote Web services.
+- Added API status, HTTP status, desktop-window state, queue state, generation param schema, and initial websocket message payload builders.
+- Added pipeline hook registration compatibility so prompt/generation services can migrate without depending on `AppContext`.
+- Kept desktop-only objects behind explicit adapter boundaries: `main_window`, `middle_section_controller`, and `remote_bridge` are `None` in the headless container.
+- Added focused tests that construct the container in a fresh Python process and assert `PyQt6` is not imported.
 
 ## Round 32 - Headless FastAPI Entrypoint
 

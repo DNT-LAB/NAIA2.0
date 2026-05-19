@@ -13,15 +13,22 @@ if %errorlevel% equ 0 (
 :install
 
 if not exist "venv\" (
-    echo Creating .venv environment for execute NAIA2.0... 
+    echo Creating .venv environment for execute NAIA2.0...
     python -m venv venv
     echo.
 )
 
 call venv\Scripts\activate.bat
 
-pip install -r requirements-desktop-legacy.txt
+pip install -r requirements-headless.txt
 
-echo Starting NAIA 2.0 Legacy Desktop App...
+if not exist "NAIA_web_headless.py" (
+    echo NAIA_web_headless.py was not found.
+    echo Run this launcher from the NAIA project directory.
+    exit /b 1
+)
 
-python legacy_desktop\NAIA_cold_v4.py --desktop
+echo Starting NAIA 2.0 Headless Web Session...
+echo Web UI: http://127.0.0.1:7243/
+
+python NAIA_web_headless.py

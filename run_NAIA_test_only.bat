@@ -1,34 +1,34 @@
 @echo off
 
-rem Python 3.12 버전이 설치되어 있는지 확인합니다.
-py -3.12 --version > nul 2>&1
+python --version > nul 2>&1
 if %errorlevel% equ 0 (
-    echo Python 3.12.x is installed.
     goto install
 ) else (
-    echo Python 3.12.x is not installed.
-    echo Opening https://www.python.org/downloads/release/python-3119/ for download...
-    Powershell -Command "Start-Process https://www.python.org/downloads/release/python-3119/"
+    echo Python 3.10.6 is not installed.
+    echo Opening https://www.python.org/downloads/release/python-3106/ for download...
+    Powershell -Command "Start-Process https://www.python.org/downloads/release/python-3106/"
     exit /b
 )
 
 :install
 
 if not exist "venv\" (
-    echo Creating .venv environment with Python 3.13...
-    rem [수정] py -3.12 플래그를 사용하여 3.12.x 버전으로 venv 생성을 강제합니다.
-    py -3.12 -m venv venv
+    echo Creating .venv environment for execute NAIA2.0...
+    python -m venv venv
     echo.
 )
 
-echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
-echo Installing required packages from requirements.txt...
-pip install -r requirements-desktop-legacy.txt
+pip install -r requirements-headless.txt
 
-echo Starting NAIA...
-python legacy_desktop\NAIA_cold_v4.py --desktop
+if not exist "NAIA_web_headless.py" (
+    echo NAIA_web_headless.py was not found.
+    echo Run this launcher from the NAIA project directory.
+    exit /b 1
+)
 
-rem 프로그램 종료 후에도 창을 닫지 않고 대기
-pause
+echo Starting NAIA 2.0 Headless Web Session...
+echo Web UI: http://127.0.0.1:7243/
+
+python NAIA_web_headless.py

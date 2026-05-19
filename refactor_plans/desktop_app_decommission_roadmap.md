@@ -314,7 +314,7 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - [x] Extract headless Clothes/Expression Preset assets out of `ui/` before the UI wrapper archive.
 - [x] Move or delete remaining PyQt-only `ui/` files that are not part of a separate package.
 - [x] Update imports and tests after the move.
-- [ ] Update docs so Desktop App is no longer presented as supported.
+- [x] Update docs so Desktop App is no longer presented as supported.
 
 ### Round 49A Result
 
@@ -388,12 +388,12 @@ Make the repository's install and launch story match the decommissioned runtime.
 
 ### TODO Checklist
 
-- [ ] Remove Desktop App instructions from primary README/docs or move them to legacy notes.
-- [ ] Remove PyQt dependencies from default requirements.
-- [ ] Update launch scripts and command docs.
-- [ ] Update `AGENTS.md` if validation/startup instructions still mention desktop-backed launch as default.
-- [ ] Update measurement tooling so `headless` is the default and `desktop` is legacy-only if retained.
-- [ ] Remove stale docs that claim desktop compatibility is part of the main path.
+- [x] Remove Desktop App instructions from primary README/docs or move them to legacy notes.
+- [x] Remove PyQt dependencies from default requirements.
+- [x] Update launch scripts and command docs.
+- [x] Update `AGENTS.md` if validation/startup instructions still mention desktop-backed launch as default.
+- [x] Update measurement tooling so `headless` is the default and `desktop` is legacy-only if retained.
+- [x] Remove stale docs that claim desktop compatibility is part of the main path.
 
 ### When Done
 
@@ -401,6 +401,14 @@ Make the repository's install and launch story match the decommissioned runtime.
 - Docs and scripts no longer point normal users at Desktop App.
 - Legacy desktop instructions, if retained, are isolated and clearly unsupported.
 - Static docs review finds no contradictory launch instructions.
+
+### Round 50 Result
+
+- `run_NAIA.bat`, `run_NAIA.command`, and `run_NAIA_test_only.bat` now install `requirements-headless.txt` and launch `NAIA_web_headless.py`.
+- Default/platform requirement files still delegate to `requirements-headless.txt`; PyQt and desktop integration dependencies remain only in `requirements-desktop-legacy*.txt`.
+- `legacy_desktop/README.md` now states the archive is manual and unsupported, not part of the setup path.
+- Startup measurement tooling presents headless Remote Web as the supported default; `--entrypoint desktop` is legacy comparison only.
+- CDP validation passed on port `7315`: first paint `2.391s`, Random prompt update `6.25s`, Generate dispatch `0.094s`; import audit reported no PyQt or `legacy_desktop` imports.
 
 ## Round 51 - Decommission Gate Validation
 

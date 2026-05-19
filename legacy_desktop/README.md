@@ -14,3 +14,5 @@ Current archive contents:
 - Clothes and Expression Preset server assets have been extracted to supported `core/clothes_preset/` and `core/expression_preset/`.
 
 Supported Remote Web code must not import this package. Keep new headless behavior in `core/web_session_app.py`, `core/web_session_context.py`, and PyQt-free services under `core/`.
+
+The repository launchers now start `NAIA_web_headless.py`. Running this archive requires an explicit manual command such as `python legacy_desktop/NAIA_cold_v4.py --desktop` after installing `requirements-desktop-legacy.txt`; it is not part of the supported setup path.

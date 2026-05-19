@@ -67,10 +67,19 @@ def test_legacy_desktop_requirements_extend_headless_and_keep_pyqt():
 
 
 def test_launchers_install_matching_requirement_sets():
-    assert "requirements-headless.txt" in Path("run_NAIA_web.bat").read_text(encoding="utf-8")
-    assert "requirements-headless.txt" in Path("run_NAIA_web.command").read_text(encoding="utf-8")
-    assert "requirements-desktop-legacy.txt" in Path("run_NAIA.bat").read_text(encoding="utf-8")
-    assert "requirements-desktop-legacy-mac.txt" in Path("run_NAIA.command").read_text(encoding="utf-8")
+    for launcher in [
+        "run_NAIA.bat",
+        "run_NAIA_web.bat",
+        "run_NAIA_test_only.bat",
+        "run_NAIA.command",
+        "run_NAIA_web.command",
+    ]:
+        text = Path(launcher).read_text(encoding="utf-8")
+        assert "requirements-headless.txt" in text
+        assert "requirements-desktop-legacy" not in text
+        assert "legacy_desktop" not in text
+        assert "NAIA_cold_v4.py" not in text
+        assert "NAIA_web_headless.py" in text
 
 
 def test_headless_entrypoint_imports_with_desktop_modules_blocked():

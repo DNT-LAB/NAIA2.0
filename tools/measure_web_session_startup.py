@@ -57,7 +57,7 @@ class Measurement:
     dependency_audit: dict[str, Any] = field(default_factory=dict)
     log_paths: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
-    entrypoint: str = "desktop"
+    entrypoint: str = "headless"
 
 
 class CdpClient:
@@ -683,10 +683,10 @@ Middle module import sample:
 
 ## Interpretation
 
-For the desktop-backed WebShell, PyQt, `ModernMainWindow`, `ImageWindow`,
-`MiddleSectionController`, and `RemoteBridge` are expected to appear. For the
-headless entrypoint, those signals should be absent while Remote Web startup,
-Random, and Generate dispatch remain functional.
+For the supported headless entrypoint, PyQt, `legacy_desktop`, `RemoteBridge`,
+`ModernMainWindow`, `ImageWindow`, and Desktop controllers should be absent
+while Remote Web startup, Random, and Generate dispatch remain functional.
+The optional `--entrypoint desktop` comparison path is legacy-only.
 """
     if measurement.errors:
         content += "\n## Errors\n\n" + "\n".join(f"- {error}" for error in measurement.errors) + "\n"
@@ -868,7 +868,7 @@ def measure(args: argparse.Namespace) -> Measurement:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Measure desktop-backed NAIA Remote WebSession startup.")
+    parser = argparse.ArgumentParser(description="Measure supported headless NAIA Remote WebSession startup.")
     parser.add_argument("--entrypoint", choices=["desktop", "headless"], default="headless")
     parser.add_argument("--port", type=int, default=7270, help="Remote WebShell port to launch.")
     parser.add_argument("--cdp-port", type=int, default=9370, help="Chrome DevTools Protocol port.")

@@ -44,17 +44,19 @@ def test_explicit_legacy_modes_disable_default_web_shell():
 
 
 def test_web_launchers_use_headless_entrypoint():
-    for launcher in ["run_NAIA_web.bat", "run_NAIA_web.command"]:
+    for launcher in [
+        "run_NAIA.bat",
+        "run_NAIA_web.bat",
+        "run_NAIA_test_only.bat",
+        "run_NAIA.command",
+        "run_NAIA_web.command",
+    ]:
         text = Path(launcher).read_text(encoding="utf-8")
         assert "NAIA_web_headless.py" in text
+        assert "requirements-headless.txt" in text
         assert "NAIA_cold_v4.py --web-session" not in text
-
-
-def test_desktop_launchers_are_explicit_legacy_desktop():
-    for launcher in ["run_NAIA.bat", "run_NAIA.command"]:
-        text = Path(launcher).read_text(encoding="utf-8")
-        assert "legacy_desktop" in text
-        assert "NAIA_cold_v4.py --desktop" in text
+        assert "NAIA_cold_v4.py --desktop" not in text
+        assert "requirements-desktop-legacy" not in text
 
 
 def test_cold_v4_legacy_web_session_is_guarded():

@@ -6035,6 +6035,9 @@ class ModernMainWindow(QMainWindow):
             except Exception as e:
                 print(f"⚠️ 자동화 모듈 콜백 연결 실패: {e}")
         else:
+            if self._is_hidden_web_session_runtime():
+                print("ℹ️ Web Session: 자동화 모듈은 필요 시 지연 로드됩니다.")
+                return
             print("⚠️ 자동화 모듈을 찾을 수 없습니다.")
 
     # [신규] 자동 생성 상태 확인 메서드 추가

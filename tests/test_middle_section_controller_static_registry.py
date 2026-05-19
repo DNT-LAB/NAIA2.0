@@ -170,6 +170,35 @@ class LazyModule(BaseMiddleModule):
     assert ctx.hooks == [({"target_pipeline": "PromptProcessor", "hook_point": "final_hookpoint"}, module)]
 
 
+def test_web_session_all_lazy_middle_modules_builds_empty_ui_without_fallback(tmp_path, monkeypatch, capsys):
+    marker_path = tmp_path / "lazy_imported.txt"
+    (tmp_path / "lazy_module.py").write_text(
+        f"""
+from pathlib import Path
+Path({str(marker_path)!r}).write_text('imported', encoding='utf-8')
+raise RuntimeError('lazy module should not be imported while building hidden web UI')
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        middle_controller,
+        "MIDDLE_MODULE_SPECS",
+        ({"file": "lazy_module", "class": "LazyModule", "web_session_lazy": True},),
+    )
+    monkeypatch.setenv("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW", "1")
+    controller = MiddleSectionController(str(tmp_path), _AppContext())
+    added_widgets = []
+
+    controller.build_ui(SimpleNamespace(addWidget=added_widgets.append))
+
+    output = capsys.readouterr().out
+    assert "로드된 모듈이 없습니다" not in output
+    assert "Web Session middle 모듈은 모두 필요 시 지연 로드됩니다" in output
+    assert added_widgets == []
+    assert not marker_path.exists()
+    assert "LazyModule" in controller._deferred_module_specs
+
+
 def test_web_session_lazy_middle_module_loads_immediately_on_desktop(tmp_path, monkeypatch):
     marker_path = tmp_path / "desktop_imported.txt"
     (tmp_path / "lazy_module.py").write_text(

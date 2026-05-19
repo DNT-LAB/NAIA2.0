@@ -278,6 +278,10 @@ class MiddleSectionController:
         
         # 모듈이 없으면 경고 메시지 표시
         if not self.module_classes:
+            if is_hidden_web_session_runtime() and self._deferred_module_specs:
+                print("ℹ️ Web Session middle 모듈은 모두 필요 시 지연 로드됩니다.")
+                return
+
             print("⚠️ 로드된 모듈이 없습니다.")
             
             # 폴백 위젯 생성

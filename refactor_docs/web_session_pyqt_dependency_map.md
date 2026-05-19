@@ -297,3 +297,11 @@
 - `CharacterModule.on_random_prompt_triggered()`, generation reroll, NAI late binding, prompt-reopen current-character path는 widget-less module을 inactive로 취급한다.
 - loaded module이 widget state를 갖지 않으면 `core.character_settings.character_params_from_settings()` fallback을 계속 사용하므로 Remote Web Generate에서 저장된 character settings도 보존된다.
 - CDP로 `#btnGen`을 실제 클릭해 NAI API 호출, `generation_result_available`, PNG 저장까지 확인했고, `#btnRnd` 랜덤 프롬프트 이벤트도 `NoneType.isChecked` 없이 통과했다.
+
+### Round 29 Web Session warning cleanup
+
+- hidden WebSession에서는 모든 middle module이 lazy/headless registry로 빠질 수 있으므로, `MiddleSectionController.build_ui()`가 이를 정상 상태로 처리하고 fallback QLabel을 만들지 않는다.
+- Settings 탭의 saved middle-module visibility replay는 desktop module boxes를 전제로 한다. hidden WebSession에서는 module boxes가 비어 있는 것이 정상이라 retry loop를 시작하지 않고 생략한다.
+- Settings 탭의 saved desktop autocomplete replay도 hidden WebSession에서는 생략한다. `AutoCompleteManager`는 desktop 표시 이후 초기화되는 surface라 WebSession startup warning 대상이 아니다.
+- `ModernMainWindow`와 `MainController`의 AutomationModule lookup은 desktop 진단 경고를 유지하되, hidden WebSession에서는 on-demand lazy module 안내로 낮췄다.
+- 이번 정리는 기능 경로 변경이 아니라 제거/지연 로드된 PyQt surface에 남아 있던 desktop 기준 경고를 WebSession 런타임 계약에 맞춘 것이다.

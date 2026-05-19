@@ -111,6 +111,9 @@ class MainController:
         if hasattr(self.main_window, 'automation_module') and self.main_window.automation_module:
             print("✅ 자동화 모듈 참조 설정 완료")
         else:
+            if os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1":
+                print("ℹ️ Web Session: 자동화 모듈 참조는 필요 시 지연 로드됩니다.")
+                return
             print("⚠️ 자동화 모듈을 찾을 수 없습니다.")
     
     def connect_e621_event_signals(self):

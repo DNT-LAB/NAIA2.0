@@ -1496,9 +1496,16 @@ class SettingsWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.app_context.image_crud_controller.reset_counter()
             QMessageBox.information(self, "완료", "카운터가 1로 초기화되었습니다.")
+
+    def _is_hidden_web_session_runtime(self) -> bool:
+        return os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1"
     
     def _apply_saved_module_visibility(self, retry_count=0):
         """저장된 모듈 가시성 설정을 실제 UI에 적용"""
+        if self._is_hidden_web_session_runtime():
+            print("ℹ️ [SETTINGS] Web Session middle 모듈 가시성 복원 생략")
+            return
+
         max_retries = 3
         print(f"🔍 [SETTINGS] _apply_saved_module_visibility 호출됨 (시도 {retry_count + 1}/{max_retries + 1})")
 
@@ -1585,6 +1592,10 @@ class SettingsWidget(QWidget):
     
     def _apply_saved_autocomplete_settings(self):
         """저장된 자동완성 설정을 실제로 적용"""
+        if self._is_hidden_web_session_runtime():
+            print("ℹ️ [SETTINGS] Web Session desktop autocomplete 설정 적용 생략")
+            return
+
         # 저장된 자동완성 설정 가져오기
         autocomplete_enabled = self.settings_module.get_setting('autocomplete.enabled', True)
 

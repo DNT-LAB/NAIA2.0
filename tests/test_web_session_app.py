@@ -12,6 +12,7 @@ from PIL import Image
 
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.api_verification import VerifyResult
+from core.generation_request import GenerationRequest
 from core.search_result_model import SearchResultModel
 from core.web_session_app import create_headless_app
 from core.web_session_context import InMemoryTokenManager, WebSessionContext
@@ -1421,6 +1422,175 @@ def test_headless_generate_executes_result_store_and_history_without_imagewindow
     meta = client.get(f"/api/history/meta/{history_id}?full=true")
     assert meta.status_code == 200
     assert meta.json()["prompt"] == "result prompt"
+
+
+def test_headless_result_asset_viewer_and_metadata_routes_are_server_owned(tmp_path):
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        repo_root=tmp_path,
+    )
+    context.result_store.add_api_result(
+        {"image": Image.new("RGB", (7, 5), (25, 50, 75))},
+        GenerationRequest(
+            params={"input": "asset prompt", "negative_prompt": "asset negative", "seed": 11},
+            source_row=pd.Series({"general": "asset prompt"}, name="row-1"),
+        ),
+    )
+    client = TestClient(create_headless_app(context))
+
+    current = client.get("/api/result/asset/current")
+    assert current.status_code == 200
+    current_payload = current.json()
+    assert current_payload["has_image"] is True
+    assert current_payload["capabilities"]["copy_png"] is True
+    rel_path = current_payload["path"]
+
+    saved = client.get("/api/result/asset/saved", params={"path": rel_path})
+    assert saved.status_code == 200
+    assert saved.json()["path"] == rel_path
+
+    viewer_image = client.get("/api/viewer/image/" + rel_path)
+    assert viewer_image.status_code == 200
+    assert viewer_image.headers["content-type"].startswith("image/png")
+
+    viewer_thumb = client.get("/api/viewer/thumb/" + rel_path)
+    assert viewer_thumb.status_code == 200
+    assert viewer_thumb.content.startswith(b"RIFF")
+
+    viewer_meta = client.get("/api/viewer/meta/" + rel_path + "?full=1")
+    assert viewer_meta.status_code == 200
+    assert viewer_meta.json()["summary"]["prompt"] == "asset prompt"
+
+    original = client.get("/api/result/image/original", params={"source": "saved", "path": rel_path})
+    assert original.status_code == 200
+    assert original.headers["content-type"].startswith("image/png")
+
+    missing_saved = client.get("/api/result/image/png", params={"source": "saved", "path": "missing.png"})
+    assert missing_saved.status_code == 404
+
+    extracted = client.post(
+        "/api/metadata/extract?label=Uploaded",
+        content=_png_bytes(),
+        headers={"Content-Type": "image/png"},
+    )
+    assert extracted.status_code == 200
+    assert extracted.json()["summary"]["width"] == 1
+
+
+def test_headless_resolution_routes_roundtrip(tmp_path):
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager(),
+        repo_root=tmp_path,
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    initial = client.get("/api/resolutions?mode=NAI")
+    assert initial.status_code == 200
+    assert initial.json()["api_mode"] == "NAI"
+
+    saved = client.post("/api/resolutions", json={
+        "api_mode": "NAI",
+        "resolutions": ["512 x 512", "1024 x 1024", "512 x 512"],
+    })
+    assert saved.status_code == 200
+    payload = saved.json()
+    assert payload["resolutions"] == ["512 x 512", "1024 x 1024"]
+    assert context.remote_params["options_resolution"] == ["512 x 512", "1024 x 1024"]
+    assert (tmp_path / "save" / "resolutions.json").exists()
+
+    invalid = client.post("/api/resolutions", json={
+        "api_mode": "NAI",
+        "resolutions": ["513 x 512"],
+    })
+    assert invalid.status_code == 400
+
+
+def test_headless_queue_action_route_controls_queue(tmp_path):
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager(),
+        repo_root=tmp_path,
+    )
+    request = GenerationRequest(
+        params={"input": "queued prompt", "width": 64, "height": 64, "_remote_queue_source": "test"},
+        source_row=pd.Series({"general": "queued prompt"}),
+    )
+    context.generation_queue_manager.enqueue_request(request)
+    client = TestClient(create_headless_app(context))
+
+    state = client.get("/api/queue/state").json()
+    assert state["total"] == 1
+    assert state["items"][0]["id"] == request.request_id
+    assert state["items"][0]["prompt_preview"] == "queued prompt"
+
+    paused = client.post("/api/queue/action", json={"action": "pause"})
+    assert paused.status_code == 200
+    assert paused.json()["queue"]["paused"] is True
+
+    removed = client.post("/api/queue/action", json={"action": "remove", "request_id": request.request_id})
+    assert removed.status_code == 200
+    assert removed.json()["queue"]["total"] == 0
+
+
+def test_headless_search_parquet_upload_load_and_merge(tmp_path):
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager(),
+        repo_root=tmp_path,
+        search_results=SearchResultModel(pd.DataFrame({"id": [1], "rating": ["s"], "general": ["old"]})),
+    )
+    client = TestClient(create_headless_app(context))
+    first = pd.DataFrame({"id": [2, 3], "rating": ["s", "q"], "general": ["new", "other"]})
+    first_buffer = io.BytesIO()
+    first.to_parquet(first_buffer, index=False)
+
+    loaded = client.post(
+        "/api/search/parquet/upload?action=load&filename=loaded.parquet",
+        content=first_buffer.getvalue(),
+    )
+    assert loaded.status_code == 200
+    assert loaded.json()["total"] == 2
+    assert context.search_results.get_dataframe()["id"].tolist() == [2, 3]
+
+    second = pd.DataFrame({"id": [4], "rating": ["g"], "general": ["merged"]})
+    second_buffer = io.BytesIO()
+    second.to_parquet(second_buffer, index=False)
+    merged = client.post(
+        "/api/search/parquet/upload?action=merge&filename=merge.parquet",
+        content=second_buffer.getvalue(),
+    )
+    assert merged.status_code == 200
+    assert context.search_results.get_dataframe()["id"].tolist() == [2, 3, 4]
+
+
+def test_headless_comfyui_and_prompt_thumbnail_compatibility_routes(tmp_path):
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"comfyui_url": "127.0.0.1:8188"}),
+        repo_root=tmp_path,
+    )
+    client = TestClient(create_headless_app(context))
+
+    default_workflow = client.post("/api/comfyui/workflow/default")
+    assert default_workflow.status_code == 200
+    assert default_workflow.json()["workflow"]["has_custom"] is False
+
+    bad_workflow = client.post("/api/comfyui/workflow/upload", content=_png_bytes(), headers={"Content-Type": "image/png"})
+    assert bad_workflow.status_code == 400
+
+    thumb_upload = client.post(
+        "/api/prompt-engineering/preset-thumbnail/upload?name=test-preset&mode=NAI",
+        content=_png_bytes(),
+        headers={"Content-Type": "image/png"},
+    )
+    assert thumb_upload.status_code == 200
+    thumb_payload = thumb_upload.json()
+    assert thumb_payload["has_thumbnail"] is True
+    thumb_get = client.get(thumb_payload["thumbnail_url"])
+    assert thumb_get.status_code == 200
+    assert thumb_get.content.startswith(b"\x89PNG")
+
+    clipboard = client.get("/api/clipboard/png")
+    assert clipboard.status_code == 404
+    assert clipboard.json()["headless"] is True
 
 
 def test_headless_image_meta_carries_artist_thumb_request_fields():

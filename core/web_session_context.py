@@ -1365,15 +1365,89 @@ class WebSessionContext:
 
     def queue_state_payload(self) -> dict[str, Any]:
         stats = self.generation_queue_manager.get_queue_stats()
+        queued = [
+            self._serialize_queue_request(request, position=index + 1)
+            for index, request in enumerate(self.generation_queue_manager.get_all_requests())
+        ]
         return {
             "type": "queue_state",
             "is_generating": bool(self.is_generating),
             "paused": bool(stats.get("is_paused", False)),
-            "total": int(stats.get("total", 0) or 0),
+            "total": int(stats.get("total", len(queued)) or 0),
             "has_urgent": bool(stats.get("has_urgent", False)),
             "priority_counts": stats.get("priority_counts", {}),
             "active": None,
-            "items": [],
+            "items": queued,
+        }
+
+    @staticmethod
+    def _queue_preview(value: Any, limit: int = 140) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        return text if len(text) <= limit else text[:limit - 1].rstrip() + "..."
+
+    def _queue_param_summary(self, params: dict[str, Any] | None = None, request: Any = None) -> dict[str, Any]:
+        params = params if isinstance(params, dict) else {}
+        prompt = params.get("_raw_input") or params.get("input") or params.get("prompt") or ""
+        negative = params.get("negative_prompt") or params.get("uc") or ""
+        width = params.get("width")
+        height = params.get("height")
+        resolution = f"{width}x{height}" if width and height else str(params.get("resolution") or "")
+
+        character_count = 0
+        characters = params.get("characters")
+        if isinstance(characters, (list, tuple)):
+            character_count = len(characters)
+        nai_characters = getattr(request, "nai_characters", None) if request else None
+        if not character_count and nai_characters:
+            character_count = len(getattr(nai_characters, "characters", []) or [])
+
+        vibe_count = 0
+        vibes = params.get("reference_image_multiple")
+        if isinstance(vibes, (list, tuple)):
+            vibe_count = len(vibes)
+        nai_vibes = getattr(request, "nai_vibe_transfer", None) if request else None
+        if not vibe_count and nai_vibes:
+            vibe_count = len(getattr(nai_vibes, "reference_image_multiple", []) or [])
+
+        char_ref_count = 0
+        director_images = params.get("director_reference_images")
+        if isinstance(director_images, (list, tuple)):
+            char_ref_count = len(director_images)
+        nai_ref = getattr(request, "nai_character_reference", None) if request else None
+        if not char_ref_count and nai_ref:
+            char_ref_count = len(getattr(nai_ref, "director_reference_images", []) or [])
+
+        return {
+            "prompt_preview": self._queue_preview(prompt),
+            "negative_preview": self._queue_preview(negative, 100),
+            "mode": str(params.get("api_mode") or self.get_api_mode() or ""),
+            "resolution": resolution,
+            "seed": str(params.get("seed") or ""),
+            "source": str(params.get("_remote_queue_source") or "queue"),
+            "label": str(params.get("_remote_queue_label") or ""),
+            "character_count": character_count,
+            "vibe_count": vibe_count,
+            "char_ref_count": char_ref_count,
+        }
+
+    def _serialize_queue_request(self, request: Any, position: int | None = None) -> dict[str, Any]:
+        params = getattr(request, "params", {}) if request else {}
+        summary = self._queue_param_summary(params, request=request)
+        source_row = getattr(request, "source_row", None) if request else None
+        source_name = str(getattr(source_row, "name", "") or "")
+        label = summary["label"] or source_name or summary["source"]
+        return {
+            **summary,
+            "id": str(getattr(request, "request_id", "") or ""),
+            "position": position,
+            "priority": int(getattr(request, "priority", 0) or 0),
+            "status": str(getattr(request, "status", "pending") or "pending"),
+            "created_at": getattr(getattr(request, "created_at", None), "isoformat", lambda: None)(),
+            "started_at": getattr(getattr(request, "started_at", None), "isoformat", lambda: None)(),
+            "completed_at": getattr(getattr(request, "completed_at", None), "isoformat", lambda: None)(),
+            "wait_time": request.get_wait_time() if request and hasattr(request, "get_wait_time") else None,
+            "elapsed_time": request.get_elapsed_time() if request and hasattr(request, "get_elapsed_time") else None,
+            "label": self._queue_preview(label, 80),
         }
 
     def generation_param_schema_payload(self) -> dict[str, Any]:

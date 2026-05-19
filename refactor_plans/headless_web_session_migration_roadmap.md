@@ -33,7 +33,26 @@ Round 38 is complete: desktop-only tabs/modules are classified and documented un
 
 Round 39 is complete: the desktop-backed and headless entrypoints were measured with the same harness, CDP coverage was reviewed, and the headless entrypoint is now the preferred Remote Web path for the core NAI workflow.
 
-The Headless Web Session migration roadmap is complete for the core Remote Web workflow. Desktop-backed WebShell remains as compatibility mode for optional PyQt-only surfaces until they receive separate web-native services.
+The Headless Web Session migration roadmap is complete for the core Remote Web workflow only. This did not remove the Desktop App. Desktop-backed WebShell and `NAIA_cold_v4.py` remain as compatibility mode for optional PyQt-only surfaces until they are either migrated to web-native services or explicitly retired by the Desktop App decommission roadmap.
+
+## Scope Correction - Desktop App Is Not Removed
+
+The previous roadmap removed the Desktop App from the Remote Web critical path. It did not delete or disable the Desktop App itself.
+
+Current state:
+
+- `NAIA_web_headless.py` is the PyQt-free Remote Web entrypoint.
+- `NAIA_cold_v4.py` still starts the PyQt desktop application.
+- Desktop tabs/modules still work when launched through the desktop entrypoint.
+- Desktop-backed WebShell still exists as compatibility mode for optional surfaces that are not yet web-native.
+
+Desktop App removal can only be claimed when all of these are true:
+
+- The default launch path uses `NAIA_web_headless.py` or an equivalent PyQt-free entrypoint.
+- `NAIA_cold_v4.py` is no longer required for supported user workflows.
+- `core.remote_api_server.RemoteBridge`, `core.middle_section_controller`, `core.tab_controller`, `tabs/*` PyQt surfaces, and `modules/*_module.py` PyQt wrappers are either removed, archived, or moved behind a separately maintained desktop package.
+- Packaging/runtime requirements no longer require `PyQt6` for the supported Remote Web application.
+- CDP validation proves Remote Web startup, Random, Generate, result display, history, API setup, and remaining supported optional workflows still work without Desktop App fallback.
 
 ## Final Target
 

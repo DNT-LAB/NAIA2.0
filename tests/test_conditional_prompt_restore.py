@@ -9,7 +9,7 @@ _piexif.helper = _piexif_helper
 sys.modules.setdefault("piexif", _piexif)
 sys.modules.setdefault("piexif.helper", _piexif_helper)
 
-from core.generation_controller import GenerationController
+from legacy_desktop.core.generation_controller import GenerationController
 from core.prompt_context import PromptContext
 from modules.conditional_prompt_module import PromptListModifierModule
 

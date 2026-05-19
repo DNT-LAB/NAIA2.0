@@ -590,7 +590,11 @@ def parse_import_audit(path: Path, stdout_text: str) -> dict[str, Any]:
             or name.startswith("legacy_desktop.core.remote_api_server")
             for name in unique_imports
         ),
-        "middle_section_controller_imported": any(name.startswith("core.middle_section_controller") for name in unique_imports),
+        "middle_section_controller_imported": any(
+            name.startswith("core.middle_section_controller")
+            or name.startswith("legacy_desktop.core.middle_section_controller")
+            for name in unique_imports
+        ),
         "middle_module_imports_count": len(middle_module_imports),
         "middle_module_imports_sample": middle_module_imports[:40],
         "modern_main_window_constructed": "🖥️ 동적 창 크기 설정 완료" in stdout_text,

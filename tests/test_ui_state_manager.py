@@ -1,7 +1,7 @@
 import base64
 import json
 
-from core.ui_state_manager import UIStateManager
+from legacy_desktop.core.ui_state_manager import UIStateManager
 
 
 class FakeMainWindow:

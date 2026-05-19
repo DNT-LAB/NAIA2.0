@@ -781,7 +781,7 @@ class GenerationParamsManager:
     def load_comfyui_dynamic_options(self):
         """🆕 ComfyUI API에서 동적 옵션들을 로드하여 UI에 적용"""
         try:
-            from core.comfyui_utils import ComfyUIAPIUtils
+            from legacy_desktop.core.comfyui_utils import ComfyUIAPIUtils
             
             # 키링에서 ComfyUI URL 가져오기
             comfyui_url = self.main_window.app_context.secure_token_manager.get_token('comfyui_url')

@@ -117,13 +117,13 @@ QInputDialog.getInt = staticmethod(_wd_blocked_input_int)
 QInputDialog.getDouble = staticmethod(_wd_blocked_input_double)
 QInputDialog.getItem = staticmethod(_wd_blocked_input_item)
 QInputDialog.getMultiLineText = staticmethod(_wd_blocked_input_multiline)
-from core.middle_section_controller import MiddleSectionController
+from legacy_desktop.core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
 from core.character_settings import (
     loaded_character_module_is_active,
     loaded_character_module_reroll_on_generate,
 )
-from core.generation_controller import GenerationController
+from legacy_desktop.core.generation_controller import GenerationController
 from core.wildcard_processor import split_tags_smart
 from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
@@ -136,22 +136,22 @@ from ui.translate_dialog import TranslateDialog
 from ui.interactive_window import InteractiveWindow
 from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor, QShowEvent, QHideEvent
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
-from core.search_controller import SearchController
+from legacy_desktop.core.search_controller import SearchController
 from core.search_result_model import SearchResultModel
-from core.autocomplete_manager import AutoCompleteManager
+from legacy_desktop.core.autocomplete_manager import AutoCompleteManager
 from core.tag_data_manager import TagDataManager
 from core.wildcard_manager import WildcardManager
-from core.prompt_generation_controller import PromptGenerationController
+from legacy_desktop.core.prompt_generation_controller import PromptGenerationController
 from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
 from utils.load_generation_params import GenerationParamsManager
 from ui.img2img_popup import Img2ImgPopup
 from ui.img2img_panel import Img2ImgPanel
 from ui.img2img_window import Img2ImgWindow
-from core.main_controller import MainController
-from core.ui_state_manager import UIStateManager
+from legacy_desktop.core.main_controller import MainController
+from legacy_desktop.core.ui_state_manager import UIStateManager
 from utils.token_calculator import get_token_calculator
 from utils.clipboard_image import pil_image_from_mime_data
-from core.comfyui_utils import ComfyUIAPIUtils
+from legacy_desktop.core.comfyui_utils import ComfyUIAPIUtils
 from ui.terminal.terminal_widget import TerminalWidget
 
 cfg_validator = QDoubleValidator(1.0, 10.0, 1)
@@ -6656,7 +6656,7 @@ class ModernMainWindow(QMainWindow):
             return
 
         try:
-            from core.comfyui_utils import WorkflowValidationDialog
+            from legacy_desktop.core.comfyui_utils import WorkflowValidationDialog
             with Image.open(file_path) as img:
                 # ComfyUI는 'prompt'와 'workflow' 키에 JSON 문자열로 저장합니다.
                 metadata = img.info

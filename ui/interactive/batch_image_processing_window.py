@@ -18,7 +18,7 @@ from PyQt6.QtGui import QPixmap
 from ui.theme import DARK_COLORS
 from ui.scaling_manager import get_scaled_size, get_scaled_font_size
 from ui.interactive.interactive_theme import COMMON_STYLES, get_button_style, FONT_FAMILY
-from core.ollama_service import OllamaService, OllamaWorker
+from legacy_desktop.core.ollama_service import OllamaService, OllamaWorker
 
 
 class BatchImageProcessingWindow(QMainWindow):

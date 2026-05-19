@@ -1,8 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from core import middle_section_controller as middle_controller
-from core.middle_section_controller import MiddleSectionController
+from legacy_desktop.core import middle_section_controller as middle_controller
+from legacy_desktop.core.middle_section_controller import MiddleSectionController
 
 
 class _AppContext:

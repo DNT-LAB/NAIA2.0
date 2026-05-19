@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QThread, Qt
 from ui.theme import DARK_STYLES, DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size
-from core.api_validator import APIValidator
+from legacy_desktop.core.api_validator import APIValidator
 from core import api_verification
 from core.context import AppContext
 from interfaces.base_tab_module import BaseTabModule

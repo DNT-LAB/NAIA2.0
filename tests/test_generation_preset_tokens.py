@@ -12,7 +12,7 @@ if "piexif" not in sys.modules:
     sys.modules["piexif"] = piexif_stub
     sys.modules["piexif.helper"] = piexif_helper_stub
 
-from core.generation_controller import GenerationController
+from legacy_desktop.core.generation_controller import GenerationController
 
 
 class _WildcardManager:

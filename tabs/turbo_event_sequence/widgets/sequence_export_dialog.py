@@ -1400,7 +1400,7 @@ class APIControlPanel(QWidget):
         self._save_settings()
 
         # Ollama API로 모델이 로컬에 있는지 확인
-        from core.ollama_service import OllamaService
+        from legacy_desktop.core.ollama_service import OllamaService
         service = OllamaService()
         
         # 서버가 실행 중인 경우 모델 목록을 가져와 확인
@@ -2234,7 +2234,7 @@ class SequenceExportDialog(QDialog):
             print("[SequenceExportDialog] ComfyUI Worker 중단됨")
 
         # Ollama 서버 프로세스 종료 (VRAM 해제)
-        from core.ollama_service import OllamaService
+        from legacy_desktop.core.ollama_service import OllamaService
         OllamaService().stop_server()
         print("[SequenceExportDialog] Ollama 서버 프로세스 종료됨")
 
@@ -2333,7 +2333,7 @@ class SequenceExportDialog(QDialog):
 
     def _on_ollama_test(self):
         """Ollama 연결 테스트"""
-        from core.ollama_service import OllamaService
+        from legacy_desktop.core.ollama_service import OllamaService
         
         self.status_label.setText("Ollama 연결 테스트 중...")
         QApplication.processEvents()
@@ -2356,7 +2356,7 @@ class SequenceExportDialog(QDialog):
     def _on_generate_prompts(self):
         """Ollama 프롬프트 자동 생성 (순차 처리)"""
         # 1. Ollama 서버 상태 확인 및 시작
-        from core.ollama_service import OllamaService
+        from legacy_desktop.core.ollama_service import OllamaService
         self.ollama_service = OllamaService()
         
         if not self.ollama_service.is_server_running():
@@ -2495,7 +2495,7 @@ class SequenceExportDialog(QDialog):
         )
 
         # Ollama 워커 생성 및 시작 (이미지 포함)
-        from core.ollama_service import OllamaWorker
+        from legacy_desktop.core.ollama_service import OllamaWorker
         self.current_ollama_worker = OllamaWorker(
             user_message,
             model=model,

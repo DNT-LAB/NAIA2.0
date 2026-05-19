@@ -3497,7 +3497,7 @@ def test_webui_result_enhance_completion_records_webui_metadata_without_credenti
 
 
 def test_generation_worker_records_webui_result_enhance_metadata_without_credential():
-    from core.generation_controller import GenerationWorker
+    from legacy_desktop.core.generation_controller import GenerationWorker
 
     worker = GenerationWorker(SimpleNamespace())
     worker.params = {
@@ -3536,7 +3536,7 @@ def test_generation_worker_records_webui_result_enhance_metadata_without_credent
 
 
 def test_generation_worker_promotes_webui_response_seed_for_replay():
-    from core.generation_controller import GenerationWorker
+    from legacy_desktop.core.generation_controller import GenerationWorker
 
     worker = GenerationWorker(SimpleNamespace())
     worker.params = {

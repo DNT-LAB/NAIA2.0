@@ -308,7 +308,7 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - [x] Choose one strategy: delete, `legacy_desktop/`, or `not_implement/desktop_archive/`.
 - [x] Move or delete `NAIA_cold_v4.py`.
 - [x] Move or delete `core.remote_api_server.py` if all supported features are migrated.
-- [ ] Move or delete `core.middle_section_controller.py`, `core.tab_controller.py`, `core.main_controller.py`, and desktop-only controllers.
+- [x] Move or delete `core.middle_section_controller.py`, `core.tab_controller.py`, `core.main_controller.py`, and desktop-only controllers.
 - [ ] Move or delete PyQt-only `tabs/`, `modules/`, and `ui/` files that are not part of a separate package.
 - [x] Update imports and tests after the move.
 - [ ] Update docs so Desktop App is no longer presented as supported.
@@ -322,7 +322,15 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - Added headless import guards for the `legacy_desktop` package.
 - Notes: `refactor_docs/round_49_desktop_legacy_archive_notes.md`.
 - Plan: `refactor_plans/round_49_desktop_legacy_archive.md`.
-- Deferred: remaining desktop controllers and PyQt tab/module wrappers need a broader package move or explicit retirement of the legacy desktop launcher.
+- Deferred: remaining PyQt tab/module wrappers need a broader package move or explicit retirement of the legacy desktop launcher.
+
+### Round 49B Result
+
+- Moved desktop-only `core` controllers and helpers to `legacy_desktop/core/`.
+- Updated legacy desktop imports, PyQt wrapper imports, and legacy tests to point at archived controller paths.
+- Headless import guards still block `legacy_desktop`, `PyQt6`, and old Desktop controller names.
+- CDP validation passed on port `7309`: first paint `1.86s`, Random prompt update `6.547s`, Generate dispatch `0.109s`; import audit reported `pyqt6_imported=False`, `legacy_desktop_imported=False`, and `remote_api_server_imported=False`.
+- Validation doc: `refactor_docs/round_49_core_controller_archive_validation.md`.
 
 ### When Done
 

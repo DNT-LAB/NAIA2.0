@@ -14,7 +14,7 @@ if "piexif" not in sys.modules:
     sys.modules["piexif"] = piexif_stub
     sys.modules["piexif.helper"] = piexif_helper_stub
 
-from core.generation_controller import GenerationController
+from legacy_desktop.core.generation_controller import GenerationController
 from core.prompt_context import PromptContext
 from core.prompt_processor import PromptProcessor
 
@@ -221,7 +221,7 @@ def test_webui_resolution_preset_default_keeps_selected_preset_candidate():
 def test_webui_resolution_preset_random_res_uses_selected_preset(monkeypatch):
     controller, combo = _controller_with_resolution_combo()
     monkeypatch.setattr(
-        "core.generation_controller.random.choice",
+        "legacy_desktop.core.generation_controller.random.choice",
         lambda values: "1088 x 1600",
     )
     params = {
@@ -244,7 +244,7 @@ def test_webui_resolution_preset_random_res_ignores_stale_detected_flag_when_aut
     controller.context.main_window.resolution_is_detected = True
     controller.context.main_window.detected_resolution_override = (832, 1216)
     monkeypatch.setattr(
-        "core.generation_controller.random.choice",
+        "legacy_desktop.core.generation_controller.random.choice",
         lambda values: "1088 x 1600",
     )
     params = {

@@ -930,7 +930,7 @@ class OllamaServerActionWorker(QThread):
         self.action = action  # "start" or "stop"
 
     def run(self):
-        from core.ollama_service import OllamaService
+        from legacy_desktop.core.ollama_service import OllamaService
         service = OllamaService()
         try:
             if self.action == "start":

@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QTabWidget
 
-from core.tab_controller import REMOVED_TAB_MODULES, WEB_SESSION_UNSUPPORTED_TAB_MODULES, TabController
+from legacy_desktop.core.tab_controller import REMOVED_TAB_MODULES, WEB_SESSION_UNSUPPORTED_TAB_MODULES, TabController
 
 
 def test_removed_tab_files_are_not_imported(tmp_path, qtbot):

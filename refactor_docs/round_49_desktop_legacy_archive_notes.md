@@ -19,15 +19,8 @@ This is the first physical archive step. It removes the primary Desktop App entr
 
 The following Desktop App surfaces remain in the main source tree and should be handled in the next archive rounds:
 
-- `core.middle_section_controller`
-- `core.tab_controller`
-- `core.main_controller`
-- `core.generation_controller`
-- `core.prompt_generation_controller`
-- `core.search_controller`
-- `core.autocomplete_manager`
-- `core.ui_state_manager`
-- `core.temp_window_manager`
 - PyQt tab/module wrappers under `tabs/`, `modules/`, and `ui/`
 
-They were not moved in this pass because several legacy PyQt files import each other through the current `core.*` and `ui.*` names. Moving them safely requires either a broader package move or explicit retirement of the legacy desktop launcher.
+Round 49B moved the desktop-only `core` controllers and helpers into `legacy_desktop/core/`. Remaining work is now concentrated on PyQt wrappers under `tabs/`, `modules/`, and `ui/`.
+
+Known follow-up: some unarchived PyQt wrapper files still contain old `core.*` desktop-controller import names and should be moved as a package in the next UI-wrapper archive round. They are outside the supported headless import graph.

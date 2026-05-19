@@ -233,14 +233,26 @@ Remove Desktop App tab surfaces from the supported runtime by moving useful beha
 
 ### TODO Checklist
 
-- [ ] Classify `tabs/studio*` and `ui/remote_web/js/features/studioTab.mjs` as migrate or retire.
-- [ ] Classify `tabs/turbo_event_sequence*` as migrate or retire.
-- [ ] Classify `tabs/artist_thumb_tab.py` against current Remote Web artist thumb services.
-- [ ] Classify `tabs/png_info_tab.py`, `tabs/thumbnails_tab.py`, and image metadata viewers.
-- [ ] Classify `tabs/img2img_tab.py`, `tabs/simple_web_view.py`, `tabs/web_view.py`, `tabs/depth_search_window.py`, and `tabs/comic_generator_tab.py`.
+- [x] Classify `tabs/studio*` and `ui/remote_web/js/features/studioTab.mjs` as migrate or retire.
+- [x] Classify `tabs/turbo_event_sequence*` as migrate or retire.
+- [x] Classify `tabs/artist_thumb_tab.py` against current Remote Web artist thumb services.
+- [x] Classify `tabs/png_info_tab.py`, `tabs/thumbnails_tab.py`, and image metadata viewers.
+- [x] Classify `tabs/img2img_tab.py`, `tabs/simple_web_view.py`, `tabs/web_view.py`, `tabs/depth_search_window.py`, and `tabs/comic_generator_tab.py`.
 - [ ] Move retired desktop-only files to an archive/not-supported area or delete them if they are already replaced.
 - [ ] Remove dynamic tab registry entries for retired surfaces.
-- [ ] Update tests that assert removed/unsupported tabs are not imported.
+- [x] Update tests that assert removed/unsupported tabs are not imported.
+
+### Round 47 Result
+
+- Added `core.style_thumbnail_service` and headless `/api/thumb/*` endpoints for the Remote Web Thumb tab.
+- Wired `core.character_viewer_service` into headless `/api/character-viewer/*` endpoints.
+- Added `/api/headless/capabilities` and dynamic right-tab availability handling so unsupported headless tabs can be hidden without changing legacy desktop-backed RemoteBridge.
+- Artist Thumbnail remains deferred and hidden in headless because it is still RemoteBridge-backed.
+- Studio remains web-native JS plus headless generation queue dispatch; the PyQt `tabs/studio_tab.py` surface remains legacy-only.
+- Physical tab file moves/deletes and `core.tab_controller` registry removal are deferred to Round 49 because they are destructive legacy desktop-tree operations.
+- CDP validation passed on port `7305`: `Artists` hidden, `Thumb` visible and loaded 9 cards, `Characters` visible and loaded 9 cards.
+- Import audit during CDP reported no PyQt, RemoteBridge, TabController, or `tabs/*` imports.
+- Validation docs: `refactor_docs/round_47_tab_surface_validation.md`, `refactor_docs/round_47_tab_surface_migration_notes.md`.
 
 ### When Done
 

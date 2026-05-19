@@ -56,6 +56,7 @@ if (isDetachedModule && detachedModuleId) {
 let wsClient = null;
 let quickFilter = null;
 let rightTabs = null;
+let pendingRightTabAvailability = null;
 let resultInfoResizer = null;
 let resultHistory = null;
 let resultEnhance = null;
@@ -259,10 +260,38 @@ const rightTabsReady = import('./js/features/rightTabs.mjs')
       document,
       onLeaveResult: hideViewerNav,
     });
+    if (pendingRightTabAvailability) {
+      rightTabs.setAvailability(pendingRightTabAvailability);
+      pendingRightTabAvailability = null;
+    }
   })
   .catch(error => {
     console.error('Failed to initialize right tabs module', error);
   });
+
+function applyRightTabAvailability(tabAvailability) {
+  if (!tabAvailability || typeof tabAvailability !== 'object') return;
+  if (rightTabs && typeof rightTabs.setAvailability === 'function') {
+    rightTabs.setAvailability(tabAvailability);
+    return;
+  }
+  pendingRightTabAvailability = {...tabAvailability};
+}
+
+async function loadHeadlessCapabilities() {
+  try {
+    const response = await fetch('/api/headless/capabilities', {cache: 'no-store'});
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (payload && payload.headless) {
+      applyRightTabAvailability(payload.right_tabs);
+    }
+  } catch (error) {
+    // Legacy desktop-backed RemoteBridge does not expose this endpoint.
+  }
+}
+
+loadHeadlessCapabilities();
 const danbooruTabReady = import('./js/features/danbooruTab.mjs')
   .then(({createDanbooruBrowserController}) => {
     danbooruTabControl = createDanbooruBrowserController({

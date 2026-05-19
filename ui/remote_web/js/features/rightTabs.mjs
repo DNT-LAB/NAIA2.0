@@ -22,18 +22,31 @@ export function createRightTabsController({document, onLeaveResult}) {
     pane.setAttribute('aria-hidden', 'true');
   }
 
+  function showTabButton(button) {
+    button.hidden = false;
+    button.removeAttribute('aria-hidden');
+    button.removeAttribute('tabindex');
+  }
+
+  function showTabPane(pane) {
+    pane.hidden = false;
+    pane.removeAttribute('aria-hidden');
+  }
+
   function applyHiddenState() {
     buttons.forEach(button => {
-      if (!hiddenTabs.has(button.dataset.rightTab)) {
+      if (hiddenTabs.has(button.dataset.rightTab)) {
+        hideTabButton(button);
         return;
       }
-      hideTabButton(button);
+      showTabButton(button);
     });
     panes.forEach(pane => {
-      if (!hiddenTabs.has(pane.dataset.rightPane)) {
+      if (hiddenTabs.has(pane.dataset.rightPane)) {
+        hideTabPane(pane);
         return;
       }
-      hideTabPane(pane);
+      showTabPane(pane);
     });
   }
 
@@ -66,5 +79,15 @@ export function createRightTabsController({document, onLeaveResult}) {
 
   applyHiddenState();
 
-  return {switchTo};
+  function setAvailability(tabAvailability = {}) {
+    Object.entries(tabAvailability || {}).forEach(([tabName, available]) => {
+      if (available) hiddenTabs.delete(tabName);
+      else hiddenTabs.add(tabName);
+    });
+    const active = buttons.find(button => button.classList.contains('active'))?.dataset.rightTab || 'result';
+    applyHiddenState();
+    return switchTo(hiddenTabs.has(active) ? 'result' : active);
+  }
+
+  return {switchTo, setAvailability};
 }

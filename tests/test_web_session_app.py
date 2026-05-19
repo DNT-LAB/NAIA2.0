@@ -4,6 +4,7 @@ import subprocess
 import sys
 import io
 import zipfile
+import base64
 
 from fastapi.testclient import TestClient
 import pandas as pd
@@ -20,6 +21,61 @@ class _WildcardManager:
     wildcard_dict_tree = {}
     instant_wildcard_tree = {}
     instant_wildcard_dict = {}
+
+
+def _png_bytes(color=(255, 0, 0, 255)) -> bytes:
+    image = Image.new("RGBA", (1, 1), color)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _write_round47_tab_fixture(root):
+    png_bytes = _png_bytes()
+    data_dir = root / "data"
+    taglist_dir = data_dir / "taglist"
+    thumb_dir = data_dir / "character_thumbnails"
+    taglist_dir.mkdir(parents=True)
+    thumb_dir.mkdir(parents=True)
+    style_b64 = base64.b64encode(png_bytes).decode("ascii")
+    (taglist_dir / "style_meta_tags.json").write_text(
+        json.dumps({
+            "categories": {
+                "render": {
+                    "name": "Render",
+                    "description": "render styles",
+                    "tags": ["airbrush"],
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    (taglist_dir / "style_thumbnails.json").write_text(
+        json.dumps({"airbrush": f"data:image/png;base64,{style_b64}"}),
+        encoding="utf-8",
+    )
+    (data_dir / "copyright_groups.json").write_text(
+        json.dumps({"series": {"girl": ["hero"], "boy": []}}),
+        encoding="utf-8",
+    )
+    (data_dir / "character_analysis.json").write_text(
+        json.dumps({
+            "series": {
+                "hero": {
+                    "total_rows": 3,
+                    "gender": "girl",
+                    "aliases": ["heroine"],
+                    "personal_color": [{"tag": "blue eyes", "count": 2, "pct": 66.6}],
+                    "characteristics": [{"tag": "long hair", "count": 2, "pct": 66.6}],
+                    "breast_size": {"distribution": [{"tag": "small breasts", "count": 1, "pct": 33.3}]},
+                    "alternates": [],
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    (thumb_dir / "index.json").write_text(json.dumps({"series::hero": "hero.png"}), encoding="utf-8")
+    (thumb_dir / "hero.png").write_bytes(png_bytes)
 
 
 def test_headless_app_import_and_factory_do_not_import_pyqt_in_fresh_process():
@@ -57,6 +113,63 @@ print(json.dumps({
         "main_window": True,
         "entrypoint": "NAIA_web_headless",
     }
+
+
+def test_headless_tab_services_cover_thumb_and_character_viewer(tmp_path):
+    _write_round47_tab_fixture(tmp_path)
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"nai_token": "token"}),
+    )
+    context.headless_generation_execute_enabled = False
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    capabilities = client.get("/api/headless/capabilities")
+    assert capabilities.status_code == 200
+    right_tabs = capabilities.json()["right_tabs"]
+    assert right_tabs["thumb"] is True
+    assert right_tabs["characters"] is True
+    assert right_tabs["artists"] is False
+
+    thumb_state = client.get("/api/thumb/state")
+    assert thumb_state.status_code == 200
+    assert thumb_state.json()["selected"] == "render"
+    thumb_category = client.get("/api/thumb/category/render")
+    assert thumb_category.status_code == 200
+    assert thumb_category.json()["tags"][0]["tag"] == "airbrush"
+    thumb_image = client.get("/api/thumb/image?tag=airbrush")
+    assert thumb_image.status_code == 200
+    assert thumb_image.headers["content-type"].startswith("image/png")
+    assert thumb_image.content.startswith(b"\x89PNG")
+
+    viewer_state = client.get("/api/character-viewer/state")
+    assert viewer_state.status_code == 200
+    assert viewer_state.json()["available"] is True
+    groups = client.get("/api/character-viewer/groups")
+    assert groups.status_code == 200
+    assert groups.json()["items"][0]["key"] == "__ALL__"
+    listing = client.get("/api/character-viewer/list?group=series")
+    assert listing.status_code == 200
+    assert listing.json()["items"][0]["character"] == "hero"
+    detail = client.post("/api/character-viewer/detail", json={"group": "series", "character": "hero"})
+    assert detail.status_code == 200
+    assert "blue eyes" in detail.json()["prompt"]["character_prompt"]
+    thumbnail = client.get("/api/character-viewer/thumbnail?group=series&character=hero")
+    assert thumbnail.status_code == 200
+    assert thumbnail.headers["content-type"].startswith("image/png")
+
+    generate = client.post("/api/character-viewer/generate", json={
+        "request_id": "char-round47",
+        "group": "series",
+        "character": "hero",
+        "character_prompt": "hero, blue eyes",
+        "prefix": "1girl",
+        "postfix": "best quality",
+    })
+    assert generate.status_code == 200
+    assert generate.json()["ok"] is True
+    assert context.last_generation_params["character_viewer_request"] is True
 
 
 def test_headless_websocket_random_generates_prompt_from_core_service():

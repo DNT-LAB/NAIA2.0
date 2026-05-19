@@ -10,10 +10,14 @@ These desktop PyQt surfaces are outside the Remote Web Session contract and must
   - Direct Turbo dialog selection also no-ops in hidden WebSession runtime.
 - `StudioTab`
   - Desktop tab remains available in the PyQt app.
-  - Headless Remote Web does not import the tab; future Studio parity requires a separate web-native queue/storyboard service.
+  - Headless Remote Web does not import the tab.
+  - Remote Web Studio is kept as a web-native JS surface that dispatches through the headless generation queue.
 - `DepthSearchTabModule`, `Img2ImgTabModule`, `SimpleWebViewTabModule`, `APIManagementTabModule`
   - These are desktop/dynamic PyQt surfaces in the current app.
   - Headless Remote Web exposes only the core server contracts that replaced them where available: API setup, latest result, PNG export, and in-memory history.
+- `ArtistThumbModule`
+  - The PyQt tab and RemoteBridge service remain legacy-only.
+  - The headless browser hides the Artists tab through `/api/headless/capabilities` until an Artist Thumbnail service is extracted.
 
 ## Removed guards
 
@@ -67,9 +71,9 @@ These modules must not be imported during headless startup. Only extracted core 
 - `tabs.web_view`
 - `tabs.image_window`
 - `tabs.setting_tabs`
-- `tabs.thumbnails_tab`
-- `tabs.artist_thumb_tab`
-- `tabs.png_info_tab`
+- `tabs.thumbnails_tab` (Remote Web Thumb is served by `core.style_thumbnail_service` instead)
+- `tabs.artist_thumb_tab` (headless Artists tab hidden until service extraction)
+- `tabs.png_info_tab` (Remote Web metadata viewer uses result metadata endpoints instead)
 - `tabs.api_management_window`
 
 The headless entrypoint must not scan or import these files.

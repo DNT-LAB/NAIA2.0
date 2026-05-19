@@ -1903,7 +1903,7 @@ class ModernMainWindow(QMainWindow):
     def _build_module_section(self, parent_layout):
         """모듈 섹션: MiddleSectionController의 모듈들을 직접 parent_layout에 추가"""
         try:
-            modules_dir = str(PROJECT_ROOT / 'modules')
+            modules_dir = str(Path(__file__).resolve().parent / 'modules')
             self.middle_section_controller = MiddleSectionController(modules_dir, self.app_context, parent=self)
             self.middle_section_controller.build_ui(parent_layout)
 

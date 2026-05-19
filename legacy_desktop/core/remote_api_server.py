@@ -9428,7 +9428,7 @@ class RemoteBridge(QObject):
 
     def _cond_preset_infos(self) -> list:
         try:
-            from modules.conditional.preset_io import get_default_storage
+            from legacy_desktop.modules.conditional.preset_io import get_default_storage
 
             infos = []
             for info in get_default_storage().list_all():
@@ -9447,8 +9447,8 @@ class RemoteBridge(QObject):
         """조건부 v2 DSL을 웹 편집기가 쓰는 RuleBook JSON으로 변환."""
         try:
             from dataclasses import asdict
-            from modules.conditional.dsl_parser import parse_rulebook
-            from modules.conditional.preset_io import SCHEMA_VERSION
+            from legacy_desktop.modules.conditional.dsl_parser import parse_rulebook
+            from legacy_desktop.modules.conditional.preset_io import SCHEMA_VERSION
 
             book = parse_rulebook(dsl_text or "")
             opts = self._cond_engine_options(module, source=engine_options)
@@ -9475,7 +9475,7 @@ class RemoteBridge(QObject):
             }
 
     def _cond_book_from_json_value(self, value: str):
-        from modules.conditional.preset_io import rulebook_from_dict
+        from legacy_desktop.modules.conditional.preset_io import rulebook_from_dict
 
         data = json.loads(value or "{}")
         if isinstance(data, dict) and isinstance(data.get("book"), dict):
@@ -9999,7 +9999,7 @@ class RemoteBridge(QObject):
 
     def _ollama_supported_models(self) -> list:
         try:
-            from modules.ollama_module import SUPPORTED_MODELS
+            from legacy_desktop.modules.ollama_module import SUPPORTED_MODELS
             return list(SUPPORTED_MODELS)
         except Exception:
             return [
@@ -10009,7 +10009,7 @@ class RemoteBridge(QObject):
 
     def _ollama_creativity_options(self) -> list:
         try:
-            from modules.ollama_module import CREATIVITY_PROFILES
+            from legacy_desktop.modules.ollama_module import CREATIVITY_PROFILES
             return [
                 {"value": value, "label": profile.get("label", str(value))}
                 for value, profile in sorted(CREATIVITY_PROFILES.items())
@@ -10217,7 +10217,7 @@ class RemoteBridge(QObject):
                 if active and active.isRunning():
                     self._broadcast_json({"type": "toast", "message": "Ollama server action is already running", "level": "error"})
                     return
-                from modules.ollama_module import OllamaServerActionWorker
+                from legacy_desktop.modules.ollama_module import OllamaServerActionWorker
                 module._remote_status_text = "Starting Ollama server..." if value == "start" else "Stopping Ollama server..."
                 self._broadcast_ollama_state()
                 worker = OllamaServerActionWorker(action=value)
@@ -10271,7 +10271,7 @@ class RemoteBridge(QObject):
                 module._remote_stage_outputs = []
                 if getattr(module, "input_text", None) is not None:
                     module.input_text.setPlainText(prompt)
-                from modules.ollama_module import OllamaConversionWorker
+                from legacy_desktop.modules.ollama_module import OllamaConversionWorker
                 worker = OllamaConversionWorker(
                     prompt=prompt,
                     model=getattr(module, "selected_model", self._ollama_supported_models()[0]),
@@ -10949,7 +10949,7 @@ class RemoteBridge(QObject):
             elif key == "rules_v2":
                 update_store(rules_v2=value)
             elif key == "rules_v2_book":
-                from modules.conditional.dsl_serializer import serialize_rulebook
+                from legacy_desktop.modules.conditional.dsl_serializer import serialize_rulebook
 
                 book, data = self._cond_book_from_json_value(value)
                 opts = self._cond_engine_options(source=data.get("engine_options") or {})
@@ -10980,8 +10980,8 @@ class RemoteBridge(QObject):
                     opts = self._cond_engine_options(source=opts)
                 update_store(engine_options=opts)
             elif key == "preset_load":
-                from modules.conditional.dsl_serializer import serialize_rulebook
-                from modules.conditional.preset_io import get_default_storage
+                from legacy_desktop.modules.conditional.dsl_serializer import serialize_rulebook
+                from legacy_desktop.modules.conditional.preset_io import get_default_storage
 
                 try:
                     book = get_default_storage().load(value)
@@ -11070,7 +11070,7 @@ class RemoteBridge(QObject):
                     m.rules_textedit.setPlainText(value)
                 update_settings(rules_v2=value)
             elif key == "rules_v2_book":
-                from modules.conditional.dsl_serializer import serialize_rulebook
+                from legacy_desktop.modules.conditional.dsl_serializer import serialize_rulebook
 
                 book, data = self._cond_book_from_json_value(value)
                 opts = self._cond_engine_options(source=data.get("engine_options") or {})
@@ -11148,7 +11148,7 @@ class RemoteBridge(QObject):
                         "level": "error",
                     })
             elif key == "preset_save":
-                from modules.conditional.preset_io import (
+                from legacy_desktop.modules.conditional.preset_io import (
                     get_default_storage,
                     rulebook_from_dict,
                 )
@@ -11192,7 +11192,7 @@ class RemoteBridge(QObject):
                             elif source_preset:
                                 book = storage.load(source_preset)
                             else:
-                                from modules.conditional.dsl_parser import parse_rulebook
+                                from legacy_desktop.modules.conditional.dsl_parser import parse_rulebook
 
                                 current_dsl = m.get_v2_dsl() if hasattr(m, "get_v2_dsl") else getattr(m, "_rules_v2_dsl", "")
                                 book = parse_rulebook(current_dsl or "")
@@ -11211,7 +11211,7 @@ class RemoteBridge(QObject):
                             if hasattr(m, "_update_headless_settings"):
                                 m._update_headless_settings(active_preset=name)
                             if activate:
-                                from modules.conditional.dsl_serializer import serialize_rulebook
+                                from legacy_desktop.modules.conditional.dsl_serializer import serialize_rulebook
 
                                 dsl = serialize_rulebook(book)
                                 if hasattr(m, "set_engine_options"):
@@ -11239,7 +11239,7 @@ class RemoteBridge(QObject):
                                 "level": "success",
                             })
             elif key == "preset_delete":
-                from modules.conditional.preset_io import get_default_storage
+                from legacy_desktop.modules.conditional.preset_io import get_default_storage
 
                 name = str(value or "").strip()
                 if name and get_default_storage().delete(name):
@@ -11261,7 +11261,7 @@ class RemoteBridge(QObject):
                     })
             elif key == "simulate_v2":
                 from dataclasses import asdict
-                from modules.conditional.dsl_serializer import serialize_rulebook
+                from legacy_desktop.modules.conditional.dsl_serializer import serialize_rulebook
 
                 book, data = self._cond_book_from_json_value(value)
                 opts = self._cond_engine_options(source=data.get("engine_options") or {})

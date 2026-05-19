@@ -702,7 +702,7 @@ class PromptEngineeringModule(BaseMiddleModule, ModeAwareModule):
 
     def _open_debug_window(self):
         """전처리 디버깅 윈도우 열기"""
-        from modules.filter_debug_window import FilterDebugWindow
+        from legacy_desktop.modules.filter_debug_window import FilterDebugWindow
 
         # C/C++ 삭제 안전 처리
         try:

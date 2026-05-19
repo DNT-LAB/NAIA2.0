@@ -130,6 +130,7 @@ def write_sitecustomize(temp_dir: Path, audit_path: Path) -> None:
         "tabs.image_window",
         "ui.image_window",
         "modules",
+        "legacy_desktop.modules",
     ]
     code = f"""
 import builtins
@@ -579,7 +580,11 @@ def parse_import_audit(path: Path, stdout_text: str) -> dict[str, Any]:
         if isinstance(module, str):
             imports.append(module)
     unique_imports = sorted(set(imports))
-    middle_module_imports = [name for name in unique_imports if name.startswith("modules")]
+    middle_module_imports = [
+        name
+        for name in unique_imports
+        if name.startswith("modules") or name.startswith("legacy_desktop.modules")
+    ]
     return {
         "pyqt6_imported": any(name == "PyQt6" or name.startswith("PyQt6.") for name in unique_imports),
         "legacy_desktop_imported": any(

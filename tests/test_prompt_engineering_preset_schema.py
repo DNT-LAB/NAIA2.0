@@ -1,4 +1,4 @@
-from modules.prompt_engineering_module import PromptEngineeringModule
+from legacy_desktop.modules.prompt_engineering_module import PromptEngineeringModule
 
 
 def test_preset_main_settings_strip_runtime_state_keys():

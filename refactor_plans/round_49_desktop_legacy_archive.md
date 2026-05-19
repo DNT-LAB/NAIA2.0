@@ -14,7 +14,8 @@ Physically move the first Desktop App entrypoints out of the supported runtime t
 - [x] Add headless import guards for the new `legacy_desktop` package.
 - [x] Run focused tests and static checks.
 - [x] Move or retire remaining PyQt controllers from `core/`.
-- [ ] Move or retire remaining PyQt tab/module wrappers from `tabs/`, `modules/`, and `ui/`.
+- [x] Move PyQt middle module wrappers from `modules/`.
+- [ ] Move or retire remaining PyQt tab/UI wrappers from `tabs/` and `ui/`.
 
 ## When Done
 
@@ -48,3 +49,17 @@ Validation:
 - `python -m pytest tests\test_auto_resolution_hiresfix_defaults.py tests\test_conditional_prompt_restore.py tests\test_generation_preset_tokens.py tests\test_middle_section_controller_static_registry.py tests\test_tab_controller_removed_tabs.py tests\test_ui_state_manager.py -q`
 - `python -m pytest tests\test_remote_api_status.py -k "generation_worker" -q`
 - CDP validation: `refactor_docs/round_49_core_controller_archive_validation.md`
+
+## Round 49C Module Archive
+
+Moved tracked `modules/` runtime files to `legacy_desktop/modules/`. The root `modules/` tree now has no tracked Python files; ignored local docs/cache may still exist but are not part of the supported runtime.
+
+Updated legacy-only imports from `modules.*` to `legacy_desktop.modules.*`, including the archived RemoteBridge conditional-prompt and Ollama helper paths.
+
+Validation:
+
+- `python -m compileall -q legacy_desktop\modules`
+- `python -m py_compile legacy_desktop\NAIA_cold_v4.py legacy_desktop\core\middle_section_controller.py legacy_desktop\core\remote_api_server.py tools\measure_web_session_startup.py core\api_service.py ui\remote\char_prompt_tab.py`
+- `python -m pytest tests\test_web_session_app.py tests\test_requirements_split.py tests\test_web_shell_config.py -q`
+- `python -m pytest tests\test_middle_section_controller_static_registry.py tests\test_conditional_prompt_restore.py tests\test_prompt_engineering_preset_schema.py tests\test_character_settings.py tests\test_vibe_transfer_clipboard.py -q`
+- CDP validation: `refactor_docs/round_49_modules_archive_validation.md`

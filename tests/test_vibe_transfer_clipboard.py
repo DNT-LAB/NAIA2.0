@@ -9,7 +9,7 @@ from PIL import Image
 from PyQt6.QtCore import QByteArray, QMimeData
 from PyQt6.QtGui import QImage
 
-from modules.vibe_transfer_module import (
+from legacy_desktop.modules.vibe_transfer_module import (
     VibeTransferFrame,
     VibeTransferModule,
     _clipboard_mime_png_bytes,

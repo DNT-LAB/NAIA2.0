@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-from modules.conditional.block_model import (
+from legacy_desktop.modules.conditional.block_model import (
     Action,
     ActionKind,
     CharState,

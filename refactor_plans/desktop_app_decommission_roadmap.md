@@ -332,6 +332,14 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - CDP validation passed on port `7309`: first paint `1.86s`, Random prompt update `6.547s`, Generate dispatch `0.109s`; import audit reported `pyqt6_imported=False`, `legacy_desktop_imported=False`, and `remote_api_server_imported=False`.
 - Validation doc: `refactor_docs/round_49_core_controller_archive_validation.md`.
 
+### Round 49C Result
+
+- Moved tracked PyQt middle module wrappers from `modules/` to `legacy_desktop/modules/`.
+- Updated legacy imports and tests from `modules.*` to `legacy_desktop.modules.*`.
+- Root `modules/` has no tracked Python files remaining.
+- CDP validation passed on port `7310`: first paint `2.11s`, Random prompt update `6.36s`, Generate dispatch `0.094s`; import audit reported `pyqt6_imported=False`, `legacy_desktop_imported=False`, `remote_api_server_imported=False`, and `middle_module_imports_count=0`.
+- Validation doc: `refactor_docs/round_49_modules_archive_validation.md`.
+
 ### When Done
 
 - Supported runtime tree no longer exposes Desktop App entrypoints.

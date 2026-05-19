@@ -8,7 +8,7 @@ from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.prompt_context import PromptContext
-from modules.conditional.runtime_snapshot import CharStateSnapshot
+from legacy_desktop.modules.conditional.runtime_snapshot import CharStateSnapshot
 from ui.theme import DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.modern_menu import setModernStyle
@@ -491,7 +491,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         """새 규칙 편집기 창을 띄운다. 단일 인스턴스로 재사용."""
         if self._rule_editor_window is None:
             try:
-                from modules.conditional.editor_window import RuleEditorWindow
+                from legacy_desktop.modules.conditional.editor_window import RuleEditorWindow
             except ImportError as e:
                 print(f"❌ 편집기 창 모듈 로드 실패: {e}")
                 return
@@ -666,11 +666,11 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         'v2' 로 전환한다. 레거시 `rules_textedit` 은 건드리지 않는다.
         `storage` 주입으로 테스트 격리 가능. 성공 시 True, 미존재 시 False.
         """
-        from modules.conditional.preset_io import (
+        from legacy_desktop.modules.conditional.preset_io import (
             get_default_storage,
             PresetStorage,
         )
-        from modules.conditional.dsl_serializer import serialize_rulebook
+        from legacy_desktop.modules.conditional.dsl_serializer import serialize_rulebook
 
         st = storage if isinstance(storage, PresetStorage) else get_default_storage()
         try:
@@ -704,8 +704,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         }
         실패 시 saved=False + error. 성공 시 raw_count 로 파서 성공률 확인 가능.
         """
-        from modules.conditional.dsl_parser import parse_rulebook
-        from modules.conditional.preset_io import (
+        from legacy_desktop.modules.conditional.dsl_parser import parse_rulebook
+        from legacy_desktop.modules.conditional.preset_io import (
             get_default_storage,
             PresetStorage,
         )

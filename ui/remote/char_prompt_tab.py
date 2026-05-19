@@ -24,7 +24,7 @@ from PyQt6.QtGui import QPixmap, QImage
 
 from ui.theme import DARK_COLORS, DARK_STYLES
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from modules.character_module import CharacterSearchDialog
+from legacy_desktop.modules.character_module import CharacterSearchDialog
 from utils.clipboard_image import qimage_from_clipboard
 
 

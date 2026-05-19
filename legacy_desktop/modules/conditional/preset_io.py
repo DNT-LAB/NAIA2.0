@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from modules.conditional.block_model import (
+from legacy_desktop.modules.conditional.block_model import (
     Action,
     ConditionNode,
     Rule,

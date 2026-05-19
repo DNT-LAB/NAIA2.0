@@ -21,6 +21,6 @@ The following Desktop App surfaces remain in the main source tree and should be 
 
 - PyQt tab/module wrappers under `tabs/`, `modules/`, and `ui/`
 
-Round 49B moved the desktop-only `core` controllers and helpers into `legacy_desktop/core/`. Remaining work is now concentrated on PyQt wrappers under `tabs/`, `modules/`, and `ui/`.
+Round 49B moved the desktop-only `core` controllers and helpers into `legacy_desktop/core/`. Round 49C moved tracked PyQt middle module wrappers from `modules/` into `legacy_desktop/modules/`.
 
-Known follow-up: some unarchived PyQt wrapper files still contain old `core.*` desktop-controller import names and should be moved as a package in the next UI-wrapper archive round. They are outside the supported headless import graph.
+Known follow-up: remaining work is concentrated on PyQt wrappers under `tabs/` and `ui/`. Some unarchived PyQt wrapper files still contain old `core.*` desktop-controller import names and should be moved as packages in the next UI-wrapper archive round. They are outside the supported headless import graph.

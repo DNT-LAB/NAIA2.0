@@ -7,5 +7,6 @@ Current archive contents:
 - `NAIA_cold_v4.py`: legacy PyQt Desktop App entrypoint.
 - `core/remote_api_server.py`: legacy Desktop-backed RemoteBridge/FastAPI bridge.
 - `core/*_controller.py`, `core/api_validator.py`, `core/comfyui_utils.py`, `core/ollama_service.py`: PyQt Desktop controllers and helper services that are no longer part of the supported `core/` runtime.
+- `modules/`: PyQt middle module wrappers and conditional editor UI. Supported headless module behavior lives in PyQt-free `core/*_settings.py`, `core/*_runtime.py`, and `WebSessionContext` instead.
 
 Supported Remote Web code must not import this package. Keep new headless behavior in `core/web_session_app.py`, `core/web_session_context.py`, and PyQt-free services under `core/`.

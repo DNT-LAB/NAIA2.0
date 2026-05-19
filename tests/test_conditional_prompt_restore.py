@@ -11,7 +11,7 @@ sys.modules.setdefault("piexif.helper", _piexif_helper)
 
 from legacy_desktop.core.generation_controller import GenerationController
 from core.prompt_context import PromptContext
-from modules.conditional_prompt_module import PromptListModifierModule
+from legacy_desktop.modules.conditional_prompt_module import PromptListModifierModule
 
 
 class _TextEdit:

@@ -39,7 +39,7 @@ def _get_loaded_middle_module(app_context, class_name: str):
 
 if TYPE_CHECKING:
     from core.context import AppContext
-    from modules.character_module import CharacterModule
+    from legacy_desktop.modules.character_module import CharacterModule
 
 class APIService:
     WEBUI_HIRES_ASSIST_MAX_PIXELS = 1536 * 1536

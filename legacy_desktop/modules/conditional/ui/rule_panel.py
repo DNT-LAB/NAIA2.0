@@ -32,18 +32,18 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from modules.conditional.block_model import (
+from legacy_desktop.modules.conditional.block_model import (
     Action,
     ConditionNode,
     Rule,
     make_tag_leaf,
 )
-from modules.conditional.ui.char_slot_combo import (
+from legacy_desktop.modules.conditional.ui.char_slot_combo import (
     CharSlotComboBox,
     get_character_slots,
 )
-from modules.conditional.ui.chip_list_widget import ChipListWidget
-from modules.conditional.ui.condition_editor import ConditionNodeEditor
+from legacy_desktop.modules.conditional.ui.chip_list_widget import ChipListWidget
+from legacy_desktop.modules.conditional.ui.condition_editor import ConditionNodeEditor
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.theme import DARK_COLORS
 

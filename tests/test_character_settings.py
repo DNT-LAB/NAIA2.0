@@ -10,7 +10,7 @@ from core.character_settings import (
     loaded_character_module_reroll_on_generate,
 )
 from core.prompt_context import PromptContext
-from modules.character_module import CharacterModule
+from legacy_desktop.modules.character_module import CharacterModule
 
 
 class _WildcardManager:

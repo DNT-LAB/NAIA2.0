@@ -19,7 +19,7 @@ import legacy_desktop.core.remote_api_server as remote_api_server
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from legacy_desktop.core.remote_api_server import RemoteBridge, WebSocketManager, create_app
 from core.search_result_model import SearchResultModel
-from modules.prompt_engineering_module import PromptEngineeringModule as RealPromptEngineeringModule
+from legacy_desktop.modules.prompt_engineering_module import PromptEngineeringModule as RealPromptEngineeringModule
 
 if "piexif" not in sys.modules:
     piexif_stub = types.ModuleType("piexif")

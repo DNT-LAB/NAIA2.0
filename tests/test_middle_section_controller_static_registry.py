@@ -96,7 +96,7 @@ class TargetModule(BaseMiddleModule):
 
 def test_checked_in_middle_module_registry_files_exist():
     for spec in middle_controller.MIDDLE_MODULE_SPECS:
-        assert (Path("modules") / f"{spec['file']}.py").is_file()
+        assert (Path("legacy_desktop/modules") / f"{spec['file']}.py").is_file()
 
 
 def test_web_session_lazy_registry_keeps_generation_modules_eager():

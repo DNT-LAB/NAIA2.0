@@ -358,7 +358,7 @@ def execute_pipeline_hook(self, stage: str, context: PromptContext) -> Any:
 #### 3. **모듈 등록**
 ```python
 # core/middle_section_controller.py 수정
-from modules.new_feature_module import NewFeatureModule
+from legacy_desktop.modules.new_feature_module import NewFeatureModule
 
 class MiddleSectionController:
     def create_modules(self):

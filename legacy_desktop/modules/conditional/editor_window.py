@@ -37,21 +37,21 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from modules.conditional.block_model import (
+from legacy_desktop.modules.conditional.block_model import (
     Action,
     Rule,
     RuleBook,
     make_tag_leaf,
 )
-from modules.conditional.dsl_parser import parse_rulebook
-from modules.conditional.dsl_serializer import serialize_rule, serialize_rulebook
-from modules.conditional.preset_io import (
+from legacy_desktop.modules.conditional.dsl_parser import parse_rulebook
+from legacy_desktop.modules.conditional.dsl_serializer import serialize_rule, serialize_rulebook
+from legacy_desktop.modules.conditional.preset_io import (
     PresetStorage,
     get_default_storage,
 )
-from modules.conditional.ui.preset_panel import PresetPanel
-from modules.conditional.ui.rule_list_panel import RuleListPanel
-from modules.conditional.ui.rule_panel import RulePanel
+from legacy_desktop.modules.conditional.ui.preset_panel import PresetPanel
+from legacy_desktop.modules.conditional.ui.rule_list_panel import RuleListPanel
+from legacy_desktop.modules.conditional.ui.rule_panel import RulePanel
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.theme import DARK_COLORS, get_dynamic_styles
 

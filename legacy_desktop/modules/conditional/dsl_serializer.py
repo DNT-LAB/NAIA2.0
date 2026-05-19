@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import List
 
-from modules.conditional.block_model import (
+from legacy_desktop.modules.conditional.block_model import (
     Action,
     ConditionNode,
     Rule,

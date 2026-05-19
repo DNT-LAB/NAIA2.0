@@ -13,6 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.web_session_context import WebSessionContext
 
 
@@ -76,6 +77,43 @@ async def _send_sync_messages(ws: WebSocket, context: WebSessionContext, client_
     ]
     for message in messages:
         await ws.send_text(json.dumps(message, ensure_ascii=False))
+
+
+def _active_ratings_from_command(command: dict[str, Any] | None) -> set[str] | None:
+    if not isinstance(command, dict):
+        return None
+    ratings = command.get("ratings")
+    if isinstance(ratings, str):
+        ratings = list(ratings)
+    if not isinstance(ratings, (list, tuple, set)):
+        return None
+    picked = {str(item).strip().lower() for item in ratings}
+    return {rating for rating in ("g", "s", "q", "e") if rating in picked} or None
+
+
+def _random_service(context: WebSessionContext) -> HeadlessRandomPromptService:
+    service = getattr(context, "headless_random_prompt_service", None)
+    if service is None:
+        service = HeadlessRandomPromptService(context)
+        context.headless_random_prompt_service = service
+    return service
+
+
+async def _handle_random_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    command: dict[str, Any] | None = None,
+) -> None:
+    command = command if isinstance(command, dict) else {}
+    overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
+    request_id = str(command.get("random_request_id") or command.get("requestId") or "")
+    result = await _to_thread(
+        _random_service(context).generate,
+        active_ratings=_active_ratings_from_command(command),
+        overrides=overrides,
+        random_request_id=request_id,
+    )
+    await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
 
 
 async def _handle_json_command(
@@ -182,7 +220,9 @@ async def _handle_json_command(
             "headless": True,
             "state": {},
         }, ensure_ascii=False))
-    elif command_type in {"random", "generate"}:
+    elif command_type == "random":
+        await _handle_random_command(ws, context, command)
+    elif command_type == "generate":
         await ws.send_text(json.dumps({
             "type": "toast",
             "level": "error",
@@ -205,7 +245,10 @@ async def _handle_text_command(
     if data == "sync":
         await _send_sync_messages(ws, context, client_host)
         return
-    if data in {"random", "generate"}:
+    if data == "random":
+        await _handle_random_command(ws, context)
+        return
+    if data == "generate":
         await ws.send_text(json.dumps({
             "type": "toast",
             "level": "error",

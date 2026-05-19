@@ -187,17 +187,39 @@ This is a startup/first-paint cutover point only. Random and Generate intentiona
 
 ### TODO Checklist
 
-- [ ] Route Remote Web random prompt requests directly to a core prompt generation service.
-- [ ] Ensure prompt engineering, conditional prompt, reference inset, wildcard, character, and filter logic run through core/headless hooks.
-- [ ] Remove `RemoteBridge._find_module()` or middle-module wakeups from the random prompt path.
-- [ ] Confirm loaded widget-less modules do not affect random prompt generation.
-- [ ] Add tests for random prompt generation with no PyQt widgets.
+- [x] Route Remote Web random prompt requests directly to a core prompt generation service.
+- [x] Ensure prompt engineering, conditional prompt, reference inset, wildcard, character, and filter logic run through core/headless hooks.
+- [x] Remove `RemoteBridge._find_module()` or middle-module wakeups from the random prompt path.
+- [x] Confirm loaded widget-less modules do not affect random prompt generation.
+- [x] Add tests for random prompt generation with no PyQt widgets.
 
 ### When Done
 
 - Random button updates the Remote Web prompt in the headless entrypoint.
 - Logs show no `MiddleSectionController.get_module_instance()` dependency for normal random prompt generation.
 - Random prompt behavior matches the current desktop-backed Web Session for the supported options.
+
+### Round 34 Result
+
+- Added `core.headless_random_prompt_service.HeadlessRandomPromptService`.
+- `core.web_session_app` now handles websocket `random` commands in the headless path and returns the existing `prompt_generated` / `random_failed` Remote Web payload contract.
+- `WebSessionContext` now owns headless prompt/search state: `search_results`, `search_results_snapshot`, `current_source_row`, `current_prompt_context`, `wildcard_manager`, `filter_data_manager`, and wildcard override state.
+- `PromptGenerationService` and `PromptProcessor` no longer import `core.context.AppContext` at runtime for type hints, keeping the headless app import path PyQt-free.
+- `PromptProcessor` can resolve `wildcard_manager` from `app_context.wildcard_manager`, falling back to desktop `main_window.wildcard_manager` only in the desktop path.
+- Headless random prompt generation lazy-registers prompt engineering, conditional prompt, reference inset, wildcard, settings-backed character, and filter services without constructing `RemoteBridge`, `MiddleSectionController`, `ModernMainWindow`, or `ImageWindow`.
+- Search rows are restored from headless context state, temp parquet, or the same fallback parquet source used by the desktop-backed Remote Web random path.
+- Focused tests prove websocket Random updates prompt text and a fresh process can perform a random prompt without importing `PyQt6`.
+- CDP validation on `http://127.0.0.1:7283/` confirmed:
+  - title: `NAIA Remote`
+  - readyState: `complete`
+  - `#btnRnd` present
+  - `#btnGen` present
+  - Random click updated the prompt with `#랜덤프롬프트`
+  - Random click elapsed time: about 2.3 seconds
+  - Random button unlocked after the prompt update
+- Static log scan for the headless Random run found no `MiddleSectionController`, `get_module_instance`, `RemoteBridge`, `ModernMainWindow`, `ImageWindow`, `not wired`, `NoneType`, error, or failure markers.
+
+Boundary for later rounds: the conditional prompt hook is now registered through the headless hook registry, but full legacy conditional rule parity should still be revalidated during the Round 38 desktop-only/module isolation pass because the historical implementation lives in a PyQt module.
 
 ## Round 35 - Widget-Free Generation Request Contract
 
@@ -257,6 +279,7 @@ This is a startup/first-paint cutover point only. Random and Generate intentiona
 - [ ] Move or document unsupported desktop-only surfaces in `not_implement/`.
 - [ ] Ensure the headless entrypoint does not scan/import desktop-only tabs/modules.
 - [ ] Keep optional web features behind explicit service boundaries.
+- [ ] Revalidate or extract full conditional prompt rule execution so enabled conditional rules do not require importing the PyQt module path.
 - [ ] Add an import audit test for the headless entrypoint.
 
 ### When Done

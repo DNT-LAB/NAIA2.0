@@ -15,8 +15,10 @@ from datetime import datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Protocol
+import weakref
 
 from core.api_config_service import ApiConfigService, CloudflaredService
+from core.search_result_model import SearchResultModel
 
 
 SUPPORTED_API_MODES = ("NAI", "WEBUI", "COMFYUI")
@@ -132,6 +134,13 @@ class WebSessionContext:
     autocomplete_state: AutocompleteRuntimeState = field(default_factory=AutocompleteRuntimeState)
     desktop_adapter: Any = None
     api_config_service: ApiConfigService | None = None
+    wildcard_manager: Any = None
+    tag_data_manager: Any = None
+    filter_data_manager: Any = None
+    search_results: SearchResultModel = field(default_factory=SearchResultModel)
+    search_results_snapshot: Any = None
+    current_source_row: Any = None
+    current_prompt_context: Any = None
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -142,9 +151,16 @@ class WebSessionContext:
         self.middle_section_controller = None
         self.remote_bridge = None
         self.remote_active_ratings = None
+        self.wildcard_override: dict[str, Any] = {}
+        self.prompt_squeeze_enabled = False
         self.pipeline_hooks: dict[str, dict[str, list[tuple[int, Any]]]] = {}
         self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.subscribers = self.event_bus.subscribers
+        if self.wildcard_manager is not None and getattr(self.wildcard_manager, "_app_context_ref", None) is None:
+            try:
+                self.wildcard_manager._app_context_ref = weakref.ref(self)
+            except TypeError:
+                pass
         if self.api_config_service is None:
             cloudflared = CloudflaredService(port=self.remote_params.get("web_session_port", 7243))
             cloudflared.set_status(

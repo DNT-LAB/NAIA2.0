@@ -1,13 +1,15 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
-from core.context import AppContext
 from core.prompt_context import PromptContext
 from core.prompt_processor import PromptProcessor
 from core.search_result_model import SearchResultModel
 from core.wildcard_processor import split_tags_smart
+
+if TYPE_CHECKING:
+    from core.context import AppContext
 
 
 @dataclass
@@ -29,7 +31,7 @@ class PromptSourcePreparation:
 class PromptGenerationService:
     """PyQt-free prompt generation core shared by desktop wrappers and Remote Web."""
 
-    def __init__(self, app_context: AppContext):
+    def __init__(self, app_context: "AppContext"):
         self.app_context = app_context
         self._processor = None
 

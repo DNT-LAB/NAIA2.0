@@ -4,11 +4,19 @@ import subprocess
 import sys
 
 from fastapi.testclient import TestClient
+import pandas as pd
 
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.api_verification import VerifyResult
+from core.search_result_model import SearchResultModel
 from core.web_session_app import create_headless_app
 from core.web_session_context import InMemoryTokenManager, WebSessionContext
+
+
+class _WildcardManager:
+    wildcard_dict_tree = {}
+    instant_wildcard_tree = {}
+    instant_wildcard_dict = {}
 
 
 def test_headless_app_import_and_factory_do_not_import_pyqt_in_fresh_process():
@@ -38,13 +46,108 @@ print(json.dumps({
         capture_output=True,
         check=True,
     )
-    payload = json.loads(result.stdout)
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
 
     assert payload == {
         "pyqt_imported": False,
         "title": "NAIA Remote Headless",
         "main_window": True,
         "entrypoint": "NAIA_web_headless",
+    }
+
+
+def test_headless_websocket_random_generates_prompt_from_core_service():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager(),
+        wildcard_manager=_WildcardManager(),
+        filter_data_manager=False,
+        search_results=SearchResultModel(pd.DataFrame([
+            {"general": "alpha, beta", "rating": "s"},
+        ])),
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "random",
+            "random_request_id": "round34-random",
+            "ratings": ["s"],
+            "overrides": {"auto_generate": False},
+        })
+        message = ws.receive_json()
+
+    assert message["type"] == "prompt_generated"
+    assert message["source"] == "random"
+    assert message["random_request_id"] == "round34-random"
+    assert "alpha" in message["prompt"]
+    assert "beta" in message["prompt"]
+    assert message["remaining"] == 0
+    assert context.prompt_text == message["prompt"]
+    assert context.main_window is None
+    assert context.remote_bridge is None
+
+
+def test_headless_websocket_random_does_not_import_pyqt_in_fresh_process():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    code = r"""
+import json
+import sys
+import pandas as pd
+from fastapi.testclient import TestClient
+from core.search_result_model import SearchResultModel
+from core.web_session_app import create_headless_app
+from core.web_session_context import InMemoryTokenManager, WebSessionContext
+
+class WildcardManager:
+    wildcard_dict_tree = {}
+    instant_wildcard_tree = {}
+    instant_wildcard_dict = {}
+
+context = WebSessionContext(
+    token_manager=InMemoryTokenManager(),
+    wildcard_manager=WildcardManager(),
+    filter_data_manager=False,
+    search_results=SearchResultModel(pd.DataFrame([
+        {"general": "fresh alpha, fresh beta", "rating": "s"},
+    ])),
+)
+app = create_headless_app(context)
+client = TestClient(app)
+with client.websocket_connect("/ws") as ws:
+    for _ in range(9):
+        ws.receive_json()
+    ws.send_json({"type": "random", "random_request_id": "fresh-random", "ratings": ["s"]})
+    message = ws.receive_json()
+print(json.dumps({
+    "pyqt_imported": "PyQt6" in sys.modules,
+    "type": message.get("type"),
+    "source": message.get("source"),
+    "has_prompt": "fresh alpha" in message.get("prompt", ""),
+    "main_window": context.main_window is None,
+    "remote_bridge": context.remote_bridge is None,
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert payload == {
+        "pyqt_imported": False,
+        "type": "prompt_generated",
+        "source": "random",
+        "has_prompt": True,
+        "main_window": True,
+        "remote_bridge": True,
     }
 
 

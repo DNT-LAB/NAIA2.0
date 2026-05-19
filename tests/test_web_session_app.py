@@ -5,6 +5,7 @@ import sys
 
 from fastapi.testclient import TestClient
 import pandas as pd
+from PIL import Image
 
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.api_verification import VerifyResult
@@ -298,6 +299,7 @@ def test_headless_websocket_probe_and_cloudflared_state(tmp_path):
 def test_headless_websocket_generate_normalizes_nai_request_without_desktop_widgets():
     context = WebSessionContext(
         token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
     )
     app = create_headless_app(context)
     client = TestClient(app)
@@ -350,6 +352,7 @@ def test_headless_websocket_generate_normalizes_nai_request_without_desktop_widg
 def test_headless_websocket_generate_normalizes_webui_request_contract():
     context = WebSessionContext(
         token_manager=InMemoryTokenManager({"webui_url": "http://127.0.0.1:7860"}),
+        headless_generation_execute_enabled=False,
     )
     context.set_api_mode("WEBUI")
     app = create_headless_app(context)
@@ -428,7 +431,10 @@ from fastapi.testclient import TestClient
 from core.web_session_app import create_headless_app
 from core.web_session_context import InMemoryTokenManager, WebSessionContext
 
-context = WebSessionContext(token_manager=InMemoryTokenManager({"nai_token": "pst-token"}))
+context = WebSessionContext(
+    token_manager=InMemoryTokenManager({"nai_token": "pst-token"}),
+    headless_generation_execute_enabled=False,
+)
 app = create_headless_app(context)
 client = TestClient(app)
 with client.websocket_connect("/ws") as ws:
@@ -472,3 +478,117 @@ print(json.dumps({
         "main_window": True,
         "remote_bridge": True,
     }
+
+
+class _FakeApiService:
+    def __init__(self):
+        self.calls = []
+
+    def call_generation_api(self, params, progress_callback=None):
+        self.calls.append(dict(params))
+        image = Image.new("RGB", (16, 12), (12, 34, 56))
+        return {
+            "status": "success",
+            "image": image,
+        }
+
+
+def test_headless_generate_executes_result_store_and_history_without_imagewindow():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+    )
+    context.api_service = _FakeApiService()
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "generate",
+            "prompt": "result prompt",
+            "negative_prompt": "result negative",
+            "overrides": {"resolution": "16 x 12", "seed": 123, "seed_fixed": True},
+        })
+        dispatched = ws.receive_json()
+        queued_status = ws.receive_json()
+        queued_state = ws.receive_json()
+        running_status = ws.receive_json()
+        running_state = ws.receive_json()
+        completed_status = ws.receive_json()
+        image_meta = ws.receive_json()
+        webp_bytes = ws.receive_bytes()
+        history_message = ws.receive_json()
+        final_state = ws.receive_json()
+
+    assert dispatched["ok"] is True
+    assert queued_status["message"] == "queued"
+    assert queued_state["total"] == 1
+    assert running_status == {"type": "status", "is_generating": True, "message": "generating"}
+    assert running_state["total"] == 0
+    assert completed_status == {"type": "status", "is_generating": False, "message": "completed"}
+    assert image_meta["type"] == "image_meta"
+    assert image_meta["width"] == 16
+    assert image_meta["height"] == 12
+    assert image_meta["prompt"] == "result prompt"
+    assert webp_bytes.startswith(b"RIFF")
+    assert history_message["type"] == "viewer_new_image"
+    assert history_message["rel_path"].startswith("__history_item__/")
+    assert history_message["total"] == 1
+    assert final_state["type"] == "queue_state"
+    assert final_state["total"] == 0
+    assert context.main_window is None
+    assert context.remote_bridge is None
+
+    latest = client.get("/api/latest-image")
+    assert latest.status_code == 200
+    assert latest.headers["content-type"].startswith("image/webp")
+    assert latest.content.startswith(b"RIFF")
+
+    png = client.get("/api/result/image/png")
+    assert png.status_code == 200
+    assert png.headers["content-type"].startswith("image/png")
+    assert png.content.startswith(b"\x89PNG")
+
+    history = client.get("/api/history/list")
+    assert history.status_code == 200
+    history_payload = history.json()
+    assert history_payload["total"] == 1
+    history_id = history_payload["images"][0]["history_id"]
+
+    thumb = client.get(f"/api/history/thumb/{history_id}")
+    assert thumb.status_code == 200
+    assert thumb.content.startswith(b"RIFF")
+
+    image = client.get(f"/api/history/image/{history_id}")
+    assert image.status_code == 200
+    assert image.headers["content-type"].startswith("image/png")
+
+    meta = client.get(f"/api/history/meta/{history_id}?full=true")
+    assert meta.status_code == 200
+    assert meta.json()["prompt"] == "result prompt"
+
+
+def test_api_service_import_does_not_import_pyqt_in_fresh_process():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    code = r"""
+import json
+import sys
+from core.api_service import APIService
+print(json.dumps({
+    "pyqt_imported": "PyQt6" in sys.modules,
+    "api_service": APIService.__name__,
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert payload == {"pyqt_imported": False, "api_service": "APIService"}

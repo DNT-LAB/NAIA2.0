@@ -21,6 +21,7 @@ from core.generation_request import (
     NAICharacterReferenceData,
     NAIVibeTransferData,
 )
+from core.headless_result_service import HeadlessStoredResult
 from core.web_session_context import WebSessionContext
 
 
@@ -140,6 +141,43 @@ class HeadlessGenerationService:
             flush=True,
         )
         return HeadlessGenerationDispatch(request=request, api_mode=api_mode)
+
+    def execute_request(self, request: GenerationRequest) -> HeadlessStoredResult:
+        """Execute one queued request and store its result in server state."""
+
+        params = dict(request.params or {})
+        params["_generation_request"] = request
+        request.mark_processing()
+        api_service = self._api_service()
+        api_result = api_service.call_generation_api(params)
+        if api_result.get("status") == "error":
+            error_message = str(api_result.get("message") or "Unknown API error")
+            request.mark_failed(error_message)
+            raise RuntimeError(error_message)
+        api_result["generation_params"] = params
+        api_result["source_row"] = request.source_row
+        stored = self.context.result_store.add_api_result(api_result, request)
+        request.mark_completed()
+        self.context.publish("generation_result_available", {
+            "request_id": request.request_id,
+            "api_mode": params.get("api_mode", ""),
+        })
+        print(
+            "Headless Remote: generation completed "
+            f"id={request.request_id[:8]} mode={params.get('api_mode', '')} "
+            f"size={stored.item.image.width}x{stored.item.image.height}",
+            flush=True,
+        )
+        return stored
+
+    def _api_service(self):
+        service = getattr(self.context, "api_service", None)
+        if service is None:
+            from core.api_service import APIService
+
+            service = APIService(self.context)
+            self.context.api_service = service
+        return service
 
     def _normalize_mode(self, command: dict[str, Any]) -> str:
         overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else {}

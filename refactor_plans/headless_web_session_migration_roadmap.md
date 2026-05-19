@@ -25,7 +25,9 @@ Round 34 is complete: Random prompt requests now run through a PyQt-free core/he
 
 Round 35 is complete: Generate requests now normalize into queue-ready `GenerationRequest` objects from Remote Web payload plus server state without reading desktop widgets.
 
-The full Headless Web Session migration is not complete yet. The new headless entrypoint intentionally does not execute image API calls, results, history, or optional modules. Rounds 36-39 remain the concrete cutover work needed before the roadmap can be marked complete.
+Round 36 is complete: the headless path can execute a queued NAI generation request, encode the result to WebP for Remote Web, expose PNG export/latest-image endpoints, and maintain in-memory history without `ImageWindow`.
+
+The full Headless Web Session migration is not complete yet. Optional modules, RemoteBridge decomposition, desktop-only isolation, and final performance/cutover review remain. Rounds 37-39 are the concrete cutover work needed before the roadmap can be marked complete.
 
 ## Final Target
 
@@ -264,11 +266,11 @@ Boundary for later rounds: Round 35 queues a normalized generation request but d
 
 ### TODO Checklist
 
-- [ ] Add or isolate a PyQt-free `ResultStore`.
-- [ ] Add or isolate a PyQt-free `GenerationHistoryStore`.
-- [ ] Add or isolate image save and PNG-to-WEBP conversion services.
-- [ ] Broadcast generation result, save result, and history changes from server state.
-- [ ] Make `ImageWindow` a desktop consumer of result/history state instead of the owner.
+- [x] Add or isolate a PyQt-free `ResultStore`.
+- [x] Add or isolate a PyQt-free `GenerationHistoryStore`.
+- [x] Add or isolate image save and PNG-to-WEBP conversion services.
+- [x] Broadcast generation result, save result, and history changes from server state.
+- [x] Make `ImageWindow` a desktop consumer of result/history state instead of the owner.
 
 ### When Done
 
@@ -276,6 +278,38 @@ Boundary for later rounds: Round 35 queues a normalized generation request but d
 - Image save and PNG-to-WEBP return paths work without `ImageWindow`.
 - History updates appear in Remote Web after generation.
 - Desktop result tab behavior remains compatible.
+
+### Round 36 Result
+
+- Added `core.headless_result_service.HeadlessResultStore`.
+- `WebSessionContext` now owns PyQt-free result/history state and headless generation execution flags.
+- `HeadlessGenerationService` can execute a queued `GenerationRequest` through `APIService`, store the generated image, and publish completion state without `GenerationWorker(QObject)`.
+- `core.api_service` no longer imports `PyQt6` at module import time; Qt-only cleanup/upscale paths lazy-import Qt inside those desktop-only methods.
+- `core.web_session_app` now owns a PyQt-free generation runner that:
+  - dequeues normalized requests,
+  - broadcasts `status` and `queue_state`,
+  - broadcasts `image_meta` plus a binary WebP frame,
+  - broadcasts `viewer_new_image` for Remote Web history.
+- The headless FastAPI app now serves:
+  - `/api/latest-image`
+  - `/api/result/image/png`
+  - `/api/result/metadata`
+  - `/api/history/list`
+  - `/api/history/image/{history_id}`
+  - `/api/history/thumb/{history_id}`
+  - `/api/history/meta/{history_id}`
+- Focused tests cover fake API execution, WebP preview bytes, PNG export, latest-image, history list/image/thumb/meta, and fresh-process `APIService` import with no `PyQt6`.
+- CDP validation on `http://127.0.0.1:7285/` performed an actual Remote Web Generate button click through stored NAI configuration and confirmed:
+  - websocket `generate` was sent by the real UI,
+  - `generation_dispatched`, `status`, and `queue_state` were returned,
+  - NAI API execution completed in the headless server,
+  - Remote Web received `image_meta` and a binary WebP frame,
+  - the preview rendered a `blob:` image at `832x1216`,
+  - `/api/latest-image` returned `image/webp`,
+  - history count became `1`,
+  - no `not wired`, `RemoteBridge`, `ModernMainWindow`, `ImageWindow`, `MiddleSectionController`, `NoneType`, traceback, or error marker appeared in the validation logs.
+
+Boundary for later rounds: Round 36 validates NAI result execution. WEBUI and COMFYUI request normalization exists, but their full headless execution parity still depends on remaining API/workflow isolation and should be rechecked during Round 37-39.
 
 ## Round 37 - RemoteBridge Decomposition
 

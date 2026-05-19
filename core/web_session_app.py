@@ -13,6 +13,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from core import result_image_payload_service as result_images
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.web_session_context import WebSessionContext
@@ -80,6 +81,31 @@ async def _send_sync_messages(ws: WebSocket, context: WebSessionContext, client_
         await ws.send_text(json.dumps(message, ensure_ascii=False))
 
 
+async def _broadcast_json(clients: set[WebSocket], data: dict[str, Any]) -> None:
+    text = json.dumps(data, ensure_ascii=False)
+    dead = []
+    for client in list(clients):
+        try:
+            await client.send_text(text)
+        except Exception:
+            dead.append(client)
+    for client in dead:
+        clients.discard(client)
+
+
+async def _broadcast_image(clients: set[WebSocket], webp_bytes: bytes, metadata: dict[str, Any]) -> None:
+    meta_text = json.dumps({"type": "image_meta", **metadata}, ensure_ascii=False)
+    dead = []
+    for client in list(clients):
+        try:
+            await client.send_text(meta_text)
+            await client.send_bytes(webp_bytes)
+        except Exception:
+            dead.append(client)
+    for client in dead:
+        clients.discard(client)
+
+
 def _active_ratings_from_command(command: dict[str, Any] | None) -> set[str] | None:
     if not isinstance(command, dict):
         return None
@@ -128,6 +154,7 @@ async def _handle_random_command(
 async def _handle_generate_command(
     ws: WebSocket,
     context: WebSessionContext,
+    clients: set[WebSocket],
     command: dict[str, Any] | None = None,
 ) -> None:
     command = command if isinstance(command, dict) else {}
@@ -151,11 +178,54 @@ async def _handle_generate_command(
         "message": "queued",
     }, ensure_ascii=False))
     await ws.send_text(json.dumps(context.queue_state_payload(), ensure_ascii=False))
+    if context.headless_generation_execute_enabled:
+        _ensure_generation_runner(context, clients)
+
+
+def _ensure_generation_runner(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    task = getattr(context, "headless_generation_runner_task", None)
+    if task is not None and not task.done():
+        return
+    context.headless_generation_runner_task = asyncio.create_task(_run_generation_queue(context, clients))
+
+
+async def _run_generation_queue(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    if getattr(context, "headless_generation_runner_active", False):
+        return
+    context.headless_generation_runner_active = True
+    try:
+        while True:
+            request = await _to_thread(context.generation_queue_manager.dequeue_request)
+            if request is None:
+                break
+            context.is_generating = True
+            await _broadcast_json(clients, {"type": "status", "is_generating": True, "message": "generating"})
+            await _broadcast_json(clients, context.queue_state_payload())
+            try:
+                stored = await _to_thread(_generation_service(context).execute_request, request)
+            except Exception as exc:
+                context.is_generating = False
+                message = str(exc)
+                await _broadcast_json(clients, {"type": "status", "is_generating": False, "message": "error"})
+                await _broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
+                await _broadcast_json(clients, {"type": "generation_error", "message": message})
+                await _broadcast_json(clients, context.queue_state_payload())
+                continue
+
+            context.is_generating = False
+            await _broadcast_json(clients, {"type": "status", "is_generating": False, "message": "completed"})
+            await _broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
+            await _broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+            await _broadcast_json(clients, context.queue_state_payload())
+    finally:
+        context.is_generating = False
+        context.headless_generation_runner_active = False
 
 
 async def _handle_json_command(
     ws: WebSocket,
     context: WebSessionContext,
+    clients: set[WebSocket],
     client_host: str,
     command: dict[str, Any],
 ) -> None:
@@ -260,7 +330,7 @@ async def _handle_json_command(
     elif command_type == "random":
         await _handle_random_command(ws, context, command)
     elif command_type == "generate":
-        await _handle_generate_command(ws, context, command)
+        await _handle_generate_command(ws, context, clients, command)
     else:
         await ws.send_text(json.dumps({
             "type": "toast",
@@ -272,6 +342,7 @@ async def _handle_json_command(
 async def _handle_text_command(
     ws: WebSocket,
     context: WebSessionContext,
+    clients: set[WebSocket],
     client_host: str,
     data: str,
 ) -> None:
@@ -282,7 +353,7 @@ async def _handle_text_command(
         await _handle_random_command(ws, context)
         return
     if data == "generate":
-        await _handle_generate_command(ws, context)
+        await _handle_generate_command(ws, context, clients)
         return
     await ws.send_text(json.dumps({
         "type": "toast",
@@ -305,6 +376,7 @@ def create_headless_app(
     session_context = context or WebSessionContext()
     app = FastAPI(title="NAIA Remote Headless")
     app.state.web_session_context = session_context
+    app.state.headless_clients = set()
 
     root_web_dir = Path(web_dir) if web_dir is not None else Path(__file__).resolve().parent.parent / "ui" / "remote_web"
     mimetypes.add_type("text/javascript", ".mjs")
@@ -346,11 +418,67 @@ def create_headless_app(
 
     @app.get("/api/latest-image")
     async def api_latest_image():
-        return JSONResponse({"error": "No image generated yet"}, status_code=404)
+        try:
+            image_bytes, media_type = session_context.result_store.latest_image_payload()
+        except FileNotFoundError:
+            return JSONResponse({"error": "No image generated yet"}, status_code=404)
+        return Response(
+            content=image_bytes,
+            media_type=media_type,
+            headers={"Content-Disposition": result_images.download_content_disposition("naia_latest.webp")},
+        )
+
+    @app.get("/api/result/image/png")
+    async def api_result_image_png():
+        try:
+            png_bytes, filename = session_context.result_store.current_png_payload()
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers={"Content-Disposition": result_images.download_content_disposition(filename)},
+        )
+
+    @app.get("/api/result/metadata")
+    async def api_result_metadata():
+        payload = session_context.result_store.latest_metadata_payload
+        if payload is None:
+            return JSONResponse({"error": "No image generated yet"}, status_code=404)
+        return payload
+
+    @app.get("/api/history/list")
+    async def api_history_list(page: int = 0, per_page: int = 30):
+        return session_context.result_store.history_list(page=page, per_page=per_page)
+
+    @app.get("/api/history/image/{history_id}")
+    async def api_history_image(history_id: str):
+        try:
+            image_bytes, media_type = session_context.result_store.history_image_payload(history_id)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return Response(content=image_bytes, media_type=media_type)
+
+    @app.get("/api/history/thumb/{history_id}")
+    async def api_history_thumb(history_id: str, size: int = 0):
+        try:
+            thumb_bytes = session_context.result_store.history_thumb_payload(history_id, size)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return Response(content=thumb_bytes, media_type="image/webp")
+
+    @app.get("/api/history/meta/{history_id}")
+    async def api_history_meta(history_id: str, full: bool = False):
+        try:
+            return session_context.result_store.history_meta_payload(history_id, include_full=full)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
 
     @app.websocket("/ws")
     async def websocket_endpoint(ws: WebSocket):
         await ws.accept()
+        clients: set[WebSocket] = app.state.headless_clients
+        clients.add(ws)
         session_id = uuid.uuid4().hex[:8]
         client_host = _client_host(ws)
         try:
@@ -368,13 +496,16 @@ def create_headless_app(
                     except json.JSONDecodeError:
                         command = {"type": ""}
                     if isinstance(command, dict):
-                        await _handle_json_command(ws, session_context, client_host, command)
+                        await _handle_json_command(ws, session_context, clients, client_host, command)
                     else:
-                        await _handle_text_command(ws, session_context, client_host, data)
+                        await _handle_text_command(ws, session_context, clients, client_host, data)
                 else:
-                    await _handle_text_command(ws, session_context, client_host, data)
+                    await _handle_text_command(ws, session_context, clients, client_host, data)
         except WebSocketDisconnect:
+            clients.discard(ws)
             return
+        finally:
+            clients.discard(ws)
 
     return app
 

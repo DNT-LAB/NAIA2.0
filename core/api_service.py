@@ -10,8 +10,6 @@ from pathlib import Path
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from typing import Dict, Any, TYPE_CHECKING, List
-from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtCore import QCoreApplication, QThreadPool
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.resolution_utils import (
@@ -81,6 +79,8 @@ class APIService:
             
             # Qt 스레드 풀 정리
             try:
+                from PyQt6.QtCore import QThreadPool
+
                 thread_pool = QThreadPool.globalInstance()
                 thread_pool.clear()
                 thread_pool.waitForDone(100)
@@ -92,7 +92,12 @@ class APIService:
             
             # Qt 이벤트 루프 처리
             for _ in range(2):
-                QCoreApplication.processEvents()
+                try:
+                    from PyQt6.QtCore import QCoreApplication
+
+                    QCoreApplication.processEvents()
+                except Exception:
+                    break
         except Exception:
             pass
 
@@ -1932,6 +1937,7 @@ class APIService:
         """
         import zipfile
         from PyQt6.QtCore import QBuffer, QIODevice
+        from PyQt6.QtGui import QPixmap
         
         try:
             # 토큰 가져오기

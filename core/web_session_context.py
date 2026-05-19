@@ -18,6 +18,7 @@ from typing import Any, Callable, Protocol
 import weakref
 
 from core.api_config_service import ApiConfigService, CloudflaredService
+from core.headless_result_service import HeadlessResultStore
 from core.search_result_model import SearchResultModel
 
 
@@ -141,6 +142,8 @@ class WebSessionContext:
     search_results_snapshot: Any = None
     current_source_row: Any = None
     current_prompt_context: Any = None
+    result_store: HeadlessResultStore = field(default_factory=HeadlessResultStore)
+    headless_generation_execute_enabled: bool = True
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -150,6 +153,11 @@ class WebSessionContext:
         self.main_window = None
         self.middle_section_controller = None
         self.remote_bridge = None
+        self.api_service = None
+        self.temp_window_mode = False
+        self.temp_window_character_tab = None
+        self.session_p_eng_override = None
+        self.scoped_wildcard = None
         self.remote_active_ratings = None
         self.wildcard_override: dict[str, Any] = {}
         self.prompt_squeeze_enabled = False
@@ -170,6 +178,7 @@ class WebSessionContext:
             )
             self.api_config_service = ApiConfigService(self.secure_token_manager, cloudflared=cloudflared)
         self.generation_queue_manager = self._create_queue_manager()
+        self.last_api_payloads: dict[str, Any] = {}
 
     def _default_token_manager(self) -> TokenStore:
         from core.secure_token_manager import SecureTokenManager
@@ -339,6 +348,9 @@ class WebSessionContext:
         self.cloudflared_status_text = str(status.get("status_text") or "")
         self.publish("cloudflared_status_changed", status)
         return result
+
+    def store_api_payload(self, payload: dict, mode: str) -> None:
+        self.last_api_payloads[str(mode or "").upper()] = payload
 
     @staticmethod
     def _is_loopback_host(host: str) -> bool:

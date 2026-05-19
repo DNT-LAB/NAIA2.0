@@ -10,5 +10,6 @@ Current archive contents:
 - `modules/`: PyQt middle module wrappers and conditional editor UI. Supported headless module behavior lives in PyQt-free `core/*_settings.py`, `core/*_runtime.py`, and `WebSessionContext` instead.
 - `tabs/`: PyQt tab modules. Supported Remote Web tab behavior is served by headless FastAPI services and `ui/remote_web`.
 - Event Preset data/engine helpers have been extracted to supported `core/event_preset/`; legacy PyQt windows should import those helpers instead of owning server-side logic.
+- Clothes and Expression Preset server assets have been extracted to supported `core/clothes_preset/` and `core/expression_preset/`.
 
 Supported Remote Web code must not import this package. Keep new headless behavior in `core/web_session_app.py`, `core/web_session_context.py`, and PyQt-free services under `core/`.

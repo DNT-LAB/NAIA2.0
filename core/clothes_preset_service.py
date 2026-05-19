@@ -69,7 +69,7 @@ class ClothesPresetService:
 
     def __init__(self, repo_root: Path | str):
         self.repo_root = Path(repo_root)
-        self.data_path = self.repo_root / "ui" / "clothes_preset"
+        self.data_path = self.repo_root / "core" / "clothes_preset"
         self.translation_path = self.data_path / "clothes_preset_translations_ko.json"
         self.kr_tags_path = self.repo_root / "data" / "KR_tags.parquet"
         self._lock = threading.RLock()

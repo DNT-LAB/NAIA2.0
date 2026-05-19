@@ -17,6 +17,7 @@ Physically move the first Desktop App entrypoints out of the supported runtime t
 - [x] Move PyQt middle module wrappers from `modules/`.
 - [x] Move PyQt tab wrappers from `tabs/`.
 - [x] Extract Event Preset headless data/engine helpers from `ui/` before moving PyQt UI wrappers.
+- [x] Extract Clothes/Expression Preset headless assets from `ui/` before moving PyQt UI wrappers.
 - [ ] Move or retire remaining PyQt UI wrappers from `ui/`.
 
 ## When Done
@@ -95,3 +96,19 @@ When done for this extraction:
 - Supported `core.event_preset_service` no longer imports `ui.event_preset.*`.
 - Event Preset data path prefers `data/event_preset/naia_prompt_preset` and falls back to the legacy local `ui/event_preset/naia_prompt_preset` ZIP if present.
 - Remaining root `ui/` imports are PyQt UI wrappers, not supported headless service dependencies.
+
+## Round 49F Headless Preset Asset Extraction
+
+Moved Clothes and Expression Preset server assets out of `ui/`:
+
+- `ui/clothes_preset/data_manager.py` -> `core/clothes_preset/data_manager.py`
+- `ui/clothes_preset/engines.py` -> `core/clothes_preset/engines.py`
+- `ui/clothes_preset/clothes_preset_translations_ko.json` -> `core/clothes_preset/clothes_preset_translations_ko.json`
+- `ui/clothes_preset/naia_clothes_preset` -> `core/clothes_preset/naia_clothes_preset`
+- `ui/expression_preset/expression_catalog.json` -> `core/expression_preset/expression_catalog.json`
+
+When done for this extraction:
+
+- `core.clothes_preset_service` loads data/runtime modules from `core/clothes_preset`.
+- `core.expression_preset_service` reads `core/expression_preset/expression_catalog.json`.
+- Supported headless app creation imports no `ui`, `PyQt6`, or `legacy_desktop` modules.

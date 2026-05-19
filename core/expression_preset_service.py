@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-CATALOG_RELATIVE_PATH = Path("ui") / "expression_preset" / "expression_catalog.json"
+CATALOG_RELATIVE_PATH = Path("core") / "expression_preset" / "expression_catalog.json"
 
 _EXPR_MODIFIERS: set[str] = {
     "blush",
@@ -24,7 +24,7 @@ _EXPR_MODIFIERS: set[str] = {
     "raised eyebrows",
 }
 
-# Ported from ui/clothes_preset/engines.py. Keep order aligned with Desktop.
+# Ported from core/clothes_preset/engines.py. Keep order aligned with Desktop.
 EXPRESSION_GROUPS: list[tuple[str, str, set[str]]] = [
     ("tears", "tears", {"tears", "crying", "crying with eyes open", "tearing up"}),
     ("angry", "angry", {"angry", "frown", "light frown", "annoyed", "defeat"}),

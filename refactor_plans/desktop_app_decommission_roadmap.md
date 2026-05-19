@@ -311,6 +311,7 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - [x] Move or delete `core.middle_section_controller.py`, `core.tab_controller.py`, `core.main_controller.py`, and desktop-only controllers.
 - [x] Move or delete PyQt-only `tabs/` and `modules/` files that are not part of a separate package.
 - [x] Extract headless Event Preset helpers out of `ui/` before the UI wrapper archive.
+- [x] Extract headless Clothes/Expression Preset assets out of `ui/` before the UI wrapper archive.
 - [ ] Move or delete remaining PyQt-only `ui/` files that are not part of a separate package.
 - [x] Update imports and tests after the move.
 - [ ] Update docs so Desktop App is no longer presented as supported.
@@ -356,6 +357,14 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - Updated `core.event_preset_service`, `core.preset_composer_service`, and remaining PyQt UI callers to import the extracted core helpers.
 - Preserved compatibility with the existing local `ui/event_preset/naia_prompt_preset` ZIP while preferring the future `data/event_preset/naia_prompt_preset` data location.
 - Deferred: archive the remaining PyQt `ui/` wrappers after this dependency split is validated.
+
+### Round 49F Result
+
+- Moved server-used Clothes Preset data/engine code and bundled package into `core/clothes_preset/`.
+- Moved the Expression Preset JSON catalog into `core/expression_preset/`.
+- Updated Clothes and Expression server services to read from `core/` instead of `ui/`.
+- Updated the remaining PyQt Clothes window/widget imports to use the extracted core helpers.
+- Deferred: archive remaining PyQt-only `ui/` wrappers while preserving `ui/remote_web` static assets.
 
 ### When Done
 

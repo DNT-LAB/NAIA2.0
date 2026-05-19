@@ -46,7 +46,7 @@ from PyQt6.QtWidgets import (
 from ui.theme import DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
-from .data_manager import (
+from core.clothes_preset.data_manager import (
     PACKAGE_FILE_NAME,
     ClothesPresetDataManager,
     ComboSummary,
@@ -57,7 +57,7 @@ from .data_manager import (
     unique_preserve,
 )
 from .download_worker import ClothesPresetDownloadDialog, ClothesPresetDownloadWorker
-from .engines import (
+from core.clothes_preset.engines import (
     DISPLAY_SLOTS,
     MAX_COMBO_ROWS_DISPLAY,
     MAX_ROWS_PER_REGION,
@@ -82,7 +82,7 @@ from .widgets import (
 # 데이터 경로
 # ---------------------------------------------------------------------------
 
-DATA_DIR = Path(__file__).resolve().parent
+DATA_DIR = Path(__file__).resolve().parents[2] / "core" / "clothes_preset"
 DATA_ZIP_PATH = DATA_DIR / PACKAGE_FILE_NAME
 _EMPTY_FSET: frozenset[int] = frozenset()  # 호환성 필터용 빈 집합 센티널
 

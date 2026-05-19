@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 
 from ui.theme import DARK_COLORS
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from .data_manager import ComboSummary, fmt_k_count
+from core.clothes_preset.data_manager import ComboSummary, fmt_k_count
 
 
 # ---------------------------------------------------------------------------

@@ -656,3 +656,95 @@ print(json.dumps({
     assert "viewer_new_image" in payload["seen"]
     assert payload["blob_seen"] is True
     assert payload["history_total"] == 1
+
+
+def test_headless_startup_random_and_generate_do_not_import_desktop_tabs_or_modules_in_fresh_process():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    code = r"""
+import json
+import sys
+import pandas as pd
+from fastapi.testclient import TestClient
+from PIL import Image
+from core.search_result_model import SearchResultModel
+from core.web_session_app import create_headless_app
+from core.web_session_context import InMemoryTokenManager, WebSessionContext
+
+class WildcardManager:
+    wildcard_dict_tree = {}
+    instant_wildcard_tree = {}
+    instant_wildcard_dict = {}
+
+class FakeApiService:
+    def call_generation_api(self, params, progress_callback=None):
+        return {"status": "success", "image": Image.new("RGB", (8, 8), (4, 5, 6))}
+
+context = WebSessionContext(
+    token_manager=InMemoryTokenManager({"nai_token": "pst-token"}),
+    wildcard_manager=WildcardManager(),
+    filter_data_manager=False,
+    search_results=SearchResultModel(pd.DataFrame([
+        {"general": "audit alpha, audit beta", "rating": "s"},
+    ])),
+)
+context.api_service = FakeApiService()
+app = create_headless_app(context)
+client = TestClient(app)
+with client.websocket_connect("/ws") as ws:
+    for _ in range(9):
+        ws.receive_json()
+    ws.send_json({"type": "random", "ratings": ["s"], "random_request_id": "audit-random"})
+    random_msg = ws.receive_json()
+    ws.send_json({"type": "generate", "prompt": random_msg.get("prompt", ""), "overrides": {"resolution": "8 x 8"}})
+    blob_seen = False
+    seen = []
+    for _ in range(12):
+        message = ws.receive()
+        if "text" in message:
+            payload = json.loads(message["text"])
+            seen.append(payload.get("type"))
+            if payload.get("type") == "viewer_new_image":
+                break
+        elif "bytes" in message:
+            blob_seen = True
+
+forbidden = [
+    "PyQt6",
+    "core.remote_api_server",
+    "core.middle_section_controller",
+    "core.tab_controller",
+    "modules.character_module",
+    "modules.prompt_engineering_module",
+    "modules.conditional_prompt_module",
+    "tabs.turbo_event_sequence_tab",
+    "tabs.studio_tab",
+    "tabs.image_window",
+    "tabs.setting_tabs",
+]
+print(json.dumps({
+    "forbidden_loaded": [name for name in forbidden if name in sys.modules],
+    "random_type": random_msg.get("type"),
+    "has_audit_prompt": "audit alpha" in random_msg.get("prompt", ""),
+    "seen": seen,
+    "blob_seen": blob_seen,
+    "history_total": context.result_store.history_total(),
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert payload["forbidden_loaded"] == []
+    assert payload["random_type"] == "prompt_generated"
+    assert payload["has_audit_prompt"] is True
+    assert "image_meta" in payload["seen"]
+    assert "viewer_new_image" in payload["seen"]
+    assert payload["blob_seen"] is True
+    assert payload["history_total"] == 1

@@ -29,7 +29,9 @@ Round 36 is complete: the headless path can execute a queued NAI generation requ
 
 Round 37 is complete: the RemoteBridge websocket event contract is documented, core server-owned events are handled by the headless FastAPI path, and tests prove result broadcasts run without importing the desktop bridge.
 
-The full Headless Web Session migration is not complete yet. Desktop-only isolation and final performance/cutover review remain. Rounds 38-39 are the concrete cutover work needed before the roadmap can be marked complete.
+Round 38 is complete: desktop-only tabs/modules are classified and documented under `not_implement/`, and an import audit proves headless startup, Random, and fake Generate result broadcast do not import desktop tabs/modules.
+
+The full Headless Web Session migration is not complete yet. Final performance/cutover review remains. Round 39 is the concrete cutover gate before the roadmap can be marked complete.
 
 ## Final Target
 
@@ -341,18 +343,27 @@ Boundary for later rounds: Round 36 validates NAI result execution. WEBUI and CO
 
 ### TODO Checklist
 
-- [ ] Classify all tabs/modules into `web-core`, `web-optional`, and `desktop-only`.
-- [ ] Move or document unsupported desktop-only surfaces in `not_implement/`.
-- [ ] Ensure the headless entrypoint does not scan/import desktop-only tabs/modules.
-- [ ] Keep optional web features behind explicit service boundaries.
-- [ ] Revalidate or extract full conditional prompt rule execution so enabled conditional rules do not require importing the PyQt module path.
-- [ ] Add an import audit test for the headless entrypoint.
+- [x] Classify all tabs/modules into `web-core`, `web-optional`, and `desktop-only`.
+- [x] Move or document unsupported desktop-only surfaces in `not_implement/`.
+- [x] Ensure the headless entrypoint does not scan/import desktop-only tabs/modules.
+- [x] Keep optional web features behind explicit service boundaries.
+- [x] Revalidate or extract full conditional prompt rule execution so enabled conditional rules do not require importing the PyQt module path.
+- [x] Add an import audit test for the headless entrypoint.
 
 ### When Done
 
 - Headless startup does not import Storyteller, Turbo Sequence, Studio, desktop-only tab files, or desktop module widgets.
 - Unsupported surfaces have explicit documentation and do not appear as hidden startup work.
 - The visible Remote Web feature set remains intact.
+
+### Round 38 Result
+
+- Updated `not_implement/web_session_unsupported_tabs.md` with `web-core`, `web-optional`, and `desktop-only` classifications.
+- Added `refactor_docs/round_38_desktop_only_isolation.md`.
+- Documented Turbo Sequence, Studio, Storyteller/Hooker/Assets, and dynamic desktop tabs as outside the current headless Remote Web contract.
+- Kept optional module behavior behind extracted services: prompt engineering runtime, conditional prompt runtime/settings, reference inset hook, wildcard/filter services, settings-backed character params, and result services.
+- Revalidated the conditional prompt boundary: headless rule execution uses `core.conditional_prompt_runtime` and saved settings; desktop editor/preset actions remain optional/desktop-adapter work.
+- Added a fresh-process import audit that performs websocket startup, Random, and fake Generate result broadcast and asserts no `PyQt6`, `core.remote_api_server`, `core.middle_section_controller`, `core.tab_controller`, `modules.character_module`, `modules.prompt_engineering_module`, `modules.conditional_prompt_module`, `tabs.turbo_event_sequence_tab`, `tabs.studio_tab`, `tabs.image_window`, or `tabs.setting_tabs` are loaded.
 
 ## Round 39 - Cutover Gate and Performance Review
 

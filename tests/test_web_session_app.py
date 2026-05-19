@@ -5,6 +5,7 @@ import sys
 import io
 import zipfile
 import base64
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 import pandas as pd
@@ -1560,6 +1561,170 @@ def test_headless_search_parquet_upload_load_and_merge(tmp_path):
     )
     assert merged.status_code == 200
     assert context.search_results.get_dataframe()["id"].tolist() == [2, 3, 4]
+
+
+def test_headless_prompt_tool_ws_search_filter_depth_and_parquet(tmp_path):
+    frame = pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "angel wings, halo", "token_count": 80, "score": 5, "character": "alice"},
+        {"id": 2, "rating": "q", "general": "angel wings, sword", "token_count": 140, "score": 10, "character": "bob"},
+        {"id": 3, "rating": "g", "general": "cat ears", "token_count": 60, "score": 1, "character": ""},
+        {"id": 4, "rating": "e", "general": "angel wings, watermark", "token_count": 180, "score": 3, "character": "cara"},
+    ])
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager(),
+        repo_root=tmp_path,
+        search_results=SearchResultModel(frame.copy()),
+    )
+    context.search_results_snapshot = frame.copy()
+    context.search_results_master_base_snapshot = frame.copy()
+    client = TestClient(create_headless_app(context))
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+
+        ws.send_json({
+            "type": "search",
+            "query": "angel wings",
+            "exclude": "",
+            "rating_g": True,
+            "rating_s": True,
+            "rating_q": True,
+            "rating_e": True,
+        })
+        assert ws.receive_json()["type"] == "search_progress"
+        assert ws.receive_json()["type"] == "search_progress"
+        search_state = ws.receive_json()
+        assert search_state["type"] == "search_state"
+        assert search_state["count"] == 3
+        assert search_state["filter_preferences"]["query"] == "angel wings"
+
+        ws.send_json({"type": "tag_filter_search", "tags": ["angel_wings"], "request_id": "tf1"})
+        tag_result = ws.receive_json()
+        assert tag_result["type"] == "tag_filter_result"
+        assert tag_result["count"] == 3
+        assert tag_result["request_id"] == "tf1"
+
+        ws.send_json({"type": "tag_filter_assign", "request_id": "tf1"})
+        assigned = ws.receive_json()
+        assigned_state = ws.receive_json()
+        assert assigned["type"] == "tag_filter_assigned"
+        assert assigned_state["type"] == "search_state"
+        assert assigned_state["filter_preferences"]["tag_filter_active"] is True
+
+        ws.send_json({"type": "depth_action", "action": "open"})
+        opened = ws.receive_json()
+        assert opened["type"] == "depth_state"
+        assert opened["open"] is True
+        assert opened["count"] == 3
+
+        ws.send_json({
+            "type": "depth_action",
+            "action": "filter",
+            "query": "angel wings",
+            "exclude": "watermark",
+            "ratings": {"g": True, "s": True, "q": True, "e": True},
+            "filters": {"token_min": {"enabled": True, "value": "100"}},
+        })
+        depth_filtered = ws.receive_json()
+        assert depth_filtered["type"] == "depth_state"
+        assert depth_filtered["count"] == 1
+
+        ws.send_json({"type": "depth_action", "action": "assign"})
+        assigned_search = ws.receive_json()
+        assigned_depth = ws.receive_json()
+        assert assigned_search["type"] == "search_state"
+        assert assigned_search["count"] == 1
+        assert assigned_depth["type"] == "depth_state"
+
+        ws.send_json({"type": "search_parquet_action", "action": "save_runner"})
+        runner_state = ws.receive_json()
+        runner_toast = ws.receive_json()
+        assert runner_state["type"] == "search_state"
+        assert runner_toast["level"] == "success"
+
+    runner = pd.read_parquet(tmp_path / "naia_temp_rows.parquet")
+    assert runner["id"].tolist() == [2]
+
+
+def test_headless_prompt_tool_ws_autocomplete_commands(tmp_path):
+    entry = SimpleNamespace(freq=11, desc="wings desc", category="general", cat="")
+    result = SimpleNamespace(tag="angel wings", entry=entry)
+    fake_index = SimpleNamespace(
+        search_autocomplete=lambda *args, **kwargs: [result],
+        search_metadata_fallback=lambda *args, **kwargs: [],
+    )
+    context = WebSessionContext(token_manager=InMemoryTokenManager(), repo_root=tmp_path)
+    context.tag_search_index = fake_index
+    context.kr_tags_raw = {
+        "angel wings": {
+            "_tag": "angel wings",
+            "freq": 11,
+            "description": "wings desc",
+            "group": "general",
+            "subgroup": "",
+            "_cat": "",
+        }
+    }
+    (tmp_path / "wildcards").mkdir()
+    (tmp_path / "wildcards" / "pose_list.txt").write_text("standing\nsitting\n", encoding="utf-8")
+    instant_dir = tmp_path / "save" / "instant_wildcard"
+    instant_dir.mkdir(parents=True)
+    (instant_dir / "default.json").write_text(json.dumps({"smile": "happy smile"}), encoding="utf-8")
+    vibe_dir = tmp_path / "save" / "vibe_transfer_clusters"
+    vibe_dir.mkdir(parents=True)
+    (vibe_dir / "soft.json").write_text(json.dumps({
+        "id": "soft",
+        "name": "softStyle",
+        "description": "soft lighting",
+        "model": "NAI",
+        "frames": [{"is_enabled": True}],
+    }), encoding="utf-8")
+    client = TestClient(create_headless_app(context))
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+
+        ws.send_json({"type": "tag_search", "query": "angel"})
+        tag_search = ws.receive_json()
+        assert tag_search["type"] == "tag_search_result"
+        assert tag_search["results"][0]["tag"] == "angel wings"
+
+        ws.send_json({"type": "tag_filter_ac", "query": "angel"})
+        assert ws.receive_json()["type"] == "tag_filter_ac_result"
+
+        ws.send_json({"type": "autocomplete", "query": "angel"})
+        assert ws.receive_json()["type"] == "autocomplete_result"
+
+        ws.send_json({"type": "autocomplete_translate", "query": "천사", "requestId": "tr1"})
+        translated = ws.receive_json()
+        assert translated["type"] == "autocomplete_result"
+        assert translated["requestId"] == "tr1"
+        assert "translated_query" in translated
+
+        ws.send_json({"type": "tag_lookup", "tag": "angel wings"})
+        lookup = ws.receive_json()
+        assert lookup["type"] == "tag_lookup_result"
+        assert lookup["tag"] == "angel wings"
+
+        ws.send_json({"type": "autocomplete_wildcard", "query": "pose"})
+        wildcard = ws.receive_json()
+        assert wildcard["type"] == "autocomplete_result"
+        assert wildcard["results"][0]["tag"] == "pose_list"
+
+        ws.send_json({"type": "autocomplete_chunk", "query": "smi"})
+        chunk = ws.receive_json()
+        assert chunk["type"] == "autocomplete_result"
+        assert chunk["results"][0]["tag"] == "smile"
+
+        ws.send_json({"type": "autocomplete_vibe_cluster", "query": "soft"})
+        vibe = ws.receive_json()
+        assert vibe["type"] == "autocomplete_result"
+        assert vibe["results"][0]["tag"] == "softStyle"
+
+        ws.send_json({"type": "autocomplete_preset", "query": "preset:"})
+        assert ws.receive_json()["type"] == "autocomplete_result"
 
 
 def test_headless_comfyui_and_prompt_thumbnail_compatibility_routes(tmp_path):

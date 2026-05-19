@@ -224,7 +224,11 @@ class WebSessionContext:
         self.temp_window_character_tab = None
         self.session_p_eng_override = None
         self.scoped_wildcard = None
-        self.remote_active_ratings = None
+        self.search_filter_state = self._load_search_filter_state()
+        self.remote_active_ratings = set(self.search_filter_state.get("ratings") or SUPPORTED_RATINGS)
+        self.active_tag_filter_ids: set[Any] | None = None
+        self.pending_tag_filter: dict[str, Any] | None = None
+        self.depth_state: dict[str, Any] | None = None
         self.wildcard_override: dict[str, Any] = {}
         if os.environ.get("NAIA_HEADLESS_DISABLE_GENERATION_EXECUTION") == "1":
             self.headless_generation_execute_enabled = False
@@ -346,16 +350,171 @@ class WebSessionContext:
             return set(SUPPORTED_RATINGS)
         return {rating for rating in SUPPORTED_RATINGS if rating in ratings} or set(SUPPORTED_RATINGS)
 
+    def _search_filter_state_path(self) -> Path:
+        return Path(self.repo_root) / "save" / "remote_web_filter_state.json"
+
+    def default_search_filter_state(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "query": "",
+            "exclude": "",
+            "ratings": list(SUPPORTED_RATINGS),
+            "tag_filter": [],
+            "tag_filter_exclude": [],
+            "tag_filter_active": False,
+            "updated_at": None,
+        }
+
+    def normalize_rating_list(self, ratings: Any) -> list[str]:
+        if isinstance(ratings, str):
+            ratings = list(ratings)
+        if not isinstance(ratings, (list, tuple, set)):
+            return list(SUPPORTED_RATINGS)
+        normalized = [
+            rating
+            for rating in SUPPORTED_RATINGS
+            if rating in {
+                str(item).strip().lower()
+                for item in ratings
+                if str(item).strip().lower() in SUPPORTED_RATINGS
+            }
+        ]
+        return normalized or list(SUPPORTED_RATINGS)
+
+    @staticmethod
+    def normalize_filter_tags(tags: Any) -> list[str]:
+        if tags is None:
+            return []
+        if isinstance(tags, str):
+            raw_items = re.split(r"[,\n]", tags)
+        elif isinstance(tags, (list, tuple, set)):
+            raw_items = list(tags)
+        else:
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in raw_items:
+            text = str(item or "").strip().replace("_", " ")
+            if not text:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(text)
+        return normalized
+
+    def normalize_search_filter_state(self, raw: Any) -> dict[str, Any]:
+        state = self.default_search_filter_state()
+        if isinstance(raw, dict):
+            state["query"] = str(raw.get("query", state["query"]) or "")
+            state["exclude"] = str(raw.get("exclude", state["exclude"]) or "")
+            state["ratings"] = self.normalize_rating_list(raw.get("ratings", state["ratings"]))
+            state["tag_filter"] = [
+                tag.lstrip("-") for tag in self.normalize_filter_tags(
+                    raw.get("tag_filter") or raw.get("include") or raw.get("include_tags")
+                )
+            ]
+            state["tag_filter_exclude"] = [
+                tag.lstrip("-") for tag in self.normalize_filter_tags(
+                    raw.get("tag_filter_exclude") or raw.get("exclude_tags")
+                )
+            ]
+            state["tag_filter_active"] = bool(raw.get("tag_filter_active")) and (
+                bool(state["tag_filter"]) or bool(state["tag_filter_exclude"])
+            )
+            state["updated_at"] = raw.get("updated_at")
+        return state
+
+    def _load_search_filter_state(self) -> dict[str, Any]:
+        path = self._search_filter_state_path()
+        try:
+            if path.exists():
+                with path.open("r", encoding="utf-8") as f:
+                    return self.normalize_search_filter_state(json.load(f))
+        except Exception as exc:
+            print(f"Headless Remote: filter state load failed - {exc}", flush=True)
+        return self.default_search_filter_state()
+
+    def save_search_filter_state(self, **updates: Any) -> dict[str, Any]:
+        state = dict(getattr(self, "search_filter_state", None) or self.default_search_filter_state())
+        for key in ("query", "exclude"):
+            if key in updates and updates[key] is not None:
+                state[key] = str(updates[key] or "")
+        if "ratings" in updates and updates["ratings"] is not None:
+            state["ratings"] = self.normalize_rating_list(updates["ratings"])
+        if "tag_filter" in updates and updates["tag_filter"] is not None:
+            state["tag_filter"] = [
+                tag.lstrip("-") for tag in self.normalize_filter_tags(updates["tag_filter"])
+            ]
+        if "tag_filter_exclude" in updates and updates["tag_filter_exclude"] is not None:
+            state["tag_filter_exclude"] = [
+                tag.lstrip("-") for tag in self.normalize_filter_tags(updates["tag_filter_exclude"])
+            ]
+        if "tag_filter_active" in updates and updates["tag_filter_active"] is not None:
+            state["tag_filter_active"] = bool(updates["tag_filter_active"])
+        state = self.normalize_search_filter_state(state)
+        state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+        self.search_filter_state = state
+        self.remote_active_ratings = set(state["ratings"])
+        try:
+            path = self._search_filter_state_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            tmp_path.replace(path)
+        except Exception as exc:
+            print(f"Headless Remote: filter state save failed - {exc}", flush=True)
+        return state
+
+    def save_search_filter_state_from_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            return self.normalize_search_filter_state(getattr(self, "search_filter_state", None))
+        return self.save_search_filter_state(
+            query=payload.get("query") if "query" in payload else None,
+            exclude=payload.get("exclude") if "exclude" in payload else None,
+            ratings=payload.get("ratings") if "ratings" in payload else None,
+            tag_filter=payload.get("tag_filter") if "tag_filter" in payload else None,
+            tag_filter_exclude=payload.get("tag_filter_exclude") if "tag_filter_exclude" in payload else None,
+            tag_filter_active=payload.get("tag_filter_active") if "tag_filter_active" in payload else None,
+        )
+
+    def custom_parquet_dir(self) -> Path:
+        return Path(self.repo_root) / "save" / "custom_tags"
+
+    def custom_parquet_names(self) -> list[str]:
+        custom_dir = self.custom_parquet_dir()
+        if not custom_dir.exists():
+            return []
+        return sorted(path.name for path in custom_dir.glob("*.parquet") if path.is_file())
+
     def search_state_payload(self) -> dict[str, Any]:
         active_ratings = self.get_active_ratings()
-        rating_counts = self.search_results.get_count_by_rating()
+        snapshot = getattr(self, "search_results_snapshot", None)
+        if snapshot is not None and not getattr(snapshot, "empty", True) and "rating" in snapshot.columns:
+            rating_counts = {
+                rating: int((snapshot["rating"] == rating).sum())
+                for rating in SUPPORTED_RATINGS
+            }
+        else:
+            rating_counts = self.search_results.get_count_by_rating()
         count = self.search_results.get_filtered_count(active_ratings) if active_ratings else self.search_results.get_count()
+        filter_preferences = self.normalize_search_filter_state(
+            getattr(self, "search_filter_state", None)
+        )
         return {
             "type": "search_state",
             "count": int(count or 0),
+            "total_count": int(self.search_results.get_count() if self.search_results else 0),
             "active_ratings": [rating for rating in SUPPORTED_RATINGS if rating in active_ratings],
             "rating_counts": rating_counts,
-            "filter_preferences": {},
+            "query": filter_preferences.get("query", ""),
+            "exclude": filter_preferences.get("exclude", ""),
+            "ratings": {rating: rating in active_ratings for rating in SUPPORTED_RATINGS},
+            "filter_preferences": filter_preferences,
+            "parquets": self.custom_parquet_names(),
         }
 
     def auto_save_state_payload(self) -> dict[str, Any]:
@@ -1358,9 +1517,8 @@ class WebSessionContext:
     def desktop_window_state_payload(self, client_host: str | None = None) -> dict[str, Any]:
         payload = {"type": "desktop_window_state", "visible": False}
         if client_host is not None:
-            allowed = self._is_loopback_host(client_host)
-            payload["control_allowed"] = allowed
-            payload["control_block_reason"] = "" if allowed else "Desktop control is local-only."
+            payload["control_allowed"] = False
+            payload["control_block_reason"] = "Desktop runtime is not available in headless mode."
         return payload
 
     def queue_state_payload(self) -> dict[str, Any]:

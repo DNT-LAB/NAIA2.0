@@ -122,7 +122,7 @@ def test_initial_websocket_messages_cover_headless_startup_state():
         "init_complete",
     ]
     assert messages[1]["visible"] is False
-    assert messages[1]["control_allowed"] is True
+    assert messages[1]["control_allowed"] is False
     assert messages[2]["mode"] == "WEBUI"
     assert messages[3]["prompt_fixed"] is True
     assert messages[4]["api_mode"] == "WEBUI"

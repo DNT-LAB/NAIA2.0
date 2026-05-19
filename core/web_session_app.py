@@ -388,6 +388,7 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
     else:
         context.search_results.append_dataframe(frame)
     context.search_results_snapshot = context.search_results.get_dataframe().copy()
+    context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
     return {
         "ok": True,
         "action": action,
@@ -395,6 +396,573 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
         "rows": int(len(frame)),
         "total": int(context.search_results.get_count()),
     }
+
+
+def _rating_counts_from_frame(frame: Any) -> dict[str, int]:
+    if frame is None or getattr(frame, "empty", True) or "rating" not in frame.columns:
+        return {rating: 0 for rating in "gsqe"}
+    counts = frame["rating"].value_counts()
+    return {rating: int(counts.get(rating, 0)) for rating in "gsqe"}
+
+
+def _search_base_frame(context: WebSessionContext):
+    base = getattr(context, "search_results_master_base_snapshot", None)
+    if base is not None and not getattr(base, "empty", True):
+        return base.copy()
+    snapshot = getattr(context, "search_results_snapshot", None)
+    if snapshot is not None and not getattr(snapshot, "empty", True):
+        context.search_results_master_base_snapshot = snapshot.copy()
+        return snapshot.copy()
+    if context.search_results is not None and not context.search_results.is_empty():
+        frame = context.search_results.get_dataframe().copy()
+        context.search_results_master_base_snapshot = frame.copy()
+        return frame
+    return None
+
+
+def _filter_source_frame(
+    frame: Any,
+    *,
+    query: str = "",
+    exclude: str = "",
+    ratings: set[str] | None = None,
+    tag_ids: set[Any] | None = None,
+):
+    if frame is None or getattr(frame, "empty", True):
+        return frame
+    filtered = frame.copy()
+    if query or exclude:
+        from core.search_engine import SearchEngine
+
+        engine = SearchEngine()
+        for column in engine.TAG_COLUMNS:
+            if column not in filtered.columns:
+                filtered[column] = ""
+        filtered = engine._apply_filters(filtered, str(query or ""), str(exclude or ""))
+        if "tags_string" in filtered.columns:
+            filtered = filtered.drop(columns=["tags_string"])
+    if tag_ids and "id" in filtered.columns:
+        filtered = filtered[filtered["id"].isin(tag_ids)]
+    if ratings and "rating" in filtered.columns:
+        filtered = filtered[filtered["rating"].isin(ratings)]
+    return filtered.copy()
+
+
+def _apply_search_runtime_filters(context: WebSessionContext) -> dict[str, Any]:
+    source = getattr(context, "search_results_snapshot", None)
+    if source is None or getattr(source, "empty", True):
+        source = _search_base_frame(context)
+        if source is not None and not getattr(source, "empty", True):
+            context.search_results_snapshot = source.copy()
+    filtered = _filter_source_frame(
+        source,
+        ratings=context.get_active_ratings(),
+        tag_ids=getattr(context, "active_tag_filter_ids", None),
+    )
+    if filtered is None or getattr(filtered, "empty", True):
+        import pandas as pd
+
+        context.search_results.set_dataframe(pd.DataFrame())
+    else:
+        context.search_results.set_dataframe(filtered)
+    return context.search_state_payload()
+
+
+def _run_search_command(context: WebSessionContext, command: dict[str, Any]) -> dict[str, Any]:
+    ratings = {
+        rating
+        for rating in "gsqe"
+        if command.get(f"rating_{rating}", True)
+    } or set("gsqe")
+    query = str(command.get("query") or "")
+    exclude = str(command.get("exclude") or "")
+    context.save_search_filter_state(query=query, exclude=exclude, ratings=ratings)
+    base = _search_base_frame(context)
+    if base is None:
+        return context.search_state_payload()
+    searched = _filter_source_frame(base, query=query, exclude=exclude)
+    context.search_results_snapshot = searched.copy() if searched is not None else None
+    context.active_tag_filter_ids = None
+    context.pending_tag_filter = None
+    context.save_search_filter_state(tag_filter_active=False)
+    return _apply_search_runtime_filters(context)
+
+
+def _restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
+    base = _search_base_frame(context)
+    if base is not None:
+        context.search_results_snapshot = base.copy()
+        context.active_tag_filter_ids = None
+        context.pending_tag_filter = None
+        context.save_search_filter_state(tag_filter_active=False)
+        context.search_results.set_dataframe(base.copy())
+    return context.search_state_payload()
+
+
+def _tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
+    import pandas as pd
+
+    snapshot = getattr(context, "search_results_snapshot", None)
+    if snapshot is None or getattr(snapshot, "empty", True):
+        snapshot = _search_base_frame(context)
+        if snapshot is not None:
+            context.search_results_snapshot = snapshot.copy()
+    normalized = WebSessionContext.normalize_filter_tags(tags)
+    if snapshot is None or getattr(snapshot, "empty", True):
+        return {"type": "tag_filter_result", "count": 0, "tags": normalized, "rating_counts": _rating_counts_from_frame(None), "_ids": set()}
+    searchable = snapshot.copy()
+    tag_columns = [column for column in ("copyright", "character", "artist", "meta", "general") if column in searchable.columns]
+    if not tag_columns:
+        tag_columns = ["general"]
+        searchable["general"] = ""
+    tags_text = searchable[tag_columns].fillna("").astype(str).agg(",".join, axis=1).str.lower()
+    mask = pd.Series(True, index=searchable.index)
+    clean_tags: list[str] = []
+    for item in tags:
+        raw = str(item or "").strip()
+        if not raw:
+            continue
+        negate = raw.startswith("-")
+        clean = raw.lstrip("-").strip().replace("_", " ")
+        if not clean:
+            continue
+        clean_tags.append(("-" if negate else "") + clean)
+        hit = tags_text.str.contains(clean.lower(), na=False, regex=False)
+        mask &= ~hit if negate else hit
+    matched = searchable[mask]
+    if "id" in matched.columns:
+        ids = set(matched["id"].tolist())
+    else:
+        ids = set(matched.index.tolist())
+    return {
+        "type": "tag_filter_result",
+        "count": int(len(matched)),
+        "tags": clean_tags,
+        "rating_counts": _rating_counts_from_frame(matched),
+        "_ids": ids,
+    }
+
+
+def _normalize_custom_parquet_filename(filename: str, *, fallback_prefix: str = "search_export") -> str:
+    clean = Path(str(filename or "").strip()).name
+    if not clean:
+        clean = f"{fallback_prefix}_{time.strftime('%Y%m%d_%H%M%S')}.parquet"
+    if not clean.lower().endswith(".parquet"):
+        clean += ".parquet"
+    return clean
+
+
+def _next_custom_parquet_path(context: WebSessionContext, filename: str, *, fallback_prefix: str = "search_export") -> Path:
+    explicit = bool(str(filename or "").strip())
+    clean = _normalize_custom_parquet_filename(filename, fallback_prefix=fallback_prefix)
+    path = context.custom_parquet_dir() / clean
+    if explicit or not path.exists():
+        return path
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    return path.with_name(f"{path.stem}_{uuid.uuid4().hex[:8]}{path.suffix}")
+
+
+def _resolve_custom_parquet_path(context: WebSessionContext, filename: str) -> Path | None:
+    raw = str(filename or "").strip()
+    clean = _normalize_custom_parquet_filename(raw)
+    if raw and clean != raw:
+        return None
+    return context.custom_parquet_dir() / clean
+
+
+def _load_or_merge_custom_parquet(context: WebSessionContext, filename: str, *, merge: bool = False) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = _resolve_custom_parquet_path(context, filename)
+    if path is None:
+        return context.search_state_payload(), {"type": "toast", "message": "Invalid parquet filename", "level": "error"}
+    if not path.exists():
+        return context.search_state_payload(), {"type": "toast", "message": f"Parquet not found: {filename}", "level": "error"}
+    import pandas as pd
+
+    frame = pd.read_parquet(path)
+    if merge:
+        current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
+        if current is not None and not current.empty:
+            frame = pd.concat([current, frame], ignore_index=True)
+    context.search_results.set_dataframe(frame)
+    context.search_results_snapshot = context.search_results.get_dataframe().copy()
+    context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
+    state = context.search_state_payload()
+    state["merged" if merge else "loaded"] = path.name
+    verb = "merged" if merge else "loaded"
+    return state, {"type": "toast", "message": f"{path.name} {verb} ({len(frame):,})", "level": "success"}
+
+
+def _search_parquet_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    frame = context.search_results.get_dataframe() if context.search_results else None
+    if frame is None or frame.empty:
+        return context.search_state_payload(), {"type": "toast", "message": "No search results to save", "level": "error"}
+    action = str(command.get("action") or "").strip()
+    if action == "export_results":
+        path = _next_custom_parquet_path(context, str(command.get("filename") or ""), fallback_prefix="search_export")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(path, index=False)
+        message = f"Exported {path.name} ({len(frame):,})"
+    elif action == "save_runner":
+        path = Path(context.repo_root) / "naia_temp_rows.parquet"
+        frame.to_parquet(path, index=False)
+        message = f"Saved runner parquet ({len(frame):,})"
+    else:
+        return context.search_state_payload(), {"type": "toast", "message": "Unsupported parquet action", "level": "error"}
+    return context.search_state_payload(), {"type": "toast", "message": message, "level": "success"}
+
+
+def _ensure_tag_search_index(context: WebSessionContext):
+    index = getattr(context, "tag_search_index", None)
+    if index is not None:
+        return index
+    from core.kr_tag_loader import load_kr_tag_records
+    from core.tag_search_index import TagSearchIndex
+
+    result = load_kr_tag_records(context.repo_root)
+    context.kr_tags_raw = result.raw
+    context.autocomplete_state.kr_tags_loaded = bool(result.raw)
+    index = TagSearchIndex.from_raw_tag_records(result.raw)
+    context.tag_search_index = index
+    return index
+
+
+def _autocomplete_row(result: Any) -> dict[str, Any]:
+    entry = result.entry
+    return {
+        "tag": result.tag,
+        "count": int(getattr(entry, "freq", 0) or 0),
+        "desc": getattr(entry, "desc", "") or "",
+        "group": getattr(entry, "category", "") or "",
+        "cat": getattr(entry, "cat", "") or "",
+    }
+
+
+def _search_kr_tags(context: WebSessionContext, query: str, limit: int = 20) -> list[dict[str, Any]]:
+    from core.tag_search_index import normalize_search_query
+
+    raw_query = str(query or "")
+    q = normalize_search_query(raw_query)
+    if not q:
+        return []
+    cats = None
+    if q.startswith("@"):
+        cats = {"artist"}
+        q = normalize_search_query(q[1:])
+    else:
+        for prefix in ("artist:", "character:"):
+            if q.startswith(prefix):
+                cats = {prefix[:-1]}
+                q = normalize_search_query(q[len(prefix):])
+                break
+    if not q:
+        return []
+    index = _ensure_tag_search_index(context)
+    rows = [_autocomplete_row(result) for result in index.search_autocomplete(q, limit=limit, cats=cats)]
+    if len(rows) < limit and re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", raw_query):
+        seen = {row["tag"] for row in rows}
+        for result in index.search_metadata_fallback(q, limit=limit, exclude_noisy_categories=True):
+            row = _autocomplete_row(result)
+            if row["tag"] in seen:
+                continue
+            seen.add(row["tag"])
+            rows.append(row)
+            if len(rows) >= limit:
+                break
+    return rows[:limit]
+
+
+def _search_wildcards(context: WebSessionContext, query: str, limit: int = 12) -> list[dict[str, Any]]:
+    q = str(query or "").strip().lower()
+    if not q:
+        return []
+    base = context._wildcard_base_dir()
+    if not base.exists():
+        return []
+    results: list[dict[str, Any]] = []
+    for path in base.rglob("*.txt"):
+        try:
+            rel = path.relative_to(base).with_suffix("").as_posix()
+            if q not in rel.lower():
+                continue
+            entries = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            results.append({
+                "tag": rel,
+                "count": len(entries),
+                "desc": f"{len(entries)} entries",
+                "group": "wildcard",
+                "cat": "",
+                "_wc_type": "wildcard",
+            })
+        except Exception:
+            continue
+    return sorted(results, key=lambda row: (row["tag"].lower() != q, not row["tag"].lower().startswith(q), row["tag"]))[:limit]
+
+
+def _search_chunks(context: WebSessionContext, query: str, limit: int = 12) -> list[dict[str, Any]]:
+    store = context._instant_wildcard_store()
+    tree = dict(store.get("instant_wildcard_tree") or {})
+    raw = str(query or "").strip()
+    if raw.startswith("$"):
+        raw = raw[1:].strip()
+    q = raw.lower()
+
+    def preview(value: Any, max_len: int = 96) -> str:
+        text = str(value or "").replace("\n", " ").strip()
+        return text[:max_len] + "..." if len(text) > max_len else text
+
+    def rank(text: str) -> int | None:
+        haystack = str(text or "").lower()
+        if not q:
+            return 4
+        if haystack == q:
+            return 0
+        if haystack.startswith(q):
+            return 1
+        if q in haystack:
+            return 2
+        return None
+
+    rows: list[tuple[int, int, dict[str, Any]]] = []
+    if ":" in raw:
+        group_name, item_query = raw.split(":", 1)
+        q = item_query.strip().lower()
+        groups = [(name, items) for name, items in tree.items() if str(name).lower() == group_name.strip().lower()]
+    else:
+        groups = list(tree.items())
+    index = 0
+    for group_name, items in groups:
+        group_rank = rank(group_name)
+        if group_rank is not None and ":" not in raw:
+            rows.append((group_rank, index, {
+                "tag": str(group_name),
+                "value": f"${group_name}:",
+                "count": len(items or {}),
+                "desc": f"{len(items or {})} entries",
+                "group": "chunk group",
+                "cat": "",
+                "_wc_type": "chunk_group",
+            }))
+            index += 1
+        if isinstance(items, dict):
+            for key, value in items.items():
+                item_rank = min([r for r in (rank(key), rank(value)) if r is not None], default=None)
+                if item_rank is None:
+                    continue
+                rows.append((item_rank, index, {
+                    "tag": str(key),
+                    "value": str(value or ""),
+                    "count": 0,
+                    "desc": preview(value),
+                    "group": str(group_name),
+                    "cat": "",
+                    "preview": str(value or ""),
+                    "_wc_type": "chunk",
+                }))
+                index += 1
+    rows.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in rows[:limit]]
+
+
+def _preset_autocomplete_payload(context: WebSessionContext, query: str, limit: int = 12, preset_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        from core.preset_input_bridge import PresetInputBridge, update_app_preset_context
+
+        token = str(query or "").strip()
+        if not token.lower().startswith("preset:"):
+            token = "preset:" + token
+        preset_context = update_app_preset_context(
+            context,
+            preset_context if isinstance(preset_context, dict) else {},
+            source="autocomplete",
+        )
+        bridge = getattr(context, "preset_autocomplete_bridge", None)
+        if bridge is None:
+            bridge = PresetInputBridge(
+                Path(context.repo_root),
+                event_service=_event_preset_service(context),
+                clothes_service=_clothes_preset_service(context),
+                expression_service=_expression_preset_service(context),
+                context=preset_context,
+            )
+            context.preset_autocomplete_bridge = bridge
+        elif hasattr(bridge, "set_context"):
+            bridge.set_context(preset_context)
+        payload = bridge.suggest(token, limit=limit)
+        rows = payload.get("suggestions") or []
+        secondary = payload.get("secondaryResults") or payload.get("secondarySuggestions") or []
+        if payload.get("stage") in {"loading", "unavailable"}:
+            state = payload.get("loadState") or {}
+            rows = [{
+                "tag": str(state.get("main") or payload.get("stage") or "preset"),
+                "value": token,
+                "count": 0,
+                "desc": str(state.get("message") or "Preset data is not ready."),
+                "group": "preset",
+                "cat": "preset",
+                "_wc_type": "preset_status",
+                "disabled": True,
+            }]
+            secondary = []
+        return {
+            "query": token,
+            "results": rows,
+            "secondaryResults": secondary,
+            "preset": {
+                "axis": payload.get("axis") or "",
+                "stage": payload.get("stage") or "",
+                "context": payload.get("presetContext") or preset_context,
+                "loadState": payload.get("loadState") or {},
+                "dataReady": bool(payload.get("dataReady")),
+                "secondaryResults": secondary,
+            },
+        }
+    except Exception as exc:
+        print(f"Headless Remote: preset autocomplete failed - {exc}", flush=True)
+        return {"query": str(query or ""), "results": [], "secondaryResults": [], "preset": {}}
+
+
+def _depth_payload(context: WebSessionContext) -> dict[str, Any]:
+    state = getattr(context, "depth_state", None)
+    if not isinstance(state, dict):
+        return {"type": "depth_state", "open": False}
+    current = state.get("current")
+    original = state.get("original")
+    return {
+        "type": "depth_state",
+        "open": True,
+        "count": 0 if current is None or getattr(current, "empty", True) else int(len(current)),
+        "original": 0 if original is None or getattr(original, "empty", True) else int(len(original)),
+        "query": state.get("query", ""),
+        "exclude": state.get("exclude", ""),
+        "ratings": state.get("ratings", {rating: True for rating in "eqsg"}),
+        "filters": state.get("filters", {}),
+        "staging_count": sum(0 if item is None or getattr(item, "empty", True) else int(len(item)) for item in state.get("staging", [])),
+        "headless": True,
+    }
+
+
+def _numeric_column(frame: Any, name: str) -> str | None:
+    candidates = {
+        "token_min": ("token_count", "tokens", "estimated_tokens"),
+        "token_max": ("token_count", "tokens", "estimated_tokens"),
+        "id_min": ("id",),
+        "id_max": ("id",),
+        "score_min": ("score",),
+    }.get(name, ())
+    for column in candidates:
+        if column in frame.columns:
+            return column
+    return None
+
+
+def _apply_depth_filters(frame: Any, command: dict[str, Any]):
+    filtered = _filter_source_frame(
+        frame,
+        query=str(command.get("query") or ""),
+        exclude=str(command.get("exclude") or ""),
+        ratings={rating for rating, enabled in (command.get("ratings") or {}).items() if enabled} or set("gsqe"),
+    )
+    filters = command.get("filters") if isinstance(command.get("filters"), dict) else {}
+    if filtered is None or getattr(filtered, "empty", True):
+        return filtered
+    for name in ("token_min", "id_min", "score_min"):
+        spec = filters.get(name) if isinstance(filters.get(name), dict) else {}
+        if not spec.get("enabled"):
+            continue
+        column = _numeric_column(filtered, name)
+        if not column:
+            continue
+        try:
+            value = float(spec.get("value"))
+        except (TypeError, ValueError):
+            continue
+        filtered = filtered[filtered[column].astype(float) >= value]
+    for name in ("token_max", "id_max"):
+        spec = filters.get(name) if isinstance(filters.get(name), dict) else {}
+        if not spec.get("enabled"):
+            continue
+        column = _numeric_column(filtered, name)
+        if not column:
+            continue
+        try:
+            value = float(spec.get("value"))
+        except (TypeError, ValueError):
+            continue
+        filtered = filtered[filtered[column].astype(float) <= value]
+    if filters.get("rem_char") and "character" in filtered.columns:
+        filtered = filtered[filtered["character"].fillna("").astype(str).str.strip() != ""]
+    if filters.get("only_empty_char") and "character" in filtered.columns:
+        filtered = filtered[filtered["character"].fillna("").astype(str).str.strip() == ""]
+    return filtered.copy()
+
+
+def _handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    action = str(command.get("action") or "").strip()
+    if action == "open":
+        base = getattr(context, "search_results_snapshot", None)
+        if base is None or getattr(base, "empty", True):
+            base = _search_base_frame(context)
+        if base is None or getattr(base, "empty", True):
+            return {"type": "depth_state", "open": False, "error": "no_search_results"}, None
+        context.depth_state = {
+            "original": base.copy(),
+            "current": base.copy(),
+            "query": "",
+            "exclude": "",
+            "ratings": {rating: True for rating in "eqsg"},
+            "filters": {},
+            "staging": [],
+        }
+        return _depth_payload(context), None
+    if not isinstance(getattr(context, "depth_state", None), dict):
+        return {"type": "depth_state", "open": False}, None
+    state = context.depth_state
+    if action == "filter":
+        state["query"] = str(command.get("query") or "")
+        state["exclude"] = str(command.get("exclude") or "")
+        state["ratings"] = command.get("ratings") if isinstance(command.get("ratings"), dict) else {rating: True for rating in "eqsg"}
+        state["filters"] = command.get("filters") if isinstance(command.get("filters"), dict) else {}
+        state["current"] = _apply_depth_filters(state.get("original"), command)
+    elif action == "assign":
+        current = state.get("current")
+        if current is not None:
+            context.active_tag_filter_ids = None
+            context.pending_tag_filter = None
+            context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
+            context.search_results.set_dataframe(current.copy())
+            context.search_results_snapshot = current.copy()
+        return _depth_payload(context), context.search_state_payload()
+    elif action == "promote":
+        current = state.get("current")
+        if current is not None:
+            state["original"] = current.copy()
+    elif action == "restore":
+        original = state.get("original")
+        if original is not None:
+            state["current"] = original.copy()
+    elif action == "stage":
+        current = state.get("current")
+        if current is not None and not getattr(current, "empty", True):
+            state.setdefault("staging", []).append(current.copy())
+    elif action == "merge_staging":
+        import pandas as pd
+
+        frames = [item for item in state.get("staging", []) if item is not None and not getattr(item, "empty", True)]
+        if frames:
+            state["current"] = pd.concat(frames, ignore_index=True).drop_duplicates()
+    elif action == "clear_staging":
+        state["staging"] = []
+    elif action == "export":
+        current = state.get("current")
+        if current is not None and not getattr(current, "empty", True):
+            path = _next_custom_parquet_path(context, "", fallback_prefix="refine")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            current.to_parquet(path, index=False)
+        return _depth_payload(context), context.search_state_payload()
+    return _depth_payload(context), None
 
 
 def _viewer_save_dir(context: WebSessionContext) -> Path:
@@ -1364,7 +1932,7 @@ async def _handle_json_command(
         await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
     elif command_type == "set_prompt":
         context.prompt_text = str(command.get("prompt") or "")
-        context.negative_prompt_text = str(command.get("negative") or "")
+        context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
         await ws.send_text(json.dumps({
             "type": "prompt_sync",
             "prompt": context.prompt_text,
@@ -1375,7 +1943,9 @@ async def _handle_json_command(
         await _broadcast_json(clients, context.generation_param_schema_payload())
     elif command_type == "set_active_ratings":
         context.set_active_ratings(command.get("ratings"))
-        await ws.send_text(json.dumps(context.search_state_payload(), ensure_ascii=False))
+        context.save_search_filter_state(ratings=context.get_active_ratings())
+        state = await _to_thread(_apply_search_runtime_filters, context)
+        await ws.send_text(json.dumps(state, ensure_ascii=False))
     elif command_type == "probe_api":
         allowed, reason = context.setup_gate(client_host)
         if not allowed:
@@ -1439,8 +2009,193 @@ async def _handle_json_command(
                 "message": result.get("error") or result.get("status_text") or "Cloudflared failed",
             }, ensure_ascii=False))
         await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
+    elif command_type == "set_desktop_window_visibility":
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "info",
+            "message": "Desktop runtime is not available in headless mode.",
+            "headless": True,
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps(context.desktop_window_state_payload(client_host), ensure_ascii=False))
     elif command_type == "get_search_state":
         await ws.send_text(json.dumps(context.search_state_payload(), ensure_ascii=False))
+    elif command_type == "save_search_filter_state":
+        await _to_thread(context.save_search_filter_state_from_payload, command)
+    elif command_type == "search":
+        await ws.send_text(json.dumps({
+            "type": "search_progress",
+            "completed": 0,
+            "total": 1,
+        }, ensure_ascii=False))
+        state = await _to_thread(_run_search_command, context, command)
+        await ws.send_text(json.dumps({
+            "type": "search_progress",
+            "completed": 1,
+            "total": 1,
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps(state, ensure_ascii=False))
+    elif command_type in {"load_parquet", "merge_parquet"}:
+        state, toast = await _to_thread(
+            _load_or_merge_custom_parquet,
+            context,
+            str(command.get("filename") or ""),
+            merge=command_type == "merge_parquet",
+        )
+        await ws.send_text(json.dumps(state, ensure_ascii=False))
+        await ws.send_text(json.dumps(toast, ensure_ascii=False))
+    elif command_type == "search_parquet_action":
+        state, toast = await _to_thread(_search_parquet_action, context, command)
+        await ws.send_text(json.dumps(state, ensure_ascii=False))
+        await ws.send_text(json.dumps(toast, ensure_ascii=False))
+    elif command_type == "restore_snapshot":
+        state = await _to_thread(_restore_search_snapshot, context)
+        await ws.send_text(json.dumps(state, ensure_ascii=False))
+    elif command_type == "tag_filter_search":
+        tags = command.get("tags") if isinstance(command.get("tags"), list) else []
+        request_id = str(command.get("request_id") or "")
+        result = await _to_thread(_tag_filter_search, context, tags)
+        ids = result.pop("_ids", set())
+        if request_id:
+            result["request_id"] = request_id
+        context.pending_tag_filter = {
+            "tags": result.get("tags", []),
+            "ids": ids,
+            "count": result.get("count", 0),
+            "request_id": request_id,
+            "rating_counts": result.get("rating_counts", {}),
+        }
+        await ws.send_text(json.dumps(result, ensure_ascii=False))
+    elif command_type == "tag_filter_assign":
+        pending = getattr(context, "pending_tag_filter", None)
+        request_id = str(command.get("request_id") or "")
+        if not pending:
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "message": "No pending search to assign",
+                "level": "error",
+            }, ensure_ascii=False))
+        elif request_id and str(pending.get("request_id") or "") != request_id:
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "message": "Tag filter search is stale. Search again.",
+                "level": "error",
+            }, ensure_ascii=False))
+        else:
+            context.active_tag_filter_ids = set(pending.get("ids") or set())
+            tags = [str(tag) for tag in pending.get("tags", [])]
+            context.save_search_filter_state(
+                tag_filter=[tag for tag in tags if not tag.startswith("-")],
+                tag_filter_exclude=[tag.lstrip("-") for tag in tags if tag.startswith("-")],
+                tag_filter_active=True,
+            )
+            state = await _to_thread(_apply_search_runtime_filters, context)
+            await ws.send_text(json.dumps({
+                "type": "tag_filter_assigned",
+                "count": pending.get("count", 0),
+                "tags": tags,
+            }, ensure_ascii=False))
+            await ws.send_text(json.dumps(state, ensure_ascii=False))
+    elif command_type == "tag_filter_clear":
+        context.active_tag_filter_ids = None
+        context.pending_tag_filter = None
+        context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
+        state = await _to_thread(_apply_search_runtime_filters, context)
+        await ws.send_text(json.dumps({
+            "type": "tag_filter_result",
+            "count": 0,
+            "tags": [],
+            "rating_counts": {rating: 0 for rating in "gsqe"},
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps(state, ensure_ascii=False))
+    elif command_type == "tag_search":
+        query = str(command.get("query") or "")
+        results = await _to_thread(_search_kr_tags, context, query, 20)
+        await ws.send_text(json.dumps({
+            "type": "tag_search_result",
+            "query": query,
+            "results": results,
+        }, ensure_ascii=False))
+    elif command_type == "tag_filter_ac":
+        query = str(command.get("query") or "")
+        results = await _to_thread(_search_kr_tags, context, query, 12)
+        await ws.send_text(json.dumps({
+            "type": "tag_filter_ac_result",
+            "query": query,
+            "results": results,
+        }, ensure_ascii=False))
+    elif command_type == "autocomplete":
+        query = str(command.get("query") or "")
+        results = await _to_thread(_search_kr_tags, context, query, 12)
+        await ws.send_text(json.dumps({
+            "type": "autocomplete_result",
+            "query": query,
+            "results": results,
+        }, ensure_ascii=False))
+    elif command_type == "autocomplete_translate":
+        query = str(command.get("query") or "")
+        request_id = str(command.get("requestId") or command.get("request_id") or "")
+        results = await _to_thread(_search_kr_tags, context, query, 12)
+        payload = {
+            "type": "autocomplete_result",
+            "query": query,
+            "results": results,
+            "translated_query": "",
+        }
+        if request_id:
+            payload["requestId"] = request_id
+        await ws.send_text(json.dumps(payload, ensure_ascii=False))
+    elif command_type == "autocomplete_wildcard":
+        query = str(command.get("query") or "")
+        results = await _to_thread(_search_wildcards, context, query, 12)
+        await ws.send_text(json.dumps({
+            "type": "autocomplete_result",
+            "query": query,
+            "results": results,
+        }, ensure_ascii=False))
+    elif command_type == "autocomplete_chunk":
+        query = str(command.get("query") or "")
+        results = await _to_thread(_search_chunks, context, query, 12)
+        await ws.send_text(json.dumps({
+            "type": "autocomplete_result",
+            "query": query,
+            "results": results,
+        }, ensure_ascii=False))
+    elif command_type == "autocomplete_vibe_cluster":
+        query = str(command.get("query") or "")
+        from core.vibe_cluster_resolver import search_vibe_clusters
+
+        results = await _to_thread(search_vibe_clusters, query, 12, Path(context.repo_root) / "save" / "vibe_transfer_clusters")
+        await ws.send_text(json.dumps({
+            "type": "autocomplete_result",
+            "query": query,
+            "results": results,
+        }, ensure_ascii=False))
+    elif command_type == "autocomplete_preset":
+        query = str(command.get("query") or "")
+        payload = await _to_thread(
+            _preset_autocomplete_payload,
+            context,
+            query,
+            12,
+            command.get("presetContext") if isinstance(command.get("presetContext"), dict) else command.get("context"),
+        )
+        await ws.send_text(json.dumps({
+            "type": "autocomplete_result",
+            "query": payload.get("query", query),
+            "results": payload.get("results", []),
+            "secondaryResults": payload.get("secondaryResults", []),
+            "preset": payload.get("preset") or {},
+        }, ensure_ascii=False))
+    elif command_type == "tag_lookup":
+        info = await _to_thread(_tag_lookup_info, context, str(command.get("tag") or ""))
+        await ws.send_text(json.dumps({"type": "tag_lookup_result", **info}, ensure_ascii=False))
+    elif command_type == "get_depth_state":
+        await ws.send_text(json.dumps(_depth_payload(context), ensure_ascii=False))
+    elif command_type == "depth_action":
+        depth_state, search_state = await _to_thread(_handle_depth_action, context, command)
+        if search_state is not None:
+            await ws.send_text(json.dumps(search_state, ensure_ascii=False))
+        await ws.send_text(json.dumps(depth_state, ensure_ascii=False))
     elif command_type == "read_hires_preset_overlay":
         preset_name = str(command.get("preset_name") or "")
         response = await _to_thread(context.hires_overlay_response, preset_name)
@@ -1606,9 +2361,23 @@ def create_headless_app(
                 session_context.headless_random_warmup_error = str(exc)
                 print(f"Headless Remote: random prompt runtime warmup failed - {exc}", flush=True)
 
+        async def run_tag_index_warmup() -> None:
+            try:
+                await _to_thread(_ensure_tag_search_index, session_context)
+                print(
+                    f"Headless Remote: tag autocomplete index ready ({len(getattr(session_context, 'kr_tags_raw', {}) or {}):,} tags)",
+                    flush=True,
+                )
+            except Exception as exc:
+                session_context.headless_tag_index_warmup_error = str(exc)
+                print(f"Headless Remote: tag autocomplete index warmup failed - {exc}", flush=True)
+
         task = getattr(session_context, "headless_random_warmup_task", None)
         if task is None or task.done():
             session_context.headless_random_warmup_task = asyncio.create_task(run_warmup())
+        tag_task = getattr(session_context, "headless_tag_index_warmup_task", None)
+        if tag_task is None or tag_task.done():
+            session_context.headless_tag_index_warmup_task = asyncio.create_task(run_tag_index_warmup())
         yield
 
     app = FastAPI(title="NAIA Remote Headless", lifespan=lifespan)

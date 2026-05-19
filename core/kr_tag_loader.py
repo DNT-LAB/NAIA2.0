@@ -71,6 +71,10 @@ def load_kr_tag_records(
 
     interactive_path = repo_root / "ui" / "interactive" / "interactive"
     if not interactive_path.exists():
+        legacy_path = repo_root / "legacy_desktop" / "ui" / "interactive" / "interactive"
+        if legacy_path.exists():
+            interactive_path = legacy_path
+    if not interactive_path.exists():
         _warn(warnings, f"tag data not found at {interactive_path}", warn)
         return KrTagLoadResult(raw=raw, warnings=warnings)
 

@@ -199,14 +199,24 @@ Remove supported Remote Web dependence on PyQt middle modules by replacing modul
 
 ### TODO Checklist
 
-- [ ] For `PromptEngineeringModule`, keep runtime hooks in `core.prompt_engineering_runtime` and migrate/retire remaining editor actions.
-- [ ] For `PromptListModifierModule`, keep rule execution in `core.conditional_prompt_runtime` and migrate/retire editor/preset UI.
-- [ ] For `CharacterModule`, keep saved settings/headless params and migrate/retire desktop character editor actions.
-- [ ] For `CharacterReferenceModule`, migrate reference image storage/state to a PyQt-free service or retire the web controls.
-- [ ] For `VibeTransferModule`, migrate image storage/clipboard-independent request state or retire the web controls.
-- [ ] For `InstantWildcardModule` and `WildcardStatusModule`, keep PyQt-free services and retire desktop wrappers from supported web runtime.
-- [ ] For `AutomationModule`, `E621EventModuleV2`, and `OllamaModule`, decide migrate or retire.
-- [ ] Update Remote Web module panels to call services, not desktop module loaders.
+- [x] For `PromptEngineeringModule`, keep runtime hooks in `core.prompt_engineering_runtime` and migrate/retire remaining editor actions.
+- [x] For `PromptListModifierModule`, keep rule execution in `core.conditional_prompt_runtime` and migrate/retire editor/preset UI.
+- [x] For `CharacterModule`, keep saved settings/headless params and migrate/retire desktop character editor actions.
+- [x] For `CharacterReferenceModule`, migrate reference image storage/state to a PyQt-free service or retire the web controls.
+- [x] For `VibeTransferModule`, migrate image storage/clipboard-independent request state or retire the web controls.
+- [x] For `InstantWildcardModule` and `WildcardStatusModule`, keep PyQt-free services and retire desktop wrappers from supported web runtime.
+- [x] For `AutomationModule`, `E621EventModuleV2`, and `OllamaModule`, decide migrate or retire.
+- [x] Update Remote Web module panels to call services, not desktop module loaders.
+
+### Round 46 Result
+
+- `WebSessionContext` now owns supported headless module state for Prompt Engineering, Conditional Prompt, Character, Automation settings, WEBUI Hiresfix Assist, and limited Wildcard state.
+- Supported module panel mutations use PyQt-free stores/services instead of `modules/*_module.py`.
+- `character_reference`, `vibe_transfer`, `instant_wildcard`, `wildcard_status`, `e621_event`, and `ollama` return explicit retired/deferred headless module states.
+- Automation settings are migrated, but Automation `start`/`stop` execution is retired until a PyQt-free scheduler exists.
+- CDP validation passed on port `7303`: Prompt Engineering preprocessing toggle, Conditional Prompt enabled toggle, Character add slot, Automation timer setting, and WEBUI Hiresfix Assist state all updated through the browser.
+- Import audit during CDP module-panel interaction reported no PyQt, RemoteBridge, desktop controller, image window, or middle module wrapper imports.
+- Validation docs: `refactor_docs/round_46_module_panel_validation.md`, `refactor_docs/round_46_module_workflow_migration_notes.md`.
 
 ### When Done
 

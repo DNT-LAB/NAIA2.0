@@ -18,6 +18,7 @@ from typing import Any, Callable, Protocol
 import weakref
 import os
 import re
+import json
 
 from core import result_image_payload_service as result_images
 from core.api_config_service import ApiConfigService, CloudflaredService
@@ -37,7 +38,9 @@ REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",
     "random_resolution",
     "auto_fit_resolution",
+    "enable_hr",
     "resolution_preset_enabled",
+    "webui_hiresfix_assist",
     "webui_hiresfix_assist_enabled",
 }
 AUTO_SAVE_DEFAULTS = {
@@ -63,6 +66,14 @@ SAVE_DIRECTORY_CLASSIFICATION_OPTIONS = [
     {"value": "none", "label": "분류 없음"},
     {"value": "prompt_recognition", "label": "프롬프트 인식"},
 ]
+HEADLESS_RETIRED_MODULES = {
+    "character_reference": "Character Reference image controls are deferred until a PyQt-free image storage service exists.",
+    "vibe_transfer": "Vibe Transfer image controls are deferred until a PyQt-free image storage service exists.",
+    "instant_wildcard": "Instant Wildcard editing is deferred; supported headless wildcard state is limited to prompt squeeze.",
+    "wildcard_status": "Wildcard Status desktop wrapper is retired in the supported headless runtime.",
+    "e621_event": "E621 Event desktop module is retired in the supported headless runtime.",
+    "ollama": "Ollama desktop assistant controls are retired in the supported headless runtime.",
+}
 
 
 class TokenStore(Protocol):
@@ -180,6 +191,7 @@ class WebSessionContext:
     headless_generation_execute_enabled: bool = True
     auto_save_state: dict[str, Any] = field(default_factory=dict)
     save_directory_state: dict[str, Any] = field(default_factory=dict)
+    webui_hiresfix_assist_state: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -362,6 +374,26 @@ class WebSessionContext:
             return self.auto_save_state_payload()
         if clean_id == "save_directory":
             return self.save_directory_state_payload(client_host)
+        if clean_id == "prompt_engineering":
+            return self._prompt_engineering_module_state()
+        if clean_id == "conditional_prompt":
+            return self._conditional_prompt_module_state()
+        if clean_id == "character":
+            return self._character_module_state()
+        if clean_id == "automation":
+            return self._automation_module_state()
+        if clean_id == "webui_hiresfix_assist":
+            return self._webui_hiresfix_assist_module_state()
+        if clean_id == "event_stream":
+            return self._module_state_payload("event_stream", {
+                "active": False,
+                "available": False,
+                "message": "Event Stream is retired in the supported headless runtime.",
+            })
+        if clean_id == "wildcard":
+            return self._wildcard_module_state()
+        if clean_id in HEADLESS_RETIRED_MODULES:
+            return self._retired_module_state(clean_id)
         return {
             "type": "module_state",
             "module_id": clean_id,
@@ -414,6 +446,20 @@ class WebSessionContext:
             else:
                 return None
             return self.save_directory_state_payload(client_host)
+        if clean_id == "prompt_engineering":
+            return self._set_prompt_engineering_param(clean_key, value)
+        if clean_id == "conditional_prompt":
+            return self._set_conditional_prompt_param(clean_key, value)
+        if clean_id == "character":
+            return self._set_character_param(clean_key, value)
+        if clean_id == "automation":
+            return self._set_automation_param(clean_key, value)
+        if clean_id == "webui_hiresfix_assist":
+            return self._set_webui_hiresfix_assist_param(clean_key, value)
+        if clean_id == "wildcard":
+            return self._set_wildcard_param(clean_key, value)
+        if clean_id in HEADLESS_RETIRED_MODULES:
+            return self._retired_module_state(clean_id, action=clean_key)
         return None
 
     def save_unsaved_history(self) -> dict[str, Any]:
@@ -441,6 +487,337 @@ class WebSessionContext:
             "paths": saved_paths,
             "current_save_directory": str(directory),
         }
+
+    def _prompt_engineering_module_state(self) -> dict[str, Any]:
+        from core.prompt_engineering_settings import (
+            get_prompt_engineering_store,
+            list_preset_names,
+            read_preset_data,
+        )
+
+        store = get_prompt_engineering_store(self)
+        settings = store.collect_settings()
+        state = store.state()
+        preset_options = store.preset_options()
+
+        def preset_summary(name: str, mode: str | None = None) -> dict[str, Any]:
+            if name == "*randomized":
+                return {
+                    "name": name,
+                    "api_mode": self.get_api_mode(),
+                    "description": "Randomized preset pool",
+                    "pre_prompt_preview": "",
+                    "thumbnail_url": "",
+                }
+            data = read_preset_data(name, mode or self.get_api_mode())
+            module_settings = data.get("module_settings") if isinstance(data, dict) else {}
+            module_settings = module_settings if isinstance(module_settings, dict) else {}
+            return {
+                "name": name,
+                "api_mode": str(data.get("api_mode") or mode or self.get_api_mode()),
+                "description": str(data.get("description") or ""),
+                "pre_prompt_preview": str(module_settings.get("pre_prompt") or ""),
+                "thumbnail_url": str(data.get("thumbnail_url") or ""),
+            }
+
+        webui_presets = list_preset_names("WEBUI")
+        payload = {
+            "preset": state["current_preset"],
+            "preset_options": preset_options,
+            "preset_summaries": [preset_summary(name) for name in preset_options],
+            "webui_preset_options": webui_presets,
+            "webui_preset_summaries": [preset_summary(name, "WEBUI") for name in webui_presets],
+            "randomized_active": state["current_preset"] == "*randomized",
+            "randomized_preset_list": list(state["randomized_preset_list"]),
+            "randomized_available_presets": store.randomized_available_presets(),
+            "pre_prompt": settings.get("pre_prompt", ""),
+            "post_prompt": settings.get("post_prompt", ""),
+            "auto_hide": settings.get("auto_hide_prompt", ""),
+            "preprocessing": dict(settings.get("preprocessing_options") or {}),
+            "e621_settings": dict(settings.get("e621_settings") or {}),
+            "danbooru_settings": dict(settings.get("danbooru_weight_settings") or {}),
+            "debug_snapshot": {},
+            "preset_can_save_current": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized"),
+            "preset_can_delete": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized", "default"),
+        }
+        return self._module_state_payload("prompt_engineering", payload)
+
+    def _set_prompt_engineering_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        from core.prompt_engineering_settings import (
+            get_prompt_engineering_store,
+            save_danbooru_weight_settings,
+            save_e621_settings,
+        )
+
+        store = get_prompt_engineering_store(self)
+        text_value = str(value or "")
+        if key == "pre_prompt":
+            store.apply_settings({"pre_prompt": text_value})
+        elif key == "post_prompt":
+            store.apply_settings({"post_prompt": text_value})
+        elif key == "auto_hide":
+            store.apply_settings({"auto_hide_prompt": text_value})
+        elif key == "preset":
+            if not store.set_preset(text_value):
+                return self._toast(f"프리셋을 찾을 수 없습니다: {text_value}", level="error")
+        elif key == "preset_save_current":
+            ok, message = store.save_current_preset()
+            if not ok:
+                return self._toast(message, level="error")
+        elif key == "preset_create":
+            ok, message = store.create_preset(text_value)
+            if not ok:
+                return self._toast(message, level="error")
+        elif key == "preset_delete":
+            ok, message = store.delete_preset(text_value or store.state()["current_preset"])
+            if not ok:
+                return self._toast(message, level="error")
+        elif key == "randomized_add":
+            ok, message = store.add_randomized_preset(text_value)
+            if not ok:
+                return self._toast(message, level="error")
+        elif key == "randomized_remove":
+            ok, message = store.remove_randomized_preset(text_value)
+            if not ok:
+                return self._toast(message, level="error")
+        elif key == "randomized_clear":
+            store.clear_randomized_presets()
+        elif key == "e621_settings":
+            settings = json.loads(text_value or "{}")
+            if not isinstance(settings, dict):
+                return self._toast("Invalid e621 settings", level="error")
+            save_e621_settings(settings)
+            store.apply_settings({"e621_settings": settings})
+        elif key == "danbooru_settings":
+            settings = json.loads(text_value or "{}")
+            if not isinstance(settings, dict):
+                return self._toast("Invalid Danbooru settings", level="error")
+            save_danbooru_weight_settings(settings)
+            store.apply_settings({"danbooru_weight_settings": settings})
+        elif key == "debug_refresh":
+            pass
+        elif key.startswith("pp_"):
+            option_key = key[3:]
+            settings = store.collect_settings()
+            preprocessing = dict(settings.get("preprocessing_options") or {})
+            preprocessing[option_key] = self._coerce_bool(value)
+            store.apply_settings({"preprocessing_options": preprocessing})
+        else:
+            return None
+        return self._prompt_engineering_module_state()
+
+    def _conditional_prompt_module_state(self) -> dict[str, Any]:
+        from core.conditional_prompt_settings import get_conditional_prompt_store
+
+        store = get_conditional_prompt_store(self)
+        settings = store.collect_settings()
+        editor_mode = str(settings.get("editor_mode") or "legacy")
+        editor_mode = editor_mode if editor_mode in {"legacy", "v2"} else "legacy"
+        rules_legacy = str(settings.get("rules") or "")
+        rules_v2 = str(settings.get("rules_v2") or "")
+        active_rules = rules_v2 if editor_mode == "v2" else rules_legacy
+        return self._module_state_payload("conditional_prompt", {
+            "enabled": bool(settings.get("enabled", False)),
+            "editor_mode": editor_mode,
+            "rules": active_rules,
+            "active_rules": active_rules,
+            "rules_legacy": rules_legacy,
+            "rules_v2": rules_v2,
+            "rules_v2_book": None,
+            "engine_options": dict(settings.get("engine_options") or {}),
+            "active_preset": str(settings.get("active_preset") or ""),
+            "presets": [],
+            "log": "",
+        })
+
+    def _set_conditional_prompt_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        from core.conditional_prompt_settings import get_conditional_prompt_store
+
+        store = get_conditional_prompt_store(self)
+        settings = store.collect_settings()
+        text_value = str(value or "")
+        if key == "enabled":
+            settings["enabled"] = self._coerce_bool(value)
+        elif key in {"editor_mode", "mode"}:
+            if text_value in {"legacy", "v2"}:
+                settings["editor_mode"] = text_value
+        elif key == "rules_legacy":
+            settings["rules"] = text_value
+        elif key == "rules_v2":
+            settings["rules_v2"] = text_value
+        elif key == "rules":
+            if settings.get("editor_mode") == "v2":
+                settings["rules_v2"] = text_value
+            else:
+                settings["rules"] = text_value
+        elif key == "engine_options":
+            parsed = json.loads(text_value or "{}")
+            if isinstance(parsed, dict):
+                settings["engine_options"] = parsed
+        elif key == "max_passes":
+            options = dict(settings.get("engine_options") or {})
+            options["max_passes"] = self._coerce_int(value, default=1, minimum=1, maximum=20)
+            settings["engine_options"] = options
+        elif key == "stop_on_match":
+            options = dict(settings.get("engine_options") or {})
+            options["stop_on_match"] = self._coerce_bool(value)
+            settings["engine_options"] = options
+        elif key in {"rules_v2_book", "preset_load", "test_rules"}:
+            return self._toast(f"Conditional Prompt action retired in headless: {key}", level="info")
+        else:
+            return None
+        store.apply_settings(settings)
+        return self._conditional_prompt_module_state()
+
+    def _character_module_state(self) -> dict[str, Any]:
+        from core.character_settings import character_state_from_settings, load_character_settings
+
+        mode = self.get_api_mode()
+        settings = self._character_settings_cache()
+        if settings is None:
+            settings = load_character_settings(mode)
+            self._character_settings_by_mode()[mode] = settings
+        state = character_state_from_settings(settings, app_context=self, mode=mode)
+        state["available"] = True
+        state["headless"] = True
+        return state
+
+    def _set_character_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        mode = self.get_api_mode()
+        settings = self._character_settings_cache()
+        frames = settings.setdefault("character_frames", [])
+        if key == "activated":
+            settings["is_active"] = self._coerce_bool(value)
+        elif key == "reroll_on_generate":
+            settings["reroll_on_generate"] = self._coerce_bool(value)
+        elif key == "add_character":
+            frames.append({"prompt": "", "uc": "", "is_enabled": True, "slot_state": "active", "custom_name": ""})
+        elif key == "preview_refresh":
+            pass
+        elif key.startswith("remove_character_"):
+            index = self._index_from_key(key, "remove_character_")
+            if index is not None and 0 <= index < len(frames) and len(frames) > 1:
+                frames.pop(index)
+        elif key.startswith("char_prompt_"):
+            index = self._index_from_key(key, "char_prompt_")
+            if index is not None:
+                self._ensure_character_frame(frames, index)["prompt"] = str(value or "")
+        elif key.startswith("char_uc_"):
+            index = self._index_from_key(key, "char_uc_")
+            if index is not None:
+                self._ensure_character_frame(frames, index)["uc"] = str(value or "")
+        elif key.startswith("char_active_"):
+            index = self._index_from_key(key, "char_active_")
+            if index is not None:
+                frame = self._ensure_character_frame(frames, index)
+                active = self._coerce_bool(value)
+                frame["is_enabled"] = active
+                frame["slot_state"] = "active" if active else "inactive"
+        elif key.startswith("char_slot_state_"):
+            index = self._index_from_key(key, "char_slot_state_")
+            if index is not None:
+                frame = self._ensure_character_frame(frames, index)
+                requested = str(value or "").strip().lower()
+                if requested == "restore":
+                    requested = str(frame.get("return_slot_state") or "inactive")
+                if requested in {"active", "inactive", "cold"}:
+                    if requested == "cold":
+                        frame["return_slot_state"] = str(frame.get("slot_state") or "inactive")
+                    frame["slot_state"] = requested
+                    frame["is_enabled"] = requested == "active"
+        elif key.startswith("char_slot_name_"):
+            index = self._index_from_key(key, "char_slot_name_")
+            if index is not None:
+                self._ensure_character_frame(frames, index)["custom_name"] = str(value or "")
+        else:
+            return None
+        self._save_character_settings(mode, settings)
+        return self._character_module_state()
+
+    def _automation_module_state(self) -> dict[str, Any]:
+        from core.automation_settings import automation_state_from_settings, load_automation_settings
+
+        settings = getattr(self, "_automation_settings", None)
+        if not isinstance(settings, dict):
+            settings = load_automation_settings()
+            self._automation_settings = settings
+        state = automation_state_from_settings(settings)
+        state["available"] = True
+        state["headless"] = True
+        return state
+
+    def _set_automation_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        from core.automation_settings import save_automation_settings, settings_from_automation_state
+
+        if key in {"start", "stop"}:
+            return self._toast("Automation execution is retired in the supported headless runtime.", level="info")
+        state = self._automation_module_state()
+        if key == "auto_type":
+            state["auto_type"] = value
+        elif key in {"delay", "random_delay", "timer_minutes", "count_limit", "notify"}:
+            state[key] = value
+        elif key == "repeat":
+            return self._automation_module_state()
+        else:
+            return None
+        settings = settings_from_automation_state(state)
+        self._automation_settings = settings
+        save_automation_settings(settings)
+        return self._automation_module_state()
+
+    def _webui_hiresfix_assist_module_state(self) -> dict[str, Any]:
+        state = self._normalized_webui_hiresfix_assist_state(self.webui_hiresfix_assist_state)
+        return self._module_state_payload("webui_hiresfix_assist", state)
+
+    def _set_webui_hiresfix_assist_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        state = self._normalized_webui_hiresfix_assist_state(self.webui_hiresfix_assist_state)
+        if key == "enabled":
+            state["enabled"] = self._coerce_bool(value)
+        elif key == "target":
+            state["target"] = 768 if str(value).strip() == "768" else 512
+        else:
+            return None
+        self.webui_hiresfix_assist_state = state
+        self.remote_params["webui_hiresfix_assist"] = bool(state["enabled"])
+        self.remote_params["webui_hiresfix_assist_target"] = int(state["target"])
+        return self._webui_hiresfix_assist_module_state()
+
+    def _wildcard_module_state(self) -> dict[str, Any]:
+        wildcard_count = 0
+        manager = self.wildcard_manager
+        for attr in ("wildcard_dict_tree", "wildcard_dict", "instant_wildcard_dict"):
+            value = getattr(manager, attr, None) if manager is not None else None
+            if isinstance(value, dict):
+                wildcard_count += len(value)
+        return self._module_state_payload("wildcard", {
+            "history": [],
+            "state": [],
+            "prompt_squeeze": bool(self.prompt_squeeze_enabled),
+            "wildcard_count": wildcard_count,
+            "file_browser_available": False,
+        })
+
+    def _set_wildcard_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        if key == "prompt_squeeze":
+            self.prompt_squeeze_enabled = self._coerce_bool(value)
+            return self._wildcard_module_state()
+        if key in {"reset_sequential", "reload"}:
+            return self._wildcard_module_state()
+        return self._toast(f"Wildcard file action retired in headless: {key}", level="info")
+
+    def _retired_module_state(self, module_id: str, *, action: str | None = None) -> dict[str, Any]:
+        message = HEADLESS_RETIRED_MODULES.get(
+            module_id,
+            "Module is retired in the supported headless runtime.",
+        )
+        state = {
+            "available": False,
+            "retired": True,
+            "message": message,
+        }
+        if action:
+            state["last_action"] = action
+        return self._module_state_payload(module_id, state)
 
     def autocomplete_status_payload(self) -> dict[str, Any]:
         return self.autocomplete_state.to_payload()
@@ -588,6 +965,75 @@ class WebSessionContext:
             if not candidate.exists():
                 return candidate
             index += 1
+
+    @staticmethod
+    def _toast(message: str, *, level: str = "info") -> dict[str, Any]:
+        return {
+            "type": "toast",
+            "level": level,
+            "message": str(message or ""),
+            "headless": True,
+        }
+
+    def _character_settings_by_mode(self) -> dict[str, dict[str, Any]]:
+        cache = getattr(self, "_character_settings_state", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self._character_settings_state = cache
+        return cache
+
+    def _character_settings_cache(self) -> dict[str, Any]:
+        from core.character_settings import load_character_settings
+
+        mode = self.get_api_mode()
+        cache = self._character_settings_by_mode()
+        if mode not in cache:
+            cache[mode] = load_character_settings(mode)
+        return cache[mode]
+
+    def _save_character_settings(self, mode: str, settings: dict[str, Any]) -> None:
+        from core.character_settings import character_settings_path, normalize_character_settings
+
+        mode_key = str(mode or "NAI").upper()
+        normalized = normalize_character_settings(settings)
+        self._character_settings_by_mode()[mode_key] = normalized
+        path = character_settings_path(mode_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({mode_key: normalized}, ensure_ascii=False, indent=4),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _index_from_key(key: str, prefix: str) -> int | None:
+        try:
+            return int(str(key)[len(prefix):])
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _ensure_character_frame(frames: list[dict[str, Any]], index: int) -> dict[str, Any]:
+        while len(frames) <= index:
+            frames.append({"prompt": "", "uc": "", "is_enabled": False, "slot_state": "inactive", "custom_name": ""})
+        frame = frames[index]
+        if not isinstance(frame, dict):
+            frame = {"prompt": "", "uc": "", "is_enabled": False, "slot_state": "inactive", "custom_name": ""}
+            frames[index] = frame
+        return frame
+
+    @staticmethod
+    def _normalized_webui_hiresfix_assist_state(raw: dict[str, Any] | None = None) -> dict[str, Any]:
+        source = raw if isinstance(raw, dict) else {}
+        target = 768 if str(source.get("target") or source.get("webui_hiresfix_assist_target") or "").strip() == "768" else 512
+        enabled = WebSessionContext._coerce_bool(
+            source.get("enabled", source.get("webui_hiresfix_assist", False))
+        )
+        return {
+            "enabled": enabled,
+            "target": target,
+            "webui_hiresfix_assist": enabled,
+            "webui_hiresfix_assist_target": target,
+        }
 
     def initial_websocket_messages(
         self,

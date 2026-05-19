@@ -348,6 +348,123 @@ def test_headless_websocket_auto_save_and_save_directory_state_are_server_owned(
     assert str(tmp_path) in updated_save_directory["current_save_directory"]
 
 
+def test_headless_supported_module_states_do_not_import_middle_modules_in_fresh_process(tmp_path):
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    code = r"""
+import json
+import sys
+from fastapi.testclient import TestClient
+from core.web_session_app import create_headless_app
+from core.web_session_context import InMemoryTokenManager, WebSessionContext
+
+context = WebSessionContext(token_manager=InMemoryTokenManager({"webui_url": "http://127.0.0.1:7860"}))
+app = create_headless_app(context)
+client = TestClient(app)
+
+with client.websocket_connect("/ws") as ws:
+    for _ in range(9):
+        ws.receive_json()
+    ws.send_json({"type": "get_module_state", "module_id": "prompt_engineering"})
+    pe_state = ws.receive_json()
+    ws.send_json({"type": "set_module_param", "module_id": "prompt_engineering", "key": "pp_remove_author", "value": "true"})
+    pe_updated = ws.receive_json()
+    ws.send_json({"type": "get_module_state", "module_id": "conditional_prompt"})
+    cond_state = ws.receive_json()
+    ws.send_json({"type": "set_module_param", "module_id": "conditional_prompt", "key": "enabled", "value": "true"})
+    cond_updated = ws.receive_json()
+    ws.send_json({"type": "set_module_param", "module_id": "character", "key": "add_character", "value": "true"})
+    char_added = ws.receive_json()
+    ws.send_json({"type": "set_module_param", "module_id": "character", "key": "char_prompt_0", "value": "module-free character"})
+    char_updated = ws.receive_json()
+    ws.send_json({"type": "set_module_param", "module_id": "automation", "key": "auto_type", "value": "1"})
+    automation_type = ws.receive_json()
+    ws.send_json({"type": "set_module_param", "module_id": "automation", "key": "timer_minutes", "value": "15"})
+    automation_updated = ws.receive_json()
+    ws.send_json({"type": "set_module_param", "module_id": "webui_hiresfix_assist", "key": "enabled", "value": "true"})
+    hires_enabled = ws.receive_json()
+    ws.send_json({"type": "set_module_param", "module_id": "webui_hiresfix_assist", "key": "target", "value": "768"})
+    hires_target = ws.receive_json()
+    retired_states = {}
+    for module_id in [
+        "character_reference",
+        "vibe_transfer",
+        "instant_wildcard",
+        "wildcard_status",
+        "e621_event",
+        "ollama",
+    ]:
+        ws.send_json({"type": "get_module_state", "module_id": module_id})
+        retired_states[module_id] = ws.receive_json()
+
+forbidden = [
+    "PyQt6",
+    "core.remote_api_server",
+    "core.middle_section_controller",
+    "modules.prompt_engineering_module",
+    "modules.conditional_prompt_module",
+    "modules.character_module",
+    "modules.automation_module",
+]
+print(json.dumps({
+    "forbidden_loaded": [name for name in forbidden if name in sys.modules],
+    "pe_available": pe_state.get("available"),
+    "pe_remove_author": pe_updated.get("preprocessing", {}).get("remove_author"),
+    "cond_available": cond_state.get("available"),
+    "cond_enabled": cond_updated.get("enabled"),
+    "char_count": char_added.get("character_count"),
+    "char_prompt": char_updated.get("characters", [{}])[0].get("prompt"),
+    "automation_auto_type": automation_type.get("auto_type"),
+    "automation_timer": automation_updated.get("timer_minutes"),
+    "hires_enabled": hires_enabled.get("enabled"),
+    "hires_target": hires_target.get("target"),
+    "remote_param_hires": context.remote_params.get("webui_hiresfix_assist"),
+    "remote_param_target": context.remote_params.get("webui_hiresfix_assist_target"),
+    "retired_modules": {
+        module_id: {
+            "available": state.get("available"),
+            "retired": state.get("retired"),
+            "has_message": bool(state.get("message")),
+        }
+        for module_id, state in retired_states.items()
+    },
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert payload == {
+        "forbidden_loaded": [],
+        "pe_available": True,
+        "pe_remove_author": True,
+        "cond_available": True,
+        "cond_enabled": True,
+        "char_count": 1,
+        "char_prompt": "module-free character",
+        "automation_auto_type": 1,
+        "automation_timer": "15",
+        "hires_enabled": True,
+        "hires_target": 768,
+        "remote_param_hires": True,
+        "remote_param_target": 768,
+        "retired_modules": {
+            "character_reference": {"available": False, "retired": True, "has_message": True},
+            "vibe_transfer": {"available": False, "retired": True, "has_message": True},
+            "instant_wildcard": {"available": False, "retired": True, "has_message": True},
+            "wildcard_status": {"available": False, "retired": True, "has_message": True},
+            "e621_event": {"available": False, "retired": True, "has_message": True},
+            "ollama": {"available": False, "retired": True, "has_message": True},
+        },
+    }
+
+
 def test_headless_websocket_verify_and_clear_api(tmp_path):
     tokens = InMemoryTokenManager()
     context = WebSessionContext(

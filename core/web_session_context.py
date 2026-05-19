@@ -16,6 +16,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Protocol
 import weakref
+import os
 
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_result_service import HeadlessResultStore
@@ -160,6 +161,8 @@ class WebSessionContext:
         self.scoped_wildcard = None
         self.remote_active_ratings = None
         self.wildcard_override: dict[str, Any] = {}
+        if os.environ.get("NAIA_HEADLESS_DISABLE_GENERATION_EXECUTION") == "1":
+            self.headless_generation_execute_enabled = False
         self.prompt_squeeze_enabled = False
         self.pipeline_hooks: dict[str, dict[str, list[tuple[int, Any]]]] = {}
         self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

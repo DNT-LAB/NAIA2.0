@@ -31,7 +31,9 @@ Round 37 is complete: the RemoteBridge websocket event contract is documented, c
 
 Round 38 is complete: desktop-only tabs/modules are classified and documented under `not_implement/`, and an import audit proves headless startup, Random, and fake Generate result broadcast do not import desktop tabs/modules.
 
-The full Headless Web Session migration is not complete yet. Final performance/cutover review remains. Round 39 is the concrete cutover gate before the roadmap can be marked complete.
+Round 39 is complete: the desktop-backed and headless entrypoints were measured with the same harness, CDP coverage was reviewed, and the headless entrypoint is now the preferred Remote Web path for the core NAI workflow.
+
+The Headless Web Session migration roadmap is complete for the core Remote Web workflow. Desktop-backed WebShell remains as compatibility mode for optional PyQt-only surfaces until they receive separate web-native services.
 
 ## Final Target
 
@@ -369,15 +371,42 @@ Boundary for later rounds: Round 36 validates NAI result execution. WEBUI and CO
 
 ### TODO Checklist
 
-- [ ] Re-run the Round 30 measurement harness on the old desktop-backed web shell.
-- [ ] Re-run the same measurement harness on the headless web entrypoint.
-- [ ] Compare startup time, first status, first paint, first random prompt, first generate dispatch, and RSS.
-- [ ] Run focused Remote Web regression tests.
-- [ ] Run CDP validation for API setup, Random, Generate, result display, and history.
-- [ ] Decide whether the default Web Session should switch to the headless entrypoint.
+- [x] Re-run the Round 30 measurement harness on the old desktop-backed web shell.
+- [x] Re-run the same measurement harness on the headless web entrypoint.
+- [x] Compare startup time, first status, first paint, first random prompt, first generate dispatch, and RSS.
+- [x] Run focused Remote Web regression tests.
+- [x] Run CDP validation for API setup, Random, Generate, result display, and history.
+- [x] Decide whether the default Web Session should switch to the headless entrypoint.
 
 ### When Done
 
 - The headless path preserves the current Remote Web core feature set.
 - The measured startup and first-action numbers show a meaningful gain or the remaining bottlenecks are explicitly listed.
 - The desktop-backed WebShell is either deprecated, kept as compatibility mode, or removed by a separate approved cleanup round.
+
+### Round 39 Result
+
+- Extended `tools/measure_web_session_startup.py` with `--entrypoint desktop|headless`.
+- Added headless-safe measurement support for Generate dispatch without executing the external image API during the timing harness.
+- Re-ran current desktop-backed WebShell measurement:
+  - FastAPI listen: 11.438s
+  - `/api/status` 200: 11.469s
+  - Remote Web first paint: 14.188s
+  - Random click to prompt update: 3.641s
+  - Generate click to dispatch: 0.204s
+  - RSS after first paint: 1772.54 MB
+  - RSS after Generate dispatch: 1896.27 MB
+  - PyQt/RemoteBridge/MiddleSection/ImageWindow signals: present
+- Re-ran headless measurement:
+  - FastAPI listen: 1.438s
+  - `/api/status` 200: 1.485s
+  - Remote Web first paint: 2.360s
+  - Random click to prompt update: 6.062s
+  - Generate click to dispatch: 0.094s
+  - RSS after first paint: 123.48 MB
+  - RSS after Generate dispatch: 1345.81 MB
+  - PyQt/RemoteBridge/MiddleSection/ImageWindow signals: absent
+- Added `refactor_docs/round_39_cutover_review.md`.
+- The headless entrypoint is ready as the preferred Remote Web path for API setup/status, Random prompt, NAI Generate, WebP result broadcast, latest image, PNG export, and in-memory history.
+- The desktop-backed WebShell remains as compatibility mode for optional PyQt-only surfaces: Studio, Turbo Sequence, deeper tag/search tools, result enhance/upscale, advanced conditional editor/preset management, and full WEBUI/COMFYUI execution parity.
+- Remaining bottleneck: first Random still lazy-loads wildcard/filter/parquet data and raises RSS by about 1.2 GB in the headless process. This is no longer a startup PyQt bottleneck; the next optimization target is prompt/search data loading.

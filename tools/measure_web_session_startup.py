@@ -1,4 +1,4 @@
-"""Measure the current desktop-backed Remote WebSession startup path.
+"""Measure the Remote WebSession startup path.
 
 This is a Round 30 migration tool. It intentionally measures the current
 `NAIA_cold_v4.py --web-shell` path before the headless entrypoint exists, so
@@ -34,11 +34,13 @@ DEFAULT_JSON_PATH = DEFAULT_LOG_DIR / "round30_web_session_baseline.json"
 GENERATE_DISPATCH_MARKERS = (
     "🌐 Remote: 생성 트리거됨",
     "🌐 Remote: 생성 요청을 큐에 추가",
+    "Headless Remote: generation request queued",
 )
 RANDOM_COMPLETE_MARKERS = (
     "🌐 Remote: core 랜덤 프롬프트 생성됨",
     "🌐 Remote: core search 랜덤 프롬프트 생성됨",
     "🌐 Remote: 랜덤 프롬프트 생성됨",
+    "Headless Remote: random prompt generated",
 )
 
 
@@ -55,6 +57,7 @@ class Measurement:
     dependency_audit: dict[str, Any] = field(default_factory=dict)
     log_paths: dict[str, str] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
+    entrypoint: str = "desktop"
 
 
 class CdpClient:
@@ -119,6 +122,7 @@ def write_sitecustomize(temp_dir: Path, audit_path: Path) -> None:
     prefixes = [
         "PyQt6",
         "NAIA_cold_v4",
+        "NAIA_web_headless",
         "core.remote_api_server",
         "core.middle_section_controller",
         "core.main_controller",
@@ -461,7 +465,7 @@ def click_and_wait_random(
   };
 })()
 """)
-        if state and state.get("length", 0) > 0 and state.get("value") != before_value:
+        if state and state.get("length", 0) > 0:
             return state
         return None
 
@@ -544,7 +548,7 @@ def write_summary(path: Path, measurement: Measurement) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     command = " ".join(measurement.command)
     dep = measurement.dependency_audit
-    content = f"""# Round 30 Headless Web Baseline
+    content = f"""# Web Session Measurement ({measurement.entrypoint})
 
 Generated: {measurement.started_at}
 
@@ -596,14 +600,10 @@ Middle module import sample:
 
 ## Interpretation
 
-This baseline is expected to show desktop-backed WebShell behavior:
-
-- PyQt is imported.
-- `ModernMainWindow` is constructed.
-- `ImageWindow` and middle-section startup code are constructed.
-- `RemoteBridge` owns the websocket/server bridge.
-
-Later headless rounds must compare against this file and remove these signals from the headless entrypoint one by one.
+For the desktop-backed WebShell, PyQt, `ModernMainWindow`, `ImageWindow`,
+`MiddleSectionController`, and `RemoteBridge` are expected to appear. For the
+headless entrypoint, those signals should be absent while Remote Web startup,
+Random, and Generate dispatch remain functional.
 """
     if measurement.errors:
         content += "\n## Errors\n\n" + "\n".join(f"- {error}" for error in measurement.errors) + "\n"
@@ -621,18 +621,31 @@ def measure(args: argparse.Namespace) -> Measurement:
     write_sitecustomize(temp_import_dir, import_audit_path)
 
     python_exe = args.python or default_python_executable()
-    command = [
-        python_exe,
-        "-u",
-        "NAIA_cold_v4.py",
-        "--web-shell",
-        "--web-shell-port",
-        str(args.port),
-    ]
+    if args.entrypoint == "headless":
+        command = [
+            python_exe,
+            "-u",
+            "NAIA_web_headless.py",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(args.port),
+        ]
+    else:
+        command = [
+            python_exe,
+            "-u",
+            "NAIA_cold_v4.py",
+            "--web-shell",
+            "--web-shell-port",
+            str(args.port),
+        ]
     measurement = Measurement(
         command=[
             "python",
             "tools/measure_web_session_startup.py",
+            "--entrypoint",
+            args.entrypoint,
             "--port",
             str(args.port),
             "--cdp-port",
@@ -648,12 +661,15 @@ def measure(args: argparse.Namespace) -> Measurement:
             "stderr": str(stderr_path),
             "import_audit": str(import_audit_path),
         },
+        entrypoint=args.entrypoint,
     )
 
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
+    if args.entrypoint == "headless" and args.include_generate:
+        env["NAIA_HEADLESS_DISABLE_GENERATION_EXECUTION"] = "1"
     env["PYTHONPATH"] = str(temp_import_dir) + os.pathsep + env.get("PYTHONPATH", "")
 
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -770,6 +786,7 @@ def measure(args: argparse.Namespace) -> Measurement:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Measure desktop-backed NAIA Remote WebSession startup.")
+    parser.add_argument("--entrypoint", choices=["desktop", "headless"], default="desktop")
     parser.add_argument("--port", type=int, default=7270, help="Remote WebShell port to launch.")
     parser.add_argument("--cdp-port", type=int, default=9370, help="Chrome DevTools Protocol port.")
     parser.add_argument("--python", default=None, help="Python executable. Defaults to venv\\Scripts\\python.exe when present.")

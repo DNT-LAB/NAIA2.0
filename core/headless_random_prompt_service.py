@@ -115,6 +115,7 @@ class HeadlessRandomPromptService:
         self.context.negative_prompt_text = str(settings.get("negative_prompt") or self.context.negative_prompt_text or "")
         if result.context is not None and callable(publish):
             publish("prompt_generated", result.context)
+        print("Headless Remote: random prompt generated", flush=True)
 
         return HeadlessRandomPromptResult(
             success=True,

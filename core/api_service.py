@@ -6,6 +6,7 @@ import copy
 import math
 import numpy as np
 import gc
+import sys
 from pathlib import Path
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -77,15 +78,18 @@ class APIService:
             except Exception:
                 pass
             
-            # Qt 스레드 풀 정리
-            try:
-                from PyQt6.QtCore import QThreadPool
-
-                thread_pool = QThreadPool.globalInstance()
-                thread_pool.clear()
-                thread_pool.waitForDone(100)
-            except Exception:
-                pass
+            # Legacy Desktop may already have Qt loaded. Do not import it from
+            # the supported headless runtime just for cleanup.
+            qt_core = sys.modules.get("PyQt6.QtCore")
+            if qt_core is not None:
+                try:
+                    thread_pool_cls = getattr(qt_core, "QThreadPool", None)
+                    if thread_pool_cls is not None:
+                        thread_pool = thread_pool_cls.globalInstance()
+                        thread_pool.clear()
+                        thread_pool.waitForDone(100)
+                except Exception:
+                    pass
             
             # 가비지 컬렉션
             gc.collect()
@@ -93,13 +97,35 @@ class APIService:
             # Qt 이벤트 루프 처리
             for _ in range(2):
                 try:
-                    from PyQt6.QtCore import QCoreApplication
-
-                    QCoreApplication.processEvents()
+                    qt_core = sys.modules.get("PyQt6.QtCore")
+                    app_cls = getattr(qt_core, "QCoreApplication", None) if qt_core is not None else None
+                    if app_cls is None:
+                        break
+                    app_cls.processEvents()
                 except Exception:
                     break
         except Exception:
             pass
+
+    @staticmethod
+    def _legacy_qpixmap_from_bytes(image_bytes: bytes):
+        qt_gui = sys.modules.get("PyQt6.QtGui")
+        pixmap_cls = getattr(qt_gui, "QPixmap", None) if qt_gui is not None else None
+        if pixmap_cls is None:
+            return None
+        pixmap = pixmap_cls()
+        if pixmap.loadFromData(image_bytes) and not pixmap.isNull():
+            return pixmap
+        return None
+
+    @staticmethod
+    def _image_result_from_bytes(image_bytes: bytes):
+        pixmap = APIService._legacy_qpixmap_from_bytes(image_bytes)
+        if pixmap is not None:
+            return pixmap
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image.load()
+            return image.copy()
 
     @staticmethod
     def _coerce_bool_param(value: Any, default: bool = False) -> bool:
@@ -1923,7 +1949,7 @@ class APIService:
             traceback.print_exc()
             return {'status': 'error', 'message': f'Auto-outpainting 실패: {e}'}
     
-    def upscale_NAI(self, pixmap: 'QPixmap', token: str = None, raw_bytes: bytes = None) -> Dict[str, Any]:
+    def upscale_NAI(self, pixmap: Any, token: str = None, raw_bytes: bytes = None) -> Dict[str, Any]:
         """
         NovelAI Upscale API를 사용하여 이미지를 2배 업스케일합니다.
 
@@ -1933,11 +1959,10 @@ class APIService:
             raw_bytes: 원본 PNG bytes (메타데이터 보존용, 제공 시 pixmap 재인코딩 생략)
 
         Returns:
-            Dict with 'status', 'image' (upscaled QPixmap), 'raw_bytes', and 'message'
+            Dict with 'status', 'image' (upscaled QPixmap in legacy desktop when
+            Qt is already loaded, otherwise PIL Image), 'raw_bytes', and 'message'
         """
         import zipfile
-        from PyQt6.QtCore import QBuffer, QIODevice
-        from PyQt6.QtGui import QPixmap
         
         try:
             # 토큰 가져오기
@@ -1949,20 +1974,28 @@ class APIService:
                         'message': 'NAI 토큰이 설정되지 않았습니다.'
                     }
             
-            # Base64 인코딩 (raw_bytes 우선, 없으면 QPixmap 재인코딩)
+            # Base64 인코딩 (raw_bytes 우선, 없으면 PIL Image만 지원)
             if raw_bytes:
-                img_base64 = base64.b64encode(raw_bytes).decode()
+                image_bytes = raw_bytes
+            elif isinstance(pixmap, Image.Image):
+                image_buffer = io.BytesIO()
+                pixmap.save(image_buffer, format="PNG")
+                image_bytes = image_buffer.getvalue()
             else:
-                buffer = QBuffer()
-                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-                pixmap.save(buffer, "PNG")
-                image_bytes = buffer.data().data()
-                buffer.close()
-                img_base64 = base64.b64encode(image_bytes).decode()
+                return {
+                    'status': 'error',
+                    'message': 'Headless upscale requires raw image bytes or a PIL image.'
+                }
+            img_base64 = base64.b64encode(image_bytes).decode()
             
             # 원본 이미지 크기
-            width = pixmap.width()
-            height = pixmap.height()
+            width_attr = getattr(pixmap, "width", None)
+            height_attr = getattr(pixmap, "height", None)
+            width = width_attr() if callable(width_attr) else width_attr
+            height = height_attr() if callable(height_attr) else height_attr
+            if not width or not height:
+                with Image.open(io.BytesIO(image_bytes)) as source_image:
+                    width, height = source_image.size
             
             # API 요청 데이터
             data = {
@@ -2017,23 +2050,26 @@ class APIService:
                 file_info = zipped.infolist()[0]
                 image_bytes = zipped.read(file_info)
                 
-                # bytes를 QPixmap으로 변환
-                upscaled_pixmap = QPixmap()
-                upscaled_pixmap.loadFromData(image_bytes)
+                upscaled_image = self._image_result_from_bytes(image_bytes)
                 
-                if upscaled_pixmap.isNull():
+                if upscaled_image is None:
                     return {
                         'status': 'error',
                         'message': '업스케일된 이미지를 로드할 수 없습니다.'
                     }
+
+                upscaled_width_attr = getattr(upscaled_image, "width", None)
+                upscaled_height_attr = getattr(upscaled_image, "height", None)
+                upscaled_width = upscaled_width_attr() if callable(upscaled_width_attr) else upscaled_width_attr
+                upscaled_height = upscaled_height_attr() if callable(upscaled_height_attr) else upscaled_height_attr
                 
-                print(f"✅ 업스케일 성공: {upscaled_pixmap.width()}x{upscaled_pixmap.height()}")
+                print(f"✅ 업스케일 성공: {upscaled_width}x{upscaled_height}")
 
                 return {
                     'status': 'success',
-                    'image': upscaled_pixmap,
+                    'image': upscaled_image,
                     'raw_bytes': image_bytes,
-                    'message': f'이미지가 {upscaled_pixmap.width()}x{upscaled_pixmap.height()}로 업스케일되었습니다.'
+                    'message': f'이미지가 {upscaled_width}x{upscaled_height}로 업스케일되었습니다.'
                 }
                 
             except zipfile.BadZipFile:
@@ -2112,13 +2148,12 @@ class APIService:
             token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
         
         Returns:
-            Dict with 'status', 'selected_image' (3rd QPixmap), and 'message'
+            Dict with 'status', 'selected_image' (3rd image; QPixmap in legacy
+            desktop when Qt is already loaded, otherwise PIL Image), and 'message'
         """
         import zipfile
         import io
         import base64
-        from pathlib import Path
-        from PyQt6.QtGui import QPixmap
         
         try:
             # 토큰 가져오기
@@ -2204,18 +2239,13 @@ class APIService:
                     img_bytes = zipped.read(file_info)
                     image_bytes_list.append(img_bytes)
                     
-                    # bytes를 QPixmap으로 변환
-                    temp_pixmap = QPixmap()
-                    temp_pixmap.loadFromData(img_bytes)
-                    
-                    if not temp_pixmap.isNull():
-                        images.append(temp_pixmap)
-                        
-                        # 파일로 저장
+                    image_obj = self._image_result_from_bytes(img_bytes)
+                    if image_obj is not None:
+                        images.append(image_obj)
                         if idx < len(suffixes):
                             filename = f"{save_counter:05d}{suffixes[idx]}.png"
                             filepath = save_path / filename
-                            temp_pixmap.save(str(filepath), "PNG")
+                            filepath.write_bytes(img_bytes)
                 
                 # 3번째 이미지 선택 (인덱스 2)
                 selected_image = None

@@ -1046,6 +1046,50 @@ print(json.dumps({
     assert payload == {"pyqt_imported": False, "api_service": "APIService"}
 
 
+def test_api_service_headless_helpers_do_not_lazy_import_pyqt_in_fresh_process():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    code = r"""
+import importlib.abc
+import io
+import json
+import sys
+from PIL import Image
+
+class BlockQtImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "PyQt6" or fullname.startswith("PyQt6."):
+            raise ImportError(f"blocked qt import: {fullname}")
+        return None
+
+sys.meta_path.insert(0, BlockQtImports())
+
+from core.api_service import APIService
+
+buffer = io.BytesIO()
+Image.new("RGB", (2, 3), (1, 2, 3)).save(buffer, format="PNG")
+service = APIService(app_context=None)
+service._cleanup_http_threads()
+image = service._image_result_from_bytes(buffer.getvalue())
+print(json.dumps({
+    "pyqt_imported": "PyQt6" in sys.modules,
+    "image_type": type(image).__name__,
+    "size": list(image.size),
+}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+
+    assert payload == {"pyqt_imported": False, "image_type": "Image", "size": [2, 3]}
+
+
 def test_headless_generation_result_broadcast_does_not_import_desktop_bridge_in_fresh_process():
     env = dict(os.environ)
     env["PYTHONPATH"] = os.getcwd()

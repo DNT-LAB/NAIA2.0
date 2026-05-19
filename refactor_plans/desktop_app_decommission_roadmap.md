@@ -418,14 +418,14 @@ Prove Desktop App removal is real and not only documented.
 
 ### TODO Checklist
 
-- [ ] Run fresh-process import audit for supported launch and supported service imports.
-- [ ] Run focused pytest for headless app, API setup, prompt generation, generation request, result/history, and all supported optional workflows.
-- [ ] Run CDP against the supported launch path.
-- [ ] Click Random and Generate in the browser.
-- [ ] Validate actual image result display for supported generation backend.
-- [ ] Validate history, PNG export, and API setup modal.
-- [ ] Verify no process logs mention `NAIA_cold_v4`, `QApplication`, `ModernMainWindow`, `ImageWindow`, `RemoteBridge`, `MiddleSectionController`, or `TabController`.
-- [ ] Re-run startup measurement and compare against Round 39 headless baseline.
+- [x] Run fresh-process import audit for supported launch and supported service imports.
+- [x] Run focused pytest for headless app, API setup, prompt generation, generation request, result/history, and all supported optional workflows.
+- [x] Run CDP against the supported launch path.
+- [x] Click Random and Generate in the browser.
+- [x] Validate actual image result display for supported generation backend.
+- [x] Validate history, PNG export, and API setup modal.
+- [x] Verify no process logs mention `NAIA_cold_v4`, `QApplication`, `ModernMainWindow`, `ImageWindow`, `RemoteBridge`, `MiddleSectionController`, or `TabController`.
+- [x] Re-run startup measurement and compare against Round 39 headless baseline.
 
 ### When Done
 
@@ -433,6 +433,16 @@ Prove Desktop App removal is real and not only documented.
 - The repository has no supported PyQt runtime dependency.
 - Browser/CDP validation proves the supported Remote Web app works after Desktop fallback removal.
 - Remaining limitations are documented as retired or legacy, not hidden compatibility requirements.
+
+### Round 51 Result
+
+- Fixed the final PyQt lazy import discovered during actual browser generation: `APIService._cleanup_http_threads` no longer imports `PyQt6.QtCore`, and NAI image-byte helper paths return PIL images in headless mode unless Qt is already loaded by legacy desktop code.
+- Added fresh-process regression coverage that blocks `PyQt6`, calls the patched API service helper paths, and verifies `PyQt6` remains absent from `sys.modules`.
+- Focused pytest gate passed: `156 passed in 18.39s`.
+- Startup measurement passed on port `7319`: first paint `1.813s`, Random prompt update `6.25s`, Generate dispatch `0.110s`, import audit `pyqt6_imported=False`, `legacy_desktop_imported=False`, `middle_module_imports_count=0`.
+- Actual CDP browser generation passed on port `7318`: Random generated a prompt, Generate completed through NAI, preview image displayed at `832 x 1216`, history contained the result, `/api/latest-image` returned `image/webp`, `/api/result/image/png` returned `image/png`, metadata returned generation params, and the API setup modal rendered saved backend statuses.
+- Actual generation import audit reported no PyQt, no `legacy_desktop`, no `core.remote_api_server`, no middle controller, no middle modules, and zero tracked desktop imports.
+- Validation docs: `refactor_docs/round_51_decommission_gate_validation.md`, `refactor_docs/round_51_startup_measurement.md`.
 
 ## Preferred Execution Order
 

@@ -200,12 +200,12 @@ echo -e "${PURPLE}╔═══════════════════�
 echo -e "${PURPLE}║                 🚀 NAIA 2.0 Headless Web Session 을 시작합니다!                  ║${NC}"
 echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${CYAN}💡 웹 UI 주소: http://127.0.0.1:7243/${NC}"
+echo -e "${CYAN}💡 웹 UI 주소: http://127.0.0.1:7243/ (7243 사용 중이면 다음 사용 가능 포트를 표시합니다)${NC}"
 echo -e "${CYAN}💡 터미널 창을 닫지 마세요. 백엔드가 함께 종료됩니다.${NC}"
 echo ""
 
 # Python 스크립트 실행
-python NAIA_web_headless.py
+python NAIA_web_headless.py --auto-port
 
 # 실행 결과 확인
 EXIT_CODE=$?

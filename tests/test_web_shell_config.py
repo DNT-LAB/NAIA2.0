@@ -6,6 +6,7 @@ from core.web_shell_config import (
     DEFAULT_WEB_SHELL_PORT,
     build_web_shell_url,
     normalize_web_shell_port,
+    select_web_shell_port,
     should_launch_web_shell_by_default,
 )
 
@@ -34,6 +35,29 @@ def test_default_web_shell_separates_load_host_from_bind_host():
     assert build_web_shell_url(DEFAULT_WEB_SHELL_HOST, 7243) == "http://127.0.0.1:7243/?desktop_shell=1"
 
 
+def test_select_web_shell_port_keeps_requested_port_without_auto(monkeypatch):
+    monkeypatch.setattr("core.web_shell_config.can_bind_web_shell_port", lambda _host, _port: False)
+
+    assert select_web_shell_port("0.0.0.0", 7243, auto_port=False) == 7243
+
+
+def test_select_web_shell_port_falls_forward_when_auto_enabled(monkeypatch):
+    probes = []
+
+    def can_bind(host, port):
+        probes.append((host, port))
+        return port == 7245
+
+    monkeypatch.setattr("core.web_shell_config.can_bind_web_shell_port", can_bind)
+
+    assert select_web_shell_port("0.0.0.0", 7243, auto_port=True, max_attempts=5) == 7245
+    assert probes == [
+        ("0.0.0.0", 7243),
+        ("0.0.0.0", 7244),
+        ("0.0.0.0", 7245),
+    ]
+
+
 def test_default_launcher_does_not_open_legacy_web_shell():
     assert not should_launch_web_shell_by_default()
 
@@ -53,6 +77,7 @@ def test_web_launchers_use_headless_entrypoint():
     ]:
         text = Path(launcher).read_text(encoding="utf-8")
         assert "NAIA_web_headless.py" in text
+        assert "--auto-port" in text
         assert "requirements-headless.txt" in text
         assert "NAIA_cold_v4.py --web-session" not in text
         assert "NAIA_cold_v4.py --desktop" not in text

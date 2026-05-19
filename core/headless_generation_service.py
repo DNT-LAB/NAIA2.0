@@ -109,6 +109,8 @@ class HeadlessGenerationService:
 
         params = self._normalized_params(command, api_mode, credential)
         source_row = self._source_row(params)
+        params.pop("_source_row_data", None)
+        params.pop("_source_name", None)
         priority = self._priority(command)
         nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params, api_mode)
         request = GenerationRequest(
@@ -282,6 +284,12 @@ class HeadlessGenerationService:
                 params[key] = self._to_bool(params.get(key))
 
     def _source_row(self, params: dict[str, Any]) -> pd.Series:
+        source_row_data = params.get("_source_row_data")
+        if isinstance(source_row_data, dict):
+            return pd.Series(
+                source_row_data,
+                name=str(params.get("_source_name") or "web_headless"),
+            )
         if params.get("wildcard_standalone"):
             return pd.Series({
                 "general": None,

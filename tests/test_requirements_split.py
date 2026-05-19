@@ -80,6 +80,7 @@ def test_launchers_install_matching_requirement_sets():
         assert "legacy_desktop" not in text
         assert "NAIA_cold_v4.py" not in text
         assert "NAIA_web_headless.py" in text
+        assert "--auto-port" in text
 
 
 def test_headless_entrypoint_imports_with_desktop_modules_blocked():

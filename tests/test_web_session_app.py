@@ -35,9 +35,12 @@ def _write_round47_tab_fixture(root):
     data_dir = root / "data"
     taglist_dir = data_dir / "taglist"
     thumb_dir = data_dir / "character_thumbnails"
+    artist_dir = root / "artist_thumb"
     taglist_dir.mkdir(parents=True)
     thumb_dir.mkdir(parents=True)
+    artist_dir.mkdir(parents=True)
     style_b64 = base64.b64encode(png_bytes).decode("ascii")
+    artist_b64 = base64.b64encode(_png_bytes((0, 96, 255, 255))).decode("ascii")
     (taglist_dir / "style_meta_tags.json").write_text(
         json.dumps({
             "categories": {
@@ -76,6 +79,14 @@ def _write_round47_tab_fixture(root):
     )
     (thumb_dir / "index.json").write_text(json.dumps({"series::hero": "hero.png"}), encoding="utf-8")
     (thumb_dir / "hero.png").write_bytes(png_bytes)
+    (data_dir / "artist_thumbnail_nai.json").write_text(
+        json.dumps({"artist_alpha": [artist_b64], "artist_beta": [artist_b64]}),
+        encoding="utf-8",
+    )
+    (artist_dir / "artist_state.json").write_text(
+        json.dumps({"version": 1, "favorites": [], "banned": []}),
+        encoding="utf-8",
+    )
 
 
 def test_headless_app_import_and_factory_do_not_import_pyqt_in_fresh_process():
@@ -130,7 +141,7 @@ def test_headless_tab_services_cover_thumb_and_character_viewer(tmp_path):
     right_tabs = capabilities.json()["right_tabs"]
     assert right_tabs["thumb"] is True
     assert right_tabs["characters"] is True
-    assert right_tabs["artists"] is False
+    assert right_tabs["artists"] is True
 
     thumb_state = client.get("/api/thumb/state")
     assert thumb_state.status_code == 200
@@ -170,6 +181,211 @@ def test_headless_tab_services_cover_thumb_and_character_viewer(tmp_path):
     assert generate.status_code == 200
     assert generate.json()["ok"] is True
     assert context.last_generation_params["character_viewer_request"] is True
+
+    artist_state = client.get("/api/artist-thumb/state")
+    assert artist_state.status_code == 200
+    assert artist_state.json()["modes"][0]["key"] == "NAID4.5F-31000"
+    assert artist_state.json()["modes"][0]["available"] is True
+    artist_list = client.get("/api/artist-thumb/list?mode=NAID4.5F-31000&per_page=12")
+    assert artist_list.status_code == 200
+    assert artist_list.json()["items"][0]["artist"] in {"artist_alpha", "artist_beta"}
+    assert artist_list.json()["items"][0]["image_url"].startswith("/api/artist-thumb/image?")
+    artist_image = client.get("/api/artist-thumb/image?mode=NAID4.5F-31000&artist=artist_alpha")
+    assert artist_image.status_code == 200
+    assert artist_image.headers["content-type"].startswith("image/jpeg")
+    assert artist_image.content.startswith(b"\xff\xd8")
+    favorite = client.post(
+        "/api/artist-thumb/favorite",
+        json={"artist": "artist_alpha", "favorite": True, "mode": "NAID4.5F-31000"},
+    )
+    assert favorite.status_code == 200
+    favorite_image = client.get("/api/artist-thumb/favorite-image?artist=artist_alpha")
+    assert favorite_image.status_code == 200
+    artist_generate = client.post("/api/artist-thumb/generate", json={
+        "request_id": "artist-round47",
+        "artist": "artist_alpha",
+        "positive": "artist:artist_alpha",
+        "width": 4096,
+        "height": 6144,
+    })
+    assert artist_generate.status_code == 200
+    assert artist_generate.json()["ok"] is True
+    assert context.last_generation_params["artist_thumb_request"] is True
+    assert context.last_generation_params["artist_thumb_request_id"] == "artist-round47"
+    assert context.last_generation_params["artist_thumb_artist"] == "artist_alpha"
+    assert context.last_generation_params["width"] == 832
+    assert context.last_generation_params["height"] == 1216
+
+
+def test_headless_event_preset_routes_are_server_owned_without_pyqt(tmp_path):
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    status = client.get("/api/event-preset/status")
+    bootstrap = client.get("/api/event-preset/bootstrap?ratingId=s&personId=1girl_solo")
+    clothes = client.get("/api/clothes-preset/status")
+    expressions = client.get("/api/expression-preset/status")
+
+    assert status.status_code == 200
+    assert status.json()["dataAvailability"]["main"] == "missing"
+    assert status.json()["download"]["availability"]["main"] == "missing"
+    assert bootstrap.status_code == 200
+    assert bootstrap.json()["ok"] is True
+    assert bootstrap.json()["categories"] == []
+    assert clothes.status_code == 200
+    assert clothes.json()["dataAvailability"]["main"] == "missing"
+    assert expressions.status_code == 200
+    assert expressions.json()["dataAvailability"]["main"] == "missing"
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd()
+    code = rf"""
+import json
+import sys
+from fastapi.testclient import TestClient
+from core.web_session_app import create_headless_app
+from core.web_session_context import InMemoryTokenManager, WebSessionContext
+
+context = WebSessionContext(repo_root={str(tmp_path)!r}, token_manager=InMemoryTokenManager())
+client = TestClient(create_headless_app(context))
+status = client.get("/api/event-preset/status").json()
+print(json.dumps({{
+    "pyqt_imported": "PyQt6" in sys.modules,
+    "main": status.get("dataAvailability", {{}}).get("main"),
+}}))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=os.getcwd(),
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload == {"pyqt_imported": False, "main": "missing"}
+
+
+class _FakeEventPresetService:
+    def status(self):
+        return {"ok": True, "dataAvailability": {"main": "ready", "thumbnails": "missing"}}
+
+    def generation_source(self, payload):
+        return {
+            "ok": True,
+            "requestId": payload.get("requestId") or "event-req-1",
+            "selected": {"ratingId": "s", "personId": "1girl_solo", "eventId": "looking back"},
+            "promptPreview": "1girl, rating:sensitive, looking back",
+            "event": {"id": "looking back", "tag": "looking back", "label": "looking back"},
+            "sourceRow": {
+                "general": "1girl, rating:sensitive, looking back",
+                "rating": "s",
+                "character": None,
+                "copyright": None,
+                "artist": None,
+                "meta": None,
+                "event_preset_event": "looking back",
+                "event_preset_combo_id": "",
+                "event_preset_person": "1girl_solo",
+            },
+        }
+
+
+def test_headless_event_preset_generate_dispatches_source_row_and_metadata():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    context.event_preset_service = _FakeEventPresetService()
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    response = client.post("/api/event-preset/generate", json={"requestId": "event-req-1"})
+
+    assert response.status_code == 200
+    assert response.json()["requestId"] == "event-req-1"
+    request = context.last_generation_request
+    assert request.params["input"] == "1girl, rating:sensitive, looking back"
+    assert request.params["event_preset_request"] is True
+    assert request.params["event_preset_request_id"] == "event-req-1"
+    assert request.source_row.name == "event_preset:event-req-1"
+    assert request.source_row["general"] == "1girl, rating:sensitive, looking back"
+
+
+def test_headless_event_preset_generate_broadcasts_prompt_generated():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    context.event_preset_service = _FakeEventPresetService()
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        response = client.post("/api/event-preset/generate", json={"requestId": "event-req-1"})
+        message = ws.receive_json()
+
+    assert response.status_code == 200
+    assert message["type"] == "prompt_generated"
+    assert message["source"] == "event_preset"
+    assert message["event_preset_request_id"] == "event-req-1"
+    assert message["prompt"] == "1girl, rating:sensitive, looking back"
+
+
+def test_headless_composite_preset_generate_dispatches_remote_preset_flags():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    response = client.post("/api/preset/generate", json={
+        "requestId": "preset-req-1",
+        "promptOverride": "1girl, dress, smile",
+        "axes": {"events": {"enabled": True}},
+    })
+
+    assert response.status_code == 200
+    assert response.json()["requestId"] == "preset-req-1"
+    request = context.last_generation_request
+    assert request.params["input"] == "1girl, dress, smile"
+    assert request.params["remote_preset_request"] is True
+    assert request.params["remote_preset_request_id"] == "preset-req-1"
+    assert request.source_row.name == "preset:preset-req-1"
+    assert request.source_row["remote_preset_request_id"] == "preset-req-1"
+
+
+def test_headless_composite_preset_generate_broadcasts_prompt_generated():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        response = client.post("/api/preset/generate", json={
+            "requestId": "preset-req-1",
+            "promptOverride": "1girl, dress, smile",
+            "axes": {"events": {"enabled": True}},
+        })
+        message = ws.receive_json()
+
+    assert response.status_code == 200
+    assert message["type"] == "prompt_generated"
+    assert message["source"] == "preset"
+    assert message["remote_preset_request_id"] == "preset-req-1"
+    assert message["prompt"] == "1girl, dress, smile"
 
 
 def test_headless_websocket_random_generates_prompt_from_core_service():
@@ -350,10 +566,42 @@ def test_headless_websocket_set_param_updates_server_owned_params():
         auto_fit_payload = ws.receive_json()
 
     assert steps_payload["type"] == "params"
-    assert steps_payload["steps"] == "31"
-    assert context.remote_params["steps"] == "31"
+    assert steps_payload["steps"] == 31
+    assert context.remote_params["steps"] == 31
     assert auto_fit_payload["auto_fit_resolution"] is True
     assert context.remote_params["auto_fit_resolution"] is True
+
+
+def test_headless_websocket_set_mode_returns_legacy_mode_result_and_params():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"webui_url": "http://127.0.0.1:7860"})
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "set_mode", "mode": "WEBUI"})
+        mode_result = ws.receive_json()
+        mode = ws.receive_json()
+        params = ws.receive_json()
+        api_status = ws.receive_json()
+
+    assert mode_result == {
+        "type": "mode_result",
+        "success": True,
+        "mode": "WEBUI",
+        "message": "WEBUI mode active",
+    }
+    assert mode == {"type": "mode", "mode": "WEBUI"}
+    assert params["type"] == "params"
+    assert params["api_mode"] == "WEBUI"
+    assert "enable_hr" in params
+    assert "options_hr_upscaler" in params
+    assert params["webui_hiresfix_assist"] is True
+    assert params["webui_hiresfix_assist_target"] == 512
+    assert api_status["type"] == "api_status"
 
 
 def test_headless_websocket_active_ratings_update_search_state_and_random():
@@ -408,8 +656,9 @@ def test_headless_websocket_retired_desktop_commands_are_explicit():
     assert overlay == {
         "type": "hires_preset_overlay",
         "preset_name": "legacy-preset",
-        "original": {},
+        "original": {"prefix_prompt": "", "postfix_prompt": "", "negative_prompt": ""},
         "overlay": None,
+        "editable": False,
         "headless": True,
         "available": False,
     }
@@ -424,6 +673,65 @@ def test_headless_websocket_retired_desktop_commands_are_explicit():
     assert "result_upscale" in upscale_retired["message"]
     assert image_action_retired["type"] == "toast"
     assert "result_image_action/img2img" in image_action_retired["message"]
+
+
+def test_headless_hires_preset_overlay_read_write_reset(tmp_path):
+    preset_dir = tmp_path / "save" / "presets" / "WEBUI"
+    preset_dir.mkdir(parents=True)
+    (preset_dir / "fast1.json").write_text(
+        json.dumps({
+            "api_mode": "WEBUI",
+            "module_settings": {"pre_prompt": "anime", "post_prompt": "detailed"},
+            "main_settings": {"negative": "lowres"},
+        }),
+        encoding="utf-8",
+    )
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    context.set_api_mode("WEBUI")
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "read_hires_preset_overlay", "preset_name": "fast1"})
+        original = ws.receive_json()
+        ws.send_json({
+            "type": "write_hires_preset_overlay",
+            "preset_name": "fast1",
+            "body": {
+                "prefix_prompt": "edited prefix",
+                "postfix_prompt": "edited postfix",
+                "negative_prompt": "edited negative",
+            },
+        })
+        saved_toast = ws.receive_json()
+        saved_overlay = ws.receive_json()
+        ws.send_json({"type": "write_hires_preset_overlay", "preset_name": "fast1", "action": "reset"})
+        reset_toast = ws.receive_json()
+        reset_overlay = ws.receive_json()
+
+    assert original["editable"] is True
+    assert original["available"] is True
+    assert original["original"] == {
+        "prefix_prompt": "anime",
+        "postfix_prompt": "detailed",
+        "negative_prompt": "lowres",
+    }
+    assert original["overlay"] is None
+    assert saved_toast["level"] == "success"
+    assert saved_overlay["overlay"] == {
+        "prefix_prompt": "edited prefix",
+        "postfix_prompt": "edited postfix",
+        "negative_prompt": "edited negative",
+    }
+    assert reset_toast["level"] == "success"
+    assert reset_overlay["overlay"] is None
+    assert not (preset_dir / "fast1.hires.json").exists()
 
 
 def test_headless_websocket_auto_save_and_save_directory_state_are_server_owned(tmp_path):
@@ -498,13 +806,13 @@ with client.websocket_connect("/ws") as ws:
     hires_enabled = ws.receive_json()
     ws.send_json({"type": "set_module_param", "module_id": "webui_hiresfix_assist", "key": "target", "value": "768"})
     hires_target = ws.receive_json()
+    ws.send_json({"type": "get_module_state", "module_id": "e621_event"})
+    e621_state = ws.receive_json()
     retired_states = {}
     for module_id in [
         "character_reference",
         "vibe_transfer",
-        "instant_wildcard",
         "wildcard_status",
-        "e621_event",
         "ollama",
     ]:
         ws.send_json({"type": "get_module_state", "module_id": module_id})
@@ -532,6 +840,8 @@ print(json.dumps({
     "automation_timer": automation_updated.get("timer_minutes"),
     "hires_enabled": hires_enabled.get("enabled"),
     "hires_target": hires_target.get("target"),
+    "e621_available": e621_state.get("available"),
+    "e621_data_loaded": e621_state.get("data_loaded"),
     "remote_param_hires": context.remote_params.get("webui_hiresfix_assist"),
     "remote_param_target": context.remote_params.get("webui_hiresfix_assist_target"),
     "retired_modules": {
@@ -566,17 +876,203 @@ print(json.dumps({
         "automation_timer": "15",
         "hires_enabled": True,
         "hires_target": 768,
+        "e621_available": True,
+        "e621_data_loaded": True,
         "remote_param_hires": True,
         "remote_param_target": 768,
         "retired_modules": {
             "character_reference": {"available": False, "retired": True, "has_message": True},
             "vibe_transfer": {"available": False, "retired": True, "has_message": True},
-            "instant_wildcard": {"available": False, "retired": True, "has_message": True},
             "wildcard_status": {"available": False, "retired": True, "has_message": True},
-            "e621_event": {"available": False, "retired": True, "has_message": True},
             "ollama": {"available": False, "retired": True, "has_message": True},
         },
     }
+
+
+def test_headless_prompt_tool_chunk_and_instant_wildcard_are_editable(tmp_path):
+    context = WebSessionContext(repo_root=tmp_path, token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "chunk"})
+        initial_chunk = ws.receive_json()
+        ws.send_json({
+            "type": "set_module_param",
+            "module_id": "instant_wildcard",
+            "key": "upsert",
+            "value": json.dumps({"file": "custom.json", "key": "pose", "value": "standing, smile"}),
+        })
+        instant_state = ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "chunk"})
+        updated_chunk = ws.receive_json()
+
+    assert initial_chunk["type"] == "module_state"
+    assert initial_chunk["module_id"] == "chunk"
+    assert initial_chunk["groups"]
+    assert instant_state["module_id"] == "instant_wildcard"
+    assert instant_state["current_file"] == "custom.json"
+    assert instant_state["current_key"] == "pose"
+    custom_group = next(group for group in updated_chunk["groups"] if group["name"] == "custom")
+    assert custom_group["items"] == [{"key": "pose", "value": "standing, smile"}]
+    saved = tmp_path / "save" / "instant_wildcard" / "custom.json"
+    assert json.loads(saved.read_text(encoding="utf-8")) == {"pose": "standing, smile"}
+
+
+def test_headless_prompt_tool_wildcard_file_browser_roundtrip(tmp_path):
+    wildcard_root = tmp_path / "wildcards"
+    wildcard_root.mkdir()
+    (wildcard_root / "poses.txt").write_text("standing\nsitting\n", encoding="utf-8")
+    context = WebSessionContext(repo_root=tmp_path, token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "wildcard", "key": "get_file_tree", "value": ""})
+        tree = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "wildcard", "key": "read_file", "value": "poses.txt"})
+        content = ws.receive_json()
+        ws.send_json({
+            "type": "set_module_param",
+            "module_id": "wildcard",
+            "key": "save_file",
+            "value": json.dumps({"path": "poses.txt", "content": "jumping\nrunning\n"}),
+        })
+        saved = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "wildcard", "key": "preview_wildcard", "value": "poses"})
+        preview = ws.receive_json()
+
+    assert tree["type"] == "wildcard_manager"
+    assert tree["action"] == "file_tree"
+    assert tree["tree"][0]["name"] == "poses.txt"
+    assert content["action"] == "file_content"
+    assert content["content"] == "standing\nsitting\n"
+    assert saved["action"] == "file_content"
+    assert (wildcard_root / "poses.txt").read_text(encoding="utf-8") == "jumping\nrunning\n"
+    assert preview["action"] == "preview_result"
+    assert "jumping" in preview["result"] or "running" in preview["result"]
+
+
+def test_headless_prompt_tool_event_stream_toggles_runtime():
+    context = WebSessionContext(token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "event_stream"})
+        initial = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "event_stream", "key": "active", "value": "true"})
+        active = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "event_stream", "key": "restart", "value": "1"})
+        restarted = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "event_stream", "key": "active", "value": "false"})
+        inactive = ws.receive_json()
+
+    assert initial["module_id"] == "event_stream"
+    assert initial["available"] is True
+    assert initial["active"] is False
+    assert active["active"] is True
+    assert active["run_id"]
+    assert restarted["active"] is True
+    assert restarted["run_id"] != active["run_id"]
+    assert inactive["active"] is False
+
+
+def test_headless_prompt_tool_e621_event_browses_and_prepares_prompt(tmp_path):
+    data_path = tmp_path / "data" / "e621_data"
+    data_path.parent.mkdir(parents=True)
+    data_path.write_text(json.dumps({
+        "General": {
+            "Actions": {
+                "Pose": [
+                    {"tag": "looking_back", "kor": "", "count": 1200, "wiki_body": "[b]Looking back[/b] pose"},
+                    {"tag": "standing", "kor": "", "count": 900, "wiki_body": "Standing pose"},
+                ]
+            }
+        },
+        "Species": {},
+    }), encoding="utf-8")
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "e621_event"})
+        initial = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "e621_event", "key": "category", "value": "Actions"})
+        category = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "e621_event", "key": "selected_tag", "value": "looking_back"})
+        selected = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "e621_event", "key": "toggle_star", "value": "looking_back"})
+        starred = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "e621_event", "key": "generate", "value": "looking_back, standing"})
+        prompt_generated = ws.receive_json()
+        toast = ws.receive_json()
+        final_state = ws.receive_json()
+        dispatched = ws.receive_json()
+        queued_status = ws.receive_json()
+        queue_state = ws.receive_json()
+
+    assert initial["available"] is True
+    assert initial["data_loaded"] is True
+    assert initial["categories"][0]["name"] == "Actions"
+    assert category["folders"][0]["name"] == "Pose"
+    assert selected["selected"]["tag"] == "looking_back"
+    assert starred["selected"]["starred"] is True
+    assert prompt_generated["type"] == "prompt_generated"
+    assert prompt_generated["source"] == "e621_event"
+    assert "looking_back" in prompt_generated["prompt"] or "looking back" in prompt_generated["prompt"]
+    assert toast["level"] == "success"
+    assert final_state["module_id"] == "e621_event"
+    assert dispatched["type"] == "generation_dispatched"
+    assert dispatched["ok"] is True
+    assert queued_status["message"] == "queued"
+    assert queue_state["type"] == "queue_state"
+    assert queue_state["total"] == 1
+    starred_payload = json.loads((tmp_path / "save" / "e621_starred_v2.json").read_text(encoding="utf-8"))
+    assert starred_payload == {"starred_keys": ["looking_back"]}
+
+
+def test_headless_danbooru_routes_are_pyqt_free(monkeypatch):
+    def fake_fetch(query, *, characteristic_tags=None):
+        return {
+            "post_id": 123,
+            "post_url": "https://danbooru.donmai.us/posts/123",
+            "tags": {
+                "artist": [],
+                "copyright": [],
+                "character": [],
+                "general": ["blue archive", "halo"],
+                "meta": [],
+            },
+        }
+
+    monkeypatch.setattr("core.web_session_app.fetch_danbooru_post", fake_fetch)
+    context = WebSessionContext(token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    browser = client.post("/api/danbooru/browser/open", json={"query": "blue archive"})
+    post = client.post("/api/danbooru/post", json={"query": "123"})
+
+    assert browser.status_code == 200
+    assert browser.json()["url"] == "https://danbooru.donmai.us/posts?tags=blue%20archive"
+    assert browser.json()["open_external"] is True
+    assert post.status_code == 200
+    assert post.json()["post_id"] == 123
+    assert "blue" in post.json()["prompt"]
 
 
 def test_headless_websocket_verify_and_clear_api(tmp_path):
@@ -925,6 +1421,82 @@ def test_headless_generate_executes_result_store_and_history_without_imagewindow
     meta = client.get(f"/api/history/meta/{history_id}?full=true")
     assert meta.status_code == 200
     assert meta.json()["prompt"] == "result prompt"
+
+
+def test_headless_image_meta_carries_artist_thumb_request_fields():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+    )
+    context.api_service = _FakeApiService()
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "generate",
+            "prompt": "artist prompt",
+            "overrides": {
+                "resolution": "16 x 12",
+                "artist_thumb_request": True,
+                "artist_thumb_request_id": "artist-meta-1",
+                "artist_thumb_artist": "artist_alpha",
+                "_remote_queue_source": "Artist Thumb",
+                "_remote_queue_label": "artist_alpha",
+            },
+        })
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        image_meta = ws.receive_json()
+
+    assert image_meta["type"] == "image_meta"
+    assert image_meta["artist_thumb_request"] is True
+    assert image_meta["artist_thumb_request_id"] == "artist-meta-1"
+    assert image_meta["artist_thumb_artist"] == "artist_alpha"
+
+
+def test_headless_image_meta_carries_event_and_composite_preset_fields():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+    )
+    context.api_service = _FakeApiService()
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "generate",
+            "prompt": "preset prompt",
+            "overrides": {
+                "resolution": "16 x 12",
+                "event_preset_request": True,
+                "event_preset_request_id": "event-meta-1",
+                "remote_preset_request": True,
+                "remote_preset_request_id": "preset-meta-1",
+                "remote_preset_axes": ["events", "clothes"],
+            },
+        })
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        ws.receive_json()
+        image_meta = ws.receive_json()
+
+    assert image_meta["type"] == "image_meta"
+    assert image_meta["event_preset_request"] is True
+    assert image_meta["event_preset_request_id"] == "event-meta-1"
+    assert image_meta["remote_preset_request"] is True
+    assert image_meta["remote_preset_request_id"] == "preset-meta-1"
+    assert image_meta["remote_preset_axes"] == ["events", "clothes"]
 
 
 def test_headless_generate_executes_non_nai_backend_modes_without_desktop_controllers():

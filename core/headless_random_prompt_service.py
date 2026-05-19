@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any
 import weakref
 
@@ -60,6 +61,13 @@ class HeadlessRandomPromptService:
     def __init__(self, context: WebSessionContext):
         self.context = context
         self._runtime_registered = False
+        self._runtime_lock = RLock()
+
+    def warmup(self) -> bool:
+        """Preload the expensive headless prompt runtime without generating."""
+
+        self._ensure_headless_runtime()
+        return self._ensure_search_results({})
 
     def generate(
         self,
@@ -81,8 +89,30 @@ class HeadlessRandomPromptService:
                 rating_counts=self._rating_counts(),
             )
 
+        source_row_override = None
+        skip_random_events = False
+        event_stream = getattr(self.context, "event_stream_runtime", None)
+        if event_stream is not None and getattr(event_stream, "is_active", False):
+            request = event_stream.prepare_random_prompt_request(
+                self.context.search_results,
+                settings,
+                active_ratings=ratings,
+            )
+            if request.error_message:
+                return HeadlessRandomPromptResult(
+                    success=False,
+                    error=request.error_message,
+                    random_request_id=random_request_id,
+                    remaining=self.context.search_results.get_count(),
+                    rating_counts=self._rating_counts(),
+                )
+            settings = request.settings
+            ratings = request.active_ratings
+            source_row_override = request.source_row_override
+            skip_random_events = request.skip_random_prompt_events
+
         publish = getattr(self.context, "publish", None)
-        if callable(publish):
+        if callable(publish) and not skip_random_events:
             publish("random_prompt_triggered")
 
         service = self._prompt_generation_service()
@@ -90,6 +120,7 @@ class HeadlessRandomPromptService:
             self.context.search_results,
             settings,
             active_ratings=ratings,
+            source_row_override=source_row_override,
         )
         if preparation.error:
             return HeadlessRandomPromptResult(
@@ -174,22 +205,23 @@ class HeadlessRandomPromptService:
         return service
 
     def _ensure_headless_runtime(self) -> None:
-        if self._runtime_registered:
-            return
-        self._runtime_registered = True
-        self._ensure_wildcard_manager()
-        self._ensure_filter_data_manager()
+        with self._runtime_lock:
+            if self._runtime_registered:
+                return
+            self._ensure_wildcard_manager()
+            self._ensure_filter_data_manager()
 
-        from core.conditional_prompt_runtime import register_conditional_prompt_headless_runtime
-        from core.prompt_engineering_runtime import register_prompt_engineering_headless_runtime
-        from core.reference_inset_service import ReferenceInsetAutoInjectHook
+            from core.conditional_prompt_runtime import register_conditional_prompt_headless_runtime
+            from core.prompt_engineering_runtime import register_prompt_engineering_headless_runtime
+            from core.reference_inset_service import ReferenceInsetAutoInjectHook
 
-        register_conditional_prompt_headless_runtime(self.context)
-        register_prompt_engineering_headless_runtime(self.context)
-        if getattr(self.context, "reference_inset_headless_hook", None) is None:
-            hook = ReferenceInsetAutoInjectHook(self.context)
-            self.context.register_pipeline_hook(hook.get_pipeline_hook_info(), hook)
-            self.context.reference_inset_headless_hook = hook
+            register_conditional_prompt_headless_runtime(self.context)
+            register_prompt_engineering_headless_runtime(self.context)
+            if getattr(self.context, "reference_inset_headless_hook", None) is None:
+                hook = ReferenceInsetAutoInjectHook(self.context)
+                self.context.register_pipeline_hook(hook.get_pipeline_hook_info(), hook)
+                self.context.reference_inset_headless_hook = hook
+            self._runtime_registered = True
 
     def _ensure_wildcard_manager(self) -> None:
         if getattr(self.context, "wildcard_manager", None) is not None:

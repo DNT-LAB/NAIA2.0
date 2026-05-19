@@ -29,6 +29,6 @@ if not exist "NAIA_web_headless.py" (
 )
 
 echo Starting NAIA 2.0 Headless Web Session...
-echo Web UI: http://127.0.0.1:7243/
+echo Web UI: http://127.0.0.1:7243/ ^(or the next available port if 7243 is busy^)
 
-python NAIA_web_headless.py
+python NAIA_web_headless.py --auto-port

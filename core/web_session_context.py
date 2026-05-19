@@ -42,6 +42,25 @@ REMOTE_BOOLEAN_PARAMS = {
     "resolution_preset_enabled",
     "webui_hiresfix_assist",
     "webui_hiresfix_assist_enabled",
+    "SMEA",
+    "DYN",
+    "VAR+",
+    "DECRISP",
+}
+REMOTE_INT_PARAMS = {
+    "steps",
+    "hires_steps",
+    "width",
+    "height",
+    "webui_hiresfix_assist_target",
+}
+REMOTE_FLOAT_PARAMS = {
+    "cfg_scale",
+    "cfg_rescale",
+    "hr_scale",
+    "denoising_strength",
+    "hr_cfg",
+    "rescale_cfg",
 }
 AUTO_SAVE_DEFAULTS = {
     "auto_save": False,
@@ -69,11 +88,10 @@ SAVE_DIRECTORY_CLASSIFICATION_OPTIONS = [
 HEADLESS_RETIRED_MODULES = {
     "character_reference": "Character Reference image controls are deferred until a PyQt-free image storage service exists.",
     "vibe_transfer": "Vibe Transfer image controls are deferred until a PyQt-free image storage service exists.",
-    "instant_wildcard": "Instant Wildcard editing is deferred; supported headless wildcard state is limited to prompt squeeze.",
     "wildcard_status": "Wildcard Status desktop wrapper is retired in the supported headless runtime.",
-    "e621_event": "E621 Event desktop module is retired in the supported headless runtime.",
     "ollama": "Ollama desktop assistant controls are retired in the supported headless runtime.",
 }
+HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
 
 
 class TokenStore(Protocol):
@@ -229,6 +247,15 @@ class WebSessionContext:
             self.api_config_service = ApiConfigService(self.secure_token_manager, cloudflared=cloudflared)
         self.generation_queue_manager = self._create_queue_manager()
         self.last_api_payloads: dict[str, Any] = {}
+        self.event_stream_runtime = self._create_event_stream_runtime()
+
+    def _create_event_stream_runtime(self):
+        try:
+            from core.event_tree import EventStreamRuntime
+
+            return EventStreamRuntime(self)
+        except Exception:
+            return None
 
     def _default_token_manager(self) -> TokenStore:
         from core.secure_token_manager import SecureTokenManager
@@ -385,13 +412,15 @@ class WebSessionContext:
         if clean_id == "webui_hiresfix_assist":
             return self._webui_hiresfix_assist_module_state()
         if clean_id == "event_stream":
-            return self._module_state_payload("event_stream", {
-                "active": False,
-                "available": False,
-                "message": "Event Stream is retired in the supported headless runtime.",
-            })
+            return self._event_stream_module_state()
         if clean_id == "wildcard":
             return self._wildcard_module_state()
+        if clean_id == "instant_wildcard":
+            return self._instant_wildcard_module_state()
+        if clean_id == "chunk":
+            return self._chunk_module_state()
+        if clean_id == "e621_event":
+            return self._e621_event_module_state()
         if clean_id in HEADLESS_RETIRED_MODULES:
             return self._retired_module_state(clean_id)
         return {
@@ -456,8 +485,14 @@ class WebSessionContext:
             return self._set_automation_param(clean_key, value)
         if clean_id == "webui_hiresfix_assist":
             return self._set_webui_hiresfix_assist_param(clean_key, value)
+        if clean_id == "event_stream":
+            return self._set_event_stream_param(clean_key, value)
         if clean_id == "wildcard":
             return self._set_wildcard_param(clean_key, value)
+        if clean_id == "instant_wildcard":
+            return self._set_instant_wildcard_param(clean_key, value)
+        if clean_id == "e621_event":
+            return self._set_e621_event_param(clean_key, value)
         if clean_id in HEADLESS_RETIRED_MODULES:
             return self._retired_module_state(clean_id, action=clean_key)
         return None
@@ -782,6 +817,52 @@ class WebSessionContext:
         self.remote_params["webui_hiresfix_assist_target"] = int(state["target"])
         return self._webui_hiresfix_assist_module_state()
 
+    def _event_stream_module_state(self) -> dict[str, Any]:
+        runtime = getattr(self, "event_stream_runtime", None)
+        if runtime is None:
+            return self._module_state_payload("event_stream", {
+                "available": False,
+                "active": False,
+                "message": "Event Stream runtime is not available.",
+            })
+        state = runtime.get_state() if hasattr(runtime, "get_state") else {}
+        return self._module_state_payload("event_stream", {
+            "available": True,
+            "headless": True,
+            **state,
+        })
+
+    def _set_event_stream_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        runtime = getattr(self, "event_stream_runtime", None)
+        if runtime is None:
+            return self._toast("Event Stream runtime is not available.", level="error")
+        if key == "active":
+            enabled = self._coerce_bool(value)
+            if enabled and not runtime.is_active:
+                runtime.start_linear()
+            elif not enabled and runtime.is_active:
+                runtime.stop()
+        elif key == "restart":
+            runtime.start_linear()
+        else:
+            return None
+        return self._event_stream_module_state()
+
+    def _e621_event_service(self):
+        service = getattr(self, "e621_event_service", None)
+        if service is None:
+            from core.e621_event_service import E621EventService
+
+            service = E621EventService(self)
+            self.e621_event_service = service
+        return service
+
+    def _e621_event_module_state(self) -> dict[str, Any]:
+        return self._e621_event_service().state()
+
+    def _set_e621_event_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
+        return self._e621_event_service().set_param(key, value)
+
     def _wildcard_module_state(self) -> dict[str, Any]:
         wildcard_count = 0
         manager = self.wildcard_manager
@@ -794,7 +875,7 @@ class WebSessionContext:
             "state": [],
             "prompt_squeeze": bool(self.prompt_squeeze_enabled),
             "wildcard_count": wildcard_count,
-            "file_browser_available": False,
+            "file_browser_available": True,
         })
 
     def _set_wildcard_param(self, key: str, value: Any) -> dict[str, Any] | None:
@@ -802,8 +883,446 @@ class WebSessionContext:
             self.prompt_squeeze_enabled = self._coerce_bool(value)
             return self._wildcard_module_state()
         if key in {"reset_sequential", "reload"}:
+            self._reload_wildcard_manager()
             return self._wildcard_module_state()
-        return self._toast(f"Wildcard file action retired in headless: {key}", level="info")
+        if key == "get_file_tree":
+            return {"type": "wildcard_manager", "action": "file_tree", "tree": self._scan_wildcard_tree()}
+        if key == "read_file":
+            content = self._read_wildcard_file(str(value or ""))
+            if content is None:
+                return self._toast("Wildcard file not found", level="error")
+            return {
+                "type": "wildcard_manager",
+                "action": "file_content",
+                "path": str(value or ""),
+                "content": content,
+            }
+        if key == "save_file":
+            try:
+                payload = json.loads(str(value or "{}"))
+            except json.JSONDecodeError:
+                return self._toast("Invalid wildcard save payload", level="error")
+            return self._save_wildcard_file(
+                str(payload.get("path") or ""),
+                str(payload.get("content") or ""),
+            )
+        if key == "delete_file":
+            return self._delete_wildcard_file(str(value or ""))
+        if key == "create_file":
+            return self._create_wildcard_file(str(value or ""))
+        if key == "preview_wildcard":
+            return {
+                "type": "wildcard_manager",
+                "action": "preview_result",
+                "name": str(value or ""),
+                "result": self._preview_wildcard(str(value or "")),
+            }
+        return self._toast(f"Wildcard action is not supported in headless: {key}", level="info")
+
+    def _instant_wildcard_store(self, *, force: bool = False) -> dict[str, Any]:
+        from core.instant_wildcard_service import DEFAULT_INSTANT_WILDCARD_SAVE_PATH, load_instant_wildcards
+
+        signature = None
+        if not force:
+            cached = getattr(self, "instant_wildcard_store", None)
+            signature = getattr(self, "instant_wildcard_signature", None)
+            if isinstance(cached, dict) and signature == cached.get("signature"):
+                return cached
+        root = Path(self.repo_root) / DEFAULT_INSTANT_WILDCARD_SAVE_PATH
+        store = load_instant_wildcards(root)
+        self.instant_wildcard_store = store
+        self.instant_wildcard_signature = store.get("signature")
+        self._apply_instant_wildcard_to_manager(store)
+        return store
+
+    def _apply_instant_wildcard_to_manager(self, store: dict[str, Any]) -> None:
+        manager = self.wildcard_manager
+        if manager is not None and hasattr(manager, "update_instant_wildcards"):
+            try:
+                manager.update_instant_wildcards(
+                    store.get("instant_wildcard_dict", {}),
+                    store.get("instant_wildcard_tree", {}),
+                )
+                return
+            except Exception:
+                pass
+        self.instant_wildcard_dict = store.get("instant_wildcard_dict", {})
+        self.instant_wildcard_tree = store.get("instant_wildcard_tree", {})
+
+    def _instant_wildcard_module_state(self) -> dict[str, Any]:
+        from core.instant_wildcard_service import instant_wildcard_group_name, select_instant_wildcard_item
+
+        store = self._instant_wildcard_store()
+        json_data = store.get("json_data", {}) if isinstance(store, dict) else {}
+        current_file = getattr(self, "instant_wildcard_current_file", None)
+        current_key = getattr(self, "instant_wildcard_current_key", None)
+        selected_file, selected_key = select_instant_wildcard_item(json_data, current_file, current_key)
+        self.instant_wildcard_current_file = selected_file
+        self.instant_wildcard_current_key = selected_key
+        current_items = json_data.get(selected_file or "", {}) if isinstance(json_data, dict) else {}
+        current_items = current_items if isinstance(current_items, dict) else {}
+        files = []
+        for filename, data in json_data.items():
+            data = data if isinstance(data, dict) else {}
+            files.append({
+                "name": filename,
+                "group": instant_wildcard_group_name(filename),
+                "count": len(data),
+                "selected": filename == selected_file,
+            })
+        items = [
+            {
+                "key": key,
+                "value": str(current_items.get(key) or ""),
+                "selected": key == selected_key,
+            }
+            for key in sorted(current_items.keys())
+        ]
+        current_value = str(current_items.get(selected_key, "") or "") if selected_key else ""
+        return self._module_state_payload("instant_wildcard", {
+            "files": files,
+            "items": items,
+            "current_file": selected_file or "",
+            "current_group": instant_wildcard_group_name(selected_file or "") if selected_file else "",
+            "current_key": selected_key or "",
+            "current_value": current_value,
+            "flat_count": len(store.get("instant_wildcard_dict", {}) or {}),
+            "save_path": str(store.get("save_path") or ""),
+        })
+
+    def _chunk_module_state(self) -> dict[str, Any]:
+        from core.instant_wildcard_service import instant_wildcard_group_name
+
+        store = self._instant_wildcard_store()
+        json_data = store.get("json_data", {}) if isinstance(store, dict) else {}
+        groups = []
+        for filename, items in json_data.items():
+            if not isinstance(items, dict):
+                continue
+            groups.append({
+                "name": instant_wildcard_group_name(filename),
+                "items": [
+                    {"key": str(key), "value": str(value)}
+                    for key, value in sorted(items.items(), key=lambda item: str(item[0]))
+                ],
+            })
+        return {"type": "module_state", "module_id": "chunk", "available": True, "headless": True, "groups": groups}
+
+    def _set_instant_wildcard_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        from core.instant_wildcard_service import (
+            instant_wildcard_group_name,
+            normalize_instant_wildcard_filename,
+            write_instant_wildcard_file,
+        )
+
+        store = self._instant_wildcard_store(force=key == "reload")
+        json_data = store.get("json_data", {}) if isinstance(store, dict) else {}
+        if key == "reload":
+            return self._instant_wildcard_module_state()
+        if key == "select_file":
+            filename = normalize_instant_wildcard_filename(str(value or ""))
+            if filename in json_data:
+                self.instant_wildcard_current_file = filename
+                items = json_data.get(filename, {})
+                self.instant_wildcard_current_key = next(iter(sorted(items.keys()))) if isinstance(items, dict) and items else None
+            return self._instant_wildcard_module_state()
+        if key == "select_key":
+            item_key = str(value or "").strip()
+            filename = getattr(self, "instant_wildcard_current_file", None)
+            if filename in json_data and item_key in json_data.get(filename, {}):
+                self.instant_wildcard_current_key = item_key
+            return self._instant_wildcard_module_state()
+        if key == "add_group":
+            filename = normalize_instant_wildcard_filename(str(value or ""))
+            if not filename:
+                return self._toast("Instant wildcard group is required", level="error")
+            json_data.setdefault(filename, {})
+            write_instant_wildcard_file(json_data, filename, store.get("save_path") or "")
+            self.instant_wildcard_current_file = filename
+            self.instant_wildcard_current_key = None
+            self._instant_wildcard_store(force=True)
+            return self._instant_wildcard_module_state()
+        if key == "value":
+            filename = getattr(self, "instant_wildcard_current_file", None)
+            item_key = getattr(self, "instant_wildcard_current_key", None)
+            if filename and item_key:
+                json_data.setdefault(filename, {})[item_key] = str(value or "")
+                write_instant_wildcard_file(json_data, filename, store.get("save_path") or "")
+                self._instant_wildcard_store(force=True)
+            return self._instant_wildcard_module_state()
+        if key in {"upsert", "delete", "rename"}:
+            try:
+                payload = json.loads(str(value or "{}"))
+            except json.JSONDecodeError:
+                return self._toast("Invalid instant wildcard payload", level="error")
+            filename = normalize_instant_wildcard_filename(
+                str(payload.get("file") or getattr(self, "instant_wildcard_current_file", "") or "")
+            )
+            if not filename:
+                return self._toast("Instant wildcard file is required", level="error")
+            if key == "upsert":
+                item_key = str(payload.get("key") or "").strip()
+                if not item_key:
+                    return self._toast("Instant wildcard key is required", level="error")
+                json_data.setdefault(filename, {})[item_key] = str(payload.get("value") or "")
+                self.instant_wildcard_current_file = filename
+                self.instant_wildcard_current_key = item_key
+            elif key == "delete":
+                item_key = str(payload.get("key") or "").strip()
+                if filename in json_data and item_key in json_data[filename]:
+                    del json_data[filename][item_key]
+                    image_path = (
+                        Path(self.repo_root)
+                        / "save"
+                        / "instant_wildcard"
+                        / "images"
+                        / instant_wildcard_group_name(filename)
+                        / f"{item_key}.png"
+                    )
+                    if image_path.exists():
+                        try:
+                            image_path.unlink()
+                        except Exception:
+                            pass
+                if getattr(self, "instant_wildcard_current_key", None) == item_key:
+                    remaining = json_data.get(filename, {})
+                    self.instant_wildcard_current_key = next(iter(sorted(remaining.keys()))) if remaining else None
+            elif key == "rename":
+                old_key = str(payload.get("old_key") or "").strip()
+                new_key = str(payload.get("new_key") or "").strip()
+                if filename in json_data and old_key in json_data[filename] and new_key:
+                    json_data[filename][new_key] = json_data[filename].pop(old_key)
+                    self.instant_wildcard_current_file = filename
+                    self.instant_wildcard_current_key = new_key
+            write_instant_wildcard_file(json_data, filename, store.get("save_path") or "")
+            self._instant_wildcard_store(force=True)
+            return self._instant_wildcard_module_state()
+        return self._toast(f"Instant wildcard action is not supported in headless: {key}", level="info")
+
+    def _wildcard_base_dir(self) -> Path:
+        manager = self.wildcard_manager
+        base = getattr(manager, "wildcards_dir", None) if manager is not None else None
+        if base:
+            return Path(base)
+        return Path(self.repo_root) / "wildcards"
+
+    def _validate_wildcard_path(self, rel_path: str) -> Path | None:
+        clean = str(rel_path or "").replace("\\", "/").strip().lstrip("/")
+        if not clean:
+            return None
+        base = self._wildcard_base_dir().resolve()
+        target = (base / clean).resolve()
+        try:
+            target.relative_to(base)
+        except ValueError:
+            return None
+        return target
+
+    def _scan_wildcard_tree(self) -> list[dict[str, Any]]:
+        base = self._wildcard_base_dir()
+        if not base.exists():
+            return []
+        tree: list[dict[str, Any]] = []
+        for item in sorted(base.iterdir(), key=lambda path: path.name.lower()):
+            if item.name.startswith("."):
+                continue
+            if item.is_dir():
+                folder = {"name": item.name, "type": "folder", "files": []}
+                for path in sorted(item.rglob("*.txt"), key=lambda path: str(path).lower()):
+                    try:
+                        lines = len(path.read_text(encoding="utf-8").splitlines())
+                    except Exception:
+                        lines = 0
+                    folder["files"].append({
+                        "name": path.name,
+                        "path": str(path.relative_to(base)).replace("\\", "/"),
+                        "lines": lines,
+                    })
+                if folder["files"]:
+                    tree.append(folder)
+            elif item.suffix.lower() == ".txt":
+                try:
+                    lines = len(item.read_text(encoding="utf-8").splitlines())
+                except Exception:
+                    lines = 0
+                tree.append({"name": item.name, "type": "file", "path": item.name, "lines": lines})
+        return tree
+
+    def _read_wildcard_file(self, rel_path: str) -> str | None:
+        target = self._validate_wildcard_path(rel_path)
+        if target is None or not target.is_file() or target.suffix.lower() != ".txt":
+            return None
+        return target.read_text(encoding="utf-8")
+
+    def _save_wildcard_file(self, rel_path: str, content: str) -> dict[str, Any]:
+        if not str(rel_path or "").endswith(".txt"):
+            return self._toast("Wildcard filename must end with .txt", level="error")
+        target = self._validate_wildcard_path(rel_path)
+        if target is None:
+            return self._toast("Invalid wildcard path", level="error")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        self._reload_wildcard_manager()
+        return {
+            "type": "wildcard_manager",
+            "action": "file_content",
+            "path": str(rel_path).replace("\\", "/"),
+            "content": content,
+        }
+
+    def _delete_wildcard_file(self, rel_path: str) -> dict[str, Any]:
+        target = self._validate_wildcard_path(rel_path)
+        if target is None or not target.is_file() or target.suffix.lower() != ".txt":
+            return self._toast("Wildcard file not found", level="error")
+        target.unlink()
+        self._reload_wildcard_manager()
+        return {
+            "type": "wildcard_manager",
+            "action": "file_deleted",
+            "path": str(rel_path).replace("\\", "/"),
+        }
+
+    def _create_wildcard_file(self, rel_path: str) -> dict[str, Any]:
+        clean = str(rel_path or "").strip()
+        if not clean.endswith(".txt"):
+            clean += ".txt"
+        target = self._validate_wildcard_path(clean)
+        if target is None:
+            return self._toast("Invalid wildcard path", level="error")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_text("", encoding="utf-8")
+        self._reload_wildcard_manager()
+        return {
+            "type": "wildcard_manager",
+            "action": "file_content",
+            "path": clean.replace("\\", "/"),
+            "content": "",
+        }
+
+    def _preview_wildcard(self, name: str) -> str:
+        import random
+
+        clean = str(name or "").strip().replace("\\", "/")
+        if clean.endswith(".txt"):
+            clean = clean[:-4]
+        entries = []
+        manager = self.wildcard_manager
+        tree = getattr(manager, "wildcard_dict_tree", {}) if manager is not None else {}
+        if isinstance(tree, dict):
+            entries = list(tree.get(clean, []))
+        if not entries:
+            file_content = self._read_wildcard_file(f"{clean}.txt")
+            if file_content is None:
+                file_content = self._read_wildcard_file(f"{clean.replace('/', '-')}.txt")
+            entries = [(1, line.strip()) for line in str(file_content or "").splitlines() if line.strip()]
+        if not entries:
+            return f"Wildcard '{clean}' not found"
+        weights = []
+        texts = []
+        for entry in entries:
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                weights.append(float(entry[0]) if str(entry[0]).replace(".", "", 1).isdigit() else 1.0)
+                texts.append(str(entry[1]))
+            else:
+                weights.append(1.0)
+                texts.append(str(entry))
+        return "\n".join(f"#{index + 1}: {random.choices(texts, weights=weights, k=1)[0]}" for index in range(5))
+
+    def _reload_wildcard_manager(self) -> None:
+        manager = self.wildcard_manager
+        if manager is not None and hasattr(manager, "reload_wildcards"):
+            try:
+                manager.reload_wildcards()
+            except Exception:
+                pass
+
+    def hires_overlay_response(self, preset_name: str) -> dict[str, Any]:
+        name = str(preset_name or "").strip()
+        response = {
+            "type": "hires_preset_overlay",
+            "preset_name": name,
+            "original": {"prefix_prompt": "", "postfix_prompt": "", "negative_prompt": ""},
+            "overlay": None,
+            "editable": False,
+            "available": False,
+            "headless": True,
+        }
+        path = self._hires_overlay_path(name)
+        if path is None:
+            return response
+        response["editable"] = True
+        response["available"] = True
+        preset_path = path.parent / f"{name}.json"
+        if preset_path.exists():
+            try:
+                preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
+                module_settings = preset_data.get("module_settings", {}) if isinstance(preset_data, dict) else {}
+                main_settings = preset_data.get("main_settings", {}) if isinstance(preset_data, dict) else {}
+                module_settings = module_settings if isinstance(module_settings, dict) else {}
+                main_settings = main_settings if isinstance(main_settings, dict) else {}
+                response["original"] = {
+                    "prefix_prompt": str(module_settings.get("pre_prompt", "") or ""),
+                    "postfix_prompt": str(module_settings.get("post_prompt", "") or ""),
+                    "negative_prompt": str(
+                        main_settings.get("negative") or main_settings.get("negative_prompt") or ""
+                    ),
+                }
+            except Exception:
+                pass
+        if path.exists():
+            try:
+                overlay = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(overlay, dict):
+                    response["overlay"] = {
+                        "prefix_prompt": str(overlay.get("prefix_prompt", "") or ""),
+                        "postfix_prompt": str(overlay.get("postfix_prompt", "") or ""),
+                        "negative_prompt": str(overlay.get("negative_prompt", "") or ""),
+                    }
+            except Exception:
+                pass
+        return response
+
+    def write_hires_overlay(self, preset_name: str, body: dict[str, Any] | None) -> tuple[bool, str]:
+        path = self._hires_overlay_path(preset_name)
+        if path is None:
+            return False, "WEBUI 모드의 일반 프리셋만 편집할 수 있습니다."
+        source = body if isinstance(body, dict) else {}
+        payload = {
+            "schema_version": 1,
+            "prefix_prompt": str(source.get("prefix_prompt", "") or ""),
+            "postfix_prompt": str(source.get("postfix_prompt", "") or ""),
+            "negative_prompt": str(source.get("negative_prompt", "") or ""),
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            return True, f"Overlay saved: {path.name}"
+        except Exception as exc:
+            return False, f"저장 실패: {exc}"
+
+    def reset_hires_overlay(self, preset_name: str) -> tuple[bool, str]:
+        path = self._hires_overlay_path(preset_name)
+        if path is None:
+            return False, "WEBUI 모드의 일반 프리셋만 편집할 수 있습니다."
+        try:
+            if path.exists():
+                path.unlink()
+                return True, f"Overlay removed: {path.name}"
+            return True, "Overlay already absent."
+        except Exception as exc:
+            return False, f"삭제 실패: {exc}"
+
+    def _hires_overlay_path(self, preset_name: str) -> Path | None:
+        name = str(preset_name or "").strip()
+        if name in HIRES_OVERLAY_DISALLOWED_NAMES:
+            return None
+        safe_name = Path(name).name
+        if safe_name != name:
+            return None
+        if self.get_api_mode() != "WEBUI":
+            return None
+        return Path(self.repo_root) / "save" / "presets" / "WEBUI" / f"{safe_name}.hires.json"
 
     def _retired_module_state(self, module_id: str, *, action: str | None = None) -> dict[str, Any]:
         message = HEADLESS_RETIRED_MODULES.get(
@@ -858,14 +1377,21 @@ class WebSessionContext:
         }
 
     def generation_param_schema_payload(self) -> dict[str, Any]:
+        from core.resolution_utils import ANIMA_RESOLUTION_LABELS, STANDARD_1MP_RESOLUTION_LABELS
+
+        mode = self.get_api_mode()
+        resolution_options = list(ANIMA_RESOLUTION_LABELS if mode == "COMFYUI" else STANDARD_1MP_RESOLUTION_LABELS)
+        resolution = str(self.remote_params.get("resolution") or "832 x 1216")
+        if resolution not in resolution_options:
+            resolution_options.append(resolution)
         payload = {
             "type": "params",
-            "api_mode": self.get_api_mode(),
+            "api_mode": mode,
             "schema_only": False,
             "model": "NAID4.5F",
             "sampler": "k_euler_ancestral",
             "scheduler": "karras",
-            "resolution": "832 x 1216",
+            "resolution": resolution,
             "steps": 28,
             "cfg_scale": 5.0,
             "cfg_rescale": 0.0,
@@ -873,13 +1399,61 @@ class WebSessionContext:
             "seed_fixed": False,
             "random_resolution": False,
             "auto_fit_resolution": False,
-            "options_model": ["NAID4.5F"],
-            "options_sampler": ["k_euler_ancestral"],
-            "options_scheduler": ["karras"],
-            "options_resolution": ["832 x 1216", "1216 x 832", "1024 x 1024"],
+            "options_model": self._model_options_for_mode(mode),
+            "options_sampler": self._sampler_options_for_mode(mode),
+            "options_scheduler": self._scheduler_options_for_mode(mode),
+            "options_resolution": resolution_options,
             "steps_range": [1, 50],
-            "nai_flags_enabled": {},
+            "nai_flags_enabled": {
+                "SMEA": mode == "NAI",
+                "DYN": mode == "NAI",
+                "VAR+": mode == "NAI",
+                "DECRISP": mode == "NAI",
+            },
         }
+        if mode == "NAI":
+            payload.update({
+                "SMEA": False,
+                "DYN": False,
+                "VAR+": False,
+                "DECRISP": False,
+            })
+        elif mode == "WEBUI":
+            hires_state = self._normalized_webui_hiresfix_assist_state(self.webui_hiresfix_assist_state)
+            payload.update({
+                "enable_hr": False,
+                "hr_scale": 2.0,
+                "hr_upscaler": "Latent (nearest-exact)",
+                "denoising_strength": 0.5,
+                "hires_steps": 0,
+                "hr_cfg": 7.0,
+                "options_hr_upscaler": [
+                    "Latent (nearest-exact)",
+                    "Latent",
+                    "Lanczos",
+                    "Nearest",
+                    "ESRGAN_4x",
+                    "R-ESRGAN 4x+",
+                    "R-ESRGAN 4x+ Anime6B",
+                ],
+                "webui_hiresfix_assist": bool(hires_state["enabled"]),
+                "webui_hiresfix_assist_target": int(hires_state["target"]),
+                "hires_preset_swap": str(self.remote_params.get("hires_preset_swap") or ""),
+                "resolution_preset_enabled": bool(self.remote_params.get("resolution_preset_enabled", False)),
+                "resolution_preset": str(self.remote_params.get("resolution_preset") or "standard"),
+                "anima_weight": str(self.remote_params.get("anima_weight") or self.remote_params.get("random_prompt_weight") or ""),
+            })
+        elif mode == "COMFYUI":
+            payload.update({
+                "sampling_mode": str(self.remote_params.get("sampling_mode") or "eps"),
+                "rescale_cfg": self.remote_params.get("rescale_cfg", 0.0),
+                "anima_weight": str(self.remote_params.get("anima_weight") or self.remote_params.get("random_prompt_weight") or ""),
+                "resolution_preset_enabled": bool(self.remote_params.get("resolution_preset_enabled", False)),
+                "resolution_preset": str(self.remote_params.get("resolution_preset") or "standard"),
+                "comfyui_workflow": dict(self.remote_params.get("comfyui_workflow") or {}),
+                "comfyui_workflow_has_custom": bool(self.remote_params.get("comfyui_workflow_has_custom", False)),
+                "comfyui_workflow_label": str(self.remote_params.get("comfyui_workflow_label") or "Default workflow"),
+            })
         payload.update(self.remote_params)
         return payload
 
@@ -887,7 +1461,45 @@ class WebSessionContext:
     def _coerce_remote_param(key: str, value: Any) -> Any:
         if key in REMOTE_BOOLEAN_PARAMS:
             return WebSessionContext._coerce_bool(value)
+        if key in REMOTE_INT_PARAMS:
+            try:
+                if value is None or value == "":
+                    return ""
+                return int(float(value))
+            except (TypeError, ValueError):
+                return value
+        if key in REMOTE_FLOAT_PARAMS:
+            try:
+                if value is None or value == "":
+                    return ""
+                return float(value)
+            except (TypeError, ValueError):
+                return value
         return value
+
+    @staticmethod
+    def _model_options_for_mode(mode: str) -> list[str]:
+        if mode == "WEBUI":
+            return ["Stable Diffusion"]
+        if mode == "COMFYUI":
+            return ["ComfyUI Workflow"]
+        return ["NAID4.5F", "NAID4.5", "NAID4", "NAID3"]
+
+    @staticmethod
+    def _sampler_options_for_mode(mode: str) -> list[str]:
+        if mode == "WEBUI":
+            return ["Euler a", "Euler", "DPM++ 2M", "DPM++ 2M Karras"]
+        if mode == "COMFYUI":
+            return ["euler", "euler_ancestral", "dpmpp_2m", "dpmpp_sde"]
+        return ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "ddim"]
+
+    @staticmethod
+    def _scheduler_options_for_mode(mode: str) -> list[str]:
+        if mode == "WEBUI":
+            return ["Automatic", "Karras", "Exponential", "SGM Uniform"]
+        if mode == "COMFYUI":
+            return ["normal", "karras", "exponential", "sgm_uniform"]
+        return ["karras", "native", "exponential", "polyexponential"]
 
     @staticmethod
     def _coerce_bool(value: Any) -> bool:
@@ -1026,7 +1638,7 @@ class WebSessionContext:
         source = raw if isinstance(raw, dict) else {}
         target = 768 if str(source.get("target") or source.get("webui_hiresfix_assist_target") or "").strip() == "768" else 512
         enabled = WebSessionContext._coerce_bool(
-            source.get("enabled", source.get("webui_hiresfix_assist", False))
+            source.get("enabled", source.get("webui_hiresfix_assist", True))
         )
         return {
             "enabled": enabled,

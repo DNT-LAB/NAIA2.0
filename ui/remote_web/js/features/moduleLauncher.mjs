@@ -12,7 +12,7 @@ const MODULE_REGISTRY = {
   },
   danbooru_browser: {
     label: '📦 Danbooru',
-    title: 'Danbooru 웹 (Qt) 별도 창 열기',
+    title: 'Danbooru 웹 열기',
     category: 'prompt_tools',
     action: 'danbooru_browser',
     className: 'module-detached-tool',

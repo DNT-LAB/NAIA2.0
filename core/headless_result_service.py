@@ -185,7 +185,7 @@ class HeadlessResultStore:
 
     def _build_image_meta(self, item: HeadlessHistoryItem) -> dict[str, Any]:
         params = item.generation_params
-        return {
+        payload = {
             "width": item.image.width,
             "height": item.image.height,
             "size_kb": len(item.webp_bytes) // 1024,
@@ -200,6 +200,16 @@ class HeadlessResultStore:
             "model": params.get("model", ""),
             "remote_queue_source": str(params.get("_remote_queue_source") or ""),
         }
+        for key, value in params.items():
+            if str(key).startswith("artist_thumb_"):
+                payload[key] = value
+            elif str(key).startswith("event_preset_"):
+                payload[key] = value
+            elif str(key).startswith("remote_preset_"):
+                payload[key] = value
+        if payload.get("artist_thumb_request") and not payload.get("artist_thumb_artist"):
+            payload["artist_thumb_artist"] = str(params.get("_remote_queue_label") or "")
+        return payload
 
     def _build_metadata_payload(self, item: HeadlessHistoryItem, image_meta: dict[str, Any]) -> dict[str, Any]:
         summary = {

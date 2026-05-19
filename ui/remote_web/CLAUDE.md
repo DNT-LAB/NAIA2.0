@@ -9,6 +9,8 @@
 1. **CLI**: `python NAIA_web_headless.py` (런처: `run_NAIA_web.bat` / `run_NAIA_web.command`)
 2. **서버**: `core.web_session_app.create_headless_app()` + `WebSessionContext`
 
+설치 의존성은 `requirements-headless.txt` 또는 기본 `requirements.txt` 를 사용한다. PyQt/WebEngine/QScintilla 의존성은 legacy desktop requirements 파일에만 둔다.
+
 `NAIA_cold_v4.py --web-session --allow-legacy-web-session` 은 desktop-backed legacy 디버깅 경로이며 지원 Remote Web 런타임으로 취급하지 않는다.
 
 ## 파일 구조

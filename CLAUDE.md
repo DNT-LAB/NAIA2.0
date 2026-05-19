@@ -32,6 +32,10 @@ NAIA2.0/
 - legacy 데스크톱 모드: `python NAIA_cold_v4.py --desktop` (또는 `run_NAIA.bat` / `run_NAIA.command`)
 - legacy desktop-backed Web Session: `python NAIA_cold_v4.py --web-session --allow-legacy-web-session` (임시 디버깅 전용)
 
+의존성:
+- 지원 웹 세션: `pip install -r requirements-headless.txt` 또는 `requirements.txt`
+- legacy 데스크톱: Windows `requirements-desktop-legacy.txt`, macOS `requirements-desktop-legacy-mac.txt`, Linux `requirements-desktop-legacy-linux.txt`
+
 ---
 
 ## 핵심 원칙

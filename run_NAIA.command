@@ -152,9 +152,9 @@ fi
 
 echo ""
 
-# requirements.txt 확인
-if [ ! -f "requirements_mac.txt" ]; then
-    echo -e "${RED}❌ requirements.txt 파일이 없습니다.${NC}"
+# requirements-desktop-legacy-mac.txt 확인
+if [ ! -f "requirements-desktop-legacy-mac.txt" ]; then
+    echo -e "${RED}❌ requirements-desktop-legacy-mac.txt 파일이 없습니다.${NC}"
     echo "   NAIA 프로젝트 폴더에서 실행해주세요."
     read -p "엔터를 눌러 종료..."
     exit 1
@@ -169,7 +169,7 @@ echo ""
 pip install --upgrade pip --quiet
 
 # requirements 설치
-pip install -r requirements_mac.txt
+pip install -r requirements-desktop-legacy-mac.txt
 
 if [ $? -eq 0 ]; then
     echo ""
@@ -179,7 +179,7 @@ else
     echo -e "${RED}❌ 라이브러리 설치 중 오류 발생${NC}"
     echo -e "${YELLOW}💡 해결 방법:${NC}"
     echo "   1. 인터넷 연결을 확인해주세요"
-    echo "   2. 터미널에서 'pip install -r requirements.txt' 명령을 직접 실행해보세요"
+    echo "   2. 터미널에서 'pip install -r requirements-desktop-legacy-mac.txt' 명령을 직접 실행해보세요"
     echo ""
     read -p "엔터를 눌러 종료..."
     exit 1

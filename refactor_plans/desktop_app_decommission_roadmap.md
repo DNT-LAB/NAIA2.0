@@ -99,12 +99,23 @@ Separate headless runtime dependencies from Desktop-only dependencies so PyQt is
 
 ### TODO Checklist
 
-- [ ] Create a headless requirements file or split the existing `requirements.txt`.
-- [ ] Move `PyQt6`, `PyQt6-Qt6`, `PyQt6-WebEngine`, `PyQt6-WebEngine-Qt6`, `PyQt6_sip`, `PyQt6-QScintilla`, `pywinpty`, and desktop-only packages into an optional legacy requirements file if still needed.
-- [ ] Verify `NAIA_web_headless.py` starts in an environment conceptually limited to headless requirements.
-- [ ] Update launcher/install scripts to install headless requirements for Web Session.
-- [ ] Update test instructions to distinguish headless tests from legacy desktop tests.
-- [ ] Add a dependency audit test that fails if a supported headless import path requires PyQt.
+- [x] Create a headless requirements file or split the existing `requirements.txt`.
+- [x] Move `PyQt6`, `PyQt6-Qt6`, `PyQt6-WebEngine`, `PyQt6-WebEngine-Qt6`, `PyQt6_sip`, `PyQt6-QScintilla`, `pywinpty`, and desktop-only packages into an optional legacy requirements file if still needed.
+- [x] Verify `NAIA_web_headless.py` starts in an environment conceptually limited to headless requirements.
+- [x] Update launcher/install scripts to install headless requirements for Web Session.
+- [x] Update test instructions to distinguish headless tests from legacy desktop tests.
+- [x] Add a dependency audit test that fails if a supported headless import path requires PyQt.
+
+### Round 43 Result
+
+- `requirements-headless.txt` is now the supported Remote Web install set.
+- `requirements.txt`, `requirements_mac.txt`, and `requirements_linux.txt` now delegate to `requirements-headless.txt`.
+- Desktop-only dependencies moved to `requirements-desktop-legacy.txt`, `requirements-desktop-legacy-mac.txt`, and `requirements-desktop-legacy-linux.txt`.
+- Web launchers install `requirements-headless.txt`; desktop launchers install legacy desktop requirements.
+- Tests assert the headless requirements files do not include PyQt/WebEngine/QScintilla/pywinpty/desktop Windows integration/Turbo-only `ultralytics`.
+- CDP validation passed on port `7296`: first paint `1.797s`, Random prompt update `6.438s`, Generate dispatch `0.094s`.
+- Import audit again reported no PyQt, RemoteBridge, desktop window, image window, middle controller, or middle module imports.
+- Validation doc: `refactor_docs/round_43_headless_requirements_validation.md`.
 
 ### When Done
 

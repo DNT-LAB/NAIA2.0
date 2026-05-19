@@ -20,7 +20,7 @@ if not exist "venv\" (
 
 call venv\Scripts\activate.bat
 
-pip install -r requirements.txt
+pip install -r requirements-headless.txt
 
 if not exist "NAIA_web_headless.py" (
     echo NAIA_web_headless.py was not found.

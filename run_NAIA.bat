@@ -20,7 +20,7 @@ if not exist "venv\" (
 
 call venv\Scripts\activate.bat
 
-pip install -r requirements.txt
+pip install -r requirements-desktop-legacy.txt
 
 echo Starting NAIA 2.0 Legacy Desktop App...
 

@@ -23,7 +23,10 @@ from core.reference_inset_service import (
     reference_inset_should_inject_params,
     strip_nai_weight_for_match,
 )
-from core.character_settings import character_params_from_settings
+from core.character_settings import (
+    character_params_from_settings,
+    loaded_character_module_is_active,
+)
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 
 
@@ -707,7 +710,7 @@ class APIService:
                     elif self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
                         # 3) Temporary Window — VirtualCharacterTab
                         char_module = self.app_context.temp_window_character_tab
-                        if hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                        if loaded_character_module_is_active(char_module):
                             char_params = char_module.get_parameters()
                             if char_params and char_params.get("characters"):
                                 char_source = "TempWindow"
@@ -725,7 +728,7 @@ class APIService:
                     else:
                         # 5) Late Binding — 메인 UI CharacterModule (직접 생성)
                         char_module = _get_loaded_middle_module(self.app_context, "CharacterModule")
-                        if char_module and hasattr(char_module, 'activate_checkbox') and char_module.activate_checkbox.isChecked():
+                        if loaded_character_module_is_active(char_module):
                             char_params = char_module.get_parameters()
                             if char_params and char_params.get("characters"):
                                 char_source = "LateBind"

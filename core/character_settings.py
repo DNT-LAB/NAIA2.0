@@ -54,6 +54,28 @@ def normalize_character_settings(raw: dict | None) -> dict:
     return settings
 
 
+def _checked(widget: Any) -> bool:
+    try:
+        return bool(widget is not None and widget.isChecked())
+    except Exception:
+        return False
+
+
+def loaded_character_module_has_widget_state(module: Any) -> bool:
+    return getattr(module, "activate_checkbox", None) is not None
+
+
+def loaded_character_module_is_active(module: Any) -> bool:
+    return _checked(getattr(module, "activate_checkbox", None))
+
+
+def loaded_character_module_reroll_on_generate(module: Any) -> bool:
+    return (
+        loaded_character_module_is_active(module)
+        and _checked(getattr(module, "reroll_on_generate_checkbox", None))
+    )
+
+
 def load_character_settings(mode: str = "NAI", path: Path | str | None = None) -> dict:
     mode_key = str(mode or "NAI").upper()
     target = Path(path) if path is not None else character_settings_path(mode_key)

@@ -1,6 +1,10 @@
 ﻿from core.context import AppContext
 from core.generation_request import GenerationRequest
-from core.character_settings import character_params_from_settings
+from core.character_settings import (
+    character_params_from_settings,
+    loaded_character_module_has_widget_state,
+    loaded_character_module_reroll_on_generate,
+)
 from core.sequence_parser import SequenceParser
 from core.vibe_cluster_resolver import VibeClusterPromptError, apply_vibe_cluster_prompt_override
 from core.wildcard_processor import split_tags_smart
@@ -38,7 +42,8 @@ def _get_loaded_middle_module(context: AppContext, class_name: str):
 def _apply_headless_character_params(context: AppContext, params: dict, api_mode: str) -> None:
     if api_mode != "NAI":
         return
-    if _get_loaded_middle_module(context, "CharacterModule") is not None:
+    loaded_module = _get_loaded_middle_module(context, "CharacterModule")
+    if loaded_module is not None and loaded_character_module_has_widget_state(loaded_module):
         return
     if params.get("characters"):
         return
@@ -700,8 +705,7 @@ class GenerationController:
                 event_stream = getattr(self.context, "event_stream_runtime", None)
                 char_module = _get_loaded_middle_module(self.context, "CharacterModule")
                 if (char_module and 
-                    char_module.activate_checkbox.isChecked() and 
-                    char_module.reroll_on_generate_checkbox.isChecked() and
+                    loaded_character_module_reroll_on_generate(char_module) and
                     not (event_stream and event_stream.should_freeze_character_prompts())):
                     
                     print("🔄️ 생성 시 Reroll: 캐릭터 와일드카드를 갱신합니다.")
@@ -2230,8 +2234,7 @@ class GenerationController:
             event_stream = getattr(self.context, "event_stream_runtime", None)
             char_module = _get_loaded_middle_module(self.context, "CharacterModule")
             if (char_module and
-                char_module.activate_checkbox.isChecked() and
-                char_module.reroll_on_generate_checkbox.isChecked() and
+                loaded_character_module_reroll_on_generate(char_module) and
                 not (event_stream and event_stream.should_freeze_character_prompts())):
                 print("🔄️ 생성 시 Reroll: 캐릭터 와일드카드를 갱신합니다.")
                 char_module.process_and_update_view()

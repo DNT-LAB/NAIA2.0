@@ -289,3 +289,11 @@
 - headless hook은 저장된 조건부 프롬프트 설정이 disabled이거나 실행 규칙이 비어 있으면 아무 모듈도 깨우지 않는다.
 - 조건부 규칙이 실제로 enabled 상태에서 generation에 들어갈 때는 기존 `PromptListModifierModule`을 on-demand 로드해 기존 룰 엔진에 위임한다. 따라서 startup 병목은 제거하지만, enabled conditional generation의 PyQt-free rule engine 분리는 다음 단계로 남는다.
 - RemoteBridge의 store-backed 설정 변경은 계속 PyQt-free로 처리하고, `simulate_v2` 같은 고급 동작은 명시적 사용자 액션 시 deferred module을 로드해 기존 동작을 보존한다.
+
+### Round 28 Headless Character Generate fix
+
+- Remote Web client가 Character panel state를 요청하면 `CharacterModule`이 widget 없이 loaded 상태가 될 수 있다. 이 상태에서 random/generate 이벤트가 checkbox를 직접 읽으면 `NoneType.isChecked`로 실패했다.
+- `core.character_settings`에 loaded CharacterModule의 widget state readiness와 active/reroll 상태를 안전하게 읽는 helper를 추가했다.
+- `CharacterModule.on_random_prompt_triggered()`, generation reroll, NAI late binding, prompt-reopen current-character path는 widget-less module을 inactive로 취급한다.
+- loaded module이 widget state를 갖지 않으면 `core.character_settings.character_params_from_settings()` fallback을 계속 사용하므로 Remote Web Generate에서 저장된 character settings도 보존된다.
+- CDP로 `#btnGen`을 실제 클릭해 NAI API 호출, `generation_result_available`, PNG 저장까지 확인했고, `#btnRnd` 랜덤 프롬프트 이벤트도 `NoneType.isChecked` 없이 통과했다.

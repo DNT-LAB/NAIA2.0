@@ -113,6 +113,10 @@ QInputDialog.getItem = staticmethod(_wd_blocked_input_item)
 QInputDialog.getMultiLineText = staticmethod(_wd_blocked_input_multiline)
 from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
+from core.character_settings import (
+    loaded_character_module_is_active,
+    loaded_character_module_reroll_on_generate,
+)
 from core.generation_controller import GenerationController
 from core.wildcard_processor import split_tags_smart
 from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM
@@ -3609,8 +3613,8 @@ class ModernMainWindow(QMainWindow):
                     self._trigger_auto_image_generation()
 
                 if (char_module and
-                    char_module.activate_checkbox.isChecked() and
-                    not char_module.reroll_on_generate_checkbox.isChecked() and
+                    loaded_character_module_is_active(char_module) and
+                    not loaded_character_module_reroll_on_generate(char_module) and
                     not (event_stream_request and event_stream_request.skip_random_prompt_events)):
 
                     print("🔄️ 자동 생성: 캐릭터 와일드카드를 갱신합니다.")

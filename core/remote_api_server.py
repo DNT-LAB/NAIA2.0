@@ -47,6 +47,7 @@ from core.character_settings import (
     character_params_from_settings,
     character_state_from_settings,
     load_character_settings,
+    loaded_character_module_is_active,
 )
 from core.conditional_prompt_settings import (
     get_conditional_prompt_store,
@@ -5629,7 +5630,7 @@ class RemoteBridge(QObject):
 
     def _apply_current_character_params(self, params: dict) -> dict:
         char_module = self._find_loaded_module_instance("CharacterModule")
-        if char_module and hasattr(char_module, "activate_checkbox") and char_module.activate_checkbox.isChecked():
+        if loaded_character_module_is_active(char_module):
             char_params = char_module.get_parameters()
             if char_params and char_params.get("characters"):
                 params["characters"] = char_params["characters"]

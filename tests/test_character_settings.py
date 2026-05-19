@@ -5,8 +5,12 @@ from core.character_settings import (
     character_params_from_settings,
     character_state_from_settings,
     load_character_settings,
+    loaded_character_module_has_widget_state,
+    loaded_character_module_is_active,
+    loaded_character_module_reroll_on_generate,
 )
 from core.prompt_context import PromptContext
+from modules.character_module import CharacterModule
 
 
 class _WildcardManager:
@@ -110,3 +114,25 @@ def test_character_state_preview_does_not_advance_existing_context():
 
     assert state["processed_characters"] == ["standing"]
     assert current_context.sequential_counters["pose"] == 1
+
+
+def test_loaded_character_module_helpers_treat_headless_module_as_inactive():
+    module = SimpleNamespace(
+        activate_checkbox=None,
+        reroll_on_generate_checkbox=None,
+    )
+
+    assert loaded_character_module_has_widget_state(module) is False
+    assert loaded_character_module_is_active(module) is False
+    assert loaded_character_module_reroll_on_generate(module) is False
+
+
+def test_character_random_prompt_event_ignores_headless_module():
+    module = CharacterModule()
+    module.app_context = SimpleNamespace(event_stream_runtime=None)
+    called = []
+    module.process_and_update_view = lambda: called.append(True)
+
+    module.on_random_prompt_triggered()
+
+    assert called == []

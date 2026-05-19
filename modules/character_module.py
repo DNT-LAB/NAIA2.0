@@ -15,6 +15,10 @@ from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
 from core.prompt_context import PromptContext
+from core.character_settings import (
+    loaded_character_module_is_active,
+    loaded_character_module_reroll_on_generate,
+)
 from core.wildcard_processor import WildcardProcessor
 from ui.character_asset_storage_window import CharacterAssetStorageWindow
 from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
@@ -1400,8 +1404,9 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
                 )
                 return self.get_or_create_context()
 
-        if not self.activate_checkbox or not self.activate_checkbox.isChecked():
-            self.processed_prompt_display.clear()
+        if not loaded_character_module_is_active(self):
+            if self.processed_prompt_display:
+                self.processed_prompt_display.clear()
             self.last_processed_data = {'characters': [], 'uc': []}
             self.modifiable_clone = {'characters': [], 'uc': []} # ⬅️ 비활성화 시 복제본도 초기화
             return None
@@ -1429,7 +1434,10 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         if event_stream and event_stream.should_freeze_random_prompt_side_effects():
             print("🔒 Event Stream: 랜덤 프롬프트 캐릭터 리롤을 동결합니다.")
             return
-        if self.activate_checkbox.isChecked() and not self.reroll_on_generate_checkbox.isChecked():
+        if (
+            loaded_character_module_is_active(self)
+            and not loaded_character_module_reroll_on_generate(self)
+        ):
             print("🔄️ 랜덤 프롬프트 요청으로 캐릭터 와일드카드를 갱신합니다.")
             self.process_and_update_view()
 
@@ -1441,7 +1449,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
             if frozen_params is not None:
                 return frozen_params
 
-        if not self.activate_checkbox or not self.activate_checkbox.isChecked():
+        if not loaded_character_module_is_active(self):
             return {"characters": None}
 
         # 기본 파라미터

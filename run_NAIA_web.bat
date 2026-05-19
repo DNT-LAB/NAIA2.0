@@ -22,4 +22,13 @@ call venv\Scripts\activate.bat
 
 pip install -r requirements.txt
 
-python NAIA_cold_v4.py --web-session
+if not exist "NAIA_web_headless.py" (
+    echo NAIA_web_headless.py was not found.
+    echo Run this launcher from the NAIA project directory.
+    exit /b 1
+)
+
+echo Starting NAIA 2.0 Headless Web Session...
+echo Web UI: http://127.0.0.1:7243/
+
+python NAIA_web_headless.py

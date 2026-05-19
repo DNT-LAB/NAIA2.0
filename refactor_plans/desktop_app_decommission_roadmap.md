@@ -68,12 +68,21 @@ Make the supported Web Session launch path headless by default while keeping Des
 
 ### TODO Checklist
 
-- [ ] Update `run_NAIA_web.bat` and `run_NAIA_web.command` to launch `NAIA_web_headless.py`.
-- [ ] Keep `run_NAIA.bat` as explicit legacy desktop launch or rename/document it as legacy.
-- [ ] Update `core.web_shell_config` tests so default Web Session means headless, not desktop-backed shell.
-- [ ] Add a smoke command for `python NAIA_web_headless.py --port <port>`.
-- [ ] Add a guard that `--web-session` through `NAIA_cold_v4.py` is legacy-only or disabled.
-- [ ] Update docs that still instruct users to start Remote Web via `NAIA_cold_v4.py --web-session`.
+- [x] Update `run_NAIA_web.bat` and `run_NAIA_web.command` to launch `NAIA_web_headless.py`.
+- [x] Keep `run_NAIA.bat` as explicit legacy desktop launch or rename/document it as legacy.
+- [x] Update `core.web_shell_config` tests so default Web Session means headless, not desktop-backed shell.
+- [x] Add a smoke command for `python NAIA_web_headless.py --port <port>`.
+- [x] Add a guard that `--web-session` through `NAIA_cold_v4.py` is legacy-only or disabled.
+- [x] Update docs that still instruct users to start Remote Web via `NAIA_cold_v4.py --web-session`.
+
+### Round 42 Result
+
+- Web launchers now start `NAIA_web_headless.py`.
+- Legacy desktop launchers call `NAIA_cold_v4.py --desktop`.
+- `NAIA_cold_v4.py --web-session` requires `--allow-legacy-web-session` and points users to `NAIA_web_headless.py`.
+- CDP validation passed on port `7295`: first paint `2.344s`, Random prompt update `5.25s`, Generate dispatch `0.11s`.
+- Import audit for the supported Web launch reported no `PyQt6`, `core.remote_api_server`, desktop window, image window, middle controller, or module imports.
+- Validation doc: `refactor_docs/round_42_headless_launch_validation.md`.
 
 ### When Done
 

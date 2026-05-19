@@ -20,5 +20,5 @@
 
 ```bat
 call venv\Scripts\activate.bat
-python NAIA_cold_v4.py
+python NAIA_web_headless.py
 ```

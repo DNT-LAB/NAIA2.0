@@ -7751,41 +7751,29 @@ if __name__ == "__main__":
     import argparse
 
     def _should_start_hidden_for_web_session() -> bool:
-        """Web Session 자동 시작/CLI 실행이면 메인 창을 처음부터 숨김 시작."""
-        if os.environ.get("NAIA_CLI_DESKTOP") == "1":
-            return False
-
-        if os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1":
-            return True
-
-        try:
-            settings_path = "app_settings.json"
-            if not os.path.exists(settings_path):
-                return False
-
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings = json.load(f) or {}
-
-            web_session = settings.get("web_session", {})
-            return bool(web_session.get("auto_start", False))
-        except Exception:
-            return False
+        """Only the explicit legacy CLI path may hide the desktop window."""
+        return os.environ.get("NAIA_CLI_WEB_SESSION_HIDE_MAIN_WINDOW") == "1"
 
     parser = argparse.ArgumentParser(description="NAIA 2.0")
     parser.add_argument(
         "--web-session",
         action="store_true",
-        help="레거시 Web Session 을 자동 시작하고 시스템 브라우저를 연다.",
+        help="레거시 desktop-backed Web Session. 기본 Web Session 은 NAIA_web_headless.py 를 사용하십시오.",
     )
     parser.add_argument(
         "--web-shell",
         action="store_true",
-        help="QWebEngine 기반 Desktop Web Shell 을 연다. 기본 실행 모드입니다.",
+        help="레거시 QWebEngine 기반 Desktop Web Shell 을 연다.",
     )
     parser.add_argument(
         "--desktop",
         action="store_true",
         help="레거시 PyQt 데스크탑 UI 를 직접 표시한다.",
+    )
+    parser.add_argument(
+        "--allow-legacy-web-session",
+        action="store_true",
+        help="NAIA_cold_v4.py --web-session legacy 경로를 명시적으로 허용한다.",
     )
     parser.add_argument(
         "--web-shell-port",
@@ -7794,6 +7782,16 @@ if __name__ == "__main__":
         help="Desktop Web Shell 이 사용할 로컬 Remote API 포트.",
     )
     cli_args, _ = parser.parse_known_args()
+
+    if cli_args.web_session and not cli_args.allow_legacy_web_session:
+        print(
+            "NAIA_cold_v4.py --web-session is a legacy desktop-backed path and is disabled. "
+            "Use `python NAIA_web_headless.py` for the supported Remote Web runtime, "
+            "or add --allow-legacy-web-session for temporary legacy debugging.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     from core.web_shell_config import should_launch_web_shell_by_default
 
     launch_web_shell = cli_args.web_shell or should_launch_web_shell_by_default(

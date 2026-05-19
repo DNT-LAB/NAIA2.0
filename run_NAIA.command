@@ -33,7 +33,7 @@ find_compatible_python() {
 }
 
 echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${PURPLE}║                              🎨 NAIA 2.0 Launcher                             ║${NC}"
+echo -e "${PURPLE}║                       🎨 NAIA 2.0 Legacy Desktop Launcher                      ║${NC}"
 echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -204,7 +204,7 @@ echo -e "${CYAN}💡 터미널 창을 닫지 마세요. NAIA가 실행 중입니
 echo ""
 
 # Python 스크립트 실행
-python NAIA_cold_v4.py
+python NAIA_cold_v4.py --desktop
 
 # 실행 결과 확인
 EXIT_CODE=$?

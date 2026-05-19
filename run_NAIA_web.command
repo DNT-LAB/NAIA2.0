@@ -187,9 +187,9 @@ fi
 
 echo ""
 
-# NAIA_cold_v4.py 파일 확인
-if [ ! -f "NAIA_cold_v4.py" ]; then
-    echo -e "${RED}❌ NAIA_cold_v4.py 파일이 없습니다.${NC}"
+# NAIA_web_headless.py 파일 확인
+if [ ! -f "NAIA_web_headless.py" ]; then
+    echo -e "${RED}❌ NAIA_web_headless.py 파일이 없습니다.${NC}"
     echo "   NAIA 프로젝트 폴더에서 실행해주세요."
     read -p "엔터를 눌러 종료..."
     exit 1
@@ -197,15 +197,15 @@ fi
 
 # NAIA 실행
 echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${PURPLE}║                   🚀 NAIA 2.0 Web Mode 를 시작합니다!                          ║${NC}"
+echo -e "${PURPLE}║                 🚀 NAIA 2.0 Headless Web Session 을 시작합니다!                  ║${NC}"
 echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${CYAN}💡 기본 브라우저에서 localhost 웹 UI를 자동으로 엽니다.${NC}"
+echo -e "${CYAN}💡 웹 UI 주소: http://127.0.0.1:7243/${NC}"
 echo -e "${CYAN}💡 터미널 창을 닫지 마세요. 백엔드가 함께 종료됩니다.${NC}"
 echo ""
 
 # Python 스크립트 실행
-python NAIA_cold_v4.py --web-session
+python NAIA_web_headless.py
 
 # 실행 결과 확인
 EXIT_CODE=$?

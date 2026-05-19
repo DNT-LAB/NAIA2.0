@@ -1,6 +1,6 @@
 # CLAUDE.md — NAIA 2.0
 
-PyQt6 기반 AI 이미지 생성 데스크톱 앱. NovelAI / Stable Diffusion WebUI / ComfyUI 백엔드 지원.
+Headless Remote Web 중심 AI 이미지 생성 앱. NovelAI / Stable Diffusion WebUI / ComfyUI 백엔드 지원. PyQt6 데스크톱 앱은 legacy 경로로 분리 중.
 
 **우선순위**: 사용자 직접 요청 > 디렉터리별 CLAUDE.md > 본 문서
 
@@ -12,7 +12,8 @@ PyQt6 기반 AI 이미지 생성 데스크톱 앱. NovelAI / Stable Diffusion We
 
 ```
 NAIA2.0/
-├── NAIA_cold_v4.py            # 메인 진입점 + MainWindow
+├── NAIA_web_headless.py        # 지원 Remote Web 진입점
+├── NAIA_cold_v4.py            # legacy PyQt 데스크톱 진입점 + MainWindow
 ├── core/                       # AppContext, 컨트롤러, 파이프라인, API
 ├── interfaces/                 # 계약 정의 (BaseMiddleModule, BaseTabModule, ModeAwareModule)
 ├── modules/*_module.py         # 좌측 패널 모듈 (자동 로드, BaseMiddleModule 상속)
@@ -27,8 +28,9 @@ NAIA2.0/
 ```
 
 실행:
-- 데스크톱 모드: `python NAIA_cold_v4.py` (또는 `run_NAIA.bat` / `run_NAIA.command`)
-- 웹 세션 모드: `python NAIA_cold_v4.py --web-session` (또는 `run_NAIA_web.bat` / `run_NAIA_web.command`) — Qt 창 + 시스템 브라우저 동시. 5초 후 `http://localhost:7243` 자동 오픈. 내부 배관은 `os.environ['NAIA_CLI_WEB_SESSION']` 경유 (타이밍: `SettingsTabModule.on_initialize` 가 `ModernMainWindow.__init__` 내부에서 동기 실행되므로 env var 필요)
+- 지원 웹 세션 모드: `python NAIA_web_headless.py` (또는 `run_NAIA_web.bat` / `run_NAIA_web.command`)
+- legacy 데스크톱 모드: `python NAIA_cold_v4.py --desktop` (또는 `run_NAIA.bat` / `run_NAIA.command`)
+- legacy desktop-backed Web Session: `python NAIA_cold_v4.py --web-session --allow-legacy-web-session` (임시 디버깅 전용)
 
 ---
 

@@ -22,4 +22,6 @@ call venv\Scripts\activate.bat
 
 pip install -r requirements.txt
 
-python NAIA_cold_v4.py
+echo Starting NAIA 2.0 Legacy Desktop App...
+
+python NAIA_cold_v4.py --desktop

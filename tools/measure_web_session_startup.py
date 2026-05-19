@@ -1,8 +1,8 @@
 """Measure the Remote WebSession startup path.
 
-This is a Round 30 migration tool. It intentionally measures the current
-`NAIA_cold_v4.py --web-shell` path before the headless entrypoint exists, so
-later rounds can compare against the same contract.
+This migration tool measures the supported headless Remote Web path by default.
+The old `NAIA_cold_v4.py --web-shell` path remains available through
+`--entrypoint desktop` for legacy comparison only.
 """
 
 from __future__ import annotations
@@ -419,7 +419,11 @@ def force_remote_options_for_measurement(client: CdpClient) -> dict[str, Any]:
   const prompt = document.getElementById('promptEdit');
   if (prompt) {
     prompt.value = '';
-    prompt.dispatchEvent(new Event('input', {bubbles: true}));
+    if (typeof promptSendTimer !== 'undefined' && promptSendTimer) {
+      clearTimeout(promptSendTimer);
+      promptSendTimer = null;
+    }
+    if (typeof _localPromptDirty !== 'undefined') _localPromptDirty = false;
   }
   return {
     promptFixed: document.getElementById('optPromptFixed')?.dataset?.checked || null,
@@ -436,6 +440,48 @@ def click_and_wait_random(
     timeout: float,
 ) -> tuple[float, dict[str, Any]]:
     forced = force_remote_options_for_measurement(client)
+    client.evaluate("""
+(() => {
+  window.__naiaMeasureWsMessages = [];
+  window.__naiaMeasureErrors = [];
+  if (!window.__naiaMeasureErrorPatched) {
+    window.__naiaMeasureErrorPatched = true;
+    window.addEventListener('error', event => {
+      window.__naiaMeasureErrors.push({
+        type: 'error',
+        message: String(event.message || ''),
+        filename: String(event.filename || ''),
+        lineno: event.lineno || 0,
+        colno: event.colno || 0,
+      });
+    });
+    window.addEventListener('unhandledrejection', event => {
+      window.__naiaMeasureErrors.push({
+        type: 'unhandledrejection',
+        message: String(event.reason?.message || event.reason || ''),
+      });
+    });
+  }
+  try {
+    if (typeof ws !== 'undefined' && ws && !ws.__naiaMeasurePatched) {
+      const original = ws.onmessage;
+      ws.__naiaMeasurePatched = true;
+      ws.onmessage = function(event) {
+        if (typeof event.data === 'string') {
+          window.__naiaMeasureWsMessages.push(event.data.slice(0, 500));
+          if (window.__naiaMeasureWsMessages.length > 20) {
+            window.__naiaMeasureWsMessages.shift();
+          }
+        }
+        return original ? original.call(this, event) : undefined;
+      };
+    }
+  } catch (error) {
+    window.__naiaMeasureErrors.push({type: 'patch', message: String(error?.message || error)});
+  }
+  return true;
+})()
+""")
     before = page_ready_state(client)
     before_value = client.evaluate("(document.getElementById('promptEdit') || {}).value || ''") or ""
     log_offset = len(read_text(stdout_path))
@@ -469,7 +515,26 @@ def click_and_wait_random(
             return state
         return None
 
-    state = wait_for(changed, timeout=timeout, interval=0.2)
+    try:
+        state = wait_for(changed, timeout=timeout, interval=0.2)
+    except TimeoutError as exc:
+        diagnostics = client.evaluate("""
+(() => {
+  const prompt = document.getElementById('promptEdit');
+  const btn = document.getElementById('btnRnd');
+  return {
+    promptLength: prompt ? prompt.value.length : null,
+    promptPreview: prompt ? prompt.value.slice(0, 120) : null,
+    randomDisabled: btn ? !!btn.disabled : null,
+    awaitingMyRandom: typeof awaitingMyRandom !== 'undefined' ? awaitingMyRandom : null,
+    pendingRandomRequestId: typeof pendingRandomRequestId !== 'undefined' ? pendingRandomRequestId : null,
+    wsReadyState: typeof ws !== 'undefined' && ws ? ws.readyState : null,
+    messages: window.__naiaMeasureWsMessages || [],
+    errors: window.__naiaMeasureErrors || [],
+  };
+})()
+""")
+        raise TimeoutError(f"{exc}; diagnostics={diagnostics}") from exc
     return round(time.monotonic() - start, 3), {
         "forced_options": forced,
         "before": before,
@@ -786,7 +851,7 @@ def measure(args: argparse.Namespace) -> Measurement:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Measure desktop-backed NAIA Remote WebSession startup.")
-    parser.add_argument("--entrypoint", choices=["desktop", "headless"], default="desktop")
+    parser.add_argument("--entrypoint", choices=["desktop", "headless"], default="headless")
     parser.add_argument("--port", type=int, default=7270, help="Remote WebShell port to launch.")
     parser.add_argument("--cdp-port", type=int, default=9370, help="Chrome DevTools Protocol port.")
     parser.add_argument("--python", default=None, help="Python executable. Defaults to venv\\Scripts\\python.exe when present.")

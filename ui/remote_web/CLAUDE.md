@@ -4,13 +4,12 @@
 
 ## 활성화
 
-세 가지 경로 — 모두 같은 `start_remote_server()` 진입:
+지원 경로는 headless FastAPI 진입점이다:
 
-1. **CLI**: `python NAIA_cold_v4.py --web-session` (런처: `run_NAIA_web.bat` / `run_NAIA_web.command`) — 부팅 5초 후 서버 기동 + 기본 브라우저 자동 오픈
-2. **Settings 영속화**: `Settings > Web Session > 자동 시작` 체크 — `app_settings.json` 에 저장, 다음 실행부터 (1)과 동일 동작
-3. **수동**: `Settings > Web Session` 체크박스 토글
+1. **CLI**: `python NAIA_web_headless.py` (런처: `run_NAIA_web.bat` / `run_NAIA_web.command`)
+2. **서버**: `core.web_session_app.create_headless_app()` + `WebSessionContext`
 
-CLI 플래그는 `os.environ['NAIA_CLI_WEB_SESSION']` 로 배관되어 `SettingsTabModule.on_initialize()` 가 읽음 (`__init__` 내부에서 동기 실행되어 `app_context` 속성 주입 타이밍이 맞지 않음).
+`NAIA_cold_v4.py --web-session --allow-legacy-web-session` 은 desktop-backed legacy 디버깅 경로이며 지원 Remote Web 런타임으로 취급하지 않는다.
 
 ## 파일 구조
 
@@ -21,7 +20,8 @@ ui/remote_web/
 └── app.js        # JS (WebSocket, 파라미터 동기화, 히스토리, 모듈, autocomplete)
 ```
 
-서버: `core/remote_api_server.py` (RemoteBridge, WebSocketManager, FastAPI 라우트)
+지원 서버: `core/web_session_app.py` + `core/web_session_context.py`.
+Legacy desktop-backed 서버: `core/remote_api_server.py` (RemoteBridge, WebSocketManager, FastAPI 라우트)
 
 ## 스레드 안전
 

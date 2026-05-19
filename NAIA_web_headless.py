@@ -1,8 +1,8 @@
 """Headless Remote Web entrypoint.
 
 This launcher starts a PyQt-free FastAPI/core-service runtime for the Remote
-Web shell. It is an incremental migration entrypoint; generation and random
-prompt execution are wired in later roadmap rounds.
+Web shell. Random prompt generation, request normalization, and headless result
+delivery are handled by core services without starting the PyQt desktop app.
 """
 
 from __future__ import annotations

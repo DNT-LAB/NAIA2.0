@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QDialog, QLineEdit, QListWidget, QSplitter, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from ui.modern_menu import setModernStyle
+from legacy_desktop.ui.modern_menu import setModernStyle
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
@@ -20,9 +20,9 @@ from core.character_settings import (
     loaded_character_module_reroll_on_generate,
 )
 from core.wildcard_processor import WildcardProcessor
-from ui.character_asset_storage_window import CharacterAssetStorageWindow
-from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.character_asset_storage_window import CharacterAssetStorageWindow
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from danbooru_character import character_dict, character_dict_count
 
 
@@ -1691,7 +1691,7 @@ class CharacterModule(BaseMiddleModule, ModeAwareModule):
         """위치 시각화 이미지 업데이트 (25x25px, 각 셀 5x5px)"""
         from PIL import Image, ImageDraw
         from PyQt6.QtGui import QPixmap, QImage
-        from ui.theme import DARK_COLORS
+        from legacy_desktop.ui.theme import DARK_COLORS
 
         print("\n[DEBUG] === _update_position_viewer 호출 ===")
 

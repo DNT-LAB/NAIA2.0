@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from interfaces.base_tab_module import BaseTabModule
 from core.context import AppContext
-from ui.theme import DARK_COLORS
+from legacy_desktop.ui.theme import DARK_COLORS
 
 
 REMOVED_TAB_MODULES = {

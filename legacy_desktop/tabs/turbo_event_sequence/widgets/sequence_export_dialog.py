@@ -25,8 +25,8 @@ import subprocess
 import importlib.util
 import sys
 
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 if TYPE_CHECKING:
     from core.context import AppContext

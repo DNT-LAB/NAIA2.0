@@ -93,9 +93,9 @@ from core.resolution_utils import (
 from utils.translator import korean_to_english
 from utils.clipboard_image import clipboard_png_bytes, set_png_clipboard_bytes
 from utils.webui_generation_info import extract_webui_seed
-from ui.event_preset.download_worker import DOWNLOAD_URL as EVENT_PRESET_DOWNLOAD_URL
-from ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONTEXT
-from ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
+from legacy_desktop.ui.event_preset.download_worker import DOWNLOAD_URL as EVENT_PRESET_DOWNLOAD_URL
+from legacy_desktop.ui.event_preset.download_worker import SSL_CONTEXT as EVENT_PRESET_SSL_CONTEXT
+from legacy_desktop.ui.event_preset.download_worker import THUMBNAIL_DOWNLOAD_URL as EVENT_PRESET_THUMBNAIL_DOWNLOAD_URL
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

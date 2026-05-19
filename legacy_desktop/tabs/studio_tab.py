@@ -22,8 +22,8 @@ from legacy_desktop.tabs.studio.dialogs.open_preset_dialog import OpenPresetDial
 from legacy_desktop.tabs.studio.dialogs.events_dialog import EventsDialog
 from legacy_desktop.tabs.studio.dialogs.wildcard_selector_dialog import WildcardSelectorDialog
 from legacy_desktop.tabs.studio.widgets.wildcard_nav_panel import WildcardNavPanel
-from ui.theme import DARK_COLORS, DARK_STYLES, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, DARK_STYLES, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
 class StudioTab(BaseTabModule):
@@ -1185,7 +1185,7 @@ class StudioTab(BaseTabModule):
         if not self.frame_manager:
             return
 
-        from ui.theme import show_question
+        from legacy_desktop.ui.theme import show_question
         if show_question(
             self.widget, "Reset Frames",
             "Reset all frames? (Prefix, Postfix, Negative Prompt will be kept)"

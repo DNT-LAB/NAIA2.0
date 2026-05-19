@@ -16,8 +16,8 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap
 
 from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_COLORS, DARK_STYLES
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, DARK_STYLES
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
 # ─── 백그라운드 JSON 로더 ─────────────────────────────────────────────

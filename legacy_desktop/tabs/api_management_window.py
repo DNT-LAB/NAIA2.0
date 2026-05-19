@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QTextEdit, QFrame, QMessageBox, QComboBox, QCheckBox
 )
 from PyQt6.QtCore import QThread, Qt
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size
 from legacy_desktop.core.api_validator import APIValidator
 from core import api_verification
 from core.context import AppContext

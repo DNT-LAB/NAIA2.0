@@ -17,8 +17,8 @@ from PyQt6.QtCore import Qt, QMimeData
 from PyQt6.QtGui import QPixmap
 from PIL import Image
 
-from ui.theme import DARK_COLORS, get_dynamic_styles, show_info, show_warning, show_error
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles, show_info, show_warning, show_error
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
 class ExportViewsDialog(QDialog):

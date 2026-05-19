@@ -38,9 +38,9 @@ from PyQt6.QtGui import QDesktopServices
 
 from interfaces.base_module import BaseMiddleModule
 from utils.translator import korean_to_english
-from ui.theme import DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.modern_menu import setModernStyle
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.modern_menu import setModernStyle
 
 
 # Ollama API 기본 URL

@@ -10,8 +10,8 @@ from PyQt6.QtWidgets import (
     QLabel, QComboBox, QWidget, QSplitter, QFrame, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from ui.theme import get_dynamic_styles, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import get_dynamic_styles, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 class CharacterPromptEditor(QDialog):
     """Editor window for character prompts with properties"""

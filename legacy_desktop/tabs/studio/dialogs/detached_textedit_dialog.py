@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QLabel
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from ui.theme import DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
 class DetachedTextEditDialog(QDialog):

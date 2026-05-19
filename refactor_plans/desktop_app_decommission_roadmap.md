@@ -312,7 +312,7 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - [x] Move or delete PyQt-only `tabs/` and `modules/` files that are not part of a separate package.
 - [x] Extract headless Event Preset helpers out of `ui/` before the UI wrapper archive.
 - [x] Extract headless Clothes/Expression Preset assets out of `ui/` before the UI wrapper archive.
-- [ ] Move or delete remaining PyQt-only `ui/` files that are not part of a separate package.
+- [x] Move or delete remaining PyQt-only `ui/` files that are not part of a separate package.
 - [x] Update imports and tests after the move.
 - [ ] Update docs so Desktop App is no longer presented as supported.
 
@@ -365,6 +365,13 @@ Physically remove Desktop App files from the supported runtime tree, or move the
 - Updated Clothes and Expression server services to read from `core/` instead of `ui/`.
 - Updated the remaining PyQt Clothes window/widget imports to use the extracted core helpers.
 - Deferred: archive remaining PyQt-only `ui/` wrappers while preserving `ui/remote_web` static assets.
+
+### Round 49G Result
+
+- Moved all tracked PyQt UI wrappers and desktop UI assets from `ui/` into `legacy_desktop/ui/`.
+- Preserved `ui/remote_web/**` at the root as the supported headless static web client.
+- Updated legacy desktop, legacy modules, legacy tabs, and the desktop theme cache test to import `legacy_desktop.ui.*`.
+- Root `ui/` tracked files now consist only of `ui/remote_web` assets.
 
 ### When Done
 

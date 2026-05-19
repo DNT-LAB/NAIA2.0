@@ -44,8 +44,8 @@ from legacy_desktop.modules.conditional.ui.char_slot_combo import (
 )
 from legacy_desktop.modules.conditional.ui.chip_list_widget import ChipListWidget
 from legacy_desktop.modules.conditional.ui.condition_editor import ConditionNodeEditor
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS
 
 
 _ACTION_KIND_ITEMS = (

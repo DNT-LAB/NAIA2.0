@@ -1,0 +1,486 @@
+from PIL import Image
+from PIL.ImageQt import ImageQt
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
+                             QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QSlider, QWidget)
+from PyQt6.QtGui import QGuiApplication, QPainter, QPixmap, QFont
+from PyQt6.QtCore import Qt, QPointF, QEvent, QTimer
+import numpy as np
+from legacy_desktop.ui.img2img_window_style import load_img2img_window_stylesheet
+
+class InpaintWindow(QDialog):
+    def __init__(self, pil_image: Image.Image, initial_mask: Image.Image = None, parent=None):
+        super().__init__(parent)
+        self.original_pil_image = pil_image
+        self.result = None
+
+        self.background_pixmap = QPixmap.fromImage(ImageQt(self.original_pil_image.convert("RGBA")))
+
+        # 🔥 핵심 수정: 기존과 동일한 격자 시스템 사용
+        w, h = self.original_pil_image.size
+        self.mirror_width = w // 8
+        self.mirror_height = h // 8
+        # 2D 정수 배열 (기존 NAIA_old_i2i.py와 완전 동일)
+        self.mirror_image = [[0 for _ in range(self.mirror_height)] for _ in range(self.mirror_width)]
+        
+        # 기존 마스크가 있다면 격자 시스템으로 변환
+        if initial_mask:
+            self._convert_mask_to_grid(initial_mask)
+        
+        # 표시용 알파 레이어 (UI 전용)
+        self.alpha_layer_image = Image.new("L", (w, h), 0)
+        self._update_display_from_grid()  # 격자 → 표시용 이미지 변환
+
+        self.composite_pixmap = QPixmap(self.background_pixmap.size())
+        self.composite_pixmap.fill(Qt.GlobalColor.transparent)
+
+        self.brush_size = 50
+        self.brush_shape = 'Square'
+        self.last_paint_pos: QPointF = None
+        
+        self.init_ui()
+        self._update_composite_display()
+
+    def _convert_mask_to_grid(self, mask_image: Image.Image):
+        """기존 마스크를 격자 시스템으로 변환"""
+        mask_array = np.array(mask_image.convert("L"))
+        h, w = mask_array.shape
+        
+        for gx in range(self.mirror_width):
+            for gy in range(self.mirror_height):
+                # 8x8 블록의 평균값 확인
+                y1, y2 = gy * 8, min((gy + 1) * 8, h)
+                x1, x2 = gx * 8, min((gx + 1) * 8, w)
+                
+                block_avg = np.mean(mask_array[y1:y2, x1:x2])
+                if block_avg > 127:
+                    self.mirror_image[gx][gy] = 1
+
+    def _update_display_from_grid(self):
+        """격자 데이터를 바탕으로 표시용 이미지 업데이트 (완전 스무싱 방지)"""
+        w, h = self.original_pil_image.size
+        
+        # 🔥 핵심 수정: numpy를 사용하여 완벽한 이진 마스크 생성
+        alpha_array = np.zeros((h, w), dtype=np.uint8)
+        
+        # 격자 데이터를 직접 배열에 복사 (PIL 그리기 함수 사용 안함)
+        for gx in range(self.mirror_width):
+            for gy in range(self.mirror_height):
+                if self.mirror_image[gx][gy] > 0:
+                    y1, y2 = gy * 8, min((gy + 1) * 8, h)
+                    x1, x2 = gx * 8, min((gx + 1) * 8, w)
+                    # 직접 배열 할당으로 완벽한 255 값 보장
+                    alpha_array[y1:y2, x1:x2] = 255
+        
+        # numpy 배열에서 PIL 이미지로 변환
+        self.alpha_layer_image = Image.fromarray(alpha_array, mode='L')
+
+    def init_ui(self):
+        self.setObjectName("NaiaInpaintWindow")
+        self.setWindowTitle("Inpaint Image")
+        self.setFont(QFont("Pretendard", 10))
+        self.setStyleSheet(load_img2img_window_stylesheet())
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
+        
+        top_bar = self._create_top_bar()
+        main_layout.addWidget(top_bar)
+        
+        self.scene = QGraphicsScene()
+        self.view = QGraphicsView(self.scene)
+        self.view.setObjectName("NaiaInpaintCanvas")
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.view.setRenderHints(
+            QPainter.RenderHint.Antialiasing |
+            QPainter.RenderHint.SmoothPixmapTransform
+        )
+        self.view.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        self.view.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
+        main_layout.addWidget(self.view)
+        self.view.viewport().installEventFilter(self)
+        
+        # 배경과 합성 이미지만 표시
+        self.bg_item = QGraphicsPixmapItem(self.background_pixmap)
+        self.composite_item = QGraphicsPixmapItem()
+        self.scene.addItem(self.bg_item)
+        self.scene.addItem(self.composite_item)
+        
+        self.scene.setSceneRect(self.background_pixmap.rect().toRectF())
+        initial_width, initial_height = self._initial_window_size()
+        self.setMinimumSize(min(720, initial_width), min(520, initial_height))
+        self.resize(initial_width, initial_height)
+        QTimer.singleShot(0, self._fit_canvas_to_view)
+
+    def _available_screen_size(self) -> tuple[int, int]:
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if not screen:
+            return 1280, 800
+        rect = screen.availableGeometry()
+        return rect.width(), rect.height()
+
+    def _initial_window_size(self) -> tuple[int, int]:
+        screen_w, screen_h = self._available_screen_size()
+        available_w = max(1, screen_w - 24)
+        available_h = max(1, screen_h - 24)
+        max_w = min(1180, max(640, int(screen_w * 0.72)), available_w)
+        max_h = min(900, max(480, int(screen_h * 0.82)), available_h)
+        image_w, image_h = self.original_pil_image.size
+        toolbar_h = 86
+        scale = min(
+            (max_w - 32) / max(1, image_w),
+            (max_h - toolbar_h) / max(1, image_h),
+            1.0,
+        )
+        width = int(image_w * scale) + 32
+        height = int(image_h * scale) + toolbar_h
+        min_w = min(720, max_w)
+        min_h = min(520, max_h)
+        width = min(max(min_w, width), max_w)
+        height = min(max(min_h, height), max_h)
+        return width, height
+
+    def _fit_canvas_to_view(self):
+        if not hasattr(self, "view") or not hasattr(self, "scene"):
+            return
+        rect = self.scene.sceneRect()
+        if rect.isNull():
+            return
+        self.view.resetTransform()
+        self.view.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._fit_canvas_to_view)
+
+    def _create_top_bar(self) -> QWidget:
+        top_widget = QWidget()
+        top_widget.setObjectName("NaiaInpaintToolbar")
+        layout = QHBoxLayout(top_widget)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(8)
+        
+        pen_size_label = QLabel("Pen Size:")
+        pen_size_label.setProperty("naiaRole", "field-label")
+        self.pen_size_value_label = QLabel(f"{self.brush_size}")
+        self.pen_size_value_label.setProperty("naiaRole", "value-label")
+        self.pen_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.pen_size_slider.setRange(8, 160)  # 8픽셀 단위로 조정
+        self.pen_size_slider.setValue(self.brush_size)
+        self.pen_size_slider.valueChanged.connect(self._update_brush_size)
+        
+        self.shape_button = QPushButton("Square Brush")
+        self.shape_button.setObjectName("NaiaInpaintShapeButton")
+        self.shape_button.setCheckable(True)
+        self.shape_button.setMinimumHeight(34)
+        self.shape_button.toggled.connect(self._toggle_brush_shape)
+        
+        layout.addWidget(pen_size_label)
+        layout.addWidget(self.pen_size_value_label)
+        layout.addWidget(self.pen_size_slider)
+        layout.addWidget(self.shape_button)
+        layout.addStretch()
+        
+        save_button = QPushButton("Save Image")
+        save_button.setObjectName("NaiaInpaintSaveButton")
+        save_button.setMinimumHeight(34)
+        save_button.setMinimumWidth(118)
+        save_button.clicked.connect(self.accept)
+        
+        close_button = QPushButton("X")
+        close_button.setObjectName("NaiaInpaintCloseButton")
+        close_button.setMinimumHeight(34)
+        close_button.setMinimumWidth(44)
+        close_button.clicked.connect(self.reject)
+        
+        layout.addWidget(save_button)
+        layout.addWidget(close_button)
+        return top_widget
+
+    def _update_brush_size(self, value):
+        # 8의 배수로 정렬
+        aligned_value = (value // 8) * 8
+        if aligned_value < 8:
+            aligned_value = 8
+        
+        self.brush_size = aligned_value
+        self.pen_size_value_label.setText(str(aligned_value))
+        self.pen_size_slider.setValue(aligned_value)
+
+    def _toggle_brush_shape(self, checked):
+        if checked:
+            self.brush_shape = 'Circle'
+            self.shape_button.setText("Circle Brush")
+        else:
+            self.brush_shape = 'Square'
+            self.shape_button.setText("Square Brush")
+
+    def eventFilter(self, source, event: QEvent) -> bool:
+        if source is self.view.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self.last_paint_pos = event.pos()
+                erase_mode = event.buttons() == Qt.MouseButton.RightButton
+                self._paint_at(event.pos(), erase_mode)
+                return True
+            elif event.type() == QEvent.Type.MouseMove and self.last_paint_pos and event.buttons():
+                erase_mode = event.buttons() == Qt.MouseButton.RightButton
+                self._paint_at(event.pos(), erase_mode)
+                return True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                self.last_paint_pos = None
+                return True
+        return super().eventFilter(source, event)
+
+    def _paint_at(self, pos: QPointF, erase: bool):
+        """🔥 핵심 수정: 기존 격자 시스템과 완전 동일한 페인팅"""
+        scene_pos = self.view.mapToScene(pos.toPoint() if isinstance(pos, QPointF) else pos)
+        img_x, img_y = int(scene_pos.x()), int(scene_pos.y())
+        
+        # 🔥 격자 좌표로 변환 (기존과 동일)
+        grid_x, grid_y = img_x // 8, img_y // 8
+        
+        if not (0 <= grid_x < self.mirror_width and 0 <= grid_y < self.mirror_height):
+            return
+        
+        # 브러시 크기를 격자 단위로 변환
+        brush_size_grid = max(1, self.brush_size // 8)
+        
+        # 🔥 기존 paint_on_image 함수와 완전 동일한 로직
+        half_brush = brush_size_grid // 2
+        
+        # 이전 지점과 현재 지점을 연결하여 부드러운 드로잉 (격자 단위)
+        if self.last_paint_pos:
+            last_scene_pos = self.view.mapToScene(self.last_paint_pos.toPoint() if isinstance(self.last_paint_pos, QPointF) else self.last_paint_pos)
+            last_grid_x, last_grid_y = int(last_scene_pos.x()) // 8, int(last_scene_pos.y()) // 8
+            
+            # 두 점 사이의 격자 점들을 연결
+            self._draw_grid_line(last_grid_x, last_grid_y, grid_x, grid_y, half_brush, erase)
+        
+        # 현재 위치에 브러시 적용
+        self._apply_brush_to_grid(grid_x, grid_y, half_brush, erase)
+        
+        # 표시용 이미지 업데이트
+        self._update_display_from_grid()
+        self._update_composite_display()
+        self.last_paint_pos = pos
+
+    def _draw_grid_line(self, x0: int, y0: int, x1: int, y1: int, brush_radius: int, erase: bool):
+        """두 격자 점 사이를 연결하는 선 그리기"""
+        # Bresenham's line algorithm (격자 버전)
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        
+        x, y = x0, y0
+        
+        while True:
+            self._apply_brush_to_grid(x, y, brush_radius, erase)
+            
+            if x == x1 and y == y1:
+                break
+                
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+
+    def _apply_brush_to_grid(self, center_x: int, center_y: int, brush_radius: int, erase: bool):
+        """격자에 브러시 적용 (기존과 완전 동일)"""
+        if self.brush_shape == 'Circle':
+            # 원형 브러시 (격자 단위)
+            for dx in range(-brush_radius, brush_radius + 1):
+                for dy in range(-brush_radius, brush_radius + 1):
+                    if dx * dx + dy * dy <= brush_radius * brush_radius:
+                        gx, gy = center_x + dx, center_y + dy
+                        if 0 <= gx < self.mirror_width and 0 <= gy < self.mirror_height:
+                            self.mirror_image[gx][gy] = 0 if erase else 1
+        else:
+            # 사각형 브러시 (격자 단위)
+            for dx in range(-brush_radius, brush_radius + 1):
+                for dy in range(-brush_radius, brush_radius + 1):
+                    gx, gy = center_x + dx, center_y + dy
+                    if 0 <= gx < self.mirror_width and 0 <= gy < self.mirror_height:
+                        self.mirror_image[gx][gy] = 0 if erase else 1
+
+    def _update_composite_display(self):
+        """🔥 스무싱 방지: composite 대신 직접 픽셀 조작"""
+        w, h = self.original_pil_image.size
+        
+        # 원본 이미지를 RGBA로 변환
+        original_rgba = self.original_pil_image.convert('RGBA')
+        original_array = np.array(original_rgba)
+        
+        # 알파 레이어를 마스크로 사용
+        alpha_array = np.array(self.alpha_layer_image)
+        
+        # 직접 픽셀 조작으로 오버레이 적용 (완벽한 이진 처리)
+        result_array = original_array.copy()
+        mask_indices = alpha_array == 255  # 완벽히 255인 픽셀만 선택
+        
+        # 마스크 영역을 파란색으로 오버레이 (알파 블렌딩)
+        blue_color = np.array([0, 0, 255, 120], dtype=np.uint8)
+        original_alpha = result_array[mask_indices, 3].astype(np.float32) / 255.0
+        overlay_alpha = 120 / 255.0
+        
+        # 알파 합성 공식 적용
+        combined_alpha = overlay_alpha + original_alpha * (1 - overlay_alpha)
+        result_array[mask_indices, 0] = (blue_color[0] * overlay_alpha + 
+                                        result_array[mask_indices, 0] * original_alpha * (1 - overlay_alpha)) / combined_alpha
+        result_array[mask_indices, 1] = (blue_color[1] * overlay_alpha + 
+                                        result_array[mask_indices, 1] * original_alpha * (1 - overlay_alpha)) / combined_alpha
+        result_array[mask_indices, 2] = (blue_color[2] * overlay_alpha + 
+                                        result_array[mask_indices, 2] * original_alpha * (1 - overlay_alpha)) / combined_alpha
+        result_array[mask_indices, 3] = combined_alpha * 255
+        
+        # 결과를 PIL 이미지로 변환
+        composite_image = Image.fromarray(result_array.astype(np.uint8), 'RGBA')
+        
+        # QPixmap으로 변환하여 화면 아이템 업데이트
+        self.composite_pixmap = QPixmap.fromImage(ImageQt(composite_image))
+        self.composite_item.setPixmap(self.composite_pixmap)
+
+    def accept(self):
+        """🔥 완전 수정: numpy 직접 조작으로 완벽한 이진 마스크 생성"""
+        w, h = self.original_pil_image.size
+        
+        # 🔥 numpy를 사용하여 완벽한 마스크 생성 (PIL 함수 사용 안함)
+        full_mask_array = np.zeros((h, w), dtype=np.uint8)
+        small_mask_array = np.zeros((self.mirror_height, self.mirror_width), dtype=np.uint8)
+        
+        # 격자 데이터를 직접 배열에 복사
+        for gx in range(self.mirror_width):
+            for gy in range(self.mirror_height):
+                if self.mirror_image[gx][gy] > 0:
+                    # Full mask: 8x8 블록 채우기
+                    y1, y2 = gy * 8, min((gy + 1) * 8, h)
+                    x1, x2 = gx * 8, min((gx + 1) * 8, w)
+                    full_mask_array[y1:y2, x1:x2] = 255
+                    
+                    # Small mask: 단일 픽셀
+                    small_mask_array[gy, gx] = 255
+        
+        # numpy 배열을 PIL 이미지로 변환
+        full_mask_image = Image.fromarray(full_mask_array, mode='L')
+        small_mask_image = Image.fromarray(small_mask_array, mode='L')
+        
+        # 픽셀 수 체크
+        painted_pixels_count = sum(sum(row) for row in self.mirror_image)
+        
+        if painted_pixels_count < 8:
+            print("🎨 마스크 블록 수가 8 미만입니다. Img2Img 모드로 전환합니다.")
+            self.result = {"original_image": self.original_pil_image}
+            super().accept()
+            return
+        
+        # 🔥 스무싱 방지: 직접 픽셀 조작으로 프리뷰 생성
+        original_rgba = self.original_pil_image.convert('RGBA')
+        original_array = np.array(original_rgba)
+        
+        # 마스크 영역만 파란색으로 변경
+        preview_array = original_array.copy()
+        mask_indices = full_mask_array == 255
+        preview_array[mask_indices] = [0, 0, 255, 120]  # 완전한 파란색
+        
+        preview_image = Image.fromarray(preview_array, 'RGBA')
+        
+        self.result = {
+            "full_mask_image": full_mask_image,
+            "small_mask_image": small_mask_image,
+            "original_image": self.original_pil_image,
+            "preview_image": preview_image
+        }
+        
+        print("✅ 완벽한 이진 마스크 생성 완료 (모든 스무싱 제거)")
+        print(f"📊 마스크 통계: {painted_pixels_count}개 블록")
+        print(f"🔍 마스크 검증: Full={np.sum(full_mask_array > 0)}, Small={np.sum(small_mask_array > 0)}")
+        
+        # 마스크 순수성 검증
+        unique_values = np.unique(full_mask_array)
+        print(f"🎯 마스크 값 검증: {unique_values} (0과 255만 있어야 함)")
+        
+        super().accept()
+
+    def wheelEvent(self, event):
+        """마우스 휠 이벤트로 브러시 크기를 조절합니다."""
+        delta = event.angleDelta().y()
+        
+        # 8픽셀 단위로 조정
+        if delta > 0:
+            new_size = min(160, self.brush_size + 8)
+            self.pen_size_slider.setValue(new_size)
+        elif delta < 0:
+            new_size = max(8, self.brush_size - 8)
+            self.pen_size_slider.setValue(new_size)
+            
+        event.accept()
+
+    def _position_near_parent_workspace(self, parent=None):
+        """Place the mask editor over the prompt/image workspace instead of screen center."""
+        try:
+            host = parent or self.parent()
+            if not host:
+                return
+            screen = host.screen() if hasattr(host, "screen") else self.screen()
+            screen_rect = screen.availableGeometry() if screen else self.screen().availableGeometry()
+
+            outer_margin = 12
+            available_width = max(1, screen_rect.width() - (outer_margin * 2))
+            available_height = max(1, screen_rect.height() - (outer_margin * 2))
+            min_width = min(self.minimumWidth(), available_width)
+            min_height = min(self.minimumHeight(), available_height)
+            if min_width != self.minimumWidth() or min_height != self.minimumHeight():
+                self.setMinimumSize(int(min_width), int(min_height))
+
+            max_width = min(max(800, int(screen_rect.width() * 0.76)), available_width)
+            max_height = min(max(600, int(screen_rect.height() * 0.82)), available_height)
+            self.resize(min(self.width(), max_width), min(self.height(), max_height))
+
+            prompt_widget = getattr(host, "main_prompt_textedit", None)
+            image_widget = getattr(host, "image_window", None)
+            if prompt_widget and image_widget:
+                prompt_top_left = prompt_widget.mapToGlobal(prompt_widget.rect().topLeft())
+                image_bottom_right = image_widget.mapToGlobal(image_widget.rect().bottomRight())
+                workspace_left = prompt_top_left.x() + int(prompt_widget.width() * 0.22)
+                workspace_top = prompt_top_left.y() + 12
+                workspace_right = image_bottom_right.x() - 12
+                workspace_bottom = image_bottom_right.y() - 12
+                x = workspace_left + max(0, (workspace_right - workspace_left - self.width()) // 2)
+                y = workspace_top + max(0, (workspace_bottom - workspace_top - self.height()) // 2)
+            else:
+                parent_rect = host.frameGeometry()
+                x = parent_rect.x() + max(0, (parent_rect.width() - self.width()) // 2)
+                y = parent_rect.y() + max(0, (parent_rect.height() - self.height()) // 2)
+
+            min_x = screen_rect.left() + outer_margin
+            min_y = screen_rect.top() + outer_margin
+            max_x = screen_rect.right() - self.width() - outer_margin
+            max_y = screen_rect.bottom() - self.height() - outer_margin
+            x = min_x if max_x < min_x else max(min_x, min(x, max_x))
+            y = min_y if max_y < min_y else max(min_y, min(y, max_y))
+            self.move(x, y)
+            QTimer.singleShot(0, self._fit_canvas_to_view)
+        except Exception as exc:
+            print(f"⚠️ InpaintWindow 위치 조정 실패: {exc}")
+
+    @staticmethod
+    def get_inpaint_data(pil_image: Image.Image, initial_mask: Image.Image = None, parent=None, auto_accept: bool = False) -> dict | None:
+        dialog = InpaintWindow(pil_image, initial_mask, parent)
+        
+        # If auto_accept is True, immediately accept with the provided mask
+        if auto_accept and initial_mask is not None:
+            # Directly call accept to process the mask
+            dialog.accept()
+            return dialog.result
+
+        dialog._position_near_parent_workspace(parent)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = dialog.result
+            dialog.deleteLater()
+            return result
+        dialog.deleteLater()
+        return None

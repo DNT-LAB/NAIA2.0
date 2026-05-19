@@ -8,9 +8,9 @@ from PyQt6.QtGui import QPixmap, QDragEnterEvent, QDropEvent, QFont
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QThread
 from PIL import Image, ImageQt
 from PIL.PngImagePlugin import PngInfo
-from ui.theme import DARK_COLORS, DARK_STYLES
-from ui.scaling_manager import get_scaled_font_size
-from ui.img2img_popup import Img2ImgPopup
+from legacy_desktop.ui.theme import DARK_COLORS, DARK_STYLES
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size
+from legacy_desktop.ui.img2img_popup import Img2ImgPopup
 from interfaces.base_tab_module import BaseTabModule
 from utils.image_info import ImageMetadataExtractor
 from utils.clipboard_image import pil_image_from_clipboard

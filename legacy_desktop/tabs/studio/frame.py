@@ -9,8 +9,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor
 from PIL import Image
-from ui.theme import DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 import io
 import os
 

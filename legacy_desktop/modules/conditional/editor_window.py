@@ -52,8 +52,8 @@ from legacy_desktop.modules.conditional.preset_io import (
 from legacy_desktop.modules.conditional.ui.preset_panel import PresetPanel
 from legacy_desktop.modules.conditional.ui.rule_list_panel import RuleListPanel
 from legacy_desktop.modules.conditional.ui.rule_panel import RulePanel
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.theme import DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles
 
 
 class RuleEditorWindow(QDialog):

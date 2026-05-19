@@ -7,8 +7,8 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal, QTimer, Qt
 from PyQt6.QtGui import QIntValidator
 from PyQt6.QtWidgets import QTextEdit
 from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 import json
 import os
 import time

@@ -8,8 +8,8 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap
 from PIL import Image
 
-from ui.theme import DARK_COLORS
-from ui.scaling_manager import get_scaled_size, get_scaled_font_size
+from legacy_desktop.ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_size, get_scaled_font_size
 
 
 class PreviewDialog(QDialog):

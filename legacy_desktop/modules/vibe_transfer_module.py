@@ -20,8 +20,8 @@ from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
-from ui.theme import get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from utils.clipboard_image import (
     IMAGE_CLIPBOARD_FORMATS,
     clipboard_mime_png_bytes as _clipboard_mime_png_bytes,

@@ -17,11 +17,11 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize, QObject, QThread, QTimer, QMimeD
 from PyQt6.QtGui import QPixmap, QMouseEvent, QPainter, QColor, QAction, QKeyEvent, QDragEnterEvent, QDropEvent, QCursor
 from PyQt6.QtWidgets import QWidgetAction
 from PIL import Image, ImageQt
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from interfaces.base_tab_module import BaseTabModule
-from ui.img2img_popup import Img2ImgPopup
-from ui.metadata_viewer import MetadataViewerWindow
+from legacy_desktop.ui.img2img_popup import Img2ImgPopup
+from legacy_desktop.ui.metadata_viewer import MetadataViewerWindow
 from utils.clipboard_image import (
     clipboard_mime_png_bytes,
     pil_image_from_clipboard,

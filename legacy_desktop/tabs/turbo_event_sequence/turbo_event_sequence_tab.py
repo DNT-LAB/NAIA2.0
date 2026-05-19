@@ -15,8 +15,8 @@ from PyQt6.QtCore import pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap
 
 from interfaces.base_tab_module import BaseTabModule
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 from .widgets.event_search_widget import EventSearchWidget
 from .widgets.sequence_tab_container import SequenceTabContainer

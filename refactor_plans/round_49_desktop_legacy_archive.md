@@ -18,7 +18,7 @@ Physically move the first Desktop App entrypoints out of the supported runtime t
 - [x] Move PyQt tab wrappers from `tabs/`.
 - [x] Extract Event Preset headless data/engine helpers from `ui/` before moving PyQt UI wrappers.
 - [x] Extract Clothes/Expression Preset headless assets from `ui/` before moving PyQt UI wrappers.
-- [ ] Move or retire remaining PyQt UI wrappers from `ui/`.
+- [x] Move remaining PyQt UI wrappers from `ui/`, leaving only `ui/remote_web` static assets.
 
 ## When Done
 
@@ -111,4 +111,15 @@ When done for this extraction:
 
 - `core.clothes_preset_service` loads data/runtime modules from `core/clothes_preset`.
 - `core.expression_preset_service` reads `core/expression_preset/expression_catalog.json`.
+- Supported headless app creation imports no `ui`, `PyQt6`, or `legacy_desktop` modules.
+
+## Round 49G UI Wrapper Archive
+
+Moved every tracked `ui/` file except `ui/remote_web/**` into `legacy_desktop/ui/`.
+
+When done for this archive:
+
+- `git ls-files ui` returns only supported Remote Web static assets.
+- Root `ui/` no longer contains tracked PyQt Python wrappers.
+- Legacy desktop code imports PyQt UI wrappers through `legacy_desktop.ui.*`.
 - Supported headless app creation imports no `ui`, `PyQt6`, or `legacy_desktop` modules.

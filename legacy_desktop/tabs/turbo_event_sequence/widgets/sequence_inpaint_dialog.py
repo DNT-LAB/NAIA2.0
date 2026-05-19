@@ -19,8 +19,8 @@ from typing import List
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, QPointF, QEvent, pyqtSignal, QTimer
 
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 from typing import Optional, TYPE_CHECKING
 

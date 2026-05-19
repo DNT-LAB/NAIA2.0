@@ -7,8 +7,8 @@ Sequence Tab Container Widget
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTabWidget
 from PyQt6.QtCore import pyqtSignal
 
-from ui.theme import DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 from .sequence_preview_widget import SequencePreviewWidget
 from .sequence_edit_widget import SequenceEditWidget

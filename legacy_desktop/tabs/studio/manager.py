@@ -18,8 +18,8 @@ from PIL import Image
 from legacy_desktop.tabs.studio.frame import ResultImageFrame
 from legacy_desktop.tabs.studio.wildcard_mode_state import WildcardModeState, WildcardAxisInfo
 from legacy_desktop.tabs.studio.wildcard_combination_generator import WildcardCombinationGenerator
-from ui.theme import DARK_COLORS, get_dynamic_styles, show_info, show_warning, show_error
-from ui.scaling_manager import get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles, show_info, show_warning, show_error
+from legacy_desktop.ui.scaling_manager import get_scaled_size
 
 if TYPE_CHECKING:
     from core.context import AppContext

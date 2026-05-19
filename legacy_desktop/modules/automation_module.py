@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer, QObject, pyqtSignal, QThread, Qt
 from PyQt6.QtWidgets import QApplication
 from interfaces.base_module import BaseMiddleModule
-from ui.theme import get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size
+from legacy_desktop.ui.theme import get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size
 from core.automation_settings import (
     AUTOMATION_SETTINGS_PATH,
     load_automation_settings,

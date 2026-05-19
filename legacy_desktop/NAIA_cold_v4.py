@@ -125,15 +125,15 @@ from core.character_settings import (
 )
 from legacy_desktop.core.generation_controller import GenerationController
 from core.wildcard_processor import split_tags_smart
-from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.collapsible import CollapsibleBox, EnhancedCollapsibleBox, FixedBox
-from ui.right_view import RightView
-from ui.temp_generation_window import TempGenerationWindow
-from ui.resolution_manager_dialog import ResolutionManagerDialog
-from ui.remote_window import RemoteWindow
-from ui.translate_dialog import TranslateDialog
-from ui.interactive_window import InteractiveWindow
+from legacy_desktop.ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.collapsible import CollapsibleBox, EnhancedCollapsibleBox, FixedBox
+from legacy_desktop.ui.right_view import RightView
+from legacy_desktop.ui.temp_generation_window import TempGenerationWindow
+from legacy_desktop.ui.resolution_manager_dialog import ResolutionManagerDialog
+from legacy_desktop.ui.remote_window import RemoteWindow
+from legacy_desktop.ui.translate_dialog import TranslateDialog
+from legacy_desktop.ui.interactive_window import InteractiveWindow
 from PyQt6.QtGui import QFont, QFontDatabase, QIntValidator, QDoubleValidator, QTextCursor, QCursor, QAction, QDesktopServices, QSyntaxHighlighter, QTextCharFormat, QColor, QShowEvent, QHideEvent
 from PyQt6.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer, QEvent, QMimeData, QUrl
 from legacy_desktop.core.search_controller import SearchController
@@ -144,15 +144,15 @@ from core.wildcard_manager import WildcardManager
 from legacy_desktop.core.prompt_generation_controller import PromptGenerationController
 from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
 from utils.load_generation_params import GenerationParamsManager
-from ui.img2img_popup import Img2ImgPopup
-from ui.img2img_panel import Img2ImgPanel
-from ui.img2img_window import Img2ImgWindow
+from legacy_desktop.ui.img2img_popup import Img2ImgPopup
+from legacy_desktop.ui.img2img_panel import Img2ImgPanel
+from legacy_desktop.ui.img2img_window import Img2ImgWindow
 from legacy_desktop.core.main_controller import MainController
 from legacy_desktop.core.ui_state_manager import UIStateManager
 from utils.token_calculator import get_token_calculator
 from utils.clipboard_image import pil_image_from_mime_data
 from legacy_desktop.core.comfyui_utils import ComfyUIAPIUtils
-from ui.terminal.terminal_widget import TerminalWidget
+from legacy_desktop.ui.terminal.terminal_widget import TerminalWidget
 
 cfg_validator = QDoubleValidator(1.0, 10.0, 1)
 step_validator = QIntValidator(1, 50)
@@ -886,7 +886,7 @@ class Img2ImgWindowManager:
 
     def create_inpaint_from_editor(self, pil_image, history_item=None, parent=None):
         """Open the native mask editor, then create the matching img2img/inpaint surface."""
-        from ui.inpaint_window import InpaintWindow
+        from legacy_desktop.ui.inpaint_window import InpaintWindow
 
         result = InpaintWindow.get_inpaint_data(
             pil_image,
@@ -2674,7 +2674,7 @@ class ModernMainWindow(QMainWindow):
             self.custom_script_textbox.setVisible(True)
 
             # 3. DetachedWindow 생성
-            from ui.detached_window import DetachedWindow
+            from legacy_desktop.ui.detached_window import DetachedWindow
             self.custom_api_window = DetachedWindow(
                 detached_widget,
                 "Custom API Parameters",
@@ -4133,7 +4133,7 @@ class ModernMainWindow(QMainWindow):
             detached_layout.addWidget(button_container)
             
             # 4. DetachedWindow 생성
-            from ui.detached_window import DetachedWindow
+            from legacy_desktop.ui.detached_window import DetachedWindow
             self.prompt_tabs_window = DetachedWindow(
                 detached_widget,
                 "프롬프트 편집기",
@@ -4351,7 +4351,7 @@ class ModernMainWindow(QMainWindow):
             self.event_preset_window.activateWindow()
             return
 
-        from ui.event_preset import EventPresetWindow
+        from legacy_desktop.ui.event_preset import EventPresetWindow
 
         # 데이터 확인 + 다운로드 (윈도우 생성 전 사전작업)
         if not EventPresetWindow.ensure_data_available(parent=self):
@@ -4387,7 +4387,7 @@ class ModernMainWindow(QMainWindow):
             self.clothes_preset_window.activateWindow()
             return
 
-        from ui.clothes_preset import ClothesPresetWindow
+        from legacy_desktop.ui.clothes_preset import ClothesPresetWindow
 
         if not ClothesPresetWindow.ensure_data_available(parent=self):
             return
@@ -4420,7 +4420,7 @@ class ModernMainWindow(QMainWindow):
             self.character_viewer_window.activateWindow()
             return
 
-        from ui.character_viewer import CharacterViewerWindow
+        from legacy_desktop.ui.character_viewer import CharacterViewerWindow
 
         if not CharacterViewerWindow.ensure_data_available(parent=self):
             return
@@ -4911,7 +4911,7 @@ class ModernMainWindow(QMainWindow):
                 return
 
         try:
-            from ui.ezmode.ezmode_window import EZModeWindow
+            from legacy_desktop.ui.ezmode.ezmode_window import EZModeWindow
 
             # EZ Mode 창 생성
             self.ez_mode_window = EZModeWindow(self.app_context, parent=self)
@@ -6788,7 +6788,7 @@ class ModernMainWindow(QMainWindow):
         csv_path = os.path.join(base_dir, "selected_tags.csv")
 
         if not os.path.exists(onnx_path) or not os.path.exists(csv_path):
-            from ui.interactive.image_tagger_block import (
+            from legacy_desktop.ui.interactive.image_tagger_block import (
                 TaggerDownloadWorker, DownloadProgressDialog
             )
             self._tag_pil_image = pil_image
@@ -6806,7 +6806,7 @@ class ModernMainWindow(QMainWindow):
             return
 
         # Step 3: 태그 분석 실행
-        from ui.interactive.image_tagger_block import TaggerWorker
+        from legacy_desktop.ui.interactive.image_tagger_block import TaggerWorker
         self._tag_pil_image = pil_image
         self.status_bar.showMessage("🏷️ 태그 분석 중...")
 
@@ -6857,7 +6857,7 @@ class ModernMainWindow(QMainWindow):
                 del _sys.modules[mod_name]
             try:
                 import onnxruntime as ort
-                import ui.interactive.image_tagger_block as tagger_mod
+                import legacy_desktop.ui.interactive.image_tagger_block as tagger_mod
                 tagger_mod.ort = ort
                 tagger_mod.HAS_TAGGER_LIBS = True
             except (ImportError, OSError):
@@ -6926,7 +6926,7 @@ class ModernMainWindow(QMainWindow):
             final_prompt = ", ".join(tag_strings)
 
         # 결과 윈도우 표시
-        from ui.tag_result_window import TagResultWindow
+        from legacy_desktop.ui.tag_result_window import TagResultWindow
 
         self._tag_result_window = TagResultWindow(
             pil_image=self._tag_pil_image,
@@ -7520,7 +7520,7 @@ class ModernMainWindow(QMainWindow):
             return
         pil_image = history_item.image
 
-        from ui.outpaint_window import OutpaintWindow
+        from legacy_desktop.ui.outpaint_window import OutpaintWindow
         result = OutpaintWindow.get_outpaint_data(pil_image, self)
         if result is None:
             return
@@ -7539,7 +7539,7 @@ class ModernMainWindow(QMainWindow):
             return
         pil_image = history_item.image
 
-        from ui.comic_panel_window import ComicPanelWindow
+        from legacy_desktop.ui.comic_panel_window import ComicPanelWindow
         result = ComicPanelWindow.get_comic_panel_data(pil_image, self)
         if result is None:
             return
@@ -7558,7 +7558,7 @@ class ModernMainWindow(QMainWindow):
         if pil_image is None:
             return
 
-        from ui.comic_panel_window import ComicPanelWindow
+        from legacy_desktop.ui.comic_panel_window import ComicPanelWindow
         result = ComicPanelWindow.get_comic_panel_data(pil_image, self)
         if result is None:
             return
@@ -7707,7 +7707,7 @@ class ModernMainWindow(QMainWindow):
         min_left_ratio = left_min_required / window_width
         
         # DPI별 기본 최소/최대 stretch 범위 설정
-        from ui.scaling_manager import get_current_scale_factor
+        from legacy_desktop.ui.scaling_manager import get_current_scale_factor
         dpi_scale = get_current_scale_factor()
         
         if dpi_scale <= 1.0:  # 100% 스케일 (FHD 등)
@@ -7847,7 +7847,7 @@ if __name__ == "__main__":
     window = ModernMainWindow()
     web_shell_window = None
     if launch_web_shell:
-        from ui.web_wrapper import WebWrapperWindow
+        from legacy_desktop.ui.web_wrapper import WebWrapperWindow
 
         web_shell_window = WebWrapperWindow(
             window.app_context,

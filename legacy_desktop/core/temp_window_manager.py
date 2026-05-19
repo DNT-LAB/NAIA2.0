@@ -48,7 +48,7 @@ class TempWindowManager(QObject):
         Returns:
             TempGenerationWindow: 생성된 임시 창 인스턴스
         """
-        from ui.temp_generation_window import TempGenerationWindow
+        from legacy_desktop.ui.temp_generation_window import TempGenerationWindow
 
         # 고유 창 ID 할당
         window_id = self._next_window_id

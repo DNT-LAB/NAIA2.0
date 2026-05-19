@@ -8,7 +8,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QPushButton, QGroupBox, QTextEdit, QLabel
 )
-from ui.theme import DARK_COLORS, DARK_STYLES
+from legacy_desktop.ui.theme import DARK_COLORS, DARK_STYLES
 
 class ComfyUIAPIUtils:
     """ComfyUI API와의 통신을 위한 유틸리티 클래스"""

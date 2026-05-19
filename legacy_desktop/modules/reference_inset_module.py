@@ -21,8 +21,8 @@ from core.reference_inset_service import (
     REFERENCE_INSET_HOOK_INFO,
     apply_reference_inset_to_prompt_context,
 )
-from ui.theme import DARK_STYLES
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_STYLES
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 if TYPE_CHECKING:
     from core.prompt_context import PromptContext

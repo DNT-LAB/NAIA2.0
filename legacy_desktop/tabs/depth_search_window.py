@@ -8,7 +8,7 @@ from PyQt6.QtGui import QCursor, QAction, QIntValidator
 from PyQt6.QtCore import QAbstractTableModel, Qt, pyqtSignal, QObject, QThread
 from core.search_result_model import SearchResultModel
 from core.search_engine import SearchEngine
-from ui.theme import DARK_COLORS
+from legacy_desktop.ui.theme import DARK_COLORS
 from interfaces.base_tab_module import BaseTabModule
 
 class TagsStringBuildThread(QThread):

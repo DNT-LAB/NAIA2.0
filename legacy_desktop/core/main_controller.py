@@ -11,8 +11,8 @@ from PyQt6.QtWidgets import QMessageBox, QProgressDialog, QMenu
 from PyQt6.QtCore import QThread, QTimer, Qt
 from PyQt6.QtGui import QTextCursor, QAction, QShortcut, QKeySequence
 from PIL import Image
-from ui.theme import DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size
+from legacy_desktop.ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size
 from core.search_result_model import SearchResultModel
 from utils.load_generation_params import GenerationParamsManager
 

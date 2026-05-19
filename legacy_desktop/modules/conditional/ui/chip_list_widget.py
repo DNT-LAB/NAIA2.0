@@ -27,8 +27,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS
 
 
 # 175 hotfix: condition_editor/rule_panel 과 동일한 입력 팔레트 사용.

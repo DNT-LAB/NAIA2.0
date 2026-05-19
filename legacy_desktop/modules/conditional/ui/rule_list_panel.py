@@ -38,8 +38,8 @@ from PyQt6.QtWidgets import (
 )
 
 from legacy_desktop.modules.conditional.block_model import Rule, RuleBook
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS
 
 
 # 규칙 종류 배지 팔레트. DARK_COLORS 의 accent/warning 계열을 그대로 활용한다.

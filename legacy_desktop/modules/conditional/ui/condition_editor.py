@@ -31,8 +31,8 @@ from PyQt6.QtWidgets import (
 )
 
 from legacy_desktop.modules.conditional.block_model import ConditionNode, make_tag_leaf
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS
 
 
 _KIND_ITEMS = (

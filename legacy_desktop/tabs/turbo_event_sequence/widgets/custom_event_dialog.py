@@ -23,8 +23,8 @@ import pandas as pd
 from PIL import Image
 from typing import Optional, TYPE_CHECKING
 
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 from .image_viewer_widget import ImageViewerWidget
 

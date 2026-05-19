@@ -17,8 +17,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QAction
 
-from ui.theme import DARK_COLORS, get_dynamic_styles, show_warning, show_error, show_question
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles, show_warning, show_error, show_question
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
 class OpenPresetDialog(QDialog):

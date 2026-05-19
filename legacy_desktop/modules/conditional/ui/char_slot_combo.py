@@ -16,7 +16,7 @@ from typing import Callable, List, Optional, Tuple
 
 from PyQt6.QtWidgets import QComboBox, QWidget
 
-from ui.scaling_manager import get_scaled_size
+from legacy_desktop.ui.scaling_manager import get_scaled_size
 
 # 각 항목: (slot_n_1based, summary_text, is_active)
 SlotInfo = Tuple[int, str, bool]

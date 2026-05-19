@@ -23,9 +23,9 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer, QThread
 from PyQt6.QtGui import QFont, QColor, QBrush, QKeyEvent
 
 from interfaces.base_module import BaseMiddleModule
-from ui.theme import DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.modern_menu import setModernStyle
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.modern_menu import setModernStyle
 from utils.translator import english_to_korean
 
 # SSL 인증서 검증

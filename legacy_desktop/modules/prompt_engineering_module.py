@@ -4,9 +4,9 @@ from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont, QImage, QClipboard, QD
 from interfaces.base_module import BaseMiddleModule
 from core.prompt_context import PromptContext
 from interfaces.mode_aware_module import ModeAwareModule
-from ui.theme import get_dynamic_styles, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.modern_menu import setModernStyle
+from legacy_desktop.ui.theme import get_dynamic_styles, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.modern_menu import setModernStyle
 from typing import Dict, Any, Optional, Set
 from core.wildcard_processor import split_tags_smart
 from core.tag_filter_helpers import _is_color_exception, apply_tag_filters

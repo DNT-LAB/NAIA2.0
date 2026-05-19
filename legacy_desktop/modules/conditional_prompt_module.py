@@ -9,9 +9,9 @@ from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.prompt_context import PromptContext
 from legacy_desktop.modules.conditional.runtime_snapshot import CharStateSnapshot
-from ui.theme import DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.modern_menu import setModernStyle
+from legacy_desktop.ui.theme import DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.modern_menu import setModernStyle
 from typing import Dict, Any, List, Optional
 import re
 

@@ -10,9 +10,9 @@ from interfaces.base_module import BaseMiddleModule
 from core.context import AppContext
 from core.prompt_context import PromptContext
 from core.wildcard_status_settings import load_wildcard_status_settings, save_wildcard_status_settings
-from ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size
-from ui.modern_menu import setModernStyle
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size
+from legacy_desktop.ui.modern_menu import setModernStyle
 
 class WildcardStatusModule(BaseMiddleModule):
     """
@@ -360,7 +360,7 @@ class WildcardStatusModule(BaseMiddleModule):
 
     def open_wildcard_manager(self):
         try:
-            from ui.wildcard_manager_window import WildcardManagerWindow
+            from legacy_desktop.ui.wildcard_manager_window import WildcardManagerWindow
 
             if hasattr(self, 'wildcard_window') and self.wildcard_window:
                 self.wildcard_window.close()

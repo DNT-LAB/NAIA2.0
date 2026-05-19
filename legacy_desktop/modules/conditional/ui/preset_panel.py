@@ -33,8 +33,8 @@ from PyQt6.QtWidgets import (
 )
 
 from legacy_desktop.modules.conditional.preset_io import PresetInfo
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
-from ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS
 
 
 class PresetPanel(QWidget):

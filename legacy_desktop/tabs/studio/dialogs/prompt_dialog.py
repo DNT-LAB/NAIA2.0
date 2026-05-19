@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QCheckBox, QFrame, QSpinBox
 )
 from PyQt6.QtCore import Qt
-from ui.theme import DARK_COLORS, DARK_STYLES, get_dynamic_styles
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS, DARK_STYLES, get_dynamic_styles
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
 class PromptSettingDialog(QDialog):

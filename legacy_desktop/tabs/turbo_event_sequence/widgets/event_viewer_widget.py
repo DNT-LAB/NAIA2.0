@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Optional, Set
 import pandas as pd
 
-from ui.theme import DARK_STYLES, DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_STYLES, DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 from .event_index_manager import EventIndexManager
 from .thumbnail_grid import ThumbnailGrid

@@ -15,8 +15,8 @@ from typing import List, Dict, Optional
 from PIL import Image
 import io
 
-from ui.theme import DARK_COLORS
-from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from legacy_desktop.ui.theme import DARK_COLORS
+from legacy_desktop.ui.scaling_manager import get_scaled_font_size, get_scaled_size
 
 
 class ThumbnailLoaderWorker(QObject):

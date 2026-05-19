@@ -5,8 +5,8 @@ import importlib.util
 import traceback
 from typing import Optional
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
-from ui.collapsible import EnhancedCollapsibleBox  # 수정된 import
-from ui.detached_window import DetachedWindow  # 추가 import
+from legacy_desktop.ui.collapsible import EnhancedCollapsibleBox  # 수정된 import
+from legacy_desktop.ui.detached_window import DetachedWindow  # 추가 import
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext 
@@ -432,7 +432,7 @@ class MiddleSectionController:
 
             # 🆕 E621 모듈인 경우 최소 너비 설정
             if "E621" in module_title or "e621" in module_title.lower():
-                from ui.scaling_manager import get_scaled_size
+                from legacy_desktop.ui.scaling_manager import get_scaled_size
                 min_width = get_scaled_size(1160)
                 detached_window.setMinimumWidth(min_width)
                 # 초기 크기도 설정

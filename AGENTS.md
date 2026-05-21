@@ -15,6 +15,7 @@
 - Treat `PROJECT_LAYOUT_POLICY.md` as the source of truth for runtime/layout ownership. The default product path is Python Headless Web; Electron is an optional shell only.
 - Keep canonical Remote Web source changes under `app/web/remote`. Do not recreate `ui/remote_web`; it is an old source path kept only as a documented legacy/fallback reference.
 - For layout/runtime boundary work, run `python tools/check_project_layout_policy.py` before finishing.
+- For refactor-plan driven work, keep `python tools/check_refactor_plan_execution_contract.py` passing so gate setup, implementation, modification, deletion, verification, post-work evaluation, and commit handling stay explicit.
 
 ## Remote Web UI
 

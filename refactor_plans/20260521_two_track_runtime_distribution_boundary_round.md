@@ -33,6 +33,19 @@ Shared boundary is complete when:
 - `ui/remote_web` remains removed from source ownership.
 - Release manifests include `app/web/remote/**` and exclude local runtime/build output.
 
+## Execution Protocol
+
+This round follows the standard refactor-plan execution pattern:
+
+- Plan review: confirm the runtime/distribution boundary and the current repository state before editing.
+- Gate setup: add or update manifest-backed validation before declaring the boundary complete.
+- Implementation: change only the source Web, optional Electron shell, manifest, tool, and test surfaces required by this round.
+- Modification: fix any failing gate inside the same round before broadening scope.
+- Deletion: remove only paths covered by an approved cleanup candidate and required gates.
+- Verification: run the round checker, focused tests, static review, and `git diff --check`.
+- Post-work evaluation: compare the result against the When Done conditions and report deferred work.
+- Commit: stage only intended files and create a round-scoped commit when requested.
+
 ## Implementation
 
 - Add `release_assets/manifests/runtime_distribution_tracks.json`.
@@ -51,6 +64,13 @@ Required checks:
 - `python tools/check_release_distribution_strategy.py`
 - `python -m pytest tests/test_runtime_distribution_tracks.py tests/test_project_layout_policy.py tests/test_release_asset_manifests.py tests/test_project_cleanup_candidates.py tests/test_project_layout_round_completion.py tests/test_remote_web_feature_contract.py tests/headless/test_remote_web_asset_resolver.py tests/test_web_shell_detached_geometry.py tests/test_stage_release_assets.py tests/test_runtime_paths.py`
 - `git diff --check` for this round's touched files.
+
+## Post-Work Evaluation
+
+- Confirm whether the source Web track still runs without npm, Electron, Docker, or bundled Python.
+- Confirm whether Electron remains a release shell instead of a second implementation.
+- Confirm whether any deletion was candidate-scoped and approval-gated.
+- Confirm whether runtime/generated artifacts were excluded from staging.
 
 ## When Done
 

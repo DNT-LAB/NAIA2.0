@@ -138,11 +138,27 @@ Cleanup candidate manifests must identify:
 
 Round 9 cleanup may be marked complete only when delete candidates and their gates are recorded. Actual deletion remains deferred until a focused candidate group receives explicit user approval.
 
+## Refactor Plan Execution Protocol
+
+Active refactor plans must be executable, not only descriptive. A plan that is used to drive implementation must state how the round handles:
+
+- Plan review.
+- Gate setup or gate reuse.
+- Implementation.
+- Modification and rework after failed verification.
+- Deletion through approved candidate groups only.
+- Verification and static review.
+- Post-work evaluation against When Done conditions.
+- Targeted staging and commit handling.
+
+The tracked execution contract is `release_assets/manifests/refactor_plan_execution_contract.json`; the checker is `python tools/check_refactor_plan_execution_contract.py`.
+
 ## Validation Gates
 
 Layout and runtime-boundary changes should keep these checks passing:
 
 - `python tools/check_project_layout_policy.py`
+- `python tools/check_refactor_plan_execution_contract.py`
 - `python tools/check_runtime_distribution_tracks.py`
 - `python tools/check_project_layout_round_completion.py`
 - `python tools/check_project_cleanup_candidates.py`

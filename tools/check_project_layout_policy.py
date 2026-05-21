@@ -202,10 +202,10 @@ def _check_evidence_manifests(repo_root: Path, manifest: dict[str, Any]) -> list
         return [{
             "type": "missing_evidence_manifests",
             "path": "evidence_manifests",
-            "reason": "layout policy must reference round completion, cleanup candidate, and runtime distribution track manifests",
+            "reason": "layout policy must reference round completion, cleanup candidate, runtime distribution, and refactor-plan execution manifests",
         }]
 
-    for key in ("round_completion", "cleanup_candidates", "runtime_distribution_tracks"):
+    for key in ("round_completion", "cleanup_candidates", "runtime_distribution_tracks", "refactor_plan_execution"):
         raw_path = str(evidence_manifests.get(key) or "")
         if not raw_path:
             violations.append({
@@ -260,6 +260,7 @@ def check_project_layout_policy(
         "round_completion_manifest": evidence_manifests.get("round_completion", ""),
         "cleanup_candidates_manifest": evidence_manifests.get("cleanup_candidates", ""),
         "runtime_distribution_tracks_manifest": evidence_manifests.get("runtime_distribution_tracks", ""),
+        "refactor_plan_execution_manifest": evidence_manifests.get("refactor_plan_execution", ""),
         "violation_count": len(violations),
         "warning_count": len(warnings),
         "violations": violations,

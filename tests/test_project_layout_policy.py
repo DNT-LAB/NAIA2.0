@@ -37,6 +37,7 @@ def _minimal_repo(root: Path, *, launcher_text: str | None = None) -> Path:
     _write(root / "release_assets" / "manifests" / "project_layout_round_completion.json", "{}")
     _write(root / "release_assets" / "manifests" / "project_cleanup_candidates.json", "{}")
     _write(root / "release_assets" / "manifests" / "runtime_distribution_tracks.json", "{}")
+    _write(root / "release_assets" / "manifests" / "refactor_plan_execution_contract.json", "{}")
     manifest = root / "policy.json"
     manifest.write_text(
         Path("release_assets/manifests/project_layout_policy.json").read_text(encoding="utf-8"),
@@ -57,6 +58,9 @@ def test_project_layout_policy_passes_current_repository():
     assert payload["cleanup_candidates_manifest"] == "release_assets/manifests/project_cleanup_candidates.json"
     assert payload["runtime_distribution_tracks_manifest"] == (
         "release_assets/manifests/runtime_distribution_tracks.json"
+    )
+    assert payload["refactor_plan_execution_manifest"] == (
+        "release_assets/manifests/refactor_plan_execution_contract.json"
     )
     assert payload["violations"] == []
 

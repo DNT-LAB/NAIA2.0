@@ -5,7 +5,8 @@
   "evidence_manifests": {
     "round_completion": "release_assets/manifests/project_layout_round_completion.json",
     "cleanup_candidates": "release_assets/manifests/project_cleanup_candidates.json",
-    "runtime_distribution_tracks": "release_assets/manifests/runtime_distribution_tracks.json"
+    "runtime_distribution_tracks": "release_assets/manifests/runtime_distribution_tracks.json",
+    "refactor_plan_execution": "release_assets/manifests/refactor_plan_execution_contract.json"
   },
   "default_runtime": {
     "name": "Python Headless Web",
@@ -75,6 +76,7 @@
     "Legacy PyQt6 Desktop is reference/quarantine only.",
     "Cleanup/delete candidates must be recorded before destructive source cleanup.",
     "Round 9 cleanup is complete only as a non-destructive candidate inventory until explicit delete approval is granted.",
-    "Clone-user Web execution and Electron release shell packaging are separate tracks over the same backend and same Remote Web source."
+    "Clone-user Web execution and Electron release shell packaging are separate tracks over the same backend and same Remote Web source.",
+    "Active refactor plans must include gate setup, implementation, modification, deletion, verification, post-work evaluation, and commit handling."
   ]
 }

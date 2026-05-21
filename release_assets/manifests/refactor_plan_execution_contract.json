@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "purpose": "Ensure active refactor plans can be executed with the same plan-implement-verify-review-commit pattern.",
+  "contract_document": "refactor_plans/20260521_refactor_plan_execution_protocol.md",
+  "tracked_plan_documents": [
+    {
+      "path": "refactor_plans/20260521_refactor_plan_execution_protocol.md",
+      "kind": "execution_protocol",
+      "required_sections": [
+        "Goal",
+        "Protocol",
+        "Gate Setup",
+        "Implementation",
+        "Modification",
+        "Deletion",
+        "Verification",
+        "Post-Work Evaluation",
+        "When Done"
+      ]
+    },
+    {
+      "path": "refactor_plans/20260521_two_track_runtime_distribution_boundary_round.md",
+      "kind": "single_round",
+      "required_sections": [
+        "Goal",
+        "Criteria",
+        "Execution Protocol",
+        "Implementation",
+        "Verification",
+        "Post-Work Evaluation",
+        "When Done"
+      ]
+    },
+    {
+      "path": "refactor_plans/20260521_project_layout_runtime_boundary_plan.md",
+      "kind": "multi_round",
+      "required_sections": [
+        "Goal",
+        "Product Runtime Decision",
+        "Execution Protocol",
+        "Implementation Status - 2026-05-21",
+        "Post-Work Evaluation",
+        "First Implementation Slice"
+      ]
+    }
+  ],
+  "required_phase_terms": {
+    "plan_review": [
+      "plan review",
+      "계획 확인"
+    ],
+    "gate_setup": [
+      "gate setup",
+      "gate",
+      "검증 gate"
+    ],
+    "implementation": [
+      "implementation",
+      "구현"
+    ],
+    "modification": [
+      "modification",
+      "수정"
+    ],
+    "deletion": [
+      "deletion",
+      "삭제"
+    ],
+    "verification": [
+      "verification",
+      "검증"
+    ],
+    "static_review": [
+      "static review",
+      "정적 리뷰"
+    ],
+    "post_work_evaluation": [
+      "post-work evaluation",
+      "작업 후 평가"
+    ],
+    "commit": [
+      "commit",
+      "커밋"
+    ]
+  },
+  "required_tooling": [
+    "tools/check_refactor_plan_execution_contract.py",
+    "tests/test_refactor_plan_execution_contract.py",
+    "release_assets/manifests/refactor_plan_execution_contract.json"
+  ],
+  "hard_rules": [
+    "Every active refactor plan must state how the round starts from plan review.",
+    "Every active refactor plan must state gate setup or the explicit gate reuse path.",
+    "Implementation, modification, deletion, verification, static review, post-work evaluation, and commit handling must be represented.",
+    "Deletion-capable work remains approval-gated and candidate-scoped.",
+    "A plan may be declared complete only after its When Done conditions and post-work evaluation are checked."
+  ]
+}

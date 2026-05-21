@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "purpose": "Completion evidence for refactor_plans/20260521_project_layout_runtime_boundary_plan.md rounds 0 through 9.",
+  "plan": "refactor_plans/20260521_project_layout_runtime_boundary_plan.md",
+  "all_rounds_status": "complete_with_non_destructive_cleanup_candidates",
+  "rounds": [
+    {
+      "round": 0,
+      "name": "Baseline Freeze",
+      "status": "complete",
+      "evidence": [
+        "PROJECT_LAYOUT_POLICY.md",
+        "release_assets/manifests/project_layout_policy.json",
+        "python tools/check_project_layout_policy.py"
+      ]
+    },
+    {
+      "round": 1,
+      "name": "Project Layout Policy Document",
+      "status": "complete",
+      "evidence": [
+        "PROJECT_LAYOUT_POLICY.md",
+        "AGENTS.md",
+        "tools/check_project_layout_policy.py"
+      ]
+    },
+    {
+      "round": 2,
+      "name": "Canonical Remote Web Source",
+      "status": "complete",
+      "evidence": [
+        "app/web/assets.py",
+        "app/web/remote",
+        "tests/test_runtime_paths.py",
+        "python tools/check_project_layout_policy.py"
+      ]
+    },
+    {
+      "round": 3,
+      "name": "Optional Electron Boundary",
+      "status": "complete",
+      "evidence": [
+        "PROJECT_LAYOUT_POLICY.md",
+        "release_assets/manifests/project_layout_policy.json",
+        "tests/electron_shell",
+        "python tools/check_project_layout_policy.py"
+      ]
+    },
+    {
+      "round": 4,
+      "name": "Runtime Data and Generated Artifact Quarantine",
+      "status": "complete",
+      "evidence": [
+        ".gitignore",
+        "release_assets/manifests/runtime_asset_classification.json",
+        "release_assets/manifests/runtime_write_policy.json",
+        "python tools/check_runtime_asset_classification.py",
+        "python tools/check_runtime_write_policy.py"
+      ]
+    },
+    {
+      "round": 5,
+      "name": "Legacy PyQt6 Reference Freeze",
+      "status": "complete",
+      "evidence": [
+        "PROJECT_LAYOUT_POLICY.md",
+        "release_assets/manifests/legacy_pyqt_surface_classification.json",
+        "release_assets/manifests/headless_core_boundary.json",
+        "python tools/check_legacy_pyqt_surface_classification.py",
+        "python tools/check_headless_core_boundary.py"
+      ]
+    },
+    {
+      "round": 6,
+      "name": "Move-Only Source Reorganization",
+      "status": "complete_as_policy_gate",
+      "evidence": [
+        "PROJECT_LAYOUT_POLICY.md",
+        "release_assets/manifests/source_layout_contract.json",
+        "python tools/check_source_layout_contract.py"
+      ]
+    },
+    {
+      "round": 7,
+      "name": "Contract Gates",
+      "status": "complete",
+      "evidence": [
+        "tools/check_project_layout_policy.py",
+        "tools/check_source_layout_contract.py",
+        "tools/check_headless_core_boundary.py",
+        "tools/check_runtime_asset_classification.py",
+        "tools/check_runtime_write_policy.py",
+        "tools/check_remote_web_feature_contract.py"
+      ]
+    },
+    {
+      "round": 8,
+      "name": "Release Path Simplification",
+      "status": "complete",
+      "evidence": [
+        "PROJECT_LAYOUT_POLICY.md",
+        "release_assets/manifests/release_include_exclude_draft.json",
+        "release_assets/manifests/release_distribution_strategy.json",
+        "python tools/check_project_layout_policy.py",
+        "python tools/check_release_distribution_strategy.py"
+      ]
+    },
+    {
+      "round": 9,
+      "name": "Cleanup and Delete Candidates",
+      "status": "complete_non_destructive",
+      "evidence": [
+        "release_assets/manifests/project_cleanup_candidates.json",
+        "tools/check_project_cleanup_candidates.py",
+        "tools/check_project_layout_round_completion.py",
+        "python tools/check_project_cleanup_candidates.py"
+      ],
+      "destructive_actions_deferred": true
+    }
+  ],
+  "required_commands": [
+    "python tools/check_project_layout_policy.py",
+    "python tools/check_project_layout_round_completion.py",
+    "python tools/check_source_layout_contract.py",
+    "python tools/check_remote_web_feature_contract.py",
+    "python tools/check_headless_core_boundary.py",
+    "python tools/check_legacy_pyqt_surface_classification.py",
+    "python tools/check_runtime_asset_classification.py",
+    "python tools/check_runtime_write_policy.py",
+    "python tools/check_release_distribution_strategy.py",
+    "python tools/check_project_cleanup_candidates.py"
+  ]
+}

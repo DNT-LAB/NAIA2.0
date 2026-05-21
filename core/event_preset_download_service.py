@@ -31,8 +31,12 @@ class EventPresetDownloadService:
         *,
         status_provider: Callable[[], dict[str, Any]],
         on_complete: Callable[[], None] | None = None,
+        data_root: Path | str | None = None,
+        thumbnail_root: Path | str | None = None,
     ):
         self.repo_root = Path(repo_root)
+        self.data_root = Path(data_root) if data_root is not None else self.repo_root / "data"
+        self.thumbnail_root = Path(thumbnail_root) if thumbnail_root is not None else self.repo_root / "data"
         self._status_provider = status_provider
         self._on_complete = on_complete
         self._lock = RLock()
@@ -103,8 +107,8 @@ class EventPresetDownloadService:
         return state
 
     def _run(self) -> None:
-        main_path = self.repo_root / "data" / "event_preset" / "naia_prompt_preset"
-        thumb_path = self.repo_root / "data" / "event_preset_thumbnail"
+        main_path = self.data_root / "event_preset" / "naia_prompt_preset"
+        thumb_path = self.thumbnail_root / "event_preset_thumbnail"
         try:
             if not main_path.exists() or not self._validate_event_preset_zip(main_path):
                 self._download_file(

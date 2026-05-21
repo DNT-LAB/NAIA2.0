@@ -16,6 +16,9 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Protocol
 import weakref
+import base64
+import hashlib
+import io
 import os
 import re
 import json
@@ -23,6 +26,9 @@ import json
 from core import result_image_payload_service as result_images
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_result_service import HeadlessResultStore
+from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
+from core.pipeline_run_registry import PipelineRunRegistry, PromptPipelineRun
+from app.backend.runtime import RuntimePaths, resolve_runtime_paths
 from core.search_result_model import SearchResultModel
 
 
@@ -86,8 +92,6 @@ SAVE_DIRECTORY_CLASSIFICATION_OPTIONS = [
     {"value": "prompt_recognition", "label": "프롬프트 인식"},
 ]
 HEADLESS_RETIRED_MODULES = {
-    "character_reference": "Character Reference image controls are deferred until a PyQt-free image storage service exists.",
-    "vibe_transfer": "Vibe Transfer image controls are deferred until a PyQt-free image storage service exists.",
     "wildcard_status": "Wildcard Status desktop wrapper is retired in the supported headless runtime.",
     "ollama": "Ollama desktop assistant controls are retired in the supported headless runtime.",
 }
@@ -185,6 +189,7 @@ class WebSessionContext:
 
     token_manager: TokenStore | None = None
     repo_root: Path | str | None = None
+    runtime_paths: RuntimePaths | None = None
     event_bus: WebSessionEventBus = field(default_factory=WebSessionEventBus)
     current_api_mode: str = "NAI"
     is_generating: bool = False
@@ -205,17 +210,32 @@ class WebSessionContext:
     search_results_snapshot: Any = None
     current_source_row: Any = None
     current_prompt_context: Any = None
+    pipeline_run_registry: PipelineRunRegistry = field(default_factory=PipelineRunRegistry)
     result_store: HeadlessResultStore = field(default_factory=HeadlessResultStore)
     headless_generation_execute_enabled: bool = True
     auto_save_state: dict[str, Any] = field(default_factory=dict)
     save_directory_state: dict[str, Any] = field(default_factory=dict)
     webui_hiresfix_assist_state: dict[str, Any] = field(default_factory=dict)
+    character_reference_frames: list[dict[str, Any]] = field(default_factory=list)
+    vibe_transfer_frames: list[dict[str, Any]] = field(default_factory=list)
+    vibe_transfer_normalize: bool = False
+    img2img_session: dict[str, Any] = field(default_factory=dict)
+    result_enhance_config: dict[str, Any] = field(default_factory=lambda: {
+        "upscale": 1.5,
+        "strength": 0.2,
+        "noise": 0.0,
+    })
+    _img2img_window_counter: int = 0
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
             self.token_manager = self._default_token_manager()
         self.secure_token_manager = self.token_manager
-        self.repo_root = Path(self.repo_root) if self.repo_root is not None else Path(__file__).resolve().parent.parent
+        explicit_repo_root = self.repo_root is not None
+        self.repo_root = Path(self.repo_root) if explicit_repo_root else Path(__file__).resolve().parent.parent
+        if self.runtime_paths is None:
+            self.runtime_paths = resolve_runtime_paths(self.repo_root, portable=explicit_repo_root)
+        self.runtime_paths.ensure_writable_dirs()
         self.main_window = None
         self.middle_section_controller = None
         self.remote_bridge = None
@@ -242,13 +262,28 @@ class WebSessionContext:
             except TypeError:
                 pass
         if self.api_config_service is None:
-            cloudflared = CloudflaredService(port=self.remote_params.get("web_session_port", 7243))
+            cloudflared_bin_dir = (
+                self.runtime_paths.downloads_dir / "cloudflared"
+                if self.runtime_paths is not None else None
+            )
+            cloudflared = CloudflaredService(
+                port=self.remote_params.get("web_session_port", 7243),
+                bin_dir=cloudflared_bin_dir,
+            )
             cloudflared.set_status(
                 active=self.cloudflared_active,
                 url=self.cloudflared_tunnel_url,
                 status_text=self.cloudflared_status_text,
             )
-            self.api_config_service = ApiConfigService(self.secure_token_manager, cloudflared=cloudflared)
+            timestamp_path = (
+                self.runtime_paths.config_dir / "NAIA_api_timestamps.json"
+                if self.runtime_paths is not None else None
+            )
+            self.api_config_service = ApiConfigService(
+                self.secure_token_manager,
+                cloudflared=cloudflared,
+                **({"timestamp_path": timestamp_path} if timestamp_path is not None else {}),
+            )
         self.generation_queue_manager = self._create_queue_manager()
         self.last_api_payloads: dict[str, Any] = {}
         self.event_stream_runtime = self._create_event_stream_runtime()
@@ -293,6 +328,105 @@ class WebSessionContext:
     def get_pipeline_hooks(self, pipeline_name: str, hook_point: str) -> list[Any]:
         hooks = self.pipeline_hooks.get(pipeline_name, {}).get(hook_point, [])
         return [module_instance for _, module_instance in hooks]
+
+    def start_prompt_run(
+        self,
+        *,
+        source: str,
+        source_row: Any = None,
+        settings: dict[str, Any] | None = None,
+        external_request_id: str = "",
+        metadata: dict[str, Any] | None = None,
+        prompt_run_id: str = "",
+    ) -> PromptPipelineRun:
+        return self.pipeline_run_registry.start_prompt_run(
+            source=source,
+            source_row=source_row,
+            settings=settings,
+            external_request_id=external_request_id,
+            metadata=metadata,
+            prompt_run_id=prompt_run_id,
+        )
+
+    def complete_prompt_run(
+        self,
+        prompt_run_id: str,
+        *,
+        context: Any = None,
+        final_prompt: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> PromptPipelineRun | None:
+        context_metadata = getattr(context, "metadata", {}) if context is not None else {}
+        merged_metadata = {}
+        if isinstance(context_metadata, dict):
+            merged_metadata.update(context_metadata)
+        if isinstance(metadata, dict):
+            merged_metadata.update(metadata)
+        prompt = final_prompt or str(getattr(context, "final_prompt", "") or "")
+        return self.pipeline_run_registry.complete_prompt_run(
+            prompt_run_id,
+            final_prompt=prompt,
+            metadata=merged_metadata,
+        )
+
+    def fail_prompt_run(
+        self,
+        prompt_run_id: str,
+        error: str,
+        *,
+        context: Any = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> PromptPipelineRun | None:
+        context_metadata = getattr(context, "metadata", {}) if context is not None else {}
+        merged_metadata = {}
+        if isinstance(context_metadata, dict):
+            merged_metadata.update(context_metadata)
+        if isinstance(metadata, dict):
+            merged_metadata.update(metadata)
+        return self.pipeline_run_registry.fail_prompt_run(
+            prompt_run_id,
+            error,
+            metadata=merged_metadata,
+        )
+
+    def record_prompt_run_hook(
+        self,
+        prompt_run_id: str,
+        *,
+        hook_point: str,
+        module: str,
+        status: str,
+        error: str = "",
+    ) -> PromptPipelineRun | None:
+        return self.pipeline_run_registry.record_hook(
+            prompt_run_id,
+            hook_point=hook_point,
+            module=module,
+            status=status,
+            error=error,
+        )
+
+    def link_generation_to_prompt_run(
+        self,
+        prompt_run_id: str,
+        generation_request_id: str,
+    ) -> PromptPipelineRun | None:
+        return self.pipeline_run_registry.link_generation_request(
+            prompt_run_id,
+            generation_request_id,
+        )
+
+    def get_prompt_run_payload(self, prompt_run_id: str, *, include_source_row: bool = False) -> dict[str, Any] | None:
+        run = self.pipeline_run_registry.get_prompt_run(prompt_run_id)
+        if run is None:
+            return None
+        return run.to_payload(include_source_row=include_source_row)
+
+    def prompt_runs_payload(self, limit: int = 50) -> dict[str, Any]:
+        return {
+            "type": "pipeline_runs",
+            "prompt_runs": self.pipeline_run_registry.list_prompt_runs(limit),
+        }
 
     def get_api_mode(self) -> str:
         return self.current_api_mode
@@ -350,8 +484,62 @@ class WebSessionContext:
             return set(SUPPORTED_RATINGS)
         return {rating for rating in SUPPORTED_RATINGS if rating in ratings} or set(SUPPORTED_RATINGS)
 
+    def _save_root(self) -> Path:
+        return self.runtime_paths.save_dir if self.runtime_paths is not None else Path(self.repo_root) / "save"
+
+    def _output_root(self) -> Path:
+        return self.runtime_paths.output_dir if self.runtime_paths is not None else Path(self.repo_root) / "output"
+
+    def _legacy_save_root(self) -> Path:
+        return Path(self.repo_root) / "save"
+
+    def _legacy_save_fallback_enabled(self) -> bool:
+        if os.environ.get("NAIA_DISABLE_LEGACY_SAVE_FALLBACK") == "1":
+            return False
+        if os.environ.get("NAIA_ELECTRON") == "1":
+            return False
+        return True
+
+    def _save_path(self, *parts: str | Path) -> Path:
+        path = self._save_root()
+        for part in parts:
+            path = path / part
+        return path
+
+    def _legacy_save_path(self, *parts: str | Path) -> Path:
+        path = self._legacy_save_root()
+        for part in parts:
+            path = path / part
+        return path
+
+    def _existing_save_path(self, *parts: str | Path) -> Path:
+        primary = self._save_path(*parts)
+        if primary.exists():
+            return primary
+        if not self._legacy_save_fallback_enabled():
+            return primary
+        legacy = self._legacy_save_path(*parts)
+        if legacy.exists():
+            return legacy
+        return primary
+
+    def _existing_save_dirs(self, *parts: str | Path) -> list[Path]:
+        dirs: list[Path] = []
+        seen: set[Path] = set()
+        paths = [self._save_path(*parts)]
+        if self._legacy_save_fallback_enabled():
+            paths.append(self._legacy_save_path(*parts))
+        for path in paths:
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            if path.exists() and path.is_dir():
+                dirs.append(path)
+        return dirs
+
     def _search_filter_state_path(self) -> Path:
-        return Path(self.repo_root) / "save" / "remote_web_filter_state.json"
+        return self._save_path("remote_web_filter_state.json")
 
     def default_search_filter_state(self) -> dict[str, Any]:
         return {
@@ -427,13 +615,16 @@ class WebSessionContext:
         return state
 
     def _load_search_filter_state(self) -> dict[str, Any]:
-        path = self._search_filter_state_path()
-        try:
-            if path.exists():
-                with path.open("r", encoding="utf-8") as f:
-                    return self.normalize_search_filter_state(json.load(f))
-        except Exception as exc:
-            print(f"Headless Remote: filter state load failed - {exc}", flush=True)
+        paths = [self._search_filter_state_path()]
+        if self._legacy_save_fallback_enabled():
+            paths.append(self._legacy_save_path("remote_web_filter_state.json"))
+        for path in paths:
+            try:
+                if path.exists():
+                    with path.open("r", encoding="utf-8") as f:
+                        return self.normalize_search_filter_state(json.load(f))
+            except Exception as exc:
+                print(f"Headless Remote: filter state load failed - {exc}", flush=True)
         return self.default_search_filter_state()
 
     def save_search_filter_state(self, **updates: Any) -> dict[str, Any]:
@@ -482,7 +673,33 @@ class WebSessionContext:
         )
 
     def custom_parquet_dir(self) -> Path:
-        return Path(self.repo_root) / "save" / "custom_tags"
+        return self._existing_save_path("custom_tags")
+
+    def runner_parquet_path(self) -> Path:
+        if self.runtime_paths is not None:
+            return self.runtime_paths.cache_dir / "naia_temp_rows.parquet"
+        return Path(self.repo_root) / "naia_temp_rows.parquet"
+
+    def runner_parquet_sources(self) -> list[tuple[Path, str]]:
+        root = Path(self.repo_root)
+        candidates: list[tuple[Path, str]] = [(self.runner_parquet_path(), "runtime cache parquet")]
+        if self.runtime_paths is not None:
+            candidates.append((self.runtime_paths.data_dir / "naia_temp_rows.parquet", "runtime data parquet"))
+            candidates.append((self.runtime_paths.data_dir / "tags" / "tags_129.parquet", "runtime tag archive parquet"))
+        candidates.extend([
+            (root / "data" / "naia_temp_rows.parquet", "legacy data parquet"),
+            (root / "naia_temp_rows.parquet", "legacy temp parquet"),
+        ])
+
+        seen: set[Path] = set()
+        unique_candidates: list[tuple[Path, str]] = []
+        for path, label in candidates:
+            resolved = Path(path).resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            unique_candidates.append((path, label))
+        return unique_candidates
 
     def custom_parquet_names(self) -> list[str]:
         custom_dir = self.custom_parquet_dir()
@@ -566,6 +783,12 @@ class WebSessionContext:
             return self._conditional_prompt_module_state()
         if clean_id == "character":
             return self._character_module_state()
+        if clean_id == "character_reference":
+            return self._character_reference_module_state()
+        if clean_id == "vibe_transfer":
+            return self._vibe_transfer_module_state()
+        if clean_id == "img2img":
+            return self._img2img_module_state()
         if clean_id == "automation":
             return self._automation_module_state()
         if clean_id == "webui_hiresfix_assist":
@@ -640,6 +863,12 @@ class WebSessionContext:
             return self._set_conditional_prompt_param(clean_key, value)
         if clean_id == "character":
             return self._set_character_param(clean_key, value)
+        if clean_id == "character_reference":
+            return self._set_character_reference_param(clean_key, value)
+        if clean_id == "vibe_transfer":
+            return self._set_vibe_transfer_param(clean_key, value)
+        if clean_id == "img2img":
+            return self._set_img2img_param(clean_key, value)
         if clean_id == "automation":
             return self._set_automation_param(clean_key, value)
         if clean_id == "webui_hiresfix_assist":
@@ -685,8 +914,6 @@ class WebSessionContext:
     def _prompt_engineering_module_state(self) -> dict[str, Any]:
         from core.prompt_engineering_settings import (
             get_prompt_engineering_store,
-            list_preset_names,
-            read_preset_data,
         )
 
         store = get_prompt_engineering_store(self)
@@ -703,7 +930,7 @@ class WebSessionContext:
                     "pre_prompt_preview": "",
                     "thumbnail_url": "",
                 }
-            data = read_preset_data(name, mode or self.get_api_mode())
+            data = store.read_preset_data(name, mode or self.get_api_mode())
             module_settings = data.get("module_settings") if isinstance(data, dict) else {}
             module_settings = module_settings if isinstance(module_settings, dict) else {}
             return {
@@ -714,7 +941,7 @@ class WebSessionContext:
                 "thumbnail_url": str(data.get("thumbnail_url") or ""),
             }
 
-        webui_presets = list_preset_names("WEBUI")
+        webui_presets = store.list_preset_names("WEBUI")
         payload = {
             "preset": state["current_preset"],
             "preset_options": preset_options,
@@ -739,8 +966,6 @@ class WebSessionContext:
     def _set_prompt_engineering_param(self, key: str, value: Any) -> dict[str, Any] | None:
         from core.prompt_engineering_settings import (
             get_prompt_engineering_store,
-            save_danbooru_weight_settings,
-            save_e621_settings,
         )
 
         store = get_prompt_engineering_store(self)
@@ -780,13 +1005,13 @@ class WebSessionContext:
             settings = json.loads(text_value or "{}")
             if not isinstance(settings, dict):
                 return self._toast("Invalid e621 settings", level="error")
-            save_e621_settings(settings)
+            store.save_e621_settings(settings)
             store.apply_settings({"e621_settings": settings})
         elif key == "danbooru_settings":
             settings = json.loads(text_value or "{}")
             if not isinstance(settings, dict):
                 return self._toast("Invalid Danbooru settings", level="error")
-            save_danbooru_weight_settings(settings)
+            store.save_danbooru_weight_settings(settings)
             store.apply_settings({"danbooru_weight_settings": settings})
         elif key == "debug_refresh":
             pass
@@ -869,7 +1094,10 @@ class WebSessionContext:
         mode = self.get_api_mode()
         settings = self._character_settings_cache()
         if settings is None:
-            settings = load_character_settings(mode)
+            settings = load_character_settings(
+                mode,
+                path=self._existing_save_path(f"CharacterModule_{str(mode or 'NAI').upper()}.json"),
+            )
             self._character_settings_by_mode()[mode] = settings
         state = character_state_from_settings(settings, app_context=self, mode=mode)
         state["available"] = True
@@ -928,12 +1156,893 @@ class WebSessionContext:
         self._save_character_settings(mode, settings)
         return self._character_module_state()
 
+    def _current_model_key(self) -> str:
+        model = str(self.remote_params.get("model") or "NAID4.5F").strip()
+        return model or "NAID4.5F"
+
+    def _is_naid45_model(self) -> bool:
+        model = self._current_model_key()
+        return "NAID4.5F" in model or "NAID4.5C" in model
+
+    def _is_naid3_model(self) -> bool:
+        return "NAID3" in self._current_model_key()
+
+    @staticmethod
+    def _image_hash(image_bytes: bytes) -> str:
+        return hashlib.sha256(image_bytes).hexdigest()[:16]
+
+    @staticmethod
+    def _data_url_payload(value: str) -> str:
+        text = str(value or "").strip()
+        if "," in text and text.lower().startswith("data:"):
+            return text.split(",", 1)[1]
+        return text
+
+    @staticmethod
+    def _image_to_png_bytes(image) -> bytes:
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG", optimize=False)
+        return buffer.getvalue()
+
+    @staticmethod
+    def _thumbnail_b64(image, max_side: int = 128) -> str:
+        from PIL import Image
+
+        thumb = image.copy()
+        thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        if thumb.mode == "RGBA":
+            thumb = thumb.convert("RGB")
+        buffer = io.BytesIO()
+        thumb.save(buffer, format="JPEG", quality=70)
+        return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    @staticmethod
+    def _image_preview_data_url(image, max_side: int = 640) -> tuple[str, int, int]:
+        from PIL import Image
+
+        preview = image.copy()
+        preview.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        if preview.mode not in ("RGB", "RGBA"):
+            preview = preview.convert("RGBA")
+        buffer = io.BytesIO()
+        preview.save(buffer, format="PNG", optimize=True)
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        return f"data:image/png;base64,{encoded}", int(preview.width), int(preview.height)
+
+    @staticmethod
+    def _best_img2img_resolution(width: int, height: int, max_pixels: int = 1024 * 1024) -> tuple[int, int]:
+        ratio = max(1, int(width)) / max(1, int(height))
+        best_w = int((max_pixels * ratio) ** 0.5)
+        best_h = int((max_pixels / ratio) ** 0.5)
+        best_w = (best_w // 64) * 64
+        best_h = (best_h // 64) * 64
+        while best_w * best_h > max_pixels:
+            best_w -= 64
+            best_h = int(best_w / ratio)
+            best_h = (best_h // 64) * 64
+        return max(best_w, 64), max(best_h, 64)
+
+    def _normalize_img2img_source_image(self, image):
+        from PIL import Image
+
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA")
+        width, height = image.size
+        if width % 64 == 0 and height % 64 == 0 and width * height <= 1024 * 1024:
+            return image
+        new_w, new_h = self._best_img2img_resolution(width, height)
+        if (new_w, new_h) == (width, height):
+            return image
+        return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+    def _character_reference_image_data(self, image) -> str:
+        from PIL import Image
+
+        source = image.convert("RGBA") if image.mode == "RGBA" else image.convert("RGB")
+        width, height = source.size
+        aspect_ratio = width / max(1, height)
+        ratios = {
+            "2:3": (2 / 3, 1024, 1536),
+            "3:2": (3 / 2, 1536, 1024),
+            "1:1": (1, 1472, 1472),
+        }
+        _, canvas_width, canvas_height = min(
+            ratios.values(),
+            key=lambda item: abs(aspect_ratio - item[0]),
+        )
+        canvas = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))
+        scale = min(canvas_width / max(1, width), canvas_height / max(1, height))
+        new_width = max(1, int(width * scale))
+        new_height = max(1, int(height * scale))
+        resized = source.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        x_offset = (canvas_width - new_width) // 2
+        y_offset = (canvas_height - new_height) // 2
+        if resized.mode == "RGBA":
+            canvas.paste(resized, (x_offset, y_offset), resized)
+        else:
+            canvas.paste(resized, (x_offset, y_offset))
+        return base64.b64encode(self._image_to_png_bytes(canvas)).decode("ascii")
+
+    def _save_character_reference_storage(self, frame: dict[str, Any]) -> None:
+        raw = frame.get("image_bytes")
+        file_hash = str(frame.get("file_hash") or "")
+        if not raw or not file_hash:
+            return
+        target = self._save_path("character_reference", "images", f"{file_hash}.png")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            target.write_bytes(raw)
+
+    def _character_reference_frame_from_bytes(
+        self,
+        image_bytes: bytes,
+        *,
+        file_name: str = "reference.png",
+        file_path: str = "",
+        enabled: bool = False,
+    ) -> dict[str, Any]:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as opened:
+            image = opened.convert("RGBA")
+            png_bytes = self._image_to_png_bytes(image)
+            file_hash = self._image_hash(png_bytes)
+            return {
+                "file_hash": file_hash,
+                "file_name": file_name or f"{file_hash}.png",
+                "file_path": file_path,
+                "image_bytes": png_bytes,
+                "image_data": self._character_reference_image_data(image),
+                "thumbnail": self._thumbnail_b64(image),
+                "is_enabled": bool(enabled),
+                "reference_type": "character&style",
+                "strength": 1.0,
+                "fidelity": 0.8,
+            }
+
+    def _character_reference_module_state(self) -> dict[str, Any]:
+        frames = []
+        for index, frame in enumerate(self.character_reference_frames):
+            frames.append({
+                "index": index,
+                "file_hash": frame.get("file_hash", ""),
+                "file_name": frame.get("file_name", ""),
+                "is_enabled": bool(frame.get("is_enabled")),
+                "reference_type": frame.get("reference_type", "character&style"),
+                "strength": float(frame.get("strength", 1.0) or 1.0),
+                "fidelity": float(frame.get("fidelity", 0.8) or 0.8),
+                "thumbnail": frame.get("thumbnail", ""),
+            })
+        return self._module_state_payload("character_reference", {
+            "is_naid45": self._is_naid45_model(),
+            "frames": frames,
+        })
+
+    def _set_character_reference_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        if key == "upload_image":
+            image_bytes = base64.b64decode(self._data_url_payload(str(value or "")))
+            self.character_reference_frames.append(
+                self._character_reference_frame_from_bytes(image_bytes, file_name="remote_upload.png")
+            )
+        elif key.startswith("remove_frame_"):
+            index = self._index_from_key(key, "remove_frame_")
+            if index is not None and 0 <= index < len(self.character_reference_frames):
+                self.character_reference_frames.pop(index)
+        elif key.startswith("enable_"):
+            index = self._index_from_key(key, "enable_")
+            if index is not None and 0 <= index < len(self.character_reference_frames):
+                enabling = self._coerce_bool(value)
+                self.character_reference_frames[index]["is_enabled"] = enabling
+                if enabling:
+                    self._save_character_reference_storage(self.character_reference_frames[index])
+                    self._disable_all_vibe_frames()
+        elif key.startswith("strength_"):
+            index = self._index_from_key(key, "strength_")
+            if index is not None and 0 <= index < len(self.character_reference_frames):
+                self.character_reference_frames[index]["strength"] = max(0.0, min(1.0, float(value)))
+        elif key.startswith("fidelity_"):
+            index = self._index_from_key(key, "fidelity_")
+            if index is not None and 0 <= index < len(self.character_reference_frames):
+                self.character_reference_frames[index]["fidelity"] = max(0.0, min(1.0, float(value)))
+        elif key.startswith("ref_type_"):
+            index = self._index_from_key(key, "ref_type_")
+            ref_type = str(value or "").strip()
+            if index is not None and 0 <= index < len(self.character_reference_frames) and ref_type in {"character&style", "character", "style"}:
+                self.character_reference_frames[index]["reference_type"] = ref_type
+        elif key == "get_storage":
+            return self._scan_character_reference_storage()
+        elif key == "apply_storage":
+            file_hash = Path(str(value or "")).name
+            image_path = self._existing_save_path("character_reference", "images", f"{file_hash}.png")
+            if not image_path.exists():
+                return self._toast("Character reference storage item not found", level="error")
+            image_bytes = image_path.read_bytes()
+            frame = self._character_reference_frame_from_bytes(
+                image_bytes,
+                file_name=image_path.name,
+                file_path=str(image_path),
+                enabled=True,
+            )
+            frame["file_hash"] = file_hash
+            self.character_reference_frames.append(frame)
+            self._disable_all_vibe_frames()
+        else:
+            return None
+        return self._character_reference_module_state()
+
+    def _scan_character_reference_storage(self) -> dict[str, Any]:
+        items = []
+        for images_folder in self._existing_save_dirs("character_reference", "images"):
+            metadata_folder = images_folder.parent / "metadata"
+            for image_path in sorted(images_folder.glob("*.png"), key=lambda path: path.stat().st_mtime, reverse=True)[:50]:
+                character_name = ""
+                meta_path = metadata_folder / f"{image_path.stem}.json"
+                if meta_path.exists():
+                    try:
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                        if isinstance(meta, dict):
+                            character_name = str(meta.get("character_name") or "")
+                    except Exception:
+                        pass
+                thumb = ""
+                try:
+                    from PIL import Image
+
+                    with Image.open(image_path) as image:
+                        thumb = self._thumbnail_b64(image)
+                except Exception:
+                    pass
+                items.append({
+                    "file_hash": image_path.stem,
+                    "file_name": image_path.name,
+                    "character_name": character_name,
+                    "thumbnail": thumb,
+                })
+        return {"type": "storage_list", "module_id": "character_reference", "items": items}
+
+    def _disable_all_vibe_frames(self) -> None:
+        for frame in self.vibe_transfer_frames:
+            frame["is_enabled"] = False
+
+    def _disable_all_character_reference_frames(self) -> None:
+        for frame in self.character_reference_frames:
+            frame["is_enabled"] = False
+
+    def _vibe_frame_from_bytes(
+        self,
+        image_bytes: bytes,
+        *,
+        file_name: str = "vibe.png",
+        file_path: str = "",
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as opened:
+            image = opened.convert("RGBA")
+            png_bytes = self._image_to_png_bytes(image)
+            file_hash = self._image_hash(png_bytes)
+            image_data = base64.b64encode(png_bytes).decode("ascii")
+            encodings: dict[str, str] = {}
+            storage_json = self._existing_save_path("vibe_transfer", self._current_model_key(), f"{file_hash}.json")
+            if storage_json.exists():
+                try:
+                    data = json.loads(storage_json.read_text(encoding="utf-8"))
+                    raw_encodings = data.get("encodings") if isinstance(data, dict) else {}
+                    if isinstance(raw_encodings, dict):
+                        encodings = {str(k): str(v) for k, v in raw_encodings.items() if v}
+                except Exception:
+                    encodings = {}
+            if self._is_naid3_model() and not encodings:
+                encodings = {"1.0": image_data}
+            return {
+                "file_hash": file_hash,
+                "file_name": file_name or f"{file_hash}.png",
+                "file_path": file_path,
+                "image_bytes": png_bytes,
+                "image_data": image_data,
+                "thumbnail": self._thumbnail_b64(image),
+                "is_enabled": bool(enabled),
+                "is_no_image": False,
+                "is_naid3": self._is_naid3_model(),
+                "reference_strength": 0.6,
+                "information_extracted": 1.0,
+                "vibe_encodings": encodings,
+                "storage_type": "",
+            }
+
+    def _vibe_transfer_module_state(self) -> dict[str, Any]:
+        frames = []
+        enabled_count = 0
+        strength_total = 0.0
+        for index, frame in enumerate(self.vibe_transfer_frames):
+            encodings = frame.get("vibe_encodings") if isinstance(frame.get("vibe_encodings"), dict) else {}
+            encoding_keys = sorted(float(key) for key in encodings.keys() if self._is_float_like(key))
+            information_extracted = float(frame.get("information_extracted", 1.0) or 1.0)
+            active_encoding = min(encoding_keys, key=lambda key: abs(key - information_extracted)) if encoding_keys else None
+            has_encoding = active_encoding is not None and abs(active_encoding - information_extracted) < 1e-9
+            if frame.get("is_enabled") and encodings:
+                enabled_count += 1
+                strength_total += float(frame.get("reference_strength", 0.6) or 0.6)
+            frames.append({
+                "index": index,
+                "file_hash": frame.get("file_hash", ""),
+                "file_name": frame.get("file_name", ""),
+                "is_enabled": bool(frame.get("is_enabled")),
+                "is_no_image": bool(frame.get("is_no_image")),
+                "is_naid3": self._is_naid3_model(),
+                "reference_strength": float(frame.get("reference_strength", 0.6) or 0.6),
+                "information_extracted": information_extracted,
+                "has_encoding": has_encoding,
+                "active_encoding": active_encoding,
+                "encoding_in_progress": False,
+                "encoding_keys": encoding_keys,
+                "thumbnail": frame.get("thumbnail", ""),
+            })
+        return self._module_state_payload("vibe_transfer", {
+            "normalize": bool(self.vibe_transfer_normalize),
+            "enabled_count": enabled_count,
+            "frame_count": len(self.vibe_transfer_frames),
+            "max_frames": MAX_NAI_VIBE_REFERENCES,
+            "included_frames": NAI_VIBE_INCLUDED_REFERENCES,
+            "extra_cost_count": max(0, enabled_count - NAI_VIBE_INCLUDED_REFERENCES),
+            "strength_total": round(strength_total, 3),
+            "strength_warning": enabled_count > 1 and strength_total > 1.0 and not self.vibe_transfer_normalize,
+            "frames": frames,
+        })
+
+    def _set_vibe_transfer_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        if key == "upload_image":
+            if len(self.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
+                return self._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
+            image_bytes = base64.b64decode(self._data_url_payload(str(value or "")))
+            self.vibe_transfer_frames.append(self._vibe_frame_from_bytes(image_bytes, file_name="remote_vibe.png"))
+            self._disable_all_character_reference_frames()
+        elif key.startswith("remove_frame_"):
+            index = self._index_from_key(key, "remove_frame_")
+            if index is not None and 0 <= index < len(self.vibe_transfer_frames):
+                self.vibe_transfer_frames.pop(index)
+        elif key.startswith("enable_"):
+            index = self._index_from_key(key, "enable_")
+            if index is not None and 0 <= index < len(self.vibe_transfer_frames):
+                enabling = self._coerce_bool(value)
+                self.vibe_transfer_frames[index]["is_enabled"] = enabling
+                if enabling:
+                    self._disable_all_character_reference_frames()
+        elif key.startswith("ref_strength_"):
+            index = self._index_from_key(key, "ref_strength_")
+            if index is not None and 0 <= index < len(self.vibe_transfer_frames):
+                self.vibe_transfer_frames[index]["reference_strength"] = max(-1.0, min(1.0, float(value)))
+        elif key.startswith("info_extracted_"):
+            index = self._index_from_key(key, "info_extracted_")
+            if index is not None and 0 <= index < len(self.vibe_transfer_frames):
+                self.vibe_transfer_frames[index]["information_extracted"] = max(0.01, min(1.0, round(float(value), 2)))
+        elif key == "normalize":
+            self.vibe_transfer_normalize = self._coerce_bool(value)
+        elif key.startswith("encode_"):
+            return self._toast("Headless Vibe encoding is not available yet; use stored encoded Vibe entries.", level="error")
+        elif key == "get_storage":
+            return self._scan_vibe_storage()
+        elif key == "apply_storage":
+            applied = self._apply_vibe_storage(str(value or ""))
+            if isinstance(applied, dict):
+                return applied
+        elif key == "cluster_list":
+            return self._scan_vibe_clusters()
+        elif key == "cluster_load":
+            loaded = self._load_vibe_cluster(str(value or ""))
+            if isinstance(loaded, dict):
+                return loaded
+        elif key in {"cluster_save", "cluster_delete", "cluster_rename", "cluster_thumbnail", "restore_metadata"}:
+            return self._toast(f"Vibe Transfer action is not available in headless yet: {key}", level="info")
+        else:
+            return None
+        return self._vibe_transfer_module_state()
+
+    @staticmethod
+    def _is_float_like(value: Any) -> bool:
+        try:
+            float(value)
+            return True
+        except Exception:
+            return False
+
+    def _scan_vibe_storage(self) -> dict[str, Any]:
+        models: dict[str, list[dict[str, Any]]] = {}
+        for vibe_folder in self._existing_save_dirs("vibe_transfer"):
+            for model_dir in sorted(path for path in vibe_folder.iterdir() if path.is_dir()):
+                images_folder = model_dir / "images"
+                items = []
+                for json_file in sorted(model_dir.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)[:50]:
+                    try:
+                        data = json.loads(json_file.read_text(encoding="utf-8"))
+                    except Exception:
+                        continue
+                    if not isinstance(data, dict) or data.get("volatile"):
+                        continue
+                    raw_encodings = data.get("encodings") if isinstance(data.get("encodings"), dict) else {}
+                    encoding_keys = sorted(float(key) for key in raw_encodings.keys() if self._is_float_like(key))
+                    if not encoding_keys:
+                        continue
+                    file_hash = str(data.get("file_hash") or json_file.stem)
+                    image_path = images_folder / f"{file_hash}.png"
+                    if data.get("is_no_image") or data.get("storage_type") == "metadata_vibe" or not image_path.exists():
+                        continue
+                    thumb = ""
+                    try:
+                        from PIL import Image
+
+                        with Image.open(image_path) as image:
+                            thumb = self._thumbnail_b64(image)
+                    except Exception:
+                        pass
+                    items.append({
+                        "file_hash": file_hash,
+                        "file_name": str(data.get("file_name") or image_path.name),
+                        "encoding_keys": encoding_keys,
+                        "thumbnail": thumb,
+                    })
+                if items:
+                    models[model_dir.name] = items
+        return {
+            "type": "storage_list",
+            "module_id": "vibe_transfer",
+            "models": models,
+            "current_model": self._current_model_key(),
+        }
+
+    def _apply_vibe_storage(self, value: str) -> dict[str, Any] | None:
+        if len(self.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
+            return self._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
+        parts = str(value or "").split("|")
+        if len(parts) < 3:
+            return self._toast("Invalid Vibe storage request", level="error")
+        model, file_hash, ie_text = parts[0], Path(parts[1]).name, parts[2]
+        json_path = self._existing_save_path("vibe_transfer", model, f"{file_hash}.json")
+        if not json_path.exists():
+            return self._toast("Vibe storage item not found", level="error")
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            raw_encodings = data.get("encodings") if isinstance(data.get("encodings"), dict) else {}
+            encodings = {str(k): str(v) for k, v in raw_encodings.items() if v}
+            if not encodings:
+                return self._toast("Stored Vibe encoding not found", level="error")
+            selected_ie = float(ie_text)
+            closest_ie = min((float(key) for key in encodings.keys()), key=lambda key: abs(key - selected_ie))
+            image_path = self._existing_save_path("vibe_transfer", model, "images", f"{file_hash}.png")
+            thumb = ""
+            image_bytes = b""
+            image_data = ""
+            if image_path.exists():
+                image_bytes = image_path.read_bytes()
+                try:
+                    from PIL import Image
+
+                    with Image.open(image_path) as image:
+                        thumb = self._thumbnail_b64(image)
+                        image_data = base64.b64encode(self._image_to_png_bytes(image.convert("RGBA"))).decode("ascii")
+                except Exception:
+                    pass
+            frame = {
+                "file_hash": file_hash,
+                "file_name": str(data.get("file_name") or image_path.name or f"{file_hash}.png"),
+                "file_path": str(data.get("file_path") or image_path),
+                "image_bytes": image_bytes,
+                "image_data": image_data,
+                "thumbnail": thumb,
+                "is_enabled": True,
+                "is_no_image": bool(data.get("is_no_image")) or data.get("storage_type") == "metadata_vibe",
+                "is_naid3": "NAID3" in model,
+                "reference_strength": float(data.get("reference_strength", 0.6) or 0.6),
+                "information_extracted": closest_ie,
+                "vibe_encodings": encodings,
+                "storage_type": str(data.get("storage_type") or ""),
+                "source_model": model,
+            }
+            self.vibe_transfer_frames.append(frame)
+            self._disable_all_character_reference_frames()
+            return None
+        except Exception as exc:
+            return self._toast(f"Failed to load Vibe storage: {exc}", level="error")
+
+    def _scan_vibe_clusters(self) -> dict[str, Any]:
+        from core.vibe_cluster_resolver import list_vibe_clusters
+
+        root = self._existing_save_path("vibe_transfer_clusters")
+        items = []
+        thumb_root = root / "thumbnails"
+        for data in list_vibe_clusters(root):
+            cluster_id = str(data.get("_cluster_id") or data.get("id") or "")
+            thumb = ""
+            thumb_path = thumb_root / f"{cluster_id}.jpg"
+            if thumb_path.exists():
+                try:
+                    thumb = base64.b64encode(thumb_path.read_bytes()).decode("ascii")
+                except Exception:
+                    thumb = ""
+            frames = data.get("frames") if isinstance(data.get("frames"), list) else []
+            enabled = sum(1 for frame in frames if isinstance(frame, dict) and frame.get("is_enabled", True))
+            items.append({
+                "id": cluster_id,
+                "name": str(data.get("_cluster_name") or data.get("name") or cluster_id),
+                "description": str(data.get("description") or ""),
+                "model": str(data.get("model") or ""),
+                "frame_count": len(frames),
+                "enabled_count": enabled,
+                "thumbnail": thumb,
+            })
+        return {
+            "type": "storage_list",
+            "module_id": "vibe_cluster",
+            "items": items,
+            "current_frame_count": len(self.vibe_transfer_frames),
+            "max_frames": MAX_NAI_VIBE_REFERENCES,
+        }
+
+    def _load_vibe_cluster(self, value: str) -> dict[str, Any] | None:
+        from core.vibe_cluster_resolver import resolve_vibe_cluster
+
+        try:
+            payload = json.loads(value or "{}")
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        cluster_id = str(payload.get("id") or "")
+        mode = str(payload.get("mode") or "append")
+        root = self._existing_save_path("vibe_transfer_clusters")
+        try:
+            data = resolve_vibe_cluster(cluster_id, root)
+        except Exception as exc:
+            return self._toast(str(exc), level="error")
+        if mode == "clean":
+            self.vibe_transfer_frames.clear()
+        frames = data.get("frames") if isinstance(data.get("frames"), list) else []
+        for frame_data in frames:
+            if len(self.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
+                break
+            encodings = frame_data.get("encodings") if isinstance(frame_data.get("encodings"), dict) else {}
+            if not encodings:
+                continue
+            self.vibe_transfer_frames.append({
+                "file_hash": str(frame_data.get("file_hash") or hashlib.sha256(json.dumps(frame_data, sort_keys=True).encode("utf-8")).hexdigest()[:16]),
+                "file_name": str(frame_data.get("file_name") or "cluster_vibe"),
+                "file_path": str(frame_data.get("file_path") or ""),
+                "image_bytes": b"",
+                "image_data": "",
+                "thumbnail": "",
+                "is_enabled": bool(frame_data.get("is_enabled", True)),
+                "is_no_image": True,
+                "is_naid3": self._is_naid3_model(),
+                "reference_strength": float(frame_data.get("reference_strength", 0.6) or 0.6),
+                "information_extracted": float(frame_data.get("information_extracted", 1.0) or 1.0),
+                "vibe_encodings": {str(k): str(v) for k, v in encodings.items() if v},
+                "storage_type": "cluster_vibe",
+                "source_model": str(data.get("model") or ""),
+            })
+        self._disable_all_character_reference_frames()
+        return None
+
+    def active_character_reference_params(self) -> dict[str, Any]:
+        if not self._is_naid45_model():
+            return {}
+        enabled = [frame for frame in self.character_reference_frames if frame.get("is_enabled")]
+        if not enabled:
+            return {}
+        descriptions = []
+        images = []
+        ie = []
+        strengths = []
+        fidelities = []
+        for frame in enabled:
+            image_data = str(frame.get("image_data") or "")
+            if not image_data:
+                continue
+            descriptions.append({
+                "caption": {
+                    "base_caption": str(frame.get("reference_type") or "character&style"),
+                    "char_captions": [],
+                },
+                "legacy_uc": False,
+            })
+            images.append(image_data)
+            ie.append(1)
+            strength = round(max(0.0, min(1.0, float(frame.get("strength", 1.0) or 1.0))) * 20) / 20.0
+            fidelity = 1.0 - max(0.0, min(1.0, float(frame.get("fidelity", 0.8) or 0.8)))
+            fidelities.append(round(fidelity * 20) / 20.0)
+            strengths.append(strength)
+        if not descriptions:
+            return {}
+        return {
+            "director_reference_descriptions": descriptions,
+            "director_reference_images": images,
+            "director_reference_information_extracted": ie,
+            "director_reference_strength_values": strengths,
+            "director_reference_secondary_strength_values": fidelities,
+            "controlnet_strength": 1,
+            "inpaintImg2ImgStrength": 1,
+            "normalize_reference_strength_multiple": True,
+        }
+
+    def active_vibe_transfer_params(self) -> dict[str, Any]:
+        reference_images = []
+        reference_strengths = []
+        reference_info = []
+        for frame in self.vibe_transfer_frames:
+            encodings = frame.get("vibe_encodings") if isinstance(frame.get("vibe_encodings"), dict) else {}
+            if not frame.get("is_enabled") or not encodings:
+                continue
+            try:
+                target_ie = float(frame.get("information_extracted", 1.0) or 1.0)
+                closest_key = min((float(key) for key in encodings.keys()), key=lambda key: abs(key - target_ie))
+            except Exception:
+                continue
+            encoded = encodings.get(str(closest_key)) or encodings.get(f"{closest_key:g}") or encodings.get(f"{closest_key:.1f}")
+            if not encoded:
+                for key, value in encodings.items():
+                    try:
+                        if abs(float(key) - closest_key) < 1e-9:
+                            encoded = value
+                            break
+                    except Exception:
+                        continue
+            if not encoded:
+                continue
+            reference_images.append(encoded)
+            reference_strengths.append(float(frame.get("reference_strength", 0.6) or 0.6))
+            reference_info.append(closest_key)
+        if not reference_images:
+            return {}
+        params = {
+            "normalize_reference_strength_multiple": bool(self.vibe_transfer_normalize),
+            "reference_image_multiple": reference_images,
+            "reference_strength_multiple": reference_strengths,
+        }
+        if self._is_naid3_model():
+            params["reference_information_extracted_multiple"] = reference_info
+        return params
+
+    def apply_headless_image_module_params(self, params: dict[str, Any], api_mode: str) -> None:
+        if str(api_mode or "").upper() != "NAI":
+            return
+        if not params.get("director_reference_descriptions"):
+            params.update(self.active_character_reference_params())
+        if params.get("_skip_vibe_transfer_late_binding"):
+            return
+        if not params.get("reference_image_multiple"):
+            params.update(self.active_vibe_transfer_params())
+
+    def open_img2img_session_from_bytes(
+        self,
+        image_bytes: bytes,
+        *,
+        label: str = "Result Image",
+        mode: str = "img2img",
+        generation_params: dict[str, Any] | None = None,
+        prompt_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from PIL import Image
+
+        if not image_bytes:
+            raise ValueError("Image data is unavailable")
+        with Image.open(io.BytesIO(image_bytes)) as opened:
+            image = self._normalize_img2img_source_image(opened.convert("RGBA"))
+        png_bytes = self._image_to_png_bytes(image)
+        preview, preview_width, preview_height = self._image_preview_data_url(image)
+        self._img2img_window_counter += 1
+        params = dict(generation_params or {})
+        prompt_ctx = dict(prompt_context or {})
+        main_prompt = str(
+            prompt_ctx.get("main_prompt")
+            or prompt_ctx.get("final_prompt")
+            or params.get("input")
+            or params.get("_raw_input")
+            or self.prompt_text
+            or ""
+        )
+        negative_prompt = str(params.get("negative_prompt") or params.get("uc") or self.negative_prompt_text or "")
+        clean_mode = "inpaint" if str(mode or "").lower() == "inpaint" else "img2img"
+        self.img2img_session = {
+            "active": True,
+            "window_id": self._img2img_window_counter,
+            "mode": clean_mode,
+            "source_label": str(label or "Result Image"),
+            "image_bytes": png_bytes,
+            "width": int(image.width),
+            "height": int(image.height),
+            "preview": preview,
+            "preview_width": preview_width,
+            "preview_height": preview_height,
+            "has_mask": False,
+            "mask_bytes": b"",
+            "mask_preview": "",
+            "strength": 99 if clean_mode == "inpaint" else 70,
+            "noise": 0,
+            "repeat": 1,
+            "main_prompt": main_prompt,
+            "negative_prompt": negative_prompt,
+            "characters": [],
+        }
+        return self._img2img_module_state()
+
+    def _img2img_strength_value(self, raw: Any) -> float:
+        try:
+            value = int(raw)
+        except Exception:
+            value = 70
+        return 1.0 if value == 99 else max(1, min(99, value)) / 100.0
+
+    def _img2img_module_state(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        state = self.img2img_session if isinstance(self.img2img_session, dict) else {}
+        if not state.get("active"):
+            payload = self._module_state_payload("img2img", {"active": False})
+            if extra:
+                payload.update(extra)
+            return payload
+        characters = [
+            {
+                "id": index + 1,
+                "active": bool(character.get("active", True)),
+                "prompt": str(character.get("prompt") or ""),
+                "uc": str(character.get("uc") or ""),
+            }
+            for index, character in enumerate(state.get("characters") or [])
+        ]
+        mode = str(state.get("mode") or "img2img")
+        payload = self._module_state_payload("img2img", {
+            "active": True,
+            "window_id": int(state.get("window_id", 0) or 0),
+            "mode": mode,
+            "source_label": str(state.get("source_label") or "Result Image"),
+            "width": int(state.get("width", 0) or 0),
+            "height": int(state.get("height", 0) or 0),
+            "preview": str(state.get("preview") or ""),
+            "preview_width": int(state.get("preview_width", 0) or 0),
+            "preview_height": int(state.get("preview_height", 0) or 0),
+            "has_mask": bool(state.get("has_mask")),
+            "mask_preview": str(state.get("mask_preview") or ""),
+            "strength": int(state.get("strength", 70) or 70),
+            "strength_value": self._img2img_strength_value(state.get("strength", 70)),
+            "noise": int(state.get("noise", 0) or 0),
+            "noise_value": max(0, min(99, int(state.get("noise", 0) or 0))) / 100.0,
+            "repeat": int(state.get("repeat", 1) or 1),
+            "main_prompt": str(state.get("main_prompt") or ""),
+            "negative_prompt": str(state.get("negative_prompt") or ""),
+            "characters": characters,
+            "requires_mask": mode == "inpaint" and not bool(state.get("has_mask")),
+            "can_generate": bool(state.get("image_bytes")) and (mode != "inpaint" or bool(state.get("has_mask"))),
+        })
+        if extra:
+            payload.update(extra)
+        return payload
+
+    def _decode_img2img_mask(self, value: str) -> tuple[bytes, str, int]:
+        from PIL import Image
+
+        if not self.img2img_session.get("active"):
+            raise RuntimeError("No active Img2Img session")
+        target_size = (int(self.img2img_session.get("width") or 1), int(self.img2img_session.get("height") or 1))
+        mask_bytes = base64.b64decode(self._data_url_payload(value))
+        with Image.open(io.BytesIO(mask_bytes)) as opened:
+            full_mask = opened.convert("L").resize(target_size)
+        threshold = [0 if i <= 127 else 255 for i in range(256)]
+        full_mask = full_mask.point(threshold, "L")
+        white_pixels = int(full_mask.histogram()[255])
+        small_size = (max(1, target_size[0] // 8), max(1, target_size[1] // 8))
+        small_mask = full_mask.resize(small_size).point(threshold, "L")
+        painted_blocks = int(small_mask.histogram()[255])
+        if white_pixels <= 0 or painted_blocks < 8:
+            raise RuntimeError("Inpaint mask is too small" if white_pixels > 0 else "Inpaint mask is empty")
+        preview_bytes = self._image_to_png_bytes(full_mask)
+        preview = "data:image/png;base64," + base64.b64encode(preview_bytes).decode("ascii")
+        return self._image_to_png_bytes(small_mask), preview, painted_blocks
+
+    def _set_img2img_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        if key == "close":
+            self.img2img_session = {}
+            return self._img2img_module_state()
+        if not self.img2img_session.get("active"):
+            return self._toast("No active Img2Img session", level="error")
+        if key == "main_prompt":
+            self.img2img_session["main_prompt"] = str(value or "")
+        elif key == "negative_prompt":
+            self.img2img_session["negative_prompt"] = str(value or "")
+        elif key == "strength":
+            self.img2img_session["strength"] = max(1, min(99, int(float(value))))
+        elif key == "noise":
+            self.img2img_session["noise"] = max(0, min(99, int(float(value))))
+        elif key == "repeat":
+            self.img2img_session["repeat"] = max(1, min(99, int(float(value))))
+        elif key == "mask_png":
+            mask_bytes, preview, _ = self._decode_img2img_mask(str(value or ""))
+            self.img2img_session["mode"] = "inpaint"
+            self.img2img_session["mask_bytes"] = mask_bytes
+            self.img2img_session["mask_preview"] = preview
+            self.img2img_session["has_mask"] = True
+        elif key == "clear_mask":
+            self.img2img_session["mask_bytes"] = b""
+            self.img2img_session["mask_preview"] = ""
+            self.img2img_session["has_mask"] = False
+        elif key == "add_character":
+            self.img2img_session.setdefault("characters", []).append({"active": True, "prompt": "", "uc": ""})
+        elif key.startswith("remove_character_"):
+            index = self._index_from_key(key, "remove_character_")
+            chars = self.img2img_session.setdefault("characters", [])
+            if index is not None and 0 <= index < len(chars):
+                chars.pop(index)
+        elif key.startswith("char_active_"):
+            index = self._index_from_key(key, "char_active_")
+            chars = self.img2img_session.setdefault("characters", [])
+            if index is not None and 0 <= index < len(chars):
+                chars[index]["active"] = self._coerce_bool(value)
+        elif key.startswith("char_prompt_"):
+            index = self._index_from_key(key, "char_prompt_")
+            chars = self.img2img_session.setdefault("characters", [])
+            if index is not None and 0 <= index < len(chars):
+                chars[index]["prompt"] = str(value or "")
+        elif key.startswith("char_uc_"):
+            index = self._index_from_key(key, "char_uc_")
+            chars = self.img2img_session.setdefault("characters", [])
+            if index is not None and 0 <= index < len(chars):
+                chars[index]["uc"] = str(value or "")
+        elif key == "generate":
+            commands = self._img2img_generation_commands()
+            return self._img2img_module_state({"_headless_generation_commands": commands})
+        else:
+            return None
+        return self._img2img_module_state()
+
+    def _img2img_generation_commands(self) -> list[dict[str, Any]]:
+        state = self.img2img_session
+        if not state.get("image_bytes"):
+            raise RuntimeError("Img2Img source image is unavailable")
+        mode = str(state.get("mode") or "img2img")
+        if mode == "inpaint" and not state.get("mask_bytes"):
+            raise RuntimeError("Inpaint mask is required")
+        overrides: dict[str, Any] = {
+            "input": str(state.get("main_prompt") or ""),
+            "_raw_input": str(state.get("main_prompt") or ""),
+            "negative_prompt": str(state.get("negative_prompt") or ""),
+            "strength": self._img2img_strength_value(state.get("strength", 70)),
+            "noise": max(0, min(99, int(state.get("noise", 0) or 0))) / 100.0,
+            "image_bytes": state["image_bytes"],
+            "width": int(state.get("width") or 832),
+            "height": int(state.get("height") or 1216),
+            "type": "inpaint" if mode == "inpaint" else "img2img",
+            "_remote_queue_source": "Inpaint" if mode == "inpaint" else "Img2Img",
+            "_remote_queue_label": str(state.get("source_label") or "Result Image"),
+        }
+        if mode == "inpaint":
+            overrides["mask_bytes"] = state.get("mask_bytes")
+        char_data = []
+        for character in state.get("characters") or []:
+            if not character.get("active", True):
+                continue
+            prompt = str(character.get("prompt") or "").strip()
+            if prompt:
+                char_data.append((prompt, str(character.get("uc") or "").strip()))
+        if char_data:
+            overrides["sketchbook_character_prompts"] = char_data
+        repeat = max(1, min(99, int(state.get("repeat", 1) or 1)))
+        if repeat > 1:
+            overrides["img2img_batch_request"] = True
+            overrides["img2img_batch_total"] = repeat
+        overrides["img2img_batch_window_id"] = int(state.get("window_id", 0) or 0)
+        return [
+            {
+                "type": "generate",
+                "api_mode": "NAI",
+                "overrides": dict(overrides),
+            }
+            for _ in range(repeat)
+        ]
+
     def _automation_module_state(self) -> dict[str, Any]:
         from core.automation_settings import automation_state_from_settings, load_automation_settings
 
         settings = getattr(self, "_automation_settings", None)
         if not isinstance(settings, dict):
-            settings = load_automation_settings()
+            settings = load_automation_settings(self._existing_save_path("AutomationModule.json"))
             self._automation_settings = settings
         state = automation_state_from_settings(settings)
         state["available"] = True
@@ -956,7 +2065,7 @@ class WebSessionContext:
             return None
         settings = settings_from_automation_state(state)
         self._automation_settings = settings
-        save_automation_settings(settings)
+        save_automation_settings(settings, self._save_path("AutomationModule.json"))
         return self._automation_module_state()
 
     def _webui_hiresfix_assist_module_state(self) -> dict[str, Any]:
@@ -1079,7 +2188,7 @@ class WebSessionContext:
         return self._toast(f"Wildcard action is not supported in headless: {key}", level="info")
 
     def _instant_wildcard_store(self, *, force: bool = False) -> dict[str, Any]:
-        from core.instant_wildcard_service import DEFAULT_INSTANT_WILDCARD_SAVE_PATH, load_instant_wildcards
+        from core.instant_wildcard_service import load_instant_wildcards
 
         signature = None
         if not force:
@@ -1087,7 +2196,7 @@ class WebSessionContext:
             signature = getattr(self, "instant_wildcard_signature", None)
             if isinstance(cached, dict) and signature == cached.get("signature"):
                 return cached
-        root = Path(self.repo_root) / DEFAULT_INSTANT_WILDCARD_SAVE_PATH
+        root = self._existing_save_path("instant_wildcard")
         store = load_instant_wildcards(root)
         self.instant_wildcard_store = store
         self.instant_wildcard_signature = store.get("signature")
@@ -1230,13 +2339,11 @@ class WebSessionContext:
                 item_key = str(payload.get("key") or "").strip()
                 if filename in json_data and item_key in json_data[filename]:
                     del json_data[filename][item_key]
-                    image_path = (
-                        Path(self.repo_root)
-                        / "save"
-                        / "instant_wildcard"
-                        / "images"
-                        / instant_wildcard_group_name(filename)
-                        / f"{item_key}.png"
+                    image_path = self._existing_save_path(
+                        "instant_wildcard",
+                        "images",
+                        instant_wildcard_group_name(filename),
+                        f"{item_key}.png",
                     )
                     if image_path.exists():
                         try:
@@ -1263,6 +2370,11 @@ class WebSessionContext:
         base = getattr(manager, "wildcards_dir", None) if manager is not None else None
         if base:
             return Path(base)
+        if os.environ.get("NAIA_USER_DATA_DIR") or os.environ.get("NAIA_PORTABLE"):
+            runtime_paths = getattr(self, "runtime_paths", None)
+            runtime_base = getattr(runtime_paths, "wildcards_dir", None) if runtime_paths is not None else None
+            if runtime_base:
+                return Path(runtime_base)
         return Path(self.repo_root) / "wildcards"
 
     def _validate_wildcard_path(self, rel_path: str) -> Path | None:
@@ -1412,7 +2524,7 @@ class WebSessionContext:
             return response
         response["editable"] = True
         response["available"] = True
-        preset_path = path.parent / f"{name}.json"
+        preset_path = self._existing_save_path("presets", "WEBUI", f"{name}.json")
         if preset_path.exists():
             try:
                 preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
@@ -1429,9 +2541,10 @@ class WebSessionContext:
                 }
             except Exception:
                 pass
-        if path.exists():
+        overlay_path = self._existing_save_path("presets", "WEBUI", f"{name}.hires.json")
+        if overlay_path.exists():
             try:
-                overlay = json.loads(path.read_text(encoding="utf-8"))
+                overlay = json.loads(overlay_path.read_text(encoding="utf-8"))
                 if isinstance(overlay, dict):
                     response["overlay"] = {
                         "prefix_prompt": str(overlay.get("prefix_prompt", "") or ""),
@@ -1481,7 +2594,7 @@ class WebSessionContext:
             return None
         if self.get_api_mode() != "WEBUI":
             return None
-        return Path(self.repo_root) / "save" / "presets" / "WEBUI" / f"{safe_name}.hires.json"
+        return self._save_path("presets", "WEBUI", f"{safe_name}.hires.json")
 
     def _retired_module_state(self, module_id: str, *, action: str | None = None) -> dict[str, Any]:
         message = HEADLESS_RETIRED_MODULES.get(
@@ -1597,6 +2710,8 @@ class WebSessionContext:
         return {
             **summary,
             "id": str(getattr(request, "request_id", "") or ""),
+            "generation_request_id": str(getattr(request, "request_id", "") or ""),
+            "prompt_run_id": str(getattr(request, "prompt_run_id", "") or params.get("prompt_run_id") or ""),
             "position": position,
             "priority": int(getattr(request, "priority", 0) or 0),
             "status": str(getattr(request, "status", "pending") or "pending"),
@@ -1763,9 +2878,13 @@ class WebSessionContext:
         base_path: str | None = None,
         use_timestamp_folder: bool | None = None,
     ) -> Path:
-        base = Path(str(base_path or self.save_directory_state.get("base_path") or "output")).expanduser()
+        raw_base = str(base_path or self.save_directory_state.get("base_path") or "output")
+        base = Path(raw_base).expanduser()
         if not base.is_absolute():
-            base = Path(self.repo_root) / base
+            if raw_base.strip() in {"", "output"}:
+                base = self._output_root()
+            else:
+                base = self._output_root() / base
         if use_timestamp_folder is None:
             use_timestamp_folder = self._coerce_bool(self.save_directory_state.get("use_timestamp_folder", True))
         return base / self.session_timestamp if use_timestamp_folder else base
@@ -1832,16 +2951,19 @@ class WebSessionContext:
         mode = self.get_api_mode()
         cache = self._character_settings_by_mode()
         if mode not in cache:
-            cache[mode] = load_character_settings(mode)
+            cache[mode] = load_character_settings(
+                mode,
+                path=self._existing_save_path(f"CharacterModule_{str(mode or 'NAI').upper()}.json"),
+            )
         return cache[mode]
 
     def _save_character_settings(self, mode: str, settings: dict[str, Any]) -> None:
-        from core.character_settings import character_settings_path, normalize_character_settings
+        from core.character_settings import normalize_character_settings
 
         mode_key = str(mode or "NAI").upper()
         normalized = normalize_character_settings(settings)
         self._character_settings_by_mode()[mode_key] = normalized
-        path = character_settings_path(mode_key)
+        path = self._save_path(f"CharacterModule_{mode_key}.json")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps({mode_key: normalized}, ensure_ascii=False, indent=4),

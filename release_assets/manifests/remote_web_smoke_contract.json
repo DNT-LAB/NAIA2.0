@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "status": "draft",
+  "scope": "non-destructive Remote Web smoke checks for staged backend resources",
+  "notes": [
+    "This contract intentionally avoids NovelAI/WebUI/ComfyUI generation dispatch and external network side effects.",
+    "Full packaged-app validation must still test Generate, Enhance, img2img, Vibe Transfer, Character Reference, Artist Thumb, and setup/API workflows with real runtime credentials or controlled test doubles."
+  ],
+  "http_checks": [
+    {
+      "feature": "web_shell",
+      "method": "GET",
+      "path": "/",
+      "expected_status": [200]
+    },
+    {
+      "feature": "web_shell_css",
+      "method": "GET",
+      "path": "/style.css",
+      "expected_status": [200]
+    },
+    {
+      "feature": "web_shell_js",
+      "method": "GET",
+      "path": "/app.js",
+      "expected_status": [200]
+    },
+    {
+      "feature": "setup_api_status",
+      "method": "GET",
+      "path": "/api/status",
+      "expected_status": [200]
+    },
+    {
+      "feature": "headless_capabilities",
+      "method": "GET",
+      "path": "/api/headless/capabilities",
+      "expected_status": [200]
+    },
+    {
+      "feature": "queue_state",
+      "method": "GET",
+      "path": "/api/queue/state",
+      "expected_status": [200]
+    },
+    {
+      "feature": "params_resolutions",
+      "method": "GET",
+      "path": "/api/resolutions",
+      "expected_status": [200]
+    },
+    {
+      "feature": "prompt_tools_highlight_index",
+      "method": "GET",
+      "path": "/api/prompt-highlight-index",
+      "expected_status": [200]
+    },
+    {
+      "feature": "event_preset_status",
+      "method": "GET",
+      "path": "/api/event-preset/status",
+      "expected_status": [200]
+    },
+    {
+      "feature": "event_preset_bootstrap_empty",
+      "method": "GET",
+      "path": "/api/event-preset/bootstrap?ratingId=s&personId=1girl_solo",
+      "expected_status": [200]
+    },
+    {
+      "feature": "clothes_preset_status",
+      "method": "GET",
+      "path": "/api/clothes-preset/status",
+      "expected_status": [200]
+    },
+    {
+      "feature": "expression_preset_status",
+      "method": "GET",
+      "path": "/api/expression-preset/status",
+      "expected_status": [200]
+    },
+    {
+      "feature": "artist_thumb_state",
+      "method": "GET",
+      "path": "/api/artist-thumb/state",
+      "expected_status": [200]
+    },
+    {
+      "feature": "character_viewer_state",
+      "method": "GET",
+      "path": "/api/character-viewer/state",
+      "expected_status": [200]
+    },
+    {
+      "feature": "history_list",
+      "method": "GET",
+      "path": "/api/history/list",
+      "expected_status": [200]
+    },
+    {
+      "feature": "viewer_list",
+      "method": "GET",
+      "path": "/api/viewer/list",
+      "expected_status": [200]
+    },
+    {
+      "feature": "comfyui_workflow_state",
+      "method": "GET",
+      "path": "/api/comfyui/workflow/state",
+      "expected_status": [200]
+    },
+    {
+      "feature": "comfyui_web_unconfigured",
+      "method": "GET",
+      "path": "/api/comfyui/web",
+      "expected_status": [404]
+    },
+    {
+      "feature": "latest_image_empty",
+      "method": "GET",
+      "path": "/api/latest-image",
+      "expected_status": [404]
+    },
+    {
+      "feature": "result_metadata_empty",
+      "method": "GET",
+      "path": "/api/result/metadata",
+      "expected_status": [404]
+    }
+  ],
+  "websocket_checks": [
+    {
+      "feature": "startup_state",
+      "path": "/ws",
+      "expected_initial_types": [
+        "session",
+        "desktop_window_state",
+        "mode",
+        "options",
+        "params",
+        "queue_state",
+        "api_status",
+        "init_complete",
+        "lazy_indices_ready"
+      ],
+      "sync_message": "sync",
+      "expected_sync_type": "mode"
+    }
+  ]
+}

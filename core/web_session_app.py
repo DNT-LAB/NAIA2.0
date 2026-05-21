@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 from contextlib import asynccontextmanager
 import json
 import asyncio
+import base64
 import io
+import math
 import mimetypes
 import time
 import re
@@ -18,6 +21,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app.web import resolve_remote_web_dir
 from core import result_image_payload_service as result_images
 from core.artist_thumbnail_service import ArtistThumbnailService
 from core.character_viewer_service import CharacterViewerService
@@ -29,6 +33,7 @@ from core.expression_preset_service import ExpressionPresetService
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.preset_composer_service import PresetComposerService
+from core.runtime_install_manager import RuntimeInstallManager
 from core.style_thumbnail_service import StyleThumbnailService
 from core.web_session_context import WebSessionContext
 
@@ -164,7 +169,8 @@ def _style_thumbnail_service(context: WebSessionContext) -> StyleThumbnailServic
 def _character_viewer_service(context: WebSessionContext) -> CharacterViewerService:
     service = getattr(context, "character_viewer_service", None)
     if service is None:
-        service = CharacterViewerService(context.repo_root)
+        save_root = context.runtime_paths.save_dir if context.runtime_paths is not None else None
+        service = CharacterViewerService(context.repo_root, save_root=save_root)
         context.character_viewer_service = service
     return service
 
@@ -172,7 +178,15 @@ def _character_viewer_service(context: WebSessionContext) -> CharacterViewerServ
 def _artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailService:
     service = getattr(context, "artist_thumbnail_service", None)
     if service is None:
-        service = ArtistThumbnailService(context.repo_root, mode_getter=context.get_api_mode)
+        mode_data_root = None
+        runtime_paths = getattr(context, "runtime_paths", None)
+        if runtime_paths is not None:
+            mode_data_root = runtime_paths.ui_assets_dir / "artist_thumb"
+        service = ArtistThumbnailService(
+            context.repo_root,
+            mode_getter=context.get_api_mode,
+            mode_data_root=mode_data_root,
+        )
         context.artist_thumbnail_service = service
     return service
 
@@ -180,7 +194,17 @@ def _artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailServ
 def _event_preset_service(context: WebSessionContext) -> EventPresetService:
     service = getattr(context, "event_preset_service", None)
     if service is None:
-        service = EventPresetService(context.repo_root)
+        data_root = None
+        thumbnail_root = None
+        runtime_paths = getattr(context, "runtime_paths", None)
+        if runtime_paths is not None:
+            data_root = runtime_paths.data_dir
+            thumbnail_root = runtime_paths.ui_assets_dir
+        service = EventPresetService(
+            context.repo_root,
+            data_root=data_root,
+            thumbnail_root=thumbnail_root,
+        )
         context.event_preset_service = service
     return service
 
@@ -216,18 +240,56 @@ def _event_preset_download_service(context: WebSessionContext) -> EventPresetDow
     service = getattr(context, "event_preset_download_service", None)
     if service is None:
         def refresh_services() -> None:
-            context.event_preset_service = EventPresetService(context.repo_root)
+            data_root = None
+            thumbnail_root = None
+            runtime_paths = getattr(context, "runtime_paths", None)
+            if runtime_paths is not None:
+                data_root = runtime_paths.data_dir
+                thumbnail_root = runtime_paths.ui_assets_dir
+            context.event_preset_service = EventPresetService(
+                context.repo_root,
+                data_root=data_root,
+                thumbnail_root=thumbnail_root,
+            )
             context.preset_composer_service = PresetComposerService(
                 context.event_preset_service,
                 axis_providers={"clothes": _clothes_preset_service(context)},
             )
 
+        data_root = None
+        thumbnail_root = None
+        runtime_paths = getattr(context, "runtime_paths", None)
+        if runtime_paths is not None:
+            data_root = runtime_paths.data_dir
+            thumbnail_root = runtime_paths.ui_assets_dir
         service = EventPresetDownloadService(
             context.repo_root,
             status_provider=lambda: _event_preset_service(context).status(),
             on_complete=refresh_services,
+            data_root=data_root,
+            thumbnail_root=thumbnail_root,
         )
         context.event_preset_download_service = service
+    return service
+
+
+def _runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager:
+    service = getattr(context, "runtime_install_manager", None)
+    if service is None:
+        runtime_paths = getattr(context, "runtime_paths", None)
+        if runtime_paths is None:
+            raise RuntimeError("Runtime paths are not available")
+
+        def refresh_tag_state() -> None:
+            context.tag_search_index = None
+            context.kr_tags_raw = {}
+            context.autocomplete_state.kr_tags_loaded = False
+
+        service = RuntimeInstallManager(
+            runtime_paths,
+            on_tag_archive_complete=refresh_tag_state,
+        )
+        context.runtime_install_manager = service
     return service
 
 
@@ -249,7 +311,7 @@ def _default_resolutions_for_mode(mode: str) -> list[str]:
 
 
 def _resolution_store_path(context: WebSessionContext) -> Path:
-    return Path(context.repo_root) / "save" / "resolutions.json"
+    return context._save_path("resolutions.json")
 
 
 def _normalize_resolution_list_for_storage(values: Any) -> list[str]:
@@ -268,7 +330,7 @@ def _normalize_resolution_list_for_storage(values: Any) -> list[str]:
 
 def _load_resolutions_by_mode(context: WebSessionContext) -> dict[str, list[str]]:
     mode_map = {mode: _default_resolutions_for_mode(mode) for mode in REMOTE_RESOLUTION_MODES}
-    path = _resolution_store_path(context)
+    path = context._existing_save_path("resolutions.json")
     if not path.exists():
         return mode_map
     try:
@@ -606,12 +668,22 @@ def _search_parquet_action(context: WebSessionContext, command: dict[str, Any]) 
         frame.to_parquet(path, index=False)
         message = f"Exported {path.name} ({len(frame):,})"
     elif action == "save_runner":
-        path = Path(context.repo_root) / "naia_temp_rows.parquet"
+        path = context.runner_parquet_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
         frame.to_parquet(path, index=False)
         message = f"Saved runner parquet ({len(frame):,})"
     else:
         return context.search_state_payload(), {"type": "toast", "message": "Unsupported parquet action", "level": "error"}
     return context.search_state_payload(), {"type": "toast", "message": message, "level": "success"}
+
+
+def _tag_data_roots(context: WebSessionContext) -> list[Path]:
+    roots: list[Path] = []
+    runtime_paths = getattr(context, "runtime_paths", None)
+    if runtime_paths is not None:
+        roots.append(runtime_paths.data_dir)
+    roots.append(Path(context.repo_root) / "data")
+    return roots
 
 
 def _ensure_tag_search_index(context: WebSessionContext):
@@ -621,7 +693,7 @@ def _ensure_tag_search_index(context: WebSessionContext):
     from core.kr_tag_loader import load_kr_tag_records
     from core.tag_search_index import TagSearchIndex
 
-    result = load_kr_tag_records(context.repo_root)
+    result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
     context.kr_tags_raw = result.raw
     context.autocomplete_state.kr_tags_loaded = bool(result.raw)
     index = TagSearchIndex.from_raw_tag_records(result.raw)
@@ -1136,6 +1208,293 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
     }
 
 
+def _resolve_result_image_action_source(
+    context: WebSessionContext,
+    payload: dict[str, Any] | None,
+) -> tuple[bytes, str, dict[str, Any], dict[str, Any]]:
+    payload = payload if isinstance(payload, dict) else {}
+    source = str(payload.get("source") or "").strip().lower()
+    rel_path = str(payload.get("path") or "").strip()
+    file_path = str(payload.get("file_path") or payload.get("filePath") or "").strip()
+    label = str(payload.get("label") or rel_path or file_path or "Result Image")
+
+    item = _history_item_from_viewer_path(context, rel_path) if rel_path else None
+    if item is None and (source in {"", "current"} or not rel_path):
+        item = context.result_store.latest_item
+    if item is not None:
+        png_bytes, _ = result_images.history_item_png_payload(item, label=getattr(item, "filename", "") or label)
+        generation_params = dict(getattr(item, "generation_params", {}) or {})
+        prompt_context = dict(getattr(item, "prompt_context", {}) or {})
+        return png_bytes, label or getattr(item, "filename", "") or "Result Image", generation_params, prompt_context
+
+    target = _validate_viewer_path(context, rel_path)
+    if target is None and file_path:
+        candidate = Path(file_path)
+        try:
+            if candidate.is_file():
+                target = candidate
+        except Exception:
+            target = None
+    if target is not None:
+        png_bytes, _ = result_images.image_file_to_png_payload(target)
+        return png_bytes, label or target.name, {}, {}
+
+    if source in {"", "current"}:
+        png_bytes, _ = context.result_store.current_png_payload()
+        return png_bytes, label or "Current Result", {}, {}
+
+    raise FileNotFoundError("Result image is unavailable")
+
+
+def _clamp_result_enhance_number(value: Any, minimum: float, maximum: float, fallback: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return min(maximum, max(minimum, number))
+
+
+def _coerce_result_enhance_bool(value: Any, fallback: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return fallback
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return fallback
+
+
+def _normalize_result_enhance_config(
+    context: WebSessionContext,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    current = context.result_enhance_config if isinstance(context.result_enhance_config, dict) else {}
+    upscale_value = payload.get("upscale", current.get("upscale", 1.5))
+    try:
+        upscale = 1.0 if abs(float(upscale_value) - 1.0) < 0.01 else 1.5
+    except (TypeError, ValueError):
+        upscale = 1.5
+    strength = round(
+        _clamp_result_enhance_number(payload.get("strength", current.get("strength", 0.2)), 0.1, 0.9, 0.2),
+        1,
+    )
+    noise = round(
+        _clamp_result_enhance_number(payload.get("noise", current.get("noise", 0.0)), 0.0, 0.1, 0.0),
+        1,
+    )
+    return {
+        "type": "result_enhance_config",
+        "upscale": upscale,
+        "strength": strength,
+        "noise": noise,
+        "available": True,
+        "headless": True,
+    }
+
+
+def _normalize_webui_result_enhance_hires_settings(
+    context: WebSessionContext,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else {}
+    payload_settings = payload.get("hires_settings") if isinstance(payload.get("hires_settings"), dict) else {}
+    merged = {**dict(context.remote_params or {}), **payload_settings}
+    return {
+        "enable_hr": True,
+        "hr_scale": round(_clamp_result_enhance_number(merged.get("hr_scale"), 1.0, 4.0, 2.0), 1),
+        "hr_upscaler": str(merged.get("hr_upscaler") or "Latent (nearest-exact)").strip() or "Latent (nearest-exact)",
+        "denoising_strength": round(
+            _clamp_result_enhance_number(merged.get("denoising_strength"), 0.0, 1.0, 0.5),
+            2,
+        ),
+        "hires_steps": int(_clamp_result_enhance_number(merged.get("hires_steps"), 0, 150, 10)),
+        "hr_cfg": round(_clamp_result_enhance_number(merged.get("hr_cfg"), 0.0, 30.0, 7.0), 1),
+        "webui_hiresfix_assist": _coerce_result_enhance_bool(merged.get("webui_hiresfix_assist"), False),
+        "webui_hiresfix_assist_target": 768
+            if str(merged.get("webui_hiresfix_assist_target") or "").strip() == "768"
+            else 512,
+    }
+
+
+def _round_result_enhance_size(value: float) -> int:
+    return max(64, int(math.ceil(float(value) / 64.0) * 64))
+
+
+def _result_enhance_dimension(value: Any, fallback: int) -> int:
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        return int(fallback)
+    return max(1, number)
+
+
+def _apply_webui_result_enhance_size_policy(
+    context: WebSessionContext,
+    params: dict[str, Any],
+    base_w: int,
+    base_h: int,
+) -> tuple[int, int, float]:
+    payload = {"width": base_w, "height": base_h}
+    scale = _clamp_result_enhance_number(params.get("hr_scale"), 1.0, 4.0, 2.0)
+    try:
+        from core.api_service import APIService
+
+        if params.get("webui_hiresfix_assist"):
+            payload["width"], payload["height"] = APIService._nearest_hiresfix_assist_resolution(
+                payload["width"],
+                payload["height"],
+                params.get("webui_hiresfix_assist_target", 512),
+            )
+            service = getattr(context, "api_service", None) or APIService(context)
+            scale = service._fit_webui_hiresfix_assist_scale(payload, scale)
+    except Exception:
+        payload = {"width": base_w, "height": base_h}
+    payload_w = _result_enhance_dimension(payload.get("width"), base_w)
+    payload_h = _result_enhance_dimension(payload.get("height"), base_h)
+    scale = round(_clamp_result_enhance_number(scale, 1.0, 4.0, 2.0), 1)
+    params["width"] = payload_w
+    params["height"] = payload_h
+    params["hr_scale"] = scale
+    new_w = max(1, int(math.floor((payload_w * scale) + 0.5)))
+    new_h = max(1, int(math.floor((payload_h * scale) + 0.5)))
+    return new_w, new_h, scale
+
+
+def _prompt_from_result_context(
+    context: WebSessionContext,
+    params: dict[str, Any],
+    prompt_context: dict[str, Any],
+) -> None:
+    if not params.get("input"):
+        prompt = (
+            prompt_context.get("main_prompt")
+            or prompt_context.get("final_prompt")
+            or prompt_context.get("prompt")
+            or context.prompt_text
+            or ""
+        )
+        params["input"] = str(prompt)
+    params["_raw_input"] = str(params.get("_raw_input") or params.get("input") or "")
+    if not params.get("negative_prompt"):
+        params["negative_prompt"] = str(
+            prompt_context.get("negative_prompt")
+            or prompt_context.get("uc")
+            or context.negative_prompt_text
+            or ""
+        )
+
+
+def _prepare_result_enhance_command(
+    context: WebSessionContext,
+    payload: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from PIL import Image
+    from utils.webui_generation_info import extract_webui_seed
+
+    payload = payload if isinstance(payload, dict) else {}
+    current_mode = str(context.get_api_mode() or "").upper()
+    requested_mode = str(payload.get("mode") or "").upper()
+    if current_mode not in {"NAI", "WEBUI"}:
+        raise RuntimeError("Enhance is available in NAI or WEBUI mode only")
+    mode = current_mode
+    if requested_mode in {"NAI", "WEBUI"} and requested_mode != current_mode:
+        raise RuntimeError("Enhance mode changed; refresh the result selection")
+
+    image_bytes, label, generation_params, prompt_context = _resolve_result_image_action_source(context, payload)
+    if not generation_params:
+        raise RuntimeError("Generation parameters are unavailable")
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        orig_w, orig_h = image.size
+    params = copy.deepcopy(generation_params)
+    _prompt_from_result_context(context, params, prompt_context)
+    for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
+        params.pop(key, None)
+
+    if mode == "NAI":
+        config = _normalize_result_enhance_config(context, payload)
+        upscale = float(config["upscale"])
+        new_w, new_h = (orig_w, orig_h) if upscale == 1.0 else (
+            _round_result_enhance_size(orig_w * 1.5),
+            _round_result_enhance_size(orig_h * 1.5),
+        )
+        params.update({
+            "image_bytes": image_bytes,
+            "strength": float(config["strength"]),
+            "noise": float(config["noise"]),
+            "width": new_w,
+            "height": new_h,
+            "api_mode": "NAI",
+            "result_enhance_request": True,
+            "result_enhance_backend": "NAI",
+            "result_enhance_upscale": upscale,
+            "result_enhance_strength": float(config["strength"]),
+            "result_enhance_source_size": [orig_w, orig_h],
+            "result_enhance_preview_size": [new_w, new_h],
+            "_remote_queue_source": "NAI Enhance",
+            "_remote_queue_label": label,
+        })
+        params.pop("type", None)
+        params.pop("mask_bytes", None)
+        params.pop("_skip_vibe_transfer_late_binding", None)
+        message = "Enhance queued"
+    else:
+        hires_settings = _normalize_webui_result_enhance_hires_settings(context, payload)
+        params.pop("type", None)
+        params.pop("image_bytes", None)
+        params.pop("mask_bytes", None)
+        params.pop("strength", None)
+        params.pop("noise", None)
+        base_w = _result_enhance_dimension(params.get("width"), orig_w)
+        base_h = _result_enhance_dimension(params.get("height"), orig_h)
+        seed = extract_webui_seed(params)
+        if seed is None:
+            raise RuntimeError("WEBUI result seed is unavailable; cannot reproduce source image for Enhance")
+        params.update({
+            **hires_settings,
+            "width": base_w,
+            "height": base_h,
+            "seed": seed,
+            "seed_fixed": True,
+            "random_resolution": False,
+            "resolution_preset_enabled": False,
+            "resolution": f"{base_w} x {base_h}",
+            "api_mode": "WEBUI",
+            "result_enhance_request": True,
+            "result_enhance_backend": "WEBUI",
+            "result_enhance_source_size": [orig_w, orig_h],
+            "_remote_queue_source": "WEBUI Enhance",
+            "_remote_queue_label": label,
+        })
+        new_w, new_h, upscale = _apply_webui_result_enhance_size_policy(context, params, base_w, base_h)
+        params.update({
+            "result_enhance_upscale": upscale,
+            "result_enhance_strength": params.get("denoising_strength", 0.5),
+            "result_enhance_hr_upscaler": params.get("hr_upscaler", ""),
+            "result_enhance_hires_steps": params.get("hires_steps", 10),
+            "result_enhance_hr_cfg": params.get("hr_cfg", 7.0),
+            "result_enhance_preview_size": [new_w, new_h],
+        })
+        message = "Enhance queued"
+
+    return {
+        "type": "generate",
+        "api_mode": mode,
+        "overrides": params,
+    }, {
+        "type": "result_enhance_state",
+        "running": True,
+        "message": message,
+        "api_mode": mode,
+        "source_size": [orig_w, orig_h],
+        "preview_size": params.get("result_enhance_preview_size", [orig_w, orig_h]),
+        "headless": True,
+    }
+
+
 def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_type: str = "") -> dict[str, Any]:
     info = dict(getattr(image, "info", {}) or {})
     parsed_info: dict[str, Any] = {}
@@ -1228,10 +1587,13 @@ def _prompt_engineering_preview_candidates(context: WebSessionContext, preset_na
     if not safe_name or safe_name == "*randomized":
         return []
     mode_key = _normalize_prompt_engineering_preset_mode(context, mode, allow_empty=True)
-    preview_dir = Path(context.repo_root) / "save" / "presets" / "previews"
-    candidates = [preview_dir / f"{safe_name}{ext}" for ext in (".png", ".webp", ".jpg", ".jpeg")]
+    candidates = [
+        preview_dir / f"{safe_name}{ext}"
+        for preview_dir in context._existing_save_dirs("presets", "previews")
+        for ext in (".png", ".webp", ".jpg", ".jpeg")
+    ]
     try:
-        favorites_path = Path(context.repo_root) / "save" / "presets" / "favorites.json"
+        favorites_path = context._existing_save_path("presets", "favorites.json")
         favorite_items = json.loads(favorites_path.read_text(encoding="utf-8")) if favorites_path.exists() else []
         if any(
             isinstance(item, dict)
@@ -1239,8 +1601,8 @@ def _prompt_engineering_preview_candidates(context: WebSessionContext, preset_na
             and (not mode_key or item.get("mode") == mode_key)
             for item in favorite_items
         ):
-            favorite_dir = Path(context.repo_root) / "save" / "presets" / "favorites"
-            candidates.extend(favorite_dir / f"{safe_name}{ext}" for ext in (".png", ".webp", ".jpg", ".jpeg"))
+            for favorite_dir in context._existing_save_dirs("presets", "favorites"):
+                candidates.extend(favorite_dir / f"{safe_name}{ext}" for ext in (".png", ".webp", ".jpg", ".jpeg"))
     except Exception:
         pass
     return candidates
@@ -1278,7 +1640,7 @@ def _prompt_engineering_thumbnail_target(context: WebSessionContext, preset_name
     safe_name = Path(str(preset_name or "").strip()).name
     if not safe_name or safe_name == "*randomized":
         raise ValueError("Preset name is required")
-    target_dir = Path(context.repo_root) / "save" / "presets" / "previews"
+    target_dir = context._save_path("presets", "previews")
     target_dir.mkdir(parents=True, exist_ok=True)
     return target_dir / f"{safe_name}.png"
 
@@ -1336,7 +1698,7 @@ def _prompt_engineering_preset_file(context: WebSessionContext, preset_name: str
         if fallback_mode not in mode_candidates:
             mode_candidates.append(fallback_mode)
     for mode_name in mode_candidates:
-        candidate = Path(context.repo_root) / "save" / "presets" / mode_name / f"{safe_name}.json"
+        candidate = context._existing_save_path("presets", mode_name, f"{safe_name}.json")
         if candidate.exists():
             return candidate
     return None
@@ -1468,6 +1830,13 @@ def _preset_source_to_generation_command(
         raise ValueError("Preset prompt source is empty.")
     request_id = str(result.get("requestId") or uuid.uuid4().hex)
     result["requestId"] = request_id
+    prompt_run_id = _record_preset_prompt_run(
+        context,
+        result,
+        source=source,
+        request_id=request_id,
+        source_row_data=source_row_data,
+    )
     generation_overrides = dict(overrides or {})
     result_overrides = result.get("overrides") if isinstance(result.get("overrides"), dict) else {}
     generation_overrides.update(result_overrides)
@@ -1479,6 +1848,8 @@ def _preset_source_to_generation_command(
         "_remote_queue_source": "Preset",
         "_remote_queue_label": source,
     })
+    if prompt_run_id:
+        generation_overrides["prompt_run_id"] = prompt_run_id
     if source == "event_preset":
         generation_overrides.update({
             "event_preset_request": True,
@@ -1505,6 +1876,49 @@ def _preset_source_to_generation_command(
     }
 
 
+def _record_preset_prompt_run(
+    context: WebSessionContext,
+    result: dict[str, Any],
+    *,
+    source: str,
+    request_id: str,
+    source_row_data: dict[str, Any],
+) -> str:
+    existing = str(result.get("prompt_run_id") or result.get("promptRunId") or "")
+    if existing:
+        return existing
+    starter = getattr(context, "start_prompt_run", None)
+    completer = getattr(context, "complete_prompt_run", None)
+    if not callable(starter) or not callable(completer):
+        return ""
+    import pandas as pd
+
+    prompt = str(
+        result.get("promptPreview")
+        or (result.get("promptPlan") or {}).get("finalPrompt")
+        or source_row_data.get("general")
+        or ""
+    )
+    run = starter(
+        source=source,
+        source_row=pd.Series(source_row_data, name=f"{source}:{request_id}"),
+        settings={"api_mode": context.get_api_mode()},
+        external_request_id=request_id,
+        metadata={
+            "prompt_source": source,
+            "requestId": request_id,
+        },
+    )
+    completer(
+        run.prompt_run_id,
+        final_prompt=prompt,
+        metadata={"prompt_source": source},
+    )
+    result["prompt_run_id"] = run.prompt_run_id
+    result["promptRunId"] = run.prompt_run_id
+    return run.prompt_run_id
+
+
 def _preset_prompt_generated_payload(
     context: WebSessionContext,
     result: dict[str, Any],
@@ -1527,6 +1941,10 @@ def _preset_prompt_generated_payload(
         "remaining": context.search_results.get_count() if context.search_results else 0,
         "rating_counts": context.search_state_payload().get("rating_counts", {}),
     }
+    prompt_run_id = str(result.get("prompt_run_id") or result.get("promptRunId") or "")
+    if prompt_run_id:
+        payload["prompt_run_id"] = prompt_run_id
+        payload["promptRunId"] = prompt_run_id
     if source == "event_preset":
         payload["event_preset_request_id"] = request_id
         payload["selected"] = result.get("selected") or {}
@@ -1543,7 +1961,7 @@ def _tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
         from core.kr_tag_loader import load_kr_tag_records
         from core.tag_relation_ranker import TagRelationRanker
 
-        load_result = load_kr_tag_records(context.repo_root)
+        load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
         raw_tags = load_result.raw
         context.kr_tags_raw = raw_tags
         context.tag_relation_ranker = TagRelationRanker(raw_tags) if raw_tags else None
@@ -1808,6 +2226,42 @@ async def _enqueue_prompt_from_module(
         _ensure_generation_runner(context, clients)
 
 
+async def _enqueue_headless_generation_commands(
+    ws: WebSocket,
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    commands: list[dict[str, Any]],
+) -> None:
+    queued = 0
+    for command in commands:
+        if not isinstance(command, dict):
+            continue
+        result = await _to_thread(_generation_service(context).enqueue_remote_request, command)
+        await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
+        if not result.ok:
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "error",
+                "message": result.blocked_reason,
+            }, ensure_ascii=False))
+            continue
+        queued += 1
+    if queued:
+        await ws.send_text(json.dumps({
+            "type": "status",
+            "is_generating": False,
+            "message": "queued",
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps({
+            "type": "toast",
+            "level": "success",
+            "message": f"{queued} generation request(s) queued",
+        }, ensure_ascii=False))
+        await ws.send_text(json.dumps(context.queue_state_payload(), ensure_ascii=False))
+        if context.headless_generation_execute_enabled:
+            _ensure_generation_runner(context, clients)
+
+
 def _ensure_generation_runner(context: WebSessionContext, clients: set[WebSocket]) -> None:
     task = getattr(context, "headless_generation_runner_task", None)
     if task is not None and not task.done():
@@ -1836,6 +2290,15 @@ async def _run_generation_queue(context: WebSessionContext, clients: set[WebSock
                 await _broadcast_json(clients, {"type": "status", "is_generating": False, "message": "error"})
                 await _broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
                 await _broadcast_json(clients, {"type": "generation_error", "message": message})
+                if params.get("result_enhance_request"):
+                    await _broadcast_json(clients, {
+                        "type": "result_enhance_state",
+                        "running": False,
+                        "success": False,
+                        "message": message,
+                        "request_id": str(params.get("result_enhance_request_id") or request.request_id),
+                        "headless": True,
+                    })
                 if params.get("event_preset_request"):
                     await _broadcast_json(clients, {
                         "type": "event_preset_generation_error",
@@ -1875,6 +2338,15 @@ async def _run_generation_queue(context: WebSessionContext, clients: set[WebSock
                         "level": "error",
                         "message": f"Preset thumbnail save failed: {exc}",
                     })
+            if params.get("result_enhance_request"):
+                await _broadcast_json(clients, {
+                    "type": "result_enhance_state",
+                    "running": False,
+                    "success": True,
+                    "message": "Enhance complete",
+                    "request_id": str(params.get("result_enhance_request_id") or request.request_id),
+                    "headless": True,
+                })
             await _broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
             await _broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
             await _broadcast_json(clients, context.queue_state_payload())
@@ -2164,7 +2636,7 @@ async def _handle_json_command(
         query = str(command.get("query") or "")
         from core.vibe_cluster_resolver import search_vibe_clusters
 
-        results = await _to_thread(search_vibe_clusters, query, 12, Path(context.repo_root) / "save" / "vibe_transfer_clusters")
+        results = await _to_thread(search_vibe_clusters, query, 12, context._existing_save_path("vibe_transfer_clusters"))
         await ws.send_text(json.dumps({
             "type": "autocomplete_result",
             "query": query,
@@ -2249,7 +2721,14 @@ async def _handle_json_command(
                     source=generated_source,
                 )
         else:
+            generation_commands = []
+            if isinstance(module_state, dict):
+                raw_commands = module_state.pop("_headless_generation_commands", [])
+                if isinstance(raw_commands, list):
+                    generation_commands = [item for item in raw_commands if isinstance(item, dict)]
             await ws.send_text(json.dumps(module_state, ensure_ascii=False))
+            if generation_commands:
+                await _enqueue_headless_generation_commands(ws, context, clients, generation_commands)
     elif command_type == "get_module_state":
         module_id = str(command.get("module_id") or "")
         await ws.send_text(json.dumps(context.module_state_payload(module_id, client_host), ensure_ascii=False))
@@ -2268,34 +2747,114 @@ async def _handle_json_command(
             "headless": True,
         }, ensure_ascii=False))
     elif command_type == "result_enhance":
+        try:
+            generation_command, enhance_state = await _to_thread(_prepare_result_enhance_command, context, command)
+            result = await _to_thread(_generation_service(context).enqueue_remote_request, generation_command)
+        except Exception as exc:
+            message = f"Enhance request failed: {exc}"
+            await ws.send_text(json.dumps({
+                "type": "result_enhance_state",
+                "running": False,
+                "success": False,
+                "message": message,
+                "headless": True,
+            }, ensure_ascii=False))
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "error",
+                "message": message,
+                "headless": True,
+            }, ensure_ascii=False))
+            return
+        await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
+        if not result.ok:
+            await ws.send_text(json.dumps({
+                "type": "result_enhance_state",
+                "running": False,
+                "success": False,
+                "message": result.blocked_reason,
+                "headless": True,
+            }, ensure_ascii=False))
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "error",
+                "message": result.blocked_reason,
+                "headless": True,
+            }, ensure_ascii=False))
+            return
+        await ws.send_text(json.dumps(enhance_state, ensure_ascii=False))
         await ws.send_text(json.dumps({
-            "type": "result_enhance_state",
-            "running": False,
-            "success": False,
-            "message": "Result enhance is not available in the headless runtime yet.",
-            "headless": True,
+            "type": "status",
+            "is_generating": False,
+            "message": "queued",
         }, ensure_ascii=False))
         await ws.send_text(json.dumps({
             "type": "toast",
-            "level": "info",
-            "message": "Headless command retired: result_enhance",
-            "headless": True,
+            "level": "success",
+            "message": "Enhance queued",
         }, ensure_ascii=False))
+        await ws.send_text(json.dumps(context.queue_state_payload(), ensure_ascii=False))
+        if context.headless_generation_execute_enabled:
+            _ensure_generation_runner(context, clients)
     elif command_type == "set_result_enhance_config":
+        config = _normalize_result_enhance_config(context, command)
+        context.result_enhance_config = {
+            "upscale": config["upscale"],
+            "strength": config["strength"],
+            "noise": config["noise"],
+        }
+        await ws.send_text(json.dumps({**config, "_session_echo": True}, ensure_ascii=False))
         await ws.send_text(json.dumps({
-            "type": "result_enhance_config",
-            "upscale": command.get("upscale", 1.5),
-            "strength": command.get("strength", 0.2),
-            "noise": command.get("noise", 0.0),
-            "available": False,
+            "type": "toast",
+            "level": "success",
+            "message": "Enhance settings updated",
             "headless": True,
         }, ensure_ascii=False))
     elif command_type == "result_image_action":
         action = str(command.get("action") or "image_action")
+        if action not in {"img2img", "inpaint"}:
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "error",
+                "message": "Unsupported result image action",
+                "headless": True,
+            }, ensure_ascii=False))
+            return
+        if context.get_api_mode() != "NAI":
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "error",
+                "message": "Img2Img/Inpaint is available in NAI mode only",
+                "headless": True,
+            }, ensure_ascii=False))
+            return
+        try:
+            image_bytes, label, generation_params, prompt_context = await _to_thread(
+                _resolve_result_image_action_source,
+                context,
+                command,
+            )
+            state = await _to_thread(
+                context.open_img2img_session_from_bytes,
+                image_bytes,
+                label=label,
+                mode=action,
+                generation_params=generation_params,
+                prompt_context=prompt_context,
+            )
+        except Exception as exc:
+            await ws.send_text(json.dumps({
+                "type": "toast",
+                "level": "error",
+                "message": f"Image action failed: {exc}",
+                "headless": True,
+            }, ensure_ascii=False))
+            return
+        await ws.send_text(json.dumps(state, ensure_ascii=False))
         await ws.send_text(json.dumps({
             "type": "toast",
-            "level": "info",
-            "message": f"Headless command retired: result_image_action/{action}",
+            "level": "success",
+            "message": f"{'Inpaint' if action == 'inpaint' else 'Img2Img'} session ready",
             "headless": True,
         }, ensure_ascii=False))
     elif command_type == "random":
@@ -2384,7 +2943,12 @@ def create_headless_app(
     app.state.web_session_context = session_context
     app.state.headless_clients = set()
 
-    root_web_dir = Path(web_dir) if web_dir is not None else Path(__file__).resolve().parent.parent / "ui" / "remote_web"
+    root_web_dir = (
+        Path(web_dir).resolve()
+        if web_dir is not None
+        else resolve_remote_web_dir(session_context.repo_root)
+    )
+    app.state.remote_web_dir = str(root_web_dir)
     mimetypes.add_type("text/javascript", ".mjs")
 
     js_dir = root_web_dir / "js"
@@ -2409,6 +2973,38 @@ def create_headless_app(
     @app.get("/api/status")
     async def api_status():
         return session_context.http_status_payload()
+
+    @app.get("/api/install-manager")
+    async def api_install_manager_state():
+        try:
+            return await _to_thread(_runtime_install_manager(session_context).snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Install manager state failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/initialize")
+    async def api_install_manager_initialize():
+        try:
+            return await _to_thread(_runtime_install_manager(session_context).initialize)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Install manager initialize failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/tag-archive/download")
+    async def api_install_manager_tag_archive_download():
+        try:
+            manager = _runtime_install_manager(session_context)
+            await _to_thread(manager.start_tag_archive_download)
+            return await _to_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Tag archive download failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/tag-archive/download/cancel")
+    async def api_install_manager_tag_archive_download_cancel():
+        try:
+            manager = _runtime_install_manager(session_context)
+            await _to_thread(manager.cancel_tag_archive_download)
+            return await _to_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Tag archive download cancel failed: {exc}"}, status_code=500)
 
     @app.get("/api/queue/state")
     async def api_queue_state():
@@ -2716,6 +3312,7 @@ def create_headless_app(
             "ok": True,
             "status": "generation_requested",
             "requestId": result.get("requestId") or dispatch.request_id,
+            "promptRunId": result.get("promptRunId") or result.get("prompt_run_id") or dispatch.websocket_payload().get("prompt_run_id") or "",
             "promptPlan": result.get("promptPlan") or {},
         }
 
@@ -2845,6 +3442,7 @@ def create_headless_app(
             "ok": True,
             "status": "generation_requested",
             "requestId": result.get("requestId") or dispatch.request_id,
+            "promptRunId": result.get("promptRunId") or result.get("prompt_run_id") or dispatch.websocket_payload().get("prompt_run_id") or "",
             "selected": result.get("selected") or {},
             "promptPreview": result.get("promptPreview") or "",
             "event": result.get("event") or {},
@@ -3768,9 +4366,54 @@ def create_headless_app(
         }, status_code=400)
 
     @app.post("/api/image-action/{action}")
-    async def api_image_action(action: str):
+    async def api_image_action(action: str, req: Request):
+        action = (action or "").strip().lower()
+        if action not in {"img2img", "inpaint", "vibe", "danbooru"}:
+            return JSONResponse({"error": "Unsupported action"}, status_code=400)
+        image_bytes = await req.body()
+        if not image_bytes:
+            return JSONResponse({"error": "No image data"}, status_code=400)
+        if len(image_bytes) > 64 * 1024 * 1024:
+            return JSONResponse({"error": "Image is too large"}, status_code=413)
+        label = (req.query_params.get("label") or "Input Image")[:120]
+        try:
+            if action in {"img2img", "inpaint"}:
+                if session_context.get_api_mode() != "NAI":
+                    return JSONResponse({"error": "Img2Img/Inpaint is available in NAI mode only"}, status_code=403)
+                state = await _to_thread(
+                    session_context.open_img2img_session_from_bytes,
+                    image_bytes,
+                    label=label,
+                    mode=action,
+                )
+                await _broadcast_json(app.state.headless_clients, state)
+                return {
+                    "ok": True,
+                    "action": action,
+                    "state": state,
+                    "message": f"{'Inpaint' if action == 'inpaint' else 'Img2Img'} session ready",
+                }
+            if action == "vibe":
+                if session_context.get_api_mode() != "NAI":
+                    return JSONResponse({"error": "Vibe Transfer is available in NAI mode only"}, status_code=403)
+                module_state = await _to_thread(
+                    session_context.set_module_param,
+                    "vibe_transfer",
+                    "upload_image",
+                    base64.b64encode(image_bytes).decode("ascii"),
+                )
+                if isinstance(module_state, dict):
+                    await _broadcast_json(app.state.headless_clients, module_state)
+                return {
+                    "ok": True,
+                    "action": action,
+                    "state": module_state,
+                    "message": "Vibe Transfer image added",
+                }
+        except Exception as exc:
+            return JSONResponse({"error": f"Image action failed: {exc}"}, status_code=500)
         return JSONResponse({
-            "error": f"Image action '{action}' is desktop-only in the headless runtime.",
+            "error": "Danbooru image interrogation is not available in the headless runtime yet.",
             "headless": True,
         }, status_code=400)
 

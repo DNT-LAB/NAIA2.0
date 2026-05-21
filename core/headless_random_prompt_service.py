@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -27,6 +28,7 @@ class HeadlessRandomPromptResult:
     rating_counts: dict[str, int] | None = None
     context: Any = None
     random_request_id: str = ""
+    prompt_run_id: str = ""
     detected_resolution: tuple[int, int] | None = None
     reset_resolution_detected: bool = False
 
@@ -48,6 +50,9 @@ class HeadlessRandomPromptResult:
         if self.random_request_id:
             payload["random_request_id"] = self.random_request_id
             payload["requestId"] = self.random_request_id
+        if self.prompt_run_id:
+            payload["prompt_run_id"] = self.prompt_run_id
+            payload["promptRunId"] = self.prompt_run_id
         if self.detected_resolution:
             width, height = self.detected_resolution
             payload["detected_resolution"] = {"width": width, "height": height}
@@ -67,7 +72,18 @@ class HeadlessRandomPromptService:
         """Preload the expensive headless prompt runtime without generating."""
 
         self._ensure_headless_runtime()
-        return self._ensure_search_results({})
+        ready = self._ensure_search_results({})
+        if ready and self.context.search_results is not None:
+            prime = getattr(self.context.search_results, "prime_random_cache", None)
+            if callable(prime):
+                prime([
+                    set(DEFAULT_RATINGS),
+                    {"s"},
+                    {"g"},
+                    {"q"},
+                    {"e"},
+                ])
+        return ready
 
     def generate(
         self,
@@ -131,7 +147,13 @@ class HeadlessRandomPromptService:
                 rating_counts=self._rating_counts(),
             )
 
-        service.set_current_context(preparation.source_row, settings)
+        service.set_current_context(
+            preparation.source_row,
+            settings,
+            source="random",
+            request_id=random_request_id,
+            metadata={"active_ratings": sorted(ratings)},
+        )
         result = service.process_current_context()
         if result.error:
             return HeadlessRandomPromptResult(
@@ -147,6 +169,7 @@ class HeadlessRandomPromptService:
         if result.context is not None and callable(publish):
             publish("prompt_generated", result.context)
         print("Headless Remote: random prompt generated", flush=True)
+        prompt_run_id = str(getattr(result.context, "metadata", {}).get("prompt_run_id") or "")
 
         return HeadlessRandomPromptResult(
             success=True,
@@ -155,6 +178,7 @@ class HeadlessRandomPromptService:
             rating_counts=self._rating_counts(),
             context=result.context,
             random_request_id=random_request_id,
+            prompt_run_id=prompt_run_id,
             detected_resolution=result.detected_resolution,
             reset_resolution_detected=result.reset_resolution_detected,
         )
@@ -228,7 +252,14 @@ class HeadlessRandomPromptService:
             return
         from core.wildcard_manager import WildcardManager
 
-        manager = WildcardManager()
+        runtime_paths = getattr(self.context, "runtime_paths", None)
+        use_runtime_wildcards = bool(os.environ.get("NAIA_USER_DATA_DIR") or os.environ.get("NAIA_PORTABLE"))
+        wildcards_dir = (
+            getattr(runtime_paths, "wildcards_dir", None)
+            if runtime_paths is not None and use_runtime_wildcards
+            else None
+        )
+        manager = WildcardManager(wildcards_dir=wildcards_dir)
         try:
             manager._app_context_ref = weakref.ref(self.context)
         except TypeError:
@@ -241,7 +272,17 @@ class HeadlessRandomPromptService:
         from core.filter_data_manager import FilterDataManager
 
         root = Path(getattr(self.context, "repo_root", Path.cwd()))
-        self.context.filter_data_manager = FilterDataManager(str(root / "data"))
+        data_root = root / "data"
+        runtime_paths = getattr(self.context, "runtime_paths", None)
+        if runtime_paths is not None:
+            runtime_data = runtime_paths.data_dir
+            if (
+                (runtime_data / "clothes_list.txt").exists()
+                or (runtime_data / "taglist").exists()
+                or (runtime_data / "tags").exists()
+            ):
+                data_root = runtime_data
+        self.context.filter_data_manager = FilterDataManager(str(data_root))
 
     def _ensure_search_results(self, settings: dict[str, Any]) -> bool:
         if settings.get("wildcard_standalone", False):
@@ -275,11 +316,13 @@ class HeadlessRandomPromptService:
         return False
 
     def _fallback_sources(self) -> list[tuple[Path, str]]:
+        sources = getattr(self.context, "runner_parquet_sources", None)
+        if callable(sources):
+            return sources()
         root = Path(getattr(self.context, "repo_root", Path.cwd()))
         return [
-            (root / "data" / "naia_temp_rows.parquet", "temp parquet"),
+            (root / "data" / "naia_temp_rows.parquet", "legacy data parquet"),
             (root / "naia_temp_rows.parquet", "legacy temp parquet"),
-            (root / "data" / "tags" / "tags_129.parquet", "fallback parquet"),
         ]
 
     def _rating_counts(self) -> dict[str, int]:

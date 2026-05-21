@@ -35,10 +35,12 @@ class CloudflaredService:
         self,
         *,
         port: int = 7243,
+        bin_dir: Path | str | None = None,
         start_tunnel: Callable[..., Any] | None = None,
         stop_tunnel: Callable[[int], Any] | None = None,
     ):
         self.port = int(port or 7243)
+        self.bin_dir = Path(bin_dir) if bin_dir is not None else None
         self._start_tunnel = start_tunnel
         self._stop_tunnel = stop_tunnel
         self._status = CloudflaredStatus()
@@ -68,7 +70,9 @@ class CloudflaredService:
             start_tunnel = self._start_tunnel
             if start_tunnel is None:
                 from utils.cloudflared import start_tunnel as start_tunnel
-            info = start_tunnel(self.port, on_progress=self._on_progress)
+                info = start_tunnel(self.port, on_progress=self._on_progress, bin_dir=self.bin_dir)
+            else:
+                info = start_tunnel(self.port, on_progress=self._on_progress)
             tunnel_url = str(getattr(info, "tunnel_url", "") or "")
             self.set_status(active=True, url=tunnel_url, status_text=tunnel_url)
             return {"success": True, **self.status()}

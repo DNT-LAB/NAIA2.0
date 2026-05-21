@@ -24,6 +24,9 @@ ENV/
 *.egg-info/
 dist/
 build/
+app/electron/dist/
+app/electron/node_modules/
+release_package/
 
 # PyInstaller
 *.manifest
@@ -161,10 +164,12 @@ GEMINI.md
 *.md
 !CLAUDE.md
 !AGENTS.md
+!PROJECT_LAYOUT_POLICY.md
 !**/.claude/*.md
 NAIA_generation_old.py
 /tabs/assets/backgrounds
 *.png
+!app/web/remote/guides/assets/*.png
 /tabs/assets/Preset
 artist_tab_old.py
 artist_thumb/banned_artist.txt

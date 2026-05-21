@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "purpose": "Final headless/Electron source layout contract.",
+  "required_directories": [
+    "app/backend",
+    "app/backend/server",
+    "app/backend/runtime",
+    "app/backend/generation",
+    "app/backend/presets",
+    "app/backend/search",
+    "app/backend/settings",
+    "app/backend/assets_storage",
+    "app/electron/main",
+    "app/electron/preload",
+    "app/electron/renderer",
+    "app/electron/packaging",
+    "app/web/remote",
+    "legacy_desktop/core",
+    "legacy_desktop/modules",
+    "legacy_desktop/tabs",
+    "legacy_desktop/ui",
+    "legacy_desktop/interfaces",
+    "legacy_desktop/utils",
+    "data/source",
+    "app_data_template",
+    "release_assets/manifests",
+    "release_assets/samples",
+    "tests/headless",
+    "tests/electron_shell",
+    "tests/legacy_desktop",
+    "tests/integration"
+  ],
+  "python_package_markers": [
+    "app/__init__.py",
+    "app/backend/__init__.py",
+    "app/backend/server/__init__.py",
+    "app/backend/runtime/__init__.py",
+    "app/backend/generation/__init__.py",
+    "app/backend/presets/__init__.py",
+    "app/backend/search/__init__.py",
+    "app/backend/settings/__init__.py",
+    "app/backend/assets_storage/__init__.py",
+    "app/web/__init__.py"
+  ],
+  "runtime_only_roots": [
+    "app/electron/dist",
+    "logs",
+    "output",
+    "save"
+  ],
+  "rules": [
+    "Source layout scaffolding must exist before large filesystem moves.",
+    "Runtime-only roots are excluded from release source layout checks.",
+    "New headless backend ownership packages must be importable without PyQt6."
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "status": "draft",
+  "selected_first_milestone": "python-runtime-folder",
+  "rationale": [
+    "Avoid PyInstaller onefile as the first milestone because it has a higher antivirus false-positive and cold-start risk.",
+    "Keep a non-PyInstaller runtime path available until scanner results and build reproducibility are measured.",
+    "Electron supports resources/python/python.exe plus resources/naia-backend/NAIA_web_headless.py. The default release path now bundles a base-only Python runtime and creates the managed dependency environment on first launch."
+  ],
+  "candidate_summary": {
+    "python-runtime-folder": {
+      "status": "selected_first_milestone",
+      "packaging_shape": "Electron resources/python base runtime plus resources/naia-backend source resources; user-data/runtime-env is created on first launch",
+      "electron_support_required": [
+        "resources/python/python.exe",
+        "resources/naia-backend/NAIA_web_headless.py",
+        "NAIA_USER_DATA_DIR",
+        "NAIA_RESOURCE_ROOT",
+        "NAIA_REMOTE_WEB_DIR"
+      ],
+      "staging_tool": "tools/stage_python_runtime.py",
+      "runtime_builder": "tools/build_python_runtime_from_venv.py --base-only --python-version 3.12",
+      "preflight_gate": "tools/check_release_preflight.py --require-bundled-python",
+      "pros": [
+        "Avoids PyInstaller bootloader false-positive surface for the first milestone",
+        "Keeps backend files inspectable and patchable",
+        "Works with the current staged backend smoke gate"
+      ],
+      "cons": [
+        "Larger file count than a single executable",
+        "Requires shipping a base Python runtime and installing Python packages into user-data/runtime-env",
+        "First launch depends on pip/network unless a wheelhouse is bundled"
+      ]
+    },
+    "pyinstaller-onedir": {
+      "status": "candidate_after_measurement",
+      "packaging_shape": "resources/naia-backend/NAIA_web_headless.exe plus sidecar dependency folder",
+      "allowed": true,
+      "requires": [
+        "no UPX",
+        "no onefile",
+        "clean-machine build",
+        "scanner result record",
+        "cold-start measurement"
+      ]
+    },
+    "pyinstaller-onefile": {
+      "status": "blocked_for_first_milestone",
+      "allowed": false,
+      "reason": "Higher false-positive and extraction/cold-start risk; only reconsider after onedir and Python-runtime-folder evidence."
+    },
+    "nuitka-standalone": {
+      "status": "candidate_after_measurement",
+      "packaging_shape": "standalone backend executable/directory",
+      "requires": [
+        "build time measurement",
+        "dependency compatibility check",
+        "scanner result record"
+      ]
+    },
+    "cx-freeze": {
+      "status": "candidate_after_measurement",
+      "packaging_shape": "frozen Python app directory",
+      "requires": [
+        "dependency compatibility check",
+        "scanner result record"
+      ]
+    },
+    "uv-managed-runtime": {
+      "status": "candidate_after_measurement",
+      "packaging_shape": "managed Python runtime bootstrap",
+      "requires": [
+        "offline behavior decision",
+        "startup latency measurement",
+        "dependency cache policy"
+      ]
+    }
+  },
+  "hard_rules": [
+    "The first serious packaging candidate must not be PyInstaller onefile.",
+    "UPX must not be used for backend packaging.",
+    "A non-PyInstaller backend runtime path must remain available.",
+    "Any accepted backend binary strategy must have a scanner result record.",
+    "Electron must be able to launch either a Python runtime folder or a future backend sidecar executable."
+  ],
+  "required_measurements": [
+    "cold_start_ms",
+    "first_paint_ms",
+    "package_size_bytes",
+    "file_count",
+    "dependency_drift_notes",
+    "scanner_result_notes"
+  ],
+  "scanner_policy": {
+    "minimum_gate": "Microsoft Defender local scan plus vendor/aggregator scan notes before public distribution",
+    "submission_notes_required": true,
+    "code_signing_decision_required_before_installer": true
+  },
+  "code_signing_strategy": {
+    "status": "decided_for_first_release_planning",
+    "internal_dev_artifacts": "unsigned_allowed",
+    "public_or_broad_beta_artifacts": "signed_required",
+    "preferred_windows_signing": "Microsoft Trusted Signing / Azure Artifact Signing or OV certificate; do not buy EV only for instant SmartScreen reputation",
+    "signing_scope": [
+      "Electron shell executable",
+      "installer or portable launcher",
+      "future frozen backend sidecar executable when introduced"
+    ],
+    "notes": "SmartScreen reputation is file-hash and publisher reputation based; signing is required for trust but does not guarantee a no-warning first download."
+  },
+  "current_measurement_checkpoint": {
+    "measured_at": "2026-05-20",
+    "staged_skeleton": {
+      "file_count": 435,
+      "total_bytes": 78665531,
+      "total_mib": 75.02,
+      "defender_scan": {
+        "result": "no_threats_found",
+        "exit_code": 0,
+        "engine": "C:\\Program Files\\Windows Defender\\MpCmdRun.exe"
+      }
+    },
+    "headless_cdp_source_checkout": {
+      "fastapi_listen_s": 1.11,
+      "api_status_200_s": 1.328,
+      "remote_web_first_paint_s": 9.656,
+      "random_click_to_prompt_update_s": 4.36,
+      "generate_click_to_dispatch_s": 0.094,
+      "generation_execution": "disabled_for_dispatch_measurement",
+      "pyqt6_imported": false,
+      "legacy_desktop_imported": false
+    }
+  }
+}

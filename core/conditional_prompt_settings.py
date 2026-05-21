@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -24,8 +25,37 @@ def normalize_conditional_mode(mode: Any = None) -> str:
     return text if text in {"NAI", "WEBUI", "COMFYUI"} else "NAI"
 
 
-def conditional_settings_path(mode: Any = None) -> Path:
-    return Path("save") / f"PromptListModifierModule_{normalize_conditional_mode(mode)}.json"
+def _default_save_root() -> Path:
+    user_data_dir = os.environ.get("NAIA_USER_DATA_DIR")
+    if user_data_dir:
+        return Path(user_data_dir).expanduser().resolve() / "save"
+    return Path("save")
+
+
+def _coerce_save_root(save_root: Path | str | None = None) -> Path:
+    return Path(save_root).expanduser().resolve() if save_root is not None else _default_save_root()
+
+
+def _legacy_save_fallback_enabled() -> bool:
+    if os.environ.get("NAIA_DISABLE_LEGACY_SAVE_FALLBACK") == "1":
+        return False
+    if os.environ.get("NAIA_ELECTRON") == "1":
+        return False
+    return True
+
+
+def conditional_settings_path(mode: Any = None, *, save_root: Path | str | None = None) -> Path:
+    return _coerce_save_root(save_root) / f"PromptListModifierModule_{normalize_conditional_mode(mode)}.json"
+
+
+def _existing_conditional_settings_path(mode: Any = None, *, save_root: Path | str | None = None) -> Path:
+    primary = conditional_settings_path(mode, save_root=save_root)
+    if primary.exists():
+        return primary
+    legacy = Path("save").resolve() / primary.name
+    if _legacy_save_fallback_enabled() and legacy != primary.resolve() and legacy.exists():
+        return legacy
+    return primary
 
 
 def normalize_conditional_engine_options(raw: Any = None) -> dict[str, Any]:
@@ -54,9 +84,9 @@ def normalize_conditional_settings(raw: Any = None) -> dict[str, Any]:
     return settings
 
 
-def load_conditional_settings(mode: Any = None) -> dict[str, Any]:
+def load_conditional_settings(mode: Any = None, *, save_root: Path | str | None = None) -> dict[str, Any]:
     mode_key = normalize_conditional_mode(mode)
-    path = conditional_settings_path(mode_key)
+    path = _existing_conditional_settings_path(mode_key, save_root=save_root)
     if not path.exists():
         return normalize_conditional_settings()
     try:
@@ -68,17 +98,28 @@ def load_conditional_settings(mode: Any = None) -> dict[str, Any]:
     return normalize_conditional_settings(payload)
 
 
-def save_conditional_settings(settings: dict[str, Any], mode: Any = None) -> None:
+def save_conditional_settings(
+    settings: dict[str, Any],
+    mode: Any = None,
+    *,
+    save_root: Path | str | None = None,
+) -> None:
     mode_key = normalize_conditional_mode(mode)
-    path = conditional_settings_path(mode_key)
+    path = conditional_settings_path(mode_key, save_root=save_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {mode_key: normalize_conditional_settings(settings)}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=4), encoding="utf-8")
 
 
 class ConditionalPromptHeadlessStore:
-    def __init__(self, mode_getter: Callable[[], str] | None = None):
+    def __init__(
+        self,
+        mode_getter: Callable[[], str] | None = None,
+        *,
+        save_root: Path | str | None = None,
+    ):
         self._mode_getter = mode_getter
+        self._save_root = _coerce_save_root(save_root)
         self._state_by_mode: dict[str, dict[str, Any]] = {}
 
     def mode(self) -> str:
@@ -92,7 +133,7 @@ class ConditionalPromptHeadlessStore:
     def state(self, mode: Any = None) -> dict[str, Any]:
         mode_key = normalize_conditional_mode(mode or self.mode())
         if mode_key not in self._state_by_mode:
-            self._state_by_mode[mode_key] = load_conditional_settings(mode_key)
+            self._state_by_mode[mode_key] = load_conditional_settings(mode_key, save_root=self._save_root)
         return self._state_by_mode[mode_key]
 
     def collect_settings(self, mode: Any = None) -> dict[str, Any]:
@@ -105,7 +146,7 @@ class ConditionalPromptHeadlessStore:
         normalized = normalize_conditional_settings(merged)
         self._state_by_mode[mode_key] = normalized
         if persist:
-            save_conditional_settings(normalized, mode_key)
+            save_conditional_settings(normalized, mode_key, save_root=self._save_root)
         return copy.deepcopy(normalized)
 
 
@@ -114,6 +155,11 @@ def get_conditional_prompt_store(app_context) -> ConditionalPromptHeadlessStore:
     if isinstance(store, ConditionalPromptHeadlessStore):
         return store
     mode_getter = getattr(app_context, "get_api_mode", None)
-    store = ConditionalPromptHeadlessStore(mode_getter if callable(mode_getter) else None)
+    runtime_paths = getattr(app_context, "runtime_paths", None)
+    save_root = getattr(runtime_paths, "save_dir", None)
+    store = ConditionalPromptHeadlessStore(
+        mode_getter if callable(mode_getter) else None,
+        save_root=save_root,
+    )
     setattr(app_context, "conditional_prompt_headless_store", store)
     return store

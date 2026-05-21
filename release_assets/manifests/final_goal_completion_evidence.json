@@ -1,0 +1,493 @@
+{
+  "version": 1,
+  "portable_workspace_evidence": "app/electron/dist/electron_workspace_release_evidence.json",
+  "rules": [
+    {
+      "item": "Build from a clean machine or reproducible CI-like image.",
+      "evidence": "A real non-dry-run portable workspace build with dependency readiness and packaged clean-machine checks.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "ready_to_build", "equals": true},
+        {"path": "sections.electron_builder.ok", "equals": true},
+        {"path": "sections.clean_packaged.ok", "equals": true}
+      ]
+    },
+    {
+      "item": "Build the Electron app with the chosen backend runtime.",
+      "evidence": "electron-builder completed from the clean portable workspace and produced a packaged root.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "sections.electron_builder.ok", "equals": true},
+        {"path": "sections.packaged_smoke.ok", "equals": true}
+      ]
+    },
+    {
+      "item": "Validate packaged app with CDP/browser or Electron automation where possible.",
+      "evidence": "Packaged Electron CDP smoke completed successfully.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true}
+      ]
+    },
+    {
+      "item": "Test portable package or installer on Windows without the repo venv activated.",
+      "evidence": "Packaged Electron CDP smoke and packaged clean-machine checks completed against the workspace build output.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "sections.clean_packaged.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true}
+      ]
+    },
+    {
+      "item": "Validate shell startup, backend lifecycle, fallback URL, maintenance/log views, and user-data folder behavior.",
+      "evidence": "Packaged Electron CDP smoke observed shell readiness, backend restart recovery, download redirection, storage, and runtime user-data root.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.window.meetsMinimum", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.download.under_runtime_downloads", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.backendRestart.readyAfterRestart", "equals": true},
+        {"path": "sections.electron_cdp_smoke.state.runtimeDataRoot", "exists": true}
+      ]
+    },
+    {
+      "item": "Validate window sizing, file picker/download behavior, clipboard/image paste, drag/drop, websocket reconnect, and local storage/session behavior.",
+      "evidence": "Packaged Electron CDP smoke observed Chromium window constraints, file input surface, download redirection, image paste/drop handlers, UI WebSocket reconnect, and storage persistence.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.window.meetsMinimum", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.filePicker.present", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.download.under_runtime_downloads", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.clipboard.clipboardReadApi", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.clipboard.syntheticImagePastePrevented", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.dragDrop.dropPrevented", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.websocketReconnect.reconnected", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.storage.localStoragePersistsAfterReload", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.storage.sessionStoragePersistsAfterReload", "equals": true}
+      ]
+    },
+    {
+      "item": "Run packaged-app smoke tests for random prompt, Generate, result display, Prompt Tools, Params, Presets, Danbooru, Artist Thumb, img2img, Vibe Transfer Storage, Character Reference, Enhance, setup/API settings, history, save/output.",
+      "evidence": "Packaged Electron CDP feature smoke observed every required user-visible surface through non-destructive DOM, route, and websocket command evidence.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.actionDispatch.random.dispatched", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.actionDispatch.generate.dispatched", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.requiredFeatureCount", "equals": 15},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.observedFeatureCount", "equals": 15},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.allRequiredFeaturesObserved", "equals": true}
+      ]
+    },
+    {
+      "item": "Measure cold start, package size, dependency drift, data-file handling, update/patch behavior, and scanner result.",
+      "evidence": "Real portable workspace build recorded Electron CDP startup timing, packaged artifact measurement, dependency readiness, clean-machine data handling, distribution/update-state policy, and a required successful Defender scan.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "defender_scan", "equals": true},
+        {"path": "require_defender_scan", "equals": true},
+        {"path": "sections.electron_dependencies.ok", "equals": true},
+        {"path": "sections.distribution_strategy.ok", "equals": true},
+        {"path": "sections.electron_builder.ok", "equals": true},
+        {"path": "sections.clean_packaged.ok", "equals": true},
+        {"path": "sections.clean_packaged.checks.measurement.stats.total_bytes", "number_gt": 0},
+        {"path": "sections.clean_packaged.checks.measurement.scanner.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.timings.shell_ready_s", "number_gt": 0}
+      ]
+    },
+    {
+      "item": "Measure cold start, first paint, random prompt latency after warmup, and Generate dispatch latency.",
+      "evidence": "Packaged Electron CDP smoke recorded shell startup timing, first-paint proxy timing, actual random-prompt round-trip latency, and Generate dispatch latency.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.timings.cdp_target_s", "number_gt": 0},
+        {"path": "sections.electron_cdp_smoke.timings.shell_ready_s", "number_gt": 0},
+        {"path": "sections.electron_cdp_smoke.checks.performance.firstPaintReady", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.performance.firstPaintProxyMs", "number_gt": 0},
+        {"path": "sections.electron_cdp_smoke.checks.randomPromptRoundTrip.promptUpdated", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.randomPromptRoundTrip.latencyMs", "number_gt": 0},
+        {"path": "sections.electron_cdp_smoke.checks.actionDispatch.generate.dispatched", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.actionDispatch.generate.latencyMs", "number_gte": 0}
+      ]
+    }
+  ],
+  "when_done_rules": [
+    {
+      "round": "Round 0 - Baseline Freeze and Ownership Map",
+      "item": "Every candidate move has an owner, risk note, and validation command.",
+      "evidence": "Round 0 inventory and move-matrix documents are present.",
+      "requires": [
+        {"path": "sections.round0_artifacts.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 0 - Baseline Freeze and Ownership Map",
+      "item": "The plan distinguishes upstream source weight from local runtime/downloaded asset weight.",
+      "evidence": "Runtime asset classification and write policy distinguish bootstrap source assets from runtime-downloaded/generated assets.",
+      "requires": [
+        {"path": "sections.runtime_asset_classification.ok", "equals": true},
+        {"path": "sections.runtime_write_policy.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 1 - Supported Remote Web Feature Contract Freeze",
+      "item": "Remote Web has a feature contract that can be regression-tested independently of PyQt.",
+      "evidence": "Remote Web feature contract validates all documented routes against the headless app source.",
+      "requires": [
+        {"path": "sections.remote_web_feature_contract.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 1 - Supported Remote Web Feature Contract Freeze",
+      "item": "Desktop-only code is not removed until its user-visible behavior is either migrated or explicitly declared unsupported.",
+      "evidence": "Legacy PyQt surfaces and legacy core boundaries are explicitly classified and release-excluded.",
+      "requires": [
+        {"path": "sections.legacy_pyqt_surface_classification.ok", "equals": true},
+        {"path": "sections.headless_core_boundary.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 1 - Supported Remote Web Feature Contract Freeze",
+      "item": "Known broken features have route-level and UI-level owners.",
+      "evidence": "Remote Web feature contract lists feature groups, routes, source files, smoke levels, and live-smoke owners.",
+      "requires": [
+        {"path": "sections.remote_web_feature_contract.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 2 - Legacy/PyQt Isolation",
+      "item": "Tracked non-legacy runtime code has zero direct `PyQt6` imports.",
+      "evidence": "Supported import-boundary scan blocks PyQt6, legacy_desktop, and NAIA_cold_v4 imports outside classified legacy core files.",
+      "requires": [
+        {"path": "sections.supported_import_boundary.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 2 - Legacy/PyQt Isolation",
+      "item": "`requirements-headless.txt` remains PyQt-free.",
+      "evidence": "Headless requirements scan rejects GUI toolkit dependencies.",
+      "requires": [
+        {"path": "sections.requirements_headless.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 2 - Legacy/PyQt Isolation",
+      "item": "`NAIA_web_headless.py`, `core.web_session_app`, and core headless services import without `PyQt6`, `legacy_desktop`, or `NAIA_cold_v4`.",
+      "evidence": "Supported import-boundary scan covers the headless entrypoint and supported runtime packages.",
+      "requires": [
+        {"path": "sections.supported_import_boundary.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 2 - Legacy/PyQt Isolation",
+      "item": "Legacy desktop code remains reachable only through explicit legacy paths.",
+      "evidence": "Legacy PyQt surfaces and legacy core files are explicitly classified and release-excluded.",
+      "requires": [
+        {"path": "sections.legacy_pyqt_surface_classification.ok", "equals": true},
+        {"path": "sections.headless_core_boundary.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 3 - Runtime Path Resolver and Asset Policy",
+      "item": "Downloaded data and UI assets have deterministic runtime destinations.",
+      "evidence": "Runtime write policy and asset classification define runtime destinations for downloaded/generated assets.",
+      "requires": [
+        {"path": "sections.runtime_write_policy.ok", "equals": true},
+        {"path": "sections.runtime_asset_classification.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 3 - Runtime Path Resolver and Asset Policy",
+      "item": "Bundled data is read-only/bootstrap-only.",
+      "evidence": "Runtime asset classification and release manifest separate source bootstrap assets from runtime assets.",
+      "requires": [
+        {"path": "sections.runtime_asset_classification.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 3 - Runtime Path Resolver and Asset Policy",
+      "item": "No packaged read-only data file is used as mutable state.",
+      "evidence": "Runtime write policy blocks future writes/downloads into source data, source UI, and repository root targets.",
+      "requires": [
+        {"path": "sections.runtime_write_policy.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 3 - Runtime Path Resolver and Asset Policy",
+      "item": "The app can run from a copied temp/dist directory without assuming the source checkout root.",
+      "evidence": "Clean staged workspace evidence proves the backend can be staged into a separate workspace without source-root writes.",
+      "requires": [
+        {"path": "sections.staged_workspace.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 4 - Filesystem Layout Scaffolding",
+      "item": "New ownership directories exist without changing runtime behavior.",
+      "evidence": "Source layout contract validates the target backend, web, Electron, legacy, data, release, and test ownership directories.",
+      "requires": [
+        {"path": "sections.source_layout_contract.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 4 - Filesystem Layout Scaffolding",
+      "item": "Existing headless entrypoint and Remote Web UI still run.",
+      "evidence": "Remote Web feature contract and supported import-boundary scan validate the headless source after scaffolding.",
+      "requires": [
+        {"path": "sections.remote_web_feature_contract.ok", "equals": true},
+        {"path": "sections.supported_import_boundary.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 4 - Filesystem Layout Scaffolding",
+      "item": "Future moves have target paths and import compatibility strategy.",
+      "evidence": "Source layout contract and backend package staging evidence define target paths and compatibility shims.",
+      "requires": [
+        {"path": "sections.source_layout_contract.ok", "equals": true},
+        {"path": "sections.backend_package_staging.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 5 - Backend Package Staging",
+      "item": "At least one supported backend path imports from `app/backend`.",
+      "evidence": "Backend package staging evidence verifies app/backend server/runtime paths and compatibility import shims.",
+      "requires": [
+        {"path": "sections.backend_package_staging.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 5 - Backend Package Staging",
+      "item": "Existing callers continue through shims during the transition.",
+      "evidence": "Backend package staging evidence verifies core runtime compatibility import paths.",
+      "requires": [
+        {"path": "sections.backend_package_staging.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 5 - Backend Package Staging",
+      "item": "Legacy desktop and headless runtime do not gain new cross-imports.",
+      "evidence": "Supported import-boundary and legacy boundary scans reject new unsupported cross-imports.",
+      "requires": [
+        {"path": "sections.supported_import_boundary.ok", "equals": true},
+        {"path": "sections.headless_core_boundary.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 5 - Backend Package Staging",
+      "item": "Headless import-block tests remain the primary gate.",
+      "evidence": "Supported import-boundary scan is embedded in the final goal audit as a release gate.",
+      "requires": [
+        {"path": "sections.supported_import_boundary.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 6 - Remote Web and Electron Source Separation",
+      "item": "Supported web source and user-downloaded UI assets have separate ownership.",
+      "evidence": "Source layout contract and runtime asset classification separate app/web source from runtime UI assets.",
+      "requires": [
+        {"path": "sections.source_layout_contract.ok", "equals": true},
+        {"path": "sections.runtime_asset_classification.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 6 - Remote Web and Electron Source Separation",
+      "item": "PyQt tab/UI leftovers are not confused with web UI.",
+      "evidence": "Legacy PyQt surface classification and Remote Web feature contract keep desktop UI and web UI ownership separate.",
+      "requires": [
+        {"path": "sections.legacy_pyqt_surface_classification.ok", "equals": true},
+        {"path": "sections.remote_web_feature_contract.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 6 - Remote Web and Electron Source Separation",
+      "item": "Electron shell can be developed without moving backend services.",
+      "evidence": "Electron shell contract and backend package staging evidence keep shell ownership separate from backend services.",
+      "requires": [
+        {"path": "sections.electron_shell_contract.ok", "equals": true},
+        {"path": "sections.backend_package_staging.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 7 - Electron Shell Prototype",
+      "item": "Electron shell can host the existing Remote Web UI without using a normal browser tab.",
+      "evidence": "Packaged Electron CDP smoke reaches the Remote Web entry URL in the owned shell and observes a ready backend state.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.state.backendState", "equals": "ready"},
+        {"path": "sections.electron_cdp_smoke.state.href", "exists": true}
+      ]
+    },
+    {
+      "round": "Round 7 - Electron Shell Prototype",
+      "item": "Electron owns backend lifecycle and app window lifecycle.",
+      "evidence": "Packaged Electron CDP smoke proves shell-owned runtime state and backend restart recovery.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.state.runtimeDataRoot", "exists": true},
+        {"path": "sections.electron_cdp_smoke.checks.backendRestart.readyAfterRestart", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 7 - Electron Shell Prototype",
+      "item": "Startup failure produces a visible maintenance/error view with logs.",
+      "evidence": "Electron shell contract verifies backend logs are captured, exposed through shell state, rendered in the maintenance view, and accessible through the Open logs shell control.",
+      "requires": [
+        {"path": "sections.electron_shell_contract.ok", "equals": true},
+        {"path": "sections.electron_shell_contract.checks.maintenance_logs.logs_accessible", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 7 - Electron Shell Prototype",
+      "item": "Browser launch remains a fallback, not the primary UX.",
+      "evidence": "Electron shell contract verifies the primary Remote Web entry stays in the owned shell while the browser fallback is an explicit filtered shell action.",
+      "requires": [
+        {"path": "sections.electron_shell_contract.ok", "equals": true},
+        {"path": "sections.electron_shell_contract.checks.primary_window.entry_url_query", "equals": true},
+        {"path": "sections.electron_shell_contract.checks.browser_fallback.fallback_only", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 8 - Backend Packaging and Antivirus Risk Gate",
+      "item": "Backend binary/runtime strategy is chosen with evidence.",
+      "evidence": "Backend runtime strategy manifest selects the python-runtime-folder first milestone and documents candidate tradeoffs.",
+      "requires": [
+        {"path": "sections.backend_runtime_strategy.ok", "equals": true},
+        {"path": "sections.backend_runtime_strategy.selected_first_milestone", "equals": "python-runtime-folder"}
+      ]
+    },
+    {
+      "round": "Round 8 - Backend Packaging and Antivirus Risk Gate",
+      "item": "PyInstaller is accepted only if false-positive handling is practical.",
+      "evidence": "Backend runtime strategy keeps PyInstaller onefile blocked for the first milestone and requires scanner evidence for accepted binary strategies.",
+      "requires": [
+        {"path": "sections.backend_runtime_strategy.ok", "equals": true},
+        {"path": "sections.backend_runtime_strategy.candidate_summary.pyinstaller-onefile.allowed", "equals": false}
+      ]
+    },
+    {
+      "round": "Round 8 - Backend Packaging and Antivirus Risk Gate",
+      "item": "A non-PyInstaller backend runtime path remains available if PyInstaller risk is unacceptable.",
+      "evidence": "Backend runtime strategy selects a Python runtime folder path as the first milestone.",
+      "requires": [
+        {"path": "sections.backend_runtime_strategy.ok", "equals": true},
+        {"path": "sections.backend_runtime_strategy.selected_first_milestone", "equals": "python-runtime-folder"}
+      ]
+    },
+    {
+      "round": "Round 8 - Backend Packaging and Antivirus Risk Gate",
+      "item": "Electron can start and stop the chosen backend runtime.",
+      "evidence": "Packaged Electron CDP smoke proves the packaged backend reaches ready state and recovers after shell-driven restart.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.state.backendState", "equals": "ready"},
+        {"path": "sections.electron_cdp_smoke.checks.backendRestart.readyAfterRestart", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 9 - Packaged App Integration",
+      "item": "Packaged app starts the headless server and hosts the UI in an owned desktop window.",
+      "evidence": "Real portable Electron build and packaged CDP smoke prove a ready backend and hosted UI from the packaged app.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "sections.electron_builder.ok", "equals": true},
+        {"path": "sections.packaged_smoke.ok", "equals": true},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.state.backendState", "equals": "ready"}
+      ]
+    },
+    {
+      "round": "Round 9 - Packaged App Integration",
+      "item": "Build output contains no PyQt6 or legacy desktop payload.",
+      "evidence": "Packaged clean-machine and feature-smoke gates pass against the generated win-unpacked artifact.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "sections.clean_packaged.ok", "equals": true},
+        {"path": "sections.packaged_smoke.ok", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 9 - Packaged App Integration",
+      "item": "Logs are accessible from the Electron shell.",
+      "evidence": "Electron shell contract verifies log capture, shell-state exposure, maintenance-view rendering, and runtime logs folder access.",
+      "requires": [
+        {"path": "sections.electron_shell_contract.ok", "equals": true},
+        {"path": "sections.electron_shell_contract.checks.maintenance_logs.logs_accessible", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 9 - Packaged App Integration",
+      "item": "Core Remote Web workflows pass from the packaged app, not just from the source checkout.",
+      "evidence": "Packaged Electron CDP feature smoke observes all required Remote Web feature surfaces.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.requiredFeatureCount", "equals": 15},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.observedFeatureCount", "equals": 15},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.allRequiredFeaturesObserved", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 10 - Clean-Machine Release Gate and Optional Installer",
+      "item": "A clean Windows machine can run the packaged app.",
+      "evidence": "Packaged clean-machine gate and Electron CDP smoke pass against a real non-dry-run build.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "sections.clean_packaged.ok", "equals": true},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.state.backendState", "equals": "ready"}
+      ]
+    },
+    {
+      "round": "Round 10 - Clean-Machine Release Gate and Optional Installer",
+      "item": "Startup and supported Remote Web workflows are validated from the release artifact.",
+      "evidence": "Packaged Electron CDP smoke records startup timing and observes all required Remote Web feature surfaces.",
+      "requires": [
+        {"path": "dry_run", "equals": false},
+        {"path": "run_electron_cdp", "equals": true},
+        {"path": "sections.electron_cdp_smoke.ok", "equals": true},
+        {"path": "sections.electron_cdp_smoke.timings.shell_ready_s", "number_gt": 0},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.allRequiredFeaturesObserved", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 10 - Clean-Machine Release Gate and Optional Installer",
+      "item": "Release notes list external dependencies such as NovelAI, WebUI, ComfyUI endpoints, and optional downloadable data.",
+      "evidence": "Staged release preflight verifies README_RELEASE.txt and RELEASE_MANIFEST.json external dependency notes.",
+      "requires": [
+        {"path": "sections.staged_workspace.sections.preflight.ok", "equals": true},
+        {"path": "sections.staged_workspace.sections.preflight.checks.release_notes.external_dependencies_listed", "equals": true}
+      ]
+    },
+    {
+      "round": "Round 10 - Clean-Machine Release Gate and Optional Installer",
+      "item": "Upgrade/uninstall behavior is documented and non-destructive by default.",
+      "evidence": "Distribution strategy manifest keeps user-state preservation and deferred update policy valid.",
+      "requires": [
+        {"path": "sections.distribution_strategy.ok", "equals": true}
+      ]
+    }
+  ],
+  "intentionally_unmapped": [
+    {
+      "section": "when_done_rules",
+      "round": "Round 0 - Baseline Freeze and Ownership Map",
+      "item": "No code files or large data files have been moved.",
+      "reason": "Phase-local baseline-freeze invariant; later implementation rounds intentionally move/scaffold source files, so this is not a final release acceptance condition."
+    }
+  ]
+}

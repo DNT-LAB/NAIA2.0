@@ -25,8 +25,8 @@ class _WildcardManager:
     instant_wildcard_dict = {}
 
 
-def _png_bytes(color=(255, 0, 0, 255)) -> bytes:
-    image = Image.new("RGBA", (1, 1), color)
+def _png_bytes(color=(255, 0, 0, 255), size=(1, 1)) -> bytes:
+    image = Image.new("RGBA", size, color)
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
@@ -94,6 +94,7 @@ def _write_round47_tab_fixture(root):
 def test_headless_app_import_and_factory_do_not_import_pyqt_in_fresh_process():
     env = dict(os.environ)
     env["PYTHONPATH"] = os.getcwd()
+    env["NAIA_DISABLE_LEGACY_SAVE_FALLBACK"] = "1"
     code = r"""
 import json
 import sys
@@ -128,6 +129,42 @@ print(json.dumps({
     }
 
 
+def test_headless_entrypoint_opens_browser_after_server_is_ready(monkeypatch):
+    import NAIA_web_headless
+
+    calls = []
+
+    class ImmediateThread:
+        def __init__(self, target, daemon=False, name=""):
+            self.target = target
+            self.daemon = daemon
+            self.name = name
+
+        def start(self):
+            calls.append(("thread", self.daemon, self.name))
+            self.target()
+
+    monkeypatch.setattr(NAIA_web_headless.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        NAIA_web_headless,
+        "_wait_for_web_server",
+        lambda port: calls.append(("wait", port)) or True,
+    )
+    monkeypatch.setattr(
+        NAIA_web_headless.webbrowser,
+        "open",
+        lambda url, new=0: calls.append(("open", url, new)) or True,
+    )
+
+    NAIA_web_headless._open_browser_when_ready(8123)
+
+    assert calls == [
+        ("thread", True, "naia-web-browser-open"),
+        ("wait", 8123),
+        ("open", "http://127.0.0.1:8123/", 2),
+    ]
+
+
 def test_headless_tab_services_cover_thumb_and_character_viewer(tmp_path):
     _write_round47_tab_fixture(tmp_path)
     context = WebSessionContext(
@@ -159,6 +196,10 @@ def test_headless_tab_services_cover_thumb_and_character_viewer(tmp_path):
     viewer_state = client.get("/api/character-viewer/state")
     assert viewer_state.status_code == 200
     assert viewer_state.json()["available"] is True
+    viewer_options = client.post("/api/character-viewer/options", json={"prefix": "runtime-prefix"})
+    assert viewer_options.status_code == 200
+    assert (context.runtime_paths.save_dir / "character_viewer_tags.json").exists()
+    assert not (tmp_path / "save" / "character_viewer_tags.json").exists()
     groups = client.get("/api/character-viewer/groups")
     assert groups.status_code == 200
     assert groups.json()["items"][0]["key"] == "__ALL__"
@@ -416,6 +457,8 @@ def test_headless_websocket_random_generates_prompt_from_core_service():
     assert message["type"] == "prompt_generated"
     assert message["source"] == "random"
     assert message["random_request_id"] == "round34-random"
+    assert message["prompt_run_id"]
+    assert context.get_prompt_run_payload(message["prompt_run_id"])["external_request_id"] == "round34-random"
     assert "alpha" in message["prompt"]
     assert "beta" in message["prompt"]
     assert message["remaining"] == 0
@@ -485,6 +528,42 @@ print(json.dumps({
     }
 
 
+def test_headless_generate_links_to_latest_random_prompt_run():
+    context = WebSessionContext(
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        wildcard_manager=_WildcardManager(),
+        filter_data_manager=False,
+        search_results=SearchResultModel(pd.DataFrame([
+            {"general": "linked alpha, linked beta", "rating": "s"},
+        ])),
+        headless_generation_execute_enabled=False,
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "random", "random_request_id": "linked-random", "ratings": ["s"]})
+        generated = ws.receive_json()
+        ws.send_json({"type": "generate", "prompt": generated["prompt"]})
+        dispatched = ws.receive_json()
+        ws.receive_json()
+        queue_state = ws.receive_json()
+
+    request = context.last_generation_request
+    prompt_run_id = generated["prompt_run_id"]
+    prompt_run = context.get_prompt_run_payload(prompt_run_id)
+
+    assert dispatched["prompt_run_id"] == prompt_run_id
+    assert request.prompt_run_id == prompt_run_id
+    assert request.params["prompt_run_id"] == prompt_run_id
+    assert queue_state["items"][0]["prompt_run_id"] == prompt_run_id
+    assert prompt_run["source"] == "random"
+    assert prompt_run["external_request_id"] == "linked-random"
+    assert prompt_run["generation_request_ids"] == [request.request_id]
+
+
 def test_headless_status_endpoint_uses_web_session_context():
     context = WebSessionContext(
         token_manager=InMemoryTokenManager({"nai_token": "pst-example-token"})
@@ -510,6 +589,20 @@ def test_headless_status_endpoint_uses_web_session_context():
             "result_cache_size": 0,
         },
     }
+
+
+def test_headless_install_manager_endpoint_initializes_runtime_data(tmp_path):
+    context = WebSessionContext(repo_root=tmp_path, token_manager=InMemoryTokenManager())
+    client = TestClient(create_headless_app(context))
+
+    state = client.get("/api/install-manager")
+    initialized = client.post("/api/install-manager/initialize")
+
+    assert state.status_code == 200
+    assert state.json()["tag_archive"]["ready"] is False
+    assert initialized.status_code == 200
+    assert initialized.json()["runtime"]["data_initialized"] is True
+    assert (context.runtime_paths.data_dir / "tags").is_dir()
 
 
 def test_headless_root_serves_remote_web_shell():
@@ -652,8 +745,8 @@ def test_headless_websocket_retired_desktop_commands_are_explicit():
         ws.send_json({"type": "result_upscale", "source": "current"})
         upscale_state = ws.receive_json()
         upscale_retired = ws.receive_json()
-        ws.send_json({"type": "result_image_action", "action": "img2img", "source": "current"})
-        image_action_retired = ws.receive_json()
+        ws.send_json({"type": "result_image_action", "action": "danbooru", "source": "current"})
+        image_action_rejected = ws.receive_json()
 
     assert overlay == {
         "type": "hires_preset_overlay",
@@ -673,8 +766,9 @@ def test_headless_websocket_retired_desktop_commands_are_explicit():
     assert upscale_state["headless"] is True
     assert upscale_retired["type"] == "toast"
     assert "result_upscale" in upscale_retired["message"]
-    assert image_action_retired["type"] == "toast"
-    assert "result_image_action/img2img" in image_action_retired["message"]
+    assert image_action_rejected["type"] == "toast"
+    assert image_action_rejected["level"] == "error"
+    assert "Unsupported result image action" in image_action_rejected["message"]
 
 
 def test_headless_hires_preset_overlay_read_write_reset(tmp_path):
@@ -734,6 +828,7 @@ def test_headless_hires_preset_overlay_read_write_reset(tmp_path):
     assert reset_toast["level"] == "success"
     assert reset_overlay["overlay"] is None
     assert not (preset_dir / "fast1.hires.json").exists()
+    assert not (tmp_path / "user-data" / "save" / "presets" / "WEBUI" / "fast1.hires.json").exists()
 
 
 def test_headless_websocket_auto_save_and_save_directory_state_are_server_owned(tmp_path):
@@ -774,6 +869,8 @@ def test_headless_websocket_auto_save_and_save_directory_state_are_server_owned(
 def test_headless_supported_module_states_do_not_import_middle_modules_in_fresh_process(tmp_path):
     env = dict(os.environ)
     env["PYTHONPATH"] = os.getcwd()
+    env["NAIA_DISABLE_LEGACY_SAVE_FALLBACK"] = "1"
+    env["NAIA_USER_DATA_DIR"] = str(tmp_path / "user-data")
     code = r"""
 import json
 import sys
@@ -810,10 +907,12 @@ with client.websocket_connect("/ws") as ws:
     hires_target = ws.receive_json()
     ws.send_json({"type": "get_module_state", "module_id": "e621_event"})
     e621_state = ws.receive_json()
+    ws.send_json({"type": "get_module_state", "module_id": "character_reference"})
+    character_reference_state = ws.receive_json()
+    ws.send_json({"type": "get_module_state", "module_id": "vibe_transfer"})
+    vibe_transfer_state = ws.receive_json()
     retired_states = {}
     for module_id in [
-        "character_reference",
-        "vibe_transfer",
         "wildcard_status",
         "ollama",
     ]:
@@ -844,6 +943,10 @@ print(json.dumps({
     "hires_target": hires_target.get("target"),
     "e621_available": e621_state.get("available"),
     "e621_data_loaded": e621_state.get("data_loaded"),
+    "character_reference_available": character_reference_state.get("available"),
+    "character_reference_frames": character_reference_state.get("frames"),
+    "vibe_transfer_available": vibe_transfer_state.get("available"),
+    "vibe_transfer_frames": vibe_transfer_state.get("frames"),
     "remote_param_hires": context.remote_params.get("webui_hiresfix_assist"),
     "remote_param_target": context.remote_params.get("webui_hiresfix_assist_target"),
     "retired_modules": {
@@ -880,15 +983,295 @@ print(json.dumps({
         "hires_target": 768,
         "e621_available": True,
         "e621_data_loaded": True,
+        "character_reference_available": True,
+        "character_reference_frames": [],
+        "vibe_transfer_available": True,
+        "vibe_transfer_frames": [],
         "remote_param_hires": True,
         "remote_param_target": 768,
         "retired_modules": {
-            "character_reference": {"available": False, "retired": True, "has_message": True},
-            "vibe_transfer": {"available": False, "retired": True, "has_message": True},
             "wildcard_status": {"available": False, "retired": True, "has_message": True},
             "ollama": {"available": False, "retired": True, "has_message": True},
         },
     }
+
+
+def test_headless_character_reference_storage_applies_to_nai_generation(tmp_path):
+    image_dir = tmp_path / "save" / "character_reference" / "images"
+    image_dir.mkdir(parents=True)
+    (image_dir / "char-ref.png").write_bytes(_png_bytes(size=(128, 128)))
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    context.remote_params["model"] = "NAID4.5F"
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "set_module_param",
+            "module_id": "character_reference",
+            "key": "apply_storage",
+            "value": "char-ref",
+        })
+        module_state = ws.receive_json()
+        ws.send_json({"type": "generate", "prompt": "1girl", "negative_prompt": "low quality"})
+        dispatched = ws.receive_json()
+        status = ws.receive_json()
+        queue_state = ws.receive_json()
+
+    request = context.last_generation_request
+    assert module_state["module_id"] == "character_reference"
+    assert module_state["available"] is True
+    assert module_state["frames"][0]["is_enabled"] is True
+    assert dispatched["type"] == "generation_dispatched"
+    assert dispatched["ok"] is True
+    assert status["message"] == "queued"
+    assert queue_state["total"] == 1
+    assert request.params["director_reference_descriptions"][0]["caption"]["base_caption"] == "character&style"
+    assert len(request.params["director_reference_images"]) == 1
+    assert request.params["director_reference_strength_values"] == [1.0]
+    assert request.params["director_reference_secondary_strength_values"] == [0.2]
+    assert request.nai_character_reference is not None
+
+
+def test_headless_vibe_transfer_storage_applies_to_nai_generation(tmp_path):
+    model_dir = tmp_path / "save" / "vibe_transfer" / "NAID4.5F"
+    image_dir = model_dir / "images"
+    image_dir.mkdir(parents=True)
+    (image_dir / "vibe-ref.png").write_bytes(_png_bytes((0, 96, 255, 255), size=(128, 128)))
+    (model_dir / "vibe-ref.json").write_text(
+        json.dumps({
+            "file_hash": "vibe-ref",
+            "file_name": "vibe-ref.png",
+            "reference_strength": 0.65,
+            "encodings": {"0.5": "encoded-half", "1.0": "encoded-full"},
+        }),
+        encoding="utf-8",
+    )
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    context.remote_params["model"] = "NAID4.5F"
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "set_module_param",
+            "module_id": "vibe_transfer",
+            "key": "apply_storage",
+            "value": "NAID4.5F|vibe-ref|0.5",
+        })
+        module_state = ws.receive_json()
+        ws.send_json({"type": "generate", "prompt": "1girl", "negative_prompt": "low quality"})
+        dispatched = ws.receive_json()
+        status = ws.receive_json()
+        queue_state = ws.receive_json()
+
+    request = context.last_generation_request
+    assert module_state["module_id"] == "vibe_transfer"
+    assert module_state["available"] is True
+    assert module_state["frames"][0]["is_enabled"] is True
+    assert module_state["frames"][0]["has_encoding"] is True
+    assert dispatched["type"] == "generation_dispatched"
+    assert dispatched["ok"] is True
+    assert status["message"] == "queued"
+    assert queue_state["total"] == 1
+    assert request.params["reference_image_multiple"] == ["encoded-half"]
+    assert request.params["reference_strength_multiple"] == [0.65]
+    assert request.nai_vibe_transfer is not None
+
+
+def test_headless_img2img_image_action_opens_session_and_queues_generation(tmp_path):
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/image-action/img2img?label=unit-test-source",
+        content=_png_bytes(size=(128, 128)),
+        headers={"Content-Type": "image/png"},
+    )
+    assert response.status_code == 200
+    opened = response.json()
+    assert opened["ok"] is True
+    assert opened["state"]["module_id"] == "img2img"
+    assert opened["state"]["active"] is True
+    assert opened["state"]["source_label"] == "unit-test-source"
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "set_module_param",
+            "module_id": "img2img",
+            "key": "main_prompt",
+            "value": "img2img prompt",
+        })
+        updated = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "img2img", "key": "generate", "value": "true"})
+        generated_state = ws.receive_json()
+        dispatched = ws.receive_json()
+        status = ws.receive_json()
+        toast = ws.receive_json()
+        queue_state = ws.receive_json()
+
+    request = context.last_generation_request
+    assert updated["main_prompt"] == "img2img prompt"
+    assert generated_state["module_id"] == "img2img"
+    assert generated_state["can_generate"] is True
+    assert dispatched["type"] == "generation_dispatched"
+    assert dispatched["ok"] is True
+    assert status["message"] == "queued"
+    assert toast["level"] == "success"
+    assert queue_state["total"] == 1
+    assert request.params["type"] == "img2img"
+    assert request.params["input"] == "img2img prompt"
+    assert request.params["image_bytes"]
+    assert request.params["strength"] == 0.7
+    assert request.params["_remote_queue_source"] == "Img2Img"
+
+
+def test_headless_nai_result_enhance_updates_config_and_queues_generation(tmp_path):
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
+        headless_generation_execute_enabled=False,
+    )
+    context.result_store.add_api_result(
+        {"image": Image.new("RGB", (128, 128), (25, 50, 75))},
+        GenerationRequest(
+            params={
+                "input": "enhance prompt",
+                "negative_prompt": "enhance negative",
+                "width": 128,
+                "height": 128,
+                "model": "NAID4.5F",
+                "seed": 123,
+            },
+            source_row=pd.Series({"general": "enhance prompt"}, name="enhance-row"),
+        ),
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "set_result_enhance_config",
+            "upscale": 1.5,
+            "strength": 0.4,
+            "noise": 0.1,
+        })
+        config = ws.receive_json()
+        config_toast = ws.receive_json()
+        ws.send_json({"type": "result_enhance", "mode": "NAI", "source": "current"})
+        dispatched = ws.receive_json()
+        enhance_state = ws.receive_json()
+        status = ws.receive_json()
+        queued_toast = ws.receive_json()
+        queue_state = ws.receive_json()
+
+    request = context.last_generation_request
+    assert config["type"] == "result_enhance_config"
+    assert config["available"] is True
+    assert config["strength"] == 0.4
+    assert config["noise"] == 0.1
+    assert config_toast["level"] == "success"
+    assert dispatched["type"] == "generation_dispatched"
+    assert dispatched["ok"] is True
+    assert enhance_state["type"] == "result_enhance_state"
+    assert enhance_state["running"] is True
+    assert status["message"] == "queued"
+    assert queued_toast["message"] == "Enhance queued"
+    assert queue_state["total"] == 1
+    assert request.params["result_enhance_request"] is True
+    assert request.params["result_enhance_backend"] == "NAI"
+    assert request.params["result_enhance_request_id"] == request.request_id
+    assert request.params["input"] == "enhance prompt"
+    assert request.params["width"] == 192
+    assert request.params["height"] == 192
+    assert request.params["strength"] == 0.4
+    assert request.params["noise"] == 0.1
+    assert request.params["image_bytes"]
+
+
+def test_headless_webui_result_enhance_replays_seed_with_hires_settings(tmp_path):
+    context = WebSessionContext(
+        repo_root=tmp_path,
+        token_manager=InMemoryTokenManager({"webui_url": "http://127.0.0.1:7860"}),
+        headless_generation_execute_enabled=False,
+    )
+    context.set_api_mode("WEBUI")
+    context.result_store.add_api_result(
+        {"image": Image.new("RGB", (320, 384), (25, 50, 75))},
+        GenerationRequest(
+            params={
+                "input": "webui enhance prompt",
+                "negative_prompt": "webui negative",
+                "width": 320,
+                "height": 384,
+                "seed": 456,
+                "api_mode": "WEBUI",
+            },
+            source_row=pd.Series({"general": "webui enhance prompt"}, name="webui-enhance-row"),
+        ),
+    )
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({
+            "type": "result_enhance",
+            "mode": "WEBUI",
+            "source": "current",
+            "hires_settings": {
+                "hr_scale": 1.5,
+                "hr_upscaler": "Latent (nearest-exact)",
+                "denoising_strength": 0.42,
+                "hires_steps": 12,
+                "hr_cfg": 6.5,
+            },
+        })
+        dispatched = ws.receive_json()
+        enhance_state = ws.receive_json()
+        status = ws.receive_json()
+        queued_toast = ws.receive_json()
+        queue_state = ws.receive_json()
+
+    request = context.last_generation_request
+    assert dispatched["type"] == "generation_dispatched"
+    assert dispatched["ok"] is True
+    assert enhance_state["api_mode"] == "WEBUI"
+    assert status["message"] == "queued"
+    assert queued_toast["message"] == "Enhance queued"
+    assert queue_state["total"] == 1
+    assert request.params["api_mode"] == "WEBUI"
+    assert request.params["credential"] == "http://127.0.0.1:7860"
+    assert request.params["result_enhance_request"] is True
+    assert request.params["result_enhance_backend"] == "WEBUI"
+    assert request.params["seed"] == 456
+    assert request.params["seed_fixed"] is True
+    assert request.params["enable_hr"] is True
+    assert request.params["hr_scale"] == 1.5
+    assert request.params["denoising_strength"] == 0.42
+    assert "image_bytes" not in request.params
 
 
 def test_headless_prompt_tool_chunk_and_instant_wildcard_are_editable(tmp_path):
@@ -919,7 +1302,7 @@ def test_headless_prompt_tool_chunk_and_instant_wildcard_are_editable(tmp_path):
     assert instant_state["current_key"] == "pose"
     custom_group = next(group for group in updated_chunk["groups"] if group["name"] == "custom")
     assert custom_group["items"] == [{"key": "pose", "value": "standing, smile"}]
-    saved = tmp_path / "save" / "instant_wildcard" / "custom.json"
+    saved = tmp_path / "user-data" / "save" / "instant_wildcard" / "custom.json"
     assert json.loads(saved.read_text(encoding="utf-8")) == {"pose": "standing, smile"}
 
 
@@ -1043,8 +1426,9 @@ def test_headless_prompt_tool_e621_event_browses_and_prepares_prompt(tmp_path):
     assert queued_status["message"] == "queued"
     assert queue_state["type"] == "queue_state"
     assert queue_state["total"] == 1
-    starred_payload = json.loads((tmp_path / "save" / "e621_starred_v2.json").read_text(encoding="utf-8"))
+    starred_payload = json.loads((context.runtime_paths.save_dir / "e621_starred_v2.json").read_text(encoding="utf-8"))
     assert starred_payload == {"starred_keys": ["looking_back"]}
+    assert not (tmp_path / "save" / "e621_starred_v2.json").exists()
 
 
 def test_headless_danbooru_routes_are_pyqt_free(monkeypatch):
@@ -1187,12 +1571,18 @@ def test_headless_websocket_generate_normalizes_nai_request_without_desktop_widg
     assert dispatched["ok"] is True
     assert dispatched["api_mode"] == "NAI"
     assert dispatched["request_id"] == request.request_id
+    assert dispatched["generation_request_id"] == request.request_id
+    assert dispatched["prompt_run_id"] == request.prompt_run_id
     assert dispatched["params"]["credential_configured"] is True
     assert "credential" not in dispatched["params"]
     assert status == {"type": "status", "is_generating": False, "message": "queued"}
     assert queue_state["type"] == "queue_state"
     assert queue_state["total"] == 1
+    assert queue_state["items"][0]["generation_request_id"] == request.request_id
+    assert queue_state["items"][0]["prompt_run_id"] == request.prompt_run_id
     assert request.params["api_mode"] == "NAI"
+    assert request.params["generation_request_id"] == request.request_id
+    assert request.params["prompt_run_id"] == request.prompt_run_id
     assert request.params["credential"] == "pst-headless-token"
     assert request.params["input"] == "1girl, blue eyes"
     assert request.params["negative_prompt"] == "low quality"
@@ -1201,6 +1591,10 @@ def test_headless_websocket_generate_normalizes_nai_request_without_desktop_widg
     assert request.params["steps"] == 31
     assert request.params["cfg_scale"] == 6.5
     assert isinstance(request.params["seed"], int)
+    prompt_run = context.get_prompt_run_payload(request.prompt_run_id)
+    assert prompt_run["source"] == "direct_generation"
+    assert prompt_run["generation_request_ids"] == [request.request_id]
+    assert prompt_run["final_prompt"] == "1girl, blue eyes"
     assert context.main_window is None
     assert context.remote_bridge is None
 
@@ -1498,7 +1892,8 @@ def test_headless_resolution_routes_roundtrip(tmp_path):
     payload = saved.json()
     assert payload["resolutions"] == ["512 x 512", "1024 x 1024"]
     assert context.remote_params["options_resolution"] == ["512 x 512", "1024 x 1024"]
-    assert (tmp_path / "save" / "resolutions.json").exists()
+    assert (context.runtime_paths.save_dir / "resolutions.json").exists()
+    assert not (tmp_path / "save" / "resolutions.json").exists()
 
     invalid = client.post("/api/resolutions", json={
         "api_mode": "NAI",
@@ -1643,7 +2038,7 @@ def test_headless_prompt_tool_ws_search_filter_depth_and_parquet(tmp_path):
         assert runner_state["type"] == "search_state"
         assert runner_toast["level"] == "success"
 
-    runner = pd.read_parquet(tmp_path / "naia_temp_rows.parquet")
+    runner = pd.read_parquet(context.runtime_paths.cache_dir / "naia_temp_rows.parquet")
     assert runner["id"].tolist() == [2]
 
 
@@ -1727,6 +2122,124 @@ def test_headless_prompt_tool_ws_autocomplete_commands(tmp_path):
         assert ws.receive_json()["type"] == "autocomplete_result"
 
 
+def test_headless_vibe_cluster_autocomplete_uses_runtime_save_in_electron(tmp_path, monkeypatch):
+    legacy_dir = tmp_path / "save" / "vibe_transfer_clusters"
+    runtime_dir = tmp_path / "user-data" / "save" / "vibe_transfer_clusters"
+    legacy_dir.mkdir(parents=True)
+    runtime_dir.mkdir(parents=True)
+    (legacy_dir / "legacy.json").write_text(json.dumps({
+        "id": "legacy",
+        "name": "legacyStyle",
+        "frames": [{"is_enabled": True}],
+    }), encoding="utf-8")
+    (runtime_dir / "runtime.json").write_text(json.dumps({
+        "id": "runtime",
+        "name": "runtimeStyle",
+        "frames": [{"is_enabled": True}],
+    }), encoding="utf-8")
+    monkeypatch.setenv("NAIA_ELECTRON", "1")
+    context = WebSessionContext(token_manager=InMemoryTokenManager(), repo_root=tmp_path)
+    client = TestClient(create_headless_app(context))
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "autocomplete_vibe_cluster", "query": "style"})
+        vibe = ws.receive_json()
+
+    assert vibe["type"] == "autocomplete_result"
+    assert [item["tag"] for item in vibe["results"]] == ["runtimeStyle"]
+
+
+def test_headless_electron_storage_surfaces_ignore_legacy_save(tmp_path, monkeypatch):
+    legacy_char_images = tmp_path / "save" / "character_reference" / "images"
+    legacy_vibe_model = tmp_path / "save" / "vibe_transfer" / "NAID4.5F"
+    legacy_vibe_images = legacy_vibe_model / "images"
+    legacy_preset = tmp_path / "save" / "presets" / "NAI"
+    legacy_save = tmp_path / "save"
+    legacy_char_images.mkdir(parents=True)
+    legacy_vibe_images.mkdir(parents=True)
+    legacy_preset.mkdir(parents=True)
+    (legacy_char_images / "legacy-char.png").write_bytes(_png_bytes(size=(16, 16)))
+    (legacy_vibe_images / "legacy-vibe.png").write_bytes(_png_bytes(size=(16, 16)))
+    (legacy_vibe_model / "legacy-vibe.json").write_text(json.dumps({
+        "file_hash": "legacy-vibe",
+        "file_name": "legacy-vibe.png",
+        "encodings": {"1.0": "legacy-encoding"},
+    }), encoding="utf-8")
+    (legacy_preset / "legacy-preset.json").write_text(json.dumps({
+        "api_mode": "NAI",
+        "module_settings": {"pre_prompt": "legacy pre"},
+    }), encoding="utf-8")
+    (legacy_save / "CharacterModule_NAI.json").write_text(json.dumps({
+        "NAI": {
+            "is_active": True,
+            "character_frames": [{"prompt": "legacy char", "is_enabled": True, "slot_state": "active"}],
+        },
+    }), encoding="utf-8")
+    (legacy_save / "PromptListModifierModule_NAI.json").write_text(json.dumps({
+        "NAI": {"enabled": True, "rules": "legacy rule", "editor_mode": "legacy"},
+    }), encoding="utf-8")
+    (legacy_save / "AutomationModule.json").write_text(json.dumps({
+        "automation_type": "timer",
+        "timer_minutes": 5,
+    }), encoding="utf-8")
+    monkeypatch.setenv("NAIA_ELECTRON", "1")
+    context = WebSessionContext(token_manager=InMemoryTokenManager(), repo_root=tmp_path)
+    client = TestClient(create_headless_app(context))
+
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(9):
+            ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "character_reference", "key": "get_storage", "value": ""})
+        char_storage = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "vibe_transfer", "key": "get_storage", "value": ""})
+        vibe_storage = ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "prompt_engineering"})
+        prompt_state = ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "character"})
+        character_state = ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "conditional_prompt"})
+        conditional_state = ws.receive_json()
+        ws.send_json({"type": "get_module_state", "module_id": "automation"})
+        automation_state = ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "character", "key": "activated", "value": "true"})
+        ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "conditional_prompt", "key": "enabled", "value": "true"})
+        ws.receive_json()
+        ws.send_json({"type": "set_module_param", "module_id": "automation", "key": "auto_type", "value": "1"})
+        ws.receive_json()
+
+    assert char_storage["items"] == []
+    assert vibe_storage["models"] == {}
+    assert "legacy-preset" not in prompt_state["preset_options"]
+    assert character_state["activated"] is False
+    assert character_state["characters"] == []
+    assert conditional_state["enabled"] is False
+    assert conditional_state["rules"] == ""
+    assert automation_state["auto_type"] == 0
+    runtime_save = tmp_path / "user-data" / "save"
+    assert (runtime_save / "CharacterModule_NAI.json").exists()
+    assert (runtime_save / "PromptListModifierModule_NAI.json").exists()
+    assert (runtime_save / "AutomationModule.json").exists()
+
+
+def test_headless_electron_resolutions_ignore_legacy_save(tmp_path, monkeypatch):
+    legacy_path = tmp_path / "save" / "resolutions.json"
+    runtime_path = tmp_path / "user-data" / "save" / "resolutions.json"
+    legacy_path.parent.mkdir(parents=True)
+    runtime_path.parent.mkdir(parents=True)
+    legacy_path.write_text(json.dumps({"NAI": ["640 x 640"]}), encoding="utf-8")
+    runtime_path.write_text(json.dumps({"NAI": ["1024 x 1024"]}), encoding="utf-8")
+    monkeypatch.setenv("NAIA_ELECTRON", "1")
+    context = WebSessionContext(token_manager=InMemoryTokenManager(), repo_root=tmp_path)
+    client = TestClient(create_headless_app(context))
+
+    payload = client.get("/api/resolutions?mode=NAI").json()
+
+    assert payload["resolutions"] == ["1024 x 1024"]
+
+
 def test_headless_comfyui_and_prompt_thumbnail_compatibility_routes(tmp_path):
     context = WebSessionContext(
         token_manager=InMemoryTokenManager({"comfyui_url": "127.0.0.1:8188"}),
@@ -1752,6 +2265,8 @@ def test_headless_comfyui_and_prompt_thumbnail_compatibility_routes(tmp_path):
     thumb_get = client.get(thumb_payload["thumbnail_url"])
     assert thumb_get.status_code == 200
     assert thumb_get.content.startswith(b"\x89PNG")
+    assert (context.runtime_paths.save_dir / "presets" / "previews" / "test-preset.png").exists()
+    assert not (tmp_path / "save" / "presets" / "previews" / "test-preset.png").exists()
 
     clipboard = client.get("/api/clipboard/png")
     assert clipboard.status_code == 404

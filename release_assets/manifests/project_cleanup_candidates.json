@@ -1,0 +1,121 @@
+{
+  "version": 1,
+  "purpose": "Non-destructive cleanup and delete candidate inventory for the project layout/runtime boundary plan.",
+  "policy_document": "PROJECT_LAYOUT_POLICY.md",
+  "delete_approval_required": true,
+  "candidate_groups": [
+    {
+      "id": "root_electron_residue",
+      "owner": "optional_electron_shell",
+      "status": "resolved_removed",
+      "decision": "Removed from repository root after confirming app/electron/main/main.cjs is the active Electron main source.",
+      "replacement": "app/electron/main/main.cjs",
+      "paths": [
+        "main.cjs"
+      ],
+      "required_gates": [
+        "python tools/check_project_layout_policy.py",
+        "python tools/check_project_cleanup_candidates.py",
+        "node --test app/electron/test/main_contract.test.cjs"
+      ],
+      "resolution": {
+        "action": "removed_root_residue",
+        "date": "2026-05-21",
+        "reason": "app/electron/package.json uses main/main.cjs and repository references point to app/electron/main/main.cjs rather than root main.cjs."
+      },
+      "requires_explicit_delete_approval": true
+    },
+    {
+      "id": "legacy_remote_web_source",
+      "owner": "remote_web_ui",
+      "status": "resolved_removed",
+      "decision": "Removed from repository source ownership after confirming app/web/remote is the served canonical Remote Web source.",
+      "replacement": "app/web/remote",
+      "paths": [
+        "ui/remote_web"
+      ],
+      "required_gates": [
+        "python tools/check_project_layout_policy.py",
+        "python tools/check_remote_web_feature_contract.py",
+        "python -m pytest tests/test_runtime_paths.py tests/test_stage_release_assets.py tests/test_web_shell_detached_geometry.py"
+      ],
+      "resolution": {
+        "action": "removed_legacy_source_directory",
+        "date": "2026-05-21",
+        "reason": "FastAPI and Electron set or resolve Remote Web to app/web/remote; ui/remote_web was release-excluded and only retained direct test/documentation references."
+      },
+      "requires_explicit_delete_approval": true
+    },
+    {
+      "id": "runtime_generated_roots",
+      "owner": "runtime_data",
+      "status": "runtime_only",
+      "decision": "Keep out of source ownership and release source staging. Do not delete automatically because these may contain local user state.",
+      "replacement": "runtime user-data or generated build output",
+      "paths": [
+        "logs",
+        "output",
+        "save",
+        "temp",
+        "tmp",
+        "wildcards",
+        "app/electron/dist",
+        "app/electron/node_modules",
+        "release_package"
+      ],
+      "required_gates": [
+        "python tools/check_runtime_asset_classification.py",
+        "python tools/check_runtime_write_policy.py",
+        "python tools/check_project_layout_policy.py"
+      ],
+      "requires_explicit_delete_approval": true
+    },
+    {
+      "id": "root_sample_and_debug_assets",
+      "owner": "development_artifacts",
+      "status": "release_excluded_cleanup_candidate",
+      "decision": "Release-excluded local samples/debug files. Remove only after owner confirms they are not useful local references.",
+      "replacement": "release_assets/samples for reviewed tiny samples, otherwise runtime/output storage",
+      "paths": [
+        "00001.png",
+        "20250827_*.png",
+        "manual_*.png",
+        "test*.png",
+        "temp_image.png",
+        "character_reference_*_result.png",
+        "vibe_transfer_*_result.png",
+        "*.naiv4vibe",
+        "*.naiv4vibebundle",
+        "naia_temp_rows.parquet"
+      ],
+      "required_gates": [
+        "python tools/check_runtime_asset_classification.py",
+        "python tools/check_release_preflight.py <staged-release>"
+      ],
+      "requires_explicit_delete_approval": true
+    },
+    {
+      "id": "legacy_desktop_reference",
+      "owner": "legacy_desktop",
+      "status": "reference_quarantine",
+      "decision": "Do not delete until WebSession feature parity gates pass and missing features are migrated.",
+      "replacement": "Python Headless Web plus Remote Web feature owners",
+      "paths": [
+        "legacy_desktop"
+      ],
+      "required_gates": [
+        "python tools/check_headless_core_boundary.py",
+        "python tools/check_legacy_pyqt_surface_classification.py",
+        "python tools/check_remote_web_feature_contract.py"
+      ],
+      "requires_explicit_delete_approval": true
+    }
+  ],
+  "hard_rules": [
+    "No candidate in this manifest is deleted automatically.",
+    "Actual deletion requires explicit user approval and a focused candidate group.",
+    "Deletion must preserve Python Headless Web execution.",
+    "Deletion must preserve optional Electron shell execution when the candidate is Electron-related.",
+    "Legacy Desktop deletion requires separate feature-parity approval."
+  ]
+}

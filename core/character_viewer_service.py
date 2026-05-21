@@ -21,10 +21,16 @@ class CharacterViewerService:
     TAG_EXCLUDE = {"mature female"}
     THUMB_MAX_SIZE = (896, 1152)
 
-    def __init__(self, root: Path | str):
+    def __init__(
+        self,
+        root: Path | str,
+        *,
+        data_root: Path | str | None = None,
+        save_root: Path | str | None = None,
+    ):
         self.root = Path(root)
-        self.data_dir = self.root / "data"
-        self.save_dir = self.root / "save"
+        self.data_dir = Path(data_root) if data_root is not None else self.root / "data"
+        self.save_dir = Path(save_root) if save_root is not None else self.root / "save"
         self.groups_path = self.data_dir / "copyright_groups.json"
         self.analysis_path = self.data_dir / "character_analysis.json"
         self.thumb_dir = self.data_dir / "character_thumbnails"

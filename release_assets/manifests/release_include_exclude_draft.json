@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "status": "draft",
+  "include": {
+    "backend_runtime": [
+      "NAIA_web_headless.py",
+      "app/__init__.py",
+      "app/backend/**",
+      "app/web/__init__.py",
+      "app/web/assets.py",
+      "core/**",
+      "interfaces/**",
+      "utils/**",
+      "requirements-headless.txt"
+    ],
+    "web_ui": [
+      "app/web/remote/**"
+    ],
+    "bootstrap_assets": [
+      "workflows/**",
+      "data/source/**",
+      "data/clothes_list.txt",
+      "data/color.txt",
+      "data/characteristic_list.txt",
+      "data/taglist/*.json",
+      "app_data_template/**",
+      "release_assets/samples/**"
+    ],
+    "electron_shell": [
+      "app/electron/**"
+    ]
+  },
+  "exclude": {
+    "desktop_legacy": [
+      "legacy_desktop/**",
+      "NAIA_cold_v4.py",
+      "requirements-desktop-legacy*.txt",
+      "core/context.py",
+      "core/image_crud_controller.py",
+      "core/mode_ware_manager.py",
+      "core/tag_data_manager.py",
+      "core/dll_fix.py",
+      "tabs/comic_generator/**",
+      "ui/variational/**",
+      "experimental/ontology_visualizer/**",
+      "temp/ezmode/**"
+    ],
+    "desktop_dependencies": [
+      "PyQt6",
+      "PyQt6-WebEngine",
+      "PyQt6-QScintilla",
+      "pywin32",
+      "win10toast",
+      "ultralytics"
+    ],
+    "local_runtime_state": [
+      "save/**",
+      "logs/**",
+      "output/**",
+      "tmp/**",
+      "temp/**",
+      "app/electron/dist/**",
+      "user-data/**",
+      "wildcards/**"
+    ],
+    "local_downloaded_assets": [
+      "data/artist_thumbnail*.json",
+      "data/character_thumbnails/**",
+      "data/event_preset/**",
+      "data/event_preset_thumbnail",
+      "data/tags/**",
+      "data/tagger/**",
+      "ui/event_preset/**",
+      "ui/**/downloaded/**",
+      "*.naiv4vibe",
+      "*.naiv4vibebundle"
+    ],
+    "generated_dictionaries": [
+      "artist_dictionary.py",
+      "danbooru_character.py",
+      "result_dict_copyright.py",
+      "result_dupl.py",
+      "data/e621_boost_static.py"
+    ],
+    "development_only": [
+      "tests/**",
+      "docs/**",
+      "refactor_docs/**",
+      "refactor_plans/**",
+      ".claude/**",
+      "**/.claude/**",
+      ".cloudflared_bin/**",
+      "**/.cloudflared_bin/**",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "**/AGENTS.md",
+      "**/CLAUDE.md",
+      "*.md",
+      "**/*.md",
+      ".experimental/**",
+      ".pytest_cache/**",
+      "__pycache__/**",
+      "app/electron/node_modules/**",
+      "venv/**"
+    ],
+    "samples_and_debug": [
+      "00001.png",
+      "20250827_*.png",
+      "manual_*.png",
+      "test*.png",
+      "temp_image.png",
+      "character_reference_*_result.png",
+      "vibe_transfer_*_result.png",
+      "stickman_canvas_tmp.webp",
+      "*.xlsx",
+      "~$*",
+      "naia_temp_rows.parquet"
+    ]
+  },
+  "hard_rules": [
+    "Release artifacts must not include PyQt6 or legacy_desktop.",
+    "Release artifacts must not include user-downloaded runtime assets by default.",
+    "Release artifacts must not include local wildcard files by default; runtime wildcards belong under user-data/wildcards.",
+    "Release artifacts may include reviewed small bootstrap filters under data/*.txt and data/taglist/*.json; bulk operational data under data/tags/** must be initialized or downloaded into runtime user data.",
+    "Writable runtime state must resolve through core.runtime_paths.",
+    "Release staging should be produced through tools/stage_release_assets.py or an equivalent manifest-driven process.",
+    "Electron backend resources should be staged under resources/naia-backend before Electron packaging.",
+    "Staged backend resources must pass tools/smoke_staged_backend.py before packaged-app validation.",
+    "Staged backend resources must pass tools/smoke_remote_web_contract.py for non-destructive Remote Web feature-surface validation.",
+    "Staged release directories must include RELEASE_MANIFEST.json and CHECKSUMS.sha256 from tools/write_release_metadata.py.",
+    "Staged release directories must pass tools/check_release_preflight.py before packaging or distribution.",
+    "Backend runtime strategy must pass tools/check_backend_runtime_strategy.py before backend binary work.",
+    "Project layout policy must pass tools/check_project_layout_policy.py before filesystem reorganization or Electron boundary changes.",
+    "Runtime distribution tracks must pass tools/check_runtime_distribution_tracks.py before changing clone-user launchers, Electron packaging, or Remote Web ownership.",
+    "Project layout round completion must pass tools/check_project_layout_round_completion.py before declaring a layout/runtime boundary plan complete.",
+    "Project cleanup candidates must pass tools/check_project_cleanup_candidates.py before destructive source cleanup.",
+    "Remote Web feature contract must pass tools/check_remote_web_feature_contract.py before desktop-code deletion or packaged-app validation.",
+    "Runtime write policy must pass tools/check_runtime_write_policy.py before desktop-code deletion or packaged-app validation.",
+    "Runtime asset classification must pass tools/check_runtime_asset_classification.py before desktop-code deletion or packaged-app validation.",
+    "Legacy PyQt surface classification must pass tools/check_legacy_pyqt_surface_classification.py before desktop-code deletion or packaged-app validation.",
+    "Headless core boundary must pass tools/check_headless_core_boundary.py before desktop-code deletion or packaged-app validation.",
+    "Staged release directories must pass tools/release_manifest_audit.py before distribution.",
+    "Large data movement requires reviewed candidate lists before execution."
+  ]
+}

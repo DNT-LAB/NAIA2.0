@@ -199,6 +199,8 @@ class HeadlessResultStore:
             "sampler": params.get("sampler", ""),
             "model": params.get("model", ""),
             "remote_queue_source": str(params.get("_remote_queue_source") or ""),
+            "prompt_run_id": str(params.get("prompt_run_id") or ""),
+            "generation_request_id": str(params.get("generation_request_id") or ""),
         }
         for key, value in params.items():
             if str(key).startswith("artist_thumb_"):

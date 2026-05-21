@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NAIA Maintenance</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, "Segoe UI", system-ui, sans-serif;
+      background: #111117;
+      color: #f4f1ff;
+    }
+    html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #111117;
+    }
+    main {
+      box-sizing: border-box;
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto auto minmax(0, 1fr);
+      gap: 14px;
+      background: #171620;
+      padding: 28px 32px 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+    p {
+      margin: 0;
+      color: #b8b2ca;
+      line-height: 1.5;
+    }
+    .progress-list {
+      display: grid;
+      gap: 10px;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    button {
+      min-height: 40px;
+      border: 1px solid #49415f;
+      border-radius: 6px;
+      padding: 0 10px;
+      background: #242133;
+      color: #f4f1ff;
+      font-size: 14px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    button.primary {
+      background: #6f43d8;
+      border-color: #8c67ee;
+    }
+    .progress {
+      display: none;
+      border: 1px solid #2e2a3b;
+      border-radius: 6px;
+      background: #0c0b11;
+      overflow: hidden;
+    }
+    .progress.visible {
+      display: block;
+    }
+    .progress-bar {
+      width: 0%;
+      height: 8px;
+      background: linear-gradient(90deg, #6f43d8, #b06ff0);
+      transition: width 180ms ease;
+    }
+    .progress.indeterminate .progress-bar {
+      width: 42%;
+      background: linear-gradient(90deg, #6f43d8, #b06ff0, #6f43d8);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 9px 12px 4px;
+      color: #b8b2ca;
+      font-size: 12px;
+    }
+    .progress-detail {
+      padding: 0 12px 10px;
+      color: #eeeaff;
+      font-size: 13px;
+      line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    pre {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+      margin: 0;
+      padding: 14px;
+      border: 1px solid #2e2a3b;
+      border-radius: 6px;
+      background: #0c0b11;
+      color: #d5d0e6;
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    @keyframes pulse {
+      0% { transform: translateX(-120%); }
+      100% { transform: translateX(260%); }
+    }
+    @media (max-width: 620px) {
+      main {
+        padding: 22px;
+      }
+      .actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1 id="title">Starting NAIA</h1>
+      <p id="message">Preparing the bundled runtime and backend. First launch can take a few minutes.</p>
+    </header>
+    <div class="progress-list">
+      <div class="progress" id="setup-progress" aria-hidden="true">
+        <div class="progress-bar" id="setup-progress-bar"></div>
+        <div class="progress-meta">
+          <span id="setup-progress-label">Runtime setup</span>
+          <span id="setup-progress-percent">0%</span>
+        </div>
+        <div class="progress-detail" id="setup-progress-detail">Preparing Python runtime.</div>
+      </div>
+      <div class="progress" id="runtime-progress" aria-hidden="true">
+        <div class="progress-bar" id="runtime-progress-bar"></div>
+        <div class="progress-meta">
+          <span id="runtime-progress-label">Runtime data</span>
+          <span id="runtime-progress-percent">0%</span>
+        </div>
+        <div class="progress-detail" id="runtime-progress-detail">Checking data files.</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="restart">Restart backend</button>
+      <button id="browser">Open in browser</button>
+      <button id="logs-folder">Open logs</button>
+      <button id="data-folder">Open data folder</button>
+    </div>
+    <pre id="logs">No backend logs yet.</pre>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const title = document.getElementById("title");
+    const message = document.getElementById("message");
+    const logs = document.getElementById("logs");
+    const runtimeProgress = document.getElementById("runtime-progress");
+    const runtimeProgressBar = document.getElementById("runtime-progress-bar");
+    const runtimeProgressLabel = document.getElementById("runtime-progress-label");
+    const runtimeProgressPercent = document.getElementById("runtime-progress-percent");
+    const runtimeProgressDetail = document.getElementById("runtime-progress-detail");
+    const setupProgress = document.getElementById("setup-progress");
+    const setupProgressBar = document.getElementById("setup-progress-bar");
+    const setupProgressLabel = document.getElementById("setup-progress-label");
+    const setupProgressPercent = document.getElementById("setup-progress-percent");
+    const setupProgressDetail = document.getElementById("setup-progress-detail");
+    const LOG_VISIBLE_LINES = 17;
+
+    function setProgressVisible(container, visible) {
+      container.classList.toggle("visible", visible);
+      container.setAttribute("aria-hidden", visible ? "false" : "true");
+    }
+
+    function setProgress(container, bar, percentNode, percent, indeterminate = false) {
+      const safePercent = Math.max(0, Math.min(100, Number(percent || 0)));
+      container.classList.toggle("indeterminate", indeterminate);
+      if (!indeterminate) {
+        bar.style.width = `${safePercent}%`;
+      }
+      percentNode.textContent = indeterminate ? "작업 중" : `${safePercent}%`;
+    }
+
+    function formatLogs(items) {
+      const sourceLogs = Array.isArray(items) ? items : [];
+      const tail = sourceLogs.slice(-LOG_VISIBLE_LINES);
+      return tail.length
+        ? tail.map((item) => `[${item.source}] ${item.line}`).join("\n")
+        : "No backend logs yet.";
+    }
+
+    function renderRuntimeBootstrap(runtimeBootstrap) {
+      if (!runtimeBootstrap || runtimeBootstrap.phase === "ready" || runtimeBootstrap.phase === "skipped") {
+        setProgressVisible(setupProgress, false);
+        return false;
+      }
+      setProgressVisible(setupProgress, true);
+      const processed = Number(runtimeBootstrap.processedCount || 0);
+      const expected = Number(runtimeBootstrap.expectedCount || 0);
+      const current = runtimeBootstrap.currentPackage ? ` · ${runtimeBootstrap.currentPackage}` : "";
+      setupProgressLabel.textContent = runtimeBootstrap.stepCurrent && runtimeBootstrap.stepTotal
+        ? `Python setup ${runtimeBootstrap.stepCurrent}/${runtimeBootstrap.stepTotal}`
+        : "Python setup";
+      setupProgressDetail.textContent = expected
+        ? `${runtimeBootstrap.message || "Installing Python packages."} (${processed}/${expected})${current}`
+        : `${runtimeBootstrap.message || "Preparing Python runtime."}${current}`;
+      setProgress(
+        setupProgress,
+        setupProgressBar,
+        setupProgressPercent,
+        runtimeBootstrap.percent,
+        runtimeBootstrap.phase === "installing-requirements" && !processed
+      );
+      if (runtimeBootstrap.phase === "error") {
+        title.textContent = "NAIA setup failed";
+        message.textContent = runtimeBootstrap.error || runtimeBootstrap.message || "Runtime setup failed.";
+      } else {
+        title.textContent = "Setting up NAIA";
+        message.textContent = runtimeBootstrap.message || "Preparing the bundled Python runtime.";
+      }
+      return true;
+    }
+
+    function renderRuntimeInstall(runtimeInstall) {
+      if (!runtimeInstall || runtimeInstall.phase === "skipped") {
+        setProgressVisible(runtimeProgress, false);
+        return false;
+      }
+      const percent = Math.max(0, Math.min(100, Number(runtimeInstall.percent || 0)));
+      setProgressVisible(runtimeProgress, true);
+      setProgress(runtimeProgress, runtimeProgressBar, runtimeProgressPercent, percent);
+      runtimeProgressLabel.textContent = runtimeInstall.ready
+        ? "Runtime data ready"
+        : `${runtimeInstall.fileCount || 0}/${runtimeInstall.expectedCount || 0} tag files`;
+      runtimeProgressDetail.textContent = runtimeInstall.message || "Preparing runtime data.";
+      if (runtimeInstall.phase === "error") {
+        title.textContent = "NAIA data setup failed";
+        message.textContent = runtimeInstall.error || "Runtime data setup failed.";
+      } else if (!runtimeInstall.ready) {
+        title.textContent = "NAIA data setup";
+        message.textContent = runtimeInstall.message || "Preparing runtime data.";
+      } else {
+        title.textContent = "NAIA data ready";
+        message.textContent = runtimeInstall.message || "Runtime data is ready.";
+      }
+      return true;
+    }
+
+    function render(state) {
+      if (!state) {
+        return;
+      }
+      const dataVisible = renderRuntimeInstall(state.runtimeInstall);
+      const setupVisible = renderRuntimeBootstrap(state.runtimeBootstrap);
+      logs.textContent = formatLogs(state.logs);
+      if (setupVisible || dataVisible) {
+        return;
+      }
+      title.textContent = state.backendState === "error" ? "NAIA backend error" : "Starting NAIA";
+      message.textContent = params.get("message") || (
+        state.backendState === "starting"
+          ? "Preparing the bundled runtime and backend. First launch can take a few minutes."
+          : `Backend: ${state.backendState} (${state.backendUrl})`
+      );
+    }
+
+    async function refresh() {
+      if (!window.naiaShell) {
+        message.textContent = "Electron preload API is unavailable.";
+        return;
+      }
+      render(await window.naiaShell.getState());
+    }
+
+    document.getElementById("restart").addEventListener("click", async () => {
+      render(await window.naiaShell.restartBackend());
+    });
+    document.getElementById("browser").addEventListener("click", () => window.naiaShell.openBrowser());
+    document.getElementById("logs-folder").addEventListener("click", () => window.naiaShell.openLogs());
+    document.getElementById("data-folder").addEventListener("click", () => window.naiaShell.openDataFolder());
+    if (window.naiaShell) {
+      window.naiaShell.onStateChanged(render);
+    }
+    refresh();
+  </script>
+</body>
+</html>

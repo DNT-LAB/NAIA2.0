@@ -6,7 +6,6 @@ import copy
 import math
 import numpy as np
 import gc
-import sys
 from pathlib import Path
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -56,6 +55,12 @@ class APIService:
         self.NAI_V3_API_URL = "https://image.novelai.net/ai/generate-image"
         self.comfyui_service = None
         self.workflow_manager = ComfyUIWorkflowManager()
+
+    def _save_file_path(self, filename: str) -> Path:
+        runtime_paths = getattr(self.app_context, "runtime_paths", None)
+        if runtime_paths is not None:
+            return runtime_paths.save_dir / filename
+        return Path("save") / filename
     
     def _cleanup_http_threads(self):
         """HTTP 연결 관련 스레드 정리"""
@@ -78,51 +83,13 @@ class APIService:
             except Exception:
                 pass
             
-            # Legacy Desktop may already have Qt loaded. Do not import it from
-            # the supported headless runtime just for cleanup.
-            qt_core = sys.modules.get("PyQt6.QtCore")
-            if qt_core is not None:
-                try:
-                    thread_pool_cls = getattr(qt_core, "QThreadPool", None)
-                    if thread_pool_cls is not None:
-                        thread_pool = thread_pool_cls.globalInstance()
-                        thread_pool.clear()
-                        thread_pool.waitForDone(100)
-                except Exception:
-                    pass
-            
             # 가비지 컬렉션
             gc.collect()
-            
-            # Qt 이벤트 루프 처리
-            for _ in range(2):
-                try:
-                    qt_core = sys.modules.get("PyQt6.QtCore")
-                    app_cls = getattr(qt_core, "QCoreApplication", None) if qt_core is not None else None
-                    if app_cls is None:
-                        break
-                    app_cls.processEvents()
-                except Exception:
-                    break
         except Exception:
             pass
 
     @staticmethod
-    def _legacy_qpixmap_from_bytes(image_bytes: bytes):
-        qt_gui = sys.modules.get("PyQt6.QtGui")
-        pixmap_cls = getattr(qt_gui, "QPixmap", None) if qt_gui is not None else None
-        if pixmap_cls is None:
-            return None
-        pixmap = pixmap_cls()
-        if pixmap.loadFromData(image_bytes) and not pixmap.isNull():
-            return pixmap
-        return None
-
-    @staticmethod
     def _image_result_from_bytes(image_bytes: bytes):
-        pixmap = APIService._legacy_qpixmap_from_bytes(image_bytes)
-        if pixmap is not None:
-            return pixmap
         with Image.open(io.BytesIO(image_bytes)) as image:
             image.load()
             return image.copy()
@@ -514,7 +481,7 @@ class APIService:
             from pathlib import Path
 
             # save/nai_accounts.json 로드
-            accounts_file = Path("save/nai_accounts.json")
+            accounts_file = self._save_file_path("nai_accounts.json")
 
             if not accounts_file.exists():
                 # 계정 파일이 없으면 메인 토큰 반환
@@ -1954,13 +1921,13 @@ class APIService:
         NovelAI Upscale API를 사용하여 이미지를 2배 업스케일합니다.
 
         Args:
-            pixmap: QPixmap 형식의 이미지
+            pixmap: PIL Image or legacy image object. Headless callers should
+                pass raw_bytes or a PIL Image.
             token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
             raw_bytes: 원본 PNG bytes (메타데이터 보존용, 제공 시 pixmap 재인코딩 생략)
 
         Returns:
-            Dict with 'status', 'image' (upscaled QPixmap in legacy desktop when
-            Qt is already loaded, otherwise PIL Image), 'raw_bytes', and 'message'
+            Dict with 'status', 'image' (PIL Image), 'raw_bytes', and 'message'
         """
         import zipfile
         
@@ -2148,8 +2115,7 @@ class APIService:
             token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
         
         Returns:
-            Dict with 'status', 'selected_image' (3rd image; QPixmap in legacy
-            desktop when Qt is already loaded, otherwise PIL Image), and 'message'
+            Dict with 'status', 'selected_image' (3rd image as PIL Image), and 'message'
         """
         import zipfile
         import io

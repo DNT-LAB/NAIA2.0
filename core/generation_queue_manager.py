@@ -54,6 +54,8 @@ class GenerationQueueManager:
         # 이벤트 발행 (Lock 외부에서)
         self._publish_queue_event("request_enqueued", {
             "request_id": request_id,
+            "generation_request_id": request_id,
+            "prompt_run_id": getattr(request, "prompt_run_id", ""),
             "priority": request.priority,
             "queue_size": queue_size,
             "position": "back"
@@ -100,6 +102,8 @@ class GenerationQueueManager:
         # 이벤트 발행
         self._publish_queue_event("request_enqueued", {
             "request_id": request_id,
+            "generation_request_id": request_id,
+            "prompt_run_id": getattr(request, "prompt_run_id", ""),
             "priority": request.priority,
             "queue_size": queue_size,
             "position": position
@@ -133,6 +137,8 @@ class GenerationQueueManager:
         # 이벤트 발행
         self._publish_queue_event("request_dequeued", {
             "request_id": request.request_id,
+            "generation_request_id": request.request_id,
+            "prompt_run_id": getattr(request, "prompt_run_id", ""),
             "priority": request.priority,
             "queue_size": queue_size
         })

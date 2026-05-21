@@ -1,12 +1,49 @@
 from abc import ABC, abstractmethod, ABCMeta
-from PyQt6.QtWidgets import QWidget
-from PyQt6.QtCore import pyqtSignal, QObject
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.context import AppContext
 
-class pyqtABCMeta(type(QObject), ABCMeta):
+
+class _BoundSignal:
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, *args, **kwargs):
+        if args and callable(args[0]):
+            self._callbacks.append(args[0])
+        return None
+
+    def emit(self, *args, **kwargs):
+        for callback in list(self._callbacks):
+            callback(*args, **kwargs)
+        return None
+
+
+class _SignalDescriptor:
+    def __init__(self, *args, **kwargs):
+        self._name = f"_fallback_signal_{id(self)}"
+
+    def __get__(self, instance, owner=None):
+        if instance is None:
+            return self
+        signals = instance.__dict__.setdefault("_fallback_signals", {})
+        if self._name not in signals:
+            signals[self._name] = _BoundSignal()
+        return signals[self._name]
+
+
+class _FallbackQObject:
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+
+QObject = _FallbackQObject
+pyqtSignal = _SignalDescriptor
+QWidget = Any
+
+
+class pyqtABCMeta(ABCMeta):
     pass
 
 class BaseTabModule(QObject, ABC, metaclass=pyqtABCMeta):

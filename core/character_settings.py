@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +11,43 @@ from core.prompt_context import PromptContext
 from core.wildcard_processor import WildcardProcessor, split_tags_smart
 
 
-def character_settings_path(mode: str = "NAI") -> Path:
-    return Path("save") / f"CharacterModule_{str(mode or 'NAI').upper()}.json"
+def _default_save_root() -> Path:
+    user_data_dir = os.environ.get("NAIA_USER_DATA_DIR")
+    if user_data_dir:
+        return Path(user_data_dir).expanduser().resolve() / "save"
+    return Path("save")
+
+
+def _coerce_save_root(save_root: Path | str | None = None) -> Path:
+    return Path(save_root).expanduser().resolve() if save_root is not None else _default_save_root()
+
+
+def _legacy_save_fallback_enabled() -> bool:
+    if os.environ.get("NAIA_DISABLE_LEGACY_SAVE_FALLBACK") == "1":
+        return False
+    if os.environ.get("NAIA_ELECTRON") == "1":
+        return False
+    return True
+
+
+def _existing_character_settings_path(mode: str = "NAI", *, save_root: Path | str | None = None) -> Path:
+    primary = character_settings_path(mode, save_root=save_root)
+    if primary.exists():
+        return primary
+    legacy = Path("save").resolve() / primary.name
+    if _legacy_save_fallback_enabled() and legacy != primary.resolve() and legacy.exists():
+        return legacy
+    return primary
+
+
+def _save_root_from_context(app_context: Any) -> Path | None:
+    runtime_paths = getattr(app_context, "runtime_paths", None)
+    save_dir = getattr(runtime_paths, "save_dir", None)
+    return Path(save_dir) if save_dir is not None else None
+
+
+def character_settings_path(mode: str = "NAI", *, save_root: Path | str | None = None) -> Path:
+    return _coerce_save_root(save_root) / f"CharacterModule_{str(mode or 'NAI').upper()}.json"
 
 
 def default_character_settings() -> dict:
@@ -76,9 +112,14 @@ def loaded_character_module_reroll_on_generate(module: Any) -> bool:
     )
 
 
-def load_character_settings(mode: str = "NAI", path: Path | str | None = None) -> dict:
+def load_character_settings(
+    mode: str = "NAI",
+    path: Path | str | None = None,
+    *,
+    save_root: Path | str | None = None,
+) -> dict:
     mode_key = str(mode or "NAI").upper()
-    target = Path(path) if path is not None else character_settings_path(mode_key)
+    target = Path(path) if path is not None else _existing_character_settings_path(mode_key, save_root=save_root)
     try:
         if target.exists():
             data = json.loads(target.read_text(encoding="utf-8"))
@@ -127,8 +168,15 @@ def character_params_from_settings(
     settings: dict | None = None,
     *,
     reuse_current_context: bool = True,
+    save_root: Path | str | None = None,
 ) -> dict:
-    normalized = normalize_character_settings(settings) if settings is not None else load_character_settings(mode)
+    if save_root is None:
+        save_root = _save_root_from_context(app_context)
+    normalized = (
+        normalize_character_settings(settings)
+        if settings is not None
+        else load_character_settings(mode, save_root=save_root)
+    )
     frames = active_character_frames(normalized)
     if not frames:
         return {"characters": None}
@@ -164,8 +212,20 @@ def _format_processed_preview(characters: list[str], ucs: list[str]) -> str:
     return "\n".join(display_text)
 
 
-def character_state_from_settings(settings: dict | None, app_context=None, mode: str = "NAI") -> dict:
-    normalized = normalize_character_settings(settings) if settings is not None else load_character_settings(mode)
+def character_state_from_settings(
+    settings: dict | None,
+    app_context=None,
+    mode: str = "NAI",
+    *,
+    save_root: Path | str | None = None,
+) -> dict:
+    if save_root is None and app_context is not None:
+        save_root = _save_root_from_context(app_context)
+    normalized = (
+        normalize_character_settings(settings)
+        if settings is not None
+        else load_character_settings(mode, save_root=save_root)
+    )
     frames = normalized.get("character_frames", [])
     characters = []
     for idx, frame in enumerate(frames):
@@ -188,6 +248,7 @@ def character_state_from_settings(settings: dict | None, app_context=None, mode:
             mode=mode,
             settings=normalized,
             reuse_current_context=False,
+            save_root=save_root,
         )
         processed_characters = [str(value) for value in params.get("characters") or []]
         processed_ucs = [str(value) for value in params.get("uc") or []]

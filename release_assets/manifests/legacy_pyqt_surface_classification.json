@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "status": "reviewed-round2",
+  "purpose": "Classify remaining ignored PyQt/Desktop-only surfaces and explicit legacy desktop tests.",
+  "legacy_surfaces": [
+    {
+      "id": "comic_generator_tab",
+      "path": "tabs/comic_generator/**",
+      "classification": "desktop_only_pyqt_tab",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "tabs/comic_generator/**"
+      ],
+      "next_action": "archive_under_legacy_desktop_or_rebuild_as_web_feature_if_product_required",
+      "notes": "Imports PyQt6 widgets/graphics and is not part of the supported headless Remote Web feature contract."
+    },
+    {
+      "id": "variational_generation_window",
+      "path": "ui/variational/**",
+      "classification": "desktop_only_pyqt_experiment",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "ui/variational/**"
+      ],
+      "next_action": "archive_under_legacy_desktop_or_rebuild_as_internal_web_popup",
+      "notes": "Standalone QMainWindow/QDialog implementation; not a headless backend dependency."
+    },
+    {
+      "id": "ontology_visualizer",
+      "path": "experimental/ontology_visualizer/**",
+      "classification": "desktop_only_pyqt_webengine_experiment",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "experimental/ontology_visualizer/**"
+      ],
+      "next_action": "archive_or_rebuild_as_static_remote_web_tool",
+      "notes": "Uses QWebEngine/QWebChannel and should not enter the Electron backend resource tree."
+    },
+    {
+      "id": "ezmode_temp",
+      "path": "temp/ezmode/**",
+      "classification": "temporary_pyqt_prototype",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "temp/ezmode/**"
+      ],
+      "next_action": "delete_after_owner_review_or_rebuild_against_headless_services",
+      "notes": "Temporary prototype code includes a PyQt prompt display and development scripts."
+    }
+  ],
+  "desktop_test_files": [
+    "tests/test_auto_resolution_hiresfix_defaults.py",
+    "tests/test_character_settings.py",
+    "tests/test_conditional_prompt_restore.py",
+    "tests/test_danbooru_client.py",
+    "tests/test_generation_preset_tokens.py",
+    "tests/test_hires_preset_overlay.py",
+    "tests/test_middle_section_controller_static_registry.py",
+    "tests/test_preset_composer_service.py",
+    "tests/test_prompt_engineering_preset_schema.py",
+    "tests/test_remote_api_status.py",
+    "tests/test_remote_autocomplete_translation.py",
+    "tests/test_remote_search_parquet_actions.py",
+    "tests/test_tab_controller_removed_tabs.py",
+    "tests/test_theme_cache.py",
+    "tests/test_ui_state_manager.py",
+    "tests/test_vibe_transfer_clipboard.py"
+  ],
+  "desktop_source_static_tests": [
+    "tests/test_desktop_host_dpi_policy.py",
+    "tests/test_web_shell_config.py"
+  ]
+}

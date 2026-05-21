@@ -67,10 +67,13 @@ class HeadlessGenerationDispatch:
             }
 
         params = self.request.params
+        prompt_run_id = str(getattr(self.request, "prompt_run_id", "") or params.get("prompt_run_id") or "")
         return {
             "type": "generation_dispatched",
             "ok": True,
             "request_id": self.request.request_id,
+            "generation_request_id": self.request.request_id,
+            "prompt_run_id": prompt_run_id,
             "api_mode": self.api_mode,
             "priority": self.request.priority,
             "queued": True,
@@ -111,6 +114,11 @@ class HeadlessGenerationService:
         source_row = self._source_row(params)
         params.pop("_source_row_data", None)
         params.pop("_source_name", None)
+        prompt_run_id = self._prompt_run_id_for_command(command, params)
+        if not prompt_run_id:
+            prompt_run_id = self._create_direct_prompt_run(command, params, source_row)
+        if prompt_run_id:
+            params["prompt_run_id"] = prompt_run_id
         priority = self._priority(command)
         nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params, api_mode)
         request = GenerationRequest(
@@ -121,7 +129,11 @@ class HeadlessGenerationService:
             nai_characters=nai_characters,
             nai_vibe_transfer=nai_vibe_transfer,
             nai_character_reference=nai_character_reference,
+            prompt_run_id=prompt_run_id,
         )
+        params["generation_request_id"] = request.request_id
+        if params.get("result_enhance_request"):
+            params["result_enhance_request_id"] = request.request_id
 
         queue_manager = self.context.generation_queue_manager
         if priority > 0:
@@ -131,8 +143,14 @@ class HeadlessGenerationService:
 
         self.context.last_generation_request = request
         self.context.last_generation_params = params
+        if prompt_run_id:
+            linker = getattr(self.context, "link_generation_to_prompt_run", None)
+            if callable(linker):
+                linker(prompt_run_id, request.request_id)
         self.context.publish("generation_request_dispatched", {
             "request_id": request.request_id,
+            "generation_request_id": request.request_id,
+            "prompt_run_id": prompt_run_id,
             "api_mode": api_mode,
             "priority": priority,
         })
@@ -162,6 +180,8 @@ class HeadlessGenerationService:
         request.mark_completed()
         self.context.publish("generation_result_available", {
             "request_id": request.request_id,
+            "generation_request_id": request.request_id,
+            "prompt_run_id": str(getattr(request, "prompt_run_id", "") or params.get("prompt_run_id") or ""),
             "api_mode": params.get("api_mode", ""),
         })
         print(
@@ -225,6 +245,9 @@ class HeadlessGenerationService:
         self._normalize_booleans(params)
         self._normalize_resolution(params)
         self._normalize_numbers(params, api_mode)
+        apply_image_modules = getattr(self.context, "apply_headless_image_module_params", None)
+        if callable(apply_image_modules):
+            apply_image_modules(params, api_mode)
         return params
 
     def _normalize_resolution(self, params: dict[str, Any]) -> None:
@@ -310,6 +333,67 @@ class HeadlessGenerationService:
             "artist": None,
             "meta": None,
         }, name="web_headless")
+
+    def _prompt_run_id_for_command(self, command: dict[str, Any], params: dict[str, Any]) -> str:
+        explicit = (
+            command.get("prompt_run_id")
+            or command.get("promptRunId")
+            or params.get("prompt_run_id")
+            or params.get("promptRunId")
+        )
+        if explicit:
+            return str(explicit)
+
+        current_context = getattr(self.context, "current_prompt_context", None)
+        metadata = getattr(current_context, "metadata", {}) if current_context is not None else {}
+        current_prompt_run_id = str(metadata.get("prompt_run_id") or "") if isinstance(metadata, dict) else ""
+        if not current_prompt_run_id:
+            return ""
+
+        current_prompt = str(getattr(current_context, "final_prompt", "") or self.context.prompt_text or "")
+        request_prompt = str(params.get("input") or params.get("_raw_input") or "")
+        if current_prompt.strip() and current_prompt.strip() == request_prompt.strip():
+            return current_prompt_run_id
+        return ""
+
+    def _create_direct_prompt_run(
+        self,
+        command: dict[str, Any],
+        params: dict[str, Any],
+        source_row: pd.Series,
+    ) -> str:
+        starter = getattr(self.context, "start_prompt_run", None)
+        completer = getattr(self.context, "complete_prompt_run", None)
+        if not callable(starter) or not callable(completer):
+            return ""
+        settings = {
+            key: value
+            for key, value in params.items()
+            if key != "credential" and not str(key).startswith("_")
+        }
+        external_request_id = str(
+            command.get("request_id")
+            or command.get("requestId")
+            or params.get("request_id")
+            or params.get("requestId")
+            or ""
+        )
+        run = starter(
+            source="direct_generation",
+            source_row=source_row,
+            settings=settings,
+            external_request_id=external_request_id,
+            metadata={"direct_generation": True},
+        )
+        completer(
+            run.prompt_run_id,
+            final_prompt=str(params.get("input") or ""),
+            metadata={
+                "prompt_source": "direct_generation",
+                "api_mode": params.get("api_mode", ""),
+            },
+        )
+        return run.prompt_run_id
 
     def _priority(self, command: dict[str, Any]) -> int:
         if self._to_bool(command.get("urgent")):

@@ -1,0 +1,100 @@
+{
+  "version": 1,
+  "purpose": "Two-track runtime/distribution boundary for normal clone-user Web execution and optional Electron release shell packaging.",
+  "tracks": {
+    "source_web": {
+      "name": "Clone-user Python Headless Web",
+      "role": "Default user execution path from a git clone or source checkout.",
+      "entrypoint": "NAIA_web_headless.py",
+      "requirements": "requirements-headless.txt",
+      "launchers": [
+        "run_NAIA_web.bat",
+        "run_NAIA_web.command",
+        "run_NAIA.bat",
+        "run_NAIA.command"
+      ],
+      "required_launcher_terms": [
+        "NAIA_web_headless.py",
+        "requirements-headless.txt"
+      ],
+      "forbidden_launcher_terms": [
+        "npm",
+        "electron",
+        "node_modules",
+        "docker",
+        "app/electron",
+        "app\\electron"
+      ],
+      "forbidden_requirements_terms": [
+        "PyQt6",
+        "PyQt6-WebEngine",
+        "electron"
+      ],
+      "must_not_require": [
+        "npm install",
+        "npm ci",
+        "electron-builder",
+        "Docker",
+        "bundled Python runtime"
+      ]
+    },
+    "electron_release": {
+      "name": "Electron release shell",
+      "role": "Maintainer/release path that wraps the same Python backend and Remote Web UI.",
+      "root": "app/electron",
+      "package_manifest": "app/electron/package.json",
+      "main": "app/electron/main/main.cjs",
+      "required_scripts": [
+        "check",
+        "start",
+        "pack:dir",
+        "dist:win-dir",
+        "release:portable:clean-python",
+        "smoke:electron:source",
+        "smoke:electron:packaged"
+      ],
+      "required_main_terms": [
+        "NAIA_REMOTE_WEB_DIR",
+        "app",
+        "web",
+        "remote",
+        "NAIA_web_headless.py",
+        "NAIA_USER_DATA_DIR"
+      ],
+      "allowed_shell_responsibilities": [
+        "backend process lifecycle",
+        "maintenance window",
+        "app icon/menu/window chrome",
+        "logs and data-folder shortcuts",
+        "packaged runtime bootstrap"
+      ],
+      "forbidden_shell_responsibilities": [
+        "prompt processing",
+        "generation dispatch",
+        "queue semantics",
+        "Remote Web feature fork",
+        "normal clone-user setup"
+      ]
+    }
+  },
+  "shared_runtime": {
+    "backend_api": "core/web_session_app.py",
+    "runtime_paths": "core/runtime_paths.py",
+    "remote_web": "app/web/remote",
+    "remote_web_required_files": [
+      "index.html",
+      "style.css",
+      "app.js"
+    ],
+    "removed_legacy_remote_web": "ui/remote_web"
+  },
+  "release_manifest": "release_assets/manifests/release_include_exclude_draft.json",
+  "hard_rules": [
+    "The source_web track is the default product path and must run without npm, Electron, Docker, or bundled Python.",
+    "The electron_release track is a shell and release-maintainer path only.",
+    "Both tracks must use the same core/web_session_app.py backend API.",
+    "Both tracks must use app/web/remote as the only source-owned Remote Web UI.",
+    "Electron must not introduce a second feature implementation for prompt processing, generation dispatch, or queue behavior.",
+    "ui/remote_web must remain removed from source ownership."
+  ]
+}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib.util
 import io
 import json
 import random
@@ -22,6 +23,13 @@ from core.resolution_utils import (
     STANDARD_1MP_RESOLUTIONS,
     nearest_standard_1mp_resolution,
 )
+
+
+def _safe_log(message: str, fallback: str | None = None) -> None:
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        print(fallback or message.encode("ascii", "replace").decode("ascii"))
 
 
 class ArtistThumbnailService:
@@ -46,8 +54,15 @@ class ArtistThumbnailService:
     }
     ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
 
-    def __init__(self, repo_root: str | Path, mode_getter: Callable[[], str] | None = None):
+    def __init__(
+        self,
+        repo_root: str | Path,
+        mode_getter: Callable[[], str] | None = None,
+        *,
+        mode_data_root: str | Path | None = None,
+    ):
         self.repo_root = Path(repo_root)
+        self.mode_data_root = Path(mode_data_root) if mode_data_root is not None else self.repo_root / "data"
         self._mode_getter = mode_getter or (lambda: "NAI")
         self._data_cache: dict[str, dict] = {}
         self._image_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
@@ -80,10 +95,25 @@ class ArtistThumbnailService:
         return info
 
     def _mode_path(self, mode: str) -> Path:
-        return self._path(self._mode_info(mode)["path"])
+        info = self._mode_info(mode)
+        primary = self._mode_download_path(info)
+        legacy = self._path(info["path"])
+        return primary if primary.exists() or not legacy.exists() else legacy
+
+    def _mode_download_path(self, info: dict) -> Path:
+        path = Path(info["path"])
+        if path.is_absolute():
+            return path
+        try:
+            return self.mode_data_root / path.relative_to("data")
+        except ValueError:
+            return self._path(path)
 
     def _file_state(self, info: dict) -> dict:
-        path = self._path(info["path"])
+        path = self._mode_download_path(info)
+        legacy = self._path(info["path"])
+        if not path.exists() and legacy.exists():
+            path = legacy
         exists = path.exists()
         size = path.stat().st_size if exists else 0
         expected_size = int(info.get("expected_size") or 0)
@@ -108,13 +138,21 @@ class ArtistThumbnailService:
 
     def _artist_weights(self, mode: str = "") -> dict[str, int]:
         weights: dict[str, int] = {}
-        try:
-            from artist_dictionary import artist_dict
-
-            if isinstance(artist_dict, dict):
-                weights.update({str(key): int(value or 0) for key, value in artist_dict.items()})
-        except Exception as exc:
-            print(f"🌐 Headless Artist Thumb: artist dictionary load failed — {exc}")
+        dictionary_path = self.repo_root / "artist_dictionary.py"
+        if dictionary_path.exists():
+            try:
+                spec = importlib.util.spec_from_file_location("naia_artist_dictionary", dictionary_path)
+                if spec and spec.loader:
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    artist_dict = getattr(module, "artist_dict", {})
+                    if isinstance(artist_dict, dict):
+                        weights.update({str(key): int(value or 0) for key, value in artist_dict.items()})
+            except Exception as exc:
+                _safe_log(
+                    f"🌐 Headless Artist Thumb: artist dictionary load failed — {exc}",
+                    f"[WARN] Headless Artist Thumb: artist dictionary load failed - {exc}",
+                )
 
         mode_key = str(mode or "").strip()
         if mode_key:
@@ -132,7 +170,10 @@ class ArtistThumbnailService:
                 return []
             return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
         except Exception as exc:
-            print(f"🌐 Headless Artist Thumb: list read failed ({path}) — {exc}")
+            _safe_log(
+                f"🌐 Headless Artist Thumb: list read failed ({path}) — {exc}",
+                f"[WARN] Headless Artist Thumb: list read failed ({path}) - {exc}",
+            )
             return []
 
     def _write_lines(self, path: Path, values: list[str]) -> None:
@@ -206,7 +247,10 @@ class ArtistThumbnailService:
         try:
             return self._normalize_options(json.loads(path.read_text(encoding="utf-8")), mode)
         except Exception as exc:
-            print(f"🌐 Headless Artist Thumb: options load failed — {exc}")
+            _safe_log(
+                f"🌐 Headless Artist Thumb: options load failed — {exc}",
+                f"[WARN] Headless Artist Thumb: options load failed - {exc}",
+            )
             return self._normalize_options({}, mode)
 
     def save_options(self, options: dict) -> dict:
@@ -476,7 +520,7 @@ class ArtistThumbnailService:
                 return cached
             if not file_state["available"]:
                 self._data_cache.pop(key, None)
-                path = self._path(info["path"])
+                path = self._mode_path(key)
                 if file_state["needs_update"]:
                     raise RuntimeError(f"Artist thumbnail data needs update: {path}")
                 raise FileNotFoundError(f"Artist thumbnail data not found: {path}")
@@ -901,7 +945,7 @@ class ArtistThumbnailService:
     def start_download(self, mode: str) -> dict:
         key = str(mode or "").strip()
         info = self._mode_info(key)
-        path = self._path(info["path"])
+        path = self._mode_download_path(info)
         url = str(info.get("url") or "")
         if not url:
             raise ValueError(f"download url is not configured: {key}")

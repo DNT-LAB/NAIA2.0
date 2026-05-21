@@ -362,6 +362,8 @@ def page_ready_state(client: CdpClient) -> dict[str, Any]:
     bodyChars: text.length,
     hasRandom: !!btnRnd && /Random|랜덤/.test(text),
     hasGenerate: !!btnGen && /Generate|생성/.test(text),
+    sendReady: typeof send === 'function',
+    wsReadyState: typeof ws !== 'undefined' && ws ? ws.readyState : null,
     promptLength: prompt ? prompt.value.length : null,
     randomDisabled: btnRnd ? !!btnRnd.disabled : null,
     generateDisabled: btnGen ? !!btnGen.disabled : null
@@ -373,13 +375,19 @@ def page_ready_state(client: CdpClient) -> dict[str, Any]:
 
 def wait_for_action_idle(client: CdpClient, timeout: float) -> dict[str, Any]:
     """Wait until initial websocket replay/preset restore has settled enough for actions."""
-    state = wait_for(
-        lambda: page_ready_state(client)
+    def ready_state():
+        state = page_ready_state(client) or {}
         if (
-            (page_ready_state(client) or {}).get("hasRandom")
-            and (page_ready_state(client) or {}).get("hasGenerate")
-        )
-        else None,
+            state.get("hasRandom")
+            and state.get("hasGenerate")
+            and state.get("sendReady")
+            and state.get("wsReadyState") == 1
+        ):
+            return state
+        return None
+
+    state = wait_for(
+        ready_state,
         timeout=timeout,
         interval=0.25,
     )

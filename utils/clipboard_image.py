@@ -1,12 +1,47 @@
+from __future__ import annotations
+
+import importlib
 import io
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image
-from PyQt6.QtCore import QByteArray, QBuffer, QIODevice
-from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QMimeData
+
+
+def _load_qt_contracts():
+    try:
+        qt_core = importlib.import_module("PyQt6.QtCore")
+        qt_gui = importlib.import_module("PyQt6.QtGui")
+        qt_widgets = importlib.import_module("PyQt6.QtWidgets")
+        return {
+            "QByteArray": qt_core.QByteArray,
+            "QBuffer": qt_core.QBuffer,
+            "QIODevice": qt_core.QIODevice,
+            "QMimeData": qt_core.QMimeData,
+            "QImage": qt_gui.QImage,
+            "QPixmap": qt_gui.QPixmap,
+            "QApplication": qt_widgets.QApplication,
+        }
+    except ImportError:
+        return {
+            "QByteArray": None,
+            "QBuffer": None,
+            "QIODevice": None,
+            "QMimeData": None,
+            "QImage": None,
+            "QPixmap": None,
+            "QApplication": None,
+        }
+
+
+_QT = _load_qt_contracts()
+QByteArray = _QT["QByteArray"]
+QBuffer = _QT["QBuffer"]
+QIODevice = _QT["QIODevice"]
+QMimeData = _QT["QMimeData"]
+QImage = _QT["QImage"]
+QPixmap = _QT["QPixmap"]
+QApplication = _QT["QApplication"]
 
 
 IMAGE_CLIPBOARD_FORMATS = (
@@ -15,11 +50,20 @@ IMAGE_CLIPBOARD_FORMATS = (
 )
 
 
+def _require_qt(name: str):
+    value = _QT.get(name)
+    if value is None:
+        raise RuntimeError("Qt clipboard image support is not available in this runtime")
+    return value
+
+
 def qimage_to_png_bytes(image: QImage) -> Optional[bytes]:
+    qbuffer = _require_qt("QBuffer")
+    qiodevice = _require_qt("QIODevice")
     if image is None or image.isNull():
         return None
-    buffer = QBuffer()
-    if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+    buffer = qbuffer()
+    if not buffer.open(qiodevice.OpenModeFlag.WriteOnly):
         return None
     if not image.save(buffer, "PNG"):
         return None
@@ -44,11 +88,11 @@ def clipboard_mime_png_bytes(mime_data: QMimeData | None, clipboard_image: Optio
 
     if mime_data.hasImage():
         image_data = mime_data.imageData()
-        if isinstance(image_data, QImage):
+        if QImage is not None and isinstance(image_data, QImage):
             png_bytes = qimage_to_png_bytes(image_data)
             if png_bytes:
                 return png_bytes
-        elif isinstance(image_data, QPixmap):
+        elif QPixmap is not None and isinstance(image_data, QPixmap):
             png_bytes = qimage_to_png_bytes(image_data.toImage())
             if png_bytes:
                 return png_bytes
@@ -62,7 +106,8 @@ def clipboard_mime_png_bytes(mime_data: QMimeData | None, clipboard_image: Optio
 
 
 def clipboard_png_bytes(clipboard=None) -> Optional[bytes]:
-    clipboard = clipboard or QApplication.clipboard()
+    qapplication = _require_qt("QApplication")
+    clipboard = clipboard or qapplication.clipboard()
     return clipboard_mime_png_bytes(clipboard.mimeData(), clipboard.image())
 
 
@@ -83,7 +128,8 @@ def pil_image_from_clipboard(clipboard=None) -> Optional[Image.Image]:
 
 
 def qimage_from_png_bytes(png_bytes: bytes | None) -> QImage:
-    image = QImage()
+    qimage = _require_qt("QImage")
+    image = qimage()
     if png_bytes:
         image.loadFromData(bytes(png_bytes), "PNG")
     return image
@@ -94,16 +140,20 @@ def qimage_from_clipboard(clipboard=None) -> QImage:
 
 
 def pixmap_from_clipboard(clipboard=None) -> QPixmap:
+    qpixmap = _require_qt("QPixmap")
     image = qimage_from_clipboard(clipboard)
-    return QPixmap.fromImage(image) if not image.isNull() else QPixmap()
+    return qpixmap.fromImage(image) if not image.isNull() else qpixmap()
 
 
 def set_png_clipboard_bytes(png_bytes: bytes, filename: str = ""):
     if not png_bytes:
         raise ValueError("No PNG data is available")
 
-    byte_array = QByteArray(bytes(png_bytes))
-    mime_data = QMimeData()
+    qbytearray = _require_qt("QByteArray")
+    qmimedata = _require_qt("QMimeData")
+    qapplication = _require_qt("QApplication")
+    byte_array = qbytearray(bytes(png_bytes))
+    mime_data = qmimedata()
     mime_data.setData("image/png", byte_array)
     mime_data.setData('application/x-qt-windows-mime;value="PNG"', byte_array)
     qimage = qimage_from_png_bytes(png_bytes)
@@ -111,4 +161,4 @@ def set_png_clipboard_bytes(png_bytes: bytes, filename: str = ""):
         mime_data.setImageData(qimage)
     if filename:
         mime_data.setText(Path(str(filename)).name)
-    QApplication.clipboard().setMimeData(mime_data)
+    qapplication.clipboard().setMimeData(mime_data)

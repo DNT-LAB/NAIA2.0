@@ -1,0 +1,324 @@
+{
+  "version": 1,
+  "status": "draft",
+  "first_release_artifact": "portable-app-folder",
+  "portable_strategy": {
+    "status": "selected_first_release",
+    "shape": "Electron app directory or zip containing NAIA.exe, resources/naia-backend, optional resources/python, and optional portable user-data skeleton",
+    "why": [
+      "Avoid installer-side state deletion risk during the first headless/Electron validation cycle.",
+      "Keep antivirus and SmartScreen triage focused on the app folder before adding installer behavior.",
+      "Match the current electron-builder target of win.dir and the staged release smoke gates."
+    ],
+    "requires_before_public_release": [
+      "real Electron package build",
+      "bundled Python runtime or documented system Python prerequisite",
+      "packaged-app smoke test",
+      "clean-machine readiness gate",
+      "clean Windows machine launch test",
+      "release artifact measurement",
+      "Microsoft Defender local scan",
+      "signed public artifact"
+    ]
+  },
+  "installer_strategy": {
+    "status": "deferred_until_portable_release_is_validated",
+    "candidates": {
+      "electron-builder-nsis": {
+        "status": "preferred_if_installer_needed_after_portable",
+        "fit": "Conventional Windows installer for Electron apps, supports app folder wrapping and shortcut creation.",
+        "risks": [
+          "Uninstall/update behavior must be configured to preserve user data.",
+          "Installer binary adds another antivirus and SmartScreen reputation surface."
+        ]
+      },
+      "electron-builder-msix": {
+        "status": "candidate_after_signing_and_identity_decision",
+        "fit": "Windows package identity, cleaner install/update story when signing and distribution channel are ready.",
+        "risks": [
+          "Requires stronger signing and package identity decisions.",
+          "May be heavier than needed for the first release channel."
+        ]
+      },
+      "inno-setup-wrapper": {
+        "status": "fallback_candidate",
+        "fit": "External installer wrapping the already-built Electron app folder.",
+        "risks": [
+          "Adds a separate installer toolchain outside electron-builder.",
+          "Must duplicate release metadata, signing, and uninstall-state policy checks."
+        ]
+      }
+    }
+  },
+  "user_state_policy": {
+    "portable_root": "user-data/",
+    "installed_root": "%APPDATA%/NAIA/",
+    "upgrade": "preserve_user_data",
+    "uninstall": "do_not_delete_user_data_by_default",
+    "delete_user_data": "explicit_user_choice_only",
+    "forbidden": [
+      "installer deletes user-data without an explicit user choice",
+      "installer deletes %APPDATA%/NAIA without an explicit user choice",
+      "auto-update rewrites save/output/download/cache roots in bundled resources"
+    ]
+  },
+  "auto_update": {
+    "status": "deferred",
+    "allowed_after": [
+      "signed release artifacts exist",
+      "portable release smoke is stable",
+      "installer/update state-preservation policy is implemented and tested",
+      "rollback behavior is documented"
+    ]
+  },
+  "electron_builder_contract": {
+    "first_target": "dir",
+    "deferred_targets": [
+      "nsis",
+      "msix"
+    ],
+    "package_scripts": [
+      "pack:dir",
+      "dist:win-dir",
+      "deps:plan",
+      "deps:plan:summary",
+      "deps:install",
+      "deps:ci",
+      "release:evidence",
+      "release:evidence:summary",
+      "release:evidence:fresh",
+      "release:evidence:fresh:summary",
+      "release:workspace",
+      "release:workspace:summary",
+      "release:workspace:evidence",
+      "release:workspace:evidence:summary",
+      "release:workspace:bundled-python",
+      "release:workspace:bundled-python:evidence",
+      "release:workspace:clean-python",
+      "release:workspace:clean-python:evidence",
+      "release:portable:workspace:plan",
+      "release:portable:workspace:plan:summary",
+      "release:portable:workspace",
+      "release:portable:workspace:bundled-python",
+      "release:portable:workspace:clean-python",
+      "release:final:plan",
+      "release:final:plan:summary",
+      "release:final",
+      "release:final:smoke",
+      "release:final:install",
+      "release:final:install:scan",
+      "release:final:bundled-python",
+      "release:final:bundled-python:scan",
+      "release:final:clean-python",
+      "release:final:clean-python:scan",
+      "preflight:electron-deps",
+      "preflight:electron-deps:summary",
+      "goal:audit:summary",
+      "check:approval-gate",
+      "preflight:packaging-inputs",
+      "preflight:packaging-inputs:bundled-python",
+      "smoke:packaged",
+      "smoke:packaged:structure",
+      "smoke:electron:source",
+      "smoke:electron:packaged",
+      "check:packaged-feature-smoke",
+      "clean:staged",
+      "clean:staged:bundled-python",
+      "clean:packaged",
+      "clean:packaged:bundled-python",
+      "release:portable",
+      "release:portable:bundled-python",
+      "release:portable:clean-python",
+      "release:portable:smoke",
+      "release:portable:smoke:scan",
+      "release:portable:bundled-python:smoke",
+      "release:portable:bundled-python:smoke:scan",
+      "release:portable:clean-python:smoke",
+      "release:portable:clean-python:smoke:scan"
+    ],
+    "required_script_terms": {
+      "release:final": [
+        "--execute",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:final:smoke": [
+        "--execute",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:final:install": [
+        "--execute",
+        "--install-deps",
+        "--yes",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:final:install:scan": [
+        "--execute",
+        "--install-deps",
+        "--yes",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:final:bundled-python": [
+        "--execute",
+        "--python-runtime-dir",
+        "%NAIA_PYTHON_RUNTIME_DIR%",
+        "--require-bundled-python",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:final:bundled-python:scan": [
+        "--execute",
+        "--python-runtime-dir",
+        "%NAIA_PYTHON_RUNTIME_DIR%",
+        "--require-bundled-python",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:final:clean-python": [
+        "--execute",
+        "--build-clean-python-runtime",
+        "--python-runtime-version",
+        "3.12",
+        "--require-bundled-python",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:final:clean-python:scan": [
+        "--execute",
+        "--build-clean-python-runtime",
+        "--python-runtime-version",
+        "3.12",
+        "--require-bundled-python",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:portable:smoke:scan": [
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:portable:bundled-python:smoke:scan": [
+        "--python-runtime-dir",
+        "%NAIA_PYTHON_RUNTIME_DIR%",
+        "--require-bundled-python",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:portable:clean-python:smoke:scan": [
+        "--build-clean-python-runtime",
+        "--python-runtime-version",
+        "3.12",
+        "--require-bundled-python",
+        "--run-electron-cdp",
+        "--electron-timeout",
+        "180",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:evidence:summary": [
+        "--no-output",
+        "--skip-electron-runtime",
+        "--summary"
+      ],
+      "release:final:plan:summary": [
+        "--summary",
+        "--output \"\"",
+        "--portable-output \"\""
+      ]
+    }
+  },
+  "approval_boundary": {
+    "non_mutating_scripts": {
+      "deps:plan": [
+        "--execute",
+        "--yes",
+        "npm install",
+        "npm ci"
+      ],
+      "deps:plan:summary": [
+        "--execute",
+        "--yes",
+        "npm install",
+        "npm ci"
+      ],
+      "preflight:electron-deps": [
+        "--execute",
+        "--yes",
+        "npm install",
+        "npm ci"
+      ],
+      "preflight:electron-deps:summary": [
+        "--execute",
+        "--yes",
+        "npm install",
+        "npm ci"
+      ],
+      "release:check": [
+        "--execute",
+        "--install-deps",
+        "--yes",
+        "npm install",
+        "npm ci",
+        "electron-builder"
+      ],
+      "check:approval-gate": [
+        "--execute",
+        "--install-deps",
+        "--yes",
+        "npm install",
+        "npm ci",
+        "electron-builder",
+        "--defender-scan",
+        "--require-defender-scan"
+      ],
+      "release:final:plan": [
+        "--execute",
+        "--install-deps",
+        "--yes",
+        "--defender-scan",
+        "--require-defender-scan",
+        "electron-builder"
+      ],
+      "release:final:plan:summary": [
+        "--execute",
+        "--install-deps",
+        "--yes",
+        "--defender-scan",
+        "--require-defender-scan",
+        "electron-builder"
+      ]
+    }
+  }
+}

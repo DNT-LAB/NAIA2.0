@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "status": "draft",
+  "purpose": "Map required user-visible Remote Web features to packaged Electron smoke evidence.",
+  "remote_feature_contract": "release_assets/manifests/remote_web_feature_contract.json",
+  "cdp_smoke_tool": "tools/smoke_electron_cdp.py",
+  "package_scripts": [
+    "smoke:electron:packaged",
+    "release:portable:smoke",
+    "release:portable:bundled-python:smoke",
+    "release:portable:clean-python:smoke"
+  ],
+  "required_features": [
+    {
+      "id": "random_prompt",
+      "label": "Random prompt",
+      "feature_groups": ["websocket_shared_state"],
+      "websocket_commands": ["random"],
+      "cdp_checks": ["shell_ready", "timings"],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "generate",
+      "label": "Generate dispatch",
+      "feature_groups": ["websocket_shared_state", "core_status_queue"],
+      "websocket_commands": ["generate"],
+      "routes": [
+        {"method": "GET", "path": "/api/queue/state"}
+      ],
+      "cdp_checks": ["shell_ready", "timings"],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "result_display",
+      "label": "Result display",
+      "feature_groups": ["result_history_viewer_actions"],
+      "routes": [
+        {"method": "GET", "path": "/api/latest-image"},
+        {"method": "GET", "path": "/api/result/metadata"}
+      ],
+      "cdp_checks": ["shell_ready"],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "prompt_tools",
+      "label": "Prompt Tools",
+      "feature_groups": ["prompt_tools"],
+      "routes": [
+        {"method": "GET", "path": "/api/prompt-highlight-index"},
+        {"method": "GET", "path": "/api/tag/lookup"}
+      ],
+      "requires_live_runtime": false
+    },
+    {
+      "id": "params",
+      "label": "Params",
+      "feature_groups": ["params_workflow_search", "websocket_shared_state"],
+      "websocket_commands": ["set_param", "set_options"],
+      "routes": [
+        {"method": "GET", "path": "/api/resolutions"},
+        {"method": "POST", "path": "/api/resolutions"}
+      ],
+      "requires_live_runtime": false
+    },
+    {
+      "id": "presets",
+      "label": "Event, clothes, expression presets",
+      "feature_groups": ["presets"],
+      "routes": [
+        {"method": "GET", "path": "/api/event-preset/status"},
+        {"method": "POST", "path": "/api/preset/prompt-preview"},
+        {"method": "GET", "path": "/api/clothes-preset/status"},
+        {"method": "GET", "path": "/api/expression-preset/status"}
+      ],
+      "requires_live_runtime": false
+    },
+    {
+      "id": "danbooru",
+      "label": "Danbooru",
+      "feature_groups": ["danbooru"],
+      "routes": [
+        {"method": "POST", "path": "/api/danbooru/post"},
+        {"method": "POST", "path": "/api/danbooru/browser/open"}
+      ],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "artist_thumbnail",
+      "label": "Artist Thumb",
+      "feature_groups": ["artist_thumbnail"],
+      "routes": [
+        {"method": "GET", "path": "/api/artist-thumb/state"},
+        {"method": "GET", "path": "/api/artist-thumb/list"},
+        {"method": "POST", "path": "/api/artist-thumb/random-prompt"},
+        {"method": "POST", "path": "/api/artist-thumb/generate"}
+      ],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "img2img",
+      "label": "img2img",
+      "feature_groups": ["result_history_viewer_actions"],
+      "routes": [
+        {"method": "POST", "path": "/api/image/fetch"},
+        {"method": "POST", "path": "/api/metadata/extract"}
+      ],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "vibe_transfer_storage",
+      "label": "Vibe Transfer Storage",
+      "feature_groups": ["websocket_shared_state", "result_history_viewer_actions"],
+      "websocket_commands": ["set_param"],
+      "routes": [
+        {"method": "POST", "path": "/api/image-action/{action}"}
+      ],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "character_reference",
+      "label": "Character Reference",
+      "feature_groups": ["thumb_character_viewer", "websocket_shared_state"],
+      "websocket_commands": ["set_param"],
+      "routes": [
+        {"method": "GET", "path": "/api/character-viewer/state"},
+        {"method": "POST", "path": "/api/character-viewer/prompt"},
+        {"method": "POST", "path": "/api/character-viewer/generate"}
+      ],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "enhance",
+      "label": "Enhance",
+      "feature_groups": ["result_history_viewer_actions", "websocket_shared_state"],
+      "websocket_commands": ["result_enhance", "set_result_enhance_config"],
+      "routes": [
+        {"method": "POST", "path": "/api/image-action/{action}"}
+      ],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "setup_api_settings",
+      "label": "setup/API settings",
+      "feature_groups": ["core_status_queue", "websocket_shared_state"],
+      "websocket_commands": ["verify_api", "clear_api", "probe_api"],
+      "routes": [
+        {"method": "GET", "path": "/api/status"},
+        {"method": "GET", "path": "/api/headless/capabilities"}
+      ],
+      "requires_live_runtime": false
+    },
+    {
+      "id": "history",
+      "label": "History",
+      "feature_groups": ["result_history_viewer_actions"],
+      "routes": [
+        {"method": "GET", "path": "/api/history/list"},
+        {"method": "GET", "path": "/api/history/image/{history_id}"},
+        {"method": "POST", "path": "/api/history/unsaved/save-all"}
+      ],
+      "requires_live_runtime": true
+    },
+    {
+      "id": "save_output",
+      "label": "save/output",
+      "feature_groups": ["result_history_viewer_actions"],
+      "routes": [
+        {"method": "POST", "path": "/api/result/action/save"},
+        {"method": "GET", "path": "/api/history/unsaved/download"}
+      ],
+      "cdp_checks": ["download_routing"],
+      "requires_live_runtime": true
+    }
+  ]
+}

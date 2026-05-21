@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "status": "draft",
+  "purpose": "Separate committed/bootstrap source assets from user-downloaded and generated runtime assets.",
+  "source_is_not_heavy_by_default": true,
+  "runtime_roots": {
+    "installed": "%APPDATA%/NAIA",
+    "portable": "user-data"
+  },
+  "writable_runtime_dirs": [
+    "config",
+    "data",
+    "ui_assets",
+    "save",
+    "downloads",
+    "bundles",
+    "cache",
+    "logs",
+    "output",
+    "wildcards"
+  ],
+  "source_bootstrap_assets": [
+    "app/web/remote/**",
+    "workflows/**",
+    "data/source/**",
+    "data/clothes_list.txt",
+    "data/color.txt",
+    "data/characteristic_list.txt",
+    "data/taglist/*.json"
+  ],
+  "runtime_asset_destinations": {
+    "downloaded_tag_or_index_data": "data",
+    "downloaded_ui_asset_bundles": "ui_assets",
+    "temporary_downloads": "downloads",
+    "external_helper_binaries": "downloads",
+    "large_optional_bundles": "bundles",
+    "generated_indexes_and_caches": "cache",
+    "logs": "logs",
+    "generated_images_and_user_output": "output",
+    "saved_user_state": "save"
+  },
+  "blocked_future_download_targets": [
+    "data/**",
+    "ui/**",
+    "./*"
+  ],
+  "blocked_target_note": "These blocked targets refer to the repository/source checkout. Use runtime roots through core.runtime_paths instead.",
+  "large_local_asset_classification_manifest": "release_assets/manifests/runtime_asset_classification.json",
+  "large_local_assets_requiring_review_before_move": [
+    "data/**",
+    "ui/**",
+    "naia_temp_rows.parquet",
+    "*.naiv4vibe",
+    "*.naiv4vibebundle",
+    "manual_*.png",
+    "logs/**",
+    "output/**",
+    "save/**",
+    "tmp/**",
+    "temp/**"
+  ]
+}

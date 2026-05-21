@@ -1,0 +1,309 @@
+{
+  "version": 1,
+  "status": "draft",
+  "scope": "Remote Web feature ownership, route coverage, and migration smoke contract",
+  "route_source": "core/web_session_app.py",
+  "legacy_dependency_policy": {
+    "none": "Feature is implemented by the headless backend without desktop imports.",
+    "legacy_compat": "Feature retains compatibility shims or legacy read fallbacks, but the supported headless path must not import PyQt6 or legacy_desktop.",
+    "external": "Feature intentionally delegates to an external service or web site.",
+    "needs_live_smoke": "Feature has a non-destructive route contract but still needs live endpoint or credential validation."
+  },
+  "smoke_levels": {
+    "static": "Static file or mounted asset route.",
+    "non_destructive": "Safe route check without external generation or destructive file operations.",
+    "state_mutation": "Mutates server-owned state but should be safe with temporary user-data.",
+    "asset_runtime": "Reads or writes runtime user assets.",
+    "external_live": "Needs live configured NovelAI, WebUI, ComfyUI, or third-party endpoint validation."
+  },
+  "static_mounts": [
+    {
+      "path": "/js",
+      "source": "app/web/remote/js",
+      "smoke": "static"
+    },
+    {
+      "path": "/guides",
+      "source": "app/web/remote/guides",
+      "smoke": "static"
+    }
+  ],
+  "feature_groups": [
+    {
+      "id": "web_shell",
+      "name": "Remote Web shell",
+      "source_files": [
+        "core/web_session_app.py",
+        "app/web/assets.py",
+        "app/web/remote/index.html",
+        "app/web/remote/style.css",
+        "app/web/remote/app.js"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/", "smoke": "static"},
+        {"method": "GET", "path": "/style.css", "smoke": "static"},
+        {"method": "GET", "path": "/app.js", "smoke": "static"}
+      ]
+    },
+    {
+      "id": "core_status_queue",
+      "name": "Status, capabilities, and queue",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/web_session_context.py",
+        "app/web/remote/js/features/queuePanel.mjs",
+        "app/web/remote/js/features/setupController.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/status", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/headless/capabilities", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/queue/state", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/queue/action", "smoke": "state_mutation"}
+      ]
+    },
+    {
+      "id": "install_manager",
+      "name": "First-run install manager and runtime data initialization",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/runtime_install_manager.py",
+        "app/web/remote/js/features/setupController.mjs",
+        "app/electron/renderer/maintenance.html"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/install-manager", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/install-manager/initialize", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/install-manager/tag-archive/download", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/install-manager/tag-archive/download/cancel", "smoke": "state_mutation"}
+      ]
+    },
+    {
+      "id": "params_workflow_search",
+      "name": "Params, resolution, workflow, and search imports",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/web_session_context.py",
+        "app/web/remote/js/features/resolutionManagerPanel.mjs",
+        "app/web/remote/js/features/setupController.mjs"
+      ],
+      "legacy_dependency": "legacy_compat",
+      "routes": [
+        {"method": "GET", "path": "/api/resolutions", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/resolutions", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/search/parquet/upload", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/comfyui/workflow/state", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/comfyui/web", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/comfyui/workflow/upload", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/comfyui/workflow/default", "smoke": "state_mutation"}
+      ]
+    },
+    {
+      "id": "prompt_tools",
+      "name": "Prompt tools and prompt engineering assets",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/web_session_context.py",
+        "app/web/remote/js/features/promptEngineeringPanel.mjs",
+        "app/web/remote/js/features/promptHighlighter.mjs"
+      ],
+      "legacy_dependency": "legacy_compat",
+      "routes": [
+        {"method": "GET", "path": "/api/prompt-highlight-index", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/tag/lookup", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/prompt-engineering/preset-thumbnail", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/prompt-engineering/preset-thumbnail/upload", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/prompt-engineering/preset-thumbnail/generate", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "presets",
+      "name": "Event, clothes, expression, and composed presets",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/event_preset_service.py",
+        "core/clothes_preset_service.py",
+        "core/expression_preset_service.py",
+        "core/preset_composer_service.py",
+        "app/web/remote/js/features/eventPresetPanel.mjs"
+      ],
+      "legacy_dependency": "legacy_compat",
+      "routes": [
+        {"method": "GET", "path": "/api/event-preset/status", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-preset/download", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-preset/download", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/event-preset/download/cancel", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/event-preset/bootstrap", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-preset/select", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-preset/prompt-preview", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-preset/generate", "smoke": "external_live"},
+        {"method": "GET", "path": "/api/event-preset/thumbnail", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/preset/prompt-preview", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/preset/generate", "smoke": "external_live"},
+        {"method": "GET", "path": "/api/clothes-preset/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/clothes-preset/bootstrap", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/clothes-preset/select", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/clothes-preset/lucky", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/clothes-preset/prompt-fragment", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/expression-preset/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/expression-preset/bootstrap", "smoke": "non_destructive"}
+      ]
+    },
+    {
+      "id": "danbooru",
+      "name": "Danbooru internal tab and browser handoff",
+      "source_files": [
+        "core/web_session_app.py",
+        "app/web/remote/js/features/danbooruTab.mjs"
+      ],
+      "legacy_dependency": "external",
+      "routes": [
+        {"method": "POST", "path": "/api/danbooru/post", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/danbooru/browser/open", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "artist_thumbnail",
+      "name": "Artist Thumbnail",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/artist_thumbnail_service.py",
+        "app/web/remote/js/features/artistThumbTab.mjs"
+      ],
+      "legacy_dependency": "legacy_compat",
+      "routes": [
+        {"method": "GET", "path": "/api/artist-thumb/state", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/artist-thumb/list", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/artist-thumb/image", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/artist-thumb/favorite-image", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/artist-thumb/favorite", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/artist-thumb/ban", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/artist-thumb/options", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/artist-thumb/download", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/artist-thumb/download", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/artist-thumb/download/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/artist-thumb/random-prompt", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/artist-thumb/generate", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "thumb_character_viewer",
+      "name": "Thumb and Character Viewer",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/character_viewer_service.py",
+        "app/web/remote/js/features/thumbTab.mjs",
+        "app/web/remote/js/features/characterViewerTab.mjs"
+      ],
+      "legacy_dependency": "legacy_compat",
+      "routes": [
+        {"method": "GET", "path": "/api/thumb/state", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/thumb/category/{category_key}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/thumb/image", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/character-viewer/state", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/character-viewer/groups", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/character-viewer/list", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/character-viewer/detail", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/character-viewer/prompt", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/character-viewer/options", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/character-viewer/thumbnail", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/character-viewer/generate", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "result_history_viewer_actions",
+      "name": "Result, history, viewer, image actions, and metadata",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/web_session_context.py",
+        "core/result_image_payload_service.py",
+        "app/web/remote/js/features/resultImageActions.mjs",
+        "app/web/remote/js/features/resultHistory.mjs",
+        "app/web/remote/js/features/metadataViewer.mjs",
+        "app/web/remote/js/features/img2imgPanel.mjs",
+        "app/web/remote/js/features/resultEnhance.mjs"
+      ],
+      "legacy_dependency": "legacy_compat",
+      "routes": [
+        {"method": "GET", "path": "/api/latest-image", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/result/image/png", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/result/image/original", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/result/clipboard/png", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/clipboard/png", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/result/asset/current", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/result/asset/saved", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/image/fetch", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/metadata/extract", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/result/metadata", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/history/list", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/history/open-folder", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/viewer/list", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/viewer/thumb/{path:path}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/viewer/image/{path:path}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/viewer/image/", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/viewer/meta", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/viewer/meta/{path:path}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/viewer/{kind}/{path:path}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/history/image/{history_id}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/history/thumb/{history_id}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/history/meta/{history_id}", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/history/unsaved/save-all", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/history/unsaved/download", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/history/{kind}/{history_id}", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/result/open-location", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/result/action/reroll", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/result/action/queue", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/result/action/save", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/result/action/delete", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/image-action/{action}", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "websocket_shared_state",
+      "name": "WebSocket shared Remote Web state and generation commands",
+      "source_files": [
+        "core/web_session_app.py",
+        "core/web_session_context.py",
+        "app/web/remote/js/core/remoteWsClient.mjs",
+        "app/web/remote/js/core/wsDispatcher.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "WEBSOCKET", "path": "/ws", "smoke": "non_destructive"}
+      ],
+      "websocket_commands": [
+        "sync",
+        "set_mode",
+        "set_param",
+        "set_options",
+        "set_active_ratings",
+        "random",
+        "generate",
+        "verify_api",
+        "clear_api",
+        "probe_api",
+        "cloudflared_start",
+        "cloudflared_stop",
+        "image_action",
+        "result_image_action",
+        "result_enhance",
+        "set_result_enhance_config",
+        "queue_action"
+      ]
+    }
+  ],
+  "required_live_smoke": [
+    "random prompt latency after warmup",
+    "Generate dispatch with configured NovelAI/WebUI/ComfyUI or controlled test doubles",
+    "Enhance",
+    "img2img",
+    "Vibe Transfer Storage",
+    "Character Reference",
+    "Artist Thumb random prompt and generate",
+    "Danbooru internal post view and internal popup/browser handoff",
+    "setup/API save and clear",
+    "history save/delete/download"
+  ]
+}

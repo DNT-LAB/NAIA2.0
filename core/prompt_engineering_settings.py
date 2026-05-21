@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -48,6 +49,59 @@ def sanitize_preset_name(preset_name: str) -> str:
     return sanitized.strip()
 
 
+def _default_save_root() -> Path:
+    user_data_dir = os.environ.get("NAIA_USER_DATA_DIR")
+    if user_data_dir:
+        return Path(user_data_dir).expanduser().resolve() / "save"
+    return Path("save")
+
+
+def _coerce_save_root(save_root: str | Path | None = None) -> Path:
+    return Path(save_root).expanduser().resolve() if save_root is not None else _default_save_root()
+
+
+def _legacy_save_fallback_enabled() -> bool:
+    if os.environ.get("NAIA_DISABLE_LEGACY_SAVE_FALLBACK") == "1":
+        return False
+    if os.environ.get("NAIA_ELECTRON") == "1":
+        return False
+    return True
+
+
+def _save_read_roots(save_root: str | Path | None = None) -> list[Path]:
+    primary = _coerce_save_root(save_root)
+    roots = [primary]
+    legacy = Path("save").resolve()
+    if _legacy_save_fallback_enabled() and legacy != primary.resolve():
+        roots.append(legacy)
+    return roots
+
+
+def _existing_save_file(relative: str | Path, save_root: str | Path | None = None) -> Path:
+    primary = _coerce_save_root(save_root) / relative
+    if primary.exists():
+        return primary
+    for root in _save_read_roots(save_root)[1:]:
+        candidate = root / relative
+        if candidate.exists():
+            return candidate
+    return primary
+
+
+def _existing_save_dirs(relative: str | Path, save_root: str | Path | None = None) -> list[Path]:
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+    for root in _save_read_roots(save_root):
+        candidate = root / relative
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if candidate.exists() and candidate.is_dir():
+            dirs.append(candidate)
+    return dirs
+
+
 def normalize_preset_main_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
     normalized = dict(settings or {})
     for key in PRESET_RUNTIME_STATE_KEYS:
@@ -59,20 +113,20 @@ def default_preprocessing_options() -> dict[str, bool]:
     return {key: False for key in PREPROCESSING_OPTION_KEYS}
 
 
-def default_prompt_engineering_settings() -> dict[str, Any]:
+def default_prompt_engineering_settings(save_root: str | Path | None = None) -> dict[str, Any]:
     return {
         "pre_prompt": "",
         "post_prompt": "",
         "auto_hide_prompt": "",
         "preprocessing_options": default_preprocessing_options(),
-        "e621_settings": load_e621_settings(),
-        "danbooru_weight_settings": load_danbooru_weight_settings(),
+        "e621_settings": load_e621_settings(save_root=save_root),
+        "danbooru_weight_settings": load_danbooru_weight_settings(save_root=save_root),
     }
 
 
-def preset_dir(mode: str | None = None) -> Path:
+def preset_dir(mode: str | None = None, *, save_root: str | Path | None = None) -> Path:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = Path("save") / "presets" / mode_key
+    path = _coerce_save_root(save_root) / "presets" / mode_key
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -82,27 +136,30 @@ def is_user_preset_file(path: Path) -> bool:
     return bool(name) and name != "*randomized" and not name.endswith(".hires")
 
 
-def list_preset_names(mode: str | None = None) -> list[str]:
-    directory = preset_dir(mode)
+def list_preset_names(mode: str | None = None, *, save_root: str | Path | None = None) -> list[str]:
+    mode_key = normalize_prompt_engineering_mode(mode)
+    directories = _existing_save_dirs(Path("presets") / mode_key, save_root)
     names = [
         path.stem
+        for directory in directories
         for path in sorted(directory.glob("*.json"))
         if path.is_file() and is_user_preset_file(path)
     ]
+    names = list(dict.fromkeys(names))
     if "default" in names:
         names.remove("default")
         names.insert(0, "default")
     return names
 
 
-def mode_settings_file(mode: str | None = None) -> Path:
+def mode_settings_file(mode: str | None = None, *, save_root: str | Path | None = None) -> Path:
     mode_key = normalize_prompt_engineering_mode(mode)
-    return Path("save") / f"PromptEngineeringModule_{mode_key}.json"
+    return _coerce_save_root(save_root) / f"PromptEngineeringModule_{mode_key}.json"
 
 
-def load_mode_settings(mode: str | None = None) -> dict[str, Any]:
+def load_mode_settings(mode: str | None = None, *, save_root: str | Path | None = None) -> dict[str, Any]:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = mode_settings_file(mode_key)
+    path = _existing_save_file(f"PromptEngineeringModule_{mode_key}.json", save_root)
     if not path.exists():
         return {}
     try:
@@ -113,9 +170,9 @@ def load_mode_settings(mode: str | None = None) -> dict[str, Any]:
     return copy.deepcopy(settings) if isinstance(settings, dict) else {}
 
 
-def save_mode_settings(mode: str | None, settings: dict[str, Any]) -> None:
+def save_mode_settings(mode: str | None, settings: dict[str, Any], *, save_root: str | Path | None = None) -> None:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = mode_settings_file(mode_key)
+    path = mode_settings_file(mode_key, save_root=save_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({mode_key: copy.deepcopy(settings)}, ensure_ascii=False, indent=4),
@@ -123,8 +180,8 @@ def save_mode_settings(mode: str | None, settings: dict[str, Any]) -> None:
     )
 
 
-def load_e621_settings() -> dict[str, Any]:
-    path = Path("save") / "e621_boost_user.json"
+def load_e621_settings(*, save_root: str | Path | None = None) -> dict[str, Any]:
+    path = _existing_save_file("e621_boost_user.json", save_root)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
@@ -132,14 +189,14 @@ def load_e621_settings() -> dict[str, Any]:
         return {"weight": 0.0, "hidden_tags": [], "mode": "stable"}
 
 
-def save_e621_settings(settings: dict[str, Any]) -> None:
-    path = Path("save") / "e621_boost_user.json"
+def save_e621_settings(settings: dict[str, Any], *, save_root: str | Path | None = None) -> None:
+    path = _coerce_save_root(save_root) / "e621_boost_user.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(dict(settings or {}), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def load_danbooru_weight_settings() -> dict[str, Any]:
-    path = Path("save") / "danbooru_auto_weight_user.json"
+def load_danbooru_weight_settings(*, save_root: str | Path | None = None) -> dict[str, Any]:
+    path = _existing_save_file("danbooru_auto_weight_user.json", save_root)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
@@ -147,19 +204,19 @@ def load_danbooru_weight_settings() -> dict[str, Any]:
         return {"magnitude": 3}
 
 
-def save_danbooru_weight_settings(settings: dict[str, Any]) -> None:
-    path = Path("save") / "danbooru_auto_weight_user.json"
+def save_danbooru_weight_settings(settings: dict[str, Any], *, save_root: str | Path | None = None) -> None:
+    path = _coerce_save_root(save_root) / "danbooru_auto_weight_user.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(dict(settings or {}), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def last_used_preset_file() -> Path:
-    return Path("save") / "presets" / "last_used_preset.json"
+def last_used_preset_file(*, save_root: str | Path | None = None) -> Path:
+    return _coerce_save_root(save_root) / "presets" / "last_used_preset.json"
 
 
-def load_last_used_preset(mode: str | None = None) -> str | None:
+def load_last_used_preset(mode: str | None = None, *, save_root: str | Path | None = None) -> str | None:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = last_used_preset_file()
+    path = _existing_save_file(Path("presets") / "last_used_preset.json", save_root)
     if not path.exists():
         return None
     try:
@@ -172,9 +229,9 @@ def load_last_used_preset(mode: str | None = None) -> str | None:
     return str(value) if value else None
 
 
-def save_last_used_preset(mode: str | None, preset_name: str) -> None:
+def save_last_used_preset(mode: str | None, preset_name: str, *, save_root: str | Path | None = None) -> None:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = last_used_preset_file()
+    path = last_used_preset_file(save_root=save_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -186,13 +243,18 @@ def save_last_used_preset(mode: str | None, preset_name: str) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def randomized_pool_file() -> Path:
-    return Path("save") / "presets" / "randomized_pool.json"
+def randomized_pool_file(*, save_root: str | Path | None = None) -> Path:
+    return _coerce_save_root(save_root) / "presets" / "randomized_pool.json"
 
 
-def load_randomized_pool(mode: str | None, preset_names: list[str] | None = None) -> list[str]:
+def load_randomized_pool(
+    mode: str | None,
+    preset_names: list[str] | None = None,
+    *,
+    save_root: str | Path | None = None,
+) -> list[str]:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = randomized_pool_file()
+    path = _existing_save_file(Path("presets") / "randomized_pool.json", save_root)
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     except Exception:
@@ -200,7 +262,7 @@ def load_randomized_pool(mode: str | None, preset_names: list[str] | None = None
     pool = data.get(mode_key, []) if isinstance(data, dict) else []
     if not isinstance(pool, list):
         pool = []
-    valid = set(preset_names or list_preset_names(mode_key))
+    valid = set(preset_names or list_preset_names(mode_key, save_root=save_root))
     seen = set()
     restored = []
     for raw_name in pool:
@@ -216,9 +278,9 @@ def load_randomized_pool(mode: str | None, preset_names: list[str] | None = None
     return restored
 
 
-def save_randomized_pool(mode: str | None, pool: list[str]) -> None:
+def save_randomized_pool(mode: str | None, pool: list[str], *, save_root: str | Path | None = None) -> None:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = randomized_pool_file()
+    path = randomized_pool_file(save_root=save_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
@@ -230,11 +292,17 @@ def save_randomized_pool(mode: str | None, pool: list[str]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def read_preset_data(preset_name: str, mode: str | None = None) -> dict[str, Any]:
+def read_preset_data(
+    preset_name: str,
+    mode: str | None = None,
+    *,
+    save_root: str | Path | None = None,
+) -> dict[str, Any]:
     name = sanitize_preset_name(preset_name)
     if not name:
         return {}
-    path = preset_dir(mode) / f"{name}.json"
+    mode_key = normalize_prompt_engineering_mode(mode)
+    path = _existing_save_file(Path("presets") / mode_key / f"{name}.json", save_root)
     if not path.exists():
         return {}
     try:
@@ -244,14 +312,20 @@ def read_preset_data(preset_name: str, mode: str | None = None) -> dict[str, Any
         return {}
 
 
-def write_preset_data(preset_name: str, mode: str | None, data: dict[str, Any]) -> None:
+def write_preset_data(
+    preset_name: str,
+    mode: str | None,
+    data: dict[str, Any],
+    *,
+    save_root: str | Path | None = None,
+) -> None:
     name = sanitize_preset_name(preset_name)
     if not name:
         raise ValueError("Preset name is required")
     payload = copy.deepcopy(data or {})
     if isinstance(payload.get("main_settings"), dict):
         payload["main_settings"] = normalize_preset_main_settings(payload["main_settings"])
-    path = preset_dir(mode) / f"{name}.json"
+    path = preset_dir(mode, save_root=save_root) / f"{name}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -275,32 +349,71 @@ def merge_settings(base: dict[str, Any], updates: dict[str, Any] | None) -> dict
 
 
 class PromptEngineeringHeadlessStore:
-    def __init__(self, mode_getter: Callable[[], str] | None = None):
+    def __init__(
+        self,
+        mode_getter: Callable[[], str] | None = None,
+        *,
+        save_root: str | Path | None = None,
+    ):
         self._mode_getter = mode_getter or (lambda: "NAI")
+        self._save_root = _coerce_save_root(save_root)
         self._states: dict[str, dict[str, Any]] = {}
 
     def mode(self, mode: str | None = None) -> str:
         return normalize_prompt_engineering_mode(mode or self._mode_getter())
 
     def _load_state(self, mode: str) -> dict[str, Any]:
-        preset_names = list_preset_names(mode)
-        current_preset = load_last_used_preset(mode)
+        preset_names = self.list_preset_names(mode)
+        current_preset = self.load_last_used_preset(mode)
         if current_preset not in preset_names:
             current_preset = "default" if "default" in preset_names else "(프리셋 없음)"
 
-        settings = default_prompt_engineering_settings()
-        settings = merge_settings(settings, load_mode_settings(mode))
+        settings = default_prompt_engineering_settings(save_root=self._save_root)
+        settings = merge_settings(settings, self.load_mode_settings(mode))
         if current_preset in preset_names:
-            preset_data = read_preset_data(current_preset, mode)
+            preset_data = self.read_preset_data(current_preset, mode)
             settings = merge_settings(settings, preset_data.get("module_settings") or {})
 
-        randomized_pool = load_randomized_pool(mode, preset_names)
+        randomized_pool = self.load_randomized_pool(mode, preset_names)
         return {
             "settings": settings,
             "preset_list": preset_names,
             "current_preset": current_preset,
             "randomized_preset_list": randomized_pool,
         }
+
+    def list_preset_names(self, mode: str | None = None) -> list[str]:
+        return list_preset_names(mode, save_root=self._save_root)
+
+    def read_preset_data(self, preset_name: str, mode: str | None = None) -> dict[str, Any]:
+        return read_preset_data(preset_name, mode, save_root=self._save_root)
+
+    def write_preset_data(self, preset_name: str, mode: str | None, data: dict[str, Any]) -> None:
+        write_preset_data(preset_name, mode, data, save_root=self._save_root)
+
+    def load_mode_settings(self, mode: str | None = None) -> dict[str, Any]:
+        return load_mode_settings(mode, save_root=self._save_root)
+
+    def save_mode_settings(self, mode: str | None, settings: dict[str, Any]) -> None:
+        save_mode_settings(mode, settings, save_root=self._save_root)
+
+    def load_last_used_preset(self, mode: str | None = None) -> str | None:
+        return load_last_used_preset(mode, save_root=self._save_root)
+
+    def save_last_used_preset(self, mode: str | None, preset_name: str) -> None:
+        save_last_used_preset(mode, preset_name, save_root=self._save_root)
+
+    def load_randomized_pool(self, mode: str | None, preset_names: list[str] | None = None) -> list[str]:
+        return load_randomized_pool(mode, preset_names, save_root=self._save_root)
+
+    def save_randomized_pool(self, mode: str | None, pool: list[str]) -> None:
+        save_randomized_pool(mode, pool, save_root=self._save_root)
+
+    def save_e621_settings(self, settings: dict[str, Any]) -> None:
+        save_e621_settings(settings, save_root=self._save_root)
+
+    def save_danbooru_weight_settings(self, settings: dict[str, Any]) -> None:
+        save_danbooru_weight_settings(settings, save_root=self._save_root)
 
     def state(self, mode: str | None = None) -> dict[str, Any]:
         mode_key = self.mode(mode)
@@ -341,10 +454,10 @@ class PromptEngineeringHeadlessStore:
             return True
         if name not in state["preset_list"]:
             return False
-        preset_data = read_preset_data(name, self.mode(mode))
+        preset_data = self.read_preset_data(name, self.mode(mode))
         state["settings"] = merge_settings(state["settings"], preset_data.get("module_settings") or {})
         state["current_preset"] = name
-        save_last_used_preset(self.mode(mode), name)
+        self.save_last_used_preset(self.mode(mode), name)
         return True
 
     def save_current_preset(self, mode: str | None = None) -> tuple[bool, str]:
@@ -353,11 +466,11 @@ class PromptEngineeringHeadlessStore:
         name = state["current_preset"]
         if name in {"", "(프리셋 없음)", "*randomized"}:
             return False, "저장할 현재 프리셋이 없습니다."
-        data = read_preset_data(name, mode_key)
+        data = self.read_preset_data(name, mode_key)
         data["api_mode"] = mode_key
         data["module_settings"] = copy.deepcopy(state["settings"])
-        write_preset_data(name, mode_key, data)
-        save_last_used_preset(mode_key, name)
+        self.write_preset_data(name, mode_key, data)
+        self.save_last_used_preset(mode_key, name)
         return True, name
 
     def create_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
@@ -370,7 +483,7 @@ class PromptEngineeringHeadlessStore:
             "module_settings": copy.deepcopy(self.state(mode_key)["settings"]),
             "main_settings": {},
         }
-        write_preset_data(name, mode_key, data)
+        self.write_preset_data(name, mode_key, data)
         self.refresh(mode_key)
         self.set_preset(name, mode_key)
         return True, name
@@ -384,7 +497,7 @@ class PromptEngineeringHeadlessStore:
             return False, "기본 프리셋은 삭제할 수 없습니다."
         if name == "*randomized":
             return False, "랜덤 프리셋 모드는 삭제할 수 없습니다."
-        path = preset_dir(mode_key) / f"{name}.json"
+        path = preset_dir(mode_key, save_root=self._save_root) / f"{name}.json"
         if not path.exists():
             return False, f"프리셋을 찾을 수 없습니다: {name}"
         path.unlink()
@@ -398,7 +511,7 @@ class PromptEngineeringHeadlessStore:
         if name not in self.randomized_available_presets(mode_key):
             return False, "랜덤 풀에 추가할 수 없는 프리셋입니다."
         state["randomized_preset_list"].append(name)
-        save_randomized_pool(mode_key, state["randomized_preset_list"])
+        self.save_randomized_pool(mode_key, state["randomized_preset_list"])
         return True, name
 
     def remove_randomized_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
@@ -408,13 +521,13 @@ class PromptEngineeringHeadlessStore:
         if name not in state["randomized_preset_list"]:
             return False, "랜덤 풀에 없는 프리셋입니다."
         state["randomized_preset_list"].remove(name)
-        save_randomized_pool(mode_key, state["randomized_preset_list"])
+        self.save_randomized_pool(mode_key, state["randomized_preset_list"])
         return True, name
 
     def clear_randomized_presets(self, mode: str | None = None) -> tuple[bool, str]:
         mode_key = self.mode(mode)
         self.state(mode_key)["randomized_preset_list"] = []
-        save_randomized_pool(mode_key, [])
+        self.save_randomized_pool(mode_key, [])
         return True, ""
 
 
@@ -423,6 +536,11 @@ def get_prompt_engineering_store(app_context) -> PromptEngineeringHeadlessStore:
     if isinstance(store, PromptEngineeringHeadlessStore):
         return store
     mode_getter = getattr(app_context, "get_api_mode", None)
-    store = PromptEngineeringHeadlessStore(mode_getter if callable(mode_getter) else None)
+    runtime_paths = getattr(app_context, "runtime_paths", None)
+    save_root = getattr(runtime_paths, "save_dir", None)
+    store = PromptEngineeringHeadlessStore(
+        mode_getter if callable(mode_getter) else None,
+        save_root=save_root,
+    )
     setattr(app_context, "prompt_engineering_headless_store", store)
     return store

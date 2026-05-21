@@ -54,28 +54,34 @@ def _get_platform_key() -> tuple[str, str]:
     return key
 
 
-def _get_executable_path() -> Path:
+def _binary_dir(bin_dir: str | Path | None = None) -> Path:
+    return Path(bin_dir) if bin_dir is not None else _BIN_DIR
+
+
+def _get_executable_path(bin_dir: str | Path | None = None) -> Path:
+    base_dir = _binary_dir(bin_dir)
     system, machine = _get_platform_key()
     if system == "darwin":
-        return _BIN_DIR / "cloudflared"
+        return base_dir / "cloudflared"
     filename = _DOWNLOAD_URLS[(system, machine)].split("/")[-1]
-    return _BIN_DIR / filename
+    return base_dir / filename
 
 
-def _download(on_progress=None) -> Path:
+def _download(on_progress=None, *, bin_dir: str | Path | None = None) -> Path:
     """cloudflared 바이너리 다운로드. on_progress(desc) 콜백으로 상태 전달."""
-    exe = _get_executable_path()
+    base_dir = _binary_dir(bin_dir)
+    exe = _get_executable_path(base_dir)
     if exe.exists():
         return exe
 
-    _BIN_DIR.mkdir(parents=True, exist_ok=True)
+    base_dir.mkdir(parents=True, exist_ok=True)
     system, machine = _get_platform_key()
     url = _DOWNLOAD_URLS[(system, machine)]
 
     if on_progress:
         on_progress("Cloudflared 바이너리 다운로드 중...")
 
-    dest = _BIN_DIR / url.split("/")[-1]
+    dest = base_dir / url.split("/")[-1]
     with urlopen(url) as resp, dest.open("wb") as dst:
         shutil.copyfileobj(resp, dst)
 
@@ -86,7 +92,7 @@ def _download(on_progress=None) -> Path:
             for member in tar.getmembers():
                 if member.name.endswith("cloudflared") and member.isfile():
                     member.name = "cloudflared"
-                    tar.extract(member, _BIN_DIR)
+                    tar.extract(member, base_dir)
                     break
         dest.unlink()
 
@@ -115,7 +121,13 @@ def _readline_timeout(stream, timeout: float) -> str | None:
     return None
 
 
-def start_tunnel(port: int, on_progress=None, timeout: float = 30.0) -> TunnelInfo:
+def start_tunnel(
+    port: int,
+    on_progress=None,
+    timeout: float = 30.0,
+    *,
+    bin_dir: str | Path | None = None,
+) -> TunnelInfo:
     """
     Cloudflared Quick Tunnel 시작.
 
@@ -129,7 +141,7 @@ def start_tunnel(port: int, on_progress=None, timeout: float = 30.0) -> TunnelIn
     if port in _running:
         return _running[port]
 
-    exe = _download(on_progress=on_progress)
+    exe = _download(on_progress=on_progress, bin_dir=bin_dir)
 
     if on_progress:
         on_progress("Cloudflared 터널 연결 중...")
@@ -198,8 +210,8 @@ def stop_all() -> None:
         stop_tunnel(port)
 
 
-def remove_binary() -> None:
+def remove_binary(*, bin_dir: str | Path | None = None) -> None:
     """다운로드된 바이너리 삭제."""
-    exe = _get_executable_path()
+    exe = _get_executable_path(bin_dir)
     if exe.exists():
         exe.unlink()

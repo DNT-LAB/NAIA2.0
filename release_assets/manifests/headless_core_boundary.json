@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "status": "reviewed-round5",
+  "purpose": "Identify core/ files that remain legacy desktop support and must not be required by the headless Electron backend.",
+  "legacy_core_files": [
+    {
+      "id": "desktop_app_context",
+      "path": "core/context.py",
+      "classification": "legacy_desktop_context",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "core/context.py"
+      ],
+      "notes": "Desktop AppContext wires ModernMainWindow, ModeAwareModuleManager, ImageCrudController, and legacy desktop event semantics."
+    },
+    {
+      "id": "desktop_image_crud_controller",
+      "path": "core/image_crud_controller.py",
+      "classification": "legacy_desktop_image_save_controller",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "core/image_crud_controller.py"
+      ],
+      "notes": "Desktop image-window save/classification controller. Headless save/output flows use WebSessionContext and headless result services."
+    },
+    {
+      "id": "desktop_mode_aware_manager",
+      "path": "core/mode_ware_manager.py",
+      "classification": "legacy_desktop_module_visibility_manager",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "core/mode_ware_manager.py"
+      ],
+      "notes": "Manages legacy middle-module mode visibility through AppContext callbacks."
+    },
+    {
+      "id": "desktop_tag_data_manager",
+      "path": "core/tag_data_manager.py",
+      "classification": "legacy_desktop_autocomplete_dictionary_adapter",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "core/tag_data_manager.py"
+      ],
+      "notes": "Desktop autocomplete adapter over generated root dictionaries. Headless autocomplete uses kr_tag_loader and TagSearchIndex."
+    },
+    {
+      "id": "desktop_dll_fix",
+      "path": "core/dll_fix.py",
+      "classification": "legacy_desktop_windows_dll_bootstrap",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "core/dll_fix.py"
+      ],
+      "notes": "Imported by legacy_desktop/NAIA_cold_v4.py for desktop Windows DLL loading. Not a headless backend startup dependency."
+    }
+  ]
+}

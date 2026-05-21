@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_py_module_sizes():
-    tree = ast.parse((ROOT / "ui" / "web_wrapper.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "legacy_desktop" / "ui" / "web_wrapper.py").read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == "_WebShellPopupWindow":
             for child in node.body:
@@ -19,7 +19,7 @@ def _load_py_module_sizes():
 
 
 def _load_js_module_sizes():
-    text = (ROOT / "ui" / "remote_web" / "app.js").read_text(encoding="utf-8")
+    text = (ROOT / "app" / "web" / "remote" / "app.js").read_text(encoding="utf-8")
     match = re.search(r"const DETACHED_MODULE_GEOMETRY = \{(?P<body>.*?)\};", text, re.S)
     if not match:
         raise AssertionError("DETACHED_MODULE_GEOMETRY not found")
@@ -33,7 +33,7 @@ def _load_js_module_sizes():
 
 
 def _load_css_module_widths():
-    text = (ROOT / "ui" / "remote_web" / "style.css").read_text(encoding="utf-8")
+    text = (ROOT / "app" / "web" / "remote" / "style.css").read_text(encoding="utf-8")
     widths = {}
     for match in re.finditer(
         r"(?P<selectors>(?:body\.detached-module\.detached-module-[^{,]+,?\s*)+)"
@@ -48,7 +48,14 @@ def _load_css_module_widths():
 
 
 def test_qt_host_detached_module_sizes_match_js_window_features():
-    assert _load_py_module_sizes() == _load_js_module_sizes()
+    py_sizes = _load_py_module_sizes()
+    js_sizes = _load_js_module_sizes()
+
+    assert set(py_sizes) <= set(js_sizes)
+    assert {
+        module_id: js_sizes[module_id]
+        for module_id in py_sizes
+    } == py_sizes
 
 
 def test_css_detached_module_widths_match_js_window_features():

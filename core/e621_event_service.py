@@ -18,11 +18,13 @@ class E621EventService:
     def __init__(self, app_context: Any):
         self.app_context = app_context
         self.root = Path(getattr(app_context, "repo_root", Path.cwd()))
+        runtime_paths = getattr(app_context, "runtime_paths", None)
+        save_root = runtime_paths.save_dir if runtime_paths is not None else self.root / "save"
         self.data_path = self.root / "data" / "e621_data"
-        self.save_dir = self.root / "save" / "e621_event"
-        self.settings_path = self.root / "save" / "e621_module_v2_settings.json"
-        self.starred_path = self.root / "save" / "e621_starred_v2.json"
-        self.deleted_path = self.root / "save" / "e621_deleted_v2.json"
+        self.save_dir = save_root / "e621_event"
+        self.settings_path = save_root / "e621_module_v2_settings.json"
+        self.starred_path = save_root / "e621_starred_v2.json"
+        self.deleted_path = save_root / "e621_deleted_v2.json"
         self.data: dict[str, Any] | None = None
         self.search_text = ""
         self.view_mode = "default"

@@ -58,14 +58,36 @@ def _collect_filter_tags(path: Path) -> list[Any]:
         return [line.strip() for line in f if line.strip()]
 
 
+def _unique_data_roots(repo_root: Path, data_roots: list[str | Path] | tuple[str | Path, ...] | None) -> list[Path]:
+    roots: list[Path] = []
+    for raw in [*(data_roots or []), repo_root / "data"]:
+        path = Path(raw)
+        if not path.is_absolute():
+            path = repo_root / path
+        resolved = path.resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _first_existing(data_roots: list[Path], relative: str | Path) -> Path:
+    for data_root in data_roots:
+        path = data_root / relative
+        if path.exists():
+            return path
+    return data_roots[0] / relative
+
+
 def load_kr_tag_records(
     root: str | Path | None = None,
     *,
+    data_roots: list[str | Path] | tuple[str | Path, ...] | None = None,
     warn: Callable[[str], None] | None = None,
 ) -> KrTagLoadResult:
     """Load the merged KR tag corpus without depending on RemoteBridge."""
 
     repo_root = Path(root) if root is not None else PROJECT_ROOT
+    resolved_data_roots = _unique_data_roots(repo_root, data_roots)
     warnings: list[str] = []
     raw: dict[str, dict[str, Any]] = {}
 
@@ -74,37 +96,36 @@ def load_kr_tag_records(
         legacy_path = repo_root / "legacy_desktop" / "ui" / "interactive" / "interactive"
         if legacy_path.exists():
             interactive_path = legacy_path
-    if not interactive_path.exists():
-        _warn(warnings, f"tag data not found at {interactive_path}", warn)
-        return KrTagLoadResult(raw=raw, warnings=warnings)
+    if interactive_path.exists():
+        with interactive_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
 
-    with interactive_path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    for tag, info in data.items():
-        if not isinstance(info, MutableMapping):
-            continue
-        keywords = str(info.get("keywords_kr", "") or "")
-        tag_norm = _normalize_tag_text(tag)
-        raw[tag_norm.lower()] = {
-            **info,
-            "_tag": tag_norm,
-            "_src": 0,
-            "_kw_lower": keywords.replace("<", "").replace(">", "").lower() if keywords else "",
-            "_desc_lower": str(info.get("description", "") or "").lower(),
-        }
+        for tag, info in data.items():
+            if not isinstance(info, MutableMapping):
+                continue
+            keywords = str(info.get("keywords_kr", "") or "")
+            tag_norm = _normalize_tag_text(tag)
+            raw[tag_norm.lower()] = {
+                **info,
+                "_tag": tag_norm,
+                "_src": 0,
+                "_kw_lower": keywords.replace("<", "").replace(">", "").lower() if keywords else "",
+                "_desc_lower": str(info.get("description", "") or "").lower(),
+            }
+    else:
+        _warn(warnings, f"tag data not found at {interactive_path}; using parquet/filter bootstrap only", warn)
     interactive_count = len(raw)
 
     parquet_stats = merge_parquet_tag_records(
         raw,
         [
-            (repo_root / "data" / "KR_tags.parquet", 1),
-            (repo_root / "data" / "e621_KR_tags.parquet", 2),
+            (_first_existing(resolved_data_roots, "KR_tags.parquet"), 1),
+            (_first_existing(resolved_data_roots, "e621_KR_tags.parquet"), 2),
         ],
     )
     override_stats = apply_translation_overrides(
         raw,
-        repo_root / "data" / "tag_index" / "tag_translation_overrides.json",
+        _first_existing(resolved_data_roots, Path("tag_index") / "tag_translation_overrides.json"),
     )
     for error in parquet_stats.errors + override_stats.errors:
         _warn(warnings, f"tag metadata merge warning - {error}", warn)
@@ -121,7 +142,10 @@ def load_kr_tag_records(
     ]
     filter_count = 0
     for relative_path, source_key, group_name in filter_sources:
-        path = repo_root / relative_path
+        clean_relative = str(relative_path)
+        if clean_relative.startswith("data/"):
+            clean_relative = clean_relative[len("data/"):]
+        path = _first_existing(resolved_data_roots, clean_relative)
         if not path.exists():
             continue
         try:

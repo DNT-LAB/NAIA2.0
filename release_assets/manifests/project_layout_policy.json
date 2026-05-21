@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "purpose": "Project layout and runtime boundary policy for Python Headless Web as the default product and Electron as an optional shell.",
+  "policy_document": "PROJECT_LAYOUT_POLICY.md",
+  "evidence_manifests": {
+    "round_completion": "release_assets/manifests/project_layout_round_completion.json",
+    "cleanup_candidates": "release_assets/manifests/project_cleanup_candidates.json",
+    "runtime_distribution_tracks": "release_assets/manifests/runtime_distribution_tracks.json"
+  },
+  "default_runtime": {
+    "name": "Python Headless Web",
+    "entrypoint": "NAIA_web_headless.py",
+    "requirements": "requirements-headless.txt",
+    "launchers": [
+      "run_NAIA_web.bat",
+      "run_NAIA_web.command",
+      "run_NAIA.bat",
+      "run_NAIA.command"
+    ],
+    "required_launcher_terms": [
+      "NAIA_web_headless.py",
+      "requirements-headless.txt"
+    ],
+    "forbidden_launcher_terms": [
+      "npm",
+      "electron",
+      "node_modules",
+      "docker"
+    ]
+  },
+  "canonical_remote_web": {
+    "path": "app/web/remote",
+    "legacy_path": "ui/remote_web",
+    "legacy_path_status": "resolved_removed",
+    "required_files": [
+      "index.html",
+      "style.css",
+      "app.js"
+    ],
+    "resolver_module": "app.web.assets",
+    "resolver_function": "resolve_remote_web_dir"
+  },
+  "optional_electron": {
+    "root": "app/electron",
+    "main": "app/electron/main/main.cjs",
+    "package_manifest": "app/electron/package.json",
+    "allowed_roots": [
+      "app/electron",
+      "release_package",
+      "release_assets",
+      "tools",
+      "tests/electron_shell"
+    ],
+    "root_residue_warning_paths": [
+      "main.cjs",
+      "package.json",
+      "package-lock.json",
+      "node_modules"
+    ]
+  },
+  "runtime_only_roots": [
+    "logs",
+    "output",
+    "save",
+    "temp",
+    "tmp",
+    "app/electron/dist",
+    "app/electron/node_modules",
+    "release_package"
+  ],
+  "rules": [
+    "Default clone users run Python Headless Web without npm, Electron, or Docker.",
+    "Electron is an optional shell around the same Python backend and Remote Web UI.",
+    "The canonical Remote Web source is app/web/remote.",
+    "Legacy PyQt6 Desktop is reference/quarantine only.",
+    "Cleanup/delete candidates must be recorded before destructive source cleanup.",
+    "Round 9 cleanup is complete only as a non-destructive candidate inventory until explicit delete approval is granted.",
+    "Clone-user Web execution and Electron release shell packaging are separate tracks over the same backend and same Remote Web source."
+  ]
+}

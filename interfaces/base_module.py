@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
-from PyQt6.QtWidgets import QWidget
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from core.context import AppContext
     from core.prompt_context import PromptContext
+    QWidget = Any
 
 class BaseMiddleModule(ABC):
     """중간 패널 모듈의 기본 인터페이스 (호환성 플래그 추가)"""

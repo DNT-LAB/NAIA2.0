@@ -1,0 +1,135 @@
+{
+  "name": "naia-electron-shell",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Electron shell prototype for the NAIA headless Remote Web backend.",
+  "main": "main/main.cjs",
+  "scripts": {
+    "check": "node --check main/main.cjs && node --check preload/preload.cjs",
+    "release:check": "npm run check && npm run test:main-contract && npm run check:runtime && npm run check:source-layout && npm run check:shell-contract && npm run check:distribution && npm run check:approval-gate && npm run check:feature-contract && npm run check:packaged-feature-smoke && npm run check:runtime-writes && npm run check:asset-classification && npm run check:legacy-pyqt && npm run check:core-boundary",
+    "goal:audit": "cd ../.. && python tools/audit_final_goal_completion.py",
+    "deps:plan": "cd ../.. && python tools/bootstrap_electron_dependencies.py",
+    "deps:plan:summary": "cd ../.. && python tools/bootstrap_electron_dependencies.py --summary",
+    "deps:install": "cd ../.. && python tools/bootstrap_electron_dependencies.py --strategy install --execute --yes",
+    "deps:ci": "cd ../.. && python tools/bootstrap_electron_dependencies.py --strategy ci --execute --yes",
+    "release:evidence": "cd ../.. && python tools/write_release_evidence_report.py",
+    "release:evidence:summary": "cd ../.. && python tools/write_release_evidence_report.py --no-output --skip-electron-runtime --summary",
+    "release:evidence:fresh": "cd ../.. && python tools/write_release_evidence_report.py --fresh-staged-workspace --skip-electron-runtime --output app/electron/dist/fresh_release_evidence.json",
+    "release:evidence:fresh:summary": "cd ../.. && python tools/write_release_evidence_report.py --fresh-staged-workspace --skip-electron-runtime --no-output --summary",
+    "release:workspace": "cd ../.. && python tools/run_release_workspace.py --output app/electron/dist/release_workspace_evidence.json",
+    "release:workspace:summary": "cd ../.. && python tools/run_release_workspace.py --summary",
+    "release:workspace:evidence": "cd ../.. && python tools/run_release_workspace.py --output app/electron/dist/release_workspace_evidence.json --include-final-evidence",
+    "release:workspace:evidence:summary": "cd ../.. && python tools/run_release_workspace.py --include-final-evidence --summary",
+    "release:workspace:bundled-python": "cd ../.. && python tools/run_release_workspace.py --output app/electron/dist/release_workspace_evidence.json --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python",
+    "release:workspace:bundled-python:evidence": "cd ../.. && python tools/run_release_workspace.py --output app/electron/dist/release_workspace_evidence.json --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python --include-final-evidence",
+    "release:workspace:clean-python": "cd ../.. && python tools/run_release_workspace.py --output app/electron/dist/release_workspace_evidence.json --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python",
+    "release:workspace:clean-python:evidence": "cd ../.. && python tools/run_release_workspace.py --output app/electron/dist/release_workspace_evidence.json --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --include-final-evidence",
+    "release:portable:workspace:plan": "cd ../.. && python tools/run_electron_portable_workspace.py --dry-run",
+    "release:portable:workspace:plan:summary": "cd ../.. && python tools/run_electron_portable_workspace.py --dry-run --no-output --summary",
+    "release:portable:workspace": "cd ../.. && python tools/run_electron_portable_workspace.py",
+    "release:portable:workspace:bundled-python": "cd ../.. && python tools/run_electron_portable_workspace.py --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python",
+    "release:portable:workspace:clean-python": "cd ../.. && python tools/run_electron_portable_workspace.py --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python",
+    "release:final:plan": "cd ../.. && python tools/run_final_electron_release_gate.py",
+    "release:final:plan:summary": "cd ../.. && python tools/run_final_electron_release_gate.py --summary --output \"\" --portable-output \"\"",
+    "release:final": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:final:smoke": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:final:install": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --install-deps --yes --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:final:install:scan": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --install-deps --yes --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:final:bundled-python": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:final:bundled-python:scan": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:final:clean-python": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:final:clean-python:scan": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "preflight:electron-deps": "cd ../.. && python tools/check_electron_dependency_readiness.py",
+    "preflight:electron-deps:summary": "cd ../.. && python tools/check_electron_dependency_readiness.py --summary",
+    "goal:audit:summary": "cd ../.. && python tools/audit_final_goal_completion.py --summary",
+    "check:runtime": "cd ../.. && python tools/check_backend_runtime_strategy.py --electron-main app/electron/main/main.cjs",
+    "check:source-layout": "cd ../.. && python tools/check_source_layout_contract.py",
+    "test:main-contract": "node --test test/main_contract.test.cjs",
+    "check:shell-contract": "cd ../.. && python tools/check_electron_shell_contract.py",
+    "check:distribution": "cd ../.. && python tools/check_release_distribution_strategy.py",
+    "check:approval-gate": "cd ../.. && python tools/check_final_release_approval_gate.py",
+    "check:feature-contract": "cd ../.. && python tools/check_remote_web_feature_contract.py --repo-root .",
+    "check:packaged-feature-smoke": "cd ../.. && python tools/check_packaged_electron_feature_smoke.py",
+    "check:runtime-writes": "cd ../.. && python tools/check_runtime_write_policy.py --repo-root .",
+    "check:asset-classification": "cd ../.. && python tools/check_runtime_asset_classification.py",
+    "check:legacy-pyqt": "cd ../.. && python tools/check_legacy_pyqt_surface_classification.py",
+    "check:core-boundary": "cd ../.. && python tools/check_headless_core_boundary.py",
+    "stage:backend": "cd ../.. && python tools/stage_electron_release.py --source . --target app/electron/dist/NAIA-Web --copy",
+    "stage:python-runtime": "cd ../.. && python tools/stage_python_runtime.py app/electron/dist/NAIA-Web %NAIA_PYTHON_RUNTIME_DIR% --copy",
+    "preflight:release": "cd ../.. && python tools/check_release_preflight.py app/electron/dist/NAIA-Web",
+    "preflight:release:bundled-python": "cd ../.. && python tools/check_release_preflight.py app/electron/dist/NAIA-Web --require-bundled-python",
+    "preflight:packaging-inputs": "cd ../.. && python tools/check_electron_packaging_inputs.py",
+    "preflight:packaging-inputs:bundled-python": "cd ../.. && python tools/check_electron_packaging_inputs.py --require-bundled-python",
+    "clean:staged": "cd ../.. && python tools/check_clean_machine_readiness.py app/electron/dist/NAIA-Web --kind staged-release",
+    "clean:staged:bundled-python": "cd ../.. && python tools/check_clean_machine_readiness.py app/electron/dist/NAIA-Web --kind staged-release --require-bundled-python",
+    "clean:packaged": "cd ../.. && python tools/check_clean_machine_readiness.py app/electron/dist/win-unpacked --kind packaged-electron",
+    "clean:packaged:bundled-python": "cd ../.. && python tools/check_clean_machine_readiness.py app/electron/dist/win-unpacked --kind packaged-electron --require-bundled-python",
+    "measure:release": "cd ../.. && python tools/measure_release_artifact.py app/electron/dist/NAIA-Web",
+    "measure:release:defender": "cd ../.. && python tools/measure_release_artifact.py app/electron/dist/NAIA-Web --defender-scan",
+    "measure:release:defender:required": "cd ../.. && python tools/measure_release_artifact.py app/electron/dist/NAIA-Web --require-defender-scan",
+    "smoke:backend": "cd ../.. && python tools/smoke_staged_backend.py app/electron/dist/NAIA-Web/resources/naia-backend --user-data app/electron/dist/NAIA-Web/user-data",
+    "smoke:web-contract": "cd ../.. && python tools/smoke_remote_web_contract.py app/electron/dist/NAIA-Web/resources/naia-backend --user-data app/electron/dist/NAIA-Web/user-data",
+    "smoke:packaged": "cd ../.. && python tools/smoke_packaged_electron_app.py app/electron/dist/win-unpacked",
+    "smoke:packaged:structure": "cd ../.. && python tools/smoke_packaged_electron_app.py app/electron/dist/win-unpacked --skip-backend-smoke",
+    "smoke:electron:source": "cd ../.. && python tools/smoke_electron_cdp.py --mode source",
+    "smoke:electron:packaged": "cd ../.. && python tools/smoke_electron_cdp.py --mode packaged --package-root app/electron/dist/win-unpacked",
+    "release:stage": "npm run stage:backend && npm run preflight:release && npm run smoke:backend && npm run smoke:web-contract",
+    "release:portable": "npm run release:portable:workspace:clean-python",
+    "release:portable:bundled-python": "npm run release:portable:workspace:bundled-python",
+    "release:portable:clean-python": "npm run release:portable:workspace:clean-python",
+    "release:portable:smoke": "cd ../.. && python tools/run_electron_portable_workspace.py --run-electron-cdp --electron-timeout 180",
+    "release:portable:smoke:scan": "cd ../.. && python tools/run_electron_portable_workspace.py --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:portable:bundled-python:smoke": "cd ../.. && python tools/run_electron_portable_workspace.py --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python --run-electron-cdp --electron-timeout 180",
+    "release:portable:bundled-python:smoke:scan": "cd ../.. && python tools/run_electron_portable_workspace.py --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:portable:clean-python:smoke": "cd ../.. && python tools/run_electron_portable_workspace.py --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --run-electron-cdp --electron-timeout 180",
+    "release:portable:clean-python:smoke:scan": "cd ../.. && python tools/run_electron_portable_workspace.py --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "start": "electron .",
+    "pack:dir": "electron-builder --dir --config package.json",
+    "dist:win-dir": "electron-builder --win dir --config package.json"
+  },
+  "devDependencies": {
+    "electron": "42.1.0",
+    "electron-builder": "26.8.1"
+  },
+  "build": {
+    "appId": "lab.dnt.naia",
+    "productName": "NAIA",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "assets/**",
+      "main/**",
+      "preload/**",
+      "renderer/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/NAIA-Web/resources/naia-backend",
+        "to": "naia-backend"
+      }
+    ],
+    "extraFiles": [
+      {
+        "from": "dist/NAIA-Web/README_RELEASE.txt",
+        "to": "README_RELEASE.txt"
+      },
+      {
+        "from": "dist/NAIA-Web/RELEASE_MANIFEST.json",
+        "to": "RELEASE_MANIFEST.json"
+      },
+      {
+        "from": "dist/NAIA-Web/CHECKSUMS.sha256",
+        "to": "CHECKSUMS.sha256"
+      }
+    ],
+    "afterPack": "packaging/afterPack.cjs",
+    "win": {
+      "target": "dir",
+      "icon": "assets/naia.ico",
+      "signAndEditExecutable": false,
+      "forceCodeSigning": false
+    }
+  }
+}

@@ -235,15 +235,45 @@ class PromptProcessor:
     def _run_hooks(self, hook_point: str, context: PromptContext) -> PromptContext:
         """등록된 훅들을 순서대로 실행합니다."""
         hooks_to_run = self.app_context.get_pipeline_hooks(self.PIPELINE_NAME, hook_point)
-        
+        prompt_run_id = str(getattr(context, "metadata", {}).get("prompt_run_id") or "")
+        hook_recorder = getattr(self.app_context, "record_prompt_run_hook", None)
+
         for module_hook in hooks_to_run:
+            module_title = self._hook_title(module_hook)
             try:
                 # 각 훅은 context를 받아 수정 후 다시 반환
                 context = module_hook.execute_pipeline_hook(context)
+                if prompt_run_id and callable(hook_recorder):
+                    hook_recorder(
+                        prompt_run_id,
+                        hook_point=hook_point,
+                        module=module_title,
+                        status="completed",
+                    )
             except Exception as e:
-                print(f"파이프라인 훅 실행 중 오류 ({module_hook.get_title()}): {e}")
+                if prompt_run_id and callable(hook_recorder):
+                    hook_recorder(
+                        prompt_run_id,
+                        hook_point=hook_point,
+                        module=module_title,
+                        status="failed",
+                        error=str(e),
+                    )
+                print(f"파이프라인 훅 실행 중 오류 ({module_title}): {e}")
 
         return context
+
+    @staticmethod
+    def _hook_title(module_hook: Any) -> str:
+        getter = getattr(module_hook, "get_title", None)
+        if callable(getter):
+            try:
+                title = str(getter() or "")
+                if title:
+                    return title
+            except Exception:
+                pass
+        return module_hook.__class__.__name__
 
     def _apply_remote_auto_resolution_preset_defaults(self, settings: dict, api_mode: str) -> None:
         """Remote Web Auto Gen also needs the server-owned resolution preset state."""

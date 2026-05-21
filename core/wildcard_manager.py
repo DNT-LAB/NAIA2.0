@@ -9,13 +9,24 @@ _WEIGHT_PATTERN = re.compile(r'^(\d+):(?!:)(.*)')
 _DEFAULT_WEIGHT = 100
 
 class WildcardManager:
-    def __init__(self):
-        self.wildcards_dir = os.path.join(os.getcwd(), 'wildcards')
+    def __init__(self, wildcards_dir=None):
+        self.wildcards_dir = str(self._resolve_wildcards_dir(wildcards_dir))
         self.wildcard_dict_tree = {}
         self.instant_wildcard_dict = {}  # 인스턴트 와일드카드 딕셔너리
         self.instant_wildcard_tree = {}  # 인스턴트 와일드카드 트리 구조
         self.reload_callbacks = []
         self.activate_wildcards()
+
+    @staticmethod
+    def _resolve_wildcards_dir(wildcards_dir=None) -> Path:
+        if wildcards_dir:
+            return Path(wildcards_dir).expanduser().resolve()
+        user_data_dir = os.environ.get("NAIA_USER_DATA_DIR")
+        if user_data_dir:
+            return (Path(user_data_dir).expanduser() / "wildcards").resolve()
+        if os.environ.get("NAIA_PORTABLE"):
+            return (Path(os.getcwd()) / "user-data" / "wildcards").resolve()
+        return (Path(os.getcwd()) / "wildcards").resolve()
 
     def activate_wildcards(self):
         """

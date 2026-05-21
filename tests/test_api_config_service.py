@@ -1,8 +1,10 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.api_verification import VerifyResult
 from core.web_session_context import InMemoryTokenManager
+from utils import cloudflared
 
 
 def test_api_config_service_verifies_and_persists_nai_token(tmp_path):
@@ -109,3 +111,19 @@ def test_cloudflared_service_controls_tunnel_state():
     assert stopped["success"] is True
     assert stopped["active"] is False
     assert calls == [("start", 7281), ("stop", 7281)]
+
+
+def test_cloudflared_service_keeps_runtime_binary_dir(tmp_path):
+    binary_dir = tmp_path / "downloads" / "cloudflared"
+    service = CloudflaredService(port=7281, bin_dir=binary_dir)
+
+    assert service.bin_dir == binary_dir
+
+
+def test_cloudflared_executable_path_can_use_runtime_binary_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(cloudflared.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(cloudflared.platform, "machine", lambda: "AMD64")
+
+    exe = cloudflared._get_executable_path(tmp_path)
+
+    assert exe == Path(tmp_path) / "cloudflared-windows-amd64.exe"

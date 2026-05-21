@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "status": "draft",
+  "scope": "Runtime write and download policy for headless/Electron release work",
+  "blocked_source_write_targets": [
+    "repository data/**",
+    "repository ui/**",
+    "repository root files"
+  ],
+  "required_runtime_download_owners": [
+    {
+      "feature": "cloudflared_download_implementation",
+      "source": "utils/cloudflared.py",
+      "must_contain": [
+        "bin_dir: str | Path | None = None",
+        "base_dir = _binary_dir(bin_dir)"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "feature": "cloudflared_helper",
+      "source": "core/web_session_context.py",
+      "must_contain": [
+        "self.runtime_paths.downloads_dir / \"cloudflared\""
+      ],
+      "must_not_contain": []
+    },
+    {
+      "feature": "artist_thumbnail_download_implementation",
+      "source": "core/artist_thumbnail_service.py",
+      "must_contain": [
+        "target_path.parent.mkdir(parents=True, exist_ok=True)",
+        "with urllib.request.urlopen(request, timeout=30) as response",
+        "temp_path.replace(target_path)"
+      ],
+      "must_not_contain": []
+    },
+    {
+      "feature": "artist_thumbnail_dictionary",
+      "source": "core/web_session_app.py",
+      "must_contain": [
+        "runtime_paths.ui_assets_dir / \"artist_thumb\""
+      ],
+      "must_not_contain": []
+    },
+    {
+      "feature": "event_preset_download",
+      "source": "core/event_preset_download_service.py",
+      "must_contain": [
+        "self.data_root / \"event_preset\" / \"naia_prompt_preset\"",
+        "self.thumbnail_root / \"event_preset_thumbnail\""
+      ],
+      "must_not_contain": [
+        "self.repo_root / \"data\" / \"event_preset\"",
+        "self.repo_root / \"data\" / \"event_preset_thumbnail\""
+      ]
+    },
+    {
+      "feature": "event_preset_service_read_preference",
+      "source": "core/event_preset_service.py",
+      "must_contain": [
+        "self.data_root = Path(data_root)",
+        "self.thumbnail_root = Path(thumbnail_root)",
+        "runtime_data_path = self.data_root / \"event_preset\" / \"naia_prompt_preset\"",
+        "runtime_thumbnail_path = self.thumbnail_root / \"event_preset_thumbnail\""
+      ],
+      "must_not_contain": []
+    },
+    {
+      "feature": "remote_web_image_fetch",
+      "source": "core/web_session_app.py",
+      "must_contain": [
+        "with urllib.request.urlopen(request, timeout=15) as response"
+      ],
+      "must_not_contain": [
+        "Path(context.repo_root) / \"data\" / \"image_fetch\"",
+        "Path(context.repo_root) / \"ui\" / \"image_fetch\""
+      ]
+    },
+    {
+      "feature": "runtime_install_manager_tag_archive_download",
+      "source": "core/runtime_install_manager.py",
+      "must_contain": [
+        "return self.runtime_paths.data_dir / \"tags\"",
+        "temp_zip = self.runtime_paths.downloads_dir / \"naia_tags.zip.download_tmp\"",
+        "with urllib.request.urlopen(request, **open_kwargs) as response",
+        "temp_target.replace(target)"
+      ],
+      "must_not_contain": [
+        "Path(\"data\")",
+        "Path(\"ui\")"
+      ]
+    }
+  ],
+  "download_api_scan": {
+    "source_roots": [
+      "core",
+      "app",
+      "utils"
+    ],
+    "patterns": [
+      "urllib.request.urlopen",
+      "urlopen("
+    ],
+    "ignored_roots": [
+      "app/electron/dist",
+      "app/electron/node_modules"
+    ],
+    "ignored_sources": []
+  },
+  "known_compatibility_exceptions": [
+    {
+      "feature": "legacy_save_read_fallback",
+      "reason": "Existing user state under repo save/ remains a read fallback for direct headless/source migration, but Electron/App runs disable it so portable user-data stays isolated."
+    },
+    {
+      "feature": "source_bootstrap_data_reads",
+      "reason": "Read-only bootstrap data under data/ remains allowed when explicitly shipped by release manifests."
+    },
+    {
+      "feature": "development_tools",
+      "reason": "Development-only tools may read/write local fixtures but must remain release-excluded."
+    }
+  ]
+}

@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "status": "reviewed-round3",
+  "purpose": "Classify large local files and user/runtime assets before Electron packaging or desktop-code deletion.",
+  "decisions": [
+    {
+      "id": "random_prompt_runner_cache",
+      "patterns": [
+        "naia_temp_rows.parquet",
+        "data/naia_temp_rows.parquet"
+      ],
+      "decision": "runtime_generated_cache",
+      "runtime_destination": "cache/naia_temp_rows.parquet",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "naia_temp_rows.parquet"
+      ],
+      "owner": "core/web_session_app.py",
+      "notes": "Remote Web save_runner now writes to runtime cache. Repository root/data copies remain read-only legacy fallbacks."
+    },
+    {
+      "id": "artist_thumbnail_bundles",
+      "patterns": [
+        "data/artist_thumbnail.json",
+        "data/artist_thumbnail_nai.json",
+        "data/artist_thumbnail_anima.json"
+      ],
+      "decision": "runtime_downloaded_optional_bundle",
+      "runtime_destination": "ui_assets/artist_thumb",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "data/artist_thumbnail*.json"
+      ],
+      "owner": "core/artist_thumbnail_service.py",
+      "notes": "Large Artist Thumbnail dictionaries are downloaded or reused from runtime user data, with repository data files as legacy read fallbacks only."
+    },
+    {
+      "id": "downloaded_tag_archives",
+      "patterns": [
+        "data/tags/**",
+        "data/tagger/**"
+      ],
+      "decision": "runtime_downloaded_data",
+      "runtime_destination": "data/tags",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "data/tags/**",
+        "data/tagger/**"
+      ],
+      "owner": "core/runtime_install_manager.py",
+      "notes": "Bulk Hugging Face tag archives are first-run/runtime data and must be installed into runtime user data, not bundled into the Electron package."
+    },
+    {
+      "id": "event_preset_runtime_assets",
+      "patterns": [
+        "data/event_preset/naia_prompt_preset/**",
+        "ui/event_preset/naia_prompt_preset/**",
+        "data/event_preset_thumbnail"
+      ],
+      "decision": "runtime_downloaded_optional_bundle",
+      "runtime_destination": "data/event_preset and ui_assets/event_preset_thumbnail",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "data/event_preset/**",
+        "ui/event_preset/**",
+        "data/event_preset_thumbnail"
+      ],
+      "owner": "core/event_preset_download_service.py",
+      "notes": "Event Preset downloads now write to runtime data/ui_assets; legacy repository copies are read fallbacks."
+    },
+    {
+      "id": "generated_tag_dictionaries",
+      "patterns": [
+        "artist_dictionary.py",
+        "danbooru_character.py",
+        "result_dict_copyright.py",
+        "result_dupl.py",
+        "data/e621_boost_static.py"
+      ],
+      "decision": "runtime_generated_index",
+      "runtime_destination": "cache/tag_index",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "artist_dictionary.py",
+        "danbooru_character.py",
+        "result_dict_copyright.py",
+        "result_dupl.py",
+        "data/e621_boost_static.py"
+      ],
+      "owner": "core/kr_tag_loader.py",
+      "notes": "Generated dictionaries must not be hand-bundled as root Python modules. A later round should convert required pieces into source data or runtime-built cache."
+    },
+    {
+      "id": "root_image_samples",
+      "patterns": [
+        "00001.png",
+        "20250827_*.png",
+        "manual_*.png",
+        "test*.png",
+        "temp_image.png",
+        "character_reference_*_result.png",
+        "vibe_transfer_*_result.png",
+        "stickman_canvas_tmp.webp"
+      ],
+      "decision": "local_sample_or_debug",
+      "runtime_destination": "none",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "00001.png",
+        "20250827_*.png",
+        "manual_*.png",
+        "test*.png",
+        "temp_image.png",
+        "character_reference_*_result.png",
+        "vibe_transfer_*_result.png",
+        "stickman_canvas_tmp.webp"
+      ],
+      "owner": "none",
+      "notes": "Root-level generated images and debug samples are local artifacts only."
+    },
+    {
+      "id": "vibe_transfer_files",
+      "patterns": [
+        "*.naiv4vibe",
+        "*.naiv4vibebundle"
+      ],
+      "decision": "user_imported_runtime_asset",
+      "runtime_destination": "bundles/vibe_transfer",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "*.naiv4vibe",
+        "*.naiv4vibebundle"
+      ],
+      "owner": "core/web_session_context.py",
+      "notes": "Vibe files are user-imported or downloaded runtime data and should be copied/imported into runtime bundles/save flows, not shipped from repository root."
+    },
+    {
+      "id": "local_state_and_outputs",
+      "patterns": [
+        "save/**",
+        "logs/**",
+        "output/**",
+        "tmp/**",
+        "temp/**",
+        "user-data/**"
+      ],
+      "decision": "runtime_user_state",
+      "runtime_destination": "save/logs/output/cache/downloads/user-data",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "save/**",
+        "logs/**",
+        "output/**",
+        "tmp/**",
+        "temp/**",
+        "user-data/**"
+      ],
+      "owner": "app/backend/runtime/paths.py",
+      "notes": "Mutable user state must remain outside bundled backend resources."
+    },
+    {
+      "id": "user_wildcards",
+      "patterns": [
+        "wildcards/**"
+      ],
+      "decision": "runtime_user_state",
+      "runtime_destination": "wildcards",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "wildcards/**"
+      ],
+      "owner": "core/wildcard_manager.py",
+      "notes": "User wildcard files are mutable runtime state. Packaged/headless runs read them from user-data/wildcards, while source checkouts keep the legacy repository wildcards fallback."
+    },
+    {
+      "id": "bootstrap_source_assets",
+      "patterns": [
+        "app/web/remote/**",
+        "workflows/**",
+        "data/source/**",
+        "data/clothes_list.txt",
+        "data/color.txt",
+        "data/characteristic_list.txt",
+        "data/taglist/*.json"
+      ],
+      "decision": "bundle_source_bootstrap",
+      "runtime_destination": "resource_root",
+      "release_action": "include",
+      "release_include_patterns": [
+        "app/web/remote/**",
+        "workflows/**",
+        "data/source/**",
+        "data/clothes_list.txt",
+        "data/color.txt",
+        "data/characteristic_list.txt",
+        "data/taglist/*.json"
+      ],
+      "owner": "release_assets/manifests/release_include_exclude_draft.json",
+      "notes": "Only immutable source/bootstrap assets are bundled by default. Runtime data is owned by the install manager."
+    },
+    {
+      "id": "installer_seed_templates",
+      "patterns": [
+        "app_data_template/**",
+        "release_assets/samples/**"
+      ],
+      "decision": "bundle_source_bootstrap",
+      "runtime_destination": "user-data template/sample seed",
+      "release_action": "include",
+      "release_include_patterns": [
+        "app_data_template/**",
+        "release_assets/samples/**"
+      ],
+      "owner": "core/runtime_install_manager.py",
+      "notes": "Initial Electron installs may ship only reviewed templates and small sample seed files. Operational tag data is downloaded into runtime user data."
+    }
+  ]
+}

@@ -68,14 +68,46 @@ class PromptGenerationService:
             event_stream.apply_context_freeze(context)
         return context
 
-    def set_current_context(self, source_row: pd.Series, settings: dict) -> PromptContext:
+    def set_current_context(
+        self,
+        source_row: pd.Series,
+        settings: dict,
+        *,
+        source: str = "prompt",
+        request_id: str = "",
+        prompt_run_id: str = "",
+        track_run: bool = True,
+        metadata: dict[str, Any] | None = None,
+    ) -> PromptContext:
         self.app_context.current_source_row = source_row
-        self.app_context.current_prompt_context = self._create_initial_context(source_row, settings)
+        context = self._create_initial_context(source_row, settings)
+        if track_run:
+            starter = getattr(self.app_context, "start_prompt_run", None)
+            if callable(starter):
+                run = starter(
+                    source=source,
+                    source_row=source_row,
+                    settings=settings,
+                    external_request_id=request_id,
+                    metadata=metadata,
+                    prompt_run_id=prompt_run_id,
+                )
+                context.metadata["prompt_run_id"] = run.prompt_run_id
+                context.metadata["prompt_source"] = source
+                if request_id:
+                    context.metadata["external_request_id"] = request_id
+        self.app_context.current_prompt_context = context
         return self.app_context.current_prompt_context
 
     def process_current_context(self) -> PromptGenerationResult:
-        final_context = self.processor.process()
-        return self.build_result(final_context)
+        try:
+            final_context = self.processor.process()
+        except Exception as exc:
+            self._fail_context_run(getattr(self.app_context, "current_prompt_context", None), str(exc))
+            raise
+        result = self.build_result(final_context)
+        self._finalize_context_run(result)
+        return result
 
     def build_result(self, context: PromptContext | None) -> PromptGenerationResult:
         if not context:
@@ -131,7 +163,7 @@ class PromptGenerationService:
             source_row = self.normalize_instant_source(instant_row)
             if source_row is None:
                 return None
-            self.set_current_context(source_row, settings)
+            self.set_current_context(source_row, settings, track_run=False)
             final_context = self.processor.process()
             return final_context.final_prompt if final_context else None
         except Exception as e:
@@ -171,3 +203,27 @@ class PromptGenerationService:
         if source_row is None:
             return PromptSourcePreparation(error="처리할 프롬프트가 더 이상 없습니다.")
         return PromptSourcePreparation(source_row=source_row, remaining_count=search_results.get_count())
+
+    def _finalize_context_run(self, result: PromptGenerationResult) -> None:
+        context = result.context
+        if context is None:
+            return
+        prompt_run_id = str(getattr(context, "metadata", {}).get("prompt_run_id") or "")
+        if not prompt_run_id:
+            return
+        if result.error:
+            self._fail_context_run(context, result.error)
+            return
+        completer = getattr(self.app_context, "complete_prompt_run", None)
+        if callable(completer):
+            completer(prompt_run_id, context=context, final_prompt=result.final_prompt or "")
+
+    def _fail_context_run(self, context: PromptContext | None, error: str) -> None:
+        if context is None:
+            return
+        prompt_run_id = str(getattr(context, "metadata", {}).get("prompt_run_id") or "")
+        if not prompt_run_id:
+            return
+        marker = getattr(self.app_context, "fail_prompt_run", None)
+        if callable(marker):
+            marker(prompt_run_id, error, context=context)

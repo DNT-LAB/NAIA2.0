@@ -70,13 +70,35 @@ class EventPresetService:
         },
     }
 
-    def __init__(self, repo_root: Path | str):
+    def __init__(
+        self,
+        repo_root: Path | str,
+        *,
+        data_root: Path | str | None = None,
+        thumbnail_root: Path | str | None = None,
+    ):
         self.repo_root = Path(repo_root)
-        preferred_data_path = self.repo_root / "data" / "event_preset" / "naia_prompt_preset"
-        legacy_data_path = self.repo_root / "ui" / "event_preset" / "naia_prompt_preset"
-        self.data_path = preferred_data_path if preferred_data_path.exists() or not legacy_data_path.exists() else legacy_data_path
+        self.data_root = Path(data_root) if data_root is not None else self.repo_root / "data"
+        self.thumbnail_root = Path(thumbnail_root) if thumbnail_root is not None else self.repo_root / "data"
+        runtime_data_path = self.data_root / "event_preset" / "naia_prompt_preset"
+        legacy_data_path = self.repo_root / "data" / "event_preset" / "naia_prompt_preset"
+        legacy_ui_data_path = self.repo_root / "ui" / "event_preset" / "naia_prompt_preset"
+        if runtime_data_path.exists():
+            self.data_path = runtime_data_path
+        elif legacy_data_path.exists():
+            self.data_path = legacy_data_path
+        elif legacy_ui_data_path.exists():
+            self.data_path = legacy_ui_data_path
+        else:
+            self.data_path = runtime_data_path
         self.translation_path = self.repo_root / "core" / "event_preset" / "event_preset_category_translations_ko.json"
-        self.thumbnail_path = self.repo_root / "data" / "event_preset_thumbnail"
+        runtime_thumbnail_path = self.thumbnail_root / "event_preset_thumbnail"
+        legacy_thumbnail_path = self.repo_root / "data" / "event_preset_thumbnail"
+        self.thumbnail_path = (
+            runtime_thumbnail_path
+            if runtime_thumbnail_path.exists() or not legacy_thumbnail_path.exists()
+            else legacy_thumbnail_path
+        )
         self._data_manager = EventPresetDataManager(self.data_path)
         self._taxonomy: TaxonomyEngine | None = None
         self._recommendation: RecommendationEngine | None = None
@@ -127,8 +149,8 @@ class EventPresetService:
                 "message": message,
             },
             "paths": {
-                "main": str(self.data_path.relative_to(self.repo_root)),
-                "thumbnails": str(self.thumbnail_path.relative_to(self.repo_root)),
+                "main": self._display_path(self.data_path),
+                "thumbnails": self._display_path(self.thumbnail_path),
             },
             "counts": {
                 "partitions": len(partitions),
@@ -143,6 +165,12 @@ class EventPresetService:
                 "download": True,
             },
         }
+
+    def _display_path(self, path: Path) -> str:
+        try:
+            return str(path.relative_to(self.repo_root))
+        except ValueError:
+            return str(path)
 
     def _ensure_ready(self) -> None:
         if self._base_ready:

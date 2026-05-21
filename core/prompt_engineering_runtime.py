@@ -7,7 +7,6 @@ from core.prompt_context import PromptContext
 from core.prompt_engineering_settings import (
     get_prompt_engineering_store,
     normalize_preset_main_settings,
-    read_preset_data,
 )
 from core.tag_filter_helpers import apply_tag_filters
 from core.wildcard_processor import split_tags_smart
@@ -512,7 +511,7 @@ class PromptEngineeringRandomizedSubscriber:
             print("⚠️ 랜덤 프리셋 목록이 비어있습니다")
             return
         selected = random.choice(pool)
-        preset_data = read_preset_data(selected, store.mode())
+        preset_data = store.read_preset_data(selected, store.mode())
         module_settings = dict(preset_data.get("module_settings") or {})
         updates = {}
         if "pre_prompt" in module_settings:

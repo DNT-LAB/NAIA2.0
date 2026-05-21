@@ -16199,7 +16199,7 @@ class RemoteBridge(QObject):
 def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
     app = FastAPI(title="NAIA Remote")
 
-    web_dir = _REPO_ROOT / "ui" / "remote_web"
+    web_dir = _REPO_ROOT / "app" / "web" / "remote"
     # Windows registry MIME mappings can report .mjs as text/plain, which
     # Chromium rejects for module scripts.
     mimetypes.add_type("text/javascript", ".mjs")

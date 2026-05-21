@@ -178,8 +178,15 @@ modules = [
     "core.prompt_engineering_runtime",
     "core.conditional_prompt_runtime",
     "core.reference_inset_service",
+    "core.runtime_paths",
     "core.wildcard_manager",
     "core.filter_data_manager",
+    "interfaces.base_module",
+    "interfaces.base_tab_module",
+    "utils.clipboard_image",
+    "app.backend.server",
+    "app.backend.runtime",
+    "app.web",
 ]
 
 class BlockDesktopImports(importlib.abc.MetaPathFinder):
@@ -214,6 +221,36 @@ print(json.dumps({
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload == {
         "ok": True,
-        "modules": 15,
+        "modules": 22,
         "pyqt_imported": False,
     }
+
+
+def test_supported_interfaces_do_not_dynamic_import_pyqt():
+    for path in [
+        Path("interfaces/base_module.py"),
+        Path("interfaces/base_tab_module.py"),
+    ]:
+        text = path.read_text(encoding="utf-8")
+        assert "import_module(\"PyQt6" not in text
+        assert "import_module('PyQt6" not in text
+        assert "from PyQt6" not in text
+        assert "import PyQt6" not in text
+
+
+def test_base_tab_module_fallback_signal_connects_without_qt():
+    from interfaces.base_tab_module import BaseTabModule
+
+    class ExampleTab(BaseTabModule):
+        def get_tab_title(self):
+            return "Example"
+
+        def create_widget(self, parent):
+            return None
+
+    received = []
+    module = ExampleTab()
+    module.parameters_extracted.connect(received.append)
+    module.parameters_extracted.emit({"steps": 28})
+
+    assert received == [{"steps": 28}]

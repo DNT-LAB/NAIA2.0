@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "status": "draft",
+  "purpose": "Document browser API assumptions and Electron-owned shell behavior for the Headless Remote Web app.",
+  "primary_window": {
+    "entry_url_query": "desktop_shell=1&electron_shell=1",
+    "context_isolation": true,
+    "node_integration": false,
+    "minimum_size": {
+      "width": 960,
+      "height": 640
+    }
+  },
+  "browser_api_assumptions": {
+    "websocket": "Remote Web connects to the local FastAPI websocket endpoint through Chromium without preload mediation.",
+    "local_storage": "Chromium profile storage is retained by Electron; server state remains authoritative for shared runtime state.",
+    "session_storage": "Chromium per-window session storage is acceptable for transient UI drafts only.",
+    "file_picker": "HTML file inputs remain the default user file picker path.",
+    "clipboard": "Standard Chromium clipboard and paste behavior is the default path; privileged shell clipboard APIs are not exposed to Remote Web yet.",
+    "drag_drop": "Chromium drag/drop is the default path; dropped files must still be uploaded through existing Remote Web handlers.",
+    "downloads": "Electron redirects browser downloads into the runtime downloads folder.",
+    "popups": "HTTP and HTTPS window.open popups are opened as Electron child windows instead of external OS browser tabs.",
+    "browser_fallback": "Remote Web can request the system browser through naia-open-browser://open?url=..., and Electron intercepts that scheme instead of navigating the app window.",
+    "portable_user_data": "When a packaged app folder contains user-data next to the executable, Electron treats that directory as NAIA_USER_DATA_DIR without requiring a launcher script.",
+    "cdp_smoke": "When NAIA_ELECTRON_REMOTE_DEBUGGING_PORT is set, Electron opens a Chromium remote-debugging endpoint for release smoke automation."
+  },
+  "maintenance_view": {
+    "purpose": "Give users a visible shell-owned recovery surface before the Remote Web UI is available.",
+    "required_controls": [
+      "Restart backend",
+      "Open in browser",
+      "Open logs",
+      "Open data folder"
+    ],
+    "required_log_flow": [
+      "backend stdout and stderr are captured by Electron",
+      "shell state exposes recent backend logs",
+      "maintenance view renders the shell log buffer",
+      "Open logs opens the runtime logs folder"
+    ]
+  },
+  "shell_controls": [
+    "backend state",
+    "restart backend",
+    "open in browser fallback",
+    "open runtime data folder",
+    "open runtime logs folder"
+  ],
+  "hard_rules": [
+    "The Electron main process must not import PyQt6 or legacy_desktop.",
+    "The backend must receive NAIA_USER_DATA_DIR from the Electron shell.",
+    "Browser downloads must not write into the bundled backend resource directory.",
+    "External HTTP popups should stay inside Electron-owned windows unless explicitly routed to the browser fallback.",
+    "The browser fallback scheme must only open HTTP/HTTPS URLs.",
+    "Portable app folders must work without a wrapper script that sets NAIA_PORTABLE.",
+    "CDP remote debugging must be opt-in through NAIA_ELECTRON_REMOTE_DEBUGGING_PORT."
+  ]
+}

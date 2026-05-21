@@ -72,6 +72,22 @@ def test_project_cleanup_candidates_allows_resolved_removed_path_to_be_absent(tm
     assert not any(warning["path"] == "missing_removed_residue.cjs" for warning in payload["warnings"])
 
 
+def test_project_cleanup_candidates_requires_declared_gitignore_patterns(tmp_path):
+    manifest = _current_manifest()
+    manifest["candidate_groups"][0]["gitignore_required_patterns"] = ["/missing-runtime-root/"]
+    manifest_path = tmp_path / "cleanup.json"
+    _write_manifest(manifest_path, manifest)
+
+    payload = check_project_cleanup_candidates(repo_root=Path("."), manifest_path=manifest_path)
+
+    assert payload["ok"] is False
+    assert {
+        "type": "candidate_gitignore_pattern_missing",
+        "path": manifest["candidate_groups"][0]["id"],
+        "reason": ".gitignore must contain /missing-runtime-root/",
+    } in payload["violations"]
+
+
 def test_project_cleanup_candidates_rejects_unsafe_path(tmp_path):
     manifest = _current_manifest()
     manifest["candidate_groups"][0]["paths"].append("../outside")

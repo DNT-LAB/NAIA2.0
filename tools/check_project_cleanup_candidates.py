@@ -10,6 +10,7 @@ from typing import Any
 
 
 DEFAULT_MANIFEST = Path("release_assets/manifests/project_cleanup_candidates.json")
+DEFAULT_GITIGNORE = Path(".gitignore")
 REQUIRED_GROUPS = {
     "root_electron_residue",
     "legacy_remote_web_source",
@@ -81,6 +82,22 @@ def _validate_candidate_group(group: dict[str, Any]) -> list[dict[str, str]]:
             "path": group_id,
             "reason": "candidate group must declare required gates",
         })
+
+    gitignore_patterns = group.get("gitignore_required_patterns", [])
+    if gitignore_patterns is not None and not isinstance(gitignore_patterns, list):
+        violations.append({
+            "type": "candidate_invalid_gitignore_required_patterns",
+            "path": group_id,
+            "reason": "gitignore_required_patterns must be a list when present",
+        })
+    elif isinstance(gitignore_patterns, list):
+        for pattern in gitignore_patterns:
+            if not isinstance(pattern, str) or not pattern.strip():
+                violations.append({
+                    "type": "candidate_invalid_gitignore_required_pattern",
+                    "path": group_id,
+                    "reason": "gitignore_required_patterns must contain non-empty strings",
+                })
     return violations
 
 
@@ -88,9 +105,11 @@ def check_project_cleanup_candidates(
     *,
     repo_root: Path = Path("."),
     manifest_path: Path = DEFAULT_MANIFEST,
+    gitignore_path: Path = DEFAULT_GITIGNORE,
 ) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     manifest_path = manifest_path if manifest_path.is_absolute() else repo_root / manifest_path
+    gitignore_path = gitignore_path if gitignore_path.is_absolute() else repo_root / gitignore_path
 
     if not manifest_path.is_file():
         return {
@@ -120,6 +139,13 @@ def check_project_cleanup_candidates(
         groups = []
 
     seen: set[str] = set()
+    gitignore_lines: set[str] = set()
+    if gitignore_path.is_file():
+        gitignore_lines = {
+            line.strip()
+            for line in gitignore_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
     for group in groups:
         if not isinstance(group, dict):
             violations.append({
@@ -145,6 +171,17 @@ def check_project_cleanup_candidates(
             })
 
         status = str(group.get("status") or "")
+        gitignore_patterns = group.get("gitignore_required_patterns", [])
+        if not isinstance(gitignore_patterns, list):
+            gitignore_patterns = []
+        for pattern in gitignore_patterns:
+            pattern_text = str(pattern).strip()
+            if pattern_text and pattern_text not in gitignore_lines:
+                violations.append({
+                    "type": "candidate_gitignore_pattern_missing",
+                    "path": group_id,
+                    "reason": f".gitignore must contain {pattern_text}",
+                })
         for raw_path in group.get("paths", []):
             path = str(raw_path or "")
             if not path or not _is_safe_relative_path(path) or _path_may_be_glob(path):

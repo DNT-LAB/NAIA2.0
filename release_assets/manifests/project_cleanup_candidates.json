@@ -68,6 +68,18 @@
         "python tools/check_runtime_write_policy.py",
         "python tools/check_project_layout_policy.py"
       ],
+      "gitignore_required_patterns": [
+        "/logs/",
+        "/output/",
+        "save/",
+        "temp/",
+        "/tmp/",
+        "/user-data/",
+        "/wildcards/",
+        "app/electron/dist/",
+        "app/electron/node_modules/",
+        "release_package/"
+      ],
       "requires_explicit_delete_approval": true
     },
     {

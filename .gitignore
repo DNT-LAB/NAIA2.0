@@ -3,16 +3,21 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# 특정 데이터 폴더 무시
+# Runtime/generated roots
+/logs/
+/output/
+save/
+temp/
+/tmp/
+/user-data/
+/wildcards/
 data/tags/
 
 # Cloudflared 바이너리
 utils/.cloudflared_bin/
 
 # 가상환경 폴더
-temp/
 tmp/.bin0/
-save/
 venv/
 env/
 ENV/
@@ -142,14 +147,12 @@ secrets.json
 *.7z
 run_NAIA_test_only.bat
 NAIA_api_timestamps.json
-/output
 naia_temp_rows.parquet
 tabs/hooker/filter_dict/clothes.txt
 tabs/storyteller/save.json
 /tabs/storyteller/default
 /tabs/storyteller/global
 /ui/hooker/filter_dict
-/wildcards
 CLAUDE.md
 app_settings.json
 .claude/settings.local.json

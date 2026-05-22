@@ -137,6 +137,68 @@ def test_conditional_anima_metadata_tags_are_visible_to_conditions():
     assert "person_hit" in context.postfix_tags
 
 
+def test_conditional_anima_artist_metadata_matches_artist_group_aliases():
+    module, row, _neg_edit = _conditional_module()
+    context = PromptContext(source_row=row, settings={}, main_tags=["1girl"])
+    context.metadata["anima_artist"] = "mika pikazo"
+
+    module._apply_rules(
+        context,
+        (
+            "(*mika pikazo):prefix+=raw_artist_hit, "
+            "(*@mika pikazo):main+=anima_artist_hit, "
+            "(*artist:mika pikazo):postfix+=group_artist_hit, "
+            "(*@artist:mika pikazo):postfix+=anima_group_artist_hit"
+        ),
+        [],
+        max_passes=1,
+        stop_on_match=False,
+    )
+
+    assert "raw_artist_hit" in context.prefix_tags
+    assert "anima_artist_hit" in context.main_tags
+    assert "group_artist_hit" in context.postfix_tags
+    assert "anima_group_artist_hit" in context.postfix_tags
+
+
+def test_conditional_plain_at_tag_does_not_create_artist_group_alias():
+    module, row, _neg_edit = _conditional_module()
+    context = PromptContext(source_row=row, settings={}, main_tags=["@mika pikazo"])
+
+    module._apply_rules(
+        context,
+        "(*artist:mika pikazo):prefix+=unexpected_artist_group_hit",
+        [],
+        max_passes=1,
+        stop_on_match=False,
+    )
+
+    assert "unexpected_artist_group_hit" not in context.prefix_tags
+
+
+def test_conditional_anima_metadata_matches_character_and_copyright_group_aliases():
+    module, row, _neg_edit = _conditional_module()
+    context = PromptContext(source_row=row, settings={}, main_tags=["1girl"])
+    context.metadata["anima_character"] = "shiroko sunaookami"
+    context.metadata["anima_copyright"] = r"\(blue archive\)"
+
+    module._apply_rules(
+        context,
+        (
+            "(*character:shiroko sunaookami):prefix+=character_group_hit, "
+            "(*copyright:blue archive):main+=copyright_group_hit, "
+            "(*worktitle:blue archive):postfix+=worktitle_group_hit"
+        ),
+        [],
+        max_passes=1,
+        stop_on_match=False,
+    )
+
+    assert "character_group_hit" in context.prefix_tags
+    assert "copyright_group_hit" in context.main_tags
+    assert "worktitle_group_hit" in context.postfix_tags
+
+
 def test_conditional_exact_condition_matches_weighted_tag_raw_name():
     module, row, _neg_edit = _conditional_module()
     context = PromptContext(

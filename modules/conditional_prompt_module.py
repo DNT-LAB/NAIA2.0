@@ -1114,11 +1114,13 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         return text
 
     @staticmethod
-    def _append_condition_tag_value(out: List[str], value) -> None:
+    def _condition_tag_variants(value) -> List[str]:
+        variants: List[str] = []
+
         def add_candidate(candidate: str) -> None:
             candidate = candidate.strip()
-            if candidate and candidate not in out:
-                out.append(candidate)
+            if candidate and candidate not in variants:
+                variants.append(candidate)
 
         def add_variants(candidate: str) -> None:
             candidate = candidate.strip()
@@ -1135,20 +1137,78 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                     add_candidate(raw[1:-1])
 
         if value is None:
-            return
+            return variants
         if isinstance(value, (list, tuple, set)):
             for item in value:
-                PromptListModifierModule._append_condition_tag_value(out, item)
-            return
+                for variant in PromptListModifierModule._condition_tag_variants(item):
+                    add_candidate(variant)
+            return variants
         if not isinstance(value, str):
-            return
+            return variants
 
         text = value.strip()
         if not text:
-            return
+            return variants
         add_variants(text)
         for tag in split_tags_smart(text):
             add_variants(tag)
+
+        return variants
+
+    @staticmethod
+    def _append_condition_tag_value(out: List[str], value) -> None:
+        for candidate in PromptListModifierModule._condition_tag_variants(value):
+            if candidate and candidate not in out:
+                out.append(candidate)
+
+    @staticmethod
+    def _append_condition_tag_group_value(
+        out: List[str],
+        value,
+        group: str,
+    ) -> None:
+        PromptListModifierModule._append_condition_tag_value(out, value)
+        for tag in PromptListModifierModule._condition_tag_variants(value):
+            if not tag:
+                continue
+            lower = tag.lower()
+            if group == "artist":
+                no_at = tag[1:].strip() if tag.startswith("@") else tag
+                if lower.startswith("artist:"):
+                    no_at = tag[len("artist:"):].strip()
+                elif lower.startswith("@artist:"):
+                    no_at = tag[len("@artist:"):].strip()
+                for candidate in (
+                    no_at,
+                    f"artist:{no_at}",
+                    f"@{no_at}",
+                    f"@artist:{no_at}",
+                ):
+                    if candidate and candidate not in out:
+                        out.append(candidate)
+            elif group == "copyright":
+                normalized = tag
+                for prefix in ("copyright:", "work_title:", "worktitle:"):
+                    if lower.startswith(prefix):
+                        normalized = tag[len(prefix):].strip()
+                        break
+                for candidate in (
+                    normalized,
+                    f"copyright:{normalized}",
+                    f"work_title:{normalized}",
+                    f"worktitle:{normalized}",
+                ):
+                    if candidate and candidate not in out:
+                        out.append(candidate)
+            elif group == "character":
+                normalized = (
+                    tag[len("character:"):].strip()
+                    if lower.startswith("character:")
+                    else tag
+                )
+                for candidate in (normalized, f"character:{normalized}"):
+                    if candidate and candidate not in out:
+                        out.append(candidate)
 
     def _condition_tag_scope(
         self,
@@ -1164,8 +1224,16 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             return all_tags
 
         metadata = getattr(context, 'metadata', None) or {}
-        for key in ('anima_character', 'anima_copyright', 'anima_artist'):
-            self._append_condition_tag_value(all_tags, metadata.get(key))
+        for key, group in (
+            ('anima_character', 'character'),
+            ('anima_copyright', 'copyright'),
+            ('anima_artist', 'artist'),
+        ):
+            self._append_condition_tag_group_value(
+                all_tags,
+                metadata.get(key),
+                group,
+            )
         return all_tags
 
     def _check_condition(self, condition: Dict, prefix_tags: List[str],

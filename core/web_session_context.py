@@ -229,6 +229,8 @@ class WebSessionContext:
     _headless_character_reference_service: Any = field(default=None, init=False, repr=False)
     _headless_vibe_transfer_service: Any = field(default=None, init=False, repr=False)
     _headless_automation_service: Any = field(default=None, init=False, repr=False)
+    _headless_webui_hiresfix_assist_service: Any = field(default=None, init=False, repr=False)
+    _headless_event_stream_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -333,6 +335,24 @@ class WebSessionContext:
 
             service = HeadlessAutomationService(self)
             self._headless_automation_service = service
+        return service
+
+    def _webui_hiresfix_assist_service(self):
+        service = self._headless_webui_hiresfix_assist_service
+        if service is None:
+            from core.headless_webui_hiresfix_assist_service import HeadlessWebuiHiresfixAssistService
+
+            service = HeadlessWebuiHiresfixAssistService(self)
+            self._headless_webui_hiresfix_assist_service = service
+        return service
+
+    def _event_stream_service(self):
+        service = self._headless_event_stream_service
+        if service is None:
+            from core.headless_event_stream_service import HeadlessEventStreamService
+
+            service = HeadlessEventStreamService(self)
+            self._headless_event_stream_service = service
         return service
 
     def _default_token_manager(self) -> TokenStore:
@@ -1373,52 +1393,16 @@ class WebSessionContext:
         return self._automation_service().set_param(key, value)
 
     def _webui_hiresfix_assist_module_state(self) -> dict[str, Any]:
-        state = self._normalized_webui_hiresfix_assist_state(self.webui_hiresfix_assist_state)
-        return self._module_state_payload("webui_hiresfix_assist", state)
+        return self._webui_hiresfix_assist_service().state()
 
     def _set_webui_hiresfix_assist_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        state = self._normalized_webui_hiresfix_assist_state(self.webui_hiresfix_assist_state)
-        if key == "enabled":
-            state["enabled"] = self._coerce_bool(value)
-        elif key == "target":
-            state["target"] = 768 if str(value).strip() == "768" else 512
-        else:
-            return None
-        self.webui_hiresfix_assist_state = state
-        self.remote_params["webui_hiresfix_assist"] = bool(state["enabled"])
-        self.remote_params["webui_hiresfix_assist_target"] = int(state["target"])
-        return self._webui_hiresfix_assist_module_state()
+        return self._webui_hiresfix_assist_service().set_param(key, value)
 
     def _event_stream_module_state(self) -> dict[str, Any]:
-        runtime = getattr(self, "event_stream_runtime", None)
-        if runtime is None:
-            return self._module_state_payload("event_stream", {
-                "available": False,
-                "active": False,
-                "message": "Event Stream runtime is not available.",
-            })
-        state = runtime.get_state() if hasattr(runtime, "get_state") else {}
-        return self._module_state_payload("event_stream", {
-            "available": True,
-            "headless": True,
-            **state,
-        })
+        return self._event_stream_service().state()
 
     def _set_event_stream_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        runtime = getattr(self, "event_stream_runtime", None)
-        if runtime is None:
-            return self._toast("Event Stream runtime is not available.", level="error")
-        if key == "active":
-            enabled = self._coerce_bool(value)
-            if enabled and not runtime.is_active:
-                runtime.start_linear()
-            elif not enabled and runtime.is_active:
-                runtime.stop()
-        elif key == "restart":
-            runtime.start_linear()
-        else:
-            return None
-        return self._event_stream_module_state()
+        return self._event_stream_service().set_param(key, value)
 
     def _e621_event_service(self):
         service = getattr(self, "e621_event_service", None)
@@ -2293,17 +2277,9 @@ class WebSessionContext:
 
     @staticmethod
     def _normalized_webui_hiresfix_assist_state(raw: dict[str, Any] | None = None) -> dict[str, Any]:
-        source = raw if isinstance(raw, dict) else {}
-        target = 768 if str(source.get("target") or source.get("webui_hiresfix_assist_target") or "").strip() == "768" else 512
-        enabled = WebSessionContext._coerce_bool(
-            source.get("enabled", source.get("webui_hiresfix_assist", True))
-        )
-        return {
-            "enabled": enabled,
-            "target": target,
-            "webui_hiresfix_assist": enabled,
-            "webui_hiresfix_assist_target": target,
-        }
+        from core.headless_webui_hiresfix_assist_service import HeadlessWebuiHiresfixAssistService
+
+        return HeadlessWebuiHiresfixAssistService.normalized_state(raw)
 
     def initial_websocket_messages(
         self,

@@ -27,11 +27,6 @@ from app.backend.runtime import RuntimePaths, resolve_runtime_paths
 from core.search_result_model import SearchResultModel
 
 
-HEADLESS_RETIRED_MODULES = {
-    "wildcard_status": "Wildcard Status desktop wrapper is retired in the supported headless runtime.",
-    "ollama": "Ollama desktop assistant controls are retired in the supported headless runtime.",
-}
-
 class TokenStore(Protocol):
     def get_token(self, service_key: str) -> str:
         ...
@@ -179,6 +174,7 @@ class WebSessionContext:
     _headless_pipeline_hook_service: Any = field(default=None, init=False, repr=False)
     _headless_api_control_service: Any = field(default=None, init=False, repr=False)
     _headless_remote_state_service: Any = field(default=None, init=False, repr=False)
+    _headless_module_dispatch_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -420,6 +416,15 @@ class WebSessionContext:
             self._headless_remote_state_service = service
         return service
 
+    def _module_dispatch_service(self):
+        service = self._headless_module_dispatch_service
+        if service is None:
+            from core.headless_module_dispatch_service import HeadlessModuleDispatchService
+
+            service = HeadlessModuleDispatchService(self)
+            self._headless_module_dispatch_service = service
+        return service
+
     def _default_token_manager(self) -> TokenStore:
         from core.secure_token_manager import SecureTokenManager
 
@@ -635,46 +640,7 @@ class WebSessionContext:
         return self._save_service().save_directory_state_payload(client_host)
 
     def module_state_payload(self, module_id: str, client_host: str | None = None) -> dict[str, Any]:
-        clean_id = str(module_id or "").strip()
-        if clean_id == "auto_save":
-            return self.auto_save_state_payload()
-        if clean_id == "save_directory":
-            return self.save_directory_state_payload(client_host)
-        if clean_id == "prompt_engineering":
-            return self._prompt_engineering_module_state()
-        if clean_id == "conditional_prompt":
-            return self._conditional_prompt_module_state()
-        if clean_id == "character":
-            return self._character_module_state()
-        if clean_id == "character_reference":
-            return self._character_reference_module_state()
-        if clean_id == "vibe_transfer":
-            return self._vibe_transfer_module_state()
-        if clean_id == "img2img":
-            return self._img2img_module_state()
-        if clean_id == "automation":
-            return self._automation_module_state()
-        if clean_id == "webui_hiresfix_assist":
-            return self._webui_hiresfix_assist_module_state()
-        if clean_id == "event_stream":
-            return self._event_stream_module_state()
-        if clean_id == "wildcard":
-            return self._wildcard_module_state()
-        if clean_id == "instant_wildcard":
-            return self._instant_wildcard_module_state()
-        if clean_id == "chunk":
-            return self._chunk_module_state()
-        if clean_id == "e621_event":
-            return self._e621_event_module_state()
-        if clean_id in HEADLESS_RETIRED_MODULES:
-            return self._retired_module_state(clean_id)
-        return {
-            "type": "module_state",
-            "module_id": clean_id,
-            "available": False,
-            "headless": True,
-            "state": {},
-        }
+        return self._module_dispatch_service().module_state_payload(module_id, client_host)
 
     def set_module_param(
         self,
@@ -684,39 +650,12 @@ class WebSessionContext:
         *,
         client_host: str | None = None,
     ) -> dict[str, Any] | None:
-        clean_id = str(module_id or "").strip()
-        clean_key = str(key or "").strip()
-        if clean_id == "auto_save":
-            return self._save_service().set_auto_save_param(clean_key, value)
-        if clean_id == "save_directory":
-            return self._save_service().set_save_directory_param(clean_key, value, client_host=client_host)
-        if clean_id == "prompt_engineering":
-            return self._set_prompt_engineering_param(clean_key, value)
-        if clean_id == "conditional_prompt":
-            return self._set_conditional_prompt_param(clean_key, value)
-        if clean_id == "character":
-            return self._set_character_param(clean_key, value)
-        if clean_id == "character_reference":
-            return self._set_character_reference_param(clean_key, value)
-        if clean_id == "vibe_transfer":
-            return self._set_vibe_transfer_param(clean_key, value)
-        if clean_id == "img2img":
-            return self._set_img2img_param(clean_key, value)
-        if clean_id == "automation":
-            return self._set_automation_param(clean_key, value)
-        if clean_id == "webui_hiresfix_assist":
-            return self._set_webui_hiresfix_assist_param(clean_key, value)
-        if clean_id == "event_stream":
-            return self._set_event_stream_param(clean_key, value)
-        if clean_id == "wildcard":
-            return self._set_wildcard_param(clean_key, value)
-        if clean_id == "instant_wildcard":
-            return self._set_instant_wildcard_param(clean_key, value)
-        if clean_id == "e621_event":
-            return self._set_e621_event_param(clean_key, value)
-        if clean_id in HEADLESS_RETIRED_MODULES:
-            return self._retired_module_state(clean_id, action=clean_key)
-        return None
+        return self._module_dispatch_service().set_module_param(
+            module_id,
+            key,
+            value,
+            client_host=client_host,
+        )
 
     def save_unsaved_history(self) -> dict[str, Any]:
         return self._save_service().save_unsaved_history()
@@ -985,18 +924,7 @@ class WebSessionContext:
         return self._prompt_engineering_service().hires_overlay_path(preset_name)
 
     def _retired_module_state(self, module_id: str, *, action: str | None = None) -> dict[str, Any]:
-        message = HEADLESS_RETIRED_MODULES.get(
-            module_id,
-            "Module is retired in the supported headless runtime.",
-        )
-        state = {
-            "available": False,
-            "retired": True,
-            "message": message,
-        }
-        if action:
-            state["last_action"] = action
-        return self._module_state_payload(module_id, state)
+        return self._module_dispatch_service().retired_module_state(module_id, action=action)
 
     def autocomplete_status_payload(self) -> dict[str, Any]:
         return self._session_state_service().autocomplete_status_payload()

@@ -15,6 +15,7 @@ REQUIRED_GROUPS = {
     "root_electron_residue",
     "legacy_remote_web_source",
     "runtime_generated_roots",
+    "development_cache_artifacts",
     "root_sample_and_debug_assets",
     "legacy_desktop_reference",
 }

@@ -385,6 +385,13 @@ After each round:
 - Release staging remains clean and auditable.
 - No user-visible supported WebSession feature regresses.
 
+### Development Cache Candidate Slice - 2026-05-22
+
+- `release_assets/manifests/project_cleanup_candidates.json` now has a dedicated `development_cache_artifacts` candidate group for `.pytest_cache`, `pytest-cache-files-*`, `__pycache__`, coverage output, Hypothesis state, and generic `.cache` output.
+- The candidate is non-destructive and still requires explicit delete approval; this is intentional because pytest/cache ACLs can fail in this workspace and should not be cleaned ad hoc.
+- `release_assets/manifests/release_include_exclude_draft.json` and `runtime_asset_classification.json` now release-exclude the same development cache outputs.
+- Current validation: cleanup candidate, runtime asset classification, layout policy, and release asset manifest tests pass.
+
 ## First Work Item
 
 Start with Round 0. The immediate concrete task is to update `remote_web_feature_contract.json` for install-manager routes and align stale plan wording around bundled wildcards.

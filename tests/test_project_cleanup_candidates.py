@@ -22,7 +22,7 @@ def test_project_cleanup_candidates_pass_current_repository():
 
     assert payload["ok"] is True
     assert payload["manifest"] == "release_assets/manifests/project_cleanup_candidates.json"
-    assert payload["candidate_group_count"] >= 5
+    assert payload["candidate_group_count"] >= 6
     assert payload["delete_approval_required"] is True
     assert payload["violations"] == []
 

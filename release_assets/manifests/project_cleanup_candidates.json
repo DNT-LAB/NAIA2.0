@@ -107,6 +107,38 @@
       "requires_explicit_delete_approval": true
     },
     {
+      "id": "development_cache_artifacts",
+      "owner": "development_artifacts",
+      "status": "runtime_only",
+      "decision": "Keep local test, coverage, and Python bytecode caches out of source ownership and release source staging. Do not delete automatically because ACLs can make cache cleanup destructive in this workspace.",
+      "replacement": "ephemeral test/cache output outside tracked source",
+      "paths": [
+        ".pytest_cache/**",
+        "pytest-cache-files-*/**",
+        "__pycache__/**",
+        "htmlcov/**",
+        ".coverage*",
+        ".hypothesis/**",
+        ".cache/**"
+      ],
+      "required_gates": [
+        "python tools/check_project_cleanup_candidates.py",
+        "python tools/check_runtime_asset_classification.py",
+        "python tools/check_release_preflight.py <staged-release>"
+      ],
+      "gitignore_required_patterns": [
+        "__pycache__/",
+        "htmlcov/",
+        ".coverage",
+        ".coverage.*",
+        ".cache",
+        ".hypothesis/",
+        ".pytest_cache/",
+        "pytest-cache-files-*/"
+      ],
+      "requires_explicit_delete_approval": true
+    },
+    {
       "id": "legacy_desktop_reference",
       "owner": "legacy_desktop",
       "status": "reference_quarantine",

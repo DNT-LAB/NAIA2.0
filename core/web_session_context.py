@@ -713,13 +713,11 @@ class WebSessionContext:
         return self._event_stream_service().set_param(key, value)
 
     def _e621_event_service(self):
-        service = getattr(self, "e621_event_service", None)
-        if service is None:
-            from core.e621_event_service import E621EventService
-
-            service = E621EventService(self)
-            self.e621_event_service = service
-        return service
+        return self._lazy_service(
+            "_headless_e621_event_service",
+            "core.e621_event_service",
+            "E621EventService",
+        )
 
     def _e621_event_module_state(self) -> dict[str, Any]:
         return self._e621_event_service().state()

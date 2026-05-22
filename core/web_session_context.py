@@ -10,10 +10,7 @@ available as a compatibility path.
 from __future__ import annotations
 
 import importlib
-import os
-import weakref
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,11 +18,10 @@ from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_autocomplete_state import AutocompleteRuntimeState
 from core.headless_event_bus import WebSessionEventBus
 from core.headless_remote_state_service import REMOTE_OPTION_DEFAULTS, SUPPORTED_API_MODES
-from core.headless_search_state_service import SUPPORTED_RATINGS
 from core.headless_result_service import HeadlessResultStore
 from core.headless_token_store import InMemoryTokenManager, TokenStore
 from core.pipeline_run_registry import PipelineRunRegistry, PromptPipelineRun
-from app.backend.runtime import RuntimePaths, resolve_runtime_paths
+from app.backend.runtime import RuntimePaths
 from core.search_result_model import SearchResultModel
 
 
@@ -80,65 +76,9 @@ class WebSessionContext:
     _service_cache: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if self.token_manager is None:
-            self.token_manager = self._default_token_manager()
-        self.secure_token_manager = self.token_manager
-        explicit_repo_root = self.repo_root is not None
-        self.repo_root = Path(self.repo_root) if explicit_repo_root else Path(__file__).resolve().parent.parent
-        if self.runtime_paths is None:
-            self.runtime_paths = resolve_runtime_paths(self.repo_root, portable=explicit_repo_root)
-        self.runtime_paths.ensure_writable_dirs()
-        self.main_window = None
-        self.middle_section_controller = None
-        self.remote_bridge = None
-        self.api_service = None
-        self.temp_window_mode = False
-        self.temp_window_character_tab = None
-        self.session_p_eng_override = None
-        self.scoped_wildcard = None
-        self.search_filter_state = self._load_search_filter_state()
-        self.remote_active_ratings = set(self.search_filter_state.get("ratings") or SUPPORTED_RATINGS)
-        self.active_tag_filter_ids: set[Any] | None = None
-        self.pending_tag_filter: dict[str, Any] | None = None
-        self.depth_state: dict[str, Any] | None = None
-        self.wildcard_override: dict[str, Any] = {}
-        if os.environ.get("NAIA_HEADLESS_DISABLE_GENERATION_EXECUTION") == "1":
-            self.headless_generation_execute_enabled = False
-        self.prompt_squeeze_enabled = False
-        self.pipeline_hooks: dict[str, dict[str, list[tuple[int, Any]]]] = {}
-        self.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.subscribers = self.event_bus.subscribers
-        if self.wildcard_manager is not None and getattr(self.wildcard_manager, "_app_context_ref", None) is None:
-            try:
-                self.wildcard_manager._app_context_ref = weakref.ref(self)
-            except TypeError:
-                pass
-        if self.api_config_service is None:
-            cloudflared_bin_dir = (
-                self.runtime_paths.downloads_dir / "cloudflared"
-                if self.runtime_paths is not None else None
-            )
-            cloudflared = CloudflaredService(
-                port=self.remote_params.get("web_session_port", 7243),
-                bin_dir=cloudflared_bin_dir,
-            )
-            cloudflared.set_status(
-                active=self.cloudflared_active,
-                url=self.cloudflared_tunnel_url,
-                status_text=self.cloudflared_status_text,
-            )
-            timestamp_path = (
-                self.runtime_paths.config_dir / "NAIA_api_timestamps.json"
-                if self.runtime_paths is not None else None
-            )
-            self.api_config_service = ApiConfigService(
-                self.secure_token_manager,
-                cloudflared=cloudflared,
-                **({"timestamp_path": timestamp_path} if timestamp_path is not None else {}),
-            )
-        self.generation_queue_manager = self._create_queue_manager()
-        self.last_api_payloads: dict[str, Any] = {}
-        self.event_stream_runtime = None
+        from core.headless_context_bootstrap import initialize_web_session_context
+
+        initialize_web_session_context(self)
 
     def _create_event_stream_runtime(self):
         return self._event_stream_service().runtime(create=True)
@@ -299,14 +239,14 @@ class WebSessionContext:
         )
 
     def _default_token_manager(self) -> TokenStore:
-        from core.secure_token_manager import SecureTokenManager
+        from core.headless_context_bootstrap import default_token_manager
 
-        return SecureTokenManager()
+        return default_token_manager()
 
     def _create_queue_manager(self):
-        from core.generation_queue_manager import GenerationQueueManager
+        from core.headless_context_bootstrap import create_queue_manager
 
-        return GenerationQueueManager(self)
+        return create_queue_manager(self)
 
     def subscribe(self, event_name: str, callback: Callable[..., Any]) -> None:
         self.event_bus.subscribe(event_name, callback)

@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "status": "draft",
+  "purpose": "Keep Electron release outputs user-facing as NAIA-Portable instead of exposing electron-builder's internal win-unpacked directory.",
+  "workspace_contract": {
+    "portable_root_name": "NAIA-Portable",
+    "internal_builder_output": "_build/electron-dist",
+    "internal_builder_root": "_build/electron-dist/win-unpacked",
+    "packaged_root_source": "portable_release_root",
+    "required_user_visible_entries": [
+      "NAIA.exe",
+      "README_RELEASE.txt",
+      "RELEASE_MANIFEST.json",
+      "CHECKSUMS.sha256",
+      "resources/",
+      "user-data/"
+    ],
+    "forbidden_user_visible_path_terms": [
+      "electron-dist",
+      "win-unpacked",
+      "_build"
+    ]
+  },
+  "required_runner_terms": [
+    "output_dir = workspace / \"_build\" / \"electron-dist\"",
+    "builder_packaged_root = output_dir / \"win-unpacked\"",
+    "portable_release_root = workspace / \"NAIA-Portable\"",
+    "packaged_root = portable_release_root",
+    "_export_packaged_release(builder_packaged_root, portable_release_root)",
+    "\"portable_release_root\": str(payload.get(\"portable_release_root\") or \"\")",
+    "\"packaged_root\": str(payload.get(\"packaged_root\") or \"\")",
+    "\"builder_packaged_root\": str(payload.get(\"builder_packaged_root\") or \"\")"
+  ],
+  "required_smoke_terms": [
+    "exe_name: str = \"NAIA.exe\"",
+    "_is_user_data_empty(user_data)",
+    "resources / \"naia-backend\"",
+    "resources / \"python\""
+  ],
+  "required_package_scripts": [
+    "check:portable-shape",
+    "release:portable",
+    "release:portable:bundled-python",
+    "release:portable:clean-python",
+    "release:portable:smoke",
+    "release:portable:smoke:scan",
+    "release:portable:bundled-python:smoke",
+    "release:portable:bundled-python:smoke:scan",
+    "release:portable:clean-python:smoke",
+    "release:portable:clean-python:smoke:scan"
+  ],
+  "release_check_script": "release:check",
+  "release_check_required_term": "check:portable-shape",
+  "notes": "electron-builder may still use win-unpacked as an internal build product. Release-facing scripts and evidence must point users at the copied NAIA-Portable folder."
+}

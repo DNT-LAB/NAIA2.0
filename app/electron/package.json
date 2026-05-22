@@ -6,7 +6,7 @@
   "main": "main/main.cjs",
   "scripts": {
     "check": "node --check main/main.cjs && node --check preload/preload.cjs",
-    "release:check": "npm run check && npm run test:main-contract && npm run check:runtime && npm run check:source-layout && npm run check:source-payload && npm run check:shell-contract && npm run check:distribution && npm run check:runtime-distribution && npm run check:approval-gate && npm run check:feature-contract && npm run check:packaged-feature-smoke && npm run check:runtime-writes && npm run check:asset-classification && npm run check:legacy-pyqt && npm run check:core-boundary",
+    "release:check": "npm run check && npm run test:main-contract && npm run check:runtime && npm run check:source-layout && npm run check:source-payload && npm run check:portable-shape && npm run check:shell-contract && npm run check:distribution && npm run check:runtime-distribution && npm run check:approval-gate && npm run check:feature-contract && npm run check:packaged-feature-smoke && npm run check:runtime-writes && npm run check:asset-classification && npm run check:legacy-pyqt && npm run check:core-boundary",
     "goal:audit": "cd ../.. && python tools/audit_final_goal_completion.py",
     "deps:plan": "cd ../.. && python tools/bootstrap_electron_dependencies.py",
     "deps:plan:summary": "cd ../.. && python tools/bootstrap_electron_dependencies.py --summary",
@@ -45,6 +45,7 @@
     "check:runtime": "cd ../.. && python tools/check_backend_runtime_strategy.py --electron-main app/electron/main/main.cjs",
     "check:source-layout": "cd ../.. && python tools/check_source_layout_contract.py",
     "check:source-payload": "cd ../.. && python tools/check_release_source_payload.py",
+    "check:portable-shape": "cd ../.. && python tools/check_portable_release_shape.py",
     "test:main-contract": "node --test test/main_contract.test.cjs",
     "check:shell-contract": "cd ../.. && python tools/check_electron_shell_contract.py",
     "check:distribution": "cd ../.. && python tools/check_release_distribution_strategy.py",

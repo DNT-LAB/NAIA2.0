@@ -131,6 +131,7 @@ def test_electron_package_declares_packaging_resource_contract():
     assert "dist:win-dir" in manifest["scripts"]
     assert "check:runtime" in manifest["scripts"]
     assert "check:source-payload" in manifest["scripts"]
+    assert "check:portable-shape" in manifest["scripts"]
     assert "check:shell-contract" in manifest["scripts"]
     assert "check:distribution" in manifest["scripts"]
     assert "check:approval-gate" in manifest["scripts"]
@@ -145,7 +146,9 @@ def test_electron_package_declares_packaging_resource_contract():
     assert manifest["scripts"]["release:portable:clean-python"] == "npm run release:portable:workspace:clean-python"
     assert "check:approval-gate" in manifest["scripts"]["release:check"]
     assert "check:source-payload" in manifest["scripts"]["release:check"]
+    assert "check:portable-shape" in manifest["scripts"]["release:check"]
     assert "check_release_source_payload.py" in manifest["scripts"]["check:source-payload"]
+    assert "check_portable_release_shape.py" in manifest["scripts"]["check:portable-shape"]
     assert "check_final_release_approval_gate.py" in manifest["scripts"]["check:approval-gate"]
     assert "--run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan" in manifest["scripts"]["release:final"]
     assert "--install-deps --yes --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan" in manifest["scripts"]["release:final:install"]

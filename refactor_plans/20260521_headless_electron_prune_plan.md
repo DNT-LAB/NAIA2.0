@@ -370,7 +370,7 @@ After each round:
 - [x] Clean Python runtime build remains base-only and creates managed dependency env on first launch.
 - [x] Maintenance window appears before long install/download work and shows progress without scrollbars.
 - [x] Release package includes only reviewed bootstrap data and samples.
-- [ ] `NAIA-Portable` folder shape is user-friendly.
+- [x] `NAIA-Portable` folder shape is user-friendly.
 - [ ] Icon, menu hiding, log access, data folder access, browser fallback are verified.
 - [ ] Defender scan and artifact size measurement are recorded for release candidates.
 
@@ -404,6 +404,13 @@ After each round:
 - `release_assets/manifests/electron_shell_contract.json` now records the maintenance progress contract for runtime setup and data install phases.
 - `tools/check_electron_shell_contract.py` now validates `setup-progress`, `runtime-progress`, runtime bootstrap/data install state fields, capped log rendering, text wrapping/ellipsis, and the absence of `overflow:auto` scroll panels.
 - Current validation: `python -B tools\check_electron_shell_contract.py`, focused Electron shell tests, and Electron `release:check` pass.
+
+### Portable Shape Gate Slice - 2026-05-22
+
+- `release_assets/manifests/portable_release_shape.json` now records that the internal electron-builder output may stay under `_build/electron-dist/win-unpacked`, but the user-facing packaged root must be `NAIA-Portable`.
+- `tools/check_portable_release_shape.py` now validates that `run_electron_portable_workspace.py` copies the internal builder output into `NAIA-Portable`, exposes `packaged_root` as that portable folder in evidence, keeps release-facing portable scripts on the workspace runner, and rejects direct `electron-builder` calls in release-facing portable scripts.
+- Electron `release:check` now includes `check:portable-shape`, and `release_distribution_strategy` requires that gate in the script chain.
+- Current validation target: `python -B tools\check_portable_release_shape.py`, focused portable-shape tests, release distribution strategy tests, and Electron `release:check`.
 
 ## Round 9 - Hard Delete Phase
 

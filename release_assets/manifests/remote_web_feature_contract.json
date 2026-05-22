@@ -5,6 +5,7 @@
   "route_source": "core/web_session_app.py",
   "route_sources": [
     "core/web_session_app.py",
+    "app/backend/server/artist_thumbnail_routes.py",
     "app/backend/server/character_viewer_routes.py",
     "app/backend/server/danbooru_routes.py",
     "app/backend/server/event_preset_routes.py",
@@ -186,6 +187,7 @@
       "name": "Artist Thumbnail",
       "source_files": [
         "core/web_session_app.py",
+        "app/backend/server/artist_thumbnail_routes.py",
         "core/artist_thumbnail_service.py",
         "app/web/remote/js/features/artistThumbTab.mjs"
       ],

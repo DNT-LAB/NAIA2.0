@@ -154,16 +154,6 @@ class WebSessionContext:
     def _module_dispatch_service(self):
         return self._lazy_service("module_dispatch")
 
-    def _default_token_manager(self) -> TokenStore:
-        from core.headless_context_bootstrap import default_token_manager
-
-        return default_token_manager()
-
-    def _create_queue_manager(self):
-        from core.headless_context_bootstrap import create_queue_manager
-
-        return create_queue_manager(self)
-
     def subscribe(self, event_name: str, callback: Callable[..., Any]) -> None:
         self.event_bus.subscribe(event_name, callback)
 
@@ -416,30 +406,6 @@ class WebSessionContext:
     def _is_naid3_model(self) -> bool:
         return self._remote_state_service().is_naid3_model()
 
-    @staticmethod
-    def _image_hash(image_bytes: bytes) -> str:
-        from core.headless_image_utils import image_hash
-
-        return image_hash(image_bytes)
-
-    @staticmethod
-    def _data_url_payload(value: str) -> str:
-        from core.headless_image_utils import data_url_payload
-
-        return data_url_payload(value)
-
-    @staticmethod
-    def _image_to_png_bytes(image) -> bytes:
-        from core.headless_image_utils import image_to_png_bytes
-
-        return image_to_png_bytes(image)
-
-    @staticmethod
-    def _thumbnail_b64(image, max_side: int = 128) -> str:
-        from core.headless_image_utils import thumbnail_b64
-
-        return thumbnail_b64(image, max_side=max_side)
-
     def _character_reference_image_data(self, image) -> str:
         return self._character_reference_service().image_data(image)
 
@@ -671,30 +637,6 @@ class WebSessionContext:
         return self._session_state_service().generation_param_schema_payload()
 
     @staticmethod
-    def _coerce_remote_param(key: str, value: Any) -> Any:
-        from core.headless_remote_state_service import HeadlessRemoteStateService
-
-        return HeadlessRemoteStateService.coerce_remote_param(key, value)
-
-    @staticmethod
-    def _model_options_for_mode(mode: str) -> list[str]:
-        from core.headless_session_state_service import HeadlessSessionStateService
-
-        return HeadlessSessionStateService.model_options_for_mode(mode)
-
-    @staticmethod
-    def _sampler_options_for_mode(mode: str) -> list[str]:
-        from core.headless_session_state_service import HeadlessSessionStateService
-
-        return HeadlessSessionStateService.sampler_options_for_mode(mode)
-
-    @staticmethod
-    def _scheduler_options_for_mode(mode: str) -> list[str]:
-        from core.headless_session_state_service import HeadlessSessionStateService
-
-        return HeadlessSessionStateService.scheduler_options_for_mode(mode)
-
-    @staticmethod
     def _coerce_bool(value: Any) -> bool:
         from core.headless_remote_state_service import HeadlessRemoteStateService
 
@@ -722,18 +664,6 @@ class WebSessionContext:
         return self._save_service().next_save_filename(item, extension)
 
     @staticmethod
-    def _safe_filename_stem(value: str, *, max_length: int = 120) -> str:
-        from core.headless_save_service import HeadlessSaveService
-
-        return HeadlessSaveService.safe_filename_stem(value, max_length=max_length)
-
-    @staticmethod
-    def _unique_output_path(path: Path) -> Path:
-        from core.headless_save_service import HeadlessSaveService
-
-        return HeadlessSaveService.unique_output_path(path)
-
-    @staticmethod
     def _toast(message: str, *, level: str = "info") -> dict[str, Any]:
         from core.headless_payload_utils import toast
 
@@ -753,12 +683,6 @@ class WebSessionContext:
         from core.headless_payload_utils import index_from_key
 
         return index_from_key(key, prefix)
-
-    @staticmethod
-    def _ensure_character_frame(frames: list[dict[str, Any]], index: int) -> dict[str, Any]:
-        from core.headless_character_service import HeadlessCharacterService
-
-        return HeadlessCharacterService.ensure_frame(frames, index)
 
     @staticmethod
     def _normalized_webui_hiresfix_assist_state(raw: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -797,12 +721,6 @@ class WebSessionContext:
 
     def store_api_payload(self, payload: dict, mode: str) -> None:
         self._api_control_service().store_api_payload(payload, mode)
-
-    @staticmethod
-    def _is_loopback_host(host: str) -> bool:
-        from core.headless_payload_utils import is_loopback_host
-
-        return is_loopback_host(host)
 
 
 __all__ = [

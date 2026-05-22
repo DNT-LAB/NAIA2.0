@@ -2409,7 +2409,14 @@ def create_headless_app(
     async def serve_js():
         return _web_file(root_web_dir / "app.js", "application/javascript")
 
-    register_state_routes(app, session_context)
+    register_state_routes(
+        app,
+        session_context,
+        run_in_thread=_to_thread,
+        clients=app.state.headless_clients,
+        broadcast_json=_broadcast_json,
+        start_generation_runner=_ensure_generation_runner,
+    )
     register_install_manager_routes(app, session_context, run_in_thread=_to_thread)
     register_prompt_tools_routes(
         app,
@@ -2443,37 +2450,6 @@ def create_headless_app(
         clients=app.state.headless_clients,
         start_generation_runner=_ensure_generation_runner,
     )
-
-    @app.post("/api/queue/action")
-    async def api_queue_action(req: Request):
-        try:
-            payload = await req.json()
-        except Exception:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        action = str(payload.get("action") or "").strip().lower()
-        manager = session_context.generation_queue_manager
-        if action == "pause":
-            await _to_thread(manager.pause_queue)
-        elif action == "resume":
-            await _to_thread(manager.resume_queue)
-            if session_context.headless_generation_execute_enabled:
-                _ensure_generation_runner(session_context, app.state.headless_clients)
-        elif action == "clear":
-            await _to_thread(manager.clear_queue)
-        elif action == "remove":
-            request_id = str(payload.get("request_id") or payload.get("id") or "").strip()
-            if not request_id:
-                return JSONResponse({"error": "request_id is required"}, status_code=400)
-            removed = await _to_thread(manager.remove_request, request_id)
-            if not removed:
-                return JSONResponse({"error": "request not found"}, status_code=404)
-        else:
-            return JSONResponse({"error": "Unsupported queue action"}, status_code=400)
-        state = session_context.queue_state_payload()
-        await _broadcast_json(app.state.headless_clients, state)
-        return {"ok": True, "action": action, "queue": state}
 
     @app.get("/api/resolutions")
     async def api_resolutions(mode: str = "", api_mode: str = ""):

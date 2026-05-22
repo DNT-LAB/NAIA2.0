@@ -177,7 +177,7 @@ After each round:
 ### Slice Evidence - 2026-05-22
 
 - Install Manager routes moved from `core/web_session_app.py` to `app/backend/server/install_manager_routes.py` without changing route paths or response shapes.
-- Status, capabilities, queue snapshot, and pipeline prompt-run lookup routes moved from `core/web_session_app.py` to `app/backend/server/state_routes.py` while leaving queue action routes in the app factory until their generation-runner coupling is split.
+- Status, capabilities, queue snapshot/action, and pipeline prompt-run lookup routes moved from `core/web_session_app.py` to `app/backend/server/state_routes.py`; queue resume keeps generation-runner wakeup through an app-factory callback.
 - Prompt highlight index and Prompt Engineering preset-thumbnail get/upload/generate routes moved from `core/web_session_app.py` to `app/backend/server/prompt_tools_routes.py`; generation-completion thumbnail persistence now reuses the route module's pure thumbnail-save helper.
 - Style thumbnail routes moved from `core/web_session_app.py` to `app/backend/server/style_thumbnail_routes.py`; Character Viewer remains in the app factory until generation dispatch coupling is split.
 - Danbooru internal tab routes moved from `core/web_session_app.py` to `app/backend/server/danbooru_routes.py` with URL normalization and prompt-preview helpers owned by that route module.

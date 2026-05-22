@@ -1,12 +1,27 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from typing import Any, Awaitable, Callable
+
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from core.web_session_context import WebSessionContext
 
 
-def register_state_routes(app: FastAPI, session_context: WebSessionContext) -> None:
+AsyncRunner = Callable[..., Awaitable[Any]]
+JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
+GenerationRunnerStarter = Callable[[WebSessionContext, set[Any]], None]
+
+
+def register_state_routes(
+    app: FastAPI,
+    session_context: WebSessionContext,
+    *,
+    run_in_thread: AsyncRunner,
+    clients: set[Any],
+    broadcast_json: JsonBroadcaster,
+    start_generation_runner: GenerationRunnerStarter,
+) -> None:
     @app.get("/api/status")
     async def api_status():
         return session_context.http_status_payload()
@@ -25,6 +40,37 @@ def register_state_routes(app: FastAPI, session_context: WebSessionContext) -> N
     @app.get("/api/queue/state")
     async def api_queue_state():
         return session_context.queue_state_payload()
+
+    @app.post("/api/queue/action")
+    async def api_queue_action(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        action = str(payload.get("action") or "").strip().lower()
+        manager = session_context.generation_queue_manager
+        if action == "pause":
+            await run_in_thread(manager.pause_queue)
+        elif action == "resume":
+            await run_in_thread(manager.resume_queue)
+            if session_context.headless_generation_execute_enabled:
+                start_generation_runner(session_context, clients)
+        elif action == "clear":
+            await run_in_thread(manager.clear_queue)
+        elif action == "remove":
+            request_id = str(payload.get("request_id") or payload.get("id") or "").strip()
+            if not request_id:
+                return JSONResponse({"error": "request_id is required"}, status_code=400)
+            removed = await run_in_thread(manager.remove_request, request_id)
+            if not removed:
+                return JSONResponse({"error": "request not found"}, status_code=404)
+        else:
+            return JSONResponse({"error": "Unsupported queue action"}, status_code=400)
+        state = session_context.queue_state_payload()
+        await broadcast_json(clients, state)
+        return {"ok": True, "action": action, "queue": state}
 
     @app.get("/api/headless/capabilities")
     async def api_headless_capabilities():

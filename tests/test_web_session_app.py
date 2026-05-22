@@ -650,6 +650,25 @@ def test_headless_status_endpoint_uses_web_session_context():
     }
 
 
+def test_headless_prompt_highlight_index_endpoint_returns_empty_headless_index():
+    context = WebSessionContext(token_manager=InMemoryTokenManager())
+    client = TestClient(create_headless_app(context))
+
+    response = client.get("/api/prompt-highlight-index")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.json() == {
+        "version": "headless-empty",
+        "groups": {},
+        "tags": {},
+        "stats": {
+            "source": "headless",
+            "total": 0,
+        },
+    }
+
+
 def test_headless_install_manager_endpoint_initializes_runtime_data(tmp_path):
     context = WebSessionContext(repo_root=tmp_path, token_manager=InMemoryTokenManager())
     client = TestClient(create_headless_app(context))

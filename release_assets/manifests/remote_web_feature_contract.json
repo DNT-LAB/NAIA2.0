@@ -6,6 +6,7 @@
   "route_sources": [
     "core/web_session_app.py",
     "app/backend/server/install_manager_routes.py",
+    "app/backend/server/prompt_tools_routes.py",
     "app/backend/server/state_routes.py"
   ],
   "legacy_dependency_policy": {
@@ -113,6 +114,7 @@
       "name": "Prompt tools and prompt engineering assets",
       "source_files": [
         "core/web_session_app.py",
+        "app/backend/server/prompt_tools_routes.py",
         "core/web_session_context.py",
         "app/web/remote/js/features/promptEngineeringPanel.mjs",
         "app/web/remote/js/features/promptHighlighter.mjs"

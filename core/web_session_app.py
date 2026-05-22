@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from app.backend.server.install_manager_routes import register_install_manager_routes
+from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
 from app.backend.server.state_routes import register_state_routes
 from app.web import resolve_remote_web_dir
 from core import result_image_payload_service as result_images
@@ -64,18 +65,6 @@ def _web_file(path: Path, media_type: str):
     if not path.exists():
         return JSONResponse({"error": "not found"}, status_code=404)
     return FileResponse(str(path), media_type=media_type, headers=_no_cache_headers())
-
-
-def _prompt_highlight_empty_index() -> dict[str, Any]:
-    return {
-        "version": "headless-empty",
-        "groups": {},
-        "tags": {},
-        "stats": {
-            "source": "headless",
-            "total": 0,
-        },
-    }
 
 
 async def _send_startup_messages(
@@ -3002,6 +2991,7 @@ def create_headless_app(
 
     register_state_routes(app, session_context)
     register_install_manager_routes(app, session_context, run_in_thread=_to_thread)
+    register_prompt_tools_routes(app, session_context)
 
     @app.post("/api/queue/action")
     async def api_queue_action(req: Request):
@@ -3103,14 +3093,6 @@ def create_headless_app(
         await _broadcast_json(app.state.headless_clients, result["workflow"])
         await _broadcast_json(app.state.headless_clients, result["params"])
         return result
-
-    @app.get("/api/prompt-highlight-index")
-    async def api_prompt_highlight_index():
-        return Response(
-            content=json.dumps(_prompt_highlight_empty_index(), ensure_ascii=False),
-            media_type="application/json",
-            headers=_no_cache_headers(),
-        )
 
     @app.get("/api/event-preset/status")
     async def api_event_preset_status():

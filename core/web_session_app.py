@@ -25,6 +25,10 @@ from app.backend.server.character_viewer_routes import register_character_viewer
 from app.backend.server.danbooru_routes import register_danbooru_routes
 from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.install_manager_routes import register_install_manager_routes
+from app.backend.server.headless_retired_commands import (
+    HEADLESS_RETIRED_COMMAND_TYPES,
+    handle_headless_retired_command,
+)
 from app.backend.server.preset_services import (
     clothes_preset_service as _clothes_preset_service,
     event_preset_service as _event_preset_service,
@@ -1267,14 +1271,8 @@ async def _handle_json_command(
             command,
             run_in_thread=_to_thread,
         )
-    elif command_type == "set_desktop_window_visibility":
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "info",
-            "message": "Desktop runtime is not available in headless mode.",
-            "headless": True,
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps(context.desktop_window_state_payload(client_host), ensure_ascii=False))
+    elif command_type in HEADLESS_RETIRED_COMMAND_TYPES:
+        await handle_headless_retired_command(ws, context, client_host, command)
     elif command_type == "get_search_state":
         await ws.send_text(json.dumps(context.search_state_payload(), ensure_ascii=False))
     elif command_type == "save_search_filter_state":
@@ -1504,20 +1502,6 @@ async def _handle_json_command(
     elif command_type == "get_module_state":
         module_id = str(command.get("module_id") or "")
         await ws.send_text(json.dumps(context.module_state_payload(module_id, client_host), ensure_ascii=False))
-    elif command_type == "result_upscale":
-        await ws.send_text(json.dumps({
-            "type": "result_upscale_state",
-            "running": False,
-            "success": False,
-            "message": "NAI 2x upscale is not available in the headless runtime yet.",
-            "headless": True,
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "info",
-            "message": "Headless command retired: result_upscale",
-            "headless": True,
-        }, ensure_ascii=False))
     elif command_type == "result_enhance":
         try:
             generation_command, enhance_state = await _to_thread(_prepare_result_enhance_command, context, command)

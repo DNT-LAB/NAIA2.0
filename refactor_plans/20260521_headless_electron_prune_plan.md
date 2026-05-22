@@ -181,10 +181,10 @@ After each round:
 - Prompt highlight index route moved from `core/web_session_app.py` to `app/backend/server/prompt_tools_routes.py`; the heavier prompt-tools routes remain in the app factory until their shared tag/search helpers are isolated.
 - Style thumbnail routes moved from `core/web_session_app.py` to `app/backend/server/style_thumbnail_routes.py`; Character Viewer remains in the app factory until generation dispatch coupling is split.
 - Danbooru internal tab routes moved from `core/web_session_app.py` to `app/backend/server/danbooru_routes.py` with URL normalization and prompt-preview helpers owned by that route module.
-- Event Preset status/download routes moved from `core/web_session_app.py` to `app/backend/server/event_preset_routes.py`; preset service factories moved to `app/backend/server/preset_services.py` while remaining event/clothes/expression/generate routes stay in the app factory for the next preset slice.
+- Event Preset status/download routes and clothes/expression preset axis routes moved from `core/web_session_app.py` to `app/backend/server/event_preset_routes.py`; preset service factories moved to `app/backend/server/preset_services.py` while remaining event/preset generate and thumbnail routes stay in the app factory for the next preset slice.
 - `app/backend/server/__init__.py` now lazy-exports the compatibility server entrypoints so feature route modules can live under the same package without circular imports.
 - `release_assets/manifests/remote_web_feature_contract.json` now supports multiple route source files and lists the install-manager, state, prompt-tools, style-thumbnail, Danbooru, and Event Preset route owners.
-- Required validation for this slice: install-manager route test, runtime install manager tests, backend package shim tests, remote web feature contract test/checker, prompt highlight route smoke, style thumbnail route smoke, Danbooru route smoke, Event Preset status/download smoke, and py_compile/syntax checks of moved route sources.
+- Required validation for this slice: install-manager route test, runtime install manager tests, backend package shim tests, remote web feature contract test/checker, prompt highlight route smoke, style thumbnail route smoke, Danbooru route smoke, Event Preset status/download smoke, clothes/expression preset route smoke, and py_compile/syntax checks of moved route sources.
 
 ## Round 5 - Runtime Data and Migration Boundary
 

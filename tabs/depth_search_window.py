@@ -765,6 +765,53 @@ class DepthSearchWindow(QWidget):
         self._ensure_tags_string(self.current_model.get_dataframe())
         self.update_view()
 
+    def reset_from_search_result(self, search_result: SearchResultModel):
+        """현재 메인 검색 결과를 심층검색의 새 원본으로 다시 로드"""
+        if not isinstance(search_result, SearchResultModel) or search_result.is_empty():
+            self._show_msg(QMessageBox.Icon.Warning, "경고", "새로 불러올 메인 검색 결과가 없습니다.")
+            return
+
+        df = search_result.get_dataframe().copy()
+        if 'tags_string' in df.columns:
+            df = df.drop(columns=['tags_string'])
+
+        self.original_model = SearchResultModel(df.copy())
+        self.current_model = SearchResultModel(df.copy())
+        self._ensure_tags_string(self.current_model.get_dataframe())
+
+        self._reset_filter_controls()
+        self.staged_items.clear()
+        self._update_staging_ui()
+        self.general_text_edit.clear()
+        self.current_sort_order = {}
+        self.update_view()
+
+    def _reset_filter_controls(self):
+        """심층검색 필터 입력을 기본 상태로 되돌림"""
+        self.d_search_input.clear()
+        self.d_exclude_input.clear()
+
+        for checkbox in self.d_rating_checkboxes.values():
+            checkbox.setChecked(True)
+
+        defaults = (
+            (self.w_min_check, self.w_min_input, "0"),
+            (self.w_max_check, self.w_max_input, "9999"),
+            (self.h_min_check, self.h_min_input, "0"),
+            (self.h_max_check, self.h_max_input, "9999"),
+            (self.token_min_check, self.token_min_input, "0"),
+            (self.token_max_check, self.token_max_input, "150"),
+            (self.id_min_check, self.id_min_input, "0"),
+            (self.id_max_check, self.id_max_input, "99999999"),
+            (self.score_min_check, self.score_min_input, "0"),
+        )
+        for checkbox, input_widget, value in defaults:
+            checkbox.setChecked(False)
+            input_widget.setText(value)
+
+        self.rem_char_check.setChecked(False)
+        self.only_empty_char_check.setChecked(False)
+
     def export_to_parquet(self):
         """현재 뷰의 데이터를 Parquet 파일로 저장"""
         if self.current_model.is_empty():

@@ -14789,6 +14789,17 @@ class RemoteBridge(QObject):
                 dw.restore_to_original()
                 self._broadcast_depth_state()
 
+            elif action == "refresh_from_main":
+                if not mw or not getattr(mw, 'search_results', None) or mw.search_results.is_empty():
+                    self._broadcast_json({
+                        "type": "depth_state",
+                        "open": False,
+                        "error": "no_search_results"
+                    })
+                    return
+                dw.reset_from_search_result(mw.search_results)
+                self._broadcast_depth_state()
+
             elif action == "stage":
                 # 현재 필터 결과를 스테이징에 추가
                 dw.add_to_staging()

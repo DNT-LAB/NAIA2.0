@@ -183,6 +183,7 @@ class WebSessionContext:
     _headless_runtime_path_service: Any = field(default=None, init=False, repr=False)
     _headless_pipeline_run_service: Any = field(default=None, init=False, repr=False)
     _headless_pipeline_hook_service: Any = field(default=None, init=False, repr=False)
+    _headless_api_control_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -404,6 +405,15 @@ class WebSessionContext:
 
             service = HeadlessPipelineHookService(self)
             self._headless_pipeline_hook_service = service
+        return service
+
+    def _api_control_service(self):
+        service = self._headless_api_control_service
+        if service is None:
+            from core.headless_api_control_service import HeadlessApiControlService
+
+            service = HeadlessApiControlService(self)
+            self._headless_api_control_service = service
         return service
 
     def _default_token_manager(self) -> TokenStore:
@@ -1152,35 +1162,25 @@ class WebSessionContext:
         )
 
     def setup_gate(self, client_host: str) -> tuple[bool, str]:
-        return self.api_config_service.setup_gate(client_host)
+        return self._api_control_service().setup_gate(client_host)
 
     def cloudflared_gate(self, client_host: str) -> tuple[bool, str]:
-        return self.api_config_service.cloudflared_gate(client_host)
+        return self._api_control_service().cloudflared_gate(client_host)
 
     def verify_api(self, mode: str, value: str) -> dict[str, Any]:
-        result = self.api_config_service.verify(mode, value)
-        self.publish("api_status_changed", self.api_status_payload())
-        return result
+        return self._api_control_service().verify_api(mode, value)
 
     def clear_api(self, mode: str) -> dict[str, Any]:
-        result = self.api_config_service.clear(mode)
-        self.publish("api_status_changed", self.api_status_payload())
-        return result
+        return self._api_control_service().clear_api(mode)
 
     def probe_api(self) -> dict[str, bool | None]:
-        return self.api_config_service.probe()
+        return self._api_control_service().probe_api()
 
     def set_cloudflared_enabled(self, enabled: bool) -> dict[str, Any]:
-        result = self.api_config_service.cloudflared.set_enabled(enabled)
-        status = self.api_config_service.cloudflared.status()
-        self.cloudflared_active = bool(status.get("active"))
-        self.cloudflared_tunnel_url = str(status.get("url") or "")
-        self.cloudflared_status_text = str(status.get("status_text") or "")
-        self.publish("cloudflared_status_changed", status)
-        return result
+        return self._api_control_service().set_cloudflared_enabled(enabled)
 
     def store_api_payload(self, payload: dict, mode: str) -> None:
-        self.last_api_payloads[str(mode or "").upper()] = payload
+        self._api_control_service().store_api_payload(payload, mode)
 
     @staticmethod
     def _is_loopback_host(host: str) -> bool:

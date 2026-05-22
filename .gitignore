@@ -10,6 +10,7 @@ save/
 temp/
 /tmp/
 tmp_codex_*/
+naia_headless_req_*/
 /user-data/
 /wildcards/
 data/tags/

@@ -329,7 +329,7 @@ After each round:
 - [ ] Desktop-only tabs/modules that are not product features are archived or deleted after owner review.
 - [x] Desktop-only features that may return later are documented as web rebuild candidates, not kept as active runtime code.
 - [ ] Legacy tests are moved under `tests/legacy_desktop/` or excluded from normal headless/electron CI.
-- [ ] `requirements-headless.txt` remains PyQt-free.
+- [x] `requirements-headless.txt` remains PyQt-free.
 
 ### When Done
 
@@ -356,6 +356,12 @@ After each round:
 - Comic Generator, Variational Generation, Ontology Visualizer, and EzMode are recorded as deferred web rebuild candidates with explicit `must_not_import` legacy patterns. This keeps the old PyQt implementation out of active runtime paths while preserving enough product context for future web rewrites.
 - `tools/check_legacy_pyqt_surface_classification.py` now validates that any classified legacy surface whose next action mentions rebuild has a matching web rebuild candidate, that candidate status remains owner-review deferred, and that candidate `must_not_import` patterns stay inside the classified legacy surface.
 - Current validation: `python -B tools\check_legacy_pyqt_surface_classification.py` and focused fixture-free direct assertions pass.
+
+### Headless Requirements Gate Slice - 2026-05-22
+
+- `release_assets/manifests/headless_core_boundary.json` now records `headless_requirements_policy` for `requirements-headless.txt`.
+- `tools/check_headless_core_boundary.py` now rejects PyQt/PySide/qtpy dependencies and accidental `requirements-desktop-legacy*.txt` includes in the supported headless requirements file.
+- Current validation: `python -B tools\check_headless_core_boundary.py` and focused fixture-free direct assertions pass.
 
 ## Round 8 - Packaging and Release Hardening
 

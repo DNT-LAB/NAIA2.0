@@ -94,6 +94,7 @@ def test_release_manifest_excludes_legacy_and_local_runtime_state():
     assert ".hypothesis/**" in excluded
     assert ".pytest_cache/**" in excluded
     assert "pytest-cache-files-*/**" in excluded
+    assert "naia_headless_req_*/**" in excluded
     assert "__pycache__/**" in excluded
     assert "*.xlsx" in excluded
     assert "PyQt6" in excluded

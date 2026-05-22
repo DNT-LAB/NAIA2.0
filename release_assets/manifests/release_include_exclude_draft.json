@@ -63,6 +63,7 @@
       "output/**",
       "tmp/**",
       "tmp_codex_*/**",
+      "naia_headless_req_*/**",
       "temp/**",
       "app/electron/dist/**",
       "user-data/**",
@@ -110,6 +111,7 @@
       ".hypothesis/**",
       ".pytest_cache/**",
       "pytest-cache-files-*/**",
+      "naia_headless_req_*/**",
       "__pycache__/**",
       "app/electron/node_modules/**",
       "venv/**"

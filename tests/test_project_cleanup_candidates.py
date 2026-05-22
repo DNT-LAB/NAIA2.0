@@ -24,6 +24,13 @@ def test_project_cleanup_candidates_pass_current_repository():
     assert payload["manifest"] == "release_assets/manifests/project_cleanup_candidates.json"
     assert payload["candidate_group_count"] >= 6
     assert payload["delete_approval_required"] is True
+    development_cache = next(
+        group
+        for group in _current_manifest()["candidate_groups"]
+        if group["id"] == "development_cache_artifacts"
+    )
+    assert "naia_headless_req_*/**" in development_cache["paths"]
+    assert "naia_headless_req_*/" in development_cache["gitignore_required_patterns"]
     assert payload["violations"] == []
 
 

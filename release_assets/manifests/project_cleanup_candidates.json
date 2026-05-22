@@ -115,6 +115,7 @@
       "paths": [
         ".pytest_cache/**",
         "pytest-cache-files-*/**",
+        "naia_headless_req_*/**",
         "__pycache__/**",
         "htmlcov/**",
         ".coverage*",
@@ -134,7 +135,8 @@
         ".cache",
         ".hypothesis/",
         ".pytest_cache/",
-        "pytest-cache-files-*/"
+        "pytest-cache-files-*/",
+        "naia_headless_req_*/"
       ],
       "requires_explicit_delete_approval": true
     },

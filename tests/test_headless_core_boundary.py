@@ -4,9 +4,11 @@ import subprocess
 import sys
 
 from tools.check_headless_core_boundary import (
+    BLOCKED_HEADLESS_REQUIREMENTS,
     REQUIRED_LEGACY_CORE_IDS,
     validation_payload,
     validate_headless_core_boundary,
+    validate_headless_requirements_policy,
 )
 
 
@@ -15,6 +17,8 @@ def test_headless_core_boundary_accepts_current_manifest():
 
     assert payload["ok"] is True
     assert payload["legacy_core_count"] == len(REQUIRED_LEGACY_CORE_IDS)
+    assert payload["headless_requirements"] == "requirements-headless.txt"
+    assert payload["headless_requirements_policy"]["desktop_dependency_policy"] == "forbidden"
     assert payload["violations"] == []
 
 
@@ -26,6 +30,28 @@ def test_headless_core_boundary_classifies_known_desktop_core_files():
     assert items["desktop_app_context"]["path"] == "core/context.py"
     assert items["desktop_image_crud_controller"]["path"] == "core/image_crud_controller.py"
     assert items["desktop_tag_data_manager"]["release_action"] == "exclude"
+    policy = manifest["headless_requirements_policy"]
+    blocked = {item.replace("_", "-").lower() for item in policy["blocked_dependencies"]}
+    assert BLOCKED_HEADLESS_REQUIREMENTS <= blocked
+    assert policy["path"] == "requirements-headless.txt"
+
+
+def test_headless_requirements_policy_rejects_pyqt_dependency():
+    manifest = json.loads(Path("release_assets/manifests/headless_core_boundary.json").read_text(encoding="utf-8"))
+    requirements = Path("tests/fixtures/bad_headless_requirements_pyqt.txt")
+
+    violations = validate_headless_requirements_policy(manifest, requirements)
+
+    assert any("forbidden desktop dependency" in violation.reason for violation in violations)
+
+
+def test_headless_requirements_policy_rejects_desktop_legacy_include():
+    manifest = json.loads(Path("release_assets/manifests/headless_core_boundary.json").read_text(encoding="utf-8"))
+    requirements = Path("tests/fixtures/bad_headless_requirements_desktop_include.txt")
+
+    violations = validate_headless_requirements_policy(manifest, requirements)
+
+    assert any("must not include desktop legacy requirements" in violation.reason for violation in violations)
 
 
 def test_headless_core_boundary_rejects_missing_release_exclude(tmp_path):

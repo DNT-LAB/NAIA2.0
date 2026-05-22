@@ -2,6 +2,28 @@
   "version": 1,
   "status": "reviewed-round5",
   "purpose": "Identify core/ files that remain legacy desktop support and must not be required by the headless Electron backend.",
+  "headless_requirements_policy": {
+    "path": "requirements-headless.txt",
+    "classification": "headless_runtime_dependencies",
+    "desktop_dependency_policy": "forbidden",
+    "blocked_dependencies": [
+      "PyQt6",
+      "PyQt6-Qt6",
+      "PyQt6-WebEngine",
+      "PyQt6-WebEngine-Qt6",
+      "PyQt6_sip",
+      "PyQt6-QScintilla",
+      "PySide2",
+      "PySide6",
+      "qtpy"
+    ],
+    "desktop_requirements_files": [
+      "requirements-desktop-legacy.txt",
+      "requirements-desktop-legacy-linux.txt",
+      "requirements-desktop-legacy-mac.txt"
+    ],
+    "notes": "Normal clone users install this file for Python Headless Web. Qt and desktop-only dependencies must stay in requirements-desktop-legacy*.txt and never flow into the supported headless runtime."
+  },
   "legacy_core_files": [
     {
       "id": "desktop_app_context",

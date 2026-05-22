@@ -167,6 +167,7 @@
         ".hypothesis/**",
         ".pytest_cache/**",
         "pytest-cache-files-*/**",
+        "naia_headless_req_*/**",
         "__pycache__/**",
         "temp/**",
         "user-data/**"
@@ -187,6 +188,7 @@
         ".hypothesis/**",
         ".pytest_cache/**",
         "pytest-cache-files-*/**",
+        "naia_headless_req_*/**",
         "__pycache__/**",
         "temp/**",
         "user-data/**"

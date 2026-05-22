@@ -12,100 +12,21 @@ from __future__ import annotations
 import importlib
 import os
 import weakref
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from threading import RLock
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
 from core.api_config_service import ApiConfigService, CloudflaredService
+from core.headless_autocomplete_state import AutocompleteRuntimeState
+from core.headless_event_bus import WebSessionEventBus
 from core.headless_remote_state_service import REMOTE_OPTION_DEFAULTS, SUPPORTED_API_MODES
 from core.headless_search_state_service import SUPPORTED_RATINGS
 from core.headless_result_service import HeadlessResultStore
+from core.headless_token_store import InMemoryTokenManager, TokenStore
 from core.pipeline_run_registry import PipelineRunRegistry, PromptPipelineRun
 from app.backend.runtime import RuntimePaths, resolve_runtime_paths
 from core.search_result_model import SearchResultModel
-
-
-class TokenStore(Protocol):
-    def get_token(self, service_key: str) -> str:
-        ...
-
-    def save_token(self, service_key: str, token: str) -> None:
-        ...
-
-    def delete_token(self, service_key: str) -> bool:
-        ...
-
-
-class InMemoryTokenManager:
-    """Small token store for tests and non-persistent headless scaffolding."""
-
-    def __init__(self, values: dict[str, str] | None = None):
-        self._values = dict(values or {})
-
-    def get_token(self, service_key: str) -> str:
-        return str(self._values.get(service_key) or "")
-
-    def save_token(self, service_key: str, token: str) -> None:
-        if token:
-            self._values[service_key] = str(token)
-
-    def delete_token(self, service_key: str) -> bool:
-        self._values.pop(service_key, None)
-        return True
-
-
-class WebSessionEventBus:
-    """Minimal AppContext-compatible event bus without Qt signal objects."""
-
-    def __init__(self):
-        self._subscribers: dict[str, list[Callable[..., Any]]] = defaultdict(list)
-        self._lock = RLock()
-
-    @property
-    def subscribers(self) -> dict[str, list[Callable[..., Any]]]:
-        return self._subscribers
-
-    def subscribe(self, event_name: str, callback: Callable[..., Any]) -> None:
-        with self._lock:
-            if callback not in self._subscribers[event_name]:
-                self._subscribers[event_name].append(callback)
-
-    def unsubscribe(self, event_name: str, callback: Callable[..., Any]) -> None:
-        with self._lock:
-            callbacks = self._subscribers.get(event_name)
-            if not callbacks:
-                return
-            self._subscribers[event_name] = [cb for cb in callbacks if cb is not callback]
-            if not self._subscribers[event_name]:
-                self._subscribers.pop(event_name, None)
-
-    def publish(self, event_name: str, *args: Any, **kwargs: Any) -> None:
-        with self._lock:
-            callbacks = list(self._subscribers.get(event_name, ()))
-        for callback in callbacks:
-            callback(*args, **kwargs)
-
-
-@dataclass
-class AutocompleteRuntimeState:
-    kr_tags_loaded: bool = False
-    metadata_fallback_ready: bool = False
-    translation_cache_size: int = 0
-    result_cache_size: int = 0
-
-    def to_payload(self) -> dict[str, Any]:
-        return {
-            "kr_tags_loaded": bool(self.kr_tags_loaded),
-            "metadata_fallback": {
-                "ready": bool(self.metadata_fallback_ready),
-                "live_path_allows_build": False,
-            },
-            "translation_cache_size": int(self.translation_cache_size),
-            "result_cache_size": int(self.result_cache_size),
-        }
 
 
 @dataclass

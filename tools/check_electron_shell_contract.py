@@ -72,6 +72,7 @@ def check_electron_shell_contract(
         "backend_lifecycle": {},
         "browser_fallback": {},
         "maintenance_logs": {},
+        "shell_affordances": {},
     }
 
     if not maintenance_path.is_file():
@@ -205,6 +206,33 @@ def check_electron_shell_contract(
             violations.append({"path": str(maintenance_path), "reason": f"maintenance progress layout term missing: {term}"})
     if "overflow: auto" in maintenance:
         violations.append({"path": str(maintenance_path), "reason": "maintenance view must not use overflow:auto scroll panels"})
+
+    shell_affordances = dict(contract.get("shell_affordances") or {})
+    required_icon_asset = str(shell_affordances.get("required_icon_asset") or "")
+    package_icon = str(((package.get("build") or {}).get("win") or {}).get("icon") or "")
+    checks["shell_affordances"]["package_icon"] = bool(required_icon_asset and package_icon == required_icon_asset)
+    if required_icon_asset and package_icon != required_icon_asset:
+        violations.append({
+            "path": str(package_path),
+            "reason": f"Electron package win.icon must be {required_icon_asset}",
+        })
+
+    affordance_main_terms = list(shell_affordances.get("required_main_terms") or [])
+    checks["shell_affordances"]["main_terms"] = all(term in main for term in affordance_main_terms)
+    for term in affordance_main_terms:
+        if term not in main:
+            violations.append({"path": str(main_path), "reason": f"shell affordance main term missing: {term}"})
+
+    affordance_preload_terms = list(shell_affordances.get("required_preload_terms") or [])
+    checks["shell_affordances"]["preload_terms"] = all(term in preload for term in affordance_preload_terms)
+    for term in affordance_preload_terms:
+        if term not in preload:
+            violations.append({"path": str(preload_path), "reason": f"shell affordance preload term missing: {term}"})
+
+    checks["shell_affordances"]["verified"] = all(
+        bool(checks["shell_affordances"].get(key))
+        for key in ("package_icon", "main_terms", "preload_terms")
+    )
 
     checks["browser_fallback"]["fallback_only"] = all(
         bool(checks["browser_fallback"].get(key))

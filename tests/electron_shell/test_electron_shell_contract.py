@@ -14,6 +14,10 @@ def test_electron_shell_contract_checker_accepts_current_shell():
 
     assert payload["ok"] is True
     assert payload["violations"] == []
+    assert payload["checks"]["shell_affordances"]["package_icon"] is True
+    assert payload["checks"]["shell_affordances"]["main_terms"] is True
+    assert payload["checks"]["shell_affordances"]["preload_terms"] is True
+    assert payload["checks"]["shell_affordances"]["verified"] is True
 
 
 def test_electron_shell_contract_checker_cli():

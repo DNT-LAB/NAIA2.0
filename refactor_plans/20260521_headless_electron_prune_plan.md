@@ -371,7 +371,7 @@ After each round:
 - [x] Maintenance window appears before long install/download work and shows progress without scrollbars.
 - [x] Release package includes only reviewed bootstrap data and samples.
 - [x] `NAIA-Portable` folder shape is user-friendly.
-- [ ] Icon, menu hiding, log access, data folder access, browser fallback are verified.
+- [x] Icon, menu hiding, log access, data folder access, browser fallback are verified.
 - [ ] Defender scan and artifact size measurement are recorded for release candidates.
 
 ### When Done
@@ -411,6 +411,12 @@ After each round:
 - `tools/check_portable_release_shape.py` now validates that `run_electron_portable_workspace.py` copies the internal builder output into `NAIA-Portable`, exposes `packaged_root` as that portable folder in evidence, keeps release-facing portable scripts on the workspace runner, and rejects direct `electron-builder` calls in release-facing portable scripts.
 - Electron `release:check` now includes `check:portable-shape`, and `release_distribution_strategy` requires that gate in the script chain.
 - Current validation target: `python -B tools\check_portable_release_shape.py`, focused portable-shape tests, release distribution strategy tests, and Electron `release:check`.
+
+### Shell Affordance Gate Slice - 2026-05-22
+
+- `release_assets/manifests/electron_shell_contract.json` now records the packaged shell affordance contract for the app icon, hidden menu policy, Open in browser, Open data folder, and Open logs.
+- `tools/check_electron_shell_contract.py` now validates the `assets/naia.ico` package icon setting, Electron main-process icon/menu/folder/fallback handlers, and preload exposure for the shell controls.
+- Current validation target: `python -B tools\check_electron_shell_contract.py`, focused Electron shell contract tests, Electron shell scaffold tests, and Electron `release:check`.
 
 ## Round 9 - Hard Delete Phase
 

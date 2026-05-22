@@ -65,6 +65,27 @@
     "open runtime data folder",
     "open runtime logs folder"
   ],
+  "shell_affordances": {
+    "required_icon_asset": "assets/naia.ico",
+    "required_main_terms": [
+      "APP_ICON = path.join(__dirname, \"..\", \"assets\", \"naia.ico\")",
+      "icon: appIconPath()",
+      "NAIA_ELECTRON_HIDE_MENU",
+      "Menu.setApplicationMenu(null)",
+      "setMenuBarVisibility(false)",
+      "ipcMain.handle(\"naia:open-browser\"",
+      "ipcMain.handle(\"naia:open-data-folder\"",
+      "ipcMain.handle(\"naia:open-logs\"",
+      "shell.openPath(runtimeDataRoot())",
+      "openRuntimeSubfolder(\"logs\")"
+    ],
+    "required_preload_terms": [
+      "openBrowser",
+      "openDataFolder",
+      "openLogs"
+    ],
+    "notes": "Shell-owned affordances must stay available in packaged mode: branded icon, hidden menu, explicit browser fallback, logs folder access, and data folder access."
+  },
   "hard_rules": [
     "The Electron main process must not import PyQt6 or legacy_desktop.",
     "The backend must receive NAIA_USER_DATA_DIR from the Electron shell.",

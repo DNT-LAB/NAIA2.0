@@ -194,15 +194,23 @@ def test_electron_after_pack_creates_portable_user_data_skeleton():
 
 def test_maintenance_view_uses_non_scrolling_progress_layout():
     source = (ELECTRON_ROOT / "renderer" / "maintenance.html").read_text(encoding="utf-8")
+    contract = json.loads(Path("release_assets/manifests/electron_shell_contract.json").read_text(encoding="utf-8"))
+    progress_contract = contract["maintenance_view"]["progress_contract"]
 
     assert 'id="setup-progress"' in source
+    assert 'id="runtime-progress"' in source
     assert "runtimeBootstrap" in source
+    assert "runtimeInstall" in source
     assert "processedCount" in source
     assert "currentPackage" in source
     assert "overflow: hidden;" in source
     assert "overflow-wrap: anywhere;" in source
+    assert "text-overflow: ellipsis;" in source
     assert "LOG_VISIBLE_LINES" in source
     assert "overflow: auto" not in source
+    assert progress_contract["required_progress_elements"] == ["setup-progress", "runtime-progress"]
+    assert "runtimeBootstrap" in progress_contract["required_shell_state_fields"]
+    assert "runtimeInstall" in progress_contract["required_shell_state_fields"]
 
 
 def test_electron_preload_exposes_shell_controls():

@@ -37,7 +37,26 @@
       "shell state exposes recent backend logs",
       "maintenance view renders the shell log buffer",
       "Open logs opens the runtime logs folder"
-    ]
+    ],
+    "progress_contract": {
+      "required_progress_elements": [
+        "setup-progress",
+        "runtime-progress"
+      ],
+      "required_shell_state_fields": [
+        "runtimeBootstrap",
+        "runtimeInstall",
+        "processedCount",
+        "currentPackage"
+      ],
+      "layout_rules": [
+        "body overflow is hidden",
+        "log output is capped to visible lines",
+        "long package/status text wraps or ellipsizes",
+        "maintenance view must not use overflow:auto scroll panels"
+      ],
+      "notes": "Long runtime setup and data download phases must be visible before Remote Web loads, without horizontal or vertical scrollbars in the shell-owned maintenance window."
+    }
   },
   "shell_controls": [
     "backend state",

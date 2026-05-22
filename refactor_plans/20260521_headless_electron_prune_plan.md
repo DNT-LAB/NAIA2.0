@@ -368,7 +368,7 @@ After each round:
 ### Checklist
 
 - [x] Clean Python runtime build remains base-only and creates managed dependency env on first launch.
-- [ ] Maintenance window appears before long install/download work and shows progress without scrollbars.
+- [x] Maintenance window appears before long install/download work and shows progress without scrollbars.
 - [x] Release package includes only reviewed bootstrap data and samples.
 - [ ] `NAIA-Portable` folder shape is user-friendly.
 - [ ] Icon, menu hiding, log access, data folder access, browser fallback are verified.
@@ -398,6 +398,12 @@ After each round:
 - `tools/check_release_source_payload.py` now audits the files selected by `tools/stage_release_assets.py` before staging, so stale `app/electron/dist` output cannot hide source selection regressions.
 - Electron `release:check` now runs `check:source-payload`, which rejects `wildcards/**`, `data/tags/**`, legacy desktop roots, old `ui/remote_web`, and runtime/downloaded state while requiring the reviewed small bootstrap filters under `data/*.txt` and `data/taglist/*.json`.
 - Current validation: `python -B tools\check_release_source_payload.py`, `python -B tools\check_release_distribution_strategy.py`, release manifest audit tests, and focused Electron package contract tests pass.
+
+### Maintenance Progress Gate Slice - 2026-05-22
+
+- `release_assets/manifests/electron_shell_contract.json` now records the maintenance progress contract for runtime setup and data install phases.
+- `tools/check_electron_shell_contract.py` now validates `setup-progress`, `runtime-progress`, runtime bootstrap/data install state fields, capped log rendering, text wrapping/ellipsis, and the absence of `overflow:auto` scroll panels.
+- Current validation: `python -B tools\check_electron_shell_contract.py`, focused Electron shell tests, and Electron `release:check` pass.
 
 ## Round 9 - Hard Delete Phase
 

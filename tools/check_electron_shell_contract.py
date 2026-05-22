@@ -173,6 +173,39 @@ def check_electron_shell_contract(
         bool(checks["maintenance_logs"].get(key))
         for key in ("main_terms", "preload_open_logs", "required_controls", "view_renders_shell_logs")
     )
+    progress_contract = (contract.get("maintenance_view") or {}).get("progress_contract") or {}
+    progress_elements = list(progress_contract.get("required_progress_elements") or [])
+    checks["maintenance_logs"]["progress_elements"] = all(
+        f'id="{element}"' in maintenance
+        for element in progress_elements
+    )
+    for element in progress_elements:
+        if f'id="{element}"' not in maintenance:
+            violations.append({"path": str(maintenance_path), "reason": f"maintenance progress element missing: {element}"})
+
+    progress_state_terms = list(progress_contract.get("required_shell_state_fields") or [])
+    progress_sources = "\n".join([main, maintenance])
+    checks["maintenance_logs"]["progress_state_fields"] = all(term in progress_sources for term in progress_state_terms)
+    for term in progress_state_terms:
+        if term not in progress_sources:
+            violations.append({"path": str(maintenance_path), "reason": f"maintenance progress state term missing: {term}"})
+
+    progress_layout_terms = [
+        "overflow: hidden;",
+        "overflow-wrap: anywhere;",
+        "text-overflow: ellipsis;",
+        "LOG_VISIBLE_LINES",
+    ]
+    checks["maintenance_logs"]["non_scrolling_progress_layout"] = (
+        all(term in maintenance for term in progress_layout_terms)
+        and "overflow: auto" not in maintenance
+    )
+    for term in progress_layout_terms:
+        if term not in maintenance:
+            violations.append({"path": str(maintenance_path), "reason": f"maintenance progress layout term missing: {term}"})
+    if "overflow: auto" in maintenance:
+        violations.append({"path": str(maintenance_path), "reason": "maintenance view must not use overflow:auto scroll panels"})
+
     checks["browser_fallback"]["fallback_only"] = all(
         bool(checks["browser_fallback"].get(key))
         for key in ("main_terms", "web_scheme", "http_https_only", "manual_open_browser_api")

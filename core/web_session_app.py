@@ -3003,10 +3003,6 @@ def create_headless_app(
     register_state_routes(app, session_context)
     register_install_manager_routes(app, session_context, run_in_thread=_to_thread)
 
-    @app.get("/api/queue/state")
-    async def api_queue_state():
-        return session_context.queue_state_payload()
-
     @app.post("/api/queue/action")
     async def api_queue_action(req: Request):
         try:
@@ -3115,22 +3111,6 @@ def create_headless_app(
             media_type="application/json",
             headers=_no_cache_headers(),
         )
-
-    @app.get("/api/headless/capabilities")
-    async def api_headless_capabilities():
-        return {
-            "headless": True,
-            "right_tabs": {
-                "result": True,
-                "pngInfo": True,
-                "thumb": True,
-                "artists": True,
-                "characters": True,
-                "studio": True,
-                "settings": False,
-            },
-            "retired_tabs": {},
-        }
 
     @app.get("/api/event-preset/status")
     async def api_event_preset_status():

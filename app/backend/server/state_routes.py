@@ -21,3 +21,23 @@ def register_state_routes(app: FastAPI, session_context: WebSessionContext) -> N
         if payload is None:
             return JSONResponse({"error": "prompt run not found"}, status_code=404)
         return payload
+
+    @app.get("/api/queue/state")
+    async def api_queue_state():
+        return session_context.queue_state_payload()
+
+    @app.get("/api/headless/capabilities")
+    async def api_headless_capabilities():
+        return {
+            "headless": True,
+            "right_tabs": {
+                "result": True,
+                "pngInfo": True,
+                "thumb": True,
+                "artists": True,
+                "characters": True,
+                "studio": True,
+                "settings": False,
+            },
+            "retired_tabs": {},
+        }

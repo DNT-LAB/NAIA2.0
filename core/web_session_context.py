@@ -19,6 +19,7 @@ import weakref
 import os
 
 from core.api_config_service import ApiConfigService, CloudflaredService
+from core.headless_remote_state_service import REMOTE_OPTION_DEFAULTS, SUPPORTED_API_MODES
 from core.headless_search_state_service import SUPPORTED_RATINGS
 from core.headless_result_service import HeadlessResultStore
 from core.pipeline_run_registry import PipelineRunRegistry, PromptPipelineRun
@@ -26,13 +27,6 @@ from app.backend.runtime import RuntimePaths, resolve_runtime_paths
 from core.search_result_model import SearchResultModel
 
 
-SUPPORTED_API_MODES = ("NAI", "WEBUI", "COMFYUI")
-REMOTE_OPTION_DEFAULTS = {
-    "prompt_fixed": False,
-    "auto_generate": False,
-    "wildcard_standalone": False,
-    "auto_save": False,
-}
 HEADLESS_RETIRED_MODULES = {
     "wildcard_status": "Wildcard Status desktop wrapper is retired in the supported headless runtime.",
     "ollama": "Ollama desktop assistant controls are retired in the supported headless runtime.",
@@ -184,6 +178,7 @@ class WebSessionContext:
     _headless_pipeline_run_service: Any = field(default=None, init=False, repr=False)
     _headless_pipeline_hook_service: Any = field(default=None, init=False, repr=False)
     _headless_api_control_service: Any = field(default=None, init=False, repr=False)
+    _headless_remote_state_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -416,6 +411,15 @@ class WebSessionContext:
             self._headless_api_control_service = service
         return service
 
+    def _remote_state_service(self):
+        service = self._headless_remote_state_service
+        if service is None:
+            from core.headless_remote_state_service import HeadlessRemoteStateService
+
+            service = HeadlessRemoteStateService(self)
+            self._headless_remote_state_service = service
+        return service
+
     def _default_token_manager(self) -> TokenStore:
         from core.secure_token_manager import SecureTokenManager
 
@@ -538,37 +542,19 @@ class WebSessionContext:
         return self._pipeline_run_service().prompt_runs_payload(limit)
 
     def get_api_mode(self) -> str:
-        return self.current_api_mode
+        return self._remote_state_service().get_api_mode()
 
     def set_api_mode(self, mode: str) -> None:
-        normalized = str(mode or "").strip().upper()
-        if normalized not in SUPPORTED_API_MODES:
-            return
-        if normalized == self.current_api_mode:
-            return
-        old_mode = self.current_api_mode
-        self.current_api_mode = normalized
-        self.publish("api_mode_changed", {"old_mode": old_mode, "new_mode": normalized})
+        self._remote_state_service().set_api_mode(mode)
 
     def set_option(self, key: str, value: Any) -> None:
-        if key not in REMOTE_OPTION_DEFAULTS:
-            return
-        self.remote_options[key] = bool(value)
-        if key == "auto_save":
-            self.auto_save_state["auto_save"] = bool(value)
-        self.publish("remote_options_changed", self.get_options())
+        self._remote_state_service().set_option(key, value)
 
     def get_options(self) -> dict[str, bool]:
-        options = dict(REMOTE_OPTION_DEFAULTS)
-        options.update({key: bool(value) for key, value in self.remote_options.items() if key in options})
-        return options
+        return self._remote_state_service().get_options()
 
     def set_param(self, key: str, value: Any) -> None:
-        clean_key = str(key or "").strip()
-        if not clean_key:
-            return
-        self.remote_params[clean_key] = self._coerce_remote_param(clean_key, value)
-        self.publish("remote_params_changed", self.generation_param_schema_payload())
+        self._remote_state_service().set_param(key, value)
 
     def set_active_ratings(self, ratings: Any) -> set[str]:
         return self._search_state_service().set_active_ratings(ratings)
@@ -1044,9 +1030,9 @@ class WebSessionContext:
 
     @staticmethod
     def _coerce_remote_param(key: str, value: Any) -> Any:
-        from core.headless_session_state_service import HeadlessSessionStateService
+        from core.headless_remote_state_service import HeadlessRemoteStateService
 
-        return HeadlessSessionStateService.coerce_remote_param(key, value)
+        return HeadlessRemoteStateService.coerce_remote_param(key, value)
 
     @staticmethod
     def _model_options_for_mode(mode: str) -> list[str]:
@@ -1068,9 +1054,9 @@ class WebSessionContext:
 
     @staticmethod
     def _coerce_bool(value: Any) -> bool:
-        if isinstance(value, bool):
-            return value
-        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+        from core.headless_remote_state_service import HeadlessRemoteStateService
+
+        return HeadlessRemoteStateService.coerce_bool(value)
 
     @staticmethod
     def _coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:

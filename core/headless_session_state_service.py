@@ -5,35 +5,7 @@ from __future__ import annotations
 from typing import Any
 import re
 
-
-REMOTE_BOOLEAN_PARAMS = {
-    "seed_fixed",
-    "random_resolution",
-    "auto_fit_resolution",
-    "enable_hr",
-    "resolution_preset_enabled",
-    "webui_hiresfix_assist",
-    "webui_hiresfix_assist_enabled",
-    "SMEA",
-    "DYN",
-    "VAR+",
-    "DECRISP",
-}
-REMOTE_INT_PARAMS = {
-    "steps",
-    "hires_steps",
-    "width",
-    "height",
-    "webui_hiresfix_assist_target",
-}
-REMOTE_FLOAT_PARAMS = {
-    "cfg_scale",
-    "cfg_rescale",
-    "hr_scale",
-    "denoising_strength",
-    "hr_cfg",
-    "rescale_cfg",
-}
+from core.headless_remote_state_service import HeadlessRemoteStateService
 
 
 class HeadlessSessionStateService:
@@ -271,23 +243,7 @@ class HeadlessSessionStateService:
 
     @staticmethod
     def coerce_remote_param(key: str, value: Any) -> Any:
-        if key in REMOTE_BOOLEAN_PARAMS:
-            return HeadlessSessionStateService.coerce_bool(value)
-        if key in REMOTE_INT_PARAMS:
-            try:
-                if value is None or value == "":
-                    return ""
-                return int(float(value))
-            except (TypeError, ValueError):
-                return value
-        if key in REMOTE_FLOAT_PARAMS:
-            try:
-                if value is None or value == "":
-                    return ""
-                return float(value)
-            except (TypeError, ValueError):
-                return value
-        return value
+        return HeadlessRemoteStateService.coerce_remote_param(key, value)
 
     @staticmethod
     def model_options_for_mode(mode: str) -> list[str]:
@@ -315,6 +271,4 @@ class HeadlessSessionStateService:
 
     @staticmethod
     def coerce_bool(value: Any) -> bool:
-        if isinstance(value, bool):
-            return value
-        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+        return HeadlessRemoteStateService.coerce_bool(value)

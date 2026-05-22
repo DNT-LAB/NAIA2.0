@@ -10,6 +10,7 @@
     "app/backend/server/danbooru_routes.py",
     "app/backend/server/event_preset_routes.py",
     "app/backend/server/install_manager_routes.py",
+    "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_tools_routes.py",
     "app/backend/server/state_routes.py",
     "app/backend/server/style_thumbnail_routes.py"
@@ -99,6 +100,7 @@
       "name": "Params, resolution, workflow, and search imports",
       "source_files": [
         "core/web_session_app.py",
+        "app/backend/server/params_workflow_routes.py",
         "core/web_session_context.py",
         "app/web/remote/js/features/resolutionManagerPanel.mjs",
         "app/web/remote/js/features/setupController.mjs"

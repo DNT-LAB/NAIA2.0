@@ -344,6 +344,12 @@ After each round:
 - `tools/measure_autocomplete_fallback_cost.py`, which directly imports `legacy_desktop.core.remote_api_server`, was moved under `legacy_desktop/tools/` so it is explicitly reference-only and release-excluded through `legacy_desktop/**`.
 - Current validation: `python -B tools\check_legacy_pyqt_surface_classification.py` reports no unclassified product legacy imports.
 
+### Desktop Test Execution Policy Slice - 2026-05-22
+
+- `release_assets/manifests/legacy_pyqt_surface_classification.json` now declares desktop/PyQt tests as `explicit_only`; normal headless and Electron release checks must use the classification gate rather than running desktop pytest directly.
+- `tools/check_legacy_pyqt_surface_classification.py` now validates that Electron `release:check` runs `check:legacy-pyqt`, that `check:legacy-pyqt` targets this classification checker, and that `release:check` does not run `pytest` or classified desktop test files directly.
+- Current validation: `python -B tools\check_legacy_pyqt_surface_classification.py` and the focused legacy classification tests pass.
+
 ## Round 8 - Packaging and Release Hardening
 
 ### Checklist

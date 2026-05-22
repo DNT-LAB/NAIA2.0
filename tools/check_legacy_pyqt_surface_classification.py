@@ -16,6 +16,7 @@ import warnings
 DEFAULT_CLASSIFICATION = Path("release_assets/manifests/legacy_pyqt_surface_classification.json")
 DEFAULT_RELEASE_MANIFEST = Path("release_assets/manifests/release_include_exclude_draft.json")
 DEFAULT_HEADLESS_CORE_BOUNDARY = Path("release_assets/manifests/headless_core_boundary.json")
+DEFAULT_ELECTRON_PACKAGE = Path("app/electron/package.json")
 REQUIRED_SURFACE_IDS = {
     "comic_generator_tab",
     "variational_generation_window",
@@ -191,12 +192,88 @@ def scan_legacy_desktop_test_imports(tests_root: str | Path = "tests") -> list[s
     return matched
 
 
+def validate_desktop_test_execution_policy(
+    manifest: dict[str, Any],
+    electron_package_path: str | Path = DEFAULT_ELECTRON_PACKAGE,
+) -> list[LegacySurfaceViolation]:
+    violations: list[LegacySurfaceViolation] = []
+    policy = manifest.get("desktop_test_execution_policy")
+    if not isinstance(policy, dict):
+        return [LegacySurfaceViolation("desktop_test_execution_policy", "desktop test execution policy is required")]
+
+    expected = {
+        "classification": "explicit_only",
+        "normal_headless_ci": "excluded",
+        "electron_release_check": "must_not_run_pytest",
+    }
+    for key, value in expected.items():
+        if policy.get(key) != value:
+            violations.append(
+                LegacySurfaceViolation(
+                    "desktop_test_execution_policy",
+                    f"{key} must be {value}",
+                )
+            )
+
+    required_script = str(policy.get("required_release_script") or "check:legacy-pyqt")
+    required_target = str(policy.get("required_release_script_target") or "tools/check_legacy_pyqt_surface_classification.py")
+    package_file = Path(electron_package_path)
+    if not package_file.is_file():
+        violations.append(LegacySurfaceViolation(str(package_file), "Electron package manifest does not exist"))
+        return violations
+
+    try:
+        package = _read_json(package_file)
+    except json.JSONDecodeError as exc:
+        return [LegacySurfaceViolation(str(package_file), f"Electron package manifest is invalid JSON: {exc}")]
+    scripts = package.get("scripts") if isinstance(package.get("scripts"), dict) else {}
+    release_check = str(scripts.get("release:check") or "")
+    release_check_lower = release_check.lower()
+    if not release_check:
+        violations.append(LegacySurfaceViolation("release:check", "Electron release check script is missing"))
+    else:
+        if f"npm run {required_script}" not in release_check:
+            violations.append(
+                LegacySurfaceViolation(
+                    "release:check",
+                    f"Electron release check must run {required_script} instead of desktop pytest",
+                )
+            )
+        if "pytest" in release_check_lower:
+            violations.append(
+                LegacySurfaceViolation(
+                    "release:check",
+                    "Electron release check must not run pytest directly; desktop tests are explicit-only",
+                )
+            )
+        for path in manifest.get("desktop_test_files", []):
+            path_text = str(path)
+            if path_text and path_text in release_check:
+                violations.append(
+                    LegacySurfaceViolation(
+                        "release:check",
+                        f"Electron release check must not run desktop test file directly: {path_text}",
+                    )
+                )
+
+    legacy_check = str(scripts.get(required_script) or "")
+    if required_target not in legacy_check:
+        violations.append(
+            LegacySurfaceViolation(
+                required_script,
+                f"{required_script} must run {required_target}",
+            )
+        )
+    return violations
+
+
 def validate_legacy_pyqt_surface_classification(
     classification_path: str | Path = DEFAULT_CLASSIFICATION,
     release_manifest_path: str | Path = DEFAULT_RELEASE_MANIFEST,
     tests_root: str | Path = "tests",
     boundary_path: str | Path = DEFAULT_HEADLESS_CORE_BOUNDARY,
     repo_root: str | Path = ".",
+    electron_package_path: str | Path = DEFAULT_ELECTRON_PACKAGE,
 ) -> list[LegacySurfaceViolation]:
     classification_file = Path(classification_path)
     release_file = Path(release_manifest_path)
@@ -263,6 +340,7 @@ def validate_legacy_pyqt_surface_classification(
             violations.append(LegacySurfaceViolation(str(path), "classified desktop static test file does not exist"))
 
     if Path(classification_path) == DEFAULT_CLASSIFICATION:
+        violations.extend(validate_desktop_test_execution_policy(manifest, electron_package_path))
         violations.extend(scan_unclassified_product_legacy_imports(classification_path, boundary_path, repo_root))
 
     return violations
@@ -274,6 +352,7 @@ def validation_payload(
     tests_root: str | Path = "tests",
     boundary_path: str | Path = DEFAULT_HEADLESS_CORE_BOUNDARY,
     repo_root: str | Path = ".",
+    electron_package_path: str | Path = DEFAULT_ELECTRON_PACKAGE,
 ) -> dict[str, Any]:
     violations = validate_legacy_pyqt_surface_classification(
         classification_path,
@@ -281,6 +360,7 @@ def validation_payload(
         tests_root,
         boundary_path,
         repo_root,
+        electron_package_path,
     )
     manifest = _read_json(Path(classification_path)) if Path(classification_path).is_file() else {}
     product_import_violations = scan_unclassified_product_legacy_imports(
@@ -294,6 +374,7 @@ def validation_payload(
         "release_manifest": str(Path(release_manifest_path)),
         "surface_count": len(manifest.get("legacy_surfaces", [])) if isinstance(manifest.get("legacy_surfaces"), list) else 0,
         "desktop_test_count": len(manifest.get("desktop_test_files", [])) if isinstance(manifest.get("desktop_test_files"), list) else 0,
+        "desktop_test_execution_policy": manifest.get("desktop_test_execution_policy", {}),
         "scanned_desktop_test_imports": scan_legacy_desktop_test_imports(tests_root),
         "unclassified_product_legacy_imports": [violation.__dict__ for violation in product_import_violations],
         "violations": [violation.__dict__ for violation in violations],
@@ -307,9 +388,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tests-root", default="tests", help="Directory containing pytest files to scan.")
     parser.add_argument("--boundary", default=str(DEFAULT_HEADLESS_CORE_BOUNDARY), help="Headless core boundary manifest.")
     parser.add_argument("--repo-root", default=".", help="Repository root for tracked product import scans.")
+    parser.add_argument("--electron-package", default=str(DEFAULT_ELECTRON_PACKAGE), help="Electron package manifest.")
     args = parser.parse_args(argv)
 
-    payload = validation_payload(args.classification, args.release_manifest, args.tests_root, args.boundary, args.repo_root)
+    payload = validation_payload(
+        args.classification,
+        args.release_manifest,
+        args.tests_root,
+        args.boundary,
+        args.repo_root,
+        args.electron_package,
+    )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0 if payload["ok"] else 1
 

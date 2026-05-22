@@ -16,6 +16,8 @@ def test_legacy_pyqt_surface_classification_accepts_current_manifest():
 
     assert payload["ok"] is True
     assert payload["surface_count"] == len(REQUIRED_SURFACE_IDS)
+    assert payload["desktop_test_execution_policy"]["classification"] == "explicit_only"
+    assert payload["desktop_test_execution_policy"]["electron_release_check"] == "must_not_run_pytest"
     assert payload["unclassified_product_legacy_imports"] == []
     assert payload["violations"] == []
 
@@ -32,6 +34,7 @@ def test_legacy_pyqt_surface_classification_covers_required_surfaces_and_tests()
     assert surfaces["comic_generator_tab"]["root_compatibility_entry"] == "tabs/comic_generator_tab.py"
     assert "tabs/comic_generator_tab.py" in surfaces["comic_generator_tab"]["release_exclude_patterns"]
     assert surfaces["ontology_visualizer"]["classification"] == "desktop_only_pyqt_webengine_experiment"
+    assert manifest["desktop_test_execution_policy"]["required_release_script"] == "check:legacy-pyqt"
     assert "tests/test_remote_api_status.py" in desktop_tests
     assert set(scan_legacy_desktop_test_imports()) <= desktop_tests
 
@@ -71,6 +74,18 @@ def test_legacy_pyqt_surface_classification_rejects_unclassified_desktop_test(tm
     )
 
     assert any("not classified" in violation.reason for violation in violations)
+
+
+def test_legacy_pyqt_surface_classification_rejects_release_check_pytest(tmp_path):
+    package = json.loads(Path("app/electron/package.json").read_text(encoding="utf-8"))
+    package["scripts"]["release:check"] += " && python -m pytest tests/test_remote_api_status.py"
+    package_path = tmp_path / "package.json"
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+
+    violations = validate_legacy_pyqt_surface_classification(electron_package_path=package_path)
+
+    assert any("must not run pytest directly" in violation.reason for violation in violations)
+    assert any("must not run desktop test file directly" in violation.reason for violation in violations)
 
 
 def test_legacy_pyqt_surface_classification_cli_outputs_json():

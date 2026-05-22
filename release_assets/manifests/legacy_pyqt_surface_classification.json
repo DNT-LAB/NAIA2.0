@@ -2,6 +2,14 @@
   "version": 1,
   "status": "reviewed-round2",
   "purpose": "Classify remaining ignored PyQt/Desktop-only surfaces and explicit legacy desktop tests.",
+  "desktop_test_execution_policy": {
+    "classification": "explicit_only",
+    "normal_headless_ci": "excluded",
+    "electron_release_check": "must_not_run_pytest",
+    "required_release_script": "check:legacy-pyqt",
+    "required_release_script_target": "tools/check_legacy_pyqt_surface_classification.py",
+    "notes": "Desktop/PyQt tests are inventory and reference coverage. They may be run intentionally by explicit file selection, but normal headless and Electron release checks must use the classification gate rather than running the desktop test set."
+  },
   "legacy_surfaces": [
     {
       "id": "comic_generator_tab",

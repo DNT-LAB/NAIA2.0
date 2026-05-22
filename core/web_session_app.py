@@ -36,6 +36,10 @@ from app.backend.server.headless_retired_commands import (
     HEADLESS_RETIRED_COMMAND_TYPES,
     handle_headless_retired_command,
 )
+from app.backend.server.module_commands import (
+    MODULE_COMMAND_TYPES,
+    handle_module_command,
+)
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
 from app.backend.server.prompt_engineering_commands import (
     HIRES_OVERLAY_COMMAND_TYPES,
@@ -724,49 +728,16 @@ async def _handle_json_command(
             command,
             run_in_thread=_to_thread,
         )
-    elif command_type == "set_module_param":
-        module_state = context.set_module_param(
-            str(command.get("module_id") or ""),
-            str(command.get("key") or ""),
-            command.get("value"),
-            client_host=client_host,
+    elif command_type in MODULE_COMMAND_TYPES:
+        await handle_module_command(
+            ws,
+            context,
+            clients,
+            client_host,
+            command,
+            enqueue_prompt_from_module=_enqueue_prompt_from_module,
+            enqueue_generation_commands=_enqueue_headless_generation_commands,
         )
-        if module_state is None:
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "level": "info",
-                "message": "Headless command retired: set_module_param",
-                "headless": True,
-            }, ensure_ascii=False))
-        elif isinstance(module_state, list):
-            generated_prompt = ""
-            generated_source = ""
-            for item in module_state:
-                if isinstance(item, dict):
-                    await ws.send_text(json.dumps(item, ensure_ascii=False))
-                    if item.get("type") == "prompt_generated" and item.get("source") == "e621_event":
-                        generated_prompt = str(item.get("prompt") or "")
-                        generated_source = "E621"
-            if generated_prompt:
-                await _enqueue_prompt_from_module(
-                    ws,
-                    context,
-                    clients,
-                    prompt=generated_prompt,
-                    source=generated_source,
-                )
-        else:
-            generation_commands = []
-            if isinstance(module_state, dict):
-                raw_commands = module_state.pop("_headless_generation_commands", [])
-                if isinstance(raw_commands, list):
-                    generation_commands = [item for item in raw_commands if isinstance(item, dict)]
-            await ws.send_text(json.dumps(module_state, ensure_ascii=False))
-            if generation_commands:
-                await _enqueue_headless_generation_commands(ws, context, clients, generation_commands)
-    elif command_type == "get_module_state":
-        module_id = str(command.get("module_id") or "")
-        await ws.send_text(json.dumps(context.module_state_payload(module_id, client_host), ensure_ascii=False))
     elif command_type == "result_enhance":
         try:
             generation_command, enhance_state = await _to_thread(_prepare_result_enhance_command, context, command)

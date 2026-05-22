@@ -2,23 +2,17 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI
 
-from app.backend.server.autocomplete_commands import (
-    ensure_tag_search_index,
-)
 from app.backend.server.artist_thumbnail_routes import register_artist_thumbnail_routes
 from app.backend.server.character_viewer_routes import register_character_viewer_routes
 from app.backend.server.danbooru_routes import register_danbooru_routes
 from app.backend.server.event_preset_routes import register_event_preset_routes
-from app.backend.server.generation_commands import (
-    random_service,
-)
 from app.backend.server.generation_runner import ensure_generation_runner
+from app.backend.server.headless_lifespan import create_headless_lifespan
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
 from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
@@ -45,41 +39,10 @@ def create_headless_app(
 
     session_context = context or WebSessionContext()
 
-    @asynccontextmanager
-    async def lifespan(_app: FastAPI):
-        async def run_warmup() -> None:
-            try:
-                ok = await _to_thread(random_service(session_context).warmup)
-                session_context.headless_random_warmup_done = bool(ok)
-                print(
-                    "Headless Remote: random prompt runtime warmup "
-                    + ("ready" if ok else "finished without search rows"),
-                    flush=True,
-                )
-            except Exception as exc:
-                session_context.headless_random_warmup_error = str(exc)
-                print(f"Headless Remote: random prompt runtime warmup failed - {exc}", flush=True)
-
-        async def run_tag_index_warmup() -> None:
-            try:
-                await _to_thread(ensure_tag_search_index, session_context)
-                print(
-                    f"Headless Remote: tag autocomplete index ready ({len(getattr(session_context, 'kr_tags_raw', {}) or {}):,} tags)",
-                    flush=True,
-                )
-            except Exception as exc:
-                session_context.headless_tag_index_warmup_error = str(exc)
-                print(f"Headless Remote: tag autocomplete index warmup failed - {exc}", flush=True)
-
-        task = getattr(session_context, "headless_random_warmup_task", None)
-        if task is None or task.done():
-            session_context.headless_random_warmup_task = asyncio.create_task(run_warmup())
-        tag_task = getattr(session_context, "headless_tag_index_warmup_task", None)
-        if tag_task is None or tag_task.done():
-            session_context.headless_tag_index_warmup_task = asyncio.create_task(run_tag_index_warmup())
-        yield
-
-    app = FastAPI(title="NAIA Remote Headless", lifespan=lifespan)
+    app = FastAPI(
+        title="NAIA Remote Headless",
+        lifespan=create_headless_lifespan(session_context, run_in_thread=_to_thread),
+    )
     app.state.web_session_context = session_context
     app.state.headless_clients = set()
 

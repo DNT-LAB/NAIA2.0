@@ -9,14 +9,15 @@ available as a compatibility path.
 
 from __future__ import annotations
 
+import importlib
+import os
+import weakref
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Protocol
-import weakref
-import os
 
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_remote_state_service import REMOTE_OPTION_DEFAULTS, SUPPORTED_API_MODES
@@ -241,194 +242,160 @@ class WebSessionContext:
     def _create_event_stream_runtime(self):
         return self._event_stream_service().runtime(create=True)
 
-    def _img2img_service(self):
-        service = self._headless_img2img_service
+    def _lazy_service(self, attr_name: str, module_name: str, class_name: str):
+        service = getattr(self, attr_name)
         if service is None:
-            from core.headless_img2img_service import HeadlessImg2ImgService
-
-            service = HeadlessImg2ImgService(self)
-            self._headless_img2img_service = service
+            module = importlib.import_module(module_name)
+            service = getattr(module, class_name)(self)
+            setattr(self, attr_name, service)
         return service
+
+    def _img2img_service(self):
+        return self._lazy_service(
+            "_headless_img2img_service",
+            "core.headless_img2img_service",
+            "HeadlessImg2ImgService",
+        )
 
     def _character_reference_service(self):
-        service = self._headless_character_reference_service
-        if service is None:
-            from core.headless_character_reference_service import HeadlessCharacterReferenceService
-
-            service = HeadlessCharacterReferenceService(self)
-            self._headless_character_reference_service = service
-        return service
+        return self._lazy_service(
+            "_headless_character_reference_service",
+            "core.headless_character_reference_service",
+            "HeadlessCharacterReferenceService",
+        )
 
     def _vibe_transfer_service(self):
-        service = self._headless_vibe_transfer_service
-        if service is None:
-            from core.headless_vibe_transfer_service import HeadlessVibeTransferService
-
-            service = HeadlessVibeTransferService(self)
-            self._headless_vibe_transfer_service = service
-        return service
+        return self._lazy_service(
+            "_headless_vibe_transfer_service",
+            "core.headless_vibe_transfer_service",
+            "HeadlessVibeTransferService",
+        )
 
     def _image_module_param_service(self):
-        service = self._headless_image_module_param_service
-        if service is None:
-            from core.headless_image_module_param_service import HeadlessImageModuleParamService
-
-            service = HeadlessImageModuleParamService(self)
-            self._headless_image_module_param_service = service
-        return service
+        return self._lazy_service(
+            "_headless_image_module_param_service",
+            "core.headless_image_module_param_service",
+            "HeadlessImageModuleParamService",
+        )
 
     def _automation_service(self):
-        service = self._headless_automation_service
-        if service is None:
-            from core.headless_automation_service import HeadlessAutomationService
-
-            service = HeadlessAutomationService(self)
-            self._headless_automation_service = service
-        return service
+        return self._lazy_service(
+            "_headless_automation_service",
+            "core.headless_automation_service",
+            "HeadlessAutomationService",
+        )
 
     def _webui_hiresfix_assist_service(self):
-        service = self._headless_webui_hiresfix_assist_service
-        if service is None:
-            from core.headless_webui_hiresfix_assist_service import HeadlessWebuiHiresfixAssistService
-
-            service = HeadlessWebuiHiresfixAssistService(self)
-            self._headless_webui_hiresfix_assist_service = service
-        return service
+        return self._lazy_service(
+            "_headless_webui_hiresfix_assist_service",
+            "core.headless_webui_hiresfix_assist_service",
+            "HeadlessWebuiHiresfixAssistService",
+        )
 
     def _event_stream_service(self):
-        service = self._headless_event_stream_service
-        if service is None:
-            from core.headless_event_stream_service import HeadlessEventStreamService
-
-            service = HeadlessEventStreamService(self)
-            self._headless_event_stream_service = service
-        return service
+        return self._lazy_service(
+            "_headless_event_stream_service",
+            "core.headless_event_stream_service",
+            "HeadlessEventStreamService",
+        )
 
     def _prompt_engineering_service(self):
-        service = self._headless_prompt_engineering_service
-        if service is None:
-            from core.headless_prompt_engineering_service import HeadlessPromptEngineeringService
-
-            service = HeadlessPromptEngineeringService(self)
-            self._headless_prompt_engineering_service = service
-        return service
+        return self._lazy_service(
+            "_headless_prompt_engineering_service",
+            "core.headless_prompt_engineering_service",
+            "HeadlessPromptEngineeringService",
+        )
 
     def _conditional_prompt_service(self):
-        service = self._headless_conditional_prompt_service
-        if service is None:
-            from core.headless_conditional_prompt_service import HeadlessConditionalPromptService
-
-            service = HeadlessConditionalPromptService(self)
-            self._headless_conditional_prompt_service = service
-        return service
+        return self._lazy_service(
+            "_headless_conditional_prompt_service",
+            "core.headless_conditional_prompt_service",
+            "HeadlessConditionalPromptService",
+        )
 
     def _character_service(self):
-        service = self._headless_character_service
-        if service is None:
-            from core.headless_character_service import HeadlessCharacterService
-
-            service = HeadlessCharacterService(self)
-            self._headless_character_service = service
-        return service
+        return self._lazy_service(
+            "_headless_character_service",
+            "core.headless_character_service",
+            "HeadlessCharacterService",
+        )
 
     def _wildcard_service(self):
-        service = self._headless_wildcard_service
-        if service is None:
-            from core.headless_wildcard_service import HeadlessWildcardService
-
-            service = HeadlessWildcardService(self)
-            self._headless_wildcard_service = service
-        return service
+        return self._lazy_service(
+            "_headless_wildcard_service",
+            "core.headless_wildcard_service",
+            "HeadlessWildcardService",
+        )
 
     def _instant_wildcard_service(self):
-        service = self._headless_instant_wildcard_service
-        if service is None:
-            from core.headless_instant_wildcard_service import HeadlessInstantWildcardService
-
-            service = HeadlessInstantWildcardService(self)
-            self._headless_instant_wildcard_service = service
-        return service
+        return self._lazy_service(
+            "_headless_instant_wildcard_service",
+            "core.headless_instant_wildcard_service",
+            "HeadlessInstantWildcardService",
+        )
 
     def _save_service(self):
-        service = self._headless_save_service
-        if service is None:
-            from core.headless_save_service import HeadlessSaveService
-
-            service = HeadlessSaveService(self)
-            self._headless_save_service = service
-        return service
+        return self._lazy_service(
+            "_headless_save_service",
+            "core.headless_save_service",
+            "HeadlessSaveService",
+        )
 
     def _search_state_service(self):
-        service = self._headless_search_state_service
-        if service is None:
-            from core.headless_search_state_service import HeadlessSearchStateService
-
-            service = HeadlessSearchStateService(self)
-            self._headless_search_state_service = service
-        return service
+        return self._lazy_service(
+            "_headless_search_state_service",
+            "core.headless_search_state_service",
+            "HeadlessSearchStateService",
+        )
 
     def _session_state_service(self):
-        service = self._headless_session_state_service
-        if service is None:
-            from core.headless_session_state_service import HeadlessSessionStateService
-
-            service = HeadlessSessionStateService(self)
-            self._headless_session_state_service = service
-        return service
+        return self._lazy_service(
+            "_headless_session_state_service",
+            "core.headless_session_state_service",
+            "HeadlessSessionStateService",
+        )
 
     def _runtime_path_service(self):
-        service = self._headless_runtime_path_service
-        if service is None:
-            from core.headless_runtime_path_service import HeadlessRuntimePathService
-
-            service = HeadlessRuntimePathService(self)
-            self._headless_runtime_path_service = service
-        return service
+        return self._lazy_service(
+            "_headless_runtime_path_service",
+            "core.headless_runtime_path_service",
+            "HeadlessRuntimePathService",
+        )
 
     def _pipeline_run_service(self):
-        service = self._headless_pipeline_run_service
-        if service is None:
-            from core.headless_pipeline_run_service import HeadlessPipelineRunService
-
-            service = HeadlessPipelineRunService(self)
-            self._headless_pipeline_run_service = service
-        return service
+        return self._lazy_service(
+            "_headless_pipeline_run_service",
+            "core.headless_pipeline_run_service",
+            "HeadlessPipelineRunService",
+        )
 
     def _pipeline_hook_service(self):
-        service = self._headless_pipeline_hook_service
-        if service is None:
-            from core.headless_pipeline_hook_service import HeadlessPipelineHookService
-
-            service = HeadlessPipelineHookService(self)
-            self._headless_pipeline_hook_service = service
-        return service
+        return self._lazy_service(
+            "_headless_pipeline_hook_service",
+            "core.headless_pipeline_hook_service",
+            "HeadlessPipelineHookService",
+        )
 
     def _api_control_service(self):
-        service = self._headless_api_control_service
-        if service is None:
-            from core.headless_api_control_service import HeadlessApiControlService
-
-            service = HeadlessApiControlService(self)
-            self._headless_api_control_service = service
-        return service
+        return self._lazy_service(
+            "_headless_api_control_service",
+            "core.headless_api_control_service",
+            "HeadlessApiControlService",
+        )
 
     def _remote_state_service(self):
-        service = self._headless_remote_state_service
-        if service is None:
-            from core.headless_remote_state_service import HeadlessRemoteStateService
-
-            service = HeadlessRemoteStateService(self)
-            self._headless_remote_state_service = service
-        return service
+        return self._lazy_service(
+            "_headless_remote_state_service",
+            "core.headless_remote_state_service",
+            "HeadlessRemoteStateService",
+        )
 
     def _module_dispatch_service(self):
-        service = self._headless_module_dispatch_service
-        if service is None:
-            from core.headless_module_dispatch_service import HeadlessModuleDispatchService
-
-            service = HeadlessModuleDispatchService(self)
-            self._headless_module_dispatch_service = service
-        return service
+        return self._lazy_service(
+            "_headless_module_dispatch_service",
+            "core.headless_module_dispatch_service",
+            "HeadlessModuleDispatchService",
+        )
 
     def _default_token_manager(self) -> TokenStore:
         from core.secure_token_manager import SecureTokenManager

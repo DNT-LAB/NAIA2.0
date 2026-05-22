@@ -46,6 +46,24 @@ def check_backend_runtime_strategy(
         violations.append("python-runtime-folder must declare the Python 3.12 base-only runtime builder")
     if "--require-bundled-python" not in str(python_runtime.get("preflight_gate", "")):
         violations.append("python-runtime-folder must declare a bundled-python preflight gate")
+    managed_env = python_runtime.get("first_launch_dependency_env", {})
+    if not isinstance(managed_env, dict):
+        violations.append("python-runtime-folder must declare first_launch_dependency_env")
+        managed_env = {}
+    expected_managed_env = {
+        "path": "user-data/runtime-env",
+        "marker": "naia-runtime-env.json",
+        "created_by": "app/electron/main/main.cjs",
+        "base_runtime": "resources/python/python.exe",
+        "requirements": "requirements-headless.txt",
+    }
+    for key, expected in expected_managed_env.items():
+        if managed_env.get(key) != expected:
+            violations.append(f"first_launch_dependency_env.{key} must be {expected}")
+    install_terms = [str(term) for term in managed_env.get("install_command_terms", [])] if isinstance(managed_env.get("install_command_terms"), list) else []
+    for term in ("-m", "venv", "pip", "install", "--disable-pip-version-check", "-r", "requirements-headless.txt"):
+        if term not in install_terms:
+            violations.append(f"first_launch_dependency_env.install_command_terms must include {term}")
 
     main_text = Path(electron_main_path).read_text(encoding="utf-8")
     required_electron_terms = [
@@ -57,6 +75,19 @@ def check_backend_runtime_strategy(
         "NAIA_USER_DATA_DIR",
         "NAIA_RESOURCE_ROOT",
         "NAIA_REMOTE_WEB_DIR",
+        "RUNTIME_ENV_DIR",
+        "runtime-env",
+        "RUNTIME_ENV_MARKER",
+        "naia-runtime-env.json",
+        "ensureManagedRuntimeEnv",
+        "runtimeEnvRoot()",
+        "runtimeEnvPython()",
+        "requirements-headless.txt",
+        "\"-m\"",
+        "\"venv\"",
+        "\"pip\"",
+        "\"install\"",
+        "\"--disable-pip-version-check\"",
     ]
     for term in required_electron_terms:
         if term not in main_text:

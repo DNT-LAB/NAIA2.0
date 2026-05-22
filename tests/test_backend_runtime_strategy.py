@@ -20,6 +20,13 @@ def test_backend_runtime_strategy_selects_python_runtime_folder_first():
     assert candidates["python-runtime-folder"]["staging_tool"] == "tools/stage_python_runtime.py"
     assert candidates["python-runtime-folder"]["runtime_builder"] == "tools/build_python_runtime_from_venv.py --base-only --python-version 3.12"
     assert "--require-bundled-python" in candidates["python-runtime-folder"]["preflight_gate"]
+    managed_env = candidates["python-runtime-folder"]["first_launch_dependency_env"]
+    assert managed_env["path"] == "user-data/runtime-env"
+    assert managed_env["marker"] == "naia-runtime-env.json"
+    assert managed_env["requirements"] == "requirements-headless.txt"
+    assert {"-m", "venv", "pip", "install", "-r", "requirements-headless.txt"} <= set(
+        managed_env["install_command_terms"]
+    )
     assert "scanner_result_notes" in strategy["required_measurements"]
     assert strategy["scanner_policy"]["submission_notes_required"] is True
 

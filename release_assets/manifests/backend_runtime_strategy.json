@@ -21,6 +21,24 @@
       "staging_tool": "tools/stage_python_runtime.py",
       "runtime_builder": "tools/build_python_runtime_from_venv.py --base-only --python-version 3.12",
       "preflight_gate": "tools/check_release_preflight.py --require-bundled-python",
+      "first_launch_dependency_env": {
+        "path": "user-data/runtime-env",
+        "marker": "naia-runtime-env.json",
+        "created_by": "app/electron/main/main.cjs",
+        "base_runtime": "resources/python/python.exe",
+        "requirements": "requirements-headless.txt",
+        "install_command_terms": [
+          "-m",
+          "venv",
+          "pip",
+          "install",
+          "--disable-pip-version-check",
+          "-r",
+          "requirements-headless.txt"
+        ],
+        "offline_cache": "optional wheelhouse through NAIA_PIP_WHEELHOUSE",
+        "notes": "The bundled Python folder stays base-only. Electron creates user-data/runtime-env on first launch, installs requirements-headless.txt into that managed env, and records a marker keyed by requirements/runtime metadata."
+      },
       "pros": [
         "Avoids PyInstaller bootloader false-positive surface for the first milestone",
         "Keeps backend files inspectable and patchable",

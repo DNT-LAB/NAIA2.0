@@ -367,7 +367,7 @@ After each round:
 
 ### Checklist
 
-- [ ] Clean Python runtime build remains base-only and creates managed dependency env on first launch.
+- [x] Clean Python runtime build remains base-only and creates managed dependency env on first launch.
 - [ ] Maintenance window appears before long install/download work and shows progress without scrollbars.
 - [ ] Release package includes only reviewed bootstrap data and samples.
 - [ ] `NAIA-Portable` folder shape is user-friendly.
@@ -386,6 +386,12 @@ After each round:
 - `release_assets/manifests/runtime_distribution_tracks.json` now requires the `check:runtime-distribution` package script for the Electron release track.
 - `release_assets/manifests/release_distribution_strategy.json` now requires `release:check` to keep `check:distribution`, `check:runtime-distribution`, and `check:approval-gate` wired in order.
 - Current validation: `python -B tools\check_runtime_distribution_tracks.py`, `python -B tools\check_release_distribution_strategy.py`, and focused tests for runtime/release distribution gates pass.
+
+### Base Python Runtime / Managed Env Gate Slice - 2026-05-22
+
+- `release_assets/manifests/backend_runtime_strategy.json` now records the first-launch managed dependency environment contract for `user-data/runtime-env`.
+- `tools/check_backend_runtime_strategy.py` now requires the base-only Python runtime builder, bundled-python preflight, Electron runtime-env marker, venv bootstrap, and `requirements-headless.txt` pip install terms to remain wired.
+- Current validation: `python -B tools\check_backend_runtime_strategy.py` and focused backend-runtime strategy tests pass.
 
 ## Round 9 - Hard Delete Phase
 

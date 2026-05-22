@@ -62,6 +62,7 @@
       "logs/**",
       "output/**",
       "tmp/**",
+      "tmp_codex_*/**",
       "temp/**",
       "app/electron/dist/**",
       "user-data/**",

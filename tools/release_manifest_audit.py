@@ -82,6 +82,8 @@ FORBIDDEN_PATH_GLOBS = (
     "*/data/tagger/*",
     "*/ui/event_preset/*",
     "*/ui/*/downloaded/*",
+    "tmp_codex_*/*",
+    "*/tmp_codex_*/*",
     "*/core/context.py",
     "*/core/image_crud_controller.py",
     "*/core/mode_ware_manager.py",

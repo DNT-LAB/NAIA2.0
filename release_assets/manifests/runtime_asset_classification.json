@@ -159,6 +159,7 @@
         "logs/**",
         "output/**",
         "tmp/**",
+        "tmp_codex_*/**",
         "temp/**",
         "user-data/**"
       ],
@@ -170,6 +171,7 @@
         "logs/**",
         "output/**",
         "tmp/**",
+        "tmp_codex_*/**",
         "temp/**",
         "user-data/**"
       ],

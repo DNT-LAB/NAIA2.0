@@ -83,6 +83,17 @@ class HeadlessRemoteStateService:
         self.context.remote_params[clean_key] = self.coerce_remote_param(clean_key, value)
         self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
 
+    def current_model_key(self) -> str:
+        model = str(self.context.remote_params.get("model") or "NAID4.5F").strip()
+        return model or "NAID4.5F"
+
+    def is_naid45_model(self) -> bool:
+        model = self.current_model_key()
+        return "NAID4.5F" in model or "NAID4.5C" in model
+
+    def is_naid3_model(self) -> bool:
+        return "NAID3" in self.current_model_key()
+
     @staticmethod
     def coerce_remote_param(key: str, value: Any) -> Any:
         if key in REMOTE_BOOLEAN_PARAMS:

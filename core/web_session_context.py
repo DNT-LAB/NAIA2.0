@@ -679,15 +679,13 @@ class WebSessionContext:
         return self._character_service().set_param(key, value)
 
     def _current_model_key(self) -> str:
-        model = str(self.remote_params.get("model") or "NAID4.5F").strip()
-        return model or "NAID4.5F"
+        return self._remote_state_service().current_model_key()
 
     def _is_naid45_model(self) -> bool:
-        model = self._current_model_key()
-        return "NAID4.5F" in model or "NAID4.5C" in model
+        return self._remote_state_service().is_naid45_model()
 
     def _is_naid3_model(self) -> bool:
-        return "NAID3" in self._current_model_key()
+        return self._remote_state_service().is_naid3_model()
 
     @staticmethod
     def _image_hash(image_bytes: bytes) -> str:

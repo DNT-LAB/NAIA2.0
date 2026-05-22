@@ -180,6 +180,7 @@ class WebSessionContext:
     _headless_save_service: Any = field(default=None, init=False, repr=False)
     _headless_search_state_service: Any = field(default=None, init=False, repr=False)
     _headless_session_state_service: Any = field(default=None, init=False, repr=False)
+    _headless_runtime_path_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -376,6 +377,15 @@ class WebSessionContext:
             self._headless_session_state_service = service
         return service
 
+    def _runtime_path_service(self):
+        service = self._headless_runtime_path_service
+        if service is None:
+            from core.headless_runtime_path_service import HeadlessRuntimePathService
+
+            service = HeadlessRuntimePathService(self)
+            self._headless_runtime_path_service = service
+        return service
+
     def _default_token_manager(self) -> TokenStore:
         from core.secure_token_manager import SecureTokenManager
 
@@ -562,58 +572,28 @@ class WebSessionContext:
         return self._search_state_service().get_active_ratings()
 
     def _save_root(self) -> Path:
-        return self.runtime_paths.save_dir if self.runtime_paths is not None else Path(self.repo_root) / "save"
+        return self._runtime_path_service().save_root()
 
     def _output_root(self) -> Path:
-        return self.runtime_paths.output_dir if self.runtime_paths is not None else Path(self.repo_root) / "output"
+        return self._runtime_path_service().output_root()
 
     def _legacy_save_root(self) -> Path:
-        return Path(self.repo_root) / "save"
+        return self._runtime_path_service().legacy_save_root()
 
     def _legacy_save_fallback_enabled(self) -> bool:
-        if os.environ.get("NAIA_DISABLE_LEGACY_SAVE_FALLBACK") == "1":
-            return False
-        if os.environ.get("NAIA_ELECTRON") == "1":
-            return False
-        return True
+        return self._runtime_path_service().legacy_save_fallback_enabled()
 
     def _save_path(self, *parts: str | Path) -> Path:
-        path = self._save_root()
-        for part in parts:
-            path = path / part
-        return path
+        return self._runtime_path_service().save_path(*parts)
 
     def _legacy_save_path(self, *parts: str | Path) -> Path:
-        path = self._legacy_save_root()
-        for part in parts:
-            path = path / part
-        return path
+        return self._runtime_path_service().legacy_save_path(*parts)
 
     def _existing_save_path(self, *parts: str | Path) -> Path:
-        primary = self._save_path(*parts)
-        if primary.exists():
-            return primary
-        if not self._legacy_save_fallback_enabled():
-            return primary
-        legacy = self._legacy_save_path(*parts)
-        if legacy.exists():
-            return legacy
-        return primary
+        return self._runtime_path_service().existing_save_path(*parts)
 
     def _existing_save_dirs(self, *parts: str | Path) -> list[Path]:
-        dirs: list[Path] = []
-        seen: set[Path] = set()
-        paths = [self._save_path(*parts)]
-        if self._legacy_save_fallback_enabled():
-            paths.append(self._legacy_save_path(*parts))
-        for path in paths:
-            resolved = path.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            if path.exists() and path.is_dir():
-                dirs.append(path)
-        return dirs
+        return self._runtime_path_service().existing_save_dirs(*parts)
 
     def _search_filter_state_path(self) -> Path:
         return self._search_state_service().search_filter_state_path()

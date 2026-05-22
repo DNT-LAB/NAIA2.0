@@ -135,7 +135,7 @@ After each round:
 
 - [x] `core/api_service.py`, `core/prompt_processor.py`, `core/prompt_generation_service.py`의 `core.context.AppContext` type hint를 Protocol 또는 `Any` 기반 headless contract로 교체한다.
 - [ ] `interfaces/base_module.py`, `interfaces/base_tab_module.py`를 legacy module protocol과 headless protocol로 분리한다.
-- [ ] `utils/clipboard_image.py`를 Qt clipboard adapter와 pure image byte helper로 분리한다.
+- [x] `utils/clipboard_image.py`를 Qt clipboard adapter와 pure image byte helper로 분리한다.
 - [ ] `utils/load_generation_params.py`를 legacy desktop utility로 격리하거나 headless settings service와 분리한다.
 - [ ] `tabs/comic_generator_tab.py` root compatibility entry를 archive/delete 후보로 분류한다.
 - [ ] `core/kr_tag_loader.py`의 legacy interactive fallback을 source mode migration fallback으로 제한한다.
@@ -150,7 +150,8 @@ After each round:
 
 - `core/api_service.py`, `core/prompt_processor.py`, `core/prompt_generation_service.py`, and the adjacent `core/mode_ware_manager.py` now type the shared context as `Any` instead of importing `core.context.AppContext` for annotations.
 - `rg 'from core\.context import AppContext|app_context: .AppContext|core\.context' core/api_service.py core/prompt_processor.py core/prompt_generation_service.py core/mode_ware_manager.py core -g '*.py'` returns no remaining matches in the targeted headless core files.
-- Required validation for this slice: `python -m py_compile core\api_service.py core\prompt_processor.py core\prompt_generation_service.py core\mode_ware_manager.py` and focused prompt/headless tests.
+- `utils/image_bytes.py` now owns pure PNG/PIL byte conversion without importing Qt; `utils/clipboard_image.py` remains the Qt clipboard adapter and reuses that helper.
+- Required validation for this slice: `python -m py_compile core\api_service.py core\prompt_processor.py core\prompt_generation_service.py core\mode_ware_manager.py utils\image_bytes.py utils\clipboard_image.py`, focused prompt/headless tests, and `tests\test_image_bytes.py tests\test_vibe_transfer_clipboard.py`.
 
 ## Round 4 - Split the Headless Monolith by Feature Owner
 

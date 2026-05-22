@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import importlib
-import io
 from pathlib import Path
 from typing import Optional
 
 from PIL import Image
+
+from utils.image_bytes import pil_image_from_png_bytes
 
 
 def _load_qt_contracts():
@@ -109,14 +110,6 @@ def clipboard_png_bytes(clipboard=None) -> Optional[bytes]:
     qapplication = _require_qt("QApplication")
     clipboard = clipboard or qapplication.clipboard()
     return clipboard_mime_png_bytes(clipboard.mimeData(), clipboard.image())
-
-
-def pil_image_from_png_bytes(png_bytes: bytes | None) -> Optional[Image.Image]:
-    if not png_bytes:
-        return None
-    with Image.open(io.BytesIO(png_bytes)) as image:
-        image.load()
-        return image.copy()
 
 
 def pil_image_from_mime_data(mime_data: QMimeData | None, clipboard_image: Optional[QImage] = None) -> Optional[Image.Image]:

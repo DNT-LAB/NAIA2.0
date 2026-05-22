@@ -7,6 +7,24 @@
     "Non-destructive checks cover the route surfaces needed by Remote Web panels; live image generation and external APIs remain separate validation.",
     "Full packaged-app validation must still test Generate, Enhance, img2img, Vibe Transfer, Character Reference, Artist Thumb, and setup/API workflows with real runtime credentials or controlled test doubles."
   ],
+  "test_tokens": {
+    "nai_token": "naia-smoke-token"
+  },
+  "seed_context": {
+    "prompt": "naia websocket smoke prompt",
+    "negative_prompt": "low quality",
+    "warmup_random": true,
+    "search_results": [
+      {
+        "rating": "s",
+        "general": "1girl, solo, simple background",
+        "artist": "",
+        "character": "",
+        "copyright": "",
+        "meta": ""
+      }
+    ]
+  },
   "http_checks": [
     {
       "feature": "web_shell",
@@ -321,6 +339,118 @@
       ],
       "sync_message": "sync",
       "expected_sync_type": "mode"
+    },
+    {
+      "feature": "command_flow_random_generate",
+      "path": "/ws",
+      "expected_initial_types": [
+        "session",
+        "desktop_window_state",
+        "mode",
+        "options",
+        "params",
+        "queue_state",
+        "api_status",
+        "init_complete",
+        "lazy_indices_ready"
+      ],
+      "commands": [
+        {
+          "name": "set_prompt_sync",
+          "send_json": {
+            "type": "set_prompt",
+            "prompt": "naia websocket smoke prompt",
+            "negative_prompt": "low quality"
+          },
+          "expected_messages": [
+            {
+              "type": "prompt_sync",
+              "expected_json_subset": {
+                "prompt": "naia websocket smoke prompt",
+                "negative": "low quality"
+              }
+            }
+          ]
+        },
+        {
+          "name": "set_param_steps",
+          "send_json": {
+            "type": "set_param",
+            "key": "steps",
+            "value": 12
+          },
+          "expected_messages": [
+            {
+              "type": "params",
+              "expected_json_subset": {
+                "steps": 12
+              }
+            }
+          ]
+        },
+        {
+          "name": "warmed_random_prompt",
+          "send_json": {
+            "type": "random",
+            "random_request_id": "smoke-random-1",
+            "ratings": ["s"],
+            "overrides": {
+              "auto_generate": false
+            }
+          },
+          "max_latency_ms": 200,
+          "expected_messages": [
+            {
+              "type": "prompt_generated",
+              "expected_json_subset": {
+                "source": "random",
+                "requestId": "smoke-random-1"
+              },
+              "expected_json_keys": ["prompt", "prompt_run_id", "rating_counts"]
+            }
+          ]
+        },
+        {
+          "name": "generate_dispatch_queued",
+          "send_json": {
+            "type": "generate",
+            "api_mode": "NAI",
+            "prompt": "naia websocket smoke prompt",
+            "negative_prompt": "low quality",
+            "overrides": {
+              "input": "naia websocket smoke prompt",
+              "_raw_input": "naia websocket smoke prompt",
+              "api_mode": "NAI",
+              "seed": 12345
+            }
+          },
+          "expected_messages": [
+            {
+              "type": "generation_dispatched",
+              "expected_json_subset": {
+                "ok": true,
+                "api_mode": "NAI",
+                "queued": true
+              },
+              "expected_json_keys": ["generation_request_id", "prompt_run_id"]
+            },
+            {
+              "type": "status",
+              "expected_json_subset": {
+                "is_generating": false,
+                "message": "queued"
+              }
+            },
+            {
+              "type": "queue_state",
+              "expected_json_subset": {
+                "total": 1
+              },
+              "expected_json_keys": ["items"]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

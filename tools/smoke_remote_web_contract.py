@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -38,16 +39,42 @@ def _prepare_environment(backend_root: Path, user_data_root: Path) -> None:
     os.chdir(backend_root)
 
 
-def _make_test_client(backend_root: Path, user_data_root: Path) -> TestClient:
+def _make_test_client(backend_root: Path, user_data_root: Path, contract: dict[str, Any]) -> TestClient:
     _prepare_environment(backend_root, user_data_root)
 
     from core.web_session_app import create_headless_app
     from core.web_session_context import InMemoryTokenManager, WebSessionContext
 
-    context = WebSessionContext(repo_root=backend_root, token_manager=InMemoryTokenManager())
+    test_tokens = contract.get("test_tokens") if isinstance(contract.get("test_tokens"), dict) else {}
+    context = WebSessionContext(repo_root=backend_root, token_manager=InMemoryTokenManager(test_tokens))
     context.headless_generation_execute_enabled = False
+    _seed_test_context(context, contract.get("seed_context") if isinstance(contract.get("seed_context"), dict) else {})
     app = create_headless_app(context)
     return TestClient(app)
+
+
+def _seed_test_context(context: Any, seed: dict[str, Any]) -> None:
+    rows = seed.get("search_results")
+    if isinstance(rows, list) and rows:
+        import pandas as pd
+        from core.search_result_model import SearchResultModel
+
+        frame = pd.DataFrame([row for row in rows if isinstance(row, dict)])
+        if not frame.empty:
+            context.search_results = SearchResultModel(frame)
+            context.search_results_snapshot = frame.copy()
+            context.search_results_master_base_snapshot = frame.copy()
+
+    if "prompt" in seed:
+        context.prompt_text = str(seed.get("prompt") or "")
+    if "negative_prompt" in seed:
+        context.negative_prompt_text = str(seed.get("negative_prompt") or "")
+    if seed.get("warmup_random"):
+        from core.headless_random_prompt_service import HeadlessRandomPromptService
+
+        service = HeadlessRandomPromptService(context)
+        context.headless_random_prompt_service = service
+        service.warmup()
 
 
 def _run_http_check(client: TestClient, check: dict[str, Any]) -> dict[str, Any]:
@@ -140,16 +167,23 @@ def _run_websocket_check(client: TestClient, check: dict[str, Any]) -> dict[str,
             if sync_message is not None:
                 ws.send_text(str(sync_message))
                 sync_payload = ws.receive_json()
+            command_results = [
+                _run_websocket_command(ws, command)
+                for command in check.get("commands", [])
+                if isinstance(command, dict)
+            ]
         observed = [message.get("type") for message in messages]
         expected_sync_type = check.get("expected_sync_type")
         sync_ok = expected_sync_type is None or (isinstance(sync_payload, dict) and sync_payload.get("type") == expected_sync_type)
+        commands_ok = all(result.get("ok") for result in command_results)
         return {
             "feature": check.get("feature", path),
             "path": path,
             "expected_initial_types": expected,
             "observed_initial_types": observed,
             "sync_type": sync_payload.get("type") if isinstance(sync_payload, dict) else None,
-            "ok": observed == expected and sync_ok,
+            "commands": command_results,
+            "ok": observed == expected and sync_ok and commands_ok,
         }
     except Exception as exc:
         return {
@@ -160,6 +194,72 @@ def _run_websocket_check(client: TestClient, check: dict[str, Any]) -> dict[str,
             "ok": False,
             "error": str(exc),
         }
+
+
+def _run_websocket_command(ws: Any, command: dict[str, Any]) -> dict[str, Any]:
+    name = str(command.get("name") or command.get("feature") or "command")
+    expected_messages = [
+        item for item in command.get("expected_messages", [])
+        if isinstance(item, dict)
+    ]
+    start = time.perf_counter()
+    try:
+        if "send_json" in command:
+            ws.send_text(json.dumps(command.get("send_json"), ensure_ascii=False))
+        else:
+            ws.send_text(str(command.get("send_text") or ""))
+        observed_messages = [ws.receive_json() for _ in expected_messages]
+    except Exception as exc:
+        return {
+            "name": name,
+            "ok": False,
+            "error": str(exc),
+        }
+
+    latency_ms = round((time.perf_counter() - start) * 1000, 3)
+    message_results = [
+        _validate_expected_websocket_message(observed, expected)
+        for observed, expected in zip(observed_messages, expected_messages)
+    ]
+    ok = all(result.get("ok") for result in message_results)
+    max_latency_ms = command.get("max_latency_ms")
+    if isinstance(max_latency_ms, (int, float)) and latency_ms > float(max_latency_ms):
+        ok = False
+        message_results.append({
+            "ok": False,
+            "error": f"latency {latency_ms}ms exceeded {float(max_latency_ms)}ms",
+        })
+    return {
+        "name": name,
+        "latency_ms": latency_ms,
+        "messages": message_results,
+        "ok": ok,
+    }
+
+
+def _validate_expected_websocket_message(observed: Any, expected: dict[str, Any]) -> dict[str, Any]:
+    expected_type = expected.get("type")
+    observed_type = observed.get("type") if isinstance(observed, dict) else None
+    ok = expected_type is None or observed_type == expected_type
+    error = "" if ok else f"expected type {expected_type!r}, got {observed_type!r}"
+    if ok and "expected_json_subset" in expected:
+        ok, error = _json_contains(observed, expected.get("expected_json_subset"))
+    if ok and "expected_json_keys" in expected:
+        keys = expected.get("expected_json_keys") or []
+        missing = [
+            str(key)
+            for key in keys
+            if not isinstance(observed, dict) or key not in observed
+        ]
+        if missing:
+            ok = False
+            error = f"missing JSON keys: {', '.join(missing)}"
+    return {
+        "expected_type": expected_type,
+        "observed_type": observed_type,
+        "ok": ok,
+        **({"error": error} if error else {}),
+    }
 
 
 def smoke_remote_web_contract(
@@ -176,7 +276,7 @@ def smoke_remote_web_contract(
         return {"ok": False, "error": f"NAIA_web_headless.py not found under: {backend}"}
 
     contract = load_contract(contract_path)
-    client = _make_test_client(backend, user_data)
+    client = _make_test_client(backend, user_data, contract)
     http_results = [_run_http_check(client, check) for check in contract.get("http_checks", [])]
     websocket_results = [_run_websocket_check(client, check) for check in contract.get("websocket_checks", [])]
     failures = [

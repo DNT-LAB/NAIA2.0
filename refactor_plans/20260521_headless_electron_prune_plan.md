@@ -287,6 +287,14 @@ After each round:
 - The slice intentionally avoids external network lookup, real NovelAI/WebUI/ComfyUI generation, download start actions, and destructive file operations. Those remain in the live/packaged Round 6 checklist items.
 - Required validation for this slice: `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6`, `python -B tools\check_remote_web_feature_contract.py`, `python -B tools\check_project_layout_policy.py`, and `python -B tools\check_refactor_plan_execution_contract.py`.
 
+### Source-Mode Controlled WebSocket Smoke Slice - 2026-05-22
+
+- `tools/smoke_remote_web_contract.py` now seeds controlled test tokens and a minimal in-memory random-prompt source from the smoke contract, then warms the random runtime before measuring command latency.
+- The WebSocket smoke now sends Remote Web command payloads for `set_prompt`, `set_param`, warmed `random`, and `generate` and verifies response sequence, JSON fields, `prompt_run_id`, `generation_request_id`, queue state, and command latency.
+- Generate dispatch remains non-external: the smoke uses a fake NAI token and keeps `headless_generation_execute_enabled = False`, so it proves queue handoff without calling NovelAI/WebUI/ComfyUI.
+- Warmed random prompt latency is guarded at `max_latency_ms: 200`; current validation observed sub-24ms random round trips in the TestClient smoke.
+- Required validation for this slice: `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6_ws`, plus the Remote Web feature, layout, and refactor-plan contract gates.
+
 ## Round 7 - Legacy Quarantine Hardening
 
 ### Checklist

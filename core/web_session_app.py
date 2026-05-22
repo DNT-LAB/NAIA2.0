@@ -51,15 +51,11 @@ from app.backend.server.result_display_routes import (
     register_result_display_routes,
     resolve_result_image_action_source,
 )
-from app.backend.server.state_routes import register_state_routes
-from app.backend.server.search_runtime import (
-    apply_search_runtime_filters as _apply_search_runtime_filters,
-    load_or_merge_custom_parquet as _load_or_merge_custom_parquet,
-    restore_search_snapshot as _restore_search_snapshot,
-    run_search_command as _run_search_command,
-    search_parquet_action as _search_parquet_action,
-    tag_filter_search as _tag_filter_search,
+from app.backend.server.search_commands import (
+    SEARCH_COMMAND_TYPES,
+    handle_search_command,
 )
+from app.backend.server.state_routes import register_state_routes
 from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
 from app.backend.server.web_shell_routes import register_web_shell_routes
 from app.web import resolve_remote_web_dir
@@ -911,11 +907,13 @@ async def _handle_json_command(
     elif command_type == "set_param":
         context.set_param(str(command.get("key") or ""), command.get("value"))
         await _broadcast_json(clients, context.generation_param_schema_payload())
-    elif command_type == "set_active_ratings":
-        context.set_active_ratings(command.get("ratings"))
-        context.save_search_filter_state(ratings=context.get_active_ratings())
-        state = await _to_thread(_apply_search_runtime_filters, context)
-        await ws.send_text(json.dumps(state, ensure_ascii=False))
+    elif command_type in SEARCH_COMMAND_TYPES:
+        await handle_search_command(
+            ws,
+            context,
+            command,
+            run_in_thread=_to_thread,
+        )
     elif command_type in API_CONTROL_COMMAND_TYPES:
         await handle_api_control_command(
             ws,
@@ -926,96 +924,6 @@ async def _handle_json_command(
         )
     elif command_type in HEADLESS_RETIRED_COMMAND_TYPES:
         await handle_headless_retired_command(ws, context, client_host, command)
-    elif command_type == "get_search_state":
-        await ws.send_text(json.dumps(context.search_state_payload(), ensure_ascii=False))
-    elif command_type == "save_search_filter_state":
-        await _to_thread(context.save_search_filter_state_from_payload, command)
-    elif command_type == "search":
-        await ws.send_text(json.dumps({
-            "type": "search_progress",
-            "completed": 0,
-            "total": 1,
-        }, ensure_ascii=False))
-        state = await _to_thread(_run_search_command, context, command)
-        await ws.send_text(json.dumps({
-            "type": "search_progress",
-            "completed": 1,
-            "total": 1,
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps(state, ensure_ascii=False))
-    elif command_type in {"load_parquet", "merge_parquet"}:
-        state, toast = await _to_thread(
-            _load_or_merge_custom_parquet,
-            context,
-            str(command.get("filename") or ""),
-            merge=command_type == "merge_parquet",
-        )
-        await ws.send_text(json.dumps(state, ensure_ascii=False))
-        await ws.send_text(json.dumps(toast, ensure_ascii=False))
-    elif command_type == "search_parquet_action":
-        state, toast = await _to_thread(_search_parquet_action, context, command)
-        await ws.send_text(json.dumps(state, ensure_ascii=False))
-        await ws.send_text(json.dumps(toast, ensure_ascii=False))
-    elif command_type == "restore_snapshot":
-        state = await _to_thread(_restore_search_snapshot, context)
-        await ws.send_text(json.dumps(state, ensure_ascii=False))
-    elif command_type == "tag_filter_search":
-        tags = command.get("tags") if isinstance(command.get("tags"), list) else []
-        request_id = str(command.get("request_id") or "")
-        result = await _to_thread(_tag_filter_search, context, tags)
-        ids = result.pop("_ids", set())
-        if request_id:
-            result["request_id"] = request_id
-        context.pending_tag_filter = {
-            "tags": result.get("tags", []),
-            "ids": ids,
-            "count": result.get("count", 0),
-            "request_id": request_id,
-            "rating_counts": result.get("rating_counts", {}),
-        }
-        await ws.send_text(json.dumps(result, ensure_ascii=False))
-    elif command_type == "tag_filter_assign":
-        pending = getattr(context, "pending_tag_filter", None)
-        request_id = str(command.get("request_id") or "")
-        if not pending:
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "message": "No pending search to assign",
-                "level": "error",
-            }, ensure_ascii=False))
-        elif request_id and str(pending.get("request_id") or "") != request_id:
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "message": "Tag filter search is stale. Search again.",
-                "level": "error",
-            }, ensure_ascii=False))
-        else:
-            context.active_tag_filter_ids = set(pending.get("ids") or set())
-            tags = [str(tag) for tag in pending.get("tags", [])]
-            context.save_search_filter_state(
-                tag_filter=[tag for tag in tags if not tag.startswith("-")],
-                tag_filter_exclude=[tag.lstrip("-") for tag in tags if tag.startswith("-")],
-                tag_filter_active=True,
-            )
-            state = await _to_thread(_apply_search_runtime_filters, context)
-            await ws.send_text(json.dumps({
-                "type": "tag_filter_assigned",
-                "count": pending.get("count", 0),
-                "tags": tags,
-            }, ensure_ascii=False))
-            await ws.send_text(json.dumps(state, ensure_ascii=False))
-    elif command_type == "tag_filter_clear":
-        context.active_tag_filter_ids = None
-        context.pending_tag_filter = None
-        context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
-        state = await _to_thread(_apply_search_runtime_filters, context)
-        await ws.send_text(json.dumps({
-            "type": "tag_filter_result",
-            "count": 0,
-            "tags": [],
-            "rating_counts": {rating: 0 for rating in "gsqe"},
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps(state, ensure_ascii=False))
     elif command_type == "tag_search":
         query = str(command.get("query") or "")
         results = await _to_thread(_search_kr_tags, context, query, 20)

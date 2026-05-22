@@ -175,6 +175,7 @@ class WebSessionContext:
     _headless_api_control_service: Any = field(default=None, init=False, repr=False)
     _headless_remote_state_service: Any = field(default=None, init=False, repr=False)
     _headless_module_dispatch_service: Any = field(default=None, init=False, repr=False)
+    _headless_image_module_param_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -270,6 +271,15 @@ class WebSessionContext:
 
             service = HeadlessVibeTransferService(self)
             self._headless_vibe_transfer_service = service
+        return service
+
+    def _image_module_param_service(self):
+        service = self._headless_image_module_param_service
+        if service is None:
+            from core.headless_image_module_param_service import HeadlessImageModuleParamService
+
+            service = HeadlessImageModuleParamService(self)
+            self._headless_image_module_param_service = service
         return service
 
     def _automation_service(self):
@@ -781,20 +791,13 @@ class WebSessionContext:
         return self._vibe_transfer_service().load_cluster(value)
 
     def active_character_reference_params(self) -> dict[str, Any]:
-        return self._character_reference_service().active_params()
+        return self._image_module_param_service().active_character_reference_params()
 
     def active_vibe_transfer_params(self) -> dict[str, Any]:
-        return self._vibe_transfer_service().active_params()
+        return self._image_module_param_service().active_vibe_transfer_params()
 
     def apply_headless_image_module_params(self, params: dict[str, Any], api_mode: str) -> None:
-        if str(api_mode or "").upper() != "NAI":
-            return
-        if not params.get("director_reference_descriptions"):
-            params.update(self.active_character_reference_params())
-        if params.get("_skip_vibe_transfer_late_binding"):
-            return
-        if not params.get("reference_image_multiple"):
-            params.update(self.active_vibe_transfer_params())
+        self._image_module_param_service().apply(params, api_mode)
 
     def open_img2img_session_from_bytes(
         self,

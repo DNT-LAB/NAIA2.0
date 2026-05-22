@@ -23,6 +23,7 @@ REQUIRED_SURFACE_IDS = {
     "ontology_visualizer",
     "ezmode_temp",
 }
+REQUIRED_WEB_REBUILD_STATUS = "deferred_until_product_owner_review"
 LEGACY_IMPORT_ROOTS = {"PyQt6", "PySide2", "PySide6", "qtpy", "legacy_desktop", "NAIA_cold_v4"}
 
 
@@ -267,6 +268,145 @@ def validate_desktop_test_execution_policy(
     return violations
 
 
+def _surface_reference_patterns(surface: dict[str, Any]) -> set[str]:
+    patterns: set[str] = set()
+    for key in ("path", "root_compatibility_entry"):
+        value = str(surface.get(key) or "").strip()
+        if value:
+            patterns.add(value)
+    release_patterns = surface.get("release_exclude_patterns")
+    if isinstance(release_patterns, list):
+        patterns.update(str(pattern) for pattern in release_patterns if str(pattern).strip())
+    return patterns
+
+
+def validate_web_rebuild_candidates(manifest: dict[str, Any]) -> list[LegacySurfaceViolation]:
+    violations: list[LegacySurfaceViolation] = []
+    policy = manifest.get("web_rebuild_candidate_policy")
+    if not isinstance(policy, dict):
+        return [LegacySurfaceViolation("web_rebuild_candidate_policy", "web rebuild candidate policy is required")]
+
+    expected_policy = {
+        "classification": "reference_only_rebuild_candidate",
+        "activation_policy": "do_not_import_legacy; rebuild_against_headless_backend_and_remote_web_contracts",
+        "required_candidate_status": REQUIRED_WEB_REBUILD_STATUS,
+    }
+    for key, expected in expected_policy.items():
+        if policy.get(key) != expected:
+            violations.append(
+                LegacySurfaceViolation(
+                    "web_rebuild_candidate_policy",
+                    f"{key} must be {expected}",
+                )
+            )
+
+    allowed_target_owners = policy.get("allowed_target_owners")
+    if not isinstance(allowed_target_owners, list) or not allowed_target_owners:
+        violations.append(
+            LegacySurfaceViolation(
+                "web_rebuild_candidate_policy",
+                "allowed_target_owners must be a non-empty list",
+            )
+        )
+        allowed_owner_set: set[str] = set()
+    else:
+        allowed_owner_set = {str(owner) for owner in allowed_target_owners}
+
+    surfaces = manifest.get("legacy_surfaces")
+    if not isinstance(surfaces, list):
+        return violations
+    surfaces_by_id = {
+        str(item.get("id")): item
+        for item in surfaces
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    rebuild_surface_ids = {
+        surface_id
+        for surface_id, item in surfaces_by_id.items()
+        if "rebuild" in str(item.get("next_action") or "").lower()
+    }
+
+    candidates = manifest.get("web_rebuild_candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return violations + [
+            LegacySurfaceViolation("web_rebuild_candidates", "web rebuild candidates must be a non-empty list")
+        ]
+
+    candidate_surface_ids: set[str] = set()
+    seen_candidate_ids: set[str] = set()
+    for item in candidates:
+        if not isinstance(item, dict):
+            violations.append(LegacySurfaceViolation("<unknown>", "web rebuild candidate item must be an object"))
+            continue
+
+        candidate_id = str(item.get("id") or "").strip()
+        feature = candidate_id or "<missing id>"
+        if not candidate_id:
+            violations.append(LegacySurfaceViolation(feature, "candidate id is required"))
+        elif candidate_id in seen_candidate_ids:
+            violations.append(LegacySurfaceViolation(feature, "duplicate web rebuild candidate id"))
+        seen_candidate_ids.add(candidate_id)
+
+        legacy_surface_id = str(item.get("legacy_surface_id") or "").strip()
+        if not legacy_surface_id:
+            violations.append(LegacySurfaceViolation(feature, "legacy_surface_id is required"))
+            continue
+        if legacy_surface_id not in surfaces_by_id:
+            violations.append(
+                LegacySurfaceViolation(feature, f"legacy_surface_id is not classified: {legacy_surface_id}")
+            )
+            continue
+        candidate_surface_ids.add(legacy_surface_id)
+
+        if item.get("status") != REQUIRED_WEB_REBUILD_STATUS:
+            violations.append(
+                LegacySurfaceViolation(
+                    feature,
+                    f"status must be {REQUIRED_WEB_REBUILD_STATUS}",
+                )
+            )
+
+        target_owner = str(item.get("target_owner") or "").strip()
+        if target_owner not in allowed_owner_set:
+            violations.append(
+                LegacySurfaceViolation(
+                    feature,
+                    f"target_owner must be one of {sorted(allowed_owner_set)}",
+                )
+            )
+
+        if not str(item.get("target_surface") or "").strip():
+            violations.append(LegacySurfaceViolation(feature, "target_surface is required"))
+
+        must_not_import = item.get("must_not_import")
+        if not isinstance(must_not_import, list) or not must_not_import:
+            violations.append(LegacySurfaceViolation(feature, "must_not_import must be a non-empty list"))
+            continue
+
+        surface_patterns = _surface_reference_patterns(surfaces_by_id[legacy_surface_id])
+        missing_patterns = [
+            str(pattern)
+            for pattern in must_not_import
+            if str(pattern).strip() not in surface_patterns
+        ]
+        if missing_patterns:
+            violations.append(
+                LegacySurfaceViolation(
+                    feature,
+                    f"must_not_import contains patterns outside the classified legacy surface: {missing_patterns}",
+                )
+            )
+
+    for surface_id in sorted(rebuild_surface_ids - candidate_surface_ids):
+        violations.append(
+            LegacySurfaceViolation(
+                surface_id,
+                "legacy surface next_action mentions rebuild but has no web rebuild candidate",
+            )
+        )
+    return violations
+
+
 def validate_legacy_pyqt_surface_classification(
     classification_path: str | Path = DEFAULT_CLASSIFICATION,
     release_manifest_path: str | Path = DEFAULT_RELEASE_MANIFEST,
@@ -341,6 +481,7 @@ def validate_legacy_pyqt_surface_classification(
 
     if Path(classification_path) == DEFAULT_CLASSIFICATION:
         violations.extend(validate_desktop_test_execution_policy(manifest, electron_package_path))
+        violations.extend(validate_web_rebuild_candidates(manifest))
         violations.extend(scan_unclassified_product_legacy_imports(classification_path, boundary_path, repo_root))
 
     return violations
@@ -373,6 +514,8 @@ def validation_payload(
         "classification": str(Path(classification_path)),
         "release_manifest": str(Path(release_manifest_path)),
         "surface_count": len(manifest.get("legacy_surfaces", [])) if isinstance(manifest.get("legacy_surfaces"), list) else 0,
+        "web_rebuild_candidate_count": len(manifest.get("web_rebuild_candidates", [])) if isinstance(manifest.get("web_rebuild_candidates"), list) else 0,
+        "web_rebuild_candidate_policy": manifest.get("web_rebuild_candidate_policy", {}),
         "desktop_test_count": len(manifest.get("desktop_test_files", [])) if isinstance(manifest.get("desktop_test_files"), list) else 0,
         "desktop_test_execution_policy": manifest.get("desktop_test_execution_policy", {}),
         "scanned_desktop_test_imports": scan_legacy_desktop_test_imports(tests_root),

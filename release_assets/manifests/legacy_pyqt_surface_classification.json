@@ -10,6 +10,64 @@
     "required_release_script_target": "tools/check_legacy_pyqt_surface_classification.py",
     "notes": "Desktop/PyQt tests are inventory and reference coverage. They may be run intentionally by explicit file selection, but normal headless and Electron release checks must use the classification gate rather than running the desktop test set."
   },
+  "web_rebuild_candidate_policy": {
+    "classification": "reference_only_rebuild_candidate",
+    "activation_policy": "do_not_import_legacy; rebuild_against_headless_backend_and_remote_web_contracts",
+    "required_candidate_status": "deferred_until_product_owner_review",
+    "allowed_target_owners": [
+      "app/backend/server",
+      "app/web/remote",
+      "core"
+    ],
+    "notes": "Desktop-only PyQt features that may return later must be represented as rebuild candidates. Their legacy implementation stays excluded from active source/web/electron runtime paths until a new headless/web implementation is planned and smoke-tested."
+  },
+  "web_rebuild_candidates": [
+    {
+      "id": "comic_generator_web_rebuild",
+      "legacy_surface_id": "comic_generator_tab",
+      "status": "deferred_until_product_owner_review",
+      "target_owner": "app/web/remote",
+      "target_surface": "internal web tool backed by headless prompt/generation services",
+      "must_not_import": [
+        "tabs/comic_generator_tab.py",
+        "tabs/comic_generator/**"
+      ],
+      "notes": "Keep the existing PyQt comic generator as reference only. A future web version must use Remote Web state and generation APIs instead of tab-controller loading."
+    },
+    {
+      "id": "variational_generation_web_rebuild",
+      "legacy_surface_id": "variational_generation_window",
+      "status": "deferred_until_product_owner_review",
+      "target_owner": "app/web/remote",
+      "target_surface": "internal image variation popup backed by headless generation APIs",
+      "must_not_import": [
+        "ui/variational/**"
+      ],
+      "notes": "The PyQt variational window is not an active runtime component. Rebuild as an internal Remote Web popup if the workflow is restored."
+    },
+    {
+      "id": "ontology_visualizer_web_rebuild",
+      "legacy_surface_id": "ontology_visualizer",
+      "status": "deferred_until_product_owner_review",
+      "target_owner": "app/web/remote",
+      "target_surface": "static or websocket-backed Remote Web visualization",
+      "must_not_import": [
+        "experimental/ontology_visualizer/**"
+      ],
+      "notes": "The QWebEngine/QWebChannel visualizer remains a reference artifact only. A future version must be served by the Remote Web UI without Qt."
+    },
+    {
+      "id": "ezmode_web_rebuild",
+      "legacy_surface_id": "ezmode_temp",
+      "status": "deferred_until_product_owner_review",
+      "target_owner": "app/web/remote",
+      "target_surface": "reviewed prompt utility rebuilt on headless prompt services",
+      "must_not_import": [
+        "temp/ezmode/**"
+      ],
+      "notes": "Temporary EzMode PyQt prototype code is not product runtime code. Owner review must decide whether to delete it or rebuild the workflow for Remote Web."
+    }
+  ],
   "legacy_surfaces": [
     {
       "id": "comic_generator_tab",

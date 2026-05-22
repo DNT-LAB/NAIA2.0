@@ -327,7 +327,7 @@ After each round:
 
 - [ ] Root-level legacy shims that import `legacy_desktop` are either removed or moved under `legacy_desktop/`.
 - [ ] Desktop-only tabs/modules that are not product features are archived or deleted after owner review.
-- [ ] Desktop-only features that may return later are documented as web rebuild candidates, not kept as active runtime code.
+- [x] Desktop-only features that may return later are documented as web rebuild candidates, not kept as active runtime code.
 - [ ] Legacy tests are moved under `tests/legacy_desktop/` or excluded from normal headless/electron CI.
 - [ ] `requirements-headless.txt` remains PyQt-free.
 
@@ -349,6 +349,13 @@ After each round:
 - `release_assets/manifests/legacy_pyqt_surface_classification.json` now declares desktop/PyQt tests as `explicit_only`; normal headless and Electron release checks must use the classification gate rather than running desktop pytest directly.
 - `tools/check_legacy_pyqt_surface_classification.py` now validates that Electron `release:check` runs `check:legacy-pyqt`, that `check:legacy-pyqt` targets this classification checker, and that `release:check` does not run `pytest` or classified desktop test files directly.
 - Current validation: `python -B tools\check_legacy_pyqt_surface_classification.py` and the focused legacy classification tests pass.
+
+### Web Rebuild Candidate Gate Slice - 2026-05-22
+
+- `release_assets/manifests/legacy_pyqt_surface_classification.json` now separates reference-only PyQt surfaces from future Remote Web work through `web_rebuild_candidate_policy` and `web_rebuild_candidates`.
+- Comic Generator, Variational Generation, Ontology Visualizer, and EzMode are recorded as deferred web rebuild candidates with explicit `must_not_import` legacy patterns. This keeps the old PyQt implementation out of active runtime paths while preserving enough product context for future web rewrites.
+- `tools/check_legacy_pyqt_surface_classification.py` now validates that any classified legacy surface whose next action mentions rebuild has a matching web rebuild candidate, that candidate status remains owner-review deferred, and that candidate `must_not_import` patterns stay inside the classified legacy surface.
+- Current validation: `python -B tools\check_legacy_pyqt_surface_classification.py` and focused fixture-free direct assertions pass.
 
 ## Round 8 - Packaging and Release Hardening
 

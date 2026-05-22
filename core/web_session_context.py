@@ -989,22 +989,14 @@ class WebSessionContext:
 
     @staticmethod
     def _coerce_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            parsed = default
-        return max(minimum, min(maximum, parsed))
+        from core.headless_payload_utils import coerce_int
+
+        return coerce_int(value, default=default, minimum=minimum, maximum=maximum)
 
     def _module_state_payload(self, module_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        payload = {
-            "type": "module_state",
-            "module_id": module_id,
-            "available": True,
-            "headless": True,
-            **state,
-        }
-        payload["state"] = dict(state)
-        return payload
+        from core.headless_payload_utils import module_state_payload
+
+        return module_state_payload(module_id, state)
 
     def _current_save_directory(
         self,
@@ -1030,12 +1022,9 @@ class WebSessionContext:
 
     @staticmethod
     def _toast(message: str, *, level: str = "info") -> dict[str, Any]:
-        return {
-            "type": "toast",
-            "level": level,
-            "message": str(message or ""),
-            "headless": True,
-        }
+        from core.headless_payload_utils import toast
+
+        return toast(message, level=level)
 
     def _character_settings_by_mode(self) -> dict[str, dict[str, Any]]:
         return self._character_service().settings_by_mode()
@@ -1048,10 +1037,9 @@ class WebSessionContext:
 
     @staticmethod
     def _index_from_key(key: str, prefix: str) -> int | None:
-        try:
-            return int(str(key)[len(prefix):])
-        except (TypeError, ValueError):
-            return None
+        from core.headless_payload_utils import index_from_key
+
+        return index_from_key(key, prefix)
 
     @staticmethod
     def _ensure_character_frame(frames: list[dict[str, Any]], index: int) -> dict[str, Any]:

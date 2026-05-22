@@ -320,6 +320,20 @@
       "path": "/api/image-action/vibe?label=Smoke",
       "expected_status": [400],
       "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "character_reference_storage_thumb_missing",
+      "method": "GET",
+      "path": "/api/module-storage/character-reference/thumb?file_hash=__missing__",
+      "expected_status": [404],
+      "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "vibe_transfer_storage_thumb_missing",
+      "method": "GET",
+      "path": "/api/module-storage/vibe/thumb?model=NAID4_5&file_hash=__missing__",
+      "expected_status": [404],
+      "expected_json_keys": ["error"]
     }
   ],
   "websocket_checks": [

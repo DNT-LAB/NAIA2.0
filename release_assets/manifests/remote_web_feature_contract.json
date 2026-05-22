@@ -10,6 +10,7 @@
     "app/backend/server/danbooru_routes.py",
     "app/backend/server/event_preset_routes.py",
     "app/backend/server/install_manager_routes.py",
+    "app/backend/server/module_storage_routes.py",
     "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_tools_routes.py",
     "app/backend/server/result_display_routes.py",
@@ -236,6 +237,21 @@
         {"method": "POST", "path": "/api/character-viewer/options", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/character-viewer/thumbnail", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/character-viewer/generate", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "image_module_storage",
+      "name": "Character Reference and Vibe Transfer storage thumbnails",
+      "source_files": [
+        "app/backend/server/module_storage_routes.py",
+        "core/headless_character_reference_service.py",
+        "core/headless_vibe_transfer_service.py",
+        "app/web/remote/js/features/imageModulePanels.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/module-storage/character-reference/thumb", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/module-storage/vibe/thumb", "smoke": "asset_runtime"}
       ]
     },
     {

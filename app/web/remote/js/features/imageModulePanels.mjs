@@ -808,7 +808,7 @@ export function createImageModulePanels({
     if (getCurrentModuleId() !== 'character_reference') return;
     const items = (message.items || []).map(item => `
     <div class="mod-storage-item" onclick="applyCharRefStorage('${escHtml(item.file_hash)}')" title="${escHtml(item.file_name)}">
-      <img class="mod-storage-thumb" src="data:image/jpeg;base64,${item.thumbnail}" alt="">
+      ${storageThumbMarkup(item)}
       <span class="mod-storage-name">${escHtml(item.character_name || item.file_name)}</span>
     </div>
   `).join('');
@@ -844,7 +844,7 @@ export function createImageModulePanels({
         const defaultIe = ieKeys.length ? ieKeys[0] : 1.0;
         return `
         <div class="mod-storage-item" onclick="applyVibeStorage('${escHtml(name)}','${escHtml(item.file_hash)}',${defaultIe})" title="${escHtml(item.file_name)}">
-          <img class="mod-storage-thumb" src="data:image/jpeg;base64,${item.thumbnail}" alt="">
+          ${storageThumbMarkup(item)}
           <span class="mod-storage-name">${escHtml(item.file_name)}</span>
           ${ieKeys.length ? `<span class="mod-encode-keys">IE: ${ieKeys.map(key => Number(key).toFixed(2)).join(', ')}</span>` : ''}
         </div>`;
@@ -873,6 +873,16 @@ export function createImageModulePanels({
 
   function applyVibeStorage(model, fileHash, ieValue) {
     setModuleParam('vibe_transfer', 'apply_storage', model + '|' + fileHash + '|' + ieValue);
+  }
+
+  function storageThumbMarkup(item = {}) {
+    if (item.thumbnail_url) {
+      return `<img class="mod-storage-thumb" src="${escHtml(item.thumbnail_url)}" alt="" loading="lazy" decoding="async">`;
+    }
+    if (item.thumbnail) {
+      return `<img class="mod-storage-thumb" src="data:image/jpeg;base64,${item.thumbnail}" alt="" loading="lazy" decoding="async">`;
+    }
+    return '<div class="mod-storage-thumb mod-storage-thumb-empty">No Thumb</div>';
   }
 
   function getStorageView() {

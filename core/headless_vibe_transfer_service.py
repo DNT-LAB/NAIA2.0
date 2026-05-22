@@ -8,6 +8,7 @@ import io
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
@@ -189,19 +190,16 @@ class HeadlessVibeTransferService:
                     image_path = images_folder / f"{file_hash}.png"
                     if data.get("is_no_image") or data.get("storage_type") == "metadata_vibe" or not image_path.exists():
                         continue
-                    thumb = ""
-                    try:
-                        from PIL import Image
-
-                        with Image.open(image_path) as image:
-                            thumb = thumbnail_b64(image)
-                    except Exception:
-                        pass
                     items.append({
                         "file_hash": file_hash,
                         "file_name": str(data.get("file_name") or image_path.name),
                         "encoding_keys": encoding_keys,
-                        "thumbnail": thumb,
+                        "thumbnail": "",
+                        "thumbnail_url": (
+                            "/api/module-storage/vibe/thumb"
+                            f"?model={quote(model_dir.name, safe='')}"
+                            f"&file_hash={quote(file_hash, safe='')}"
+                        ),
                     })
                 if items:
                     models[model_dir.name] = items

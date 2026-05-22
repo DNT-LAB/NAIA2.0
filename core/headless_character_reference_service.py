@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
 
@@ -165,19 +166,16 @@ class HeadlessCharacterReferenceService:
                             character_name = str(meta.get("character_name") or "")
                     except Exception:
                         pass
-                thumb = ""
-                try:
-                    from PIL import Image
-
-                    with Image.open(image_path) as image:
-                        thumb = thumbnail_b64(image)
-                except Exception:
-                    pass
+                file_hash = image_path.stem
                 items.append({
-                    "file_hash": image_path.stem,
+                    "file_hash": file_hash,
                     "file_name": image_path.name,
                     "character_name": character_name,
-                    "thumbnail": thumb,
+                    "thumbnail": "",
+                    "thumbnail_url": (
+                        "/api/module-storage/character-reference/thumb"
+                        f"?file_hash={quote(file_hash, safe='')}"
+                    ),
                 })
         return {"type": "storage_list", "module_id": "character_reference", "items": items}
 

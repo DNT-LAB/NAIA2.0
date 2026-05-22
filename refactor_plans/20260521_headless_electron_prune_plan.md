@@ -303,6 +303,16 @@ After each round:
 - Current validation exposed storage scan latency as a follow-up performance/path-boundary candidate: Character Reference storage list took hundreds of ms and Vibe Transfer storage list was also noticeably slower than plain state reads in the source-mode TestClient smoke.
 - Required validation for this slice: `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6_module`, plus syntax and policy gates.
 
+### Source-Mode Lazy Storage Thumbnail Slice - 2026-05-22
+
+- Character Reference and Vibe Transfer storage-list payloads now return stable `thumbnail_url` fields instead of generating base64 thumbnails during the websocket `get_storage` command.
+- `app/backend/server/module_storage_routes.py` owns lazy HTTP WEBP thumbnails for `/api/module-storage/character-reference/thumb` and `/api/module-storage/vibe/thumb`, keeping image decode/resize work outside the websocket command path.
+- The Remote Web image module panel keeps backward compatibility with legacy inline `thumbnail` payloads while preferring lazy `<img loading="lazy" decoding="async">` URLs.
+- The Remote Web smoke contract now checks the new thumbnail route surface with missing-asset 404 probes; non-destructive source-mode smoke still avoids upload/apply/delete/encoding operations.
+- Current validation observed Character Reference storage-list latency drop to 4.885ms and Vibe Transfer storage-list latency drop to 15.335ms in `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6_storage_lazy`.
+- Focused TestClient validation with seeded temporary PNG files confirmed both new thumbnail routes return `200 image/webp` payloads and reject `.`/`..` path segments with 404.
+- Required validation for this slice: `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6_storage_lazy`, focused TestClient thumbnail 200 and boundary 404 probe, syntax checks for the touched Python route/service files, `node --check app\web\remote\js\features\imageModulePanels.mjs`, `python -B tools\check_remote_web_feature_contract.py`, `python -B tools\check_project_layout_policy.py`, `python -B tools\check_refactor_plan_execution_contract.py`, and `git diff --check`.
+
 ## Round 7 - Legacy Quarantine Hardening
 
 ### Checklist

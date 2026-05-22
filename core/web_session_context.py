@@ -236,15 +236,10 @@ class WebSessionContext:
             )
         self.generation_queue_manager = self._create_queue_manager()
         self.last_api_payloads: dict[str, Any] = {}
-        self.event_stream_runtime = self._create_event_stream_runtime()
+        self.event_stream_runtime = None
 
     def _create_event_stream_runtime(self):
-        try:
-            from core.event_tree import EventStreamRuntime
-
-            return EventStreamRuntime(self)
-        except Exception:
-            return None
+        return self._event_stream_service().runtime(create=True)
 
     def _img2img_service(self):
         service = self._headless_img2img_service

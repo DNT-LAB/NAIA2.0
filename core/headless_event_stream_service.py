@@ -9,8 +9,20 @@ class HeadlessEventStreamService:
     def __init__(self, context: Any):
         self.context = context
 
-    def state(self) -> dict[str, Any]:
+    def runtime(self, *, create: bool = True):
         runtime = getattr(self.context, "event_stream_runtime", None)
+        if runtime is None and create:
+            try:
+                from core.event_tree import EventStreamRuntime
+
+                runtime = EventStreamRuntime(self.context)
+                self.context.event_stream_runtime = runtime
+            except Exception:
+                runtime = None
+        return runtime
+
+    def state(self) -> dict[str, Any]:
+        runtime = self.runtime(create=True)
         if runtime is None:
             return self.context._module_state_payload("event_stream", {
                 "available": False,
@@ -25,7 +37,7 @@ class HeadlessEventStreamService:
         })
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        runtime = getattr(self.context, "event_stream_runtime", None)
+        runtime = self.runtime(create=True)
         if runtime is None:
             return self.context._toast("Event Stream runtime is not available.", level="error")
         if key == "active":

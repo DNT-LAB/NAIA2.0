@@ -10,6 +10,8 @@ import base64
 import io
 from typing import Any
 
+from core.headless_image_utils import data_url_payload, image_to_png_bytes
+
 
 class HeadlessImg2ImgService:
     def __init__(self, context: Any):
@@ -17,9 +19,7 @@ class HeadlessImg2ImgService:
 
     @staticmethod
     def _image_to_png_bytes(image) -> bytes:
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG", optimize=False)
-        return buffer.getvalue()
+        return image_to_png_bytes(image)
 
     @staticmethod
     def _image_preview_data_url(image, max_side: int = 640) -> tuple[str, int, int]:
@@ -177,7 +177,7 @@ class HeadlessImg2ImgService:
             int(context.img2img_session.get("width") or 1),
             int(context.img2img_session.get("height") or 1),
         )
-        mask_bytes = base64.b64decode(context._data_url_payload(value))
+        mask_bytes = base64.b64decode(data_url_payload(value))
         with Image.open(io.BytesIO(mask_bytes)) as opened:
             full_mask = opened.convert("L").resize(target_size)
         threshold = [0 if i <= 127 else 255 for i in range(256)]

@@ -8,28 +8,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
+
 
 class HeadlessCharacterReferenceService:
     def __init__(self, context: Any):
         self.context = context
-
-    @staticmethod
-    def _image_to_png_bytes(image) -> bytes:
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG", optimize=False)
-        return buffer.getvalue()
-
-    @staticmethod
-    def _thumbnail_b64(image, max_side: int = 128) -> str:
-        from PIL import Image
-
-        thumb = image.copy()
-        thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-        if thumb.mode == "RGBA":
-            thumb = thumb.convert("RGB")
-        buffer = io.BytesIO()
-        thumb.save(buffer, format="JPEG", quality=70)
-        return base64.b64encode(buffer.getvalue()).decode("ascii")
 
     def image_data(self, image) -> str:
         from PIL import Image
@@ -57,7 +41,7 @@ class HeadlessCharacterReferenceService:
             canvas.paste(resized, (x_offset, y_offset), resized)
         else:
             canvas.paste(resized, (x_offset, y_offset))
-        return base64.b64encode(self._image_to_png_bytes(canvas)).decode("ascii")
+        return base64.b64encode(image_to_png_bytes(canvas)).decode("ascii")
 
     def save_storage(self, frame: dict[str, Any]) -> None:
         raw = frame.get("image_bytes")
@@ -81,15 +65,15 @@ class HeadlessCharacterReferenceService:
 
         with Image.open(io.BytesIO(image_bytes)) as opened:
             image = opened.convert("RGBA")
-            png_bytes = self._image_to_png_bytes(image)
-            file_hash = self.context._image_hash(png_bytes)
+            png_bytes = image_to_png_bytes(image)
+            file_hash = image_hash(png_bytes)
             return {
                 "file_hash": file_hash,
                 "file_name": file_name or f"{file_hash}.png",
                 "file_path": file_path,
                 "image_bytes": png_bytes,
                 "image_data": self.image_data(image),
-                "thumbnail": self._thumbnail_b64(image),
+                "thumbnail": thumbnail_b64(image),
                 "is_enabled": bool(enabled),
                 "reference_type": "character&style",
                 "strength": 1.0,
@@ -117,7 +101,7 @@ class HeadlessCharacterReferenceService:
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
         if key == "upload_image":
-            image_bytes = base64.b64decode(context._data_url_payload(str(value or "")))
+            image_bytes = base64.b64decode(data_url_payload(str(value or "")))
             context.character_reference_frames.append(
                 self.frame_from_bytes(image_bytes, file_name="remote_upload.png")
             )
@@ -186,7 +170,7 @@ class HeadlessCharacterReferenceService:
                     from PIL import Image
 
                     with Image.open(image_path) as image:
-                        thumb = self._thumbnail_b64(image)
+                        thumb = thumbnail_b64(image)
                 except Exception:
                     pass
                 items.append({

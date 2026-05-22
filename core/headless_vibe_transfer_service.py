@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
 
 
@@ -41,8 +42,8 @@ class HeadlessVibeTransferService:
         context = self.context
         with Image.open(io.BytesIO(image_bytes)) as opened:
             image = opened.convert("RGBA")
-            png_bytes = context._image_to_png_bytes(image)
-            file_hash = context._image_hash(png_bytes)
+            png_bytes = image_to_png_bytes(image)
+            file_hash = image_hash(png_bytes)
             image_data = base64.b64encode(png_bytes).decode("ascii")
             encodings: dict[str, str] = {}
             storage_json = context._existing_save_path(
@@ -66,7 +67,7 @@ class HeadlessVibeTransferService:
                 "file_path": file_path,
                 "image_bytes": png_bytes,
                 "image_data": image_data,
-                "thumbnail": context._thumbnail_b64(image),
+                "thumbnail": thumbnail_b64(image),
                 "is_enabled": bool(enabled),
                 "is_no_image": False,
                 "is_naid3": context._is_naid3_model(),
@@ -122,7 +123,7 @@ class HeadlessVibeTransferService:
         if key == "upload_image":
             if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
                 return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
-            image_bytes = base64.b64decode(context._data_url_payload(str(value or "")))
+            image_bytes = base64.b64decode(data_url_payload(str(value or "")))
             context.vibe_transfer_frames.append(self.frame_from_bytes(image_bytes, file_name="remote_vibe.png"))
             context._disable_all_character_reference_frames()
         elif key.startswith("remove_frame_"):
@@ -193,7 +194,7 @@ class HeadlessVibeTransferService:
                         from PIL import Image
 
                         with Image.open(image_path) as image:
-                            thumb = context._thumbnail_b64(image)
+                            thumb = thumbnail_b64(image)
                     except Exception:
                         pass
                     items.append({
@@ -240,8 +241,10 @@ class HeadlessVibeTransferService:
                     from PIL import Image
 
                     with Image.open(image_path) as image:
-                        thumb = context._thumbnail_b64(image)
-                        image_data = base64.b64encode(context._image_to_png_bytes(image.convert("RGBA"))).decode("ascii")
+                        thumb = thumbnail_b64(image)
+                        image_data = base64.b64encode(
+                            image_to_png_bytes(image.convert("RGBA"))
+                        ).decode("ascii")
                 except Exception:
                     pass
             frame = {

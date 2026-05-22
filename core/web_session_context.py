@@ -16,9 +16,6 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Protocol
 import weakref
-import base64
-import hashlib
-import io
 import os
 import re
 
@@ -803,32 +800,27 @@ class WebSessionContext:
 
     @staticmethod
     def _image_hash(image_bytes: bytes) -> str:
-        return hashlib.sha256(image_bytes).hexdigest()[:16]
+        from core.headless_image_utils import image_hash
+
+        return image_hash(image_bytes)
 
     @staticmethod
     def _data_url_payload(value: str) -> str:
-        text = str(value or "").strip()
-        if "," in text and text.lower().startswith("data:"):
-            return text.split(",", 1)[1]
-        return text
+        from core.headless_image_utils import data_url_payload
+
+        return data_url_payload(value)
 
     @staticmethod
     def _image_to_png_bytes(image) -> bytes:
-        buffer = io.BytesIO()
-        image.save(buffer, format="PNG", optimize=False)
-        return buffer.getvalue()
+        from core.headless_image_utils import image_to_png_bytes
+
+        return image_to_png_bytes(image)
 
     @staticmethod
     def _thumbnail_b64(image, max_side: int = 128) -> str:
-        from PIL import Image
+        from core.headless_image_utils import thumbnail_b64
 
-        thumb = image.copy()
-        thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-        if thumb.mode == "RGBA":
-            thumb = thumb.convert("RGB")
-        buffer = io.BytesIO()
-        thumb.save(buffer, format="JPEG", quality=70)
-        return base64.b64encode(buffer.getvalue()).decode("ascii")
+        return thumbnail_b64(image, max_side=max_side)
 
     def _character_reference_image_data(self, image) -> str:
         return self._character_reference_service().image_data(image)

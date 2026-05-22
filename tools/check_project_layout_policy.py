@@ -106,6 +106,62 @@ def _check_default_runtime(repo_root: Path, manifest: dict[str, Any]) -> list[di
     return violations
 
 
+def _check_legacy_desktop_boundary(repo_root: Path, manifest: dict[str, Any]) -> list[dict[str, str]]:
+    violations: list[dict[str, str]] = []
+    legacy = manifest.get("legacy_desktop") if isinstance(manifest.get("legacy_desktop"), dict) else {}
+    runtime = manifest.get("default_runtime") if isinstance(manifest.get("default_runtime"), dict) else {}
+    policy_doc = str(manifest.get("policy_document") or "")
+
+    root = str(legacy.get("root") or "")
+    entrypoint = str(legacy.get("entrypoint") or "")
+    _check_relative_dir(repo_root, root, violations, "legacy desktop reference root is required")
+    _check_relative_file(repo_root, entrypoint, violations, "legacy desktop reference entrypoint is required")
+    _check_relative_file(
+        repo_root,
+        str(legacy.get("classification_manifest") or ""),
+        violations,
+        "legacy PyQt surface classification manifest is required",
+    )
+
+    if legacy.get("status") != "reference_only":
+        violations.append({
+            "type": "legacy_desktop_not_reference_only",
+            "path": "legacy_desktop.status",
+            "reason": "legacy desktop status must be reference_only",
+        })
+
+    if policy_doc:
+        policy_path = repo_root / policy_doc
+        if policy_path.is_file():
+            policy_text = _read_text(policy_path)
+            for term in ("reference-only", "not the active product baseline"):
+                if term not in policy_text:
+                    violations.append({
+                        "type": "policy_document_missing_legacy_boundary_term",
+                        "path": policy_doc,
+                        "reason": f"missing legacy boundary term: {term}",
+                    })
+
+    forbidden_terms = [
+        str(term).lower()
+        for term in legacy.get("forbidden_default_launcher_terms", [])
+        if str(term).strip()
+    ]
+    for launcher in runtime.get("launchers", []):
+        launcher_path = repo_root / str(launcher)
+        if not launcher_path.is_file():
+            continue
+        text = _read_text(launcher_path).lower()
+        for term in forbidden_terms:
+            if term in text:
+                violations.append({
+                    "type": "launcher_references_legacy_desktop",
+                    "path": str(launcher),
+                    "reason": f"default launcher must not reference legacy desktop term: {term}",
+                })
+    return violations
+
+
 def _check_remote_web(repo_root: Path, manifest: dict[str, Any]) -> list[dict[str, str]]:
     violations: list[dict[str, str]] = []
     remote = manifest.get("canonical_remote_web") if isinstance(manifest.get("canonical_remote_web"), dict) else {}
@@ -202,10 +258,16 @@ def _check_evidence_manifests(repo_root: Path, manifest: dict[str, Any]) -> list
         return [{
             "type": "missing_evidence_manifests",
             "path": "evidence_manifests",
-            "reason": "layout policy must reference round completion, cleanup candidate, runtime distribution, and refactor-plan execution manifests",
+            "reason": "layout policy must reference round completion, cleanup candidate, runtime distribution, refactor-plan execution, and legacy PyQt surface manifests",
         }]
 
-    for key in ("round_completion", "cleanup_candidates", "runtime_distribution_tracks", "refactor_plan_execution"):
+    for key in (
+        "round_completion",
+        "cleanup_candidates",
+        "runtime_distribution_tracks",
+        "refactor_plan_execution",
+        "legacy_pyqt_surfaces",
+    ):
         raw_path = str(evidence_manifests.get(key) or "")
         if not raw_path:
             violations.append({
@@ -239,6 +301,7 @@ def check_project_layout_policy(
     warnings: list[dict[str, str]] = []
     violations.extend(_check_policy_document(repo_root, manifest))
     violations.extend(_check_default_runtime(repo_root, manifest))
+    violations.extend(_check_legacy_desktop_boundary(repo_root, manifest))
     violations.extend(_check_remote_web(repo_root, manifest))
     electron_violations, electron_warnings = _check_optional_electron(repo_root, manifest)
     violations.extend(electron_violations)
@@ -247,6 +310,7 @@ def check_project_layout_policy(
     violations.extend(_check_evidence_manifests(repo_root, manifest))
 
     runtime = manifest.get("default_runtime") if isinstance(manifest.get("default_runtime"), dict) else {}
+    legacy = manifest.get("legacy_desktop") if isinstance(manifest.get("legacy_desktop"), dict) else {}
     remote = manifest.get("canonical_remote_web") if isinstance(manifest.get("canonical_remote_web"), dict) else {}
     electron = manifest.get("optional_electron") if isinstance(manifest.get("optional_electron"), dict) else {}
     evidence_manifests = manifest.get("evidence_manifests") if isinstance(manifest.get("evidence_manifests"), dict) else {}
@@ -255,12 +319,15 @@ def check_project_layout_policy(
         "contract": _repo_relative(manifest_path, repo_root),
         "default_runtime": runtime.get("name", ""),
         "default_entrypoint": runtime.get("entrypoint", ""),
+        "legacy_desktop_root": legacy.get("root", ""),
+        "legacy_desktop_status": legacy.get("status", ""),
         "canonical_remote_web": remote.get("path", ""),
         "optional_electron_root": electron.get("root", ""),
         "round_completion_manifest": evidence_manifests.get("round_completion", ""),
         "cleanup_candidates_manifest": evidence_manifests.get("cleanup_candidates", ""),
         "runtime_distribution_tracks_manifest": evidence_manifests.get("runtime_distribution_tracks", ""),
         "refactor_plan_execution_manifest": evidence_manifests.get("refactor_plan_execution", ""),
+        "legacy_pyqt_surfaces_manifest": evidence_manifests.get("legacy_pyqt_surfaces", ""),
         "violation_count": len(violations),
         "warning_count": len(warnings),
         "violations": violations,

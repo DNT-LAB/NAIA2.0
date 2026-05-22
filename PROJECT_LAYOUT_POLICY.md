@@ -13,6 +13,17 @@ Electron is optional. It is a desktop shell and release/portable packaging path 
 
 Legacy PyQt6/QWebApplication Desktop is reference-only. It may be used to inspect previous behavior while migrating parity, but it is not the active product baseline for new work.
 
+## Legacy Desktop Reference Rule
+
+Legacy Desktop access is explicit and reference-only:
+
+- Reference entrypoint: `legacy_desktop/NAIA_cold_v4.py`.
+- Valid use: historical behavior inspection and migration reference.
+- Invalid use: default launchers, normal clone-user setup, release shell behavior, or new feature ownership.
+- Desktop-only tests must either live under `tests/legacy_desktop/` or be listed in `release_assets/manifests/legacy_pyqt_surface_classification.json`.
+
+Default launchers must not reference `legacy_desktop`, `NAIA_cold_v4.py`, or `requirements-desktop-legacy*`.
+
 ## Canonical Source Owners
 
 ```text

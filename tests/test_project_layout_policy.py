@@ -18,7 +18,8 @@ def _minimal_repo(root: Path, *, launcher_text: str | None = None) -> Path:
             "Python Headless Web",
             "app/web/remote",
             "Electron is optional",
-            "Legacy PyQt6",
+            "Legacy PyQt6 reference-only",
+            "not the active product baseline",
         ]),
     )
     _write(root / "NAIA_web_headless.py", "print('headless')\n")
@@ -34,10 +35,12 @@ def _minimal_repo(root: Path, *, launcher_text: str | None = None) -> Path:
     _write(root / "app" / "web" / "__init__.py", "")
     _write(root / "app" / "electron" / "main" / "main.cjs", "")
     _write(root / "app" / "electron" / "package.json", "{}")
+    _write(root / "legacy_desktop" / "NAIA_cold_v4.py", "print('legacy')\n")
     _write(root / "release_assets" / "manifests" / "project_layout_round_completion.json", "{}")
     _write(root / "release_assets" / "manifests" / "project_cleanup_candidates.json", "{}")
     _write(root / "release_assets" / "manifests" / "runtime_distribution_tracks.json", "{}")
     _write(root / "release_assets" / "manifests" / "refactor_plan_execution_contract.json", "{}")
+    _write(root / "release_assets" / "manifests" / "legacy_pyqt_surface_classification.json", "{}")
     manifest = root / "policy.json"
     manifest.write_text(
         Path("release_assets/manifests/project_layout_policy.json").read_text(encoding="utf-8"),
@@ -52,6 +55,8 @@ def test_project_layout_policy_passes_current_repository():
     assert payload["ok"] is True
     assert payload["default_runtime"] == "Python Headless Web"
     assert payload["default_entrypoint"] == "NAIA_web_headless.py"
+    assert payload["legacy_desktop_root"] == "legacy_desktop"
+    assert payload["legacy_desktop_status"] == "reference_only"
     assert payload["canonical_remote_web"] == "app/web/remote"
     assert payload["optional_electron_root"] == "app/electron"
     assert payload["round_completion_manifest"] == "release_assets/manifests/project_layout_round_completion.json"
@@ -61,6 +66,9 @@ def test_project_layout_policy_passes_current_repository():
     )
     assert payload["refactor_plan_execution_manifest"] == (
         "release_assets/manifests/refactor_plan_execution_contract.json"
+    )
+    assert payload["legacy_pyqt_surfaces_manifest"] == (
+        "release_assets/manifests/legacy_pyqt_surface_classification.json"
     )
     assert payload["violations"] == []
 
@@ -76,6 +84,29 @@ def test_project_layout_policy_rejects_electron_requirement_in_default_launcher(
     assert payload["ok"] is False
     assert any(
         violation["type"] == "launcher_contains_forbidden_term"
+        and violation["path"] == "run_NAIA_web.bat"
+        for violation in payload["violations"]
+    )
+
+
+def test_project_layout_policy_rejects_legacy_desktop_default_launcher(tmp_path):
+    manifest = _minimal_repo(
+        tmp_path,
+        launcher_text=(
+            "pip install -r requirements-headless.txt\n"
+            "python NAIA_web_headless.py\n"
+            "python legacy_desktop/NAIA_cold_v4.py\n"
+        ),
+    )
+
+    payload = check_project_layout_policy(repo_root=tmp_path, manifest_path=manifest)
+
+    assert payload["ok"] is False
+    assert any(
+        violation["type"] in {
+            "launcher_contains_forbidden_term",
+            "launcher_references_legacy_desktop",
+        }
         and violation["path"] == "run_NAIA_web.bat"
         for violation in payload["violations"]
     )

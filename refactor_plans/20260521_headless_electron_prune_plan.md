@@ -69,17 +69,24 @@ After each round:
 
 ### Checklist
 
-- [ ] PyQt Desktop entrypoint를 reference-only로 명시한다.
-- [ ] `run_NAIA.bat`, `run_NAIA_web.bat`, `NAIA_web_headless.py`, Electron main process의 역할을 문서화한다.
-- [ ] 신규 기능 수정은 headless/web/electron path에만 적용한다는 rule을 AGENTS 또는 refactor plan에 반영한다.
-- [ ] `legacy_desktop/**` 아래 코드는 migration reference로만 사용하고 product smoke 대상에서 제외한다.
-- [ ] Desktop-only tests는 `tests/legacy_desktop/`로 이동하거나 manifest에 명시된 legacy tests로 유지한다.
+- [x] PyQt Desktop entrypoint를 reference-only로 명시한다.
+- [x] `run_NAIA.bat`, `run_NAIA_web.bat`, `NAIA_web_headless.py`, Electron main process의 역할을 문서화한다.
+- [x] 신규 기능 수정은 headless/web/electron path에만 적용한다는 rule을 AGENTS 또는 refactor plan에 반영한다.
+- [x] `legacy_desktop/**` 아래 코드는 migration reference로만 사용하고 product smoke 대상에서 제외한다.
+- [x] Desktop-only tests는 `tests/legacy_desktop/`로 이동하거나 manifest에 명시된 legacy tests로 유지한다.
 
 ### When Done
 
 - 개발자가 새 작업을 시작할 때 기준 구현이 PyQt인지 Web/Headless인지 혼동하지 않는다.
 - Desktop path는 feature parity source가 아니라 historical reference로 취급된다.
 - Legacy test는 의도적으로만 실행된다.
+
+### Completion Evidence - 2026-05-22
+
+- `PROJECT_LAYOUT_POLICY.md` defines `legacy_desktop/NAIA_cold_v4.py` as an explicit reference-only entrypoint and blocks default launchers from using legacy desktop terms.
+- `release_assets/manifests/project_layout_policy.json` records the `legacy_desktop` reference boundary and links `release_assets/manifests/legacy_pyqt_surface_classification.json` as evidence for explicit desktop tests.
+- `tools/check_project_layout_policy.py` now verifies the legacy desktop reference boundary, launcher ban, and classification manifest link.
+- Required validation: `python tools/check_project_layout_policy.py`.
 
 ## Round 2 - Shared Pipeline and ID-Scoped Runs
 

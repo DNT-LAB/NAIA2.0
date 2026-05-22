@@ -6,7 +6,8 @@
     "round_completion": "release_assets/manifests/project_layout_round_completion.json",
     "cleanup_candidates": "release_assets/manifests/project_cleanup_candidates.json",
     "runtime_distribution_tracks": "release_assets/manifests/runtime_distribution_tracks.json",
-    "refactor_plan_execution": "release_assets/manifests/refactor_plan_execution_contract.json"
+    "refactor_plan_execution": "release_assets/manifests/refactor_plan_execution_contract.json",
+    "legacy_pyqt_surfaces": "release_assets/manifests/legacy_pyqt_surface_classification.json"
   },
   "default_runtime": {
     "name": "Python Headless Web",
@@ -26,7 +27,24 @@
       "npm",
       "electron",
       "node_modules",
-      "docker"
+      "docker",
+      "legacy_desktop",
+      "NAIA_cold_v4.py"
+    ]
+  },
+  "legacy_desktop": {
+    "root": "legacy_desktop",
+    "entrypoint": "legacy_desktop/NAIA_cold_v4.py",
+    "status": "reference_only",
+    "classification_manifest": "release_assets/manifests/legacy_pyqt_surface_classification.json",
+    "allowed_uses": [
+      "historical_behavior_inspection",
+      "migration_reference"
+    ],
+    "forbidden_default_launcher_terms": [
+      "legacy_desktop",
+      "NAIA_cold_v4.py",
+      "requirements-desktop-legacy"
     ]
   },
   "canonical_remote_web": {
@@ -74,6 +92,7 @@
     "Electron is an optional shell around the same Python backend and Remote Web UI.",
     "The canonical Remote Web source is app/web/remote.",
     "Legacy PyQt6 Desktop is reference/quarantine only.",
+    "Legacy PyQt6 Desktop can be entered only as an explicit reference path, never through default launchers.",
     "Cleanup/delete candidates must be recorded before destructive source cleanup.",
     "Round 9 cleanup is complete only as a non-destructive candidate inventory until explicit delete approval is granted.",
     "Clone-user Web execution and Electron release shell packaging are separate tracks over the same backend and same Remote Web source.",

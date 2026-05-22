@@ -17,6 +17,7 @@ def test_remote_web_feature_contract_covers_real_headless_routes():
     assert any(source.endswith("app\\backend\\server\\install_manager_routes.py") or source.endswith("app/backend/server/install_manager_routes.py") for source in payload["route_sources"])
     assert any(source.endswith("app\\backend\\server\\prompt_tools_routes.py") or source.endswith("app/backend/server/prompt_tools_routes.py") for source in payload["route_sources"])
     assert any(source.endswith("app\\backend\\server\\state_routes.py") or source.endswith("app/backend/server/state_routes.py") for source in payload["route_sources"])
+    assert any(source.endswith("app\\backend\\server\\style_thumbnail_routes.py") or source.endswith("app/backend/server/style_thumbnail_routes.py") for source in payload["route_sources"])
     assert payload["contract_route_count"] == payload["source_route_count"]
     assert payload["violations"] == []
 

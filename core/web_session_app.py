@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
 from app.backend.server.state_routes import register_state_routes
+from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
 from app.web import resolve_remote_web_dir
 from core import result_image_payload_service as result_images
 from core.artist_thumbnail_service import ArtistThumbnailService
@@ -36,7 +37,6 @@ from core.expression_preset_service import ExpressionPresetService
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.preset_composer_service import PresetComposerService
-from core.style_thumbnail_service import StyleThumbnailService
 from core.web_session_context import WebSessionContext
 
 
@@ -145,14 +145,6 @@ def _generation_service(context: WebSessionContext) -> HeadlessGenerationService
     if service is None:
         service = HeadlessGenerationService(context)
         context.headless_generation_service = service
-    return service
-
-
-def _style_thumbnail_service(context: WebSessionContext) -> StyleThumbnailService:
-    service = getattr(context, "style_thumbnail_service", None)
-    if service is None:
-        service = StyleThumbnailService(context.repo_root)
-        context.style_thumbnail_service = service
     return service
 
 
@@ -2992,6 +2984,7 @@ def create_headless_app(
     register_state_routes(app, session_context)
     register_install_manager_routes(app, session_context, run_in_thread=_to_thread)
     register_prompt_tools_routes(app, session_context)
+    register_style_thumbnail_routes(app, session_context, run_in_thread=_to_thread)
 
     @app.post("/api/queue/action")
     async def api_queue_action(req: Request):
@@ -3795,42 +3788,6 @@ def create_headless_app(
         if session_context.headless_generation_execute_enabled:
             _ensure_generation_runner(session_context, app.state.headless_clients)
         return {"ok": True, **dispatch.websocket_payload()}
-
-    @app.get("/api/thumb/state")
-    async def api_thumb_state():
-        try:
-            return await _to_thread(_style_thumbnail_service(session_context).state)
-        except FileNotFoundError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        except Exception as exc:
-            return JSONResponse({"error": f"Thumb state failed: {exc}"}, status_code=500)
-
-    @app.get("/api/thumb/category/{category_key}")
-    async def api_thumb_category(category_key: str):
-        try:
-            return await _to_thread(_style_thumbnail_service(session_context).category_payload, category_key)
-        except KeyError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        except FileNotFoundError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        except Exception as exc:
-            return JSONResponse({"error": f"Thumb category failed: {exc}"}, status_code=500)
-
-    @app.get("/api/thumb/image")
-    async def api_thumb_image(tag: str = ""):
-        try:
-            image_bytes, media_type = await _to_thread(_style_thumbnail_service(session_context).image_payload, tag)
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        except FileNotFoundError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
-        except Exception as exc:
-            return JSONResponse({"error": f"Thumb image failed: {exc}"}, status_code=500)
-        return Response(
-            content=image_bytes,
-            media_type=media_type,
-            headers={"Cache-Control": "public, max-age=3600"},
-        )
 
     @app.get("/api/character-viewer/state")
     async def api_character_viewer_state():

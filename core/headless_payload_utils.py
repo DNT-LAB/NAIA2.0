@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any
 
 
@@ -39,3 +40,13 @@ def index_from_key(key: str, prefix: str) -> int | None:
         return int(str(key)[len(prefix):])
     except (TypeError, ValueError):
         return None
+
+
+def is_loopback_host(host: str) -> bool:
+    clean_host = str(host or "").strip()
+    if clean_host in {"127.0.0.1", "::1", "localhost"}:
+        return True
+    try:
+        return ipaddress.ip_address(clean_host).is_loopback
+    except Exception:
+        return False

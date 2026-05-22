@@ -1049,15 +1049,9 @@ class WebSessionContext:
 
     @staticmethod
     def _is_loopback_host(host: str) -> bool:
-        clean_host = str(host or "").strip()
-        if clean_host in {"127.0.0.1", "::1", "localhost"}:
-            return True
-        try:
-            import ipaddress
+        from core.headless_payload_utils import is_loopback_host
 
-            return ipaddress.ip_address(clean_host).is_loopback
-        except Exception:
-            return False
+        return is_loopback_host(host)
 
 
 __all__ = [

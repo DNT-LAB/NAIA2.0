@@ -8,6 +8,7 @@ from typing import Any
 import re
 
 from core import result_image_payload_service as result_images
+from core.headless_payload_utils import is_loopback_host
 
 
 AUTO_SAVE_DEFAULTS = {
@@ -62,7 +63,7 @@ class HeadlessSaveService:
         use_timestamp_folder = context._coerce_bool(
             context.save_directory_state.get("use_timestamp_folder", True)
         )
-        control_allowed = True if client_host is None else context._is_loopback_host(client_host)
+        control_allowed = True if client_host is None else is_loopback_host(client_host)
         control_reason = "" if control_allowed else "Save directory control is local-only."
         state = {
             "base_path": base_path,
@@ -109,7 +110,7 @@ class HeadlessSaveService:
         client_host: str | None = None,
     ) -> dict[str, Any] | None:
         context = self.context
-        if client_host is not None and not context._is_loopback_host(client_host):
+        if client_host is not None and not is_loopback_host(client_host):
             return self.save_directory_state_payload(client_host)
         if key == "base_path":
             path_value = str(value or "").strip()

@@ -227,6 +227,7 @@ class WebSessionContext:
     })
     _img2img_window_counter: int = 0
     _headless_img2img_service: Any = field(default=None, init=False, repr=False)
+    _headless_character_reference_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -304,6 +305,15 @@ class WebSessionContext:
 
             service = HeadlessImg2ImgService(self)
             self._headless_img2img_service = service
+        return service
+
+    def _character_reference_service(self):
+        service = self._headless_character_reference_service
+        if service is None:
+            from core.headless_character_reference_service import HeadlessCharacterReferenceService
+
+            service = HeadlessCharacterReferenceService(self)
+            self._headless_character_reference_service = service
         return service
 
     def _default_token_manager(self) -> TokenStore:
@@ -1221,42 +1231,10 @@ class WebSessionContext:
         return base64.b64encode(buffer.getvalue()).decode("ascii")
 
     def _character_reference_image_data(self, image) -> str:
-        from PIL import Image
-
-        source = image.convert("RGBA") if image.mode == "RGBA" else image.convert("RGB")
-        width, height = source.size
-        aspect_ratio = width / max(1, height)
-        ratios = {
-            "2:3": (2 / 3, 1024, 1536),
-            "3:2": (3 / 2, 1536, 1024),
-            "1:1": (1, 1472, 1472),
-        }
-        _, canvas_width, canvas_height = min(
-            ratios.values(),
-            key=lambda item: abs(aspect_ratio - item[0]),
-        )
-        canvas = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))
-        scale = min(canvas_width / max(1, width), canvas_height / max(1, height))
-        new_width = max(1, int(width * scale))
-        new_height = max(1, int(height * scale))
-        resized = source.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        x_offset = (canvas_width - new_width) // 2
-        y_offset = (canvas_height - new_height) // 2
-        if resized.mode == "RGBA":
-            canvas.paste(resized, (x_offset, y_offset), resized)
-        else:
-            canvas.paste(resized, (x_offset, y_offset))
-        return base64.b64encode(self._image_to_png_bytes(canvas)).decode("ascii")
+        return self._character_reference_service().image_data(image)
 
     def _save_character_reference_storage(self, frame: dict[str, Any]) -> None:
-        raw = frame.get("image_bytes")
-        file_hash = str(frame.get("file_hash") or "")
-        if not raw or not file_hash:
-            return
-        target = self._save_path("character_reference", "images", f"{file_hash}.png")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            target.write_bytes(raw)
+        self._character_reference_service().save_storage(frame)
 
     def _character_reference_frame_from_bytes(
         self,
@@ -1266,132 +1244,28 @@ class WebSessionContext:
         file_path: str = "",
         enabled: bool = False,
     ) -> dict[str, Any]:
-        from PIL import Image
-
-        with Image.open(io.BytesIO(image_bytes)) as opened:
-            image = opened.convert("RGBA")
-            png_bytes = self._image_to_png_bytes(image)
-            file_hash = self._image_hash(png_bytes)
-            return {
-                "file_hash": file_hash,
-                "file_name": file_name or f"{file_hash}.png",
-                "file_path": file_path,
-                "image_bytes": png_bytes,
-                "image_data": self._character_reference_image_data(image),
-                "thumbnail": self._thumbnail_b64(image),
-                "is_enabled": bool(enabled),
-                "reference_type": "character&style",
-                "strength": 1.0,
-                "fidelity": 0.8,
-            }
+        return self._character_reference_service().frame_from_bytes(
+            image_bytes,
+            file_name=file_name,
+            file_path=file_path,
+            enabled=enabled,
+        )
 
     def _character_reference_module_state(self) -> dict[str, Any]:
-        frames = []
-        for index, frame in enumerate(self.character_reference_frames):
-            frames.append({
-                "index": index,
-                "file_hash": frame.get("file_hash", ""),
-                "file_name": frame.get("file_name", ""),
-                "is_enabled": bool(frame.get("is_enabled")),
-                "reference_type": frame.get("reference_type", "character&style"),
-                "strength": float(frame.get("strength", 1.0) or 1.0),
-                "fidelity": float(frame.get("fidelity", 0.8) or 0.8),
-                "thumbnail": frame.get("thumbnail", ""),
-            })
-        return self._module_state_payload("character_reference", {
-            "is_naid45": self._is_naid45_model(),
-            "frames": frames,
-        })
+        return self._character_reference_service().module_state()
 
     def _set_character_reference_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        if key == "upload_image":
-            image_bytes = base64.b64decode(self._data_url_payload(str(value or "")))
-            self.character_reference_frames.append(
-                self._character_reference_frame_from_bytes(image_bytes, file_name="remote_upload.png")
-            )
-        elif key.startswith("remove_frame_"):
-            index = self._index_from_key(key, "remove_frame_")
-            if index is not None and 0 <= index < len(self.character_reference_frames):
-                self.character_reference_frames.pop(index)
-        elif key.startswith("enable_"):
-            index = self._index_from_key(key, "enable_")
-            if index is not None and 0 <= index < len(self.character_reference_frames):
-                enabling = self._coerce_bool(value)
-                self.character_reference_frames[index]["is_enabled"] = enabling
-                if enabling:
-                    self._save_character_reference_storage(self.character_reference_frames[index])
-                    self._disable_all_vibe_frames()
-        elif key.startswith("strength_"):
-            index = self._index_from_key(key, "strength_")
-            if index is not None and 0 <= index < len(self.character_reference_frames):
-                self.character_reference_frames[index]["strength"] = max(0.0, min(1.0, float(value)))
-        elif key.startswith("fidelity_"):
-            index = self._index_from_key(key, "fidelity_")
-            if index is not None and 0 <= index < len(self.character_reference_frames):
-                self.character_reference_frames[index]["fidelity"] = max(0.0, min(1.0, float(value)))
-        elif key.startswith("ref_type_"):
-            index = self._index_from_key(key, "ref_type_")
-            ref_type = str(value or "").strip()
-            if index is not None and 0 <= index < len(self.character_reference_frames) and ref_type in {"character&style", "character", "style"}:
-                self.character_reference_frames[index]["reference_type"] = ref_type
-        elif key == "get_storage":
-            return self._scan_character_reference_storage()
-        elif key == "apply_storage":
-            file_hash = Path(str(value or "")).name
-            image_path = self._existing_save_path("character_reference", "images", f"{file_hash}.png")
-            if not image_path.exists():
-                return self._toast("Character reference storage item not found", level="error")
-            image_bytes = image_path.read_bytes()
-            frame = self._character_reference_frame_from_bytes(
-                image_bytes,
-                file_name=image_path.name,
-                file_path=str(image_path),
-                enabled=True,
-            )
-            frame["file_hash"] = file_hash
-            self.character_reference_frames.append(frame)
-            self._disable_all_vibe_frames()
-        else:
-            return None
-        return self._character_reference_module_state()
+        return self._character_reference_service().set_param(key, value)
 
     def _scan_character_reference_storage(self) -> dict[str, Any]:
-        items = []
-        for images_folder in self._existing_save_dirs("character_reference", "images"):
-            metadata_folder = images_folder.parent / "metadata"
-            for image_path in sorted(images_folder.glob("*.png"), key=lambda path: path.stat().st_mtime, reverse=True)[:50]:
-                character_name = ""
-                meta_path = metadata_folder / f"{image_path.stem}.json"
-                if meta_path.exists():
-                    try:
-                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                        if isinstance(meta, dict):
-                            character_name = str(meta.get("character_name") or "")
-                    except Exception:
-                        pass
-                thumb = ""
-                try:
-                    from PIL import Image
-
-                    with Image.open(image_path) as image:
-                        thumb = self._thumbnail_b64(image)
-                except Exception:
-                    pass
-                items.append({
-                    "file_hash": image_path.stem,
-                    "file_name": image_path.name,
-                    "character_name": character_name,
-                    "thumbnail": thumb,
-                })
-        return {"type": "storage_list", "module_id": "character_reference", "items": items}
+        return self._character_reference_service().scan_storage()
 
     def _disable_all_vibe_frames(self) -> None:
         for frame in self.vibe_transfer_frames:
             frame["is_enabled"] = False
 
     def _disable_all_character_reference_frames(self) -> None:
-        for frame in self.character_reference_frames:
-            frame["is_enabled"] = False
+        self._character_reference_service().disable_all_frames()
 
     def _vibe_frame_from_bytes(
         self,
@@ -1709,45 +1583,7 @@ class WebSessionContext:
         return None
 
     def active_character_reference_params(self) -> dict[str, Any]:
-        if not self._is_naid45_model():
-            return {}
-        enabled = [frame for frame in self.character_reference_frames if frame.get("is_enabled")]
-        if not enabled:
-            return {}
-        descriptions = []
-        images = []
-        ie = []
-        strengths = []
-        fidelities = []
-        for frame in enabled:
-            image_data = str(frame.get("image_data") or "")
-            if not image_data:
-                continue
-            descriptions.append({
-                "caption": {
-                    "base_caption": str(frame.get("reference_type") or "character&style"),
-                    "char_captions": [],
-                },
-                "legacy_uc": False,
-            })
-            images.append(image_data)
-            ie.append(1)
-            strength = round(max(0.0, min(1.0, float(frame.get("strength", 1.0) or 1.0))) * 20) / 20.0
-            fidelity = 1.0 - max(0.0, min(1.0, float(frame.get("fidelity", 0.8) or 0.8)))
-            fidelities.append(round(fidelity * 20) / 20.0)
-            strengths.append(strength)
-        if not descriptions:
-            return {}
-        return {
-            "director_reference_descriptions": descriptions,
-            "director_reference_images": images,
-            "director_reference_information_extracted": ie,
-            "director_reference_strength_values": strengths,
-            "director_reference_secondary_strength_values": fidelities,
-            "controlnet_strength": 1,
-            "inpaintImg2ImgStrength": 1,
-            "normalize_reference_strength_multiple": True,
-        }
+        return self._character_reference_service().active_params()
 
     def active_vibe_transfer_params(self) -> dict[str, Any]:
         reference_images = []

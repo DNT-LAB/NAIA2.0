@@ -16,6 +16,9 @@ def test_release_distribution_strategy_accepts_current_contract():
     assert payload["script_term_rule_count"] >= 8
     assert payload["non_mutating_script_rule_count"] >= 8
     assert payload["ok"] is True
+    strategy = json.loads(Path("release_assets/manifests/release_distribution_strategy.json").read_text(encoding="utf-8"))
+    assert "check:source-payload" in strategy["electron_builder_contract"]["package_scripts"]
+    assert "check:source-payload" in strategy["electron_builder_contract"]["required_script_terms"]["release:check"]
 
 
 def test_release_distribution_strategy_rejects_final_script_without_required_smoke_and_scan_terms(tmp_path):
@@ -138,6 +141,27 @@ def test_release_distribution_strategy_requires_runtime_distribution_in_release_
     assert payload["ok"] is False
     assert any(
         "release:check must include check:runtime-distribution" in item["reason"]
+        for item in payload["violations"]
+    )
+
+
+def test_release_distribution_strategy_requires_source_payload_in_release_check(tmp_path):
+    strategy = json.loads(Path("release_assets/manifests/release_distribution_strategy.json").read_text(encoding="utf-8"))
+    package = json.loads(Path("app/electron/package.json").read_text(encoding="utf-8"))
+    package["scripts"]["release:check"] = package["scripts"]["release:check"].replace(
+        " && npm run check:source-payload",
+        "",
+    )
+    strategy_path = tmp_path / "strategy.json"
+    package_path = tmp_path / "package.json"
+    strategy_path.write_text(json.dumps(strategy), encoding="utf-8")
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+
+    payload = check_release_distribution_strategy(strategy_path, electron_package_path=package_path)
+
+    assert payload["ok"] is False
+    assert any(
+        "release:check must include check:source-payload" in item["reason"]
         for item in payload["violations"]
     )
 

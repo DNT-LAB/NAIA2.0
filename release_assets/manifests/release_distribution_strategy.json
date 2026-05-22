@@ -114,6 +114,7 @@
       "preflight:electron-deps",
       "preflight:electron-deps:summary",
       "goal:audit:summary",
+      "check:source-payload",
       "check:runtime-distribution",
       "check:approval-gate",
       "preflight:packaging-inputs",
@@ -139,6 +140,7 @@
     ],
     "required_script_terms": {
       "release:check": [
+        "check:source-payload",
         "check:distribution",
         "check:runtime-distribution",
         "check:approval-gate"

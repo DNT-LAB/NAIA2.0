@@ -369,7 +369,7 @@ After each round:
 
 - [x] Clean Python runtime build remains base-only and creates managed dependency env on first launch.
 - [ ] Maintenance window appears before long install/download work and shows progress without scrollbars.
-- [ ] Release package includes only reviewed bootstrap data and samples.
+- [x] Release package includes only reviewed bootstrap data and samples.
 - [ ] `NAIA-Portable` folder shape is user-friendly.
 - [ ] Icon, menu hiding, log access, data folder access, browser fallback are verified.
 - [ ] Defender scan and artifact size measurement are recorded for release candidates.
@@ -392,6 +392,12 @@ After each round:
 - `release_assets/manifests/backend_runtime_strategy.json` now records the first-launch managed dependency environment contract for `user-data/runtime-env`.
 - `tools/check_backend_runtime_strategy.py` now requires the base-only Python runtime builder, bundled-python preflight, Electron runtime-env marker, venv bootstrap, and `requirements-headless.txt` pip install terms to remain wired.
 - Current validation: `python -B tools\check_backend_runtime_strategy.py` and focused backend-runtime strategy tests pass.
+
+### Source Payload Bootstrap Gate Slice - 2026-05-22
+
+- `tools/check_release_source_payload.py` now audits the files selected by `tools/stage_release_assets.py` before staging, so stale `app/electron/dist` output cannot hide source selection regressions.
+- Electron `release:check` now runs `check:source-payload`, which rejects `wildcards/**`, `data/tags/**`, legacy desktop roots, old `ui/remote_web`, and runtime/downloaded state while requiring the reviewed small bootstrap filters under `data/*.txt` and `data/taglist/*.json`.
+- Current validation: `python -B tools\check_release_source_payload.py`, `python -B tools\check_release_distribution_strategy.py`, release manifest audit tests, and focused Electron package contract tests pass.
 
 ## Round 9 - Hard Delete Phase
 

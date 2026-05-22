@@ -186,6 +186,14 @@ def audit_release_directory(
     if not root.is_dir():
         return [ReleaseViolation(str(root), "release root is not a directory")]
 
+    return audit_release_paths(_relative_files(root), manifest_path=manifest_path)
+
+
+def audit_release_paths(
+    relative_paths: Iterable[str | Path],
+    *,
+    manifest_path: str | Path = DEFAULT_MANIFEST,
+) -> list[ReleaseViolation]:
     manifest = load_manifest(manifest_path)
     manifest_rules = "\n".join(manifest.get("hard_rules", []))
     violations: list[ReleaseViolation] = []
@@ -195,7 +203,8 @@ def audit_release_directory(
             ReleaseViolation(str(manifest_path), "manifest hard rules do not mention PyQt6 and legacy_desktop")
         )
 
-    for relative in _relative_files(root):
+    for item in relative_paths:
+        relative = Path(item)
         reason = (
             _has_forbidden_path_pattern(relative)
             or _has_forbidden_part(relative)

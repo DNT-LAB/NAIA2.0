@@ -137,6 +137,7 @@
     "Release artifacts may include reviewed small bootstrap filters under data/*.txt and data/taglist/*.json; bulk operational data under data/tags/** must be initialized or downloaded into runtime user data.",
     "Writable runtime state must resolve through core.runtime_paths.",
     "Release staging should be produced through tools/stage_release_assets.py or an equivalent manifest-driven process.",
+    "Manifest-selected release source payload must pass tools/check_release_source_payload.py before staging or packaging.",
     "Electron backend resources should be staged under resources/naia-backend before Electron packaging.",
     "Staged backend resources must pass tools/smoke_staged_backend.py before packaged-app validation.",
     "Staged backend resources must pass tools/smoke_remote_web_contract.py for non-destructive Remote Web feature-surface validation.",

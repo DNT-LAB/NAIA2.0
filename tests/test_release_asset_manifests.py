@@ -100,6 +100,7 @@ def test_release_manifest_excludes_legacy_and_local_runtime_state():
     assert "PyQt6" in excluded
     assert "PyQt6" in rules
     assert "stage_release_assets.py" in rules
+    assert "check_release_source_payload.py" in rules
     assert "resources/naia-backend" in rules
     assert "smoke_staged_backend.py" in rules
     assert "smoke_remote_web_contract.py" in rules

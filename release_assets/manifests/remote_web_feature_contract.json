@@ -5,7 +5,8 @@
   "route_source": "core/web_session_app.py",
   "route_sources": [
     "core/web_session_app.py",
-    "app/backend/server/install_manager_routes.py"
+    "app/backend/server/install_manager_routes.py",
+    "app/backend/server/state_routes.py"
   ],
   "legacy_dependency_policy": {
     "none": "Feature is implemented by the headless backend without desktop imports.",
@@ -55,6 +56,7 @@
       "name": "Status, capabilities, and queue",
       "source_files": [
         "core/web_session_app.py",
+        "app/backend/server/state_routes.py",
         "core/web_session_context.py",
         "app/web/remote/js/features/queuePanel.mjs",
         "app/web/remote/js/features/setupController.mjs"

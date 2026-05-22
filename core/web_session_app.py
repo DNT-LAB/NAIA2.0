@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from app.backend.server.install_manager_routes import register_install_manager_routes
+from app.backend.server.state_routes import register_state_routes
 from app.web import resolve_remote_web_dir
 from core import result_image_payload_service as result_images
 from core.artist_thumbnail_service import ArtistThumbnailService
@@ -2999,21 +3000,7 @@ def create_headless_app(
     async def serve_js():
         return _web_file(root_web_dir / "app.js", "application/javascript")
 
-    @app.get("/api/status")
-    async def api_status():
-        return session_context.http_status_payload()
-
-    @app.get("/api/pipeline/prompt-runs")
-    async def api_pipeline_prompt_runs(limit: int = 50):
-        return session_context.prompt_runs_payload(limit=limit)
-
-    @app.get("/api/pipeline/prompt-runs/{prompt_run_id}")
-    async def api_pipeline_prompt_run(prompt_run_id: str):
-        payload = session_context.get_prompt_run_payload(prompt_run_id, include_source_row=True)
-        if payload is None:
-            return JSONResponse({"error": "prompt run not found"}, status_code=404)
-        return payload
-
+    register_state_routes(app, session_context)
     register_install_manager_routes(app, session_context, run_in_thread=_to_thread)
 
     @app.get("/api/queue/state")

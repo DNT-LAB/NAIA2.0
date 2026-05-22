@@ -177,6 +177,7 @@ After each round:
 ### Slice Evidence - 2026-05-22
 
 - Install Manager routes moved from `core/web_session_app.py` to `app/backend/server/install_manager_routes.py` without changing route paths or response shapes.
+- Status and pipeline prompt-run lookup routes moved from `core/web_session_app.py` to `app/backend/server/state_routes.py` while leaving queue action routes in the app factory until their generation-runner coupling is split.
 - `app/backend/server/__init__.py` now lazy-exports the compatibility server entrypoints so feature route modules can live under the same package without circular imports.
 - `release_assets/manifests/remote_web_feature_contract.json` now supports multiple route source files and lists the install-manager route owner.
 - Required validation for this slice: install-manager route test, runtime install manager tests, backend package shim tests, remote web feature contract test/checker, and py_compile of moved route sources.

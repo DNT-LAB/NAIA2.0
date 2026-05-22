@@ -21,9 +21,9 @@ import hashlib
 import io
 import os
 import re
-import json
 
 from core.api_config_service import ApiConfigService, CloudflaredService
+from core.headless_search_state_service import SUPPORTED_RATINGS
 from core.headless_result_service import HeadlessResultStore
 from core.pipeline_run_registry import PipelineRunRegistry, PromptPipelineRun
 from app.backend.runtime import RuntimePaths, resolve_runtime_paths
@@ -37,7 +37,6 @@ REMOTE_OPTION_DEFAULTS = {
     "wildcard_standalone": False,
     "auto_save": False,
 }
-SUPPORTED_RATINGS = ("g", "s", "q", "e")
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",
     "random_resolution",
@@ -211,6 +210,7 @@ class WebSessionContext:
     _headless_wildcard_service: Any = field(default=None, init=False, repr=False)
     _headless_instant_wildcard_service: Any = field(default=None, init=False, repr=False)
     _headless_save_service: Any = field(default=None, init=False, repr=False)
+    _headless_search_state_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -387,6 +387,15 @@ class WebSessionContext:
 
             service = HeadlessSaveService(self)
             self._headless_save_service = service
+        return service
+
+    def _search_state_service(self):
+        service = self._headless_search_state_service
+        if service is None:
+            from core.headless_search_state_service import HeadlessSearchStateService
+
+            service = HeadlessSearchStateService(self)
+            self._headless_search_state_service = service
         return service
 
     def _default_token_manager(self) -> TokenStore:
@@ -569,27 +578,10 @@ class WebSessionContext:
         self.publish("remote_params_changed", self.generation_param_schema_payload())
 
     def set_active_ratings(self, ratings: Any) -> set[str]:
-        if isinstance(ratings, str):
-            ratings = list(ratings)
-        if not isinstance(ratings, (list, tuple, set)):
-            normalized = set(SUPPORTED_RATINGS)
-        else:
-            normalized = {
-                str(item).strip().lower()
-                for item in ratings
-                if str(item).strip().lower() in SUPPORTED_RATINGS
-            }
-            if not normalized:
-                normalized = set(SUPPORTED_RATINGS)
-        self.remote_active_ratings = normalized
-        self.publish("remote_active_ratings_changed", self.search_state_payload())
-        return normalized
+        return self._search_state_service().set_active_ratings(ratings)
 
     def get_active_ratings(self) -> set[str]:
-        ratings = self.remote_active_ratings
-        if not ratings:
-            return set(SUPPORTED_RATINGS)
-        return {rating for rating in SUPPORTED_RATINGS if rating in ratings} or set(SUPPORTED_RATINGS)
+        return self._search_state_service().get_active_ratings()
 
     def _save_root(self) -> Path:
         return self.runtime_paths.save_dir if self.runtime_paths is not None else Path(self.repo_root) / "save"
@@ -646,200 +638,46 @@ class WebSessionContext:
         return dirs
 
     def _search_filter_state_path(self) -> Path:
-        return self._save_path("remote_web_filter_state.json")
+        return self._search_state_service().search_filter_state_path()
 
     def default_search_filter_state(self) -> dict[str, Any]:
-        return {
-            "version": 1,
-            "query": "",
-            "exclude": "",
-            "ratings": list(SUPPORTED_RATINGS),
-            "tag_filter": [],
-            "tag_filter_exclude": [],
-            "tag_filter_active": False,
-            "updated_at": None,
-        }
+        return self._search_state_service().default_search_filter_state()
 
     def normalize_rating_list(self, ratings: Any) -> list[str]:
-        if isinstance(ratings, str):
-            ratings = list(ratings)
-        if not isinstance(ratings, (list, tuple, set)):
-            return list(SUPPORTED_RATINGS)
-        normalized = [
-            rating
-            for rating in SUPPORTED_RATINGS
-            if rating in {
-                str(item).strip().lower()
-                for item in ratings
-                if str(item).strip().lower() in SUPPORTED_RATINGS
-            }
-        ]
-        return normalized or list(SUPPORTED_RATINGS)
+        return self._search_state_service().normalize_rating_list(ratings)
 
     @staticmethod
     def normalize_filter_tags(tags: Any) -> list[str]:
-        if tags is None:
-            return []
-        if isinstance(tags, str):
-            raw_items = re.split(r"[,\n]", tags)
-        elif isinstance(tags, (list, tuple, set)):
-            raw_items = list(tags)
-        else:
-            return []
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for item in raw_items:
-            text = str(item or "").strip().replace("_", " ")
-            if not text:
-                continue
-            key = text.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            normalized.append(text)
-        return normalized
+        from core.headless_search_state_service import HeadlessSearchStateService
+
+        return HeadlessSearchStateService.normalize_filter_tags(tags)
 
     def normalize_search_filter_state(self, raw: Any) -> dict[str, Any]:
-        state = self.default_search_filter_state()
-        if isinstance(raw, dict):
-            state["query"] = str(raw.get("query", state["query"]) or "")
-            state["exclude"] = str(raw.get("exclude", state["exclude"]) or "")
-            state["ratings"] = self.normalize_rating_list(raw.get("ratings", state["ratings"]))
-            state["tag_filter"] = [
-                tag.lstrip("-") for tag in self.normalize_filter_tags(
-                    raw.get("tag_filter") or raw.get("include") or raw.get("include_tags")
-                )
-            ]
-            state["tag_filter_exclude"] = [
-                tag.lstrip("-") for tag in self.normalize_filter_tags(
-                    raw.get("tag_filter_exclude") or raw.get("exclude_tags")
-                )
-            ]
-            state["tag_filter_active"] = bool(raw.get("tag_filter_active")) and (
-                bool(state["tag_filter"]) or bool(state["tag_filter_exclude"])
-            )
-            state["updated_at"] = raw.get("updated_at")
-        return state
+        return self._search_state_service().normalize_search_filter_state(raw)
 
     def _load_search_filter_state(self) -> dict[str, Any]:
-        paths = [self._search_filter_state_path()]
-        if self._legacy_save_fallback_enabled():
-            paths.append(self._legacy_save_path("remote_web_filter_state.json"))
-        for path in paths:
-            try:
-                if path.exists():
-                    with path.open("r", encoding="utf-8") as f:
-                        return self.normalize_search_filter_state(json.load(f))
-            except Exception as exc:
-                print(f"Headless Remote: filter state load failed - {exc}", flush=True)
-        return self.default_search_filter_state()
+        return self._search_state_service().load_search_filter_state()
 
     def save_search_filter_state(self, **updates: Any) -> dict[str, Any]:
-        state = dict(getattr(self, "search_filter_state", None) or self.default_search_filter_state())
-        for key in ("query", "exclude"):
-            if key in updates and updates[key] is not None:
-                state[key] = str(updates[key] or "")
-        if "ratings" in updates and updates["ratings"] is not None:
-            state["ratings"] = self.normalize_rating_list(updates["ratings"])
-        if "tag_filter" in updates and updates["tag_filter"] is not None:
-            state["tag_filter"] = [
-                tag.lstrip("-") for tag in self.normalize_filter_tags(updates["tag_filter"])
-            ]
-        if "tag_filter_exclude" in updates and updates["tag_filter_exclude"] is not None:
-            state["tag_filter_exclude"] = [
-                tag.lstrip("-") for tag in self.normalize_filter_tags(updates["tag_filter_exclude"])
-            ]
-        if "tag_filter_active" in updates and updates["tag_filter_active"] is not None:
-            state["tag_filter_active"] = bool(updates["tag_filter_active"])
-        state = self.normalize_search_filter_state(state)
-        state["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        self.search_filter_state = state
-        self.remote_active_ratings = set(state["ratings"])
-        try:
-            path = self._search_filter_state_path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = path.with_suffix(path.suffix + ".tmp")
-            with tmp_path.open("w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
-                f.write("\n")
-            tmp_path.replace(path)
-        except Exception as exc:
-            print(f"Headless Remote: filter state save failed - {exc}", flush=True)
-        return state
+        return self._search_state_service().save_search_filter_state(**updates)
 
     def save_search_filter_state_from_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(payload, dict):
-            return self.normalize_search_filter_state(getattr(self, "search_filter_state", None))
-        return self.save_search_filter_state(
-            query=payload.get("query") if "query" in payload else None,
-            exclude=payload.get("exclude") if "exclude" in payload else None,
-            ratings=payload.get("ratings") if "ratings" in payload else None,
-            tag_filter=payload.get("tag_filter") if "tag_filter" in payload else None,
-            tag_filter_exclude=payload.get("tag_filter_exclude") if "tag_filter_exclude" in payload else None,
-            tag_filter_active=payload.get("tag_filter_active") if "tag_filter_active" in payload else None,
-        )
+        return self._search_state_service().save_search_filter_state_from_payload(payload)
 
     def custom_parquet_dir(self) -> Path:
-        return self._existing_save_path("custom_tags")
+        return self._search_state_service().custom_parquet_dir()
 
     def runner_parquet_path(self) -> Path:
-        if self.runtime_paths is not None:
-            return self.runtime_paths.cache_dir / "naia_temp_rows.parquet"
-        return Path(self.repo_root) / "naia_temp_rows.parquet"
+        return self._search_state_service().runner_parquet_path()
 
     def runner_parquet_sources(self) -> list[tuple[Path, str]]:
-        root = Path(self.repo_root)
-        candidates: list[tuple[Path, str]] = [(self.runner_parquet_path(), "runtime cache parquet")]
-        if self.runtime_paths is not None:
-            candidates.append((self.runtime_paths.data_dir / "naia_temp_rows.parquet", "runtime data parquet"))
-            candidates.append((self.runtime_paths.data_dir / "tags" / "tags_129.parquet", "runtime tag archive parquet"))
-        candidates.extend([
-            (root / "data" / "naia_temp_rows.parquet", "legacy data parquet"),
-            (root / "naia_temp_rows.parquet", "legacy temp parquet"),
-        ])
-
-        seen: set[Path] = set()
-        unique_candidates: list[tuple[Path, str]] = []
-        for path, label in candidates:
-            resolved = Path(path).resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            unique_candidates.append((path, label))
-        return unique_candidates
+        return self._search_state_service().runner_parquet_sources()
 
     def custom_parquet_names(self) -> list[str]:
-        custom_dir = self.custom_parquet_dir()
-        if not custom_dir.exists():
-            return []
-        return sorted(path.name for path in custom_dir.glob("*.parquet") if path.is_file())
+        return self._search_state_service().custom_parquet_names()
 
     def search_state_payload(self) -> dict[str, Any]:
-        active_ratings = self.get_active_ratings()
-        snapshot = getattr(self, "search_results_snapshot", None)
-        if snapshot is not None and not getattr(snapshot, "empty", True) and "rating" in snapshot.columns:
-            rating_counts = {
-                rating: int((snapshot["rating"] == rating).sum())
-                for rating in SUPPORTED_RATINGS
-            }
-        else:
-            rating_counts = self.search_results.get_count_by_rating()
-        count = self.search_results.get_filtered_count(active_ratings) if active_ratings else self.search_results.get_count()
-        filter_preferences = self.normalize_search_filter_state(
-            getattr(self, "search_filter_state", None)
-        )
-        return {
-            "type": "search_state",
-            "count": int(count or 0),
-            "total_count": int(self.search_results.get_count() if self.search_results else 0),
-            "active_ratings": [rating for rating in SUPPORTED_RATINGS if rating in active_ratings],
-            "rating_counts": rating_counts,
-            "query": filter_preferences.get("query", ""),
-            "exclude": filter_preferences.get("exclude", ""),
-            "ratings": {rating: rating in active_ratings for rating in SUPPORTED_RATINGS},
-            "filter_preferences": filter_preferences,
-            "parquets": self.custom_parquet_names(),
-        }
+        return self._search_state_service().search_state_payload()
 
     def auto_save_state_payload(self) -> dict[str, Any]:
         return self._save_service().auto_save_state_payload()

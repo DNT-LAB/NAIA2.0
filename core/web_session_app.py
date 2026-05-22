@@ -31,6 +31,10 @@ from app.backend.server.preset_services import (
     expression_preset_service as _expression_preset_service,
 )
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
+from app.backend.server.prompt_engineering_commands import (
+    HIRES_OVERLAY_COMMAND_TYPES,
+    handle_hires_overlay_command,
+)
 from app.backend.server.prompt_tools_routes import (
     register_prompt_tools_routes,
     save_prompt_engineering_thumbnail_bytes,
@@ -1450,27 +1454,13 @@ async def _handle_json_command(
         if search_state is not None:
             await ws.send_text(json.dumps(search_state, ensure_ascii=False))
         await ws.send_text(json.dumps(depth_state, ensure_ascii=False))
-    elif command_type == "read_hires_preset_overlay":
-        preset_name = str(command.get("preset_name") or "")
-        response = await _to_thread(context.hires_overlay_response, preset_name)
-        await ws.send_text(json.dumps(response, ensure_ascii=False))
-    elif command_type == "write_hires_preset_overlay":
-        preset_name = str(command.get("preset_name") or "")
-        action = str(command.get("action") or "save")
-        if action == "reset":
-            ok, message = await _to_thread(context.reset_hires_overlay, preset_name)
-        else:
-            body = command.get("body") if isinstance(command.get("body"), dict) else {}
-            ok, message = await _to_thread(context.write_hires_overlay, preset_name, body)
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "success" if ok else "error",
-            "message": message,
-            "headless": True,
-        }, ensure_ascii=False))
-        if ok:
-            response = await _to_thread(context.hires_overlay_response, preset_name)
-            await ws.send_text(json.dumps(response, ensure_ascii=False))
+    elif command_type in HIRES_OVERLAY_COMMAND_TYPES:
+        await handle_hires_overlay_command(
+            ws,
+            context,
+            command,
+            run_in_thread=_to_thread,
+        )
     elif command_type == "set_module_param":
         module_state = context.set_module_param(
             str(command.get("module_id") or ""),

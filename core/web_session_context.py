@@ -591,18 +591,6 @@ class WebSessionContext:
     def _reload_wildcard_manager(self) -> None:
         self._wildcard_service().reload_manager()
 
-    def hires_overlay_response(self, preset_name: str) -> dict[str, Any]:
-        return self._prompt_engineering_service().hires_overlay_response(preset_name)
-
-    def write_hires_overlay(self, preset_name: str, body: dict[str, Any] | None) -> tuple[bool, str]:
-        return self._prompt_engineering_service().write_hires_overlay(preset_name, body)
-
-    def reset_hires_overlay(self, preset_name: str) -> tuple[bool, str]:
-        return self._prompt_engineering_service().reset_hires_overlay(preset_name)
-
-    def _hires_overlay_path(self, preset_name: str) -> Path | None:
-        return self._prompt_engineering_service().hires_overlay_path(preset_name)
-
     def _retired_module_state(self, module_id: str, *, action: str | None = None) -> dict[str, Any]:
         return self._module_dispatch_service().retired_module_state(module_id, action=action)
 

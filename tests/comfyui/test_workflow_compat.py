@@ -287,6 +287,103 @@ def test_native_unet_apply_params_still_swaps_model():
     assert result["44"]["inputs"]["unet_name"] == "new-unet.safetensors"
 
 
+def _make_spectrum_spd_ksampler_workflow():
+    return {
+        "1": {"class_type": "PreviewImage", "inputs": {"images": ["8", 0]}},
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["48", 0], "vae": ["15", 0]}},
+        "11": {"class_type": "CLIPTextEncode", "inputs": {"text": "old prompt", "clip": ["45", 0]}},
+        "12": {"class_type": "CLIPTextEncode", "inputs": {"text": "old neg", "clip": ["45", 0]}},
+        "15": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
+        "28": {"class_type": "EmptyLatentImage", "inputs": {"width": 1536, "height": 1536, "batch_size": 1}},
+        "44": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "Anima/anima-base-v1.0.safetensors", "weight_dtype": "default"},
+        },
+        "45": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": "qwen_3_06b_base.safetensors", "type": "stable_diffusion", "device": "default"},
+        },
+        "48": {
+            "class_type": "SpectrumSPDKSampler",
+            "_meta": {"title": "KSampler (Spectrum + SPD / SPEED)"},
+            "inputs": {
+                "seed": 485341741675919,
+                "steps": 27,
+                "cfg": 4.6,
+                "sampler_name": "er_sde",
+                "scheduler": "simple",
+                "denoise": 1,
+                "split_mode": "single",
+                "spd_scale": 0.5,
+                "spd_sigma": 0.7,
+                "adaptive_smc_alpha": 0,
+                "model": ["52", 0],
+                "positive": ["11", 0],
+                "negative": ["12", 0],
+                "latent_image": ["28", 0],
+            },
+        },
+        "52": {"class_type": "RescaleCFG", "inputs": {"multiplier": 0.6, "model": ["44", 0]}},
+        "53": {"class_type": "SaveImage", "inputs": {"filename_prefix": "NAIA_ComfyUI", "images": ["8", 0]}},
+    }
+
+
+def test_ksampler_compatible_custom_sampler_is_supported():
+    mgr = ComfyUIWorkflowManager()
+    wf = _make_spectrum_spd_ksampler_workflow()
+
+    ok, node_map = mgr.validate_and_map_workflow(wf)
+    assert ok, f"SpectrumSPDKSampler workflow should validate: {node_map}"
+    assert node_map["sampler"] == "48"
+    assert node_map["model_compat"] == "native_unet"
+    assert node_map["unet_loader"] == "44"
+    assert node_map["positive_prompt"] == "11"
+    assert node_map["negative_prompt"] == "12"
+
+    meta = {"prompt": json.dumps(wf), "workflow": json.dumps(wf)}
+    analysis = mgr.analyze_workflow_for_ui(meta)
+    assert analysis["success"] is True
+    assert ("PASS", "SpectrumSPDKSampler") in analysis["required"]
+    assert "SpectrumSPDKSampler" not in analysis["custom"]
+
+    assert mgr.load_workflow_from_metadata(meta)
+    params = {
+        "model": "new-unet.safetensors",
+        "input": "new prompt",
+        "negative_prompt": "new neg",
+        "seed": 123,
+        "steps": 20,
+        "cfg_scale": 3.5,
+        "sampler": "euler",
+        "scheduler": "normal",
+        "width": 768,
+        "height": 1024,
+        "rescale_cfg": 0.2,
+        "filename_prefix": "NAIA_Test",
+    }
+    result = mgr.apply_params_to_workflow(params)
+    assert result is not None
+    sampler_inputs = result["48"]["inputs"]
+    assert sampler_inputs["seed"] == 123
+    assert sampler_inputs["steps"] == 20
+    assert sampler_inputs["cfg"] == 3.5
+    assert sampler_inputs["sampler_name"] == "euler"
+    assert sampler_inputs["scheduler"] == "normal"
+    assert sampler_inputs["split_mode"] == "single"
+    assert sampler_inputs["spd_scale"] == 0.5
+    assert sampler_inputs["spd_sigma"] == 0.7
+    assert sampler_inputs["adaptive_smc_alpha"] == 0
+    assert result["44"]["inputs"]["unet_name"] == "new-unet.safetensors"
+    assert result["11"]["inputs"]["text"] == "new prompt"
+    assert result["12"]["inputs"]["text"] == "new neg"
+    assert result["28"]["inputs"]["width"] == 768
+    assert result["28"]["inputs"]["height"] == 1024
+    workflow_ui = mgr.get_last_applied_workflow_ui()
+    sampler_ui = next(node for node in workflow_ui["nodes"] if str(node["id"]) == "48")
+    assert sampler_ui["outputs"][0]["type"] == "LATENT"
+    assert sampler_ui["widgets_values"][:6] == [123, "randomize", 20, 3.5, "euler", "normal"]
+
+
 def test_native_workflows_use_save_image_outputs():
     mgr = ComfyUIWorkflowManager()
 
@@ -540,6 +637,7 @@ ALL_TESTS = [
     test_event_no_publish_without_app_context,
     test_native_checkpoint_apply_params_still_swaps_model,
     test_native_unet_apply_params_still_swaps_model,
+    test_ksampler_compatible_custom_sampler_is_supported,
     test_native_workflows_use_save_image_outputs,
     test_apply_params_builds_current_ui_workflow_metadata,
     test_trace_handles_dangling_model_link,

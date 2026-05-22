@@ -536,8 +536,7 @@ class ComfyUIWorkflowManager:
             return False, {"error": "분석할 노드 데이터를 찾을 수 없습니다."}
 
         node_map = {}
-        # [수정] KSampler 외에 다른 커스텀 샘플러도 인식하도록 리스트 사용
-        recognized_sampler_types = ["KSampler", "SamplerCustom"]
+        recognized_sampler_types = self._recognized_sampler_label()
 
         # [수정] UNETLoader + CLIPLoader 조합 또는 CheckpointLoaderSimple 중 하나만 있으면 됨
         required_nodes = {
@@ -576,7 +575,7 @@ class ComfyUIWorkflowManager:
                 found_loader_nodes[class_type].append(node_id)
 
             # [핵심 수정] 인식 가능한 샘플러 타입인지 확인
-            if class_type in recognized_sampler_types:
+            if self._is_supported_sampler_node(node_data, is_ui_format):
                 found_sampler_nodes.append(node_id)
 
         # --- 3. 필수 노드 존재 여부 확인 ---
@@ -710,6 +709,88 @@ class ComfyUIWorkflowManager:
         
         return True
 
+    _KNOWN_SAMPLER_TYPES = {"KSampler", "SamplerCustom"}
+    _KSAMPLER_COMPATIBLE_INPUTS = {"model", "positive", "negative", "latent_image"}
+
+    @classmethod
+    def _recognized_sampler_label(cls) -> List[str]:
+        return ["KSampler", "SamplerCustom", "KSampler-compatible"]
+
+    @staticmethod
+    def _node_class_type(node: Dict[str, Any]) -> str:
+        return str(node.get("type") or node.get("class_type") or "")
+
+    @staticmethod
+    def _node_display_name(node: Dict[str, Any]) -> str:
+        meta = node.get("_meta") if isinstance(node.get("_meta"), dict) else {}
+        properties = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+        for value in (
+            node.get("title"),
+            meta.get("title"),
+            properties.get("Node name for S&R"),
+            node.get("type"),
+            node.get("class_type"),
+        ):
+            if value:
+                return str(value)
+        return ""
+
+    @staticmethod
+    def _class_type_has_ksampler_hint(class_type: Any) -> bool:
+        return "ksampler" in str(class_type or "").lower()
+
+    def _node_has_ksampler_hint(self, node: Dict[str, Any]) -> bool:
+        meta = node.get("_meta") if isinstance(node.get("_meta"), dict) else {}
+        properties = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+        parts = [
+            node.get("type"),
+            node.get("class_type"),
+            node.get("title"),
+            meta.get("title"),
+            properties.get("Node name for S&R"),
+        ]
+        return any("ksampler" in str(part or "").lower() for part in parts)
+
+    @staticmethod
+    def _node_input_names(node: Dict[str, Any], is_ui_format: bool) -> set:
+        inputs = node.get("inputs")
+        if isinstance(inputs, dict):
+            return {str(key) for key in inputs.keys()}
+        if isinstance(inputs, list):
+            return {
+                str(slot.get("name"))
+                for slot in inputs
+                if isinstance(slot, dict) and slot.get("name")
+            }
+        return set()
+
+    def _is_supported_sampler_node(self, node: Dict[str, Any], is_ui_format: bool) -> bool:
+        class_type = self._node_class_type(node)
+        if class_type in self._KNOWN_SAMPLER_TYPES:
+            return True
+        if not self._node_has_ksampler_hint(node):
+            return False
+        input_names = self._node_input_names(node, is_ui_format)
+        return self._KSAMPLER_COMPATIBLE_INPUTS.issubset(input_names)
+
+    def _is_direct_sampler_patch_node(self, node: Dict[str, Any]) -> bool:
+        class_type = self._node_class_type(node)
+        if class_type == "SamplerCustom":
+            return False
+        return self._is_supported_sampler_node(node, is_ui_format=False)
+
+    def _apply_common_sampler_params(self, sampler_inputs: Dict[str, Any], params: Dict[str, Any], *, force: bool) -> None:
+        updates = {
+            "seed": params["seed"] if params["seed"] != -1 else self._generate_random_seed(),
+            "steps": params["steps"],
+            "cfg": params["cfg_scale"],
+            "sampler_name": params["sampler"],
+            "scheduler": params["scheduler"],
+        }
+        for key, value in updates.items():
+            if force or key in sampler_inputs:
+                sampler_inputs[key] = value
+
     _INPUT_TYPE_BY_NAME = {
         "model": "MODEL",
         "clip": "CLIP",
@@ -764,10 +845,21 @@ class ComfyUIWorkflowManager:
     def _input_type_for(self, input_name: str) -> str:
         return self._INPUT_TYPE_BY_NAME.get(input_name, "*")
 
-    def _output_defs_for(self, class_type: str, output_count: int = 1) -> List[Dict[str, Any]]:
+    def _output_defs_for(
+        self,
+        class_type: str,
+        output_count: int = 1,
+        node: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         if output_count <= 0:
             return []
         defs = self._OUTPUT_TYPES_BY_CLASS.get(class_type)
+        if (
+            not defs
+            and node is not None
+            and self._is_supported_sampler_node(node, is_ui_format=False)
+        ):
+            defs = [("LATENT", "LATENT")]
         if not defs:
             defs = [("*", "*") for _ in range(max(1, output_count))]
         while len(defs) < output_count:
@@ -777,8 +869,11 @@ class ComfyUIWorkflowManager:
             for name, type_name in defs
         ]
 
-    def _widgets_from_api_node(self, class_type: str, inputs: Dict[str, Any]) -> List[Any]:
-        if class_type == "KSampler":
+    def _widgets_from_api_node(self, class_type: str, inputs: Dict[str, Any], node: Dict[str, Any]) -> List[Any]:
+        if class_type == "KSampler" or (
+            class_type != "SamplerCustom"
+            and self._is_supported_sampler_node(node, is_ui_format=False)
+        ):
             return [
                 inputs.get("seed"),
                 inputs.get("control_after_generate", "randomize"),
@@ -836,10 +931,10 @@ class ComfyUIWorkflowManager:
             class_type = node.get("class_type") or node.get("type") or "Unknown"
             outputs_by_slot = output_links.get(str(node_id), {})
             output_count = max(outputs_by_slot.keys(), default=-1) + 1
-            outputs = self._output_defs_for(class_type, output_count)
+            outputs = self._output_defs_for(class_type, output_count, node)
             for slot, slot_links in outputs_by_slot.items():
                 if slot >= len(outputs):
-                    outputs.extend(self._output_defs_for(class_type, slot - len(outputs) + 1))
+                    outputs.extend(self._output_defs_for(class_type, slot - len(outputs) + 1, node))
                 outputs[slot]["links"] = slot_links
             nodes.append({
                 "id": self._ui_node_id(node_id),
@@ -852,7 +947,7 @@ class ComfyUIWorkflowManager:
                 "inputs": input_slots.get(str(node_id), []),
                 "outputs": outputs,
                 "properties": {"Node name for S&R": class_type},
-                "widgets_values": self._widgets_from_api_node(class_type, node.get("inputs", {}) or {}),
+                "widgets_values": self._widgets_from_api_node(class_type, node.get("inputs", {}) or {}, node),
             })
 
         return {
@@ -1006,13 +1101,10 @@ class ComfyUIWorkflowManager:
             
             sampler_class_type = sampler_node_api.get("class_type")
 
-            if sampler_class_type == "KSampler":
+            if self._is_direct_sampler_patch_node(sampler_node_api):
                 sampler_inputs = sampler_node_api["inputs"]
-                sampler_inputs["seed"] = params['seed'] if params['seed'] != -1 else self._generate_random_seed()
-                sampler_inputs["steps"] = params['steps']
-                sampler_inputs["cfg"] = params['cfg_scale']
-                sampler_inputs["sampler_name"] = params['sampler']
-                sampler_inputs["scheduler"] = params['scheduler']
+                force_known_ksampler = sampler_class_type == "KSampler"
+                self._apply_common_sampler_params(sampler_inputs, params, force=force_known_ksampler)
 
             elif sampler_class_type == "SamplerCustom" and sampler_node_ui:
                 # SamplerCustom은 widgets_values를 통해 파라미터를 제어
@@ -1184,7 +1276,7 @@ class ComfyUIWorkflowManager:
             "model_compat": None,
         }
         # [수정] KSampler 외 커스텀 샘플러 지원
-        recognized_sampler_types = {"KSampler", "SamplerCustom"}
+        recognized_sampler_types = self._recognized_sampler_label()
         required_node_types = {
             "CLIPTextEncode",
             "EmptyLatentImage", "VAEDecode", "SaveImage", "PreviewImage"
@@ -1232,10 +1324,10 @@ class ComfyUIWorkflowManager:
                 elif class_type in loader_types:
                     result['required'].append(("PASS", class_type))
                     found_loaders.add(class_type)
-                elif class_type in recognized_sampler_types:
+                elif self._is_supported_sampler_node(node, is_ui_format):
                     # 여러 샘플러가 있을 경우 첫 번째 것만 인정
                     if not found_sampler:
-                        found_sampler = class_type
+                        found_sampler = class_type or self._node_display_name(node) or "KSampler-compatible"
                 else:
                     result['custom'].append(class_type)
 

@@ -5,6 +5,7 @@
   "route_source": "core/web_session_app.py",
   "route_sources": [
     "core/web_session_app.py",
+    "app/backend/server/character_viewer_routes.py",
     "app/backend/server/danbooru_routes.py",
     "app/backend/server/event_preset_routes.py",
     "app/backend/server/install_manager_routes.py",
@@ -209,6 +210,7 @@
       "name": "Thumb and Character Viewer",
       "source_files": [
         "core/web_session_app.py",
+        "app/backend/server/character_viewer_routes.py",
         "app/backend/server/style_thumbnail_routes.py",
         "core/character_viewer_service.py",
         "app/web/remote/js/features/thumbTab.mjs",

@@ -228,6 +228,7 @@ class WebSessionContext:
     _headless_img2img_service: Any = field(default=None, init=False, repr=False)
     _headless_character_reference_service: Any = field(default=None, init=False, repr=False)
     _headless_vibe_transfer_service: Any = field(default=None, init=False, repr=False)
+    _headless_automation_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -323,6 +324,15 @@ class WebSessionContext:
 
             service = HeadlessVibeTransferService(self)
             self._headless_vibe_transfer_service = service
+        return service
+
+    def _automation_service(self):
+        service = self._headless_automation_service
+        if service is None:
+            from core.headless_automation_service import HeadlessAutomationService
+
+            service = HeadlessAutomationService(self)
+            self._headless_automation_service = service
         return service
 
     def _default_token_manager(self) -> TokenStore:
@@ -1357,35 +1367,10 @@ class WebSessionContext:
         return self._img2img_service().generation_commands()
 
     def _automation_module_state(self) -> dict[str, Any]:
-        from core.automation_settings import automation_state_from_settings, load_automation_settings
-
-        settings = getattr(self, "_automation_settings", None)
-        if not isinstance(settings, dict):
-            settings = load_automation_settings(self._existing_save_path("AutomationModule.json"))
-            self._automation_settings = settings
-        state = automation_state_from_settings(settings)
-        state["available"] = True
-        state["headless"] = True
-        return state
+        return self._automation_service().state()
 
     def _set_automation_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        from core.automation_settings import save_automation_settings, settings_from_automation_state
-
-        if key in {"start", "stop"}:
-            return self._toast("Automation execution is retired in the supported headless runtime.", level="info")
-        state = self._automation_module_state()
-        if key == "auto_type":
-            state["auto_type"] = value
-        elif key in {"delay", "random_delay", "timer_minutes", "count_limit", "notify"}:
-            state[key] = value
-        elif key == "repeat":
-            return self._automation_module_state()
-        else:
-            return None
-        settings = settings_from_automation_state(state)
-        self._automation_settings = settings
-        save_automation_settings(settings, self._save_path("AutomationModule.json"))
-        return self._automation_module_state()
+        return self._automation_service().set_param(key, value)
 
     def _webui_hiresfix_assist_module_state(self) -> dict[str, Any]:
         state = self._normalized_webui_hiresfix_assist_state(self.webui_hiresfix_assist_state)

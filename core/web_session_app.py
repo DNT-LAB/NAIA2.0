@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from functools import partial
 import json
 import asyncio
 import uuid
@@ -28,6 +29,16 @@ from app.backend.server.depth_search_commands import (
     handle_depth_search_command,
 )
 from app.backend.server.event_preset_routes import register_event_preset_routes
+from app.backend.server.generation_commands import (
+    GENERATION_COMMAND_TYPES,
+    enqueue_generation_request,
+    enqueue_headless_generation_commands,
+    enqueue_prompt_from_module,
+    generation_service,
+    handle_generate_command,
+    handle_random_command,
+    random_service,
+)
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.headless_retired_commands import (
     HEADLESS_RETIRED_COMMAND_TYPES,
@@ -67,8 +78,6 @@ from app.backend.server.style_thumbnail_routes import register_style_thumbnail_r
 from app.backend.server.web_shell_routes import register_web_shell_routes
 from app.web import resolve_remote_web_dir
 from core import result_image_payload_service as result_images
-from core.headless_generation_service import HeadlessGenerationService
-from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.web_session_context import WebSessionContext
 
 
@@ -128,164 +137,6 @@ async def _broadcast_image(clients: set[WebSocket], webp_bytes: bytes, metadata:
         clients.discard(client)
 
 
-def _active_ratings_from_command(command: dict[str, Any] | None) -> set[str] | None:
-    if not isinstance(command, dict):
-        return None
-    ratings = command.get("ratings")
-    if isinstance(ratings, str):
-        ratings = list(ratings)
-    if not isinstance(ratings, (list, tuple, set)):
-        return None
-    picked = {str(item).strip().lower() for item in ratings}
-    return {rating for rating in ("g", "s", "q", "e") if rating in picked} or None
-
-
-def _random_service(context: WebSessionContext) -> HeadlessRandomPromptService:
-    service = getattr(context, "headless_random_prompt_service", None)
-    if service is None:
-        service = HeadlessRandomPromptService(context)
-        context.headless_random_prompt_service = service
-    return service
-
-
-def _generation_service(context: WebSessionContext) -> HeadlessGenerationService:
-    service = getattr(context, "headless_generation_service", None)
-    if service is None:
-        service = HeadlessGenerationService(context)
-        context.headless_generation_service = service
-    return service
-
-
-async def _enqueue_result_generation_request(context: WebSessionContext, command: dict[str, Any]) -> Any:
-    return await _to_thread(_generation_service(context).enqueue_remote_request, command)
-
-
-async def _handle_random_command(
-    ws: WebSocket,
-    context: WebSessionContext,
-    command: dict[str, Any] | None = None,
-) -> None:
-    command = command if isinstance(command, dict) else {}
-    overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
-    request_id = str(command.get("random_request_id") or command.get("requestId") or "")
-    active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
-    result = await _to_thread(
-        _random_service(context).generate,
-        active_ratings=active_ratings,
-        overrides=overrides,
-        random_request_id=request_id,
-    )
-    await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
-
-
-async def _handle_generate_command(
-    ws: WebSocket,
-    context: WebSessionContext,
-    clients: set[WebSocket],
-    command: dict[str, Any] | None = None,
-) -> None:
-    command = command if isinstance(command, dict) else {}
-    result = await _to_thread(_generation_service(context).enqueue_remote_request, command)
-    await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
-    if not result.ok:
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "error",
-            "message": result.blocked_reason,
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps({
-            "type": "status",
-            "is_generating": False,
-            "message": "blocked",
-        }, ensure_ascii=False))
-        return
-    await ws.send_text(json.dumps({
-        "type": "status",
-        "is_generating": False,
-        "message": "queued",
-    }, ensure_ascii=False))
-    await ws.send_text(json.dumps(context.queue_state_payload(), ensure_ascii=False))
-    if context.headless_generation_execute_enabled:
-        _ensure_generation_runner(context, clients)
-
-
-async def _enqueue_prompt_from_module(
-    ws: WebSocket,
-    context: WebSessionContext,
-    clients: set[WebSocket],
-    *,
-    prompt: str,
-    source: str,
-) -> None:
-    clean_prompt = str(prompt or "").strip()
-    if not clean_prompt:
-        return
-    command = {
-        "type": "generate",
-        "prompt": clean_prompt,
-        "negative_prompt": context.negative_prompt_text,
-        "overrides": {
-            "input": clean_prompt,
-            "_raw_input": clean_prompt,
-            "_remote_queue_source": source,
-            "_remote_queue_label": source,
-        },
-    }
-    result = await _to_thread(_generation_service(context).enqueue_remote_request, command)
-    await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
-    if not result.ok:
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "error",
-            "message": result.blocked_reason,
-        }, ensure_ascii=False))
-        return
-    await ws.send_text(json.dumps({
-        "type": "status",
-        "is_generating": False,
-        "message": "queued",
-    }, ensure_ascii=False))
-    await ws.send_text(json.dumps(context.queue_state_payload(), ensure_ascii=False))
-    if context.headless_generation_execute_enabled:
-        _ensure_generation_runner(context, clients)
-
-
-async def _enqueue_headless_generation_commands(
-    ws: WebSocket,
-    context: WebSessionContext,
-    clients: set[WebSocket],
-    commands: list[dict[str, Any]],
-) -> None:
-    queued = 0
-    for command in commands:
-        if not isinstance(command, dict):
-            continue
-        result = await _to_thread(_generation_service(context).enqueue_remote_request, command)
-        await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
-        if not result.ok:
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "level": "error",
-                "message": result.blocked_reason,
-            }, ensure_ascii=False))
-            continue
-        queued += 1
-    if queued:
-        await ws.send_text(json.dumps({
-            "type": "status",
-            "is_generating": False,
-            "message": "queued",
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "success",
-            "message": f"{queued} generation request(s) queued",
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps(context.queue_state_payload(), ensure_ascii=False))
-        if context.headless_generation_execute_enabled:
-            _ensure_generation_runner(context, clients)
-
-
 def _ensure_generation_runner(context: WebSessionContext, clients: set[WebSocket]) -> None:
     task = getattr(context, "headless_generation_runner_task", None)
     if task is not None and not task.done():
@@ -306,7 +157,7 @@ async def _run_generation_queue(context: WebSessionContext, clients: set[WebSock
             await _broadcast_json(clients, {"type": "status", "is_generating": True, "message": "generating"})
             await _broadcast_json(clients, context.queue_state_payload())
             try:
-                stored = await _to_thread(_generation_service(context).execute_request, request)
+                stored = await _to_thread(generation_service(context).execute_request, request)
             except Exception as exc:
                 context.is_generating = False
                 message = str(exc)
@@ -441,8 +292,14 @@ async def _handle_json_command(
             clients,
             client_host,
             command,
-            enqueue_prompt_from_module=_enqueue_prompt_from_module,
-            enqueue_generation_commands=_enqueue_headless_generation_commands,
+            enqueue_prompt_from_module=partial(
+                enqueue_prompt_from_module,
+                start_generation_runner=_ensure_generation_runner,
+            ),
+            enqueue_generation_commands=partial(
+                enqueue_headless_generation_commands,
+                start_generation_runner=_ensure_generation_runner,
+            ),
         )
     elif command_type in RESULT_COMMAND_TYPES:
         await handle_result_command(
@@ -451,13 +308,20 @@ async def _handle_json_command(
             clients,
             command,
             run_in_thread=_to_thread,
-            enqueue_generation_request=_enqueue_result_generation_request,
+            enqueue_generation_request=enqueue_generation_request,
             start_generation_runner=_ensure_generation_runner,
         )
-    elif command_type == "random":
-        await _handle_random_command(ws, context, command)
-    elif command_type == "generate":
-        await _handle_generate_command(ws, context, clients, command)
+    elif command_type in GENERATION_COMMAND_TYPES:
+        if command_type == "random":
+            await handle_random_command(ws, context, command)
+        else:
+            await handle_generate_command(
+                ws,
+                context,
+                clients,
+                command,
+                start_generation_runner=_ensure_generation_runner,
+            )
     else:
         await ws.send_text(json.dumps({
             "type": "toast",
@@ -477,10 +341,15 @@ async def _handle_text_command(
         await send_sync_messages(ws, context, client_host)
         return
     if data == "random":
-        await _handle_random_command(ws, context)
+        await handle_random_command(ws, context)
         return
     if data == "generate":
-        await _handle_generate_command(ws, context, clients)
+        await handle_generate_command(
+            ws,
+            context,
+            clients,
+            start_generation_runner=_ensure_generation_runner,
+        )
         return
     await ws.send_text(json.dumps({
         "type": "toast",
@@ -506,7 +375,7 @@ def create_headless_app(
     async def lifespan(_app: FastAPI):
         async def run_warmup() -> None:
             try:
-                ok = await _to_thread(_random_service(session_context).warmup)
+                ok = await _to_thread(random_service(session_context).warmup)
                 session_context.headless_random_warmup_done = bool(ok)
                 print(
                     "Headless Remote: random prompt runtime warmup "

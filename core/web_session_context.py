@@ -234,6 +234,8 @@ class WebSessionContext:
     _headless_prompt_engineering_service: Any = field(default=None, init=False, repr=False)
     _headless_conditional_prompt_service: Any = field(default=None, init=False, repr=False)
     _headless_character_service: Any = field(default=None, init=False, repr=False)
+    _headless_wildcard_service: Any = field(default=None, init=False, repr=False)
+    _headless_instant_wildcard_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -383,6 +385,24 @@ class WebSessionContext:
 
             service = HeadlessCharacterService(self)
             self._headless_character_service = service
+        return service
+
+    def _wildcard_service(self):
+        service = self._headless_wildcard_service
+        if service is None:
+            from core.headless_wildcard_service import HeadlessWildcardService
+
+            service = HeadlessWildcardService(self)
+            self._headless_wildcard_service = service
+        return service
+
+    def _instant_wildcard_service(self):
+        service = self._headless_instant_wildcard_service
+        if service is None:
+            from core.headless_instant_wildcard_service import HeadlessInstantWildcardService
+
+            service = HeadlessInstantWildcardService(self)
+            self._headless_instant_wildcard_service = service
         return service
 
     def _default_token_manager(self) -> TokenStore:
@@ -1223,381 +1243,52 @@ class WebSessionContext:
         return self._e621_event_service().set_param(key, value)
 
     def _wildcard_module_state(self) -> dict[str, Any]:
-        wildcard_count = 0
-        manager = self.wildcard_manager
-        for attr in ("wildcard_dict_tree", "wildcard_dict", "instant_wildcard_dict"):
-            value = getattr(manager, attr, None) if manager is not None else None
-            if isinstance(value, dict):
-                wildcard_count += len(value)
-        return self._module_state_payload("wildcard", {
-            "history": [],
-            "state": [],
-            "prompt_squeeze": bool(self.prompt_squeeze_enabled),
-            "wildcard_count": wildcard_count,
-            "file_browser_available": True,
-        })
+        return self._wildcard_service().state()
 
     def _set_wildcard_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        if key == "prompt_squeeze":
-            self.prompt_squeeze_enabled = self._coerce_bool(value)
-            return self._wildcard_module_state()
-        if key in {"reset_sequential", "reload"}:
-            self._reload_wildcard_manager()
-            return self._wildcard_module_state()
-        if key == "get_file_tree":
-            return {"type": "wildcard_manager", "action": "file_tree", "tree": self._scan_wildcard_tree()}
-        if key == "read_file":
-            content = self._read_wildcard_file(str(value or ""))
-            if content is None:
-                return self._toast("Wildcard file not found", level="error")
-            return {
-                "type": "wildcard_manager",
-                "action": "file_content",
-                "path": str(value or ""),
-                "content": content,
-            }
-        if key == "save_file":
-            try:
-                payload = json.loads(str(value or "{}"))
-            except json.JSONDecodeError:
-                return self._toast("Invalid wildcard save payload", level="error")
-            return self._save_wildcard_file(
-                str(payload.get("path") or ""),
-                str(payload.get("content") or ""),
-            )
-        if key == "delete_file":
-            return self._delete_wildcard_file(str(value or ""))
-        if key == "create_file":
-            return self._create_wildcard_file(str(value or ""))
-        if key == "preview_wildcard":
-            return {
-                "type": "wildcard_manager",
-                "action": "preview_result",
-                "name": str(value or ""),
-                "result": self._preview_wildcard(str(value or "")),
-            }
-        return self._toast(f"Wildcard action is not supported in headless: {key}", level="info")
+        return self._wildcard_service().set_param(key, value)
 
     def _instant_wildcard_store(self, *, force: bool = False) -> dict[str, Any]:
-        from core.instant_wildcard_service import load_instant_wildcards
-
-        signature = None
-        if not force:
-            cached = getattr(self, "instant_wildcard_store", None)
-            signature = getattr(self, "instant_wildcard_signature", None)
-            if isinstance(cached, dict) and signature == cached.get("signature"):
-                return cached
-        root = self._existing_save_path("instant_wildcard")
-        store = load_instant_wildcards(root)
-        self.instant_wildcard_store = store
-        self.instant_wildcard_signature = store.get("signature")
-        self._apply_instant_wildcard_to_manager(store)
-        return store
+        return self._instant_wildcard_service().store(force=force)
 
     def _apply_instant_wildcard_to_manager(self, store: dict[str, Any]) -> None:
-        manager = self.wildcard_manager
-        if manager is not None and hasattr(manager, "update_instant_wildcards"):
-            try:
-                manager.update_instant_wildcards(
-                    store.get("instant_wildcard_dict", {}),
-                    store.get("instant_wildcard_tree", {}),
-                )
-                return
-            except Exception:
-                pass
-        self.instant_wildcard_dict = store.get("instant_wildcard_dict", {})
-        self.instant_wildcard_tree = store.get("instant_wildcard_tree", {})
+        self._instant_wildcard_service().apply_to_manager(store)
 
     def _instant_wildcard_module_state(self) -> dict[str, Any]:
-        from core.instant_wildcard_service import instant_wildcard_group_name, select_instant_wildcard_item
-
-        store = self._instant_wildcard_store()
-        json_data = store.get("json_data", {}) if isinstance(store, dict) else {}
-        current_file = getattr(self, "instant_wildcard_current_file", None)
-        current_key = getattr(self, "instant_wildcard_current_key", None)
-        selected_file, selected_key = select_instant_wildcard_item(json_data, current_file, current_key)
-        self.instant_wildcard_current_file = selected_file
-        self.instant_wildcard_current_key = selected_key
-        current_items = json_data.get(selected_file or "", {}) if isinstance(json_data, dict) else {}
-        current_items = current_items if isinstance(current_items, dict) else {}
-        files = []
-        for filename, data in json_data.items():
-            data = data if isinstance(data, dict) else {}
-            files.append({
-                "name": filename,
-                "group": instant_wildcard_group_name(filename),
-                "count": len(data),
-                "selected": filename == selected_file,
-            })
-        items = [
-            {
-                "key": key,
-                "value": str(current_items.get(key) or ""),
-                "selected": key == selected_key,
-            }
-            for key in sorted(current_items.keys())
-        ]
-        current_value = str(current_items.get(selected_key, "") or "") if selected_key else ""
-        return self._module_state_payload("instant_wildcard", {
-            "files": files,
-            "items": items,
-            "current_file": selected_file or "",
-            "current_group": instant_wildcard_group_name(selected_file or "") if selected_file else "",
-            "current_key": selected_key or "",
-            "current_value": current_value,
-            "flat_count": len(store.get("instant_wildcard_dict", {}) or {}),
-            "save_path": str(store.get("save_path") or ""),
-        })
+        return self._instant_wildcard_service().state()
 
     def _chunk_module_state(self) -> dict[str, Any]:
-        from core.instant_wildcard_service import instant_wildcard_group_name
-
-        store = self._instant_wildcard_store()
-        json_data = store.get("json_data", {}) if isinstance(store, dict) else {}
-        groups = []
-        for filename, items in json_data.items():
-            if not isinstance(items, dict):
-                continue
-            groups.append({
-                "name": instant_wildcard_group_name(filename),
-                "items": [
-                    {"key": str(key), "value": str(value)}
-                    for key, value in sorted(items.items(), key=lambda item: str(item[0]))
-                ],
-            })
-        return {"type": "module_state", "module_id": "chunk", "available": True, "headless": True, "groups": groups}
+        return self._instant_wildcard_service().chunk_state()
 
     def _set_instant_wildcard_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        from core.instant_wildcard_service import (
-            instant_wildcard_group_name,
-            normalize_instant_wildcard_filename,
-            write_instant_wildcard_file,
-        )
-
-        store = self._instant_wildcard_store(force=key == "reload")
-        json_data = store.get("json_data", {}) if isinstance(store, dict) else {}
-        if key == "reload":
-            return self._instant_wildcard_module_state()
-        if key == "select_file":
-            filename = normalize_instant_wildcard_filename(str(value or ""))
-            if filename in json_data:
-                self.instant_wildcard_current_file = filename
-                items = json_data.get(filename, {})
-                self.instant_wildcard_current_key = next(iter(sorted(items.keys()))) if isinstance(items, dict) and items else None
-            return self._instant_wildcard_module_state()
-        if key == "select_key":
-            item_key = str(value or "").strip()
-            filename = getattr(self, "instant_wildcard_current_file", None)
-            if filename in json_data and item_key in json_data.get(filename, {}):
-                self.instant_wildcard_current_key = item_key
-            return self._instant_wildcard_module_state()
-        if key == "add_group":
-            filename = normalize_instant_wildcard_filename(str(value or ""))
-            if not filename:
-                return self._toast("Instant wildcard group is required", level="error")
-            json_data.setdefault(filename, {})
-            write_instant_wildcard_file(json_data, filename, store.get("save_path") or "")
-            self.instant_wildcard_current_file = filename
-            self.instant_wildcard_current_key = None
-            self._instant_wildcard_store(force=True)
-            return self._instant_wildcard_module_state()
-        if key == "value":
-            filename = getattr(self, "instant_wildcard_current_file", None)
-            item_key = getattr(self, "instant_wildcard_current_key", None)
-            if filename and item_key:
-                json_data.setdefault(filename, {})[item_key] = str(value or "")
-                write_instant_wildcard_file(json_data, filename, store.get("save_path") or "")
-                self._instant_wildcard_store(force=True)
-            return self._instant_wildcard_module_state()
-        if key in {"upsert", "delete", "rename"}:
-            try:
-                payload = json.loads(str(value or "{}"))
-            except json.JSONDecodeError:
-                return self._toast("Invalid instant wildcard payload", level="error")
-            filename = normalize_instant_wildcard_filename(
-                str(payload.get("file") or getattr(self, "instant_wildcard_current_file", "") or "")
-            )
-            if not filename:
-                return self._toast("Instant wildcard file is required", level="error")
-            if key == "upsert":
-                item_key = str(payload.get("key") or "").strip()
-                if not item_key:
-                    return self._toast("Instant wildcard key is required", level="error")
-                json_data.setdefault(filename, {})[item_key] = str(payload.get("value") or "")
-                self.instant_wildcard_current_file = filename
-                self.instant_wildcard_current_key = item_key
-            elif key == "delete":
-                item_key = str(payload.get("key") or "").strip()
-                if filename in json_data and item_key in json_data[filename]:
-                    del json_data[filename][item_key]
-                    image_path = self._existing_save_path(
-                        "instant_wildcard",
-                        "images",
-                        instant_wildcard_group_name(filename),
-                        f"{item_key}.png",
-                    )
-                    if image_path.exists():
-                        try:
-                            image_path.unlink()
-                        except Exception:
-                            pass
-                if getattr(self, "instant_wildcard_current_key", None) == item_key:
-                    remaining = json_data.get(filename, {})
-                    self.instant_wildcard_current_key = next(iter(sorted(remaining.keys()))) if remaining else None
-            elif key == "rename":
-                old_key = str(payload.get("old_key") or "").strip()
-                new_key = str(payload.get("new_key") or "").strip()
-                if filename in json_data and old_key in json_data[filename] and new_key:
-                    json_data[filename][new_key] = json_data[filename].pop(old_key)
-                    self.instant_wildcard_current_file = filename
-                    self.instant_wildcard_current_key = new_key
-            write_instant_wildcard_file(json_data, filename, store.get("save_path") or "")
-            self._instant_wildcard_store(force=True)
-            return self._instant_wildcard_module_state()
-        return self._toast(f"Instant wildcard action is not supported in headless: {key}", level="info")
+        return self._instant_wildcard_service().set_param(key, value)
 
     def _wildcard_base_dir(self) -> Path:
-        manager = self.wildcard_manager
-        base = getattr(manager, "wildcards_dir", None) if manager is not None else None
-        if base:
-            return Path(base)
-        if os.environ.get("NAIA_USER_DATA_DIR") or os.environ.get("NAIA_PORTABLE"):
-            runtime_paths = getattr(self, "runtime_paths", None)
-            runtime_base = getattr(runtime_paths, "wildcards_dir", None) if runtime_paths is not None else None
-            if runtime_base:
-                return Path(runtime_base)
-        return Path(self.repo_root) / "wildcards"
+        return self._wildcard_service().base_dir()
 
     def _validate_wildcard_path(self, rel_path: str) -> Path | None:
-        clean = str(rel_path or "").replace("\\", "/").strip().lstrip("/")
-        if not clean:
-            return None
-        base = self._wildcard_base_dir().resolve()
-        target = (base / clean).resolve()
-        try:
-            target.relative_to(base)
-        except ValueError:
-            return None
-        return target
+        return self._wildcard_service().validate_path(rel_path)
 
     def _scan_wildcard_tree(self) -> list[dict[str, Any]]:
-        base = self._wildcard_base_dir()
-        if not base.exists():
-            return []
-        tree: list[dict[str, Any]] = []
-        for item in sorted(base.iterdir(), key=lambda path: path.name.lower()):
-            if item.name.startswith("."):
-                continue
-            if item.is_dir():
-                folder = {"name": item.name, "type": "folder", "files": []}
-                for path in sorted(item.rglob("*.txt"), key=lambda path: str(path).lower()):
-                    try:
-                        lines = len(path.read_text(encoding="utf-8").splitlines())
-                    except Exception:
-                        lines = 0
-                    folder["files"].append({
-                        "name": path.name,
-                        "path": str(path.relative_to(base)).replace("\\", "/"),
-                        "lines": lines,
-                    })
-                if folder["files"]:
-                    tree.append(folder)
-            elif item.suffix.lower() == ".txt":
-                try:
-                    lines = len(item.read_text(encoding="utf-8").splitlines())
-                except Exception:
-                    lines = 0
-                tree.append({"name": item.name, "type": "file", "path": item.name, "lines": lines})
-        return tree
+        return self._wildcard_service().scan_tree()
 
     def _read_wildcard_file(self, rel_path: str) -> str | None:
-        target = self._validate_wildcard_path(rel_path)
-        if target is None or not target.is_file() or target.suffix.lower() != ".txt":
-            return None
-        return target.read_text(encoding="utf-8")
+        return self._wildcard_service().read_file(rel_path)
 
     def _save_wildcard_file(self, rel_path: str, content: str) -> dict[str, Any]:
-        if not str(rel_path or "").endswith(".txt"):
-            return self._toast("Wildcard filename must end with .txt", level="error")
-        target = self._validate_wildcard_path(rel_path)
-        if target is None:
-            return self._toast("Invalid wildcard path", level="error")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        self._reload_wildcard_manager()
-        return {
-            "type": "wildcard_manager",
-            "action": "file_content",
-            "path": str(rel_path).replace("\\", "/"),
-            "content": content,
-        }
+        return self._wildcard_service().save_file(rel_path, content)
 
     def _delete_wildcard_file(self, rel_path: str) -> dict[str, Any]:
-        target = self._validate_wildcard_path(rel_path)
-        if target is None or not target.is_file() or target.suffix.lower() != ".txt":
-            return self._toast("Wildcard file not found", level="error")
-        target.unlink()
-        self._reload_wildcard_manager()
-        return {
-            "type": "wildcard_manager",
-            "action": "file_deleted",
-            "path": str(rel_path).replace("\\", "/"),
-        }
+        return self._wildcard_service().delete_file(rel_path)
 
     def _create_wildcard_file(self, rel_path: str) -> dict[str, Any]:
-        clean = str(rel_path or "").strip()
-        if not clean.endswith(".txt"):
-            clean += ".txt"
-        target = self._validate_wildcard_path(clean)
-        if target is None:
-            return self._toast("Invalid wildcard path", level="error")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            target.write_text("", encoding="utf-8")
-        self._reload_wildcard_manager()
-        return {
-            "type": "wildcard_manager",
-            "action": "file_content",
-            "path": clean.replace("\\", "/"),
-            "content": "",
-        }
+        return self._wildcard_service().create_file(rel_path)
 
     def _preview_wildcard(self, name: str) -> str:
-        import random
-
-        clean = str(name or "").strip().replace("\\", "/")
-        if clean.endswith(".txt"):
-            clean = clean[:-4]
-        entries = []
-        manager = self.wildcard_manager
-        tree = getattr(manager, "wildcard_dict_tree", {}) if manager is not None else {}
-        if isinstance(tree, dict):
-            entries = list(tree.get(clean, []))
-        if not entries:
-            file_content = self._read_wildcard_file(f"{clean}.txt")
-            if file_content is None:
-                file_content = self._read_wildcard_file(f"{clean.replace('/', '-')}.txt")
-            entries = [(1, line.strip()) for line in str(file_content or "").splitlines() if line.strip()]
-        if not entries:
-            return f"Wildcard '{clean}' not found"
-        weights = []
-        texts = []
-        for entry in entries:
-            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
-                weights.append(float(entry[0]) if str(entry[0]).replace(".", "", 1).isdigit() else 1.0)
-                texts.append(str(entry[1]))
-            else:
-                weights.append(1.0)
-                texts.append(str(entry))
-        return "\n".join(f"#{index + 1}: {random.choices(texts, weights=weights, k=1)[0]}" for index in range(5))
+        return self._wildcard_service().preview(name)
 
     def _reload_wildcard_manager(self) -> None:
-        manager = self.wildcard_manager
-        if manager is not None and hasattr(manager, "reload_wildcards"):
-            try:
-                manager.reload_wildcards()
-            except Exception:
-                pass
+        self._wildcard_service().reload_manager()
 
     def hires_overlay_response(self, preset_name: str) -> dict[str, Any]:
         name = str(preset_name or "").strip()

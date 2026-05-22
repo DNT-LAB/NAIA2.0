@@ -1330,6 +1330,41 @@ def test_web_random_passes_session_overrides_to_prompt_generation():
     assert bridge._pending_overrides[ws]["remote_random_request_id"] == "rid-random-click"
 
 
+def test_comfyui_random_passes_saved_resolution_preset_to_auto_gen(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    triggered = []
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={"자동 생성": _ToggleButton(True)},
+        trigger_random_prompt=lambda **kwargs: triggered.append(kwargs),
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._save_remote_web_ui_state(
+        resolution_preset={"COMFYUI": {"enabled": True, "preset": "max"}}
+    )
+    source_row = pd.Series({
+        "general": "1girl",
+        "image_width": 2496,
+        "image_height": 3648,
+    })
+    bridge._pending_random_requests.append({
+        "ws": None,
+        "source_row": source_row,
+        "active_ratings": {"s"},
+        "comfyui_request_id": "req",
+    })
+
+    bridge._do_random()
+
+    overrides = triggered[0]["settings_override"]
+    assert overrides["api_mode"] == "COMFYUI"
+    assert overrides["auto_generate"] is True
+    assert overrides["resolution_preset_enabled"] is True
+    assert overrides["resolution_preset"] == "max"
+    assert bridge._pending_overrides[("comfyui", "req")]["params"] == overrides
+    assert bridge._pending_overrides[("comfyui", "req")]["auto_generate"] is True
+
+
 def test_remote_web_ui_state_persists_hires_assist_and_random_prompt_weight(tmp_path, monkeypatch):
     class _WebuiContext(_AppContext):
         def get_api_mode(self):
@@ -3570,6 +3605,49 @@ def test_artist_thumb_random_prompt_fits_detected_resolution_to_standard_1mp(tmp
     assert future.value["width"] == 832
     assert future.value["height"] == 1216
     assert future.value["resolution_source"] == "detected_fit"
+
+
+def test_comfyui_random_auto_gen_uses_preset_resolution_for_response_and_naia(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ctx = _AppContext()
+    generation_controller = _GenerationController()
+    ctx.main_window = SimpleNamespace(
+        negative_prompt_textedit=_TextEdit("negative"),
+        search_results=None,
+        generation_controller=generation_controller,
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._loop = _ImmediateLoop()
+    bridge._broadcast_json = lambda _payload: None
+    future = _DoneFuture()
+    bridge._pending_comfyui_requests["req"] = future
+    bridge._pending_overrides[("comfyui", "req")] = {
+        "comfyui_request_id": "req",
+        "auto_generate": True,
+        "params": {
+            "api_mode": "COMFYUI",
+            "auto_generate": True,
+            "resolution_preset_enabled": True,
+            "resolution_preset": "max",
+        },
+    }
+
+    bridge.on_prompt_generated(SimpleNamespace(
+        final_prompt="prompt",
+        source_row={"image_width": 2496, "image_height": 3648},
+    ))
+
+    assert future.value["width"] == 1216
+    assert future.value["height"] == 1792
+    assert future.value["resolution_source"] == "detected_fit"
+    overrides, priority = generation_controller.executed[0]
+    assert priority == 0
+    assert overrides["api_mode"] == "COMFYUI"
+    assert overrides["resolution_preset_enabled"] is True
+    assert overrides["resolution_preset"] == "max"
+    assert overrides["width"] == 1216
+    assert overrides["height"] == 1792
+    assert overrides["resolution"] == "1216 x 1792"
 
 
 def test_artist_thumb_random_prompt_empty_source_fails_pending_request(tmp_path, monkeypatch):

@@ -54,7 +54,9 @@ from core.resolution_utils import (
     MAX_1MP_PIXELS,
     STANDARD_1MP_RESOLUTIONS,
     STANDARD_1MP_RESOLUTION_LABELS,
+    anima_resolution_preset_candidates,
     normalize_anima_resolution_preset_id,
+    nearest_anima_preset_resolution,
     nearest_standard_1mp_resolution,
     parse_resolution_pair,
 )
@@ -915,6 +917,102 @@ class RemoteBridge(QObject):
 
     def get_resolution_preset_params(self, mode: str | None = None) -> dict:
         return self._resolution_preset_defaults_for_mode(mode or self._current_api_mode())
+
+    def _comfyui_random_request_overrides(
+        self,
+        request_overrides: dict | None,
+        *,
+        auto_generate: bool,
+        artist_thumb_request: bool = False,
+    ) -> dict | None:
+        params = dict(request_overrides) if isinstance(request_overrides, dict) else {}
+        if artist_thumb_request:
+            return params or None
+
+        params.setdefault("api_mode", "COMFYUI")
+        if auto_generate:
+            params.setdefault("auto_generate", True)
+
+        defaults = self._resolution_preset_defaults_for_mode("COMFYUI")
+        if defaults.get("resolution_preset_enabled"):
+            params.setdefault("resolution_preset_enabled", True)
+            params.setdefault("resolution_preset", defaults.get("resolution_preset", "standard"))
+
+        return params or None
+
+    @staticmethod
+    def _positive_resolution_from_params(params: dict | None) -> tuple[int, int] | None:
+        if not isinstance(params, dict):
+            return None
+        width = params.get("width")
+        height = params.get("height")
+        if (width is None or height is None) and params.get("resolution"):
+            parsed = parse_resolution_pair(params.get("resolution"))
+            if parsed:
+                width, height = parsed
+        try:
+            width = int(width)
+            height = int(height)
+        except (TypeError, ValueError):
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return width, height
+
+    @staticmethod
+    def _source_row_resolution(source_row) -> tuple[int, int] | None:
+        if source_row is None:
+            return None
+        try:
+            if "image_width" not in source_row or "image_height" not in source_row:
+                return None
+            width = int(source_row["image_width"])
+            height = int(source_row["image_height"])
+        except (TypeError, ValueError, KeyError):
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return width, height
+
+    def _comfyui_random_response_resolution(
+        self,
+        prompt_context,
+        params: dict | None,
+        *,
+        artist_thumb_request: bool = False,
+    ) -> tuple[int | None, int | None, str]:
+        explicit = self._positive_resolution_from_params(params)
+        if explicit:
+            return explicit[0], explicit[1], "explicit"
+
+        source_pair = self._source_row_resolution(getattr(prompt_context, "source_row", None))
+        preset_enabled = (
+            not artist_thumb_request
+            and isinstance(params, dict)
+            and self._coerce_bool(params.get("resolution_preset_enabled"))
+        )
+        if preset_enabled:
+            preset_id = params.get("resolution_preset")
+            if source_pair:
+                source_w, source_h = source_pair
+                width, height = nearest_anima_preset_resolution(source_w, source_h, preset_id)
+                source = "detected" if (width, height) == (source_w, source_h) else "detected_fit"
+                return width, height, source
+            width, height = random.choice(anima_resolution_preset_candidates(preset_id))
+            return width, height, "random"
+
+        if source_pair:
+            source_w, source_h = source_pair
+            fitted_w, fitted_h = self._coerce_artist_thumb_resolution(source_w, source_h)
+            if self._artist_thumb_resolution_allowed(fitted_w, fitted_h):
+                source = "detected" if (fitted_w, fitted_h) == (source_w, source_h) else "detected_fit"
+                return fitted_w, fitted_h, source
+
+        try:
+            return self._artist_thumb_random_resolution()
+        except Exception as e:
+            print(f"🌐 ComfyUI: 해상도 결정 실패 — {e}")
+            return None, None, "unknown"
 
     def _save_resolution_preset_param(self, key: str, value: str):
         mode = self._normalize_resolution_mode()
@@ -6132,19 +6230,26 @@ class RemoteBridge(QObject):
             force_skip = bool(req.get("force_naia_skip_generate", False))
             respect_autogen = bool(req.get("respect_naia_autogen", True))
             comfyui_peng_override = req.get("peng_override")  # dict or None
+            artist_thumb_random_prompt = bool(req.get("artist_thumb_random_prompt", False))
             request_overrides = req.get("overrides") if isinstance(req.get("overrides"), dict) else None
 
             if comfyui_request_id:
                 will_naia_generate = (
                     auto_gen_checked and respect_autogen and not force_skip
                 )
+                request_overrides = self._comfyui_random_request_overrides(
+                    request_overrides,
+                    auto_generate=will_naia_generate,
+                    artist_thumb_request=artist_thumb_random_prompt,
+                )
                 override_key = ("comfyui", comfyui_request_id)
                 pending_entry = {
-                    "params": None,
+                    "params": request_overrides,
                     "negative": None,
                     "source": "comfyui_random",
                     "auto_generate": will_naia_generate,
                     "comfyui_request_id": comfyui_request_id,
+                    "artist_thumb_random_prompt": artist_thumb_random_prompt,
                 }
 
                 # P.Eng per-request override 주입
@@ -15001,6 +15106,7 @@ class RemoteBridge(QObject):
                 cf_pending = self._pending_overrides.pop(ck, {})
                 cf_id = cf_pending.get("comfyui_request_id")
                 cf_will_generate = cf_pending.get("auto_generate", False)
+                cf_params = cf_pending.get("params") if isinstance(cf_pending.get("params"), dict) else None
 
                 # P.Eng override 능동 reset (id 비교, 다른 세션 값 훼손 방지)
                 # 이미지 생성 경로는 generation_controller가 리셋하지만,
@@ -15009,47 +15115,29 @@ class RemoteBridge(QObject):
                 if _peng_ref is not None and self.app_context.session_p_eng_override is _peng_ref:
                     self.app_context.session_p_eng_override = None
 
+                cf_width, cf_height, cf_res_source = self._comfyui_random_response_resolution(
+                    prompt_context,
+                    cf_params,
+                    artist_thumb_request=bool(cf_pending.get("artist_thumb_random_prompt", False)),
+                )
+
                 # NAIA 자체 generate 트리거 (auto_generate=True 인 경우)
                 if cf_will_generate:
                     try:
                         gc_cf = _mw_for_cf.generation_controller
                         if not gc_cf.is_generating:
+                            if cf_width and cf_height:
+                                if cf_params is None:
+                                    cf_params = {}
+                                cf_params["width"] = cf_width
+                                cf_params["height"] = cf_height
+                                cf_params["resolution"] = f"{cf_width} x {cf_height}"
                             gc_cf.execute_generation_pipeline(
-                                overrides=cf_pending.get("params"), priority=0,
+                                overrides=cf_params, priority=0,
                             )
                             self._broadcast_json({"type": "status", "is_generating": True})
                     except Exception as e:
                         print(f"🌐 ComfyUI: NAIA generate 실패 — {e}")
-
-                # 추천 해상도 결정 — NAIA 표준 fallback chain 미러:
-                # 1) source_row 의 image_width/height (auto_fit_resolution 정책)
-                # 2) resolution_combo 에서 random pick (random_resolution 정책,
-                #    generation_controller.py:393-399 패턴; 단 setCurrentIndex 미호출 → UI 불변)
-                # combo 는 _load_resolutions 가 default 7개 항목을 항상 보장하므로
-                # 추가 hardcoded fallback 없음. ComfyUI 경로는 항상 random/auto 켠 효과.
-                # NAIA combo 텍스트 포맷: "1024 x 1024" (공백 포함)
-                cf_width, cf_height, cf_res_source = None, None, "unknown"
-                try:
-                    src_row = getattr(prompt_context, "source_row", None)
-                    if (
-                        src_row is not None
-                        and "image_width" in src_row
-                        and "image_height" in src_row
-                    ):
-                        try:
-                            w = int(src_row["image_width"])
-                            h = int(src_row["image_height"])
-                            if w > 0 and h > 0:
-                                fitted_w, fitted_h = self._coerce_artist_thumb_resolution(w, h)
-                                if self._artist_thumb_resolution_allowed(fitted_w, fitted_h):
-                                    cf_width, cf_height = fitted_w, fitted_h
-                                    cf_res_source = "detected" if (fitted_w, fitted_h) == (w, h) else "detected_fit"
-                        except (ValueError, TypeError):
-                            pass
-                    if cf_width is None:
-                        cf_width, cf_height, cf_res_source = self._artist_thumb_random_resolution()
-                except Exception as e:
-                    print(f"🌐 ComfyUI: 해상도 결정 실패 — {e}")
 
                 # Future 완료 (HTTP 응답 전송)
                 if cf_id:
@@ -15717,6 +15805,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
           - timeout: float (default 30) — 응답 대기 최대 시간(초)
           - respect_naia_autogen: bool (default true) — NAIA "자동 생성" 체크 존중
           - force_naia_skip_generate: bool (default false) — 강제로 NAIA generate 차단
+          - overrides: dict (default null) — ComfyUI 생성 파라미터 오버라이드
           - peng_override: dict (default null) — per-request P.Eng 오버라이드. NAIA 메인 UI 불변.
               생략 시: 데스크톱 UI 사용
               빈 dict {}: 전부 빈 값 (prefix/postfix/auto_hide 비우고 preprocessing 전부 OFF)
@@ -15739,6 +15828,9 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         timeout = float(body.get("timeout", 30))
         respect_autogen = bool(body.get("respect_naia_autogen", True))
         force_skip = bool(body.get("force_naia_skip_generate", False))
+        overrides = body.get("overrides")
+        if overrides is not None and not isinstance(overrides, dict):
+            return JSONResponse({"error": "overrides must be a dict"}, status_code=400)
         peng_override = body.get("peng_override")
         if peng_override is not None and not isinstance(peng_override, dict):
             return JSONResponse({"error": "peng_override must be a dict"}, status_code=400)
@@ -15757,6 +15849,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
             "comfyui_request_id": request_id,
             "respect_naia_autogen": respect_autogen,
             "force_naia_skip_generate": force_skip,
+            "overrides": overrides,
             "peng_override": peng_override,
         })
         bridge.request_random.emit()

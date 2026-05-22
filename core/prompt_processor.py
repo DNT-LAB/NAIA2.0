@@ -2,7 +2,7 @@ import math
 import re
 import pandas as pd
 import weakref
-from typing import TYPE_CHECKING, Dict, Any
+from typing import Dict, Any
 from core.prompt_context import PromptContext
 from core.wildcard_processor import WildcardProcessor # 이전 단계에서 생성
 from core.resolution_utils import (
@@ -10,9 +10,6 @@ from core.resolution_utils import (
     nearest_anima_preset_resolution,
     nearest_standard_1mp_resolution,
 )
-
-if TYPE_CHECKING:
-    from core.context import AppContext
 
 # 가중치 구문 감지 정규식 (C-2: \d+\.?\d* 로 정밀화)
 _WEIGHT_WEBUI_RE = re.compile(r'^\(.*:\d+\.?\d*\)$')   # (tag:1.2) — A1111 개별 가중치
@@ -193,7 +190,7 @@ def _escape_main_tags_parens(tags: list, weighted: set):
 class PromptProcessor:
     PIPELINE_NAME = "PromptProcessor"
 
-    def __init__(self, app_context: "AppContext"):
+    def __init__(self, app_context: Any):
         self.app_context = app_context
         wildcard_manager = getattr(app_context, 'wildcard_manager', None)
         if wildcard_manager is None:

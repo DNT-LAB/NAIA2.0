@@ -133,7 +133,7 @@ After each round:
 
 ### Checklist
 
-- [ ] `core/api_service.py`, `core/prompt_processor.py`, `core/prompt_generation_service.py`의 `core.context.AppContext` type hint를 Protocol 또는 `Any` 기반 headless contract로 교체한다.
+- [x] `core/api_service.py`, `core/prompt_processor.py`, `core/prompt_generation_service.py`의 `core.context.AppContext` type hint를 Protocol 또는 `Any` 기반 headless contract로 교체한다.
 - [ ] `interfaces/base_module.py`, `interfaces/base_tab_module.py`를 legacy module protocol과 headless protocol로 분리한다.
 - [ ] `utils/clipboard_image.py`를 Qt clipboard adapter와 pure image byte helper로 분리한다.
 - [ ] `utils/load_generation_params.py`를 legacy desktop utility로 격리하거나 headless settings service와 분리한다.
@@ -145,6 +145,12 @@ After each round:
 - Headless-supported import path에서 `legacy_desktop`, `NAIA_cold_v4`, direct PyQt runtime import가 발생하지 않는다.
 - `tools/smoke_staged_backend.py`와 `tests/test_requirements_split.py`가 통과한다.
 - Qt가 필요한 helper는 이름과 위치만 봐도 legacy adapter임을 알 수 있다.
+
+### Slice Evidence - 2026-05-22
+
+- `core/api_service.py`, `core/prompt_processor.py`, `core/prompt_generation_service.py`, and the adjacent `core/mode_ware_manager.py` now type the shared context as `Any` instead of importing `core.context.AppContext` for annotations.
+- `rg 'from core\.context import AppContext|app_context: .AppContext|core\.context' core/api_service.py core/prompt_processor.py core/prompt_generation_service.py core/mode_ware_manager.py core -g '*.py'` returns no remaining matches in the targeted headless core files.
+- Required validation for this slice: `python -m py_compile core\api_service.py core\prompt_processor.py core\prompt_generation_service.py core\mode_ware_manager.py` and focused prompt/headless tests.
 
 ## Round 4 - Split the Headless Monolith by Feature Owner
 

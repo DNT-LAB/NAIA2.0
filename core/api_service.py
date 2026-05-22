@@ -9,7 +9,7 @@ import gc
 from pathlib import Path
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
-from typing import Dict, Any, TYPE_CHECKING, List
+from typing import Dict, Any, List
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.resolution_utils import (
@@ -37,15 +37,11 @@ def _get_loaded_middle_module(app_context, class_name: str):
             return module
     return None
 
-if TYPE_CHECKING:
-    from core.context import AppContext
-    from legacy_desktop.modules.character_module import CharacterModule
-
 class APIService:
     WEBUI_HIRES_ASSIST_MAX_PIXELS = 1536 * 1536
 
     # [추가] 생성자에서 AppContext를 받도록 수정
-    def __init__(self, app_context: 'AppContext'):
+    def __init__(self, app_context: Any):
         self.app_context = app_context
         """
         API 호출을 전담하는 서비스.

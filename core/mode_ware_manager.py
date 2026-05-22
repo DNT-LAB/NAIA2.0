@@ -1,13 +1,10 @@
 from interfaces.mode_aware_module import ModeAwareModule
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from core.context import AppContext 
+from typing import Any
 
 class ModeAwareModuleManager:
     """모드 대응 모듈들을 자동으로 관리하는 매니저"""
     
-    def __init__(self, app_context: 'AppContext'):
+    def __init__(self, app_context: Any):
         self.app_context = app_context
         self.registered_modules = []
     

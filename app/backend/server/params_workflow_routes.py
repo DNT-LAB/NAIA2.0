@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from core.web_session_context import WebSessionContext
 
@@ -150,6 +151,81 @@ def _save_resolution_manager_state(context: WebSessionContext, mode: str, raw_it
     return _resolution_manager_state(context, normalized_mode)
 
 
+def _comfyui_workflow_state_payload(context: WebSessionContext) -> dict[str, Any]:
+    has_custom = bool(context.remote_params.get("comfyui_workflow_has_custom", False))
+    return {
+        "type": "comfyui_workflow_state",
+        "has_custom": has_custom,
+        "workflow_label": str(context.remote_params.get("comfyui_workflow_label") or ("Custom Workflow" if has_custom else "Basic Workflow")),
+        "model_compat": context.remote_params.get("comfyui_workflow_model_compat"),
+        "locked_loader_class": context.remote_params.get("comfyui_workflow_locked_loader_class"),
+        "locked_model_display": context.remote_params.get("comfyui_workflow_locked_model_display"),
+    }
+
+
+def _extract_comfyui_workflow_metadata_from_png(image_bytes: bytes) -> dict[str, Any]:
+    from PIL import Image
+
+    if not image_bytes:
+        raise ValueError("Image payload is empty")
+    if len(image_bytes) > 64 * 1024 * 1024:
+        raise ValueError("Image is too large")
+    with Image.open(io.BytesIO(image_bytes)) as opened:
+        opened.load()
+        info = dict(getattr(opened, "info", {}) or {})
+    workflow_text = info.get("workflow") or info.get("workflow_api")
+    prompt_text = info.get("prompt") or info.get("workflow_api")
+    if not workflow_text or not prompt_text:
+        raise ValueError("PNG does not include ComfyUI workflow metadata")
+    try:
+        workflow = json.loads(workflow_text) if isinstance(workflow_text, str) else workflow_text
+        prompt_api = json.loads(prompt_text) if isinstance(prompt_text, str) else prompt_text
+    except Exception as exc:
+        raise ValueError(f"ComfyUI workflow metadata is invalid: {exc}") from exc
+    if not isinstance(workflow, dict) or not isinstance(prompt_api, dict):
+        raise ValueError("ComfyUI workflow metadata is invalid")
+    return {
+        "workflow": prompt_api if "nodes" in workflow else workflow,
+        "workflow_ui": workflow if "nodes" in workflow else None,
+    }
+
+
+def _apply_comfyui_workflow_metadata(context: WebSessionContext, metadata: dict[str, Any] | None) -> dict[str, Any]:
+    metadata = metadata or {}
+    workflow = metadata.get("workflow")
+    if not isinstance(workflow, dict):
+        raise ValueError("ComfyUI workflow metadata is invalid")
+    context.remote_params["comfyui_workflow"] = workflow
+    context.remote_params["_comfyui_workflow_ui"] = metadata.get("workflow_ui")
+    context.remote_params["comfyui_workflow_has_custom"] = True
+    context.remote_params["comfyui_workflow_label"] = "Custom Workflow"
+    context.publish("comfyui_workflow_changed", _comfyui_workflow_state_payload(context))
+    return {
+        "ok": True,
+        "workflow": _comfyui_workflow_state_payload(context),
+        "params": context.generation_param_schema_payload(),
+    }
+
+
+def _clear_comfyui_workflow(context: WebSessionContext) -> dict[str, Any]:
+    for key in (
+        "comfyui_workflow",
+        "_comfyui_workflow_ui",
+        "comfyui_workflow_has_custom",
+        "comfyui_workflow_label",
+        "comfyui_workflow_model_compat",
+        "comfyui_workflow_locked_loader_class",
+        "comfyui_workflow_locked_model_display",
+    ):
+        context.remote_params.pop(key, None)
+    context.publish("comfyui_workflow_changed", _comfyui_workflow_state_payload(context))
+    return {
+        "ok": True,
+        "workflow": _comfyui_workflow_state_payload(context),
+        "params": context.generation_param_schema_payload(),
+    }
+
+
 def register_params_workflow_routes(
     app: FastAPI,
     session_context: WebSessionContext,
@@ -180,4 +256,36 @@ def register_params_workflow_routes(
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         await broadcast_json(clients, session_context.generation_param_schema_payload())
+        return result
+
+    @app.get("/api/comfyui/workflow/state")
+    async def api_comfyui_workflow_state():
+        return _comfyui_workflow_state_payload(session_context)
+
+    @app.get("/api/comfyui/web")
+    async def api_comfyui_web():
+        url = str(session_context.secure_token_manager.get_token("comfyui_url") or "").strip()
+        if not url:
+            return JSONResponse({"ok": False, "error": "ComfyUI URL is not configured"}, status_code=404)
+        if not url.startswith(("http://", "https://")):
+            url = f"http://{url}"
+        return RedirectResponse(url)
+
+    @app.post("/api/comfyui/workflow/upload")
+    async def api_comfyui_workflow_upload(req: Request):
+        image_bytes = await req.body()
+        try:
+            metadata = await run_in_thread(_extract_comfyui_workflow_metadata_from_png, image_bytes)
+            result = await run_in_thread(_apply_comfyui_workflow_metadata, session_context, metadata)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        await broadcast_json(clients, result["workflow"])
+        await broadcast_json(clients, result["params"])
+        return result
+
+    @app.post("/api/comfyui/workflow/default")
+    async def api_comfyui_workflow_default():
+        result = await run_in_thread(_clear_comfyui_workflow, session_context)
+        await broadcast_json(clients, result["workflow"])
+        await broadcast_json(clients, result["params"])
         return result

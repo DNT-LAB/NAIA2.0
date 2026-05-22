@@ -2330,9 +2330,10 @@ def test_headless_electron_resolutions_ignore_legacy_save(tmp_path, monkeypatch)
 
 def test_headless_comfyui_and_prompt_thumbnail_compatibility_routes(tmp_path):
     context = WebSessionContext(
-        token_manager=InMemoryTokenManager({"comfyui_url": "127.0.0.1:8188"}),
+        token_manager=InMemoryTokenManager({"comfyui_url": "127.0.0.1:8188", "nai_token": "pst-test-token"}),
         repo_root=tmp_path,
     )
+    context.headless_generation_execute_enabled = False
     client = TestClient(create_headless_app(context))
 
     default_workflow = client.post("/api/comfyui/workflow/default")
@@ -2355,6 +2356,24 @@ def test_headless_comfyui_and_prompt_thumbnail_compatibility_routes(tmp_path):
     assert thumb_get.content.startswith(b"\x89PNG")
     assert (context.runtime_paths.save_dir / "presets" / "previews" / "test-preset.png").exists()
     assert not (tmp_path / "save" / "presets" / "previews" / "test-preset.png").exists()
+
+    preset_dir = context.runtime_paths.save_dir / "presets" / "NAI"
+    preset_dir.mkdir(parents=True)
+    (preset_dir / "test-preset.json").write_text(
+        json.dumps({"module_settings": {"pre_prompt": "preset prefix"}}),
+        encoding="utf-8",
+    )
+    thumb_generate = client.post(
+        "/api/prompt-engineering/preset-thumbnail/generate",
+        json={"name": "test-preset", "mode": "NAI", "request_id": "thumb-req-1"},
+    )
+    assert thumb_generate.status_code == 200
+    generated_payload = thumb_generate.json()
+    assert generated_payload["request_id"] == "thumb-req-1"
+    assert generated_payload["mode"] == "NAI"
+    assert context.last_generation_params["prompt_preset_thumbnail_request"] is True
+    assert context.last_generation_params["_skip_vibe_transfer_late_binding"] is True
+    assert context.last_generation_params["input"].startswith("preset prefix, 1girl")
 
     clipboard = client.get("/api/clipboard/png")
     assert clipboard.status_code == 404

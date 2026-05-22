@@ -174,6 +174,13 @@ After each round:
 - `core/web_session_context.py`는 모든 feature storage와 image logic을 직접 소유하지 않는다.
 - feature owner를 보고 해당 기능의 route, state, storage, tests를 찾을 수 있다.
 
+### Slice Evidence - 2026-05-22
+
+- Install Manager routes moved from `core/web_session_app.py` to `app/backend/server/install_manager_routes.py` without changing route paths or response shapes.
+- `app/backend/server/__init__.py` now lazy-exports the compatibility server entrypoints so feature route modules can live under the same package without circular imports.
+- `release_assets/manifests/remote_web_feature_contract.json` now supports multiple route source files and lists the install-manager route owner.
+- Required validation for this slice: install-manager route test, runtime install manager tests, backend package shim tests, remote web feature contract test/checker, and py_compile of moved route sources.
+
 ## Round 5 - Runtime Data and Migration Boundary
 
 ### Checklist

@@ -3,6 +3,10 @@
   "status": "draft",
   "scope": "Remote Web feature ownership, route coverage, and migration smoke contract",
   "route_source": "core/web_session_app.py",
+  "route_sources": [
+    "core/web_session_app.py",
+    "app/backend/server/install_manager_routes.py"
+  ],
   "legacy_dependency_policy": {
     "none": "Feature is implemented by the headless backend without desktop imports.",
     "legacy_compat": "Feature retains compatibility shims or legacy read fallbacks, but the supported headless path must not import PyQt6 or legacy_desktop.",
@@ -69,7 +73,7 @@
       "id": "install_manager",
       "name": "First-run install manager and runtime data initialization",
       "source_files": [
-        "core/web_session_app.py",
+        "app/backend/server/install_manager_routes.py",
         "core/runtime_install_manager.py",
         "app/web/remote/js/features/setupController.mjs",
         "app/electron/renderer/maintenance.html"

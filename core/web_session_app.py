@@ -21,6 +21,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.web import resolve_remote_web_dir
 from core import result_image_payload_service as result_images
 from core.artist_thumbnail_service import ArtistThumbnailService
@@ -33,7 +34,6 @@ from core.expression_preset_service import ExpressionPresetService
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.preset_composer_service import PresetComposerService
-from core.runtime_install_manager import RuntimeInstallManager
 from core.style_thumbnail_service import StyleThumbnailService
 from core.web_session_context import WebSessionContext
 
@@ -270,26 +270,6 @@ def _event_preset_download_service(context: WebSessionContext) -> EventPresetDow
             thumbnail_root=thumbnail_root,
         )
         context.event_preset_download_service = service
-    return service
-
-
-def _runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager:
-    service = getattr(context, "runtime_install_manager", None)
-    if service is None:
-        runtime_paths = getattr(context, "runtime_paths", None)
-        if runtime_paths is None:
-            raise RuntimeError("Runtime paths are not available")
-
-        def refresh_tag_state() -> None:
-            context.tag_search_index = None
-            context.kr_tags_raw = {}
-            context.autocomplete_state.kr_tags_loaded = False
-
-        service = RuntimeInstallManager(
-            runtime_paths,
-            on_tag_archive_complete=refresh_tag_state,
-        )
-        context.runtime_install_manager = service
     return service
 
 
@@ -3034,37 +3014,7 @@ def create_headless_app(
             return JSONResponse({"error": "prompt run not found"}, status_code=404)
         return payload
 
-    @app.get("/api/install-manager")
-    async def api_install_manager_state():
-        try:
-            return await _to_thread(_runtime_install_manager(session_context).snapshot)
-        except Exception as exc:
-            return JSONResponse({"ok": False, "error": f"Install manager state failed: {exc}"}, status_code=500)
-
-    @app.post("/api/install-manager/initialize")
-    async def api_install_manager_initialize():
-        try:
-            return await _to_thread(_runtime_install_manager(session_context).initialize)
-        except Exception as exc:
-            return JSONResponse({"ok": False, "error": f"Install manager initialize failed: {exc}"}, status_code=500)
-
-    @app.post("/api/install-manager/tag-archive/download")
-    async def api_install_manager_tag_archive_download():
-        try:
-            manager = _runtime_install_manager(session_context)
-            await _to_thread(manager.start_tag_archive_download)
-            return await _to_thread(manager.snapshot)
-        except Exception as exc:
-            return JSONResponse({"ok": False, "error": f"Tag archive download failed: {exc}"}, status_code=500)
-
-    @app.post("/api/install-manager/tag-archive/download/cancel")
-    async def api_install_manager_tag_archive_download_cancel():
-        try:
-            manager = _runtime_install_manager(session_context)
-            await _to_thread(manager.cancel_tag_archive_download)
-            return await _to_thread(manager.snapshot)
-        except Exception as exc:
-            return JSONResponse({"ok": False, "error": f"Tag archive download cancel failed: {exc}"}, status_code=500)
+    register_install_manager_routes(app, session_context, run_in_thread=_to_thread)
 
     @app.get("/api/queue/state")
     async def api_queue_state():

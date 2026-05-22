@@ -33,6 +33,13 @@ def scan_app_routes(source_path: str | Path = DEFAULT_ROUTE_SOURCE) -> set[tuple
     return routes
 
 
+def scan_route_sources(source_paths: list[str | Path]) -> set[tuple[str, str]]:
+    routes: set[tuple[str, str]] = set()
+    for source_path in source_paths:
+        routes.update(scan_app_routes(source_path))
+    return routes
+
+
 def _contract_routes(contract: dict[str, Any]) -> tuple[set[tuple[str, str]], list[dict[str, Any]]]:
     routes: set[tuple[str, str]] = set()
     duplicates: list[dict[str, Any]] = []
@@ -66,9 +73,18 @@ def validate_remote_web_feature_contract(
     root = Path(repo_root)
     contract_file = Path(contract_path)
     contract = load_contract(contract_file)
-    source_path = Path(route_source or contract.get("route_source") or DEFAULT_ROUTE_SOURCE)
-    if not source_path.is_absolute():
-        source_path = root / source_path
+    if route_source is not None:
+        route_sources = [Path(route_source)]
+    else:
+        configured_sources = contract.get("route_sources")
+        if isinstance(configured_sources, list) and configured_sources:
+            route_sources = [Path(str(source)) for source in configured_sources]
+        else:
+            route_sources = [Path(contract.get("route_source") or DEFAULT_ROUTE_SOURCE)]
+    route_sources = [
+        source if source.is_absolute() else root / source
+        for source in route_sources
+    ]
 
     violations: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -127,7 +143,7 @@ def validate_remote_web_feature_contract(
                 }
             )
 
-    source_routes = scan_app_routes(source_path)
+    source_routes = scan_route_sources(route_sources)
     contract_routes, duplicates = _contract_routes(contract)
     for duplicate in duplicates:
         violations.append({"reason": "duplicate route in contract", **duplicate})
@@ -154,7 +170,8 @@ def validate_remote_web_feature_contract(
     return {
         "ok": not violations,
         "contract": str(contract_file),
-        "route_source": str(source_path),
+        "route_source": str(route_sources[0]),
+        "route_sources": [str(source) for source in route_sources],
         "feature_count": len(contract.get("feature_groups", [])),
         "contract_route_count": len(contract_routes),
         "source_route_count": len(source_routes),

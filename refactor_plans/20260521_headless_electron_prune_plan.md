@@ -98,7 +98,7 @@ After each round:
 - [x] `PromptProcessor` hook execution이 run-scoped metadata를 받을 수 있게 하고 기존 hook point와 priority를 유지한다.
 - [ ] Hook trace, warning, derived prompt/params를 prompt run에 기록할 수 있게 한다.
 - [x] `HeadlessGenerationService` generation request가 source prompt run id를 참조하게 한다.
-- [ ] Queue snapshot, generation result, history event, websocket payload가 id link를 보존하게 한다.
+- [x] Queue snapshot, generation result, history event, websocket payload가 id link를 보존하게 한다.
 - [ ] `current_prompt_context`, `current_source_row`, `last_generation_request`, `last_generation_params`는 compatibility mirror로만 쓰이도록 호출부를 분류한다.
 - [x] Multi-tab Remote Web에서 같은 prompt run/generation request 상태를 id로 조회 또는 재수신할 수 있게 한다.
 - [ ] Existing hook modules: Prompt Engineering, Conditional Prompt, Reference Inset의 behavior를 focused tests로 고정한다.
@@ -116,6 +116,7 @@ After each round:
 - Random prompt websocket payloads, preset generation payloads, and direct generation dispatches carry `prompt_run_id`/`promptRunId`.
 - Event preset and composite preset prompt-preview routes now record preview prompt runs before generation.
 - `/api/pipeline/prompt-runs` and `/api/pipeline/prompt-runs/{prompt_run_id}` expose prompt runs for multi-tab lookup.
+- Headless result image metadata, history list items, history metadata, and `viewer_new_image` websocket events preserve `prompt_run_id` and `generation_request_id`.
 - `release_assets/manifests/remote_web_feature_contract.json` documents the pipeline lookup routes.
 - Required validation: `python tools/check_remote_web_feature_contract.py`.
 

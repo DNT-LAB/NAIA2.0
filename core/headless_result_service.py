@@ -133,6 +133,7 @@ class HeadlessResultStore:
             "thumb_url": f"/api/history/thumb/{item.history_id}",
             "image_url": f"/api/history/image/{item.history_id}",
             "metadata_url": f"/api/history/meta/{item.history_id}",
+            **self._history_pipeline_ids(item),
         }
 
     def history_list(self, page: int = 0, per_page: int = 30) -> dict[str, Any]:
@@ -176,7 +177,9 @@ class HeadlessResultStore:
         item = self.get_item(history_id)
         if item is None:
             raise FileNotFoundError("History item not found")
-        return result_images.history_item_meta_payload(item, include_full=include_full)
+        payload = result_images.history_item_meta_payload(item, include_full=include_full)
+        payload.update(self._history_pipeline_ids(item))
+        return payload
 
     def viewer_new_image_payload(self, item: HeadlessHistoryItem) -> dict[str, Any]:
         payload = self.history_summary(item, index=0)
@@ -212,6 +215,14 @@ class HeadlessResultStore:
         if payload.get("artist_thumb_request") and not payload.get("artist_thumb_artist"):
             payload["artist_thumb_artist"] = str(params.get("_remote_queue_label") or "")
         return payload
+
+    @staticmethod
+    def _history_pipeline_ids(item: HeadlessHistoryItem) -> dict[str, str]:
+        params = item.generation_params if isinstance(item.generation_params, dict) else {}
+        return {
+            "prompt_run_id": str(params.get("prompt_run_id") or ""),
+            "generation_request_id": str(params.get("generation_request_id") or ""),
+        }
 
     def _build_metadata_payload(self, item: HeadlessHistoryItem, image_meta: dict[str, Any]) -> dict[str, Any]:
         summary = {

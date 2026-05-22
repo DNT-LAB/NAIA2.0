@@ -1826,6 +1826,8 @@ def test_headless_generate_executes_result_store_and_history_without_imagewindow
         final_state = ws.receive_json()
 
     assert dispatched["ok"] is True
+    prompt_run_id = dispatched["prompt_run_id"]
+    generation_request_id = dispatched["generation_request_id"]
     assert queued_status["message"] == "queued"
     assert queued_state["total"] == 1
     assert running_status == {"type": "status", "is_generating": True, "message": "generating"}
@@ -1835,10 +1837,14 @@ def test_headless_generate_executes_result_store_and_history_without_imagewindow
     assert image_meta["width"] == 16
     assert image_meta["height"] == 12
     assert image_meta["prompt"] == "result prompt"
+    assert image_meta["prompt_run_id"] == prompt_run_id
+    assert image_meta["generation_request_id"] == generation_request_id
     assert webp_bytes.startswith(b"RIFF")
     assert history_message["type"] == "viewer_new_image"
     assert history_message["rel_path"].startswith("__history_item__/")
     assert history_message["total"] == 1
+    assert history_message["prompt_run_id"] == prompt_run_id
+    assert history_message["generation_request_id"] == generation_request_id
     assert final_state["type"] == "queue_state"
     assert final_state["total"] == 0
     assert context.main_window is None
@@ -1859,6 +1865,8 @@ def test_headless_generate_executes_result_store_and_history_without_imagewindow
     history_payload = history.json()
     assert history_payload["total"] == 1
     history_id = history_payload["images"][0]["history_id"]
+    assert history_payload["images"][0]["prompt_run_id"] == prompt_run_id
+    assert history_payload["images"][0]["generation_request_id"] == generation_request_id
 
     thumb = client.get(f"/api/history/thumb/{history_id}")
     assert thumb.status_code == 200
@@ -1871,6 +1879,8 @@ def test_headless_generate_executes_result_store_and_history_without_imagewindow
     meta = client.get(f"/api/history/meta/{history_id}?full=true")
     assert meta.status_code == 200
     assert meta.json()["prompt"] == "result prompt"
+    assert meta.json()["prompt_run_id"] == prompt_run_id
+    assert meta.json()["generation_request_id"] == generation_request_id
 
 
 def test_headless_result_asset_viewer_and_metadata_routes_are_server_owned(tmp_path):

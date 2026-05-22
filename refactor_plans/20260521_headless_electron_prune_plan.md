@@ -280,6 +280,13 @@ After each round:
 - A regression can be assigned to a feature owner and route/UI smoke, not to a vague Desktop/Web mismatch.
 - Packaged and source modes both have accepted smoke coverage.
 
+### Source-Mode Non-Destructive Smoke Slice - 2026-05-22
+
+- `release_assets/manifests/remote_web_smoke_contract.json` now covers the safe source-mode route surface for setup/API status, install-manager state, pipeline prompt-run lookup, queue state and invalid action handling, per-mode resolution state, prompt-highlight and tag lookup, Event/Clothes/Expression bootstrap state, Danbooru internal browser handoff, Thumb/Artist/Character viewer probes, history/viewer empty state, headless-retired result actions, and empty img2img/inpaint/Vibe image-action guards.
+- `tools/smoke_remote_web_contract.py` now supports JSON subset and top-level key assertions, so smoke checks can verify headless contracts such as `{"headless": true}`, `{"ok": true}`, `{"type": "queue_state"}`, and `{"type": "pipeline_runs"}` instead of only checking HTTP status.
+- The slice intentionally avoids external network lookup, real NovelAI/WebUI/ComfyUI generation, download start actions, and destructive file operations. Those remain in the live/packaged Round 6 checklist items.
+- Required validation for this slice: `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6`, `python -B tools\check_remote_web_feature_contract.py`, `python -B tools\check_project_layout_policy.py`, and `python -B tools\check_refactor_plan_execution_contract.py`.
+
 ## Round 7 - Legacy Quarantine Hardening
 
 ### Checklist

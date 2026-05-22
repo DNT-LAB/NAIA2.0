@@ -60,7 +60,27 @@ def _run_http_check(client: TestClient, check: dict[str, Any]) -> dict[str, Any]
         response = client.request(method, path, json=payload)
         status = response.status_code
         ok = status in expected
-        return {
+        json_error = ""
+        observed_json = None
+        if ok and ("expected_json_subset" in check or "expected_json_keys" in check):
+            try:
+                observed_json = response.json()
+            except Exception as exc:
+                ok = False
+                json_error = f"response was not JSON: {exc}"
+            if ok and "expected_json_subset" in check:
+                ok, json_error = _json_contains(observed_json, check.get("expected_json_subset"))
+            if ok and "expected_json_keys" in check:
+                keys = check.get("expected_json_keys") or []
+                missing = [
+                    str(key)
+                    for key in keys
+                    if not isinstance(observed_json, dict) or key not in observed_json
+                ]
+                if missing:
+                    ok = False
+                    json_error = f"missing JSON keys: {', '.join(missing)}"
+        result = {
             "feature": check.get("feature", path),
             "method": method,
             "path": path,
@@ -68,6 +88,9 @@ def _run_http_check(client: TestClient, check: dict[str, Any]) -> dict[str, Any]
             "status": status,
             "ok": ok,
         }
+        if json_error:
+            result["error"] = json_error
+        return result
     except Exception as exc:
         return {
             "feature": check.get("feature", path),
@@ -78,6 +101,32 @@ def _run_http_check(client: TestClient, check: dict[str, Any]) -> dict[str, Any]
             "ok": False,
             "error": str(exc),
         }
+
+
+def _json_contains(actual: Any, expected: Any, path: str = "$") -> tuple[bool, str]:
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            return False, f"{path} is not an object"
+        for key, expected_value in expected.items():
+            if key not in actual:
+                return False, f"{path}.{key} missing"
+            ok, error = _json_contains(actual.get(key), expected_value, f"{path}.{key}")
+            if not ok:
+                return ok, error
+        return True, ""
+    if isinstance(expected, list):
+        if not isinstance(actual, list):
+            return False, f"{path} is not an array"
+        if len(actual) < len(expected):
+            return False, f"{path} has fewer items than expected"
+        for index, expected_value in enumerate(expected):
+            ok, error = _json_contains(actual[index], expected_value, f"{path}[{index}]")
+            if not ok:
+                return ok, error
+        return True, ""
+    if actual != expected:
+        return False, f"{path} expected {expected!r}, got {actual!r}"
+    return True, ""
 
 
 def _run_websocket_check(client: TestClient, check: dict[str, Any]) -> dict[str, Any]:

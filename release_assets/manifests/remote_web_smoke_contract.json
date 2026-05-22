@@ -4,6 +4,7 @@
   "scope": "non-destructive Remote Web smoke checks for staged backend resources",
   "notes": [
     "This contract intentionally avoids NovelAI/WebUI/ComfyUI generation dispatch and external network side effects.",
+    "Non-destructive checks cover the route surfaces needed by Remote Web panels; live image generation and external APIs remain separate validation.",
     "Full packaged-app validation must still test Generate, Enhance, img2img, Vibe Transfer, Character Reference, Artist Thumb, and setup/API workflows with real runtime credentials or controlled test doubles."
   ],
   "http_checks": [
@@ -29,36 +30,89 @@
       "feature": "setup_api_status",
       "method": "GET",
       "path": "/api/status",
-      "expected_status": [200]
+      "expected_status": [200],
+      "expected_json_keys": ["is_generating", "api_mode", "autocomplete"]
+    },
+    {
+      "feature": "install_manager_state",
+      "method": "GET",
+      "path": "/api/install-manager",
+      "expected_status": [200],
+      "expected_json_subset": {"ok": true}
     },
     {
       "feature": "headless_capabilities",
       "method": "GET",
       "path": "/api/headless/capabilities",
-      "expected_status": [200]
+      "expected_status": [200],
+      "expected_json_subset": {"headless": true}
+    },
+    {
+      "feature": "pipeline_prompt_runs",
+      "method": "GET",
+      "path": "/api/pipeline/prompt-runs?limit=3",
+      "expected_status": [200],
+      "expected_json_subset": {"type": "pipeline_runs"}
     },
     {
       "feature": "queue_state",
       "method": "GET",
       "path": "/api/queue/state",
-      "expected_status": [200]
+      "expected_status": [200],
+      "expected_json_subset": {"type": "queue_state"}
+    },
+    {
+      "feature": "queue_action_invalid",
+      "method": "POST",
+      "path": "/api/queue/action",
+      "json": {"action": "unsupported"},
+      "expected_status": [400],
+      "expected_json_keys": ["error"]
     },
     {
       "feature": "params_resolutions",
       "method": "GET",
       "path": "/api/resolutions",
-      "expected_status": [200]
+      "expected_status": [200],
+      "expected_json_subset": {"ok": true}
+    },
+    {
+      "feature": "params_resolutions_comfyui",
+      "method": "GET",
+      "path": "/api/resolutions?mode=COMFYUI",
+      "expected_status": [200],
+      "expected_json_subset": {"ok": true, "api_mode": "COMFYUI"}
     },
     {
       "feature": "prompt_tools_highlight_index",
       "method": "GET",
       "path": "/api/prompt-highlight-index",
+      "expected_status": [200],
+      "expected_json_subset": {"version": "headless-empty"}
+    },
+    {
+      "feature": "prompt_tools_tag_lookup",
+      "method": "GET",
+      "path": "/api/tag/lookup?tag=1girl",
       "expected_status": [200]
+    },
+    {
+      "feature": "prompt_engineering_missing_thumbnail",
+      "method": "GET",
+      "path": "/api/prompt-engineering/preset-thumbnail?name=__naia_smoke_missing__",
+      "expected_status": [404],
+      "expected_json_keys": ["error"]
     },
     {
       "feature": "event_preset_status",
       "method": "GET",
       "path": "/api/event-preset/status",
+      "expected_status": [200]
+    },
+    {
+      "feature": "event_preset_download_state",
+      "method": "GET",
+      "path": "/api/event-preset/download",
       "expected_status": [200]
     },
     {
@@ -74,10 +128,38 @@
       "expected_status": [200]
     },
     {
+      "feature": "clothes_preset_bootstrap_empty",
+      "method": "POST",
+      "path": "/api/clothes-preset/bootstrap",
+      "json": {},
+      "expected_status": [200]
+    },
+    {
       "feature": "expression_preset_status",
       "method": "GET",
       "path": "/api/expression-preset/status",
       "expected_status": [200]
+    },
+    {
+      "feature": "expression_preset_bootstrap_empty",
+      "method": "POST",
+      "path": "/api/expression-preset/bootstrap",
+      "json": {},
+      "expected_status": [200]
+    },
+    {
+      "feature": "danbooru_internal_browser_handoff",
+      "method": "POST",
+      "path": "/api/danbooru/browser/open",
+      "json": {"query": "rating:g"},
+      "expected_status": [200],
+      "expected_json_subset": {"ok": true, "headless": true}
+    },
+    {
+      "feature": "style_thumb_state",
+      "method": "GET",
+      "path": "/api/thumb/state",
+      "expected_status": [200, 404]
     },
     {
       "feature": "artist_thumb_state",
@@ -86,9 +168,33 @@
       "expected_status": [200]
     },
     {
+      "feature": "artist_thumb_list_probe",
+      "method": "GET",
+      "path": "/api/artist-thumb/list?mode=NAI&page=0&per_page=1",
+      "expected_status": [200, 404]
+    },
+    {
+      "feature": "artist_thumb_download_state",
+      "method": "GET",
+      "path": "/api/artist-thumb/download",
+      "expected_status": [200]
+    },
+    {
       "feature": "character_viewer_state",
       "method": "GET",
       "path": "/api/character-viewer/state",
+      "expected_status": [200]
+    },
+    {
+      "feature": "character_viewer_groups_probe",
+      "method": "GET",
+      "path": "/api/character-viewer/groups?query=",
+      "expected_status": [200]
+    },
+    {
+      "feature": "character_viewer_list_probe",
+      "method": "GET",
+      "path": "/api/character-viewer/list?page=0&per_page=1",
       "expected_status": [200]
     },
     {
@@ -102,6 +208,34 @@
       "method": "GET",
       "path": "/api/viewer/list",
       "expected_status": [200]
+    },
+    {
+      "feature": "history_unsaved_download_empty",
+      "method": "GET",
+      "path": "/api/history/unsaved/download",
+      "expected_status": [404],
+      "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "result_asset_current_empty",
+      "method": "GET",
+      "path": "/api/result/asset/current",
+      "expected_status": [404],
+      "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "result_image_png_empty",
+      "method": "GET",
+      "path": "/api/result/image/png",
+      "expected_status": [404],
+      "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "clipboard_headless_unavailable",
+      "method": "GET",
+      "path": "/api/clipboard/png",
+      "expected_status": [404],
+      "expected_json_subset": {"headless": true}
     },
     {
       "feature": "comfyui_workflow_state",
@@ -126,6 +260,48 @@
       "method": "GET",
       "path": "/api/result/metadata",
       "expected_status": [404]
+    },
+    {
+      "feature": "result_open_location_headless",
+      "method": "POST",
+      "path": "/api/result/open-location",
+      "expected_status": [400],
+      "expected_json_subset": {"headless": true}
+    },
+    {
+      "feature": "result_action_save_retired",
+      "method": "POST",
+      "path": "/api/result/action/save",
+      "expected_status": [400],
+      "expected_json_subset": {"headless": true}
+    },
+    {
+      "feature": "result_action_delete_retired",
+      "method": "POST",
+      "path": "/api/result/action/delete",
+      "expected_status": [400],
+      "expected_json_subset": {"headless": true}
+    },
+    {
+      "feature": "image_action_img2img_empty",
+      "method": "POST",
+      "path": "/api/image-action/img2img?label=Smoke",
+      "expected_status": [400],
+      "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "image_action_inpaint_empty",
+      "method": "POST",
+      "path": "/api/image-action/inpaint?label=Smoke",
+      "expected_status": [400],
+      "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "image_action_vibe_empty",
+      "method": "POST",
+      "path": "/api/image-action/vibe?label=Smoke",
+      "expected_status": [400],
+      "expected_json_keys": ["error"]
     }
   ],
   "websocket_checks": [

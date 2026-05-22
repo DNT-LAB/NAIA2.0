@@ -33,6 +33,7 @@ from app.backend.server.params_workflow_routes import register_params_workflow_r
 from app.backend.server.prompt_tools_routes import (
     register_prompt_tools_routes,
     save_prompt_engineering_thumbnail_bytes,
+    tag_lookup_info,
 )
 from app.backend.server.state_routes import register_state_routes
 from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
@@ -1266,72 +1267,6 @@ def _metadata_for_disk_image(path: Path, label: str = "", include_full: bool = F
     return payload
 
 
-def _tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
-    raw_tags = getattr(context, "kr_tags_raw", None)
-    if not isinstance(raw_tags, dict) or not raw_tags:
-        from core.kr_tag_loader import load_kr_tag_records
-        from core.tag_relation_ranker import TagRelationRanker
-
-        load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
-        raw_tags = load_result.raw
-        context.kr_tags_raw = raw_tags
-        context.tag_relation_ranker = TagRelationRanker(raw_tags) if raw_tags else None
-    if not raw_tags:
-        return {}
-    tag_lower = re.sub(r"\\([()])", r"\1", str(tag or "").strip()).lower()
-    info = raw_tags.get(tag_lower)
-    if not info:
-        return {}
-    result = {
-        "tag": info.get("_tag", tag),
-        "count": info.get("freq", 0),
-        "desc": info.get("description", ""),
-        "group": info.get("group", ""),
-        "subgroup": info.get("subgroup", ""),
-        "cat": info.get("_cat", ""),
-    }
-    relations = info.get("relations", {}) if isinstance(info.get("relations"), dict) else {}
-    parents = relations.get("parent", [])
-    if isinstance(parents, str):
-        parents = [parents]
-    ranker = getattr(context, "tag_relation_ranker", None)
-    if ranker is not None:
-        parents = ranker.valid_implications(tag_lower, info, limit=8)
-    if parents:
-        result["implications"] = parents[:8]
-    if ranker is not None:
-        related = ranker.rank_related(tag_lower, info, limit=8)
-    else:
-        related = []
-        seen = set(parents)
-        for relation_key in ("siblings", "word_match"):
-            values = relations.get(relation_key, [])
-            if isinstance(values, str):
-                values = [values]
-            for value in values:
-                if value not in seen:
-                    seen.add(value)
-                    related.append(value)
-    if related:
-        result["related"] = related[:8]
-    extra_info = {}
-    for extra_tag in list(result.get("implications", [])) + list(result.get("related", [])):
-        extra = raw_tags.get(str(extra_tag).strip().lower())
-        if not extra:
-            continue
-        extra_info[str(extra_tag)] = {
-            "tag": extra.get("_tag", str(extra_tag)),
-            "count": extra.get("freq", 0),
-            "desc": extra.get("description", ""),
-            "group": extra.get("group", ""),
-            "subgroup": extra.get("subgroup", ""),
-            "cat": extra.get("_cat", ""),
-        }
-    if extra_info:
-        result["extra_tag_info"] = extra_info
-    return result
-
-
 async def _handle_random_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -1855,7 +1790,7 @@ async def _handle_json_command(
             "preset": payload.get("preset") or {},
         }, ensure_ascii=False))
     elif command_type == "tag_lookup":
-        info = await _to_thread(_tag_lookup_info, context, str(command.get("tag") or ""))
+        info = await _to_thread(tag_lookup_info, context, str(command.get("tag") or ""))
         await ws.send_text(json.dumps({"type": "tag_lookup_result", **info}, ensure_ascii=False))
     elif command_type == "get_depth_state":
         await ws.send_text(json.dumps(_depth_payload(context), ensure_ascii=False))
@@ -2195,13 +2130,6 @@ def create_headless_app(
         clients=app.state.headless_clients,
         start_generation_runner=_ensure_generation_runner,
     )
-
-    @app.get("/api/tag/lookup")
-    async def api_tag_lookup(tag: str = ""):
-        try:
-            return await _to_thread(_tag_lookup_info, session_context, tag)
-        except Exception as exc:
-            return JSONResponse({"error": f"Tag lookup failed: {exc}"}, status_code=500)
 
     @app.get("/api/latest-image")
     async def api_latest_image():

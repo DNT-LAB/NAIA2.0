@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -48,6 +49,81 @@ def _generation_service(context: WebSessionContext) -> HeadlessGenerationService
 
 def _image_media_type_for_path(image_path: str | Path) -> str:
     return result_images.image_media_type_for_path(image_path)
+
+
+def _tag_data_roots(context: WebSessionContext) -> list[Path]:
+    roots: list[Path] = []
+    runtime_paths = getattr(context, "runtime_paths", None)
+    if runtime_paths is not None:
+        roots.append(runtime_paths.data_dir)
+    roots.append(Path(context.repo_root) / "data")
+    return roots
+
+
+def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
+    raw_tags = getattr(context, "kr_tags_raw", None)
+    if not isinstance(raw_tags, dict) or not raw_tags:
+        from core.kr_tag_loader import load_kr_tag_records
+        from core.tag_relation_ranker import TagRelationRanker
+
+        load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
+        raw_tags = load_result.raw
+        context.kr_tags_raw = raw_tags
+        context.tag_relation_ranker = TagRelationRanker(raw_tags) if raw_tags else None
+    if not raw_tags:
+        return {}
+    tag_lower = re.sub(r"\\([()])", r"\1", str(tag or "").strip()).lower()
+    info = raw_tags.get(tag_lower)
+    if not info:
+        return {}
+    result = {
+        "tag": info.get("_tag", tag),
+        "count": info.get("freq", 0),
+        "desc": info.get("description", ""),
+        "group": info.get("group", ""),
+        "subgroup": info.get("subgroup", ""),
+        "cat": info.get("_cat", ""),
+    }
+    relations = info.get("relations", {}) if isinstance(info.get("relations"), dict) else {}
+    parents = relations.get("parent", [])
+    if isinstance(parents, str):
+        parents = [parents]
+    ranker = getattr(context, "tag_relation_ranker", None)
+    if ranker is not None:
+        parents = ranker.valid_implications(tag_lower, info, limit=8)
+    if parents:
+        result["implications"] = parents[:8]
+    if ranker is not None:
+        related = ranker.rank_related(tag_lower, info, limit=8)
+    else:
+        related = []
+        seen = set(parents)
+        for relation_key in ("siblings", "word_match"):
+            values = relations.get(relation_key, [])
+            if isinstance(values, str):
+                values = [values]
+            for value in values:
+                if value not in seen:
+                    seen.add(value)
+                    related.append(value)
+    if related:
+        result["related"] = related[:8]
+    extra_info = {}
+    for extra_tag in list(result.get("implications", [])) + list(result.get("related", [])):
+        extra = raw_tags.get(str(extra_tag).strip().lower())
+        if not extra:
+            continue
+        extra_info[str(extra_tag)] = {
+            "tag": extra.get("_tag", str(extra_tag)),
+            "count": extra.get("freq", 0),
+            "desc": extra.get("description", ""),
+            "group": extra.get("group", ""),
+            "subgroup": extra.get("subgroup", ""),
+            "cat": extra.get("_cat", ""),
+        }
+    if extra_info:
+        result["extra_tag_info"] = extra_info
+    return result
 
 
 def _preview_candidates(context: WebSessionContext, preset_name: str, mode: str = "") -> list[Path]:
@@ -205,6 +281,13 @@ def register_prompt_tools_routes(
             media_type="application/json",
             headers=_no_cache_headers(),
         )
+
+    @app.get("/api/tag/lookup")
+    async def api_tag_lookup(tag: str = ""):
+        try:
+            return await run_in_thread(tag_lookup_info, session_context, tag)
+        except Exception as exc:
+            return JSONResponse({"error": f"Tag lookup failed: {exc}"}, status_code=500)
 
     @app.get("/api/prompt-engineering/preset-thumbnail")
     async def api_prompt_engineering_preset_thumbnail(name: str = "", mode: str = "", v: str = ""):

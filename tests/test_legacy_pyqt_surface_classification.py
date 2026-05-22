@@ -16,6 +16,7 @@ def test_legacy_pyqt_surface_classification_accepts_current_manifest():
 
     assert payload["ok"] is True
     assert payload["surface_count"] == len(REQUIRED_SURFACE_IDS)
+    assert payload["unclassified_product_legacy_imports"] == []
     assert payload["violations"] == []
 
 

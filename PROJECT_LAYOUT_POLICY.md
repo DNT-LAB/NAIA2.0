@@ -178,5 +178,6 @@ Layout and runtime-boundary changes should keep these checks passing:
 - `python tools/check_runtime_asset_classification.py`
 - `python tools/check_runtime_write_policy.py`
 - `python tools/check_remote_web_feature_contract.py`
+- `python tools/check_legacy_pyqt_surface_classification.py`
 
 Electron-specific gates are release-maintainer checks, not normal clone-user startup requirements.

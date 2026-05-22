@@ -152,10 +152,10 @@ After each round:
 - `rg 'from core\.context import AppContext|app_context: .AppContext|core\.context' core/api_service.py core/prompt_processor.py core/prompt_generation_service.py core/mode_ware_manager.py core -g '*.py'` returns no remaining matches in the targeted headless core files.
 - `utils/image_bytes.py` now owns pure PNG/PIL byte conversion without importing Qt; `utils/clipboard_image.py` remains the Qt clipboard adapter and reuses that helper.
 - `interfaces/headless_module_protocol.py` and `interfaces/legacy_module_protocol.py` now separate headless hook/module contracts from legacy widget module contracts; `base_module.py` and `base_tab_module.py` are documented as legacy widget adapters and no longer type against `core.context.AppContext`.
-- `GenerationParamsManager` moved to `legacy_desktop/utils/load_generation_params.py`; the root `utils/load_generation_params.py` is now a lazy compatibility shim that does not import `legacy_desktop` during module import.
+- `GenerationParamsManager` moved to `legacy_desktop/utils/load_generation_params.py`; the old root `utils/load_generation_params.py` compatibility shim was removed in Round 7 after repo-wide reference checks.
 - `tabs/comic_generator_tab.py` is now explicitly classified as the root compatibility entry for the legacy Comic Generator surface and is excluded alongside `tabs/comic_generator/**`.
 - `core/kr_tag_loader.py` no longer reads `legacy_desktop/ui/interactive/interactive` by default; callers must opt into `allow_legacy_interactive_fallback=True` for source-mode migration reads.
-- Required validation for this slice: `python -m py_compile core\api_service.py core\prompt_processor.py core\prompt_generation_service.py core\mode_ware_manager.py core\kr_tag_loader.py utils\image_bytes.py utils\clipboard_image.py utils\load_generation_params.py legacy_desktop\utils\load_generation_params.py interfaces\base_module.py interfaces\base_tab_module.py interfaces\headless_module_protocol.py interfaces\legacy_module_protocol.py`, focused prompt/headless tests, `tests\test_requirements_split.py`, `tests\test_kr_tag_loader.py`, `tests\test_image_bytes.py`, `tests\test_vibe_transfer_clipboard.py`, and legacy surface classification gates.
+- Required validation for this slice: `python -m py_compile core\api_service.py core\prompt_processor.py core\prompt_generation_service.py core\mode_ware_manager.py core\kr_tag_loader.py utils\image_bytes.py utils\clipboard_image.py legacy_desktop\utils\load_generation_params.py interfaces\base_module.py interfaces\base_tab_module.py interfaces\headless_module_protocol.py interfaces\legacy_module_protocol.py`, focused prompt/headless tests, `tests\test_requirements_split.py`, `tests\test_kr_tag_loader.py`, `tests\test_image_bytes.py`, `tests\test_vibe_transfer_clipboard.py`, and legacy surface classification gates.
 
 ## Round 4 - Split the Headless Monolith by Feature Owner
 
@@ -336,6 +336,13 @@ After each round:
 - Normal source and packaged runtime cannot accidentally import Desktop app code.
 - Legacy Desktop can still be inspected historically, but it no longer shapes active product architecture.
 - The remaining source tree communicates supported runtime boundaries by directory structure.
+
+### Legacy Import Quarantine Gate Slice - 2026-05-22
+
+- `tools/check_legacy_pyqt_surface_classification.py` now scans git-tracked Python files for direct `PyQt6`/`PySide`/`qtpy`/`legacy_desktop`/`NAIA_cold_v4` imports and reports any product-path import not covered by the legacy desktop root, classified desktop-only surfaces, classified desktop tests, or `headless_core_boundary.json`.
+- The unused root `utils/load_generation_params.py` lazy compatibility shim was removed; legacy desktop callers use `legacy_desktop/utils/load_generation_params.py` directly.
+- `tools/measure_autocomplete_fallback_cost.py`, which directly imports `legacy_desktop.core.remote_api_server`, was moved under `legacy_desktop/tools/` so it is explicitly reference-only and release-excluded through `legacy_desktop/**`.
+- Current validation: `python -B tools\check_legacy_pyqt_surface_classification.py` reports no unclassified product legacy imports.
 
 ## Round 8 - Packaging and Release Hardening
 

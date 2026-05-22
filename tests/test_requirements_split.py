@@ -266,24 +266,6 @@ def test_headless_and_legacy_module_protocols_are_qt_free():
     assert LegacyTabWidgetModule is not None
 
 
-def test_load_generation_params_shim_does_not_import_legacy_desktop_on_import():
-    env = dict(os.environ)
-    env["PYTHONPATH"] = os.getcwd()
-    code = r"""
-import importlib
-import json
-import sys
-
-importlib.import_module("utils.load_generation_params")
-print(json.dumps({"legacy_desktop_imported": "legacy_desktop" in sys.modules}))
-"""
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=os.getcwd(),
-        env=env,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-
-    assert json.loads(result.stdout) == {"legacy_desktop_imported": False}
+def test_generation_params_manager_has_no_root_legacy_shim():
+    assert not Path("utils/load_generation_params.py").exists()
+    assert Path("legacy_desktop/utils/load_generation_params.py").is_file()

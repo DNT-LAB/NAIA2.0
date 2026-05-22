@@ -417,7 +417,6 @@ def _supported_import_boundary_payload() -> dict[str, Any]:
         Path("core/mode_ware_manager.py"),
         Path("core/tag_data_manager.py"),
         Path("core/dll_fix.py"),
-        Path("utils/load_generation_params.py"),
     }
     sources: list[Path] = []
     for root in roots:

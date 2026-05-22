@@ -57,6 +57,11 @@ from app.backend.server.search_commands import (
     SEARCH_COMMAND_TYPES,
     handle_search_command,
 )
+from app.backend.server.session_commands import (
+    SESSION_COMMAND_TYPES,
+    handle_session_command,
+    send_sync_messages,
+)
 from app.backend.server.state_routes import register_state_routes
 from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
 from app.backend.server.web_shell_routes import register_web_shell_routes
@@ -96,19 +101,6 @@ async def _send_startup_messages(
     ):
         await ws.send_text(json.dumps(message, ensure_ascii=False))
     await ws.send_text(json.dumps({"type": "lazy_indices_ready"}))
-
-
-async def _send_sync_messages(ws: WebSocket, context: WebSessionContext, client_host: str) -> None:
-    messages = [
-        {"type": "mode", "mode": context.get_api_mode()},
-        {"type": "options", **context.get_options()},
-        context.generation_param_schema_payload(),
-        context.queue_state_payload(),
-        context.api_status_payload(client_host),
-        {"type": "lazy_indices_ready"},
-    ]
-    for message in messages:
-        await ws.send_text(json.dumps(message, ensure_ascii=False))
 
 
 async def _broadcast_json(clients: set[WebSocket], data: dict[str, Any]) -> None:
@@ -395,56 +387,15 @@ async def _handle_json_command(
     command: dict[str, Any],
 ) -> None:
     command_type = str(command.get("type") or "").strip()
-    if command_type == "sync":
-        await _send_sync_messages(ws, context, client_host)
-    elif command_type == "set_option":
-        context.set_option(str(command.get("key") or ""), command.get("value"))
-        await _broadcast_json(clients, {"type": "options", **context.get_options()})
-    elif command_type == "set_mode":
-        requested_mode = str(command.get("mode") or "").strip().upper()
-        if requested_mode not in {"NAI", "WEBUI", "COMFYUI"}:
-            await ws.send_text(json.dumps({
-                "type": "mode_result",
-                "success": False,
-                "mode": requested_mode,
-                "message": f"Unknown mode: {requested_mode}",
-            }, ensure_ascii=False))
-            return
-        token_key = {
-            "NAI": "nai_token",
-            "WEBUI": "webui_url",
-            "COMFYUI": "comfyui_url",
-        }[requested_mode]
-        if not str(context.secure_token_manager.get_token(token_key) or ""):
-            await ws.send_text(json.dumps({
-                "type": "mode_result",
-                "success": False,
-                "mode": requested_mode,
-                "message": f"{requested_mode} API is not connected",
-            }, ensure_ascii=False))
-            await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
-            return
-        context.set_api_mode(requested_mode)
-        await _broadcast_json(clients, {
-            "type": "mode_result",
-            "success": True,
-            "mode": context.get_api_mode(),
-            "message": f"{context.get_api_mode()} mode active",
-        })
-        await _broadcast_json(clients, {"type": "mode", "mode": context.get_api_mode()})
-        await _broadcast_json(clients, context.generation_param_schema_payload())
-        await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
-    elif command_type == "set_prompt":
-        context.prompt_text = str(command.get("prompt") or "")
-        context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
-        await ws.send_text(json.dumps({
-            "type": "prompt_sync",
-            "prompt": context.prompt_text,
-            "negative": context.negative_prompt_text,
-        }, ensure_ascii=False))
-    elif command_type == "set_param":
-        context.set_param(str(command.get("key") or ""), command.get("value"))
-        await _broadcast_json(clients, context.generation_param_schema_payload())
+    if command_type in SESSION_COMMAND_TYPES:
+        await handle_session_command(
+            ws,
+            context,
+            clients,
+            client_host,
+            command,
+            broadcast_json=_broadcast_json,
+        )
     elif command_type in SEARCH_COMMAND_TYPES:
         await handle_search_command(
             ws,
@@ -523,7 +474,7 @@ async def _handle_text_command(
     data: str,
 ) -> None:
     if data == "sync":
-        await _send_sync_messages(ws, context, client_host)
+        await send_sync_messages(ws, context, client_host)
         return
     if data == "random":
         await _handle_random_command(ws, context)

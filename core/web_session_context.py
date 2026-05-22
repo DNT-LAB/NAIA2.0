@@ -233,6 +233,7 @@ class WebSessionContext:
     _headless_event_stream_service: Any = field(default=None, init=False, repr=False)
     _headless_prompt_engineering_service: Any = field(default=None, init=False, repr=False)
     _headless_conditional_prompt_service: Any = field(default=None, init=False, repr=False)
+    _headless_character_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -373,6 +374,15 @@ class WebSessionContext:
 
             service = HeadlessConditionalPromptService(self)
             self._headless_conditional_prompt_service = service
+        return service
+
+    def _character_service(self):
+        service = self._headless_character_service
+        if service is None:
+            from core.headless_character_service import HeadlessCharacterService
+
+            service = HeadlessCharacterService(self)
+            self._headless_character_service = service
         return service
 
     def _default_token_manager(self) -> TokenStore:
@@ -1017,72 +1027,10 @@ class WebSessionContext:
         return self._conditional_prompt_service().set_param(key, value)
 
     def _character_module_state(self) -> dict[str, Any]:
-        from core.character_settings import character_state_from_settings, load_character_settings
-
-        mode = self.get_api_mode()
-        settings = self._character_settings_cache()
-        if settings is None:
-            settings = load_character_settings(
-                mode,
-                path=self._existing_save_path(f"CharacterModule_{str(mode or 'NAI').upper()}.json"),
-            )
-            self._character_settings_by_mode()[mode] = settings
-        state = character_state_from_settings(settings, app_context=self, mode=mode)
-        state["available"] = True
-        state["headless"] = True
-        return state
+        return self._character_service().state()
 
     def _set_character_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        mode = self.get_api_mode()
-        settings = self._character_settings_cache()
-        frames = settings.setdefault("character_frames", [])
-        if key == "activated":
-            settings["is_active"] = self._coerce_bool(value)
-        elif key == "reroll_on_generate":
-            settings["reroll_on_generate"] = self._coerce_bool(value)
-        elif key == "add_character":
-            frames.append({"prompt": "", "uc": "", "is_enabled": True, "slot_state": "active", "custom_name": ""})
-        elif key == "preview_refresh":
-            pass
-        elif key.startswith("remove_character_"):
-            index = self._index_from_key(key, "remove_character_")
-            if index is not None and 0 <= index < len(frames) and len(frames) > 1:
-                frames.pop(index)
-        elif key.startswith("char_prompt_"):
-            index = self._index_from_key(key, "char_prompt_")
-            if index is not None:
-                self._ensure_character_frame(frames, index)["prompt"] = str(value or "")
-        elif key.startswith("char_uc_"):
-            index = self._index_from_key(key, "char_uc_")
-            if index is not None:
-                self._ensure_character_frame(frames, index)["uc"] = str(value or "")
-        elif key.startswith("char_active_"):
-            index = self._index_from_key(key, "char_active_")
-            if index is not None:
-                frame = self._ensure_character_frame(frames, index)
-                active = self._coerce_bool(value)
-                frame["is_enabled"] = active
-                frame["slot_state"] = "active" if active else "inactive"
-        elif key.startswith("char_slot_state_"):
-            index = self._index_from_key(key, "char_slot_state_")
-            if index is not None:
-                frame = self._ensure_character_frame(frames, index)
-                requested = str(value or "").strip().lower()
-                if requested == "restore":
-                    requested = str(frame.get("return_slot_state") or "inactive")
-                if requested in {"active", "inactive", "cold"}:
-                    if requested == "cold":
-                        frame["return_slot_state"] = str(frame.get("slot_state") or "inactive")
-                    frame["slot_state"] = requested
-                    frame["is_enabled"] = requested == "active"
-        elif key.startswith("char_slot_name_"):
-            index = self._index_from_key(key, "char_slot_name_")
-            if index is not None:
-                self._ensure_character_frame(frames, index)["custom_name"] = str(value or "")
-        else:
-            return None
-        self._save_character_settings(mode, settings)
-        return self._character_module_state()
+        return self._character_service().set_param(key, value)
 
     def _current_model_key(self) -> str:
         model = str(self.remote_params.get("model") or "NAID4.5F").strip()
@@ -2082,36 +2030,13 @@ class WebSessionContext:
         }
 
     def _character_settings_by_mode(self) -> dict[str, dict[str, Any]]:
-        cache = getattr(self, "_character_settings_state", None)
-        if not isinstance(cache, dict):
-            cache = {}
-            self._character_settings_state = cache
-        return cache
+        return self._character_service().settings_by_mode()
 
     def _character_settings_cache(self) -> dict[str, Any]:
-        from core.character_settings import load_character_settings
-
-        mode = self.get_api_mode()
-        cache = self._character_settings_by_mode()
-        if mode not in cache:
-            cache[mode] = load_character_settings(
-                mode,
-                path=self._existing_save_path(f"CharacterModule_{str(mode or 'NAI').upper()}.json"),
-            )
-        return cache[mode]
+        return self._character_service().settings_cache()
 
     def _save_character_settings(self, mode: str, settings: dict[str, Any]) -> None:
-        from core.character_settings import normalize_character_settings
-
-        mode_key = str(mode or "NAI").upper()
-        normalized = normalize_character_settings(settings)
-        self._character_settings_by_mode()[mode_key] = normalized
-        path = self._save_path(f"CharacterModule_{mode_key}.json")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({mode_key: normalized}, ensure_ascii=False, indent=4),
-            encoding="utf-8",
-        )
+        self._character_service().save_settings(mode, settings)
 
     @staticmethod
     def _index_from_key(key: str, prefix: str) -> int | None:
@@ -2122,13 +2047,9 @@ class WebSessionContext:
 
     @staticmethod
     def _ensure_character_frame(frames: list[dict[str, Any]], index: int) -> dict[str, Any]:
-        while len(frames) <= index:
-            frames.append({"prompt": "", "uc": "", "is_enabled": False, "slot_state": "inactive", "custom_name": ""})
-        frame = frames[index]
-        if not isinstance(frame, dict):
-            frame = {"prompt": "", "uc": "", "is_enabled": False, "slot_state": "inactive", "custom_name": ""}
-            frames[index] = frame
-        return frame
+        from core.headless_character_service import HeadlessCharacterService
+
+        return HeadlessCharacterService.ensure_frame(frames, index)
 
     @staticmethod
     def _normalized_webui_hiresfix_assist_state(raw: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -226,6 +226,33 @@ def _clear_comfyui_workflow(context: WebSessionContext) -> dict[str, Any]:
     }
 
 
+def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, action: str, filename: str) -> dict[str, Any]:
+    if action not in {"load", "merge"}:
+        raise ValueError("action must be load or merge")
+    safe_filename = Path(str(filename or "uploaded.parquet")).name
+    if not safe_filename.lower().endswith(".parquet"):
+        raise ValueError("Only .parquet files are supported")
+    if not content:
+        raise ValueError("Uploaded parquet is empty")
+
+    import pandas as pd
+
+    frame = pd.read_parquet(io.BytesIO(content))
+    if action == "load":
+        context.search_results.set_dataframe(frame)
+    else:
+        context.search_results.append_dataframe(frame)
+    context.search_results_snapshot = context.search_results.get_dataframe().copy()
+    context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
+    return {
+        "ok": True,
+        "action": action,
+        "filename": safe_filename,
+        "rows": int(len(frame)),
+        "total": int(context.search_results.get_count()),
+    }
+
+
 def register_params_workflow_routes(
     app: FastAPI,
     session_context: WebSessionContext,
@@ -256,6 +283,20 @@ def register_params_workflow_routes(
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         await broadcast_json(clients, session_context.generation_param_schema_payload())
+        return result
+
+    @app.post("/api/search/parquet/upload")
+    async def api_search_parquet_upload(req: Request):
+        action = str(req.query_params.get("action") or "").strip().lower()
+        filename = str(req.query_params.get("filename") or "uploaded.parquet")
+        content = await req.body()
+        try:
+            result = await run_in_thread(_apply_uploaded_search_parquet, session_context, content, action, filename)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Parquet upload failed: {exc}"}, status_code=400)
+        await broadcast_json(clients, session_context.search_state_payload())
         return result
 
     @app.get("/api/comfyui/workflow/state")

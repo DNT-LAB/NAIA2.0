@@ -151,33 +151,6 @@ def _generation_service(context: WebSessionContext) -> HeadlessGenerationService
     return service
 
 
-def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, action: str, filename: str) -> dict[str, Any]:
-    if action not in {"load", "merge"}:
-        raise ValueError("action must be load or merge")
-    safe_filename = Path(str(filename or "uploaded.parquet")).name
-    if not safe_filename.lower().endswith(".parquet"):
-        raise ValueError("Only .parquet files are supported")
-    if not content:
-        raise ValueError("Uploaded parquet is empty")
-
-    import pandas as pd
-
-    frame = pd.read_parquet(io.BytesIO(content))
-    if action == "load":
-        context.search_results.set_dataframe(frame)
-    else:
-        context.search_results.append_dataframe(frame)
-    context.search_results_snapshot = context.search_results.get_dataframe().copy()
-    context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
-    return {
-        "ok": True,
-        "action": action,
-        "filename": safe_filename,
-        "rows": int(len(frame)),
-        "total": int(context.search_results.get_count()),
-    }
-
-
 def _rating_counts_from_frame(frame: Any) -> dict[str, int]:
     if frame is None or getattr(frame, "empty", True) or "rating" not in frame.columns:
         return {rating: 0 for rating in "gsqe"}
@@ -2248,20 +2221,6 @@ def create_headless_app(
         clients=app.state.headless_clients,
         start_generation_runner=_ensure_generation_runner,
     )
-
-    @app.post("/api/search/parquet/upload")
-    async def api_search_parquet_upload(req: Request):
-        action = str(req.query_params.get("action") or "").strip().lower()
-        filename = str(req.query_params.get("filename") or "uploaded.parquet")
-        content = await req.body()
-        try:
-            result = await _to_thread(_apply_uploaded_search_parquet, session_context, content, action, filename)
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        except Exception as exc:
-            return JSONResponse({"error": f"Parquet upload failed: {exc}"}, status_code=400)
-        await _broadcast_json(app.state.headless_clients, session_context.search_state_payload())
-        return result
 
     @app.get("/api/tag/lookup")
     async def api_tag_lookup(tag: str = ""):

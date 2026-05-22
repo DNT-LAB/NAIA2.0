@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import copy
 from contextlib import asynccontextmanager
 import json
 import asyncio
-import io
-import math
 import uuid
 from pathlib import Path
 from typing import Any
@@ -51,7 +48,10 @@ from app.backend.server.prompt_tools_routes import (
 )
 from app.backend.server.result_display_routes import (
     register_result_display_routes,
-    resolve_result_image_action_source,
+)
+from app.backend.server.result_commands import (
+    RESULT_COMMAND_TYPES,
+    handle_result_command,
 )
 from app.backend.server.search_commands import (
     SEARCH_COMMAND_TYPES,
@@ -164,253 +164,8 @@ def _generation_service(context: WebSessionContext) -> HeadlessGenerationService
     return service
 
 
-def _clamp_result_enhance_number(value: Any, minimum: float, maximum: float, fallback: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return fallback
-    return min(maximum, max(minimum, number))
-
-
-def _coerce_result_enhance_bool(value: Any, fallback: bool = False) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return fallback
-    text = str(value).strip().lower()
-    if text in {"1", "true", "yes", "on"}:
-        return True
-    if text in {"0", "false", "no", "off"}:
-        return False
-    return fallback
-
-
-def _normalize_result_enhance_config(
-    context: WebSessionContext,
-    payload: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    payload = payload if isinstance(payload, dict) else {}
-    current = context.result_enhance_config if isinstance(context.result_enhance_config, dict) else {}
-    upscale_value = payload.get("upscale", current.get("upscale", 1.5))
-    try:
-        upscale = 1.0 if abs(float(upscale_value) - 1.0) < 0.01 else 1.5
-    except (TypeError, ValueError):
-        upscale = 1.5
-    strength = round(
-        _clamp_result_enhance_number(payload.get("strength", current.get("strength", 0.2)), 0.1, 0.9, 0.2),
-        1,
-    )
-    noise = round(
-        _clamp_result_enhance_number(payload.get("noise", current.get("noise", 0.0)), 0.0, 0.1, 0.0),
-        1,
-    )
-    return {
-        "type": "result_enhance_config",
-        "upscale": upscale,
-        "strength": strength,
-        "noise": noise,
-        "available": True,
-        "headless": True,
-    }
-
-
-def _normalize_webui_result_enhance_hires_settings(
-    context: WebSessionContext,
-    payload: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    payload = payload if isinstance(payload, dict) else {}
-    payload_settings = payload.get("hires_settings") if isinstance(payload.get("hires_settings"), dict) else {}
-    merged = {**dict(context.remote_params or {}), **payload_settings}
-    return {
-        "enable_hr": True,
-        "hr_scale": round(_clamp_result_enhance_number(merged.get("hr_scale"), 1.0, 4.0, 2.0), 1),
-        "hr_upscaler": str(merged.get("hr_upscaler") or "Latent (nearest-exact)").strip() or "Latent (nearest-exact)",
-        "denoising_strength": round(
-            _clamp_result_enhance_number(merged.get("denoising_strength"), 0.0, 1.0, 0.5),
-            2,
-        ),
-        "hires_steps": int(_clamp_result_enhance_number(merged.get("hires_steps"), 0, 150, 10)),
-        "hr_cfg": round(_clamp_result_enhance_number(merged.get("hr_cfg"), 0.0, 30.0, 7.0), 1),
-        "webui_hiresfix_assist": _coerce_result_enhance_bool(merged.get("webui_hiresfix_assist"), False),
-        "webui_hiresfix_assist_target": 768
-            if str(merged.get("webui_hiresfix_assist_target") or "").strip() == "768"
-            else 512,
-    }
-
-
-def _round_result_enhance_size(value: float) -> int:
-    return max(64, int(math.ceil(float(value) / 64.0) * 64))
-
-
-def _result_enhance_dimension(value: Any, fallback: int) -> int:
-    try:
-        number = int(float(value))
-    except (TypeError, ValueError):
-        return int(fallback)
-    return max(1, number)
-
-
-def _apply_webui_result_enhance_size_policy(
-    context: WebSessionContext,
-    params: dict[str, Any],
-    base_w: int,
-    base_h: int,
-) -> tuple[int, int, float]:
-    payload = {"width": base_w, "height": base_h}
-    scale = _clamp_result_enhance_number(params.get("hr_scale"), 1.0, 4.0, 2.0)
-    try:
-        from core.api_service import APIService
-
-        if params.get("webui_hiresfix_assist"):
-            payload["width"], payload["height"] = APIService._nearest_hiresfix_assist_resolution(
-                payload["width"],
-                payload["height"],
-                params.get("webui_hiresfix_assist_target", 512),
-            )
-            service = getattr(context, "api_service", None) or APIService(context)
-            scale = service._fit_webui_hiresfix_assist_scale(payload, scale)
-    except Exception:
-        payload = {"width": base_w, "height": base_h}
-    payload_w = _result_enhance_dimension(payload.get("width"), base_w)
-    payload_h = _result_enhance_dimension(payload.get("height"), base_h)
-    scale = round(_clamp_result_enhance_number(scale, 1.0, 4.0, 2.0), 1)
-    params["width"] = payload_w
-    params["height"] = payload_h
-    params["hr_scale"] = scale
-    new_w = max(1, int(math.floor((payload_w * scale) + 0.5)))
-    new_h = max(1, int(math.floor((payload_h * scale) + 0.5)))
-    return new_w, new_h, scale
-
-
-def _prompt_from_result_context(
-    context: WebSessionContext,
-    params: dict[str, Any],
-    prompt_context: dict[str, Any],
-) -> None:
-    if not params.get("input"):
-        prompt = (
-            prompt_context.get("main_prompt")
-            or prompt_context.get("final_prompt")
-            or prompt_context.get("prompt")
-            or context.prompt_text
-            or ""
-        )
-        params["input"] = str(prompt)
-    params["_raw_input"] = str(params.get("_raw_input") or params.get("input") or "")
-    if not params.get("negative_prompt"):
-        params["negative_prompt"] = str(
-            prompt_context.get("negative_prompt")
-            or prompt_context.get("uc")
-            or context.negative_prompt_text
-            or ""
-        )
-
-
-def _prepare_result_enhance_command(
-    context: WebSessionContext,
-    payload: dict[str, Any] | None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    from PIL import Image
-    from utils.webui_generation_info import extract_webui_seed
-
-    payload = payload if isinstance(payload, dict) else {}
-    current_mode = str(context.get_api_mode() or "").upper()
-    requested_mode = str(payload.get("mode") or "").upper()
-    if current_mode not in {"NAI", "WEBUI"}:
-        raise RuntimeError("Enhance is available in NAI or WEBUI mode only")
-    mode = current_mode
-    if requested_mode in {"NAI", "WEBUI"} and requested_mode != current_mode:
-        raise RuntimeError("Enhance mode changed; refresh the result selection")
-
-    image_bytes, label, generation_params, prompt_context = resolve_result_image_action_source(context, payload)
-    if not generation_params:
-        raise RuntimeError("Generation parameters are unavailable")
-    with Image.open(io.BytesIO(image_bytes)) as image:
-        orig_w, orig_h = image.size
-    params = copy.deepcopy(generation_params)
-    _prompt_from_result_context(context, params, prompt_context)
-    for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
-        params.pop(key, None)
-
-    if mode == "NAI":
-        config = _normalize_result_enhance_config(context, payload)
-        upscale = float(config["upscale"])
-        new_w, new_h = (orig_w, orig_h) if upscale == 1.0 else (
-            _round_result_enhance_size(orig_w * 1.5),
-            _round_result_enhance_size(orig_h * 1.5),
-        )
-        params.update({
-            "image_bytes": image_bytes,
-            "strength": float(config["strength"]),
-            "noise": float(config["noise"]),
-            "width": new_w,
-            "height": new_h,
-            "api_mode": "NAI",
-            "result_enhance_request": True,
-            "result_enhance_backend": "NAI",
-            "result_enhance_upscale": upscale,
-            "result_enhance_strength": float(config["strength"]),
-            "result_enhance_source_size": [orig_w, orig_h],
-            "result_enhance_preview_size": [new_w, new_h],
-            "_remote_queue_source": "NAI Enhance",
-            "_remote_queue_label": label,
-        })
-        params.pop("type", None)
-        params.pop("mask_bytes", None)
-        params.pop("_skip_vibe_transfer_late_binding", None)
-        message = "Enhance queued"
-    else:
-        hires_settings = _normalize_webui_result_enhance_hires_settings(context, payload)
-        params.pop("type", None)
-        params.pop("image_bytes", None)
-        params.pop("mask_bytes", None)
-        params.pop("strength", None)
-        params.pop("noise", None)
-        base_w = _result_enhance_dimension(params.get("width"), orig_w)
-        base_h = _result_enhance_dimension(params.get("height"), orig_h)
-        seed = extract_webui_seed(params)
-        if seed is None:
-            raise RuntimeError("WEBUI result seed is unavailable; cannot reproduce source image for Enhance")
-        params.update({
-            **hires_settings,
-            "width": base_w,
-            "height": base_h,
-            "seed": seed,
-            "seed_fixed": True,
-            "random_resolution": False,
-            "resolution_preset_enabled": False,
-            "resolution": f"{base_w} x {base_h}",
-            "api_mode": "WEBUI",
-            "result_enhance_request": True,
-            "result_enhance_backend": "WEBUI",
-            "result_enhance_source_size": [orig_w, orig_h],
-            "_remote_queue_source": "WEBUI Enhance",
-            "_remote_queue_label": label,
-        })
-        new_w, new_h, upscale = _apply_webui_result_enhance_size_policy(context, params, base_w, base_h)
-        params.update({
-            "result_enhance_upscale": upscale,
-            "result_enhance_strength": params.get("denoising_strength", 0.5),
-            "result_enhance_hr_upscaler": params.get("hr_upscaler", ""),
-            "result_enhance_hires_steps": params.get("hires_steps", 10),
-            "result_enhance_hr_cfg": params.get("hr_cfg", 7.0),
-            "result_enhance_preview_size": [new_w, new_h],
-        })
-        message = "Enhance queued"
-
-    return {
-        "type": "generate",
-        "api_mode": mode,
-        "overrides": params,
-    }, {
-        "type": "result_enhance_state",
-        "running": True,
-        "message": message,
-        "api_mode": mode,
-        "source_size": [orig_w, orig_h],
-        "preview_size": params.get("result_enhance_preview_size", [orig_w, orig_h]),
-        "headless": True,
-    }
+async def _enqueue_result_generation_request(context: WebSessionContext, command: dict[str, Any]) -> Any:
+    return await _to_thread(_generation_service(context).enqueue_remote_request, command)
 
 
 async def _handle_random_command(
@@ -738,117 +493,16 @@ async def _handle_json_command(
             enqueue_prompt_from_module=_enqueue_prompt_from_module,
             enqueue_generation_commands=_enqueue_headless_generation_commands,
         )
-    elif command_type == "result_enhance":
-        try:
-            generation_command, enhance_state = await _to_thread(_prepare_result_enhance_command, context, command)
-            result = await _to_thread(_generation_service(context).enqueue_remote_request, generation_command)
-        except Exception as exc:
-            message = f"Enhance request failed: {exc}"
-            await ws.send_text(json.dumps({
-                "type": "result_enhance_state",
-                "running": False,
-                "success": False,
-                "message": message,
-                "headless": True,
-            }, ensure_ascii=False))
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "level": "error",
-                "message": message,
-                "headless": True,
-            }, ensure_ascii=False))
-            return
-        await ws.send_text(json.dumps(result.websocket_payload(), ensure_ascii=False))
-        if not result.ok:
-            await ws.send_text(json.dumps({
-                "type": "result_enhance_state",
-                "running": False,
-                "success": False,
-                "message": result.blocked_reason,
-                "headless": True,
-            }, ensure_ascii=False))
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "level": "error",
-                "message": result.blocked_reason,
-                "headless": True,
-            }, ensure_ascii=False))
-            return
-        await ws.send_text(json.dumps(enhance_state, ensure_ascii=False))
-        await ws.send_text(json.dumps({
-            "type": "status",
-            "is_generating": False,
-            "message": "queued",
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "success",
-            "message": "Enhance queued",
-        }, ensure_ascii=False))
-        await ws.send_text(json.dumps(context.queue_state_payload(), ensure_ascii=False))
-        if context.headless_generation_execute_enabled:
-            _ensure_generation_runner(context, clients)
-    elif command_type == "set_result_enhance_config":
-        config = _normalize_result_enhance_config(context, command)
-        context.result_enhance_config = {
-            "upscale": config["upscale"],
-            "strength": config["strength"],
-            "noise": config["noise"],
-        }
-        await ws.send_text(json.dumps({**config, "_session_echo": True}, ensure_ascii=False))
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "success",
-            "message": "Enhance settings updated",
-            "headless": True,
-        }, ensure_ascii=False))
-    elif command_type == "result_image_action":
-        action = str(command.get("action") or "image_action")
-        if action not in {"img2img", "inpaint"}:
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "level": "error",
-                "message": "Unsupported result image action",
-                "headless": True,
-            }, ensure_ascii=False))
-            return
-        if context.get_api_mode() != "NAI":
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "level": "error",
-                "message": "Img2Img/Inpaint is available in NAI mode only",
-                "headless": True,
-            }, ensure_ascii=False))
-            return
-        try:
-            image_bytes, label, generation_params, prompt_context = await _to_thread(
-                resolve_result_image_action_source,
-                context,
-                command,
-            )
-            state = await _to_thread(
-                context.open_img2img_session_from_bytes,
-                image_bytes,
-                label=label,
-                mode=action,
-                generation_params=generation_params,
-                prompt_context=prompt_context,
-            )
-        except Exception as exc:
-            await ws.send_text(json.dumps({
-                "type": "toast",
-                "level": "error",
-                "message": f"Image action failed: {exc}",
-                "headless": True,
-            }, ensure_ascii=False))
-            return
-        await ws.send_text(json.dumps(state, ensure_ascii=False))
-        await ws.send_text(json.dumps({
-            "type": "toast",
-            "level": "success",
-            "message": f"{'Inpaint' if action == 'inpaint' else 'Img2Img'} session ready",
-            "headless": True,
-        }, ensure_ascii=False))
+    elif command_type in RESULT_COMMAND_TYPES:
+        await handle_result_command(
+            ws,
+            context,
+            clients,
+            command,
+            run_in_thread=_to_thread,
+            enqueue_generation_request=_enqueue_result_generation_request,
+            start_generation_runner=_ensure_generation_runner,
+        )
     elif command_type == "random":
         await _handle_random_command(ws, context, command)
     elif command_type == "generate":

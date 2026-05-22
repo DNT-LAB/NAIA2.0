@@ -295,6 +295,14 @@ After each round:
 - Warmed random prompt latency is guarded at `max_latency_ms: 200`; current validation observed sub-24ms random round trips in the TestClient smoke.
 - Required validation for this slice: `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6_ws`, plus the Remote Web feature, layout, and refactor-plan contract gates.
 
+### Source-Mode Module WebSocket Surface Slice - 2026-05-22
+
+- `release_assets/manifests/remote_web_smoke_contract.json` now verifies safe module websocket state for Prompt Engineering, Conditional Prompt, Character Reference, Vibe Transfer, Img2Img, Auto Save, Save Directory, retired Wildcard Status, and an unknown module fallback.
+- Character Reference and Vibe Transfer storage-list actions are covered through `set_module_param(..., "get_storage", "")` without uploading, applying, deleting, or encoding images.
+- The module smoke confirms headless `module_state` payload ownership and retired/unavailable module responses without relying on PyQt6 Desktop widgets.
+- Current validation exposed storage scan latency as a follow-up performance/path-boundary candidate: Character Reference storage list took hundreds of ms and Vibe Transfer storage list was also noticeably slower than plain state reads in the source-mode TestClient smoke.
+- Required validation for this slice: `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6_module`, plus syntax and policy gates.
+
 ## Round 7 - Legacy Quarantine Hardening
 
 ### Checklist

@@ -451,6 +451,216 @@
           ]
         }
       ]
+    },
+    {
+      "feature": "module_surface_states",
+      "path": "/ws",
+      "expected_initial_types": [
+        "session",
+        "desktop_window_state",
+        "mode",
+        "options",
+        "params",
+        "queue_state",
+        "api_status",
+        "init_complete",
+        "lazy_indices_ready"
+      ],
+      "commands": [
+        {
+          "name": "module_prompt_engineering_state",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "prompt_engineering"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "prompt_engineering",
+                "headless": true
+              },
+              "expected_json_keys": ["state", "preset_options"]
+            }
+          ]
+        },
+        {
+          "name": "module_conditional_prompt_state",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "conditional_prompt"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "conditional_prompt",
+                "headless": true
+              },
+              "expected_json_keys": ["state", "enabled", "editor_mode"]
+            }
+          ]
+        },
+        {
+          "name": "module_character_reference_state",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "character_reference"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "character_reference",
+                "headless": true
+              },
+              "expected_json_keys": ["state", "frames"]
+            }
+          ]
+        },
+        {
+          "name": "module_character_reference_storage",
+          "send_json": {
+            "type": "set_module_param",
+            "module_id": "character_reference",
+            "key": "get_storage",
+            "value": ""
+          },
+          "expected_messages": [
+            {
+              "type": "storage_list",
+              "expected_json_subset": {
+                "module_id": "character_reference"
+              },
+              "expected_json_keys": ["items"]
+            }
+          ]
+        },
+        {
+          "name": "module_vibe_transfer_state",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "vibe_transfer"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "vibe_transfer",
+                "headless": true
+              },
+              "expected_json_keys": ["state", "frames", "frame_count"]
+            }
+          ]
+        },
+        {
+          "name": "module_vibe_transfer_storage",
+          "send_json": {
+            "type": "set_module_param",
+            "module_id": "vibe_transfer",
+            "key": "get_storage",
+            "value": ""
+          },
+          "expected_messages": [
+            {
+              "type": "storage_list",
+              "expected_json_subset": {
+                "module_id": "vibe_transfer"
+              },
+              "expected_json_keys": ["models", "current_model"]
+            }
+          ]
+        },
+        {
+          "name": "module_img2img_state",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "img2img"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "img2img",
+                "headless": true,
+                "active": false
+              },
+              "expected_json_keys": ["state"]
+            }
+          ]
+        },
+        {
+          "name": "module_auto_save_state",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "auto_save"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "auto_save",
+                "headless": true
+              },
+              "expected_json_keys": ["state", "auto_save", "unsaved_history_count"]
+            }
+          ]
+        },
+        {
+          "name": "module_save_directory_state",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "save_directory"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "save_directory",
+                "headless": true,
+                "control_allowed": true
+              },
+              "expected_json_keys": ["state", "current_save_directory"]
+            }
+          ]
+        },
+        {
+          "name": "module_wildcard_status_retired",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "wildcard_status"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "wildcard_status",
+                "headless": true,
+                "retired": true
+              },
+              "expected_json_keys": ["state", "message"]
+            }
+          ]
+        },
+        {
+          "name": "module_unknown_unavailable",
+          "send_json": {
+            "type": "get_module_state",
+            "module_id": "__missing_module__"
+          },
+          "expected_messages": [
+            {
+              "type": "module_state",
+              "expected_json_subset": {
+                "module_id": "__missing_module__",
+                "available": false,
+                "headless": true
+              },
+              "expected_json_keys": ["state"]
+            }
+          ]
+        }
+      ]
     }
   ]
 }

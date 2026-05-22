@@ -9,7 +9,6 @@ import asyncio
 import base64
 import io
 import math
-import mimetypes
 import time
 import re
 import uuid
@@ -19,7 +18,6 @@ from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
 
 from app.backend.server.artist_thumbnail_routes import register_artist_thumbnail_routes
 from app.backend.server.character_viewer_routes import register_character_viewer_routes
@@ -38,6 +36,7 @@ from app.backend.server.prompt_tools_routes import (
 )
 from app.backend.server.state_routes import register_state_routes
 from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
+from app.backend.server.web_shell_routes import register_web_shell_routes
 from app.web import resolve_remote_web_dir
 from core import result_image_payload_service as result_images
 from core.headless_generation_service import HeadlessGenerationService
@@ -62,12 +61,6 @@ def _client_host(ws: WebSocket) -> str:
 
 def _no_cache_headers() -> dict[str, str]:
     return {"Cache-Control": "no-store, max-age=0"}
-
-
-def _web_file(path: Path, media_type: str):
-    if not path.exists():
-        return JSONResponse({"error": "not found"}, status_code=404)
-    return FileResponse(str(path), media_type=media_type, headers=_no_cache_headers())
 
 
 async def _send_startup_messages(
@@ -2152,26 +2145,7 @@ def create_headless_app(
         else resolve_remote_web_dir(session_context.repo_root)
     )
     app.state.remote_web_dir = str(root_web_dir)
-    mimetypes.add_type("text/javascript", ".mjs")
-
-    js_dir = root_web_dir / "js"
-    if js_dir.exists():
-        app.mount("/js", StaticFiles(directory=str(js_dir)), name="remote_js")
-    guides_dir = root_web_dir / "guides"
-    if guides_dir.exists():
-        app.mount("/guides", StaticFiles(directory=str(guides_dir), html=True), name="remote_guides")
-
-    @app.get("/")
-    async def index():
-        return _web_file(root_web_dir / "index.html", "text/html")
-
-    @app.get("/style.css")
-    async def serve_css():
-        return _web_file(root_web_dir / "style.css", "text/css")
-
-    @app.get("/app.js")
-    async def serve_js():
-        return _web_file(root_web_dir / "app.js", "application/javascript")
+    register_web_shell_routes(app, root_web_dir)
 
     register_state_routes(
         app,

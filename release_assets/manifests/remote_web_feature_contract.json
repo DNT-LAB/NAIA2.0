@@ -13,7 +13,8 @@
     "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_tools_routes.py",
     "app/backend/server/state_routes.py",
-    "app/backend/server/style_thumbnail_routes.py"
+    "app/backend/server/style_thumbnail_routes.py",
+    "app/backend/server/web_shell_routes.py"
   ],
   "legacy_dependency_policy": {
     "none": "Feature is implemented by the headless backend without desktop imports.",
@@ -45,7 +46,7 @@
       "id": "web_shell",
       "name": "Remote Web shell",
       "source_files": [
-        "core/web_session_app.py",
+        "app/backend/server/web_shell_routes.py",
         "app/web/assets.py",
         "app/web/remote/index.html",
         "app/web/remote/style.css",

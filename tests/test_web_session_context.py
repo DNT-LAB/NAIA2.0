@@ -3,11 +3,21 @@ import os
 import subprocess
 import sys
 
+import pandas as pd
+
 from core.web_session_context import (
     AutocompleteRuntimeState,
     InMemoryTokenManager,
     WebSessionContext,
 )
+
+
+class _EmptyWildcardManager:
+    def __init__(self):
+        self.wildcard_dict_tree = {}
+        self.instant_wildcard_tree = {}
+        self.instant_wildcard_dict = {}
+        self._app_context_ref = None
 
 
 def test_web_session_context_constructs_without_importing_pyqt_in_fresh_process():
@@ -183,6 +193,18 @@ def test_web_session_context_tracks_prompt_runs_and_generation_links():
         module="ExampleHook",
         status="completed",
     )
+    ctx.record_prompt_run_warning(run.prompt_run_id, "sample warning")
+    ctx.record_prompt_run_derived(
+        run.prompt_run_id,
+        {
+            "generation_params": {
+                "credential": "hidden",
+                "width": 832,
+                "_raw_input": "internal prompt mirror",
+                "nested": {"token": "hidden", "safe": True},
+            }
+        },
+    )
     ctx.complete_prompt_run(run.prompt_run_id, final_prompt="alpha, beta")
     ctx.link_generation_to_prompt_run(run.prompt_run_id, "gen-1")
 
@@ -194,11 +216,60 @@ def test_web_session_context_tracks_prompt_runs_and_generation_links():
     assert payload["status"] == "completed"
     assert payload["final_prompt"] == "alpha, beta"
     assert payload["generation_request_ids"] == ["gen-1"]
+    assert payload["warnings"] == ["sample warning"]
+    assert payload["derived"]["final_prompt"] == "alpha, beta"
+    assert payload["derived"]["generation_params"]["width"] == 832
+    assert "credential" not in payload["derived"]["generation_params"]
+    assert "_raw_input" not in payload["derived"]["generation_params"]
+    assert payload["derived"]["generation_params"]["nested"] == {"safe": True}
     assert payload["hook_trace"][0]["hook_point"] == "after_wildcard"
     assert payload["hook_trace"][0]["module"] == "ExampleHook"
     assert payload["settings"]["api_mode"] == "NAI"
     assert "credential" not in payload["settings"]
     assert payload["source_row"]["general"] == "alpha, beta"
+
+
+def test_prompt_processor_records_headless_hook_trace_on_prompt_run():
+    from core.prompt_context import PromptContext
+    from core.prompt_processor import PromptProcessor
+    from core.reference_inset_service import ReferenceInsetAutoInjectHook
+
+    ctx = WebSessionContext(
+        token_manager=InMemoryTokenManager(),
+        wildcard_manager=_EmptyWildcardManager(),
+    )
+    run = ctx.start_prompt_run(
+        source="test",
+        source_row={"general": "1girl, smile", "rating": "s"},
+        settings={"api_mode": "NAI", "reference_inset_tag_required": True},
+    )
+    prompt_context = PromptContext(
+        source_row=pd.Series({"general": "1girl, smile", "rating": "s"}),
+        settings={"api_mode": "NAI", "reference_inset_tag_required": True},
+        main_tags=["1girl", "smile"],
+        metadata={"prompt_run_id": run.prompt_run_id},
+    )
+    ctx.current_prompt_context = prompt_context
+    ctx.register_pipeline_hook(
+        ReferenceInsetAutoInjectHook(ctx).get_pipeline_hook_info(),
+        ReferenceInsetAutoInjectHook(ctx),
+    )
+
+    result = PromptProcessor(ctx).process()
+    ctx.complete_prompt_run(run.prompt_run_id, context=result)
+    payload = ctx.get_prompt_run_payload(run.prompt_run_id, include_source_row=True)
+
+    assert result is prompt_context
+    assert "reference inset" in result.final_prompt
+    assert payload["status"] == "completed"
+    assert len(payload["hook_trace"]) == 1
+    assert payload["hook_trace"][0]["hook_point"] == "final_hookpoint"
+    assert payload["hook_trace"][0]["module"] == "Reference Inset Auto-Inject"
+    assert payload["hook_trace"][0]["status"] == "completed"
+    assert "error" not in payload["hook_trace"][0]
+    assert payload["hook_trace"][0]["timestamp"]
+    assert payload["metadata"]["prompt_run_id"] == run.prompt_run_id
+    assert payload["source_row"]["general"] == "1girl, smile"
 
 
 def test_web_session_context_uses_runtime_paths_for_default_writable_state(tmp_path):

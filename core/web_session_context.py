@@ -406,6 +406,20 @@ class WebSessionContext:
             error=error,
         )
 
+    def record_prompt_run_warning(
+        self,
+        prompt_run_id: str,
+        warning: str,
+    ) -> PromptPipelineRun | None:
+        return self.pipeline_run_registry.record_warning(prompt_run_id, warning)
+
+    def record_prompt_run_derived(
+        self,
+        prompt_run_id: str,
+        derived: dict[str, Any] | None,
+    ) -> PromptPipelineRun | None:
+        return self.pipeline_run_registry.record_derived(prompt_run_id, derived)
+
     def link_generation_to_prompt_run(
         self,
         prompt_run_id: str,

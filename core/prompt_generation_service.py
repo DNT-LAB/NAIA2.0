@@ -214,6 +214,15 @@ class PromptGenerationService:
         if result.error:
             self._fail_context_run(context, result.error)
             return
+        derived_recorder = getattr(self.app_context, "record_prompt_run_derived", None)
+        if callable(derived_recorder):
+            derived_recorder(
+                prompt_run_id,
+                {
+                    "detected_resolution": result.detected_resolution,
+                    "reset_resolution_detected": result.reset_resolution_detected,
+                },
+            )
         completer = getattr(self.app_context, "complete_prompt_run", None)
         if callable(completer):
             completer(prompt_run_id, context=context, final_prompt=result.final_prompt or "")

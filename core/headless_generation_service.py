@@ -42,6 +42,21 @@ SCHEMA_ONLY_KEYS = {
     "nai_flags_enabled",
 }
 
+DERIVED_GENERATION_PARAM_KEYS = (
+    "api_mode",
+    "model",
+    "sampler",
+    "scheduler",
+    "steps",
+    "width",
+    "height",
+    "resolution",
+    "seed",
+    "cfg_scale",
+    "cfg_rescale",
+    "negative_prompt",
+)
+
 
 @dataclass
 class HeadlessGenerationDispatch:
@@ -147,6 +162,15 @@ class HeadlessGenerationService:
             linker = getattr(self.context, "link_generation_to_prompt_run", None)
             if callable(linker):
                 linker(prompt_run_id, request.request_id)
+            derived_recorder = getattr(self.context, "record_prompt_run_derived", None)
+            if callable(derived_recorder):
+                derived_recorder(
+                    prompt_run_id,
+                    {
+                        "generation_request_id": request.request_id,
+                        "generation_params": self._derived_generation_params(params),
+                    },
+                )
         self.context.publish("generation_request_dispatched", {
             "request_id": request.request_id,
             "generation_request_id": request.request_id,
@@ -161,6 +185,14 @@ class HeadlessGenerationService:
             flush=True,
         )
         return HeadlessGenerationDispatch(request=request, api_mode=api_mode)
+
+    @staticmethod
+    def _derived_generation_params(params: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: params.get(key)
+            for key in DERIVED_GENERATION_PARAM_KEYS
+            if key in params
+        }
 
     def execute_request(self, request: GenerationRequest) -> HeadlessStoredResult:
         """Execute one queued request and store its result in server state."""

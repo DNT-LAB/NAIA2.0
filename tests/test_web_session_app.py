@@ -616,6 +616,11 @@ def test_headless_generate_links_to_latest_random_prompt_run():
     assert prompt_run["source"] == "random"
     assert prompt_run["external_request_id"] == "linked-random"
     assert prompt_run["generation_request_ids"] == [request.request_id]
+    assert prompt_run["derived"]["generation_request_id"] == request.request_id
+    assert prompt_run["derived"]["generation_params"]["api_mode"] == "NAI"
+    assert prompt_run["derived"]["generation_params"]["width"] == request.params["width"]
+    assert prompt_run["derived"]["generation_params"]["height"] == request.params["height"]
+    assert "credential" not in prompt_run["derived"]["generation_params"]
 
 
 def test_headless_status_endpoint_uses_web_session_context():

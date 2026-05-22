@@ -96,12 +96,12 @@ After each round:
 - [x] `WebSessionContext` 또는 별도 service에 bounded in-memory pipeline run registry를 추가한다.
 - [x] Random prompt, preset composer, prompt tools preview, direct prompt submit이 prompt run record를 생성하게 한다.
 - [x] `PromptProcessor` hook execution이 run-scoped metadata를 받을 수 있게 하고 기존 hook point와 priority를 유지한다.
-- [ ] Hook trace, warning, derived prompt/params를 prompt run에 기록할 수 있게 한다.
+- [x] Hook trace, warning, derived prompt/params를 prompt run에 기록할 수 있게 한다.
 - [x] `HeadlessGenerationService` generation request가 source prompt run id를 참조하게 한다.
 - [x] Queue snapshot, generation result, history event, websocket payload가 id link를 보존하게 한다.
-- [ ] `current_prompt_context`, `current_source_row`, `last_generation_request`, `last_generation_params`는 compatibility mirror로만 쓰이도록 호출부를 분류한다.
+- [x] `current_prompt_context`, `current_source_row`, `last_generation_request`, `last_generation_params`는 compatibility mirror로만 쓰이도록 호출부를 분류한다.
 - [x] Multi-tab Remote Web에서 같은 prompt run/generation request 상태를 id로 조회 또는 재수신할 수 있게 한다.
-- [ ] Existing hook modules: Prompt Engineering, Conditional Prompt, Reference Inset의 behavior를 focused tests로 고정한다.
+- [x] Existing hook modules: Prompt Engineering, Conditional Prompt, Reference Inset의 behavior를 focused tests로 고정한다.
 
 ### When Done
 
@@ -117,8 +117,17 @@ After each round:
 - Event preset and composite preset prompt-preview routes now record preview prompt runs before generation.
 - `/api/pipeline/prompt-runs` and `/api/pipeline/prompt-runs/{prompt_run_id}` expose prompt runs for multi-tab lookup.
 - Headless result image metadata, history list items, history metadata, and `viewer_new_image` websocket events preserve `prompt_run_id` and `generation_request_id`.
+- Prompt run payloads now expose explicit `warnings` and sanitized `derived` data; completion records derived final prompt and generation dispatch records selected public generation params.
+- `PromptProcessor` integration coverage now verifies a real headless `ReferenceInsetAutoInjectHook` execution is recorded in prompt-run `hook_trace`.
+- Existing focused tests cover Prompt Engineering and Conditional Prompt hook behavior; the new processor-level test closes the Reference Inset gap.
 - `release_assets/manifests/remote_web_feature_contract.json` documents the pipeline lookup routes.
 - Required validation: `python tools/check_remote_web_feature_contract.py`.
+
+### Compatibility Mirror Audit - 2026-05-22
+
+- `current_source_row` and `current_prompt_context` remain AppContext compatibility mirrors for the active prompt-processing call path. `PromptGenerationService` and `PromptProcessor` still need them during a single in-flight prompt run, and legacy-adjacent helpers such as character settings and event-stream runtime still read them. Cross-tab Remote Web state must use `PipelineRunRegistry` through `prompt_run_id` instead.
+- `last_generation_request` and `last_generation_params` remain test/debug and legacy RemoteBridge compatibility mirrors after `HeadlessGenerationService.enqueue_remote_request`. The authoritative queue state is `GenerationQueueManager`/`GenerationRequest.request_id`, and result/history state is owned by `HeadlessResultStore` plus id-bearing websocket/API payloads.
+- New feature work must not add fresh singleton consumers for these four fields. If a route needs durable state, add an id-scoped registry/store lookup first and leave the mirror as a temporary bridge only.
 
 ## Round 3 - Non-Legacy Legacy Import Cleanup
 

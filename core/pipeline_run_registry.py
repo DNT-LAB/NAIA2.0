@@ -74,6 +74,29 @@ def _settings_payload(settings: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _public_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        payload = {}
+        for key, item in value.items():
+            clean_key = str(key)
+            if clean_key.lower() in SENSITIVE_SETTING_KEYS or clean_key.startswith("_"):
+                continue
+            payload[clean_key] = _public_payload(item)
+        return payload
+    if isinstance(value, (list, tuple)):
+        return [_public_payload(item) for item in value]
+    if isinstance(value, set):
+        items = [_public_payload(item) for item in value]
+        return sorted(items, key=lambda item: str(item))
+    return _safe_value(value)
+
+
+def _derived_payload(derived: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(derived, dict):
+        return {}
+    return _public_payload(derived)
+
+
 @dataclass
 class PipelineHookTrace:
     hook_point: str
@@ -106,6 +129,8 @@ class PromptPipelineRun:
     final_prompt: str = ""
     error: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    derived: dict[str, Any] = field(default_factory=dict)
     hook_trace: list[PipelineHookTrace] = field(default_factory=list)
     generation_request_ids: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=_utc_now)
@@ -116,6 +141,7 @@ class PromptPipelineRun:
         self.status = "completed"
         if final_prompt:
             self.final_prompt = final_prompt
+            self.derived["final_prompt"] = _safe_value(final_prompt)
         if metadata:
             self.metadata.update(_safe_value(metadata))
         self.updated_at = _utc_now()
@@ -138,6 +164,18 @@ class PromptPipelineRun:
         ))
         self.updated_at = _utc_now()
 
+    def add_warning(self, warning: str) -> None:
+        clean_warning = str(warning or "").strip()
+        if clean_warning and clean_warning not in self.warnings:
+            self.warnings.append(clean_warning)
+            self.updated_at = _utc_now()
+
+    def update_derived(self, derived: dict[str, Any] | None) -> None:
+        payload = _derived_payload(derived)
+        if payload:
+            self.derived.update(payload)
+            self.updated_at = _utc_now()
+
     def link_generation_request(self, generation_request_id: str) -> None:
         clean_id = str(generation_request_id or "")
         if clean_id and clean_id not in self.generation_request_ids:
@@ -154,6 +192,8 @@ class PromptPipelineRun:
             "final_prompt": self.final_prompt,
             "error": self.error,
             "metadata": _safe_value(self.metadata),
+            "warnings": list(self.warnings),
+            "derived": _safe_value(self.derived),
             "settings": _safe_value(self.settings),
             "hook_trace": [trace.to_payload() for trace in self.hook_trace],
             "generation_request_ids": list(self.generation_request_ids),
@@ -260,6 +300,28 @@ class PipelineRunRegistry:
             if run is None:
                 return None
             run.add_hook_trace(hook_point, module, status, error)
+            self._prompt_runs.move_to_end(run.prompt_run_id)
+            return run
+
+    def record_warning(self, prompt_run_id: str, warning: str) -> PromptPipelineRun | None:
+        with self._lock:
+            run = self._prompt_runs.get(str(prompt_run_id or ""))
+            if run is None:
+                return None
+            run.add_warning(warning)
+            self._prompt_runs.move_to_end(run.prompt_run_id)
+            return run
+
+    def record_derived(
+        self,
+        prompt_run_id: str,
+        derived: dict[str, Any] | None,
+    ) -> PromptPipelineRun | None:
+        with self._lock:
+            run = self._prompt_runs.get(str(prompt_run_id or ""))
+            if run is None:
+                return None
+            run.update_derived(derived)
             self._prompt_runs.move_to_end(run.prompt_run_id)
             return run
 

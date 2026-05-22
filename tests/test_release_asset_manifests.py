@@ -87,6 +87,7 @@ def test_release_manifest_excludes_legacy_and_local_runtime_state():
     assert "**/AGENTS.md" in excluded
     assert "**/CLAUDE.md" in excluded
     assert "**/*.md" in excluded
+    assert "pytest-cache-files-*/**" in excluded
     assert "*.xlsx" in excluded
     assert "PyQt6" in excluded
     assert "PyQt6" in rules

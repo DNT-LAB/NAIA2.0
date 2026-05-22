@@ -160,6 +160,7 @@
         "output/**",
         "tmp/**",
         "tmp_codex_*/**",
+        "pytest-cache-files-*/**",
         "temp/**",
         "user-data/**"
       ],
@@ -172,6 +173,7 @@
         "output/**",
         "tmp/**",
         "tmp_codex_*/**",
+        "pytest-cache-files-*/**",
         "temp/**",
         "user-data/**"
       ],

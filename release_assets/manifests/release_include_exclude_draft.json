@@ -104,6 +104,7 @@
       "**/*.md",
       ".experimental/**",
       ".pytest_cache/**",
+      "pytest-cache-files-*/**",
       "__pycache__/**",
       "app/electron/node_modules/**",
       "venv/**"

@@ -94,8 +94,6 @@ HEADLESS_RETIRED_MODULES = {
     "wildcard_status": "Wildcard Status desktop wrapper is retired in the supported headless runtime.",
     "ollama": "Ollama desktop assistant controls are retired in the supported headless runtime.",
 }
-HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
-
 
 class TokenStore(Protocol):
     def get_token(self, service_key: str) -> str:
@@ -1291,92 +1289,16 @@ class WebSessionContext:
         self._wildcard_service().reload_manager()
 
     def hires_overlay_response(self, preset_name: str) -> dict[str, Any]:
-        name = str(preset_name or "").strip()
-        response = {
-            "type": "hires_preset_overlay",
-            "preset_name": name,
-            "original": {"prefix_prompt": "", "postfix_prompt": "", "negative_prompt": ""},
-            "overlay": None,
-            "editable": False,
-            "available": False,
-            "headless": True,
-        }
-        path = self._hires_overlay_path(name)
-        if path is None:
-            return response
-        response["editable"] = True
-        response["available"] = True
-        preset_path = self._existing_save_path("presets", "WEBUI", f"{name}.json")
-        if preset_path.exists():
-            try:
-                preset_data = json.loads(preset_path.read_text(encoding="utf-8"))
-                module_settings = preset_data.get("module_settings", {}) if isinstance(preset_data, dict) else {}
-                main_settings = preset_data.get("main_settings", {}) if isinstance(preset_data, dict) else {}
-                module_settings = module_settings if isinstance(module_settings, dict) else {}
-                main_settings = main_settings if isinstance(main_settings, dict) else {}
-                response["original"] = {
-                    "prefix_prompt": str(module_settings.get("pre_prompt", "") or ""),
-                    "postfix_prompt": str(module_settings.get("post_prompt", "") or ""),
-                    "negative_prompt": str(
-                        main_settings.get("negative") or main_settings.get("negative_prompt") or ""
-                    ),
-                }
-            except Exception:
-                pass
-        overlay_path = self._existing_save_path("presets", "WEBUI", f"{name}.hires.json")
-        if overlay_path.exists():
-            try:
-                overlay = json.loads(overlay_path.read_text(encoding="utf-8"))
-                if isinstance(overlay, dict):
-                    response["overlay"] = {
-                        "prefix_prompt": str(overlay.get("prefix_prompt", "") or ""),
-                        "postfix_prompt": str(overlay.get("postfix_prompt", "") or ""),
-                        "negative_prompt": str(overlay.get("negative_prompt", "") or ""),
-                    }
-            except Exception:
-                pass
-        return response
+        return self._prompt_engineering_service().hires_overlay_response(preset_name)
 
     def write_hires_overlay(self, preset_name: str, body: dict[str, Any] | None) -> tuple[bool, str]:
-        path = self._hires_overlay_path(preset_name)
-        if path is None:
-            return False, "WEBUI 모드의 일반 프리셋만 편집할 수 있습니다."
-        source = body if isinstance(body, dict) else {}
-        payload = {
-            "schema_version": 1,
-            "prefix_prompt": str(source.get("prefix_prompt", "") or ""),
-            "postfix_prompt": str(source.get("postfix_prompt", "") or ""),
-            "negative_prompt": str(source.get("negative_prompt", "") or ""),
-        }
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-            return True, f"Overlay saved: {path.name}"
-        except Exception as exc:
-            return False, f"저장 실패: {exc}"
+        return self._prompt_engineering_service().write_hires_overlay(preset_name, body)
 
     def reset_hires_overlay(self, preset_name: str) -> tuple[bool, str]:
-        path = self._hires_overlay_path(preset_name)
-        if path is None:
-            return False, "WEBUI 모드의 일반 프리셋만 편집할 수 있습니다."
-        try:
-            if path.exists():
-                path.unlink()
-                return True, f"Overlay removed: {path.name}"
-            return True, "Overlay already absent."
-        except Exception as exc:
-            return False, f"삭제 실패: {exc}"
+        return self._prompt_engineering_service().reset_hires_overlay(preset_name)
 
     def _hires_overlay_path(self, preset_name: str) -> Path | None:
-        name = str(preset_name or "").strip()
-        if name in HIRES_OVERLAY_DISALLOWED_NAMES:
-            return None
-        safe_name = Path(name).name
-        if safe_name != name:
-            return None
-        if self.get_api_mode() != "WEBUI":
-            return None
-        return self._save_path("presets", "WEBUI", f"{safe_name}.hires.json")
+        return self._prompt_engineering_service().hires_overlay_path(preset_name)
 
     def _retired_module_state(self, module_id: str, *, action: str | None = None) -> dict[str, Any]:
         message = HEADLESS_RETIRED_MODULES.get(

@@ -325,10 +325,10 @@ After each round:
 
 ### Checklist
 
-- [ ] Root-level legacy shims that import `legacy_desktop` are either removed or moved under `legacy_desktop/`.
+- [x] Root-level legacy shims that import `legacy_desktop` are either removed or moved under `legacy_desktop/`.
 - [ ] Desktop-only tabs/modules that are not product features are archived or deleted after owner review.
 - [x] Desktop-only features that may return later are documented as web rebuild candidates, not kept as active runtime code.
-- [ ] Legacy tests are moved under `tests/legacy_desktop/` or excluded from normal headless/electron CI.
+- [x] Legacy tests are moved under `tests/legacy_desktop/` or excluded from normal headless/electron CI.
 - [x] `requirements-headless.txt` remains PyQt-free.
 
 ### When Done
@@ -342,7 +342,7 @@ After each round:
 - `tools/check_legacy_pyqt_surface_classification.py` now scans git-tracked Python files for direct `PyQt6`/`PySide`/`qtpy`/`legacy_desktop`/`NAIA_cold_v4` imports and reports any product-path import not covered by the legacy desktop root, classified desktop-only surfaces, classified desktop tests, or `headless_core_boundary.json`.
 - The unused root `utils/load_generation_params.py` lazy compatibility shim was removed; legacy desktop callers use `legacy_desktop/utils/load_generation_params.py` directly.
 - `tools/measure_autocomplete_fallback_cost.py`, which directly imports `legacy_desktop.core.remote_api_server`, was moved under `legacy_desktop/tools/` so it is explicitly reference-only and release-excluded through `legacy_desktop/**`.
-- Current validation: `python -B tools\check_legacy_pyqt_surface_classification.py` reports no unclassified product legacy imports.
+- Current validation: `python -B tools\check_legacy_pyqt_surface_classification.py` reports no unclassified product legacy imports. A direct source scan also found no `legacy_desktop`/Qt imports outside `legacy_desktop`, classified desktop-only surfaces, or classified tests.
 
 ### Desktop Test Execution Policy Slice - 2026-05-22
 

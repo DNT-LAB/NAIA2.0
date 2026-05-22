@@ -226,6 +226,7 @@ class WebSessionContext:
         "noise": 0.0,
     })
     _img2img_window_counter: int = 0
+    _headless_img2img_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -295,6 +296,15 @@ class WebSessionContext:
             return EventStreamRuntime(self)
         except Exception:
             return None
+
+    def _img2img_service(self):
+        service = self._headless_img2img_service
+        if service is None:
+            from core.headless_img2img_service import HeadlessImg2ImgService
+
+            service = HeadlessImg2ImgService(self)
+            self._headless_img2img_service = service
+        return service
 
     def _default_token_manager(self) -> TokenStore:
         from core.secure_token_manager import SecureTokenManager
@@ -1210,45 +1220,6 @@ class WebSessionContext:
         thumb.save(buffer, format="JPEG", quality=70)
         return base64.b64encode(buffer.getvalue()).decode("ascii")
 
-    @staticmethod
-    def _image_preview_data_url(image, max_side: int = 640) -> tuple[str, int, int]:
-        from PIL import Image
-
-        preview = image.copy()
-        preview.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-        if preview.mode not in ("RGB", "RGBA"):
-            preview = preview.convert("RGBA")
-        buffer = io.BytesIO()
-        preview.save(buffer, format="PNG", optimize=True)
-        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-        return f"data:image/png;base64,{encoded}", int(preview.width), int(preview.height)
-
-    @staticmethod
-    def _best_img2img_resolution(width: int, height: int, max_pixels: int = 1024 * 1024) -> tuple[int, int]:
-        ratio = max(1, int(width)) / max(1, int(height))
-        best_w = int((max_pixels * ratio) ** 0.5)
-        best_h = int((max_pixels / ratio) ** 0.5)
-        best_w = (best_w // 64) * 64
-        best_h = (best_h // 64) * 64
-        while best_w * best_h > max_pixels:
-            best_w -= 64
-            best_h = int(best_w / ratio)
-            best_h = (best_h // 64) * 64
-        return max(best_w, 64), max(best_h, 64)
-
-    def _normalize_img2img_source_image(self, image):
-        from PIL import Image
-
-        if image.mode not in ("RGB", "RGBA"):
-            image = image.convert("RGBA")
-        width, height = image.size
-        if width % 64 == 0 and height % 64 == 0 and width * height <= 1024 * 1024:
-            return image
-        new_w, new_h = self._best_img2img_resolution(width, height)
-        if (new_w, new_h) == (width, height):
-            return image
-        return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
     def _character_reference_image_data(self, image) -> str:
         from PIL import Image
 
@@ -1835,221 +1806,28 @@ class WebSessionContext:
         generation_params: dict[str, Any] | None = None,
         prompt_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from PIL import Image
-
-        if not image_bytes:
-            raise ValueError("Image data is unavailable")
-        with Image.open(io.BytesIO(image_bytes)) as opened:
-            image = self._normalize_img2img_source_image(opened.convert("RGBA"))
-        png_bytes = self._image_to_png_bytes(image)
-        preview, preview_width, preview_height = self._image_preview_data_url(image)
-        self._img2img_window_counter += 1
-        params = dict(generation_params or {})
-        prompt_ctx = dict(prompt_context or {})
-        main_prompt = str(
-            prompt_ctx.get("main_prompt")
-            or prompt_ctx.get("final_prompt")
-            or params.get("input")
-            or params.get("_raw_input")
-            or self.prompt_text
-            or ""
+        return self._img2img_service().open_session_from_bytes(
+            image_bytes,
+            label=label,
+            mode=mode,
+            generation_params=generation_params,
+            prompt_context=prompt_context,
         )
-        negative_prompt = str(params.get("negative_prompt") or params.get("uc") or self.negative_prompt_text or "")
-        clean_mode = "inpaint" if str(mode or "").lower() == "inpaint" else "img2img"
-        self.img2img_session = {
-            "active": True,
-            "window_id": self._img2img_window_counter,
-            "mode": clean_mode,
-            "source_label": str(label or "Result Image"),
-            "image_bytes": png_bytes,
-            "width": int(image.width),
-            "height": int(image.height),
-            "preview": preview,
-            "preview_width": preview_width,
-            "preview_height": preview_height,
-            "has_mask": False,
-            "mask_bytes": b"",
-            "mask_preview": "",
-            "strength": 99 if clean_mode == "inpaint" else 70,
-            "noise": 0,
-            "repeat": 1,
-            "main_prompt": main_prompt,
-            "negative_prompt": negative_prompt,
-            "characters": [],
-        }
-        return self._img2img_module_state()
 
     def _img2img_strength_value(self, raw: Any) -> float:
-        try:
-            value = int(raw)
-        except Exception:
-            value = 70
-        return 1.0 if value == 99 else max(1, min(99, value)) / 100.0
+        return self._img2img_service().strength_value(raw)
 
     def _img2img_module_state(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-        state = self.img2img_session if isinstance(self.img2img_session, dict) else {}
-        if not state.get("active"):
-            payload = self._module_state_payload("img2img", {"active": False})
-            if extra:
-                payload.update(extra)
-            return payload
-        characters = [
-            {
-                "id": index + 1,
-                "active": bool(character.get("active", True)),
-                "prompt": str(character.get("prompt") or ""),
-                "uc": str(character.get("uc") or ""),
-            }
-            for index, character in enumerate(state.get("characters") or [])
-        ]
-        mode = str(state.get("mode") or "img2img")
-        payload = self._module_state_payload("img2img", {
-            "active": True,
-            "window_id": int(state.get("window_id", 0) or 0),
-            "mode": mode,
-            "source_label": str(state.get("source_label") or "Result Image"),
-            "width": int(state.get("width", 0) or 0),
-            "height": int(state.get("height", 0) or 0),
-            "preview": str(state.get("preview") or ""),
-            "preview_width": int(state.get("preview_width", 0) or 0),
-            "preview_height": int(state.get("preview_height", 0) or 0),
-            "has_mask": bool(state.get("has_mask")),
-            "mask_preview": str(state.get("mask_preview") or ""),
-            "strength": int(state.get("strength", 70) or 70),
-            "strength_value": self._img2img_strength_value(state.get("strength", 70)),
-            "noise": int(state.get("noise", 0) or 0),
-            "noise_value": max(0, min(99, int(state.get("noise", 0) or 0))) / 100.0,
-            "repeat": int(state.get("repeat", 1) or 1),
-            "main_prompt": str(state.get("main_prompt") or ""),
-            "negative_prompt": str(state.get("negative_prompt") or ""),
-            "characters": characters,
-            "requires_mask": mode == "inpaint" and not bool(state.get("has_mask")),
-            "can_generate": bool(state.get("image_bytes")) and (mode != "inpaint" or bool(state.get("has_mask"))),
-        })
-        if extra:
-            payload.update(extra)
-        return payload
+        return self._img2img_service().module_state(extra)
 
     def _decode_img2img_mask(self, value: str) -> tuple[bytes, str, int]:
-        from PIL import Image
-
-        if not self.img2img_session.get("active"):
-            raise RuntimeError("No active Img2Img session")
-        target_size = (int(self.img2img_session.get("width") or 1), int(self.img2img_session.get("height") or 1))
-        mask_bytes = base64.b64decode(self._data_url_payload(value))
-        with Image.open(io.BytesIO(mask_bytes)) as opened:
-            full_mask = opened.convert("L").resize(target_size)
-        threshold = [0 if i <= 127 else 255 for i in range(256)]
-        full_mask = full_mask.point(threshold, "L")
-        white_pixels = int(full_mask.histogram()[255])
-        small_size = (max(1, target_size[0] // 8), max(1, target_size[1] // 8))
-        small_mask = full_mask.resize(small_size).point(threshold, "L")
-        painted_blocks = int(small_mask.histogram()[255])
-        if white_pixels <= 0 or painted_blocks < 8:
-            raise RuntimeError("Inpaint mask is too small" if white_pixels > 0 else "Inpaint mask is empty")
-        preview_bytes = self._image_to_png_bytes(full_mask)
-        preview = "data:image/png;base64," + base64.b64encode(preview_bytes).decode("ascii")
-        return self._image_to_png_bytes(small_mask), preview, painted_blocks
+        return self._img2img_service()._decode_mask(value)
 
     def _set_img2img_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        if key == "close":
-            self.img2img_session = {}
-            return self._img2img_module_state()
-        if not self.img2img_session.get("active"):
-            return self._toast("No active Img2Img session", level="error")
-        if key == "main_prompt":
-            self.img2img_session["main_prompt"] = str(value or "")
-        elif key == "negative_prompt":
-            self.img2img_session["negative_prompt"] = str(value or "")
-        elif key == "strength":
-            self.img2img_session["strength"] = max(1, min(99, int(float(value))))
-        elif key == "noise":
-            self.img2img_session["noise"] = max(0, min(99, int(float(value))))
-        elif key == "repeat":
-            self.img2img_session["repeat"] = max(1, min(99, int(float(value))))
-        elif key == "mask_png":
-            mask_bytes, preview, _ = self._decode_img2img_mask(str(value or ""))
-            self.img2img_session["mode"] = "inpaint"
-            self.img2img_session["mask_bytes"] = mask_bytes
-            self.img2img_session["mask_preview"] = preview
-            self.img2img_session["has_mask"] = True
-        elif key == "clear_mask":
-            self.img2img_session["mask_bytes"] = b""
-            self.img2img_session["mask_preview"] = ""
-            self.img2img_session["has_mask"] = False
-        elif key == "add_character":
-            self.img2img_session.setdefault("characters", []).append({"active": True, "prompt": "", "uc": ""})
-        elif key.startswith("remove_character_"):
-            index = self._index_from_key(key, "remove_character_")
-            chars = self.img2img_session.setdefault("characters", [])
-            if index is not None and 0 <= index < len(chars):
-                chars.pop(index)
-        elif key.startswith("char_active_"):
-            index = self._index_from_key(key, "char_active_")
-            chars = self.img2img_session.setdefault("characters", [])
-            if index is not None and 0 <= index < len(chars):
-                chars[index]["active"] = self._coerce_bool(value)
-        elif key.startswith("char_prompt_"):
-            index = self._index_from_key(key, "char_prompt_")
-            chars = self.img2img_session.setdefault("characters", [])
-            if index is not None and 0 <= index < len(chars):
-                chars[index]["prompt"] = str(value or "")
-        elif key.startswith("char_uc_"):
-            index = self._index_from_key(key, "char_uc_")
-            chars = self.img2img_session.setdefault("characters", [])
-            if index is not None and 0 <= index < len(chars):
-                chars[index]["uc"] = str(value or "")
-        elif key == "generate":
-            commands = self._img2img_generation_commands()
-            return self._img2img_module_state({"_headless_generation_commands": commands})
-        else:
-            return None
-        return self._img2img_module_state()
+        return self._img2img_service().set_param(key, value)
 
     def _img2img_generation_commands(self) -> list[dict[str, Any]]:
-        state = self.img2img_session
-        if not state.get("image_bytes"):
-            raise RuntimeError("Img2Img source image is unavailable")
-        mode = str(state.get("mode") or "img2img")
-        if mode == "inpaint" and not state.get("mask_bytes"):
-            raise RuntimeError("Inpaint mask is required")
-        overrides: dict[str, Any] = {
-            "input": str(state.get("main_prompt") or ""),
-            "_raw_input": str(state.get("main_prompt") or ""),
-            "negative_prompt": str(state.get("negative_prompt") or ""),
-            "strength": self._img2img_strength_value(state.get("strength", 70)),
-            "noise": max(0, min(99, int(state.get("noise", 0) or 0))) / 100.0,
-            "image_bytes": state["image_bytes"],
-            "width": int(state.get("width") or 832),
-            "height": int(state.get("height") or 1216),
-            "type": "inpaint" if mode == "inpaint" else "img2img",
-            "_remote_queue_source": "Inpaint" if mode == "inpaint" else "Img2Img",
-            "_remote_queue_label": str(state.get("source_label") or "Result Image"),
-        }
-        if mode == "inpaint":
-            overrides["mask_bytes"] = state.get("mask_bytes")
-        char_data = []
-        for character in state.get("characters") or []:
-            if not character.get("active", True):
-                continue
-            prompt = str(character.get("prompt") or "").strip()
-            if prompt:
-                char_data.append((prompt, str(character.get("uc") or "").strip()))
-        if char_data:
-            overrides["sketchbook_character_prompts"] = char_data
-        repeat = max(1, min(99, int(state.get("repeat", 1) or 1)))
-        if repeat > 1:
-            overrides["img2img_batch_request"] = True
-            overrides["img2img_batch_total"] = repeat
-        overrides["img2img_batch_window_id"] = int(state.get("window_id", 0) or 0)
-        return [
-            {
-                "type": "generate",
-                "api_mode": "NAI",
-                "overrides": dict(overrides),
-            }
-            for _ in range(repeat)
-        ]
+        return self._img2img_service().generation_commands()
 
     def _automation_module_state(self) -> dict[str, Any]:
         from core.automation_settings import automation_state_from_settings, load_automation_settings

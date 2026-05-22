@@ -22,6 +22,10 @@ from app.backend.server.api_control_commands import (
 from app.backend.server.artist_thumbnail_routes import register_artist_thumbnail_routes
 from app.backend.server.character_viewer_routes import register_character_viewer_routes
 from app.backend.server.danbooru_routes import register_danbooru_routes
+from app.backend.server.depth_search_commands import (
+    DEPTH_SEARCH_COMMAND_TYPES,
+    handle_depth_search_command,
+)
 from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.headless_retired_commands import (
@@ -50,12 +54,9 @@ from app.backend.server.result_display_routes import (
 from app.backend.server.state_routes import register_state_routes
 from app.backend.server.search_runtime import (
     apply_search_runtime_filters as _apply_search_runtime_filters,
-    filter_source_frame as _filter_source_frame,
     load_or_merge_custom_parquet as _load_or_merge_custom_parquet,
-    next_custom_parquet_path as _next_custom_parquet_path,
     restore_search_snapshot as _restore_search_snapshot,
     run_search_command as _run_search_command,
-    search_base_frame as _search_base_frame,
     search_parquet_action as _search_parquet_action,
     tag_filter_search as _tag_filter_search,
 )
@@ -382,147 +383,6 @@ def _preset_autocomplete_payload(context: WebSessionContext, query: str, limit: 
     except Exception as exc:
         print(f"Headless Remote: preset autocomplete failed - {exc}", flush=True)
         return {"query": str(query or ""), "results": [], "secondaryResults": [], "preset": {}}
-
-
-def _depth_payload(context: WebSessionContext) -> dict[str, Any]:
-    state = getattr(context, "depth_state", None)
-    if not isinstance(state, dict):
-        return {"type": "depth_state", "open": False}
-    current = state.get("current")
-    original = state.get("original")
-    return {
-        "type": "depth_state",
-        "open": True,
-        "count": 0 if current is None or getattr(current, "empty", True) else int(len(current)),
-        "original": 0 if original is None or getattr(original, "empty", True) else int(len(original)),
-        "query": state.get("query", ""),
-        "exclude": state.get("exclude", ""),
-        "ratings": state.get("ratings", {rating: True for rating in "eqsg"}),
-        "filters": state.get("filters", {}),
-        "staging_count": sum(0 if item is None or getattr(item, "empty", True) else int(len(item)) for item in state.get("staging", [])),
-        "headless": True,
-    }
-
-
-def _numeric_column(frame: Any, name: str) -> str | None:
-    candidates = {
-        "token_min": ("token_count", "tokens", "estimated_tokens"),
-        "token_max": ("token_count", "tokens", "estimated_tokens"),
-        "id_min": ("id",),
-        "id_max": ("id",),
-        "score_min": ("score",),
-    }.get(name, ())
-    for column in candidates:
-        if column in frame.columns:
-            return column
-    return None
-
-
-def _apply_depth_filters(frame: Any, command: dict[str, Any]):
-    filtered = _filter_source_frame(
-        frame,
-        query=str(command.get("query") or ""),
-        exclude=str(command.get("exclude") or ""),
-        ratings={rating for rating, enabled in (command.get("ratings") or {}).items() if enabled} or set("gsqe"),
-    )
-    filters = command.get("filters") if isinstance(command.get("filters"), dict) else {}
-    if filtered is None or getattr(filtered, "empty", True):
-        return filtered
-    for name in ("token_min", "id_min", "score_min"):
-        spec = filters.get(name) if isinstance(filters.get(name), dict) else {}
-        if not spec.get("enabled"):
-            continue
-        column = _numeric_column(filtered, name)
-        if not column:
-            continue
-        try:
-            value = float(spec.get("value"))
-        except (TypeError, ValueError):
-            continue
-        filtered = filtered[filtered[column].astype(float) >= value]
-    for name in ("token_max", "id_max"):
-        spec = filters.get(name) if isinstance(filters.get(name), dict) else {}
-        if not spec.get("enabled"):
-            continue
-        column = _numeric_column(filtered, name)
-        if not column:
-            continue
-        try:
-            value = float(spec.get("value"))
-        except (TypeError, ValueError):
-            continue
-        filtered = filtered[filtered[column].astype(float) <= value]
-    if filters.get("rem_char") and "character" in filtered.columns:
-        filtered = filtered[filtered["character"].fillna("").astype(str).str.strip() != ""]
-    if filters.get("only_empty_char") and "character" in filtered.columns:
-        filtered = filtered[filtered["character"].fillna("").astype(str).str.strip() == ""]
-    return filtered.copy()
-
-
-def _handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    action = str(command.get("action") or "").strip()
-    if action == "open":
-        base = getattr(context, "search_results_snapshot", None)
-        if base is None or getattr(base, "empty", True):
-            base = _search_base_frame(context)
-        if base is None or getattr(base, "empty", True):
-            return {"type": "depth_state", "open": False, "error": "no_search_results"}, None
-        context.depth_state = {
-            "original": base.copy(),
-            "current": base.copy(),
-            "query": "",
-            "exclude": "",
-            "ratings": {rating: True for rating in "eqsg"},
-            "filters": {},
-            "staging": [],
-        }
-        return _depth_payload(context), None
-    if not isinstance(getattr(context, "depth_state", None), dict):
-        return {"type": "depth_state", "open": False}, None
-    state = context.depth_state
-    if action == "filter":
-        state["query"] = str(command.get("query") or "")
-        state["exclude"] = str(command.get("exclude") or "")
-        state["ratings"] = command.get("ratings") if isinstance(command.get("ratings"), dict) else {rating: True for rating in "eqsg"}
-        state["filters"] = command.get("filters") if isinstance(command.get("filters"), dict) else {}
-        state["current"] = _apply_depth_filters(state.get("original"), command)
-    elif action == "assign":
-        current = state.get("current")
-        if current is not None:
-            context.active_tag_filter_ids = None
-            context.pending_tag_filter = None
-            context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
-            context.search_results.set_dataframe(current.copy())
-            context.search_results_snapshot = current.copy()
-        return _depth_payload(context), context.search_state_payload()
-    elif action == "promote":
-        current = state.get("current")
-        if current is not None:
-            state["original"] = current.copy()
-    elif action == "restore":
-        original = state.get("original")
-        if original is not None:
-            state["current"] = original.copy()
-    elif action == "stage":
-        current = state.get("current")
-        if current is not None and not getattr(current, "empty", True):
-            state.setdefault("staging", []).append(current.copy())
-    elif action == "merge_staging":
-        import pandas as pd
-
-        frames = [item for item in state.get("staging", []) if item is not None and not getattr(item, "empty", True)]
-        if frames:
-            state["current"] = pd.concat(frames, ignore_index=True).drop_duplicates()
-    elif action == "clear_staging":
-        state["staging"] = []
-    elif action == "export":
-        current = state.get("current")
-        if current is not None and not getattr(current, "empty", True):
-            path = _next_custom_parquet_path(context, "", fallback_prefix="refine")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            current.to_parquet(path, index=False)
-        return _depth_payload(context), context.search_state_payload()
-    return _depth_payload(context), None
 
 
 def _clamp_result_enhance_number(value: Any, minimum: float, maximum: float, fallback: float) -> float:
@@ -1238,13 +1098,13 @@ async def _handle_json_command(
     elif command_type == "tag_lookup":
         info = await _to_thread(tag_lookup_info, context, str(command.get("tag") or ""))
         await ws.send_text(json.dumps({"type": "tag_lookup_result", **info}, ensure_ascii=False))
-    elif command_type == "get_depth_state":
-        await ws.send_text(json.dumps(_depth_payload(context), ensure_ascii=False))
-    elif command_type == "depth_action":
-        depth_state, search_state = await _to_thread(_handle_depth_action, context, command)
-        if search_state is not None:
-            await ws.send_text(json.dumps(search_state, ensure_ascii=False))
-        await ws.send_text(json.dumps(depth_state, ensure_ascii=False))
+    elif command_type in DEPTH_SEARCH_COMMAND_TYPES:
+        await handle_depth_search_command(
+            ws,
+            context,
+            command,
+            run_in_thread=_to_thread,
+        )
     elif command_type in HIRES_OVERLAY_COMMAND_TYPES:
         await handle_hires_overlay_command(
             ws,

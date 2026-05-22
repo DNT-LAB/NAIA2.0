@@ -19,9 +19,9 @@
     },
     {
       "feature": "cloudflared_helper",
-      "source": "core/web_session_context.py",
+      "source": "core/headless_context_bootstrap.py",
       "must_contain": [
-        "self.runtime_paths.downloads_dir / \"cloudflared\""
+        "context.runtime_paths.downloads_dir / \"cloudflared\""
       ],
       "must_not_contain": []
     },
@@ -37,7 +37,7 @@
     },
     {
       "feature": "artist_thumbnail_dictionary",
-      "source": "core/web_session_app.py",
+      "source": "app/backend/server/artist_thumbnail_routes.py",
       "must_contain": [
         "runtime_paths.ui_assets_dir / \"artist_thumb\""
       ],
@@ -68,7 +68,7 @@
     },
     {
       "feature": "remote_web_image_fetch",
-      "source": "core/web_session_app.py",
+      "source": "app/backend/server/result_display_routes.py",
       "must_contain": [
         "with urllib.request.urlopen(request, timeout=15) as response"
       ],

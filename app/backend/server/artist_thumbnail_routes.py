@@ -27,6 +27,8 @@ def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailServi
             context.repo_root,
             mode_getter=context.get_api_mode,
             mode_data_root=mode_data_root,
+            state_root=mode_data_root,
+            wildcards_root=runtime_paths.wildcards_dir if runtime_paths is not None else None,
         )
         context.artist_thumbnail_service = service
     return service

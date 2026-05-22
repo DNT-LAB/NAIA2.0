@@ -20,7 +20,11 @@ def test_remote_web_smoke_contract_lists_core_feature_surface():
     assert "event_preset_status" in features
     assert "artist_thumb_state" in features
     assert "character_viewer_state" in features
+    assert "character_reference_storage_thumb_asset" in features
+    assert "vibe_transfer_storage_thumb_asset" in features
     assert "history_list" in features
+    assert contract["seed_context"]["module_storage"]["character_reference"][0]["file_hash"]
+    assert contract["seed_context"]["module_storage"]["vibe_transfer"][0]["model"]
     assert contract["websocket_checks"][0]["expected_initial_types"] == [
         "session",
         "desktop_window_state",

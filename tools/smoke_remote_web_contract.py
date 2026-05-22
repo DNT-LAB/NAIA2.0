@@ -76,6 +76,63 @@ def _seed_test_context(context: Any, seed: dict[str, Any]) -> None:
         context.headless_random_prompt_service = service
         service.warmup()
 
+    _seed_module_storage_fixtures(context, seed.get("module_storage"))
+
+
+def _seed_module_storage_fixtures(context: Any, module_storage: Any) -> None:
+    if not isinstance(module_storage, dict):
+        return
+
+    char_items = module_storage.get("character_reference")
+    if isinstance(char_items, list):
+        for item in char_items:
+            if not isinstance(item, dict):
+                continue
+            file_hash = str(item.get("file_hash") or "").strip()
+            if not file_hash:
+                continue
+            _write_png_fixture(
+                context.runtime_paths.save_dir / "character_reference" / "images" / f"{file_hash}.png",
+                item,
+            )
+
+    vibe_items = module_storage.get("vibe_transfer")
+    if isinstance(vibe_items, list):
+        for item in vibe_items:
+            if not isinstance(item, dict):
+                continue
+            model = str(item.get("model") or "").strip()
+            file_hash = str(item.get("file_hash") or "").strip()
+            if not model or not file_hash:
+                continue
+            _write_png_fixture(
+                context.runtime_paths.save_dir / "vibe_transfer" / model / "images" / f"{file_hash}.png",
+                item,
+            )
+
+
+def _write_png_fixture(path: Path, spec: dict[str, Any]) -> None:
+    from PIL import Image
+
+    size = spec.get("size") if isinstance(spec.get("size"), list) else [32, 24]
+    width = _coerce_fixture_int(size[0] if len(size) > 0 else 32, default=32, minimum=1, maximum=512)
+    height = _coerce_fixture_int(size[1] if len(size) > 1 else 24, default=24, minimum=1, maximum=512)
+    color = spec.get("color") if isinstance(spec.get("color"), list) else [120, 30, 200]
+    rgb = tuple(
+        _coerce_fixture_int(color[index] if len(color) > index else 0, default=0, minimum=0, maximum=255)
+        for index in range(3)
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (width, height), rgb).save(path)
+
+
+def _coerce_fixture_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(maximum, number))
+
 
 def _run_http_check(client: TestClient, check: dict[str, Any]) -> dict[str, Any]:
     method = str(check.get("method", "GET")).upper()
@@ -107,6 +164,32 @@ def _run_http_check(client: TestClient, check: dict[str, Any]) -> dict[str, Any]
                 if missing:
                     ok = False
                     json_error = f"missing JSON keys: {', '.join(missing)}"
+        content_error = ""
+        if ok and "expected_headers" in check:
+            expected_headers = check.get("expected_headers")
+            if isinstance(expected_headers, dict):
+                for header, expected_value in expected_headers.items():
+                    observed_value = response.headers.get(str(header))
+                    if observed_value != str(expected_value):
+                        ok = False
+                        content_error = (
+                            f"header {header!r} expected {expected_value!r}, got {observed_value!r}"
+                        )
+                        break
+        if ok and "expected_content_prefix" in check:
+            expected_prefix = str(check.get("expected_content_prefix") or "").encode("utf-8")
+            if not response.content.startswith(expected_prefix):
+                ok = False
+                content_error = f"content did not start with {expected_prefix!r}"
+        if ok and "expected_content_contains" in check:
+            expected_parts = [
+                str(part).encode("utf-8")
+                for part in check.get("expected_content_contains", [])
+            ]
+            missing_parts = [part for part in expected_parts if part not in response.content]
+            if missing_parts:
+                ok = False
+                content_error = f"content missing expected bytes: {missing_parts!r}"
         result = {
             "feature": check.get("feature", path),
             "method": method,
@@ -117,6 +200,8 @@ def _run_http_check(client: TestClient, check: dict[str, Any]) -> dict[str, Any]
         }
         if json_error:
             result["error"] = json_error
+        if content_error:
+            result["error"] = content_error
         return result
     except Exception as exc:
         return {

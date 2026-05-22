@@ -23,7 +23,24 @@
         "copyright": "",
         "meta": ""
       }
-    ]
+    ],
+    "module_storage": {
+      "character_reference": [
+        {
+          "file_hash": "smoke_char_ref_thumb",
+          "size": [32, 24],
+          "color": [120, 30, 200]
+        }
+      ],
+      "vibe_transfer": [
+        {
+          "model": "NAID4_5",
+          "file_hash": "smoke_vibe_thumb",
+          "size": [24, 32],
+          "color": [30, 180, 90]
+        }
+      ]
+    }
   },
   "http_checks": [
     {
@@ -322,6 +339,24 @@
       "expected_json_keys": ["error"]
     },
     {
+      "feature": "character_reference_storage_thumb_asset",
+      "method": "GET",
+      "path": "/api/module-storage/character-reference/thumb?file_hash=smoke_char_ref_thumb",
+      "expected_status": [200],
+      "expected_headers": {"content-type": "image/webp"},
+      "expected_content_prefix": "RIFF",
+      "expected_content_contains": ["WEBP"]
+    },
+    {
+      "feature": "vibe_transfer_storage_thumb_asset",
+      "method": "GET",
+      "path": "/api/module-storage/vibe/thumb?model=NAID4_5&file_hash=smoke_vibe_thumb",
+      "expected_status": [200],
+      "expected_headers": {"content-type": "image/webp"},
+      "expected_content_prefix": "RIFF",
+      "expected_content_contains": ["WEBP"]
+    },
+    {
       "feature": "character_reference_storage_thumb_missing",
       "method": "GET",
       "path": "/api/module-storage/character-reference/thumb?file_hash=__missing__",
@@ -332,6 +367,20 @@
       "feature": "vibe_transfer_storage_thumb_missing",
       "method": "GET",
       "path": "/api/module-storage/vibe/thumb?model=NAID4_5&file_hash=__missing__",
+      "expected_status": [404],
+      "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "character_reference_storage_thumb_boundary",
+      "method": "GET",
+      "path": "/api/module-storage/character-reference/thumb?file_hash=..",
+      "expected_status": [404],
+      "expected_json_keys": ["error"]
+    },
+    {
+      "feature": "vibe_transfer_storage_thumb_boundary",
+      "method": "GET",
+      "path": "/api/module-storage/vibe/thumb?model=..&file_hash=smoke_vibe_thumb",
       "expected_status": [404],
       "expected_json_keys": ["error"]
     }

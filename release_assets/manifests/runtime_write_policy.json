@@ -39,7 +39,9 @@
       "feature": "artist_thumbnail_dictionary",
       "source": "app/backend/server/artist_thumbnail_routes.py",
       "must_contain": [
-        "runtime_paths.ui_assets_dir / \"artist_thumb\""
+        "runtime_paths.ui_assets_dir / \"artist_thumb\"",
+        "state_root=mode_data_root",
+        "wildcards_root=runtime_paths.wildcards_dir"
       ],
       "must_not_contain": []
     },

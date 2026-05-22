@@ -60,9 +60,15 @@ class ArtistThumbnailService:
         mode_getter: Callable[[], str] | None = None,
         *,
         mode_data_root: str | Path | None = None,
+        state_root: str | Path | None = None,
+        wildcards_root: str | Path | None = None,
     ):
         self.repo_root = Path(repo_root)
         self.mode_data_root = Path(mode_data_root) if mode_data_root is not None else self.repo_root / "data"
+        self.state_root = Path(state_root) if state_root is not None else self.repo_root / "artist_thumb"
+        self.wildcards_root = Path(wildcards_root) if wildcards_root is not None else self.repo_root / "wildcards"
+        self.legacy_state_root = self.repo_root / "artist_thumb"
+        self.legacy_wildcards_root = self.repo_root / "wildcards"
         self._mode_getter = mode_getter or (lambda: "NAI")
         self._data_cache: dict[str, dict] = {}
         self._image_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
@@ -191,19 +197,25 @@ class ArtistThumbnailService:
         path.write_text("".join(f"{value}\n" for value in cleaned), encoding="utf-8")
 
     def _state_path(self) -> Path:
-        return self._path("artist_thumb/artist_state.json")
+        return self.state_root / "artist_state.json"
 
     def _favorite_path(self) -> Path:
-        return self._path("wildcards/favorite_artist.txt")
+        return self.wildcards_root / "favorite_artist.txt"
 
     def _banned_path(self) -> Path:
-        return self._path("artist_thumb/banned_artist.txt")
+        return self.state_root / "banned_artist.txt"
 
     def _options_path(self) -> Path:
-        return self._path("artist_thumb/generate_options.json")
+        return self.state_root / "generate_options.json"
 
     def _favorite_thumbnail_cache_path(self) -> Path:
-        return self._path("artist_thumb/favorite_thumbnail_cache.json")
+        return self.state_root / "favorite_thumbnail_cache.json"
+
+    def _legacy_favorite_path(self) -> Path:
+        return self.legacy_wildcards_root / "favorite_artist.txt"
+
+    def _legacy_banned_path(self) -> Path:
+        return self.legacy_state_root / "banned_artist.txt"
 
     def _options_mode(self, mode: str = "") -> str:
         mode_key = str(mode or "").strip().upper()
@@ -300,8 +312,14 @@ class ArtistThumbnailService:
 
     def _legacy_state(self) -> dict:
         return self._normalize_state({
-            "favorites": self._read_lines(self._favorite_path()),
-            "banned": self._read_lines(self._banned_path()),
+            "favorites": self._merge_values(
+                self._read_lines(self._favorite_path()),
+                self._read_lines(self._legacy_favorite_path()),
+            ),
+            "banned": self._merge_values(
+                self._read_lines(self._banned_path()),
+                self._read_lines(self._legacy_banned_path()),
+            ),
         })
 
     def _read_state_file(self, *, merge_legacy_additions: bool = True) -> dict:
@@ -328,9 +346,17 @@ class ArtistThumbnailService:
         normalized = self._normalize_state(state)
         path = self._state_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(normalized, ensure_ascii=False, indent=2) + "\n"
         temp_path = path.with_name(f"{path.name}.tmp")
-        temp_path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp_path.replace(path)
+        temp_path.write_text(payload, encoding="utf-8")
+        try:
+            temp_path.replace(path)
+        except PermissionError:
+            path.write_text(payload, encoding="utf-8")
+            try:
+                temp_path.unlink(missing_ok=True)
+            except PermissionError:
+                pass
         self._sync_state_mirrors(normalized)
         return normalized
 
@@ -351,21 +377,29 @@ class ArtistThumbnailService:
         return list(self._state().get("banned", []))
 
     def _custom_filters(self, weights: dict | None = None, banned_set: set[str] | None = None) -> list[dict]:
-        base = self._path("artist_thumb")
+        bases = [self.state_root]
+        if self.legacy_state_root.resolve() != self.state_root.resolve():
+            bases.append(self.legacy_state_root)
         filters = []
-        if not base.exists():
-            return filters
         weights = weights or self._artist_weights()
         banned_set = banned_set if banned_set is not None else set(self._banned())
-        for path in sorted(base.glob("*.txt")):
-            if path.name == "banned_artist.txt":
+        seen_keys = set()
+        for base in bases:
+            if not base.exists():
                 continue
-            items = self._read_lines(path)
-            filters.append({
-                "key": f"custom:{path.stem}",
-                "name": path.stem,
-                "count": len([artist for artist in items if artist in weights and artist not in banned_set]),
-            })
+            for path in sorted(base.glob("*.txt")):
+                if path.name == "banned_artist.txt":
+                    continue
+                key = f"custom:{path.stem}"
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                items = self._read_lines(path)
+                filters.append({
+                    "key": key,
+                    "name": path.stem,
+                    "count": len([artist for artist in items if artist in weights and artist not in banned_set]),
+                })
         return filters
 
     def _normalize_thumbnail_cache(self, data: Any) -> dict:

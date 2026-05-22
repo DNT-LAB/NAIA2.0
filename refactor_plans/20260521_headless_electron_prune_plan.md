@@ -313,6 +313,14 @@ After each round:
 - Focused TestClient validation with seeded temporary PNG files confirmed both new thumbnail routes return `200 image/webp` payloads and reject `.`/`..` path segments with 404.
 - Required validation for this slice: `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6_storage_lazy`, focused TestClient thumbnail 200 and boundary 404 probe, syntax checks for the touched Python route/service files, `node --check app\web\remote\js\features\imageModulePanels.mjs`, `python -B tools\check_remote_web_feature_contract.py`, `python -B tools\check_project_layout_policy.py`, `python -B tools\check_refactor_plan_execution_contract.py`, and `git diff --check`.
 
+### Source-Mode Storage Asset Smoke Contract Slice - 2026-05-22
+
+- `tools/smoke_remote_web_contract.py` now supports seeded module-storage PNG fixtures plus binary response assertions for expected headers, content prefixes, and content byte markers.
+- The smoke contract now automatically verifies `200 image/webp` thumbnail payloads for Character Reference and Vibe Transfer, as well as missing-asset and `.`/`..` boundary 404 responses.
+- The stronger staged-backend smoke exposed Artist Thumbnail mutable state writes under the staged backend resource root. `core/artist_thumbnail_service.py` now accepts runtime state and wildcard roots, writes small mutable Artist Thumbnail JSON/list state to user-data, and keeps repository files as legacy read fallbacks.
+- `app/backend/server/artist_thumbnail_routes.py` wires Artist Thumbnail state to `runtime_paths.ui_assets_dir / "artist_thumb"` and favorites to `runtime_paths.wildcards_dir`, so source checkout and staged release smoke share the same runtime boundary.
+- Current validation: source-mode `python -B tools\smoke_remote_web_contract.py . --user-data .\tmp_codex_remote_smoke_round6_thumb_contract_artistfix3`, manual staged-backend smoke equivalent using `tools.stage_electron_release`, Artist Thumbnail runtime-state equivalent probe, runtime write policy check, runtime asset classification check, feature/layout/refactor gates, syntax checks, and `git diff --check`.
+
 ## Round 7 - Legacy Quarantine Hardening
 
 ### Checklist

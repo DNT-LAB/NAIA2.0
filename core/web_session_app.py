@@ -34,11 +34,11 @@ from app.backend.server.generation_commands import (
     enqueue_generation_request,
     enqueue_headless_generation_commands,
     enqueue_prompt_from_module,
-    generation_service,
     handle_generate_command,
     handle_random_command,
     random_service,
 )
+from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.headless_retired_commands import (
     HEADLESS_RETIRED_COMMAND_TYPES,
@@ -53,10 +53,7 @@ from app.backend.server.prompt_engineering_commands import (
     HIRES_OVERLAY_COMMAND_TYPES,
     handle_hires_overlay_command,
 )
-from app.backend.server.prompt_tools_routes import (
-    register_prompt_tools_routes,
-    save_prompt_engineering_thumbnail_bytes,
-)
+from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
 from app.backend.server.result_display_routes import (
     register_result_display_routes,
 )
@@ -76,8 +73,8 @@ from app.backend.server.session_commands import (
 from app.backend.server.state_routes import register_state_routes
 from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
 from app.backend.server.web_shell_routes import register_web_shell_routes
+from app.backend.server.websocket_broadcast import broadcast_json
 from app.web import resolve_remote_web_dir
-from core import result_image_payload_service as result_images
 from core.web_session_context import WebSessionContext
 
 
@@ -112,124 +109,6 @@ async def _send_startup_messages(
     await ws.send_text(json.dumps({"type": "lazy_indices_ready"}))
 
 
-async def _broadcast_json(clients: set[WebSocket], data: dict[str, Any]) -> None:
-    text = json.dumps(data, ensure_ascii=False)
-    dead = []
-    for client in list(clients):
-        try:
-            await client.send_text(text)
-        except Exception:
-            dead.append(client)
-    for client in dead:
-        clients.discard(client)
-
-
-async def _broadcast_image(clients: set[WebSocket], webp_bytes: bytes, metadata: dict[str, Any]) -> None:
-    meta_text = json.dumps({"type": "image_meta", **metadata}, ensure_ascii=False)
-    dead = []
-    for client in list(clients):
-        try:
-            await client.send_text(meta_text)
-            await client.send_bytes(webp_bytes)
-        except Exception:
-            dead.append(client)
-    for client in dead:
-        clients.discard(client)
-
-
-def _ensure_generation_runner(context: WebSessionContext, clients: set[WebSocket]) -> None:
-    task = getattr(context, "headless_generation_runner_task", None)
-    if task is not None and not task.done():
-        return
-    context.headless_generation_runner_task = asyncio.create_task(_run_generation_queue(context, clients))
-
-
-async def _run_generation_queue(context: WebSessionContext, clients: set[WebSocket]) -> None:
-    if getattr(context, "headless_generation_runner_active", False):
-        return
-    context.headless_generation_runner_active = True
-    try:
-        while True:
-            request = await _to_thread(context.generation_queue_manager.dequeue_request)
-            if request is None:
-                break
-            context.is_generating = True
-            await _broadcast_json(clients, {"type": "status", "is_generating": True, "message": "generating"})
-            await _broadcast_json(clients, context.queue_state_payload())
-            try:
-                stored = await _to_thread(generation_service(context).execute_request, request)
-            except Exception as exc:
-                context.is_generating = False
-                message = str(exc)
-                params = getattr(request, "params", {}) or {}
-                await _broadcast_json(clients, {"type": "status", "is_generating": False, "message": "error"})
-                await _broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
-                await _broadcast_json(clients, {"type": "generation_error", "message": message})
-                if params.get("result_enhance_request"):
-                    await _broadcast_json(clients, {
-                        "type": "result_enhance_state",
-                        "running": False,
-                        "success": False,
-                        "message": message,
-                        "request_id": str(params.get("result_enhance_request_id") or request.request_id),
-                        "headless": True,
-                    })
-                if params.get("event_preset_request"):
-                    await _broadcast_json(clients, {
-                        "type": "event_preset_generation_error",
-                        "requestId": str(params.get("event_preset_request_id") or ""),
-                        "message": message,
-                    })
-                if params.get("remote_preset_request"):
-                    await _broadcast_json(clients, {
-                        "type": "preset_generation_error",
-                        "requestId": str(params.get("remote_preset_request_id") or ""),
-                        "message": message,
-                    })
-                await _broadcast_json(clients, context.queue_state_payload())
-                continue
-
-            context.is_generating = False
-            await _broadcast_json(clients, {"type": "status", "is_generating": False, "message": "completed"})
-            params = getattr(request, "params", {}) or {}
-            if params.get("prompt_preset_thumbnail_request"):
-                try:
-                    png_bytes, _ = result_images.history_item_png_payload(stored.item, label=stored.item.filename)
-                    thumbnail_payload = await _to_thread(
-                        save_prompt_engineering_thumbnail_bytes,
-                        context,
-                        str(params.get("prompt_preset_thumbnail_name") or ""),
-                        str(params.get("prompt_preset_thumbnail_mode") or ""),
-                        png_bytes,
-                    )
-                    await _broadcast_json(clients, {
-                        "type": "prompt_engineering_preset_thumbnail_updated",
-                        "request_id": str(params.get("prompt_preset_thumbnail_request_id") or ""),
-                        **thumbnail_payload,
-                    })
-                except Exception as exc:
-                    await _broadcast_json(clients, {
-                        "type": "toast",
-                        "level": "error",
-                        "message": f"Preset thumbnail save failed: {exc}",
-                    })
-            if params.get("result_enhance_request"):
-                await _broadcast_json(clients, {
-                    "type": "result_enhance_state",
-                    "running": False,
-                    "success": True,
-                    "message": "Enhance complete",
-                    "request_id": str(params.get("result_enhance_request_id") or request.request_id),
-                    "headless": True,
-                })
-            await _broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
-            await _broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
-            await _broadcast_json(clients, context.queue_state_payload())
-    finally:
-        context.is_generating = False
-        context.headless_generation_runner_active = False
-
-
 async def _handle_json_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -245,7 +124,7 @@ async def _handle_json_command(
             clients,
             client_host,
             command,
-            broadcast_json=_broadcast_json,
+            broadcast_json=broadcast_json,
         )
     elif command_type in SEARCH_COMMAND_TYPES:
         await handle_search_command(
@@ -294,11 +173,11 @@ async def _handle_json_command(
             command,
             enqueue_prompt_from_module=partial(
                 enqueue_prompt_from_module,
-                start_generation_runner=_ensure_generation_runner,
+                start_generation_runner=ensure_generation_runner,
             ),
             enqueue_generation_commands=partial(
                 enqueue_headless_generation_commands,
-                start_generation_runner=_ensure_generation_runner,
+                start_generation_runner=ensure_generation_runner,
             ),
         )
     elif command_type in RESULT_COMMAND_TYPES:
@@ -309,7 +188,7 @@ async def _handle_json_command(
             command,
             run_in_thread=_to_thread,
             enqueue_generation_request=enqueue_generation_request,
-            start_generation_runner=_ensure_generation_runner,
+            start_generation_runner=ensure_generation_runner,
         )
     elif command_type in GENERATION_COMMAND_TYPES:
         if command_type == "random":
@@ -320,7 +199,7 @@ async def _handle_json_command(
                 context,
                 clients,
                 command,
-                start_generation_runner=_ensure_generation_runner,
+                start_generation_runner=ensure_generation_runner,
             )
     else:
         await ws.send_text(json.dumps({
@@ -348,7 +227,7 @@ async def _handle_text_command(
             ws,
             context,
             clients,
-            start_generation_runner=_ensure_generation_runner,
+            start_generation_runner=ensure_generation_runner,
         )
         return
     await ws.send_text(json.dumps({
@@ -422,8 +301,8 @@ def create_headless_app(
         session_context,
         run_in_thread=_to_thread,
         clients=app.state.headless_clients,
-        broadcast_json=_broadcast_json,
-        start_generation_runner=_ensure_generation_runner,
+        broadcast_json=broadcast_json,
+        start_generation_runner=ensure_generation_runner,
     )
     register_install_manager_routes(app, session_context, run_in_thread=_to_thread)
     register_params_workflow_routes(
@@ -431,15 +310,15 @@ def create_headless_app(
         session_context,
         run_in_thread=_to_thread,
         clients=app.state.headless_clients,
-        broadcast_json=_broadcast_json,
+        broadcast_json=broadcast_json,
     )
     register_prompt_tools_routes(
         app,
         session_context,
         run_in_thread=_to_thread,
         clients=app.state.headless_clients,
-        broadcast_json=_broadcast_json,
-        start_generation_runner=_ensure_generation_runner,
+        broadcast_json=broadcast_json,
+        start_generation_runner=ensure_generation_runner,
     )
     register_style_thumbnail_routes(app, session_context, run_in_thread=_to_thread)
     register_danbooru_routes(app, session_context, run_in_thread=_to_thread)
@@ -448,29 +327,29 @@ def create_headless_app(
         session_context,
         run_in_thread=_to_thread,
         clients=app.state.headless_clients,
-        broadcast_json=_broadcast_json,
-        start_generation_runner=_ensure_generation_runner,
+        broadcast_json=broadcast_json,
+        start_generation_runner=ensure_generation_runner,
     )
     register_artist_thumbnail_routes(
         app,
         session_context,
         run_in_thread=_to_thread,
         clients=app.state.headless_clients,
-        start_generation_runner=_ensure_generation_runner,
+        start_generation_runner=ensure_generation_runner,
     )
     register_character_viewer_routes(
         app,
         session_context,
         run_in_thread=_to_thread,
         clients=app.state.headless_clients,
-        start_generation_runner=_ensure_generation_runner,
+        start_generation_runner=ensure_generation_runner,
     )
     register_result_display_routes(
         app,
         session_context,
         run_in_thread=_to_thread,
         clients=app.state.headless_clients,
-        broadcast_json=_broadcast_json,
+        broadcast_json=broadcast_json,
     )
 
     @app.websocket("/ws")

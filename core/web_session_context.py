@@ -77,27 +77,7 @@ class WebSessionContext:
         "noise": 0.0,
     })
     _img2img_window_counter: int = 0
-    _headless_img2img_service: Any = field(default=None, init=False, repr=False)
-    _headless_character_reference_service: Any = field(default=None, init=False, repr=False)
-    _headless_vibe_transfer_service: Any = field(default=None, init=False, repr=False)
-    _headless_automation_service: Any = field(default=None, init=False, repr=False)
-    _headless_webui_hiresfix_assist_service: Any = field(default=None, init=False, repr=False)
-    _headless_event_stream_service: Any = field(default=None, init=False, repr=False)
-    _headless_prompt_engineering_service: Any = field(default=None, init=False, repr=False)
-    _headless_conditional_prompt_service: Any = field(default=None, init=False, repr=False)
-    _headless_character_service: Any = field(default=None, init=False, repr=False)
-    _headless_wildcard_service: Any = field(default=None, init=False, repr=False)
-    _headless_instant_wildcard_service: Any = field(default=None, init=False, repr=False)
-    _headless_save_service: Any = field(default=None, init=False, repr=False)
-    _headless_search_state_service: Any = field(default=None, init=False, repr=False)
-    _headless_session_state_service: Any = field(default=None, init=False, repr=False)
-    _headless_runtime_path_service: Any = field(default=None, init=False, repr=False)
-    _headless_pipeline_run_service: Any = field(default=None, init=False, repr=False)
-    _headless_pipeline_hook_service: Any = field(default=None, init=False, repr=False)
-    _headless_api_control_service: Any = field(default=None, init=False, repr=False)
-    _headless_remote_state_service: Any = field(default=None, init=False, repr=False)
-    _headless_module_dispatch_service: Any = field(default=None, init=False, repr=False)
-    _headless_image_module_param_service: Any = field(default=None, init=False, repr=False)
+    _service_cache: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -164,11 +144,11 @@ class WebSessionContext:
         return self._event_stream_service().runtime(create=True)
 
     def _lazy_service(self, attr_name: str, module_name: str, class_name: str):
-        service = getattr(self, attr_name)
+        service = self._service_cache.get(attr_name)
         if service is None:
             module = importlib.import_module(module_name)
             service = getattr(module, class_name)(self)
-            setattr(self, attr_name, service)
+            self._service_cache[attr_name] = service
         return service
 
     def _img2img_service(self):

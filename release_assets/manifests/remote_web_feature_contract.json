@@ -5,6 +5,7 @@
   "route_source": "core/web_session_app.py",
   "route_sources": [
     "core/web_session_app.py",
+    "app/backend/server/danbooru_routes.py",
     "app/backend/server/install_manager_routes.py",
     "app/backend/server/prompt_tools_routes.py",
     "app/backend/server/state_routes.py",
@@ -167,6 +168,7 @@
       "name": "Danbooru internal tab and browser handoff",
       "source_files": [
         "core/web_session_app.py",
+        "app/backend/server/danbooru_routes.py",
         "app/web/remote/js/features/danbooruTab.mjs"
       ],
       "legacy_dependency": "external",

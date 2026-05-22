@@ -180,9 +180,10 @@ After each round:
 - Status, capabilities, queue snapshot, and pipeline prompt-run lookup routes moved from `core/web_session_app.py` to `app/backend/server/state_routes.py` while leaving queue action routes in the app factory until their generation-runner coupling is split.
 - Prompt highlight index route moved from `core/web_session_app.py` to `app/backend/server/prompt_tools_routes.py`; the heavier prompt-tools routes remain in the app factory until their shared tag/search helpers are isolated.
 - Style thumbnail routes moved from `core/web_session_app.py` to `app/backend/server/style_thumbnail_routes.py`; Character Viewer remains in the app factory until generation dispatch coupling is split.
+- Danbooru internal tab routes moved from `core/web_session_app.py` to `app/backend/server/danbooru_routes.py` with URL normalization and prompt-preview helpers owned by that route module.
 - `app/backend/server/__init__.py` now lazy-exports the compatibility server entrypoints so feature route modules can live under the same package without circular imports.
-- `release_assets/manifests/remote_web_feature_contract.json` now supports multiple route source files and lists the install-manager, state, prompt-tools, and style-thumbnail route owners.
-- Required validation for this slice: install-manager route test, runtime install manager tests, backend package shim tests, remote web feature contract test/checker, prompt highlight route smoke, style thumbnail route smoke, and py_compile/syntax checks of moved route sources.
+- `release_assets/manifests/remote_web_feature_contract.json` now supports multiple route source files and lists the install-manager, state, prompt-tools, style-thumbnail, and Danbooru route owners.
+- Required validation for this slice: install-manager route test, runtime install manager tests, backend package shim tests, remote web feature contract test/checker, prompt highlight route smoke, style thumbnail route smoke, Danbooru route smoke, and py_compile/syntax checks of moved route sources.
 
 ## Round 5 - Runtime Data and Migration Boundary
 

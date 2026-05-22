@@ -1523,7 +1523,7 @@ def test_headless_danbooru_routes_are_pyqt_free(monkeypatch):
             },
         }
 
-    monkeypatch.setattr("core.web_session_app.fetch_danbooru_post", fake_fetch)
+    monkeypatch.setattr("app.backend.server.danbooru_routes.fetch_danbooru_post", fake_fetch)
     context = WebSessionContext(token_manager=InMemoryTokenManager())
     app = create_headless_app(context)
     client = TestClient(app)

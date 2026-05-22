@@ -8,6 +8,7 @@ from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor
 from interfaces.base_module import BaseMiddleModule
 from interfaces.mode_aware_module import ModeAwareModule
 from core.prompt_context import PromptContext
+from core.wildcard_processor import split_tags_smart
 from modules.conditional.runtime_snapshot import CharStateSnapshot
 from ui.theme import DARK_COLORS, get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
@@ -792,6 +793,7 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
             prefix_tags, main_tags, postfix_tags, results, pass_matched = (
                 self._apply_rules_single_pass(
                     rules, prefix_tags, main_tags, postfix_tags,
+                    context=context,
                     stop_on_match=stop_on_match,
                 )
             )
@@ -840,7 +842,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         return context
 
     def _apply_rules_single_pass(self, rules, prefix_tags, main_tags, postfix_tags,
-                                 *, stop_on_match: bool):
+                                 *, context: Optional[PromptContext] = None,
+                                 stop_on_match: bool):
         """단일 패스. 각 규칙을 순서대로 평가/실행하고 결과 리스트 반환."""
         results: List[Dict] = []
         matched = False
@@ -849,7 +852,8 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 condition = rule['condition']
                 action = rule['action']
                 condition_met = self._check_condition(
-                    condition, prefix_tags, main_tags, postfix_tags
+                    condition, prefix_tags, main_tags, postfix_tags,
+                    context=context,
                 )
                 if condition_met:
                     prefix_tags, main_tags, postfix_tags = self._execute_action(
@@ -1109,12 +1113,71 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
                 return text[1:-1]
         return text
 
-    def _check_condition(self, condition: Dict, prefix_tags: List[str], main_tags: List[str], postfix_tags: List[str]) -> bool:
+    @staticmethod
+    def _append_condition_tag_value(out: List[str], value) -> None:
+        def add_candidate(candidate: str) -> None:
+            candidate = candidate.strip()
+            if candidate and candidate not in out:
+                out.append(candidate)
+
+        def add_variants(candidate: str) -> None:
+            candidate = candidate.strip()
+            if not candidate:
+                return
+            for base in (
+                candidate,
+                candidate.replace(r"\(", "(").replace(r"\)", ")"),
+            ):
+                add_candidate(base)
+                raw = _strip_weight_format(base)
+                add_candidate(raw)
+                if raw.startswith("(") and raw.endswith(")"):
+                    add_candidate(raw[1:-1])
+
+        if value is None:
+            return
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                PromptListModifierModule._append_condition_tag_value(out, item)
+            return
+        if not isinstance(value, str):
+            return
+
+        text = value.strip()
+        if not text:
+            return
+        add_variants(text)
+        for tag in split_tags_smart(text):
+            add_variants(tag)
+
+    def _condition_tag_scope(
+        self,
+        prefix_tags: List[str],
+        main_tags: List[str],
+        postfix_tags: List[str],
+        context: Optional[PromptContext] = None,
+    ) -> List[str]:
+        all_tags: List[str] = []
+        for tag in list(prefix_tags) + list(main_tags) + list(postfix_tags):
+            self._append_condition_tag_value(all_tags, tag)
+        if context is None:
+            return all_tags
+
+        metadata = getattr(context, 'metadata', None) or {}
+        for key in ('anima_character', 'anima_copyright', 'anima_artist'):
+            self._append_condition_tag_value(all_tags, metadata.get(key))
+        return all_tags
+
+    def _check_condition(self, condition: Dict, prefix_tags: List[str],
+                         main_tags: List[str], postfix_tags: List[str],
+                         context: Optional[PromptContext] = None) -> bool:
         """조건 확인 - 논리 연산자 지원"""
         if condition['type'] != 'logical':
             return False
             
-        all_tags = prefix_tags + main_tags + postfix_tags
+        all_tags = self._condition_tag_scope(
+            prefix_tags, main_tags, postfix_tags, context
+        )
         expression = condition['expression']
         
         return self._evaluate_logical_expression(expression, all_tags)
@@ -1616,7 +1679,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         raw_str = char_list[char_idx]
         if not isinstance(raw_str, str) or not raw_str.strip():
             return []
-        return [t.strip() for t in raw_str.split(',') if t.strip()]
+        tags: List[str] = []
+        for tag in split_tags_smart(raw_str):
+            self._append_condition_tag_value(tags, tag)
+        return tags
 
     def _check_char_in_condition(self, char_idx: int, tag_expr: str,
                                  *, negated: bool) -> bool:

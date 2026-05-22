@@ -42,6 +42,24 @@ class _StatusBar:
         pass
 
 
+class _CharacterModule:
+    def __init__(self, prompt):
+        self.prompt = prompt
+
+    def get_character_modifiable_clone(self):
+        return {"characters": [self.prompt], "uc": [""]}
+
+
+class _MiddleSection:
+    def __init__(self, module):
+        self.module = module
+
+    def get_module_instance(self, name):
+        if name == "CharacterModule":
+            return self.module
+        return None
+
+
 def _conditional_module(negative="base negative"):
     row = pd.Series({"rating": "e", "general": "1girl"})
     neg_edit = _TextEdit(negative)
@@ -94,6 +112,86 @@ def test_conditional_negative_fallback_restores_before_next_cycle():
     )
 
     assert neg_edit.toPlainText() == "base negative, nsfw, rating:explicit"
+
+
+def test_conditional_anima_metadata_tags_are_visible_to_conditions():
+    module, row, _neg_edit = _conditional_module()
+    context = PromptContext(source_row=row, settings={}, main_tags=["1girl", "blue sky"])
+    context.metadata["anima_character"] = "hatsune miku, kagamine rin"
+    context.metadata["anima_copyright"] = "vocaloid"
+
+    module._apply_rules(
+        context,
+        (
+            "(*1girl):postfix+=person_hit, "
+            "(*hatsune miku):prefix+=character_hit, "
+            "(*vocaloid):main+=copyright_hit"
+        ),
+        [],
+        max_passes=1,
+        stop_on_match=False,
+    )
+
+    assert "character_hit" in context.prefix_tags
+    assert "copyright_hit" in context.main_tags
+    assert "person_hit" in context.postfix_tags
+
+
+def test_conditional_exact_condition_matches_weighted_tag_raw_name():
+    module, row, _neg_edit = _conditional_module()
+    context = PromptContext(
+        source_row=row,
+        settings={},
+        main_tags=["0.85::1girl ::", "(blue sky:1.2)"],
+    )
+
+    module._apply_rules(
+        context,
+        "(*1girl):prefix+=person_hit, (*blue sky):postfix+=sky_hit",
+        [],
+        max_passes=1,
+        stop_on_match=False,
+    )
+
+    assert "person_hit" in context.prefix_tags
+    assert "sky_hit" in context.postfix_tags
+
+
+def test_conditional_exact_condition_matches_escaped_parentheses_semantic_tag():
+    module, row, _neg_edit = _conditional_module()
+    context = PromptContext(
+        source_row=row,
+        settings={},
+        main_tags=[r"\(blue archive\)"],
+    )
+
+    module._apply_rules(
+        context,
+        "(*blue archive):prefix+=copyright_hit",
+        [],
+        max_passes=1,
+        stop_on_match=False,
+    )
+
+    assert "copyright_hit" in context.prefix_tags
+
+
+def test_conditional_char_in_matches_escaped_parentheses_semantic_tag():
+    module, row, _neg_edit = _conditional_module()
+    module.app_context.middle_section_controller = _MiddleSection(
+        _CharacterModule(r"\(blue archive\), 1girl")
+    )
+    context = PromptContext(source_row=row, settings={}, main_tags=["solo"])
+
+    module._apply_rules(
+        context,
+        "(char_in(1, *blue archive)):prefix+=character_hit",
+        [],
+        max_passes=1,
+        stop_on_match=False,
+    )
+
+    assert "character_hit" in context.prefix_tags
 
 
 def test_generation_controller_publishes_generation_finished_event():

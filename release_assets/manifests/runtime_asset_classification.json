@@ -15,8 +15,8 @@
       "release_exclude_patterns": [
         "naia_temp_rows.parquet"
       ],
-      "owner": "core/web_session_app.py",
-      "notes": "Remote Web save_runner now writes to runtime cache. Repository root/data copies remain read-only legacy fallbacks."
+      "owner": "app/backend/server/search_runtime.py",
+      "notes": "Remote Web save_runner now writes through search_runtime to the runner parquet path owned by core/headless_search_state_service.py. Repository root/data copies remain read-only legacy fallbacks."
     },
     {
       "id": "artist_thumbnail_bundles",
@@ -122,17 +122,35 @@
       "id": "vibe_transfer_files",
       "patterns": [
         "*.naiv4vibe",
-        "*.naiv4vibebundle"
+        "*.naiv4vibebundle",
+        "save/vibe_transfer/**",
+        "save/vibe_transfer_clusters/**"
       ],
       "decision": "user_imported_runtime_asset",
-      "runtime_destination": "bundles/vibe_transfer",
+      "runtime_destination": "save/vibe_transfer and save/vibe_transfer_clusters",
       "release_action": "exclude",
       "release_exclude_patterns": [
         "*.naiv4vibe",
-        "*.naiv4vibebundle"
+        "*.naiv4vibebundle",
+        "save/vibe_transfer/**",
+        "save/vibe_transfer_clusters/**"
       ],
-      "owner": "core/web_session_context.py",
-      "notes": "Vibe files are user-imported or downloaded runtime data and should be copied/imported into runtime bundles/save flows, not shipped from repository root."
+      "owner": "core/headless_vibe_transfer_service.py",
+      "notes": "Vibe files and encoded Vibe storage are user/imported runtime data. Headless storage reads runtime save roots and keeps repository save/ as a source-checkout migration fallback only."
+    },
+    {
+      "id": "character_reference_storage",
+      "patterns": [
+        "save/character_reference/**"
+      ],
+      "decision": "runtime_user_state",
+      "runtime_destination": "save/character_reference",
+      "release_action": "exclude",
+      "release_exclude_patterns": [
+        "save/character_reference/**"
+      ],
+      "owner": "core/headless_character_reference_service.py",
+      "notes": "Character Reference images are stored under runtime save roots. Repository save/character_reference remains a source-checkout migration/read fallback and is disabled for Electron mode."
     },
     {
       "id": "local_state_and_outputs",

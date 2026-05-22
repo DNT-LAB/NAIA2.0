@@ -56,6 +56,9 @@
     ],
     "local_runtime_state": [
       "save/**",
+      "save/character_reference/**",
+      "save/vibe_transfer/**",
+      "save/vibe_transfer_clusters/**",
       "logs/**",
       "output/**",
       "tmp/**",

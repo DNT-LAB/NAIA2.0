@@ -22,6 +22,7 @@ REQUIRED_DECISION_IDS = {
     "local_state_and_outputs",
     "user_wildcards",
     "bootstrap_source_assets",
+    "character_reference_storage",
     "installer_seed_templates",
 }
 ALLOWED_DECISIONS = {

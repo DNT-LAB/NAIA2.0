@@ -9,6 +9,7 @@ __pycache__/
 save/
 temp/
 /tmp/
+tmp_codex_*/
 /user-data/
 /wildcards/
 data/tags/

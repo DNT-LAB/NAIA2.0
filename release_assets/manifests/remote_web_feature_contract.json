@@ -12,6 +12,7 @@
     "app/backend/server/install_manager_routes.py",
     "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_tools_routes.py",
+    "app/backend/server/result_display_routes.py",
     "app/backend/server/state_routes.py",
     "app/backend/server/style_thumbnail_routes.py",
     "app/backend/server/web_shell_routes.py"
@@ -240,6 +241,7 @@
       "id": "result_history_viewer_actions",
       "name": "Result, history, viewer, image actions, and metadata",
       "source_files": [
+        "app/backend/server/result_display_routes.py",
         "core/web_session_app.py",
         "core/web_session_context.py",
         "core/result_image_payload_service.py",

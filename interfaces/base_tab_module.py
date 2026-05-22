@@ -1,8 +1,5 @@
 from abc import ABC, abstractmethod, ABCMeta
-from typing import Any, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from core.context import AppContext
+from typing import Any
 
 
 class _BoundSignal:
@@ -47,7 +44,11 @@ class pyqtABCMeta(ABCMeta):
     pass
 
 class BaseTabModule(QObject, ABC, metaclass=pyqtABCMeta):
-    """오른쪽 패널의 탭으로 동적 로드될 모든 모듈의 기반 추상 클래스"""
+    """Legacy desktop tab-widget base.
+
+    Headless Web tabs should depend on interfaces.headless_module_protocol
+    instead of subclassing this widget-oriented adapter.
+    """
     
     # 탭 간 통신을 위한 공통 시그널들
     parameters_extracted = pyqtSignal(dict)
@@ -59,7 +60,7 @@ class BaseTabModule(QObject, ABC, metaclass=pyqtABCMeta):
         self.app_context = None
         self.tab_id = self.__class__.__name__  # 고유 식별자
 
-    def initialize_with_context(self, app_context: 'AppContext'):
+    def initialize_with_context(self, app_context: Any):
         """모듈에 AppContext를 주입합니다."""
         self.app_context = app_context
 

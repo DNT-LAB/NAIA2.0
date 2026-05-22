@@ -28,6 +28,8 @@ def test_legacy_pyqt_surface_classification_covers_required_surfaces_and_tests()
 
     assert set(REQUIRED_SURFACE_IDS) == set(surfaces)
     assert surfaces["comic_generator_tab"]["path"] == "tabs/comic_generator/**"
+    assert surfaces["comic_generator_tab"]["root_compatibility_entry"] == "tabs/comic_generator_tab.py"
+    assert "tabs/comic_generator_tab.py" in surfaces["comic_generator_tab"]["release_exclude_patterns"]
     assert surfaces["ontology_visualizer"]["classification"] == "desktop_only_pyqt_webengine_experiment"
     assert "tests/test_remote_api_status.py" in desktop_tests
     assert set(scan_legacy_desktop_test_imports()) <= desktop_tests

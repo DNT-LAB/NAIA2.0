@@ -40,6 +40,7 @@
       "core/mode_ware_manager.py",
       "core/tag_data_manager.py",
       "core/dll_fix.py",
+      "tabs/comic_generator_tab.py",
       "tabs/comic_generator/**",
       "ui/variational/**",
       "experimental/ontology_visualizer/**",

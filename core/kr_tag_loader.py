@@ -82,6 +82,7 @@ def load_kr_tag_records(
     root: str | Path | None = None,
     *,
     data_roots: list[str | Path] | tuple[str | Path, ...] | None = None,
+    allow_legacy_interactive_fallback: bool = False,
     warn: Callable[[str], None] | None = None,
 ) -> KrTagLoadResult:
     """Load the merged KR tag corpus without depending on RemoteBridge."""
@@ -92,7 +93,7 @@ def load_kr_tag_records(
     raw: dict[str, dict[str, Any]] = {}
 
     interactive_path = repo_root / "ui" / "interactive" / "interactive"
-    if not interactive_path.exists():
+    if not interactive_path.exists() and allow_legacy_interactive_fallback:
         legacy_path = repo_root / "legacy_desktop" / "ui" / "interactive" / "interactive"
         if legacy_path.exists():
             interactive_path = legacy_path

@@ -67,6 +67,7 @@ def test_release_manifest_excludes_legacy_and_local_runtime_state():
     assert "core/context.py" in excluded
     assert "core/image_crud_controller.py" in excluded
     assert "core/tag_data_manager.py" in excluded
+    assert "tabs/comic_generator_tab.py" in excluded
     assert "tabs/comic_generator/**" in excluded
     assert "ui/variational/**" in excluded
     assert "experimental/ontology_visualizer/**" in excluded

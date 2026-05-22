@@ -134,11 +134,11 @@ After each round:
 ### Checklist
 
 - [x] `core/api_service.py`, `core/prompt_processor.py`, `core/prompt_generation_service.py`의 `core.context.AppContext` type hint를 Protocol 또는 `Any` 기반 headless contract로 교체한다.
-- [ ] `interfaces/base_module.py`, `interfaces/base_tab_module.py`를 legacy module protocol과 headless protocol로 분리한다.
+- [x] `interfaces/base_module.py`, `interfaces/base_tab_module.py`를 legacy module protocol과 headless protocol로 분리한다.
 - [x] `utils/clipboard_image.py`를 Qt clipboard adapter와 pure image byte helper로 분리한다.
-- [ ] `utils/load_generation_params.py`를 legacy desktop utility로 격리하거나 headless settings service와 분리한다.
-- [ ] `tabs/comic_generator_tab.py` root compatibility entry를 archive/delete 후보로 분류한다.
-- [ ] `core/kr_tag_loader.py`의 legacy interactive fallback을 source mode migration fallback으로 제한한다.
+- [x] `utils/load_generation_params.py`를 legacy desktop utility로 격리하거나 headless settings service와 분리한다.
+- [x] `tabs/comic_generator_tab.py` root compatibility entry를 archive/delete 후보로 분류한다.
+- [x] `core/kr_tag_loader.py`의 legacy interactive fallback을 source mode migration fallback으로 제한한다.
 
 ### When Done
 
@@ -151,7 +151,11 @@ After each round:
 - `core/api_service.py`, `core/prompt_processor.py`, `core/prompt_generation_service.py`, and the adjacent `core/mode_ware_manager.py` now type the shared context as `Any` instead of importing `core.context.AppContext` for annotations.
 - `rg 'from core\.context import AppContext|app_context: .AppContext|core\.context' core/api_service.py core/prompt_processor.py core/prompt_generation_service.py core/mode_ware_manager.py core -g '*.py'` returns no remaining matches in the targeted headless core files.
 - `utils/image_bytes.py` now owns pure PNG/PIL byte conversion without importing Qt; `utils/clipboard_image.py` remains the Qt clipboard adapter and reuses that helper.
-- Required validation for this slice: `python -m py_compile core\api_service.py core\prompt_processor.py core\prompt_generation_service.py core\mode_ware_manager.py utils\image_bytes.py utils\clipboard_image.py`, focused prompt/headless tests, and `tests\test_image_bytes.py tests\test_vibe_transfer_clipboard.py`.
+- `interfaces/headless_module_protocol.py` and `interfaces/legacy_module_protocol.py` now separate headless hook/module contracts from legacy widget module contracts; `base_module.py` and `base_tab_module.py` are documented as legacy widget adapters and no longer type against `core.context.AppContext`.
+- `GenerationParamsManager` moved to `legacy_desktop/utils/load_generation_params.py`; the root `utils/load_generation_params.py` is now a lazy compatibility shim that does not import `legacy_desktop` during module import.
+- `tabs/comic_generator_tab.py` is now explicitly classified as the root compatibility entry for the legacy Comic Generator surface and is excluded alongside `tabs/comic_generator/**`.
+- `core/kr_tag_loader.py` no longer reads `legacy_desktop/ui/interactive/interactive` by default; callers must opt into `allow_legacy_interactive_fallback=True` for source-mode migration reads.
+- Required validation for this slice: `python -m py_compile core\api_service.py core\prompt_processor.py core\prompt_generation_service.py core\mode_ware_manager.py core\kr_tag_loader.py utils\image_bytes.py utils\clipboard_image.py utils\load_generation_params.py legacy_desktop\utils\load_generation_params.py interfaces\base_module.py interfaces\base_tab_module.py interfaces\headless_module_protocol.py interfaces\legacy_module_protocol.py`, focused prompt/headless tests, `tests\test_requirements_split.py`, `tests\test_kr_tag_loader.py`, `tests\test_image_bytes.py`, `tests\test_vibe_transfer_clipboard.py`, and legacy surface classification gates.
 
 ## Round 4 - Split the Headless Monolith by Feature Owner
 

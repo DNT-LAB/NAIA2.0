@@ -1,13 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Any, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from core.context import AppContext
-    from core.prompt_context import PromptContext
-    QWidget = Any
+from typing import Any
 
 class BaseMiddleModule(ABC):
-    """중간 패널 모듈의 기본 인터페이스 (호환성 플래그 추가)"""
+    """Legacy desktop middle-widget base.
+
+    Headless Web modules should depend on interfaces.headless_module_protocol
+    instead of subclassing this widget-oriented adapter.
+    """
     
     def __init__(self):
         # 🆕 필수: 모든 모듈은 호환성 플래그를 가져야 함
@@ -25,7 +24,7 @@ class BaseMiddleModule(ABC):
         pass
     
     @abstractmethod
-    def create_widget(self, parent) -> 'QWidget':
+    def create_widget(self, parent) -> Any:
         """UI 위젯 생성"""
         pass
 
@@ -48,7 +47,7 @@ class BaseMiddleModule(ABC):
         """생성 파라미터 반환"""
         return {}
     
-    def execute_pipeline_hook(self, context) -> 'PromptContext':
+    def execute_pipeline_hook(self, context: Any) -> Any:
         """파이프라인 훅 실행"""
         return context
     

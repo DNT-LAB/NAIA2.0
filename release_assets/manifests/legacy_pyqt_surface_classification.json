@@ -6,13 +6,15 @@
     {
       "id": "comic_generator_tab",
       "path": "tabs/comic_generator/**",
+      "root_compatibility_entry": "tabs/comic_generator_tab.py",
       "classification": "desktop_only_pyqt_tab",
       "release_action": "exclude",
       "release_exclude_patterns": [
+        "tabs/comic_generator_tab.py",
         "tabs/comic_generator/**"
       ],
       "next_action": "archive_under_legacy_desktop_or_rebuild_as_web_feature_if_product_required",
-      "notes": "Imports PyQt6 widgets/graphics and is not part of the supported headless Remote Web feature contract."
+      "notes": "Imports PyQt6 widgets/graphics through the root compatibility entry and is not part of the supported headless Remote Web feature contract."
     },
     {
       "id": "variational_generation_window",
@@ -53,6 +55,7 @@
     "tests/test_character_settings.py",
     "tests/test_conditional_prompt_restore.py",
     "tests/test_danbooru_client.py",
+    "tests/test_generation_params_hiresfix_persistence.py",
     "tests/test_generation_preset_tokens.py",
     "tests/test_hires_preset_overlay.py",
     "tests/test_middle_section_controller_static_registry.py",

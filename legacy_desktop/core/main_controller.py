@@ -14,7 +14,7 @@ from PIL import Image
 from legacy_desktop.ui.theme import DARK_COLORS
 from legacy_desktop.ui.scaling_manager import get_scaled_font_size
 from core.search_result_model import SearchResultModel
-from utils.load_generation_params import GenerationParamsManager
+from legacy_desktop.utils.load_generation_params import GenerationParamsManager
 
 
 class MainController:

@@ -143,7 +143,7 @@ from core.tag_data_manager import TagDataManager
 from core.wildcard_manager import WildcardManager
 from legacy_desktop.core.prompt_generation_controller import PromptGenerationController
 from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
-from utils.load_generation_params import GenerationParamsManager
+from legacy_desktop.utils.load_generation_params import GenerationParamsManager
 from legacy_desktop.ui.img2img_popup import Img2ImgPopup
 from legacy_desktop.ui.img2img_panel import Img2ImgPanel
 from legacy_desktop.ui.img2img_window import Img2ImgWindow

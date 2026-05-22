@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from utils.load_generation_params import GenerationParamsManager
+from legacy_desktop.utils.load_generation_params import GenerationParamsManager
 
 
 class _ValueWidget:

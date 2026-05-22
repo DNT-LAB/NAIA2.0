@@ -50,6 +50,7 @@
         "pack:dir",
         "dist:win-dir",
         "release:portable:clean-python",
+        "check:runtime-distribution",
         "smoke:electron:source",
         "smoke:electron:packaged"
       ],

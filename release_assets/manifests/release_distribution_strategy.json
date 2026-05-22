@@ -114,6 +114,7 @@
       "preflight:electron-deps",
       "preflight:electron-deps:summary",
       "goal:audit:summary",
+      "check:runtime-distribution",
       "check:approval-gate",
       "preflight:packaging-inputs",
       "preflight:packaging-inputs:bundled-python",
@@ -137,6 +138,11 @@
       "release:portable:clean-python:smoke:scan"
     ],
     "required_script_terms": {
+      "release:check": [
+        "check:distribution",
+        "check:runtime-distribution",
+        "check:approval-gate"
+      ],
       "release:final": [
         "--execute",
         "--run-electron-cdp",

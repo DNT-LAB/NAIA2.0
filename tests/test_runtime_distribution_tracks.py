@@ -55,6 +55,7 @@ def _minimal_repo(root: Path, *, launcher_text: str | None = None, package_scrip
         "pack:dir": "electron-builder --dir",
         "dist:win-dir": "electron-builder --win dir",
         "release:portable:clean-python": "python tool.py",
+        "check:runtime-distribution": "python tools/check_runtime_distribution_tracks.py",
         "smoke:electron:source": "python smoke.py",
         "smoke:electron:packaged": "python smoke.py",
     }

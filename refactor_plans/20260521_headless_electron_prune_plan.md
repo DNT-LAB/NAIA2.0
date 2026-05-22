@@ -361,6 +361,13 @@ After each round:
 - First-run delay is visible and explainable.
 - Packaged release does not bundle local runtime/user data.
 
+### Runtime Distribution Gate Slice - 2026-05-22
+
+- Electron `release:check` now runs `check:runtime-distribution` in addition to the release distribution strategy gate, so the optional shell check also validates the clone-user Python Web path stays free of npm/Electron/Docker requirements.
+- `release_assets/manifests/runtime_distribution_tracks.json` now requires the `check:runtime-distribution` package script for the Electron release track.
+- `release_assets/manifests/release_distribution_strategy.json` now requires `release:check` to keep `check:distribution`, `check:runtime-distribution`, and `check:approval-gate` wired in order.
+- Current validation: `python -B tools\check_runtime_distribution_tracks.py`, `python -B tools\check_release_distribution_strategy.py`, and focused tests for runtime/release distribution gates pass.
+
 ## Round 9 - Hard Delete Phase
 
 ### Checklist

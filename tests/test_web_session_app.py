@@ -382,6 +382,32 @@ def test_headless_event_preset_generate_broadcasts_prompt_generated():
     assert message["prompt"] == "1girl, rating:sensitive, looking back"
 
 
+def test_headless_event_preset_prompt_preview_records_prompt_run():
+    context = WebSessionContext(token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    response = client.post("/api/event-preset/prompt-preview", json={
+        "requestId": "event-preview-1",
+        "ratingId": "s",
+        "personId": "1girl_solo",
+        "comboPrompt": "standing, smile",
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    prompt_run_id = payload["prompt_run_id"]
+    prompt_run = client.get(f"/api/pipeline/prompt-runs/{prompt_run_id}").json()
+
+    assert payload["requestId"] == "event-preview-1"
+    assert payload["promptRunId"] == prompt_run_id
+    assert prompt_run["source"] == "event_preset_preview"
+    assert prompt_run["external_request_id"] == "event-preview-1"
+    assert prompt_run["metadata"]["preview"] is True
+    assert prompt_run["final_prompt"] == payload["prompt"]
+    assert prompt_run["source_row"]["event_preset_preview"] is True
+
+
 def test_headless_composite_preset_generate_dispatches_remote_preset_flags():
     context = WebSessionContext(
         token_manager=InMemoryTokenManager({"nai_token": "pst-headless-token"}),
@@ -429,6 +455,34 @@ def test_headless_composite_preset_generate_broadcasts_prompt_generated():
     assert message["source"] == "preset"
     assert message["remote_preset_request_id"] == "preset-req-1"
     assert message["prompt"] == "1girl, dress, smile"
+
+
+def test_headless_composite_preset_prompt_preview_records_prompt_run():
+    context = WebSessionContext(token_manager=InMemoryTokenManager())
+    app = create_headless_app(context)
+    client = TestClient(app)
+
+    response = client.post("/api/preset/prompt-preview", json={
+        "requestId": "preset-preview-1",
+        "promptOverride": "1girl, dress, smile",
+        "axes": {"events": {"enabled": True}},
+    })
+
+    assert response.status_code == 200
+    payload = response.json()
+    prompt_run_id = payload["prompt_run_id"]
+    prompt_run = client.get(f"/api/pipeline/prompt-runs/{prompt_run_id}").json()
+    prompt_runs = client.get("/api/pipeline/prompt-runs?limit=5").json()
+
+    assert payload["requestId"] == "preset-preview-1"
+    assert payload["promptRunId"] == prompt_run_id
+    assert prompt_run["source"] == "preset_preview"
+    assert prompt_run["external_request_id"] == "preset-preview-1"
+    assert prompt_run["metadata"]["preview"] is True
+    assert prompt_run["final_prompt"] == "1girl, dress, smile"
+    assert prompt_run["source_row"]["remote_preset_preview"] is True
+    assert prompt_runs["type"] == "pipeline_runs"
+    assert prompt_runs["prompt_runs"][0]["prompt_run_id"] == prompt_run_id
 
 
 def test_headless_websocket_random_generates_prompt_from_core_service():

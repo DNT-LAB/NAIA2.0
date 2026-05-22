@@ -59,6 +59,8 @@
       "routes": [
         {"method": "GET", "path": "/api/status", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/headless/capabilities", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/pipeline/prompt-runs", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/pipeline/prompt-runs/{prompt_run_id}", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/queue/state", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/queue/action", "smoke": "state_mutation"}
       ]

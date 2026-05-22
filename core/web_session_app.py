@@ -1919,6 +1919,55 @@ def _record_preset_prompt_run(
     return run.prompt_run_id
 
 
+def _record_prompt_preview_run(
+    context: WebSessionContext,
+    result: dict[str, Any],
+    *,
+    source: str,
+    request_id: str,
+    prompt: str,
+    source_row_data: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    existing = str(result.get("prompt_run_id") or result.get("promptRunId") or "")
+    if existing:
+        return existing
+    starter = getattr(context, "start_prompt_run", None)
+    completer = getattr(context, "complete_prompt_run", None)
+    if not callable(starter) or not callable(completer):
+        return ""
+
+    clean_request_id = str(request_id or result.get("requestId") or uuid.uuid4().hex)
+    result["requestId"] = clean_request_id
+    source_row = dict(source_row_data or {})
+    source_row.setdefault("general", prompt)
+    source_row.setdefault("prompt_preview_source", source)
+    run = starter(
+        source=source,
+        source_row=source_row,
+        settings=settings or {},
+        external_request_id=clean_request_id,
+        metadata={
+            "prompt_source": source,
+            "preview": True,
+            **(metadata or {}),
+        },
+    )
+    completer(
+        run.prompt_run_id,
+        final_prompt=prompt,
+        metadata={
+            "prompt_source": source,
+            "preview": True,
+            **(metadata or {}),
+        },
+    )
+    result["prompt_run_id"] = run.prompt_run_id
+    result["promptRunId"] = run.prompt_run_id
+    return run.prompt_run_id
+
+
 def _preset_prompt_generated_payload(
     context: WebSessionContext,
     result: dict[str, Any],
@@ -2974,6 +3023,17 @@ def create_headless_app(
     async def api_status():
         return session_context.http_status_payload()
 
+    @app.get("/api/pipeline/prompt-runs")
+    async def api_pipeline_prompt_runs(limit: int = 50):
+        return session_context.prompt_runs_payload(limit=limit)
+
+    @app.get("/api/pipeline/prompt-runs/{prompt_run_id}")
+    async def api_pipeline_prompt_run(prompt_run_id: str):
+        payload = session_context.get_prompt_run_payload(prompt_run_id, include_source_row=True)
+        if payload is None:
+            return JSONResponse({"error": "prompt run not found"}, status_code=404)
+        return payload
+
     @app.get("/api/install-manager")
     async def api_install_manager_state():
         try:
@@ -3254,7 +3314,25 @@ def create_headless_app(
         if not isinstance(payload, dict):
             payload = {}
         try:
-            return await _to_thread(_event_preset_service(session_context).prompt_preview, payload)
+            result = await _to_thread(_event_preset_service(session_context).prompt_preview, payload)
+            if isinstance(result, dict):
+                prompt = str(result.get("prompt") or "")
+                request_id = str(result.get("requestId") or payload.get("requestId") or payload.get("request_id") or "")
+                _record_prompt_preview_run(
+                    session_context,
+                    result,
+                    source="event_preset_preview",
+                    request_id=request_id,
+                    prompt=prompt,
+                    source_row_data={
+                        "general": prompt,
+                        "rating": payload.get("ratingId") or "s",
+                        "event_preset_preview": True,
+                    },
+                    settings=payload,
+                    metadata={"api_mode": session_context.get_api_mode()},
+                )
+            return result
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:
@@ -3269,7 +3347,29 @@ def create_headless_app(
         if not isinstance(payload, dict):
             payload = {}
         try:
-            return await _to_thread(_preset_composer_service(session_context).prompt_preview, payload)
+            result = await _to_thread(_preset_composer_service(session_context).prompt_preview, payload)
+            if isinstance(result, dict):
+                prompt_plan = result.get("promptPlan") if isinstance(result.get("promptPlan"), dict) else {}
+                prompt = str(prompt_plan.get("finalPrompt") or "")
+                request_id = str(result.get("requestId") or payload.get("requestId") or payload.get("request_id") or "")
+                _record_prompt_preview_run(
+                    session_context,
+                    result,
+                    source="preset_preview",
+                    request_id=request_id,
+                    prompt=prompt,
+                    source_row_data={
+                        "general": prompt,
+                        "remote_preset_request_id": request_id,
+                        "remote_preset_preview": True,
+                    },
+                    settings=payload,
+                    metadata={
+                        "api_mode": session_context.get_api_mode(),
+                        "active_axes": prompt_plan.get("activeAxes") or [],
+                    },
+                )
+            return result
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:

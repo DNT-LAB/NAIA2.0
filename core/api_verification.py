@@ -2,7 +2,7 @@
 API 검증 순수 함수 레이어 — Qt/UI 의존성 없음.
 
 - 데스크톱: `core/api_validator.py` 의 QObject 워커가 이 함수들을 호출
-- 웹: `core/remote_api_server.py` 의 Setup 모듈이 이 함수들을 직접 호출
+- 웹: `core/web_session_app.py` 의 Setup/API route가 이 함수들을 직접 호출
 
 테스트 토큰 `api_test_BCF13af9#d` 는 NAI 한정 검증 우회 (기존 동작 유지).
 """

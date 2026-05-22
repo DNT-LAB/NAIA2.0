@@ -42,6 +42,17 @@
         "Post-Work Evaluation",
         "First Implementation Slice"
       ]
+    },
+    {
+      "path": "refactor_plans/20260521_headless_electron_prune_plan.md",
+      "kind": "multi_round",
+      "required_sections": [
+        "Goal",
+        "Principles",
+        "Execution Protocol",
+        "Post-Work Evaluation",
+        "First Work Item"
+      ]
     }
   ],
   "required_phase_terms": {

@@ -96,8 +96,15 @@ def test_refactor_plan_execution_contract_passes_current_repository():
     assert payload["ok"] is True
     assert payload["manifest"] == "release_assets/manifests/refactor_plan_execution_contract.json"
     assert payload["contract_document"] == "refactor_plans/20260521_refactor_plan_execution_protocol.md"
-    assert payload["tracked_plan_count"] >= 2
+    assert payload["tracked_plan_count"] >= 4
     assert payload["violations"] == []
+
+
+def test_refactor_plan_execution_contract_tracks_prune_plan():
+    manifest = json.loads(Path("release_assets/manifests/refactor_plan_execution_contract.json").read_text(encoding="utf-8"))
+    paths = {item["path"] for item in manifest["tracked_plan_documents"]}
+
+    assert "refactor_plans/20260521_headless_electron_prune_plan.md" in paths
 
 
 def test_refactor_plan_execution_contract_rejects_missing_phase_terms(tmp_path):

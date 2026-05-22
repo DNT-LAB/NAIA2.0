@@ -6,6 +6,7 @@
   "route_sources": [
     "core/web_session_app.py",
     "app/backend/server/danbooru_routes.py",
+    "app/backend/server/event_preset_routes.py",
     "app/backend/server/install_manager_routes.py",
     "app/backend/server/prompt_tools_routes.py",
     "app/backend/server/state_routes.py",
@@ -135,6 +136,8 @@
       "name": "Event, clothes, expression, and composed presets",
       "source_files": [
         "core/web_session_app.py",
+        "app/backend/server/event_preset_routes.py",
+        "app/backend/server/preset_services.py",
         "core/event_preset_service.py",
         "core/clothes_preset_service.py",
         "core/expression_preset_service.py",

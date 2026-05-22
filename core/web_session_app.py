@@ -22,7 +22,15 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from app.backend.server.danbooru_routes import register_danbooru_routes
+from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.install_manager_routes import register_install_manager_routes
+from app.backend.server.preset_services import (
+    clothes_preset_service as _clothes_preset_service,
+    event_preset_download_service as _event_preset_download_service,
+    event_preset_service as _event_preset_service,
+    expression_preset_service as _expression_preset_service,
+    preset_composer_service as _preset_composer_service,
+)
 from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
 from app.backend.server.state_routes import register_state_routes
 from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
@@ -30,13 +38,8 @@ from app.web import resolve_remote_web_dir
 from core import result_image_payload_service as result_images
 from core.artist_thumbnail_service import ArtistThumbnailService
 from core.character_viewer_service import CharacterViewerService
-from core.clothes_preset_service import ClothesPresetService
-from core.event_preset_download_service import EventPresetDownloadService
-from core.event_preset_service import EventPresetService
-from core.expression_preset_service import ExpressionPresetService
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
-from core.preset_composer_service import PresetComposerService
 from core.web_session_context import WebSessionContext
 
 
@@ -171,94 +174,6 @@ def _artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailServ
         )
         context.artist_thumbnail_service = service
     return service
-
-
-def _event_preset_service(context: WebSessionContext) -> EventPresetService:
-    service = getattr(context, "event_preset_service", None)
-    if service is None:
-        data_root = None
-        thumbnail_root = None
-        runtime_paths = getattr(context, "runtime_paths", None)
-        if runtime_paths is not None:
-            data_root = runtime_paths.data_dir
-            thumbnail_root = runtime_paths.ui_assets_dir
-        service = EventPresetService(
-            context.repo_root,
-            data_root=data_root,
-            thumbnail_root=thumbnail_root,
-        )
-        context.event_preset_service = service
-    return service
-
-
-def _clothes_preset_service(context: WebSessionContext) -> ClothesPresetService:
-    service = getattr(context, "clothes_preset_service", None)
-    if service is None:
-        service = ClothesPresetService(context.repo_root)
-        context.clothes_preset_service = service
-    return service
-
-
-def _expression_preset_service(context: WebSessionContext) -> ExpressionPresetService:
-    service = getattr(context, "expression_preset_service", None)
-    if service is None:
-        service = ExpressionPresetService(context.repo_root)
-        context.expression_preset_service = service
-    return service
-
-
-def _preset_composer_service(context: WebSessionContext) -> PresetComposerService:
-    service = getattr(context, "preset_composer_service", None)
-    if service is None:
-        service = PresetComposerService(
-            _event_preset_service(context),
-            axis_providers={"clothes": _clothes_preset_service(context)},
-        )
-        context.preset_composer_service = service
-    return service
-
-
-def _event_preset_download_service(context: WebSessionContext) -> EventPresetDownloadService:
-    service = getattr(context, "event_preset_download_service", None)
-    if service is None:
-        def refresh_services() -> None:
-            data_root = None
-            thumbnail_root = None
-            runtime_paths = getattr(context, "runtime_paths", None)
-            if runtime_paths is not None:
-                data_root = runtime_paths.data_dir
-                thumbnail_root = runtime_paths.ui_assets_dir
-            context.event_preset_service = EventPresetService(
-                context.repo_root,
-                data_root=data_root,
-                thumbnail_root=thumbnail_root,
-            )
-            context.preset_composer_service = PresetComposerService(
-                context.event_preset_service,
-                axis_providers={"clothes": _clothes_preset_service(context)},
-            )
-
-        data_root = None
-        thumbnail_root = None
-        runtime_paths = getattr(context, "runtime_paths", None)
-        if runtime_paths is not None:
-            data_root = runtime_paths.data_dir
-            thumbnail_root = runtime_paths.ui_assets_dir
-        service = EventPresetDownloadService(
-            context.repo_root,
-            status_provider=lambda: _event_preset_service(context).status(),
-            on_complete=refresh_services,
-            data_root=data_root,
-            thumbnail_root=thumbnail_root,
-        )
-        context.event_preset_download_service = service
-    return service
-
-
-def _event_preset_status(context: WebSessionContext) -> dict[str, Any]:
-    status = _event_preset_service(context).status()
-    status["download"] = _event_preset_download_service(context).snapshot()
-    return status
 
 
 def _normalize_remote_mode(context: WebSessionContext, mode: str | None = None) -> str:
@@ -2919,6 +2834,7 @@ def create_headless_app(
     register_prompt_tools_routes(app, session_context)
     register_style_thumbnail_routes(app, session_context, run_in_thread=_to_thread)
     register_danbooru_routes(app, session_context, run_in_thread=_to_thread)
+    register_event_preset_routes(app, session_context, run_in_thread=_to_thread)
 
     @app.post("/api/queue/action")
     async def api_queue_action(req: Request):
@@ -3020,34 +2936,6 @@ def create_headless_app(
         await _broadcast_json(app.state.headless_clients, result["workflow"])
         await _broadcast_json(app.state.headless_clients, result["params"])
         return result
-
-    @app.get("/api/event-preset/status")
-    async def api_event_preset_status():
-        try:
-            return await _to_thread(_event_preset_status, session_context)
-        except Exception as exc:
-            return JSONResponse({"error": f"Event Preset status failed: {exc}"}, status_code=500)
-
-    @app.get("/api/event-preset/download")
-    async def api_event_preset_download_state():
-        try:
-            return await _to_thread(_event_preset_download_service(session_context).snapshot)
-        except Exception as exc:
-            return JSONResponse({"error": f"Event Preset download state failed: {exc}"}, status_code=500)
-
-    @app.post("/api/event-preset/download")
-    async def api_event_preset_download():
-        try:
-            return await _to_thread(_event_preset_download_service(session_context).start)
-        except Exception as exc:
-            return JSONResponse({"error": f"Event Preset download failed: {exc}"}, status_code=500)
-
-    @app.post("/api/event-preset/download/cancel")
-    async def api_event_preset_download_cancel():
-        try:
-            return await _to_thread(_event_preset_download_service(session_context).cancel)
-        except Exception as exc:
-            return JSONResponse({"error": f"Event Preset download cancel failed: {exc}"}, status_code=500)
 
     @app.get("/api/tag/lookup")
     async def api_tag_lookup(tag: str = ""):

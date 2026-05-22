@@ -26,7 +26,6 @@ import json
 from core import result_image_payload_service as result_images
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_result_service import HeadlessResultStore
-from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
 from core.pipeline_run_registry import PipelineRunRegistry, PromptPipelineRun
 from app.backend.runtime import RuntimePaths, resolve_runtime_paths
 from core.search_result_model import SearchResultModel
@@ -228,6 +227,7 @@ class WebSessionContext:
     _img2img_window_counter: int = 0
     _headless_img2img_service: Any = field(default=None, init=False, repr=False)
     _headless_character_reference_service: Any = field(default=None, init=False, repr=False)
+    _headless_vibe_transfer_service: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.token_manager is None:
@@ -314,6 +314,15 @@ class WebSessionContext:
 
             service = HeadlessCharacterReferenceService(self)
             self._headless_character_reference_service = service
+        return service
+
+    def _vibe_transfer_service(self):
+        service = self._headless_vibe_transfer_service
+        if service is None:
+            from core.headless_vibe_transfer_service import HeadlessVibeTransferService
+
+            service = HeadlessVibeTransferService(self)
+            self._headless_vibe_transfer_service = service
         return service
 
     def _default_token_manager(self) -> TokenStore:
@@ -1261,8 +1270,7 @@ class WebSessionContext:
         return self._character_reference_service().scan_storage()
 
     def _disable_all_vibe_frames(self) -> None:
-        for frame in self.vibe_transfer_frames:
-            frame["is_enabled"] = False
+        self._vibe_transfer_service().disable_all_frames()
 
     def _disable_all_character_reference_frames(self) -> None:
         self._character_reference_service().disable_all_frames()
@@ -1275,353 +1283,36 @@ class WebSessionContext:
         file_path: str = "",
         enabled: bool = True,
     ) -> dict[str, Any]:
-        from PIL import Image
-
-        with Image.open(io.BytesIO(image_bytes)) as opened:
-            image = opened.convert("RGBA")
-            png_bytes = self._image_to_png_bytes(image)
-            file_hash = self._image_hash(png_bytes)
-            image_data = base64.b64encode(png_bytes).decode("ascii")
-            encodings: dict[str, str] = {}
-            storage_json = self._existing_save_path("vibe_transfer", self._current_model_key(), f"{file_hash}.json")
-            if storage_json.exists():
-                try:
-                    data = json.loads(storage_json.read_text(encoding="utf-8"))
-                    raw_encodings = data.get("encodings") if isinstance(data, dict) else {}
-                    if isinstance(raw_encodings, dict):
-                        encodings = {str(k): str(v) for k, v in raw_encodings.items() if v}
-                except Exception:
-                    encodings = {}
-            if self._is_naid3_model() and not encodings:
-                encodings = {"1.0": image_data}
-            return {
-                "file_hash": file_hash,
-                "file_name": file_name or f"{file_hash}.png",
-                "file_path": file_path,
-                "image_bytes": png_bytes,
-                "image_data": image_data,
-                "thumbnail": self._thumbnail_b64(image),
-                "is_enabled": bool(enabled),
-                "is_no_image": False,
-                "is_naid3": self._is_naid3_model(),
-                "reference_strength": 0.6,
-                "information_extracted": 1.0,
-                "vibe_encodings": encodings,
-                "storage_type": "",
-            }
+        return self._vibe_transfer_service().frame_from_bytes(
+            image_bytes,
+            file_name=file_name,
+            file_path=file_path,
+            enabled=enabled,
+        )
 
     def _vibe_transfer_module_state(self) -> dict[str, Any]:
-        frames = []
-        enabled_count = 0
-        strength_total = 0.0
-        for index, frame in enumerate(self.vibe_transfer_frames):
-            encodings = frame.get("vibe_encodings") if isinstance(frame.get("vibe_encodings"), dict) else {}
-            encoding_keys = sorted(float(key) for key in encodings.keys() if self._is_float_like(key))
-            information_extracted = float(frame.get("information_extracted", 1.0) or 1.0)
-            active_encoding = min(encoding_keys, key=lambda key: abs(key - information_extracted)) if encoding_keys else None
-            has_encoding = active_encoding is not None and abs(active_encoding - information_extracted) < 1e-9
-            if frame.get("is_enabled") and encodings:
-                enabled_count += 1
-                strength_total += float(frame.get("reference_strength", 0.6) or 0.6)
-            frames.append({
-                "index": index,
-                "file_hash": frame.get("file_hash", ""),
-                "file_name": frame.get("file_name", ""),
-                "is_enabled": bool(frame.get("is_enabled")),
-                "is_no_image": bool(frame.get("is_no_image")),
-                "is_naid3": self._is_naid3_model(),
-                "reference_strength": float(frame.get("reference_strength", 0.6) or 0.6),
-                "information_extracted": information_extracted,
-                "has_encoding": has_encoding,
-                "active_encoding": active_encoding,
-                "encoding_in_progress": False,
-                "encoding_keys": encoding_keys,
-                "thumbnail": frame.get("thumbnail", ""),
-            })
-        return self._module_state_payload("vibe_transfer", {
-            "normalize": bool(self.vibe_transfer_normalize),
-            "enabled_count": enabled_count,
-            "frame_count": len(self.vibe_transfer_frames),
-            "max_frames": MAX_NAI_VIBE_REFERENCES,
-            "included_frames": NAI_VIBE_INCLUDED_REFERENCES,
-            "extra_cost_count": max(0, enabled_count - NAI_VIBE_INCLUDED_REFERENCES),
-            "strength_total": round(strength_total, 3),
-            "strength_warning": enabled_count > 1 and strength_total > 1.0 and not self.vibe_transfer_normalize,
-            "frames": frames,
-        })
+        return self._vibe_transfer_service().module_state()
 
     def _set_vibe_transfer_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        if key == "upload_image":
-            if len(self.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
-                return self._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
-            image_bytes = base64.b64decode(self._data_url_payload(str(value or "")))
-            self.vibe_transfer_frames.append(self._vibe_frame_from_bytes(image_bytes, file_name="remote_vibe.png"))
-            self._disable_all_character_reference_frames()
-        elif key.startswith("remove_frame_"):
-            index = self._index_from_key(key, "remove_frame_")
-            if index is not None and 0 <= index < len(self.vibe_transfer_frames):
-                self.vibe_transfer_frames.pop(index)
-        elif key.startswith("enable_"):
-            index = self._index_from_key(key, "enable_")
-            if index is not None and 0 <= index < len(self.vibe_transfer_frames):
-                enabling = self._coerce_bool(value)
-                self.vibe_transfer_frames[index]["is_enabled"] = enabling
-                if enabling:
-                    self._disable_all_character_reference_frames()
-        elif key.startswith("ref_strength_"):
-            index = self._index_from_key(key, "ref_strength_")
-            if index is not None and 0 <= index < len(self.vibe_transfer_frames):
-                self.vibe_transfer_frames[index]["reference_strength"] = max(-1.0, min(1.0, float(value)))
-        elif key.startswith("info_extracted_"):
-            index = self._index_from_key(key, "info_extracted_")
-            if index is not None and 0 <= index < len(self.vibe_transfer_frames):
-                self.vibe_transfer_frames[index]["information_extracted"] = max(0.01, min(1.0, round(float(value), 2)))
-        elif key == "normalize":
-            self.vibe_transfer_normalize = self._coerce_bool(value)
-        elif key.startswith("encode_"):
-            return self._toast("Headless Vibe encoding is not available yet; use stored encoded Vibe entries.", level="error")
-        elif key == "get_storage":
-            return self._scan_vibe_storage()
-        elif key == "apply_storage":
-            applied = self._apply_vibe_storage(str(value or ""))
-            if isinstance(applied, dict):
-                return applied
-        elif key == "cluster_list":
-            return self._scan_vibe_clusters()
-        elif key == "cluster_load":
-            loaded = self._load_vibe_cluster(str(value or ""))
-            if isinstance(loaded, dict):
-                return loaded
-        elif key in {"cluster_save", "cluster_delete", "cluster_rename", "cluster_thumbnail", "restore_metadata"}:
-            return self._toast(f"Vibe Transfer action is not available in headless yet: {key}", level="info")
-        else:
-            return None
-        return self._vibe_transfer_module_state()
-
-    @staticmethod
-    def _is_float_like(value: Any) -> bool:
-        try:
-            float(value)
-            return True
-        except Exception:
-            return False
+        return self._vibe_transfer_service().set_param(key, value)
 
     def _scan_vibe_storage(self) -> dict[str, Any]:
-        models: dict[str, list[dict[str, Any]]] = {}
-        for vibe_folder in self._existing_save_dirs("vibe_transfer"):
-            for model_dir in sorted(path for path in vibe_folder.iterdir() if path.is_dir()):
-                images_folder = model_dir / "images"
-                items = []
-                for json_file in sorted(model_dir.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)[:50]:
-                    try:
-                        data = json.loads(json_file.read_text(encoding="utf-8"))
-                    except Exception:
-                        continue
-                    if not isinstance(data, dict) or data.get("volatile"):
-                        continue
-                    raw_encodings = data.get("encodings") if isinstance(data.get("encodings"), dict) else {}
-                    encoding_keys = sorted(float(key) for key in raw_encodings.keys() if self._is_float_like(key))
-                    if not encoding_keys:
-                        continue
-                    file_hash = str(data.get("file_hash") or json_file.stem)
-                    image_path = images_folder / f"{file_hash}.png"
-                    if data.get("is_no_image") or data.get("storage_type") == "metadata_vibe" or not image_path.exists():
-                        continue
-                    thumb = ""
-                    try:
-                        from PIL import Image
-
-                        with Image.open(image_path) as image:
-                            thumb = self._thumbnail_b64(image)
-                    except Exception:
-                        pass
-                    items.append({
-                        "file_hash": file_hash,
-                        "file_name": str(data.get("file_name") or image_path.name),
-                        "encoding_keys": encoding_keys,
-                        "thumbnail": thumb,
-                    })
-                if items:
-                    models[model_dir.name] = items
-        return {
-            "type": "storage_list",
-            "module_id": "vibe_transfer",
-            "models": models,
-            "current_model": self._current_model_key(),
-        }
+        return self._vibe_transfer_service().scan_storage()
 
     def _apply_vibe_storage(self, value: str) -> dict[str, Any] | None:
-        if len(self.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
-            return self._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
-        parts = str(value or "").split("|")
-        if len(parts) < 3:
-            return self._toast("Invalid Vibe storage request", level="error")
-        model, file_hash, ie_text = parts[0], Path(parts[1]).name, parts[2]
-        json_path = self._existing_save_path("vibe_transfer", model, f"{file_hash}.json")
-        if not json_path.exists():
-            return self._toast("Vibe storage item not found", level="error")
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-            raw_encodings = data.get("encodings") if isinstance(data.get("encodings"), dict) else {}
-            encodings = {str(k): str(v) for k, v in raw_encodings.items() if v}
-            if not encodings:
-                return self._toast("Stored Vibe encoding not found", level="error")
-            selected_ie = float(ie_text)
-            closest_ie = min((float(key) for key in encodings.keys()), key=lambda key: abs(key - selected_ie))
-            image_path = self._existing_save_path("vibe_transfer", model, "images", f"{file_hash}.png")
-            thumb = ""
-            image_bytes = b""
-            image_data = ""
-            if image_path.exists():
-                image_bytes = image_path.read_bytes()
-                try:
-                    from PIL import Image
-
-                    with Image.open(image_path) as image:
-                        thumb = self._thumbnail_b64(image)
-                        image_data = base64.b64encode(self._image_to_png_bytes(image.convert("RGBA"))).decode("ascii")
-                except Exception:
-                    pass
-            frame = {
-                "file_hash": file_hash,
-                "file_name": str(data.get("file_name") or image_path.name or f"{file_hash}.png"),
-                "file_path": str(data.get("file_path") or image_path),
-                "image_bytes": image_bytes,
-                "image_data": image_data,
-                "thumbnail": thumb,
-                "is_enabled": True,
-                "is_no_image": bool(data.get("is_no_image")) or data.get("storage_type") == "metadata_vibe",
-                "is_naid3": "NAID3" in model,
-                "reference_strength": float(data.get("reference_strength", 0.6) or 0.6),
-                "information_extracted": closest_ie,
-                "vibe_encodings": encodings,
-                "storage_type": str(data.get("storage_type") or ""),
-                "source_model": model,
-            }
-            self.vibe_transfer_frames.append(frame)
-            self._disable_all_character_reference_frames()
-            return None
-        except Exception as exc:
-            return self._toast(f"Failed to load Vibe storage: {exc}", level="error")
+        return self._vibe_transfer_service().apply_storage(value)
 
     def _scan_vibe_clusters(self) -> dict[str, Any]:
-        from core.vibe_cluster_resolver import list_vibe_clusters
-
-        root = self._existing_save_path("vibe_transfer_clusters")
-        items = []
-        thumb_root = root / "thumbnails"
-        for data in list_vibe_clusters(root):
-            cluster_id = str(data.get("_cluster_id") or data.get("id") or "")
-            thumb = ""
-            thumb_path = thumb_root / f"{cluster_id}.jpg"
-            if thumb_path.exists():
-                try:
-                    thumb = base64.b64encode(thumb_path.read_bytes()).decode("ascii")
-                except Exception:
-                    thumb = ""
-            frames = data.get("frames") if isinstance(data.get("frames"), list) else []
-            enabled = sum(1 for frame in frames if isinstance(frame, dict) and frame.get("is_enabled", True))
-            items.append({
-                "id": cluster_id,
-                "name": str(data.get("_cluster_name") or data.get("name") or cluster_id),
-                "description": str(data.get("description") or ""),
-                "model": str(data.get("model") or ""),
-                "frame_count": len(frames),
-                "enabled_count": enabled,
-                "thumbnail": thumb,
-            })
-        return {
-            "type": "storage_list",
-            "module_id": "vibe_cluster",
-            "items": items,
-            "current_frame_count": len(self.vibe_transfer_frames),
-            "max_frames": MAX_NAI_VIBE_REFERENCES,
-        }
+        return self._vibe_transfer_service().scan_clusters()
 
     def _load_vibe_cluster(self, value: str) -> dict[str, Any] | None:
-        from core.vibe_cluster_resolver import resolve_vibe_cluster
-
-        try:
-            payload = json.loads(value or "{}")
-        except Exception:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        cluster_id = str(payload.get("id") or "")
-        mode = str(payload.get("mode") or "append")
-        root = self._existing_save_path("vibe_transfer_clusters")
-        try:
-            data = resolve_vibe_cluster(cluster_id, root)
-        except Exception as exc:
-            return self._toast(str(exc), level="error")
-        if mode == "clean":
-            self.vibe_transfer_frames.clear()
-        frames = data.get("frames") if isinstance(data.get("frames"), list) else []
-        for frame_data in frames:
-            if len(self.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
-                break
-            encodings = frame_data.get("encodings") if isinstance(frame_data.get("encodings"), dict) else {}
-            if not encodings:
-                continue
-            self.vibe_transfer_frames.append({
-                "file_hash": str(frame_data.get("file_hash") or hashlib.sha256(json.dumps(frame_data, sort_keys=True).encode("utf-8")).hexdigest()[:16]),
-                "file_name": str(frame_data.get("file_name") or "cluster_vibe"),
-                "file_path": str(frame_data.get("file_path") or ""),
-                "image_bytes": b"",
-                "image_data": "",
-                "thumbnail": "",
-                "is_enabled": bool(frame_data.get("is_enabled", True)),
-                "is_no_image": True,
-                "is_naid3": self._is_naid3_model(),
-                "reference_strength": float(frame_data.get("reference_strength", 0.6) or 0.6),
-                "information_extracted": float(frame_data.get("information_extracted", 1.0) or 1.0),
-                "vibe_encodings": {str(k): str(v) for k, v in encodings.items() if v},
-                "storage_type": "cluster_vibe",
-                "source_model": str(data.get("model") or ""),
-            })
-        self._disable_all_character_reference_frames()
-        return None
+        return self._vibe_transfer_service().load_cluster(value)
 
     def active_character_reference_params(self) -> dict[str, Any]:
         return self._character_reference_service().active_params()
 
     def active_vibe_transfer_params(self) -> dict[str, Any]:
-        reference_images = []
-        reference_strengths = []
-        reference_info = []
-        for frame in self.vibe_transfer_frames:
-            encodings = frame.get("vibe_encodings") if isinstance(frame.get("vibe_encodings"), dict) else {}
-            if not frame.get("is_enabled") or not encodings:
-                continue
-            try:
-                target_ie = float(frame.get("information_extracted", 1.0) or 1.0)
-                closest_key = min((float(key) for key in encodings.keys()), key=lambda key: abs(key - target_ie))
-            except Exception:
-                continue
-            encoded = encodings.get(str(closest_key)) or encodings.get(f"{closest_key:g}") or encodings.get(f"{closest_key:.1f}")
-            if not encoded:
-                for key, value in encodings.items():
-                    try:
-                        if abs(float(key) - closest_key) < 1e-9:
-                            encoded = value
-                            break
-                    except Exception:
-                        continue
-            if not encoded:
-                continue
-            reference_images.append(encoded)
-            reference_strengths.append(float(frame.get("reference_strength", 0.6) or 0.6))
-            reference_info.append(closest_key)
-        if not reference_images:
-            return {}
-        params = {
-            "normalize_reference_strength_multiple": bool(self.vibe_transfer_normalize),
-            "reference_image_multiple": reference_images,
-            "reference_strength_multiple": reference_strengths,
-        }
-        if self._is_naid3_model():
-            params["reference_information_extracted_multiple"] = reference_info
-        return params
+        return self._vibe_transfer_service().active_params()
 
     def apply_headless_image_module_params(self, params: dict[str, Any], api_mode: str) -> None:
         if str(api_mode or "").upper() != "NAI":

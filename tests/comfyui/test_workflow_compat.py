@@ -27,6 +27,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager  # noqa: E402
+from utils.comfyui_png_metadata import extract_comfyui_workflow_metadata_from_upload_bytes  # noqa: E402
 
 
 FIXTURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
@@ -678,6 +679,43 @@ def test_locked_to_locked_transition_emits_fresh_payload():
     assert data_b["locked_model_display"] == "model_b.safetensors"
 
 
+def test_api_workflow_json_upload_loads_as_custom_workflow():
+    mgr = ComfyUIWorkflowManager()
+    metadata = extract_comfyui_workflow_metadata_from_upload_bytes(
+        json.dumps(mgr.base_workflow).encode("utf-8")
+    )
+
+    target = ComfyUIWorkflowManager()
+    assert target.load_workflow_from_metadata(metadata)
+    assert target.user_workflow is not None
+    assert target.user_workflow_ui is None
+
+
+def test_utf8_bom_workflow_json_upload_loads_as_custom_workflow():
+    mgr = ComfyUIWorkflowManager()
+    metadata = extract_comfyui_workflow_metadata_from_upload_bytes(
+        b"\xef\xbb\xbf" + json.dumps(mgr.base_workflow).encode("utf-8")
+    )
+
+    target = ComfyUIWorkflowManager()
+    assert target.load_workflow_from_metadata(metadata)
+    assert target.user_workflow is not None
+
+
+def test_ui_workflow_json_upload_loads_with_generated_api_workflow():
+    source = ComfyUIWorkflowManager()
+    workflow_ui = source.api_workflow_to_ui_workflow(source.base_workflow)
+    metadata = extract_comfyui_workflow_metadata_from_upload_bytes(
+        json.dumps(workflow_ui).encode("utf-8")
+    )
+
+    target = ComfyUIWorkflowManager()
+    assert target.load_workflow_from_metadata(metadata)
+    assert target.user_workflow is not None
+    assert target.user_workflow_ui is not None
+    assert target.user_workflow["4"]["inputs"]["steps"] == 20
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -702,6 +740,9 @@ ALL_TESTS = [
     test_trace_respects_max_depth,
     test_trace_deep_but_within_limit,
     test_locked_to_locked_transition_emits_fresh_payload,
+    test_api_workflow_json_upload_loads_as_custom_workflow,
+    test_utf8_bom_workflow_json_upload_loads_as_custom_workflow,
+    test_ui_workflow_json_upload_loads_with_generated_api_workflow,
 ]
 
 

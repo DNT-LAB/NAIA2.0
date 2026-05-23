@@ -115,7 +115,7 @@ from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
 from core.generation_controller import GenerationController
 from core.wildcard_processor import split_tags_smart
-from utils.comfyui_png_metadata import extract_comfyui_workflow_metadata_from_image
+from utils.comfyui_png_metadata import extract_comfyui_workflow_metadata_from_upload_bytes
 from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.collapsible import CollapsibleBox, EnhancedCollapsibleBox, FixedBox
@@ -6588,7 +6588,7 @@ class ModernMainWindow(QMainWindow):
     
     def _load_custom_workflow_from_image(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "ComfyUI 워크플로우 이미지 선택", "", "Image Files (*.png *.webp);;PNG Files (*.png);;WEBP Files (*.webp)"
+            self, "ComfyUI 워크플로우 선택", "", "Workflow Files (*.json *.png *.webp);;JSON Files (*.json);;Image Files (*.png *.webp)"
         )
 
         if not file_path:
@@ -6596,9 +6596,8 @@ class ModernMainWindow(QMainWindow):
 
         try:
             from core.comfyui_utils import WorkflowValidationDialog
-            with Image.open(file_path) as img:
-                # ComfyUI PNG/WebP metadata stores workflow JSON under prompt/workflow keys.
-                metadata = extract_comfyui_workflow_metadata_from_image(img)
+            with open(file_path, "rb") as f:
+                metadata = extract_comfyui_workflow_metadata_from_upload_bytes(f.read())
                 # 워크플로우 분석 및 검증
                 analysis_result = self.workflow_manager.analyze_workflow_for_ui(metadata)
 

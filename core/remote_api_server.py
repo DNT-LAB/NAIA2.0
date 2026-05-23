@@ -7558,9 +7558,9 @@ class RemoteBridge(QObject):
             self._cached_params = params
 
     def _extract_comfyui_workflow_metadata_from_image_bytes(self, image_bytes: bytes) -> dict:
-        from utils.comfyui_png_metadata import extract_comfyui_workflow_metadata_from_image_bytes
+        from utils.comfyui_png_metadata import extract_comfyui_workflow_metadata_from_upload_bytes
 
-        return extract_comfyui_workflow_metadata_from_image_bytes(image_bytes)
+        return extract_comfyui_workflow_metadata_from_upload_bytes(image_bytes)
 
     def _extract_comfyui_workflow_metadata_from_png_bytes(self, image_bytes: bytes) -> dict:
         return self._extract_comfyui_workflow_metadata_from_image_bytes(image_bytes)

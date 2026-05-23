@@ -345,7 +345,10 @@ class ComfyUIWorkflowManager:
             prompt_api = json.loads(prompt_str)
 
             # 워크플로우 유효성 검사 및 노드 맵 생성
-            is_valid, node_map = self.validate_and_map_workflow(workflow)
+            validation_workflow = prompt_api if isinstance(prompt_api, dict) and prompt_api else workflow
+            is_valid, node_map = self.validate_and_map_workflow(validation_workflow)
+            if not is_valid and validation_workflow is not workflow:
+                is_valid, node_map = self.validate_and_map_workflow(workflow)
 
             if not is_valid:
                 print(f"❌ 불러온 워크플로우가 유효하지 않습니다: {node_map}")
@@ -519,6 +522,7 @@ class ComfyUIWorkflowManager:
         """
         nodes_by_id = {}
         links_data = None
+        links_by_id = {}
         is_ui_format = False
 
         # --- [핵심] 1. 워크플로우 형식 감지 및 데이터 정규화 ---
@@ -527,6 +531,7 @@ class ComfyUIWorkflowManager:
             is_ui_format = True
             nodes_by_id = {str(node['id']): node for node in workflow['nodes']}
             links_data = workflow.get('links', [])
+            links_by_id = {link[0]: link for link in links_data if isinstance(link, list) and link}
         else:
             # B. API/기본 형식일 경우: workflow 자체가 노드 딕셔너리임
             is_ui_format = False
@@ -647,8 +652,6 @@ class ComfyUIWorkflowManager:
             # UI 형식의 링크 처리
             positive_link_id = next((slot.get("link") for slot in sampler_inputs if slot.get("name") == "positive"), None)
             negative_link_id = next((slot.get("link") for slot in sampler_inputs if slot.get("name") == "negative"), None)
-            
-            links_by_id = {link[0]: link for link in links_data}
             if positive_link_id in links_by_id:
                 node_map["positive_prompt"] = str(links_by_id[positive_link_id][1])
             if negative_link_id in links_by_id:
@@ -664,7 +667,14 @@ class ComfyUIWorkflowManager:
             return False, {"error": "샘플러에 연결된 Prompt/Negative 노드를 특정할 수 없습니다."}
 
         node_map["sampler"] = sampler_node_id
-        if found_nodes["EmptyLatentImage"]:
+        latent_source_id = self._sampler_latent_source_id(
+            sampler_inputs,
+            is_ui_format=is_ui_format,
+            links_by_id=links_by_id,
+        )
+        if self._node_accepts_resolution(nodes_by_id.get(str(latent_source_id)), is_ui_format):
+            node_map["latent_image"] = str(latent_source_id)
+        elif found_nodes["EmptyLatentImage"]:
             node_map["latent_image"] = found_nodes["EmptyLatentImage"][0]
 
         # [추가] AlignYourStepsScheduler 노드 ID 저장 (선택적)
@@ -778,6 +788,48 @@ class ComfyUIWorkflowManager:
             return False
         input_names = self._node_input_names(node, is_ui_format)
         return self._KSAMPLER_COMPATIBLE_INPUTS.issubset(input_names)
+
+    def _node_accepts_resolution(self, node: Optional[Dict[str, Any]], is_ui_format: bool) -> bool:
+        if not node:
+            return False
+        input_names = self._node_input_names(node, is_ui_format)
+        if {"width", "height"}.issubset(input_names):
+            return True
+        if is_ui_format:
+            class_type = self._node_class_type(node)
+            widget_keys = self._WIDGET_KEYS_BY_CLASS.get(class_type, [])
+            return "width" in widget_keys and "height" in widget_keys
+        return False
+
+    def _sampler_latent_source_id(
+        self,
+        sampler_inputs: Any,
+        *,
+        is_ui_format: bool,
+        links_by_id: Optional[Dict[Any, Any]] = None,
+    ) -> Optional[str]:
+        if is_ui_format:
+            if not isinstance(sampler_inputs, list) or not links_by_id:
+                return None
+            latent_link_id = next(
+                (
+                    slot.get("link")
+                    for slot in sampler_inputs
+                    if isinstance(slot, dict) and slot.get("name") == "latent_image"
+                ),
+                None,
+            )
+            link = links_by_id.get(latent_link_id)
+            if isinstance(link, list) and len(link) >= 2:
+                return str(link[1])
+            return None
+
+        if not isinstance(sampler_inputs, dict):
+            return None
+        latent_ref = sampler_inputs.get("latent_image")
+        if isinstance(latent_ref, list) and latent_ref:
+            return str(latent_ref[0])
+        return None
 
     def _is_direct_sampler_patch_node(self, node: Dict[str, Any]) -> bool:
         class_type = self._node_class_type(node)

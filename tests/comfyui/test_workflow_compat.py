@@ -385,6 +385,50 @@ def test_ksampler_compatible_custom_sampler_is_supported():
     assert sampler_ui["widgets_values"][:6] == [123, "randomize", 20, 3.5, "euler", "normal"]
 
 
+def test_custom_workflow_resolution_targets_connected_latent_source():
+    mgr = ComfyUIWorkflowManager()
+    wf = _make_spectrum_spd_ksampler_workflow()
+    wf["27"] = {
+        "class_type": "EmptyLatentImage",
+        "inputs": {"width": 512, "height": 512, "batch_size": 1},
+    }
+    wf["28"]["class_type"] = "EmptySD3LatentImage"
+    wf["28"]["_meta"] = {"title": "EmptySD3LatentImage"}
+
+    ok, node_map = mgr.validate_and_map_workflow(wf)
+    assert ok, f"custom latent workflow should validate: {node_map}"
+    assert node_map["latent_image"] == "28"
+
+    meta = {"prompt": json.dumps(wf), "workflow": json.dumps(wf)}
+    assert mgr.load_workflow_from_metadata(meta)
+    result = mgr.apply_params_to_workflow({
+        "model": "new-unet.safetensors",
+        "input": "new prompt",
+        "negative_prompt": "new neg",
+        "seed": 123,
+        "steps": 20,
+        "cfg_scale": 3.5,
+        "sampler": "euler",
+        "scheduler": "normal",
+        "width": 832,
+        "height": 1216,
+        "rescale_cfg": 0.2,
+        "filename_prefix": "NAIA_Test",
+    })
+
+    assert result is not None
+    assert result["28"]["inputs"]["width"] == 832
+    assert result["28"]["inputs"]["height"] == 1216
+    assert result["27"]["inputs"]["width"] == 512
+    assert result["27"]["inputs"]["height"] == 512
+
+    ui_mgr = ComfyUIWorkflowManager()
+    workflow_ui = ui_mgr.api_workflow_to_ui_workflow(wf)
+    ui_meta = {"prompt": json.dumps(wf), "workflow": json.dumps(workflow_ui)}
+    assert ui_mgr.load_workflow_from_metadata(ui_meta)
+    assert ui_mgr.user_workflow_node_map["latent_image"] == "28"
+
+
 def _make_webp_output_workflow():
     wf = _make_spectrum_spd_ksampler_workflow()
     wf.pop("1")

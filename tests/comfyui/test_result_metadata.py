@@ -24,11 +24,12 @@ def _png_bytes():
     return buffer.getvalue()
 
 
-def _comfyui_workflow_webp_bytes(workflow_api, workflow_ui):
+def _comfyui_workflow_webp_bytes(workflow_api, workflow_ui=None):
     image = Image.new("RGB", (4, 4), "white")
     exif = image.getexif()
     exif[0x0110] = "prompt:" + json.dumps(workflow_api, ensure_ascii=False, separators=(",", ":"))
-    exif[0x010F] = "workflow:" + json.dumps(workflow_ui, ensure_ascii=False, separators=(",", ":"))
+    if workflow_ui is not None:
+        exif[0x010F] = "workflow:" + json.dumps(workflow_ui, ensure_ascii=False, separators=(",", ":"))
     buffer = io.BytesIO()
     image.save(buffer, format="WEBP", exif=exif)
     return buffer.getvalue()
@@ -213,6 +214,34 @@ def test_webp_workflow_image_metadata_can_reload_as_custom_workflow():
 
     assert json.loads(metadata["prompt"]) == workflow_api
     assert json.loads(metadata["workflow"]) == workflow_ui
+    target_mgr = ComfyUIWorkflowManager()
+    assert target_mgr.load_workflow_from_metadata(metadata) is True
+    assert target_mgr.user_workflow is not None
+
+
+def test_prompt_only_webp_workflow_metadata_can_reload_as_custom_workflow():
+    source_mgr = ComfyUIWorkflowManager()
+    params = {
+        "model": "new-checkpoint.safetensors",
+        "input": "webp prompt only reload prompt",
+        "negative_prompt": "webp prompt only reload negative",
+        "seed": 321,
+        "steps": 24,
+        "cfg_scale": 7.0,
+        "sampler": "euler",
+        "scheduler": "normal",
+        "width": 640,
+        "height": 768,
+        "workflow_type": "checkpoint",
+        "sampling_mode": "eps",
+    }
+    workflow_api = source_mgr.apply_params_to_workflow(params)
+    webp_bytes = _comfyui_workflow_webp_bytes(workflow_api)
+
+    metadata = extract_comfyui_workflow_metadata_from_image_bytes(webp_bytes)
+
+    assert json.loads(metadata["prompt"]) == workflow_api
+    assert json.loads(metadata["workflow_api"]) == workflow_api
     target_mgr = ComfyUIWorkflowManager()
     assert target_mgr.load_workflow_from_metadata(metadata) is True
     assert target_mgr.user_workflow is not None

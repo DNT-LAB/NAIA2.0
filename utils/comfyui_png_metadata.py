@@ -50,6 +50,48 @@ def _has_comfyui_workflow_metadata(metadata: Dict[str, Any]) -> bool:
     return bool(metadata.get("prompt") and (metadata.get("workflow") or metadata.get("workflow_api")))
 
 
+def _normalize_comfyui_workflow_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = dict(metadata or {})
+    if not metadata.get("prompt") and metadata.get("workflow_api"):
+        metadata["prompt"] = metadata["workflow_api"]
+    if metadata.get("prompt") and not (metadata.get("workflow") or metadata.get("workflow_api")):
+        metadata["workflow_api"] = metadata["prompt"]
+    return metadata
+
+
+def _extract_prefixed_json_metadata_from_text(text: str) -> Dict[str, str]:
+    metadata: Dict[str, str] = {}
+    if not text:
+        return metadata
+
+    decoder = json.JSONDecoder()
+    for key in ("prompt", "workflow", "workflow_api"):
+        marker = f"{key}:"
+        start = 0
+        while True:
+            marker_index = text.find(marker, start)
+            if marker_index < 0:
+                break
+            value_start = marker_index + len(marker)
+            while value_start < len(text) and text[value_start].isspace():
+                value_start += 1
+            try:
+                _, value_end = decoder.raw_decode(text[value_start:])
+            except Exception:
+                start = value_start
+                continue
+            metadata[key] = text[value_start:value_start + value_end]
+            break
+    return metadata
+
+
+def _extract_prefixed_json_metadata(value: Any) -> Dict[str, str]:
+    text = _text_value(value)
+    if text is None:
+        return {}
+    return _extract_prefixed_json_metadata_from_text(text)
+
+
 def _copy_text_metadata(source_info: Dict[str, Any]) -> Dict[str, Any]:
     metadata: Dict[str, Any] = {}
     for key, value in (source_info or {}).items():
@@ -57,8 +99,10 @@ def _copy_text_metadata(source_info: Dict[str, Any]) -> Dict[str, Any]:
             text = _text_value(value)
             if text is not None and str(key) in {"prompt", "workflow", "workflow_api"}:
                 metadata[str(key)] = text
+            metadata.update(_extract_prefixed_json_metadata(value))
             continue
         metadata[str(key)] = value
+        metadata.update(_extract_prefixed_json_metadata(value))
     return metadata
 
 
@@ -83,6 +127,7 @@ def _extract_webp_exif_metadata(image: Image.Image) -> Dict[str, str]:
 def extract_comfyui_workflow_metadata_from_image(image: Image.Image) -> Dict[str, Any]:
     metadata = _copy_text_metadata(dict(getattr(image, "info", {}) or {}))
     metadata.update(_extract_webp_exif_metadata(image))
+    metadata = _normalize_comfyui_workflow_metadata(metadata)
     if not _has_comfyui_workflow_metadata(metadata):
         raise ValueError("No ComfyUI workflow metadata found in the selected image.")
     return metadata
@@ -95,8 +140,11 @@ def extract_comfyui_workflow_metadata_from_image_bytes(image_bytes: bytes) -> Di
     try:
         with Image.open(io.BytesIO(image_bytes)) as image:
             return extract_comfyui_workflow_metadata_from_image(image)
-    except ValueError:
-        raise
+    except ValueError as exc:
+        fallback = _normalize_comfyui_workflow_metadata(_extract_prefixed_json_metadata(image_bytes))
+        if _has_comfyui_workflow_metadata(fallback):
+            return fallback
+        raise exc
     except Exception as exc:
         raise ValueError(f"Image metadata parse failed: {exc}") from exc
 

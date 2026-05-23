@@ -8,6 +8,8 @@ from PIL.PngImagePlugin import PngInfo
 
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+WORKFLOW_SOURCE_KEY = "_naia_workflow_source"
+WORKFLOW_SOURCE_JSON = "json"
 
 SENSITIVE_KEYS = {
     "access_token",
@@ -62,6 +64,8 @@ UI_WIDGET_KEYS_BY_CLASS = {
     "RescaleCFG": ["multiplier"],
     "SaveImage": ["filename_prefix"],
     "SaveAnimatedWEBP": ["filename_prefix", "fps", "lossless", "quality", "method"],
+    "PrimitiveString": ["value"],
+    "PrimitiveInt": ["value"],
 }
 
 
@@ -202,7 +206,9 @@ def extract_comfyui_workflow_metadata_from_json_bytes(json_bytes: bytes) -> Dict
         data = json.loads(json_bytes.decode("utf-8-sig"))
     except Exception as exc:
         raise ValueError(f"Workflow JSON parse failed: {exc}") from exc
-    return comfyui_workflow_json_to_metadata(data)
+    metadata = comfyui_workflow_json_to_metadata(data)
+    metadata[WORKFLOW_SOURCE_KEY] = WORKFLOW_SOURCE_JSON
+    return metadata
 
 
 def extract_comfyui_workflow_metadata_from_upload_bytes(upload_bytes: bytes) -> Dict[str, Any]:

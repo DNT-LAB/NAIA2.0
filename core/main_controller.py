@@ -63,6 +63,8 @@ class MainController:
         
         self.connect_checkbox_signals()
         mw.workflow_load_btn.clicked.connect(self._load_custom_workflow_from_image)
+        if hasattr(mw, 'workflow_free_load_btn'):
+            mw.workflow_free_load_btn.clicked.connect(self._load_free_custom_workflow)
         mw.workflow_default_btn.clicked.connect(self._on_workflow_type_changed)
         mw.image_window.instant_generation_requested.connect(self.on_instant_generation_requested)
         if hasattr(mw.image_window, 'generate_with_image_requested'):
@@ -613,6 +615,11 @@ class MainController:
         # 메인 윈도우에 위임
         if hasattr(self.main_window, '_load_custom_workflow_from_image'):
             self.main_window._load_custom_workflow_from_image()
+
+    def _load_free_custom_workflow(self):
+        """JSON에서 Bypass 커스텀 워크플로우 로드"""
+        if hasattr(self.main_window, '_load_custom_workflow_from_image'):
+            self.main_window._load_custom_workflow_from_image(workflow_mode="bypass")
             
     def _on_workflow_type_changed(self):
         """워크플로우 타입 변경 처리"""

@@ -103,9 +103,16 @@ const MODULE_REGISTRY = {
   },
   comfyui_workflow_upload: {
     label: '커스텀 워크플로우',
-    title: 'ComfyUI 워크플로우 PNG 업로드',
+    title: 'ComfyUI 워크플로우 JSON/PNG/WEBP 업로드',
     category: 'comfyui_tools',
     action: 'comfyui_workflow_upload',
+    modes: ['COMFYUI'],
+  },
+  comfyui_workflow_free_upload: {
+    label: '커스텀 워크플로우 (Bypass)',
+    title: 'Bypass ComfyUI 워크플로우 JSON 업로드',
+    category: 'comfyui_tools',
+    action: 'comfyui_workflow_free_upload',
     modes: ['COMFYUI'],
   },
   comfyui_open_web: {
@@ -155,7 +162,7 @@ const CATEGORY_REGISTRY = [
     id: 'comfyui_tools',
     label: 'COMFYUI 전용 도구',
     title: 'COMFYUI 전용 도구',
-    moduleIds: ['comfyui_resolution_preset', 'comfyui_workflow_default', 'comfyui_workflow_upload', 'comfyui_open_web'],
+    moduleIds: ['comfyui_resolution_preset', 'comfyui_workflow_default', 'comfyui_workflow_upload', 'comfyui_workflow_free_upload', 'comfyui_open_web'],
   },
   {
     id: 'assistant_tools',
@@ -177,6 +184,7 @@ export function createModuleLauncher({
   getComfyUiWorkflowState,
   switchComfyUiWorkflowDefault,
   uploadComfyUiWorkflow,
+  uploadComfyUiFreeWorkflow,
   openComfyUiWeb,
   setModuleParam,
 }) {
@@ -271,8 +279,11 @@ export function createModuleLauncher({
   function isActiveWorkflowMode(moduleId) {
     const state = typeof getComfyUiWorkflowState === 'function' ? getComfyUiWorkflowState() : null;
     const hasCustom = Boolean(state?.has_custom);
+    const workflowType = String(state?.workflow_type || '').trim().toLowerCase();
+    const isFree = workflowType === 'bypass' || workflowType === 'free';
     return (moduleId === 'comfyui_workflow_default' && !hasCustom)
-      || (moduleId === 'comfyui_workflow_upload' && hasCustom);
+      || (moduleId === 'comfyui_workflow_upload' && hasCustom && !isFree)
+      || (moduleId === 'comfyui_workflow_free_upload' && hasCustom && isFree);
   }
 
   function isVisibleInMode(moduleId) {
@@ -399,6 +410,8 @@ export function createModuleLauncher({
       switchComfyUiWorkflowDefault?.();
     } else if (config.action === 'comfyui_workflow_upload') {
       uploadComfyUiWorkflow?.();
+    } else if (config.action === 'comfyui_workflow_free_upload') {
+      uploadComfyUiFreeWorkflow?.();
     } else if (config.action === 'comfyui_open_web') {
       openComfyUiWeb?.();
     } else {

@@ -35,9 +35,13 @@ class ComfyUIWorkflowManager:
 
         node_map = self.user_workflow_node_map or {}
         has_custom = self.user_workflow is not None
+        workflow_type = node_map.get("workflow_type") if has_custom else None
+        workflow_label = "Bypass Workflow" if self._is_bypass_workflow_type(workflow_type) else ("Custom Workflow" if has_custom else "Basic Workflow")
         payload = {
             "has_custom": has_custom,
             "model_compat": node_map.get("model_compat") if has_custom else None,
+            "workflow_type": workflow_type,
+            "workflow_label": workflow_label,
             "locked_loader_class": node_map.get("locked_loader_class"),
             "locked_model_display": node_map.get("locked_model_display"),
         }
@@ -327,13 +331,34 @@ class ComfyUIWorkflowManager:
         print("🔄 사용자 워크플로우가 초기화되었습니다. 기본 워크플로우를 사용합니다.")
         self._publish_workflow_changed()
 
+    @staticmethod
+    def _normalize_custom_workflow_mode(workflow_mode: Optional[str]) -> str:
+        mode = str(workflow_mode or "custom").strip().lower()
+        bypass_aliases = {
+            "bypass",
+            "custom_bypass",
+            "custom-workflow-bypass",
+            "free",
+            "custom_free",
+            "custom-workflow-free",
+        }
+        return "bypass" if mode in bypass_aliases else "custom"
 
-    def load_workflow_from_metadata(self, comfyui_metadata: Dict[str, Any]) -> bool:
+    @staticmethod
+    def _is_bypass_workflow_type(value: Any) -> bool:
+        return str(value or "").strip().lower() in {"bypass", "free"}
+
+    @staticmethod
+    def _is_json_workflow_metadata(metadata: Dict[str, Any]) -> bool:
+        return metadata.get("_naia_workflow_source") == "json"
+
+    def load_workflow_from_metadata(self, comfyui_metadata: Dict[str, Any], *, workflow_mode: str = "custom") -> bool:
         """
         이미지 메타데이터에서 workflow와 prompt API를 추출하고 유효성을 검사합니다.
         성공 시, 해당 워크플로우를 클래스 내에 저장합니다.
         """
         try:
+            workflow_mode = self._normalize_custom_workflow_mode(workflow_mode)
             workflow_str = comfyui_metadata.get('workflow') or comfyui_metadata.get('workflow_api')
             prompt_str = comfyui_metadata.get('prompt')
 
@@ -343,16 +368,38 @@ class ComfyUIWorkflowManager:
 
             workflow = json.loads(workflow_str)
             prompt_api = json.loads(prompt_str)
+            allow_free_workflow = workflow_mode == "bypass" and self._is_json_workflow_metadata(comfyui_metadata)
+            if workflow_mode == "bypass" and not allow_free_workflow:
+                print("❌ Bypass 커스텀 워크플로우는 JSON 업로드에서만 로드할 수 있습니다.")
+                self.clear_user_workflow()
+                return False
 
             # 워크플로우 유효성 검사 및 노드 맵 생성
             validation_workflow = prompt_api if isinstance(prompt_api, dict) and prompt_api else workflow
-            is_valid, node_map = self.validate_and_map_workflow(validation_workflow)
+            is_valid, node_map = self.validate_and_map_workflow(
+                validation_workflow,
+                allow_free=allow_free_workflow,
+            )
             if not is_valid and validation_workflow is not workflow:
-                is_valid, node_map = self.validate_and_map_workflow(workflow)
+                is_valid, node_map = self.validate_and_map_workflow(
+                    workflow,
+                    allow_free=allow_free_workflow,
+                )
 
             if not is_valid:
                 print(f"❌ 불러온 워크플로우가 유효하지 않습니다: {node_map}")
                 self.clear_user_workflow() # 유효하지 않으면 초기화
+                return False
+
+            detected_type = node_map.get("workflow_type")
+            detected_is_bypass = self._is_bypass_workflow_type(detected_type)
+            if workflow_mode == "bypass" and not detected_is_bypass:
+                print("❌ Bypass 모드는 naia_prompt/naia_negative/naia_width/naia_height Primitive 노드 워크플로우만 허용합니다.")
+                self.clear_user_workflow()
+                return False
+            if workflow_mode != "bypass" and detected_is_bypass:
+                print("❌ Bypass 워크플로우는 커스텀 워크플로우 (Bypass) 경로로만 로드할 수 있습니다.")
+                self.clear_user_workflow()
                 return False
 
             # [핵심] 워크플로우 형식에 따라 저장
@@ -378,7 +425,7 @@ class ComfyUIWorkflowManager:
     def _generate_random_seed(self) -> int:
         """랜덤 시드 생성"""
         import random
-        return random.randint(0, 2**32 - 1)
+        return random.randint(1, 2**32 - 1)
     
     def _clean_prompt(self, prompt: str) -> str:
         """입력 프롬프트에서 주석 및 개행문자 제거 (api_service.py와 동일한 로직)"""
@@ -513,7 +560,7 @@ class ComfyUIWorkflowManager:
 
         return None
 
-    def validate_and_map_workflow(self, workflow: Dict[str, Any]) -> tuple[bool, Dict[str, Any]]:
+    def validate_and_map_workflow(self, workflow: Dict[str, Any], *, allow_free: bool = False) -> tuple[bool, Dict[str, Any]]:
         """
         워크플로우의 필수 노드들을 class_type으로 찾아 ID를 매핑합니다.
         [수정] UI 형식('nodes' 리스트)과 API 형식(노드 딕셔너리)을 모두 처리하도록 개선되었습니다.
@@ -539,6 +586,11 @@ class ComfyUIWorkflowManager:
 
         if not nodes_by_id:
             return False, {"error": "분석할 노드 데이터를 찾을 수 없습니다."}
+
+        if allow_free:
+            free_ok, free_node_map = self._validate_and_map_free_workflow(nodes_by_id)
+            if free_ok:
+                return True, free_node_map
 
         node_map = {}
         recognized_sampler_types = self._recognized_sampler_label()
@@ -587,10 +639,14 @@ class ComfyUIWorkflowManager:
         # --- 3. 필수 노드 존재 여부 확인 ---
         # 3-1. 프롬프트 인코더
         if len(found_nodes["CLIPTextEncode"]) < 2:
+            if allow_free and self._looks_like_free_workflow_candidate(nodes_by_id):
+                return self._validate_and_map_free_workflow(nodes_by_id)
             return False, {"error": "CLIPTextEncode 노드가 2개 미만입니다 (Prompt/Negative)."}
 
         # 3-2. 샘플러
         if not found_sampler_nodes:
+            if allow_free and self._looks_like_free_workflow_candidate(nodes_by_id):
+                return self._validate_and_map_free_workflow(nodes_by_id)
             return False, {"error": f"필수 샘플러 노드({'/'.join(recognized_sampler_types)})를 찾을 수 없습니다."}
 
         sampler_node_id = found_sampler_nodes[0]
@@ -664,6 +720,8 @@ class ComfyUIWorkflowManager:
                 node_map["negative_prompt"] = sampler_inputs["negative"][0]
 
         if "positive_prompt" not in node_map or "negative_prompt" not in node_map:
+            if allow_free and self._looks_like_free_workflow_candidate(nodes_by_id):
+                return self._validate_and_map_free_workflow(nodes_by_id)
             return False, {"error": "샘플러에 연결된 Prompt/Negative 노드를 특정할 수 없습니다."}
 
         node_map["sampler"] = sampler_node_id
@@ -831,6 +889,102 @@ class ComfyUIWorkflowManager:
             return str(latent_ref[0])
         return None
 
+    _FREE_STRING_NODE_TYPES = {"PrimitiveString"}
+    _FREE_INT_NODE_TYPES = {"PrimitiveInt"}
+    _FREE_REQUIRED_TITLES = {
+        "naia_prompt": ("PrimitiveString", "positive_prompt", "PrimitiveString title naia_prompt"),
+        "naia_negative": ("PrimitiveString", "negative_prompt", "PrimitiveString title naia_negative"),
+        "naia_width": ("PrimitiveInt", "width_primitive", "PrimitiveInt title naia_width"),
+        "naia_height": ("PrimitiveInt", "height_primitive", "PrimitiveInt title naia_height"),
+    }
+
+    @staticmethod
+    def _normalized_node_title(value: Any) -> str:
+        return str(value or "").strip().lower()
+
+    def _node_title_equals(self, node: Dict[str, Any], expected_title: str) -> bool:
+        meta = node.get("_meta") if isinstance(node.get("_meta"), dict) else {}
+        properties = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+        candidates = (
+            node.get("title"),
+            meta.get("title"),
+            properties.get("Node name for S&R"),
+        )
+        expected = self._normalized_node_title(expected_title)
+        return any(self._normalized_node_title(candidate) == expected for candidate in candidates)
+
+    def _free_workflow_requirements(
+        self,
+        nodes_by_id: Dict[str, Any],
+    ) -> tuple[Dict[str, str], List[tuple[str, str]], List[str]]:
+        node_map: Dict[str, str] = {}
+        required_status: List[tuple[str, str]] = []
+        errors: List[str] = []
+
+        for title, (class_type, map_key, display) in self._FREE_REQUIRED_TITLES.items():
+            matches = [
+                str(node_id)
+                for node_id, node in nodes_by_id.items()
+                if isinstance(node, dict)
+                and self._node_class_type(node) == class_type
+                and self._node_title_equals(node, title)
+            ]
+            if len(matches) == 1:
+                node_map[map_key] = matches[0]
+                required_status.append(("PASS", display))
+            elif len(matches) == 0:
+                required_status.append(("FAIL", display))
+                errors.append(f"missing {display}")
+            else:
+                required_status.append(("FAIL", f"{display} (duplicate)"))
+                errors.append(f"multiple nodes with title {title}")
+
+        output_nodes = [
+            str(node_id)
+            for node_id, node in nodes_by_id.items()
+            if isinstance(node, dict) and self._node_class_type(node) in self._SAVE_OUTPUT_NODE_TYPES
+        ]
+        if len(output_nodes) == 1:
+            output_id = output_nodes[0]
+            node_map["save_image"] = output_id
+            output_class = self._node_class_type(nodes_by_id[output_id])
+            required_status.append(("PASS", f"{output_class} single save node"))
+        elif len(output_nodes) == 0:
+            required_status.append(("FAIL", "SaveImage or SaveAnimatedWEBP single save node"))
+            errors.append("missing one SaveImage or SaveAnimatedWEBP node")
+        else:
+            required_status.append(("FAIL", "SaveImage or SaveAnimatedWEBP single save node"))
+            errors.append("multiple SaveImage/SaveAnimatedWEBP nodes")
+
+        return node_map, required_status, errors
+
+    def _looks_like_free_workflow_candidate(self, nodes_by_id: Dict[str, Any]) -> bool:
+        required_titles = set(self._FREE_REQUIRED_TITLES)
+        for node in nodes_by_id.values():
+            if not isinstance(node, dict):
+                continue
+            if self._normalized_node_title(self._node_display_name(node)) in required_titles:
+                return True
+        return False
+
+    def _validate_and_map_free_workflow(
+        self,
+        nodes_by_id: Dict[str, Any],
+    ) -> tuple[bool, Dict[str, Any]]:
+        node_map, _required_status, errors = self._free_workflow_requirements(nodes_by_id)
+        if errors:
+            return False, {
+                "error": "Bypass workflow requirements not satisfied: " + "; ".join(errors),
+                "workflow_type": "bypass",
+                "model_compat": "bypass",
+            }
+
+        return True, {
+            "model_compat": "bypass",
+            "workflow_type": "bypass",
+            **node_map,
+        }
+
     def _is_direct_sampler_patch_node(self, node: Dict[str, Any]) -> bool:
         class_type = self._node_class_type(node)
         if class_type == "SamplerCustom":
@@ -848,6 +1002,63 @@ class ComfyUIWorkflowManager:
         for key, value in updates.items():
             if force or key in sampler_inputs:
                 sampler_inputs[key] = value
+
+    @staticmethod
+    def _set_workflow_node_input(workflow: Dict[str, Any], node_id: str, key: str, value: Any) -> None:
+        node = workflow[str(node_id)]
+        inputs = node.setdefault("inputs", {})
+        inputs[key] = value
+
+    @staticmethod
+    def _is_seed_input_name(name: Any) -> bool:
+        normalized = str(name or "").strip().lower()
+        return "seed" in normalized
+
+    @staticmethod
+    def _is_scalar_seed_value(value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (int, float)):
+            return True
+        if isinstance(value, str):
+            return value.strip() != ""
+        return False
+
+    def _randomize_free_seed_inputs(self, workflow: Dict[str, Any]) -> int:
+        randomized = 0
+        for node in workflow.values():
+            if not isinstance(node, dict):
+                continue
+            inputs = node.get("inputs")
+            if not isinstance(inputs, dict):
+                continue
+            for key, value in list(inputs.items()):
+                if self._is_seed_input_name(key) and self._is_scalar_seed_value(value):
+                    inputs[key] = self._generate_random_seed()
+                    randomized += 1
+        return randomized
+
+    def _apply_free_workflow_params(
+        self,
+        workflow: Dict[str, Any],
+        node_map: Dict[str, Any],
+        params: Dict[str, Any],
+    ) -> None:
+        cleaned_input = self._clean_prompt(params.get("input", ""))
+        cleaned_negative = self._clean_prompt(params.get("negative_prompt", ""))
+        self._set_workflow_node_input(workflow, node_map["positive_prompt"], "value", cleaned_input)
+        self._set_workflow_node_input(workflow, node_map["negative_prompt"], "value", cleaned_negative)
+        self._set_workflow_node_input(workflow, node_map["width_primitive"], "value", int(params.get("width", 1024)))
+        self._set_workflow_node_input(workflow, node_map["height_primitive"], "value", int(params.get("height", 1024)))
+
+        save_node_id = node_map.get("save_image")
+        if save_node_id and str(save_node_id) in workflow:
+            save_inputs = workflow[str(save_node_id)].setdefault("inputs", {})
+            save_inputs["filename_prefix"] = params.get("filename_prefix") or save_inputs.get("filename_prefix") or "NAIA_ComfyUI"
+
+        randomized_seed_count = self._randomize_free_seed_inputs(workflow)
+        if randomized_seed_count:
+            print(f"BYPASS 워크플로우: seed 입력 {randomized_seed_count}개를 랜덤 시드로 치환")
 
     _INPUT_TYPE_BY_NAME = {
         "model": "MODEL",
@@ -872,6 +1083,8 @@ class ComfyUIWorkflowManager:
         "KSampler": [("LATENT", "LATENT")],
         "SamplerCustom": [("LATENT", "LATENT")],
         "VAEDecode": [("IMAGE", "IMAGE")],
+        "PrimitiveString": [("STRING", "STRING")],
+        "PrimitiveInt": [("INT", "INT")],
     }
 
     _WIDGET_KEYS_BY_CLASS = {
@@ -885,6 +1098,8 @@ class ComfyUIWorkflowManager:
         "RescaleCFG": ["multiplier"],
         "SaveImage": ["filename_prefix"],
         "SaveAnimatedWEBP": ["filename_prefix", "fps", "lossless", "quality", "method"],
+        "PrimitiveString": ["value"],
+        "PrimitiveInt": ["value"],
     }
 
     @staticmethod
@@ -1112,6 +1327,18 @@ class ComfyUIWorkflowManager:
             # 1. 모델 설정 (워크플로우 타입/호환성에 따라 다르게 처리)
             detected_workflow_type = node_map.get("workflow_type", "checkpoint")
             model_compat = node_map.get("model_compat")
+            if node_map.get("save_image"):
+                params["_comfyui_output_node_id"] = str(node_map["save_image"])
+
+            if self._is_bypass_workflow_type(detected_workflow_type):
+                self._apply_free_workflow_params(workflow, node_map, params)
+                if workflow_ui:
+                    workflow_ui = self._sync_ui_workflow_from_api(workflow_ui, workflow)
+                else:
+                    workflow_ui = self.api_workflow_to_ui_workflow(workflow)
+                self.last_applied_workflow_ui = workflow_ui
+                print("BYPASS 워크플로우: Primitive IO 적용 완료")
+                return workflow
 
             if model_compat == "locked_unknown":
                 # 커스텀 로더 체인 — 모델 치환을 명시적으로 스킵.
@@ -1321,7 +1548,7 @@ class ComfyUIWorkflowManager:
             return f"미리보기 생성 실패: {e}"
         
 
-    def analyze_workflow_for_ui(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    def analyze_workflow_for_ui(self, metadata: Dict[str, Any], *, workflow_mode: str = "custom") -> Dict[str, Any]:
         """
         워크플로우를 상세히 분석하여 UI에 표시할 검증 결과를 반환합니다.
         'workflow'(UI 형식)와 'prompt'(API 형식) JSON을 모두 처리할 수 있도록 개선되었습니다.
@@ -1334,6 +1561,7 @@ class ComfyUIWorkflowManager:
             # [179.5] 모델 호환성 상태: None / "native_checkpoint" / "native_unet" / "locked_unknown"
             "model_compat": None,
         }
+        workflow_mode = self._normalize_custom_workflow_mode(workflow_mode)
         # [수정] KSampler 외 커스텀 샘플러 지원
         recognized_sampler_types = self._recognized_sampler_label()
         output_node_types = set(self._SUPPORTED_OUTPUT_NODE_TYPES)
@@ -1350,16 +1578,19 @@ class ComfyUIWorkflowManager:
             
             all_nodes = []
             is_ui_format = False
+            validation_candidate = None
 
             # 1. 워크플로우 데이터 소스 결정 및 노드 리스트 생성
             if workflow_str:
                 parsed_workflow = json.loads(workflow_str)
+                validation_candidate = parsed_workflow
                 if 'nodes' in parsed_workflow and isinstance(parsed_workflow['nodes'], list):
                     all_nodes = parsed_workflow['nodes']
                     is_ui_format = True
             
             if not all_nodes and prompt_str:
                 parsed_prompt = json.loads(prompt_str)
+                validation_candidate = parsed_prompt
                 # API 형식의 딕셔너리를 UI 형식의 리스트로 변환
                 all_nodes = list(parsed_prompt.values())
                 is_ui_format = False
@@ -1369,6 +1600,62 @@ class ComfyUIWorkflowManager:
                 return result
 
             # 2. 노드 분석
+            if validation_candidate is not None:
+                node_lookup = {}
+                if isinstance(validation_candidate, dict) and isinstance(validation_candidate.get("nodes"), list):
+                    node_lookup = {
+                        str(node.get("id")): node
+                        for node in validation_candidate.get("nodes", [])
+                        if isinstance(node, dict)
+                    }
+                elif isinstance(validation_candidate, dict):
+                    node_lookup = {
+                        str(node_id): node
+                        for node_id, node in validation_candidate.items()
+                        if isinstance(node, dict)
+                    }
+
+                if workflow_mode == "bypass":
+                    if not self._is_json_workflow_metadata(metadata):
+                        result["error_message"] = "Bypass workflow mode supports JSON workflow uploads only."
+                        result["success"] = False
+                        return result
+                    if node_lookup:
+                        _free_map, required_status, free_errors = self._free_workflow_requirements(node_lookup)
+                        result["model_compat"] = "bypass"
+                        result["workflow_type"] = "bypass"
+                        result["required"] = required_status
+                        free_io_types = {"PrimitiveString", "PrimitiveInt", "SaveImage", "SaveAnimatedWEBP"}
+                        result["custom"] = [
+                            self._node_class_type(node)
+                            for node in all_nodes
+                            if self._node_class_type(node) and self._node_class_type(node) not in free_io_types
+                        ]
+                        if free_errors:
+                            result["error_message"] = "Bypass workflow requirements not satisfied: " + "; ".join(free_errors)
+                            result["success"] = False
+                            return result
+                        result["success"] = True
+                        return result
+                    result["error_message"] = "Bypass workflow requirements not satisfied."
+                    result["success"] = False
+                    return result
+
+                if node_lookup and self._looks_like_free_workflow_candidate(node_lookup):
+                    _free_map, required_status, free_errors = self._free_workflow_requirements(node_lookup)
+                    result["model_compat"] = "bypass"
+                    result["workflow_type"] = "bypass"
+                    result["required"] = required_status
+                    free_io_types = {"PrimitiveString", "PrimitiveInt", "SaveImage", "SaveAnimatedWEBP"}
+                    result["custom"] = [
+                        self._node_class_type(node)
+                        for node in all_nodes
+                        if self._node_class_type(node) and self._node_class_type(node) not in free_io_types
+                    ]
+                    result["error_message"] = "This workflow uses Bypass-mode naia_* Primitive nodes. Use Custom Workflow (Bypass)."
+                    result["success"] = False
+                    return result
+
             found_required = set()
             found_loaders = set()
             found_sampler = None

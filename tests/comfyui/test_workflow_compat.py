@@ -27,6 +27,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager  # noqa: E402
+from core.comfyui_service import ComfyUIService  # noqa: E402
 from utils.comfyui_png_metadata import extract_comfyui_workflow_metadata_from_upload_bytes  # noqa: E402
 
 
@@ -217,6 +218,8 @@ def test_event_publish_on_load_and_clear():
     assert data1 == {
         "has_custom": True,
         "model_compat": "locked_unknown",
+        "workflow_type": "locked",
+        "workflow_label": "Custom Workflow",
         "locked_loader_class": "OTUNetLoaderW8A8",
         "locked_model_display": "anima-preview3-base-int8rowwise.safetensors",
     }
@@ -226,6 +229,8 @@ def test_event_publish_on_load_and_clear():
     assert data2 == {
         "has_custom": False,
         "model_compat": None,
+        "workflow_type": None,
+        "workflow_label": "Basic Workflow",
         "locked_loader_class": None,
         "locked_model_display": None,
     }
@@ -483,6 +488,228 @@ def test_webp_save_node_can_be_custom_workflow_output():
     webp_node = next(node for node in workflow_ui["nodes"] if str(node["id"]) == "53")
     assert webp_node["type"] == "SaveAnimatedWEBP"
     assert webp_node["widgets_values"][:5] == ["NAIA_WebP_Test", 1, False, 97, "default"]
+
+
+def _make_bypass_primitive_workflow():
+    return {
+        "10": {
+            "class_type": "PrimitiveString",
+            "inputs": {"value": "old positive"},
+            "_meta": {"title": "naia_prompt"},
+        },
+        "11": {
+            "class_type": "PrimitiveString",
+            "inputs": {"value": "old negative"},
+            "_meta": {"title": "naia_negative"},
+        },
+        "12": {
+            "class_type": "PrimitiveInt",
+            "inputs": {"value": 512},
+            "_meta": {"title": "naia_width"},
+        },
+        "13": {
+            "class_type": "PrimitiveInt",
+            "inputs": {"value": 768},
+            "_meta": {"title": "naia_height"},
+        },
+        "40": {
+            "class_type": "HeavyCustomPipeline",
+            "inputs": {
+                "positive": ["10", 0],
+                "negative": ["11", 0],
+                "width": ["12", 0],
+                "height": ["13", 0],
+                "seed": 0,
+                "noise_seed": "0",
+                "fixed_seed": 777,
+                "seed_fixed": True,
+            },
+        },
+        "90": {
+            "class_type": "SaveAnimatedWEBP",
+            "inputs": {
+                "filename_prefix": "old_bypass",
+                "fps": 1,
+                "lossless": False,
+                "quality": 90,
+                "method": "default",
+                "images": ["40", 0],
+            },
+            "_meta": {"title": "Final WEBP"},
+        },
+    }
+
+
+def test_bypass_primitive_workflow_updates_naia_io_and_forces_seed_nodes_random():
+    class DeterministicSeedWorkflowManager(ComfyUIWorkflowManager):
+        def __init__(self):
+            super().__init__()
+            self._seed_values = iter([101, 202, 303])
+
+        def _generate_random_seed(self) -> int:
+            return next(self._seed_values)
+
+    mgr = DeterministicSeedWorkflowManager()
+    wf = _make_bypass_primitive_workflow()
+
+    ok, node_map = mgr.validate_and_map_workflow(wf, allow_free=True)
+    assert ok, f"bypass workflow should validate: {node_map}"
+    assert node_map["workflow_type"] == "bypass"
+    assert node_map["model_compat"] == "bypass"
+    assert node_map["positive_prompt"] == "10"
+    assert node_map["negative_prompt"] == "11"
+    assert node_map["width_primitive"] == "12"
+    assert node_map["height_primitive"] == "13"
+    assert node_map["save_image"] == "90"
+    assert "sampler" not in node_map
+
+    meta = extract_comfyui_workflow_metadata_from_upload_bytes(json.dumps(wf).encode("utf-8"))
+    analysis = mgr.analyze_workflow_for_ui(meta, workflow_mode="bypass")
+    assert analysis["success"] is True
+    assert analysis["model_compat"] == "bypass"
+    assert ("PASS", "PrimitiveString title naia_prompt") in analysis["required"]
+    assert ("PASS", "SaveAnimatedWEBP single save node") in analysis["required"]
+    assert "HeavyCustomPipeline" in analysis["custom"]
+
+    assert mgr.load_workflow_from_metadata(meta, workflow_mode="bypass")
+    params = {
+        "model": "ignored.safetensors",
+        "input": "new positive",
+        "negative_prompt": "new negative",
+        "seed": 123,
+        "steps": 20,
+        "cfg_scale": 3.5,
+        "sampler": "euler",
+        "scheduler": "normal",
+        "width": 832,
+        "height": 1216,
+        "filename_prefix": "NAIA_Bypass_Test",
+    }
+    result = mgr.apply_params_to_workflow(params)
+    assert result is not None
+    assert result["10"]["inputs"]["value"] == "new positive"
+    assert result["11"]["inputs"]["value"] == "new negative"
+    assert result["12"]["inputs"]["value"] == 832
+    assert result["13"]["inputs"]["value"] == 1216
+    assert result["90"]["inputs"]["filename_prefix"] == "NAIA_Bypass_Test"
+    assert result["40"]["inputs"]["positive"] == ["10", 0]
+    assert result["40"]["inputs"]["seed"] == 101
+    assert result["40"]["inputs"]["noise_seed"] == 202
+    assert result["40"]["inputs"]["fixed_seed"] == 303
+    assert result["40"]["inputs"]["seed_fixed"] is True
+    assert params["_comfyui_output_node_id"] == "90"
+
+    workflow_ui = mgr.get_last_applied_workflow_ui()
+    positive_ui = next(node for node in workflow_ui["nodes"] if str(node["id"]) == "10")
+    width_ui = next(node for node in workflow_ui["nodes"] if str(node["id"]) == "12")
+    assert positive_ui["widgets_values"] == ["new positive"]
+    assert width_ui["widgets_values"] == [832]
+
+
+def test_bypass_workflow_rejects_missing_required_title():
+    mgr = ComfyUIWorkflowManager()
+    wf = _make_bypass_primitive_workflow()
+    wf["12"]["_meta"]["title"] = "width"
+
+    ok, node_map = mgr.validate_and_map_workflow(wf, allow_free=True)
+    assert not ok
+    assert "naia_width" in node_map["error"]
+
+    meta = extract_comfyui_workflow_metadata_from_upload_bytes(json.dumps(wf).encode("utf-8"))
+    analysis = mgr.analyze_workflow_for_ui(meta, workflow_mode="bypass")
+    assert analysis["success"] is False
+    assert ("FAIL", "PrimitiveInt title naia_width") in analysis["required"]
+    assert "naia_width" in analysis["error_message"]
+
+
+def test_bypass_workflow_title_can_come_from_meta_when_title_exists():
+    mgr = ComfyUIWorkflowManager()
+    wf = _make_bypass_primitive_workflow()
+    wf["10"]["title"] = "문자열"
+
+    ok, node_map = mgr.validate_and_map_workflow(wf, allow_free=True)
+    assert ok, f"_meta title should still identify naia_prompt: {node_map}"
+    assert node_map["positive_prompt"] == "10"
+
+
+def test_bypass_workflow_requires_exactly_one_save_node():
+    mgr = ComfyUIWorkflowManager()
+    wf = _make_bypass_primitive_workflow()
+    wf["91"] = {
+        "class_type": "SaveImage",
+        "inputs": {"filename_prefix": "extra", "images": ["40", 0]},
+    }
+
+    ok, node_map = mgr.validate_and_map_workflow(wf, allow_free=True)
+    assert not ok
+    assert "multiple SaveImage/SaveAnimatedWEBP nodes" in node_map["error"]
+
+
+def test_bypass_workflow_does_not_load_through_normal_custom_mode():
+    mgr = ComfyUIWorkflowManager()
+    wf = _make_bypass_primitive_workflow()
+    meta = extract_comfyui_workflow_metadata_from_upload_bytes(json.dumps(wf).encode("utf-8"))
+
+    analysis = mgr.analyze_workflow_for_ui(meta, workflow_mode="custom")
+    assert analysis["success"] is False
+    assert "Custom Workflow (Bypass)" in analysis["error_message"]
+    assert not mgr.load_workflow_from_metadata(meta, workflow_mode="custom")
+
+
+def test_bypass_workflow_metadata_is_json_upload_only():
+    mgr = ComfyUIWorkflowManager()
+    wf = _make_bypass_primitive_workflow()
+    image_style_meta = {"prompt": json.dumps(wf), "workflow": json.dumps(wf)}
+
+    analysis = mgr.analyze_workflow_for_ui(image_style_meta, workflow_mode="bypass")
+    assert analysis["success"] is False
+    assert "JSON workflow uploads only" in analysis["error_message"]
+    assert not mgr.load_workflow_from_metadata(image_style_meta, workflow_mode="bypass")
+
+
+def test_comfyui_service_prefers_requested_output_node():
+    import core.comfyui_service as comfyui_service_module
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "prompt-id": {
+                    "outputs": {
+                        "1": {
+                            "images": [
+                                {"filename": "preview.png", "subfolder": "", "type": "temp"},
+                            ],
+                        },
+                        "90": {
+                            "images": [
+                                {"filename": "final.webp", "subfolder": "", "type": "output"},
+                            ],
+                        },
+                    }
+                }
+            }
+
+    original_get = comfyui_service_module.requests.get
+    comfyui_service_module.requests.get = lambda *args, **kwargs: FakeResponse()
+    try:
+        service = ComfyUIService("http://127.0.0.1:8188")
+        workflow = {
+            "1": {"class_type": "PreviewImage", "inputs": {}},
+            "90": {"class_type": "SaveAnimatedWEBP", "inputs": {}, "_meta": {"title": "NAIA_OUTPUT"}},
+        }
+        result = service.get_generation_result(
+            "prompt-id",
+            workflow=workflow,
+            preferred_output_node_id="90",
+        )
+    finally:
+        comfyui_service_module.requests.get = original_get
+
+    assert len(result) == 1
+    assert result[0]["filename"] == "final.webp"
+    assert result[0]["source_node_id"] == "90"
 
 
 def test_native_workflows_use_save_image_outputs():
@@ -777,6 +1004,13 @@ ALL_TESTS = [
     test_native_unet_apply_params_still_swaps_model,
     test_ksampler_compatible_custom_sampler_is_supported,
     test_webp_save_node_can_be_custom_workflow_output,
+    test_bypass_primitive_workflow_updates_naia_io_and_forces_seed_nodes_random,
+    test_bypass_workflow_rejects_missing_required_title,
+    test_bypass_workflow_title_can_come_from_meta_when_title_exists,
+    test_bypass_workflow_requires_exactly_one_save_node,
+    test_bypass_workflow_does_not_load_through_normal_custom_mode,
+    test_bypass_workflow_metadata_is_json_upload_only,
+    test_comfyui_service_prefers_requested_output_node,
     test_native_workflows_use_save_image_outputs,
     test_apply_params_builds_current_ui_workflow_metadata,
     test_trace_handles_dangling_model_link,

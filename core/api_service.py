@@ -1208,6 +1208,7 @@ class APIService:
                 workflow,
                 _comfyui_progress,
                 extra_pnginfo=extra_pnginfo,
+                preferred_output_node_id=params.get("_comfyui_output_node_id"),
             )
             
             if result and result['status'] == 'success':

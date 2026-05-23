@@ -464,10 +464,11 @@
                   <select class="param-select" id="pComfyuiResolutionPreset" onchange="setResolutionPreset('COMFYUI', this.value)"></select>
                 </div>
               </div>
-              <div class="param-flags" style="padding:7px 10px;background:var(--bg-deep)">
+              <div class="param-flags" id="comfyuiSamplingModeRow" style="padding:7px 10px;background:var(--bg-deep)">
                 <span class="param-flag" data-key="sampling_mode" data-val="eps" id="flagEps" onclick="setSamplingMode('eps')">EPS</span>
                 <span class="param-flag" data-key="sampling_mode" data-val="v_prediction" id="flagVpred" onclick="setSamplingMode('v_prediction')">V-Pred</span>
                 <span class="param-flag" data-key="sampling_mode" data-val="anima" id="flagAnima" onclick="setSamplingMode('anima')">ANIMA</span>
+                <span class="param-bypass-inline" id="comfyuiSamplingBypass" style="display:none">Ignore and bypass</span>
               </div>
               <div class="param-row" id="comfyuiRescaleRow" style="display:none">
                 <span class="param-label">Rescale CFG</span>

@@ -294,6 +294,14 @@ class WorkflowValidationDialog(QDialog):
                 f"체크포인트는 워크플로우 내장값을 유지합니다."
                 f"</span>"
             )
+        elif compat in {"bypass", "free"}:
+            self.compat_label.setText(
+                f"<b style='color:{DARK_COLORS['warning']};'>Bypass Custom Workflow</b><br>"
+                f"<span style='color:{DARK_COLORS['text_secondary']};'>"
+                "Requires JSON upload with titles naia_prompt, naia_negative, naia_width, naia_height, "
+                "and exactly one SaveImage or SaveAnimatedWEBP node. NAIA writes those IO nodes and forces all seed inputs random."
+                f"</span>"
+            )
         else:
             self.compat_label.setText(
                 f"<span style='color:{DARK_COLORS['text_secondary']};'>"

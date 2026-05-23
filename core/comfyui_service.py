@@ -142,8 +142,43 @@ class ComfyUIService:
             return (0, str(node_id))
 
     _SAVE_OUTPUT_NODE_TYPES = {"SaveImage", "SaveAnimatedWEBP"}
+    _NAIA_OUTPUT_HINTS = {"naia_output", "naia output", "final_output", "final output"}
 
-    def get_generation_result(self, prompt_id: str, workflow: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _node_display_name(node: Dict[str, Any]) -> str:
+        meta = node.get("_meta") if isinstance(node.get("_meta"), dict) else {}
+        properties = node.get("properties") if isinstance(node.get("properties"), dict) else {}
+        for value in (
+            node.get("title"),
+            meta.get("title"),
+            properties.get("Node name for S&R"),
+            node.get("type"),
+            node.get("class_type"),
+        ):
+            if value:
+                return str(value)
+        return ""
+
+    @staticmethod
+    def _label_has_output_hint(label: str) -> bool:
+        normalized = str(label or "").strip().lower()
+        compact = "".join(ch for ch in normalized if ch.isalnum())
+        spaced = " ".join("".join(ch if ch.isalnum() else " " for ch in normalized).split())
+        for hint in ComfyUIService._NAIA_OUTPUT_HINTS:
+            hint_compact = "".join(ch for ch in hint.lower() if ch.isalnum())
+            hint_spaced = " ".join("".join(ch if ch.isalnum() else " " for ch in hint.lower()).split())
+            if hint_compact and hint_compact in compact:
+                return True
+            if hint_spaced and hint_spaced in spaced:
+                return True
+        return False
+
+    def get_generation_result(
+        self,
+        prompt_id: str,
+        workflow: Optional[Dict[str, Any]] = None,
+        preferred_output_node_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """
         생성 결과를 조회하고, SaveImage/output 결과를 우선하여 반환합니다.
         """
@@ -163,10 +198,13 @@ class ComfyUIService:
             outputs = result.get('outputs', {})
             
             node_types = {}
+            node_output_hints = {}
             if isinstance(workflow, dict):
                 for node_id, node in workflow.items():
                     if isinstance(node, dict):
-                        node_types[str(node_id)] = node.get("class_type") or node.get("type") or ""
+                        node_id_text = str(node_id)
+                        node_types[node_id_text] = node.get("class_type") or node.get("type") or ""
+                        node_output_hints[node_id_text] = self._label_has_output_hint(self._node_display_name(node))
 
             # 1. 이미지를 실제로 생성한 노드들만 후보로 수집합니다.
             candidates = []
@@ -187,9 +225,12 @@ class ComfyUIService:
                 return []
 
             def candidate_score(info: Dict[str, Any]):
+                source_node_id = str(info.get('source_node_id') or '')
                 node_type = str(info.get('source_node_type') or '')
                 image_type = str(info.get('type') or '')
                 return (
+                    1 if preferred_output_node_id and source_node_id == str(preferred_output_node_id) else 0,
+                    1 if node_output_hints.get(source_node_id) else 0,
                     1 if node_type in self._SAVE_OUTPUT_NODE_TYPES else 0,
                     1 if image_type == "output" else 0,
                     0 if image_type == "temp" else 1,
@@ -247,6 +288,7 @@ class ComfyUIService:
         workflow: Dict[str, Any],
         progress_callback: Optional[Callable] = None,
         extra_pnginfo: Optional[Dict[str, Any]] = None,
+        preferred_output_node_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """완전한 이미지 생성 파이프라인"""
         if progress_callback:
@@ -265,7 +307,11 @@ class ComfyUIService:
         
         # 3. 결과 조회 (이제 리스트를 반환받음)
         # [수정] 변수명을 복수형(result_infos)으로 변경하여 리스트임을 명시
-        result_infos = self.get_generation_result(prompt_id, workflow=workflow)
+        result_infos = self.get_generation_result(
+            prompt_id,
+            workflow=workflow,
+            preferred_output_node_id=preferred_output_node_id,
+        )
         if not result_infos:
             return {'status': 'error', 'message': '생성 결과 조회 실패'}
         

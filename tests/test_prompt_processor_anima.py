@@ -121,6 +121,63 @@ def test_webui_prompt_formatting_applies_random_prompt_weight_without_anima_mode
     assert context.main_tags[1:3] == ["(blue sky", "solo:0.85)"]
 
 
+def test_comfyui_prompt_weight_applies_without_anima_sampling_mode():
+    processor = _processor_with_main_radio(checked=False, current_api_mode="COMFYUI")
+    context = PromptContext(
+        source_row={},
+        settings={
+            "api_mode": "COMFYUI",
+            "comfyui_sampling_mode": "eps",
+            "anima_weight": "0.85",
+        },
+        prefix_tags=["quality"],
+        main_tags=["1girl", "blue sky", "solo"],
+    )
+
+    processor._step_final_format(context)
+
+    assert context.prefix_tags[:2] == ["1girl", "quality"]
+    assert context.main_tags[1:3] == ["(blue sky", "solo:0.85)"]
+
+
+def test_comfyui_explicit_non_anima_mode_ignores_checked_main_radio():
+    processor = _processor_with_main_radio(checked=True, current_api_mode="COMFYUI")
+    context = PromptContext(
+        source_row={},
+        settings={
+            "api_mode": "COMFYUI",
+            "comfyui_sampling_mode": "eps",
+            "anima_weight": "0.85",
+        },
+        prefix_tags=["quality"],
+        main_tags=["1girl", "blue sky", "solo"],
+    )
+
+    processor._step_final_format(context)
+
+    assert context.prefix_tags[:2] == ["1girl", "quality"]
+    assert context.main_tags[1:3] == ["(blue sky", "solo:0.85)"]
+
+
+def test_comfyui_bypass_mode_ignores_checked_main_radio():
+    processor = _processor_with_main_radio(checked=True, current_api_mode="COMFYUI")
+    context = PromptContext(
+        source_row={},
+        settings={
+            "api_mode": "COMFYUI",
+            "workflow_type": "bypass",
+            "anima_weight": "0.85",
+        },
+        prefix_tags=["quality"],
+        main_tags=["1girl", "blue sky", "solo"],
+    )
+
+    processor._step_final_format(context)
+
+    assert context.prefix_tags[:2] == ["1girl", "quality"]
+    assert context.main_tags[1:3] == ["(blue sky", "solo:0.85)"]
+
+
 def test_webui_prompt_formatting_uses_window_weight_when_auto_generate_settings_omit_it():
     processor = _processor_with_main_radio(
         checked=False,

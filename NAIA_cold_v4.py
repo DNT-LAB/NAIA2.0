@@ -63,6 +63,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QTextEdit, QCheckBox, QComboBox, QFrame,
     QScrollArea, QSplitter, QStatusBar, QTabWidget, QMessageBox, QSpinBox, QSlider, QDoubleSpinBox,
+    QAbstractSpinBox,
     QFileDialog, QWidgetAction, QButtonGroup, QMenu, QProgressDialog, QSizePolicy, QRadioButton,
     QInputDialog,
 )
@@ -1180,8 +1181,11 @@ class ModernMainWindow(QMainWindow):
         self.controller.connect_signals()
         # 🆕 메인 생성 파라미터 모드 관리자 추가
         self.generation_params_manager = GenerationParamsManager(self)
+        self._comfyui_free_params_locked = False
+        self._comfyui_free_param_snapshots = {}
         
         # AppContext에 모드 변경 이벤트 구독
+        self.app_context.subscribe_mode_swap(lambda *_: self._release_comfyui_free_params_lock())
         self.app_context.subscribe_mode_swap(self.generation_params_manager.on_mode_changed)
         self.app_context.subscribe_mode_swap(self._on_mode_changed_for_remote)
         self.app_context.subscribe_mode_swap(lambda *_: self._update_model_list_for_comfyui())
@@ -1213,6 +1217,8 @@ class ModernMainWindow(QMainWindow):
         # workflow_manager 는 즉시 필요할 수 있어 동기 유지.
         self.autocomplete_manager = None
         self.workflow_manager = self.app_context.comfyui_workflow_manager
+        self.app_context.subscribe("comfyui_workflow_changed", self._on_comfyui_workflow_changed_for_params)
+        self.app_context.subscribe_mode_swap(lambda *_: self._sync_comfyui_free_params_lock_for_mode())
 
         self.main_prompt_textedit.installEventFilter(self)
         self.negative_prompt_textedit.installEventFilter(self)
@@ -2326,13 +2332,13 @@ class ModernMainWindow(QMainWindow):
         sampling_mode_layout.addWidget(self.v_pred_radio)
         sampling_mode_layout.addWidget(self.anima_radio)
 
-        # ANIMA 가중치 입력 (ANIMA 선택 시만 표시)
+        # Prompt Weight 입력 (ComfyUI sampling mode와 무관하게 허용)
         self.anima_weight_edit = QLineEdit()
         self.anima_weight_edit.setPlaceholderText("1")
         self.anima_weight_edit.setText("1")
         self.anima_weight_edit.setFixedWidth(get_scaled_size(70))
         self.anima_weight_edit.setToolTip(
-            "ANIMA 가중치 (기본 1)\n"
+            "Prompt Weight (기본 1)\n"
             "· 0 또는 1 입력 → 가중치 없음 (블록 래핑 생략)\n"
             "· 잘못된 값 → 기본값 1"
         )
@@ -2368,17 +2374,27 @@ class ModernMainWindow(QMainWindow):
         self.workflow_custom_btn.setEnabled(False)
         self.workflow_custom_btn.setStyleSheet(DARK_STYLES['toggle_button'])
 
+        self.workflow_free_btn = QPushButton("Bypass")
+        self.workflow_free_btn.setCheckable(True)
+        self.workflow_free_btn.setEnabled(False)
+        self.workflow_free_btn.setStyleSheet(DARK_STYLES['toggle_button'])
+
         self.workflow_toggle_group = QButtonGroup(self)
         self.workflow_toggle_group.addButton(self.workflow_default_btn)
         self.workflow_toggle_group.addButton(self.workflow_custom_btn)
+        self.workflow_toggle_group.addButton(self.workflow_free_btn)
         self.workflow_toggle_group.setExclusive(True)
 
-        self.workflow_load_btn = QPushButton("불러오기(이미지)")
+        self.workflow_load_btn = QPushButton("커스텀 불러오기")
         self.workflow_load_btn.setStyleSheet(DARK_STYLES['secondary_button'])
+        self.workflow_free_load_btn = QPushButton("Bypass 불러오기(JSON)")
+        self.workflow_free_load_btn.setStyleSheet(DARK_STYLES['secondary_button'])
 
         comfyui_workflow_layout.addWidget(self.workflow_default_btn, 1)
         comfyui_workflow_layout.addWidget(self.workflow_custom_btn, 1)
+        comfyui_workflow_layout.addWidget(self.workflow_free_btn, 1)
         comfyui_workflow_layout.addWidget(self.workflow_load_btn, 1)
+        comfyui_workflow_layout.addWidget(self.workflow_free_load_btn, 1)
 
         self.comfyui_option_widget_layout.addWidget(self.comfyui_workflow_section)
 
@@ -2936,7 +2952,7 @@ class ModernMainWindow(QMainWindow):
                             for w in self.comfyui_rescale_ui:
                                 w.setVisible(is_anima)
                             if hasattr(self, 'anima_weight_edit'):
-                                self.anima_weight_edit.setVisible(is_anima)
+                                self.anima_weight_edit.setVisible(True)
 
                             self.status_bar.showMessage(f"✅ ComfyUI 모드로 전환되었습니다. ({comfyui_url})", 5000)
 
@@ -3070,6 +3086,15 @@ class ModernMainWindow(QMainWindow):
                     )
                     checkbox.setStyleSheet(gray_style)
 
+    def _current_comfyui_sampling_mode_for_prompt(self) -> str:
+        if self.get_current_api_mode() == "COMFYUI" and getattr(self, '_comfyui_free_params_locked', False):
+            return "bypass"
+        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
+            return "anima"
+        if hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
+            return "v_prediction"
+        return "eps"
+
     def get_main_parameters(self) -> dict:
         """메인 UI의 파라미터들을 수집하여 딕셔너리로 반환합니다."""
         params = {}
@@ -3093,7 +3118,9 @@ class ModernMainWindow(QMainWindow):
                 resolution_text = f"{width} x {height}"
             
             # 시드 처리
-            if self.seed_fix_checkbox.isChecked():
+            if getattr(self, '_comfyui_free_params_locked', False) and self.get_current_api_mode() == "COMFYUI":
+                seed_value = -1
+            elif self.seed_fix_checkbox.isChecked():
                 try:
                     seed_value = int(self.seed_input.text())
                     if seed_value < 0:
@@ -3155,7 +3182,20 @@ class ModernMainWindow(QMainWindow):
             # 🆕 추가: ComfyUI 전용 파라미터들 (현재 모드가 ComfyUI일 때만)
             current_mode = self.get_current_api_mode()
             if current_mode == "COMFYUI":
-                if hasattr(self, 'eps_radio') and hasattr(self, 'v_pred_radio') and hasattr(self, 'anima_radio'):
+                if hasattr(self, 'anima_weight_edit'):
+                    raw_prompt_weight = self.anima_weight_edit.text().strip()
+                    if raw_prompt_weight:
+                        params["anima_weight"] = raw_prompt_weight
+                        params["random_prompt_weight"] = raw_prompt_weight
+                if getattr(self, '_comfyui_free_params_locked', False):
+                    params.update({
+                        "sampling_mode": "bypass",
+                        "comfyui_sampling_mode": "bypass",
+                        "workflow_type": "bypass",
+                        "filename_prefix": "NAIA_ComfyUI",
+                    })
+                    print("🎨 ComfyUI Bypass 워크플로우: sampling/rescale 파라미터 수집을 건너뜁니다.")
+                elif hasattr(self, 'eps_radio') and hasattr(self, 'v_pred_radio') and hasattr(self, 'anima_radio'):
                     # 선택된 샘플링 모드 확인
                     if self.eps_radio.isChecked():
                         sampling_mode = "eps"
@@ -3181,11 +3221,12 @@ class ModernMainWindow(QMainWindow):
                     if workflow_type == "unet" and hasattr(self, 'comfyui_rescale_slider'):
                         params["rescale_cfg"] = self.comfyui_rescale_slider.value() / 100.0
 
-                    # ANIMA 모드: 사용자 지정 가중치 (공란/잘못된 값 → prompt_processor 가 기본값 1 로 복원)
-                    if sampling_mode == "anima" and hasattr(self, 'anima_weight_edit'):
+                    # Prompt Weight: sampling mode와 무관하게 prompt_processor가 WEBUI 방식으로 처리
+                    if hasattr(self, 'anima_weight_edit'):
                         raw = self.anima_weight_edit.text().strip()
                         if raw:
                             params["anima_weight"] = raw
+                            params["random_prompt_weight"] = raw
 
                     # 디버그 정보
                     print(f"🎨 ComfyUI 파라미터 수집 완료:")
@@ -3522,13 +3563,7 @@ class ModernMainWindow(QMainWindow):
                 
                 # 다음 프롬프트 생성 요청
                 # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
-                comfyui_sampling_mode = "eps"  # 기본값
-                if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
-                    comfyui_sampling_mode = "anima"
-                elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
-                    comfyui_sampling_mode = "v_prediction"
-                elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
-                    comfyui_sampling_mode = "eps"
+                comfyui_sampling_mode = self._current_comfyui_sampling_mode_for_prompt()
 
                 settings = {
                     'prompt_fixed': False,
@@ -5161,13 +5196,7 @@ class ModernMainWindow(QMainWindow):
 
         # 현재 UI의 생성 설정값들을 가져옴
         # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
-        comfyui_sampling_mode = "eps"  # 기본값
-        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
-            comfyui_sampling_mode = "anima"
-        elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
-            comfyui_sampling_mode = "v_prediction"
-        elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
-            comfyui_sampling_mode = "eps"
+        comfyui_sampling_mode = self._current_comfyui_sampling_mode_for_prompt()
 
         settings = {
             'prompt_fixed': self.generation_checkboxes["프롬프트 고정"].isChecked(),
@@ -5197,13 +5226,7 @@ class ModernMainWindow(QMainWindow):
 
         # UI에서 생성 관련 설정값들을 수집
         # 🔧 ComfyUI 샘플링 모드 감지 (라디오 버튼에서 직접 읽기)
-        comfyui_sampling_mode = "eps"  # 기본값
-        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
-            comfyui_sampling_mode = "anima"
-        elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
-            comfyui_sampling_mode = "v_prediction"
-        elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
-            comfyui_sampling_mode = "eps"
+        comfyui_sampling_mode = self._current_comfyui_sampling_mode_for_prompt()
 
         settings = {
             'prompt_fixed': self.generation_checkboxes["프롬프트 고정"].isChecked(),
@@ -6586,9 +6609,277 @@ class ModernMainWindow(QMainWindow):
             print(f"Error updating negative token count: {e}")
             self.negative_prompt_token_label.setText("Estimated Tokens : Error")
     
-    def _load_custom_workflow_from_image(self):
+    def _on_comfyui_workflow_changed_for_params(self, data):
+        if isinstance(data, dict) and str(data.get("model_compat") or "").strip().lower() in {"bypass", "free"}:
+            self._sync_comfyui_free_params_lock_for_mode()
+        else:
+            self._release_comfyui_free_params_lock()
+
+    def _sync_comfyui_free_params_lock_for_mode(self):
+        node_map = getattr(self.workflow_manager, "user_workflow_node_map", None) or {}
+        if self.get_current_api_mode() == "COMFYUI" and str(node_map.get("model_compat") or "").strip().lower() in {"bypass", "free"}:
+            self._apply_comfyui_free_params_lock()
+        else:
+            self._release_comfyui_free_params_lock()
+
+    def _snapshot_combo_for_bypass(self, combo):
+        return {
+            "items": [combo.itemText(i) for i in range(combo.count())],
+            "index": combo.currentIndex(),
+            "enabled": combo.isEnabled(),
+            "style": combo.styleSheet(),
+            "tooltip": combo.toolTip(),
+        }
+
+    def _restore_combo_from_bypass(self, combo, snapshot):
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItems(snapshot.get("items") or [])
+            if combo.count() > 0:
+                index = max(0, min(snapshot.get("index", 0), combo.count() - 1))
+                combo.setCurrentIndex(index)
+        finally:
+            combo.blockSignals(False)
+        combo.setEnabled(snapshot.get("enabled", True))
+        combo.setStyleSheet(snapshot.get("style", ""))
+        combo.setToolTip(snapshot.get("tooltip", ""))
+
+    def _lock_combo_with_bypass(self, combo, name):
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("Ignore and bypass")
+            combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(False)
+        combo.setEnabled(False)
+        combo.setStyleSheet("QComboBox { color: #ff5a66; } QComboBox:disabled { color: #ff5a66; }")
+        combo.setToolTip(f"{name} is controlled by the Bypass custom workflow.")
+
+    def _snapshot_spin_for_bypass(self, spin):
+        return {
+            "minimum": spin.minimum(),
+            "maximum": spin.maximum(),
+            "value": spin.value(),
+            "enabled": spin.isEnabled(),
+            "read_only": spin.isReadOnly(),
+            "special": spin.specialValueText(),
+            "buttons": spin.buttonSymbols(),
+            "style": spin.styleSheet(),
+            "tooltip": spin.toolTip(),
+        }
+
+    def _restore_spin_from_bypass(self, spin, snapshot):
+        spin.blockSignals(True)
+        try:
+            spin.setRange(snapshot.get("minimum", 0), snapshot.get("maximum", 100))
+            spin.setSpecialValueText(snapshot.get("special", ""))
+            spin.setValue(snapshot.get("value", spin.minimum()))
+        finally:
+            spin.blockSignals(False)
+        spin.setReadOnly(snapshot.get("read_only", False))
+        spin.setButtonSymbols(snapshot.get("buttons", QAbstractSpinBox.ButtonSymbols.UpDownArrows))
+        spin.setEnabled(snapshot.get("enabled", True))
+        spin.setStyleSheet(snapshot.get("style", ""))
+        spin.setToolTip(snapshot.get("tooltip", ""))
+
+    def _lock_spin_with_bypass(self, spin, name):
+        spin.blockSignals(True)
+        try:
+            spin.setRange(0, 0)
+            spin.setSpecialValueText("Ignore and bypass")
+            spin.setValue(0)
+        finally:
+            spin.blockSignals(False)
+        spin.setReadOnly(True)
+        spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        spin.setEnabled(False)
+        spin.setStyleSheet(
+            "QSpinBox, QDoubleSpinBox { color: #ff5a66; } "
+            "QSpinBox:disabled, QDoubleSpinBox:disabled { color: #ff5a66; }"
+        )
+        spin.setToolTip(f"{name} is controlled by the Bypass custom workflow.")
+
+    def _snapshot_lineedit_for_bypass(self, line_edit):
+        return {
+            "text": line_edit.text(),
+            "enabled": line_edit.isEnabled(),
+            "read_only": line_edit.isReadOnly(),
+            "style": line_edit.styleSheet(),
+            "tooltip": line_edit.toolTip(),
+        }
+
+    def _restore_lineedit_from_bypass(self, line_edit, snapshot):
+        line_edit.blockSignals(True)
+        try:
+            line_edit.setText(snapshot.get("text", ""))
+        finally:
+            line_edit.blockSignals(False)
+        line_edit.setReadOnly(snapshot.get("read_only", False))
+        line_edit.setEnabled(snapshot.get("enabled", True))
+        line_edit.setStyleSheet(snapshot.get("style", ""))
+        line_edit.setToolTip(snapshot.get("tooltip", ""))
+
+    def _lock_lineedit_with_bypass(self, line_edit, name):
+        display_text = "Forced always random" if name == "Seed" else "Ignore and bypass"
+        line_edit.blockSignals(True)
+        try:
+            line_edit.setText(display_text)
+        finally:
+            line_edit.blockSignals(False)
+        line_edit.setReadOnly(True)
+        line_edit.setEnabled(False)
+        line_edit.setStyleSheet(
+            "QLineEdit { color: #ff5a66; } QLineEdit:disabled { color: #ff5a66; }"
+        )
+        line_edit.setToolTip(f"{name} is controlled by the Bypass custom workflow.")
+
+    def _snapshot_radio_for_bypass(self, radio):
+        return {
+            "text": radio.text(),
+            "checked": radio.isChecked(),
+            "enabled": radio.isEnabled(),
+            "style": radio.styleSheet(),
+            "tooltip": radio.toolTip(),
+        }
+
+    def _restore_radio_from_bypass(self, radio, snapshot):
+        radio.blockSignals(True)
+        try:
+            radio.setText(snapshot.get("text", radio.text()))
+            radio.setChecked(snapshot.get("checked", False))
+        finally:
+            radio.blockSignals(False)
+        radio.setEnabled(snapshot.get("enabled", True))
+        radio.setStyleSheet(snapshot.get("style", ""))
+        radio.setToolTip(snapshot.get("tooltip", ""))
+
+    def _lock_sampling_mode_with_bypass(self):
+        radios = [self.eps_radio, self.v_pred_radio, self.anima_radio]
+        labels = ["Ignore and bypass", "", ""]
+        for radio, text in zip(radios, labels):
+            radio.blockSignals(True)
+            try:
+                radio.setText(text)
+            finally:
+                radio.blockSignals(False)
+            radio.setEnabled(False)
+            radio.setStyleSheet("QRadioButton { color: #ff5a66; } QRadioButton:disabled { color: #ff5a66; }")
+            radio.setToolTip("Sampling mode is controlled by the Bypass custom workflow.")
+
+    def _snapshot_slider_for_bypass(self, slider, label=None):
+        return {
+            "enabled": slider.isEnabled(),
+            "style": slider.styleSheet(),
+            "tooltip": slider.toolTip(),
+            "label_text": label.text() if label else None,
+            "label_style": label.styleSheet() if label else None,
+            "label_width": label.width() if label else None,
+        }
+
+    def _restore_slider_from_bypass(self, slider, snapshot, label=None):
+        slider.setEnabled(snapshot.get("enabled", True))
+        slider.setStyleSheet(snapshot.get("style", ""))
+        slider.setToolTip(snapshot.get("tooltip", ""))
+        if label is not None:
+            if snapshot.get("label_text") is not None:
+                label.setText(snapshot.get("label_text"))
+            if snapshot.get("label_style") is not None:
+                label.setStyleSheet(snapshot.get("label_style"))
+            if snapshot.get("label_width"):
+                label.setFixedWidth(snapshot.get("label_width"))
+
+    def _lock_slider_with_bypass(self, slider, name, label=None):
+        slider.setEnabled(False)
+        slider.setToolTip(f"{name} is controlled by the Bypass custom workflow.")
+        if label is not None:
+            label.setText("Ignore and bypass")
+            label.setStyleSheet("color: #ff5a66;")
+            label.setFixedWidth(get_scaled_size(150))
+
+    def _apply_comfyui_free_params_lock(self):
+        if self._comfyui_free_params_locked:
+            return
+        self._comfyui_free_param_snapshots = {
+            "model_combo": self._snapshot_combo_for_bypass(self.model_combo),
+            "sampler_combo": self._snapshot_combo_for_bypass(self.sampler_combo),
+            "scheduler_combo": self._snapshot_combo_for_bypass(self.scheduler_combo),
+            "steps_spinbox": self._snapshot_spin_for_bypass(self.steps_spinbox),
+            "cfg_scale_slider": self._snapshot_slider_for_bypass(self.cfg_scale_slider, self.cfg_value_label),
+            "seed_input": self._snapshot_lineedit_for_bypass(self.seed_input),
+            "sampling_radios": [
+                self._snapshot_radio_for_bypass(self.eps_radio),
+                self._snapshot_radio_for_bypass(self.v_pred_radio),
+                self._snapshot_radio_for_bypass(self.anima_radio),
+            ],
+            "comfyui_rescale_slider": self._snapshot_slider_for_bypass(self.comfyui_rescale_slider, self.comfyui_rescale_value_label),
+            "comfyui_rescale_visibility": [w.isVisible() for w in self.comfyui_rescale_ui],
+        }
+        self._lock_combo_with_bypass(self.model_combo, "Model")
+        self._lock_combo_with_bypass(self.sampler_combo, "Sampler")
+        self._lock_combo_with_bypass(self.scheduler_combo, "Scheduler")
+        self._lock_spin_with_bypass(self.steps_spinbox, "Steps")
+        self._lock_slider_with_bypass(self.cfg_scale_slider, "CFG Scale", self.cfg_value_label)
+        self._lock_lineedit_with_bypass(self.seed_input, "Seed")
+        self._lock_sampling_mode_with_bypass()
+        for w in self.comfyui_rescale_ui:
+            w.setVisible(True)
+        self._lock_slider_with_bypass(self.comfyui_rescale_slider, "Rescale CFG", self.comfyui_rescale_value_label)
+        self._comfyui_free_params_locked = True
+
+    def _release_comfyui_free_params_lock(self):
+        if not self._comfyui_free_params_locked:
+            return
+        snapshots = self._comfyui_free_param_snapshots
+        self._restore_combo_from_bypass(self.model_combo, snapshots.get("model_combo", {}))
+        self._restore_combo_from_bypass(self.sampler_combo, snapshots.get("sampler_combo", {}))
+        self._restore_combo_from_bypass(self.scheduler_combo, snapshots.get("scheduler_combo", {}))
+        self._restore_spin_from_bypass(self.steps_spinbox, snapshots.get("steps_spinbox", {}))
+        self._restore_slider_from_bypass(self.cfg_scale_slider, snapshots.get("cfg_scale_slider", {}), self.cfg_value_label)
+        self._restore_lineedit_from_bypass(self.seed_input, snapshots.get("seed_input", {}))
+        for radio, snapshot in zip(
+            [self.eps_radio, self.v_pred_radio, self.anima_radio],
+            snapshots.get("sampling_radios", []),
+        ):
+            self._restore_radio_from_bypass(radio, snapshot)
+        self._restore_slider_from_bypass(self.comfyui_rescale_slider, snapshots.get("comfyui_rescale_slider", {}), self.comfyui_rescale_value_label)
+        for w, visible in zip(self.comfyui_rescale_ui, snapshots.get("comfyui_rescale_visibility", [])):
+            w.setVisible(visible)
+        self._comfyui_free_param_snapshots = {}
+        self._comfyui_free_params_locked = False
+
+    def _confirm_comfyui_free_workflow_upload(self) -> bool:
+        message = (
+            "[ Bypass 모드 주의사항 ]\n"
+            "1. 2개의 문자열 노드, 2개의 정수 노드, 1개의 이미지 혹은 WEBP 저장 노드가 필요합니다.\n"
+            "2. 각 문자열 노드의 이름을 naia_prompt, naia_negative 로 수정, 정수 노드의 이름을 naia_width, naia_height로 수정합니다. 이름이 틀리면 업로드가 거부됩니다.\n"
+            "3. Bypass 모드에서는 NAIA가 위 4개의 Primitive 노드와 저장 노드만 제어합니다. 모델, sampler, scheduler, steps, CFG, sampling mode, Rescale CFG는 NAIA에서 수정하지 않습니다.\n"
+            "4. json 내 seed 입력 영역은 매 실행 랜덤값으로 강제됩니다. seed를 0으로 초기화할 필요는 없습니다.\n"
+            "5. 파라미터 수정시 json 파일을 다시 업로드 하십시오.\n"
+            "* json 내보내기는 [파일] > [내보내기 (API)] 로 내보내면 됩니다."
+        )
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("ComfyUI Bypass Workflow")
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setText(message)
+        upload_button = dialog.addButton(".json 업로드", QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+        dialog.exec()
+        return dialog.clickedButton() == upload_button
+
+    def _load_custom_workflow_from_image(self, workflow_mode: str = "custom"):
+        workflow_mode = "bypass" if str(workflow_mode).strip().lower() in {"bypass", "free"} else "custom"
+        if workflow_mode == "bypass":
+            if not self._confirm_comfyui_free_workflow_upload():
+                return
+            dialog_title = "ComfyUI Bypass 워크플로우 선택"
+            file_filter = "JSON Files (*.json)"
+        else:
+            dialog_title = "ComfyUI 커스텀 워크플로우 선택"
+            file_filter = "Workflow Files (*.json *.png *.webp);;JSON Files (*.json);;Image Files (*.png *.webp)"
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "ComfyUI 워크플로우 선택", "", "Workflow Files (*.json *.png *.webp);;JSON Files (*.json);;Image Files (*.png *.webp)"
+            self, dialog_title, "", file_filter
         )
 
         if not file_path:
@@ -6599,7 +6890,7 @@ class ModernMainWindow(QMainWindow):
             with open(file_path, "rb") as f:
                 metadata = extract_comfyui_workflow_metadata_from_upload_bytes(f.read())
                 # 워크플로우 분석 및 검증
-                analysis_result = self.workflow_manager.analyze_workflow_for_ui(metadata)
+                analysis_result = self.workflow_manager.analyze_workflow_for_ui(metadata, workflow_mode=workflow_mode)
 
                 # TODO(web-dialog): 원래 WorkflowValidationDialog.exec() — 워크플로우 검증 결과 모달.
                 # Web Shell 모달/패널로 재구현 권장. 현재는 결과를 콘솔에 요약 출력.
@@ -6609,10 +6900,22 @@ class ModernMainWindow(QMainWindow):
                 # 검증 성공 시, 실제 워크플로우를 매니저에 로드
                 if analysis_result['success']:
                     # 기존 load_workflow_from_metadata를 사용하여 워크플로우를 정식으로 로드
-                    self.workflow_manager.load_workflow_from_metadata(metadata)
-                    self.workflow_custom_btn.setEnabled(True)
-                    self.workflow_custom_btn.setChecked(True)
-                    self.status_bar.showMessage("✅ 커스텀 워크플로우가 활성화되었습니다.", 3000)
+                    if self.workflow_manager.load_workflow_from_metadata(metadata, workflow_mode=workflow_mode):
+                        if workflow_mode == "bypass":
+                            self.workflow_free_btn.setEnabled(True)
+                            self.workflow_free_btn.setChecked(True)
+                            self.workflow_custom_btn.setEnabled(False)
+                            self.status_bar.showMessage("✅ 커스텀 워크플로우 (Bypass)가 활성화되었습니다.", 3000)
+                        else:
+                            self.workflow_custom_btn.setEnabled(True)
+                            self.workflow_custom_btn.setChecked(True)
+                            self.workflow_free_btn.setEnabled(False)
+                            self.status_bar.showMessage("✅ 커스텀 워크플로우가 활성화되었습니다.", 3000)
+                    else:
+                        QMessageBox.warning(self, "ComfyUI Workflow", "ComfyUI workflow load failed.")
+                else:
+                    message = analysis_result.get('error_message') or "ComfyUI workflow validation failed."
+                    QMessageBox.warning(self, "ComfyUI Workflow", message)
 
         except Exception as e:
             # TODO(web-dialog): 원래 QMessageBox.critical "파일 오류" — Web Shell error 토스트로 재구현.
@@ -6624,6 +6927,7 @@ class ModernMainWindow(QMainWindow):
             self.workflow_manager.clear_user_workflow()
             # 커스텀 워크플로우가 비워졌으므로 버튼을 다시 비활성화
             self.workflow_custom_btn.setEnabled(False)
+            self.workflow_free_btn.setEnabled(False)
             self.status_bar.showMessage("🔄 기본 워크플로우로 전환되었습니다.", 3000)
 
     def _on_sampling_mode_changed(self, button):
@@ -6634,7 +6938,7 @@ class ModernMainWindow(QMainWindow):
             for w in self.comfyui_rescale_ui:
                 w.setVisible(is_anima)
             if hasattr(self, 'anima_weight_edit'):
-                self.anima_weight_edit.setVisible(is_anima)
+                self.anima_weight_edit.setVisible(True)
 
     def on_generate_with_image_requested(self, tags_dict: dict):
         """WebView에서 추출된 태그로 프롬프트를 생성하고 바로 이미지 생성을 시작합니다."""
@@ -6836,13 +7140,7 @@ class ModernMainWindow(QMainWindow):
         tags_dict = {"general": tag_strings}
 
         # 설정 수집 (on_instant_generation_requested와 동일)
-        comfyui_sampling_mode = "eps"
-        if hasattr(self, 'anima_radio') and self.anima_radio.isChecked():
-            comfyui_sampling_mode = "anima"
-        elif hasattr(self, 'v_pred_radio') and self.v_pred_radio.isChecked():
-            comfyui_sampling_mode = "v_prediction"
-        elif hasattr(self, 'eps_radio') and self.eps_radio.isChecked():
-            comfyui_sampling_mode = "eps"
+        comfyui_sampling_mode = self._current_comfyui_sampling_mode_for_prompt()
 
         settings = {
             'prompt_fixed': self.generation_checkboxes["프롬프트 고정"].isChecked(),

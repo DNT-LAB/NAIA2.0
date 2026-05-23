@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
     QSpinBox, QSlider, QCheckBox, QFrame, QGridLayout, QDoubleSpinBox,
-    QRadioButton, QButtonGroup
+    QRadioButton, QButtonGroup, QAbstractSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from ui.theme import DARK_COLORS
@@ -121,6 +121,8 @@ class ComfyUIParameterPanel(QFrame):
         # [179.5] 모델 잠금 상태 — locked_unknown 워크플로우에서 치환/조회 차단
         self._model_locked = False
         self._model_original_items = []
+        self._free_params_locked = False
+        self._free_param_snapshots = {}
         self._gen_workflow_subscribed = False
 
         self._init_ui()
@@ -365,13 +367,202 @@ class ComfyUIParameterPanel(QFrame):
         """이벤트 핸들러 — model_compat 값에 따라 model_combo 잠금 토글."""
         if not isinstance(data, dict):
             return
-        if data.get("model_compat") == "locked_unknown":
+        if str(data.get("model_compat") or "").strip().lower() in {"bypass", "free"}:
+            self._apply_free_param_lock()
+        elif data.get("model_compat") == "locked_unknown":
+            self._release_free_param_lock()
             self._apply_model_lock(
                 display=data.get("locked_model_display"),
                 loader_class=data.get("locked_loader_class"),
             )
         else:
+            self._release_free_param_lock()
             self._release_model_lock()
+
+    def _snapshot_combo(self, combo):
+        return {
+            "items": [combo.itemText(i) for i in range(combo.count())],
+            "index": combo.currentIndex(),
+            "enabled": combo.isEnabled(),
+            "style": combo.styleSheet(),
+            "tooltip": combo.toolTip(),
+        }
+
+    def _restore_combo(self, combo, snapshot):
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItems(snapshot.get("items") or [])
+            index = snapshot.get("index", 0)
+            if combo.count() > 0:
+                combo.setCurrentIndex(max(0, min(index, combo.count() - 1)))
+        finally:
+            combo.blockSignals(False)
+        combo.setEnabled(snapshot.get("enabled", True))
+        combo.setStyleSheet(snapshot.get("style", ""))
+        combo.setToolTip(snapshot.get("tooltip", ""))
+
+    def _lock_combo_bypass(self, combo, name):
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("Ignore and bypass")
+            combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(False)
+        combo.setEnabled(False)
+        combo.setStyleSheet("QComboBox { color: #ff5a66; } QComboBox:disabled { color: #ff5a66; }")
+        combo.setToolTip(f"{name} is controlled by the Bypass custom workflow.")
+
+    def _snapshot_spin(self, spin):
+        return {
+            "minimum": spin.minimum(),
+            "maximum": spin.maximum(),
+            "value": spin.value(),
+            "enabled": spin.isEnabled(),
+            "read_only": spin.isReadOnly(),
+            "special": spin.specialValueText(),
+            "buttons": spin.buttonSymbols(),
+            "style": spin.styleSheet(),
+            "tooltip": spin.toolTip(),
+        }
+
+    def _restore_spin(self, spin, snapshot):
+        spin.blockSignals(True)
+        try:
+            spin.setRange(snapshot.get("minimum", 0), snapshot.get("maximum", 100))
+            spin.setSpecialValueText(snapshot.get("special", ""))
+            spin.setValue(snapshot.get("value", spin.minimum()))
+        finally:
+            spin.blockSignals(False)
+        spin.setReadOnly(snapshot.get("read_only", False))
+        spin.setButtonSymbols(snapshot.get("buttons", QAbstractSpinBox.ButtonSymbols.UpDownArrows))
+        spin.setEnabled(snapshot.get("enabled", True))
+        spin.setStyleSheet(snapshot.get("style", ""))
+        spin.setToolTip(snapshot.get("tooltip", ""))
+
+    def _lock_spin_bypass(self, spin, name):
+        spin.blockSignals(True)
+        try:
+            spin.setRange(0, 0)
+            spin.setSpecialValueText("Ignore and bypass")
+            spin.setValue(0)
+        finally:
+            spin.blockSignals(False)
+        spin.setReadOnly(True)
+        spin.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        spin.setEnabled(False)
+        spin.setStyleSheet(
+            "QSpinBox, QDoubleSpinBox { color: #ff5a66; } "
+            "QSpinBox:disabled, QDoubleSpinBox:disabled { color: #ff5a66; }"
+        )
+        spin.setToolTip(f"{name} is controlled by the Bypass custom workflow.")
+
+    def _snapshot_slider(self, slider):
+        return {
+            "enabled": slider.isEnabled(),
+            "style": slider.styleSheet(),
+            "tooltip": slider.toolTip(),
+        }
+
+    def _restore_slider(self, slider, snapshot):
+        slider.setEnabled(snapshot.get("enabled", True))
+        slider.setStyleSheet(snapshot.get("style", ""))
+        slider.setToolTip(snapshot.get("tooltip", ""))
+
+    def _lock_slider_bypass(self, slider, name):
+        slider.setEnabled(False)
+        slider.setToolTip(f"{name} is controlled by the Bypass custom workflow.")
+
+    def _snapshot_radio(self, radio):
+        return {
+            "text": radio.text(),
+            "checked": radio.isChecked(),
+            "enabled": radio.isEnabled(),
+            "style": radio.styleSheet(),
+            "tooltip": radio.toolTip(),
+        }
+
+    def _restore_radio(self, radio, snapshot):
+        radio.blockSignals(True)
+        try:
+            radio.setText(snapshot.get("text", radio.text()))
+            radio.setChecked(snapshot.get("checked", False))
+        finally:
+            radio.blockSignals(False)
+        radio.setEnabled(snapshot.get("enabled", True))
+        radio.setStyleSheet(snapshot.get("style", ""))
+        radio.setToolTip(snapshot.get("tooltip", ""))
+
+    def _lock_sampling_mode_bypass(self):
+        for radio, text in zip(
+            [self.eps_radio, self.v_pred_radio, self.anima_radio],
+            ["Ignore and bypass", "", ""],
+        ):
+            radio.blockSignals(True)
+            try:
+                radio.setText(text)
+            finally:
+                radio.blockSignals(False)
+            radio.setEnabled(False)
+            radio.setStyleSheet("QRadioButton { color: #ff5a66; } QRadioButton:disabled { color: #ff5a66; }")
+            radio.setToolTip("Sampling mode is controlled by the Bypass custom workflow.")
+
+    def _apply_free_param_lock(self):
+        self._release_model_lock()
+        if self._free_params_locked:
+            return
+        self._free_param_snapshots = {
+            "model_combo": self._snapshot_combo(self.model_combo),
+            "sampler_combo": self._snapshot_combo(self.sampler_combo),
+            "schedule_combo": self._snapshot_combo(self.schedule_combo),
+            "steps_spin": self._snapshot_spin(self.steps_spin),
+            "cfg_spin": self._snapshot_spin(self.cfg_spin),
+            "steps_slider": self._snapshot_slider(self.steps_slider),
+            "cfg_slider": self._snapshot_slider(self.cfg_slider),
+            "sampling_radios": [
+                self._snapshot_radio(self.eps_radio),
+                self._snapshot_radio(self.v_pred_radio),
+                self._snapshot_radio(self.anima_radio),
+            ],
+            "rescale_cfg_spin": self._snapshot_spin(self.rescale_cfg_spin),
+            "rescale_cfg_slider": self._snapshot_slider(self.rescale_cfg_slider),
+            "rescale_cfg_visible": self.rescale_cfg_container.isVisible(),
+        }
+        self._lock_combo_bypass(self.model_combo, "Model")
+        self._lock_combo_bypass(self.sampler_combo, "Sampler")
+        self._lock_combo_bypass(self.schedule_combo, "Scheduler")
+        self._lock_spin_bypass(self.steps_spin, "Steps")
+        self._lock_spin_bypass(self.cfg_spin, "CFG Scale")
+        self._lock_slider_bypass(self.steps_slider, "Steps")
+        self._lock_slider_bypass(self.cfg_slider, "CFG Scale")
+        self._lock_sampling_mode_bypass()
+        self.rescale_cfg_container.setVisible(True)
+        self._lock_spin_bypass(self.rescale_cfg_spin, "Rescale CFG")
+        self._lock_slider_bypass(self.rescale_cfg_slider, "Rescale CFG")
+        self._free_params_locked = True
+
+    def _release_free_param_lock(self):
+        if not self._free_params_locked:
+            return
+        snapshots = self._free_param_snapshots
+        self._restore_combo(self.model_combo, snapshots.get("model_combo", {}))
+        self._restore_combo(self.sampler_combo, snapshots.get("sampler_combo", {}))
+        self._restore_combo(self.schedule_combo, snapshots.get("schedule_combo", {}))
+        self._restore_spin(self.steps_spin, snapshots.get("steps_spin", {}))
+        self._restore_spin(self.cfg_spin, snapshots.get("cfg_spin", {}))
+        self._restore_slider(self.steps_slider, snapshots.get("steps_slider", {}))
+        self._restore_slider(self.cfg_slider, snapshots.get("cfg_slider", {}))
+        for radio, snapshot in zip(
+            [self.eps_radio, self.v_pred_radio, self.anima_radio],
+            snapshots.get("sampling_radios", []),
+        ):
+            self._restore_radio(radio, snapshot)
+        self._restore_spin(self.rescale_cfg_spin, snapshots.get("rescale_cfg_spin", {}))
+        self._restore_slider(self.rescale_cfg_slider, snapshots.get("rescale_cfg_slider", {}))
+        self.rescale_cfg_container.setVisible(snapshots.get("rescale_cfg_visible", False))
+        self._free_param_snapshots = {}
+        self._free_params_locked = False
 
     def _apply_model_lock(self, display=None, loader_class=None):
         """model_combo를 '[UNKNOWN]' 표시로 고정하고 편집/조회를 차단.
@@ -431,6 +622,9 @@ class ComfyUIParameterPanel(QFrame):
 
     def get_params(self):
         """현재 설정된 파라미터 반환"""
+        if self._free_params_locked:
+            return {}
+
         # 샘플링 모드 확인
         if self.eps_radio.isChecked():
             sampling_mode = "eps"
@@ -463,6 +657,8 @@ class ComfyUIParameterPanel(QFrame):
 
     def _on_sampling_mode_changed(self, button):
         """샘플링 모드 변경 시 Rescale CFG 가시성 제어"""
+        if self._free_params_locked:
+            return
         is_anima = (button == self.anima_radio)
         self.rescale_cfg_container.setVisible(is_anima)
 

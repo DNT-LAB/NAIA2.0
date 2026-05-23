@@ -5464,12 +5464,15 @@ class RemoteBridge(QObject):
 
     def _collect_prompt_reopen_settings(self) -> dict:
         mw = self.app_context.main_window
-        comfyui_sampling_mode = "eps"
-        if hasattr(mw, "anima_radio") and mw.anima_radio.isChecked():
+        workflow_state = self._comfyui_workflow_state_payload()
+        workflow_type = str(workflow_state.get("workflow_type") or "").strip().lower()
+        if workflow_type in {"bypass", "free"}:
+            comfyui_sampling_mode = "bypass"
+        elif hasattr(mw, "anima_radio") and mw.anima_radio.isChecked():
             comfyui_sampling_mode = "anima"
         elif hasattr(mw, "v_pred_radio") and mw.v_pred_radio.isChecked():
             comfyui_sampling_mode = "v_prediction"
-        elif hasattr(mw, "eps_radio") and mw.eps_radio.isChecked():
+        else:
             comfyui_sampling_mode = "eps"
 
         return {
@@ -7515,31 +7518,48 @@ class RemoteBridge(QObject):
         has_custom = bool(getattr(manager, "user_workflow", None) is not None)
         if "has_custom" in event_data:
             has_custom = bool(event_data.get("has_custom"))
+        workflow_type = event_data.get("workflow_type", node_map.get("workflow_type") if has_custom else None)
+        workflow_type_text = str(workflow_type or "").strip().lower()
+        is_bypass_workflow = workflow_type_text in {"bypass", "free"}
+        workflow_label = event_data.get("workflow_label")
+        if not workflow_label:
+            workflow_label = "Bypass Workflow" if is_bypass_workflow else ("Custom Workflow" if has_custom else "Basic Workflow")
         return {
             "type": "comfyui_workflow_state",
             "has_custom": has_custom,
-            "workflow_label": "Custom Workflow" if has_custom else "Basic Workflow",
+            "workflow_label": workflow_label,
+            "workflow_type": "bypass" if is_bypass_workflow else workflow_type,
             "model_compat": event_data.get("model_compat", node_map.get("model_compat") if has_custom else None),
             "locked_loader_class": event_data.get("locked_loader_class", node_map.get("locked_loader_class")),
             "locked_model_display": event_data.get("locked_model_display", node_map.get("locked_model_display")),
         }
 
-    def _set_comfyui_workflow_buttons(self, has_custom: bool):
+    def _set_comfyui_workflow_buttons(self, has_custom: bool, *, workflow_type: Optional[str] = None):
         mw = getattr(self.app_context, "main_window", None)
         if not mw:
             return
         default_btn = getattr(mw, "workflow_default_btn", None)
         custom_btn = getattr(mw, "workflow_custom_btn", None)
+        free_btn = getattr(mw, "workflow_free_btn", None)
         try:
             if has_custom:
-                if custom_btn:
+                if str(workflow_type or "").strip().lower() in {"bypass", "free"} and free_btn:
+                    free_btn.setEnabled(True)
+                    free_btn.setChecked(True)
+                    if custom_btn:
+                        custom_btn.setEnabled(False)
+                elif custom_btn:
                     custom_btn.setEnabled(True)
                     custom_btn.setChecked(True)
+                    if free_btn:
+                        free_btn.setEnabled(False)
             else:
                 if default_btn:
                     default_btn.setChecked(True)
                 if custom_btn:
                     custom_btn.setEnabled(False)
+                if free_btn:
+                    free_btn.setEnabled(False)
         except Exception as e:
             print(f"🌐 Remote: ComfyUI 워크플로우 버튼 상태 갱신 실패 — {e}")
 
@@ -7576,6 +7596,7 @@ class RemoteBridge(QObject):
         self,
         action: str,
         metadata: Optional[dict] = None,
+        workflow_mode: str = "custom",
         timeout: float = 30.0,
     ) -> dict:
         loop = asyncio.get_running_loop()
@@ -7587,6 +7608,7 @@ class RemoteBridge(QObject):
                 "future": future,
                 "action": action,
                 "metadata": metadata,
+                "workflow_mode": workflow_mode,
             }
         self.request_comfyui_workflow_action.emit(request_id)
         try:
@@ -7613,7 +7635,10 @@ class RemoteBridge(QObject):
         try:
             action = str(request.get("action") or "").strip().lower()
             if action == "load":
-                result = self._load_comfyui_workflow_from_metadata(request.get("metadata") or {})
+                result = self._load_comfyui_workflow_from_metadata(
+                    request.get("metadata") or {},
+                    workflow_mode=request.get("workflow_mode") or "custom",
+                )
             elif action == "clear":
                 result = self._clear_comfyui_workflow()
             else:
@@ -7622,7 +7647,7 @@ class RemoteBridge(QObject):
             result = {"ok": False, "error": f"ComfyUI workflow action failed: {e}"}
         self._complete_comfyui_workflow_action(request, result)
 
-    def _load_comfyui_workflow_from_metadata(self, metadata: dict) -> dict:
+    def _load_comfyui_workflow_from_metadata(self, metadata: dict, *, workflow_mode: str = "custom") -> dict:
         manager = self._get_comfyui_workflow_manager()
         if manager is None:
             return {"ok": False, "error": "ComfyUI workflow manager is unavailable"}
@@ -7630,7 +7655,7 @@ class RemoteBridge(QObject):
         if not isinstance(metadata, dict):
             return {"ok": False, "error": "Invalid workflow metadata"}
 
-        analysis_result = manager.analyze_workflow_for_ui(metadata)
+        analysis_result = manager.analyze_workflow_for_ui(metadata, workflow_mode=workflow_mode)
         if not analysis_result.get("success"):
             return {
                 "ok": False,
@@ -7639,7 +7664,7 @@ class RemoteBridge(QObject):
                 "workflow": self._comfyui_workflow_state_payload(),
             }
 
-        if not manager.load_workflow_from_metadata(metadata):
+        if not manager.load_workflow_from_metadata(metadata, workflow_mode=workflow_mode):
             return {
                 "ok": False,
                 "error": "워크플로우를 로드하지 못했습니다.",
@@ -7647,8 +7672,10 @@ class RemoteBridge(QObject):
                 "workflow": self._comfyui_workflow_state_payload(),
             }
 
-        self._set_comfyui_workflow_buttons(True)
-        self._show_comfyui_workflow_status("✅ 커스텀 워크플로우가 활성화되었습니다.")
+        workflow_type = analysis_result.get("workflow_type")
+        self._set_comfyui_workflow_buttons(True, workflow_type=workflow_type)
+        status_label = "커스텀 워크플로우 (Bypass)" if str(workflow_type or "").strip().lower() in {"bypass", "free"} else "커스텀 워크플로우"
+        self._show_comfyui_workflow_status(f"✅ {status_label}가 활성화되었습니다.")
         state = self._comfyui_workflow_state_payload()
         params = self.get_generation_param_schema()
         if params:
@@ -7789,6 +7816,13 @@ class RemoteBridge(QObject):
                 return
             if key in {"resolution_preset_enabled", "resolution_preset"}:
                 self._save_resolution_preset_param(key, value)
+                self._syncing_param = False
+                return
+            workflow_state = self._comfyui_workflow_state_payload()
+            if (
+                str(workflow_state.get("workflow_type") or "").strip().lower() in {"bypass", "free"}
+                and key in {"model", "sampler", "scheduler", "steps", "cfg_scale", "seed", "sampling_mode", "rescale_cfg"}
+            ):
                 self._syncing_param = False
                 return
             mw = self.app_context.main_window
@@ -15904,12 +15938,37 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         try:
-            result = await bridge._request_comfyui_workflow_action("load", metadata=metadata)
+            result = await bridge._request_comfyui_workflow_action("load", metadata=metadata, workflow_mode="custom")
         except asyncio.TimeoutError:
             return JSONResponse({"ok": False, "error": "ComfyUI workflow upload timed out"}, status_code=504)
         if not result.get("ok"):
             return JSONResponse(result, status_code=400)
         return result
+
+    async def _handle_comfyui_workflow_bypass_upload(req: Request):
+        upload_bytes = await req.body()
+        max_bytes = 64 * 1024 * 1024
+        if len(upload_bytes) > max_bytes:
+            return JSONResponse({"ok": False, "error": "Workflow file is too large"}, status_code=413)
+        try:
+            metadata = await asyncio.to_thread(bridge._extract_comfyui_workflow_metadata_from_image_bytes, upload_bytes)
+        except ValueError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        try:
+            result = await bridge._request_comfyui_workflow_action("load", metadata=metadata, workflow_mode="bypass")
+        except asyncio.TimeoutError:
+            return JSONResponse({"ok": False, "error": "ComfyUI Bypass workflow upload timed out"}, status_code=504)
+        if not result.get("ok"):
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @app.post("/api/comfyui/workflow/bypass/upload")
+    async def api_comfyui_workflow_bypass_upload(req: Request):
+        return await _handle_comfyui_workflow_bypass_upload(req)
+
+    @app.post("/api/comfyui/workflow/free/upload")
+    async def api_comfyui_workflow_free_upload(req: Request):
+        return await _handle_comfyui_workflow_bypass_upload(req)
 
     @app.post("/api/comfyui/workflow/default")
     async def api_comfyui_workflow_default():

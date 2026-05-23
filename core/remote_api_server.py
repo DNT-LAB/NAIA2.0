@@ -7557,20 +7557,13 @@ class RemoteBridge(QObject):
         if params:
             self._cached_params = params
 
+    def _extract_comfyui_workflow_metadata_from_image_bytes(self, image_bytes: bytes) -> dict:
+        from utils.comfyui_png_metadata import extract_comfyui_workflow_metadata_from_image_bytes
+
+        return extract_comfyui_workflow_metadata_from_image_bytes(image_bytes)
+
     def _extract_comfyui_workflow_metadata_from_png_bytes(self, image_bytes: bytes) -> dict:
-        if not image_bytes:
-            raise ValueError("No image data")
-
-        try:
-            from PIL import Image
-            with Image.open(io.BytesIO(image_bytes)) as img:
-                metadata = dict(img.info or {})
-        except Exception as e:
-            raise ValueError(f"PNG 분석 실패: {e}") from e
-
-        if "prompt" not in metadata or not (metadata.get("workflow") or metadata.get("workflow_api")):
-            raise ValueError("선택한 이미지에서 ComfyUI 워크플로우 정보를 찾을 수 없습니다.")
-        return metadata
+        return self._extract_comfyui_workflow_metadata_from_image_bytes(image_bytes)
 
     async def _request_comfyui_workflow_action(
         self,
@@ -15900,7 +15893,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
         if len(image_bytes) > max_bytes:
             return JSONResponse({"ok": False, "error": "Image is too large"}, status_code=413)
         try:
-            metadata = await asyncio.to_thread(bridge._extract_comfyui_workflow_metadata_from_png_bytes, image_bytes)
+            metadata = await asyncio.to_thread(bridge._extract_comfyui_workflow_metadata_from_image_bytes, image_bytes)
         except ValueError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
         try:

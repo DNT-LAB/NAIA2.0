@@ -2856,7 +2856,7 @@ function getComfyUiWorkflowFileInput() {
   if (comfyuiWorkflowFileInput) return comfyuiWorkflowFileInput;
   comfyuiWorkflowFileInput = document.createElement('input');
   comfyuiWorkflowFileInput.type = 'file';
-  comfyuiWorkflowFileInput.accept = 'image/png,.png';
+  comfyuiWorkflowFileInput.accept = 'image/png,image/webp,.png,.webp';
   comfyuiWorkflowFileInput.hidden = true;
   comfyuiWorkflowFileInput.addEventListener('change', () => {
     const file = comfyuiWorkflowFileInput.files && comfyuiWorkflowFileInput.files[0];
@@ -2890,15 +2890,17 @@ function uploadComfyUiWorkflow() {
 
 async function uploadComfyUiWorkflowFile(file) {
   if (!file) return;
-  const isPng = file.type === 'image/png' || /\.png$/i.test(file.name || '');
-  if (!isPng) {
-    showToast('PNG workflow image is required', 'error');
+  const isWorkflowImage = file.type === 'image/png'
+    || file.type === 'image/webp'
+    || /\.(png|webp)$/i.test(file.name || '');
+  if (!isWorkflowImage) {
+    showToast('PNG or WEBP workflow image is required', 'error');
     return;
   }
   try {
     const response = await fetch('/api/comfyui/workflow/upload', {
       method: 'POST',
-      headers: {'Content-Type': file.type || 'image/png'},
+      headers: {'Content-Type': file.type || 'application/octet-stream'},
       body: file,
     });
     const data = await readJsonResponse(response);

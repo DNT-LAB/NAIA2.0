@@ -46,6 +46,61 @@ TEXT_PNG_KEYS = (
 )
 
 
+def _has_comfyui_workflow_metadata(metadata: Dict[str, Any]) -> bool:
+    return bool(metadata.get("prompt") and (metadata.get("workflow") or metadata.get("workflow_api")))
+
+
+def _copy_text_metadata(source_info: Dict[str, Any]) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    for key, value in (source_info or {}).items():
+        if isinstance(value, bytes):
+            text = _text_value(value)
+            if text is not None and str(key) in {"prompt", "workflow", "workflow_api"}:
+                metadata[str(key)] = text
+            continue
+        metadata[str(key)] = value
+    return metadata
+
+
+def _extract_webp_exif_metadata(image: Image.Image) -> Dict[str, str]:
+    metadata: Dict[str, str] = {}
+    try:
+        exif = image.getexif()
+    except Exception:
+        return metadata
+
+    for value in exif.values():
+        text = _text_value(value)
+        if not text or ":" not in text:
+            continue
+        key, payload = text.split(":", 1)
+        key = key.strip()
+        if key in {"prompt", "workflow", "workflow_api"} and payload:
+            metadata[key] = payload
+    return metadata
+
+
+def extract_comfyui_workflow_metadata_from_image(image: Image.Image) -> Dict[str, Any]:
+    metadata = _copy_text_metadata(dict(getattr(image, "info", {}) or {}))
+    metadata.update(_extract_webp_exif_metadata(image))
+    if not _has_comfyui_workflow_metadata(metadata):
+        raise ValueError("No ComfyUI workflow metadata found in the selected image.")
+    return metadata
+
+
+def extract_comfyui_workflow_metadata_from_image_bytes(image_bytes: bytes) -> Dict[str, Any]:
+    if not image_bytes:
+        raise ValueError("No image data")
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            return extract_comfyui_workflow_metadata_from_image(image)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"Image metadata parse failed: {exc}") from exc
+
+
 def is_png_bytes(raw_bytes: Optional[bytes]) -> bool:
     return bool(raw_bytes and raw_bytes.startswith(PNG_SIGNATURE))
 

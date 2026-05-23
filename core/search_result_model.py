@@ -1,3 +1,4 @@
+import random
 import pandas as pd
 from typing import Dict, Any, Optional, List
 
@@ -12,6 +13,10 @@ def _has_prompt_text(value) -> bool:
     return bool(text) and text.lower() not in {"nan", "none", "null"}
 
 
+def _normalize_rating(value) -> str:
+    return str(value or "").strip().lower()
+
+
 class SearchResultModel:
     """검색 결과를 래핑하고 관리하는 데이터 모델 클래스"""
 
@@ -20,12 +25,112 @@ class SearchResultModel:
             self.df = pd.DataFrame()
         else:
             self.df = dataframe.reset_index(drop=True)
+        self._valid_prompt_mask_cache: Optional[pd.Series] = None
+        self._random_pools_by_rating: Optional[dict[Optional[str], list[int]]] = None
+        self._rating_counts_cache: Optional[dict[str, int]] = None
+
+    def _invalidate_caches(self):
+        self._valid_prompt_mask_cache = None
+        self._random_pools_by_rating = None
+        self._rating_counts_cache = None
+
+    def _valid_prompt_mask(self) -> pd.Series:
+        if self._valid_prompt_mask_cache is not None:
+            return self._valid_prompt_mask_cache
+        if 'general' not in self.df.columns:
+            self._valid_prompt_mask_cache = pd.Series(True, index=self.df.index)
+            return self._valid_prompt_mask_cache
+        general = self.df['general']
+        mask = general.notna()
+        text = general.astype(str).str.strip()
+        mask &= text.ne("")
+        mask &= ~text.str.lower().isin({"nan", "none", "null"})
+        self._valid_prompt_mask_cache = mask
+        return mask
+
+    def _ensure_random_pools(self):
+        if self._random_pools_by_rating is not None:
+            return
+
+        self._random_pools_by_rating = {}
+        if self.df.empty:
+            return
+
+        mask = self._valid_prompt_mask()
+        if not bool(mask.any()):
+            return
+
+        if 'rating' not in self.df.columns:
+            self._random_pools_by_rating[None] = list(self.df.index[mask])
+            return
+
+        ratings = self.df.loc[mask, 'rating'].astype(str).str.strip().str.lower()
+        for rating, indices in ratings.groupby(ratings, sort=False).groups.items():
+            self._random_pools_by_rating[str(rating)] = list(indices)
+
+    def _active_rating_keys(self, active_ratings: set = None) -> Optional[set[str]]:
+        if not active_ratings or 'rating' not in self.df.columns:
+            return None
+        return {
+            rating for rating in (_normalize_rating(value) for value in active_ratings)
+            if rating
+        }
+
+    def _row_matches_random_filter(self, index: int, active_rating_keys: Optional[set[str]]) -> bool:
+        if index not in self.df.index:
+            return False
+        row = self.df.loc[index]
+        if active_rating_keys is not None and _normalize_rating(row.get('rating')) not in active_rating_keys:
+            return False
+        if 'general' in self.df.columns and not _has_prompt_text(row.get('general')):
+            return False
+        return True
+
+    def _candidate_bucket_keys(self, active_rating_keys: Optional[set[str]]) -> list[Optional[str]]:
+        self._ensure_random_pools()
+        if not self._random_pools_by_rating:
+            return []
+        if active_rating_keys is None:
+            return list(self._random_pools_by_rating.keys())
+        return [rating for rating in active_rating_keys if rating in self._random_pools_by_rating]
+
+    def _pop_candidate_index(self, bucket_keys: list[Optional[str]]) -> Optional[int]:
+        if not self._random_pools_by_rating:
+            return None
+
+        while True:
+            pools = [
+                self._random_pools_by_rating[key]
+                for key in bucket_keys
+                if key in self._random_pools_by_rating and self._random_pools_by_rating[key]
+            ]
+            total = sum(len(pool) for pool in pools)
+            if total <= 0:
+                return None
+
+            target = random.randrange(total)
+            for pool in pools:
+                if target >= len(pool):
+                    target -= len(pool)
+                    continue
+                index = pool[target]
+                pool[target] = pool[-1]
+                pool.pop()
+                return index
+
+    def prime_random_cache(self) -> None:
+        """랜덤 프롬프트 후보 풀을 미리 준비합니다."""
+        if self.is_empty():
+            return
+        self._ensure_random_pools()
+        self.get_count_by_rating()
 
     def append_dataframe(self, new_df: pd.DataFrame):
         """기존 결과에 새로운 데이터프레임을 추가합니다."""
         if new_df is None or new_df.empty:
             return
         self.df = pd.concat([self.df, new_df], ignore_index=True)
+        self._invalidate_caches()
     
     def set_dataframe(self, new_df: pd.DataFrame):
         """기존 데이터프레임을 안전하게 제거하고 새로운 데이터프레임으로 교체합니다."""
@@ -43,9 +148,12 @@ class SearchResultModel:
             self.df = pd.DataFrame()
         else:
             self.df = new_df.reset_index(drop=True)
+        self._invalidate_caches()
 
     def get_dataframe(self) -> pd.DataFrame:
         """결과 데이터프레임을 반환합니다."""
+        # 호출자가 반환된 DataFrame을 직접 수정하는 기존 경로가 있어 캐시를 보수적으로 폐기합니다.
+        self._invalidate_caches()
         return self.df
 
     def get_count(self) -> int:
@@ -66,13 +174,21 @@ class SearchResultModel:
         """Rating별 row 수 반환. {'g': N, 's': N, 'q': N, 'e': N}"""
         if self.is_empty() or 'rating' not in self.df.columns:
             return {r: 0 for r in 'gsqe'}
+        if self._rating_counts_cache is not None:
+            return dict(self._rating_counts_cache)
         counts = self.df['rating'].value_counts()
-        return {r: int(counts.get(r, 0)) for r in 'gsqe'}
+        self._rating_counts_cache = {r: int(counts.get(r, 0)) for r in 'gsqe'}
+        return dict(self._rating_counts_cache)
 
     def get_filtered_count(self, active_ratings: set) -> int:
         """활성 rating에 해당하는 row 수."""
         if self.is_empty() or 'rating' not in self.df.columns:
             return 0
+        if self._rating_counts_cache is not None:
+            return int(sum(
+                self._rating_counts_cache.get(_normalize_rating(rating), 0)
+                for rating in active_ratings
+            ))
         return int(self.df['rating'].isin(active_ratings).sum())
 
     # [신규] 무작위 행을 추출하고 제거하는 메서드
@@ -86,22 +202,27 @@ class SearchResultModel:
         if self.is_empty():
             return None
 
-        eligible = self.df
-        if active_ratings and 'rating' in self.df.columns:
-            mask = self.df['rating'].isin(active_ratings)
-            eligible = eligible[mask]
+        active_rating_keys = self._active_rating_keys(active_ratings)
+        bucket_keys = self._candidate_bucket_keys(active_rating_keys)
+        random_index = None
+        while bucket_keys:
+            candidate_index = self._pop_candidate_index(bucket_keys)
+            if candidate_index is None:
+                break
+            if self._row_matches_random_filter(candidate_index, active_rating_keys):
+                random_index = candidate_index
+                break
 
-        if 'general' in eligible.columns:
-            eligible = eligible[eligible['general'].map(_has_prompt_text)]
-
-        if eligible.empty:
+        if random_index is None:
             return None
-
-        random_index = eligible.index.to_series().sample(n=1).iloc[0]
 
         # 해당 행 데이터 추출 및 원본에서 삭제
         popped_row = self.df.loc[random_index].copy()
         self.df.drop(random_index, inplace=True)
+        if self._rating_counts_cache is not None and 'rating' in popped_row:
+            rating = _normalize_rating(popped_row.get('rating'))
+            if rating in self._rating_counts_cache:
+                self._rating_counts_cache[rating] = max(0, self._rating_counts_cache[rating] - 1)
 
         return popped_row
 
@@ -116,3 +237,4 @@ class SearchResultModel:
             
         self.df.drop_duplicates(subset=subset, keep='first', inplace=True)
         self.df.reset_index(drop=True, inplace=True)
+        self._invalidate_caches()

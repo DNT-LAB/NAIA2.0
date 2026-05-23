@@ -348,6 +348,8 @@ class MainController:
                 self.main_window.search_results.get_dataframe().to_parquet('naia_temp_rows.parquet')
             except Exception as e:
                 self.main_window.status_bar.showMessage(f"⚠️ 결과 파일 저장 실패: {e}", 5000)
+            if hasattr(self.main_window, '_save_search_snapshot'):
+                self.main_window._save_search_snapshot()
         
     def on_search_error(self, error_message: str):
         """검색 오류 발생 시 호출되는 슬롯"""

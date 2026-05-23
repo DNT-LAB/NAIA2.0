@@ -3715,11 +3715,11 @@ class ModernMainWindow(QMainWindow):
 
         # [신규] 검색 결과 Parquet 파일로 저장
         if not self.search_results.is_empty():
-            self._save_search_snapshot()  # 소진 시 자동 복원용
             try:
                 self.search_results.get_dataframe().to_parquet('naia_temp_rows.parquet')
             except Exception as e:
                 self.status_bar.showMessage(f"⚠️ 결과 파일 저장 실패: {e}", 5000)
+            self._save_search_snapshot()  # 소진 시 자동 복원용 + 랜덤 후보 캐시 준비
 
     def on_search_error(self, error_message: str):
         """검색 오류 발생 시 호출되는 슬롯"""
@@ -3832,6 +3832,7 @@ class ModernMainWindow(QMainWindow):
     def on_previous_results_loaded(self, result_model: SearchResultModel):
         """비동기로 로드된 이전 검색 결과를 UI에 적용"""
         self.search_results.append_dataframe(result_model.get_dataframe())
+        self._prime_search_random_cache()
         
         # 라벨 업데이트
         count = self.search_results.get_count()
@@ -5394,10 +5395,20 @@ class ModernMainWindow(QMainWindow):
             self.detached_random_btn.setEnabled(True)
 
     # --- 검색 결과 스냅샷 (소진 시 자동 복원용) ---
+    def _prime_search_random_cache(self):
+        prime = getattr(self.search_results, 'prime_random_cache', None)
+        if not callable(prime):
+            return
+        try:
+            prime()
+        except Exception as e:
+            print(f"⚠️ 랜덤 프롬프트 후보 캐시 준비 실패: {e}")
+
     def _save_search_snapshot(self):
         """현재 search_results의 원본 사본을 메모리에 저장"""
         if not self.search_results.is_empty():
             self._search_results_snapshot = self.search_results.get_dataframe().copy()
+            self._prime_search_random_cache()
             # Remote Session 필터 초기화 (검색/로드/depth assign/복원 시)
             # 필터 적용 중에는 bridge._skip_filter_reset으로 우회
             bridge = getattr(self.app_context, 'remote_bridge', None)
@@ -5409,6 +5420,7 @@ class ModernMainWindow(QMainWindow):
         # 1차: 메모리 스냅샷에서 복원
         if self._search_results_snapshot is not None and not self._search_results_snapshot.empty:
             self.search_results.set_dataframe(self._search_results_snapshot.copy())
+            self._prime_search_random_cache()
             count = self.search_results.get_count()
             self.result_label1.setText(f"검색: {count:,}")
             self.result_label2.setText(f"남음: {count:,}")
@@ -5426,6 +5438,7 @@ class ModernMainWindow(QMainWindow):
                 if not temp_df.empty:
                     self.search_results.set_dataframe(temp_df)
                     self._search_results_snapshot = temp_df.copy()
+                    self._prime_search_random_cache()
                     count = self.search_results.get_count()
                     self.result_label1.setText(f"검색: {count:,}")
                     self.result_label2.setText(f"남음: {count:,}")
@@ -5447,6 +5460,7 @@ class ModernMainWindow(QMainWindow):
                     fallback_df = fallback_df.reset_index(drop=True)
                     self.search_results.set_dataframe(fallback_df)
                     self._search_results_snapshot = fallback_df.copy()
+                    self._prime_search_random_cache()
                     count = self.search_results.get_count()
                     self.result_label1.setText(f"검색: {count:,}")
                     self.result_label2.setText(f"남음: {count:,}")

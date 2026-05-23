@@ -384,6 +384,62 @@ def test_ksampler_compatible_custom_sampler_is_supported():
     assert sampler_ui["widgets_values"][:6] == [123, "randomize", 20, 3.5, "euler", "normal"]
 
 
+def _make_webp_output_workflow():
+    wf = _make_spectrum_spd_ksampler_workflow()
+    wf.pop("1")
+    wf["53"] = {
+        "class_type": "SaveAnimatedWEBP",
+        "inputs": {
+            "filename_prefix": "NAIA_ComfyUI",
+            "fps": 1,
+            "lossless": False,
+            "quality": 97,
+            "method": "default",
+            "images": ["8", 0],
+        },
+    }
+    return wf
+
+
+def test_webp_save_node_can_be_custom_workflow_output():
+    mgr = ComfyUIWorkflowManager()
+    wf = _make_webp_output_workflow()
+
+    ok, node_map = mgr.validate_and_map_workflow(wf)
+    assert ok, f"SaveAnimatedWEBP workflow should validate: {node_map}"
+    assert node_map["save_image"] == "53"
+
+    meta = {"prompt": json.dumps(wf), "workflow": json.dumps(wf)}
+    analysis = mgr.analyze_workflow_for_ui(meta)
+    assert analysis["success"] is True
+    assert ("PASS", "SaveAnimatedWEBP") in analysis["required"]
+    assert "SaveAnimatedWEBP" not in analysis["custom"]
+
+    assert mgr.load_workflow_from_metadata(meta)
+    result = mgr.apply_params_to_workflow({
+        "model": "new-unet.safetensors",
+        "input": "new prompt",
+        "negative_prompt": "new neg",
+        "seed": 123,
+        "steps": 20,
+        "cfg_scale": 3.5,
+        "sampler": "euler",
+        "scheduler": "normal",
+        "width": 768,
+        "height": 1024,
+        "rescale_cfg": 0.2,
+        "filename_prefix": "NAIA_WebP_Test",
+    })
+    assert result is not None
+    assert result["53"]["class_type"] == "SaveAnimatedWEBP"
+    assert result["53"]["inputs"]["filename_prefix"] == "NAIA_WebP_Test"
+    assert result["53"]["inputs"]["quality"] == 97
+    workflow_ui = mgr.get_last_applied_workflow_ui()
+    webp_node = next(node for node in workflow_ui["nodes"] if str(node["id"]) == "53")
+    assert webp_node["type"] == "SaveAnimatedWEBP"
+    assert webp_node["widgets_values"][:5] == ["NAIA_WebP_Test", 1, False, 97, "default"]
+
+
 def test_native_workflows_use_save_image_outputs():
     mgr = ComfyUIWorkflowManager()
 
@@ -638,6 +694,7 @@ ALL_TESTS = [
     test_native_checkpoint_apply_params_still_swaps_model,
     test_native_unet_apply_params_still_swaps_model,
     test_ksampler_compatible_custom_sampler_is_supported,
+    test_webp_save_node_can_be_custom_workflow_output,
     test_native_workflows_use_save_image_outputs,
     test_apply_params_builds_current_ui_workflow_metadata,
     test_trace_handles_dangling_model_link,

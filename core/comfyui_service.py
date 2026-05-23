@@ -141,6 +141,8 @@ class ComfyUIService:
         except Exception:
             return (0, str(node_id))
 
+    _SAVE_OUTPUT_NODE_TYPES = {"SaveImage", "SaveAnimatedWEBP"}
+
     def get_generation_result(self, prompt_id: str, workflow: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
         생성 결과를 조회하고, SaveImage/output 결과를 우선하여 반환합니다.
@@ -188,7 +190,7 @@ class ComfyUIService:
                 node_type = str(info.get('source_node_type') or '')
                 image_type = str(info.get('type') or '')
                 return (
-                    1 if node_type == "SaveImage" else 0,
+                    1 if node_type in self._SAVE_OUTPUT_NODE_TYPES else 0,
                     1 if image_type == "output" else 0,
                     0 if image_type == "temp" else 1,
                     self._node_sort_key(info.get('source_node_id')),

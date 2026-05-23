@@ -53,6 +53,38 @@ def test_comfyui_result_selection_prefers_save_image_output(monkeypatch):
     assert result[0]["source_node_type"] == "SaveImage"
 
 
+def test_comfyui_result_selection_prefers_webp_save_output(monkeypatch):
+    service = ComfyUIService("http://127.0.0.1:8188")
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "prompt-1": {
+                    "outputs": {
+                        "9": {"images": [{"filename": "preview.png", "subfolder": "", "type": "temp"}]},
+                        "57": {"images": [{"filename": "saved.webp", "subfolder": "", "type": "output"}]},
+                    }
+                }
+            }
+
+    def fake_get(url, timeout=10):
+        assert url.endswith("/history/prompt-1")
+        return Response()
+
+    workflow = {
+        "57": {"class_type": "SaveAnimatedWEBP", "inputs": {"images": ["8", 0]}},
+        "9": {"class_type": "PreviewImage", "inputs": {"images": ["8", 0]}},
+    }
+    monkeypatch.setattr("core.comfyui_service.requests.get", fake_get)
+
+    result = service.get_generation_result("prompt-1", workflow=workflow)
+
+    assert result[0]["filename"] == "saved.webp"
+    assert result[0]["source_node_type"] == "SaveAnimatedWEBP"
+
+
 def test_comfyui_png_enrichment_adds_standard_and_naia_chunks():
     workflow_api = {
         "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "current prompt"}},

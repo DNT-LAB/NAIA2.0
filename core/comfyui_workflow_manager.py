@@ -545,6 +545,7 @@ class ComfyUIWorkflowManager:
             "EmptyLatentImage": "latent_image",
             "VAEDecode": "vae_decode",
             "SaveImage": "save_image",
+            "SaveAnimatedWEBP": "save_image",
             "PreviewImage": "preview_image",
             # ModelSamplingDiscrete는 선택적 (CheckpointLoader 사용 시만 필요)
         }
@@ -590,6 +591,8 @@ class ComfyUIWorkflowManager:
         sampler_node_id = found_sampler_nodes[0]
         if found_nodes["SaveImage"]:
             node_map["save_image"] = found_nodes["SaveImage"][0]
+        elif found_nodes["SaveAnimatedWEBP"]:
+            node_map["save_image"] = found_nodes["SaveAnimatedWEBP"][0]
         if found_nodes["PreviewImage"]:
             node_map["preview_image"] = found_nodes["PreviewImage"][0]
 
@@ -711,6 +714,9 @@ class ComfyUIWorkflowManager:
 
     _KNOWN_SAMPLER_TYPES = {"KSampler", "SamplerCustom"}
     _KSAMPLER_COMPATIBLE_INPUTS = {"model", "positive", "negative", "latent_image"}
+    _SAVE_OUTPUT_NODE_TYPES = {"SaveImage", "SaveAnimatedWEBP"}
+    _PREVIEW_OUTPUT_NODE_TYPES = {"PreviewImage"}
+    _SUPPORTED_OUTPUT_NODE_TYPES = _SAVE_OUTPUT_NODE_TYPES | _PREVIEW_OUTPUT_NODE_TYPES
 
     @classmethod
     def _recognized_sampler_label(cls) -> List[str]:
@@ -826,6 +832,7 @@ class ComfyUIWorkflowManager:
         "ModelSamplingDiscrete": ["sampling", "zsnr"],
         "RescaleCFG": ["multiplier"],
         "SaveImage": ["filename_prefix"],
+        "SaveAnimatedWEBP": ["filename_prefix", "fps", "lossless", "quality", "method"],
     }
 
     @staticmethod
@@ -1277,9 +1284,10 @@ class ComfyUIWorkflowManager:
         }
         # [수정] KSampler 외 커스텀 샘플러 지원
         recognized_sampler_types = self._recognized_sampler_label()
+        output_node_types = set(self._SUPPORTED_OUTPUT_NODE_TYPES)
         required_node_types = {
             "CLIPTextEncode",
-            "EmptyLatentImage", "VAEDecode", "SaveImage", "PreviewImage"
+            "EmptyLatentImage", "VAEDecode", *output_node_types
         }
         # CheckpointLoaderSimple 또는 (UNETLoader + CLIPLoader) 중 하나 필요
         loader_types = {"CheckpointLoaderSimple", "UNETLoader", "CLIPLoader", "VAELoader", "RescaleCFG"}
@@ -1344,10 +1352,9 @@ class ComfyUIWorkflowManager:
             else:
                 result['model_compat'] = "locked_unknown"
 
-            # 3-2. SaveImage 또는 PreviewImage 둘 중 하나만 있으면 됨
-            if "SaveImage" in found_required or "PreviewImage" in found_required:
-                required_node_types.discard("SaveImage")
-                required_node_types.discard("PreviewImage")
+            # 3-2. SaveImage / WEBP 저장 / PreviewImage 중 하나만 있으면 됨
+            if found_required & output_node_types:
+                required_node_types.difference_update(output_node_types)
 
             missing_nodes = required_node_types - found_required
             

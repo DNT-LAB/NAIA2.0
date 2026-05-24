@@ -42,6 +42,12 @@ DEFAULT_ELECTRON_PACKAGE = Path("app/electron/package.json")
 DEFAULT_PACKAGED_ROOT = Path("app/electron/dist/win-unpacked")
 DEFAULT_PORTABLE_WORKSPACE_EVIDENCE = Path("app/electron/dist/electron_workspace_release_evidence.json")
 DEFAULT_COMPLETION_EVIDENCE_MAP = Path("release_assets/manifests/final_goal_completion_evidence.json")
+FINAL_RELEASE_FALLBACK_ROUNDS = {
+    "Round 7 - Electron Shell Prototype",
+    "Round 8 - Backend Packaging and Antivirus Risk Gate",
+    "Round 9 - Packaged App Integration",
+    "Round 10 - Clean-Machine Release Gate and Optional Installer",
+}
 
 REQUIRED_PACKAGE_SCRIPTS = (
     "release:check",
@@ -303,6 +309,33 @@ def _unmapped_evidence_items(
             continue
         unmapped.append(item)
     return unmapped
+
+
+def _items_from_evidence_rules(
+    evidence_map_path: Path,
+    rule_section: str,
+    *,
+    allowed_rounds: set[str] | None = None,
+) -> list[dict[str, str]]:
+    evidence_map = _load_json_file(evidence_map_path)
+    if evidence_map is None:
+        return []
+    items: list[dict[str, str]] = []
+    for index, rule in enumerate(evidence_map.get(rule_section, []), start=1):
+        if not isinstance(rule, dict):
+            continue
+        item = str(rule.get("item") or "").strip()
+        if not item:
+            continue
+        round_name = str(rule.get("round") or "")
+        if allowed_rounds is not None and round_name not in allowed_rounds:
+            continue
+        items.append({
+            "round": round_name,
+            "line": f"{rule_section}:{index}",
+            "item": item,
+        })
+    return items
 
 
 def _unchecked_items_satisfied_by_evidence(
@@ -583,31 +616,43 @@ def audit_final_goal_completion(
     warnings: list[dict[str, str]] = []
 
     if not plan_file.is_file():
-        plan_blocker = {"type": "plan", "reason": "final plan file is missing", "path": str(plan_file)}
-        return {
-            "ok": False,
-            "plan": str(plan_file),
-            "blocker_count": 1,
-            "warning_count": len(warnings),
-            "blockers_by_type": {"plan": 1},
-            "blockers_by_round": {"Unscoped": 1},
-            "completion_status": {
-                "release_ready": False,
-                "blocked_on_approval": False,
-                "next_actions": [],
-                "runtime_blocker_count": 0,
+        unchecked_items = _items_from_evidence_rules(completion_evidence_map_file, "rules")
+        when_done_items = _items_from_evidence_rules(
+            completion_evidence_map_file,
+            "when_done_rules",
+            allowed_rounds=FINAL_RELEASE_FALLBACK_ROUNDS,
+        )
+        if not unchecked_items and not when_done_items:
+            plan_blocker = {"type": "plan", "reason": "final plan file is missing", "path": str(plan_file)}
+            return {
+                "ok": False,
+                "plan": str(plan_file),
+                "blocker_count": 1,
+                "warning_count": len(warnings),
                 "blockers_by_type": {"plan": 1},
                 "blockers_by_round": {"Unscoped": 1},
-            },
-            "blockers": [plan_blocker],
-            "warnings": warnings,
-            "unchecked_items": [],
-            "evidence": {},
-        }
-
-    plan_text = plan_file.read_text(encoding="utf-8")
-    unchecked_items = _parse_unchecked_items(plan_text)
-    when_done_items = _parse_when_done_items(plan_text)
+                "completion_status": {
+                    "release_ready": False,
+                    "blocked_on_approval": False,
+                    "next_actions": [],
+                    "runtime_blocker_count": 0,
+                    "blockers_by_type": {"plan": 1},
+                    "blockers_by_round": {"Unscoped": 1},
+                },
+                "blockers": [plan_blocker],
+                "warnings": warnings,
+                "unchecked_items": [],
+                "evidence": {},
+            }
+        warnings.append({
+            "type": "local-plan-missing",
+            "reason": "final plan markdown is local-only or absent; using tracked final goal evidence manifest",
+            "path": str(plan_file),
+        })
+    else:
+        plan_text = plan_file.read_text(encoding="utf-8")
+        unchecked_items = _parse_unchecked_items(plan_text)
+        when_done_items = _parse_when_done_items(plan_text)
     try:
         electron_shell_contract = check_electron_shell_contract(electron_root=electron_package_file.parent)
     except Exception as exc:

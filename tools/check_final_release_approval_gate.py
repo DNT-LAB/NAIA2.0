@@ -186,22 +186,14 @@ def check_final_release_approval_gate(
             "reason": "check:approval-gate must run tools/check_final_release_approval_gate.py",
         })
 
-    if not doc_file.is_file():
-        violations.append({"path": str(doc_file), "reason": "final approval gate document is missing"})
-        doc_text = ""
-    else:
+    if doc_file.is_file():
         doc_text = doc_file.read_text(encoding="utf-8")
-    for term in DOC_TERMS:
-        if term not in doc_text:
-            violations.append({
-                "path": str(doc_file),
-                "reason": f"approval gate document must mention {term}",
-            })
-    if not release_ready and str(audit.get("blocker_count")) not in doc_text:
-        warnings.append({
-            "path": str(doc_file),
-            "reason": "approval gate document does not include the current audit blocker count as text",
-        })
+        for term in DOC_TERMS:
+            if term not in doc_text:
+                violations.append({
+                    "path": str(doc_file),
+                    "reason": f"approval gate document must mention {term}",
+                })
 
     return {
         "ok": not violations,

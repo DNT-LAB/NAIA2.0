@@ -39,7 +39,12 @@
     "save"
   ],
   "development_only_roots": [
-    "tests"
+    "tests",
+    "docs",
+    "refactor_docs",
+    "refactor_plans",
+    "not_implement",
+    ".claude"
   ],
   "rules": [
     "Source layout scaffolding must exist before large filesystem moves.",

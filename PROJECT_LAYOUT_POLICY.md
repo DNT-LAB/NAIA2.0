@@ -44,7 +44,8 @@ The canonical Remote Web source is `app/web/remote`. The older `ui/remote_web` p
 
 Remote-published source must be the smallest executable product surface that can run the program and keep all supported features available.
 
-- `/tests/` is local-development-only and must not be tracked or pushed to the remote branch.
+- `/tests/`, `/docs/`, `/refactor_docs/`, `/refactor_plans/`, and `/not_implement/` are local-development-only and must not be tracked or pushed to the remote branch.
+- `CLAUDE.md`, `.claude/`, and ad-hoc Markdown notes are local agent/development materials and must not be remote-published source.
 - Remote-published source may contain runtime code, bootstrap assets, release manifests, and launchers required to run or package the app.
 - Remote-published source must not contain test suites, local smoke workspaces, generated caches, or build outputs.
 - A fresh remote checkout must still run Python Headless Web through `NAIA_web_headless.py` with `requirements-headless.txt`.

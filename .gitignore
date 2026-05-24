@@ -48,6 +48,10 @@ release_package*/
 
 # Plane: local development only (never remote-published source)
 /tests/
+/docs/
+/refactor_docs/
+/refactor_plans/
+/not_implement/
 
 # 단위 테스트 / 커버리지 보고서
 htmlcov/
@@ -177,10 +181,10 @@ data/artist_thumbnail_anima_bucket2.json
 data/artist_thumbnail_anima_bucket3.json
 GEMINI.md
 *.md
-!CLAUDE.md
 !AGENTS.md
 !PROJECT_LAYOUT_POLICY.md
-!**/.claude/*.md
+.claude/
+**/.claude/
 NAIA_generation_old.py
 /tabs/assets/backgrounds
 *.png

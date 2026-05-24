@@ -34,17 +34,26 @@
   "remote_publish": {
     "role": "Remote-published source is the minimal executable product surface, not the full local development workspace.",
     "local_only_roots": [
-      "tests"
+      "tests",
+      "docs",
+      "refactor_docs",
+      "refactor_plans",
+      "not_implement",
+      ".claude"
     ],
     "required_terms": [
       "Remote-published source",
       "/tests/",
+      "/docs/",
+      "/refactor_docs/",
+      "/refactor_plans/",
       "local-development-only",
       "NAIA_web_headless.py",
       "requirements-headless.txt"
     ],
     "rules": [
-      "tests/ must remain local-development-only and must not be tracked in remote-published source.",
+      "tests/, docs/, refactor_docs/, refactor_plans/, and not_implement/ must remain local-development-only and must not be tracked in remote-published source.",
+      "Agent handoff files such as CLAUDE.md and .claude/ must remain local-only.",
       "Remote-published source must keep the program executable with all supported features available.",
       "Build outputs, smoke workspaces, generated caches, and local runtime data remain excluded."
     ]

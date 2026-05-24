@@ -1218,6 +1218,31 @@ def test_tag_filter_random_pick_uses_master_snapshot_after_rating_switch():
     assert int(picked["id"]) == 2
 
 
+def test_tag_filter_random_pick_consumes_current_filtered_results():
+    master = pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "angel wings blue hair"},
+        {"id": 2, "rating": "e", "general": "angel wings red hair"},
+        {"id": 3, "rating": "q", "general": "solo smile"},
+    ])
+    visible = master[master["id"].isin({1, 2})].copy()
+    bridge = _bridge_with_search_snapshots(master, visible)
+    tag_filter = {
+        "ids": {1, 2},
+        "count": 2,
+        "rating_counts": {"g": 0, "s": 1, "q": 0, "e": 1},
+        "tags": ["angel_wings"],
+    }
+
+    picked = bridge._pick_from_tag_filter(tag_filter, {"e"})
+
+    assert picked is not None
+    assert int(picked["id"]) == 2
+    assert bridge.app_context.main_window.search_results.get_count() == 1
+    assert tag_filter["count"] == 1
+    assert tag_filter["ids"] == {1}
+    assert tag_filter["rating_counts"] == {"g": 0, "s": 1, "q": 0, "e": 0}
+
+
 def test_studio_generate_overrides_are_preserved_when_queued():
     bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context(is_generating=True)
     overrides = {

@@ -2113,6 +2113,7 @@ const wsMessageHandlers = {
   autocomplete_result: onAutocompleteResult,
   tag_filter_result: onTagFilterResult,
   tag_filter_assigned: onTagFilterAssigned,
+  tag_filter_update: m => { if (quickFilter) quickFilter.onUpdate(m); },
   tag_filter_ac_result: onTagFilterAcResult,
   storage_list: onStorageList,
   wildcard_manager: onWildcardManager,

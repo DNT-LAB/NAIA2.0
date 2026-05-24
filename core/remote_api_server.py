@@ -6302,13 +6302,19 @@ class RemoteBridge(QObject):
             if source_row is None and ws and self._ws_manager:
                 session = self._ws_manager.sessions.get(ws)
                 tag_filter = session.get("tag_filter") if session else None
-                if tag_filter and tag_filter.get("ids"):
+                if tag_filter:
+                    if not tag_filter.get("ids"):
+                        self._send_json_to(ws, {"type": "random_failed",
+                                                "message": "Tag filter: no matching rows",
+                                                "level": "error"})
+                        return
                     source_row = self._pick_from_tag_filter(tag_filter, active_ratings)
                     if source_row is None:
                         self._send_json_to(ws, {"type": "random_failed",
                                                 "message": "Tag filter: no matching rows",
                                                 "level": "error"})
                         return
+                    self._send_tag_filter_update(ws, tag_filter)
 
             if comfyui_request_id and source_row is None:
                 if self._pick_from_snapshot(active_ratings) is None:
@@ -6379,8 +6385,59 @@ class RemoteBridge(QObject):
         return eligible.sample(n=1).iloc[0].copy()
 
     def _pick_from_tag_filter(self, tag_filter: dict, active_ratings: set):
-        """snapshot에서 tag_filter에 매칭되는 row 중 rating 필터 적용하여 랜덤 1개 반환"""
-        return self._pick_from_snapshot(active_ratings, filter_ids=tag_filter["ids"])
+        """할당된 tag_filter 결과에서 랜덤 1개를 소비해 반환합니다."""
+        row = None
+        try:
+            mw = self.app_context.main_window
+            search_results = getattr(mw, "search_results", None)
+            tag_count = int(tag_filter.get("count") or 0)
+            if search_results and not search_results.is_empty() and search_results.get_count() <= tag_count:
+                row = search_results.pop_random_row(active_ratings)
+        except Exception:
+            row = None
+
+        if row is None:
+            row = self._pick_from_snapshot(active_ratings, filter_ids=tag_filter["ids"])
+
+        if row is not None:
+            self._consume_tag_filter_row(tag_filter, row)
+        return row
+
+    def _consume_tag_filter_row(self, tag_filter: dict, row):
+        """Random에서 사용한 row를 session tag_filter 상태에서도 소비 처리합니다."""
+        try:
+            row_id = row.get("id")
+            if row_id is not None:
+                try:
+                    row_id = int(row_id)
+                except (TypeError, ValueError):
+                    pass
+                ids = tag_filter.get("ids")
+                if isinstance(ids, set):
+                    ids.discard(row_id)
+                    self._active_tag_filter_ids = ids
+
+            tag_filter["count"] = max(0, int(tag_filter.get("count") or 0) - 1)
+
+            rating_counts = tag_filter.get("rating_counts")
+            if isinstance(rating_counts, dict):
+                rating = str(row.get("rating") or "").strip().lower()
+                if rating in rating_counts:
+                    rating_counts[rating] = max(0, int(rating_counts.get(rating) or 0) - 1)
+        except Exception as e:
+            print(f"🌐 Remote: tag filter 소비 상태 갱신 실패 — {e}")
+
+    def _send_tag_filter_update(self, ws, tag_filter: dict):
+        """Quick Filter UI에 소비 후 count/rating_counts를 반영합니다."""
+        payload = {
+            "type": "tag_filter_update",
+            "count": int(tag_filter.get("count") or 0),
+            "tags": tag_filter.get("tags") or [],
+        }
+        rating_counts = tag_filter.get("rating_counts")
+        if isinstance(rating_counts, dict):
+            payload["rating_counts"] = {r: int(rating_counts.get(r, 0) or 0) for r in "gsqe"}
+        self._send_json_to(ws, payload)
 
     def _do_tag_filter_search(self, tags: list):
         """master snapshot에서 태그 AND 검색, 매칭 ID를 반환"""
@@ -15017,7 +15074,7 @@ class RemoteBridge(QObject):
         rc = {r: int((master['rating'] == r).sum()) for r in 'gsqe'} if 'rating' in master.columns else {}
         source = master
         tag_ids = self._active_tag_filter_ids
-        if tag_ids and 'id' in source.columns:
+        if tag_ids is not None and 'id' in source.columns:
             source = source[source['id'].isin(tag_ids)]
         count = int(source['rating'].isin(active_ratings).sum()) if (active_ratings and 'rating' in source.columns) else len(source)
         return {"count": count, "rating_counts": rc}
@@ -15048,7 +15105,7 @@ class RemoteBridge(QObject):
                 filtered = filtered[filtered['rating'].isin(ratings)]
             # Tag Filter
             tag_ids = self._active_tag_filter_ids
-            if tag_ids and 'id' in filtered.columns:
+            if tag_ids is not None and 'id' in filtered.columns:
                 filtered = filtered[filtered['id'].isin(tag_ids)]
 
             from core.search_result_model import SearchResultModel
@@ -17466,6 +17523,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                         "tags": tags,
                                         "ids": ids,
                                         "count": result["count"],
+                                        "rating_counts": dict(result.get("rating_counts") or {}),
                                         "request_id": request_id,
                                     }
                                 else:
@@ -17509,6 +17567,7 @@ def create_app(bridge: RemoteBridge, ws_manager: WebSocketManager) -> FastAPI:
                                     "type": "tag_filter_assigned",
                                     "count": tf["count"],
                                     "tags": tf["tags"],
+                                    "rating_counts": tf.get("rating_counts") or {r: 0 for r in 'gsqe'},
                                 }))
                             else:
                                 await ws.send_text(json.dumps({

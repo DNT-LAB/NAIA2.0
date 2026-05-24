@@ -9,6 +9,7 @@ from core.web_session_context import WebSessionContext
 
 
 BroadcastJson = Callable[[set[WebSocket], dict[str, Any]], Awaitable[None]]
+AsyncRunner = Callable[..., Awaitable[Any]]
 
 SESSION_COMMAND_TYPES = {
     "sync",
@@ -40,6 +41,7 @@ async def handle_session_command(
     command: dict[str, Any],
     *,
     broadcast_json: BroadcastJson,
+    run_in_thread: AsyncRunner,
 ) -> bool:
     command_type = str(command.get("type") or "").strip()
     if command_type == "sync":
@@ -50,7 +52,15 @@ async def handle_session_command(
         await broadcast_json(clients, {"type": "options", **context.get_options()})
         return True
     if command_type == "set_mode":
-        await _handle_set_mode(ws, context, clients, client_host, command, broadcast_json=broadcast_json)
+        await _handle_set_mode(
+            ws,
+            context,
+            clients,
+            client_host,
+            command,
+            broadcast_json=broadcast_json,
+            run_in_thread=run_in_thread,
+        )
         return True
     if command_type == "set_prompt":
         context.prompt_text = str(command.get("prompt") or "")
@@ -76,6 +86,7 @@ async def _handle_set_mode(
     command: dict[str, Any],
     *,
     broadcast_json: BroadcastJson,
+    run_in_thread: AsyncRunner,
 ) -> None:
     requested_mode = str(command.get("mode") or "").strip().upper()
     if requested_mode not in {"NAI", "WEBUI", "COMFYUI"}:
@@ -101,6 +112,8 @@ async def _handle_set_mode(
         await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
         return
     context.set_api_mode(requested_mode)
+    if requested_mode in {"WEBUI", "COMFYUI"}:
+        await run_in_thread(context.refresh_api_options, requested_mode)
     await broadcast_json(clients, {
         "type": "mode_result",
         "success": True,

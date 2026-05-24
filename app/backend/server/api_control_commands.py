@@ -69,8 +69,12 @@ async def handle_api_control_command(
         }[command_type]
         raw_value = command.get("token") if mode == "NAI" else command.get("url")
         result = await run_in_thread(context.verify_api, mode, str(raw_value or ""))
+        if result.get("success") and mode in {"WEBUI", "COMFYUI"}:
+            await run_in_thread(context.refresh_api_options, mode)
         await _send_json(ws, result)
         await _send_json(ws, context.api_status_payload(client_host))
+        if result.get("success") and mode in {"WEBUI", "COMFYUI"} and context.get_api_mode() == mode:
+            await _send_json(ws, context.generation_param_schema_payload())
         return True
 
     if command_type == "clear_api":
@@ -79,6 +83,8 @@ async def handle_api_control_command(
             await _send_setup_blocked(ws, command_type, reason)
             return True
         result = await run_in_thread(context.clear_api, str(command.get("mode") or ""))
+        if result.get("success"):
+            context.clear_api_options(str(command.get("mode") or ""))
         await _send_json(ws, result)
         await _send_json(ws, context.api_status_payload(client_host))
         return True

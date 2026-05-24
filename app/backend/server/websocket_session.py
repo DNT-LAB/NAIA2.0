@@ -172,6 +172,7 @@ async def handle_json_command(
             client_host,
             command,
             broadcast_json=broadcast_json,
+            run_in_thread=run_in_thread,
         )
     elif command_type in SEARCH_COMMAND_TYPES:
         await handle_search_command(

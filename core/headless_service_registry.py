@@ -55,6 +55,7 @@ HEADLESS_SERVICE_SPECS = {
     "pipeline_run": HeadlessServiceSpec("core.headless_pipeline_run_service", "HeadlessPipelineRunService"),
     "pipeline_hook": HeadlessServiceSpec("core.headless_pipeline_hook_service", "HeadlessPipelineHookService"),
     "api_control": HeadlessServiceSpec("core.headless_api_control_service", "HeadlessApiControlService"),
+    "api_options": HeadlessServiceSpec("core.headless_api_option_service", "HeadlessApiOptionService"),
     "remote_state": HeadlessServiceSpec("core.headless_remote_state_service", "HeadlessRemoteStateService"),
     "module_dispatch": HeadlessServiceSpec(
         "core.headless_module_dispatch_service",

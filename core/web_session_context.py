@@ -46,6 +46,7 @@ class WebSessionContext:
     negative_prompt_text: str = ""
     remote_options: dict[str, bool] = field(default_factory=lambda: dict(REMOTE_OPTION_DEFAULTS))
     remote_params: dict[str, Any] = field(default_factory=dict)
+    remote_option_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     autocomplete_state: AutocompleteRuntimeState = field(default_factory=AutocompleteRuntimeState)
     desktop_adapter: Any = None
     api_config_service: ApiConfigService | None = None
@@ -147,6 +148,9 @@ class WebSessionContext:
 
     def _api_control_service(self):
         return self._lazy_service("api_control")
+
+    def _api_option_service(self):
+        return self._lazy_service("api_options")
 
     def _remote_state_service(self):
         return self._lazy_service("remote_state")
@@ -703,6 +707,12 @@ class WebSessionContext:
 
     def probe_api(self) -> dict[str, bool | None]:
         return self._api_control_service().probe_api()
+
+    def refresh_api_options(self, mode: str) -> dict[str, Any]:
+        return self._api_option_service().refresh(mode)
+
+    def clear_api_options(self, mode: str) -> None:
+        self._api_option_service().clear(mode)
 
     def set_cloudflared_enabled(self, enabled: bool) -> dict[str, Any]:
         return self._api_control_service().set_cloudflared_enabled(enabled)

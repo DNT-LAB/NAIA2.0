@@ -81,7 +81,20 @@ class HeadlessRemoteStateService:
         if not clean_key:
             return
         self.context.remote_params[clean_key] = self.coerce_remote_param(clean_key, value)
+        self._sync_cached_selection(clean_key, self.context.remote_params[clean_key])
         self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
+
+    def _sync_cached_selection(self, key: str, value: Any) -> None:
+        if key not in {"model", "sampler", "scheduler", "hr_upscaler"}:
+            return
+        mode = self.get_api_mode()
+        option_cache = getattr(self.context, "remote_option_cache", None)
+        if not isinstance(option_cache, dict):
+            return
+        cached_options = option_cache.get(mode)
+        if not isinstance(cached_options, dict):
+            return
+        cached_options[key] = [value]
 
     def current_model_key(self) -> str:
         model = str(self.context.remote_params.get("model") or "NAID4.5F").strip()

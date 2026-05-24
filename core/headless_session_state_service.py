@@ -216,8 +216,19 @@ class HeadlessSessionStateService:
                 "comfyui_workflow": dict(context.remote_params.get("comfyui_workflow") or {}),
                 "comfyui_workflow_has_custom": bool(context.remote_params.get("comfyui_workflow_has_custom", False)),
                 "comfyui_workflow_label": str(context.remote_params.get("comfyui_workflow_label") or "Default workflow"),
+                "comfyui_workflow_type": context.remote_params.get("comfyui_workflow_type"),
             })
         payload.update(context.remote_params)
+        option_cache = getattr(context, "remote_option_cache", {}) or {}
+        cached_options = option_cache.get(mode, {}) if isinstance(option_cache, dict) else {}
+        for key in ("options_model", "options_sampler", "options_scheduler", "options_hr_upscaler"):
+            values = cached_options.get(key)
+            if isinstance(values, list) and values:
+                payload[key] = list(values)
+        for key in ("model", "sampler", "scheduler", "hr_upscaler"):
+            values = cached_options.get(key)
+            if isinstance(values, list) and values:
+                payload[key] = values[0]
         return payload
 
     def initial_websocket_messages(

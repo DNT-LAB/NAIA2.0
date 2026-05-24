@@ -183,7 +183,7 @@ class DepthSearchWindow(QWidget):
         self.search_engine = SearchEngine()
 
         # tags_string 사전 빌드 (검색 속도 최적화)
-        self._ensure_tags_string(self.current_model.get_dataframe())
+        self._ensure_model_tags_string(self.current_model)
 
         # 스테이징 데이터
         self.staged_items = []  # list of {'query': str, 'exclude': str, 'df': DataFrame}
@@ -752,7 +752,7 @@ class DepthSearchWindow(QWidget):
             df = df.drop(columns=['tags_string'])
         self.original_model = SearchResultModel(df)
         self.current_model = SearchResultModel(df.copy())
-        self._ensure_tags_string(self.current_model.get_dataframe())
+        self._ensure_model_tags_string(self.current_model)
 
         # 검색 텍스트 초기화
         self.d_search_input.clear()
@@ -762,7 +762,7 @@ class DepthSearchWindow(QWidget):
     def restore_to_original(self):
         """뷰를 초기 데이터 상태로 되돌림"""
         self.current_model = SearchResultModel(self.original_model.get_dataframe().copy())
-        self._ensure_tags_string(self.current_model.get_dataframe())
+        self._ensure_model_tags_string(self.current_model)
         self.update_view()
 
     def reset_from_search_result(self, search_result: SearchResultModel):
@@ -777,7 +777,7 @@ class DepthSearchWindow(QWidget):
 
         self.original_model = SearchResultModel(df.copy())
         self.current_model = SearchResultModel(df.copy())
-        self._ensure_tags_string(self.current_model.get_dataframe())
+        self._ensure_model_tags_string(self.current_model)
 
         self._reset_filter_controls()
         self.staged_items.clear()
@@ -833,9 +833,19 @@ class DepthSearchWindow(QWidget):
         print(f"[Dialog] depth_search — {title}: {text}")
 
     def _ensure_tags_string(self, df):
-        """tags_string 컬럼이 없으면 빌드하여 캐싱 (이후 재검색 시 재빌드 불필요)"""
+        """tags_string 컬럼이 없으면 빌드하여 반환합니다."""
         if not df.empty and 'tags_string' not in df.columns:
+            df = df.copy()
             df['tags_string'] = self.search_engine._build_tags_string(df)
+        return df
+
+    def _ensure_model_tags_string(self, model: SearchResultModel):
+        """SearchResultModel 내부 bucket에도 tags_string 캐시를 반영합니다."""
+        if model is None or model.is_empty():
+            return
+        df = self._ensure_tags_string(model.get_dataframe())
+        if 'tags_string' in df.columns:
+            model.set_dataframe(df)
 
     # --- 스테이징 기능 ---
 
@@ -889,7 +899,7 @@ class DepthSearchWindow(QWidget):
             merged.reset_index(drop=True, inplace=True)
 
         self.current_model = SearchResultModel(merged)
-        self._ensure_tags_string(self.current_model.get_dataframe())
+        self._ensure_model_tags_string(self.current_model)
 
         self.staged_items.clear()
         self._update_staging_ui()

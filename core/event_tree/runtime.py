@@ -389,30 +389,20 @@ class EventStreamRuntime:
         if search_results is None or search_results.is_empty():
             return None
 
-        df = search_results.get_dataframe()
-        eligible = df
         rating_filter = node.ratings if node.ratings else active_ratings
-        if rating_filter and "rating" in eligible.columns:
-            eligible = eligible[eligible["rating"].isin(rating_filter)]
 
         include_tags = {tag.strip() for tag in node.include_tags if str(tag).strip()}
         exclude_tags = {tag.strip() for tag in node.exclude_tags if str(tag).strip()}
         if include_tags or exclude_tags:
-            mask = eligible.apply(
+            return search_results.pop_random_row_matching(
+                rating_filter,
                 lambda row: self._matches_node_tags(row, include_tags, exclude_tags),
-                axis=1,
             )
-            eligible = eligible[mask]
-        elif "general" in eligible.columns:
-            eligible = eligible[eligible["general"].map(lambda value: bool(_clean_tags(value)))]
 
-        if eligible.empty:
-            return None
-
-        random_index = eligible.index.to_series().sample(n=1).iloc[0]
-        popped_row = df.loc[random_index].copy()
-        df.drop(random_index, inplace=True)
-        return popped_row
+        return search_results.pop_random_row_matching(
+            rating_filter,
+            lambda row: bool(_clean_tags(row.get("general", ""))) if "general" in row.index else True,
+        )
 
     @staticmethod
     def _matches_node_tags(row, include_tags: set[str], exclude_tags: set[str]) -> bool:

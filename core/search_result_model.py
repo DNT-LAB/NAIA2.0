@@ -2,7 +2,7 @@ import random
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -195,6 +195,17 @@ class _SearchResultBucket:
 
         popped_row = self.df.loc[random_index].copy()
         self.consumed_indices.add(random_index)
+        if self.rating_counts_cache is not None and "rating" in popped_row:
+            rating = _normalize_rating(popped_row.get("rating"))
+            if rating in self.rating_counts_cache:
+                self.rating_counts_cache[rating] = max(0, self.rating_counts_cache[rating] - 1)
+        return popped_row
+
+    def pop_row_at_index(self, index: int) -> Optional[pd.Series]:
+        if index in self.consumed_indices or index not in self.df.index:
+            return None
+        popped_row = self.df.loc[index].copy()
+        self.consumed_indices.add(index)
         if self.rating_counts_cache is not None and "rating" in popped_row:
             rating = _normalize_rating(popped_row.get("rating"))
             if rating in self.rating_counts_cache:
@@ -519,6 +530,76 @@ class SearchResultModel:
             attempted.add(selected_id)
 
         return None
+
+    def pop_random_row_matching(
+        self,
+        active_ratings: set = None,
+        row_predicate: Optional[Callable[[pd.Series], bool]] = None,
+    ) -> Optional[pd.Series]:
+        """임의 predicate까지 반영해 무작위 행을 선택하고 소비 처리합니다."""
+        if self.is_empty():
+            return None
+        if row_predicate is None:
+            return self.pop_random_row(active_ratings)
+
+        active_rating_keys = self._active_rating_keys(active_ratings)
+        weighted_buckets = []
+        eligible_indices_by_bucket: dict[int, list[int]] = {}
+        total_weight = 0
+
+        for bucket_id in self._bucket_order:
+            bucket = self._buckets.get(bucket_id)
+            if bucket is None or bucket.is_empty():
+                continue
+            frame = bucket.remaining_dataframe()
+            if frame.empty:
+                continue
+
+            filtered = frame
+            if active_rating_keys is not None and "rating" in filtered.columns:
+                ratings = filtered["rating"].astype(str).str.strip().str.lower()
+                filtered = filtered[ratings.isin(active_rating_keys)]
+            if filtered.empty:
+                continue
+
+            predicate_mask = filtered.apply(row_predicate, axis=1)
+            eligible = filtered[predicate_mask]
+            if eligible.empty:
+                continue
+
+            indices = list(eligible.index)
+            eligible_indices_by_bucket[bucket_id] = indices
+            total_weight += len(indices)
+            weighted_buckets.append((bucket_id, total_weight))
+
+        if total_weight <= 0:
+            return None
+
+        target = random.randrange(total_weight)
+        selected_bucket_id = None
+        previous_weight = 0
+        for bucket_id, cumulative_weight in weighted_buckets:
+            if target < cumulative_weight:
+                selected_bucket_id = bucket_id
+                target -= previous_weight
+                break
+            previous_weight = cumulative_weight
+
+        if selected_bucket_id is None:
+            return None
+
+        bucket = self._buckets[selected_bucket_id]
+        selected_index = eligible_indices_by_bucket[selected_bucket_id][target]
+        popped_row = bucket.pop_row_at_index(selected_index)
+        if popped_row is None:
+            return None
+
+        if self._rating_counts_cache is not None and "rating" in popped_row:
+            rating = _normalize_rating(popped_row.get("rating"))
+            if rating in self._rating_counts_cache:
+                self._rating_counts_cache[rating] = max(0, self._rating_counts_cache[rating] - 1)
+        self._mark_bucket_data_changed()
+        return popped_row
 
     def deduplicate(self, subset: Optional[List[str]] = None):
         """데이터프레임의 중복된 행을 제거합니다."""

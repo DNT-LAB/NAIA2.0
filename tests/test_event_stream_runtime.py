@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pandas as pd
+import numpy as np
 
 from core.event_tree import EventStreamRuntime, LegacyStoryNodeSpec
 from core.prompt_context import PromptContext
@@ -68,7 +69,10 @@ class _Context:
         self.published.append((event_name, args, kwargs))
 
 
-def test_event_stream_allocates_current_search_node_by_axis_like_bucket():
+def test_event_stream_allocates_current_search_node_by_axis_like_bucket(monkeypatch):
+    monkeypatch.setattr(SearchResultModel, "_bucket_starts_cache", [0, 10])
+    monkeypatch.setattr(SearchResultModel, "_bucket_starts_array_cache", np.asarray([0, 10], dtype=np.int64))
+
     ctx = _Context()
     runtime = EventStreamRuntime(ctx)
     runtime.start_linear([
@@ -80,9 +84,11 @@ def test_event_stream_allocates_current_search_node_by_axis_like_bucket():
         )
     ])
     model = SearchResultModel(pd.DataFrame([
-        {"general": "1girl, standing", "rating": "s"},
-        {"general": "1girl, sitting, smile", "rating": "s"},
+        {"id": 1, "general": "1girl, standing", "rating": "s"},
+        {"id": 11, "general": "1girl, sitting, smile", "rating": "s"},
     ]))
+
+    assert set(model._buckets) == {0, 1}
 
     req = runtime.prepare_random_prompt_request(model, {"auto_generate": False})
 

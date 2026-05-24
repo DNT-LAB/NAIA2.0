@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,50 @@ HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
 class HeadlessPromptEngineeringService:
     def __init__(self, context: Any):
         self.context = context
+
+    @staticmethod
+    def _empty_debug_snapshot() -> dict[str, Any]:
+        return {
+            "source_info": {},
+            "filter_log": [],
+            "original_count": 0,
+            "remaining_count": 0,
+            "e621_info": None,
+            "implication_info": [],
+        }
+
+    @staticmethod
+    def _debug_snapshot_from_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(metadata, dict):
+            return HeadlessPromptEngineeringService._empty_debug_snapshot()
+
+        def int_value(value: Any) -> int:
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        return {
+            "source_info": copy.deepcopy(metadata.get("debug_source_info") or {}),
+            "filter_log": copy.deepcopy(metadata.get("filter_log") or []),
+            "original_count": int_value(metadata.get("original_tag_count")),
+            "remaining_count": int_value(metadata.get("remaining_tag_count")),
+            "e621_info": copy.deepcopy(metadata.get("e621_debug_info")),
+            "implication_info": copy.deepcopy(metadata.get("implication_compressed_tags") or []),
+        }
+
+    def debug_snapshot(self) -> dict[str, Any]:
+        current_context = getattr(self.context, "current_prompt_context", None)
+        current_metadata = getattr(current_context, "metadata", None)
+        snapshot = self._debug_snapshot_from_metadata(current_metadata)
+        if snapshot != self._empty_debug_snapshot():
+            return snapshot
+
+        latest_run = getattr(getattr(self.context, "pipeline_run_registry", None), "latest_prompt_run", None)
+        if not callable(latest_run):
+            return snapshot
+        run = latest_run()
+        return self._debug_snapshot_from_metadata(getattr(run, "metadata", None))
 
     def state(self) -> dict[str, Any]:
         from core.prompt_engineering_settings import get_prompt_engineering_store
@@ -59,7 +104,7 @@ class HeadlessPromptEngineeringService:
             "preprocessing": dict(settings.get("preprocessing_options") or {}),
             "e621_settings": dict(settings.get("e621_settings") or {}),
             "danbooru_settings": dict(settings.get("danbooru_weight_settings") or {}),
-            "debug_snapshot": {},
+            "debug_snapshot": self.debug_snapshot(),
             "preset_can_save_current": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized"),
             "preset_can_delete": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized", "default"),
         }

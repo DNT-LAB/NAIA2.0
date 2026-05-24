@@ -2532,6 +2532,34 @@ function applyGeneratedResolutionUpdate(message = {}) {
   updateWebUiHrScaleHint();
 }
 
+function hasPromptEngineeringDebugSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  const sourceInfo = snapshot.source_info || {};
+  const filterLog = Array.isArray(snapshot.filter_log) ? snapshot.filter_log : [];
+  const implicationInfo = Array.isArray(snapshot.implication_info) ? snapshot.implication_info : [];
+  const e621Results = Array.isArray(snapshot.e621_info?.results) ? snapshot.e621_info.results : [];
+  return Boolean(
+    filterLog.length
+    || implicationInfo.length
+    || e621Results.length
+    || Object.values(sourceInfo).some(value => value != null && String(value).trim() !== '')
+  );
+}
+
+function applyPromptEngineeringDebugSnapshot(snapshot) {
+  if (!hasPromptEngineeringDebugSnapshot(snapshot)) return;
+  const currentState = cloneModuleState(moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState) || {
+    type: 'module_state',
+    module_id: 'prompt_engineering',
+    available: true,
+    headless: true,
+  };
+  currentState.debug_snapshot = snapshot;
+  moduleStateCache.set('prompt_engineering', currentState);
+  lastPromptEngineeringState = currentState;
+  syncPromptEngineeringPopups();
+}
+
 function updatePromptOnly(messageOrPrompt, sourceArg) {
   const message = (typeof messageOrPrompt === 'object' && messageOrPrompt !== null)
     ? messageOrPrompt
@@ -2578,6 +2606,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     updatePromptHighlight();
     applyPromptHighlightState();
     applyPromptTokenPayload(message);
+    applyPromptEngineeringDebugSnapshot(message.debug_snapshot);
     // Show new-content dot if drawer is closed
     if (promptDrawerControl) promptDrawerControl.showNewContentDot();
   }

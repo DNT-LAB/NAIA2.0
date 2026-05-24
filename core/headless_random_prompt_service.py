@@ -58,6 +58,11 @@ class HeadlessRandomPromptResult:
             width, height = self.detected_resolution
             payload["detected_resolution"] = {"width": width, "height": height}
             payload["resolution"] = f"{width} x {height}"
+        context_metadata = getattr(self.context, "metadata", None) if self.context is not None else None
+        if isinstance(context_metadata, dict):
+            from core.headless_prompt_engineering_service import HeadlessPromptEngineeringService
+
+            payload["debug_snapshot"] = HeadlessPromptEngineeringService._debug_snapshot_from_metadata(context_metadata)
         return payload
 
 
@@ -412,16 +417,17 @@ class HeadlessRandomPromptService:
 
         root = Path(getattr(self.context, "repo_root", Path.cwd()))
         data_root = root / "data"
+        fallback_data_roots: list[str] = []
         runtime_paths = getattr(self.context, "runtime_paths", None)
         if runtime_paths is not None:
-            runtime_data = runtime_paths.data_dir
-            if (
-                (runtime_data / "clothes_list.txt").exists()
-                or (runtime_data / "taglist").exists()
-                or (runtime_data / "tags").exists()
-            ):
-                data_root = runtime_data
-        self.context.filter_data_manager = FilterDataManager(str(data_root))
+            data_root = runtime_paths.data_dir
+            for candidate in (runtime_paths.resource_path("data"), root / "data"):
+                if candidate.exists() and candidate.resolve() != data_root.resolve():
+                    fallback_data_roots.append(str(candidate))
+        self.context.filter_data_manager = FilterDataManager(
+            str(data_root),
+            fallback_data_dirs=fallback_data_roots,
+        )
 
     def _ensure_search_results(self, settings: dict[str, Any]) -> bool:
         if settings.get("wildcard_standalone", False):

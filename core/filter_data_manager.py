@@ -1,13 +1,14 @@
 import os
 import json
-from typing import List, Dict, Set, Optional
+from typing import Iterable, List, Dict, Set, Optional
 
 class FilterDataManager:
     """
     data/ 디렉토리의 필터용 텍스트 파일들을 로드하고 관리하는 클래스.
     """
-    def __init__(self, data_dir: str = 'data'):
-        self.data_dir = data_dir
+    def __init__(self, data_dir: str = 'data', fallback_data_dirs: Optional[Iterable[str]] = None):
+        self.data_dir = os.fspath(data_dir)
+        self.data_dirs = self._normalize_data_dirs(self.data_dir, fallback_data_dirs or [])
 
         # 각 텍스트 파일의 태그 목록을 저장할 리스트
         self.clothes_list: List[str] = []
@@ -38,9 +39,29 @@ class FilterDataManager:
         # 클래스 생성 시 모든 파일을 로드
         self.load_all_filters()
 
+    @staticmethod
+    def _normalize_data_dirs(primary: str, fallback_data_dirs: Iterable[str]) -> List[str]:
+        data_dirs: List[str] = []
+        seen: Set[str] = set()
+        for raw_dir in (primary, *fallback_data_dirs):
+            path = os.fspath(raw_dir)
+            key = os.path.abspath(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            data_dirs.append(path)
+        return data_dirs
+
+    def _resolve_data_file(self, filename: str, subdirectory: Optional[str] = None) -> str:
+        for data_dir in self.data_dirs:
+            file_path = os.path.join(data_dir, subdirectory, filename) if subdirectory else os.path.join(data_dir, filename)
+            if os.path.exists(file_path):
+                return file_path
+        return os.path.join(self.data_dir, subdirectory, filename) if subdirectory else os.path.join(self.data_dir, filename)
+
     def _load_list_from_file(self, filename: str) -> List[str]:
         """지정된 파일에서 한 줄에 하나씩 있는 태그를 읽어 리스트로 반환합니다."""
-        file_path = os.path.join(self.data_dir, filename)
+        file_path = self._resolve_data_file(filename)
 
         if not os.path.exists(file_path):
             print(f"⚠️ 필터 파일 없음: {file_path}")
@@ -58,7 +79,7 @@ class FilterDataManager:
 
     def _load_json_tag_list(self, filename: str, subdirectory: str = 'taglist') -> dict:
         """JSON 태그 파일을 로드합니다."""
-        file_path = os.path.join(self.data_dir, subdirectory, filename)
+        file_path = self._resolve_data_file(filename, subdirectory)
 
         if not os.path.exists(file_path):
             print(f"⚠️ JSON 필터 파일 없음: {file_path}")
@@ -177,7 +198,7 @@ class FilterDataManager:
 
     def _load_tag_whitelist(self):
         """unique_tags.json 빈도 기반 + 분류 완료 태그를 합쳐 whitelist를 구성합니다."""
-        file_path = os.path.join(self.data_dir, 'taglist', 'unique_tags.json')
+        file_path = self._resolve_data_file('unique_tags.json', 'taglist')
 
         if not os.path.exists(file_path):
             print(f"⚠️ Whitelist 소스 파일 없음: {file_path}")

@@ -113,6 +113,7 @@ export function createRefinePanel({
       <button class="mod-action-btn mod-start" style="flex:1" onclick="depthFilter()">결과 내 재검색</button>
       <button class="mod-action-btn mod-restore" style="flex:1" onclick="depthAction('restore')">초기 상태로 복원</button>
     </div>
+    <button class="mod-action-btn mod-refine" style="width:100%" onclick="depthAction('refresh_from_main')" title="현재 메인 검색 결과를 심층검색 원본 행으로 다시 불러오기">메인 검색 결과로 새로고침</button>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
       <button class="mod-action-btn mod-start" style="flex:1;background:var(--accent)" onclick="depthAction('assign')">현재 결과를 메인에 할당</button>
       <button class="mod-action-btn mod-refine" style="flex:1" onclick="depthAction('promote')" title="현재 검색 결과를 원본 행으로 설정">현재 검색 결과를 원본 행으로</button>

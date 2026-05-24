@@ -70,12 +70,6 @@
           <span class="setup-nav-sub" id="setupNavSubComfyui">미설정</span>
           <span class="setup-nav-dot" id="setupDotComfyui"></span>
         </button>
-        <button class="setup-nav-item" data-tab="data" onclick="switchSetupTab('data')" role="tab">
-          <span class="setup-nav-num">04</span>
-          <span class="setup-nav-name">DATA</span>
-          <span class="setup-nav-sub" id="setupNavSubData">확인 중</span>
-          <span class="setup-nav-dot" id="setupDotData"></span>
-        </button>
       </nav>
       <section class="setup-pane" role="tabpanel">
         <!-- NAI -->
@@ -125,18 +119,6 @@
           </div>
           <div class="setup-result" id="setupResultComfyui"></div>
           <!-- ComfyUI model / sampling mode 은 Params 패널(데스크탑 동기화)에서 관리 — 데스크탑 우선. -->
-        </div>
-        <!-- DATA -->
-        <div class="setup-tab-pane" data-pane="data">
-          <div class="setup-meta-line"><span>태그 데이터</span><span class="setup-meta-val" id="setupDataArchiveStatus">확인 중</span></div>
-          <div class="setup-meta-line"><span>설치 위치</span><span class="setup-meta-val setup-meta-path" id="setupDataPath">—</span></div>
-          <div class="setup-meta-line"><span>파일 수</span><span class="setup-meta-val" id="setupDataFileCount">—</span></div>
-          <div class="setup-actions">
-            <button class="setup-btn-primary" id="setupDataInstallBtn" onclick="installTagArchive()">태그 데이터 설치</button>
-            <button class="setup-btn-ghost" id="setupDataRefreshBtn" onclick="refreshInstallManager()">새로고침</button>
-            <button class="setup-btn-ghost" id="setupDataCancelBtn" onclick="cancelTagArchiveDownload()" disabled>취소</button>
-          </div>
-          <div class="setup-result" id="setupDataResult"></div>
         </div>
         <div class="setup-cloudflared hidden" id="setupCloudflaredSection">
           <div class="setup-cloudflared-head">

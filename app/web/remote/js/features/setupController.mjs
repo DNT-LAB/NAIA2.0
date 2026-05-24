@@ -21,17 +21,6 @@ export function createSetupController({
   const setupResultEls = { NAI: byId('setupResultNai'), WEBUI: byId('setupResultWebui'), COMFYUI: byId('setupResultComfyui') };
   const setupVerifyBtns = { NAI: byId('setupBtnVerifyNai'), WEBUI: byId('setupBtnVerifyWebui'), COMFYUI: byId('setupBtnVerifyComfyui') };
   const setupClearBtns = { NAI: byId('setupBtnClearNai'), WEBUI: byId('setupBtnClearWebui'), COMFYUI: byId('setupBtnClearComfyui') };
-  const setupDataEls = {
-    navSub: byId('setupNavSubData'),
-    dot: byId('setupDotData'),
-    status: byId('setupDataArchiveStatus'),
-    path: byId('setupDataPath'),
-    count: byId('setupDataFileCount'),
-    installBtn: byId('setupDataInstallBtn'),
-    refreshBtn: byId('setupDataRefreshBtn'),
-    cancelBtn: byId('setupDataCancelBtn'),
-    result: byId('setupDataResult'),
-  };
   const SETUP_READY_LABEL = '확인 후 저장';
   const SETUP_LOADING_LABEL = '확인 중...';
   const NOT_SET_LABEL = '미설정';
@@ -44,8 +33,6 @@ export function createSetupController({
   let runtimeSetupForced = false;
   let runtimeSetupReason = '';
   let apiStatusLast = null;
-  let installManagerLast = null;
-  let installManagerPollTimer = null;
   let initialProbeDone = false;
   let probeCompleted = false;
   const probeState = { NAI: null, WEBUI: null, COMFYUI: null };
@@ -129,7 +116,6 @@ export function createSetupController({
   function openApiPopup() {
     setupOverlay.classList.add('open');
     if (apiStatusLast) applySetupGate(apiStatusLast);
-    refreshInstallManager();
     const ws = getWs();
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send('sync');
@@ -210,83 +196,6 @@ export function createSetupController({
     const className = (messageType === 'info' || messageType === 'warning' || messageType === 'error') ? messageType : '';
     element.className = 'setup-result ' + className;
     element.textContent = message || '';
-  }
-
-  function setDataResult(message, messageType) {
-    const element = setupDataEls.result;
-    if (!element) return;
-    const className = (messageType === 'info' || messageType === 'warning' || messageType === 'error') ? messageType : '';
-    element.className = 'setup-result ' + className;
-    element.textContent = message || '';
-  }
-
-  function updateInstallManagerStatus(payload) {
-    installManagerLast = payload || null;
-    const tagArchive = payload?.tag_archive || {};
-    const download = tagArchive.download || {};
-    const ready = !!tagArchive.ready;
-    const active = !!download.active;
-    const countText = `${Number(tagArchive.file_count || 0).toLocaleString()} / ${Number(tagArchive.expected_count || 0).toLocaleString()}`;
-    if (setupDataEls.navSub) setupDataEls.navSub.textContent = ready ? '설치됨' : active ? '다운로드 중' : '미설치';
-    if (setupDataEls.dot) {
-      let className = 'setup-nav-dot';
-      if (ready) className += ' ok';
-      else if (active) className += ' warn';
-      else className += ' err';
-      setupDataEls.dot.className = className;
-    }
-    if (setupDataEls.status) {
-      setupDataEls.status.textContent = ready ? '설치됨' : active ? `다운로드 중 ${download.percent || 0}%` : '미설치';
-    }
-    if (setupDataEls.path) setupDataEls.path.textContent = tagArchive.target || payload?.runtime?.data_dir || '\u2014';
-    if (setupDataEls.count) setupDataEls.count.textContent = countText;
-    if (setupDataEls.installBtn) {
-      setupDataEls.installBtn.disabled = ready || active || !tagArchive.downloadable;
-      setupDataEls.installBtn.textContent = active ? '설치 중...' : ready ? '설치 완료' : '태그 데이터 설치';
-    }
-    if (setupDataEls.refreshBtn) setupDataEls.refreshBtn.disabled = active;
-    if (setupDataEls.cancelBtn) setupDataEls.cancelBtn.disabled = !active;
-    if (download.error) setDataResult(download.error, 'error');
-    else if (download.message) setDataResult(download.message, active ? 'info' : (ready ? 'info' : 'warning'));
-    else setDataResult(ready ? '태그 데이터가 준비되었습니다.' : '태그 데이터 설치가 필요합니다.', ready ? 'info' : 'warning');
-
-    if (active && !installManagerPollTimer) {
-      installManagerPollTimer = setInterval(refreshInstallManager, 1000);
-    }
-    if (!active && installManagerPollTimer) {
-      clearInterval(installManagerPollTimer);
-      installManagerPollTimer = null;
-    }
-  }
-
-  async function requestInstallManager(path, options = {}) {
-    try {
-      const response = await fetch(path, options);
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || `HTTP ${response.status}`);
-      }
-      updateInstallManagerStatus(payload);
-      return payload;
-    } catch (error) {
-      setDataResult(error?.message || '데이터 상태 확인 실패', 'error');
-      return null;
-    }
-  }
-
-  async function refreshInstallManager() {
-    return requestInstallManager('/api/install-manager');
-  }
-
-  async function installTagArchive() {
-    setDataResult('태그 데이터 설치를 시작합니다.', 'info');
-    return requestInstallManager('/api/install-manager/tag-archive/download', {method: 'POST'});
-  }
-
-  async function cancelTagArchiveDownload() {
-    setDataResult('태그 데이터 설치를 취소합니다.', 'info');
-    await requestInstallManager('/api/install-manager/tag-archive/download/cancel', {method: 'POST'});
-    return refreshInstallManager();
   }
 
   function setSetupLoading(mode, loading) {
@@ -526,9 +435,6 @@ export function createSetupController({
     toggleSetupReveal,
     setSetupResult,
     setSetupLoading,
-    refreshInstallManager,
-    installTagArchive,
-    cancelTagArchiveDownload,
     verifyNai,
     verifyWebui,
     verifyComfyui,

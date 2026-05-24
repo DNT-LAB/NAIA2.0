@@ -661,7 +661,7 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v
   .catch(error => {
     console.error('Failed to initialize cloudflared controls module', error);
   });
-const setupControllerReady = import('./js/features/setupController.mjs?v=20260520-install-manager1')
+const setupControllerReady = import('./js/features/setupController.mjs?v=20260523-api-setup-backends1')
   .then(({createSetupController}) => {
     setupController = createSetupController({
       document,

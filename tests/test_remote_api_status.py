@@ -1218,6 +1218,31 @@ def test_tag_filter_random_pick_uses_master_snapshot_after_rating_switch():
     assert int(picked["id"]) == 2
 
 
+def test_tag_filter_random_pick_does_not_consume_stale_visible_outside_tag_ids():
+    master = pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "angel wings blue hair"},
+        {"id": 2, "rating": "e", "general": "angel wings red hair"},
+        {"id": 4, "rating": "e", "general": "unrelated red hair"},
+    ])
+    stale_visible = master[master["id"] == 4].copy()
+    bridge = _bridge_with_search_snapshots(master, stale_visible)
+    tag_filter = {
+        "ids": {1, 2},
+        "count": 2,
+        "rating_counts": {"g": 0, "s": 1, "q": 0, "e": 1},
+        "tags": ["angel_wings"],
+    }
+
+    picked = bridge._pick_from_tag_filter(tag_filter, {"e"})
+
+    assert picked is not None
+    assert int(picked["id"]) == 2
+    assert set(bridge.app_context.main_window.search_results.get_dataframe()["id"]) == {4}
+    assert tag_filter["count"] == 1
+    assert tag_filter["ids"] == {1}
+    assert tag_filter["rating_counts"] == {"g": 0, "s": 1, "q": 0, "e": 0}
+
+
 def test_tag_filter_random_pick_consumes_current_filtered_results():
     master = pd.DataFrame([
         {"id": 1, "rating": "s", "general": "angel wings blue hair"},
@@ -1320,6 +1345,40 @@ def test_remote_search_ratings_apply_only_to_search_query(monkeypatch, tmp_path)
     assert ctx.main_window.rating_checkboxes["g"].isChecked() is False
     assert bridge._active_ratings == {"g", "s", "q", "e"}
     assert bridge._search_filter_state["ratings"] == ["g", "s", "q", "e"]
+
+
+def test_web_random_tag_filter_failure_clears_pending_override():
+    triggered = []
+    sent = []
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        generation_checkboxes={"자동 생성": _ToggleButton(True)},
+        trigger_random_prompt=lambda **kwargs: triggered.append(kwargs),
+    )
+    bridge = RemoteBridge(ctx)
+    ws = object()
+    bridge._ws_manager = SimpleNamespace(
+        sessions={ws: {"tag_filter": {"ids": set(), "count": 0}}},
+    )
+    bridge._send_json_to = lambda _ws, payload: sent.append(payload)
+    overrides = {"api_mode": "WEBUI", "random_prompt_weight": "0.85"}
+    bridge._pending_random_requests.append({
+        "ws": ws,
+        "source_row": None,
+        "active_ratings": {"s"},
+        "overrides": overrides,
+        "remote_random_request_id": "rid-empty-filter",
+    })
+
+    bridge._do_random()
+
+    assert triggered == []
+    assert ws not in bridge._pending_overrides
+    assert sent == [{
+        "type": "random_failed",
+        "message": "Tag filter: no matching rows",
+        "level": "error",
+    }]
 
 
 def test_studio_generate_overrides_are_preserved_when_queued():
@@ -2739,7 +2798,7 @@ def test_comfyui_workflow_upload_and_default_endpoints_load_png_metadata():
     ctx = _ComfyWorkflowContext()
     bridge = RemoteBridge(ctx)
 
-    async def run_workflow_action(action, metadata=None, timeout=30.0):
+    async def run_workflow_action(action, metadata=None, timeout=30.0, **_kwargs):
         if action == "load":
             return bridge._load_comfyui_workflow_from_metadata(metadata or {})
         if action == "clear":

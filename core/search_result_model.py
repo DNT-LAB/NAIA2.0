@@ -22,6 +22,30 @@ def _normalize_rating(value) -> str:
     return str(value or "").strip().lower()
 
 
+def _normalize_row_id(value):
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        text = str(value or "").strip()
+        return text or None
+
+
+def _normalize_row_id_set(values) -> set:
+    if not values:
+        return set()
+    out = set()
+    for value in values:
+        normalized = _normalize_row_id(value)
+        if normalized is not None:
+            out.add(normalized)
+    return out
+
+
 @dataclass
 class _SearchResultBucket:
     bucket_id: int
@@ -200,6 +224,39 @@ class _SearchResultBucket:
             if rating in self.rating_counts_cache:
                 self.rating_counts_cache[rating] = max(0, self.rating_counts_cache[rating] - 1)
         return popped_row
+
+    def pop_random_row_with_id_filter(
+        self,
+        active_rating_keys: Optional[set[str]],
+        allowed_ids: set,
+        *,
+        max_attempts: int = 128,
+    ) -> Optional[pd.Series]:
+        if self.is_empty() or "id" not in self.df.columns or not allowed_ids:
+            return None
+
+        index_values = self.df.index
+        for _ in range(min(max_attempts, len(index_values))):
+            index = index_values[random.randrange(len(index_values))]
+            if not self.row_matches_random_filter(index, active_rating_keys):
+                continue
+            if _normalize_row_id(self.df.loc[index].get("id")) in allowed_ids:
+                return self.pop_row_at_index(index)
+
+        bucket_keys = self.candidate_bucket_keys(active_rating_keys)
+        attempts = 0
+        while bucket_keys and attempts < max_attempts:
+            candidate_index = self.pop_candidate_index(bucket_keys)
+            if candidate_index is None:
+                break
+            attempts += 1
+            if not self.row_matches_random_filter(candidate_index, active_rating_keys):
+                continue
+            if _normalize_row_id(self.df.loc[candidate_index].get("id")) in allowed_ids:
+                return self.pop_row_at_index(candidate_index)
+
+        self.invalidate_caches()
+        return None
 
     def pop_row_at_index(self, index: int) -> Optional[pd.Series]:
         if index in self.consumed_indices or index not in self.df.index:
@@ -659,6 +716,73 @@ class SearchResultModel:
                 self._rating_counts_cache[rating] = max(0, self._rating_counts_cache[rating] - 1)
         self._mark_bucket_data_changed()
         return popped_row
+
+    def pop_random_row_with_id_filter(
+        self,
+        active_ratings: set = None,
+        allowed_ids=None,
+    ) -> Optional[pd.Series]:
+        """id 집합까지 반영해 현재 결과에서 안전하게 무작위 행을 소비합니다."""
+        if self.is_empty():
+            return None
+
+        allowed_id_set = _normalize_row_id_set(allowed_ids)
+        if not allowed_id_set:
+            return None
+
+        self._ensure_bucketized()
+        active_rating_keys = self._active_rating_keys(active_ratings)
+        remaining_bucket_ids = [
+            bucket_id
+            for bucket_id in self._bucket_order
+            if bucket_id in self._buckets and not self._buckets[bucket_id].is_empty()
+        ]
+        attempted: set[int] = set()
+
+        while len(attempted) < len(remaining_bucket_ids):
+            weighted_buckets = []
+            total_weight = 0
+            for bucket_id in remaining_bucket_ids:
+                if bucket_id in attempted:
+                    continue
+                bucket = self._buckets[bucket_id]
+                weight = bucket.get_filtered_count(active_rating_keys)
+                if weight <= 0:
+                    attempted.add(bucket_id)
+                    continue
+                total_weight += weight
+                weighted_buckets.append((bucket_id, bucket, total_weight))
+
+            if total_weight <= 0:
+                return None
+
+            target = random.randrange(total_weight)
+            selected_id = None
+            selected_bucket = None
+            for bucket_id, bucket, cumulative_weight in weighted_buckets:
+                if target < cumulative_weight:
+                    selected_id = bucket_id
+                    selected_bucket = bucket
+                    break
+            if selected_bucket is None:
+                return None
+
+            popped_row = selected_bucket.pop_random_row_with_id_filter(
+                active_rating_keys,
+                allowed_id_set,
+            )
+            if popped_row is not None:
+                if self._rating_counts_cache is not None and "rating" in popped_row:
+                    rating = _normalize_rating(popped_row.get("rating"))
+                    if rating in self._rating_counts_cache:
+                        self._rating_counts_cache[rating] = max(0, self._rating_counts_cache[rating] - 1)
+                self._mark_bucket_data_changed()
+                return popped_row
+
+            attempted.add(selected_id)
+
+        self._invalidate_caches()
+        return None
 
     def deduplicate(self, subset: Optional[List[str]] = None):
         """데이터프레임의 중복된 행을 제거합니다."""

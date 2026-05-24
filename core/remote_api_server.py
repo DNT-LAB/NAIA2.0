@@ -6307,12 +6307,22 @@ class RemoteBridge(QObject):
                         self._send_json_to(ws, {"type": "random_failed",
                                                 "message": "Tag filter: no matching rows",
                                                 "level": "error"})
+                        self._clear_pending_random_override(
+                            ws=ws,
+                            event_preset_request_id=event_preset_request_id,
+                            remote_preset_request_id=remote_preset_request_id,
+                        )
                         return
                     source_row = self._pick_from_tag_filter(tag_filter, active_ratings)
                     if source_row is None:
                         self._send_json_to(ws, {"type": "random_failed",
                                                 "message": "Tag filter: no matching rows",
                                                 "level": "error"})
+                        self._clear_pending_random_override(
+                            ws=ws,
+                            event_preset_request_id=event_preset_request_id,
+                            remote_preset_request_id=remote_preset_request_id,
+                        )
                         return
                     self._send_tag_filter_update(ws, tag_filter)
 
@@ -6346,6 +6356,20 @@ class RemoteBridge(QObject):
                                         "message": f"Random failed: {e}",
                                         "level": "error"})
             print(f"🌐 Remote: 랜덤 프롬프트 생성 실패 — {e}")
+
+    def _clear_pending_random_override(
+        self,
+        *,
+        ws=None,
+        event_preset_request_id: str = None,
+        remote_preset_request_id: str = None,
+    ):
+        if event_preset_request_id:
+            self._pending_overrides.pop(("event_preset", event_preset_request_id), None)
+        if remote_preset_request_id:
+            self._pending_overrides.pop(("preset", remote_preset_request_id), None)
+        if ws is not None:
+            self._pending_overrides.pop(ws, None)
 
     # --- Tag Filter ---
 
@@ -6439,30 +6463,48 @@ class RemoteBridge(QObject):
             search_results = getattr(mw, "search_results", None)
             tag_count = int(tag_filter.get("count") or 0)
             if search_results and not search_results.is_empty() and search_results.get_count() <= tag_count:
-                row = search_results.pop_random_row(active_ratings)
+                pop_with_id_filter = getattr(search_results, "pop_random_row_with_id_filter", None)
+                if callable(pop_with_id_filter):
+                    row = pop_with_id_filter(active_ratings, tag_filter.get("ids"))
         except Exception:
             row = None
 
         if row is None:
             row = self._pick_from_snapshot(active_ratings, filter_ids=tag_filter["ids"])
 
-        if row is not None:
-            self._consume_tag_filter_row(tag_filter, row)
+        if row is not None and not self._consume_tag_filter_row(tag_filter, row):
+            return None
         return row
 
-    def _consume_tag_filter_row(self, tag_filter: dict, row):
+    @staticmethod
+    def _normalize_tag_filter_row_id(value):
+        try:
+            import pandas as _pd
+            if _pd.isna(value):
+                return None
+        except Exception:
+            pass
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            text = str(value or "").strip()
+            return text or None
+
+    def _consume_tag_filter_row(self, tag_filter: dict, row) -> bool:
         """Random에서 사용한 row를 session tag_filter 상태에서도 소비 처리합니다."""
         try:
-            row_id = row.get("id")
-            if row_id is not None:
-                try:
-                    row_id = int(row_id)
-                except (TypeError, ValueError):
-                    pass
-                ids = tag_filter.get("ids")
-                if isinstance(ids, set):
-                    ids.discard(row_id)
-                    self._active_tag_filter_ids = ids
+            ids = tag_filter.get("ids")
+            row_id = self._normalize_tag_filter_row_id(row.get("id"))
+            if isinstance(ids, set):
+                matched_id = None
+                for candidate_id in ids:
+                    if self._normalize_tag_filter_row_id(candidate_id) == row_id:
+                        matched_id = candidate_id
+                        break
+                if matched_id is None:
+                    return False
+                ids.discard(matched_id)
+                self._active_tag_filter_ids = ids
 
             tag_filter["count"] = max(0, int(tag_filter.get("count") or 0) - 1)
 
@@ -6471,8 +6513,10 @@ class RemoteBridge(QObject):
                 rating = str(row.get("rating") or "").strip().lower()
                 if rating in rating_counts:
                     rating_counts[rating] = max(0, int(rating_counts.get(rating) or 0) - 1)
+            return True
         except Exception as e:
             print(f"🌐 Remote: tag filter 소비 상태 갱신 실패 — {e}")
+            return False
 
     def _send_tag_filter_update(self, ws, tag_filter: dict):
         """Quick Filter UI에 소비 후 count/rating_counts를 반영합니다."""

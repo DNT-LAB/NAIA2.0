@@ -66,6 +66,22 @@ def test_rating_counts_cache_updates_after_random_pop():
     assert model.get_filtered_count({"s", "e"}) == 2
 
 
+def test_pop_random_row_marks_row_consumed_without_rebuilding_dataframe():
+    model = SearchResultModel(pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "safe one"},
+        {"id": 2, "rating": "s", "general": "safe two"},
+    ]))
+    original_df = model.df
+
+    popped = model.pop_random_row({"s"})
+
+    assert popped is not None
+    assert model.df is original_df
+    assert len(model.df) == 2
+    assert model.get_count() == 1
+    assert popped["id"] not in set(model.get_dataframe()["id"])
+
+
 def test_get_dataframe_invalidates_random_cache_for_direct_mutation():
     model = SearchResultModel(pd.DataFrame([
         {"id": 1, "rating": "s", "general": "safe one"},

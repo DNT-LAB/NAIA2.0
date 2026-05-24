@@ -25,6 +25,7 @@ class SearchResultModel:
             self.df = pd.DataFrame()
         else:
             self.df = dataframe.reset_index(drop=True)
+        self._consumed_indices: set[int] = set()
         self._valid_prompt_mask_cache: Optional[pd.Series] = None
         self._random_pools_by_rating: Optional[dict[Optional[str], list[int]]] = None
         self._rating_counts_cache: Optional[dict[str, int]] = None
@@ -33,6 +34,20 @@ class SearchResultModel:
         self._valid_prompt_mask_cache = None
         self._random_pools_by_rating = None
         self._rating_counts_cache = None
+
+    def _reset_consumed(self):
+        self._consumed_indices.clear()
+
+    def _remaining_count(self) -> int:
+        if not self._consumed_indices:
+            return len(self.df)
+        consumed_present = sum(1 for index in self._consumed_indices if index in self.df.index)
+        return max(0, len(self.df) - consumed_present)
+
+    def _remaining_dataframe(self) -> pd.DataFrame:
+        if not self._consumed_indices:
+            return self.df
+        return self.df.drop(index=list(self._consumed_indices), errors='ignore')
 
     def _valid_prompt_mask(self) -> pd.Series:
         if self._valid_prompt_mask_cache is not None:
@@ -57,6 +72,8 @@ class SearchResultModel:
             return
 
         mask = self._valid_prompt_mask()
+        if self._consumed_indices:
+            mask = mask & ~self.df.index.isin(self._consumed_indices)
         if not bool(mask.any()):
             return
 
@@ -77,6 +94,8 @@ class SearchResultModel:
         }
 
     def _row_matches_random_filter(self, index: int, active_rating_keys: Optional[set[str]]) -> bool:
+        if index in self._consumed_indices:
+            return False
         if index not in self.df.index:
             return False
         row = self.df.loc[index]
@@ -118,18 +137,29 @@ class SearchResultModel:
                 pool.pop()
                 return index
 
+    def _probe_random_index(self, active_rating_keys: Optional[set[str]], attempts: int = 64) -> Optional[int]:
+        if self.df.empty:
+            return None
+        index_values = self.df.index
+        for _ in range(min(attempts, len(index_values))):
+            index = index_values[random.randrange(len(index_values))]
+            if self._row_matches_random_filter(index, active_rating_keys):
+                return index
+        return None
+
     def prime_random_cache(self) -> None:
-        """랜덤 프롬프트 후보 풀을 미리 준비합니다."""
+        """랜덤 프롬프트에 자주 함께 표시되는 카운트 캐시만 준비합니다."""
         if self.is_empty():
             return
-        self._ensure_random_pools()
         self.get_count_by_rating()
 
     def append_dataframe(self, new_df: pd.DataFrame):
         """기존 결과에 새로운 데이터프레임을 추가합니다."""
         if new_df is None or new_df.empty:
             return
-        self.df = pd.concat([self.df, new_df], ignore_index=True)
+        base_df = self._remaining_dataframe()
+        self.df = pd.concat([base_df, new_df], ignore_index=True)
+        self._reset_consumed()
         self._invalidate_caches()
     
     def set_dataframe(self, new_df: pd.DataFrame):
@@ -148,26 +178,27 @@ class SearchResultModel:
             self.df = pd.DataFrame()
         else:
             self.df = new_df.reset_index(drop=True)
+        self._reset_consumed()
         self._invalidate_caches()
 
     def get_dataframe(self) -> pd.DataFrame:
         """결과 데이터프레임을 반환합니다."""
         # 호출자가 반환된 DataFrame을 직접 수정하는 기존 경로가 있어 캐시를 보수적으로 폐기합니다.
         self._invalidate_caches()
-        return self.df
+        return self._remaining_dataframe()
 
     def get_count(self) -> int:
         """결과의 총 개수를 반환합니다."""
-        return len(self.df)
+        return self._remaining_count()
 
     def is_empty(self) -> bool:
         """결과가 비어있는지 확인합니다."""
-        return self.df.empty
+        return self.get_count() <= 0
 
     def get_prompt_at(self, index: int) -> Optional[Dict[str, Any]]:
         """특정 인덱스의 프롬프트 데이터를 딕셔너리 형태로 반환합니다."""
         if not self.is_empty() and 0 <= index < self.get_count():
-            return self.df.iloc[index].to_dict()
+            return self._remaining_dataframe().iloc[index].to_dict()
         return None
     
     def get_count_by_rating(self) -> dict:
@@ -176,7 +207,7 @@ class SearchResultModel:
             return {r: 0 for r in 'gsqe'}
         if self._rating_counts_cache is not None:
             return dict(self._rating_counts_cache)
-        counts = self.df['rating'].value_counts()
+        counts = self._remaining_dataframe()['rating'].value_counts()
         self._rating_counts_cache = {r: int(counts.get(r, 0)) for r in 'gsqe'}
         return dict(self._rating_counts_cache)
 
@@ -189,7 +220,7 @@ class SearchResultModel:
                 self._rating_counts_cache.get(_normalize_rating(rating), 0)
                 for rating in active_ratings
             ))
-        return int(self.df['rating'].isin(active_ratings).sum())
+        return int(self._remaining_dataframe()['rating'].isin(active_ratings).sum())
 
     # [신규] 무작위 행을 추출하고 제거하는 메서드
     def pop_random_row(self, active_ratings: set = None) -> Optional[pd.Series]:
@@ -203,22 +234,23 @@ class SearchResultModel:
             return None
 
         active_rating_keys = self._active_rating_keys(active_ratings)
-        bucket_keys = self._candidate_bucket_keys(active_rating_keys)
-        random_index = None
-        while bucket_keys:
-            candidate_index = self._pop_candidate_index(bucket_keys)
-            if candidate_index is None:
-                break
-            if self._row_matches_random_filter(candidate_index, active_rating_keys):
-                random_index = candidate_index
-                break
+        random_index = self._probe_random_index(active_rating_keys)
+        if random_index is None:
+            bucket_keys = self._candidate_bucket_keys(active_rating_keys)
+            while bucket_keys:
+                candidate_index = self._pop_candidate_index(bucket_keys)
+                if candidate_index is None:
+                    break
+                if self._row_matches_random_filter(candidate_index, active_rating_keys):
+                    random_index = candidate_index
+                    break
 
         if random_index is None:
             return None
 
-        # 해당 행 데이터 추출 및 원본에서 삭제
+        # 해당 행 데이터 추출 및 소비 처리. 대형 DataFrame에서 drop은 매번 전체 블록을 재구성하므로 지연이 큽니다.
         popped_row = self.df.loc[random_index].copy()
-        self.df.drop(random_index, inplace=True)
+        self._consumed_indices.add(random_index)
         if self._rating_counts_cache is not None and 'rating' in popped_row:
             rating = _normalize_rating(popped_row.get('rating'))
             if rating in self._rating_counts_cache:
@@ -235,6 +267,8 @@ class SearchResultModel:
         if subset is None:
             subset = ['general']
             
+        self.df = self._remaining_dataframe()
         self.df.drop_duplicates(subset=subset, keep='first', inplace=True)
         self.df.reset_index(drop=True, inplace=True)
+        self._reset_consumed()
         self._invalidate_caches()

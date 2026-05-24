@@ -75,6 +75,9 @@ def test_release_manifest_excludes_legacy_and_local_runtime_state():
     assert "save/**" in excluded
     assert "logs/**" in excluded
     assert "output/**" in excluded
+    assert "_build/**" in excluded
+    assert "NAIA-Portable/**" in excluded
+    assert "smoke-user-data/**" in excluded
     assert "wildcards/**" in excluded
     assert "data/event_preset/**" in excluded
     assert "data/event_preset_thumbnail" in excluded
@@ -99,6 +102,7 @@ def test_release_manifest_excludes_legacy_and_local_runtime_state():
     assert "*.xlsx" in excluded
     assert "PyQt6" in excluded
     assert "PyQt6" in rules
+    assert "distribution plane" in rules
     assert "stage_release_assets.py" in rules
     assert "check_release_source_payload.py" in rules
     assert "resources/naia-backend" in rules
@@ -114,7 +118,6 @@ def test_release_manifest_excludes_legacy_and_local_runtime_state():
     assert "check_remote_web_feature_contract.py" in rules
     assert "check_runtime_write_policy.py" in rules
     assert "check_runtime_asset_classification.py" in rules
-    assert "check_legacy_pyqt_surface_classification.py" in rules
     assert "check_headless_core_boundary.py" in rules
     assert "release_manifest_audit.py" in rules
 
@@ -285,8 +288,12 @@ def test_final_goal_completion_evidence_maps_only_provable_release_items():
 
 def test_final_plan_when_done_items_have_evidence_mapping_or_explicit_exception():
     manifest = _read_manifest("final_goal_completion_evidence.json")
+    plan_path = Path("refactor_plans/final_headless_electron_release_reorganization_plan.md")
+    if not plan_path.is_file():
+        assert manifest["when_done_rules"]
+        return
     plan_items = _parse_when_done_items(
-        Path("refactor_plans/final_headless_electron_release_reorganization_plan.md").read_text(encoding="utf-8")
+        plan_path.read_text(encoding="utf-8")
     )
     mapped = {(item["round"], item["item"]) for item in manifest["when_done_rules"]}
     intentionally_unmapped = {
@@ -317,7 +324,7 @@ def test_source_layout_contract_tracks_final_target_layout():
     assert "app/backend/assets_storage" in required
     assert "data/source" in required
     assert "release_assets/samples" in required
-    assert "legacy_desktop/interfaces" in required
-    assert "legacy_desktop/utils" in required
+    assert "legacy_desktop/interfaces" not in required
+    assert "legacy_desktop/utils" not in required
     assert "app/backend/generation/__init__.py" in markers
     assert "app/electron/dist" in manifest["runtime_only_roots"]

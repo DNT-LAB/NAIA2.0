@@ -35,6 +35,26 @@ def test_release_source_payload_rejects_runtime_wildcards_and_downloaded_data():
     assert any("data/tags/**" in violation["reason"] for violation in violations)
 
 
+def test_release_source_payload_rejects_distribution_plane_outputs():
+    violations = validate_selected_release_files([
+        "NAIA_web_headless.py",
+        "requirements-headless.txt",
+        "app/web/remote/index.html",
+        "app/web/remote/app.js",
+        "data/clothes_list.txt",
+        "data/color.txt",
+        "data/characteristic_list.txt",
+        "data/taglist/expression_tags.json",
+        "_build/electron-dist/win-unpacked/NAIA.exe",
+        "NAIA-Portable/NAIA.exe",
+        "smoke-user-data/config/settings.json",
+    ])
+
+    assert any("_build/**" in violation["reason"] for violation in violations)
+    assert any("NAIA-Portable/**" in violation["reason"] for violation in violations)
+    assert any("smoke-user-data/**" in violation["reason"] for violation in violations)
+
+
 def test_release_manifest_audit_rejects_forbidden_selected_paths_without_directory():
     violations = audit_release_paths([
         "NAIA_web_headless.py",

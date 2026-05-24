@@ -65,9 +65,16 @@
       "tmp_codex_*/**",
       "naia_headless_req_*/**",
       "temp/**",
+      "_build/**",
+      "NAIA-Portable/**",
+      "NAIA-Web/**",
+      "smoke-user-data/**",
       "app/electron/dist/**",
+      "app/electron/out/**",
+      "app/electron/.cache/**",
       "user-data/**",
-      "wildcards/**"
+      "wildcards/**",
+      "release_package/**"
     ],
     "local_downloaded_assets": [
       "data/artist_thumbnail*.json",
@@ -132,6 +139,7 @@
   },
   "hard_rules": [
     "Release artifacts must not include PyQt6 or legacy_desktop.",
+    "Repository source/development files may include Electron build scripts, but generated Electron and portable release outputs belong only to the distribution plane.",
     "Release artifacts must not include user-downloaded runtime assets by default.",
     "Release artifacts must not include local wildcard files by default; runtime wildcards belong under user-data/wildcards.",
     "Release artifacts may include reviewed small bootstrap filters under data/*.txt and data/taglist/*.json; bulk operational data under data/tags/** must be initialized or downloaded into runtime user data.",
@@ -151,7 +159,6 @@
     "Remote Web feature contract must pass tools/check_remote_web_feature_contract.py before desktop-code deletion or packaged-app validation.",
     "Runtime write policy must pass tools/check_runtime_write_policy.py before desktop-code deletion or packaged-app validation.",
     "Runtime asset classification must pass tools/check_runtime_asset_classification.py before desktop-code deletion or packaged-app validation.",
-    "Legacy PyQt surface classification must pass tools/check_legacy_pyqt_surface_classification.py before desktop-code deletion or packaged-app validation.",
     "Headless core boundary must pass tools/check_headless_core_boundary.py before desktop-code deletion or packaged-app validation.",
     "Staged release directories must pass tools/release_manifest_audit.py before distribution.",
     "Large data movement requires reviewed candidate lists before execution."

@@ -58,8 +58,14 @@
         "save",
         "temp",
         "tmp",
+        "_build",
+        "NAIA-Portable",
+        "NAIA-Web",
+        "smoke-user-data",
         "wildcards",
         "app/electron/dist",
+        "app/electron/out",
+        "app/electron/.cache",
         "app/electron/node_modules",
         "release_package"
       ],
@@ -74,11 +80,18 @@
         "save/",
         "temp/",
         "/tmp/",
+        "/_build/",
+        "/NAIA-Portable/",
+        "/NAIA-Web/",
+        "/smoke-user-data/",
         "/user-data/",
         "/wildcards/",
         "app/electron/dist/",
+        "app/electron/out/",
+        "app/electron/.cache/",
         "app/electron/node_modules/",
-        "release_package/"
+        "release_package/",
+        "release_package*/"
       ],
       "requires_explicit_delete_approval": true
     },
@@ -143,17 +156,21 @@
     {
       "id": "legacy_desktop_reference",
       "owner": "legacy_desktop",
-      "status": "reference_quarantine",
-      "decision": "Do not delete until WebSession feature parity gates pass and missing features are migrated.",
+      "status": "resolved_removed",
+      "decision": "Removed from active source ownership on future02 after the user explicitly approved the legacy_desktop deletion goal.",
       "replacement": "Python Headless Web plus Remote Web feature owners",
       "paths": [
         "legacy_desktop"
       ],
       "required_gates": [
         "python tools/check_headless_core_boundary.py",
-        "python tools/check_legacy_pyqt_surface_classification.py",
         "python tools/check_remote_web_feature_contract.py"
       ],
+      "resolution": {
+        "action": "removed_legacy_desktop_tree",
+        "date": "2026-05-23",
+        "reason": "future02 uses Python Headless Web and optional Electron shell as the active product paths; historical desktop code is recoverable from git history."
+      },
       "requires_explicit_delete_approval": true
     }
   ],
@@ -162,6 +179,6 @@
     "Actual deletion requires explicit user approval and a focused candidate group.",
     "Deletion must preserve Python Headless Web execution.",
     "Deletion must preserve optional Electron shell execution when the candidate is Electron-related.",
-    "Legacy Desktop deletion requires separate feature-parity approval."
+    "Legacy Desktop deletion requires explicit user approval and must preserve Python Headless Web plus optional Electron shell gates."
   ]
 }

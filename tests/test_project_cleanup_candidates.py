@@ -31,6 +31,15 @@ def test_project_cleanup_candidates_pass_current_repository():
     )
     assert "naia_headless_req_*/**" in development_cache["paths"]
     assert "naia_headless_req_*/" in development_cache["gitignore_required_patterns"]
+    runtime_generated = next(
+        group
+        for group in _current_manifest()["candidate_groups"]
+        if group["id"] == "runtime_generated_roots"
+    )
+    assert "_build" in runtime_generated["paths"]
+    assert "NAIA-Portable" in runtime_generated["paths"]
+    assert "/_build/" in runtime_generated["gitignore_required_patterns"]
+    assert "/NAIA-Portable/" in runtime_generated["gitignore_required_patterns"]
     assert payload["violations"] == []
 
 

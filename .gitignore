@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Runtime/generated roots
+# Plane: runtime/user-data state (never source-owned)
 /logs/
 /output/
 save/
@@ -14,6 +14,7 @@ naia_headless_req_*/
 /user-data/
 /wildcards/
 data/tags/
+/smoke-user-data/
 
 # Cloudflared 바이너리
 utils/.cloudflared_bin/
@@ -25,15 +26,21 @@ env/
 ENV/
 .venv/
 
-# 배포 관련
+# Plane: release/distribution outputs (generated from manifests)
 *.so
 *.egg
 *.egg-info/
 dist/
 build/
+/_build/
+/NAIA-Portable/
+/NAIA-Web/
 app/electron/dist/
+app/electron/out/
+app/electron/.cache/
 app/electron/node_modules/
 release_package/
+release_package*/
 
 # PyInstaller
 *.manifest
@@ -166,6 +173,8 @@ app_settings.json
 data/artist_thumbnail.json
 data/artist_thumbnail_nai.json
 data/artist_thumbnail_anima.json
+data/artist_thumbnail_anima_bucket2.json
+data/artist_thumbnail_anima_bucket3.json
 GEMINI.md
 *.md
 !CLAUDE.md

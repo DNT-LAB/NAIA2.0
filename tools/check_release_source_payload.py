@@ -51,7 +51,12 @@ FORBIDDEN_SELECTED_PATTERNS = {
     "output/**",
     "logs/**",
     "tmp/**",
+    "_build/**",
+    "NAIA-Portable/**",
+    "NAIA-Web/**",
+    "smoke-user-data/**",
     "temp/**",
+    "release_package/**",
     "requirements-desktop-legacy*.txt",
 }
 

@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260520-install-manager1">
+<link rel="stylesheet" href="style.css?v=20260523-api-setup-backends1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -464,10 +464,11 @@
                   <select class="param-select" id="pComfyuiResolutionPreset" onchange="setResolutionPreset('COMFYUI', this.value)"></select>
                 </div>
               </div>
-              <div class="param-flags" style="padding:7px 10px;background:var(--bg-deep)">
+              <div class="param-flags" id="comfyuiSamplingModeRow" style="padding:7px 10px;background:var(--bg-deep)">
                 <span class="param-flag" data-key="sampling_mode" data-val="eps" id="flagEps" onclick="setSamplingMode('eps')">EPS</span>
                 <span class="param-flag" data-key="sampling_mode" data-val="v_prediction" id="flagVpred" onclick="setSamplingMode('v_prediction')">V-Pred</span>
                 <span class="param-flag" data-key="sampling_mode" data-val="anima" id="flagAnima" onclick="setSamplingMode('anima')">ANIMA</span>
+                <span class="param-bypass-inline" id="comfyuiSamplingBypass" style="display:none">Ignore and bypass</span>
               </div>
               <div class="param-row" id="comfyuiRescaleRow" style="display:none">
                 <span class="param-label">Rescale CFG</span>
@@ -943,6 +944,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260520-random-latency1"></script>
+<script src="app.js?v=20260524-search-filter-sync1"></script>
 </body>
 </html>

@@ -117,6 +117,8 @@
         {"method": "GET", "path": "/api/comfyui/workflow/state", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/comfyui/web", "smoke": "external_live"},
         {"method": "POST", "path": "/api/comfyui/workflow/upload", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/comfyui/workflow/bypass/upload", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/comfyui/workflow/free/upload", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/comfyui/workflow/default", "smoke": "state_mutation"}
       ]
     },
@@ -282,6 +284,7 @@
         {"method": "GET", "path": "/api/result/metadata", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/history/list", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/history/open-folder", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/viewer/open-folder", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/viewer/list", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/viewer/thumb/{path:path}", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/viewer/image/{path:path}", "smoke": "asset_runtime"},

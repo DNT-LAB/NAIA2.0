@@ -223,6 +223,7 @@ def prepare_result_enhance_command(
         seed = extract_webui_seed(generation_params)
         if seed is not None:
             params["seed"] = seed
+            params["seed_fixed"] = True
         base_w = _result_enhance_dimension(params.get("width"), orig_w)
         base_h = _result_enhance_dimension(params.get("height"), orig_h)
         params.update({
@@ -243,12 +244,20 @@ def prepare_result_enhance_command(
         })
 
     params["result_enhance_source_label"] = label
-    return params, {
+    generation_command = {
+        "type": "generate",
+        "api_mode": mode,
+        "prompt": str(params.get("input") or ""),
+        "negative_prompt": str(params.get("negative_prompt") or ""),
+        "overrides": params,
+    }
+    return generation_command, {
         "type": "result_enhance_state",
         "running": True,
         "success": None,
         "message": "Enhance queued",
         "backend": mode,
+        "api_mode": mode,
         "source_size": [orig_w, orig_h],
         "preview_size": params.get("result_enhance_preview_size", [orig_w, orig_h]),
         "request_id": "",

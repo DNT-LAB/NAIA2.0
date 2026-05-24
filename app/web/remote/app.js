@@ -82,8 +82,10 @@ let webUiHiresfixAssistState = {enabled: true, target: 512};
 let comfyuiWorkflowState = {
   has_custom: false,
   workflow_label: 'Basic Workflow',
+  workflow_type: '',
 };
 let comfyuiWorkflowFileInput = null;
+let comfyuiFreeWorkflowFileInput = null;
 let cloudflaredControls = null;
 let generationProgress = null;
 let setupController = null;
@@ -290,7 +292,7 @@ async function loadHeadlessCapabilities() {
       applyRightTabAvailability(payload.right_tabs);
     }
   } catch (error) {
-    // Legacy desktop-backed RemoteBridge does not expose this endpoint.
+    // Older compatibility hosts may not expose this endpoint.
   }
 }
 
@@ -629,7 +631,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs')
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260516-hires-assist-persist1')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260523-comfyui-bypass1')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -1090,6 +1092,7 @@ function _collectCurrentParams() {
   p.prompt_fixed = getOptionChecked('prompt_fixed');
   p.wildcard_standalone = getOptionChecked('wildcard_standalone');
   applyResolutionPresetToParams(p, mode, randomResolution);
+  const promptWeight = $('pAnimaWeight')?.value?.trim();
 
   if (mode === 'WEBUI') {
     const enableHr = $('pEnableHr');
@@ -1106,7 +1109,6 @@ function _collectCurrentParams() {
     if (hrCfg) p.hr_cfg = parseNumber(hrCfg.value, 7.0);
     const presetSwap = ((_hiresPresetSwapValueKnown ? _hiresPresetSwapValue : $('pHiresPresetSwap')?.value) || '').trim();
     if (presetSwap) p.hires_preset_swap = presetSwap;
-    const promptWeight = $('pAnimaWeight')?.value?.trim();
     if (promptWeight) {
       p.anima_weight = promptWeight;
       p.random_prompt_weight = promptWeight;
@@ -1115,15 +1117,23 @@ function _collectCurrentParams() {
   }
 
   if (mode === 'COMFYUI') {
-    const samplingMode = currentComfyUiSamplingMode();
-    p.sampling_mode = samplingMode;
-    p.workflow_type = samplingMode === 'anima' ? 'unet' : 'checkpoint';
     p.filename_prefix = 'NAIA_ComfyUI';
-    if (samplingMode === 'anima') {
-      const rescaleCfg = parseNumber($('pRescaleCfg')?.value);
-      if (rescaleCfg !== null) p.rescale_cfg = rescaleCfg;
-      const animaWeight = $('pAnimaWeight')?.value?.trim();
-      if (animaWeight) p.anima_weight = animaWeight;
+    if (isComfyUiFreeWorkflowActive()) {
+      p.sampling_mode = 'bypass';
+      p.comfyui_sampling_mode = 'bypass';
+      p.workflow_type = 'bypass';
+    } else {
+      const samplingMode = currentComfyUiSamplingMode();
+      p.sampling_mode = samplingMode;
+      p.workflow_type = samplingMode === 'anima' ? 'unet' : 'checkpoint';
+      if (samplingMode === 'anima') {
+        const rescaleCfg = parseNumber($('pRescaleCfg')?.value);
+        if (rescaleCfg !== null) p.rescale_cfg = rescaleCfg;
+      }
+    }
+    if (promptWeight) {
+      p.anima_weight = promptWeight;
+      p.random_prompt_weight = promptWeight;
     }
     p._comfyui_workflow_mode = comfyuiWorkflowState?.has_custom ? 'custom' : 'basic';
   }
@@ -1841,6 +1851,10 @@ function currentComfyUiSamplingMode() {
     ? 'anima'
     : ($('flagVpred')?.classList.contains('on') ? 'v_prediction' : 'eps');
 }
+
+const COMFYUI_FREE_BYPASS_TEXT = 'Ignore and bypass';
+const COMFYUI_FREE_SEED_TEXT = 'Forced always random';
+const COMFYUI_FREE_LOCKED_PARAM_KEYS = new Set(['model', 'sampler', 'scheduler', 'steps', 'cfg_scale', 'seed', 'sampling_mode', 'rescale_cfg']);
 
 function buildWebGenerationOverrides(prompt, negativePrompt) {
   const overrides = _collectCurrentParams();
@@ -2714,28 +2728,119 @@ function normalizeComfyUiWorkflowState(m = {}) {
   const hasCustom = 'has_custom' in state
     ? Boolean(state.has_custom)
     : Boolean(m.comfyui_workflow_has_custom);
+  const workflowType = state.workflow_type || m.comfyui_workflow_type || '';
+  const isBypass = isComfyUiBypassWorkflowType(workflowType);
   return {
     has_custom: hasCustom,
-    workflow_label: state.workflow_label || m.comfyui_workflow_label || (hasCustom ? 'Custom Workflow' : 'Basic Workflow'),
+    workflow_label: isBypass
+      ? 'Bypass Workflow'
+      : (state.workflow_label || m.comfyui_workflow_label || (hasCustom ? 'Custom Workflow' : 'Basic Workflow')),
+    workflow_type: isBypass ? 'bypass' : workflowType,
     model_compat: state.model_compat || null,
     locked_loader_class: state.locked_loader_class || null,
     locked_model_display: state.locked_model_display || null,
   };
 }
 
+function isComfyUiBypassWorkflowType(value) {
+  return ['bypass', 'free'].includes(String(value || '').trim().toLowerCase());
+}
+
+function isComfyUiFreeWorkflowActive(mode = currentMode || modeSelect?.value || '') {
+  return String(mode || '').toUpperCase() === 'COMFYUI'
+    && isComfyUiBypassWorkflowType(comfyuiWorkflowState?.workflow_type);
+}
+
+function setSelectToBypass(el) {
+  if (!el) return;
+  if (el.options.length !== 1 || el.options[0]?.value !== COMFYUI_FREE_BYPASS_TEXT) {
+    el.textContent = '';
+    const option = document.createElement('option');
+    option.value = COMFYUI_FREE_BYPASS_TEXT;
+    option.textContent = COMFYUI_FREE_BYPASS_TEXT;
+    el.append(option);
+  }
+  el.value = COMFYUI_FREE_BYPASS_TEXT;
+}
+
+function applyComfyUiFreeParamLock(mode = currentMode || modeSelect?.value || '') {
+  const locked = isComfyUiFreeWorkflowActive(mode);
+  [paramEls.model, paramEls.sampler, paramEls.scheduler].forEach(el => {
+    if (!el) return;
+    if (locked) setSelectToBypass(el);
+    el.disabled = locked;
+    el.classList.toggle('param-bypass-lock', locked);
+    el.dataset.customSelectLabel = locked ? COMFYUI_FREE_BYPASS_TEXT : '';
+    el.dataset.customSelectTitle = locked ? 'Controlled by the Bypass custom workflow' : '';
+  });
+
+  [paramEls.steps, paramEls.cfg_scale, paramEls.seed].forEach(el => {
+    if (!el) return;
+    const displayText = el === paramEls.seed ? COMFYUI_FREE_SEED_TEXT : COMFYUI_FREE_BYPASS_TEXT;
+    if (locked) {
+      if (!el.dataset.originalType) el.dataset.originalType = el.type || 'text';
+      el.type = 'text';
+      el.value = displayText;
+    } else if (el.dataset.originalType) {
+      el.type = el.dataset.originalType;
+      delete el.dataset.originalType;
+    }
+    el.readOnly = locked;
+    el.disabled = locked;
+    el.classList.toggle('param-bypass-lock', locked);
+    el.title = locked ? (el === paramEls.seed ? 'Forced random by the Bypass custom workflow' : 'Controlled by the Bypass custom workflow') : '';
+  });
+
+  const samplingBypass = $('comfyuiSamplingBypass');
+  const samplingFlags = [$('flagEps'), $('flagVpred'), $('flagAnima')].filter(Boolean);
+  samplingFlags.forEach(el => {
+    el.classList.toggle('disabled', locked);
+    el.classList.toggle('param-bypass-lock', locked);
+    el.style.display = locked ? 'none' : '';
+    el.title = locked ? 'Controlled by the Bypass custom workflow' : '';
+  });
+  if (samplingBypass) {
+    samplingBypass.style.display = locked ? '' : 'none';
+  }
+
+  const rescaleRow = $('comfyuiRescaleRow');
+  const rescaleInput = $('pRescaleCfg');
+  if (rescaleRow) {
+    rescaleRow.style.display = locked
+      ? ''
+      : (currentComfyUiSamplingMode() === 'anima' ? '' : 'none');
+  }
+  if (rescaleInput) {
+    if (locked) {
+      if (!rescaleInput.dataset.originalType) rescaleInput.dataset.originalType = rescaleInput.type || 'number';
+      rescaleInput.type = 'text';
+      rescaleInput.value = COMFYUI_FREE_BYPASS_TEXT;
+    } else if (rescaleInput.dataset.originalType) {
+      rescaleInput.type = rescaleInput.dataset.originalType;
+      delete rescaleInput.dataset.originalType;
+    }
+    rescaleInput.readOnly = locked;
+    rescaleInput.disabled = locked;
+    rescaleInput.classList.toggle('param-bypass-lock', locked);
+    rescaleInput.title = locked ? 'Controlled by the Bypass custom workflow' : '';
+  }
+
+  if (typeof customSelectsControl?.scan === 'function') customSelectsControl.scan();
+}
+
 function updateRandomPromptWeightRow(mode, samplingMode = null) {
   const row = $('randomPromptWeightRow');
   if (!row) return;
   const normalizedMode = String(mode || currentMode || modeSelect?.value || '').toUpperCase();
-  const comfySamplingMode = samplingMode || currentComfyUiSamplingMode();
-  const visible = normalizedMode === 'WEBUI' || (normalizedMode === 'COMFYUI' && comfySamplingMode === 'anima');
+  const visible = normalizedMode === 'WEBUI' || normalizedMode === 'COMFYUI';
   row.style.display = visible ? '' : 'none';
   const label = $('randomPromptWeightLabel');
-  if (label) label.textContent = normalizedMode === 'WEBUI' ? 'Prompt Weight' : 'ANIMA Weight';
+  if (label) label.textContent = 'Prompt Weight';
 }
 
 function onComfyUiWorkflowState(m) {
   comfyuiWorkflowState = normalizeComfyUiWorkflowState(m);
+  applyComfyUiFreeParamLock();
   if (moduleBadges) moduleBadges.updateComfyUiWorkflowState(comfyuiWorkflowState);
   if (moduleLauncherControl) moduleLauncherControl.updateState();
 }
@@ -2863,6 +2968,7 @@ function updateParams(m) {
 
 function setParam(key, value) {
   if (syncingParams) return;
+  if (isComfyUiFreeWorkflowActive() && COMFYUI_FREE_LOCKED_PARAM_KEYS.has(key)) return;
   // Quick ↔ Params 탭 양방향 동기화
   if (key === 'resolution') {
     paramEls.resolution.value = value;
@@ -2926,6 +3032,7 @@ function toggleQuickFlag(el, key) {
 }
 
 function setSamplingMode(mode) {
+  if (isComfyUiFreeWorkflowActive()) return;
   $('flagEps').classList.toggle('on', mode === 'eps');
   $('flagVpred').classList.toggle('on', mode === 'v_prediction');
   $('flagAnima').classList.toggle('on', mode === 'anima');
@@ -2935,19 +3042,26 @@ function setSamplingMode(mode) {
   updateModuleHeaderAction(currentModuleId);
 }
 
-function getComfyUiWorkflowFileInput() {
-  if (comfyuiWorkflowFileInput) return comfyuiWorkflowFileInput;
-  comfyuiWorkflowFileInput = document.createElement('input');
-  comfyuiWorkflowFileInput.type = 'file';
-  comfyuiWorkflowFileInput.accept = 'image/png,.png';
-  comfyuiWorkflowFileInput.hidden = true;
-  comfyuiWorkflowFileInput.addEventListener('change', () => {
-    const file = comfyuiWorkflowFileInput.files && comfyuiWorkflowFileInput.files[0];
-    comfyuiWorkflowFileInput.value = '';
-    if (file) uploadComfyUiWorkflowFile(file);
+function getComfyUiWorkflowFileInput({free = false} = {}) {
+  const existing = free ? comfyuiFreeWorkflowFileInput : comfyuiWorkflowFileInput;
+  if (existing) return existing;
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = free ? 'application/json,.json' : 'application/json,image/png,image/webp,.json,.png,.webp';
+  input.hidden = true;
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (file) uploadComfyUiWorkflowFile(file, {free});
   });
-  document.body.append(comfyuiWorkflowFileInput);
-  return comfyuiWorkflowFileInput;
+  document.body.append(input);
+  if (free) {
+    comfyuiFreeWorkflowFileInput = input;
+  } else {
+    comfyuiWorkflowFileInput = input;
+  }
+  return input;
 }
 
 async function readJsonResponse(response) {
@@ -2971,17 +3085,49 @@ function uploadComfyUiWorkflow() {
   getComfyUiWorkflowFileInput().click();
 }
 
-async function uploadComfyUiWorkflowFile(file) {
+function freeWorkflowNoticeHtml() {
+  return [
+    '1. 2개의 문자열 노드, 2개의 정수 노드, 1개의 이미지 혹은 WEBP 저장 노드가 필요합니다.',
+    '2. 각 문자열 노드의 이름을 naia_prompt, naia_negative 로 수정, 정수 노드의 이름을 naia_width, naia_height로 수정합니다. 이름이 틀리면 업로드가 거부됩니다.',
+    '3. Bypass 모드에서는 NAIA가 위 4개의 Primitive 노드와 저장 노드만 제어합니다. 모델, sampler, scheduler, steps, CFG, sampling mode, Rescale CFG는 NAIA에서 수정하지 않습니다.',
+    '4. json 내 seed 입력 영역은 매 실행 랜덤값으로 강제됩니다. seed를 0으로 초기화할 필요는 없습니다.',
+    '5. 파라미터 수정시 json 파일을 다시 업로드 하십시오.',
+    '* json 내보내기는 [파일] > [내보내기 (API)] 로 내보내면 됩니다.',
+  ].map(line => escHtml(line)).join('<br>');
+}
+
+async function uploadComfyUiFreeWorkflow() {
+  if ((currentMode || modeSelect.value) !== 'COMFYUI') {
+    showToast('ComfyUI mode is required', 'error');
+    return;
+  }
+  const confirmed = await showConfirmDialog('', {
+    title: '[ Bypass 모드 주의사항 ]',
+    messageHtml: freeWorkflowNoticeHtml(),
+    okText: '.json 업로드',
+    cancelText: '취소',
+    dialogClass: 'app-confirm-dialog-bypass-workflow',
+  });
+  if (!confirmed) return;
+  getComfyUiWorkflowFileInput({free: true}).click();
+}
+
+async function uploadComfyUiWorkflowFile(file, {free = false} = {}) {
   if (!file) return;
-  const isPng = file.type === 'image/png' || /\.png$/i.test(file.name || '');
-  if (!isPng) {
-    showToast('PNG workflow image is required', 'error');
+  const isWorkflowImage = ['image/png', 'image/webp'].includes(file.type) || /\.(png|webp)$/i.test(file.name || '');
+  const isWorkflowJson = file.type === 'application/json' || /\.json$/i.test(file.name || '');
+  if (free && !isWorkflowJson) {
+    showToast('JSON workflow file is required for Bypass mode', 'error');
+    return;
+  }
+  if (!free && !isWorkflowImage && !isWorkflowJson) {
+    showToast('JSON, PNG, or WEBP workflow file is required', 'error');
     return;
   }
   try {
-    const response = await fetch('/api/comfyui/workflow/upload', {
+    const response = await fetch(free ? '/api/comfyui/workflow/bypass/upload' : '/api/comfyui/workflow/upload', {
       method: 'POST',
-      headers: {'Content-Type': file.type || 'image/png'},
+      headers: {'Content-Type': file.type || 'application/octet-stream'},
       body: file,
     });
     const data = await readJsonResponse(response);
@@ -2989,7 +3135,7 @@ async function uploadComfyUiWorkflowFile(file) {
       throw new Error(data.error || 'Workflow upload failed');
     }
     applyComfyUiWorkflowResponse(data);
-    showToast('Custom Workflow enabled', 'success');
+    showToast(free ? 'Bypass Workflow enabled' : 'Custom Workflow enabled', 'success');
   } catch (error) {
     showToast(error?.message || 'Workflow upload failed', 'error');
   }
@@ -4224,6 +4370,7 @@ function syncMode(mode) {
   setNaiHighlightMode(mode);
   updatePromptTokenEstimate();
   updateRandomPromptWeightRow(mode);
+  applyComfyUiFreeParamLock(mode);
   if (moduleBadges) moduleBadges.updateModeState();
   // 모드 전용 모듈 상태 갱신 (NAI 전용 도구는 비NAI에서 숨김)
   const isNai = mode === 'NAI';
@@ -4424,18 +4571,6 @@ function setSetupLoading(mode, loading) {
   if (setupController) setupController.setSetupLoading(mode, loading);
 }
 
-function refreshInstallManager() {
-  if (setupController) setupController.refreshInstallManager?.();
-}
-
-function installTagArchive() {
-  if (setupController) setupController.installTagArchive?.();
-}
-
-function cancelTagArchiveDownload() {
-  if (setupController) setupController.cancelTagArchiveDownload?.();
-}
-
 function verifyNai() {
   if (setupController) setupController.verifyNai();
 }
@@ -4534,7 +4669,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260517-resolution-preset-tools2')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260523-comfyui-bypass1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -4548,6 +4683,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260517-
       getComfyUiWorkflowState: () => comfyuiWorkflowState,
       switchComfyUiWorkflowDefault,
       uploadComfyUiWorkflow,
+      uploadComfyUiFreeWorkflow,
       openComfyUiWeb,
       setModuleParam,
     });

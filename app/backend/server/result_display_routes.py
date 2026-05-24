@@ -534,6 +534,10 @@ def register_result_display_routes(
         except Exception as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
+    @app.post("/api/viewer/open-folder")
+    async def api_viewer_open_folder():
+        return await api_history_open_folder()
+
     @app.get("/api/viewer/list")
     async def api_viewer_list(page: int = 0, per_page: int = 30, scope: str = "memory"):
         page = max(0, int(page or 0))

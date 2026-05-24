@@ -153,30 +153,36 @@ def _save_resolution_manager_state(context: WebSessionContext, mode: str, raw_it
 
 def _comfyui_workflow_state_payload(context: WebSessionContext) -> dict[str, Any]:
     has_custom = bool(context.remote_params.get("comfyui_workflow_has_custom", False))
+    workflow_type = context.remote_params.get("comfyui_workflow_type")
+    workflow_type_text = str(workflow_type or "").strip().lower()
+    is_bypass = workflow_type_text in {"bypass", "free"}
+    workflow_label = str(
+        context.remote_params.get("comfyui_workflow_label")
+        or ("Bypass Workflow" if is_bypass else ("Custom Workflow" if has_custom else "Basic Workflow"))
+    )
     return {
         "type": "comfyui_workflow_state",
         "has_custom": has_custom,
-        "workflow_label": str(context.remote_params.get("comfyui_workflow_label") or ("Custom Workflow" if has_custom else "Basic Workflow")),
+        "workflow_label": workflow_label,
+        "workflow_type": "bypass" if is_bypass else workflow_type,
         "model_compat": context.remote_params.get("comfyui_workflow_model_compat"),
         "locked_loader_class": context.remote_params.get("comfyui_workflow_locked_loader_class"),
         "locked_model_display": context.remote_params.get("comfyui_workflow_locked_model_display"),
     }
 
 
-def _extract_comfyui_workflow_metadata_from_png(image_bytes: bytes) -> dict[str, Any]:
-    from PIL import Image
+def _extract_comfyui_workflow_metadata_from_image(image_bytes: bytes) -> dict[str, Any]:
+    from utils.comfyui_png_metadata import extract_comfyui_workflow_metadata_from_upload_bytes
 
     if not image_bytes:
-        raise ValueError("Image payload is empty")
+        raise ValueError("Workflow upload payload is empty")
     if len(image_bytes) > 64 * 1024 * 1024:
-        raise ValueError("Image is too large")
-    with Image.open(io.BytesIO(image_bytes)) as opened:
-        opened.load()
-        info = dict(getattr(opened, "info", {}) or {})
+        raise ValueError("Workflow upload is too large")
+    info = extract_comfyui_workflow_metadata_from_upload_bytes(image_bytes)
     workflow_text = info.get("workflow") or info.get("workflow_api")
     prompt_text = info.get("prompt") or info.get("workflow_api")
     if not workflow_text or not prompt_text:
-        raise ValueError("PNG does not include ComfyUI workflow metadata")
+        raise ValueError("Image does not include ComfyUI workflow metadata")
     try:
         workflow = json.loads(workflow_text) if isinstance(workflow_text, str) else workflow_text
         prompt_api = json.loads(prompt_text) if isinstance(prompt_text, str) else prompt_text
@@ -187,18 +193,45 @@ def _extract_comfyui_workflow_metadata_from_png(image_bytes: bytes) -> dict[str,
     return {
         "workflow": prompt_api if "nodes" in workflow else workflow,
         "workflow_ui": workflow if "nodes" in workflow else None,
+        "metadata": info,
     }
 
 
-def _apply_comfyui_workflow_metadata(context: WebSessionContext, metadata: dict[str, Any] | None) -> dict[str, Any]:
+def _apply_comfyui_workflow_metadata(
+    context: WebSessionContext,
+    metadata: dict[str, Any] | None,
+    *,
+    workflow_mode: str = "custom",
+) -> dict[str, Any]:
+    from core.comfyui_workflow_manager import ComfyUIWorkflowManager
+
     metadata = metadata or {}
-    workflow = metadata.get("workflow")
+    raw_metadata = metadata.get("metadata")
+    if not isinstance(raw_metadata, dict):
+        raise ValueError("ComfyUI workflow metadata is invalid")
+
+    manager = ComfyUIWorkflowManager()
+    analysis = manager.analyze_workflow_for_ui(raw_metadata, workflow_mode=workflow_mode)
+    if not analysis.get("success"):
+        raise ValueError(str(analysis.get("error_message") or "ComfyUI workflow validation failed"))
+    if not manager.load_workflow_from_metadata(raw_metadata, workflow_mode=workflow_mode):
+        raise ValueError("ComfyUI workflow could not be loaded")
+
+    node_map = manager.user_workflow_node_map or {}
+    workflow = manager.user_workflow
     if not isinstance(workflow, dict):
         raise ValueError("ComfyUI workflow metadata is invalid")
+    workflow_type = node_map.get("workflow_type")
+    is_bypass = str(workflow_type or "").strip().lower() in {"bypass", "free"}
     context.remote_params["comfyui_workflow"] = workflow
-    context.remote_params["_comfyui_workflow_ui"] = metadata.get("workflow_ui")
+    context.remote_params["_comfyui_workflow_ui"] = manager.user_workflow_ui
     context.remote_params["comfyui_workflow_has_custom"] = True
-    context.remote_params["comfyui_workflow_label"] = "Custom Workflow"
+    context.remote_params["comfyui_workflow_label"] = "Bypass Workflow" if is_bypass else "Custom Workflow"
+    context.remote_params["comfyui_workflow_type"] = "bypass" if is_bypass else workflow_type
+    context.remote_params["comfyui_workflow_model_compat"] = node_map.get("model_compat")
+    context.remote_params["comfyui_workflow_node_map"] = dict(node_map)
+    context.remote_params["comfyui_workflow_locked_loader_class"] = node_map.get("locked_loader_class")
+    context.remote_params["comfyui_workflow_locked_model_display"] = node_map.get("locked_model_display")
     context.publish("comfyui_workflow_changed", _comfyui_workflow_state_payload(context))
     return {
         "ok": True,
@@ -213,7 +246,9 @@ def _clear_comfyui_workflow(context: WebSessionContext) -> dict[str, Any]:
         "_comfyui_workflow_ui",
         "comfyui_workflow_has_custom",
         "comfyui_workflow_label",
+        "comfyui_workflow_type",
         "comfyui_workflow_model_compat",
+        "comfyui_workflow_node_map",
         "comfyui_workflow_locked_loader_class",
         "comfyui_workflow_locked_model_display",
     ):
@@ -317,13 +352,29 @@ def register_params_workflow_routes(
     async def api_comfyui_workflow_upload(req: Request):
         image_bytes = await req.body()
         try:
-            metadata = await run_in_thread(_extract_comfyui_workflow_metadata_from_png, image_bytes)
-            result = await run_in_thread(_apply_comfyui_workflow_metadata, session_context, metadata)
+            metadata = await run_in_thread(_extract_comfyui_workflow_metadata_from_image, image_bytes)
+            result = await run_in_thread(_apply_comfyui_workflow_metadata, session_context, metadata, workflow_mode="custom")
         except ValueError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         await broadcast_json(clients, result["workflow"])
         await broadcast_json(clients, result["params"])
         return result
+
+    @app.post("/api/comfyui/workflow/bypass/upload")
+    async def api_comfyui_workflow_bypass_upload(req: Request):
+        image_bytes = await req.body()
+        try:
+            metadata = await run_in_thread(_extract_comfyui_workflow_metadata_from_image, image_bytes)
+            result = await run_in_thread(_apply_comfyui_workflow_metadata, session_context, metadata, workflow_mode="bypass")
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        await broadcast_json(clients, result["workflow"])
+        await broadcast_json(clients, result["params"])
+        return result
+
+    @app.post("/api/comfyui/workflow/free/upload")
+    async def api_comfyui_workflow_free_upload(req: Request):
+        return await api_comfyui_workflow_bypass_upload(req)
 
     @app.post("/api/comfyui/workflow/default")
     async def api_comfyui_workflow_default():

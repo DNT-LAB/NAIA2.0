@@ -1209,7 +1209,37 @@ class APIService:
                 raise Exception("ComfyUI 서버에 연결할 수 없습니다.")
             
             # 4. 워크플로우 생성
-            workflow = params['workflow']
+            workflow = params.get('workflow')
+            if not isinstance(workflow, dict):
+                workflow_manager = self.workflow_manager
+                has_custom_workflow = bool(params.get("comfyui_workflow_has_custom"))
+                custom_workflow = params.get("comfyui_workflow")
+                if has_custom_workflow and isinstance(custom_workflow, dict):
+                    node_map = params.get("comfyui_workflow_node_map")
+                    if not isinstance(node_map, dict) or not node_map:
+                        workflow_type = str(params.get("comfyui_workflow_type") or params.get("workflow_type") or "").strip().lower()
+                        _ok, node_map = workflow_manager.validate_and_map_workflow(
+                            custom_workflow,
+                            allow_free=workflow_type in {"bypass", "free"},
+                        )
+                        if not _ok:
+                            raise ValueError(f"ComfyUI custom workflow is invalid: {node_map}")
+                    workflow_manager.user_workflow = copy.deepcopy(custom_workflow)
+                    workflow_manager.user_workflow_ui = copy.deepcopy(params.get("_comfyui_workflow_ui"))
+                    workflow_manager.user_workflow_node_map = copy.deepcopy(node_map)
+                    params["_comfyui_workflow_mode"] = "custom"
+                    if workflow_manager._is_bypass_workflow_type(node_map.get("workflow_type")):
+                        params["workflow_type"] = "bypass"
+                        params["sampling_mode"] = "bypass"
+                else:
+                    workflow_manager.clear_user_workflow()
+                    params["_comfyui_workflow_mode"] = "basic"
+                workflow = workflow_manager.apply_params_to_workflow(params)
+                if not isinstance(workflow, dict):
+                    raise ValueError("ComfyUI workflow could not be built from current parameters.")
+                workflow_ui = workflow_manager.get_last_applied_workflow_ui()
+                if workflow_ui:
+                    params["_comfyui_workflow_ui"] = workflow_ui
 
             # 6. 진행률 콜백 설정
             # 🔧 FIX: QTimer.singleShot 및 app_context.publish를 워커 스레드에서 직접 호출하지 않음
@@ -1240,6 +1270,7 @@ class APIService:
                 workflow,
                 _comfyui_progress,
                 extra_pnginfo=extra_pnginfo,
+                preferred_output_node_id=params.get("_comfyui_output_node_id"),
             )
             
             if result and result['status'] == 'success':

@@ -9,6 +9,7 @@ from app.backend.server.artist_thumbnail_routes import register_artist_thumbnail
 from app.backend.server.character_viewer_routes import register_character_viewer_routes
 from app.backend.server.danbooru_routes import register_danbooru_routes
 from app.backend.server.event_preset_routes import register_event_preset_routes
+from app.backend.server.generation_commands import register_generation_rest_routes
 from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.module_storage_routes import register_module_storage_routes
@@ -43,6 +44,12 @@ def register_headless_routes(
         run_in_thread=run_in_thread,
         clients=clients,
         broadcast_json=broadcast_json,
+        start_generation_runner=ensure_generation_runner,
+    )
+    register_generation_rest_routes(
+        app,
+        context,
+        clients=clients,
         start_generation_runner=ensure_generation_runner,
     )
     register_install_manager_routes(app, context, run_in_thread=run_in_thread)

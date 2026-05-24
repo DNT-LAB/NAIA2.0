@@ -108,6 +108,8 @@ def _is_comfyui_anima_mode(app_context, settings: Dict[str, Any]) -> bool:
     workflow_type = str(settings.get('workflow_type') or '').strip().lower()
     if sampling_mode == 'anima' or workflow_type == 'unet':
         return True
+    if sampling_mode or workflow_type:
+        return False
 
     main_window = getattr(app_context, 'main_window', None)
     anima_radio = getattr(main_window, 'anima_radio', None)
@@ -458,11 +460,11 @@ class PromptProcessor:
         is_anima_mode = _is_comfyui_anima_mode(self.app_context, context.settings)
         is_comfyui = self.app_context.current_api_mode == 'COMFYUI'
         is_webui_weight_mode = _is_webui_weight_mode(self.app_context, context.settings)
-        apply_prompt_weight = is_webui_weight_mode or (is_comfyui and is_anima_mode)
+        apply_prompt_weight = is_webui_weight_mode or is_comfyui
         raw_prompt_weight = _get_random_prompt_weight_raw(
             self.app_context,
             context.settings,
-            allow_window_fallback=(is_webui_weight_mode or (is_comfyui and is_anima_mode)),
+            allow_window_fallback=(is_webui_weight_mode or is_comfyui),
         )
         prompt_weight_skip, prompt_weight = _parse_anima_weight(raw_prompt_weight)
 
@@ -563,7 +565,7 @@ class PromptProcessor:
         # ANIMA/WEBUI 랜덤 프롬프트 가중치: 이미 가중치가 적용된 태그는 제외하고
         # 비가중치 연속 구간만 A1111 형식으로 래핑한다.
         if apply_prompt_weight and context.main_tags and first_non_hash < len(context.main_tags):
-            label = "WEBUI" if is_webui_weight_mode else "ANIMA"
+            label = "WEBUI" if is_webui_weight_mode else "COMFYUI"
             if not prompt_weight_skip:
                 run_count = _wrap_unweighted_main_tag_runs(
                     context.main_tags,

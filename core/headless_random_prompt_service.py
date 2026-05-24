@@ -332,6 +332,19 @@ class HeadlessRandomPromptService:
         option_state = self.context.get_options()
         remote_params = self.context.generation_param_schema_payload()
         auto_generate = request_overrides.get("auto_generate", option_state.get("auto_generate", False))
+        workflow_type = (
+            request_overrides.get("workflow_type")
+            or remote_params.get("workflow_type")
+            or remote_params.get("comfyui_workflow_type")
+            or ""
+        )
+        comfyui_sampling_mode = (
+            request_overrides.get("comfyui_sampling_mode")
+            or request_overrides.get("sampling_mode")
+            or remote_params.get("comfyui_sampling_mode")
+            or remote_params.get("sampling_mode")
+            or ("bypass" if str(workflow_type).strip().lower() in {"bypass", "free"} else "eps")
+        )
 
         settings: dict[str, Any] = {
             "prompt_fixed": bool(option_state.get("prompt_fixed", False)),
@@ -339,16 +352,20 @@ class HeadlessRandomPromptService:
             "turbo_mode": False,
             "wildcard_standalone": bool(option_state.get("wildcard_standalone", False)),
             "auto_fit_resolution": self._coerce_bool(remote_params.get("auto_fit_resolution", False)),
+            "resolution_preset_enabled": self._coerce_bool(remote_params.get("resolution_preset_enabled", False)),
+            "resolution_preset": remote_params.get("resolution_preset"),
             "api_mode": self.context.get_api_mode(),
-            "comfyui_sampling_mode": str(
-                request_overrides.get("comfyui_sampling_mode")
-                or request_overrides.get("sampling_mode")
-                or remote_params.get("comfyui_sampling_mode")
-                or "eps"
-            ),
+            "comfyui_sampling_mode": str(comfyui_sampling_mode),
+            "workflow_type": str(workflow_type),
         }
         settings.update(request_overrides)
-        for key in ("prompt_fixed", "auto_generate", "wildcard_standalone", "auto_fit_resolution"):
+        for key in (
+            "prompt_fixed",
+            "auto_generate",
+            "wildcard_standalone",
+            "auto_fit_resolution",
+            "resolution_preset_enabled",
+        ):
             settings[key] = self._coerce_bool(settings.get(key, False))
         settings["api_mode"] = self.context.get_api_mode()
         return settings

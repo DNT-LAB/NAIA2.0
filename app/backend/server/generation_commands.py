@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from typing import Any, Callable
 
-from fastapi import WebSocket
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import JSONResponse
 
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
@@ -37,6 +39,14 @@ def generation_service(context: WebSessionContext) -> HeadlessGenerationService:
 
 async def enqueue_generation_request(context: WebSessionContext, command: dict[str, Any]) -> Any:
     return await asyncio.to_thread(generation_service(context).enqueue_remote_request, command)
+
+
+async def _request_json_payload(req: Request) -> dict[str, Any]:
+    try:
+        payload = await req.json()
+    except Exception:
+        payload = {}
+    return payload if isinstance(payload, dict) else {}
 
 
 async def _send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
@@ -185,3 +195,145 @@ async def _send_generation_queued_state(ws: WebSocket, context: WebSessionContex
         "message": "queued",
     })
     await _send_json(ws, context.queue_state_payload())
+
+
+def register_generation_rest_routes(
+    app: FastAPI,
+    context: WebSessionContext,
+    *,
+    clients: set[WebSocket],
+    start_generation_runner: GenerationRunnerStarter,
+) -> None:
+    """Register future01-compatible REST generation entrypoints.
+
+    The canonical Remote Web path is websocket based, but older Web Session
+    tools and ComfyUI integrations still call these REST routes.
+    """
+
+    @app.post("/api/generate")
+    async def api_generate(req: Request):
+        command = await _request_json_payload(req)
+        command = dict(command)
+        command.setdefault("type", "generate")
+        result = await enqueue_generation_request(context, command)
+        payload = result.websocket_payload()
+        if not result.ok:
+            return JSONResponse(payload, status_code=400)
+        if context.headless_generation_execute_enabled:
+            start_generation_runner(context, clients)
+        return {
+            "status": "generation_requested",
+            **payload,
+            "queue": context.queue_state_payload(),
+        }
+
+    @app.post("/api/random")
+    async def api_random(req: Request):
+        command = await _request_json_payload(req)
+        overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
+        request_id = str(command.get("random_request_id") or command.get("requestId") or "")
+        active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
+        result = await asyncio.to_thread(
+            random_service(context).generate,
+            active_ratings=active_ratings,
+            overrides=overrides,
+            random_request_id=request_id,
+        )
+        payload = result.websocket_payload()
+        if not result.success:
+            return JSONResponse(payload, status_code=400)
+        return {
+            "status": "random_generation_requested",
+            **payload,
+            "extra_messages": result.extra_messages,
+        }
+
+    @app.post("/api/comfyui/random")
+    async def api_comfyui_random(req: Request):
+        command = await _request_json_payload(req)
+        if command.get("overrides") is not None and not isinstance(command.get("overrides"), dict):
+            return JSONResponse({"error": "overrides must be a dict"}, status_code=400)
+        if command.get("peng_override") is not None and not isinstance(command.get("peng_override"), dict):
+            return JSONResponse({"error": "peng_override must be a dict"}, status_code=400)
+        overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else {}
+        overrides = dict(overrides)
+        respect_autogen = command.get("respect_naia_autogen", True) is not False
+        force_skip = command.get("force_naia_skip_generate") is True
+        requested_auto_generate = overrides.get("auto_generate", context.get_options().get("auto_generate", False))
+        will_naia_generate = bool(context._coerce_bool(requested_auto_generate) and respect_autogen and not force_skip)
+        overrides["auto_generate"] = will_naia_generate
+        peng_override = command.get("peng_override") if isinstance(command.get("peng_override"), dict) else None
+        request_id = str(command.get("request_id") or command.get("random_request_id") or command.get("requestId") or uuid.uuid4())
+        try:
+            timeout = float(command.get("timeout") or 30)
+        except (TypeError, ValueError):
+            timeout = 30.0
+        timeout = min(max(timeout, 1.0), 300.0)
+        active_ratings = _active_ratings_from_command(command) or {"g", "s", "q", "e"}
+        previous_peng_override = getattr(context, "session_p_eng_override", None)
+        if peng_override is not None:
+            context.session_p_eng_override = peng_override
+        try:
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        random_service(context).generate,
+                        active_ratings=active_ratings,
+                        overrides=overrides,
+                        random_request_id=request_id,
+                    ),
+                    timeout=timeout,
+                )
+            finally:
+                if peng_override is not None and getattr(context, "session_p_eng_override", None) is peng_override:
+                    context.session_p_eng_override = previous_peng_override
+        except asyncio.TimeoutError:
+            return JSONResponse({
+                "ok": False,
+                "error": "Timed out waiting for random prompt generation",
+                "request_id": request_id,
+            }, status_code=504)
+        payload = result.websocket_payload()
+        if not result.success:
+            return JSONResponse(payload, status_code=400)
+        generation_payload = None
+        if will_naia_generate:
+            generation_result = await enqueue_generation_request(
+                context,
+                {
+                    "type": "generate",
+                    "prompt": result.prompt,
+                    "negative_prompt": context.negative_prompt_text,
+                    "request_id": f"{request_id}:generate",
+                    "overrides": {
+                        **overrides,
+                        "_remote_queue_source": "ComfyUI Random",
+                        "_remote_queue_label": "ComfyUI Random",
+                    },
+                },
+            )
+            generation_payload = generation_result.websocket_payload()
+            will_naia_generate = bool(generation_result.ok)
+            if generation_result.ok and context.headless_generation_execute_enabled:
+                start_generation_runner(context, clients)
+        return {
+            "ok": True,
+            "status": "prompt_generated",
+            "request_id": request_id,
+            "prompt": result.prompt,
+            "negative_prompt": context.negative_prompt_text,
+            "naia_started_generation": will_naia_generate,
+            "generation": generation_payload,
+            **payload,
+            "extra_messages": result.extra_messages,
+        }
+
+    @app.get("/api/comfyui/health")
+    async def api_comfyui_health():
+        return {
+            "ok": True,
+            "api_mode": context.get_api_mode(),
+            "is_generating": bool(context.is_generating or getattr(context, "headless_generation_runner_active", False)),
+            "queue": context.queue_state_payload(),
+            "headless": True,
+        }

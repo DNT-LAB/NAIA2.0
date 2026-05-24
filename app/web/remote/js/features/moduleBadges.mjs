@@ -22,6 +22,8 @@ export function createModuleBadges({
     samplingMode: 'eps',
     animaWeight: '1',
     workflowHasCustom: false,
+    workflowType: '',
+    workflowLabel: 'Basic Workflow',
   };
   const webUiStatus = {
     enableHr: false,
@@ -192,10 +194,11 @@ export function createModuleBadges({
 
   function createWorkflowPart() {
     const hasCustom = comfyUiStatus.workflowHasCustom;
+    const isFree = ['bypass', 'free'].includes(String(comfyUiStatus.workflowType || '').trim().toLowerCase());
     const part = document.createElement('button');
     part.type = 'button';
     part.className = `activated-summary-part ${hasCustom ? 'comfyui-workflow-custom' : 'comfyui-workflow-basic'}`;
-    part.textContent = hasCustom ? 'Custom Workflow' : 'Basic Workflow';
+    part.textContent = isFree ? 'Bypass Workflow' : (comfyUiStatus.workflowLabel || (hasCustom ? 'Custom Workflow' : 'Basic Workflow'));
     part.title = 'COMFYUI 전용 도구';
     part.addEventListener('click', event => {
       event.stopPropagation();
@@ -219,12 +222,11 @@ export function createModuleBadges({
     if (activatedFooter) activatedFooter.classList.add('has-activated');
     if (activatedWrap) activatedWrap.classList.add('has-activated-summary');
 
+    const isFreeWorkflow = ['bypass', 'free'].includes(String(comfyUiStatus.workflowType || '').trim().toLowerCase());
     const mode = normalizeSamplingMode(comfyUiStatus.samplingMode);
-    activatedSummary.append(createParamsPart('comfyui-mode', `Mode : ${displaySamplingMode(mode)}`));
-    if (mode === 'anima') {
-      appendBullet();
-      activatedSummary.append(createWeightPart(`가중치 : ${formatAnimaWeight(comfyUiStatus.animaWeight)}`));
-    }
+    activatedSummary.append(createParamsPart('comfyui-mode', `Mode : ${isFreeWorkflow ? 'Bypass' : displaySamplingMode(mode)}`));
+    appendBullet();
+    activatedSummary.append(createWeightPart(`가중치 : ${formatAnimaWeight(comfyUiStatus.animaWeight)}`));
     appendBullet();
     activatedSummary.append(createWorkflowPart());
   }
@@ -426,6 +428,24 @@ export function createModuleBadges({
       comfyUiStatus.workflowHasCustom = Boolean(m.has_custom);
     } else if ('comfyui_workflow_has_custom' in m) {
       comfyUiStatus.workflowHasCustom = Boolean(m.comfyui_workflow_has_custom);
+    }
+    if ('workflow_type' in m) {
+      const workflowType = String(m.workflow_type || '');
+      comfyUiStatus.workflowType = ['bypass', 'free'].includes(workflowType.trim().toLowerCase()) ? 'bypass' : workflowType;
+    } else if ('comfyui_workflow_type' in m) {
+      const workflowType = String(m.comfyui_workflow_type || '');
+      comfyUiStatus.workflowType = ['bypass', 'free'].includes(workflowType.trim().toLowerCase()) ? 'bypass' : workflowType;
+    } else if (!comfyUiStatus.workflowHasCustom) {
+      comfyUiStatus.workflowType = '';
+    }
+    if (['bypass', 'free'].includes(String(comfyUiStatus.workflowType || '').trim().toLowerCase())) {
+      comfyUiStatus.workflowLabel = 'Bypass Workflow';
+    } else if (m.workflow_label) {
+      comfyUiStatus.workflowLabel = String(m.workflow_label);
+    } else if (m.comfyui_workflow_label) {
+      comfyUiStatus.workflowLabel = String(m.comfyui_workflow_label);
+    } else {
+      comfyUiStatus.workflowLabel = comfyUiStatus.workflowHasCustom ? 'Custom Workflow' : 'Basic Workflow';
     }
     renderActivatedSummary();
   }

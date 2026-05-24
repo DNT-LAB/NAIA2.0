@@ -28,6 +28,9 @@ WORKFLOW_KEYS = {
     "_comfyui_workflow_ui",
 }
 
+WORKFLOW_SOURCE_KEY = "_naia_workflow_source"
+WORKFLOW_SOURCE_JSON = "json"
+
 TEXT_PNG_KEYS = (
     "Title",
     "Author",
@@ -44,6 +47,270 @@ TEXT_PNG_KEYS = (
     "naia_prompt_context",
     "naia_api_metadata",
 )
+
+
+def _has_comfyui_workflow_metadata(metadata: Dict[str, Any]) -> bool:
+    return bool(metadata.get("prompt") and (metadata.get("workflow") or metadata.get("workflow_api")))
+
+
+UI_WIDGET_KEYS_BY_CLASS = {
+    "CheckpointLoaderSimple": ["ckpt_name"],
+    "UNETLoader": ["unet_name", "weight_dtype"],
+    "CLIPLoader": ["clip_name", "type", "device"],
+    "VAELoader": ["vae_name"],
+    "CLIPTextEncode": ["text"],
+    "EmptyLatentImage": ["width", "height", "batch_size"],
+    "KSampler": ["seed", None, "steps", "cfg", "sampler_name", "scheduler", "denoise"],
+    "ModelSamplingDiscrete": ["sampling", "zsnr"],
+    "RescaleCFG": ["multiplier"],
+    "SaveImage": ["filename_prefix"],
+    "SaveAnimatedWEBP": ["filename_prefix", "fps", "lossless", "quality", "method"],
+    "PrimitiveString": ["value"],
+    "PrimitiveInt": ["value"],
+}
+
+
+def _normalize_comfyui_workflow_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = dict(metadata or {})
+    if not metadata.get("prompt") and metadata.get("workflow_api"):
+        metadata["prompt"] = metadata["workflow_api"]
+    if metadata.get("prompt") and not (metadata.get("workflow") or metadata.get("workflow_api")):
+        metadata["workflow_api"] = metadata["prompt"]
+    return metadata
+
+
+def _loads_json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _looks_like_comfyui_api_workflow(data: Any) -> bool:
+    if not isinstance(data, dict) or not data:
+        return False
+    return any(
+        isinstance(node, dict) and isinstance(node.get("class_type"), str)
+        for node in data.values()
+    )
+
+
+def _looks_like_comfyui_ui_workflow(data: Any) -> bool:
+    return isinstance(data, dict) and isinstance(data.get("nodes"), list)
+
+
+def _comfyui_ui_workflow_to_api(workflow: Dict[str, Any]) -> Dict[str, Any]:
+    links = {
+        link[0]: link
+        for link in workflow.get("links", [])
+        if isinstance(link, list) and len(link) >= 6
+    }
+    api_workflow: Dict[str, Any] = {}
+
+    for node in workflow.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        raw_node_id = node.get("id")
+        if raw_node_id is None:
+            continue
+        node_id = str(raw_node_id)
+        class_type = node.get("type") or node.get("class_type")
+        if not class_type:
+            continue
+
+        inputs: Dict[str, Any] = {}
+        for input_slot in node.get("inputs", []) or []:
+            if not isinstance(input_slot, dict):
+                continue
+            slot_name = input_slot.get("name")
+            link_id = input_slot.get("link")
+            link = links.get(link_id)
+            if not slot_name or not link:
+                continue
+            inputs[str(slot_name)] = [str(link[1]), link[2]]
+
+        widget_keys = UI_WIDGET_KEYS_BY_CLASS.get(str(class_type), [])
+        widgets = node.get("widgets_values", [])
+        if isinstance(widgets, dict):
+            for key, value in widgets.items():
+                inputs.setdefault(str(key), value)
+        elif isinstance(widgets, list):
+            for index, key in enumerate(widget_keys):
+                if key and index < len(widgets):
+                    inputs.setdefault(key, widgets[index])
+
+        api_workflow[node_id] = {
+            "class_type": str(class_type),
+            "inputs": inputs,
+        }
+        title = node.get("title") or (node.get("properties") or {}).get("Node name for S&R")
+        if title:
+            api_workflow[node_id]["_meta"] = {"title": title}
+
+    return api_workflow
+
+
+def comfyui_workflow_json_to_metadata(data: Any) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ValueError("ComfyUI workflow JSON must be an object.")
+
+    if data.get("prompt") or data.get("workflow") or data.get("workflow_api"):
+        metadata = {}
+        for key in ("prompt", "workflow", "workflow_api"):
+            if key in data and data.get(key) is not None:
+                metadata[key] = json_dumps_for_png(_loads_json_value(data.get(key)))
+        metadata = _normalize_comfyui_workflow_metadata(metadata)
+        if _has_comfyui_workflow_metadata(metadata):
+            return metadata
+
+        workflow_data = _loads_json_value(data.get("workflow") or data.get("workflow_api"))
+        if _looks_like_comfyui_ui_workflow(workflow_data):
+            prompt_api = _comfyui_ui_workflow_to_api(workflow_data)
+            if prompt_api:
+                return {
+                    "workflow": json_dumps_for_png(workflow_data),
+                    "prompt": json_dumps_for_png(prompt_api),
+                    "workflow_api": json_dumps_for_png(prompt_api),
+                }
+        if _looks_like_comfyui_api_workflow(workflow_data):
+            workflow_text = json_dumps_for_png(workflow_data)
+            return {
+                "workflow": workflow_text,
+                "prompt": workflow_text,
+                "workflow_api": workflow_text,
+            }
+
+    if _looks_like_comfyui_ui_workflow(data):
+        prompt_api = _comfyui_ui_workflow_to_api(data)
+        if not prompt_api:
+            raise ValueError("ComfyUI UI workflow JSON has no usable nodes.")
+        return {
+            "workflow": json_dumps_for_png(data),
+            "prompt": json_dumps_for_png(prompt_api),
+            "workflow_api": json_dumps_for_png(prompt_api),
+        }
+
+    if _looks_like_comfyui_api_workflow(data):
+        workflow_text = json_dumps_for_png(data)
+        return {
+            "workflow": workflow_text,
+            "prompt": workflow_text,
+            "workflow_api": workflow_text,
+        }
+
+    raise ValueError("No ComfyUI workflow data found in the selected JSON.")
+
+
+def extract_comfyui_workflow_metadata_from_json_bytes(json_bytes: bytes) -> Dict[str, Any]:
+    if not json_bytes:
+        raise ValueError("No JSON data")
+    try:
+        data = json.loads(json_bytes.decode("utf-8-sig"))
+    except Exception as exc:
+        raise ValueError(f"Workflow JSON parse failed: {exc}") from exc
+    metadata = comfyui_workflow_json_to_metadata(data)
+    metadata[WORKFLOW_SOURCE_KEY] = WORKFLOW_SOURCE_JSON
+    return metadata
+
+
+def extract_comfyui_workflow_metadata_from_upload_bytes(upload_bytes: bytes) -> Dict[str, Any]:
+    if not upload_bytes:
+        raise ValueError("No upload data")
+    stripped = upload_bytes.lstrip()
+    if stripped.startswith(b"\xef\xbb\xbf"):
+        stripped = stripped[3:].lstrip()
+    if stripped.startswith((b"{", b"[")):
+        return extract_comfyui_workflow_metadata_from_json_bytes(upload_bytes)
+    return extract_comfyui_workflow_metadata_from_image_bytes(upload_bytes)
+
+
+def _extract_prefixed_json_metadata_from_text(text: str) -> Dict[str, str]:
+    metadata: Dict[str, str] = {}
+    if not text:
+        return metadata
+
+    decoder = json.JSONDecoder()
+    for key in ("prompt", "workflow", "workflow_api"):
+        marker = f"{key}:"
+        start = 0
+        while True:
+            marker_index = text.find(marker, start)
+            if marker_index < 0:
+                break
+            value_start = marker_index + len(marker)
+            while value_start < len(text) and text[value_start].isspace():
+                value_start += 1
+            try:
+                _, value_end = decoder.raw_decode(text[value_start:])
+            except Exception:
+                start = value_start
+                continue
+            metadata[key] = text[value_start:value_start + value_end]
+            break
+    return metadata
+
+
+def _extract_prefixed_json_metadata(value: Any) -> Dict[str, str]:
+    text = _text_value(value)
+    if text is None:
+        return {}
+    return _extract_prefixed_json_metadata_from_text(text)
+
+
+def _copy_text_metadata(source_info: Dict[str, Any]) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    for key, value in (source_info or {}).items():
+        if isinstance(value, bytes):
+            text = _text_value(value)
+            if text is not None and str(key) in {"prompt", "workflow", "workflow_api"}:
+                metadata[str(key)] = text
+            metadata.update(_extract_prefixed_json_metadata(value))
+            continue
+        metadata[str(key)] = value
+        metadata.update(_extract_prefixed_json_metadata(value))
+    return metadata
+
+
+def _extract_webp_exif_metadata(image: Image.Image) -> Dict[str, str]:
+    metadata: Dict[str, str] = {}
+    try:
+        exif = image.getexif()
+    except Exception:
+        return metadata
+
+    for value in exif.values():
+        text = _text_value(value)
+        if not text or ":" not in text:
+            continue
+        key, payload = text.split(":", 1)
+        key = key.strip()
+        if key in {"prompt", "workflow", "workflow_api"} and payload:
+            metadata[key] = payload
+    return metadata
+
+
+def extract_comfyui_workflow_metadata_from_image(image: Image.Image) -> Dict[str, Any]:
+    metadata = _copy_text_metadata(dict(getattr(image, "info", {}) or {}))
+    metadata.update(_extract_webp_exif_metadata(image))
+    metadata = _normalize_comfyui_workflow_metadata(metadata)
+    if not _has_comfyui_workflow_metadata(metadata):
+        raise ValueError("No ComfyUI workflow metadata found in the selected image.")
+    return metadata
+
+
+def extract_comfyui_workflow_metadata_from_image_bytes(image_bytes: bytes) -> Dict[str, Any]:
+    if not image_bytes:
+        raise ValueError("No image data")
+
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            return extract_comfyui_workflow_metadata_from_image(image)
+    except ValueError as exc:
+        fallback = _normalize_comfyui_workflow_metadata(_extract_prefixed_json_metadata(image_bytes))
+        if _has_comfyui_workflow_metadata(fallback):
+            return fallback
+        raise exc
+    except Exception as exc:
+        raise ValueError(f"Image metadata parse failed: {exc}") from exc
 
 
 def is_png_bytes(raw_bytes: Optional[bytes]) -> bool:

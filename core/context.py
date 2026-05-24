@@ -1,5 +1,5 @@
 from core.api_service import APIService
-from typing import TYPE_CHECKING, Optional, Dict, List, Callable
+from typing import TYPE_CHECKING, Any, Optional, Dict, List, Callable
 from interfaces.base_module import BaseMiddleModule
 from core.filter_data_manager import FilterDataManager
 from core.secure_token_manager import SecureTokenManager
@@ -14,13 +14,12 @@ from datetime import datetime
 from pathlib import Path       
 
 if TYPE_CHECKING:
-    from legacy_desktop.NAIA_cold_v4 import ModernMainWindow
     from core.middle_section_controller import MiddleSectionController
     from interfaces.mode_aware_module import ModeAwareModule
 
 class AppContext:
     """애플리케이션의 공유 자원 및 상태를 관리하는 컨텍스트"""
-    def __init__(self, main_window: 'ModernMainWindow', wildcard_manager: WildcardManager, tag_data_manager: 'TagDataManager'):
+    def __init__(self, main_window: Any, wildcard_manager: WildcardManager, tag_data_manager: 'TagDataManager'):
         from core.api_service import APIService
         
         import weakref

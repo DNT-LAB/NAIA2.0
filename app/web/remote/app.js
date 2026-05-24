@@ -235,7 +235,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260509-tag-filter-sync1')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260524-tag-filter-update1')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -972,7 +972,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260516-search-draft1')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260524-search-ratings1')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -2140,6 +2140,7 @@ const wsMessageHandlers = {
   autocomplete_result: onAutocompleteResult,
   tag_filter_result: onTagFilterResult,
   tag_filter_assigned: onTagFilterAssigned,
+  tag_filter_update: onTagFilterUpdate,
   tag_filter_ac_result: onTagFilterAcResult,
   storage_list: onStorageList,
   wildcard_manager: onWildcardManager,
@@ -6043,6 +6044,7 @@ function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
 function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
 function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
 function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
+function onTagFilterUpdate(m) { if (quickFilter) quickFilter.onUpdate(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
 Promise.all([
   quickFilterReady,

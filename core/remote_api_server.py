@@ -6384,6 +6384,53 @@ class RemoteBridge(QObject):
             return None
         return eligible.sample(n=1).iloc[0].copy()
 
+    def _has_active_tag_filter_state(self) -> bool:
+        if self._active_tag_filter_ids is not None:
+            return True
+        state = self._normalize_search_filter_state(self._search_filter_state)
+        if state.get("tag_filter_active"):
+            return True
+        if self._ws_manager:
+            for session in self._ws_manager.sessions.values():
+                if session.get("tag_filter") or session.get("tag_filter_pending"):
+                    return True
+        return False
+
+    def clear_tag_filter_for_depth_search(self) -> bool:
+        """Depth Search 진입 전 Quick Tag Filter를 view 상태에서 제거합니다."""
+        if not self._has_active_tag_filter_state():
+            return False
+
+        mw = getattr(self.app_context, "main_window", None)
+        master = getattr(mw, "_master_filter_snapshot", None) if mw else None
+
+        self._active_tag_filter_ids = None
+        if self._ws_manager:
+            for session in self._ws_manager.sessions.values():
+                session["tag_filter"] = None
+                session["tag_filter_pending"] = None
+
+        self._save_search_filter_state(
+            tag_filter=[],
+            tag_filter_exclude=[],
+            tag_filter_active=False,
+        )
+
+        if mw and master is not None and not master.empty:
+            mw._master_filter_snapshot = master
+            self._do_apply_filters()
+        else:
+            state = self._read_search_state()
+            if state:
+                self._broadcast_json(state)
+
+        self._broadcast_json({
+            "type": "toast",
+            "message": "Tag Filter was cleared for Depth Search",
+            "level": "info",
+        })
+        return True
+
     def _pick_from_tag_filter(self, tag_filter: dict, active_ratings: set):
         """할당된 tag_filter 결과에서 랜덤 1개를 소비해 반환합니다."""
         row = None
@@ -14913,6 +14960,7 @@ class RemoteBridge(QObject):
             if action == "open":
                 # 심층검색 탭 열기 (이미 열려있으면 switch만 됨)
                 if mw and hasattr(mw, 'open_depth_search_tab'):
+                    self.clear_tag_filter_for_depth_search()
                     # 검색 결과 없으면 열 수 없음 → 즉시 피드백
                     if hasattr(mw, 'search_results') and mw.search_results.is_empty():
                         self._broadcast_json({

@@ -5108,6 +5108,11 @@ class ModernMainWindow(QMainWindow):
 
     def open_depth_search_tab(self):
         """심층 검색 탭을 열거나, 이미 열려있으면 해당 탭으로 전환"""
+        bridge = getattr(getattr(self, "app_context", None), "remote_bridge", None)
+        clear_tag_filter = getattr(bridge, "clear_tag_filter_for_depth_search", None)
+        if callable(clear_tag_filter):
+            clear_tag_filter()
+
         if self.search_results.is_empty():
             return
         if not (self.image_window and hasattr(self.image_window, 'tab_controller')):

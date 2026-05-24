@@ -1243,6 +1243,47 @@ def test_tag_filter_random_pick_consumes_current_filtered_results():
     assert tag_filter["rating_counts"] == {"g": 0, "s": 1, "q": 0, "e": 0}
 
 
+def test_depth_search_entry_clears_tag_filter_and_restores_master(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    master = pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "solo smile"},
+        {"id": 2, "rating": "e", "general": "duo smile"},
+    ])
+    visible = master[master["id"] == 1].copy()
+    bridge = _bridge_with_search_snapshots(master, visible)
+    bridge.app_context.main_window._save_search_snapshot = lambda: None
+    bridge._search_filter_state = bridge._normalize_search_filter_state({
+        "ratings": ["g", "s", "q", "e"],
+        "tag_filter": ["solo"],
+        "tag_filter_exclude": [],
+        "tag_filter_active": True,
+    })
+    bridge._active_tag_filter_ids = {1}
+    ws_key = object()
+    bridge._ws_manager = SimpleNamespace(
+        sessions={
+            ws_key: {
+                "tag_filter": {"ids": {1}, "count": 1},
+                "tag_filter_pending": {"ids": {1}},
+            }
+        },
+        active_connections=set(),
+    )
+    broadcasts = []
+    bridge._broadcast_json = lambda payload: broadcasts.append(payload)
+
+    cleared = bridge.clear_tag_filter_for_depth_search()
+
+    assert cleared is True
+    assert bridge._active_tag_filter_ids is None
+    assert bridge._ws_manager.sessions[ws_key]["tag_filter"] is None
+    assert bridge._ws_manager.sessions[ws_key]["tag_filter_pending"] is None
+    assert bridge._search_filter_state["tag_filter"] == []
+    assert bridge._search_filter_state["tag_filter_active"] is False
+    assert set(bridge.app_context.main_window.search_results.get_dataframe()["id"]) == {1, 2}
+    assert any(payload.get("type") == "toast" for payload in broadcasts)
+
+
 def test_studio_generate_overrides_are_preserved_when_queued():
     bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context(is_generating=True)
     overrides = {

@@ -14716,16 +14716,10 @@ class RemoteBridge(QObject):
                 for k in ('e', 'q', 's', 'g'):
                     cb = mw.rating_checkboxes.get(k)
                     if cb:
-                        # Remote: 항상 전체 rating 포함 검색 (소비 시점에 GSQE로 필터)
-                        cb.setChecked(True)
-            # active_ratings 갱신: 클라이언트가 보낸 rating 상태 반영
-            self._active_ratings = set(
-                k for k in 'gsqe' if params.get(f"rating_{k}", True)
-            )
+                        cb.setChecked(bool(params.get(f"rating_{k}", True)))
             self._save_search_filter_state(
                 query=params.get("query", ""),
                 exclude=params.get("exclude", ""),
-                ratings=self._normalize_rating_list(self._active_ratings),
             )
             # 검색 실행
             mw.trigger_search()

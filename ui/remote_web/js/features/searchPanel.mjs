@@ -9,8 +9,10 @@ export function createSearchPanel({
   getCurrentModuleId,
   bindTagAssist,
 }) {
+  const RATING_KEYS = ['g', 's', 'q', 'e'];
   let searchingActive = false;
   let ratingState = { g: true, s: true, q: true, e: true };
+  let searchRatingState = { g: true, s: true, q: true, e: true };
   let cachedRatingCounts = null;
   let parquetPickMode = 'load';
   const draftSearch = {
@@ -39,8 +41,15 @@ export function createSearchPanel({
 
   function setRatingsFromList(ratings) {
     if (!Array.isArray(ratings)) return;
-    for (const key of ['g','s','q','e']) {
+    for (const key of RATING_KEYS) {
       ratingState[key] = ratings.includes(key);
+    }
+  }
+
+  function setSearchRatingsFromMap(ratings) {
+    if (!ratings || typeof ratings !== 'object') return;
+    for (const key of RATING_KEYS) {
+      if (key in ratings) searchRatingState[key] = !!ratings[key];
     }
   }
 
@@ -56,7 +65,7 @@ export function createSearchPanel({
       : cachedRatingCounts;
     if (!ratingCounts || !Object.keys(ratingCounts).length) return null;
     let count = 0;
-    for (const key of ['g','s','q','e']) {
+    for (const key of RATING_KEYS) {
       if (ratingState[key]) count += (ratingCounts[key] || 0);
     }
     return count;
@@ -249,10 +258,6 @@ export function createSearchPanel({
   function toggleRating(rating) {
     ratingState[rating] = !ratingState[rating];
     syncRatingButtons();
-    if (getCurrentModuleId() === 'search') {
-      const checkbox = document.getElementById('sr_' + rating);
-      if (checkbox) checkbox.checked = ratingState[rating];
-    }
     const quickFilter = getQuickFilter();
     sendActiveRatings();
     if (quickFilter) quickFilter.savePreferences();
@@ -303,11 +308,8 @@ export function createSearchPanel({
     searchingActive = false;
     if (message.active_ratings) {
       setRatingsFromList(message.active_ratings);
-    } else if (message.ratings) {
-      for (const key of ['g','s','q','e']) {
-        if (key in message.ratings) ratingState[key] = !!message.ratings[key];
-      }
     }
+    setSearchRatingsFromMap(message.ratings);
     const quickFilter = getQuickFilter();
     const serverPreferences = message.filter_preferences;
     if (serverPreferences && quickFilter) {
@@ -335,7 +337,7 @@ export function createSearchPanel({
       ['e', 'Explicit'], ['q', 'NSFW'], ['s', 'Sensitive'], ['g', 'General']
     ].map(([key, label]) =>
       `<label class="mod-checkbox-item">
-      <input type="checkbox" id="sr_${key}" ${ratingState[key] ? 'checked' : ''}>
+      <input type="checkbox" id="sr_${key}" ${searchRatingState[key] ? 'checked' : ''}>
       <span class="mod-checkbox-label">${label}</span>
     </label>`
     ).join('');
@@ -413,10 +415,7 @@ export function createSearchPanel({
       const checkbox = moduleBody.querySelector(`#sr_${key}`);
       if (!checkbox) continue;
       checkbox.addEventListener('change', () => {
-        ratingState[key] = checkbox.checked;
-        syncRatingButtons();
-        sendActiveRatings();
-        saveFilterState({ratings: getActiveRatings()});
+        searchRatingState[key] = checkbox.checked;
       });
     }
   }
@@ -429,17 +428,14 @@ export function createSearchPanel({
     updateDraftSearch(query, exclude, {protect: true, awaitEcho: true});
     for (const key of ['e','q','s','g']) {
       const element = document.getElementById('sr_' + key);
-      if (element) ratingState[key] = element.checked;
+      if (element) searchRatingState[key] = element.checked;
     }
-    syncRatingButtons();
-    const quickFilter = getQuickFilter();
-    if (quickFilter) quickFilter.savePreferences();
     const ratings = {};
     for (const key of ['e','q','s','g']) {
-      ratings['rating_' + key] = ratingState[key];
+      ratings['rating_' + key] = searchRatingState[key];
     }
     searchingActive = true;
-    saveFilterState({query, exclude, ratings: getActiveRatings()});
+    saveFilterState({query, exclude});
     ws.send(JSON.stringify({ type: 'search', query, exclude, ...ratings }));
     const progress = moduleBody.querySelector('.search-progress');
     if (progress) progress.textContent = 'Starting...';

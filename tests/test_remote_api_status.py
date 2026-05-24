@@ -1284,6 +1284,44 @@ def test_depth_search_entry_clears_tag_filter_and_restores_master(monkeypatch, t
     assert any(payload.get("type") == "toast" for payload in broadcasts)
 
 
+def test_remote_search_ratings_apply_only_to_search_query(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    ctx = _AppContext()
+    ctx.main_window = SimpleNamespace(
+        search_input=_FakeLineEdit(),
+        exclude_input=_FakeLineEdit(),
+        rating_checkboxes={key: _FakeCheckBox(True) for key in "eqsg"},
+        trigger_search=lambda: calls.append("search"),
+    )
+    bridge = RemoteBridge(ctx)
+    bridge._active_ratings = {"g", "s", "q", "e"}
+    bridge._search_filter_state = bridge._normalize_search_filter_state({
+        "ratings": ["g", "s", "q", "e"],
+        "tag_filter": [],
+        "tag_filter_exclude": [],
+        "tag_filter_active": False,
+    })
+
+    bridge._do_search(json.dumps({
+        "query": "1girl",
+        "exclude": "",
+        "rating_e": True,
+        "rating_q": False,
+        "rating_s": True,
+        "rating_g": False,
+    }))
+
+    assert calls == ["search"]
+    assert ctx.main_window.search_input.text() == "1girl"
+    assert ctx.main_window.rating_checkboxes["e"].isChecked() is True
+    assert ctx.main_window.rating_checkboxes["q"].isChecked() is False
+    assert ctx.main_window.rating_checkboxes["s"].isChecked() is True
+    assert ctx.main_window.rating_checkboxes["g"].isChecked() is False
+    assert bridge._active_ratings == {"g", "s", "q", "e"}
+    assert bridge._search_filter_state["ratings"] == ["g", "s", "q", "e"]
+
+
 def test_studio_generate_overrides_are_preserved_when_queued():
     bridge, generation_controller, prompt_edit, negative_edit = _bridge_with_generate_context(is_generating=True)
     overrides = {

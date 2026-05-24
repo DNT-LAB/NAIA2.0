@@ -14984,7 +14984,7 @@ class RemoteBridge(QObject):
             master = getattr(mw, '_master_filter_snapshot', None)
             if master is not None and not master.empty:
                 from core.search_result_model import SearchResultModel
-                mw.search_results = SearchResultModel(master)
+                mw.search_results = SearchResultModel(master, lazy_bucketize=True)
                 mw._save_search_snapshot()  # → _reset_remote_filters → 필터 초기화 + master 재설정
             elif hasattr(mw, '_restore_from_snapshot'):
                 mw._restore_from_snapshot()

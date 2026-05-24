@@ -167,7 +167,7 @@ class ParquetLoader(QObject):
     finished = pyqtSignal(SearchResultModel)
     def run(self, file_path):
         df = pd.read_parquet(file_path)
-        self.finished.emit(SearchResultModel(df))
+        self.finished.emit(SearchResultModel(df, lazy_bucketize=True))
 
 def load_custom_fonts():
     """Pretendard 폰트 로드"""
@@ -3831,7 +3831,10 @@ class ModernMainWindow(QMainWindow):
 
     def on_previous_results_loaded(self, result_model: SearchResultModel):
         """비동기로 로드된 이전 검색 결과를 UI에 적용"""
-        self.search_results.append_dataframe(result_model.get_dataframe())
+        if self.search_results.is_empty():
+            self.search_results = result_model
+        else:
+            self.search_results.append_dataframe(result_model.get_dataframe())
         self._prime_search_random_cache()
         
         # 라벨 업데이트
@@ -5419,7 +5422,7 @@ class ModernMainWindow(QMainWindow):
         """스냅샷에서 search_results 복원. 성공 시 True."""
         # 1차: 메모리 스냅샷에서 복원
         if self._search_results_snapshot is not None and not self._search_results_snapshot.empty:
-            self.search_results.set_dataframe(self._search_results_snapshot.copy())
+            self.search_results.set_dataframe(self._search_results_snapshot.copy(), lazy_bucketize=True)
             self._prime_search_random_cache()
             count = self.search_results.get_count()
             self.result_label1.setText(f"검색: {count:,}")
@@ -5436,7 +5439,7 @@ class ModernMainWindow(QMainWindow):
                 import pandas as pd
                 temp_df = pd.read_parquet(temp_path)
                 if not temp_df.empty:
-                    self.search_results.set_dataframe(temp_df)
+                    self.search_results.set_dataframe(temp_df, lazy_bucketize=True)
                     self._search_results_snapshot = temp_df.copy()
                     self._prime_search_random_cache()
                     count = self.search_results.get_count()

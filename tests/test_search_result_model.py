@@ -49,6 +49,58 @@ def test_append_dataframe_keeps_results_in_buckets_without_global_concat(monkeyp
     assert model.get_count_by_rating() == {"g": 1, "s": 1, "q": 0, "e": 1}
 
 
+def test_lazy_bucketize_defers_split_until_random_pop(monkeypatch):
+    _set_bucket_starts(monkeypatch, [0, 10, 20])
+    model = SearchResultModel(pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "bucket zero"},
+        {"id": 10, "rating": "e", "general": "bucket one"},
+        {"id": 20, "rating": "g", "general": "bucket two"},
+    ]), lazy_bucketize=True)
+
+    assert model._pending_dataframe is not None
+    assert model._buckets == {}
+    assert model.get_count() == 3
+    assert model.get_prompt_at(1)["id"] == 10
+    assert model.get_count_by_rating() == {"g": 1, "s": 1, "q": 0, "e": 1}
+    assert model._buckets == {}
+
+    row = model.pop_random_row({"s", "e", "g"})
+
+    assert row is not None
+    assert model._pending_dataframe is None
+    assert set(model._buckets) == {0, 1, 2}
+    assert model.get_count() == 2
+
+
+def test_lazy_get_dataframe_returns_single_frame_for_persistence_without_bucketizing(monkeypatch):
+    _set_bucket_starts(monkeypatch, [0, 10, 20])
+    model = SearchResultModel(pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "bucket zero"},
+        {"id": 10, "rating": "e", "general": "bucket one"},
+    ]), lazy_bucketize=True)
+
+    df = model.get_dataframe()
+
+    assert list(df["id"]) == [1, 10]
+    assert model._pending_dataframe is df
+    assert model._buckets == {}
+
+
+def test_get_dataframe_merges_bucketed_remaining_rows_for_persistence(monkeypatch):
+    _set_bucket_starts(monkeypatch, [0, 10, 20])
+    model = SearchResultModel(pd.DataFrame([
+        {"id": 1, "rating": "s", "general": "bucket zero"},
+        {"id": 10, "rating": "e", "general": "bucket one"},
+        {"id": 20, "rating": "g", "general": "bucket two"},
+    ]))
+
+    model.pop_random_row({"e"})
+    df = model.get_dataframe()
+
+    assert set(df["id"]) == {1, 20}
+    assert 10 not in set(df["id"])
+
+
 def test_pop_random_row_excludes_blank_prompts_without_dropping_them():
     model = SearchResultModel(pd.DataFrame([
         {"id": 1, "rating": "s", "general": "1girl, smile"},

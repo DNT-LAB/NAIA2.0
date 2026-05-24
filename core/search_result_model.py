@@ -219,14 +219,15 @@ class SearchResultModel:
     _bucket_starts_cache: Optional[list[int]] = None
     _bucket_starts_array_cache: Optional[np.ndarray] = None
 
-    def __init__(self, dataframe: Optional[pd.DataFrame] = None):
+    def __init__(self, dataframe: Optional[pd.DataFrame] = None, *, lazy_bucketize: bool = False):
         self._buckets: dict[int, _SearchResultBucket] = {}
         self._bucket_order: list[int] = []
         self._rating_counts_cache: Optional[dict[str, int]] = None
         self._materialized_current = False
+        self._pending_dataframe: Optional[pd.DataFrame] = None
         self.df = pd.DataFrame()
         if dataframe is not None:
-            self.set_dataframe(dataframe)
+            self.set_dataframe(dataframe, lazy_bucketize=lazy_bucketize)
 
     @classmethod
     def _load_bucket_starts(cls) -> list[int]:
@@ -328,10 +329,15 @@ class SearchResultModel:
     def _mark_bucket_data_changed(self):
         self._rating_counts_cache = None
         self._materialized_current = False
+        self._pending_dataframe = None
         if len(self._buckets) != 1:
             self.df = pd.DataFrame()
 
     def _refresh_legacy_df_pointer(self):
+        if self._pending_dataframe is not None:
+            self.df = self._pending_dataframe
+            self._materialized_current = True
+            return
         if len(self._buckets) == 1:
             bucket = self._buckets[self._bucket_order[0]]
             if not bucket.consumed_indices:
@@ -342,9 +348,13 @@ class SearchResultModel:
         self._materialized_current = False
 
     def _remaining_count(self) -> int:
+        if self._pending_dataframe is not None:
+            return len(self._pending_dataframe)
         return sum(bucket.remaining_count() for bucket in self._buckets.values())
 
     def _remaining_dataframe(self) -> pd.DataFrame:
+        if self._pending_dataframe is not None:
+            return self._pending_dataframe
         if not self._buckets:
             return pd.DataFrame()
 
@@ -360,6 +370,8 @@ class SearchResultModel:
         return pd.concat(frames, ignore_index=True)
 
     def _has_rating_column(self) -> bool:
+        if self._pending_dataframe is not None:
+            return "rating" in self._pending_dataframe.columns
         return any(bucket.has_rating_column() for bucket in self._buckets.values())
 
     def _active_rating_keys(self, active_ratings: set = None) -> Optional[set[str]]:
@@ -376,23 +388,52 @@ class SearchResultModel:
             return
         self.get_count_by_rating()
 
-    def append_dataframe(self, new_df: pd.DataFrame):
-        """기존 결과에 새로운 데이터프레임을 추가합니다."""
-        if new_df is None or new_df.empty:
-            return
-        for bucket_id, bucket_df in self._iter_bucketed_frames(new_df):
+    def _add_bucketed_dataframe(self, dataframe: pd.DataFrame):
+        for bucket_id, bucket_df in self._iter_bucketed_frames(dataframe):
             bucket = self._buckets.get(bucket_id)
             if bucket is None:
                 self._buckets[bucket_id] = _SearchResultBucket(bucket_id, bucket_df)
                 self._bucket_order.append(bucket_id)
             else:
                 bucket.append_dataframe(bucket_df)
+
+    def _ensure_bucketized(self):
+        """Lazy 복원된 단일 DataFrame을 실제 버킷 구조로 전개합니다."""
+        if self._pending_dataframe is None:
+            return
+        pending = self._pending_dataframe
+        self._pending_dataframe = None
+        self._buckets = {}
+        self._bucket_order = []
+        self._rating_counts_cache = None
+        self.df = pd.DataFrame()
+        self._materialized_current = False
+        if pending is not None and not pending.empty:
+            self._add_bucketed_dataframe(pending)
+        self._refresh_legacy_df_pointer()
+
+    def append_dataframe(self, new_df: pd.DataFrame):
+        """기존 결과에 새로운 데이터프레임을 추가합니다."""
+        if new_df is None or new_df.empty:
+            return
+        if self._pending_dataframe is not None:
+            self._pending_dataframe = pd.concat(
+                [self._pending_dataframe, new_df.reset_index(drop=True)],
+                ignore_index=True,
+            )
+            self._rating_counts_cache = None
+            self._refresh_legacy_df_pointer()
+            return
+        self._add_bucketed_dataframe(new_df)
         self._rating_counts_cache = None
         self._refresh_legacy_df_pointer()
 
-    def set_dataframe(self, new_df: pd.DataFrame):
+    def set_dataframe(self, new_df: pd.DataFrame, *, lazy_bucketize: bool = False):
         """기존 데이터프레임을 안전하게 제거하고 새로운 데이터프레임으로 교체합니다."""
         import gc
+
+        if new_df is self.df or new_df is self._pending_dataframe:
+            new_df = new_df.copy()
 
         if hasattr(self, "df") and self.df is not None:
             try:
@@ -406,9 +447,14 @@ class SearchResultModel:
         self._bucket_order = []
         self._rating_counts_cache = None
         self._materialized_current = False
+        self._pending_dataframe = None
         self.df = pd.DataFrame()
         if new_df is not None and not new_df.empty:
-            self.append_dataframe(new_df)
+            if lazy_bucketize:
+                self._pending_dataframe = new_df.reset_index(drop=True)
+                self._refresh_legacy_df_pointer()
+            else:
+                self.append_dataframe(new_df)
 
     def get_dataframe(self) -> pd.DataFrame:
         """결과 데이터프레임을 반환합니다."""
@@ -435,6 +481,10 @@ class SearchResultModel:
         """특정 인덱스의 프롬프트 데이터를 딕셔너리 형태로 반환합니다."""
         if self.is_empty() or index < 0:
             return None
+        if self._pending_dataframe is not None:
+            if index >= len(self._pending_dataframe):
+                return None
+            return self._pending_dataframe.iloc[index].to_dict()
         offset = index
         for bucket_id in self._bucket_order:
             bucket = self._buckets.get(bucket_id)
@@ -451,6 +501,11 @@ class SearchResultModel:
         if self.is_empty() or not self._has_rating_column():
             return {r: 0 for r in "gsqe"}
         if self._rating_counts_cache is not None:
+            return dict(self._rating_counts_cache)
+        if self._pending_dataframe is not None:
+            ratings = self._pending_dataframe["rating"].astype(str).str.strip().str.lower()
+            rating_counts = ratings.value_counts()
+            self._rating_counts_cache = {r: int(rating_counts.get(r, 0)) for r in "gsqe"}
             return dict(self._rating_counts_cache)
         counts = {r: 0 for r in "gsqe"}
         for bucket in self._buckets.values():
@@ -469,6 +524,8 @@ class SearchResultModel:
         active_rating_keys = self._active_rating_keys(active_ratings)
         if self._rating_counts_cache is not None and active_rating_keys is not None:
             return int(sum(self._rating_counts_cache.get(rating, 0) for rating in active_rating_keys))
+        if self._pending_dataframe is not None and active_rating_keys is not None:
+            return int(self._pending_dataframe["rating"].astype(str).str.strip().str.lower().isin(active_rating_keys).sum())
         return int(sum(bucket.get_filtered_count(active_rating_keys) for bucket in self._buckets.values()))
 
     # [신규] 무작위 행을 추출하고 제거하는 메서드
@@ -482,6 +539,7 @@ class SearchResultModel:
         if self.is_empty():
             return None
 
+        self._ensure_bucketized()
         active_rating_keys = self._active_rating_keys(active_ratings)
         remaining_bucket_ids = [
             bucket_id
@@ -542,6 +600,7 @@ class SearchResultModel:
         if row_predicate is None:
             return self.pop_random_row(active_ratings)
 
+        self._ensure_bucketized()
         active_rating_keys = self._active_rating_keys(active_ratings)
         weighted_buckets = []
         eligible_indices_by_bucket: dict[int, list[int]] = {}

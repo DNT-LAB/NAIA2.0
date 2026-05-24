@@ -51,6 +51,20 @@ class ArtistThumbnailService:
             "expected_size": 2656390724,
             "sha256": "C831A5B186176AEBED394F320C3E5B75B3ACEB78AF2D97B84D04C277C276252E",
         },
+        "ANIMA-44000": {
+            "label": "ANIMA-44000",
+            "path": Path("data/artist_thumbnail_anima_bucket2.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima_bucket2.json",
+            "expected_size": 2604574500,
+            "sha256": "3B581E8A5C596B4E2AE001C8842B486BF4D7BC36485D23B0861B0200C41017E2",
+        },
+        "ANIMA-60000": {
+            "label": "ANIMA-60000",
+            "path": Path("data/artist_thumbnail_anima_bucket3.json"),
+            "url": "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/Anima_artist_thumbnail/artist_thumbnail_anima_bucket3.json",
+            "expected_size": 1882040677,
+            "sha256": "C564F0A473F32A81DEA43696FBF1CAA477184C957C7C1A8B5B2B21781334FB7B",
+        },
     }
     ARTIST_THUMB_OPTION_MODES = ("NAI", "WEBUI", "COMFYUI")
 

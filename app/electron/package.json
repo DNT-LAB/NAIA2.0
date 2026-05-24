@@ -86,8 +86,8 @@
     "release:portable:clean-python:smoke": "cd ../.. && python tools/run_electron_portable_workspace.py --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --run-electron-cdp --electron-timeout 180",
     "release:portable:clean-python:smoke:scan": "cd ../.. && python tools/run_electron_portable_workspace.py --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
     "start": "electron .",
-    "pack:dir": "electron-builder --dir --config package.json",
-    "dist:win-dir": "electron-builder --win dir --config package.json"
+    "pack:dir": "electron-builder --dir",
+    "dist:win-dir": "electron-builder --win dir"
   },
   "devDependencies": {
     "electron": "42.1.0",

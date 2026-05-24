@@ -8,6 +8,17 @@ from typing import Any
 from core.web_session_context import WebSessionContext
 
 
+CUSTOM_PARQUET_SCOPE = "custom_parquet"
+TAG_ARCHIVE_SCOPE = "tag_archive"
+
+
+def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
+    try:
+        return int(path.stem.split("_", 1)[1]), path.name
+    except (IndexError, ValueError):
+        return 10**9, path.name
+
+
 def rating_counts_from_frame(frame: Any) -> dict[str, int]:
     if frame is None or getattr(frame, "empty", True) or "rating" not in frame.columns:
         return {rating: 0 for rating in "gsqe"}
@@ -58,6 +69,50 @@ def filter_source_frame(
     return filtered.copy()
 
 
+def tag_archive_parquet_sources(context: WebSessionContext) -> list[tuple[Path, str]]:
+    sources = getattr(context, "tag_archive_parquet_sources", None)
+    if callable(sources):
+        return sources()
+    root = Path(getattr(context, "repo_root", Path.cwd()))
+    tag_dir = root / "data" / "tags"
+    if not tag_dir.is_dir():
+        return []
+    return [
+        (path.resolve(), "source tag archive parquet")
+        for path in sorted(tag_dir.glob("tags_*.parquet"), key=_tag_archive_sort_key)
+        if path.is_file()
+    ]
+
+
+def search_tag_archive_frame(
+    sources: list[tuple[Path, str]],
+    *,
+    query: str,
+    exclude: str,
+    ratings: set[str],
+):
+    import pandas as pd
+    from core.search_engine import SearchEngine
+
+    search_params = {
+        "query": query,
+        "exclude_query": exclude,
+        "rating_g": "g" in ratings,
+        "rating_s": "s" in ratings,
+        "rating_q": "q" in ratings,
+        "rating_e": "e" in ratings,
+    }
+    engine = SearchEngine()
+    frames: list[Any] = []
+    for path, _label in sources:
+        result = engine.search_in_file(str(path), search_params)
+        if result is not None and not getattr(result, "empty", True):
+            frames.append(result)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
 def apply_search_runtime_filters(context: WebSessionContext) -> dict[str, Any]:
     source = getattr(context, "search_results_snapshot", None)
     if source is None or getattr(source, "empty", True):
@@ -78,6 +133,18 @@ def apply_search_runtime_filters(context: WebSessionContext) -> dict[str, Any]:
     return context.search_state_payload()
 
 
+def clear_active_tag_filter(context: WebSessionContext) -> dict[str, Any]:
+    context.active_tag_filter_ids = None
+    context.pending_tag_filter = None
+    context.active_tag_filter = None
+    context.save_search_filter_state(
+        tag_filter=[],
+        tag_filter_exclude=[],
+        tag_filter_active=False,
+    )
+    return apply_search_runtime_filters(context)
+
+
 def run_search_command(context: WebSessionContext, command: dict[str, Any]) -> dict[str, Any]:
     ratings = {
         rating
@@ -86,14 +153,36 @@ def run_search_command(context: WebSessionContext, command: dict[str, Any]) -> d
     } or set("gsqe")
     query = str(command.get("query") or "")
     exclude = str(command.get("exclude") or "")
-    context.save_search_filter_state(query=query, exclude=exclude, ratings=ratings)
+    context.search_query_ratings = ratings
+    context.save_search_filter_state(query=query, exclude=exclude)
+
+    use_custom_scope = getattr(context, "search_results_scope", "") == CUSTOM_PARQUET_SCOPE
+    archive_sources = [] if use_custom_scope else tag_archive_parquet_sources(context)
+    if archive_sources:
+        searched = search_tag_archive_frame(
+            archive_sources,
+            query=query,
+            exclude=exclude,
+            ratings=ratings,
+        )
+        context.search_results.set_dataframe(searched)
+        context.search_results_snapshot = searched.copy()
+        context.search_results_master_base_snapshot = searched.copy()
+        context.search_results_scope = TAG_ARCHIVE_SCOPE
+        context.active_tag_filter_ids = None
+        context.pending_tag_filter = None
+        context.active_tag_filter = None
+        context.save_search_filter_state(tag_filter_active=False)
+        return apply_search_runtime_filters(context)
+
     base = search_base_frame(context)
     if base is None:
         return context.search_state_payload()
-    searched = filter_source_frame(base, query=query, exclude=exclude)
+    searched = filter_source_frame(base, query=query, exclude=exclude, ratings=ratings)
     context.search_results_snapshot = searched.copy() if searched is not None else None
     context.active_tag_filter_ids = None
     context.pending_tag_filter = None
+    context.active_tag_filter = None
     context.save_search_filter_state(tag_filter_active=False)
     return apply_search_runtime_filters(context)
 
@@ -104,6 +193,7 @@ def restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
         context.search_results_snapshot = base.copy()
         context.active_tag_filter_ids = None
         context.pending_tag_filter = None
+        context.active_tag_filter = None
         context.save_search_filter_state(tag_filter_active=False)
         context.search_results.set_dataframe(base.copy())
     return context.search_state_payload()
@@ -210,6 +300,7 @@ def load_or_merge_custom_parquet(
     context.search_results.set_dataframe(frame)
     context.search_results_snapshot = context.search_results.get_dataframe().copy()
     context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
+    context.search_results_scope = CUSTOM_PARQUET_SCOPE
     state = context.search_state_payload()
     state["merged" if merge else "loaded"] = path.name
     verb = "merged" if merge else "loaded"

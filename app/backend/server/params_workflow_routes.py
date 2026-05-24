@@ -244,6 +244,7 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
         context.search_results.append_dataframe(frame)
     context.search_results_snapshot = context.search_results.get_dataframe().copy()
     context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
+    context.search_results_scope = "custom_parquet"
     return {
         "ok": True,
         "action": action,

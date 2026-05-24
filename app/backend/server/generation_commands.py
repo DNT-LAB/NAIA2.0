@@ -71,6 +71,8 @@ async def handle_random_command(
         random_request_id=request_id,
     )
     await _send_json(ws, result.websocket_payload())
+    for message in result.extra_messages:
+        await _send_json(ws, message)
 
 
 async def handle_generate_command(

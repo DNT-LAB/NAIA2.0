@@ -1,10 +1,10 @@
 """PyQt-free service container for the Remote Web headless runtime.
 
 This module is the Round 31 skeleton for the headless Web Session migration.
-It intentionally does not import the desktop application, RemoteBridge, or
-Qt-backed controllers. Later rounds can move FastAPI and generation behavior
-onto this container incrementally while the desktop-backed WebShell remains
-available as a compatibility path.
+It intentionally does not import the removed desktop application, RemoteBridge,
+or Qt-backed controllers. Later rounds can continue moving FastAPI and
+generation behavior onto this container without restoring the old desktop
+WebShell path.
 """
 
 from __future__ import annotations
@@ -55,6 +55,11 @@ class WebSessionContext:
     filter_data_manager: Any = None
     search_results: SearchResultModel = field(default_factory=SearchResultModel)
     search_results_snapshot: Any = None
+    search_results_master_base_snapshot: Any = None
+    search_query_ratings: set[str] = field(default_factory=lambda: {"g", "s", "q", "e"})
+    active_tag_filter_ids: set[Any] | None = None
+    pending_tag_filter: dict[str, Any] | None = None
+    active_tag_filter: dict[str, Any] | None = None
     current_source_row: Any = None
     current_prompt_context: Any = None
     pipeline_run_registry: PipelineRunRegistry = field(default_factory=PipelineRunRegistry)
@@ -349,6 +354,9 @@ class WebSessionContext:
 
     def runner_parquet_sources(self) -> list[tuple[Path, str]]:
         return self._search_state_service().runner_parquet_sources()
+
+    def tag_archive_parquet_sources(self) -> list[tuple[Path, str]]:
+        return self._search_state_service().tag_archive_parquet_sources()
 
     def custom_parquet_names(self) -> list[str]:
         return self._search_state_service().custom_parquet_names()

@@ -7,6 +7,7 @@ from fastapi import WebSocket
 
 from app.backend.server.search_runtime import (
     apply_search_runtime_filters,
+    clear_active_tag_filter,
     load_or_merge_custom_parquet,
     restore_search_snapshot,
     run_search_command,
@@ -64,16 +65,21 @@ async def handle_search_command(
         return True
 
     if command_type == "search":
+        archive_count = 0
+        sources = getattr(context, "tag_archive_parquet_sources", None)
+        if callable(sources) and getattr(context, "search_results_scope", "") != "custom_parquet":
+            archive_count = len(sources())
+        progress_total = max(1, archive_count)
         await _send_json(ws, {
             "type": "search_progress",
             "completed": 0,
-            "total": 1,
+            "total": progress_total,
         })
         state = await run_in_thread(run_search_command, context, command)
         await _send_json(ws, {
             "type": "search_progress",
-            "completed": 1,
-            "total": 1,
+            "completed": progress_total,
+            "total": progress_total,
         })
         await _send_json(ws, state)
         return True
@@ -136,6 +142,13 @@ async def handle_search_command(
             return True
         context.active_tag_filter_ids = set(pending.get("ids") or set())
         tags = [str(tag) for tag in pending.get("tags", [])]
+        context.active_tag_filter = {
+            "tags": tags,
+            "ids": set(context.active_tag_filter_ids),
+            "count": int(pending.get("count") or 0),
+            "request_id": request_id,
+            "rating_counts": dict(pending.get("rating_counts") or {}),
+        }
         context.save_search_filter_state(
             tag_filter=[tag for tag in tags if not tag.startswith("-")],
             tag_filter_exclude=[tag.lstrip("-") for tag in tags if tag.startswith("-")],
@@ -146,15 +159,13 @@ async def handle_search_command(
             "type": "tag_filter_assigned",
             "count": pending.get("count", 0),
             "tags": tags,
+            "rating_counts": pending.get("rating_counts", {}),
         })
         await _send_json(ws, state)
         return True
 
     if command_type == "tag_filter_clear":
-        context.active_tag_filter_ids = None
-        context.pending_tag_filter = None
-        context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
-        state = await run_in_thread(apply_search_runtime_filters, context)
+        state = await run_in_thread(clear_active_tag_filter, context)
         await _send_json(ws, {
             "type": "tag_filter_result",
             "count": 0,

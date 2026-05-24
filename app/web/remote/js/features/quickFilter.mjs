@@ -408,6 +408,7 @@ export function createQuickFilterController(deps) {
 
   function onAssigned(message) {
     active = true;
+    if (message.rating_counts) ratingCounts = message.rating_counts;
     const toggleBtn = getEl('tagFilterToggle');
     if (toggleBtn) {
       toggleBtn.classList.remove('active');
@@ -430,6 +431,25 @@ export function createQuickFilterController(deps) {
       deps.updateSearchCount(filtered);
     }
     deps.showToast(`Tag filter assigned: ${(message.count || 0).toLocaleString()} rows`, 'success');
+  }
+
+  function onUpdate(message) {
+    if (message.rating_counts) ratingCounts = message.rating_counts;
+    const countEl = getEl('tagFilterCount');
+    if (countEl) {
+      countEl.textContent = `${(message.count || 0).toLocaleString()} assigned`;
+      countEl.classList.add('has-result');
+    }
+    const toggleBtn = getEl('tagFilterToggle');
+    if (toggleBtn && active) toggleBtn.classList.add('assigned');
+    if (ratingCounts) {
+      let filtered = 0;
+      const ratingState = deps.getRatingState();
+      RATING_KEYS.forEach(key => {
+        if (ratingState[key]) filtered += (ratingCounts[key] || 0);
+      });
+      deps.updateSearchCount(filtered);
+    }
   }
 
   function onAutocompleteResult(message) {
@@ -510,6 +530,7 @@ export function createQuickFilterController(deps) {
     assign,
     onResult,
     onAssigned,
+    onUpdate,
     onAutocompleteResult,
     applyPreferences,
     restorePreferences,

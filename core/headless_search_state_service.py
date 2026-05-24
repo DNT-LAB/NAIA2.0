@@ -12,6 +12,13 @@ import re
 SUPPORTED_RATINGS = ("g", "s", "q", "e")
 
 
+def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
+    match = re.match(r"^tags_(\d+)\.parquet$", path.name)
+    if match:
+        return int(match.group(1)), path.name
+    return 10**9, path.name
+
+
 class HeadlessSearchStateService:
     def __init__(self, context: Any):
         self.context = context
@@ -192,6 +199,45 @@ class HeadlessSearchStateService:
             return context.runtime_paths.cache_dir / "naia_temp_rows.parquet"
         return Path(context.repo_root) / "naia_temp_rows.parquet"
 
+    def tag_archive_parquet_sources(self) -> list[tuple[Path, str]]:
+        """Return the active image-tag archive shards for full search.
+
+        Runtime user data is the authoritative archive location for packaged
+        runs. Source-tree data is only a development fallback when no runtime
+        archive has been installed yet.
+        """
+
+        context = self.context
+        root = Path(context.repo_root)
+        directories: list[tuple[Path, str]] = []
+        if context.runtime_paths is not None:
+            directories.append((
+                context.runtime_paths.data_dir / "tags",
+                "runtime tag archive parquet",
+            ))
+            directories.append((
+                context.runtime_paths.resource_path("data") / "tags",
+                "resource tag archive parquet",
+            ))
+        directories.append((root / "data" / "tags", "source tag archive parquet"))
+
+        seen_dirs: set[Path] = set()
+        for directory, label in directories:
+            resolved_dir = Path(directory).resolve()
+            if resolved_dir in seen_dirs:
+                continue
+            seen_dirs.add(resolved_dir)
+            if not resolved_dir.is_dir():
+                continue
+            files = [
+                path.resolve()
+                for path in sorted(resolved_dir.glob("tags_*.parquet"), key=_tag_archive_sort_key)
+                if path.is_file()
+            ]
+            if files:
+                return [(path, label) for path in files]
+        return []
+
     def runner_parquet_sources(self) -> list[tuple[Path, str]]:
         context = self.context
         root = Path(context.repo_root)
@@ -201,10 +247,9 @@ class HeadlessSearchStateService:
                 context.runtime_paths.data_dir / "naia_temp_rows.parquet",
                 "runtime data parquet",
             ))
-            candidates.append((
-                context.runtime_paths.data_dir / "tags" / "tags_129.parquet",
-                "runtime tag archive parquet",
-            ))
+            tag_archive_sources = self.tag_archive_parquet_sources()
+            if tag_archive_sources:
+                candidates.append(tag_archive_sources[-1])
         candidates.extend([
             (root / "data" / "naia_temp_rows.parquet", "legacy data parquet"),
             (root / "naia_temp_rows.parquet", "legacy temp parquet"),
@@ -229,6 +274,9 @@ class HeadlessSearchStateService:
     def search_state_payload(self) -> dict[str, Any]:
         context = self.context
         active_ratings = self.get_active_ratings()
+        search_ratings = self.normalize_rating_list(
+            getattr(context, "search_query_ratings", None) or list(SUPPORTED_RATINGS)
+        )
         snapshot = getattr(context, "search_results_snapshot", None)
         if snapshot is not None and not getattr(snapshot, "empty", True) and "rating" in snapshot.columns:
             rating_counts = {
@@ -253,7 +301,7 @@ class HeadlessSearchStateService:
             "rating_counts": rating_counts,
             "query": filter_preferences.get("query", ""),
             "exclude": filter_preferences.get("exclude", ""),
-            "ratings": {rating: rating in active_ratings for rating in SUPPORTED_RATINGS},
+            "ratings": {rating: rating in search_ratings for rating in SUPPORTED_RATINGS},
             "filter_preferences": filter_preferences,
             "parquets": self.custom_parquet_names(),
         }

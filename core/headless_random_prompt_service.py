@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from threading import RLock
@@ -31,6 +31,7 @@ class HeadlessRandomPromptResult:
     prompt_run_id: str = ""
     detected_resolution: tuple[int, int] | None = None
     reset_resolution_detected: bool = False
+    extra_messages: list[dict[str, Any]] = field(default_factory=list)
 
     def websocket_payload(self) -> dict[str, Any]:
         if not self.success:
@@ -127,6 +128,18 @@ class HeadlessRandomPromptService:
             source_row_override = request.source_row_override
             skip_random_events = request.skip_random_prompt_events
 
+        tag_filter_update = None
+        if source_row_override is None:
+            source_row_override, tag_filter_update, tag_filter_error = self._pop_active_tag_filter_source_row(ratings)
+            if tag_filter_error:
+                return HeadlessRandomPromptResult(
+                    success=False,
+                    error=tag_filter_error,
+                    random_request_id=random_request_id,
+                    remaining=self.context.search_results.get_count(),
+                    rating_counts=self._rating_counts(),
+                )
+
         publish = getattr(self.context, "publish", None)
         if callable(publish) and not skip_random_events:
             publish("random_prompt_triggered")
@@ -181,7 +194,133 @@ class HeadlessRandomPromptService:
             prompt_run_id=prompt_run_id,
             detected_resolution=result.detected_resolution,
             reset_resolution_detected=result.reset_resolution_detected,
+            extra_messages=[tag_filter_update] if tag_filter_update else [],
         )
+
+    def _active_tag_filter_state(self) -> dict[str, Any] | None:
+        tag_filter = getattr(self.context, "active_tag_filter", None)
+        if isinstance(tag_filter, dict):
+            return tag_filter
+        ids = getattr(self.context, "active_tag_filter_ids", None)
+        if ids is None:
+            return None
+        tag_filter = {
+            "ids": set(ids),
+            "count": len(ids),
+            "tags": [],
+            "rating_counts": {},
+        }
+        self.context.active_tag_filter = tag_filter
+        return tag_filter
+
+    @staticmethod
+    def _normalize_tag_filter_row_id(value: Any):
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            text = str(value or "").strip()
+            return text or None
+
+    def _pick_active_tag_filter_snapshot_row(
+        self,
+        active_ratings: set[str],
+        ids: set[Any],
+    ) -> pd.Series | None:
+        snapshot = getattr(self.context, "search_results_snapshot", None)
+        if snapshot is None or getattr(snapshot, "empty", True):
+            snapshot = getattr(self.context, "search_results_master_base_snapshot", None)
+        if snapshot is None or getattr(snapshot, "empty", True) or "id" not in snapshot.columns:
+            return None
+
+        normalized_ids = {
+            normalized
+            for normalized in (self._normalize_tag_filter_row_id(value) for value in ids)
+            if normalized is not None
+        }
+        if not normalized_ids:
+            return None
+        frame = snapshot[
+            snapshot["id"].map(self._normalize_tag_filter_row_id).isin(normalized_ids)
+        ]
+        if active_ratings and "rating" in frame.columns:
+            frame = frame[frame["rating"].astype(str).str.strip().str.lower().isin(active_ratings)]
+        if frame.empty:
+            return None
+        return frame.sample(n=1).iloc[0].copy()
+
+    def _consume_active_tag_filter_row(self, tag_filter: dict[str, Any], row: pd.Series) -> bool:
+        try:
+            ids = tag_filter.get("ids")
+            row_id = self._normalize_tag_filter_row_id(row.get("id"))
+            if isinstance(ids, set):
+                matched_id = None
+                for candidate_id in ids:
+                    if self._normalize_tag_filter_row_id(candidate_id) == row_id:
+                        matched_id = candidate_id
+                        break
+                if matched_id is None:
+                    return False
+                ids.discard(matched_id)
+                self.context.active_tag_filter_ids = set(ids)
+
+            tag_filter["count"] = max(0, int(tag_filter.get("count") or 0) - 1)
+            rating_counts = tag_filter.get("rating_counts")
+            if isinstance(rating_counts, dict):
+                rating = str(row.get("rating") or "").strip().lower()
+                if rating in rating_counts:
+                    rating_counts[rating] = max(0, int(rating_counts.get(rating) or 0) - 1)
+            return True
+        except Exception as exc:
+            print(f"Headless Remote: tag filter consume update failed - {exc}", flush=True)
+            return False
+
+    @staticmethod
+    def _tag_filter_update_payload(tag_filter: dict[str, Any]) -> dict[str, Any]:
+        payload = {
+            "type": "tag_filter_update",
+            "count": int(tag_filter.get("count") or 0),
+            "tags": tag_filter.get("tags") or [],
+        }
+        rating_counts = tag_filter.get("rating_counts")
+        if isinstance(rating_counts, dict):
+            payload["rating_counts"] = {
+                rating: int(rating_counts.get(rating, 0) or 0)
+                for rating in DEFAULT_RATINGS
+            }
+        return payload
+
+    def _pop_active_tag_filter_source_row(
+        self,
+        active_ratings: set[str],
+    ) -> tuple[pd.Series | None, dict[str, Any] | None, str]:
+        tag_filter = self._active_tag_filter_state()
+        if not tag_filter:
+            return None, None, ""
+
+        ids = tag_filter.get("ids")
+        if not isinstance(ids, set) or not ids or int(tag_filter.get("count") or 0) <= 0:
+            return None, None, "Tag filter: no matching rows"
+
+        row = None
+        search_results = getattr(self.context, "search_results", None)
+        if search_results is not None and not search_results.is_empty():
+            pop_with_id_filter = getattr(search_results, "pop_random_row_with_id_filter", None)
+            if callable(pop_with_id_filter):
+                row = pop_with_id_filter(active_ratings, ids)
+
+        if row is None:
+            row = self._pick_active_tag_filter_snapshot_row(active_ratings, ids)
+
+        if row is None:
+            return None, None, "Tag filter: no matching rows"
+        if not self._consume_active_tag_filter_row(tag_filter, row):
+            return None, None, "Tag filter: no matching rows"
+        return row, self._tag_filter_update_payload(tag_filter), ""
 
     def _random_settings(self, overrides: dict[str, Any] | None) -> dict[str, Any]:
         request_overrides = overrides if isinstance(overrides, dict) else {}

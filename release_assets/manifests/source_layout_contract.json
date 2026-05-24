@@ -18,10 +18,7 @@
     "data/source",
     "app_data_template",
     "release_assets/manifests",
-    "release_assets/samples",
-    "tests/headless",
-    "tests/electron_shell",
-    "tests/integration"
+    "release_assets/samples"
   ],
   "python_package_markers": [
     "app/__init__.py",
@@ -41,9 +38,13 @@
     "output",
     "save"
   ],
+  "development_only_roots": [
+    "tests"
+  ],
   "rules": [
     "Source layout scaffolding must exist before large filesystem moves.",
     "Runtime-only roots are excluded from release source layout checks.",
+    "Development-only roots are local validation surfaces and must not be remote-published source.",
     "New headless backend ownership packages must be importable without PyQt6."
   ]
 }

@@ -36,6 +36,9 @@
         "electron-builder",
         "Docker",
         "bundled Python runtime"
+      ],
+      "local_only_roots": [
+        "tests"
       ]
     },
     "electron_release": {
@@ -92,6 +95,7 @@
   "release_manifest": "release_assets/manifests/release_include_exclude_draft.json",
   "hard_rules": [
     "The source_web track is the default product path and must run without npm, Electron, Docker, or bundled Python.",
+    "Remote-published source excludes tests/ and other local development-only validation surfaces.",
     "The electron_release track is a shell and release-maintainer path only.",
     "Both tracks must use the same core/web_session_app.py backend API.",
     "Both tracks must use app/web/remote as the only source-owned Remote Web UI.",

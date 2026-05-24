@@ -36,12 +36,18 @@ NAIA2.0/
     electron/            # optional Electron shell only
   release_package/       # reusable packaging workspace, gitignored by default
   release_assets/        # manifests, contracts, release gates
-  tests/
-    headless/
-    electron_shell/
 ```
 
 The canonical Remote Web source is `app/web/remote`. The older `ui/remote_web` path has been removed from source ownership and must not receive new feature work. Compatibility fallback code may still recognize that path only for old checkouts or explicit local overrides, not as an active source directory.
+
+## Remote Publish Rule
+
+Remote-published source must be the smallest executable product surface that can run the program and keep all supported features available.
+
+- `/tests/` is local-development-only and must not be tracked or pushed to the remote branch.
+- Remote-published source may contain runtime code, bootstrap assets, release manifests, and launchers required to run or package the app.
+- Remote-published source must not contain test suites, local smoke workspaces, generated caches, or build outputs.
+- A fresh remote checkout must still run Python Headless Web through `NAIA_web_headless.py` with `requirements-headless.txt`.
 
 ## Default Execution Rules
 
@@ -79,7 +85,6 @@ Allowed Electron source and release-maintainer paths:
 - `release_package/`
 - `release_assets/`
 - `tools/`
-- `tests/electron_shell/`
 
 Electron may own:
 

@@ -31,6 +31,24 @@
       "NAIA_cold_v4.py"
     ]
   },
+  "remote_publish": {
+    "role": "Remote-published source is the minimal executable product surface, not the full local development workspace.",
+    "local_only_roots": [
+      "tests"
+    ],
+    "required_terms": [
+      "Remote-published source",
+      "/tests/",
+      "local-development-only",
+      "NAIA_web_headless.py",
+      "requirements-headless.txt"
+    ],
+    "rules": [
+      "tests/ must remain local-development-only and must not be tracked in remote-published source.",
+      "Remote-published source must keep the program executable with all supported features available.",
+      "Build outputs, smoke workspaces, generated caches, and local runtime data remain excluded."
+    ]
+  },
   "legacy_desktop": {
     "root": "legacy_desktop",
     "entrypoint": "legacy_desktop/NAIA_cold_v4.py",
@@ -64,8 +82,7 @@
       "app/electron",
       "release_package",
       "release_assets",
-      "tools",
-      "tests/electron_shell"
+      "tools"
     ],
     "root_residue_warning_paths": [
       "main.cjs",
@@ -86,6 +103,7 @@
   ],
   "rules": [
     "Default clone users run Python Headless Web without npm, Electron, or Docker.",
+    "Remote-published source excludes local development tests while preserving a runnable product surface.",
     "Electron is an optional shell around the same Python backend and Remote Web UI.",
     "The canonical Remote Web source is app/web/remote.",
     "Legacy PyQt6 Desktop source is removed from active source ownership.",

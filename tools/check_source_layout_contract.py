@@ -92,6 +92,7 @@ def check_source_layout_contract(
     required_directories = list(manifest.get("required_directories", []))
     python_package_markers = list(manifest.get("python_package_markers", []))
     runtime_only_roots = list(manifest.get("runtime_only_roots", []))
+    development_only_roots = list(manifest.get("development_only_roots", []))
 
     violations: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
@@ -121,12 +122,22 @@ def check_source_layout_contract(
                 "path": root,
             })
 
+    for root in development_only_roots:
+        if not _is_safe_relative_path(root):
+            violations.append({"type": "unsafe_development_only_root", "path": root})
+        if root in required_directories:
+            violations.append({
+                "type": "development_only_root_required_as_source_directory",
+                "path": root,
+            })
+
     return {
         "ok": not violations,
         "contract": _repo_relative(manifest_path, repo_root),
         "required_directory_count": len(required_directories),
         "python_package_marker_count": len(python_package_markers),
         "runtime_only_root_count": len(runtime_only_roots),
+        "development_only_root_count": len(development_only_roots),
         "violations": violations,
         "warnings": warnings,
     }

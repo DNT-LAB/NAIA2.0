@@ -1,2 +1,0 @@
-fastapi
-PyQt6==6.9.1

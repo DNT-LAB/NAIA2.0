@@ -109,6 +109,20 @@ def _check_source_web_track(repo_root: Path, track: dict[str, Any]) -> list[dict
                 "path": str(raw_launcher),
                 "reason": f"source web launcher must not require {blocked}",
             })
+    local_only_roots = [str(item).strip().strip("/\\") for item in track.get("local_only_roots", [])]
+    if "tests" not in local_only_roots:
+        violations.append({
+            "type": "source_track_missing_tests_local_only",
+            "path": "source_web.local_only_roots",
+            "reason": "tests must stay local-development-only and out of remote-published source",
+        })
+    for root in local_only_roots:
+        if root and not _is_safe_relative_path(root):
+            violations.append({
+                "type": "unsafe_source_track_local_only_root",
+                "path": root,
+                "reason": "source web local-only roots must be repository-relative",
+            })
     return violations
 
 
@@ -224,12 +238,12 @@ def _check_release_manifest(repo_root: Path, manifest: dict[str, Any]) -> list[d
             "path": raw_path,
             "reason": "release web_ui include must not use ui/remote_web/**",
         })
-    for required in ("app/electron/dist/**", "user-data/**", "wildcards/**"):
+    for required in ("app/electron/dist/**", "user-data/**", "wildcards/**", "tests/**"):
         if required not in runtime_state and required not in development and required not in flattened_excludes:
             violations.append({
                 "type": "release_manifest_missing_runtime_exclude",
                 "path": required,
-                "reason": "release manifest must exclude local runtime/build output from source staging",
+                "reason": "release manifest must exclude local runtime/build/test output from source staging",
             })
     return violations
 

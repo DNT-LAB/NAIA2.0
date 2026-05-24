@@ -6,6 +6,7 @@ import argparse
 import importlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 
@@ -72,6 +73,73 @@ def _check_policy_document(repo_root: Path, manifest: dict[str, Any]) -> list[di
                 "path": policy_doc,
                 "reason": f"missing required term: {term}",
             })
+    return violations
+
+
+def _git_tracked_paths(repo_root: Path, root: str) -> list[str]:
+    git_dir = repo_root / ".git"
+    if not git_dir.exists():
+        return []
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--", root],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError:
+        return []
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _check_remote_publish_boundary(repo_root: Path, manifest: dict[str, Any]) -> list[dict[str, str]]:
+    violations: list[dict[str, str]] = []
+    remote_publish = manifest.get("remote_publish") if isinstance(manifest.get("remote_publish"), dict) else {}
+    policy_doc = str(manifest.get("policy_document") or "")
+
+    local_only_roots = [str(root).strip().strip("/\\") for root in remote_publish.get("local_only_roots", [])]
+    if "tests" not in local_only_roots:
+        violations.append({
+            "type": "remote_publish_missing_tests_local_only",
+            "path": "remote_publish.local_only_roots",
+            "reason": "tests must be declared as local-development-only",
+        })
+
+    for root in local_only_roots:
+        if not root:
+            continue
+        if not _is_safe_relative_path(root):
+            violations.append({
+                "type": "unsafe_remote_publish_local_only_root",
+                "path": root,
+                "reason": "remote publish local-only roots must be relative",
+            })
+            continue
+        tracked = _git_tracked_paths(repo_root, root)
+        if tracked:
+            violations.append({
+                "type": "remote_publish_local_only_root_tracked",
+                "path": root,
+                "reason": f"local-only root has tracked files: {len(tracked)}",
+            })
+
+    if policy_doc:
+        policy_path = repo_root / policy_doc
+        if policy_path.is_file():
+            policy_text = _read_text(policy_path)
+            for term in remote_publish.get("required_terms", []):
+                term_text = str(term)
+                if term_text and term_text not in policy_text:
+                    violations.append({
+                        "type": "policy_document_missing_remote_publish_term",
+                        "path": policy_doc,
+                        "reason": f"missing remote publish term: {term_text}",
+                    })
     return violations
 
 
@@ -313,6 +381,7 @@ def check_project_layout_policy(
     violations: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
     violations.extend(_check_policy_document(repo_root, manifest))
+    violations.extend(_check_remote_publish_boundary(repo_root, manifest))
     violations.extend(_check_default_runtime(repo_root, manifest))
     violations.extend(_check_legacy_desktop_boundary(repo_root, manifest))
     violations.extend(_check_remote_web(repo_root, manifest))

@@ -114,27 +114,33 @@ def _check_legacy_desktop_boundary(repo_root: Path, manifest: dict[str, Any]) ->
 
     root = str(legacy.get("root") or "")
     entrypoint = str(legacy.get("entrypoint") or "")
-    _check_relative_dir(repo_root, root, violations, "legacy desktop reference root is required")
-    _check_relative_file(repo_root, entrypoint, violations, "legacy desktop reference entrypoint is required")
-    _check_relative_file(
-        repo_root,
-        str(legacy.get("classification_manifest") or ""),
-        violations,
-        "legacy PyQt surface classification manifest is required",
-    )
 
-    if legacy.get("status") != "reference_only":
+    if legacy.get("status") != "removed":
         violations.append({
-            "type": "legacy_desktop_not_reference_only",
+            "type": "legacy_desktop_not_removed",
             "path": "legacy_desktop.status",
-            "reason": "legacy desktop status must be reference_only",
+            "reason": "legacy desktop status must be removed",
         })
+
+    for raw_path, violation_type, reason in (
+        (root, "legacy_desktop_root_still_present", "removed legacy desktop root must stay absent"),
+        (entrypoint, "legacy_desktop_entrypoint_still_present", "removed legacy desktop entrypoint must stay absent"),
+    ):
+        if not _is_safe_relative_path(raw_path):
+            violations.append({"type": "unsafe_path", "path": raw_path, "reason": reason})
+            continue
+        if (repo_root / raw_path).exists():
+            violations.append({
+                "type": violation_type,
+                "path": raw_path,
+                "reason": reason,
+            })
 
     if policy_doc:
         policy_path = repo_root / policy_doc
         if policy_path.is_file():
             policy_text = _read_text(policy_path)
-            for term in ("reference-only", "not the active product baseline"):
+            for term in ("Legacy Desktop source must stay removed", "git history"):
                 if term not in policy_text:
                     violations.append({
                         "type": "policy_document_missing_legacy_boundary_term",
@@ -187,10 +193,12 @@ def _check_remote_web(repo_root: Path, manifest: dict[str, Any]) -> list[dict[st
     module_name = str(remote.get("resolver_module") or "")
     function_name = str(remote.get("resolver_function") or "")
     if module_name and function_name and web_dir is not None:
+        inserted_repo_root = False
         try:
             repo_root_text = str(repo_root)
             if repo_root_text not in sys.path:
                 sys.path.insert(0, repo_root_text)
+                inserted_repo_root = True
             module = importlib.import_module(module_name)
             resolver = getattr(module, function_name)
             resolved = Path(resolver(repo_root, env={})).resolve()
@@ -206,6 +214,12 @@ def _check_remote_web(repo_root: Path, manifest: dict[str, Any]) -> list[dict[st
                 "path": f"{module_name}.{function_name}",
                 "reason": str(exc),
             })
+        finally:
+            if inserted_repo_root:
+                try:
+                    sys.path.remove(repo_root_text)
+                except ValueError:
+                    pass
     return violations
 
 
@@ -258,7 +272,7 @@ def _check_evidence_manifests(repo_root: Path, manifest: dict[str, Any]) -> list
         return [{
             "type": "missing_evidence_manifests",
             "path": "evidence_manifests",
-            "reason": "layout policy must reference round completion, cleanup candidate, runtime distribution, refactor-plan execution, and legacy PyQt surface manifests",
+            "reason": "layout policy must reference round completion, cleanup candidate, runtime distribution, and refactor-plan execution manifests",
         }]
 
     for key in (
@@ -266,7 +280,6 @@ def _check_evidence_manifests(repo_root: Path, manifest: dict[str, Any]) -> list
         "cleanup_candidates",
         "runtime_distribution_tracks",
         "refactor_plan_execution",
-        "legacy_pyqt_surfaces",
     ):
         raw_path = str(evidence_manifests.get(key) or "")
         if not raw_path:
@@ -327,7 +340,6 @@ def check_project_layout_policy(
         "cleanup_candidates_manifest": evidence_manifests.get("cleanup_candidates", ""),
         "runtime_distribution_tracks_manifest": evidence_manifests.get("runtime_distribution_tracks", ""),
         "refactor_plan_execution_manifest": evidence_manifests.get("refactor_plan_execution", ""),
-        "legacy_pyqt_surfaces_manifest": evidence_manifests.get("legacy_pyqt_surfaces", ""),
         "violation_count": len(violations),
         "warning_count": len(warnings),
         "violations": violations,

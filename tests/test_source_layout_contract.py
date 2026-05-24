@@ -8,9 +8,11 @@ from tools.check_source_layout_contract import check_source_layout_contract
 
 def test_source_layout_contract_passes_current_repository():
     payload = check_source_layout_contract(repo_root=Path("."))
+    manifest = json.loads(Path("release_assets/manifests/source_layout_contract.json").read_text(encoding="utf-8"))
 
     assert payload["ok"] is True
-    assert payload["required_directory_count"] >= 25
+    assert payload["required_directory_count"] == len(manifest["required_directories"])
+    assert payload["required_directory_count"] >= 20
     assert payload["python_package_marker_count"] >= 10
     assert payload["violations"] == []
 

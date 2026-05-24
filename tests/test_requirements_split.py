@@ -12,12 +12,6 @@ HEADLESS_REQUIREMENT_FILES = [
     "requirements-headless.txt",
 ]
 
-LEGACY_REQUIREMENT_FILES = [
-    "requirements-desktop-legacy.txt",
-    "requirements-desktop-legacy-mac.txt",
-    "requirements-desktop-legacy-linux.txt",
-]
-
 HEADLESS_FORBIDDEN_PACKAGES = [
     "pyqt6",
     "pyqt6-qt6",
@@ -53,17 +47,6 @@ def test_headless_requirements_do_not_include_desktop_packages():
 def test_platform_default_requirements_delegate_to_headless_file():
     for path in ["requirements.txt", "requirements_mac.txt", "requirements_linux.txt"]:
         assert requirement_lines(path) == ["-r requirements-headless.txt"]
-
-
-def test_legacy_desktop_requirements_extend_headless_and_keep_pyqt():
-    for path in LEGACY_REQUIREMENT_FILES:
-        lines = requirement_lines(path)
-        text = "\n".join(lines)
-        assert lines[0] == "-r requirements-headless.txt"
-        assert "pyqt6==6.9.1" in text
-        assert "pyqt6-webengine==6.9.0" in text
-        assert "pyqt6-qscintilla" in text
-        assert "ultralytics" in text
 
 
 def test_launchers_install_matching_requirement_sets():
@@ -185,7 +168,6 @@ modules = [
     "interfaces.base_tab_module",
     "interfaces.headless_module_protocol",
     "interfaces.legacy_module_protocol",
-    "utils.clipboard_image",
     "app.backend.server",
     "app.backend.runtime",
     "app.web",
@@ -223,7 +205,7 @@ print(json.dumps({
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload == {
         "ok": True,
-        "modules": 24,
+        "modules": 23,
         "pyqt_imported": False,
     }
 
@@ -268,4 +250,4 @@ def test_headless_and_legacy_module_protocols_are_qt_free():
 
 def test_generation_params_manager_has_no_root_legacy_shim():
     assert not Path("utils/load_generation_params.py").exists()
-    assert Path("legacy_desktop/utils/load_generation_params.py").is_file()
+    assert not Path("legacy_desktop/utils/load_generation_params.py").exists()

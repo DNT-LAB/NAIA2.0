@@ -17,12 +17,7 @@
       "PySide6",
       "qtpy"
     ],
-    "desktop_requirements_files": [
-      "requirements-desktop-legacy.txt",
-      "requirements-desktop-legacy-linux.txt",
-      "requirements-desktop-legacy-mac.txt"
-    ],
-    "notes": "Normal clone users install this file for Python Headless Web. Qt and desktop-only dependencies must stay in requirements-desktop-legacy*.txt and never flow into the supported headless runtime."
+    "notes": "Normal clone users install this file for Python Headless Web. Qt and desktop-only dependencies must never flow into the supported headless runtime."
   },
   "legacy_core_files": [
     {
@@ -73,7 +68,7 @@
       "release_exclude_patterns": [
         "core/dll_fix.py"
       ],
-      "notes": "Imported by legacy_desktop/NAIA_cold_v4.py for desktop Windows DLL loading. Not a headless backend startup dependency."
+      "notes": "Formerly imported by the removed legacy_desktop/NAIA_cold_v4.py entrypoint for desktop Windows DLL loading. Not a headless backend startup dependency."
     }
   ]
 }

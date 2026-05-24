@@ -11,16 +11,17 @@ The default NAIA2 product is Python Headless Web:
 
 Electron is optional. It is a desktop shell and release/portable packaging path around the same Python backend and the same Remote Web UI. Electron must not make npm, Node, Electron, or Docker mandatory for normal git-clone web execution.
 
-Legacy PyQt6/QWebApplication Desktop is reference-only. It may be used to inspect previous behavior while migrating parity, but it is not the active product baseline for new work.
+Legacy PyQt6/QWebApplication Desktop has been removed from source ownership. Historical behavior may be recovered from git history when needed, but it is not an active reference tree or product baseline for new work.
 
-## Legacy Desktop Reference Rule
+## Legacy Desktop Removal Rule
 
-Legacy Desktop access is explicit and reference-only:
+Legacy Desktop source must stay removed from the active tree:
 
-- Reference entrypoint: `legacy_desktop/NAIA_cold_v4.py`.
-- Valid use: historical behavior inspection and migration reference.
-- Invalid use: default launchers, normal clone-user setup, release shell behavior, or new feature ownership.
-- Desktop-only tests must either live under `tests/legacy_desktop/` or be listed in `release_assets/manifests/legacy_pyqt_surface_classification.json`.
+- Removed root: `legacy_desktop/`.
+- Removed entrypoint: `legacy_desktop/NAIA_cold_v4.py`.
+- Valid use: historical inspection through git history only.
+- Invalid use: default launchers, normal clone-user setup, release shell behavior, new feature ownership, or active tests.
+- Any remaining desktop-only PyQt surfaces must be classified as release-excluded rebuild/delete candidates, not as active legacy desktop code.
 
 Default launchers must not reference `legacy_desktop`, `NAIA_cold_v4.py`, or `requirements-desktop-legacy*`.
 
@@ -33,13 +34,11 @@ NAIA2.0/
     backend/             # optional shell/launcher backend adapters
     web/remote/          # canonical Remote Web UI source
     electron/            # optional Electron shell only
-  legacy_desktop/        # PyQt6 reference/quarantine only
   release_package/       # reusable packaging workspace, gitignored by default
   release_assets/        # manifests, contracts, release gates
   tests/
     headless/
     electron_shell/
-    legacy_desktop/
 ```
 
 The canonical Remote Web source is `app/web/remote`. The older `ui/remote_web` path has been removed from source ownership and must not receive new feature work. Compatibility fallback code may still recognize that path only for old checkouts or explicit local overrides, not as an active source directory.
@@ -132,7 +131,7 @@ Move-only rounds must not:
 - Change generation dispatch behavior.
 - Change queue semantics.
 - Add new user-visible features.
-- Delete legacy code before replacement and feature smoke are proven.
+- Reintroduce deleted legacy desktop code instead of rebuilding against headless/web contracts.
 
 ## Cleanup Candidate Rule
 
@@ -178,6 +177,5 @@ Layout and runtime-boundary changes should keep these checks passing:
 - `python tools/check_runtime_asset_classification.py`
 - `python tools/check_runtime_write_policy.py`
 - `python tools/check_remote_web_feature_contract.py`
-- `python tools/check_legacy_pyqt_surface_classification.py`
 
 Electron-specific gates are release-maintainer checks, not normal clone-user startup requirements.

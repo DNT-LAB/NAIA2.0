@@ -321,7 +321,7 @@ result = prepare_variation_inpaint_canvas(pil_image)
 |----------|------|
 | `modules/`, `tabs/` | token_calculator, image_info, translator, cloudflared 호출 |
 | `core/` | load_generation_params (MainWindow 통합) |
-| `ui/` | character_asset_storage, reference_inpaint_preprocess 호출 (에셋 생성/스토리지 창, `NAIA_cold_v4.apply_character_asset_reference_from_image`) |
+| `app/web/remote`, `core/` | Headless Remote Web flows에서 metadata/translation/token utilities 호출 |
 | `interfaces/` | 독립 |
 
 **예외**: `character_asset_storage.py`는 `utils/image_info.py`의 `ImageMetadataExtractor`에 의존합니다 (원래 utils 내부는 독립이지만, 이 파일은 utils 내 조합만 사용). UI/컨트롤러 비의존 원칙은 유지됩니다.

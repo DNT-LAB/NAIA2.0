@@ -1,6 +1,6 @@
 # CLAUDE.md — NAIA 2.0
 
-Headless Remote Web 중심 AI 이미지 생성 앱. NovelAI / Stable Diffusion WebUI / ComfyUI 백엔드 지원. PyQt6 데스크톱 앱은 legacy 경로로 분리 중.
+Headless Remote Web 중심 AI 이미지 생성 앱. NovelAI / Stable Diffusion WebUI / ComfyUI 백엔드 지원. PyQt6 데스크톱 앱은 active source에서 제거되었으며 필요 시 git history로만 확인한다.
 
 **우선순위**: 사용자 직접 요청 > 디렉터리별 CLAUDE.md > 본 문서
 
@@ -13,28 +13,22 @@ Headless Remote Web 중심 AI 이미지 생성 앱. NovelAI / Stable Diffusion W
 ```
 NAIA2.0/
 ├── NAIA_web_headless.py        # 지원 Remote Web 진입점
-├── NAIA_cold_v4.py            # legacy PyQt 데스크톱 진입점 + MainWindow
-├── core/                       # AppContext, 컨트롤러, 파이프라인, API
-├── interfaces/                 # 계약 정의 (BaseMiddleModule, BaseTabModule, ModeAwareModule)
-├── modules/*_module.py         # 좌측 패널 모듈 (자동 로드, BaseMiddleModule 상속)
-├── tabs/*_tab.py               # 우측 패널 탭 (자동 로드, BaseTabModule 상속)
-├── ui/                         # 테마, 스케일링, 공용 위젯, 분리 창
-│   ├── theme.py               # DARK_COLORS, DARK_STYLES, get_dynamic_styles()
-│   ├── scaling_manager.py     # get_scaled_font_size(), get_scaled_size()
-│   ├── collapsible.py         # EnhancedCollapsibleBox, FixedBox
-│   └── interactive/           # Interactive Mode (ComfyUI 스타일 블록 UI)
+├── app/web/remote/             # canonical Remote Web UI source
+├── app/backend/                # optional shell/launcher backend adapters
+├── app/electron/               # optional Electron shell
+├── core/                       # headless services, runtime context, generation/search API
+├── interfaces/                 # headless/runtime 계약 정의
+├── release_assets/             # manifests, contracts, release gates
+├── tests/                      # headless/electron/integration checks
 ├── utils/                      # 이미지 메타데이터, 토큰 계산, 번역
 └── data/                       # Parquet 태그 DB, 텍스트 사전
 ```
 
 실행:
 - 지원 웹 세션 모드: `python NAIA_web_headless.py` (또는 `run_NAIA_web.bat` / `run_NAIA_web.command`)
-- legacy 데스크톱 모드: `python NAIA_cold_v4.py --desktop` (또는 `run_NAIA.bat` / `run_NAIA.command`)
-- legacy desktop-backed Web Session: `python NAIA_cold_v4.py --web-session --allow-legacy-web-session` (임시 디버깅 전용)
 
 의존성:
 - 지원 웹 세션: `pip install -r requirements-headless.txt` 또는 `requirements.txt`
-- legacy 데스크톱: Windows `requirements-desktop-legacy.txt`, macOS `requirements-desktop-legacy-mac.txt`, Linux `requirements-desktop-legacy-linux.txt`
 
 ---
 
@@ -133,20 +127,18 @@ HTTP 요청 후 `_cleanup_http_threads()` 호출 필수 (Dummy 스레드 누적 
 
 ---
 
-## 좌측 패널 레이아웃 (NAIA_cold_v4.py)
+## Remote Web 레이아웃
 
 ```
-main_container (QVBoxLayout)
-├── left_panel_scroll_area (stretch=1)  ← 가로 스크롤바 없음
-│   └── CollapsibleBox 모듈들 + FixedBox "프롬프트" + img2img 등
-├── params_toggle_button (▲/▼ 생성 파라미터)
-├── params_area (기본 숨김)
-└── generation_control_frame
+app/web/remote
+├── prompt and generation controls
+├── parameter panels
+├── tool popups / detached module geometry
+└── result and status panels
 ```
 
-- `EnhancedCollapsibleBox`: 접기/펼치기 + 우클릭 분리. 내부 QScrollArea 없음 (부모 스크롤 영역이 담당)
-- `FixedBox`: 헤더 없이 콘텐츠만 + 하단 리사이즈 핸들
-- `CollapsibleBox`: EnhancedCollapsibleBox의 detachable=False 버전
+- Remote Web source of truth는 `app/web/remote`다.
+- Desktop-only PyQt layout behavior must be rebuilt against headless/web contracts instead of restoring removed desktop code.
 
 ---
 

@@ -146,10 +146,10 @@
     },
     {
       "round": "Round 1 - Supported Remote Web Feature Contract Freeze",
-      "item": "Desktop-only code is not removed until its user-visible behavior is either migrated or explicitly declared unsupported.",
-      "evidence": "Legacy PyQt surfaces and legacy core boundaries are explicitly classified and release-excluded.",
+      "item": "Removed desktop-only code does not return to the active Web/Electron tree.",
+      "evidence": "Headless core boundaries remain release-excluded and supported import scans block legacy desktop imports.",
       "requires": [
-        {"path": "sections.legacy_pyqt_surface_classification.ok", "equals": true},
+        {"path": "sections.supported_import_boundary.ok", "equals": true},
         {"path": "sections.headless_core_boundary.ok", "equals": true}
       ]
     },
@@ -187,10 +187,10 @@
     },
     {
       "round": "Round 2 - Legacy/PyQt Isolation",
-      "item": "Legacy desktop code remains reachable only through explicit legacy paths.",
-      "evidence": "Legacy PyQt surfaces and legacy core files are explicitly classified and release-excluded.",
+      "item": "Legacy desktop code remains absent from active runtime ownership.",
+      "evidence": "Supported import scans and headless core boundary checks keep active runtime code Web-only.",
       "requires": [
-        {"path": "sections.legacy_pyqt_surface_classification.ok", "equals": true},
+        {"path": "sections.supported_import_boundary.ok", "equals": true},
         {"path": "sections.headless_core_boundary.ok", "equals": true}
       ]
     },
@@ -297,10 +297,10 @@
     },
     {
       "round": "Round 6 - Remote Web and Electron Source Separation",
-      "item": "PyQt tab/UI leftovers are not confused with web UI.",
-      "evidence": "Legacy PyQt surface classification and Remote Web feature contract keep desktop UI and web UI ownership separate.",
+      "item": "Removed PyQt tab/UI leftovers are not confused with web UI.",
+      "evidence": "Remote Web feature and source-layout contracts keep web ownership under app/web/remote.",
       "requires": [
-        {"path": "sections.legacy_pyqt_surface_classification.ok", "equals": true},
+        {"path": "sections.source_layout_contract.ok", "equals": true},
         {"path": "sections.remote_web_feature_contract.ok", "equals": true}
       ]
     },

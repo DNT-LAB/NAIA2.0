@@ -148,11 +148,11 @@ def create_naia_comprehensive_guide(tree_lines, merged_files_info):
 
 ```mermaid
 graph TB
-    subgraph "🖥️ UI Layer (PyQt6)"
-        A[ModernMainWindow] --> B[LeftPanel - Modules]
-        A --> C[RightPanel - Tabs]
-        B --> D[CollapsibleBox]
-        C --> E[TabController]
+    subgraph "🌐 UI Layer (Remote Web)"
+        A[app/web/remote] --> B[Prompt Tools]
+        A --> C[Generation Controls]
+        A --> D[Result Panels]
+        A --> E[WebSocket State]
     end
     
     subgraph "🎛️ Controller Layer"
@@ -357,15 +357,12 @@ def execute_pipeline_hook(self, stage: str, context: PromptContext) -> Any:
 
 #### 3. **모듈 등록**
 ```python
-# core/middle_section_controller.py 수정
-from legacy_desktop.modules.new_feature_module import NewFeatureModule
+# app/web/remote + core/headless_* service 계약으로 새 기능을 추가
+from core.headless_generation_service import HeadlessGenerationService
 
-class MiddleSectionController:
-    def create_modules(self):
-        modules = [
-            # 기존 모듈들...
-            NewFeatureModule(self.app_context)  # 새 모듈 추가
-        ]
+def register_new_feature(app):
+    # FastAPI route, WebSocket state, Remote Web UI를 같은 계약으로 확장
+    pass
 ```
 
 ### 코드 수정 시 체크리스트
@@ -611,7 +608,7 @@ def heavy_computation():
 pip install -r requirements.txt
 
 # 개발용 실행
-python NAIA_cold_v4.py
+python NAIA_web_headless.py
 ```
 
 2. **기여 워크플로우**
@@ -716,7 +713,7 @@ print(f"활성 모듈: {{self.app_context.get_active_modules()}}")
 def get_module_description(dir_name):
     """모듈별 설명을 반환하는 함수"""
     descriptions = {
-        "main": "🚀 애플리케이션 진입점 및 메인 윈도우 (NAIA_cold_v4.py)",
+        "main": "🚀 지원 headless Remote Web 진입점 (NAIA_web_headless.py)",
         "core": "⚙️ 시스템 핵심 로직 - 컨텍스트, 프롬프트 파이프라인, API 서비스, 컨트롤러",
         "interfaces": "🔌 추상 인터페이스 - 모듈 계약 정의 및 모드별 설정 자동화",
         "modules": "🧩 기능 모듈 - 자동화, 캐릭터 입력, 프롬프트 엔지니어링 등",
@@ -757,9 +754,9 @@ def merge_py_files():
         
         # 현재 디렉토리에서 .py 파일 찾기
         if root == ".":
-            # 시작 디렉토리에서는 NAIA_cold_v4.py만 읽기 (없으면 모든 .py 파일)
-            py_files = [f for f in files if f == 'NAIA_cold_v4.py']
-            if not py_files:  # NAIA_cold_v4.py가 없으면 모든 .py 파일
+            # 시작 디렉토리에서는 NAIA_web_headless.py만 읽기 (없으면 모든 .py 파일)
+            py_files = [f for f in files if f == 'NAIA_web_headless.py']
+            if not py_files:  # NAIA_web_headless.py가 없으면 모든 .py 파일
                 py_files = [f for f in files if f.endswith('.py') and not f.startswith('test_')]
         else:
             # 하위 디렉토리에서는 모든 .py 파일 읽기 (테스트 파일 제외)
@@ -942,7 +939,7 @@ NAIA v2.0는 AI 이미지 생성을 위한 고급 프롬프트 관리 및 자동
 
 ### 코드 이해를 위한 핵심 포인트
 
-1. **진입점 파악**: `NAIA_cold_v4.py`에서 시작
+1. **진입점 파악**: `NAIA_web_headless.py`에서 시작
 2. **아키텍처**: AppContext 중심의 모듈형 설계
 3. **파이프라인**: PromptProcessor를 통한 단계별 처리
 4. **의존성**: 인터페이스 기반 모듈 계약

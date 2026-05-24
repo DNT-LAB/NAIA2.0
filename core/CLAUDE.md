@@ -7,20 +7,19 @@
 ## 디렉터리 구조 및 의존성
 
 ```
-NAIA_cold_v4.py (메인)
+NAIA_web_headless.py (지원 진입점)
     ↓
-core/main_controller.py
+core/web_session_app.py
     ↓
-core/context.py (AppContext 생성)
+core/web_session_context.py (headless runtime context)
     ↓
-core/middle_section_controller.py ← modules/ 로드
-core/tab_controller.py ← tabs/ 로드
-core/prompt_generation_controller.py
-core/generation_controller.py
+core/headless_generation_service.py
+core/headless_result_service.py
+core/prompt_generation_service.py
 ```
 
-**core/가 의존하는 것**: `interfaces/`, `ui/`, `utils/`, `data/`
-**core/를 의존하는 것**: `modules/`, `tabs/`, `NAIA_cold_v4.py`
+**core/가 의존하는 것**: `interfaces/`, `utils/`, `data/`, `app/web/remote`
+**core/를 의존하는 것**: `NAIA_web_headless.py`, `app/backend/`, Electron shell launch flow
 
 **상세 레퍼런스**:
 - [Generation Queue 가이드](.claude/GENERATION_QUEUE_CLAUDE.md)
@@ -427,7 +426,7 @@ widget.setProperty("autocomplete_ignore", True)
 
 **상세 레퍼런스**: [자동생성-큐 핸드오프 가이드](.claude/AUTO_GENERATION_HANDOFF_CLAUDE.md)
 
-## 검색 결과 스냅샷 자동 복원 (`NAIA_cold_v4.py`)
+## 검색 결과 스냅샷 자동 복원
 
 `search_results` 소진 시 자동 생성 루프가 멈추지 않도록, 데이터 유입 시점에 메모리 스냅샷을 보관하고 소진 시 자동 복원.
 

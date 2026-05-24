@@ -1,8 +1,8 @@
 """Measure the Remote WebSession startup path.
 
 This migration tool measures the supported headless Remote Web path by default.
-The old `legacy_desktop/NAIA_cold_v4.py --web-shell` path remains available through
-`--entrypoint desktop` for legacy comparison only.
+The old `legacy_desktop/NAIA_cold_v4.py --web-shell` comparison path was removed
+with the legacy desktop tree; inspect git history for old desktop measurements.
 """
 
 from __future__ import annotations
@@ -694,7 +694,7 @@ Middle module import sample:
 For the supported headless entrypoint, PyQt, `legacy_desktop`, `RemoteBridge`,
 `ModernMainWindow`, `ImageWindow`, and Desktop controllers should be absent
 while Remote Web startup, Random, and Generate dispatch remain functional.
-The optional `--entrypoint desktop` comparison path is legacy-only.
+No legacy desktop comparison path is available in the active tree.
 """
     if measurement.errors:
         content += "\n## Errors\n\n" + "\n".join(f"- {error}" for error in measurement.errors) + "\n"
@@ -712,25 +712,17 @@ def measure(args: argparse.Namespace) -> Measurement:
     write_sitecustomize(temp_import_dir, import_audit_path)
 
     python_exe = args.python or default_python_executable()
-    if args.entrypoint == "headless":
-        command = [
-            python_exe,
-            "-u",
-            "NAIA_web_headless.py",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(args.port),
-        ]
-    else:
-        command = [
-            python_exe,
-            "-u",
-            "legacy_desktop/NAIA_cold_v4.py",
-            "--web-shell",
-            "--web-shell-port",
-            str(args.port),
-        ]
+    if args.entrypoint != "headless":
+        raise ValueError("legacy desktop measurement was removed; use --entrypoint headless")
+    command = [
+        python_exe,
+        "-u",
+        "NAIA_web_headless.py",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(args.port),
+    ]
     measurement = Measurement(
         command=[
             "python",
@@ -877,7 +869,7 @@ def measure(args: argparse.Namespace) -> Measurement:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Measure supported headless NAIA Remote WebSession startup.")
-    parser.add_argument("--entrypoint", choices=["desktop", "headless"], default="headless")
+    parser.add_argument("--entrypoint", choices=["headless"], default="headless")
     parser.add_argument("--port", type=int, default=7270, help="Remote WebShell port to launch.")
     parser.add_argument("--cdp-port", type=int, default=9370, help="Chrome DevTools Protocol port.")
     parser.add_argument("--python", default=None, help="Python executable. Defaults to venv\\Scripts\\python.exe when present.")

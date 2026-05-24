@@ -98,6 +98,16 @@ def check_electron_packaging_inputs(
     )
     violations.extend(resource_violations)
     violations.extend(file_violations)
+    if require_bundled_python:
+        has_python_resource = any(
+            str(entry.get("to") or "").replace("\\", "/").strip("/") == "python"
+            for entry in extra_resources
+        )
+        if not has_python_resource:
+            violations.append({
+                "path": "build.extraResources",
+                "reason": "bundled Python builds must include an electron-builder resources/python extraResource",
+            })
 
     if not staged.is_dir():
         staged_readiness = {

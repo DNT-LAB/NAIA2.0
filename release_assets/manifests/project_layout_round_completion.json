@@ -60,13 +60,11 @@
     },
     {
       "round": 5,
-      "name": "Legacy PyQt6 Reference Freeze",
+      "name": "Web-Only Boundary Freeze",
       "status": "complete",
       "evidence": [
         "PROJECT_LAYOUT_POLICY.md",
-        "release_assets/manifests/legacy_pyqt_surface_classification.json",
         "release_assets/manifests/headless_core_boundary.json",
-        "python tools/check_legacy_pyqt_surface_classification.py",
         "python tools/check_headless_core_boundary.py"
       ]
     },
@@ -124,7 +122,6 @@
     "python tools/check_source_layout_contract.py",
     "python tools/check_remote_web_feature_contract.py",
     "python tools/check_headless_core_boundary.py",
-    "python tools/check_legacy_pyqt_surface_classification.py",
     "python tools/check_runtime_asset_classification.py",
     "python tools/check_runtime_write_policy.py",
     "python tools/check_release_distribution_strategy.py",

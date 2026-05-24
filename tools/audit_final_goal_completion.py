@@ -20,7 +20,6 @@ try:
     from tools.check_electron_dependency_readiness import check_electron_dependency_readiness
     from tools.check_electron_shell_contract import check_electron_shell_contract
     from tools.check_headless_core_boundary import validation_payload as check_headless_core_boundary_payload
-    from tools.check_legacy_pyqt_surface_classification import validation_payload as check_legacy_pyqt_surface_payload
     from tools.check_release_distribution_strategy import check_release_distribution_strategy
     from tools.check_remote_web_feature_contract import validate_remote_web_feature_contract
     from tools.check_runtime_asset_classification import validation_payload as check_runtime_asset_classification_payload
@@ -31,7 +30,6 @@ except ModuleNotFoundError:  # pragma: no cover - used when executed as a script
     from check_electron_dependency_readiness import check_electron_dependency_readiness
     from check_electron_shell_contract import check_electron_shell_contract
     from check_headless_core_boundary import validation_payload as check_headless_core_boundary_payload
-    from check_legacy_pyqt_surface_classification import validation_payload as check_legacy_pyqt_surface_payload
     from check_release_distribution_strategy import check_release_distribution_strategy
     from check_remote_web_feature_contract import validate_remote_web_feature_contract
     from check_runtime_asset_classification import validation_payload as check_runtime_asset_classification_payload
@@ -585,10 +583,23 @@ def audit_final_goal_completion(
     warnings: list[dict[str, str]] = []
 
     if not plan_file.is_file():
+        plan_blocker = {"type": "plan", "reason": "final plan file is missing", "path": str(plan_file)}
         return {
             "ok": False,
             "plan": str(plan_file),
-            "blockers": [{"type": "plan", "reason": "final plan file is missing", "path": str(plan_file)}],
+            "blocker_count": 1,
+            "warning_count": len(warnings),
+            "blockers_by_type": {"plan": 1},
+            "blockers_by_round": {"Unscoped": 1},
+            "completion_status": {
+                "release_ready": False,
+                "blocked_on_approval": False,
+                "next_actions": [],
+                "runtime_blocker_count": 0,
+                "blockers_by_type": {"plan": 1},
+                "blockers_by_round": {"Unscoped": 1},
+            },
+            "blockers": [plan_blocker],
             "warnings": warnings,
             "unchecked_items": [],
             "evidence": {},
@@ -616,10 +627,6 @@ def audit_final_goal_completion(
             check_runtime_asset_classification_payload,
         ),
         "source_layout_contract": _safe_section("source_layout_contract", check_source_layout_contract),
-        "legacy_pyqt_surface_classification": _safe_section(
-            "legacy_pyqt_surface_classification",
-            check_legacy_pyqt_surface_payload,
-        ),
         "headless_core_boundary": _safe_section("headless_core_boundary", check_headless_core_boundary_payload),
         "requirements_headless": _requirements_headless_payload(),
         "round0_artifacts": _round0_artifacts_payload(),

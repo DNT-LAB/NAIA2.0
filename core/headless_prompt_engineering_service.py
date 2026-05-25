@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
 
 
@@ -110,7 +109,7 @@ class HeadlessPromptEngineeringService:
         }
         return context._module_state_payload("prompt_engineering", payload)
 
-    def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
+    def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
         from core.prompt_engineering_settings import get_prompt_engineering_store
 
         context = self.context
@@ -133,6 +132,21 @@ class HeadlessPromptEngineeringService:
             ok, message = store.create_preset(text_value)
             if not ok:
                 return context._toast(message, level="error")
+        elif key == "preset_apply_recommended":
+            ok, message = self.create_and_apply_recommended_preset()
+            if not ok:
+                return context._toast(message, level="error")
+            return [
+                context._toast(f"추천 프리셋 적용: {message}", level="success"),
+                self.state(),
+                context.generation_param_schema_payload(),
+                {
+                    "type": "prompt_sync",
+                    "prompt": context.prompt_text,
+                    "negative": context.negative_prompt_text,
+                    "negative_prompt": context.negative_prompt_text,
+                },
+            ]
         elif key == "preset_delete":
             ok, message = store.delete_preset(text_value or store.state()["current_preset"])
             if not ok:
@@ -170,6 +184,212 @@ class HeadlessPromptEngineeringService:
         else:
             return None
         return self.state()
+
+    def create_and_apply_recommended_preset(self, *, save_current: bool = True) -> tuple[bool, str]:
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        context = self.context
+        store = get_prompt_engineering_store(context)
+        mode = context.get_api_mode()
+        if mode == "COMFYUI":
+            if not self._is_comfyui_anima_mode():
+                return False, "추천 설정 적용은 COMFYUI ANIMA 모드에서만 지원됩니다."
+            preset_name = self._unique_preset_name(store, "recommend_anima", mode)
+            module_settings = self._comfyui_anima_recommended_module_settings()
+            main_settings = self._comfyui_anima_recommended_main_settings()
+        elif mode == "NAI":
+            preset_name = self._unique_preset_name(store, "recommend", mode)
+            module_settings = store.collect_settings(mode)
+            module_settings.update(self._nai_recommended_module_settings())
+            main_settings = self._nai_recommended_main_settings()
+        else:
+            return False, "추천 설정 적용은 현재 NAI 또는 COMFYUI ANIMA 모드에서만 지원됩니다."
+
+        if save_current:
+            current = store.state(mode).get("current_preset")
+            if current and current not in {"", "(프리셋 없음)", "*randomized"}:
+                store.save_current_preset(mode)
+
+        preset_data = {
+            "api_mode": mode,
+            "module_settings": module_settings,
+            "main_settings": main_settings,
+        }
+        store.write_preset_data(preset_name, mode, preset_data)
+        store.refresh(mode)
+        if not store.set_preset(preset_name, mode):
+            return False, f"프리셋을 적용할 수 없습니다: {preset_name}"
+        self._apply_main_settings(main_settings)
+        return True, preset_name
+
+    def _is_comfyui_anima_mode(self) -> bool:
+        context = self.context
+        if context.get_api_mode() != "COMFYUI":
+            return False
+        sampling_mode = str(context.remote_params.get("sampling_mode") or "").strip().lower()
+        comfyui_sampling_mode = str(context.remote_params.get("comfyui_sampling_mode") or "").strip().lower()
+        workflow_type = str(context.remote_params.get("workflow_type") or "").strip().lower()
+        if sampling_mode:
+            return sampling_mode == "anima"
+        if comfyui_sampling_mode:
+            return comfyui_sampling_mode == "anima"
+        return workflow_type == "unet"
+
+    @staticmethod
+    def _unique_preset_name(store: Any, base_name: str, mode: str) -> str:
+        from core.prompt_engineering_settings import sanitize_preset_name
+
+        base = sanitize_preset_name(base_name) or "preset"
+        existing = set(store.list_preset_names(mode))
+        candidate = base
+        suffix = 1
+        while candidate in existing:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        return candidate
+
+    def _apply_main_settings(self, main_settings: dict[str, Any]) -> None:
+        context = self.context
+        prompt_dirty = False
+        for key, value in dict(main_settings or {}).items():
+            if key == "prompt":
+                context.prompt_text = str(value or "")
+                prompt_dirty = True
+            elif key in {"negative", "negative_prompt"}:
+                context.negative_prompt_text = str(value or "")
+                prompt_dirty = True
+            else:
+                context.set_param(str(key), value)
+        if main_settings or prompt_dirty:
+            context.save_remote_ui_state()
+            context.publish("remote_params_changed", context.generation_param_schema_payload())
+
+    @staticmethod
+    def _comfyui_anima_recommended_module_settings() -> dict[str, Any]:
+        return {
+            "pre_prompt": "(@myowa), newest, year2024, (best quality), highres, absurdres",
+            "post_prompt": (
+                "(3d background, blurry background:1.5), (musk, oekaki, crosshatching, sketch, "
+                "watercolor \\(medium\\), airbrush \\(medium\\), cel rendering:0.4), "
+                "(delicate colored lineart, highly aesthetic Pixiv style illustration, clean composition, "
+                "high-quality digital art, very thin lineart, low contrast shading, cinematic lighting, "
+                "very beautiful and detailed scene:0.8)"
+            ),
+            "auto_hide_prompt": "",
+        }
+
+    @staticmethod
+    def _comfyui_anima_recommended_main_settings() -> dict[str, Any]:
+        return {
+            "negative": (
+                "ai-generated, face in shadow, (worst quality), low quality, cropped, (score_1), "
+                "score_2, score_3, artist logo, unfinished, work-in-progress, blank, letterboxed, "
+                "blurry, jpeg artifacts, sepia, mutated, mutated digits, missing fingers, extra digit, "
+                "fewer digits, artistic error, bad anatomy, watermark, patreon username, web address, "
+                "patreon logo, weibo username, watermark, mature female, adult female, adolescent, "
+                "wide hips, narrow waist, long body, (multiple views:1.3), monochrome, greyscale, "
+                "retro artstyle, (outline, thick outlines:1.15), bold lines, thick borders, messy shading, "
+                "(western comics \\(style\\):1.5), furry, english text, spot color, doodle on background, "
+                "gif artifacts, muted color, high contrast, oversaturated colors, glossy highlights"
+            ),
+            "sampling_mode": "anima",
+            "comfyui_sampling_mode": "anima",
+            "workflow_type": "unet",
+            "sampler": "er_sde",
+            "scheduler": "simple",
+            "steps": 30,
+            "cfg_scale": 5.1,
+            "rescale_cfg": 0.5,
+            "anima_weight": "1",
+        }
+
+    @staticmethod
+    def _nai_recommended_module_settings() -> dict[str, Any]:
+        return {
+            "pre_prompt": (
+                "1.2::artist:kim eb ::, 0.7::artist:torino aqua ::, 0.6::artist:mikozin ::, "
+                "0.4::tianliang duohe fangdongye, ixy ::, 0.5::kedama milk ::, "
+                "0.7::artist:quasarcake ::, 0.7::artist:channel (caststation) ::, "
+                "0.6::artist:tab head ::, 0.5::artist:qiandaiyiyu ::, "
+                "0.5::artist:mika pikazo ::, 0.3::artist:wanke ::, 0.4::artist:freng ::, "
+                "0.25::artist:cutesexyrobutts ::"
+            ),
+            "post_prompt": (
+                "year 2025, year 2024, 1.2::3d ::, 1.2::blender (medium) ::, detailed eyes, "
+                "silky skin, detailed skin texture, masterpiece, best quality, very aesthetic, highres, "
+                "best illustration, novel illustration, -1.2::simple illustration ::, "
+                "-1::artist collaboration ::, -1::multiple views ::, -1::duplicate ::, -0.8::censored ::"
+            ),
+            "auto_hide_prompt": (
+                "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, "
+                "bad id, _logo, bad twitter id, comic, __background__, ~blurry background, "
+                "~sky background, character doll, stuffed animal, stuffed toy, speech bubble, cyclops, "
+                "pov, 3d, glasses, mole, text focus, thought bubble, watermark, web address, "
+                "body writing, fake screenshot, facing away, |_|, __piercing__, tattoo, _tattoo, "
+                "_text, sound effects, greyscale, multiple views, __pubic hair__, peeing, rabbit, "
+                "__censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, child on child, "
+                "covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, multiple boys, "
+                "__measuring__, multiple views, big belly, curvy, doll joints, looking at viewer, timestamp, "
+                "battery indicator, tan, fake phone screenshot, stomach bulge, __beach__, __shower__, "
+                "on table, huge penis, __bug__, giant insect, belly, eye mask, circle cut, dark nipples, "
+                "signature, alternate race, alternate species, dark nipples, livestream, slap mark, x-ray, "
+                "armpit hair, health bar, snapchat, facial mark, emoji, command spell, dark areolae, "
+                "__piercing__, __bed__, __pillow__, __sheet__, body markings, obese, __long tongue__, "
+                "toddlercon, __name__, handprint, __pasties__, mini person, __butt plug__, __eyepatch__, "
+                "oppai loli, sex toy, loli, chibi, chibi inset, makeup, mascara, large breasts, "
+                "runny makeup, third eye, anal hair, __halo__, __(style)__, __(cosplay)__, __freckles__, "
+                "braces, gag, __joint__"
+            ),
+            "preprocessing_options": {
+                "remove_author": True,
+                "remove_work_title": True,
+                "remove_character_name": True,
+                "remove_character_features": False,
+                "remove_clothes": False,
+                "remove_clothing_event": False,
+                "remove_color": False,
+                "remove_location_and_background_color": False,
+                "remove_expression": False,
+                "remove_pose_action": False,
+                "remove_meta_tags": True,
+                "remove_object_tags": True,
+                "remove_noise_tags": True,
+                "e621_auto_boost": False,
+                "danbooru_auto_weight": False,
+                "tag_implication_compression": True,
+            },
+        }
+
+    @staticmethod
+    def _nai_recommended_main_settings() -> dict[str, Any]:
+        return {
+            "model": "NAID4.5F",
+            "sampler": "k_euler_ancestral",
+            "scheduler": "karras",
+            "resolution": "1024 x 1024",
+            "steps": 28,
+            "cfg_scale": 5.8,
+            "cfg_rescale": 0.28,
+            "negative": (
+                "text, logo, signature, watermark, too many watermarks, chili inset, "
+                "0.4::artist:nameo (judgemasterkou), artist:matsunaga kouyou::, artist collaboration, "
+                "chibi, 1990s (style), bad anatomy, distorted anatomy, disfigured, bad hands, "
+                "missing finger, extra digits, mutation, extra arms, extra legs, long neck, bad feet, "
+                "very displeasing, undetailed eyes, multiple views, negative space, blank page, variant set, "
+                "large variant set, 4koma, 2koma, oekaki, halftone, screentone, artistic error, "
+                "film grain, scan artifacts, jpeg artifacts, chromatic aberration, dithering, "
+                "disorganized colors, lowres, worst quality, bad quality, cheesy, sloppiness, "
+                "unfinished, Incomplete, ai-generated"
+            ),
+            "seed": "8097879955",
+            "seed_fixed": False,
+            "random_resolution": True,
+            "auto_fit_resolution": True,
+            "SMEA": False,
+            "DYN": False,
+            "VAR+": True,
+            "DECRISP": False,
+        }
 
     def hires_overlay_response(self, preset_name: str) -> dict[str, Any]:
         name = str(preset_name or "").strip()

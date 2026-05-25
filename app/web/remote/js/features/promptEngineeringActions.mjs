@@ -47,6 +47,7 @@ export function createPromptEngineeringActions({
       return;
     }
     if (!await Promise.resolve(confirmDialog('추천 설정을 새 프리셋으로 만들고 즉시 적용하시겠습니까?'))) return;
+    flushPresetSaveState();
     setModuleParam('prompt_engineering', 'preset_apply_recommended', 'true');
   }
 

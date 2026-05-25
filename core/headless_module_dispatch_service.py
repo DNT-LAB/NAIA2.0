@@ -65,7 +65,7 @@ class HeadlessModuleDispatchService:
         value: Any,
         *,
         client_host: str | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
         context = self.context
         clean_id = str(module_id or "").strip()
         clean_key = str(key or "").strip()

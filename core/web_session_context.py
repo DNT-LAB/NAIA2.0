@@ -385,7 +385,7 @@ class WebSessionContext:
         value: Any,
         *,
         client_host: str | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
         return self._module_dispatch_service().set_module_param(
             module_id,
             key,

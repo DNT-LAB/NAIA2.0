@@ -43,10 +43,41 @@ def check_release_distribution_strategy(
         "clean Windows machine launch test",
         "release artifact measurement",
         "Microsoft Defender local scan",
-        "signed public artifact",
+        "GitHub Release artifact bundle",
+        "SHA-256 release checksum",
+        "release evidence summary",
+        "Defender false-positive response path",
     }:
         if required not in required_release_gates:
             violations.append({"path": str(strategy_file), "reason": f"portable release gate missing: {required}"})
+
+    github_release = strategy.get("github_release_contract", {})
+    if github_release.get("status") != "selected_for_unsigned_portable_beta":
+        violations.append({
+            "path": str(strategy_file),
+            "reason": "GitHub Release contract must select unsigned portable beta distribution",
+        })
+    required_assets = set(github_release.get("required_assets", []))
+    for asset in {
+        "NAIA-Portable.zip",
+        "SHA256SUMS.txt",
+        "RELEASE_EVIDENCE_SUMMARY.json",
+        "GITHUB_RELEASE_BODY.md",
+        "DEFENDER_FALSE_POSITIVE.md",
+    }:
+        if asset not in required_assets:
+            violations.append({"path": str(strategy_file), "reason": f"GitHub Release asset missing from contract: {asset}"})
+    false_positive = github_release.get("false_positive_response", {})
+    if "wdsi/filesubmission" not in str(false_positive.get("portal") or ""):
+        violations.append({
+            "path": str(strategy_file),
+            "reason": "Defender false-positive response path must use Microsoft file submission",
+        })
+    signing = github_release.get("signing", {})
+    if signing.get("status") != "deferred":
+        violations.append({"path": str(strategy_file), "reason": "code signing must remain explicitly deferred for unsigned beta"})
+    if signing.get("smartscreen_warning_accepted") is not True:
+        violations.append({"path": str(strategy_file), "reason": "unsigned beta contract must explicitly accept SmartScreen friction"})
 
     candidates = strategy.get("installer_strategy", {}).get("candidates", {})
     for candidate in ("electron-builder-nsis", "electron-builder-msix", "inno-setup-wrapper"):
@@ -137,6 +168,7 @@ def check_release_distribution_strategy(
         "strategy": str(strategy_file),
         "electron_package": str(package_file),
         "first_release_artifact": strategy.get("first_release_artifact"),
+        "github_release_status": github_release.get("status"),
         "installer_candidate_count": len(candidates),
         "auto_update_status": auto_update.get("status"),
         "script_term_rule_count": len(electron_contract.get("required_script_terms", {})),

@@ -18,8 +18,35 @@
       "clean Windows machine launch test",
       "release artifact measurement",
       "Microsoft Defender local scan",
-      "signed public artifact"
+      "GitHub Release artifact bundle",
+      "SHA-256 release checksum",
+      "release evidence summary",
+      "Defender false-positive response path"
     ]
+  },
+  "github_release_contract": {
+    "status": "selected_for_unsigned_portable_beta",
+    "artifact_folder": "app/electron/dist/github-release",
+    "required_assets": [
+      "NAIA-Portable.zip",
+      "SHA256SUMS.txt",
+      "RELEASE_EVIDENCE_SUMMARY.json",
+      "GITHUB_RELEASE_BODY.md",
+      "DEFENDER_FALSE_POSITIVE.md",
+      "final_electron_release_gate.json",
+      "electron_workspace_release_evidence.json"
+    ],
+    "false_positive_response": {
+      "portal": "https://www.microsoft.com/en-us/wdsi/filesubmission",
+      "submit_as": "Software developer",
+      "trigger": "Use only when Microsoft Defender flags the GitHub Release artifact or bundled executable."
+    },
+    "signing": {
+      "status": "deferred",
+      "smartscreen_warning_accepted": true,
+      "required_before_auto_update": true,
+      "reason": "First public portable beta accepts SmartScreen friction; the release-blocking public-distribution contract is immutable checksums plus local Defender scan evidence."
+    }
   },
   "installer_strategy": {
     "status": "deferred_until_portable_release_is_validated",
@@ -111,6 +138,7 @@
       "release:final:bundled-python:scan",
       "release:final:clean-python",
       "release:final:clean-python:scan",
+      "release:github-artifacts",
       "preflight:electron-deps",
       "preflight:electron-deps:summary",
       "goal:audit:summary",
@@ -228,6 +256,11 @@
         "180",
         "--defender-scan",
         "--require-defender-scan"
+      ],
+      "release:github-artifacts": [
+        "prepare_github_release_artifacts.py",
+        "--require-final-gate",
+        "--force"
       ],
       "release:portable:smoke:scan": [
         "--run-electron-cdp",

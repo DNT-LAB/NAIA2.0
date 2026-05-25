@@ -39,6 +39,7 @@
     "release:final:bundled-python:scan": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
     "release:final:clean-python": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
     "release:final:clean-python:scan": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",
+    "release:github-artifacts": "cd ../.. && python tools/prepare_github_release_artifacts.py --require-final-gate --force",
     "preflight:electron-deps": "cd ../.. && python tools/check_electron_dependency_readiness.py",
     "preflight:electron-deps:summary": "cd ../.. && python tools/check_electron_dependency_readiness.py --summary",
     "goal:audit:summary": "cd ../.. && python tools/audit_final_goal_completion.py --summary",

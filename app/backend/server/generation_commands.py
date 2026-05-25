@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
@@ -14,8 +14,10 @@ from core.web_session_context import WebSessionContext
 
 
 GenerationRunnerStarter = Callable[[WebSessionContext, set[WebSocket]], None]
+BroadcastJson = Callable[[set[WebSocket], dict[str, Any]], Awaitable[None]]
 
 GENERATION_COMMAND_TYPES = {
+    "bootstrap_random",
     "random",
     "generate",
 }
@@ -83,6 +85,55 @@ async def handle_random_command(
     await _send_json(ws, result.websocket_payload())
     for message in result.extra_messages:
         await _send_json(ws, message)
+
+
+async def handle_bootstrap_random_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    command: dict[str, Any] | None = None,
+    *,
+    broadcast_json: BroadcastJson,
+) -> None:
+    command = command if isinstance(command, dict) else {}
+    if str(context.prompt_text or "").strip():
+        context.bootstrap_random_prompt_issued = True
+        await _send_json(ws, {
+            "type": "prompt_sync",
+            "prompt": context.prompt_text,
+            "negative": context.negative_prompt_text,
+            "negative_prompt": context.negative_prompt_text,
+        })
+        return
+    if getattr(context, "bootstrap_random_prompt_issued", False):
+        return
+    if getattr(context, "bootstrap_random_prompt_inflight", False):
+        return
+
+    context.bootstrap_random_prompt_inflight = True
+    try:
+        overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
+        request_id = str(command.get("random_request_id") or command.get("requestId") or "")
+        active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
+        result = await asyncio.to_thread(
+            random_service(context).generate,
+            active_ratings=active_ratings,
+            overrides=overrides,
+            random_request_id=request_id,
+        )
+        payload = result.websocket_payload()
+        if result.success:
+            context.bootstrap_random_prompt_issued = True
+            payload["source"] = "bootstrap_random"
+            await broadcast_json(clients, payload)
+            for message in result.extra_messages:
+                await broadcast_json(clients, message)
+        else:
+            await _send_json(ws, payload)
+            for message in result.extra_messages:
+                await _send_json(ws, message)
+    finally:
+        context.bootstrap_random_prompt_inflight = False
 
 
 async def handle_generate_command(

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-import sys
 from threading import RLock
 from typing import Any
 import weakref
@@ -13,20 +12,12 @@ import weakref
 import pandas as pd
 
 from core.prompt_generation_service import PromptGenerationService
+from core.safe_console import safe_print
 from core.search_result_model import SearchResultModel
 from core.web_session_context import WebSessionContext
 
 
 DEFAULT_RATINGS = ("g", "s", "q", "e")
-
-
-def _safe_print(message: object, *, flush: bool = False) -> None:
-    text = str(message)
-    try:
-        print(text, flush=flush)
-    except UnicodeEncodeError:
-        encoding = sys.stdout.encoding or "utf-8"
-        print(text.encode(encoding, errors="replace").decode(encoding, errors="replace"), flush=flush)
 
 
 @dataclass
@@ -197,7 +188,7 @@ class HeadlessRandomPromptService:
         self.context.save_remote_ui_state()
         if result.context is not None and callable(publish):
             publish("prompt_generated", result.context)
-        _safe_print("Headless Remote: random prompt generated", flush=True)
+        safe_print("Headless Remote: random prompt generated", flush=True)
         prompt_run_id = str(getattr(result.context, "metadata", {}).get("prompt_run_id") or "")
 
         return HeadlessRandomPromptResult(
@@ -292,7 +283,7 @@ class HeadlessRandomPromptService:
                     rating_counts[rating] = max(0, int(rating_counts.get(rating) or 0) - 1)
             return True
         except Exception as exc:
-            _safe_print(f"Headless Remote: tag filter consume update failed - {exc}", flush=True)
+            safe_print(f"Headless Remote: tag filter consume update failed - {exc}", flush=True)
             return False
 
     @staticmethod
@@ -467,7 +458,7 @@ class HeadlessRandomPromptService:
         snapshot = getattr(self.context, "search_results_snapshot", None)
         if snapshot is not None and not getattr(snapshot, "empty", True):
             self.context.search_results = SearchResultModel(snapshot.copy())
-            _safe_print(f"🌐 Headless Remote: search_results restored from memory snapshot ({self.context.search_results.get_count()} rows)")
+            safe_print(f"🌐 Headless Remote: search_results restored from memory snapshot ({self.context.search_results.get_count()} rows)")
             return True
 
         for path, label in self._fallback_sources():
@@ -482,10 +473,10 @@ class HeadlessRandomPromptService:
                 frame = frame.reset_index(drop=True)
                 self.context.search_results = SearchResultModel(frame)
                 self.context.search_results_snapshot = frame.copy()
-                _safe_print(f"🌐 Headless Remote: search_results restored from {label} ({self.context.search_results.get_count()} rows)")
+                safe_print(f"🌐 Headless Remote: search_results restored from {label} ({self.context.search_results.get_count()} rows)")
                 return True
             except Exception as exc:
-                _safe_print(f"🌐 Headless Remote: search_results restore failed from {path} — {exc}")
+                safe_print(f"🌐 Headless Remote: search_results restore failed from {path} — {exc}")
         return False
 
     def _fallback_sources(self) -> list[tuple[Path, str]]:

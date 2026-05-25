@@ -21,6 +21,7 @@ let promptHighlightIndexTimer = null;
 let initialHistoryRefreshTimer = null;
 let initialRandomPromptIssued = false;
 let initialRandomPromptTimer = null;
+let sessionBootstrapReceived = false;
 let randomRequestSerial = 0;
 let sessionId = null;
 const urlParams = new URLSearchParams(location.search);
@@ -2105,7 +2106,6 @@ function onInitComplete() {
   }
   scheduleInitialHistoryRefresh();
   scheduleInitialStateRefresh();
-  scheduleInitialRandomPrompt();
   const cachedPe = moduleStateCache.get('prompt_engineering');
   if (cachedPe) refreshHiresPresetSwapOptions(cachedPe);
 }
@@ -2585,8 +2585,10 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   const prompt = message.prompt == null ? '' : String(message.prompt);
   const source = message.source;
   const isPresetSource = source === 'event_preset' || source === 'preset';
+  const acceptsBootstrapPrompt = source === 'bootstrap_random';
   const acceptsRandomPrompt = source === 'random' && isExpectedRandomPrompt(message);
   const acceptsGeneratedPrompt = (
+    acceptsBootstrapPrompt ||
     acceptsRandomPrompt
     || isPresetSource
     || source === 'auto_generate'
@@ -3935,6 +3937,7 @@ function onLoadPrompt(prompt) {
 
 function onSession(m) {
   if (m.session_id) sessionId = m.session_id;
+  sessionBootstrapReceived = true;
   if ('prompt' in m || 'negative_prompt' in m) {
     syncPrompts({
       type: 'prompt_sync',
@@ -4013,7 +4016,7 @@ function requestGenerate(payload = {}) {
   return true;
 }
 
-function requestRandomPrompt({force = false} = {}) {
+function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   if (activePromptTab === 'preset') {
     if (!force) void randomizeFromPresetTab();
     return false;
@@ -4023,6 +4026,15 @@ function requestRandomPrompt({force = false} = {}) {
     return false;
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  if (bootstrap) {
+    ws.send(JSON.stringify({
+      type: 'bootstrap_random',
+      random_request_id: createRandomRequestId(),
+      ratings: getActiveRatings(),
+      overrides: _collectCurrentParams(),
+    }));
+    return true;
+  }
   if (promptSendTimer) {
     clearTimeout(promptSendTimer);
     promptSendTimer = null;
@@ -4048,6 +4060,7 @@ function requestRandomPrompt({force = false} = {}) {
 
 function scheduleInitialRandomPrompt(delay = 350) {
   if (initialRandomPromptIssued) return;
+  if (!sessionBootstrapReceived) return;
   if (initialRandomPromptTimer) clearTimeout(initialRandomPromptTimer);
   initialRandomPromptTimer = setTimeout(() => {
     initialRandomPromptTimer = null;
@@ -4059,7 +4072,7 @@ function scheduleInitialRandomPrompt(delay = 350) {
       return;
     }
     initialRandomPromptIssued = true;
-    requestRandomPrompt({force: true});
+    requestRandomPrompt({force: true, bootstrap: true});
   }, Math.max(0, Number(delay) || 0));
 }
 

@@ -50,6 +50,11 @@
       "name": "Remote Web shell",
       "source_files": [
         "app/backend/server/web_shell_routes.py",
+        "app/backend/server/generation_commands.py",
+        "app/backend/server/session_commands.py",
+        "app/backend/server/websocket_session.py",
+        "core/headless_remote_ui_state_service.py",
+        "core/headless_session_state_service.py",
         "app/web/assets.py",
         "app/web/remote/index.html",
         "app/web/remote/style.css",

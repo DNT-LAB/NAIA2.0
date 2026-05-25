@@ -24,6 +24,7 @@ from app.backend.server.generation_commands import (
     enqueue_generation_request,
     enqueue_headless_generation_commands,
     enqueue_prompt_from_module,
+    handle_bootstrap_random_command,
     handle_generate_command,
     handle_random_command,
 )
@@ -239,7 +240,15 @@ async def handle_json_command(
             start_generation_runner=start_generation_runner,
         )
     elif command_type in GENERATION_COMMAND_TYPES:
-        if command_type == "random":
+        if command_type == "bootstrap_random":
+            await handle_bootstrap_random_command(
+                ws,
+                context,
+                clients,
+                command,
+                broadcast_json=broadcast_json,
+            )
+        elif command_type == "random":
             await handle_random_command(ws, context, command)
         else:
             await handle_generate_command(

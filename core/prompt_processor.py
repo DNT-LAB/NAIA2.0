@@ -1,10 +1,10 @@
 import math
 import re
-import sys
 import pandas as pd
 import weakref
 from typing import Dict, Any
 from core.prompt_context import PromptContext
+from core.safe_console import safe_print
 from core.wildcard_processor import WildcardProcessor # 이전 단계에서 생성
 from core.resolution_utils import (
     MAX_1MP_PIXELS,
@@ -16,15 +16,6 @@ from core.resolution_utils import (
 _WEIGHT_WEBUI_RE = re.compile(r'^\(.*:\d+\.?\d*\)$')   # (tag:1.2) — A1111 개별 가중치
 _WEIGHT_NAI_RE = re.compile(r'^\d+\.?\d*::.*\s*::$')    # 0.85::tag :: — NAI 개별 가중치
 _E621_GROUP_CLOSE_RE = re.compile(r':\d+\.?\d*\)$')     # tag:1.05) — e621 그룹 종료
-
-
-def _safe_print(message: object) -> None:
-    text = str(message)
-    try:
-        print(text)
-    except UnicodeEncodeError:
-        encoding = sys.stdout.encoding or "utf-8"
-        print(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
 
 def _escape_parens_in_content(s: str) -> str:
@@ -528,7 +519,7 @@ class PromptProcessor:
                     anima_tags +
                     context.prefix_tags[at_index:]
                 )
-                _safe_print(f"🎨 ANIMA 모드: 태그 삽입 완료 (인덱스 {at_index}): {', '.join(anima_tags)}")
+                safe_print(f"🎨 ANIMA 모드: 태그 삽입 완료 (인덱스 {at_index}): {', '.join(anima_tags)}")
             else:
                 # @ 태그가 없으면 맨 뒤에 삽입
                 anima_tags = []
@@ -566,7 +557,7 @@ class PromptProcessor:
                     anima_tags.append(f"@{artist}")
 
                 context.prefix_tags = context.prefix_tags + anima_tags
-                _safe_print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
+                safe_print(f"🎨 ANIMA 모드: @ 태그 없음, 태그를 맨 뒤에 삽입: {', '.join(anima_tags)}")
 
         else:
             # 기존 방식: 맨 앞에 삽입
@@ -583,9 +574,9 @@ class PromptProcessor:
                     weighted_indices,
                     prompt_weight,
                 )
-                _safe_print(f"🎨 {label} 모드: main_tags 가중치 {prompt_weight} 적용 — {run_count}개 구간, 가중치 태그 {len(weighted_indices)}개 제외")
+                safe_print(f"🎨 {label} 모드: main_tags 가중치 {prompt_weight} 적용 — {run_count}개 구간, 가중치 태그 {len(weighted_indices)}개 제외")
             else:
-                _safe_print(f"🎨 {label} 모드: main_tags 가중치 입력 {raw_prompt_weight} → 래핑 생략")
+                safe_print(f"🎨 {label} 모드: main_tags 가중치 입력 {raw_prompt_weight} → 래핑 생략")
 
         # --- 이하 기존 로직 ---
         all_tags = context.get_all_tags()

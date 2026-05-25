@@ -114,6 +114,14 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
         "auto_save_state": _json_safe(dict(context.auto_save_state or {})),
         "save_directory_state": _json_safe(dict(context.save_directory_state or {})),
     }
-    settings[REMOTE_WEB_STATE_KEY] = _normalize_state(state)
+    normalized = _normalize_state(state)
+    previous = (
+        _normalize_state(settings.get(REMOTE_WEB_STATE_KEY))
+        if REMOTE_WEB_STATE_KEY in settings
+        else None
+    )
+    if previous == normalized:
+        return normalized
+    settings[REMOTE_WEB_STATE_KEY] = normalized
     _write_app_settings(context, settings)
-    return settings[REMOTE_WEB_STATE_KEY]
+    return normalized

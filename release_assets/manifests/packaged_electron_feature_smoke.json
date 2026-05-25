@@ -142,7 +142,7 @@
       "id": "setup_api_settings",
       "label": "setup/API settings",
       "feature_groups": ["core_status_queue", "websocket_shared_state"],
-      "websocket_commands": ["verify_api", "clear_api", "probe_api"],
+      "websocket_commands": ["verify_api", "clear_api", "probe_api", "set_cloudflared_enabled"],
       "routes": [
         {"method": "GET", "path": "/api/status"},
         {"method": "GET", "path": "/api/headless/capabilities"}

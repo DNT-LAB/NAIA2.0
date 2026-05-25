@@ -126,4 +126,4 @@ def register_danbooru_routes(
             target_url = normalize_danbooru_browser_url(query)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
-        return {"ok": True, "url": target_url, "headless": True, "open_external": True}
+        return {"ok": True, "url": target_url, "runtime": "web", "open_external": True}

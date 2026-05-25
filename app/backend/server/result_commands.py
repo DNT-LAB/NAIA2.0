@@ -79,7 +79,7 @@ def normalize_result_enhance_config(
         "strength": strength,
         "noise": noise,
         "available": True,
-        "headless": True,
+        "runtime": "web",
     }
 
 
@@ -267,7 +267,7 @@ def prepare_result_enhance_command(
         "source_size": [orig_w, orig_h],
         "preview_size": params.get("result_enhance_preview_size", [orig_w, orig_h]),
         "request_id": "",
-        "headless": True,
+        "runtime": "web",
     }
 
 
@@ -340,7 +340,7 @@ async def handle_result_command(
             "running": True,
             "success": None,
             "message": "NAI 2x upscale running",
-            "headless": True,
+            "runtime": "web",
         })
         try:
             stored, message = await run_in_thread(perform_nai_result_upscale, context, command)
@@ -351,13 +351,13 @@ async def handle_result_command(
                 "running": False,
                 "success": False,
                 "message": message,
-                "headless": True,
+                "runtime": "web",
             })
             await _send_json(ws, {
                 "type": "toast",
                 "level": "error",
                 "message": message,
-                "headless": True,
+                "runtime": "web",
             })
             return True
         await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
@@ -368,13 +368,13 @@ async def handle_result_command(
             "running": False,
             "success": True,
             "message": message,
-            "headless": True,
+            "runtime": "web",
         })
         await _send_json(ws, {
             "type": "toast",
             "level": "success",
             "message": message,
-            "headless": True,
+            "runtime": "web",
         })
         return True
 
@@ -389,13 +389,13 @@ async def handle_result_command(
                 "running": False,
                 "success": False,
                 "message": message,
-                "headless": True,
+                "runtime": "web",
             })
             await _send_json(ws, {
                 "type": "toast",
                 "level": "error",
                 "message": message,
-                "headless": True,
+                "runtime": "web",
             })
             return True
         await _send_json(ws, result.websocket_payload())
@@ -405,13 +405,13 @@ async def handle_result_command(
                 "running": False,
                 "success": False,
                 "message": result.blocked_reason,
-                "headless": True,
+                "runtime": "web",
             })
             await _send_json(ws, {
                 "type": "toast",
                 "level": "error",
                 "message": result.blocked_reason,
-                "headless": True,
+                "runtime": "web",
             })
             return True
         await _send_json(ws, enhance_state)
@@ -442,7 +442,7 @@ async def handle_result_command(
             "type": "toast",
             "level": "success",
             "message": "Enhance settings updated",
-            "headless": True,
+            "runtime": "web",
         })
         return True
 
@@ -452,7 +452,7 @@ async def handle_result_command(
             "type": "toast",
             "level": "error",
             "message": "Unsupported result image action",
-            "headless": True,
+            "runtime": "web",
         })
         return True
     if context.get_api_mode() != "NAI":
@@ -460,7 +460,7 @@ async def handle_result_command(
             "type": "toast",
             "level": "error",
             "message": "Img2Img/Inpaint is available in NAI mode only",
-            "headless": True,
+            "runtime": "web",
         })
         return True
     try:
@@ -482,7 +482,7 @@ async def handle_result_command(
             "type": "toast",
             "level": "error",
             "message": f"Image action failed: {exc}",
-            "headless": True,
+            "runtime": "web",
         })
         return True
     await _send_json(ws, state)
@@ -490,6 +490,6 @@ async def handle_result_command(
         "type": "toast",
         "level": "success",
         "message": f"{'Inpaint' if action == 'inpaint' else 'Img2Img'} session ready",
-        "headless": True,
+        "runtime": "web",
     })
     return True

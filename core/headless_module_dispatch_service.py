@@ -54,7 +54,7 @@ class HeadlessModuleDispatchService:
             "type": "module_state",
             "module_id": clean_id,
             "available": False,
-            "headless": True,
+            "runtime": "web",
             "state": {},
         }
 

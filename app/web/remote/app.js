@@ -93,7 +93,6 @@ let cloudflaredControls = null;
 let generationProgress = null;
 let setupController = null;
 window.__naiaSetupControllerReady = false;
-let desktopWindowControl = null;
 let promptDrawerControl = null;
 let eventPresetPanel = null;
 let tokenDisplayControl = null;
@@ -216,7 +215,6 @@ let wildcardPanel = null;
 let wildcardManagerPanel = null;
 let instantWildcardPanel = null;
 let e621EventPanel = null;
-let ollamaPanel = null;
 let imageModulePanels = null;
 let img2imgPanel = null;
 let refinePanelControl = null;
@@ -286,12 +284,12 @@ function applyRightTabAvailability(tabAvailability) {
   pendingRightTabAvailability = {...tabAvailability};
 }
 
-async function loadHeadlessCapabilities() {
+async function loadRuntimeCapabilities() {
   try {
-    const response = await fetch('/api/headless/capabilities', {cache: 'no-store'});
+    const response = await fetch('/api/runtime/capabilities', {cache: 'no-store'});
     if (!response.ok) return;
     const payload = await response.json();
-    if (payload && payload.headless) {
+    if (payload) {
       applyRightTabAvailability(payload.right_tabs);
     }
   } catch (error) {
@@ -299,8 +297,8 @@ async function loadHeadlessCapabilities() {
   }
 }
 
-loadHeadlessCapabilities();
-const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260519-headless-danbooru1')
+loadRuntimeCapabilities();
+const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260525-runtime-danbooru1')
   .then(({createDanbooruBrowserController}) => {
     danbooruTabControl = createDanbooruBrowserController({
       document,
@@ -461,7 +459,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260519-headless-actions1')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260525-runtime-actions1')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -510,7 +508,7 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
   .catch(error => {
     console.error('Failed to initialize metadata viewer module', error);
   });
-const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260525-headless-action-clean1')
+const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260525-runtime-action-clean1')
   .then(({createImageActionPopup}) => {
     imageActionPopup = createImageActionPopup({
       document,
@@ -697,17 +695,6 @@ const generationProgressReady = import('./js/features/generationProgress.mjs')
   .catch(error => {
     console.error('Failed to initialize generation progress module', error);
   });
-const desktopWindowControlReady = import('./js/features/desktopWindowControl.mjs?v=20260506-api-setup-ko1')
-  .then(({createDesktopWindowControl}) => {
-    desktopWindowControl = createDesktopWindowControl({
-      document,
-      getWs: () => ws,
-      WebSocket,
-    });
-  })
-  .catch(error => {
-    console.error('Failed to initialize desktop window control module', error);
-  });
 const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .then(({createPromptDrawer}) => {
     promptDrawerControl = createPromptDrawer({
@@ -881,19 +868,6 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
-  });
-const ollamaPanelReady = import('./js/features/ollamaPanel.mjs')
-  .then(({createOllamaPanel}) => {
-    ollamaPanel = createOllamaPanel({
-      document,
-      escHtml,
-      setModuleParam,
-      bindTagAssist,
-      showToast,
-    });
-  })
-  .catch(error => {
-    console.error('Failed to initialize Ollama panel module', error);
   });
 const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260512-api-dialog-fallback1')
   .then(({createImageModulePanels}) => {
@@ -2177,7 +2151,6 @@ const wsMessageHandlers = {
   viewer_history_removed: onViewerHistoryRemoved,
   viewer_history_cleared: onViewerHistoryCleared,
   session: onSession,
-  desktop_window_state: onDesktopWindowState,
   init_complete: onInitComplete,
   lazy_indices_ready: onLazyIndicesReady,
 };
@@ -2221,7 +2194,6 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
         setLauncherConn(false);
         modeSwitching = false;
         if (modeSelect) modeSelect.disabled = true;
-        if (desktopWindowControl) desktopWindowControl.disable();
       },
     });
   })
@@ -2570,7 +2542,7 @@ function applyPromptEngineeringDebugSnapshot(snapshot) {
     type: 'module_state',
     module_id: 'prompt_engineering',
     available: true,
-    headless: true,
+    runtime: 'web',
   };
   currentState.debug_snapshot = snapshot;
   moduleStateCache.set('prompt_engineering', currentState);
@@ -3329,7 +3301,6 @@ const DETACHED_MODULE_GEOMETRY = {
   vibe_transfer: {width: 900, height: 780},
   img2img: {width: 1080, height: 860},
   e621_event: {width: 1120, height: 820},
-  ollama: {width: 760, height: 780},
 };
 const DEFAULT_DETACHED_MODULE_GEOMETRY = {width: 720, height: 760};
 const DETACHED_METADATA_GEOMETRY = {width: 1040, height: 820};
@@ -3958,14 +3929,6 @@ function onSession(m) {
   }
   scheduleInitialRandomPrompt();
   updateModeSelectAvailability();
-}
-
-function onDesktopWindowState(m) {
-  if (desktopWindowControl) desktopWindowControl.onState(m);
-}
-
-function toggleDesktopWindow() {
-  if (desktopWindowControl) desktopWindowControl.toggle();
 }
 
 // ---- Drawer & Tabs ----
@@ -4918,7 +4881,6 @@ function openModule(moduleId, options = {}) {
     instant_wildcard: 'Instant Wildcard',
     chunk: '와일드카드 청크',
     e621_event: 'E621 연구모듈',
-    ollama: 'Ollama',
   };
   moduleTitle.textContent = moduleLauncherControl?.moduleTitle(moduleId) || titles[moduleId] || moduleId;
   if (moduleId === 'auto_save' && autoSavePanel) {
@@ -5183,7 +5145,6 @@ function renderModuleState(m) {
   else if (m.module_id === 'wildcard') renderWildcard(m);
   else if (m.module_id === 'instant_wildcard') renderInstantWildcard(m);
   else if (m.module_id === 'e621_event') renderE621Event(m);
-  else if (m.module_id === 'ollama') renderOllama(m);
 }
 
 function openSaveDirectoryPanel() {
@@ -5591,35 +5552,6 @@ function e621OnTestbenchInput(element) {
 
 function e621Generate() {
   if (e621EventPanel) e621EventPanel.generate();
-}
-
-// ---- Ollama module ----
-function renderOllama(m) {
-  if (ollamaPanel) ollamaPanel.render(m);
-}
-
-function ollamaRefresh() {
-  if (ollamaPanel) ollamaPanel.refresh();
-}
-
-function ollamaServerAction(action) {
-  if (ollamaPanel) ollamaPanel.serverAction(action);
-}
-
-function ollamaInputChanged(element) {
-  if (ollamaPanel) ollamaPanel.inputChanged(element);
-}
-
-function ollamaConvert() {
-  if (ollamaPanel) ollamaPanel.convert();
-}
-
-function ollamaCancel() {
-  if (ollamaPanel) ollamaPanel.cancel();
-}
-
-function ollamaCopyOutput() {
-  if (ollamaPanel) ollamaPanel.copyOutput();
 }
 
 // ---- Chunk Module (instant wildcard tree browser) ----
@@ -6284,7 +6216,6 @@ Promise.all([
   cloudflaredControlsReady,
   setupControllerReady,
   generationProgressReady,
-  desktopWindowControlReady,
   promptDrawerReady,
   eventPresetReady,
   autoSavePanelReady,
@@ -6298,7 +6229,6 @@ Promise.all([
   wildcardManagerPanelReady,
   instantWildcardPanelReady,
   e621EventPanelReady,
-  ollamaPanelReady,
   imageModulePanelsReady,
   img2imgPanelReady,
   refinePanelReady,

@@ -47,7 +47,7 @@ class E621EventService:
             "type": "module_state",
             "module_id": "e621_event",
             "available": True,
-            "headless": True,
+            "runtime": "web",
             "data_loaded": loaded,
             "data_path": str(self.data_path),
             "search_text": self.search_text,
@@ -150,7 +150,7 @@ class E621EventService:
                 self.state(),
             ]
         else:
-            return self._toast(f"E621 action is not supported in headless: {key}", level="info")
+            return self._toast(f"E621 action is not supported in this runtime: {key}", level="info")
         return self.state()
 
     def _ensure_loaded(self) -> bool:
@@ -357,7 +357,7 @@ class E621EventService:
         return tags
 
     def _toast(self, message: str, *, level: str = "info") -> dict[str, Any]:
-        return {"type": "toast", "message": message, "level": level, "headless": True}
+        return {"type": "toast", "message": message, "level": level, "runtime": "web"}
 
     @staticmethod
     def _coerce_bool(value: Any) -> bool:

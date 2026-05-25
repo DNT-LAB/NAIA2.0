@@ -262,7 +262,7 @@ async def handle_json_command(
         await ws.send_text(json.dumps({
             "type": "toast",
             "level": "info",
-            "message": f"Headless command ignored: {command_type or 'unknown'}",
+            "message": f"Unsupported command ignored: {command_type or 'unknown'}",
         }, ensure_ascii=False))
 
 
@@ -292,5 +292,5 @@ async def handle_text_command(
     await ws.send_text(json.dumps({
         "type": "toast",
         "level": "info",
-        "message": f"Headless command ignored: {data}",
+        "message": f"Unsupported command ignored: {data}",
     }, ensure_ascii=False))

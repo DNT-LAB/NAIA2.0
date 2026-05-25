@@ -386,5 +386,5 @@ def register_generation_rest_routes(
             "api_mode": context.get_api_mode(),
             "is_generating": bool(context.is_generating or getattr(context, "headless_generation_runner_active", False)),
             "queue": context.queue_state_payload(),
-            "headless": True,
+            "runtime": "web",
         }

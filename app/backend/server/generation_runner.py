@@ -75,7 +75,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                     "success": True,
                     "message": "Enhance complete",
                     "request_id": str(params.get("result_enhance_request_id") or request.request_id),
-                    "headless": True,
+                    "runtime": "web",
                 })
             await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
             await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
@@ -233,7 +233,7 @@ async def _broadcast_generation_error(
             "success": False,
             "message": message,
             "request_id": str(params.get("result_enhance_request_id") or request.request_id),
-            "headless": True,
+            "runtime": "web",
         })
     if params.get("event_preset_request"):
         await broadcast_json(clients, {

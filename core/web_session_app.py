@@ -1,4 +1,4 @@
-"""PyQt-free FastAPI app for the headless Remote Web Session path."""
+"""PyQt-free FastAPI app for the Remote Web Session path."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def create_headless_app(
     session_context = context or WebSessionContext()
 
     app = FastAPI(
-        title="NAIA Remote Headless",
+        title="NAIA Remote",
         lifespan=create_headless_lifespan(session_context, run_in_thread=_to_thread),
     )
     app.state.web_session_context = session_context

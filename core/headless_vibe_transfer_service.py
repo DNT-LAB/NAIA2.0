@@ -149,7 +149,7 @@ class HeadlessVibeTransferService:
         elif key == "normalize":
             context.vibe_transfer_normalize = context._coerce_bool(value)
         elif key.startswith("encode_"):
-            return context._toast("Headless Vibe encoding is not available yet; use stored encoded Vibe entries.", level="error")
+            return context._toast("Vibe encoding is not available in this runtime; use stored encoded Vibe entries.", level="error")
         elif key == "get_storage":
             return self.scan_storage()
         elif key == "apply_storage":
@@ -163,7 +163,7 @@ class HeadlessVibeTransferService:
             if isinstance(loaded, dict):
                 return loaded
         elif key in {"cluster_save", "cluster_delete", "cluster_rename", "cluster_thumbnail", "restore_metadata"}:
-            return context._toast(f"Vibe Transfer action is not available in headless yet: {key}", level="info")
+            return context._toast(f"Vibe Transfer action is not available in this runtime: {key}", level="info")
         else:
             return None
         return self.module_state()

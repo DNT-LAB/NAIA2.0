@@ -73,7 +73,7 @@ def smoke_staged_backend(
     root_response = client.get("/")
     app_js_response = client.get("/app.js")
     status_response = client.get("/api/status")
-    capabilities_response = client.get("/api/headless/capabilities")
+    capabilities_response = client.get("/api/runtime/capabilities")
     web_dir = resolve_remote_web_dir(backend)
     save_dir = context.runtime_paths.save_dir if context.runtime_paths is not None else backend / "save"
     output_dir = context.runtime_paths.output_dir if context.runtime_paths is not None else backend / "output"

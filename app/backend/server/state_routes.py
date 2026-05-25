@@ -72,10 +72,9 @@ def register_state_routes(
         await broadcast_json(clients, state)
         return {"ok": True, "action": action, "queue": state}
 
-    @app.get("/api/headless/capabilities")
-    async def api_headless_capabilities():
+    def runtime_capabilities_payload() -> dict[str, Any]:
         return {
-            "headless": True,
+            "runtime": "web",
             "right_tabs": {
                 "result": True,
                 "pngInfo": True,
@@ -87,3 +86,7 @@ def register_state_routes(
             },
             "retired_tabs": {},
         }
+
+    @app.get("/api/runtime/capabilities")
+    async def api_runtime_capabilities():
+        return runtime_capabilities_payload()

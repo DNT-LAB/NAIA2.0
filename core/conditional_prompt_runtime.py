@@ -435,7 +435,7 @@ class ConditionalPromptHeadlessHook:
         self._store = get_conditional_prompt_store(app_context)
 
     def get_title(self) -> str:
-        return "Conditional Prompt Headless"
+        return "Conditional Prompt"
 
     def get_pipeline_hook_info(self) -> dict[str, Any]:
         return {

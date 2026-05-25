@@ -25,11 +25,11 @@ GenerationRunnerStarter = Callable[[WebSessionContext, set[Any]], None]
 
 def prompt_highlight_empty_index() -> dict[str, object]:
     return {
-        "version": "headless-empty",
+        "version": "runtime-empty",
         "groups": {},
         "tags": {},
         "stats": {
-            "source": "headless",
+            "source": "runtime",
             "total": 0,
         },
     }

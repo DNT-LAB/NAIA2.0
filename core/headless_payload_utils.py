@@ -19,7 +19,7 @@ def module_state_payload(module_id: str, state: dict[str, Any]) -> dict[str, Any
         "type": "module_state",
         "module_id": module_id,
         "available": True,
-        "headless": True,
+        "runtime": "web",
         **state,
     }
     payload["state"] = dict(state)
@@ -31,7 +31,7 @@ def toast(message: str, *, level: str = "info") -> dict[str, Any]:
         "type": "toast",
         "level": level,
         "message": str(message or ""),
-        "headless": True,
+        "runtime": "web",
     }
 
 

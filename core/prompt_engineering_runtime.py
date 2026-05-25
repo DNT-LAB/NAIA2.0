@@ -193,7 +193,7 @@ class _PromptEngineeringAdvancedModuleBridge:
                 module.apply_settings(get_prompt_engineering_store(self.app_context).collect_settings())
             return module
         except Exception as exc:
-            print(f"⚠️ PromptEngineering headless advanced module load failed: {exc}")
+            print(f"[WARN] Prompt Engineering advanced module load failed: {exc}")
             return None
 
 
@@ -203,7 +203,7 @@ class PromptEngineeringHeadlessPostHook:
         self._advanced = _PromptEngineeringAdvancedModuleBridge(app_context)
 
     def get_title(self):
-        return "Prompt Engineering Headless"
+        return "Prompt Engineering"
 
     def get_pipeline_hook_info(self):
         return {
@@ -349,7 +349,7 @@ class PromptEngineeringClosedEyesHeadlessHook:
         self.app_context = app_context
 
     def get_title(self):
-        return "Closed Eyes Sync Headless"
+        return "Closed Eyes Sync"
 
     def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
         if not context.metadata.get("_closed_eyes_sync_enabled"):
@@ -409,7 +409,7 @@ class PromptEngineeringOutfitContextHeadlessHook:
         self.app_context = app_context
 
     def get_title(self):
-        return "Outfit Context Resolver Headless"
+        return "Outfit Context Resolver"
 
     def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
         filter_manager = getattr(self.app_context, "filter_data_manager", None)
@@ -527,7 +527,7 @@ class PromptEngineeringRandomizedSubscriber:
             module = _PromptEngineeringAdvancedModuleBridge(self.app_context).module()
             if module and hasattr(module, "apply_main_ui_settings"):
                 module.apply_main_ui_settings(main_settings)
-        print(f"🎲 Headless 랜덤 프리셋 적용: {selected}")
+        print(f"Random preset applied: {selected}")
 
 
 def register_prompt_engineering_headless_runtime(app_context) -> None:
@@ -543,7 +543,7 @@ def register_prompt_engineering_headless_runtime(app_context) -> None:
             PromptEngineeringAdvancedAfterWildcardHook(
                 app_context,
                 "_execute_e621_after_wildcard",
-                "e621 Auto-Boost Headless",
+                "e621 Auto-Boost",
                 lambda context: "_e621_source_tags" in context.metadata,
             ),
         ),
@@ -552,7 +552,7 @@ def register_prompt_engineering_headless_runtime(app_context) -> None:
             PromptEngineeringAdvancedAfterWildcardHook(
                 app_context,
                 "_execute_danbooru_weight_after_wildcard",
-                "Danbooru Auto-Weight Headless",
+                "Danbooru Auto-Weight",
                 lambda context: (
                     "_danbooru_weight_deferred" in context.metadata
                     or "_danbooru_weight_applied_tags" in context.metadata

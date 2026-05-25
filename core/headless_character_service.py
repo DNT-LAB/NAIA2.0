@@ -59,7 +59,7 @@ class HeadlessCharacterService:
         settings = self.settings_cache()
         state = character_state_from_settings(settings, app_context=self.context, mode=mode)
         state["available"] = True
-        state["headless"] = True
+        state["runtime"] = "web"
         return state
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:

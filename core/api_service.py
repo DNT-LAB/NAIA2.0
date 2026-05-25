@@ -2002,7 +2002,7 @@ class APIService:
             else:
                 return {
                     'status': 'error',
-                    'message': 'Headless upscale requires raw image bytes or a PIL image.'
+                    'message': 'Upscale requires raw image bytes or a PIL image.'
                 }
             img_base64 = base64.b64encode(image_bytes).decode()
             

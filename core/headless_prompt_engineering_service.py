@@ -400,7 +400,7 @@ class HeadlessPromptEngineeringService:
             "overlay": None,
             "editable": False,
             "available": False,
-            "headless": True,
+            "runtime": "web",
         }
         path = self.hires_overlay_path(name)
         if path is None:

@@ -76,11 +76,11 @@
       "expected_json_subset": {"ok": true}
     },
     {
-      "feature": "headless_capabilities",
+      "feature": "runtime_capabilities",
       "method": "GET",
-      "path": "/api/headless/capabilities",
+      "path": "/api/runtime/capabilities",
       "expected_status": [200],
-      "expected_json_subset": {"headless": true}
+      "expected_json_subset": {"runtime": "web"}
     },
     {
       "feature": "pipeline_prompt_runs",
@@ -123,7 +123,7 @@
       "method": "GET",
       "path": "/api/prompt-highlight-index",
       "expected_status": [200],
-      "expected_json_subset": {"version": "headless-empty"}
+      "expected_json_subset": {"version": "runtime-empty"}
     },
     {
       "feature": "prompt_tools_tag_lookup",
@@ -188,7 +188,7 @@
       "path": "/api/danbooru/browser/open",
       "json": {"query": "rating:g"},
       "expected_status": [200],
-      "expected_json_subset": {"ok": true, "headless": true}
+      "expected_json_subset": {"ok": true, "runtime": "web"}
     },
     {
       "feature": "style_thumb_state",
@@ -266,11 +266,11 @@
       "expected_json_keys": ["error"]
     },
     {
-      "feature": "clipboard_headless_unavailable",
+      "feature": "clipboard_native_unavailable",
       "method": "GET",
       "path": "/api/clipboard/png",
       "expected_status": [404],
-      "expected_json_subset": {"headless": true}
+      "expected_json_subset": {"runtime": "web"}
     },
     {
       "feature": "comfyui_workflow_state",
@@ -297,11 +297,11 @@
       "expected_status": [404]
     },
     {
-      "feature": "result_open_location_headless",
+      "feature": "result_open_location_unavailable",
       "method": "POST",
       "path": "/api/result/open-location",
       "expected_status": [400],
-      "expected_json_subset": {"headless": true}
+      "expected_json_subset": {"runtime": "web"}
     },
     {
       "feature": "result_action_save_missing_history",
@@ -541,7 +541,7 @@
               "type": "module_state",
               "expected_json_subset": {
                 "module_id": "prompt_engineering",
-                "headless": true
+                "runtime": "web"
               },
               "expected_json_keys": ["state", "preset_options"]
             }
@@ -558,7 +558,7 @@
               "type": "module_state",
               "expected_json_subset": {
                 "module_id": "conditional_prompt",
-                "headless": true
+                "runtime": "web"
               },
               "expected_json_keys": ["state", "enabled", "editor_mode"]
             }
@@ -575,7 +575,7 @@
               "type": "module_state",
               "expected_json_subset": {
                 "module_id": "character_reference",
-                "headless": true
+                "runtime": "web"
               },
               "expected_json_keys": ["state", "frames"]
             }
@@ -610,7 +610,7 @@
               "type": "module_state",
               "expected_json_subset": {
                 "module_id": "vibe_transfer",
-                "headless": true
+                "runtime": "web"
               },
               "expected_json_keys": ["state", "frames", "frame_count"]
             }
@@ -645,7 +645,7 @@
               "type": "module_state",
               "expected_json_subset": {
                 "module_id": "img2img",
-                "headless": true,
+                "runtime": "web",
                 "active": false
               },
               "expected_json_keys": ["state"]
@@ -663,7 +663,7 @@
               "type": "module_state",
               "expected_json_subset": {
                 "module_id": "auto_save",
-                "headless": true
+                "runtime": "web"
               },
               "expected_json_keys": ["state", "auto_save", "unsaved_history_count"]
             }
@@ -680,7 +680,7 @@
               "type": "module_state",
               "expected_json_subset": {
                 "module_id": "save_directory",
-                "headless": true,
+                "runtime": "web",
                 "control_allowed": true
               },
               "expected_json_keys": ["state", "current_save_directory"]
@@ -698,7 +698,7 @@
               "type": "module_state",
               "expected_json_subset": {
                 "module_id": "wildcard_status",
-                "headless": true,
+                "runtime": "web",
                 "retired": true
               },
               "expected_json_keys": ["state", "message"]
@@ -717,7 +717,7 @@
               "expected_json_subset": {
                 "module_id": "__missing_module__",
                 "available": false,
-                "headless": true
+                "runtime": "web"
               },
               "expected_json_keys": ["state"]
             }

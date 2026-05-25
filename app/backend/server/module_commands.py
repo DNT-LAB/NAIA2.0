@@ -51,7 +51,7 @@ async def handle_module_command(
             "type": "toast",
             "level": "info",
             "message": "Module parameter is not supported in this runtime.",
-            "headless": True,
+            "runtime": "web",
         })
         return True
 

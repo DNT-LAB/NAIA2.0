@@ -48,7 +48,7 @@ async def handle_hires_overlay_command(
         "type": "toast",
         "level": "success" if ok else "error",
         "message": message,
-        "headless": True,
+        "runtime": "web",
     })
     if ok:
         response = await run_in_thread(service.hires_overlay_response, preset_name)

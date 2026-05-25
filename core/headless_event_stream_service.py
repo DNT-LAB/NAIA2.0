@@ -32,7 +32,7 @@ class HeadlessEventStreamService:
         state = runtime.get_state() if hasattr(runtime, "get_state") else {}
         return self.context._module_state_payload("event_stream", {
             "available": True,
-            "headless": True,
+            "runtime": "web",
             **state,
         })
 

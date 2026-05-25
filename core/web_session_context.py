@@ -1,10 +1,9 @@
-"""PyQt-free service container for the Remote Web headless runtime.
+"""PyQt-free service container for the Remote Web runtime.
 
-This module is the Round 31 skeleton for the headless Web Session migration.
+This module is the Round 31 skeleton for the Web Session migration.
 It intentionally does not import the removed desktop application, RemoteBridge,
 or Qt-backed controllers. Later rounds can continue moving FastAPI and
-generation behavior onto this container without restoring the old desktop
-WebShell path.
+generation behavior onto this container without restoring the old WebShell path.
 """
 
 from __future__ import annotations
@@ -26,11 +25,11 @@ from core.search_result_model import SearchResultModel
 
 @dataclass
 class WebSessionContext:
-    """Headless state owner for Remote Web startup and shared status.
+    """State owner for Remote Web startup and shared status.
 
     The container deliberately exposes several AppContext-shaped attributes and
     methods so core services can migrate one by one without depending on a
-    ``ModernMainWindow`` instance.
+    GUI window instance.
     """
 
     token_manager: TokenStore | None = None

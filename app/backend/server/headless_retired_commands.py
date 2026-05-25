@@ -32,7 +32,7 @@ async def handle_headless_retired_command(
             "type": "toast",
             "level": "info",
             "message": "Native window controls are not available in this runtime.",
-            "headless": True,
+            "runtime": "web",
         })
         await _send_json(ws, context.desktop_window_state_payload(client_host))
         return True

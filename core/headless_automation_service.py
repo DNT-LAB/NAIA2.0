@@ -19,7 +19,7 @@ class HeadlessAutomationService:
             context._automation_settings = settings
         state = automation_state_from_settings(settings)
         state["available"] = True
-        state["headless"] = True
+        state["runtime"] = "web"
         return state
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:

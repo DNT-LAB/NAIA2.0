@@ -742,7 +742,7 @@ def _verify_feature_workflows_surface(client: CdpClient, timeout: float) -> dict
   }}
   const routeChecks = [
     {{key: "status", feature: "setup_api_settings", path: "/api/status", expectedStatus: [200]}},
-    {{key: "headless_capabilities", feature: "setup_api_settings", path: "/api/headless/capabilities", expectedStatus: [200]}},
+    {{key: "runtime_capabilities", feature: "setup_api_settings", path: "/api/runtime/capabilities", expectedStatus: [200]}},
     {{key: "queue_state", feature: "generate", path: "/api/queue/state", expectedStatus: [200]}},
     {{key: "resolutions", feature: "params", path: "/api/resolutions", expectedStatus: [200]}},
     {{key: "prompt_highlight_index", feature: "prompt_tools", path: "/api/prompt-highlight-index", expectedStatus: [200]}},
@@ -900,7 +900,7 @@ def _verify_feature_workflows_surface(client: CdpClient, timeout: float) -> dict
     {{name: "dom.setup_launcher", ok: domOk("setup_launcher")}},
     {{name: "function.openApiPopup", ok: result.functions.openApiPopup}},
     {{name: "route.status", ok: routeOk("status")}},
-    {{name: "route.headless_capabilities", ok: routeOk("headless_capabilities")}},
+    {{name: "route.runtime_capabilities", ok: routeOk("runtime_capabilities")}},
   ]);
   markFeature("history", [
     {{name: "dom.history_panel", ok: domOk("history_panel")}},

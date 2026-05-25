@@ -123,12 +123,6 @@ const MODULE_REGISTRY = {
     modes: ['COMFYUI'],
     className: 'module-comfyui-tool',
   },
-  ollama: {
-    label: 'Ollama',
-    title: 'Ollama',
-    category: 'assistant_tools',
-    action: 'module',
-  },
   automation: {
     label: 'Automation',
     title: 'Automation',
@@ -168,7 +162,7 @@ const CATEGORY_REGISTRY = [
     id: 'assistant_tools',
     label: '자동화 / 고급 기능',
     title: '자동화 / 고급 기능',
-    moduleIds: ['ollama', 'automation'],
+    moduleIds: ['automation'],
   },
 ];
 

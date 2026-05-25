@@ -68,7 +68,7 @@ class HeadlessWildcardService:
                 "name": str(value or ""),
                 "result": self.preview(str(value or "")),
             }
-        return context._toast(f"Wildcard action is not supported in headless: {key}", level="info")
+        return context._toast(f"Wildcard action is not supported in this runtime: {key}", level="info")
 
     def base_dir(self) -> Path:
         manager = self.context.wildcard_manager

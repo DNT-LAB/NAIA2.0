@@ -487,15 +487,15 @@ def register_result_display_routes(
     @app.post("/api/result/clipboard/png")
     async def api_result_clipboard_png():
         return JSONResponse({
-            "error": "Native clipboard copy is not available in the headless runtime; use the browser clipboard path.",
-            "headless": True,
+            "error": "Native clipboard copy is not available in this runtime; use the browser clipboard path.",
+            "runtime": "web",
         }, status_code=400)
 
     @app.get("/api/clipboard/png")
     async def api_clipboard_png():
         return JSONResponse({
-            "error": "Native clipboard read is not available in the headless runtime.",
-            "headless": True,
+            "error": "Native clipboard read is not available in this runtime.",
+            "runtime": "web",
         }, status_code=404)
 
     @app.get("/api/result/asset/current")
@@ -542,7 +542,7 @@ def register_result_display_routes(
                         raise ValueError("Private or loopback image URLs are not allowed")
 
             validate_public_url(url)
-            request = urllib.request.Request(url, headers={"User-Agent": "NAIA-Headless/1.0"})
+            request = urllib.request.Request(url, headers={"User-Agent": "NAIA-Remote/1.0"})
             with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310 - URL is validated above.
                 final_url = response.geturl()
                 if final_url and final_url != url:
@@ -777,7 +777,7 @@ def register_result_display_routes(
     async def api_result_open_location():
         return JSONResponse({
             "error": "Opening local folders is not supported from Remote Web.",
-            "headless": True,
+            "runtime": "web",
         }, status_code=400)
 
     @app.post("/api/result/action/reroll")
@@ -997,5 +997,5 @@ def register_result_display_routes(
             return JSONResponse({"error": f"Image action failed: {exc}"}, status_code=500)
         return JSONResponse({
             "error": "Danbooru image analysis from uploads is not supported. Use the Danbooru browser by post ID or URL.",
-            "headless": True,
+            "runtime": "web",
         }, status_code=400)

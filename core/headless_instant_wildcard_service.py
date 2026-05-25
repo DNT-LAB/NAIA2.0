@@ -97,7 +97,7 @@ class HeadlessInstantWildcardService:
                     for key, value in sorted(items.items(), key=lambda item: str(item[0]))
                 ],
             })
-        return {"type": "module_state", "module_id": "chunk", "available": True, "headless": True, "groups": groups}
+        return {"type": "module_state", "module_id": "chunk", "available": True, "runtime": "web", "groups": groups}
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         from core.instant_wildcard_service import (
@@ -187,4 +187,4 @@ class HeadlessInstantWildcardService:
             write_instant_wildcard_file(json_data, filename, store.get("save_path") or "")
             self.store(force=True)
             return self.state()
-        return context._toast(f"Instant wildcard action is not supported in headless: {key}", level="info")
+        return context._toast(f"Instant wildcard action is not supported in this runtime: {key}", level="info")

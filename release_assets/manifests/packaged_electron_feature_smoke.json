@@ -145,7 +145,7 @@
       "websocket_commands": ["verify_api", "clear_api", "probe_api", "set_cloudflared_enabled"],
       "routes": [
         {"method": "GET", "path": "/api/status"},
-        {"method": "GET", "path": "/api/headless/capabilities"}
+        {"method": "GET", "path": "/api/runtime/capabilities"}
       ],
       "requires_live_runtime": false
     },

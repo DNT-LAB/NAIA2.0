@@ -68,7 +68,7 @@ class HeadlessConditionalPromptService:
             options["stop_on_match"] = context._coerce_bool(value)
             settings["engine_options"] = options
         elif key in {"rules_v2_book", "preset_load", "test_rules"}:
-            return context._toast(f"Conditional Prompt action retired in headless: {key}", level="info")
+            return context._toast(f"Conditional Prompt action is not available in this runtime: {key}", level="info")
         else:
             return None
         store.apply_settings(settings)

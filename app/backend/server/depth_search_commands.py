@@ -45,7 +45,7 @@ def depth_payload(context: WebSessionContext) -> dict[str, Any]:
             0 if item is None or getattr(item, "empty", True) else int(len(item))
             for item in state.get("staging", [])
         ),
-        "headless": True,
+        "runtime": "web",
     }
 
 

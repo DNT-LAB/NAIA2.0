@@ -152,7 +152,12 @@ class APIService:
         else:
             try:
                 address = ipaddress.ip_address(host)
-                if address.is_loopback or address.is_private or address.is_link_local:
+                if (
+                    address.is_loopback
+                    or address.is_private
+                    or address.is_link_local
+                    or address.is_unspecified
+                ):
                     scheme = "http"
             except ValueError:
                 pass

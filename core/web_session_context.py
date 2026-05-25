@@ -622,9 +622,6 @@ class WebSessionContext:
     def http_status_payload(self) -> dict[str, Any]:
         return self._session_state_service().http_status_payload()
 
-    def desktop_window_state_payload(self, client_host: str | None = None) -> dict[str, Any]:
-        return self._session_state_service().desktop_window_state_payload(client_host)
-
     def queue_state_payload(self) -> dict[str, Any]:
         return self._session_state_service().queue_state_payload()
 

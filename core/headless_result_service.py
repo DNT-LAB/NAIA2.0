@@ -38,7 +38,7 @@ class HeadlessHistoryItem:
     @property
     def filename(self) -> str:
         timestamp = self.created_at.strftime("%Y%m%d_%H%M%S")
-        return f"naia_headless_{timestamp}_{self.history_id[:8]}.png"
+        return f"naia_result_{timestamp}_{self.history_id[:8]}.png"
 
 
 @dataclass

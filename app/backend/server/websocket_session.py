@@ -28,10 +28,6 @@ from app.backend.server.generation_commands import (
     handle_generate_command,
     handle_random_command,
 )
-from app.backend.server.headless_retired_commands import (
-    HEADLESS_RETIRED_COMMAND_TYPES,
-    handle_headless_retired_command,
-)
 from app.backend.server.module_commands import (
     MODULE_COMMAND_TYPES,
     handle_module_command,
@@ -190,8 +186,6 @@ async def handle_json_command(
             command,
             run_in_thread=run_in_thread,
         )
-    elif command_type in HEADLESS_RETIRED_COMMAND_TYPES:
-        await handle_headless_retired_command(ws, context, client_host, command)
     elif command_type in AUTOCOMPLETE_COMMAND_TYPES:
         await handle_autocomplete_command(
             ws,

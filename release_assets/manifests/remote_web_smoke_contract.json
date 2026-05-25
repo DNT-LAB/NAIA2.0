@@ -391,7 +391,6 @@
       "path": "/ws",
       "expected_initial_types": [
         "session",
-        "desktop_window_state",
         "mode",
         "options",
         "params",
@@ -408,7 +407,6 @@
       "path": "/ws",
       "expected_initial_types": [
         "session",
-        "desktop_window_state",
         "mode",
         "options",
         "params",
@@ -520,7 +518,6 @@
       "path": "/ws",
       "expected_initial_types": [
         "session",
-        "desktop_window_state",
         "mode",
         "options",
         "params",

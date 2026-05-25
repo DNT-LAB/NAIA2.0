@@ -118,8 +118,8 @@ export function createResultEnhanceController({
     button.classList.toggle('running', running);
     button.textContent = running && !isWebUiMode() ? 'Enhancing...' : label();
     button.title = disabledReason || (isWebUiMode()
-      ? 'Run WEBUI Hires.fix Enhance on the current desktop result'
-      : 'Run NAI Enhance on the current desktop result');
+      ? 'Run WEBUI Hires.fix Enhance on the current result'
+      : 'Run NAI Enhance on the current result');
     if (settingsButton) settingsButton.disabled = running || !isSupportedMode();
   }
 

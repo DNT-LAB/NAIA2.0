@@ -33,14 +33,12 @@ const DEFAULT_CAPABILITIES = {
 
 const MAIN_IMAGE_ACTIONS = [
   {label: '이미지 붙여넣기', action: ACTION_PASTE_IMAGE, alwaysEnabled: true},
-  {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
   {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
   {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png', badge: 'PNG', badgeTone: 'blue'},
   {type: 'separator'},
 ];
 
 const THUMBNAIL_IMAGE_ACTIONS = [
-  {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
   {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
   {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png', badge: 'PNG', badgeTone: 'blue'},
   {type: 'separator'},
@@ -589,7 +587,7 @@ export function createResultContextMenu({
         image_action: canUseNaiImageAction,
         inpaint: canUseNaiImageAction,
         copy_png: hasImage,
-        open_file: isSaved && Boolean(path),
+        open_file: false,
         save_image: (isCurrent || isSaved) && hasImage,
       },
     };

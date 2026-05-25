@@ -63,7 +63,7 @@ export function createAutoSavePanel({
     const statusText = panelState.auto_save ? 'Enabled' : 'Disabled';
     const desc = panelState.auto_save
       ? '이미지를 생성할 때 저장 폴더에도 자동 저장합니다.'
-      : '이미지를 저장하지 않고 Desktop/Web 히스토리에만 유지합니다.';
+      : '이미지를 저장하지 않고 Remote Web 히스토리에만 유지합니다.';
     const toggleLabel = panelState.auto_save ? 'Disable Auto Save' : 'Enable Auto Save';
     const toggleValue = panelState.auto_save ? 'false' : 'true';
     const toggleClass = panelState.auto_save ? 'mod-stop' : 'mod-start';

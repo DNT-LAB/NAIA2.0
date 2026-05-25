@@ -31,14 +31,6 @@ class HeadlessSessionStateService:
             "autocomplete": self.autocomplete_status_payload(),
         }
 
-    @staticmethod
-    def desktop_window_state_payload(client_host: str | None = None) -> dict[str, Any]:
-        payload = {"type": "desktop_window_state", "visible": False}
-        if client_host is not None:
-            payload["control_allowed"] = False
-            payload["control_block_reason"] = "Native window controls are not available in this runtime."
-        return payload
-
     def queue_state_payload(self) -> dict[str, Any]:
         context = self.context
         stats = context.generation_queue_manager.get_queue_stats()
@@ -247,7 +239,6 @@ class HeadlessSessionStateService:
                 "negative_prompt": context.negative_prompt_text,
             })
         messages.extend([
-            self.desktop_window_state_payload(client_host),
             {"type": "mode", "mode": context.get_api_mode()},
             {"type": "options", **context.get_options()},
             self.generation_param_schema_payload(),

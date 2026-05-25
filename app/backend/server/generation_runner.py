@@ -168,24 +168,17 @@ async def _maybe_continue_auto_generation(
 
 def _should_continue_auto_generation(context: WebSessionContext, request) -> bool:
     if not context._coerce_bool(context.get_options().get("auto_generate", False)):
-        context.headless_auto_generate_queue_hold = False
         return False
     queue_manager = context.generation_queue_manager
     if queue_manager.is_paused() or not queue_manager.is_empty():
-        context.headless_auto_generate_queue_hold = True
         return False
-    was_holding = bool(getattr(context, "headless_auto_generate_queue_hold", False))
-    context.headless_auto_generate_queue_hold = False
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
-    if (
-        not was_holding
-        and any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS)
-    ):
+    if any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS):
         return False
     request_type = str(params.get("type") or "").strip().lower()
-    if not was_holding and request_type in {"img2img", "inpaint", "outpaint", "auto_outpainting"}:
+    if request_type in {"img2img", "inpaint", "outpaint", "auto_outpainting"}:
         return False
     return True
 

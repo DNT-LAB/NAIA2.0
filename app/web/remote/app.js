@@ -6181,7 +6181,7 @@ function _fireModuleOninput(el) {
   if (handler) new Function('event', handler).call(el, {target: el});
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260515-webui-escaped-tag1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260525-tag-autocomplete-cache1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

@@ -18,12 +18,26 @@ def _web_file(path: Path, media_type: str):
     return FileResponse(str(path), media_type=media_type, headers=_no_cache_headers())
 
 
+def _web_asset(root: Path, asset_path: str, *, default_media_type: str = "application/octet-stream"):
+    try:
+        target = (root / asset_path).resolve()
+        root_resolved = root.resolve()
+        if not target.is_relative_to(root_resolved):
+            return JSONResponse({"error": "not found"}, status_code=404)
+    except Exception:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if not target.is_file():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    media_type = mimetypes.guess_type(str(target))[0] or default_media_type
+    if target.suffix.lower() in {".js", ".mjs"}:
+        media_type = "text/javascript"
+    return FileResponse(str(target), media_type=media_type, headers=_no_cache_headers())
+
+
 def register_web_shell_routes(app: FastAPI, root_web_dir: Path) -> None:
     mimetypes.add_type("text/javascript", ".mjs")
 
     js_dir = root_web_dir / "js"
-    if js_dir.exists():
-        app.mount("/js", StaticFiles(directory=str(js_dir)), name="remote_js")
     guides_dir = root_web_dir / "guides"
     if guides_dir.exists():
         app.mount("/guides", StaticFiles(directory=str(guides_dir), html=True), name="remote_guides")
@@ -39,3 +53,7 @@ def register_web_shell_routes(app: FastAPI, root_web_dir: Path) -> None:
     @app.get("/app.js")
     async def serve_js():
         return _web_file(root_web_dir / "app.js", "application/javascript")
+
+    @app.get("/js/{asset_path:path}")
+    async def serve_js_asset(asset_path: str):
+        return _web_asset(js_dir, asset_path, default_media_type="text/javascript")

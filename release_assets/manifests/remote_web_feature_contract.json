@@ -64,7 +64,8 @@
       "routes": [
         {"method": "GET", "path": "/", "smoke": "static"},
         {"method": "GET", "path": "/style.css", "smoke": "static"},
-        {"method": "GET", "path": "/app.js", "smoke": "static"}
+        {"method": "GET", "path": "/app.js", "smoke": "static"},
+        {"method": "GET", "path": "/js/{asset_path:path}", "smoke": "static"}
       ]
     },
     {

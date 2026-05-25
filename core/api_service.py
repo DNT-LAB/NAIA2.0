@@ -6,6 +6,7 @@ import copy
 import math
 import numpy as np
 import gc
+import ipaddress
 from pathlib import Path
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -129,6 +130,33 @@ class APIService:
         except (TypeError, ValueError):
             return 512
         return 768 if target == 768 else 512
+
+    @staticmethod
+    def _normalize_webui_url(value: Any) -> str:
+        clean = str(value or "").strip().rstrip("/")
+        if not clean:
+            return ""
+        if clean.startswith(("http://", "https://")):
+            return clean
+
+        host_port = clean.split("/", 1)[0].rsplit("@", 1)[-1]
+        if host_port.startswith("["):
+            host = host_port[1:].split("]", 1)[0]
+        else:
+            host = host_port.split(":", 1)[0]
+        host = host.strip().lower()
+
+        scheme = "https"
+        if host == "localhost":
+            scheme = "http"
+        else:
+            try:
+                address = ipaddress.ip_address(host)
+                if address.is_loopback or address.is_private or address.is_link_local:
+                    scheme = "http"
+            except ValueError:
+                pass
+        return f"{scheme}://{clean}"
 
     @staticmethod
     def _nearest_hiresfix_assist_resolution(width: Any, height: Any, target: Any) -> tuple[int, int]:
@@ -941,11 +969,7 @@ class APIService:
             webui_url = params.get('credential')
             if not webui_url:
                 raise ValueError("WEBUI URL이 제공되지 않았습니다.")
-            if not webui_url.startswith("http"):
-                if "127.0" not in webui_url:
-                    webui_url = f"https://{webui_url}"
-                else:
-                    webui_url = f"http://{webui_url}"
+            webui_url = self._normalize_webui_url(webui_url)
 
             is_img2img = 'image_bytes' in params and params['image_bytes'] is not None
             is_inpaint = is_img2img and params.get('type') == 'inpaint'

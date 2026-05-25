@@ -1,14 +1,40 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
+from typing import Any
 
 from fastapi import WebSocket
 
-from app.backend.server.generation_commands import generation_service
+from app.backend.server.generation_commands import generation_service, random_service
 from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
 from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
 from core import result_image_payload_service as result_images
 from core.web_session_context import WebSessionContext
+
+
+AUTO_GENERATE_SUPPRESSED_FLAGS = {
+    "artist_thumb_request",
+    "character_viewer_request",
+    "event_preset_request",
+    "interactive_mode_request",
+    "prompt_preset_thumbnail_request",
+    "remote_preset_request",
+    "result_enhance_request",
+    "studio_request",
+    "turbo_sequence_request",
+}
+
+AUTO_GENERATE_DROPPED_PARAM_KEYS = {
+    "_generation_request",
+    "credential",
+    "generation_request_id",
+    "promptRunId",
+    "prompt_run_id",
+    "requestId",
+    "request_id",
+    "result_enhance_request_id",
+}
 
 
 def ensure_generation_runner(context: WebSessionContext, clients: set[WebSocket]) -> None:
@@ -53,6 +79,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 })
             await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
             await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+            await _maybe_continue_auto_generation(context, clients, request)
             await broadcast_json(clients, context.queue_state_payload())
             await broadcast_json(clients, context.auto_save_state_payload())
             if isinstance(auto_save_result, dict) and auto_save_result.get("error"):
@@ -64,6 +91,119 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
     finally:
         context.is_generating = False
         context.headless_generation_runner_active = False
+
+
+async def _maybe_continue_auto_generation(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    request,
+) -> bool:
+    if not _should_continue_auto_generation(context, request):
+        return False
+
+    params = getattr(request, "params", {}) or {}
+    prompt_fixed = context._coerce_bool(
+        context.get_options().get("prompt_fixed", params.get("prompt_fixed", False))
+    )
+    overrides = _auto_generation_overrides(params)
+    overrides["auto_generate"] = True
+    overrides["prompt_fixed"] = prompt_fixed
+    overrides["_remote_queue_source"] = "Auto Generate"
+    overrides["_remote_queue_label"] = "Auto Generate"
+
+    request_id = f"auto-{uuid.uuid4().hex}"
+    prompt = str(params.get("input") or params.get("_raw_input") or context.prompt_text or "")
+    negative = str(params.get("negative_prompt") or context.negative_prompt_text or "")
+
+    if not prompt_fixed:
+        result = await asyncio.to_thread(
+            random_service(context).generate,
+            active_ratings=context.get_active_ratings(),
+            overrides=overrides,
+            random_request_id=request_id,
+        )
+        payload = result.websocket_payload()
+        if not result.success:
+            await broadcast_json(clients, payload)
+            await broadcast_json(clients, {
+                "type": "toast",
+                "level": "error",
+                "message": payload.get("message") or "Auto Generate stopped: random prompt failed.",
+            })
+            return False
+
+        payload["source"] = "auto_generate"
+        await broadcast_json(clients, payload)
+        for message in result.extra_messages:
+            await broadcast_json(clients, message)
+        prompt = result.prompt
+        negative = context.negative_prompt_text
+        if result.detected_resolution:
+            width, height = result.detected_resolution
+            overrides["width"] = width
+            overrides["height"] = height
+            overrides["resolution"] = f"{width} x {height}"
+
+    dispatch = await asyncio.to_thread(
+        generation_service(context).enqueue_remote_request,
+        {
+            "type": "generate",
+            "prompt": prompt,
+            "negative_prompt": negative,
+            "request_id": f"{request_id}:generate",
+            "overrides": overrides,
+        },
+    )
+    await broadcast_json(clients, dispatch.websocket_payload())
+    if not dispatch.ok:
+        await broadcast_json(clients, {
+            "type": "toast",
+            "level": "error",
+            "message": dispatch.blocked_reason,
+        })
+        return False
+    await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "queued"})
+    return True
+
+
+def _should_continue_auto_generation(context: WebSessionContext, request) -> bool:
+    if not context._coerce_bool(context.get_options().get("auto_generate", False)):
+        context.headless_auto_generate_queue_hold = False
+        return False
+    queue_manager = context.generation_queue_manager
+    if queue_manager.is_paused() or not queue_manager.is_empty():
+        context.headless_auto_generate_queue_hold = True
+        return False
+    was_holding = bool(getattr(context, "headless_auto_generate_queue_hold", False))
+    context.headless_auto_generate_queue_hold = False
+    params = getattr(request, "params", {}) or {}
+    if not isinstance(params, dict):
+        return False
+    if (
+        not was_holding
+        and any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS)
+    ):
+        return False
+    request_type = str(params.get("type") or "").strip().lower()
+    if not was_holding and request_type in {"img2img", "inpaint", "outpaint", "auto_outpainting"}:
+        return False
+    return True
+
+
+def _auto_generation_overrides(params: dict[str, Any]) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    for key, value in params.items():
+        if key in AUTO_GENERATE_DROPPED_PARAM_KEYS:
+            continue
+        if str(key).startswith("_") and key not in {
+            "_remote_web_session_params",
+            "_remote_queue_source",
+            "_remote_queue_label",
+            "_skip_vibe_transfer_late_binding",
+        }:
+            continue
+        overrides[key] = value
+    return overrides
 
 
 async def _auto_save_generated_history_item(context: WebSessionContext, item):

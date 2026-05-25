@@ -304,18 +304,18 @@
       "expected_json_subset": {"headless": true}
     },
     {
-      "feature": "result_action_save_retired",
+      "feature": "result_action_save_missing_history",
       "method": "POST",
       "path": "/api/result/action/save",
       "expected_status": [400],
-      "expected_json_subset": {"headless": true}
+      "expected_json_subset": {"ok": false}
     },
     {
-      "feature": "result_action_delete_retired",
+      "feature": "result_action_delete_missing_history",
       "method": "POST",
       "path": "/api/result/action/delete",
       "expected_status": [400],
-      "expected_json_subset": {"headless": true}
+      "expected_json_subset": {"ok": false}
     },
     {
       "feature": "image_action_img2img_empty",

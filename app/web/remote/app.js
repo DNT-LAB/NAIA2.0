@@ -2439,6 +2439,7 @@ async function deleteDisplayedHistoryImage() {
       throw new Error(data.error || `HTTP ${response.status}`);
     }
     renderResultUnsavedActions(null);
+    if (resultHistory && data.rel_path) resultHistory.onRemoved(data);
     if (deletingDisplayedImage) {
       preview.removeAttribute('src');
       preview.classList.remove('show');

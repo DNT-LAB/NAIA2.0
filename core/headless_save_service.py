@@ -142,20 +142,35 @@ class HeadlessSaveService:
         directory.mkdir(parents=True, exist_ok=True)
         saved_paths: list[str] = []
         for item in list(items):
-            extension = "webp" if save_as_webp else "png"
-            filename = self.next_save_filename(item, extension)
-            target = self.unique_output_path(directory / filename)
-            if save_as_webp:
-                target.write_bytes(item.webp_bytes)
-            else:
-                png_bytes, _ = result_images.history_item_png_payload(item, label=item.filename)
-                target.write_bytes(png_bytes)
-            context.result_store.mark_saved(item, target)
+            target = self._save_history_item_to_directory(item, directory, save_as_webp=save_as_webp)
             saved_paths.append(str(target))
         return {
             "saved": len(saved_paths),
             "remaining": context.result_store.unsaved_history_count(),
             "paths": saved_paths,
+            "current_save_directory": str(directory),
+        }
+
+    def save_history_item(self, item: Any) -> dict[str, Any]:
+        context = self.context
+        existing_path = str(getattr(item, "filepath", "") or "")
+        if existing_path and Path(existing_path).is_file():
+            return {
+                "saved": 0,
+                "remaining": context.result_store.unsaved_history_count(),
+                "paths": [existing_path],
+                "path": existing_path,
+                "current_save_directory": str(Path(existing_path).parent),
+            }
+        save_as_webp = context._coerce_bool(self.auto_save_state_payload().get("save_as_webp"))
+        directory = self.current_save_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+        target = self._save_history_item_to_directory(item, directory, save_as_webp=save_as_webp)
+        return {
+            "saved": 1,
+            "remaining": context.result_store.unsaved_history_count(),
+            "paths": [str(target)],
+            "path": str(target),
             "current_save_directory": str(directory),
         }
 
@@ -198,6 +213,19 @@ class HeadlessSaveService:
             stem = f"{counter:05d}"
         context.save_directory_state["save_counter"] = counter + 1
         return f"{stem}.{extension}"
+
+    def _save_history_item_to_directory(self, item: Any, directory: Path, *, save_as_webp: bool) -> Path:
+        context = self.context
+        extension = "webp" if save_as_webp else "png"
+        filename = self.next_save_filename(item, extension)
+        target = self.unique_output_path(directory / filename)
+        if save_as_webp:
+            target.write_bytes(item.webp_bytes)
+        else:
+            png_bytes, _ = result_images.history_item_png_payload(item, label=item.filename)
+            target.write_bytes(png_bytes)
+        context.result_store.mark_saved(item, target)
+        return target
 
     @staticmethod
     def safe_filename_stem(value: str, *, max_length: int = 120) -> str:

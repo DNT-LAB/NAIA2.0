@@ -47,6 +47,14 @@ def validate_viewer_path(context: WebSessionContext, rel_path: str) -> Path | No
     return None
 
 
+def history_item_from_action_payload(context: WebSessionContext, payload: dict[str, Any] | None):
+    payload = payload if isinstance(payload, dict) else {}
+    rel_path = str(payload.get("path") or "").strip()
+    if not rel_path:
+        return None
+    return history_item_from_viewer_path(context, rel_path)
+
+
 def _image_media_type_for_path(image_path: str | Path) -> str:
     return result_images.image_media_type_for_path(image_path)
 
@@ -127,7 +135,7 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
             "inpaint": bool(has_image and nai_mode),
             "character_reference": bool(item),
             "remote_event": bool(has_source_row),
-            "delete": False,
+            "delete": bool(item and not has_file),
         },
     }
 
@@ -149,6 +157,8 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             stat = target.stat()
         except Exception:
             stat = None
+    item_file = Path(str(getattr(item, "filepath", "") or "")) if item else None
+    item_has_file = bool(item_file and item_file.is_file())
     mode = str(context.get_api_mode() or "").upper()
     nai_mode = mode == "NAI"
     webui_mode = mode == "WEBUI"
@@ -161,8 +171,8 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
         "id": f"saved:{normalized_path}",
         "source": "saved",
         "path": normalized_path,
-        "file_path": str(target) if target is not None else "",
-        "label": target.name if target is not None else getattr(item, "filename", "History Image"),
+        "file_path": str(target) if target is not None else (str(item_file) if item_has_file else ""),
+        "label": target.name if target is not None else (item_file.name if item_has_file else getattr(item, "filename", "History Image")),
         "image_url": image_url,
         "metadata_url": metadata_url,
         "has_image": True,
@@ -177,7 +187,7 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             "restore_params": True,
             "metadata": True,
             "paste_image": True,
-            "open_file": bool(target),
+            "open_file": bool(target or item_has_file),
             "save_image": True,
             "copy_png": True,
             "image_action": bool(item and nai_mode),
@@ -186,7 +196,7 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             "inpaint": False,
             "character_reference": False,
             "remote_event": False,
-            "delete": False,
+            "delete": bool(item and not item_has_file),
         },
     }
 
@@ -701,18 +711,62 @@ def register_result_display_routes(
         }, status_code=400)
 
     @app.post("/api/result/action/save")
-    async def api_result_action_save():
-        return JSONResponse({
-            "error": "Desktop result save action is retired; use auto-save or unsaved history save-all.",
-            "headless": True,
-        }, status_code=400)
+    async def api_result_action_save(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        item = history_item_from_action_payload(session_context, payload)
+        if item is None:
+            return JSONResponse({"ok": False, "error": "History item not found"}, status_code=400)
+        try:
+            result = await run_in_thread(session_context.save_history_item, item)
+            asset = _build_saved_result_asset_payload(session_context, item.rel_path)
+            await broadcast_json(clients, session_context.auto_save_state_payload())
+            return {"ok": True, **result, "asset": asset}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
     @app.post("/api/result/action/delete")
-    async def api_result_action_delete():
-        return JSONResponse({
-            "error": "Desktop result delete action is retired in the headless runtime.",
-            "headless": True,
-        }, status_code=400)
+    async def api_result_action_delete(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        item = history_item_from_action_payload(session_context, payload)
+        if item is None:
+            return JSONResponse({"ok": False, "error": "History item not found"}, status_code=400)
+
+        def _delete_item():
+            file_path = str(getattr(item, "filepath", "") or "")
+            deleted_file = False
+            if file_path:
+                target = Path(file_path)
+                if target.is_file():
+                    target.unlink()
+                    deleted_file = True
+            removed = session_context.result_store.remove_item(item)
+            if removed is None:
+                raise FileNotFoundError("History item not found")
+            return removed, deleted_file, file_path
+
+        try:
+            removed, deleted_file, file_path = await run_in_thread(_delete_item)
+            removed_payload = session_context.result_store.viewer_removed_payload(removed)
+            await broadcast_json(clients, removed_payload)
+            await broadcast_json(clients, session_context.auto_save_state_payload())
+            return {
+                "ok": True,
+                "deleted": True,
+                "rel_path": removed.rel_path,
+                "history_id": removed.history_id,
+                "file_path": file_path,
+                "deleted_file": deleted_file,
+                "total": removed_payload["total"],
+                "remaining": session_context.result_store.unsaved_history_count(),
+            }
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
     @app.post("/api/image-action/{action}")
     async def api_image_action(action: str, req: Request):

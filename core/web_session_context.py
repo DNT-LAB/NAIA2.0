@@ -391,6 +391,9 @@ class WebSessionContext:
     def save_unsaved_history(self) -> dict[str, Any]:
         return self._save_service().save_unsaved_history()
 
+    def save_history_item(self, item: Any) -> dict[str, Any]:
+        return self._save_service().save_history_item(item)
+
     def _prompt_engineering_module_state(self) -> dict[str, Any]:
         return self._prompt_engineering_service().state()
 

@@ -78,13 +78,10 @@ class HeadlessResultStore:
             source_row=getattr(request, "source_row", None),
             api_metadata=dict(api_result.get("api_metadata", {}) or {}),
         )
-        image_meta = self._build_image_meta(item)
-        metadata_payload = self._build_metadata_payload(item, image_meta)
         self._items.insert(0, item)
         del self._items[self.max_items:]
-        self.latest_item = item
-        self.latest_webp = webp_bytes
-        self.latest_metadata_payload = metadata_payload
+        image_meta = self._set_latest_item(item) or {}
+        metadata_payload = self.latest_metadata_payload or {}
         return HeadlessStoredResult(item=item, image_meta=image_meta, metadata_payload=metadata_payload)
 
     def get_item(self, history_id: str) -> HeadlessHistoryItem | None:
@@ -105,6 +102,29 @@ class HeadlessResultStore:
 
     def mark_saved(self, item: HeadlessHistoryItem, filepath: str | Path) -> None:
         item.filepath = str(filepath)
+
+    def remove_item(self, item_or_history_id: HeadlessHistoryItem | str) -> HeadlessHistoryItem | None:
+        history_id = (
+            item_or_history_id.history_id
+            if isinstance(item_or_history_id, HeadlessHistoryItem)
+            else str(item_or_history_id or "")
+        )
+        for index, item in enumerate(self._items):
+            if item.history_id != history_id:
+                continue
+            removed = self._items.pop(index)
+            if self.latest_item and self.latest_item.history_id == history_id:
+                self._set_latest_item(self._items[0] if self._items else None)
+            return removed
+        return None
+
+    def viewer_removed_payload(self, item: HeadlessHistoryItem) -> dict[str, Any]:
+        return {
+            "type": "viewer_history_removed",
+            "rel_path": item.rel_path,
+            "history_id": item.history_id,
+            "total": len(self._items),
+        }
 
     def unsaved_zip_payload(self) -> tuple[bytes, str]:
         items = self.unsaved_items()
@@ -185,6 +205,17 @@ class HeadlessResultStore:
         payload = self.history_summary(item, index=0)
         payload.update({"type": "viewer_new_image", "total": len(self._items)})
         return payload
+
+    def _set_latest_item(self, item: HeadlessHistoryItem | None) -> dict[str, Any] | None:
+        self.latest_item = item
+        if item is None:
+            self.latest_webp = None
+            self.latest_metadata_payload = None
+            return None
+        image_meta = self._build_image_meta(item)
+        self.latest_webp = item.webp_bytes
+        self.latest_metadata_payload = self._build_metadata_payload(item, image_meta)
+        return image_meta
 
     def _build_image_meta(self, item: HeadlessHistoryItem) -> dict[str, Any]:
         params = item.generation_params

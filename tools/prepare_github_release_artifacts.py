@@ -232,6 +232,17 @@ def _build_summary(
 
 def _write_false_positive_note(summary: dict[str, Any], path: Path) -> None:
     zip_asset = next((item for item in summary["assets"] if item["name"] == PORTABLE_ZIP_NAME), {})
+    defender_ok = bool(summary.get("defender", {}).get("ok"))
+    if defender_ok:
+        scan_sentence = (
+            f"This release is unsigned, but it passed the local Microsoft Defender scan recorded in "
+            f"`{RELEASE_SUMMARY_NAME}` and `{FINAL_GATE_COPY_NAME}`."
+        )
+    else:
+        scan_sentence = (
+            f"This release is unsigned. The recorded Microsoft Defender scan status is in "
+            f"`{RELEASE_SUMMARY_NAME}` and `{FINAL_GATE_COPY_NAME}`."
+        )
     text = f"""# Microsoft Defender false-positive response
 
 Use this note only when Microsoft Defender flags the release artifact.
@@ -249,7 +260,7 @@ SHA-256:
 {zip_asset.get("sha256", "")}
 
 Suggested context:
-NAIA is a portable Electron shell for the NAIA headless Remote Web backend. This release is unsigned, but it passed the local Microsoft Defender scan recorded in `{RELEASE_SUMMARY_NAME}` and `{FINAL_GATE_COPY_NAME}`. The artifact is distributed through GitHub Releases with immutable SHA-256 checksums in `{SHA256SUMS_NAME}`. Please review this detection as a false positive if Defender classifies the archive or bundled executable as malware.
+NAIA is a portable Electron shell for the NAIA headless Remote Web backend. {scan_sentence} The artifact is distributed through GitHub Releases with immutable SHA-256 checksums in `{SHA256SUMS_NAME}`. Please review this detection as a false positive if Defender classifies the archive or bundled executable as malware.
 
 Attach or reference:
 - {PORTABLE_ZIP_NAME}
@@ -264,6 +275,25 @@ Attach or reference:
 def _write_release_body(summary: dict[str, Any], path: Path) -> None:
     zip_asset = next((item for item in summary["assets"] if item["name"] == PORTABLE_ZIP_NAME), {})
     total_mib = round(int(zip_asset.get("size") or 0) / (1024 * 1024), 2)
+    gate = summary.get("final_gate", {})
+    defender = summary.get("defender", {})
+    portable = summary.get("portable_workspace", {})
+    release_ready = str(bool(gate.get("release_ready"))).lower()
+    bundled_python = "required" if gate.get("require_bundled_python") else "not required"
+    clean_python = "required" if gate.get("build_clean_python_runtime") else "not required"
+    defender_required = bool(defender.get("required"))
+    defender_ok = bool(defender.get("ok"))
+    if defender_ok:
+        defender_line = "required and passed" if defender_required else "passed"
+    else:
+        defender_line = "required but NOT passed" if defender_required else "not run"
+    cdp_line = "passed" if portable.get("electron_cdp_smoke_ok") else "not passed"
+    backend_state = str(portable.get("backend_state") or "unknown")
+    defender_notice = (
+        "The release artifact itself was scanned locally by Microsoft Defender, and immutable checksums are included for verification."
+        if defender_ok
+        else "Immutable checksums are included for verification."
+    )
     text = f"""# NAIA Portable Release
 
 ## Download
@@ -287,16 +317,16 @@ Expected SHA-256 for `{PORTABLE_ZIP_NAME}`:
 
 ## Release Gate
 
-- Final gate: `release_ready=true`
-- Bundled Python: required
-- Clean Python runtime build: required
-- Defender scan: required and passed
-- Electron CDP smoke: passed
-- Packaged backend state: ready
+- Final gate: `release_ready={release_ready}`
+- Bundled Python: {bundled_python}
+- Clean Python runtime build: {clean_python}
+- Defender scan: {defender_line}
+- Electron CDP smoke: {cdp_line}
+- Packaged backend state: {backend_state}
 
 ## Windows Notice
 
-This portable beta is unsigned. Microsoft Defender SmartScreen may show an unrecognized-app warning on first run. The release artifact itself was scanned locally by Microsoft Defender, and immutable checksums are included for verification.
+This portable beta is unsigned. Microsoft Defender SmartScreen may show an unrecognized-app warning on first run. {defender_notice}
 
 ## Artifact
 

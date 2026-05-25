@@ -23,11 +23,13 @@ except ModuleNotFoundError:  # pragma: no cover - used when executed as a script
 DEFAULT_PLAN = Path("refactor_plans/final_headless_electron_release_reorganization_plan.md")
 DEFAULT_APPROVAL_DOC = Path("refactor_docs/round_final_release_approval_gate.md")
 DEFAULT_ELECTRON_PACKAGE = Path("app/electron/package.json")
-FINAL_SCRIPT = "release:final:install:scan"
+FINAL_SCRIPT = "release:final:clean-python:scan"
 FINAL_SCRIPT_TERMS = (
     "--execute",
-    "--install-deps",
-    "--yes",
+    "--build-clean-python-runtime",
+    "--python-runtime-version",
+    "3.12",
+    "--require-bundled-python",
     "--run-electron-cdp",
     "--electron-timeout",
     "180",
@@ -37,7 +39,7 @@ FINAL_SCRIPT_TERMS = (
 DOC_TERMS = (
     "Final Release Approval Gate",
     "blocked_on_approval=true",
-    "release:final:install:scan",
+    "release:final:clean-python:scan",
     "app/electron/package-lock.json",
     "app/electron/node_modules",
     "app/electron/dist",

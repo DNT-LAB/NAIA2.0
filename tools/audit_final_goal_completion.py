@@ -78,6 +78,8 @@ REQUIRED_PACKAGE_SCRIPTS = (
     "release:final:install:scan",
     "release:final:bundled-python",
     "release:final:bundled-python:scan",
+    "release:final:clean-python",
+    "release:final:clean-python:scan",
     "preflight:electron-deps",
     "preflight:electron-deps:summary",
     "goal:audit:summary",
@@ -572,10 +574,10 @@ def _release_completion_status(
             "id": "packaged-electron-build",
             "reason": "The final packaged Electron artifact is missing or incomplete.",
             "requires_explicit_approval": True,
-            "script": str(dependency_action.get("final_release_script") or "npm --prefix app/electron run release:final:install:scan")
+            "script": str(dependency_action.get("final_release_script") or "npm --prefix app/electron run release:final:clean-python:scan")
             if isinstance(dependency_action, dict)
-            else "npm --prefix app/electron run release:final:install:scan",
-            "strategy": "final-install-scan",
+            else "npm --prefix app/electron run release:final:clean-python:scan",
+            "strategy": "final-clean-python-scan",
             "mutates": [
                 str(packaged_dir),
             ],

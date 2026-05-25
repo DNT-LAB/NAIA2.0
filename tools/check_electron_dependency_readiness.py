@@ -52,7 +52,7 @@ def _dependency_bootstrap_action(electron_root: Path, *, ready: bool) -> dict[st
             str(electron_root / "package-lock.json"),
             str(electron_root / "node_modules"),
         ],
-        "final_release_script": f"npm --prefix {electron_root} run release:final:install:scan",
+        "final_release_script": f"npm --prefix {electron_root} run release:final:clean-python:scan",
     }
 
 

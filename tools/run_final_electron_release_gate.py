@@ -117,11 +117,9 @@ def _release_next_actions(*, electron_root: Path, dependency_bootstrap: dict[str
             "id": "final-release-execute",
             "reason": "A real final build still requires dependency readiness, packaged Electron CDP smoke, and Defender scan evidence.",
             "requires_explicit_approval": True,
-            "script": f"npm --prefix {electron_root} run release:final:install:scan",
-            "strategy": "final-install-scan",
+            "script": f"npm --prefix {electron_root} run release:final:clean-python:scan",
+            "strategy": "final-clean-python-scan",
             "mutates": [
-                str(electron_root / "package-lock.json"),
-                str(electron_root / "node_modules"),
                 str(electron_root / "dist"),
             ],
         })

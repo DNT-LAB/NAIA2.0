@@ -9,8 +9,6 @@ click==8.2.1
 colorama==0.4.6
 cryptography==45.0.5
 fastapi
-gitdb==4.0.12
-GitPython==3.1.44
 googletrans
 idna==3.10
 importlib_metadata==8.7.0
@@ -39,7 +37,6 @@ requests==2.32.4
 rpds-py>=0.25.1
 scipy>=1.11.0
 six==1.17.0
-smmap==5.0.2
 tenacity==9.1.2
 tiktoken
 toml==0.10.2

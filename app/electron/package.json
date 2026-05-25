@@ -74,7 +74,7 @@
     "smoke:packaged": "cd ../.. && python tools/smoke_packaged_electron_app.py app/electron/dist/win-unpacked",
     "smoke:packaged:structure": "cd ../.. && python tools/smoke_packaged_electron_app.py app/electron/dist/win-unpacked --skip-backend-smoke",
     "smoke:electron:source": "cd ../.. && python tools/smoke_electron_cdp.py --mode source",
-    "smoke:electron:packaged": "cd ../.. && python tools/smoke_electron_cdp.py --mode packaged --package-root app/electron/dist/win-unpacked",
+    "smoke:electron:packaged": "cd ../.. && python tools/smoke_electron_cdp.py --mode packaged --package-root app/electron/dist/win-unpacked --timeout 240",
     "release:stage": "npm run stage:backend && npm run preflight:release && npm run smoke:backend && npm run smoke:web-contract",
     "release:portable": "npm run release:portable:workspace:clean-python",
     "release:portable:bundled-python": "npm run release:portable:workspace:bundled-python",

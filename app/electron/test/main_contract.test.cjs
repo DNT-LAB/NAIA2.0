@@ -366,6 +366,13 @@ test("afterPack reapplies the NAIA icon resource for unsigned Windows dir builds
   assert.match(helper, /language_ids: tuple\[int, \.\.\.\] = \(LANG_NEUTRAL, LANG_EN_US\)/);
 });
 
+test("packaged CDP smoke allows first-run runtime bootstrap time", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(ELECTRON_ROOT, "package.json"), "utf8"));
+
+  assert.match(manifest.scripts["smoke:electron:packaged"], /--package-root app\/electron\/dist\/win-unpacked/);
+  assert.match(manifest.scripts["smoke:electron:packaged"], /--timeout 240/);
+});
+
 test("startup window uses compact bounds before expanding to the app shell", () => {
   const { api } = loadMain();
 

@@ -3,6 +3,8 @@
 The Electron portable build keeps ``signAndEditExecutable`` disabled to avoid
 implicit code-signing/toolchain side effects for bundled Python executables.
 This helper updates only the final NAIA.exe icon resource after packaging.
+It writes both neutral and en-US resources because Windows Explorer commonly
+prefers the existing Electron en-US icon group over a newly-added neutral group.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from typing import Any
 RT_ICON = 3
 RT_GROUP_ICON = 14
 LANG_NEUTRAL = 0
+LANG_EN_US = 1033
 
 
 @dataclass(frozen=True)
@@ -102,7 +105,7 @@ def apply_windows_exe_icon(
     *,
     group_icon_id: int = 1,
     base_icon_id: int = 1,
-    language_id: int = LANG_NEUTRAL,
+    language_ids: tuple[int, ...] = (LANG_NEUTRAL, LANG_EN_US),
 ) -> dict[str, Any]:
     exe = Path(exe_path)
     icon = Path(icon_path)
@@ -141,30 +144,31 @@ def apply_windows_exe_icon(
         if not handle:
             _raise_last_error("BeginUpdateResourceW")
         try:
-            for index, image in enumerate(images):
-                resource_id = base_icon_id + index
-                buffer = ctypes.create_string_buffer(image.data)
+            for language_id in language_ids:
+                for index, image in enumerate(images):
+                    resource_id = base_icon_id + index
+                    buffer = ctypes.create_string_buffer(image.data)
+                    ok = update_resource(
+                        handle,
+                        _resource_id(RT_ICON),
+                        _resource_id(resource_id),
+                        language_id,
+                        buffer,
+                        len(image.data),
+                    )
+                    if not ok:
+                        _raise_last_error(f"UpdateResourceW RT_ICON {resource_id} language {language_id}")
+                group_buffer = ctypes.create_string_buffer(group_payload)
                 ok = update_resource(
                     handle,
-                    _resource_id(RT_ICON),
-                    _resource_id(resource_id),
+                    _resource_id(RT_GROUP_ICON),
+                    _resource_id(group_icon_id),
                     language_id,
-                    buffer,
-                    len(image.data),
+                    group_buffer,
+                    len(group_payload),
                 )
                 if not ok:
-                    _raise_last_error(f"UpdateResourceW RT_ICON {resource_id}")
-            group_buffer = ctypes.create_string_buffer(group_payload)
-            ok = update_resource(
-                handle,
-                _resource_id(RT_GROUP_ICON),
-                _resource_id(group_icon_id),
-                language_id,
-                group_buffer,
-                len(group_payload),
-            )
-            if not ok:
-                _raise_last_error(f"UpdateResourceW RT_GROUP_ICON {group_icon_id}")
+                    _raise_last_error(f"UpdateResourceW RT_GROUP_ICON {group_icon_id} language {language_id}")
             if not end_update(handle, False):
                 handle = None
                 _raise_last_error("EndUpdateResourceW")
@@ -186,6 +190,7 @@ def apply_windows_exe_icon(
         "icon": str(icon),
         "group_icon_id": group_icon_id,
         "base_icon_id": base_icon_id,
+        "language_ids": list(language_ids),
         "image_count": len(images),
         "violations": [],
     }

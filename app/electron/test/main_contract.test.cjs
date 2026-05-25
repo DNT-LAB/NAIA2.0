@@ -353,6 +353,19 @@ test("app icon path points at packaged Electron icon asset", () => {
   assert.equal(fs.existsSync(api.appIconPath()), true);
 });
 
+test("afterPack reapplies the NAIA icon resource for unsigned Windows dir builds", () => {
+  const source = fs.readFileSync(path.join(ELECTRON_ROOT, "packaging", "afterPack.cjs"), "utf8");
+  const helper = fs.readFileSync(path.resolve(ELECTRON_ROOT, "..", "..", "tools", "apply_windows_exe_icon.py"), "utf8");
+
+  assert.match(source, /apply_windows_exe_icon\.py/);
+  assert.match(source, /NAIA\.exe/);
+  assert.match(source, /naia\.ico/);
+  assert.match(source, /spawnSync/);
+  assert.match(source, /process\.platform !== "win32"/);
+  assert.match(helper, /LANG_EN_US = 1033/);
+  assert.match(helper, /language_ids: tuple\[int, \.\.\.\] = \(LANG_NEUTRAL, LANG_EN_US\)/);
+});
+
 test("startup window uses compact bounds before expanding to the app shell", () => {
   const { api } = loadMain();
 

@@ -8,7 +8,12 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket
 
-from app.backend.server.result_display_routes import resolve_result_image_action_source
+from app.backend.server.result_display_routes import (
+    history_item_from_viewer_path,
+    resolve_result_image_action_source,
+)
+from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
+from core.generation_request import GenerationRequest
 from core.web_session_context import WebSessionContext
 
 
@@ -20,6 +25,7 @@ RESULT_COMMAND_TYPES = {
     "result_enhance",
     "set_result_enhance_config",
     "result_image_action",
+    "result_upscale",
 }
 
 
@@ -265,6 +271,55 @@ def prepare_result_enhance_command(
     }
 
 
+def _history_item_from_result_payload(context: WebSessionContext, payload: dict[str, Any] | None):
+    payload = payload if isinstance(payload, dict) else {}
+    source = str(payload.get("source") or "").strip().lower()
+    rel_path = str(payload.get("path") or "").strip()
+    item = history_item_from_viewer_path(context, rel_path) if rel_path else None
+    if item is None and source in {"", "current"}:
+        item = context.result_store.latest_item
+    return item
+
+
+def perform_nai_result_upscale(context: WebSessionContext, payload: dict[str, Any] | None):
+    if context.get_api_mode() != "NAI":
+        raise RuntimeError("NAI 2x upscale is available in NAI mode only")
+    image_bytes, label, generation_params, prompt_context = resolve_result_image_action_source(context, payload)
+    service = getattr(context, "api_service", None)
+    if service is None:
+        from core.api_service import APIService
+
+        service = APIService(context)
+        context.api_service = service
+    result = service.upscale_NAI(None, raw_bytes=image_bytes)
+    if not isinstance(result, dict) or result.get("status") != "success":
+        raise RuntimeError(str((result or {}).get("message") or "NAI upscale failed"))
+
+    params = copy.deepcopy(generation_params)
+    _prompt_from_result_context(context, params, prompt_context)
+    for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
+        params.pop(key, None)
+    params.update({
+        "api_mode": "NAI",
+        "result_upscale_request": True,
+        "result_upscale_source_label": label,
+        "_remote_queue_source": "Result Upscale",
+        "_remote_queue_label": label,
+    })
+    source_item = _history_item_from_result_payload(context, payload)
+    request = GenerationRequest(
+        params=params,
+        source_row=getattr(source_item, "source_row", None),
+    )
+    stored = context.result_store.add_api_result(result, request)
+    if context._coerce_bool(context.auto_save_state.get("auto_save", True)):
+        try:
+            context.save_history_item(stored.item)
+        except Exception:
+            pass
+    return stored, str(result.get("message") or "NAI 2x upscale complete")
+
+
 async def handle_result_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -278,6 +333,50 @@ async def handle_result_command(
     command_type = str(command.get("type") or "").strip()
     if command_type not in RESULT_COMMAND_TYPES:
         return False
+
+    if command_type == "result_upscale":
+        await _send_json(ws, {
+            "type": "result_upscale_state",
+            "running": True,
+            "success": None,
+            "message": "NAI 2x upscale running",
+            "headless": True,
+        })
+        try:
+            stored, message = await run_in_thread(perform_nai_result_upscale, context, command)
+        except Exception as exc:
+            message = f"NAI 2x upscale failed: {exc}"
+            await _send_json(ws, {
+                "type": "result_upscale_state",
+                "running": False,
+                "success": False,
+                "message": message,
+                "headless": True,
+            })
+            await _send_json(ws, {
+                "type": "toast",
+                "level": "error",
+                "message": message,
+                "headless": True,
+            })
+            return True
+        await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
+        await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+        await broadcast_json(clients, context.auto_save_state_payload())
+        await _send_json(ws, {
+            "type": "result_upscale_state",
+            "running": False,
+            "success": True,
+            "message": message,
+            "headless": True,
+        })
+        await _send_json(ws, {
+            "type": "toast",
+            "level": "success",
+            "message": message,
+            "headless": True,
+        })
+        return True
 
     if command_type == "result_enhance":
         try:

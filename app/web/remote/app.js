@@ -510,7 +510,7 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
   .catch(error => {
     console.error('Failed to initialize metadata viewer module', error);
   });
-const imageActionPopupReady = import('./js/features/imageActionPopup.mjs')
+const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260525-headless-action-clean1')
   .then(({createImageActionPopup}) => {
     imageActionPopup = createImageActionPopup({
       document,

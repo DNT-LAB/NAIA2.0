@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import quote, urlparse
@@ -16,6 +17,7 @@ from core.web_session_context import WebSessionContext
 
 
 IMAGE_VIEWER_EXTENSIONS = {".png", ".webp", ".jpg", ".jpeg"}
+PROMPT_SOURCE_KEYS = ("general", "character", "copyright", "artist", "meta", "prompt", "input", "tags")
 AsyncRunner = Callable[..., Awaitable[Any]]
 JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
 
@@ -53,6 +55,88 @@ def history_item_from_action_payload(context: WebSessionContext, payload: dict[s
     if not rel_path:
         return None
     return history_item_from_viewer_path(context, rel_path)
+
+
+def _source_row_dict(source_row: Any) -> dict[str, Any]:
+    if source_row is None:
+        return {}
+    if isinstance(source_row, dict):
+        return dict(source_row)
+    to_dict = getattr(source_row, "to_dict", None)
+    if callable(to_dict):
+        try:
+            data = to_dict()
+        except Exception:
+            return {}
+        return dict(data) if isinstance(data, dict) else {}
+    return {}
+
+
+def _source_value_has_content(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        if value != value:
+            return False
+    except Exception:
+        pass
+    if isinstance(value, dict):
+        return any(_source_value_has_content(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_source_value_has_content(item) for item in value)
+    text = str(value).strip()
+    if text.lower() in {"", "nan", "nat", "none", "<na>"}:
+        return False
+    return True
+
+
+def _source_row_available(source_row: Any) -> bool:
+    data = _source_row_dict(source_row)
+    return any(_source_value_has_content(data.get(key)) for key in PROMPT_SOURCE_KEYS)
+
+
+def _source_row_json_safe(source_row: Any) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key, value in _source_row_dict(source_row).items():
+        if value is None:
+            safe[str(key)] = None
+            continue
+        try:
+            if value != value:
+                safe[str(key)] = None
+                continue
+        except Exception:
+            pass
+        if isinstance(value, (str, int, float, bool)):
+            text = str(value).strip()
+            safe[str(key)] = None if text.lower() in {"nan", "nat", "none", "<na>"} else value
+        elif isinstance(value, (list, tuple)):
+            safe[str(key)] = [
+                item if isinstance(item, (str, int, float, bool)) or item is None else str(item)
+                for item in value
+            ]
+        else:
+            safe[str(key)] = str(value)
+    return safe
+
+
+def _history_item_replay_params(item: Any) -> dict[str, Any]:
+    params = dict(getattr(item, "generation_params", {}) or {})
+    for key in (
+        "credential",
+        "_generation_request",
+        "prompt_run_id",
+        "promptRunId",
+        "generation_request_id",
+        "request_id",
+        "requestId",
+    ):
+        params.pop(key, None)
+    source_row = getattr(item, "source_row", None)
+    if _source_row_available(source_row):
+        params["_source_row_data"] = _source_row_json_safe(source_row)
+        params["_source_name"] = str(getattr(source_row, "name", "") or "result_history")
+    return params
 
 
 def _image_media_type_for_path(image_path: str | Path) -> str:
@@ -101,7 +185,7 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
     webui_mode = mode == "WEBUI"
     has_image = bool(item or context.result_store.latest_webp)
     has_generation_params = bool(generation_params)
-    has_source_row = source_row is not None
+    has_source_row = _source_row_available(source_row)
     has_prompt = bool(
         (isinstance(prompt_context, dict) and (prompt_context.get("main_prompt") or prompt_context.get("final_prompt")))
         or (isinstance(generation_params, dict) and generation_params.get("input"))
@@ -126,7 +210,7 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
             "restore_params": has_generation_params,
             "metadata": bool(metadata_payload or rel_path),
             "paste_image": True,
-            "open_file": has_file,
+            "open_file": False,
             "save_image": has_image,
             "copy_png": has_image,
             "image_action": bool(has_image and nai_mode),
@@ -163,7 +247,7 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
     nai_mode = mode == "NAI"
     webui_mode = mode == "WEBUI"
     has_generation_params = bool(getattr(item, "generation_params", None)) if item else False
-    has_source_row = getattr(item, "source_row", None) is not None if item else False
+    has_source_row = _source_row_available(getattr(item, "source_row", None)) if item else False
     can_enhance = bool(item and has_generation_params and (nai_mode or webui_mode))
     image_url = f"/api/history/image/{item.history_id}" if item else f"/api/viewer/image/{quote(normalized_path)}"
     metadata_url = f"/api/history/meta/{item.history_id}" if item else f"/api/viewer/meta?path={quote(normalized_path, safe='')}"
@@ -187,7 +271,7 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             "restore_params": True,
             "metadata": True,
             "paste_image": True,
-            "open_file": bool(target or item_has_file),
+            "open_file": False,
             "save_image": True,
             "copy_png": True,
             "image_action": bool(item and nai_mode),
@@ -692,23 +776,119 @@ def register_result_display_routes(
     @app.post("/api/result/open-location")
     async def api_result_open_location():
         return JSONResponse({
-            "error": "Open location is a desktop-only action in the headless runtime.",
+            "error": "Opening local folders is not supported from Remote Web.",
             "headless": True,
         }, status_code=400)
 
     @app.post("/api/result/action/reroll")
-    async def api_result_action_reroll():
-        return JSONResponse({
-            "error": "Result reroll from saved desktop state is not available in the headless runtime yet.",
-            "headless": True,
-        }, status_code=400)
+    async def api_result_action_reroll(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        item = history_item_from_action_payload(session_context, payload)
+        if item is None:
+            return JSONResponse({"ok": False, "error": "History item not found"}, status_code=400)
+        source_row = getattr(item, "source_row", None)
+        if not _source_row_available(source_row):
+            return JSONResponse({"ok": False, "error": "Reroll source is unavailable"}, status_code=400)
+
+        from app.backend.server.generation_commands import random_service
+
+        request_id = str(payload.get("request_id") or payload.get("requestId") or uuid.uuid4())
+        result = await run_in_thread(
+            random_service(session_context).generate_from_source_row,
+            source_row,
+            overrides=_history_item_replay_params(item),
+            random_request_id=request_id,
+            source="result_reroll",
+            update_context=True,
+        )
+        if not result.success:
+            return JSONResponse({"ok": False, "error": result.error or "Prompt reroll failed"}, status_code=400)
+        message = result.websocket_payload()
+        await broadcast_json(clients, message)
+        for extra in result.extra_messages:
+            await broadcast_json(clients, extra)
+        return {
+            "ok": True,
+            "source": "result_reroll",
+            "prompt": result.prompt,
+            "prompt_run_id": result.prompt_run_id,
+            "request_id": request_id,
+        }
 
     @app.post("/api/result/action/queue")
-    async def api_result_action_queue():
-        return JSONResponse({
-            "error": "Result queue replay from saved desktop state is not available in the headless runtime yet.",
-            "headless": True,
-        }, status_code=400)
+    async def api_result_action_queue(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        item = history_item_from_action_payload(session_context, payload)
+        if item is None:
+            return JSONResponse({"ok": False, "error": "History item not found"}, status_code=400)
+
+        from app.backend.server.generation_commands import generation_service, random_service
+
+        queue_mode = str(payload.get("queue_mode") or payload.get("mode") or "original").strip().lower()
+        position = str(payload.get("position") or "back").strip().lower()
+        overrides = _history_item_replay_params(item)
+        prompt = str(overrides.get("input") or overrides.get("_raw_input") or "")
+        prompt_run_id = ""
+
+        if queue_mode == "reopen":
+            source_row = getattr(item, "source_row", None)
+            if not _source_row_available(source_row):
+                return JSONResponse({"ok": False, "error": "Reroll source is unavailable"}, status_code=400)
+            request_id = str(payload.get("request_id") or payload.get("requestId") or uuid.uuid4())
+            reroll = await run_in_thread(
+                random_service(session_context).generate_from_source_row,
+                source_row,
+                overrides=overrides,
+                random_request_id=request_id,
+                source="result_reroll",
+                update_context=False,
+            )
+            if not reroll.success:
+                return JSONResponse({"ok": False, "error": reroll.error or "Prompt reroll failed"}, status_code=400)
+            prompt = reroll.prompt
+            prompt_run_id = reroll.prompt_run_id
+            overrides["input"] = prompt
+            overrides["_raw_input"] = prompt
+            overrides["_remote_queue_source"] = "Result Reopen"
+        elif queue_mode == "current_character":
+            for key in ("characters", "uc", "character_positions"):
+                overrides.pop(key, None)
+            overrides["_remote_queue_source"] = "Result Current Character"
+        else:
+            overrides["_remote_queue_source"] = "Result Replay"
+
+        if not prompt.strip():
+            return JSONResponse({"ok": False, "error": "Queued result has no prompt"}, status_code=400)
+        overrides["_remote_queue_label"] = str(payload.get("label") or getattr(item, "filename", "") or queue_mode)
+        command: dict[str, Any] = {
+            "type": "generate",
+            "prompt": prompt,
+            "negative_prompt": str(overrides.get("negative_prompt") or ""),
+            "overrides": overrides,
+            "priority": 100 if position == "front" else 0,
+        }
+        if prompt_run_id:
+            command["prompt_run_id"] = prompt_run_id
+        dispatch = await run_in_thread(generation_service(session_context).enqueue_remote_request, command)
+        if not dispatch.ok:
+            return JSONResponse({"ok": False, "error": dispatch.blocked_reason}, status_code=400)
+        await broadcast_json(clients, dispatch.websocket_payload())
+        await broadcast_json(clients, session_context.queue_state_payload())
+        return {
+            "ok": True,
+            "mode": queue_mode,
+            "position": "front" if position == "front" else "back",
+            "request_id": dispatch.request_id,
+            "generation_request_id": dispatch.request_id,
+            "prompt_run_id": prompt_run_id,
+            "queue": session_context.queue_state_payload(),
+        }
 
     @app.post("/api/result/action/save")
     async def api_result_action_save(req: Request):
@@ -816,6 +996,6 @@ def register_result_display_routes(
         except Exception as exc:
             return JSONResponse({"error": f"Image action failed: {exc}"}, status_code=500)
         return JSONResponse({
-            "error": "Danbooru image interrogation is not available in the headless runtime yet.",
+            "error": "Danbooru image analysis from uploads is not supported. Use the Danbooru browser by post ID or URL.",
             "headless": True,
         }, status_code=400)

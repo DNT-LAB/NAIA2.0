@@ -50,7 +50,7 @@ async def handle_module_command(
         await _send_json(ws, {
             "type": "toast",
             "level": "info",
-            "message": "Headless command retired: set_module_param",
+            "message": "Module parameter is not supported in this runtime.",
             "headless": True,
         })
         return True

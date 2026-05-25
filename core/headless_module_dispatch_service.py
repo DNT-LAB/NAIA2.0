@@ -6,8 +6,8 @@ from typing import Any
 
 
 HEADLESS_RETIRED_MODULES = {
-    "wildcard_status": "Wildcard Status desktop wrapper is retired in the supported headless runtime.",
-    "ollama": "Ollama desktop assistant controls are retired in the supported headless runtime.",
+    "wildcard_status": "Wildcard Status is not available in this runtime.",
+    "ollama": "Ollama assistant controls are not available in this runtime.",
 }
 
 
@@ -104,7 +104,7 @@ class HeadlessModuleDispatchService:
     def retired_module_state(self, module_id: str, *, action: str | None = None) -> dict[str, Any]:
         message = HEADLESS_RETIRED_MODULES.get(
             str(module_id or ""),
-            "Module is retired in the supported headless runtime.",
+            "Module is not available in this runtime.",
         )
         state = {
             "available": False,

@@ -115,7 +115,6 @@ export function createImageActionPopup({
           ${showDesktopImg2ImgActions ? actionButton({action: 'img2img', icon: '↗', label: 'Img2Img 전송', tone: 'primary'}) : ''}
           ${showDesktopImg2ImgActions ? actionButton({action: 'inpaint', icon: '✎', label: 'Inpaint 전송'}) : ''}
           ${hasMetadata ? actionButton({action: 'metadata', icon: '▤', label: '메타데이터', tone: 'metadata'}) : ''}
-          ${actionButton({action: 'danbooru', icon: '#', label: 'Danbooru 분석', tone: 'danbooru'})}
           ${showVibe ? actionButton({action: 'vibe', icon: '◇', label: 'Vibe Transfer', tone: 'vibe'}) : ''}
         </div>
       </section>`;

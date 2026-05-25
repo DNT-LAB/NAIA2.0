@@ -36,7 +36,7 @@ class HeadlessSessionStateService:
         payload = {"type": "desktop_window_state", "visible": False}
         if client_host is not None:
             payload["control_allowed"] = False
-            payload["control_block_reason"] = "Desktop runtime is not available in headless mode."
+            payload["control_block_reason"] = "Native window controls are not available in this runtime."
         return payload
 
     def queue_state_payload(self) -> dict[str, Any]:

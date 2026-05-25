@@ -10,7 +10,6 @@ from core.web_session_context import WebSessionContext
 
 HEADLESS_RETIRED_COMMAND_TYPES = {
     "set_desktop_window_visibility",
-    "result_upscale",
 }
 
 
@@ -32,26 +31,10 @@ async def handle_headless_retired_command(
         await _send_json(ws, {
             "type": "toast",
             "level": "info",
-            "message": "Desktop runtime is not available in headless mode.",
+            "message": "Native window controls are not available in this runtime.",
             "headless": True,
         })
         await _send_json(ws, context.desktop_window_state_payload(client_host))
-        return True
-
-    if command_type == "result_upscale":
-        await _send_json(ws, {
-            "type": "result_upscale_state",
-            "running": False,
-            "success": False,
-            "message": "NAI 2x upscale is not available in the headless runtime yet.",
-            "headless": True,
-        })
-        await _send_json(ws, {
-            "type": "toast",
-            "level": "info",
-            "message": "Headless command retired: result_upscale",
-            "headless": True,
-        })
         return True
 
     return False

@@ -27,7 +27,7 @@ class HeadlessAutomationService:
 
         context = self.context
         if key in {"start", "stop"}:
-            return context._toast("Automation execution is retired in the supported headless runtime.", level="info")
+            return context._toast("Automation execution is not available in this runtime.", level="info")
         state = self.state()
         if key == "auto_type":
             state["auto_type"] = value

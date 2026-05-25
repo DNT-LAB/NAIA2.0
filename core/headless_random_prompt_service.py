@@ -30,6 +30,7 @@ class HeadlessRandomPromptResult:
     context: Any = None
     random_request_id: str = ""
     prompt_run_id: str = ""
+    source: str = "random"
     detected_resolution: tuple[int, int] | None = None
     reset_resolution_detected: bool = False
     extra_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -46,7 +47,7 @@ class HeadlessRandomPromptResult:
             "type": "prompt_generated",
             "prompt": self.prompt,
             "remaining": int(self.remaining or 0),
-            "source": "random",
+            "source": self.source or "random",
             "rating_counts": self.rating_counts or {rating: 0 for rating in DEFAULT_RATINGS},
         }
         if self.random_request_id:
@@ -202,6 +203,103 @@ class HeadlessRandomPromptService:
             detected_resolution=result.detected_resolution,
             reset_resolution_detected=result.reset_resolution_detected,
             extra_messages=[tag_filter_update] if tag_filter_update else [],
+        )
+
+    def generate_from_source_row(
+        self,
+        source_row: Any,
+        *,
+        active_ratings: set[str] | None = None,
+        overrides: dict[str, Any] | None = None,
+        random_request_id: str = "",
+        source: str = "result_reroll",
+        update_context: bool = True,
+    ) -> HeadlessRandomPromptResult:
+        settings = self._random_settings(overrides)
+        ratings = self._normalize_ratings(active_ratings)
+        self._ensure_headless_runtime()
+        self._apply_character_settings(settings)
+
+        normalized_source = self._normalize_source_row(source_row)
+        if normalized_source is None:
+            return HeadlessRandomPromptResult(
+                success=False,
+                error="Reroll source is unavailable",
+                random_request_id=random_request_id,
+                source=source,
+                rating_counts=self._rating_counts(),
+            )
+
+        saved_source = getattr(self.context, "current_source_row", None)
+        saved_context = getattr(self.context, "current_prompt_context", None)
+        saved_prompt = str(getattr(self.context, "prompt_text", "") or "")
+        saved_negative = str(getattr(self.context, "negative_prompt_text", "") or "")
+
+        service = self._prompt_generation_service()
+        service.set_current_context(
+            normalized_source,
+            settings,
+            source=source,
+            request_id=random_request_id,
+            metadata={"active_ratings": sorted(ratings), source: True},
+        )
+        try:
+            result = service.process_current_context()
+        except Exception as exc:
+            if not update_context:
+                self.context.current_source_row = saved_source
+                self.context.current_prompt_context = saved_context
+                self.context.prompt_text = saved_prompt
+                self.context.negative_prompt_text = saved_negative
+            return HeadlessRandomPromptResult(
+                success=False,
+                error=str(exc),
+                random_request_id=random_request_id,
+                source=source,
+                rating_counts=self._rating_counts(),
+            )
+        if result.error:
+            if not update_context:
+                self.context.current_source_row = saved_source
+                self.context.current_prompt_context = saved_context
+                self.context.prompt_text = saved_prompt
+                self.context.negative_prompt_text = saved_negative
+            return HeadlessRandomPromptResult(
+                success=False,
+                error=result.error,
+                random_request_id=random_request_id,
+                source=source,
+                rating_counts=self._rating_counts(),
+            )
+
+        if update_context:
+            self.context.prompt_text = result.final_prompt or ""
+            self.context.negative_prompt_text = str(settings.get("negative_prompt") or self.context.negative_prompt_text or "")
+            self.context.save_remote_ui_state()
+            publish = getattr(self.context, "publish", None)
+            if result.context is not None and callable(publish):
+                publish("prompt_generated", result.context)
+        else:
+            self.context.current_source_row = saved_source
+            self.context.current_prompt_context = saved_context
+            self.context.prompt_text = saved_prompt
+            self.context.negative_prompt_text = saved_negative
+
+        safe_print(f"Headless Remote: prompt regenerated from {source}", flush=True)
+        prompt_run_id = str(getattr(result.context, "metadata", {}).get("prompt_run_id") or "")
+        search_results = getattr(self.context, "search_results", None)
+        remaining = search_results.get_count() if search_results is not None else 0
+        return HeadlessRandomPromptResult(
+            success=True,
+            prompt=result.final_prompt or "",
+            remaining=remaining,
+            rating_counts=self._rating_counts(),
+            context=result.context,
+            random_request_id=random_request_id,
+            prompt_run_id=prompt_run_id,
+            source=source,
+            detected_resolution=result.detected_resolution,
+            reset_resolution_detected=result.reset_resolution_detected,
         )
 
     def _active_tag_filter_state(self) -> dict[str, Any] | None:
@@ -371,6 +469,22 @@ class HeadlessRandomPromptService:
             settings[key] = self._coerce_bool(settings.get(key, False))
         settings["api_mode"] = self.context.get_api_mode()
         return settings
+
+    @staticmethod
+    def _normalize_source_row(source_row: Any) -> pd.Series | None:
+        if isinstance(source_row, pd.Series):
+            return source_row
+        if isinstance(source_row, dict):
+            return pd.Series(source_row)
+        to_dict = getattr(source_row, "to_dict", None)
+        if callable(to_dict):
+            try:
+                data = to_dict()
+            except Exception:
+                return None
+            if isinstance(data, dict):
+                return pd.Series(data)
+        return None
 
     def _apply_character_settings(self, settings: dict[str, Any]) -> None:
         from core.character_settings import character_params_from_settings

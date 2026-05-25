@@ -11,6 +11,7 @@ from typing import Any
 from app.backend.runtime import resolve_runtime_paths
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_search_state_service import SUPPORTED_RATINGS
+from core.headless_remote_ui_state_service import apply_remote_ui_state
 
 
 def default_token_manager():
@@ -38,6 +39,7 @@ def initialize_web_session_context(context: Any) -> None:
 
     initialize_desktop_compatibility(context)
     initialize_runtime_state(context)
+    apply_remote_ui_state(context)
     attach_wildcard_manager_context(context)
 
     if context.api_config_service is None:

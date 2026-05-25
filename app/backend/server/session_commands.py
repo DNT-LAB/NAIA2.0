@@ -65,10 +65,12 @@ async def handle_session_command(
     if command_type == "set_prompt":
         context.prompt_text = str(command.get("prompt") or "")
         context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
+        context.save_remote_ui_state()
         await ws.send_text(json.dumps({
             "type": "prompt_sync",
             "prompt": context.prompt_text,
             "negative": context.negative_prompt_text,
+            "negative_prompt": context.negative_prompt_text,
         }, ensure_ascii=False))
         return True
     if command_type == "set_param":

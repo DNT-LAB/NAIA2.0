@@ -1,6 +1,16 @@
 import os
 import json
+import sys
 from typing import Iterable, List, Dict, Set, Optional
+
+
+def _safe_print(message: object) -> None:
+    text = str(message)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or "utf-8"
+        print(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
 
 class FilterDataManager:
     """
@@ -64,17 +74,17 @@ class FilterDataManager:
         file_path = self._resolve_data_file(filename)
 
         if not os.path.exists(file_path):
-            print(f"⚠️ 필터 파일 없음: {file_path}")
+            _safe_print(f"⚠️ 필터 파일 없음: {file_path}")
             return []
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 # 비어있지 않은 라인만 읽어서 앞뒤 공백 제거 후 리스트에 추가
                 tags = [line.strip() for line in f if line.strip()]
-            print(f"✅ 필터 파일 로드 완료: {filename} ({len(tags)}개 태그)")
+            _safe_print(f"✅ 필터 파일 로드 완료: {filename} ({len(tags)}개 태그)")
             return tags
         except Exception as e:
-            print(f"❌ 필터 파일 로드 오류 ({filename}): {e}")
+            _safe_print(f"❌ 필터 파일 로드 오류 ({filename}): {e}")
             return []
 
     def _load_json_tag_list(self, filename: str, subdirectory: str = 'taglist') -> dict:
@@ -82,16 +92,16 @@ class FilterDataManager:
         file_path = self._resolve_data_file(filename, subdirectory)
 
         if not os.path.exists(file_path):
-            print(f"⚠️ JSON 필터 파일 없음: {file_path}")
+            _safe_print(f"⚠️ JSON 필터 파일 없음: {file_path}")
             return {}
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            print(f"✅ JSON 필터 파일 로드 완료: {subdirectory}/{filename}")
+            _safe_print(f"✅ JSON 필터 파일 로드 완료: {subdirectory}/{filename}")
             return data
         except Exception as e:
-            print(f"❌ JSON 필터 파일 로드 오류 ({filename}): {e}")
+            _safe_print(f"❌ JSON 필터 파일 로드 오류 ({filename}): {e}")
             return {}
 
     def _load_json_filters(self):
@@ -103,7 +113,7 @@ class FilterDataManager:
             for group_tags in expr_data.get('groups', {}).values():
                 tags.update(group_tags)
             self._expression_set = tags
-            print(f"  → 표정 태그: {len(self._expression_set)}개")
+            _safe_print(f"  → 표정 태그: {len(self._expression_set)}개")
 
         # pose_action_tags.json: 모든 categories 값 flatten → set
         pose_data = self._load_json_tag_list('pose_action_tags.json')
@@ -112,25 +122,25 @@ class FilterDataManager:
             for cat_tags in pose_data.get('categories', {}).values():
                 tags.update(cat_tags)
             self._pose_action_set = tags
-            print(f"  → 포즈/행동 태그: {len(self._pose_action_set)}개")
+            _safe_print(f"  → 포즈/행동 태그: {len(self._pose_action_set)}개")
 
         # location_tags.json: tags → set
         loc_data = self._load_json_tag_list('location_tags.json')
         if loc_data:
             self._location_set = set(loc_data.get('tags', []))
-            print(f"  → 장소 태그: {len(self._location_set)}개")
+            _safe_print(f"  → 장소 태그: {len(self._location_set)}개")
 
         # meta_tags.json: tags → set
         meta_data = self._load_json_tag_list('meta_tags.json')
         if meta_data:
             self._meta_set = set(meta_data.get('tags', []))
-            print(f"  → 메타 태그: {len(self._meta_set)}개")
+            _safe_print(f"  → 메타 태그: {len(self._meta_set)}개")
 
         # object_tags.json: tags → set
         obj_data = self._load_json_tag_list('object_tags.json')
         if obj_data:
             self._object_set = set(obj_data.get('tags', []))
-            print(f"  → 사물 태그: {len(self._object_set)}개")
+            _safe_print(f"  → 사물 태그: {len(self._object_set)}개")
 
         # clothing_event.json: 의상 이벤트(상태/동작) 카테고리 → flat set + 역 매핑 + 메타
         event_data = self._load_json_tag_list('clothing_event.json')
@@ -179,9 +189,9 @@ class FilterDataManager:
             self._clothing_event_tag_to_category = tag_to_cat
             self._clothing_event_meta = meta_map
             bound_n = sum(1 for m in meta_map.values() if m['garment_bound'])
-            print(f"  → 의상 이벤트 태그: {len(self._clothing_event_set)}개 "
-                  f"({len(self._clothing_event_categories)}개 카테고리, v{version}, "
-                  f"garment-bound {bound_n}/{len(meta_map)})")
+            _safe_print(f"  → 의상 이벤트 태그: {len(self._clothing_event_set)}개 "
+                        f"({len(self._clothing_event_categories)}개 카테고리, v{version}, "
+                        f"garment-bound {bound_n}/{len(meta_map)})")
 
         # clothing_regions.json: regions dict 저장 + 역 매핑 생성
         region_data = self._load_json_tag_list('clothing_regions.json')
@@ -193,15 +203,15 @@ class FilterDataManager:
             for region, tags in self._clothing_region_map.items():
                 for tag in tags:
                     self._clothing_tag_to_region[tag] = region
-            print(f"  → 의류 Region: {len(self._clothing_region_map)}개 지역, "
-                  f"{len(self._clothing_tag_to_region)}개 태그 매핑")
+            _safe_print(f"  → 의류 Region: {len(self._clothing_region_map)}개 지역, "
+                        f"{len(self._clothing_tag_to_region)}개 태그 매핑")
 
     def _load_tag_whitelist(self):
         """unique_tags.json 빈도 기반 + 분류 완료 태그를 합쳐 whitelist를 구성합니다."""
         file_path = self._resolve_data_file('unique_tags.json', 'taglist')
 
         if not os.path.exists(file_path):
-            print(f"⚠️ Whitelist 소스 파일 없음: {file_path}")
+            _safe_print(f"⚠️ Whitelist 소스 파일 없음: {file_path}")
             return
 
         try:
@@ -224,10 +234,10 @@ class FilterDataManager:
 
             self._valid_tag_whitelist = frozenset(freq_whitelist | classified)
             exempt = len(classified - freq_whitelist)
-            print(f"✅ 태그 Whitelist: {len(self._valid_tag_whitelist)}개 "
-                  f"(빈도>{self._NOISE_THRESHOLD}: {len(freq_whitelist)} + 분류 예외: {exempt})")
+            _safe_print(f"✅ 태그 Whitelist: {len(self._valid_tag_whitelist)}개 "
+                        f"(빈도>{self._NOISE_THRESHOLD}: {len(freq_whitelist)} + 분류 예외: {exempt})")
         except Exception as e:
-            print(f"❌ Whitelist 로드 오류: {e}")
+            _safe_print(f"❌ Whitelist 로드 오류: {e}")
 
     def filter_noise_tags(self, tags: List[str]) -> List[str]:
         """Whitelist에 있는 태그만 통과시킵니다. Whitelist 미로드 시 원본 반환."""

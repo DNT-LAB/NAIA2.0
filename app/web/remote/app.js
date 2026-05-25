@@ -19,6 +19,8 @@ let pendingRandomRequestId = '';
 let initialStateRefreshTimer = null;
 let promptHighlightIndexTimer = null;
 let initialHistoryRefreshTimer = null;
+let initialRandomPromptIssued = false;
+let initialRandomPromptTimer = null;
 let randomRequestSerial = 0;
 let sessionId = null;
 const urlParams = new URLSearchParams(location.search);
@@ -2103,6 +2105,7 @@ function onInitComplete() {
   }
   scheduleInitialHistoryRefresh();
   scheduleInitialStateRefresh();
+  scheduleInitialRandomPrompt();
   const cachedPe = moduleStateCache.get('prompt_engineering');
   if (cachedPe) refreshHiresPresetSwapOptions(cachedPe);
 }
@@ -3932,6 +3935,14 @@ function onLoadPrompt(prompt) {
 
 function onSession(m) {
   if (m.session_id) sessionId = m.session_id;
+  if ('prompt' in m || 'negative_prompt' in m) {
+    syncPrompts({
+      type: 'prompt_sync',
+      prompt: m.prompt || '',
+      negative_prompt: m.negative_prompt || '',
+      force: true,
+    });
+  }
   const autoGenCb = optBoxes.auto_generate;
   const naiOpt = modeSelect.querySelector('option[value="NAI"]');
   if (autoGenCb) { autoGenCb.disabled = false; autoGenCb.style.opacity = ''; }
@@ -3942,6 +3953,7 @@ function onSession(m) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'get_search_state'}));
   }
+  scheduleInitialRandomPrompt();
   updateModeSelectAvailability();
 }
 
@@ -4001,6 +4013,56 @@ function requestGenerate(payload = {}) {
   return true;
 }
 
+function requestRandomPrompt({force = false} = {}) {
+  if (activePromptTab === 'preset') {
+    if (!force) void randomizeFromPresetTab();
+    return false;
+  }
+  if (!force && getOptionChecked('prompt_fixed')) {
+    updateGenerateButtonMode();
+    return false;
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  if (promptSendTimer) {
+    clearTimeout(promptSendTimer);
+    promptSendTimer = null;
+  }
+  _localPromptDirty = false;
+  btnRnd.disabled = true;
+  awaitingMyRandom = true;
+  pendingRandomRequestId = createRandomRequestId();
+  if (window._randomTimeout) clearTimeout(window._randomTimeout);
+  window._randomTimeout = setTimeout(() => {
+    if (awaitingMyRandom) {
+      unlockRandomButton({clearRequest: false});
+    }
+  }, 2000);
+  ws.send(JSON.stringify({
+    type: 'random',
+    random_request_id: pendingRandomRequestId,
+    ratings: getActiveRatings(),
+    overrides: _collectCurrentParams(),
+  }));
+  return true;
+}
+
+function scheduleInitialRandomPrompt(delay = 350) {
+  if (initialRandomPromptIssued) return;
+  if (initialRandomPromptTimer) clearTimeout(initialRandomPromptTimer);
+  initialRandomPromptTimer = setTimeout(() => {
+    initialRandomPromptTimer = null;
+    if (initialRandomPromptIssued) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (generating || awaitingMyRandom || pendingRandomRequestId) return;
+    if (String(promptEdit?.value || '').trim()) {
+      initialRandomPromptIssued = true;
+      return;
+    }
+    initialRandomPromptIssued = true;
+    requestRandomPrompt({force: true});
+  }, Math.max(0, Number(delay) || 0));
+}
+
 function send(cmd) {
   if (cmd === 'generate') {
     if (activePromptTab === 'preset') {
@@ -4018,36 +4080,7 @@ function send(cmd) {
     return;
   }
   if (cmd === 'random') {
-    if (activePromptTab === 'preset') {
-      void randomizeFromPresetTab();
-      return;
-    }
-    if (getOptionChecked('prompt_fixed')) {
-      updateGenerateButtonMode();
-      return;
-    }
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    if (promptSendTimer) {
-      clearTimeout(promptSendTimer);
-      promptSendTimer = null;
-    }
-    _localPromptDirty = false;
-    btnRnd.disabled = true;
-    awaitingMyRandom = true;
-    pendingRandomRequestId = createRandomRequestId();
-    // 타임아웃 안전망: 일반 응답은 0.2초 내외이므로 2초면 충분합니다.
-    if (window._randomTimeout) clearTimeout(window._randomTimeout);
-    window._randomTimeout = setTimeout(() => {
-      if (awaitingMyRandom) {
-        unlockRandomButton({clearRequest: false});
-      }
-    }, 2000);
-    ws.send(JSON.stringify({
-      type: 'random',
-      random_request_id: pendingRandomRequestId,
-      ratings: getActiveRatings(),
-      overrides: _collectCurrentParams(),
-    }));
+    requestRandomPrompt();
     return;
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) return;

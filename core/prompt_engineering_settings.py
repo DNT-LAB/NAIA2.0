@@ -364,9 +364,11 @@ class PromptEngineeringHeadlessStore:
 
     def _load_state(self, mode: str) -> dict[str, Any]:
         preset_names = self.list_preset_names(mode)
+        if "default" not in preset_names:
+            preset_names.insert(0, "default")
         current_preset = self.load_last_used_preset(mode)
         if current_preset not in preset_names:
-            current_preset = "default" if "default" in preset_names else "(프리셋 없음)"
+            current_preset = "default"
 
         settings = default_prompt_engineering_settings(save_root=self._save_root)
         settings = merge_settings(settings, self.load_mode_settings(mode))
@@ -436,7 +438,9 @@ class PromptEngineeringHeadlessStore:
 
     def preset_options(self, mode: str | None = None) -> list[str]:
         names = list(self.state(mode)["preset_list"])
-        return ["*randomized", *names]
+        if "default" not in names:
+            names.insert(0, "default")
+        return [*names, "*randomized"]
 
     def randomized_available_presets(self, mode: str | None = None) -> list[str]:
         state = self.state(mode)

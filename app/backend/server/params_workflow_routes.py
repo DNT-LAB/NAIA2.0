@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from app.backend.server.search_runtime import save_runner_parquet
 from core.web_session_context import WebSessionContext
 
 
@@ -280,6 +281,7 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
     context.search_results_snapshot = context.search_results.get_dataframe().copy()
     context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
     context.search_results_scope = "custom_parquet"
+    save_runner_parquet(context)
     return {
         "ok": True,
         "action": action,

@@ -289,6 +289,11 @@ class WebSessionContext:
     def set_param(self, key: str, value: Any) -> None:
         self._remote_state_service().set_param(key, value)
 
+    def save_remote_ui_state(self) -> dict[str, Any]:
+        from core.headless_remote_ui_state_service import save_remote_ui_state
+
+        return save_remote_ui_state(self)
+
     def set_active_ratings(self, ratings: Any) -> set[str]:
         return self._search_state_service().set_active_ratings(ratings)
 

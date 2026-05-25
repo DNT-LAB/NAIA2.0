@@ -12,7 +12,7 @@ from core.headless_payload_utils import is_loopback_host
 
 
 AUTO_SAVE_DEFAULTS = {
-    "auto_save": False,
+    "auto_save": True,
     "save_as_webp": False,
     "history_limit_enabled": False,
     "max_history_length": 2000,
@@ -100,6 +100,7 @@ class HeadlessSaveService:
             context.auto_save_state[key] = context._coerce_int(value, default=1, minimum=1, maximum=3)
         else:
             return None
+        context.save_remote_ui_state()
         return self.auto_save_state_payload()
 
     def set_save_directory_param(
@@ -130,6 +131,7 @@ class HeadlessSaveService:
             context.save_directory_state[key] = str(value or "")
         else:
             return None
+        context.save_remote_ui_state()
         return self.save_directory_state_payload(client_host)
 
     def save_unsaved_history(self) -> dict[str, Any]:
@@ -225,6 +227,7 @@ class HeadlessSaveService:
             png_bytes, _ = result_images.history_item_png_payload(item, label=item.filename)
             target.write_bytes(png_bytes)
         context.result_store.mark_saved(item, target)
+        context.save_remote_ui_state()
         return target
 
     @staticmethod

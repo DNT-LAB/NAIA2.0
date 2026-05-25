@@ -10,7 +10,7 @@ REMOTE_OPTION_DEFAULTS = {
     "prompt_fixed": False,
     "auto_generate": False,
     "wildcard_standalone": False,
-    "auto_save": False,
+    "auto_save": True,
 }
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",
@@ -57,6 +57,7 @@ class HeadlessRemoteStateService:
             return
         old_mode = self.context.current_api_mode
         self.context.current_api_mode = normalized
+        self.context.save_remote_ui_state()
         self.context.publish("api_mode_changed", {"old_mode": old_mode, "new_mode": normalized})
 
     def set_option(self, key: str, value: Any) -> None:
@@ -65,6 +66,7 @@ class HeadlessRemoteStateService:
         self.context.remote_options[key] = bool(value)
         if key == "auto_save":
             self.context.auto_save_state["auto_save"] = bool(value)
+        self.context.save_remote_ui_state()
         self.context.publish("remote_options_changed", self.get_options())
 
     def get_options(self) -> dict[str, bool]:
@@ -82,6 +84,7 @@ class HeadlessRemoteStateService:
             return
         self.context.remote_params[clean_key] = self.coerce_remote_param(clean_key, value)
         self._sync_cached_selection(clean_key, self.context.remote_params[clean_key])
+        self.context.save_remote_ui_state()
         self.context.publish("remote_params_changed", self.context.generation_param_schema_payload())
 
     def _sync_cached_selection(self, key: str, value: Any) -> None:

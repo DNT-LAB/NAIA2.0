@@ -133,6 +133,9 @@ class E621EventService:
             self.testbench = ", ".join(tags)
             generated = self._generate_prompt(tags)
             self.app_context.prompt_text = generated
+            save_remote_ui_state = getattr(self.app_context, "save_remote_ui_state", None)
+            if callable(save_remote_ui_state):
+                save_remote_ui_state()
             return [
                 {
                     "type": "prompt_generated",

@@ -130,7 +130,28 @@ def apply_search_runtime_filters(context: WebSessionContext) -> dict[str, Any]:
         context.search_results.set_dataframe(pd.DataFrame())
     else:
         context.search_results.set_dataframe(filtered)
-    return context.search_state_payload()
+    return search_state_with_runner_save(context)
+
+
+def save_runner_parquet(context: WebSessionContext) -> Path | None:
+    frame = context.search_results.get_dataframe() if context.search_results else None
+    if frame is None or getattr(frame, "empty", True):
+        return None
+    path = context.runner_parquet_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(path, index=False)
+    return path
+
+
+def search_state_with_runner_save(context: WebSessionContext) -> dict[str, Any]:
+    state = context.search_state_payload()
+    try:
+        path = save_runner_parquet(context)
+        if path is not None:
+            state["runner_parquet_path"] = str(path)
+    except Exception as exc:
+        state["runner_parquet_error"] = str(exc)
+    return state
 
 
 def clear_active_tag_filter(context: WebSessionContext) -> dict[str, Any]:
@@ -196,7 +217,7 @@ def restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
         context.active_tag_filter = None
         context.save_search_filter_state(tag_filter_active=False)
         context.search_results.set_dataframe(base.copy())
-    return context.search_state_payload()
+    return search_state_with_runner_save(context)
 
 
 def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
@@ -301,7 +322,7 @@ def load_or_merge_custom_parquet(
     context.search_results_snapshot = context.search_results.get_dataframe().copy()
     context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
     context.search_results_scope = CUSTOM_PARQUET_SCOPE
-    state = context.search_state_payload()
+    state = search_state_with_runner_save(context)
     state["merged" if merge else "loaded"] = path.name
     verb = "merged" if merge else "loaded"
     return state, {"type": "toast", "message": f"{path.name} {verb} ({len(frame):,})", "level": "success"}
@@ -318,9 +339,9 @@ def search_parquet_action(context: WebSessionContext, command: dict[str, Any]) -
         frame.to_parquet(path, index=False)
         message = f"Exported {path.name} ({len(frame):,})"
     elif action == "save_runner":
-        path = context.runner_parquet_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_parquet(path, index=False)
+        path = save_runner_parquet(context)
+        if path is None:
+            return context.search_state_payload(), {"type": "toast", "message": "No search results to save", "level": "error"}
         message = f"Saved runner parquet ({len(frame):,})"
     else:
         return context.search_state_payload(), {"type": "toast", "message": "Unsupported parquet action", "level": "error"}

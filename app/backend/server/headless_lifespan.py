@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.backend.server.autocomplete_commands import ensure_tag_search_index
 from app.backend.server.generation_commands import random_service
+from app.backend.server.search_runtime import save_runner_parquet
 from core.web_session_context import WebSessionContext
 
 
@@ -23,7 +24,13 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
         tag_task = getattr(context, "headless_tag_index_warmup_task", None)
         if tag_task is None or tag_task.done():
             context.headless_tag_index_warmup_task = asyncio.create_task(_run_tag_index_warmup(context, run_in_thread))
-        yield
+        try:
+            yield
+        finally:
+            try:
+                await run_in_thread(save_runner_parquet, context)
+            except Exception as exc:
+                print(f"Headless Remote: runner parquet shutdown save failed - {exc}", flush=True)
 
     return lifespan
 

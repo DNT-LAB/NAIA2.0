@@ -240,7 +240,12 @@ class HeadlessSessionStateService:
         context = self.context
         messages: list[dict[str, Any]] = []
         if session_id:
-            messages.append({"type": "session", "session_id": session_id})
+            messages.append({
+                "type": "session",
+                "session_id": session_id,
+                "prompt": context.prompt_text,
+                "negative_prompt": context.negative_prompt_text,
+            })
         messages.extend([
             self.desktop_window_state_payload(client_host),
             {"type": "mode", "mode": context.get_api_mode()},

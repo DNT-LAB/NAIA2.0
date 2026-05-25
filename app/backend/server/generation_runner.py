@@ -35,6 +35,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             except Exception as exc:
                 await _broadcast_generation_error(context, clients, request, str(exc))
                 continue
+            auto_save_result = await _auto_save_generated_history_item(context, stored.item)
 
             context.is_generating = False
             await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "completed"})
@@ -53,9 +54,25 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
             await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
             await broadcast_json(clients, context.queue_state_payload())
+            await broadcast_json(clients, context.auto_save_state_payload())
+            if isinstance(auto_save_result, dict) and auto_save_result.get("error"):
+                await broadcast_json(clients, {
+                    "type": "toast",
+                    "level": "error",
+                    "message": f"Auto Save failed: {auto_save_result['error']}",
+                })
     finally:
         context.is_generating = False
         context.headless_generation_runner_active = False
+
+
+async def _auto_save_generated_history_item(context: WebSessionContext, item):
+    if not context._coerce_bool(context.auto_save_state.get("auto_save", True)):
+        return None
+    try:
+        return await asyncio.to_thread(context.save_history_item, item)
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 async def _broadcast_generation_error(

@@ -573,7 +573,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260517-webui-enhance-menu1')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260526-open-location1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -600,6 +600,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onWebUiEnhance: context => requestResultEnhanceFromContext(context),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       canUseDesktopImg2Img,
+      canOpenLocalFiles: () => isLocalWebHost || isDesktopShell,
     });
     resultContextMenu.bind();
   })

@@ -33,12 +33,14 @@ const DEFAULT_CAPABILITIES = {
 
 const MAIN_IMAGE_ACTIONS = [
   {label: '이미지 붙여넣기', action: ACTION_PASTE_IMAGE, alwaysEnabled: true},
+  {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
   {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
   {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png', badge: 'PNG', badgeTone: 'blue'},
   {type: 'separator'},
 ];
 
 const THUMBNAIL_IMAGE_ACTIONS = [
+  {label: '파일 위치 열기', action: ACTION_OPEN_LOCATION, capability: 'open_file'},
   {label: '이미지 저장', action: ACTION_SAVE_IMAGE, capability: 'save_image'},
   {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png', badge: 'PNG', badgeTone: 'blue'},
   {type: 'separator'},
@@ -166,6 +168,7 @@ export function createResultContextMenu({
   getMode = () => '',
   getCurrentSavedPath = () => '',
   canUseDesktopImg2Img = () => true,
+  canOpenLocalFiles = () => false,
 }) {
   let menu = null;
   let metadataModal = null;
@@ -207,6 +210,10 @@ export function createResultContextMenu({
 
   function currentMode() {
     return String(getMode() || '').toUpperCase();
+  }
+
+  function canUseFileLocation() {
+    return typeof canOpenLocalFiles === 'function' && canOpenLocalFiles();
   }
 
   function itemModeAllowed(item) {
@@ -587,7 +594,7 @@ export function createResultContextMenu({
         image_action: canUseNaiImageAction,
         inpaint: canUseNaiImageAction,
         copy_png: hasImage,
-        open_file: false,
+        open_file: canUseFileLocation() && isSaved && Boolean(path),
         save_image: (isCurrent || isSaved) && hasImage,
       },
     };
@@ -615,6 +622,7 @@ export function createResultContextMenu({
     if ('has_metadata' in asset || 'hasMetadata' in asset) {
       capabilities.metadata = Boolean(asset.has_metadata ?? asset.hasMetadata);
     }
+    capabilities.open_file = canUseFileLocation() && Boolean(capabilities.open_file);
     return {
       ...context,
       id: asset.id ?? context.id,

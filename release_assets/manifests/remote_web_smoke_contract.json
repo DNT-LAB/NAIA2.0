@@ -297,7 +297,7 @@
       "expected_status": [404]
     },
     {
-      "feature": "result_open_location_unavailable",
+      "feature": "result_open_location_missing_target",
       "method": "POST",
       "path": "/api/result/open-location",
       "expected_status": [400],

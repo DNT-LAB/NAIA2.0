@@ -3,6 +3,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
+import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -13,6 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from core import result_image_payload_service as result_images
+from core.headless_payload_utils import is_loopback_host
 from core.web_session_context import WebSessionContext
 
 
@@ -55,6 +59,69 @@ def history_item_from_action_payload(context: WebSessionContext, payload: dict[s
     if not rel_path:
         return None
     return history_item_from_viewer_path(context, rel_path)
+
+
+def _request_host(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    if raw.startswith("[") and "]" in raw:
+        return raw[1:raw.index("]")]
+    if raw.count(":") == 1:
+        return raw.rsplit(":", 1)[0]
+    return raw
+
+
+def _is_local_request(req: Request) -> bool:
+    client_host = ""
+    try:
+        if req.client is not None:
+            client_host = _request_host(str(req.client.host or ""))
+    except Exception:
+        client_host = ""
+
+    request_host = _request_host(req.headers.get("host") or getattr(req.url, "hostname", "") or "")
+    if client_host == "testclient":
+        return request_host in {"", "testserver"} or is_loopback_host(request_host)
+    return is_loopback_host(client_host) and is_loopback_host(request_host)
+
+
+def _open_location_target(target: Path) -> Path:
+    resolved = target.resolve()
+    folder = resolved.parent if resolved.is_file() else resolved
+    folder.mkdir(parents=True, exist_ok=True)
+    if sys.platform.startswith("darwin"):
+        subprocess.Popen(["open", str(folder)])
+    elif os.name == "nt":
+        os.startfile(str(folder))  # type: ignore[attr-defined]
+    else:
+        subprocess.Popen(["xdg-open", str(folder)])
+    return folder
+
+
+def _result_location_target(context: WebSessionContext, payload: dict[str, Any] | None) -> Path | None:
+    payload = payload if isinstance(payload, dict) else {}
+    rel_path = str(payload.get("path") or "").strip()
+    item = history_item_from_viewer_path(context, rel_path) if rel_path else None
+    if item is None and str(payload.get("source") or "").strip().lower() in {"", "current"}:
+        item = context.result_store.latest_item
+    if item is not None:
+        item_path = Path(str(getattr(item, "filepath", "") or ""))
+        if item_path.is_file():
+            return item_path
+
+    target = validate_viewer_path(context, rel_path)
+    if target is not None:
+        return target
+
+    file_path = str(payload.get("file_path") or payload.get("filePath") or "").strip()
+    if not file_path:
+        return None
+    candidate = Path(file_path).expanduser().resolve()
+    save_dir = _viewer_save_dir(context).resolve()
+    try:
+        candidate.relative_to(save_dir)
+    except ValueError:
+        return None
+    return candidate if candidate.exists() else None
 
 
 def _source_row_dict(source_row: Any) -> dict[str, Any]:
@@ -210,7 +277,7 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
             "restore_params": has_generation_params,
             "metadata": bool(metadata_payload or rel_path),
             "paste_image": True,
-            "open_file": False,
+            "open_file": has_file,
             "save_image": has_image,
             "copy_png": has_image,
             "image_action": bool(has_image and nai_mode),
@@ -271,7 +338,7 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             "restore_params": True,
             "metadata": True,
             "paste_image": True,
-            "open_file": False,
+            "open_file": bool(target is not None or item_has_file),
             "save_image": True,
             "copy_png": True,
             "image_action": bool(item and nai_mode),
@@ -774,11 +841,38 @@ def register_result_display_routes(
         return JSONResponse({"error": "unsupported history asset kind"}, status_code=400)
 
     @app.post("/api/result/open-location")
-    async def api_result_open_location():
-        return JSONResponse({
-            "error": "Opening local folders is not supported from Remote Web.",
-            "runtime": "web",
-        }, status_code=400)
+    async def api_result_open_location(req: Request):
+        if not _is_local_request(req):
+            return JSONResponse({
+                "ok": False,
+                "error": "Opening local folders is available from the local browser only.",
+                "runtime": "web",
+            }, status_code=403)
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        target = _result_location_target(session_context, payload)
+        if target is None:
+            return JSONResponse({
+                "ok": False,
+                "error": "Saved image location is unavailable.",
+                "runtime": "web",
+            }, status_code=400)
+        try:
+            opened = await run_in_thread(_open_location_target, target)
+            return {
+                "ok": True,
+                "path": str(target),
+                "folder": str(opened),
+                "runtime": "web",
+            }
+        except Exception as exc:
+            return JSONResponse({
+                "ok": False,
+                "error": str(exc),
+                "runtime": "web",
+            }, status_code=500)
 
     @app.post("/api/result/action/reroll")
     async def api_result_action_reroll(req: Request):

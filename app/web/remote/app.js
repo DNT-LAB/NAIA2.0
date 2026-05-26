@@ -4864,7 +4864,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260525-recommended-preset1')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260526-webui-recommended-preset1')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -4900,7 +4900,11 @@ function updateModuleHeaderAction(moduleId) {
     }
   }
   if (!modulePopupAction) return;
-  if (moduleId === 'prompt_engineering' && ((currentMode || modeSelect.value) === 'NAI' || isComfyUiAnimaMode())) {
+  if (moduleId === 'prompt_engineering' && (
+    (currentMode || modeSelect.value) === 'NAI'
+    || (currentMode || modeSelect.value) === 'WEBUI'
+    || isComfyUiAnimaMode()
+  )) {
     modulePopupAction.textContent = '추천 설정 적용';
     modulePopupAction.style.display = '';
     modulePopupAction.onclick = applyRecommendedPromptPreset;

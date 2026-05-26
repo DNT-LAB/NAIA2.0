@@ -118,7 +118,7 @@ class HeadlessPromptEngineeringService:
         mode = context.get_api_mode()
         if mode == "COMFYUI" and not self._is_comfyui_anima_mode():
             return
-        if mode not in {"NAI", "COMFYUI"}:
+        if mode not in {"NAI", "WEBUI", "COMFYUI"}:
             return
         if store.load_last_used_preset(mode):
             return
@@ -221,13 +221,17 @@ class HeadlessPromptEngineeringService:
             preset_name = self._unique_preset_name(store, "recommend_anima", mode)
             module_settings = self._comfyui_anima_recommended_module_settings()
             main_settings = self._comfyui_anima_recommended_main_settings()
+        elif mode == "WEBUI":
+            preset_name = self._unique_preset_name(store, "recommend", mode)
+            module_settings = self._webui_recommended_module_settings()
+            main_settings = self._webui_recommended_main_settings()
         elif mode == "NAI":
             preset_name = self._unique_preset_name(store, "recommend", mode)
             module_settings = store.collect_settings(mode)
             module_settings.update(self._nai_recommended_module_settings())
             main_settings = self._nai_recommended_main_settings()
         else:
-            return False, "추천 설정 적용은 현재 NAI 또는 COMFYUI ANIMA 모드에서만 지원됩니다."
+            return False, "추천 설정 적용은 현재 NAI, WEBUI 또는 COMFYUI ANIMA 모드에서만 지원됩니다."
 
         if save_current:
             current = store.state(mode).get("current_preset")
@@ -282,11 +286,53 @@ class HeadlessPromptEngineeringService:
             elif key in {"negative", "negative_prompt"}:
                 context.negative_prompt_text = str(value or "")
                 prompt_dirty = True
+            elif key == "webui_hiresfix_assist":
+                enabled = context._coerce_bool(value)
+                state = context._normalized_webui_hiresfix_assist_state(
+                    context.webui_hiresfix_assist_state
+                )
+                state["enabled"] = enabled
+                state["webui_hiresfix_assist"] = enabled
+                context.webui_hiresfix_assist_state = state
+                context.set_param(str(key), enabled)
+            elif key == "webui_hiresfix_assist_target":
+                target = 768 if str(value).strip() == "768" else 512
+                state = context._normalized_webui_hiresfix_assist_state(
+                    context.webui_hiresfix_assist_state
+                )
+                state["target"] = target
+                state["webui_hiresfix_assist_target"] = target
+                context.webui_hiresfix_assist_state = state
+                context.set_param(str(key), target)
             else:
                 context.set_param(str(key), value)
         if main_settings or prompt_dirty:
             context.save_remote_ui_state()
             context.publish("remote_params_changed", context.generation_param_schema_payload())
+
+    def _webui_remote_options(self, option_key: str) -> list[str]:
+        context = self.context
+        option_cache = getattr(context, "remote_option_cache", {}) or {}
+        cached_options = option_cache.get("WEBUI", {}) if isinstance(option_cache, dict) else {}
+        values = cached_options.get(option_key) if isinstance(cached_options, dict) else None
+        if isinstance(values, list):
+            return [str(value) for value in values if str(value or "").strip()]
+        return []
+
+    @staticmethod
+    def _option_key(value: str) -> str:
+        return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+    def _preferred_webui_option(self, option_key: str, preferred: list[str], fallback: str) -> str:
+        options = self._webui_remote_options(option_key)
+        if not options:
+            return fallback
+        option_by_key = {self._option_key(option): option for option in options}
+        for candidate in preferred:
+            matched = option_by_key.get(self._option_key(candidate))
+            if matched:
+                return matched
+        return options[0]
 
     @staticmethod
     def _comfyui_anima_recommended_module_settings() -> dict[str, Any]:
@@ -325,6 +371,103 @@ class HeadlessPromptEngineeringService:
             "cfg_scale": 5.1,
             "rescale_cfg": 0.5,
             "anima_weight": "1",
+        }
+
+    @staticmethod
+    def _webui_recommended_module_settings() -> dict[str, Any]:
+        return {
+            "pre_prompt": "newest, year 2024, (best quality), score_8, highres, absurdres",
+            "post_prompt": (
+                "(perspective, foreshortening, dutch angle:0.75), "
+                "(dynamic facial expressions), exaggerated and dark environment, "
+                "violent composition, (low-contrast, muted color, watercolor \\(medium\\), "
+                "highly aesthetic Pixiv style illustration, clean composition, view focus "
+                "concentrated on the character with blurry background, high-quality digital art.:0.75)"
+            ),
+            "auto_hide_prompt": (
+                "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, "
+                "bad id, _logo, bad twitter id, comic, __background__, ~blurry background, "
+                "~sky background, character doll, stuffed animal, stuffed toy, speech bubble, cyclops, "
+                "pov, 3d, glasses, mole, text focus, thought bubble, watermark, web address, "
+                "body writing, fake screenshot, facing away, |_|, __piercing__, tattoo, _tattoo, "
+                "_text, sound effects, greyscale, multiple views, __pubic hair__, peeing, rabbit, "
+                "__censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, child on child, "
+                "covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, multiple boys, "
+                "__measuring__, multiple views, big belly, curvy, doll joints, looking at viewer, timestamp, "
+                "battery indicator, tan, fake phone screenshot, stomach bulge, __beach__, __shower__, "
+                "on table, huge penis, __bug__, giant insect, belly, eye mask, circle cut, dark nipples, "
+                "signature, alternate race, alternate species, dark nipples, livestream, slap mark, x-ray, "
+                "armpit hair, health bar, snapchat, facial mark, emoji, command spell, dark areolae, "
+                "__piercing__, __bed__, __pillow__, __sheet__, body markings, obese, __long tongue__, "
+                "toddlercon, __name__, handprint, __pasties__, mini person, __butt plug__, __eyepatch__, "
+                "oppai loli, sex toy, loli, chibi, chibi inset, makeup, mascara, large breasts, "
+                "runny makeup, third eye, anal hair, __halo__, __(style)__, __(cosplay)__, __freckles__, "
+                "braces, gag, __joint__"
+            ),
+            "preprocessing_options": {
+                "remove_author": True,
+                "remove_work_title": True,
+                "remove_character_name": True,
+                "remove_character_features": False,
+                "remove_clothes": False,
+                "remove_clothing_event": False,
+                "remove_color": False,
+                "remove_location_and_background_color": False,
+                "remove_expression": False,
+                "remove_pose_action": False,
+                "remove_meta_tags": True,
+                "remove_object_tags": True,
+                "remove_noise_tags": True,
+                "closed_eyes_sync": True,
+                "e621_auto_boost": False,
+                "danbooru_auto_weight": False,
+                "tag_implication_compression": True,
+            },
+        }
+
+    def _webui_recommended_main_settings(self) -> dict[str, Any]:
+        return {
+            "sampler": self._preferred_webui_option(
+                "options_sampler",
+                ["ER SDE", "Euler a", "Euler A", "Euler Ancestral"],
+                "Euler a",
+            ),
+            "scheduler": self._preferred_webui_option(
+                "options_scheduler",
+                ["Simple", "SGM Uniform"],
+                "SGM Uniform",
+            ),
+            "resolution": "1024 x 1024",
+            "steps": 32,
+            "cfg_scale": 5.0,
+            "negative": (
+                "ai-generated, 3d, (worst quality), low quality, (score_1), score_2, score_3, "
+                "realistic, furry, furry female, anthro, unfinished, work-in-progress, "
+                "absurdly detailed composition, blank, blank background, letterboxed, blurry, "
+                "jpeg artifacts, mutated, mutated digits, missing fingers, extra digit, fewer digits, "
+                "artistic error, unusual anatomy, watermark, patreon username, web address, patreon logo, "
+                "weibo username, (artist logo, twitter username, signature), watermark, (multiple views), "
+                "distorted anatomy, english text, anatomically incorrect, doodle on background, "
+                "bad perspective, high contrast, cool colored, glitch, distortion, colorful, neon palette, "
+                "detailed background, (vignetting, shiny skin, shaded face, face in shadow, underexposed face, "
+                "underexposed body, dark body, body in shadow, low-key lighting, cast shadow, diagonal shadow, "
+                "shadow across face, shadow across torso, harsh shadow, dramatic lighting, spotlight, rim light, "
+                "split lighting, chiaroscuro:0.85)"
+            ),
+            "seed": "-1",
+            "seed_fixed": False,
+            "enable_hr": False,
+            "hr_scale": 2.0,
+            "hr_upscaler": "Latent (nearest-exact)",
+            "denoising_strength": 0.5,
+            "hires_steps": 0,
+            "hr_cfg": 7.0,
+            "webui_hiresfix_assist": False,
+            "webui_hiresfix_assist_target": 512,
+            "anima_weight": "1",
+            "random_prompt_weight": "1",
+            "resolution_preset_enabled": False,
+            "resolution_preset": "standard",
         }
 
     @staticmethod

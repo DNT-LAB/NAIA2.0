@@ -5,7 +5,8 @@
   "notes": [
     "This contract intentionally avoids NovelAI/WebUI/ComfyUI generation dispatch and external network side effects.",
     "Non-destructive checks cover the route surfaces needed by Remote Web panels; live image generation and external APIs remain separate validation.",
-    "Full packaged-app validation must still test Generate, Enhance, img2img, Vibe Transfer, Character Reference, Artist Thumb, and setup/API workflows with real runtime credentials or controlled test doubles."
+    "Full packaged-app validation must still test Generate, Enhance, img2img, Vibe Transfer, Character Reference, Artist Thumb, and setup/API workflows with real runtime credentials or controlled test doubles.",
+    "On connect the server sends the startup state messages and then one anlas_update (the NAI Anlas pill snapshot), broadcast before the command receive loop. expected_initial_types lists anlas_update last to keep command/response alignment deterministic."
   ],
   "test_tokens": {
     "nai_token": "naia-smoke-token"
@@ -397,7 +398,8 @@
         "queue_state",
         "api_status",
         "init_complete",
-        "lazy_indices_ready"
+        "lazy_indices_ready",
+        "anlas_update"
       ],
       "sync_message": "sync",
       "expected_sync_type": "mode"
@@ -413,7 +415,8 @@
         "queue_state",
         "api_status",
         "init_complete",
-        "lazy_indices_ready"
+        "lazy_indices_ready",
+        "anlas_update"
       ],
       "commands": [
         {
@@ -524,7 +527,8 @@
         "queue_state",
         "api_status",
         "init_complete",
-        "lazy_indices_ready"
+        "lazy_indices_ready",
+        "anlas_update"
       ],
       "commands": [
         {

@@ -183,6 +183,7 @@ GEMINI.md
 *.md
 !AGENTS.md
 !PROJECT_LAYOUT_POLICY.md
+!README.md
 .claude/
 **/.claude/
 NAIA_generation_old.py

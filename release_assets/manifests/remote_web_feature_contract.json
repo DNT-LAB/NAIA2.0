@@ -401,6 +401,12 @@
       "provisioning": "bundled"
     },
     {
+      "feature": "websocket_shared_state",
+      "description": "E621 Event module corpus bundled for clean-machine availability (module driven through WebSocket module commands).",
+      "paths": ["data/e621_data"],
+      "provisioning": "bundled"
+    },
+    {
       "feature": "artist_thumbnail",
       "description": "Artist thumbnail catalog and images fetched at runtime.",
       "paths": ["data/artist_thumbnail_choices.json", "data/character_thumbnails/**"],

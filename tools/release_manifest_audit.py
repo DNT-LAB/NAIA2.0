@@ -117,11 +117,13 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/tag_index/*",
     "data/copyright_groups.json",
     "data/character_analysis.json",
+    "data/e621_data",
     "*/data/KR_tags.parquet",
     "*/data/e621_KR_tags.parquet",
     "*/data/tag_index/*",
     "*/data/copyright_groups.json",
     "*/data/character_analysis.json",
+    "*/data/e621_data",
 )
 FORBIDDEN_PACKAGE_NAMES = (
     "PyQt6",

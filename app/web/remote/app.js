@@ -789,7 +789,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260514-
   .catch(error => {
     console.error('Failed to initialize character panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260526-capability-honesty1')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260527-v2-autosave1')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,

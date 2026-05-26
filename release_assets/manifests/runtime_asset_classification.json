@@ -71,9 +71,6 @@
     {
       "id": "generated_tag_dictionaries",
       "patterns": [
-        "artist_dictionary.py",
-        "danbooru_character.py",
-        "result_dict_copyright.py",
         "result_dupl.py",
         "data/e621_boost_static.py"
       ],
@@ -81,14 +78,29 @@
       "runtime_destination": "cache/tag_index",
       "release_action": "exclude",
       "release_exclude_patterns": [
-        "artist_dictionary.py",
-        "danbooru_character.py",
-        "result_dict_copyright.py",
         "result_dupl.py",
         "data/e621_boost_static.py"
       ],
       "owner": "core/kr_tag_loader.py",
-      "notes": "Generated dictionaries must not be hand-bundled as root Python modules. A later round should convert required pieces into source data or runtime-built cache."
+      "notes": "Generated dictionaries that the runtime can rebuild or that are unused at runtime stay excluded. The three corpus dictionaries the tag-search index cannot rebuild on a clean machine (artist_dictionary/danbooru_character/result_dict_copyright) were reclassified into clean_machine_tag_dictionaries for the 2.0.2 parity restoration."
+    },
+    {
+      "id": "clean_machine_tag_dictionaries",
+      "patterns": [
+        "artist_dictionary.py",
+        "danbooru_character.py",
+        "result_dict_copyright.py"
+      ],
+      "decision": "bundle_source_bootstrap",
+      "runtime_destination": "resource_root",
+      "release_action": "include",
+      "release_include_patterns": [
+        "artist_dictionary.py",
+        "danbooru_character.py",
+        "result_dict_copyright.py"
+      ],
+      "owner": "release_assets/manifests/release_include_exclude_draft.json",
+      "notes": "Prebuilt corpus dictionaries the TagSearchIndex consumes at load time. A clean machine has no way to regenerate them (the source corpus is not shipped), so the 2.0.2 parity restoration bundles them as read-only bootstrap data via the clean_machine_data include group. A later round may convert them to source data or a runtime-built cache; until then they are bundled, not excluded."
     },
     {
       "id": "root_image_samples",

@@ -503,32 +503,6 @@ export function createConditionalPromptPanel({
     dirty = true;
     if (currentState) currentState.simulation = null;
     updateDynamicText();
-    persistV2Rules();
-  }
-
-  // V2 ("New Editor") edits previously only lived in the in-memory rulebook and
-  // could only be saved through the "apply to module" button, which is gated off
-  // when the backend reports can_edit_rulebook=false. That left V2 edits volatile.
-  // Persist them automatically like the legacy editor does: serialize the rulebook
-  // to its DSL and push it through the debounced module-text path. The backend
-  // set_param('rules_v2') already stores it, and renderV2 reconstructs the book
-  // from rules_v2 on reload, so edits survive tab switches and reloads.
-  function persistV2Rules() {
-    if (!currentState || currentState.editor_mode !== 'v2') return;
-    const dsl = serializeRulebook(currentBookPayload());
-    currentState.rules_v2 = dsl;
-    currentState.rules = dsl;
-    currentState.active_rules = dsl;
-    onModTextEdit('conditional_prompt', 'rules_v2', dsl);
-  }
-
-  // Engine options (max passes / stop on match) change infrequently, so persist
-  // them immediately on commit rather than through the debounced text slot.
-  function persistEngineOptions() {
-    if (!currentState || currentState.editor_mode !== 'v2') return;
-    const options = normalizeEngineOptions(rulebook().engine_options);
-    currentState.engine_options = options;
-    sendModuleParam('conditional_prompt', 'engine_options', JSON.stringify(options));
   }
 
   function currentBookPayload() {
@@ -1516,13 +1490,11 @@ export function createConditionalPromptPanel({
     if (target.dataset.condEngine === 'stop_on_match') {
       rulebook().engine_options.stop_on_match = !!target.checked;
       markDirty();
-      persistEngineOptions();
       return;
     }
     if (target.dataset.condEngine === 'max_passes') {
       rulebook().engine_options.max_passes = clampInt(target.value, 1, 20, 1);
       markDirty();
-      persistEngineOptions();
       return;
     }
     if (target.dataset.condNodeField) {

@@ -31,6 +31,14 @@ class HeadlessConditionalPromptService:
             "engine_options": dict(settings.get("engine_options") or {}),
             "active_preset": str(settings.get("active_preset") or ""),
             "presets": [],
+            "can_test_rules": False,
+            "can_manage_presets": False,
+            "can_edit_rulebook": False,
+            "capabilities": {
+                "test_rules": False,
+                "manage_presets": False,
+                "edit_rulebook": False,
+            },
             "log": "",
         })
 

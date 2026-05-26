@@ -234,6 +234,9 @@ export function createConditionalPromptPanel({
     const engineOptions = normalizeEngineOptions(state.engine_options || {});
     const book = normalizeBook(state.rules_v2_book, rulesV2, engineOptions);
     const activeRules = mode === 'v2' ? serializeRulebook(book) : rulesLegacy;
+    const capabilities = state.capabilities && typeof state.capabilities === 'object'
+      ? state.capabilities
+      : {};
     return {
       ...state,
       enabled: Boolean(state.enabled),
@@ -246,6 +249,16 @@ export function createConditionalPromptPanel({
       engine_options: normalizeEngineOptions(book.engine_options || engineOptions),
       active_preset: state.active_preset || '',
       presets: Array.isArray(state.presets) ? state.presets : [],
+      can_test_rules: capabilities.test_rules !== undefined
+        ? Boolean(capabilities.test_rules)
+        : state.can_test_rules !== false,
+      can_manage_presets: capabilities.manage_presets !== undefined
+        ? Boolean(capabilities.manage_presets)
+        : state.can_manage_presets !== false,
+      can_edit_rulebook: capabilities.edit_rulebook !== undefined
+        ? Boolean(capabilities.edit_rulebook)
+        : state.can_edit_rulebook !== false,
+      capabilities,
     };
   }
 
@@ -520,6 +533,7 @@ export function createConditionalPromptPanel({
 
   function applyBook({showToast = true} = {}) {
     if (!currentState) return;
+    if (currentState.can_edit_rulebook === false) return;
     const book = currentBookPayload();
     const dsl = serializeRulebook(book);
     currentState.rules_v2_book = normalizeBook(book, dsl, book.engine_options);
@@ -536,6 +550,7 @@ export function createConditionalPromptPanel({
   }
 
   function savePreset(nameOverride = null, options = {}) {
+    if (currentState?.can_manage_presets === false) return;
     const input = document.getElementById('condPresetNameInput');
     const select = document.getElementById('condPresetSelect');
     const rawName = nameOverride !== null ? nameOverride : (input ? input.value : select?.value);
@@ -575,6 +590,7 @@ export function createConditionalPromptPanel({
   }
 
   function beginNewPreset() {
+    if (currentState?.can_manage_presets === false) return;
     presetDialogName = '';
     presetDialogMode = 'empty';
     presetDialogSource = safeText(currentState?.active_preset).trim()
@@ -594,6 +610,7 @@ export function createConditionalPromptPanel({
   }
 
   function confirmPresetDialog() {
+    if (currentState?.can_manage_presets === false) return;
     const input = document.getElementById('condPresetDialogName');
     const name = safeText(input?.value ?? presetDialogName).trim();
     if (!name) {
@@ -647,6 +664,10 @@ export function createConditionalPromptPanel({
     const presetName = safeText(m.active_preset || '').trim();
     const presetLabel = presetName ? `<span class="cond-status-chip cond-preset-status">Preset ${escHtml(presetName)}</span>` : '';
     const presetButtonLabel = presetName ? `프리셋: ${presetName}` : '프리셋';
+    const presetControl = m.can_manage_presets
+      ? `<button type="button" class="cond-preset-toggle" data-cond-action="toggle-preset-popover">${escHtml(presetButtonLabel)}</button>
+          ${presetLabel}`
+      : '';
     return `
       <div class="cond-topbar">
         <label class="mod-checkbox-item cond-enable-row">
@@ -658,8 +679,7 @@ export function createConditionalPromptPanel({
           <button type="button" class="cond-mode-btn ${m.editor_mode === 'v2' ? 'active' : ''}" data-cond-mode="v2">New Editor</button>
         </div>
         <div class="cond-status-row">
-          <button type="button" class="cond-preset-toggle" data-cond-action="toggle-preset-popover">${escHtml(presetButtonLabel)}</button>
-          ${presetLabel}
+          ${presetControl}
           <span class="cond-status-chip" id="condDirtyChip">${dirty ? '미적용 변경' : '적용됨'}</span>
         </div>
       </div>`;
@@ -683,9 +703,9 @@ export function createConditionalPromptPanel({
           </div>
         </div>
         ${renderSyntaxGuide()}
-        <div>
+        ${m.can_test_rules ? `<div>
           <button class="mod-action-btn mod-start" data-cond-action="test-rules">Test Rules</button>
-        </div>
+        </div>` : ''}
         <div>
           <div class="mod-section-label">Execution Log</div>
           <div class="mod-log-viewer" id="condLogViewer">${formatLog(m.log)}</div>
@@ -719,15 +739,15 @@ export function createConditionalPromptPanel({
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
         <div class="cond-summary-box" id="condSelectedSummary">${escHtml(selected ? `${describeCondition(selected.condition)} → ${describeAction(selected.action)}` : '선택한 규칙 요약이 여기에 표시됩니다.')}</div>
         <div class="cond-v2-grid">
-          ${renderPresetPane(m)}
+          ${m.can_manage_presets ? renderPresetPane(m) : ''}
           ${renderRuleListPane(book)}
           ${renderConditionPane(selected)}
           ${renderActionPane(selected)}
         </div>
         <div class="cond-bottom-actions">
           <button type="button" class="mod-action-btn" data-cond-action="reload-state">현재 DSL 다시 불러오기</button>
-          <button type="button" class="mod-action-btn" data-cond-action="test-rules">시뮬레이션</button>
-          <button type="button" class="mod-action-btn mod-start" data-cond-action="apply-book" ${dirty ? '' : 'disabled'}>✔ 모듈에 적용</button>
+          ${m.can_test_rules ? '<button type="button" class="mod-action-btn" data-cond-action="test-rules">시뮬레이션</button>' : ''}
+          ${m.can_edit_rulebook ? `<button type="button" class="mod-action-btn mod-start" data-cond-action="apply-book" ${dirty ? '' : 'disabled'}>✔ 모듈에 적용</button>` : ''}
         </div>
         <div>
           <div class="mod-section-label">Execution Log</div>
@@ -1305,6 +1325,7 @@ export function createConditionalPromptPanel({
       actionEl.classList.toggle('open');
       actionEl.nextElementSibling?.classList.toggle('collapsed');
     } else if (action === 'toggle-preset-popover') {
+      if (currentState?.can_manage_presets === false) return;
       presetPopoverOpen = !presetPopoverOpen;
       renderWithScrollRestore(['.cond-rule-list', '.cond-condition-scroll']);
     } else if (action === 'select-rule') {
@@ -1361,12 +1382,14 @@ export function createConditionalPromptPanel({
     } else if (action === 'remove-tag') {
       removeTag(actionEl.dataset.tagField, actionEl.dataset.tagIndex);
     } else if (action === 'apply-book') {
+      if (currentState?.can_edit_rulebook === false) return;
       applyBook();
     } else if (action === 'reload-state') {
       if (typeof globalThis.requestModuleState === 'function') {
         globalThis.requestModuleState('conditional_prompt');
       }
     } else if (action === 'test-rules') {
+      if (currentState?.can_test_rules === false) return;
       if (currentState?.editor_mode === 'v2') {
         sendModuleParam('conditional_prompt', 'simulate_v2', JSON.stringify({book: currentBookPayload()}));
       } else {
@@ -1381,10 +1404,12 @@ export function createConditionalPromptPanel({
     } else if (action === 'confirm-new-preset') {
       confirmPresetDialog();
     } else if (action === 'delete-preset') {
+      if (currentState?.can_manage_presets === false) return;
       const select = document.getElementById('condPresetSelect');
       const name = safeText(select?.value).trim();
       if (name) sendModuleParam('conditional_prompt', 'preset_delete', name);
     } else if (action === 'load-selected-preset') {
+      if (currentState?.can_manage_presets === false) return;
       const select = document.getElementById('condPresetSelect');
       const name = safeText(select?.value).trim();
       if (name) {
@@ -1392,6 +1417,7 @@ export function createConditionalPromptPanel({
         sendModuleParam('conditional_prompt', 'preset_load', name);
       }
     } else if (action === 'load-preset') {
+      if (currentState?.can_manage_presets === false) return;
       const name = safeText(actionEl.dataset.presetName).trim();
       if (name) {
         presetPopoverOpen = false;

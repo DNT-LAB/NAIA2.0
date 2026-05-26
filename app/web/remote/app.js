@@ -765,7 +765,7 @@ const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats
   .catch(error => {
     console.error('Failed to initialize session generation stats module', error);
   });
-const automationPanelReady = import('./js/features/automationPanel.mjs')
+const automationPanelReady = import('./js/features/automationPanel.mjs?v=20260526-automation-runtime1')
   .then(({createAutomationPanel}) => {
     automationPanel = createAutomationPanel({
       document,
@@ -789,7 +789,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260514-
   .catch(error => {
     console.error('Failed to initialize character panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260526-capability-honesty1')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -870,7 +870,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260512-api-dialog-fallback1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260526-capability-honesty1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,

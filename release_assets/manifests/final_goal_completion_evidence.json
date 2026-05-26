@@ -78,8 +78,8 @@
         {"path": "sections.electron_cdp_smoke.ok", "equals": true},
         {"path": "sections.electron_cdp_smoke.checks.actionDispatch.random.dispatched", "equals": true},
         {"path": "sections.electron_cdp_smoke.checks.actionDispatch.generate.dispatched", "equals": true},
-        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.requiredFeatureCount", "equals": 15},
-        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.observedFeatureCount", "equals": 15},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.requiredFeatureCount", "equals": 16},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.observedFeatureCount", "equals": 16},
         {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.allRequiredFeaturesObserved", "equals": true}
       ]
     },
@@ -435,8 +435,8 @@
         {"path": "dry_run", "equals": false},
         {"path": "run_electron_cdp", "equals": true},
         {"path": "sections.electron_cdp_smoke.ok", "equals": true},
-        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.requiredFeatureCount", "equals": 15},
-        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.observedFeatureCount", "equals": 15},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.requiredFeatureCount", "equals": 16},
+        {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.observedFeatureCount", "equals": 16},
         {"path": "sections.electron_cdp_smoke.checks.featureWorkflows.allRequiredFeaturesObserved", "equals": true}
       ]
     },

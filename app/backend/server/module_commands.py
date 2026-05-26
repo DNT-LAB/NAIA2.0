@@ -75,10 +75,16 @@ async def handle_module_command(
         return True
 
     generation_commands: list[dict[str, Any]] = []
+    extra_messages: list[dict[str, Any]] = []
     if isinstance(module_state, dict):
         raw_commands = module_state.pop("_headless_generation_commands", [])
         if isinstance(raw_commands, list):
             generation_commands = [item for item in raw_commands if isinstance(item, dict)]
+        raw_messages = module_state.pop("_headless_extra_messages", [])
+        if isinstance(raw_messages, list):
+            extra_messages = [item for item in raw_messages if isinstance(item, dict)]
+    for message in extra_messages:
+        await _send_json(ws, message)
     await _send_json(ws, module_state)
     if generation_commands:
         await enqueue_generation_commands(ws, context, clients, generation_commands)

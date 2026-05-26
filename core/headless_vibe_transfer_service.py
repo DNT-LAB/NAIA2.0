@@ -104,10 +104,23 @@ class HeadlessVibeTransferService:
                 "has_encoding": has_encoding,
                 "active_encoding": active_encoding,
                 "encoding_in_progress": False,
+                "can_encode": False,
+                "encoding_unavailable_reason": "Headless runtime can use stored encoded Vibe entries but cannot create new encodings.",
                 "encoding_keys": encoding_keys,
                 "thumbnail": frame.get("thumbnail", ""),
             })
         return context._module_state_payload("vibe_transfer", {
+            "can_encode": False,
+            "can_write_clusters": False,
+            "can_restore_metadata": False,
+            "unavailable_actions": [
+                "encode",
+                "cluster_save",
+                "cluster_delete",
+                "cluster_rename",
+                "cluster_thumbnail",
+                "restore_metadata",
+            ],
             "normalize": bool(context.vibe_transfer_normalize),
             "enabled_count": enabled_count,
             "frame_count": len(context.vibe_transfer_frames),
@@ -206,6 +219,7 @@ class HeadlessVibeTransferService:
         return {
             "type": "storage_list",
             "module_id": "vibe_transfer",
+            "can_encode": False,
             "models": models,
             "current_model": context._current_model_key(),
         }
@@ -297,6 +311,7 @@ class HeadlessVibeTransferService:
         return {
             "type": "storage_list",
             "module_id": "vibe_cluster",
+            "can_write_clusters": False,
             "items": items,
             "current_frame_count": len(context.vibe_transfer_frames),
             "max_frames": MAX_NAI_VIBE_REFERENCES,

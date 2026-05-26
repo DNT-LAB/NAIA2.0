@@ -102,18 +102,37 @@ async def _maybe_continue_auto_generation(
     clients: set[WebSocket],
     request,
 ) -> bool:
+    params = getattr(request, "params", {}) or {}
+    automation_run_id = str(params.get("automation_run_id") or "")
+    if automation_run_id:
+        policy = context._automation_service().record_generation_completed(automation_run_id)
+        await broadcast_json(clients, context._automation_service().state())
+        for message in policy.get("messages", []):
+            await broadcast_json(clients, message)
+        if not policy.get("continue"):
+            return False
+        delay_seconds = float(policy.get("delay_seconds") or 0.0)
+        if delay_seconds > 0:
+            context._automation_service().begin_delay(automation_run_id, delay_seconds)
+            await broadcast_json(clients, context._automation_service().state())
+            if not await _wait_for_automation_delay(context, automation_run_id, delay_seconds):
+                await broadcast_json(clients, context._automation_service().state())
+                return False
+            context._automation_service().end_delay(automation_run_id)
+            await broadcast_json(clients, context._automation_service().state())
+
     if not _should_continue_auto_generation(context, request):
         return False
 
-    params = getattr(request, "params", {}) or {}
     prompt_fixed = context._coerce_bool(
         context.get_options().get("prompt_fixed", params.get("prompt_fixed", False))
     )
     overrides = _auto_generation_overrides(params)
     overrides["auto_generate"] = True
     overrides["prompt_fixed"] = prompt_fixed
-    overrides["_remote_queue_source"] = "Auto Generate"
-    overrides["_remote_queue_label"] = "Auto Generate"
+    queue_source = "Automation" if automation_run_id else "Auto Generate"
+    overrides["_remote_queue_source"] = queue_source
+    overrides["_remote_queue_label"] = queue_source
 
     request_id = f"auto-{uuid.uuid4().hex}"
     prompt = str(params.get("input") or params.get("_raw_input") or context.prompt_text or "")
@@ -135,9 +154,17 @@ async def _maybe_continue_auto_generation(
                 "level": "error",
                 "message": payload.get("message") or "Auto Generate stopped: random prompt failed.",
             })
+            if automation_run_id:
+                failure = context._automation_service().fail(
+                    automation_run_id,
+                    str(payload.get("message") or "random prompt failed"),
+                )
+                await broadcast_json(clients, context._automation_service().state())
+                for message in failure.get("messages", []):
+                    await broadcast_json(clients, message)
             return False
 
-        payload["source"] = "auto_generate"
+        payload["source"] = "automation" if automation_run_id else "auto_generate"
         await broadcast_json(clients, payload)
         for message in result.extra_messages:
             await broadcast_json(clients, message)
@@ -166,19 +193,28 @@ async def _maybe_continue_auto_generation(
             "level": "error",
             "message": dispatch.blocked_reason,
         })
+        if automation_run_id:
+            failure = context._automation_service().fail(automation_run_id, dispatch.blocked_reason)
+            await broadcast_json(clients, context._automation_service().state())
+            for message in failure.get("messages", []):
+                await broadcast_json(clients, message)
         return False
     await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "queued"})
     return True
 
 
 def _should_continue_auto_generation(context: WebSessionContext, request) -> bool:
-    if not context._coerce_bool(context.get_options().get("auto_generate", False)):
+    params = getattr(request, "params", {}) or {}
+    if not isinstance(params, dict):
+        return False
+    automation_run_id = str(params.get("automation_run_id") or "")
+    if automation_run_id:
+        if not context._automation_service().is_running(automation_run_id):
+            return False
+    elif not context._coerce_bool(context.get_options().get("auto_generate", False)):
         return False
     queue_manager = context.generation_queue_manager
     if queue_manager.is_paused() or not queue_manager.is_empty():
-        return False
-    params = getattr(request, "params", {}) or {}
-    if not isinstance(params, dict):
         return False
     if any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS):
         return False
@@ -204,6 +240,21 @@ def _auto_generation_overrides(params: dict[str, Any]) -> dict[str, Any]:
     return overrides
 
 
+async def _wait_for_automation_delay(
+    context: WebSessionContext,
+    automation_run_id: str,
+    delay_seconds: float,
+) -> bool:
+    deadline = asyncio.get_running_loop().time() + max(0.0, delay_seconds)
+    while True:
+        if not context._automation_service().is_running(automation_run_id):
+            return False
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return context._automation_service().is_running(automation_run_id)
+        await asyncio.sleep(min(1.0, max(0.05, remaining)))
+
+
 async def _auto_save_generated_history_item(context: WebSessionContext, item):
     if not context._coerce_bool(context.auto_save_state.get("auto_save", True)):
         return None
@@ -224,6 +275,12 @@ async def _broadcast_generation_error(
     await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "error"})
     await broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
     await broadcast_json(clients, {"type": "generation_error", "message": message})
+    automation_run_id = str(params.get("automation_run_id") or "")
+    if automation_run_id:
+        failure = context._automation_service().fail(automation_run_id, message)
+        await broadcast_json(clients, context._automation_service().state())
+        for extra_message in failure.get("messages", []):
+            await broadcast_json(clients, extra_message)
     if params.get("result_enhance_request"):
         await broadcast_json(clients, {
             "type": "result_enhance_state",

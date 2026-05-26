@@ -25,6 +25,7 @@ export function createImageModulePanels({
   let vibeClusterSaveOpen = false;
   let vibeClusterShowListAfterSave = false;
   let vibeClusterItems = [];
+  let vibeClusterCanWrite = true;
   let vibeClusterPendingThumb = '';
   let vibeClusterThumbTarget = '';
   const VIBE_CLUSTER_NAME_PATTERN = /^[A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ]+$/;
@@ -140,6 +141,10 @@ export function createImageModulePanels({
   }
 
   function openVibeClusterSavePanel() {
+    if (vibeClusterCanWrite === false) {
+      showToast?.('Vibe cluster editing is not available in the headless runtime.', 'info');
+      return;
+    }
     closeVibeClusterListPanel();
     vibeClusterSaveOpen = true;
     vibeClusterShowListAfterSave = false;
@@ -432,7 +437,7 @@ export function createImageModulePanels({
     const encodedKeys = getEncodedIeValues(frame);
     const currentIe = formatIe(frame.information_extracted);
     const hasCurrentEncoding = hasEncodedIe(encodedKeys, currentIe);
-    const canEncode = !frame.is_no_image && !frame.is_naid3 && !frame.encoding_in_progress;
+    const canEncode = frame.can_encode !== false && !frame.is_no_image && !frame.is_naid3 && !frame.encoding_in_progress;
     const keyData = encodedKeys.map(formatIe).join(',');
     const frameFlags = [
       `data-vibe-index="${index}"`,
@@ -457,13 +462,15 @@ export function createImageModulePanels({
       };
     }
 
-    const statusText = frame.encoding_in_progress
+    const statusText = frame.can_encode === false && !hasCurrentEncoding
+      ? 'Use stored encoded Vibe entries'
+      : frame.encoding_in_progress
       ? `Encoding IE ${currentIe}...`
       : hasCurrentEncoding
         ? `Encoded IE ${currentIe}`
         : `Encode required for IE ${currentIe}`;
     const statusClass = hasCurrentEncoding ? 'encoded' : 'pending';
-    const encodeHidden = hasCurrentEncoding || frame.encoding_in_progress || frame.is_naid3 ? ' hidden' : '';
+    const encodeHidden = hasCurrentEncoding || !canEncode ? ' hidden' : '';
     const encodeDisabled = frame.encoding_in_progress ? ' disabled' : '';
 
     return {
@@ -538,12 +545,14 @@ export function createImageModulePanels({
   }
 
   function renderVibeTransfer(message) {
+    vibeClusterCanWrite = message.can_write_clusters !== false;
     const frames = (message.frames || []).map((frame, index) => {
       const thumbHtml = frame.is_no_image
         ? '<div class="mod-ref-noimage">No Image</div>'
         : `<img class="mod-ref-thumb" src="data:image/jpeg;base64,${frame.thumbnail}" alt="${escHtml(frame.file_name)}">`;
       const encodingControls = renderVibeEncodingControls(frame, index);
-      const needsEncoding = !frame.is_no_image && !frame.is_naid3 && !frame.has_encoding ? ' needs-encoding' : '';
+      const canEncodeFrame = frame.can_encode !== false && !frame.is_no_image && !frame.is_naid3;
+      const needsEncoding = canEncodeFrame && !frame.has_encoding ? ' needs-encoding' : '';
       const refStrength = formatRefStrength(frame.reference_strength) || '0.00';
 
       return `
@@ -604,9 +613,9 @@ export function createImageModulePanels({
     ${vibeNotice}
     ${strengthNotice}
     ${frames.length ? frames : '<div class="mod-empty">No vibe transfers loaded</div>'}
-    <div class="vibe-cluster-footer">
+    ${vibeClusterCanWrite ? `<div class="vibe-cluster-footer">
       <button class="mod-btn-upload mod-btn-vibe-cluster" onclick="openVibeClusterPanel()">Make Vibe Cluster</button>
-    </div>
+    </div>` : ''}
   `;
     if (vibeClusterListOpen || vibeClusterSaveOpen) relayoutVibeClusterPanel();
   }
@@ -620,6 +629,9 @@ export function createImageModulePanels({
   }
 
   function onVibeClusterList(message) {
+    if (Object.prototype.hasOwnProperty.call(message, 'can_write_clusters')) {
+      vibeClusterCanWrite = message.can_write_clusters !== false;
+    }
     vibeClusterItems = Array.isArray(message.items) ? message.items : [];
     if (vibeClusterShowListAfterSave && message.source === 'cluster_save') {
       closeVibeClusterSavePanel();
@@ -639,6 +651,7 @@ export function createImageModulePanels({
   function renderVibeClusterPanel(message = {}) {
     const existing = getVibeClusterPanel();
     if (existing) existing.remove();
+    const canWriteClusters = message.can_write_clusters !== false && vibeClusterCanWrite !== false;
 
     const items = vibeClusterItems.map(item => {
       const id = escHtml(item.id);
@@ -663,14 +676,14 @@ export function createImageModulePanels({
                 <button onclick="loadVibeCluster('${id}','append')">Append</button>
               </div>
             </div>
-            <div class="vibe-cluster-menu-wrap">
+            ${canWriteClusters ? `<div class="vibe-cluster-menu-wrap">
               <button class="mod-btn-sm" onclick="toggleVibeClusterManageMenu('${id}',event)">Manage</button>
               <div class="vibe-cluster-menu" data-manage-menu="${id}">
                 <button onclick="renameVibeCluster('${id}')">Rename</button>
                 <button onclick="chooseVibeClusterThumbnail('${id}')">Change Thumb</button>
                 <button class="danger" onclick="deleteVibeCluster('${id}')">Delete</button>
               </div>
-            </div>
+            </div>` : ''}
           </div>
         </article>`;
     }).join('');

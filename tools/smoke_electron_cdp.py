@@ -665,6 +665,7 @@ def _verify_feature_workflows_surface(client: CdpClient, timeout: float) -> dict
     "img2img",
     "vibe_transfer_storage",
     "character_reference",
+    "automation",
     "enhance",
     "setup_api_settings",
     "history",
@@ -782,6 +783,7 @@ def _verify_feature_workflows_surface(client: CdpClient, timeout: float) -> dict
     {{key: "character_reference_button", feature: "character_reference", selector: '#moduleLauncher .module-btn[data-module="character_reference"]'}},
     {{key: "img2img_open_function_surface", feature: "img2img", selector: "#modulePopup"}},
     {{key: "vibe_button", feature: "vibe_transfer_storage", selector: '#moduleLauncher .module-btn[data-module="vibe_transfer"]'}},
+    {{key: "automation_button", feature: "automation", selector: '#moduleLauncher .module-btn[data-module="automation"]'}},
     {{key: "enhance_button", feature: "enhance", selector: "#resultEnhanceBtn"}},
     {{key: "enhance_settings_button", feature: "enhance", selector: "#resultEnhanceSettingsBtn"}},
     {{key: "setup_launcher", feature: "setup_api_settings", selector: "#setupLauncher"}},
@@ -889,6 +891,11 @@ def _verify_feature_workflows_surface(client: CdpClient, timeout: float) -> dict
     {{name: "dom.character_tab", ok: domOk("character_tab")}},
     {{name: "dom.character_reference_button", ok: domOk("character_reference_button")}},
     {{name: "route.character_viewer_state", ok: routeOk("character_viewer_state")}},
+  ]);
+  markFeature("automation", [
+    {{name: "dom.automation_button", ok: domOk("automation_button")}},
+    {{name: "function.setModuleParam", ok: result.functions.setModuleParam}},
+    {{name: "websocket.active", ok: result.websocket.activeSocketOpen}},
   ]);
   markFeature("enhance", [
     {{name: "dom.enhance_button", ok: domOk("enhance_button")}},

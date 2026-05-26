@@ -24,6 +24,7 @@ export function createAutomationPanel({
     ).join('');
 
     const isRunning = state.is_running;
+    const isAvailable = state.available !== false;
     moduleBody.innerHTML = `
       <div>
         <div class="mod-section-label">Delay (seconds)</div>
@@ -58,7 +59,7 @@ export function createAutomationPanel({
         </label>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="mod-action-btn mod-start" ${isRunning ? 'disabled' : ''} onclick="setModuleParam('automation','start','1')">Start</button>
+        <button class="mod-action-btn mod-start" ${isRunning || !isAvailable ? 'disabled' : ''} onclick="setModuleParam('automation','start','1')">Start</button>
         <button class="mod-action-btn mod-stop" ${!isRunning ? 'disabled' : ''} onclick="setModuleParam('automation','stop','1')">Stop</button>
       </div>
       <div class="mod-status">${state.status || ''}</div>

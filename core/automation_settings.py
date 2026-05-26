@@ -124,6 +124,7 @@ def automation_state_from_settings(settings: dict | None) -> dict:
         "timer_minutes": str(normalized["timer_minutes"]),
         "count_limit": str(normalized["count_limit"]),
         "notify": bool(normalized["notify_on_finish"]),
+        "shutdown_on_finish": bool(normalized["shutdown_on_finish"]),
         "is_running": False,
         "status": "",
         "repeat_info": "",
@@ -139,5 +140,9 @@ def settings_from_automation_state(state: dict | None) -> dict:
     settings["timer_minutes"] = _coerce_int(data.get("timer_minutes"), settings["timer_minutes"], minimum=1)
     settings["count_limit"] = _coerce_int(data.get("count_limit"), settings["count_limit"], minimum=1)
     settings["notify_on_finish"] = _coerce_bool(data.get("notify"), settings["notify_on_finish"])
+    settings["shutdown_on_finish"] = _coerce_bool(
+        data.get("shutdown_on_finish"),
+        settings["shutdown_on_finish"],
+    )
     settings["automation_type"] = normalize_automation_type(data.get("auto_type", 0))
     return settings

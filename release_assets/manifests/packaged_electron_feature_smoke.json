@@ -129,6 +129,14 @@
       "requires_live_runtime": true
     },
     {
+      "id": "automation",
+      "label": "Automation",
+      "feature_groups": ["websocket_shared_state"],
+      "websocket_commands": ["set_module_param"],
+      "cdp_checks": ["feature_workflows"],
+      "requires_live_runtime": true
+    },
+    {
       "id": "enhance",
       "label": "Enhance",
       "feature_groups": ["result_history_viewer_actions", "websocket_shared_state"],

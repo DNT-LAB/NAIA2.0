@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket
 
+from app.backend.server.anlas_poller import build_anlas_payload
 from core.web_session_context import WebSessionContext
 
 
@@ -71,6 +72,8 @@ async def handle_api_control_command(
         result = await run_in_thread(context.verify_api, mode, str(raw_value or ""))
         await _send_json(ws, result)
         await _send_json(ws, context.api_status_payload(client_host))
+        if result.get("success") and mode == "NAI":
+            await _send_json(ws, await run_in_thread(build_anlas_payload, context))
         if result.get("success") and mode in {"WEBUI", "COMFYUI"}:
             await run_in_thread(context.refresh_api_options, mode)
             if context.get_api_mode() == mode:

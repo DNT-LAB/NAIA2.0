@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from app.backend.server.anlas_poller import broadcast_anlas, ensure_anlas_poller
 from app.backend.server.api_control_commands import (
     API_CONTROL_COMMAND_TYPES,
     handle_api_control_command,
@@ -81,6 +82,8 @@ def register_websocket_session(
                 session_id=session_id,
                 client_host=client_host,
             )
+            ensure_anlas_poller(context, clients)
+            await broadcast_anlas(context, clients)
             while True:
                 data = await ws.receive_text()
                 if data.startswith("{"):

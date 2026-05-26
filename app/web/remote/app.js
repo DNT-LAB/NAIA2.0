@@ -459,7 +459,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260525-runtime-actions1')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260526-clipboard-copy1')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,

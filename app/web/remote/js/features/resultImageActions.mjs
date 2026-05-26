@@ -561,20 +561,6 @@ export function createResultImageActions({
     return String(blob?.type || '').toLowerCase() === String(mimeType || '').toLowerCase();
   }
 
-  async function copyPngViaNativeClipboard(context = {}) {
-    const response = await fetch('/api/result/clipboard/png', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(resultContextCommandPayload(context)),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || `HTTP ${response.status}`);
-    }
-    const data = await response.json().catch(() => ({}));
-    showToast(data.filename ? `PNG copied to clipboard: ${data.filename}` : 'PNG copied to clipboard', 'success');
-  }
-
   async function copyImageFromContext(context = {}, format = 'png') {
     const normalizedFormat = String(format || 'png').toLowerCase();
     if (normalizedFormat !== 'png') {
@@ -582,10 +568,8 @@ export function createResultImageActions({
       return;
     }
     try {
-      if (useNativeClipboard()) {
-        await copyPngViaNativeClipboard(context);
-        return;
-      }
+      // 네이티브 백엔드 클립보드 경로는 헤드리스 런타임에서 스텁이므로 사용하지 않는다.
+      // Electron 렌더러와 localhost 브라우저 모두 secure context라 브라우저 ClipboardItem이 동작한다.
       if (!window.navigator.clipboard?.write || !window.ClipboardItem) {
         showToast('Image clipboard is not supported by this browser', 'error');
         return;

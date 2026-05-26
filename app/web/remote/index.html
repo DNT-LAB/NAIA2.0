@@ -287,9 +287,13 @@
     <div class="prompt-inner">
       <div class="tab-bar">
         <button class="tab-btn active" data-tab="prompt" onclick="switchTab('prompt')"><span class="tab-icon">&#9998;</span><span>Prompt</span></button>
-        <button class="tab-btn" data-tab="preset" onclick="switchTab('preset')"><span class="tab-icon">&#9638;</span><span>Preset</span></button>
         <button class="tab-btn" data-tab="params" onclick="switchTab('params')"><span class="tab-icon">&#9776;</span><span>Params</span></button>
         <button class="tab-btn" data-tab="negative" onclick="switchTab('negative')"><span class="tab-icon">&#8856;</span><span>Negative</span></button>
+        <button class="tab-btn fn-menu-trigger" id="fnMenuTrigger" data-tab="preset" onclick="toggleFnMenu(event)" aria-haspopup="menu" aria-expanded="false"><span class="tab-icon">&#9638;</span><span>Fn</span></button>
+      </div>
+      <div class="fn-menu" id="fnMenu" role="menu" hidden>
+        <button type="button" role="menuitem" onclick="openFnPreset()"><span>&#9638;</span><span>Preset</span></button>
+        <button type="button" role="menuitem" onclick="openTranslatorPopup()"><span>あ</span><span>Translate</span></button>
       </div>
       <div class="tab-content">
         <div class="tab-page active" id="tabPrompt">
@@ -923,6 +927,22 @@
 <!-- Viewer lightbox / popup overlay -->
 <div class="viewer-lightbox" id="viewerLightbox" onclick="onLightboxClick(event)"></div>
 
+<section class="translator-popup" id="translatorPopup" aria-label="Translate" hidden>
+  <header class="translator-popup-head">
+    <span>Translate</span>
+    <button type="button" class="translator-popup-close" onclick="closeTranslatorPopup()" aria-label="Close translator">×</button>
+  </header>
+  <div class="translator-popup-body">
+    <textarea id="translatorInput" class="translator-textarea" placeholder="한국어..." autocomplete="off" spellcheck="false"></textarea>
+    <textarea id="translatorOutput" class="translator-textarea output" placeholder="English..." readonly></textarea>
+  </div>
+  <footer class="translator-popup-actions">
+    <button type="button" onclick="requestTranslatorPopupTranslate()">Translate</button>
+    <button type="button" onclick="copyTranslatorOutput()">Copy</button>
+    <button type="button" onclick="insertTranslatorOutput()">Insert</button>
+  </footer>
+</section>
+
 <script>
 function buildSystemBrowserUrl() {
   const url = new URL(window.location.href);
@@ -942,6 +962,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260525-runtime-surface-clean1"></script>
+<script src="app.js?v=20260526-fn-menu-translator1"></script>
 </body>
 </html>

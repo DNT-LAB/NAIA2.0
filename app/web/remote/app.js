@@ -1853,6 +1853,11 @@ const btnGen       = $('btnGen');
 const btnRnd       = $('btnRnd');
 const promptEdit   = $('promptEdit');
 const negEdit      = $('negEdit');
+const fnMenuTrigger = $('fnMenuTrigger');
+const fnMenu = $('fnMenu');
+const translatorPopup = $('translatorPopup');
+const translatorInput = $('translatorInput');
+const translatorOutput = $('translatorOutput');
 const metaRow      = $('metaRow');
 const promptTokenLabel = $('promptTokenLabel');
 const negativeTokenLabel = $('negativeTokenLabel');
@@ -1892,6 +1897,7 @@ const optBoxes = {
   wildcard_standalone: $('optWcStandalone'),
 };
 const pendingOptionValues = Object.create(null);
+let translatorPopupRequestId = '';
 // ---- Result history wrappers ----
 const mobileHistoryMediaQuery = window.matchMedia('(max-width: 767px)');
 function isMobileHistoryViewport() {
@@ -2130,6 +2136,7 @@ const wsMessageHandlers = {
   tag_search_result: onTagSearchResult,
   tag_lookup_result: onTagLookupResult,
   autocomplete_result: onAutocompleteResult,
+  translation_result: onTranslationResult,
   tag_filter_result: onTagFilterResult,
   tag_filter_assigned: onTagFilterAssigned,
   tag_filter_update: onTagFilterUpdate,
@@ -3951,6 +3958,142 @@ function switchTab(name) {
   if (eventPresetPanel) eventPresetPanel.setActiveTab(activePromptTab === 'preset');
   updateGenerateButtonMode();
 }
+
+function positionFnMenu() {
+  if (!fnMenu || !fnMenuTrigger || fnMenu.hidden) return;
+  const rect = fnMenuTrigger.getBoundingClientRect();
+  const gap = 5;
+  const menuRect = fnMenu.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const left = Math.max(8, Math.min(rect.right - menuRect.width, viewportWidth - menuRect.width - 8));
+  fnMenu.style.left = `${Math.round(left)}px`;
+  fnMenu.style.top = `${Math.round(rect.bottom + gap)}px`;
+}
+
+function closeFnMenu() {
+  if (!fnMenu) return;
+  fnMenu.hidden = true;
+  fnMenuTrigger?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleFnMenu(event) {
+  event?.preventDefault?.();
+  event?.stopPropagation?.();
+  if (!fnMenu || !fnMenuTrigger) return;
+  const nextOpen = fnMenu.hidden;
+  if (!nextOpen) {
+    closeFnMenu();
+    return;
+  }
+  fnMenu.hidden = false;
+  fnMenuTrigger.setAttribute('aria-expanded', 'true');
+  positionFnMenu();
+}
+
+function openFnPreset() {
+  closeFnMenu();
+  switchTab('preset');
+}
+
+function positionTranslatorPopup() {
+  if (!translatorPopup || translatorPopup.hidden) return;
+  const anchor = fnMenuTrigger || document.querySelector('.tab-bar');
+  const rect = anchor?.getBoundingClientRect?.();
+  const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+  const top = rect ? rect.bottom + 10 : 88;
+  const width = translatorPopup.getBoundingClientRect().width || 560;
+  let left = rect ? rect.right - width : 18;
+  left = Math.max(12, Math.min(left, viewportWidth - width - 12));
+  translatorPopup.style.left = `${Math.round(left)}px`;
+  translatorPopup.style.top = `${Math.round(top)}px`;
+}
+
+function openTranslatorPopup() {
+  closeFnMenu();
+  if (!translatorPopup) return;
+  translatorPopup.hidden = false;
+  positionTranslatorPopup();
+  translatorInput?.focus();
+  translatorInput?.select?.();
+}
+
+function closeTranslatorPopup() {
+  if (!translatorPopup) return;
+  translatorPopup.hidden = true;
+  translatorPopupRequestId = '';
+}
+
+function requestTranslatorPopupTranslate() {
+  const text = translatorInput?.value?.trim() || '';
+  if (!text) {
+    if (translatorOutput) translatorOutput.value = '';
+    return;
+  }
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    showToast('Remote connection is not open', 'error');
+    return;
+  }
+  translatorPopupRequestId = `translate-${Date.now()}`;
+  if (translatorOutput) translatorOutput.value = '...';
+  ws.send(JSON.stringify({
+    type: 'translate_text',
+    direction: 'ko_en',
+    text,
+    requestId: translatorPopupRequestId,
+  }));
+}
+
+function onTranslationResult(message) {
+  const requestId = String(message?.requestId || '');
+  if (translatorPopupRequestId && requestId && requestId !== translatorPopupRequestId) return;
+  translatorPopupRequestId = '';
+  const translated = String(message?.translated || '');
+  if (translatorOutput) translatorOutput.value = translated;
+  if (!translated) showToast(message?.error || 'Translation failed', 'error');
+}
+
+async function copyTranslatorOutput() {
+  const text = translatorOutput?.value || '';
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('Translation copied', 'success');
+  } catch (error) {
+    showToast('Clipboard copy failed', 'error');
+  }
+}
+
+function insertTranslatorOutput() {
+  const text = translatorOutput?.value || '';
+  if (!text) return;
+  const target = promptEdit || document.activeElement;
+  if (!target || typeof target.setRangeText !== 'function') return;
+  const start = Number.isFinite(target.selectionStart) ? target.selectionStart : target.value.length;
+  const end = Number.isFinite(target.selectionEnd) ? target.selectionEnd : target.value.length;
+  target.setRangeText(text, start, end, 'end');
+  target.focus();
+  onPromptEdit();
+}
+
+document.addEventListener('click', event => {
+  if (
+    fnMenu
+    && !fnMenu.hidden
+    && !fnMenu.contains(event.target)
+    && !fnMenuTrigger?.contains(event.target)
+  ) {
+    closeFnMenu();
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  closeFnMenu();
+  if (translatorPopup && !translatorPopup.hidden) closeTranslatorPopup();
+});
+window.addEventListener('resize', () => {
+  positionFnMenu();
+  positionTranslatorPopup();
+});
 
 function currentPromptTabFromDom() {
   const activeButton = document.querySelector('.tab-btn.active[data-tab]');

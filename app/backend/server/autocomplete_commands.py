@@ -14,6 +14,7 @@ from app.backend.server.preset_services import (
 )
 from app.backend.server.prompt_tools_routes import tag_lookup_info
 from core.web_session_context import WebSessionContext
+from utils.translator import english_to_korean, korean_to_english
 
 
 AsyncRunner = Callable[..., Awaitable[Any]]
@@ -28,6 +29,7 @@ AUTOCOMPLETE_COMMAND_TYPES = {
     "autocomplete_vibe_cluster",
     "autocomplete_preset",
     "tag_lookup",
+    "translate_text",
 }
 
 
@@ -340,6 +342,34 @@ async def handle_autocomplete_command(
             "secondaryResults": payload.get("secondaryResults", []),
             "preset": payload.get("preset") or {},
         })
+        return True
+
+    if command_type == "translate_text":
+        request_id = str(command.get("requestId") or command.get("request_id") or "")
+        direction = str(command.get("direction") or "ko_en").strip().lower()
+        text = str(command.get("text") or command.get("query") or "")
+        translator = english_to_korean if direction in {"en_ko", "en-ko", "en2ko"} else korean_to_english
+        try:
+            translated = await run_in_thread(translator, text)
+            payload = {
+                "type": "translation_result",
+                "text": text,
+                "translated": translated or "",
+                "direction": "en_ko" if translator is english_to_korean else "ko_en",
+                "ok": bool(translated),
+            }
+        except Exception as exc:
+            payload = {
+                "type": "translation_result",
+                "text": text,
+                "translated": "",
+                "direction": "en_ko" if translator is english_to_korean else "ko_en",
+                "ok": False,
+                "error": str(exc),
+            }
+        if request_id:
+            payload["requestId"] = request_id
+        await _send_json(ws, payload)
         return True
 
     info = await run_in_thread(tag_lookup_info, context, str(command.get("tag") or ""))

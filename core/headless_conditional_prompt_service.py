@@ -1,17 +1,101 @@
-"""Headless Conditional Prompt module state service."""
+"""Headless Conditional Prompt module state service.
+
+Provides the Remote Web editor contract ported from future01:
+- ``state()`` reconstructs the structured rule book from the persisted DSL so the
+  block editor survives reloads, lists user/bundled presets, and advertises the
+  edit/preset/test capabilities.
+- ``set_param`` handles explicit rule-book apply (``rules_v2_book``), preset CRUD
+  (``preset_save`` / ``preset_load`` / ``preset_delete``) and simulation
+  (``simulate_v2`` / ``test``).
+
+The DSL stays the source of truth (the runtime hook in
+``core/conditional_prompt_runtime.py`` consumes it); the block book is a derived
+view produced by ``core.conditional.dsl_parser`` / ``dsl_serializer``.
+"""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 
 class HeadlessConditionalPromptService:
     def __init__(self, context: Any):
         self.context = context
+        self._last_log = ""
+
+    # ------------------------------------------------------------------
+    # Preset storage (runtime-aware paths)
+    # ------------------------------------------------------------------
+
+    def _storage(self):
+        from core.conditional.preset_io import PresetStorage
+
+        runtime_paths = getattr(self.context, "runtime_paths", None)
+        save_root = getattr(runtime_paths, "save_dir", None)
+        save_dir = Path(save_root) / "conditional_presets" if save_root else None
+        # bundled_dir defaults to <project>/data/conditional_presets_bundled.
+        return PresetStorage(save_dir=save_dir)
+
+    def _preset_infos(self) -> list[dict[str, Any]]:
+        try:
+            infos = []
+            for info in self._storage().list_all():
+                infos.append({
+                    "name": info.name,
+                    "description": info.description,
+                    "is_bundled": bool(info.is_bundled),
+                    "rule_count": int(info.rule_count),
+                })
+            return infos
+        except Exception as exc:
+            print(f"Remote: conditional preset list failed — {exc}")
+            return []
+
+    def _rulebook_dict_from_dsl(self, dsl_text: str, engine_options: dict[str, Any]) -> dict[str, Any]:
+        """v2 DSL → RuleBook JSON the web editor consumes."""
+        from core.conditional_prompt_settings import normalize_conditional_engine_options
+
+        opts = normalize_conditional_engine_options(engine_options or {})
+        try:
+            from dataclasses import asdict
+
+            from core.conditional.dsl_parser import parse_rulebook
+            from core.conditional.preset_io import SCHEMA_VERSION
+
+            book = parse_rulebook(dsl_text or "")
+            book.max_passes = int(opts.get("max_passes", book.max_passes))
+            book.stop_on_match = bool(opts.get("stop_on_match", book.stop_on_match))
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "name": "",
+                "description": "",
+                "engine_options": {
+                    "max_passes": book.max_passes,
+                    "stop_on_match": book.stop_on_match,
+                },
+                "rules": [asdict(rule) for rule in book.rules],
+            }
+        except Exception as exc:
+            print(f"Remote: conditional RuleBook decode failed — {exc}")
+            return {
+                "schema_version": 1,
+                "name": "",
+                "description": "",
+                "engine_options": opts,
+                "rules": [],
+            }
+
+    # ------------------------------------------------------------------
+    # State
+    # ------------------------------------------------------------------
 
     def state(self) -> dict[str, Any]:
-        from core.conditional_prompt_settings import get_conditional_prompt_store
+        from core.conditional_prompt_settings import (
+            get_conditional_prompt_store,
+            normalize_conditional_engine_options,
+        )
 
         store = get_conditional_prompt_store(self.context)
         settings = store.collect_settings()
@@ -20,6 +104,7 @@ class HeadlessConditionalPromptService:
         rules_legacy = str(settings.get("rules") or "")
         rules_v2 = str(settings.get("rules_v2") or "")
         active_rules = rules_v2 if editor_mode == "v2" else rules_legacy
+        engine_options = normalize_conditional_engine_options(settings.get("engine_options") or {})
         return self.context._module_state_payload("conditional_prompt", {
             "enabled": bool(settings.get("enabled", False)),
             "editor_mode": editor_mode,
@@ -27,28 +112,54 @@ class HeadlessConditionalPromptService:
             "active_rules": active_rules,
             "rules_legacy": rules_legacy,
             "rules_v2": rules_v2,
-            "rules_v2_book": None,
-            "engine_options": dict(settings.get("engine_options") or {}),
+            "rules_v2_book": self._rulebook_dict_from_dsl(rules_v2, engine_options),
+            "engine_options": engine_options,
             "active_preset": str(settings.get("active_preset") or ""),
-            "presets": [],
-            "can_test_rules": False,
-            "can_manage_presets": False,
-            "can_edit_rulebook": False,
+            "presets": self._preset_infos(),
+            "can_test_rules": True,
+            "can_manage_presets": True,
+            "can_edit_rulebook": True,
             "capabilities": {
-                "test_rules": False,
-                "manage_presets": False,
-                "edit_rulebook": False,
+                "test_rules": True,
+                "manage_presets": True,
+                "edit_rulebook": True,
             },
-            "log": "",
+            "log": self._last_log,
         })
 
+    def _state_with(
+        self,
+        *,
+        messages: list[dict[str, Any]] | None = None,
+        simulation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = self.state()
+        if simulation is not None:
+            payload["simulation"] = simulation
+            payload["local_dirty"] = True
+        if messages:
+            payload["_headless_extra_messages"] = messages
+        return payload
+
+    @staticmethod
+    def _toast_message(message: str, level: str = "info") -> dict[str, Any]:
+        return {"type": "toast", "message": message, "level": level}
+
+    # ------------------------------------------------------------------
+    # Mutations
+    # ------------------------------------------------------------------
+
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
-        from core.conditional_prompt_settings import get_conditional_prompt_store
+        from core.conditional_prompt_settings import (
+            get_conditional_prompt_store,
+            normalize_conditional_engine_options,
+        )
 
         context = self.context
         store = get_conditional_prompt_store(context)
         settings = store.collect_settings()
         text_value = str(value or "")
+
         if key == "enabled":
             settings["enabled"] = context._coerce_bool(value)
         elif key in {"editor_mode", "mode"}:
@@ -66,7 +177,7 @@ class HeadlessConditionalPromptService:
         elif key == "engine_options":
             parsed = json.loads(text_value or "{}")
             if isinstance(parsed, dict):
-                settings["engine_options"] = parsed
+                settings["engine_options"] = normalize_conditional_engine_options(parsed)
         elif key == "max_passes":
             options = dict(settings.get("engine_options") or {})
             options["max_passes"] = context._coerce_int(value, default=1, minimum=1, maximum=20)
@@ -75,9 +186,292 @@ class HeadlessConditionalPromptService:
             options = dict(settings.get("engine_options") or {})
             options["stop_on_match"] = context._coerce_bool(value)
             settings["engine_options"] = options
-        elif key in {"rules_v2_book", "preset_load", "test_rules"}:
-            return context._toast(f"Conditional Prompt action is not available in this runtime: {key}", level="info")
+        elif key == "rules_v2_book":
+            return self._apply_rules_v2_book(store, settings, text_value)
+        elif key == "preset_save":
+            return self._handle_preset_save(store, settings, text_value)
+        elif key == "preset_load":
+            return self._handle_preset_load(store, settings, text_value)
+        elif key == "preset_delete":
+            return self._handle_preset_delete(store, settings, text_value)
+        elif key in {"simulate_v2", "test"}:
+            return self._handle_simulation(key, settings, text_value)
         else:
             return None
+
         store.apply_settings(settings)
         return self.state()
+
+    def _apply_rules_v2_book(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
+        from core.conditional.dsl_serializer import serialize_rulebook
+        from core.conditional_prompt_settings import normalize_conditional_engine_options
+
+        book, data = self._book_from_json_value(text_value)
+        opts = normalize_conditional_engine_options(
+            data.get("engine_options")
+            or {"max_passes": book.max_passes, "stop_on_match": book.stop_on_match}
+        )
+        book.max_passes = opts["max_passes"]
+        book.stop_on_match = opts["stop_on_match"]
+        dsl = serialize_rulebook(book)
+        settings["rules_v2"] = dsl
+        settings["editor_mode"] = "v2"
+        settings["engine_options"] = opts
+        store.apply_settings(settings)
+        return self.state()
+
+    def _book_from_json_value(self, value: str):
+        """JSON ({"book": {...}} or a raw book dict) → (RuleBook, raw_dict)."""
+        from core.conditional.preset_io import rulebook_from_dict
+
+        data = json.loads(value or "{}")
+        if isinstance(data, dict) and isinstance(data.get("book"), dict):
+            data = data["book"]
+        if not isinstance(data, dict):
+            data = {}
+        return rulebook_from_dict(data), data
+
+    def _handle_preset_save(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
+        from core.conditional.dsl_parser import parse_rulebook
+        from core.conditional.dsl_serializer import serialize_rulebook
+        from core.conditional.preset_io import rulebook_from_dict
+        from core.conditional_prompt_settings import normalize_conditional_engine_options
+
+        try:
+            payload = json.loads(text_value or "{}")
+        except Exception:
+            payload = {}
+        if isinstance(payload, str):
+            payload = {"name": payload}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        name = str(payload.get("name") or "").strip()
+        source_preset = str(payload.get("source_preset") or "").strip()
+        activate_raw = payload.get("activate", False)
+        activate = activate_raw is True or (
+            isinstance(activate_raw, str) and activate_raw.strip().lower() == "true"
+        )
+        book_data = payload.get("book") if isinstance(payload.get("book"), dict) else None
+
+        if not name:
+            return self._state_with(messages=[self._toast_message("조건부 프리셋 이름이 비어 있습니다.", "error")])
+
+        storage = self._storage()
+        if any(info.name == name and info.is_bundled for info in storage.list_all()):
+            return self._state_with(messages=[self._toast_message("번들 프리셋과 같은 이름으로 저장할 수 없습니다.", "error")])
+
+        book = None
+        try:
+            if book_data is not None:
+                book = rulebook_from_dict(book_data)
+            elif source_preset:
+                book = storage.load(source_preset)
+            else:
+                book = parse_rulebook(str(settings.get("rules_v2") or ""))
+                opts = normalize_conditional_engine_options(settings.get("engine_options") or {})
+                book.max_passes = opts["max_passes"]
+                book.stop_on_match = opts["stop_on_match"]
+        except FileNotFoundError:
+            return self._state_with(messages=[
+                self._toast_message(f"복제할 조건부 프리셋을 찾을 수 없습니다: {source_preset}", "error"),
+            ])
+        except Exception as exc:
+            return self._state_with(messages=[self._toast_message(f"프리셋 저장 실패: {exc}", "error")])
+
+        if book is None:
+            return self._state_with(messages=[self._toast_message("프리셋 저장 실패: 규칙을 해석할 수 없습니다.", "error")])
+
+        storage.save(name, book)
+        settings["active_preset"] = name
+        if activate:
+            settings["rules_v2"] = serialize_rulebook(book)
+            settings["editor_mode"] = "v2"
+            settings["engine_options"] = {
+                "max_passes": book.max_passes,
+                "stop_on_match": book.stop_on_match,
+            }
+        store.apply_settings(settings)
+        return self._state_with(messages=[self._toast_message(f"조건부 프리셋 저장: {name}", "success")])
+
+    def _handle_preset_load(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
+        from core.conditional.dsl_serializer import serialize_rulebook
+
+        name = text_value.strip()
+        if not name:
+            return self._state_with(messages=[self._toast_message("로드할 프리셋 이름이 비어 있습니다.", "error")])
+        try:
+            book = self._storage().load(name)
+        except FileNotFoundError:
+            return self._state_with(messages=[
+                self._toast_message(f"조건부 프리셋을 찾을 수 없습니다: {name}", "error"),
+            ])
+        except Exception as exc:
+            return self._state_with(messages=[self._toast_message(f"프리셋 로드 실패: {exc}", "error")])
+
+        settings["rules_v2"] = serialize_rulebook(book)
+        settings["editor_mode"] = "v2"
+        settings["engine_options"] = {
+            "max_passes": book.max_passes,
+            "stop_on_match": book.stop_on_match,
+        }
+        settings["active_preset"] = name
+        store.apply_settings(settings)
+        return self._state_with(messages=[self._toast_message(f"조건부 프리셋 로드: {name}", "success")])
+
+    def _handle_preset_delete(self, store, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
+        name = text_value.strip()
+        if name and self._storage().delete(name):
+            if str(settings.get("active_preset") or "") == name:
+                settings["active_preset"] = None
+                store.apply_settings(settings)
+            return self._state_with(messages=[self._toast_message(f"조건부 프리셋 삭제: {name}", "success")])
+        return self._state_with(messages=[
+            self._toast_message(f"삭제할 사용자 프리셋을 찾을 수 없습니다: {name}", "error"),
+        ])
+
+    # ------------------------------------------------------------------
+    # Simulation
+    # ------------------------------------------------------------------
+
+    def _handle_simulation(self, key: str, settings: dict[str, Any], text_value: str) -> dict[str, Any]:
+        if key == "simulate_v2":
+            try:
+                from core.conditional.dsl_serializer import serialize_rulebook
+
+                book, _data = self._book_from_json_value(text_value)
+                dsl = serialize_rulebook(book)
+            except Exception as exc:
+                return self._state_with(simulation={
+                    "ok": False,
+                    "error": f"규칙 직렬화 실패: {exc}",
+                    "matched_rule_texts": [],
+                    "matched_count": 0,
+                    "final_prompt": None,
+                    "sample": None,
+                })
+            result = self._run_simulation(dsl)
+            return self._state_with(simulation=result)
+
+        # legacy "test"
+        editor_mode = str(settings.get("editor_mode") or "legacy")
+        dsl = str(settings.get("rules_v2") if editor_mode == "v2" else settings.get("rules") or "")
+        result = self._run_simulation(dsl)
+        self._last_log = self._format_sim_log(result)
+        return self.state()
+
+    @staticmethod
+    def _format_sim_log(result: dict[str, Any]) -> str:
+        if not result.get("ok"):
+            return f"=== 시뮬레이션 실패 ===\nError: {result.get('error') or '알 수 없는 오류'}"
+        lines = [f"=== 시뮬레이션 성공 — 매칭 {int(result.get('matched_count') or 0)}개 ==="]
+        sample = result.get("sample") or {}
+        if sample:
+            lines.append(
+                f"샘플: rating={sample.get('rating') or '-'} / "
+                f"character={sample.get('character') or '-'} / artist={sample.get('artist') or '-'}"
+            )
+        for rule in result.get("matched_rule_texts") or []:
+            lines.append(f"Condition Met: {rule}")
+        if result.get("final_prompt"):
+            lines.append("")
+            lines.append(str(result["final_prompt"]))
+        return "\n".join(lines)
+
+    def _run_simulation(self, dsl_text: str) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "ok": False,
+            "error": None,
+            "matched_rule_texts": [],
+            "matched_count": 0,
+            "final_prompt": None,
+            "sample": None,
+        }
+        text = str(dsl_text or "").strip()
+        if not text:
+            result["error"] = "규칙이 비어있습니다."
+            return result
+
+        context = self.context
+        try:
+            from core.headless_random_prompt_service import HeadlessRandomPromptService
+
+            rps = getattr(context, "headless_random_prompt_service", None)
+            if rps is None:
+                rps = HeadlessRandomPromptService(context)
+                context.headless_random_prompt_service = rps
+            settings = rps._random_settings(None)
+            rps._ensure_headless_runtime()
+            if not rps._ensure_search_results(settings):
+                result["error"] = "검색 결과가 없습니다. 먼저 검색을 수행하세요."
+                return result
+            service = rps._prompt_generation_service()
+        except Exception as exc:
+            result["error"] = f"시뮬레이션 준비 실패: {exc}"
+            return result
+
+        sample_row = self._sample_row()
+        if sample_row is None:
+            result["error"] = "샘플 행을 추출할 수 없습니다."
+            return result
+        result["sample"] = self._sample_summary(sample_row)
+
+        saved_override = getattr(context, "session_cond_override", None)
+        saved_recorder = getattr(context, "session_cond_simulate", None)
+        recorder: list[str] = []
+        try:
+            context.session_cond_override = {"enabled": True, "rules": text}
+            context.session_cond_simulate = recorder
+            final = service.generate_instant_source_silent(sample_row, settings)
+            result["ok"] = True
+            result["final_prompt"] = final
+            matched = [r for r in recorder if r]
+            result["matched_rule_texts"] = matched
+            result["matched_count"] = len(set(matched))
+        except Exception as exc:
+            result["error"] = f"시뮬레이션 실행 실패: {exc}"
+        finally:
+            context.session_cond_override = saved_override
+            context.session_cond_simulate = saved_recorder
+        return result
+
+    def _sample_row(self):
+        context = self.context
+        for attr in ("search_results", "search_results_snapshot", "search_results_master_base_snapshot"):
+            source = getattr(context, attr, None)
+            if source is None:
+                continue
+            frame = None
+            getter = getattr(source, "get_dataframe", None)
+            if callable(getter):
+                try:
+                    frame = getter()
+                except Exception:
+                    frame = None
+            elif getattr(source, "empty", None) is not None:
+                frame = source
+            if frame is None or getattr(frame, "empty", True):
+                continue
+            try:
+                return frame.sample(n=1).iloc[0].copy()
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _sample_summary(row) -> dict[str, Any]:
+        def _get(key: str) -> str:
+            try:
+                return str(row.get(key, "") or "").strip()
+            except Exception:
+                return ""
+
+        def _first(value: str) -> str:
+            return value.split(",")[0].strip() if value else ""
+
+        return {
+            "rating": (_get("rating")[:1] if _get("rating") else ""),
+            "character": _first(_get("character")),
+            "artist": _first(_get("artist")),
+            "general_preview": _get("general")[:120],
+        }

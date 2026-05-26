@@ -403,6 +403,9 @@ class HeadlessConditionalRuleEngine:
             scope = self._condition_tag_scope(scope_context)
             for rule in rules:
                 if self._evaluate_logical_expression(str(rule["condition"]), scope, scope_context):
+                    recorder = getattr(self.app_context, "session_cond_simulate", None)
+                    if isinstance(recorder, list):
+                        recorder.append(str(rule.get("original") or ""))
                     prefix_tags, main_tags, postfix_tags = self._execute_action(
                         rule["action"],
                         prefix_tags,

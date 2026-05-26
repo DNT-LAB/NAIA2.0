@@ -348,6 +348,47 @@
       ]
     }
   ],
+  "data_dependencies": [
+    {
+      "feature": "core_status_queue",
+      "description": "Core filter dictionaries shipped as small bootstrap text/json.",
+      "paths": ["data/clothes_list.txt", "data/color.txt", "data/characteristic_list.txt"],
+      "provisioning": "bundled"
+    },
+    {
+      "feature": "presets",
+      "description": "Clothes preset library bundled with the headless core tree.",
+      "paths": ["core/clothes_preset/**"],
+      "provisioning": "bundled"
+    },
+    {
+      "feature": "presets",
+      "description": "Event preset prompt/thumbnail assets fetched from the release mirror at runtime.",
+      "paths": ["data/event_preset/**"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/event-preset/download"
+    },
+    {
+      "feature": "prompt_tools",
+      "description": "Style thumbnail catalog bundled in the tag list payload.",
+      "paths": ["data/taglist/*.json"],
+      "provisioning": "bundled"
+    },
+    {
+      "feature": "install_manager",
+      "description": "Tag search parquet archive downloaded by the first-run install manager.",
+      "paths": ["data/tags/**"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/install-manager/tag-archive/download"
+    },
+    {
+      "feature": "artist_thumbnail",
+      "description": "Artist thumbnail catalog and images fetched at runtime.",
+      "paths": ["data/artist_thumbnail_choices.json", "data/character_thumbnails/**"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/artist-thumb/download"
+    }
+  ],
   "required_live_smoke": [
     "random prompt latency after warmup",
     "Generate dispatch with configured NovelAI/WebUI/ComfyUI or controlled test doubles",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 from pathlib import Path
 import re
@@ -11,6 +12,7 @@ from typing import Any
 
 DEFAULT_CONTRACT = Path("release_assets/manifests/remote_web_feature_contract.json")
 DEFAULT_ROUTE_SOURCE = Path("core/web_session_app.py")
+DEFAULT_RELEASE_MANIFEST = Path("release_assets/manifests/release_include_exclude_draft.json")
 
 ROUTE_DECORATOR_RE = re.compile(
     r"^\s*@app\.(get|post|put|patch|delete|websocket)\(\s*[\"']([^\"']+)[\"']",
@@ -18,10 +20,39 @@ ROUTE_DECORATOR_RE = re.compile(
 )
 ALLOWED_LEGACY_DEPENDENCIES = {"none", "legacy_compat", "external", "needs_live_smoke"}
 ALLOWED_SMOKE_LEVELS = {"static", "non_destructive", "state_mutation", "asset_runtime", "external_live"}
+# Provisioning kinds for a feature's data/ dependency on a clean machine.
+#  - bundled:           shipped inside the release payload (must match a manifest include glob)
+#  - downloader:        fetched at runtime via a real download route (provisioned_by must be a contract route)
+#  - runtime_generated: produced by the running app/user actions (no static guarantee required)
+ALLOWED_DATA_PROVISIONING = {"bundled", "downloader", "runtime_generated"}
 
 
 def load_contract(path: str | Path = DEFAULT_CONTRACT) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def load_manifest_includes(path: str | Path = DEFAULT_RELEASE_MANIFEST) -> list[str]:
+    """Flatten every include glob from the release include/exclude manifest."""
+    manifest = json.loads(Path(path).read_text(encoding="utf-8"))
+    includes: list[str] = []
+    for group in (manifest.get("include") or {}).values():
+        if isinstance(group, list):
+            includes.extend(str(pattern) for pattern in group)
+    return includes
+
+
+def _glob_covers(path: str, pattern: str) -> bool:
+    """Return True when a release-manifest include ``pattern`` would stage ``path``.
+
+    Handles the manifest's actual glob vocabulary: exact files, ``dir/*.ext``, and
+    recursive ``prefix/**`` (which fnmatch alone does not treat as crossing separators).
+    """
+    candidate = path.replace("\\", "/").strip("/")
+    glob = pattern.replace("\\", "/").strip("/")
+    if glob.endswith("/**"):
+        base = glob[:-3]
+        return candidate == base or candidate.startswith(base + "/")
+    return fnmatch.fnmatch(candidate, glob)
 
 
 def scan_app_routes(source_path: str | Path = DEFAULT_ROUTE_SOURCE) -> set[tuple[str, str]]:
@@ -69,6 +100,7 @@ def validate_remote_web_feature_contract(
     *,
     repo_root: str | Path = ".",
     route_source: str | Path | None = None,
+    manifest_path: str | Path | None = None,
 ) -> dict[str, Any]:
     root = Path(repo_root)
     contract_file = Path(contract_path)
@@ -167,6 +199,66 @@ def validate_remote_web_feature_contract(
             }
         )
 
+    # Clean-machine data availability: every feature that depends on data/ must
+    # have that data provisioned (bundled in the release payload or fetched by a
+    # real download route). This guards the "feature renders but its data is
+    # missing on a clean install" regression class.
+    data_dependencies = contract.get("data_dependencies", [])
+    feature_ids = {str(feature.get("id")) for feature in contract.get("feature_groups", [])}
+    route_strings = {f"{method} {route_path}" for method, route_path in contract_routes}
+    manifest_file = (
+        Path(manifest_path)
+        if manifest_path is not None
+        else root / DEFAULT_RELEASE_MANIFEST
+    )
+    manifest_includes: list[str] = []
+    if manifest_file.exists():
+        manifest_includes = load_manifest_includes(manifest_file)
+    elif data_dependencies:
+        warnings.append(
+            {
+                "path": str(manifest_file),
+                "reason": "release manifest not found; bundled data dependencies cannot be verified",
+            }
+        )
+
+    for dependency in data_dependencies:
+        feature_id = str(dependency.get("feature") or "<missing>")
+        if feature_id not in feature_ids:
+            violations.append(
+                {"feature": feature_id, "reason": "data dependency references unknown feature id"}
+            )
+        provisioning = str(dependency.get("provisioning") or "")
+        if provisioning not in ALLOWED_DATA_PROVISIONING:
+            violations.append(
+                {"feature": feature_id, "reason": f"invalid data provisioning: {provisioning}"}
+            )
+        paths = dependency.get("paths") or []
+        if not paths:
+            violations.append(
+                {"feature": feature_id, "reason": "data dependency declares no paths"}
+            )
+        if provisioning == "bundled":
+            for data_path in paths:
+                if not any(_glob_covers(str(data_path), pattern) for pattern in manifest_includes):
+                    violations.append(
+                        {
+                            "feature": feature_id,
+                            "path": str(data_path),
+                            "reason": "bundled data path is not covered by any release manifest include glob",
+                        }
+                    )
+        elif provisioning == "downloader":
+            provisioned_by = str(dependency.get("provisioned_by") or "")
+            if provisioned_by not in route_strings:
+                violations.append(
+                    {
+                        "feature": feature_id,
+                        "provisioned_by": provisioned_by,
+                        "reason": "downloader data dependency provisioned_by is not a contract route",
+                    }
+                )
+
     return {
         "ok": not violations,
         "contract": str(contract_file),
@@ -175,6 +267,7 @@ def validate_remote_web_feature_contract(
         "feature_count": len(contract.get("feature_groups", [])),
         "contract_route_count": len(contract_routes),
         "source_route_count": len(source_routes),
+        "data_dependency_count": len(data_dependencies),
         "violations": violations,
         "warnings": warnings,
     }
@@ -185,12 +278,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--contract", default=str(DEFAULT_CONTRACT), help="Remote Web feature contract JSON path.")
     parser.add_argument("--repo-root", default=".", help="Repository root for source file checks.")
     parser.add_argument("--route-source", default=None, help="Override route source file.")
+    parser.add_argument("--manifest", default=None, help="Override release include/exclude manifest path.")
     args = parser.parse_args(argv)
 
     payload = validate_remote_web_feature_contract(
         args.contract,
         repo_root=args.repo_root,
         route_source=args.route_source,
+        manifest_path=args.manifest,
     )
     print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload["ok"] else 1

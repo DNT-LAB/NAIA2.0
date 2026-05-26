@@ -10,9 +10,28 @@ from __future__ import annotations
 import argparse
 import os
 import socket
+import sys
 import threading
 import time
 import webbrowser
+
+
+def _force_utf8_console() -> None:
+    """Force UTF-8 stdout/stderr so emoji log/print calls never crash on a
+    non-UTF-8 Windows console (e.g. Korean cp949). Covers the .bat, Electron and
+    direct ``python NAIA_web_headless.py`` launch paths; a no-op when already
+    UTF-8. Must run before any module-import-time prints."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_force_utf8_console()
 
 import uvicorn
 

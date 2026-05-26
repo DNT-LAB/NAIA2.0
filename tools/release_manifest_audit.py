@@ -42,9 +42,6 @@ FORBIDDEN_FILE_GLOBS = (
     "*.md",
     "NAIA_cold_v4.py",
     "requirements-desktop-legacy*.txt",
-    "artist_dictionary.py",
-    "danbooru_character.py",
-    "result_dict_copyright.py",
     "result_dupl.py",
     "artist_thumbnail*.json",
     "*.xlsx",
@@ -112,6 +109,19 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/color.txt",
     "*/data/characteristic_list.txt",
     "*/data/taglist/*.json",
+    # Reviewed clean-machine bundles (2.0.2): tag-search KR corpus + metadata
+    # index + Character Viewer catalogs. Small/medium, not hosted on the public
+    # mirror, so they ship with the payload instead of via a runtime download.
+    "data/KR_tags.parquet",
+    "data/e621_KR_tags.parquet",
+    "data/tag_index/*",
+    "data/copyright_groups.json",
+    "data/character_analysis.json",
+    "*/data/KR_tags.parquet",
+    "*/data/e621_KR_tags.parquet",
+    "*/data/tag_index/*",
+    "*/data/copyright_groups.json",
+    "*/data/character_analysis.json",
 )
 FORBIDDEN_PACKAGE_NAMES = (
     "PyQt6",

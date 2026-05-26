@@ -375,11 +375,30 @@
       "provisioning": "bundled"
     },
     {
+      "feature": "prompt_tools",
+      "description": "Tag search / autocomplete KR corpus, metadata fallback index, and artist/character/copyright dictionaries bundled for clean-machine autocomplete.",
+      "paths": [
+        "data/KR_tags.parquet",
+        "data/e621_KR_tags.parquet",
+        "data/tag_index/**",
+        "artist_dictionary.py",
+        "danbooru_character.py",
+        "result_dict_copyright.py"
+      ],
+      "provisioning": "bundled"
+    },
+    {
       "feature": "install_manager",
       "description": "Tag search parquet archive downloaded by the first-run install manager.",
       "paths": ["data/tags/**"],
       "provisioning": "downloader",
       "provisioned_by": "POST /api/install-manager/tag-archive/download"
+    },
+    {
+      "feature": "thumb_character_viewer",
+      "description": "Character Viewer copyright groups + character analysis bundled for clean-machine availability (thumbnails remain optional/runtime).",
+      "paths": ["data/copyright_groups.json", "data/character_analysis.json"],
+      "provisioning": "bundled"
     },
     {
       "feature": "artist_thumbnail",

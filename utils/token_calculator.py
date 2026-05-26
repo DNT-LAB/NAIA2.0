@@ -116,7 +116,7 @@ class TokenCalculator:
         Process WebUI/ComfyUI weight syntax for token counting.
         
         New rules:
-        - Only escaped parentheses \( \) count as tokens (1 token for pair)
+        - Only escaped parentheses \\( \\) count as tokens (1 token for pair)
         - Weight syntax (text:weight) or (text) removes weights but no tokens for parentheses
         - Regular parentheses contribute 0 tokens
         

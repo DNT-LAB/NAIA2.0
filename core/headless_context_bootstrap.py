@@ -12,6 +12,7 @@ from app.backend.runtime import resolve_runtime_paths
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_search_state_service import DEFAULT_ACTIVE_RATINGS
 from core.headless_remote_ui_state_service import apply_remote_ui_state
+from core.web_shell_config import DEFAULT_WEB_SHELL_PORT
 
 
 def default_token_manager():
@@ -99,7 +100,7 @@ def create_api_config_service(context: Any) -> ApiConfigService:
         if context.runtime_paths is not None else None
     )
     cloudflared = CloudflaredService(
-        port=context.remote_params.get("web_session_port", 7243),
+        port=context.remote_params.get("web_session_port", DEFAULT_WEB_SHELL_PORT),
         bin_dir=cloudflared_bin_dir,
     )
     cloudflared.set_status(

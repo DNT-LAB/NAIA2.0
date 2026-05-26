@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core import api_verification
+from core.web_shell_config import DEFAULT_WEB_SHELL_PORT
 
 
 VERIFY_TIMESTAMP_FILE = Path("NAIA_api_timestamps.json")
@@ -34,12 +35,12 @@ class CloudflaredService:
     def __init__(
         self,
         *,
-        port: int = 7243,
+        port: int = DEFAULT_WEB_SHELL_PORT,
         bin_dir: Path | str | None = None,
         start_tunnel: Callable[..., Any] | None = None,
         stop_tunnel: Callable[[int], Any] | None = None,
     ):
-        self.port = int(port or 7243)
+        self.port = int(port or DEFAULT_WEB_SHELL_PORT)
         self.bin_dir = Path(bin_dir) if bin_dir is not None else None
         self._start_tunnel = start_tunnel
         self._stop_tunnel = stop_tunnel

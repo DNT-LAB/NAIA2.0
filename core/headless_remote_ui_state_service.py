@@ -16,6 +16,7 @@ from core.headless_remote_state_service import (
 
 REMOTE_WEB_STATE_KEY = "remote_web"
 STATE_VERSION = 1
+RUNTIME_REMOTE_PARAM_KEYS = {"web_session_port"}
 
 
 def _settings_path(context: Any) -> Path:
@@ -89,11 +90,21 @@ def load_remote_ui_state(context: Any) -> dict[str, Any]:
 
 def apply_remote_ui_state(context: Any) -> dict[str, Any]:
     state = load_remote_ui_state(context)
+    runtime_params = {
+        key: context.remote_params[key]
+        for key in RUNTIME_REMOTE_PARAM_KEYS
+        if key in context.remote_params
+    }
     context.current_api_mode = state["api_mode"]
     context.prompt_text = state["prompt"]
     context.negative_prompt_text = state["negative_prompt"]
     context.remote_options.update(state["remote_options"])
-    context.remote_params.update(state["remote_params"])
+    context.remote_params.update({
+        key: value
+        for key, value in state["remote_params"].items()
+        if key not in RUNTIME_REMOTE_PARAM_KEYS
+    })
+    context.remote_params.update(runtime_params)
     context.auto_save_state.update(state["auto_save_state"])
     context.save_directory_state.update(state["save_directory_state"])
     if "auto_save" not in context.auto_save_state:
@@ -110,7 +121,11 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
         "prompt": str(context.prompt_text or ""),
         "negative_prompt": str(context.negative_prompt_text or ""),
         "remote_options": dict(context.get_options()),
-        "remote_params": _json_safe(dict(context.remote_params or {})),
+        "remote_params": _json_safe({
+            key: value
+            for key, value in dict(context.remote_params or {}).items()
+            if key not in RUNTIME_REMOTE_PARAM_KEYS
+        }),
         "auto_save_state": _json_safe(dict(context.auto_save_state or {})),
         "save_directory_state": _json_safe(dict(context.save_directory_state or {})),
     }

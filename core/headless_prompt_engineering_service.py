@@ -362,6 +362,7 @@ class HeadlessPromptEngineeringService:
 
     @staticmethod
     def _comfyui_anima_recommended_module_settings() -> dict[str, Any]:
+        cls = HeadlessPromptEngineeringService
         return {
             "pre_prompt": "(@myowa), newest, year2024, (best quality), highres, absurdres",
             "post_prompt": (
@@ -371,7 +372,16 @@ class HeadlessPromptEngineeringService:
                 "high-quality digital art, very thin lineart, low contrast shading, cinematic lighting, "
                 "very beautiful and detailed scene:0.8)"
             ),
-            "auto_hide_prompt": "",
+            # Parity with the NAI/WEBUI recommended presets. COMFYUI ANIMA used to
+            # ship an empty auto-hide list and no preprocessing options, so its
+            # recommended preset silently skipped closed-eyes sync, auto-hide, and
+            # the remove_* normalization the other modes apply on first connect /
+            # "추천 설정 적용". Reuse the shared auto-hide list and WEBUI's
+            # preprocessing options (which include closed_eyes_sync).
+            "auto_hide_prompt": cls._nai_recommended_module_settings()["auto_hide_prompt"],
+            "preprocessing_options": dict(
+                cls._webui_recommended_module_settings()["preprocessing_options"]
+            ),
         }
 
     @staticmethod

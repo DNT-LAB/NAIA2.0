@@ -35,6 +35,7 @@ export function createSetupController({
   let apiStatusLast = null;
   let initialProbeDone = false;
   let probeCompleted = false;
+  let pendingForcedClose = false;
   const probeState = { NAI: null, WEBUI: null, COMFYUI: null };
   const clearPending = { NAI: false, WEBUI: false, COMFYUI: false };
   const clearTimers = { NAI: null, WEBUI: null, COMFYUI: null };
@@ -96,6 +97,11 @@ export function createSetupController({
       setupOverlay.classList.add('open');
     } else {
       setupCloseBtn.classList.remove('hidden');
+      if (pendingForcedClose) {
+        // 강제 설정이 해제됨(백엔드 연결 성공) → 모달 자동 닫기
+        pendingForcedClose = false;
+        setupOverlay.classList.remove('open');
+      }
     }
     if (setupSubTitle) {
       if (setupAllowed) {
@@ -314,6 +320,10 @@ export function createSetupController({
     const mode = message.mode;
     setSetupLoading(mode, false);
     setSetupResult(mode, message.message, message.message_type);
+    if (message.success && setupForced) {
+      // 강제 설정 모달에서 인증 성공 → 게이트가 풀리는 순간 자동 닫기
+      pendingForcedClose = true;
+    }
     if (message.success && mode === 'NAI') {
       byId('setupNaiToken').value = '';
     }

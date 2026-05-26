@@ -952,7 +952,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260526-safe-rating-default1')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260527-rating-inflight-lock1')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,

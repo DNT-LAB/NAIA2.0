@@ -8523,6 +8523,7 @@ body.resizing-result-info {
   cursor: pointer; transition: all 0.15s; line-height: 1.2;
 }
 .rating-btn:hover { border-color: var(--text-dim); }
+.rating-btn.rating-locked { opacity: 0.5; cursor: progress; pointer-events: none; }
 .rating-btn.active[data-r="g"] { background: #2e7d32; color: #fff; border-color: #4CAF50; }
 .rating-btn.active[data-r="s"] { background: #1565C0; color: #fff; border-color: #2196F3; }
 .rating-btn.active[data-r="q"] { background: #e65100; color: #fff; border-color: #FF9800; }

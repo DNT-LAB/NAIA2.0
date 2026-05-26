@@ -12,6 +12,11 @@ export function createSearchPanel({
   const RATING_KEYS = ['g', 's', 'q', 'e'];
   let searchingActive = false;
   let ratingState = { g: true, s: true, q: true, e: false };
+  // Lock the G/S/Q/E rating buttons while a set_active_ratings request is in
+  // flight so a slow backend can't be spammed by rapid re-clicks. Released when
+  // the server's rating_update arrives, with a safety timeout in case it does not.
+  let ratingInflight = false;
+  let ratingInflightTimer = null;
   let searchRatingState = { g: true, s: true, q: true, e: false };
   let cachedRatingCounts = null;
   let parquetPickMode = 'load';
@@ -255,11 +260,37 @@ export function createSearchPanel({
     ws.send(JSON.stringify({type: 'search_parquet_action', action}));
   }
 
+  function setRatingButtonsLocked(locked) {
+    document.querySelectorAll('.rating-btn').forEach(button => {
+      if (!button.dataset.r) return;
+      button.classList.toggle('rating-locked', locked);
+      if ('disabled' in button) button.disabled = locked;
+    });
+  }
+
+  function beginRatingRequest() {
+    ratingInflight = true;
+    setRatingButtonsLocked(true);
+    if (ratingInflightTimer) clearTimeout(ratingInflightTimer);
+    ratingInflightTimer = setTimeout(endRatingRequest, 4000);
+  }
+
+  function endRatingRequest() {
+    ratingInflight = false;
+    if (ratingInflightTimer) {
+      clearTimeout(ratingInflightTimer);
+      ratingInflightTimer = null;
+    }
+    setRatingButtonsLocked(false);
+  }
+
   function toggleRating(rating) {
+    if (ratingInflight) return;
     ratingState[rating] = !ratingState[rating];
     syncRatingButtons();
     const quickFilter = getQuickFilter();
     sendActiveRatings();
+    beginRatingRequest();
     if (quickFilter) quickFilter.savePreferences();
   }
 
@@ -283,6 +314,7 @@ export function createSearchPanel({
   }
 
   function onRatingUpdate(message) {
+    endRatingRequest();
     if (message.rating_counts) cachedRatingCounts = message.rating_counts;
     const quickFilter = getQuickFilter();
     updateSearchCount(message.count || 0);

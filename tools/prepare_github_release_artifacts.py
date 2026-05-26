@@ -300,7 +300,6 @@ def _write_release_body(summary: dict[str, Any], path: Path) -> None:
 
 - `{PORTABLE_ZIP_NAME}`
 - `{SHA256SUMS_NAME}`
-- `{RELEASE_SUMMARY_NAME}`
 
 ## Verification
 
@@ -332,7 +331,6 @@ This portable beta is unsigned. Microsoft Defender SmartScreen may show an unrec
 
 - Size: {total_mib} MiB
 - Channel: GitHub Release portable zip
-- False-positive response note: `{FALSE_POSITIVE_NAME}`
 """
     path.write_text(text, encoding="utf-8")
 
@@ -426,13 +424,14 @@ def prepare_github_release_artifacts(
     )
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    checksum_assets = [
-        *release_assets,
-        _record(summary_path),
-    ]
+    # Public release upload set = portable zip + SHA256SUMS.txt only (handoff policy).
+    # Evidence files (release summary, final gate, workspace evidence, false-positive note,
+    # release body) are still generated locally for records and false-positive submission,
+    # but are NOT advertised as release downloads nor listed in the public checksum manifest.
+    checksum_assets = [_record(zip_path)]
     checksum_lines = [f"{record.sha256}  {record.name}" for record in sorted(checksum_assets, key=lambda item: item.name)]
     (out / SHA256SUMS_NAME).write_text("\n".join(checksum_lines) + "\n", encoding="utf-8")
-    all_assets = [*checksum_assets, _record(out / SHA256SUMS_NAME)]
+    all_assets = [*release_assets, _record(summary_path), _record(out / SHA256SUMS_NAME)]
 
     return {
         "ok": True,

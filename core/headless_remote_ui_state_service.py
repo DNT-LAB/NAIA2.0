@@ -108,8 +108,14 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
     context.auto_save_state.update(state["auto_save_state"])
     context.save_directory_state.update(state["save_directory_state"])
     if "auto_save" not in context.auto_save_state:
-        context.auto_save_state["auto_save"] = bool(context.remote_options.get("auto_save", True))
-    context.remote_options["auto_save"] = bool(context.auto_save_state.get("auto_save", True))
+        context.auto_save_state["auto_save"] = HeadlessRemoteStateService.coerce_bool(
+            context.remote_options.get("auto_save", True)
+        )
+    else:
+        context.auto_save_state["auto_save"] = HeadlessRemoteStateService.coerce_bool(
+            context.auto_save_state.get("auto_save")
+        )
+    context.remote_options["auto_save"] = bool(context.auto_save_state["auto_save"])
     return state
 
 

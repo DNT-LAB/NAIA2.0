@@ -48,9 +48,9 @@ class HeadlessSaveService:
             for key in AUTO_SAVE_DEFAULTS
             if key in context.auto_save_state
         })
-        state["auto_save"] = bool(state["auto_save"])
-        state["save_as_webp"] = bool(state["save_as_webp"])
-        state["history_limit_enabled"] = bool(state["history_limit_enabled"])
+        state["auto_save"] = context._coerce_bool(state["auto_save"])
+        state["save_as_webp"] = context._coerce_bool(state["save_as_webp"])
+        state["history_limit_enabled"] = context._coerce_bool(state["history_limit_enabled"])
         state["max_history_length"] = int(state["max_history_length"] or 2000)
         state["memory_action"] = int(state["memory_action"] or 1)
         state["unsaved_history_count"] = context.result_store.unsaved_history_count()

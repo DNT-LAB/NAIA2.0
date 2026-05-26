@@ -929,7 +929,11 @@
 
 <section class="translator-popup" id="translatorPopup" aria-label="Translate" hidden>
   <header class="translator-popup-head">
-    <span>Translate</span>
+    <div class="translator-popup-title">
+      <span class="translator-popup-icon">あ</span>
+      <span>Translate</span>
+    </div>
+    <span class="translator-popup-mode">KO -> EN</span>
     <button type="button" class="translator-popup-close" onclick="closeTranslatorPopup()" aria-label="Close translator">×</button>
   </header>
   <div class="translator-popup-body">
@@ -962,6 +966,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260526-fn-menu-translator1"></script>
+<script src="app.js?v=20260526-fn-menu-translator2"></script>
 </body>
 </html>

@@ -249,7 +249,13 @@ async def handle_json_command(
                 broadcast_json=broadcast_json,
             )
         elif command_type == "random":
-            await handle_random_command(ws, context, command)
+            await handle_random_command(
+                ws,
+                context,
+                clients,
+                command,
+                start_generation_runner=start_generation_runner,
+            )
         else:
             await handle_generate_command(
                 ws,
@@ -280,7 +286,12 @@ async def handle_text_command(
         await send_sync_messages(ws, context, client_host, run_in_thread=run_in_thread)
         return
     if data == "random":
-        await handle_random_command(ws, context)
+        await handle_random_command(
+            ws,
+            context,
+            clients,
+            start_generation_runner=start_generation_runner,
+        )
         return
     if data == "generate":
         await handle_generate_command(

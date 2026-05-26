@@ -70,7 +70,10 @@ def _active_ratings_from_command(command: dict[str, Any] | None) -> set[str] | N
 async def handle_random_command(
     ws: WebSocket,
     context: WebSessionContext,
+    clients: set[WebSocket],
     command: dict[str, Any] | None = None,
+    *,
+    start_generation_runner: GenerationRunnerStarter,
 ) -> None:
     command = command if isinstance(command, dict) else {}
     overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
@@ -85,6 +88,32 @@ async def handle_random_command(
     await _send_json(ws, result.websocket_payload())
     for message in result.extra_messages:
         await _send_json(ws, message)
+    dispatch = await _maybe_enqueue_random_auto_generation(
+        context,
+        result=result,
+        command=command,
+        overrides=overrides,
+        request_id=request_id,
+        queue_source="Random",
+    )
+    if dispatch is None:
+        return
+    await _send_json(ws, dispatch.websocket_payload())
+    if not dispatch.ok:
+        await _send_json(ws, {
+            "type": "toast",
+            "level": "error",
+            "message": dispatch.blocked_reason,
+        })
+        await _send_json(ws, {
+            "type": "status",
+            "is_generating": False,
+            "message": "blocked",
+        })
+        return
+    await _send_generation_queued_state(ws, context)
+    if context.headless_generation_execute_enabled:
+        start_generation_runner(context, clients)
 
 
 async def handle_bootstrap_random_command(
@@ -248,6 +277,58 @@ async def _send_generation_queued_state(ws: WebSocket, context: WebSessionContex
     await _send_json(ws, context.queue_state_payload())
 
 
+def _should_auto_generate_after_random(
+    context: WebSessionContext,
+    command: dict[str, Any],
+    overrides: dict[str, Any] | None,
+) -> bool:
+    if command.get("respect_naia_autogen", True) is False:
+        return False
+    if command.get("force_naia_skip_generate") is True:
+        return False
+    request_overrides = overrides if isinstance(overrides, dict) else {}
+    requested = request_overrides.get("auto_generate", context.get_options().get("auto_generate", False))
+    return bool(context._coerce_bool(requested))
+
+
+async def _maybe_enqueue_random_auto_generation(
+    context: WebSessionContext,
+    *,
+    result,
+    command: dict[str, Any],
+    overrides: dict[str, Any] | None,
+    request_id: str,
+    queue_source: str,
+):
+    if not result.success:
+        return None
+    if not _should_auto_generate_after_random(context, command, overrides):
+        return None
+
+    generation_overrides = dict(overrides) if isinstance(overrides, dict) else {}
+    generation_overrides["auto_generate"] = True
+    generation_overrides["_remote_queue_source"] = queue_source
+    generation_overrides["_remote_queue_label"] = queue_source
+    if result.detected_resolution:
+        width, height = result.detected_resolution
+        generation_overrides["width"] = width
+        generation_overrides["height"] = height
+        generation_overrides["resolution"] = f"{width} x {height}"
+
+    generation_command: dict[str, Any] = {
+        "type": "generate",
+        "prompt": result.prompt,
+        "negative_prompt": context.negative_prompt_text,
+        "request_id": f"{request_id}:generate" if request_id else f"random-{uuid.uuid4().hex}:generate",
+        "overrides": generation_overrides,
+    }
+    if result.prompt_run_id:
+        generation_command["prompt_run_id"] = result.prompt_run_id
+
+    dispatch = await enqueue_generation_request(context, generation_command)
+    return dispatch
+
+
 def register_generation_rest_routes(
     app: FastAPI,
     context: WebSessionContext,
@@ -293,8 +374,20 @@ def register_generation_rest_routes(
         payload = result.websocket_payload()
         if not result.success:
             return JSONResponse(payload, status_code=400)
+        dispatch = await _maybe_enqueue_random_auto_generation(
+            context,
+            result=result,
+            command=command,
+            overrides=overrides,
+            request_id=request_id,
+            queue_source="Random",
+        )
+        if dispatch and dispatch.ok and context.headless_generation_execute_enabled:
+            start_generation_runner(context, clients)
         return {
             "status": "random_generation_requested",
+            "naia_started_generation": bool(dispatch and dispatch.ok),
+            "generation": dispatch.websocket_payload() if dispatch is not None else None,
             **payload,
             "extra_messages": result.extra_messages,
         }
@@ -347,26 +440,18 @@ def register_generation_rest_routes(
         payload = result.websocket_payload()
         if not result.success:
             return JSONResponse(payload, status_code=400)
-        generation_payload = None
-        if will_naia_generate:
-            generation_result = await enqueue_generation_request(
-                context,
-                {
-                    "type": "generate",
-                    "prompt": result.prompt,
-                    "negative_prompt": context.negative_prompt_text,
-                    "request_id": f"{request_id}:generate",
-                    "overrides": {
-                        **overrides,
-                        "_remote_queue_source": "ComfyUI Random",
-                        "_remote_queue_label": "ComfyUI Random",
-                    },
-                },
-            )
-            generation_payload = generation_result.websocket_payload()
-            will_naia_generate = bool(generation_result.ok)
-            if generation_result.ok and context.headless_generation_execute_enabled:
-                start_generation_runner(context, clients)
+        generation_result = await _maybe_enqueue_random_auto_generation(
+            context,
+            result=result,
+            command=command,
+            overrides=overrides,
+            request_id=request_id,
+            queue_source="ComfyUI Random",
+        )
+        generation_payload = generation_result.websocket_payload() if generation_result is not None else None
+        will_naia_generate = bool(generation_result and generation_result.ok)
+        if will_naia_generate and context.headless_generation_execute_enabled:
+            start_generation_runner(context, clients)
         return {
             "ok": True,
             "status": "prompt_generated",

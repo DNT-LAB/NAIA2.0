@@ -63,9 +63,9 @@ class HeadlessRemoteStateService:
     def set_option(self, key: str, value: Any) -> None:
         if key not in REMOTE_OPTION_DEFAULTS:
             return
-        self.context.remote_options[key] = bool(value)
+        self.context.remote_options[key] = self.coerce_bool(value)
         if key == "auto_save":
-            self.context.auto_save_state["auto_save"] = bool(value)
+            self.context.auto_save_state["auto_save"] = self.context.remote_options[key]
         self.context.save_remote_ui_state()
         self.context.publish("remote_options_changed", self.get_options())
 

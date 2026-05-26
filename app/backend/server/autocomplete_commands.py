@@ -106,6 +106,105 @@ def search_kr_tags(context: WebSessionContext, query: str, limit: int = 20) -> l
     return rows[:limit]
 
 
+def _has_hangul_text(text: str) -> bool:
+    return bool(re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", str(text or "")))
+
+
+def _translate_autocomplete_query(context: WebSessionContext, query: str) -> str:
+    from core.tag_search_index import normalize_search_query
+
+    normalized = normalize_search_query(query)
+    if not normalized or not _has_hangul_text(normalized):
+        return ""
+    cache = getattr(context, "autocomplete_translation_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        context.autocomplete_translation_cache = cache
+    cached = cache.get(normalized)
+    if cached is not None:
+        return str(cached)
+    translated = normalize_search_query(korean_to_english(normalized) or "")
+    if not translated or _has_hangul_text(translated) or translated == normalized:
+        translated = ""
+    if len(cache) > 256:
+        cache.clear()
+    cache[normalized] = translated
+    return translated
+
+
+def _translation_hint_row(translated: str) -> dict[str, Any]:
+    return {
+        "tag": translated,
+        "count": 0,
+        "desc": "translation hint",
+        "group": "[translation hint]",
+        "cat": "",
+        "_wc_type": "fallback_recommended",
+        "_fallback_recommended": True,
+        "candidate": {
+            "type": "translation_hint",
+            "source": "translation_fallback",
+            "confidence": 0.2,
+            "insertPolicy": "manual",
+        },
+        "candidateType": "translation_hint",
+        "source": "translation_fallback",
+        "confidence": 0.2,
+        "insertPolicy": "manual",
+    }
+
+
+def search_kr_tags_with_translation(
+    context: WebSessionContext,
+    query: str,
+    limit: int = 20,
+) -> tuple[list[dict[str, Any]], str]:
+    from core.tag_search_index import normalize_search_query
+
+    translated = _translate_autocomplete_query(context, query)
+    base_rows = search_kr_tags(context, query, limit)
+    if not translated:
+        return base_rows, ""
+
+    merged: dict[str, dict[str, Any]] = {}
+    rows: list[dict[str, Any]] = []
+
+    def add_row(row: dict[str, Any], *, translated_match: bool = False) -> None:
+        tag = str(row.get("tag") or "")
+        key = normalize_search_query(tag)
+        if not key or key in merged:
+            return
+        item = dict(row)
+        if translated_match:
+            item["_translated"] = True
+            item.setdefault("candidateType", "tag_translated")
+            item.setdefault("source", "translation_search")
+            item.setdefault("confidence", 0.75)
+            item.setdefault("insertPolicy", "default")
+            candidate = dict(item.get("candidate") or {})
+            candidate.setdefault("type", item["candidateType"])
+            candidate.setdefault("source", item["source"])
+            candidate.setdefault("confidence", item["confidence"])
+            candidate.setdefault("insertPolicy", item["insertPolicy"])
+            item["candidate"] = candidate
+        merged[key] = item
+        rows.append(item)
+
+    for row in search_kr_tags(context, translated, limit):
+        add_row(row, translated_match=True)
+    for row in base_rows:
+        add_row(row)
+
+    translated_key = normalize_search_query(translated)
+    if translated_key and translated_key not in merged:
+        hint_row = _translation_hint_row(translated)
+        if len(rows) >= limit:
+            rows = rows[:max(0, limit - 1)] + [hint_row]
+        else:
+            add_row(hint_row)
+    return rows[:limit], translated
+
+
 def search_wildcards(context: WebSessionContext, query: str, limit: int = 12) -> list[dict[str, Any]]:
     q = str(query or "").strip().lower()
     if not q:
@@ -293,12 +392,12 @@ async def handle_autocomplete_command(
 
     if command_type == "autocomplete_translate":
         request_id = str(command.get("requestId") or command.get("request_id") or "")
-        results = await run_in_thread(search_kr_tags, context, query, 12)
+        results, translated = await run_in_thread(search_kr_tags_with_translation, context, query, 12)
         payload = {
             "type": "autocomplete_result",
             "query": query,
             "results": results,
-            "translated_query": "",
+            "translated_query": translated,
         }
         if request_id:
             payload["requestId"] = request_id

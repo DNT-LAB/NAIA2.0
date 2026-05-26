@@ -1858,6 +1858,7 @@ const fnMenu = $('fnMenu');
 const translatorPopup = $('translatorPopup');
 const translatorInput = $('translatorInput');
 const translatorOutput = $('translatorOutput');
+const resultViewer = $('resultViewer');
 const metaRow      = $('metaRow');
 const promptTokenLabel = $('promptTokenLabel');
 const negativeTokenLabel = $('negativeTokenLabel');
@@ -1898,6 +1899,12 @@ const optBoxes = {
 };
 const pendingOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
+let translatorPopupRequestText = '';
+let translatorPopupTimer = null;
+let translatorPopupSeq = 0;
+let translatorPopupComposing = false;
+const translatorHangulRe = /[가-힣ㄱ-ㅎㅏ-ㅣ]/;
+const TRANSLATOR_AUTO_TRANSLATE_MS = 600;
 // ---- Result history wrappers ----
 const mobileHistoryMediaQuery = window.matchMedia('(max-width: 767px)');
 function isMobileHistoryViewport() {
@@ -3997,13 +4004,33 @@ function openFnPreset() {
 
 function positionTranslatorPopup() {
   if (!translatorPopup || translatorPopup.hidden) return;
-  const anchor = fnMenuTrigger || document.querySelector('.tab-bar');
-  const rect = anchor?.getBoundingClientRect?.();
   const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-  const top = rect ? rect.bottom + 10 : 88;
-  const width = translatorPopup.getBoundingClientRect().width || 560;
-  let left = rect ? rect.right - width : 18;
-  left = Math.max(12, Math.min(left, viewportWidth - width - 12));
+  const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+  const viewerRect = resultViewer?.getBoundingClientRect?.();
+  const fnRect = fnMenuTrigger?.getBoundingClientRect?.();
+  const popupRect = translatorPopup.getBoundingClientRect();
+  let popupWidth = popupRect.width || 620;
+  const height = popupRect.height || 300;
+  let left = 18;
+  let top = 76;
+  if (viewerRect && viewerRect.width > 220 && viewerRect.height > 160) {
+    const targetWidth = Math.min(
+      Math.max(460, Math.round(viewerRect.width * 0.56)),
+      Math.min(640, viewerRect.width - 28),
+    );
+    translatorPopup.style.width = `${Math.max(320, targetWidth)}px`;
+    const nextRect = translatorPopup.getBoundingClientRect();
+    const nextWidth = nextRect.width || targetWidth;
+    popupWidth = nextWidth;
+    const anchorLeft = fnRect ? Math.max(viewerRect.left + 16, fnRect.right + 18) : viewerRect.left + 18;
+    left = Math.min(anchorLeft, viewerRect.right - nextWidth - 18);
+    top = viewerRect.top + 18;
+  } else if (fnRect) {
+    left = fnRect.right + 14;
+    top = fnRect.bottom + 10;
+  }
+  left = Math.max(12, Math.min(left, viewportWidth - popupWidth - 12));
+  top = Math.max(54, Math.min(top, viewportHeight - height - 12));
   translatorPopup.style.left = `${Math.round(left)}px`;
   translatorPopup.style.top = `${Math.round(top)}px`;
 }
@@ -4015,38 +4042,84 @@ function openTranslatorPopup() {
   positionTranslatorPopup();
   translatorInput?.focus();
   translatorInput?.select?.();
+  scheduleTranslatorPopupTranslation();
 }
 
 function closeTranslatorPopup() {
   if (!translatorPopup) return;
   translatorPopup.hidden = true;
+  clearTranslatorPopupTimer();
+  clearPendingTranslatorPopupTranslation();
+}
+
+function clearTranslatorPopupTimer() {
+  if (!translatorPopupTimer) return;
+  window.clearTimeout(translatorPopupTimer);
+  translatorPopupTimer = null;
+}
+
+function clearPendingTranslatorPopupTranslation(text = '', requestId = '') {
+  if (!text && !requestId) {
+    translatorPopupRequestText = '';
+    translatorPopupRequestId = '';
+    return;
+  }
+  if (text && translatorPopupRequestText !== text) return;
+  if (requestId && translatorPopupRequestId !== requestId) return;
+  translatorPopupRequestText = '';
   translatorPopupRequestId = '';
 }
 
-function requestTranslatorPopupTranslate() {
+function requestTranslatorPopupTranslate(options = {}) {
+  const force = options === true || !!options.force;
   const text = translatorInput?.value?.trim() || '';
+  clearTranslatorPopupTimer();
   if (!text) {
     if (translatorOutput) translatorOutput.value = '';
+    clearPendingTranslatorPopupTranslation();
+    return;
+  }
+  if (!force && !translatorHangulRe.test(text)) {
     return;
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    showToast('Remote connection is not open', 'error');
+    if (force) showToast('Remote connection is not open', 'error');
     return;
   }
-  translatorPopupRequestId = `translate-${Date.now()}`;
+  if (!force && translatorPopupRequestText === text) return;
+  translatorPopupRequestText = text;
+  translatorPopupRequestId = `translate-${Date.now()}-${++translatorPopupSeq}`;
+  const requestId = translatorPopupRequestId;
   if (translatorOutput) translatorOutput.value = '...';
   ws.send(JSON.stringify({
     type: 'translate_text',
     direction: 'ko_en',
     text,
-    requestId: translatorPopupRequestId,
+    requestId,
   }));
+  window.setTimeout(() => clearPendingTranslatorPopupTranslation(text, requestId), 10000);
+}
+
+function scheduleTranslatorPopupTranslation() {
+  clearTranslatorPopupTimer();
+  if (!translatorPopup || translatorPopup.hidden || translatorPopupComposing) return;
+  const text = translatorInput?.value?.trim() || '';
+  if (!text) {
+    if (translatorOutput) translatorOutput.value = '';
+    clearPendingTranslatorPopupTranslation();
+    return;
+  }
+  if (!translatorHangulRe.test(text)) return;
+  translatorPopupTimer = window.setTimeout(() => {
+    translatorPopupTimer = null;
+    requestTranslatorPopupTranslate({force: false});
+  }, TRANSLATOR_AUTO_TRANSLATE_MS);
 }
 
 function onTranslationResult(message) {
   const requestId = String(message?.requestId || '');
-  if (translatorPopupRequestId && requestId && requestId !== translatorPopupRequestId) return;
-  translatorPopupRequestId = '';
+  if (requestId && requestId !== translatorPopupRequestId) return;
+  clearPendingTranslatorPopupTranslation('', requestId);
   const translated = String(message?.translated || '');
   if (translatorOutput) translatorOutput.value = translated;
   if (!translated) showToast(message?.error || 'Translation failed', 'error');
@@ -4073,6 +4146,18 @@ function insertTranslatorOutput() {
   target.setRangeText(text, start, end, 'end');
   target.focus();
   onPromptEdit();
+}
+
+if (translatorInput) {
+  translatorInput.addEventListener('input', scheduleTranslatorPopupTranslation);
+  translatorInput.addEventListener('compositionstart', () => {
+    translatorPopupComposing = true;
+    clearTranslatorPopupTimer();
+  });
+  translatorInput.addEventListener('compositionend', () => {
+    translatorPopupComposing = false;
+    scheduleTranslatorPopupTranslation();
+  });
 }
 
 document.addEventListener('click', event => {

@@ -130,6 +130,11 @@ async def _maybe_continue_auto_generation(
     overrides = _auto_generation_overrides(params)
     overrides["auto_generate"] = True
     overrides["prompt_fixed"] = prompt_fixed
+    # Auto Gen은 매 반복마다 새 랜덤 시드를 사용한다 (사용자가 seed_fixed로 명시 고정한 경우 제외).
+    # 특히 prompt_fixed면 프롬프트가 동일하므로, 직전 생성의 구체 시드를 그대로 재사용하면
+    # 같은 이미지만 반복된다. seed=-1로 리셋해 시드 정규화에서 재랜덤화되도록 한다.
+    if not context._coerce_bool(overrides.get("seed_fixed", params.get("seed_fixed", False))):
+        overrides["seed"] = -1
     queue_source = "Automation" if automation_run_id else "Auto Generate"
     overrides["_remote_queue_source"] = queue_source
     overrides["_remote_queue_label"] = queue_source

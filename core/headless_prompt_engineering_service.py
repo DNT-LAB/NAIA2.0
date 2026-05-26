@@ -110,28 +110,45 @@ class HeadlessPromptEngineeringService:
         }
         return context._module_state_payload("prompt_engineering", payload)
 
-    def ensure_first_run_recommended_preset(self) -> None:
+    def ensure_first_run_recommended_preset(self) -> tuple[bool, str]:
         from core.prompt_engineering_settings import get_prompt_engineering_store
 
         context = self.context
         store = get_prompt_engineering_store(context)
         mode = context.get_api_mode()
         if mode == "COMFYUI" and not self._is_comfyui_anima_mode():
-            return
+            return False, ""
         if mode not in {"NAI", "WEBUI", "COMFYUI"}:
-            return
+            return False, ""
         if store.load_last_used_preset(mode):
-            return
+            return False, ""
         user_presets = [
             name
             for name in store.list_preset_names(mode)
             if name not in {"", "default", "*randomized"}
         ]
         if user_presets:
-            return
+            return False, ""
         ok, message = self.create_and_apply_recommended_preset(save_current=False)
         if ok:
             print(f"Remote Web: first-run recommended preset applied: {message}", flush=True)
+        return ok, message
+
+    def ensure_first_run_recommended_preset_payloads(self) -> list[dict[str, Any]]:
+        ok, _message = self.ensure_first_run_recommended_preset()
+        if not ok:
+            return []
+        context = self.context
+        return [
+            self.state(),
+            context.generation_param_schema_payload(),
+            {
+                "type": "prompt_sync",
+                "prompt": context.prompt_text,
+                "negative": context.negative_prompt_text,
+                "negative_prompt": context.negative_prompt_text,
+            },
+        ]
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
         from core.prompt_engineering_settings import get_prompt_engineering_store
@@ -256,7 +273,11 @@ class HeadlessPromptEngineeringService:
             return False
         sampling_mode = str(context.remote_params.get("sampling_mode") or "").strip().lower()
         comfyui_sampling_mode = str(context.remote_params.get("comfyui_sampling_mode") or "").strip().lower()
-        workflow_type = str(context.remote_params.get("workflow_type") or "").strip().lower()
+        workflow_type = str(
+            context.remote_params.get("workflow_type")
+            or context.remote_params.get("comfyui_workflow_type")
+            or ""
+        ).strip().lower()
         if sampling_mode:
             return sampling_mode == "anima"
         if comfyui_sampling_mode:

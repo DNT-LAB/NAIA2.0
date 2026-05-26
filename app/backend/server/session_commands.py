@@ -22,6 +22,24 @@ API_OPTION_TOKEN_KEYS = {
     "WEBUI": "webui_url",
     "COMFYUI": "comfyui_url",
 }
+RECOMMENDED_PRESET_PARAM_TRIGGERS = {
+    "sampling_mode",
+    "comfyui_sampling_mode",
+    "workflow_type",
+    "comfyui_workflow_type",
+}
+
+
+async def broadcast_first_run_recommended_preset_payloads(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    *,
+    broadcast_json: BroadcastJson,
+) -> bool:
+    payloads = context._prompt_engineering_service().ensure_first_run_recommended_preset_payloads()
+    for payload in payloads:
+        await broadcast_json(clients, payload)
+    return bool(payloads)
 
 
 async def refresh_active_api_options_if_configured(
@@ -103,8 +121,17 @@ async def handle_session_command(
         }, ensure_ascii=False))
         return True
     if command_type == "set_param":
-        context.set_param(str(command.get("key") or ""), command.get("value"))
-        await broadcast_json(clients, context.generation_param_schema_payload())
+        key = str(command.get("key") or "")
+        context.set_param(key, command.get("value"))
+        recommended_applied = False
+        if key.strip() in RECOMMENDED_PRESET_PARAM_TRIGGERS:
+            recommended_applied = await broadcast_first_run_recommended_preset_payloads(
+                context,
+                clients,
+                broadcast_json=broadcast_json,
+            )
+        if not recommended_applied:
+            await broadcast_json(clients, context.generation_param_schema_payload())
         return True
     return False
 
@@ -145,6 +172,7 @@ async def _handle_set_mode(
     context.set_api_mode(requested_mode)
     if requested_mode in {"WEBUI", "COMFYUI"}:
         await run_in_thread(context.refresh_api_options, requested_mode)
+    recommended_payloads = context._prompt_engineering_service().ensure_first_run_recommended_preset_payloads()
     await broadcast_json(clients, {
         "type": "mode_result",
         "success": True,
@@ -152,5 +180,9 @@ async def _handle_set_mode(
         "message": f"{context.get_api_mode()} mode active",
     })
     await broadcast_json(clients, {"type": "mode", "mode": context.get_api_mode()})
-    await broadcast_json(clients, context.generation_param_schema_payload())
+    if recommended_payloads:
+        for payload in recommended_payloads:
+            await broadcast_json(clients, payload)
+    else:
+        await broadcast_json(clients, context.generation_param_schema_payload())
     await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))

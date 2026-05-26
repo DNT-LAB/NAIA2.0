@@ -43,6 +43,10 @@ async def enqueue_generation_request(context: WebSessionContext, command: dict[s
     return await asyncio.to_thread(generation_service(context).enqueue_remote_request, command)
 
 
+async def persist_prompt_engineering_settings(context: WebSessionContext) -> None:
+    await asyncio.to_thread(context.persist_prompt_engineering_settings)
+
+
 async def _request_json_payload(req: Request) -> dict[str, Any]:
     try:
         payload = await req.json()
@@ -85,6 +89,7 @@ async def handle_random_command(
         overrides=overrides,
         random_request_id=request_id,
     )
+    await persist_prompt_engineering_settings(context)
     await _send_json(ws, result.websocket_payload())
     for message in result.extra_messages:
         await _send_json(ws, message)
@@ -150,6 +155,7 @@ async def handle_bootstrap_random_command(
             overrides=overrides,
             random_request_id=request_id,
         )
+        await persist_prompt_engineering_settings(context)
         payload = result.websocket_payload()
         if result.success:
             context.bootstrap_random_prompt_issued = True
@@ -174,6 +180,7 @@ async def handle_generate_command(
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
     command = command if isinstance(command, dict) else {}
+    await persist_prompt_engineering_settings(context)
     result = await enqueue_generation_request(context, command)
     await _send_json(ws, result.websocket_payload())
     if not result.ok:
@@ -347,6 +354,7 @@ def register_generation_rest_routes(
         command = await _request_json_payload(req)
         command = dict(command)
         command.setdefault("type", "generate")
+        await persist_prompt_engineering_settings(context)
         result = await enqueue_generation_request(context, command)
         payload = result.websocket_payload()
         if not result.ok:
@@ -371,6 +379,7 @@ def register_generation_rest_routes(
             overrides=overrides,
             random_request_id=request_id,
         )
+        await persist_prompt_engineering_settings(context)
         payload = result.websocket_payload()
         if not result.success:
             return JSONResponse(payload, status_code=400)
@@ -437,6 +446,7 @@ def register_generation_rest_routes(
                 "error": "Timed out waiting for random prompt generation",
                 "request_id": request_id,
             }, status_code=504)
+        await persist_prompt_engineering_settings(context)
         payload = result.websocket_payload()
         if not result.success:
             return JSONResponse(payload, status_code=400)

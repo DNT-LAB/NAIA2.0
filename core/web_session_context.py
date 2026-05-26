@@ -402,6 +402,9 @@ class WebSessionContext:
     def _prompt_engineering_module_state(self) -> dict[str, Any]:
         return self._prompt_engineering_service().state()
 
+    def persist_prompt_engineering_settings(self) -> tuple[bool, str]:
+        return self._prompt_engineering_service().persist_active_settings()
+
     def _set_prompt_engineering_param(self, key: str, value: Any) -> dict[str, Any] | None:
         return self._prompt_engineering_service().set_param(key, value)
 

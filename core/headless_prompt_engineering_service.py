@@ -150,6 +150,11 @@ class HeadlessPromptEngineeringService:
             },
         ]
 
+    def persist_active_settings(self) -> tuple[bool, str]:
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        return get_prompt_engineering_store(self.context).persist_active_settings()
+
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
         from core.prompt_engineering_settings import get_prompt_engineering_store
 

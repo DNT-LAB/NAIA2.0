@@ -4201,6 +4201,7 @@ function syncPromptTabStateFromDom() {
 function requestGenerate(payload = {}) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   if (generating) return false;
+  flushPromptEngineeringEdits();
   if (promptSendTimer) { clearTimeout(promptSendTimer); promptSendTimer = null; }
   _localPromptDirty = false;
   const message = {type: 'generate', ...(payload && typeof payload === 'object' ? payload : {})};
@@ -4209,6 +4210,7 @@ function requestGenerate(payload = {}) {
 }
 
 function requestRandomPrompt({force = false, bootstrap = false} = {}) {
+  flushPromptEngineeringEdits();
   if (activePromptTab === 'preset') {
     if (!force) void randomizeFromPresetTab();
     return false;
@@ -5085,7 +5087,8 @@ function openModule(moduleId, options = {}) {
   }
   if (currentModuleId === 'img2img' && img2imgPanel) img2imgPanel.closeMaskEditor();
   if (characterPanel && moduleId !== 'character') characterPanel.hideColdPanel();
-  flushPendingModuleEdit(currentModuleId);
+  if (currentModuleId === 'prompt_engineering') flushPromptEngineeringEdits();
+  else flushPendingModuleEdit(currentModuleId);
   // chunk 는 1차 모듈과 공존 — 닫지 않고 새 anchor 로 재정렬만
   closeAuxiliaryPopups(null, { keepChunk: moduleId !== 'chunk' });
   currentModuleId = moduleId;
@@ -5139,7 +5142,8 @@ function closeModule(options = {}) {
     imageModulePanels.closeAllVibeClusterPanels();
   }
   if (currentModuleId === 'character' && characterPanel) characterPanel.hideColdPanel();
-  flushPendingModuleEdit(currentModuleId);
+  if (currentModuleId === 'prompt_engineering') flushPromptEngineeringEdits();
+  else flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
   modulePopup.classList.remove('module-popup-e621');
   modulePopup.classList.remove('module-popup-img2img');

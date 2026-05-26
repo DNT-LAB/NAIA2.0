@@ -28,6 +28,10 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
             yield
         finally:
             try:
+                await run_in_thread(context.persist_prompt_engineering_settings)
+            except Exception as exc:
+                print(f"Headless Remote: prompt engineering shutdown save failed - {exc}", flush=True)
+            try:
                 await run_in_thread(save_runner_parquet, context)
             except Exception as exc:
                 print(f"Headless Remote: runner parquet shutdown save failed - {exc}", flush=True)

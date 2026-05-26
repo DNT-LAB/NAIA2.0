@@ -360,6 +360,7 @@ class PromptEngineeringHeadlessStore:
         self._mode_getter = mode_getter or (lambda: "NAI")
         self._save_root = _coerce_save_root(save_root)
         self._states: dict[str, dict[str, Any]] = {}
+        self._dirty_modes: set[str] = set()
 
     def mode(self, mode: str | None = None) -> str:
         return normalize_prompt_engineering_mode(mode or self._mode_getter())
@@ -434,8 +435,12 @@ class PromptEngineeringHeadlessStore:
         return copy.deepcopy(self.state(mode)["settings"])
 
     def apply_settings(self, updates: dict[str, Any], mode: str | None = None) -> dict[str, Any]:
-        state = self.state(mode)
-        state["settings"] = merge_settings(state["settings"], updates)
+        mode_key = self.mode(mode)
+        state = self.state(mode_key)
+        merged = merge_settings(state["settings"], updates)
+        if merged != state["settings"]:
+            state["settings"] = merged
+            self._dirty_modes.add(mode_key)
         return copy.deepcopy(state["settings"])
 
     def preset_options(self, mode: str | None = None) -> list[str]:
@@ -457,6 +462,7 @@ class PromptEngineeringHeadlessStore:
         name = sanitize_preset_name(preset_name) if preset_name != "*randomized" else "*randomized"
         if name == "*randomized":
             state["current_preset"] = "*randomized"
+            self._dirty_modes.discard(self.mode(mode))
             return True
         if name not in state["preset_list"]:
             return False
@@ -464,6 +470,7 @@ class PromptEngineeringHeadlessStore:
         state["settings"] = merge_settings(state["settings"], preset_data.get("module_settings") or {})
         state["current_preset"] = name
         self.save_last_used_preset(self.mode(mode), name)
+        self._dirty_modes.discard(self.mode(mode))
         return True
 
     def save_current_preset(self, mode: str | None = None) -> tuple[bool, str]:
@@ -477,6 +484,7 @@ class PromptEngineeringHeadlessStore:
         data["module_settings"] = copy.deepcopy(state["settings"])
         self.write_preset_data(name, mode_key, data)
         self.save_last_used_preset(mode_key, name)
+        self._dirty_modes.discard(mode_key)
         return True, name
 
     def create_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
@@ -535,6 +543,28 @@ class PromptEngineeringHeadlessStore:
         self.state(mode_key)["randomized_preset_list"] = []
         self.save_randomized_pool(mode_key, [])
         return True, ""
+
+    def persist_active_settings(self, mode: str | None = None, *, force: bool = False) -> tuple[bool, str]:
+        mode_key = self.mode(mode)
+        if mode_key not in self._states:
+            return False, ""
+        state = self.state(mode_key)
+        current = str(state.get("current_preset") or "")
+        if not force and mode_key not in self._dirty_modes:
+            return False, current
+
+        settings = copy.deepcopy(state["settings"])
+        if current and current not in {"(프리셋 없음)", "*randomized"}:
+            data = self.read_preset_data(current, mode_key)
+            data["api_mode"] = mode_key
+            data["module_settings"] = settings
+            data.setdefault("main_settings", {})
+            self.write_preset_data(current, mode_key, data)
+            self.save_last_used_preset(mode_key, current)
+        else:
+            self.save_mode_settings(mode_key, settings)
+        self._dirty_modes.discard(mode_key)
+        return True, current
 
 
 def get_prompt_engineering_store(app_context) -> PromptEngineeringHeadlessStore:

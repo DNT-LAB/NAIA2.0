@@ -6,7 +6,11 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from app.backend.server.generation_commands import generation_service, random_service
+from app.backend.server.generation_commands import (
+    generation_service,
+    persist_prompt_engineering_settings,
+    random_service,
+)
 from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
 from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
 from core import result_image_payload_service as result_images
@@ -122,6 +126,7 @@ async def _maybe_continue_auto_generation(
             overrides=overrides,
             random_request_id=request_id,
         )
+        await persist_prompt_engineering_settings(context)
         payload = result.websocket_payload()
         if not result.success:
             await broadcast_json(clients, payload)

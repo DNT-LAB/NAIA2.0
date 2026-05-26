@@ -134,6 +134,8 @@ def apply_search_runtime_filters(context: WebSessionContext) -> dict[str, Any]:
 
 
 def save_runner_parquet(context: WebSessionContext) -> Path | None:
+    if _should_skip_auto_runner_save(context):
+        return None
     frame = context.search_results.get_dataframe() if context.search_results else None
     if frame is None or getattr(frame, "empty", True):
         return None
@@ -141,6 +143,15 @@ def save_runner_parquet(context: WebSessionContext) -> Path | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(path, index=False)
     return path
+
+
+def _should_skip_auto_runner_save(context: WebSessionContext) -> bool:
+    state = context.normalize_search_filter_state(getattr(context, "search_filter_state", None))
+    if state.get("query") or state.get("exclude") or state.get("tag_filter_active"):
+        return True
+    if getattr(context, "active_tag_filter_ids", None) is not None or getattr(context, "active_tag_filter", None):
+        return True
+    return False
 
 
 def search_state_with_runner_save(context: WebSessionContext) -> dict[str, Any]:
@@ -175,7 +186,7 @@ def run_search_command(context: WebSessionContext, command: dict[str, Any]) -> d
     query = str(command.get("query") or "")
     exclude = str(command.get("exclude") or "")
     context.search_query_ratings = ratings
-    context.save_search_filter_state(query=query, exclude=exclude)
+    context.save_search_filter_state(query=query, exclude=exclude, search_ratings=ratings)
 
     use_custom_scope = getattr(context, "search_results_scope", "") == CUSTOM_PARQUET_SCOPE
     archive_sources = [] if use_custom_scope else tag_archive_parquet_sources(context)
@@ -339,9 +350,9 @@ def search_parquet_action(context: WebSessionContext, command: dict[str, Any]) -
         frame.to_parquet(path, index=False)
         message = f"Exported {path.name} ({len(frame):,})"
     elif action == "save_runner":
-        path = save_runner_parquet(context)
-        if path is None:
-            return context.search_state_payload(), {"type": "toast", "message": "No search results to save", "level": "error"}
+        path = context.runner_parquet_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(path, index=False)
         message = f"Saved runner parquet ({len(frame):,})"
     else:
         return context.search_state_payload(), {"type": "toast", "message": "Unsupported parquet action", "level": "error"}

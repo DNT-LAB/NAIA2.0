@@ -579,8 +579,12 @@ class HeadlessRandomPromptService:
         for path, label in self._fallback_sources():
             if not path.exists():
                 continue
+            if self._should_skip_fallback_source(label, None):
+                continue
             try:
                 frame = pd.read_parquet(path)
+                if self._should_skip_fallback_source(label, frame):
+                    continue
                 if "rating" in frame.columns and label == "fallback parquet":
                     frame = frame[frame["rating"] == "s"]
                 if frame.empty:
@@ -588,10 +592,29 @@ class HeadlessRandomPromptService:
                 frame = frame.reset_index(drop=True)
                 self.context.search_results = SearchResultModel(frame)
                 self.context.search_results_snapshot = frame.copy()
+                if "tag archive" in label:
+                    self.context.search_results_scope = "tag_archive"
                 safe_print(f"🌐 Headless Remote: search_results restored from {label} ({self.context.search_results.get_count()} rows)")
                 return True
             except Exception as exc:
                 safe_print(f"🌐 Headless Remote: search_results restore failed from {path} — {exc}")
+        return False
+
+    def _should_skip_fallback_source(self, label: str, frame: Any | None) -> bool:
+        if label not in {
+            "runtime cache parquet",
+            "runtime data parquet",
+            "legacy data parquet",
+            "legacy temp parquet",
+        }:
+            return False
+        state = self.context.normalize_search_filter_state(getattr(self.context, "search_filter_state", None))
+        if state.get("query") or state.get("exclude") or state.get("tag_filter_active"):
+            return True
+        if frame is not None and "id" not in getattr(frame, "columns", []):
+            sources = getattr(self.context, "tag_archive_parquet_sources", None)
+            if callable(sources) and sources():
+                return True
         return False
 
     def _fallback_sources(self) -> list[tuple[Path, str]]:

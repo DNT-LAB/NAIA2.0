@@ -65,6 +65,7 @@ def initialize_desktop_compatibility(context: Any) -> None:
 def initialize_runtime_state(context: Any) -> None:
     context.search_filter_state = context._load_search_filter_state()
     context.remote_active_ratings = set(context.search_filter_state.get("ratings") or DEFAULT_ACTIVE_RATINGS)
+    context.search_query_ratings = set(context.search_filter_state.get("search_ratings") or DEFAULT_ACTIVE_RATINGS)
     context.active_tag_filter_ids = None
     context.pending_tag_filter = None
     context.depth_state = None

@@ -58,6 +58,7 @@ class HeadlessSearchStateService:
             "query": "",
             "exclude": "",
             "ratings": list(DEFAULT_ACTIVE_RATINGS),
+            "search_ratings": list(DEFAULT_ACTIVE_RATINGS),
             "tag_filter": [],
             "tag_filter_exclude": [],
             "tag_filter_active": False,
@@ -110,6 +111,9 @@ class HeadlessSearchStateService:
             state["query"] = str(raw.get("query", state["query"]) or "")
             state["exclude"] = str(raw.get("exclude", state["exclude"]) or "")
             state["ratings"] = self.normalize_rating_list(raw.get("ratings", state["ratings"]))
+            state["search_ratings"] = self.normalize_rating_list(
+                raw.get("search_ratings", raw.get("ratings", state["search_ratings"]))
+            )
             state["tag_filter"] = [
                 tag.lstrip("-") for tag in self.normalize_filter_tags(
                     raw.get("tag_filter") or raw.get("include") or raw.get("include_tags")
@@ -123,6 +127,14 @@ class HeadlessSearchStateService:
             state["tag_filter_active"] = bool(raw.get("tag_filter_active")) and (
                 bool(state["tag_filter"]) or bool(state["tag_filter_exclude"])
             )
+            if (
+                "search_ratings" not in raw
+                and (state["query"] or state["exclude"])
+                and not state["tag_filter_active"]
+                and not state["tag_filter"]
+                and not state["tag_filter_exclude"]
+            ):
+                state["ratings"] = list(DEFAULT_ACTIVE_RATINGS)
             state["updated_at"] = raw.get("updated_at")
         return state
 
@@ -151,6 +163,8 @@ class HeadlessSearchStateService:
                 state[key] = str(updates[key] or "")
         if "ratings" in updates and updates["ratings"] is not None:
             state["ratings"] = self.normalize_rating_list(updates["ratings"])
+        if "search_ratings" in updates and updates["search_ratings"] is not None:
+            state["search_ratings"] = self.normalize_rating_list(updates["search_ratings"])
         if "tag_filter" in updates and updates["tag_filter"] is not None:
             state["tag_filter"] = [
                 tag.lstrip("-") for tag in self.normalize_filter_tags(updates["tag_filter"])
@@ -184,6 +198,7 @@ class HeadlessSearchStateService:
             query=payload.get("query") if "query" in payload else None,
             exclude=payload.get("exclude") if "exclude" in payload else None,
             ratings=payload.get("ratings") if "ratings" in payload else None,
+            search_ratings=payload.get("search_ratings") if "search_ratings" in payload else None,
             tag_filter=payload.get("tag_filter") if "tag_filter" in payload else None,
             tag_filter_exclude=payload.get("tag_filter_exclude") if "tag_filter_exclude" in payload else None,
             tag_filter_active=payload.get("tag_filter_active") if "tag_filter_active" in payload else None,
@@ -273,8 +288,13 @@ class HeadlessSearchStateService:
     def search_state_payload(self) -> dict[str, Any]:
         context = self.context
         active_ratings = self.get_active_ratings()
+        filter_preferences = self.normalize_search_filter_state(
+            getattr(context, "search_filter_state", None)
+        )
         search_ratings = self.normalize_rating_list(
-            getattr(context, "search_query_ratings", None) or list(DEFAULT_ACTIVE_RATINGS)
+            getattr(context, "search_query_ratings", None)
+            or filter_preferences.get("search_ratings")
+            or list(DEFAULT_ACTIVE_RATINGS)
         )
         snapshot = getattr(context, "search_results_snapshot", None)
         if snapshot is not None and not getattr(snapshot, "empty", True) and "rating" in snapshot.columns:
@@ -288,9 +308,6 @@ class HeadlessSearchStateService:
             context.search_results.get_filtered_count(active_ratings)
             if active_ratings
             else context.search_results.get_count()
-        )
-        filter_preferences = self.normalize_search_filter_state(
-            getattr(context, "search_filter_state", None)
         )
         return {
             "type": "search_state",

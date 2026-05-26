@@ -1,6 +1,6 @@
 {
   "name": "naia-electron-shell",
-  "version": "0.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Electron shell prototype for the NAIA headless Remote Web backend.",
   "main": "main/main.cjs",
@@ -29,6 +29,8 @@
     "release:portable:workspace": "cd ../.. && python tools/run_electron_portable_workspace.py",
     "release:portable:workspace:bundled-python": "cd ../.. && python tools/run_electron_portable_workspace.py --python-runtime-dir %NAIA_PYTHON_RUNTIME_DIR% --require-bundled-python",
     "release:portable:workspace:clean-python": "cd ../.. && python tools/run_electron_portable_workspace.py --build-clean-python-runtime --python-runtime-version 3.12 --require-bundled-python",
+    "release:portable:update-cdp-evidence": "cd ../.. && python tools/update_portable_workspace_cdp_evidence.py --electron-timeout 180",
+    "release:portable:update-cdp-evidence:scan": "cd ../.. && python tools/update_portable_workspace_cdp_evidence.py --electron-timeout 180 --defender-scan --require-defender-scan",
     "release:final:plan": "cd ../.. && python tools/run_final_electron_release_gate.py",
     "release:final:plan:summary": "cd ../.. && python tools/run_final_electron_release_gate.py --summary --output \"\" --portable-output \"\"",
     "release:final": "cd ../.. && python tools/run_final_electron_release_gate.py --execute --run-electron-cdp --electron-timeout 180 --defender-scan --require-defender-scan",

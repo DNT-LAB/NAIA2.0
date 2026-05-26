@@ -1,6 +1,7 @@
 {
   "version": 1,
-  "status": "draft",
+  "status": "active",
+  "status_note": "Authoritative runtime-vs-development source payload policy. Filename retains the legacy '_draft' suffix for tool/test path stability (release_manifest_audit.py, stage_release_assets.py, tests).",
   "include": {
     "backend_runtime": [
       "NAIA_web_headless.py",

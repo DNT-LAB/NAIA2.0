@@ -114,7 +114,12 @@ class HeadlessGenerationService:
     def __init__(self, context: WebSessionContext):
         self.context = context
 
-    def enqueue_remote_request(self, command: dict[str, Any] | None = None) -> HeadlessGenerationDispatch:
+    def enqueue_remote_request(
+        self,
+        command: dict[str, Any] | None = None,
+        *,
+        enqueue: bool = True,
+    ) -> HeadlessGenerationDispatch:
         command = command if isinstance(command, dict) else {}
         api_mode = self._normalize_mode(command)
         credential = self._credential_for_mode(api_mode)
@@ -151,10 +156,11 @@ class HeadlessGenerationService:
             params["result_enhance_request_id"] = request.request_id
 
         queue_manager = self.context.generation_queue_manager
-        if priority > 0:
-            queue_manager.enqueue_with_priority(request)
-        else:
-            queue_manager.enqueue_request(request)
+        if enqueue:
+            if priority > 0:
+                queue_manager.enqueue_with_priority(request)
+            else:
+                queue_manager.enqueue_request(request)
 
         self.context.last_generation_request = request
         self.context.last_generation_params = params

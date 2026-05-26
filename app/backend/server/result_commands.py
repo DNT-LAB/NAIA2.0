@@ -379,9 +379,21 @@ async def handle_result_command(
         return True
 
     if command_type == "result_enhance":
+        # Enhance is a paid, parallel-capable call, so it runs OFF the shared
+        # generation queue (like NAI 2x upscale) rather than through
+        # enqueue/run_generation_queue. That keeps it from toggling
+        # is_generating and locking the Generate button, and lets it run
+        # concurrently with a normal generation.
+        from app.backend.server.generation_commands import generation_service
+        from app.backend.server.generation_runner import _auto_save_generated_history_item
+
+        def _build_enhance_dispatch():
+            generation_command, enhance_state = prepare_result_enhance_command(context, command)
+            dispatch = generation_service(context).enqueue_remote_request(generation_command, enqueue=False)
+            return dispatch, enhance_state
+
         try:
-            generation_command, enhance_state = await run_in_thread(prepare_result_enhance_command, context, command)
-            result = await enqueue_generation_request(context, generation_command)
+            dispatch, enhance_state = await run_in_thread(_build_enhance_dispatch)
         except Exception as exc:
             message = f"Enhance request failed: {exc}"
             await _send_json(ws, {
@@ -398,36 +410,69 @@ async def handle_result_command(
                 "runtime": "web",
             })
             return True
-        await _send_json(ws, result.websocket_payload())
-        if not result.ok:
+        if not dispatch.ok or dispatch.request is None:
+            await _send_json(ws, dispatch.websocket_payload())
             await _send_json(ws, {
                 "type": "result_enhance_state",
                 "running": False,
                 "success": False,
-                "message": result.blocked_reason,
+                "message": dispatch.blocked_reason,
                 "runtime": "web",
             })
             await _send_json(ws, {
                 "type": "toast",
                 "level": "error",
-                "message": result.blocked_reason,
+                "message": dispatch.blocked_reason,
                 "runtime": "web",
             })
             return True
+        enhance_request_id = str(dispatch.request.request_id)
         await _send_json(ws, enhance_state)
         await _send_json(ws, {
-            "type": "status",
-            "is_generating": False,
-            "message": "queued",
+            "type": "result_enhance_state",
+            "running": True,
+            "success": None,
+            "message": "Enhance running",
+            "request_id": enhance_request_id,
+            "runtime": "web",
+        })
+        try:
+            stored = await run_in_thread(generation_service(context).execute_request, dispatch.request)
+        except Exception as exc:
+            message = f"Enhance failed: {exc}"
+            await _send_json(ws, {
+                "type": "result_enhance_state",
+                "running": False,
+                "success": False,
+                "message": message,
+                "request_id": enhance_request_id,
+                "runtime": "web",
+            })
+            await _send_json(ws, {
+                "type": "toast",
+                "level": "error",
+                "message": message,
+                "runtime": "web",
+            })
+            return True
+        await _auto_save_generated_history_item(context, stored.item)
+        await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
+        await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+        await broadcast_json(clients, context.auto_save_state_payload())
+        await _send_json(ws, {
+            "type": "result_enhance_state",
+            "running": False,
+            "success": True,
+            "message": "Enhance complete",
+            "request_id": enhance_request_id,
+            "runtime": "web",
         })
         await _send_json(ws, {
             "type": "toast",
             "level": "success",
-            "message": "Enhance queued",
+            "message": "Enhance complete",
+            "runtime": "web",
         })
-        await _send_json(ws, context.queue_state_payload())
-        if context.headless_generation_execute_enabled:
-            start_generation_runner(context, clients)
         return True
 
     if command_type == "set_result_enhance_config":

@@ -63,6 +63,7 @@ class HeadlessPromptEngineeringService:
 
         context = self.context
         store = get_prompt_engineering_store(context)
+        self.ensure_first_run_recommended_preset()
         settings = store.collect_settings()
         state = store.state()
         preset_options = store.preset_options()
@@ -108,6 +109,29 @@ class HeadlessPromptEngineeringService:
             "preset_can_delete": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized", "default"),
         }
         return context._module_state_payload("prompt_engineering", payload)
+
+    def ensure_first_run_recommended_preset(self) -> None:
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        context = self.context
+        store = get_prompt_engineering_store(context)
+        mode = context.get_api_mode()
+        if mode == "COMFYUI" and not self._is_comfyui_anima_mode():
+            return
+        if mode not in {"NAI", "COMFYUI"}:
+            return
+        if store.load_last_used_preset(mode):
+            return
+        user_presets = [
+            name
+            for name in store.list_preset_names(mode)
+            if name not in {"", "default", "*randomized"}
+        ]
+        if user_presets:
+            return
+        ok, message = self.create_and_apply_recommended_preset(save_current=False)
+        if ok:
+            print(f"Remote Web: first-run recommended preset applied: {message}", flush=True)
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
         from core.prompt_engineering_settings import get_prompt_engineering_store

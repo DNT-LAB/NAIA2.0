@@ -10,7 +10,7 @@ from typing import Any
 
 from app.backend.runtime import resolve_runtime_paths
 from core.api_config_service import ApiConfigService, CloudflaredService
-from core.headless_search_state_service import SUPPORTED_RATINGS
+from core.headless_search_state_service import DEFAULT_ACTIVE_RATINGS
 from core.headless_remote_ui_state_service import apply_remote_ui_state
 
 
@@ -40,6 +40,7 @@ def initialize_web_session_context(context: Any) -> None:
     initialize_desktop_compatibility(context)
     initialize_runtime_state(context)
     apply_remote_ui_state(context)
+    ensure_first_run_recommended_preset(context)
     attach_wildcard_manager_context(context)
 
     if context.api_config_service is None:
@@ -62,7 +63,7 @@ def initialize_desktop_compatibility(context: Any) -> None:
 
 def initialize_runtime_state(context: Any) -> None:
     context.search_filter_state = context._load_search_filter_state()
-    context.remote_active_ratings = set(context.search_filter_state.get("ratings") or SUPPORTED_RATINGS)
+    context.remote_active_ratings = set(context.search_filter_state.get("ratings") or DEFAULT_ACTIVE_RATINGS)
     context.active_tag_filter_ids = None
     context.pending_tag_filter = None
     context.depth_state = None
@@ -73,6 +74,13 @@ def initialize_runtime_state(context: Any) -> None:
     context.pipeline_hooks = {}
     context.session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     context.subscribers = context.event_bus.subscribers
+
+
+def ensure_first_run_recommended_preset(context: Any) -> None:
+    try:
+        context._prompt_engineering_service().ensure_first_run_recommended_preset()
+    except Exception as exc:
+        print(f"Remote Web: first-run recommended preset skipped: {exc}", flush=True)
 
 
 def attach_wildcard_manager_context(context: Any) -> None:

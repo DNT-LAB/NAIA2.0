@@ -10,6 +10,7 @@ import re
 
 
 SUPPORTED_RATINGS = ("g", "s", "q", "e")
+DEFAULT_ACTIVE_RATINGS = ("g", "s", "q")
 
 
 def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
@@ -28,7 +29,7 @@ class HeadlessSearchStateService:
         if isinstance(ratings, str):
             ratings = list(ratings)
         if not isinstance(ratings, (list, tuple, set)):
-            normalized = set(SUPPORTED_RATINGS)
+            normalized = set(DEFAULT_ACTIVE_RATINGS)
         else:
             normalized = {
                 str(item).strip().lower()
@@ -36,7 +37,7 @@ class HeadlessSearchStateService:
                 if str(item).strip().lower() in SUPPORTED_RATINGS
             }
             if not normalized:
-                normalized = set(SUPPORTED_RATINGS)
+                normalized = set(DEFAULT_ACTIVE_RATINGS)
         context.remote_active_ratings = normalized
         context.publish("remote_active_ratings_changed", self.search_state_payload())
         return normalized
@@ -44,10 +45,8 @@ class HeadlessSearchStateService:
     def get_active_ratings(self) -> set[str]:
         ratings = self.context.remote_active_ratings
         if not ratings:
-            return set(SUPPORTED_RATINGS)
-        return {rating for rating in SUPPORTED_RATINGS if rating in ratings} or set(
-            SUPPORTED_RATINGS
-        )
+            return set(DEFAULT_ACTIVE_RATINGS)
+        return {rating for rating in SUPPORTED_RATINGS if rating in ratings} or set(DEFAULT_ACTIVE_RATINGS)
 
     def search_filter_state_path(self) -> Path:
         return self.context._save_path("remote_web_filter_state.json")
@@ -58,7 +57,7 @@ class HeadlessSearchStateService:
             "version": 1,
             "query": "",
             "exclude": "",
-            "ratings": list(SUPPORTED_RATINGS),
+            "ratings": list(DEFAULT_ACTIVE_RATINGS),
             "tag_filter": [],
             "tag_filter_exclude": [],
             "tag_filter_active": False,
@@ -70,7 +69,7 @@ class HeadlessSearchStateService:
         if isinstance(ratings, str):
             ratings = list(ratings)
         if not isinstance(ratings, (list, tuple, set)):
-            return list(SUPPORTED_RATINGS)
+            return list(DEFAULT_ACTIVE_RATINGS)
         normalized = [
             rating
             for rating in SUPPORTED_RATINGS
@@ -80,7 +79,7 @@ class HeadlessSearchStateService:
                 if str(item).strip().lower() in SUPPORTED_RATINGS
             }
         ]
-        return normalized or list(SUPPORTED_RATINGS)
+        return normalized or list(DEFAULT_ACTIVE_RATINGS)
 
     @staticmethod
     def normalize_filter_tags(tags: Any) -> list[str]:
@@ -275,7 +274,7 @@ class HeadlessSearchStateService:
         context = self.context
         active_ratings = self.get_active_ratings()
         search_ratings = self.normalize_rating_list(
-            getattr(context, "search_query_ratings", None) or list(SUPPORTED_RATINGS)
+            getattr(context, "search_query_ratings", None) or list(DEFAULT_ACTIVE_RATINGS)
         )
         snapshot = getattr(context, "search_results_snapshot", None)
         if snapshot is not None and not getattr(snapshot, "empty", True) and "rating" in snapshot.columns:

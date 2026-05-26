@@ -238,7 +238,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260524-tag-filter-update1')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260526-safe-rating-default1')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -952,7 +952,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260524-search-ratings1')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260526-safe-rating-default1')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -5862,7 +5862,7 @@ function applyVibeStorage(model, fileHash, ieValue) {
 
 // ---- Search system ----
 const searchCountEl = $('searchCount');
-const DEFAULT_RATING_STATE = {g: true, s: true, q: true, e: true};
+const DEFAULT_RATING_STATE = {g: true, s: true, q: true, e: false};
 
 function getRatingStateSnapshot() {
   return searchPanelControl ? searchPanelControl.getRatingState() : DEFAULT_RATING_STATE;

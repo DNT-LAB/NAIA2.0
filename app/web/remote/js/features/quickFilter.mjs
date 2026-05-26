@@ -1,10 +1,11 @@
 const STORAGE_KEY = 'naia_quick_filter_options';
 const RATING_KEYS = ['g', 's', 'q', 'e'];
+const DEFAULT_RATING_KEYS = ['g', 's', 'q'];
 
 export function normalizeRatings(value) {
-  if (!Array.isArray(value)) return [...RATING_KEYS];
+  if (!Array.isArray(value)) return [...DEFAULT_RATING_KEYS];
   const picked = RATING_KEYS.filter(key => value.includes(key));
-  return picked.length ? picked : [...RATING_KEYS];
+  return picked.length ? picked : [...DEFAULT_RATING_KEYS];
 }
 
 export function normalizeTags(value) {
@@ -35,9 +36,9 @@ export function normalizePreferences(raw) {
 export function hasCustomPreferences(pref) {
   if (!pref) return false;
   const ratings = normalizeRatings(pref.ratings);
-  const allRatings = ratings.length === RATING_KEYS.length
-    && RATING_KEYS.every(key => ratings.includes(key));
-  return !allRatings
+  const defaultRatings = ratings.length === DEFAULT_RATING_KEYS.length
+    && DEFAULT_RATING_KEYS.every(key => ratings.includes(key));
+  return !defaultRatings
     || (pref.tag_filter && pref.tag_filter.length > 0)
     || (pref.tag_filter_exclude && pref.tag_filter_exclude.length > 0)
     || !!pref.tag_filter_active;

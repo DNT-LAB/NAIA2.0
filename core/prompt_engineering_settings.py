@@ -110,7 +110,9 @@ def normalize_preset_main_settings(settings: dict[str, Any] | None) -> dict[str,
 
 
 def default_preprocessing_options() -> dict[str, bool]:
-    return {key: False for key in PREPROCESSING_OPTION_KEYS}
+    options = {key: False for key in PREPROCESSING_OPTION_KEYS}
+    options["closed_eyes_sync"] = True
+    return options
 
 
 def default_prompt_engineering_settings(save_root: str | Path | None = None) -> dict[str, Any]:

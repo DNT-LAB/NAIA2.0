@@ -11,6 +11,7 @@ import weakref
 
 import pandas as pd
 
+from core.headless_search_state_service import DEFAULT_ACTIVE_RATINGS
 from core.prompt_generation_service import PromptGenerationService
 from core.safe_console import safe_print
 from core.search_result_model import SearchResultModel
@@ -85,7 +86,7 @@ class HeadlessRandomPromptService:
             prime = getattr(self.context.search_results, "prime_random_cache", None)
             if callable(prime):
                 prime([
-                    set(DEFAULT_RATINGS),
+                    set(DEFAULT_ACTIVE_RATINGS),
                     {"s"},
                     {"g"},
                     {"q"},
@@ -611,11 +612,11 @@ class HeadlessRandomPromptService:
     @staticmethod
     def _normalize_ratings(ratings: set[str] | None) -> set[str]:
         try:
-            values = {str(rating).strip().lower() for rating in (ratings or DEFAULT_RATINGS)}
+            values = {str(rating).strip().lower() for rating in (ratings or DEFAULT_ACTIVE_RATINGS)}
         except TypeError:
-            values = set(DEFAULT_RATINGS)
+            values = set(DEFAULT_ACTIVE_RATINGS)
         picked = {rating for rating in DEFAULT_RATINGS if rating in values}
-        return picked or set(DEFAULT_RATINGS)
+        return picked or set(DEFAULT_ACTIVE_RATINGS)
 
     @staticmethod
     def _coerce_bool(value: Any) -> bool:

@@ -11,8 +11,8 @@ export function createSearchPanel({
 }) {
   const RATING_KEYS = ['g', 's', 'q', 'e'];
   let searchingActive = false;
-  let ratingState = { g: true, s: true, q: true, e: true };
-  let searchRatingState = { g: true, s: true, q: true, e: true };
+  let ratingState = { g: true, s: true, q: true, e: false };
+  let searchRatingState = { g: true, s: true, q: true, e: false };
   let cachedRatingCounts = null;
   let parquetPickMode = 'load';
   const draftSearch = {
@@ -274,7 +274,7 @@ export function createSearchPanel({
         syncRatingButtons();
       }
     } else {
-      ratingState = { g: true, s: true, q: true, e: true };
+      ratingState = { g: true, s: true, q: true, e: false };
       syncRatingButtons();
       if (quickFilter) quickFilter.reset({ persist: false });
     }

@@ -17,6 +17,7 @@ from core.headless_autocomplete_state import AutocompleteRuntimeState
 from core.headless_event_bus import WebSessionEventBus
 from core.headless_remote_state_service import REMOTE_OPTION_DEFAULTS, SUPPORTED_API_MODES
 from core.headless_result_service import HeadlessResultStore
+from core.headless_search_state_service import DEFAULT_ACTIVE_RATINGS
 from core.headless_token_store import InMemoryTokenManager, TokenStore
 from core.pipeline_run_registry import PipelineRunRegistry, PromptPipelineRun
 from app.backend.runtime import RuntimePaths
@@ -55,7 +56,7 @@ class WebSessionContext:
     search_results: SearchResultModel = field(default_factory=SearchResultModel)
     search_results_snapshot: Any = None
     search_results_master_base_snapshot: Any = None
-    search_query_ratings: set[str] = field(default_factory=lambda: {"g", "s", "q", "e"})
+    search_query_ratings: set[str] = field(default_factory=lambda: set(DEFAULT_ACTIVE_RATINGS))
     active_tag_filter_ids: set[Any] | None = None
     pending_tag_filter: dict[str, Any] | None = None
     active_tag_filter: dict[str, Any] | None = None

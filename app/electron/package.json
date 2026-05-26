@@ -139,6 +139,16 @@
       "icon": "assets/naia.ico",
       "signAndEditExecutable": false,
       "forceCodeSigning": false
+    },
+    "mac": {
+      "target": [
+        { "target": "dir", "arch": "arm64" }
+      ],
+      "icon": "assets/naia.icns",
+      "category": "public.app-category.graphics-design",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     }
   }
 }

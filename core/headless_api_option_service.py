@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
+from typing import Any, Callable
 
 import requests
 
@@ -53,15 +55,22 @@ class HeadlessApiOptionService:
         if not normalized_url:
             return {}
 
+        fetched = _fetch_concurrently({
+            "options_model": lambda: WebuiAPIUtils.get_model_list(normalized_url),
+            "options_sampler": lambda: WebuiAPIUtils.get_sampler_list(normalized_url),
+            "options_scheduler": lambda: WebuiAPIUtils.get_schedulers_list(normalized_url),
+            "options_hr_upscaler": lambda: WebuiAPIUtils.get_upscaler_list(normalized_url),
+            "current_model": lambda: WebuiAPIUtils.get_current_model(normalized_url),
+        })
         options = {
-            "options_model": _dedupe(WebuiAPIUtils.get_model_list(normalized_url)),
-            "options_sampler": _dedupe(WebuiAPIUtils.get_sampler_list(normalized_url)),
-            "options_scheduler": _dedupe(WebuiAPIUtils.get_schedulers_list(normalized_url)),
-            "options_hr_upscaler": _dedupe(WebuiAPIUtils.get_upscaler_list(normalized_url)),
+            "options_model": _dedupe(fetched.get("options_model") or []),
+            "options_sampler": _dedupe(fetched.get("options_sampler") or []),
+            "options_scheduler": _dedupe(fetched.get("options_scheduler") or []),
+            "options_hr_upscaler": _dedupe(fetched.get("options_hr_upscaler") or []),
         }
-        current_model = str(WebuiAPIUtils.get_current_model(normalized_url) or "").strip()
+        current_model = str(fetched.get("current_model") or "").strip()
         if current_model and options["options_model"]:
-            options["model"] = [_choose_option(current_model, options["options_model"], current_model)]
+            options["model"] = [_choose_model_option(current_model, options["options_model"], current_model)]
         return _non_empty_options(options)
 
     def _fetch_comfyui_options(self, url: str) -> dict[str, list[str]]:
@@ -89,8 +98,10 @@ class HeadlessApiOptionService:
         upscaler_options = options.get("options_hr_upscaler") or []
 
         if model_options:
-            current_model = params.get("model") or ((options.get("model") or [""])[0])
-            options["model"] = [_choose_option(current_model, model_options, fallback_model)]
+            current_model = _find_model_option(params.get("model"), model_options)
+            if not current_model:
+                current_model = (options.get("model") or [""])[0]
+            options["model"] = [_choose_model_option(current_model, model_options, fallback_model)]
         if sampler_options:
             options["sampler"] = [_choose_option(params.get("sampler"), sampler_options, sampler_options[0])]
         if scheduler_options:
@@ -155,8 +166,79 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
+def _fetch_concurrently(fetchers: dict[str, Callable[[], Any]]) -> dict[str, Any]:
+    if not fetchers:
+        return {}
+    results: dict[str, Any] = {}
+    max_workers = min(len(fetchers), 5)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_key = {
+            executor.submit(fetcher): key
+            for key, fetcher in fetchers.items()
+        }
+        for future in as_completed(future_to_key):
+            key = future_to_key[future]
+            try:
+                results[key] = future.result()
+            except Exception:
+                results[key] = [] if key != "current_model" else ""
+    return results
+
+
 def _non_empty_options(options: dict[str, list[str]]) -> dict[str, list[str]]:
     return {key: values for key, values in options.items() if values}
+
+
+def _choose_model_option(current: Any, options: list[str], fallback: str) -> str:
+    clean_current = str(current or "").strip()
+    selected = _find_model_option(current, options)
+    if selected:
+        return selected
+
+    clean_fallback = str(fallback or "").strip()
+    direct = _choose_exact_option(clean_fallback, options)
+    if direct:
+        return direct
+
+    fallback_alias = _model_alias(clean_fallback)
+    if fallback_alias:
+        for option in options:
+            if _model_alias(option) == fallback_alias:
+                return option
+
+    return options[0] if options else clean_current
+
+
+def _find_model_option(current: Any, options: list[str]) -> str:
+    clean_current = str(current or "").strip()
+    direct = _choose_exact_option(clean_current, options)
+    if direct:
+        return direct
+
+    current_alias = _model_alias(clean_current)
+    if current_alias:
+        for option in options:
+            if _model_alias(option) == current_alias:
+                return option
+    return ""
+
+
+def _choose_exact_option(current: str, options: list[str]) -> str:
+    if not current:
+        return ""
+    if current in options:
+        return current
+    folded_current = current.casefold()
+    for option in options:
+        if option.casefold() == folded_current:
+            return option
+    return ""
+
+
+def _model_alias(value: Any) -> str:
+    clean = str(value or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+    clean = re.sub(r"\s+\[[0-9a-fA-F]{6,}\]$", "", clean).strip()
+    return clean.casefold()
 
 
 def _choose_option(current: Any, options: list[str], fallback: str) -> str:

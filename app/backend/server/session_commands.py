@@ -18,9 +18,38 @@ SESSION_COMMAND_TYPES = {
     "set_prompt",
     "set_param",
 }
+API_OPTION_TOKEN_KEYS = {
+    "WEBUI": "webui_url",
+    "COMFYUI": "comfyui_url",
+}
 
 
-async def send_sync_messages(ws: WebSocket, context: WebSessionContext, client_host: str) -> None:
+async def refresh_active_api_options_if_configured(
+    context: WebSessionContext,
+    *,
+    run_in_thread: AsyncRunner,
+) -> dict[str, Any] | None:
+    mode = str(context.get_api_mode() or "").strip().upper()
+    token_key = API_OPTION_TOKEN_KEYS.get(mode)
+    if not token_key:
+        return None
+    if not str(context.secure_token_manager.get_token(token_key) or "").strip():
+        return None
+    try:
+        return await run_in_thread(context.refresh_api_options, mode)
+    except Exception:
+        return None
+
+
+async def send_sync_messages(
+    ws: WebSocket,
+    context: WebSessionContext,
+    client_host: str,
+    *,
+    run_in_thread: AsyncRunner | None = None,
+) -> None:
+    if run_in_thread is not None:
+        await refresh_active_api_options_if_configured(context, run_in_thread=run_in_thread)
     messages = [
         {"type": "mode", "mode": context.get_api_mode()},
         {"type": "options", **context.get_options()},
@@ -45,7 +74,7 @@ async def handle_session_command(
 ) -> bool:
     command_type = str(command.get("type") or "").strip()
     if command_type == "sync":
-        await send_sync_messages(ws, context, client_host)
+        await send_sync_messages(ws, context, client_host, run_in_thread=run_in_thread)
         return True
     if command_type == "set_option":
         context.set_option(str(command.get("key") or ""), command.get("value"))

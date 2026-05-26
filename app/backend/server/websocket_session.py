@@ -47,6 +47,7 @@ from app.backend.server.search_commands import (
 from app.backend.server.session_commands import (
     SESSION_COMMAND_TYPES,
     handle_session_command,
+    refresh_active_api_options_if_configured,
     send_sync_messages,
 )
 from core.web_session_context import WebSessionContext
@@ -76,6 +77,7 @@ def register_websocket_session(
             await send_startup_messages(
                 ws,
                 context,
+                run_in_thread=run_in_thread,
                 session_id=session_id,
                 client_host=client_host,
             )
@@ -104,6 +106,7 @@ def register_websocket_session(
                             clients,
                             client_host,
                             data,
+                            run_in_thread=run_in_thread,
                             start_generation_runner=start_generation_runner,
                         )
                 else:
@@ -113,6 +116,7 @@ def register_websocket_session(
                         clients,
                         client_host,
                         data,
+                        run_in_thread=run_in_thread,
                         start_generation_runner=start_generation_runner,
                     )
         except WebSocketDisconnect:
@@ -138,9 +142,11 @@ async def send_startup_messages(
     ws: WebSocket,
     context: WebSessionContext,
     *,
+    run_in_thread: RunInThread,
     session_id: str,
     client_host: str,
 ) -> None:
+    await refresh_active_api_options_if_configured(context, run_in_thread=run_in_thread)
     for message in context.initial_websocket_messages(
         session_id=session_id,
         client_host=client_host,
@@ -267,10 +273,11 @@ async def handle_text_command(
     client_host: str,
     data: str,
     *,
+    run_in_thread: RunInThread,
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
     if data == "sync":
-        await send_sync_messages(ws, context, client_host)
+        await send_sync_messages(ws, context, client_host, run_in_thread=run_in_thread)
         return
     if data == "random":
         await handle_random_command(ws, context)

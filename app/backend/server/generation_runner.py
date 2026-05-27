@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from app.backend.server.character_viewer_routes import character_viewer_service
 from app.backend.server.generation_commands import (
     generation_service,
     persist_prompt_engineering_settings,
@@ -72,6 +73,8 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             params = getattr(request, "params", {}) or {}
             if params.get("prompt_preset_thumbnail_request"):
                 await _broadcast_prompt_preset_thumbnail_update(context, clients, stored, params)
+            if params.get("character_viewer_request"):
+                await _save_character_viewer_thumbnail(context, stored, params)
             if params.get("result_enhance_request"):
                 await broadcast_json(clients, {
                     "type": "result_enhance_state",
@@ -308,6 +311,47 @@ async def _broadcast_generation_error(
             "message": message,
         })
     await broadcast_json(clients, context.queue_state_payload())
+
+
+async def _save_character_viewer_thumbnail(
+    context: WebSessionContext,
+    stored,
+    params: dict,
+) -> None:
+    """Register a Character Viewer generation result as that character's grid
+    thumbnail and enrich the broadcast image_meta so the tab refreshes in place.
+
+    The frontend's handleResultMeta()/refreshThumbnailFromMeta() already consume
+    these fields; future02 had built the snapshot in build_generation_overrides
+    but never saved the thumbnail or surfaced the fields, so generated images
+    never appeared in the Character tab grid."""
+    snapshot = params.get("_character_viewer_snapshot")
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    meta = stored.image_meta if isinstance(stored.image_meta, dict) else {}
+
+    thumbnail = None
+    if not snapshot.get("save_blocked"):
+        try:
+            thumbnail = await asyncio.to_thread(
+                character_viewer_service(context).save_thumbnail,
+                stored.item.image,
+                snapshot,
+            )
+        except Exception as exc:
+            print(f"Character Viewer thumbnail save failed: {exc}")
+
+    meta.update({
+        "character_viewer_request": True,
+        "character_viewer_request_id": str(params.get("character_viewer_request_id") or ""),
+        "character_viewer_character": str(params.get("_remote_queue_label") or ""),
+        "character_viewer_group": str(snapshot.get("group_key") or ""),
+        "character_viewer_character_name": str(snapshot.get("char_name") or ""),
+        "character_viewer_variant": str(snapshot.get("variant_label") or ""),
+        "character_viewer_thumbnail_saved": bool(thumbnail),
+        "character_viewer_thumbnail_url": (
+            str(thumbnail.get("url") or "") if isinstance(thumbnail, dict) else ""
+        ),
+    })
 
 
 async def _broadcast_prompt_preset_thumbnail_update(

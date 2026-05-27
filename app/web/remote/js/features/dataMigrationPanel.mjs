@@ -72,7 +72,7 @@ export function createDataMigrationPanel({document, showToast}) {
         <span class="setup-meta-val">${b.conflict_count > 0 ? `중복 ${b.conflict_count}` : '신규'}</span>
       </label>`).join('');
     const credNote = preview.credentials?.present
-      ? `<p class="setup-sub" style="margin:6px 0;color:var(--text-dim)">⚠ ${esc(preview.credentials.note)}</p>`
+      ? `<p class="setup-sub" style="color:var(--text-dim)">⚠ ${esc(preview.credentials.note)}</p>`
       : '';
     body.innerHTML = `
       <div class="setup-meta-line"><span>가져올 위치</span><span class="setup-meta-val" title="${esc(preview.source)}">${esc(preview.source)}</span></div>
@@ -85,7 +85,7 @@ export function createDataMigrationPanel({document, showToast}) {
           <option value="overwrite">덮어쓰기</option>
         </select>
       </label>
-      <div class="setup-cloudflared-actions" style="margin-top:8px">
+      <div class="setup-cloudflared-actions">
         <button class="setup-btn-primary" id="setupMigrationRun" type="button">가져오기 실행</button>
       </div>`;
     body.classList.remove('hidden');

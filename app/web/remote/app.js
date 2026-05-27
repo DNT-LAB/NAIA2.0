@@ -685,7 +685,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026052
     console.error('Failed to initialize setup controller module', error);
   });
 let dataMigrationPanel = null;
-const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=20260527-migration1')
+const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=20260527-migration2')
   .then(({createDataMigrationPanel}) => {
     dataMigrationPanel = createDataMigrationPanel({document, showToast});
   })

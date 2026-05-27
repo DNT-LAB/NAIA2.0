@@ -14761,6 +14761,27 @@ select.setup-input { cursor: pointer; }
   text-decoration: underline;
 }
 
+.setup-migration {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.setup-migration .setup-cloudflared-status { color: var(--text-muted); }
+.setup-migration .setup-sub { margin: 0; }
+.setup-migration-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+}
+.setup-migration-body.hidden { display: none; }
+
 .setup-sub.blocked { color: #f04040; }
 
 .setup-dialog.blocked .setup-btn-primary:not(.setup-btn-cloudflared),

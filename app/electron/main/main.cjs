@@ -5,6 +5,7 @@ const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
+const https = require("node:https");
 const path = require("node:path");
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -24,6 +25,80 @@ const RUNTIME_ENV_MARKER = "naia-runtime-env.json";
 const RUNTIME_ENV_MARKER_SCHEMA = 1;
 const PYTHON_BYTECODE_CACHE_DIR = path.join("cache", "python-bytecode");
 const APP_ICON = path.join(__dirname, "..", "assets", "naia.ico");
+// Auto-update: poll the GitHub releases API for the portable build and surface
+// it to the Remote Web shell UI. Releases are tagged vX.Y.Z and carry the
+// portable zip + a SHA256SUMS.txt that the apply step verifies against.
+const UPDATE_REPO = "DNT-LAB/NAIA2.0";
+const UPDATE_LATEST_RELEASE_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
+const UPDATE_RELEASES_PAGE_URL = `https://github.com/${UPDATE_REPO}/releases/latest`;
+const UPDATE_PORTABLE_ASSET = "NAIA-Portable.zip";
+const UPDATE_CHECKSUMS_ASSET = "SHA256SUMS.txt";
+const UPDATE_USER_AGENT = "NAIA-Updater";
+const UPDATE_DIR_NAME = ".updates";
+// Windows in-place swap helper. The app's exe/resources can't be overwritten
+// while running, so this PowerShell script is written to user-data/.updates at
+// apply time, spawned detached, waits for the app to exit, then moves the live
+// install (everything except the preserved user-data folder) into backup/ and
+// the staged build into place, rolling back on failure, and relaunches.
+// NOTE: kept free of ${...} and backticks so it survives the JS template literal.
+const APPLY_SCRIPT_PS1 = `param([string]$ConfigPath)
+$ErrorActionPreference = 'Stop'
+$cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+function Write-ApplyLog($m) {
+  try { "$([DateTime]::Now.ToString('s')) $m" | Out-File -LiteralPath $cfg.logPath -Append -Encoding utf8 } catch {}
+}
+function Move-WithRetry($src, $dest) {
+  for ($r = 0; $r -lt 6; $r++) {
+    try { Move-Item -LiteralPath $src -Destination $dest -Force; return } catch { Start-Sleep -Milliseconds 400 }
+  }
+  Move-Item -LiteralPath $src -Destination $dest -Force
+}
+function Remove-WithRetry($target) {
+  if (-not (Test-Path -LiteralPath $target)) { return }
+  for ($r = 0; $r -lt 6; $r++) {
+    try { Remove-Item -LiteralPath $target -Recurse -Force } catch { Start-Sleep -Milliseconds 400 }
+    if (-not (Test-Path -LiteralPath $target)) { return }
+  }
+}
+Write-ApplyLog "apply start pid=$($cfg.pid) install=$($cfg.installRoot)"
+for ($i = 0; $i -lt 240; $i++) {
+  $proc = Get-Process -Id $cfg.pid -ErrorAction SilentlyContinue
+  if (-not $proc) { break }
+  Start-Sleep -Milliseconds 500
+}
+Start-Sleep -Milliseconds 1000
+$preserve = @($cfg.preserve)
+if (Test-Path -LiteralPath $cfg.backupRoot) { Remove-Item -LiteralPath $cfg.backupRoot -Recurse -Force -ErrorAction SilentlyContinue }
+New-Item -ItemType Directory -Path $cfg.backupRoot -Force | Out-Null
+$moved = New-Object System.Collections.ArrayList
+try {
+  Get-ChildItem -LiteralPath $cfg.installRoot -Force | ForEach-Object {
+    if ($preserve -contains $_.Name) { return }
+    Move-WithRetry $_.FullName (Join-Path $cfg.backupRoot $_.Name)
+    [void]$moved.Add($_.Name)
+  }
+  Get-ChildItem -LiteralPath $cfg.stagedRoot -Force | ForEach-Object {
+    if ($preserve -contains $_.Name) { return }
+    Move-WithRetry $_.FullName (Join-Path $cfg.installRoot $_.Name)
+  }
+  Write-ApplyLog "swap ok"
+} catch {
+  Write-ApplyLog "swap FAILED: $_ rolling back"
+  foreach ($name in $moved) {
+    $cur = Join-Path $cfg.installRoot $name
+    if (Test-Path -LiteralPath $cur) { Remove-Item -LiteralPath $cur -Recurse -Force -ErrorAction SilentlyContinue }
+    $bak = Join-Path $cfg.backupRoot $name
+    if (Test-Path -LiteralPath $bak) { Move-Item -LiteralPath $bak -Destination $cur -Force -ErrorAction SilentlyContinue }
+  }
+  Write-ApplyLog "rollback done"
+}
+foreach ($d in @($cfg.cleanupDirs)) {
+  try { Remove-WithRetry $d; Write-ApplyLog "cleaned $d" } catch { Write-ApplyLog "cleanup FAILED $d : $_" }
+}
+Write-ApplyLog "relaunch $($cfg.exePath)"
+try { Start-Process -FilePath $cfg.exePath } catch { Write-ApplyLog "relaunch FAILED: $_" }
+Write-ApplyLog "apply end"
+`;
 const STARTUP_WINDOW_BOUNDS = Object.freeze({
   width: 680,
   height: 420,
@@ -49,6 +124,27 @@ let runtimeInstallState = null;
 let runtimeBootstrapState = null;
 let quitting = false;
 let backendPortConfirmed = false;
+let cachedAppVersion = null;
+let updateCheckPromise = null;
+let updateDownloadPromise = null;
+let updateState = {
+  phase: "idle", // idle | checking | available | up-to-date | error | downloading | downloaded | applying
+  currentVersion: null,
+  latestVersion: null,
+  releaseTag: "",
+  releaseUrl: "",
+  releaseNotes: "",
+  publishedAt: "",
+  assetUrl: "",
+  assetSize: 0,
+  checksumsUrl: "",
+  downloadPercent: 0,
+  downloadedBytes: 0,
+  verified: false,
+  error: "",
+  checkedAt: null,
+  updatedAt: null,
+};
 
 function readPort(value, fallback) {
   const parsed = Number.parseInt(value || "", 10);
@@ -643,6 +739,8 @@ function shellState() {
     runtimeInstall: runtimeInstallState,
     healthUrl: `${backendUrl}${HEALTH_PATH}`,
     logs: backendLogs.slice(-200),
+    appVersion: currentAppVersion(),
+    update: updateState,
   };
 }
 
@@ -797,6 +895,425 @@ function httpJsonRequest(targetUrl, options = {}) {
     req.on("error", reject);
     req.end();
   });
+}
+
+// --- Auto-update -----------------------------------------------------------
+
+function currentAppVersion() {
+  if (cachedAppVersion) {
+    return cachedAppVersion;
+  }
+  let version = "";
+  try {
+    if (typeof app.getVersion === "function") {
+      version = String(app.getVersion() || "");
+    }
+  } catch (_error) {
+    version = "";
+  }
+  if (!version) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json"), "utf8"));
+      version = String(pkg.version || "");
+    } catch (_error) {
+      version = "";
+    }
+  }
+  cachedAppVersion = version || "0.0.0";
+  return cachedAppVersion;
+}
+
+function parseVersionParts(value) {
+  const core = String(value || "").trim().replace(/^v/i, "").split(/[-+]/)[0];
+  return core.split(".").map((part) => Number.parseInt(part, 10) || 0);
+}
+
+function compareVersions(a, b) {
+  const pa = parseVersionParts(a);
+  const pb = parseVersionParts(b);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i += 1) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da > db) {
+      return 1;
+    }
+    if (da < db) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+function httpsJsonRequest(targetUrl, options = {}) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(targetUrl, {
+      method: options.method || "GET",
+      timeout: options.timeoutMs || 15000,
+      headers: {
+        "User-Agent": UPDATE_USER_AGENT,
+        Accept: "application/vnd.github+json",
+        ...(options.headers || {}),
+      },
+    }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`HTTP ${res.statusCode} from ${targetUrl}: ${body.slice(0, 200)}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch (error) {
+          reject(new Error(`Invalid JSON from ${targetUrl}: ${error.message}`));
+        }
+      });
+    });
+    req.on("timeout", () => {
+      req.destroy(new Error(`Request timed out: ${targetUrl}`));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function parseLatestRelease(payload) {
+  const tag = String((payload && payload.tag_name) || "");
+  const assets = Array.isArray(payload && payload.assets) ? payload.assets : [];
+  const findAsset = (name) => assets.find((asset) => asset && asset.name === name) || null;
+  const portable = findAsset(UPDATE_PORTABLE_ASSET);
+  const checksums = findAsset(UPDATE_CHECKSUMS_ASSET);
+  return {
+    version: tag.replace(/^v/i, ""),
+    tag,
+    releaseUrl: String((payload && payload.html_url) || UPDATE_RELEASES_PAGE_URL),
+    releaseNotes: String((payload && payload.body) || ""),
+    publishedAt: String((payload && payload.published_at) || ""),
+    assetUrl: portable ? String(portable.browser_download_url || "") : "",
+    assetSize: portable ? Number(portable.size || 0) : 0,
+    checksumsUrl: checksums ? String(checksums.browser_download_url || "") : "",
+  };
+}
+
+async function fetchLatestRelease() {
+  const payload = await httpsJsonRequest(UPDATE_LATEST_RELEASE_URL);
+  return parseLatestRelease(payload);
+}
+
+function setUpdateState(patch) {
+  updateState = { ...updateState, ...patch, updatedAt: new Date().toISOString() };
+  broadcastShellState();
+}
+
+async function checkForUpdate() {
+  if (updateCheckPromise) {
+    return updateCheckPromise;
+  }
+  const current = currentAppVersion();
+  setUpdateState({ phase: "checking", currentVersion: current, error: "" });
+  updateCheckPromise = (async () => {
+    try {
+      const release = await fetchLatestRelease();
+      const newer = !!release.version && compareVersions(release.version, current) > 0;
+      setUpdateState({
+        phase: newer ? "available" : "up-to-date",
+        currentVersion: current,
+        latestVersion: release.version,
+        releaseTag: release.tag,
+        releaseUrl: release.releaseUrl,
+        releaseNotes: release.releaseNotes,
+        publishedAt: release.publishedAt,
+        assetUrl: release.assetUrl,
+        assetSize: release.assetSize,
+        checksumsUrl: release.checksumsUrl,
+        downloadPercent: 0,
+        downloadedBytes: 0,
+        verified: false,
+        error: "",
+        checkedAt: new Date().toISOString(),
+      });
+      return updateState;
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      setUpdateState({ phase: "error", error: message, checkedAt: new Date().toISOString() });
+      return updateState;
+    } finally {
+      updateCheckPromise = null;
+    }
+  })();
+  return updateCheckPromise;
+}
+
+function updatesRoot() {
+  return path.join(runtimeDataRoot(), UPDATE_DIR_NAME);
+}
+
+function httpsText(targetUrl, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(targetUrl, {
+      method: "GET",
+      timeout: 15000,
+      headers: { "User-Agent": UPDATE_USER_AGENT, Accept: "text/plain" },
+    }, (res) => {
+      const status = res.statusCode || 0;
+      if (status >= 300 && status < 400 && res.headers.location) {
+        res.resume();
+        if (redirectsLeft <= 0) {
+          reject(new Error("Too many redirects"));
+          return;
+        }
+        resolve(httpsText(new URL(res.headers.location, targetUrl).toString(), redirectsLeft - 1));
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        res.resume();
+        reject(new Error(`HTTP ${status} from ${targetUrl}`));
+        return;
+      }
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => resolve(body));
+    });
+    req.on("timeout", () => req.destroy(new Error(`Request timed out: ${targetUrl}`)));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function httpsDownloadToFile(targetUrl, destPath, onProgress, redirectsLeft = 5) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    const req = https.request(targetUrl, {
+      method: "GET",
+      timeout: 60000,
+      headers: { "User-Agent": UPDATE_USER_AGENT, Accept: "application/octet-stream" },
+    }, (res) => {
+      const status = res.statusCode || 0;
+      if (status >= 300 && status < 400 && res.headers.location) {
+        res.resume();
+        if (redirectsLeft <= 0) {
+          reject(new Error("Too many redirects"));
+          return;
+        }
+        const next = new URL(res.headers.location, targetUrl).toString();
+        resolve(httpsDownloadToFile(next, destPath, onProgress, redirectsLeft - 1));
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        res.resume();
+        reject(new Error(`HTTP ${status} downloading ${targetUrl}`));
+        return;
+      }
+      const total = Number(res.headers["content-length"] || 0);
+      let received = 0;
+      const hash = crypto.createHash("sha256");
+      const out = fs.createWriteStream(destPath);
+      res.on("data", (chunk) => {
+        received += chunk.length;
+        hash.update(chunk);
+        if (typeof onProgress === "function") {
+          onProgress(received, total);
+        }
+      });
+      res.on("error", (error) => {
+        out.destroy();
+        reject(error);
+      });
+      out.on("error", reject);
+      res.pipe(out);
+      out.on("finish", () => {
+        out.close(() => resolve({ bytes: received, total, sha256: hash.digest("hex") }));
+      });
+    });
+    req.on("timeout", () => req.destroy(new Error(`Download stalled: ${targetUrl}`)));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function parseChecksums(text, filename) {
+  for (const rawLine of String(text || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    const match = line.match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/);
+    if (match && path.basename(match[2].trim()) === filename) {
+      return match[1].toLowerCase();
+    }
+  }
+  return "";
+}
+
+function extractZip(zipPath, destDir) {
+  fs.mkdirSync(destDir, { recursive: true });
+  return new Promise((resolve, reject) => {
+    let command;
+    let args;
+    if (process.platform === "win32") {
+      const escapedZip = zipPath.replace(/'/g, "''");
+      const escapedDest = destDir.replace(/'/g, "''");
+      command = "powershell";
+      args = [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Expand-Archive -LiteralPath '${escapedZip}' -DestinationPath '${escapedDest}' -Force`,
+      ];
+    } else {
+      command = "ditto";
+      args = ["-x", "-k", zipPath, destDir];
+    }
+    const child = spawn(command, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Extraction failed (exit ${code}): ${stderr.slice(0, 300)}`));
+      }
+    });
+  });
+}
+
+async function downloadUpdate() {
+  if (updateDownloadPromise) {
+    return updateDownloadPromise;
+  }
+  const assetUrl = updateState.assetUrl;
+  const checksumsUrl = updateState.checksumsUrl;
+  if (!assetUrl || !checksumsUrl) {
+    setUpdateState({ phase: "error", error: "릴리스 자산 URL을 찾을 수 없습니다." });
+    return updateState;
+  }
+  updateDownloadPromise = (async () => {
+    const root = updatesRoot();
+    const downloadDir = path.join(root, "download");
+    const stagingDir = path.join(root, "staging");
+    const zipPath = path.join(downloadDir, UPDATE_PORTABLE_ASSET);
+    try {
+      fs.rmSync(downloadDir, { recursive: true, force: true });
+      fs.rmSync(stagingDir, { recursive: true, force: true });
+      fs.mkdirSync(downloadDir, { recursive: true });
+      setUpdateState({ phase: "downloading", downloadPercent: 0, downloadedBytes: 0, verified: false, error: "" });
+
+      const checksumsText = await httpsText(checksumsUrl);
+      const expected = parseChecksums(checksumsText, UPDATE_PORTABLE_ASSET);
+      if (!expected) {
+        throw new Error("SHA256SUMS.txt에서 NAIA-Portable.zip 체크섬을 찾지 못했습니다.");
+      }
+
+      const result = await httpsDownloadToFile(assetUrl, zipPath, (received, total) => {
+        const percent = total > 0 ? Math.min(99, Math.round((received / total) * 100)) : 0;
+        if (percent !== updateState.downloadPercent) {
+          setUpdateState({ downloadPercent: percent, downloadedBytes: received });
+        }
+      });
+      if (result.sha256.toLowerCase() !== expected) {
+        fs.rmSync(zipPath, { force: true });
+        throw new Error(
+          `체크섬 불일치 — 다운로드가 손상되었습니다 (expected ${expected.slice(0, 12)}…, got ${result.sha256.slice(0, 12)}…).`,
+        );
+      }
+      setUpdateState({ downloadPercent: 100, downloadedBytes: result.bytes, verified: true });
+
+      await extractZip(zipPath, stagingDir);
+      const stagedRoot = path.join(stagingDir, "NAIA-Portable");
+      if (!fs.existsSync(stagedRoot)) {
+        throw new Error("압축 해제 결과에서 NAIA-Portable 폴더를 찾지 못했습니다.");
+      }
+      if (process.platform === "win32" && !fs.existsSync(path.join(stagedRoot, "NAIA.exe"))) {
+        throw new Error("스테이징된 빌드에 NAIA.exe가 없습니다.");
+      }
+      setUpdateState({ phase: "downloaded", verified: true, downloadPercent: 100, error: "" });
+      return updateState;
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      setUpdateState({ phase: "error", error: message, verified: false });
+      return updateState;
+    } finally {
+      updateDownloadPromise = null;
+    }
+  })();
+  return updateDownloadPromise;
+}
+
+function buildApplyConfig() {
+  const root = updatesRoot();
+  const installRoot = path.dirname(app.getPath("exe"));
+  const userRoot = runtimeDataRoot();
+  const preserve = [];
+  const rel = path.relative(installRoot, userRoot);
+  if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+    // User data lives under the install root (portable layout) — never swap it.
+    preserve.push(rel.split(path.sep)[0]);
+  }
+  return {
+    pid: process.pid,
+    installRoot,
+    stagedRoot: path.join(root, "staging", "NAIA-Portable"),
+    backupRoot: path.join(root, "backup"),
+    exePath: app.getPath("exe"),
+    preserve,
+    cleanupDirs: [path.join(root, "staging"), path.join(root, "download")],
+    logPath: path.join(root, "apply.log"),
+  };
+}
+
+async function applyUpdate() {
+  if (process.platform !== "win32") {
+    setUpdateState({ phase: "error", error: "자동 적용은 현재 Windows에서만 지원됩니다. 릴리스 페이지에서 수동으로 업데이트하세요." });
+    return updateState;
+  }
+  if (!app.isPackaged) {
+    setUpdateState({ phase: "error", error: "개발 모드에서는 업데이트를 적용할 수 없습니다." });
+    return updateState;
+  }
+  const config = buildApplyConfig();
+  if (updateState.phase !== "downloaded" || !updateState.verified || !fs.existsSync(config.stagedRoot)) {
+    setUpdateState({ phase: "error", error: "적용할 검증된 업데이트가 없습니다. 먼저 다운로드하세요." });
+    return updateState;
+  }
+  const root = updatesRoot();
+  const scriptPath = path.join(root, "apply_update.ps1");
+  const configPath = path.join(root, "apply.json");
+  try {
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(scriptPath, APPLY_SCRIPT_PS1, "utf8");
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    setUpdateState({ phase: "error", error: `업데이트 적용 준비 실패: ${message}` });
+    return updateState;
+  }
+  setUpdateState({ phase: "applying", error: "" });
+  appendBackendLog("shell", `Applying update: detached swap helper for ${config.installRoot}`);
+  const child = spawn("powershell", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    scriptPath,
+    "-ConfigPath",
+    configPath,
+  ], { detached: true, stdio: "ignore", windowsHide: true });
+  child.unref();
+  quitting = true;
+  stopBackend();
+  setTimeout(() => app.quit(), 400);
+  return { ok: true, applying: true };
 }
 
 async function runRuntimeInstallGate(baseUrl, options = {}) {
@@ -1163,6 +1680,13 @@ ipcMain.handle("naia:pick-directory", async () => {
   }
   return result.filePaths[0];
 });
+ipcMain.handle("naia:check-update", () => checkForUpdate());
+ipcMain.handle("naia:download-update", () => downloadUpdate());
+ipcMain.handle("naia:apply-update", () => applyUpdate());
+ipcMain.handle("naia:open-release-page", () => {
+  const url = updateState.releaseUrl || UPDATE_RELEASES_PAGE_URL;
+  return shell.openExternal(url);
+});
 
 configureRemoteDebugging();
 
@@ -1219,6 +1743,16 @@ module.exports.__test = {
   backendRoot,
   buildRemoteUrl,
   appIconPath,
+  compareVersions,
+  currentAppVersion,
+  parseLatestRelease,
+  parseChecksums,
+  updatesRoot,
+  httpsText,
+  httpsDownloadToFile,
+  extractZip,
+  buildApplyConfig,
+  applyScriptPs1: APPLY_SCRIPT_PS1,
   configureRemoteDebugging,
   configureApplicationMenu,
   isHttpLikeUrl,

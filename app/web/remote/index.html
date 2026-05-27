@@ -145,6 +145,24 @@
           <div class="setup-migration-body hidden" id="setupMigrationBody"></div>
           <div class="setup-result" id="setupMigrationResult"></div>
         </div>
+        <div class="setup-update hidden" id="setupUpdateSection">
+          <div class="setup-cloudflared-head">
+            <span class="setup-cloudflared-title">앱 업데이트</span>
+            <span class="setup-cloudflared-status" id="setupUpdateStatus">확인 중…</span>
+          </div>
+          <p class="setup-sub" id="setupUpdateSub">최신 버전을 확인하는 중입니다.</p>
+          <div class="setup-cloudflared-actions">
+            <button class="setup-btn-primary hidden" id="setupUpdateDownload" type="button">다운로드</button>
+            <button class="setup-btn-primary hidden" id="setupUpdateInstall" type="button">설치하고 재시작</button>
+            <button class="setup-btn-ghost hidden" id="setupUpdateRelease" type="button">릴리스 페이지 열기</button>
+            <button class="setup-btn-ghost" id="setupUpdateRecheck" type="button">업데이트 확인</button>
+          </div>
+          <div class="setup-update-progress hidden" id="setupUpdateProgress">
+            <div class="setup-update-progress-bar"><div class="setup-update-progress-fill" id="setupUpdateProgressFill"></div></div>
+            <span class="setup-update-progress-text" id="setupUpdateProgressText"></span>
+          </div>
+          <div class="setup-result hidden" id="setupUpdateResult"></div>
+        </div>
       </section>
     </div>
   </div>

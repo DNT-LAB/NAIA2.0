@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld("naiaShell", {
   openDataFolder: () => ipcRenderer.invoke("naia:open-data-folder"),
   openLogs: () => ipcRenderer.invoke("naia:open-logs"),
   pickDirectory: () => ipcRenderer.invoke("naia:pick-directory"),
+  checkUpdate: () => ipcRenderer.invoke("naia:check-update"),
+  downloadUpdate: () => ipcRenderer.invoke("naia:download-update"),
+  applyUpdate: () => ipcRenderer.invoke("naia:apply-update"),
+  openReleasePage: () => ipcRenderer.invoke("naia:open-release-page"),
   onStateChanged: (callback) => {
     if (typeof callback !== "function") {
       return () => {};

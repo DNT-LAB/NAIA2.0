@@ -692,6 +692,15 @@ const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=202605
   .catch(error => {
     console.error('Failed to initialize data migration panel module', error);
   });
+let updateBanner = null;
+const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260527-update3')
+  .then(({createUpdateBanner}) => {
+    updateBanner = createUpdateBanner({document, showToast, confirmDialog: showConfirmDialog});
+    updateBanner.init();
+  })
+  .catch(error => {
+    console.error('Failed to initialize update banner module', error);
+  });
 const generationProgressReady = import('./js/features/generationProgress.mjs')
   .then(({createGenerationProgress}) => {
     generationProgress = createGenerationProgress({

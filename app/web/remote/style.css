@@ -14782,6 +14782,44 @@ select.setup-input { cursor: pointer; }
 }
 .setup-migration-body.hidden { display: none; }
 
+.setup-update {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.setup-update .setup-cloudflared-status { color: var(--text-muted); }
+.setup-update .setup-sub { margin: 0; }
+.setup-update .setup-sub strong { color: var(--accent-blue); }
+.setup-update-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.setup-update-progress.hidden { display: none; }
+.setup-update-progress-bar {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 4px;
+  background: var(--border-dim);
+  overflow: hidden;
+}
+.setup-update-progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent-blue);
+  transition: width 0.2s ease;
+}
+.setup-update-progress-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  min-width: 36px;
+  text-align: right;
+}
+
 .setup-sub.blocked { color: #f04040; }
 
 .setup-dialog.blocked .setup-btn-primary:not(.setup-btn-cloudflared),

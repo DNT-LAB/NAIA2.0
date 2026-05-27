@@ -684,6 +684,14 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026052
     window.__naiaSetupControllerReady = false;
     console.error('Failed to initialize setup controller module', error);
   });
+let dataMigrationPanel = null;
+const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=20260527-migration1')
+  .then(({createDataMigrationPanel}) => {
+    dataMigrationPanel = createDataMigrationPanel({document, showToast});
+  })
+  .catch(error => {
+    console.error('Failed to initialize data migration panel module', error);
+  });
 const generationProgressReady = import('./js/features/generationProgress.mjs')
   .then(({createGenerationProgress}) => {
     generationProgress = createGenerationProgress({
@@ -4777,6 +4785,14 @@ function showPromptDialog(message, options = {}) {
 // until at least one backend is verified.
 function openApiPopup() {
   if (setupController) setupController.openApiPopup();
+}
+
+function openDataMigration() {
+  if (dataMigrationPanel) dataMigrationPanel.open();
+}
+
+function openCurrentDataFolder() {
+  if (dataMigrationPanel) dataMigrationPanel.openDataFolder();
 }
 
 function probeApi() {

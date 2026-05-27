@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("naiaShell", {
   openBrowser: () => ipcRenderer.invoke("naia:open-browser"),
   openDataFolder: () => ipcRenderer.invoke("naia:open-data-folder"),
   openLogs: () => ipcRenderer.invoke("naia:open-logs"),
+  pickDirectory: () => ipcRenderer.invoke("naia:pick-directory"),
   onStateChanged: (callback) => {
     if (typeof callback !== "function") {
       return () => {};

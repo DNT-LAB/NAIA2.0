@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, ipcMain, Menu, session, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -1154,6 +1154,15 @@ ipcMain.handle("naia:restart-backend", async () => {
 ipcMain.handle("naia:open-browser", () => shell.openExternal(`${backendUrl}/?desktop_shell=1`));
 ipcMain.handle("naia:open-data-folder", () => shell.openPath(runtimeDataRoot()));
 ipcMain.handle("naia:open-logs", () => openRuntimeSubfolder("logs"));
+ipcMain.handle("naia:pick-directory", async () => {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null;
+  const options = { properties: ["openDirectory"], title: "이전 NAIA 데이터 폴더 선택" };
+  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
 
 configureRemoteDebugging();
 

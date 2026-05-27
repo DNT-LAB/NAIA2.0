@@ -359,7 +359,8 @@
       "legacy_dependency": "none",
       "routes": [
         {"method": "POST", "path": "/api/data-migration/preview", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/data-migration/import", "smoke": "asset_runtime"}
+        {"method": "POST", "path": "/api/data-migration/import", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/data-migration/nai-token", "smoke": "state_mutation"}
       ]
     }
   ],

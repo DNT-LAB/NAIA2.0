@@ -288,7 +288,15 @@ class HeadlessPromptEngineeringService:
             return sampling_mode == "anima"
         if comfyui_sampling_mode:
             return comfyui_sampling_mode == "anima"
-        return workflow_type == "unet"
+        if workflow_type:
+            return workflow_type == "unet"
+        # Nothing configured yet: ANIMA is the mainstream COMFYUI model, so an
+        # unconfigured COMFYUI session defaults to ANIMA — the recommended preset
+        # and preprocessing apply on first entry instead of leaving the user
+        # empty-handed. A loaded custom workflow sets ``workflow_type`` (handled
+        # above) and an explicit eps/v_prediction choice sets ``sampling_mode``
+        # (handled above), so both are still respected over this default.
+        return True
 
     @staticmethod
     def _unique_preset_name(store: Any, base_name: str, mode: str) -> str:

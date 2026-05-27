@@ -105,12 +105,13 @@ def check_webui_mode_switch_applies_recommend(root: Path) -> None:
     assert prompt_sync["negative"].startswith("ai-generated, 3d, (worst quality)")
 
 
-def check_comfyui_anima_param_applies_recommend(root: Path) -> None:
+def check_comfyui_mode_switch_applies_anima_recommend(root: Path) -> None:
+    # ANIMA is the default COMFYUI model: switching to COMFYUI applies the
+    # recommended ANIMA preset on entry (no explicit sampling_mode needed).
     context = _context(root)
     with _client(context).websocket_connect("/ws") as ws:
         _drain_startup(ws)
-        _collect_after(ws, {"type": "set_mode", "mode": "COMFYUI"})
-        messages = _collect_after(ws, {"type": "set_param", "key": "sampling_mode", "value": "anima"})
+        messages = _collect_after(ws, {"type": "set_mode", "mode": "COMFYUI"})
 
     module_state = _first_module(messages, "prompt_engineering")
     params = _first(messages, "params")
@@ -130,7 +131,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         check_webui_mode_switch_applies_recommend(root / "webui")
-        check_comfyui_anima_param_applies_recommend(root / "comfyui")
+        check_comfyui_mode_switch_applies_anima_recommend(root / "comfyui")
     print(json.dumps({"ok": True, "contract": "remote_recommend"}, ensure_ascii=True))
     return 0
 

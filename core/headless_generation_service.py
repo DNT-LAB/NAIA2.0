@@ -316,8 +316,13 @@ class HeadlessGenerationService:
             params["workflow_type"] = "bypass"
         elif sampling_mode == "anima":
             params["workflow_type"] = "unet"
-        else:
+        elif sampling_mode:
+            # An explicit non-ANIMA choice (eps/v_prediction) maps to checkpoint.
             params["workflow_type"] = "checkpoint"
+        else:
+            # No sampling_mode persisted: ANIMA is the default COMFYUI model, so
+            # build the unet (ANIMA) workflow rather than checkpoint.
+            params["workflow_type"] = "unet"
 
     def _normalize_resolution(self, params: dict[str, Any]) -> None:
         width = self._to_int(params.get("width"))

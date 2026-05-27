@@ -196,7 +196,7 @@ class HeadlessSessionStateService:
             })
         elif mode == "COMFYUI":
             payload.update({
-                "sampling_mode": str(context.remote_params.get("sampling_mode") or "eps"),
+                "sampling_mode": str(context.remote_params.get("sampling_mode") or "anima"),
                 "rescale_cfg": context.remote_params.get("rescale_cfg", 0.0),
                 "anima_weight": str(
                     context.remote_params.get("anima_weight")

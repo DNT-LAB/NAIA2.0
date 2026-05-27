@@ -105,3 +105,28 @@ def register_data_migration_routes(
             return JSONResponse({"runtime": "web", **result}, status_code=status)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"가져오기 실패: {exc}"}, status_code=500)
+
+    @app.post("/api/data-migration/nai-token")
+    async def api_data_migration_nai_token(req: Request):
+        if not _is_local_request(req):
+            return JSONResponse(
+                {"ok": False, "runtime": "web", "error": "토큰 가져오기는 로컬에서만 가능합니다."},
+                status_code=403,
+            )
+        body = await _json_body(req)
+        source = str(body.get("source") or "").strip()
+        if not source:
+            return JSONResponse({"ok": False, "error": "가져올 폴더 경로가 비어 있습니다."}, status_code=400)
+        overwrite = bool(body.get("overwrite"))
+        try:
+            result = await run_in_thread(
+                data_migration_service(session_context).import_nai_token,
+                source,
+                overwrite=overwrite,
+            )
+            # ``needs_confirm`` is not an error — the client must prompt and retry
+            # with ``overwrite`` — so surface it with a 200 alongside successes.
+            status = 200 if (result.get("ok") or result.get("needs_confirm")) else 400
+            return JSONResponse({"runtime": "web", **result}, status_code=status)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"토큰 가져오기 실패: {exc}"}, status_code=500)

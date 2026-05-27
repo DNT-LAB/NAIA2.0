@@ -28,6 +28,7 @@ directly via the config bucket, carrying the token forward across versions.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -181,7 +182,16 @@ class DataMigrationService:
         credential = source / LEGACY_CREDENTIAL_FILE
         result["credentials"] = {
             "present": credential.is_file(),
-            "note": "보안상 자격증명은 이 단계에서 가져오지 않습니다. NAI 토큰은 설정에서 다시 입력하세요.",
+            "note": "보안상 자격증명은 일반 가져오기에 포함되지 않습니다. NAI 토큰은 아래 전용 버튼으로 따로 가져오거나 설정에서 다시 입력하세요.",
+        }
+        # The main NAI token lives in the legacy install's encrypted token store
+        # (config/secure_tokens.json), never in the bulk-copied buckets. Surface
+        # whether it can be imported via the dedicated opt-in button.
+        token, token_error = self._read_legacy_nai_token(source)
+        result["nai_token"] = {
+            "legacy_present": bool(token),
+            "current_present": bool(self._current_nai_token()),
+            "error": token_error,
         }
         return result
 
@@ -262,3 +272,79 @@ class DataMigrationService:
             "conflict_policy": conflict,
             "errors": errors,
         }
+
+    # ------------------------------------------------------------------
+    # NAI credential (opt-in, separate from the bulk copy)
+    # ------------------------------------------------------------------
+
+    def _current_nai_token(self) -> str:
+        manager = getattr(self.context, "secure_token_manager", None)
+        if manager is None:
+            return ""
+        try:
+            return str(manager.get_token("nai_token") or "")
+        except Exception:
+            return ""
+
+    def _read_legacy_nai_token(self, source: Path) -> tuple[str, str | None]:
+        """Decrypt the main ``nai_token`` from a legacy install's token store.
+
+        Returns ``(token, error)``. The token is read from
+        ``<source>/config/secure_tokens.json`` and decrypted with that file's own
+        embedded Fernet key (the legacy install's key, not the current one). The
+        legacy multi-account file (``save/nai_accounts.json``) only holds account
+        metadata, never the token itself, so it is intentionally not consulted.
+        """
+        cred_file = source / "config" / "secure_tokens.json"
+        if not cred_file.is_file():
+            return "", "이전 설치에서 NAI 토큰 파일(config/secure_tokens.json)을 찾지 못했습니다. 설정에서 직접 입력하세요."
+        try:
+            data = json.loads(cred_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return "", f"토큰 파일을 읽을 수 없습니다: {exc}"
+        if not isinstance(data, dict):
+            return "", "토큰 파일 형식이 올바르지 않습니다."
+        key = data.get("_key")
+        tokens = data.get("tokens") if isinstance(data.get("tokens"), dict) else {}
+        stored = tokens.get("nai_token")
+        if not stored:
+            return "", "이전 설치에 저장된 NAI 토큰이 없습니다."
+        if not key:
+            return "", "토큰 파일에 복호화 키가 없어 NAI 토큰을 가져올 수 없습니다."
+        try:
+            from cryptography.fernet import Fernet
+
+            token = Fernet(str(key).encode()).decrypt(str(stored).encode()).decode()
+        except Exception:
+            return "", "NAI 토큰을 복호화하지 못했습니다 (키 불일치 또는 파일 손상)."
+        return token, None
+
+    def import_nai_token(self, source_dir: str | Path, *, overwrite: bool = False) -> dict[str, Any]:
+        """Import only the main NAI token from a legacy install into the current
+        secure token store. Opt-in / explicit; never part of the bulk copy.
+
+        When the current store already holds a token and ``overwrite`` is False,
+        returns ``needs_confirm`` so the caller can ask before clobbering it.
+        """
+        source = Path(source_dir).expanduser()
+        if not source.is_dir():
+            return {"ok": False, "error": "선택한 폴더를 찾을 수 없습니다."}
+        source = source.resolve()
+        if self._overlaps_target(source):
+            return {"ok": False, "error": "현재 데이터 폴더와 같은(또는 그 내부) 위치는 가져올 수 없습니다."}
+        token, error = self._read_legacy_nai_token(source)
+        if not token:
+            return {"ok": False, "error": error or "가져올 NAI 토큰이 없습니다."}
+        manager = getattr(self.context, "secure_token_manager", None)
+        if manager is None:
+            return {"ok": False, "error": "토큰 저장소를 사용할 수 없습니다."}
+        current = self._current_nai_token()
+        if current and not overwrite:
+            return {
+                "ok": False,
+                "needs_confirm": True,
+                "current_present": True,
+                "error": "현재 설치에 이미 NAI 토큰이 저장돼 있습니다. 덮어쓰시겠습니까?",
+            }
+        manager.save_token("nai_token", token)
+        return {"ok": True, "imported": True, "overwritten": bool(current)}

@@ -74,6 +74,12 @@ export function createDataMigrationPanel({document, showToast}) {
     const credNote = preview.credentials?.present
       ? `<p class="setup-sub" style="color:var(--text-dim)">⚠ ${esc(preview.credentials.note)}</p>`
       : '';
+    const tokenInfo = preview.nai_token || {};
+    const tokenSection = tokenInfo.legacy_present ? `
+      <div class="setup-cloudflared-actions" style="margin-top:6px">
+        <button class="setup-btn-primary" id="setupMigrationToken" type="button">NAI 토큰 가져오기${tokenInfo.current_present ? ' (현재 토큰 덮어쓰기)' : ''}</button>
+      </div>
+      <p class="setup-sub" style="color:var(--text-dim)">이전 설치의 NAI 토큰을 현재 설정으로 가져옵니다 (일반 가져오기에는 포함되지 않습니다).</p>` : '';
     body.innerHTML = `
       <div class="setup-meta-line"><span>가져올 위치</span><span class="setup-meta-val" title="${esc(preview.source)}">${esc(preview.source)}</span></div>
       <div class="setup-meta-line"><span>대상</span><span class="setup-meta-val" title="${esc(preview.user_root)}">${esc(preview.user_root)}</span></div>
@@ -87,11 +93,56 @@ export function createDataMigrationPanel({document, showToast}) {
       </label>
       <div class="setup-cloudflared-actions">
         <button class="setup-btn-primary" id="setupMigrationRun" type="button">가져오기 실행</button>
-      </div>`;
+      </div>
+      ${tokenSection}`;
     body.classList.remove('hidden');
     setResult('가져올 항목을 확인하고 "가져오기 실행"을 누르세요.', '');
     const runBtn = byId('setupMigrationRun');
     if (runBtn) runBtn.addEventListener('click', runImport);
+    const tokenBtn = byId('setupMigrationToken');
+    if (tokenBtn) tokenBtn.addEventListener('click', runTokenImport);
+  }
+
+  async function runTokenImport() {
+    if (busy || !currentSource) return;
+    busy = true;
+    const tokenBtn = byId('setupMigrationToken');
+    if (tokenBtn) { tokenBtn.disabled = true; }
+    setResult('NAI 토큰을 가져오는 중…', '');
+    try {
+      const post = (overwrite) => fetch('/api/data-migration/nai-token', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({source: currentSource, overwrite}),
+      }).then(r => r.json());
+      let data = await post(false);
+      if (data.needs_confirm) {
+        const ok = (globalThis.confirm
+          ? globalThis.confirm(data.error || '현재 설치에 이미 NAI 토큰이 있습니다. 덮어쓰시겠습니까?')
+          : true);
+        if (!ok) {
+          setResult('NAI 토큰 가져오기를 취소했습니다.', '');
+          return;
+        }
+        data = await post(true);
+      }
+      if (!data.ok) {
+        setResult(data.error || 'NAI 토큰을 가져오지 못했습니다.', 'error');
+        toast(data.error || 'NAI 토큰 가져오기 실패', 'error');
+        return;
+      }
+      const msg = data.overwritten
+        ? 'NAI 토큰을 덮어썼습니다. 재시작 후 적용됩니다.'
+        : 'NAI 토큰을 가져왔습니다. 재시작 후 적용됩니다.';
+      setResult(msg, 'success');
+      toast(msg, 'success');
+    } catch (err) {
+      setResult(`NAI 토큰 가져오기 실패: ${err}`, 'error');
+      toast(`NAI 토큰 가져오기 실패: ${err}`, 'error');
+    } finally {
+      busy = false;
+      if (tokenBtn) { tokenBtn.disabled = false; }
+    }
   }
 
   async function open() {

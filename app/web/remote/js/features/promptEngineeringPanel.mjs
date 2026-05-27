@@ -80,8 +80,26 @@ export function createPromptEngineeringPanel({
     try { el.setSelectionRange(snap.selectionStart, snap.selectionEnd); } catch (e) {}
   }
 
+  function captureTextareaHeights() {
+    const heights = {};
+    PE_EDITABLE_IDS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.style.height) heights[id] = el.style.height;
+    });
+    return heights;
+  }
+
+  function restoreTextareaHeights(heights) {
+    if (!heights) return;
+    Object.entries(heights).forEach(([id, height]) => {
+      const el = document.getElementById(id);
+      if (el && height) el.style.height = height;
+    });
+  }
+
   function render(m) {
     const focusSnap = captureFocus();
+    const textareaHeights = captureTextareaHeights();
     const summaryMap = new Map();
     (m.preset_summaries || []).forEach(summary => {
       if (summary && summary.name) summaryMap.set(String(summary.name), summary);
@@ -161,6 +179,7 @@ export function createPromptEngineeringPanel({
       const el = document.getElementById(id);
       if (el) bindTagAssist(el);
     });
+    restoreTextareaHeights(textareaHeights);
     restoreFocus(focusSnap);
   }
 

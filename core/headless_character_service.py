@@ -112,5 +112,11 @@ class HeadlessCharacterService:
                 self.ensure_frame(frames, index)["custom_name"] = str(value or "")
         else:
             return None
+        prompt_context = getattr(context, "current_prompt_context", None)
+        metadata = getattr(prompt_context, "metadata", None)
+        if isinstance(metadata, dict):
+            metadata.pop("conditional_character_overrides", None)
+            metadata.pop("_conditional_character_slots", None)
+            metadata.pop("conditional_character_skips", None)
         self.save_settings(mode, settings)
         return self.state()

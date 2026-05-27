@@ -152,6 +152,29 @@ def _get_prompt_context(app_context, *, reuse_current_context: bool = True) -> P
     return PromptContext(source_row=source_row, settings={})
 
 
+def _conditional_character_override(app_context, *, reuse_current_context: bool) -> dict | None:
+    if not reuse_current_context:
+        return None
+    context = getattr(app_context, "current_prompt_context", None)
+    metadata = getattr(context, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    override = metadata.get("conditional_character_overrides")
+    if not isinstance(override, dict):
+        return None
+    if "characters" not in override:
+        return None
+    characters = [str(value) for value in override.get("characters") or [] if str(value).strip()]
+    if not characters:
+        return {"characters": None}
+    raw_ucs = [str(value) for value in override.get("uc") or []]
+    ucs = [raw_ucs[index] if index < len(raw_ucs) else "" for index in range(len(characters))]
+    return {
+        "characters": characters,
+        "uc": ucs,
+    }
+
+
 def _expand_character_text(text: str, processor: WildcardProcessor | None, context: PromptContext) -> str:
     pieces = [piece.strip() for piece in split_tags_smart(str(text or ""))]
     pieces = [piece for piece in pieces if piece]
@@ -172,6 +195,9 @@ def character_params_from_settings(
 ) -> dict:
     if save_root is None:
         save_root = _save_root_from_context(app_context)
+    override = _conditional_character_override(app_context, reuse_current_context=reuse_current_context)
+    if override is not None:
+        return override
     normalized = (
         normalize_character_settings(settings)
         if settings is not None

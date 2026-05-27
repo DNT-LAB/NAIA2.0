@@ -231,6 +231,31 @@ export function createCharacterPanel({
     setModuleParam('character', `char_slot_name_${index}`, next.trim());
   }
 
+  function captureTextareaHeights() {
+    const heights = {};
+    moduleBody.querySelectorAll('.mod-char-block[data-char-index]').forEach(block => {
+      const index = block.dataset.charIndex;
+      const prompt = block.querySelector('.mod-char-prompt');
+      const uc = block.querySelector('.mod-char-uc');
+      if (prompt?.style?.height) heights[`prompt:${index}`] = prompt.style.height;
+      if (uc?.style?.height) heights[`uc:${index}`] = uc.style.height;
+    });
+    return heights;
+  }
+
+  function restoreTextareaHeights(heights) {
+    if (!heights) return;
+    moduleBody.querySelectorAll('.mod-char-block[data-char-index]').forEach(block => {
+      const index = block.dataset.charIndex;
+      const prompt = block.querySelector('.mod-char-prompt');
+      const uc = block.querySelector('.mod-char-uc');
+      const promptHeight = heights[`prompt:${index}`];
+      const ucHeight = heights[`uc:${index}`];
+      if (prompt && promptHeight) prompt.style.height = promptHeight;
+      if (uc && ucHeight) uc.style.height = ucHeight;
+    });
+  }
+
   function renderWorkingSlot(character, index, totalCount) {
     const customName = String(character.custom_name || '').trim();
     const label = customName ? `${escHtml(customName)} <span class="mod-char-id-muted">C${character.id}</span>` : `C${character.id}`;
@@ -294,6 +319,7 @@ export function createCharacterPanel({
 
   function render(state) {
     hideColdTooltip();
+    const textareaHeights = captureTextareaHeights();
     lastState = state || {};
     const chars = state.characters || [];
     const workingSlots = chars
@@ -341,6 +367,7 @@ export function createCharacterPanel({
       </div>
     `;
     moduleBody.querySelectorAll('.mod-textarea:not(.mod-uc)').forEach(element => bindTagAssist(element));
+    restoreTextareaHeights(textareaHeights);
     applyColdSearchFilter();
     bindColdInteractions();
   }

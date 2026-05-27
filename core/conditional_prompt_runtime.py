@@ -15,6 +15,8 @@ _WEIGHT_WEBUI_RE = re.compile(r"^\((.*):[+-]?\d+(?:\.\d+)?\)$")
 _RATING_FUNC_RE = re.compile(r"^(~)?rating\(\s*([eqsg])(?:\s*,\s*source\s*=\s*([^)]+))?\s*\)$", re.IGNORECASE)
 _CHAR_IN_RE = re.compile(r"^(~)?char_in\(\s*(\d+)\s*,\s*(.*?)\s*\)$", re.IGNORECASE)
 _CHAR_ON_RE = re.compile(r"^(~)?char_on\(\s*(\d+)\s*\)$", re.IGNORECASE)
+_CHAR_UC_TARGET_RE = re.compile(r"^(char|uc):(\d+|\*)$", re.IGNORECASE)
+_FUNC_ACTION_RE = re.compile(r"^([A-Za-z_]\w*)\((.*)\)$")
 
 
 def _strip_weight_format(text: str) -> str:
@@ -164,6 +166,161 @@ class HeadlessConditionalRuleEngine:
         return bool(frame.get("is_enabled")) or str(frame.get("slot_state") or "").lower() == "active"
 
     @staticmethod
+    def _parse_char_uc_target(target: str) -> tuple[str, int | str] | None:
+        match = _CHAR_UC_TARGET_RE.match(str(target or "").strip())
+        if not match:
+            return None
+        kind = match.group(1).lower()
+        raw_index = match.group(2)
+        if raw_index == "*":
+            return kind, "*"
+        index = int(raw_index)
+        if index < 1:
+            return None
+        return kind, index - 1
+
+    @classmethod
+    def _is_char_uc_target(cls, target: str) -> bool:
+        return cls._parse_char_uc_target(target) is not None
+
+    def _character_slots(self, context) -> list[dict[str, Any]]:
+        metadata = getattr(context, "metadata", None)
+        if isinstance(metadata, dict):
+            existing = metadata.get("_conditional_character_slots")
+            if isinstance(existing, list):
+                return [dict(slot) for slot in existing if isinstance(slot, dict)]
+
+        frames = self._character_frames()
+        settings = getattr(context, "settings", None) or {}
+        settings_chars = list(settings.get("characters") or []) if isinstance(settings, dict) else []
+        settings_ucs = list(settings.get("uc") or []) if isinstance(settings, dict) else []
+        slots: list[dict[str, Any]] = []
+
+        if frames:
+            active_position = 0
+            for index, frame in enumerate(frames):
+                frame = frame if isinstance(frame, dict) else {}
+                active = self._character_active(index)
+                prompt = str(frame.get("prompt") or "")
+                uc = str(frame.get("uc") or "")
+                if active:
+                    if active_position < len(settings_chars):
+                        prompt = str(settings_chars[active_position] or "")
+                    if active_position < len(settings_ucs):
+                        uc = str(settings_ucs[active_position] or "")
+                    active_position += 1
+                slots.append({"prompt": prompt, "uc": uc, "active": active})
+            return slots
+
+        total = max(len(settings_chars), len(settings_ucs))
+        for index in range(total):
+            prompt = str(settings_chars[index] or "") if index < len(settings_chars) else ""
+            uc = str(settings_ucs[index] or "") if index < len(settings_ucs) else ""
+            slots.append({"prompt": prompt, "uc": uc, "active": bool(prompt.strip())})
+        return slots
+
+    @staticmethod
+    def _record_character_skip(context, target: str, reason: str) -> None:
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return
+        skips = metadata.setdefault("conditional_character_skips", [])
+        if isinstance(skips, list):
+            skips.append({"target": target, "reason": reason})
+
+    def _store_character_overrides(self, context, slots: list[dict[str, Any]]) -> None:
+        settings = getattr(context, "settings", None)
+        if not isinstance(settings, dict):
+            context.settings = {}
+            settings = context.settings
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            context.metadata = {}
+            metadata = context.metadata
+
+        characters: list[str] = []
+        ucs: list[str] = []
+        for slot in slots:
+            prompt = str(slot.get("prompt") or "").strip()
+            if slot.get("active") and prompt:
+                characters.append(prompt)
+                ucs.append(str(slot.get("uc") or "").strip())
+
+        settings["characters"] = characters
+        settings["uc"] = ucs
+        metadata["_conditional_character_slots"] = [dict(slot) for slot in slots]
+        metadata["conditional_character_overrides"] = {
+            "characters": characters,
+            "uc": ucs,
+        }
+
+    def _write_char_uc_target(
+        self,
+        context,
+        target: str,
+        tags: list[str],
+        *,
+        op: str,
+    ) -> None:
+        parsed = self._parse_char_uc_target(target)
+        if parsed is None:
+            return
+        slots = self._character_slots(context)
+        if not slots:
+            self._record_character_skip(context, target, "no character slots")
+            return
+        kind, index = parsed
+        if index == "*":
+            indices = [slot_index for slot_index, slot in enumerate(slots) if slot.get("active")]
+            if not indices:
+                self._record_character_skip(context, target, "no active character slots")
+                return
+        elif isinstance(index, int) and 0 <= index < len(slots):
+            indices = [index]
+        else:
+            self._record_character_skip(context, target, f"index {int(index) + 1} missing")
+            return
+
+        text = ", ".join(str(tag).strip() for tag in tags if str(tag).strip())
+        if op == "append" and not text:
+            return
+        field = "prompt" if kind == "char" else "uc"
+        for slot_index in indices:
+            current = str(slots[slot_index].get(field) or "").strip()
+            if op == "append" and current and text:
+                slots[slot_index][field] = f"{current}, {text}"
+            elif op in {"append", "set"}:
+                slots[slot_index][field] = text
+        self._store_character_overrides(context, slots)
+
+    def _execute_char_set(self, context, char_index: int, state: str) -> None:
+        slots = self._character_slots(context)
+        if char_index < 0 or char_index >= len(slots):
+            self._record_character_skip(context, f"char_set({char_index + 1})", "index missing")
+            return
+        slots[char_index]["active"] = state == "enabled"
+        self._store_character_overrides(context, slots)
+
+    def _execute_char_replace(self, context, char_index: int, old_tag: str, new_tag: str) -> None:
+        slots = self._character_slots(context)
+        if char_index < 0 or char_index >= len(slots):
+            self._record_character_skip(context, f"char_replace({char_index + 1})", "index missing")
+            return
+        tags = [tag.strip() for tag in split_tags_smart(str(slots[char_index].get("prompt") or "")) if tag.strip()]
+        old_value = str(old_tag or "").strip()
+        new_value = str(new_tag or "").strip()
+        replaced = False
+        for index, tag in enumerate(tags):
+            if tag == old_value or _strip_weight_format(tag) == old_value:
+                tags[index] = new_value
+                replaced = True
+        if not replaced:
+            self._record_character_skip(context, f"char_replace({char_index + 1})", "tag missing")
+            return
+        slots[char_index]["prompt"] = ", ".join(tag for tag in tags if tag)
+        self._store_character_overrides(context, slots)
+
+    @staticmethod
     def _matching_paren(text: str, start: int) -> int:
         depth = 1
         for index in range(start + 1, len(text)):
@@ -308,26 +465,61 @@ class HeadlessConditionalRuleEngine:
                 rules.append(rule)
         return rules
 
+    def _try_parse_func_action(self, action_text: str) -> dict[str, Any] | None:
+        match = _FUNC_ACTION_RE.match(action_text)
+        if not match:
+            return None
+        func_name = match.group(1)
+        args_text = match.group(2).strip()
+        args = [arg.strip() for arg in args_text.split(",")] if args_text else []
+        if func_name == "char_set" and len(args) == 2:
+            try:
+                char_index = int(args[0]) - 1
+            except ValueError:
+                return None
+            state = args[1].lower()
+            if state not in {"enabled", "disabled"}:
+                return None
+            return {"type": "func_char_set", "char_index": char_index, "state": state}
+        if func_name == "char_replace" and len(args) == 3:
+            try:
+                char_index = int(args[0]) - 1
+            except ValueError:
+                return None
+            return {
+                "type": "func_char_replace",
+                "char_index": char_index,
+                "old_tag": args[1],
+                "new_tag": args[2],
+            }
+        return None
+
     def _parse_action(self, action_text: str) -> dict[str, Any] | None:
         action_text = _remove_outer_quotes(action_text)
+        func_action = self._try_parse_func_action(action_text)
+        if func_action is not None:
+            return func_action
         if "+=" in action_text:
             target, value = action_text.split("+=", 1)
             tags = self._parse_tag_list(value)
             target = target.strip()
             return {
-                "type": "append_to_list" if target in {"prefix", "main", "postfix"} else "insert",
+                "type": "append_to_list" if target in {"prefix", "main", "postfix"} or self._is_char_uc_target(target) else "insert",
                 "target": target,
                 "tags": tags,
             }
         if "+:" in action_text:
             target, _sep, value = action_text.partition("+:")
             target = target.strip()
-            if target not in {"prefix", "main", "postfix"}:
+            if target not in {"prefix", "main", "postfix"} and not self._is_char_uc_target(target):
                 value = action_text.replace("+:", "", 1)
                 target = "main"
             return {"type": "append_to_list", "target": target, "tags": self._parse_tag_list(value)}
         if "=" in action_text:
             old, value = action_text.split("=", 1)
+            target = old.strip()
+            if self._is_char_uc_target(target):
+                return {"type": "set_character_target", "target": target, "tags": self._parse_tag_list(value)}
             return {"type": "replace", "old": old.strip(), "tags": self._parse_tag_list(value)}
         return None
 
@@ -347,6 +539,7 @@ class HeadlessConditionalRuleEngine:
 
     def _execute_action(
         self,
+        context,
         action: dict[str, Any],
         prefix_tags: list[str],
         main_tags: list[str],
@@ -354,9 +547,11 @@ class HeadlessConditionalRuleEngine:
     ) -> tuple[list[str], list[str], list[str]]:
         action_type = action.get("type")
         if action_type == "append_to_list":
-            self._target_list(prefix_tags, main_tags, postfix_tags, str(action.get("target") or "main")).extend(
-                list(action.get("tags") or [])
-            )
+            target = str(action.get("target") or "main")
+            if self._is_char_uc_target(target):
+                self._write_char_uc_target(context, target, list(action.get("tags") or []), op="append")
+            else:
+                self._target_list(prefix_tags, main_tags, postfix_tags, target).extend(list(action.get("tags") or []))
         elif action_type == "insert":
             target = str(action.get("target") or "")
             tags = list(action.get("tags") or [])
@@ -376,6 +571,26 @@ class HeadlessConditionalRuleEngine:
                         index += len(replacements)
                     else:
                         index += 1
+        elif action_type == "set_character_target":
+            self._write_char_uc_target(
+                context,
+                str(action.get("target") or ""),
+                list(action.get("tags") or []),
+                op="set",
+            )
+        elif action_type == "func_char_set":
+            self._execute_char_set(
+                context,
+                int(action.get("char_index") or 0),
+                str(action.get("state") or "enabled"),
+            )
+        elif action_type == "func_char_replace":
+            self._execute_char_replace(
+                context,
+                int(action.get("char_index") or 0),
+                str(action.get("old_tag") or ""),
+                str(action.get("new_tag") or ""),
+            )
         return prefix_tags, main_tags, postfix_tags
 
     def apply(
@@ -407,6 +622,7 @@ class HeadlessConditionalRuleEngine:
                     if isinstance(recorder, list):
                         recorder.append(str(rule.get("original") or ""))
                     prefix_tags, main_tags, postfix_tags = self._execute_action(
+                        scope_context,
                         rule["action"],
                         prefix_tags,
                         main_tags,

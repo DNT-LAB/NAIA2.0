@@ -792,7 +792,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026052
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260514-character-cold6')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260527-textarea-size1')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -4964,7 +4964,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260523-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260508-preset-hover1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260527-textarea-size1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

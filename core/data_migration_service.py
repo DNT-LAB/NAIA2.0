@@ -1,21 +1,29 @@
-"""Import user data from a legacy NAIA checkout into the runtime user-data root.
+"""Import user data from a previous NAIA 2.0 install into the runtime user-data root.
 
-future01 wrote user data to ``os.getcwd()``-relative folders (``save/``,
-``wildcards/``, ``output/``, ``artist_thumb/``). future02 / the packaged exe
-store everything under the runtime ``user_root`` (``%APPDATA%/NAIA`` for source
-runs, ``<exe>/user-data`` for the portable build) because the release write
-policy forbids writing user state into the read-only resource/source tree.
+Two kinds of previous install are supported and auto-detected by which buckets
+are present in the chosen folder:
+  * a legacy source checkout (future01 / Dev0714 / main) that wrote user data to
+    ``os.getcwd()``-relative folders (``save/``, ``wildcards/``, ``output/``,
+    ``artist_thumb/``);
+  * an older packaged / Electron install whose data already uses the runtime
+    ``user_root`` layout (``save/``, ``wildcards/``, ``output/``, ``ui_assets/``,
+    ``config/``) — so users can carry data forward across version updates.
 
-That mismatch makes it hard for future01 users to bring their data forward. This
-service copies a chosen legacy folder into the current ``user_root``, remapping
-the few buckets whose parent differs. It is **non-destructive**: it only ever
-reads the source and copies into the target (never moves or deletes), and by
-default it skips files that already exist in the target so it cannot clobber
-data created in the new install.
+Source runs resolve ``user_root`` to ``%APPDATA%/NAIA``; the portable build uses
+``<exe>/user-data``. The release write policy forbids writing user state into the
+read-only resource/source tree, so the new install never reuses the old layout in
+place — this service copies the chosen folder into the current ``user_root``,
+remapping the few buckets whose parent differs (legacy ``artist_thumb/`` ->
+``ui_assets/artist_thumb``). It is **non-destructive**: it only ever reads the
+source and copies into the target (never moves or deletes), and by default it
+skips files that already exist in the target so it cannot clobber data created in
+the new install (including existing credentials).
 
-Credentials (``save/nai_accounts.json``) are intentionally NOT migrated here —
-they use a different at-rest scheme (``config/secure_tokens.json`` via
-``secure_token_manager``) and are handled by a separate, explicit opt-in flow.
+The legacy multi-account credential file (``save/nai_accounts.json``) uses a
+different at-rest scheme than the current ``config/secure_tokens.json`` and is
+excluded from the save bucket (handled by a separate opt-in transform). An
+Electron-source ``config/`` already holds ``secure_tokens.json`` and migrates
+directly via the config bucket, carrying the token forward across versions.
 """
 
 from __future__ import annotations
@@ -24,12 +32,22 @@ import shutil
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-# (source subpath relative to the legacy checkout, target relative to user_root, label)
+# (source subpath relative to the chosen folder, target relative to user_root, label)
+#
+# Two source layouts are supported and auto-detected by which buckets are present:
+#   * legacy source checkout (future01 / Dev0714 / main): cwd-relative flat dirs
+#     save/, wildcards/, output/, and artist_thumb/ at the top level.
+#   * older Electron / packaged install: the runtime user-data layout, where
+#     artist thumbnails live under ui_assets/ and credentials under config/.
+# A given source has either a top-level artist_thumb/ (legacy) or ui_assets/ +
+# config/ (user-data), so the per-bucket "present" check selects the right set.
 MIGRATION_BUCKETS: tuple[tuple[str, str, str], ...] = (
     ("save", "save", "설정·프리셋·상태"),
     ("wildcards", "wildcards", "와일드카드"),
     ("output", "output", "생성 이미지"),
-    ("artist_thumb", "ui_assets/artist_thumb", "아티스트 필터 상태"),
+    ("ui_assets", "ui_assets", "썸네일·UI 자산"),            # user-data layout (incl. artist_thumb)
+    ("artist_thumb", "ui_assets/artist_thumb", "아티스트 필터 상태"),  # legacy checkout layout
+    ("config", "config", "API 설정·토큰"),                  # user-data layout (NAI 토큰 등)
 )
 
 # Legacy credential file — detected but never auto-imported (separate opt-in flow).

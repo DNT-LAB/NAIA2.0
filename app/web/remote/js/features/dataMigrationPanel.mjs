@@ -35,7 +35,7 @@ export function createDataMigrationPanel({document, showToast}) {
       }
     }
     // Browser fallback: ask for an absolute path.
-    const entered = globalThis.prompt?.('이전 NAIA 폴더의 전체 경로를 입력하세요 (예: C:\\NAIA_future01)');
+    const entered = globalThis.prompt?.('이전 NAIA2.0 설치 폴더의 전체 경로를 입력하세요 (구버전 앱의 user-data 폴더 또는 소스 체크아웃)');
     return entered ? String(entered).trim() : null;
   }
 

@@ -1156,7 +1156,7 @@ ipcMain.handle("naia:open-data-folder", () => shell.openPath(runtimeDataRoot()))
 ipcMain.handle("naia:open-logs", () => openRuntimeSubfolder("logs"));
 ipcMain.handle("naia:pick-directory", async () => {
   const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null;
-  const options = { properties: ["openDirectory"], title: "이전 NAIA 데이터 폴더 선택" };
+  const options = { properties: ["openDirectory"], title: "이전 NAIA2.0 데이터 폴더 선택" };
   const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
   if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
     return null;

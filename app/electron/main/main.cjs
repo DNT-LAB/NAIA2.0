@@ -947,7 +947,7 @@ function compareVersions(a, b) {
 
 function httpsJsonRequest(targetUrl, options = {}) {
   return new Promise((resolve, reject) => {
-    const req = https.request(targetUrl, {
+    const req = requestModuleFor(targetUrl).request(targetUrl, {
       method: options.method || "GET",
       timeout: options.timeoutMs || 15000,
       headers: {
@@ -1000,8 +1000,15 @@ function parseLatestRelease(payload) {
 }
 
 async function fetchLatestRelease() {
-  const payload = await httpsJsonRequest(UPDATE_LATEST_RELEASE_URL);
+  // NAIA_UPDATE_FEED_URL lets a mirror/enterprise feed (or a local e2e harness)
+  // stand in for the GitHub releases API; it must return the same JSON shape.
+  const feedUrl = process.env.NAIA_UPDATE_FEED_URL || UPDATE_LATEST_RELEASE_URL;
+  const payload = await httpsJsonRequest(feedUrl);
   return parseLatestRelease(payload);
+}
+
+function requestModuleFor(targetUrl) {
+  return new URL(targetUrl).protocol === "http:" ? http : https;
 }
 
 function setUpdateState(patch) {
@@ -1054,7 +1061,7 @@ function updatesRoot() {
 
 function httpsText(targetUrl, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
-    const req = https.request(targetUrl, {
+    const req = requestModuleFor(targetUrl).request(targetUrl, {
       method: "GET",
       timeout: 15000,
       headers: { "User-Agent": UPDATE_USER_AGENT, Accept: "text/plain" },
@@ -1090,7 +1097,7 @@ function httpsText(targetUrl, redirectsLeft = 5) {
 function httpsDownloadToFile(targetUrl, destPath, onProgress, redirectsLeft = 5) {
   return new Promise((resolve, reject) => {
     fs.mkdirSync(path.dirname(destPath), { recursive: true });
-    const req = https.request(targetUrl, {
+    const req = requestModuleFor(targetUrl).request(targetUrl, {
       method: "GET",
       timeout: 60000,
       headers: { "User-Agent": UPDATE_USER_AGENT, Accept: "application/octet-stream" },

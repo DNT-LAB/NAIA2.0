@@ -53,6 +53,9 @@ release_package*/
 /refactor_plans/
 /not_implement/
 
+# Playwright MCP browser-test artifacts (console/page logs, regenerated per run)
+.playwright-mcp/
+
 # 단위 테스트 / 커버리지 보고서
 htmlcov/
 .tox/

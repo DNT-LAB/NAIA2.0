@@ -1295,31 +1295,35 @@ async function applyUpdate() {
   const root = updatesRoot();
   const scriptPath = path.join(root, "apply_update.ps1");
   const configPath = path.join(root, "apply.json");
+  const launchCmdPath = path.join(root, "apply_launch.cmd");
   try {
     fs.mkdirSync(root, { recursive: true });
     fs.writeFileSync(scriptPath, APPLY_SCRIPT_PS1, "utf8");
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf8");
+    // Launch the helper via `start` from a .cmd: that gives it its own console
+    // so it survives this process exiting. A plain detached child is otherwise
+    // killed by Electron's Windows job object when the app quits.
+    fs.writeFileSync(
+      launchCmdPath,
+      `@echo off\r\nstart "NAIA Update" /min powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "${scriptPath}" -ConfigPath "${configPath}"\r\n`,
+      "utf8",
+    );
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
     setUpdateState({ phase: "error", error: `업데이트 적용 준비 실패: ${message}` });
     return updateState;
   }
   setUpdateState({ phase: "applying", error: "" });
-  appendBackendLog("shell", `Applying update: detached swap helper for ${config.installRoot}`);
-  const child = spawn("powershell", [
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    scriptPath,
-    "-ConfigPath",
-    configPath,
-  ], { detached: true, stdio: "ignore", windowsHide: true });
+  appendBackendLog("shell", `Applying update: swap helper for ${config.installRoot}`);
+  const child = spawn(process.env.COMSPEC || "cmd.exe", ["/c", launchCmdPath], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
   child.unref();
   quitting = true;
   stopBackend();
-  setTimeout(() => app.quit(), 400);
+  setTimeout(() => app.quit(), 800);
   return { ok: true, applying: true };
 }
 

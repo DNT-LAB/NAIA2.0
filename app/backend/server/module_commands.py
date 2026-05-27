@@ -86,6 +86,12 @@ async def handle_module_command(
     for message in extra_messages:
         await _send_json(ws, message)
     await _send_json(ws, module_state)
+    if str(command.get("module_id") or "") == "automation":
+        # A timer automation must finish on wall-clock time even when no
+        # generation is running; spawn the independent expiry watcher.
+        from app.backend.server.generation_runner import ensure_automation_timer_watcher
+
+        ensure_automation_timer_watcher(context, clients)
     if generation_commands:
         await enqueue_generation_commands(ws, context, clients, generation_commands)
     return True

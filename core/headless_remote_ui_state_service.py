@@ -9,14 +9,14 @@ from typing import Any
 
 from core.headless_remote_state_service import (
     REMOTE_OPTION_DEFAULTS,
+    RUNTIME_REMOTE_PARAM_KEYS,
     HeadlessRemoteStateService,
     SUPPORTED_API_MODES,
 )
 
 
 REMOTE_WEB_STATE_KEY = "remote_web"
-STATE_VERSION = 1
-RUNTIME_REMOTE_PARAM_KEYS = {"web_session_port"}
+STATE_VERSION = 2
 
 
 def _settings_path(context: Any) -> Path:
@@ -66,18 +66,45 @@ def _normalize_mapping(raw: Any) -> dict[str, Any]:
     return copy.deepcopy(raw) if isinstance(raw, dict) else {}
 
 
+def _strip_runtime_keys(params: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in params.items() if key not in RUNTIME_REMOTE_PARAM_KEYS}
+
+
+def _normalize_param_planes(raw: Any, *, legacy_params: dict[str, Any], legacy_mode: str) -> dict[str, dict[str, Any]]:
+    """Per-mode parameter planes. Falls back to migrating a legacy single
+    ``remote_params`` blob into the mode it was last used under."""
+    planes: dict[str, dict[str, Any]] = {}
+    if isinstance(raw, dict):
+        for mode in SUPPORTED_API_MODES:
+            plane = raw.get(mode)
+            if isinstance(plane, dict):
+                planes[mode] = _strip_runtime_keys(_normalize_mapping(plane))
+    if not planes and legacy_params:
+        planes[legacy_mode] = _strip_runtime_keys(_normalize_mapping(legacy_params))
+    return planes
+
+
 def _normalize_state(raw: Any) -> dict[str, Any]:
     state = raw if isinstance(raw, dict) else {}
     mode = str(state.get("api_mode") or "NAI").strip().upper()
     if mode not in SUPPORTED_API_MODES:
         mode = "NAI"
+    remote_params = _normalize_mapping(state.get("remote_params"))
+    planes = _normalize_param_planes(
+        state.get("remote_param_planes"),
+        legacy_params=remote_params,
+        legacy_mode=mode,
+    )
+    # Keep the flat remote_params mirror in sync with the active mode's plane.
+    active_plane = _strip_runtime_keys(planes.get(mode, {}))
     return {
         "version": STATE_VERSION,
         "api_mode": mode,
         "prompt": str(state.get("prompt") or ""),
         "negative_prompt": str(state.get("negative_prompt") or state.get("negative") or ""),
         "remote_options": _normalize_options(state.get("remote_options")),
-        "remote_params": _normalize_mapping(state.get("remote_params")),
+        "remote_params": active_plane,
+        "remote_param_planes": planes,
         "auto_save_state": _normalize_mapping(state.get("auto_save_state")),
         "save_directory_state": _normalize_mapping(state.get("save_directory_state")),
     }
@@ -95,16 +122,20 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
         for key in RUNTIME_REMOTE_PARAM_KEYS
         if key in context.remote_params
     }
-    context.current_api_mode = state["api_mode"]
+    mode = state["api_mode"]
+    context.current_api_mode = mode
     context.prompt_text = state["prompt"]
     context.negative_prompt_text = state["negative_prompt"]
     context.remote_options.update(state["remote_options"])
-    context.remote_params.update({
-        key: value
-        for key, value in state["remote_params"].items()
-        if key not in RUNTIME_REMOTE_PARAM_KEYS
-    })
-    context.remote_params.update(runtime_params)
+    # Restore per-mode parameter planes and activate the saved mode's plane.
+    # Mutate the existing remote_params dict (rather than replacing it) so any
+    # values set before apply survive, then register it as the active plane.
+    planes = {plane_mode: dict(values) for plane_mode, values in state["remote_param_planes"].items()}
+    active = context.remote_params
+    active.update(planes.get(mode, {}))
+    active.update(runtime_params)
+    planes[mode] = active
+    context.remote_param_planes = planes
     context.auto_save_state.update(state["auto_save_state"])
     context.save_directory_state.update(state["save_directory_state"])
     if "auto_save" not in context.auto_save_state:
@@ -121,16 +152,24 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
 
 def save_remote_ui_state(context: Any) -> dict[str, Any]:
     settings = _read_app_settings(context)
+    mode = context.get_api_mode()
+    planes = getattr(context, "remote_param_planes", None)
+    if not isinstance(planes, dict):
+        planes = {}
+        context.remote_param_planes = planes
+    # Keep the active mode's plane pointing at the live remote_params (same
+    # object the state service swaps), so persistence always captures it.
+    planes[mode] = context.remote_params
     state = {
         "version": STATE_VERSION,
-        "api_mode": context.get_api_mode(),
+        "api_mode": mode,
         "prompt": str(context.prompt_text or ""),
         "negative_prompt": str(context.negative_prompt_text or ""),
         "remote_options": dict(context.get_options()),
-        "remote_params": _json_safe({
-            key: value
-            for key, value in dict(context.remote_params or {}).items()
-            if key not in RUNTIME_REMOTE_PARAM_KEYS
+        "remote_param_planes": _json_safe({
+            plane_mode: dict(values or {})
+            for plane_mode, values in planes.items()
+            if plane_mode in SUPPORTED_API_MODES
         }),
         "auto_save_state": _json_safe(dict(context.auto_save_state or {})),
         "save_directory_state": _json_safe(dict(context.save_directory_state or {})),

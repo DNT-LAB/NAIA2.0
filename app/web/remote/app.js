@@ -633,7 +633,7 @@ const tokenDisplayReady = import('./js/features/tokenDisplay.mjs')
   .catch(error => {
     console.error('Failed to initialize token display module', error);
   });
-const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260523-comfyui-bypass1')
+const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260527-automation-countdown1')
   .then(({createModuleBadges}) => {
     moduleBadges = createModuleBadges({
       document,
@@ -782,7 +782,7 @@ const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats
   .catch(error => {
     console.error('Failed to initialize session generation stats module', error);
   });
-const automationPanelReady = import('./js/features/automationPanel.mjs?v=20260526-automation-runtime1')
+const automationPanelReady = import('./js/features/automationPanel.mjs?v=20260527-automation-countdown1')
   .then(({createAutomationPanel}) => {
     automationPanel = createAutomationPanel({
       document,
@@ -5459,7 +5459,7 @@ function renderSaveDirectory(m) {
 
 // ---- Module button inline badges ----
 function updateAutoBadge(m) {
-  if (moduleBadges) moduleBadges.updateAuto(m);
+  setAutomationRuntime(m);
 }
 
 function updateCharBadge(m) {
@@ -5690,12 +5690,100 @@ function setCharacterColdSearch(value) {
 }
 
 // ---- Automation module ----
+// Live remaining time/count (future01 QTimer parity). The server pushes
+// automation module_state on each generation/delay transition; between pushes a
+// client-side 1s tick keeps the timer countdown smooth without server spam.
+let automationRuntime = null;
+let automationRuntimeAnchorMs = 0;
+let automationTickTimer = null;
+
+function automationKindOf(m) {
+  const t = String(m && m.automation_type || '').trim().toLowerCase();
+  if (t === 'timer' || t === 'count' || t === 'unlimited') return t;
+  const byIndex = ['unlimited', 'timer', 'count'][Number(m && m.auto_type)];
+  return byIndex || 'unlimited';
+}
+
+function formatAutomationClock(totalSeconds) {
+  const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const h = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return h > 0 ? `${pad(h)}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
+}
+
+function liveAutomationRemainingSeconds() {
+  if (!automationRuntime) return null;
+  const base = Number(automationRuntime.remaining_seconds);
+  if (!Number.isFinite(base)) return null;
+  const elapsed = Math.floor((Date.now() - automationRuntimeAnchorMs) / 1000);
+  return Math.max(0, base - elapsed);
+}
+
+function automationLiveState() {
+  // Feed the badge formatter a state whose remaining_seconds has ticked down.
+  if (!automationRuntime) return {is_running: false};
+  if (automationKindOf(automationRuntime) === 'timer') {
+    const rem = liveAutomationRemainingSeconds();
+    if (rem != null) return {...automationRuntime, remaining_seconds: rem};
+  }
+  return automationRuntime;
+}
+
+function automationPanelStatusText() {
+  const m = automationRuntime;
+  if (!m || !m.is_running) return (m && m.status) || '';
+  if (m.delay_info) return m.delay_info;
+  const kind = automationKindOf(m);
+  if (kind === 'timer') {
+    const rem = liveAutomationRemainingSeconds();
+    return rem == null ? 'Running' : `남은 시간 ${formatAutomationClock(rem)}`;
+  }
+  if (kind === 'count') {
+    const c = Number(m.remaining_count);
+    return Number.isFinite(c) ? `${c}회 남음` : 'Running';
+  }
+  const done = Number(m.completed_count);
+  return Number.isFinite(done) ? `${done}회 생성됨` : 'Running';
+}
+
+function applyAutomationLiveDisplay() {
+  if (moduleBadges) moduleBadges.updateAuto(automationLiveState());
+  if (currentModuleId === 'automation' && automationPanel && automationPanel.setLiveStatus) {
+    automationPanel.setLiveStatus(automationPanelStatusText());
+  }
+}
+
+function startAutomationTick() {
+  if (automationTickTimer) return;
+  automationTickTimer = window.setInterval(applyAutomationLiveDisplay, 1000);
+}
+
+function stopAutomationTick() {
+  if (automationTickTimer) {
+    window.clearInterval(automationTickTimer);
+    automationTickTimer = null;
+  }
+}
+
+function setAutomationRuntime(m) {
+  automationRuntime = m || {is_running: false};
+  automationRuntimeAnchorMs = Date.now();
+  if (m && m.is_running && automationKindOf(m) === 'timer') startAutomationTick();
+  else stopAutomationTick();
+  applyAutomationLiveDisplay();
+}
+
 function onAutoTypeChange(val) {
   if (automationPanel) automationPanel.onTypeChange(val);
 }
 
 function renderAutomation(m) {
   if (automationPanel) automationPanel.render(m);
+  // The panel's render seeds mod-status from state.status; immediately replace
+  // it with the live countdown/count so it is correct before the next tick.
+  if (currentModuleId === 'automation') applyAutomationLiveDisplay();
 }
 
 // ---- Character module ----

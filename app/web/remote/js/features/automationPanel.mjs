@@ -13,6 +13,13 @@ export function createAutomationPanel({
     }
   }
 
+  // Patch only the status line so the live countdown can tick without a full
+  // re-render (which would steal focus from the inputs).
+  function setLiveStatus(text) {
+    const statusEl = moduleBody.querySelector('.mod-status');
+    if (statusEl) statusEl.textContent = text || '';
+  }
+
   function render(state) {
     lastState = state;
     const typeLabels = ['Unlimited', 'Timer', 'Count'];
@@ -69,5 +76,6 @@ export function createAutomationPanel({
   return {
     onTypeChange,
     render,
+    setLiveStatus,
   };
 }

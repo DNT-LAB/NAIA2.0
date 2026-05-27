@@ -6,6 +6,9 @@ from typing import Any
 
 
 SUPPORTED_API_MODES = ("NAI", "WEBUI", "COMFYUI")
+# Mode-agnostic params that must survive a per-mode plane swap (e.g. the web
+# session port is a process-level value, not a per-mode generation parameter).
+RUNTIME_REMOTE_PARAM_KEYS = frozenset({"web_session_port"})
 REMOTE_OPTION_DEFAULTS = {
     "prompt_fixed": False,
     "auto_generate": False,
@@ -56,9 +59,37 @@ class HeadlessRemoteStateService:
         if normalized == self.context.current_api_mode:
             return
         old_mode = self.context.current_api_mode
+        # Per-mode parameter planes: stash the outgoing mode's params and swap in
+        # the target mode's plane so mode-specific values (sampler/scheduler/steps/
+        # sampling_mode/comfyui_* …) never leak across modes. Leaking COMFYUI's
+        # sampler/scheduler into a NAI generation produced a NAI 500.
+        self._stash_active_param_plane(old_mode)
         self.context.current_api_mode = normalized
+        self._activate_param_plane(normalized)
         self.context.save_remote_ui_state()
         self.context.publish("api_mode_changed", {"old_mode": old_mode, "new_mode": normalized})
+
+    def _param_planes(self) -> dict[str, dict[str, Any]]:
+        planes = getattr(self.context, "remote_param_planes", None)
+        if not isinstance(planes, dict):
+            planes = {}
+            self.context.remote_param_planes = planes
+        return planes
+
+    def _stash_active_param_plane(self, mode: str) -> None:
+        if mode in SUPPORTED_API_MODES:
+            self._param_planes()[mode] = self.context.remote_params
+
+    def _activate_param_plane(self, mode: str) -> None:
+        planes = self._param_planes()
+        target = planes.get(mode)
+        if not isinstance(target, dict):
+            target = {}
+            planes[mode] = target
+        for key in RUNTIME_REMOTE_PARAM_KEYS:
+            if key in self.context.remote_params and key not in target:
+                target[key] = self.context.remote_params[key]
+        self.context.remote_params = target
 
     def set_option(self, key: str, value: Any) -> None:
         if key not in REMOTE_OPTION_DEFAULTS:

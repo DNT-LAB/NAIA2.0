@@ -44,6 +44,7 @@ class HeadlessAutomationService:
         if runtime:
             state.update({
                 "automation_run_id": str(runtime.get("run_id") or ""),
+                "automation_type": str(runtime.get("automation_type") or ""),
                 "completed_count": int(runtime.get("completed_count") or 0),
                 "remaining_count": runtime.get("remaining_count"),
                 "remaining_seconds": self._remaining_seconds(runtime),
@@ -101,34 +102,73 @@ class HeadlessAutomationService:
         }
         self.context.automation_runtime_state = runtime
 
-        build = self._first_generation_command(settings, run_id)
-        if build.get("error"):
-            self._finish_runtime(run_id, reason="error")
-            state = self.state()
-            state["_headless_extra_messages"] = [
-                self.context._toast(str(build.get("error")), level="error")
-            ]
-            return state
+        # Automation is a controller over the shared Auto Generate loop
+        # (future01 parity): Start only sets the run conditions and engages
+        # Auto Gen. It never issues a generation itself. The unified generation
+        # runner drives each iteration once a generation runs, and this
+        # controller enforces the timer/count limit and disables Auto Gen when
+        # the limit is reached.
+        messages: list[dict[str, Any]] = []
+        options_message = self._engage_auto_generate(True)
+        if options_message:
+            messages.append(options_message)
+        messages.append(self.context._toast(
+            "Automation armed. Generation runs through Auto Generate.",
+            level="info",
+        ))
 
         state = self.state()
-        state["_headless_generation_commands"] = [build["command"]]
-        if build.get("messages"):
-            state["_headless_extra_messages"] = list(build["messages"])
+        state["_headless_extra_messages"] = messages
         return state
 
     def stop(self, *, reason: str = "stopped") -> dict[str, Any]:
         runtime = self._runtime(create=False)
-        if runtime and runtime.get("is_running"):
+        was_running = bool(runtime and runtime.get("is_running"))
+        if was_running:
             runtime["is_running"] = False
             runtime["finish_reason"] = reason
             runtime["delay_until_monotonic"] = None
-        return self.state()
+        state = self.state()
+        if was_running:
+            # Disable Auto Gen when the controller stops (future01
+            # _disable_auto_generate_immediately parity).
+            options_message = self._engage_auto_generate(False)
+            if options_message:
+                state["_headless_extra_messages"] = [options_message]
+        return state
 
     def is_running(self, run_id: str | None = None) -> bool:
         runtime = self._runtime(create=False)
         if not runtime or not runtime.get("is_running"):
             return False
         return not run_id or str(runtime.get("run_id") or "") == str(run_id)
+
+    def active_run_id(self) -> str:
+        """Return the running controller's run id, or "" when idle.
+
+        Lets the generation runner bind a plain Auto Generate completion to the
+        live Automation controller so its timer/count limit is enforced even
+        though Start never tags requests itself.
+        """
+        runtime = self._runtime(create=False)
+        if not runtime or not runtime.get("is_running"):
+            return ""
+        return str(runtime.get("run_id") or "")
+
+    def timer_remaining_seconds(self, run_id: str) -> float | None:
+        """Remaining seconds for a running *timer* automation, else ``None``.
+
+        Drives the independent server-side timer watcher: count automations
+        finish per-generation, but a timer must expire on wall-clock time even
+        when no generation is running (future01 QTimer parity).
+        """
+        runtime = self._runtime_for_run(run_id)
+        if runtime is None:
+            return None
+        if str(runtime.get("automation_type") or "") != "timer":
+            return None
+        remaining = self._remaining_seconds(runtime)
+        return None if remaining is None else float(remaining)
 
     def begin_delay(self, run_id: str, delay_seconds: float) -> bool:
         runtime = self._runtime_for_run(run_id)
@@ -165,6 +205,11 @@ class HeadlessAutomationService:
         self._finish_runtime(run_id, reason=reason)
         settings = self._settings()
         messages: list[dict[str, Any]] = []
+        # Disable Auto Gen when the controller finishes so a later manual
+        # generate does not silently keep looping (future01 parity).
+        options_message = self._engage_auto_generate(False)
+        if options_message:
+            messages.append(options_message)
         if error:
             messages.append(self.context._toast(f"Automation stopped: {error}", level="error"))
         elif settings.get("notify_on_finish", True):
@@ -184,6 +229,24 @@ class HeadlessAutomationService:
         if settings.get("random_delay"):
             return random.uniform(delay * 0.5, delay * 1.5)
         return delay
+
+    def _engage_auto_generate(self, enabled: bool) -> dict[str, Any] | None:
+        """Toggle the shared Auto Generate option and return a broadcastable
+        ``options`` message when the value actually changed.
+
+        Automation is an Auto Gen controller: starting it engages Auto Gen and
+        stopping/finishing disengages it. Returning the message lets the caller
+        push the option change to connected clients so the Auto Gen checkbox
+        stays in sync.
+        """
+        try:
+            current = bool(self.context.get_options().get("auto_generate", False))
+            if current == bool(enabled):
+                return None
+            self.context.set_option("auto_generate", bool(enabled))
+            return {"type": "options", **self.context.get_options()}
+        except Exception:
+            return None
 
     def _settings(self) -> dict[str, Any]:
         from core.automation_settings import load_automation_settings
@@ -230,66 +293,6 @@ class HeadlessAutomationService:
         if credential:
             return ""
         return f"{api_mode} credential is not configured."
-
-    def _base_overrides(self, run_id: str, *, prompt_fixed: bool) -> dict[str, Any]:
-        return {
-            "auto_generate": True,
-            "prompt_fixed": prompt_fixed,
-            "automation_run_id": run_id,
-            "_remote_queue_source": AUTOMATION_SOURCE,
-            "_remote_queue_label": AUTOMATION_SOURCE,
-        }
-
-    def _first_generation_command(self, settings: dict[str, Any], run_id: str) -> dict[str, Any]:
-        prompt_fixed = self.context._coerce_bool(self.context.get_options().get("prompt_fixed", False))
-        overrides = self._base_overrides(run_id, prompt_fixed=prompt_fixed)
-        request_id = f"{run_id}:start"
-        prompt = str(self.context.prompt_text or "").strip()
-        negative = str(self.context.negative_prompt_text or "")
-        messages: list[dict[str, Any]] = []
-        prompt_run_id = ""
-
-        if not prompt_fixed:
-            from core.headless_random_prompt_service import HeadlessRandomPromptService
-
-            service = getattr(self.context, "headless_random_prompt_service", None)
-            if service is None:
-                service = HeadlessRandomPromptService(self.context)
-                self.context.headless_random_prompt_service = service
-            result = service.generate(
-                active_ratings=self.context.get_active_ratings(),
-                overrides=overrides,
-                random_request_id=request_id,
-            )
-            self.context.persist_prompt_engineering_settings()
-            payload = result.websocket_payload()
-            if not result.success:
-                return {"error": payload.get("message") or "Automation start failed: random prompt failed."}
-            payload["source"] = "automation"
-            messages.append(payload)
-            messages.extend(result.extra_messages)
-            prompt = result.prompt
-            negative = self.context.negative_prompt_text
-            prompt_run_id = result.prompt_run_id
-            if result.detected_resolution:
-                width, height = result.detected_resolution
-                overrides["width"] = width
-                overrides["height"] = height
-                overrides["resolution"] = f"{width} x {height}"
-
-        if not prompt:
-            return {"error": "Automation start requires a prompt or a random prompt source."}
-
-        command: dict[str, Any] = {
-            "type": "generate",
-            "prompt": prompt,
-            "negative_prompt": negative,
-            "request_id": f"{request_id}:generate",
-            "overrides": overrides,
-        }
-        if prompt_run_id:
-            command["prompt_run_id"] = prompt_run_id
-        return {"command": command, "messages": messages}
 
     @staticmethod
     def _remaining_seconds(runtime: dict[str, Any] | None) -> int | None:

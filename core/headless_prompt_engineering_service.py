@@ -170,12 +170,13 @@ class HeadlessPromptEngineeringService:
         elif key == "preset":
             if not store.set_preset(text_value):
                 return context._toast(f"프리셋을 찾을 수 없습니다: {text_value}", level="error")
+            return self._apply_preset_main_settings_response(store, text_value)
         elif key == "preset_save_current":
-            ok, message = store.save_current_preset()
+            ok, message = store.save_current_preset(main_settings=self._capture_main_settings())
             if not ok:
                 return context._toast(message, level="error")
         elif key == "preset_create":
-            ok, message = store.create_preset(text_value)
+            ok, message = store.create_preset(text_value, main_settings=self._capture_main_settings())
             if not ok:
                 return context._toast(message, level="error")
         elif key == "preset_apply_recommended":
@@ -258,7 +259,7 @@ class HeadlessPromptEngineeringService:
         if save_current:
             current = store.state(mode).get("current_preset")
             if current and current not in {"", "(프리셋 없음)", "*randomized"}:
-                store.save_current_preset(mode)
+                store.save_current_preset(mode, main_settings=self._capture_main_settings())
 
         preset_data = {
             "api_mode": mode,
@@ -302,10 +303,54 @@ class HeadlessPromptEngineeringService:
             suffix += 1
         return candidate
 
+    def _capture_main_settings(self) -> dict[str, Any]:
+        """Snapshot the active mode's generation params (+ prompt/negative) for
+        persisting with a preset. Internal (``_*``) and process-runtime keys are
+        excluded; runtime-state keys are stripped later on apply/save."""
+        from core.headless_remote_state_service import RUNTIME_REMOTE_PARAM_KEYS
+
+        context = self.context
+        captured: dict[str, Any] = {
+            "prompt": str(context.prompt_text or ""),
+            "negative": str(context.negative_prompt_text or ""),
+        }
+        for key, value in dict(context.remote_params or {}).items():
+            if key.startswith("_") or key in RUNTIME_REMOTE_PARAM_KEYS:
+                continue
+            captured[key] = value
+        return captured
+
+    def _apply_preset_main_settings_response(self, store: Any, preset_name: str):
+        """On a preset swap, restore the preset's generation params + prompt and
+        surface params/prompt_sync so the client UI updates."""
+        context = self.context
+        try:
+            preset_data = store.read_preset_data(preset_name)
+        except Exception:
+            preset_data = None
+        main_settings = preset_data.get("main_settings") if isinstance(preset_data, dict) else None
+        if not isinstance(main_settings, dict) or not main_settings:
+            return self.state()
+        self._apply_main_settings(main_settings)
+        return [
+            self.state(),
+            context.generation_param_schema_payload(),
+            {
+                "type": "prompt_sync",
+                "prompt": context.prompt_text,
+                "negative": context.negative_prompt_text,
+                "negative_prompt": context.negative_prompt_text,
+            },
+        ]
+
     def _apply_main_settings(self, main_settings: dict[str, Any]) -> None:
+        from core.prompt_engineering_settings import normalize_preset_main_settings
+
         context = self.context
         prompt_dirty = False
-        for key, value in dict(main_settings or {}).items():
+        # Strip per-preset runtime-state keys (random_resolution/auto_fit_resolution)
+        # so preset application never clobbers those session flags (future01 parity).
+        for key, value in normalize_preset_main_settings(dict(main_settings or {})).items():
             if key == "prompt":
                 context.prompt_text = str(value or "")
                 prompt_dirty = True

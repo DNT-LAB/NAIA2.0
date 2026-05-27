@@ -318,34 +318,57 @@ export function createModuleBadges({
     });
   }
 
+  function automationKind(m) {
+    const t = String(m && m.automation_type || '').trim().toLowerCase();
+    if (t === 'timer' || t === 'count' || t === 'unlimited') return t;
+    const byIndex = ['unlimited', 'timer', 'count'][Number(m && m.auto_type)];
+    return byIndex || 'unlimited';
+  }
+
+  function formatAutomationClock(totalSeconds) {
+    const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    const pad = n => String(n).padStart(2, '0');
+    // future01 parity: MM:SS, expanding to HH:MM:SS only past the hour mark.
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
+  }
+
+  function automationBadgeText(m) {
+    const kind = automationKind(m);
+    if (kind === 'timer') {
+      const rem = Number(m.remaining_seconds);
+      return Number.isFinite(rem) ? formatAutomationClock(rem) : '';
+    }
+    if (kind === 'count') {
+      const c = Number(m.remaining_count);
+      return Number.isFinite(c) ? `${c}` : '';
+    }
+    const done = Number(m.completed_count);
+    return Number.isFinite(done) && done > 0 ? `${done}` : '';
+  }
+
   function updateAuto(m) {
     const btn = document.querySelector('.module-btn[data-module="automation"]');
     const badge = document.getElementById('badgeAuto');
     if (!badge || !btn) return;
-    const isRunning = m.is_running;
 
-    if (!isRunning) {
+    if (!m.is_running) {
       badge.classList.add('hidden');
+      badge.textContent = '';
       btn.classList.remove('auto-active');
       return;
     }
     btn.classList.add('auto-active');
-    badge.classList.remove('hidden');
 
-    const delayInfo = m.delay_info || '';
-    const repeatInfo = m.repeat_info || '';
-    const status = m.status || '';
-
-    if (delayInfo) {
-      const dMatch = delayInfo.match(/([\d.]+)\s*s/i) || delayInfo.match(/([\d.:]+)/);
-      badge.textContent = dMatch ? dMatch[1] : '\u2026';
-    } else if (repeatInfo) {
-      const rMatch = repeatInfo.match(/(\d+\/\d+)/);
-      badge.textContent = rMatch ? rMatch[1] : '\u2026';
+    const text = automationBadgeText(m);
+    if (text) {
+      badge.textContent = text;
+      badge.classList.remove('hidden');
     } else {
-      const numMatch = status.match(/(\d+[:/]?\d*)/);
-      if (numMatch) badge.textContent = numMatch[1];
-      else badge.classList.add('hidden');
+      badge.textContent = '';
+      badge.classList.add('hidden');
     }
   }
 

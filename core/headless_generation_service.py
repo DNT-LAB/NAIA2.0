@@ -283,10 +283,41 @@ class HeadlessGenerationService:
         self._normalize_booleans(params)
         self._normalize_resolution(params)
         self._normalize_numbers(params, api_mode)
+        self._normalize_comfyui_workflow_type(params, api_mode)
         apply_image_modules = getattr(self.context, "apply_headless_image_module_params", None)
         if callable(apply_image_modules):
             apply_image_modules(params, api_mode)
         return params
+
+    @staticmethod
+    def _normalize_comfyui_workflow_type(params: dict[str, Any], api_mode: str) -> None:
+        """Derive the COMFYUI ``workflow_type`` discriminator when it is missing.
+
+        The web UI computes ``workflow_type`` (``unet`` for ANIMA, ``checkpoint``
+        otherwise) at generate time in ``_collectCurrentParams`` and only ships it
+        with frontend-issued generate commands. Server-initiated generations
+        (Automation, Auto Generate continuation) only see the persisted
+        ``sampling_mode`` and would otherwise fall back to the ``checkpoint``
+        default in ``ComfyUIWorkflowManager.apply_params_to_workflow`` — building
+        the wrong base workflow and getting rejected at ComfyUI ``/prompt``.
+        Mirror the frontend mapping so every server path builds the same workflow.
+        """
+        if str(api_mode or "").strip().upper() != "COMFYUI":
+            return
+        existing = str(params.get("workflow_type") or "").strip().lower()
+        if existing in {"unet", "checkpoint", "bypass", "free", "locked"}:
+            return
+        sampling_mode = str(
+            params.get("comfyui_sampling_mode")
+            or params.get("sampling_mode")
+            or ""
+        ).strip().lower()
+        if sampling_mode == "bypass":
+            params["workflow_type"] = "bypass"
+        elif sampling_mode == "anima":
+            params["workflow_type"] = "unet"
+        else:
+            params["workflow_type"] = "checkpoint"
 
     def _normalize_resolution(self, params: dict[str, Any]) -> None:
         width = self._to_int(params.get("width"))

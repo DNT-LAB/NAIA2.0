@@ -473,7 +473,12 @@ class PromptEngineeringHeadlessStore:
         self._dirty_modes.discard(self.mode(mode))
         return True
 
-    def save_current_preset(self, mode: str | None = None) -> tuple[bool, str]:
+    def save_current_preset(
+        self,
+        mode: str | None = None,
+        *,
+        main_settings: dict[str, Any] | None = None,
+    ) -> tuple[bool, str]:
         mode_key = self.mode(mode)
         state = self.state(mode_key)
         name = state["current_preset"]
@@ -482,12 +487,22 @@ class PromptEngineeringHeadlessStore:
         data = self.read_preset_data(name, mode_key)
         data["api_mode"] = mode_key
         data["module_settings"] = copy.deepcopy(state["settings"])
+        if main_settings is not None:
+            # Generation params travel with the preset (future01 parity); runtime
+            # -state keys are stripped so they stay session-global.
+            data["main_settings"] = normalize_preset_main_settings(copy.deepcopy(main_settings))
         self.write_preset_data(name, mode_key, data)
         self.save_last_used_preset(mode_key, name)
         self._dirty_modes.discard(mode_key)
         return True, name
 
-    def create_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:
+    def create_preset(
+        self,
+        preset_name: str,
+        mode: str | None = None,
+        *,
+        main_settings: dict[str, Any] | None = None,
+    ) -> tuple[bool, str]:
         mode_key = self.mode(mode)
         name = sanitize_preset_name(preset_name)
         if not name:
@@ -495,7 +510,11 @@ class PromptEngineeringHeadlessStore:
         data = {
             "api_mode": mode_key,
             "module_settings": copy.deepcopy(self.state(mode_key)["settings"]),
-            "main_settings": {},
+            "main_settings": (
+                normalize_preset_main_settings(copy.deepcopy(main_settings))
+                if main_settings is not None
+                else {}
+            ),
         }
         self.write_preset_data(name, mode_key, data)
         self.refresh(mode_key)

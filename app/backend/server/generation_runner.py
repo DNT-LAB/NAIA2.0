@@ -42,11 +42,65 @@ AUTO_GENERATE_DROPPED_PARAM_KEYS = {
 }
 
 
+async def _broadcast_automation_state(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """Broadcast the automation runtime as a proper ``module_state`` message.
+
+    The runner pushes automation state on each generation completion, delay
+    transition, and failure. These must carry the ``module_state`` envelope
+    (``type`` + ``module_id``) or the frontend dispatcher drops them — which is
+    why the live remaining time/count never updated in the web UI.
+    """
+    state = context._automation_service().state()
+    await broadcast_json(clients, context._module_state_payload("automation", state))
+
+
 def ensure_generation_runner(context: WebSessionContext, clients: set[WebSocket]) -> None:
     task = getattr(context, "headless_generation_runner_task", None)
     if task is not None and not task.done():
         return
     context.headless_generation_runner_task = asyncio.create_task(run_generation_queue(context, clients))
+
+
+def ensure_automation_timer_watcher(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """Start the independent timer-expiry watcher for the running automation.
+
+    A timer automation must finish on wall-clock time even when no generation
+    is running (future01 QTimer parity). ``record_generation_completed`` only
+    sees timer expiry on the next completion, so a timer with idle/stalled
+    generation would never finish without this watcher.
+    """
+    service = context._automation_service()
+    run_id = service.active_run_id()
+    if not run_id or service.timer_remaining_seconds(run_id) is None:
+        return
+    task = getattr(context, "automation_timer_watcher_task", None)
+    if task is not None and not task.done():
+        return
+    context.automation_timer_watcher_task = asyncio.create_task(
+        _run_automation_timer_watcher(context, clients)
+    )
+
+
+async def _run_automation_timer_watcher(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    service = context._automation_service()
+    try:
+        while True:
+            run_id = service.active_run_id()
+            if not run_id:
+                return
+            remaining = service.timer_remaining_seconds(run_id)
+            if remaining is None:
+                # Not a timer run (count/unlimited finish elsewhere) — stop watching.
+                return
+            if remaining <= 0:
+                policy = service.finish(run_id, reason="timer_complete")
+                await _broadcast_automation_state(context, clients)
+                for message in policy.get("messages", []):
+                    await broadcast_json(clients, message)
+                return
+            await asyncio.sleep(min(max(remaining, 0.2), 1.0))
+    finally:
+        context.automation_timer_watcher_task = None
 
 
 async def run_generation_queue(context: WebSessionContext, clients: set[WebSocket]) -> None:
@@ -107,9 +161,15 @@ async def _maybe_continue_auto_generation(
 ) -> bool:
     params = getattr(request, "params", {}) or {}
     automation_run_id = str(params.get("automation_run_id") or "")
+    # The Automation controller never tags requests itself (Start only sets the
+    # run conditions and engages Auto Gen). Bind a plain Auto Generate completion
+    # to the live controller so its timer/count limit is enforced and Auto Gen is
+    # disabled when the limit is reached.
+    if not automation_run_id and _automation_should_bind(context, request):
+        automation_run_id = context._automation_service().active_run_id()
     if automation_run_id:
         policy = context._automation_service().record_generation_completed(automation_run_id)
-        await broadcast_json(clients, context._automation_service().state())
+        await _broadcast_automation_state(context, clients)
         for message in policy.get("messages", []):
             await broadcast_json(clients, message)
         if not policy.get("continue"):
@@ -117,12 +177,12 @@ async def _maybe_continue_auto_generation(
         delay_seconds = float(policy.get("delay_seconds") or 0.0)
         if delay_seconds > 0:
             context._automation_service().begin_delay(automation_run_id, delay_seconds)
-            await broadcast_json(clients, context._automation_service().state())
+            await _broadcast_automation_state(context, clients)
             if not await _wait_for_automation_delay(context, automation_run_id, delay_seconds):
-                await broadcast_json(clients, context._automation_service().state())
+                await _broadcast_automation_state(context, clients)
                 return False
             context._automation_service().end_delay(automation_run_id)
-            await broadcast_json(clients, context._automation_service().state())
+            await _broadcast_automation_state(context, clients)
 
     if not _should_continue_auto_generation(context, request):
         return False
@@ -167,7 +227,7 @@ async def _maybe_continue_auto_generation(
                     automation_run_id,
                     str(payload.get("message") or "random prompt failed"),
                 )
-                await broadcast_json(clients, context._automation_service().state())
+                await _broadcast_automation_state(context, clients)
                 for message in failure.get("messages", []):
                     await broadcast_json(clients, message)
             return False
@@ -203,11 +263,28 @@ async def _maybe_continue_auto_generation(
         })
         if automation_run_id:
             failure = context._automation_service().fail(automation_run_id, dispatch.blocked_reason)
-            await broadcast_json(clients, context._automation_service().state())
+            await _broadcast_automation_state(context, clients)
             for message in failure.get("messages", []):
                 await broadcast_json(clients, message)
         return False
     await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "queued"})
+    return True
+
+
+def _automation_should_bind(context: WebSessionContext, request) -> bool:
+    """Whether a completed request should count against the running Automation
+    controller. Mirrors the Auto Generate suppression rules so special requests
+    (event preset, character viewer, img2img, etc.) never consume the limit."""
+    if not context._automation_service().is_running():
+        return False
+    params = getattr(request, "params", {}) or {}
+    if not isinstance(params, dict):
+        return False
+    if any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS):
+        return False
+    request_type = str(params.get("type") or "").strip().lower()
+    if request_type in {"img2img", "inpaint", "outpaint", "auto_outpainting"}:
+        return False
     return True
 
 
@@ -286,7 +363,7 @@ async def _broadcast_generation_error(
     automation_run_id = str(params.get("automation_run_id") or "")
     if automation_run_id:
         failure = context._automation_service().fail(automation_run_id, message)
-        await broadcast_json(clients, context._automation_service().state())
+        await _broadcast_automation_state(context, clients)
         for extra_message in failure.get("messages", []):
             await broadcast_json(clients, extra_message)
     if params.get("result_enhance_request"):

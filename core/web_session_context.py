@@ -46,6 +46,7 @@ class WebSessionContext:
     negative_prompt_text: str = ""
     remote_options: dict[str, bool] = field(default_factory=lambda: dict(REMOTE_OPTION_DEFAULTS))
     remote_params: dict[str, Any] = field(default_factory=dict)
+    remote_param_planes: dict[str, dict[str, Any]] = field(default_factory=dict)
     remote_option_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
     autocomplete_state: AutocompleteRuntimeState = field(default_factory=AutocompleteRuntimeState)
     desktop_adapter: Any = None

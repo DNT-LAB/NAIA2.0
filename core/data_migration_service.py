@@ -245,7 +245,13 @@ class DataMigrationService:
             copied[bucket] = bucket_files
 
         return {
+            # ``ok`` means the import ran (top-level failures already returned
+            # early). A partial run still copies what it can; ``partial`` /
+            # ``failed_files`` surface per-file OSErrors so callers don't report a
+            # run that dropped files as a clean success.
             "ok": True,
+            "partial": bool(errors),
+            "failed_files": len(errors),
             "source": str(source),
             "user_root": str(self.user_root()),
             "copied": copied,

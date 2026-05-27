@@ -6,7 +6,7 @@
   "main": "main/main.cjs",
   "scripts": {
     "check": "node --check main/main.cjs && node --check preload/preload.cjs",
-    "release:check": "npm run check && npm run test:main-contract && npm run check:runtime && npm run check:source-layout && npm run check:source-payload && npm run check:portable-shape && npm run check:shell-contract && npm run check:distribution && npm run check:runtime-distribution && npm run check:approval-gate && npm run check:feature-contract && npm run check:packaged-feature-smoke && npm run check:runtime-writes && npm run check:asset-classification && npm run check:core-boundary",
+    "release:check": "npm run check && npm run test:main-contract && npm run check:runtime && npm run check:source-layout && npm run check:source-payload && npm run check:portable-shape && npm run check:shell-contract && npm run check:distribution && npm run check:runtime-distribution && npm run check:approval-gate && npm run check:feature-contract && npm run check:recommend-contract && npm run check:packaged-feature-smoke && npm run check:runtime-writes && npm run check:asset-classification && npm run check:core-boundary",
     "goal:audit": "cd ../.. && python tools/audit_final_goal_completion.py",
     "deps:plan": "cd ../.. && python tools/bootstrap_electron_dependencies.py",
     "deps:plan:summary": "cd ../.. && python tools/bootstrap_electron_dependencies.py --summary",
@@ -55,6 +55,7 @@
     "check:runtime-distribution": "cd ../.. && python tools/check_runtime_distribution_tracks.py",
     "check:approval-gate": "cd ../.. && python tools/check_final_release_approval_gate.py",
     "check:feature-contract": "cd ../.. && python tools/check_remote_web_feature_contract.py --repo-root .",
+    "check:recommend-contract": "cd ../.. && python tools/check_remote_recommend_contract.py",
     "check:packaged-feature-smoke": "cd ../.. && python tools/check_packaged_electron_feature_smoke.py",
     "check:runtime-writes": "cd ../.. && python tools/check_runtime_write_policy.py --repo-root .",
     "check:asset-classification": "cd ../.. && python tools/check_runtime_asset_classification.py",

@@ -7,6 +7,7 @@
     "core/web_session_app.py",
     "app/backend/server/artist_thumbnail_routes.py",
     "app/backend/server/character_viewer_routes.py",
+    "app/backend/server/data_migration_routes.py",
     "app/backend/server/danbooru_routes.py",
     "app/backend/server/event_preset_routes.py",
     "app/backend/server/install_manager_routes.py",
@@ -346,6 +347,20 @@
         "set_result_enhance_config",
         "queue_action"
       ]
+    },
+    {
+      "id": "data_migration",
+      "name": "Previous-install user data import",
+      "source_files": [
+        "app/backend/server/data_migration_routes.py",
+        "core/data_migration_service.py",
+        "app/web/remote/js/features/dataMigrationPanel.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "POST", "path": "/api/data-migration/preview", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/data-migration/import", "smoke": "asset_runtime"}
+      ]
     }
   ],
   "data_dependencies": [
@@ -425,6 +440,7 @@
     "Artist Thumb random prompt and generate",
     "Danbooru internal post view and internal popup/browser handoff",
     "setup/API save and clear",
-    "history save/delete/download"
+    "history save/delete/download",
+    "data migration preview/import (loopback, temporary user-data)"
   ]
 }

@@ -48,8 +48,28 @@ def _drain_startup(ws: Any) -> None:
     raise AssertionError("startup messages did not finish")
 
 
-def _receive_types(ws: Any, count: int) -> list[dict[str, Any]]:
-    return [ws.receive_json() for _ in range(count)]
+def _drain_until_lazy(ws: Any, cap: int = 60) -> list[dict[str, Any]]:
+    """Collect messages up to and including the ``lazy_indices_ready`` terminator."""
+    out: list[dict[str, Any]] = []
+    for _ in range(cap):
+        message = ws.receive_json()
+        out.append(message)
+        if message.get("type") == "lazy_indices_ready":
+            return out
+    raise AssertionError(f"sync terminator not seen; got {[m.get('type') for m in out]!r}")
+
+
+def _collect_after(ws: Any, command: dict[str, Any]) -> list[dict[str, Any]]:
+    """Send ``command`` then a ``sync`` and return every message they produced.
+
+    Draining to the ``sync`` terminator (instead of a fixed count) keeps the
+    contract robust to incidental traffic — e.g. an ``anlas_update`` or an extra
+    ``api_status`` — and to broadcast ordering, while still asserting the exact
+    payload types a recommended-preset application must emit.
+    """
+    ws.send_json(command)
+    ws.send_json({"type": "sync"})
+    return _drain_until_lazy(ws)
 
 
 def _first(messages: list[dict[str, Any]], message_type: str) -> dict[str, Any]:
@@ -70,8 +90,7 @@ def check_webui_mode_switch_applies_recommend(root: Path) -> None:
     context = _context(root)
     with _client(context).websocket_connect("/ws") as ws:
         _drain_startup(ws)
-        ws.send_json({"type": "set_mode", "mode": "WEBUI"})
-        messages = _receive_types(ws, 6)
+        messages = _collect_after(ws, {"type": "set_mode", "mode": "WEBUI"})
 
     module_state = _first_module(messages, "prompt_engineering")
     params = _first(messages, "params")
@@ -90,10 +109,8 @@ def check_comfyui_anima_param_applies_recommend(root: Path) -> None:
     context = _context(root)
     with _client(context).websocket_connect("/ws") as ws:
         _drain_startup(ws)
-        ws.send_json({"type": "set_mode", "mode": "COMFYUI"})
-        _receive_types(ws, 4)
-        ws.send_json({"type": "set_param", "key": "sampling_mode", "value": "anima"})
-        messages = _receive_types(ws, 3)
+        _collect_after(ws, {"type": "set_mode", "mode": "COMFYUI"})
+        messages = _collect_after(ws, {"type": "set_param", "key": "sampling_mode", "value": "anima"})
 
     module_state = _first_module(messages, "prompt_engineering")
     params = _first(messages, "params")

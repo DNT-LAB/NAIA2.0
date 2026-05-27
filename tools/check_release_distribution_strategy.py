@@ -97,11 +97,27 @@ def check_release_distribution_strategy(
             violations.append({"path": str(strategy_file), "reason": f"state policy forbidden list must mention {term}"})
 
     auto_update = strategy.get("auto_update", {})
-    if auto_update.get("status") != "deferred":
-        violations.append({"path": str(strategy_file), "reason": "auto-update must remain deferred until signed release artifacts exist"})
-    allowed_after = set(auto_update.get("allowed_after", []))
-    if "signed release artifacts exist" not in allowed_after:
-        violations.append({"path": str(strategy_file), "reason": "auto-update gate must require signed release artifacts"})
+    auto_update_status = auto_update.get("status")
+    if auto_update_status not in {"deferred", "enabled_unsigned_beta"}:
+        violations.append({
+            "path": str(strategy_file),
+            "reason": "auto-update status must be 'deferred' or 'enabled_unsigned_beta'",
+        })
+    if auto_update_status == "deferred":
+        allowed_after = set(auto_update.get("allowed_after", []))
+        if "signed release artifacts exist" not in allowed_after:
+            violations.append({"path": str(strategy_file), "reason": "deferred auto-update gate must require signed release artifacts"})
+    elif auto_update_status == "enabled_unsigned_beta":
+        # Auto-update ships before code signing (v2.0.4): the compensating
+        # integrity controls are mandatory and must stay declared in the
+        # contract so the unsigned channel never silently drops them.
+        required_controls = " ".join(str(item) for item in auto_update.get("required_controls", []))
+        for term in ("SHA-256", "user-data preservation", "backup-and-rollback", "packaged Windows"):
+            if term not in required_controls:
+                violations.append({
+                    "path": str(strategy_file),
+                    "reason": f"unsigned-beta auto-update must declare control: {term}",
+                })
 
     electron_contract = strategy.get("electron_builder_contract", {})
     if electron_contract.get("first_target") != "dir":

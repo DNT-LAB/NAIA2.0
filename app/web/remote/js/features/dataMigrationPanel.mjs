@@ -145,9 +145,18 @@ export function createDataMigrationPanel({document, showToast}) {
       const parts = [`${data.total_files}개 파일 복사`];
       if (data.skipped_existing) parts.push(`${data.skipped_existing}개 건너뜀`);
       if (data.overwritten) parts.push(`${data.overwritten}개 덮어씀`);
-      const msg = `가져오기 완료 — ${parts.join(' · ')}. 변경 사항은 재시작 후 적용됩니다.`;
-      setResult(msg, 'success');
-      toast(msg, 'success');
+      const failed = Number(data.failed_files) || (Array.isArray(data.errors) ? data.errors.length : 0);
+      if (failed > 0) {
+        parts.push(`${failed}개 실패`);
+        const reason = Array.isArray(data.errors) && data.errors.length ? ` — ${data.errors[0]}` : '';
+        const msg = `일부만 가져왔습니다 (${parts.join(' · ')})${reason}. 권한/잠금/경로를 확인 후 다시 시도하세요. 변경 사항은 재시작 후 적용됩니다.`;
+        setResult(msg, 'warning');
+        toast(`일부 파일을 가져오지 못했습니다 (${failed}개 실패)`, 'error');
+      } else {
+        const msg = `가져오기 완료 — ${parts.join(' · ')}. 변경 사항은 재시작 후 적용됩니다.`;
+        setResult(msg, 'success');
+        toast(msg, 'success');
+      }
     } catch (err) {
       setResult(`가져오기 실패: ${err}`, 'error');
       toast(`가져오기 실패: ${err}`, 'error');

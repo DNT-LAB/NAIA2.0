@@ -44,8 +44,8 @@
     "signing": {
       "status": "deferred",
       "smartscreen_warning_accepted": true,
-      "required_before_auto_update": true,
-      "reason": "First public portable beta accepts SmartScreen friction; the release-blocking public-distribution contract is immutable checksums plus local Defender scan evidence."
+      "required_before_auto_update": false,
+      "reason": "First public portable beta accepts SmartScreen friction. Auto-update is enabled before signing (v2.0.4) under mandatory SHA-256 integrity verification plus user-data-preserving backup/rollback; the release-blocking public-distribution contract remains immutable checksums plus local Defender scan evidence."
     }
   },
   "installer_strategy": {
@@ -90,12 +90,18 @@
     ]
   },
   "auto_update": {
-    "status": "deferred",
-    "allowed_after": [
-      "signed release artifacts exist",
-      "portable release smoke is stable",
-      "installer/update state-preservation policy is implemented and tested",
-      "rollback behavior is documented"
+    "status": "enabled_unsigned_beta",
+    "enabled_in": "v2.0.4",
+    "rationale": "The portable beta intentionally ships in-place auto-update before code signing. Signing stays deferred; the compensating integrity controls below are mandatory and replace the prior 'signed artifacts first' precondition for the unsigned beta channel.",
+    "required_controls": [
+      "SHA-256 checksum verification of the downloaded artifact before apply",
+      "user-data preservation during the in-place swap",
+      "backup-and-rollback of the previous install on apply failure",
+      "apply restricted to packaged Windows builds"
+    ],
+    "deferred_until_signing": [
+      "macOS/cross-platform auto-apply",
+      "publisher trust and SmartScreen reputation via signed artifacts"
     ]
   },
   "electron_builder_contract": {

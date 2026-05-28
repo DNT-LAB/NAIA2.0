@@ -46,6 +46,13 @@ def register_web_shell_routes(app: FastAPI, root_web_dir: Path) -> None:
     async def index():
         return _web_file(root_web_dir / "index.html", "text/html")
 
+    @app.get("/bootstrap.html")
+    async def bootstrap_migration_page():
+        # Standalone first-run migration screen loaded by the Electron shell when
+        # the user picks "import from previous NAIA2.0", so migration happens in
+        # a focused view before the full app launches.
+        return _web_file(root_web_dir / "bootstrap.html", "text/html")
+
     @app.get("/style.css")
     async def serve_css():
         return _web_file(root_web_dir / "style.css", "text/css")

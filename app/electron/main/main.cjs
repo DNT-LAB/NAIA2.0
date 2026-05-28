@@ -1775,8 +1775,14 @@ ipcMain.handle("naia:start-tag-download", async () => {
   if (!backendUrl) return { ok: false, error: "Backend not ready." };
   try {
     const payload = await httpJsonRequest(`${backendUrl}/api/install-manager/tag-archive/download`, { method: "POST" });
+    // Choosing the download abandons any in-progress migration handshake so the
+    // gate completes on download readiness.
+    bootstrapMigrationActive = false;
     runtimeInstallChoiceMade = true;
     setRuntimeInstallState(normalizeRuntimeInstallState(payload, { active: true }));
+    // If we were on the standalone migration page, return to the maintenance
+    // view so the user sees download progress (it renders the progress bar).
+    loadMaintenance("loading", "태그 데이터 다운로드 중...");
     return { ok: true };
   } catch (error) {
     const message = error && error.message ? error.message : String(error);
@@ -1793,19 +1799,21 @@ ipcMain.handle("naia:start-bootstrap-migration", async () => {
   // without the bootstrap hint.
   if (!backendUrl) return { ok: false, error: "Backend not ready." };
   if (mainWindow && !mainWindow.isDestroyed()) {
-    const target = `${remoteEntryUrl(backendUrl)}${remoteEntryUrl(backendUrl).includes("?") ? "&" : "?"}bootstrap_migration=1`;
+    // Load the standalone migration page (NOT the full app). This keeps the
+    // migration a focused, pre-launch step instead of opening the real app
+    // (which would show API/random-prompt errors and need a large window).
+    expandMainWindowForApp();
     try {
-      await mainWindow.loadURL(target);
+      await mainWindow.loadURL(`${backendUrl.replace(/\/+$/, "")}/bootstrap.html`);
     } catch (error) {
       // Navigation failed — do NOT mark the choice as made, otherwise the
-      // install gate would start its completion deadline against a migration
-      // UI that never actually loaded.
+      // install gate would start a deadline against a UI that never loaded.
       const message = error && error.message ? error.message : String(error);
       return { ok: false, error: message };
     }
   }
   // Only now that the migration UI is actually showing do we mark the migration
-  // path active. The gate will keep waiting (no deadline) until the user clicks
+  // path active. The gate keeps waiting (no deadline) until the user clicks
   // "NAIA 재시작", which clears this flag and completes via a clean restart.
   bootstrapMigrationActive = true;
   return { ok: true };

@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket
 
+from app.backend.server.anlas_poller import broadcast_anlas
 from core.web_session_context import WebSessionContext
 
 
@@ -186,3 +187,6 @@ async def _handle_set_mode(
     else:
         await broadcast_json(clients, context.generation_param_schema_payload())
     await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
+    # 모드 전환 시 Anlas pill 갱신: NAI 진입 시 다시 표시, 비-NAI 진입 시 숨김.
+    # (없으면 한 번 숨겨진 pill이 5분 폴링/재연결 전까지 NAI 복귀해도 안 나타남)
+    await broadcast_anlas(context, clients)

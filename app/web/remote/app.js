@@ -693,7 +693,7 @@ const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=202605
     console.error('Failed to initialize data migration panel module', error);
   });
 let dataBootstrapPanel = null;
-const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=20260528-bootstrap1')
+const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=20260528-bootstrap2')
   .then(({createDataBootstrapPanel}) => {
     dataBootstrapPanel = createDataBootstrapPanel({
       document,
@@ -707,6 +707,21 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
   .catch(error => {
     console.error('Failed to initialize data bootstrap panel module', error);
   });
+
+// When the Electron maintenance window navigated here with `?bootstrap_migration=1`
+// the user has chosen to import their previous NAIA2.0 data instead of running
+// the Hugging Face tag-archive download. Auto-open the migration popup once the
+// panel module finishes loading so they do not have to dig through the API
+// modal to find it.
+try {
+  if (new URLSearchParams(window.location.search).get('bootstrap_migration') === '1') {
+    dataMigrationReady.then(() => {
+      if (dataMigrationPanel) dataMigrationPanel.open();
+    });
+  }
+} catch (error) {
+  console.warn('bootstrap_migration query parse failed', error);
+}
 let updateBanner = null;
 const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260527-update3')
   .then(({createUpdateBanner}) => {

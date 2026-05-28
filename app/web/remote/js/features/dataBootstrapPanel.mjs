@@ -110,6 +110,12 @@ export function createDataBootstrapPanel({
       const res = await fetchFn('/api/install-manager', {cache: 'no-store'});
       const data = await res.json();
       render(data);
+      // If a download is already in flight when this panel mounts or is
+      // re-opened, attach the polling loop so the user sees live progress.
+      // Without this the UI would render once with the active payload then
+      // never refresh until the user clicks something.
+      const downloadActive = !!(data && data.tag_archive && data.tag_archive.download && data.tag_archive.download.active);
+      if (downloadActive && !pollTimer) startPolling();
       return data;
     } catch (err) {
       console.warn('install-manager refresh failed', err);

@@ -121,6 +121,11 @@ let backendLogs = [];
 let startingBackend = null;
 let runtimeInstallGate = null;
 let runtimeInstallState = null;
+// Whether the user has picked a tag-data path in the maintenance window. Set
+// by the ``naia:start-tag-download`` / ``naia:start-bootstrap-migration`` IPC
+// handlers and read inside ``runRuntimeInstallGate`` to know when to enforce
+// the completion deadline (no deadline while still waiting on the user).
+let runtimeInstallChoiceMade = false;
 let runtimeBootstrapState = null;
 let quitting = false;
 let backendPortConfirmed = false;
@@ -1368,25 +1373,44 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
     return true;
   }
 
-  setRuntimeInstallState({
-    active: true,
-    ready: false,
-    phase: "download",
-    percent: 0,
-    message: "처음 실행에 필요한 태그 데이터를 다운로드합니다.",
+  // Do NOT auto-trigger the Hugging Face download here. A returning user with a
+  // previous NAIA2.0 install can carry the ~1.4 GB tag corpus over via the
+  // migration flow, and silently spending bandwidth+time on a download that
+  // they would have skipped is the bug the user reported. Instead, surface a
+  // choice in the maintenance window: "허깅페이스에서 다운로드" starts the
+  // download via the ``naia:start-tag-download`` IPC, "NAIA2.0에서 가져오기"
+  // hands off to the migration UI. Either path eventually makes
+  // ``install-manager`` report ready, which this poll loop picks up.
+  runtimeInstallChoiceMade = false;
+  setRuntimeInstallState(normalizeRuntimeInstallState(initialized, {
+    active: false,
+    phase: "awaiting_choice",
+    message: "태그 데이터를 어떻게 준비할지 선택하세요.",
     error: "",
-  });
-  const started = await httpJsonRequest(`${apiBase}/api/install-manager/tag-archive/download`, { method: "POST" });
-  setRuntimeInstallState(normalizeRuntimeInstallState(started, { active: true }));
-  const startError = runtimeInstallErrorFromPayload(started);
-  if (startError) {
-    throw new Error(startError);
-  }
+  }));
 
-  while (Date.now() < deadline) {
+  // No timeout while the user is deciding. Once they pick a path (download
+  // started or migration kicked off), enforce the normal completion deadline.
+  while (true) {
     await delay(pollIntervalMs);
-    const current = await httpJsonRequest(`${apiBase}/api/install-manager`);
-    setRuntimeInstallState(normalizeRuntimeInstallState(current, { active: true }));
+    let current;
+    try {
+      current = await httpJsonRequest(`${apiBase}/api/install-manager`);
+    } catch (pollError) {
+      // The backend can be momentarily unreachable during a user-initiated
+      // restart (the "NAIA 재시작" button in the migration popup). Treat the
+      // transient error as "keep polling" rather than failing the gate.
+      if (runtimeInstallChoiceMade && Date.now() >= deadline) {
+        throw new Error("Runtime data installation timed out.");
+      }
+      continue;
+    }
+    const choiceMade = runtimeInstallChoiceMade || !!(current && current.tag_archive && current.tag_archive.download && current.tag_archive.download.active);
+    setRuntimeInstallState(normalizeRuntimeInstallState(current, {
+      active: choiceMade,
+      phase: choiceMade ? undefined : "awaiting_choice",
+      message: choiceMade ? undefined : "태그 데이터를 어떻게 준비할지 선택하세요.",
+    }));
     if (runtimeInstallReadyFromPayload(current)) {
       setRuntimeInstallState(normalizeRuntimeInstallState(current, {
         active: false,
@@ -1398,9 +1422,10 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
     if (error) {
       throw new Error(error);
     }
+    if (choiceMade && Date.now() >= deadline) {
+      throw new Error("Runtime data installation timed out.");
+    }
   }
-
-  throw new Error("Runtime data installation timed out.");
 }
 
 async function ensureRuntimeInstallReady(baseUrl, options = {}) {
@@ -1678,6 +1703,42 @@ ipcMain.handle("naia:restart-backend", async () => {
     await mainWindow.loadURL(remoteEntryUrl(url));
   }
   return shellState();
+});
+ipcMain.handle("naia:start-tag-download", async () => {
+  // Maintenance window asks us to fetch the tag corpus from Hugging Face.
+  // Marks the gate's choice as made so the deadline kicks in and the polling
+  // loop transitions from "awaiting_choice" to active download progress.
+  if (!backendUrl) return { ok: false, error: "Backend not ready." };
+  try {
+    const payload = await httpJsonRequest(`${backendUrl}/api/install-manager/tag-archive/download`, { method: "POST" });
+    runtimeInstallChoiceMade = true;
+    setRuntimeInstallState(normalizeRuntimeInstallState(payload, { active: true }));
+    return { ok: true };
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    return { ok: false, error: message };
+  }
+});
+ipcMain.handle("naia:start-bootstrap-migration", async () => {
+  // User wants to bring tag data over from a previous NAIA2.0 install. We hand
+  // off to the main app's data migration UI by loading it with a bootstrap
+  // hint, then mark the choice as made so the install gate polls under the
+  // normal deadline. Once migration writes tag files to disk the install
+  // manager will report ready and the gate completes — at that point the
+  // user will use the existing "NAIA 재시작" button which re-loads main app
+  // without the bootstrap hint.
+  if (!backendUrl) return { ok: false, error: "Backend not ready." };
+  runtimeInstallChoiceMade = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const target = `${remoteEntryUrl(backendUrl)}${remoteEntryUrl(backendUrl).includes("?") ? "&" : "?"}bootstrap_migration=1`;
+    try {
+      await mainWindow.loadURL(target);
+    } catch (error) {
+      const message = error && error.message ? error.message : String(error);
+      return { ok: false, error: message };
+    }
+  }
+  return { ok: true };
 });
 ipcMain.handle("naia:open-browser", () => shell.openExternal(`${backendUrl}/?desktop_shell=1`));
 ipcMain.handle("naia:open-data-folder", () => shell.openPath(runtimeDataRoot()));

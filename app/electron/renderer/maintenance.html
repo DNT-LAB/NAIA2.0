@@ -161,6 +161,10 @@
         <div class="progress-detail" id="runtime-progress-detail">Checking data files.</div>
       </div>
     </div>
+    <div class="actions" id="bootstrap-choice" style="display:none">
+      <button class="primary" id="bootstrap-download">허깅페이스에서 다운로드</button>
+      <button id="bootstrap-migrate">NAIA2.0에서 가져오기</button>
+    </div>
     <div class="actions">
       <button class="primary" id="restart">Restart backend</button>
       <button id="browser">Open in browser</button>
@@ -184,6 +188,9 @@
     const setupProgressLabel = document.getElementById("setup-progress-label");
     const setupProgressPercent = document.getElementById("setup-progress-percent");
     const setupProgressDetail = document.getElementById("setup-progress-detail");
+    const bootstrapChoice = document.getElementById("bootstrap-choice");
+    const bootstrapDownloadBtn = document.getElementById("bootstrap-download");
+    const bootstrapMigrateBtn = document.getElementById("bootstrap-migrate");
     const LOG_VISIBLE_LINES = 17;
 
     function setProgressVisible(container, visible) {
@@ -243,7 +250,19 @@
     function renderRuntimeInstall(runtimeInstall) {
       if (!runtimeInstall || runtimeInstall.phase === "skipped") {
         setProgressVisible(runtimeProgress, false);
+        bootstrapChoice.style.display = "none";
         return false;
+      }
+      const awaitingChoice = runtimeInstall.phase === "awaiting_choice" && !runtimeInstall.ready;
+      // Two-choice CTA replaces a passive progress bar while we wait for the
+      // user to pick "download from Hugging Face" vs "import from previous
+      // NAIA2.0". Once they pick, the progress bar takes over again.
+      bootstrapChoice.style.display = awaitingChoice ? "" : "none";
+      if (awaitingChoice) {
+        setProgressVisible(runtimeProgress, false);
+        title.textContent = "NAIA 태그 데이터 준비";
+        message.textContent = "검색·자동완성에 필요한 태그 데이터(~1.4 GB)를 어떻게 준비할지 선택하세요.";
+        return true;
       }
       const percent = Math.max(0, Math.min(100, Number(runtimeInstall.percent || 0)));
       setProgressVisible(runtimeProgress, true);
@@ -294,6 +313,46 @@
     document.getElementById("restart").addEventListener("click", async () => {
       render(await window.naiaShell.restartBackend());
     });
+    if (bootstrapDownloadBtn) {
+      bootstrapDownloadBtn.addEventListener("click", async () => {
+        bootstrapDownloadBtn.disabled = true;
+        bootstrapMigrateBtn.disabled = true;
+        try {
+          const result = await window.naiaShell.startTagDownload();
+          if (result && result.ok === false) {
+            message.textContent = `다운로드 시작 실패: ${result.error || ""}`;
+            bootstrapDownloadBtn.disabled = false;
+            bootstrapMigrateBtn.disabled = false;
+            return;
+          }
+        } catch (error) {
+          message.textContent = `다운로드 시작 실패: ${error && error.message ? error.message : error}`;
+          bootstrapDownloadBtn.disabled = false;
+          bootstrapMigrateBtn.disabled = false;
+          return;
+        }
+        // Progress UI takes over via the state-change broadcast.
+        refresh();
+      });
+    }
+    if (bootstrapMigrateBtn) {
+      bootstrapMigrateBtn.addEventListener("click", async () => {
+        bootstrapDownloadBtn.disabled = true;
+        bootstrapMigrateBtn.disabled = true;
+        try {
+          const result = await window.naiaShell.startBootstrapMigration();
+          if (result && result.ok === false) {
+            message.textContent = `가져오기 화면 로드 실패: ${result.error || ""}`;
+            bootstrapDownloadBtn.disabled = false;
+            bootstrapMigrateBtn.disabled = false;
+          }
+        } catch (error) {
+          message.textContent = `가져오기 화면 로드 실패: ${error && error.message ? error.message : error}`;
+          bootstrapDownloadBtn.disabled = false;
+          bootstrapMigrateBtn.disabled = false;
+        }
+      });
+    }
     document.getElementById("browser").addEventListener("click", () => window.naiaShell.openBrowser());
     document.getElementById("logs-folder").addEventListener("click", () => window.naiaShell.openLogs());
     document.getElementById("data-folder").addEventListener("click", () => window.naiaShell.openDataFolder());

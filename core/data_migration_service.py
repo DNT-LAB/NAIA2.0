@@ -90,8 +90,15 @@ _EXCLUDED_BY_BUCKET: dict[str, set[str]] = {
     "save": {"nai_accounts.json"},
 }
 
-# Entry-point markers that identify a folder as a NAIA checkout even if it has no
-# user-data folders yet.
+# Entry-point markers that identify a folder as a NAIA checkout even if it has
+# no user-data folders yet. These are **string-only** detector hints used by
+# ``is_plausible_source`` to recognize legacy checkouts (``NAIA_cold_v4.py``
+# was the PyQt desktop entry point; it is **never imported** at runtime in
+# future02 and only appears here as a filename check). The headless desktop
+# leak scanner flags this as a high-severity match — that finding is a known
+# false positive and is documented in the parity audit. Removing the marker
+# would silently break "import from previous NAIA2.0" for users on older
+# trees that lacked ``NAIA_web_headless.py``.
 _SOURCE_MARKERS = ("NAIA_web_headless.py", "NAIA_cold_v4.py", "__init__.py")
 
 

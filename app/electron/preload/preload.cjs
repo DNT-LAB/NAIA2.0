@@ -5,6 +5,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("naiaShell", {
   getState: () => ipcRenderer.invoke("naia:shell-state"),
   restartBackend: () => ipcRenderer.invoke("naia:restart-backend"),
+  startTagDownload: () => ipcRenderer.invoke("naia:start-tag-download"),
+  startBootstrapMigration: () => ipcRenderer.invoke("naia:start-bootstrap-migration"),
   openBrowser: () => ipcRenderer.invoke("naia:open-browser"),
   openDataFolder: () => ipcRenderer.invoke("naia:open-data-folder"),
   openLogs: () => ipcRenderer.invoke("naia:open-logs"),

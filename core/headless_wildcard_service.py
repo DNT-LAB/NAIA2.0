@@ -20,13 +20,51 @@ class HeadlessWildcardService:
             value = getattr(manager, attr, None) if manager is not None else None
             if isinstance(value, dict):
                 wildcard_count += len(value)
+        history, sequential_state = self._collect_runtime_state()
+        # NOTE: 필드명을 "state"로 두면 module_state_payload 가 payload["state"]=전체 dict 로
+        # 덮어써(키 충돌) 프론트에서 순차 배열이 사라진다. "sequential_state" 로 분리한다.
         return self.context._module_state_payload("wildcard", {
-            "history": [],
-            "state": [],
+            "history": history,
+            "sequential_state": sequential_state,
             "prompt_squeeze": bool(self.context.prompt_squeeze_enabled),
             "wildcard_count": wildcard_count,
             "file_browser_available": True,
         })
+
+    def _collect_runtime_state(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """직전 생성의 PromptContext에서 사용된 와일드카드/순차·종속 상태를 수집한다.
+
+        - Used Wildcards: `wildcard_history` {key: [chosen lines]} → 가장 최근 선택값.
+        - Sequential / Dependent State: `wildcard_state` {key: {current, total, ...}}.
+        (순차 `__*name__` 와 종속 `__$master:slave__` 둘 다 wildcard_state 에 기록됨)
+        """
+        ctx = getattr(self.context, "current_prompt_context", None)
+        history: list[dict[str, Any]] = []
+        sequential_state: list[dict[str, Any]] = []
+        if ctx is None:
+            return history, sequential_state
+        wc_history = getattr(ctx, "wildcard_history", None) or {}
+        if isinstance(wc_history, dict):
+            for name, values in wc_history.items():
+                if not values:
+                    continue
+                chosen = values[-1] if isinstance(values, (list, tuple)) else values
+                history.append({"name": str(name), "value": str(chosen)})
+        wc_state = getattr(ctx, "wildcard_state", None) or {}
+        if isinstance(wc_state, dict):
+            for name, info in wc_state.items():
+                if not isinstance(info, dict):
+                    continue
+                entry = {
+                    "name": str(name),
+                    "current": int(info.get("current", 0) or 0),
+                    "total": int(info.get("total", 0) or 0),
+                }
+                master = info.get("master_name")
+                if master and str(master) not in {"", "unknown"}:
+                    entry["master"] = str(master)
+                sequential_state.append(entry)
+        return history, sequential_state
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context

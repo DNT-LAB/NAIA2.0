@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260528-data-bootstrap2">
+<link rel="stylesheet" href="style.css?v=20260528-gray-brighten1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -188,7 +188,10 @@
 <!-- Module floating panel (no overlay, no UI lock) -->
 <div class="module-popup" id="modulePopup">
   <div class="module-popup-header">
-    <span class="module-popup-title" id="modulePopupTitle"></span>
+    <span class="module-popup-titlewrap">
+      <span class="module-popup-title" id="modulePopupTitle"></span>
+      <button class="header-guide-btn" id="modulePopupGuide" style="display:none">ⓘ 가이드</button>
+    </span>
     <div class="module-popup-actions">
       <button class="module-popup-action-btn" id="modulePopupAction" style="display:none"></button>
       <button class="module-popup-icon-btn" id="modulePopupDetach" onclick="detachCurrentModule()" title="Open detached window" aria-label="Open detached window">↗</button>
@@ -559,18 +562,21 @@
     <div class="options-row">
       <button type="button" class="opt-toggle" id="optPromptFixed"
               data-option="prompt_fixed" data-checked="false" aria-pressed="false"
+              data-naia-guide="프롬프트 고정. 랜덤 프롬프트 생성이 잠기고, Auto Gen이 켜져 있으면 현재 프롬프트로 계속 생성합니다. NAI 모드에서 캐릭터 와일드카드를 쓰는 경우, [Process wildcards on Generate]를 체크해야 매번 새로운 랜덤 캐릭터가 할당됩니다."
               onclick="toggleOptionButton('prompt_fixed')">
         <span class="opt-box" aria-hidden="true"></span>
         <span class="opt-label">Prompt Fixed</span>
       </button>
       <button type="button" class="opt-toggle" id="optAutoGen"
               data-option="auto_generate" data-checked="false" aria-pressed="false"
+              data-naia-guide="자동 생성. 한 장이 끝나면 자동으로 다음 장을 계속 생성합니다(끄면 1회). 딜레이를 주려면 [자동화/고급기능 > Automation]에서 Delay 입력 후 Unlimited로 설정하세요."
               onclick="toggleOptionButton('auto_generate')">
         <span class="opt-box" aria-hidden="true"></span>
         <span class="opt-label">Auto Gen</span>
       </button>
       <button type="button" class="opt-toggle" id="optWcStandalone"
               data-option="wildcard_standalone" data-checked="false" aria-pressed="false"
+              data-naia-guide="와일드카드 단독. 랜덤 프롬프트를 불러오지 않고, [프롬프트 엔지니어링 > Prefix/Postfix Prompt]에 배치한 프롬프트와 와일드카드만으로 구성합니다. 각 창에서 언더바 2개(__)를 입력하면 보유 중인 와일드카드를 미리볼 수 있습니다."
               onclick="toggleOptionButton('wildcard_standalone')">
         <span class="opt-box" aria-hidden="true"></span>
         <span class="opt-label">WC Solo</span>
@@ -578,8 +584,8 @@
     </div>
     <div class="quick-params">
       <select class="param-select quick-select" id="qResolution" onchange="setParam('resolution',this.value)"></select>
-      <span class="quick-flag-btn" id="qRndRes" onclick="toggleQuickFlag(this,'random_resolution')">Rnd Res</span>
-      <span class="quick-flag-btn" id="qAutoRes" onclick="toggleQuickFlag(this,'auto_fit_resolution')">Auto Res</span>
+      <span class="quick-flag-btn" id="qRndRes" data-naia-guide="랜덤 해상도. Params/Manage에 적용된 랜덤 프롬프트 중에서 무작위 1개 해상도를 적용합니다. Auto Res가 함께 켜져 있으면 같은 프롬프트에 Auto Res를 1회 적용하고, 이후 동일 프롬프트로 재생성 시 Rnd Res를 적용합니다." onclick="toggleQuickFlag(this,'random_resolution')">Rnd Res</span>
+      <span class="quick-flag-btn" id="qAutoRes" data-naia-guide="자동 해상도. Danbooru Prompt에 내장된 해상도 비율을 우선 적용합니다. 없을 때는 Rnd Res(켜져 있으면) 또는 이전 해상도를 사용합니다. Rnd Res를 함께 켜두는 것을 권장합니다." onclick="toggleQuickFlag(this,'auto_fit_resolution')">Auto Res</span>
     </div>
     <div class="ctrl-buttons">
       <button class="ctrl-btn btn-rnd" id="btnRnd" onclick="send('random')"><span class="shortcut-hint">ALT + ENTER</span>Random</button>
@@ -1014,6 +1020,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260528-pe-autocomplete-bypass1"></script>
+<script src="app.js?v=20260528-guide-tooltips4"></script>
 </body>
 </html>

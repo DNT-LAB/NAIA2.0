@@ -1462,6 +1462,57 @@ export function createTagAssistController({
     }, HANGUL_TRANSLATION_POLL_MS);
   }
 
+  // `__` 와일드카드 토큰을 분류한다.
+  //  plain      : __name__            → 일반 (랜덤)
+  //  seq        : __*name__           → 순차
+  //  dep_master : __$ / __$mas        → 종속 1단계 (master 선택)
+  //  dep_slave  : __$master:slave     → 종속 2단계 (slave 선택)
+  function wildcardAutocompleteSpec(stripped) {
+    const body = String(stripped || '').replace(/^_+/, '').replace(/_+$/, '');
+    if (body.startsWith('$')) {
+      const rest = body.slice(1);
+      const ci = rest.indexOf(':');
+      if (ci === -1) return {kind: 'dep_master', master: '', query: rest};
+      return {kind: 'dep_slave', master: rest.slice(0, ci), query: rest.slice(ci + 1)};
+    }
+    if (body.startsWith('*')) return {kind: 'seq', query: body.slice(1)};
+    return {kind: 'plain', query: body};
+  }
+
+  // 현재 Prefix/Postfix 프롬프트에서 __*name__ (순차) 와일드카드 이름을 수집.
+  function collectSequentialMasters() {
+    const names = [];
+    const seen = new Set();
+    ['modPrePrompt', 'modPostPrompt'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const re = /__\*(.+?)__/g;
+      let mm;
+      while ((mm = re.exec(String(el.value || ''))) !== null) {
+        const name = mm[1].trim();
+        if (name && !seen.has(name)) { seen.add(name); names.push(name); }
+      }
+    });
+    return names;
+  }
+
+  // 종속 1단계: __$ 입력 시 프롬프트의 __* master 후보를 클라이언트측으로 나열.
+  function showDependentMasterCandidates(query) {
+    const ql = String(query || '').toLowerCase();
+    const filtered = collectSequentialMasters()
+      .filter(name => !ql || name.toLowerCase().includes(ql))
+      .sort((a, b) => (a.toLowerCase() !== ql) - (b.toLowerCase() !== ql)
+        || (!a.toLowerCase().startsWith(ql) - !b.toLowerCase().startsWith(ql))
+        || a.localeCompare(b));
+    if (!filtered.length) { hideAutocomplete(); checkTagHint(); return; }
+    acResults = filtered.map(name => ({
+      tag: name, _wc_type: 'wildcard_master', group: 'master', desc: 'sequential master', cat: '',
+    }));
+    acSel = firstDefaultAutocompleteIndex(acResults);
+    acMode = true;
+    renderAutocomplete();
+  }
+
   function scheduleAutocomplete(options = {}) {
     const target = options.target || acTarget || promptEdit;
     const info = options.info || getActiveTokenInfo(target);
@@ -1489,8 +1540,14 @@ export function createTagAssistController({
     acTimer = window.setTimeout(() => {
       const s = query;
       if (allowTriggers && s.startsWith('__')) {
-        const q = s.replace(/^_+/, '').replace(/_+$/, '');
-        if (q.length >= 1) sendWs({type: 'autocomplete_wildcard', query: q});
+        const spec = wildcardAutocompleteSpec(s);
+        if (spec.kind === 'dep_master') {
+          // 종속 1단계: 프롬프트의 __* master 후보를 클라이언트측으로 나열
+          showDependentMasterCandidates(spec.query);
+        } else {
+          // seq/plain/dep_slave 모두 백엔드 와일드카드 검색 (빈 쿼리=전체 나열)
+          sendWs({type: 'autocomplete_wildcard', query: spec.query});
+        }
       } else if (allowTriggers && s.startsWith('$')) {
         sendWs({type: 'autocomplete_chunk', query: s.slice(1).trim()});
       } else if (allowTriggers && s.toLowerCase().startsWith('vibe:')) {
@@ -1506,7 +1563,9 @@ export function createTagAssistController({
   function applyAutocompleteResult(m) {
     const q = lastAcQuery;
     const isTranslatedResponse = Object.prototype.hasOwnProperty.call(m || {}, 'translated_query');
-    const matchesWc = q && q.startsWith('__') && m.query === q.replace(/^_+/, '').replace(/_+$/, '');
+    const wcSpec = q && q.startsWith('__') ? wildcardAutocompleteSpec(q) : null;
+    // dep_master 는 클라이언트측으로 렌더되므로 백엔드 응답 매칭 대상이 아니다.
+    const matchesWc = !!wcSpec && wcSpec.kind !== 'dep_master' && m.query === wcSpec.query;
     const matchesChunk = q && q.startsWith('$') && m.query === q.slice(1).trim();
     const matchesVibeCluster = q && q.toLowerCase().startsWith('vibe:') && m.query === q.slice(5).trim();
     const matchesPreset = q && q.toLowerCase().startsWith('preset:') && m.query === q;
@@ -1518,7 +1577,8 @@ export function createTagAssistController({
       (Array.isArray(m?.preset?.secondaryResults) ? m.preset.secondaryResults :
       (Array.isArray(m.secondarySuggestions) ? m.secondarySuggestions : []))
     ).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
-    if (!isTranslatedResponse && m.query === visibleTranslatedAutocompleteQuery) {
+    // 빈 쿼리(`__` 전체 나열 등)는 기본값('')과 우연히 일치하므로 가드에서 제외.
+    if (!isTranslatedResponse && m.query && m.query === visibleTranslatedAutocompleteQuery) {
       return true;
     }
     presetAutocompleteMeta = matchesPreset ? (m.preset || null) : null;
@@ -2332,7 +2392,7 @@ export function createTagAssistController({
       const sel = i === acSel ? ' selected' : '';
       const wcType = r._wc_type;
       const tagColor = wcType ? catStyle(wcType) : catStyle(r.cat);
-      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : ''));
+      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : '')));
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
       const displayTag = wcType === 'preset_path'
@@ -2418,8 +2478,17 @@ export function createTagAssistController({
     const info = getActiveTokenInfo(target);
     if (!info) return;
     let newTag = r.tag;
+    if (r._wc_type === 'wildcard_master') {
+      // 종속 1단계: master 선택 → __$master: 삽입 후 2단계(slave) 자동완성 트리거
+      swapToken(target, info, `__$${r.tag}:`);
+      window.setTimeout(() => scheduleAutocomplete({force: true, target}), 0);
+      return;
+    }
     if (r._wc_type === 'wildcard') {
-      newTag = '__' + r.tag + '__';
+      const spec = wildcardAutocompleteSpec(info.stripped);
+      if (spec.kind === 'dep_slave') newTag = `__$${spec.master}:${r.tag}__`;
+      else if (spec.kind === 'seq') newTag = `__*${r.tag}__`;
+      else newTag = `__${r.tag}__`;
       swapToken(target, info, newTag);
       hideAutocomplete();
       return;

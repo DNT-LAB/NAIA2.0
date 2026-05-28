@@ -6,8 +6,10 @@
   --border-dim: #2a2a3d;
   --border-glow: #3d3d5c;
   --text-primary: #e8e8f0;
-  --text-muted: #8888a0;
-  --text-dim: #555568;
+  /* 회색조 텍스트 밝기 상향 (가독성) — primary > muted > dim 계층 유지.
+     기존 #8888a0 / #555568 은 너무 어두워 눈이 침침했음. */
+  --text-muted: #c6c6d8;
+  --text-dim: #9ea0b4;
   --accent: #7c6aef;
   --accent-blue: #2878d8;
   --accent-glow: #9d8bff;
@@ -17,6 +19,10 @@
   --success: #5cb87a;
   --bg-hover: rgba(255,255,255,0.06);
   --border: #2a2a3d;
+  /* 가이드 툴팁: 남색 배경 + 밝은 흰색 폰트 (한 곳에서 톤 조정) */
+  --guide-tip-bg: #1c2a55;
+  --guide-tip-border: rgba(124,150,236,0.55);
+  --guide-tip-text: #f4f7ff;
   --font-display: 'Outfit', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   --z-viewer-plane: 0;
@@ -8632,6 +8638,65 @@ body.resizing-result-info {
 }
 .naia-title-tooltip.open {
   display: block;
+}
+/* 가이드 툴팁: 남색 배경, 밝은 흰색 폰트, 둥근 모서리, 읽기 좋은 본문 폰트 */
+.naia-title-tooltip.guide {
+  max-width: min(340px, calc(100vw - 16px));
+  padding: 9px 12px;
+  background: var(--guide-tip-bg);
+  border: 1px solid var(--guide-tip-border);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
+  color: var(--guide-tip-text);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  line-height: 1.45;
+  white-space: pre-line; /* \n\n → 단락 구분 */
+}
+/* 헤더 우측에 붙는 작은 버튼식 가이드 라벨 (모듈/섹션 헤더 공용) */
+.header-guide-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(124,150,236,0.12);
+  border: 1px solid var(--guide-tip-border);
+  border-radius: 999px;
+  color: #b9c6f5;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: help;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.header-guide-btn:hover {
+  background: var(--guide-tip-bg);
+  color: var(--guide-tip-text);
+  border-color: rgba(124,150,236,0.85);
+}
+/* 모듈 팝업 헤더: 타이틀 + 가이드를 좌측 그룹으로 묶음 (액션은 우측 유지) */
+.module-popup-titlewrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* 섹션 라벨에 우측 액션(가이드/추후 Quick Preset 등)을 붙일 때 */
+.mod-section-label.has-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mod-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .module-badge {
   display: inline-block;

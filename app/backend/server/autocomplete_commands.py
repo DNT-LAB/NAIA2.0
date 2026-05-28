@@ -206,33 +206,41 @@ def search_kr_tags_with_translation(
 
 
 def search_wildcards(context: WebSessionContext, query: str, limit: int = 12) -> list[dict[str, Any]]:
+    # 빈 쿼리(`__` 만 입력)도 허용 → 전체 와일드카드 상위 N개를 나열한다.
     q = str(query or "").strip().lower()
-    if not q:
-        return []
     base = context._wildcard_base_dir()
     if not base.exists():
         return []
-    results: list[dict[str, Any]] = []
+    # 1) 경로만 먼저 수집/필터 (entries 파일 읽기는 상위 N개로 지연 — 빈 쿼리 성능)
+    matched: list[tuple[str, Any]] = []
     for path in base.rglob("*.txt"):
         try:
             rel = path.relative_to(base).with_suffix("").as_posix()
-            if q not in rel.lower():
-                continue
-            entries = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            results.append({
-                "tag": rel,
-                "count": len(entries),
-                "desc": f"{len(entries)} entries",
-                "group": "wildcard",
-                "cat": "",
-                "_wc_type": "wildcard",
-            })
         except Exception:
             continue
-    return sorted(
-        results,
-        key=lambda row: (row["tag"].lower() != q, not row["tag"].lower().startswith(q), row["tag"]),
-    )[:limit]
+        if q and q not in rel.lower():
+            continue
+        matched.append((rel, path))
+    if q:
+        matched.sort(key=lambda rp: (rp[0].lower() != q, not rp[0].lower().startswith(q), rp[0].lower()))
+    else:
+        matched.sort(key=lambda rp: rp[0].lower())
+    # 2) 상위 N개만 entries 카운트
+    results: list[dict[str, Any]] = []
+    for rel, path in matched[:limit]:
+        try:
+            entries = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        except Exception:
+            entries = []
+        results.append({
+            "tag": rel,
+            "count": len(entries),
+            "desc": f"{len(entries)} entries",
+            "group": "wildcard",
+            "cat": "",
+            "_wc_type": "wildcard",
+        })
+    return results
 
 
 def search_chunks(context: WebSessionContext, query: str, limit: int = 12) -> list[dict[str, Any]]:

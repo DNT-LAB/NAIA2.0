@@ -14,8 +14,12 @@ export function createWildcardPanel({
       }).join('')
       : '<div class="mod-empty">No wildcards used</div>';
 
-    const stateHtml = state.state && state.state.length
-      ? state.state.map(item => `<div>▶ ${escHtml(item.name)}: ${item.current} / ${item.total}</div>`).join('')
+    const seqState = state.sequential_state || state.state;
+    const stateHtml = seqState && seqState.length
+      ? seqState.map(item => {
+        const dep = item.master ? ` <span style="color:var(--text-dim)">(↳ $${escHtml(item.master)})</span>` : '';
+        return `<div>▶ ${escHtml(item.name)}: ${item.current} / ${item.total}${dep}</div>`;
+      }).join('')
       : '<div class="mod-empty">No active sequential wildcards</div>';
 
     moduleBody.innerHTML = `

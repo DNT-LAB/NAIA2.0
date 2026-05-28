@@ -159,19 +159,39 @@ function initNaiaTitleTooltips() {
     tooltip.style.top = `${Math.round(top)}px`;
   };
 
+  // 가이드 툴팁(data-naia-guide)은 남색 스타일 + 700ms hover 지연으로 뜬다.
+  // 기존 터스(terse)한 title 흡수 툴팁(data-naia-title)은 그대로 즉시 표시.
+  const GUIDE_SHOW_DELAY = 700;
+  let showTimer = null;
+
   const showTooltip = target => {
-    const text = target?.dataset?.naiaTitle || '';
+    const guideText = target?.dataset?.naiaGuide || '';
+    const text = guideText || target?.dataset?.naiaTitle || '';
     if (!text) return;
-    owner = target;
-    tooltip.textContent = text;
-    tooltip.classList.add('open');
-    requestAnimationFrame(() => {
-      if (owner === target) positionTooltip(target);
-    });
+    const isGuide = !!guideText;
+    const open = () => {
+      owner = target;
+      // 가이드 툴팁은 줄바꿈(\n 토큰 또는 실제 개행)을 단락으로 렌더 (CSS white-space: pre-line)
+      tooltip.textContent = isGuide ? text.replace(/\\n/g, '\n') : text;
+      tooltip.classList.toggle('guide', isGuide);
+      tooltip.classList.add('open');
+      requestAnimationFrame(() => {
+        if (owner === target) positionTooltip(target);
+      });
+    };
+    clearTimeout(showTimer);
+    // 명시적 [ⓘ 가이드] 버튼은 즉시 표시(의도적으로 올린 것). 기능 컨트롤의 가이드는 700ms 지연.
+    const isGuideButton = !!(target.classList && target.classList.contains('header-guide-btn'));
+    if (isGuide && !isGuideButton) {
+      showTimer = setTimeout(open, GUIDE_SHOW_DELAY);
+    } else {
+      open();
+    }
   };
 
   const hideTooltip = target => {
     if (target && owner && target !== owner) return;
+    clearTimeout(showTimer);
     owner = null;
     tooltip.classList.remove('open');
   };
@@ -188,19 +208,19 @@ function initNaiaTitleTooltips() {
   }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['title']});
 
   document.addEventListener('pointerover', event => {
-    const target = event.target?.closest?.('[data-naia-title]');
+    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide]');
     if (target) showTooltip(target);
   });
   document.addEventListener('pointerout', event => {
-    const target = event.target?.closest?.('[data-naia-title]');
+    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide]');
     if (target && !target.contains(event.relatedTarget)) hideTooltip(target);
   });
   document.addEventListener('focusin', event => {
-    const target = event.target?.closest?.('[data-naia-title]');
+    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide]');
     if (target) showTooltip(target);
   });
   document.addEventListener('focusout', event => {
-    const target = event.target?.closest?.('[data-naia-title]');
+    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide]');
     if (target) hideTooltip(target);
   });
   window.addEventListener('resize', () => hideTooltip());
@@ -4936,9 +4956,33 @@ function updateApiStatus(m) {
 // ---- Module floating panel ----
 const modulePopup = $('modulePopup');
 const moduleTitle = $('modulePopupTitle');
+const moduleGuideBtn = $('modulePopupGuide');
 const moduleBody = $('modulePopupBody');
 const modulePopupAction = $('modulePopupAction');
 const modulePopupDetach = $('modulePopupDetach');
+
+// 모듈 헤더 우측 [ⓘ 가이드] 버튼의 오버뷰 문구 (모듈별). 없으면 버튼 숨김.
+const MODULE_OVERVIEW_GUIDES = {
+  prompt_engineering: [
+    'NAIA의 프롬프트 생성은 이 프롬프트 엔지니어링 모듈을 통해 진행됩니다.',
+    '일반적인 프롬프트 구조: [랜덤 프롬프트 인원 수] · {Prefix Prompts} · [랜덤 프롬프트] · {Postfix Prompts}',
+    'Auto-Hide에 입력한 프롬프트는 랜덤 프롬프트가 Prefix·Postfix와 결합되는 과정에서 소거됩니다.',
+    'Preprocessing Options에서는 랜덤 프롬프트에 포함될 요소를 결정할 수 있습니다. 각 기능을 확인해 보세요.',
+    '※ WC Solo 모드에서는 Auto-Hide와 Preprocessing Option이 적용되지 않고, {Prefix Prompt}·{Postfix Prompt}와 와일드카드만으로 구성됩니다.',
+  ].join('\n\n'),
+};
+
+function applyModuleOverviewGuide(moduleId) {
+  if (!moduleGuideBtn) return;
+  const guide = MODULE_OVERVIEW_GUIDES[moduleId] || '';
+  if (guide) {
+    moduleGuideBtn.dataset.naiaGuide = guide;
+    moduleGuideBtn.style.display = '';
+  } else {
+    delete moduleGuideBtn.dataset.naiaGuide;
+    moduleGuideBtn.style.display = 'none';
+  }
+}
 const chunkPanel = $('chunkPanel');
 let currentModuleId = null;
 let moduleSendTimer = null;
@@ -4987,7 +5031,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260523-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260528-pe-autocomplete1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260528-guide-tooltips1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -5167,6 +5211,7 @@ function openModule(moduleId, options = {}) {
     e621_event: 'E621 연구모듈',
   };
   moduleTitle.textContent = moduleLauncherControl?.moduleTitle(moduleId) || titles[moduleId] || moduleId;
+  applyModuleOverviewGuide(moduleId);
   if (moduleId === 'auto_save' && autoSavePanel) {
     autoSavePanel.renderCached();
   }

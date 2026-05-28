@@ -328,6 +328,15 @@ class DataMigrationService:
                     pass
             copied[bucket] = bucket_files
 
+        if total_files:
+            # Copying into user_root leaves the running backend's in-memory
+            # caches (tag search index, KR tag map, autocomplete warmup) stale.
+            # Drop them so newly-imported tags are picked up even without a full
+            # restart — the bootstrap flow still routes through restartBackend
+            # for a clean reload of everything, but the in-app migration path
+            # benefits from immediate invalidation.
+            self._invalidate_runtime_caches()
+
         return {
             # ``ok`` means the import ran (top-level failures already returned
             # early). A partial run still copies what it can; ``partial`` /
@@ -346,6 +355,29 @@ class DataMigrationService:
             "conflict_policy": conflict,
             "errors": errors,
         }
+
+    def _invalidate_runtime_caches(self) -> None:
+        """Drop the running backend's startup-warmed caches after an import.
+
+        Mirrors ``RuntimeInstallManager.on_tag_archive_complete`` so an import
+        that adds ``data/tags`` is visible to search/autocomplete without a
+        restart. No-op when there is no live context (e.g. unit tests that
+        construct the service with only ``user_root``)."""
+        context = self.context
+        if context is None:
+            return
+        try:
+            if hasattr(context, "tag_search_index"):
+                context.tag_search_index = None
+            if hasattr(context, "kr_tags_raw"):
+                context.kr_tags_raw = {}
+            autocomplete_state = getattr(context, "autocomplete_state", None)
+            if autocomplete_state is not None and hasattr(autocomplete_state, "kr_tags_loaded"):
+                autocomplete_state.kr_tags_loaded = False
+        except Exception:
+            # Cache invalidation is best-effort; never fail an otherwise good
+            # import because the runtime context shape was unexpected.
+            pass
 
     # ------------------------------------------------------------------
     # NAI credential (opt-in, separate from the bulk copy)

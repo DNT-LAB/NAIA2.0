@@ -121,11 +121,17 @@ let backendLogs = [];
 let startingBackend = null;
 let runtimeInstallGate = null;
 let runtimeInstallState = null;
-// Whether the user has picked a tag-data path in the maintenance window. Set
-// by the ``naia:start-tag-download`` / ``naia:start-bootstrap-migration`` IPC
-// handlers and read inside ``runRuntimeInstallGate`` to know when to enforce
-// the completion deadline (no deadline while still waiting on the user).
+// Whether the user picked the *download* path in the maintenance window. Set by
+// ``naia:start-tag-download`` and read in ``runRuntimeInstallGate`` to arm the
+// completion deadline (the download is bounded; no deadline while still waiting
+// on the user's choice).
 let runtimeInstallChoiceMade = false;
+// Whether the user picked "import from previous NAIA2.0". While true, the gate
+// must NOT auto-complete on tag readiness — it waits for the explicit
+// ``naia:restart-backend`` so the freshly-imported data is loaded by a clean
+// backend restart instead of against the stale startup cache. Cleared by the
+// restart handler.
+let bootstrapMigrationActive = false;
 let runtimeBootstrapState = null;
 let quitting = false;
 let backendPortConfirmed = false;
@@ -1393,8 +1399,9 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
     error: "",
   }));
 
-  // No timeout while the user is deciding. Once they pick a path (download
-  // started or migration kicked off), enforce the normal completion deadline.
+  // No timeout while the user is deciding. The completion deadline applies only
+  // to the bounded download path; the migration path is user-interactive and
+  // completes via the explicit "NAIA 재시작" (restartBackend), never a timer.
   while (true) {
     await delay(pollIntervalMs);
     let current;
@@ -1403,22 +1410,39 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
     } catch (pollError) {
       // The backend can be momentarily unreachable during a user-initiated
       // restart (the "NAIA 재시작" button in the migration popup). Treat the
-      // transient error as "keep polling" rather than failing the gate.
+      // transient error as "keep polling" rather than failing the gate. If the
+      // user picked the download path, make sure the deadline is armed even
+      // before the first successful GET so a dead backend cannot hang forever.
+      if (runtimeInstallChoiceMade && !choiceDeadline) {
+        choiceDeadline = Date.now() + timeoutMs;
+      }
       if (choiceDeadline && Date.now() >= choiceDeadline) {
         throw new Error("Runtime data installation timed out.");
       }
       continue;
     }
-    const choiceMade = runtimeInstallChoiceMade || !!(current && current.tag_archive && current.tag_archive.download && current.tag_archive.download.active);
-    if (choiceMade && !choiceDeadline) {
+    const downloadActive = runtimeInstallChoiceMade
+      || !!(current && current.tag_archive && current.tag_archive.download && current.tag_archive.download.active);
+    // Deadline only for the download path. Migration is interactive (no timer).
+    if (downloadActive && !choiceDeadline) {
       choiceDeadline = Date.now() + timeoutMs;
     }
+    const showActive = downloadActive || bootstrapMigrationActive;
     setRuntimeInstallState(normalizeRuntimeInstallState(current, {
-      active: choiceMade,
-      phase: choiceMade ? undefined : "awaiting_choice",
-      message: choiceMade ? undefined : "태그 데이터를 어떻게 준비할지 선택하세요.",
+      active: showActive,
+      phase: showActive ? undefined : "awaiting_choice",
+      message: showActive ? undefined : "태그 데이터를 어떻게 준비할지 선택하세요.",
     }));
     if (runtimeInstallReadyFromPayload(current)) {
+      // During bootstrap migration, tag files can appear (import copied
+      // data/tags) before the user clicks "NAIA 재시작". Do NOT auto-complete
+      // and navigate away from the migration UI: wait for restartBackend, which
+      // clears bootstrapMigrationActive and re-warms the backend so ALL imported
+      // data (tags, presets, wildcards, settings) is picked up cleanly rather
+      // than against a stale in-memory cache.
+      if (bootstrapMigrationActive) {
+        continue;
+      }
       setRuntimeInstallState(normalizeRuntimeInstallState(current, {
         active: false,
         message: "태그 데이터 준비 완료",
@@ -1701,6 +1725,10 @@ function appIconPath() {
 
 ipcMain.handle("naia:shell-state", () => shellState());
 ipcMain.handle("naia:restart-backend", async () => {
+  // The "NAIA 재시작" button is the explicit completion of a bootstrap
+  // migration: clearing this lets the still-pending install gate finish once
+  // the freshly-restarted backend reports tag data ready.
+  bootstrapMigrationActive = false;
   stopBackend();
   await new Promise((resolve) => setTimeout(resolve, 750));
   backendState = "starting";
@@ -1747,9 +1775,10 @@ ipcMain.handle("naia:start-bootstrap-migration", async () => {
       return { ok: false, error: message };
     }
   }
-  // Only now that the migration UI is actually showing do we let the install
-  // gate begin enforcing its completion deadline.
-  runtimeInstallChoiceMade = true;
+  // Only now that the migration UI is actually showing do we mark the migration
+  // path active. The gate will keep waiting (no deadline) until the user clicks
+  // "NAIA 재시작", which clears this flag and completes via a clean restart.
+  bootstrapMigrationActive = true;
   return { ok: true };
 });
 ipcMain.handle("naia:open-browser", () => shell.openExternal(`${backendUrl}/?desktop_shell=1`));

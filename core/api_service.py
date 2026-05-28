@@ -16,6 +16,7 @@ from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.resolution_utils import (
     apply_resolution_to_comfyui_workflow,
     normalize_artist_thumbnail_resolution,
+    snap_resolution_to_multiple,
 )
 from core.reference_inset_service import (
     inject_reference_inset_into_prompt,
@@ -599,6 +600,20 @@ class APIService:
             nai_seed = params.get('seed', 0)
             if not isinstance(nai_seed, int) or nai_seed < 0:
                 nai_seed = 0
+
+            # NAI는 width/height가 64의 배수가 아니면 HTTP 500을 반환한다. AutoRes·
+            # chokepoint 단계에서 이미 정규화하지만, 이 POST 직전이 외부 API로 나가는
+            # 마지막 지점이므로 우회 경로(인라인 fix:WxH, 구버전 프리셋 복원 등)가 남긴
+            # 비-64 값을 마지막으로 보정해 500을 외부로 던지지 않게 한다.
+            _nai_w = params.get('width', 832)
+            _nai_h = params.get('height', 1216)
+            _snapped_w, _snapped_h = snap_resolution_to_multiple(_nai_w, _nai_h, 64)
+            if (_snapped_w, _snapped_h) != (_nai_w, _nai_h):
+                print(
+                    f"🧩 [NAI] 해상도 64배수 보정: {_nai_w}x{_nai_h} → {_snapped_w}x{_snapped_h}"
+                )
+                params['width'] = _snapped_w
+                params['height'] = _snapped_h
 
             # API가 요구하는 파라미터 구조 생성
             api_parameters = {

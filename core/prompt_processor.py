@@ -10,6 +10,7 @@ from core.resolution_utils import (
     MAX_1MP_PIXELS,
     nearest_anima_preset_resolution,
     nearest_standard_1mp_resolution,
+    snap_resolution_to_multiple,
 )
 
 # 가중치 구문 감지 정규식 (C-2: \d+\.?\d* 로 정밀화)
@@ -324,8 +325,9 @@ class PromptProcessor:
                         or getattr(getattr(self, 'app_context', None), 'current_api_mode', '')
                     )
                     self._apply_remote_auto_resolution_preset_defaults(settings, api_mode)
+                    normalized_mode = str(api_mode or '').strip().upper()
                     if (
-                        str(api_mode or '').strip().upper() in {'WEBUI', 'COMFYUI'}
+                        normalized_mode in {'WEBUI', 'COMFYUI'}
                         and settings.get('resolution_preset_enabled')
                     ):
                         width, height = nearest_anima_preset_resolution(
@@ -333,6 +335,16 @@ class PromptProcessor:
                             height,
                             settings.get('resolution_preset'),
                         )
+                    elif normalized_mode == 'NAI':
+                        # NAI only accepts dimensions that are multiples of 64.
+                        # Above 1MP, snap to the nearest standard NAI resolution;
+                        # at or below 1MP, keep the source size but round each side
+                        # to a multiple of 64 (e.g. 1280x720 -> 1280x704) so the
+                        # request is never rejected with a 500.
+                        if width * height > MAX_1MP_PIXELS:
+                            width, height = nearest_standard_1mp_resolution(width, height)
+                        else:
+                            width, height = snap_resolution_to_multiple(width, height, 64)
                     elif width * height > MAX_1MP_PIXELS:
                         width, height = nearest_standard_1mp_resolution(width, height)
                     context.metadata['detected_resolution'] = (width, height)

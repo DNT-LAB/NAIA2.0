@@ -22,6 +22,7 @@ from core.generation_request import (
     NAIVibeTransferData,
 )
 from core.headless_result_service import HeadlessStoredResult
+from core.resolution_utils import snap_resolution_to_multiple
 from core.web_session_context import WebSessionContext
 
 
@@ -333,6 +334,13 @@ class HeadlessGenerationService:
                 width, height = parsed
         if width is None or height is None or width <= 0 or height <= 0:
             width, height = 832, 1216
+        # NAI rejects any width/height that is not a multiple of 64 (HTTP 500).
+        # This is the single chokepoint every headless generation request flows
+        # through (AutoRes overrides, manual entry, preset restore, automation,
+        # inline fix:WxH), so snap here as a backstop regardless of the source.
+        # WEBUI/COMFYUI allow finer steps, so only normalize for NAI.
+        if str(params.get("api_mode") or "").strip().upper() == "NAI":
+            width, height = snap_resolution_to_multiple(width, height, 64)
         params["width"] = width
         params["height"] = height
         params["resolution"] = f"{width} x {height}"

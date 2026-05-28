@@ -115,6 +115,25 @@ class DataMigrationService:
             return True
         return any((source / marker).exists() for marker in _SOURCE_MARKERS)
 
+    def _resolve_source_root(self, source: Path) -> Path:
+        """Descend into a portable install's ``user-data`` folder when needed.
+
+        A downloaded portable build keeps its data buckets under
+        ``<NAIA-Portable>/user-data`` (next to ``NAIA.exe``), so a user who picks
+        the portable folder itself is pointing one level above the actual data.
+        When the chosen folder is not a plausible source on its own but contains a
+        plausible ``user-data`` subfolder, transparently import from that
+        subfolder. All entry points (``preview``/``import_from``/
+        ``import_nai_token``) funnel through here so they agree on the location.
+        """
+        source = Path(source)
+        if self.is_plausible_source(source):
+            return source
+        candidate = source / "user-data"
+        if candidate.is_dir() and self.is_plausible_source(candidate):
+            return candidate.resolve()
+        return source
+
     def _overlaps_target(self, source: Path) -> bool:
         """True if source is the user_root or sits inside it (self-import)."""
         user_root = self.user_root()
@@ -144,7 +163,7 @@ class DataMigrationService:
         if not source.is_dir():
             result["error"] = "선택한 폴더를 찾을 수 없습니다."
             return result
-        source = source.resolve()
+        source = self._resolve_source_root(source.resolve())
         result["source"] = str(source)
         if self._overlaps_target(source):
             result["same_as_target"] = True
@@ -209,7 +228,7 @@ class DataMigrationService:
         source = Path(source_dir).expanduser()
         if not source.is_dir():
             return {"ok": False, "error": "선택한 폴더를 찾을 수 없습니다."}
-        source = source.resolve()
+        source = self._resolve_source_root(source.resolve())
         if self._overlaps_target(source):
             return {"ok": False, "error": "현재 데이터 폴더와 같은(또는 그 내부) 위치는 가져올 수 없습니다."}
         if not self.is_plausible_source(source):
@@ -329,7 +348,7 @@ class DataMigrationService:
         source = Path(source_dir).expanduser()
         if not source.is_dir():
             return {"ok": False, "error": "선택한 폴더를 찾을 수 없습니다."}
-        source = source.resolve()
+        source = self._resolve_source_root(source.resolve())
         if self._overlaps_target(source):
             return {"ok": False, "error": "현재 데이터 폴더와 같은(또는 그 내부) 위치는 가져올 수 없습니다."}
         token, error = self._read_legacy_nai_token(source)

@@ -163,6 +163,33 @@ def parse_resolution_pair(value: Any) -> tuple[int, int] | None:
     return width, height
 
 
+def snap_dimension_to_multiple(value: Any, multiple: int = 64, *, minimum: int | None = None) -> int:
+    """Round a single dimension to the nearest positive multiple of ``multiple``.
+
+    NAI only accepts width/height that are multiples of 64, so any resolution
+    headed for the NAI backend must be snapped or the request is rejected with a
+    500. Rounding (not flooring) keeps the result as close as possible to the
+    requested size, and the floor guarantees at least one full multiple.
+    """
+    if multiple <= 0:
+        multiple = 64
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = float(multiple)
+    floor_min = multiple if minimum is None else max(multiple, int(minimum))
+    snapped = int(round(numeric / multiple)) * multiple
+    return max(floor_min, snapped)
+
+
+def snap_resolution_to_multiple(width: Any, height: Any, multiple: int = 64) -> tuple[int, int]:
+    """Snap both sides of a resolution to the nearest multiple of ``multiple``."""
+    return (
+        snap_dimension_to_multiple(width, multiple),
+        snap_dimension_to_multiple(height, multiple),
+    )
+
+
 def nearest_standard_1mp_resolution(width: Any, height: Any) -> tuple[int, int]:
     try:
         source_width = int(width)

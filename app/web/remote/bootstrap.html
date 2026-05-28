@@ -20,12 +20,12 @@
     .bootstrap-shell {
       box-sizing: border-box;
       /* style.css sets `body { display:flex; flex-direction:column }`, which
-         makes this a flex item whose width would otherwise shrink to content
-         and collapse the grid's 1fr track. Pin full width + flex:1 so the grid
-         fills the window and the right column gets the remaining space. */
-      width: 100%;
-      flex: 1 1 auto;
-      height: 100vh;
+         made this a flex item whose width shrank to content and collapsed the
+         grid's 1fr track. Take it out of the flex flow entirely with fixed
+         positioning pinned to the viewport, so the grid always fills the window
+         regardless of the inherited body layout. */
+      position: fixed;
+      inset: 0;
       display: grid;
       grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
       gap: 28px;

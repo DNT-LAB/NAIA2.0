@@ -3,7 +3,7 @@
 // previews per-bucket counts via /api/data-migration/preview, then copies via
 // /api/data-migration/import. Non-destructive: the backend only ever copies.
 
-export function createDataMigrationPanel({document, showToast}) {
+export function createDataMigrationPanel({document, showToast, onImported = () => {}}) {
   const toast = (msg, kind) => {
     if (typeof showToast === 'function') showToast(msg, kind);
     else if (typeof globalThis.showToast === 'function') globalThis.showToast(msg, kind);
@@ -223,6 +223,11 @@ export function createDataMigrationPanel({document, showToast}) {
       // button (both on success and partial — files were copied either way)
       // so the next obvious action is exactly the restart, in the same spot.
       swapRunButtonToRestart();
+      // Notify the host (e.g. the standalone bootstrap page) that an import
+      // completed. The bootstrap page uses this to retire its "download
+      // instead" escape hatch so the user cannot bypass the clean restart
+      // after having already copied data in.
+      try { onImported(); } catch (_e) { /* host callback must not break import */ }
     } catch (err) {
       setResult(`가져오기 실패: ${err}`, 'error');
       toast(`가져오기 실패: ${err}`, 'error');

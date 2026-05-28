@@ -924,7 +924,12 @@ class APIService:
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):
                 self._apply_custom_nai_params(api_parameters, params)
-            
+
+            # 커스텀 파라미터(use_custom_api_params)는 api_parameters를 직접 update하므로
+            # 사용자 JSON에 width/height가 있으면 앞선 64배수 보정을 덮어쓸 수 있다. 이
+            # 페이로드 직전 지점이 NAI로 나가는 진짜 마지막 단계이므로 여기서 최종 보정한다.
+            self._snap_nai_api_parameters_resolution(api_parameters)
+
             # 최종 페이로드 구성
             payload = {
                 "input": params.get('input', ''),
@@ -1183,6 +1188,21 @@ class APIService:
         corrected = re.sub(r',(\s*[}\]])', r'\1', corrected)
         
         return corrected
+
+    def _snap_nai_api_parameters_resolution(self, api_parameters: dict) -> None:
+        """NAI 페이로드의 width/height를 64배수로 최종 보정한다.
+
+        ``use_custom_api_params``는 ``api_parameters``를 직접 update하므로 사용자 JSON에
+        width/height가 있으면 앞선 보정을 덮어쓸 수 있다. 이 메서드는 페이로드 직전(POST
+        직전)에 호출되어, 어떤 경로로 들어온 값이든 NAI가 거부하는 비-64 해상도가 나가지
+        못하게 하는 최종 방어선이다."""
+        width = api_parameters.get("width", 832)
+        height = api_parameters.get("height", 1216)
+        snapped_width, snapped_height = snap_resolution_to_multiple(width, height, 64)
+        if (snapped_width, snapped_height) != (width, height):
+            print(f"🧩 [NAI] 해상도 64배수 보정(payload 직전): {width}x{height} → {snapped_width}x{snapped_height}")
+            api_parameters["width"] = snapped_width
+            api_parameters["height"] = snapped_height
 
     def _apply_custom_nai_params(self, api_parameters: dict, params: dict) -> None:
         """

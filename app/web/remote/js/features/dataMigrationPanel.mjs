@@ -75,11 +75,22 @@ export function createDataMigrationPanel({document, showToast}) {
       ? `<p class="setup-sub" style="color:var(--text-dim)">⚠ ${esc(preview.credentials.note)}</p>`
       : '';
     const tokenInfo = preview.nai_token || {};
-    const tokenSection = tokenInfo.legacy_present ? `
+    // The button is always shown when the source is plausible, even if the
+    // backend could not auto-detect a legacy token: a non-standard layout
+    // (e.g. a legacy source checkout with the runtime token under
+    // <source>/user-data/config) may still hold a token, and the runTokenImport
+    // handler surfaces a friendly "no token found" message otherwise. Hiding
+    // the button when the warning above already says "아래 전용 버튼으로" left
+    // users with no way to act on that instruction.
+    const tokenLabelSuffix = tokenInfo.current_present ? ' (현재 토큰 덮어쓰기)' : '';
+    const tokenHint = tokenInfo.legacy_present
+      ? '이전 설치의 NAI 토큰을 현재 설정으로 가져옵니다 (일반 가져오기에는 포함되지 않습니다).'
+      : '이전 설치의 NAI 토큰을 가져옵니다. 자동 감지에 실패하면 알림과 함께 설정에서 직접 입력하는 방법이 안내됩니다.';
+    const tokenSection = `
       <div class="setup-cloudflared-actions" style="margin-top:6px">
-        <button class="setup-btn-primary" id="setupMigrationToken" type="button">NAI 토큰 가져오기${tokenInfo.current_present ? ' (현재 토큰 덮어쓰기)' : ''}</button>
+        <button class="setup-btn-primary" id="setupMigrationToken" type="button">NAI 토큰 가져오기${tokenLabelSuffix}</button>
       </div>
-      <p class="setup-sub" style="color:var(--text-dim)">이전 설치의 NAI 토큰을 현재 설정으로 가져옵니다 (일반 가져오기에는 포함되지 않습니다).</p>` : '';
+      <p class="setup-sub" style="color:var(--text-dim)">${tokenHint}</p>`;
     body.innerHTML = `
       <div class="setup-meta-line"><span>가져올 위치</span><span class="setup-meta-val" title="${esc(preview.source)}">${esc(preview.source)}</span></div>
       <div class="setup-meta-line"><span>대상</span><span class="setup-meta-val" title="${esc(preview.user_root)}">${esc(preview.user_root)}</span></div>
@@ -208,12 +219,16 @@ export function createDataMigrationPanel({document, showToast}) {
         setResult(msg, 'success');
         toast(msg, 'success');
       }
+      // Copied data needs a backend restart to take effect; swap the run
+      // button (both on success and partial — files were copied either way)
+      // so the next obvious action is exactly the restart, in the same spot.
+      swapRunButtonToRestart();
     } catch (err) {
       setResult(`가져오기 실패: ${err}`, 'error');
       toast(`가져오기 실패: ${err}`, 'error');
+      if (runBtn) { runBtn.disabled = false; runBtn.textContent = '가져오기 실행'; }
     } finally {
       busy = false;
-      if (runBtn) { runBtn.disabled = false; runBtn.textContent = '가져오기 실행'; }
     }
   }
 
@@ -224,6 +239,41 @@ export function createDataMigrationPanel({document, showToast}) {
     } else {
       toast('데이터 폴더 열기는 데스크톱 앱에서만 지원됩니다.', 'info');
     }
+  }
+
+  // Replace the "가져오기 실행" button in place with a red "NAIA 재시작" button.
+  // Copied data only becomes visible to the running app after the backend
+  // re-reads user-data, so the natural next step after import is a restart;
+  // shell.restartBackend stops the python backend, waits, ensures it's ready
+  // again, and reloads the renderer. In a browser-only context we fall back
+  // to an info toast since there is no shell IPC available.
+  function swapRunButtonToRestart() {
+    const old = byId('setupMigrationRun');
+    if (!old || !old.parentNode) return;
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'setup-btn-restart';
+    next.id = 'setupMigrationRestart';
+    next.textContent = 'NAIA 재시작';
+    next.addEventListener('click', attemptRestart);
+    old.parentNode.replaceChild(next, old);
+  }
+
+  async function attemptRestart() {
+    const shell = globalThis.naiaShell;
+    const btn = byId('setupMigrationRestart');
+    if (btn) { btn.disabled = true; btn.textContent = '재시작 중…'; }
+    if (shell && typeof shell.restartBackend === 'function') {
+      try {
+        await shell.restartBackend();
+      } catch (err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'NAIA 재시작'; }
+        toast(`재시작 실패: ${err?.message || err}`, 'error');
+      }
+      return;
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'NAIA 재시작'; }
+    toast('재시작은 데스크톱 앱에서만 지원됩니다. 앱을 직접 종료 후 다시 실행하세요.', 'info');
   }
 
   return {open, openDataFolder};

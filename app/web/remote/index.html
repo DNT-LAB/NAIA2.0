@@ -145,6 +145,23 @@
           <div class="setup-migration-body hidden" id="setupMigrationBody"></div>
           <div class="setup-result" id="setupMigrationResult"></div>
         </div>
+        <div class="setup-cloudflared" id="setupDataBootstrapSection">
+          <div class="setup-cloudflared-head">
+            <span class="setup-cloudflared-title">태그 데이터</span>
+            <span class="setup-cloudflared-status" data-bootstrap-status>확인 중…</span>
+          </div>
+          <p class="setup-sub" data-bootstrap-sub>검색·자동완성에 필요한 태그 데이터입니다.</p>
+          <div class="setup-cloudflared-actions" data-bootstrap-actions>
+            <button class="setup-btn-primary" type="button" data-bootstrap-download>허깅페이스에서 다운로드</button>
+            <button class="setup-btn-ghost" type="button" data-bootstrap-migrate>NAIA2.0에서 가져오기</button>
+            <button class="setup-btn-ghost hidden" type="button" data-bootstrap-cancel>다운로드 취소</button>
+          </div>
+          <div class="setup-update-progress hidden" data-bootstrap-progress>
+            <div class="setup-update-progress-bar"><div class="setup-update-progress-fill" data-bootstrap-progress-fill></div></div>
+            <span class="setup-update-progress-text" data-bootstrap-progress-text></span>
+          </div>
+          <div class="setup-result" data-bootstrap-result></div>
+        </div>
         <div class="setup-update hidden" id="setupUpdateSection">
           <div class="setup-cloudflared-head">
             <span class="setup-cloudflared-title">앱 업데이트</span>
@@ -997,6 +1014,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260527-data-migration2"></script>
+<script src="app.js?v=20260528-data-bootstrap1"></script>
 </body>
 </html>

@@ -42,6 +42,10 @@ from typing import Any, Iterable, Iterator
 #     artist thumbnails live under ui_assets/ and credentials under config/.
 # A given source has either a top-level artist_thumb/ (legacy) or ui_assets/ +
 # config/ (user-data), so the per-bucket "present" check selects the right set.
+# Each entry is ``(source_rel, target_rel, label)``. The source path may be a
+# directory (whole tree copies) or a single file (copies that file to the
+# target path verbatim). Buckets whose source path is missing in a chosen
+# install are silently skipped, so adding both layouts is safe.
 MIGRATION_BUCKETS: tuple[tuple[str, str, str], ...] = (
     ("save", "save", "설정·프리셋·상태"),
     ("wildcards", "wildcards", "와일드카드"),
@@ -49,6 +53,29 @@ MIGRATION_BUCKETS: tuple[tuple[str, str, str], ...] = (
     ("ui_assets", "ui_assets", "썸네일·UI 자산"),            # user-data layout (incl. artist_thumb)
     ("artist_thumb", "ui_assets/artist_thumb", "아티스트 필터 상태"),  # legacy checkout layout
     ("config", "config", "API 설정·토큰"),                  # user-data layout (NAI 토큰 등)
+    # User-generated content under ``data/`` that previously was not migrated.
+    # Each subdir is a known user-state directory (the rest of ``data/`` is
+    # bundled with the app or re-downloadable via Install Manager — never
+    # copied to avoid carrying stale bundles forward).
+    ("data/character_thumbnails", "data/character_thumbnails", "캐릭터 뷰어 썸네일"),
+    ("data/event_preset", "data/event_preset", "프리셋 사용자 데이터"),
+    ("data/event_preset_thumbnail", "data/event_preset_thumbnail", "프리셋 썸네일"),
+    ("data/quick_search", "data/quick_search", "퀵 검색 데이터"),
+    # Heavy runtime-downloadable tag corpora — usually fetched from Hugging Face
+    # via Install Manager. Migrating an existing copy lets users skip the ~2GB
+    # Hugging Face download when they already have it from a prior NAIA install.
+    ("data/tags", "data/tags", "태그 데이터 (~2GB)"),
+    ("data/tag_index", "data/tag_index", "태그 인덱스"),
+    # Legacy source-checkout layout stored artist thumbnail packs as multi-GB
+    # JSON files directly under ``data/``; the portable runtime keeps them at
+    # ``ui_assets/artist_thumb/<filename>``. Explicit remap so users who had
+    # downloaded packs in a legacy install do not lose ~10GB of cached data.
+    # Each file is opt-in (large size) and skipped if absent in the source.
+    ("data/artist_thumbnail.json", "ui_assets/artist_thumb/artist_thumbnail.json", "아티스트 썸네일 팩 (기본)"),
+    ("data/artist_thumbnail_nai.json", "ui_assets/artist_thumb/artist_thumbnail_nai.json", "아티스트 썸네일 팩 (NAI)"),
+    ("data/artist_thumbnail_anima.json", "ui_assets/artist_thumb/artist_thumbnail_anima.json", "아티스트 썸네일 팩 (ANIMA)"),
+    ("data/artist_thumbnail_anima_bucket2.json", "ui_assets/artist_thumb/artist_thumbnail_anima_bucket2.json", "아티스트 썸네일 팩 (ANIMA bucket2)"),
+    ("data/artist_thumbnail_anima_bucket3.json", "ui_assets/artist_thumb/artist_thumbnail_anima_bucket3.json", "아티스트 썸네일 팩 (ANIMA bucket3)"),
 )
 
 # Legacy credential file — detected but never auto-imported (separate opt-in flow).
@@ -69,6 +96,13 @@ _SOURCE_MARKERS = ("NAIA_web_headless.py", "NAIA_cold_v4.py", "__init__.py")
 
 
 def _iter_files(root: Path, *, bucket: str = "") -> Iterator[Path]:
+    # A bucket may point at a directory (tree copy) or at a single file (e.g.
+    # ``data/event_preset_thumbnail`` is a multi-hundred-MB JSON file, not a
+    # folder). Yield the file itself in the single-file case so the same
+    # preview/import code paths handle both shapes.
+    if root.is_file():
+        yield root
+        return
     excluded = _EXCLUDED_BY_BUCKET.get(bucket, set())
     for path in root.rglob("*"):
         if not path.is_file():
@@ -78,6 +112,19 @@ def _iter_files(root: Path, *, bucket: str = "") -> Iterator[Path]:
         if excluded and path.relative_to(root).as_posix() in excluded:
             continue
         yield path
+
+
+def _bucket_target_for(src: Path, source_root: Path, target_root: Path) -> Path:
+    """Resolve the destination path for a file copied from ``source_root``.
+
+    For directory buckets, the file is placed under ``target_root`` preserving
+    its path relative to the bucket root. For single-file buckets (where the
+    bucket source path *is* the file), the target is ``target_root`` itself
+    so the file can be renamed/relocated as part of the bucket mapping.
+    """
+    if source_root.is_file():
+        return target_root
+    return target_root / src.relative_to(source_root)
 
 
 class DataMigrationService:
@@ -174,7 +221,7 @@ class DataMigrationService:
         for bucket, target_rel, label in MIGRATION_BUCKETS:
             src = source / bucket
             target = self._target_dir(target_rel)
-            present = src.is_dir()
+            present = src.is_dir() or src.is_file()
             file_count = 0
             total_bytes = 0
             conflict_count = 0
@@ -185,7 +232,8 @@ class DataMigrationService:
                         total_bytes += path.stat().st_size
                     except OSError:
                         pass
-                    if (target / path.relative_to(src)).exists():
+                    dest_path = _bucket_target_for(path, src, target)
+                    if dest_path.exists():
                         conflict_count += 1
             result["buckets"].append({
                 "bucket": bucket,
@@ -248,12 +296,12 @@ class DataMigrationService:
             if bucket not in selected:
                 continue
             src = source / bucket
-            if not src.is_dir():
+            if not (src.is_dir() or src.is_file()):
                 continue
             target = self._target_dir(target_rel)
             bucket_files = 0
             for path in _iter_files(src, bucket=bucket):
-                dest = target / path.relative_to(src)
+                dest = _bucket_target_for(path, src, target)
                 if dest.exists():
                     if conflict == "skip":
                         skipped_existing += 1
@@ -314,8 +362,20 @@ class DataMigrationService:
         legacy multi-account file (``save/nai_accounts.json``) only holds account
         metadata, never the token itself, so it is intentionally not consulted.
         """
-        cred_file = source / "config" / "secure_tokens.json"
-        if not cred_file.is_file():
+        # Candidate locations, in priority order:
+        #   1. ``<source>/config/secure_tokens.json`` — portable user-data layout;
+        #      the source resolver normally lands here for a portable root.
+        #   2. ``<source>/user-data/config/secure_tokens.json`` — legacy source
+        #      checkout whose top-level looks plausible (save/, wildcards/ from
+        #      a non-portable run) but whose portable runtime wrote the token
+        #      under a nested ``user-data/``. Without this fallback, picking the
+        #      checkout root passes plausibility yet the token is invisible.
+        cred_candidates = (
+            source / "config" / "secure_tokens.json",
+            source / "user-data" / "config" / "secure_tokens.json",
+        )
+        cred_file = next((path for path in cred_candidates if path.is_file()), None)
+        if cred_file is None:
             return "", "이전 설치에서 NAI 토큰 파일(config/secure_tokens.json)을 찾지 못했습니다. 설정에서 직접 입력하세요."
         try:
             data = json.loads(cred_file.read_text(encoding="utf-8"))

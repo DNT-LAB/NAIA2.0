@@ -14667,6 +14667,23 @@ select.setup-input { cursor: pointer; }
   filter: brightness(1.08);
   box-shadow: 0 6px 18px rgba(91,53,200,0.42);
 }
+.setup-btn-restart {
+  padding: 9px 18px;
+  background: linear-gradient(135deg, #d33a3a, #b81f1f);
+  color: #fff;
+  border: none; border-radius: 7px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 1.4px; font-weight: 700;
+  cursor: pointer; text-transform: uppercase;
+  transition: all 160ms;
+  box-shadow: 0 4px 14px rgba(211,58,58,0.35);
+}
+.setup-btn-restart:hover {
+  filter: brightness(1.08);
+  box-shadow: 0 6px 18px rgba(211,58,58,0.45);
+}
+.setup-btn-restart:disabled {
+  opacity: 0.6; cursor: not-allowed;
+}
 .setup-btn-primary:disabled {
   opacity: 0.5; cursor: wait;
   background: var(--bg-elevated); color: var(--text-muted);

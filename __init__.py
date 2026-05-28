@@ -9,7 +9,7 @@ import time
 from typing import List, Tuple
 
 # NAIA 프로젝트 버전 정보
-__version__ = "2.0.6"
+__version__ = "2.0.7"
 __author__ = "NAIA"
 
 class TagDataDownloader:
@@ -76,7 +76,7 @@ class TagDataDownloader:
             
             # Hugging Face에서 파일 다운로드를 위한 헤더 설정
             headers = {
-                'User-Agent': 'NAIA/2.0.6 (https://github.com/naia-project)'
+                'User-Agent': 'NAIA/2.0.7 (https://github.com/naia-project)'
             }
             
             # urllib 요청 객체 생성 및 헤더 설정

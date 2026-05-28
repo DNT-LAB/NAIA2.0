@@ -685,12 +685,27 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026052
     console.error('Failed to initialize setup controller module', error);
   });
 let dataMigrationPanel = null;
-const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=20260527-migration3')
+const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=20260528-migration4')
   .then(({createDataMigrationPanel}) => {
     dataMigrationPanel = createDataMigrationPanel({document, showToast});
   })
   .catch(error => {
     console.error('Failed to initialize data migration panel module', error);
+  });
+let dataBootstrapPanel = null;
+const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=20260528-bootstrap1')
+  .then(({createDataBootstrapPanel}) => {
+    dataBootstrapPanel = createDataBootstrapPanel({
+      document,
+      showToast,
+      // Reuse the existing migration popup; the user picks the previous NAIA
+      // install and the data/tags bucket now appears in the bucket list.
+      onOpenMigration: () => { if (dataMigrationPanel) dataMigrationPanel.open(); },
+    });
+    dataBootstrapPanel.init();
+  })
+  .catch(error => {
+    console.error('Failed to initialize data bootstrap panel module', error);
   });
 let updateBanner = null;
 const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260527-update3')
@@ -4794,6 +4809,9 @@ function showPromptDialog(message, options = {}) {
 // until at least one backend is verified.
 function openApiPopup() {
   if (setupController) setupController.openApiPopup();
+  // Refresh the tag-data section every time the modal opens so the user sees
+  // a current download state rather than the snapshot from app load.
+  if (dataBootstrapPanel) dataBootstrapPanel.refresh();
 }
 
 function openDataMigration() {

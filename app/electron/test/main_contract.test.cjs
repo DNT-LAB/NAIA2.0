@@ -438,7 +438,13 @@ test("runtime install gate is packaged-only by default with explicit source over
   assert.equal(packagedSkipped.api.shouldRunRuntimeInstallGate(), false);
 });
 
-test("runtime install gate initializes, starts download, and waits for ready state", async () => {
+test("runtime install gate waits for a user choice and never auto-downloads", async () => {
+  // Contract: the gate initializes, then parks until the install-manager
+  // reports ready. It must NOT POST /tag-archive/download itself — starting the
+  // Hugging Face download (or importing from a previous install) is now an
+  // explicit user choice in the maintenance window. The poll here simulates the
+  // user having started a download externally (download.active on the first
+  // poll) which then completes (ready on the second poll).
   const calls = [];
   let polls = 0;
   const server = http.createServer((req, res) => {
@@ -452,18 +458,6 @@ test("runtime install gate initializes, starts download, and waits for ready sta
           file_count: 0,
           expected_count: 2,
           download: { active: false, phase: "idle", percent: 0, message: "" },
-        },
-      }));
-      return;
-    }
-    if (req.method === "POST" && req.url === "/api/install-manager/tag-archive/download") {
-      res.end(JSON.stringify({
-        ok: true,
-        tag_archive: {
-          ready: false,
-          file_count: 0,
-          expected_count: 2,
-          download: { active: true, phase: "tag_archive", percent: 10, message: "downloading" },
         },
       }));
       return;
@@ -501,9 +495,12 @@ test("runtime install gate initializes, starts download, and waits for ready sta
     });
 
     assert.equal(ready, true);
-    assert.deepEqual(calls, [
-      "POST /api/install-manager/initialize",
-      "POST /api/install-manager/tag-archive/download",
+    assert.ok(
+      !calls.includes("POST /api/install-manager/tag-archive/download"),
+      "gate must not auto-trigger the tag-archive download",
+    );
+    assert.equal(calls[0], "POST /api/install-manager/initialize");
+    assert.deepEqual(calls.slice(1), [
       "GET /api/install-manager",
       "GET /api/install-manager",
     ]);

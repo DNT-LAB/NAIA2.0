@@ -54,6 +54,30 @@ def _loopback_only_response() -> JSONResponse:
     )
 
 
+def _sanitize_snapshot_for_remote(snapshot: Any) -> Any:
+    """Drop host filesystem paths from a snapshot served to a non-loopback
+    client. Remote clients only need progress/status to render the bootstrap
+    UI; absolute ``user_root``/``data_dir``/``downloads_dir`` paths and the
+    sample/resource locations are local-machine details that should not leak.
+    """
+    if not isinstance(snapshot, dict):
+        return snapshot
+    sanitized = dict(snapshot)
+    runtime = sanitized.get("runtime")
+    if isinstance(runtime, dict):
+        sanitized["runtime"] = {
+            "portable": runtime.get("portable"),
+            "data_initialized": runtime.get("data_initialized"),
+        }
+    sanitized.pop("samples", None)
+    archive = sanitized.get("tag_archive")
+    if isinstance(archive, dict):
+        archive = dict(archive)
+        archive.pop("target", None)
+        sanitized["tag_archive"] = archive
+    return sanitized
+
+
 def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager:
     service = getattr(context, "runtime_install_manager", None)
     if service is None:
@@ -81,9 +105,12 @@ def register_install_manager_routes(
     run_in_thread: AsyncRunner,
 ) -> None:
     @app.get("/api/install-manager")
-    async def api_install_manager_state():
+    async def api_install_manager_state(req: Request):
         try:
-            return await run_in_thread(runtime_install_manager(session_context).snapshot)
+            snapshot = await run_in_thread(runtime_install_manager(session_context).snapshot)
+            if not _is_local_request(req):
+                return _sanitize_snapshot_for_remote(snapshot)
+            return snapshot
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Install manager state failed: {exc}"}, status_code=500)
 

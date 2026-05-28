@@ -1347,7 +1347,11 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
 
   const pollIntervalMs = options.pollIntervalMs || 1000;
   const timeoutMs = options.timeoutMs || RUNTIME_INSTALL_TIMEOUT_MS;
-  const deadline = Date.now() + timeoutMs;
+  // The completion deadline only starts once the user has chosen a path; it is
+  // computed lazily the first time a choice is detected so a user who leaves
+  // the maintenance window open for a while before picking does not time out
+  // immediately.
+  let choiceDeadline = 0;
   const apiBase = String(baseUrl || "").replace(/\/+$/, "");
 
   setRuntimeInstallState({
@@ -1400,12 +1404,15 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
       // The backend can be momentarily unreachable during a user-initiated
       // restart (the "NAIA 재시작" button in the migration popup). Treat the
       // transient error as "keep polling" rather than failing the gate.
-      if (runtimeInstallChoiceMade && Date.now() >= deadline) {
+      if (choiceDeadline && Date.now() >= choiceDeadline) {
         throw new Error("Runtime data installation timed out.");
       }
       continue;
     }
     const choiceMade = runtimeInstallChoiceMade || !!(current && current.tag_archive && current.tag_archive.download && current.tag_archive.download.active);
+    if (choiceMade && !choiceDeadline) {
+      choiceDeadline = Date.now() + timeoutMs;
+    }
     setRuntimeInstallState(normalizeRuntimeInstallState(current, {
       active: choiceMade,
       phase: choiceMade ? undefined : "awaiting_choice",
@@ -1422,7 +1429,7 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
     if (error) {
       throw new Error(error);
     }
-    if (choiceMade && Date.now() >= deadline) {
+    if (choiceDeadline && Date.now() >= choiceDeadline) {
       throw new Error("Runtime data installation timed out.");
     }
   }
@@ -1728,16 +1735,21 @@ ipcMain.handle("naia:start-bootstrap-migration", async () => {
   // user will use the existing "NAIA 재시작" button which re-loads main app
   // without the bootstrap hint.
   if (!backendUrl) return { ok: false, error: "Backend not ready." };
-  runtimeInstallChoiceMade = true;
   if (mainWindow && !mainWindow.isDestroyed()) {
     const target = `${remoteEntryUrl(backendUrl)}${remoteEntryUrl(backendUrl).includes("?") ? "&" : "?"}bootstrap_migration=1`;
     try {
       await mainWindow.loadURL(target);
     } catch (error) {
+      // Navigation failed — do NOT mark the choice as made, otherwise the
+      // install gate would start its completion deadline against a migration
+      // UI that never actually loaded.
       const message = error && error.message ? error.message : String(error);
       return { ok: false, error: message };
     }
   }
+  // Only now that the migration UI is actually showing do we let the install
+  // gate begin enforcing its completion deadline.
+  runtimeInstallChoiceMade = true;
   return { ok: true };
 });
 ipcMain.handle("naia:open-browser", () => shell.openExternal(`${backendUrl}/?desktop_shell=1`));

@@ -99,6 +99,15 @@ export function createPromptEngineeringPanel({
 
   function render(m) {
     const focusSnap = captureFocus();
+    // While the user is actively editing one of the prompt textareas, this
+    // render is almost always the echo of their own keystrokes coming back as a
+    // module_state broadcast (after the input debounce). Rebuilding innerHTML
+    // here replaces the focused textarea node, which dismisses the open
+    // autocomplete popup and drops focus mid-word — even though we restore both
+    // afterward, the popup is already gone. The local DOM already holds the
+    // edited value, so skip the destructive rebuild while a prompt textarea is
+    // focused; the next render after blur reflects any real state change.
+    if (focusSnap) return;
     const textareaHeights = captureTextareaHeights();
     const summaryMap = new Map();
     (m.preset_summaries || []).forEach(summary => {

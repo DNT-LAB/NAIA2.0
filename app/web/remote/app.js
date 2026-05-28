@@ -4730,6 +4730,11 @@ function showAppDialog(message, options = {}) {
   const inputHtml = isPrompt ? `
           <input class="app-confirm-input" type="text" data-dialog-input value="${escHtml(defaultValue)}" placeholder="${escHtml(options.placeholder || '')}">
         ` : '';
+  // Callers may pass pre-built, already-escaped HTML via options.messageHtml
+  // (e.g. multi-line notices with <br>). Fall back to escaping the plain
+  // `message` arg. messageHtml must be sanitized by the caller — the only user,
+  // freeWorkflowNoticeHtml, escHtml()s each line before joining with <br>.
+  const messageMarkup = options.messageHtml != null ? String(options.messageHtml) : escHtml(message);
 
   return new Promise(resolve => {
     const overlay = document.createElement('div');
@@ -4739,7 +4744,7 @@ function showAppDialog(message, options = {}) {
         <div class="app-confirm-icon" aria-hidden="true">i</div>
         <div class="app-confirm-copy">
           <div class="app-confirm-title">${escHtml(title)}</div>
-          <div class="app-confirm-message">${escHtml(message)}</div>
+          <div class="app-confirm-message">${messageMarkup}</div>
           ${inputHtml}
         </div>
         <div class="app-confirm-actions">
@@ -4982,7 +4987,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260523-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260527-textarea-size1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260528-pe-autocomplete1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

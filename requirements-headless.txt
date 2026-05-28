@@ -17,6 +17,7 @@ jaraco.context==6.0.1
 jaraco.functools==4.2.1
 jsonschema==4.24.0
 jsonschema-specifications==2025.4.1
+keyring==25.6.0
 MarkupSafe>=3.0.2
 more-itertools==10.7.0
 narwhals==1.43.0
@@ -29,6 +30,7 @@ protobuf==6.31.1
 pyarrow>=20.0.0
 pycparser==2.22
 pydeck==0.9.1
+pywin32-ctypes==0.2.3; platform_system == "Windows"
 python-dateutil==2.9.0.post0
 pytz==2025.2
 referencing==0.36.2

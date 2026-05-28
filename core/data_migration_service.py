@@ -393,49 +393,96 @@ class DataMigrationService:
             return ""
 
     def _read_legacy_nai_token(self, source: Path) -> tuple[str, str | None]:
-        """Decrypt the main ``nai_token`` from a legacy install's token store.
+        """Find the main ``nai_token`` from a previous install, returning
+        ``(token, error)``.
 
-        Returns ``(token, error)``. The token is read from
-        ``<source>/config/secure_tokens.json`` and decrypted with that file's own
-        embedded Fernet key (the legacy install's key, not the current one). The
-        legacy multi-account file (``save/nai_accounts.json``) only holds account
-        metadata, never the token itself, so it is intentionally not consulted.
+        Lookup order (per UX request / future01 parity):
+          1. **Directory** — ``<source>/config/secure_tokens.json`` and the
+             nested ``<source>/user-data/config/secure_tokens.json`` (the
+             file-based scheme of recent future02 installs), decrypted with each
+             file's own embedded Fernet ``_key``.
+          2. **Windows credential keyring** — the future01 *desktop* scheme,
+             which stored the Fernet key + encrypted token in the OS credential
+             store under service ``NAIA_APP`` (keys ``encryption_key`` /
+             ``nai_token``). This is machine-scoped, not source-folder-scoped, so
+             a user upgrading from future01 on the same machine recovers their
+             token even though the new file-based store removed keyring.
+          3. Otherwise report that nothing was found.
+
+        The legacy multi-account file (``save/nai_accounts.json``) only holds
+        account metadata, never the token itself, so it is not consulted.
         """
-        # Candidate locations, in priority order:
-        #   1. ``<source>/config/secure_tokens.json`` — portable user-data layout;
-        #      the source resolver normally lands here for a portable root.
-        #   2. ``<source>/user-data/config/secure_tokens.json`` — legacy source
-        #      checkout whose top-level looks plausible (save/, wildcards/ from
-        #      a non-portable run) but whose portable runtime wrote the token
-        #      under a nested ``user-data/``. Without this fallback, picking the
-        #      checkout root passes plausibility yet the token is invisible.
-        cred_candidates = (
+        file_error: str | None = None
+        for cred_file in (
             source / "config" / "secure_tokens.json",
             source / "user-data" / "config" / "secure_tokens.json",
+        ):
+            if not cred_file.is_file():
+                continue
+            token, file_error = self._read_token_from_file(cred_file)
+            if token:
+                return token, None
+
+        # Directory lookup exhausted — fall back to the OS credential store.
+        token = self._read_token_from_keyring()
+        if token:
+            return token, None
+
+        if file_error:
+            return "", file_error
+        return "", (
+            "이전 설치에서 NAI 토큰을 찾지 못했습니다 "
+            "(config/secure_tokens.json 및 Windows 자격 증명 저장소 모두 없음). "
+            "설정에서 직접 입력하세요."
         )
-        cred_file = next((path for path in cred_candidates if path.is_file()), None)
-        if cred_file is None:
-            return "", "이전 설치에서 NAI 토큰 파일(config/secure_tokens.json)을 찾지 못했습니다. 설정에서 직접 입력하세요."
+
+    @staticmethod
+    def _read_token_from_file(cred_file: Path) -> tuple[str, str | None]:
+        """Decrypt ``nai_token`` from a file-based token store. Returns
+        ``("", None)`` when the file has no token (lets keyring fallback run);
+        ``("", <error>)`` only for a present-but-unreadable/undecryptable token."""
         try:
             data = json.loads(cred_file.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             return "", f"토큰 파일을 읽을 수 없습니다: {exc}"
         if not isinstance(data, dict):
             return "", "토큰 파일 형식이 올바르지 않습니다."
-        key = data.get("_key")
         tokens = data.get("tokens") if isinstance(data.get("tokens"), dict) else {}
         stored = tokens.get("nai_token")
         if not stored:
-            return "", "이전 설치에 저장된 NAI 토큰이 없습니다."
+            return "", None  # no token here; allow keyring fallback
+        key = data.get("_key")
         if not key:
             return "", "토큰 파일에 복호화 키가 없어 NAI 토큰을 가져올 수 없습니다."
         try:
             from cryptography.fernet import Fernet
 
-            token = Fernet(str(key).encode()).decrypt(str(stored).encode()).decode()
+            return Fernet(str(key).encode()).decrypt(str(stored).encode()).decode(), None
         except Exception:
             return "", "NAI 토큰을 복호화하지 못했습니다 (키 불일치 또는 파일 손상)."
-        return token, None
+
+    @staticmethod
+    def _read_token_from_keyring() -> str:
+        """Read + decrypt the future01 desktop token from the OS keyring
+        (service ``NAIA_APP``). Best-effort: returns ``""`` when keyring is
+        unavailable, has no entry, or cannot be decrypted."""
+        try:
+            import keyring
+        except Exception:
+            return ""
+        try:
+            enc_key = keyring.get_password("NAIA_APP", "encryption_key")
+            enc_token = keyring.get_password("NAIA_APP", "nai_token")
+        except Exception:
+            return ""
+        if not enc_key or not enc_token:
+            return ""
+        try:
+            from cryptography.fernet import Fernet
+
+            return Fernet(str(enc_key).encode()).decrypt(str(enc_token).encode()).decode()
+        except Exception:
+            return ""
 
     def import_nai_token(self, source_dir: str | Path, *, overwrite: bool = False) -> dict[str, Any]:
         """Import only the main NAI token from a legacy install into the current

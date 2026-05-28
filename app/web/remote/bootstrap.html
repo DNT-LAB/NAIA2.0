@@ -8,7 +8,8 @@
   <style>
     /* Standalone first-run migration screen. Deliberately NOT the full app:
        no generation surfaces, no API-empty errors — just pick a previous
-       install, import, then restart into the real app. */
+       install, import, then restart into the real app. Two-column layout so the
+       wide window is used: left = context + actions, right = the bucket list. */
     html, body {
       margin: 0; height: 100%;
       background: var(--bg, #111117);
@@ -18,50 +19,53 @@
     }
     .bootstrap-shell {
       box-sizing: border-box;
-      max-width: 920px;
-      margin: 0 auto;
       height: 100vh;
-      display: flex;
-      flex-direction: column;
-      padding: 28px 32px 24px;
-      gap: 14px;
+      display: grid;
+      grid-template-columns: minmax(300px, 380px) 1fr;
+      gap: 28px;
+      padding: 30px 38px;
     }
-    .bootstrap-head h1 { margin: 0 0 6px; font-size: 22px; }
-    .bootstrap-head p { margin: 0; color: var(--text-dim, #b8b2ca); line-height: 1.5; font-size: 13px; }
-    .bootstrap-actions-top { display: flex; gap: 10px; flex-wrap: wrap; }
-    .bootstrap-scroll {
-      flex: 1 1 auto;
+    .bootstrap-left { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+    .bootstrap-head h1 { margin: 0 0 10px; font-size: 23px; line-height: 1.25; }
+    .bootstrap-head p { margin: 0; color: var(--text-dim, #b8b2ca); line-height: 1.6; font-size: 13px; }
+    .bootstrap-actions-top { display: flex; flex-direction: column; gap: 10px; }
+    .bootstrap-actions-top button { width: 100%; }
+    .bootstrap-foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+    .bootstrap-skip { background: none; border: none; color: var(--text-dim, #b8b2ca); cursor: pointer; font-size: 12px; text-decoration: underline; text-align: left; padding: 0; }
+    #bootstrapToast { min-height: 16px; font-size: 12px; color: var(--text-dim, #b8b2ca); }
+    .bootstrap-right {
       min-height: 0;
       overflow-y: auto;
       border: 1px solid var(--border, #2e2a3b);
-      border-radius: 8px;
-      padding: 14px 16px;
-      background: rgba(0,0,0,0.18);
+      border-radius: 10px;
+      padding: 18px 22px;
+      background: rgba(0,0,0,0.2);
     }
     #setupMigrationBody.hidden { display: none; }
-    .bootstrap-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .bootstrap-skip { background: none; border: none; color: var(--text-dim, #b8b2ca); cursor: pointer; font-size: 12px; text-decoration: underline; }
-    #bootstrapToast { min-height: 18px; font-size: 12px; color: var(--text-dim, #b8b2ca); }
+    /* Let the bucket rows breathe in the wider right column. */
+    .bootstrap-right .setup-meta-line { padding: 7px 0; }
   </style>
 </head>
 <body>
   <main class="bootstrap-shell">
-    <div class="bootstrap-head">
-      <h1>이전 NAIA2.0에서 데이터 가져오기</h1>
-      <p>이전 NAIA2.0 설치(구버전 앱 또는 소스 체크아웃)의 설정·프리셋·와일드카드·태그 데이터를 현재 폴더로 복사합니다. 원본은 변경되지 않으며, 가져온 뒤 <strong>NAIA 재시작</strong>을 누르면 본 앱이 실행됩니다.</p>
-    </div>
-    <div class="bootstrap-actions-top">
-      <button class="setup-btn-primary" id="setupMigrationPick" type="button">폴더 선택…</button>
-      <button class="setup-btn-ghost" id="setupMigrationOpenFolder" type="button">현재 데이터 폴더 열기</button>
-    </div>
-    <div class="bootstrap-scroll">
+    <aside class="bootstrap-left">
+      <div class="bootstrap-head">
+        <h1>이전 NAIA2.0에서<br>데이터 가져오기</h1>
+        <p>이전 NAIA2.0 설치(구버전 앱 또는 소스 체크아웃)의 설정·프리셋·와일드카드·태그 데이터를 현재 폴더로 복사합니다. 원본은 변경되지 않으며, 가져온 뒤 <strong>NAIA 재시작</strong>을 누르면 본 앱이 실행됩니다.</p>
+      </div>
+      <div class="bootstrap-actions-top">
+        <button class="setup-btn-primary" id="setupMigrationPick" type="button">폴더 선택…</button>
+        <button class="setup-btn-ghost" id="setupMigrationOpenFolder" type="button">현재 데이터 폴더 열기</button>
+      </div>
+      <div class="bootstrap-foot">
+        <span id="bootstrapToast"></span>
+        <button class="bootstrap-skip" id="bootstrapSkipToDownload" type="button">가져오기 대신 허깅페이스에서 다운로드</button>
+      </div>
+    </aside>
+    <section class="bootstrap-right">
       <div class="setup-migration-body hidden" id="setupMigrationBody"></div>
-      <div class="setup-result" id="setupMigrationResult">위의 <strong>폴더 선택</strong>으로 이전 NAIA2.0 설치 폴더를 지정하세요.</div>
-    </div>
-    <div class="bootstrap-foot">
-      <span id="bootstrapToast"></span>
-      <button class="bootstrap-skip" id="bootstrapSkipToDownload" type="button">가져오기 대신 허깅페이스에서 다운로드</button>
-    </div>
+      <div class="setup-result" id="setupMigrationResult">왼쪽의 <strong>폴더 선택</strong>으로 이전 NAIA2.0 설치 폴더를 지정하면, 가져올 항목 목록이 여기에 표시됩니다.</div>
+    </section>
   </main>
   <script type="module" src="js/features/bootstrapMigration.mjs?v=20260528-bootstrap-page3"></script>
 </body>

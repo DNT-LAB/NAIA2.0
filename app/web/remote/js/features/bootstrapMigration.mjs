@@ -3,7 +3,7 @@
 // a previous install, preview buckets, import, then the run button becomes the
 // red "NAIA 재시작" which restarts the backend and lets the install gate finish
 // — at which point the Electron shell loads the real app in an expanded window.
-import { createDataMigrationPanel } from './dataMigrationPanel.mjs?v=20260528-migration5';
+import { createDataMigrationPanel } from './dataMigrationPanel.mjs?v=20260528-migration6';
 
 const toastEl = document.getElementById('bootstrapToast');
 
@@ -21,15 +21,21 @@ const skipBtn = document.getElementById('bootstrapSkipToDownload');
 let importCompleted = false;
 
 function retireEscapeHatch() {
-  // Once data has been copied in, the only valid next step is the clean
-  // restart. Switching to the Hugging Face download here would clear the
-  // migration handshake and load the app WITHOUT restarting, leaving the
-  // freshly-imported state half-applied — so remove the escape entirely.
+  // Once a copy is committed, the only valid next step is the clean restart.
+  // Switching to the Hugging Face download would clear the migration handshake
+  // and load the app WITHOUT restarting, leaving copied state half-applied — so
+  // remove the escape entirely. Retired at import *start* (not just completion)
+  // so it cannot be clicked mid-copy of a large bucket like data/tags.
   importCompleted = true;
   if (skipBtn) skipBtn.remove();
 }
 
-const panel = createDataMigrationPanel({ document, showToast, onImported: retireEscapeHatch });
+const panel = createDataMigrationPanel({
+  document,
+  showToast,
+  onImportStarted: retireEscapeHatch,
+  onImported: retireEscapeHatch,
+});
 
 const pickBtn = document.getElementById('setupMigrationPick');
 if (pickBtn) pickBtn.addEventListener('click', () => panel.open());

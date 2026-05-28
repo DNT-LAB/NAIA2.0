@@ -3,7 +3,7 @@
 // previews per-bucket counts via /api/data-migration/preview, then copies via
 // /api/data-migration/import. Non-destructive: the backend only ever copies.
 
-export function createDataMigrationPanel({document, showToast, onImported = () => {}}) {
+export function createDataMigrationPanel({document, showToast, onImported = () => {}, onImportStarted = () => {}}) {
   const toast = (msg, kind) => {
     if (typeof showToast === 'function') showToast(msg, kind);
     else if (typeof globalThis.showToast === 'function') globalThis.showToast(msg, kind);
@@ -189,6 +189,11 @@ export function createDataMigrationPanel({document, showToast, onImported = () =
     }
     const conflict = byId('setupMigrationConflict')?.value || 'skip';
     busy = true;
+    // Notify the host the moment a copy is committed (before the request), so a
+    // standalone bootstrap page can retire its "download instead" escape hatch
+    // up front — once files start landing on disk the only safe path forward is
+    // a clean restart, even if the import later fails partway.
+    try { onImportStarted(); } catch (_e) { /* host callback must not block import */ }
     const runBtn = byId('setupMigrationRun');
     if (runBtn) { runBtn.disabled = true; runBtn.textContent = '가져오는 중…'; }
     setResult('데이터를 가져오는 중…', '');

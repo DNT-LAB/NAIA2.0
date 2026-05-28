@@ -508,3 +508,74 @@ test("runtime install gate waits for a user choice and never auto-downloads", as
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("runtime install gate auto-downloads when NAIA_ELECTRON_AUTO_TAG_DOWNLOAD=1", async () => {
+  // Automated/CI path (the CDP release smoke): no human picks a choice and the
+  // random-prompt round-trip needs tag data, so the gate auto-starts the
+  // download exactly as it did before the interactive choice was introduced.
+  const calls = [];
+  let polls = 0;
+  const server = http.createServer((req, res) => {
+    calls.push(`${req.method} ${req.url}`);
+    res.setHeader("content-type", "application/json");
+    if (req.method === "POST" && req.url === "/api/install-manager/initialize") {
+      res.end(JSON.stringify({
+        ok: true,
+        tag_archive: {
+          ready: false, file_count: 0, expected_count: 2,
+          download: { active: false, phase: "idle", percent: 0, message: "" },
+        },
+      }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/install-manager/tag-archive/download") {
+      res.end(JSON.stringify({
+        ok: true,
+        tag_archive: {
+          ready: false, file_count: 0, expected_count: 2,
+          download: { active: true, phase: "tag_archive", percent: 10, message: "downloading" },
+        },
+      }));
+      return;
+    }
+    if (req.method === "GET" && req.url === "/api/install-manager") {
+      polls += 1;
+      res.end(JSON.stringify({
+        ok: true,
+        tag_archive: {
+          ready: polls >= 2, file_count: polls >= 2 ? 2 : 1, expected_count: 2,
+          download: {
+            active: polls < 2,
+            phase: polls >= 2 ? "complete" : "tag_archive",
+            percent: polls >= 2 ? 100 : 55,
+            message: polls >= 2 ? "complete" : "downloading",
+            done: polls >= 2,
+          },
+        },
+      }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ ok: false, error: "not found" }));
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { api } = loadMain({ isPackaged: true, env: { NAIA_ELECTRON_AUTO_TAG_DOWNLOAD: "1" } });
+    const address = server.address();
+    const ready = await api.ensureRuntimeInstallReady(`http://127.0.0.1:${address.port}`, {
+      pollIntervalMs: 5,
+      timeoutMs: 1000,
+    });
+
+    assert.equal(ready, true);
+    assert.equal(calls[0], "POST /api/install-manager/initialize");
+    assert.equal(calls[1], "POST /api/install-manager/tag-archive/download");
+    assert.ok(
+      calls.slice(2).every((c) => c === "GET /api/install-manager"),
+      "after auto-download the gate only polls",
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

@@ -19,6 +19,10 @@ const REMOTE_DEBUGGING_ENV = "NAIA_ELECTRON_REMOTE_DEBUGGING_PORT";
 const HIDE_MENU_ENV = "NAIA_ELECTRON_HIDE_MENU";
 const RUNTIME_INSTALL_FORCE_ENV = "NAIA_ELECTRON_RUNTIME_INSTALL";
 const RUNTIME_INSTALL_SKIP_ENV = "NAIA_ELECTRON_SKIP_RUNTIME_INSTALL";
+// Automated/CI flag: skip the interactive tag-data choice and auto-download the
+// corpus (original behavior). Used by the CDP release smoke, which needs tag
+// data present and has no human to pick a path.
+const RUNTIME_INSTALL_AUTO_DOWNLOAD_ENV = "NAIA_ELECTRON_AUTO_TAG_DOWNLOAD";
 const RUNTIME_INSTALL_TIMEOUT_MS = 60 * 60 * 1000;
 const RUNTIME_ENV_DIR = "runtime-env";
 const RUNTIME_ENV_MARKER = "naia-runtime-env.json";
@@ -1383,21 +1387,46 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
     return true;
   }
 
-  // Do NOT auto-trigger the Hugging Face download here. A returning user with a
-  // previous NAIA2.0 install can carry the ~1.4 GB tag corpus over via the
-  // migration flow, and silently spending bandwidth+time on a download that
-  // they would have skipped is the bug the user reported. Instead, surface a
-  // choice in the maintenance window: "허깅페이스에서 다운로드" starts the
-  // download via the ``naia:start-tag-download`` IPC, "NAIA2.0에서 가져오기"
-  // hands off to the migration UI. Either path eventually makes
-  // ``install-manager`` report ready, which this poll loop picks up.
-  runtimeInstallChoiceMade = false;
-  setRuntimeInstallState(normalizeRuntimeInstallState(initialized, {
-    active: false,
-    phase: "awaiting_choice",
-    message: "태그 데이터를 어떻게 준비할지 선택하세요.",
-    error: "",
-  }));
+  // Automated contexts (the CDP release smoke) have no human to pick a path and
+  // need tag data present for the random-prompt round-trip checks, so they set
+  // NAIA_ELECTRON_AUTO_TAG_DOWNLOAD=1 to restore the original auto-download.
+  // Interactive launches fall through to the awaiting_choice flow below.
+  if (process.env[RUNTIME_INSTALL_AUTO_DOWNLOAD_ENV] === "1") {
+    setRuntimeInstallState({
+      active: true,
+      ready: false,
+      phase: "download",
+      percent: 0,
+      message: "처음 실행에 필요한 태그 데이터를 다운로드합니다.",
+      error: "",
+    });
+    const started = await httpJsonRequest(`${apiBase}/api/install-manager/tag-archive/download`, { method: "POST" });
+    setRuntimeInstallState(normalizeRuntimeInstallState(started, { active: true }));
+    const startError = runtimeInstallErrorFromPayload(started);
+    if (startError) {
+      throw new Error(startError);
+    }
+    // Arm the deadline and skip the awaiting_choice state; the unified poll
+    // loop below treats this exactly like a user-initiated download.
+    runtimeInstallChoiceMade = true;
+  } else {
+    // Do NOT auto-trigger the Hugging Face download. A returning user with a
+    // previous NAIA2.0 install can carry the ~1.4 GB tag corpus over via the
+    // migration flow, and silently spending bandwidth+time on a download they
+    // would have skipped is the bug the user reported. Surface a choice in the
+    // maintenance window: "허깅페이스에서 다운로드" starts the download via the
+    // ``naia:start-tag-download`` IPC, "NAIA2.0에서 가져오기" hands off to the
+    // migration UI. Either path eventually makes ``install-manager`` report
+    // ready, which the poll loop picks up.
+    runtimeInstallChoiceMade = false;
+    bootstrapMigrationActive = false;
+    setRuntimeInstallState(normalizeRuntimeInstallState(initialized, {
+      active: false,
+      phase: "awaiting_choice",
+      message: "태그 데이터를 어떻게 준비할지 선택하세요.",
+      error: "",
+    }));
+  }
 
   // No timeout while the user is deciding. The completion deadline applies only
   // to the bounded download path; the migration path is user-interactive and

@@ -123,11 +123,11 @@ def build_launch_config(
         "NAIA_BACKEND_PORT": str(backend_port),
         "NAIA_HEADLESS_OPEN_BROWSER": "0",
         # The first-run tag-data gate now parks on a user choice (download vs
-        # import) instead of auto-downloading. There is no human to click in an
-        # automated CDP smoke, so skip the gate here — this smoke validates the
-        # packaged shell + Remote Web feature surfaces, not tag provisioning
-        # (the gate's logic is covered by app/electron/test/main_contract.test.cjs).
-        "NAIA_ELECTRON_SKIP_RUNTIME_INSTALL": "1",
+        # import) instead of auto-downloading. The CDP smoke has no human to pick
+        # and its random-prompt round-trip checks need tag data present, so force
+        # the original auto-download path here. (The interactive awaiting_choice
+        # behavior is covered by app/electron/test/main_contract.test.cjs.)
+        "NAIA_ELECTRON_AUTO_TAG_DOWNLOAD": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONUTF8": "1",
         "PYTHONIOENCODING": "utf-8",

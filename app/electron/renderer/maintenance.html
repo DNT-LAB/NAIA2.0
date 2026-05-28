@@ -52,6 +52,18 @@
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 10px;
     }
+    /* First-run tag-data choice: two wide, prominent buttons (not the cramped
+       4-column maintenance grid). Single-line labels. */
+    .bootstrap-choice {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .bootstrap-choice button {
+      min-height: 60px;
+      font-size: 15px;
+      white-space: nowrap;
+    }
     button {
       min-height: 40px;
       border: 1px solid #49415f;
@@ -161,11 +173,11 @@
         <div class="progress-detail" id="runtime-progress-detail">Checking data files.</div>
       </div>
     </div>
-    <div class="actions" id="bootstrap-choice" style="display:none">
+    <div class="bootstrap-choice" id="bootstrap-choice" style="display:none">
       <button class="primary" id="bootstrap-download">허깅페이스에서 다운로드</button>
       <button id="bootstrap-migrate">NAIA2.0에서 가져오기</button>
     </div>
-    <div class="actions">
+    <div class="actions" id="maintenance-actions">
       <button class="primary" id="restart">Restart backend</button>
       <button id="browser">Open in browser</button>
       <button id="logs-folder">Open logs</button>
@@ -191,7 +203,12 @@
     const bootstrapChoice = document.getElementById("bootstrap-choice");
     const bootstrapDownloadBtn = document.getElementById("bootstrap-download");
     const bootstrapMigrateBtn = document.getElementById("bootstrap-migrate");
+    const maintenanceActions = document.getElementById("maintenance-actions");
     const LOG_VISIBLE_LINES = 17;
+
+    function setMaintenanceActionsVisible(visible) {
+      if (maintenanceActions) maintenanceActions.style.display = visible ? "" : "none";
+    }
 
     function setProgressVisible(container, visible) {
       container.classList.toggle("visible", visible);
@@ -251,13 +268,16 @@
       if (!runtimeInstall || runtimeInstall.phase === "skipped") {
         setProgressVisible(runtimeProgress, false);
         bootstrapChoice.style.display = "none";
+        setMaintenanceActionsVisible(true);
         return false;
       }
       const awaitingChoice = runtimeInstall.phase === "awaiting_choice" && !runtimeInstall.ready;
       // Two-choice CTA replaces a passive progress bar while we wait for the
       // user to pick "download from Hugging Face" vs "import from previous
-      // NAIA2.0". Once they pick, the progress bar takes over again.
+      // NAIA2.0". The generic maintenance actions (restart/browser/logs) are
+      // irrelevant at this point, so hide them to keep the choice unambiguous.
       bootstrapChoice.style.display = awaitingChoice ? "" : "none";
+      setMaintenanceActionsVisible(!awaitingChoice);
       if (awaitingChoice) {
         setProgressVisible(runtimeProgress, false);
         title.textContent = "NAIA 태그 데이터 준비";

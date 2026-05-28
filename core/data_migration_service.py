@@ -412,7 +412,6 @@ class DataMigrationService:
         The legacy multi-account file (``save/nai_accounts.json``) only holds
         account metadata, never the token itself, so it is not consulted.
         """
-        file_error: str | None = None
         for cred_file in (
             source / "config" / "secure_tokens.json",
             source / "user-data" / "config" / "secure_tokens.json",
@@ -422,14 +421,19 @@ class DataMigrationService:
             token, file_error = self._read_token_from_file(cred_file)
             if token:
                 return token, None
+            if file_error is not None:
+                # The file is present and HAS a token we could not read/decrypt.
+                # Surface that error rather than silently substituting a
+                # machine-wide keyring token from a different install — the
+                # keyring fallback is only for "no file token present" cases.
+                return "", file_error
+            # file_error is None -> no nai_token entry here; keep looking.
 
-        # Directory lookup exhausted — fall back to the OS credential store.
+        # No file held a token — fall back to the OS credential store.
         token = self._read_token_from_keyring()
         if token:
             return token, None
 
-        if file_error:
-            return "", file_error
         return "", (
             "이전 설치에서 NAI 토큰을 찾지 못했습니다 "
             "(config/secure_tokens.json 및 Windows 자격 증명 저장소 모두 없음). "

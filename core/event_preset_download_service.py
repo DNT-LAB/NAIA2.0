@@ -115,7 +115,7 @@ class EventPresetDownloadService:
                     phase="main",
                     target_path=main_path,
                     url=DOWNLOAD_URL,
-                    user_agent="NAIA/2.0.7 EventPreset Module",
+                    user_agent="NAIA/2.0.8 EventPreset Module",
                     validator=self._validate_event_preset_zip,
                     invalid_message="다운로드된 Event Preset 데이터가 손상되었습니다.",
                 )
@@ -127,7 +127,7 @@ class EventPresetDownloadService:
                     phase="thumbnail",
                     target_path=thumb_path,
                     url=THUMBNAIL_DOWNLOAD_URL,
-                    user_agent="NAIA/2.0.7 EventPreset Thumbnail",
+                    user_agent="NAIA/2.0.8 EventPreset Thumbnail",
                     validator=lambda path: path.exists() and path.stat().st_size >= 1_000_000,
                     invalid_message="다운로드된 썸네일 데이터가 손상되었습니다.",
                 )

@@ -8679,6 +8679,31 @@ body.resizing-result-info {
   color: var(--guide-tip-text);
   border-color: rgba(124,150,236,0.85);
 }
+/* 헤더 우측 작은 액션 버튼 (가이드가 아닌 동작 트리거 — Debug Snapshot 등).
+   가이드 pill 과 같은 크기지만 중립 톤 + cursor:pointer 로 구분한다. */
+.header-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.header-action-btn:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
 /* 모듈 팝업 헤더: 타이틀 + 가이드를 좌측 그룹으로 묶음 (액션은 우측 유지) */
 .module-popup-titlewrap {
   display: inline-flex;

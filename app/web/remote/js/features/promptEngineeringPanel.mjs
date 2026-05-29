@@ -203,9 +203,6 @@ export function createPromptEngineeringPanel({
         <button class="mod-btn-secondary" onclick="openPeE621Panel()">e621 Auto-Boost Settings</button>
         <button class="mod-btn-secondary" onclick="openPeDanbooruPanel()">Danbooru Auto-Weight Settings</button>
       </div>
-      <div class="mod-inline-row">
-        <button class="mod-btn-secondary" onclick="openPeDebugPanel()">Debug Snapshot</button>
-      </div>
     </div>
   `;
 
@@ -226,7 +223,7 @@ export function createPromptEngineeringPanel({
       </div>
     </div>
     <div>
-      <div class="mod-section-label has-actions"><span>Preprocessing Options</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
+      <div class="mod-section-label has-actions"><span>Preprocessing Options</span><span class="mod-head-actions"><button type="button" class="header-action-btn" onclick="openPeDebugPanel()">Debug Snapshot</button><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
       <div class="mod-checkbox-grid">${preprocessingHtml}</div>
     </div>
     ${advancedHtml}

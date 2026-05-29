@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260528-gray-brighten1">
+<link rel="stylesheet" href="style.css?v=20260529-debug-snapshot-header1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -273,7 +273,10 @@
 
 <div class="pe-popup" id="peDebugPanel">
   <div class="module-popup-header">
-    <span class="module-popup-title">Debug Snapshot</span>
+    <span class="module-popup-titlewrap">
+      <span class="module-popup-title">Debug Snapshot</span>
+      <button type="button" class="header-guide-btn" data-naia-guide="Debug Snapshot — 가장 최근에 생성된 랜덤 프롬프트가 어떻게 가공되었는지 단계별로 보여주는 진단 화면입니다. 프롬프트를 한 번 생성해야 데이터가 표시됩니다.\n\n출처 카드(CHARACTER·COPYRIGHT·ARTIST·ID) — 랜덤 프롬프트를 뽑아온 Danbooru 원본 행 정보입니다.\n\nOriginal → Remaining · Removed — 필터 적용 전/후 태그 개수와 제거된 수입니다.\n\nAuto-Hide 및 각 Preprocessing 항목 — 켜짐(ON)/꺼짐(OFF) 여부와 그 단계에서 실제로 제거된 태그 목록을 보여줍니다. 어떤 태그가 왜 사라졌는지 추적할 수 있습니다.\n\nTag Implication / e621 Auto-Boost — 함의 압축으로 제거된 태그와 e621 가중치 제안 결과입니다.\n\n[Refresh Debug] — 가장 최근 생성 기준으로 스냅샷을 갱신합니다.">ⓘ 가이드</button>
+    </span>
     <button class="history-close" onclick="closePeDebugPanel()">&times;</button>
   </div>
   <div class="pe-popup-body"></div>

@@ -307,7 +307,10 @@
 <!-- Tag Filter floating panel -->
 <div class="tag-filter-popup" id="tagFilterPopup">
   <div class="module-popup-header">
-    <span class="module-popup-title">Tag Filter</span>
+    <span class="module-popup-titlewrap">
+      <span class="module-popup-title">Tag Filter</span>
+      <button type="button" class="header-guide-btn" data-naia-guide="Tag Filter — 랜덤 프롬프트를 뽑아오는 검색 데이터셋을 미리 좁혀, 지정한 태그가 든(또는 들지 않은) 행에서만 프롬프트가 생성되게 합니다.\n\nRating (G/S/Q/E) — 포함할 콘텐츠 등급(General/Sensitive/Questionable/Explicit). 켜진 등급만 검색 대상이 됩니다.\n\ninclude tag — 입력한 태그를 모두 포함하는 행만 남깁니다(AND). exclude tag — 해당 태그가 든 행을 제외합니다. 입력 후 Enter로 칩이 추가되고, 2글자 이상 입력하면 자동완성이 뜹니다.\n\n매칭 방식 — 부분 문자열 포함 검사입니다(대소문자 무시, _는 공백으로 처리). 예: 'girl'은 1girl·cowgirl까지, 'hair'는 long hair·hairband까지 함께 잡힙니다. 정확히 한 태그만 원하면 더 구체적으로 입력하세요.\n\nSearch — 조건에 맞는 행 수를 미리 봅니다. Assign — 그 결과를 실제 생성 데이터셋에 적용합니다(이후 랜덤 프롬프트가 이 범위에서 나옵니다). Clear — 필터를 모두 해제합니다.\n\n※ 칩을 수정하면 Assign(적용)이 해제됩니다. 다시 Search → Assign 하세요.">ⓘ 가이드</button>
+    </span>
     <button class="history-close" onclick="closeTagFilter()">&times;</button>
   </div>
   <div class="tag-filter-body">

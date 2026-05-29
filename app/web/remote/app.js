@@ -266,6 +266,7 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260526-safe-r
       WebSocket,
       getWs: () => ws,
       getRatingState: getRatingStateSnapshot,
+      setActiveRatings: setRatingsFromList,
       syncRatingButtons,
       computeLocalFilteredCount: _computeLocalFilteredCount,
       updateSearchCount,

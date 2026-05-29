@@ -94,11 +94,9 @@ export function createQuickFilterController(deps) {
     return RATING_KEYS.filter(key => ratingState[key]);
   };
   const setActiveRatings = ratings => {
-    const normalized = normalizeRatings(ratings);
-    const ratingState = deps.getRatingState();
-    RATING_KEYS.forEach(key => {
-      ratingState[key] = normalized.includes(key);
-    });
+    // Write through the shared rating store (via the panel bridge) instead of
+    // mutating searchPanel's rating object by reference.
+    deps.setActiveRatings(normalizeRatings(ratings));
   };
   const payload = () => [...includeTags, ...excludeTags.map(tag => '-' + tag)];
   const nextSearchRequestId = () => {

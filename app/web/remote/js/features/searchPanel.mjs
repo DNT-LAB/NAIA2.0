@@ -1,3 +1,5 @@
+import { createRatingStore } from './ratingStore.mjs';
+
 export function createSearchPanel({
   document,
   moduleBody,
@@ -11,14 +13,20 @@ export function createSearchPanel({
 }) {
   const RATING_KEYS = ['g', 's', 'q', 'e'];
   let searchingActive = false;
-  let ratingState = { g: true, s: true, q: true, e: false };
+  // Rating state lives in one store holding BOTH the generation-pool ratings
+  // (active) and the search-execution ratings (search) — distinct concepts,
+  // managed together. ratingState/searchRatingState alias the store's live
+  // objects so existing in-place reads/writes keep working; the Quick/Tag Filter
+  // shares the same store via deps instead of mutating these by reference.
+  const ratingStore = createRatingStore();
+  const ratingState = ratingStore.active;
+  const searchRatingState = ratingStore.search;
   // Rating toggles are always live: local state + count update instantly and the
   // set_active_ratings push is debounced so a burst of clicks coalesces into one
   // backend recompute. No button lock — the backend never emits a rating_update,
   // so the previous lock only ever released via its 4s safety timeout, which read
   // as a fixed minimum delay between rating clicks.
   let ratingSendTimer = null;
-  let searchRatingState = { g: true, s: true, q: true, e: false };
   let cachedRatingCounts = null;
   let parquetPickMode = 'load';
   const draftSearch = {
@@ -42,7 +50,7 @@ export function createSearchPanel({
   }
 
   function setRatingState(nextState) {
-    ratingState = { ...ratingState, ...nextState };
+    Object.assign(ratingState, nextState);
   }
 
   function setRatingsFromList(ratings) {
@@ -290,7 +298,7 @@ export function createSearchPanel({
         syncRatingButtons();
       }
     } else {
-      ratingState = { g: true, s: true, q: true, e: false };
+      setRatingsFromList(['g', 's', 'q']);
       syncRatingButtons();
       if (quickFilter) quickFilter.reset({ persist: false });
     }
@@ -476,6 +484,7 @@ export function createSearchPanel({
 
   return {
     getRatingState,
+    getRatingStore: () => ratingStore,
     getActiveRatings,
     setRatingState,
     setRatingsFromList,

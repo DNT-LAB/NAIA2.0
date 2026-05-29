@@ -50,6 +50,12 @@ const PP_DESCRIPTIONS = {
 };
 const PE_PREPROCESSING_GUIDE = 'Preprocessing Options — 랜덤(Danbooru) 프롬프트에서 원치 않는 카테고리 태그를 자동으로 걸러내거나, 가중치·태그 정합을 적용해 프롬프트를 다듬습니다.\\n\\n각 항목에 마우스를 올리면 기능 설명이 나옵니다. (WC Solo 모드에서는 적용되지 않습니다)';
 
+const PE_QUICK_PRESET_GUIDE = [
+  'Quick Preset — 프롬프트 엔지니어링 설정과 생성 파라미터를 하나로 묶어 저장/불러옵니다. 드롭다운에서 고르면 즉시 적용됩니다.',
+  '포함 항목: Prefix·Postfix·Auto-Hide 프롬프트, Preprocessing 옵션, 그리고 생성 파라미터(모델·스텝·CFG·샘플러·해상도 등)와 프롬프트/네거티브.',
+  '[Add] 현재 설정을 새 프리셋으로 저장 · [Manage] 이름 변경·삭제·썸네일 관리. 프리셋은 API 모드(NAI/WEBUI/COMFYUI)별로 구분되어 저장됩니다.',
+].join('\\n\\n');
+
 const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
 
 // 섹션 헤더 우측 [ⓘ 가이드] 버튼 문구. \n\n 은 단락 구분 (툴팁 엔진이 변환).
@@ -181,7 +187,7 @@ export function createPromptEngineeringPanel({
 
     const presetControlHtml = `
     <div>
-      <div class="mod-section-label">Quick Preset</div>
+      <div class="mod-section-label has-actions"><span>Quick Preset</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
       <div class="mod-preset-toolbar">
         <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>

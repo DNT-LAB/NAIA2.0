@@ -165,15 +165,23 @@ def search_state_with_runner_save(context: WebSessionContext) -> dict[str, Any]:
     return state
 
 
-def clear_active_tag_filter(context: WebSessionContext) -> dict[str, Any]:
+def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True) -> dict[str, Any]:
     context.active_tag_filter_ids = None
     context.pending_tag_filter = None
     context.active_tag_filter = None
-    context.save_search_filter_state(
-        tag_filter=[],
-        tag_filter_exclude=[],
-        tag_filter_active=False,
-    )
+    if reset_draft:
+        # Explicit "Clear": drop the assigned filter AND the draft include/exclude
+        # lists.
+        context.save_search_filter_state(
+            tag_filter=[],
+            tag_filter_exclude=[],
+            tag_filter_active=False,
+        )
+    else:
+        # Chip edit: only the assignment is stale — keep the persisted draft lists
+        # so the returned search_state echo does not wipe the remaining chips in
+        # the popup (save_search_filter_state merges, leaving tag_filter intact).
+        context.save_search_filter_state(tag_filter_active=False)
     return apply_search_runtime_filters(context)
 
 

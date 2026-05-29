@@ -165,7 +165,11 @@ async def handle_search_command(
         return True
 
     if command_type == "tag_filter_clear":
-        state = await run_in_thread(clear_active_tag_filter, context)
+        # keep_draft=True (chip edit) clears only the active assignment and keeps
+        # the persisted include/exclude draft, so the search_state echo does not
+        # wipe the remaining chips. Absent (explicit "Clear") resets the draft too.
+        keep_draft = bool(command.get("keep_draft"))
+        state = await run_in_thread(clear_active_tag_filter, context, not keep_draft)
         await _send_json(ws, {
             "type": "tag_filter_result",
             "count": 0,

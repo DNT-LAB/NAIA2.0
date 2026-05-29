@@ -358,18 +358,27 @@ export function createQuickFilterController(deps) {
     excludeTags.splice(index, 1);
     renderExcludeChips();
     invalidateAssignedState();
-    if (!includeTags.length && !excludeTags.length) clearFilter();
-    else send({type: 'tag_filter_clear'});
+    if (!includeTags.length && !excludeTags.length) {
+      clearFilter();
+      return;
+    }
+    // Persist the reduced draft first, then clear only the active assignment
+    // (keep_draft) so the clear's search_state echo carries the remaining chips
+    // rather than wiping every chip.
     save();
+    send({type: 'tag_filter_clear', keep_draft: true});
   }
 
   function removeIncludeTag(index) {
     includeTags.splice(index, 1);
     renderIncludeChips();
     invalidateAssignedState();
-    if (!includeTags.length && !excludeTags.length) clearFilter();
-    else send({type: 'tag_filter_clear'});
+    if (!includeTags.length && !excludeTags.length) {
+      clearFilter();
+      return;
+    }
     save();
+    send({type: 'tag_filter_clear', keep_draft: true});
   }
 
   function apply() {

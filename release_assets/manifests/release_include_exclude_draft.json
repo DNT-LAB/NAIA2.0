@@ -40,6 +40,10 @@
       "artist_dictionary.py",
       "danbooru_character.py",
       "result_dict_copyright.py"
+    ],
+    "prompt_boost_static": [
+      "data/e621_boost_static.py",
+      "data/danbooru_tag_counts_by_rating.json"
     ]
   },
   "exclude": {
@@ -101,8 +105,7 @@
       "*.naiv4vibebundle"
     ],
     "generated_dictionaries": [
-      "result_dupl.py",
-      "data/e621_boost_static.py"
+      "result_dupl.py"
     ],
     "development_only": [
       "tests/**",
@@ -151,7 +154,7 @@
     "Repository source/development files may include Electron build scripts, but generated Electron and portable release outputs belong only to the distribution plane.",
     "Release artifacts must not include user-downloaded runtime assets by default.",
     "Release artifacts must not include local wildcard files by default; runtime wildcards belong under user-data/wildcards.",
-    "Release artifacts may include reviewed small bootstrap filters under data/*.txt and data/taglist/*.json, plus reviewed clean-machine data bundles (data/KR_tags.parquet, data/e621_KR_tags.parquet, data/tag_index/*, data/copyright_groups.json, data/character_analysis.json, data/e621_data, and the artist/character/copyright tag dictionaries); bulk operational data under data/tags/** and runtime thumbnails must be initialized or downloaded into runtime user data.",
+    "Release artifacts may include reviewed small bootstrap filters under data/*.txt and data/taglist/*.json, plus reviewed clean-machine data bundles (data/KR_tags.parquet, data/e621_KR_tags.parquet, data/tag_index/*, data/copyright_groups.json, data/character_analysis.json, data/e621_data, the artist/character/copyright tag dictionaries, and the prompt-boost static lookup tables data/e621_boost_static.py and data/danbooru_tag_counts_by_rating.json that the e621 Auto-Boost / Danbooru Auto-Weight features load at generation time); bulk operational data under data/tags/** and runtime thumbnails must be initialized or downloaded into runtime user data.",
     "Writable runtime state must resolve through core.runtime_paths.",
     "Release staging should be produced through tools/stage_release_assets.py or an equivalent manifest-driven process.",
     "Manifest-selected release source payload must pass tools/check_release_source_payload.py before staging or packaging.",

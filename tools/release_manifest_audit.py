@@ -71,7 +71,6 @@ FORBIDDEN_PATH_GLOBS = (
     "data/character_thumbnails/*",
     "data/event_preset/*",
     "data/event_preset_thumbnail",
-    "data/e621_boost_static.py",
     "data/tags/*",
     "data/tagger/*",
     "ui/event_preset/*",
@@ -79,7 +78,6 @@ FORBIDDEN_PATH_GLOBS = (
     "*/data/character_thumbnails/*",
     "*/data/event_preset/*",
     "*/data/event_preset_thumbnail",
-    "*/data/e621_boost_static.py",
     "*/data/tags/*",
     "*/data/tagger/*",
     "*/ui/event_preset/*",
@@ -118,12 +116,19 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/copyright_groups.json",
     "data/character_analysis.json",
     "data/e621_data",
+    # Prompt-boost static lookup tables (e621 Auto-Boost / Danbooru Auto-Weight)
+    # loaded at generation time from the resource root; see prompt_boost_static_data
+    # in runtime_asset_classification.json.
+    "data/e621_boost_static.py",
+    "data/danbooru_tag_counts_by_rating.json",
     "*/data/KR_tags.parquet",
     "*/data/e621_KR_tags.parquet",
     "*/data/tag_index/*",
     "*/data/copyright_groups.json",
     "*/data/character_analysis.json",
     "*/data/e621_data",
+    "*/data/e621_boost_static.py",
+    "*/data/danbooru_tag_counts_by_rating.json",
 )
 FORBIDDEN_PACKAGE_NAMES = (
     "PyQt6",

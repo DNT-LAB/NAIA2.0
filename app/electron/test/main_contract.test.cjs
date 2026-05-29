@@ -376,10 +376,10 @@ test("packaged CDP smoke allows first-run runtime bootstrap time", () => {
 test("startup window uses compact bounds before expanding to the app shell", () => {
   const { api } = loadMain();
 
-  assert.equal(api.STARTUP_WINDOW_BOUNDS.width, 680);
-  assert.equal(api.STARTUP_WINDOW_BOUNDS.height, 420);
-  assert.equal(api.STARTUP_WINDOW_BOUNDS.minWidth, 560);
-  assert.equal(api.STARTUP_WINDOW_BOUNDS.minHeight, 360);
+  assert.equal(api.STARTUP_WINDOW_BOUNDS.width, 900);
+  assert.equal(api.STARTUP_WINDOW_BOUNDS.height, 600);
+  assert.equal(api.STARTUP_WINDOW_BOUNDS.minWidth, 760);
+  assert.equal(api.STARTUP_WINDOW_BOUNDS.minHeight, 480);
   assert.equal(api.APP_WINDOW_BOUNDS.width, 1280);
   assert.equal(api.APP_WINDOW_BOUNDS.height, 860);
   assert.equal(api.APP_WINDOW_BOUNDS.minWidth, 960);

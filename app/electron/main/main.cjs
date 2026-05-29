@@ -104,10 +104,10 @@ try { Start-Process -FilePath $cfg.exePath } catch { Write-ApplyLog "relaunch FA
 Write-ApplyLog "apply end"
 `;
 const STARTUP_WINDOW_BOUNDS = Object.freeze({
-  width: 680,
-  height: 420,
-  minWidth: 560,
-  minHeight: 360,
+  width: 900,
+  height: 600,
+  minWidth: 760,
+  minHeight: 480,
 });
 const APP_WINDOW_BOUNDS = Object.freeze({
   width: 1280,

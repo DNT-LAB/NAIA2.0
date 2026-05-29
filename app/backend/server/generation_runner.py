@@ -54,6 +54,25 @@ async def _broadcast_automation_state(context: WebSessionContext, clients: set[W
     await broadcast_json(clients, context._module_state_payload("automation", state))
 
 
+async def _broadcast_wildcard_state(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """Push the wildcard module state so an open Wildcard Manager updates live.
+
+    Sequential/dependent counters advance and the used-wildcard list changes on
+    every generation, but the panel previously only refreshed when reopened
+    (``get_module_state``). The frontend dispatcher re-renders the wildcard panel
+    only while it is the active/detached module, so this is a cheap no-op for
+    users who don't have it open.
+    """
+    try:
+        payload = context._wildcard_module_state()
+    except Exception:
+        return
+    # 라이브 틱 마커: 프론트는 이 플래그가 있을 때만 런타임 섹션을 in-place 갱신하고
+    # 파일 브라우저/전체 구조는 보존한다. 마커가 없으면(열기·reload 등) 기존 full rebuild.
+    payload["live_update"] = True
+    await broadcast_json(clients, payload)
+
+
 def ensure_generation_runner(context: WebSessionContext, clients: set[WebSocket]) -> None:
     task = getattr(context, "headless_generation_runner_task", None)
     if task is not None and not task.done():
@@ -140,6 +159,9 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 })
             await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
             await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+            # 직전 생성에 사용된 와일드카드(순차/종속 카운터 + Used)를 라이브 반영.
+            # auto-continue 가 다음 프롬프트로 context 를 덮어쓰기 전에 push 한다.
+            await _broadcast_wildcard_state(context, clients)
             await _maybe_continue_auto_generation(context, clients, request)
             await broadcast_json(clients, context.queue_state_payload())
             await broadcast_json(clients, context.auto_save_state_payload())

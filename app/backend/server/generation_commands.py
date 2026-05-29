@@ -8,6 +8,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
 
+from app.backend.server.websocket_broadcast import broadcast_json as _broadcast_json
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.web_session_context import WebSessionContext
@@ -59,6 +60,20 @@ async def _send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
     await ws.send_text(json.dumps(payload, ensure_ascii=False))
 
 
+async def _broadcast_wildcard_state(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """Push the wildcard module state to every client so an open Wildcard
+    Manager (inline or detached) reflects the wildcards just consumed by a
+    random/WC-Solo prompt. Cheap no-op when the panel isn't the active module."""
+    try:
+        payload = context._wildcard_module_state()
+    except Exception:
+        return
+    # 라이브 틱 마커 (generation_runner._broadcast_wildcard_state 와 동일 계약):
+    # 프론트는 이 플래그가 있을 때만 런타임 섹션을 in-place 갱신한다.
+    payload["live_update"] = True
+    await _broadcast_json(clients, payload)
+
+
 def _active_ratings_from_command(command: dict[str, Any] | None) -> set[str] | None:
     if not isinstance(command, dict):
         return None
@@ -101,24 +116,27 @@ async def handle_random_command(
         request_id=request_id,
         queue_source="Random",
     )
-    if dispatch is None:
-        return
-    await _send_json(ws, dispatch.websocket_payload())
-    if not dispatch.ok:
-        await _send_json(ws, {
-            "type": "toast",
-            "level": "error",
-            "message": dispatch.blocked_reason,
-        })
-        await _send_json(ws, {
-            "type": "status",
-            "is_generating": False,
-            "message": "blocked",
-        })
-        return
-    await _send_generation_queued_state(ws, context)
-    if context.headless_generation_execute_enabled:
-        start_generation_runner(context, clients)
+    if dispatch is not None:
+        await _send_json(ws, dispatch.websocket_payload())
+        if not dispatch.ok:
+            await _send_json(ws, {
+                "type": "toast",
+                "level": "error",
+                "message": dispatch.blocked_reason,
+            })
+            await _send_json(ws, {
+                "type": "status",
+                "is_generating": False,
+                "message": "blocked",
+            })
+        else:
+            await _send_generation_queued_state(ws, context)
+            if context.headless_generation_execute_enabled:
+                start_generation_runner(context, clients)
+    # 와일드카드가 소비되었으므로(순차/종속 카운터 전진) 관리 창을 라이브 갱신한다.
+    # 모든 ws 전송 이후에 broadcast 하여 클라이언트가 기대하는 메시지 순서를 보존.
+    if result.success:
+        await _broadcast_wildcard_state(context, clients)
 
 
 async def handle_bootstrap_random_command(
@@ -163,6 +181,7 @@ async def handle_bootstrap_random_command(
             await broadcast_json(clients, payload)
             for message in result.extra_messages:
                 await broadcast_json(clients, message)
+            await _broadcast_wildcard_state(context, clients)
         else:
             await _send_json(ws, payload)
             for message in result.extra_messages:

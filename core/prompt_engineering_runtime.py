@@ -186,7 +186,13 @@ class _PromptEngineeringAdvancedModuleBridge:
     def module(self):
         controller = getattr(self.app_context, "middle_section_controller", None)
         if not controller or not hasattr(controller, "get_module_instance"):
-            return None
+            # Headless 런타임에는 데스크톱 MiddleSectionController 가 없다
+            # (headless_context_bootstrap: middle_section_controller=None).
+            # e621 Auto-Boost / Danbooru Auto-Weight 알고리즘은 Qt-free 서비스로
+            # 포팅되어 데스크톱 모듈의 메서드 인터페이스를 그대로 노출하므로,
+            # post_processing / after_wildcard 훅 배선이 무수정으로 이 서비스를 구동한다.
+            from core.headless_prompt_boost_service import get_headless_prompt_boost_service
+            return get_headless_prompt_boost_service(self.app_context)
         try:
             module = controller.get_module_instance("PromptEngineeringModule")
             if module and hasattr(module, "apply_settings"):

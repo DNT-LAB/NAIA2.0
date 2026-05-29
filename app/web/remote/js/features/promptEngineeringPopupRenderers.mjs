@@ -336,19 +336,29 @@ export function createPromptEngineeringPopupRenderers({
     const body = getBody(panels.e621);
     if (!body) return;
     const e621 = m.e621_settings || {};
+    const weight = Number(e621.weight ?? 0);
     const e621Hidden = Array.isArray(e621.hidden_tags) ? e621.hidden_tags.join(', ') : '';
     body.innerHTML = `
-    <div class="mod-section-label">Weight / Mode</div>
-    <div class="mod-inline-row">
-      <input class="mod-input" id="modE621Weight" type="number" min="-5" max="5" step="0.05" value="${escHtml(String(e621.weight ?? 0))}" placeholder="weight">
-      <select class="mod-select" id="modE621Mode">
-        <option value="stable"${e621.mode === 'stable' || !e621.mode ? ' selected' : ''}>stable</option>
-        <option value="confused"${e621.mode === 'confused' ? ' selected' : ''}>confused</option>
+    <div class="mod-boost-block">
+      <div class="mod-boost-head">
+        <span class="mod-boost-name">부스트 강도</span>
+        <span class="mod-boost-val" id="modE621WeightValue">${weight.toFixed(2)}</span>
+      </div>
+      <input type="range" class="mod-boost-slider" id="modE621Weight" min="-5" max="5" step="0.05" value="${escHtml(String(weight))}"
+        oninput="var v=document.getElementById('modE621WeightValue'); if(v) v.textContent=(+this.value).toFixed(2);">
+      <div class="mod-boost-scale"><span>약화 −5</span><span>0 (래핑 없음)</span><span>강조 +5</span></div>
+      <div class="mod-boost-caption">0이면 추천 태그를 가중치 없이 그대로 추가합니다.</div>
+    </div>
+    <div class="mod-boost-block">
+      <div class="mod-boost-head"><span class="mod-boost-name">추천 모드</span></div>
+      <select class="mod-select" id="modE621Mode" style="width:100%">
+        <option value="stable"${e621.mode === 'stable' || !e621.mode ? ' selected' : ''}>stable — 결정적 (항상 같은 추천)</option>
+        <option value="confused"${e621.mode === 'confused' ? ' selected' : ''}>confused — 확률적 (다양성↑)</option>
       </select>
     </div>
     <div>
-      <div class="mod-section-label">Hidden Tags</div>
-      <textarea class="mod-textarea" id="modE621HiddenTags" placeholder="comma or newline separated tags">${escHtml(e621Hidden)}</textarea>
+      <div class="mod-section-label">숨길 태그 (Hidden Tags)</div>
+      <textarea class="mod-textarea" id="modE621HiddenTags" placeholder="쉼표 또는 줄바꿈으로 구분">${escHtml(e621Hidden)}</textarea>
     </div>
     <div class="mod-inline-row">
       <button class="mod-btn-secondary" onclick="savePromptEngineeringE621Settings()">Save e621 Settings</button>
@@ -360,52 +370,65 @@ export function createPromptEngineeringPopupRenderers({
     const body = getBody(panels.danbooru);
     if (!body) return;
     const danbooru = m.danbooru_settings || {};
+    const mag = Number(danbooru.magnitude ?? 3);
+    const blend = Number(danbooru.rating_blend ?? 0.3);
+    const advOpen = danbooru.override_on || danbooru.rating_override_on || danbooru.invert_weight;
     body.innerHTML = `
+    <div class="mod-boost-block">
+      <div class="mod-boost-head">
+        <span class="mod-boost-name">강조 강도 <span class="mod-boost-chip" id="modDanMagLabel">추천</span></span>
+        <span class="mod-boost-val" id="modDanMagValue">${mag} / 10</span>
+      </div>
+      <input type="range" class="mod-boost-slider" id="modDanMagnitude" min="1" max="10" step="1" value="${escHtml(String(mag))}">
+      <div class="mod-boost-scale"><span>약한</span><span>추천</span><span>극한++</span></div>
+      <div class="mod-boost-caption">적용 범위 <span id="modDanRange">0.80 ~ 1.35</span></div>
+    </div>
+    <div class="mod-boost-block">
+      <div class="mod-boost-head">
+        <span class="mod-boost-name">Rating 반영</span>
+        <span class="mod-boost-val" id="modDanBlendValue">${blend.toFixed(1)}</span>
+      </div>
+      <input type="range" class="mod-boost-slider" id="modDanBlend" min="0" max="1" step="0.1" value="${escHtml(String(blend))}">
+      <div class="mod-boost-scale"><span>전역 IDF</span><span>Rating IDF</span></div>
+    </div>
     <div id="modDanFeedback"></div>
-    <div class="mod-grid-2">
-      <label class="mod-field">
-        <span class="mod-field-label">Magnitude</span>
-        <input class="mod-input" id="modDanMagnitude" type="number" min="1" max="10" step="1" value="${escHtml(String(danbooru.magnitude ?? 3))}">
+    <details class="mod-boost-adv"${advOpen ? ' open' : ''}>
+      <summary>고급 — 오버라이드 · Rating 강제 · 반전</summary>
+      <label class="mod-checkbox-item">
+        <input type="checkbox" id="modDanOverrideOn" ${danbooru.override_on ? 'checked' : ''}>
+        <span class="mod-checkbox-label">커스텀 오버라이드 (프리셋 곡선 대체)</span>
       </label>
-      <label class="mod-field">
-        <span class="mod-field-label">Rating Blend</span>
-        <input class="mod-input" id="modDanBlend" type="number" min="0" max="1" step="0.1" value="${escHtml(String(danbooru.rating_blend ?? 0.3))}">
+      <div class="mod-grid-3">
+        <label class="mod-field">
+          <span class="mod-field-label">Scale</span>
+          <input class="mod-input" id="modDanOverrideScale" type="number" min="0" max="5" step="0.05" value="${escHtml(String(danbooru.override_scale ?? 0.35))}">
+        </label>
+        <label class="mod-field">
+          <span class="mod-field-label">Min</span>
+          <input class="mod-input" id="modDanOverrideMin" type="number" min="0" max="5" step="0.05" value="${escHtml(String(danbooru.override_min ?? 0.8))}">
+        </label>
+        <label class="mod-field">
+          <span class="mod-field-label">Max</span>
+          <input class="mod-input" id="modDanOverrideMax" type="number" min="0" max="10" step="0.05" value="${escHtml(String(danbooru.override_max ?? 1.35))}">
+        </label>
+      </div>
+      <label class="mod-checkbox-item">
+        <input type="checkbox" id="modDanRatingOverrideOn" ${danbooru.rating_override_on ? 'checked' : ''}>
+        <span class="mod-checkbox-label">Rating 강제 (모든 태그에 고정 등급 적용)</span>
       </label>
-    </div>
-    <label class="mod-checkbox-item">
-      <input type="checkbox" id="modDanOverrideOn" ${danbooru.override_on ? 'checked' : ''}>
-      <span class="mod-checkbox-label">Custom Override</span>
-    </label>
-    <div class="mod-grid-3">
-      <label class="mod-field">
-        <span class="mod-field-label">Scale</span>
-        <input class="mod-input" id="modDanOverrideScale" type="number" min="0" max="5" step="0.05" value="${escHtml(String(danbooru.override_scale ?? 0.35))}">
+      <div class="mod-inline-row">
+        <select class="mod-select" id="modDanRatingOverride">
+          <option value="g"${danbooru.rating_override === 'g' ? ' selected' : ''}>General</option>
+          <option value="s"${danbooru.rating_override === 's' || !danbooru.rating_override ? ' selected' : ''}>Sensitive</option>
+          <option value="q"${danbooru.rating_override === 'q' ? ' selected' : ''}>Questionable</option>
+          <option value="e"${danbooru.rating_override === 'e' ? ' selected' : ''}>Explicit</option>
+        </select>
+      </div>
+      <label class="mod-checkbox-item">
+        <input type="checkbox" id="modDanInvertWeight" ${danbooru.invert_weight ? 'checked' : ''}>
+        <span class="mod-checkbox-label">가중치 반전 (흔한 태그를 강조)</span>
       </label>
-      <label class="mod-field">
-        <span class="mod-field-label">Min</span>
-        <input class="mod-input" id="modDanOverrideMin" type="number" min="0" max="5" step="0.05" value="${escHtml(String(danbooru.override_min ?? 0.8))}">
-      </label>
-      <label class="mod-field">
-        <span class="mod-field-label">Max</span>
-        <input class="mod-input" id="modDanOverrideMax" type="number" min="0" max="10" step="0.05" value="${escHtml(String(danbooru.override_max ?? 1.35))}">
-      </label>
-    </div>
-    <label class="mod-checkbox-item">
-      <input type="checkbox" id="modDanRatingOverrideOn" ${danbooru.rating_override_on ? 'checked' : ''}>
-      <span class="mod-checkbox-label">Rating Override</span>
-    </label>
-    <div class="mod-inline-row">
-      <select class="mod-select" id="modDanRatingOverride">
-        <option value="g"${danbooru.rating_override === 'g' ? ' selected' : ''}>General</option>
-        <option value="s"${danbooru.rating_override === 's' || !danbooru.rating_override ? ' selected' : ''}>Sensitive</option>
-        <option value="q"${danbooru.rating_override === 'q' ? ' selected' : ''}>Questionable</option>
-        <option value="e"${danbooru.rating_override === 'e' ? ' selected' : ''}>Explicit</option>
-      </select>
-    </div>
-    <label class="mod-checkbox-item">
-      <input type="checkbox" id="modDanInvertWeight" ${danbooru.invert_weight ? 'checked' : ''}>
-      <span class="mod-checkbox-label">Invert Weight</span>
-    </label>
+    </details>
     <div class="mod-inline-row">
       <button class="mod-btn-secondary" onclick="savePromptEngineeringDanbooruSettings()">Save Danbooru Settings</button>
     </div>

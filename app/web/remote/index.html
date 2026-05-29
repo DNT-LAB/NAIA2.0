@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260529-debug-snapshot-header1">
+<link rel="stylesheet" href="style.css?v=20260529-boost-redesign1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -257,7 +257,10 @@
 
 <div class="pe-popup" id="peE621Panel">
   <div class="module-popup-header">
-    <span class="module-popup-title">e621 Auto-Boost Settings</span>
+    <span class="module-popup-titlewrap">
+      <span class="module-popup-title">e621 Auto-Boost Settings</span>
+      <button type="button" class="header-guide-btn" data-naia-guide="e621 Auto-Boost — 현재 프롬프트의 태그와 e621에서 자주 함께 등장하는 태그(자세·행위·효과 등)를 자동으로 찾아 프롬프트 뒤에 추가합니다.\n\n부스트 강도 — 추가되는 추천 태그 묶음 전체에 적용할 가중치입니다. 0이면 가중치 래핑 없이 그대로 추가합니다.\n\n추천 모드 — stable은 결정적(항상 같은 추천), confused는 확률적(다양성↑)입니다.\n\n숨길 태그 — 추천에서 제외할 태그 목록(쉼표/줄바꿈 구분).\n\n※ 노출·행위 등 explicit 맥락이 있을 때 NSFW·위험 카테고리 추천이 활성화됩니다. 실제 추천 결과는 Debug Snapshot에서 확인할 수 있습니다.">ⓘ 가이드</button>
+    </span>
     <button class="history-close" onclick="closePeE621Panel()">&times;</button>
   </div>
   <div class="pe-popup-body"></div>
@@ -265,7 +268,10 @@
 
 <div class="pe-popup" id="peDanbooruPanel">
   <div class="module-popup-header">
-    <span class="module-popup-title">Danbooru Auto-Weight Settings</span>
+    <span class="module-popup-titlewrap">
+      <span class="module-popup-title">Danbooru Auto-Weight Settings</span>
+      <button type="button" class="header-guide-btn" data-naia-guide="Danbooru Auto-Weight — 랜덤 프롬프트의 각 태그에 Danbooru 출현 빈도(IDF) 기반 강조 가중치를 자동 부여합니다. 희귀한 태그일수록 높은 가중치, 흔한 태그는 1.0 미만이 됩니다.\n\n강조 강도 (Magnitude) — 가중치가 퍼지는 폭. 약한~극한++ 10단계이며, 단계가 높을수록 강약 대비가 커집니다. 슬라이더 아래에 현재 적용 범위가 표시됩니다.\n\nRating 반영 — 전역 빈도와 해당 등급(g/s/q/e) 조건부 빈도를 섞는 비율입니다(0=전역만, 1=등급만).\n\n고급 — 커스텀 오버라이드(곡선 직접 지정), Rating 강제(등급 고정), 가중치 반전(흔한 태그 강조).\n\n※ NAI는 1.20::tag :: , WEBUI/COMFYUI는 (tag:1.20) 구문으로 적용됩니다. 동일 입력이라도 매 생성마다 미세한 무작위 섭동이 더해집니다.">ⓘ 가이드</button>
+    </span>
     <button class="history-close" onclick="closePeDanbooruPanel()">&times;</button>
   </div>
   <div class="pe-popup-body"></div>

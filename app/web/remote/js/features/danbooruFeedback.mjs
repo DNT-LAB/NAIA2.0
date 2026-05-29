@@ -123,10 +123,19 @@ export function createDanbooruFeedbackController({ document }) {
   }
 
   function sync(baseSettings = {}) {
-    const feedback = byId('modDanFeedback');
-    if (!feedback) return;
     const state = getPreviewState(baseSettings);
-    feedback.innerHTML = renderVisualFeedback(state);
+    const feedback = byId('modDanFeedback');
+    if (feedback) feedback.innerHTML = renderVisualFeedback(state);
+
+    // 슬라이더 중심 패널의 인라인 라벨 (존재할 때만 갱신)
+    const magLabel = byId('modDanMagLabel');
+    if (magLabel) magLabel.textContent = state.label;
+    const magValue = byId('modDanMagValue');
+    if (magValue) magValue.textContent = `${state.magnitude} / 10`;
+    const rangeEl = byId('modDanRange');
+    if (rangeEl) rangeEl.textContent = `${state.minWeight.toFixed(2)} ~ ${state.maxWeight.toFixed(2)}`;
+    const blendEl = byId('modDanBlendValue');
+    if (blendEl) blendEl.textContent = state.blend.toFixed(1);
 
     const overrideOn = !!byId('modDanOverrideOn')?.checked;
     const ratingOverrideOn = !!byId('modDanRatingOverrideOn')?.checked;

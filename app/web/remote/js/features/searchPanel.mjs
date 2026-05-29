@@ -12,11 +12,12 @@ export function createSearchPanel({
   const RATING_KEYS = ['g', 's', 'q', 'e'];
   let searchingActive = false;
   let ratingState = { g: true, s: true, q: true, e: false };
-  // Lock the G/S/Q/E rating buttons while a set_active_ratings request is in
-  // flight so a slow backend can't be spammed by rapid re-clicks. Released when
-  // the server's rating_update arrives, with a safety timeout in case it does not.
-  let ratingInflight = false;
-  let ratingInflightTimer = null;
+  // Rating toggles are always live: local state + count update instantly and the
+  // set_active_ratings push is debounced so a burst of clicks coalesces into one
+  // backend recompute. No button lock — the backend never emits a rating_update,
+  // so the previous lock only ever released via its 4s safety timeout, which read
+  // as a fixed minimum delay between rating clicks.
+  let ratingSendTimer = null;
   let searchRatingState = { g: true, s: true, q: true, e: false };
   let cachedRatingCounts = null;
   let parquetPickMode = 'load';
@@ -260,37 +261,21 @@ export function createSearchPanel({
     ws.send(JSON.stringify({type: 'search_parquet_action', action}));
   }
 
-  function setRatingButtonsLocked(locked) {
-    document.querySelectorAll('.rating-btn').forEach(button => {
-      if (!button.dataset.r) return;
-      button.classList.toggle('rating-locked', locked);
-      if ('disabled' in button) button.disabled = locked;
-    });
-  }
-
-  function beginRatingRequest() {
-    ratingInflight = true;
-    setRatingButtonsLocked(true);
-    if (ratingInflightTimer) clearTimeout(ratingInflightTimer);
-    ratingInflightTimer = setTimeout(endRatingRequest, 4000);
-  }
-
-  function endRatingRequest() {
-    ratingInflight = false;
-    if (ratingInflightTimer) {
-      clearTimeout(ratingInflightTimer);
-      ratingInflightTimer = null;
-    }
-    setRatingButtonsLocked(false);
-  }
-
   function toggleRating(rating) {
-    if (ratingInflight) return;
     ratingState[rating] = !ratingState[rating];
     syncRatingButtons();
+    // Instant local feedback from the cached per-rating counts — no wait for the
+    // backend round-trip.
+    const localCount = computeLocalFilteredCount();
+    if (localCount !== null) updateSearchCount(localCount);
+    // Debounce the authoritative push so a burst of toggles sends a single
+    // set_active_ratings; the search_state reply reconciles the count.
+    if (ratingSendTimer) clearTimeout(ratingSendTimer);
+    ratingSendTimer = setTimeout(() => {
+      ratingSendTimer = null;
+      sendActiveRatings();
+    }, 160);
     const quickFilter = getQuickFilter();
-    sendActiveRatings();
-    beginRatingRequest();
     if (quickFilter) quickFilter.savePreferences();
   }
 
@@ -314,7 +299,6 @@ export function createSearchPanel({
   }
 
   function onRatingUpdate(message) {
-    endRatingRequest();
     if (message.rating_counts) cachedRatingCounts = message.rating_counts;
     const quickFilter = getQuickFilter();
     updateSearchCount(message.count || 0);

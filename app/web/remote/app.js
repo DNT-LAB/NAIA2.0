@@ -4986,6 +4986,21 @@ const MODULE_OVERVIEW_GUIDES = {
     '반복 횟수 — 같은 프롬프트로 N회 생성한 뒤 다음 프롬프트로 넘어갑니다(시드는 매번 바뀌어 변주가 생깁니다). 값은 저장되지 않고 항상 1로 시작합니다.',
     '지속 자동화 — Auto Gen을 켜면 저장된 자동화 설정으로 자동 시작합니다(Auto Gen이 트리거). 완료(횟수/타이머)되면 자동화와 Auto Gen이 모두 꺼지므로 무한 생성되지 않으며, 다시 돌리려면 Auto Gen을 다시 켜면 됩니다.',
   ].join('\n\n'),
+  vibe_transfer: [
+    'Vibe Transfer — 참조 이미지의 분위기(색감·화풍·구도 등)를 추출해 생성에 반영하는 NAI 전용 도구입니다. Upload/Paste하거나 Storage(저장된 인코딩)·Cluster(묶음)에서 불러온 뒤 Enable하면 적용됩니다.',
+    'Ref Strength — 반영 강도(-1~1). Info Extracted(IE) — 참조에서 추출하는 정보량(클수록 원본에 가깝게). 헤드리스에서는 미리 인코딩된 항목만 사용합니다(새 인코딩 생성 불가).',
+    '여러 장을 동시에 켤 수 있고 5장 이상은 Anlas가 추가될 수 있습니다. 활성 강도 합이 1.0을 넘으면 Normalize로 정규화하세요. Character Reference와 상호배타입니다(하나를 켜면 다른 쪽이 꺼집니다).',
+  ].join('\n\n'),
+  character_reference: [
+    'Character Reference — 참조 이미지의 캐릭터/화풍을 director 방식으로 반영하는 NAID4.5 전용 도구입니다. Upload/Paste하거나 Storage에서 불러온 뒤 Enable하면 적용됩니다.',
+    '참조 유형 — Char & Style(캐릭터+화풍) / Character(캐릭터만) / Style(화풍만). Strength — 반영 강도. Fidelity — 원본 충실도(높을수록 참조에 가깝게).',
+    'Vibe Transfer와 상호배타이며(하나를 켜면 다른 쪽이 꺼짐), NAID4.5F/C 모델에서만 동작합니다.',
+  ].join('\n\n'),
+  character: [
+    'Character — 여러 캐릭터를 개별 슬롯으로 구성해 멀티 캐릭터 생성에 쓰는 NAI 전용 도구입니다. 활성화한 뒤 각 슬롯에 캐릭터별 프롬프트와 UC(네거티브)를 입력합니다.',
+    '슬롯 상태 — active(생성에 사용) / inactive(미사용) / cold(보류: 입력은 유지하되 이번 생성에서 제외). 생성에는 active 슬롯만 캐릭터로 들어갑니다.',
+    '프롬프트·UC에는 와일드카드(__name__)도 사용할 수 있고, 리롤을 켜면 자동 생성 중 캐릭터 구성을 매 생성마다 다시 적용합니다.',
+  ].join('\n\n'),
 };
 
 function applyModuleOverviewGuide(moduleId) {

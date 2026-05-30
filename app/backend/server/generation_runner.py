@@ -116,6 +116,9 @@ async def _run_automation_timer_watcher(context: WebSessionContext, clients: set
                 await _broadcast_automation_state(context, clients)
                 for message in policy.get("messages", []):
                     await broadcast_json(clients, message)
+                if policy.get("continue"):
+                    # 지속 자동화: 재무장됨 — 새 timer window를 계속 감시한다.
+                    continue
                 return
             await asyncio.sleep(min(max(remaining, 0.2), 1.0))
     finally:
@@ -189,8 +192,10 @@ async def _maybe_continue_auto_generation(
     # disabled when the limit is reached.
     if not automation_run_id and _automation_should_bind(context, request):
         automation_run_id = context._automation_service().active_run_id()
+    hold_prompt = False
     if automation_run_id:
         policy = context._automation_service().record_generation_completed(automation_run_id)
+        hold_prompt = bool(policy.get("hold_prompt", False))
         await _broadcast_automation_state(context, clients)
         for message in policy.get("messages", []):
             await broadcast_json(clients, message)
@@ -212,9 +217,11 @@ async def _maybe_continue_auto_generation(
     prompt_fixed = context._coerce_bool(
         context.get_options().get("prompt_fixed", params.get("prompt_fixed", False))
     )
+    # Repeat Count(자동화): hold_prompt면 새 프롬프트를 뽑지 않고 직전 프롬프트를 재사용한다.
+    effective_prompt_fixed = prompt_fixed or hold_prompt
     overrides = _auto_generation_overrides(params)
     overrides["auto_generate"] = True
-    overrides["prompt_fixed"] = prompt_fixed
+    overrides["prompt_fixed"] = effective_prompt_fixed
     # Auto Gen은 매 반복마다 새 랜덤 시드를 사용한다 (사용자가 seed_fixed로 명시 고정한 경우 제외).
     # 특히 prompt_fixed면 프롬프트가 동일하므로, 직전 생성의 구체 시드를 그대로 재사용하면
     # 같은 이미지만 반복된다. seed=-1로 리셋해 시드 정규화에서 재랜덤화되도록 한다.
@@ -228,7 +235,7 @@ async def _maybe_continue_auto_generation(
     prompt = str(params.get("input") or params.get("_raw_input") or context.prompt_text or "")
     negative = str(params.get("negative_prompt") or context.negative_prompt_text or "")
 
-    if not prompt_fixed:
+    if not effective_prompt_fixed:
         result = await asyncio.to_thread(
             random_service(context).generate,
             active_ratings=context.get_active_ratings(),

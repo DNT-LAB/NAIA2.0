@@ -49,6 +49,7 @@ class HeadlessAutomationService:
                 "remaining_count": runtime.get("remaining_count"),
                 "remaining_seconds": self._remaining_seconds(runtime),
             })
+        state["repeat"] = str(self._repeat_count())
         return state
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
@@ -60,13 +61,20 @@ class HeadlessAutomationService:
         if key == "stop":
             return self.stop(reason="stopped")
 
+        if key == "repeat":
+            # Session-only (desktop parity): store pending so state() echoes the
+            # typed value, but never persist it to AutomationModule.json.
+            try:
+                self.context._automation_repeat_pending = max(1, int(value))
+            except (TypeError, ValueError):
+                self.context._automation_repeat_pending = 1
+            return self.state()
+
         state = self.state()
         if key == "auto_type":
             state["auto_type"] = value
-        elif key in {"delay", "random_delay", "timer_minutes", "count_limit", "notify", "shutdown_on_finish"}:
+        elif key in {"delay", "random_delay", "timer_minutes", "count_limit", "notify", "shutdown_on_finish", "persist_automation"}:
             state[key] = value
-        elif key == "repeat":
-            return self.state()
         else:
             return None
         settings = settings_from_automation_state(state)
@@ -99,6 +107,8 @@ class HeadlessAutomationService:
             ),
             "delay_until_monotonic": None,
             "finish_reason": "",
+            "repeat_count": self._repeat_count(),
+            "repeat_progress": 0,
         }
         self.context.automation_runtime_state = runtime
 
@@ -199,11 +209,38 @@ class HeadlessAutomationService:
         elif automation_type == "timer":
             if self._remaining_seconds(runtime) <= 0:
                 return self.finish(run_id, reason="timer_complete")
-        return {"continue": True, "messages": [], "delay_seconds": self.next_delay_seconds()}
+        # Repeat Count: 같은 프롬프트를 N회 생성한 뒤 다음 프롬프트로 진행(desktop parity).
+        # hold_prompt=True면 러너가 새 프롬프트를 뽑지 않고 직전 프롬프트를 재사용한다.
+        hold_prompt = False
+        repeat_count = int(runtime.get("repeat_count") or 1)
+        if repeat_count > 1:
+            progress = int(runtime.get("repeat_progress") or 0) + 1
+            if progress < repeat_count:
+                runtime["repeat_progress"] = progress
+                hold_prompt = True
+            else:
+                runtime["repeat_progress"] = 0
+        return {
+            "continue": True,
+            "messages": [],
+            "delay_seconds": self.next_delay_seconds(),
+            "hold_prompt": hold_prompt,
+        }
 
     def finish(self, run_id: str, *, reason: str = "complete", error: str = "") -> dict[str, Any]:
-        self._finish_runtime(run_id, reason=reason)
         settings = self._settings()
+        # 지속 자동화(자동 재무장): 자연 완료(횟수/타이머)에 한해 persist_automation이
+        # 켜져 있으면 정지하지 않고 같은 run_id로 카운터/타이머를 리셋해 계속 돌린다.
+        # 명시적 stop·error는 항상 정지한다(error는 무한 루프 방지).
+        if not error and reason in {"count_complete", "timer_complete"} and settings.get("persist_automation"):
+            if self._rearm_runtime(run_id, settings):
+                return {
+                    "continue": True,
+                    "messages": [],
+                    "delay_seconds": self.next_delay_seconds(),
+                    "hold_prompt": False,
+                }
+        self._finish_runtime(run_id, reason=reason)
         messages: list[dict[str, Any]] = []
         # Disable Auto Gen when the controller finishes so a later manual
         # generate does not silently keep looping (future01 parity).
@@ -248,6 +285,24 @@ class HeadlessAutomationService:
         except Exception:
             return None
 
+    def _repeat_count(self) -> int:
+        """Session-only Repeat Count (desktop parity: never persisted, default 1).
+
+        Prefers the live runtime value while running, else the pending value the
+        UI set via ``set_param('repeat', N)`` so the panel echoes the typed value.
+        """
+        runtime = self._runtime(create=False)
+        if runtime and runtime.get("is_running") and runtime.get("repeat_count"):
+            try:
+                return max(1, int(runtime.get("repeat_count")))
+            except (TypeError, ValueError):
+                return 1
+        pending = getattr(self.context, "_automation_repeat_pending", None)
+        try:
+            return max(1, int(pending)) if pending is not None else 1
+        except (TypeError, ValueError):
+            return 1
+
     def _settings(self) -> dict[str, Any]:
         from core.automation_settings import load_automation_settings
 
@@ -283,6 +338,28 @@ class HeadlessAutomationService:
         runtime["is_running"] = False
         runtime["finish_reason"] = reason
         runtime["delay_until_monotonic"] = None
+
+    def _rearm_runtime(self, run_id: str, settings: dict[str, Any]) -> bool:
+        """Re-arm a naturally-completed run in place (same run_id) for 지속 자동화.
+
+        Keeps is_running/Auto Gen engaged and resets the count/timer window so the
+        automation loops. Returns False when ``run_id`` is not the live run.
+        """
+        runtime = self._runtime(create=False)
+        if not runtime or str(runtime.get("run_id") or "") != str(run_id or ""):
+            return False
+        automation_type = str(runtime.get("automation_type") or "unlimited")
+        if automation_type == "count":
+            runtime["remaining_count"] = int(settings.get("count_limit") or 0)
+        elif automation_type == "timer":
+            runtime["ends_at_monotonic"] = (
+                time.monotonic() + max(1, int(settings.get("timer_minutes") or 1)) * 60
+            )
+        runtime["repeat_progress"] = 0
+        runtime["delay_until_monotonic"] = None
+        runtime["is_running"] = True
+        runtime["finish_reason"] = ""
+        return True
 
     def _credential_error(self) -> str:
         from core.headless_generation_service import TOKEN_KEYS

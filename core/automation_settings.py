@@ -18,6 +18,7 @@ def default_automation_settings() -> dict:
         "count_limit": 100,
         "shutdown_on_finish": False,
         "notify_on_finish": True,
+        "persist_automation": False,
         "automation_type": "unlimited",
     }
 
@@ -81,6 +82,10 @@ def normalize_automation_settings(raw: dict | None) -> dict:
         data.get("notify_on_finish"),
         settings["notify_on_finish"],
     )
+    settings["persist_automation"] = _coerce_bool(
+        data.get("persist_automation"),
+        settings["persist_automation"],
+    )
     settings["automation_type"] = normalize_automation_type(
         data.get("automation_type", settings["automation_type"])
     )
@@ -125,6 +130,7 @@ def automation_state_from_settings(settings: dict | None) -> dict:
         "count_limit": str(normalized["count_limit"]),
         "notify": bool(normalized["notify_on_finish"]),
         "shutdown_on_finish": bool(normalized["shutdown_on_finish"]),
+        "persist_automation": bool(normalized["persist_automation"]),
         "is_running": False,
         "status": "",
         "repeat_info": "",
@@ -143,6 +149,10 @@ def settings_from_automation_state(state: dict | None) -> dict:
     settings["shutdown_on_finish"] = _coerce_bool(
         data.get("shutdown_on_finish"),
         settings["shutdown_on_finish"],
+    )
+    settings["persist_automation"] = _coerce_bool(
+        data.get("persist_automation"),
+        settings["persist_automation"],
     )
     settings["automation_type"] = normalize_automation_type(data.get("auto_type", 0))
     return settings

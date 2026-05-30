@@ -818,7 +818,7 @@ const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats
   .catch(error => {
     console.error('Failed to initialize session generation stats module', error);
   });
-const automationPanelReady = import('./js/features/automationPanel.mjs?v=20260527-automation-countdown1')
+const automationPanelReady = import('./js/features/automationPanel.mjs?v=20260530-automation-enh1')
   .then(({createAutomationPanel}) => {
     automationPanel = createAutomationPanel({
       document,
@@ -4979,6 +4979,12 @@ const MODULE_OVERVIEW_GUIDES = {
     'Exclude Keyword(제외) 문법 — 포함과 문법이 다릅니다. tag = 그 문자열이 든 행을 제외(부분일치 — 예: girl 은 1girl·cowgirl 까지 제외). ~tag = 정확히 그 태그만 제외(예: ~girl 은 1girl 을 남김). ※ 제외 칸에서는 {a|b}·*tag 는 동작하지 않습니다.',
     '공통 — 태그의 _(언더바)는 공백으로 처리됩니다. 검색은 켜진 등급(G/S/Q/E)에만 적용됩니다.',
     'Remaining = 현재 풀에 남은 프롬프트 수. Parquet = 커스텀 결과셋 불러오기/합치기/내보내기. 심층검색 = 결과셋을 테이블로 깊게 다듬기. 복원 = 직전 스냅샷으로 되돌리기.',
+  ].join('\n\n'),
+  automation: [
+    '자동화는 Auto Generate(자동 생성)를 제어하는 컨트롤러입니다. [시작]을 누르면 자동 생성이 켜지고, 설정한 종료 조건에 도달하면 자동으로 꺼집니다 — 자동화 자체가 이미지를 생성하지 않고, 생성은 자동 생성 루프를 통해 진행됩니다.',
+    '종료 조건 — 무제한: 직접 [정지]할 때까지 계속 / 타이머: 지정한 시간(분)이 지나면 종료 / 횟수: 지정한 장수를 생성하면 종료.',
+    '반복 횟수 — 같은 프롬프트로 N회 생성한 뒤 다음 프롬프트로 넘어갑니다(시드는 매번 바뀌어 변주가 생깁니다). 값은 저장되지 않고 항상 1로 시작합니다.',
+    '지속 자동화 — 완료로 멈춘 뒤 같은 설정으로 자동 재시작해 계속 돌립니다. [정지]나 오류로 멈춘 경우엔 재시작하지 않으며, 이 옵션은 직접 끌 때까지 유지됩니다.',
   ].join('\n\n'),
 };
 

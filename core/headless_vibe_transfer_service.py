@@ -14,9 +14,126 @@ from core.headless_image_utils import data_url_payload, image_hash, image_to_png
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
 
 
+def _as_float(value: Any, default: float) -> float:
+    """0.0 같은 유효한 0 값을 보존하는 float 변환(누락/None/비수치만 default)."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class HeadlessVibeTransferService:
     def __init__(self, context: Any):
         self.context = context
+
+    # ----- 영속 (재시작 복원): VibeTransferModule_{mode}.json -----
+    def _settings_mode(self) -> str:
+        return str(self.context.get_api_mode() or "NAI").upper()
+
+    def _ensure_loaded(self) -> None:
+        """첫 접근/모드 변경 시 디스크에서 활성 프레임을 1회 로드한다.
+
+        프레임 리스트는 모드별 파일(데스크톱 호환)에 영속된다. 이미 현재 모드로
+        로드했으면 no-op. 상호배타 cross-disable이 미로드 상대를 깨우도록 여기서
+        디스크의 enabled 상태까지 복원한다.
+        """
+        context = self.context
+        mode = self._settings_mode()
+        if getattr(context, "_vibe_frames_loaded_mode", None) == mode:
+            return
+        context._vibe_frames_loaded_mode = mode
+        frames, normalize = self._load_persisted(mode)
+        context.vibe_transfer_frames = frames
+        context.vibe_transfer_normalize = normalize
+
+    def _load_persisted(self, mode: str) -> tuple[list[dict[str, Any]], bool]:
+        try:
+            path = self.context._existing_save_path(f"VibeTransferModule_{mode}.json")
+            if not path.exists():
+                return [], False
+            data = json.loads(path.read_text(encoding="utf-8"))
+            block = data.get(mode) if isinstance(data, dict) else None
+            if not isinstance(block, dict):
+                block = data if isinstance(data, dict) else {}
+            raw_frames = block.get("vibe_frames")
+            normalize = bool(block.get("normalize_strength", False))
+            frames: list[dict[str, Any]] = []
+            if isinstance(raw_frames, list):
+                for raw in raw_frames:
+                    frame = self._frame_from_persisted(raw)
+                    if frame is not None:
+                        frames.append(frame)
+            return frames, normalize
+        except Exception as exc:
+            print(f"[ERROR] Vibe Transfer settings load failed: {exc}")
+            return [], False
+
+    def _frame_from_persisted(self, raw: Any) -> dict[str, Any] | None:
+        if not isinstance(raw, dict):
+            return None
+        encodings = raw.get("vibe_encodings") if isinstance(raw.get("vibe_encodings"), dict) else {}
+        encodings = {str(k): str(v) for k, v in encodings.items() if v}
+        file_hash = str(raw.get("file_hash") or "")
+        source_model = str(raw.get("target_model") or raw.get("source_model") or "")
+        image_data = ""
+        thumbnail = ""
+        if file_hash and not raw.get("is_no_image"):
+            try:
+                image_path = self.context._existing_save_path(
+                    "vibe_transfer", source_model, "images", f"{file_hash}.png"
+                )
+                if image_path.exists():
+                    from PIL import Image
+
+                    with Image.open(image_path) as image:
+                        image_data = base64.b64encode(image_to_png_bytes(image.convert("RGBA"))).decode("ascii")
+                        thumbnail = thumbnail_b64(image)
+            except Exception:
+                image_data = ""
+                thumbnail = ""
+        return {
+            "file_hash": file_hash,
+            "file_name": str(raw.get("file_name") or (f"{file_hash}.png" if file_hash else "vibe.png")),
+            "file_path": str(raw.get("file_path") or ""),
+            "image_bytes": b"",
+            "image_data": image_data,
+            "thumbnail": thumbnail,
+            "is_enabled": bool(raw.get("is_enabled")),
+            "is_no_image": bool(raw.get("is_no_image", True)),
+            "is_naid3": "NAID3" in source_model,
+            "reference_strength": _as_float(raw.get("reference_strength"), 0.6),
+            "information_extracted": _as_float(raw.get("information_extracted"), 1.0),
+            "vibe_encodings": encodings,
+            "storage_type": str(raw.get("storage_type") or ""),
+            "source_model": source_model,
+        }
+
+    @staticmethod
+    def _persistable_frame(frame: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "file_hash": str(frame.get("file_hash") or ""),
+            "file_path": str(frame.get("file_path") or ""),
+            "file_name": str(frame.get("file_name") or ""),
+            "reference_strength": _as_float(frame.get("reference_strength"), 0.6),
+            "information_extracted": _as_float(frame.get("information_extracted"), 1.0),
+            "is_enabled": bool(frame.get("is_enabled")),
+            "is_no_image": bool(frame.get("is_no_image")),
+            "target_model": str(frame.get("source_model") or frame.get("target_model") or ""),
+            "storage_type": str(frame.get("storage_type") or ""),
+            "vibe_encodings": {str(k): str(v) for k, v in (frame.get("vibe_encodings") or {}).items() if v},
+        }
+
+    def _persist(self) -> None:
+        context = self.context
+        mode = self._settings_mode()
+        try:
+            frames = [self._persistable_frame(frame) for frame in context.vibe_transfer_frames]
+            payload = {mode: {"normalize_strength": bool(context.vibe_transfer_normalize), "vibe_frames": frames}}
+            path = context._save_path(f"VibeTransferModule_{mode}.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=4), encoding="utf-8")
+        except Exception as exc:
+            print(f"[ERROR] Vibe Transfer settings save failed: {exc}")
 
     @staticmethod
     def _is_float_like(value: Any) -> bool:
@@ -27,8 +144,16 @@ class HeadlessVibeTransferService:
             return False
 
     def disable_all_frames(self) -> None:
+        # 상호배타 cross-disable의 영속 진입점: 미로드 상대도 깨워 디스크의 enabled를
+        # 끄고 저장한다(재시작 시 stale 부활 방지).
+        self._ensure_loaded()
+        changed = False
         for frame in self.context.vibe_transfer_frames:
-            frame["is_enabled"] = False
+            if frame.get("is_enabled"):
+                frame["is_enabled"] = False
+                changed = True
+        if changed:
+            self._persist()
 
     def frame_from_bytes(
         self,
@@ -80,18 +205,19 @@ class HeadlessVibeTransferService:
 
     def module_state(self) -> dict[str, Any]:
         context = self.context
+        self._ensure_loaded()
         frames = []
         enabled_count = 0
         strength_total = 0.0
         for index, frame in enumerate(context.vibe_transfer_frames):
             encodings = frame.get("vibe_encodings") if isinstance(frame.get("vibe_encodings"), dict) else {}
             encoding_keys = sorted(float(key) for key in encodings.keys() if self._is_float_like(key))
-            information_extracted = float(frame.get("information_extracted", 1.0) or 1.0)
+            information_extracted = _as_float(frame.get("information_extracted"), 1.0)
             active_encoding = min(encoding_keys, key=lambda key: abs(key - information_extracted)) if encoding_keys else None
             has_encoding = active_encoding is not None and abs(active_encoding - information_extracted) < 1e-9
             if frame.get("is_enabled") and encodings:
                 enabled_count += 1
-                strength_total += float(frame.get("reference_strength", 0.6) or 0.6)
+                strength_total += _as_float(frame.get("reference_strength"), 0.6)
             frames.append({
                 "index": index,
                 "file_hash": frame.get("file_hash", ""),
@@ -99,7 +225,7 @@ class HeadlessVibeTransferService:
                 "is_enabled": bool(frame.get("is_enabled")),
                 "is_no_image": bool(frame.get("is_no_image")),
                 "is_naid3": context._is_naid3_model(),
-                "reference_strength": float(frame.get("reference_strength", 0.6) or 0.6),
+                "reference_strength": _as_float(frame.get("reference_strength"), 0.6),
                 "information_extracted": information_extracted,
                 "has_encoding": has_encoding,
                 "active_encoding": active_encoding,
@@ -134,6 +260,7 @@ class HeadlessVibeTransferService:
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
+        self._ensure_loaded()
         if key == "upload_image":
             if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
                 return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
@@ -179,6 +306,7 @@ class HeadlessVibeTransferService:
             return context._toast(f"Vibe Transfer action is not available in this runtime: {key}", level="info")
         else:
             return None
+        self._persist()
         return self.module_state()
 
     def scan_storage(self) -> dict[str, Any]:
@@ -367,15 +495,16 @@ class HeadlessVibeTransferService:
 
     def active_params(self) -> dict[str, Any]:
         context = self.context
+        self._ensure_loaded()
         reference_images = []
         reference_strengths = []
         reference_info = []
-        for frame in context.vibe_transfer_frames:
+        for frame in list(context.vibe_transfer_frames):
             encodings = frame.get("vibe_encodings") if isinstance(frame.get("vibe_encodings"), dict) else {}
             if not frame.get("is_enabled") or not encodings:
                 continue
             try:
-                target_ie = float(frame.get("information_extracted", 1.0) or 1.0)
+                target_ie = _as_float(frame.get("information_extracted"), 1.0)
                 closest_key = min((float(key) for key in encodings.keys()), key=lambda key: abs(key - target_ie))
             except Exception:
                 continue
@@ -391,7 +520,7 @@ class HeadlessVibeTransferService:
             if not encoded:
                 continue
             reference_images.append(encoded)
-            reference_strengths.append(float(frame.get("reference_strength", 0.6) or 0.6))
+            reference_strengths.append(_as_float(frame.get("reference_strength"), 0.6))
             reference_info.append(closest_key)
         if not reference_images:
             return {}

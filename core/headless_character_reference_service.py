@@ -12,9 +12,117 @@ from urllib.parse import quote
 from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
 
 
+def _as_float(value: Any, default: float) -> float:
+    """0.0 같은 유효한 0 값을 보존하는 float 변환(누락/None/비수치만 default)."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class HeadlessCharacterReferenceService:
     def __init__(self, context: Any):
         self.context = context
+
+    # ----- 영속 (재시작 복원): CharacterReferenceModule_{mode}.json -----
+    def _settings_mode(self) -> str:
+        return str(self.context.get_api_mode() or "NAI").upper()
+
+    def _ensure_loaded(self) -> None:
+        """첫 접근/모드 변경 시 디스크에서 활성 프레임을 1회 로드한다. 상호배타
+        cross-disable이 미로드 상대를 깨우도록 디스크 enabled 상태까지 복원한다."""
+        context = self.context
+        mode = self._settings_mode()
+        if getattr(context, "_character_reference_frames_loaded_mode", None) == mode:
+            return
+        context._character_reference_frames_loaded_mode = mode
+        context.character_reference_frames = self._load_persisted(mode)
+
+    def _load_persisted(self, mode: str) -> list[dict[str, Any]]:
+        try:
+            path = self.context._existing_save_path(f"CharacterReferenceModule_{mode}.json")
+            if not path.exists():
+                return []
+            data = json.loads(path.read_text(encoding="utf-8"))
+            block = data.get(mode) if isinstance(data, dict) else None
+            if not isinstance(block, dict):
+                block = data if isinstance(data, dict) else {}
+            raw_frames = block.get("frames")
+            frames: list[dict[str, Any]] = []
+            if isinstance(raw_frames, list):
+                for raw in raw_frames:
+                    frame = self._frame_from_persisted(raw)
+                    if frame is not None:
+                        frames.append(frame)
+            return frames
+        except Exception as exc:
+            print(f"[ERROR] Character Reference settings load failed: {exc}")
+            return []
+
+    def _frame_from_persisted(self, raw: Any) -> dict[str, Any] | None:
+        if not isinstance(raw, dict):
+            return None
+        file_hash = str(raw.get("file_hash") or "")
+        ref_type = str(raw.get("reference_type") or "character&style")
+        if ref_type not in {"character&style", "character", "style"}:
+            ref_type = "character&style"
+        image_bytes = b""
+        image_data = ""
+        thumbnail = ""
+        # active_params는 image_data가 필수 → enabled 프레임은 enable 시 save_storage로
+        # storage png가 있으므로 거기서 복원. 없으면 빈값(active_params가 skip).
+        if file_hash:
+            try:
+                image_path = self.context._existing_save_path(
+                    "character_reference", "images", f"{file_hash}.png"
+                )
+                if image_path.exists():
+                    from PIL import Image
+
+                    image_bytes = image_path.read_bytes()
+                    with Image.open(image_path) as image:
+                        image_data = self.image_data(image)
+                        thumbnail = thumbnail_b64(image.convert("RGBA"))
+            except Exception:
+                image_bytes = b""
+                image_data = ""
+                thumbnail = ""
+        return {
+            "file_hash": file_hash,
+            "file_name": str(raw.get("file_name") or (f"{file_hash}.png" if file_hash else "reference.png")),
+            "file_path": str(raw.get("file_path") or ""),
+            "image_bytes": image_bytes,
+            "image_data": image_data,
+            "thumbnail": thumbnail,
+            "is_enabled": bool(raw.get("is_enabled")),
+            "reference_type": ref_type,
+            "strength": _as_float(raw.get("strength"), 1.0),
+            "fidelity": _as_float(raw.get("fidelity"), 0.8),
+        }
+
+    @staticmethod
+    def _persistable_frame(frame: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "file_hash": str(frame.get("file_hash") or ""),
+            "file_name": str(frame.get("file_name") or ""),
+            "file_path": str(frame.get("file_path") or ""),
+            "is_enabled": bool(frame.get("is_enabled")),
+            "reference_type": str(frame.get("reference_type") or "character&style"),
+            "strength": _as_float(frame.get("strength"), 1.0),
+            "fidelity": _as_float(frame.get("fidelity"), 0.8),
+        }
+
+    def _persist(self) -> None:
+        context = self.context
+        mode = self._settings_mode()
+        try:
+            frames = [self._persistable_frame(frame) for frame in context.character_reference_frames]
+            payload = {mode: {"frames": frames}}
+            path = context._save_path(f"CharacterReferenceModule_{mode}.json")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=4), encoding="utf-8")
+        except Exception as exc:
+            print(f"[ERROR] Character Reference settings save failed: {exc}")
 
     def image_data(self, image) -> str:
         from PIL import Image
@@ -82,6 +190,7 @@ class HeadlessCharacterReferenceService:
             }
 
     def module_state(self) -> dict[str, Any]:
+        self._ensure_loaded()
         frames = []
         for index, frame in enumerate(self.context.character_reference_frames):
             frames.append({
@@ -90,8 +199,8 @@ class HeadlessCharacterReferenceService:
                 "file_name": frame.get("file_name", ""),
                 "is_enabled": bool(frame.get("is_enabled")),
                 "reference_type": frame.get("reference_type", "character&style"),
-                "strength": float(frame.get("strength", 1.0) or 1.0),
-                "fidelity": float(frame.get("fidelity", 0.8) or 0.8),
+                "strength": _as_float(frame.get("strength"), 1.0),
+                "fidelity": _as_float(frame.get("fidelity"), 0.8),
                 "thumbnail": frame.get("thumbnail", ""),
             })
         return self.context._module_state_payload("character_reference", {
@@ -101,6 +210,7 @@ class HeadlessCharacterReferenceService:
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
+        self._ensure_loaded()
         if key == "upload_image":
             image_bytes = base64.b64decode(data_url_payload(str(value or "")))
             context.character_reference_frames.append(
@@ -150,6 +260,7 @@ class HeadlessCharacterReferenceService:
             context._disable_all_vibe_frames()
         else:
             return None
+        self._persist()
         return self.module_state()
 
     def scan_storage(self) -> dict[str, Any]:
@@ -180,14 +291,22 @@ class HeadlessCharacterReferenceService:
         return {"type": "storage_list", "module_id": "character_reference", "items": items}
 
     def disable_all_frames(self) -> None:
+        # 상호배타 cross-disable의 영속 진입점(미로드 상대도 깨워 디스크 enabled 차단).
+        self._ensure_loaded()
+        changed = False
         for frame in self.context.character_reference_frames:
-            frame["is_enabled"] = False
+            if frame.get("is_enabled"):
+                frame["is_enabled"] = False
+                changed = True
+        if changed:
+            self._persist()
 
     def active_params(self) -> dict[str, Any]:
         context = self.context
+        self._ensure_loaded()
         if not context._is_naid45_model():
             return {}
-        enabled = [frame for frame in context.character_reference_frames if frame.get("is_enabled")]
+        enabled = [frame for frame in list(context.character_reference_frames) if frame.get("is_enabled")]
         if not enabled:
             return {}
         descriptions = []
@@ -208,8 +327,8 @@ class HeadlessCharacterReferenceService:
             })
             images.append(image_data)
             ie.append(1)
-            strength = round(max(0.0, min(1.0, float(frame.get("strength", 1.0) or 1.0))) * 20) / 20.0
-            fidelity = 1.0 - max(0.0, min(1.0, float(frame.get("fidelity", 0.8) or 0.8)))
+            strength = round(max(0.0, min(1.0, _as_float(frame.get("strength"), 1.0))) * 20) / 20.0
+            fidelity = 1.0 - max(0.0, min(1.0, _as_float(frame.get("fidelity"), 0.8)))
             fidelities.append(round(fidelity * 20) / 20.0)
             strengths.append(strength)
         if not descriptions:

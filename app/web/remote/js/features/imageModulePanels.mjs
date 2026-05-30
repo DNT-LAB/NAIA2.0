@@ -837,7 +837,18 @@ export function createImageModulePanels({
   `;
   }
 
+  // Storage 항목 클릭 적용은 ~500ms 지연돼 반영되므로, 같은 항목을 빠르게 다시
+  // 누르면(더블클릭) 중복 프레임이 올라온다. 같은 키의 재적용을 짧게 디바운스한다.
+  let _lastStorageApply = {key: '', t: 0};
+  function _storageApplyGuard(key) {
+    const now = Date.now();
+    if (key === _lastStorageApply.key && now - _lastStorageApply.t < 800) return false;
+    _lastStorageApply = {key, t: now};
+    return true;
+  }
+
   function applyCharRefStorage(fileHash) {
+    if (!_storageApplyGuard('cr:' + fileHash)) return;
     setModuleParam('character_reference', 'apply_storage', fileHash);
     setTimeoutFn(() => openModule('character_reference', {forceOpen: true}), 500);
   }
@@ -885,6 +896,7 @@ export function createImageModulePanels({
   }
 
   function applyVibeStorage(model, fileHash, ieValue) {
+    if (!_storageApplyGuard('vt:' + model + '|' + fileHash + '|' + ieValue)) return;
     setModuleParam('vibe_transfer', 'apply_storage', model + '|' + fileHash + '|' + ieValue);
   }
 

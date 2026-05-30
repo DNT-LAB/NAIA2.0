@@ -923,7 +923,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260526-capability-honesty1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260530-storage-dblclick1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,

@@ -2145,6 +2145,11 @@ function onInitComplete() {
   if (currentModuleId && !isModuleStateGuarded(currentModuleId)) {
     requestModuleState(currentModuleId);
   }
+  // 재시작/재연결 시 NAI 전용 도구(character/charref/vibe) 배지·Activated 요약 하이드레이션:
+  // 모듈을 열지 않아도 복원된 활성 상태가 배지에 즉시 반영되도록 접속 직후 module_state 요청.
+  for (const naiToolId of ['character', 'character_reference', 'vibe_transfer']) {
+    if (naiToolId !== currentModuleId) requestModuleState(naiToolId);
+  }
   scheduleInitialHistoryRefresh();
   scheduleInitialStateRefresh();
   const cachedPe = moduleStateCache.get('prompt_engineering');

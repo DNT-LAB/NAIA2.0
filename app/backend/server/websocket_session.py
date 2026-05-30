@@ -156,17 +156,6 @@ async def send_startup_messages(
         client_host=client_host,
     ):
         await ws.send_text(json.dumps(message, ensure_ascii=False))
-    # NAI 전용 도구(character/character_reference/vibe_transfer) 배지·Activated 요약
-    # 하이드레이션: 재시작 후 복원된 활성 상태가 '모듈을 열기 전에도' 배지에 반영되도록
-    # 접속 시 각 module_state를 전송한다(미전송이면 모듈을 열어야만 배지가 갱신됐음).
-    for module_id in ("character", "character_reference", "vibe_transfer"):
-        try:
-            await ws.send_text(json.dumps(
-                context.module_state_payload(module_id, client_host),
-                ensure_ascii=False,
-            ))
-        except Exception:
-            pass
     await ws.send_text(json.dumps({"type": "lazy_indices_ready"}))
 
 

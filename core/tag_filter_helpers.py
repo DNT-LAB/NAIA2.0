@@ -346,7 +346,7 @@ def apply_tag_filters(
     })
 
     # 8. remove_meta_tags (메타 태그 제거)
-    enabled = checkbox_options.get("remove_meta_tags", False)
+    enabled = checkbox_options.get("remove_meta_tags", True)
     before_len = len(removed_tags)
     if enabled:
         meta_set = filter_manager._meta_set

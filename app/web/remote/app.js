@@ -959,17 +959,16 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260505-search-parquet-v4')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260530-refine-tab5')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
-      panel: refinePanel,
-      modulePopup,
+      container: refineView,
       escHtml,
       getWs: () => ws,
       WebSocket,
-      closeAuxiliaryPopups,
-      positionFloatingPanel,
+      enterMode: refineEnterMode,
+      exitMode: refineExitMode,
     });
   })
   .catch(error => {
@@ -1005,7 +1004,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260530-daterange-slider4')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260530-refine-revert')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -2194,6 +2193,7 @@ const wsMessageHandlers = {
   search_progress: onSearchProgress,
   bucket_dates: onBucketDates,
   depth_state: onDepthState,
+  depth_sample: onDepthSample,
   tag_search_result: onTagSearchResult,
   tag_lookup_result: onTagLookupResult,
   autocomplete_result: onAutocompleteResult,
@@ -5167,6 +5167,8 @@ function openModule(moduleId, options = {}) {
   if (imageModulePanels && moduleId !== 'vibe_transfer') {
     imageModulePanels.closeAllVibeClusterPanels();
   }
+  // Leaving (or re-clicking) any module exits refine-mode first.
+  if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close();
   // Toggle: same module clicked again → close
   if (currentModuleId === moduleId && modulePopup.classList.contains('open')) {
     if (options.forceOpen) {
@@ -5239,6 +5241,7 @@ function closeModule(options = {}) {
     if (window.opener) window.close();
     return;
   }
+  if (refinePanelControl && refinePanelControl.isOpen()) refinePanelControl.close();
   if (currentModuleId === 'img2img' && img2imgPanel) img2imgPanel.closeMaskEditor();
   if (currentModuleId === 'vibe_transfer' && imageModulePanels && !options.keepVibeCluster) {
     imageModulePanels.closeAllVibeClusterPanels();
@@ -5247,6 +5250,7 @@ function closeModule(options = {}) {
   if (currentModuleId === 'prompt_engineering') flushPromptEngineeringEdits();
   else flushPendingModuleEdit(currentModuleId);
   modulePopup.classList.remove('open');
+  modulePopup.classList.remove('refine-mode');
   modulePopup.classList.remove('module-popup-e621');
   modulePopup.classList.remove('module-popup-img2img');
   modulePopup.classList.remove('module-popup-conditional');
@@ -5355,7 +5359,6 @@ function closeAuxiliaryPopups(exceptPanel = null, options = {}) {
       closeChunkPanel();
     }
   }
-  if (exceptPanel !== refinePanel && refinePanelControl && refinePanelControl.isOpen()) closeRefine();
   if (exceptPanel !== pePresetAddPanel && promptEngineeringPopups?.isOpen('presetAdd')) closePePresetAddPanel();
   if (exceptPanel !== pePresetManagePanel && promptEngineeringPopups?.isOpen('presetManage')) closePePresetManagePanel();
   if (exceptPanel !== peE621Panel && promptEngineeringPopups?.isOpen('e621')) closePeE621Panel();
@@ -6371,13 +6374,12 @@ function restoreSnapshot() {
   if (searchPanelControl) searchPanelControl.restoreSnapshot();
 }
 
-// ---- Refine (Depth Search) panel ----
-const refinePanel = $('refinePanel');
+// ---- Refine (Depth Search) tab view (inside #modulePopup) ----
+const refineView = $('refineView');
 
 function getFloatingPanelWidth(panel) {
   if (panel === chunkPanel) return 420;
   if (panel === peDebugPanel) return 520;
-  if (panel === refinePanel) return 400;
   if (panel?.classList?.contains('vibe-cluster-popover')) return 560;
   if (panel?.classList?.contains('vibe-cluster-save-popover')) return 560;
   if (panel?.classList?.contains('wc-editor-popup')) return 560;
@@ -6446,7 +6448,6 @@ function positionFloatingPanel(panel, anchorEl = modulePopup) {
 }
 
 function relayoutFloatingPanels() {
-  positionFloatingPanel(refinePanel, modulePopup);
   if (chunkPanelControl) chunkPanelControl.relayout();
   positionFloatingPanel(pePresetAddPanel, modulePopup);
   positionFloatingPanel(pePresetManagePanel, modulePopup);
@@ -6457,7 +6458,17 @@ function relayoutFloatingPanels() {
   if (imageModulePanels) imageModulePanels.relayoutVibeClusterPanel();
 }
 
+function refineEnterMode() {
+  modulePopup.classList.add('refine-mode');
+}
+
+function refineExitMode() {
+  modulePopup.classList.remove('refine-mode');
+}
+
 function openRefine() {
+  // Refine is a tab of the Search surface — only enter from the search module.
+  if (currentModuleId !== 'search') return;
   if (refinePanelControl) refinePanelControl.open();
 }
 
@@ -6465,8 +6476,24 @@ function closeRefine() {
   if (refinePanelControl) refinePanelControl.close();
 }
 
+function refineBack() {
+  closeRefine();
+}
+
+function refineSample() {
+  if (refinePanelControl) refinePanelControl.refineSample();
+}
+
+function refineGenerate() {
+  if (refinePanelControl) refinePanelControl.refineGenerate();
+}
+
 function onDepthState(m) {
   if (refinePanelControl) refinePanelControl.onDepthState(m);
+}
+
+function onDepthSample(m) {
+  if (refinePanelControl) refinePanelControl.onDepthSample(m);
 }
 
 function depthFilter() {

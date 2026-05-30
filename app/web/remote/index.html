@@ -199,6 +199,7 @@
     </div>
   </div>
   <div class="module-popup-body" id="modulePopupBody"></div>
+  <div class="refine-view" id="refineView"></div>
 </div>
 
 <!-- Hires Preset Overlay Editor -->
@@ -229,14 +230,7 @@
   </div>
 </div>
 
-<!-- Refine (Depth Search) floating panel -->
-<div class="refine-popup" id="refinePanel">
-  <div class="module-popup-header">
-    <span class="module-popup-title">심층검색</span>
-    <button class="history-close" onclick="closeRefine()">&times;</button>
-  </div>
-  <div class="refine-body"></div>
-</div>
+<!-- Refine (심층검색) is now a tab of the module popup (#refineView) — see refinePanel.mjs -->
 
 <!-- Prompt Engineering floating panels -->
 <div class="pe-popup" id="pePresetAddPanel">
@@ -1032,6 +1026,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260530-daterange-slider4"></script>
+<script src="app.js?v=20260530-refine-tab5"></script>
 </body>
 </html>

@@ -26,6 +26,19 @@ async def _send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
     await ws.send_text(json.dumps(payload, ensure_ascii=False))
 
 
+def _staging_frame(item: Any):
+    """Each staged item is a {query, exclude, df} dict (Dev0714 staging model).
+    Tolerate a bare frame for any legacy in-memory item."""
+    if isinstance(item, dict):
+        return item.get("df")
+    return item
+
+
+def _staging_item_count(item: Any) -> int:
+    frame = _staging_frame(item)
+    return 0 if frame is None or getattr(frame, "empty", True) else int(len(frame))
+
+
 def depth_payload(context: WebSessionContext) -> dict[str, Any]:
     state = getattr(context, "depth_state", None)
     if not isinstance(state, dict):
@@ -41,10 +54,15 @@ def depth_payload(context: WebSessionContext) -> dict[str, Any]:
         "exclude": state.get("exclude", ""),
         "ratings": state.get("ratings", {rating: True for rating in "eqsg"}),
         "filters": state.get("filters", {}),
-        "staging_count": sum(
-            0 if item is None or getattr(item, "empty", True) else int(len(item))
+        "staging_count": sum(_staging_item_count(item) for item in state.get("staging", [])),
+        "staging": [
+            {
+                "query": item.get("query", "") if isinstance(item, dict) else "",
+                "exclude": item.get("exclude", "") if isinstance(item, dict) else "",
+                "count": _staging_item_count(item),
+            }
             for item in state.get("staging", [])
-        ),
+        ],
         "runtime": "web",
     }
 
@@ -56,11 +74,60 @@ def _numeric_column(frame: Any, name: str) -> str | None:
         "id_min": ("id",),
         "id_max": ("id",),
         "score_min": ("score",),
+        "score_max": ("score",),
     }.get(name, ())
     for column in candidates:
         if column in frame.columns:
             return column
     return None
+
+
+def _sample_field(row: Any, column: str, *, as_int: bool = False) -> Any:
+    """NaN-safe extraction of a single preview field from a sampled row.
+
+    Missing column → "" (or 0 for ids). NaN/NaT → "" (or 0 for ids). Never lets
+    ``str(NaN)`` leak the literal string ``"nan"`` into the preview payload.
+    """
+    import pandas as pd
+
+    if column not in getattr(row, "index", ()):
+        return 0 if as_int else ""
+    value = row.get(column)
+    try:
+        if pd.isna(value):
+            return 0 if as_int else ""
+    except (TypeError, ValueError):
+        pass
+    if as_int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+    return str(value)
+
+
+def _strip_meta_tags(general: str, meta_set: Any) -> str:
+    """Drop meta-category tags (artist name, signature, watermark, web address,
+    twitter/patreon username, dated, ...) from the PREVIEW general for a clean
+    peek. Display-only: the retained ``state['sample']`` full row is untouched, so
+    [생성] still honours the user's Prompt Engineering ``remove_meta_tags`` setting."""
+    if not general or not meta_set:
+        return general
+    kept = [tag.strip() for tag in str(general).split(",")]
+    kept = [tag for tag in kept if tag and tag not in meta_set]
+    return ", ".join(kept)
+
+
+def _depth_sample_payload(row: Any, meta_set: Any = None) -> dict[str, Any]:
+    return {
+        "type": "depth_sample",
+        "ok": True,
+        "id": _sample_field(row, "id", as_int=True),
+        "artist": _sample_field(row, "artist"),
+        "character": _sample_field(row, "character"),
+        "copyright": _sample_field(row, "copyright"),
+        "general": _strip_meta_tags(_sample_field(row, "general"), meta_set),
+    }
 
 
 def apply_depth_filters(frame: Any, command: dict[str, Any]):
@@ -85,7 +152,7 @@ def apply_depth_filters(frame: Any, command: dict[str, Any]):
         except (TypeError, ValueError):
             continue
         filtered = filtered[filtered[column].astype(float) >= value]
-    for name in ("token_max", "id_max"):
+    for name in ("token_max", "id_max", "score_max"):
         spec = filters.get(name) if isinstance(filters.get(name), dict) else {}
         if not spec.get("enabled"):
             continue
@@ -171,15 +238,36 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
     elif action == "stage":
         current = state.get("current")
         if current is not None and not getattr(current, "empty", True):
-            state.setdefault("staging", []).append(current.copy())
+            # Dev0714 staging model: keep the query/exclude that produced this
+            # snapshot so the staging board can label each item as a search pair.
+            state.setdefault("staging", []).append({
+                "query": str(state.get("query", "") or ""),
+                "exclude": str(state.get("exclude", "") or ""),
+                "df": current.copy(),
+            })
     elif action == "merge_staging":
         import pandas as pd
 
-        frames = [item for item in state.get("staging", []) if item is not None and not getattr(item, "empty", True)]
+        frames = [
+            frame
+            for frame in (_staging_frame(item) for item in state.get("staging", []))
+            if frame is not None and not getattr(frame, "empty", True)
+        ]
         if frames:
             state["current"] = pd.concat(frames, ignore_index=True).drop_duplicates()
     elif action == "clear_staging":
         state["staging"] = []
+    elif action == "sample":
+        current = state.get("current")
+        if current is None or getattr(current, "empty", True):
+            return {"type": "depth_sample", "ok": False, "reason": "empty"}, None
+        row = current.sample(n=1).iloc[0]
+        # Retain the FULL sampled row so depth_generate can build the exact
+        # source_row override without re-sampling (and without mutating any
+        # of the 3 depth frames). Only counts are serialized by depth_payload.
+        state["sample"] = row
+        meta_set = getattr(getattr(context, "filter_data_manager", None), "_meta_set", None)
+        return _depth_sample_payload(row, meta_set), None
     elif action == "export":
         current = state.get("current")
         if current is not None and not getattr(current, "empty", True):

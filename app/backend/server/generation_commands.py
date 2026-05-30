@@ -21,6 +21,7 @@ GENERATION_COMMAND_TYPES = {
     "bootstrap_random",
     "random",
     "generate",
+    "depth_generate",
 }
 
 
@@ -217,6 +218,129 @@ async def handle_generate_command(
     await _send_generation_queued_state(ws, context)
     if context.headless_generation_execute_enabled:
         start_generation_runner(context, clients)
+
+
+def _refine_source_row_data(row: Any) -> dict[str, Any]:
+    """Convert a sampled depth row (pandas Series) into a JSON/NaN-safe dict for
+    ``_source_row_data`` so the queued GenerationRequest.source_row reconstructs
+    the *sampled* row rather than the prior ``context.current_source_row``
+    (which generate_from_source_row(update_context=False) restores before the
+    enqueue boundary)."""
+    import pandas as pd
+
+    data: dict[str, Any] = {}
+    try:
+        raw = row.to_dict()
+    except Exception:
+        return data
+    for key, value in raw.items():
+        try:
+            if pd.isna(value):
+                data[str(key)] = None
+                continue
+        except (TypeError, ValueError):
+            pass
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            data[str(key)] = value
+        else:
+            data[str(key)] = str(value)
+    return data
+
+
+async def handle_depth_generate_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    command: dict[str, Any] | None = None,
+    *,
+    start_generation_runner: GenerationRunnerStarter,
+) -> None:
+    """Generate one image from the Refine (심층검색) sampled row.
+
+    The sampled row is assembled through PromptProcessor/PE via
+    ``generate_from_source_row(update_context=False)`` so the *main* prompt box is
+    never overwritten and no ``prompt_generated`` is broadcast. The assembled
+    prompt is then queued through ``handle_generate_command`` (shared enqueue/ack
+    path) with the sampled row carried as ``_source_row_data`` and a Refine queue
+    label, reusing the event_preset override pattern.
+    """
+    command = command if isinstance(command, dict) else {}
+
+    state = context.depth_state if isinstance(getattr(context, "depth_state", None), dict) else None
+    row = state.get("sample") if state is not None else None
+    if row is None and state is not None:
+        current = state.get("current")
+        if current is not None and not getattr(current, "empty", True):
+            row = current.sample(n=1).iloc[0]
+            state["sample"] = row
+    if row is None:
+        await _send_json(ws, {"type": "depth_sample", "ok": False, "reason": "empty"})
+        return
+
+    active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
+    request_id = str(
+        command.get("random_request_id")
+        or command.get("requestId")
+        or f"refine-{uuid.uuid4().hex}"
+    )
+
+    # PE assembly with NO side effects on the main prompt context:
+    # update_context=False restores current_source_row/current_prompt_context/
+    # prompt_text/negative_prompt_text and skips the prompt_generated publish.
+    result = await asyncio.to_thread(
+        random_service(context).generate_from_source_row,
+        row,
+        active_ratings=active_ratings,
+        random_request_id=request_id,
+        source="refine_sample",
+        update_context=False,
+    )
+    await persist_prompt_engineering_settings(context)
+    if not result.success:
+        await _send_json(ws, {
+            "type": "toast",
+            "level": "error",
+            "message": result.error or "Refine generation failed",
+        })
+        return
+
+    # Reuse the event_preset override pattern EXACTLY: carry the sampled row as
+    # _source_row_data so HeadlessGenerationService._source_row() reconstructs the
+    # sampled row (not the restored prior current_source_row), tag the queue source.
+    gen_overrides: dict[str, Any] = {
+        "input": result.prompt,
+        "_raw_input": result.prompt,
+        "_source_row_data": _refine_source_row_data(row),
+        "_remote_queue_source": "Refine",
+        "_remote_queue_label": "Refine",
+    }
+    name = getattr(row, "name", None)
+    if name is not None:
+        gen_overrides["_source_name"] = str(name)
+    if result.detected_resolution:
+        width, height = result.detected_resolution
+        gen_overrides["width"] = width
+        gen_overrides["height"] = height
+        gen_overrides["resolution"] = f"{width} x {height}"
+
+    gen_command: dict[str, Any] = {
+        "type": "generate",
+        "prompt": result.prompt,
+        "negative_prompt": context.negative_prompt_text,
+        "request_id": f"{request_id}:generate",
+        "overrides": gen_overrides,
+    }
+    if result.prompt_run_id:
+        gen_command["prompt_run_id"] = result.prompt_run_id
+
+    # Delegate enqueue/queue/ack to the shared generate handler (no prompt_generated).
+    await handle_generate_command(
+        ws,
+        context,
+        clients,
+        gen_command,
+        start_generation_runner=start_generation_runner,
+    )
 
 
 async def enqueue_prompt_from_module(
@@ -441,7 +565,7 @@ def register_generation_rest_routes(
         except (TypeError, ValueError):
             timeout = 30.0
         timeout = min(max(timeout, 1.0), 300.0)
-        active_ratings = _active_ratings_from_command(command) or {"g", "s", "q", "e"}
+        active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
         previous_peng_override = getattr(context, "session_p_eng_override", None)
         if peng_override is not None:
             context.session_p_eng_override = peng_override

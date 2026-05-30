@@ -26,6 +26,7 @@ from app.backend.server.generation_commands import (
     enqueue_headless_generation_commands,
     enqueue_prompt_from_module,
     handle_bootstrap_random_command,
+    handle_depth_generate_command,
     handle_generate_command,
     handle_random_command,
 )
@@ -253,6 +254,14 @@ async def handle_json_command(
             )
         elif command_type == "random":
             await handle_random_command(
+                ws,
+                context,
+                clients,
+                command,
+                start_generation_runner=start_generation_runner,
+            )
+        elif command_type == "depth_generate":
+            await handle_depth_generate_command(
                 ws,
                 context,
                 clients,

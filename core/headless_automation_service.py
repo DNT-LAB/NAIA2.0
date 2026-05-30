@@ -80,6 +80,11 @@ class HeadlessAutomationService:
         settings = settings_from_automation_state(state)
         context._automation_settings = settings
         save_automation_settings(settings, context._save_path("AutomationModule.json"))
+        # 지속 자동화를 방금 켰고 Auto Gen이 이미 켜져 있으면 자동 시작(Auto Gen이 트리거).
+        if key == "persist_automation" and context._coerce_bool(value):
+            started = self.maybe_autostart()
+            if isinstance(started, dict):
+                return started
         return self.state()
 
     def start(self) -> dict[str, Any]:
@@ -146,6 +151,19 @@ class HeadlessAutomationService:
             if options_message:
                 state["_headless_extra_messages"] = [options_message]
         return state
+
+    def maybe_autostart(self) -> dict[str, Any] | None:
+        """지속 자동화: Auto Gen이 켜져 있고 persist_automation이 켜져 있으며 아직
+        실행 중이 아니면 자동화를 자동 시작한다(Auto Gen이 핵심 트리거). 완료 시
+        finish가 Auto Gen을 끄므로, 다시 켜기 전까지 재시작되지 않는다(무한 루프 없음)."""
+        if self.is_running():
+            return None
+        settings = self._settings()
+        if not settings.get("persist_automation"):
+            return None
+        if not bool(self.context.get_options().get("auto_generate", False)):
+            return None
+        return self.start()
 
     def is_running(self, run_id: str | None = None) -> bool:
         runtime = self._runtime(create=False)
@@ -228,19 +246,11 @@ class HeadlessAutomationService:
         }
 
     def finish(self, run_id: str, *, reason: str = "complete", error: str = "") -> dict[str, Any]:
-        settings = self._settings()
-        # 지속 자동화(자동 재무장): 자연 완료(횟수/타이머)에 한해 persist_automation이
-        # 켜져 있으면 정지하지 않고 같은 run_id로 카운터/타이머를 리셋해 계속 돌린다.
-        # 명시적 stop·error는 항상 정지한다(error는 무한 루프 방지).
-        if not error and reason in {"count_complete", "timer_complete"} and settings.get("persist_automation"):
-            if self._rearm_runtime(run_id, settings):
-                return {
-                    "continue": True,
-                    "messages": [],
-                    "delay_seconds": self.next_delay_seconds(),
-                    "hold_prompt": False,
-                }
+        # 완료(횟수/타이머)·정지·오류는 항상 자동화를 멈추고 Auto Gen을 해제한다.
+        # 지속 자동화는 '완료 후 재무장'이 아니라 'Auto Gen을 다시 켜면 재시작'이므로
+        # 여기서 재무장하지 않는다(무한 루프 방지). → maybe_autostart 참조.
         self._finish_runtime(run_id, reason=reason)
+        settings = self._settings()
         messages: list[dict[str, Any]] = []
         # Disable Auto Gen when the controller finishes so a later manual
         # generate does not silently keep looping (future01 parity).
@@ -338,28 +348,6 @@ class HeadlessAutomationService:
         runtime["is_running"] = False
         runtime["finish_reason"] = reason
         runtime["delay_until_monotonic"] = None
-
-    def _rearm_runtime(self, run_id: str, settings: dict[str, Any]) -> bool:
-        """Re-arm a naturally-completed run in place (same run_id) for 지속 자동화.
-
-        Keeps is_running/Auto Gen engaged and resets the count/timer window so the
-        automation loops. Returns False when ``run_id`` is not the live run.
-        """
-        runtime = self._runtime(create=False)
-        if not runtime or str(runtime.get("run_id") or "") != str(run_id or ""):
-            return False
-        automation_type = str(runtime.get("automation_type") or "unlimited")
-        if automation_type == "count":
-            runtime["remaining_count"] = int(settings.get("count_limit") or 0)
-        elif automation_type == "timer":
-            runtime["ends_at_monotonic"] = (
-                time.monotonic() + max(1, int(settings.get("timer_minutes") or 1)) * 60
-            )
-        runtime["repeat_progress"] = 0
-        runtime["delay_until_monotonic"] = None
-        runtime["is_running"] = True
-        runtime["finish_reason"] = ""
-        return True
 
     def _credential_error(self) -> str:
         from core.headless_generation_service import TOKEN_KEYS

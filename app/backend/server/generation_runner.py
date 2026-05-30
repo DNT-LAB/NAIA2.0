@@ -116,9 +116,6 @@ async def _run_automation_timer_watcher(context: WebSessionContext, clients: set
                 await _broadcast_automation_state(context, clients)
                 for message in policy.get("messages", []):
                     await broadcast_json(clients, message)
-                if policy.get("continue"):
-                    # 지속 자동화: 재무장됨 — 새 timer window를 계속 감시한다.
-                    continue
                 return
             await asyncio.sleep(min(max(remaining, 0.2), 1.0))
     finally:

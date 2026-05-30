@@ -66,9 +66,9 @@ export function createAutomationPanel({
         </label>
       </div>
       <div>
-        <label class="mod-checkbox-item" data-naia-guide="완료(횟수/타이머 도달)로 멈춘 뒤 같은 설정으로 자동화를 다시 시작해 계속 돌립니다.\\n\\n[정지]를 누르면 실제로 멈추며, 이 체크는 직접 끌 때까지 유지됩니다(오류로 멈춘 경우엔 재시작하지 않습니다).">
+        <label class="mod-checkbox-item" data-naia-guide="Auto Gen을 켜면 저장된 자동화 설정(종료 조건·딜레이 등)으로 자동화가 함께 시작됩니다 — Auto Gen이 트리거입니다.\\n\\n완료(횟수/타이머 도달)·정지 시 자동화와 Auto Gen이 모두 꺼지며 무한 생성되지 않습니다. 다시 돌리려면 Auto Gen을 다시 켜세요.">
           <input type="checkbox" ${state.persist_automation ? 'checked' : ''} oninput="setModuleParam('automation','persist_automation',String(this.checked))">
-          <span class="mod-checkbox-label">지속 자동화 (자동 재무장)</span>
+          <span class="mod-checkbox-label">지속 자동화 (Auto Gen 연동)</span>
         </label>
       </div>
       <div style="display:flex;gap:8px">

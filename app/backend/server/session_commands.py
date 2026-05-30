@@ -81,6 +81,32 @@ async def send_sync_messages(
         await ws.send_text(json.dumps(message, ensure_ascii=False))
 
 
+async def _maybe_autostart_automation(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    *,
+    broadcast_json: BroadcastJson,
+) -> None:
+    """Auto Gen을 켤 때 지속 자동화(persist)가 켜져 있으면 자동화를 자동 시작한다.
+
+    Auto Gen이 핵심 트리거다. start는 종료 조건을 무장하고 Auto Gen을 엔게이지만 하므로
+    (생성은 사용자 생성으로 점화) 여기서는 무장된 module_state와 타이머 watcher만 동기화한다.
+    완료되면 finish가 Auto Gen을 끄므로 다시 켜기 전까지 재시작되지 않는다(무한 루프 없음).
+    """
+    state = context._automation_service().maybe_autostart()
+    if not isinstance(state, dict):
+        return
+    extra = state.pop("_headless_extra_messages", [])
+    if isinstance(extra, list):
+        for message in extra:
+            if isinstance(message, dict):
+                await broadcast_json(clients, message)
+    await broadcast_json(clients, state)
+    from app.backend.server.generation_runner import ensure_automation_timer_watcher
+
+    ensure_automation_timer_watcher(context, clients)
+
+
 async def handle_session_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -96,8 +122,12 @@ async def handle_session_command(
         await send_sync_messages(ws, context, client_host, run_in_thread=run_in_thread)
         return True
     if command_type == "set_option":
-        context.set_option(str(command.get("key") or ""), command.get("value"))
+        option_key = str(command.get("key") or "")
+        context.set_option(option_key, command.get("value"))
         await broadcast_json(clients, {"type": "options", **context.get_options()})
+        # 지속 자동화: Auto Gen을 켜면(+persist) 자동화를 자동 시작(Auto Gen이 트리거).
+        if option_key == "auto_generate" and context._coerce_bool(command.get("value")):
+            await _maybe_autostart_automation(context, clients, broadcast_json=broadcast_json)
         return True
     if command_type == "set_mode":
         await _handle_set_mode(

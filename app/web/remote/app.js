@@ -818,7 +818,7 @@ const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats
   .catch(error => {
     console.error('Failed to initialize session generation stats module', error);
   });
-const automationPanelReady = import('./js/features/automationPanel.mjs?v=20260530-automation-enh1')
+const automationPanelReady = import('./js/features/automationPanel.mjs?v=20260530-automation-enh2')
   .then(({createAutomationPanel}) => {
     automationPanel = createAutomationPanel({
       document,
@@ -4984,7 +4984,7 @@ const MODULE_OVERVIEW_GUIDES = {
     '자동화는 Auto Generate(자동 생성)를 제어하는 컨트롤러입니다. [시작]을 누르면 자동 생성이 켜지고, 설정한 종료 조건에 도달하면 자동으로 꺼집니다 — 자동화 자체가 이미지를 생성하지 않고, 생성은 자동 생성 루프를 통해 진행됩니다.',
     '종료 조건 — 무제한: 직접 [정지]할 때까지 계속 / 타이머: 지정한 시간(분)이 지나면 종료 / 횟수: 지정한 장수를 생성하면 종료.',
     '반복 횟수 — 같은 프롬프트로 N회 생성한 뒤 다음 프롬프트로 넘어갑니다(시드는 매번 바뀌어 변주가 생깁니다). 값은 저장되지 않고 항상 1로 시작합니다.',
-    '지속 자동화 — 완료로 멈춘 뒤 같은 설정으로 자동 재시작해 계속 돌립니다. [정지]나 오류로 멈춘 경우엔 재시작하지 않으며, 이 옵션은 직접 끌 때까지 유지됩니다.',
+    '지속 자동화 — Auto Gen을 켜면 저장된 자동화 설정으로 자동 시작합니다(Auto Gen이 트리거). 완료(횟수/타이머)되면 자동화와 Auto Gen이 모두 꺼지므로 무한 생성되지 않으며, 다시 돌리려면 Auto Gen을 다시 켜면 됩니다.',
   ].join('\n\n'),
 };
 

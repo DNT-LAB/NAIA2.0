@@ -91,7 +91,9 @@ def search_tag_archive_frame(
     exclude: str,
     ratings: set[str],
 ):
+    import os
     import pandas as pd
+    from concurrent.futures import ThreadPoolExecutor
     from core.search_engine import SearchEngine
 
     search_params = {
@@ -102,12 +104,26 @@ def search_tag_archive_frame(
         "rating_q": "q" in ratings,
         "rating_e": "e" in ratings,
     }
+    # SearchEngine is stateless -> safe to share across worker threads. parquet
+    # reads release the GIL, so a ThreadPool restores the future01 "150 bucket"
+    # parallelism without multiprocessing.Pool's Windows/spawn pickling risk.
     engine = SearchEngine()
+
+    def _search_one(item: tuple[Path, str]):
+        path, _label = item
+        return engine.search_in_file(str(path), search_params)
+
     frames: list[Any] = []
-    for path, _label in sources:
-        result = engine.search_in_file(str(path), search_params)
-        if result is not None and not getattr(result, "empty", True):
-            frames.append(result)
+    if sources:
+        max_workers = min(len(sources), max(2, min(8, os.cpu_count() or 4)))
+        with ThreadPoolExecutor(
+            max_workers=max_workers, thread_name_prefix="tag-archive-search"
+        ) as executor:
+            # executor.map yields results in INPUT order -> identical frame order
+            # to the prior sequential loop -> byte-identical concat result.
+            for result in executor.map(_search_one, sources):
+                if result is not None and not getattr(result, "empty", True):
+                    frames.append(result)
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
@@ -333,6 +349,12 @@ def load_or_merge_custom_parquet(
     import pandas as pd
 
     frame = pd.read_parquet(path)
+    # Load-time index normalization (mirrors SearchEngine.search_in_file): a
+    # foreign-imported parquet may ship a scrambled / non-unique index, which
+    # would corrupt tags_string via groupby('index') in the search DSL. The real
+    # id is the 'id' column, so the index carries no meaning — drop it.
+    if not isinstance(frame.index, pd.RangeIndex):
+        frame = frame.reset_index(drop=True)
     if merge:
         current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
         if current is not None and not current.empty:

@@ -1005,7 +1005,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260527-rating-inflight-lock1')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260530-daterange-slider4')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -2192,6 +2192,7 @@ const wsMessageHandlers = {
   search_state: onSearchState,
   rating_update: onRatingUpdate,
   search_progress: onSearchProgress,
+  bucket_dates: onBucketDates,
   depth_state: onDepthState,
   tag_search_result: onTagSearchResult,
   tag_lookup_result: onTagLookupResult,
@@ -4971,6 +4972,13 @@ const MODULE_OVERVIEW_GUIDES = {
     'Preprocessing Options에서는 랜덤 프롬프트에 포함될 요소를 결정할 수 있습니다. 각 기능을 확인해 보세요.',
     '※ WC Solo 모드에서는 Auto-Hide와 Preprocessing Option이 적용되지 않고, {Prefix Prompt}·{Postfix Prompt}와 와일드카드만으로 구성됩니다.',
   ].join('\n\n'),
+  search: [
+    'Prompt Search — 태그·키워드로 아카이브 전체를 검색해 생성 풀(결과셋)을 새로 만듭니다. Quick(태그 필터)이 기존 결과셋을 가볍게 좁히는 것과 달리, 이쪽은 무거운 전체 검색이라 [검색] 버튼으로 명시적으로 실행합니다.',
+    'Search Keyword(포함) 문법 — 쉼표로 구분한 태그를 모두 포함(AND). {a|b|c} = 그 그룹 중 하나라도 포함(OR). *tag = 정확히 그 태그만(부분일치 없이 완전 일치). 예: 1girl, {smile|grin}, *solo',
+    'Exclude Keyword(제외) 문법 — 포함과 문법이 다릅니다. tag = 그 문자열이 든 행을 제외(부분일치 — 예: girl 은 1girl·cowgirl 까지 제외). ~tag = 정확히 그 태그만 제외(예: ~girl 은 1girl 을 남김). ※ 제외 칸에서는 {a|b}·*tag 는 동작하지 않습니다.',
+    '공통 — 태그의 _(언더바)는 공백으로 처리됩니다. 검색은 켜진 등급(G/S/Q/E)에만 적용됩니다.',
+    'Remaining = 현재 풀에 남은 프롬프트 수. Parquet = 커스텀 결과셋 불러오기/합치기/내보내기. 심층검색 = 결과셋을 테이블로 깊게 다듬기. 복원 = 직전 스냅샷으로 되돌리기.',
+  ].join('\n\n'),
 };
 
 function applyModuleOverviewGuide(moduleId) {
@@ -6325,6 +6333,10 @@ function onSearchState(m) {
 
 function onSearchProgress(m) {
   if (searchPanelControl) searchPanelControl.onSearchProgress(m);
+}
+
+function onBucketDates(m) {
+  if (searchPanelControl) searchPanelControl.onBucketDates(m);
 }
 
 function renderSearch(m) {

@@ -90,10 +90,11 @@ def search_tag_archive_frame(
     query: str,
     exclude: str,
     ratings: set[str],
+    progress_callback: Any = None,
 ):
     import os
     import pandas as pd
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from core.search_engine import SearchEngine
 
     search_params = {
@@ -105,25 +106,37 @@ def search_tag_archive_frame(
         "rating_e": "e" in ratings,
     }
     # SearchEngine is stateless -> safe to share across worker threads. parquet
-    # reads release the GIL, so a ThreadPool restores the future01 "150 bucket"
-    # parallelism without multiprocessing.Pool's Windows/spawn pickling risk.
+    # reads + PyArrow compute matching release the GIL, so a ThreadPool restores
+    # the future01 "150 bucket" parallelism without multiprocessing.Pool's
+    # Windows/spawn pickling risk.
     engine = SearchEngine()
 
     def _search_one(item: tuple[Path, str]):
         path, _label = item
         return engine.search_in_file(str(path), search_params)
 
-    frames: list[Any] = []
+    total = len(sources)
+    # Collect by source index so the concatenated frame order is identical to a
+    # sequential scan (as_completed itself is unordered; results[i] re-orders).
+    results: list[Any] = [None] * total
     if sources:
-        max_workers = min(len(sources), max(2, min(8, os.cpu_count() or 4)))
+        max_workers = min(total, max(2, min(8, os.cpu_count() or 4)))
+        step = max(1, total // 20)  # ~20 progress ticks
+        completed = 0
         with ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="tag-archive-search"
         ) as executor:
-            # executor.map yields results in INPUT order -> identical frame order
-            # to the prior sequential loop -> byte-identical concat result.
-            for result in executor.map(_search_one, sources):
-                if result is not None and not getattr(result, "empty", True):
-                    frames.append(result)
+            future_to_index = {executor.submit(_search_one, item): i for i, item in enumerate(sources)}
+            for future in as_completed(future_to_index):
+                results[future_to_index[future]] = future.result()
+                completed += 1
+                if progress_callback is not None and (completed % step == 0 or completed == total):
+                    try:
+                        progress_callback(completed, total)
+                    except Exception:
+                        # Progress is best-effort; never fail the search on it.
+                        pass
+    frames = [r for r in results if r is not None and not getattr(r, "empty", True)]
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
@@ -201,7 +214,11 @@ def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True
     return apply_search_runtime_filters(context)
 
 
-def run_search_command(context: WebSessionContext, command: dict[str, Any]) -> dict[str, Any]:
+def run_search_command(
+    context: WebSessionContext,
+    command: dict[str, Any],
+    progress_callback: Any = None,
+) -> dict[str, Any]:
     ratings = {
         rating
         for rating in "gsqe"
@@ -209,17 +226,29 @@ def run_search_command(context: WebSessionContext, command: dict[str, Any]) -> d
     } or set("gsqe")
     query = str(command.get("query") or "")
     exclude = str(command.get("exclude") or "")
+    bucket_start = command.get("bucket_start")
+    bucket_end = command.get("bucket_end")
     context.search_query_ratings = ratings
-    context.save_search_filter_state(query=query, exclude=exclude, search_ratings=ratings)
+    # None values are ignored by the saver -> they keep the persisted range.
+    context.save_search_filter_state(
+        query=query, exclude=exclude, search_ratings=ratings,
+        bucket_start=bucket_start, bucket_end=bucket_end,
+    )
 
     use_custom_scope = getattr(context, "search_results_scope", "") == CUSTOM_PARQUET_SCOPE
     archive_sources = [] if use_custom_scope else tag_archive_parquet_sources(context)
     if archive_sources:
+        # Date-cutoff slider: scan only buckets [start..end] (fewer files = faster).
+        if bucket_start is not None or bucket_end is not None:
+            from core.tag_bucket_dates import clamp_bucket_range
+            s, e = clamp_bucket_range(bucket_start, bucket_end, len(archive_sources))
+            archive_sources = archive_sources[s:e + 1]
         searched = search_tag_archive_frame(
             archive_sources,
             query=query,
             exclude=exclude,
             ratings=ratings,
+            progress_callback=progress_callback,
         )
         context.search_results.set_dataframe(searched)
         context.search_results_snapshot = searched.copy()

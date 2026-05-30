@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Awaitable, Callable
 
@@ -23,6 +24,7 @@ SEARCH_COMMAND_TYPES = {
     "set_active_ratings",
     "get_search_state",
     "save_search_filter_state",
+    "get_bucket_dates",
     "search",
     "load_parquet",
     "merge_parquet",
@@ -60,6 +62,25 @@ async def handle_search_command(
         await _send_json(ws, context.search_state_payload())
         return True
 
+    if command_type == "get_bucket_dates":
+        from core.tag_bucket_dates import load_bucket_dates, default_bucket_range
+        data = await run_in_thread(load_bucket_dates, context)
+        buckets = data.get("buckets", []) if isinstance(data, dict) else []
+        default_start, default_end = default_bucket_range(buckets)
+        state = context.normalize_search_filter_state(getattr(context, "search_filter_state", None))
+        cur_start = state.get("bucket_start")
+        cur_end = state.get("bucket_end")
+        await _send_json(ws, {
+            "type": "bucket_dates",
+            "bucket_count": len(buckets),
+            "buckets": buckets,
+            "default_start": default_start,
+            "default_end": default_end,
+            "current_start": cur_start if cur_start is not None else default_start,
+            "current_end": cur_end if cur_end is not None else default_end,
+        })
+        return True
+
     if command_type == "save_search_filter_state":
         await run_in_thread(context.save_search_filter_state_from_payload, command)
         return True
@@ -75,7 +96,17 @@ async def handle_search_command(
             "completed": 0,
             "total": progress_total,
         })
-        state = await run_in_thread(run_search_command, context, command)
+        # Stream per-file progress from the worker thread onto this event loop so
+        # the "Searching... N/150" counter actually climbs instead of sitting at 0.
+        loop = asyncio.get_running_loop()
+
+        def _emit_progress(completed: int, total: int) -> None:
+            asyncio.run_coroutine_threadsafe(
+                _send_json(ws, {"type": "search_progress", "completed": completed, "total": total}),
+                loop,
+            )
+
+        state = await run_in_thread(run_search_command, context, command, progress_callback=_emit_progress)
         await _send_json(ws, {
             "type": "search_progress",
             "completed": progress_total,

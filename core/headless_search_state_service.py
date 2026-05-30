@@ -10,6 +10,12 @@ import re
 
 
 SUPPORTED_RATINGS = ("g", "s", "q", "e")
+# Safe first-run default: Explicit (e) is intentionally OFF so a brand-new user
+# does not get explicit content on first launch. After first run the user's saved
+# filter state takes over, so this only governs the initial/fallback active set.
+# Do NOT "unify" this up to all four — that would flip first-run to Explicit. The
+# real off-by-one was generation_commands' /api/comfyui/random fallback, which now
+# uses context.get_active_ratings() to agree with this default and the sibling paths.
 DEFAULT_ACTIVE_RATINGS = ("g", "s", "q")
 
 
@@ -62,8 +68,19 @@ class HeadlessSearchStateService:
             "tag_filter": [],
             "tag_filter_exclude": [],
             "tag_filter_active": False,
+            "bucket_start": None,
+            "bucket_end": None,
             "updated_at": None,
         }
+
+    @staticmethod
+    def _coerce_bucket_index(value: Any) -> Any:
+        if value is None:
+            return None
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def normalize_rating_list(ratings: Any) -> list[str]:
@@ -127,6 +144,8 @@ class HeadlessSearchStateService:
             state["tag_filter_active"] = bool(raw.get("tag_filter_active")) and (
                 bool(state["tag_filter"]) or bool(state["tag_filter_exclude"])
             )
+            state["bucket_start"] = self._coerce_bucket_index(raw.get("bucket_start", state["bucket_start"]))
+            state["bucket_end"] = self._coerce_bucket_index(raw.get("bucket_end", state["bucket_end"]))
             if (
                 "search_ratings" not in raw
                 and (state["query"] or state["exclude"])
@@ -175,6 +194,9 @@ class HeadlessSearchStateService:
             ]
         if "tag_filter_active" in updates and updates["tag_filter_active"] is not None:
             state["tag_filter_active"] = bool(updates["tag_filter_active"])
+        for bkey in ("bucket_start", "bucket_end"):
+            if bkey in updates and updates[bkey] is not None:
+                state[bkey] = self._coerce_bucket_index(updates[bkey])
         state = self.normalize_search_filter_state(state)
         state["updated_at"] = datetime.now().isoformat(timespec="seconds")
         context.search_filter_state = state
@@ -202,6 +224,8 @@ class HeadlessSearchStateService:
             tag_filter=payload.get("tag_filter") if "tag_filter" in payload else None,
             tag_filter_exclude=payload.get("tag_filter_exclude") if "tag_filter_exclude" in payload else None,
             tag_filter_active=payload.get("tag_filter_active") if "tag_filter_active" in payload else None,
+            bucket_start=payload.get("bucket_start") if "bucket_start" in payload else None,
+            bucket_end=payload.get("bucket_end") if "bucket_end" in payload else None,
         )
 
     def custom_parquet_dir(self) -> Path:

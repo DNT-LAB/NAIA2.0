@@ -19,8 +19,8 @@
     </div>
   </div>
   <div class="prompt-quick-control toolbar-prompt-control">
-    <button class="module-prompt-btn prompt-count-btn" onclick="openModule('search')">Prompt: <span id="searchCount">0</span></button>
-    <button class="quick-filter-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()">Quick</button>
+    <button class="module-prompt-btn prompt-count-btn" onclick="openModule('search')" data-naia-guide="프롬프트 검색 패널을 엽니다. 태그·키워드로 아카이브 전체에서 결과셋을 새로 검색해 생성 풀을 만드는 '무거운' 검색입니다(명시적 실행). 옆 숫자는 현재 풀에 남은 프롬프트 수입니다.">Prompt: <span id="searchCount">0</span></button>
+    <button class="quick-filter-btn tag-filter-toggle" id="tagFilterToggle" onclick="toggleTagFilter()" data-naia-guide="빠른 태그 필터를 엽니다. 이미 만들어진 결과셋을 재검색 없이 태그로 즉시 좁히는 '가벼운' 필터입니다(인메모리). 포함/제외 태그·등급으로 활성 풀만 거릅니다 — 큰 아카이브 검색을 다시 돌리지 않으려는 용도입니다.">Quick</button>
   </div>
   <div class="anlas-pill hidden" id="anlasPill" title="NAI subscription"><span class="anlas-label">Anlas</span><span class="anlas-value" id="anlasValue">—</span></div>
   <div class="mode-api-combo" id="modeApiCombo">
@@ -1032,6 +1032,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260528-guide-tooltips4"></script>
+<script src="app.js?v=20260530-daterange-slider4"></script>
 </body>
 </html>

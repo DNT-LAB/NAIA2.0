@@ -13,6 +13,19 @@
 // reaching into each other's state by reference.
 export const RATING_KEYS = ['g', 's', 'q', 'e'];
 
+// Sum the per-rating counts for the currently-active ratings. Returns null only
+// when ratingCounts is absent (callers decide the empty-object policy). This is
+// the one shared count arithmetic used by both the Search panel and the
+// Quick/Tag Filter, replacing three near-identical inline loops.
+export function filteredCount(ratingCounts, activeRatings) {
+  if (!ratingCounts) return null;
+  let total = 0;
+  for (const key of RATING_KEYS) {
+    if (activeRatings && activeRatings[key]) total += (ratingCounts[key] || 0);
+  }
+  return total;
+}
+
 export function createRatingStore({
   active = { g: true, s: true, q: true, e: false },
   search = { g: true, s: true, q: true, e: false },

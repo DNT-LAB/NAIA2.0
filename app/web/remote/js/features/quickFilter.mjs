@@ -1,5 +1,6 @@
+import { RATING_KEYS, filteredCount } from './ratingStore.mjs';
+
 const STORAGE_KEY = 'naia_quick_filter_options';
-const RATING_KEYS = ['g', 's', 'q', 'e'];
 const DEFAULT_RATING_KEYS = ['g', 's', 'q'];
 
 export function normalizeRatings(value) {
@@ -431,12 +432,7 @@ export function createQuickFilterController(deps) {
     if (assignBtn) assignBtn.disabled = true;
     save();
     if (ratingCounts) {
-      let filtered = 0;
-      const ratingState = deps.getRatingState();
-      RATING_KEYS.forEach(key => {
-        if (ratingState[key]) filtered += (ratingCounts[key] || 0);
-      });
-      deps.updateSearchCount(filtered);
+      deps.updateSearchCount(filteredCount(ratingCounts, deps.getRatingState()));
     }
     deps.showToast(`Tag filter assigned: ${(message.count || 0).toLocaleString()} rows`, 'success');
   }
@@ -451,12 +447,7 @@ export function createQuickFilterController(deps) {
     const toggleBtn = getEl('tagFilterToggle');
     if (toggleBtn && active) toggleBtn.classList.add('assigned');
     if (ratingCounts) {
-      let filtered = 0;
-      const ratingState = deps.getRatingState();
-      RATING_KEYS.forEach(key => {
-        if (ratingState[key]) filtered += (ratingCounts[key] || 0);
-      });
-      deps.updateSearchCount(filtered);
+      deps.updateSearchCount(filteredCount(ratingCounts, deps.getRatingState()));
     }
   }
 

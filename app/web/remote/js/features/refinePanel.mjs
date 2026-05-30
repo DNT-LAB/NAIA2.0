@@ -15,6 +15,7 @@ export function createRefinePanel({
   WebSocket,
   enterMode,
   exitMode,
+  bindTagAssist,
 }) {
   let open = false;
   let lastSample = null;
@@ -57,6 +58,7 @@ export function createRefinePanel({
     <div class="refine-header">
       <button type="button" class="refine-back" onclick="refineBack()">← SEARCH</button>
       <span class="refine-title">심층검색</span>
+      <button type="button" class="header-guide-btn rf-header-guide" data-naia-guide="심층검색(Refine) — 이미 검색된 결과셋을 아카이브 재스캔 없이 반복적으로 좁히고 합치는 작업대입니다.\\n\\n좌측 컨트롤로 결과 내 재검색(태그·등급·토큰/ID/Score 범위)하고, 스테이징에 서로 다른 검색을 쌓아 병합(union+중복 제거)할 수 있습니다.\\n\\n우측에서 무작위 샘플을 들여다보거나 생성하고, 현재 결과를 메인에 할당하거나 .parquet으로 내보냅니다.\\n\\n표시된 행 = 현재 작업 중인 결과, 원본 행 = 좁히기 이전의 기준 결과입니다.">ⓘ 가이드</button>
     </div>
     <div class="refine-2col">
       <div class="refine-left"></div>
@@ -137,11 +139,17 @@ export function createRefinePanel({
       </div>
     </div>
     <div>
-      <div class="mod-section-label">검색 키워드</div>
+      <div class="dr-label-row">
+        <span class="mod-section-label">검색 키워드</span>
+        <button type="button" class="header-guide-btn" data-naia-guide="검색 키워드 — 포함 검색(AND). 쉼표로 구분한 태그를 모두 포함하는 결과만 남깁니다.\\n\\n부분일치 — 기본은 부분 문자열 매칭입니다. 예: girl → 1girl·cowgirl 도 매칭, hair → long hair 도 매칭. (_ 는 공백으로 처리)\\n\\n{a|b|c} — OR 그룹. 중괄호 안 태그 중 하나라도 포함하면 매칭. 그룹끼리는 AND로 결합됩니다.\\n\\n*tag — 정확 태그 일치. 쉼표·공백 경계로 둘러싸인 정확한 토큰만 매칭. 예: *girl 은 girl 토큰만, 1girl·cowgirl 은 제외.">ⓘ 가이드</button>
+      </div>
       <input class="mod-input" id="depthQuery" type="text" value="${escHtml(message.query)}" placeholder="검색 태그...">
     </div>
     <div>
-      <div class="mod-section-label">제외 키워드</div>
+      <div class="dr-label-row">
+        <span class="mod-section-label">제외 키워드</span>
+        <button type="button" class="header-guide-btn" data-naia-guide="제외 키워드 — 제외 검색. 입력한 태그가 든 결과를 빼냅니다. 포함 검색과 문법이 다릅니다.\\n\\ntag — 부분일치 제외. 해당 문자열이 든 행을 모두 제외합니다. 예: abs 는 absurdres 까지 함께 제외될 수 있습니다.\\n\\n~tag — 정확 태그 제외. 정확한 토큰만 제외합니다(부분일치 아님). 예: ~abs 는 abs 토큰만 제외하고 absurdres 는 유지.\\n\\n※ 제외 칸에서는 {a|b}·*tag 문법이 동작하지 않습니다(제외는 포함 문법의 부분집합).">ⓘ 가이드</button>
+      </div>
       <input class="mod-input" id="depthExclude" type="text" value="${escHtml(message.exclude)}" placeholder="제외 태그...">
     </div>
     <div>
@@ -182,6 +190,7 @@ export function createRefinePanel({
       <button class="mod-action-btn mod-refine rf-promote" onclick="depthAction('promote')" title="현재 검색 결과를 원본 행으로 설정">현재 검색 결과를 원본 행으로</button>
     </div>`;
 
+    bindRefineInputs();
     renderStagingBoard(message.staging || [], message.staging_count || 0);
   }
 
@@ -275,6 +284,16 @@ export function createRefinePanel({
     send({ type: 'depth_generate' });
   }
 
+  // Bind tag autocomplete to the depth keyword inputs (same assist as the main
+  // Search panel). Runs once after the controls are built.
+  function bindRefineInputs() {
+    if (typeof bindTagAssist !== 'function') return;
+    for (const id of ['depthQuery', 'depthExclude']) {
+      const el = document.getElementById(id);
+      if (el) bindTagAssist(el, { excludeE621: true });
+    }
+  }
+
   function depthFilter() {
     const byId = id => document.getElementById(id);
     const query = (byId('depthQuery') || {}).value || '';
@@ -312,6 +331,9 @@ export function createRefinePanel({
 .refine-back{background:var(--bg-elevated,#2a2a33);color:var(--text,#e8e8ee);border:1px solid var(--border,#33333f);border-radius:6px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}
 .refine-back:hover{border-color:var(--accent-blue,#8d7bd6);color:var(--accent-blue,#8d7bd6)}
 .refine-title{font-size:14px;font-weight:700;color:var(--text,#e8e8ee)}
+.refine-header .header-guide-btn{flex:0 0 auto;margin-left:2px}
+.refine-left .dr-label-row{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.refine-left .dr-label-row .mod-section-label{margin:0}
 .refine-2col{display:flex;gap:14px;align-items:flex-start}
 .refine-left{flex:1 1 50%;min-width:0;display:flex;flex-direction:column;gap:8px}
 .refine-right{flex:1 1 50%;min-width:0;display:flex;flex-direction:column;gap:10px}

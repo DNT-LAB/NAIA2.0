@@ -959,7 +959,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260530-refine-tab5')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260530-refine-tab6')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
@@ -969,6 +969,7 @@ const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260530-refine
       WebSocket,
       enterMode: refineEnterMode,
       exitMode: refineExitMode,
+      bindTagAssist,
     });
   })
   .catch(error => {

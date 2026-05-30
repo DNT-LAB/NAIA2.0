@@ -1,5 +1,8 @@
 import pandas as pd
+import numpy as np
 import re
+import pyarrow as pa
+import pyarrow.compute as pc
 from typing import Dict, List, Any, Optional
 
 
@@ -52,82 +55,74 @@ class SearchEngine:
         return parsed
 
     def _apply_filters(self, df: pd.DataFrame, query: str, exclude_query: str) -> pd.DataFrame:
-        """파싱된 쿼리에 따라 데이터프레임에 필터를 순차적으로 적용합니다."""
+        """파싱된 쿼리에 따라 필터를 적용합니다.
+
+        매칭은 PyArrow compute(`match_substring` / `match_substring_regex`, C레벨·
+        **GIL 해제**)로 수행 → ThreadPool 아카이브 스캔에서 실질 병렬화. 모든 마스크를
+        하나의 numpy 불리언 배열로 누적해 **DataFrame 슬라이싱은 마지막 1회**만(다열
+        복사 반복 제거). 결과는 기존 pandas `.str.contains` 순차 narrowing 과 **동치**
+        (정확매칭 lookbehind 정규식은 RE2 의 '경계 소비형' 패턴으로 존재여부 동치 변환;
+        OR 그룹의 기존 동작-빈 그룹 덮어쓰기 포함-도 그대로 보존)."""
         if df.empty:
             return df
-            
-        # 긍정 쿼리 파싱 및 필터링
+
         search_params = self._parse_query(query)
+        exclude_params = self._parse_query(exclude_query)
 
         # 필터링 전에 'tags_string' 컬럼이 없으면 생성
         if 'tags_string' not in df.columns:
             df['tags_string'] = self._build_tags_string(df)
-            
+
+        tags = pa.array(df['tags_string'], from_pandas=True)  # NaN -> null (na=False 동치)
+
+        def contains(keyword: str) -> np.ndarray:
+            # 부분일치. pandas str.contains(re.escape(kw), regex=True) 와 동치.
+            return pc.fill_null(pc.match_substring(tags, keyword), False).to_numpy(zero_copy_only=False)
+
+        def contains_exact(keyword: str) -> np.ndarray:
+            # 정확태그 일치. 기존 lookbehind 정규식 (?<![^, ])kw(?![^, ]) 을 RE2 가 지원하는
+            # 경계 소비형 (^|[, ])kw([, ]|$) 으로 변환(존재여부 동치).
+            pattern = '(^|[, ])' + re.escape(keyword) + '([, ]|$)'
+            return pc.fill_null(pc.match_substring_regex(tags, pattern), False).to_numpy(zero_copy_only=False)
+
+        n = len(df)
+        survivors = np.ones(n, dtype=bool)
+
         # 1. Normal (AND) - 각 키워드가 모두 포함되어야 함
-        if search_params['normal']:
-            for keyword in search_params['normal']:
-                safe_keyword = re.escape(keyword)
-                mask = df['tags_string'].str.contains(safe_keyword, na=False, regex=True)
-                df = df[mask]
-                if df.empty: 
-                    return df
+        for keyword in search_params['normal']:
+            survivors &= contains(keyword)
+        if not survivors.any():
+            return df.iloc[:0]
 
-        # 2. OR - 수정된 로직
-        if 'or' in search_params and search_params['or']:
-            final_or_mask = pd.Series(False, index=df.index)
-            
+        # 2. OR - {a|b}, {c|d} → (a OR b) AND (c OR d). 단, 기존 구현의 동작 보존:
+        #    누적 OR 마스크가 현재 생존행 중 매치 0이면 다음 그룹으로 '덮어쓰기'.
+        if search_params.get('or'):
+            final_or: Optional[np.ndarray] = None
             for or_group in search_params['or']:
-                # 각 OR 그룹 내에서는 하나의 태그만 일치하면 됨
-                group_or_mask = pd.Series(False, index=df.index)
-                
+                group_mask = np.zeros(n, dtype=bool)
                 for keyword in or_group:
-                    safe_keyword = re.escape(keyword.strip())
-                    keyword_mask = df['tags_string'].str.contains(safe_keyword, na=False, regex=True)
-                    group_or_mask |= keyword_mask
-                
-                # 각 OR 그룹의 결과를 AND로 결합
-                # 예: {tag1|tag2}, {tag3|tag4} → (tag1 OR tag2) AND (tag3 OR tag4)
-                if final_or_mask.any():
-                    final_or_mask &= group_or_mask
+                    group_mask |= contains(keyword.strip())
+                if final_or is not None and bool((final_or & survivors).any()):
+                    final_or = final_or & group_mask
                 else:
-                    final_or_mask = group_or_mask
-            
-            df = df[final_or_mask]
-            if df.empty: 
-                return df
-        
+                    final_or = group_mask
+            survivors &= final_or
+            if not survivors.any():
+                return df.iloc[:0]
+
         # 3. Exact (*) - 정확한 태그 매칭
-        if search_params['exact']:
-            for keyword in search_params['exact']:
-                safe_keyword = re.escape(keyword)
-                # 완전한 단어(태그)를 찾기 위한 정규식
-                mask = df['tags_string'].str.contains(f'(?<![^, ]){safe_keyword}(?![^, ])', na=False, regex=True)
-                df = df[mask]
-                if df.empty: 
-                    return df
+        for keyword in search_params['exact']:
+            survivors &= contains_exact(keyword)
 
-        # 부정 쿼리 파싱 및 필터링
-        exclude_params = self._parse_query(exclude_query)
-        
         # 4. Normal Exclude - 해당 키워드를 포함하지 않아야 함
-        if exclude_params['normal']:
-            for keyword in exclude_params['normal']:
-                safe_keyword = re.escape(keyword)
-                mask = ~df['tags_string'].str.contains(safe_keyword, na=False, regex=True)
-                df = df[mask]
-                if df.empty: 
-                    return df
-                
-        # 5. Exact Exclude (~) - 정확한 태그를 포함하지 않아야 함
-        if exclude_params['not_exact']:
-            for keyword in exclude_params['not_exact']:
-                safe_keyword = re.escape(keyword)
-                mask = ~df['tags_string'].str.contains(f'(?<![^, ]){safe_keyword}(?![^, ])', na=False, regex=True)
-                df = df[mask]
-                if df.empty: 
-                    return df
+        for keyword in exclude_params['normal']:
+            survivors &= ~contains(keyword)
 
-        return df
+        # 5. Exact Exclude (~) - 정확한 태그를 포함하지 않아야 함
+        for keyword in exclude_params['not_exact']:
+            survivors &= ~contains_exact(keyword)
+
+        return df[survivors]
 
     def search_in_file(self, file_path: str, search_params: Dict[str, Any]) -> Optional[pd.DataFrame]:
         """단일 Parquet 파일 내에서 검색을 수행합니다."""

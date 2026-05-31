@@ -472,6 +472,11 @@ export function createResultHistoryController({
   function onRemoved(message) {
     const relPath = message?.rel_path || '';
     if (!relPath) return;
+    // 삭제된 항목의 캐시 잔여까지 제거 (지워지면 남은 데이터가 없어야 한다).
+    if (relPath in promptFloatCache) {
+      delete promptFloatCache[relPath];
+      promptFloatCacheKeys = promptFloatCacheKeys.filter(key => key !== relPath);
+    }
     const removedMain = removeThumb(viewerGrid, relPath);
     removeThumb(getEl('vpGrid'), relPath);
     viewerNavPaths = viewerNavPaths.filter(path => path !== relPath);

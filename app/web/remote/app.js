@@ -432,7 +432,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260509_mobile_panel_pc_sync1')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260531-imgdel3')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -594,7 +594,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260531-imgdel1')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260531-imgdel2')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -2484,9 +2484,6 @@ async function saveDisplayedHistoryImage() {
 async function deleteDisplayedHistoryImage() {
   if (!isUnsavedHistoryAsset(resultUnsavedActionAsset) || resultUnsavedActionBusy) return;
   const deletedPath = String(resultUnsavedActionAsset.path || '');
-  // 표시 중 이미지 여부는 rel_path 동일성으로만 판정 (source 폴백 금지 — 새 결과 도착 시 오클리어 방지).
-  // current 프리뷰는 renderResultUnsavedActions에서 같은 rel_path가 각인되므로 동일성 매칭이 성립한다.
-  const deletingDisplayedImage = Boolean(deletedPath) && preview?.dataset?.path === deletedPath;
   setResultUnsavedActionBusy(true);
   try {
     const response = await fetch('/api/result/action/delete', {
@@ -2500,13 +2497,17 @@ async function deleteDisplayedHistoryImage() {
     }
     renderResultUnsavedActions(null);
     if (resultHistory && data.rel_path) resultHistory.onRemoved(data);
-    if (deletingDisplayedImage) {
+    // 응답 후 "지금" 프리뷰 상태로 판정 (await 사이 새 결과 도착 시 최신 프리뷰/버퍼 보존).
+    const stillDisplayed = Boolean(deletedPath) && preview?.dataset?.path === deletedPath;
+    const stillCurrentResult = stillDisplayed && preview?.dataset?.source === 'current';
+    if (stillDisplayed) {
       preview.removeAttribute('src');
       preview.classList.remove('show');
       preview.dataset.path = '';
       emptyMsg.style.display = '';
       if (resultInfoContent) resultInfoContent.innerHTML = '<span class="result-info-empty">No history item selected</span>';
       if (resultEnhance) resultEnhance.clearCurrentMeta();
+      if (stillCurrentResult) releaseLatestResultBuffers();
     }
     showToast('History item deleted', 'success');
   } catch (error) {
@@ -2516,6 +2517,17 @@ async function deleteDisplayedHistoryImage() {
     setResultUnsavedActionBusy(false);
     scheduleResultUnsavedActionRefresh(250);
   }
+}
+
+// 표시 중이던 "현재 결과"를 삭제할 때, 풀사이즈 blob·objectURL·메타 참조까지 즉시 해제한다.
+// (이 버퍼들은 평소 handleWsBlob에서 다음 생성 때 교체되지만, 삭제 후엔 잔여 데이터가 남지 않아야 한다.)
+function releaseLatestResultBuffers() {
+  if (blobUrl) {
+    try { URL.revokeObjectURL(blobUrl); } catch (error) { /* noop */ }
+    blobUrl = null;
+  }
+  latestResultBlob = null;
+  latestImageMeta = null;
 }
 
 // 결과/히스토리 컨텍스트 메뉴 "이미지 삭제" 핸들러.
@@ -2528,10 +2540,6 @@ async function deleteResultFromContext(context, mode) {
     return;
   }
   const keepFile = mode !== 'disk';
-  // 표시 중 이미지 여부는 오직 rel_path 동일성으로 판정 (source 폴백 금지).
-  // 메뉴를 연 사이 새 결과가 표시돼도 엉뚱한 최신 프리뷰를 클리어하지 않는다.
-  // current 프리뷰는 renderResultUnsavedActions에서 rel_path가 각인된다.
-  const deletingDisplayedImage = Boolean(deletedPath) && preview?.dataset?.path === deletedPath;
   try {
     const response = await fetch('/api/result/action/delete', {
       method: 'POST',
@@ -2544,15 +2552,21 @@ async function deleteResultFromContext(context, mode) {
     }
     renderResultUnsavedActions(null);
     if (resultHistory && data.rel_path) resultHistory.onRemoved(data);
-    if (deletingDisplayedImage) {
+    // 표시/버퍼 정리는 응답을 받은 "지금" 시점의 프리뷰 상태로 판정한다.
+    // (await 사이 새 결과가 도착해 프리뷰가 교체됐다면 그 최신 프리뷰/버퍼는 건드리지 않는다 —
+    //  오직 rel_path 동일성으로만 확인. current 프리뷰엔 renderResultUnsavedActions가 rel_path를 각인한다.)
+    const stillDisplayed = Boolean(deletedPath) && preview?.dataset?.path === deletedPath;
+    const stillCurrentResult = stillDisplayed && preview?.dataset?.source === 'current';
+    if (stillDisplayed) {
       preview.removeAttribute('src');
       preview.classList.remove('show');
       preview.dataset.path = '';
       emptyMsg.style.display = '';
       if (resultInfoContent) resultInfoContent.innerHTML = '<span class="result-info-empty">No history item selected</span>';
       if (resultEnhance) resultEnhance.clearCurrentMeta();
+      if (stillCurrentResult) releaseLatestResultBuffers();
     }
-    showToast(data.deleted_file ? '이미지 삭제됨 (디스크 파일 포함)' : '이미지 삭제됨 (히스토리)', 'success');
+    showToast(data.deleted_file ? '이미지 삭제됨 (디스크 파일 → 휴지통)' : '이미지 삭제됨 (히스토리)', 'success');
   } catch (error) {
     console.error('Result context delete failed', error);
     showToast(error.message || '이미지 삭제 실패', 'error');
@@ -3795,6 +3809,18 @@ function onViewerNewImage(message) {
   scheduleResultUnsavedActionRefresh(180);
 }
 function onViewerHistoryRemoved(message) {
+  // current 프리뷰로 표시 중이던 항목이 제거되면(다른 클라이언트 삭제/오버플로우 퇴출 포함)
+  // 프리뷰·풀사이즈 버퍼까지 정리한다. (resultHistory.onRemoved는 source==='saved'만 정리)
+  const removedPath = String(message?.rel_path || '');
+  if (removedPath && preview?.dataset?.source === 'current' && preview?.dataset?.path === removedPath) {
+    preview.removeAttribute('src');
+    preview.classList.remove('show');
+    preview.dataset.path = '';
+    emptyMsg.style.display = '';
+    if (resultInfoContent) resultInfoContent.innerHTML = '<span class="result-info-empty">No history item selected</span>';
+    if (resultEnhance) resultEnhance.clearCurrentMeta();
+    releaseLatestResultBuffers();
+  }
   if (resultHistory) resultHistory.onRemoved(message);
   scheduleResultUnsavedActionRefresh(80);
 }

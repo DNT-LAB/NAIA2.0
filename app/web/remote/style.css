@@ -5403,6 +5403,11 @@ body.resizing-result-info {
   color: #cce5ff;
   background: rgba(40, 120, 216, 0.28);
 }
+.result-context-badge.danger {
+  border-color: rgba(240, 64, 64, 0.6);
+  color: #ffd0d0;
+  background: rgba(240, 64, 64, 0.26);
+}
 .result-context-menu.touch-mode .result-context-group.submenu-open > .result-context-item .result-context-arrow {
   transform: rotate(90deg);
 }

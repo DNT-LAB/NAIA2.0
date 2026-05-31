@@ -97,6 +97,64 @@ def _open_location_target(target: Path) -> Path:
     return folder
 
 
+def _move_to_trash(target: Path) -> bool:
+    """Move a file to the OS trash / Windows Recycle Bin (reversible).
+
+    Returns True on success. Tries the cross-platform send2trash package first,
+    then a dependency-free native Recycle Bin call on Windows (portable builds do
+    not bundle send2trash). Never performs a permanent delete here — the caller
+    decides what to do on failure (we keep the file rather than hard-delete)."""
+    try:
+        target = Path(target)
+        if not target.exists():
+            return False
+    except Exception:
+        return False
+    # 1) send2trash when available (dev env / properly bundled builds)
+    try:
+        from send2trash import send2trash as _send2trash
+        _send2trash(str(target))
+        return True
+    except Exception:
+        pass
+    # 2) Native Windows Recycle Bin via SHFileOperationW with FOF_ALLOWUNDO (no deps)
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _SHFILEOPSTRUCTW(ctypes.Structure):
+                _fields_ = [
+                    ("hwnd", wintypes.HWND),
+                    ("wFunc", wintypes.UINT),
+                    ("pFrom", wintypes.LPCWSTR),
+                    ("pTo", wintypes.LPCWSTR),
+                    ("fFlags", ctypes.c_uint16),
+                    ("fAnyOperationsAborted", wintypes.BOOL),
+                    ("hNameMappings", ctypes.c_void_p),
+                    ("lpszProgressTitle", wintypes.LPCWSTR),
+                ]
+
+            FO_DELETE = 0x0003
+            FOF_ALLOWUNDO = 0x0040
+            FOF_NOCONFIRMATION = 0x0010
+            FOF_SILENT = 0x0004
+            FOF_NOERRORUI = 0x0400
+            path_str = str(target.resolve())
+            # pFrom must be double-null terminated; buffer of len+2 zero-fills the tail.
+            buf = ctypes.create_unicode_buffer(path_str, len(path_str) + 2)
+            op = _SHFILEOPSTRUCTW()
+            op.wFunc = FO_DELETE
+            op.pFrom = ctypes.cast(buf, wintypes.LPCWSTR)
+            op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+            res = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+            if res == 0 and not op.fAnyOperationsAborted:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _result_location_target(context: WebSessionContext, payload: dict[str, Any] | None) -> Path | None:
     payload = payload if isinstance(payload, dict) else {}
     rel_path = str(payload.get("path") or "").strip()
@@ -347,7 +405,10 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             "image_action": bool(item and nai_mode),
             "upscale_nai": nai_mode,
             "enhance": can_enhance,
-            "inpaint": False,
+            # Saved/history images support inpaint the same way they support img2img
+            # (resolve_result_image_action_source reads the file/item bytes either way);
+            # keep this in lock-step with image_action instead of hardcoding False.
+            "inpaint": bool(item and nai_mode),
             "character_reference": False,
             "remote_event": False,
             # delete enabled for any history-backed saved result; disk-only viewer
@@ -1025,7 +1086,10 @@ def register_result_display_routes(
             if file_path and not keep_file:
                 target = Path(file_path)
                 if target.is_file():
-                    target.unlink()
+                    # 디스크 모드는 영구삭제 대신 휴지통으로 이동 (복구 가능).
+                    # 휴지통 이동 실패 시 영구삭제하지 않고 실패시킨다(파일·히스토리 보존 → 재시도 가능).
+                    if not _move_to_trash(target):
+                        raise OSError(f"Could not move file to recycle bin: {target}")
                     deleted_file = True
             removed = session_context.result_store.remove_item(item)
             if removed is None:
@@ -1044,6 +1108,7 @@ def register_result_display_routes(
                 "history_id": removed.history_id,
                 "file_path": file_path,
                 "deleted_file": deleted_file,
+                "trashed": deleted_file,
                 "total": removed_payload["total"],
                 "remaining": session_context.result_store.unsaved_history_count(),
             }

@@ -48,6 +48,9 @@ const THUMBNAIL_IMAGE_ACTIONS = [
   {type: 'separator'},
 ];
 
+// 디스크 모드일 때 "이미지 삭제" 우측에 붙는 경고 라벨 (모드 전환 시 라이브로 추가/제거).
+const DISK_BADGE_HTML = '<span class="result-context-badge danger" data-disk-badge="1">디스크</span>';
+
 // 컨텍스트 메뉴 최하단 ⚙ 삭제 설정 — 삭제 모드(히스토리 전용 / 디스크 파일까지)를 고른다.
 // children 인프라 재사용. 선택은 메뉴를 닫지 않고 active 표시만 갱신(아래 bindActions 특수 처리).
 const DELETE_SETTINGS_MENU_ITEM = {
@@ -222,6 +225,17 @@ export function createResultContextMenu({
         labelSpan.textContent = (active ? '✓ ' : '') + base;
       }
     });
+    // "이미지 삭제" 우측 [디스크] 라벨도 현재 모드에 맞춰 라이브 갱신
+    const delBtn = menu.querySelector('[data-action="' + ACTION_DELETE_RESULT + '"]');
+    const tail = delBtn ? delBtn.querySelector('.result-context-item-tail') : null;
+    if (tail) {
+      const existing = tail.querySelector('[data-disk-badge]');
+      if (deleteMode === 'disk' && !existing) {
+        tail.insertAdjacentHTML('afterbegin', DISK_BADGE_HTML);
+      } else if (deleteMode !== 'disk' && existing) {
+        existing.remove();
+      }
+    }
   }
 
   function isTouchMenu() {
@@ -355,13 +369,14 @@ export function createResultContextMenu({
     const badgeHtml = item.badge
       ? `<span class="result-context-badge${badgeClass}">${escapeText(item.badge)}</span>`
       : '';
+    const diskBadgeHtml = (item.action === ACTION_DELETE_RESULT && deleteMode === 'disk') ? DISK_BADGE_HTML : '';
     const childHtml = hasChildren
       ? `<div class="result-context-children" role="menu">${item.children.map(child => renderItem(child, context)).join('')}</div>`
       : '';
     return `
       <div class="result-context-group${hasChildren ? ' has-children' : ''}">
         <button type="button" class="result-context-item${danger}${deleteModeActiveCls}${hasChildren ? ' has-children' : ''}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${deleteModeAttr}${deleteLabelAttr}${submenuAttr}${disabledAttr}>
-          <span>${escapeText(labelText)}</span><span class="result-context-item-tail">${badgeHtml}${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}</span>
+          <span>${escapeText(labelText)}</span><span class="result-context-item-tail">${diskBadgeHtml}${badgeHtml}${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}</span>
         </button>
         ${childHtml}
       </div>`;

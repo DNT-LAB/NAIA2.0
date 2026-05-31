@@ -5006,6 +5006,11 @@ const MODULE_OVERVIEW_GUIDES = {
     '슬롯 상태 — active(생성에 사용) / inactive(미사용) / cold(보류: 입력은 유지하되 이번 생성에서 제외). 생성에는 active 슬롯만 캐릭터로 들어갑니다.',
     '프롬프트·UC에는 와일드카드(__name__)도 사용할 수 있고, 리롤을 켜면 자동 생성 중 캐릭터 구성을 매 생성마다 다시 적용합니다.',
   ].join('\n\n'),
+  wildcard: [
+    '와일드카드 — 프롬프트의 __이름__ 토큰을 생성 때마다 해당 파일(이름.txt)의 한 줄로 치환합니다. 좌측 Browse 트리에서 파일을 탐색하고, 파일을 클릭하면 내용 편집·미리보기·조립 팝업이 열립니다.',
+    '호출 문법 — __name__ = 일반(랜덤 1줄) · __*name__ = 순차(순서대로 한 줄씩) · __*master__ + __$master:slave__ = 종속(master가 한 바퀴 돌 때마다 slave가 한 칸 전진). 가중치는 200:텍스트(기본 100), 하위폴더는 __folder/name__ 로 호출합니다.',
+    '파일 팝업 — 하단 [랜덤 / 순차 / $종속:순차] 탭에서 무작위 샘플을 뽑아보고, $종속:순차에서 slave를 좌측 트리 클릭으로 지정하면 구문과 한 바퀴·완주 생성 횟수를 확인하고 복사·삽입할 수 있습니다.',
+  ].join('\n\n'),
 };
 
 function applyModuleOverviewGuide(moduleId) {
@@ -6061,6 +6066,29 @@ function wcOpenBrowser() {
 
 function onWildcardManager(m) {
   if (wildcardManagerPanel) wildcardManagerPanel.onMessage(m);
+}
+
+function wcSimTab(tab) { if (wildcardManagerPanel) wildcardManagerPanel.setSimTab(tab); }
+function wcPickSlave() { if (wildcardManagerPanel) wildcardManagerPanel.pickSlave(); }
+function wcClearSlave() { if (wildcardManagerPanel) wildcardManagerPanel.clearSlave(); }
+function wcRoll() { if (wildcardManagerPanel) wildcardManagerPanel.requestInspect(); }
+function wcCopySyntax(btn) {
+  const row = btn && btn.closest ? btn.closest('.wc-syntax-row') : null;
+  const text = row ? (row.querySelector('.wc-syntax')?.textContent || '').trim() : '';
+  if (!text) return;
+  if (navigator.clipboard) navigator.clipboard.writeText(text);
+  showToast('복사됨: ' + text, 'success');
+}
+function wcInsertSyntax(btn) {
+  const row = btn && btn.closest ? btn.closest('.wc-syntax-row') : null;
+  const text = row ? (row.querySelector('.wc-syntax')?.textContent || '').trim() : '';
+  if (!text) return;
+  const pe = document.getElementById('promptEdit');
+  if (!pe) return;
+  const cur = pe.value || '';
+  pe.value = cur.trim() ? (cur.replace(/\s*$/, '') + ', ' + text) : text;
+  pe.dispatchEvent(new Event('input', { bubbles: true }));
+  showToast('프롬프트에 삽입됨', 'success');
 }
 
 function wcRenderTree(tree) {

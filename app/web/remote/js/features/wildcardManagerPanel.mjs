@@ -18,6 +18,11 @@ export function createWildcardManagerPanel({
   let editorOpen = false;
   let editorPanel = null;
   const openFolders = new Set();
+  let simTab = 'random';
+  let simSlave = '';
+  let slavePick = false;
+  let lastInspect = null;
+  let currentWcName = '';
 
   function getTarget() {
     if (renderMode === 'inline') return document.getElementById('wcInlineBrowser');
@@ -86,6 +91,15 @@ export function createWildcardManagerPanel({
   function openFile(element) {
     const path = element?.dataset?.path || '';
     if (!path) return;
+    // While picking a dependent slave, a tree click registers the slave instead of
+    // opening the file (the management surface is temporarily locked into pick mode).
+    if (slavePick) {
+      simSlave = path.replace(/\.txt$/i, '');
+      slavePick = false;
+      showToast('slave: ' + simSlave, 'success');
+      requestInspect();
+      return;
+    }
     currentPath = path;
     markActiveFile(element);
     setModuleParam('wildcard', 'read_file', path);
@@ -95,6 +109,7 @@ export function createWildcardManagerPanel({
     if (message.action === 'file_tree') renderTree(message.tree);
     else if (message.action === 'file_content') renderEditor(message.path, message.content);
     else if (message.action === 'preview_result') showPreview(message.name, message.result);
+    else if (message.action === 'inspect_result') { lastInspect = message; renderTabs(); }
     else if (message.action === 'save_ok') showToast('File saved', 'success');
     else if (message.action === 'file_deleted') {
       showToast('File deleted', 'success');
@@ -154,6 +169,9 @@ export function createWildcardManagerPanel({
     currentContent = content || '';
     editMode = false;
     editorOpen = true;
+    currentWcName = path.replace(/\.txt$/i, '');
+    simSlave = '';
+    slavePick = false;
     const fname = path.split('/').pop();
     const wcName = fname.replace('.txt', '');
     const panel = ensureEditorPanel();
@@ -188,17 +206,13 @@ export function createWildcardManagerPanel({
             <button class="mod-btn-sm" onclick="wcAddEntry()">Add</button>
           </div>
         </div>
-        <div class="mod-section">
-          <div class="mod-section-label">Preview <code>__${escHtml(wcName)}__</code></div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <button class="mod-btn-sm" onclick="setModuleParam('wildcard','preview_wildcard','${escHtml(wcName)}')">Roll ×5</button>
-            <div class="wc-preview" id="wcPreview"></div>
-          </div>
-        </div>
+        <div class="mod-section wc-sim-area" id="wcSimArea"><div class="mod-empty">미리보기 로딩…</div></div>
       </div>
     `;
+    ensureWildcardSimStyle();
     positionFloatingPanel(panel, modulePopup);
     markActiveFile();
+    requestInspect();
   }
 
   function toggleEdit() {
@@ -280,8 +294,131 @@ export function createWildcardManagerPanel({
     if (editorOpen && editorPanel) positionFloatingPanel(editorPanel, modulePopup);
   }
 
+  // ---- Tabbed preview / assembly (랜덤 | 순차 | $종속:순차) in the file popup ----
+  function requestInspect() {
+    if (!currentWcName) return;
+    setModuleParam('wildcard', 'inspect', JSON.stringify({ name: currentWcName, slave: simSlave, n: 12 }));
+  }
+
+  function setSimTab(tab) {
+    simTab = tab;
+    renderTabs();
+  }
+
+  function pickSlave() {
+    slavePick = true;
+    simTab = 'dependent';
+    renderTabs();
+    showToast('좌측 트리에서 slave로 쓸 와일드카드를 클릭하세요', 'info');
+  }
+
+  function clearSlave() {
+    simSlave = '';
+    slavePick = false;
+    requestInspect();
+  }
+
+  function syntaxRow(syntax) {
+    return `<div class="wc-syntax-row"><span class="wc-syntax">${escHtml(syntax)}</span>`
+      + `<button class="mod-btn-sm" onclick="wcCopySyntax(this)">복사</button>`
+      + `<button class="mod-btn-sm" onclick="wcInsertSyntax(this)">삽입</button></div>`;
+  }
+
+  function renderDependentTab(info, name) {
+    if (slavePick) {
+      return `<div class="wc-pick-banner"><span>좌측 트리에서 <b>slave</b>로 쓸 와일드카드를 클릭하세요</span>`
+        + `<button class="mod-btn-sm" onclick="wcClearSlave()">취소</button></div>`;
+    }
+    const explain = `<div class="wc-dep-explain">현재 <b>${escHtml(name)}</b>(master)가 <b>매 생성마다</b> 바뀝니다.<br>`
+      + `slave는 master가 한 바퀴 돌 때마다 한 칸 전진합니다.</div>`;
+    if (!simSlave) {
+      return explain + `<button class="wc-slave-pick" onclick="wcPickSlave()">＋ slave 선택</button>`;
+    }
+    const cycle = info && info.cycle != null ? info.cycle : (info ? info.count || 0 : 0);
+    const total = info ? info.total || 0 : 0;
+    const slaveCount = info ? info.slave_count || 0 : 0;
+    return explain
+      + `<div class="wc-slave-row"><span class="mod-section-label" style="margin:0">slave</span>`
+      + `<span class="wc-sel-chip">${escHtml(simSlave)} <span class="wc-pick-count">${slaveCount}</span></span>`
+      + `<button class="mod-btn-sm" onclick="wcPickSlave()">다시 선택</button>`
+      + `<button class="mod-btn-sm" onclick="wcClearSlave()">✕</button></div>`
+      + syntaxRow(`__*${name}__`)
+      + syntaxRow(`__$${name}:${simSlave}__`)
+      + `<div class="wc-stat-grid">`
+      + `<div><div class="wc-stat-label">1바퀴 생성 횟수</div><div class="wc-stat-val">${cycle}</div></div>`
+      + `<div><div class="wc-stat-label">완주 총 생성 횟수</div><div class="wc-stat-val">${total} <small>(${cycle}×${slaveCount})</small></div></div>`
+      + `</div>`;
+  }
+
+  function renderTabs() {
+    const area = document.getElementById('wcSimArea');
+    if (!area) return;
+    const info = lastInspect;
+    const name = currentWcName;
+    const tabs = [['random', '랜덤'], ['sequential', '순차'], ['dependent', '$종속:순차']];
+    const tabBar = tabs.map(([key, label]) =>
+      `<button class="wc-tab${simTab === key ? ' on' : ''}" onclick="wcSimTab('${key}')">${label}</button>`).join('');
+    let body;
+    if (simTab === 'dependent') {
+      body = renderDependentTab(info, name);
+    } else if (!info) {
+      body = '<div class="mod-empty">로딩…</div>';
+    } else if (simTab === 'sequential') {
+      const lines = (info.ordered || []).map((s, i) =>
+        `<div class="wc-sample-line"><span class="wc-idx">${i + 1}</span>${escHtml(String(s))}</div>`).join('');
+      body = syntaxRow(`__*${name}__`)
+        + `<div class="wc-slave-row" style="margin:8px 0 6px"><span class="mod-section-label" style="margin:0">순차 진행 (정렬된 순서)</span></div>`
+        + `<div class="wc-sim-samples">${lines || '<div class="mod-empty">비어 있음</div>'}</div>`
+        + `<div class="wc-an-total">총 <b>${info.count || 0}</b>개 · 한 바퀴 ${info.count || 0}회 생성</div>`;
+    } else {
+      const lines = (info.random || []).map(s =>
+        `<div class="wc-sample-line">${escHtml(String(s))}</div>`).join('');
+      body = syntaxRow(`__${name}__`)
+        + `<div class="wc-slave-row" style="margin:8px 0 6px"><span class="mod-section-label" style="margin:0">무작위 미리보기</span>`
+        + `<button class="wc-sim-roll" onclick="wcRoll()">🎲 다시 뽑기</button></div>`
+        + `<div class="wc-sim-samples">${lines || '<div class="mod-empty">비어 있음</div>'}</div>`;
+    }
+    area.innerHTML = `<div class="wc-tabs">${tabBar}</div><div class="wc-tab-body">${body}</div>`;
+  }
+
+  function ensureWildcardSimStyle() {
+    if (document.getElementById('wc-sim-style')) return;
+    const style = document.createElement('style');
+    style.id = 'wc-sim-style';
+    style.textContent = `
+.wc-sim-area{border-top:1px solid var(--border-dim);padding-top:10px}
+.wc-tabs{display:flex;gap:4px;border-bottom:1px solid var(--border-dim);margin-bottom:10px}
+.wc-tabs .wc-tab{background:none;border:0;border-bottom:2px solid transparent;color:var(--text-dim);padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font-mono)}
+.wc-tabs .wc-tab.on{color:var(--text-primary);border-bottom-color:var(--accent)}
+.wc-dep-explain{font-size:11px;color:var(--text-muted);line-height:1.65;background:var(--bg-deep);border:1px solid var(--border-dim);border-radius:7px;padding:8px 10px;margin-bottom:9px}
+.wc-dep-explain b{color:#6fb0ff}
+.wc-pick-banner{font-size:11px;color:var(--text-primary);background:rgba(124,106,239,.13);border:1px solid var(--accent);border-radius:7px;padding:8px 10px;margin-bottom:9px;display:flex;align-items:center;gap:8px;justify-content:space-between}
+.wc-slave-row{display:flex;align-items:center;gap:8px;margin-bottom:9px;flex-wrap:wrap}
+.wc-sel-chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg-deep);border:1px solid var(--accent-secondary);border-radius:999px;padding:4px 11px;font-size:11px;color:var(--text-primary)}
+.wc-sim-area .wc-pick-count{font-family:var(--font-mono);font-size:10px;color:var(--text-dim)}
+.wc-syntax-row{display:flex;align-items:center;gap:7px;margin:6px 0}
+.wc-syntax-row .wc-syntax{flex:1;font-family:var(--font-mono);font-size:12px;color:var(--accent-glow);background:var(--bg-deep);border:1px solid var(--border);border-radius:7px;padding:7px 10px;word-break:break-all}
+.wc-stat-grid{display:flex;gap:8px;margin-top:9px}
+.wc-stat-grid>div{flex:1;background:var(--bg-deep);border:1px solid var(--border-dim);border-radius:8px;padding:8px 10px}
+.wc-stat-label{font-size:10px;color:var(--text-dim)}
+.wc-stat-val{font-size:21px;font-weight:700;color:var(--success);font-family:var(--font-mono);margin-top:2px}
+.wc-stat-val small{font-size:11px;color:var(--text-dim);font-weight:400}
+.wc-sim-samples{display:flex;flex-direction:column;gap:2px;max-height:160px;overflow:auto}
+.wc-sim-samples .wc-sample-line{font-size:12px;color:var(--text-primary);padding:3px 0;border-bottom:1px solid var(--border-dim)}
+.wc-sim-samples .wc-sample-line:last-child{border-bottom:0}
+.wc-sim-samples .wc-idx{color:var(--text-dim);font-family:var(--font-mono);font-size:10px;margin-right:6px}
+.wc-an-total{margin-top:7px;font-size:12px;color:var(--text-primary)}
+.wc-sim-roll,.wc-slave-pick{height:26px;padding:0 12px;font-size:11px;font-weight:600;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:var(--bg-deep);color:var(--text-primary)}
+.wc-slave-pick{background:var(--accent);color:#fff;border-color:transparent}`;
+    document.head.appendChild(style);
+  }
+
   return {
     openBrowser,
+    setSimTab,
+    pickSlave,
+    clearSlave,
+    requestInspect,
     renderInlineBrowser,
     closeEditor,
     isEditorOpen,

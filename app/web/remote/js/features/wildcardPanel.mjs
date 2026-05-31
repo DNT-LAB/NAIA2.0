@@ -63,6 +63,14 @@ export function createWildcardPanel({
           <span style="font-size:12px">NovelAI 403 Prevention</span>
         </label>
       </div>
+      <div class="mod-section">
+        <div class="mod-section-label">와일드카드 호출법</div>
+        <div class="wc-syntax-guide">
+          <div><code>__name__</code> — 일반 (랜덤 1줄)</div>
+          <div><code>__*name__</code> — 순차 (순서대로)</div>
+          <div><code>__*master__</code> + <code>__$master:slave__</code> — 순차 + 종속</div>
+        </div>
+      </div>
       <div class="mod-section" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
         <button class="mod-btn-sm" onclick="setModuleParam('wildcard','reset_sequential','')">Reset Seq</button>
         <button class="mod-btn-sm" onclick="setModuleParam('wildcard','reload','')">Reload</button>

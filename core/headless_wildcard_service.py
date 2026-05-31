@@ -106,6 +106,18 @@ class HeadlessWildcardService:
                 "name": str(value or ""),
                 "result": self.preview(str(value or "")),
             }
+        if key == "inspect":
+            try:
+                payload = json.loads(str(value or "{}"))
+            except json.JSONDecodeError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            return self.inspect(
+                str(payload.get("name") or ""),
+                str(payload.get("slave") or ""),
+                payload.get("n", 12),
+            )
         return context._toast(f"Wildcard action is not supported in this runtime: {key}", level="info")
 
     def base_dir(self) -> Path:
@@ -240,6 +252,81 @@ class HeadlessWildcardService:
                 weights.append(1.0)
                 texts.append(str(entry))
         return "\n".join(f"#{index + 1}: {random.choices(texts, weights=weights, k=1)[0]}" for index in range(5))
+
+    def _resolve_entries(self, name: str) -> list[tuple[float, str]]:
+        """Resolve a wildcard name to its (weight, text) entries (fuzzy key + .txt fallback)."""
+        clean = str(name or "").strip().replace("\\", "/")
+        if clean.endswith(".txt"):
+            clean = clean[:-4]
+        manager = self.context.wildcard_manager
+        tree = getattr(manager, "wildcard_dict_tree", {}) if manager is not None else {}
+        raw: list[Any] = []
+        if isinstance(tree, dict):
+            raw = list(tree.get(clean, []))
+            if not raw:
+                for key in tree:
+                    if key == clean or key.endswith("/" + clean) or key.endswith("\\" + clean):
+                        raw = list(tree[key])
+                        break
+        if not raw:
+            content = self.read_file(f"{clean}.txt")
+            if content is None:
+                content = self.read_file(f"{clean.replace('/', '-')}.txt")
+            raw = [(100, line.strip()) for line in str(content or "").splitlines() if line.strip()]
+        entries: list[tuple[float, str]] = []
+        for item in raw:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                try:
+                    weight = float(item[0])
+                except (TypeError, ValueError):
+                    weight = 1.0
+                entries.append((weight, str(item[1])))
+            elif str(item).strip():
+                entries.append((1.0, str(item)))
+        return entries
+
+    def inspect(self, name: str, slave: str, n: Any) -> dict[str, Any]:
+        """Non-destructive single-wildcard inspect for the tabbed preview/assembly UI.
+
+        Returns the master wildcard's item count + a random roll + the items in order,
+        and (when a slave is given) the dependent-cycle math: a master that advances
+        every generation needs ``count`` gens per full cycle (= one slave step), and
+        ``count * slave_count`` gens to walk every slave value. Reads only — no live
+        wildcard/generation state is mutated.
+        """
+        try:
+            count_n = int(n)
+        except (TypeError, ValueError):
+            count_n = 12
+        count_n = max(1, min(count_n, 50))
+
+        entries = self._resolve_entries(name)
+        if not entries:
+            return self.context._toast(f"Wildcard '{name}' not found", level="error")
+        texts = [text for _, text in entries]
+        weights = [weight for weight, _ in entries]
+        count = len(entries)
+        random_roll = [random.choices(texts, weights=weights, k=1)[0] for _ in range(count_n)]
+        ordered = texts[:count_n]
+
+        payload: dict[str, Any] = {
+            "type": "wildcard_manager",
+            "action": "inspect_result",
+            "name": str(name),
+            "count": count,
+            "random": random_roll,
+            "ordered": ordered,
+        }
+        slave_name = str(slave or "").strip()
+        if slave_name:
+            slave_count = len(self._resolve_entries(slave_name))
+            payload.update({
+                "slave": slave_name,
+                "slave_count": slave_count,
+                "cycle": count,                 # gens for master to complete one cycle (= one slave step)
+                "total": count * slave_count,   # gens to walk every slave value
+            })
+        return payload
 
     def reload_manager(self) -> None:
         manager = self.context.wildcard_manager

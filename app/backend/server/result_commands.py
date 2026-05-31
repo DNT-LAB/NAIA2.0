@@ -362,6 +362,8 @@ async def handle_result_command(
             return True
         await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
         await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+        for _evicted in stored.evicted_payloads:
+            await broadcast_json(clients, _evicted)
         await broadcast_json(clients, context.auto_save_state_payload())
         await _send_json(ws, {
             "type": "result_upscale_state",
@@ -458,6 +460,8 @@ async def handle_result_command(
         await _auto_save_generated_history_item(context, stored.item)
         await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
         await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+        for _evicted in stored.evicted_payloads:
+            await broadcast_json(clients, _evicted)
         await broadcast_json(clients, context.auto_save_state_payload())
         await _send_json(ws, {
             "type": "result_enhance_state",

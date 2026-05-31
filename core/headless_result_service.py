@@ -46,6 +46,9 @@ class HeadlessStoredResult:
     item: HeadlessHistoryItem
     image_meta: dict[str, Any]
     metadata_payload: dict[str, Any]
+    # viewer_history_removed payloads for items dropped by overflow eviction, so
+    # callers can broadcast them and the frontend trims the matching thumbnails.
+    evicted_payloads: list[dict[str, Any]] = field(default_factory=list)
 
 
 class HeadlessResultStore:
@@ -64,6 +67,11 @@ class HeadlessResultStore:
         webp_bytes = self._image_to_webp(image)
         params = dict(getattr(request, "params", {}) or {})
         params.pop("credential", None)
+        # NOTE: input image/mask bytes (image_bytes/mask_bytes/init_image_bytes/...) are KEPT here
+        # on purpose. "큐 앞/뒤에 추가 → 원본 프롬프트 유지"(queue_mode='original') replays the stored
+        # params directly, and APIService picks img2img/inpaint from those byte fields. Stripping them
+        # would silently downgrade an img2img/inpaint replay to txt2img / drop the mask. They are freed
+        # with the item on delete (proven by the weakref GC test), so this is not a leak.
         prompt_context = {
             "main_prompt": params.get("input", ""),
             "final_prompt": params.get("input", ""),
@@ -79,10 +87,18 @@ class HeadlessResultStore:
             api_metadata=dict(api_result.get("api_metadata", {}) or {}),
         )
         self._items.insert(0, item)
+        evicted = self._items[self.max_items:]
         del self._items[self.max_items:]
         image_meta = self._set_latest_item(item) or {}
         metadata_payload = self.latest_metadata_payload or {}
-        return HeadlessStoredResult(item=item, image_meta=image_meta, metadata_payload=metadata_payload)
+        # Build removal payloads AFTER eviction so their `total` reflects the capped count.
+        evicted_payloads = [self.viewer_removed_payload(ev) for ev in evicted]
+        return HeadlessStoredResult(
+            item=item,
+            image_meta=image_meta,
+            metadata_payload=metadata_payload,
+            evicted_payloads=evicted_payloads,
+        )
 
     def get_item(self, history_id: str) -> HeadlessHistoryItem | None:
         history_id = str(history_id or "")

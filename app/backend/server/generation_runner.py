@@ -159,6 +159,8 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 })
             await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
             await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+            for _evicted in stored.evicted_payloads:
+                await broadcast_json(clients, _evicted)
             # 직전 생성에 사용된 와일드카드(순차/종속 카운터 + Used)를 라이브 반영.
             # auto-continue 가 다음 프롬프트로 context 를 덮어쓰기 전에 push 한다.
             await _broadcast_wildcard_state(context, clients)

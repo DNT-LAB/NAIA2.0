@@ -829,7 +829,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260527-textarea-size1')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260531-char-ac-focus1')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,

@@ -13,6 +13,9 @@ export function createCharacterPanel({
   let coldTooltipEl = null;
   let coldPanelHost = null;
   let resizeBound = false;
+  let lastRenderedStructureSignature = '';
+  let deferredFocusedRenderState = null;
+  let deferredFocusTarget = null;
 
   function escAttr(value) {
     return String(value ?? '')
@@ -256,6 +259,56 @@ export function createCharacterPanel({
     });
   }
 
+  function focusedCharacterTextarea() {
+    const active = document.activeElement;
+    if (!active || !moduleBody.contains(active)) return null;
+    if (!active.classList?.contains('mod-char-prompt') && !active.classList?.contains('mod-char-uc')) return null;
+    if (!active.closest?.('.mod-char-block[data-char-index]')) return null;
+    return active;
+  }
+
+  function characterStructureSignature(state) {
+    const chars = Array.isArray(state?.characters) ? state.characters : [];
+    return JSON.stringify({
+      activated: !!state?.activated,
+      reroll_on_generate: !!state?.reroll_on_generate,
+      characters: chars.map(character => [
+        character?.id,
+        slotState(character),
+        !!character?.active,
+        character?.custom_name || '',
+      ]),
+    });
+  }
+
+  function clearDeferredFocusedRender() {
+    if (deferredFocusTarget) {
+      deferredFocusTarget.removeEventListener('blur', flushDeferredFocusedRender);
+    }
+    deferredFocusTarget = null;
+    deferredFocusedRenderState = null;
+  }
+
+  function queueDeferredFocusedRender(textarea, state) {
+    deferredFocusedRenderState = state;
+    if (deferredFocusTarget === textarea) return;
+    if (deferredFocusTarget) {
+      deferredFocusTarget.removeEventListener('blur', flushDeferredFocusedRender);
+    }
+    deferredFocusTarget = textarea;
+    textarea.addEventListener('blur', flushDeferredFocusedRender, {once: true});
+  }
+
+  function flushDeferredFocusedRender() {
+    const pendingState = deferredFocusedRenderState;
+    deferredFocusTarget = null;
+    deferredFocusedRenderState = null;
+    if (!pendingState) return;
+    globalThis.setTimeout(() => {
+      if (!focusedCharacterTextarea()) render(pendingState);
+    }, 0);
+  }
+
   function renderWorkingSlot(character, index, totalCount) {
     const customName = String(character.custom_name || '').trim();
     const label = customName ? `${escHtml(customName)} <span class="mod-char-id-muted">C${character.id}</span>` : `C${character.id}`;
@@ -319,9 +372,20 @@ export function createCharacterPanel({
 
   function render(state) {
     hideColdTooltip();
+    const nextState = state || {};
+    const structureSignature = characterStructureSignature(nextState);
+    const focusedTextarea = focusedCharacterTextarea();
+    if (focusedTextarea && lastRenderedStructureSignature === structureSignature) {
+      // Server echo for local text edits must not replace the focused textarea;
+      // replacing it collapses tag autocomplete before the user can choose.
+      lastState = nextState;
+      queueDeferredFocusedRender(focusedTextarea, nextState);
+      return;
+    }
+    clearDeferredFocusedRender();
     const textareaHeights = captureTextareaHeights();
-    lastState = state || {};
-    const chars = state.characters || [];
+    lastState = nextState;
+    const chars = nextState.characters || [];
     const workingSlots = chars
       .map((character, index) => ({character, index}))
       .filter(item => slotState(item.character) !== 'cold');
@@ -332,7 +396,7 @@ export function createCharacterPanel({
       ? workingSlots.map(({character, index}) => renderWorkingSlot(character, index, chars.length)).join('')
       : '<div class="mod-empty">No active or inactive slots. Use + Add Character or restore a Cold slot.</div>';
     renderColdPanel(coldSlots, chars.length);
-    const previewText = state.processed_preview_text || '';
+    const previewText = nextState.processed_preview_text || '';
     const previewEmpty = !previewText.trim();
 
     moduleBody.innerHTML = `
@@ -340,13 +404,13 @@ export function createCharacterPanel({
         <section class="mod-character-workspace">
           <div>
             <label class="mod-checkbox-item">
-              <input type="checkbox" ${state.activated ? 'checked' : ''} oninput="setModuleParam('character','activated',String(this.checked))">
+              <input type="checkbox" ${nextState.activated ? 'checked' : ''} oninput="setModuleParam('character','activated',String(this.checked))">
               <span class="mod-checkbox-label">Enable Character Prompts (NAID4+)</span>
             </label>
           </div>
           <div>
             <label class="mod-checkbox-item">
-              <input type="checkbox" ${state.reroll_on_generate ? 'checked' : ''} oninput="setModuleParam('character','reroll_on_generate',String(this.checked))">
+              <input type="checkbox" ${nextState.reroll_on_generate ? 'checked' : ''} oninput="setModuleParam('character','reroll_on_generate',String(this.checked))">
               <span class="mod-checkbox-label">Process wildcards on Generate</span>
             </label>
           </div>
@@ -354,7 +418,7 @@ export function createCharacterPanel({
             <button class="mod-btn-sm" onclick="addCharacterSlot()">+ Add Character</button>
             <button class="mod-btn-sm mod-btn-encode" onclick="refreshCharacterPreview()">Refresh Preview</button>
             <button class="mod-btn-sm mod-cold-toggle ${coldPanelOpen ? 'active' : ''}" onclick="toggleCharacterColdPanel()">Cold (${coldSlots.length})</button>
-            <span class="mod-char-meta">${state.active_count || 0} active / ${workingSlots.length} work / ${coldSlots.length} cold</span>
+            <span class="mod-char-meta">${nextState.active_count || 0} active / ${workingSlots.length} work / ${coldSlots.length} cold</span>
           </div>
           ${charsHtml}
           <div class="mod-char-preview">
@@ -370,6 +434,7 @@ export function createCharacterPanel({
     restoreTextareaHeights(textareaHeights);
     applyColdSearchFilter();
     bindColdInteractions();
+    lastRenderedStructureSignature = structureSignature;
   }
 
   return {

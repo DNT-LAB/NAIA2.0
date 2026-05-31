@@ -5344,6 +5344,14 @@ body.resizing-result-info {
 .result-context-item.danger:not(:disabled) {
   color: #ff6b6b;
 }
+/* 삭제 설정 서브메뉴에서 현재 선택된 모드(✓) 강조 */
+.result-context-item.is-active:not(:disabled) {
+  background: rgba(74, 222, 128, 0.14);
+  font-weight: 600;
+}
+.result-context-item.is-active:not(.danger):not(:disabled) {
+  color: #7fe0a0;
+}
 .artist-thumb-context-menu .result-context-item.artist-thumb-queue-fixed:not(:disabled) {
   color: #9fe4ff;
   background: rgba(54, 144, 210, 0.12);

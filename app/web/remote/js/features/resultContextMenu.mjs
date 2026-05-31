@@ -11,6 +11,8 @@ const ACTION_COPY_IMAGE = 'copy_image';
 const ACTION_UPSCALE_NAI = 'upscale_nai';
 const ACTION_METADATA_DETACHED = 'show_metadata_detached';
 const ACTION_WEBUI_ENHANCE = 'webui_enhance';
+const ACTION_DELETE_RESULT = 'delete_result';
+const ACTION_SET_DELETE_MODE = 'set_delete_mode';
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -45,6 +47,17 @@ const THUMBNAIL_IMAGE_ACTIONS = [
   {label: '클립보드 복사', action: ACTION_COPY_IMAGE, capability: 'copy_png', copyFormat: 'png', badge: 'PNG', badgeTone: 'blue'},
   {type: 'separator'},
 ];
+
+// 컨텍스트 메뉴 최하단 ⚙ 삭제 설정 — 삭제 모드(히스토리 전용 / 디스크 파일까지)를 고른다.
+// children 인프라 재사용. 선택은 메뉴를 닫지 않고 active 표시만 갱신(아래 bindActions 특수 처리).
+const DELETE_SETTINGS_MENU_ITEM = {
+  label: '⚙ 삭제 설정',
+  alwaysEnabled: true,
+  children: [
+    {label: '히스토리에서만 제거', action: ACTION_SET_DELETE_MODE, deleteMode: 'history', alwaysEnabled: true},
+    {label: '디스크 파일까지 삭제', action: ACTION_SET_DELETE_MODE, deleteMode: 'disk', alwaysEnabled: true, danger: true},
+  ],
+};
 
 const MAIN_IMAGE_MENU = [
   ...MAIN_IMAGE_ACTIONS,
@@ -96,6 +109,9 @@ const MAIN_IMAGE_MENU = [
   },
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
+  {type: 'separator'},
+  {label: '이미지 삭제', action: ACTION_DELETE_RESULT, capability: 'delete', danger: true},
+  DELETE_SETTINGS_MENU_ITEM,
 ];
 
 const THUMBNAIL_MENU = [
@@ -143,7 +159,8 @@ const THUMBNAIL_MENU = [
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
-  {label: '이미지 삭제', danger: true},
+  {label: '이미지 삭제', action: ACTION_DELETE_RESULT, capability: 'delete', danger: true},
+  DELETE_SETTINGS_MENU_ITEM,
 ];
 
 export function createResultContextMenu({
@@ -165,6 +182,7 @@ export function createResultContextMenu({
   onCopyImage = null,
   onUpscaleNai = null,
   onWebUiEnhance = null,
+  onDelete = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
   canUseDesktopImg2Img = () => true,
@@ -174,6 +192,37 @@ export function createResultContextMenu({
   let metadataModal = null;
   let menuVersion = 0;
   const submenuCloseTimers = new WeakMap();
+  const DELETE_MODE_KEY = 'naia_result_delete_mode';
+  let deleteMode = readDeleteMode();
+
+  function readDeleteMode() {
+    try {
+      return window.localStorage?.getItem(DELETE_MODE_KEY) === 'disk' ? 'disk' : 'history';
+    } catch (error) {
+      return 'history';
+    }
+  }
+
+  function setDeleteMode(mode) {
+    deleteMode = mode === 'disk' ? 'disk' : 'history';
+    try { window.localStorage?.setItem(DELETE_MODE_KEY, deleteMode); } catch (error) {}
+  }
+
+  // 모드 선택 시 메뉴를 닫지 않고 ✓ active 표시만 라이브 갱신한다.
+  function updateDeleteModeActiveState() {
+    if (!menu) return;
+    menu.querySelectorAll('[data-delete-mode]').forEach(button => {
+      const active = button.dataset.deleteMode === deleteMode;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-checked', active ? 'true' : 'false');
+      const labelSpan = button.querySelector('span');
+      if (labelSpan) {
+        const base = button.dataset.deleteLabel ?? labelSpan.textContent;
+        button.dataset.deleteLabel = base;
+        labelSpan.textContent = (active ? '✓ ' : '') + base;
+      }
+    });
+  }
 
   function isTouchMenu() {
     const mediaQuery = window.matchMedia?.('(hover: none), (pointer: coarse)');
@@ -269,6 +318,10 @@ export function createResultContextMenu({
       if (!hasCapability(context, 'image_action')) return false;
       return typeof onImageAction === 'function';
     }
+    if (item.action === ACTION_DELETE_RESULT) {
+      // capability 'delete'는 위에서 이미 검증됨 (백엔드 asset이 history item 존재 시 true).
+      return typeof onDelete === 'function';
+    }
     return false;
   }
 
@@ -291,6 +344,12 @@ export function createResultContextMenu({
     const copyFormatAttr = item.copyFormat ? ` data-copy-format="${item.copyFormat}"` : '';
     const queuePositionAttr = item.queuePosition ? ` data-queue-position="${item.queuePosition}"` : '';
     const queueModeAttr = item.queueMode ? ` data-queue-mode="${item.queueMode}"` : '';
+    const isDeleteModeItem = item.action === ACTION_SET_DELETE_MODE;
+    const deleteModeAttr = isDeleteModeItem && item.deleteMode ? ` data-delete-mode="${item.deleteMode}"` : '';
+    const deleteModeActive = isDeleteModeItem && item.deleteMode === deleteMode;
+    const deleteModeActiveCls = deleteModeActive ? ' is-active' : '';
+    const deleteLabelAttr = isDeleteModeItem ? ` data-delete-label="${escapeText(item.label)}"` : '';
+    const labelText = deleteModeActive ? `✓ ${item.label}` : item.label;
     const submenuAttr = hasChildren ? ' data-submenu-trigger="true" aria-haspopup="menu" aria-expanded="false"' : '';
     const badgeClass = item.badgeTone ? ` ${item.badgeTone}` : '';
     const badgeHtml = item.badge
@@ -301,8 +360,8 @@ export function createResultContextMenu({
       : '';
     return `
       <div class="result-context-group${hasChildren ? ' has-children' : ''}">
-        <button type="button" class="result-context-item${danger}${hasChildren ? ' has-children' : ''}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${submenuAttr}${disabledAttr}>
-          <span>${escapeText(item.label)}</span><span class="result-context-item-tail">${badgeHtml}${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}</span>
+        <button type="button" class="result-context-item${danger}${deleteModeActiveCls}${hasChildren ? ' has-children' : ''}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${deleteModeAttr}${deleteLabelAttr}${submenuAttr}${disabledAttr}>
+          <span>${escapeText(labelText)}</span><span class="result-context-item-tail">${badgeHtml}${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}</span>
         </button>
         ${childHtml}
       </div>`;
@@ -463,6 +522,12 @@ export function createResultContextMenu({
         event.stopPropagation();
         if (button.disabled) return;
         const action = button.dataset.action;
+        if (action === ACTION_SET_DELETE_MODE) {
+          // 삭제 모드만 변경하고 메뉴는 닫지 않는다 (active ✓ 라이브 갱신).
+          setDeleteMode(button.dataset.deleteMode === 'disk' ? 'disk' : 'history');
+          updateDeleteModeActiveState();
+          return;
+        }
         close();
         if (action === ACTION_LOAD_PROMPT) {
           onLoadPrompt(context);
@@ -494,6 +559,8 @@ export function createResultContextMenu({
           onWebUiEnhance(context);
         } else if (action === ACTION_IMAGE_ACTION) {
           onImageAction(context, button.dataset.imageAction || '');
+        } else if (action === ACTION_DELETE_RESULT) {
+          if (typeof onDelete === 'function') onDelete(context, deleteMode);
         }
       });
     });

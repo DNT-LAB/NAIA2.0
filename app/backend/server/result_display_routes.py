@@ -286,7 +286,10 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
             "inpaint": bool(has_image and nai_mode),
             "character_reference": bool(item),
             "remote_event": bool(has_source_row),
-            "delete": bool(item and not has_file),
+            # delete capability gates the result context-menu "이미지 삭제" action.
+            # True whenever a history item backs this result (saved or unsaved);
+            # the route resolves the item by its __history_item__ rel_path.
+            "delete": bool(item),
         },
     }
 
@@ -347,7 +350,9 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             "inpaint": False,
             "character_reference": False,
             "remote_event": False,
-            "delete": bool(item and not item_has_file),
+            # delete enabled for any history-backed saved result; disk-only viewer
+            # targets (no item) stay false — this route can only remove history items.
+            "delete": bool(item),
         },
     }
 
@@ -1010,11 +1015,14 @@ def register_result_display_routes(
         item = history_item_from_action_payload(session_context, payload)
         if item is None:
             return JSONResponse({"ok": False, "error": "History item not found"}, status_code=400)
+        # keep_file=True → history-only removal (skip the irreversible disk unlink).
+        # Default False preserves the legacy behaviour (disk + history) for existing callers.
+        keep_file = bool(payload.get("keep_file"))
 
         def _delete_item():
             file_path = str(getattr(item, "filepath", "") or "")
             deleted_file = False
-            if file_path:
+            if file_path and not keep_file:
                 target = Path(file_path)
                 if target.is_file():
                     target.unlink()

@@ -594,7 +594,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260526-open-location1')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260531-imgdel1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -619,6 +619,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onCopyImage: (context, format) => callResultImageAction('copyImageFromContext', context, format),
       onUpscaleNai: context => callResultImageAction('upscaleFromContext', context),
       onWebUiEnhance: context => requestResultEnhanceFromContext(context),
+      onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       canUseDesktopImg2Img,
       canOpenLocalFiles: () => isLocalWebHost || isDesktopShell,
@@ -2405,6 +2406,13 @@ function setResultUnsavedActionBusy(busy) {
 
 function renderResultUnsavedActions(asset = null) {
   resultUnsavedActionAsset = asset;
+  // current 프리뷰에 안정적 history 식별자(rel_path)를 각인 → 삭제 시 "표시 중 이미지" 여부를
+  // source가 아닌 동일성으로 정확히 판정 (오클리어 방지). source는 'current' 그대로 유지하므로
+  // activeResultAssetUrl / buildImagePlaneContext 등 기존 흐름은 영향받지 않는다.
+  const assetPath = String(asset?.path || '');
+  if (preview && preview.dataset.source === 'current' && assetPath.startsWith('__history_item__/')) {
+    preview.dataset.path = assetPath;
+  }
   const visible = isUnsavedHistoryAsset(asset);
   if (resultUnsavedActions) resultUnsavedActions.hidden = !visible;
   if (!visible) setResultUnsavedActionBusy(false);
@@ -2476,7 +2484,9 @@ async function saveDisplayedHistoryImage() {
 async function deleteDisplayedHistoryImage() {
   if (!isUnsavedHistoryAsset(resultUnsavedActionAsset) || resultUnsavedActionBusy) return;
   const deletedPath = String(resultUnsavedActionAsset.path || '');
-  const deletingDisplayedImage = preview?.dataset?.source === 'current' || preview?.dataset?.path === deletedPath;
+  // 표시 중 이미지 여부는 rel_path 동일성으로만 판정 (source 폴백 금지 — 새 결과 도착 시 오클리어 방지).
+  // current 프리뷰는 renderResultUnsavedActions에서 같은 rel_path가 각인되므로 동일성 매칭이 성립한다.
+  const deletingDisplayedImage = Boolean(deletedPath) && preview?.dataset?.path === deletedPath;
   setResultUnsavedActionBusy(true);
   try {
     const response = await fetch('/api/result/action/delete', {
@@ -2504,6 +2514,49 @@ async function deleteDisplayedHistoryImage() {
     showToast(error.message || 'History delete failed', 'error');
   } finally {
     setResultUnsavedActionBusy(false);
+    scheduleResultUnsavedActionRefresh(250);
+  }
+}
+
+// 결과/히스토리 컨텍스트 메뉴 "이미지 삭제" 핸들러.
+// mode: 'history'(기본) = 히스토리에서만 제거 / 'disk' = 디스크 파일까지 삭제.
+// 안전장치: 반드시 __history_item__/<id> rel_path로만 삭제 (오삭제·레이스 방지, 확인 다이얼로그 없음).
+async function deleteResultFromContext(context, mode) {
+  const deletedPath = String(context?.path || '');
+  if (!deletedPath.startsWith('__history_item__/')) {
+    showToast('삭제할 수 있는 히스토리 항목이 아닙니다', 'error');
+    return;
+  }
+  const keepFile = mode !== 'disk';
+  // 표시 중 이미지 여부는 오직 rel_path 동일성으로 판정 (source 폴백 금지).
+  // 메뉴를 연 사이 새 결과가 표시돼도 엉뚱한 최신 프리뷰를 클리어하지 않는다.
+  // current 프리뷰는 renderResultUnsavedActions에서 rel_path가 각인된다.
+  const deletingDisplayedImage = Boolean(deletedPath) && preview?.dataset?.path === deletedPath;
+  try {
+    const response = await fetch('/api/result/action/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path: deletedPath, keep_file: keepFile}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    renderResultUnsavedActions(null);
+    if (resultHistory && data.rel_path) resultHistory.onRemoved(data);
+    if (deletingDisplayedImage) {
+      preview.removeAttribute('src');
+      preview.classList.remove('show');
+      preview.dataset.path = '';
+      emptyMsg.style.display = '';
+      if (resultInfoContent) resultInfoContent.innerHTML = '<span class="result-info-empty">No history item selected</span>';
+      if (resultEnhance) resultEnhance.clearCurrentMeta();
+    }
+    showToast(data.deleted_file ? '이미지 삭제됨 (디스크 파일 포함)' : '이미지 삭제됨 (히스토리)', 'success');
+  } catch (error) {
+    console.error('Result context delete failed', error);
+    showToast(error.message || '이미지 삭제 실패', 'error');
+  } finally {
     scheduleResultUnsavedActionRefresh(250);
   }
 }

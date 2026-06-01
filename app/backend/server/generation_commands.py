@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -11,6 +12,12 @@ from fastapi.responses import JSONResponse
 from app.backend.server.websocket_broadcast import broadcast_json as _broadcast_json
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
+from core.resolution_utils import (
+    anima_resolution_preset_candidates,
+    nearest_anima_preset_resolution,
+    nearest_standard_1mp_resolution,
+    parse_resolution_pair,
+)
 from core.web_session_context import WebSessionContext
 
 
@@ -23,6 +30,112 @@ GENERATION_COMMAND_TYPES = {
     "generate",
     "depth_generate",
 }
+
+# --- ComfyUI random resolution contract (ports future01 bb47537) ---------------
+# The external "NAIA Bridge" ComfyUI client reads top-level width/height from the
+# /api/comfyui/random response. The headless payload only carried a NESTED
+# detected_resolution (and only when auto_fit produced one), so a normal ComfyUI
+# random call returned no width/height and the client raised a RuntimeError. These
+# helpers guarantee a top-level resolution for the ComfyUI path ONLY (NAI/WEBUI and
+# the shared websocket_payload are untouched).
+_DEFAULT_COMFYUI_RESOLUTION = (832, 1216)
+
+
+def _coerce_resolution_flag(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _positive_resolution_from_params(params: Any) -> tuple[int, int] | None:
+    if not isinstance(params, dict):
+        return None
+    width = params.get("width")
+    height = params.get("height")
+    if (width is None or height is None) and params.get("resolution"):
+        parsed = parse_resolution_pair(params.get("resolution"))
+        if parsed:
+            width, height = parsed
+    try:
+        width = int(width)
+        height = int(height)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+def _source_row_resolution(source_row: Any) -> tuple[int, int] | None:
+    if source_row is None:
+        return None
+    getter = getattr(source_row, "get", None)
+    try:
+        if callable(getter):
+            width = getter("image_width")
+            height = getter("image_height")
+        else:
+            width = source_row["image_width"]
+            height = source_row["image_height"]
+        width = int(width)
+        height = int(height)
+    except (TypeError, ValueError, KeyError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+def _resolve_comfyui_response_resolution(result: Any, overrides: Any) -> tuple[int, int, str]:
+    """Always return (width, height, source) for a ComfyUI random response.
+
+    Fallback chain mirrors future01 RemoteBridge._comfyui_random_response_resolution:
+    auto_fit result -> explicit request override -> preset snap (source row or random
+    preset pick) -> nearest standard 1MP for source dims -> guaranteed default.
+    """
+    detected = getattr(result, "detected_resolution", None)
+    if detected:
+        try:
+            return int(detected[0]), int(detected[1]), "detected_fit"
+        except (TypeError, ValueError, IndexError):
+            pass
+
+    explicit = _positive_resolution_from_params(overrides if isinstance(overrides, dict) else None)
+    if explicit:
+        return explicit[0], explicit[1], "explicit"
+
+    context = getattr(result, "context", None)
+    settings = getattr(context, "settings", None) if context is not None else None
+    source_pair = _source_row_resolution(getattr(context, "source_row", None))
+
+    preset_flag = None
+    if isinstance(overrides, dict) and overrides.get("resolution_preset_enabled") is not None:
+        preset_flag = overrides.get("resolution_preset_enabled")
+    elif isinstance(settings, dict):
+        preset_flag = settings.get("resolution_preset_enabled")
+    preset_id = None
+    if isinstance(overrides, dict):
+        preset_id = overrides.get("resolution_preset")
+    if preset_id is None and isinstance(settings, dict):
+        preset_id = settings.get("resolution_preset")
+
+    if _coerce_resolution_flag(preset_flag):
+        if source_pair:
+            sw, sh = source_pair
+            width, height = nearest_anima_preset_resolution(sw, sh, preset_id)
+            return width, height, ("detected" if (width, height) == (sw, sh) else "detected_fit")
+        candidates = anima_resolution_preset_candidates(preset_id)
+        if candidates:
+            width, height = random.choice(candidates)
+            return int(width), int(height), "random"
+
+    if source_pair:
+        sw, sh = source_pair
+        width, height = nearest_standard_1mp_resolution(sw, sh)
+        return width, height, ("detected" if (width, height) == (sw, sh) else "detected_fit")
+
+    width, height = _DEFAULT_COMFYUI_RESOLUTION
+    return width, height, "default"
 
 
 def random_service(context: WebSessionContext) -> HeadlessRandomPromptService:
@@ -593,6 +706,18 @@ def register_generation_rest_routes(
         payload = result.websocket_payload()
         if not result.success:
             return JSONResponse(payload, status_code=400)
+        # Guarantee a top-level resolution (ports future01 bb47537) so the external
+        # NAIA Bridge ComfyUI client never sees a missing width/height, and feed the
+        # same dims into NAIA's own auto-generation so it matches the response.
+        res_w, res_h, res_source = _resolve_comfyui_response_resolution(result, overrides)
+        if res_w and res_h:
+            # Authoritative for this ComfyUI path: res_w/res_h already honors a valid
+            # explicit override (the resolver returns it first), so assigning here keeps
+            # NAIA's auto-generation in lock-step with the response and overwrites any
+            # invalid/nonpositive width/height the caller may have sent.
+            overrides["width"] = res_w
+            overrides["height"] = res_h
+            overrides["resolution"] = f"{res_w} x {res_h}"
         generation_result = await _maybe_enqueue_random_auto_generation(
             context,
             result=result,
@@ -605,7 +730,7 @@ def register_generation_rest_routes(
         will_naia_generate = bool(generation_result and generation_result.ok)
         if will_naia_generate and context.headless_generation_execute_enabled:
             start_generation_runner(context, clients)
-        return {
+        response = {
             "ok": True,
             "status": "prompt_generated",
             "request_id": request_id,
@@ -616,6 +741,14 @@ def register_generation_rest_routes(
             **payload,
             "extra_messages": result.extra_messages,
         }
+        # Top-level resolution contract (set AFTER **payload so it is authoritative;
+        # the nested detected_resolution from payload is preserved for Remote Web).
+        if res_w and res_h:
+            response["width"] = res_w
+            response["height"] = res_h
+            response["resolution"] = f"{res_w} x {res_h}"
+            response["resolution_source"] = res_source
+        return response
 
     @app.get("/api/comfyui/health")
     async def api_comfyui_health():

@@ -276,6 +276,12 @@ class HeadlessConditionalRuleEngine:
                 self._record_character_skip(context, target, "no active character slots")
                 return
         elif isinstance(index, int) and 0 <= index < len(slots):
+            if not slots[index].get("active"):
+                # In-range but inactive/cold: _store_character_overrides only emits
+                # active slots, so the write would be silently dropped — record a skip
+                # so the bug [2] hardening toast surfaces it.
+                self._record_character_skip(context, target, f"slot {int(index) + 1} inactive")
+                return
             indices = [index]
         else:
             self._record_character_skip(context, target, f"index {int(index) + 1} missing")
@@ -537,6 +543,30 @@ class HeadlessConditionalRuleEngine:
             return target[1:].strip() in tag
         return tag == target
 
+    def _expand_action_tags(self, context, raw_tags) -> list[str]:
+        """Expand wildcard tokens (__wc__/<a|b>/$wc) in tags an action injects.
+
+        Only the action's freshly-authored tags are expanded — pre-existing prefix/
+        main/postfix tags are never re-expanded (that would re-roll random wildcards
+        and advance sequential/dependent counters). Plain tags pass through unchanged.
+        """
+        tags = [str(tag) for tag in (raw_tags or []) if str(tag).strip()]
+        if not tags:
+            return tags
+        if not any(("__" in tag) or ("<" in tag) or tag.lstrip().startswith("$") for tag in tags):
+            return tags
+        manager = getattr(self.app_context, "wildcard_manager", None)
+        if manager is None:
+            return tags
+        try:
+            from core.wildcard_processor import WildcardProcessor
+
+            expanded = WildcardProcessor(manager).expand_tags(list(tags), context)
+            cleaned = [str(tag) for tag in expanded if str(tag).strip()]
+            return cleaned or tags
+        except Exception:
+            return tags
+
     def _execute_action(
         self,
         context,
@@ -546,15 +576,20 @@ class HeadlessConditionalRuleEngine:
         postfix_tags: list[str],
     ) -> tuple[list[str], list[str], list[str]]:
         action_type = action.get("type")
+        # Expand wildcard tokens (__wc__/<a|b>/$wc) in the tags this action injects.
+        # The conditional hook runs at 'after_wildcard' (after the only expansion step),
+        # so action-authored wildcards would otherwise survive raw into the prompt.
+        # Scoped to the action's NEW tags only — never re-expands pre-existing list tags.
+        action_tags = self._expand_action_tags(context, action.get("tags"))
         if action_type == "append_to_list":
             target = str(action.get("target") or "main")
             if self._is_char_uc_target(target):
-                self._write_char_uc_target(context, target, list(action.get("tags") or []), op="append")
+                self._write_char_uc_target(context, target, list(action_tags), op="append")
             else:
-                self._target_list(prefix_tags, main_tags, postfix_tags, target).extend(list(action.get("tags") or []))
+                self._target_list(prefix_tags, main_tags, postfix_tags, target).extend(list(action_tags))
         elif action_type == "insert":
             target = str(action.get("target") or "")
-            tags = list(action.get("tags") or [])
+            tags = list(action_tags)
             for tag_list in (prefix_tags, main_tags, postfix_tags):
                 for index, tag in enumerate(tag_list):
                     if self._tag_matches_action_target(str(tag), target):
@@ -562,7 +597,7 @@ class HeadlessConditionalRuleEngine:
                         return prefix_tags, main_tags, postfix_tags
         elif action_type == "replace":
             target = str(action.get("old") or "")
-            replacements = list(action.get("tags") or [])
+            replacements = list(action_tags)
             for tag_list in (prefix_tags, main_tags, postfix_tags):
                 index = 0
                 while index < len(tag_list):
@@ -575,7 +610,7 @@ class HeadlessConditionalRuleEngine:
             self._write_char_uc_target(
                 context,
                 str(action.get("target") or ""),
-                list(action.get("tags") or []),
+                list(action_tags),
                 op="set",
             )
         elif action_type == "func_char_set":

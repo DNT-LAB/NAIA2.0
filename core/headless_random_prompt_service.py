@@ -193,6 +193,11 @@ class HeadlessRandomPromptService:
         safe_print("Headless Remote: random prompt generated", flush=True)
         prompt_run_id = str(getattr(result.context, "metadata", {}).get("prompt_run_id") or "")
 
+        extra_messages = [tag_filter_update] if tag_filter_update else []
+        skip_message = self._conditional_character_skip_message(result.context)
+        if skip_message:
+            extra_messages.append(skip_message)
+
         return HeadlessRandomPromptResult(
             success=True,
             prompt=result.final_prompt or "",
@@ -203,8 +208,34 @@ class HeadlessRandomPromptService:
             prompt_run_id=prompt_run_id,
             detected_resolution=result.detected_resolution,
             reset_resolution_detected=result.reset_resolution_detected,
-            extra_messages=[tag_filter_update] if tag_filter_update else [],
+            extra_messages=extra_messages,
         )
+
+    @staticmethod
+    def _conditional_character_skip_message(prompt_context: Any) -> dict[str, Any] | None:
+        """Surface silently-dropped conditional character targets (bug [2] hardening).
+
+        Conditional rules like char:N+=tag / uc:N= aimed at an inactive/cold/missing
+        slot are dropped without effect; without this the user sees nothing. Emit a
+        warning toast (the 'toast' WS type is already handled in app.js).
+        """
+        metadata = getattr(prompt_context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        skips = metadata.get("conditional_character_skips") or []
+        targets = [
+            str(skip.get("target"))
+            for skip in skips
+            if isinstance(skip, dict) and skip.get("target")
+        ]
+        if not targets:
+            return None
+        joined = ", ".join(dict.fromkeys(targets))
+        return {
+            "type": "toast",
+            "level": "warning",
+            "message": f"조건부 규칙이 비활성/없는 캐릭터 슬롯을 대상으로 해 적용되지 않았습니다: {joined}",
+        }
 
     def generate_from_source_row(
         self,

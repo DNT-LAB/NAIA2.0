@@ -319,7 +319,7 @@ async function loadRuntimeCapabilities() {
 }
 
 loadRuntimeCapabilities();
-const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260525-runtime-danbooru1')
+const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260531-danbooru-embed1')
   .then(({createDanbooruBrowserController}) => {
     danbooruTabControl = createDanbooruBrowserController({
       document,

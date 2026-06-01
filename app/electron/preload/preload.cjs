@@ -15,6 +15,22 @@ contextBridge.exposeInMainWorld("naiaShell", {
   downloadUpdate: () => ipcRenderer.invoke("naia:download-update"),
   applyUpdate: () => ipcRenderer.invoke("naia:apply-update"),
   openReleasePage: () => ipcRenderer.invoke("naia:open-release-page"),
+  // Embedded Danbooru browser (WebContentsView) bridge — Electron shell only.
+  danbooruAttach: (rect) => ipcRenderer.invoke("naia:danbooru-attach", rect),
+  danbooruDetach: () => ipcRenderer.invoke("naia:danbooru-detach"),
+  danbooruSetBounds: (rect) => ipcRenderer.invoke("naia:danbooru-set-bounds", rect),
+  danbooruNavigate: (text) => ipcRenderer.invoke("naia:danbooru-navigate", text),
+  danbooruBack: () => ipcRenderer.invoke("naia:danbooru-back"),
+  danbooruForward: () => ipcRenderer.invoke("naia:danbooru-forward"),
+  danbooruReload: () => ipcRenderer.invoke("naia:danbooru-reload"),
+  onDanbooruDidNavigate: (callback) => {
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+    const listener = (_event, info) => callback(info);
+    ipcRenderer.on("naia:danbooru-did-navigate", listener);
+    return () => ipcRenderer.removeListener("naia:danbooru-did-navigate", listener);
+  },
   onStateChanged: (callback) => {
     if (typeof callback !== "function") {
       return () => {};

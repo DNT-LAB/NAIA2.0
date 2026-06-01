@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } = require("electron");
+const { app, BrowserWindow, WebContentsView, dialog, ipcMain, Menu, session, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -1678,8 +1678,14 @@ function createMainWindow() {
 
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.on("closed", () => {
+    danbooruView = null;
+    danbooruViewAttached = false;
     mainWindow = null;
   });
+  // If the shell renderer reloads or navigates (maintenance/bootstrap/F5) while the
+  // Danbooru panel is open, the renderer loses its embedActive state and cannot detach
+  // the native child view — so detach it here too (no-op when unattached).
+  mainWindow.webContents.on("did-start-loading", () => detachDanbooruView());
   configurePopupHandling(mainWindow);
 
   loadMaintenance("loading", "Starting NAIA backend...");
@@ -1751,6 +1757,205 @@ function configureDownloads() {
 function appIconPath() {
   return APP_ICON;
 }
+
+// --- Embedded Danbooru browser (WebContentsView) ---------------------------
+// Serves danbooru.donmai.us inside the app as a native child view (the desktop
+// QWebEngineView analog). It runs in its OWN WebContents on a persistent partition,
+// so it is unaffected by donmai's CSP/X-Frame-Options and keeps login across restarts
+// (persist:danbooru lives under userData — the same %APPDATA%-class location the
+// desktop browser_profile used). Browser (non-Electron) clients never reach this;
+// they fall back to the JSON query/Load path in danbooruTab.mjs.
+let danbooruView = null;
+let danbooruViewAttached = false;
+const DANBOORU_HOSTS = new Set(["danbooru.donmai.us", "www.danbooru.donmai.us"]);
+const DANBOORU_POST_RE = /danbooru\.donmai\.us\/posts\/(\d+)/;
+const DANBOORU_HOME_URL = "https://danbooru.donmai.us/";
+
+// Mirror of danbooru_routes.normalize_danbooru_browser_url (host-locked).
+function resolveDanbooruUrl(text) {
+  const value = String(text || "").trim();
+  const base = "https://danbooru.donmai.us";
+  let url;
+  if (!value) {
+    url = `${base}/posts?tags=rating%3Ageneral&z=5`;
+  } else if (/^\d+$/.test(value)) {
+    url = `${base}/posts/${value}`;
+  } else if (value.startsWith("//")) {
+    url = "https:" + value;
+  } else if (value.startsWith("/")) {
+    url = base + value;
+  } else if (/^(?:www\.)?danbooru\.donmai\.us(?:\/|$)/i.test(value)) {
+    url = "https://" + value;
+  } else if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)) {
+    url = `${base}/posts?tags=${encodeURIComponent(value)}`;
+  } else {
+    url = value;
+  }
+  try {
+    const parsed = new URL(url);
+    const host = (parsed.hostname || "").toLowerCase();
+    if (!["http:", "https:"].includes(parsed.protocol) || !DANBOORU_HOSTS.has(host)) {
+      return null;
+    }
+    return parsed.toString();
+  } catch (_error) {
+    return null;
+  }
+}
+
+function roundRect(rect) {
+  return {
+    x: Math.round(Number(rect && rect.x) || 0),
+    y: Math.round(Number(rect && rect.y) || 0),
+    width: Math.max(0, Math.round(Number(rect && rect.width) || 0)),
+    height: Math.max(0, Math.round(Number(rect && rect.height) || 0)),
+  };
+}
+
+function sendDanbooruNav() {
+  if (!mainWindow || mainWindow.isDestroyed() || !danbooruView) {
+    return;
+  }
+  const wc = danbooruView.webContents;
+  const url = wc.getURL();
+  const match = DANBOORU_POST_RE.exec(url || "");
+  mainWindow.webContents.send("naia:danbooru-did-navigate", {
+    url,
+    postId: match ? match[1] : null,
+    canGoBack: wc.canGoBack(),
+    canGoForward: wc.canGoForward(),
+  });
+}
+
+function ensureDanbooruView() {
+  if (danbooruView) {
+    return danbooruView;
+  }
+  const view = new WebContentsView({
+    webPreferences: {
+      session: session.fromPartition("persist:danbooru"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  const wc = view.webContents;
+  // donmai target=_blank (source links, full image) must not spawn raw windows.
+  wc.setWindowOpenHandler(({ url }) => {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      if (DANBOORU_HOSTS.has(host)) {
+        wc.loadURL(url);
+      } else if (isHttpLikeUrl(url)) {
+        shell.openExternal(url);
+      }
+    } catch (_error) {}
+    return { action: "deny" };
+  });
+  // Keep the embedded view strictly on http(s) danbooru.donmai.us — reject other
+  // schemes (javascript:/file:/…) and off-allowlist server redirects.
+  const guardNavigation = (event, url) => {
+    let allowed = false;
+    try {
+      const parsed = new URL(url);
+      allowed = ["http:", "https:"].includes(parsed.protocol)
+        && DANBOORU_HOSTS.has((parsed.hostname || "").toLowerCase());
+    } catch (_error) {
+      allowed = false;
+    }
+    if (!allowed) {
+      event.preventDefault();
+      if (isHttpLikeUrl(url)) {
+        shell.openExternal(url);
+      }
+    }
+  };
+  wc.on("will-navigate", guardNavigation);
+  wc.on("will-redirect", guardNavigation);
+  wc.on("did-navigate", () => sendDanbooruNav());
+  wc.on("did-navigate-in-page", () => sendDanbooruNav());
+  danbooruView = view;
+  return view;
+}
+
+function attachDanbooruView(rect) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return false;
+  }
+  const view = ensureDanbooruView();
+  if (!danbooruViewAttached) {
+    mainWindow.contentView.addChildView(view);
+    danbooruViewAttached = true;
+  }
+  view.setBounds(roundRect(rect));
+  if (!view.webContents.getURL()) {
+    view.webContents.loadURL(DANBOORU_HOME_URL);
+  }
+  sendDanbooruNav();
+  return true;
+}
+
+function detachDanbooruView() {
+  if (danbooruView && danbooruViewAttached && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.contentView.removeChildView(danbooruView);
+  }
+  danbooruViewAttached = false;
+}
+
+// The danbooru view drives the MAIN window overlay; only the trusted main-window
+// renderer may control it. The same preload is shared with external http popups, so
+// every handler rejects calls from any other WebContents (incl. the danbooru view).
+function isDanbooruSender(event) {
+  return !!(
+    mainWindow
+    && !mainWindow.isDestroyed()
+    && event
+    && event.sender === mainWindow.webContents
+  );
+}
+
+ipcMain.handle("naia:danbooru-attach", (event, rect) =>
+  isDanbooruSender(event) ? attachDanbooruView(rect) : false);
+ipcMain.handle("naia:danbooru-detach", (event) => {
+  if (isDanbooruSender(event)) {
+    detachDanbooruView();
+  }
+  return true;
+});
+ipcMain.handle("naia:danbooru-set-bounds", (event, rect) => {
+  if (isDanbooruSender(event) && danbooruView && danbooruViewAttached) {
+    danbooruView.setBounds(roundRect(rect));
+  }
+  return true;
+});
+ipcMain.handle("naia:danbooru-navigate", (event, text) => {
+  if (!isDanbooruSender(event)) {
+    return { ok: false, error: "forbidden" };
+  }
+  const url = resolveDanbooruUrl(text);
+  if (!url) {
+    return { ok: false, error: "Danbooru URL, post ID, or tag query is required" };
+  }
+  ensureDanbooruView().webContents.loadURL(url);
+  return { ok: true, url };
+});
+ipcMain.handle("naia:danbooru-back", (event) => {
+  if (isDanbooruSender(event) && danbooruView && danbooruView.webContents.canGoBack()) {
+    danbooruView.webContents.goBack();
+  }
+  return true;
+});
+ipcMain.handle("naia:danbooru-forward", (event) => {
+  if (isDanbooruSender(event) && danbooruView && danbooruView.webContents.canGoForward()) {
+    danbooruView.webContents.goForward();
+  }
+  return true;
+});
+ipcMain.handle("naia:danbooru-reload", (event) => {
+  if (isDanbooruSender(event) && danbooruView) {
+    danbooruView.webContents.reload();
+  }
+  return true;
+});
 
 ipcMain.handle("naia:shell-state", () => shellState());
 ipcMain.handle("naia:restart-backend", async () => {

@@ -5869,6 +5869,95 @@ body.resizing-result-info {
   color: var(--text-dim);
   font-size: 12px;
 }
+.danbooru-tag-count {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.danbooru-breakdown-head {
+  margin: 14px 0 8px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.danbooru-breakdown-head .danbooru-tag-count {
+  color: var(--text-dim);
+  letter-spacing: 0;
+}
+
+/* Embedded Danbooru browser (Electron WebContentsView) two-pane surface.
+   The native view paints over the .danbooru-view-region rect, so that region
+   is intentionally empty HTML; toolbar + right panel stay outside it. */
+.danbooru-tool-panel-embed {
+  padding: 16px;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.danbooru-tool-dialog.danbooru-embed {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  height: 100%;
+}
+.danbooru-embed-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.danbooru-embed-left {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 70%;
+  min-width: 0;
+  border-right: 1px solid rgba(255,255,255,0.08);
+}
+.danbooru-embed-right {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 360px;
+  min-width: 0;
+}
+.danbooru-embed-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.danbooru-address-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.danbooru-nav-btn {
+  height: 34px;
+  min-width: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.danbooru-nav-btn:hover { background: rgba(255,255,255,0.08); }
+.danbooru-go-btn {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.danbooru-view-region {
+  flex: 1;
+  min-height: 0;
+  background: #0a0a0f;
+}
+.danbooru-embed-right .danbooru-results {
+  flex: 1;
+}
 
 @media (max-width: 767px) {
   .image-action-popup {

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
 from core.headless_random_prompt_service import HeadlessRandomPromptService
+from core.tag_filter_helpers import _is_color_exception
 from core.web_session_context import WebSessionContext
 
 
@@ -82,12 +83,96 @@ def _danbooru_prompt_preview(context: WebSessionContext, tags: dict[str, Any]) -
     return _fallback_danbooru_prompt(tags)
 
 
+# --- GENERAL BREAKDOWN classifier (ported from future01 tabs/web_view.py:34-704) ---
+# Buckets a post's (post-promotion) general tags into 12 display groups using the
+# shared FilterDataManager. Display-only: never mutates the flat 5-category tags that
+# feed the prompt preview / generate path. Tag format is space-form on both sides
+# (_split_tag_string -> spaces; FilterDataManager data files are space-form), so no
+# conversion is needed. character_features stays empty here by design (characteristic
+# tags were already promoted into 'character' upstream), mirroring the desktop flow.
+DANBOORU_GENERAL_BREAKDOWN_KEYS = (
+    "character_features",
+    "subject_count",
+    "clothing_events",
+    "clothes",
+    "colors",
+    "location_background",
+    "expression",
+    "pose_action",
+    "objects",
+    "meta_like",
+    "noise",
+    "other",
+)
+_PERSON_COUNT_RE = re.compile(
+    r"^(?:[1-5](?:boy|boys|girl|girls|other|others)|6\+(?:boys|girls|others))$"
+)
+
+
+def _danbooru_filter_manager(context: WebSessionContext):
+    """Return the shared FilterDataManager (portable-path aware), loading it once."""
+    try:
+        _random_service(context)._ensure_headless_runtime()
+    except Exception:
+        pass
+    return getattr(context, "filter_data_manager", None)
+
+
+def _general_tag_bucket(tag: str, fm: Any) -> str:
+    if _PERSON_COUNT_RE.match(tag):
+        return "subject_count"
+    if tag in fm.characteristic_list:
+        return "character_features"
+    if tag in fm._clothing_event_set:
+        return "clothing_events"
+    if tag in fm.clothes_list or fm.get_garment_region(tag):
+        return "clothes"
+    if (
+        fm.color_list
+        and not _is_color_exception(tag)
+        and any(color in tag for color in fm.color_list)
+    ):
+        return "colors"
+    if tag in fm._location_set:
+        return "location_background"
+    if tag in fm._expression_set:
+        return "expression"
+    if tag in fm._pose_action_set:
+        return "pose_action"
+    if tag in fm._object_set:
+        return "objects"
+    if tag in fm._meta_set:
+        return "meta_like"
+    if fm._valid_tag_whitelist and tag not in fm._valid_tag_whitelist:
+        return "noise"
+    return "other"
+
+
+def _classify_general_breakdown(
+    context: WebSessionContext, general_tags: list[str]
+) -> dict[str, list[str]]:
+    breakdown: dict[str, list[str]] = {key: [] for key in DANBOORU_GENERAL_BREAKDOWN_KEYS}
+    tags = [t for t in (general_tags or []) if isinstance(t, str) and t]
+    if not tags:
+        return breakdown
+    fm = _danbooru_filter_manager(context)
+    if fm is None:
+        breakdown["other"] = list(tags)
+        return breakdown
+    for tag in tags:
+        breakdown[_general_tag_bucket(tag, fm)].append(tag)
+    return breakdown
+
+
 def build_danbooru_post_payload(context: WebSessionContext, query: str) -> dict[str, Any]:
     post = fetch_danbooru_post(
         query,
         characteristic_tags=_load_characteristic_tags(context),
     )
-    post["prompt"] = _danbooru_prompt_preview(context, post.get("tags", {}))
+    tags = post.get("tags", {}) if isinstance(post.get("tags"), dict) else {}
+    post["prompt"] = _danbooru_prompt_preview(context, tags)
+    general = tags.get("general") if isinstance(tags.get("general"), list) else []
+    post["general_breakdown"] = _classify_general_breakdown(context, general)
     return post
 
 

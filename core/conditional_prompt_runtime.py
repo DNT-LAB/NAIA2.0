@@ -427,28 +427,62 @@ class HeadlessConditionalRuleEngine:
         return [_remove_outer_quotes(tag) for tag in tags]
 
     def _split_rules_with_quotes(self, rules_text: str) -> list[str]:
+        # Rules are separated by a top-level comma OR newline. A comma/newline is a
+        # rule boundary ONLY when the next non-whitespace char starts a new rule —
+        # '(' (a condition) or '#' (a disabled/commented rule). This lets an action's
+        # tag list legitimately contain commas (`main+=a, b`) or newlines without being
+        # mis-split, while still honoring the editor's ',\n' join AND a bare newline
+        # between rules (a common hand-edit). Depth/quote awareness is preserved.
+        text = str(rules_text or "")
+        length = len(text)
         rules: list[str] = []
         current: list[str] = []
         in_quotes = False
         depth = 0
-        text = str(rules_text or "")
+
+        def starts_new_rule(pos: int) -> bool:
+            cursor = pos
+            while cursor < length and text[cursor] in " \t\r\n":
+                cursor += 1
+            if cursor >= length:
+                return False
+            if text[cursor] == "#":
+                return True
+            if text[cursor] != "(":
+                return False
+            # A rule is "(<condition>):..." — require the '(' to be a condition group
+            # whose matching ')' is immediately followed by ':'. This avoids treating a
+            # parenthesized/weighted tag like "(b:1.2)" after a comma as a new rule
+            # (same rule shape that _parse_rule enforces).
+            close = self._matching_paren(text, cursor)
+            return close >= 0 and close + 1 < length and text[close + 1] == ":"
+
+        def flush() -> None:
+            rule = "".join(current).strip()
+            if rule and not rule.startswith("#"):
+                rules.append(rule)
+            current.clear()
+
         for index, char in enumerate(text):
             if char == '"' and (index == 0 or text[index - 1] != "\\"):
                 in_quotes = not in_quotes
+                current.append(char)
             elif not in_quotes and char == "(":
                 depth += 1
+                current.append(char)
             elif not in_quotes and char == ")":
                 depth = max(0, depth - 1)
-            if char == "," and not in_quotes and depth == 0:
-                rule = "".join(current).strip()
-                if rule and not rule.startswith("#"):
-                    rules.append(rule)
-                current = []
+                current.append(char)
+            elif (
+                not in_quotes
+                and depth == 0
+                and char in ",\n\r"
+                and starts_new_rule(index + 1)
+            ):
+                flush()
             else:
                 current.append(char)
-        rule = "".join(current).strip()
-        if rule and not rule.startswith("#"):
-            rules.append(rule)
+        flush()
         return rules
 
     def _parse_rule(self, rule_text: str) -> dict[str, Any] | None:

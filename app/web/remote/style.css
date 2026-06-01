@@ -5846,10 +5846,35 @@ body.resizing-result-info {
   background: rgba(255,255,255,0.03);
 }
 .danbooru-tag-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 8px;
   color: var(--text-dim);
   font-size: 12px;
   text-transform: uppercase;
+}
+.danbooru-tag-group-name { min-width: 0; }
+.danbooru-group-copy {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 5px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.danbooru-group-copy:hover {
+  background: rgba(40,120,216,0.28);
+  border-color: rgba(47,139,235,0.6);
+  color: #fff;
 }
 .danbooru-tags {
   display: flex;
@@ -5886,6 +5911,93 @@ body.resizing-result-info {
   letter-spacing: 0;
 }
 
+/* Result-card actions: 프롬프트 적용 + 즉시 이미지 생성 */
+.danbooru-result-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.danbooru-gen-btn {
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid #3ba55d;
+  border-radius: 6px;
+  background: #2e9e54;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.danbooru-gen-btn:hover { background: #34b35f; }
+.danbooru-gen-btn:active { background: #2a8f4c; }
+
+/* Header minimize/close cluster */
+.danbooru-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.danbooru-min-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+.danbooru-min-btn:hover { background: rgba(255,255,255,0.08); }
+
+/* Minimized floating island — anchored near the Auto Save pill */
+.danbooru-mini-island {
+  position: fixed;
+  z-index: 2300;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 12px;
+  background: rgba(18,18,26,0.95);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(157,139,255,0.35);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.42);
+}
+.danbooru-mini-island[hidden] { display: none; }
+.danbooru-mini-label {
+  padding: 2px 4px;
+  border: none;
+  background: none;
+  color: #ececf5;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+}
+.danbooru-mini-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.danbooru-mini-btn:hover { background: rgba(255,255,255,0.14); }
+.danbooru-mini-close:hover {
+  background: rgba(244,67,54,0.5);
+  border-color: rgba(244,67,54,0.7);
+  color: #fff;
+}
+
 /* Embedded Danbooru browser (Electron WebContentsView) two-pane surface.
    The native view paints over the .danbooru-view-region rect, so that region
    is intentionally empty HTML; toolbar + right panel stay outside it. */
@@ -5915,7 +6027,7 @@ body.resizing-result-info {
 .danbooru-embed-right {
   display: flex;
   flex-direction: column;
-  flex: 0 0 360px;
+  flex: 0 0 clamp(380px, 28%, 460px);
   min-width: 0;
 }
 .danbooru-embed-toolbar {
@@ -5957,6 +6069,26 @@ body.resizing-result-info {
 }
 .danbooru-embed-right .danbooru-results {
   flex: 1;
+}
+/* [1] right-panel UX: single-column tag groups (wider) + no button clipping */
+.danbooru-embed-right .danbooru-tag-groups {
+  grid-template-columns: 1fr;
+}
+.danbooru-embed-right .danbooru-result-head {
+  flex-wrap: wrap;
+}
+.danbooru-embed-right .danbooru-result-head > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.danbooru-embed-right .danbooru-result-link {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.danbooru-embed-right .danbooru-copy-btn {
+  flex-shrink: 0;
 }
 
 @media (max-width: 767px) {
@@ -10146,6 +10278,23 @@ body.detached-metadata .metadata-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
 }
+.pe-randomized-wc {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+.pe-randomized-wc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pe-randomized-wc-input {
+  width: 100%;
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  resize: vertical;
+}
 .mod-dan-feedback-subtitle {
   margin-top: 2px;
   font-family: var(--font-mono);
@@ -12572,9 +12721,11 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   color: var(--text-primary);
 }
 .cond-mode-btn.active {
-  border-color: rgba(92, 150, 255, 0.72);
-  background: rgba(54, 104, 180, 0.22);
-  color: var(--text-primary);
+  border-color: rgba(120, 170, 255, 0.95);
+  background: rgba(74, 130, 240, 0.92);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 0 0 1px rgba(120, 170, 255, 0.45);
 }
 .cond-rules-head {
   display: flex;

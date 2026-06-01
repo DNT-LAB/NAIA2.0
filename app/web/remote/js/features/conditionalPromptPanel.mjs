@@ -664,7 +664,10 @@ export function createConditionalPromptPanel({
     const presetName = safeText(m.active_preset || '').trim();
     const presetLabel = presetName ? `<span class="cond-status-chip cond-preset-status">Preset ${escHtml(presetName)}</span>` : '';
     const presetButtonLabel = presetName ? `프리셋: ${presetName}` : '프리셋';
-    const presetControl = m.can_manage_presets
+    // 프리셋은 New Editor(v2) 전용 개념이다 — 프리셋을 적용/저장하면 항상 editor_mode='v2'가 된다.
+    // Legacy DSL 보기에서는 active_preset이 지금 편집 중인 원시 DSL을 의미하지 않으므로,
+    // 프리셋이 적용 중인 것처럼 오해를 줄 수 있는 이름 표시를 전부 숨긴다.
+    const presetControl = (m.can_manage_presets && m.editor_mode === 'v2')
       ? `<button type="button" class="cond-preset-toggle" data-cond-action="toggle-preset-popover">${escHtml(presetButtonLabel)}</button>
           ${presetLabel}`
       : '';
@@ -695,7 +698,6 @@ export function createConditionalPromptPanel({
         <div>
           <div class="cond-rules-head">
             <div class="mod-section-label">Rules (Legacy DSL)</div>
-            ${m.active_preset ? `<span class="cond-status-chip">Preset ${escHtml(m.active_preset)}</span>` : ''}
           </div>
           <div class="cond-rules-wrap">
             <div class="cond-rules-highlight" id="condRulesHighlight">${formatRules(activeRules)}</div>

@@ -112,6 +112,14 @@ export function createPromptEngineeringActions({
     setModuleParam('prompt_engineering', 'randomized_clear', 'true');
   }
 
+  function setRandomizedWildcard(front, back, enabled) {
+    setModuleParam('prompt_engineering', 'randomized_wildcard', JSON.stringify({
+      front: String(front || ''),
+      back: String(back || ''),
+      enabled: !!enabled,
+    }));
+  }
+
   function saveE621Settings() {
     const hiddenRaw = document.getElementById('modE621HiddenTags')?.value || '';
     const hiddenTags = hiddenRaw
@@ -173,6 +181,7 @@ export function createPromptEngineeringActions({
     removeRandomizedPreset,
     switchRandomizedPreset,
     clearRandomizedPresets,
+    setRandomizedWildcard,
     saveE621Settings,
     saveDanbooruSettings,
     refreshDebug,

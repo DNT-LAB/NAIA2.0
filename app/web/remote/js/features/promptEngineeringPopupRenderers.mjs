@@ -7,9 +7,19 @@ export function createPromptEngineeringPopupRenderers({
   removeRandomizedPreset,
   switchRandomizedPreset,
   clearRandomizedPresets,
+  setRandomizedWildcard,
+  bindTagAssist,
   bindDanbooruFeedback,
   panels,
 }) {
+  const RANDOMIZED_WC_GUIDE =
+    '랜덤 프리셋(*randomized) 사용 시, 매 생성마다 뽑힌 프리셋의 선행 프롬프트(Prefix)에 '
+    + '여기 입력을 함께 주입합니다.\\n\\n'
+    + '고정 태그(예: artist:ciloranko, 1girl)는 그대로 항상 들어가고, 와일드카드(__character__)는 '
+    + '매 생성 새로 추출됩니다. 둘을 섞어 써도 됩니다.\\n\\n'
+    + '앞 = Prefix 앞(artist 류 권장), 뒤 = Prefix 뒤(character 류 권장). '
+    + '(와일드카드는 구식 <...>가 아닌 __이름__ 형식)\\n\\n'
+    + '체크를 끄면 주입하지 않으며, *randomized 프리셋에서만 동작합니다.';
   let randomizedPreview = null;
   let randomizedPreviewHideTimer = null;
 
@@ -207,6 +217,15 @@ export function createPromptEngineeringPopupRenderers({
     const pool = Array.isArray(m.randomized_preset_list) ? m.randomized_preset_list : [];
     const available = Array.isArray(m.randomized_available_presets) ? m.randomized_available_presets : [];
     const summaryMap = presetSummaryMap(m);
+    const wcFront = typeof m.randomized_wildcard_front === 'string' ? m.randomized_wildcard_front : '';
+    const wcBack = typeof m.randomized_wildcard_back === 'string' ? m.randomized_wildcard_back : '';
+    const wcEnabled = !!m.randomized_wildcard_enabled;
+    // Preserve in-progress typing if an unrelated state push re-renders mid-edit.
+    const activeEl = document.activeElement;
+    const focusedWcId = activeEl && (activeEl.id === 'modRandomizedWildcardFront' || activeEl.id === 'modRandomizedWildcardBack')
+      ? activeEl.id : null;
+    const wcLiveValue = focusedWcId ? activeEl.value : null;
+    const wcCaret = focusedWcId ? activeEl.selectionStart : null;
     hideRandomizedPreview();
     const poolHtml = pool.length
       ? pool.map(preset => `
@@ -228,6 +247,26 @@ export function createPromptEngineeringPopupRenderers({
     <div class="mod-info-chip">${escHtml(m.preset || '(none)')}</div>
     <div class="mod-section-label">Randomized Pool</div>
     <div class="pe-randomized-list">${poolHtml}</div>
+    <div class="pe-randomized-wc">
+      <div class="mod-section-label pe-randomized-wc-head">
+        <span>Randomized Inject (고정/와일드카드)</span>
+        <button type="button" class="header-guide-btn" data-naia-guide="${escHtml(RANDOMIZED_WC_GUIDE)}">ⓘ 가이드</button>
+      </div>
+      <label class="mod-checkbox-item">
+        <input type="checkbox" id="modRandomizedWildcardEnabled" ${wcEnabled ? 'checked' : ''}>
+        <span class="mod-checkbox-label">매 생성마다 아래 내용을 주입 (고정 태그 또는 와일드카드)</span>
+      </label>
+      <label class="mod-field pe-randomized-wc-field">
+        <span class="mod-field-label">앞 (artist 등 · Prefix 앞)</span>
+        <textarea class="mod-textarea pe-randomized-wc-input" id="modRandomizedWildcardFront" rows="2"
+                  placeholder="예: artist:ciloranko  또는  __artist__">${escHtml(wcFront)}</textarea>
+      </label>
+      <label class="mod-field pe-randomized-wc-field">
+        <span class="mod-field-label">뒤 (character 등 · Prefix 뒤)</span>
+        <textarea class="mod-textarea pe-randomized-wc-input" id="modRandomizedWildcardBack" rows="2"
+                  placeholder="예: 1girl, smile  또는  __character__">${escHtml(wcBack)}</textarea>
+      </label>
+    </div>
     <div>
       <div class="mod-section-label">Add Preset</div>
       <div class="mod-inline-row pe-randomized-add-row">
@@ -272,6 +311,34 @@ export function createPromptEngineeringPopupRenderers({
     });
     const clearButton = document.getElementById('modRandomizedPresetClearBtn');
     if (clearButton) clearButton.addEventListener('click', () => clearRandomizedPresets());
+
+    const wcFrontInput = document.getElementById('modRandomizedWildcardFront');
+    const wcBackInput = document.getElementById('modRandomizedWildcardBack');
+    const wcEnabledBox = document.getElementById('modRandomizedWildcardEnabled');
+    const sendWildcard = () => {
+      if (typeof setRandomizedWildcard === 'function') {
+        setRandomizedWildcard(
+          wcFrontInput ? wcFrontInput.value : '',
+          wcBackInput ? wcBackInput.value : '',
+          !!(wcEnabledBox && wcEnabledBox.checked),
+        );
+      }
+    };
+    if (wcEnabledBox) wcEnabledBox.addEventListener('change', sendWildcard);
+    [wcFrontInput, wcBackInput].forEach(el => {
+      if (!el) return;
+      // 'change' fires on blur/Enter — avoids a backend round-trip (and re-render) per keystroke.
+      el.addEventListener('change', sendWildcard);
+      if (typeof bindTagAssist === 'function') bindTagAssist(el);
+    });
+    if (focusedWcId) {
+      const restoreEl = document.getElementById(focusedWcId);
+      if (restoreEl) {
+        restoreEl.value = wcLiveValue;
+        restoreEl.focus();
+        try { restoreEl.setSelectionRange(wcCaret, wcCaret); } catch (_error) {}
+      }
+    }
   }
 
   function renderDebugSnapshot(snapshot) {

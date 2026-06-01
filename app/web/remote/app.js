@@ -319,13 +319,14 @@ async function loadRuntimeCapabilities() {
 }
 
 loadRuntimeCapabilities();
-const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260531-danbooru-embed1')
+const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260601-danbooru-feat3')
   .then(({createDanbooruBrowserController}) => {
     danbooruTabControl = createDanbooruBrowserController({
       document,
       fetch: window.fetch.bind(window),
       showToast,
       onLoadPrompt,
+      onGenerateFromPrompt,
     });
   })
   .catch(error => {
@@ -843,7 +844,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260531-
   .catch(error => {
     console.error('Failed to initialize character panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260526-capability-honesty1')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260601-cond-preset-mode1')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -4060,6 +4061,24 @@ function onLoadPrompt(prompt) {
   showToast('Prompt loaded', 'success');
 }
 
+// Danbooru 임베드의 "이미지 생성" 버튼 — 데스크톱 on_generate_with_image_requested 포팅.
+// 추출 프롬프트를 메인 프롬프트 박스에 반영한 뒤 곧바로 생성 파이프라인으로 보낸다.
+function onGenerateFromPrompt(prompt) {
+  if (!prompt) return false;
+  // requestGenerate의 가드(생성 중 / WS 닫힘)를 프롬프트 박스 수정 전에 먼저 적용한다.
+  // 그래야 막힌 시도가 사용자의 현재 프롬프트를 덮어쓰지 않는다. (false 반환 → 호출자가 토스트 처리)
+  if (generating) return false;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  promptEdit.value = prompt;
+  onPromptEdit();
+  const negative = negEdit ? negEdit.value : '';
+  return requestGenerate({
+    prompt,
+    negative_prompt: negative,
+    overrides: buildWebGenerationOverrides(prompt, negative),
+  });
+}
+
 function onSession(m) {
   if (m.session_id) sessionId = m.session_id;
   sessionBootstrapReceived = true;
@@ -5163,7 +5182,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260526-webui-recommended-preset1')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260601-randomized-wc2')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -5401,7 +5420,7 @@ const pePresetAddPanel = $('pePresetAddPanel');
 const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260514-randomized-preview3')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260601-randomized-wc3')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
@@ -5412,6 +5431,8 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
       removeRandomizedPreset: removeRandomizedPromptPreset,
       switchRandomizedPreset: switchRandomizedPromptPreset,
       clearRandomizedPresets: clearRandomizedPromptPresets,
+      setRandomizedWildcard: setRandomizedPromptWildcard,
+      bindTagAssist,
       bindDanbooruFeedback,
       panels: {
         e621: peE621Panel,
@@ -5777,6 +5798,10 @@ function switchRandomizedPromptPreset(preset) {
 
 function clearRandomizedPromptPresets() {
   if (promptEngineeringActions) promptEngineeringActions.clearRandomizedPresets();
+}
+
+function setRandomizedPromptWildcard(front, back, enabled) {
+  if (promptEngineeringActions) promptEngineeringActions.setRandomizedWildcard(front, back, enabled);
 }
 
 function savePromptEngineeringE621Settings() {

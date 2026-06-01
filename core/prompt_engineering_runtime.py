@@ -520,8 +520,21 @@ class PromptEngineeringRandomizedSubscriber:
         preset_data = store.read_preset_data(selected, store.mode())
         module_settings = dict(preset_data.get("module_settings") or {})
         updates = {}
-        if "pre_prompt" in module_settings:
-            updates["pre_prompt"] = module_settings.get("pre_prompt", "")
+        base_pre = str(module_settings.get("pre_prompt", ""))
+        wc_front = str(state.get("randomized_wildcard_front") or "").strip()
+        wc_back = str(state.get("randomized_wildcard_back") or "").strip()
+        wc_on = bool(state.get("randomized_wildcard_enabled"))
+        if wc_on and (wc_front or wc_back):
+            # Rebuild the leading prompt as: <front wildcard>, <rolled preset Prefix>, <back wildcard>.
+            # 1.5 컨벤션: artist 류는 앞(front), character 류는 뒤(back). 토큰(__character__ 등)은
+            # 미전개 상태로 둬서 파이프라인 와일드카드 단계가 매 생성 새로 reroll한다. 매 롤마다
+            # 완전히 재구성하므로 키 없는/비활성 프리셋에서도 stale 토큰이 남지 않는다.
+            trimmed = base_pre.strip()
+            if trimmed.endswith(","):
+                trimmed = trimmed[:-1].rstrip()
+            updates["pre_prompt"] = ", ".join(part for part in (wc_front, trimmed, wc_back) if part)
+        elif "pre_prompt" in module_settings:
+            updates["pre_prompt"] = base_pre
         if "post_prompt" in module_settings:
             updates["post_prompt"] = module_settings.get("post_prompt", "")
         if updates:

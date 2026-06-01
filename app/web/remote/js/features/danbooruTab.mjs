@@ -28,6 +28,7 @@ export function createDanbooruBrowserController({
   fetch: fetchFn = window.fetch.bind(window),
   showToast,
   onLoadPrompt = null,
+  onGenerateFromPrompt = null,
 }) {
   // Electron shell exposes a native WebContentsView bridge; a plain browser does not.
   const naia = (win && win.naiaShell) || null;
@@ -50,6 +51,13 @@ export function createDanbooruBrowserController({
   let unsubscribeNav = null;
   let boundsListener = null;
 
+  // Minimize-to-island state (the panel can collapse to a floating pill near
+  // the Auto Save control while preserving the embedded view's page state).
+  let minimized = false;
+  let islandEl = null;
+  let islandReposition = null;
+  let islandRaf = 0;
+
   function escHtml(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -60,6 +68,12 @@ export function createDanbooruBrowserController({
 
   function tagGroupHtml(label, values) {
     const list = Array.isArray(values) ? values : [];
+    // Group prompt = every tag in this group joined as a comma prompt (full list, not the
+    // display-capped slice) so the copy button always yields the complete group.
+    const groupPrompt = list.join(', ');
+    const copyBtn = list.length
+      ? `<button type="button" class="danbooru-group-copy" data-danbooru-copy-group="${escHtml(groupPrompt)}" title="이 그룹을 프롬프트로 복사" aria-label="Copy ${escHtml(label)} prompt">⧉</button>`
+      : '';
     const body = list.length
       ? list.slice(0, 120)
           .map(tag => `<button type="button" class="danbooru-tag" data-danbooru-tag="${escHtml(tag)}">${escHtml(tag)}</button>`)
@@ -67,7 +81,7 @@ export function createDanbooruBrowserController({
       : '<span class="danbooru-empty">—</span>';
     return `
       <section class="danbooru-tag-group">
-        <h3>${escHtml(label)} <span class="danbooru-tag-count">· ${list.length}</span></h3>
+        <h3><span class="danbooru-tag-group-name">${escHtml(label)}</span> <span class="danbooru-tag-count">· ${list.length}</span>${copyBtn}</h3>
         <div class="danbooru-tags">${body}</div>
       </section>`;
   }
@@ -116,7 +130,12 @@ export function createDanbooruBrowserController({
             <div class="danbooru-result-kicker">Post ${escHtml(post?.post_id || '')}</div>
             <a class="danbooru-result-link" href="${escHtml(postUrl)}" target="_blank" rel="noopener noreferrer">${escHtml(postUrl || 'Danbooru post')}</a>
           </div>
-          <button type="button" class="danbooru-copy-btn" data-danbooru-apply-prompt>Apply Prompt</button>
+          <div class="danbooru-result-actions">
+            <button type="button" class="danbooru-copy-btn danbooru-apply-btn" data-danbooru-apply-prompt>프롬프트 적용</button>
+            ${typeof onGenerateFromPrompt === 'function'
+              ? '<button type="button" class="danbooru-gen-btn" data-danbooru-generate title="이 프롬프트로 즉시 이미지 생성">이미지 생성</button>'
+              : ''}
+          </div>
         </header>
         <div class="danbooru-prompt-box">${escHtml(prompt || 'No prompt preview')}</div>
         <div class="danbooru-tag-groups">${primaryHtml}</div>
@@ -193,6 +212,58 @@ export function createDanbooruBrowserController({
     if (typeof onLoadPrompt === 'function') {
       onLoadPrompt(prompt);
       if (showToast) showToast('Danbooru prompt applied', 'success');
+    }
+  }
+
+  async function copyGroup(value) {
+    const text = String(value || '').trim();
+    if (!text) {
+      if (showToast) showToast('복사할 태그가 없습니다.', 'error');
+      return;
+    }
+    try {
+      const clip = win.navigator && win.navigator.clipboard;
+      if (clip && typeof clip.writeText === 'function') {
+        await clip.writeText(text);
+      } else {
+        // Fallback for non-secure contexts where navigator.clipboard is absent.
+        const scratch = document.createElement('textarea');
+        scratch.value = text;
+        scratch.style.position = 'fixed';
+        scratch.style.opacity = '0';
+        document.body.append(scratch);
+        scratch.select();
+        document.execCommand('copy');
+        scratch.remove();
+      }
+      if (showToast) showToast('프롬프트를 복사했습니다.', 'success');
+    } catch (error) {
+      console.error('Danbooru group copy failed', error);
+      if (showToast) showToast('복사 실패: ' + (error.message || ''), 'error');
+    }
+  }
+
+  // Mirror of desktop on_generate_with_image_requested: build the prompt from the
+  // post, then run it through the host generation pipeline immediately.
+  function generateFromPost() {
+    const prompt = String(lastPost?.prompt || '').trim();
+    if (!prompt) {
+      if (showToast) showToast('생성할 Danbooru 프롬프트가 없습니다.', 'error');
+      return;
+    }
+    if (typeof onGenerateFromPrompt !== 'function') {
+      applyPrompt();
+      return;
+    }
+    // onGenerateFromPrompt가 false면 생성이 막힌 것(이미 생성 중/연결 없음) — 거짓 성공 토스트 금지.
+    const started = onGenerateFromPrompt(prompt) !== false;
+    if (showToast) {
+      showToast(
+        started
+          ? 'Danbooru 프롬프트로 이미지 생성을 시작합니다.'
+          : '지금은 생성할 수 없습니다 (이미 생성 중이거나 연결이 없습니다).',
+        started ? 'success' : 'error',
+      );
     }
   }
 
@@ -286,6 +357,108 @@ export function createDanbooruBrowserController({
     try { naia.danbooruDetach(); } catch (_error) {}
   }
 
+  // ---- Minimize-to-island --------------------------------------------------
+  function ensureIsland() {
+    if (islandEl) return islandEl;
+    islandEl = document.createElement('div');
+    islandEl.className = 'danbooru-mini-island';
+    islandEl.hidden = true;
+    islandEl.innerHTML = `
+      <button type="button" class="danbooru-mini-label" data-danbooru-restore title="Danbooru 창 펼치기">📦 Danbooru</button>
+      <button type="button" class="danbooru-mini-btn" data-danbooru-restore aria-label="펼치기" title="펼치기">▢</button>
+      <button type="button" class="danbooru-mini-btn danbooru-mini-close" data-danbooru-island-close aria-label="닫기" title="닫기">×</button>`;
+    islandEl.addEventListener('click', event => {
+      const target = event.target;
+      if (!(target instanceof win.Element)) return;
+      if (target.closest('[data-danbooru-island-close]')) {
+        closePanel();
+      } else if (target.closest('[data-danbooru-restore]')) {
+        restorePanel();
+      }
+    });
+    document.body.append(islandEl);
+    return islandEl;
+  }
+
+  function positionIsland() {
+    if (!islandEl || islandEl.hidden) return;
+    // Top axis: vertically centered in the right tab bar (the topmost toolbar where
+    // "브라우저에서 열기" lives); horizontally right-aligned to the Auto Save column.
+    const bar = document.querySelector('.right-tab-bar');
+    const save = document.getElementById('statsSave');
+    const barRect = bar && bar.getBoundingClientRect();
+    const saveRect = save && save.getBoundingClientRect();
+    if (saveRect && saveRect.width > 0) {
+      islandEl.style.right = `${Math.round(Math.max(8, win.innerWidth - saveRect.right))}px`;
+    } else {
+      islandEl.style.right = '14px';
+    }
+    islandEl.style.left = 'auto';
+    if (barRect && barRect.height > 0) {
+      // Center vertically in the bar, clamped so it can never settle off-screen.
+      const centered = barRect.top + (barRect.height - islandEl.offsetHeight) / 2;
+      const maxTop = win.innerHeight - islandEl.offsetHeight - 8;
+      islandEl.style.top = `${Math.max(8, Math.min(Math.round(centered), maxTop))}px`;
+    } else {
+      islandEl.style.top = '10px';
+    }
+  }
+
+  function schedulePositionIsland() {
+    // Throttle to one reflow per frame — scroll/resize fire in bursts (capture phase
+    // catches every scroller), mirroring the embed bounds path's scheduleReportBounds.
+    if (islandRaf) win.cancelAnimationFrame(islandRaf);
+    islandRaf = win.requestAnimationFrame(() => {
+      islandRaf = 0;
+      positionIsland();
+    });
+  }
+
+  function showIsland() {
+    ensureIsland();
+    islandEl.hidden = false;
+    positionIsland();
+    if (!islandReposition) {
+      islandReposition = () => schedulePositionIsland();
+      win.addEventListener('resize', islandReposition, true);
+      win.addEventListener('scroll', islandReposition, {capture: true, passive: true});
+    }
+  }
+
+  function hideIsland() {
+    if (islandEl) islandEl.hidden = true;
+    if (islandReposition) {
+      win.removeEventListener('resize', islandReposition, true);
+      win.removeEventListener('scroll', islandReposition, true);
+      islandReposition = null;
+    }
+    if (islandRaf) {
+      win.cancelAnimationFrame(islandRaf);
+      islandRaf = 0;
+    }
+  }
+
+  function minimizePanel() {
+    if (minimized) return;
+    if (!panel || !panel.classList.contains('open')) return;
+    minimized = true;
+    // Detach the native view (removeChildView preserves its page state) so the
+    // floating island and the main UI are unobstructed.
+    if (embedMode) detachEmbed();
+    panel.classList.remove('open');
+    panel.hidden = true;
+    showIsland();
+  }
+
+  function restorePanel() {
+    if (!minimized || !panel) return;
+    minimized = false;
+    hideIsland();
+    panel.hidden = false;
+    panel.classList.add('open');
+    if (embedMode) attachEmbed();
+  }
+
   function embedDialogHtml() {
     return `
       <div class="danbooru-tool-dialog danbooru-embed">
@@ -294,7 +467,10 @@ export function createDanbooruBrowserController({
             <div class="danbooru-tool-kicker">Danbooru</div>
             <h2>Danbooru Browser</h2>
           </div>
-          <button type="button" class="danbooru-close-btn" data-danbooru-close aria-label="Close">×</button>
+          <div class="danbooru-header-actions">
+            <button type="button" class="danbooru-min-btn" data-danbooru-minimize aria-label="최소화" title="최소화">–</button>
+            <button type="button" class="danbooru-close-btn" data-danbooru-close aria-label="Close">×</button>
+          </div>
         </header>
         <div class="danbooru-embed-body">
           <div class="danbooru-embed-left">
@@ -368,6 +544,13 @@ export function createDanbooruBrowserController({
         navigateEmbed();
       } else if (target.closest('[data-danbooru-apply-prompt]')) {
         applyPrompt();
+      } else if (target.closest('[data-danbooru-generate]')) {
+        generateFromPost();
+      } else if (target.closest('[data-danbooru-minimize]')) {
+        minimizePanel();
+      } else if (target.closest('[data-danbooru-copy-group]')) {
+        const copyBtn = target.closest('[data-danbooru-copy-group]');
+        copyGroup(copyBtn.dataset.danbooruCopyGroup || '');
       } else {
         const tag = target.closest('[data-danbooru-tag]');
         if (tag) {
@@ -397,6 +580,8 @@ export function createDanbooruBrowserController({
 
   function openPanel({query = ''} = {}) {
     ensurePanel();
+    minimized = false;
+    hideIsland();
     if (queryInput && query) queryInput.value = query;
     if (embedMode && addressInput && query) addressInput.value = query;
     panel.hidden = false;
@@ -415,6 +600,8 @@ export function createDanbooruBrowserController({
   function closePanel() {
     if (!panel) return;
     detachEmbed();
+    minimized = false;
+    hideIsland();
     panel.classList.remove('open');
     panel.hidden = true;
   }

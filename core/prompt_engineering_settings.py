@@ -249,6 +249,42 @@ def randomized_pool_file(*, save_root: str | Path | None = None) -> Path:
     return _coerce_save_root(save_root) / "presets" / "randomized_pool.json"
 
 
+def _read_randomized_pool_data(save_root: str | Path | None) -> dict[str, Any]:
+    path = _existing_save_file(Path("presets") / "randomized_pool.json", save_root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_randomized_pool_data(data: dict[str, Any], save_root: str | Path | None) -> None:
+    path = randomized_pool_file(save_root=save_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _randomized_pool_entry(data: dict[str, Any], mode_key: str) -> tuple[list, str, str, bool]:
+    """Extract (pool, wildcard_front, wildcard_back, wildcard_enabled) for a mode.
+
+    Accepts the legacy list format (``data[mode] = [...]``) and the dict format
+    (``{"pool": [...], "wildcard_front": str, "wildcard_back": str, "wildcard_enabled": bool}``).
+    The earlier single-slot ``"wildcard"`` key is migrated into ``wildcard_back``."""
+    raw = data.get(mode_key) if isinstance(data, dict) else None
+    if isinstance(raw, dict):
+        pool = raw.get("pool", [])
+        front = raw.get("wildcard_front", "")
+        back = raw.get("wildcard_back", raw.get("wildcard", ""))
+        enabled = bool(raw.get("wildcard_enabled", False))
+    elif isinstance(raw, list):
+        pool, front, back, enabled = raw, "", "", False
+    else:
+        pool, front, back, enabled = [], "", "", False
+    if not isinstance(pool, list):
+        pool = []
+    return pool, str(front or ""), str(back or ""), bool(enabled)
+
+
 def load_randomized_pool(
     mode: str | None,
     preset_names: list[str] | None = None,
@@ -256,14 +292,8 @@ def load_randomized_pool(
     save_root: str | Path | None = None,
 ) -> list[str]:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = _existing_save_file(Path("presets") / "randomized_pool.json", save_root)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
-        data = {}
-    pool = data.get(mode_key, []) if isinstance(data, dict) else []
-    if not isinstance(pool, list):
-        pool = []
+    data = _read_randomized_pool_data(save_root)
+    pool, _front, _back, _enabled = _randomized_pool_entry(data, mode_key)
     valid = set(preset_names or list_preset_names(mode_key, save_root=save_root))
     seen = set()
     restored = []
@@ -280,18 +310,38 @@ def load_randomized_pool(
     return restored
 
 
+def _randomized_entry_dict(pool, front, back, enabled) -> dict[str, Any]:
+    return {
+        "pool": list(pool or []),
+        "wildcard_front": str(front or ""),
+        "wildcard_back": str(back or ""),
+        "wildcard_enabled": bool(enabled),
+    }
+
+
 def save_randomized_pool(mode: str | None, pool: list[str], *, save_root: str | Path | None = None) -> None:
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = randomized_pool_file(save_root=save_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    except Exception:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
-    data[mode_key] = list(pool or [])
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    data = _read_randomized_pool_data(save_root)
+    _pool, front, back, enabled = _randomized_pool_entry(data, mode_key)
+    data[mode_key] = _randomized_entry_dict(pool, front, back, enabled)
+    _write_randomized_pool_data(data, save_root)
+
+
+def load_randomized_wildcard(mode: str | None, *, save_root: str | Path | None = None) -> tuple[str, str, bool]:
+    mode_key = normalize_prompt_engineering_mode(mode)
+    data = _read_randomized_pool_data(save_root)
+    _pool, front, back, enabled = _randomized_pool_entry(data, mode_key)
+    return front, back, enabled
+
+
+def save_randomized_wildcard(
+    mode: str | None, front: str, back: str, enabled: bool, *, save_root: str | Path | None = None
+) -> None:
+    mode_key = normalize_prompt_engineering_mode(mode)
+    data = _read_randomized_pool_data(save_root)
+    pool, _front, _back, _enabled = _randomized_pool_entry(data, mode_key)
+    data[mode_key] = _randomized_entry_dict(pool, front, back, enabled)
+    _write_randomized_pool_data(data, save_root)
 
 
 def read_preset_data(
@@ -380,11 +430,15 @@ class PromptEngineeringHeadlessStore:
             settings = merge_settings(settings, preset_data.get("module_settings") or {})
 
         randomized_pool = self.load_randomized_pool(mode, preset_names)
+        wc_front, wc_back, wc_enabled = self.load_randomized_wildcard(mode)
         return {
             "settings": settings,
             "preset_list": preset_names,
             "current_preset": current_preset,
             "randomized_preset_list": randomized_pool,
+            "randomized_wildcard_front": wc_front,
+            "randomized_wildcard_back": wc_back,
+            "randomized_wildcard_enabled": wc_enabled,
         }
 
     def list_preset_names(self, mode: str | None = None) -> list[str]:
@@ -413,6 +467,12 @@ class PromptEngineeringHeadlessStore:
 
     def save_randomized_pool(self, mode: str | None, pool: list[str]) -> None:
         save_randomized_pool(mode, pool, save_root=self._save_root)
+
+    def load_randomized_wildcard(self, mode: str | None = None) -> tuple[str, str, bool]:
+        return load_randomized_wildcard(mode, save_root=self._save_root)
+
+    def save_randomized_wildcard(self, mode: str | None, front: str, back: str, enabled: bool) -> None:
+        save_randomized_wildcard(mode, front, back, enabled, save_root=self._save_root)
 
     def save_e621_settings(self, settings: dict[str, Any]) -> None:
         save_e621_settings(settings, save_root=self._save_root)
@@ -563,6 +623,20 @@ class PromptEngineeringHeadlessStore:
         self.save_randomized_pool(mode_key, [])
         return True, ""
 
+    def set_randomized_wildcard(
+        self, front: str, back: str, enabled: bool, mode: str | None = None
+    ) -> tuple[bool, str]:
+        mode_key = self.mode(mode)
+        state = self.state(mode_key)
+        wc_front = str(front or "")
+        wc_back = str(back or "")
+        en = bool(enabled)
+        state["randomized_wildcard_front"] = wc_front
+        state["randomized_wildcard_back"] = wc_back
+        state["randomized_wildcard_enabled"] = en
+        self.save_randomized_wildcard(mode_key, wc_front, wc_back, en)
+        return True, ""
+
     def persist_active_settings(self, mode: str | None = None, *, force: bool = False) -> tuple[bool, str]:
         mode_key = self.mode(mode)
         if mode_key not in self._states:
@@ -580,8 +654,12 @@ class PromptEngineeringHeadlessStore:
             data.setdefault("main_settings", {})
             self.write_preset_data(current, mode_key, data)
             self.save_last_used_preset(mode_key, current)
-        else:
+        elif current != "*randomized":
             self.save_mode_settings(mode_key, settings)
+        # *randomized rolls a fresh preset (and an unexpanded Randomized Wildcard token)
+        # into state["settings"] every generation; that transient roll must NEVER be
+        # written to the durable mode baseline, or it bleeds into unrelated presets on
+        # reload. Skip persistence entirely while *randomized is the current preset.
         self._dirty_modes.discard(mode_key)
         return True, current
 

@@ -98,6 +98,9 @@ class HeadlessPromptEngineeringService:
             "randomized_active": state["current_preset"] == "*randomized",
             "randomized_preset_list": list(state["randomized_preset_list"]),
             "randomized_available_presets": store.randomized_available_presets(),
+            "randomized_wildcard_front": str(state.get("randomized_wildcard_front") or ""),
+            "randomized_wildcard_back": str(state.get("randomized_wildcard_back") or ""),
+            "randomized_wildcard_enabled": bool(state.get("randomized_wildcard_enabled")),
             "pre_prompt": settings.get("pre_prompt", ""),
             "post_prompt": settings.get("post_prompt", ""),
             "auto_hide": settings.get("auto_hide_prompt", ""),
@@ -208,6 +211,18 @@ class HeadlessPromptEngineeringService:
                 return context._toast(message, level="error")
         elif key == "randomized_clear":
             store.clear_randomized_presets()
+        elif key == "randomized_wildcard":
+            try:
+                payload = json.loads(text_value or "{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            store.set_randomized_wildcard(
+                str(payload.get("front") or ""),
+                str(payload.get("back") or ""),
+                bool(payload.get("enabled")),
+            )
         elif key == "e621_settings":
             settings = json.loads(text_value or "{}")
             if not isinstance(settings, dict):

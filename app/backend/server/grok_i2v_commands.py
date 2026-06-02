@@ -38,7 +38,7 @@ _POLL_TIMEOUT = 30.0
 _DOWNLOAD_TIMEOUT = 180.0
 _POLL_INTERVAL = 5.0
 _TOTAL_BUDGET = 900.0  # 15분
-_VIDEO_MODEL = "grok-imagine-video"
+_VIDEO_MODEL = "grok-imagine-video-1.5-2026-05-30"
 
 
 def _proxy() -> str:

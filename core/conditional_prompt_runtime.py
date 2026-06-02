@@ -314,7 +314,12 @@ class HeadlessConditionalRuleEngine:
             return
         tags = [tag.strip() for tag in split_tags_smart(str(slots[char_index].get("prompt") or "")) if tag.strip()]
         old_value = str(old_tag or "").strip()
-        new_value = str(new_tag or "").strip()
+        # Expand wildcard tokens in the replacement, mirroring _execute_action's other
+        # branches: the conditional hook runs at 'after_wildcard' (after the only expansion
+        # pass), so char_replace(N, old, __wc__) would otherwise emit the literal token.
+        # Guarded/exception-safe; plain tags pass through unchanged.
+        expanded = self._expand_action_tags(context, [new_tag])
+        new_value = ", ".join(str(tag).strip() for tag in expanded if str(tag).strip()) or str(new_tag or "").strip()
         replaced = False
         for index, tag in enumerate(tags):
             if tag == old_value or _strip_weight_format(tag) == old_value:

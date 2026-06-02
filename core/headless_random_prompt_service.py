@@ -521,6 +521,16 @@ class HeadlessRandomPromptService:
     def _apply_character_settings(self, settings: dict[str, Any]) -> None:
         from core.character_settings import character_params_from_settings
 
+        # A NEW prompt run must derive the character base from the PRISTINE character
+        # frames, not the previous run's conditional result. The conditional hook stores
+        # its per-prompt character override on current_prompt_context.metadata; if we let
+        # character_params_from_settings(reuse_current_context=True) pick that up as the
+        # base, a conditional rule like `char:1+=__wc__` re-appends every generation
+        # (1girl -> 1girl, a -> 1girl, a, b -> ...). Drop the stale conditional override
+        # here so reuse_current_context=True — which we keep so character-prompt wildcards
+        # still share the main prompt's sequential/dependent counters — falls through to
+        # the frame-based pristine base. (Mirrors the reset in headless_character_service.)
+        self._clear_conditional_character_override()
         params = character_params_from_settings(
             self.context,
             mode=self.context.get_api_mode(),
@@ -529,6 +539,14 @@ class HeadlessRandomPromptService:
         if params.get("characters"):
             settings["characters"] = params["characters"]
             settings["uc"] = params.get("uc", [])
+
+    def _clear_conditional_character_override(self) -> None:
+        context = getattr(self.context, "current_prompt_context", None)
+        metadata = getattr(context, "metadata", None)
+        if isinstance(metadata, dict):
+            metadata.pop("conditional_character_overrides", None)
+            metadata.pop("_conditional_character_slots", None)
+            metadata.pop("conditional_character_skips", None)
 
     def _prompt_generation_service(self) -> PromptGenerationService:
         service = getattr(self.context, "prompt_generation_service", None)

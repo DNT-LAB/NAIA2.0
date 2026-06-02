@@ -41,7 +41,7 @@ function lsGet(key, fallback) {
 }
 function lsSet(key, value) { try { localStorage.setItem(key, value); } catch (error) { /* 비치명 */ } }
 
-export function createNaiDirectorModal({document, window: win = window, getWs, WebSocket, showToast = () => {}, escHtml = (value) => String(value)}) {
+export function createNaiDirectorModal({document, window: win = window, getWs, WebSocket, showToast = () => {}, escHtml = (value) => String(value), bindTagAssist = () => {}}) {
   let popup = null;
   let ctx = null;
   let running = false;
@@ -204,7 +204,10 @@ export function createNaiDirectorModal({document, window: win = window, getWs, W
     const defrySel = pick('.nai-director-defry');
     if (defrySel) defrySel.addEventListener('change', savePrefs);
     const promptBox = pick('.nai-director-prompt');
-    if (promptBox) promptBox.addEventListener('input', savePrefs);
+    if (promptBox) {
+      promptBox.addEventListener('input', savePrefs);
+      bindTagAssist(promptBox);  // 메인 프롬프트와 동일한 태그 autocomplete 적용
+    }
 
     syncFields();
     position();

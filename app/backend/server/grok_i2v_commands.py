@@ -155,8 +155,14 @@ async def handle_grok_video_command(ws, context, clients, command, *, run_in_thr
 
 
 async def _run_grok_video(ws, context, command, run_in_thread) -> None:
+    # 다중 인스턴스 라우팅: 프론트가 grok_i2v 에 실어 보낸 job_id 를 모든 grok_i2v_state 에 echo 한다.
+    # (동시 생성 시 어느 인스턴스의 진행/완료인지 프론트가 구분) — 없으면 빈 문자열(구버전 단일 폴백).
+    job_id = str(command.get("job_id") or "")
+
     async def _send(obj: dict[str, Any]) -> None:
         try:
+            if isinstance(obj, dict) and obj.get("type") == "grok_i2v_state":
+                obj = {**obj, "job_id": job_id}
             await ws.send_json(obj)
         except Exception:
             pass

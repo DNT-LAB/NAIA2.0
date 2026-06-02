@@ -16,7 +16,13 @@ export function createGrokVideoHistory({document, fetch: fetchFn = (...args) => 
   }
 
   function closePlayer() {
-    if (overlay) { overlay.remove(); overlay = null; }
+    if (overlay) {
+      // 재생 중 <video> 는 DOM 제거만으로 오디오가 안 멈춤 → pause+src 제거+load() 로 명시 정지.
+      overlay.querySelectorAll('video').forEach((v) => {
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (error) { /* noop */ }
+      });
+      overlay.remove(); overlay = null;
+    }
   }
 
   function openFolder() {

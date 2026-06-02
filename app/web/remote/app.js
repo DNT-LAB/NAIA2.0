@@ -734,7 +734,7 @@ const grokI2iModalReady = import('./js/features/grokI2iModal.mjs?v=20260602-grok
   });
 // --- Grok I2V 모달 (제거 가능): 우클릭 → 이미지→영상 ---
 let grokI2vModal = null;
-const grokI2vModalReady = import('./js/features/grokI2vModal.mjs?v=20260602-grok11')
+const grokI2vModalReady = import('./js/features/grokI2vModal.mjs?v=20260602-grok17')
   .then(({createGrokI2vModal}) => {
     grokI2vModal = createGrokI2vModal({document, getWs: () => ws, WebSocket, showToast, escHtml, fetch: window.fetch.bind(window)});
   })
@@ -743,9 +743,9 @@ const grokI2vModalReady = import('./js/features/grokI2vModal.mjs?v=20260602-grok
   });
 // --- NAI Director Tools 모달 (제거 가능): GENERATION INFO [Director] → 현재 결과 변형 ---
 let naiDirectorModal = null;
-const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260602-director4')
+const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260602-director5')
   .then(({createNaiDirectorModal}) => {
-    naiDirectorModal = createNaiDirectorModal({document, getWs: () => ws, WebSocket, showToast, escHtml});
+    naiDirectorModal = createNaiDirectorModal({document, getWs: () => ws, WebSocket, showToast, escHtml, bindTagAssist});
   })
   .catch(error => {
     console.error('Failed to initialize nai director modal module', error);
@@ -761,7 +761,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
 })();
 // --- Grok 영상 히스토리 클릭→재생 (제거 가능): 영상 썸네일 클릭 시 실제 mp4 재생 ---
 let grokVideoHistory = null;
-const grokVideoHistoryReady = import('./js/features/grokVideoHistory.mjs?v=20260602-grok11')
+const grokVideoHistoryReady = import('./js/features/grokVideoHistory.mjs?v=20260602-grok12')
   .then(({createGrokVideoHistory}) => {
     grokVideoHistory = createGrokVideoHistory({document, fetch: window.fetch.bind(window)});
     grokVideoHistory.bind();

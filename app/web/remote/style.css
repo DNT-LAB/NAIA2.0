@@ -14888,6 +14888,13 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   font-family: var(--font-mono); font-size: 10.5px;
   color: var(--text-muted); letter-spacing: 0.4px;
 }
+/* GROK OAuth ToS 면책 경고 — 앰버 강조 (제거 가능) */
+.setup-sub-warn {
+  color: #e3c163;
+  border-left: 2px solid rgba(243,211,104,0.5);
+  padding-left: 8px; margin-top: 6px;
+}
+.setup-sub-warn b { color: #f5df8b; }
 .setup-close {
   width: 28px; height: 28px;
   background: transparent; border: 1px solid var(--border-dim); border-radius: 6px;
@@ -15636,6 +15643,21 @@ body.detached-module .mod-grid-3 {
 .grok-extra-x:hover { background: var(--accent); }
 .grok-i2i-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
 .grok-i2i-hint { color: var(--text-dim); font-weight: 400; font-size: 11px; margin-left: 6px; }
+/* Grok I2V 최소화 진행 pill (제거 가능) — 상단 우측, 클릭 시 모달 복원 */
+.grok-i2v-pill {
+  position: fixed; top: 10px; right: 16px; z-index: 12000;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 13px; border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid rgba(96,205,178,0.7);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 11.5px; font-weight: 700;
+  cursor: pointer; box-shadow: 0 8px 22px rgba(0,0,0,0.55);
+}
+.grok-i2v-pill { transition: top 0.15s ease; }
+.grok-i2v-pill:hover { background: var(--bg-surface); border-color: rgba(126,225,200,0.95); }
+.grok-i2v-pill.done { border-color: rgba(126,225,200,1); color: #cfeee4; }
+.grok-i2v-pill-ico { font-size: 13px; line-height: 1; }
+.grok-i2v-pill-id { font-size: 10px; font-weight: 800; color: #8fe0cd; letter-spacing: 0.3px; }
+.grok-i2v-pill.done .grok-i2v-pill-id { color: #aef0e0; }
 .grok-i2i-prompt {
   flex: 1 1 auto; min-height: 180px; resize: vertical;
   background: var(--bg-deep); color: var(--text-primary);

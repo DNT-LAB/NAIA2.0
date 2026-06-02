@@ -9,6 +9,7 @@ export function createImageActionPopup({
   onInpaint = null,
   onDanbooru = null,
   onVibeTransfer = null,
+  onInsertHistory = null,
   canUseDesktopImg2Img = () => true,
 }) {
   let root = null;
@@ -71,6 +72,8 @@ export function createImageActionPopup({
           runOptional(onDanbooru, 'Danbooru tag analysis');
         } else if (action === 'vibe') {
           runOptional(onVibeTransfer, 'Import Vibe Transfer');
+        } else if (action === 'insert-history') {
+          runOptional(onInsertHistory, 'Insert to history');
         }
       });
     });
@@ -116,6 +119,7 @@ export function createImageActionPopup({
           ${showDesktopImg2ImgActions ? actionButton({action: 'inpaint', icon: '✎', label: 'Inpaint 전송'}) : ''}
           ${hasMetadata ? actionButton({action: 'metadata', icon: '▤', label: '메타데이터', tone: 'metadata'}) : ''}
           ${showVibe ? actionButton({action: 'vibe', icon: '◇', label: 'Vibe Transfer', tone: 'vibe'}) : ''}
+          ${onInsertHistory ? actionButton({action: 'insert-history', icon: '＋', label: '이미지 히스토리에 추가', tone: 'history'}) : ''}
         </div>
       </section>`;
     document.body.appendChild(root);

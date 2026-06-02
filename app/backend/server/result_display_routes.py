@@ -456,6 +456,42 @@ def resolve_result_image_action_source(
     raise FileNotFoundError("Result image is unavailable")
 
 
+def insert_external_image_to_history(context: WebSessionContext, image_bytes: bytes, label: str = "Imported Image"):
+    """Insert an arbitrary external image into the result history WITHOUT a prompt.
+
+    Lets a pasted / dropped / detected image enter the standard result pipeline
+    (result_store.add_api_result) so it gains a __history_item__ rel_path and can then
+    be right-clicked for Grok I2I/I2V (and, in NAI mode, Img2Img/Inpaint/Vibe) exactly
+    like a generated result. No source_row is attached → reroll/queue stay disabled (it
+    has no prompt to replay). api_mode only tags the current backend for the metadata
+    panel; insertion itself is mode-agnostic so external images work in every mode."""
+    from PIL import Image
+    from core.generation_request import GenerationRequest
+
+    if not image_bytes:
+        raise ValueError("No image data")
+    with Image.open(io.BytesIO(image_bytes)) as opened:
+        opened.load()
+        image = opened.copy()
+    png_bytes = result_images.pil_image_to_png_bytes(image)
+    safe_label = str(label or "Imported Image")[:120]
+    result = {"status": "success", "image": image, "raw_bytes": png_bytes}
+    params = {
+        "api_mode": str(context.get_api_mode() or "").upper(),
+        "imported_external": True,
+        "_remote_queue_source": "Imported Image",
+        "_remote_queue_label": safe_label,
+    }
+    request = GenerationRequest(params=params, source_row=None)
+    stored = context.result_store.add_api_result(result, request)
+    if context._coerce_bool(context.auto_save_state.get("auto_save", True)):
+        try:
+            context.save_history_item(stored.item)
+        except Exception:
+            pass
+    return stored, "이미지를 히스토리에 추가했습니다."
+
+
 def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_type: str = "") -> dict[str, Any]:
     info = dict(getattr(image, "info", {}) or {})
     parsed_info: dict[str, Any] = {}
@@ -1166,3 +1202,40 @@ def register_result_display_routes(
             "error": "Danbooru image analysis from uploads is not supported. Use the Danbooru browser by post ID or URL.",
             "runtime": "web",
         }, status_code=400)
+
+    @app.post("/api/image/insert-history")
+    async def api_image_insert_history(req: Request):
+        # Insert an external image into the result history WITHOUT a prompt so it can be
+        # fed to Grok I2I/I2V (and NAI Img2Img/Inpaint/Vibe) by right-click. Mode-agnostic.
+        image_bytes = await req.body()
+        if not image_bytes:
+            return JSONResponse({"error": "No image data"}, status_code=400)
+        if len(image_bytes) > 64 * 1024 * 1024:
+            return JSONResponse({"error": "Image is too large"}, status_code=413)
+        label = (req.query_params.get("label") or "Imported Image")[:120]
+        from app.backend.server.websocket_broadcast import broadcast_image
+
+        try:
+            stored, message = await run_in_thread(
+                insert_external_image_to_history,
+                session_context,
+                image_bytes,
+                label,
+            )
+        except Exception as exc:
+            return JSONResponse({"error": f"Insert failed: {exc}"}, status_code=400)
+
+        await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
+        await broadcast_json(clients, session_context.result_store.viewer_new_image_payload(stored.item))
+        for evicted in stored.evicted_payloads:
+            await broadcast_json(clients, evicted)
+        try:
+            await broadcast_json(clients, session_context.auto_save_state_payload())
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "message": message,
+            "history_id": stored.item.history_id,
+            "rel_path": stored.item.rel_path,
+        }

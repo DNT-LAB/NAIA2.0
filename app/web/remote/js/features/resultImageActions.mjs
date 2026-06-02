@@ -179,6 +179,32 @@ export function createResultImageActions({
     }
   }
 
+  // 외부 이미지(붙여넣기/드롭/감지)를 프롬프트 없이 결과 히스토리에 삽입한다.
+  // 삽입된 이미지는 우클릭 → Grok I2I/I2V (및 NAI Img2Img/Inpaint/Vibe) 진입점으로 쓸 수 있다.
+  async function insertExternalToHistory(payload) {
+    if (!payload || !payload.blob) {
+      showToast('이미지 데이터를 찾을 수 없습니다.', 'error');
+      return;
+    }
+    try {
+      const label = encodeURIComponent(payload.label || 'Imported Image');
+      const response = await fetch(`/api/image/insert-history?label=${label}`, {
+        method: 'POST',
+        headers: {'Content-Type': payload.blob.type || 'application/octet-stream'},
+        body: payload.blob,
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${response.status}`);
+      }
+      const data = await response.json().catch(() => ({}));
+      showToast(data.message || '이미지를 히스토리에 추가했습니다.', 'success');
+    } catch (error) {
+      console.error('Insert external image to history failed', error);
+      showToast(error.message || '히스토리 추가 실패', 'error');
+    }
+  }
+
   async function requestMetadataImageAction(payload, action) {
     const label = payload?.label || payload?.source?.label || payload?.source?.path || 'Metadata Image';
     let blob = payload?.blob || null;
@@ -810,6 +836,7 @@ export function createResultImageActions({
   return {
     bindDragSource,
     requestPopupImageAction,
+    insertExternalToHistory,
     requestMetadataImageAction,
     loadPromptFromContext,
     restoreSettingsFromContext,

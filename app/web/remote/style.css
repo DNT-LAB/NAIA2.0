@@ -5700,6 +5700,12 @@ body.resizing-result-info {
   border-color: #5a4a8f;
   color: #c8b8ff;
 }
+.image-action-btn.history {
+  grid-column: 1 / -1;
+  background: #123a3f;
+  border-color: #1f6b73;
+  color: #9fe5e0;
+}
 .image-action-btn:disabled {
   opacity: 0.44;
   cursor: default;

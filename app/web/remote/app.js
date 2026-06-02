@@ -481,7 +481,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260526-clipboard-copy1')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260602-insert-history1')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -530,7 +530,7 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs')
   .catch(error => {
     console.error('Failed to initialize metadata viewer module', error);
   });
-const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260525-runtime-action-clean1')
+const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260602-insert-history1')
   .then(({createImageActionPopup}) => {
     imageActionPopup = createImageActionPopup({
       document,
@@ -543,6 +543,7 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260
       onInpaint: payload => callResultImageAction('requestPopupImageAction', payload, 'inpaint'),
       onDanbooru: payload => callResultImageAction('requestPopupImageAction', payload, 'danbooru'),
       onVibeTransfer: payload => callResultImageAction('requestPopupImageAction', payload, 'vibe'),
+      onInsertHistory: payload => callResultImageAction('insertExternalToHistory', payload),
       onMetadata: payload => {
         if (!metadataViewer || typeof metadataViewer.displayPayload !== 'function') {
           showToast('Metadata viewer is not ready', 'error');

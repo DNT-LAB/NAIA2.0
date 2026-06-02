@@ -9,6 +9,7 @@ from app.backend.server.artist_thumbnail_routes import register_artist_thumbnail
 from app.backend.server.character_viewer_routes import register_character_viewer_routes
 from app.backend.server.data_migration_routes import register_data_migration_routes
 from app.backend.server.danbooru_routes import register_danbooru_routes
+from app.backend.server.grok_routes import register_grok_routes  # Grok 연동 (제거 가능)
 from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.generation_commands import register_generation_rest_routes
 from app.backend.server.generation_runner import ensure_generation_runner
@@ -73,6 +74,7 @@ def register_headless_routes(
     register_module_storage_routes(app, context, run_in_thread=run_in_thread)
     register_data_migration_routes(app, context, run_in_thread=run_in_thread)
     register_danbooru_routes(app, context, run_in_thread=run_in_thread)
+    register_grok_routes(app, context, run_in_thread=run_in_thread)  # Grok 연동 (제거 가능)
     register_event_preset_routes(
         app,
         context,

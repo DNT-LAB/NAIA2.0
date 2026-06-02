@@ -30,6 +30,16 @@ from app.backend.server.generation_commands import (
     handle_generate_command,
     handle_random_command,
 )
+from app.backend.server.grok_i2i_commands import (  # Grok I2I (제거 가능)
+    GROK_I2I_COMMAND_TYPES,
+    handle_grok_command,
+)
+from app.backend.server.grok_i2v_commands import (  # Grok I2V (제거 가능)
+    GROK_ANIMATE_COMMAND_TYPES,
+    GROK_I2V_COMMAND_TYPES,
+    handle_grok_animate_command,
+    handle_grok_video_command,
+)
 from app.backend.server.module_commands import (
     MODULE_COMMAND_TYPES,
     handle_module_command,
@@ -242,6 +252,30 @@ async def handle_json_command(
             run_in_thread=run_in_thread,
             enqueue_generation_request=enqueue_generation_request,
             start_generation_runner=start_generation_runner,
+        )
+    elif command_type in GROK_I2I_COMMAND_TYPES:  # Grok I2I (제거 가능)
+        await handle_grok_command(
+            ws,
+            context,
+            clients,
+            command,
+            run_in_thread=run_in_thread,
+        )
+    elif command_type in GROK_I2V_COMMAND_TYPES:  # Grok I2V (제거 가능)
+        await handle_grok_video_command(
+            ws,
+            context,
+            clients,
+            command,
+            run_in_thread=run_in_thread,
+        )
+    elif command_type in GROK_ANIMATE_COMMAND_TYPES:  # Grok 영상 프리뷰 (제거 가능)
+        await handle_grok_animate_command(
+            ws,
+            context,
+            clients,
+            command,
+            run_in_thread=run_in_thread,
         )
     elif command_type in GENERATION_COMMAND_TYPES:
         if command_type == "bootstrap_random":

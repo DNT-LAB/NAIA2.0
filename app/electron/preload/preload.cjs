@@ -40,4 +40,16 @@ contextBridge.exposeInMainWorld("naiaShell", {
     ipcRenderer.on("naia:shell-state-changed", listener);
     return () => ipcRenderer.removeListener("naia:shell-state-changed", listener);
   },
+  // Grok(xAI) OAuth + 프록시 브리지 (제거 가능)
+  grokState: () => ipcRenderer.invoke("naia:grok-state"),
+  grokLogin: () => ipcRenderer.invoke("naia:grok-login"),
+  grokRestartProxy: () => ipcRenderer.invoke("naia:grok-restart-proxy"),
+  onGrokStateChanged: (callback) => {
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("naia:grok-state-changed", listener);
+    return () => ipcRenderer.removeListener("naia:grok-state-changed", listener);
+  },
 });

@@ -1897,6 +1897,17 @@ function ensureDanbooruView() {
   wc.on("will-redirect", guardNavigation);
   wc.on("did-navigate", () => sendDanbooruNav());
   wc.on("did-navigate-in-page", () => sendDanbooruNav());
+  // 우클릭 컨텍스트 메뉴: 이미지에 한해 복사 / 저장 (donmai 임베드 뷰).
+  wc.on("context-menu", (_event, params) => {
+    if (params.mediaType !== "image" || !params.srcURL) {
+      return;
+    }
+    const menu = Menu.buildFromTemplate([
+      { label: "이미지 복사", click: () => { try { wc.copyImageAt(params.x, params.y); } catch (_error) {} } },
+      { label: "이미지 저장", click: () => { try { wc.downloadURL(params.srcURL); } catch (_error) {} } },
+    ]);
+    try { menu.popup({ window: mainWindow }); } catch (_error) {}
+  });
   danbooruView = view;
   return view;
 }
@@ -2087,6 +2098,121 @@ ipcMain.handle("naia:open-release-page", () => {
   return shell.openExternal(url);
 });
 
+// ===== Grok(xAI) OAuth + 프록시 (ima2 패턴, 제거 가능 블록) ===========================
+// 번들된 progrok 를 NAIA.exe(=Electron) 를 Node 로 써서(ELECTRON_RUN_AS_NODE) 구동한다.
+//   - app ready 시 `progrok proxy` 를 관리 자식으로 자동 기동(미로그인 시 auth_required 로 종료)
+//   - naia:grok-login 이 `progrok login --browser`(로컬백 자동 캡처) 실행 → 성공 시 프록시 재기동
+//   - 토큰/프록시 모두 progrok 가 관리, NAIA 는 토큰을 보관하지 않는다.
+// 제거: 이 블록 + preload 의 grok* + resources/progrok-runtime + 프론트 패널만 지우면 됨.
+const GROK_PROXY_HOST = "127.0.0.1";
+const GROK_PROXY_PORT = 18645;
+let grokProxyProcess = null;
+let grokProxyState = "stopped"; // stopped|starting|ready|auth_required|offline|unavailable
+let grokProxyPort = GROK_PROXY_PORT;
+let grokLoginProcess = null;
+
+function grokRuntimeRoot() {
+  return path.join(resourcesRoot(), "progrok-runtime");
+}
+
+function grokProgrokEntry() {
+  const entry = path.join(grokRuntimeRoot(), "node_modules", "progrok", "dist", "index.js");
+  return fs.existsSync(entry) ? entry : null;
+}
+
+function spawnGrok(args, opts = {}) {
+  if (!grokProgrokEntry()) return null;
+  // NAIA.exe 를 Node 로 실행(ELECTRON_RUN_AS_NODE). grok-launch.cjs 가 commander 의
+  // electron argv 오슬라이스(process.defaultApp 보정) + ESM 동적 import 를 처리한다.
+  const launcher = path.join(grokRuntimeRoot(), "grok-launch.cjs");
+  return spawn(process.execPath, [launcher, ...args], {
+    windowsHide: true,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    ...opts,
+  });
+}
+
+function grokState() {
+  return { available: !!grokProgrokEntry(), proxyState: grokProxyState, host: GROK_PROXY_HOST, port: grokProxyPort };
+}
+
+function broadcastGrokState() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("naia:grok-state-changed", grokState());
+  }
+}
+
+function setGrokProxyState(state) {
+  grokProxyState = state;
+  broadcastGrokState();
+}
+
+function startGrokProxy() {
+  if (!grokProgrokEntry()) { setGrokProxyState("unavailable"); return; }
+  if (grokProxyProcess) return;
+  let authRequired = false;
+  const child = spawnGrok(["proxy", "--host", GROK_PROXY_HOST, "--port", String(GROK_PROXY_PORT)], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (!child) { setGrokProxyState("unavailable"); return; }
+  grokProxyProcess = child;
+  setGrokProxyState("starting");
+  const scan = (buf) => {
+    const text = String(buf || "");
+    appendBackendLog("grok", text.trim());
+    const m = text.match(/https?:\/\/(?:127\.0\.0\.1|localhost):(\d+)\/v1/i);
+    if (m) { grokProxyPort = Number(m[1]) || GROK_PROXY_PORT; setGrokProxyState("ready"); }
+    if (/not logged in|progrok login|grok login/i.test(text)) authRequired = true;
+  };
+  child.stdout.on("data", scan);
+  child.stderr.on("data", scan);
+  child.on("error", (error) => appendBackendLog("grok", `proxy error: ${error.message}`));
+  child.on("exit", (code) => {
+    grokProxyProcess = null;
+    if (quitting) return;
+    setGrokProxyState(authRequired ? "auth_required" : "offline");
+  });
+}
+
+function stopGrokProxy() {
+  if (grokLoginProcess) { try { grokLoginProcess.kill(); } catch (_e) {} grokLoginProcess = null; }
+  if (!grokProxyProcess) return;
+  try { grokProxyProcess.kill(); } catch (_e) {}
+  grokProxyProcess = null;
+}
+
+ipcMain.handle("naia:grok-state", () => grokState());
+
+ipcMain.handle("naia:grok-restart-proxy", () => {
+  stopGrokProxy();
+  startGrokProxy();
+  return grokState();
+});
+
+ipcMain.handle("naia:grok-login", async () => {
+  if (!grokProgrokEntry()) return { ok: false, message: "progrok 런타임이 번들되지 않았습니다." };
+  if (grokLoginProcess) return { ok: false, message: "이미 로그인 진행 중입니다. 열린 브라우저에서 완료하세요." };
+  stopGrokProxy(); // 로그인 중에는 프록시를 내려 56121 콜백/토큰 파일 경합을 피한다.
+  return await new Promise((resolve) => {
+    const child = spawnGrok(["login", "--browser"], { stdio: ["ignore", "pipe", "pipe"] });
+    if (!child) { startGrokProxy(); resolve({ ok: false, message: "progrok 실행 실패." }); return; }
+    grokLoginProcess = child;
+    let tail = "";
+    const onData = (buf) => { const t = String(buf || ""); tail = (tail + t).slice(-2000); appendBackendLog("grok-login", t.trim()); };
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onData);
+    child.on("error", (error) => { grokLoginProcess = null; startGrokProxy(); resolve({ ok: false, message: `로그인 실행 오류: ${error.message}` }); });
+    child.on("exit", (code) => {
+      grokLoginProcess = null;
+      startGrokProxy(); // 로그인 결과와 무관하게 프록시 재기동(성공 시 ready, 실패 시 auth_required)
+      if (code === 0) { resolve({ ok: true, message: "로그인 완료." }); return; }
+      const lastLines = tail.split(/\r?\n/).filter(Boolean).slice(-2).join(" ");
+      resolve({ ok: false, message: `로그인 실패 (code ${code}). ${lastLines}`.trim() });
+    });
+  });
+});
+// ===== /Grok 블록 ===================================================================
+
 configureRemoteDebugging();
 
 const lock = app.requestSingleInstanceLock();
@@ -2106,6 +2232,7 @@ if (!lock) {
     configureApplicationMenu();
     configureDownloads();
     createMainWindow();
+    startGrokProxy(); // Grok(제거 가능): 번들 progrok 프록시 자동 기동
   });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -2115,6 +2242,7 @@ if (!lock) {
   app.on("before-quit", () => {
     quitting = true;
     stopBackend();
+    stopGrokProxy(); // Grok(제거 가능)
   });
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") {

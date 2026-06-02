@@ -12,6 +12,7 @@ export function createSearchPanel({
   bindTagAssist,
 }) {
   let searchingActive = false;
+  let initialFilterRestoreDone = false; // 시작 시 Tag Filter 자동 Search→Assign 1회 가드
   // Rating state lives in one store holding BOTH the generation-pool ratings
   // (active) and the search-execution ratings (search) — distinct concepts,
   // managed together. ratingState/searchRatingState alias the store's live
@@ -300,7 +301,13 @@ export function createSearchPanel({
     const quickFilter = getQuickFilter();
     const serverPreferences = message.filter_preferences;
     if (serverPreferences && quickFilter) {
-      quickFilter.applyPreferences(serverPreferences, {send: false, updateCount: false});
+      // 시작 후 첫 search_state 에서 영속된 Tag Filter 가 활성+태그 보유 시 자동 Search→Assign 1회.
+      // (그 이후 search_state 는 기존대로 {send:false} — 카운트 갱신마다 재검색/재할당 방지)
+      const hasActiveTags = serverPreferences.tag_filter_active
+        && (((serverPreferences.tag_filter || []).length) || ((serverPreferences.tag_filter_exclude || []).length));
+      const autoApply = !initialFilterRestoreDone && !!hasActiveTags;
+      if (autoApply) initialFilterRestoreDone = true;
+      quickFilter.applyPreferences(serverPreferences, {send: autoApply, updateCount: false});
     } else if (serverPreferences) {
       setRatingsFromList(serverPreferences.ratings);
       syncRatingButtons();

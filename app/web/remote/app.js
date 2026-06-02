@@ -595,7 +595,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260531-imgdel2')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260602-grok6')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -620,6 +620,8 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onCopyImage: (context, format) => callResultImageAction('copyImageFromContext', context, format),
       onUpscaleNai: context => callResultImageAction('upscaleFromContext', context),
       onWebUiEnhance: context => requestResultEnhanceFromContext(context),
+      onGrokI2I: context => { if (grokI2iModal) grokI2iModal.open(context); },
+      onGrokI2V: context => { if (grokI2vModal) grokI2vModal.open(context); },
       onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       canUseDesktopImg2Img,
@@ -706,6 +708,43 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026052
   .catch(error => {
     window.__naiaSetupControllerReady = false;
     console.error('Failed to initialize setup controller module', error);
+  });
+// --- Grok(xAI) I2I 연동 패널 (제거 가능): Setup 모달의 격리된 REST 전용 컨트롤러 ---
+let grokConnectPanel = null;
+const grokConnectPanelReady = import('./js/features/grokConnectPanel.mjs?v=20260602-grok8')
+  .then(({createGrokConnectPanel}) => {
+    grokConnectPanel = createGrokConnectPanel({document, fetch: window.fetch.bind(window), showToast});
+  })
+  .catch(error => {
+    console.error('Failed to initialize grok connect panel module', error);
+  });
+// --- Grok I2I 모달 (제거 가능): 우클릭 → 이미지 변형 ---
+let grokI2iModal = null;
+const grokI2iModalReady = import('./js/features/grokI2iModal.mjs?v=20260602-grok14')
+  .then(({createGrokI2iModal}) => {
+    grokI2iModal = createGrokI2iModal({document, getWs: () => ws, WebSocket, showToast, escHtml});
+  })
+  .catch(error => {
+    console.error('Failed to initialize grok i2i modal module', error);
+  });
+// --- Grok I2V 모달 (제거 가능): 우클릭 → 이미지→영상 ---
+let grokI2vModal = null;
+const grokI2vModalReady = import('./js/features/grokI2vModal.mjs?v=20260602-grok11')
+  .then(({createGrokI2vModal}) => {
+    grokI2vModal = createGrokI2vModal({document, getWs: () => ws, WebSocket, showToast, escHtml, fetch: window.fetch.bind(window)});
+  })
+  .catch(error => {
+    console.error('Failed to initialize grok i2v modal module', error);
+  });
+// --- Grok 영상 히스토리 클릭→재생 (제거 가능): 영상 썸네일 클릭 시 실제 mp4 재생 ---
+let grokVideoHistory = null;
+const grokVideoHistoryReady = import('./js/features/grokVideoHistory.mjs?v=20260602-grok11')
+  .then(({createGrokVideoHistory}) => {
+    grokVideoHistory = createGrokVideoHistory({document, fetch: window.fetch.bind(window)});
+    grokVideoHistory.bind();
+  })
+  .catch(error => {
+    console.error('Failed to initialize grok video history module', error);
   });
 let dataMigrationPanel = null;
 const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=20260528-migration6')
@@ -1007,7 +1046,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs')
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260530-refine-revert')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260602-tagfilter1')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -2180,6 +2219,9 @@ const wsMessageHandlers = {
   params: updateParams,
   mode: m => syncMode(m.mode),
   result_enhance_state: m => { if (resultEnhance) resultEnhance.handleState(m); },
+  grok_i2i_state: m => { if (grokI2iModal) grokI2iModal.onState(m); },
+  grok_i2v_state: m => { if (grokI2vModal) grokI2vModal.onState(m); },
+  grok_video_registered: m => { if (grokVideoHistory) grokVideoHistory.register(m.rel_path, m.video_id); },
   result_enhance_config: m => {
     pendingResultEnhanceConfig = m;
     if (resultEnhance) resultEnhance.setConfig(m);
@@ -4835,11 +4877,22 @@ function showToast(msg, type, showConfigure) {
     toastEl.textContent = msg;
   }
   toastEl.className = `toast ${type}`;
-  requestAnimationFrame(() => toastEl.classList.add('show'));
+  // 표시를 requestAnimationFrame 대신 강제 reflow 후 동기 적용한다. Electron 백그라운드
+  // 스로틀링(창 최소화/가림/hidden) 시 rAF 콜백이 보류되는 동안 제거용 setTimeout 만 발화해
+  // 'show' 가 나중에 영구히 붙는 stuck-toast 버그를 차단. (수 초 대기 후 도착하는 토스트에서 발생)
+  void toastEl.offsetWidth; // reflow → opacity transition 트리거
+  toastEl.classList.add('show');
   toastTimer = setTimeout(() => {
     toastEl.classList.remove('show');
+    toastTimer = null;
   }, showConfigure ? 4000 : 2500);
 }
+// 안전망: 창이 숨겨진 동안 제거 타이머가 발화해 끝난 뒤 복귀했을 때 남아있는 토스트를 정리.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && toastEl && toastEl.classList.contains('show') && !toastTimer) {
+    toastEl.classList.remove('show');
+  }
+});
 
 let appDialogCleanup = null;
 function showAppDialog(message, options = {}) {
@@ -5000,6 +5053,15 @@ function verifyComfyui() {
 
 function clearApi(mode) {
   if (setupController) setupController.clearApi(mode);
+}
+
+// --- Grok(xAI) I2I 연동 onclick 핸들러 (제거 가능) ---
+function grokLogin() {
+  if (grokConnectPanel) grokConnectPanel.login();
+}
+
+function grokLogout() {
+  if (grokConnectPanel) grokConnectPanel.logout();
 }
 
 function onClearApiResult(m) {

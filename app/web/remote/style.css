@@ -662,6 +662,12 @@ header {
   border: 1px solid rgba(240,64,64,0.4);
   box-shadow: 0 4px 16px rgba(140,30,30,0.3);
 }
+.toast.info {
+  background: rgba(40,60,120,0.85);
+  color: #d0d8f5;
+  border: 1px solid rgba(92,122,184,0.4);
+  box-shadow: 0 4px 16px rgba(40,60,120,0.3);
+}
 
 /* ---- App confirm dialog ---- */
 .app-confirm-overlay {
@@ -15494,3 +15500,135 @@ body.detached-module .mod-debug-meta-grid {
 body.detached-module .mod-grid-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+
+/* === Grok I2I 모달 (제거 가능): 좌 이미지 · 우 프롬프트 · 하단 버튼 === */
+.grok-i2i-overlay {
+  position: fixed; inset: 0; z-index: 4000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.6); padding: 24px;
+}
+.grok-i2i-dialog {
+  width: min(880px, 96vw); max-height: 92vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border-glow); border-radius: 14px;
+  box-shadow: 0 20px 46px rgba(0, 0, 0, 0.55); overflow: hidden;
+}
+.grok-i2i-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border-dim);
+}
+.grok-i2i-title { font-weight: 700; letter-spacing: 0.04em; font-size: 14px; }
+.grok-i2i-x {
+  background: none; border: none; color: var(--text-dim); font-size: 22px;
+  line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.grok-i2i-x:hover { color: var(--text-primary); }
+.grok-i2i-body { display: flex; gap: 16px; padding: 18px; min-height: 0; }
+.grok-i2i-image {
+  flex: 0 0 46%; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-deep); border: 1px solid var(--border-dim);
+  border-radius: 10px; overflow: hidden; max-height: 60vh;
+}
+.grok-i2i-image img { max-width: 100%; max-height: 60vh; object-fit: contain; display: block; }
+.grok-i2i-side { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* 3분할 프롬프트(선행/메인/후행) — I2I·I2V 공용 (제거 가능) */
+.grok-side-3 { gap: 6px; overflow-y: auto; max-height: 66vh; padding-right: 4px; }
+.grok-prompt-label { font-size: 12px; color: var(--text-muted); font-weight: 600; margin-top: 2px; }
+.grok-prompt {
+  resize: vertical; min-height: 54px;
+  background: var(--bg-deep); color: var(--text-primary);
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  padding: 8px 10px; font-size: 12px; line-height: 1.5; font-family: inherit;
+}
+.grok-prompt:focus { outline: none; border-color: var(--accent); }
+.grok-prompt-main { min-height: 132px; }
+.grok-extra-note { font-size: 11px; color: var(--text-dim); margin: 2px 0 0; line-height: 1.45; }
+/* I2I 추가 참조 이미지 (제거 가능) */
+.grok-i2i-extra-block { display: flex; flex-direction: column; gap: 6px; }
+.grok-extra-head { display: flex; align-items: center; justify-content: space-between; }
+.grok-extra-add {
+  font-size: 12px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border-dim);
+  background: var(--bg-elevated); color: var(--text-muted); cursor: pointer; font-weight: 600;
+}
+.grok-extra-add:hover { color: var(--text-primary); border-color: var(--accent); }
+.grok-extra-drop {
+  min-height: 64px; border: 1px dashed var(--border-glow); border-radius: 8px;
+  padding: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+}
+.grok-extra-drop.drag { border-color: var(--accent); background: rgba(124,106,239,0.10); }
+.grok-extra-hint { color: var(--text-dim); font-size: 11px; }
+.grok-extra-thumb { position: relative; width: 56px; height: 56px; border-radius: 6px; overflow: hidden; }
+.grok-extra-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.grok-extra-x {
+  position: absolute; top: 1px; right: 1px; width: 18px; height: 18px; border-radius: 50%;
+  border: none; background: rgba(0,0,0,0.6); color: #fff; font-size: 13px; line-height: 1; cursor: pointer; padding: 0;
+}
+.grok-extra-x:hover { background: var(--accent); }
+.grok-i2i-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.grok-i2i-hint { color: var(--text-dim); font-weight: 400; font-size: 11px; margin-left: 6px; }
+.grok-i2i-prompt {
+  flex: 1 1 auto; min-height: 180px; resize: vertical;
+  background: var(--bg-deep); color: var(--text-primary);
+  border: 1px solid var(--border-dim); border-radius: 10px;
+  padding: 12px; font-size: 13px; line-height: 1.5; font-family: inherit;
+}
+.grok-i2i-prompt:focus { outline: none; border-color: var(--accent); }
+.grok-i2i-quality { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.grok-i2i-actions { display: flex; gap: 10px; padding: 0 18px 14px; }
+.grok-i2i-generate {
+  flex: 1 1 auto; padding: 12px; border: none; border-radius: 10px;
+  background: #3f8f5e; color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
+}
+.grok-i2i-generate:hover { background: #47a16a; }
+.grok-i2i-generate:disabled { background: #2f4f3d; color: #b9c9bf; cursor: default; }
+.grok-i2i-cancel {
+  flex: 0 0 auto; padding: 12px 20px; border-radius: 10px;
+  background: var(--bg-elevated); color: var(--text-muted);
+  border: 1px solid var(--border-dim); font-weight: 600; cursor: pointer;
+}
+.grok-i2i-cancel:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.grok-i2i-status { padding: 0 18px 16px; font-size: 12px; min-height: 16px; color: var(--text-dim); }
+.grok-i2i-status.info { color: var(--accent-glow); }
+.grok-i2i-status.error { color: #e87c7c; }
+@media (max-width: 720px) {
+  .grok-i2i-body { flex-direction: column; }
+  .grok-i2i-image { flex: 0 0 auto; max-height: 38vh; }
+}
+/* Grok I2V 추가 (제거 가능) */
+.grok-i2v-params { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.grok-i2v-param { display: flex; flex-direction: column; gap: 6px; }
+.grok-i2v-param-dur { flex: 1 1 180px; min-width: 160px; }
+.grok-i2v-param-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.grok-i2v-dur-val { color: var(--accent-glow); font-weight: 700; }
+.grok-i2v-duration { width: 100%; accent-color: var(--accent); height: 4px; cursor: pointer; }
+.grok-i2v-res-group { display: inline-flex; border: 1px solid var(--border-dim); border-radius: 8px; overflow: hidden; }
+.grok-i2v-res-opt { position: relative; margin: 0; }
+.grok-i2v-res-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.grok-i2v-res-opt span {
+  display: block; padding: 7px 16px; font-size: 13px; color: var(--text-dim);
+  cursor: pointer; background: var(--bg-deep); user-select: none;
+}
+.grok-i2v-res-opt + .grok-i2v-res-opt span { border-left: 1px solid var(--border-dim); }
+.grok-i2v-res-opt input:checked + span { background: var(--accent); color: #fff; font-weight: 700; }
+.grok-i2v-res-opt input:focus-visible + span { outline: 2px solid var(--accent-glow); outline-offset: -2px; }
+.grok-i2v-body.grok-i2v-done { justify-content: center; }
+.grok-i2v-player { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-width: 0; }
+.grok-i2v-player video { max-width: 100%; max-height: 64vh; border-radius: 10px; background: #000; display: block; }
+.grok-i2v-save { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+/* Grok 영상 히스토리 클릭→재생 플레이어 (제거 가능) */
+.grok-vplay-overlay { z-index: 4100; }
+.grok-vplay-dialog { position: relative; max-width: 92vw; max-height: 92vh; }
+.grok-vplay-dialog video { max-width: 92vw; max-height: 88vh; border-radius: 12px; background: #000; display: block; box-shadow: 0 20px 46px rgba(0,0,0,0.6); }
+.grok-vplay-close {
+  position: absolute; top: -14px; right: -14px; width: 34px; height: 34px; border-radius: 50%;
+  border: none; background: var(--bg-elevated); color: var(--text-primary); font-size: 20px;
+  line-height: 1; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+.grok-vplay-close:hover { background: var(--accent); color: #fff; }
+.grok-vplay-actions { display: flex; justify-content: center; margin-top: 10px; }
+.grok-vplay-folder {
+  padding: 9px 18px; border-radius: 9px; border: 1px solid var(--border-dim);
+  background: var(--bg-elevated); color: var(--text-muted); font-weight: 600; cursor: pointer;
+}
+.grok-vplay-folder:hover { color: var(--text-primary); border-color: var(--border-glow); }

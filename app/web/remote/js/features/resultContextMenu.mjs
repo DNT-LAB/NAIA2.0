@@ -13,6 +13,8 @@ const ACTION_METADATA_DETACHED = 'show_metadata_detached';
 const ACTION_WEBUI_ENHANCE = 'webui_enhance';
 const ACTION_DELETE_RESULT = 'delete_result';
 const ACTION_SET_DELETE_MODE = 'set_delete_mode';
+const ACTION_GROK_I2I = 'grok_i2i'; // Grok 변형 (제거 가능)
+const ACTION_GROK_I2V = 'grok_i2v'; // Grok 영상 (제거 가능)
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -113,6 +115,9 @@ const MAIN_IMAGE_MENU = [
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
+  {label: 'Grok 변형 (I2I)', action: ACTION_GROK_I2I},
+  {label: 'Grok 영상 (I2V)', action: ACTION_GROK_I2V},
+  {type: 'separator'},
   {label: '이미지 삭제', action: ACTION_DELETE_RESULT, capability: 'delete', danger: true},
   DELETE_SETTINGS_MENU_ITEM,
 ];
@@ -162,6 +167,9 @@ const THUMBNAIL_MENU = [
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
+  {label: 'Grok 변형 (I2I)', action: ACTION_GROK_I2I},
+  {label: 'Grok 영상 (I2V)', action: ACTION_GROK_I2V},
+  {type: 'separator'},
   {label: '이미지 삭제', action: ACTION_DELETE_RESULT, capability: 'delete', danger: true},
   DELETE_SETTINGS_MENU_ITEM,
 ];
@@ -185,6 +193,8 @@ export function createResultContextMenu({
   onCopyImage = null,
   onUpscaleNai = null,
   onWebUiEnhance = null,
+  onGrokI2I = null,
+  onGrokI2V = null,
   onDelete = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
@@ -331,6 +341,12 @@ export function createResultContextMenu({
     if (item.action === ACTION_IMAGE_ACTION) {
       if (!hasCapability(context, 'image_action')) return false;
       return typeof onImageAction === 'function';
+    }
+    if (item.action === ACTION_GROK_I2I) {
+      return typeof onGrokI2I === 'function' && Boolean(context?.hasImage);
+    }
+    if (item.action === ACTION_GROK_I2V) {
+      return typeof onGrokI2V === 'function' && Boolean(context?.hasImage);
     }
     if (item.action === ACTION_DELETE_RESULT) {
       // capability 'delete'는 위에서 이미 검증됨 (백엔드 asset이 history item 존재 시 true).
@@ -574,6 +590,10 @@ export function createResultContextMenu({
           onWebUiEnhance(context);
         } else if (action === ACTION_IMAGE_ACTION) {
           onImageAction(context, button.dataset.imageAction || '');
+        } else if (action === ACTION_GROK_I2I) {
+          if (typeof onGrokI2I === 'function') onGrokI2I(context);
+        } else if (action === ACTION_GROK_I2V) {
+          if (typeof onGrokI2V === 'function') onGrokI2V(context);
         } else if (action === ACTION_DELETE_RESULT) {
           if (typeof onDelete === 'function') onDelete(context, deleteMode);
         }

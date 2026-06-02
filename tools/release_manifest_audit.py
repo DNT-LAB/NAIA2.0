@@ -116,6 +116,10 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/copyright_groups.json",
     "data/character_analysis.json",
     "data/e621_data",
+    # Search date-cutoff slider bucket→date map (data/tag_bucket_dates.json). Small
+    # static index loaded by core/tag_bucket_dates.load_bucket_dates; without it the
+    # slider has no buckets and stays at the placeholder.
+    "data/tag_bucket_dates.json",
     # Prompt-boost static lookup tables (e621 Auto-Boost / Danbooru Auto-Weight)
     # loaded at generation time from the resource root; see prompt_boost_static_data
     # in runtime_asset_classification.json.
@@ -127,6 +131,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/copyright_groups.json",
     "*/data/character_analysis.json",
     "*/data/e621_data",
+    "*/data/tag_bucket_dates.json",
     "*/data/e621_boost_static.py",
     "*/data/danbooru_tag_counts_by_rating.json",
 )

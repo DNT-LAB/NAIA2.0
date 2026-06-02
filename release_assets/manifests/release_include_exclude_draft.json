@@ -35,6 +35,7 @@
       "data/e621_KR_tags.parquet",
       "data/tag_index/**",
       "data/copyright_groups.json",
+      "data/tag_bucket_dates.json",
       "data/character_analysis.json",
       "data/e621_data",
       "artist_dictionary.py",

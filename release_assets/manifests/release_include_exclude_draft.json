@@ -133,6 +133,7 @@
       "naia_headless_req_*/**",
       "__pycache__/**",
       "app/electron/node_modules/**",
+      "app/electron/grok-runtime/node_modules/**",
       "venv/**"
     ],
     "samples_and_debug": [

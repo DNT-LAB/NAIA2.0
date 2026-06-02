@@ -178,6 +178,12 @@ def _workspace_builder_config(
             "from": str(python_runtime.resolve()),
             "to": "python",
         })
+    progrok_runtime = release_root / "resources" / "progrok-runtime"
+    if progrok_runtime.is_dir():
+        extra_resources.append({
+            "from": str(progrok_runtime.resolve()),
+            "to": "progrok-runtime",
+        })
     build["extraResources"] = extra_resources
     build["extraFiles"] = [
         {"from": str((release_root / "README_RELEASE.txt").resolve()), "to": "README_RELEASE.txt"},

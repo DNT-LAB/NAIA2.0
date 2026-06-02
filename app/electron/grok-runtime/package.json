@@ -1,0 +1,9 @@
+{
+  "name": "naia-grok-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bundled progrok (xAI OAuth proxy) runtime for the NAIA Grok integration. Built at release time (npm ci) and staged into resources/progrok-runtime; not committed as node_modules. Removable: delete this folder + the stage_grok_runtime hook + the main.cjs Grok block.",
+  "dependencies": {
+    "progrok": "file:vendor/progrok-0.2.0.tgz"
+  }
+}

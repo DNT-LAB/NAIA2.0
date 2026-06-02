@@ -227,6 +227,14 @@ def audit_release_paths(
 
     for item in relative_paths:
         relative = Path(item)
+        # Bundled Grok (progrok) runtime ships like resources/python — a trusted vendored
+        # runtime materialized at release time (npm ci from a pinned tarball). Its node_modules
+        # tree contains README.md / dist / etc. that the generic include/exclude policy would
+        # flag, so exempt the whole resources/progrok-runtime subtree the way resources/python
+        # is exempted from the path-pattern checks.
+        parts = relative.parts
+        if len(parts) >= 2 and parts[0] == "resources" and parts[1] == "progrok-runtime":
+            continue
         reason = (
             _has_forbidden_path_pattern(relative)
             or _has_forbidden_part(relative)

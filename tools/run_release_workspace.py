@@ -20,6 +20,7 @@ try:
     from tools.check_release_preflight import check_release_preflight
     from tools.measure_release_artifact import measure_release_artifact
     from tools.stage_electron_release import stage_electron_release
+    from tools.stage_grok_runtime import stage_grok_runtime
     from tools.stage_python_runtime import stage_python_runtime
     from tools.write_release_evidence_report import write_release_evidence_report
 except ModuleNotFoundError:  # pragma: no cover - used when executed as a script.
@@ -30,6 +31,7 @@ except ModuleNotFoundError:  # pragma: no cover - used when executed as a script
     from check_release_preflight import check_release_preflight
     from measure_release_artifact import measure_release_artifact
     from stage_electron_release import stage_electron_release
+    from stage_grok_runtime import stage_grok_runtime
     from stage_python_runtime import stage_python_runtime
     from write_release_evidence_report import write_release_evidence_report
 
@@ -109,6 +111,7 @@ def summarize_release_workspace(payload: dict[str, Any]) -> dict[str, Any]:
 
     stage_backend = section("stage_backend")
     stage_python = section("stage_python_runtime")
+    stage_grok = section("stage_grok_runtime")
     preflight = section("preflight")
     smoke_backend = section("smoke_backend")
     smoke_web = section("smoke_web_contract")
@@ -150,6 +153,12 @@ def summarize_release_workspace(payload: dict[str, Any]) -> dict[str, Any]:
             "ok": bool(stage_python.get("ok")) if stage_python else None,
             "status": str(stage_python.get("status") or "") if stage_python else "",
             "violation_count": len(stage_python.get("violations", [])) if stage_python else 0,
+        },
+        "stage_grok_runtime": {
+            "ok": bool(stage_grok.get("ok")) if stage_grok else None,
+            "status": str(stage_grok.get("status") or "") if stage_grok else "",
+            "package_count": int(stage_grok.get("package_count") or 0) if stage_grok else 0,
+            "violation_count": len(stage_grok.get("violations", [])) if stage_grok else 0,
         },
         "build_python_runtime": {
             "ok": bool(section("build_python_runtime").get("ok")) if section("build_python_runtime") else None,
@@ -315,6 +324,26 @@ def run_release_workspace(
         sections["stage_python_runtime"] = {
             "ok": True,
             "status": "not_requested",
+            "violations": [],
+        }
+
+    # Bundled Grok (progrok) runtime — optional, removable. Built at release time and
+    # staged into resources/progrok-runtime. Runs AFTER stage_python_runtime so the final
+    # write_release_metadata covers both runtimes before preflight/audit read the manifest.
+    grok_runtime_source = source / "app" / "electron" / "grok-runtime"
+    if grok_runtime_source.is_dir():
+        try:
+            grok_result = stage_grok_runtime(release_root, grok_runtime_source, copy=True)
+            sections["stage_grok_runtime"] = {**grok_result.__dict__, "ok": True, "violations": []}
+        except Exception as exc:
+            sections["stage_grok_runtime"] = {
+                "ok": False,
+                "violations": [{"path": "resources/progrok-runtime", "reason": str(exc)}],
+            }
+    else:
+        sections["stage_grok_runtime"] = {
+            "ok": True,
+            "status": "not_present",
             "violations": [],
         }
 

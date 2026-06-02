@@ -39,6 +39,10 @@ app/electron/dist/
 app/electron/out/
 app/electron/.cache/
 app/electron/node_modules/
+# Bundled Grok (progrok) runtime: built at release time via `npm ci` from the
+# vendored tarball + lockfile, then staged into resources/progrok-runtime. The
+# node_modules is a build product (like the python runtime) — not committed.
+app/electron/grok-runtime/node_modules/
 release_package/
 release_package*/
 

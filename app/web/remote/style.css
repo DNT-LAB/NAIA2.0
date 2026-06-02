@@ -13192,6 +13192,8 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 }
 .cond-condition-card,
 .cond-action-card {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 9px;
@@ -13199,6 +13201,17 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   border-radius: 6px;
   padding: 10px;
   background: rgba(23, 23, 32, 0.92);
+}
+/* In the action pane, let the tag-add box grow to fill the card and the DSL
+   preview stay compact (user request: shrink preview, enlarge 추가할 태그 box). */
+.cond-action-pane .cond-action-card .cond-tag-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.cond-action-pane .cond-action-card .cond-chip-list {
+  flex: 1 1 auto;
+  min-height: 132px;
+  overflow-y: auto;
 }
 .cond-condition-card.group {
   border-left-width: 4px;
@@ -13305,7 +13318,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   font-family: var(--font-mono);
 }
 .cond-dsl-viewer {
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -13317,7 +13330,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 }
 .cond-dsl-viewer textarea {
   flex: 1;
-  min-height: 120px;
+  min-height: 76px;
   resize: none;
   border: 1px solid rgba(120, 128, 170, 0.22);
   border-radius: 6px;

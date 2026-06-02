@@ -269,6 +269,16 @@ def perform_grok_video_thumb(context, payload: dict[str, Any]):
     request = GenerationRequest(params=params, source_row=None)
     result = {"status": "success", "image": still, "raw_bytes": png_bytes}
     stored = context.result_store.add_api_result(result, request)
+    # I2I(perform_grok_i2i)와 동일하게 Auto Save 를 존중해 저장한다. 저장하면 item.filepath 가
+    # 채워져(history rel_path 는 history_id 기반 property 라 저장해도 불변) 프론트의
+    # isUnsavedHistoryAsset 가 false 가 되어 새 썸네일로 포커스가 넘어가도 [저장][삭제] 미저장
+    # 오버레이가 뜨지 않는다. rel_path 불변이라 grok_video_registered 의 썸네일 클릭→영상 재생
+    # 매핑도 그대로 유지된다. Auto Save Off 면 다른 결과와 동일하게 미저장으로 남는다.
+    if context._coerce_bool(context.auto_save_state.get("auto_save", True)):
+        try:
+            context.save_history_item(stored.item)
+        except Exception:
+            pass
     return stored, video_id
 
 
@@ -291,6 +301,11 @@ async def handle_grok_animate_command(ws, context, clients, command, *, run_in_t
     await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
     for evicted in stored.evicted_payloads:
         await broadcast_json(clients, evicted)
+    # 썸네일이 (Auto Save 에 따라) 저장됐을 수 있으니 미저장 카운트 배지를 동기화한다. (I2I 와 동일)
+    try:
+        await broadcast_json(clients, context.auto_save_state_payload())
+    except Exception:
+        pass
     # 이 썸네일(rel_path) 클릭 시 실제 mp4 를 재생하도록 프론트에 등록 알림.
     try:
         await ws.send_json({

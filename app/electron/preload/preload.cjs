@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("naiaShell", {
   danbooruBack: () => ipcRenderer.invoke("naia:danbooru-back"),
   danbooruForward: () => ipcRenderer.invoke("naia:danbooru-forward"),
   danbooruReload: () => ipcRenderer.invoke("naia:danbooru-reload"),
+  danbooruExtractPost: () => ipcRenderer.invoke("naia:danbooru-extract-post"),
   onDanbooruDidNavigate: (callback) => {
     if (typeof callback !== "function") {
       return () => {};

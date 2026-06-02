@@ -8,7 +8,12 @@ from urllib.parse import quote, urljoin, urlparse
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from core.danbooru_client import DANBOORU_BASE_URL, fetch_danbooru_post
+from core.danbooru_client import (
+    DANBOORU_BASE_URL,
+    extract_danbooru_post_id,
+    fetch_danbooru_post,
+    normalize_danbooru_post_payload,
+)
 from core.headless_random_prompt_service import HeadlessRandomPromptService
 from core.tag_filter_helpers import _is_color_exception
 from core.web_session_context import WebSessionContext
@@ -164,16 +169,47 @@ def _classify_general_breakdown(
     return breakdown
 
 
-def build_danbooru_post_payload(context: WebSessionContext, query: str) -> dict[str, Any]:
-    post = fetch_danbooru_post(
-        query,
-        characteristic_tags=_load_characteristic_tags(context),
-    )
+def _finalize_danbooru_post(context: WebSessionContext, post: dict[str, Any]) -> dict[str, Any]:
     tags = post.get("tags", {}) if isinstance(post.get("tags"), dict) else {}
     post["prompt"] = _danbooru_prompt_preview(context, tags)
     general = tags.get("general") if isinstance(tags.get("general"), list) else []
     post["general_breakdown"] = _classify_general_breakdown(context, general)
     return post
+
+
+def build_danbooru_post_payload(context: WebSessionContext, query: str) -> dict[str, Any]:
+    post = fetch_danbooru_post(
+        query,
+        characteristic_tags=_load_characteristic_tags(context),
+    )
+    return _finalize_danbooru_post(context, post)
+
+
+def build_danbooru_post_payload_from_extracted(
+    context: WebSessionContext, extracted: dict[str, Any], query: str = ""
+) -> dict[str, Any]:
+    """Build the post payload from tags crawled out of the embedded view DOM
+    (data-tag-name values, underscored). Mirrors the server-fetch path's normalization
+    (underscore->space, characteristic promotion, prompt preview, general breakdown) but
+    never touches the network — the Cloudflare-safe path the embed uses by default."""
+    categories = ("artist", "copyright", "character", "general", "meta")
+    raw_id = str(extracted.get("post_id") or "").strip()
+    try:
+        post_id = int(raw_id) if raw_id.isdigit() else int(extract_danbooru_post_id(query))
+    except Exception:
+        post_id = int(extract_danbooru_post_id(query))
+    synthetic = {"id": post_id}
+    for category in categories:
+        values = extracted.get(category) if isinstance(extracted.get(category), list) else []
+        synthetic[f"tag_string_{category}"] = " ".join(
+            str(value).strip() for value in values if str(value).strip()
+        )
+    post = normalize_danbooru_post_payload(
+        synthetic,
+        query=str(post_id),
+        characteristic_tags=_load_characteristic_tags(context),
+    )
+    return _finalize_danbooru_post(context, post)
 
 
 def register_danbooru_routes(
@@ -191,7 +227,15 @@ def register_danbooru_routes(
         if not isinstance(payload, dict):
             payload = {}
         query = str(payload.get("query") or req.query_params.get("query") or "").strip()
+        extracted = payload.get("extracted")
         try:
+            if isinstance(extracted, dict) and any(
+                isinstance(extracted.get(key), list) and extracted.get(key)
+                for key in ("artist", "copyright", "character", "general", "meta")
+            ):
+                return await run_in_thread(
+                    build_danbooru_post_payload_from_extracted, session_context, extracted, query
+                )
             return await run_in_thread(build_danbooru_post_payload, session_context, query)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)

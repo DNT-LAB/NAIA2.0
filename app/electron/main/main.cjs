@@ -1770,6 +1770,30 @@ let danbooruViewAttached = false;
 const DANBOORU_HOSTS = new Set(["danbooru.donmai.us", "www.danbooru.donmai.us"]);
 const DANBOORU_POST_RE = /danbooru\.donmai\.us\/posts\/(\d+)/;
 const DANBOORU_HOME_URL = "https://danbooru.donmai.us/";
+// Tag extraction = crawl the page the view ALREADY loaded (Dev0714 tabs/web_view.py:307-334),
+// reading data-tag-name from each <ul class="{category}-tag-list">. No server-side donmai
+// request, so Cloudflare (which resets the backend's plain client) is bypassed entirely.
+const DANBOORU_EXTRACT_JS = `(() => {
+  const cats = ['artist','copyright','character','general','meta'];
+  const out = {};
+  let total = 0;
+  for (const c of cats) {
+    const ul = document.querySelector('ul.' + c + '-tag-list');
+    const names = [];
+    if (ul) {
+      const seen = new Set();
+      ul.querySelectorAll('[data-tag-name]').forEach((el) => {
+        const n = el.getAttribute('data-tag-name');
+        if (n && !seen.has(n)) { seen.add(n); names.push(n); }
+      });
+    }
+    out[c] = names; total += names.length;
+  }
+  const m = location.pathname.match(/\\/posts\\/(\\d+)/);
+  out.post_id = m ? m[1] : null;
+  out.__total = total;
+  return out;
+})()`;
 
 // Mirror of danbooru_routes.normalize_danbooru_browser_url (host-locked).
 function resolveDanbooruUrl(text) {
@@ -1955,6 +1979,26 @@ ipcMain.handle("naia:danbooru-reload", (event) => {
     danbooruView.webContents.reload();
   }
   return true;
+});
+// Crawl tags from the live view DOM (the page is already rendered with the user's
+// session). Polls briefly because did-navigate can fire before the tag list paints.
+ipcMain.handle("naia:danbooru-extract-post", async (event) => {
+  if (!isDanbooruSender(event) || !danbooruView || danbooruView.webContents.isDestroyed()) {
+    return { ok: false, error: "no view" };
+  }
+  const wc = danbooruView.webContents;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const data = await wc.executeJavaScript(DANBOORU_EXTRACT_JS);
+      if (data && data.__total > 0 && data.post_id) {
+        return { ok: true, extracted: data, post_id: data.post_id };
+      }
+    } catch (_error) {
+      // page mid-load / navigated away — retry
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return { ok: false, error: "no tags on page" };
 });
 
 ipcMain.handle("naia:shell-state", () => shellState());

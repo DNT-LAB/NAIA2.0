@@ -156,11 +156,23 @@ export function createDanbooruBrowserController({
     lastQuery = query;
     setBusy(true);
     setStatus('Loading Danbooru post...', 'busy');
+    // Embed mode: crawl tags from the already-loaded view DOM (uses the user's session,
+    // Cloudflare-safe) and let the backend normalize them — avoids the backend's own
+    // donmai request being reset. Falls back to the server-side fetch if extraction fails.
+    let requestBody = {query};
+    if (embedMode && naia && typeof naia.danbooruExtractPost === 'function') {
+      try {
+        const res = await naia.danbooruExtractPost();
+        if (res && res.ok && res.extracted) {
+          requestBody = {query, extracted: res.extracted};
+        }
+      } catch (_error) { /* fall back to server-side fetch */ }
+    }
     try {
       const response = await fetchFn('/api/danbooru/post', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({query}),
+        body: JSON.stringify(requestBody),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);

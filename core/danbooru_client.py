@@ -8,12 +8,56 @@ categories through the public post JSON endpoint.
 from __future__ import annotations
 
 import re
+import time
 from typing import Callable, Iterable
 
 import requests
 
 
 DANBOORU_BASE_URL = "https://danbooru.donmai.us"
+
+# Cloudflare in front of donmai resets plain non-browser clients (the "NAIA2 Remote
+# Shell" UA) — especially under the embed's per-navigation auto-extract. A browser UA +
+# a reused session + a short retry on connection resets makes the server-side JSON
+# lookup behave like the embedded WebContentsView that already loads the page fine.
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+_CONNECTION_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+_session: "requests.Session | None" = None
+
+
+def _danbooru_session() -> "requests.Session":
+    global _session
+    if _session is None:
+        sess = requests.Session()
+        sess.headers.update({
+            "User-Agent": _BROWSER_UA,
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": f"{DANBOORU_BASE_URL}/",
+        })
+        _session = sess
+    return _session
+
+
+def _get_with_retry(url: str, *, timeout: float, retries: int):
+    attempts = max(1, int(retries))
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return _danbooru_session().get(url, timeout=timeout)
+        except _CONNECTION_ERRORS as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.6 * (attempt + 1))
+    assert last_exc is not None
+    raise last_exc
 POST_ID_RE = re.compile(
     r"(?:https?://)?(?:www\.)?danbooru\.donmai\.us/posts/(\d+)",
     re.IGNORECASE,
@@ -109,14 +153,14 @@ def fetch_danbooru_post(
     timeout: float = 12.0,
     http_get: Callable[..., object] | None = None,
     characteristic_tags: Iterable[str] | None = None,
+    retries: int = 3,
 ) -> dict:
     post_id = extract_danbooru_post_id(query)
-    get = http_get or requests.get
-    response = get(
-        f"{DANBOORU_BASE_URL}/posts/{post_id}.json",
-        timeout=timeout,
-        headers={"User-Agent": "NAIA2 Remote Shell"},
-    )
+    url = f"{DANBOORU_BASE_URL}/posts/{post_id}.json"
+    if http_get is not None:
+        response = http_get(url, timeout=timeout, headers={"User-Agent": _BROWSER_UA})
+    else:
+        response = _get_with_retry(url, timeout=timeout, retries=retries)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):

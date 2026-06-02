@@ -229,9 +229,21 @@ def run_search_command(
     bucket_start = command.get("bucket_start")
     bucket_end = command.get("bucket_end")
     context.search_query_ratings = ratings
+    # Sync the active/generation-pool ratings to the search ratings. The search
+    # panel's rating checkboxes are the only rating control the user touches at
+    # search time, so a search for predominantly-explicit tags (e.g. "gangbang" is
+    # ~99% rating 'e') must not be silently decimated by the pool filter still
+    # sitting at the explicit-off default — that collapsed 15,122 hits down to the
+    # 187 non-explicit ones. Passing ratings= updates state["ratings"] (and thus
+    # remote_active_ratings via save_search_filter_state), so the post-search
+    # apply_search_runtime_filters keeps exactly what the user searched for. The
+    # DEFAULT_ACTIVE_RATINGS first-run safety default is untouched: a default search
+    # keeps 'e' off because the search ratings also default 'e' off — explicit only
+    # enters the pool when the user deliberately checks it and searches.
     # None values are ignored by the saver -> they keep the persisted range.
     context.save_search_filter_state(
-        query=query, exclude=exclude, search_ratings=ratings,
+        query=query, exclude=exclude,
+        ratings=ratings, search_ratings=ratings,
         bucket_start=bucket_start, bucket_end=bucket_end,
     )
 

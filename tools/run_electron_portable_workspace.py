@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -178,12 +179,9 @@ def _workspace_builder_config(
             "from": str(python_runtime.resolve()),
             "to": "python",
         })
-    progrok_runtime = release_root / "resources" / "progrok-runtime"
-    if progrok_runtime.is_dir():
-        extra_resources.append({
-            "from": str(progrok_runtime.resolve()),
-            "to": "progrok-runtime",
-        })
+    # The bundled Grok runtime (resources/progrok-runtime) is NOT an extraResources entry:
+    # electron-builder strips node_modules from extraResources directory copies. afterPack.cjs
+    # copies the full staged runtime (path passed via NAIA_PROGROK_RUNTIME_SRC) after packaging.
     build["extraResources"] = extra_resources
     build["extraFiles"] = [
         {"from": str((release_root / "README_RELEASE.txt").resolve()), "to": "README_RELEASE.txt"},
@@ -351,6 +349,12 @@ def run_electron_portable_workspace(
     portable_export: dict[str, Any] | None = None
 
     if not dry_run and not violations:
+        # electron-builder drops node_modules from extraResources, so the bundled Grok
+        # runtime is copied by afterPack.cjs instead. Hand it the staged source path.
+        builder_env = {**os.environ}
+        progrok_staged = release_root / "resources" / "progrok-runtime"
+        if progrok_staged.is_dir():
+            builder_env["NAIA_PROGROK_RUNTIME_SRC"] = str(progrok_staged.resolve())
         completed = subprocess.run(
             builder_command,
             cwd=electron_root,
@@ -359,6 +363,7 @@ def run_electron_portable_workspace(
             encoding="utf-8",
             errors="replace",
             check=False,
+            env=builder_env,
         )
         build_result = {
             "ok": completed.returncode == 0,

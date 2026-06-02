@@ -118,10 +118,6 @@
       {
         "from": "dist/NAIA-Web/resources/python",
         "to": "python"
-      },
-      {
-        "from": "dist/NAIA-Web/resources/progrok-runtime",
-        "to": "progrok-runtime"
       }
     ],
     "extraFiles": [

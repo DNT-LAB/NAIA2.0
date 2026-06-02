@@ -36,12 +36,33 @@ function applyWindowsExeIcon(appOutDir) {
   }
 }
 
+// Copy the bundled Grok (progrok) runtime into the packaged resources. electron-builder
+// strips node_modules from extraResources directory copies, so the staged runtime
+// (resources/progrok-runtime, ~700 files incl. node_modules) is copied here instead, raw.
+// The source path is handed in via NAIA_PROGROK_RUNTIME_SRC by the release orchestrator;
+// when it is absent (e.g. a manual build without Grok) this is a no-op.
+function bundleGrokRuntime(appOutDir) {
+  const source = process.env.NAIA_PROGROK_RUNTIME_SRC;
+  if (!source || !fs.existsSync(source)) {
+    return;
+  }
+  const dest = path.join(appOutDir, "resources", "progrok-runtime");
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.cpSync(source, dest, { recursive: true });
+  const entry = path.join(dest, "node_modules", "progrok", "dist", "index.js");
+  if (!fs.existsSync(entry)) {
+    throw new Error(`Grok runtime bundle is incomplete; missing entry: ${entry}`);
+  }
+}
+
 exports.default = async function afterPack(context) {
   const userDataDir = path.join(context.appOutDir, "user-data");
   fs.mkdirSync(userDataDir, { recursive: true });
   applyWindowsExeIcon(context.appOutDir);
+  bundleGrokRuntime(context.appOutDir);
 };
 
 exports.__test = {
   applyWindowsExeIcon,
+  bundleGrokRuntime,
 };

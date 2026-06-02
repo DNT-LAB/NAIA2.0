@@ -29,6 +29,7 @@ export function createDanbooruBrowserController({
   showToast,
   onLoadPrompt = null,
   onGenerateFromPrompt = null,
+  onInsertImageToHistory = null,
 }) {
   // Electron shell exposes a native WebContentsView bridge; a plain browser does not.
   const naia = (win && win.naiaShell) || null;
@@ -49,6 +50,7 @@ export function createDanbooruBrowserController({
   let autoExtractTimer = 0;
   let boundsRaf = 0;
   let unsubscribeNav = null;
+  let unsubscribeInsert = null;
   let boundsListener = null;
 
   // Minimize-to-island state (the panel can collapse to a floating pill near
@@ -339,6 +341,9 @@ export function createDanbooruBrowserController({
     if (typeof naia.onDanbooruDidNavigate === 'function') {
       unsubscribeNav = naia.onDanbooruDidNavigate(onDidNavigate);
     }
+    if (typeof naia.onDanbooruInsertHistory === 'function') {
+      unsubscribeInsert = naia.onDanbooruInsertHistory(onInsertHistoryEvent);
+    }
     boundsListener = () => scheduleReportBounds();
     win.addEventListener('resize', boundsListener, true);
     win.addEventListener('scroll', boundsListener, true);
@@ -366,7 +371,37 @@ export function createDanbooruBrowserController({
       unsubscribeNav();
       unsubscribeNav = null;
     }
+    if (typeof unsubscribeInsert === 'function') {
+      unsubscribeInsert();
+      unsubscribeInsert = null;
+    }
     try { naia.danbooruDetach(); } catch (_error) {}
+  }
+
+  // 메인 프로세스가 임베드 뷰 세션으로 받아 보낸 이미지(data URL)를 히스토리에 삽입한다.
+  // 성공 시 단부루 패널을 최소화해 결과/히스토리가 바로 보이도록 한다(우클릭 → 히스토리에 추가 UX).
+  async function onInsertHistoryEvent(payload) {
+    payload = payload || {};
+    if (payload.error) {
+      if (showToast) showToast(payload.error, 'error');
+      return;
+    }
+    const dataUrl = String(payload.dataUrl || '');
+    if (!dataUrl.startsWith('data:')) {
+      if (showToast) showToast('이미지 데이터를 받지 못했습니다.', 'error');
+      return;
+    }
+    let ok = false;
+    try {
+      const blob = await (await fetchFn(dataUrl)).blob();
+      if (typeof onInsertImageToHistory === 'function') {
+        ok = await onInsertImageToHistory({ blob, label: payload.label || 'Danbooru Image' });
+      }
+    } catch (_error) {
+      if (showToast) showToast('히스토리 추가 실패', 'error');
+      return;
+    }
+    if (ok) minimizePanel();
   }
 
   // ---- Minimize-to-island --------------------------------------------------

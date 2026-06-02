@@ -32,6 +32,14 @@ contextBridge.exposeInMainWorld("naiaShell", {
     ipcRenderer.on("naia:danbooru-did-navigate", listener);
     return () => ipcRenderer.removeListener("naia:danbooru-did-navigate", listener);
   },
+  onDanbooruInsertHistory: (callback) => {
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("naia:danbooru-insert-history", listener);
+    return () => ipcRenderer.removeListener("naia:danbooru-insert-history", listener);
+  },
   onStateChanged: (callback) => {
     if (typeof callback !== "function") {
       return () => {};

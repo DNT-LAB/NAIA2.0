@@ -1851,6 +1851,47 @@ function sendDanbooruNav() {
   });
 }
 
+function danbooruImageLabel(srcURL) {
+  try {
+    const parsed = new URL(srcURL);
+    const base = decodeURIComponent((parsed.pathname.split("/").pop() || "").split("?")[0]) || "";
+    return (base || "Danbooru Image").slice(0, 120);
+  } catch (_error) {
+    return "Danbooru Image";
+  }
+}
+
+// 우클릭 "히스토리에 추가": 임베드 뷰의 세션(쿠키 + Chromium 네트워크 스택)으로 이미지를
+// 받아(서버사이드 requests 와 달리 Cloudflare JA3 차단 우회) data URL 로 렌더러에 전달한다.
+// 렌더러(danbooruTab)가 /api/image/insert-history 로 넣고 성공 시 단부루 패널을 최소화한다.
+async function sendDanbooruImageToHistory(srcURL) {
+  if (!mainWindow || mainWindow.isDestroyed() || !danbooruView || danbooruView.webContents.isDestroyed()) {
+    return;
+  }
+  const target = mainWindow.webContents;
+  try {
+    const ses = danbooruView.webContents.session;
+    if (!ses || typeof ses.fetch !== "function") {
+      throw new Error("세션 fetch 를 사용할 수 없습니다.");
+    }
+    const resp = await ses.fetch(srcURL);
+    if (!resp.ok) {
+      throw new Error("HTTP " + resp.status);
+    }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (!buf.length) {
+      throw new Error("빈 이미지");
+    }
+    const contentType = String(resp.headers.get("content-type") || "image/jpeg").split(";")[0].trim() || "image/jpeg";
+    const dataUrl = "data:" + contentType + ";base64," + buf.toString("base64");
+    target.send("naia:danbooru-insert-history", { dataUrl, label: danbooruImageLabel(srcURL) });
+  } catch (error) {
+    target.send("naia:danbooru-insert-history", {
+      error: "이미지를 가져오지 못했습니다: " + String((error && error.message) || error),
+    });
+  }
+}
+
 function ensureDanbooruView() {
   if (danbooruView) {
     return danbooruView;
@@ -1905,6 +1946,8 @@ function ensureDanbooruView() {
     const menu = Menu.buildFromTemplate([
       { label: "이미지 복사", click: () => { try { wc.copyImageAt(params.x, params.y); } catch (_error) {} } },
       { label: "이미지 저장", click: () => { try { wc.downloadURL(params.srcURL); } catch (_error) {} } },
+      { type: "separator" },
+      { label: "히스토리에 추가", click: () => { void sendDanbooruImageToHistory(params.srcURL); } },
     ]);
     try { menu.popup({ window: mainWindow }); } catch (_error) {}
   });

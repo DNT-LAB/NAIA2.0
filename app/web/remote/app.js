@@ -319,7 +319,7 @@ async function loadRuntimeCapabilities() {
 }
 
 loadRuntimeCapabilities();
-const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260601-danbooru-crawl1')
+const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260602-danbooru-insert1')
   .then(({createDanbooruBrowserController}) => {
     danbooruTabControl = createDanbooruBrowserController({
       document,
@@ -327,6 +327,7 @@ const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260601-danboo
       showToast,
       onLoadPrompt,
       onGenerateFromPrompt,
+      onInsertImageToHistory: payload => callResultImageAction('insertExternalToHistory', payload),
     });
   })
   .catch(error => {

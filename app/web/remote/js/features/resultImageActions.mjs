@@ -181,10 +181,11 @@ export function createResultImageActions({
 
   // 외부 이미지(붙여넣기/드롭/감지)를 프롬프트 없이 결과 히스토리에 삽입한다.
   // 삽입된 이미지는 우클릭 → Grok I2I/I2V (및 NAI Img2Img/Inpaint/Vibe) 진입점으로 쓸 수 있다.
+  // 반환값: 성공 true / 실패 false (Danbooru 등 호출부가 성공 시에만 후속 동작을 하도록).
   async function insertExternalToHistory(payload) {
     if (!payload || !payload.blob) {
       showToast('이미지 데이터를 찾을 수 없습니다.', 'error');
-      return;
+      return false;
     }
     try {
       const label = encodeURIComponent(payload.label || 'Imported Image');
@@ -199,9 +200,11 @@ export function createResultImageActions({
       }
       const data = await response.json().catch(() => ({}));
       showToast(data.message || '이미지를 히스토리에 추가했습니다.', 'success');
+      return true;
     } catch (error) {
       console.error('Insert external image to history failed', error);
       showToast(error.message || '히스토리 추가 실패', 'error');
+      return false;
     }
   }
 

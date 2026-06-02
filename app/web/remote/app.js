@@ -78,6 +78,8 @@ let resultUnsavedActionRequestId = 0;
 let resultUnsavedActionAsset = null;
 let resultUnsavedActionTimer = null;
 let resultUnsavedActionBusy = false;
+let naiConfigured = false;  // api_status.nai_configured — NAI Director 버튼 게이팅
+let grokReady = false;      // progrok proxy 'ready'(로그인 완료) — Grok 컨텍스트 메뉴 게이팅 (Electron 전용)
 let promptHighlighter = null;
 let moduleBadges = null;
 let moduleLauncherControl = null;
@@ -409,7 +411,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260512-api-dialog
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260517-hiresfix-display1')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260602-director7')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -597,7 +599,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260602-grok6')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260602-grok7')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -628,6 +630,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       canUseDesktopImg2Img,
       canOpenLocalFiles: () => isLocalWebHost || isDesktopShell,
+      isGrokReady: () => grokReady,  // Grok 변형/영상 항목은 로그인(proxy ready) 시에만 표시
     });
     resultContextMenu.bind();
   })
@@ -738,6 +741,24 @@ const grokI2vModalReady = import('./js/features/grokI2vModal.mjs?v=20260602-grok
   .catch(error => {
     console.error('Failed to initialize grok i2v modal module', error);
   });
+// --- NAI Director Tools 모달 (제거 가능): GENERATION INFO [Director] → 현재 결과 변형 ---
+let naiDirectorModal = null;
+const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260602-director4')
+  .then(({createNaiDirectorModal}) => {
+    naiDirectorModal = createNaiDirectorModal({document, getWs: () => ws, WebSocket, showToast, escHtml});
+  })
+  .catch(error => {
+    console.error('Failed to initialize nai director modal module', error);
+  });
+// --- Grok 로그인 상태 추적 (제거 가능): progrok proxy 가 'ready'(OAuth 로그인 완료)일 때만 결과
+// 우클릭의 'Grok 변형/영상' 항목을 노출한다. Electron 전용(naiaShell 없으면 false=숨김 → 순수 브라우저도 숨김). ---
+(function trackGrokReady() {
+  const s = (typeof window !== 'undefined') ? window.naiaShell : null;
+  if (!s || typeof s.onGrokStateChanged !== 'function') { grokReady = false; return; }
+  const apply = (state) => { grokReady = !!state && state.proxyState === 'ready'; };
+  if (typeof s.grokState === 'function') { s.grokState().then(apply).catch(() => {}); }
+  s.onGrokStateChanged(apply);
+})();
 // --- Grok 영상 히스토리 클릭→재생 (제거 가능): 영상 썸네일 클릭 시 실제 mp4 재생 ---
 let grokVideoHistory = null;
 const grokVideoHistoryReady = import('./js/features/grokVideoHistory.mjs?v=20260602-grok11')
@@ -1988,6 +2009,7 @@ const statsSave      = $('statsSave');
 const resultUnsavedActions = $('resultUnsavedActions');
 const resultUnsavedSaveBtn = $('resultUnsavedSaveBtn');
 const resultUnsavedDeleteBtn = $('resultUnsavedDeleteBtn');
+const naiDirectorBtn = $('naiDirectorBtn');
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
@@ -2222,6 +2244,7 @@ const wsMessageHandlers = {
   mode: m => syncMode(m.mode),
   result_enhance_state: m => { if (resultEnhance) resultEnhance.handleState(m); },
   grok_i2i_state: m => { if (grokI2iModal) grokI2iModal.onState(m); },
+  nai_director_state: m => { if (naiDirectorModal) naiDirectorModal.onState(m); },
   grok_i2v_state: m => { if (grokI2vModal) grokI2vModal.onState(m); },
   grok_video_registered: m => { if (grokVideoHistory) grokVideoHistory.register(m.rel_path, m.video_id); },
   result_enhance_config: m => {
@@ -3886,6 +3909,33 @@ function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
 function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh(); }
 
+// NAI Director Tools (제거 가능) — NAI 계정이 등록돼 있으면(api_status.nai_configured) 모드 무관 활성.
+function updateNaiDirectorButton() {
+  if (naiDirectorBtn) naiDirectorBtn.disabled = !naiConfigured;
+}
+async function openNaiDirector() {
+  if (!naiConfigured) { showToast('NAI 계정이 등록되어 있지 않습니다 (API 설정 → NAI).', 'error'); return; }
+  await naiDirectorModalReady;
+  if (!naiDirectorModal) { showToast('Director 모듈을 불러오지 못했습니다.', 'error'); return; }
+  let asset = null;
+  try {
+    const resp = await fetch('/api/result/asset/current', {cache: 'no-store'});
+    if (resp.ok) asset = await resp.json();
+  } catch (error) { /* noop */ }
+  if (!asset || !(asset.has_image ?? asset.hasImage)) {
+    showToast('변형할 결과 이미지가 없습니다.', 'error');
+    return;
+  }
+  naiDirectorModal.open({
+    source: 'current',
+    path: String(asset.path || ''),
+    filePath: String(asset.file_path || asset.filePath || ''),
+    label: String(asset.label || 'Result Image'),
+    imageSrc: String(asset.image_url || asset.imageUrl || '/api/latest-image'),
+    hasImage: true,
+  });
+}
+
 function loadMetadataImageBlob(blob, label = 'Input Image') {
   if (!metadataViewer || typeof metadataViewer.loadImageBlob !== 'function') {
     showToast('Metadata viewer is not ready', 'error');
@@ -5120,6 +5170,10 @@ function onAnlasUpdate(m) {
 
 function updateApiStatus(m) {
   if (setupController) setupController.updateApiStatus(m);
+  if (m && typeof m === 'object' && 'nai_configured' in m) {
+    naiConfigured = !!m.nai_configured;
+    updateNaiDirectorButton();
+  }
   reconcileActiveApiMode('api_status');
 }
 

@@ -115,8 +115,8 @@ const MAIN_IMAGE_MENU = [
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
-  {label: 'Grok 변형 (I2I)', action: ACTION_GROK_I2I},
-  {label: 'Grok 영상 (I2V)', action: ACTION_GROK_I2V},
+  {label: 'Grok 변형 (I2I)', action: ACTION_GROK_I2I, grokGated: true},
+  {label: 'Grok 영상 (I2V)', action: ACTION_GROK_I2V, grokGated: true},
   {type: 'separator'},
   {label: '이미지 삭제', action: ACTION_DELETE_RESULT, capability: 'delete', danger: true},
   DELETE_SETTINGS_MENU_ITEM,
@@ -167,8 +167,8 @@ const THUMBNAIL_MENU = [
   {type: 'separator'},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
-  {label: 'Grok 변형 (I2I)', action: ACTION_GROK_I2I},
-  {label: 'Grok 영상 (I2V)', action: ACTION_GROK_I2V},
+  {label: 'Grok 변형 (I2I)', action: ACTION_GROK_I2I, grokGated: true},
+  {label: 'Grok 영상 (I2V)', action: ACTION_GROK_I2V, grokGated: true},
   {type: 'separator'},
   {label: '이미지 삭제', action: ACTION_DELETE_RESULT, capability: 'delete', danger: true},
   DELETE_SETTINGS_MENU_ITEM,
@@ -200,6 +200,7 @@ export function createResultContextMenu({
   getCurrentSavedPath = () => '',
   canUseDesktopImg2Img = () => true,
   canOpenLocalFiles = () => false,
+  isGrokReady = () => false,
 }) {
   let menu = null;
   let metadataModal = null;
@@ -343,10 +344,12 @@ export function createResultContextMenu({
       return typeof onImageAction === 'function';
     }
     if (item.action === ACTION_GROK_I2I) {
-      return typeof onGrokI2I === 'function' && Boolean(context?.hasImage);
+      return typeof onGrokI2I === 'function' && Boolean(context?.hasImage)
+        && (typeof isGrokReady === 'function' && isGrokReady());
     }
     if (item.action === ACTION_GROK_I2V) {
-      return typeof onGrokI2V === 'function' && Boolean(context?.hasImage);
+      return typeof onGrokI2V === 'function' && Boolean(context?.hasImage)
+        && (typeof isGrokReady === 'function' && isGrokReady());
     }
     if (item.action === ACTION_DELETE_RESULT) {
       // capability 'delete'는 위에서 이미 검증됨 (백엔드 asset이 history item 존재 시 true).
@@ -360,6 +363,10 @@ export function createResultContextMenu({
       return '';
     }
     if (item.desktopImg2Img && !(typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img())) {
+      return '';
+    }
+    // Grok 변형/영상은 progrok 로그인(ready) 시에만 노출 — 미로그인/순수 브라우저에선 항목 자체를 숨긴다.
+    if (item.grokGated && !(typeof isGrokReady === 'function' && isGrokReady())) {
       return '';
     }
     if (item.type === 'separator') {

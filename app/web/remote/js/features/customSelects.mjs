@@ -573,12 +573,20 @@ export function createCustomSelectController({
     const openUpward = !preferBelow && below < desiredHeight && above > below;
     const available = Math.max(44, openUpward ? above : below);
     const height = Math.min(menuMaxHeight, desiredHeight, available);
-    const top = openUpward ? Math.max(viewportGap, rect.top - height - 4) : Math.min(window.innerHeight - viewportGap, rect.bottom + 4);
 
     state.menu.style.left = `${Math.round(rect.left)}px`;
-    state.menu.style.top = `${Math.round(top)}px`;
     state.menu.style.width = `${Math.round(rect.width)}px`;
     state.menu.style.maxHeight = `${Math.round(height)}px`;
+    // 위로 열 때는 메뉴의 '아래' 끝을 버튼 바로 위에 고정(bottom-anchor)한다. top + 추정높이 방식은
+    // 옵션 높이를 과대추정(옵션당 36px 가정)할 때 실제 짧은 메뉴가 버튼에서 떨어져 보이는 간격이 생긴다.
+    // 아래로 열 때는 기존대로 버튼 아래에 붙인다(간격 없음).
+    if (openUpward) {
+      state.menu.style.top = 'auto';
+      state.menu.style.bottom = `${Math.round(Math.max(viewportGap, window.innerHeight - (rect.top - 4)))}px`;
+    } else {
+      state.menu.style.bottom = 'auto';
+      state.menu.style.top = `${Math.round(Math.min(window.innerHeight - viewportGap, rect.bottom + 4))}px`;
+    }
     positionPreview(state);
   }
 

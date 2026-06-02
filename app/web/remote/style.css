@@ -5076,6 +5076,16 @@ body.resizing-result-info {
 .result-enhance-btn.running {
   color: var(--accent);
 }
+/* NAI Director Tools 버튼 (제거 가능) — Enhance 옆, teal 액센트로 구분 */
+.nai-director-btn {
+  min-width: 84px;
+  border-color: rgba(96,205,178,0.42);
+  background: rgba(96,205,178,0.13);
+}
+.nai-director-btn:hover:not(:disabled) {
+  border-color: rgba(126,225,200,0.72);
+  background: rgba(96,205,178,0.22);
+}
 .result-enhance-settings-btn {
   width: 22px;
   height: 22px;
@@ -15550,6 +15560,59 @@ body.detached-module .mod-grid-3 {
 .grok-prompt:focus { outline: none; border-color: var(--accent); }
 .grok-prompt-main { min-height: 132px; }
 .grok-extra-note { font-size: 11px; color: var(--text-dim); margin: 2px 0 0; line-height: 1.45; }
+/* NAI Director Tools 미니 팝업 (제거 가능) — GENERATION INFO [Director] 버튼 위에 앵커 */
+.nai-director-popup {
+  position: fixed; z-index: var(--z-floating-module); width: 380px; max-width: calc(100vw - 16px);
+  background: var(--bg-elevated); border: 1px solid var(--border-glow);
+  border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.55);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.nai-director-popup [hidden] { display: none !important; }
+.nai-director-pop-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.nai-director-pop-title { font-size: 12px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.02em; }
+.nai-director-pop-x { border: none; background: transparent; color: var(--text-muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.nai-director-pop-x:hover { color: var(--text-primary); }
+.nai-director-pop-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 9px; }
+.nai-director-pop-top { display: flex; gap: 10px; align-items: flex-start; }
+.nai-director-pop-thumb {
+  flex: 0 0 auto; width: 84px; height: 84px; border-radius: 8px; overflow: hidden;
+  background: var(--bg-deep); border: 1px solid var(--border-dim);
+}
+.nai-director-pop-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 각 필드 = flex 행(라벨 고정폭 + 셀렉트). customSelects enhance 래퍼(.custom-select)도 같은 행에 들어가
+   라벨 열이 일정하게 유지된다(강도 위치 일정). 래퍼 행 토글로 native+enhance 래퍼를 함께 숨김/표시. */
+.nai-director-pop-fields { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.nai-director-field { display: flex; align-items: center; gap: 8px; }
+.nai-director-field > .nai-director-fld-label { flex: 0 0 36px; font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.nai-director-field > select,
+.nai-director-field > .custom-select { flex: 1 1 auto; min-width: 0; }
+.nai-director-field > select {
+  box-sizing: border-box; background: var(--bg-deep); color: var(--text-primary);
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  padding: 5px 8px; font-size: 12px; font-family: inherit; cursor: pointer;
+}
+.nai-director-field > select:focus { outline: none; border-color: var(--accent); }
+.nai-director-field .custom-select-button { padding: 5px 8px; font-size: 12px; color: var(--text-primary); }
+.nai-director-prompt {
+  width: 100%; min-height: 44px; resize: vertical; box-sizing: border-box;
+  background: var(--bg-deep); color: var(--text-primary);
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  padding: 7px 9px; font-size: 12px; line-height: 1.45; font-family: inherit;
+}
+.nai-director-prompt:focus { outline: none; border-color: var(--accent); }
+.nai-director-pop-actions { display: flex; }
+.nai-director-go {
+  flex: 1 1 auto; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(96,205,178,0.5);
+  background: rgba(96,205,178,0.18); color: var(--text-primary); font-weight: 700; font-size: 13px; cursor: pointer;
+}
+.nai-director-go:hover:not(:disabled) { background: rgba(96,205,178,0.28); border-color: rgba(126,225,200,0.8); }
+.nai-director-go:disabled { opacity: 0.55; cursor: default; }
+.nai-director-status { font-size: 11px; min-height: 14px; color: var(--text-dim); }
+.nai-director-status.error { color: #e06c75; }
+.nai-director-status.info { color: var(--text-muted); }
 /* I2I 추가 참조 이미지 (제거 가능) */
 .grok-i2i-extra-block { display: flex; flex-direction: column; gap: 6px; }
 .grok-extra-head { display: flex; align-items: center; justify-content: space-between; }

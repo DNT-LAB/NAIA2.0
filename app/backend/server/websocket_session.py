@@ -40,6 +40,10 @@ from app.backend.server.grok_i2v_commands import (  # Grok I2V (제거 가능)
     handle_grok_animate_command,
     handle_grok_video_command,
 )
+from app.backend.server.nai_director_commands import (  # NAI Director Tools (제거 가능)
+    NAI_DIRECTOR_COMMAND_TYPES,
+    handle_nai_director_command,
+)
 from app.backend.server.module_commands import (
     MODULE_COMMAND_TYPES,
     handle_module_command,
@@ -271,6 +275,14 @@ async def handle_json_command(
         )
     elif command_type in GROK_ANIMATE_COMMAND_TYPES:  # Grok 영상 프리뷰 (제거 가능)
         await handle_grok_animate_command(
+            ws,
+            context,
+            clients,
+            command,
+            run_in_thread=run_in_thread,
+        )
+    elif command_type in NAI_DIRECTOR_COMMAND_TYPES:  # NAI Director Tools (제거 가능)
+        await handle_nai_director_command(
             ws,
             context,
             clients,

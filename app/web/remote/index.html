@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260601-randomized-wc1">
+<link rel="stylesheet" href="style.css?v=20260602-director5">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -684,6 +684,7 @@
           <div class="result-info-header">
             <span>Generation Info</span>
             <div class="result-enhance-controls">
+              <button class="result-enhance-btn nai-director-btn" id="naiDirectorBtn" onclick="openNaiDirector()" title="NAI Director Tools (현재 결과 변형)" disabled>Director</button>
               <button class="result-enhance-btn" id="resultEnhanceBtn" onclick="requestResultEnhance()" disabled>Enhance</button>
               <button class="result-enhance-settings-btn" id="resultEnhanceSettingsBtn" title="Enhance settings" aria-label="Enhance settings">⚙</button>
             </div>
@@ -1044,6 +1045,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260602-danbooru-insert1"></script>
+<script src="app.js?v=20260602-director7"></script>
 </body>
 </html>

@@ -179,16 +179,47 @@ def history_item_meta_payload(
     if isinstance(gen_params, dict):
         prompt = prompt or str(gen_params.get("input") or gen_params.get("prompt") or "")
         negative = str(gen_params.get("negative_prompt") or gen_params.get("uc") or "")
+    characters = prompt_context.get("characters") if isinstance(prompt_context, dict) else None
+
+    extra_summary: dict = {}
+    # External images (e.g. imported into history) carry no naia_* params; their
+    # prompt/params live only in the embedded PNG metadata (NAI Comment/stealth,
+    # WebUI parameters, ComfyUI workflow). Extract on the detail view when the
+    # in-app prompt is missing, so the viewer is no longer limited to in-session
+    # generations. Gated on include_full + missing prompt → generated results
+    # never run the stealth-PNG scan.
+    if include_full and not prompt:
+        from utils.image_info import extract_embedded_metadata
+
+        extracted = extract_embedded_metadata(getattr(item, "raw_bytes", None))
+        if extracted:
+            raw["extracted_metadata"] = extracted
+            prompt = prompt or str(extracted.get("prompt") or "")
+            negative = negative or str(extracted.get("negative") or extracted.get("uc") or "")
+            if not characters and extracted.get("characters"):
+                characters = extracted.get("characters")
+            ext_params = extracted.get("parameters") if isinstance(extracted.get("parameters"), dict) else {}
+            for key in ("seed", "steps", "sampler", "cfg_scale", "scale", "model"):
+                value = extracted.get(key)
+                if value in ("", None):
+                    value = ext_params.get(key)
+                if value not in ("", None):
+                    extra_summary[key] = value
 
     result = {}
     if prompt:
         result["prompt"] = prompt
     if negative:
         result["negative"] = negative
-    characters = prompt_context.get("characters") if isinstance(prompt_context, dict) else None
     if characters:
         result["characters"] = characters
     if include_full:
-        result["summary"] = dict(result)
+        summary = dict(result)
+        image = getattr(item, "image", None)
+        if image is not None and getattr(image, "width", None) and getattr(image, "height", None):
+            summary.setdefault("width", image.width)
+            summary.setdefault("height", image.height)
+        summary.update(extra_summary)
+        result["summary"] = summary
         result["raw"] = metadata_json_safe(raw) if metadata_json_safe else raw
     return result

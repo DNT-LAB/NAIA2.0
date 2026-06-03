@@ -512,6 +512,20 @@ def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_ty
         else:
             parsed_info[key] = str(value)
 
+    # Full extraction so EXTERNAL images work too: NAI "Comment"/stealth-PNG,
+    # WebUI "parameters"/EXIF, ComfyUI workflow, plus NAIA's own naia_* chunks.
+    # Without this the viewer only read naia_* chunks (i.e. images generated
+    # in-session), so any downloaded / re-saved NAI/WebUI/ComfyUI image — even one
+    # this app saved with the original NAI "Comment" — showed "No prompt metadata".
+    extracted: dict[str, Any] = {}
+    try:
+        from utils.image_info import ImageMetadataExtractor
+
+        extracted = ImageMetadataExtractor.extract_metadata(image) or {}
+    except Exception:
+        extracted = {}
+    extracted_params = extracted.get("parameters") if isinstance(extracted.get("parameters"), dict) else {}
+
     raw_params = parsed_info.get("naia_generation_params") if isinstance(parsed_info.get("naia_generation_params"), dict) else {}
     prompt_context = parsed_info.get("naia_prompt_context") if isinstance(parsed_info.get("naia_prompt_context"), dict) else {}
     prompt = ""
@@ -522,9 +536,15 @@ def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_ty
         prompt = prompt or str(raw_params.get("input") or raw_params.get("prompt") or "")
         negative = str(raw_params.get("negative_prompt") or raw_params.get("uc") or "")
     if not prompt:
-        prompt = str(parsed_info.get("prompt") or "")
+        prompt = str(extracted.get("prompt") or parsed_info.get("prompt") or "")
     if not negative:
-        negative = str(parsed_info.get("negative") or parsed_info.get("uc") or "")
+        negative = str(
+            extracted.get("negative")
+            or extracted.get("uc")
+            or parsed_info.get("negative")
+            or parsed_info.get("uc")
+            or ""
+        )
 
     summary = {
         "width": image.width,
@@ -539,25 +559,35 @@ def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_ty
     for key in ("seed", "steps", "sampler", "cfg_scale", "scale", "model"):
         if isinstance(raw_params, dict) and raw_params.get(key) not in ("", None):
             summary[key] = raw_params.get(key)
+        elif extracted.get(key) not in ("", None):
+            summary[key] = extracted.get(key)
+        elif extracted_params.get(key) not in ("", None):
+            summary[key] = extracted_params.get(key)
         elif parsed_info.get(key) not in ("", None):
             summary[key] = parsed_info.get(key)
+
+    raw_payload: dict[str, Any] = {
+        "image": {
+            "width": image.width,
+            "height": image.height,
+            "mode": image.mode,
+            "format": image.format,
+            "size_kb": len(image_bytes) // 1024,
+            "mime_type": mime_type,
+        },
+        "metadata": parsed_info,
+    }
+    if extracted:
+        from utils.image_info import json_safe_metadata
+
+        raw_payload["extracted_metadata"] = json_safe_metadata(extracted)
 
     return {
         "source": "input",
         "label": label,
         "summary": summary,
-        "raw": {
-            "image": {
-                "width": image.width,
-                "height": image.height,
-                "mode": image.mode,
-                "format": image.format,
-                "size_kb": len(image_bytes) // 1024,
-                "mime_type": mime_type,
-            },
-            "metadata": parsed_info,
-        },
-        "has_metadata": bool(parsed_info),
+        "raw": raw_payload,
+        "has_metadata": bool(parsed_info or extracted),
     }
 
 

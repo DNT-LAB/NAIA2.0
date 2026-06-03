@@ -981,3 +981,47 @@ class ImageMetadataExtractor:
             return 'comfyui'
 
         return 'unknown'
+
+
+def json_safe_metadata(value: Any, _depth: int = 0) -> Any:
+    """Make extracted metadata JSON-serializable.
+
+    ``ImageMetadataExtractor.extract_metadata`` starts from ``img.info``, which can
+    carry binary ``bytes`` (``exif``/``icc_profile``/GIF comment). FastAPI's
+    ``jsonable_encoder`` decodes ``bytes`` as strict UTF-8 and would 500 on a binary
+    payload, so decode leniently / stringify anything non-serializable.
+    """
+    if _depth > 8:
+        return str(value)
+    if isinstance(value, bytes):
+        try:
+            return value.decode('utf-8', errors='replace')
+        except Exception:
+            return f'<bytes {len(value)}>'
+    if isinstance(value, dict):
+        return {str(key): json_safe_metadata(val, _depth + 1) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe_metadata(item, _depth + 1) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def extract_embedded_metadata(raw_bytes: Optional[bytes]) -> Dict[str, Any]:
+    """Best-effort embedded-metadata extraction from original image bytes.
+
+    Returns a JSON-safe dict (NAI ``Comment``/stealth-PNG, WebUI ``parameters``/EXIF,
+    ComfyUI workflow) or ``{}``. Use for EXTERNAL images that lack NAIA's own
+    ``naia_*`` chunks (e.g. images imported into history). Runs the stealth-PNG pixel
+    scan, so gate the call on a missing in-app prompt to avoid paying it for normal
+    generated results.
+    """
+    if not raw_bytes:
+        return {}
+    try:
+        with Image.open(io.BytesIO(bytes(raw_bytes))) as image:
+            image.load()
+            extracted = ImageMetadataExtractor.extract_metadata(image) or {}
+    except Exception:
+        return {}
+    return json_safe_metadata(extracted) if extracted else {}

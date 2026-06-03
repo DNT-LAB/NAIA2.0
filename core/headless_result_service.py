@@ -285,23 +285,46 @@ class HeadlessResultStore:
             "cfg_scale": item.generation_params.get("cfg_scale", ""),
             "model": item.generation_params.get("model", ""),
         }
+        raw: dict[str, Any] = {
+            "image": {
+                "width": item.image.width,
+                "height": item.image.height,
+                "mode": item.image.mode,
+                "format": item.image.format,
+                "size_kb": len(item.webp_bytes) // 1024,
+            },
+            "generation_params": item.generation_params,
+            "prompt_context": item.prompt_context,
+            "api_metadata": item.api_metadata,
+            "image_meta": image_meta,
+        }
+        # External images (imported into history) have no naia_* params; recover
+        # prompt/params from the embedded PNG metadata so the viewer is not limited
+        # to in-session generations. Only runs when there is no in-app prompt, so
+        # normal generated results never pay the extraction cost.
+        if not summary["prompt"]:
+            from utils.image_info import extract_embedded_metadata
+
+            extracted = extract_embedded_metadata(getattr(item, "raw_bytes", None))
+            if extracted:
+                raw["extracted_metadata"] = extracted
+                summary["prompt"] = summary["prompt"] or str(extracted.get("prompt") or "")
+                summary["negative"] = summary["negative"] or str(
+                    extracted.get("negative") or extracted.get("uc") or ""
+                )
+                ext_params = extracted.get("parameters") if isinstance(extracted.get("parameters"), dict) else {}
+                for key in ("seed", "steps", "sampler", "cfg_scale", "scale", "model"):
+                    if summary.get(key) in ("", None):
+                        value = extracted.get(key)
+                        if value in ("", None):
+                            value = ext_params.get(key)
+                        if value not in ("", None):
+                            summary[key] = value
         return {
             "source": "current",
             "label": "Current Result",
             "summary": {key: value for key, value in summary.items() if value not in ("", None)},
-            "raw": {
-                "image": {
-                    "width": item.image.width,
-                    "height": item.image.height,
-                    "mode": item.image.mode,
-                    "format": item.image.format,
-                    "size_kb": len(item.webp_bytes) // 1024,
-                },
-                "generation_params": item.generation_params,
-                "prompt_context": item.prompt_context,
-                "api_metadata": item.api_metadata,
-                "image_meta": image_meta,
-            },
+            "raw": raw,
             "has_metadata": True,
         }
 

@@ -8200,9 +8200,13 @@ body.resizing-result-info {
   background: rgba(68,130,78,0.34);
   color: #d9ffda;
 }
+/* Highlight-overlay tokens must only change COLOR. The overlay is stacked over a
+   transparent textarea, so any width-changing property (font-weight/size/style,
+   letter-spacing) desyncs the overlay text from the textarea (word-break:break-all
+   then wraps differently) and shifts/garbles every token after it — e.g. a "#comment"
+   line previously rendered at weight 600 here pushed the following tags out of line. */
 .prompt-token-comment {
   color: #f4df8a;
-  font-weight: 600;
 }
 .prompt-token-artist {
   color: rgba(255, 205, 196, 1.00);

@@ -69,8 +69,8 @@ $ErrorActionPreference = "Stop"
 $safeName = ($Name -replace '[^A-Za-z0-9_.-]', '_').Trim('_')
 if (-not $safeName) { throw "Instance -Name must contain at least one path-safe character." }
 
-if ($GrokPort -lt 0 -or $GrokPort -gt 65535) {
-    throw "-GrokPort must be between 1 and 65535 (or 0 for auto)."
+if ($GrokPort -ne 0 -and ($GrokPort -lt 1024 -or $GrokPort -gt 65535)) {
+    throw "-GrokPort must be between 1024 and 65535 (or 0 for auto) — NAIA/Electron only accepts ports >= 1024."
 }
 
 if (-not $DataRoot) {
@@ -86,7 +86,7 @@ $electronDir = Join-Path $repoRoot "app\electron"
 if ($Target) {
     if (-not (Test-Path -LiteralPath $Target)) { throw "Portable target not found: $Target" }
     $exe     = (Resolve-Path -LiteralPath $Target).Path
-    $exeArgs = @("--user-data-dir=$electronUserData")
+    $exeArgs = @("--user-data-dir=`"$electronUserData`"")  # quote: tolerate spaces in the path
     $workDir = Split-Path -Parent $exe
     $modeDesc = "portable: $exe"
 } else {
@@ -95,7 +95,7 @@ if ($Target) {
         throw "Source Electron not installed. Run:  cd `"$electronDir`"; npm install`n(or pass -Target <NAIA.exe> to use a portable build)."
     }
     $exe     = $electronBin
-    $exeArgs = @(".", "--user-data-dir=$electronUserData")
+    $exeArgs = @(".", "--user-data-dir=`"$electronUserData`"")  # quote: tolerate spaces in the path
     $workDir = $electronDir
     $modeDesc = "source (electron .)"
 }

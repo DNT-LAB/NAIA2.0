@@ -258,27 +258,35 @@ class HeadlessVibeTransferService:
                     return b""
         return b""
 
-    def begin_encode(self, key: str) -> list[dict[str, Any]]:
-        """Validate + mark the frame as encoding (so the broadcast shows 'Encoding…').
-        Returns [module_state] on success, or [toast] when it cannot be encoded."""
+    def begin_encode(self, key: str) -> dict[str, Any]:
+        """Validate + atomically CLAIM the frame for encoding (the broadcast then shows
+        'Encoding…'). Returns ``{"ok": bool, "messages": [...]}``. ok=False (with a
+        toast) when the frame is missing, cannot be encoded, or is ALREADY encoding —
+        the caller MUST then not start a second /ai/encode-vibe call, which would spend
+        Anlas twice and let two workers mutate the same frame."""
         context = self.context
         self._ensure_loaded()
         index = context._index_from_key(key, "encode_")
         frames = context.vibe_transfer_frames
         if index is None or not (0 <= index < len(frames)):
-            return [context._toast("Vibe 프레임을 찾을 수 없습니다.", level="error")]
+            return {"ok": False, "messages": [context._toast("Vibe 프레임을 찾을 수 없습니다.", level="error")]}
         frame = frames[index]
+        if frame.get("encoding_in_progress"):
+            return {"ok": False, "messages": [context._toast("이미 인코딩 중입니다.", level="info")]}
         if not self._runtime_can_encode():
-            return [context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다 (NAID3 제외).", level="error")]
+            return {"ok": False, "messages": [context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다 (NAID3 제외).", level="error")]}
         if frame.get("is_no_image") or not self._frame_has_source(frame):
-            return [context._toast("인코딩할 소스 이미지가 없습니다.", level="error")]
+            return {"ok": False, "messages": [context._toast("인코딩할 소스 이미지가 없습니다.", level="error")]}
         frame["encoding_in_progress"] = True
-        return [self.module_state()]
+        return {"ok": True, "messages": [self.module_state()]}
 
     def perform_encode(self, key: str, value: Any = None) -> list[dict[str, Any]]:
         """Blocking: POST /ai/encode-vibe for the requested IE, store the encoding,
         persist (active state + storage), return [toast, module_state]. Must run off
-        the event loop (executor) — the encode is a network call.
+        the event loop (executor) — the encode is a network call. Assumes begin_encode
+        already claimed the frame; ``encoding_in_progress`` stays True for the whole
+        network call (so a duplicate request is rejected) and is cleared here in a
+        finally, before the final module_state is built.
 
         ``value`` is the target IE from the encode command (the slider value the user
         wants to encode at). It is authoritative because dragging the slider to an
@@ -291,52 +299,54 @@ class HeadlessVibeTransferService:
         if index is None or not (0 <= index < len(frames)):
             return [context._toast("Vibe 프레임을 찾을 수 없습니다.", level="error")]
         frame = frames[index]
-        frame["encoding_in_progress"] = False  # final state reflects completion
+        toast = None
         try:
-            if not self._runtime_can_encode():
-                return [context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다.", level="error"), self.module_state()]
-            source_bytes = self._frame_source_bytes(frame)
-            if frame.get("is_no_image") or not source_bytes:
-                return [context._toast("인코딩할 소스 이미지를 찾을 수 없습니다.", level="error"), self.module_state()]
-            token = context.secure_token_manager.get_token("nai_token") or ""
-            if not token:
-                return [context._toast("NAI 토큰이 필요합니다 (API 설정 → NAI).", level="error"), self.module_state()]
-            ie = round(_as_float(value, _as_float(frame.get("information_extracted"), 1.0)), 2)
-            ie = max(0.01, min(1.0, ie))
-            frame["information_extracted"] = ie  # the freshly-encoded IE becomes current
-            model_key = context._current_model_key()
-            api_model = _NAI_MODEL_MAP.get(model_key, "nai-diffusion-4-5-full")
-            import requests
+            can = self._runtime_can_encode()
+            source_bytes = b"" if frame.get("is_no_image") else self._frame_source_bytes(frame)
+            token = (context.secure_token_manager.get_token("nai_token") or "") if can else ""
+            if not can:
+                toast = context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다.", level="error")
+            elif not source_bytes:
+                toast = context._toast("인코딩할 소스 이미지를 찾을 수 없습니다.", level="error")
+            elif not token:
+                toast = context._toast("NAI 토큰이 필요합니다 (API 설정 → NAI).", level="error")
+            else:
+                ie = round(_as_float(value, _as_float(frame.get("information_extracted"), 1.0)), 2)
+                ie = max(0.01, min(1.0, ie))
+                model_key = context._current_model_key()
+                api_model = _NAI_MODEL_MAP.get(model_key, "nai-diffusion-4-5-full")
+                import requests
 
-            resp = requests.post(
-                _ENCODE_VIBE_URL,
-                json={
-                    "image": base64.b64encode(source_bytes).decode("ascii"),
-                    "information_extracted": ie,
-                    "model": api_model,
-                },
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                timeout=180,
-            )
-            resp.raise_for_status()
-            encoding = base64.b64encode(resp.content).decode("utf-8")
-            if not encoding:
-                return [context._toast("Vibe 인코딩 응답이 비어 있습니다.", level="error"), self.module_state()]
-            encodings = frame.get("vibe_encodings")
-            if not isinstance(encodings, dict):
-                encodings = {}
-            encodings[f"{ie:.2f}"] = encoding
-            frame["vibe_encodings"] = encodings
-            frame["source_model"] = frame.get("source_model") or model_key
-            self._persist()
-            self._save_encoding_to_storage(frame, source_bytes, model_key)
-            return [
-                context._toast(f"Vibe 인코딩 완료 — IE {ie:.2f} (2 Anlas 소모)", level="success"),
-                self.module_state(),
-            ]
+                resp = requests.post(
+                    _ENCODE_VIBE_URL,
+                    json={
+                        "image": base64.b64encode(source_bytes).decode("ascii"),
+                        "information_extracted": ie,
+                        "model": api_model,
+                    },
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    timeout=180,
+                )
+                resp.raise_for_status()
+                encoding = base64.b64encode(resp.content).decode("utf-8")
+                if not encoding:
+                    toast = context._toast("Vibe 인코딩 응답이 비어 있습니다.", level="error")
+                else:
+                    frame["information_extracted"] = ie  # the freshly-encoded IE becomes current
+                    encodings = frame.get("vibe_encodings")
+                    if not isinstance(encodings, dict):
+                        encodings = {}
+                    encodings[f"{ie:.2f}"] = encoding
+                    frame["vibe_encodings"] = encodings
+                    frame["source_model"] = frame.get("source_model") or model_key
+                    self._persist()
+                    self._save_encoding_to_storage(frame, source_bytes, model_key)
+                    toast = context._toast(f"Vibe 인코딩 완료 — IE {ie:.2f} (2 Anlas 소모)", level="success")
         except Exception as exc:
+            toast = context._toast(f"Vibe 인코딩 실패: {exc}", level="error")
+        finally:
             frame["encoding_in_progress"] = False
-            return [context._toast(f"Vibe 인코딩 실패: {exc}", level="error"), self.module_state()]
+        return [toast, self.module_state()] if toast else [self.module_state()]
 
     def _save_encoding_to_storage(self, frame: dict[str, Any], source_bytes: bytes, model_key: str) -> None:
         context = self.context

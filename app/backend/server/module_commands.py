@@ -33,11 +33,14 @@ async def _run_vibe_encode(
     from app.backend.server.websocket_broadcast import broadcast_json
 
     key = str(command.get("key") or "")
-    for message in (context._vibe_transfer_begin_encode(key) or []):
-        if isinstance(message, dict):
-            await broadcast_json(clients, message)
     if not key:
         return
+    start = context._vibe_transfer_begin_encode(key)
+    for message in (start.get("messages", []) if isinstance(start, dict) else []) or []:
+        if isinstance(message, dict):
+            await broadcast_json(clients, message)
+    if not (isinstance(start, dict) and start.get("ok")):
+        return  # invalid or already encoding — do NOT start a duplicate /ai/encode-vibe
     loop = asyncio.get_event_loop()
     try:
         result = await loop.run_in_executor(

@@ -22,6 +22,18 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
+# NAI UI model key -> encode-vibe API model string (mirrors api_service.py model_mapping).
+_NAI_MODEL_MAP = {
+    "NAID4.5F": "nai-diffusion-4-5-full",
+    "NAID4.5C": "nai-diffusion-4-5-curated",
+    "NAID4.0F": "nai-diffusion-4-full",
+    "NAID4.0C": "nai-diffusion-4-curated-preview",
+    "NAID3": "nai-diffusion-3",
+}
+_ENCODE_VIBE_URL = "https://image.novelai.net/ai/encode-vibe"
+_ENCODE_UNAVAILABLE_REASON = "Vibe 인코딩은 NAI 모드 + NAI 토큰 + 소스 이미지가 있을 때만 가능합니다."
+
+
 class HeadlessVibeTransferService:
     def __init__(self, context: Any):
         self.context = context
@@ -203,9 +215,164 @@ class HeadlessVibeTransferService:
                 "storage_type": "",
             }
 
+    # ----- Vibe 인코딩 (NAI /ai/encode-vibe 포팅, 2 Anlas/회) -----
+    def _runtime_can_encode(self) -> bool:
+        context = self.context
+        if str(context.get_api_mode() or "").upper() != "NAI":
+            return False
+        if context._is_naid3_model():
+            return False
+        try:
+            return bool(context.secure_token_manager.get_token("nai_token"))
+        except Exception:
+            return False
+
+    def _frame_source_candidates(self, frame: dict[str, Any]):
+        file_hash = str(frame.get("file_hash") or "")
+        if not file_hash:
+            return []
+        models = []
+        for model in (str(frame.get("source_model") or ""), self.context._current_model_key()):
+            if model and model not in models:
+                models.append(model)
+        return [
+            self.context._existing_save_path("vibe_transfer", model, "images", f"{file_hash}.png")
+            for model in models
+        ]
+
+    def _frame_has_source(self, frame: dict[str, Any]) -> bool:
+        raw = frame.get("image_bytes")
+        if isinstance(raw, (bytes, bytearray)) and raw:
+            return True
+        return any(path.exists() for path in self._frame_source_candidates(frame))
+
+    def _frame_source_bytes(self, frame: dict[str, Any]) -> bytes:
+        raw = frame.get("image_bytes")
+        if isinstance(raw, (bytes, bytearray)) and raw:
+            return bytes(raw)
+        for path in self._frame_source_candidates(frame):
+            if path.exists():
+                try:
+                    return path.read_bytes()
+                except Exception:
+                    return b""
+        return b""
+
+    def begin_encode(self, key: str) -> list[dict[str, Any]]:
+        """Validate + mark the frame as encoding (so the broadcast shows 'Encoding…').
+        Returns [module_state] on success, or [toast] when it cannot be encoded."""
+        context = self.context
+        self._ensure_loaded()
+        index = context._index_from_key(key, "encode_")
+        frames = context.vibe_transfer_frames
+        if index is None or not (0 <= index < len(frames)):
+            return [context._toast("Vibe 프레임을 찾을 수 없습니다.", level="error")]
+        frame = frames[index]
+        if not self._runtime_can_encode():
+            return [context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다 (NAID3 제외).", level="error")]
+        if frame.get("is_no_image") or not self._frame_has_source(frame):
+            return [context._toast("인코딩할 소스 이미지가 없습니다.", level="error")]
+        frame["encoding_in_progress"] = True
+        return [self.module_state()]
+
+    def perform_encode(self, key: str, value: Any = None) -> list[dict[str, Any]]:
+        """Blocking: POST /ai/encode-vibe for the requested IE, store the encoding,
+        persist (active state + storage), return [toast, module_state]. Must run off
+        the event loop (executor) — the encode is a network call.
+
+        ``value`` is the target IE from the encode command (the slider value the user
+        wants to encode at). It is authoritative because dragging the slider to an
+        un-encoded IE does NOT round-trip to the backend, so frame.information_extracted
+        can be stale; fall back to it only when no value is supplied."""
+        context = self.context
+        self._ensure_loaded()
+        index = context._index_from_key(key, "encode_")
+        frames = context.vibe_transfer_frames
+        if index is None or not (0 <= index < len(frames)):
+            return [context._toast("Vibe 프레임을 찾을 수 없습니다.", level="error")]
+        frame = frames[index]
+        frame["encoding_in_progress"] = False  # final state reflects completion
+        try:
+            if not self._runtime_can_encode():
+                return [context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다.", level="error"), self.module_state()]
+            source_bytes = self._frame_source_bytes(frame)
+            if frame.get("is_no_image") or not source_bytes:
+                return [context._toast("인코딩할 소스 이미지를 찾을 수 없습니다.", level="error"), self.module_state()]
+            token = context.secure_token_manager.get_token("nai_token") or ""
+            if not token:
+                return [context._toast("NAI 토큰이 필요합니다 (API 설정 → NAI).", level="error"), self.module_state()]
+            ie = round(_as_float(value, _as_float(frame.get("information_extracted"), 1.0)), 2)
+            ie = max(0.01, min(1.0, ie))
+            frame["information_extracted"] = ie  # the freshly-encoded IE becomes current
+            model_key = context._current_model_key()
+            api_model = _NAI_MODEL_MAP.get(model_key, "nai-diffusion-4-5-full")
+            import requests
+
+            resp = requests.post(
+                _ENCODE_VIBE_URL,
+                json={
+                    "image": base64.b64encode(source_bytes).decode("ascii"),
+                    "information_extracted": ie,
+                    "model": api_model,
+                },
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                timeout=180,
+            )
+            resp.raise_for_status()
+            encoding = base64.b64encode(resp.content).decode("utf-8")
+            if not encoding:
+                return [context._toast("Vibe 인코딩 응답이 비어 있습니다.", level="error"), self.module_state()]
+            encodings = frame.get("vibe_encodings")
+            if not isinstance(encodings, dict):
+                encodings = {}
+            encodings[f"{ie:.2f}"] = encoding
+            frame["vibe_encodings"] = encodings
+            frame["source_model"] = frame.get("source_model") or model_key
+            self._persist()
+            self._save_encoding_to_storage(frame, source_bytes, model_key)
+            return [
+                context._toast(f"Vibe 인코딩 완료 — IE {ie:.2f} (2 Anlas 소모)", level="success"),
+                self.module_state(),
+            ]
+        except Exception as exc:
+            frame["encoding_in_progress"] = False
+            return [context._toast(f"Vibe 인코딩 실패: {exc}", level="error"), self.module_state()]
+
+    def _save_encoding_to_storage(self, frame: dict[str, Any], source_bytes: bytes, model_key: str) -> None:
+        context = self.context
+        file_hash = str(frame.get("file_hash") or "")
+        if not file_hash or not model_key:
+            return
+        try:
+            json_path = context._save_path("vibe_transfer", model_key, f"{file_hash}.json")
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            existing: dict[str, Any] = {}
+            if json_path.exists():
+                try:
+                    loaded = json.loads(json_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        existing = loaded
+                except Exception:
+                    existing = {}
+            enc = existing.get("encodings") if isinstance(existing.get("encodings"), dict) else {}
+            enc.update({str(k): str(v) for k, v in (frame.get("vibe_encodings") or {}).items() if v})
+            existing.update({
+                "file_hash": file_hash,
+                "file_name": str(frame.get("file_name") or f"{file_hash}.png"),
+                "encodings": enc,
+            })
+            json_path.write_text(json.dumps(existing, ensure_ascii=False, indent=4), encoding="utf-8")
+            img_path = context._save_path("vibe_transfer", model_key, "images", f"{file_hash}.png")
+            img_path.parent.mkdir(parents=True, exist_ok=True)
+            if source_bytes and not img_path.exists():
+                img_path.write_bytes(source_bytes)
+        except Exception as exc:
+            print(f"[ERROR] Vibe encoding storage save failed: {exc}")
+
     def module_state(self) -> dict[str, Any]:
         context = self.context
         self._ensure_loaded()
+        runtime_can_encode = self._runtime_can_encode()
         frames = []
         enabled_count = 0
         strength_total = 0.0
@@ -218,6 +385,11 @@ class HeadlessVibeTransferService:
             if frame.get("is_enabled") and encodings:
                 enabled_count += 1
                 strength_total += _as_float(frame.get("reference_strength"), 0.6)
+            frame_can_encode = (
+                runtime_can_encode
+                and not frame.get("is_no_image")
+                and self._frame_has_source(frame)
+            )
             frames.append({
                 "index": index,
                 "file_hash": frame.get("file_hash", ""),
@@ -229,24 +401,26 @@ class HeadlessVibeTransferService:
                 "information_extracted": information_extracted,
                 "has_encoding": has_encoding,
                 "active_encoding": active_encoding,
-                "encoding_in_progress": False,
-                "can_encode": False,
-                "encoding_unavailable_reason": "Headless runtime can use stored encoded Vibe entries but cannot create new encodings.",
+                "encoding_in_progress": bool(frame.get("encoding_in_progress")),
+                "can_encode": frame_can_encode,
+                "encoding_unavailable_reason": "" if frame_can_encode else _ENCODE_UNAVAILABLE_REASON,
                 "encoding_keys": encoding_keys,
                 "thumbnail": frame.get("thumbnail", ""),
             })
+        unavailable_actions = [
+            "cluster_save",
+            "cluster_delete",
+            "cluster_rename",
+            "cluster_thumbnail",
+            "restore_metadata",
+        ]
+        if not runtime_can_encode:
+            unavailable_actions.insert(0, "encode")
         return context._module_state_payload("vibe_transfer", {
-            "can_encode": False,
+            "can_encode": runtime_can_encode,
             "can_write_clusters": False,
             "can_restore_metadata": False,
-            "unavailable_actions": [
-                "encode",
-                "cluster_save",
-                "cluster_delete",
-                "cluster_rename",
-                "cluster_thumbnail",
-                "restore_metadata",
-            ],
+            "unavailable_actions": unavailable_actions,
             "normalize": bool(context.vibe_transfer_normalize),
             "enabled_count": enabled_count,
             "frame_count": len(context.vibe_transfer_frames),

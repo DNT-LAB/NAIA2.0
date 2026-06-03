@@ -487,6 +487,12 @@ class WebSessionContext:
     def _set_vibe_transfer_param(self, key: str, value: Any) -> dict[str, Any] | None:
         return self._vibe_transfer_service().set_param(key, value)
 
+    def _vibe_transfer_begin_encode(self, key: str) -> list[dict[str, Any]]:
+        return self._vibe_transfer_service().begin_encode(key)
+
+    def _vibe_transfer_perform_encode(self, key: str, value: Any = None) -> list[dict[str, Any]]:
+        return self._vibe_transfer_service().perform_encode(key, value)
+
     def _scan_vibe_storage(self) -> dict[str, Any]:
         return self._vibe_transfer_service().scan_storage()
 

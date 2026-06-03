@@ -21,6 +21,40 @@ async def _send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
     await ws.send_text(json.dumps(payload, ensure_ascii=False))
 
 
+async def _run_vibe_encode(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    command: dict[str, Any],
+) -> None:
+    """Background Vibe encode: broadcast the in-progress module_state, run the
+    blocking /ai/encode-vibe call in a thread, then broadcast the result."""
+    import asyncio
+
+    from app.backend.server.websocket_broadcast import broadcast_json
+
+    key = str(command.get("key") or "")
+    for message in (context._vibe_transfer_begin_encode(key) or []):
+        if isinstance(message, dict):
+            await broadcast_json(clients, message)
+    if not key:
+        return
+    loop = asyncio.get_event_loop()
+    try:
+        result = await loop.run_in_executor(
+            None, context._vibe_transfer_perform_encode, key, command.get("value")
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        result = [{
+            "type": "toast",
+            "level": "error",
+            "message": f"Vibe 인코딩 실패: {exc}",
+            "runtime": "web",
+        }]
+    for message in (result or []):
+        if isinstance(message, dict):
+            await broadcast_json(clients, message)
+
+
 async def handle_module_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -38,6 +72,18 @@ async def handle_module_command(
     if command_type == "get_module_state":
         module_id = str(command.get("module_id") or "")
         await _send_json(ws, context.module_state_payload(module_id, client_host))
+        return True
+
+    # Vibe encoding is a NAI network call (/ai/encode-vibe, ~seconds). Run it off the
+    # event loop as a background task so it never blocks the WS handler; broadcast the
+    # "encoding…" state, then the result. (set_module_param is called synchronously.)
+    if (
+        str(command.get("module_id") or "") == "vibe_transfer"
+        and str(command.get("key") or "").startswith("encode_")
+    ):
+        import asyncio
+
+        asyncio.create_task(_run_vibe_encode(context, clients, command))
         return True
 
     module_state = context.set_module_param(

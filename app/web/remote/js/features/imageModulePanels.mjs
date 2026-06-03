@@ -357,7 +357,9 @@ export function createImageModulePanels({
     if (status) {
       status.classList.toggle('encoded', encoded);
       status.classList.toggle('pending', !encoded);
-      status.textContent = encoded ? `Encoded IE ${ieText}` : `Encode required for IE ${ieText}`;
+      status.textContent = encoded
+        ? `Encoded IE ${ieText}`
+        : (canEncode ? `Encode required for IE ${ieText}` : 'Use stored encoded Vibe entries');
     }
 
     if (encodeButton) {

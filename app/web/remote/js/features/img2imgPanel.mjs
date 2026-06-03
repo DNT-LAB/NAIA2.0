@@ -18,6 +18,9 @@ export function createImg2ImgPanel({
   let currentState = null;
   let maskBrushSize = 48;
   let maskMode = 'paint';
+  let lastRenderedStructureSignature = '';
+  let deferredFocusedRenderState = null;
+  let deferredFocusTarget = null;
 
   function formatRatio(value, fallback = '0.00') {
     const number = Number(value);
@@ -143,7 +146,85 @@ export function createImg2ImgPanel({
       </div>`;
   }
 
+  function focusedImg2imgTextarea() {
+    const active = document.activeElement;
+    if (!active || !moduleBody.contains(active) || active.tagName !== 'TEXTAREA') return null;
+    const cls = active.classList;
+    if (!cls) return null;
+    if (cls.contains('mod-img2img-main-prompt')
+      || cls.contains('mod-img2img-negative-prompt')
+      || cls.contains('mod-char-prompt')
+      || cls.contains('mod-char-uc')) {
+      return active;
+    }
+    return null;
+  }
+
+  function img2imgStructureSignature(state) {
+    if (!state || !state.active) return 'inactive';
+    const characters = Array.isArray(state.characters) ? state.characters : [];
+    // Everything that changes the DOM structure, EXCLUDING the prompt text
+    // (main / negative / per-character) so a server echo for a local text edit
+    // keeps the same signature and never replaces the focused textarea.
+    // can_generate / requires_mask are mask/image-derived (not prompt-derived,
+    // see headless_img2img_service), so including them keeps the generate button
+    // fresh without destabilising the signature while typing.
+    return JSON.stringify({
+      mode: String(state.mode || '').toLowerCase(),
+      can_generate: !!state.can_generate,
+      requires_mask: !!state.requires_mask,
+      has_mask: !!state.has_mask,
+      has_mask_preview: !!state.mask_preview,
+      has_preview: !!state.preview,
+      width: Number(state.width) || 0,
+      height: Number(state.height) || 0,
+      source_label: String(state.source_label || ''),
+      characters: characters.map(character => [character?.id, !!character?.active]),
+    });
+  }
+
+  function clearDeferredFocusedRender() {
+    if (deferredFocusTarget) {
+      deferredFocusTarget.removeEventListener('blur', flushDeferredFocusedRender);
+    }
+    deferredFocusTarget = null;
+    deferredFocusedRenderState = null;
+  }
+
+  function queueDeferredFocusedRender(textarea, state) {
+    deferredFocusedRenderState = state;
+    if (deferredFocusTarget === textarea) return;
+    if (deferredFocusTarget) {
+      deferredFocusTarget.removeEventListener('blur', flushDeferredFocusedRender);
+    }
+    deferredFocusTarget = textarea;
+    textarea.addEventListener('blur', flushDeferredFocusedRender, {once: true});
+  }
+
+  function flushDeferredFocusedRender() {
+    const pendingState = deferredFocusedRenderState;
+    deferredFocusTarget = null;
+    deferredFocusedRenderState = null;
+    if (!pendingState) return;
+    setTimeoutFn(() => {
+      if (!focusedImg2imgTextarea()) render(pendingState);
+    }, 0);
+  }
+
   function render(state) {
+    const structureSignature = img2imgStructureSignature(state);
+    const focusedTextarea = focusedImg2imgTextarea();
+    if (focusedTextarea && state && state.active && lastRenderedStructureSignature === structureSignature) {
+      // A server echo for a local text edit must not rebuild moduleBody.innerHTML:
+      // replacing the focused textarea drops focus and collapses tag autocomplete
+      // mid-typing (same regression fixed for the NAID4 Character panel, 38d3898).
+      // Stash the latest state and flush it once the textarea blurs.
+      currentState = state || null;
+      queueDeferredFocusedRender(focusedTextarea, state);
+      return;
+    }
+    clearDeferredFocusedRender();
+    lastRenderedStructureSignature = structureSignature;
     currentState = state || null;
     if (!state || !state.active) {
       closeMaskEditor();

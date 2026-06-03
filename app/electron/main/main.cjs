@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
+const net = require("node:net");
 const path = require("node:path");
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -688,6 +689,7 @@ function backendEnvironment(root) {
     NAIA_RESOURCE_ROOT: process.env.NAIA_RESOURCE_ROOT || root,
     NAIA_REMOTE_WEB_DIR: process.env.NAIA_REMOTE_WEB_DIR || path.join(root, "app", "web", "remote"),
     NAIA_USER_DATA_DIR: runtimeDataRoot(),
+    NAIA_GROK_PROXY_PORT: String(grokProxyPort),
     PYTHONDONTWRITEBYTECODE: "1",
     PYTHONPYCACHEPREFIX: pythonBytecodeCacheRoot(),
     PYTHONUTF8: "1",
@@ -2148,10 +2150,11 @@ ipcMain.handle("naia:open-release-page", () => {
 //   - 토큰/프록시 모두 progrok 가 관리, NAIA 는 토큰을 보관하지 않는다.
 // 제거: 이 블록 + preload 의 grok* + resources/progrok-runtime + 프론트 패널만 지우면 됨.
 const GROK_PROXY_HOST = "127.0.0.1";
-const GROK_PROXY_PORT = 18645;
+const GROK_PROXY_PORT = 18645; // default base port; resolved dynamically below
+const GROK_PROXY_PORT_ENV = "NAIA_GROK_PROXY_PORT";
 let grokProxyProcess = null;
 let grokProxyState = "stopped"; // stopped|starting|ready|auth_required|offline|unavailable
-let grokProxyPort = GROK_PROXY_PORT;
+let grokProxyPort = readPort(process.env[GROK_PROXY_PORT_ENV], GROK_PROXY_PORT);
 let grokLoginProcess = null;
 
 function grokRuntimeRoot() {
@@ -2190,11 +2193,63 @@ function setGrokProxyState(state) {
   broadcastGrokState();
 }
 
+function probePort(host, port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once("error", () => {
+      try { srv.close(); } catch (_e) {}
+      resolve(false);
+    });
+    srv.once("listening", () => {
+      srv.close(() => resolve(true));
+    });
+    srv.listen(port, host);
+  });
+}
+
+async function findFreePort(host, startPort, maxTries = 64) {
+  for (let i = 0; i < maxTries; i += 1) {
+    const candidate = startPort + i;
+    if (candidate > 65535) break;
+    // eslint-disable-next-line no-await-in-loop
+    if (await probePort(host, candidate)) {
+      return candidate;
+    }
+  }
+  // Nothing free in range: fall back to the base port. We deliberately do NOT
+  // throw — Grok is optional and this runs during startup; throwing would block
+  // the main window. progrok then just reports "unavailable" if it cannot bind,
+  // exactly like the pre-dynamic-port behavior.
+  return startPort;
+}
+
+// Resolve the progrok proxy port BEFORE the backend spawns so the Electron shell
+// and the Python backend (NAIA_GROK_PROXY_PORT) agree on it. An explicit
+// NAIA_GROK_PROXY_PORT wins (deterministic, race-free — the launcher uses this for
+// guaranteed isolation); otherwise probe upward from the default so multiple
+// concurrent instances each get their own proxy instead of colliding on 18645.
+// The probe is best-effort: there is a small check-then-bind window, so on the
+// rare simultaneous start it degrades to the old single-proxy behavior (one
+// instance's progrok reports unavailable) rather than corrupting anything.
+async function resolveGrokProxyPort() {
+  const explicit = readPort(process.env[GROK_PROXY_PORT_ENV], 0);
+  if (explicit) {
+    grokProxyPort = explicit;
+    return grokProxyPort;
+  }
+  try {
+    grokProxyPort = await findFreePort(GROK_PROXY_HOST, GROK_PROXY_PORT);
+  } catch (_error) {
+    grokProxyPort = GROK_PROXY_PORT;
+  }
+  return grokProxyPort;
+}
+
 function startGrokProxy() {
   if (!grokProgrokEntry()) { setGrokProxyState("unavailable"); return; }
   if (grokProxyProcess) return;
   let authRequired = false;
-  const child = spawnGrok(["proxy", "--host", GROK_PROXY_HOST, "--port", String(GROK_PROXY_PORT)], {
+  const child = spawnGrok(["proxy", "--host", GROK_PROXY_HOST, "--port", String(grokProxyPort)], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (!child) { setGrokProxyState("unavailable"); return; }
@@ -2271,9 +2326,11 @@ if (!lock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     configureApplicationMenu();
     configureDownloads();
+    // Resolve the Grok proxy port first so the backend env carries it (multi-instance).
+    await resolveGrokProxyPort();
     createMainWindow();
     startGrokProxy(); // Grok(제거 가능): 번들 progrok 프록시 자동 기동
   });
@@ -2334,6 +2391,8 @@ module.exports.__test = {
   portableUserDataRoot,
   remoteDebuggingPort,
   remoteEntryUrl,
+  resolveGrokProxyPort,
+  findFreePort,
   runtimeInstallErrorFromPayload,
   runtimeInstallReadyFromPayload,
   shouldRunRuntimeInstallGate,

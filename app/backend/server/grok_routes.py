@@ -22,7 +22,17 @@ import requests
 from fastapi import Request
 from fastapi.responses import FileResponse, JSONResponse
 
-DEFAULT_GROK_PROXY_URL = "http://127.0.0.1:18645"
+def _default_grok_proxy_url() -> str:
+    """기본 progrok 프록시 URL. Electron 셸이 다중 인스턴스 격리를 위해
+    ``NAIA_GROK_PROXY_PORT`` 로 동적 포트를 넘기면 그 포트를 사용한다(미설정 시 18645).
+    사용자가 명시 저장한 proxy_url 은 ``load_grok_config()`` 에서 여전히 우선한다."""
+    raw = str(os.environ.get("NAIA_GROK_PROXY_PORT") or "").strip()
+    if raw.isdigit() and 1 <= int(raw) <= 65535:
+        return f"http://127.0.0.1:{int(raw)}"
+    return "http://127.0.0.1:18645"
+
+
+DEFAULT_GROK_PROXY_URL = _default_grok_proxy_url()
 _GROK_TEST_TIMEOUT = 6.0
 
 

@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");
+const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
@@ -160,6 +161,44 @@ test("source backend launch config uses repo venv, no-browser, and app data user
     assert.equal(launch.env.NAIA_REMOTE_WEB_DIR, path.join(root, "app", "web", "remote"));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("grok proxy port is dynamic: explicit env wins and reaches the Python backend", async () => {
+  // Multi-instance contract: an explicit NAIA_GROK_PROXY_PORT is honored and is
+  // forwarded into the backend environment so the Python proxy resolver targets
+  // the same progrok instance the shell spawned (each NAIA instance = own port).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "naia-electron-grok-"));
+  try {
+    const venvPython = path.join(root, "venv", "Scripts", "python.exe");
+    const entry = path.join(root, "NAIA_web_headless.py");
+    writeFile(venvPython, "python");
+    writeFile(entry, "print('ok')\n");
+
+    const { api } = loadMain({
+      env: { NAIA_REPO_ROOT: root, NAIA_GROK_PROXY_PORT: "18650" },
+    });
+    const resolved = await api.resolveGrokProxyPort();
+    assert.equal(resolved, 18650);
+
+    const launch = await api.backendLaunchConfig();
+    assert.equal(launch.env.NAIA_GROK_PROXY_PORT, "18650");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("findFreePort returns the first port that is not in use", async () => {
+  const { api } = loadMain();
+  const blocker = net.createServer();
+  await new Promise((resolve) => blocker.listen(0, "127.0.0.1", resolve));
+  const taken = blocker.address().port;
+  try {
+    const free = await api.findFreePort("127.0.0.1", taken, 8);
+    assert.notEqual(free, taken);
+    assert.equal(free > taken && free <= taken + 8, true);
+  } finally {
+    await new Promise((resolve) => blocker.close(resolve));
   }
 });
 

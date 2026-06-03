@@ -24,9 +24,13 @@ def _normalize_remote_mode(context: WebSessionContext, mode: str | None = None) 
 
 
 def _default_resolutions_for_mode(mode: str) -> list[str]:
-    from core.resolution_utils import ANIMA_RESOLUTION_LABELS, STANDARD_1MP_RESOLUTION_LABELS
+    # COMFYUI/ANIMA defaults to the 1MP band (1024x1024 .. 832x1216 .. 1216x832), same as
+    # NAI/WEBUI. The full ANIMA range (512..1792) is opt-in via the Res Preset bands
+    # (draft/compact/standard/hd/.../max) or by adding entries in Manage Resolution, so a
+    # fresh COMFYUI session no longer lists every 512..1536 resolution by default.
+    from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
 
-    return list(ANIMA_RESOLUTION_LABELS if mode == "COMFYUI" else STANDARD_1MP_RESOLUTION_LABELS)
+    return list(STANDARD_1MP_RESOLUTION_LABELS)
 
 
 def _resolution_store_path(context: WebSessionContext) -> Path:

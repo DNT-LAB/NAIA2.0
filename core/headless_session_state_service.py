@@ -123,11 +123,14 @@ class HeadlessSessionStateService:
         }
 
     def generation_param_schema_payload(self) -> dict[str, Any]:
-        from core.resolution_utils import ANIMA_RESOLUTION_LABELS, STANDARD_1MP_RESOLUTION_LABELS
+        # COMFYUI/ANIMA shares the 1MP band default; larger ANIMA resolutions are opt-in
+        # via the Res Preset bands, so the resolution dropdown isn't flooded with the full
+        # 512..1536 ANIMA range by default (user request: default to the 1024 band).
+        from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
 
         context = self.context
         mode = context.get_api_mode()
-        resolution_options = list(ANIMA_RESOLUTION_LABELS if mode == "COMFYUI" else STANDARD_1MP_RESOLUTION_LABELS)
+        resolution_options = list(STANDARD_1MP_RESOLUTION_LABELS)
         resolution = str(context.remote_params.get("resolution") or "832 x 1216")
         if resolution not in resolution_options:
             resolution_options.append(resolution)

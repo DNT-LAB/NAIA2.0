@@ -906,7 +906,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260531-
   .catch(error => {
     console.error('Failed to initialize character panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260601-cond-preset-mode1')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260603-cond-focus1')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -974,7 +974,7 @@ const instantWildcardPanelReady = import('./js/features/instantWildcardPanel.mjs
   .catch(error => {
     console.error('Failed to initialize instant wildcard panel module', error);
   });
-const e621EventPanelReady = import('./js/features/e621EventPanel.mjs')
+const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20260603-e621-focus1')
   .then(({createE621EventPanel}) => {
     e621EventPanel = createE621EventPanel({
       document,

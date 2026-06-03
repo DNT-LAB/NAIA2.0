@@ -7,6 +7,9 @@ export function createE621EventPanel({
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
   let lastState = null;
+  let lastRenderedStructureSignature = '';
+  let deferredFocusedRenderState = null;
+  let deferredFocusTarget = null;
 
   function attr(value) {
     return escHtml(String(value ?? ''));
@@ -74,7 +77,58 @@ export function createE621EventPanel({
     }
   }
 
+  function focusedE621Testbench() {
+    const active = document.activeElement;
+    if (!active || !moduleBody || !moduleBody.contains(active)) return null;
+    if (active.tagName !== 'TEXTAREA' || active.id !== 'e621Testbench') return null;
+    return active;
+  }
+
+  function e621StructureSignature(state) {
+    if (!state || !state.data_loaded) return JSON.stringify({loaded: false, path: state?.data_path || ''});
+    // Everything EXCEPT the testbench text (echoed per-keystroke by onTestbenchInput)
+    // so a server echo for a local testbench edit keeps the same signature and never
+    // replaces the focused #e621Testbench textarea.
+    const rest = {...state};
+    delete rest.testbench;
+    return JSON.stringify(rest);
+  }
+
+  function clearDeferredE621Render() {
+    if (deferredFocusTarget) deferredFocusTarget.removeEventListener('blur', flushDeferredE621Render);
+    deferredFocusTarget = null;
+    deferredFocusedRenderState = null;
+  }
+
+  function queueDeferredE621Render(textarea, state) {
+    deferredFocusedRenderState = state;
+    if (deferredFocusTarget === textarea) return;
+    if (deferredFocusTarget) deferredFocusTarget.removeEventListener('blur', flushDeferredE621Render);
+    deferredFocusTarget = textarea;
+    textarea.addEventListener('blur', flushDeferredE621Render, {once: true});
+  }
+
+  function flushDeferredE621Render() {
+    const pendingState = deferredFocusedRenderState;
+    deferredFocusTarget = null;
+    deferredFocusedRenderState = null;
+    if (!pendingState) return;
+    globalThis.setTimeout(() => { if (!focusedE621Testbench()) render(pendingState); }, 0);
+  }
+
   function render(state) {
+    // A server echo for a local testbench edit must not rebuild moduleBody.innerHTML
+    // while the testbench is focused — replacing it drops focus and collapses tag
+    // autocomplete (same regression fixed for Character/Img2Img: 38d3898 / c9edf4b).
+    const structureSignature = e621StructureSignature(state);
+    const focusedTextarea = focusedE621Testbench();
+    if (focusedTextarea && lastRenderedStructureSignature === structureSignature) {
+      lastState = state;
+      queueDeferredE621Render(focusedTextarea, state);
+      return;
+    }
+    clearDeferredE621Render();
+    lastRenderedStructureSignature = structureSignature;
     lastState = state;
     if (!state.data_loaded) {
       moduleBody.innerHTML = `

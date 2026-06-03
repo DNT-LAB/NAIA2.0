@@ -27,6 +27,9 @@ export function createConditionalPromptPanel({
   let presetDialogSource = '';
   let dirty = false;
   let bound = false;
+  let lastRenderedStructureSignature = '';
+  let deferredFocusedRenderState = null;
+  let deferredFocusTarget = null;
 
   function safeText(value) {
     return value == null ? '' : String(value);
@@ -1537,8 +1540,61 @@ export function createConditionalPromptPanel({
     moduleBody.addEventListener('keydown', handleKeydown);
   }
 
+  function focusedCondTextarea() {
+    const active = document.activeElement;
+    if (!active || !moduleBody || !moduleBody.contains(active) || active.tagName !== 'TEXTAREA') return null;
+    if (active.id === 'condRulesInput' || active.classList?.contains('cond-raw-editor')) return active;
+    return null;
+  }
+
+  function condStructureSignature(state) {
+    if (!state) return 'null';
+    // Exclude the Legacy DSL rules text (echoed per-keystroke by onRulesInput) so a
+    // server echo for a local rules edit keeps the same signature and never replaces
+    // the focused #condRulesInput. raw_dsl is edited locally (markDirty, no echo).
+    const rest = {...state};
+    delete rest.rules;
+    delete rest.rules_legacy;
+    delete rest.active_rules;
+    delete rest.raw_dsl;
+    return JSON.stringify(rest);
+  }
+
+  function clearDeferredCondRender() {
+    if (deferredFocusTarget) deferredFocusTarget.removeEventListener('blur', flushDeferredCondRender);
+    deferredFocusTarget = null;
+    deferredFocusedRenderState = null;
+  }
+
+  function queueDeferredCondRender(textarea, state) {
+    deferredFocusedRenderState = state;
+    if (deferredFocusTarget === textarea) return;
+    if (deferredFocusTarget) deferredFocusTarget.removeEventListener('blur', flushDeferredCondRender);
+    deferredFocusTarget = textarea;
+    textarea.addEventListener('blur', flushDeferredCondRender, {once: true});
+  }
+
+  function flushDeferredCondRender() {
+    const pendingState = deferredFocusedRenderState;
+    deferredFocusTarget = null;
+    deferredFocusedRenderState = null;
+    if (!pendingState) return;
+    globalThis.setTimeout(() => { if (!focusedCondTextarea()) render(pendingState); }, 0);
+  }
+
   function render(state) {
     bindEvents();
+    // Skip the destructive innerHTML rebuild when the Legacy DSL rules editor (or raw
+    // DSL editor) is focused and only the rules text changed — replacing the textarea
+    // drops focus mid-typing (same regression as Character/Img2Img: 38d3898 / c9edf4b).
+    const focusedTextarea = focusedCondTextarea();
+    const structureSignature = condStructureSignature(state);
+    if (focusedTextarea && lastRenderedStructureSignature === structureSignature) {
+      queueDeferredCondRender(focusedTextarea, state);
+      return;
+    }
+    clearDeferredCondRender();
+    lastRenderedStructureSignature = structureSignature;
     const preserveDirty = state === currentState;
     currentState = normalizeState(state);
     if (!preserveDirty) dirty = Boolean(currentState.local_dirty);

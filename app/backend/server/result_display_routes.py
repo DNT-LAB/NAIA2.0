@@ -473,7 +473,14 @@ def insert_external_image_to_history(context: WebSessionContext, image_bytes: by
     with Image.open(io.BytesIO(image_bytes)) as opened:
         opened.load()
         image = opened.copy()
-    png_bytes = result_images.pil_image_to_png_bytes(image)
+    # Preserve the original embedded NAI metadata (Comment / stealth-PNG / EXIF)
+    # byte-for-byte when the upload is already a PNG; only re-encode other formats.
+    # Re-encoding keeps the text chunks but stripping to the original bytes is lossless
+    # so the imported history item keeps its full metadata for the viewer.
+    if result_images.is_png_bytes(image_bytes):
+        png_bytes = bytes(image_bytes)
+    else:
+        png_bytes = result_images.pil_image_to_png_bytes(image)
     safe_label = str(label or "Imported Image")[:120]
     result = {"status": "success", "image": image, "raw_bytes": png_bytes}
     params = {
@@ -1196,12 +1203,39 @@ def register_result_display_routes(
             if action in {"img2img", "inpaint"}:
                 if session_context.get_api_mode() != "NAI":
                     return JSONResponse({"error": "Img2Img/Inpaint is available in NAI mode only"}, status_code=403)
-                state = await run_in_thread(
-                    session_context.open_img2img_session_from_bytes,
-                    image_bytes,
-                    label=label,
-                    mode=action,
-                )
+
+                def _open_img2img_with_embedded_prompt():
+                    # Carry the image's OWN embedded NAI prompt/negative into the
+                    # img2img/inpaint window so external images don't lose their prompt
+                    # when sent here. Falls back to the current prompt box when the
+                    # image has no embedded metadata. Extraction (stealth-PNG scan) runs
+                    # inside this worker thread so it never blocks the event loop.
+                    seed_prompt_ctx = None
+                    seed_gen_params = None
+                    try:
+                        from utils.image_info import extract_embedded_metadata
+
+                        embedded = extract_embedded_metadata(image_bytes)
+                        if embedded:
+                            embedded_prompt = str(embedded.get("prompt") or "")
+                            embedded_negative = str(
+                                embedded.get("negative") or embedded.get("uc") or ""
+                            )
+                            if embedded_prompt:
+                                seed_prompt_ctx = {"main_prompt": embedded_prompt}
+                            if embedded_negative:
+                                seed_gen_params = {"negative_prompt": embedded_negative}
+                    except Exception:
+                        pass
+                    return session_context.open_img2img_session_from_bytes(
+                        image_bytes,
+                        label=label,
+                        mode=action,
+                        generation_params=seed_gen_params,
+                        prompt_context=seed_prompt_ctx,
+                    )
+
+                state = await run_in_thread(_open_img2img_with_embedded_prompt)
                 await broadcast_json(clients, state)
                 return {
                     "ok": True,

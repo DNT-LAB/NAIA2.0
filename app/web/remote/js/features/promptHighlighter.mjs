@@ -164,6 +164,22 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
   let mode = '';
   let state = 'disabled';
 
+  // The overlay used to render the highlighted prompt as inline <span> tokens.
+  // Problem: `word-break: break-all` breaks across inline-box boundaries
+  // differently than across the <textarea>'s continuous plain text, so the span
+  // overlay wrapped into MORE visual lines than the textarea — every line below
+  // the divergence shifted, and clicks (which land on the transparent textarea)
+  // hit a different character than the glyph the user saw. Verified: the SAME text
+  // as a plain text node wraps identically to the textarea.
+  // Fix: keep the existing tokenizer, but project its span markup onto PLAIN text
+  // in the overlay and paint colours via the CSS Custom Highlight API (ranges add
+  // zero layout). Falls back to the old span markup when the API is unavailable.
+  const HIGHLIGHT_API = typeof Highlight !== 'undefined'
+    && typeof CSS !== 'undefined' && CSS && !!CSS.highlights;
+  let scratch = null;            // off-screen element; reuses format() to tokenize
+  let dynamicStyle = null;       // holds the generated ::highlight() rules
+  const registeredHighlightNames = [];
+
   function supports(nextMode = mode) {
     return SUPPORTED_MODES.has(nextMode);
   }
@@ -381,9 +397,120 @@ export function createPromptHighlighter({document, promptEdit, escHtml}) {
     }
   }
 
+  function ensureScratch() {
+    if (!scratch) {
+      scratch = document.createElement('div');
+      scratch.setAttribute('aria-hidden', 'true');
+      // Off-screen but IN the document so getComputedStyle resolves token colours
+      // from the cascade (.prompt-token-* / .nai-wt-* / .webui-* in style.css).
+      scratch.style.cssText = 'position:absolute;left:-99999px;top:0;width:1px;'
+        + 'height:1px;overflow:hidden;visibility:hidden;pointer-events:none;';
+    }
+    if (!scratch.isConnected && document.body) document.body.appendChild(scratch);
+    if (!dynamicStyle) {
+      dynamicStyle = document.createElement('style');
+      dynamicStyle.setAttribute('data-prompt-highlight', 'dynamic');
+      document.head.appendChild(dynamicStyle);
+    }
+  }
+
+  function clearCustomHighlights() {
+    if (!HIGHLIGHT_API) return;
+    for (const name of registeredHighlightNames) CSS.highlights.delete(name);
+    registeredHighlightNames.length = 0;
+    if (dynamicStyle) dynamicStyle.textContent = '';
+  }
+
+  // Reuse the existing span tokenizer, then re-express it as plain text + painted
+  // ranges so the overlay wraps exactly like the textarea (see note above).
+  function paintWithHighlights(value) {
+    ensureScratch();
+    scratch.innerHTML = format(value);
+    const walker = document.createTreeWalker(scratch, NodeFilter.SHOW_TEXT);
+    let plain = '';
+    const colorRanges = new Map();   // computed color   -> [[start,end], ...]
+    const bgRanges = new Map();      // computed bgColor  -> {depth, spans:[...]}
+    const styleCache = new Map();
+    const computed = (el) => {
+      let cs = styleCache.get(el);
+      if (!cs) { cs = getComputedStyle(el); styleCache.set(el, cs); }
+      return cs;
+    };
+    let node;
+    while ((node = walker.nextNode())) {
+      const start = plain.length;
+      plain += node.nodeValue;
+      const end = plain.length;
+      if (end === start) continue;
+      const parent = node.parentElement;
+      if (parent && parent !== scratch) {
+        const color = computed(parent).color;
+        if (color) {
+          let arr = colorRanges.get(color);
+          if (!arr) { arr = []; colorRanges.set(color, arr); }
+          arr.push([start, end]);
+        }
+        let el = parent;
+        let depth = 0;
+        while (el && el !== scratch) {
+          const bg = computed(el).backgroundColor;
+          if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+            let rec = bgRanges.get(bg);
+            if (!rec) { rec = {depth, spans: []}; bgRanges.set(bg, rec); }
+            rec.spans.push([start, end]);
+          }
+          el = el.parentElement;
+          depth += 1;
+        }
+      }
+    }
+    clearCustomHighlights();
+    // Plain text MUST equal the textarea value so wrapping (and the caret) match.
+    // If the tokenizer ever altered the text, fall back to span markup rather than
+    // desync the caret.
+    if (plain !== value) {
+      highlight.innerHTML = format(value);
+      return;
+    }
+    highlight.textContent = plain;
+    const textNode = highlight.firstChild;
+    if (!textNode) return;
+    const makeRange = (s, e) => {
+      const r = document.createRange();
+      r.setStart(textNode, s);
+      r.setEnd(textNode, e);
+      return r;
+    };
+    let css = '';
+    let ci = 0;
+    for (const [color, spans] of colorRanges) {
+      const name = 'naia-phc-' + ci;
+      ci += 1;
+      const h = new Highlight();
+      for (const [s, e] of spans) h.add(makeRange(s, e));
+      h.priority = 100;
+      CSS.highlights.set(name, h);
+      registeredHighlightNames.push(name);
+      css += `::highlight(${name}){color:${color};}`;
+    }
+    let bi = 0;
+    for (const [bg, rec] of bgRanges) {
+      const name = 'naia-phb-' + bi;
+      bi += 1;
+      const h = new Highlight();
+      for (const [s, e] of rec.spans) h.add(makeRange(s, e));
+      h.priority = rec.depth;   // nested group backgrounds composite by depth
+      CSS.highlights.set(name, h);
+      registeredHighlightNames.push(name);
+      css += `::highlight(${name}){background-color:${bg};}`;
+    }
+    if (dynamicStyle) dynamicStyle.textContent = css;
+  }
+
   function update() {
     if (!highlight || !supports()) return;
-    highlight.innerHTML = format(promptEdit.value);
+    if (HIGHLIGHT_API) paintWithHighlights(promptEdit.value);
+    else highlight.innerHTML = format(promptEdit.value);
     if (state !== 'disabled') syncScroll();
   }
 

@@ -638,7 +638,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize result context menu module', error);
   });
-const promptHighlighterReady = import('./js/features/promptHighlighter.mjs')
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260603-caret-align1')
   .then(({createPromptHighlighter}) => {
     promptHighlighter = createPromptHighlighter({
       document,

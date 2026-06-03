@@ -599,7 +599,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260602-grok7')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260603-director-ctx1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -626,6 +626,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onWebUiEnhance: context => requestResultEnhanceFromContext(context),
       onGrokI2I: context => { if (grokI2iModal) grokI2iModal.open(context); },
       onGrokI2V: context => { if (grokI2vModal) grokI2vModal.open(context); },
+      onDirector: context => openNaiDirector(context),
       onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       canUseDesktopImg2Img,
@@ -3913,13 +3914,28 @@ function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh();
 function updateNaiDirectorButton() {
   if (naiDirectorBtn) naiDirectorBtn.disabled = !naiConfigured;
 }
-async function openNaiDirector() {
+async function openNaiDirector(presetContext = null) {
   if (!naiConfigured) { showToast('NAI 계정이 등록되어 있지 않습니다 (API 설정 → NAI).', 'error'); return; }
   await naiDirectorModalReady;
   if (!naiDirectorModal) { showToast('Director 모듈을 불러오지 못했습니다.', 'error'); return; }
+  // Context-menu invocation passes the clicked image's context (already the director
+  // shape via mergeAssetContext) — augment exactly that image.
+  if (presetContext && presetContext.hasImage) {
+    naiDirectorModal.open(presetContext);
+    return;
+  }
+  // The [Director] button augments the CURRENTLY VIEWED image: a saved history item
+  // when one is shown on the viewer, otherwise the latest result. Previously it always
+  // fetched /api/result/asset/current (the latest), ignoring the viewed history item.
+  const preview = document.getElementById('preview');
+  const savedPath = preview && preview.dataset && preview.dataset.source === 'saved'
+    ? String(preview.dataset.path || '') : '';
   let asset = null;
   try {
-    const resp = await fetch('/api/result/asset/current', {cache: 'no-store'});
+    const url = savedPath
+      ? '/api/result/asset/saved?path=' + encodeURIComponent(savedPath)
+      : '/api/result/asset/current';
+    const resp = await fetch(url, {cache: 'no-store'});
     if (resp.ok) asset = await resp.json();
   } catch (error) { /* noop */ }
   if (!asset || !(asset.has_image ?? asset.hasImage)) {
@@ -3927,11 +3943,11 @@ async function openNaiDirector() {
     return;
   }
   naiDirectorModal.open({
-    source: 'current',
-    path: String(asset.path || ''),
+    source: String(asset.source || (savedPath ? 'saved' : 'current')),
+    path: String(asset.path || savedPath || ''),
     filePath: String(asset.file_path || asset.filePath || ''),
     label: String(asset.label || 'Result Image'),
-    imageSrc: String(asset.image_url || asset.imageUrl || '/api/latest-image'),
+    imageSrc: String(asset.image_url || asset.imageUrl || (savedPath ? '/api/viewer/image/' + encodeURI(savedPath) : '/api/latest-image')),
     hasImage: true,
   });
 }

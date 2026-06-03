@@ -15,6 +15,7 @@ const ACTION_DELETE_RESULT = 'delete_result';
 const ACTION_SET_DELETE_MODE = 'set_delete_mode';
 const ACTION_GROK_I2I = 'grok_i2i'; // Grok 변형 (제거 가능)
 const ACTION_GROK_I2V = 'grok_i2v'; // Grok 영상 (제거 가능)
+const ACTION_DIRECTOR = 'nai_director_tool'; // NAI Director Tools (제거 가능)
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -104,6 +105,7 @@ const MAIN_IMAGE_MENU = [
     modes: ['NAI'],
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
+      {label: 'Director Tools', action: ACTION_DIRECTOR, modes: ['NAI']},
       {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true, modes: ['NAI']},
       {label: 'Send to Inpaint', action: ACTION_IMAGE_ACTION, imageAction: 'inpaint', capability: 'inpaint', desktopImg2Img: true, modes: ['NAI']},
       {label: 'Instant Outpaint Request'},
@@ -161,6 +163,7 @@ const THUMBNAIL_MENU = [
     modes: ['NAI'],
     children: [
       {label: 'NAI 2x 업스케일', action: ACTION_UPSCALE_NAI, capability: 'upscale_nai', modes: ['NAI']},
+      {label: 'Director Tools', action: ACTION_DIRECTOR, modes: ['NAI']},
       {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true, modes: ['NAI']},
     ],
   },
@@ -195,6 +198,7 @@ export function createResultContextMenu({
   onWebUiEnhance = null,
   onGrokI2I = null,
   onGrokI2V = null,
+  onDirector = null,
   onDelete = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
@@ -350,6 +354,9 @@ export function createResultContextMenu({
     if (item.action === ACTION_GROK_I2V) {
       return typeof onGrokI2V === 'function' && Boolean(context?.hasImage)
         && (typeof isGrokReady === 'function' && isGrokReady());
+    }
+    if (item.action === ACTION_DIRECTOR) {
+      return typeof onDirector === 'function' && Boolean(context?.hasImage);
     }
     if (item.action === ACTION_DELETE_RESULT) {
       // capability 'delete'는 위에서 이미 검증됨 (백엔드 asset이 history item 존재 시 true).
@@ -601,6 +608,8 @@ export function createResultContextMenu({
           if (typeof onGrokI2I === 'function') onGrokI2I(context);
         } else if (action === ACTION_GROK_I2V) {
           if (typeof onGrokI2V === 'function') onGrokI2V(context);
+        } else if (action === ACTION_DIRECTOR) {
+          if (typeof onDirector === 'function') onDirector(context);
         } else if (action === ACTION_DELETE_RESULT) {
           if (typeof onDelete === 'function') onDelete(context, deleteMode);
         }

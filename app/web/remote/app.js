@@ -3292,6 +3292,23 @@ function closeWebuiCustomPayloadEditor() {
   if (btn) { try { btn.focus(); } catch (e) {} }
 }
 
+// If the user pasted a FULL WEBUI generation payload (top-level "alwayson_scripts"), return just
+// the alwayson_scripts object pretty-printed; otherwise null (already a fragment, or unparseable).
+// Mirrors Dev0714's converter — keep only the extension block, drop prompt/seed/width/etc.
+function reduceToAlwaysonScripts(text) {
+  const txt = (text || '').trim();
+  if (!txt) return null;
+  try {
+    const obj = JSON.parse(txt);
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)
+        && obj.alwayson_scripts && typeof obj.alwayson_scripts === 'object'
+        && !Array.isArray(obj.alwayson_scripts)) {
+      return JSON.stringify(obj.alwayson_scripts, null, 2);
+    }
+  } catch (e) {}
+  return null;
+}
+
 function applyWebuiCustomPayload() {
   const el = $('pWebuiCustomPayload');
   if (!el) return;
@@ -3299,6 +3316,12 @@ function applyWebuiCustomPayload() {
     showToast('WS 연결이 끊겨 적용할 수 없습니다.', 'error');
     return;
   }
+  // Paste-a-full-payload convenience: reduce the editor to just its alwayson_scripts block so the
+  // stored remote_param (and the next view) is the clean fragment, not the whole payload.
+  const original = el.value.trim();
+  const reduced = reduceToAlwaysonScripts(el.value);
+  const wasReduced = reduced !== null && reduced !== original;
+  if (reduced !== null) el.value = reduced;
   const info = validateWebuiCustomPayload();
   setParam('webui_custom_payload', el.value);
   _webuiCustomPayloadApplied = el.value;
@@ -3307,7 +3330,9 @@ function applyWebuiCustomPayload() {
   if (!txt) {
     showToast('Custom Payload를 비웠습니다.', 'success');
   } else if (info.valid) {
-    showToast(`Custom Payload 적용됨 · alwayson 스크립트 ${info.count}개`, 'success');
+    showToast(wasReduced
+      ? `전체 payload에서 alwayson_scripts ${info.count}개 추출·적용됨`
+      : `Custom Payload 적용됨 · alwayson 스크립트 ${info.count}개`, 'success');
   } else {
     // Backend _apply_custom_api_params runs _intelligent_json_corrector at generation time, so
     // an imperfect paste is still usable — commit it, but don't call it valid.

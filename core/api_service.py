@@ -1057,9 +1057,14 @@ class APIService:
             
             self._apply_webui_hires_params(payload, params, is_img2img=is_img2img)
             
-            # 🔥 개선된 커스텀 파라미터 처리
-            if params.get('use_custom_api_params', False):
-                self._apply_custom_api_params(payload, params)
+            # 🔥 WEBUI 전용 custom payload(alwayson_scripts) 주입.
+            # NAI 경로의 use_custom_api_params와 분리된 키라 WEBUI payload가 NAI 생성으로 새지 않는다.
+            # 값은 remote_params 경유(_normalized_params 병합)라 모든 생성 경로
+            # (수동/랜덤/auto-gen 연속/Event Preset/Studio/Result Enhance)에 동일하게 적용된다.
+            if params.get('webui_custom_payload_enabled'):
+                webui_custom = str(params.get('webui_custom_payload') or '').strip()
+                if webui_custom:
+                    self._apply_custom_api_params(payload, {'custom_api_params': webui_custom})
             
             print(f"📤 WEBUI API 요청 페이로드 요약:")
             print(f"   - 엔드포인트: {api_endpoint}")
@@ -1137,10 +1142,17 @@ class APIService:
                 print(f"   수정 시도한 텍스트: {corrected_text[:200]}...") # 디버깅을 위해 일부 출력
                 return
 
-        # 성공적으로 파싱된 경우 payload에 업데이트
+        # 성공적으로 파싱된 경우 payload에 업데이트.
+        # 두 가지 붙여넣기 형태를 모두 허용한다:
+        #   1) alwayson_scripts 조각만:  {"ControlNet": {"args": [...]}}
+        #   2) WEBUI 생성 결과의 전체 payload:  {"prompt": ..., "alwayson_scripts": {...}}
+        # 후자(전체 payload를 그대로 붙여넣은 경우)는 alwayson_scripts 블록만 취한다.
+        # NAIA가 prompt/seed/해상도 등을 소유하므로 top-level 필드는 덮어쓰지 않는다.
         if isinstance(custom_params, dict):
-            payload['alwayson_scripts'].update(custom_params)
-            print(f"✅ Custom API 파라미터 적용됨: {len(custom_params)}개 스크립트")
+            nested = custom_params.get('alwayson_scripts')
+            fragment = nested if isinstance(nested, dict) else custom_params
+            payload['alwayson_scripts'].update(fragment)
+            print(f"✅ Custom API 파라미터 적용됨: {len(fragment)}개 스크립트")
 
     def _intelligent_json_corrector(self, text: str) -> str:
         """

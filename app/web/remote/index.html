@@ -529,6 +529,16 @@
                 <input class="param-input" id="pHrCfg" type="number" step="0.1" min="0" max="30" value="7" onchange="setParam('hr_cfg',this.value)">
               </div>
               </div>
+              <div class="param-row webui-custom-payload-row">
+                <span class="param-label" title="WEBUI 확장(ControlNet/ADetailer 등)의 alwayson_scripts를 매 생성에 주입합니다. 사용자가 WEBUI에서 생성한 결과의 payload를 붙여넣으세요.">Custom Payload</span>
+                <input type="checkbox" class="param-check" id="pWebuiCustomEnable" onchange="setWebuiCustomPayloadEnabled(this.checked)">
+              </div>
+              <div class="webui-custom-payload-body" id="webuiCustomPayloadBody" style="display:none">
+                <textarea id="pWebuiCustomPayload" class="webui-custom-payload-text mod-textarea" rows="6" spellcheck="false"
+                          placeholder='WEBUI 생성 결과의 alwayson_scripts JSON을 붙여넣으세요. 예: {"ControlNet": {"args": [ ... ]}} — 생성 payload 전체를 붙여넣어도 alwayson_scripts만 사용합니다.'
+                          oninput="onWebuiCustomPayloadInput()" onchange="onWebuiCustomPayloadChange()"></textarea>
+                <div class="webui-custom-payload-hint" id="webuiCustomPayloadHint"></div>
+              </div>
             </div>
             <!-- ComfyUI controls -->
             <div class="mode-comfyui" id="comfyuiParams" style="display:none">
@@ -1046,6 +1056,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260604-img2img-autocomplete1"></script>
+<script src="app.js?v=20260604-webui-custompayload3"></script>
 </body>
 </html>

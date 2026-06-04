@@ -9240,6 +9240,31 @@ body.resizing-result-info {
   /* 스크롤바 폭 보정 (내부 행이 살짝 끼이지 않도록) */
   scrollbar-gutter: stable;
 }
+
+/* WEBUI Custom Payload (alwayson_scripts) editor */
+.webui-custom-payload-row { margin-top: 2px; }
+.webui-custom-payload-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 2px;
+}
+.webui-custom-payload-text {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 96px;
+  resize: vertical;
+  font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.webui-custom-payload-hint {
+  font-size: 11px;
+  color: var(--text-dim, #8a8a8a);
+  min-height: 14px;
+}
+.webui-custom-payload-hint.ok { color: #5fb87a; }
+.webui-custom-payload-hint.warn { color: #d6a23a; }
 /* Preset Swap 행 — select 와 Edit 버튼을 함께 배치 */
 .webui-hires-preset-control {
   display: flex;

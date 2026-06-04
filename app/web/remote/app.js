@@ -1211,6 +1211,11 @@ function _collectCurrentParams() {
       p.random_prompt_weight = promptWeight;
     }
     Object.assign(p, collectWebUiHiresfixAssistOverrides(mode));
+    const webuiCustomEnable = $('pWebuiCustomEnable');
+    const webuiCustomPayload = ($('pWebuiCustomPayload')?.value || '').trim();
+    const webuiCustomOn = !!(webuiCustomEnable && webuiCustomEnable.checked && webuiCustomPayload);
+    p.webui_custom_payload_enabled = webuiCustomOn;
+    if (webuiCustomOn) p.webui_custom_payload = webuiCustomPayload;
   }
 
   if (mode === 'COMFYUI') {
@@ -3118,6 +3123,17 @@ function updateParams(m) {
     if ('denoising_strength' in m) $('pDenoise').value = m.denoising_strength;
     if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
     if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
+    // WEBUI Custom Payload editor — restore from backend remote_params (per-mode plane)
+    const customPayloadEl = $('pWebuiCustomPayload');
+    if (customPayloadEl && 'webui_custom_payload' in m) customPayloadEl.value = m.webui_custom_payload || '';
+    const customPayloadCb = $('pWebuiCustomEnable');
+    if (customPayloadCb && 'webui_custom_payload_enabled' in m) {
+      const customOn = (m.webui_custom_payload_enabled === true || String(m.webui_custom_payload_enabled).toLowerCase() === 'true');
+      customPayloadCb.checked = customOn;
+      const customBody = $('webuiCustomPayloadBody');
+      if (customBody) customBody.style.display = customOn ? '' : 'none';
+    }
+    validateWebuiCustomPayload();
     if ('hires_preset_swap' in m) {
       _hiresPresetSwapValue = String(m.hires_preset_swap || '').trim();
       _hiresPresetSwapValueKnown = true;
@@ -3231,6 +3247,56 @@ function setSamplingMode(mode) {
   setParam('sampling_mode', mode);
   updateModuleHeaderAction(currentModuleId);
 }
+
+// --- WEBUI Custom Payload (alwayson_scripts) -------------------------------
+// Paste a WEBUI generation's payload (or just its alwayson_scripts block) to inject user
+// extensions (ControlNet/ADetailer/...) into every generation. The captured payload comes
+// from the user's WEBUI side (the api-payload extension / a fork); NAIA only accepts it
+// here and merges it into alwayson_scripts.
+//
+// Stored in backend remote_params under WEBUI-SPECIFIC keys (webui_custom_payload /
+// webui_custom_payload_enabled) so EVERY generation path injects it — manual, random,
+// auto-gen continuation, Event Preset, Studio, Result Enhance all merge remote_params via
+// _normalized_params — while the NAI path (which reads the separate use_custom_api_params)
+// can never receive it. The editor is restored from the schema broadcast (per-mode plane),
+// like the WEBUI hires params; no localStorage (which previously caused a clobber).
+function setWebuiCustomPayloadEnabled(on) {
+  const body = $('webuiCustomPayloadBody');
+  if (body) body.style.display = on ? '' : 'none';
+  setParam('webui_custom_payload_enabled', String(!!on));
+  validateWebuiCustomPayload();
+}
+
+function onWebuiCustomPayloadInput() {
+  validateWebuiCustomPayload();
+}
+
+function onWebuiCustomPayloadChange() {
+  const el = $('pWebuiCustomPayload');
+  if (!el) return;
+  setParam('webui_custom_payload', el.value);
+  validateWebuiCustomPayload();
+}
+
+function validateWebuiCustomPayload() {
+  const hint = $('webuiCustomPayloadHint');
+  const el = $('pWebuiCustomPayload');
+  if (!hint || !el) return;
+  const txt = (el.value || '').trim();
+  if (!txt) { hint.textContent = ''; hint.className = 'webui-custom-payload-hint'; return; }
+  try {
+    const obj = JSON.parse(txt);
+    const block = (obj && typeof obj === 'object' && obj.alwayson_scripts && typeof obj.alwayson_scripts === 'object')
+      ? obj.alwayson_scripts : obj;
+    const n = (block && typeof block === 'object' && !Array.isArray(block)) ? Object.keys(block).length : 0;
+    hint.textContent = `유효한 JSON · alwayson 스크립트 ${n}개`;
+    hint.className = 'webui-custom-payload-hint ok';
+  } catch (e) {
+    hint.textContent = 'JSON 형식 오류 — 생성 시 자동 교정을 시도합니다';
+    hint.className = 'webui-custom-payload-hint warn';
+  }
+}
+
 
 function getComfyUiWorkflowFileInput({free = false} = {}) {
   const existing = free ? comfyuiFreeWorkflowFileInput : comfyuiWorkflowFileInput;

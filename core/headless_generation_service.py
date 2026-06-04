@@ -384,6 +384,7 @@ class HeadlessGenerationService:
             "wildcard_standalone",
             "enable_hr",
             "webui_hiresfix_assist",
+            "webui_custom_payload_enabled",
         ):
             if key in params:
                 params[key] = self._to_bool(params.get(key))

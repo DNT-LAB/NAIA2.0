@@ -23,6 +23,7 @@ REMOTE_BOOLEAN_PARAMS = {
     "resolution_preset_enabled",
     "webui_hiresfix_assist",
     "webui_hiresfix_assist_enabled",
+    "webui_custom_payload_enabled",
     "SMEA",
     "DYN",
     "VAR+",

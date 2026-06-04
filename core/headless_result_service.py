@@ -67,6 +67,12 @@ class HeadlessResultStore:
         webp_bytes = self._image_to_webp(image)
         params = dict(getattr(request, "params", {}) or {})
         params.pop("credential", None)
+        # WEBUI custom payload is a LIVE editor/session setting (remote_params), not a per-image
+        # baked param. Never persist it into a stored result, so EVERY replay path (Result Enhance,
+        # history replay/reopen, queue 'original', and any future one) injects the user's CURRENT
+        # payload from remote_params instead of resurrecting a stale enabled/disabled state.
+        params.pop("webui_custom_payload", None)
+        params.pop("webui_custom_payload_enabled", None)
         # NOTE: input image/mask bytes (image_bytes/mask_bytes/init_image_bytes/...) are KEPT here
         # on purpose. "큐 앞/뒤에 추가 → 원본 프롬프트 유지"(queue_mode='original') replays the stored
         # params directly, and APIService picks img2img/inpaint from those byte fields. Stripping them

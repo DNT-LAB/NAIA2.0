@@ -200,14 +200,15 @@ def embed_webui_parameters(raw_bytes: Any, info: Any) -> Any:
     """Bake the WebUI infotext into a PNG ``parameters`` text chunk when it is absent.
 
     forge/A1111 returns the infotext only in the API response's ``info`` field; the
-    base64 image it sends back frequently carries NO ``parameters`` chunk (forge bakes
-    that in only when *it* writes the file to disk). A NAIA-saved WEBUI image is the raw
-    API bytes, so without this it has no metadata at all. We add the chunk so a
-    NAIA-saved WEBUI PNG matches a forge-saved one (and the metadata viewer / re-import
-    can read prompt, seed, ADetailer/ControlNet args, etc.). If the image already has a
-    non-empty ``parameters`` chunk we return the original bytes untouched (forge baked it
-    in). NAI/ComfyUI never reach here — only ``_call_webui_api`` sets ``generation_info``.
-    Any failure returns the input bytes unchanged.
+    image bytes it sends back carry NO ``parameters`` chunk. Crucially forge-neo returns
+    the image as **WEBP** (which can't hold A1111 text metadata at all), and NAIA re-saves
+    WEBUI results as PNG anyway — that re-encode previously dropped everything. So here we
+    re-encode the image to PNG and bake the infotext into a ``parameters`` text chunk,
+    regardless of the inbound format (WEBP/JPEG/PNG). The result is a PNG whose metadata a
+    forge "PNG Info" tab / the NAIA viewer can read (prompt, seed, ADetailer/ControlNet).
+    A PNG that already carries a non-empty ``parameters`` chunk is returned untouched
+    (forge baked it in). NAI/ComfyUI never reach here — only ``_call_webui_api`` sets
+    ``generation_info``. Any failure returns the input bytes unchanged.
     """
     if not raw_bytes:
         return raw_bytes
@@ -221,19 +222,22 @@ def embed_webui_parameters(raw_bytes: Any, info: Any) -> Any:
 
         data = bytes(raw_bytes)
         with Image.open(io.BytesIO(data)) as img:
-            if (img.format or "").upper() != "PNG":
-                return data
+            fmt = (img.format or "").upper()
             existing = dict(img.info or {})
             current = existing.get("parameters")
-            if isinstance(current, str) and current.strip():
+            # A PNG forge already stamped with a parameters chunk — keep its bytes verbatim.
+            if fmt == "PNG" and isinstance(current, str) and current.strip():
                 return data
             pnginfo = PngImagePlugin.PngInfo()
             for key, value in existing.items():
                 if isinstance(key, str) and isinstance(value, str) and key != "parameters":
                     pnginfo.add_text(key, value)
             pnginfo.add_text("parameters", infotext)
+            # forge-neo sends WEBP; re-encode to PNG with the chunk (NAIA saves WEBUI as PNG
+            # anyway, so this is the same single re-encode, just metadata-preserving now).
+            out = img if img.mode in ("RGB", "RGBA", "L", "P") else img.convert("RGB")
             buffer = io.BytesIO()
-            img.save(buffer, format="PNG", pnginfo=pnginfo)
+            out.save(buffer, format="PNG", pnginfo=pnginfo)
             return buffer.getvalue()
     except Exception:
         return raw_bytes

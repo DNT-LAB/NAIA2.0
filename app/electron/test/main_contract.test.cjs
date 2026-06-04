@@ -29,19 +29,31 @@ function loadMain({
   isPackaged = false,
   resourcesPath,
   spawnImpl,
+  cliSwitches = [],
+  argv = [],
 } = {}) {
   const source = fs.readFileSync(MAIN_PATH, "utf8");
   const opened = [];
   const menuCalls = [];
   const app = {
     isPackaged,
+    paths: {},
     commandLine: {
       switches: [],
       appendSwitch(name, value) {
         this.switches.push([name, value]);
       },
+      hasSwitch(name) {
+        return cliSwitches.includes(name);
+      },
+    },
+    setPath(name, value) {
+      this.paths[name] = value;
     },
     getPath(name) {
+      if (this.paths[name]) {
+        return this.paths[name];
+      }
       if (name === "appData") {
         return appData || path.join(os.tmpdir(), "naia-appdata");
       }
@@ -91,6 +103,7 @@ function loadMain({
     env: { ...process.env, ...env },
     platform: process.platform,
     resourcesPath: resourcesPath || process.resourcesPath,
+    argv: ["node", MAIN_PATH, ...argv],
   };
 
   const sandbox = {
@@ -199,6 +212,59 @@ test("findFreePort returns the first port that is not in use", async () => {
     assert.equal(free > taken && free <= taken + 8, true);
   } finally {
     await new Promise((resolve) => blocker.close(resolve));
+  }
+});
+
+test("electron userData is install-local so separate install dirs get independent locks", () => {
+  // Multi-instance contract: the single-instance lock + persist:danbooru session live under
+  // Electron's userData. Pointing it at <runtimeDataRoot>/electron makes each install directory
+  // its own lock, so separate-directory portable copies run simultaneously (no launcher needed).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "naia-electron-userdata-"));
+  try {
+    const { api, app } = loadMain({ env: { NAIA_USER_DATA_DIR: root } });
+    const expected = path.join(root, "electron");
+    assert.equal(api.electronUserDataDir(), expected);
+    assert.equal(app.paths.userData, expected); // setPath ran at module load, before the lock
+    assert.equal(fs.existsSync(expected), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("packaged portable isolates per install dir: danbooru/lock under electron, NAI token under user-data", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "naia-electron-portable-userdata-"));
+  try {
+    const exePath = path.join(root, "NAIA.exe");
+    mkdirp(path.join(root, "user-data")); // portableUserDataRoot() requires it to exist
+    const { app, api } = loadMain({ isPackaged: true, exePath, env: { NAIA_USER_DATA_DIR: "" } });
+    // danbooru session (persist:danbooru/Partitions) + the single-instance lock live under
+    // Electron's userData — the `electron` subfolder, so separate install dirs do NOT share login.
+    assert.equal(app.paths.userData, path.join(root, "user-data", "electron"));
+    // The backend (NAI token at config/secure_tokens.json) stays at the PARENT user-data, NOT the
+    // electron subfolder: the Electron-userData move must never redirect the backend token store.
+    // Net: a different install directory isolates BOTH danbooru and the NAI token.
+    assert.equal(api.backendEnvironment(root).NAIA_USER_DATA_DIR, path.join(root, "user-data"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit --user-data-dir (launcher / manual override) is honored over the install-local default", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "naia-electron-udd-"));
+  try {
+    // argv form: manual `NAIA.exe --user-data-dir=...` or the clone test.
+    const viaArgv = loadMain({
+      env: { NAIA_USER_DATA_DIR: root },
+      argv: ["--user-data-dir=" + path.join(root, "explicit")],
+    });
+    assert.equal(viaArgv.api.userDataDirSwitchPresent(), true);
+    assert.equal(viaArgv.app.paths.userData, undefined); // setPath NOT called — the switch wins
+    // commandLine.hasSwitch form: the same-folder launcher tools/launch_naia_instance.ps1.
+    const viaSwitch = loadMain({ env: { NAIA_USER_DATA_DIR: root }, cliSwitches: ["user-data-dir"] });
+    assert.equal(viaSwitch.api.userDataDirSwitchPresent(), true);
+    assert.equal(viaSwitch.app.paths.userData, undefined);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

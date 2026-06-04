@@ -2313,6 +2313,46 @@ ipcMain.handle("naia:grok-login", async () => {
 
 configureRemoteDebugging();
 
+// Make Electron's own userData install-local so SEPARATE-DIRECTORY portable copies run as
+// independent instances. The single-instance lock (below) and the persist:danbooru session
+// both live under userData; by default that is the global %APPDATA%/<productName>, so every
+// copy shares one lock and the 2nd launch just focuses the 1st window and quits. Pointing
+// userData at <install>/user-data/electron (the same install-local root the backend already
+// uses via runtimeDataRoot()) gives each install its own lock — no launcher needed.
+function userDataDirSwitchPresent() {
+  // An explicit --user-data-dir (the same-folder launcher tools/launch_naia_instance.ps1, or a
+  // manual override) wins — setPath would otherwise clobber that switch. Detect it both via the
+  // Electron commandLine API and raw argv so it is robust regardless of how it was passed.
+  if (app.commandLine && typeof app.commandLine.hasSwitch === "function" && app.commandLine.hasSwitch("user-data-dir")) {
+    return true;
+  }
+  const argv = Array.isArray(process.argv) ? process.argv : [];
+  return argv.some((arg) => arg === "--user-data-dir" || arg.startsWith("--user-data-dir="));
+}
+
+function electronUserDataDir() {
+  return path.join(runtimeDataRoot(), "electron");
+}
+
+// Must run BEFORE requestSingleInstanceLock() so the lock is keyed on the final userData path.
+function applyInstallLocalUserData() {
+  try {
+    if (userDataDirSwitchPresent() || typeof app.setPath !== "function") {
+      return null;
+    }
+    const target = electronUserDataDir();
+    fs.mkdirSync(target, { recursive: true });
+    app.setPath("userData", target);
+    return target;
+  } catch (error) {
+    // Install dir not writable (e.g. Program Files) — fall back to the default userData.
+    appendBackendLog("shell", `userData override skipped: ${error && error.message}`);
+    return null;
+  }
+}
+
+applyInstallLocalUserData();
+
 const lock = app.requestSingleInstanceLock();
 if (!lock) {
   app.quit();
@@ -2401,6 +2441,9 @@ module.exports.__test = {
   removePythonRuntimeBytecode,
   resourcesRoot,
   runtimeDataRoot,
+  electronUserDataDir,
+  userDataDirSwitchPresent,
+  applyInstallLocalUserData,
   runtimeEnvMarker,
   runtimeEnvPython,
   runtimeEnvReady,

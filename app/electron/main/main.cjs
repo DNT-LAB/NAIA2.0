@@ -1790,7 +1790,21 @@ function createMainWindow() {
     },
   });
 
-  mainWindow.once("ready-to-show", () => mainWindow.show());
+  // Show on first paint, but ALSO show on the first did-finish-load as a fallback:
+  // applying the persisted zoom factor (below) can suppress the `ready-to-show` signal
+  // on some GPU/compositor states, which would otherwise leave the window invisible
+  // forever (the v2.0.18 "window never shows" regression). Never rely on ready-to-show
+  // alone to make the window visible.
+  const showMainWindowOnce = () => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  };
+  mainWindow.once("ready-to-show", showMainWindowOnce);
+  mainWindow.webContents.once("did-finish-load", showMainWindowOnce);
+  mainWindow.webContents.once("dom-ready", showMainWindowOnce);
+  // Ultimate guard: if neither paint nor load event reveals the window, force it.
+  setTimeout(showMainWindowOnce, 2000);
   mainWindow.on("closed", () => {
     danbooruView = null;
     danbooruViewAttached = false;
@@ -1806,7 +1820,10 @@ function createMainWindow() {
   // navigation) and wire Ctrl+= / Ctrl+- / Ctrl+0. Pinch/visual zoom is intentionally
   // left disabled so zoom stays within the 5 discrete levels and never reaches the
   // mobile-layout breakpoint.
-  mainWindow.webContents.on("did-finish-load", () => applyMainWindowZoom());
+  // The setZoomFactor call is DEFERRED to a later tick: running it inside the
+  // did-finish-load paint path suppressed `ready-to-show` and left the window invisible
+  // (v2.0.18 regression). Deferring lets the first frame paint + show before we zoom.
+  mainWindow.webContents.on("did-finish-load", () => setTimeout(() => applyMainWindowZoom(), 0));
   attachZoomKeyboard(mainWindow);
 
   loadMaintenance("loading", "Starting NAIA backend...");
@@ -2478,6 +2495,9 @@ if (!lock) {
 } else {
   app.on("second-instance", () => {
     if (mainWindow) {
+      if (!mainWindow.isVisible()) {
+        mainWindow.show();
+      }
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
       }

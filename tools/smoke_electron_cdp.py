@@ -1188,6 +1188,7 @@ def _collect_runtime_checks(
 
 def _runtime_check_violations(checks: dict[str, Any]) -> list[dict[str, str]]:
     expected_true = [
+        ("checks.windowVisible.visible", checks.get("windowVisible", {}).get("visible")),
         ("checks.window.meetsMinimum", checks.get("window", {}).get("meetsMinimum")),
         ("checks.browserApis.websocket", checks.get("browserApis", {}).get("websocket")),
         ("checks.browserApis.clipboard", checks.get("browserApis", {}).get("clipboard")),
@@ -1278,6 +1279,64 @@ def _terminate(proc: subprocess.Popen) -> None:
             pass
 
 
+def _verify_window_visible(proc: subprocess.Popen, timeout: float) -> dict[str, Any]:
+    """Assert the Electron process actually has a VISIBLE titled top-level OS window.
+
+    A CDP page target + backendState==ready is NOT proof of a visible window: the v2.0.19
+    regression had a live renderer (CDP saw the page) and a working backend, but the
+    BrowserWindow was never shown (a zoom side-effect suppressed `ready-to-show`), so the
+    OS had no visible HWND. This check polls the win32 window list for a visible, titled
+    top-level window owned by the Electron process (or its children). Windows-only;
+    conservatively reports visible=True on non-Windows or any API error so a check bug
+    never blocks the gate — only a genuinely hidden window fails it.
+    """
+    result: dict[str, Any] = {"visible": False, "windowCount": 0, "pids": [], "reason": ""}
+    if os.name != "nt":
+        result["visible"] = True
+        result["reason"] = "non-windows: skipped"
+        return result
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        target_pids = {int(proc.pid)}
+        try:
+            import psutil
+
+            for child in psutil.Process(proc.pid).children(recursive=True):
+                target_pids.add(int(child.pid))
+        except Exception:
+            pass
+        result["pids"] = sorted(target_pids)
+        found: list[int] = []
+
+        @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+        def _enum(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            pid = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value in target_pids and user32.GetWindowTextLengthW(hwnd) > 0:
+                found.append(int(hwnd))
+                return False
+            return True
+
+        deadline = time.monotonic() + min(max(5.0, timeout), 30.0)
+        while time.monotonic() < deadline and not found:
+            user32.EnumWindows(_enum, 0)
+            if not found:
+                time.sleep(0.5)
+        result["windowCount"] = len(found)
+        result["visible"] = bool(found)
+        if not found:
+            result["reason"] = "no visible titled top-level window owned by the Electron process(es)"
+    except Exception as exc:
+        result["visible"] = True
+        result["reason"] = f"check-error (not failing gate): {type(exc).__name__}: {exc}"
+    return result
+
+
 def smoke_electron_cdp(
     *,
     mode: str,
@@ -1348,6 +1407,9 @@ def smoke_electron_cdp(
                     skip_download=skip_download,
                     skip_restart=skip_restart,
                 )
+                # OS window visibility — a CDP page target is not proof of a visible window
+                # (the v2.0.19 hidden-window regression). Assert a real visible HWND.
+                checks["windowVisible"] = _verify_window_visible(proc, timeout)
                 timings["runtime_checks_s"] = round(time.monotonic() - checks_started, 3)
                 timings["total_s"] = round(time.monotonic() - started, 3)
                 violations = _runtime_check_violations(checks)

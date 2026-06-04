@@ -1661,6 +1661,118 @@ function expandMainWindowForApp() {
   mainWindow.center();
 }
 
+// --- Renderer zoom (browser-style Ctrl+wheel / Ctrl+± / Ctrl+0) -------------
+// Electron has no browser chrome, so Ctrl+wheel zoom must be wired up by hand. The
+// main window's factor is persisted (per-instance, under userData) and re-applied on
+// every load since zoom resets on navigation. Other webContents (popup) zoom transiently.
+// Limited to 5 discrete levels — the default (1.0) ±2 steps. Zooming in any further
+// shrinks the CSS viewport past the responsive breakpoint and flips the app into its
+// mobile layout, so the range is intentionally narrow.
+const ZOOM_DEFAULT = 1.0;
+const ZOOM_STEP = 0.1;
+const ZOOM_MIN = ZOOM_DEFAULT - 2 * ZOOM_STEP; // 0.8
+const ZOOM_MAX = ZOOM_DEFAULT + 2 * ZOOM_STEP; // 1.2
+let zoomFactorCache = null;
+
+function zoomConfigPath() {
+  try {
+    return path.join(app.getPath("userData"), "naia-zoom.json");
+  } catch (_error) {
+    return null;
+  }
+}
+
+function clampZoom(factor) {
+  if (!Number.isFinite(factor)) return 1.0;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(factor * 100) / 100));
+}
+
+function loadZoomFactor() {
+  if (zoomFactorCache !== null) return zoomFactorCache;
+  let factor = 1.0;
+  try {
+    const configPath = zoomConfigPath();
+    if (configPath && fs.existsSync(configPath)) {
+      const raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      const parsed = Number(raw && raw.zoomFactor);
+      if (Number.isFinite(parsed)) factor = clampZoom(parsed);
+    }
+  } catch (_error) {}
+  zoomFactorCache = factor;
+  return factor;
+}
+
+function saveZoomFactor(factor) {
+  zoomFactorCache = factor;
+  try {
+    const configPath = zoomConfigPath();
+    if (configPath) fs.writeFileSync(configPath, JSON.stringify({ zoomFactor: factor }), "utf8");
+  } catch (_error) {}
+}
+
+function isMainWebContents(webContents) {
+  return Boolean(
+    mainWindow && !mainWindow.isDestroyed() && webContents === mainWindow.webContents
+  );
+}
+
+function applyMainWindowZoom() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.setZoomFactor(loadZoomFactor());
+  } catch (_error) {}
+}
+
+function adjustZoom(webContents, direction) {
+  if (!webContents || webContents.isDestroyed() || !direction) return;
+  const main = isMainWebContents(webContents);
+  let current;
+  try {
+    current = webContents.getZoomFactor();
+  } catch (_error) {
+    current = main ? loadZoomFactor() : 1.0;
+  }
+  const next = clampZoom(current + (direction > 0 ? ZOOM_STEP : -ZOOM_STEP));
+  try {
+    webContents.setZoomFactor(next);
+  } catch (_error) {}
+  if (main) saveZoomFactor(next);
+}
+
+function resetZoom(webContents) {
+  if (!webContents || webContents.isDestroyed()) return;
+  try {
+    webContents.setZoomFactor(1.0);
+  } catch (_error) {}
+  if (isMainWebContents(webContents)) saveZoomFactor(1.0);
+}
+
+ipcMain.on("naia:zoom-by", (event, direction) => {
+  const dir = Number(direction);
+  if (!Number.isFinite(dir) || dir === 0) return;
+  adjustZoom(event.sender, dir > 0 ? 1 : -1);
+});
+
+ipcMain.on("naia:zoom-reset", (event) => resetZoom(event.sender));
+
+// Browser-style Ctrl+± / Ctrl+0 keyboard zoom for the main app window.
+function attachZoomKeyboard(targetWindow) {
+  targetWindow.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || !(input.control || input.meta)) return;
+    const key = String(input.key || "");
+    if (key === "+" || key === "=" || key === "Add") {
+      adjustZoom(targetWindow.webContents, 1);
+      event.preventDefault();
+    } else if (key === "-" || key === "Subtract") {
+      adjustZoom(targetWindow.webContents, -1);
+      event.preventDefault();
+    } else if (key === "0") {
+      resetZoom(targetWindow.webContents);
+      event.preventDefault();
+    }
+  });
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: STARTUP_WINDOW_BOUNDS.width,
@@ -1689,6 +1801,13 @@ function createMainWindow() {
   // the native child view — so detach it here too (no-op when unattached).
   mainWindow.webContents.on("did-start-loading", () => detachDanbooruView());
   configurePopupHandling(mainWindow);
+
+  // Browser-style zoom: re-apply the saved factor on every load (zoom resets on
+  // navigation) and wire Ctrl+= / Ctrl+- / Ctrl+0. Pinch/visual zoom is intentionally
+  // left disabled so zoom stays within the 5 discrete levels and never reaches the
+  // mobile-layout breakpoint.
+  mainWindow.webContents.on("did-finish-load", () => applyMainWindowZoom());
+  attachZoomKeyboard(mainWindow);
 
   loadMaintenance("loading", "Starting NAIA backend...");
 

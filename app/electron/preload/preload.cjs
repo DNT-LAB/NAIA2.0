@@ -61,3 +61,18 @@ contextBridge.exposeInMainWorld("naiaShell", {
     return () => ipcRenderer.removeListener("naia:grok-state-changed", listener);
   },
 });
+
+// Browser-style Ctrl + mouse-wheel zoom for the NAIA app (the Electron shell has no
+// browser chrome to provide it). Captured before any grid wheel-paginators so a
+// Ctrl+scroll only zooms — it never falls through to page navigation. The main process
+// applies and persists the zoom factor (see naia:zoom-by).
+window.addEventListener(
+  "wheel",
+  (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    ipcRenderer.send("naia:zoom-by", event.deltaY < 0 ? 1 : -1);
+  },
+  { passive: false, capture: true }
+);

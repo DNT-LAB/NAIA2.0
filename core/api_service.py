@@ -1096,12 +1096,26 @@ class APIService:
                 image = Image.open(io.BytesIO(image_data))
                 
                 info_text = result.get('info', '')
-                if info_text:
-                    print(f"📋 WEBUI 생성 정보: {info_text[:100]}...")
-                
+                # forge-neo / some forks return an empty or unreadable `info`, which would
+                # leave the saved PNG with no metadata at all. If forge gives us nothing
+                # readable, reconstruct an A1111-style infotext from the payload we just
+                # sent (prompt/params + ADetailer/ControlNet summary) so the image always
+                # carries metadata and the user can confirm what was dispatched.
+                from utils.webui_generation_info import (
+                    build_webui_infotext_from_payload,
+                    extract_webui_infotext,
+                    extract_webui_seed,
+                )
+                if extract_webui_infotext(info_text):
+                    print(f"📋 WEBUI 생성 정보(forge): {str(info_text)[:100]}...")
+                else:
+                    actual_seed = extract_webui_seed(info_text)
+                    info_text = build_webui_infotext_from_payload(payload, actual_seed)
+                    print(f"📋 WEBUI info 비어있음 → payload에서 메타데이터 재구성 ({len(info_text)}자)")
+
                 return {
-                    'status': 'success', 
-                    'image': image, 
+                    'status': 'success',
+                    'image': image,
                     'raw_bytes': image_data,
                     'generation_info': info_text
                 }

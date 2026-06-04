@@ -122,6 +122,80 @@ def extract_webui_infotext(value: Any) -> str:
     return ""
 
 
+def _alwayson_summary(alwayson: Any) -> list[str]:
+    """Infotext fragments summarising the requested alwayson scripts (ADetailer/ControlNet)."""
+    out: list[str] = []
+    if not isinstance(alwayson, Mapping):
+        return out
+    adetailer = alwayson.get("ADetailer")
+    if isinstance(adetailer, Mapping):
+        args = adetailer.get("args") or []
+        # forge ADetailer args: [enabled, skip_img2img, unit1{...}, unit2{...}, ...]
+        if isinstance(args, Sequence) and not isinstance(args, (str, bytes)) and args and args[0]:
+            for unit in args:
+                if not isinstance(unit, Mapping):
+                    continue
+                model = str(unit.get("ad_model") or "").strip()
+                if not model or model.lower() == "none":
+                    continue
+                out.append(f"ADetailer model: {model}")
+                if unit.get("ad_confidence") is not None:
+                    out.append(f"ADetailer confidence: {unit.get('ad_confidence')}")
+                if unit.get("ad_denoising_strength") is not None:
+                    out.append(f"ADetailer denoising strength: {unit.get('ad_denoising_strength')}")
+                break  # first active unit is enough to confirm ADetailer was requested
+    controlnet = alwayson.get("ControlNet")
+    if isinstance(controlnet, Mapping):
+        args = controlnet.get("args") or []
+        if isinstance(args, Sequence) and not isinstance(args, (str, bytes)):
+            active = sum(1 for u in args if isinstance(u, Mapping) and u.get("enabled"))
+            if active:
+                out.append(f"ControlNet units active: {active}")
+    return out
+
+
+def build_webui_infotext_from_payload(payload: Any, actual_seed: Any = None) -> str:
+    """Reconstruct an A1111-style ``parameters`` infotext from the request payload.
+
+    Some forge forks (forge-neo/reForge) return an empty or unreadable ``info`` field
+    from ``/sdapi/v1/txt2img``, so a NAIA-saved image would have no metadata at all. When
+    that happens we rebuild the infotext from exactly what NAIA sent (prompt, core params,
+    and a summary of the requested alwayson scripts such as ADetailer), so the saved PNG
+    is never metadata-less and the user can see ADetailer/ControlNet were dispatched.
+    """
+    if not isinstance(payload, Mapping):
+        return ""
+    pos = str(payload.get("prompt") or "").strip()
+    neg = str(payload.get("negative_prompt") or "").strip()
+    seed = actual_seed if actual_seed is not None else payload.get("seed")
+    parts: list[str] = []
+    if payload.get("steps") is not None:
+        parts.append(f"Steps: {payload.get('steps')}")
+    sampler = payload.get("sampler_name") or payload.get("sampler")
+    if sampler:
+        parts.append(f"Sampler: {sampler}")
+    if payload.get("scheduler"):
+        parts.append(f"Schedule type: {payload.get('scheduler')}")
+    if payload.get("cfg_scale") is not None:
+        parts.append(f"CFG scale: {payload.get('cfg_scale')}")
+    if seed is not None:
+        parts.append(f"Seed: {seed}")
+    width, height = payload.get("width"), payload.get("height")
+    if width and height:
+        parts.append(f"Size: {width}x{height}")
+    override = payload.get("override_settings")
+    model = str(override.get("sd_model_checkpoint") or "").strip() if isinstance(override, Mapping) else ""
+    if model:
+        parts.append(f"Model: {model}")
+    parts.extend(_alwayson_summary(payload.get("alwayson_scripts")))
+    lines = [pos]
+    if neg:
+        lines.append(f"Negative prompt: {neg}")
+    if parts:
+        lines.append(", ".join(str(part) for part in parts))
+    return "\n".join(lines)
+
+
 def embed_webui_parameters(raw_bytes: Any, info: Any) -> Any:
     """Bake the WebUI infotext into a PNG ``parameters`` text chunk when it is absent.
 

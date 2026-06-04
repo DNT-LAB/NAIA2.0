@@ -64,6 +64,15 @@ class HeadlessResultStore:
     def add_api_result(self, api_result: dict[str, Any], request) -> HeadlessStoredResult:
         image = self._coerce_image(api_result)
         raw_bytes = self._coerce_raw_bytes(api_result, image)
+        # WEBUI returns the infotext only in the API `info` field; the image bytes forge
+        # sends back usually have NO `parameters` chunk, so a NAIA-saved WEBUI PNG would
+        # carry no metadata. Bake the infotext into the PNG here (no-op if forge already
+        # embedded it, or for NAI/ComfyUI which never set generation_info).
+        info_text = api_result.get("generation_info")
+        if info_text:
+            from utils.webui_generation_info import embed_webui_parameters
+
+            raw_bytes = embed_webui_parameters(raw_bytes, info_text)
         webp_bytes = self._image_to_webp(image)
         params = dict(getattr(request, "params", {}) or {})
         params.pop("credential", None)

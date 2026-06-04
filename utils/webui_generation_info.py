@@ -120,3 +120,46 @@ def extract_webui_infotext(value: Any) -> str:
         infotext = extract_webui_infotext(decoded)
         return infotext or text
     return ""
+
+
+def embed_webui_parameters(raw_bytes: Any, info: Any) -> Any:
+    """Bake the WebUI infotext into a PNG ``parameters`` text chunk when it is absent.
+
+    forge/A1111 returns the infotext only in the API response's ``info`` field; the
+    base64 image it sends back frequently carries NO ``parameters`` chunk (forge bakes
+    that in only when *it* writes the file to disk). A NAIA-saved WEBUI image is the raw
+    API bytes, so without this it has no metadata at all. We add the chunk so a
+    NAIA-saved WEBUI PNG matches a forge-saved one (and the metadata viewer / re-import
+    can read prompt, seed, ADetailer/ControlNet args, etc.). If the image already has a
+    non-empty ``parameters`` chunk we return the original bytes untouched (forge baked it
+    in). NAI/ComfyUI never reach here — only ``_call_webui_api`` sets ``generation_info``.
+    Any failure returns the input bytes unchanged.
+    """
+    if not raw_bytes:
+        return raw_bytes
+    infotext = extract_webui_infotext(info)
+    if not infotext:
+        return raw_bytes
+    try:
+        import io
+
+        from PIL import Image, PngImagePlugin
+
+        data = bytes(raw_bytes)
+        with Image.open(io.BytesIO(data)) as img:
+            if (img.format or "").upper() != "PNG":
+                return data
+            existing = dict(img.info or {})
+            current = existing.get("parameters")
+            if isinstance(current, str) and current.strip():
+                return data
+            pnginfo = PngImagePlugin.PngInfo()
+            for key, value in existing.items():
+                if isinstance(key, str) and isinstance(value, str) and key != "parameters":
+                    pnginfo.add_text(key, value)
+            pnginfo.add_text("parameters", infotext)
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG", pnginfo=pnginfo)
+            return buffer.getvalue()
+    except Exception:
+        return raw_bytes

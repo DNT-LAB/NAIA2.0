@@ -184,11 +184,14 @@ def history_item_meta_payload(
     extra_summary: dict = {}
     # External images (e.g. imported into history) carry no naia_* params; their
     # prompt/params live only in the embedded PNG metadata (NAI Comment/stealth,
-    # WebUI parameters, ComfyUI workflow). Extract on the detail view when the
-    # in-app prompt is missing, so the viewer is no longer limited to in-session
-    # generations. Gated on include_full + missing prompt → generated results
-    # never run the stealth-PNG scan.
-    if include_full and not prompt:
+    # WebUI parameters, ComfyUI workflow). Extract whenever the in-app prompt is
+    # missing so BOTH the summary (the Generation Info panel and floating prompt
+    # fetch /api/history/meta WITHOUT full=1) and the full detail view surface it —
+    # otherwise external images show "No metadata" in the result view even though
+    # the Metadata tab (full=1) reads them. This endpoint is only called per
+    # displayed item (the bulk history list uses a different summary), and generated
+    # results have a prompt so they skip the stealth-PNG scan.
+    if not prompt:
         from utils.image_info import extract_embedded_metadata
 
         extracted = extract_embedded_metadata(getattr(item, "raw_bytes", None))

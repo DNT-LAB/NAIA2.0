@@ -151,6 +151,45 @@ def _apply_webui_result_enhance_size_policy(
     return new_w, new_h, scale
 
 
+def _enrich_img2img_source_prompt(
+    image_bytes: bytes,
+    generation_params: dict[str, Any] | None,
+    prompt_context: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Recover an external image's prompt/negative from its embedded NAI metadata.
+
+    Used only for the result-context-menu Img2Img/Inpaint path: external (imported /
+    saved) images have empty in-app generation_params/prompt_context, so the img2img
+    window would otherwise inherit the current prompt box. Leaves generated results
+    untouched (they already carry a prompt). Scoped here so the enhance/upscale and
+    Grok/Director paths keep their own source semantics.
+    """
+    gen_params = dict(generation_params or {})
+    prompt_ctx = dict(prompt_context or {})
+    has_prompt = bool(
+        prompt_ctx.get("main_prompt")
+        or prompt_ctx.get("final_prompt")
+        or prompt_ctx.get("prompt")
+        or gen_params.get("input")
+    )
+    if has_prompt:
+        return gen_params, prompt_ctx
+    try:
+        from utils.image_info import extract_embedded_metadata
+
+        extracted = extract_embedded_metadata(image_bytes)
+    except Exception:
+        extracted = {}
+    if extracted:
+        prompt = str(extracted.get("prompt") or "")
+        negative = str(extracted.get("negative") or extracted.get("uc") or "")
+        if prompt:
+            prompt_ctx["main_prompt"] = prompt
+        if negative and not gen_params.get("negative_prompt"):
+            gen_params["negative_prompt"] = negative
+    return gen_params, prompt_ctx
+
+
 def _prompt_from_result_context(
     context: WebSessionContext,
     params: dict[str, Any],
@@ -517,6 +556,16 @@ async def handle_result_command(
             resolve_result_image_action_source,
             context,
             command,
+        )
+        # External images (imported/saved) carry no in-app params, so without this the
+        # img2img/inpaint window would inherit the CURRENT prompt box instead of the
+        # image's own prompt. Recover prompt/negative from the image's embedded NAI
+        # metadata when the in-app prompt is missing.
+        generation_params, prompt_context = await run_in_thread(
+            _enrich_img2img_source_prompt,
+            image_bytes,
+            generation_params,
+            prompt_context,
         )
         state = await run_in_thread(
             context.open_img2img_session_from_bytes,

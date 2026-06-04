@@ -1009,7 +1009,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260603-img2img-focus1')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260604-img2img-autocomplete1')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -1019,6 +1019,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260603-img2
       onModTextEdit,
       flushPendingModuleEdit,
       showToast,
+      bindTagAssist,
     });
   })
   .catch(error => {

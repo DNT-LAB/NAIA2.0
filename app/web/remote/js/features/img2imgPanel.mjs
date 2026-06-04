@@ -6,6 +6,7 @@ export function createImg2ImgPanel({
   onModTextEdit,
   flushPendingModuleEdit,
   showToast,
+  bindTagAssist = () => {},
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout,
 }) {
@@ -211,6 +212,14 @@ export function createImg2ImgPanel({
     }, 0);
   }
 
+  function bindPromptTagAssist() {
+    // Tag autocomplete on the img2img/inpaint prompt fields (main + negative +
+    // character prompts), matching the main prompt box. The UC fields (.mod-uc) are
+    // excluded, same convention as the Character panel. Must run after every full
+    // render because moduleBody.innerHTML replaces the textarea elements.
+    moduleBody.querySelectorAll('.mod-textarea:not(.mod-uc)').forEach(element => bindTagAssist(element));
+  }
+
   function render(state) {
     const structureSignature = img2imgStructureSignature(state);
     const focusedTextarea = focusedImg2imgTextarea();
@@ -307,6 +316,7 @@ export function createImg2ImgPanel({
       if (document.getElementById('img2imgMaskDialogCanvas')) {
         setTimeoutFn(() => updateMaskStatus(activeMaskCanvas(), currentState), 0);
       }
+      bindPromptTagAssist();
       return;
     }
 
@@ -332,6 +342,7 @@ export function createImg2ImgPanel({
         ${promptsHtml}
         ${charactersHtml}
       </div>`;
+    bindPromptTagAssist();
   }
 
   function openMaskEditor() {

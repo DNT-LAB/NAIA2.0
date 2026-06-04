@@ -40,6 +40,11 @@ AUTO_GENERATE_DROPPED_PARAM_KEYS = {
     "requestId",
     "request_id",
     "result_enhance_request_id",
+    # WEBUI custom payload is a live session setting committed to remote_params (via the editor's
+    # Apply). Don't pin it into auto-gen continuation overrides, or an Apply mid-run would be
+    # ignored — dropping it lets each iteration re-merge the CURRENT remote_params value.
+    "webui_custom_payload",
+    "webui_custom_payload_enabled",
 }
 
 

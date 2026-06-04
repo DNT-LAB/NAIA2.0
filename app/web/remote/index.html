@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260604-cf-feedback1">
+<link rel="stylesheet" href="style.css?v=20260604-cfpayload-edit2">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -245,6 +245,29 @@
         <button type="button" class="mod-btn-danger" onclick="resetHiresOverlayEditor()">Reset to Original</button>
         <button type="button" class="mod-btn-secondary" onclick="closeHiresOverlayEditor()">Cancel</button>
         <button type="button" class="mod-btn-secondary mod-btn-secondary--accent" onclick="saveHiresOverlayEditor()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- WEBUI Custom Payload Editor -->
+<div class="module-popup module-popup-webui-custom" id="webuiCustomPayloadPopup" role="dialog" aria-labelledby="webuiCustomPayloadTitle" aria-modal="false">
+  <div class="module-popup-header">
+    <span class="module-popup-title" id="webuiCustomPayloadTitle">Custom Payload — alwayson_scripts</span>
+    <div class="module-popup-actions">
+      <button class="history-close" aria-label="닫기" onclick="closeWebuiCustomPayloadEditor()">&times;</button>
+    </div>
+  </div>
+  <div class="module-popup-body webui-custom-payload-popbody">
+    <div class="webui-custom-payload-guide">WEBUI 생성 결과의 <strong>alwayson_scripts</strong> JSON을 붙여넣으세요. 예: <code>{"ControlNet": {"args": [ ... ]}}</code> — 생성 payload 전체를 붙여넣어도 alwayson_scripts만 사용합니다. <strong>Apply</strong>를 눌러야 적용됩니다.</div>
+    <textarea id="pWebuiCustomPayload" class="webui-custom-payload-text mod-textarea" spellcheck="false"
+              placeholder='{"ControlNet": {"args": [ ... ]}}'
+              oninput="onWebuiCustomPayloadInput()"></textarea>
+    <div class="webui-custom-payload-footer">
+      <span class="webui-custom-payload-hint" id="webuiCustomPayloadHint"></span>
+      <div class="webui-custom-payload-actions">
+        <button type="button" class="mod-btn-secondary" onclick="closeWebuiCustomPayloadEditor()">Cancel</button>
+        <button type="button" class="mod-btn-secondary mod-btn-secondary--accent" onclick="applyWebuiCustomPayload()">Apply</button>
       </div>
     </div>
   </div>
@@ -531,14 +554,11 @@
               </div>
               </div>
               <div class="param-row webui-custom-payload-row">
-                <span class="param-label" title="WEBUI 확장(ControlNet/ADetailer 등)의 alwayson_scripts를 매 생성에 주입합니다. 사용자가 WEBUI에서 생성한 결과의 payload를 붙여넣으세요.">Custom Payload</span>
-                <input type="checkbox" class="param-check" id="pWebuiCustomEnable" onchange="setWebuiCustomPayloadEnabled(this.checked)">
-              </div>
-              <div class="webui-custom-payload-body" id="webuiCustomPayloadBody" style="display:none">
-                <textarea id="pWebuiCustomPayload" class="webui-custom-payload-text mod-textarea" rows="6" spellcheck="false"
-                          placeholder='WEBUI 생성 결과의 alwayson_scripts JSON을 붙여넣으세요. 예: {"ControlNet": {"args": [ ... ]}} — 생성 payload 전체를 붙여넣어도 alwayson_scripts만 사용합니다.'
-                          oninput="onWebuiCustomPayloadInput()" onchange="onWebuiCustomPayloadChange()"></textarea>
-                <div class="webui-custom-payload-hint" id="webuiCustomPayloadHint"></div>
+                <span class="param-label" title="WEBUI 확장(ControlNet/ADetailer 등)의 alwayson_scripts를 매 생성에 주입합니다. Edit로 payload를 붙여넣고 Apply 하세요.">Custom Payload</span>
+                <div class="webui-custom-payload-ctl">
+                  <button type="button" class="webui-custom-payload-edit" id="pWebuiCustomEditBtn" onclick="openWebuiCustomPayloadEditor()">Edit</button>
+                  <input type="checkbox" class="param-check" id="pWebuiCustomEnable" onchange="setWebuiCustomPayloadEnabled(this.checked)">
+                </div>
               </div>
             </div>
             <!-- ComfyUI controls -->
@@ -1057,6 +1077,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260604-cf-feedback1"></script>
+<script src="app.js?v=20260604-cfpayload-edit1"></script>
 </body>
 </html>

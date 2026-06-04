@@ -9241,23 +9241,63 @@ body.resizing-result-info {
   scrollbar-gutter: stable;
 }
 
-/* WEBUI Custom Payload (alwayson_scripts) editor */
+/* WEBUI Custom Payload (alwayson_scripts) — compact row + right-side popup editor */
 .webui-custom-payload-row { margin-top: 2px; }
-.webui-custom-payload-body {
+.webui-custom-payload-ctl { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.webui-custom-payload-edit {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  padding: 3px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.webui-custom-payload-edit:hover { border-color: var(--accent-blue, #7c96ec); }
+.webui-custom-payload-edit.has-payload { border-color: var(--accent-blue, #7c96ec); color: #b9c7ff; }
+.module-popup.module-popup-webui-custom {
+  width: min(560px, 92vw);
+  height: min(80vh, 680px);
+  flex-direction: column;
+}
+.module-popup.module-popup-webui-custom .module-popup-body { flex: 1 1 auto; min-height: 0; }
+.webui-custom-payload-popbody {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin: 4px 0 2px;
+  gap: 8px;
+  padding: 12px;
+  height: 100%;
+  box-sizing: border-box;
 }
-.webui-custom-payload-text {
+.webui-custom-payload-guide {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-dim, #8a8a8a);
+}
+.webui-custom-payload-guide code { color: var(--accent-glow); }
+.webui-custom-payload-popbody .webui-custom-payload-text {
+  flex: 1 1 auto;
+  min-height: 160px;
+  /* override .mod-textarea's max-height:200px so the editor fills the popup */
+  max-height: none;
   width: 100%;
   box-sizing: border-box;
-  min-height: 96px;
-  resize: vertical;
+  resize: none;
   font-family: var(--font-mono, ui-monospace, "Cascadia Code", Consolas, monospace);
   font-size: 11px;
   line-height: 1.45;
 }
+.webui-custom-payload-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.webui-custom-payload-actions { display: flex; gap: 6px; }
 .webui-custom-payload-hint {
   font-size: 11px;
   color: var(--text-dim, #8a8a8a);

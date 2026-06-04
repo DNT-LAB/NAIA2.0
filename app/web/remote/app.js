@@ -1211,11 +1211,11 @@ function _collectCurrentParams() {
       p.random_prompt_weight = promptWeight;
     }
     Object.assign(p, collectWebUiHiresfixAssistOverrides(mode));
+    // The payload itself is committed via the editor's Apply (-> remote_params, which
+    // _normalized_params merges for every path). Only the LIVE enable toggle rides the
+    // generate overrides so a generate right after toggling reflects it immediately.
     const webuiCustomEnable = $('pWebuiCustomEnable');
-    const webuiCustomPayload = ($('pWebuiCustomPayload')?.value || '').trim();
-    const webuiCustomOn = !!(webuiCustomEnable && webuiCustomEnable.checked && webuiCustomPayload);
-    p.webui_custom_payload_enabled = webuiCustomOn;
-    if (webuiCustomOn) p.webui_custom_payload = webuiCustomPayload;
+    p.webui_custom_payload_enabled = !!(webuiCustomEnable && webuiCustomEnable.checked);
   }
 
   if (mode === 'COMFYUI') {
@@ -3123,16 +3123,21 @@ function updateParams(m) {
     if ('denoising_strength' in m) $('pDenoise').value = m.denoising_strength;
     if ('hires_steps' in m) $('pHiresSteps').value = m.hires_steps;
     if ('hr_cfg' in m) $('pHrCfg').value = m.hr_cfg;
-    // WEBUI Custom Payload editor — restore from backend remote_params (per-mode plane)
-    const customPayloadEl = $('pWebuiCustomPayload');
-    if (customPayloadEl && 'webui_custom_payload' in m) customPayloadEl.value = m.webui_custom_payload || '';
+    // WEBUI Custom Payload — restore the APPLIED value from backend remote_params (per-mode
+    // plane). Keep an applied cache; do NOT overwrite the editor textarea while the popup is
+    // open (it would clobber an in-progress draft before the user hits Apply).
+    if ('webui_custom_payload' in m) {
+      _webuiCustomPayloadApplied = m.webui_custom_payload || '';
+      const customPayloadEl = $('pWebuiCustomPayload');
+      const cpPopup = $('webuiCustomPayloadPopup');
+      const cpOpen = cpPopup && cpPopup.classList.contains('open');
+      if (customPayloadEl && !cpOpen) customPayloadEl.value = _webuiCustomPayloadApplied;
+    }
     const customPayloadCb = $('pWebuiCustomEnable');
     if (customPayloadCb && 'webui_custom_payload_enabled' in m) {
-      const customOn = (m.webui_custom_payload_enabled === true || String(m.webui_custom_payload_enabled).toLowerCase() === 'true');
-      customPayloadCb.checked = customOn;
-      const customBody = $('webuiCustomPayloadBody');
-      if (customBody) customBody.style.display = customOn ? '' : 'none';
+      customPayloadCb.checked = (m.webui_custom_payload_enabled === true || String(m.webui_custom_payload_enabled).toLowerCase() === 'true');
     }
+    updateWebuiCustomPayloadIndicator();
     validateWebuiCustomPayload();
     if ('hires_preset_swap' in m) {
       _hiresPresetSwapValue = String(m.hires_preset_swap || '').trim();
@@ -3260,41 +3265,104 @@ function setSamplingMode(mode) {
 // _normalized_params — while the NAI path (which reads the separate use_custom_api_params)
 // can never receive it. The editor is restored from the schema broadcast (per-mode plane),
 // like the WEBUI hires params; no localStorage (which previously caused a clobber).
+// The payload lives in remote_params and is committed ONLY via the editor's Apply button.
+// _webuiCustomPayloadApplied mirrors the last applied/known value (from the schema) so the
+// editor can load it on open and the Edit button can show an applied indicator.
+let _webuiCustomPayloadApplied = '';
+
 function setWebuiCustomPayloadEnabled(on) {
-  const body = $('webuiCustomPayloadBody');
-  if (body) body.style.display = on ? '' : 'none';
   setParam('webui_custom_payload_enabled', String(!!on));
+  updateWebuiCustomPayloadIndicator();
+}
+
+function openWebuiCustomPayloadEditor() {
+  const popup = $('webuiCustomPayloadPopup');
+  const el = $('pWebuiCustomPayload');
+  if (!popup || !el) return;
+  el.value = _webuiCustomPayloadApplied;   // load the applied value; discard any stale draft
+  popup.classList.add('open');
   validateWebuiCustomPayload();
+  try { el.focus(); } catch (e) {}
+}
+
+function closeWebuiCustomPayloadEditor() {
+  const popup = $('webuiCustomPayloadPopup');
+  if (popup) popup.classList.remove('open');
+  const btn = $('pWebuiCustomEditBtn');
+  if (btn) { try { btn.focus(); } catch (e) {} }
+}
+
+function applyWebuiCustomPayload() {
+  const el = $('pWebuiCustomPayload');
+  if (!el) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    showToast('WS 연결이 끊겨 적용할 수 없습니다.', 'error');
+    return;
+  }
+  const info = validateWebuiCustomPayload();
+  setParam('webui_custom_payload', el.value);
+  _webuiCustomPayloadApplied = el.value;
+  updateWebuiCustomPayloadIndicator();
+  const txt = (el.value || '').trim();
+  if (!txt) {
+    showToast('Custom Payload를 비웠습니다.', 'success');
+  } else if (info.valid) {
+    showToast(`Custom Payload 적용됨 · alwayson 스크립트 ${info.count}개`, 'success');
+  } else {
+    // Backend _apply_custom_api_params runs _intelligent_json_corrector at generation time, so
+    // an imperfect paste is still usable — commit it, but don't call it valid.
+    showToast('적용됨 — JSON 형식 오류라 생성 시 자동 교정을 시도합니다.', 'warning');
+  }
 }
 
 function onWebuiCustomPayloadInput() {
   validateWebuiCustomPayload();
 }
 
-function onWebuiCustomPayloadChange() {
-  const el = $('pWebuiCustomPayload');
-  if (!el) return;
-  setParam('webui_custom_payload', el.value);
-  validateWebuiCustomPayload();
-}
-
 function validateWebuiCustomPayload() {
   const hint = $('webuiCustomPayloadHint');
   const el = $('pWebuiCustomPayload');
-  if (!hint || !el) return;
+  if (!el) return { valid: true, count: 0 };
   const txt = (el.value || '').trim();
-  if (!txt) { hint.textContent = ''; hint.className = 'webui-custom-payload-hint'; return; }
+  if (!txt) {
+    if (hint) { hint.textContent = ''; hint.className = 'webui-custom-payload-hint'; }
+    return { valid: true, count: 0 };
+  }
   try {
     const obj = JSON.parse(txt);
     const block = (obj && typeof obj === 'object' && obj.alwayson_scripts && typeof obj.alwayson_scripts === 'object')
       ? obj.alwayson_scripts : obj;
     const n = (block && typeof block === 'object' && !Array.isArray(block)) ? Object.keys(block).length : 0;
-    hint.textContent = `유효한 JSON · alwayson 스크립트 ${n}개`;
-    hint.className = 'webui-custom-payload-hint ok';
+    if (hint) { hint.textContent = `유효한 JSON · alwayson 스크립트 ${n}개`; hint.className = 'webui-custom-payload-hint ok'; }
+    return { valid: true, count: n };
   } catch (e) {
-    hint.textContent = 'JSON 형식 오류 — 생성 시 자동 교정을 시도합니다';
-    hint.className = 'webui-custom-payload-hint warn';
+    if (hint) { hint.textContent = 'JSON 형식 오류 — 생성 시 자동 교정을 시도합니다'; hint.className = 'webui-custom-payload-hint warn'; }
+    return { valid: false, count: 0 };
   }
+}
+
+function updateWebuiCustomPayloadIndicator() {
+  const btn = $('pWebuiCustomEditBtn');
+  if (!btn) return;
+  const txt = (_webuiCustomPayloadApplied || '').trim();
+  if (!txt) {
+    btn.textContent = 'Edit';
+    btn.classList.remove('has-payload');
+    btn.removeAttribute('title');
+    return;
+  }
+  try {
+    const obj = JSON.parse(txt);
+    const block = (obj && typeof obj === 'object' && obj.alwayson_scripts && typeof obj.alwayson_scripts === 'object')
+      ? obj.alwayson_scripts : obj;
+    const n = (block && typeof block === 'object' && !Array.isArray(block)) ? Object.keys(block).length : 0;
+    btn.textContent = `Edit · ${n}`;
+    btn.title = `적용된 alwayson 스크립트 ${n}개`;
+  } catch (e) {
+    btn.textContent = 'Edit · !';
+    btn.title = '적용된 payload가 JSON 형식 오류 — 생성 시 자동 교정을 시도합니다';
+  }
+  btn.classList.add('has-payload');
 }
 
 

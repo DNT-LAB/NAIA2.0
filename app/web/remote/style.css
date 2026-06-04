@@ -23,8 +23,8 @@
   --guide-tip-bg: #1c2a55;
   --guide-tip-border: rgba(124,150,236,0.55);
   --guide-tip-text: #f4f7ff;
-  --font-display: 'Outfit', sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-display: 'Outfit', "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  --font-mono: 'JetBrains Mono', "Malgun Gothic", "Apple SD Gothic Neo", monospace;
   --z-viewer-plane: 0;
   --z-viewer-overlay: 20;
   --z-viewer-modal: 100;

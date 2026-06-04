@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import uuid
 from typing import Any
 
@@ -226,6 +227,12 @@ async def _maybe_continue_auto_generation(
     # 같은 이미지만 반복된다. seed=-1로 리셋해 시드 정규화에서 재랜덤화되도록 한다.
     if not context._coerce_bool(overrides.get("seed_fixed", params.get("seed_fixed", False))):
         overrides["seed"] = -1
+    # Rnd Res must re-roll every Auto Gen iteration, exactly like a manual Random
+    # press. The frontend picks a random resolution per click (_collectCurrentParams),
+    # but this server-side loop reuses the previous params, so without this the
+    # resolution stays frozen when Rnd Res is on without Auto Res. (Auto Res still
+    # wins afterwards via detected_resolution when both are enabled.)
+    _reroll_random_resolution(context, overrides)
     queue_source = "Automation" if automation_run_id else "Auto Generate"
     overrides["_remote_queue_source"] = queue_source
     overrides["_remote_queue_label"] = queue_source
@@ -335,6 +342,49 @@ def _should_continue_auto_generation(context: WebSessionContext, request) -> boo
     if request_type in {"img2img", "inpaint", "outpaint", "auto_outpainting"}:
         return False
     return True
+
+
+def _parse_resolution_label(label: Any) -> tuple[int | None, int | None]:
+    try:
+        parts = str(label or "").lower().replace("×", "x").split("x")
+        if len(parts) == 2:
+            return int(parts[0].strip()), int(parts[1].strip())
+    except (ValueError, TypeError):
+        pass
+    return None, None
+
+
+def _reroll_random_resolution(context: WebSessionContext, overrides: dict[str, Any]) -> None:
+    """Re-pick a random resolution for the next Auto Gen iteration when Rnd Res is on.
+
+    Auto Gen loops server-side, so the frontend's per-click random pick
+    (_collectCurrentParams) never re-rolls — only the seed and Auto Res do. Mirror
+    the manual Random behaviour here, drawing from the same option set the dropdown
+    offers (NAI standard 1MP labels, or the resolution preset labels for WEBUI/COMFYUI).
+    """
+    if not context._coerce_bool(overrides.get("random_resolution", False)):
+        return
+    from core.resolution_utils import (
+        ANIMA_RESOLUTION_PRESET_LABELS,
+        STANDARD_1MP_RESOLUTION_LABELS,
+        normalize_anima_resolution_preset_id,
+    )
+
+    mode = str(overrides.get("api_mode") or context.get_api_mode() or "").strip().upper()
+    labels: tuple[str, ...] = ()
+    if mode in {"WEBUI", "COMFYUI"} and context._coerce_bool(overrides.get("resolution_preset_enabled", False)):
+        preset = normalize_anima_resolution_preset_id(overrides.get("resolution_preset"))
+        labels = ANIMA_RESOLUTION_PRESET_LABELS.get(preset) or ()
+    if not labels:
+        labels = STANDARD_1MP_RESOLUTION_LABELS
+    if not labels:
+        return
+    picked = random.choice(labels)
+    overrides["resolution"] = picked
+    width, height = _parse_resolution_label(picked)
+    if width and height:
+        overrides["width"] = width
+        overrides["height"] = height
 
 
 def _auto_generation_overrides(params: dict[str, Any]) -> dict[str, Any]:

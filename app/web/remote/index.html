@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260604-korean-font1">
+<link rel="stylesheet" href="style.css?v=20260604-cf-feedback1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -140,6 +140,7 @@
         <div class="setup-cloudflared hidden" id="setupCloudflaredSection">
           <div class="setup-cloudflared-head">
             <span class="setup-cloudflared-title">Cloudflared 터널</span>
+            <span class="setup-cloudflared-spinner hidden" id="setupCloudflaredSpinner" aria-hidden="true"></span>
             <span class="setup-cloudflared-status" id="setupCloudflaredStatus">연결 안 됨</span>
           </div>
           <div class="setup-cloudflared-actions">
@@ -1056,6 +1057,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260604-webui-custompayload3"></script>
+<script src="app.js?v=20260604-cf-feedback1"></script>
 </body>
 </html>

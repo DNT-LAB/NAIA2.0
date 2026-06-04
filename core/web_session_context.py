@@ -737,6 +737,9 @@ class WebSessionContext:
     def clear_api_options(self, mode: str) -> None:
         self._api_option_service().clear(mode)
 
+    def begin_cloudflared_connect(self) -> dict[str, Any]:
+        return self._api_control_service().begin_cloudflared_connect()
+
     def set_cloudflared_enabled(self, enabled: bool) -> dict[str, Any]:
         return self._api_control_service().set_cloudflared_enabled(enabled)
 

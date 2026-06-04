@@ -28,6 +28,20 @@ class HeadlessApiControlService:
     def probe_api(self) -> dict[str, bool | None]:
         return self.context.api_config_service.probe()
 
+    def begin_cloudflared_connect(self) -> dict[str, Any]:
+        """Mark the tunnel as connecting (active, no url) so the UI shows immediate feedback
+        BEFORE the blocking start_tunnel (binary download + handshake = several seconds).
+        CloudflaredService.start() only early-returns when active AND url are both set, so this
+        connecting state does not prevent the actual tunnel from starting."""
+        status = self.context.api_config_service.cloudflared.set_status(
+            active=True, status_text="Cloudflared 연결 중..."
+        )
+        self.context.cloudflared_active = True
+        self.context.cloudflared_tunnel_url = ""
+        self.context.cloudflared_status_text = "Cloudflared 연결 중..."
+        self.context.publish("cloudflared_status_changed", status)
+        return status
+
     def set_cloudflared_enabled(self, enabled: bool) -> dict[str, Any]:
         result = self.context.api_config_service.cloudflared.set_enabled(enabled)
         status = self.context.api_config_service.cloudflared.status()

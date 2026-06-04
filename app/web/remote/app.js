@@ -682,7 +682,7 @@ const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260527-auto
   .catch(error => {
     console.error('Failed to initialize module badges module', error);
   });
-const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v=20260506-api-setup-ko1')
+const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v=20260604-cf-feedback1')
   .then(({createCloudflaredControls}) => {
     cloudflaredControls = createCloudflaredControls({
       document,

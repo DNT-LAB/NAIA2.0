@@ -102,7 +102,14 @@ async def handle_api_control_command(
                 "reason": reason,
             })
             return True
-        result = await run_in_thread(context.set_cloudflared_enabled, bool(command.get("enabled", False)))
+        enabled = bool(command.get("enabled", False))
+        if enabled:
+            # Immediate "connecting" feedback before the blocking tunnel start (binary download
+            # + handshake can take several seconds). Without this the UI sat unchanged until the
+            # final status arrived, so the connect looked like it did nothing.
+            context.begin_cloudflared_connect()
+            await _send_json(ws, context.api_status_payload(client_host))
+        result = await run_in_thread(context.set_cloudflared_enabled, enabled)
         if not result.get("success", False):
             await _send_json(ws, {
                 "type": "toast",

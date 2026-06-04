@@ -15218,6 +15218,19 @@ select.setup-input { cursor: pointer; }
   color: var(--text-primary);
   letter-spacing: 0.4px;
 }
+/* Connecting spinner — shown while the tunnel is establishing (binary download + handshake). */
+.setup-cloudflared-spinner {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-blue, #7c96ec);
+  animation: cf-spin 0.7s linear infinite;
+}
+@keyframes cf-spin { to { transform: rotate(360deg); } }
+.setup-btn-cloudflared.is-connecting { opacity: 0.85; cursor: progress; }
 .setup-cloudflared-actions {
   display: flex;
   gap: 8px;

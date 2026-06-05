@@ -3870,7 +3870,8 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 @container metadata-viewer (max-width: 980px) {
   .metadata-layout {
     grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1.15fr);
-    grid-template-rows: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    /* 파라미터/원본 행은 프롬프트 행의 절반 이하 높이(사용자 요청) — 내부 스크롤. */
+    grid-template-rows: minmax(0, 1.55fr) minmax(0, 0.45fr);
   }
   .metadata-detail-section {
     grid-column: 1 / -1;

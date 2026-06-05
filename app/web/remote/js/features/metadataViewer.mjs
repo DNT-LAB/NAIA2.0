@@ -189,14 +189,19 @@ export function createMetadataViewer({
   }
 
   function getCharacters(data) {
-    const direct = normalizeArray(findValue(data, ['characters', 'char_captions']));
+    // _executed_characters: NAI 캐릭터는 페이로드 빌드 시점 늦은 바인딩이라 요청
+    // params에 없다 — api_service가 기록한 실행본 키(인앱 생성 결과/히스토리용).
+    const direct = normalizeArray(findValue(data, ['characters', 'char_captions', '_executed_characters']));
     if (direct.length) return direct;
     return extractCharCaptions(findValue(data, ['v4_prompt']));
   }
 
   function getCharacterNegatives(data) {
-    const direct = normalizeArray(findValue(data, ['characters_uc', 'char_captions_uc']));
-    if (direct.length) return direct;
+    const direct = findValue(data, ['characters_uc', 'char_captions_uc', '_executed_characters_uc']);
+    // 배열은 빈 항목을 걸러내지 않는다 — C1 uc가 비어 있을 때 인덱스가 밀려
+    // C2의 네거티브가 C1로 표시되는 정렬 붕괴 방지.
+    if (Array.isArray(direct) && direct.length) return direct.map(value => (value == null ? '' : value));
+    if (!Array.isArray(direct) && isPresent(direct)) return [direct];
     return extractCharCaptions(findValue(data, ['v4_negative_prompt']));
   }
 

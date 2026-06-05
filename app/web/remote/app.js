@@ -512,7 +512,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize result image actions module', error);
   });
-const metadataViewerReady = import('./js/features/metadataViewer.mjs')
+const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260605-meta-charslots1')
   .then(({createMetadataViewer}) => {
     metadataViewer = createMetadataViewer({
       document,
@@ -919,12 +919,14 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
   .catch(error => {
     console.error('Failed to initialize conditional prompt panel module', error);
   });
-const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs')
+const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260606-storyteller-steps9')
   .then(({createEventStreamPanel}) => {
     eventStreamPanel = createEventStreamPanel({
       document,
       escHtml,
       setModuleParam,
+      runStorytellerCycle,
+      bindTagAssist,
     });
   })
   .catch(error => {
@@ -4637,6 +4639,45 @@ function requestGenerate(payload = {}) {
   return true;
 }
 
+function updateRandomStreamBadge(state) {
+  // 스트림(스토리/수동 진행) 활성 시 Random 버튼에 현재 시퀀스 위치 (n/m)를 표시한다.
+  // 1.5 모델: 수동 Random도 스텝을 전진시키므로 버튼은 절대 잠그지 않는다.
+  const btn = document.getElementById('btnRnd');
+  if (!btn) return;
+  let textNode = null;
+  btn.childNodes.forEach(node => {
+    if (node.nodeType === 3 && node.textContent.trim()) textNode = node;
+  });
+  if (!textNode) {
+    textNode = document.createTextNode('Random');
+    btn.appendChild(textNode);
+  }
+  const active = state?.active === true || String(state?.active).toLowerCase() === 'true';
+  const total = Number(state?.node_count) || 0;
+  if (active && total > 0) {
+    const position = ((Number(state?.current_index) || 0) % total) + 1;
+    textNode.textContent = `Random (${position}/${total})`;
+  } else {
+    textNode.textContent = 'Random';
+  }
+}
+
+function runStorytellerCycle(request) {
+  // One atomic command: the backend arms the cycle AND generates page 1 with these live
+  // params server-side, so there is no separate "random" kick that could be skipped on the
+  // preset tab or leave the cycle armed-but-idle on failure. `request` may be a bare count
+  // or {count, steps} where steps is the authored 1.5-style step sequence.
+  const req = (request && typeof request === 'object') ? request : {count: request};
+  const pages = Math.max(1, parseInt(req.count, 10) || 1);
+  const payload = {
+    count: pages,
+    overrides: _collectCurrentParams(),
+    ratings: getActiveRatings(),
+  };
+  if (Array.isArray(req.steps) && req.steps.length) payload.steps = req.steps;
+  setModuleParam('storyteller', 'run_cycle', JSON.stringify(payload));
+}
+
 function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   flushPromptEngineeringEdits();
   if (activePromptTab === 'preset') {
@@ -5435,7 +5476,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260523-comfyui-bypass1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260605-ev-badge1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -5566,6 +5607,7 @@ function scheduleInitialStateRefresh(delayMs = 5000) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({type: 'get_search_state'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
+    ws.send(JSON.stringify({type: 'get_module_state', module_id: 'storyteller'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'webui_hiresfix_assist'}));
   }, Math.max(250, Number(delayMs) || 5000));
 }
@@ -5868,6 +5910,9 @@ function onModuleState(m) {
   else if (m.module_id === 'event_stream') {
     if (moduleLauncherControl) moduleLauncherControl.updateEventStreamState(m);
     if (eventStreamPanel) eventStreamPanel.setState(m);
+    updateRandomStreamBadge(m);
+  } else if (m.module_id === 'storyteller') {
+    if (eventStreamPanel) eventStreamPanel.setStorytellerState(m);
   } else if (m.module_id === 'webui_hiresfix_assist') {
     if (m.enabled) {
       const presetState = activeResolutionPresetState('WEBUI');
@@ -6325,6 +6370,9 @@ function renderConditionalPrompt(m) {
 // ---- Event Stream module ----
 function renderEventStream(m) {
   if (eventStreamPanel) eventStreamPanel.render(m);
+  // Hydrate the Storyteller hero section (saved steps + run state) alongside the
+  // Event Stream debug state whenever the panel renders.
+  requestModuleState('storyteller');
 }
 
 // ---- Wildcard Module ----
@@ -7020,8 +7068,11 @@ function onAutocompleteResult(m) {
 }
 
 function _fireModuleOninput(el) {
-  const handler = el.getAttribute('oninput');
-  if (handler) new Function('event', handler).call(el, {target: el});
+  // 실제 버블링 input 이벤트를 디스패치한다 — 인라인 oninput 속성과 document 레벨
+  // 리스너(스토리텔러 스텝 카드의 검증 무효화 등)가 사용자 타이핑과 동일하게 반응.
+  // 과거엔 인라인 oninput만 수동 호출해서 자동완성의 프로그램적 값 변경이 검증 ✓를
+  // stale로 남기는 부류의 버그가 반복됐다(Codex 리뷰 F1).
+  el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
 const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260525-tag-autocomplete-cache1')

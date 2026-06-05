@@ -564,6 +564,15 @@ class WebSessionContext:
     def _set_event_stream_param(self, key: str, value: Any) -> dict[str, Any] | None:
         return self._event_stream_service().set_param(key, value)
 
+    def _storyteller_service(self):
+        return self._lazy_service("storyteller")
+
+    def _storyteller_module_state(self) -> dict[str, Any]:
+        return self._storyteller_service().state()
+
+    def _set_storyteller_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        return self._storyteller_service().set_param(key, value)
+
     def _e621_event_service(self):
         return self._lazy_service("e621_event")
 

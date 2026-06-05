@@ -251,6 +251,14 @@ async def handle_random_command(
     # 모든 ws 전송 이후에 broadcast 하여 클라이언트가 기대하는 메시지 순서를 보존.
     if result.success:
         await _broadcast_wildcard_state(context, clients)
+        # 스트림(스토리/수동 진행) 활성 시 수동 랜덤도 시퀀스를 전진시키므로(1.5 모델)
+        # Random 버튼 (n/m) 배지·패널 위치를 즉시 갱신한다.
+        event_stream_runtime = getattr(context, "event_stream_runtime", None)
+        if event_stream_runtime is not None and getattr(event_stream_runtime, "is_active", False):
+            try:
+                await _broadcast_json(clients, context._event_stream_module_state())
+            except Exception:
+                pass
 
 
 async def handle_bootstrap_random_command(
@@ -493,6 +501,23 @@ async def enqueue_prompt_from_module(
         start_generation_runner(context, clients)
 
 
+async def _rollback_storyteller_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    command: dict[str, Any],
+    reason: str,
+) -> None:
+    """Roll the Storyteller cycle back when a stamped page-1 command fails to enqueue
+    (returned not-ok OR raised) — otherwise the freeze + Auto Gen stay armed with nothing
+    running."""
+    run_id = str((command.get("overrides") or {}).get("event_stream_run_id") or "")
+    if run_id and context._storyteller_service().is_running(run_id):
+        policy = context._storyteller_service().fail(run_id, reason)
+        await _send_json(ws, context._storyteller_service().state())
+        for message in policy.get("messages", []):
+            await _send_json(ws, message)
+
+
 async def enqueue_headless_generation_commands(
     ws: WebSocket,
     context: WebSessionContext,
@@ -505,7 +530,16 @@ async def enqueue_headless_generation_commands(
     for command in commands:
         if not isinstance(command, dict):
             continue
-        result = await enqueue_generation_request(context, command)
+        try:
+            result = await enqueue_generation_request(context, command)
+        except Exception as exc:
+            await _send_json(ws, {
+                "type": "toast",
+                "level": "error",
+                "message": f"Generation enqueue failed: {exc}",
+            })
+            await _rollback_storyteller_command(ws, context, command, str(exc))
+            continue
         await _send_json(ws, result.websocket_payload())
         if not result.ok:
             await _send_json(ws, {
@@ -513,6 +547,7 @@ async def enqueue_headless_generation_commands(
                 "level": "error",
                 "message": result.blocked_reason,
             })
+            await _rollback_storyteller_command(ws, context, command, result.blocked_reason)
             continue
         queued += 1
     if queued:
@@ -550,6 +585,15 @@ def _should_auto_generate_after_random(
     if command.get("force_naia_skip_generate") is True:
         return False
     request_overrides = overrides if isinstance(overrides, dict) else {}
+    # 자동 사이클(Storyteller run)이 도는 동안의 수동 랜덤은 허용하되(스텝 전진/박스 갱신),
+    # 생성 연쇄는 하지 않는다 — 스토리 루프와 경쟁하는 평행 auto-gen 루프 방지.
+    # 수동 진행 모드(사이클 미실행)와 스토리 페이지 자체는 영향 없음.
+    if not request_overrides.get("_storyteller_page"):
+        try:
+            if context._storyteller_service().is_running():
+                return False
+        except Exception:
+            pass
     requested = request_overrides.get("auto_generate", context.get_options().get("auto_generate", False))
     return bool(context._coerce_bool(requested))
 

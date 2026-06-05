@@ -34,6 +34,7 @@ HEADLESS_SERVICE_SPECS = {
         "HeadlessWebuiHiresfixAssistService",
     ),
     "event_stream": HeadlessServiceSpec("core.headless_event_stream_service", "HeadlessEventStreamService"),
+    "storyteller": HeadlessServiceSpec("core.headless_storyteller_service", "HeadlessStorytellerService"),
     "prompt_engineering": HeadlessServiceSpec(
         "core.headless_prompt_engineering_service",
         "HeadlessPromptEngineeringService",

@@ -752,6 +752,164 @@ class SearchResultModel:
         self._mark_bucket_data_changed()
         return popped_row
 
+    def count_rows_matching(
+        self,
+        active_ratings: set = None,
+        row_predicate: Optional[Callable[[pd.Series], bool]] = None,
+    ) -> int:
+        """``pop_random_row_matching``과 동일한 필터(등급 + predicate)로 매칭되는 남은 행
+        수만 센다 — 아무것도 소비하지 않는 검증용 카운트."""
+        if self.is_empty():
+            return 0
+        self._ensure_bucketized()
+        active_rating_keys = self._active_rating_keys(active_ratings)
+        total = 0
+        for bucket_id in self._bucket_order:
+            bucket = self._buckets.get(bucket_id)
+            if bucket is None or bucket.is_empty():
+                continue
+            frame = bucket.remaining_dataframe()
+            if frame.empty:
+                continue
+            filtered = frame
+            if active_rating_keys is not None and "rating" in filtered.columns:
+                ratings = filtered["rating"].astype(str).str.strip().str.lower()
+                filtered = filtered[ratings.isin(active_rating_keys)]
+            if filtered.empty:
+                continue
+            if row_predicate is not None:
+                predicate_mask = filtered.apply(row_predicate, axis=1)
+                filtered = filtered[predicate_mask]
+            total += len(filtered)
+        return total
+
+    @staticmethod
+    def _tag_condition_mask(frame: pd.DataFrame, include_tags, exclude_tags):
+        """include/exclude 태그 조건의 벡터화 마스크.
+
+        행별 ``apply``(파이썬 람다)는 수십만 행에서 GIL을 잡은 채 수 분간 돌며 이벤트
+        루프까지 굳히므로(Storyteller 검증/할당), 경계 정규식 ``str.contains``로
+        ``EventStreamRuntime._matches_node_tags``(태그 정확 일치)와 동일 의미를 계산한다.
+        """
+        include = [str(tag).strip() for tag in (include_tags or ()) if str(tag).strip()]
+        exclude = [str(tag).strip() for tag in (exclude_tags or ()) if str(tag).strip()]
+        if "general" not in frame.columns:
+            # 老 경로 패리티(Codex F3): 조건이 없으면 모든 행 허용(pop_random_row와 동일),
+            # include 조건이 있으면 어떤 행도 매칭 불가(빈 general로는 매칭 불능).
+            return pd.Series(not include, index=frame.index)
+        general = frame["general"].astype(str)
+        if not include and not exclude:
+            # 무조건 노드 = 老 pop_random_row와 동일하게 전 행 허용.
+            return pd.Series(True, index=frame.index)
+        mask = pd.Series(True, index=frame.index)
+        for text in include:
+            # (?:^|,)\s* : 첫 태그의 선행 공백(" cat, ...")도 매칭 — 老 _clean_tags의
+            # strip 후 exact-match 의미 보존(Codex F3).
+            pattern = r"(?:^|,)\s*" + re.escape(text) + r"\s*(?:,|$)"
+            mask &= general.str.contains(pattern, regex=True, na=False)
+        for text in exclude:
+            pattern = r"(?:^|,)\s*" + re.escape(text) + r"\s*(?:,|$)"
+            mask &= ~general.str.contains(pattern, regex=True, na=False)
+        return mask
+
+    def pop_random_row_matching_tags(
+        self,
+        active_ratings: set = None,
+        include_tags=(),
+        exclude_tags=(),
+    ) -> Optional[pd.Series]:
+        """태그 포함/제외 조건으로 무작위 행을 선택·소비한다(벡터화 — Storyteller 할당용)."""
+        if self.is_empty():
+            return None
+        self._ensure_bucketized()
+        active_rating_keys = self._active_rating_keys(active_ratings)
+        weighted_buckets = []
+        eligible_indices_by_bucket: dict[int, list[int]] = {}
+        total_weight = 0
+
+        for bucket_id in self._bucket_order:
+            bucket = self._buckets.get(bucket_id)
+            if bucket is None or bucket.is_empty():
+                continue
+            frame = bucket.remaining_dataframe()
+            if frame.empty:
+                continue
+            filtered = frame
+            if active_rating_keys is not None and "rating" in filtered.columns:
+                ratings = filtered["rating"].astype(str).str.strip().str.lower()
+                filtered = filtered[ratings.isin(active_rating_keys)]
+            if filtered.empty:
+                continue
+            mask = self._tag_condition_mask(filtered, include_tags, exclude_tags)
+            if mask is None:
+                continue
+            eligible = list(filtered.index[mask])
+            if not eligible:
+                continue
+            eligible_indices_by_bucket[bucket_id] = eligible
+            total_weight += len(eligible)
+            weighted_buckets.append((bucket_id, total_weight))
+
+        if total_weight <= 0:
+            return None
+
+        target = random.randrange(total_weight)
+        selected_bucket_id = None
+        previous_weight = 0
+        for bucket_id, cumulative_weight in weighted_buckets:
+            if target < cumulative_weight:
+                selected_bucket_id = bucket_id
+                target -= previous_weight
+                break
+            previous_weight = cumulative_weight
+
+        if selected_bucket_id is None:
+            return None
+
+        bucket = self._buckets[selected_bucket_id]
+        selected_index = eligible_indices_by_bucket[selected_bucket_id][target]
+        popped_row = bucket.pop_row_at_index(selected_index)
+        if popped_row is None:
+            return None
+
+        if self._rating_counts_cache is not None and "rating" in popped_row:
+            rating = _normalize_rating(popped_row.get("rating"))
+            if rating in self._rating_counts_cache:
+                self._rating_counts_cache[rating] = max(0, self._rating_counts_cache[rating] - 1)
+        self._mark_bucket_data_changed()
+        return popped_row
+
+    def count_rows_matching_tags(
+        self,
+        active_ratings: set = None,
+        include_tags=(),
+        exclude_tags=(),
+    ) -> int:
+        """태그 포함/제외 조건과 매칭되는 남은 행 수(비파괴·벡터화 — Storyteller 검증용)."""
+        if self.is_empty():
+            return 0
+        self._ensure_bucketized()
+        active_rating_keys = self._active_rating_keys(active_ratings)
+        total = 0
+        for bucket_id in self._bucket_order:
+            bucket = self._buckets.get(bucket_id)
+            if bucket is None or bucket.is_empty():
+                continue
+            frame = bucket.remaining_dataframe()
+            if frame.empty:
+                continue
+            filtered = frame
+            if active_rating_keys is not None and "rating" in filtered.columns:
+                ratings = filtered["rating"].astype(str).str.strip().str.lower()
+                filtered = filtered[ratings.isin(active_rating_keys)]
+            if filtered.empty:
+                continue
+            mask = self._tag_condition_mask(filtered, include_tags, exclude_tags)
+            if mask is None:
+                continue
+            total += int(mask.sum())
+        return total
+
     def pop_random_row_with_id_filter(
         self,
         active_ratings: set = None,

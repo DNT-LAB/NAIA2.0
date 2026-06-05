@@ -265,6 +265,15 @@ class PromptEngineeringHeadlessPostHook:
         source_row = context.source_row
         checkbox_options = {} if skip_preprocessing else dict(options.get("preprocessing_options") or {})
 
+        # 이벤트 스트림(Storyteller) 중에는 Tag Implication 압축을 소비 지점에서 강제
+        # OFF — 'bikini pull' 같은 새 행 태그가 carry로 유지해야 할 'bikini' 등 의상
+        # 태그를 소거해 의상 전이를 깨뜨린다(사용자 결정). frozen 캡처의 fallback
+        # 분기만 믿으면 모듈/세션 override 등 다른 options 경로가 빠져나간다 —
+        # 캐릭터 freeze와 같은 교훈: 강제는 실제 적용되는 단일 소비 지점에서.
+        event_stream = getattr(self.app_context, "event_stream_runtime", None)
+        if checkbox_options and event_stream is not None and getattr(event_stream, "is_active", False):
+            checkbox_options["tag_implication_compression"] = False
+
         if not skip_preprocessing:
             api_mode = context.settings.get("api_mode")
             sampling_mode = context.settings.get("comfyui_sampling_mode")

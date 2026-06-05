@@ -40,6 +40,10 @@ const MODULE_REGISTRY = {
     title: '이벤트 스트림 설정',
     category: 'prompt_tools',
     action: 'module',
+    // 스트림 활성(EV 자동화) 시 카테고리 버튼에 분홍 EV 칩 표시.
+    badgeId: 'badgeEventStream',
+    categoryBadgeLabel: '',
+    categoryBadgeClass: 'event-stream',
   },
   character: {
     label: 'Character',
@@ -138,6 +142,8 @@ const CATEGORY_REGISTRY = [
     label: '프롬프트 도구',
     title: '프롬프트 도구',
     moduleIds: ['event_stream', 'e621_event', 'wildcard', 'chunk', 'conditional_prompt', 'danbooru_browser'],
+    // EV 칩을 합산 숫자가 아닌 개별 칩으로 렌더(NAI 전용 도구의 C/V 패턴).
+    splitBadges: true,
   },
   {
     id: 'character_tools',
@@ -324,7 +330,7 @@ export function createModuleLauncher({
       return `
         <div class="module-event-stream-row" data-module-event-stream>
           <button type="button" class="module-btn module-menu-item module-event-stream-settings" data-module="event_stream" aria-label="${tooltip}" data-module-tooltip="${tooltip}" data-module-static-disabled="0">
-            <span>${config.label}</span>
+            <span>${config.label}</span><span class="module-badge hidden" id="badgeEventStream"></span>
           </button>
           <label class="module-event-stream-toggle" data-module-tooltip="이벤트 스트림 활성">
             <input type="checkbox" data-event-stream-toggle aria-label="이벤트 스트림 활성">
@@ -419,7 +425,8 @@ export function createModuleLauncher({
         if (!badge || badge.classList.contains('hidden') || !badge.textContent.trim()) return null;
         return {
           moduleId,
-          label: config.categoryBadgeLabel || config.label,
+          // ?? : EV처럼 라벨 없이 배지 값만 쓰는 칩 허용(''는 유효한 라벨).
+          label: config.categoryBadgeLabel ?? config.label,
           className: config.categoryBadgeClass || '',
           title: config.title,
           value: badge.textContent.trim(),
@@ -485,6 +492,14 @@ export function createModuleLauncher({
       button.classList.toggle('module-static-disabled', button.dataset.moduleStaticDisabled === '1');
       button.classList.toggle('module-workflow-active', visible && isActiveWorkflowMode(moduleId));
       button.classList.toggle('event-stream-enabled', moduleId === 'event_stream' && Boolean(eventStreamState.active));
+      if (moduleId === 'event_stream') {
+        const evBadge = document.getElementById('badgeEventStream');
+        if (evBadge) {
+          const streamOn = Boolean(eventStreamState.active);
+          evBadge.textContent = streamOn ? 'EV' : '';
+          evBadge.classList.toggle('hidden', !streamOn);
+        }
+      }
       button.disabled = blocked;
       button.classList.toggle('active', visible && moduleIsActive(moduleId));
     });

@@ -40,6 +40,8 @@ class HeadlessModuleDispatchService:
             return context._webui_hiresfix_assist_module_state()
         if clean_id == "event_stream":
             return context._event_stream_module_state()
+        if clean_id == "storyteller":
+            return context._storyteller_module_state()
         if clean_id == "wildcard":
             return context._wildcard_module_state()
         if clean_id == "instant_wildcard":
@@ -91,6 +93,8 @@ class HeadlessModuleDispatchService:
             return context._set_webui_hiresfix_assist_param(clean_key, value)
         if clean_id == "event_stream":
             return context._set_event_stream_param(clean_key, value)
+        if clean_id == "storyteller":
+            return context._set_storyteller_param(clean_key, value)
         if clean_id == "wildcard":
             return context._set_wildcard_param(clean_key, value)
         if clean_id == "instant_wildcard":

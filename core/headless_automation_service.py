@@ -89,6 +89,16 @@ class HeadlessAutomationService:
 
     def start(self) -> dict[str, Any]:
         settings = self._settings()
+        # Mutual exclusion with the Storyteller cycle — both own the single Auto Generate
+        # loop, so only one controller may drive it at a time (reciprocal of the guard in
+        # HeadlessStorytellerService.start_cycle).
+        if self.context._storyteller_service().is_running():
+            state = self.state()
+            state["_headless_extra_messages"] = [self.context._toast(
+                "A Storyteller cycle is running. Stop it before starting Automation.",
+                level="error",
+            )]
+            return state
         credential_error = self._credential_error()
         if credential_error:
             state = self.state()
@@ -157,6 +167,8 @@ class HeadlessAutomationService:
         실행 중이 아니면 자동화를 자동 시작한다(Auto Gen이 핵심 트리거). 완료 시
         finish가 Auto Gen을 끄므로, 다시 켜기 전까지 재시작되지 않는다(무한 루프 없음)."""
         if self.is_running():
+            return None
+        if self.context._storyteller_service().is_running():
             return None
         settings = self._settings()
         if not settings.get("persist_automation"):

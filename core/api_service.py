@@ -768,15 +768,33 @@ class APIService:
                         character_positions = params.get('character_positions', [])
 
                     else:
+                        # 5-0) 이벤트 스트림(스토리/수동 진행) freeze — 시퀀스가 도는 동안
+                        # 캐릭터(와일드카드 롤 포함)는 스냅샷의 전개-리터럴로 고정된다.
+                        # 여기(실제 페이로드 빌드)가 단일 소비 지점: 아래 LateBind/
+                        # HeadlessSettings는 매 호출 재전개라 페이지마다 재롤된다.
+                        event_stream = getattr(self.app_context, "event_stream_runtime", None)
+                        if event_stream is not None:
+                            frozen_getter = getattr(event_stream, "get_frozen_character_params", None)
+                            if callable(frozen_getter):
+                                try:
+                                    frozen_chars = frozen_getter()
+                                except Exception:
+                                    frozen_chars = None
+                                if frozen_chars and frozen_chars.get("characters"):
+                                    char_source = "EventStreamFreeze"
+                                    characters = frozen_chars["characters"]
+                                    ucs = frozen_chars.get("uc", [])
+                                    character_positions = []
                         # 5) Late Binding — 메인 UI CharacterModule (직접 생성)
-                        char_module = _get_loaded_middle_module(self.app_context, "CharacterModule")
-                        if loaded_character_module_is_active(char_module):
-                            char_params = char_module.get_parameters()
-                            if char_params and char_params.get("characters"):
-                                char_source = "LateBind"
-                                characters = char_params["characters"]
-                                ucs = char_params["uc"]
-                                character_positions = char_params.get("character_positions", [])
+                        if not characters:
+                            char_module = _get_loaded_middle_module(self.app_context, "CharacterModule")
+                            if loaded_character_module_is_active(char_module):
+                                char_params = char_module.get_parameters()
+                                if char_params and char_params.get("characters"):
+                                    char_source = "LateBind"
+                                    characters = char_params["characters"]
+                                    ucs = char_params["uc"]
+                                    character_positions = char_params.get("character_positions", [])
                         if not characters:
                             char_params = character_params_from_settings(
                                 self.app_context,
@@ -803,6 +821,14 @@ class APIService:
                         })
                     print(f"✅ [{char_source}] {len(characters)} character(s) added"
                           f"{' (positions: ' + str(character_positions) + ')' if character_positions else ''}")
+                    # 실행본 기록(메타데이터 뷰어용): 캐릭터는 페이로드 빌드 시점에 늦은
+                    # 바인딩으로 결정되므로 요청 params에는 없다. 뷰어가 "이 이미지가
+                    # 실제로 생성된 캐릭터"를 보여줄 수 있도록 언더스코어 키로 기록한다
+                    # (분기 판정은 'characters' 키만 보므로 리플레이 의미 불변).
+                    params['_executed_characters'] = [str(c) for c in characters]
+                    params['_executed_characters_uc'] = [
+                        str(ucs[i]) if i < len(ucs) else "" for i in range(len(characters))
+                    ]
             
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
             generation_request = params.get('_generation_request')

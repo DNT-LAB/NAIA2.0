@@ -60,6 +60,13 @@ async def _broadcast_automation_state(context: WebSessionContext, clients: set[W
     await broadcast_json(clients, context._module_state_payload("automation", state))
 
 
+async def _broadcast_storyteller_state(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """Broadcast the Storyteller cycle runtime as a module_state message so the panel's
+    live page progress (completed/target) updates on every completion. The service's
+    state() already returns a wrapped module_state payload."""
+    await broadcast_json(clients, context._storyteller_service().state())
+
+
 async def _broadcast_wildcard_state(context: WebSessionContext, clients: set[WebSocket]) -> None:
     """Push the wildcard module state so an open Wildcard Manager updates live.
 
@@ -170,7 +177,22 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # 직전 생성에 사용된 와일드카드(순차/종속 카운터 + Used)를 라이브 반영.
             # auto-continue 가 다음 프롬프트로 context 를 덮어쓰기 전에 push 한다.
             await _broadcast_wildcard_state(context, clients)
-            await _maybe_continue_auto_generation(context, clients, request)
+            # 스트림(스토리/수동 진행) 활성 시 시퀀스 위치를 라이브 반영 — Random 버튼의
+            # (n/m) 배지와 패널의 현재 스텝 표시가 생성마다 갱신된다.
+            event_stream_runtime = getattr(context, "event_stream_runtime", None)
+            if event_stream_runtime is not None and getattr(event_stream_runtime, "is_active", False):
+                try:
+                    await broadcast_json(clients, context._event_stream_module_state())
+                except Exception:
+                    pass
+            # Guard the auto-continue (prompt gen / PE persist / enqueue) so a raised
+            # exception after a story page was counted still cleans up the cycle
+            # (_broadcast_generation_error fails the stamped story) instead of leaving the
+            # freeze + Auto Gen armed.
+            try:
+                await _maybe_continue_auto_generation(context, clients, request)
+            except Exception as exc:
+                await _broadcast_generation_error(context, clients, request, str(exc))
             await broadcast_json(clients, context.queue_state_payload())
             await broadcast_json(clients, context.auto_save_state_payload())
             if isinstance(auto_save_result, dict) and auto_save_result.get("error"):
@@ -190,15 +212,35 @@ async def _maybe_continue_auto_generation(
     request,
 ) -> bool:
     params = getattr(request, "params", {}) or {}
-    automation_run_id = str(params.get("automation_run_id") or "")
-    # The Automation controller never tags requests itself (Start only sets the
-    # run conditions and engages Auto Gen). Bind a plain Auto Generate completion
-    # to the live controller so its timer/count limit is enforced and Auto Gen is
-    # disabled when the limit is reached.
-    if not automation_run_id and _automation_should_bind(context, request):
-        automation_run_id = context._automation_service().active_run_id()
+
+    # Run-policy controller bound to this completion. Storyteller and Automation each own
+    # the single Auto Generate loop and are mutually exclusive; Storyteller takes
+    # precedence. The controller never tags the FIRST request itself (Start only arms Auto
+    # Gen), so bind a plain Auto Gen completion to the live controller so its page/timer/
+    # count limit is enforced and Auto Gen is disabled when the limit is reached.
+    # Storyteller binds ONLY via the explicit run-id stamp that start_cycle and each
+    # continuation put on the request — never by "a story is running" — so a stale,
+    # manual, or special (img2img/preset/etc.) untagged completion can't be miscounted
+    # as a page of the cycle.
+    story_run_id = str(params.get("event_stream_run_id") or "")
+    if story_run_id and not context._storyteller_service().is_running(story_run_id):
+        story_run_id = ""
+
+    automation_run_id = ""
+    if not story_run_id:
+        automation_run_id = str(params.get("automation_run_id") or "")
+        if not automation_run_id and _automation_should_bind(context, request):
+            automation_run_id = context._automation_service().active_run_id()
+
     hold_prompt = False
-    if automation_run_id:
+    if story_run_id:
+        policy = context._storyteller_service().record_generation_completed(story_run_id)
+        await _broadcast_storyteller_state(context, clients)
+        for message in policy.get("messages", []):
+            await broadcast_json(clients, message)
+        if not policy.get("continue"):
+            return False
+    elif automation_run_id:
         policy = context._automation_service().record_generation_completed(automation_run_id)
         hold_prompt = bool(policy.get("hold_prompt", False))
         await _broadcast_automation_state(context, clients)
@@ -217,13 +259,22 @@ async def _maybe_continue_auto_generation(
             await _broadcast_automation_state(context, clients)
 
     if not _should_continue_auto_generation(context, request):
+        # A story page was just counted but the loop can't continue (Auto Gen turned off,
+        # queue paused, etc.). Finish the story so the freeze snapshot + runtime don't stay
+        # stuck armed below the page target.
+        if story_run_id and context._storyteller_service().is_running(story_run_id):
+            policy = context._storyteller_service().finish(story_run_id, reason="stopped")
+            await _broadcast_storyteller_state(context, clients)
+            for message in policy.get("messages", []):
+                await broadcast_json(clients, message)
         return False
 
     prompt_fixed = context._coerce_bool(
         context.get_options().get("prompt_fixed", params.get("prompt_fixed", False))
     )
     # Repeat Count(자동화): hold_prompt면 새 프롬프트를 뽑지 않고 직전 프롬프트를 재사용한다.
-    effective_prompt_fixed = prompt_fixed or hold_prompt
+    # 단, 스토리는 매 페이지 새 구도를 뽑아야 하므로 prompt_fixed/hold_prompt를 무시한다.
+    effective_prompt_fixed = (prompt_fixed or hold_prompt) and not story_run_id
     overrides = _auto_generation_overrides(params)
     overrides["auto_generate"] = True
     overrides["prompt_fixed"] = effective_prompt_fixed
@@ -238,13 +289,46 @@ async def _maybe_continue_auto_generation(
     # resolution stays frozen when Rnd Res is on without Auto Res. (Auto Res still
     # wins afterwards via detected_resolution when both are enabled.)
     _reroll_random_resolution(context, overrides)
-    queue_source = "Automation" if automation_run_id else "Auto Generate"
+    if story_run_id:
+        # Carry the story run id so the next completion re-binds to this same cycle.
+        overrides["event_stream_run_id"] = story_run_id
+        queue_source = "Storyteller"
+    elif automation_run_id:
+        queue_source = "Automation"
+    else:
+        queue_source = "Auto Generate"
     overrides["_remote_queue_source"] = queue_source
     overrides["_remote_queue_label"] = queue_source
 
     request_id = f"auto-{uuid.uuid4().hex}"
     prompt = str(params.get("input") or params.get("_raw_input") or context.prompt_text or "")
     negative = str(params.get("negative_prompt") or context.negative_prompt_text or "")
+
+    # Storyteller 다음 페이지의 스텝별 해상도 계획. carry(의상/배경 유지)는 더 이상
+    # 여기서 다루지 않는다 — EventStreamRuntime이 prepare 시점에 노드 policy로 직접
+    # 적용한다(수동 진행/자동 사이클 공통).
+    story_plan = None
+    if story_run_id:
+        # 사이클 페이지 마커: 수동 랜덤과 구분(연쇄 억제 예외 등).
+        overrides["_storyteller_page"] = True
+        story_plan = context._storyteller_service().page_plan(story_run_id)
+        # 'default' 스텝: 이전 스텝이 stamped한 해상도가 이 페이지로 상속되지 않게 시작
+        # 시점 베이스(UI 값)로 복원한다. Rnd Res가 켜져 있으면 방금 재추첨한 값을 존중하고,
+        # Auto Res(detected)는 생성 후 정상 적용된다. 스텝이 해상도를 지정하면 생성 후
+        # 그 값이 최종 우선.
+        if story_plan is not None and not (story_plan.get("width") and story_plan.get("height")):
+            if not context._coerce_bool(overrides.get("random_resolution", False)):
+                base = story_plan.get("base_resolution") or {}
+                if base.get("width") and base.get("height"):
+                    overrides["width"] = base["width"]
+                    overrides["height"] = base["height"]
+                    overrides["resolution"] = (
+                        base.get("resolution") or f"{base['width']} x {base['height']}"
+                    )
+                else:
+                    overrides.pop("width", None)
+                    overrides.pop("height", None)
+                    overrides.pop("resolution", None)
 
     if not effective_prompt_fixed:
         result = await asyncio.to_thread(
@@ -262,7 +346,15 @@ async def _maybe_continue_auto_generation(
                 "level": "error",
                 "message": payload.get("message") or "Auto Generate stopped: random prompt failed.",
             })
-            if automation_run_id:
+            if story_run_id:
+                failure = context._storyteller_service().fail(
+                    story_run_id,
+                    str(payload.get("message") or "random prompt failed"),
+                )
+                await _broadcast_storyteller_state(context, clients)
+                for message in failure.get("messages", []):
+                    await broadcast_json(clients, message)
+            elif automation_run_id:
                 failure = context._automation_service().fail(
                     automation_run_id,
                     str(payload.get("message") or "random prompt failed"),
@@ -272,7 +364,10 @@ async def _maybe_continue_auto_generation(
                     await broadcast_json(clients, message)
             return False
 
-        payload["source"] = "automation" if automation_run_id else "auto_generate"
+        payload["source"] = (
+            "storyteller" if story_run_id
+            else ("automation" if automation_run_id else "auto_generate")
+        )
         await broadcast_json(clients, payload)
         for message in result.extra_messages:
             await broadcast_json(clients, message)
@@ -283,6 +378,18 @@ async def _maybe_continue_auto_generation(
             overrides["width"] = width
             overrides["height"] = height
             overrides["resolution"] = f"{width} x {height}"
+        if story_run_id:
+            # 스텝별 해상도는 Auto Res/Rnd Res 값보다 우선한다.
+            if story_plan and story_plan.get("width") and story_plan.get("height"):
+                overrides["width"] = story_plan["width"]
+                overrides["height"] = story_plan["height"]
+                overrides["resolution"] = f"{story_plan['width']} x {story_plan['height']}"
+            # 이번 페이지 해상도 기록('previous' 해상도용). carry 추출은 런타임 담당.
+            context._storyteller_service().record_page_outcome(
+                story_run_id,
+                width=overrides.get("width"),
+                height=overrides.get("height"),
+            )
 
     dispatch = await asyncio.to_thread(
         generation_service(context).enqueue_remote_request,
@@ -301,7 +408,12 @@ async def _maybe_continue_auto_generation(
             "level": "error",
             "message": dispatch.blocked_reason,
         })
-        if automation_run_id:
+        if story_run_id:
+            failure = context._storyteller_service().fail(story_run_id, dispatch.blocked_reason)
+            await _broadcast_storyteller_state(context, clients)
+            for message in failure.get("messages", []):
+                await broadcast_json(clients, message)
+        elif automation_run_id:
             failure = context._automation_service().fail(automation_run_id, dispatch.blocked_reason)
             await _broadcast_automation_state(context, clients)
             for message in failure.get("messages", []):
@@ -443,6 +555,12 @@ async def _broadcast_generation_error(
     await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "error"})
     await broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
     await broadcast_json(clients, {"type": "generation_error", "message": message})
+    story_run_id = str(params.get("event_stream_run_id") or "")
+    if story_run_id and context._storyteller_service().is_running(story_run_id):
+        failure = context._storyteller_service().fail(story_run_id, message)
+        await _broadcast_storyteller_state(context, clients)
+        for extra_message in failure.get("messages", []):
+            await broadcast_json(clients, extra_message)
     automation_run_id = str(params.get("automation_run_id") or "")
     if automation_run_id:
         failure = context._automation_service().fail(automation_run_id, message)

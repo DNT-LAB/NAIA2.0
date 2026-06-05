@@ -116,6 +116,8 @@ class HeadlessRandomPromptService:
 
         source_row_override = None
         skip_random_events = False
+        # 1.5 모델: 스트림이 활성인 동안 모든 랜덤(수동 포함)이 시퀀스를 전진시킨다 —
+        # 사용자는 마음에 드는 이미지가 나올 때까지 수동으로 라운드를 반복할 수 있다.
         event_stream = getattr(self.context, "event_stream_runtime", None)
         if event_stream is not None and getattr(event_stream, "is_active", False):
             request = event_stream.prepare_random_prompt_request(
@@ -520,6 +522,11 @@ class HeadlessRandomPromptService:
 
     def _apply_character_settings(self, settings: dict[str, Any]) -> None:
         from core.character_settings import character_params_from_settings
+
+        # NOTE(이벤트 스트림 freeze): 캐릭터 freeze의 단일 소비 지점은 api_service의
+        # 페이로드 빌드(EventStreamFreeze 분기)다 — 여기서 settings["characters"]에
+        # frozen 값을 넣어도 실제 생성에는 닿지 않아 페이지마다 재롤되는 버그가 있었다.
+        # 이 함수는 항상 pristine 베이스를 계산한다(프롬프트 파이프라인/조건부용).
 
         # A NEW prompt run must derive the character base from the PRISTINE character
         # frames, not the previous run's conditional result. The conditional hook stores

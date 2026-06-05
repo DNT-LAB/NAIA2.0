@@ -1,6 +1,6 @@
 {
   "name": "naia-electron-shell",
-  "version": "2.0.19",
+  "version": "2.0.20",
   "private": true,
   "description": "Electron shell prototype for the NAIA headless Remote Web backend.",
   "main": "main/main.cjs",

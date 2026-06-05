@@ -76,6 +76,25 @@ class HeadlessResultStore:
         webp_bytes = self._image_to_webp(image)
         params = dict(getattr(request, "params", {}) or {})
         params.pop("credential", None)
+        # 입력창 와일드카드는 실행 시점에 로컬 복사본에서 전개된다(execute_request의
+        # _expand_input_wildcards — 요청 원본에는 토큰이 남아 반복 시 재롤). 저장 메타의
+        # 프롬프트는 "이 이미지가 실제로 생성된 값"이어야 하므로 실행본의 input/negative만
+        # 덮어쓴다. 그 외 파라미터는 요청 원본 유지(리플레이/큐 의미 보존).
+        executed = api_result.get("generation_params")
+        if isinstance(executed, dict):
+            for key in ("input", "negative_prompt"):
+                value = executed.get(key)
+                if isinstance(value, str) and value and value != params.get(key):
+                    params[key] = value
+            # NAI 캐릭터는 페이로드 빌드 시점 늦은 바인딩이라 요청 params에 없다 —
+            # api_service가 기록한 실행본(_executed_*)을 메타데이터로 보존한다
+            # (메타데이터 뷰어 캐릭터 슬롯 표시용). 리플레이된 request.params에 직전
+            # 실행의 값이 남아 있을 수 있으므로 항상 실행본 기준으로 재설정한다.
+            for key in ("_executed_characters", "_executed_characters_uc"):
+                params.pop(key, None)
+                value = executed.get(key)
+                if isinstance(value, list) and value:
+                    params[key] = list(value)
         # WEBUI custom payload is a LIVE editor/session setting (remote_params), not a per-image
         # baked param. Never persist it into a stored result, so EVERY replay path (Result Enhance,
         # history replay/reopen, queue 'original', and any future one) injects the user's CURRENT

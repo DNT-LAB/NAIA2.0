@@ -206,6 +206,15 @@ class HeadlessGenerationService:
 
         params = dict(request.params or {})
         params["_generation_request"] = request
+        # 실행본 기록 키는 이번 실행에서 다시 계산된다 — 리플레이된 params에 남은 직전
+        # 실행의 값이 이번 결과 메타데이터로 둔갑하지 않게 항상 비우고 시작한다
+        # (NAI가 아니거나 캐릭터가 꺼진 실행에서 stale 캐릭터 표시 방지).
+        params.pop("_executed_characters", None)
+        params.pop("_executed_characters_uc", None)
+        # 프롬프트 입력창에 직접 친 와일드카드를 생성 시점에 전개한다(desktop
+        # generation_controller 패리티). request.params 원본은 건드리지 않으므로
+        # prompt_fixed Auto Gen 반복마다 여기서 새로 전개 = 매 생성 재롤.
+        self._expand_input_wildcards(params)
         request.mark_processing()
         api_service = self._api_service()
         api_result = api_service.call_generation_api(params)
@@ -230,6 +239,74 @@ class HeadlessGenerationService:
             flush=True,
         )
         return stored
+
+    def _expand_input_wildcards(self, params: dict[str, Any]) -> None:
+        """프롬프트 입력창의 와일드카드(__wc__/__*wc__/__$m:s__/$wc/<wc>)를 생성 직전에
+        전개한다 — future01 ``generation_controller._expand_wildcards_in_input`` 패리티.
+
+        함께 처리(desktop 동일): 주석(#)/개행 제거, ``-태그``(`::` 없는 경우)를 네거티브로
+        이동, 와일드카드 라인의 global append 소비. 랜덤 경로 산출물처럼 토큰이 없는
+        프롬프트는 빠르게 통과한다. ``params``는 execute_request의 로컬 복사본이므로
+        요청 원본에는 토큰이 남아 반복 생성 시 매번 재전개(재롤)된다."""
+        text = params.get("input")
+        if not isinstance(text, str) or not text.strip():
+            return
+        # 빠른 통과: 와일드카드 문법 후보가 전혀 없으면 손대지 않는다.
+        if "__" not in text and "<" not in text and "$" not in text:
+            return
+        try:
+            import weakref
+
+            from core.prompt_context import PromptContext
+            from core.wildcard_processor import WildcardProcessor, split_tags_smart
+
+            prompt_context = getattr(self.context, "current_prompt_context", None)
+            if prompt_context is None:
+                # 순차(__*wc__) 카운터 공유를 위해 AppContext에 보관한다(desktop 동일).
+                prompt_context = PromptContext(
+                    source_row=pd.Series(dtype=object), settings={}
+                )
+                self.context.current_prompt_context = prompt_context
+
+            wildcard_manager = getattr(self.context, "wildcard_manager", None)
+            if wildcard_manager is None:
+                from core.wildcard_manager import WildcardManager
+
+                wildcard_manager = WildcardManager()
+                self.context.wildcard_manager = wildcard_manager
+            if getattr(wildcard_manager, "_app_context_ref", None) is None:
+                try:
+                    wildcard_manager._app_context_ref = weakref.ref(self.context)
+                except TypeError:
+                    pass
+
+            processor = WildcardProcessor(wildcard_manager)
+
+            negative = str(params.get("negative_prompt") or "")
+            cleaned_tags: list[str] = []
+            for tag in split_tags_smart(text):
+                processed = tag.replace("\n", "").strip()
+                if not processed or processed.startswith("#"):
+                    continue
+                if processed.startswith("-") and "::" not in processed:
+                    negative_tag = processed[1:].strip()
+                    if negative_tag:
+                        negative = f"{negative}, {negative_tag}" if negative else negative_tag
+                    continue
+                cleaned_tags.append(processed)
+
+            expanded_tags = processor.expand_tags(cleaned_tags, prompt_context)
+            result_parts = list(expanded_tags)
+            if prompt_context.global_append_tags:
+                result_parts.extend(prompt_context.global_append_tags)
+                prompt_context.global_append_tags.clear()
+
+            expanded_text = ", ".join(result_parts) if result_parts else text
+            if expanded_text != text:
+                params["input"] = expanded_text
+            params["negative_prompt"] = negative
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"⚠️ 입력 와일드카드 전개 실패(원본 사용): {exc}")
 
     def _api_service(self):
         service = getattr(self.context, "api_service", None)

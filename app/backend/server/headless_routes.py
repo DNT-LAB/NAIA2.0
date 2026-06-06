@@ -15,6 +15,7 @@ from app.backend.server.generation_commands import register_generation_rest_rout
 from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.module_storage_routes import register_module_storage_routes
+from app.backend.server.ollama_routes import register_ollama_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
 from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
 from app.backend.server.result_display_routes import register_result_display_routes
@@ -55,6 +56,7 @@ def register_headless_routes(
         start_generation_runner=ensure_generation_runner,
     )
     register_install_manager_routes(app, context, run_in_thread=run_in_thread)
+    register_ollama_routes(app, context, run_in_thread=run_in_thread)
     register_params_workflow_routes(
         app,
         context,

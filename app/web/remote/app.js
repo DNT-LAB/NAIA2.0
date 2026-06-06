@@ -548,6 +548,12 @@ const imageActionPopupReady = import('./js/features/imageActionPopup.mjs?v=20260
       onVibeTransfer: payload => callResultImageAction('requestPopupImageAction', payload, 'vibe'),
       onInsertHistory: payload => callResultImageAction('insertExternalToHistory', payload),
       onMetadata: payload => {
+        // 모바일은 메타데이터 탭이 없다 — 보이지 않는 곳에 로드하고 Result로
+        // 강제되는 침묵 동작 대신 명시적으로 안내한다.
+        if (!isDetachedShell && !isPC.matches) {
+          showToast('모바일에서는 메타데이터 탭을 지원하지 않습니다. PC 화면에서 확인하세요.', 'info');
+          return;
+        }
         if (!metadataViewer || typeof metadataViewer.displayPayload !== 'function') {
           showToast('Metadata viewer is not ready', 'error');
           return;
@@ -599,7 +605,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260603-director-ctx1')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260606-mobile-ui2')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -607,6 +613,8 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       fetch,
       showToast,
       escHtml,
+      // 모바일(비분리창)은 우측 탭이 없으므로 '탭에서 보기' 항목을 숨긴다.
+      canUseTabView: () => isDetachedShell || isPC.matches,
       getMode: () => currentMode || modeSelect.value || 'NAI',
       getCurrentSavedPath: () => resultHistory ? resultHistory.latestImagePath : '',
       onPasteImage: () => {
@@ -751,6 +759,21 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   })
   .catch(error => {
     console.error('Failed to initialize nai director modal module', error);
+  });
+// --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
+let ollamaAssistantPopup = null;
+const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260606-ollama7')
+  .then(({createOllamaAssistantPopup}) => {
+    ollamaAssistantPopup = createOllamaAssistantPopup({
+      document,
+      showToast,
+      escHtml,
+      // Electron 셸에서 설치 페이지(ollama.com)를 내부 팝업 대신 시스템 브라우저로.
+      openUrlInSystemBrowser,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize ollama assistant popup module', error);
   });
 // --- Grok 로그인 상태 추적 (제거 가능): progrok proxy 가 'ready'(OAuth 로그인 완료)일 때만 결과
 // 우클릭의 'Grok 변형/영상' 항목을 노출한다. Electron 전용(naiaShell 없으면 false=숨김 → 순수 브라우저도 숨김). ---
@@ -1060,7 +1083,7 @@ const tagSearchReady = import('./js/features/tagSearch.mjs?v=20260510-ime-compos
   .catch(error => {
     console.error('Failed to initialize tag search module', error);
   });
-const mobileViewportReady = import('./js/features/mobileViewport.mjs')
+const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-mobile-ui3')
   .then(({createMobileViewportController}) => {
     mobileViewportControl = createMobileViewportController({
       window,
@@ -1091,7 +1114,7 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260602-tagfil
   .catch(error => {
     console.error('Failed to initialize search panel module', error);
   });
-const chunkPanelReady = import('./js/features/chunkPanel.mjs')
+const chunkPanelReady = import('./js/features/chunkPanel.mjs?v=20260606-remote-entry1')
   .then(({createChunkPanel}) => {
     chunkPanelControl = createChunkPanel({
       document,
@@ -1109,6 +1132,7 @@ const chunkPanelReady = import('./js/features/chunkPanel.mjs')
       onPromptEdit,
       fireModuleOninput: _fireModuleOninput,
       escHtml,
+      onOpenRemote: target => openRemotePanel(target),
     });
   })
   .catch(error => {
@@ -2020,6 +2044,7 @@ const resultUnsavedActions = $('resultUnsavedActions');
 const resultUnsavedSaveBtn = $('resultUnsavedSaveBtn');
 const resultUnsavedDeleteBtn = $('resultUnsavedDeleteBtn');
 const naiDirectorBtn = $('naiDirectorBtn');
+const ollamaAssistantBtn = $('ollamaAssistantBtn');
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
@@ -3688,6 +3713,12 @@ function getDetachedModuleGeometry(moduleId) {
 }
 
 function switchRightTab(tabName, options = {}) {
+  // 모바일(<768px): 우측 탭 스트립을 숨기고 항상 Result 고정 — 다른 탭으로
+  // 전환되면 되돌아올 UI가 없다. (탭 기능은 리모트 패널로 대체 예정)
+  // 분리 창(detached metadata/module)은 pngInfo 전환에 의존하므로 예외.
+  if (!isDetachedShell && typeof isPC !== 'undefined' && !isPC.matches && tabName !== 'result') {
+    tabName = 'result';
+  }
   const activeTab = rightTabs ? rightTabs.switchTo(tabName) : tabName;
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
   if (activeTab === 'thumb' && thumbTabControl) thumbTabControl.load();
@@ -4115,6 +4146,20 @@ async function openNaiDirector(presetContext = null) {
   });
 }
 
+async function openOllamaAssistant() {
+  await ollamaAssistantPopupReady;
+  if (!ollamaAssistantPopup) {
+    showToast('Ollama 모듈을 불러오지 못했습니다.', 'error');
+    return;
+  }
+  ollamaAssistantPopup.open();
+}
+if (ollamaAssistantBtn) {
+  ollamaAssistantBtn.addEventListener('click', () => {
+    openOllamaAssistant();
+  });
+}
+
 function loadMetadataImageBlob(blob, label = 'Input Image') {
   if (!metadataViewer || typeof metadataViewer.loadImageBlob !== 'function') {
     showToast('Metadata viewer is not ready', 'error');
@@ -4379,6 +4424,16 @@ function onSession(m) {
 
 // ---- Drawer & Tabs ----
 const isPC = window.matchMedia('(min-width: 768px)');
+// 모바일 진입/전환 시 우측 탭을 Result로 강제 (모바일은 탭 스트립 자체가 숨김).
+// 분리 창은 좁아도 자체 탭(pngInfo 등)에 의존하므로 제외.
+if (!isDetachedShell) {
+  isPC.addEventListener?.('change', () => {
+    if (!isPC.matches) switchRightTab('result');
+  });
+  rightTabsReady.then(() => {
+    if (!isPC.matches) switchRightTab('result');
+  });
+}
 const layoutMediaQuery = isDetachedShell ? detachedDesktopMediaQuery : isPC;
 const isDesktopLayout = () => isDetachedShell || isPC.matches;
 function canUseDesktopImg2Img() {
@@ -4432,6 +4487,7 @@ function openFnPreset() {
   closeFnMenu();
   switchTab('preset');
 }
+
 
 function positionTranslatorPopup() {
   if (!translatorPopup || translatorPopup.hidden) return;
@@ -5358,6 +5414,12 @@ function setCloudflaredEnabled(enabled) {
 
 function copyCloudflaredUrl() {
   if (cloudflaredControls) cloudflaredControls.copyUrl();
+}
+
+// 리모트 패널 진입점 — 프롬프트 영역 컨텍스트 메뉴 최상단 "리모트" 항목.
+// 패널 본체(Dev0714 RemoteWindow 이식)는 후속 작업; 지금은 자리만 잡아둔다.
+function openRemotePanel(_target) {
+  showToast('리모트 패널은 준비 중입니다 — 다음 업데이트에서 제공됩니다.', 'info');
 }
 
 function applySetupGate(m) {
@@ -7076,7 +7138,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260525-tag-autocomplete-cache1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260606-remote-entry1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -7192,6 +7254,7 @@ Promise.all([
   wildcardManagerPanelReady,
   instantWildcardPanelReady,
   e621EventPanelReady,
+  ollamaAssistantPopupReady,
   imageModulePanelsReady,
   img2imgPanelReady,
   refinePanelReady,

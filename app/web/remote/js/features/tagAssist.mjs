@@ -2698,12 +2698,6 @@ export function createTagAssistController({
         imeState.settleTimer = window.setTimeout(settle, 50);
       }
     }
-    function hasTextSelection() {
-      return textarea.selectionStart != null
-        && textarea.selectionEnd != null
-        && textarea.selectionStart !== textarea.selectionEnd
-        && textarea.value.substring(textarea.selectionStart, textarea.selectionEnd).trim().length > 0;
-    }
     function rememberContextPointer(event) {
       lastContextPointer = {
         type: String(event.pointerType || ''),
@@ -2795,7 +2789,10 @@ export function createTagAssistController({
     textarea.addEventListener('contextmenu', e => {
       const chunkPanelControl = getChunkPanelControl();
       if (!allowChunkBridge || textarea === negEdit || textarea.classList.contains('mod-uc')) return;
-      if (!hasTextSelection() || !chunkPanelControl) return;
+      // 선택 없는 데스크톱 우클릭에도 메뉴를 띄운다(리모트/Paste/Select all 등) —
+      // 선택 의존 항목은 chunkPanel이 no-selection 클래스로 숨긴다. 모바일
+      // 롱프레스는 아래 shouldUseNativeTextContextMenu가 네이티브로 돌려보낸다.
+      if (!chunkPanelControl) return;
       if (shouldUseNativeTextContextMenu(e)) {
         chunkPanelControl.hideSelectionMenu?.();
         return;

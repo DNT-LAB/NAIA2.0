@@ -14,6 +14,7 @@ export function createChunkPanel({
   onPromptEdit,
   fireModuleOninput,
   escHtml,
+  onOpenRemote = null,
 }) {
   const CHUNK_PANEL_WIDTH = 420;
   const CHUNK_PANEL_MIN_WIDTH = 320;
@@ -268,19 +269,25 @@ export function createChunkPanel({
     selectionMenu.className = 'result-context-menu chunk-selection-menu';
     selectionMenu.innerHTML = `
       <div class="result-context-group">
+        <button class="result-context-item chunk-context-remote" type="button" data-action="open-remote">
+          <span>리모트</span><span class="result-context-arrow">›</span>
+        </button>
+      </div>
+      <div class="result-context-separator"></div>
+      <div class="result-context-group">
         <button class="result-context-item" type="button" data-action="undo"><span>Undo</span></button>
         <button class="result-context-item" type="button" data-action="redo"><span>Redo</span></button>
       </div>
       <div class="result-context-separator"></div>
       <div class="result-context-group">
-        <button class="result-context-item" type="button" data-action="cut"><span>Cut</span></button>
-        <button class="result-context-item" type="button" data-action="copy"><span>Copy</span></button>
+        <button class="result-context-item" type="button" data-action="cut" data-requires-selection="1"><span>Cut</span></button>
+        <button class="result-context-item" type="button" data-action="copy" data-requires-selection="1"><span>Copy</span></button>
         <button class="result-context-item" type="button" data-action="paste"><span>Paste</span></button>
         <button class="result-context-item" type="button" data-action="paste-plain"><span>Paste and match style</span></button>
         <button class="result-context-item" type="button" data-action="select-all"><span>Select all</span></button>
       </div>
-      <div class="result-context-separator"></div>
-      <div class="result-context-group">
+      <div class="result-context-separator" data-requires-selection="1"></div>
+      <div class="result-context-group" data-requires-selection="1">
         <button class="result-context-item chunk-context-add" type="button" data-action="add-chunk">
           <span>Add to Chunk</span><span class="result-context-arrow">›</span>
         </button>
@@ -349,7 +356,11 @@ export function createChunkPanel({
     hideSelectionMenu();
     if (target) target.focus();
     try {
-      if (action === 'add-chunk') {
+      if (action === 'open-remote') {
+        // 리모트 패널 진입점 (Dev0714 RemoteWindow 이식) — 본체는 호스트가 주입.
+        if (typeof onOpenRemote === 'function') onOpenRemote(target);
+        else showToast('리모트 패널은 준비 중입니다.', 'info');
+      } else if (action === 'add-chunk') {
         pendingAddPrefill = { value, key };
         openPanel(getAnchor(target), false);
       } else if (action === 'undo' || action === 'redo') {
@@ -395,13 +406,18 @@ export function createChunkPanel({
   }
 
   function showSelectionMenu(target, event) {
+    // 선택이 없어도 메뉴를 띄운다(데스크톱 마우스 우클릭) — 선택 의존 항목
+    // (Cut/Copy/Add to Chunk)은 no-selection 클래스로 숨긴다. 모바일 롱프레스는
+    // 호출부(tagAssist의 shouldUseNativeTextContextMenu)가 이미 네이티브로 보낸다.
+    if (!target || !event) return false;
     const selection = getSelectionText(target);
-    if (!selection || !event) return false;
     selectionMenuPayload = {
       target,
-      value: selection,
-      key: suggestKeyFromValue(selection),
+      value: selection || '',
+      key: selection ? suggestKeyFromValue(selection) : '',
     };
+    const menu = ensureSelectionMenu();
+    menu.classList.toggle('no-selection', !selection);
     placeSelectionMenu(event);
     return true;
   }

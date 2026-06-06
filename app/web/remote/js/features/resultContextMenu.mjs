@@ -95,7 +95,7 @@ const MAIN_IMAGE_MENU = [
     label: '메타데이터',
     capability: 'metadata',
     children: [
-      {label: '탭에서 보기', action: ACTION_METADATA},
+      {label: '탭에서 보기', action: ACTION_METADATA, desktopTabOnly: true},
       {label: '새 창으로 열기', action: ACTION_METADATA_DETACHED},
     ],
   },
@@ -154,7 +154,7 @@ const THUMBNAIL_MENU = [
     label: '메타데이터',
     capability: 'metadata',
     children: [
-      {label: '탭에서 보기', action: ACTION_METADATA, requiresPath: true},
+      {label: '탭에서 보기', action: ACTION_METADATA, requiresPath: true, desktopTabOnly: true},
       {label: '새 창으로 열기', action: ACTION_METADATA_DETACHED, requiresPath: true},
     ],
   },
@@ -203,6 +203,7 @@ export function createResultContextMenu({
   getMode = () => '',
   getCurrentSavedPath = () => '',
   canUseDesktopImg2Img = () => true,
+  canUseTabView = () => true,
   canOpenLocalFiles = () => false,
   isGrokReady = () => false,
 }) {
@@ -301,6 +302,8 @@ export function createResultContextMenu({
   function isItemEnabled(item, context) {
     if (!itemModeAllowed(item)) return false;
     if (item.desktopImg2Img && !(typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img())) return false;
+    // 모바일은 우측 탭 스트립이 없어 '탭에서 보기'가 무의미 — 항목 자체를 숨긴다.
+    if (item.desktopTabOnly && !(typeof canUseTabView === 'function' && canUseTabView())) return false;
     if (item.alwaysEnabled) return true;
     if (item.requiresPath && !context?.path) return false;
     if (item.children) {
@@ -370,6 +373,9 @@ export function createResultContextMenu({
       return '';
     }
     if (item.desktopImg2Img && !(typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img())) {
+      return '';
+    }
+    if (item.desktopTabOnly && !(typeof canUseTabView === 'function' && canUseTabView())) {
       return '';
     }
     // Grok 변형/영상은 progrok 로그인(ready) 시에만 노출 — 미로그인/순수 브라우저에선 항목 자체를 숨긴다.

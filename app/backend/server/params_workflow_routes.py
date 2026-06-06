@@ -37,45 +37,11 @@ def _resolution_store_path(context: WebSessionContext) -> Path:
     return context._save_path("resolutions.json")
 
 
-def _normalize_resolution_list_for_storage(values: Any) -> list[str]:
-    if not isinstance(values, list):
-        return []
-    normalized: list[str] = []
-    seen = set()
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        normalized.append(text)
-    return normalized
-
-
 def _load_resolutions_by_mode(context: WebSessionContext) -> dict[str, list[str]]:
-    mode_map = {mode: _default_resolutions_for_mode(mode) for mode in REMOTE_RESOLUTION_MODES}
-    path = context._existing_save_path("resolutions.json")
-    if not path.exists():
-        return mode_map
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return mode_map
-
-    legacy_items: list[str] = []
-    if isinstance(loaded, list):
-        legacy_items = _normalize_resolution_list_for_storage(loaded)
-    elif isinstance(loaded, dict):
-        legacy_items = _normalize_resolution_list_for_storage(loaded.get("resolutions"))
-    if legacy_items:
-        for mode in REMOTE_RESOLUTION_MODES:
-            mode_map[mode] = list(legacy_items)
-
-    if isinstance(loaded, dict):
-        for mode in REMOTE_RESOLUTION_MODES:
-            items = _normalize_resolution_list_for_storage(loaded.get(mode))
-            if items:
-                mode_map[mode] = items
-    return mode_map
+    # SSOT: 파싱/폴백(레거시 list·"resolutions" 키 포함)은 세션 상태 서비스의
+    # resolution_options_for_mode가 담당한다 — 스키마 페이로드·Auto Gen reroll과
+    # 동일한 해석을 보장.
+    return {mode: list(context.resolution_options_for_mode(mode)) for mode in REMOTE_RESOLUTION_MODES}
 
 
 def _write_resolutions_by_mode(context: WebSessionContext, mode_map: dict[str, list[str]]) -> None:
@@ -149,7 +115,10 @@ def _save_resolution_manager_state(context: WebSessionContext, mode: str, raw_it
     mode_map[normalized_mode] = cleaned
     _write_resolutions_by_mode(context, mode_map)
     if normalized_mode == context.get_api_mode():
-        context.remote_params["options_resolution"] = list(cleaned)
+        # options_resolution은 더 이상 remote_params에 기록하지 않는다 — 스키마
+        # 페이로드가 매번 resolutions.json을 재해석하므로(스테일 방지) 여기서는
+        # 현재 해상도가 목록을 벗어났을 때의 보정과 브로드캐스트만 수행한다.
+        context.remote_params.pop("options_resolution", None)
         if str(context.remote_params.get("resolution") or "") not in cleaned:
             context.remote_params["resolution"] = cleaned[0]
         context.publish("remote_params_changed", context.generation_param_schema_payload())

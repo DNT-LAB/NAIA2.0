@@ -2,15 +2,66 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 import re
 
 from core.headless_remote_state_service import HeadlessRemoteStateService
 
+# 해상도 매니저가 저장하는 모드 키 (params_workflow_routes.REMOTE_RESOLUTION_MODES와 동일).
+_RESOLUTION_MODES = ("NAI", "WEBUI", "COMFYUI")
+
+
+def _normalized_resolution_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
 
 class HeadlessSessionStateService:
     def __init__(self, context: Any):
         self.context = context
+
+    def resolution_options_for_mode(self, mode: str | None = None) -> list[str]:
+        """해상도 매니저가 저장한 모드별 해상도 목록 (없으면 표준 1MP 폴백).
+
+        ``save/resolutions.json``은 params_workflow_routes의 해상도 매니저가
+        쓰는 파일과 동일하다. 스키마 페이로드·Auto Gen 랜덤 해상도 reroll이
+        모두 이 함수를 모집단으로 쓰므로, 사용자가 목록을 줄이면 재시작 후에도
+        Rnd Res가 그 목록 안에서만 추첨된다.
+        """
+        from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
+
+        normalized_mode = str(mode or self.context.get_api_mode() or "NAI").strip().upper()
+        if normalized_mode not in _RESOLUTION_MODES:
+            normalized_mode = "NAI"
+        defaults = list(STANDARD_1MP_RESOLUTION_LABELS)
+        try:
+            path = self.context._existing_save_path("resolutions.json")
+            if not path.exists():
+                return defaults
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return defaults
+        items: list[str] = []
+        if isinstance(loaded, list):
+            # 레거시 포맷: 모드 구분 없는 단일 목록 → 모든 모드에 적용.
+            items = _normalized_resolution_list(loaded)
+        elif isinstance(loaded, dict):
+            # 모드별 키가 우선, 없으면 레거시 "resolutions" 키.
+            items = (
+                _normalized_resolution_list(loaded.get(normalized_mode))
+                or _normalized_resolution_list(loaded.get("resolutions"))
+            )
+        return items or defaults
 
     def autocomplete_status_payload(self) -> dict[str, Any]:
         return self.context.autocomplete_state.to_payload()
@@ -126,11 +177,11 @@ class HeadlessSessionStateService:
         # COMFYUI/ANIMA shares the 1MP band default; larger ANIMA resolutions are opt-in
         # via the Res Preset bands, so the resolution dropdown isn't flooded with the full
         # 512..1536 ANIMA range by default (user request: default to the 1024 band).
-        from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
-
         context = self.context
         mode = context.get_api_mode()
-        resolution_options = list(STANDARD_1MP_RESOLUTION_LABELS)
+        # 해상도 매니저가 저장한 모드별 목록을 매번 재해석한다 — 재시작/모드 전환
+        # 후에도 드롭다운(=Rnd Res 추첨 모집단)이 사용자 목록을 유지한다.
+        resolution_options = self.resolution_options_for_mode(mode)
         resolution = str(context.remote_params.get("resolution") or "832 x 1216")
         if resolution not in resolution_options:
             resolution_options.append(resolution)
@@ -214,6 +265,10 @@ class HeadlessSessionStateService:
                 "comfyui_workflow_type": context.remote_params.get("comfyui_workflow_type"),
             })
         payload.update(context.remote_params)
+        # remote_params에 남아 있을 수 있는 (다른 모드에서 저장된) 스테일
+        # options_resolution이 위 update로 덮어쓰지 못하게, 파일 기반 모드별
+        # 목록을 최종 확정한다.
+        payload["options_resolution"] = list(resolution_options)
         option_cache = getattr(context, "remote_option_cache", {}) or {}
         cached_options = option_cache.get(mode, {}) if isinstance(option_cache, dict) else {}
         for key in ("options_model", "options_sampler", "options_scheduler", "options_hr_upscaler"):

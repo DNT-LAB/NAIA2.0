@@ -660,6 +660,9 @@ class WebSessionContext:
     def generation_param_schema_payload(self) -> dict[str, Any]:
         return self._session_state_service().generation_param_schema_payload()
 
+    def resolution_options_for_mode(self, mode: str | None = None) -> list[str]:
+        return self._session_state_service().resolution_options_for_mode(mode)
+
     @staticmethod
     def _coerce_bool(value: Any) -> bool:
         from core.headless_remote_state_service import HeadlessRemoteStateService

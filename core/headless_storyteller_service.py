@@ -567,11 +567,19 @@ class HeadlessStorytellerService:
         if resolution == "default":
             return (None, None)
         if resolution == "random":
-            from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
+            # 해상도 매니저가 저장한 현재 모드의 사용자 목록에서 추첨 — 메인
+            # 파라미터의 Rnd Res와 동일한 모집단(폴백=표준 1MP).
+            try:
+                labels = list(self.context.resolution_options_for_mode())
+            except Exception:
+                labels = []
+            if not labels:
+                from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
 
-            if not STANDARD_1MP_RESOLUTION_LABELS:
+                labels = list(STANDARD_1MP_RESOLUTION_LABELS)
+            if not labels:
                 return (None, None)
-            return _parse_resolution_text(random.choice(STANDARD_1MP_RESOLUTION_LABELS))
+            return _parse_resolution_text(random.choice(labels))
         if resolution == "previous":
             try:
                 width = int(runtime.get("last_width"))

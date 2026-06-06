@@ -62,7 +62,7 @@ export function createEventStreamPanel({
 
   const RES_OPTIONS = [
     {value: 'default', label: '기본(현재 설정)'},
-    {value: 'random', label: 'Random'},
+    {value: 'random', label: 'Random(해상도 매니저 목록)'},
     {value: 'previous', label: 'Previous(직전 페이지)'},
     {value: '1024 x 1024', label: '1024 x 1024'},
     {value: '960 x 1088', label: '960 x 1088'},

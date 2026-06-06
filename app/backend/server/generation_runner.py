@@ -27,6 +27,7 @@ AUTO_GENERATE_SUPPRESSED_FLAGS = {
     "prompt_preset_thumbnail_request",
     "remote_preset_request",
     "result_enhance_request",
+    "sequence_preset_request",
     "studio_request",
     "turbo_sequence_request",
 }
@@ -493,6 +494,14 @@ def _reroll_random_resolution(context: WebSessionContext, overrides: dict[str, A
         preset = normalize_anima_resolution_preset_id(overrides.get("resolution_preset"))
         labels = ANIMA_RESOLUTION_PRESET_LABELS.get(preset) or ()
     if not labels:
+        # Res Preset이 아니면 해상도 매니저가 저장한 모드별 사용자 목록에서 추첨
+        # — 드롭다운(프론트 per-click 추첨)과 동일한 모집단. 목록을 2개로 줄였는데
+        # Auto Gen이 기본 7종 전체에서 뽑던 버그 수정.
+        try:
+            labels = tuple(context.resolution_options_for_mode(mode))
+        except Exception:
+            labels = ()
+    if not labels:
         labels = STANDARD_1MP_RESOLUTION_LABELS
     if not labels:
         return
@@ -586,6 +595,14 @@ async def _broadcast_generation_error(
         await broadcast_json(clients, {
             "type": "preset_generation_error",
             "requestId": str(params.get("remote_preset_request_id") or ""),
+            "message": message,
+        })
+    if params.get("sequence_preset_request"):
+        await broadcast_json(clients, {
+            "type": "sequence_preset_generation_error",
+            "requestId": str(params.get("sequence_preset_request_id") or ""),
+            "groupId": str(params.get("sequence_preset_group_id") or ""),
+            "step": str(params.get("sequence_preset_step") or ""),
             "message": message,
         })
     await broadcast_json(clients, context.queue_state_payload())

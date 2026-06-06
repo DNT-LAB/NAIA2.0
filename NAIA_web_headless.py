@@ -111,7 +111,11 @@ def main() -> int:
             f"NAIA Headless Web: port {requested_port} is busy; using {port}.",
             flush=True,
         )
-    context = WebSessionContext(remote_params={"web_session_port": port})
+    context = WebSessionContext(remote_params={
+        "web_session_port": port,
+        # LAN 접속 링크 노출 판단용 — 0.0.0.0(기본)일 때만 같은 네트워크 주소를 안내한다.
+        "web_session_bind_host": str(args.host or ""),
+    })
     app = create_headless_app(context)
     print(f"NAIA Headless Web backend: http://127.0.0.1:{port} (bind {args.host})", flush=True)
     if not args.no_browser and _env_flag("NAIA_HEADLESS_OPEN_BROWSER", default=True):

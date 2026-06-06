@@ -682,7 +682,7 @@ const moduleBadgesReady = import('./js/features/moduleBadges.mjs?v=20260527-auto
   .catch(error => {
     console.error('Failed to initialize module badges module', error);
   });
-const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v=20260604-cf-feedback1')
+const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v=20260606-lan-link2')
   .then(({createCloudflaredControls}) => {
     cloudflaredControls = createCloudflaredControls({
       document,
@@ -691,6 +691,7 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v
       getApiStatus: () => setupController ? setupController.getApiStatus() : null,
       navigator,
       showToast,
+      openUrlInSystemBrowser,
     });
   })
   .catch(error => {
@@ -771,7 +772,7 @@ const grokVideoHistoryReady = import('./js/features/grokVideoHistory.mjs?v=20260
     console.error('Failed to initialize grok video history module', error);
   });
 let dataMigrationPanel = null;
-const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=20260528-migration6')
+const dataMigrationReady = import('./js/features/dataMigrationPanel.mjs?v=20260606-migration7')
   .then(({createDataMigrationPanel}) => {
     dataMigrationPanel = createDataMigrationPanel({document, showToast});
   })
@@ -919,7 +920,7 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
   .catch(error => {
     console.error('Failed to initialize conditional prompt panel module', error);
   });
-const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260606-storyteller-steps9')
+const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260606-storyteller-steps10')
   .then(({createEventStreamPanel}) => {
     eventStreamPanel = createEventStreamPanel({
       document,

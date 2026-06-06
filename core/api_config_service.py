@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +16,54 @@ from core.web_shell_config import DEFAULT_WEB_SHELL_PORT
 
 
 VERIFY_TIMESTAMP_FILE = Path("NAIA_api_timestamps.json")
+
+# LAN IP 열거 캐시 (TTL 초). status_payload는 api_status 이벤트마다 불리므로
+# getaddrinfo를 매번 때리지 않는다. NIC 변경은 TTL 후 자연 반영.
+_LAN_IP_CACHE_TTL_SECONDS = 60.0
+_lan_ip_cache: tuple[float, list[str]] = (0.0, [])
+
+
+def _is_displayable_private_ip(text: str) -> bool:
+    """같은 공유기(사설망) 안에서 접속 가능한 IPv4만 노출한다."""
+    try:
+        ip = ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return ip.version == 4 and ip.is_private and not ip.is_loopback and not ip.is_link_local
+
+
+def private_lan_ips(*, max_count: int = 3) -> list[str]:
+    """이 호스트의 사설 IPv4 목록 (기본 라우트 우선, 최대 max_count개).
+
+    UDP connect 트릭은 패킷을 보내지 않고 기본 경로의 소스 IP만 알아낸다 —
+    멀티 NIC(가상 어댑터 포함)에서 실제 와이파이/이더넷 IP가 첫 번째로 온다.
+    """
+    global _lan_ip_cache
+    now = time.monotonic()
+    cached_at, cached = _lan_ip_cache
+    if cached and now - cached_at < _LAN_IP_CACHE_TTL_SECONDS:
+        return list(cached[:max_count])
+    ips: list[str] = []
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("8.8.8.8", 80))
+            primary = probe.getsockname()[0]
+        finally:
+            probe.close()
+        if _is_displayable_private_ip(primary):
+            ips.append(primary)
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            candidate = str(info[4][0])
+            if _is_displayable_private_ip(candidate) and candidate not in ips:
+                ips.append(candidate)
+    except OSError:
+        pass
+    _lan_ip_cache = (now, list(ips))
+    return ips[:max_count]
 
 
 @dataclass
@@ -109,6 +160,8 @@ class ApiConfigService:
         verify_nai_token: Callable[[str], api_verification.VerifyResult] = api_verification.verify_nai_token,
         verify_webui_url: Callable[[str], api_verification.VerifyResult] = api_verification.verify_webui_url,
         verify_comfyui_url: Callable[[str], api_verification.VerifyResult] = api_verification.verify_comfyui_url,
+        bind_host: str = "0.0.0.0",
+        lan_ip_provider: Callable[[], list[str]] = private_lan_ips,
     ):
         self.token_manager = token_manager
         self.timestamp_path = Path(timestamp_path)
@@ -116,6 +169,24 @@ class ApiConfigService:
         self._verify_nai_token = verify_nai_token
         self._verify_webui_url = verify_webui_url
         self._verify_comfyui_url = verify_comfyui_url
+        # 서버 바인드 호스트 — 루프백 바인드(127.0.0.1 등)면 LAN 링크를 숨긴다.
+        self.bind_host = str(bind_host or "0.0.0.0").strip()
+        self._lan_ip_provider = lan_ip_provider
+
+    def lan_access_urls(self) -> list[str]:
+        """같은 네트워크(Wi-Fi/유선)에서 접속 가능한 Remote Web 주소 목록.
+
+        바인드가 루프백이면 외부에서 접속 불가하므로 빈 목록. Cloudflared와
+        달리 서버 상태를 바꾸지 않는 표시 전용 정보다.
+        """
+        if self._is_loopback_host(self.bind_host):
+            return []
+        try:
+            ips = list(self._lan_ip_provider() or [])
+        except Exception:
+            return []
+        port = int(self.cloudflared.port or DEFAULT_WEB_SHELL_PORT)
+        return [f"http://{ip}:{port}/" for ip in ips]
 
     def timestamps(self) -> dict[str, str]:
         try:
@@ -175,6 +246,9 @@ class ApiConfigService:
         payload["cloudflared_active"] = cloudflared["active"]
         payload["cloudflared_url"] = cloudflared["url"]
         payload["cloudflared_status_text"] = cloudflared["status_text"]
+        # 같은 네트워크(LAN) 접속 링크 — 표시 전용. Cloudflared(공개 터널)보다
+        # 노출 범위가 좁고, 민감 라우트는 어차피 루프백 게이트가 막는다.
+        payload["lan_urls"] = self.lan_access_urls()
         if client_host is not None:
             allowed, reason = self.setup_gate(client_host)
             payload["setup_allowed"] = allowed

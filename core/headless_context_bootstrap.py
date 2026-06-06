@@ -116,5 +116,8 @@ def create_api_config_service(context: Any) -> ApiConfigService:
     return ApiConfigService(
         context.secure_token_manager,
         cloudflared=cloudflared,
+        # 진입점(NAIA_web_headless)이 기록한 실제 바인드 호스트. 키가 없으면
+        # 패키지/포터블 기본(0.0.0.0)으로 간주해 LAN 링크를 노출한다.
+        bind_host=str(context.remote_params.get("web_session_bind_host") or "0.0.0.0"),
         **({"timestamp_path": timestamp_path} if timestamp_path is not None else {}),
     )

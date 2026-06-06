@@ -15722,6 +15722,16 @@ select.setup-input { cursor: pointer; }
   color: var(--text-primary);
   text-decoration: underline;
 }
+.setup-lan-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.setup-lan-hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin: 0;
+}
 
 .setup-migration {
   margin-top: 22px;

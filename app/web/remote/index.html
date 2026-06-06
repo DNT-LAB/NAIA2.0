@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260606-storyteller-steps10">
+<link rel="stylesheet" href="style.css?v=20260606-lan-link1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -136,6 +136,14 @@
             <button class="setup-btn-ghost" id="setupBtnGrokLogout" onclick="grokLogout()">로그아웃</button>
           </div>
           <div class="setup-result" id="setupResultGrok"></div>
+        </div>
+        <div class="setup-cloudflared hidden" id="setupLanSection">
+          <div class="setup-cloudflared-head">
+            <span class="setup-cloudflared-title">같은 네트워크(Wi-Fi) 접속</span>
+            <span class="setup-cloudflared-status">사용 가능</span>
+          </div>
+          <div class="setup-lan-links" id="setupLanLinks"></div>
+          <p class="setup-sub setup-lan-hint">같은 공유기에 연결된 기기(휴대폰·태블릿)에서 위 주소로 접속할 수 있습니다. 접속이 안 되면 Windows 방화벽의 NAIA(Python) 허용과 공유기 AP 격리 설정을 확인하세요.</p>
         </div>
         <div class="setup-cloudflared hidden" id="setupCloudflaredSection">
           <div class="setup-cloudflared-head">
@@ -1077,6 +1085,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260605-storyteller-steps8"></script>
+<script src="app.js?v=20260606-lan-link2"></script>
 </body>
 </html>

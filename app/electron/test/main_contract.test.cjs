@@ -81,7 +81,7 @@ function loadMain({
   const electron = {
     app,
     BrowserWindow,
-    ipcMain: { handle() {} },
+    ipcMain: { handle() {}, on() {} },
     Menu: {
       setApplicationMenu(menu) {
         menuCalls.push(menu);
@@ -679,6 +679,71 @@ test("runtime install gate auto-downloads when NAIA_ELECTRON_AUTO_TAG_DOWNLOAD=1
     assert.ok(
       calls.slice(2).every((c) => c === "GET /api/install-manager"),
       "after auto-download the gate only polls",
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("runtime install gate treats an already-active download as the made choice", async () => {
+  // ``naia:restart-backend`` auto-arms the tag-archive download when a
+  // migration finished without tag data, BEFORE the gate (re)runs. The gate
+  // must then show download progress immediately instead of flashing the
+  // two-choice screen or re-POSTing the download.
+  const calls = [];
+  let polls = 0;
+  const server = http.createServer((req, res) => {
+    calls.push(`${req.method} ${req.url}`);
+    res.setHeader("content-type", "application/json");
+    if (req.method === "POST" && req.url === "/api/install-manager/initialize") {
+      res.end(JSON.stringify({
+        ok: true,
+        tag_archive: {
+          ready: false, file_count: 0, expected_count: 2,
+          // A download is already running (armed by the restart handler).
+          download: { active: true, phase: "tag_archive", percent: 5, message: "downloading" },
+        },
+      }));
+      return;
+    }
+    if (req.method === "GET" && req.url === "/api/install-manager") {
+      polls += 1;
+      res.end(JSON.stringify({
+        ok: true,
+        tag_archive: {
+          ready: polls >= 2, file_count: polls >= 2 ? 2 : 1, expected_count: 2,
+          download: {
+            active: polls < 2,
+            phase: polls >= 2 ? "complete" : "tag_archive",
+            percent: polls >= 2 ? 100 : 55,
+            message: polls >= 2 ? "complete" : "downloading",
+            done: polls >= 2,
+          },
+        },
+      }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end(JSON.stringify({ ok: false, error: "not found" }));
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const { api } = loadMain({ isPackaged: true });
+    const address = server.address();
+    const ready = await api.ensureRuntimeInstallReady(`http://127.0.0.1:${address.port}`, {
+      pollIntervalMs: 5,
+      timeoutMs: 1000,
+    });
+    assert.equal(ready, true);
+    assert.ok(
+      !calls.includes("POST /api/install-manager/tag-archive/download"),
+      "gate must not re-POST an already-active download",
+    );
+    assert.equal(calls[0], "POST /api/install-manager/initialize");
+    assert.ok(
+      calls.slice(1).every((c) => c === "GET /api/install-manager"),
+      "after adopting the active download the gate only polls",
     );
   } finally {
     await new Promise((resolve) => server.close(resolve));

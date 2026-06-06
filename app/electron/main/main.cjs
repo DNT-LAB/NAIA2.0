@@ -7,6 +7,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
 const net = require("node:net");
+const os = require("node:os");
 const path = require("node:path");
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -1411,6 +1412,16 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
     // Arm the deadline and skip the awaiting_choice state; the unified poll
     // loop below treats this exactly like a user-initiated download.
     runtimeInstallChoiceMade = true;
+  } else if (initialized && initialized.tag_archive && initialized.tag_archive.download
+      && initialized.tag_archive.download.active) {
+    // A tag-archive download is already running — e.g. ``naia:restart-backend``
+    // auto-armed it because a migration finished without tag data. Treat it as
+    // the download choice immediately instead of flashing ``awaiting_choice``
+    // for one poll interval (the loop below would recover via download.active,
+    // but the maintenance view would briefly show the two-choice CTA).
+    runtimeInstallChoiceMade = true;
+    bootstrapMigrationActive = false;
+    setRuntimeInstallState(normalizeRuntimeInstallState(initialized, { active: true }));
   } else {
     // Do NOT auto-trigger the Hugging Face download. A returning user with a
     // previous NAIA2.0 install can carry the ~1.4 GB tag corpus over via the
@@ -1437,7 +1448,17 @@ async function runRuntimeInstallGate(baseUrl, options = {}) {
     await delay(pollIntervalMs);
     let current;
     try {
-      current = await httpJsonRequest(`${apiBase}/api/install-manager`);
+      // Re-resolve the backend URL every iteration: a user-initiated restart
+      // (``naia:restart-backend`` during bootstrap migration) respawns the
+      // backend with --auto-port, so the port can change while this gate is
+      // still in flight. Polling the captured launch-time ``apiBase`` would
+      // then hit a dead port forever. Only trust the global ``backendUrl``
+      // once a spawned backend confirmed its port — explicit-base callers
+      // (the contract tests pass a mock server URL without spawning) must
+      // keep polling the ``baseUrl`` they were given.
+      const pollBase = String(backendPortConfirmed && backendUrl ? backendUrl : apiBase)
+        .replace(/\/+$/, "");
+      current = await httpJsonRequest(`${pollBase}/api/install-manager`);
     } catch (pollError) {
       // The backend can be momentarily unreachable during a user-initiated
       // restart (the "NAIA 재시작" button in the migration popup). Treat the
@@ -2199,10 +2220,41 @@ ipcMain.handle("naia:restart-backend", async () => {
   // migration: clearing this lets the still-pending install gate finish once
   // the freshly-restarted backend reports tag data ready.
   bootstrapMigrationActive = false;
+  // Show the maintenance view FIRST: the install gate's progress/choice UI only
+  // renders there, so a restart that has to wait on the gate (e.g. tag data
+  // still missing after a migration) would otherwise look like a hang on
+  // whatever page issued the restart (bootstrap.html just shows "재시작 중…").
+  // Contract note: navigating here destroys the renderer context that issued
+  // this invoke, so the returned promise may never settle for that caller —
+  // this was already the case via the final loadURL below, and every caller
+  // (maintenance.html, dataMigrationPanel, smoke_electron_cdp's
+  // "navigated or closed" handler) tolerates it.
+  loadMaintenance("loading", "NAIA 재시작 중...");
   stopBackend();
   await new Promise((resolve) => setTimeout(resolve, 750));
   backendState = "starting";
   const url = await ensureBackendReady();
+  // Tag data is mandatory runtime data. If the restart finds it missing (a
+  // migration whose source had no data/tags, or a partial copy), start the
+  // Hugging Face download now so the gate shows download progress instead of
+  // parking on the two-choice screen again. Skipped when the gate itself is
+  // disabled (dev runs) so a source checkout never auto-downloads ~1.4 GB.
+  if (shouldRunRuntimeInstallGate()) {
+    try {
+      const status = await httpJsonRequest(`${url}/api/install-manager`);
+      if (!runtimeInstallReadyFromPayload(status)) {
+        const started = await httpJsonRequest(
+          `${url}/api/install-manager/tag-archive/download`,
+          { method: "POST" },
+        );
+        runtimeInstallChoiceMade = true;
+        setRuntimeInstallState(normalizeRuntimeInstallState(started, { active: true }));
+      }
+    } catch (error) {
+      // Non-fatal: the gate below still runs and surfaces its own state.
+      appendBackendLog("shell", `restart tag-data check failed: ${error && error.message}`);
+    }
+  }
   await ensureRuntimeInstallReady(url);
   if (mainWindow && !mainWindow.isDestroyed()) {
     await mainWindow.loadURL(remoteEntryUrl(url));
@@ -2300,6 +2352,19 @@ function grokRuntimeRoot() {
 function grokProgrokEntry() {
   const entry = path.join(grokRuntimeRoot(), "node_modules", "progrok", "dist", "index.js");
   return fs.existsSync(entry) ? entry : null;
+}
+
+// progrok stores its OAuth tokens at ~/.progrok/auth.json (CONFIG_DIR/AUTH_FILE
+// in progrok's token store; we spawn it without overriding HOME). Used to skip
+// the startup proxy spawn for users who never logged in — for them the proxy
+// is started lazily by ``naia:grok-login`` (which always restarts the proxy
+// when the login process exits) or the manual ``naia:grok-restart-proxy``.
+function grokAuthFilePresent() {
+  try {
+    return fs.existsSync(path.join(os.homedir(), ".progrok", "auth.json"));
+  } catch (_e) {
+    return false;
+  }
 }
 
 function spawnGrok(args, opts = {}) {
@@ -2511,7 +2576,15 @@ if (!lock) {
     // Resolve the Grok proxy port first so the backend env carries it (multi-instance).
     await resolveGrokProxyPort();
     createMainWindow();
-    startGrokProxy(); // Grok(제거 가능): 번들 progrok 프록시 자동 기동
+    // Grok(제거 가능): 로그인 흔적(~/.progrok/auth.json)이 있는 사용자만 번들
+    // progrok 프록시를 자동 기동. 미로그인 유저에게는 프로세스를 띄우지 않고
+    // auth_required 상태만 노출 — 로그인(naia:grok-login) 종료 시 기존 로직이
+    // 프록시를 기동한다.
+    if (grokAuthFilePresent()) {
+      startGrokProxy();
+    } else {
+      setGrokProxyState(grokProgrokEntry() ? "auth_required" : "unavailable");
+    }
   });
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -3,7 +3,7 @@
 // a previous install, preview buckets, import, then the run button becomes the
 // red "NAIA 재시작" which restarts the backend and lets the install gate finish
 // — at which point the Electron shell loads the real app in an expanded window.
-import { createDataMigrationPanel } from './dataMigrationPanel.mjs?v=20260528-migration6';
+import { createDataMigrationPanel } from './dataMigrationPanel.mjs?v=20260606-migration7';
 
 const toastEl = document.getElementById('bootstrapToast');
 

@@ -11,6 +11,9 @@ export function createDataMigrationPanel({document, showToast, onImported = () =
   const byId = id => document.getElementById(id);
   let currentSource = '';
   let busy = false;
+  // 미리보기에서 소스에 data/tags가 없었는지 — import 완료 메시지에 "재시작 시
+  // 자동 다운로드" 안내를 덧붙이는 데 쓴다.
+  let tagsMissingInSource = false;
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -49,6 +52,7 @@ export function createDataMigrationPanel({document, showToast, onImported = () =
   function renderPreview(preview) {
     const body = byId('setupMigrationBody');
     if (!body) return;
+    tagsMissingInSource = false;
     if (!preview || preview.error) {
       body.classList.add('hidden');
       body.innerHTML = '';
@@ -63,14 +67,25 @@ export function createDataMigrationPanel({document, showToast, onImported = () =
       setResult('선택한 폴더에서 가져올 NAIA 데이터를 찾지 못했습니다.', 'error');
       return;
     }
-    const rows = present.map(b => `
+    // 태그 코퍼스(data/tags)는 첫 실행 게이트의 필수 데이터 — 소스에 있으면
+    // 강제 포함(checked+disabled; disabled여도 .checked 수집에는 포함된다).
+    // 소스에 없으면 재시작 시 자동 다운로드가 이어진다는 안내를 띄운다.
+    const TAG_BUCKET = 'data/tags';
+    const rows = present.map(b => {
+      const mandatory = b.bucket === TAG_BUCKET;
+      return `
       <label class="setup-meta-line" style="cursor:pointer;gap:8px">
         <span style="display:flex;align-items:center;gap:6px">
-          <input type="checkbox" class="cond-mig-bucket" data-bucket="${esc(b.bucket)}" checked>
-          ${esc(b.label)} <span class="setup-meta-val">(${b.file_count}개 · ${fmtBytes(b.total_bytes)})</span>
+          <input type="checkbox" class="cond-mig-bucket" data-bucket="${esc(b.bucket)}" checked${mandatory ? ' disabled' : ''}>
+          ${esc(b.label)}${mandatory ? ' <span class="setup-meta-val">(필수)</span>' : ''} <span class="setup-meta-val">(${b.file_count}개 · ${fmtBytes(b.total_bytes)})</span>
         </span>
         <span class="setup-meta-val">${b.conflict_count > 0 ? `중복 ${b.conflict_count}` : '신규'}</span>
-      </label>`).join('');
+      </label>`;
+    }).join('');
+    tagsMissingInSource = !present.some(b => b.bucket === TAG_BUCKET);
+    const tagNote = tagsMissingInSource
+      ? `<p class="setup-sub" style="color:var(--text-dim)">ⓘ 이전 설치에 태그 데이터가 없습니다 — 가져오기 후 "NAIA 재시작" 시 태그 데이터 다운로드(~1.4 GB)가 자동으로 진행됩니다.</p>`
+      : '';
     const credNote = preview.credentials?.present
       ? `<p class="setup-sub" style="color:var(--text-dim)">⚠ ${esc(preview.credentials.note)}</p>`
       : '';
@@ -95,6 +110,7 @@ export function createDataMigrationPanel({document, showToast, onImported = () =
       <div class="setup-meta-line"><span>가져올 위치</span><span class="setup-meta-val" title="${esc(preview.source)}">${esc(preview.source)}</span></div>
       <div class="setup-meta-line"><span>대상</span><span class="setup-meta-val" title="${esc(preview.user_root)}">${esc(preview.user_root)}</span></div>
       ${rows}
+      ${tagNote}
       ${credNote}
       <label class="setup-meta-line" style="gap:8px"><span>중복 파일</span>
         <select id="setupMigrationConflict" class="setup-meta-val">
@@ -220,7 +236,10 @@ export function createDataMigrationPanel({document, showToast, onImported = () =
         setResult(msg, 'warning');
         toast(`일부 파일을 가져오지 못했습니다 (${failed}개 실패)`, 'error');
       } else {
-        const msg = `가져오기 완료 — ${parts.join(' · ')}. 변경 사항은 재시작 후 적용됩니다.`;
+        const tagSuffix = tagsMissingInSource
+          ? ' 태그 데이터가 없어 재시작 시 다운로드가 자동으로 진행됩니다.'
+          : '';
+        const msg = `가져오기 완료 — ${parts.join(' · ')}. 변경 사항은 재시작 후 적용됩니다.${tagSuffix}`;
         setResult(msg, 'success');
         toast(msg, 'success');
       }

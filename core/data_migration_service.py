@@ -291,6 +291,18 @@ class DataMigrationService:
 
         conflict = conflict if conflict in {"skip", "overwrite"} else "skip"
         selected = set(include) if include is not None else {bucket for bucket, _, _ in MIGRATION_BUCKETS}
+        # 태그 코퍼스(data/tags)는 첫 실행 게이트의 필수 런타임 데이터: 소스에
+        # 존재하면 호출자의 선택과 무관하게 항상 포함한다. 빼고 가져오면 재시작
+        # 게이트가 태그 없음으로 빠져 다운로드부터 다시 해야 한다 (프론트도
+        # 체크박스를 강제하지만, 구버전 프론트/직접 API 호출을 방어).
+        # 단, 호출자가 명시적으로 제외했던 버킷을 강제 포함하는 경우에는 전역
+        # conflict="overwrite"를 적용하지 않는다(빠진 파일만 채움) — 사용자가
+        # 동의하지 않은 기존 타깃 코퍼스 덮어쓰기를 막는다.
+        tag_src = source / "data/tags"
+        forced_tag_bucket = False
+        if (tag_src.is_dir() or tag_src.is_file()) and "data/tags" not in selected:
+            selected.add("data/tags")
+            forced_tag_bucket = True
 
         copied: dict[str, int] = {}
         total_files = 0
@@ -306,11 +318,14 @@ class DataMigrationService:
             if not (src.is_dir() or src.is_file()):
                 continue
             target = self._target_dir(target_rel)
+            # 강제 포함된 data/tags는 호출자가 overwrite에 동의한 적이 없으므로
+            # 항상 skip 의미론(빠진 파일만 복사)으로 처리한다.
+            bucket_conflict = "skip" if (forced_tag_bucket and bucket == "data/tags") else conflict
             bucket_files = 0
             for path in _iter_files(src, bucket=bucket):
                 dest = _bucket_target_for(path, src, target)
                 if dest.exists():
-                    if conflict == "skip":
+                    if bucket_conflict == "skip":
                         skipped_existing += 1
                         continue
                     overwritten += 1

@@ -343,6 +343,15 @@ class HeadlessGenerationService:
         overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else {}
         params.update(overrides)
 
+        # Seed Fix가 꺼져 있으면, 이 요청(overrides)이 시드를 명시하지 않는 한 직전
+        # 생성이 remote_params/스키마에 남긴 구체 시드를 재사용하지 않도록 리셋한다 —
+        # 프리셋 탭 Generate·Event/Sequence Preset·Refine 등 시드를 안 보내는 경로가
+        # 같은 시드로 반복 생성되는 버그 방지(-1은 _normalize_numbers가 NAI면 재추첨,
+        # WEBUI/COMFYUI면 백엔드 랜덤화에 위임). 시드 재현 경로(Enhance replay)는
+        # seed_fixed=True와 함께 시드를 명시하므로 영향 없다(result_commands.py).
+        if "seed" not in overrides and not self._to_bool(params.get("seed_fixed")):
+            params["seed"] = -1
+
         prompt = command.get("prompt")
         negative = command.get("negative_prompt")
         if prompt is not None:

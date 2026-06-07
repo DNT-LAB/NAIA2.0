@@ -172,6 +172,17 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     if (excEl) state.query.exclude = excEl.value;
   }
 
+  // 현재 검색 필터 페이로드 — 생성/연속 추첨 모집단(전체 매칭)을 백엔드가 동일 조건으로 잡도록.
+  function searchPayload() {
+    collectInputs();
+    const q = state.query;
+    return {
+      include: q.include, exclude: q.exclude,
+      ratings: Array.from(q.ratings),
+      frameCounts: Array.from(q.cuts),
+    };
+  }
+
   // -------------------------------------------------------------- 검색/생성
   async function runSearch(opts = {}) {
     collectInputs();
@@ -215,21 +226,45 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     if (state.busy) return;
     state.busy = true; renderPopup();
     try {
-      const out = await postJson('/api/sequence-preset/generate', {groupId: Number(groupId)});
+      const out = await postJson('/api/sequence-preset/generate',
+        {groupId: Number(groupId), ...searchPayload()});
       const failed = (out.frames || []).filter(f => !f.ok);
       if (!out.ok) {
-        showToast(`생성 등록 실패: ${failed.length ? failed[0].error : '자격증명/큐 확인'}`, 'error');
+        showToast(`생성 등록 실패: ${failed.length ? failed[0].error : (out.error || '자격증명/큐 확인')}`, 'error');
       } else if (failed.length) {
         const detail = failed.map(f => `컷${f.index + 1}(${f.error || 'failed'})`).join(', ');
         showToast(`${out.total}컷 중 ${out.enqueued}컷 등록 · 실패: ${detail}`, 'warning');
       } else {
-        showToast(`${out.total}컷 생성 큐 등록`, 'success');
+        showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)`
+                              : `${out.total}컷 생성 큐 등록`, 'success');
       }
     } catch (error) {
       showToast(`생성 실패: ${error.message}`, 'error');
     } finally {
       state.busy = false; renderPopup();
     }
+  }
+
+  // 메인 Random(Alt+Enter) — Sequence 컨텍스트. 현재 매칭 전체에서 랜덤 그룹 1개를 연속 생성.
+  // Auto Gen ON 이면 백엔드 러너가 라운드 완료마다 다음 랜덤 그룹으로 이어간다.
+  async function runRandomGenerate() {
+    if (state.busy) return true;
+    state.busy = true;
+    try {
+      const out = await postJson('/api/sequence-preset/random-generate', searchPayload());
+      if (!out.ok) {
+        const failed = (out.frames || []).filter(f => !f.ok);
+        showToast(`연속 생성 실패: ${failed.length ? failed[0].error : (out.error || '매칭/자격증명/큐 확인')}`, 'error');
+      } else {
+        showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)`
+                              : `${out.total}컷 생성 큐 등록 (그룹 #${out.groupId})`, 'success');
+      }
+    } catch (error) {
+      showToast(`연속 생성 실패: ${error.message}`, 'error');
+    } finally {
+      state.busy = false;
+    }
+    return true;
   }
 
   // -------------------------------------------------------------- body 렌더
@@ -342,5 +377,17 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
 
   return {
     onOpen() { ensureReady(); },
+    // 메인 하단 버튼 라우팅용(app.js). Sequence 탭 활성일 때 Ctrl/Alt+Enter 가 위임된다.
+    hasOpenGroup() {
+      return !!(popupEl && popupEl.classList.contains('open') && state.openGroupId != null);
+    },
+    generateOpenGroup() {  // req1: 보고 있는 그룹의 '연속 생성'. 열린 그룹 없으면 false(폴백).
+      if (popupEl && popupEl.classList.contains('open') && state.openGroupId != null) {
+        generateGroup(state.openGroupId);
+        return true;
+      }
+      return false;
+    },
+    randomGenerate() { return runRandomGenerate(); },  // req2/3: 랜덤 그룹 연속 생성
   };
 }

@@ -197,6 +197,10 @@ class HeadlessStorytellerService:
             return self._error_state(
                 "다른 Event Stream(예: Sequence)이 무장돼 있습니다. 먼저 정지한 뒤 시작하세요."
             )
+        if self.context._sequence_run_service().is_running():
+            return self._error_state(
+                "시퀀스 연속 생성이 실행 중입니다. 정지한 뒤 시작하세요."
+            )
         steps = self._parse_steps_value(value)
         if steps:
             self.save_steps(steps)
@@ -253,6 +257,10 @@ class HeadlessStorytellerService:
         if self._foreign_event_stream_active():
             return self._error_state(
                 "다른 Event Stream(예: Sequence)이 무장돼 있습니다. 먼저 정지한 뒤 시작하세요."
+            )
+        if self.context._sequence_run_service().is_running():
+            return self._error_state(
+                "시퀀스 연속 생성이 실행 중입니다. 정지한 뒤 시작하세요."
             )
         # Don't start on top of an in-flight queue/generation.
         if getattr(self.context, "is_generating", False):

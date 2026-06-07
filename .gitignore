@@ -240,4 +240,8 @@ ui/event_preset/build_quick_event_combos.py
 ui/terminal/.cli/*
 !ui/terminal/.cli/stickman_prompt_guide.md
 stickman_canvas_tmp.webp
-data/sequence_preset/events_v1.parquet
+data/sequence_preset/
+tools/sequence_preset/build_events.py
+mcps/
+.tmp_*
+tools/ollama_assist_eval.py

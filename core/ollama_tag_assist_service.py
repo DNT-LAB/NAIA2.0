@@ -880,6 +880,30 @@ class OllamaTagAssistService:
         )
         return result
 
+    def scene_boost(
+        self, prompt: str, *, model: str | None = None, options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Scene Boost — 기존 프롬프트(주로 danbooru 태그)를 **원샷**으로 배경/구도/분위기
+        보강한다. 전 로직은 core/scene_boost(순수·테스트가능)가 보유하고, 여기선 실제
+        callable만 주입한다. 주체/의상/행위/인원/저작권 불변 — 검증된 구도 태그 +
+        드리프트·에코·한글 필터를 통과한 자연어만 덧붙인다.
+
+        best-effort: 어떤 실패에서도 raise하지 않고 원문 그대로(additions 빈)로 반환.
+        (요청대로 GUI 미연결 — 라우트/프런트는 아직 붙이지 않는다.)
+        """
+        from core.scene_boost import run_scene_boost
+        return run_scene_boost(
+            prompt, options or {},
+            chat=self._chat,
+            default_model=str(model or self.default_model),
+            tag_rating=_tag_rating,
+            validate_tag=self._validate_tag,
+            tag_allowed=_tag_allowed,
+            is_sexual=_is_sexual_tag,
+            is_hardcore=lambda t: any(kw in str(t).lower() for kw in _HARDCORE_KEYWORDS),
+            has_hangul=_has_hangul,
+        )
+
     def _recover_tag(
         self, normalized: str, seen: set[str], *, max_rating: str = "e",
     ) -> dict[str, Any] | None:

@@ -58,6 +58,14 @@ const PE_QUICK_PRESET_GUIDE = [
 
 const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
 
+// Ollama Auto Boost — readiness gating. Mirrors the model used by the Ollama
+// assistant popup (ollamaAssistantPopup.mjs DEFAULT_MODEL). "ready" means the
+// local Ollama is installed AND its server is running AND the target model is
+// present (installed && running && model_installed).
+const PE_OLLAMA_MODEL = 'hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M';
+const PE_OLLAMA_POLL_MS = 5000;
+const PE_OLLAMA_BOOST_GUIDE = 'Ollama가 준비됐을 때만 켤 수 있음 · 매 생성 직전 프롬프트를 자연어 배경/구도/분위기로 보강 · 저장/프리셋에 기록되지 않음(항상 OFF로 시작)';
+
 // 섹션 헤더 우측 [ⓘ 가이드] 버튼 문구. \n\n 은 단락 구분 (툴팁 엔진이 변환).
 const PE_PREFIX_GUIDE = [
   'Prefix Prompt — 랜덤 프롬프트 앞에 결합됩니다. NAI에서는 보통 아티스트 태그를 나열합니다. WEBUI/COMFYUI에서 Anima 계열 모델을 쓴다면 퀄리티 프롬프트도 여기에 포함하세요.',
@@ -103,7 +111,85 @@ export function createPromptEngineeringPanel({
   moduleBody,
   escHtml,
   bindTagAssist,
+  setOllamaAutoBoost = () => {},
 }) {
+  // Ollama readiness gating state for the "Ollama Auto Boost" checkbox. We poll
+  // /api/ollama/status while the PE panel is mounted and reflect ready/not-ready
+  // onto the checkbox (enabled vs disabled) in-place, without a full re-render.
+  let ollamaReady = false;
+  let ollamaBoostOn = false;          // last-known desired state from module_state
+  let ollamaPollTimer = null;
+  let ollamaStatusInFlight = false;
+
+  function isBoostCheckboxMounted() {
+    const el = document.getElementById('peOllamaBoostCheckbox');
+    return !!(el && el.isConnected);
+  }
+
+  function applyOllamaBoostGating() {
+    const checkbox = document.getElementById('peOllamaBoostCheckbox');
+    if (!checkbox) return;
+    const hint = document.getElementById('peOllamaBoostHint');
+    checkbox.disabled = !ollamaReady;
+    // When Ollama is down the toggle can never be armed.
+    checkbox.checked = ollamaReady && ollamaBoostOn;
+    // Grey out the whole row inline (no style.css dependency) so it reads as
+    // disabled and is not clickable while Ollama is not ready.
+    checkbox.style.cursor = ollamaReady ? '' : 'not-allowed';
+    const item = checkbox.closest('.mod-checkbox-item');
+    if (item) {
+      item.classList.toggle('mod-checkbox-disabled', !ollamaReady);
+      item.style.opacity = ollamaReady ? '' : '0.4';
+      item.style.cursor = ollamaReady ? '' : 'not-allowed';
+    }
+    if (hint) hint.style.display = ollamaReady ? 'none' : '';
+  }
+
+  async function pollOllamaStatus() {
+    // Panel was closed/unmounted — stop polling to avoid needless fetches.
+    if (!isBoostCheckboxMounted()) {
+      stopOllamaPolling();
+      return;
+    }
+    if (ollamaStatusInFlight) return;
+    ollamaStatusInFlight = true;
+    let ready = false;
+    try {
+      const url = `/api/ollama/status?model=${encodeURIComponent(PE_OLLAMA_MODEL)}`;
+      const response = await fetch(url);
+      const data = await response.json().catch(() => null);
+      ready = !!(data && data.installed === true && data.running === true && data.model_installed === true);
+    } catch (error) {
+      // Treat any fetch/parse failure as "not ready" — never crash the panel.
+      ready = false;
+    } finally {
+      ollamaStatusInFlight = false;
+    }
+    const wasReady = ollamaReady;
+    ollamaReady = ready;
+    // If it just dropped out of ready while armed, clear the backend session flag
+    // once so the boost can't stay armed while Ollama is down.
+    if (wasReady && !ready && ollamaBoostOn) {
+      ollamaBoostOn = false;
+      try { setOllamaAutoBoost(false); } catch (e) {}
+    }
+    applyOllamaBoostGating();
+  }
+
+  function startOllamaPolling() {
+    // Kick an immediate check, then poll lightly while the panel is visible.
+    void pollOllamaStatus();
+    if (ollamaPollTimer) return;
+    ollamaPollTimer = setInterval(() => { void pollOllamaStatus(); }, PE_OLLAMA_POLL_MS);
+  }
+
+  function stopOllamaPolling() {
+    if (ollamaPollTimer) {
+      clearInterval(ollamaPollTimer);
+      ollamaPollTimer = null;
+    }
+  }
+
   function captureFocus() {
     const active = document.activeElement;
     if (!active || !PE_EDITABLE_IDS.includes(active.id)) return null;
@@ -185,6 +271,21 @@ export function createPromptEngineeringPanel({
     </label>`;
     }).join('');
 
+    // Ollama Auto Boost — a SESSION-ONLY toggle rendered separately from the
+    // preprocessing grid (it is NOT a preprocessing option). Backend resets it to
+    // false on load, so reflect m.ollama_auto_boost as the desired state but only
+    // allow it ON when Ollama is ready (gated by the polling status check below).
+    ollamaBoostOn = !!m.ollama_auto_boost;
+    const boostChecked = ollamaReady && ollamaBoostOn;
+    const boostDisabled = ollamaReady ? '' : ' disabled';
+    const boostItemStyle = ollamaReady ? '' : ' style="opacity:0.4;cursor:not-allowed"';
+    const boostInputStyle = ollamaReady ? '' : ' style="cursor:not-allowed"';
+    const ollamaBoostHtml = `
+    <label class="mod-checkbox-item pe-tone-teal${ollamaReady ? '' : ' mod-checkbox-disabled'}"${boostItemStyle} data-naia-guide="${escHtml(PE_OLLAMA_BOOST_GUIDE)}">
+      <input type="checkbox" id="peOllamaBoostCheckbox" ${boostChecked ? 'checked' : ''}${boostDisabled}${boostInputStyle} oninput="setPromptEngineeringOllamaAutoBoost(this.checked)">
+      <span class="mod-checkbox-label">Ollama Auto Boost <span id="peOllamaBoostHint" style="margin-left:6px;color:var(--text-dim)${ollamaReady ? ';display:none' : ''}">(Ollama 실행·모델 준비 시 활성화)</span></span>
+    </label>`;
+
     const presetControlHtml = `
     <div>
       <div class="mod-section-label has-actions"><span>Quick Preset</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
@@ -225,6 +326,7 @@ export function createPromptEngineeringPanel({
     <div>
       <div class="mod-section-label has-actions"><span>Preprocessing Options</span><span class="mod-head-actions"><button type="button" class="header-action-btn" onclick="openPeDebugPanel()">Debug Snapshot</button><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
       <div class="mod-checkbox-grid">${preprocessingHtml}</div>
+      ${ollamaBoostHtml}
     </div>
     ${advancedHtml}
   `;
@@ -235,6 +337,10 @@ export function createPromptEngineeringPanel({
     });
     restoreTextareaHeights(textareaHeights);
     restoreFocus(focusSnap);
+    // Reflect last-known readiness immediately on the freshly rendered checkbox,
+    // then (re)start the lightweight status poll while the panel is mounted.
+    applyOllamaBoostGating();
+    startOllamaPolling();
   }
 
   return {

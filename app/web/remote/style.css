@@ -16387,9 +16387,9 @@ body.detached-module .mod-grid-3 {
 .xlation-history-pinned, .xlation-history-section {
   display: flex; flex-direction: column; gap: 4px; min-height: 0;
 }
-.xlation-history-pinned { flex: 0 1 auto; max-height: 38%; }
+.xlation-history-pinned { flex: 1 1 0; }
 .xlation-history-pinned.empty { flex: 0 0 auto; }
-.xlation-history-section { flex: 1 1 auto; }
+.xlation-history-section { flex: 1 1 0; }
 .xlation-history-section-label {
   font-family: var(--font-mono); font-size: 9.5px; font-weight: 700;
   letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); flex: 0 0 auto;
@@ -16400,7 +16400,7 @@ body.detached-module .mod-grid-3 {
 }
 .xlation-history-scroll::-webkit-scrollbar { width: 4px; }
 .xlation-history-scroll::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
-.xlation-history-pinned-list { max-height: 132px; }
+.xlation-history-pinned-list { flex: 1 1 auto; min-height: 0; }
 .xlation-history-empty {
   font-size: 11px; color: var(--text-dim); padding: 6px 2px; font-style: italic;
 }
@@ -16453,6 +16453,26 @@ body.detached-module .mod-grid-3 {
 .xlation-history-act.delete:hover { color: #e09098; border-color: rgba(200,110,120,0.5); }
 .xlation-history-status { font-size: 10.5px; min-height: 12px; color: var(--text-dim); flex: 0 0 auto; }
 .xlation-history-status.error { color: #e06c75; }
+/* 기록 리스트는 섹션을 채워(스크롤) 페이저가 섹션 하단에 고정되게 한다. */
+.xlation-history-list { flex: 1 1 auto; }
+/* 페이지 이동 컨트롤(‹ N/M ›) — 페이지 1개뿐이면 .hidden 으로 숨김. */
+.xlation-history-pager {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  flex: 0 0 auto; padding: 3px 0 1px;
+}
+.xlation-history-pager.hidden { display: none; }
+.xlation-history-pager-prev, .xlation-history-pager-next {
+  border: 1px solid var(--border-dim); background: rgba(255,255,255,0.04);
+  color: var(--text-muted); width: 22px; height: 19px; border-radius: 6px;
+  cursor: pointer; font-size: 13px; line-height: 1; padding: 0;
+}
+.xlation-history-pager-prev:hover:not(:disabled),
+.xlation-history-pager-next:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-glow); }
+.xlation-history-pager-prev:disabled, .xlation-history-pager-next:disabled { opacity: 0.32; cursor: default; }
+.xlation-history-pager-info {
+  font-size: 10.5px; color: var(--text-dim); font-family: var(--font-mono);
+  min-width: 46px; text-align: center;
+}
 /* 모바일: 결과 영역이 좁아 패널이 화면을 가리므로 숨긴다(데스크톱 전용 보조 패널). */
 @media (max-width: 767px) {
   .xlation-history-panel { display: none !important; }

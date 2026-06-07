@@ -206,27 +206,7 @@ class SequencePresetService:
         offset = max(0, self._safe_int(payload.get("offset"), 0))
         randomize = bool(payload.get("random"))
 
-        mask = pd.Series(True, index=df.index)
-        for t in include:
-            mask &= self._padded.str.contains(" " + t + " ", regex=False)
-        for t in exclude:
-            mask &= ~self._padded.str.contains(" " + t + " ", regex=False)
-        if ratings:
-            mask &= df["peak_rating"].isin(ratings)
-        if person and self._person_padded is not None:
-            pmask = pd.Series(False, index=df.index)
-            for p in person:
-                pmask |= self._person_padded.str.contains(" " + p + " ", regex=False)
-            mask &= pmask  # 인원은 선택 칩 OR (등급/태그와는 AND)
-        if cuts:
-            mask &= df["frame_count"].isin(cuts)  # 컷 멀티선택 (정확 일치)
-        else:
-            if min_frames > 0:
-                mask &= df["frame_count"] >= min_frames
-            if max_frames > 0:
-                mask &= df["frame_count"] <= max_frames
-
-        hits = df[mask]
+        hits = df[self._build_mask(df, include, exclude, ratings, person, cuts, min_frames, max_frames)]
         total = int(len(hits))
         if randomize and total:
             hits = hits.sample(min(limit, total))
@@ -246,6 +226,56 @@ class SequencePresetService:
             "groups": groups,
             "status": {"groupCount": int(len(df))},
         }
+
+    def _build_mask(self, df, include, exclude, ratings, person, cuts, min_frames, max_frames):
+        """검색/랜덤픽 공통 매칭 마스크 (정확토큰 contains + rating + person OR + 컷)."""
+        mask = pd.Series(True, index=df.index)
+        for t in include:
+            mask &= self._padded.str.contains(" " + t + " ", regex=False)
+        for t in exclude:
+            mask &= ~self._padded.str.contains(" " + t + " ", regex=False)
+        if ratings:
+            mask &= df["peak_rating"].isin(ratings)
+        if person and self._person_padded is not None:
+            pmask = pd.Series(False, index=df.index)
+            for p in person:
+                pmask |= self._person_padded.str.contains(" " + p + " ", regex=False)
+            mask &= pmask  # 인원은 선택 칩 OR (등급/태그와는 AND)
+        if cuts:
+            mask &= df["frame_count"].isin(cuts)  # 컷 멀티선택 (정확 일치)
+        else:
+            if min_frames > 0:
+                mask &= df["frame_count"] >= min_frames
+            if max_frames > 0:
+                mask &= df["frame_count"] <= max_frames
+        return mask
+
+    def pick_random_group(self, payload: dict[str, Any], *, exclude_group_id: Any = None) -> dict[str, Any]:
+        """검색 필터(payload)에 매칭되는 **전체 셋**에서 그룹 1개를 무작위로 뽑는다(표시 60건 아님).
+        Auto Gen 연속 시퀀스의 다음 라운드 선택용. exclude_group_id 로 직전 그룹 즉시 반복 회피."""
+        payload = payload if isinstance(payload, dict) else {}
+        self._ensure_loaded()
+        df = self._df
+        if df is None or len(df) == 0:
+            return {"ok": False, "total": 0, "groupId": None, "error": self._load_error or "no data"}
+        include = self._parse_terms(payload.get("include"))
+        exclude = self._parse_terms(payload.get("exclude"))
+        ratings = [r for r in (payload.get("ratings") or []) if r in RATING_ORDER]
+        person = [str(p).strip().lower() for p in (payload.get("person") or []) if str(p).strip()]
+        cuts = [c for c in (self._safe_int(c, 0) for c in (payload.get("frameCounts") or [])) if c > 0]
+        min_frames = self._safe_int(payload.get("minFrames"), 0)
+        max_frames = self._safe_int(payload.get("maxFrames"), 0)
+        hits = df[self._build_mask(df, include, exclude, ratings, person, cuts, min_frames, max_frames)]
+        total = int(len(hits))
+        if total == 0:
+            return {"ok": False, "total": 0, "groupId": None, "error": "no matching groups"}
+        pool = hits
+        if exclude_group_id is not None and total > 1:
+            pool = hits[hits["group_id"] != int(exclude_group_id)]
+            if len(pool) == 0:
+                pool = hits
+        one = pool.sample(1).iloc[0]
+        return {"ok": True, "total": total, "groupId": int(one["group_id"])}
 
     def _group_summary(self, row: pd.Series) -> dict[str, Any]:
         frames = self._load_frames(row)

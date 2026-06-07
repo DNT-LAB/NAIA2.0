@@ -143,6 +143,11 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 stored = await asyncio.to_thread(generation_service(context).execute_request, request)
             except Exception as exc:
                 await _broadcast_generation_error(context, clients, request, str(exc))
+                # 실패한 시퀀스 프레임도 라운드 카운트를 진전시켜야 연속 루프가 멈추지 않는다(Codex).
+                try:
+                    await _advance_sequence_run(context, clients, request)
+                except Exception:
+                    pass
                 continue
             auto_save_result = await _auto_save_generated_history_item(context, stored.item)
 
@@ -220,12 +225,55 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
         context.headless_generation_runner_active = False
 
 
+async def _advance_sequence_run(context: WebSessionContext, clients: set[WebSocket], request) -> bool:
+    """Sequence 프레임 완료(성공·실패 공통) 처리. 시퀀스 프레임이면 라운드 카운트를 진전시키고,
+    라운드 완료 시 Auto Gen ON·큐 빔이면 다음 랜덤 그룹으로 연속(continue_sequence_run), 아니면
+    종료한다. 시퀀스 프레임이 아니면 False(미처리). 성공 완료(_maybe_continue)와 실행 실패(except)
+    양쪽에서 호출돼 실패 프레임도 카운트되므로 루프가 영구 정지하지 않는다(Codex MUST-FIX)."""
+    params = getattr(request, "params", {}) or {}
+    sequence_run_id = str(params.get("sequence_run_id") or "")
+    if not sequence_run_id or not context._sequence_run_service().is_running(sequence_run_id):
+        return False
+    seq_service = context._sequence_run_service()
+    policy = seq_service.record_generation_completed(sequence_run_id)
+    try:
+        await broadcast_json(clients, context._sequence_run_module_state())
+    except Exception:
+        pass
+    for message in policy.get("messages", []):
+        await broadcast_json(clients, message)
+    if not policy.get("round_done"):
+        return True  # 라운드 진행 중 — 남은 프레임은 큐가 그대로 드레인
+    # 라운드 완료 — Auto Gen ON(라이브) + 큐 빔이면 다음 랜덤 그룹 연속, 아니면 종료.
+    auto_gen = context._coerce_bool(context.get_options().get("auto_generate", False))
+    queue_manager = context.generation_queue_manager
+    advanced = False
+    if auto_gen and not queue_manager.is_paused() and queue_manager.is_empty():
+        from app.backend.server.sequence_preset_routes import continue_sequence_run
+        advanced = await continue_sequence_run(context, clients, sequence_run_id, broadcast_json)
+    if not advanced:
+        finish = seq_service.finish(sequence_run_id, reason="complete")
+        try:
+            await broadcast_json(clients, context._sequence_run_module_state())
+        except Exception:
+            pass
+        for message in finish.get("messages", []):
+            await broadcast_json(clients, message)
+    return True
+
+
 async def _maybe_continue_auto_generation(
     context: WebSessionContext,
     clients: set[WebSocket],
     request,
 ) -> bool:
     params = getattr(request, "params", {}) or {}
+
+    # Sequence 연속 생성(Auto Gen): 시퀀스 프레임이면 _advance_sequence_run 이 라운드 카운트를
+    # 진전시키고(완료 시 다음 랜덤 그룹 연속 또는 종료) True 를 돌려준다. 시퀀스는 '그룹 전체'를
+    # 새로 넣으므로 아래 제네릭 프롬프트 재롤 경로를 타면 안 된다 — 처리됐으면 곧장 return.
+    if await _advance_sequence_run(context, clients, request):
+        return False
 
     # Run-policy controller bound to this completion. Storyteller and Automation each own
     # the single Auto Generate loop and are mutually exclusive; Storyteller takes

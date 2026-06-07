@@ -170,6 +170,15 @@ export function createPromptEngineeringActions({
     setModuleParam('prompt_engineering', `pp_${key}`, checked ? 'true' : 'false');
   }
 
+  // Session-only flag (never persisted; backend resets it to false on load). Unlike
+  // setOption() this uses the bare `ollama_auto_boost` key (NOT the `pp_` prefix) and
+  // lives at the top level of the module state, not inside `preprocessing`.
+  function setOllamaAutoBoost(checked) {
+    const lastState = getLastPromptEngineeringState();
+    if (lastState) lastState.ollama_auto_boost = !!checked;
+    setModuleParam('prompt_engineering', 'ollama_auto_boost', checked ? 'true' : 'false');
+  }
+
   return {
     flushPresetSaveState,
     onPresetChange,
@@ -186,5 +195,6 @@ export function createPromptEngineeringActions({
     saveDanbooruSettings,
     refreshDebug,
     setOption,
+    setOllamaAutoBoost,
   };
 }

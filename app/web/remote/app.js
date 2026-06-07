@@ -763,7 +763,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   });
 // --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
 let ollamaAssistantPopup = null;
-const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260607-assist19')
+const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260607-assist20')
   .then(({createOllamaAssistantPopup}) => {
     ollamaAssistantPopup = createOllamaAssistantPopup({
       document,
@@ -1161,7 +1161,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs')
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20260607-seqpopup1')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20260607-seqautogen1')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
@@ -4819,11 +4819,17 @@ function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   awaitingMyRandom = true;
   pendingRandomRequestId = createRandomRequestId();
   if (window._randomTimeout) clearTimeout(window._randomTimeout);
+  // When Ollama Auto Boost is armed the backend spends ~1-3s rewriting the prompt
+  // before broadcasting prompt_generated, so the normal 2s safety re-enable would
+  // free the button mid-boost and let the user spam it. Extend the safety timeout
+  // to 15s only while the boost is on; normal random keeps the existing 2s behavior.
+  const boostArmed = !!(lastPromptEngineeringState && lastPromptEngineeringState.ollama_auto_boost);
+  const randomSafetyTimeoutMs = boostArmed ? 15000 : 2000;
   window._randomTimeout = setTimeout(() => {
     if (awaitingMyRandom) {
       unlockRandomButton({clearRequest: false});
     }
-  }, 2000);
+  }, randomSafetyTimeoutMs);
   ws.send(JSON.stringify({
     type: 'random',
     random_request_id: pendingRandomRequestId,
@@ -4853,6 +4859,12 @@ function scheduleInitialRandomPrompt(delay = 350) {
 
 function send(cmd) {
   if (cmd === 'generate') {
+    // Sequence 탭에서 그룹 팝업을 보고 있으면 메인 Generate = 그 그룹의 '연속 생성'(req1).
+    // 열린 그룹이 없으면 일반 생성으로 폴백.
+    if (activePromptTab === 'sequence' && sequencePresetControl?.hasOpenGroup?.()) {
+      sequencePresetControl.generateOpenGroup();
+      return;
+    }
     if (activePromptTab === 'preset') {
       void generateFromPresetTab();
       return;
@@ -4868,6 +4880,11 @@ function send(cmd) {
     return;
   }
   if (cmd === 'random') {
+    // Sequence 탭에서 메인 Random = 현재 매칭 전체에서 랜덤 그룹 연속 생성(req2/3).
+    if (activePromptTab === 'sequence' && sequencePresetControl?.randomGenerate) {
+      sequencePresetControl.randomGenerate();
+      return;
+    }
     requestRandomPrompt();
     return;
   }
@@ -5630,6 +5647,10 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
       moduleBody,
       escHtml,
       bindTagAssist,
+      // Lazily resolve the action so panel/actions module import order doesn't matter.
+      setOllamaAutoBoost: (checked) => {
+        if (promptEngineeringActions) promptEngineeringActions.setOllamaAutoBoost(checked);
+      },
     });
   })
   .catch(error => {
@@ -6297,6 +6318,10 @@ function discardPendingModuleEdit(moduleId = null) {
 
 function setPromptEngineeringOption(key, checked) {
   if (promptEngineeringActions) promptEngineeringActions.setOption(key, checked);
+}
+
+function setPromptEngineeringOllamaAutoBoost(checked) {
+  if (promptEngineeringActions) promptEngineeringActions.setOllamaAutoBoost(checked);
 }
 
 function setModuleParam(moduleId, key, value, options = {}) {

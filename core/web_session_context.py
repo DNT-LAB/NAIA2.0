@@ -44,6 +44,9 @@ class WebSessionContext:
     cloudflared_status_text: str = ""
     prompt_text: str = ""
     negative_prompt_text: str = ""
+    # Ollama Auto Boost — 세션 전용 토글(비영속). 항상 OFF로 시작하고 save/preset에 절대
+    # 기록하지 않는다. 사용자가 직접 켜야만 ON이며 Ollama가 준비됐을 때만 enable 가능.
+    ollama_auto_boost: bool = False
     remote_options: dict[str, bool] = field(default_factory=lambda: dict(REMOTE_OPTION_DEFAULTS))
     remote_params: dict[str, Any] = field(default_factory=dict)
     remote_param_planes: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -572,6 +575,15 @@ class WebSessionContext:
 
     def _set_storyteller_param(self, key: str, value: Any) -> dict[str, Any] | None:
         return self._storyteller_service().set_param(key, value)
+
+    def _sequence_run_service(self):
+        return self._lazy_service("sequence_run")
+
+    def _sequence_run_module_state(self) -> dict[str, Any]:
+        return self._sequence_run_service().state()
+
+    def _set_sequence_run_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        return self._sequence_run_service().set_param(key, value)
 
     def _e621_event_service(self):
         return self._lazy_service("e621_event")

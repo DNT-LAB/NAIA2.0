@@ -72,6 +72,59 @@ def _event_combo_tags(
         return []
 
 
+def get_assist_service(context: WebSessionContext) -> "Any":
+    """OllamaTagAssistService를 context에 캐시·반환(라우트/생성 경로 공용 팩토리).
+
+    base_url은 OllamaAssistantService에서, 검색기/번역기/이벤트조합은 app 레이어에서
+    주입한다(core가 app을 모르도록). Auto Boost 등 라우트 밖에서도 동일 서비스를
+    쓰기 위해 모듈 레벨로 노출.
+    """
+    from app.backend.server.autocomplete_commands import search_kr_tags
+    from core.ollama_assistant_service import DEFAULT_MODEL
+    from core.ollama_tag_assist_service import OllamaTagAssistService
+
+    existing = getattr(context, "ollama_tag_assist_service", None)
+    if existing is not None:
+        return existing
+    assistant = getattr(context, "ollama_assistant_service", None)
+    if assistant is None:
+        assistant = OllamaAssistantService()
+        context.ollama_assistant_service = assistant
+    svc = OllamaTagAssistService(
+        base_url=assistant.base_url,
+        default_model=DEFAULT_MODEL,
+        searcher=lambda query, limit: search_kr_tags(context, query, limit=limit),
+        event_combo_provider=lambda rating, person_id, query, top: _event_combo_tags(
+            context, rating, person_id, query, top
+        ),
+        translator=_korean_to_english,
+    )
+    context.ollama_tag_assist_service = svc
+    return svc
+
+
+def scene_boost_prompt(context: WebSessionContext, prompt: str, *, level: str = "rich") -> dict[str, Any]:
+    """Ollama Auto Boost — 주어진 프롬프트를 Scene Boost로 강화한다(best-effort).
+
+    토글(``context.ollama_auto_boost``)이 OFF면 그대로 통과. ON이어도 Ollama가 꺼져
+    있으면 scene_boost 내부 chat이 빠르게 실패(connection refused)해 원문을 돌려준다 —
+    생성 루프를 절대 깨지 않는다. 반환은 scene_boost 결과 dict(없으면 패스 표시).
+    """
+    src = str(prompt or "")
+    if not getattr(context, "ollama_auto_boost", False) or not src.strip():
+        return {"ok": False, "skipped": True, "prompt": src}
+    try:
+        svc = get_assist_service(context)
+        if not hasattr(svc, "scene_boost"):
+            return {"ok": False, "skipped": True, "prompt": src}
+        result = svc.scene_boost(src, options={"level": str(level or "rich")})
+        if isinstance(result, dict) and result.get("prompt"):
+            return result
+    except Exception:
+        pass
+    return {"ok": False, "skipped": True, "prompt": src}
+
+
 def register_ollama_routes(
     app: FastAPI,
     context: WebSessionContext,
@@ -141,26 +194,8 @@ def register_ollama_routes(
         return service().cancel_pull()
 
     def assist_service() -> "OllamaTagAssistService":
-        from app.backend.server.autocomplete_commands import search_kr_tags
-        from core.ollama_assistant_service import DEFAULT_MODEL
-        from core.ollama_tag_assist_service import OllamaTagAssistService
-
-        existing = getattr(context, "ollama_tag_assist_service", None)
-        if existing is None:
-            existing = OllamaTagAssistService(
-                base_url=service().base_url,
-                default_model=DEFAULT_MODEL,
-                # 진실의 원천: NAIA 태그 인덱스(한국어 질의 지원). core가 app 레이어를
-                # 모르도록 여기서 주입한다.
-                searcher=lambda query, limit: search_kr_tags(context, query, limit=limit),
-                event_combo_provider=lambda rating, person_id, query, top: _event_combo_tags(
-                    context, rating, person_id, query, top
-                ),
-                # 한국어 사전 번역 — NAIA 내장 Google Translate(Dev0714 STAGE 0 동일).
-                translator=_korean_to_english,
-            )
-            context.ollama_tag_assist_service = existing
-        return existing
+        # 공용 모듈 레벨 팩토리에 위임(Auto Boost 등 라우트 밖 경로와 동일 인스턴스 공유).
+        return get_assist_service(context)
 
     @app.get("/api/ollama/assist/progress")
     async def ollama_assist_progress():

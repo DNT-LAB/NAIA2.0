@@ -201,6 +201,46 @@ def _active_ratings_from_command(command: dict[str, Any] | None) -> set[str] | N
     return {rating for rating in ("g", "s", "q", "e") if rating in picked} or None
 
 
+async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bool:
+    """Ollama Auto Boost — random 결과 프롬프트를 Scene Boost로 강화(스레드, best-effort).
+
+    토글 OFF/Ollama 미준비/빈 프롬프트면 no-op. 성공 시 result.prompt·context.prompt_text·
+    result.context(final_prompt+metadata)를 부스트본으로 갱신하고 True를 반환한다. 어떤
+    실패에서도 raise하지 않으며 원문을 유지한다(생성 루프 불변). Auto Gen(파트4)에서도 재사용.
+    """
+    try:
+        if not getattr(result, "success", False) or not getattr(context, "ollama_auto_boost", False):
+            return False
+        prompt = str(getattr(result, "prompt", "") or "")
+        if not prompt.strip():
+            return False
+        from app.backend.server.ollama_routes import scene_boost_prompt
+
+        boosted = await asyncio.to_thread(scene_boost_prompt, context, prompt)
+        if not isinstance(boosted, dict) or not boosted.get("ok"):
+            return False
+        new_prompt = str(boosted.get("prompt") or "")
+        if not new_prompt or new_prompt == prompt:
+            return False
+        result.prompt = new_prompt
+        context.prompt_text = new_prompt
+        ctx = getattr(result, "context", None)
+        if ctx is not None:
+            try:
+                ctx.final_prompt = new_prompt
+                if isinstance(getattr(ctx, "metadata", None), dict):
+                    ctx.metadata["ollama_auto_boost"] = {
+                        "rating": boosted.get("rating"),
+                        "level": boosted.get("level"),
+                        "additions": boosted.get("additions"),
+                    }
+            except Exception:
+                pass
+        return True
+    except Exception:
+        return False
+
+
 async def handle_random_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -219,6 +259,9 @@ async def handle_random_command(
         overrides=overrides,
         random_request_id=request_id,
     )
+    # 수동 1회 random: 그 시점에 동기 부스트(프런트가 Random 버튼을 응답까지 disable).
+    # Auto Gen 오버랩(파트4)은 별도 — 여기는 단발 경로.
+    await apply_ollama_auto_boost(context, result)
     await persist_prompt_engineering_settings(context)
     await _send_json(ws, result.websocket_payload())
     for message in result.extra_messages:

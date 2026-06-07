@@ -15,7 +15,9 @@
 const LIST_URL = '/api/translation-history';
 // 어시스트 최종 결과만 표시 — 백엔드가 이 context로 최종 프롬프트를 남긴다.
 const ASSIST_CONTEXT = 'ollama_assist';
-const FETCH_LIMIT = 200;  // 혼합 컨텍스트에서 어시스트 결과만 추려도 충분하도록 넉넉히.
+const FETCH_LIMIT = 500;  // 페이지네이션 위해 넉넉히 받아 클라에서 페이지로 분할(백엔드 상한 500).
+const PINNED_PAGE_SIZE = 6;    // 고정됨/기록 페이지당 행 수 — 100~200건 쌓여도 DOM은 한 페이지만.
+const HISTORY_PAGE_SIZE = 12;
 const _LEVEL_KR = {concise: '간결', standard: '표준', rich: '풍부', max: '최대'};
 
 export function createTranslationHistoryPanel({
@@ -34,6 +36,8 @@ export function createTranslationHistoryPanel({
   let searchTimer = null;
   let visible = false;
   let reposTimer = null;   // Ollama 팝업 추종(열림/이동/최소화) 재배치
+  let pinnedPage = 0;      // 고정됨/기록 각각의 현재 페이지(0-base)
+  let historyPage = 0;
 
   function pick(selector) {
     return panel ? panel.querySelector(selector) : null;
@@ -181,7 +185,12 @@ export function createTranslationHistoryPanel({
     });
 
     // 머리 클릭(액션 제외) → 펼침 토글.
-    head.addEventListener('click', () => row.classList.toggle('expanded'));
+    head.addEventListener('click', () => {
+      const wasOpen = row.classList.contains('expanded');
+      // 전체(고정됨+기록)에서 한 번에 하나만 펼친다 — 펼침 길이 폭발 방지.
+      if (panel) panel.querySelectorAll('.xlation-history-row.expanded').forEach(r => r.classList.remove('expanded'));
+      if (!wasOpen) row.classList.add('expanded');
+    });
 
     row.appendChild(head);
     row.appendChild(body);
@@ -203,11 +212,38 @@ export function createTranslationHistoryPanel({
     container.appendChild(frag);
   }
 
+  // 한 섹션(고정됨/기록)을 페이지 단위로 렌더 + 페이저 갱신. 페이지가 1개뿐이면 페이저 숨김.
+  // 페이지를 [0, pages-1]로 클램프(삭제/검색으로 줄어든 경우 마지막 페이지로 보정).
+  function renderSection(listSel, pagerSel, items, isPinned, pageSize, getPage, setPage, emptyText) {
+    const total = items.length;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(Math.max(0, getPage()), pages - 1);
+    setPage(page);
+    const start = page * pageSize;
+    renderList(pick(listSel), items.slice(start, start + pageSize), isPinned, emptyText);
+    const pager = pick(pagerSel);
+    if (!pager) return;
+    if (pages > 1) {
+      pager.classList.remove('hidden');
+      const info = pager.querySelector('.xlation-history-pager-info');
+      if (info) info.textContent = `${page + 1} / ${pages}`;
+      const prev = pager.querySelector('.xlation-history-pager-prev');
+      const next = pager.querySelector('.xlation-history-pager-next');
+      if (prev) prev.disabled = page <= 0;
+      if (next) next.disabled = page >= pages - 1;
+    } else {
+      pager.classList.add('hidden');
+    }
+  }
+
   function render() {
-    renderList(pick('.xlation-history-pinned-list'), pinned, true, '고정된 변환이 없습니다.');
+    renderSection('.xlation-history-pinned-list', '.xlation-history-pinned-pager',
+      pinned || [], true, PINNED_PAGE_SIZE, () => pinnedPage, p => { pinnedPage = p; },
+      '고정된 변환이 없습니다.');
     const pinnedIds = new Set((pinned || []).map(r => String(r.id)));
     const flat = (records || []).filter(r => !pinnedIds.has(String(r.id)));
-    renderList(pick('.xlation-history-list'), flat, false,
+    renderSection('.xlation-history-list', '.xlation-history-history-pager',
+      flat, false, HISTORY_PAGE_SIZE, () => historyPage, p => { historyPage = p; },
       lastQuery ? '검색 결과가 없습니다.' : '변환 기록이 없습니다.');
     setCount(records ? records.length : 0);
     const pinnedSection = pick('.xlation-history-pinned');
@@ -310,6 +346,7 @@ export function createTranslationHistoryPanel({
 
   function onSearchInput(value) {
     lastQuery = String(value || '').trim();
+    historyPage = 0;  // 새 검색 → 첫 페이지부터.
     if (searchTimer) win.clearTimeout(searchTimer);
     searchTimer = win.setTimeout(() => refresh(), 220);
   }
@@ -330,10 +367,20 @@ export function createTranslationHistoryPanel({
         <section class="xlation-history-pinned empty" aria-label="고정된 변환">
           <div class="xlation-history-section-label">고정됨</div>
           <div class="xlation-history-pinned-list xlation-history-scroll"></div>
+          <div class="xlation-history-pager xlation-history-pinned-pager hidden">
+            <button type="button" class="xlation-history-pager-prev" aria-label="이전" title="이전">‹</button>
+            <span class="xlation-history-pager-info"></span>
+            <button type="button" class="xlation-history-pager-next" aria-label="다음" title="다음">›</button>
+          </div>
         </section>
         <section class="xlation-history-section" aria-label="변환 기록">
           <div class="xlation-history-section-label">기록</div>
           <div class="xlation-history-list xlation-history-scroll"></div>
+          <div class="xlation-history-pager xlation-history-history-pager hidden">
+            <button type="button" class="xlation-history-pager-prev" aria-label="이전" title="이전">‹</button>
+            <span class="xlation-history-pager-info"></span>
+            <button type="button" class="xlation-history-pager-next" aria-label="다음" title="다음">›</button>
+          </div>
         </section>
         <div class="xlation-history-status"></div>
       </div>`;
@@ -343,6 +390,11 @@ export function createTranslationHistoryPanel({
     pick('.xlation-history-close')?.addEventListener('click', () => setVisible(false));
     const search = pick('.xlation-history-search');
     if (search) search.addEventListener('input', () => onSearchInput(search.value));
+    // 페이저 — 페이지 이동 후 render만 다시(데이터 재요청 없음). render가 범위를 클램프.
+    pick('.xlation-history-pinned-pager .xlation-history-pager-prev')?.addEventListener('click', () => { pinnedPage -= 1; render(); });
+    pick('.xlation-history-pinned-pager .xlation-history-pager-next')?.addEventListener('click', () => { pinnedPage += 1; render(); });
+    pick('.xlation-history-history-pager .xlation-history-pager-prev')?.addEventListener('click', () => { historyPage -= 1; render(); });
+    pick('.xlation-history-history-pager .xlation-history-pager-next')?.addEventListener('click', () => { historyPage += 1; render(); });
 
     onResize = () => position();
     win.addEventListener('resize', onResize);
@@ -362,6 +414,7 @@ export function createTranslationHistoryPanel({
     }
     if (!panel) build();
     panel.style.display = '';
+    pinnedPage = 0; historyPage = 0;  // 열 때마다 첫 페이지(최신)부터.
     position();
     refresh();
     reposTimer = win.setInterval(position, 500);  // 팝업 추종.

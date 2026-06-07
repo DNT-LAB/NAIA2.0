@@ -35,6 +35,7 @@ HEADLESS_SERVICE_SPECS = {
     ),
     "event_stream": HeadlessServiceSpec("core.headless_event_stream_service", "HeadlessEventStreamService"),
     "storyteller": HeadlessServiceSpec("core.headless_storyteller_service", "HeadlessStorytellerService"),
+    "sequence_run": HeadlessServiceSpec("core.headless_sequence_run_service", "HeadlessSequenceRunService"),
     "prompt_engineering": HeadlessServiceSpec(
         "core.headless_prompt_engineering_service",
         "HeadlessPromptEngineeringService",

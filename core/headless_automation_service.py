@@ -99,6 +99,13 @@ class HeadlessAutomationService:
                 level="error",
             )]
             return state
+        if self.context._sequence_run_service().is_running():
+            state = self.state()
+            state["_headless_extra_messages"] = [self.context._toast(
+                "시퀀스 연속 생성이 실행 중입니다. 정지한 뒤 Automation을 시작하세요.",
+                level="error",
+            )]
+            return state
         credential_error = self._credential_error()
         if credential_error:
             state = self.state()
@@ -169,6 +176,8 @@ class HeadlessAutomationService:
         if self.is_running():
             return None
         if self.context._storyteller_service().is_running():
+            return None
+        if self.context._sequence_run_service().is_running():
             return None
         settings = self._settings()
         if not settings.get("persist_automation"):

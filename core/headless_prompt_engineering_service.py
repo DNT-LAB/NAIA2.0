@@ -105,6 +105,8 @@ class HeadlessPromptEngineeringService:
             "post_prompt": settings.get("post_prompt", ""),
             "auto_hide": settings.get("auto_hide_prompt", ""),
             "preprocessing": dict(settings.get("preprocessing_options") or {}),
+            # 세션 전용 토글 — store가 아니라 context 세션 플래그에서 직접 읽는다(비영속).
+            "ollama_auto_boost": bool(getattr(context, "ollama_auto_boost", False)),
             "e621_settings": dict(settings.get("e621_settings") or {}),
             "danbooru_settings": dict(settings.get("danbooru_weight_settings") or {}),
             "debug_snapshot": self.debug_snapshot(),
@@ -237,6 +239,10 @@ class HeadlessPromptEngineeringService:
             store.apply_settings({"danbooru_weight_settings": settings})
         elif key == "debug_refresh":
             pass
+        elif key == "ollama_auto_boost":
+            # ⚠️ 세션 전용 토글(비영속). store/preset/save 어디에도 기록하지 않는다 —
+            # 항상 OFF로 시작하고 사용자가 직접 켜야만 ON. (pp_* 영속 경로와 분리)
+            context.ollama_auto_boost = context._coerce_bool(value)
         elif key.startswith("pp_"):
             option_key = key[3:]
             settings = store.collect_settings()

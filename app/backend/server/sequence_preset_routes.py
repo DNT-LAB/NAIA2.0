@@ -82,6 +82,264 @@ async def _read_json(req: Request) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+# 시퀀스 생성 직렬화 락(프로세스 단위). freeze 무장/해제 + run 상태 갱신 구간을 라우트(Random/
+# Generate)와 러너(Auto Gen 자동 연속)가 겹쳐 서로의 freeze 를 짓밟지 않도록 한다. 모듈 레벨이라
+# 러너의 continue_sequence_run 도 같은 락을 공유한다(헤드리스 단일 세션).
+_SEQ_LOCK = asyncio.Lock()
+
+
+def _coerce_dim(value: Any) -> int | None:
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _roll_random_resolution(session_context: WebSessionContext) -> tuple[int | None, int | None]:
+    """Rnd Res 모집단(현재 모드 사용자 목록, 폴백=표준 1MP)에서 1회 추첨. 라운드마다 새 해상도용."""
+    try:
+        labels = list(session_context.resolution_options_for_mode())
+    except Exception:
+        labels = []
+    if not labels:
+        try:
+            from core.resolution_utils import STANDARD_1MP_RESOLUTION_LABELS
+            labels = list(STANDARD_1MP_RESOLUTION_LABELS)
+        except Exception:
+            labels = []
+    if not labels:
+        return (None, None)
+    try:
+        parts = str(_rng.choice(labels)).lower().replace("×", "x").split("x")
+        if len(parts) == 2:
+            w, h = int(parts[0].strip()), int(parts[1].strip())
+            if w > 0 and h > 0:
+                return (w, h)
+    except (TypeError, ValueError):
+        pass
+    return (None, None)
+
+
+async def _do_round(session_context: WebSessionContext, thread_run, *, group_id: int, run_id: str):
+    """한 이벤트 그룹의 전 프레임을 fresh freeze 로 조립·baking·enqueue. _SEQ_LOCK 보유 가정.
+    라운드마다 새 정체성(아티스트/캐릭터 와일드카드 롤)·새 시드(Seed Fixed면 사용자값)·해상도.
+    정체성은 커맨드 params 에 baking 되어 freeze 해제(큐 드레인) 후에도 유지된다. 반환 (enqueued, total)."""
+    from core.event_tree import LegacyStoryNodeSpec
+
+    random = _random_service(session_context)
+    generation = _generation_service(session_context)
+    active_ratings = session_context.get_active_ratings()
+    api_mode = session_context.get_api_mode()
+
+    sources = await thread_run(
+        sequence_preset_service(session_context).generation_sources, {"groupId": group_id}
+    )
+    total = sources["total"]
+    enqueued: list[dict[str, Any]] = []
+
+    # 시드(첫 프레임 기준, 라운드 단위 고정): Seed Fixed면 그 값, 아니면 라운드마다 새로 1회 추첨.
+    user_seed_fixed = session_context._coerce_bool(session_context.remote_params.get("seed_fixed", False))
+    raw_seed = session_context.remote_params.get("seed", "")
+    try:
+        user_seed = int(float(raw_seed)) if str(raw_seed).strip() != "" else None
+    except (TypeError, ValueError):
+        user_seed = None
+    pinned_seed = user_seed if (user_seed_fixed and user_seed is not None and user_seed >= 0) \
+        else _rng.randint(0, 9_999_999_999)
+    # 해상도(라운드 단위 고정): Rnd Res 면 라운드마다 1회 추첨(req5 새 해상도), 아니면 세션 값.
+    fixed_w = _coerce_dim(session_context.remote_params.get("width"))
+    fixed_h = _coerce_dim(session_context.remote_params.get("height"))
+    if session_context._coerce_bool(session_context.remote_params.get("random_resolution", False)):
+        rw, rh = _roll_random_resolution(session_context)
+        if rw and rh:
+            fixed_w, fixed_h = rw, rh
+
+    # fresh freeze 무장(라운드마다 새 캡처). 캡처 실패 시 stop 후 재던진다.
+    event_stream = session_context._create_event_stream_runtime()
+    event_stream.start_linear(
+        [LegacyStoryNodeSpec(node_id="sequence.freeze", name="Sequence")], run_id=run_id
+    )
+    try:
+        event_stream.ensure_freeze_snapshot()
+        frozen_chars = event_stream.get_frozen_character_params()
+    except Exception:
+        try:
+            event_stream.stop()
+        except Exception:
+            pass
+        raise
+
+    try:
+        for source in sources["sources"]:
+            idx = source["index"]
+            try:
+                source_row = source["sourceRow"]
+                request_id = f"{run_id[-12:]}-{idx}"
+                assembled = await thread_run(
+                    random.generate_from_source_row,
+                    source_row,
+                    active_ratings=active_ratings,
+                    random_request_id=request_id,
+                    source="sequence_preset",
+                    update_context=False,
+                )
+                if not assembled.success:
+                    enqueued.append({"index": idx, "ok": False,
+                                     "error": assembled.error or "assembly failed"})
+                    continue
+                overrides: dict[str, Any] = {
+                    "input": assembled.prompt,
+                    "_raw_input": assembled.prompt,
+                    "_source_row_data": dict(source_row),
+                    "_source_name": request_id,
+                    "_remote_queue_source": "SequencePreset",
+                    "_remote_queue_label": "sequence_preset",
+                    "sequence_preset_request": True,
+                    "sequence_preset_request_id": request_id,
+                    "sequence_preset_group_id": str(group_id),
+                    "sequence_preset_frame": f"{idx + 1}/{total}",
+                    # Auto Gen 연속 바인딩 키 — 러너가 이 stamp 로 라운드 완료를 카운트한다.
+                    "sequence_run_id": run_id,
+                    "seed": pinned_seed,
+                    "seed_fixed": True,
+                    "auto_fit_resolution": False,
+                }
+                if fixed_w:
+                    overrides["width"] = fixed_w
+                if fixed_h:
+                    overrides["height"] = fixed_h
+                if fixed_w and fixed_h:
+                    overrides["resolution"] = f"{fixed_w} x {fixed_h}"
+                if frozen_chars and frozen_chars.get("characters"):
+                    chars = list(frozen_chars.get("characters") or [])
+                    ucs = list(frozen_chars.get("uc") or [])
+                    ucs = (ucs + [""] * len(chars))[:len(chars)]
+                    overrides["characters"] = chars
+                    overrides["uc"] = ucs
+                    positions = frozen_chars.get("character_positions") or []
+                    if positions:
+                        overrides["character_positions"] = list(positions)
+                command = {
+                    "type": "generate",
+                    "api_mode": api_mode,
+                    "prompt": assembled.prompt,
+                    "negative_prompt": session_context.negative_prompt_text,
+                    "overrides": overrides,
+                }
+                if assembled.prompt_run_id:
+                    command["prompt_run_id"] = assembled.prompt_run_id
+                dispatch = await thread_run(generation.enqueue_remote_request, command)
+                enqueued.append({
+                    "index": idx, "ok": bool(dispatch.ok),
+                    "prompt": assembled.prompt,
+                    "requestId": getattr(dispatch.request, "request_id", "") if dispatch.ok else "",
+                    "error": "" if dispatch.ok else (dispatch.blocked_reason or "enqueue blocked"),
+                })
+            except Exception as exc:  # 프레임 단위 격리
+                enqueued.append({"index": idx, "ok": False, "error": f"frame error: {exc}"})
+    finally:
+        try:
+            event_stream.stop()
+        except Exception:
+            pass
+    return enqueued, total, pinned_seed
+
+
+async def start_sequence_run(
+    session_context: WebSessionContext,
+    *,
+    run_in_thread: AsyncRunner,
+    clients: set[Any],
+    broadcast_json: JsonBroadcaster,
+    start_generation_runner: GenerationRunnerStarter,
+    query: dict[str, Any],
+    explicit_group_id: Any,
+    auto_gen: bool,
+):
+    """Random(랜덤 그룹) 또는 Generate(특정 그룹) 진입점. 가드→그룹 결정→fresh freeze enqueue→run 시작.
+    Auto Gen ON 이면 러너가 라운드 완료마다 다음 랜덤 그룹으로 연속한다(continue_sequence_run)."""
+    svc = session_context._sequence_run_service()
+    async with _SEQ_LOCK:
+        guard = svc.guard_can_start()
+        if guard:
+            return JSONResponse({"error": guard}, status_code=409)
+        if explicit_group_id is not None:
+            group_id = int(explicit_group_id)
+        else:
+            pick = await run_in_thread(
+                sequence_preset_service(session_context).pick_random_group, query
+            )
+            if not pick.get("ok") or pick.get("groupId") is None:
+                return JSONResponse(
+                    {"error": pick.get("error") or "no matching groups"}, status_code=404
+                )
+            group_id = int(pick["groupId"])
+        run_id = svc.new_run_id()
+        try:
+            enqueued, total, pinned_seed = await _do_round(
+                session_context, run_in_thread, group_id=group_id, run_id=run_id
+            )
+        except Exception as exc:
+            return JSONResponse({"error": f"Sequence freeze/assemble failed: {exc}"}, status_code=500)
+        ok_count = sum(1 for e in enqueued if e["ok"])
+        if ok_count:
+            # total_frames = 실제 enqueue 된 프레임 수(ok_count) — 컨트롤러는 '완료'를 세므로
+            # 일부 프레임이 실패하면 sources total 이 아니라 enqueue 된 수로 라운드 완결을 판정한다.
+            svc.begin(run_id=run_id, query=query, group_id=group_id,
+                      total_frames=ok_count, auto_gen=auto_gen)
+    if ok_count and session_context.headless_generation_execute_enabled:
+        start_generation_runner(session_context, clients)
+    try:
+        await broadcast_json(clients, session_context._sequence_run_module_state())
+    except Exception:
+        pass
+    return {
+        "ok": ok_count > 0,
+        "status": "sequence_run_started",
+        "groupId": group_id,
+        "runId": run_id if ok_count else "",
+        "total": total,
+        "enqueued": ok_count,
+        "seed": pinned_seed,
+        "autoGen": bool(auto_gen),
+        "frames": enqueued,
+    }
+
+
+async def continue_sequence_run(session_context: WebSessionContext, clients, run_id: str,
+                                broadcast_json: JsonBroadcaster) -> bool:
+    """러너 호출: 라운드 완료 후 다음 랜덤 그룹을 fresh freeze 로 enqueue. True=다음 라운드 시작됨.
+    enqueue 는 asyncio.to_thread 로(러너 컨텍스트엔 route 의 run_in_thread 가 없음 — Codex #3)."""
+    svc = session_context._sequence_run_service()
+    query = svc.query(run_id)
+    last = svc.last_group_id(run_id)
+    pick = await asyncio.to_thread(
+        sequence_preset_service(session_context).pick_random_group, query, exclude_group_id=last
+    )
+    if not pick.get("ok") or pick.get("groupId") is None:
+        return False
+    group_id = int(pick["groupId"])
+    async with _SEQ_LOCK:
+        if not svc.is_running(run_id):
+            return False
+        try:
+            enqueued, _total, _seed = await _do_round(
+                session_context, asyncio.to_thread, group_id=group_id, run_id=run_id
+            )
+        except Exception:
+            return False
+        ok_count = sum(1 for e in enqueued if e["ok"])
+        if not ok_count:
+            return False
+        svc.begin_round(run_id, group_id=group_id, total_frames=ok_count)
+    try:
+        await broadcast_json(clients, session_context._sequence_run_module_state())
+    except Exception:
+        pass
+    return True
+
+
 def register_sequence_preset_routes(
     app: FastAPI,
     session_context: WebSessionContext,
@@ -91,11 +349,6 @@ def register_sequence_preset_routes(
     broadcast_json: JsonBroadcaster,
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
-    # 시퀀스 생성 동시 직렬화 락(앱 단위). 공유 EventStreamRuntime 을 무장/해제하는 구간을
-    # 두 시퀀스 요청이 겹쳐 서로의 freeze 를 짓밟지 않도록 한다. 가드→무장은 추가로 동기
-    # 실행(아래 핸들러)이라 Storyteller/Random 과의 TOCTOU 도 막는다.
-    freeze_lock = asyncio.Lock()
-
     @app.get("/api/sequence-preset/status")
     async def api_sequence_preset_status():
         try:
@@ -156,214 +409,62 @@ def register_sequence_preset_routes(
 
     @app.post("/api/sequence-preset/generate")
     async def api_sequence_preset_generate(req: Request):
+        # req (1): 팝업에서 보고 있는 특정 그룹의 '연속 생성'. Auto Gen ON 이면 그 그룹 완료 후
+        # 러너가 다음 랜덤 그룹으로 연속한다(req 4). payload 에 검색 필터도 실려 와 연속 추첨 모집단이 된다.
         payload = await _read_json(req)
-        service = sequence_preset_service(session_context)
+        group_id = payload.get("groupId")
+        if group_id is None:
+            return JSONResponse({"error": "groupId is required."}, status_code=400)
         try:
-            result = await run_in_thread(service.generation_sources, payload)
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        except KeyError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=404)
+            gid = int(group_id)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "groupId is invalid."}, status_code=400)
+        auto_gen = session_context._coerce_bool(
+            session_context.get_options().get("auto_generate", False)
+        )
+        try:
+            return await start_sequence_run(
+                session_context,
+                run_in_thread=run_in_thread,
+                clients=clients,
+                broadcast_json=broadcast_json,
+                start_generation_runner=start_generation_runner,
+                query=payload,
+                explicit_group_id=gid,
+                auto_gen=auto_gen,
+            )
         except Exception as exc:
-            return JSONResponse(
-                {"error": f"Sequence generate failed: {exc}"}, status_code=500
+            return JSONResponse({"error": f"Sequence generate failed: {exc}"}, status_code=500)
+
+    @app.post("/api/sequence-preset/random-generate")
+    async def api_sequence_preset_random_generate(req: Request):
+        # req (2)/(3): 현재 매칭된 전체 셋에서 랜덤 그룹 1개 → 연속 생성. Auto Gen ON 이면 연속 루프 시작.
+        payload = await _read_json(req)
+        auto_gen = session_context._coerce_bool(
+            session_context.get_options().get("auto_generate", False)
+        )
+        try:
+            return await start_sequence_run(
+                session_context,
+                run_in_thread=run_in_thread,
+                clients=clients,
+                broadcast_json=broadcast_json,
+                start_generation_runner=start_generation_runner,
+                query=payload,
+                explicit_group_id=None,
+                auto_gen=auto_gen,
             )
+        except Exception as exc:
+            return JSONResponse({"error": f"Sequence random-generate failed: {exc}"}, status_code=500)
 
-        batch_id = uuid.uuid4().hex
-        random = _random_service(session_context)
-        generation = _generation_service(session_context)
-        active_ratings = session_context.get_active_ratings()
-        api_mode = session_context.get_api_mode()
-        total = result["total"]
-        enqueued: list[dict[str, Any]] = []
-
-        def _coerce_dim(value: Any) -> int | None:
-            try:
-                parsed = int(float(value))
-            except (TypeError, ValueError):
-                return None
-            return parsed if parsed > 0 else None
-
-        # 정체성 동결을 위해 공유 EventStreamRuntime 을 잠시 무장한다. 가드→무장→스냅샷 캡처는
-        # 반드시 await 없이 동기로 실행한다: 단일 스레드 asyncio 가 이 구간을 원자적으로 처리하므로
-        # (a) 동시 Sequence/Storyteller 가 가드를 통과해 서로의 freeze 를 짓밟거나(clobber),
-        # (b) 동시 Random 이 미무장→무장 전이의 부분 상태/미완 스냅샷을 관측하는 TOCTOU 를 막는다.
-        # freeze_lock 은 Sequence 요청 간 직렬화(겹친 두 배치 방지)를 추가로 보장한다.
-        async with freeze_lock:
-            # --- 동기 임계구역: 가드 (충돌 시 거부) ---
-            es_existing = getattr(session_context, "event_stream_runtime", None)
-            # is_active 는 Storyteller 자동 사이클과 1.5식 수동 진행을 모두 포착한다
-            # (storyteller.is_running() 만으로는 수동 진행을 놓침 — 검증).
-            if (es_existing is not None and getattr(es_existing, "is_active", False)) \
-                    or session_context._storyteller_service().is_running():
-                return JSONResponse(
-                    {"error": "Event Stream / Storyteller가 실행 중입니다. 먼저 정지한 뒤 시퀀스를 생성하세요."},
-                    status_code=409,
-                )
-            if session_context._automation_service().is_running():
-                return JSONResponse(
-                    {"error": "Automation이 실행 중입니다. 정지한 뒤 시퀀스를 생성하세요."},
-                    status_code=409,
-                )
-            if getattr(session_context, "is_generating", False):
-                return JSONResponse(
-                    {"error": "생성이 진행 중입니다. 완료된 뒤 시퀀스를 생성하세요."},
-                    status_code=409,
-                )
-            queue = getattr(session_context, "generation_queue_manager", None)
-            if queue is not None and (queue.is_paused() or not queue.is_empty()):
-                return JSONResponse(
-                    {"error": "생성 큐가 비어있지 않습니다. 큐를 비운 뒤 시퀀스를 생성하세요."},
-                    status_code=409,
-                )
-
-            # 시드(첫 이미지 기준 고정): 사용자가 고정 시드를 켜 두고 유효값이 있으면 그 값을,
-            # 아니면 배치 전체에 쓸 시드를 1회만 추첨해 전 프레임에 박는다(사용자 결정: "매번 1회
-            # 추첨해 고정"). seed + seed_fixed 를 함께 박아야 _normalize_numbers 가 재추첨하지
-            # 않는다(default-0 트랩 회피). remote_params(라이브 세션 값)만 읽고 세션은 변경 안 함.
-            user_seed_fixed = session_context._coerce_bool(
-                session_context.remote_params.get("seed_fixed", False)
-            )
-            raw_seed = session_context.remote_params.get("seed", "")
-            try:
-                user_seed = int(float(raw_seed)) if str(raw_seed).strip() != "" else None
-            except (TypeError, ValueError):
-                user_seed = None
-            if user_seed_fixed and user_seed is not None and user_seed >= 0:
-                pinned_seed = user_seed
-            else:
-                pinned_seed = _rng.randint(0, 9_999_999_999)
-
-            # 해상도(첫 이미지 기준 고정): 세션 width/height 를 전 프레임에 동일 적용하고 per-frame
-            # auto-fit 을 끈다. resolution 문자열은 정규화가 width/height 로 재계산하므로 width/height
-            # 가 진실의 원천. 각 차원을 독립 고정(비대칭 입력도 보존); 판독 실패한 차원은 정규화
-            # 기본값으로 전 프레임 동일하게 통일된다.
-            fixed_w = _coerce_dim(session_context.remote_params.get("width"))
-            fixed_h = _coerce_dim(session_context.remote_params.get("height"))
-
-            # --- 동기 무장 + 정체성 스냅샷 1회 캡처(가드와 같은 임계구역, await 없음) ---
-            from core.event_tree import LegacyStoryNodeSpec
-
-            event_stream = session_context._create_event_stream_runtime()
-            event_stream.start_linear(
-                [LegacyStoryNodeSpec(node_id="sequence.freeze", name="Sequence")],
-                run_id=f"sequence-{batch_id}",
-            )
-            try:
-                event_stream.ensure_freeze_snapshot()
-                frozen_chars = event_stream.get_frozen_character_params()
-            except Exception as exc:
-                # 캡처 실패: 무장 상태로 남기지 않도록 즉시 해제 후 명확히 실패 반환.
-                try:
-                    event_stream.stop()
-                except Exception:
-                    pass
-                return JSONResponse(
-                    {"error": f"Sequence freeze arm failed: {exc}"}, status_code=500
-                )
-
-            try:
-                # 프레임별: freeze 로 아티스트/와일드카드 고정된 PE 경유 조립(메인 컨텍스트 비오염)
-                # → 정체성(시드/해상도/캐릭터) baking → enqueue. 한 프레임 실패해도 나머지 진행.
-                # 각 프레임을 try/except 로 감싸 예외에도 frames[] 가 항상 프레임당 1엔트리 보장.
-                for source in result["sources"]:
-                    idx = source["index"]
-                    try:
-                        source_row = source["sourceRow"]
-                        request_id = f"seqpreset-{batch_id[:8]}-{idx}"
-                        assembled = await run_in_thread(
-                            random.generate_from_source_row,
-                            source_row,
-                            active_ratings=active_ratings,
-                            random_request_id=request_id,
-                            source="sequence_preset",
-                            update_context=False,
-                        )
-                        if not assembled.success:
-                            enqueued.append({"index": idx, "ok": False,
-                                             "error": assembled.error or "assembly failed"})
-                            continue
-                        overrides: dict[str, Any] = {
-                            "input": assembled.prompt,
-                            "_raw_input": assembled.prompt,
-                            "_source_row_data": dict(source_row),
-                            "_source_name": request_id,
-                            "_remote_queue_source": "SequencePreset",
-                            "_remote_queue_label": "sequence_preset",
-                            "sequence_preset_request": True,
-                            "sequence_preset_request_id": request_id,
-                            "sequence_preset_group_id": batch_id,
-                            "sequence_preset_frame": f"{idx + 1}/{total}",
-                            # 첫 이미지 기준 시드 고정.
-                            "seed": pinned_seed,
-                            "seed_fixed": True,
-                            # 첫 이미지 기준 해상도 고정(per-frame auto-fit 차단).
-                            "auto_fit_resolution": False,
-                        }
-                        if fixed_w:
-                            overrides["width"] = fixed_w
-                        if fixed_h:
-                            overrides["height"] = fixed_h
-                        if fixed_w and fixed_h:
-                            overrides["resolution"] = f"{fixed_w} x {fixed_h}"
-                        # NAI 캐릭터 프롬프트 동결: 동결 캐릭터를 커맨드 params 에 baking → freeze
-                        # 해제(큐 드레인) 후에도 EarlyBinding 경로로 적용된다. uc 길이를 캐릭터 수에
-                        # 맞춰(부족분=빈 네거티브 패딩, 초과분=절단) NAICharacterData 검증을 항상
-                        # 통과시켜 동결 캐릭터가 조용히 드롭되지 않게 한다(정상 경로는 이미 일치).
-                        if frozen_chars and frozen_chars.get("characters"):
-                            chars = list(frozen_chars.get("characters") or [])
-                            ucs = list(frozen_chars.get("uc") or [])
-                            ucs = (ucs + [""] * len(chars))[:len(chars)]
-                            overrides["characters"] = chars
-                            overrides["uc"] = ucs
-                            positions = frozen_chars.get("character_positions") or []
-                            if positions:
-                                overrides["character_positions"] = list(positions)
-                        command = {
-                            "type": "generate",
-                            "api_mode": api_mode,
-                            "prompt": assembled.prompt,
-                            "negative_prompt": session_context.negative_prompt_text,
-                            "overrides": overrides,
-                        }
-                        if assembled.prompt_run_id:
-                            command["prompt_run_id"] = assembled.prompt_run_id
-                        dispatch = await run_in_thread(generation.enqueue_remote_request, command)
-                        enqueued.append({
-                            "index": idx, "ok": bool(dispatch.ok),
-                            "prompt": assembled.prompt,
-                            "requestId": getattr(dispatch.request, "request_id", "") if dispatch.ok else "",
-                            "error": "" if dispatch.ok else (dispatch.blocked_reason or "enqueue blocked"),
-                        })
-                    except Exception as exc:  # 프레임 단위 격리 — 전체 요청이 500 으로 죽지 않게
-                        enqueued.append({"index": idx, "ok": False, "error": f"frame error: {exc}"})
-            finally:
-                # Freeze 는 조립 동안에만 필요(정체성은 baking 완료). 항상 해제해 공유 런타임이
-                # 무장 상태로 남지 않게 한다(이후 일반 Random 이 allocator 로 빠지는 것 방지).
-                # stop 은 동기·경량(publish only)이라 스레드 없이 호출한다.
-                try:
-                    event_stream.stop()
-                except Exception:
-                    pass
-
-        ok_count = sum(1 for e in enqueued if e["ok"])
-        if ok_count and session_context.headless_generation_execute_enabled:
-            start_generation_runner(session_context, clients)
-        await broadcast_json(clients, {
-            "type": "sequence_preset_queued",
-            "groupId": result["groupId"],
-            "batchId": batch_id,
-            "total": total,
-            "enqueued": ok_count,
-            "seed": pinned_seed,
-        })
-        return {
-            "ok": ok_count > 0,
-            "status": "sequence_queued",
-            "groupId": result["groupId"],
-            "batchId": batch_id,
-            "total": total,
-            "enqueued": ok_count,
-            "seed": pinned_seed,
-            "frames": enqueued,
-        }
+    @app.post("/api/sequence-preset/stop")
+    async def api_sequence_preset_stop():
+        try:
+            state = session_context._sequence_run_service().stop()
+            extra = state.pop("_headless_extra_messages", []) if isinstance(state, dict) else []
+            await broadcast_json(clients, session_context._sequence_run_module_state())
+            for message in extra:
+                await broadcast_json(clients, message)
+            return state
+        except Exception as exc:
+            return JSONResponse({"error": f"Sequence stop failed: {exc}"}, status_code=500)

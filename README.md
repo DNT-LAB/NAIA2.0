@@ -55,7 +55,8 @@ Get-Content  .\SHA256SUMS.txt
 > 이 portable 빌드는 unsigned 베타입니다. 첫 실행 시 Windows SmartScreen 경고가 나타날 수 있으며,
 > 배포 아티팩트는 로컬 Microsoft Defender 스캔을 통과하고 `SHA256SUMS.txt`로 검증 가능합니다.
 
-업데이트는 어느 경로든 `git pull` 후 런처를 다시 실행하면 됩니다 (Portable은 앱 내 업데이트 지원).
+업데이트: A/B(소스) 런처는 시작 시 새 커밋을 자동 확인하고 `git pull`을 제안합니다.
+Portable(C)은 앱 내 업데이트(다운로드+검증+재시작)를 지원합니다.
 
 ---
 

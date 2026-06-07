@@ -34,6 +34,15 @@ const APP_ICON = path.join(__dirname, "..", "assets", "naia.ico");
 // Auto-update: poll the GitHub releases API for the portable build and surface
 // it to the Remote Web shell UI. Releases are tagged vX.Y.Z and carry the
 // portable zip + a SHA256SUMS.txt that the apply step verifies against.
+//
+// WARNING(update channel): there are TWO update paths that must stay in sync.
+// Packaged/portable installs use this release feed (download + swap). Source
+// clones instead follow their git upstream branch (origin/future02 today) via
+// the run_NAIA_* launchers' fetch/pull check; in source mode the banner only
+// points users at `git pull` (updateState.sourceMode). If future02 is ever
+// force-merged into/renamed to main, revise every update touchpoint together:
+// all four run_NAIA_* launchers, the source-mode banner guidance
+// (updateBannerControls.mjs), and existing clones' upstream branches.
 const UPDATE_REPO = "DNT-LAB/NAIA2.0";
 const UPDATE_LATEST_RELEASE_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
 const UPDATE_RELEASES_PAGE_URL = `https://github.com/${UPDATE_REPO}/releases/latest`;
@@ -146,6 +155,9 @@ let updateCheckPromise = null;
 let updateDownloadPromise = null;
 let updateState = {
   phase: "idle", // idle | checking | available | up-to-date | error | downloading | downloaded | applying
+  // Source checkouts cannot take the zip download/swap path; the banner shows
+  // git-pull guidance instead (see WARNING(update channel) above).
+  sourceMode: !app.isPackaged,
   currentVersion: null,
   latestVersion: null,
   releaseTag: "",

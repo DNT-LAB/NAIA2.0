@@ -54,6 +54,32 @@ if [ ! -x "$0" ]; then
     exit 0
 fi
 
+# --- 소스 업데이트 체크 ----------------------------------------------------
+# 채널: clone 의 upstream 브랜치 (현재 origin/future02).
+# WARNING: future02 가 main 브랜치로 force merge 되는 경우, 업데이트 기준점을
+# 전부 함께 수정해야 한다: run_NAIA_* 런처 4종의 이 블록, 소스모드 업데이트
+# 배너 (app/electron/main/main.cjs + updateBannerControls.mjs), 기존 clone
+# 들의 upstream 브랜치.
+if command -v git > /dev/null 2>&1 && [ -d ".git" ] && git rev-parse --abbrev-ref --symbolic-full-name '@{u}' > /dev/null 2>&1; then
+    if git fetch --quiet 2>/dev/null; then
+        BEHIND="$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)"
+        if [ "${BEHIND:-0}" -gt 0 ] 2>/dev/null; then
+            echo -e "${YELLOW}⬆️  업데이트 가능: 원격 브랜치에 새 커밋 ${BEHIND}개${NC}"
+            read -p "지금 git pull 로 업데이트할까요? (y/N): " DO_UPDATE
+            if [[ "$DO_UPDATE" =~ ^[Yy]$ ]]; then
+                # pull 이 이 스크립트 자신을 덮어쓰므로, 성공 시 같은 컴파운드
+                # 블록 안에서 exec 로 새 스크립트를 즉시 재실행한다.
+                if git pull --ff-only; then
+                    echo -e "${GREEN}✅ 업데이트 완료 — 런처를 다시 시작합니다.${NC}"
+                    exec bash "$0"
+                else
+                    echo -e "${RED}❌ git pull 실패 — 현재 버전으로 계속 진행합니다.${NC}"
+                fi
+            fi
+        fi
+    fi
+fi
+
 # Python 설치 확인
 echo -e "${BLUE}🐍 Python 환경 확인 중...${NC}"
 

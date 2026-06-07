@@ -5,6 +5,15 @@
 //
 // In a plain browser session (no naiaShell) the section stays hidden — auto-update
 // is a packaged-desktop concern only.
+//
+// Source mode (update.sourceMode, i.e. `run_NAIA_electron.*` / npm start from a
+// git clone): the zip download/swap path does not apply, so "available" renders
+// git-pull guidance instead of the download/install buttons.
+// WARNING(update channel): source clones follow their upstream branch
+// (origin/future02 today). If future02 is ever force-merged into main, revise
+// every update touchpoint together: the four run_NAIA_* launchers, this
+// source-mode guidance, main.cjs WARNING(update channel), and existing clones'
+// upstream branches.
 
 export function createUpdateBanner({document, showToast, confirmDialog}) {
   const toast = (msg, kind) => {
@@ -98,7 +107,7 @@ export function createUpdateBanner({document, showToast, confirmDialog}) {
       setSub(current ? `현재 버전 v${esc(current)}.` : '');
       setResult(u.error || '업데이트 확인에 실패했습니다.', 'error');
       show('setupUpdateRelease', true);
-      if (latest && compareNewer(latest, current)) show('setupUpdateDownload', true);
+      if (!u.sourceMode && latest && compareNewer(latest, current)) show('setupUpdateDownload', true);
       return;
     }
     if (phase === 'up-to-date') {
@@ -110,13 +119,22 @@ export function createUpdateBanner({document, showToast, confirmDialog}) {
     if (phase === 'available') {
       setStatus(`업데이트 가능 · v${esc(latest)}`);
       const snippet = notesSnippet(u.releaseNotes);
-      setSub(`현재 v${esc(current)} → 최신 <strong>v${esc(latest)}</strong>${snippet ? ` — ${esc(snippet)}` : ''}`);
+      if (u.sourceMode) {
+        // Source checkout: zip swap does not apply — guide to git pull instead.
+        setSub(
+          `현재 v${esc(current)} → 최신 <strong>v${esc(latest)}</strong>${snippet ? ` — ${esc(snippet)}` : ''}<br>` +
+          '소스 실행 중입니다: 앱을 종료한 뒤 <code>git pull</code> 후 런처를 다시 실행하면 업데이트됩니다. ' +
+          '(런처가 시작 시 자동으로 확인·제안합니다)',
+        );
+      } else {
+        setSub(`현재 v${esc(current)} → 최신 <strong>v${esc(latest)}</strong>${snippet ? ` — ${esc(snippet)}` : ''}`);
+        show('setupUpdateDownload', true);
+      }
       setResult('');
-      show('setupUpdateDownload', true);
       show('setupUpdateRelease', true);
       if (latest && latest !== lastNotifiedVersion) {
         lastNotifiedVersion = latest;
-        toast(`새 버전 v${latest} 사용 가능`, 'info');
+        toast(u.sourceMode ? `새 버전 v${latest} — git pull 로 업데이트하세요` : `새 버전 v${latest} 사용 가능`, 'info');
       }
       return;
     }

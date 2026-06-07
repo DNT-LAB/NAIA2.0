@@ -7,6 +7,31 @@ REM  NAIA 2.0 - Headless Web Launcher (browser mode)
 REM  Backend: Python venv (3.10 - 3.12)
 REM ============================================================
 
+REM --- Source update check ------------------------------------------------
+REM Channel: the clone's upstream branch (origin/future02 today).
+REM WARNING: if future02 is ever force-merged into main, revise every update
+REM touchpoint together: this block in all four run_NAIA_* launchers, the
+REM desktop shell update banner, and existing clones' upstream branches.
+where git > nul 2>&1
+if errorlevel 1 goto update_check_done
+if not exist ".git" goto update_check_done
+git rev-parse --abbrev-ref --symbolic-full-name @{u} > nul 2>&1
+if errorlevel 1 goto update_check_done
+git fetch --quiet 2> nul
+if errorlevel 1 goto update_check_done
+set "NAIA_BEHIND=0"
+for /f "delims=" %%c in ('git rev-list --count "HEAD..@{u}" 2^>nul') do set "NAIA_BEHIND=%%c"
+if "%NAIA_BEHIND%"=="0" goto update_check_done
+echo.
+echo A NAIA update is available: %NAIA_BEHIND% new commits on the remote branch.
+set /p DO_UPDATE=Run git pull now? [y/N]:
+if /i not "%DO_UPDATE%"=="y" goto update_check_done
+REM Keep everything after a successful pull on this single line: the pull
+REM rewrites this very file, and cmd re-reads later lines by byte offset.
+git pull --ff-only && echo Update applied - restarting the launcher in a new window... && start "" "%~f0" && exit /b 0
+echo git pull failed - continuing with the current version.
+:update_check_done
+
 REM --- Locate a compatible Python (3.13+ is not supported yet) ---
 set "PY_CMD="
 call :try_python "py -3.12"

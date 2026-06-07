@@ -15,6 +15,10 @@ from typing import Any
 
 import pandas as pd
 
+from core.event_stream_vibe import (
+    EVENT_STREAM_VIBE_MARKER_KEY,
+    strip_event_stream_vibe_params,
+)
 from core.generation_request import (
     GenerationRequest,
     NAICharacterData,
@@ -214,6 +218,19 @@ class HeadlessGenerationService:
         # (NAI가 아니거나 캐릭터가 꺼진 실행에서 stale 캐릭터 표시 방지).
         params.pop("_executed_characters", None)
         params.pop("_executed_characters_uc", None)
+        # Storyteller Use Vibe: 정지 후 실행되는 큐 잔존 페이지가 휘발성 스트림 vibe를
+        # 보내지 않도록 실행 시점 검증 — 마커의 run_id가 활성 스트림과 다르면 스트림
+        # 발급분만 제거한다(일반 vibe 불변; Codex 설계검수 #4).
+        marker = params.get(EVENT_STREAM_VIBE_MARKER_KEY)
+        if isinstance(marker, dict):
+            runtime = getattr(self.context, "event_stream_runtime", None)
+            active_run = (
+                str(getattr(runtime, "run_id", "") or "")
+                if runtime is not None and getattr(runtime, "is_active", False)
+                else ""
+            )
+            if str(marker.get("run_id") or "") != active_run:
+                strip_event_stream_vibe_params(params)
         # 프롬프트 입력창에 직접 친 와일드카드를 생성 시점에 전개한다(desktop
         # generation_controller 패리티). request.params 원본은 건드리지 않으므로
         # prompt_fixed Auto Gen 반복마다 여기서 새로 전개 = 매 생성 재롤.

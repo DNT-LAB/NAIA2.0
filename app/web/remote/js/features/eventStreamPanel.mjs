@@ -74,7 +74,7 @@ export function createEventStreamPanel({
   ];
 
   function defaultStep() {
-    return {include: '', exclude: '', rating: 'all', keep_clothes: false, keep_background: false, resolution: 'default'};
+    return {include: '', exclude: '', rating: 'all', keep_clothes: false, keep_background: false, use_vibe: false, resolution: 'default'};
   }
 
   function ensureSteps() {
@@ -94,12 +94,14 @@ export function createEventStreamPanel({
       const resolution = card.querySelector('.story-step-res');
       const keepClothes = card.querySelector('[data-step-keepclothes]');
       const keepBackground = card.querySelector('[data-step-keepbg]');
+      const useVibe = card.querySelector('[data-step-usevibe]');
       if (include) steps[index].include = include.value;
       if (exclude) steps[index].exclude = exclude.value;
       if (rating) steps[index].rating = rating.value;
       if (resolution) steps[index].resolution = resolution.value;
       if (keepClothes) steps[index].keep_clothes = Boolean(keepClothes.checked);
       if (keepBackground) steps[index].keep_background = Boolean(keepBackground.checked);
+      if (useVibe) steps[index].use_vibe = Boolean(useVibe.checked);
     });
   }
 
@@ -246,6 +248,9 @@ export function createEventStreamPanel({
               </label>
               <label title="이 스텝의 배경/장소를 다음 스텝에도 유지합니다">
                 <input type="checkbox" data-step-keepbg="${index}" ${step.keep_background ? 'checked' : ''} ${dis}> 배경 유지
+              </label>
+              <label title="이 스텝의 생성 결과를 IE 0.5로 인코딩해(2 Anlas) 다음 스텝부터 Vibe(RS 0.9)로 적용합니다. 스트림이 추가하는 Vibe는 1장뿐 — 다른 스텝에서 다시 체크하면 그 스텝 이미지로 교체됩니다. 라운드가 다시 시작되면 리셋되고, Vibe Storage에는 저장되지 않습니다 (NAI 전용, NAID3 제외).">
+                <input type="checkbox" data-step-usevibe="${index}" ${step.use_vibe ? 'checked' : ''} ${dis}> Vibe 사용 (2 Anlas)
               </label>
             </span>
           </div>
@@ -444,6 +449,11 @@ export function createEventStreamPanel({
         if (steps[index]) { steps[index].keep_background = Boolean(target.checked); persistSteps(); }
         return;
       }
+      if (target.dataset.stepUsevibe !== undefined) {
+        const index = Number(target.dataset.stepUsevibe);
+        if (steps[index]) { steps[index].use_vibe = Boolean(target.checked); persistSteps(); }
+        return;
+      }
       if (target.dataset.stepInclude !== undefined || target.dataset.stepExclude !== undefined) {
         persistSteps();
       }
@@ -530,6 +540,7 @@ export function createEventStreamPanel({
             rating: String(step?.rating || 'all'),
             keep_clothes: Boolean(step?.keep_clothes),
             keep_background: Boolean(step?.keep_background),
+            use_vibe: Boolean(step?.use_vibe),
             resolution: String(step?.resolution || 'default'),
           }));
           hydratedNow = true;

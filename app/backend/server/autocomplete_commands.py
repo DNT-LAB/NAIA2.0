@@ -123,7 +123,10 @@ def _translate_autocomplete_query(context: WebSessionContext, query: str) -> str
     cached = cache.get(normalized)
     if cached is not None:
         return str(cached)
-    translated = normalize_search_query(korean_to_english(normalized) or "")
+    from core.translation_history import translation_context
+
+    with translation_context("autocomplete"):
+        translated = normalize_search_query(korean_to_english(normalized) or "")
     if not translated or _has_hangul_text(translated) or translated == normalized:
         translated = ""
     if len(cache) > 256:
@@ -456,8 +459,12 @@ async def handle_autocomplete_command(
         direction = str(command.get("direction") or "ko_en").strip().lower()
         text = str(command.get("text") or command.get("query") or "")
         translator = english_to_korean if direction in {"en_ko", "en-ko", "en2ko"} else korean_to_english
+        from core.translation_history import translation_context
+
         try:
-            translated = await run_in_thread(translator, text)
+            # asyncio.to_thread는 contextvar를 워커 스레드로 복사하므로 라벨이 전파된다.
+            with translation_context("manual_translate"):
+                translated = await run_in_thread(translator, text)
             payload = {
                 "type": "translation_result",
                 "text": text,

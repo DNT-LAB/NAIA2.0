@@ -16,21 +16,11 @@ from app.backend.server.generation_commands import (
 from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
 from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
 from core import result_image_payload_service as result_images
+# 특수 요청 판정은 core와 공유한다(Storyteller Use Vibe가 같은 기준으로 plain generate를
+# 가르므로) — 정의가 두 군데로 갈라지지 않게 core/auto_generation_flags.py가 단일 출처.
+from core.auto_generation_flags import AUTO_GENERATE_SUPPRESSED_FLAGS, SPECIAL_REQUEST_TYPES
+from core.event_stream_vibe import EVENT_STREAM_VIBE_CAPTURE_KEY
 from core.web_session_context import WebSessionContext
-
-
-AUTO_GENERATE_SUPPRESSED_FLAGS = {
-    "artist_thumb_request",
-    "character_viewer_request",
-    "event_preset_request",
-    "interactive_mode_request",
-    "prompt_preset_thumbnail_request",
-    "remote_preset_request",
-    "result_enhance_request",
-    "sequence_preset_request",
-    "studio_request",
-    "turbo_sequence_request",
-}
 
 AUTO_GENERATE_DROPPED_PARAM_KEYS = {
     "_generation_request",
@@ -186,6 +176,28 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                     await broadcast_json(clients, context._event_stream_module_state())
                 except Exception:
                     pass
+            # Storyteller Use Vibe: use_vibe 스텝의 완료 이미지를 런타임에 보관한다(Anlas 0).
+            # stamp의 run_id가 활성 런과 일치할 때만 — stale/특수 완료의 오캡처를 stamp-only
+            # 바인딩으로 차단. seq는 완료 역순 도착 시 '가장 나중에 시작한' 생성이 이기게
+            # 하는 단조 게이트. 인코딩(2 Anlas)은 다음 스텝 전진 시점에 1회만 일어난다.
+            vibe_capture = params.get(EVENT_STREAM_VIBE_CAPTURE_KEY)
+            if vibe_capture and event_stream_runtime is not None:
+                store_vibe = getattr(event_stream_runtime, "store_vibe_source", None)
+                if callable(store_vibe):
+                    capture_run = (
+                        vibe_capture.get("run_id") if isinstance(vibe_capture, dict) else vibe_capture
+                    )
+                    capture_seq = (
+                        vibe_capture.get("seq") if isinstance(vibe_capture, dict) else None
+                    )
+                    try:
+                        store_vibe(
+                            stored.item.raw_bytes,
+                            run_id=str(capture_run or ""),
+                            seq=capture_seq,
+                        )
+                    except Exception:
+                        pass
             # Guard the auto-continue (prompt gen / PE persist / enqueue) so a raised
             # exception after a story page was counted still cleans up the cycle
             # (_broadcast_generation_error fails the stamped story) instead of leaving the
@@ -294,6 +306,16 @@ async def _maybe_continue_auto_generation(
         # Carry the story run id so the next completion re-binds to this same cycle.
         overrides["event_stream_run_id"] = story_run_id
         queue_source = "Storyteller"
+        # 직전 페이지 params에 바인딩된 vibe reference(일반+스트림)가 overrides로 핀되지
+        # 않게 제거 — 다음 페이지는 enqueue 시점에 라이브 일반 vibe + 현재 스트림 vibe
+        # 1장을 새로 받는다(누적/고착 차단, Use Vibe '딱 1장' 보장의 1차 방어).
+        for key in (
+            "reference_image_multiple",
+            "reference_strength_multiple",
+            "normalize_reference_strength_multiple",
+            "reference_information_extracted_multiple",
+        ):
+            overrides.pop(key, None)
     elif automation_run_id:
         queue_source = "Automation"
     else:
@@ -436,7 +458,7 @@ def _automation_should_bind(context: WebSessionContext, request) -> bool:
     if any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS):
         return False
     request_type = str(params.get("type") or "").strip().lower()
-    if request_type in {"img2img", "inpaint", "outpaint", "auto_outpainting"}:
+    if request_type in SPECIAL_REQUEST_TYPES:
         return False
     return True
 
@@ -457,7 +479,7 @@ def _should_continue_auto_generation(context: WebSessionContext, request) -> boo
     if any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS):
         return False
     request_type = str(params.get("type") or "").strip().lower()
-    if request_type in {"img2img", "inpaint", "outpaint", "auto_outpainting"}:
+    if request_type in SPECIAL_REQUEST_TYPES:
         return False
     return True
 
@@ -602,7 +624,7 @@ async def _broadcast_generation_error(
             "type": "sequence_preset_generation_error",
             "requestId": str(params.get("sequence_preset_request_id") or ""),
             "groupId": str(params.get("sequence_preset_group_id") or ""),
-            "step": str(params.get("sequence_preset_step") or ""),
+            "frame": str(params.get("sequence_preset_frame") or ""),
             "message": message,
         })
     await broadcast_json(clients, context.queue_state_payload())

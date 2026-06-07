@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260606-ollama4">
+<link rel="stylesheet" href="style.css?v=20260607-seqpopup3">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -349,7 +349,6 @@
   <div class="pe-popup-body"></div>
 </div>
 
-</div>
 
 <!-- Tag Filter floating panel -->
 <div class="tag-filter-popup" id="tagFilterPopup">
@@ -403,6 +402,7 @@
       </div>
       <div class="fn-menu" id="fnMenu" role="menu" hidden>
         <button type="button" role="menuitem" onclick="openFnPreset()"><span>&#9638;</span><span>Preset</span></button>
+        <button type="button" role="menuitem" onclick="openFnSequence()"><span>&#9654;</span><span>Sequence</span></button>
         <button type="button" role="menuitem" onclick="openTranslatorPopup()"><span>あ</span><span>Translate</span></button>
       </div>
       <div class="tab-content">
@@ -605,6 +605,9 @@
               <span id="negativeTokenLabel">Estimated Tokens : 0</span>
             </div>
           </div>
+        </div>
+        <div class="tab-page" id="tabSequence">
+          <div class="seq-panel" id="sequencePresetPanel"></div>
         </div>
       </div>
       <!-- Module bar -->
@@ -1090,6 +1093,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260607-seedbox1"></script>
+<script src="app.js?v=20260607-seqpopup1"></script>
 </body>
 </html>

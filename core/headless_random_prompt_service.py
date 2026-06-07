@@ -116,6 +116,7 @@ class HeadlessRandomPromptService:
 
         source_row_override = None
         skip_random_events = False
+        stream_messages: list[dict[str, Any]] = []
         # 1.5 모델: 스트림이 활성인 동안 모든 랜덤(수동 포함)이 시퀀스를 전진시킨다 —
         # 사용자는 마음에 드는 이미지가 나올 때까지 수동으로 라운드를 반복할 수 있다.
         event_stream = getattr(self.context, "event_stream_runtime", None)
@@ -125,6 +126,11 @@ class HeadlessRandomPromptService:
                 settings,
                 active_ratings=ratings,
             )
+            # Use Vibe 인코딩 성공/실패 토스트(런타임은 직접 브로드캐스트 불가) — 어느
+            # 분기로 끝나든 extra_messages로 실어 보낸다.
+            consume_vibe = getattr(event_stream, "consume_vibe_messages", None)
+            if callable(consume_vibe):
+                stream_messages = list(consume_vibe() or [])
             if request.error_message:
                 return HeadlessRandomPromptResult(
                     success=False,
@@ -132,6 +138,7 @@ class HeadlessRandomPromptService:
                     random_request_id=random_request_id,
                     remaining=self.context.search_results.get_count(),
                     rating_counts=self._rating_counts(),
+                    extra_messages=stream_messages,
                 )
             settings = request.settings
             ratings = request.active_ratings
@@ -148,6 +155,7 @@ class HeadlessRandomPromptService:
                     random_request_id=random_request_id,
                     remaining=self.context.search_results.get_count(),
                     rating_counts=self._rating_counts(),
+                    extra_messages=stream_messages,
                 )
 
         publish = getattr(self.context, "publish", None)
@@ -168,6 +176,7 @@ class HeadlessRandomPromptService:
                 random_request_id=random_request_id,
                 remaining=self.context.search_results.get_count(),
                 rating_counts=self._rating_counts(),
+                extra_messages=stream_messages,
             )
 
         service.set_current_context(
@@ -185,6 +194,7 @@ class HeadlessRandomPromptService:
                 random_request_id=random_request_id,
                 remaining=preparation.remaining_count or 0,
                 rating_counts=self._rating_counts(),
+                extra_messages=stream_messages,
             )
 
         self.context.prompt_text = result.final_prompt or ""
@@ -195,7 +205,7 @@ class HeadlessRandomPromptService:
         safe_print("Headless Remote: random prompt generated", flush=True)
         prompt_run_id = str(getattr(result.context, "metadata", {}).get("prompt_run_id") or "")
 
-        extra_messages = [tag_filter_update] if tag_filter_update else []
+        extra_messages = stream_messages + ([tag_filter_update] if tag_filter_update else [])
         skip_message = self._conditional_character_skip_message(result.context)
         if skip_message:
             extra_messages.append(skip_message)

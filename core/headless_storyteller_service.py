@@ -89,7 +89,7 @@ class HeadlessStorytellerService:
             steps = self._parse_steps_value(value)
             self.save_steps(steps)
             state = self.state()
-            conflicts = self._carry_conflict_messages(steps)
+            conflicts = self._carry_conflict_messages(steps) + self._use_vibe_mode_messages(steps)
             if conflicts:
                 state["_headless_extra_messages"] = conflicts
             return state
@@ -110,11 +110,12 @@ class HeadlessStorytellerService:
                     ratings=_STEP_RATING_SETS.get(str(step.get("rating") or "all")),
                     include_tags=tuple(sorted(self._split_step_tags(step.get("include")))),
                     exclude_tags=tuple(sorted(self._split_step_tags(step.get("exclude")))),
-                    # carry(의상/배경 유지)는 EventStreamRuntime이 노드 policy로 직접
-                    # 적용한다 — 수동 진행/자동 사이클 공통.
+                    # carry(의상/배경 유지)·Use Vibe는 EventStreamRuntime이 노드 policy로
+                    # 직접 적용한다 — 수동 진행/자동 사이클 공통.
                     axis_carry_policy={
                         "keep_clothes": bool(step.get("keep_clothes")),
                         "keep_background": bool(step.get("keep_background")),
+                        "use_vibe": bool(step.get("use_vibe")),
                     },
                 )
                 for index, step in enumerate(steps)
@@ -157,6 +158,31 @@ class HeadlessStorytellerService:
             ))
         return messages
 
+    def _use_vibe_mode_messages(self, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Use Vibe 스텝이 있는데 인코딩 불가 런타임(비NAI 모드/NAID3)이면 1회 경고 —
+        라이브에선 조용히 아무 일도 안 일어나므로 명시한다(토큰 유무는 실행 시점 검증)."""
+        if not steps or not any(step.get("use_vibe") for step in steps):
+            return []
+        if "use_vibe_mode" in self._carry_conflict_warned:
+            return []
+        try:
+            mode = str(self.context.get_api_mode() or "").upper()
+            naid3 = bool(self.context._is_naid3_model())
+        except Exception:
+            return []
+        if mode == "NAI" and not naid3:
+            return []
+        reason = (
+            "NAID3 모델은 Vibe 인코딩을 지원하지 않습니다"
+            if mode == "NAI"
+            else "NAI 모드에서만 동작합니다"
+        )
+        self._carry_conflict_warned.add("use_vibe_mode")
+        return [self.context._toast(
+            f"스텝의 'Vibe 사용(2 Anlas)'은 {reason} — 이번 실행에서는 무시됩니다.",
+            level="warning",
+        )]
+
     # -------------------------------------------------- 1.5식 수동 진행 모드
     def arm_manual(self, value: Any) -> dict[str, Any]:
         """작성한 스텝 시퀀스를 allocator에 무장만 한다(자동 생성 없음). 이후의 모든
@@ -164,6 +190,10 @@ class HeadlessStorytellerService:
         마음에 드는 이미지가 나올 때까지 직접 라운드를 반복한다."""
         if self.is_running():
             return self._error_state("자동 사이클 실행 중에는 수동 진행을 시작할 수 없습니다.")
+        if self._foreign_event_stream_active():
+            return self._error_state(
+                "다른 Event Stream(예: Sequence)이 무장돼 있습니다. 먼저 정지한 뒤 시작하세요."
+            )
         steps = self._parse_steps_value(value)
         if steps:
             self.save_steps(steps)
@@ -180,6 +210,7 @@ class HeadlessStorytellerService:
             ),
             self.context._event_stream_module_state(),
             *self._carry_conflict_messages(steps),
+            *self._use_vibe_mode_messages(steps),
         ]
         return state
 
@@ -216,6 +247,10 @@ class HeadlessStorytellerService:
             )
         if self.is_running():
             return self._error_state("A Storyteller cycle is already running.")
+        if self._foreign_event_stream_active():
+            return self._error_state(
+                "다른 Event Stream(예: Sequence)이 무장돼 있습니다. 먼저 정지한 뒤 시작하세요."
+            )
         # Don't start on top of an in-flight queue/generation.
         if getattr(self.context, "is_generating", False):
             return self._error_state("A generation is in progress. Wait for it to finish.")
@@ -331,6 +366,7 @@ class HeadlessStorytellerService:
             level="info",
         ))
         messages.extend(self._carry_conflict_messages(steps))
+        messages.extend(self._use_vibe_mode_messages(steps))
         state = self.state()
         state["_headless_extra_messages"] = messages
         state["_headless_generation_commands"] = [command]
@@ -387,6 +423,9 @@ class HeadlessStorytellerService:
                     # 1.5 carry parity: 이 스텝의 의상/배경을 '다음' 스텝에 유지할지.
                     "keep_clothes": bool(item.get("keep_clothes", False)),
                     "keep_background": bool(item.get("keep_background", False)),
+                    # Use Vibe(2 Anlas): 이 스텝의 생성 결과를 IE 0.5로 인코딩해 이후
+                    # 스텝에 단일 vibe(RS 0.9)로 적용. 스트림 동안만 유지, Storage 미저장.
+                    "use_vibe": bool(item.get("use_vibe", False)),
                     # 스텝별 해상도: default | random | previous | "W x H"
                     "resolution": self._normalize_step_resolution(item.get("resolution")),
                 })
@@ -660,6 +699,16 @@ class HeadlessStorytellerService:
         if not runtime or not runtime.get("is_running"):
             return ""
         return str(runtime.get("run_id") or "")
+
+    def _foreign_event_stream_active(self) -> bool:
+        """공유 EventStreamRuntime 이 Storyteller 가 아닌 런(예: Sequence freeze)으로 무장돼
+        있는지. start_linear 은 무조건 clobber 하므로, 외부 런을 짓밟지 않도록 가드한다.
+        자기(Storyteller auto/manual) 런은 run_id 가 'storyteller' 로 시작해 재무장이 허용된다
+        — 기존 Storyteller↔수동진행 동작 보존."""
+        es = getattr(self.context, "event_stream_runtime", None)
+        if es is None or not getattr(es, "is_active", False):
+            return False
+        return not str(getattr(es, "run_id", "") or "").startswith("storyteller")
 
     # ----------------------------------------------------------------- helpers
     def _runtime(self) -> dict[str, Any] | None:

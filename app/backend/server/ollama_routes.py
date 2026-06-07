@@ -28,6 +28,50 @@ def _loopback_only_response() -> JSONResponse:
     )
 
 
+def _korean_to_english(text: str) -> "str | None":
+    """NAIA 내장 번역(Google Translate). 어시스트 사전 번역용."""
+    try:
+        from utils.translator import korean_to_english
+
+        return korean_to_english(text)
+    except Exception:
+        return None
+
+
+def _event_combo_tags(
+    context: WebSessionContext, rating: str, person_id: str, query: str, top_events: int,
+) -> list[tuple[str, int]]:
+    """Event Preset(실제 관측 조합)에서 query에 맞는 이벤트들의 공기 태그를 빈도순
+    집계. 인원수(person_id)+등급(rating) 파티션에 한정 — 어시스트의 B 하이브리드용."""
+    try:
+        from app.backend.server.preset_services import event_preset_service
+
+        svc = event_preset_service(context)
+        if svc.status().get("dataAvailability", {}).get("main") != "ready":
+            return []
+        boot = svc.bootstrap(rating_id=rating, person_id=person_id, search=query)
+        event_ids: list[str] = []
+        for cat in boot.get("categories", []):
+            for sub in cat.get("subcategories", []):
+                for ev in sub.get("events", []):
+                    eid = ev.get("id") or ev.get("eventTag")
+                    if eid:
+                        event_ids.append(str(eid))
+        weights: dict[str, int] = {}
+        for eid in event_ids[: max(1, top_events)]:
+            det = svc.observed_combos({"ratingId": rating, "personId": person_id, "eventId": eid})
+            event = det.get("event") or {}
+            for combo in (event.get("observedCombos") or [])[:12]:
+                cnt = int(combo.get("count") or 1)
+                for tag in combo.get("tags") or []:
+                    t = str(tag).strip()
+                    if t:
+                        weights[t] = weights.get(t, 0) + cnt
+        return sorted(weights.items(), key=lambda kv: kv[1], reverse=True)[:30]
+    except Exception:
+        return []
+
+
 def register_ollama_routes(
     app: FastAPI,
     context: WebSessionContext,
@@ -75,8 +119,81 @@ def register_ollama_routes(
     async def ollama_pull_status():
         return service().pull_state()
 
+    # ── 이벤트 데이터셋 브릿지 — Manual(B 실조합 참조)용. main(조합)만 받는다. ──
+    def _dataset_service():
+        from app.backend.server.preset_services import event_preset_download_service
+        return event_preset_download_service(context)
+
+    @app.get("/api/ollama/dataset")
+    async def ollama_dataset_state():
+        return await run_in_thread(_dataset_service().snapshot)
+
+    @app.post("/api/ollama/dataset")
+    async def ollama_dataset_download(request: Request):
+        if not _is_local_request(request):
+            return _loopback_only_response()
+        return await run_in_thread(lambda: _dataset_service().start(main_only=True))
+
     @app.post("/api/ollama/pull/cancel")
     async def ollama_pull_cancel(request: Request):
         if not _is_local_request(request):
             return _loopback_only_response()
         return service().cancel_pull()
+
+    def assist_service() -> "OllamaTagAssistService":
+        from app.backend.server.autocomplete_commands import search_kr_tags
+        from core.ollama_assistant_service import DEFAULT_MODEL
+        from core.ollama_tag_assist_service import OllamaTagAssistService
+
+        existing = getattr(context, "ollama_tag_assist_service", None)
+        if existing is None:
+            existing = OllamaTagAssistService(
+                base_url=service().base_url,
+                default_model=DEFAULT_MODEL,
+                # 진실의 원천: NAIA 태그 인덱스(한국어 질의 지원). core가 app 레이어를
+                # 모르도록 여기서 주입한다.
+                searcher=lambda query, limit: search_kr_tags(context, query, limit=limit),
+                event_combo_provider=lambda rating, person_id, query, top: _event_combo_tags(
+                    context, rating, person_id, query, top
+                ),
+                # 한국어 사전 번역 — NAIA 내장 Google Translate(Dev0714 STAGE 0 동일).
+                translator=_korean_to_english,
+            )
+            context.ollama_tag_assist_service = existing
+        return existing
+
+    @app.get("/api/ollama/assist/progress")
+    async def ollama_assist_progress():
+        # 현재 파이프라인 단계 + 경과초(FE 폴링). 백엔드 단일 블로킹 호출이라
+        # 실제 단계는 서비스 내부 상태로만 알 수 있다. 진행 중이 아니면 빈 스냅샷.
+        svc = getattr(context, "ollama_tag_assist_service", None)
+        if svc is None:
+            return {"active": False}
+        try:
+            return svc.progress()
+        except Exception:
+            return {"active": False}
+
+    @app.post("/api/ollama/assist")
+    async def ollama_assist(request: Request):
+        # 추론은 생성과 같은 제품 기능 — 원격 세션(폰/터널)에도 공개.
+        # 무거운 LLM 호출 + 인덱스 검색이라 스레드로.
+        # mode=fast → 원샷(1호출, 빠르지만 보수적), 그 외 → 파이프라인(정밀).
+        text = ""
+        model = None
+        mode = "manual"
+        options: dict[str, Any] = {}
+        try:
+            payload = await request.json()
+            if isinstance(payload, dict):
+                text = str(payload.get("text") or "")
+                model = payload.get("model")
+                mode = str(payload.get("mode") or "manual").lower()
+                if isinstance(payload.get("options"), dict):
+                    options = payload["options"]
+        except Exception:
+            text = ""
+        svc = assist_service()
+        if mode == "fast":
+            return await run_in_thread(lambda: svc.assist_oneshot(text, model=model, options=options))
+        return await run_in_thread(lambda: svc.assist(text, model=model, options=options))

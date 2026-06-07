@@ -17,6 +17,7 @@
     "app/backend/server/result_display_routes.py",
     "app/backend/server/state_routes.py",
     "app/backend/server/style_thumbnail_routes.py",
+    "app/backend/server/translation_history_routes.py",
     "app/backend/server/websocket_session.py",
     "app/backend/server/web_shell_routes.py"
   ],
@@ -361,6 +362,21 @@
         {"method": "POST", "path": "/api/data-migration/preview", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/data-migration/import", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/data-migration/nai-token", "smoke": "state_mutation"}
+      ]
+    },
+    {
+      "id": "translation_history",
+      "name": "Translation history (Ollama assist KR->EN log)",
+      "source_files": [
+        "app/backend/server/translation_history_routes.py",
+        "core/translation_history.py",
+        "app/web/remote/js/features/ollamaAssistantPopup.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/translation-history", "smoke": "non_destructive"},
+        {"method": "DELETE", "path": "/api/translation-history/{record_id}", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/translation-history/{record_id}/pin", "smoke": "state_mutation"}
       ]
     }
   ],

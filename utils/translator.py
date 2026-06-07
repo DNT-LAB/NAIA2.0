@@ -17,6 +17,27 @@ import requests
 warnings.filterwarnings("ignore", message="coroutine 'Translator.translate' was never awaited")
 
 
+def _record_translation(source: str, translated: Optional[str], direction: str) -> None:
+    """번역 1건을 기록한다(best-effort). 기록 실패가 번역을 깨뜨리지 않도록 완전히 격리.
+
+    임포트 자체도 try 안에서 지연 로드해 translator 모듈을 leaf 의존으로 유지한다
+    (순환 임포트/필수 의존 회피). 호출 지점 라벨은 ``context`` 인자를 비워 두어
+    ``translation_context(...)``로 설정된 현재 컨텍스트를 사용하게 하고, 아무 것도
+    설정되지 않았을 때만 범용 ``"translator"``로 폴백한다(이중 기록 없이 라벨링).
+    """
+    try:
+        if not translated:
+            return
+        from core.translation_history import current_context, log_translation
+
+        # 호출자가 translation_context(...)로 라벨을 설정했으면 그것을, 아니면
+        # 범용 "translator"를 컨텍스트로 사용한다.
+        label = current_context("translator")
+        log_translation(source, translated, direction=direction, context=label)
+    except Exception:
+        pass
+
+
 def korean_to_english(text: str) -> Optional[str]:
     """
     한글을 영어로 번역
@@ -36,7 +57,9 @@ def korean_to_english(text: str) -> Optional[str]:
             translator = GoogleTranslator()
             result = translator.translate(text, src='ko', dest='en')
             if result and hasattr(result, 'text'):
-                return result.text.lower()
+                translated = result.text.lower()
+                _record_translation(text, translated, "ko->en")
+                return translated
         except (RuntimeWarning, Exception):
             # googletrans 내부의 비동기 관련 경고 무시
             pass
@@ -74,7 +97,9 @@ def korean_to_english(text: str) -> Optional[str]:
 
                 translated_text = ''.join(translated_parts)
                 if translated_text:
-                    return translated_text.lower()
+                    translated = translated_text.lower()
+                    _record_translation(text, translated, "ko->en")
+                    return translated
     except Exception:
         pass
 
@@ -100,6 +125,7 @@ def english_to_korean(text: str) -> Optional[str]:
             translator = GoogleTranslator()
             result = translator.translate(text, src='en', dest='ko')
             if result and hasattr(result, 'text'):
+                _record_translation(text, result.text, "en->ko")
                 return result.text
         except (RuntimeWarning, Exception):
             # googletrans 내부의 비동기 관련 경고 무시
@@ -138,6 +164,7 @@ def english_to_korean(text: str) -> Optional[str]:
 
                 translated_text = ''.join(translated_parts)
                 if translated_text:
+                    _record_translation(text, translated_text, "en->ko")
                     return translated_text
     except Exception:
         pass

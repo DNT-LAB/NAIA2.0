@@ -244,6 +244,7 @@ let tagSearchController = null;
 let mobileViewportControl = null;
 let searchPanelControl = null;
 let chunkPanelControl = null;
+let sequencePresetControl = null;
 let danbooruFeedbackControl = null;
 let resolutionManagerPanel = null;
 let danbooruTabControl = null;
@@ -762,7 +763,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   });
 // --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
 let ollamaAssistantPopup = null;
-const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260606-ollama7')
+const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260607-assist19')
   .then(({createOllamaAssistantPopup}) => {
     ollamaAssistantPopup = createOllamaAssistantPopup({
       document,
@@ -770,11 +771,25 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
       escHtml,
       // Electron 셸에서 설치 페이지(ollama.com)를 내부 팝업 대신 시스템 브라우저로.
       openUrlInSystemBrowser,
+      // 어시스트 결과 태그를 메인 프롬프트 끝에 덧붙인다.
+      onInsertTags: text => {
+        const tags = String(text || '').trim();
+        if (!tags || !promptEdit) return;
+        const current = promptEdit.value.replace(/[,\s]+$/, '');
+        promptEdit.value = current ? `${current}, ${tags}` : tags;
+        onPromptEdit();
+        showToast('프롬프트에 추가했습니다.', 'success');
+      },
     });
   })
   .catch(error => {
     console.error('Failed to initialize ollama assistant popup module', error);
   });
+// --- Translation History: Ollama 팝업이 소유하는 우측 도킹 2단 패널(translationHistoryPanel).
+// 팝업의 작은 [🕘 기록] 버튼이 토글하며, 첫 클릭 때 지연 로드된다(ollamaAssistantPopup.mjs).
+// app.js는 더 이상 직접 인스턴스화하지 않는다. ---
+let translationHistoryPanel = null;
+const translationHistoryPanelReady = Promise.resolve();
 // --- Grok 로그인 상태 추적 (제거 가능): progrok proxy 가 'ready'(OAuth 로그인 완료)일 때만 결과
 // 우클릭의 'Grok 변형/영상' 항목을 노출한다. Electron 전용(naiaShell 없으면 false=숨김 → 순수 브라우저도 숨김). ---
 (function trackGrokReady() {
@@ -943,7 +958,7 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
   .catch(error => {
     console.error('Failed to initialize conditional prompt panel module', error);
   });
-const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260606-storyteller-steps10')
+const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260607-usevibe1')
   .then(({createEventStreamPanel}) => {
     eventStreamPanel = createEventStreamPanel({
       document,
@@ -1144,6 +1159,18 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
+  });
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20260607-seqpopup1')
+  .then(({createSequencePresetPanel}) => {
+    sequencePresetControl = createSequencePresetPanel({
+      panel: $('sequencePresetPanel'),
+      escHtml,
+      showToast,
+      bindTagAssist,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Sequence Preset panel', error);
   });
 const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs')
   .then(({createResolutionManagerPanel}) => {
@@ -2345,6 +2372,8 @@ const wsMessageHandlers = {
   },
   event_preset_generation_error: onEventPresetGenerationError,
   preset_generation_error: onEventPresetGenerationError,
+  sequence_preset_generation_error: m => showToast(
+    `시퀀스 컷${m.frame ? ' ' + m.frame : ''} 생성 실패: ${m.message || 'failed'}`, 'error'),
   load_prompt: m => onLoadPrompt(m.prompt),
   viewer_new_image: onViewerNewImage,
   viewer_history_removed: onViewerHistoryRemoved,
@@ -4508,6 +4537,11 @@ function openFnPreset() {
   switchTab('preset');
 }
 
+function openFnSequence() {
+  closeFnMenu();
+  switchTab('sequence');
+  sequencePresetReady.then(() => sequencePresetControl?.onOpen());
+}
 
 function positionTranslatorPopup() {
   if (!translatorPopup || translatorPopup.hidden) return;
@@ -7275,6 +7309,7 @@ Promise.all([
   instantWildcardPanelReady,
   e621EventPanelReady,
   ollamaAssistantPopupReady,
+  translationHistoryPanelReady,
   imageModulePanelsReady,
   img2imgPanelReady,
   refinePanelReady,

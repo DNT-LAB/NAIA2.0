@@ -23,7 +23,10 @@ from typing import Any, Callable
 
 DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434"
 # 프론트(ollamaAssistantPopup.mjs)의 DEFAULT_MODEL과 미러 — 요청에 model이 없을 때 폴백.
-DEFAULT_MODEL = "hf.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q4_K_M"
+# E2B-IQ3_M로 전환: round-trip eval에서 E4B Q4_K_M 대비 recall↑(0.615→0.665)·noise↓
+# (0.215→0.182)·VRAM 절반(3.1GB)·2.3배 빠름. 파이프라인이 추론을 코드로 외부화해
+# 작은 모델이 더 순종적(노이즈↓). E2B는 IQ3_M만 로드 가능(_P 양자화는 llama.cpp 미지원).
+DEFAULT_MODEL = "hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M"
 
 _IDLE_PULL_STATE: dict[str, Any] = {
     "active": False,

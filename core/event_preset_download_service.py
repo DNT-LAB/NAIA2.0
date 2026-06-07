@@ -42,6 +42,7 @@ class EventPresetDownloadService:
         self._lock = RLock()
         self._cancel = Event()
         self._thread: Thread | None = None
+        self._main_only = False  # main(조합)만 받기 — 어시스트 B 참조용
         self._state: dict[str, Any] = {
             "active": False,
             "phase": "idle",
@@ -64,10 +65,14 @@ class EventPresetDownloadService:
             state["availability"] = {}
         return state
 
-    def start(self) -> dict[str, Any]:
+    def start(self, *, main_only: bool = False) -> dict[str, Any]:
+        # main_only=True → 조합 데이터(main, ~385MB)만. 썸네일(갤러리용 ~434MB)은
+        # 건너뛴다. Ollama 어시스트의 B 실조합 참조는 main만 필요.
         status = self._status_provider()
         availability = status.get("dataAvailability", {}) if isinstance(status, dict) else {}
-        if availability.get("main") == "ready" and availability.get("thumbnails") == "ready":
+        main_ready = availability.get("main") == "ready"
+        thumb_ready = availability.get("thumbnails") == "ready"
+        if main_ready and (main_only or thumb_ready):
             return self._set_state(
                 active=False,
                 phase="complete",
@@ -83,6 +88,7 @@ class EventPresetDownloadService:
             if self._state.get("active"):
                 return dict(self._state)
             self._cancel.clear()
+            self._main_only = bool(main_only)
             self._state.update({
                 "active": True,
                 "phase": "main",
@@ -122,7 +128,10 @@ class EventPresetDownloadService:
             else:
                 self._set_state(phase="main", percent=100, message="Event Preset 데이터가 이미 존재합니다.")
 
-            if not thumb_path.exists() or thumb_path.stat().st_size < 1_000_000:
+            if self._main_only:
+                # 어시스트 B 참조: 조합(main)만으로 충분 — 썸네일 다운로드 생략.
+                self._set_state(phase="thumbnail", percent=100, message="썸네일은 건너뜁니다(조합 데이터만 사용).")
+            elif not thumb_path.exists() or thumb_path.stat().st_size < 1_000_000:
                 self._download_file(
                     phase="thumbnail",
                     target_path=thumb_path,

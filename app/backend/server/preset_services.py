@@ -7,7 +7,20 @@ from core.event_preset_download_service import EventPresetDownloadService
 from core.event_preset_service import EventPresetService
 from core.expression_preset_service import ExpressionPresetService
 from core.preset_composer_service import PresetComposerService
+from core.sequence_preset_service import SequencePresetService
 from core.web_session_context import WebSessionContext
+
+
+def sequence_preset_service(context: WebSessionContext) -> SequencePresetService:
+    service = getattr(context, "sequence_preset_service", None)
+    if service is None:
+        data_root = None
+        runtime_paths = getattr(context, "runtime_paths", None)
+        if runtime_paths is not None:
+            data_root = runtime_paths.data_dir
+        service = SequencePresetService(context.repo_root, data_root=data_root)
+        context.sequence_preset_service = service
+    return service
 
 
 def event_preset_service(context: WebSessionContext) -> EventPresetService:

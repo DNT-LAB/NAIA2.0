@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from core import result_image_payload_service as result_images
+from core.event_stream_vibe import strip_event_stream_vibe_params
 from core.headless_payload_utils import is_loopback_host
 from core.web_session_context import WebSessionContext
 
@@ -257,6 +258,9 @@ def _history_item_replay_params(item: Any) -> dict[str, Any]:
         "requestId",
     ):
         params.pop(key, None)
+    # Storyteller Use Vibe 방어 strip: 저장 시점(add_api_result)에 정리되지만, 구버전
+    # 항목/우회 경로 대비 — 마커가 없으면 no-op라 일반 항목엔 영향 없다.
+    strip_event_stream_vibe_params(params)
     source_row = getattr(item, "source_row", None)
     if _source_row_available(source_row):
         params["_source_row_data"] = _source_row_json_safe(source_row)

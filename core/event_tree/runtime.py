@@ -9,6 +9,7 @@ import pandas as pd
 
 from core.search_result_model import SearchResultModel
 from core.prompt_engineering_settings import get_prompt_engineering_store
+from core.event_stream_vibe import EVENT_STREAM_VIBE_IE, EVENT_STREAM_VIBE_STRENGTH
 from core.wildcard_processor import split_tags_smart
 
 
@@ -132,6 +133,21 @@ class EventStreamRuntime:
         # 직전 스트림 생성의 최종 프롬프트에서 추출한 의상/배경 태그(다음 페이지 주입 재료).
         self._carry_clothes: list[str] = []
         self._carry_background: list[str] = []
+        # Storyteller "Use Vibe"(1회성, Storage 미저장): use_vibe 스텝의 완료 이미지
+        # bytes를 보관했다가(Anlas 0) 다음 스텝 전진 시 encode-vibe(IE 0.5)로 1회 인코딩,
+        # 이후 스트림 페이지에 단일 vibe(RS 0.9)로 주입한다. start_linear/stop/라운드
+        # 경계에서 전부 클리어 — 어떤 종료 경로로도 잔존하지 않는다.
+        self._vibe_source: Optional[dict[str, Any]] = None
+        self._stream_vibe: Optional[dict[str, Any]] = None
+        self._issued_stream_encodings: set[str] = set()
+        self._pending_vibe_policy = False
+        self._vibe_warned: set[str] = set()
+        self._vibe_messages: list[dict[str, Any]] = []
+        # 캡처 stamp 단조 시퀀스(Codex 구현리뷰 F2): 같은 스텝 재생성/Random 연타로 완료가
+        # 역순 도착해도 '가장 나중에 시작한' 생성의 이미지가 이긴다. 라운드 경계는 배리어
+        # (_vibe_seq_accepted = 발급분+1)로 이전 라운드의 in-flight 캡처를 전부 거부한다.
+        self._vibe_stamp_seq = 0
+        self._vibe_seq_accepted = 0
 
     @property
     def is_active(self) -> bool:
@@ -163,6 +179,7 @@ class EventStreamRuntime:
         self._carry_overlay = None
         self._carry_clothes = []
         self._carry_background = []
+        self._reset_stream_vibe(full=True)
         self._trace.clear()
         self.app_context.publish("event_stream_started", {"run_id": self._state.run_id})
         return self._state.run_id
@@ -176,12 +193,118 @@ class EventStreamRuntime:
         self._carry_overlay = None
         self._carry_clothes = []
         self._carry_background = []
+        self._reset_stream_vibe(full=True)
         self.app_context.publish("event_stream_stopped", {"run_id": run_id})
 
     def set_carry_overlay(self, overlay: Optional[dict[str, Any]]) -> None:
         """Storyteller 페이지별 carry(의상/배경 유지): 다음 프롬프트 빌드에 한해 frozen
         PE options에 병합할 ``{"pre_prompt_extra": [...], "preprocessing_flags": {...}}``."""
         self._carry_overlay = dict(overlay) if overlay else None
+
+    # ------------------------------------------------- Storyteller "Use Vibe"
+    def _reset_stream_vibe(self, *, full: bool = False) -> None:
+        """라운드 경계(1.5 step-0 규칙)는 소스/vibe만, start/stop은 발급 이력·경고·메시지까지
+        전부 클리어한다."""
+        self._vibe_source = None
+        self._stream_vibe = None
+        self._pending_vibe_policy = False
+        if full:
+            self._issued_stream_encodings = set()
+            self._vibe_warned = set()
+            self._vibe_messages = []
+            self._vibe_stamp_seq = 0
+            self._vibe_seq_accepted = 0
+
+    def store_vibe_source(self, image_bytes: Any, *, run_id: str, seq: Any = None) -> bool:
+        """use_vibe 스텝의 완료 이미지 보관(Anlas 0). 같은 스텝 재생성은 교체 — 전진 시
+        마지막 1장만 인코딩된다. stamp의 run_id가 활성 런과 다르면 거부(stale/특수 완료가
+        엉뚱한 이미지를 vibe로 만드는 오캡처 방지 — stamp-only 바인딩). ``seq``가 있으면
+        단조 게이트: 이미 더 새 stamp가 수락됐거나 라운드 경계 배리어를 지났으면 거부
+        (완료 역순 도착·이전 라운드 in-flight 캡처 차단, Codex 구현리뷰 F2)."""
+        if not isinstance(image_bytes, (bytes, bytearray)) or not image_bytes:
+            return False
+        if not self.is_active or not self._state or str(run_id or "") != self._state.run_id:
+            return False
+        if seq is not None:
+            try:
+                seq_value = int(seq)
+            except (TypeError, ValueError):
+                return False
+            if seq_value < self._vibe_seq_accepted:
+                return False
+            self._vibe_seq_accepted = seq_value
+        self._vibe_source = {"bytes": bytes(image_bytes)}
+        return True
+
+    def should_stamp_vibe_capture(self) -> bool:
+        """현재 노드가 use_vibe 스텝이면 True — params 빌드 시 캡처 stamp 게이트."""
+        return self.is_active and self._pending_vibe_policy
+
+    def issue_vibe_capture_stamp(self) -> Optional[dict[str, Any]]:
+        """params 빌드 시 호출: use_vibe 스텝이면 ``{"run_id", "seq"}`` stamp를 발급한다.
+        seq는 발급 순서 단조 증가 — 완료가 역순으로 도착해도 '가장 나중에 시작한' 생성의
+        이미지가 vibe 소스로 남는다."""
+        if not self.should_stamp_vibe_capture() or not self._state:
+            return None
+        self._vibe_stamp_seq += 1
+        return {"run_id": self._state.run_id, "seq": self._vibe_stamp_seq}
+
+    def get_stream_vibe(self) -> Optional[dict[str, Any]]:
+        """주입용 단일 스트림 vibe ``{encoding, strength, model}`` (없으면/비활성이면 None)."""
+        if not self.is_active or not self._stream_vibe:
+            return None
+        return dict(self._stream_vibe)
+
+    def issued_stream_encodings(self) -> set[str]:
+        """이번 런이 발급한 모든 인코딩 — 주입부가 carried/stale 리스트에서 걷어낼 때 사용."""
+        return set(self._issued_stream_encodings)
+
+    def consume_vibe_messages(self) -> list[dict[str, Any]]:
+        """인코딩 성공/실패 토스트(런타임은 직접 브로드캐스트 불가 → 랜덤 경로가 플러시)."""
+        messages = self._vibe_messages
+        self._vibe_messages = []
+        return messages
+
+    def _queue_vibe_message(self, message: str, *, level: str = "info") -> None:
+        self._vibe_messages.append({"type": "toast", "level": level, "message": message})
+
+    def _encode_pending_vibe_source(self) -> None:
+        """전진 시점 lazy 인코딩(Use Vibe): 직전 use_vibe 페이지가 남긴 원본 이미지를
+        encode-vibe(IE 0.5)로 1회 인코딩해 단일 스트림 vibe로 교체한다. 같은 스텝을 여러 번
+        재생성해도 마지막 1장만 인코딩(스텝당 2 Anlas). 실패는 런당 1회 경고 후 vibe 없이
+        계속(사용자 확정) — 성공/실패 무관 소스는 소비한다(재시도 폭주 방지). 호출 컨텍스트는
+        prepare(수동 Random·자동 continuation 모두 ``asyncio.to_thread``)라 이벤트 루프 비차단."""
+        source = self._vibe_source
+        if not source:
+            return
+        self._vibe_source = None
+        try:
+            from core.headless_vibe_transfer_service import encode_vibe_bytes
+
+            encoding = encode_vibe_bytes(
+                self.app_context, source.get("bytes") or b"", EVENT_STREAM_VIBE_IE
+            )
+            try:
+                model_key = str(self.app_context._current_model_key() or "")
+            except Exception:
+                model_key = ""
+            self._stream_vibe = {
+                "encoding": encoding,
+                "strength": EVENT_STREAM_VIBE_STRENGTH,
+                "model": model_key,
+            }
+            self._issued_stream_encodings.add(encoding)
+            self._queue_vibe_message(
+                f"Use Vibe: 스텝 결과 인코딩 완료 — IE {EVENT_STREAM_VIBE_IE:.1f}, "
+                f"RS {EVENT_STREAM_VIBE_STRENGTH:.1f} (2 Anlas). 다음 스텝부터 적용됩니다.",
+                level="success",
+            )
+        except Exception as exc:
+            if "encode_failed" not in self._vibe_warned:
+                self._vibe_warned.add("encode_failed")
+                self._queue_vibe_message(
+                    f"Use Vibe 인코딩 실패 — vibe 없이 계속합니다: {exc}", level="warning"
+                )
 
     def configure_linear_nodes(self, nodes: list[LegacyStoryNodeSpec]) -> None:
         if not self._state:
@@ -225,12 +348,26 @@ class EventStreamRuntime:
         # 설정과 새 롤이 반영된다 — 수동 진행(라운드 반복)과 자동 사이클(1라운드) 공통.
         if self._state.nodes and self._state.frame_index % len(self._state.nodes) == 0:
             self._freeze_snapshot = None
+            # 라운드 경계: Use Vibe도 1.5 step-0 규칙으로 리셋 — 이전 라운드 vibe가 새
+            # freeze 롤(새 캐릭터)에 묻는 드리프트 방지(사용자 확정). 마지막 스텝의 미인코딩
+            # 소스도 여기서 폐기되므로 Anlas를 쓰지 않는다. 배리어로 이전 라운드의
+            # in-flight 캡처(아직 완료 전인 stamped 생성)도 도착 시 거부된다.
+            self._vibe_source = None
+            self._stream_vibe = None
+            self._vibe_seq_accepted = self._vibe_stamp_seq + 1
         self.ensure_freeze_snapshot()
         # carry(의상/배경 유지)는 이전 노드의 policy + 직전 생성에서 추출한 태그로 매
         # 페이지 자체 계산한다 — 수동 진행/자동 사이클 공통(과거엔 자동 전용 배선이라
         # 수동 모드에서 전혀 동작하지 않던 버그).
         self._apply_carry_for_current_node()
+        # Use Vibe: 직전 use_vibe 페이지가 남긴 이미지를 여기서(스텝 전진 시점) 1회
+        # 인코딩한다 — carry처럼 수동 진행/자동 사이클 공통 단일 경로.
+        self._encode_pending_vibe_source()
         node = self._state.current_node()
+        # 캡처 의향(pending)은 이 prepare가 '성공'했을 때만 남긴다 — 행 할당 실패 후
+        # 잔존 pending이 무관한 일반 생성(스트림은 여전히 활성)을 stamp해 엉뚱한 이미지를
+        # vibe로 만드는 오캡처 방지(Codex 구현리뷰 F1). 성공 경로 말미에서 설정한다.
+        self._pending_vibe_policy = False
         selected_row = source_row_override
 
         if selected_row is None and not settings.get("wildcard_standalone", False):
@@ -266,6 +403,9 @@ class EventStreamRuntime:
         })
 
         self._state.advance()
+        # use_vibe 스텝: 이 페이지의 생성 결과를 다음 전진 때 vibe 소스로 캡처한다
+        # (params 빌드 시 issue_vibe_capture_stamp → 완료 시 store_vibe_source).
+        self._pending_vibe_policy = bool((node.axis_carry_policy or {}).get("use_vibe"))
         return EventStreamPromptRequest(
             active=True,
             settings=event_settings,
@@ -443,6 +583,8 @@ class EventStreamRuntime:
                 "freeze_wildcards": True,
                 "freeze_character_prompts": True,
                 "freeze_prompt_engineering": True,
+                "stream_vibe_active": False,
+                "vibe_capture_pending": False,
                 "trace_count": 0,
                 "last_trace": None,
             }
@@ -474,6 +616,8 @@ class EventStreamRuntime:
             "freeze_wildcards": True,
             "freeze_character_prompts": True,
             "freeze_prompt_engineering": True,
+            "stream_vibe_active": self._stream_vibe is not None,
+            "vibe_capture_pending": self._vibe_source is not None,
             "trace_count": len(self._trace),
             "last_trace": copy.deepcopy(self._trace[-1]) if self._trace else None,
         }

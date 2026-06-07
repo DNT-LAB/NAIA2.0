@@ -46,13 +46,13 @@ export function createPromptDrawer({
   }
 
   function switchTab(name) {
+    const page = document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1));
+    if (!page) return;  // 탭바 버튼 없는 Fn 진입 페이지(sequence 등) 가드
     document.querySelectorAll('.tab-btn').forEach(button => {
       button.classList.toggle('active', button.dataset.tab === name);
     });
-    document.querySelectorAll('.tab-page').forEach(page => {
-      page.classList.remove('active');
-    });
-    document.getElementById('tab' + name.charAt(0).toUpperCase() + name.slice(1)).classList.add('active');
+    document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+    page.classList.add('active');
   }
 
   mediaQuery.addEventListener('change', closeForDesktop);

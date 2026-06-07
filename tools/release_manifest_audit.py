@@ -125,6 +125,9 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     # in runtime_asset_classification.json.
     "data/e621_boost_static.py",
     "data/danbooru_tag_counts_by_rating.json",
+    # NOTE: Sequence dataset (data/sequence_preset/events_v1.parquet) is NOT shipped —
+    # it is downloaded on demand from HuggingFace (core/sequence_download_service.py),
+    # mirroring Event Preset. So it is intentionally absent from this allowlist.
     "*/data/KR_tags.parquet",
     "*/data/e621_KR_tags.parquet",
     "*/data/tag_index/*",

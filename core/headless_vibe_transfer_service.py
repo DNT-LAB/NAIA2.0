@@ -34,6 +34,48 @@ _ENCODE_VIBE_URL = "https://image.novelai.net/ai/encode-vibe"
 _ENCODE_UNAVAILABLE_REASON = "Vibe 인코딩은 NAI 모드 + NAI 토큰 + 소스 이미지가 있을 때만 가능합니다."
 
 
+def _post_encode_vibe(token: str, source_bytes: bytes, ie: float, api_model: str) -> str:
+    """POST /ai/encode-vibe (2 Anlas). 순수 네트워크 호출 — 영속/프레임/Storage 접근 없음."""
+    import requests
+
+    resp = requests.post(
+        _ENCODE_VIBE_URL,
+        json={
+            "image": base64.b64encode(source_bytes).decode("ascii"),
+            "information_extracted": ie,
+            "model": api_model,
+        },
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        timeout=180,
+    )
+    resp.raise_for_status()
+    return base64.b64encode(resp.content).decode("utf-8")
+
+
+def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float) -> str:
+    """1회성 vibe 인코딩(Storyteller Use Vibe 등): 검증 후 encode-vibe를 호출해 인코딩
+    문자열만 돌려준다. Storage/프레임/영속(_persist, _save_encoding_to_storage,
+    vibe_transfer_frames)을 일절 건드리지 않는다 — 휘발성 보장은 구조적. 실패는 예외."""
+    if str(context.get_api_mode() or "").upper() != "NAI":
+        raise RuntimeError("Vibe 인코딩은 NAI 모드에서만 가능합니다.")
+    if context._is_naid3_model():
+        raise RuntimeError("NAID3 모델은 Vibe 인코딩을 지원하지 않습니다.")
+    if not source_bytes:
+        raise RuntimeError("인코딩할 소스 이미지가 없습니다.")
+    try:
+        token = str(context.secure_token_manager.get_token("nai_token") or "")
+    except Exception:
+        token = ""
+    if not token:
+        raise RuntimeError("NAI 토큰이 필요합니다 (API 설정 → NAI).")
+    ie = max(0.01, min(1.0, round(float(ie), 2)))
+    api_model = _NAI_MODEL_MAP.get(context._current_model_key(), "nai-diffusion-4-5-full")
+    encoding = _post_encode_vibe(token, bytes(source_bytes), ie, api_model)
+    if not encoding:
+        raise RuntimeError("Vibe 인코딩 응답이 비어 있습니다.")
+    return encoding
+
+
 class HeadlessVibeTransferService:
     def __init__(self, context: Any):
         self.context = context
@@ -315,20 +357,7 @@ class HeadlessVibeTransferService:
                 ie = max(0.01, min(1.0, ie))
                 model_key = context._current_model_key()
                 api_model = _NAI_MODEL_MAP.get(model_key, "nai-diffusion-4-5-full")
-                import requests
-
-                resp = requests.post(
-                    _ENCODE_VIBE_URL,
-                    json={
-                        "image": base64.b64encode(source_bytes).decode("ascii"),
-                        "information_extracted": ie,
-                        "model": api_model,
-                    },
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                    timeout=180,
-                )
-                resp.raise_for_status()
-                encoding = base64.b64encode(resp.content).decode("utf-8")
+                encoding = _post_encode_vibe(token, source_bytes, ie, api_model)
                 if not encoding:
                     toast = context._toast("Vibe 인코딩 응답이 비어 있습니다.", level="error")
                 else:

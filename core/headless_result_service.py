@@ -13,6 +13,7 @@ from typing import Any
 from PIL import Image
 
 from core import result_image_payload_service as result_images
+from core.event_stream_vibe import strip_event_stream_vibe_params
 
 
 HISTORY_ITEM_PREFIX = "__history_item__/"
@@ -76,6 +77,9 @@ class HeadlessResultStore:
         webp_bytes = self._image_to_webp(image)
         params = dict(getattr(request, "params", {}) or {})
         params.pop("credential", None)
+        # Storyteller Use Vibe: 스트림 발급 vibe는 휘발성 — 히스토리 메타/리플레이에
+        # 남기지 않는다(마커로 그 1장만 정밀 제거, 일반 vibe refs는 리플레이 의미 보존).
+        strip_event_stream_vibe_params(params)
         # 입력창 와일드카드는 실행 시점에 로컬 복사본에서 전개된다(execute_request의
         # _expand_input_wildcards — 요청 원본에는 토큰이 남아 반복 시 재롤). 저장 메타의
         # 프롬프트는 "이 이미지가 실제로 생성된 값"이어야 하므로 실행본의 input/negative만

@@ -12,10 +12,12 @@ from app.backend.server.danbooru_routes import register_danbooru_routes
 from app.backend.server.grok_routes import register_grok_routes  # Grok 연동 (제거 가능)
 from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.generation_commands import register_generation_rest_routes
+from app.backend.server.sequence_preset_routes import register_sequence_preset_routes
 from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.module_storage_routes import register_module_storage_routes
 from app.backend.server.ollama_routes import register_ollama_routes
+from app.backend.server.translation_history_routes import register_translation_history_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
 from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
 from app.backend.server.result_display_routes import register_result_display_routes
@@ -57,6 +59,7 @@ def register_headless_routes(
     )
     register_install_manager_routes(app, context, run_in_thread=run_in_thread)
     register_ollama_routes(app, context, run_in_thread=run_in_thread)
+    register_translation_history_routes(app, context, run_in_thread=run_in_thread)
     register_params_workflow_routes(
         app,
         context,
@@ -78,6 +81,14 @@ def register_headless_routes(
     register_danbooru_routes(app, context, run_in_thread=run_in_thread)
     register_grok_routes(app, context, run_in_thread=run_in_thread)  # Grok 연동 (제거 가능)
     register_event_preset_routes(
+        app,
+        context,
+        run_in_thread=run_in_thread,
+        clients=clients,
+        broadcast_json=broadcast_json,
+        start_generation_runner=ensure_generation_runner,
+    )
+    register_sequence_preset_routes(
         app,
         context,
         run_in_thread=run_in_thread,

@@ -59,6 +59,19 @@ async def broadcast_anlas(context: Any, clients: set) -> None:
     await broadcast_json(clients, payload)
 
 
+async def broadcast_anlas_if_vibe_encoded(context: Any, clients: set) -> None:
+    """Storyteller Use Vibe 인코딩(2 Anlas) 직후 차감분이 pill에 즉시 반영되도록 1회
+    재조회 브로드캐스트 — 인코딩이 일어날 수 있는 랜덤/자동 진행 경로가 generate 후
+    호출한다(플래그 없으면 no-op, 네트워크 0)."""
+    runtime = getattr(context, "event_stream_runtime", None)
+    consume = getattr(runtime, "consume_anlas_refresh", None) if runtime is not None else None
+    try:
+        if callable(consume) and consume():
+            await broadcast_anlas(context, clients)
+    except Exception as exc:  # pragma: no cover - 잔액 갱신 실패가 생성 흐름을 막으면 안 됨
+        print(f"⚠️ Use Vibe Anlas 갱신 실패: {exc}")
+
+
 def ensure_anlas_poller(context: Any, clients: set) -> None:
     """5분 주기 Anlas 폴링 태스크를 보장 (중복 생성 방지)."""
     task = getattr(context, "headless_anlas_poll_task", None)

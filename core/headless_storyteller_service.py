@@ -111,11 +111,13 @@ class HeadlessStorytellerService:
                     include_tags=tuple(sorted(self._split_step_tags(step.get("include")))),
                     exclude_tags=tuple(sorted(self._split_step_tags(step.get("exclude")))),
                     # carry(의상/배경 유지)·Use Vibe는 EventStreamRuntime이 노드 policy로
-                    # 직접 적용한다 — 수동 진행/자동 사이클 공통.
+                    # 직접 적용한다 — 수동 진행/자동 사이클 공통. 마지막 스텝의 use_vibe는
+                    # 적용할 다음 스텝이 없으므로 강제 OFF(무의미한 캡처 차단, FE disable과
+                    # 이중 방어 — 사용자 요청).
                     axis_carry_policy={
                         "keep_clothes": bool(step.get("keep_clothes")),
                         "keep_background": bool(step.get("keep_background")),
-                        "use_vibe": bool(step.get("use_vibe")),
+                        "use_vibe": bool(step.get("use_vibe")) and index < len(steps) - 1,
                     },
                 )
                 for index, step in enumerate(steps)
@@ -160,8 +162,9 @@ class HeadlessStorytellerService:
 
     def _use_vibe_mode_messages(self, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Use Vibe 스텝이 있는데 인코딩 불가 런타임(비NAI 모드/NAID3)이면 1회 경고 —
-        라이브에선 조용히 아무 일도 안 일어나므로 명시한다(토큰 유무는 실행 시점 검증)."""
-        if not steps or not any(step.get("use_vibe") for step in steps):
+        라이브에선 조용히 아무 일도 안 일어나므로 명시한다(토큰 유무는 실행 시점 검증).
+        마지막 스텝의 use_vibe는 어차피 강제 OFF라 경고 대상에서 제외한다."""
+        if not steps or not any(step.get("use_vibe") for step in steps[:-1]):
             return []
         if "use_vibe_mode" in self._carry_conflict_warned:
             return []
@@ -423,7 +426,7 @@ class HeadlessStorytellerService:
                     # 1.5 carry parity: 이 스텝의 의상/배경을 '다음' 스텝에 유지할지.
                     "keep_clothes": bool(item.get("keep_clothes", False)),
                     "keep_background": bool(item.get("keep_background", False)),
-                    # Use Vibe(2 Anlas): 이 스텝의 생성 결과를 IE 0.5로 인코딩해 이후
+                    # Use Vibe(2 Anlas): 이 스텝의 생성 결과를 IE 0.6으로 인코딩해 이후
                     # 스텝에 단일 vibe(RS 0.9)로 적용. 스트림 동안만 유지, Storage 미저장.
                     "use_vibe": bool(item.get("use_vibe", False)),
                     # 스텝별 해상도: default | random | previous | "W x H"

@@ -134,7 +134,7 @@ class EventStreamRuntime:
         self._carry_clothes: list[str] = []
         self._carry_background: list[str] = []
         # Storyteller "Use Vibe"(1회성, Storage 미저장): use_vibe 스텝의 완료 이미지
-        # bytes를 보관했다가(Anlas 0) 다음 스텝 전진 시 encode-vibe(IE 0.5)로 1회 인코딩,
+        # bytes를 보관했다가(Anlas 0) 다음 스텝 전진 시 encode-vibe(IE 0.6)로 1회 인코딩,
         # 이후 스트림 페이지에 단일 vibe(RS 0.9)로 주입한다. start_linear/stop/라운드
         # 경계에서 전부 클리어 — 어떤 종료 경로로도 잔존하지 않는다.
         self._vibe_source: Optional[dict[str, Any]] = None
@@ -148,6 +148,9 @@ class EventStreamRuntime:
         # (_vibe_seq_accepted = 발급분+1)로 이전 라운드의 in-flight 캡처를 전부 거부한다.
         self._vibe_stamp_seq = 0
         self._vibe_seq_accepted = 0
+        # 인코딩(2 Anlas) 직후 잔액 pill 즉시 갱신용 1회성 플래그 — 인코딩을 일으킨
+        # 랜덤/생성 경로가 consume 후 anlas_update를 브로드캐스트한다.
+        self._anlas_refresh_pending = False
 
     @property
     def is_active(self) -> bool:
@@ -214,6 +217,7 @@ class EventStreamRuntime:
             self._vibe_messages = []
             self._vibe_stamp_seq = 0
             self._vibe_seq_accepted = 0
+            self._anlas_refresh_pending = False
 
     def store_vibe_source(self, image_bytes: Any, *, run_id: str, seq: Any = None) -> bool:
         """use_vibe 스텝의 완료 이미지 보관(Anlas 0). 같은 스텝 재생성은 교체 — 전진 시
@@ -265,12 +269,19 @@ class EventStreamRuntime:
         self._vibe_messages = []
         return messages
 
+    def consume_anlas_refresh(self) -> bool:
+        """인코딩(2 Anlas)이 방금 일어났으면 True를 1회 반환 — 호출자가 Anlas 잔액을
+        재조회·브로드캐스트해 차감을 즉시 확인할 수 있게 한다(5분 폴링 대기 없이)."""
+        pending = self._anlas_refresh_pending
+        self._anlas_refresh_pending = False
+        return pending
+
     def _queue_vibe_message(self, message: str, *, level: str = "info") -> None:
         self._vibe_messages.append({"type": "toast", "level": level, "message": message})
 
     def _encode_pending_vibe_source(self) -> None:
         """전진 시점 lazy 인코딩(Use Vibe): 직전 use_vibe 페이지가 남긴 원본 이미지를
-        encode-vibe(IE 0.5)로 1회 인코딩해 단일 스트림 vibe로 교체한다. 같은 스텝을 여러 번
+        encode-vibe(IE 0.6)로 1회 인코딩해 단일 스트림 vibe로 교체한다. 같은 스텝을 여러 번
         재생성해도 마지막 1장만 인코딩(스텝당 2 Anlas). 실패는 런당 1회 경고 후 vibe 없이
         계속(사용자 확정) — 성공/실패 무관 소스는 소비한다(재시도 폭주 방지). 호출 컨텍스트는
         prepare(수동 Random·자동 continuation 모두 ``asyncio.to_thread``)라 이벤트 루프 비차단."""
@@ -294,6 +305,7 @@ class EventStreamRuntime:
                 "model": model_key,
             }
             self._issued_stream_encodings.add(encoding)
+            self._anlas_refresh_pending = True
             self._queue_vibe_message(
                 f"Use Vibe: 스텝 결과 인코딩 완료 — IE {EVENT_STREAM_VIBE_IE:.1f}, "
                 f"RS {EVENT_STREAM_VIBE_STRENGTH:.1f} (2 Anlas). 다음 스텝부터 적용됩니다.",
@@ -405,7 +417,15 @@ class EventStreamRuntime:
         self._state.advance()
         # use_vibe 스텝: 이 페이지의 생성 결과를 다음 전진 때 vibe 소스로 캡처한다
         # (params 빌드 시 issue_vibe_capture_stamp → 완료 시 store_vibe_source).
-        self._pending_vibe_policy = bool((node.axis_carry_policy or {}).get("use_vibe"))
+        # 비NAI 모드에서는 작업 자체를 수행하지 않는다(사용자 요청) — stamp 발급의
+        # apply() NAI 게이트에 더해 의향 단계에서도 차단(이중 방어).
+        use_vibe_policy = bool((node.axis_carry_policy or {}).get("use_vibe"))
+        if use_vibe_policy:
+            try:
+                use_vibe_policy = str(self.app_context.get_api_mode() or "").upper() == "NAI"
+            except Exception:
+                use_vibe_policy = False
+        self._pending_vibe_policy = use_vibe_policy
         return EventStreamPromptRequest(
             active=True,
             settings=event_settings,

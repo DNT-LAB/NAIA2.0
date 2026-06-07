@@ -4,6 +4,7 @@ export function createEventStreamPanel({
   setModuleParam,
   runStorytellerCycle,
   bindTagAssist,
+  getApiMode,
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
   let currentState = null;        // event_stream module state (advanced section)
@@ -39,6 +40,17 @@ export function createEventStreamPanel({
           globalThis.bindTagAssist(el, opts);
         }
       };
+
+  // Use Vibe는 NAI 전용 — 모드를 모르면 NAI로 간주해 잘못된 잠금을 피한다(백엔드가
+  // 어차피 비NAI에서 작업을 수행하지 않으므로 안전).
+  function isNaiMode() {
+    try {
+      const mode = typeof getApiMode === 'function' ? getApiMode() : 'NAI';
+      return String(mode || 'NAI').toUpperCase() === 'NAI';
+    } catch {
+      return true;
+    }
+  }
 
   function safe(value) {
     return escHtml ? escHtml(String(value ?? '')) : String(value ?? '');
@@ -101,7 +113,9 @@ export function createEventStreamPanel({
       if (resolution) steps[index].resolution = resolution.value;
       if (keepClothes) steps[index].keep_clothes = Boolean(keepClothes.checked);
       if (keepBackground) steps[index].keep_background = Boolean(keepBackground.checked);
-      if (useVibe) steps[index].use_vibe = Boolean(useVibe.checked);
+      // disabled(마지막 스텝/비NAI) 체크박스는 해제 상태로 그려지므로 동기화에서 제외 —
+      // 저장된 use_vibe 값을 보존한다(스텝을 다시 추가하면 체크 복원).
+      if (useVibe && !useVibe.disabled) steps[index].use_vibe = Boolean(useVibe.checked);
     });
   }
 
@@ -189,6 +203,29 @@ export function createEventStreamPanel({
     updateRunGate();
   }
 
+  // Use Vibe 체크박스: 마지막 스텝(적용할 다음 스텝 없음 — 무의미한 Anlas 소모 방지)과
+  // 비NAI 모드(백엔드가 작업을 수행하지 않음)에서는 비활성+해제 표시. 값 자체는 보존
+  // (sync가 disabled 입력을 건너뛰므로) — 아래에 스텝을 추가하면 체크가 되살아난다.
+  function vibeCheckbox(step, index, running) {
+    const isLast = index === steps.length - 1;
+    const naiMode = isNaiMode();
+    const forcedOff = isLast || !naiMode;
+    const disabled = running || forcedOff;
+    let title = '이 스텝의 생성 결과를 IE 0.6으로 인코딩해(2 Anlas) 다음 스텝부터 Vibe(RS 0.9)로 적용합니다. '
+      + '스트림이 추가하는 Vibe는 1장뿐 — 다른 스텝에서 다시 체크하면 그 스텝 이미지로 교체됩니다. '
+      + '라운드가 다시 시작되면 리셋되고, Vibe Storage에는 저장되지 않습니다 (NAI 전용, NAID3 제외).';
+    if (!naiMode) {
+      title = 'NAI 모드 전용입니다 — 현재 모드에서는 Vibe 사용이 동작하지 않습니다.';
+    } else if (isLast) {
+      title = '마지막 스텝에는 적용할 다음 스텝이 없어 사용할 수 없습니다 (무의미한 Anlas 소모 방지).';
+    }
+    return `
+              <label title="${title}" ${forcedOff ? 'class="story-vibe-off"' : ''}>
+                <input type="checkbox" data-step-usevibe="${index}"
+                       ${step.use_vibe && !forcedOff ? 'checked' : ''} ${disabled ? 'disabled' : ''}> Vibe 사용 (2 Anlas)
+              </label>`;
+  }
+
   // ---- Storyteller hero section -------------------------------------------------
   function stepCard(step, index) {
     const running = bool(currentStoryState?.is_running);
@@ -249,9 +286,7 @@ export function createEventStreamPanel({
               <label title="이 스텝의 배경/장소를 다음 스텝에도 유지합니다">
                 <input type="checkbox" data-step-keepbg="${index}" ${step.keep_background ? 'checked' : ''} ${dis}> 배경 유지
               </label>
-              <label title="이 스텝의 생성 결과를 IE 0.5로 인코딩해(2 Anlas) 다음 스텝부터 Vibe(RS 0.9)로 적용합니다. 스트림이 추가하는 Vibe는 1장뿐 — 다른 스텝에서 다시 체크하면 그 스텝 이미지로 교체됩니다. 라운드가 다시 시작되면 리셋되고, Vibe Storage에는 저장되지 않습니다 (NAI 전용, NAID3 제외).">
-                <input type="checkbox" data-step-usevibe="${index}" ${step.use_vibe ? 'checked' : ''} ${dis}> Vibe 사용 (2 Anlas)
-              </label>
+              ${vibeCheckbox(step, index, running)}
             </span>
           </div>
         </div>

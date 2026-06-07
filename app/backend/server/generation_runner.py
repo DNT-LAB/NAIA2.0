@@ -13,6 +13,7 @@ from app.backend.server.generation_commands import (
     persist_prompt_engineering_settings,
     random_service,
 )
+from app.backend.server.anlas_poller import broadcast_anlas_if_vibe_encoded
 from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
 from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
 from core import result_image_payload_service as result_images
@@ -361,6 +362,9 @@ async def _maybe_continue_auto_generation(
             random_request_id=request_id,
         )
         await persist_prompt_engineering_settings(context)
+        # Use Vibe 인코딩(2 Anlas)이 이 페이지 전진에서 일어났다면 잔액 차감 즉시 반영
+        # (자동 사이클 continuation 경로).
+        await broadcast_anlas_if_vibe_encoded(context, clients)
         payload = result.websocket_payload()
         if not result.success:
             await broadcast_json(clients, payload)

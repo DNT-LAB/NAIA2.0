@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
 
+from app.backend.server.anlas_poller import broadcast_anlas_if_vibe_encoded
 from app.backend.server.websocket_broadcast import broadcast_json as _broadcast_json
 from core.headless_generation_service import HeadlessGenerationService
 from core.headless_random_prompt_service import HeadlessRandomPromptService
@@ -259,6 +260,9 @@ async def handle_random_command(
                 await _broadcast_json(clients, context._event_stream_module_state())
             except Exception:
                 pass
+    # Use Vibe 인코딩(2 Anlas)이 이 랜덤(스텝 전진)에서 일어났다면 잔액 차감을 pill에
+    # 즉시 반영한다(generate 실패여도 인코딩은 일어났을 수 있어 무조건 검사 — no-op 안전).
+    await broadcast_anlas_if_vibe_encoded(context, clients)
 
 
 async def handle_bootstrap_random_command(
@@ -680,6 +684,8 @@ def register_generation_rest_routes(
             random_request_id=request_id,
         )
         await persist_prompt_engineering_settings(context)
+        # Use Vibe 인코딩(2 Anlas) 발생 시 잔액 차감 즉시 반영(REST random 경로).
+        await broadcast_anlas_if_vibe_encoded(context, clients)
         payload = result.websocket_payload()
         if not result.success:
             return JSONResponse(payload, status_code=400)

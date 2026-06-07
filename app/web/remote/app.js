@@ -958,7 +958,7 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
   .catch(error => {
     console.error('Failed to initialize conditional prompt panel module', error);
   });
-const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260607-usevibe1')
+const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260607-usevibe3')
   .then(({createEventStreamPanel}) => {
     eventStreamPanel = createEventStreamPanel({
       document,
@@ -966,6 +966,7 @@ const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260
       setModuleParam,
       runStorytellerCycle,
       bindTagAssist,
+      getApiMode: () => currentMode || modeSelect?.value || '',
     });
   })
   .catch(error => {

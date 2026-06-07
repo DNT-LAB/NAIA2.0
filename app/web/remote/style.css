@@ -10301,6 +10301,11 @@ body.resizing-result-info {
 .story-step-carry input[data-step-usevibe] {
   accent-color: #d36aa6;
 }
+/* 마지막 스텝/비NAI 모드: 동작하지 않음을 시각적으로 명확히 */
+.story-step-carry label.story-vibe-off {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .story-step-bottom {
   display: flex;
   align-items: center;

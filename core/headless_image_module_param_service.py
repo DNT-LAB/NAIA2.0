@@ -8,6 +8,7 @@ from core.auto_generation_flags import is_special_request
 from core.event_stream_vibe import (
     EVENT_STREAM_VIBE_CAPTURE_KEY,
     EVENT_STREAM_VIBE_MARKER_KEY,
+    EVENT_STREAM_VIBE_STRENGTH,
 )
 
 
@@ -81,7 +82,7 @@ class HeadlessImageModuleParamService:
             refs.append(ref)
             strengths.append(raw_strengths[index] if index < len(raw_strengths) else 0.6)
         refs.append(encoding)
-        strengths.append(float(vibe.get("strength") or 0.9))
+        strengths.append(float(vibe.get("strength") or EVENT_STREAM_VIBE_STRENGTH))
         params["reference_image_multiple"] = refs
         params["reference_strength_multiple"] = strengths
         params.setdefault(

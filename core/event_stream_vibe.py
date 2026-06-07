@@ -16,8 +16,8 @@ from typing import Any
 EVENT_STREAM_VIBE_CAPTURE_KEY = "_event_stream_vibe_capture"  # 값=run_id (완료 시 캡처 게이트)
 EVENT_STREAM_VIBE_MARKER_KEY = "_event_stream_vibe"           # 값={run_id, encoding} (주입 마커)
 
-# 사용자 확정 사양: encode IE 0.5, reference strength 0.9.
-EVENT_STREAM_VIBE_IE = 0.5
+# 사용자 확정 사양: encode IE 0.6, reference strength 0.9 (IE는 초기 0.5 → 라이브 보정).
+EVENT_STREAM_VIBE_IE = 0.6
 EVENT_STREAM_VIBE_STRENGTH = 0.9
 
 _REFERENCE_PARAM_KEYS = (

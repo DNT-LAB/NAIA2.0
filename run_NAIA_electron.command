@@ -137,6 +137,10 @@ fi
 # user-data 는 기본적으로 run_NAIA_web.command 와 공유됩니다.
 export NAIA_ELECTRON_RUNTIME_INSTALL=1
 
+# File/Edit/View/Window 개발자 메뉴 숨김 (portable 빌드와 동일한 UX).
+# 개발자 메뉴가 필요하면 이 줄을 지우세요.
+export NAIA_ELECTRON_HIDE_MENU=1
+
 echo ""
 echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${PURPLE}║              🚀 NAIA 2.0 Electron 셸 (소스 모드) 을 시작합니다!                  ║${NC}"

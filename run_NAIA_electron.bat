@@ -61,5 +61,9 @@ REM First run shows the tag-data install wizard, same flow as the portable build
 REM User data is shared with run_NAIA_web.bat by default: %%APPDATA%%\NAIA
 set NAIA_ELECTRON_RUNTIME_INSTALL=1
 
+REM Hide the File/Edit/View/Window dev menu for portable-parity UX.
+REM Delete this line if you want the developer menu back.
+set NAIA_ELECTRON_HIDE_MENU=1
+
 echo Starting NAIA 2.0 - Electron shell, source mode...
 call npm start

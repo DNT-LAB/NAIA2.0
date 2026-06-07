@@ -2267,6 +2267,25 @@ function onWsMessageError(error) {
   console.warn('Failed to handle WebSocket message', error);
 }
 
+function onGenerationDispatched(m) {
+  // 실제 디스패치된 시드를 Params 패널 시드 박스에 반영한다 — Seed Fix OFF면 서버가
+  // 요청마다 시드를 재추첨하므로(534fa55) 박스의 직전 값과 어긋난다. 구체 시드(>=0)일
+  // 때만 갱신한다(WEBUI/COMFYUI의 -1은 백엔드 랜덤 위임이라 실행 시드를 아직 모름).
+  // 사용자가 시드 박스를 편집 중이거나 COMFYUI Free 잠금 표시 중에는 건드리지 않는다.
+  if (!m || m.ok !== true) return;
+  const seed = Number(m.params?.seed);
+  if (!Number.isFinite(seed) || seed < 0) return;
+  if (!paramEls?.seed || document.activeElement === paramEls.seed) return;
+  if (isComfyUiFreeWorkflowActive()) return;
+  const seedText = String(Math.trunc(seed));
+  paramEls.seed.value = seedText;
+  // remote_params에도 동기화 — 이후 Seed Fix를 켜면 메인 Generate(박스 직독)뿐
+  // 아니라 시드 없는 overrides로 enqueue되는 서버 주도 경로(프리셋/Character Viewer
+  // 등)도 같은 "마지막 실사용 시드"에 고정되게 한다(Codex High). Seed Fix OFF인
+  // 동안의 영속은 무해 — 서버 리셋 가드(534fa55)가 매 요청 재추첨한다.
+  setParam('seed', seedText);
+}
+
 const wsMessageHandlers = {
   image_meta: updateMeta,
   status: m => setGen(m.is_generating),
@@ -2276,6 +2295,7 @@ const wsMessageHandlers = {
   prompt_tokens: applyPromptTokenPayload,
   options: syncOptions,
   params: updateParams,
+  generation_dispatched: onGenerationDispatched,
   mode: m => syncMode(m.mode),
   result_enhance_state: m => { if (resultEnhance) resultEnhance.handleState(m); },
   grok_i2i_state: m => { if (grokI2iModal) grokI2iModal.onState(m); },

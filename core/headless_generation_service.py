@@ -140,6 +140,9 @@ class HeadlessGenerationService:
             prompt_run_id = self._create_direct_prompt_run(command, params, source_row)
         if prompt_run_id:
             params["prompt_run_id"] = prompt_run_id
+            # 조건부 규칙(neg 타겟)이 이 프롬프트 런에 기록한 네거티브 조작을 병합한다.
+            # 직접 생성 런(_create_direct_prompt_run)은 조작이 없으므로 자연 no-op.
+            self._apply_conditional_negative(params, prompt_run_id)
         priority = self._priority(command)
         nai_characters, nai_vibe_transfer, nai_character_reference = self._extract_nai_data(params, api_mode)
         request = GenerationRequest(
@@ -515,6 +518,55 @@ class HeadlessGenerationService:
         if current_prompt.strip() and current_prompt.strip() == request_prompt.strip():
             return current_prompt_run_id
         return ""
+
+    def _apply_conditional_negative(self, params: dict[str, Any], prompt_run_id: str) -> None:
+        """조건부 규칙(neg 타겟)이 프롬프트 런에 기록한 네거티브 조작을 이 생성에 병합한다.
+
+        desktop(future01)은 네거티브 위젯을 직접 수정 후 생성 완료 시 스냅샷 복원했지만,
+        헤드리스는 위젯이 없다. 엔진이 PromptContext.metadata['conditional_negative_ops']에
+        기록 → complete_prompt_run이 런 레코드로 승계 → 여기(수동 Generate/Auto Gen/시퀀스·
+        이벤트 프리셋/Refine 모두가 지나는 단일 합류점)에서 prompt_run_id 바인딩으로 병합.
+
+        append는 기존 네거티브에 없는 태그만 추가(같은 런 재생성 시 중복 방지), set은 전체
+        교체(future01 `neg=` 패리티). 런에 조작이 없으면 no-op. 요청 params 사본에만 반영
+        하므로 프론트 네거티브 박스/컨텍스트 상태는 오염되지 않는다.
+        """
+        ops = self._conditional_negative_ops(prompt_run_id)
+        if not ops:
+            return
+        negative = str(params.get("negative_prompt") or "")
+        for op in ops:
+            kind = str(op.get("op") or "")
+            tags = [str(tag).strip() for tag in (op.get("tags") or []) if str(tag).strip()]
+            if kind == "set":
+                negative = ", ".join(tags)
+            elif kind == "append" and tags:
+                existing = {tag.strip() for tag in negative.split(",") if tag.strip()}
+                fresh = [tag for tag in tags if tag not in existing]
+                if fresh:
+                    joined = ", ".join(fresh)
+                    negative = f"{negative}, {joined}" if negative.strip() else joined
+        params["negative_prompt"] = negative
+        params["_conditional_negative_applied"] = True
+
+    def _conditional_negative_ops(self, prompt_run_id: str) -> list[dict[str, Any]]:
+        if not prompt_run_id:
+            return []
+        registry = getattr(self.context, "pipeline_run_registry", None)
+        run = registry.get_prompt_run(prompt_run_id) if registry is not None else None
+        metadata = getattr(run, "metadata", None)
+        if isinstance(metadata, dict):
+            ops = metadata.get("conditional_negative_ops")
+            if isinstance(ops, list):
+                return [op for op in ops if isinstance(op, dict)]
+        # 방어: 레지스트리가 없거나 런이 트림된 경우, 현재 컨텍스트가 같은 런이면 직접 읽는다.
+        current = getattr(self.context, "current_prompt_context", None)
+        current_meta = getattr(current, "metadata", None)
+        if isinstance(current_meta, dict) and str(current_meta.get("prompt_run_id") or "") == prompt_run_id:
+            ops = current_meta.get("conditional_negative_ops")
+            if isinstance(ops, list):
+                return [op for op in ops if isinstance(op, dict)]
+        return []
 
     def _create_direct_prompt_run(
         self,

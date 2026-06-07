@@ -132,15 +132,27 @@ class HeadlessConditionalRuleEngine:
             self._append_condition_tag_group_value(tags, metadata.get(key), group)
         return tags
 
-    def _rating_from_context(self, context) -> str:
-        override = getattr(self.app_context, "rating_override", None)
-        if override:
-            return str(override).strip().lower()[:1]
+    def _rating_from_context(self, context, source: str = "auto") -> str:
+        """rating 조회 — future01 `_lookup_rating` 패리티 (source ∈ auto/row/override/bayes).
+
+        auto: override → row 순. bayes: future01에서도 미구현 → 빈 값(조건 실패).
+        `rating(x, source=...)` 문법은 기존에 source를 무시하고 항상 auto로 동작했다.
+        """
+        source = str(source or "auto").strip().lower()
+        override_raw = getattr(self.app_context, "rating_override", None)
+        override = str(override_raw).strip().lower()[:1] if override_raw else ""
         row = getattr(context, "source_row", None)
         try:
-            return str(row.get("rating", "")).strip().lower()[:1]
+            row_rating = str(row.get("rating", "")).strip().lower()[:1]
         except Exception:
+            row_rating = ""
+        if source == "override":
+            return override
+        if source == "row":
+            return row_rating
+        if source == "bayes":
             return ""
+        return override or row_rating
 
     def _character_frames(self) -> list[dict[str, Any]]:
         try:
@@ -158,7 +170,16 @@ class HeadlessConditionalRuleEngine:
         self._append_condition_tag_value(tags, frames[index].get("prompt"))
         return tags
 
-    def _character_active(self, index: int) -> bool:
+    def _character_active(self, index: int, context=None) -> bool:
+        # 같은 런에서 앞선 룰의 char_set이 남긴 조건부 슬롯 상태를 우선한다 — desktop은
+        # char_set이 위젯 체크박스를 즉시 토글해 이후 char_on이 그 효과를 봤다(패리티).
+        # context가 없거나(슬롯 빌드 시점) 조건부 슬롯이 없으면 pristine 프레임 기준.
+        if context is not None:
+            metadata = getattr(context, "metadata", None)
+            if isinstance(metadata, dict):
+                slots = metadata.get("_conditional_character_slots")
+                if isinstance(slots, list) and 0 <= index < len(slots) and isinstance(slots[index], dict):
+                    return bool(slots[index].get("active"))
         frames = self._character_frames()
         if index < 0 or index >= len(frames) or not isinstance(frames[index], dict):
             return False
@@ -218,6 +239,46 @@ class HeadlessConditionalRuleEngine:
             uc = str(settings_ucs[index] or "") if index < len(settings_ucs) else ""
             slots.append({"prompt": prompt, "uc": uc, "active": bool(prompt.strip())})
         return slots
+
+    @staticmethod
+    def _record_negative_op(context, tags: list[str], *, op: str) -> None:
+        """neg 타겟 조작을 per-run 메타데이터에 기록한다.
+
+        desktop(future01)은 네거티브 위젯을 직접 수정/스냅샷 복원했지만 헤드리스에는
+        위젯이 없다. 대신 PromptContext.metadata에 순서 보존 op 리스트로 기록하면
+        complete_prompt_run이 런 레코드로 승계하고, HeadlessGenerationService가 생성
+        시점에 prompt_run 바인딩으로 병합한다(모든 생성 경로의 단일 합류점).
+
+        동일 (op, tags) 재기록은 무시 — max_passes 반복에서 같은 룰이 다시 매칭돼도
+        중복 op가 쌓이지 않는다(apply()의 오실레이션 스냅샷은 prefix/main/postfix만
+        보므로 종료 판정을 바꾸지 않고 여기서 멱등 처리한다).
+        """
+        cleaned = [str(tag).strip() for tag in (tags or []) if str(tag).strip()]
+        if not cleaned:
+            # future01 `_write_negative_target` 패리티: 빈 태그 리스트는 op 무관 no-op
+            # (`neg=`가 네거티브를 통째로 지우는 사고 방지).
+            return
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            context.metadata = {}
+            metadata = context.metadata
+        ops = metadata.setdefault("conditional_negative_ops", [])
+        if not isinstance(ops, list):
+            return
+        entry = {"op": str(op), "tags": cleaned}
+        if entry not in ops:
+            ops.append(entry)
+
+    @staticmethod
+    def _record_unsupported_target(context, target: str) -> None:
+        """future01 패리티: global_uc는 런타임 저장소 미확정 스텁 — 문법은 수용하되
+        조용한 오파싱(insert no-op) 대신 메타데이터에 미지원 기록만 남긴다."""
+        metadata = getattr(context, "metadata", None)
+        if not isinstance(metadata, dict):
+            return
+        skips = metadata.setdefault("conditional_unsupported_targets", [])
+        if isinstance(skips, list) and target not in skips:
+            skips.append(target)
 
     @staticmethod
     def _record_character_skip(context, target: str, reason: str) -> None:
@@ -388,7 +449,8 @@ class HeadlessConditionalRuleEngine:
         if rating_match:
             negated = rating_match.group(1) == "~"
             expected = rating_match.group(2).lower()
-            matched = self._rating_from_context(context) == expected
+            source = str(rating_match.group(3) or "auto").strip()
+            matched = self._rating_from_context(context, source) == expected
             return not matched if negated else matched
         char_in_match = _CHAR_IN_RE.match(condition)
         if char_in_match:
@@ -400,7 +462,7 @@ class HeadlessConditionalRuleEngine:
         if char_on_match:
             negated = char_on_match.group(1) == "~"
             index = int(char_on_match.group(2)) - 1
-            matched = self._character_active(index)
+            matched = self._character_active(index, context)
             return not matched if negated else matched
 
         if condition in {"e", "q", "s", "g"}:
@@ -539,6 +601,11 @@ class HeadlessConditionalRuleEngine:
             }
         return None
 
+    # future01 패리티: prefix/main/postfix 외에 neg(메인 네거티브)·global_uc(스텁)도
+    # 고정 타겟이다. 누락 시 `neg+=x`가 "태그 'neg' 뒤 삽입"(insert)으로 오파싱되어
+    # silent no-op — 사용자 버그 "조건부 네거티브 작동 안 함"의 근본 원인.
+    _FIXED_LIST_TARGETS = frozenset({"prefix", "main", "postfix", "neg", "global_uc"})
+
     def _parse_action(self, action_text: str) -> dict[str, Any] | None:
         action_text = _remove_outer_quotes(action_text)
         func_action = self._try_parse_func_action(action_text)
@@ -549,20 +616,25 @@ class HeadlessConditionalRuleEngine:
             tags = self._parse_tag_list(value)
             target = target.strip()
             return {
-                "type": "append_to_list" if target in {"prefix", "main", "postfix"} or self._is_char_uc_target(target) else "insert",
+                "type": "append_to_list" if target in self._FIXED_LIST_TARGETS or self._is_char_uc_target(target) else "insert",
                 "target": target,
                 "tags": tags,
             }
         if "+:" in action_text:
             target, _sep, value = action_text.partition("+:")
             target = target.strip()
-            if target not in {"prefix", "main", "postfix"} and not self._is_char_uc_target(target):
+            if target not in self._FIXED_LIST_TARGETS and not self._is_char_uc_target(target):
                 value = action_text.replace("+:", "", 1)
                 target = "main"
             return {"type": "append_to_list", "target": target, "tags": self._parse_tag_list(value)}
         if "=" in action_text:
             old, value = action_text.split("=", 1)
             target = old.strip()
+            if target == "neg":
+                # future01 `_execute_replace_action`: old_tag == 'neg' → 네거티브 전체 교체.
+                return {"type": "set_negative", "tags": self._parse_tag_list(value)}
+            if target == "global_uc":
+                return {"type": "skip_global_uc"}
             if self._is_char_uc_target(target):
                 return {"type": "set_character_target", "target": target, "tags": self._parse_tag_list(value)}
             return {"type": "replace", "old": old.strip(), "tags": self._parse_tag_list(value)}
@@ -615,6 +687,17 @@ class HeadlessConditionalRuleEngine:
         postfix_tags: list[str],
     ) -> tuple[list[str], list[str], list[str]]:
         action_type = action.get("type")
+        # neg 타겟은 한 apply() 안에서 룰(파싱된 액션 객체)당 1회만 기록한다.
+        # max_passes>1에서 같은 룰이 재매칭되면 와일드카드가 pass마다 다른 값으로
+        # 재전개되어 (op, tags) 멱등화를 비껴가 hidden negative가 과잉 적용되고
+        # 순차 카운터도 추가 소비된다(Codex 리뷰 High) — 전개 전에 끊는다.
+        # 액션 객체는 apply()마다 새로 파싱되므로 런 간 누출은 없다.
+        if action_type == "set_negative" or (
+            action_type == "append_to_list" and str(action.get("target") or "") == "neg"
+        ):
+            if action.get("_neg_recorded"):
+                return prefix_tags, main_tags, postfix_tags
+            action["_neg_recorded"] = True
         # Expand wildcard tokens (__wc__/<a|b>/$wc) in the tags this action injects.
         # The conditional hook runs at 'after_wildcard' (after the only expansion step),
         # so action-authored wildcards would otherwise survive raw into the prompt.
@@ -622,7 +705,11 @@ class HeadlessConditionalRuleEngine:
         action_tags = self._expand_action_tags(context, action.get("tags"))
         if action_type == "append_to_list":
             target = str(action.get("target") or "main")
-            if self._is_char_uc_target(target):
+            if target == "neg":
+                self._record_negative_op(context, list(action_tags), op="append")
+            elif target == "global_uc":
+                self._record_unsupported_target(context, "global_uc")
+            elif self._is_char_uc_target(target):
                 self._write_char_uc_target(context, target, list(action_tags), op="append")
             else:
                 self._target_list(prefix_tags, main_tags, postfix_tags, target).extend(list(action_tags))
@@ -645,6 +732,10 @@ class HeadlessConditionalRuleEngine:
                         index += len(replacements)
                     else:
                         index += 1
+        elif action_type == "set_negative":
+            self._record_negative_op(context, list(action_tags), op="set")
+        elif action_type == "skip_global_uc":
+            self._record_unsupported_target(context, "global_uc")
         elif action_type == "set_character_target":
             self._write_char_uc_target(
                 context,

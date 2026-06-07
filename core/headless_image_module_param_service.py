@@ -9,6 +9,7 @@ from core.event_stream_vibe import (
     EVENT_STREAM_VIBE_CAPTURE_KEY,
     EVENT_STREAM_VIBE_MARKER_KEY,
     EVENT_STREAM_VIBE_STRENGTH,
+    halve_floor_strength,
 )
 
 
@@ -81,6 +82,9 @@ class HeadlessImageModuleParamService:
                 continue
             refs.append(ref)
             strengths.append(raw_strengths[index] if index < len(raw_strengths) else 0.6)
+        # 공존하는 기존 Vibe Transfer 의 RS 는 절반(퍼센트 floor)으로 감쇠해 스트림 vibe 가
+        # 상대적으로 더 지배하게 한다(Sequence 와 동일 패치). 스트림 vibe 자신은 풀 RS 유지.
+        strengths = [halve_floor_strength(s) for s in strengths]
         refs.append(encoding)
         strengths.append(float(vibe.get("strength") or EVENT_STREAM_VIBE_STRENGTH))
         params["reference_image_multiple"] = refs

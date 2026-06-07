@@ -9,6 +9,7 @@ params에 마커를 함께 싣고, 저장(add_api_result)·리플레이(_history
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 # 생성 params에 싣는 키. 언더스코어 키라 Auto Gen continuation overrides에는 복사되지
@@ -16,15 +17,30 @@ from typing import Any
 EVENT_STREAM_VIBE_CAPTURE_KEY = "_event_stream_vibe_capture"  # 값=run_id (완료 시 캡처 게이트)
 EVENT_STREAM_VIBE_MARKER_KEY = "_event_stream_vibe"           # 값={run_id, encoding} (주입 마커)
 
-# Storyteller "Use Vibe" 사용자 확정 사양: encode IE 0.6, reference strength 0.9.
-EVENT_STREAM_VIBE_IE = 0.6
-EVENT_STREAM_VIBE_STRENGTH = 0.9
+# Storyteller "Use Vibe" 사용자 확정 사양: encode IE 1.0, 스트림 vibe reference strength 0.6.
+# (공존하는 기존 Vibe Transfer 의 RS 는 halve_floor_strength 로 별도 절반 처리 — Sequence 와 동일.)
+EVENT_STREAM_VIBE_IE = 1.0
+EVENT_STREAM_VIBE_STRENGTH = 0.6
 
 # Sequence "첫 이미지를 Vibe로 사용" 임시 vibe 전용 IE/RS — Storyteller(위)와 분리해 독립 튜닝
-# (사용자 최종 확정값). encode IE 1.0, 임시 vibe reference strength 0.6. (공존하는 기존
-# Vibe Transfer 의 RS 는 _halve_floor_strength 로 별도 절반 처리.)
+# (사용자 최종 확정값). encode IE 1.0, 임시 vibe reference strength 0.6. (현재 값은 위와 같지만
+# 별도 상수라 한쪽만 따로 조정 가능. 공존하는 기존 Vibe Transfer RS 는 halve_floor_strength 로 절반.)
 SEQUENCE_VIBE_IE = 1.0
 SEQUENCE_VIBE_STRENGTH = 0.6
+
+
+def halve_floor_strength(value: Any) -> Any:
+    """RS 가중치를 절반으로 줄이되 '퍼센트 floor'로 내린다(사용자 확정): 퍼센트(rs*100)로 반올림해
+    부동소수 오차를 제거한 뒤(0.6*50=29.999… → 0.29 방지) 절반에서 내림. 0.90→0.45, 0.85→0.42,
+    0.60→0.30, 0.55→0.27. 음수 RS 는 크기를 줄이는 의미가 되도록 부호를 보존한 채 크기에 floor
+    (-0.85→-0.42). 수치 변환 불가 시 원값 반환(방어). Sequence·Storyteller 임시 vibe 공존 시 기존
+    Vibe Transfer RS 감쇠에 공통 사용."""
+    try:
+        rs = float(value)
+    except (TypeError, ValueError):
+        return value
+    magnitude = math.floor(round(abs(rs) * 100) / 2) / 100.0
+    return -magnitude if rs < 0 else magnitude
 
 _REFERENCE_PARAM_KEYS = (
     "reference_image_multiple",

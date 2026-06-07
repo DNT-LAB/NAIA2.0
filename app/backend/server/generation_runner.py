@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 import random
 import uuid
 from typing import Any
@@ -29,6 +28,7 @@ from core.event_stream_vibe import (
     EVENT_STREAM_VIBE_CAPTURE_KEY,
     SEQUENCE_VIBE_IE,
     SEQUENCE_VIBE_STRENGTH,
+    halve_floor_strength,
 )
 from core.web_session_context import WebSessionContext
 
@@ -453,19 +453,6 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
         _release_auto_gen_prefetch(context)
 
 
-def _halve_floor_strength(value: Any) -> Any:
-    """RS 가중치를 절반으로 줄이되 '퍼센트 floor'로 내린다(사용자 확정): 퍼센트(rs*100)로 반올림해
-    부동소수 오차를 제거한 뒤(0.6*50=29.999… → 0.29 방지) 절반에서 내림. 0.90→0.45, 0.85→0.42,
-    0.60→0.30. 음수 RS 는 크기를 줄이는 의미가 되도록 부호를 보존한 채 크기에 floor 적용
-    (예: -0.85→-0.42). 수치 변환 불가 시 원값 반환(방어)."""
-    try:
-        rs = float(value)
-    except (TypeError, ValueError):
-        return value
-    magnitude = math.floor(round(abs(rs) * 100) / 2) / 100.0
-    return -magnitude if rs < 0 else magnitude
-
-
 def _inject_sequence_vibe(context: WebSessionContext, request) -> None:
     """Sequence Use Vibe: 실행 직전, 라운드 첫 이미지의 인코딩이 준비돼 있으면 이 프레임의 NAI vibe
     EarlyBinding(``request.nai_vibe_transfer`` — api_service 가 실제로 보내는 출처)에 임시 vibe 1장을
@@ -519,7 +506,7 @@ def _inject_sequence_vibe(context: WebSessionContext, request) -> None:
     # RS 를 절반(퍼센트 floor)으로 줄인다 — 첫 이미지 vibe 가 상대적으로 더 지배하도록(사용자 요청).
     # 임시 vibe 자신은 시퀀스 전용 RS(SEQUENCE_VIBE_STRENGTH) 유지.
     strengths = (strengths + [0.6] * len(refs))[:len(refs)]
-    strengths = [_halve_floor_strength(s) for s in strengths]
+    strengths = [halve_floor_strength(s) for s in strengths]
     refs.append(encoding)
     strengths.append(SEQUENCE_VIBE_STRENGTH)
     try:

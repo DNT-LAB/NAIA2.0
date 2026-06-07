@@ -211,7 +211,8 @@ export function createEventStreamPanel({
     const naiMode = isNaiMode();
     const forcedOff = isLast || !naiMode;
     const disabled = running || forcedOff;
-    let title = '이 스텝의 생성 결과를 IE 0.6으로 인코딩해(2 Anlas) 다음 스텝부터 Vibe(RS 0.9)로 적용합니다. '
+    let title = '이 스텝의 생성 결과를 IE 1.0으로 인코딩해(2 Anlas) 다음 스텝부터 Vibe(RS 0.6)로 적용합니다. '
+      + '기존에 활성화된 Vibe Transfer가 있으면 그 RS는 절반으로 줄여 이 Vibe가 더 지배하게 합니다. '
       + '스트림이 추가하는 Vibe는 1장뿐 — 다른 스텝에서 다시 체크하면 그 스텝 이미지로 교체됩니다. '
       + '라운드가 다시 시작되면 리셋되고, Vibe Storage에는 저장되지 않습니다 (NAI 전용, NAID3 제외).';
     if (!naiMode) {

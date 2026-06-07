@@ -434,8 +434,8 @@ class HeadlessStorytellerService:
                     # 1.5 carry parity: 이 스텝의 의상/배경을 '다음' 스텝에 유지할지.
                     "keep_clothes": bool(item.get("keep_clothes", False)),
                     "keep_background": bool(item.get("keep_background", False)),
-                    # Use Vibe(2 Anlas): 이 스텝의 생성 결과를 IE 0.6으로 인코딩해 이후
-                    # 스텝에 단일 vibe(RS 0.9)로 적용. 스트림 동안만 유지, Storage 미저장.
+                    # Use Vibe(2 Anlas): 이 스텝의 생성 결과를 IE 1.0으로 인코딩해 이후
+                    # 스텝에 단일 vibe(RS 0.6, 공존 기존 vibe RS는 절반)로 적용. 스트림 동안만 유지, Storage 미저장.
                     "use_vibe": bool(item.get("use_vibe", False)),
                     # 스텝별 해상도: default | random | previous | "W x H"
                     "resolution": self._normalize_step_resolution(item.get("resolution")),

@@ -134,8 +134,8 @@ class EventStreamRuntime:
         self._carry_clothes: list[str] = []
         self._carry_background: list[str] = []
         # Storyteller "Use Vibe"(1회성, Storage 미저장): use_vibe 스텝의 완료 이미지
-        # bytes를 보관했다가(Anlas 0) 다음 스텝 전진 시 encode-vibe(IE 0.6)로 1회 인코딩,
-        # 이후 스트림 페이지에 단일 vibe(RS 0.9)로 주입한다. start_linear/stop/라운드
+        # bytes를 보관했다가(Anlas 0) 다음 스텝 전진 시 encode-vibe(IE 1.0)로 1회 인코딩,
+        # 이후 스트림 페이지에 단일 vibe(RS 0.6, 공존 기존 vibe RS는 절반)로 주입한다. start_linear/stop/라운드
         # 경계에서 전부 클리어 — 어떤 종료 경로로도 잔존하지 않는다.
         self._vibe_source: Optional[dict[str, Any]] = None
         self._stream_vibe: Optional[dict[str, Any]] = None
@@ -281,7 +281,7 @@ class EventStreamRuntime:
 
     def _encode_pending_vibe_source(self) -> None:
         """전진 시점 lazy 인코딩(Use Vibe): 직전 use_vibe 페이지가 남긴 원본 이미지를
-        encode-vibe(IE 0.6)로 1회 인코딩해 단일 스트림 vibe로 교체한다. 같은 스텝을 여러 번
+        encode-vibe(IE EVENT_STREAM_VIBE_IE=1.0)로 1회 인코딩해 단일 스트림 vibe로 교체한다. 같은 스텝을 여러 번
         재생성해도 마지막 1장만 인코딩(스텝당 2 Anlas). 실패는 런당 1회 경고 후 vibe 없이
         계속(사용자 확정) — 성공/실패 무관 소스는 소비한다(재시도 폭주 방지). 호출 컨텍스트는
         prepare(수동 Random·자동 continuation 모두 ``asyncio.to_thread``)라 이벤트 루프 비차단."""

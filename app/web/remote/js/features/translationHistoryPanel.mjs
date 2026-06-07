@@ -76,19 +76,27 @@ export function createTranslationHistoryPanel({
       if (left + pw > win.innerWidth - margin) {
         left = Math.max(margin, r.left - margin - pw);
       }
+      const top = Math.round(Math.max(margin, r.top));
       panel.style.left = `${Math.round(left)}px`;
-      panel.style.top = `${Math.round(Math.max(margin, r.top))}px`;
+      panel.style.top = `${top}px`;
       panel.style.right = 'auto';
       panel.style.bottom = 'auto';
-      panel.style.maxHeight = `${Math.round(Math.max(200, win.innerHeight - r.top - margin))}px`;
+      // 정의된 height 필수 — 1:1 flex(고정됨/기록)는 부모 높이가 정의돼야 분할된다(max-height
+      // 만으론 basis-0 섹션이 0으로 붕괴해 행이 사라졌음). 팝업 높이에 맞추되 화면 안으로 클램프.
+      const availH = win.innerHeight - top - margin;
+      const h = Math.round(Math.max(240, Math.min(r.height || availH, availH)));
+      panel.style.height = `${h}px`;
+      panel.style.maxHeight = `${h}px`;
       return;
     }
     // 폴백(팝업 없음/닫힘/최소화): 화면 우상단.
+    const fh = Math.round(win.innerHeight - 2 * margin);
     panel.style.right = `${margin}px`;
     panel.style.top = `${margin}px`;
     panel.style.left = 'auto';
     panel.style.bottom = 'auto';
-    panel.style.maxHeight = `${Math.round(win.innerHeight - 2 * margin)}px`;
+    panel.style.height = `${fh}px`;
+    panel.style.maxHeight = `${fh}px`;
   }
 
   function setStatus(text, type = '') {

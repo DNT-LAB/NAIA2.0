@@ -246,7 +246,7 @@ export function createOllamaAssistantPopup({
   function ensureHistoryPanel() {
     if (historyPanel) return Promise.resolve(historyPanel);
     if (!historyPanelReady) {
-      historyPanelReady = import('./translationHistoryPanel.mjs?v=20260607-xhist5')
+      historyPanelReady = import('./translationHistoryPanel.mjs?v=20260607-xhist6')
         .then(({createTranslationHistoryPanel}) => {
           historyPanel = createTranslationHistoryPanel({
             document, window: win, showToast, escHtml,

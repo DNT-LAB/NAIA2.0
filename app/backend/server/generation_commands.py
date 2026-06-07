@@ -216,6 +216,87 @@ def invalidate_auto_gen_prefetch(context: WebSessionContext) -> None:
     context._auto_gen_prefetch = None
 
 
+def _inject_boost_at_main(prompt: str, addition: str) -> str:
+    """boost 추가분을 메인 섹션 끝(=postfix 앞)에 끼워 넣는다 — e621 Auto-Boost와 같은 위치.
+    final_prompt는 `prefix \\n\\n main \\n\\n postfix` 구조라 마지막 "\\n\\n"(main/postfix
+    경계) 앞에 삽입한다. 경계가 없으면(단일 섹션) 끝에 덧붙인다(폴백)."""
+    addition = str(addition or "").strip().strip(",").strip()
+    if not addition:
+        return prompt
+    idx = prompt.rfind("\n\n")
+    if idx == -1:
+        return prompt.rstrip(" ,") + ", " + addition
+    head, tail = prompt[:idx], prompt[idx:]
+    return head.rstrip(" ,") + ", " + addition + tail
+
+
+def _e621_meta_tags(ctx: Any) -> list:
+    """context.metadata['e621_boost_tags']에서 태그명만 추출. 실제 shape은 dict 리스트
+    ({'tag': ...}); 문자열 리스트도 방어적으로 허용(Codex Must-fix 2)."""
+    meta = getattr(ctx, "metadata", None) or {}
+    out = []
+    for it in (meta.get("e621_boost_tags") or []):
+        if isinstance(it, dict):
+            t = it.get("tag")
+        else:
+            t = it
+        if t:
+            out.append(str(t))
+    return out
+
+
+def _build_boost_input(result: Any, settings: dict) -> "str | None":
+    """[기능3] Ollama 입력 구성. base = 원시 장면 태그(source_row['general']) — 인물수/주체
+    (1girl 등; 포매터가 main_tags→prefix_tags로 옮겨 main만으론 사라짐, Codex Must-fix 1)를
+    포함하고 e621 boost 미포함(파이프라인이 main_tags에 append하기 전). 기본(모두 OFF)=장면만.
+    선택 시 prefix/postfix는 **와일드카드 출력만**(고정 아티스트/퀄리티 태그 제외 — 사용자
+    요청), e621은 metadata(dict→tag)를 가중치 제거 후 추가."""
+    from core.scene_boost import strip_weight_syntax
+
+    ctx = getattr(result, "context", None)
+    if ctx is None:
+        return None
+    meta = getattr(ctx, "metadata", None) or {}
+
+    base = ""
+    src = getattr(ctx, "source_row", None)
+    if src is not None:
+        try:
+            base = str(src.get("general") or "")
+        except Exception:
+            base = ""
+    if not base.strip():
+        # 폴백(source_row 없음/와일드카드 단독): processed main_tags.
+        base = ", ".join(str(t) for t in (getattr(ctx, "main_tags", None) or []))
+
+    parts = [strip_weight_syntax(base)]
+    if settings.get("include_prefix"):
+        # 고정 태그(아티스트/퀄리티)는 제외하고 prefix의 와일드카드 출력만(_step_3에서 캡처).
+        pre_wc = meta.get("prefix_wildcard_tags") or []
+        parts.append(strip_weight_syntax(", ".join(str(t) for t in pre_wc)))
+    if settings.get("include_postfix"):
+        post_wc = meta.get("postfix_wildcard_tags") or []
+        parts.append(strip_weight_syntax(", ".join(str(t) for t in post_wc)))
+    if settings.get("include_e621"):
+        e_tags = _e621_meta_tags(ctx)
+        if e_tags:
+            parts.append(strip_weight_syntax(", ".join(e_tags)))
+    inp = ", ".join(p for p in parts if p)
+    return inp or None
+
+
+def _compose_addition(add: dict, settings: dict, context: WebSessionContext) -> str:
+    """삽입 문자열 조립: 구도태그(무가중) + 자연어([기능1] nl_weight 래핑). 메인 섹션에 삽입."""
+    from core.scene_boost import format_nl_weight
+
+    comp_str = ", ".join(str(c) for c in (add.get("composition_tags") or []) if str(c).strip())
+    desc_str = ", ".join(str(d) for d in (add.get("descriptions") or []) if str(d).strip())
+    if desc_str:
+        is_nai = str(getattr(context, "current_api_mode", "") or "").upper() == "NAI"
+        desc_str = format_nl_weight(desc_str, settings.get("nl_weight", 1.0), is_nai)
+    return ", ".join(p for p in [comp_str, desc_str] if p)
+
+
 async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bool:
     """Ollama Auto Boost — random 결과 프롬프트를 Scene Boost로 강화(스레드, best-effort).
 
@@ -229,13 +310,22 @@ async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bo
         prompt = str(getattr(result, "prompt", "") or "")
         if not prompt.strip():
             return False
-        from app.backend.server.ollama_routes import scene_boost_prompt
+        from app.backend.server.ollama_routes import ollama_boost_settings, scene_boost_prompt
 
-        boosted = await asyncio.to_thread(scene_boost_prompt, context, prompt)
+        settings = ollama_boost_settings(context)
+        # [기능3] Ollama 입력 = 메인 장면 태그 + 선택된 prefix/postfix/e621(가중치 제거). 폴백=전체.
+        boost_input = _build_boost_input(result, settings) or prompt
+        # scene_boost_prompt가 Effort([기능2])를 레벨로 읽는다.
+        boosted = await asyncio.to_thread(scene_boost_prompt, context, boost_input)
         if not isinstance(boosted, dict) or not boosted.get("ok"):
             return False
-        new_prompt = str(boosted.get("prompt") or "")
-        if not new_prompt or new_prompt == prompt:
+        # 구도태그(무가중) + 자연어([기능1] nl_weight 래핑)를 메인 섹션 끝(e621 위치)에 삽입.
+        add = boosted.get("additions") or {}
+        addition = _compose_addition(add, settings, context)
+        if not addition:
+            return False
+        new_prompt = _inject_boost_at_main(prompt, addition)
+        if new_prompt == prompt:
             return False
         result.prompt = new_prompt
         context.prompt_text = new_prompt
@@ -247,7 +337,8 @@ async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bo
                     ctx.metadata["ollama_auto_boost"] = {
                         "rating": boosted.get("rating"),
                         "level": boosted.get("level"),
-                        "additions": boosted.get("additions"),
+                        "additions": add,
+                        "settings": settings,
                     }
             except Exception:
                 pass
@@ -744,6 +835,8 @@ def register_generation_rest_routes(
             overrides=overrides,
             random_request_id=request_id,
         )
+        # WebSocket Random과 동일하게 Ollama Auto Boost 적용(토글 OFF면 no-op) — Codex round2 관찰.
+        await apply_ollama_auto_boost(context, result)
         await persist_prompt_engineering_settings(context)
         # Use Vibe 인코딩(2 Anlas) 발생 시 잔액 차감 즉시 반영(REST random 경로).
         await broadcast_anlas_if_vibe_encoded(context, clients)

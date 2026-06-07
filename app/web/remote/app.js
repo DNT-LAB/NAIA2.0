@@ -961,7 +961,7 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
   .catch(error => {
     console.error('Failed to initialize conditional prompt panel module', error);
   });
-const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260607-usevibe3')
+const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260607-stvibe-halve1')
   .then(({createEventStreamPanel}) => {
     eventStreamPanel = createEventStreamPanel({
       document,
@@ -1164,7 +1164,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs')
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20260607-seqvibe5')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20260607-seqvibe6')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
@@ -5678,7 +5678,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260605-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260607-ollamafix1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260607-ollama-boost3')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -5694,7 +5694,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260601-randomized-wc2')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260607-ollama-boost3')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -5932,8 +5932,9 @@ const peE621Panel = $('peE621Panel');
 const pePresetAddPanel = $('pePresetAddPanel');
 const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
+const peOllamaBoostPanel = $('peOllamaBoostPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260601-randomized-wc3')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260607-ollama-boost3')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
@@ -5952,6 +5953,7 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
         presetAdd: pePresetAddPanel,
         presetManage: pePresetManagePanel,
         danbooru: peDanbooruPanel,
+        ollamaBoost: peOllamaBoostPanel,
         debug: peDebugPanel,
       },
     });
@@ -5959,7 +5961,7 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering popup renderers module', error);
   });
-const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopups.mjs')
+const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopups.mjs?v=20260607-ollama-boost3')
   .then(({createPromptEngineeringPopups}) => {
     promptEngineeringPopups = createPromptEngineeringPopups({
       getWs: () => ws,
@@ -5970,6 +5972,7 @@ const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopu
         presetAdd: pePresetAddPanel,
         presetManage: pePresetManagePanel,
         danbooru: peDanbooruPanel,
+        ollamaBoost: peOllamaBoostPanel,
         debug: peDebugPanel,
       },
       positionFloatingPanel,
@@ -5982,6 +5985,7 @@ const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopu
         presetManage: renderPePresetManagePanel,
         e621: renderPeE621Panel,
         danbooru: renderPeDanbooruPanel,
+        ollamaBoost: renderPeOllamaBoostPanel,
         debug: renderPeDebugPanel,
       },
     });
@@ -6008,6 +6012,7 @@ function closeAuxiliaryPopups(exceptPanel = null, options = {}) {
   if (exceptPanel !== pePresetManagePanel && promptEngineeringPopups?.isOpen('presetManage')) closePePresetManagePanel();
   if (exceptPanel !== peE621Panel && promptEngineeringPopups?.isOpen('e621')) closePeE621Panel();
   if (exceptPanel !== peDanbooruPanel && promptEngineeringPopups?.isOpen('danbooru')) closePeDanbooruPanel();
+  if (exceptPanel !== peOllamaBoostPanel && promptEngineeringPopups?.isOpen('ollamaBoost')) closePeOllamaBoostPanel();
   if (exceptPanel !== peDebugPanel && promptEngineeringPopups?.isOpen('debug')) closePeDebugPanel();
   const resolutionPanel = document.getElementById('resolutionManagerPanel');
   if (exceptPanel !== resolutionPanel && resolutionManagerPanel?.isOpen()) closeResolutionManager();
@@ -6060,6 +6065,14 @@ function openPeDanbooruPanel() {
 
 function closePeDanbooruPanel() {
   if (promptEngineeringPopups) promptEngineeringPopups.closeDanbooru();
+}
+
+function openPeOllamaBoostPanel() {
+  if (promptEngineeringPopups) promptEngineeringPopups.openOllamaBoost();
+}
+
+function closePeOllamaBoostPanel() {
+  if (promptEngineeringPopups) promptEngineeringPopups.closeOllamaBoost();
 }
 
 function openPeDebugPanel() {
@@ -6242,6 +6255,10 @@ function renderPeDanbooruPanel(m) {
   if (promptEngineeringPopupRenderers) promptEngineeringPopupRenderers.renderDanbooru(m);
 }
 
+function renderPeOllamaBoostPanel(m) {
+  if (promptEngineeringPopupRenderers) promptEngineeringPopupRenderers.renderOllamaBoost(m);
+}
+
 function renderPeDebugPanel(m) {
   if (promptEngineeringPopupRenderers) promptEngineeringPopupRenderers.renderDebugPanel(m);
 }
@@ -6326,6 +6343,10 @@ function savePromptEngineeringE621Settings() {
 
 function savePromptEngineeringDanbooruSettings() {
   if (promptEngineeringActions) promptEngineeringActions.saveDanbooruSettings();
+}
+
+function savePromptEngineeringOllamaBoostSettings() {
+  if (promptEngineeringActions) promptEngineeringActions.saveOllamaBoostSettings();
 }
 
 function refreshPromptEngineeringDebug() {
@@ -7135,6 +7156,7 @@ function relayoutFloatingPanels() {
   positionFloatingPanel(pePresetManagePanel, modulePopup);
   positionFloatingPanel(peE621Panel, modulePopup);
   positionFloatingPanel(peDanbooruPanel, modulePopup);
+  positionFloatingPanel(peOllamaBoostPanel, modulePopup);
   positionFloatingPanel(peDebugPanel, modulePopup);
   if (wildcardManagerPanel) wildcardManagerPanel.relayout();
   if (imageModulePanels) imageModulePanels.relayoutVibeClusterPanel();

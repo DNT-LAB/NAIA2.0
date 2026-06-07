@@ -355,11 +355,23 @@ class PromptProcessor:
 
     def _step_3_expand_wildcards(self, context: PromptContext) -> PromptContext:
         """와일드카드를 실제 태그로 치환하는 단계"""
-        context.prefix_tags = self.wildcard_processor.expand_tags(context.prefix_tags, context)
+        # Ollama Boost([기능3])용: prefix/postfix의 *와일드카드 출력만* 캡처한다(고정 아티스트/
+        # 퀄리티 태그 제외). 실제 전개와 동일 draw를 써야 하므로 여기서 sink로 수집한다.
+        prefix_wc_sink: list[str] = []
+        postfix_wc_sink: list[str] = []
+        context.prefix_tags = self.wildcard_processor.expand_tags(
+            context.prefix_tags, context, wildcard_sink=prefix_wc_sink)
         context.prefix_tags = self._expand_preset_tokens(context.prefix_tags, context)
         context.main_tags = self._expand_preset_tokens(context.main_tags, context)
-        context.postfix_tags = self.wildcard_processor.expand_tags(context.postfix_tags, context)
+        context.postfix_tags = self.wildcard_processor.expand_tags(
+            context.postfix_tags, context, wildcard_sink=postfix_wc_sink)
         context.postfix_tags = self._expand_preset_tokens(context.postfix_tags, context)
+        try:
+            if isinstance(getattr(context, "metadata", None), dict):
+                context.metadata["prefix_wildcard_tags"] = list(prefix_wc_sink)
+                context.metadata["postfix_wildcard_tags"] = list(postfix_wc_sink)
+        except Exception:
+            pass
         return context
 
     def _expand_preset_tokens(self, tags: list[str], context: PromptContext) -> list[str]:

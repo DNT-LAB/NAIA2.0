@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260607-seqvibe5">
+<link rel="stylesheet" href="style.css?v=20260607-stvibehalve1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -318,6 +318,17 @@
       <button type="button" class="header-guide-btn" data-naia-guide="Danbooru Auto-Weight — 랜덤 프롬프트의 각 태그에 Danbooru 출현 빈도(IDF) 기반 강조 가중치를 자동 부여합니다. 희귀한 태그일수록 높은 가중치, 흔한 태그는 1.0 미만이 됩니다.\n\n강조 강도 (Magnitude) — 가중치가 퍼지는 폭. 약한~극한++ 10단계이며, 단계가 높을수록 강약 대비가 커집니다. 슬라이더 아래에 현재 적용 범위가 표시됩니다.\n\nRating 반영 — 전역 빈도와 해당 등급(g/s/q/e) 조건부 빈도를 섞는 비율입니다(0=전역만, 1=등급만).\n\n고급 — 커스텀 오버라이드(곡선 직접 지정), Rating 강제(등급 고정), 가중치 반전(흔한 태그 강조).\n\n※ NAI는 1.20::tag :: , WEBUI/COMFYUI는 (tag:1.20) 구문으로 적용됩니다. 동일 입력이라도 매 생성마다 미세한 무작위 섭동이 더해집니다.">ⓘ 가이드</button>
     </span>
     <button class="history-close" onclick="closePeDanbooruPanel()">&times;</button>
+  </div>
+  <div class="pe-popup-body"></div>
+</div>
+
+<div class="pe-popup" id="peOllamaBoostPanel">
+  <div class="module-popup-header">
+    <span class="module-popup-titlewrap">
+      <span class="module-popup-title">Ollama Boost Settings</span>
+      <button type="button" class="header-guide-btn" data-naia-guide="Ollama Boost — 로컬 Ollama로 프롬프트를 자연어 배경/구도/분위기로 보강합니다.\n\n자연어 가중치 — 보강된 자연어 프롬프트에 부여할 가중치입니다. NAI는 {v}::..:: , 로컬(WEBUI/COMFYUI)은 (..:v) 구문으로 적용됩니다.\n\nEffort — 보강 자연어의 길이·창의성입니다. 간결(concise) / 표준(standard) / 풍부(rich).\n\nInput 구성 — Ollama에 보낼 입력에 PE Prefix / PE Postfix / e621 Auto-Boost 태그를 포함할지 선택합니다. (포함되는 태그의 가중치 구문은 자동으로 제거됩니다.)">ⓘ 가이드</button>
+    </span>
+    <button class="history-close" onclick="closePeOllamaBoostPanel()">&times;</button>
   </div>
   <div class="pe-popup-body"></div>
 </div>
@@ -1093,6 +1104,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260607-seqvibe5"></script>
+<script src="app.js?v=20260607-stvibehalve1"></script>
 </body>
 </html>

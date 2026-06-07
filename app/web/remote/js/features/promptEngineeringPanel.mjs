@@ -303,6 +303,7 @@ export function createPromptEngineeringPanel({
       <div class="mod-inline-row">
         <button class="mod-btn-secondary" onclick="openPeE621Panel()">e621 Auto-Boost Settings</button>
         <button class="mod-btn-secondary" onclick="openPeDanbooruPanel()">Danbooru Auto-Weight Settings</button>
+        <button class="mod-btn-secondary" onclick="openPeOllamaBoostPanel()">Ollama Boost Settings</button>
       </div>
     </div>
   `;

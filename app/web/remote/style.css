@@ -16376,6 +16376,7 @@ body.detached-module .mod-grid-3 {
 .xlation-history-body {
   display: flex; flex-direction: column; gap: 8px; min-height: 0;
   padding: 8px 10px 10px; overflow: hidden;
+  flex: 1 1 auto;  /* 패널 높이를 채워야 1:1 flex 섹션(고정됨/기록)이 높이를 분배받는다 */
 }
 .xlation-history-search-row { flex: 0 0 auto; }
 .xlation-history-search {

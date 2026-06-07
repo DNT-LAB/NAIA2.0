@@ -115,16 +115,32 @@ def get_assist_service(context: WebSessionContext) -> "Any":
         return svc
 
 
-def scene_boost_prompt(context: WebSessionContext, prompt: str, *, level: str = "rich") -> dict[str, Any]:
+def ollama_boost_settings(context: WebSessionContext) -> dict[str, Any]:
+    """PE 저장소의 ``ollama_boost_settings``를 정규화해 반환(없으면 기본값).
+    nl_weight(0.75~3)·effort(concise/standard/rich)·include_prefix/postfix/e621."""
+    from core.prompt_engineering_settings import normalize_ollama_boost_settings
+    try:
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        store = get_prompt_engineering_store(context)
+        return normalize_ollama_boost_settings(store.collect_settings().get("ollama_boost_settings"))
+    except Exception:
+        return normalize_ollama_boost_settings(None)
+
+
+def scene_boost_prompt(context: WebSessionContext, prompt: str, *, level: str | None = None) -> dict[str, Any]:
     """Ollama Auto Boost — 주어진 프롬프트를 Scene Boost로 강화한다(best-effort).
 
     토글(``context.ollama_auto_boost``)이 OFF면 그대로 통과. ON이어도 Ollama가 꺼져
     있으면 scene_boost 내부 chat이 빠르게 실패(connection refused)해 원문을 돌려준다 —
     생성 루프를 절대 깨지 않는다. 반환은 scene_boost 결과 dict(없으면 패스 표시).
+    level 미지정 시 설정의 Effort([기능2])를 레벨로 쓴다.
     """
     src = str(prompt or "")
     if not getattr(context, "ollama_auto_boost", False) or not src.strip():
         return {"ok": False, "skipped": True, "prompt": src}
+    if level is None:
+        level = ollama_boost_settings(context).get("effort") or "rich"
     try:
         svc = get_assist_service(context)
         if not hasattr(svc, "scene_boost"):

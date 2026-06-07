@@ -157,6 +157,21 @@ export function createPromptEngineeringActions({
     setModuleParam('prompt_engineering', 'danbooru_settings', JSON.stringify(payload));
   }
 
+  function saveOllamaBoostSettings() {
+    const nlWeightRaw = parseFloat(document.getElementById('modOllamaBoostWeight')?.value ?? '');
+    const nlWeight = Number.isFinite(nlWeightRaw) ? nlWeightRaw : 1.0;
+    const effortChecked = document.querySelector('input[name="modOllamaBoostEffort"]:checked');
+    const effort = effortChecked ? effortChecked.value : 'rich';
+    const payload = {
+      nl_weight: nlWeight,
+      effort,
+      include_prefix: !!document.getElementById('modOllamaBoostIncludePrefix')?.checked,
+      include_postfix: !!document.getElementById('modOllamaBoostIncludePostfix')?.checked,
+      include_e621: !!document.getElementById('modOllamaBoostIncludeE621')?.checked,
+    };
+    setModuleParam('prompt_engineering', 'ollama_boost_settings', JSON.stringify(payload));
+  }
+
   function refreshDebug() {
     setModuleParam('prompt_engineering', 'debug_refresh', 'true');
   }
@@ -193,6 +208,7 @@ export function createPromptEngineeringActions({
     setRandomizedWildcard,
     saveE621Settings,
     saveDanbooruSettings,
+    saveOllamaBoostSettings,
     refreshDebug,
     setOption,
     setOllamaAutoBoost,

@@ -59,7 +59,10 @@ class HeadlessPromptEngineeringService:
         return self._debug_snapshot_from_metadata(getattr(run, "metadata", None))
 
     def state(self) -> dict[str, Any]:
-        from core.prompt_engineering_settings import get_prompt_engineering_store
+        from core.prompt_engineering_settings import (
+            get_prompt_engineering_store,
+            normalize_ollama_boost_settings,
+        )
 
         context = self.context
         store = get_prompt_engineering_store(context)
@@ -109,6 +112,7 @@ class HeadlessPromptEngineeringService:
             "ollama_auto_boost": bool(getattr(context, "ollama_auto_boost", False)),
             "e621_settings": dict(settings.get("e621_settings") or {}),
             "danbooru_settings": dict(settings.get("danbooru_weight_settings") or {}),
+            "ollama_boost_settings": normalize_ollama_boost_settings(settings.get("ollama_boost_settings")),
             "debug_snapshot": self.debug_snapshot(),
             "preset_can_save_current": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized"),
             "preset_can_delete": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized", "default"),
@@ -237,6 +241,17 @@ class HeadlessPromptEngineeringService:
                 return context._toast("Invalid Danbooru settings", level="error")
             store.save_danbooru_weight_settings(settings)
             store.apply_settings({"danbooru_weight_settings": settings})
+        elif key == "ollama_boost_settings":
+            # 영속 설정(세션 전용 ollama_auto_boost 토글과는 별개). merge+clamp+coerce 는
+            # store/normalize_ollama_boost_settings 가 담당한다(e621_settings 패턴 동일).
+            from core.prompt_engineering_settings import normalize_ollama_boost_settings
+
+            settings = json.loads(text_value or "{}")
+            if not isinstance(settings, dict):
+                return context._toast("Invalid Ollama Boost settings", level="error")
+            normalized = normalize_ollama_boost_settings(settings)
+            store.save_ollama_boost_settings(normalized)
+            store.apply_settings({"ollama_boost_settings": normalized})
         elif key == "debug_refresh":
             pass
         elif key == "ollama_auto_boost":

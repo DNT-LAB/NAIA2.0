@@ -752,6 +752,7 @@ class OllamaTagAssistService:
         keep_alive: Any = None,
         num_predict: Any = None,
         timeout: Any = None,
+        think: Any = False,
     ) -> dict[str, Any]:
         import requests
 
@@ -771,6 +772,12 @@ class OllamaTagAssistService:
             # 단계별 분리: 개념/선택은 결정적(낮게), 자연어/보완은 창의적(높게).
             "options": options,
         }
+        # think: 추론(<think>) 모델은 답 앞에 긴 사고 블록을 낸다. **기본 False** — 모든
+        # assist/oneshot/boost 호출에서 사고를 끄고 곧장 답(JSON)을 받는다. 스키마로 구조가
+        # 강제되므로 사고 없이도 정확하고 ~8배 빠르다(Scene Boost는 사고가 num_predict를 다
+        # 먹어 빈 출력이 되던 회귀를 think=False로 차단). 사고를 다시 켜려면 think=None 전달.
+        if think is not None:
+            payload["think"] = bool(think)
         # keep_alive: -1=무기한 유지(Auto Boost 모드 — 모델 상주로 매 boost 재로드 없음),
         # 0=언로드, None=Ollama 기본(~5분). Auto Boost scene_boost는 -1로 모델을 살려 둔다.
         if keep_alive is not None:
@@ -948,6 +955,9 @@ class OllamaTagAssistService:
                 kwargs.setdefault("keep_alive", keep_alive)
             # 동기 Random 경로 worst-case를 묶는다(일반 assist보다 짧게).
             kwargs.setdefault("timeout", _BOOST_CHAT_TIMEOUT)
+            # 추론 모델의 <think> 블록이 num_predict를 다 먹어 빈 출력이 되는 걸 차단 +
+            # 8배가량 빠르게. Scene Boost는 결정론적 구조(코드)라 모델 사고가 불필요.
+            kwargs.setdefault("think", False)
             return self._chat(*args, **kwargs)
 
         result = run_scene_boost(

@@ -17,6 +17,7 @@ export function createPromptEngineeringPopups({
     presetManage: false,
     e621: false,
     danbooru: false,
+    ollamaBoost: false,
     debug: false,
   };
 
@@ -66,6 +67,7 @@ export function createPromptEngineeringPopups({
     if (openState.presetManage) renderers.presetManage(lastState);
     if (openState.e621) renderers.e621(lastState);
     if (openState.danbooru) renderers.danbooru(lastState);
+    if (openState.ollamaBoost) renderers.ollamaBoost(lastState);
     if (openState.debug) renderers.debug(lastState);
   }
 
@@ -82,6 +84,8 @@ export function createPromptEngineeringPopups({
     closeE621: () => closePanel('e621'),
     openDanbooru: () => openPanel('danbooru'),
     closeDanbooru: () => closePanel('danbooru'),
+    openOllamaBoost: () => openPanel('ollamaBoost'),
+    closeOllamaBoost: () => closePanel('ollamaBoost'),
     openDebug: () => openPanel('debug', {refreshOnly: true}),
     closeDebug: () => closePanel('debug'),
     closeAll,

@@ -67,82 +67,69 @@ class WildcardProcessor:
 
         return None
 
-    def expand_tags(self, tag_list: List[str], context: PromptContext) -> List[str]:
+    def expand_tags(self, tag_list: List[str], context: PromptContext,
+                    wildcard_sink: "list | None" = None) -> List[str]:
         """
         태그 리스트를 받아 리스트 내의 모든 와일드카드를 확장합니다.
         이것이 다른 모듈에서 호출할 기본 진입점(entry-point)이 됩니다.
+
+        ``wildcard_sink``가 주어지면 *와일드카드(__name__/<name>/$instant)에서 나온* 출력
+        태그만 따로 수집한다(고정 태그는 제외). Ollama Boost가 prefix/postfix의 **와일드카드
+        출력만** 캡처하는 용도(설정 [기능3]) — 고정 아티스트/퀄리티 태그 오염 방지.
         """
         expanded_list = []
         for tag in tag_list:
+            is_wildcard = ('__' in tag) or ('<' in tag) or tag.strip().startswith('$')
+            produced: List[str] = []
             # $ 로 시작하는 인스턴트 와일드카드 처리
             if tag.startswith('$'):
                 instant_key = tag[1:].strip()  # $ 제거
-                
                 # ":" 포함 여부 확인하여 필터링 적용
                 if ":" in instant_key:
                     parts = instant_key.split(":", 1)
                     group_name = parts[0]
                     filter_text = parts[1].lower() if len(parts) > 1 else ""
-                    
-                    # tree에서 그룹 찾기
                     if group_name in self.wildcard_manager.instant_wildcard_tree:
                         group_dict = self.wildcard_manager.instant_wildcard_tree[group_name]
-                        
-                        # filter_text를 포함하는 key들만 추출
-                        if filter_text and group_dict:
-                            filtered_dict = {k: v for k, v in group_dict.items() if filter_text in k.lower()}
-                            
-                            if filtered_dict:
-                                # 필터링된 결과에서 무작위 선택
-                                random_key = random.choice(list(filtered_dict.keys()))
-                                random_value = filtered_dict[random_key]
-                            else:
-                                # 필터링 결과가 없으면 전체에서 무작위 선택
-                                random_key = random.choice(list(group_dict.keys()))
-                                random_value = group_dict[random_key]
-                        elif group_dict:
-                            # 필터 텍스트가 없으면 전체에서 무작위 선택
-                            random_key = random.choice(list(group_dict.keys()))
-                            random_value = group_dict[random_key]
+                        if not group_dict:
+                            produced = [tag]  # 그룹 비어있으면 원본 유지
                         else:
-                            # 그룹이 비어있으면 원본 유지
-                            expanded_list.append(tag)
-                            continue
-                            
-                        # 값을 콤마로 분리하여 개별 태그로 추가
-                        instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
-                        expanded_list.extend(instant_tags)
+                            src = group_dict
+                            if filter_text:
+                                filtered_dict = {k: v for k, v in group_dict.items() if filter_text in k.lower()}
+                                if filtered_dict:
+                                    src = filtered_dict
+                            random_key = random.choice(list(src.keys()))
+                            random_value = src[random_key]
+                            produced = [t.strip() for t in random_value.split(',') if t.strip()]
                     else:
-                        # 그룹을 찾을 수 없으면 원본 유지
-                        expanded_list.append(tag)
-                
+                        produced = [tag]  # 그룹 못 찾으면 원본 유지
                 # ":" 없이 단순 그룹명인 경우
                 elif instant_key in self.wildcard_manager.instant_wildcard_tree:
-                    # tree에서 해당 그룹의 딕셔너리 가져오기
                     group_dict = self.wildcard_manager.instant_wildcard_tree[instant_key]
                     if group_dict:
-                        # 무작위로 key-value 쌍 선택
                         random_key = random.choice(list(group_dict.keys()))
                         random_value = group_dict[random_key]
-                        # 값을 콤마로 분리하여 개별 태그로 추가
-                        instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
-                        expanded_list.extend(instant_tags)
+                        produced = [t.strip() for t in random_value.split(',') if t.strip()]
                     else:
-                        # 그룹이 비어있으면 원본 유지
-                        expanded_list.append(tag)
+                        produced = [tag]
                 # tree에 없으면 기존 instant_wildcard_dict에서 검색
                 elif instant_key in self.wildcard_manager.instant_wildcard_dict:
-                    # 인스턴트 와일드카드의 값으로 대체
                     instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
-                    # 값을 콤마로 분리하여 개별 태그로 추가
-                    instant_tags = [t.strip() for t in instant_value.split(',') if t.strip()]
-                    expanded_list.extend(instant_tags)
+                    produced = [t.strip() for t in instant_value.split(',') if t.strip()]
                 else:
-                    # 인스턴트 와일드카드를 찾을 수 없으면 원본 유지
-                    expanded_list.append(tag)
+                    produced = [tag]  # 인스턴트 와일드카드 못 찾으면 원본 유지
             else:
-                # 일반 와일드카드 처리
-                expanded_list.extend(self._expand_recursive(tag, context))
+                # 일반 와일드카드 처리(고정 태그는 그대로 통과)
+                produced = self._expand_recursive(tag, context)
+            expanded_list.extend(produced)
+            # 실제로 전개된 경우만 sink에 수집한다(Codex). LoRA(<lora:..>)·미해결 토큰
+            # (<missing>/__missing__/$missing)은 _expand_recursive/인스턴트 분기가 원본을 그대로
+            # 반환(produced == [tag])하므로 "와일드카드 출력"이 아니다 → 제외.
+            # 주의: <wc>(구식 각괄호)의 2번째+ 태그는 global_append_tags로 빠져 in-place sink엔
+            # 안 잡힌다. 사용자 권장 문법은 __name__(in-place 콤마결합)이라 실사용엔 무영향.
+            if wildcard_sink is not None and is_wildcard and produced != [tag]:
+                wildcard_sink.extend(produced)
         return expanded_list
 
     def _expand_recursive(self, tag: str, context: PromptContext, depth=0) -> List[str]:

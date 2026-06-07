@@ -74,6 +74,25 @@ _TONE_PALETTE: dict[str, tuple[str, ...]] = {
     "e": ("intense", "feverish", "low-key", "raw", "breathless", "smouldering"),
 }
 
+# 등급별 포커스(사용자 스펙) — 톤(어조)만 바꾸던 것을 넘어, 보강 *방향*을 등급에 맞춰
+# 강제한다. 어디까지나 **기존 태그가 이미 담은 것**을 강조/프레이밍할 뿐, 새 인물·소품·
+# 행위는 만들지 않는다(코드의 _tag_allowed 등급 상한이 안전선). NAIA=성인 일러스트 툴.
+_RATING_FOCUS: dict[str, str] = {
+    "g": ("Keep it wholesome: only lighting, weather, time of day and background scenery. "
+          "No exposure, no intimacy, no suggestive framing."),
+    "s": ("Suggestive, inviting atmosphere centered on the existing subject(s): soft warm tone "
+          "with gentle emphasis on the figure and the setting. No explicit anatomy or acts."),
+    "q": ("Sensual focus: directly frame the exposure and intimate composition the tags already "
+          "show — the angle, closeness, bared skin and heated tension. You MAY reference the "
+          "existing exposed pose/body to frame it concretely (that is NOT 'repeating tags'); only "
+          "invent no new people, body parts, or sexual acts. Avoid vague shadow/mist filler."),
+    "e": ("Explicit focus: directly and boldly frame the exposed, intimate scene the tags already "
+          "depict — how the angle and close framing present the bared body and the act, the raw "
+          "physical heat and tension. You MAY reference the existing exposure/pose/act to frame it "
+          "concretely (NOT vague shadows or mist); only invent no new people, body parts, props, "
+          "or acts. At least half the phrases must be about the body/pose/framing, not weather."),
+}
+
 # NAI/A1111 가중치·강조 래퍼 — bare 태그 추출용.
 _WEIGHT_PREFIX_RE = re.compile(r"^\s*\d*\.?\d+\s*::")        # "1.2::"
 _WEIGHT_SUFFIX_RE = re.compile(r"::\s*$")                     # 끝의 "::"
@@ -111,6 +130,36 @@ def _bare_tag(token: str) -> str:
             break
     t = _A1111_WEIGHT_RE.sub("", t).strip()  # "tag:1.2" → "tag"
     return t.lower().replace("_", " ").strip()
+
+
+def format_nl_weight(text: str, weight: float, is_nai: bool) -> str:
+    """자연어 보강분에 가중치 부여(설정 [기능1]). NAI: '{w}::text ::', 로컬(A1111/Comfy):
+    '(text:w)'. weight≈1.0이면 그대로(가중치 없음). 범위는 호출부가 0.75~3로 보장."""
+    s = str(text or "").strip().strip(",").strip()
+    if not s:
+        return ""
+    try:
+        w = float(weight)
+    except Exception:
+        return s
+    if abs(w - 1.0) < 1e-3:
+        return s
+    w = max(0.75, min(3.0, w))
+    return f"{w:g}::{s} ::" if is_nai else f"({s}:{w:g})"
+
+
+def strip_weight_syntax(prompt: str) -> str:
+    """가중치 구문({n}::, ::, (text:n))을 제거해 순수 태그 나열로(설정 [기능3] Ollama 입력용).
+    주석(#)·개행·빈 토큰 제거. 각 토큰을 _bare_tag로 벗긴다."""
+    out: list[str] = []
+    for raw in str(prompt or "").replace("\n", ",").split(","):
+        raw = raw.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        bare = _bare_tag(raw)
+        if bare:
+            out.append(bare)
+    return ", ".join(out)
 
 
 def parse_prompt(prompt: str) -> dict[str, Any]:
@@ -326,31 +375,33 @@ def build_instruction(
     lo, hi = level_cfg.get("phrases", (2, 3))
     wlo, whi = level_cfg.get("words", (8, 16))
     tone = ", ".join(_TONE_PALETTE.get(rating, _TONE_PALETTE["s"]))
+    focus = _RATING_FOCUS.get(rating, _RATING_FOCUS["s"])
     tags_line = ", ".join(descriptive[:60])
     comp_clause = ""
     if candidates:
+        cmax = int(level_cfg.get("comp_max", 2))
         comp_clause = (
-            f"Also pick {0}-{level_cfg.get('comp_max', 2)} camera/lighting tags from THIS list "
-            f"that best fit the scene (choose only from the list, invent none): "
+            f"Composition: choose {min(1, cmax)}-{cmax} tags from THIS enum that strengthen the "
+            f"framing/angle/shot for THIS exact scene (only from the list, invent none): "
             f"{', '.join(candidates)}.\n"
         )
     return (
-        "Task: enrich an existing anime image prompt by adding ATMOSPHERE ONLY. "
-        "You are given the existing tags and a target mood. Do NOT change, repeat, or "
-        "contradict the subjects, their count, outfit, pose, or action; invent no new "
-        "characters, locations, props, or named series/artists.\n"
-        f"Write {max(1, lo)}-{hi} short English scene-description phrases ({wlo}-{whi} words "
-        f"each) evoking background, lighting and a {tone} mood — vivid and {tone}, but only "
-        "what the existing tags already imply. English only. Do not introduce a new person. "
-        "For explicit moods, keep it suggestive in TONE (intimate, low-key) — add no new "
-        "sexual act or body part.\n"
+        "Task: add only atmosphere and composition (no new facts) to an existing anime image prompt.\n"
+        f"Rating focus [{rating}]: {focus}\n"
+        f"Write {max(1, lo)}-{hi} short English phrases ({wlo}-{whi} words each), {tone} in tone, "
+        "as the Rating focus above directs — lighting, depth, mood, and the composition/framing the "
+        "existing tags imply.\n"
+        "Rules: (1) never add or change subjects, count, outfit, location, props, named series, "
+        "artist, or style; (2) do not merely re-list the existing tags verbatim — but you MAY frame "
+        "and present what they already depict; (3) if nothing fitting can be added, return empty "
+        "arrays — never invent. English only.\n"
         + comp_clause +
+        "Bad — never do: \"another girl walks in\", \"a bed in the background\" (unless a bed tag "
+        "already exists), introducing any new character, prop, or location.\n"
         "Example tags: 1girl, school uniform, classroom, sitting, looking out window\n"
         'Example output: {"descriptions": ["late afternoon light pooling across empty desks", '
-        '"a hush of chalk dust drifting in the golden quiet"], "composition_tags": '
-        '["depth of field", "backlighting"]}\n\n'
-        f"Existing tags: {tags_line}\n"
-        f"Target mood: {tone}\n"
+        '"a hush of chalk dust in the golden quiet"], "composition_tags": ["depth of field", "backlighting"]}\n\n'
+        f"Existing tags (IMMUTABLE — never change, add to, or contradict): {tags_line}\n"
         "Output JSON:"
     )
 

@@ -12,6 +12,21 @@ export function createPromptEngineeringPopupRenderers({
   bindDanbooruFeedback,
   panels,
 }) {
+  const OLLAMA_BOOST_GUIDE =
+    '자연어 가중치 — 보강된 자연어 프롬프트에 부여할 가중치입니다. '
+    + 'NAI는 {v}::..:: , 로컬(WEBUI/COMFYUI)은 (..:v) 구문으로 적용됩니다.\\n\\n'
+    + 'Effort — 보강 자연어의 길이·창의성. 간결(concise) / 표준(standard) / 풍부(rich).\\n\\n'
+    + 'Input 구성 — Ollama에 보낼 입력에 PE Prefix / PE Postfix / e621 Auto-Boost 태그를 '
+    + '포함할지 선택합니다.\\n\\n'
+    + '⚠️ Prefix / Postfix는 **와일드카드 출력만** 반영됩니다. 고정 아티스트·퀄리티 태그'
+    + '(예: 1.2::artist:.. ::, masterpiece, best quality)는 모델이 다루기 어렵고 의도와 '
+    + '무관하므로 제외하고, __이름__ 와일드카드가 펼쳐진 결과만 입력에 넣습니다. '
+    + '(포함 태그의 가중치 구문은 자동 제거.)';
+  const OLLAMA_BOOST_EFFORTS = [
+    ['concise', '간결'],
+    ['standard', '표준'],
+    ['rich', '풍부'],
+  ];
   const RANDOMIZED_WC_GUIDE =
     '랜덤 프리셋(*randomized) 사용 시, 매 생성마다 뽑힌 프리셋의 선행 프롬프트(Prefix)에 '
     + '여기 입력을 함께 주입합니다.\\n\\n'
@@ -503,6 +518,64 @@ export function createPromptEngineeringPopupRenderers({
     bindDanbooruFeedback(danbooru);
   }
 
+  function renderOllamaBoost(m) {
+    const body = getBody(panels.ollamaBoost);
+    if (!body) return;
+    const boost = m.ollama_boost_settings || {};
+    const nlWeight = Number.isFinite(Number(boost.nl_weight)) ? Number(boost.nl_weight) : 1.0;
+    const effort = ['concise', 'standard', 'rich'].includes(boost.effort) ? boost.effort : 'rich';
+    const includePrefix = !!boost.include_prefix;
+    const includePostfix = !!boost.include_postfix;
+    const includeE621 = !!boost.include_e621;
+    const effortHtml = OLLAMA_BOOST_EFFORTS.map(([value, label]) => `
+      <label class="mod-checkbox-item">
+        <input type="radio" name="modOllamaBoostEffort" value="${escHtml(value)}"${effort === value ? ' checked' : ''}>
+        <span class="mod-checkbox-label">${escHtml(label)}</span>
+      </label>`).join('');
+    body.innerHTML = `
+    <div class="mod-boost-block">
+      <div class="mod-boost-head">
+        <span class="mod-boost-name">자연어 가중치</span>
+        <span class="mod-boost-val" id="modOllamaBoostWeightValue">${nlWeight.toFixed(2)}</span>
+      </div>
+      <input type="range" class="mod-boost-slider" id="modOllamaBoostWeight" min="0.75" max="3" step="0.05" value="${escHtml(String(nlWeight))}"
+        oninput="var v=document.getElementById('modOllamaBoostWeightValue'); if(v) v.textContent=(+this.value).toFixed(2);">
+      <div class="mod-boost-scale" style="position:relative;display:block;height:12px;">
+        <span style="position:absolute;left:0;">0.75</span>
+        <span style="position:absolute;left:11.1%;transform:translateX(-50%);">1.0</span>
+        <span style="position:absolute;right:0;">3.0</span>
+      </div>
+      <div class="mod-boost-caption">보강된 자연어 프롬프트 전체에 적용할 가중치 (1.0=무가중, NAI {v}::..:: / 로컬 (..:v)).</div>
+    </div>
+    <div class="mod-boost-block">
+      <div class="mod-boost-head"><span class="mod-boost-name">Effort</span></div>
+      <div class="mod-checkbox-grid" id="modOllamaBoostEffort">${effortHtml}</div>
+      <div class="mod-boost-caption">보강 자연어의 길이·창의성(scene_boost level).</div>
+    </div>
+    <div>
+      <div class="mod-section-label">Input 구성</div>
+      <div class="mod-checkbox-grid">
+        <label class="mod-checkbox-item">
+          <input type="checkbox" id="modOllamaBoostIncludePrefix"${includePrefix ? ' checked' : ''}>
+          <span class="mod-checkbox-label">PE Prefix 포함</span>
+        </label>
+        <label class="mod-checkbox-item">
+          <input type="checkbox" id="modOllamaBoostIncludePostfix"${includePostfix ? ' checked' : ''}>
+          <span class="mod-checkbox-label">PE Postfix 포함</span>
+        </label>
+        <label class="mod-checkbox-item">
+          <input type="checkbox" id="modOllamaBoostIncludeE621"${includeE621 ? ' checked' : ''}>
+          <span class="mod-checkbox-label">e621 Auto-Boost 포함</span>
+        </label>
+      </div>
+      <div class="mod-boost-caption">Prefix / Postfix는 <b>와일드카드 출력만</b> 반영 (고정 아티스트·퀄리티 태그 제외). 가중치 구문 자동 제거.</div>
+    </div>
+    <div class="mod-inline-row">
+      <button class="mod-btn-secondary" onclick="savePromptEngineeringOllamaBoostSettings()">Save Ollama Boost Settings</button>
+    </div>
+  `;
+  }
+
   function renderDebugPanel(m) {
     const body = getBody(panels.debug);
     if (!body) return;
@@ -520,6 +593,7 @@ export function createPromptEngineeringPopupRenderers({
     renderDebugSnapshot,
     renderE621,
     renderDanbooru,
+    renderOllamaBoost,
     renderDebugPanel,
   };
 }

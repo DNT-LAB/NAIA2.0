@@ -115,6 +115,46 @@ def default_preprocessing_options() -> dict[str, bool]:
     return options
 
 
+# Ollama Boost — 자연어 보강 프롬프트 설정(영속). e621_settings 와 동일한 저장/로드/병합
+# 패턴을 따른다. nl_weight 는 [0.75, 3.0] 으로 clamp, effort 는 concise/standard/rich 중
+# 하나로 강제(기본 rich), 3개의 include 플래그는 bool 로 강제.
+OLLAMA_BOOST_EFFORTS = ("concise", "standard", "rich")
+OLLAMA_BOOST_NL_WEIGHT_MIN = 0.75
+OLLAMA_BOOST_NL_WEIGHT_MAX = 3.0
+OLLAMA_BOOST_DEFAULTS: dict[str, Any] = {
+    "nl_weight": 1.0,
+    "effort": "rich",
+    "include_prefix": False,
+    "include_postfix": False,
+    "include_e621": False,
+}
+
+
+def normalize_ollama_boost_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
+    """Coerce raw Ollama Boost settings to the canonical schema/defaults.
+
+    nl_weight → float clamped to [0.75, 3.0]; effort → one of concise/standard/rich
+    (fallback rich); include_prefix/postfix/e621 → bool. Unknown keys are dropped."""
+    source = settings if isinstance(settings, dict) else {}
+    try:
+        nl_weight = float(source.get("nl_weight", OLLAMA_BOOST_DEFAULTS["nl_weight"]))
+    except (TypeError, ValueError):
+        nl_weight = OLLAMA_BOOST_DEFAULTS["nl_weight"]
+    if nl_weight != nl_weight:  # NaN guard
+        nl_weight = OLLAMA_BOOST_DEFAULTS["nl_weight"]
+    nl_weight = max(OLLAMA_BOOST_NL_WEIGHT_MIN, min(OLLAMA_BOOST_NL_WEIGHT_MAX, nl_weight))
+    effort = str(source.get("effort", OLLAMA_BOOST_DEFAULTS["effort"]) or "").strip().lower()
+    if effort not in OLLAMA_BOOST_EFFORTS:
+        effort = OLLAMA_BOOST_DEFAULTS["effort"]
+    return {
+        "nl_weight": round(nl_weight, 4),
+        "effort": effort,
+        "include_prefix": bool(source.get("include_prefix", False)),
+        "include_postfix": bool(source.get("include_postfix", False)),
+        "include_e621": bool(source.get("include_e621", False)),
+    }
+
+
 def default_prompt_engineering_settings(save_root: str | Path | None = None) -> dict[str, Any]:
     return {
         "pre_prompt": "",
@@ -123,6 +163,7 @@ def default_prompt_engineering_settings(save_root: str | Path | None = None) -> 
         "preprocessing_options": default_preprocessing_options(),
         "e621_settings": load_e621_settings(save_root=save_root),
         "danbooru_weight_settings": load_danbooru_weight_settings(save_root=save_root),
+        "ollama_boost_settings": load_ollama_boost_settings(save_root=save_root),
     }
 
 
@@ -210,6 +251,24 @@ def save_danbooru_weight_settings(settings: dict[str, Any], *, save_root: str | 
     path = _coerce_save_root(save_root) / "danbooru_auto_weight_user.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(dict(settings or {}), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_ollama_boost_settings(*, save_root: str | Path | None = None) -> dict[str, Any]:
+    path = _existing_save_file("ollama_boost_user.json", save_root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return dict(OLLAMA_BOOST_DEFAULTS)
+    return normalize_ollama_boost_settings(data if isinstance(data, dict) else {})
+
+
+def save_ollama_boost_settings(settings: dict[str, Any], *, save_root: str | Path | None = None) -> None:
+    path = _coerce_save_root(save_root) / "ollama_boost_user.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(normalize_ollama_boost_settings(settings), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 def last_used_preset_file(*, save_root: str | Path | None = None) -> Path:
@@ -391,7 +450,9 @@ def merge_settings(base: dict[str, Any], updates: dict[str, Any] | None) -> dict
             current_options[key] = bool(value)
         merged["preprocessing_options"] = current_options
     for key, value in incoming.items():
-        if key in {"e621_settings", "danbooru_weight_settings"} and isinstance(value, dict):
+        if key == "ollama_boost_settings" and isinstance(value, dict):
+            merged[key] = normalize_ollama_boost_settings(value)
+        elif key in {"e621_settings", "danbooru_weight_settings"} and isinstance(value, dict):
             merged[key] = dict(value)
         elif key in {"pre_prompt", "post_prompt", "auto_hide_prompt"}:
             merged[key] = str(value or "")
@@ -479,6 +540,9 @@ class PromptEngineeringHeadlessStore:
 
     def save_danbooru_weight_settings(self, settings: dict[str, Any]) -> None:
         save_danbooru_weight_settings(settings, save_root=self._save_root)
+
+    def save_ollama_boost_settings(self, settings: dict[str, Any]) -> None:
+        save_ollama_boost_settings(settings, save_root=self._save_root)
 
     def state(self, mode: str | None = None) -> dict[str, Any]:
         mode_key = self.mode(mode)

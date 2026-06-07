@@ -833,7 +833,7 @@ const dataBootstrapReady = import('./js/features/dataBootstrapPanel.mjs?v=202605
     console.error('Failed to initialize data bootstrap panel module', error);
   });
 let updateBanner = null;
-const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260607-srcupd1')
+const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260607-srcupd2')
   .then(({createUpdateBanner}) => {
     updateBanner = createUpdateBanner({document, showToast, confirmDialog: showConfirmDialog});
     updateBanner.init();

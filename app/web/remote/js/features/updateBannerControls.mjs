@@ -8,7 +8,12 @@
 //
 // Source mode (update.sourceMode, i.e. `run_NAIA_electron.*` / npm start from a
 // git clone): the zip download/swap path does not apply, so "available" renders
-// git-pull guidance instead of the download/install buttons.
+// git-pull guidance instead of the download/install buttons. NOTE: this banner
+// stays RELEASE-TAG driven even in source mode (it compares the app version
+// against the GitHub releases feed) — it does NOT see commit-level drift from
+// the clone's upstream. Commit-level freshness is the launchers' job (they
+// fetch and offer git pull on every start), so "up-to-date" here only means
+// "no newer release tag", and the copy below says exactly that.
 // WARNING(update channel): source clones follow their upstream branch
 // (origin/future02 today). If future02 is ever force-merged into main, revise
 // every update touchpoint together: the four run_NAIA_* launchers, this
@@ -111,8 +116,15 @@ export function createUpdateBanner({document, showToast, confirmDialog}) {
       return;
     }
     if (phase === 'up-to-date') {
-      setStatus(current ? `최신 버전 · v${esc(current)}` : '최신 버전');
-      setSub('설치된 버전이 최신입니다.');
+      if (u.sourceMode) {
+        // Release-feed comparison only — the clone may still be behind its
+        // upstream branch by commits; the launcher covers that on each start.
+        setStatus(current ? `최신 릴리스 기준 · v${esc(current)}` : '최신 릴리스 기준');
+        setSub('새 릴리스는 없습니다. 커밋 단위 업데이트는 런처가 시작할 때마다 확인하고 <code>git pull</code> 을 제안합니다.');
+      } else {
+        setStatus(current ? `최신 버전 · v${esc(current)}` : '최신 버전');
+        setSub('설치된 버전이 최신입니다.');
+      }
       setResult('');
       return;
     }

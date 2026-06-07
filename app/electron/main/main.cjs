@@ -37,12 +37,14 @@ const APP_ICON = path.join(__dirname, "..", "assets", "naia.ico");
 //
 // WARNING(update channel): there are TWO update paths that must stay in sync.
 // Packaged/portable installs use this release feed (download + swap). Source
-// clones instead follow their git upstream branch (origin/future02 today) via
-// the run_NAIA_* launchers' fetch/pull check; in source mode the banner only
-// points users at `git pull` (updateState.sourceMode). If future02 is ever
-// force-merged into/renamed to main, revise every update touchpoint together:
-// all four run_NAIA_* launchers, the source-mode banner guidance
-// (updateBannerControls.mjs), and existing clones' upstream branches.
+// clones follow their git upstream branch (origin/future02 today) via the
+// run_NAIA_* launchers' fetch/pull check on every start. This shell check
+// stays release-feed driven even in source mode — it does NOT see commit-level
+// drift; updateState.sourceMode only switches the banner to git-pull guidance
+// for release-tag notifications. If future02 is ever force-merged into/renamed
+// to main, revise every update touchpoint together: all four run_NAIA_*
+// launchers, the source-mode banner guidance (updateBannerControls.mjs), and
+// existing clones' upstream branches.
 const UPDATE_REPO = "DNT-LAB/NAIA2.0";
 const UPDATE_LATEST_RELEASE_URL = `https://api.github.com/repos/${UPDATE_REPO}/releases/latest`;
 const UPDATE_RELEASES_PAGE_URL = `https://github.com/${UPDATE_REPO}/releases/latest`;

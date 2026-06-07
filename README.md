@@ -6,9 +6,9 @@ Headless Remote Web 중심 AI 이미지 생성 앱. **NovelAI / Stable Diffusion
 
 ---
 
-## 사용 방법 — 두 가지 경로
+## 사용 방법 — 세 가지 경로
 
-### A. Python으로 직접 실행 (clone 사용자)
+### A. Python으로 직접 실행 (clone 사용자, 브라우저 모드)
 
 소스를 clone 해서 실행합니다. Python **3.12** 권장.
 
@@ -20,7 +20,27 @@ python NAIA_web_headless.py
 Windows는 `run_NAIA_web.bat`, macOS는 `run_NAIA_web.command` 로도 실행할 수 있습니다.
 실행 후 표시되는 로컬 주소를 브라우저에서 열면 됩니다.
 
-### B. Portable 앱 (Release 사용자)
+### B. 소스에서 Electron 데스크톱 셸 실행 (clone 사용자 + Node.js)
+
+A와 같은 Python 백엔드를 Electron 데스크톱 창에서 실행합니다 (Danbooru 임베드 뷰 등
+셸 전용 기능 포함). Python **3.12** 권장 + **Node.js 18 이상**이 추가로 필요합니다.
+
+```bash
+# Windows
+run_NAIA_electron.bat
+# macOS
+./run_NAIA_electron.command
+```
+
+런처가 venv 생성 → `pip install -r requirements-headless.txt` → `app/electron`에서
+`npm ci`(첫 실행에만) → `npm start`를 자동으로 수행합니다.
+수동으로 하려면: 위 A의 venv 셋업 후 `cd app/electron && npm ci && npm start`.
+
+- 첫 실행 시 태그 검색 데이터(약 1.4GB) 설치 화면이 표시됩니다 (Portable 빌드와 동일한 흐름).
+- user-data는 기본적으로 A(브라우저 모드)와 **공유**됩니다 (Windows: `%APPDATA%\NAIA`).
+  A에서 쓰던 설정·토큰·저장물을 그대로 이어서 사용합니다.
+
+### C. Portable 앱 (Release 사용자)
 
 Python 설치 없이 쓰려면 [Releases](../../releases)에서 `NAIA-Portable.zip`을 받습니다.
 번들된 Python 런타임 + Electron 셸이 포함되어 있어 압축만 풀면 바로 실행됩니다.
@@ -34,6 +54,8 @@ Get-Content  .\SHA256SUMS.txt
 > 이 portable 빌드는 unsigned 베타입니다. 첫 실행 시 Windows SmartScreen 경고가 나타날 수 있으며,
 > 배포 아티팩트는 로컬 Microsoft Defender 스캔을 통과하고 `SHA256SUMS.txt`로 검증 가능합니다.
 
+업데이트는 어느 경로든 `git pull` 후 런처를 다시 실행하면 됩니다 (Portable은 앱 내 업데이트 지원).
+
 ---
 
 ## 저장소 구조 — 런타임 vs 개발/릴리스 인프라
@@ -44,7 +66,8 @@ clone 하면 실행에 필요한 소스 **외에** maintainer용 빌드/릴리�
 | 구분 | 디렉터리 | 용도 |
 |------|----------|------|
 | **런타임** (실행에 필요) | `core/` `app/backend/` `app/web/` `interfaces/` `utils/` `data/` `workflows/` `NAIA_web_headless.py` `requirements-headless.txt` | clone 해서 바로 실행 |
-| **개발/릴리스 인프라** (maintainer 전용) | `tools/` `tests/` `release_assets/` `app/electron/` `docs/` | 게이트 검증·패키징·Electron 빌드. 실행에는 불필요 |
+| **Electron 셸** (선택) | `app/electron/` | B(소스 Electron 실행)와 Portable 빌드에 사용. A(브라우저 모드)에는 불필요 |
+| **개발/릴리스 인프라** (maintainer 전용) | `tools/` `tests/` `release_assets/` `docs/` | 게이트 검증·패키징·릴리스 빌드. 실행에는 불필요 |
 
 - 무엇이 런타임이고 무엇이 개발 전용인지의 **authoritative 정의**는
   [`release_assets/manifests/release_include_exclude_draft.json`](release_assets/manifests/release_include_exclude_draft.json) 입니다.

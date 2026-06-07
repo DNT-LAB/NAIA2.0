@@ -9,9 +9,7 @@
       "requirements": "requirements-headless.txt",
       "launchers": [
         "run_NAIA_web.bat",
-        "run_NAIA_web.command",
-        "run_NAIA.bat",
-        "run_NAIA.command"
+        "run_NAIA_web.command"
       ],
       "required_launcher_terms": [
         "NAIA_web_headless.py",
@@ -43,7 +41,7 @@
     },
     "electron_release": {
       "name": "Electron release shell",
-      "role": "Maintainer/release path that wraps the same Python backend and Remote Web UI.",
+      "role": "Optional desktop shell that wraps the same Python backend and Remote Web UI; run from source via run_NAIA_electron.* launchers or packaged as the portable release.",
       "root": "app/electron",
       "package_manifest": "app/electron/package.json",
       "main": "app/electron/main/main.cjs",
@@ -96,7 +94,7 @@
   "hard_rules": [
     "The source_web track is the default product path and must run without npm, Electron, Docker, or bundled Python.",
     "Remote-published source excludes tests/ and other local development-only validation surfaces.",
-    "The electron_release track is a shell and release-maintainer path only.",
+    "The electron_release track is an optional desktop shell (opt-in from source via run_NAIA_electron.*) and the release packaging path; the source_web track remains the default product path.",
     "Both tracks must use the same core/web_session_app.py backend API.",
     "Both tracks must use app/web/remote as the only source-owned Remote Web UI.",
     "Electron must not introduce a second feature implementation for prompt processing, generation dispatch, or queue behavior.",

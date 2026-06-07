@@ -14,9 +14,7 @@
     "requirements": "requirements-headless.txt",
     "launchers": [
       "run_NAIA_web.bat",
-      "run_NAIA_web.command",
-      "run_NAIA.bat",
-      "run_NAIA.command"
+      "run_NAIA_web.command"
     ],
     "required_launcher_terms": [
       "NAIA_web_headless.py",

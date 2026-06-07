@@ -167,7 +167,6 @@ secrets.json
 *.tar.gz
 *.rar
 *.7z
-run_NAIA_test_only.bat
 NAIA_api_timestamps.json
 naia_temp_rows.parquet
 tabs/hooker/filter_dict/clothes.txt
@@ -176,6 +175,7 @@ tabs/storyteller/save.json
 /tabs/storyteller/global
 /ui/hooker/filter_dict
 CLAUDE.md
+/.claude/
 app_settings.json
 .claude/settings.local.json
 .claude/launch.json

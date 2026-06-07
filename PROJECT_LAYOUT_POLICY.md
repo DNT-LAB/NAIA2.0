@@ -7,9 +7,9 @@ The default NAIA2 product is Python Headless Web:
 - Backend: `NAIA_web_headless.py` and FastAPI services under `core/`.
 - Web UI: Remote Web served by the headless backend.
 - User setup: Python plus `pip install -r requirements-headless.txt`.
-- Launchers: `run_NAIA_web.bat`, `run_NAIA_web.command`, and compatibility launchers that call the same headless web entrypoint.
+- Launchers: `run_NAIA_web.bat` and `run_NAIA_web.command` call the same headless web entrypoint.
 
-Electron is optional. It is a desktop shell and release/portable packaging path around the same Python backend and the same Remote Web UI. Electron must not make npm, Node, Electron, or Docker mandatory for normal git-clone web execution.
+Electron is optional. It is a desktop shell and release/portable packaging path around the same Python backend and the same Remote Web UI. Clone users may opt in to the desktop shell from source via `run_NAIA_electron.bat` / `run_NAIA_electron.command` (requires Node.js). Electron must not make npm, Node, Electron, or Docker mandatory for normal git-clone web execution.
 
 Legacy PyQt6/QWebApplication Desktop has been removed from source ownership. Historical behavior may be recovered from git history when needed, but it is not an active reference tree or product baseline for new work.
 
@@ -64,7 +64,7 @@ NAIA2 has two runtime/distribution tracks, not two application codebases.
 
 Track A is the clone-user source web track:
 
-- Entry: `NAIA_web_headless.py` through `run_NAIA_web.*` or compatibility launchers.
+- Entry: `NAIA_web_headless.py` through `run_NAIA_web.*` launchers.
 - Dependency boundary: Python plus `requirements-headless.txt`.
 - Forbidden requirements: npm, Node, Electron, Docker, bundled Python, Electron packaging.
 - UI source: `app/web/remote`.
@@ -72,7 +72,7 @@ Track A is the clone-user source web track:
 Track B is the Electron release shell track:
 
 - Entry: `app/electron/package.json` and `app/electron/main/main.cjs`.
-- Dependency boundary: maintainer/release tooling only.
+- Dependency boundary: Node.js/npm for the opt-in source shell (`run_NAIA_electron.*`); full maintainer/release tooling for packaging.
 - Responsibility: shell lifecycle, maintenance view, backend launch, logs/data-folder shortcuts, packaged runtime bootstrap.
 - Forbidden responsibility: prompt processing, generation dispatch, queue semantics, and Remote Web feature forks.
 

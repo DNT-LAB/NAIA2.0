@@ -22,7 +22,7 @@ find_compatible_python() {
             if [ -n "$version_info" ]; then
                 major="${version_info%%.*}"
                 minor="${version_info##*.}"
-                if [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 10 ]; }; then
+                if [ "$major" -eq 3 ] && [ "$minor" -ge 10 ] && [ "$minor" -le 12 ]; then
                     echo "$candidate"
                     return 0
                 fi
@@ -60,11 +60,11 @@ echo -e "${BLUE}🐍 Python 환경 확인 중...${NC}"
 PYTHON_CMD="$(find_compatible_python)"
 
 if [ -z "$PYTHON_CMD" ]; then
-    echo -e "${RED}❌ Python 3.10 이상이 설치되지 않았습니다.${NC}"
-    echo -e "${CYAN}🔗 Python 다운로드 페이지를 열고 있습니다...${NC}"
-    open "https://www.python.org/downloads/"
+    echo -e "${RED}❌ Python 3.10 ~ 3.12 가 필요합니다 (3.13 이상은 아직 미지원).${NC}"
+    echo -e "${CYAN}🔗 Python 3.12 다운로드 페이지를 열고 있습니다...${NC}"
+    open "https://www.python.org/downloads/release/python-31210/"
     echo ""
-    read -p "Python 3.10 이상 설치 후 엔터를 눌러주세요..."
+    read -p "Python 3.12 설치 후 엔터를 눌러주세요..."
     exit 1
 fi
 
@@ -95,6 +95,21 @@ fi
 
 # 가상환경 확인 및 생성
 echo -e "${BLUE}📦 가상환경 설정 중...${NC}"
+
+# 기존 venv 가 지원 범위(3.10 ~ 3.12) 밖의 Python 으로 생성되어 있으면 재생성
+if [ -x "venv/bin/python" ]; then
+    if ! venv/bin/python -c 'import sys; raise SystemExit(0 if (3,10) <= sys.version_info[:2] <= (3,12) else 1)' 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  기존 venv 가 지원되지 않는 Python 버전으로 생성되어 있습니다.${NC}"
+        read -p "venv 를 삭제하고 $("$PYTHON_CMD" --version) 기준으로 다시 생성할까요? (y/N): " RECREATE_VENV
+        if [[ "$RECREATE_VENV" =~ ^[Yy]$ ]]; then
+            rm -rf venv
+        else
+            echo -e "${RED}❌ venv 폴더를 직접 삭제한 뒤 다시 실행해주세요.${NC}"
+            read -p "엔터를 눌러 종료..."
+            exit 1
+        fi
+    fi
+fi
 
 if [ ! -d "venv" ]; then
     echo -e "${YELLOW}   가상환경이 없습니다. 새로 생성합니다...${NC}"

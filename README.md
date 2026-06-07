@@ -10,7 +10,7 @@ Headless Remote Web 중심 AI 이미지 생성 앱. **NovelAI / Stable Diffusion
 
 ### A. Python으로 직접 실행 (clone 사용자, 브라우저 모드)
 
-소스를 clone 해서 실행합니다. Python **3.12** 권장.
+소스를 clone 해서 실행합니다. Python **3.10 ~ 3.12** (3.13 이상은 아직 미지원, 3.12 권장).
 
 ```bash
 pip install -r requirements-headless.txt
@@ -23,7 +23,8 @@ Windows는 `run_NAIA_web.bat`, macOS는 `run_NAIA_web.command` 로도 실행할 
 ### B. 소스에서 Electron 데스크톱 셸 실행 (clone 사용자 + Node.js)
 
 A와 같은 Python 백엔드를 Electron 데스크톱 창에서 실행합니다 (Danbooru 임베드 뷰 등
-셸 전용 기능 포함). Python **3.12** 권장 + **Node.js 18 이상**이 추가로 필요합니다.
+셸 전용 기능 포함). Python **3.10 ~ 3.12** (3.13 이상 미지원) + **Node.js 18 이상**이 필요합니다.
+런처가 `py` 런처로 설치된 3.12 를 자동으로 찾으므로, PATH 기본 Python 이 3.13+ 여도 됩니다.
 
 ```bash
 # Windows

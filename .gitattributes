@@ -1,0 +1,5 @@
+# Launcher scripts need deterministic line endings on every checkout:
+# - cmd batch label scanning (goto/call) misbehaves on LF-only files -> force CRLF
+# - bash chokes on CRLF shebang/lines -> force LF for macOS .command launchers
+*.bat text eol=crlf
+*.command text eol=lf

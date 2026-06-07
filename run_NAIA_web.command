@@ -22,7 +22,7 @@ find_compatible_python() {
             if [ -n "$version_info" ]; then
                 major="${version_info%%.*}"
                 minor="${version_info##*.}"
-                if [ "$major" -gt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -ge 10 ]; }; then
+                if [ "$major" -eq 3 ] && [ "$minor" -ge 10 ] && [ "$minor" -le 12 ]; then
                     echo "$candidate"
                     return 0
                 fi
@@ -68,10 +68,10 @@ PYTHON_CMD="$(find_compatible_python)"
 if [ -z "$PYTHON_CMD" ]; then
     CURRENT_PYTHON_VERSION="$(python3 --version 2>/dev/null || true)"
     if [ -n "$CURRENT_PYTHON_VERSION" ]; then
-        echo -e "${RED}❌ 현재 Python 버전이 너무 낮습니다: ${CURRENT_PYTHON_VERSION}${NC}"
-        echo -e "${YELLOW}   NAIA 2.0은 Python 3.10 이상이 필요합니다.${NC}"
+        echo -e "${RED}❌ 현재 Python 버전이 지원 범위 밖입니다: ${CURRENT_PYTHON_VERSION}${NC}"
+        echo -e "${YELLOW}   NAIA 2.0은 Python 3.10 ~ 3.12 가 필요합니다 (3.13 이상은 아직 미지원).${NC}"
     else
-        echo -e "${RED}❌ Python 3.10 이상이 설치되지 않았습니다.${NC}"
+        echo -e "${RED}❌ Python 3.10 ~ 3.12 가 설치되지 않았습니다 (3.13 이상은 아직 미지원).${NC}"
     fi
     echo -e "${YELLOW}📖 Python 설치 가이드:${NC}"
     echo "   1. 브라우저에서 Python 3.12 다운로드 페이지가 열립니다"
@@ -82,7 +82,7 @@ if [ -z "$PYTHON_CMD" ]; then
     echo -e "${CYAN}🔗 Python 다운로드 페이지를 열고 있습니다...${NC}"
     open "https://www.python.org/downloads/release/python-31210/"
     echo ""
-    read -p "Python 3.10 이상 설치 후 엔터를 눌러주세요..."
+    read -p "Python 3.12 설치 후 엔터를 눌러주세요..."
     exit 1
 fi
 
@@ -106,14 +106,14 @@ if [ -x "venv/bin/python" ]; then
     if [ -n "$VENV_VERSION" ]; then
         VENV_MAJOR="${VENV_VERSION%%.*}"
         VENV_MINOR="${VENV_VERSION##*.}"
-        if [ "$VENV_MAJOR" -lt 3 ] || { [ "$VENV_MAJOR" -eq 3 ] && [ "$VENV_MINOR" -lt 10 ]; }; then
-            echo -e "${YELLOW}⚠️  기존 가상환경이 Python ${VENV_VERSION}로 생성되어 다시 만들어야 합니다.${NC}"
+        if [ "$VENV_MAJOR" -ne 3 ] || [ "$VENV_MINOR" -lt 10 ] || [ "$VENV_MINOR" -gt 12 ]; then
+            echo -e "${YELLOW}⚠️  기존 가상환경이 지원 범위 밖의 Python ${VENV_VERSION}로 생성되어 다시 만들어야 합니다.${NC}"
             read -p "기존 venv 폴더를 삭제하고 ${PYTHON_VERSION} 기준으로 다시 생성할까요? (y/N): " RECREATE_VENV
             if [[ "$RECREATE_VENV" =~ ^[Yy]$ ]]; then
                 rm -rf venv
                 echo -e "${GREEN}✅ 기존 가상환경을 삭제했습니다.${NC}"
             else
-                echo -e "${RED}❌ Python 3.10 이상으로 생성된 가상환경이 필요합니다.${NC}"
+                echo -e "${RED}❌ Python 3.10 ~ 3.12 로 생성된 가상환경이 필요합니다.${NC}"
                 echo "   venv 폴더를 삭제한 뒤 다시 실행해주세요."
                 read -p "엔터를 눌러 종료..."
                 exit 1

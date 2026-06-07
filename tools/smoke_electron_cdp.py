@@ -1101,6 +1101,14 @@ def _restart_backend_and_wait(client: CdpClient, timeout: float) -> dict[str, An
         try:
             state = _wait_for_shell_state(client, max(0.5, min(5.0, deadline - time.monotonic())))
             break
+        except TimeoutError as exc:
+            # The restart flow parks the window on maintenance.html while the
+            # backend reboots and the install gate re-verifies tag data, so a
+            # single 5s polling window legitimately expires mid-restart. Only
+            # the OUTER deadline decides failure; keep polling. (TimeoutError
+            # is not a RuntimeError, so the branch below never caught it — the
+            # restart check used to abort after one window.)
+            last_error = exc
         except RuntimeError as exc:
             if "navigated or closed" not in str(exc):
                 raise

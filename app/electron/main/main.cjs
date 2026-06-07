@@ -2245,7 +2245,19 @@ ipcMain.handle("naia:restart-backend", async () => {
   // "navigated or closed" handler) tolerates it.
   loadMaintenance("loading", "NAIA 재시작 중...");
   stopBackend();
-  await new Promise((resolve) => setTimeout(resolve, 750));
+  // Wait for the old process to actually exit (its 'exit' handler clears
+  // ``backendProcess``) before spawning the replacement. The previous fixed
+  // 750ms was racy under load: when the kill took longer, ``ensureBackendReady``
+  // saw a still-set ``backendProcess``, skipped the spawn entirely, and then
+  // polled a dead port for 30s.
+  const exitDeadline = Date.now() + 15000;
+  while (backendProcess && Date.now() < exitDeadline) {
+    await delay(100);
+  }
+  if (backendProcess) {
+    appendBackendLog("shell", "restart: old backend still alive after 15s; proceeding anyway");
+  }
+  await delay(750); // let the OS release the port before the same-port respawn
   backendState = "starting";
   const url = await ensureBackendReady();
   // Tag data is mandatory runtime data. If the restart finds it missing (a
@@ -2269,9 +2281,53 @@ ipcMain.handle("naia:restart-backend", async () => {
       appendBackendLog("shell", `restart tag-data check failed: ${error && error.message}`);
     }
   }
-  await ensureRuntimeInstallReady(url);
+  // The gate must not strand the shell on the maintenance view. Before the
+  // restart flow navigated here first, the window stayed on the app page, so a
+  // transient gate failure (stale keep-alive socket to the reused port, a slow
+  // first response from the just-booted backend) was invisible and the page
+  // self-healed over its WebSocket. Now the window is parked on
+  // maintenance.html, so a single throw would leave it there forever. Retry
+  // once, then fall back to navigating anyway when the backend itself reports
+  // tag data ready.
+  let gateError = null;
+  try {
+    await ensureRuntimeInstallReady(url);
+  } catch (error) {
+    gateError = error;
+    appendBackendLog("shell", `restart install gate failed: ${error && error.message}; retrying once`);
+    await delay(1500);
+    try {
+      await ensureRuntimeInstallReady(url);
+      gateError = null;
+    } catch (retryError) {
+      gateError = retryError;
+      appendBackendLog("shell", `restart install gate retry failed: ${retryError && retryError.message}`);
+    }
+  }
+  if (gateError) {
+    let readyAnyway = false;
+    try {
+      const status = await httpJsonRequest(`${url}/api/install-manager`);
+      readyAnyway = runtimeInstallReadyFromPayload(status);
+    } catch (_error) {
+      readyAnyway = false;
+    }
+    if (!readyAnyway) {
+      // Surface the failure in the maintenance UI (its 재시작 button stays
+      // usable) instead of a silent, permanent "NAIA 재시작 중...".
+      loadMaintenance("error", `재시작 후 데이터 게이트 실패: ${gateError && gateError.message}`);
+      return shellState();
+    }
+    appendBackendLog("shell", "restart: install gate errored but tag data is ready; continuing to app");
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    await mainWindow.loadURL(remoteEntryUrl(url));
+    try {
+      await mainWindow.loadURL(remoteEntryUrl(url));
+    } catch (error) {
+      // ERR_ABORTED from a competing navigation is not fatal — whatever
+      // superseded this navigation is what the user sees.
+      appendBackendLog("shell", `restart loadURL failed: ${error && error.message}`);
+    }
   }
   return shellState();
 });

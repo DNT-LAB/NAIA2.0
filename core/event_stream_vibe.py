@@ -16,9 +16,15 @@ from typing import Any
 EVENT_STREAM_VIBE_CAPTURE_KEY = "_event_stream_vibe_capture"  # 값=run_id (완료 시 캡처 게이트)
 EVENT_STREAM_VIBE_MARKER_KEY = "_event_stream_vibe"           # 값={run_id, encoding} (주입 마커)
 
-# 사용자 확정 사양: encode IE 0.6, reference strength 0.9 (IE는 초기 0.5 → 라이브 보정).
+# Storyteller "Use Vibe" 사용자 확정 사양: encode IE 0.6, reference strength 0.9.
 EVENT_STREAM_VIBE_IE = 0.6
 EVENT_STREAM_VIBE_STRENGTH = 0.9
+
+# Sequence "첫 이미지를 Vibe로 사용" 임시 vibe 전용 IE/RS — Storyteller(위)와 분리해 독립 튜닝
+# (사용자 최종 확정값). encode IE 1.0, 임시 vibe reference strength 0.6. (공존하는 기존
+# Vibe Transfer 의 RS 는 _halve_floor_strength 로 별도 절반 처리.)
+SEQUENCE_VIBE_IE = 1.0
+SEQUENCE_VIBE_STRENGTH = 0.6
 
 _REFERENCE_PARAM_KEYS = (
     "reference_image_multiple",

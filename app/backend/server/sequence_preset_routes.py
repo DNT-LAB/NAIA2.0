@@ -121,16 +121,24 @@ def _roll_random_resolution(session_context: WebSessionContext) -> tuple[int | N
     return (None, None)
 
 
-async def _do_round(session_context: WebSessionContext, thread_run, *, group_id: int, run_id: str):
+async def _do_round(session_context: WebSessionContext, thread_run, *, group_id: int, run_id: str,
+                    fix_seed: bool = True, fix_resolution: bool = True, use_vibe: bool = False):
     """한 이벤트 그룹의 전 프레임을 fresh freeze 로 조립·baking·enqueue. _SEQ_LOCK 보유 가정.
     라운드마다 새 정체성(아티스트/캐릭터 와일드카드 롤)·새 시드(Seed Fixed면 사용자값)·해상도.
-    정체성은 커맨드 params 에 baking 되어 freeze 해제(큐 드레인) 후에도 유지된다. 반환 (enqueued, total)."""
+    정체성은 커맨드 params 에 baking 되어 freeze 해제(큐 드레인) 후에도 유지된다. 반환 (enqueued, total).
+
+    Vibe 사용(``use_vibe``, NAI 전용): 라운드의 첫 OK 프레임이 '마지막이 아닐 때'(OK ≥ 2) 그
+    프레임에 캡처 stamp(``sequence_vibe_capture``=run_id)를 단다 — 러너가 그 첫 이미지 생성 완료
+    후 인코딩(2 Anlas)해 이후 프레임에 임시 vibe 로 주입한다(이벤트 스트림 Use Vibe 메커니즘의
+    시퀀스 포팅). enqueue 시점엔 인코딩이 없으므로 주입은 러너의 실행 시점에 이뤄진다."""
     from core.event_tree import LegacyStoryNodeSpec
 
     random = _random_service(session_context)
     generation = _generation_service(session_context)
     active_ratings = session_context.get_active_ratings()
     api_mode = session_context.get_api_mode()
+    # 비NAI 에서는 인코딩/주입 자체를 수행하지 않는다(생성 단계 silent 차단) — 캡처 stamp 미부착.
+    vibe_enabled = bool(use_vibe) and str(api_mode or "").upper() == "NAI"
 
     sources = await thread_run(
         sequence_preset_service(session_context).generation_sources, {"groupId": group_id}
@@ -154,6 +162,13 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
         rw, rh = _roll_random_resolution(session_context)
         if rw and rh:
             fixed_w, fixed_h = rw, rh
+    # 모델(라운드 단위 고정): api_mode 처럼 라운드 시작 시 1회 캡처해 전 프레임에 baking 한다 —
+    # 조립/enqueue 가 프레임별 async 라 도중에 사용자가 모델을 바꾸면 enqueue 가 그때그때의 live
+    # remote_params 를 복사해 한 라운드에 모델이 섞일 수 있다. 라운드 정체성 일관성 + Vibe 사용의
+    # 캡처/주입 모델 일치를 위해 모델도 고정한다(Codex R2). _current_model_key() 는 remote_params
+    # ['model'] 또는 기본 'NAID4.5F'(api_service 기본과 동일)를 돌려주므로 항상 구체값 → 모델
+    # 미설정 시작에도 무조건 baking 해 라운드 내 드리프트를 차단한다(Codex R3).
+    round_model = session_context._current_model_key()
 
     # fresh freeze 무장(라운드마다 새 캡처). 캡처 실패 시 stop 후 재던진다.
     event_stream = session_context._create_event_stream_runtime()
@@ -170,6 +185,11 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
             pass
         raise
 
+    prev_prompt: str | None = None   # 라운드 내 직전 enqueue 프롬프트(연속 중복 skip용)
+    # 조립(assemble)과 enqueue 를 분리한다 — 첫 OK 프레임이 '마지막이 아닌지'(OK ≥ 2)를 알아야
+    # Vibe 캡처 stamp 를 달지 말지 정할 수 있기 때문(루프 도중엔 이후 OK 프레임 존재를 모름).
+    # enqueued 는 idx 순서를 유지(실패/중복은 즉시, OK 는 enqueue 후 placeholder 를 채움).
+    pending: list[dict[str, Any]] = []   # enqueue 대기 OK 프레임 {pos, command, idx, prompt}
     try:
         for source in sources["sources"]:
             idx = source["index"]
@@ -188,6 +208,16 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
                     enqueued.append({"index": idx, "ok": False,
                                      "error": assembled.error or "assembly failed"})
                     continue
+                # 라운드 내 직전 enqueue 프롬프트와 동일하면 skip. PE 태그 제거(작가/캐릭터/구도
+                # 압축 등)로 인접 프레임이 같은 최종 프롬프트가 되는 케이스 — 시드 고정 시 같은
+                # 시드/해상도라 동일 이미지다. skip 프레임은 ok=False+skipped 라 ok_count(=total_frames)
+                # 에서 빠져 라운드 완결·다음 freeze 갱신이 정확하다(2행/마지막행 케이스 포함).
+                # ※ 시드 미고정이면 프레임마다 시드가 달라 같은 프롬프트라도 다른 이미지 → dedup 안 함.
+                if fix_seed and assembled.prompt == prev_prompt:
+                    enqueued.append({"index": idx, "ok": False, "skipped": True,
+                                     "prompt": assembled.prompt})
+                    continue
+                prev_prompt = assembled.prompt
                 overrides: dict[str, Any] = {
                     "input": assembled.prompt,
                     "_raw_input": assembled.prompt,
@@ -201,16 +231,22 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
                     "sequence_preset_frame": f"{idx + 1}/{total}",
                     # Auto Gen 연속 바인딩 키 — 러너가 이 stamp 로 라운드 완료를 카운트한다.
                     "sequence_run_id": run_id,
-                    "seed": pinned_seed,
-                    "seed_fixed": True,
-                    "auto_fit_resolution": False,
                 }
-                if fixed_w:
-                    overrides["width"] = fixed_w
-                if fixed_h:
-                    overrides["height"] = fixed_h
-                if fixed_w and fixed_h:
-                    overrides["resolution"] = f"{fixed_w} x {fixed_h}"
+                # 모델 고정(라운드 단위): 전 프레임 동일 모델 → 정체성 일관 + Vibe 캡처/주입 모델 일치.
+                overrides["model"] = round_model
+                # 고정 토글(하단 UI): SEED 고정 시 라운드 단위 시드 박기, 해상도 고정 시 width/height
+                # 박고 per-frame auto-fit 차단. 미체크면 기본 동작(프레임별 시드/해상도)에 맡긴다.
+                if fix_seed:
+                    overrides["seed"] = pinned_seed
+                    overrides["seed_fixed"] = True
+                if fix_resolution:
+                    overrides["auto_fit_resolution"] = False
+                    if fixed_w:
+                        overrides["width"] = fixed_w
+                    if fixed_h:
+                        overrides["height"] = fixed_h
+                    if fixed_w and fixed_h:
+                        overrides["resolution"] = f"{fixed_w} x {fixed_h}"
                 if frozen_chars and frozen_chars.get("characters"):
                     chars = list(frozen_chars.get("characters") or [])
                     ucs = list(frozen_chars.get("uc") or [])
@@ -229,15 +265,27 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
                 }
                 if assembled.prompt_run_id:
                     command["prompt_run_id"] = assembled.prompt_run_id
-                dispatch = await thread_run(generation.enqueue_remote_request, command)
-                enqueued.append({
-                    "index": idx, "ok": bool(dispatch.ok),
-                    "prompt": assembled.prompt,
-                    "requestId": getattr(dispatch.request, "request_id", "") if dispatch.ok else "",
-                    "error": "" if dispatch.ok else (dispatch.blocked_reason or "enqueue blocked"),
-                })
+                pos = len(enqueued)
+                enqueued.append({"index": idx, "ok": False, "prompt": assembled.prompt})  # placeholder
+                pending.append({"pos": pos, "command": command, "idx": idx, "prompt": assembled.prompt})
             except Exception as exc:  # 프레임 단위 격리
                 enqueued.append({"index": idx, "ok": False, "error": f"frame error: {exc}"})
+        # Vibe 사용: 첫 OK 프레임이 '마지막이 아닐 때'(OK ≥ 2)만 캡처 stamp. OK 1개면 적용 대상이
+        # 없으므로 인코딩하지 않는다(Anlas 낭비 방지 — 사용자 사양 "자신이 큐의 마지막이 아닐 때").
+        if vibe_enabled and len(pending) >= 2:
+            pending[0]["command"]["overrides"]["sequence_vibe_capture"] = run_id
+        # enqueue (idx 순서 유지). 첫 OK 프레임이 큐의 맨 앞 → 가장 먼저 생성·인코딩된다.
+        for item in pending:
+            try:
+                dispatch = await thread_run(generation.enqueue_remote_request, item["command"])
+                enqueued[item["pos"]] = {
+                    "index": item["idx"], "ok": bool(dispatch.ok), "prompt": item["prompt"],
+                    "requestId": getattr(dispatch.request, "request_id", "") if dispatch.ok else "",
+                    "error": "" if dispatch.ok else (dispatch.blocked_reason or "enqueue blocked"),
+                }
+            except Exception as exc:
+                enqueued[item["pos"]] = {"index": item["idx"], "ok": False,
+                                         "prompt": item["prompt"], "error": f"enqueue error: {exc}"}
     finally:
         try:
             event_stream.stop()
@@ -276,9 +324,16 @@ async def start_sequence_run(
                 )
             group_id = int(pick["groupId"])
         run_id = svc.new_run_id()
+        # REST 하드닝: 문자열 "false"/"0" 등도 정확히 해석(_coerce_bool) — UI는 실제 boolean 을
+        # 보내지만 외부 REST 호출 방어(Codex LOW).
+        coerce = session_context._coerce_bool
+        fix_seed = coerce(query.get("fixSeed", True))
+        fix_resolution = coerce(query.get("fixResolution", True))
+        use_vibe = coerce(query.get("useVibe", False))
         try:
             enqueued, total, pinned_seed = await _do_round(
-                session_context, run_in_thread, group_id=group_id, run_id=run_id
+                session_context, run_in_thread, group_id=group_id, run_id=run_id,
+                fix_seed=fix_seed, fix_resolution=fix_resolution, use_vibe=use_vibe,
             )
         except Exception as exc:
             return JSONResponse({"error": f"Sequence freeze/assemble failed: {exc}"}, status_code=500)
@@ -287,7 +342,7 @@ async def start_sequence_run(
             # total_frames = 실제 enqueue 된 프레임 수(ok_count) — 컨트롤러는 '완료'를 세므로
             # 일부 프레임이 실패하면 sources total 이 아니라 enqueue 된 수로 라운드 완결을 판정한다.
             svc.begin(run_id=run_id, query=query, group_id=group_id,
-                      total_frames=ok_count, auto_gen=auto_gen)
+                      total_frames=ok_count, auto_gen=auto_gen, use_vibe=use_vibe)
     if ok_count and session_context.headless_generation_execute_enabled:
         start_generation_runner(session_context, clients)
     try:
@@ -320,12 +375,17 @@ async def continue_sequence_run(session_context: WebSessionContext, clients, run
     if not pick.get("ok") or pick.get("groupId") is None:
         return False
     group_id = int(pick["groupId"])
+    coerce = session_context._coerce_bool
+    fix_seed = coerce(query.get("fixSeed", True))
+    fix_resolution = coerce(query.get("fixResolution", True))
+    use_vibe = coerce(query.get("useVibe", False))
     async with _SEQ_LOCK:
         if not svc.is_running(run_id):
             return False
         try:
             enqueued, _total, _seed = await _do_round(
-                session_context, asyncio.to_thread, group_id=group_id, run_id=run_id
+                session_context, asyncio.to_thread, group_id=group_id, run_id=run_id,
+                fix_seed=fix_seed, fix_resolution=fix_resolution, use_vibe=use_vibe,
             )
         except Exception:
             return False

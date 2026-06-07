@@ -74,8 +74,13 @@ class HeadlessSequenceRunService:
         return f"sequence-run-{uuid.uuid4().hex}"
 
     def begin(self, *, run_id: str, query: dict[str, Any], group_id: int, total_frames: int,
-              auto_gen: bool) -> str:
-        """첫 라운드 시작 — run 상태 생성. 호출부(라우트)가 run_id 로 freeze+enqueue 한 뒤 호출."""
+              auto_gen: bool, use_vibe: bool = False) -> str:
+        """첫 라운드 시작 — run 상태 생성. 호출부(라우트)가 run_id 로 freeze+enqueue 한 뒤 호출.
+
+        ``use_vibe`` (Vibe 사용, NAI 전용): 라운드의 첫 프레임을 인코딩해 나머지 프레임에
+        임시 vibe 로 적용하는 의향(공존 시 기존 vibe RS 는 절반으로 감소). 실제 인코딩 문자열은
+        라운드마다 첫 이미지 생성 완료 시 러너가 채운다(set_vibe_encoding) — 라운드 경계에서
+        리셋돼 매 라운드 새로 인코딩한다."""
         self.context.sequence_run_state = {
             "run_id": run_id,
             "is_running": True,
@@ -87,11 +92,16 @@ class HeadlessSequenceRunService:
             "completed_count": 0,
             "round_count": 1,
             "finish_reason": "",
+            # Vibe 사용(1회성 라운드 vibe) — 의향 + 현재 라운드 인코딩(첫 이미지 완료 후 채워짐).
+            "use_vibe": bool(use_vibe),
+            "vibe_encoding": "",
+            "vibe_model": "",
         }
         return run_id
 
     def begin_round(self, run_id: str, *, group_id: int, total_frames: int) -> None:
-        """다음 라운드(자동 연속) — 카운터 리셋 + 새 그룹/총프레임."""
+        """다음 라운드(자동 연속) — 카운터 리셋 + 새 그룹/총프레임. 라운드마다 vibe 인코딩을
+        리셋해 새 라운드의 첫 이미지를 다시 인코딩한다(fresh freeze 와 동일한 라운드 경계 규칙)."""
         st = self._runtime_for(run_id)
         if st is None:
             return
@@ -100,6 +110,8 @@ class HeadlessSequenceRunService:
         st["total_frames"] = int(total_frames)
         st["completed_count"] = 0
         st["round_count"] = int(st.get("round_count") or 0) + 1
+        st["vibe_encoding"] = ""
+        st["vibe_model"] = ""
 
     def record_generation_completed(self, run_id: str) -> dict[str, Any]:
         """프레임 1장 완료 기록. round_done=이 라운드의 전 프레임 완료."""
@@ -166,6 +178,30 @@ class HeadlessSequenceRunService:
     def auto_gen(self, run_id: str) -> bool:
         st = self._runtime_for(run_id)
         return bool(st.get("auto_gen")) if st else False
+
+    # --------------------------------------------------------------- Vibe 사용
+    def wants_vibe(self, run_id: str) -> bool:
+        """이 런이 Vibe 사용 의향이 있는지(체크박스 ON). NAI 게이트는 러너/라우트가 별도로 본다."""
+        st = self._runtime_for(run_id)
+        return bool(st.get("use_vibe")) if st else False
+
+    def set_vibe_encoding(self, run_id: str, encoding: str, model: str) -> None:
+        """현재 라운드의 첫 이미지 인코딩을 보관(러너가 첫 프레임 완료 후 1회 호출)."""
+        st = self._runtime_for(run_id)
+        if st is None:
+            return
+        st["vibe_encoding"] = str(encoding or "")
+        st["vibe_model"] = str(model or "")
+
+    def vibe_injection(self, run_id: str) -> dict[str, Any] | None:
+        """현재 라운드에 적용할 vibe ``{encoding, model}`` (아직 인코딩 전이면 None)."""
+        st = self._runtime_for(run_id)
+        if not st:
+            return None
+        encoding = str(st.get("vibe_encoding") or "")
+        if not encoding:
+            return None
+        return {"encoding": encoding, "model": str(st.get("vibe_model") or "")}
 
     # ----------------------------------------------------------------- helpers
     def _runtime_for(self, run_id: str) -> dict[str, Any] | None:

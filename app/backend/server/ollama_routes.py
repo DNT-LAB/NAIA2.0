@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
@@ -19,6 +20,12 @@ from core.ollama_assistant_service import OllamaAssistantService
 from core.web_session_context import WebSessionContext
 
 AsyncRunner = Callable[..., Awaitable[Any]]
+
+# get_assist_service 첫 생성 직렬화 — Auto Boost 오버랩에서 prefetch 생산자(백그라운드)와
+# 메인 경로가 동시에 첫 호출하면 서비스 인스턴스가 중복 생성될 수 있다. 상주 상태가
+# 인스턴스에 살기 때문에, 중복되면 토글 warm/unload와 boost의 keep_alive 판정이 서로
+# 다른 인스턴스를 보게 된다(캐시가 한쪽으로 정착하기 전까지). 단일 인스턴스 보장.
+_ASSIST_SVC_LOCK = threading.Lock()
 
 
 def _loopback_only_response() -> JSONResponse:
@@ -83,24 +90,29 @@ def get_assist_service(context: WebSessionContext) -> "Any":
     from core.ollama_assistant_service import DEFAULT_MODEL
     from core.ollama_tag_assist_service import OllamaTagAssistService
 
+    # double-checked locking — 락 밖 빠른 경로(이미 캐시됨) + 락 안 재확인(첫 생성 직렬화).
     existing = getattr(context, "ollama_tag_assist_service", None)
     if existing is not None:
         return existing
-    assistant = getattr(context, "ollama_assistant_service", None)
-    if assistant is None:
-        assistant = OllamaAssistantService()
-        context.ollama_assistant_service = assistant
-    svc = OllamaTagAssistService(
-        base_url=assistant.base_url,
-        default_model=DEFAULT_MODEL,
-        searcher=lambda query, limit: search_kr_tags(context, query, limit=limit),
-        event_combo_provider=lambda rating, person_id, query, top: _event_combo_tags(
-            context, rating, person_id, query, top
-        ),
-        translator=_korean_to_english,
-    )
-    context.ollama_tag_assist_service = svc
-    return svc
+    with _ASSIST_SVC_LOCK:
+        existing = getattr(context, "ollama_tag_assist_service", None)
+        if existing is not None:
+            return existing
+        assistant = getattr(context, "ollama_assistant_service", None)
+        if assistant is None:
+            assistant = OllamaAssistantService()
+            context.ollama_assistant_service = assistant
+        svc = OllamaTagAssistService(
+            base_url=assistant.base_url,
+            default_model=DEFAULT_MODEL,
+            searcher=lambda query, limit: search_kr_tags(context, query, limit=limit),
+            event_combo_provider=lambda rating, person_id, query, top: _event_combo_tags(
+                context, rating, person_id, query, top
+            ),
+            translator=_korean_to_english,
+        )
+        context.ollama_tag_assist_service = svc
+        return svc
 
 
 def scene_boost_prompt(context: WebSessionContext, prompt: str, *, level: str = "rich") -> dict[str, Any]:
@@ -232,3 +244,21 @@ def register_ollama_routes(
         if mode == "fast":
             return await run_in_thread(lambda: svc.assist_oneshot(text, model=model, options=options))
         return await run_in_thread(lambda: svc.assist(text, model=model, options=options))
+
+    # ── Auto Boost 모델 상주 — 토글 ON 시 warm-up(미리 적재+상주), OFF 시 즉시 언로드. ──
+    # 토글 핸들러(PE 서비스)가 publish하면 set_resident에 위임한다. set_resident는
+    # 의도만 동기로 갱신하고 실제 warm/unload HTTP(최대 120s)는 내부 데몬 스레드에서
+    # '마지막 토글 승리'로 처리 — 토글 응답/이벤트 루프를 막지 않는다.
+    def _on_auto_boost_changed(*args: Any) -> None:
+        enabled = bool(getattr(context, "ollama_auto_boost", False))
+        if args and isinstance(args[0], dict) and "enabled" in args[0]:
+            enabled = bool(args[0]["enabled"])
+        try:
+            get_assist_service(context).set_resident(enabled)
+        except Exception:
+            pass
+
+    try:
+        context.subscribe("ollama_auto_boost_changed", _on_auto_boost_changed)
+    except Exception:
+        pass

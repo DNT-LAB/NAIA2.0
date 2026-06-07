@@ -6,6 +6,9 @@ let ws, blobUrl = null, latestResultBlob = null, generating = false;
 const escHtml = s => s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;') : '';
 let genTimer = null, genStartTime = 0;
 const genDurations = [];  // last 5 generation durations (ms)
+// Ollama Auto Boost(=Ollama 모드) ON일 때 Random 버튼에 boost 재작성 경과시간을 실시간 표시.
+let rndTimer = null, rndStartTime = 0;
+const _RND_BTN_LABEL = '<span class="shortcut-hint">ALT + ENTER</span>Random';
 let activePromptTab = 'prompt';
 let presetGenerationPending = null;
 let latestImageMeta = null;
@@ -763,7 +766,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   });
 // --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
 let ollamaAssistantPopup = null;
-const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260607-assist20')
+const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260607-ollamafix1')
   .then(({createOllamaAssistantPopup}) => {
     ollamaAssistantPopup = createOllamaAssistantPopup({
       document,
@@ -1161,13 +1164,14 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs')
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20260607-seqautogen1')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20260607-seqvibe5')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
       escHtml,
       showToast,
       bindTagAssist,
+      getApiMode: () => currentMode || modeSelect?.value || '',
     });
   })
   .catch(error => {
@@ -2782,6 +2786,7 @@ function unlockRandomButton({clearRequest = true} = {}) {
     clearTimeout(window._randomTimeout);
     window._randomTimeout = null;
   }
+  stopRndTimer();  // boost 경과 타이머 정지 + 'Random' 라벨 복원
   const fixed = getOptionChecked('prompt_fixed');
   btnRnd.disabled = fixed;
   btnRnd.style.opacity = fixed ? '0.4' : '';
@@ -4205,8 +4210,14 @@ async function openOllamaAssistant() {
   ollamaAssistantPopup.open();
 }
 if (ollamaAssistantBtn) {
-  ollamaAssistantBtn.addEventListener('click', () => {
-    openOllamaAssistant();
+  ollamaAssistantBtn.addEventListener('click', async () => {
+    // [Ollama] 버튼 재클릭 = 토글: 열려 있으면 닫고, 아니면 연다.
+    await ollamaAssistantPopupReady;
+    if (ollamaAssistantPopup && ollamaAssistantPopup.isOpen && ollamaAssistantPopup.isOpen()) {
+      ollamaAssistantPopup.close();
+    } else {
+      openOllamaAssistant();
+    }
   });
 }
 
@@ -4825,6 +4836,8 @@ function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   // to 15s only while the boost is on; normal random keeps the existing 2s behavior.
   const boostArmed = !!(lastPromptEngineeringState && lastPromptEngineeringState.ollama_auto_boost);
   const randomSafetyTimeoutMs = boostArmed ? 15000 : 2000;
+  // Ollama 모드: Random 버튼에 boost 재작성 경과시간을 실시간 표시(Generate 버튼처럼).
+  if (boostArmed) startRndTimer();
   window._randomTimeout = setTimeout(() => {
     if (awaitingMyRandom) {
       unlockRandomButton({clearRequest: false});
@@ -4860,9 +4873,15 @@ function scheduleInitialRandomPrompt(delay = 350) {
 function send(cmd) {
   if (cmd === 'generate') {
     // Sequence 탭에서 그룹 팝업을 보고 있으면 메인 Generate = 그 그룹의 '연속 생성'(req1).
-    // 열린 그룹이 없으면 일반 생성으로 폴백.
-    if (activePromptTab === 'sequence' && sequencePresetControl?.hasOpenGroup?.()) {
-      sequencePresetControl.generateOpenGroup();
+    // 이벤트 미선택 상태로 Generate 를 누르면 일반 프롬프트가 생성돼 혼동을 주므로, 적색
+    // 토스트로 안내하고 요청을 스킵한다(일반 생성 폴백 차단). Auto Gen(백엔드 연속 루프)은
+    // 이 수동 Generate 분기를 타지 않으므로 영향 없음.
+    if (activePromptTab === 'sequence') {
+      if (sequencePresetControl?.hasOpenGroup?.()) {
+        sequencePresetControl.generateOpenGroup();
+      } else {
+        showToast('시퀀스 프리셋에서는 Generate 대신 Random 버튼을 누르거나, 생성할 이벤트를 선택한 뒤 Generate를 눌러주세요.', 'error');
+      }
       return;
     }
     if (activePromptTab === 'preset') {
@@ -5010,6 +5029,24 @@ function startGenTimer() {
 
 function stopGenTimer() {
   if (genTimer) { clearInterval(genTimer); genTimer = null; }
+}
+
+// Ollama 모드(Auto Boost ON) Random 버튼 경과시간 — Generate 버튼과 동일 패턴.
+function startRndTimer() {
+  stopRndTimer();
+  rndStartTime = Date.now();
+  rndTimer = setInterval(() => {
+    const elapsed = ((Date.now() - rndStartTime) / 1000).toFixed(1);
+    if (btnRnd) btnRnd.innerHTML = `<span class="shortcut-hint">ALT + ENTER</span>${elapsed}s`;
+  }, 100);
+}
+
+function stopRndTimer() {
+  if (rndTimer) {
+    clearInterval(rndTimer);
+    rndTimer = null;
+    if (btnRnd) btnRnd.innerHTML = _RND_BTN_LABEL;  // 'Random' 라벨 복원
+  }
 }
 
 // ---- Generation Progress Bar ----
@@ -5222,6 +5259,7 @@ function syncMode(mode) {
   updateModeSelectAvailability();
   if (resultEnhance) resultEnhance.update();
   if (artistThumbControl) artistThumbControl.syncPromptFormat();
+  if (sequencePresetControl?.onModeChange) sequencePresetControl.onModeChange(mode);
 }
 
 function setMode(mode) {
@@ -5640,7 +5678,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260605-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260528-guide-tooltips1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260607-ollamafix1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

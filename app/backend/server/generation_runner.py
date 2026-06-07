@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import random
 import uuid
 from typing import Any
@@ -13,14 +14,22 @@ from app.backend.server.generation_commands import (
     persist_prompt_engineering_settings,
     random_service,
 )
-from app.backend.server.anlas_poller import broadcast_anlas_if_vibe_encoded
+from app.backend.server.anlas_poller import broadcast_anlas, broadcast_anlas_if_vibe_encoded
 from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
 from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
 from core import result_image_payload_service as result_images
 # 특수 요청 판정은 core와 공유한다(Storyteller Use Vibe가 같은 기준으로 plain generate를
 # 가르므로) — 정의가 두 군데로 갈라지지 않게 core/auto_generation_flags.py가 단일 출처.
-from core.auto_generation_flags import AUTO_GENERATE_SUPPRESSED_FLAGS, SPECIAL_REQUEST_TYPES
-from core.event_stream_vibe import EVENT_STREAM_VIBE_CAPTURE_KEY
+from core.auto_generation_flags import (
+    AUTO_GENERATE_SUPPRESSED_FLAGS,
+    SPECIAL_REQUEST_TYPES,
+    is_special_request,
+)
+from core.event_stream_vibe import (
+    EVENT_STREAM_VIBE_CAPTURE_KEY,
+    SEQUENCE_VIBE_IE,
+    SEQUENCE_VIBE_STRENGTH,
+)
 from core.web_session_context import WebSessionContext
 
 AUTO_GENERATE_DROPPED_PARAM_KEYS = {
@@ -127,6 +136,211 @@ async def _run_automation_timer_watcher(context: WebSessionContext, clients: set
         context.automation_timer_watcher_task = None
 
 
+# ── Ollama Auto Boost 오버랩(프리페치) ───────────────────────────────────────
+# 일반 Auto Gen/Automation에서 boost(느린 LLM)를 이미지 생성 대기와 겹쳐 "공짜"로 만든다.
+#   생산자: 현재 이미지 enqueue 직전, 다음 랜덤 행을 예약(pop)하고 그 행의 raw 태그로 boost를
+#           백그라운드 계산해 1슬롯 홀더에 채운다(부작용 0 — full generate는 안 함).
+#   소비자: continuation에서 홀더가 유효하면 예약 행을 generate(source_row_override)로 소비하고
+#           미리 만든 boost를 concat. 무효/미준비/실패면 동기 폴백(Phase 1).
+# Story/Preset/특수요청·prompt_fixed·활성 태그필터는 제외(Codex 정제안). depth=1.
+_PREFETCH_BOOST_GRACE = 3.0  # 소비 시 boost가 아직이면 이만큼만 기다리고, 안 되면 이번 컷 boost 생략.
+
+
+def _ollama_boost_settings_token(context: WebSessionContext) -> tuple:
+    """prefetch 유효성용 설정 토큰(해시 가능). 설정(가중치·effort·include) 변경 시 stale
+    감지 — 옛 effort/입력으로 만든 boost를 새 설정으로 삽입하는 걸 막는다(Codex Must-fix 3)."""
+    try:
+        from app.backend.server.ollama_routes import ollama_boost_settings
+
+        s = ollama_boost_settings(context)
+        return (
+            round(float(s.get("nl_weight", 1.0)), 3), str(s.get("effort") or "rich"),
+            bool(s.get("include_prefix")), bool(s.get("include_postfix")), bool(s.get("include_e621")),
+        )
+    except Exception:
+        return ()
+
+
+def _auto_gen_prefetch_state_key(context: WebSessionContext, ratings) -> tuple:
+    """예약 행/boost 유효성 토큰. 검색풀 교체(재검색)·등급·API모드·토글·boost 설정 변경을 잡는다.
+    (풀 count는 매 생성 변하므로 제외 — 풀 advance는 명시 무효화[수동 random]로 처리.)"""
+    return (
+        id(getattr(context, "search_results", None)),
+        tuple(sorted(ratings or [])),
+        str(getattr(context, "current_api_mode", "") or ""),
+        bool(getattr(context, "ollama_auto_boost", False)),
+        _ollama_boost_settings_token(context),
+    )
+
+
+def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
+    """프리페치 자격: 토글 ON·일반 Auto Gen(또는 Automation)·Story/Preset/특수 아님·
+    prompt_fixed 아님·활성 태그필터 없음."""
+    if not getattr(context, "ollama_auto_boost", False):
+        return False
+    # include_*(prefix/postfix/e621) 중 하나라도 ON이면 prefetch 비활성 → 동기 폴백. 오버랩
+    # 선행 단계는 raw store 값(와일드카드 미전개)·파이프라인 전이라, sync 경로(processed
+    # context: 전개된 prefix/postfix + 산출된 e621)와 입력이 달라진다. 정확성 우선(Codex
+    # Must-fix 4 + round2 minor). 기본(모두 OFF)은 prefetch 유지 — 입력=장면 태그만이라 양 경로 동일.
+    try:
+        from app.backend.server.ollama_routes import ollama_boost_settings
+
+        _obs = ollama_boost_settings(context)
+        if _obs.get("include_e621") or _obs.get("include_prefix") or _obs.get("include_postfix"):
+            return False
+    except Exception:
+        pass
+    params = getattr(request, "params", {}) or {}
+    if not isinstance(params, dict):
+        return False
+    if str(params.get("event_stream_run_id") or ""):
+        return False  # Story
+    if is_special_request(params, context._coerce_bool):
+        return False  # Preset/특수(img2img·이벤트프리셋·인핸스 등)
+    if context._coerce_bool(params.get("prompt_fixed", context.get_options().get("prompt_fixed", False))):
+        return False  # 고정 프롬프트 → 새 랜덤 없음
+    auto_on = context._coerce_bool(context.get_options().get("auto_generate", False))
+    automation_on = bool(str(params.get("automation_run_id") or ""))
+    if not (auto_on or automation_on):
+        return False
+    # wildcard_standalone이면 prepare_next_source가 standalone 행을 우선해 예약 행을 무시한다 —
+    # 그러면 boost(예약 행 기반)가 엉뚱한 standalone 프롬프트에 붙으므로 제외(Codex). 요청
+    # 단위 플래그(params)를 먼저 보고, 없으면 세션 옵션으로 폴백(요청 우선 — 가드 순서 버그 수정).
+    if context._coerce_bool(params.get("wildcard_standalone", context.get_options().get("wildcard_standalone", False))):
+        return False
+    # 큐가 비고 일시정지 아님일 때만 예약 — 다중/수동 큐 중 예약하면 continuation이
+    # _should_continue_auto_generation(큐 비어야 함)에서 거부해 예약이 낭비된다(Codex).
+    qm = getattr(context, "generation_queue_manager", None)
+    try:
+        if qm is None or qm.is_paused() or not qm.is_empty():
+            return False
+    except Exception:
+        return False
+    try:
+        if random_service(context)._active_tag_filter_state() is not None:
+            return False  # 활성 태그필터 — v1 비활성(롤백 복잡도 회피)
+    except Exception:
+        return False
+    return True
+
+
+def _release_auto_gen_prefetch(context: WebSessionContext) -> None:
+    """프리페치 홀더 폐기(예약 행은 버림 — 무시 가능 손실). 진행 중 task는 cancel."""
+    holder = getattr(context, "_auto_gen_prefetch", None)
+    if holder:
+        task = holder.get("task")
+        if task is not None and not task.done():
+            task.cancel()
+    context._auto_gen_prefetch = None
+
+
+def _kickoff_auto_gen_prefetch(context: WebSessionContext, request) -> None:
+    """이미지 생성 직전 호출 — 다음 랜덤 행 예약 + boost를 백그라운드 선행(현재 생성과 겹침)."""
+    try:
+        if getattr(context, "_auto_gen_prefetch", None) is not None:
+            return  # 이미 채워짐/진행 중
+        if not _auto_gen_prefetch_eligible(context, request):
+            return
+        ratings = context.get_active_ratings()
+        reserved = random_service(context).reserve_next_random_row(ratings)
+        if reserved is None:
+            return
+        try:
+            general = str(reserved.get("general") or "")
+        except Exception:
+            general = ""
+        from app.backend.server.ollama_routes import ollama_boost_settings, scene_boost_prompt
+        from core.scene_boost import strip_weight_syntax
+
+        # prefetch는 모든 include OFF일 때만 동작(eligible 가드) → 입력 = 장면 태그(general)만,
+        # 가중치 제거. (prefix/postfix/e621 포함 시엔 prefetch 끄고 동기 폴백이 정확히 처리.)
+        boost_settings = ollama_boost_settings(context)
+        boost_input = strip_weight_syntax(general) or general
+        # Effort([기능2]) 명시 전달 + 설정을 holder에 freeze — 소비 시 kickoff 시점 설정으로
+        # 조립해, 생성 중 설정을 바꿔도 옛 boost를 새 설정으로 삽입하지 않는다(Codex Must-fix 3).
+        task = asyncio.create_task(
+            asyncio.to_thread(scene_boost_prompt, context, boost_input, level=boost_settings.get("effort"))
+        )
+        context._auto_gen_prefetch = {
+            "state_key": _auto_gen_prefetch_state_key(context, ratings),
+            "source_row": reserved,
+            "task": task,
+            "settings": boost_settings,
+        }
+    except Exception:
+        context._auto_gen_prefetch = None  # 프리페치 실패는 무해 — 소비 시 동기 폴백.
+
+
+def _apply_prefetched_boost(context: WebSessionContext, result, boost, settings=None) -> None:
+    """미리 계산한 boost(구도태그+자연어)를 generate 결과 프롬프트에 concat.
+    settings는 kickoff 시 freeze된 것을 받는다(없으면 현재값 — Codex Must-fix 3)."""
+    try:
+        if not isinstance(boost, dict) or not boost.get("ok"):
+            return
+        add = boost.get("additions") or {}
+        # 구도태그(무가중) + 자연어([기능1] nl_weight 래핑)로 조립 — freeze된 설정 사용.
+        from app.backend.server.generation_commands import _compose_addition, _inject_boost_at_main
+        if settings is None:
+            from app.backend.server.ollama_routes import ollama_boost_settings
+
+            settings = ollama_boost_settings(context)
+        text = _compose_addition(add, settings, context)
+        if not text:
+            return
+        prompt = str(getattr(result, "prompt", "") or "")
+        # 메인 섹션 끝(e621 위치)에 삽입 — 끝(postfix 뒤)이 아니라 장면 태그 바로 뒤.
+        new_prompt = _inject_boost_at_main(prompt, text) if prompt.strip() else text
+        result.prompt = new_prompt
+        context.prompt_text = new_prompt
+        ctx = getattr(result, "context", None)
+        if ctx is not None:
+            ctx.final_prompt = new_prompt
+            if isinstance(getattr(ctx, "metadata", None), dict):
+                ctx.metadata["ollama_auto_boost"] = {
+                    "rating": boost.get("rating"), "level": boost.get("level"),
+                    "additions": add, "prefetched": True, "settings": settings,
+                }
+    except Exception:
+        pass
+
+
+async def _consume_auto_gen_prefetch(context: WebSessionContext, overrides, request_id):
+    """홀더가 유효하면 예약 행을 generate(override)로 소비 + boost concat. 아니면 None(폴백)."""
+    holder = getattr(context, "_auto_gen_prefetch", None)
+    if not holder:
+        return None
+    context._auto_gen_prefetch = None  # 원샷 소비
+    source_row = holder.get("source_row")
+    task = holder.get("task")
+    try:
+        ratings = context.get_active_ratings()
+        if holder.get("state_key") != _auto_gen_prefetch_state_key(context, ratings):
+            if task is not None and not task.done():
+                task.cancel()
+            return None  # stale(재검색/등급/모드/토글 변경) → 다른 행 필요 → 동기 폴백
+        # 예약 행으로 full generate(override → pop 없음, random_prompt_triggered 등 정상).
+        # boost와 무관하게 항상 이 예약 행을 쓴다(동기 재생성 폴백으로 빠지지 않음).
+        result = await asyncio.to_thread(
+            random_service(context).generate,
+            active_ratings=ratings,
+            overrides=overrides,
+            random_request_id=request_id,
+            source_row_override=source_row,
+        )
+        if getattr(result, "success", False):
+            # boost는 이미지 생성과 겹쳐 대부분 이미 완료. 아직이면 짧게만 기다리고, 그래도
+            # 안 되면 이번 컷은 boost 생략한다 — **2차 Ollama 호출은 절대 하지 않는다**(중복/지연 방지).
+            try:
+                boost = await asyncio.wait_for(asyncio.shield(task), timeout=_PREFETCH_BOOST_GRACE)
+                _apply_prefetched_boost(context, result, boost, holder.get("settings"))
+            except Exception:
+                if task is not None and not task.done():
+                    task.cancel()
+        return result
+    except Exception:
+        return None
+
+
 async def run_generation_queue(context: WebSessionContext, clients: set[WebSocket]) -> None:
     if getattr(context, "headless_generation_runner_active", False):
         return
@@ -139,9 +353,17 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             context.is_generating = True
             await broadcast_json(clients, {"type": "status", "is_generating": True, "message": "generating"})
             await broadcast_json(clients, context.queue_state_payload())
+            # Ollama Auto Boost 오버랩 생산자 — 다음 랜덤 행 예약 + boost를 백그라운드 선행해
+            # 현재 이미지 생성(아래 execute_request 대기)과 겹친다. 자격 미달이면 no-op.
+            _kickoff_auto_gen_prefetch(context, request)
+            # Sequence Use Vibe: 라운드 첫 이미지가 인코딩돼 있으면 이후 프레임 실행 직전에
+            # 임시 vibe 를 주입한다(enqueue 시점엔 인코딩이 없어 실행 시점 주입). 캡처 프레임/
+            # 비활성 런/비NAI/모델 불일치는 no-op.
+            _inject_sequence_vibe(context, request)
             try:
                 stored = await asyncio.to_thread(generation_service(context).execute_request, request)
             except Exception as exc:
+                _release_auto_gen_prefetch(context)  # 생성 실패 → 이번 예약 홀더 폐기(stale 방지)
                 await _broadcast_generation_error(context, clients, request, str(exc))
                 # 실패한 시퀀스 프레임도 라운드 카운트를 진전시켜야 연속 루프가 멈추지 않는다(Codex).
                 try:
@@ -204,6 +426,10 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                         )
                     except Exception:
                         pass
+            # Sequence Use Vibe: 라운드 첫 이미지(캡처 stamp)가 완료되면 그 결과를 인코딩(2 Anlas)
+            # 해 이후 프레임에 적용할 임시 vibe 로 보관한다. 다음 프레임 dequeue 전(같은 루프 반복
+            # 안에서 await)이라 두 번째 컷부터 곧바로 주입된다. 비NAI/이미 인코딩됨/실패는 no-op.
+            await _capture_sequence_vibe(context, clients, request, stored)
             # Guard the auto-continue (prompt gen / PE persist / enqueue) so a raised
             # exception after a story page was counted still cleans up the cycle
             # (_broadcast_generation_error fails the stamped story) instead of leaving the
@@ -223,6 +449,147 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
     finally:
         context.is_generating = False
         context.headless_generation_runner_active = False
+        # 큐 루프 종료(정상/중단/예외) — 남은 예약 홀더는 폐기(detached task 누수·stale 방지).
+        _release_auto_gen_prefetch(context)
+
+
+def _halve_floor_strength(value: Any) -> Any:
+    """RS 가중치를 절반으로 줄이되 '퍼센트 floor'로 내린다(사용자 확정): 퍼센트(rs*100)로 반올림해
+    부동소수 오차를 제거한 뒤(0.6*50=29.999… → 0.29 방지) 절반에서 내림. 0.90→0.45, 0.85→0.42,
+    0.60→0.30. 음수 RS 는 크기를 줄이는 의미가 되도록 부호를 보존한 채 크기에 floor 적용
+    (예: -0.85→-0.42). 수치 변환 불가 시 원값 반환(방어)."""
+    try:
+        rs = float(value)
+    except (TypeError, ValueError):
+        return value
+    magnitude = math.floor(round(abs(rs) * 100) / 2) / 100.0
+    return -magnitude if rs < 0 else magnitude
+
+
+def _inject_sequence_vibe(context: WebSessionContext, request) -> None:
+    """Sequence Use Vibe: 실행 직전, 라운드 첫 이미지의 인코딩이 준비돼 있으면 이 프레임의 NAI vibe
+    EarlyBinding(``request.nai_vibe_transfer`` — api_service 가 실제로 보내는 출처)에 임시 vibe 1장을
+    append 한다. 사용자 Vibe Transfer 가 있으면 그 뒤에 붙어 공존하되, 기존 vibe 들의 RS 는 절반
+    (퍼센트 floor)으로 줄여 첫 이미지 vibe 가 상대적으로 더 지배하게 한다. 사용자 vibe 가 없으면
+    임시 vibe 단독으로 바인딩된다. 중요: ``request.params`` 는 건드리지 않는다 — 저장 메타/리플레이는
+    params 기준이라 임시 vibe 가 자동으로 비영속(휘발)이다(마커/strip 불필요). 캡처 프레임 자신·
+    비활성 런·비NAI·모델 불일치·중복·NAID3·최대 vibe 초과는 no-op. enqueue 시점엔 인코딩이 없으므로
+    주입은 반드시 여기서 한다."""
+    params = getattr(request, "params", None)
+    if not isinstance(params, dict):
+        return
+    run_id = str(params.get("sequence_run_id") or "")
+    if not run_id or params.get("sequence_vibe_capture"):
+        return  # 시퀀스 프레임 아님 / 캡처 프레임 자신은 vibe 소스라 주입 대상 아님
+    svc = context._sequence_run_service()
+    if not svc.is_running(run_id):
+        return
+    # 게이트는 프레임에 baking 된 값으로 본다(라이브 컨텍스트가 아니라) — 생성 도중 사용자가
+    # 모드/모델을 바꿔도 이 NAI 프레임은 baking 된 모드/모델로 처리된다(Codex: 컨텍스트 드리프트).
+    if str(params.get("api_mode") or "").upper() != "NAI":
+        return  # 생성 단계 silent 차단
+    injection = svc.vibe_injection(run_id)
+    if not injection:
+        return  # 아직 첫 이미지 인코딩 전(또는 인코딩 실패) — vibe 없이 진행
+    encoding = str(injection.get("encoding") or "")
+    if not encoding:
+        return
+    # 인코딩은 모델 종속 — 캡처 모델과 이 프레임의 baking 모델이 다르면 주입하지 않는다(NAI 오류
+    # 방지). 한 라운드의 전 프레임은 동일 모델로 enqueue 되므로 정상 경로에선 항상 일치한다.
+    vibe_model = str(injection.get("model") or "")
+    if vibe_model and vibe_model != str(params.get("model") or ""):
+        return
+    from core.generation_request import NAIVibeTransferData
+
+    existing = getattr(request, "nai_vibe_transfer", None)
+    if existing is not None:
+        # NAID3 (IE 리스트 존재)는 인코딩 vibe 와 혼용 불가 — 주입 skip(애초 NAID3 encode 실패라
+        # 도달 불가, 방어적).
+        if getattr(existing, "reference_information_extracted_multiple", None):
+            return
+        refs = list(existing.reference_image_multiple or [])
+        strengths = list(existing.reference_strength_multiple or [])
+        normalize = bool(existing.normalize)
+    else:
+        refs, strengths = [], []
+        normalize = bool(getattr(context, "vibe_transfer_normalize", False))
+    if encoding in refs:
+        return  # 이미 실려 있음(이중 방어)
+    # 기존 refs 길이에 맞춰 strengths 정렬 후, 임시 vibe 와 공존하는 기존(EarlyBinding) vibe 들의
+    # RS 를 절반(퍼센트 floor)으로 줄인다 — 첫 이미지 vibe 가 상대적으로 더 지배하도록(사용자 요청).
+    # 임시 vibe 자신은 시퀀스 전용 RS(SEQUENCE_VIBE_STRENGTH) 유지.
+    strengths = (strengths + [0.6] * len(refs))[:len(refs)]
+    strengths = [_halve_floor_strength(s) for s in strengths]
+    refs.append(encoding)
+    strengths.append(SEQUENCE_VIBE_STRENGTH)
+    try:
+        from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES
+
+        if len(refs) > MAX_NAI_VIBE_REFERENCES:
+            return  # NAI 최대 vibe 수 초과 → 주입 skip(400 방지)
+    except Exception:
+        pass
+    try:
+        request.nai_vibe_transfer = NAIVibeTransferData(
+            reference_image_multiple=refs,
+            reference_strength_multiple=strengths,
+            normalize=normalize,
+        )
+    except Exception:
+        pass  # 검증(길이/범위) 실패 시 vibe 없이 진행(시퀀스를 막지 않음)
+
+
+async def _capture_sequence_vibe(context: WebSessionContext, clients: set[WebSocket], request, stored) -> None:
+    """Sequence Use Vibe: 캡처 stamp 가 달린 라운드 첫 이미지의 생성 결과를 인코딩(2 Anlas)해
+    이후 프레임용 임시 vibe 로 보관한다. 라운드당 1회만(이미 인코딩됐으면 skip). 비NAI/소스 없음/
+    인코딩 실패는 경고 토스트 후 vibe 없이 계속(사용자 확정 — 실패가 시퀀스를 막지 않는다)."""
+    params = getattr(request, "params", None)
+    if not isinstance(params, dict):
+        return
+    run_id = str(params.get("sequence_run_id") or "")
+    if not run_id or str(params.get("sequence_vibe_capture") or "") != run_id:
+        return
+    svc = context._sequence_run_service()
+    if not svc.is_running(run_id) or not svc.wants_vibe(run_id):
+        return
+    if svc.vibe_injection(run_id):
+        return  # 이 라운드는 이미 인코딩됨
+    # 게이트/모델은 프레임에 baking 된 값을 쓴다(라이브 컨텍스트 아님) — 생성 도중 사용자가 모드/
+    # 모델을 바꿔도 이 NAI 프레임은 baking 된 모드로 인코딩하고, 그 모델을 보관한다. 그래야 이후
+    # 프레임(동일 baking 모델)에 정확히 주입되고 엉뚱한 모델로 2 Anlas 를 쓰지 않는다(Codex).
+    if str(params.get("api_mode") or "").upper() != "NAI":
+        return  # 생성 단계 silent 차단
+    model = str(params.get("model") or "")
+    raw = getattr(getattr(stored, "item", None), "raw_bytes", b"") or b""
+    if not raw:
+        await broadcast_json(clients, {
+            "type": "toast", "level": "warning",
+            "message": "Vibe 사용: 인코딩할 첫 이미지를 찾지 못해 vibe 없이 계속합니다.",
+        })
+        return
+    try:
+        from core.headless_vibe_transfer_service import encode_vibe_bytes
+
+        encoding = await asyncio.to_thread(
+            encode_vibe_bytes, context, raw, SEQUENCE_VIBE_IE, model_key=(model or None)
+        )
+    except Exception as exc:
+        await broadcast_json(clients, {
+            "type": "toast", "level": "warning",
+            "message": f"Vibe 사용 인코딩 실패 — vibe 없이 계속합니다: {exc}",
+        })
+        return
+    svc.set_vibe_encoding(run_id, encoding, model)
+    await broadcast_json(clients, {
+        "type": "toast", "level": "success",
+        "message": (f"Vibe 사용: 첫 이미지 인코딩 완료 — IE {SEQUENCE_VIBE_IE:.1f}, "
+                    f"RS {SEQUENCE_VIBE_STRENGTH:.1f} (2 Anlas). 이후 컷에 적용됩니다."),
+    })
+    # 인코딩(2 Anlas) 차감을 pill 에 즉시 반영(5분 폴링 대기 없이).
+    try:
+        await broadcast_anlas(context, clients)
+    except Exception:
+        pass
 
 
 async def _advance_sequence_run(context: WebSessionContext, clients: set[WebSocket], request) -> bool:
@@ -301,6 +668,7 @@ async def _maybe_continue_auto_generation(
         for message in policy.get("messages", []):
             await broadcast_json(clients, message)
         if not policy.get("continue"):
+            _release_auto_gen_prefetch(context)  # 스토리 종료 → 예약 홀더 폐기
             return False
     elif automation_run_id:
         policy = context._automation_service().record_generation_completed(automation_run_id)
@@ -309,6 +677,7 @@ async def _maybe_continue_auto_generation(
         for message in policy.get("messages", []):
             await broadcast_json(clients, message)
         if not policy.get("continue"):
+            _release_auto_gen_prefetch(context)  # Automation 종료/카운트 소진 → 예약 홀더 폐기
             return False
         delay_seconds = float(policy.get("delay_seconds") or 0.0)
         if delay_seconds > 0:
@@ -316,11 +685,13 @@ async def _maybe_continue_auto_generation(
             await _broadcast_automation_state(context, clients)
             if not await _wait_for_automation_delay(context, automation_run_id, delay_seconds):
                 await _broadcast_automation_state(context, clients)
+                _release_auto_gen_prefetch(context)  # 딜레이 중단 → 예약 홀더 폐기
                 return False
             context._automation_service().end_delay(automation_run_id)
             await _broadcast_automation_state(context, clients)
 
     if not _should_continue_auto_generation(context, request):
+        _release_auto_gen_prefetch(context)  # 루프 중단(Auto Gen off·큐 점유·특수) → 예약 홀더 폐기
         # A story page was just counted but the loop can't continue (Auto Gen turned off,
         # queue paused, etc.). Finish the story so the freeze snapshot + runtime don't stay
         # stuck armed below the page target.
@@ -402,13 +773,28 @@ async def _maybe_continue_auto_generation(
                     overrides.pop("height", None)
                     overrides.pop("resolution", None)
 
+    # 이 continuation이 프리페치를 소비하지 않는 경우(고정 프롬프트/스토리/특수)엔 예약 홀더 폐기.
+    if effective_prompt_fixed or story_run_id or is_special_request(params, context._coerce_bool):
+        _release_auto_gen_prefetch(context)
     if not effective_prompt_fixed:
-        result = await asyncio.to_thread(
-            random_service(context).generate,
-            active_ratings=context.get_active_ratings(),
-            overrides=overrides,
-            random_request_id=request_id,
-        )
+        result = None
+        # Ollama Auto Boost 오버랩 소비 — 유효한 예약행+boost가 있으면 그대로 사용(이미지
+        # 생성과 겹쳐 이미 계산됨 → 지연 0). 일반 Auto Gen/Automation만. Story(고정 정체성)는
+        # 시도 안 하고, Preset/특수는 위 _should_continue_auto_generation이 이미 차단.
+        if not story_run_id and not is_special_request(params, context._coerce_bool):
+            result = await _consume_auto_gen_prefetch(context, overrides, request_id)
+        if result is None:
+            # 폴백: 동기 generate + 동기 boost(Phase 1). 남은 프리페치 홀더는 정리.
+            _release_auto_gen_prefetch(context)
+            result = await asyncio.to_thread(
+                random_service(context).generate,
+                active_ratings=context.get_active_ratings(),
+                overrides=overrides,
+                random_request_id=request_id,
+            )
+            if not story_run_id and not is_special_request(params, context._coerce_bool):
+                from app.backend.server.generation_commands import apply_ollama_auto_boost
+                await apply_ollama_auto_boost(context, result)
         await persist_prompt_engineering_settings(context)
         # Use Vibe 인코딩(2 Anlas)이 이 페이지 전진에서 일어났다면 잔액 차감 즉시 반영
         # (자동 사이클 continuation 경로).

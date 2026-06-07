@@ -26,11 +26,13 @@ from typing import Any, Callable, Optional
 # 강도 레벨 — 문장 수·길이·구도태그 수·temperature를 한 손잡이로(_LEVELS 미러). 기본=rich.
 # 풍부함은 "cinematic하게" 같은 모호한 지시가 아니라 개수/길이 캡으로 통제(Codex D).
 # ---------------------------------------------------------------------------
+# num_predict: 출력 토큰 상한(속도 backstop). 스키마 강제라 모델은 보통 알아서 멈추지만,
+# 폭주 시 오버랩 창을 넘기지 않도록 레벨별 넉넉한 천장을 둔다(정상 출력은 절대 안 잘림).
 SCENE_BOOST_LEVELS: dict[str, dict[str, Any]] = {
-    "concise":  {"phrases": (1, 2), "words": (6, 12),  "comp_max": 1, "temperature": 0.25},
-    "standard": {"phrases": (2, 3), "words": (8, 16),  "comp_max": 2, "temperature": 0.30},
-    "rich":     {"phrases": (3, 4), "words": (10, 18), "comp_max": 3, "temperature": 0.32},
-    "max":      {"phrases": (4, 6), "words": (12, 22), "comp_max": 4, "temperature": 0.35},
+    "concise":  {"phrases": (1, 2), "words": (6, 12),  "comp_max": 1, "temperature": 0.25, "num_predict": 160},
+    "standard": {"phrases": (2, 3), "words": (8, 16),  "comp_max": 2, "temperature": 0.30, "num_predict": 224},
+    "rich":     {"phrases": (3, 4), "words": (10, 18), "comp_max": 3, "temperature": 0.32, "num_predict": 320},
+    "max":      {"phrases": (4, 6), "words": (12, 22), "comp_max": 4, "temperature": 0.35, "num_predict": 448},
 }
 DEFAULT_LEVEL = "rich"
 
@@ -419,7 +421,8 @@ def run_scene_boost(
     instruction = build_instruction(descriptive, rating, lvl_cfg, candidates)
     schema = boost_schema(lvl_cfg, candidates)
     try:
-        out = chat(instruction, schema, model=default_model, temperature=lvl_cfg["temperature"])
+        out = chat(instruction, schema, model=default_model,
+                   temperature=lvl_cfg["temperature"], num_predict=lvl_cfg.get("num_predict"))
     except Exception as exc:  # 원샷 계약 — 재시도 없이 원문 보존.
         return {"ok": False, "stage": "chat", "error": str(exc) or "scene boost 생성 실패",
                 "prompt": original, "rating": rating, "level": level, "additions": empty_add}

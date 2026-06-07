@@ -242,7 +242,14 @@ class HeadlessPromptEngineeringService:
         elif key == "ollama_auto_boost":
             # ⚠️ 세션 전용 토글(비영속). store/preset/save 어디에도 기록하지 않는다 —
             # 항상 OFF로 시작하고 사용자가 직접 켜야만 ON. (pp_* 영속 경로와 분리)
-            context.ollama_auto_boost = context._coerce_bool(value)
+            enabled = context._coerce_bool(value)
+            context.ollama_auto_boost = enabled
+            # 모델 상주 관리: ON이면 미리 warm-up(상주), OFF면 언로드. 구독자가 데몬
+            # 스레드로 처리(이벤트 루프/응답 비차단). ollama_routes에서 구독.
+            try:
+                context.publish("ollama_auto_boost_changed", {"enabled": enabled})
+            except Exception:
+                pass
         elif key.startswith("pp_"):
             option_key = key[3:]
             settings = store.collect_settings()

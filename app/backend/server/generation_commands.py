@@ -201,6 +201,21 @@ def _active_ratings_from_command(command: dict[str, Any] | None) -> set[str] | N
     return {rating for rating in ("g", "s", "q", "e") if rating in picked} or None
 
 
+def invalidate_auto_gen_prefetch(context: WebSessionContext) -> None:
+    """풀을 advance하는 경로(수동/REST random)에서 Auto Gen 프리페치 예약을 폐기한다.
+    state_key는 풀 *교체*만 잡으므로(advance는 못 잡음) pop 어긋남을 명시 방어. best-effort."""
+    holder = getattr(context, "_auto_gen_prefetch", None)
+    if not holder:
+        return
+    task = holder.get("task")
+    try:
+        if task is not None and not task.done():
+            task.cancel()
+    except Exception:
+        pass
+    context._auto_gen_prefetch = None
+
+
 async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bool:
     """Ollama Auto Boost — random 결과 프롬프트를 Scene Boost로 강화(스레드, best-effort).
 
@@ -253,6 +268,8 @@ async def handle_random_command(
     overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
     request_id = str(command.get("random_request_id") or command.get("requestId") or "")
     active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
+    # 수동 random은 풀을 advance하므로 Auto Gen 프리페치 예약행을 무효화(폐기).
+    invalidate_auto_gen_prefetch(context)
     result = await asyncio.to_thread(
         random_service(context).generate,
         active_ratings=active_ratings,
@@ -720,6 +737,7 @@ def register_generation_rest_routes(
         overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
         request_id = str(command.get("random_request_id") or command.get("requestId") or "")
         active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
+        invalidate_auto_gen_prefetch(context)  # REST random도 풀 advance → 예약 무효화
         result = await asyncio.to_thread(
             random_service(context).generate,
             active_ratings=active_ratings,
@@ -775,6 +793,7 @@ def register_generation_rest_routes(
         previous_peng_override = getattr(context, "session_p_eng_override", None)
         if peng_override is not None:
             context.session_p_eng_override = peng_override
+        invalidate_auto_gen_prefetch(context)  # 이 REST random도 풀 advance → 예약 무효화
         try:
             try:
                 result = await asyncio.wait_for(

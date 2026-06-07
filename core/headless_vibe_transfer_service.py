@@ -52,13 +52,22 @@ def _post_encode_vibe(token: str, source_bytes: bytes, ie: float, api_model: str
     return base64.b64encode(resp.content).decode("utf-8")
 
 
-def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float) -> str:
+def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float, *, model_key: str | None = None) -> str:
     """1회성 vibe 인코딩(Storyteller Use Vibe 등): 검증 후 encode-vibe를 호출해 인코딩
     문자열만 돌려준다. Storage/프레임/영속(_persist, _save_encoding_to_storage,
-    vibe_transfer_frames)을 일절 건드리지 않는다 — 휘발성 보장은 구조적. 실패는 예외."""
+    vibe_transfer_frames)을 일절 건드리지 않는다 — 휘발성 보장은 구조적. 실패는 예외.
+
+    ``model_key`` 명시 시 그 모델 키로 인코딩한다(요청-로컬 호출용 — 큐 프레임이 baking 한
+    모델로 인코딩해 라이브 컨텍스트 모델 드리프트와 무관하게 한다). 미지정 시 현재 모델(기존 동작)."""
     if str(context.get_api_mode() or "").upper() != "NAI":
         raise RuntimeError("Vibe 인코딩은 NAI 모드에서만 가능합니다.")
-    if context._is_naid3_model():
+    if model_key is not None:
+        resolved_model = str(model_key or "")
+        is_naid3 = "NAID3" in resolved_model.upper()
+    else:
+        resolved_model = str(context._current_model_key() or "")
+        is_naid3 = context._is_naid3_model()
+    if is_naid3:
         raise RuntimeError("NAID3 모델은 Vibe 인코딩을 지원하지 않습니다.")
     if not source_bytes:
         raise RuntimeError("인코딩할 소스 이미지가 없습니다.")
@@ -69,7 +78,7 @@ def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float) -> str:
     if not token:
         raise RuntimeError("NAI 토큰이 필요합니다 (API 설정 → NAI).")
     ie = max(0.01, min(1.0, round(float(ie), 2)))
-    api_model = _NAI_MODEL_MAP.get(context._current_model_key(), "nai-diffusion-4-5-full")
+    api_model = _NAI_MODEL_MAP.get(resolved_model, "nai-diffusion-4-5-full")
     encoding = _post_encode_vibe(token, bytes(source_bytes), ie, api_model)
     if not encoding:
         raise RuntimeError("Vibe 인코딩 응답이 비어 있습니다.")

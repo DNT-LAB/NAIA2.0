@@ -100,6 +100,7 @@ class HeadlessRandomPromptService:
         active_ratings: set[str] | None = None,
         overrides: dict[str, Any] | None = None,
         random_request_id: str = "",
+        source_row_override: Any = None,
     ) -> HeadlessRandomPromptResult:
         settings = self._random_settings(overrides)
         ratings = self._normalize_ratings(active_ratings)
@@ -114,13 +115,16 @@ class HeadlessRandomPromptService:
                 rating_counts=self._rating_counts(),
             )
 
-        source_row_override = None
+        # source_row_override(외부 주입 = 프리페치 오버랩이 예약해 둔 행)가 있으면 story/
+        # tag-filter 산정과 풀 pop을 건너뛴다 — 프리페치는 일반 Auto Gen 한정이라 story/
+        # tag-filter가 없는 경우에만 호출된다. 그 외 모든 부작용(random_prompt_triggered·
+        # prepare_next_source[override 분기, pop 없음]·publish prompt_generated)은 그대로 수행.
         skip_random_events = False
         stream_messages: list[dict[str, Any]] = []
         # 1.5 모델: 스트림이 활성인 동안 모든 랜덤(수동 포함)이 시퀀스를 전진시킨다 —
         # 사용자는 마음에 드는 이미지가 나올 때까지 수동으로 라운드를 반복할 수 있다.
         event_stream = getattr(self.context, "event_stream_runtime", None)
-        if event_stream is not None and getattr(event_stream, "is_active", False):
+        if source_row_override is None and event_stream is not None and getattr(event_stream, "is_active", False):
             request = event_stream.prepare_random_prompt_request(
                 self.context.search_results,
                 settings,
@@ -345,6 +349,26 @@ class HeadlessRandomPromptService:
             detected_resolution=result.detected_resolution,
             reset_resolution_detected=result.reset_resolution_detected,
         )
+
+    def reserve_next_random_row(self, active_ratings: set[str] | None = None) -> Any:
+        """프리페치 오버랩용 — 다음 랜덤 행을 풀에서 pop해 반환(부작용: 풀 advance만).
+
+        None이면 풀이 비었거나 준비 안 됨. **폐기(무효화) 시 되돌리지 않고 버린다** —
+        대형 풀에서 1행 손실은 무시 가능하며 검색 스냅샷 자동복원이 백스톱이다. 활성
+        태그필터에서는 호출하지 않는다(필터 카운트 누수 방지 — 호출부에서 가드).
+        """
+        try:
+            settings = self._random_settings(None)
+            if settings.get("wildcard_standalone", False):
+                return None
+            if not self._ensure_search_results(settings):
+                return None
+            sr = getattr(self.context, "search_results", None)
+            if sr is None:
+                return None
+            return sr.pop_random_row(self._normalize_ratings(active_ratings))
+        except Exception:
+            return None
 
     def _active_tag_filter_state(self) -> dict[str, Any] | None:
         tag_filter = getattr(self.context, "active_tag_filter", None)

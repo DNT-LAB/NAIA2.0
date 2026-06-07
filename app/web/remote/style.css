@@ -16191,7 +16191,8 @@ body.detached-module .mod-grid-3 {
 .nai-director-status.info { color: var(--text-muted); }
 /* Ollama Local Assistant popup — Tools & Assistants header button anchor */
 .ollama-assistant-popup {
-  position: fixed; z-index: var(--z-floating-module); width: 400px; max-width: calc(100vw - 16px);
+  /* 다른 플로팅 패널보다 한 단계 낮게 — 동일 z였을 때 나중에 그려져 나머지 창을 다 가렸음. */
+  position: fixed; z-index: calc(var(--z-floating-module) - 1); width: 400px; max-width: calc(100vw - 16px);
   background: var(--bg-elevated); border: 1px solid rgba(130, 150, 255, 0.42);
   border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.55);
   display: flex; flex-direction: column; overflow: hidden;
@@ -16723,3 +16724,30 @@ body.detached-module .mod-grid-3 {
   display: flex; flex-direction: column; gap: 6px;
 }
 .seq-popup-foot .seq-btn.primary { width: 100%; }
+
+/* 하단 '고정' 토글 행 — 스크롤 컨테이너(.tab-content)의 padding-bottom(10px)만큼 내려
+   바닥 border(=Tools&Assistants 상단)에 딱 붙인다(bottom:-10px). 음수 bottom 마진으로
+   그 10px 패딩 공간을 덮어 빈틈 없이 flush. */
+.seq-fixrow {
+  position: sticky;
+  bottom: -10px;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 7px 6px;
+  margin: 2px 0 -10px;
+  border-top: 1px solid var(--border-dim);
+  background: var(--bg-surface);
+}
+.seq-fixlabel { font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.seq-fixchk {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--text-primary); cursor: pointer; user-select: none;
+}
+.seq-fixchk input { accent-color: var(--accent-blue); cursor: pointer; margin: 0; }
+.seq-fixchk.seq-chk-disabled { opacity: 0.42; cursor: not-allowed; }
+.seq-fixchk.seq-chk-disabled input { cursor: not-allowed; }
+.seq-fixhint { color: var(--text-muted); font-size: 11px; }

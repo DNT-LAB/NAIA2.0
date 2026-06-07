@@ -325,8 +325,8 @@ export function createPromptEngineeringPanel({
     </div>
     <div>
       <div class="mod-section-label has-actions"><span>Preprocessing Options</span><span class="mod-head-actions"><button type="button" class="header-action-btn" onclick="openPeDebugPanel()">Debug Snapshot</button><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
-      <div class="mod-checkbox-grid">${preprocessingHtml}</div>
-      ${ollamaBoostHtml}
+      <!-- Ollama Auto Boost를 그리드 마지막 셀로 — Tag Implication(좌) 우측 칸을 채워 균일하게. -->
+      <div class="mod-checkbox-grid">${preprocessingHtml}${ollamaBoostHtml}</div>
     </div>
     ${advancedHtml}
   `;

@@ -24,7 +24,7 @@ const RATING_LABELS = {g: 'G', s: 'S', q: 'Q', e: 'E'};
 const ALL_RATINGS = ['e', 'q', 's', 'g'];
 const CUTS = [2, 3, 4, 5, 6];
 
-export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist}) {
+export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode}) {
   const state = {
     available: null,        // null=미확인
     presentRatings: [],
@@ -33,12 +33,40 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     results: null,
     detail: null,
     openGroupId: null,      // 우측 팝업에 열린 그룹 (카드 하이라이트용)
+    // 하단 '고정' 토글 — 생성 시 백엔드로 전달. SEED·해상도 기본 ON.
+    fixSeed: true,
+    fixResolution: true,
+    useVibe: false,
     busy: false,
   };
   let incEl = null, excEl = null, bodyEl = null, popupEl = null, dlTimer = null;
 
   function ratingBadge(r) {
     return `<span class="seq-badge seq-r-${escHtml(r)}">${escHtml(RATING_LABELS[r] || r)}</span>`;
+  }
+
+  // Vibe 사용은 NAI 전용 — 모드를 모르면 NAI 로 간주(백엔드가 비NAI 에서 작업을 안 하므로 안전).
+  function vibeAllowed() {
+    try {
+      const mode = typeof getApiMode === 'function' ? getApiMode() : 'NAI';
+      return String(mode || 'NAI').toUpperCase() === 'NAI';
+    } catch (_) { return true; }
+  }
+
+  // 모드 전환 시 Vibe 체크박스 비활성/복원(state.useVibe 값 자체는 보존). app.js syncMode 가 호출.
+  function refreshVibeGate() {
+    const box = panel.querySelector('[data-seq-fix="vibe"]');
+    if (!box) return;
+    const allowed = vibeAllowed();
+    box.disabled = !allowed;
+    box.checked = allowed && state.useVibe;   // 비NAI 에서는 해제 표시(값은 state 에 남음)
+    const label = box.closest('.seq-fixchk');
+    if (label) {
+      label.classList.toggle('seq-chk-disabled', !allowed);
+      label.title = allowed
+        ? '라운드의 첫 이미지를 인코딩해(2 Anlas) 이후 컷에 임시 vibe 로 적용합니다(기존 Vibe Transfer 가 있으면 그 RS 는 절반으로 줄입니다). NAI 전용·라운드마다 새로 인코딩.'
+        : 'NAI 모드 전용입니다 — 현재 모드에서는 Vibe 사용이 동작하지 않습니다.';
+    }
   }
 
   // -------------------------------------------------------------- 초기화/셸
@@ -143,6 +171,12 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         </div>
       </div>
       <div class="seq-body" id="seqBody"></div>
+      <div class="seq-fixrow">
+        <span class="seq-fixlabel">고정</span>
+        <label class="seq-fixchk"><input type="checkbox" data-seq-fix="seed" ${state.fixSeed ? 'checked' : ''}> SEED</label>
+        <label class="seq-fixchk"><input type="checkbox" data-seq-fix="resolution" ${state.fixResolution ? 'checked' : ''}> 해상도</label>
+        <label class="seq-fixchk ${vibeAllowed() ? '' : 'seq-chk-disabled'}"><input type="checkbox" data-seq-fix="vibe" ${vibeAllowed() && state.useVibe ? 'checked' : ''} ${vibeAllowed() ? '' : 'disabled'}> 첫 이미지를 Vibe로 사용 <span class="seq-fixhint">(2 Anlas)</span></label>
+      </div>
       <div class="seq-popup" id="seqPopup"></div>`;
     incEl = panel.querySelector('#seqInclude');
     excEl = panel.querySelector('#seqExclude');
@@ -158,6 +192,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         bindTagAssist(excEl, {excludeE621: true});
       } catch (_) { /* tagAssist 미준비 */ }
     }
+    refreshVibeGate();   // 현재 모드 기준 Vibe 체크박스 활성/비활성 동기화
   }
 
   function syncChips() {
@@ -180,6 +215,10 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       include: q.include, exclude: q.exclude,
       ratings: Array.from(q.ratings),
       frameCounts: Array.from(q.cuts),
+      // 하단 '고정' 토글 — 생성/연속 추첨에 전달(런 상태에 저장돼 auto-continue 라운드에도 적용).
+      fixSeed: state.fixSeed,
+      fixResolution: state.fixResolution,
+      useVibe: state.useVibe,
     };
   }
 
@@ -228,15 +267,18 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     try {
       const out = await postJson('/api/sequence-preset/generate',
         {groupId: Number(groupId), ...searchPayload()});
-      const failed = (out.frames || []).filter(f => !f.ok);
+      const frames = out.frames || [];
+      const failed = frames.filter(f => !f.ok && !f.skipped);   // skipped(중복)은 실패 아님
+      const skipped = frames.filter(f => f.skipped).length;
+      const skipNote = skipped ? ` (중복 ${skipped}컷 생략)` : '';
       if (!out.ok) {
         showToast(`생성 등록 실패: ${failed.length ? failed[0].error : (out.error || '자격증명/큐 확인')}`, 'error');
       } else if (failed.length) {
         const detail = failed.map(f => `컷${f.index + 1}(${f.error || 'failed'})`).join(', ');
-        showToast(`${out.total}컷 중 ${out.enqueued}컷 등록 · 실패: ${detail}`, 'warning');
+        showToast(`${out.total}컷 중 ${out.enqueued}컷 등록${skipNote} · 실패: ${detail}`, 'warning');
       } else {
-        showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)`
-                              : `${out.total}컷 생성 큐 등록`, 'success');
+        showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
+                              : `${out.enqueued}컷 생성 큐 등록${skipNote}`, 'success');
       }
     } catch (error) {
       showToast(`생성 실패: ${error.message}`, 'error');
@@ -252,12 +294,15 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     state.busy = true;
     try {
       const out = await postJson('/api/sequence-preset/random-generate', searchPayload());
+      const frames = out.frames || [];
+      const failed = frames.filter(f => !f.ok && !f.skipped);
+      const skipped = frames.filter(f => f.skipped).length;
+      const skipNote = skipped ? ` (중복 ${skipped}컷 생략)` : '';
       if (!out.ok) {
-        const failed = (out.frames || []).filter(f => !f.ok);
         showToast(`연속 생성 실패: ${failed.length ? failed[0].error : (out.error || '매칭/자격증명/큐 확인')}`, 'error');
       } else {
-        showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)`
-                              : `${out.total}컷 생성 큐 등록 (그룹 #${out.groupId})`, 'success');
+        showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
+                              : `${out.enqueued}컷 생성 큐 등록 (그룹 #${out.groupId})${skipNote}`, 'success');
       }
     } catch (error) {
       showToast(`연속 생성 실패: ${error.message}`, 'error');
@@ -368,6 +413,16 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     if (gen) { generateGroup(gen.dataset.seqGenerate); return; }
   });
 
+  // 하단 '고정' 체크박스 — change 위임(라벨 클릭도 정확히 잡힘). 즉시 state 반영(검색 불필요).
+  panel.addEventListener('change', event => {
+    const fix = event.target.closest('[data-seq-fix]');
+    if (!fix) return;
+    const kind = fix.dataset.seqFix;
+    if (kind === 'seed') state.fixSeed = fix.checked;
+    else if (kind === 'resolution') state.fixResolution = fix.checked;
+    else if (kind === 'vibe') { if (!fix.disabled) state.useVibe = fix.checked; }  // 비NAI(disabled)면 값 보존
+  });
+
   // Esc로 우측 팝업 닫기(검색 입력 포커스 중에도). 패널은 1회 생성이라 리스너도 1회.
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && popupEl && popupEl.classList.contains('open')) {
@@ -377,6 +432,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
 
   return {
     onOpen() { ensureReady(); },
+    onModeChange() { refreshVibeGate(); },   // app.js syncMode → Vibe 체크박스 NAI 게이트 갱신
     // 메인 하단 버튼 라우팅용(app.js). Sequence 탭 활성일 때 Ctrl/Alt+Enter 가 위임된다.
     hasOpenGroup() {
       return !!(popupEl && popupEl.classList.contains('open') && state.openGroupId != null);

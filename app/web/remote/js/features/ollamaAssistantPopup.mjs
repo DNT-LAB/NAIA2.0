@@ -30,9 +30,9 @@ export function createOllamaAssistantPopup({
   let onResize = null;
   let pollTimer = null;
   let busy = false;
-  let assistMode = 'fast';   // 'fast'(원샷) | 'manual'(파이프라인)
+  let assistMode = 'manual';   // 'fast'(원샷) | 'manual'(파이프라인) — 기본 Manual
   let assistRating = 's';    // 'g'|'s'|'q'|'e' — 최대 등급(상한 클램프)
-  let assistLevel = 'standard';  // 'concise'|'standard'|'rich' — 분량/창의성
+  let assistLevel = 'rich';  // 'concise'|'standard'|'rich'|'max' — 분량/창의성, 기본 풍부(rich)
   let assistSolo = false;    // Solo 강제 — 켜면 1girl_solo 파티션 + 'solo' 태그
   let datasetReady = false;  // 이벤트 데이터셋(B 실조합 참조) 설치 여부
 
@@ -647,8 +647,8 @@ export function createOllamaAssistantPopup({
           <textarea class="ollama-assist-input" rows="6" placeholder="예: 교복 입은 소녀가 창가에 앉아 웃고 있는 장면"></textarea>
           <div class="ollama-assist-controls">
             <div class="ollama-assist-mode" role="group" aria-label="변환 모드">
-              <button type="button" class="ollama-assist-mode-btn active" data-mode="fast" title="원샷 — 빠름(1호출)">Fast</button>
-              <button type="button" class="ollama-assist-mode-btn" data-mode="manual" title="파이프라인 — 정밀(다단계 참조)">Manual</button>
+              <button type="button" class="ollama-assist-mode-btn" data-mode="fast" title="원샷 — 빠름(1호출)">Fast</button>
+              <button type="button" class="ollama-assist-mode-btn active" data-mode="manual" title="파이프라인 — 정밀(다단계 참조)">Manual</button>
             </div>
             <button type="button" class="ollama-assistant-action ollama-assist-run">태그로 변환</button>
             <button type="button" class="ollama-assist-history-btn" title="변환 기록 보기 (우측 패널)" aria-pressed="false">🕘 기록</button>
@@ -664,8 +664,8 @@ export function createOllamaAssistantPopup({
             <span class="ollama-assist-knob-label">분량</span>
             <div class="ollama-assist-level" role="group" aria-label="분량">
               <button type="button" class="ollama-assist-level-btn" data-level="concise" title="태그만 간결히 (보완·이벤트참조 없음)">간결</button>
-              <button type="button" class="ollama-assist-level-btn active" data-level="standard" title="표준 (보완 3·이벤트참조 2)">표준</button>
-              <button type="button" class="ollama-assist-level-btn" data-level="rich" title="풍부 (보완 7·이벤트참조 4·긴 자연어)">풍부</button>
+              <button type="button" class="ollama-assist-level-btn" data-level="standard" title="표준 (보완 3·이벤트참조 2)">표준</button>
+              <button type="button" class="ollama-assist-level-btn active" data-level="rich" title="풍부 (보완 7·이벤트참조 4·긴 자연어)">풍부</button>
               <button type="button" class="ollama-assist-level-btn" data-level="max" title="최대 (보완 12·이벤트참조 6·가장 긴 자연어)">최대</button>
             </div>
             <button type="button" class="ollama-assist-solo-btn" aria-pressed="false" title="Solo 강제 — solo가 명시되지 않으면 1girl/1boy로, 켜면 1girl_solo + solo 태그">Solo</button>
@@ -737,5 +737,10 @@ export function createOllamaAssistantPopup({
     refreshStatus();
   }
 
-  return {open, close, destroy};
+  // [Ollama] 버튼 토글용 — 현재 펼쳐져 보이는지(숨김/미생성이 아닌지).
+  function isOpen() {
+    return !!(popup && popup.style.display !== 'none');
+  }
+
+  return {open, close, destroy, isOpen};
 }

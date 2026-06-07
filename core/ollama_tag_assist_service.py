@@ -603,6 +603,15 @@ _VERIFY_INSTRUCTION = (
 )
 
 
+# keep_alive 값(Ollama): -1=무기한 상주, 0=즉시 언로드, None=서버 기본(~5분).
+# Auto Boost ON이면 2B 모델을 -1로 살려 둬 매 boost의 콜드 로드를 없앤다.
+_KEEP_ALIVE_RESIDENT = -1
+_KEEP_ALIVE_UNLOAD = 0
+# Scene Boost 전용 chat 타임아웃(connect, read). 일반 assist(5,180)보다 짧게 — 동기 Random
+# 경로가 Ollama 지연에 길게 묶이지 않도록 worst-case를 묶는다(정상 boost는 1~5s).
+_BOOST_CHAT_TIMEOUT = (5, 45)
+
+
 class OllamaTagAssistService:
     def __init__(
         self,
@@ -626,6 +635,17 @@ class OllamaTagAssistService:
         self._translator = translator
         # 파이프라인 종료 후 VRAM 언로드 콜백(테스트 주입용). None이면 기본 구현.
         self._unloader = unloader
+        # Auto Boost 모델 상주 관리. 토글이 데몬 스레드에서 warm/unload를 비동기로
+        # 일으키므로 '마지막 토글 승리'를 보장해야 한다(느린 warm-up이 빠른 unload보다
+        # 늦게 끝나도 OFF가 이긴다). _keep_resident=desired intent(scene_boost·assist가
+        # 읽음), _resident_model=상주 대상(모델별 언로드 스킵 판정), _resident_loaded=
+        # 실제 적재 여부(중복 warm 스킵). meta_lock=빠른 플래그 가드, apply_lock=warm/
+        # unload HTTP 직렬화(최대 120s; meta_lock과 분리해 동기 토글이 안 막히게).
+        self._keep_resident = False
+        self._resident_model: "str | None" = None
+        self._resident_loaded = False
+        self._resident_meta_lock = threading.Lock()
+        self._resident_apply_lock = threading.Lock()
         # Event Preset 참조: (rating, person_id, query) -> [(tag, weight)]. 실제 관측
         # 조합에서 공기 태그를 끌어와 후보를 보강한다(app 레이어에서 주입).
         self._event_combo_provider = event_combo_provider
@@ -729,23 +749,36 @@ class OllamaTagAssistService:
         *,
         model: str,
         temperature: float = 0.2,
+        keep_alive: Any = None,
+        num_predict: Any = None,
+        timeout: Any = None,
     ) -> dict[str, Any]:
         import requests
 
+        options: dict[str, Any] = {"temperature": float(temperature)}
+        # num_predict: 출력 토큰 상한(속도 backstop). 스키마 강제라 정상 출력은 안 잘리고,
+        # 폭주만 막는다. None이면 무제한(기존 동작).
+        if num_predict is not None:
+            options["num_predict"] = int(num_predict)
+        payload: dict[str, Any] = {
+            "model": model,
+            # 지시문+입력을 user 단일 메시지로 — Gemma 챗 템플릿엔 system 롤이 없다.
+            "messages": [
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+            "format": schema,
+            # 단계별 분리: 개념/선택은 결정적(낮게), 자연어/보완은 창의적(높게).
+            "options": options,
+        }
+        # keep_alive: -1=무기한 유지(Auto Boost 모드 — 모델 상주로 매 boost 재로드 없음),
+        # 0=언로드, None=Ollama 기본(~5분). Auto Boost scene_boost는 -1로 모델을 살려 둔다.
+        if keep_alive is not None:
+            payload["keep_alive"] = keep_alive
         response = requests.post(
             f"{self.base_url}/api/chat",
-            json={
-                "model": model,
-                # 지시문+입력을 user 단일 메시지로 — Gemma 챗 템플릿엔 system 롤이 없다.
-                "messages": [
-                    {"role": "user", "content": user},
-                ],
-                "stream": False,
-                "format": schema,
-                # 단계별 분리: 개념/선택은 결정적(낮게), 자연어/보완은 창의적(높게).
-                "options": {"temperature": float(temperature)},
-            },
-            timeout=(5, 180),
+            json=payload,
+            timeout=timeout or (5, 180),
         )
         if response.status_code != 200:
             detail = ""
@@ -801,7 +834,16 @@ class OllamaTagAssistService:
             return self._assist_oneshot(text, model=model, options=options)
         finally:
             self._end_progress()
-            self._unload_model(target_model)
+            # Auto Boost로 '이 모델'이 상주 중이면 언로드 대신 keep_alive=-1 재확인(assist의
+            # 기본 keep_alive가 상주 타이머를 ~5분으로 덮었을 수 있다). 상주 모델이 아니면
+            # (다른 모델 override 포함) 기존대로 언로드 — 무거운 모델이 VRAM에 남지 않게.
+            with self._resident_meta_lock:
+                is_resident_model = self._keep_resident and target_model == (
+                    self._resident_model or self.default_model)
+            if is_resident_model:
+                self._http_keep_alive_load(target_model)
+            else:
+                self._unload_model(target_model)
 
     def _assist_oneshot(
         self, text: str, *, model: str | None = None, options: dict[str, Any] | None = None,
@@ -889,13 +931,29 @@ class OllamaTagAssistService:
         드리프트·에코·한글 필터를 통과한 자연어만 덧붙인다.
 
         best-effort: 어떤 실패에서도 raise하지 않고 원문 그대로(additions 빈)로 반환.
-        (요청대로 GUI 미연결 — 라우트/프런트는 아직 붙이지 않는다.)
+        Auto Boost(상주) 모드 + 대상 모델이 상주 모델일 때만 chat에 keep_alive=-1을
+        주입해 2B 모델을 살려 둔다(다른 모델이면 서버 기본 → self-clean).
         """
         from core.scene_boost import run_scene_boost
-        return run_scene_boost(
+
+        target_model = str(model or self.default_model).strip()
+        # 상주 의도 + 대상이 상주 모델일 때만 keep_alive=-1. 진입 시점 스냅샷.
+        with self._resident_meta_lock:
+            resident_at_start = self._keep_resident
+            resident_model = self._resident_model or self.default_model
+        keep_alive = _KEEP_ALIVE_RESIDENT if (resident_at_start and target_model == resident_model) else None
+
+        def _boost_chat(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            if keep_alive is not None:
+                kwargs.setdefault("keep_alive", keep_alive)
+            # 동기 Random 경로 worst-case를 묶는다(일반 assist보다 짧게).
+            kwargs.setdefault("timeout", _BOOST_CHAT_TIMEOUT)
+            return self._chat(*args, **kwargs)
+
+        result = run_scene_boost(
             prompt, options or {},
-            chat=self._chat,
-            default_model=str(model or self.default_model),
+            chat=_boost_chat,
+            default_model=target_model,
             tag_rating=_tag_rating,
             validate_tag=self._validate_tag,
             tag_allowed=_tag_allowed,
@@ -903,6 +961,92 @@ class OllamaTagAssistService:
             is_hardcore=lambda t: any(kw in str(t).lower() for kw in _HARDCORE_KEYWORDS),
             has_hangul=_has_hangul,
         )
+        # 레이스 backstop: 이 boost가 keep_alive=-1을 보낸 사이 토글이 OFF로 뒤집혔다면
+        # 모델이 재적재됐을 수 있다 → best-effort 언로드(상주 의도가 사라졌으므로).
+        if keep_alive is not None:
+            with self._resident_meta_lock:
+                flipped_off = not self._keep_resident
+            if flipped_off:
+                self._unload_model(target_model)
+        return result
+
+    # ------------------------------------------------------------------
+    # Auto Boost 모델 상주 관리 — 토글 ON 시 warm-up(적재+상주), OFF 시 언로드.
+    # 토글 이벤트가 데몬 스레드를 띄우므로 '마지막 토글 승리'를 apply_lock으로 보장한다.
+    # ------------------------------------------------------------------
+
+    def _http_keep_alive_load(self, model: str) -> bool:
+        """/api/generate에 빈 프롬프트 + keep_alive=-1 → 모델 적재 후 무기한 상주.
+        성공하면 True. best-effort(예외/비200 = False, 결과에 영향 없음)."""
+        target = str(model or "").strip()
+        if not target:
+            return False
+        try:
+            import requests
+
+            resp = requests.post(
+                f"{self.base_url}/api/generate",
+                json={"model": target, "prompt": "", "stream": False,
+                      "keep_alive": _KEEP_ALIVE_RESIDENT},
+                timeout=(5, 120),
+            )
+            return getattr(resp, "status_code", 0) == 200
+        except Exception:
+            return False
+
+    def set_resident(self, enabled: bool, model: str | None = None) -> None:
+        """Auto Boost 토글 진입점(동기·빠름). 상주 의도만 갱신하고 실제 적재/언로드는
+        데몬 스레드에 위임 — warm-up이 최대 120s 블로킹이라 토글 응답을 막으면 안 된다.
+        여러 토글이 겹쳐도 _apply_resident_state가 매번 최신 의도를 읽어 마지막이 이긴다."""
+        with self._resident_meta_lock:
+            self._keep_resident = bool(enabled)
+            if enabled:
+                self._resident_model = str(model or self.default_model).strip() or self.default_model
+        threading.Thread(
+            target=self._apply_resident_state, name="ollama-resident-apply", daemon=True,
+        ).start()
+
+    def _apply_resident_state(self) -> None:
+        """최신 상주 의도에 맞춰 Ollama를 적재/언로드. apply_lock으로 직렬화하고, 락을
+        잡은 뒤 '현재' 의도를 다시 읽으므로 마지막 토글 상태로 수렴한다(느린 warm-up이
+        빠른 unload보다 늦게 끝나도 OFF가 이긴다)."""
+        with self._resident_apply_lock:
+            with self._resident_meta_lock:
+                enabled = self._keep_resident
+                model = self._resident_model or self.default_model
+                already = self._resident_loaded
+            if enabled:
+                if not already:
+                    ok = self._http_keep_alive_load(model)
+                    with self._resident_meta_lock:
+                        # 적재 도중 OFF로 안 바뀐 경우에만 loaded 마킹(바뀌었으면 다음
+                        # applier가 언로드).
+                        if self._keep_resident:
+                            self._resident_loaded = bool(ok)
+            else:
+                self._unload_model(model)
+                with self._resident_meta_lock:
+                    self._resident_loaded = False
+
+    def warm_up(self, model: str | None = None) -> None:
+        """동기 warm-up(테스트/직접용). 상주 의도 ON + 즉시 적재. 프로덕션 토글 경로는
+        set_resident(비동기)를 쓴다."""
+        with self._resident_meta_lock:
+            self._keep_resident = True
+            self._resident_model = str(model or self.default_model).strip() or self.default_model
+            target = self._resident_model
+        ok = self._http_keep_alive_load(target)
+        with self._resident_meta_lock:
+            self._resident_loaded = bool(ok) and self._keep_resident
+
+    def unload(self, model: str | None = None) -> None:
+        """동기 언로드(테스트/직접용). 상주 의도 OFF + 즉시 언로드(keep_alive=0)."""
+        with self._resident_meta_lock:
+            self._keep_resident = False
+            self._resident_loaded = False
+            target = str(model or self._resident_model or self.default_model).strip()
+            self._resident_model = None
+        self._unload_model(target)
 
     def _recover_tag(
         self, normalized: str, seen: set[str], *, max_rating: str = "e",
@@ -949,7 +1093,16 @@ class OllamaTagAssistService:
             return self._assist(text, model=model, options=options)
         finally:
             self._end_progress()
-            self._unload_model(target_model)
+            # Auto Boost로 '이 모델'이 상주 중이면 언로드 대신 keep_alive=-1 재확인(assist의
+            # 기본 keep_alive가 상주 타이머를 ~5분으로 덮었을 수 있다). 상주 모델이 아니면
+            # (다른 모델 override 포함) 기존대로 언로드 — 무거운 모델이 VRAM에 남지 않게.
+            with self._resident_meta_lock:
+                is_resident_model = self._keep_resident and target_model == (
+                    self._resident_model or self.default_model)
+            if is_resident_model:
+                self._http_keep_alive_load(target_model)
+            else:
+                self._unload_model(target_model)
 
     def _assist(
         self, text: str, *, model: str | None = None, options: dict[str, Any] | None = None,

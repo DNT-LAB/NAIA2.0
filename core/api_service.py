@@ -305,15 +305,19 @@ class APIService:
         if isinstance(hr_negative, str) and hr_negative.strip():
             payload["hr_negative_prompt"] = hr_negative
 
-    def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
+    def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
         최대 5회까지 예외 발생 시 재시도합니다.
 
         Args:
             parameters: 생성 파라미터
-            progress_callback: ComfyUI 진행률 콜백 (message, current, total, percent)
-                워커 스레드에서 호출되므로 시그널 emit 등 스레드 안전한 방식으로 전달해야 함
+            progress_callback: 진행률 콜백 (message, current, total, percent)
+                ComfyUI 및 NAI 스트리밍에서 사용. 워커 스레드에서 호출되므로
+                스레드 안전한 방식으로 전달해야 함
+            preview_callback: NAI 스트리밍 중간 프리뷰 콜백 (image_bytes, step, total)
+                전달되면 NAI generate-image-stream(SSE)을 사용해 중간 이미지를 받습니다.
+                워커 스레드에서 호출되므로 스레드 안전하게 처리해야 함
         """
         # 입력 프롬프트에서 주석 및 개행문자 처리
         if 'input' in parameters and isinstance(parameters['input'], str):
@@ -453,7 +457,7 @@ class APIService:
                 print(f"[RETRY] 재시도 {attempt}/{max_retries}...")
             try:
                 if api_mode == "NAI":
-                    result = self._call_nai_api(parameters)
+                    result = self._call_nai_api(parameters, progress_callback=progress_callback, preview_callback=preview_callback)
                 elif api_mode == "WEBUI":
                     result = self._call_webui_api(parameters)
                 elif api_mode == "COMFYUI":  # 🆕 새로 추가
@@ -568,8 +572,12 @@ class APIService:
             main_token = self.app_context.secure_token_manager.get_token('nai_token')
             return main_token if main_token else ""
 
-    def _call_nai_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """NovelAI 이미지 생성 API를 호출합니다."""
+    def _call_nai_api(self, params: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
+        """NovelAI 이미지 생성 API를 호출합니다.
+
+        preview_callback이 전달되고 기본 txt2img(generate) 액션이면
+        generate-image-stream(SSE)을 사용해 중간 프리뷰를 스트리밍합니다.
+        """
         try:
             # 🆕 멀티 계정 지원: 라운드 로빈 토큰 선택
             token = self._get_active_nai_token()
@@ -956,6 +964,14 @@ class APIService:
             # 페이로드 직전 지점이 NAI로 나가는 진짜 마지막 단계이므로 여기서 최종 보정한다.
             self._snap_nai_api_parameters_resolution(api_parameters)
 
+            # 🎬 NAI 스트리밍 미리보기 사용 여부 결정
+            # preview_callback이 있고 기본 txt2img(generate) 액션일 때만 스트리밍.
+            # (img2img/infill은 일반 경로로 처리하여 호환성 보장)
+            use_stream = (preview_callback is not None) and action_type == "generate"
+            if use_stream:
+                # stream 파라미터는 parameters 객체 내부에 위치 (SSE)
+                api_parameters["stream"] = "sse"
+
             # 최종 페이로드 구성
             payload = {
                 "input": params.get('input', ''),
@@ -968,12 +984,30 @@ class APIService:
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json"
             }
-            
+
             # print("📤 NAI API 요청 페이로드:", payload)
-            
+
             # API payload를 안전하게 저장
             self.app_context.store_api_payload(payload, "NAI")
-            
+
+            # 🎬 스트리밍 경로: generate-image-stream(SSE)으로 중간 프리뷰 수신 후 최종 이미지 반환
+            if use_stream:
+                steps_for_progress = api_parameters.get('steps', 28)
+                image_bytes = self._stream_nai_request(
+                    payload, headers, steps_for_progress,
+                    progress_callback=progress_callback,
+                    preview_callback=preview_callback,
+                )
+                self._cleanup_http_threads()
+                if not image_bytes:
+                    raise Exception("스트리밍 응답에서 최종 이미지를 받지 못했습니다.")
+                try:
+                    image = Image.open(io.BytesIO(image_bytes))
+                    image.load()
+                except Exception as e:
+                    raise Exception(f"스트리밍 최종 이미지 처리 실패: {e}")
+                return {'status': 'success', 'image': image, 'raw_bytes': image_bytes}
+
             # HTTP 세션을 사용하여 연결 정리
             with requests.Session() as session:
                 response = session.post(
@@ -1291,6 +1325,100 @@ class APIService:
             # 적용된 파라미터들을 로그에 출력 (디버깅용)
             for key, value in custom_params.items():
                 print(f"   - {key}: {value}")
+
+    def _stream_nai_request(self, payload: Dict[str, Any], headers: Dict[str, str], steps: int,
+                            progress_callback=None, preview_callback=None) -> bytes | None:
+        """
+        NovelAI generate-image-stream(SSE) 엔드포인트를 호출합니다.
+
+        - 중간 단계(event_type='intermediate') 프레임은 preview_callback(image_bytes, step, total)으로 전달
+        - 진행률은 progress_callback(message, current, total, percent)으로 전달
+        - 최종(event_type='final') 프레임의 원본 바이트를 반환
+
+        Returns:
+            최종 이미지의 raw bytes (없으면 None)
+        """
+        # NAI_V3_API_URL = ".../ai/generate-image" → ".../ai/generate-image-stream"
+        stream_url = self.NAI_V3_API_URL + "-stream"
+        stream_headers = dict(headers)
+        stream_headers["Accept"] = "text/event-stream"
+
+        final_bytes = None
+        try:
+            steps = int(steps) if steps else 0
+        except Exception:
+            steps = 0
+
+        with requests.Session() as session:
+            response = session.post(
+                stream_url,
+                headers=stream_headers,
+                json=payload,
+                stream=True,
+                timeout=(30, 300),
+            )
+            try:
+                # 오류 응답은 본문을 읽어 예외로 처리 (재시도/에러 표시 일관성)
+                if response.status_code not in (200, 201):
+                    response.raise_for_status()
+
+                for line in response.iter_lines(decode_unicode=True):
+                    if not line:
+                        continue
+                    # SSE 데이터 라인만 처리 (event:/id: 라인은 무시)
+                    if not line.startswith("data:"):
+                        continue
+                    data_str = line[len("data:"):].lstrip()
+                    if not data_str:
+                        continue
+                    try:
+                        event = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+
+                    event_type = event.get("event_type")
+                    img_b64 = event.get("image")
+                    if not img_b64:
+                        continue
+                    try:
+                        img_bytes = base64.b64decode(img_b64)
+                    except Exception:
+                        continue
+
+                    if event_type == "final":
+                        final_bytes = img_bytes
+                        # 최종 프레임도 즉시 프리뷰에 반영 (완료 처리 전 잔상 방지)
+                        if preview_callback is not None:
+                            try:
+                                preview_callback(img_bytes, steps, steps)
+                            except Exception:
+                                pass
+                    else:
+                        # intermediate 프레임
+                        step_ix = event.get("step_ix", -1)
+                        try:
+                            cur = int(step_ix) + 1 if (step_ix is not None and int(step_ix) >= 0) else 0
+                        except Exception:
+                            cur = 0
+                        if progress_callback is not None and steps > 0:
+                            percent = int(min(max(cur / steps, 0.0), 1.0) * 100)
+                            progress_callback(
+                                f"NAI 스트리밍 : {percent}% ({cur}/{steps})",
+                                cur, steps, percent,
+                            )
+                        if preview_callback is not None:
+                            try:
+                                preview_callback(img_bytes, cur, steps)
+                            except Exception as e:
+                                print(f"⚠️ 스트리밍 프리뷰 콜백 실패: {e}")
+            finally:
+                response.close()
+                if hasattr(session, 'adapters'):
+                    for adapter in session.adapters.values():
+                        if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
+                            adapter.poolmanager.clear()
+
+        return final_bytes
 
     def _process_nai_response(self, content: bytes) -> Dict[str, Any] | None:
         """NAI API의 응답(zip)을 처리하여 PIL Image와 원본 바이트를 반환합니다."""

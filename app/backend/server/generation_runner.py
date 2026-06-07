@@ -14,7 +14,7 @@ from app.backend.server.generation_commands import (
     random_service,
 )
 from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
-from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
+from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json, broadcast_preview_image
 from core import result_image_payload_service as result_images
 from core.web_session_context import WebSessionContext
 
@@ -135,11 +135,33 @@ async def _run_automation_timer_watcher(context: WebSessionContext, clients: set
         context.automation_timer_watcher_task = None
 
 
+def _make_nai_preview_callback(clients: set[WebSocket], loop: asyncio.AbstractEventLoop):
+    """워커 스레드(asyncio.to_thread)에서 호출되는 NAI 스트리밍 프리뷰 콜백을 만든다.
+
+    콜백은 동기 함수지만 WebSocket 브로드캐스트는 코루틴이므로,
+    ``run_coroutine_threadsafe``로 메인 이벤트 루프에 넘긴다(스레드 안전).
+    프레임은 fire-and-forget으로 전송한다(워커 블로킹 방지).
+    """
+    def _cb(image_bytes: bytes, step, total) -> None:
+        try:
+            info = {"step": int(step), "total": int(total)}
+        except Exception:
+            info = {}
+        try:
+            asyncio.run_coroutine_threadsafe(
+                broadcast_preview_image(clients, image_bytes, info), loop
+            )
+        except Exception:
+            pass
+    return _cb
+
+
 async def run_generation_queue(context: WebSessionContext, clients: set[WebSocket]) -> None:
     if getattr(context, "headless_generation_runner_active", False):
         return
     context.headless_generation_runner_active = True
     try:
+        loop = asyncio.get_running_loop()
         while True:
             request = await asyncio.to_thread(context.generation_queue_manager.dequeue_request)
             if request is None:
@@ -147,8 +169,19 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             context.is_generating = True
             await broadcast_json(clients, {"type": "status", "is_generating": True, "message": "generating"})
             await broadcast_json(clients, context.queue_state_payload())
+            # 🎬 NAI 스트리밍 미리보기: 옵션이 켜져 있고 NAI 모드일 때만 프리뷰 콜백 연결
+            preview_callback = None
             try:
-                stored = await asyncio.to_thread(generation_service(context).execute_request, request)
+                streaming_on = bool(context.remote_options.get("nai_streaming_preview", False))
+            except Exception:
+                streaming_on = False
+            if streaming_on and (getattr(request, "params", {}) or {}).get("api_mode") == "NAI":
+                preview_callback = _make_nai_preview_callback(clients, loop)
+            try:
+                stored = await asyncio.to_thread(
+                    generation_service(context).execute_request, request,
+                    preview_callback,
+                )
             except Exception as exc:
                 await _broadcast_generation_error(context, clients, request, str(exc))
                 continue

@@ -2023,6 +2023,7 @@ const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
   wildcard_standalone: $('optWcStandalone'),
+  nai_streaming_preview: $('optNaiStreaming'),
 };
 const pendingOptionValues = Object.create(null);
 let translatorPopupRequestId = '';
@@ -2064,7 +2065,34 @@ function initResultInfoResizer() {
 
 // ---- WebSocket ----
 
+// 🎬 NAI 스트리밍: nai_preview_meta 직후 도착하는 blob은 '중간 프리뷰'로 처리한다.
+let nextBlobIsPreview = false;
+let naiPreviewBlobUrl = null;
+
+function handleNaiPreviewBlob(data) {
+  // 중간 프리뷰: 메인 뷰어에 표시만 하고 완료/히스토리/통계 처리는 하지 않는다.
+  try {
+    const url = URL.createObjectURL(data);
+    if (naiPreviewBlobUrl) URL.revokeObjectURL(naiPreviewBlobUrl);
+    naiPreviewBlobUrl = url;
+    preview.src = url;
+    preview.dataset.source = 'preview';
+    preview.classList.add('show');
+    emptyMsg.style.display = 'none';
+  } catch (e) {
+    /* 프리뷰 표시 실패는 무시 (최종 결과에는 영향 없음) */
+  }
+}
+
 function handleWsBlob(data) {
+  // 🎬 NAI 스트리밍 중간 프리뷰 프레임이면 가볍게 표시만 하고 종료
+  if (nextBlobIsPreview) {
+    nextBlobIsPreview = false;
+    handleNaiPreviewBlob(data);
+    return;
+  }
+  // 최종 결과 도착: 남아있는 프리뷰 URL 정리
+  if (naiPreviewBlobUrl) { try { URL.revokeObjectURL(naiPreviewBlobUrl); } catch {} naiPreviewBlobUrl = null; }
   // Live preview: blob → 메인 뷰어에 즉시 표시
   const url = URL.createObjectURL(data);
   if (blobUrl) URL.revokeObjectURL(blobUrl);
@@ -2243,6 +2271,7 @@ function onWsMessageError(error) {
 
 const wsMessageHandlers = {
   image_meta: updateMeta,
+  nai_preview_meta: () => { nextBlobIsPreview = true; },
   status: m => setGen(m.is_generating),
   prompt_generated: updatePromptOnly,
   random_failed: onRandomFailed,

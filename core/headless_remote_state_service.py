@@ -14,6 +14,7 @@ REMOTE_OPTION_DEFAULTS = {
     "auto_generate": False,
     "wildcard_standalone": False,
     "auto_save": True,
+    "nai_streaming_preview": False,
 }
 REMOTE_BOOLEAN_PARAMS = {
     "seed_fixed",

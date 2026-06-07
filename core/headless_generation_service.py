@@ -201,8 +201,13 @@ class HeadlessGenerationService:
             if key in params
         }
 
-    def execute_request(self, request: GenerationRequest) -> HeadlessStoredResult:
-        """Execute one queued request and store its result in server state."""
+    def execute_request(self, request: GenerationRequest, preview_callback=None, progress_callback=None) -> HeadlessStoredResult:
+        """Execute one queued request and store its result in server state.
+
+        preview_callback/progress_callback: NAI 스트리밍 미리보기용 콜백.
+        제너레이션 러너(asyncio.to_thread)에서 워커 스레드로 호출되므로,
+        콜백 내부에서 이벤트 루프 접근은 스레드 안전하게 처리해야 한다.
+        """
 
         params = dict(request.params or {})
         params["_generation_request"] = request
@@ -217,7 +222,11 @@ class HeadlessGenerationService:
         self._expand_input_wildcards(params)
         request.mark_processing()
         api_service = self._api_service()
-        api_result = api_service.call_generation_api(params)
+        api_result = api_service.call_generation_api(
+            params,
+            progress_callback=progress_callback,
+            preview_callback=preview_callback,
+        )
         if api_result.get("status") == "error":
             error_message = str(api_result.get("message") or "Unknown API error")
             request.mark_failed(error_message)

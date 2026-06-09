@@ -281,7 +281,11 @@ class HeadlessAutomationService:
         if error:
             messages.append(self.context._toast(f"Automation stopped: {error}", level="error"))
         elif settings.get("notify_on_finish", True):
-            messages.append(self.context._toast("Automation complete.", level="success"))
+            # 완료 토스트에 사운드 마커를 달아 프론트가 가청 알림음(Web Audio 비프)을
+            # 재생하게 한다 — 기존엔 시각 토스트만 있어 "알림이 안 들린다"는 보고가 있었다.
+            complete_toast = self.context._toast("Automation complete.", level="success")
+            complete_toast["sound"] = "complete"
+            messages.append(complete_toast)
         if settings.get("shutdown_on_finish"):
             messages.append(self.context._toast(AUTOMATION_UNSUPPORTED_SHUTDOWN_MESSAGE, level="info"))
         return {"continue": False, "messages": messages}

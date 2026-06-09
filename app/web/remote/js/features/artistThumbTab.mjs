@@ -1190,7 +1190,9 @@ export function createArtistThumbController({
     const raw = Number.parseFloat(String(value ?? '1'));
     const next = Number.isFinite(raw) ? Math.max(0, Math.min(5, raw)) : 1;
     const display = formatArtistWeight(next) || '0';
-    if (weightInput) weightInput.value = display;
+    // 입력 중에는 재포맷 writeback 금지 — 타이핑마다 .value를 덮어쓰면 캐럿이 끝으로 튄다
+    // (type=number라 selectionStart 복원 불가). 커밋(change/blur) 시에만 정규화한다.
+    if (weightInput && document.activeElement !== weightInput) weightInput.value = display;
     if (weightSlider) {
       weightSlider.value = String(Math.max(0, Math.min(2, next)));
     }
@@ -1869,6 +1871,8 @@ export function createArtistThumbController({
     postfixEl?.addEventListener('input', scheduleSaveOptions);
     weightSlider?.addEventListener('input', event => setArtistWeight(event.target.value));
     weightInput?.addEventListener('input', event => setArtistWeight(event.target.value));
+    // 커밋 시점(blur/Enter)에만 정규화 표시를 반영 — 입력 중 캐럿 점프 방지(위 가드와 짝).
+    weightInput?.addEventListener('change', event => setArtistWeight(event.target.value));
   }
 
   async function load(options = {}) {

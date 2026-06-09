@@ -10646,6 +10646,15 @@ body.detached-metadata .metadata-layout {
 }
 .mod-textarea:focus { border-color: var(--accent); }
 .mod-textarea::placeholder { color: var(--text-dim); font-style: italic; }
+/* NAI 캐릭터 프롬프트/UC 입력칸: 포커스(클릭) 시 높이 확장 — PE .pe-textarea 패턴 이식.
+   min-height 플로어만 올리므로 사용자가 수동 리사이즈한 더 큰 높이(inline style.height)는
+   보존되고, 작은 칸만 편집 시 커졌다가 blur 시 원래대로 돌아온다. */
+.mod-char-prompt, .mod-char-uc {
+  transition: min-height 160ms ease, border-color 0.2s;
+}
+.mod-char-prompt:focus, .mod-char-uc:focus {
+  min-height: 150px;
+}
 .mod-select {
   width: 100%;
   background: var(--bg-deep);
@@ -13326,6 +13335,29 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
+}
+/* Legacy DSL: Rules 입력칸이 팝업의 남은 세로 공간을 채우도록(하단 빈 공간 제거).
+   .cond-root는 height:100% 플렉스 컬럼이므로 Rules 섹션을 flex-grow시키고 textarea/
+   오버레이를 wrap에 절대 채움한다. .mod-textarea의 max-height:200px 캡도 해제한다. */
+.cond-rules-section {
+  flex: 1 1 auto;
+  min-height: 140px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cond-rules-section .cond-rules-wrap {
+  flex: 1 1 auto;
+  min-height: 120px;
+}
+.cond-rules-section .cond-rules-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  resize: none;
 }
 .cond-engine-grid {
   display: grid;

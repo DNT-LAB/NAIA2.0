@@ -647,10 +647,12 @@ export function createTagAssistController({
         const info = getActiveTokenInfo(target);
         if (!info) return;
         const text = target.value;
+        const _st = target.scrollTop, _sl = target.scrollLeft; // value 재대입 scrollTop 리셋 → 복원
         target.value = text.substring(0, info.end) + ', ' + tag + text.substring(info.end);
         const newPos = info.end + 2 + tag.length;
         target.selectionStart = target.selectionEnd = newPos;
-        target.focus();
+        target.focus({ preventScroll: true }); // 복원 전 focus(미포커스 시 재스크롤 방지, Codex)
+        target.scrollTop = _st; target.scrollLeft = _sl; // 긴 프롬프트 스크롤 점프 방지
         if (target === promptEdit) onPromptEdit();
         else fireModuleOninput(target);
         lastLookupTag = '';
@@ -1338,10 +1340,12 @@ export function createTagAssistController({
         const info = getActiveTokenInfo(target);
         if (!info) return;
         const text = target.value;
+        const _st = target.scrollTop, _sl = target.scrollLeft; // value 재대입 scrollTop 리셋 → 복원
         target.value = text.substring(0, info.end) + ', ' + tag + text.substring(info.end);
         const newPos = info.end + 2 + tag.length;
         target.selectionStart = target.selectionEnd = newPos;
-        target.focus();
+        target.focus({ preventScroll: true }); // 복원 전 focus(미포커스 시 재스크롤 방지, Codex)
+        target.scrollTop = _st; target.scrollLeft = _sl; // 긴 프롬프트 스크롤 점프 방지
         if (target === promptEdit) onPromptEdit();
         else fireModuleOninput(target);
         lastLookupTag = '';
@@ -1918,7 +1922,7 @@ export function createTagAssistController({
     presetPersonMenuOpen = false;
     presetEventSearch = '';
     swapToken(target, info, result.token);
-    target.focus();
+    target.focus({ preventScroll: true }); // swapToken이 이미 스크롤 복원 — 재스크롤 방지(Codex)
     requestPresetAutocomplete(result.token);
     return true;
   }
@@ -2585,6 +2589,7 @@ export function createTagAssistController({
 
   function swapToken(textarea, tokenInfo, newTag) {
     const text = textarea.value;
+    const _st = textarea.scrollTop, _sl = textarea.scrollLeft; // value 재대입 scrollTop=0 리셋 → 복원
     const raw = tokenInfo.raw;
     const stripped = tokenInfo.stripped;
     const rawLower = raw.toLowerCase();
@@ -2599,7 +2604,11 @@ export function createTagAssistController({
     textarea.value = text.substring(0, tokenInfo.start) + replacement + text.substring(tokenInfo.end);
     const newPos = tokenInfo.start + replacement.length;
     textarea.selectionStart = textarea.selectionEnd = newPos;
-    textarea.focus();
+    // 스크롤 복원은 focus() 뒤에 — 미포커스 상태(preset/클릭 경로)에서 focus()가 캐럿으로
+    // 재스크롤하면 복원이 무효화되고, 이어진 onPromptEdit이 잘못된 스크롤로 오버레이를
+    // 동기화한다(Codex 적대리뷰). preventScroll로 focus 자체의 스크롤도 막는다.
+    textarea.focus({ preventScroll: true });
+    textarea.scrollTop = _st; textarea.scrollLeft = _sl; // 긴 프롬프트 스크롤 점프 방지
     if (textarea === promptEdit) onPromptEdit();
     else fireModuleOninput(textarea);
   }

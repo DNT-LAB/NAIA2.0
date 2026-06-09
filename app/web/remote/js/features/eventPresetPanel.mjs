@@ -3575,7 +3575,10 @@ export function createEventPresetPanel({
   function renderSearchControl() {
     const input = root.querySelector('[data-ep-search]');
     if (!input) return;
-    input.value = activeSearchValue();
+    // 입력 중(포커스 상태)에는 value를 재대입하지 않는다 — 매 키 입력마다 renderAll이
+    // 돌며 .value를 덮어쓰면 캐럿/스크롤이 리셋된다(프롬프트 프리뷰 :4117과 동일 가드).
+    const next = activeSearchValue();
+    if (document.activeElement !== input && input.value !== next) input.value = next;
     input.placeholder = activeSearchPlaceholder();
   }
 

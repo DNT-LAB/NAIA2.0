@@ -512,7 +512,12 @@ export function createCharacterViewerController({
       ].filter(Boolean).join('') || '<div class="character-viewer-tag-empty">No tag detail</div>';
     }
     lastPromptPayload = data.prompt || null;
-    if (promptEl && lastPromptPayload) promptEl.value = lastPromptPayload.character_prompt || '';
+    // #characterViewerPrompt는 편집 가능한 textarea(Copy/Generate의 소스) — 사용자가
+    // 직접 편집 중(포커스)일 때 재시드하면 수동 편집·캐럿·스크롤이 날아간다.
+    if (promptEl && lastPromptPayload && document.activeElement !== promptEl
+        && promptEl.value !== (lastPromptPayload.character_prompt || '')) {
+      promptEl.value = lastPromptPayload.character_prompt || '';
+    }
     updateActionAvailability();
     markSelection();
     if (activeView === 'detail') switchCharacterView('detail');
@@ -575,7 +580,12 @@ export function createCharacterViewerController({
         return;
       }
       lastPromptPayload = data;
-      if (promptEl) promptEl.value = data.character_prompt || '';
+      // 디바운스 refresh(120ms)가 사용자 편집 중에도 도달할 수 있다 — 포커스 중이면
+      // 재시드하지 않아 수동 편집·캐럿·스크롤을 보존한다(eventPreset :4117 가드와 동일).
+      if (promptEl && document.activeElement !== promptEl
+          && promptEl.value !== (data.character_prompt || '')) {
+        promptEl.value = data.character_prompt || '';
+      }
     } catch (error) {
       console.error('Character prompt refresh failed', error);
       showToast?.(error.message || 'Character prompt failed', 'error');

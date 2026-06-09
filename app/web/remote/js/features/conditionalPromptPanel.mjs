@@ -348,6 +348,10 @@ export function createConditionalPromptPanel({
   function onRulesInput(element) {
     const highlight = document.getElementById('condRulesHighlight');
     if (highlight) highlight.innerHTML = formatRules(element.value);
+    // innerHTML 재구축은 오버레이 scrollTop을 0으로 리셋한다 — textarea 스크롤에
+    // 재동기화하지 않으면 맨 아래에서 타이핑 시 색상 오버레이만 맨 위로 튄다(캐럿은 아래).
+    // onscroll 핸들러는 네이티브 스크롤에만 반응하므로 타이핑 경로는 여기서 직접 복원한다.
+    syncScroll(element);
     const key = element.dataset.condRuleKey || 'rules';
     onModTextEdit('conditional_prompt', key, element.value);
   }
@@ -698,7 +702,7 @@ export function createConditionalPromptPanel({
       <div class="cond-root">
         ${renderModeBar(m)}
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
-        <div>
+        <div class="cond-rules-section">
           <div class="cond-rules-head">
             <div class="mod-section-label">Rules (Legacy DSL)</div>
           </div>

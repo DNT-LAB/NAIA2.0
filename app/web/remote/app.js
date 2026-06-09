@@ -352,7 +352,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260517-artist-active-resolution1')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260609-scrollfix1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -372,7 +372,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260517-art
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260509-mobile-layout1')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260609-scrollfix1')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,
@@ -868,7 +868,7 @@ const promptDrawerReady = import('./js/features/promptDrawer.mjs')
   .catch(error => {
     console.error('Failed to initialize prompt drawer module', error);
   });
-const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260516-hires-assist1')
+const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260609-scrollfix1')
   .then(({createEventPresetPanel}) => {
     eventPresetPanel = createEventPresetPanel({
       document,
@@ -949,7 +949,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260531-
   .catch(error => {
     console.error('Failed to initialize character panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260603-cond-focus1')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260609-scrollfix1')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
@@ -1086,7 +1086,7 @@ const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260530-refine
   .catch(error => {
     console.error('Failed to initialize refine panel module', error);
   });
-const tagSearchReady = import('./js/features/tagSearch.mjs?v=20260510-ime-compose1')
+const tagSearchReady = import('./js/features/tagSearch.mjs?v=20260609-scrollfix1')
   .then(({createTagSearchController}) => {
     tagSearchController = createTagSearchController({
       document,
@@ -2367,7 +2367,7 @@ const wsMessageHandlers = {
   storage_list: onStorageList,
   wildcard_manager: onWildcardManager,
   filter_reset: onFilterReset,
-  toast: m => showToast(m.message, m.level || 'success'),
+  toast: m => { showToast(m.message, m.level || 'success'); if (m.sound) playNotifySound(); },
   character_viewer_error: m => {
     if (characterViewerControl && typeof characterViewerControl.handleGenerationError === 'function') {
       characterViewerControl.handleGenerationError(m);
@@ -5166,6 +5166,52 @@ let syncingMode = false;
 let modeSwitching = false;
 let prevMode = modeSelect.value;
 let toastTimer = null;
+
+// 알림음(Web Audio, 에셋 불필요) — sound 마커가 붙은 토스트(자동화 완료 등)에서 재생.
+let _notifyAudioCtx = null;
+function _ensureNotifyAudioCtx() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!_notifyAudioCtx) _notifyAudioCtx = new Ctx();
+    if (_notifyAudioCtx.state === 'suspended') _notifyAudioCtx.resume();
+    return _notifyAudioCtx;
+  } catch (e) { return null; }
+}
+function playNotifySound() {
+  const ctx = _ensureNotifyAudioCtx();
+  if (!ctx) return;
+  try {
+    const now = ctx.currentTime;
+    // 2음 차임(A5 → D6)
+    [[880, 0], [1174.66, 0.13]].forEach(([freq, t]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const start = now + t;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.3, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.3);
+    });
+  } catch (e) { /* ignore */ }
+}
+// 브라우저 자동재생 정책: 첫 사용자 제스처에서 AudioContext를 미리 unlock(자동화는 사용자가
+// 켜고 시작하므로 그 시점 제스처로 충분; 이후 완료 시 정지 상태 없이 즉시 재생).
+let _notifyAudioPrimed = false;
+function _primeNotifyAudio() {
+  if (_notifyAudioPrimed) return;
+  _notifyAudioPrimed = true;
+  _ensureNotifyAudioCtx();
+  document.removeEventListener('pointerdown', _primeNotifyAudio);
+  document.removeEventListener('keydown', _primeNotifyAudio);
+}
+document.addEventListener('pointerdown', _primeNotifyAudio);
+document.addEventListener('keydown', _primeNotifyAudio);
+
 let autoModeFallbackInFlight = false;
 let autoModeFallbackTarget = '';
 const API_MODES = ['NAI', 'WEBUI', 'COMFYUI'];
@@ -7278,7 +7324,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260606-remote-entry1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260609-scrollfix1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

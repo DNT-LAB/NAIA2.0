@@ -162,13 +162,15 @@ export function createTagSearchController({
   function insertTag(tag) {
     const current = promptEdit.value;
     const start = promptEdit.selectionStart != null ? promptEdit.selectionStart : current.length;
+    const st = promptEdit.scrollTop, sl = promptEdit.scrollLeft; // value 재대입은 scrollTop=0 리셋 → 복원
     const before = current.substring(0, start);
     const needSep = before.length > 0 && !before.endsWith(', ') && !before.endsWith(',') && before.trim().length > 0;
     const sep = needSep ? ', ' : '';
     promptEdit.value = before + sep + tag + ', ' + current.substring(start);
-    promptEdit.focus();
+    promptEdit.focus({ preventScroll: true });
     const newPos = start + sep.length + tag.length + 2;
     promptEdit.selectionStart = promptEdit.selectionEnd = newPos;
+    promptEdit.scrollTop = st; promptEdit.scrollLeft = sl; // 복원은 focus/selection 뒤(긴 프롬프트 스크롤 점프 방지)
     onPromptEdit();
     clearTimeoutFn(timer);
     input.value = '';

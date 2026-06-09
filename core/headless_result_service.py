@@ -31,6 +31,9 @@ class HeadlessHistoryItem:
     filepath: str = ""
     history_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: datetime = field(default_factory=datetime.now)
+    # 비-PNG(WEBP 등) ComfyUI 결과에서 raw_bytes는 원본을 보존하고, 저장/PNG 합류점이 쓸
+    # 메타데이터-임베드 PNG를 여기에 둔다(history_item_png_payload가 우선 사용). None이면 미사용.
+    png_payload_override: bytes | None = None
 
     @property
     def rel_path(self) -> str:
@@ -119,21 +122,25 @@ class HeadlessResultStore:
             "final_prompt": params.get("input", ""),
             "negative_prompt": params.get("negative_prompt", ""),
         }
-        # ComfyUI 결과: ComfyUI 서버가 이미지에 메타데이터를 임베드하지 않은 경우에만
-        # (예: 서버가 ``--disable-metadata``로 기동) NAIA가 자체 구조화 메타데이터
-        # (naia_generation_params / naia_prompt_context + 워크플로우 청크)를 삽입한다.
-        # 서버가 네이티브 ComfyUI 메타데이터(prompt/workflow 청크)를 남겼으면 보존하고
-        # 손대지 않는다(사용자 요청: 누락된 경우에만 대응). 데스크톱 generation_controller가
-        # 하던 보강(82856b6)이 헤드리스 이관(30542db 아카이브) 시 누락된 회귀를 복구하는
-        # 경로이기도 하다. WEBUI(embed_webui_parameters)와 같은 단일 저장 합류점 패턴이며,
-        # prompt_context/params가 모두 조립된 이 시점에서 호출해야 한다. NAI/WEBUI는 게이트로
-        # 건너뛰고, 비-PNG(SaveAnimatedWEBP 등)는 PNG 재인코딩 시 프레임이 손실되므로 스킵
-        # (원본 유지). 메타 없는 첫 ComfyUI 이미지는 호출부가 경고 토스트를 1회 띄운다.
-        # ⚠️add_api_result는 외부 이미지 임포트(insert_external_image_to_history)도 거치는데
-        # 거긴 api_mode를 현재 UI 모드 태그로만 박는다 — COMFYUI 모드에서 임포트한 사용자
-        # 원본 PNG를 재인코딩/오염하지 않도록, 실제 ComfyUI 생성 신호(prompt_id/workflow_api/
-        # source_node_id)가 있고 imported_external이 아닌 경우로 한정한다(Codex 적대리뷰).
+        # ComfyUI 결과 메타데이터 보강 (단일 저장 합류점 패턴, WEBUI embed_webui_parameters와 동형).
+        # 데스크톱 generation_controller 보강(82856b6)이 헤드리스 이관(30542db 아카이브) 시
+        # 누락된 회귀를 복구하는 경로. prompt_context/params가 조립된 이 시점에서 호출한다.
+        #  • PNG: 서버가 네이티브 메타(prompt/workflow 청크)를 남겼으면 보존(사용자 요청:
+        #    누락 시에만 대응). ``--disable-metadata`` 서버처럼 비어 있으면 naia_* 를 in-place
+        #    보강한다(원본도 PNG라 손실 없음).
+        #  • 비-PNG(WEBP/JPEG — 워크플로우의 SaveAnimatedWEBP / WebP 저장 노드 출력):
+        #    원본 바이트는 raw_bytes로 **그대로 보존**한다 — /api/history/image, /api/result/
+        #    image/original, img2img 소스가 raw_bytes를 verbatim 사용하므로 애니메이션/원본을
+        #    잃으면 안 된다(Codex 적대리뷰). 다만 저장 합류점 history_item_png_payload가 비-PNG를
+        #    PNG로 재인코딩하며 메타를 잃으므로, 메타 임베드 PNG를 png_payload_override에 별도
+        #    보관해 **저장/PNG 경로만** 그것을 쓰게 한다(PNG 저장은 원래 단일 프레임으로 평탄화
+        #    되므로 애니메이션 손실은 기존 동작과 동일).
+        # NAI/WEBUI는 게이트로 건너뛴다. ⚠️add_api_result는 외부 이미지 임포트
+        # (insert_external_image_to_history)도 거치는데 거긴 api_mode를 현재 UI 모드 태그로만
+        # 박는다 — 실제 ComfyUI 생성 신호(prompt_id/workflow_api/source_node_id)가 있고
+        # imported_external이 아닌 경우로 한정한다.
         comfyui_metadata_injected = False
+        comfyui_png_override: bytes | None = None
         is_comfyui_generation = (
             str(params.get("api_mode") or "").strip().upper() == "COMFYUI"
             and not params.get("imported_external")
@@ -143,16 +150,34 @@ class HeadlessResultStore:
                 or api_result.get("source_node_id")
             )
         )
-        if is_comfyui_generation and result_images.is_png_bytes(raw_bytes):
+        if is_comfyui_generation:
             from utils.comfyui_png_metadata import (
                 enrich_comfyui_png_bytes,
                 png_has_generation_metadata,
             )
 
-            if not png_has_generation_metadata(raw_bytes):
+            raw_is_png = result_images.is_png_bytes(raw_bytes)
+            if raw_is_png:
+                source_has_metadata = png_has_generation_metadata(raw_bytes)
+            else:
+                # WEBP/JPEG: ComfyUI(예: SaveAnimatedWEBP)가 EXIF에 prompt/workflow를 남겼는지.
+                try:
+                    from utils.comfyui_png_metadata import (
+                        extract_comfyui_workflow_metadata_from_image_bytes,
+                    )
+
+                    extract_comfyui_workflow_metadata_from_image_bytes(raw_bytes)
+                    source_has_metadata = True
+                except Exception:
+                    source_has_metadata = False
+            # PNG: 네이티브 메타가 없을 때만 보강(있으면 보존). 비-PNG: 저장 시 PNG 재인코딩으로
+            # 메타를 잃으므로 원본 메타 유무와 무관하게 항상 PNG 오버라이드를 만든다.
+            should_enrich = (not raw_is_png) or (not source_has_metadata)
+            if should_enrich:
                 try:
                     enriched_bytes, _enriched_image, _changed = enrich_comfyui_png_bytes(
-                        raw_bytes,
+                        # 비-PNG는 None을 넘겨 디코드된 PIL 이미지로부터 PNG를 생성한다.
+                        raw_bytes if raw_is_png else None,
                         image,
                         workflow_api=api_result.get("workflow_api") or params.get("workflow"),
                         workflow_ui=api_result.get("workflow_ui") or params.get("_comfyui_workflow_ui"),
@@ -160,8 +185,13 @@ class HeadlessResultStore:
                         prompt_context=prompt_context,
                         api_metadata=dict(api_result.get("api_metadata", {}) or {}) or {"backend": "COMFYUI"},
                     )
-                    raw_bytes = enriched_bytes
-                    comfyui_metadata_injected = True
+                    if raw_is_png:
+                        raw_bytes = enriched_bytes              # PNG: in-place(원본도 PNG라 무손실)
+                    else:
+                        comfyui_png_override = enriched_bytes   # 비-PNG: 원본 raw_bytes 보존 + 저장용 PNG 별도
+                    # "--disable-metadata" 경고 토스트는 원본에 메타가 정말 없었을 때만 1회 띄운다
+                    # (네이티브 메타를 가진 WEBP를 PNG로 변환·임베드한 경우엔 오발 금지).
+                    comfyui_metadata_injected = not source_has_metadata
                 except Exception as exc:  # pragma: no cover - defensive
                     print(f"⚠️ ComfyUI PNG 메타데이터 보강 실패(원본 사용): {exc}")
         item = HeadlessHistoryItem(
@@ -172,6 +202,7 @@ class HeadlessResultStore:
             prompt_context=prompt_context,
             source_row=getattr(request, "source_row", None),
             api_metadata=dict(api_result.get("api_metadata", {}) or {}),
+            png_payload_override=comfyui_png_override,
         )
         self._items.insert(0, item)
         evicted = self._items[self.max_items:]

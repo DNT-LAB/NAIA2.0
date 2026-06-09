@@ -108,6 +108,12 @@ def history_item_png_payload(item, label: str = "") -> tuple[bytes, str]:
     filepath = str(getattr(item, "filepath", "") or "")
     label = str(label or filepath or "naia-result.png")
 
+    # 비-PNG(WEBP 등) ComfyUI 결과: raw_bytes는 원본 보존용이라 PNG가 아니다. 저장/PNG 경로는
+    # add_api_result가 만든 메타데이터-임베드 PNG(png_payload_override)를 우선 사용한다.
+    override = _coerce_bytes(getattr(item, "png_payload_override", None))
+    if override and is_png_bytes(override):
+        return override, result_png_filename(label)
+
     raw_bytes = _coerce_bytes(getattr(item, "raw_bytes", None))
     if raw_bytes and is_png_bytes(raw_bytes):
         return raw_bytes, result_png_filename(label)

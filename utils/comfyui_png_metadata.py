@@ -447,10 +447,19 @@ def image_to_png_bytes(
     save_kwargs: Dict[str, Any] = {}
     if pnginfo is not None:
         save_kwargs["pnginfo"] = pnginfo
-    icc_profile = (getattr(image, "info", {}) or {}).get("icc_profile")
+    source_info = getattr(image, "info", {}) or {}
+    icc_profile = source_info.get("icc_profile")
+    dpi = source_info.get("dpi")
+    # PNG가 저장할 수 없는 모드(CMYK/YCbCr/HSV/F 등)는 RGB(A)로 변환한다. 변환 시 원본
+    # ICC(예: CMYK 프로파일)는 더 이상 유효하지 않으므로 떨군다. ComfyUI는 보통 RGB(A)다.
+    # ⚠️ PIL은 save_kwargs에 icc_profile이 없으면 image.info["icc_profile"]를 자동 사용하므로,
+    #    변환본에 복사된 stale ICC를 info에서도 제거해야 실제로 기록되지 않는다.
+    if image.mode not in ("1", "L", "LA", "I", "P", "RGB", "RGBA"):
+        image = image.convert("RGBA" if ("A" in image.mode or "a" in image.mode) else "RGB")
+        image.info.pop("icc_profile", None)
+        icc_profile = None
     if icc_profile:
         save_kwargs["icc_profile"] = icc_profile
-    dpi = (getattr(image, "info", {}) or {}).get("dpi")
     if dpi:
         save_kwargs["dpi"] = dpi
     image.save(buffer, format="PNG", **save_kwargs)

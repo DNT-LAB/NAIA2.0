@@ -133,6 +133,35 @@ class OllamaAssistantService:
             self._version_cache = (time.monotonic(), value)
             return value
 
+    @staticmethod
+    def _models_path_warning() -> str:
+        """Ollama 모델 디렉터리 경로에 비-ASCII(한글 등) 문자가 있으면 경고 문구를 반환한다.
+
+        llama.cpp(Ollama 내부 llama-server)는 Windows에서 비-ASCII 경로의 모델/CLIP
+        파일을 못 열어 "Failed to load CLIP model ... exit status 1"로 죽는다(upstream
+        한계 — NAIA가 고칠 수 없음). 사용자가 암호 같은 에러 대신 원인·해결책을 바로
+        알도록, 모델 경로(OLLAMA_MODELS 또는 기본 ~/.ollama/models)가 비-ASCII면 안내한다.
+        Windows 전용(비-Windows는 UTF-8 경로가 정상이라 경고 불필요)."""
+        try:
+            import os
+            import sys
+
+            if sys.platform != "win32":
+                return ""
+            from pathlib import Path
+
+            raw = os.environ.get("OLLAMA_MODELS") or str(Path.home() / ".ollama" / "models")
+            if raw and not raw.isascii():
+                return (
+                    "Ollama 모델 경로에 한글 등 비영문 문자가 포함돼 있어 모델 로딩이 "
+                    "실패할 수 있습니다 (llama.cpp의 Windows 경로 제약). 환경변수 "
+                    "OLLAMA_MODELS를 영문 경로(예: C:\\ollama\\models)로 지정하거나 모델을 "
+                    "영문 경로로 옮긴 뒤 Ollama를 재시작하세요."
+                )
+        except Exception:
+            pass
+        return ""
+
     def status(
         self,
         model: str | None = None,
@@ -188,6 +217,8 @@ class OllamaAssistantService:
             "endpoint": f"{self.base_url}/v1",
             "download_page": "https://ollama.com/download",
             "control_allowed": True,
+            # 비-ASCII(한글) 모델 경로 경고 — 빈 문자열이면 문제 없음(프론트가 게이트).
+            "path_warning": self._models_path_warning(),
         }
 
     # ------------------------------------------------------------------

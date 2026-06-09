@@ -766,7 +766,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   });
 // --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
 let ollamaAssistantPopup = null;
-const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260607-ollamafix1')
+const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260609-taskflash1')
   .then(({createOllamaAssistantPopup}) => {
     ollamaAssistantPopup = createOllamaAssistantPopup({
       document,
@@ -2367,7 +2367,7 @@ const wsMessageHandlers = {
   storage_list: onStorageList,
   wildcard_manager: onWildcardManager,
   filter_reset: onFilterReset,
-  toast: m => { showToast(m.message, m.level || 'success'); if (m.sound) playNotifySound(); },
+  toast: m => { showToast(m.message, m.level || 'success'); if (m.sound) playNotifySound(); if (m.sound === 'complete') flashTaskbarAttention(); },
   character_viewer_error: m => {
     if (characterViewerControl && typeof characterViewerControl.handleGenerationError === 'function') {
       characterViewerControl.handleGenerationError(m);
@@ -5211,6 +5211,12 @@ function _primeNotifyAudio() {
 }
 document.addEventListener('pointerdown', _primeNotifyAudio);
 document.addEventListener('keydown', _primeNotifyAudio);
+
+// Electron 셸: Automation 완료 시 작업표시줄 버튼 깜빡임(Windows 노란불)으로 주의를 끈다.
+// 웹/비-Electron(naiaShell 없음)에서는 자동 no-op. main이 창 비활성일 때만 실제로 깜빡인다.
+function flashTaskbarAttention() {
+  try { window.naiaShell?.flashTaskbar?.(); } catch (e) { /* non-electron / no-op */ }
+}
 
 let autoModeFallbackInFlight = false;
 let autoModeFallbackTarget = '';

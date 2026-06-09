@@ -1790,6 +1790,13 @@ ipcMain.on("naia:zoom-by", (event, direction) => {
 
 ipcMain.on("naia:zoom-reset", (event) => resetZoom(event.sender));
 
+// Automation 완료 등 백그라운드 작업이 끝나면 작업표시줄 버튼을 깜빡여(Windows 노란불)
+// 사용자 주의를 끈다. 창이 이미 포커스면 불필요하므로 비활성(다른 창/최소화)일 때만 깜빡인다.
+ipcMain.on("naia:flash-taskbar", () => {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFocused()) return;
+  try { mainWindow.flashFrame(true); } catch (e) {}
+});
+
 // Browser-style Ctrl+± / Ctrl+0 keyboard zoom for the main app window.
 function attachZoomKeyboard(targetWindow) {
   targetWindow.webContents.on("before-input-event", (event, input) => {
@@ -1844,6 +1851,13 @@ function createMainWindow() {
     danbooruView = null;
     danbooruViewAttached = false;
     mainWindow = null;
+  });
+  // 창을 다시 보면(포커스) 작업표시줄 깜빡임을 멈춘다 — Windows는 포커스 시 자동
+  // 정지하지만 방어적으로 명시한다(Automation 완료 시 깜빡인 노란불 해제).
+  mainWindow.on("focus", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.flashFrame(false); } catch (e) {}
+    }
   });
   // If the shell renderer reloads or navigates (maintenance/bootstrap/F5) while the
   // Danbooru panel is open, the renderer loses its embedActive state and cannot detach

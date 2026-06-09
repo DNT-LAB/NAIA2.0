@@ -16278,6 +16278,17 @@ body.detached-module .mod-grid-3 {
 .ollama-assistant-status { font-size: 11px; min-height: 14px; color: var(--text-dim); }
 .ollama-assistant-status.error { color: #e06c75; }
 .ollama-assistant-status.info { color: var(--text-muted); }
+.ollama-assistant-warning {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #e3c878;
+  background: rgba(170, 140, 60, 0.12);
+  border: 1px solid rgba(200, 170, 90, 0.4);
+  border-radius: 6px;
+  padding: 7px 9px;
+  margin-top: 2px;
+}
+.ollama-assistant-warning.hidden { display: none; }
 .ollama-assistant-badge {
   margin-left: auto; margin-right: 8px;
   font-size: 10px; font-weight: 700; letter-spacing: 0.2px;

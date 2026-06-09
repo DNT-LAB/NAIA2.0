@@ -87,6 +87,15 @@ export function createOllamaAssistantPopup({
     badge.textContent = text || '';
   }
 
+  // 비-ASCII(한글) 모델 경로 경고 배너 — 백엔드 status.path_warning이 있을 때만 표시.
+  function setWarning(text) {
+    const el = pick('.ollama-assistant-warning');
+    if (!el) return;
+    const msg = String(text || '').trim();
+    el.textContent = msg ? '⚠ ' + msg : '';
+    el.classList.toggle('hidden', !msg);
+  }
+
   function position() {
     if (!popup) return;
     const pw = popup.offsetWidth;
@@ -367,6 +376,7 @@ export function createOllamaAssistantPopup({
     renderActions('');
     setProgress(0, false);
     setAssistVisible(false);
+    setWarning('');  // 경로가 고쳐졌을 수 있으니 매 갱신 시 초기화 후 재설정.
     let data = null;
     try {
       // fresh=1(다시 확인): 백엔드 CLI 프로브 캐시 우회 — 방금 설치한 Ollama가 즉시 잡힌다.
@@ -383,6 +393,10 @@ export function createOllamaAssistantPopup({
       setStatus(String(data?.error || 'Ollama 상태를 확인하지 못했습니다.'), 'error');
       return;
     }
+    // 비-ASCII(한글) 모델 경로 경고는 설치/실행/모델 상태와 무관하게 항상 노출한다
+    // (모델 로딩 단계에서 터지는 llama-server 에러를 미리 안내). 원격 클라이언트는
+    // path_warning 미포함 → 자동 숨김.
+    setWarning(data.path_warning || '');
     if (!data.installed) {
       setBadge('Ollama 미설치', 'err');
       setStatus('이 PC에 Ollama가 없습니다. 설치 후 "다시 확인"을 누르세요.');
@@ -673,6 +687,7 @@ export function createOllamaAssistantPopup({
           <div class="ollama-assist-result"></div>
         </div>
         <div class="ollama-assistant-progress hidden"><div class="ollama-assistant-progress-fill"></div></div>
+        <div class="ollama-assistant-warning hidden"></div>
         <div class="ollama-assistant-actions ollama-main-actions"></div>
         <div class="ollama-assistant-status"></div>
       </div>`;

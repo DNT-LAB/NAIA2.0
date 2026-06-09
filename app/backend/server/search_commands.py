@@ -88,7 +88,10 @@ async def handle_search_command(
     if command_type == "search":
         archive_count = 0
         sources = getattr(context, "tag_archive_parquet_sources", None)
-        if callable(sources) and getattr(context, "search_results_scope", "") != "custom_parquet":
+        # The green [검색] is always a full tag-archive search (a previously fast-loaded
+        # custom parquet must not confine it — see run_search_command), so count the
+        # archive sources for the progress bar regardless of the current scope.
+        if callable(sources):
             archive_count = len(sources())
         progress_total = max(1, archive_count)
         await _send_json(ws, {

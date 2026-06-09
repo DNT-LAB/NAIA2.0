@@ -254,6 +254,11 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
     context.search_results_snapshot = context.search_results.get_dataframe().copy()
     context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
     context.search_results_scope = "custom_parquet"
+    # 업로드(불러오기/합치기)한 parquet도 모든 등급의 행을 담을 수 있으므로 활성/검색 등급을
+    # 전부 ON으로 켠다(WS load/merge 경로와 동일, 사용자 요청). search_query_ratings도 켜야
+    # search_state_payload의 체크박스(ratings 맵)가 전부 ON으로 표시된다.
+    context.search_query_ratings = set("gsqe")
+    context.save_search_filter_state(ratings=["g", "s", "q", "e"], search_ratings=["g", "s", "q", "e"])
     save_runner_parquet(context)
     return {
         "ok": True,

@@ -247,8 +247,16 @@ def run_search_command(
         bucket_start=bucket_start, bucket_end=bucket_end,
     )
 
-    use_custom_scope = getattr(context, "search_results_scope", "") == CUSTOM_PARQUET_SCOPE
-    archive_sources = [] if use_custom_scope else tag_archive_parquet_sources(context)
+    # The green [검색] is the full tag-archive search and must ALWAYS scan the archive
+    # when it is available — even if a custom parquet was previously fast-loaded (which
+    # sets search_results_scope = CUSTOM_PARQUET_SCOPE). The old guard suppressed the
+    # archive here whenever scope was custom, so basic search silently fell back to
+    # filtering the small loaded parquet AND never reset the scope (the reset below lives
+    # only in this archive branch) — a one-way trap that broke full search for the whole
+    # session (user report: fast-load → 전체검색 먹통). Refining WITHIN a loaded set is the
+    # 심층검색(refine) path; restore reverts to the loaded snapshot. So always prefer the
+    # archive; the successful archive search resets scope to TAG_ARCHIVE_SCOPE below.
+    archive_sources = tag_archive_parquet_sources(context)
     if archive_sources:
         # Date-cutoff slider: scan only buckets [start..end] (fewer files = faster).
         if bucket_start is not None or bucket_end is not None:
@@ -404,6 +412,13 @@ def load_or_merge_custom_parquet(
     context.search_results_snapshot = context.search_results.get_dataframe().copy()
     context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
     context.search_results_scope = CUSTOM_PARQUET_SCOPE
+    # 로드/합치기한 커스텀 parquet은 어떤 등급(g/s/q/e)의 행이든 담을 수 있다. 활성/검색 등급이
+    # 일부 OFF(기본 explicit OFF 등)면 로드된 결과셋이 등급 필터에 잘려 보이지 않으므로, 로드
+    # 시 모든 등급을 ON으로 켠다(사용자 요청). search_query_ratings는 search_state_payload의
+    # 체크박스 표시(ratings 맵, search_state_payload 318-344)에서 최우선이라 이것도 켜야 UI
+    # 체크박스가 전부 ON으로 보인다(save_search_filter_state는 활성/검색 등급 상태만 갱신).
+    context.search_query_ratings = set("gsqe")
+    context.save_search_filter_state(ratings=["g", "s", "q", "e"], search_ratings=["g", "s", "q", "e"])
     state = search_state_with_runner_save(context)
     state["merged" if merge else "loaded"] = path.name
     verb = "merged" if merge else "loaded"

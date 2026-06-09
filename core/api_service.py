@@ -1391,6 +1391,14 @@ class APIService:
             
             if result and result['status'] == 'success':
                 print(f"✅ ComfyUI 이미지 생성 완료: {result['filename']}")
+                # 빌드한 API 워크플로우를 결과에 노출한다 — 저장 단계(add_api_result)의
+                # PNG 메타데이터 보강이 SaveImage가 없는(PreviewImage/커스텀) 워크플로우
+                # 에서도 naia 워크플로우 청크를 임베드할 수 있게 한다. SaveImage 경로는
+                # ComfyUI 서버가 extra_pnginfo로 이미 임베드하므로 보강 시 보존된다.
+                if isinstance(workflow, dict):
+                    result.setdefault('workflow_api', workflow)
+                if params.get('_comfyui_workflow_ui'):
+                    result.setdefault('workflow_ui', params.get('_comfyui_workflow_ui'))
                 return result
             else:
                 error_msg = result.get('message', '알 수 없는 오류') if result else 'API 호출 실패'

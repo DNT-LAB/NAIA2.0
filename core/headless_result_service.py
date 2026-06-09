@@ -50,6 +50,10 @@ class HeadlessStoredResult:
     # viewer_history_removed payloads for items dropped by overflow eviction, so
     # callers can broadcast them and the frontend trims the matching thumbnails.
     evicted_payloads: list[dict[str, Any]] = field(default_factory=list)
+    # True when this is a ComfyUI result whose downloaded image carried NO native
+    # metadata (e.g. server ran with --disable-metadata) and NAIA injected its own.
+    # The caller surfaces a one-time warning toast on the first such image.
+    comfyui_metadata_injected: bool = False
 
 
 class HeadlessResultStore:
@@ -115,6 +119,51 @@ class HeadlessResultStore:
             "final_prompt": params.get("input", ""),
             "negative_prompt": params.get("negative_prompt", ""),
         }
+        # ComfyUI 결과: ComfyUI 서버가 이미지에 메타데이터를 임베드하지 않은 경우에만
+        # (예: 서버가 ``--disable-metadata``로 기동) NAIA가 자체 구조화 메타데이터
+        # (naia_generation_params / naia_prompt_context + 워크플로우 청크)를 삽입한다.
+        # 서버가 네이티브 ComfyUI 메타데이터(prompt/workflow 청크)를 남겼으면 보존하고
+        # 손대지 않는다(사용자 요청: 누락된 경우에만 대응). 데스크톱 generation_controller가
+        # 하던 보강(82856b6)이 헤드리스 이관(30542db 아카이브) 시 누락된 회귀를 복구하는
+        # 경로이기도 하다. WEBUI(embed_webui_parameters)와 같은 단일 저장 합류점 패턴이며,
+        # prompt_context/params가 모두 조립된 이 시점에서 호출해야 한다. NAI/WEBUI는 게이트로
+        # 건너뛰고, 비-PNG(SaveAnimatedWEBP 등)는 PNG 재인코딩 시 프레임이 손실되므로 스킵
+        # (원본 유지). 메타 없는 첫 ComfyUI 이미지는 호출부가 경고 토스트를 1회 띄운다.
+        # ⚠️add_api_result는 외부 이미지 임포트(insert_external_image_to_history)도 거치는데
+        # 거긴 api_mode를 현재 UI 모드 태그로만 박는다 — COMFYUI 모드에서 임포트한 사용자
+        # 원본 PNG를 재인코딩/오염하지 않도록, 실제 ComfyUI 생성 신호(prompt_id/workflow_api/
+        # source_node_id)가 있고 imported_external이 아닌 경우로 한정한다(Codex 적대리뷰).
+        comfyui_metadata_injected = False
+        is_comfyui_generation = (
+            str(params.get("api_mode") or "").strip().upper() == "COMFYUI"
+            and not params.get("imported_external")
+            and bool(
+                api_result.get("prompt_id")
+                or api_result.get("workflow_api")
+                or api_result.get("source_node_id")
+            )
+        )
+        if is_comfyui_generation and result_images.is_png_bytes(raw_bytes):
+            from utils.comfyui_png_metadata import (
+                enrich_comfyui_png_bytes,
+                png_has_generation_metadata,
+            )
+
+            if not png_has_generation_metadata(raw_bytes):
+                try:
+                    enriched_bytes, _enriched_image, _changed = enrich_comfyui_png_bytes(
+                        raw_bytes,
+                        image,
+                        workflow_api=api_result.get("workflow_api") or params.get("workflow"),
+                        workflow_ui=api_result.get("workflow_ui") or params.get("_comfyui_workflow_ui"),
+                        generation_params=params,
+                        prompt_context=prompt_context,
+                        api_metadata=dict(api_result.get("api_metadata", {}) or {}) or {"backend": "COMFYUI"},
+                    )
+                    raw_bytes = enriched_bytes
+                    comfyui_metadata_injected = True
+                except Exception as exc:  # pragma: no cover - defensive
+                    print(f"⚠️ ComfyUI PNG 메타데이터 보강 실패(원본 사용): {exc}")
         item = HeadlessHistoryItem(
             image=image,
             raw_bytes=raw_bytes,
@@ -136,6 +185,7 @@ class HeadlessResultStore:
             image_meta=image_meta,
             metadata_payload=metadata_payload,
             evicted_payloads=evicted_payloads,
+            comfyui_metadata_injected=comfyui_metadata_injected,
         )
 
     def get_item(self, history_id: str) -> HeadlessHistoryItem | None:

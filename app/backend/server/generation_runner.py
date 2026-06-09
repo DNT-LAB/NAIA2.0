@@ -375,6 +375,20 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
 
             context.is_generating = False
             await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "completed"})
+            # ComfyUI 서버가 생성 이미지에 메타데이터를 남기지 않아(예: --disable-metadata)
+            # NAIA가 자체 메타데이터를 삽입한 경우, 세션당 한 번만 경고 토스트로 알린다.
+            if getattr(stored, "comfyui_metadata_injected", False) and not getattr(
+                context, "comfyui_metadata_warning_emitted", False
+            ):
+                context.comfyui_metadata_warning_emitted = True
+                await broadcast_json(clients, {
+                    "type": "toast",
+                    "level": "warning",
+                    "message": (
+                        "ComfyUI가 생성 이미지에 메타데이터를 남기지 않았습니다"
+                        "(예: --disable-metadata). NAIA가 자체 메타데이터를 삽입해 저장합니다."
+                    ),
+                })
             params = getattr(request, "params", {}) or {}
             if params.get("prompt_preset_thumbnail_request"):
                 await _broadcast_prompt_preset_thumbnail_update(context, clients, stored, params)

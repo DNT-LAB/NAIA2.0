@@ -317,6 +317,23 @@ def is_png_bytes(raw_bytes: Optional[bytes]) -> bool:
     return bool(raw_bytes and raw_bytes.startswith(PNG_SIGNATURE))
 
 
+def png_has_generation_metadata(raw_bytes: Optional[bytes]) -> bool:
+    """다운로드한 PNG가 이미 ComfyUI 생성 메타데이터(prompt/workflow 청크)를 담고 있는가.
+
+    NAIA가 자체 메타데이터를 보강할지 판단하는 게이트 — **네이티브 메타데이터가 없을
+    때만** 보강한다(사용자 요청). ComfyUI 서버가 ``--disable-metadata`` 등으로 아무것도
+    임베드하지 않으면 False를 반환한다. prompt/workflow/workflow_api 중 하나라도 있으면
+    "메타데이터 있음"으로 간주해 네이티브 값을 보존한다."""
+    if not is_png_bytes(raw_bytes):
+        return False
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as image:
+            info = getattr(image, "info", {}) or {}
+        return any(bool(info.get(key)) for key in ("prompt", "workflow", "workflow_api"))
+    except Exception:
+        return False
+
+
 def json_dumps_for_png(value: Any) -> str:
     if isinstance(value, str):
         return value

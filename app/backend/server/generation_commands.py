@@ -935,17 +935,27 @@ def register_generation_rest_routes(
         will_naia_generate = bool(generation_result and generation_result.ok)
         if will_naia_generate and context.headless_generation_execute_enabled:
             start_generation_runner(context, clients)
+        # 조건부 규칙(neg 타겟)이 이 프롬프트 런에 기록한 네거티브 조작을 응답 네거티브에
+        # 병합한다. 외부 NAIA Bridge ComfyUI 클라이언트는 enqueue 합류점을 지나지 않고
+        # 이 응답의 negative_prompt로 자기 서버에서 생성하므로, 병합이 없으면 조건부
+        # 네거티브가 누락된다(NAIA 자체 auto-gen은 enqueue에서 이미 병합되어 일치한다).
+        # context.negative_prompt_text(사용자 박스)는 오염하지 않고 응답 문자열만 병합.
+        bridge_negative = generation_service(context).merge_conditional_negative(
+            context.negative_prompt_text, result.prompt_run_id
+        )
         response = {
             "ok": True,
             "status": "prompt_generated",
             "request_id": request_id,
             "prompt": result.prompt,
-            "negative_prompt": context.negative_prompt_text,
             "naia_started_generation": will_naia_generate,
             "generation": generation_payload,
             **payload,
             "extra_messages": result.extra_messages,
         }
+        # 조건부 병합된 브릿지 네거티브는 **payload 이후에 박아 권위적으로 만든다 — 향후
+        # websocket_payload에 negative_prompt가 추가돼도 병합본을 덮어쓰지 못하게 잠근다.
+        response["negative_prompt"] = bridge_negative
         # Top-level resolution contract (set AFTER **payload so it is authoritative;
         # the nested detected_resolution from payload is preserved for Remote Web).
         if res_w and res_h:

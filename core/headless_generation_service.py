@@ -545,6 +545,20 @@ class HeadlessGenerationService:
             return current_prompt_run_id
         return ""
 
+    def merge_conditional_negative(self, negative: str, prompt_run_id: str) -> str:
+        """조건부 규칙(neg 타겟)이 프롬프트 런에 기록한 네거티브 조작을 base 네거티브에
+        병합한 **문자열**을 반환한다(컨텍스트/네거티브 박스 비오염 — 사본만 다룬다).
+
+        enqueue 합류점(`_apply_conditional_negative`)을 지나지 않고 random 응답의
+        네거티브를 직접 소비하는 경로(외부 NAIA Bridge ComfyUI 클라이언트가 자기
+        서버에서 생성하는 경우)가 NAIA 자체 생성과 **동일한** 조건부 네거티브를 받도록
+        하는 공개 진입점. 내부적으로 `_apply_conditional_negative`와 같은 로직을 재사용해
+        set/append 의미·중복 제거·레지스트리 트림 폴백이 한 곳에서만 정의되게 한다.
+        조작이 없으면 base 네거티브를 그대로 반환한다(자연 no-op)."""
+        params: dict[str, Any] = {"negative_prompt": str(negative or "")}
+        self._apply_conditional_negative(params, str(prompt_run_id or ""))
+        return str(params.get("negative_prompt") or "")
+
     def _apply_conditional_negative(self, params: dict[str, Any], prompt_run_id: str) -> None:
         """조건부 규칙(neg 타겟)이 프롬프트 런에 기록한 네거티브 조작을 이 생성에 병합한다.
 

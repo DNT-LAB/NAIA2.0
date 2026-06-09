@@ -949,7 +949,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260531-
   .catch(error => {
     console.error('Failed to initialize character panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260609-scrollfix1')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260609-condscroll3')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,

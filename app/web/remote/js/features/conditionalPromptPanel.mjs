@@ -1553,14 +1553,29 @@ export function createConditionalPromptPanel({
 
   function condStructureSignature(state) {
     if (!state) return 'null';
-    // Exclude the Legacy DSL rules text (echoed per-keystroke by onRulesInput) so a
-    // server echo for a local rules edit keeps the same signature and never replaces
-    // the focused #condRulesInput. raw_dsl is edited locally (markDirty, no echo).
+    // Signature must capture only STRUCTURAL changes (enabled / editor_mode / presets /
+    // active_preset / capabilities) — never rule TEXT or its derived forms. A server echo
+    // for a local rules edit must keep the same signature so render() never replaces the
+    // focused #condRulesInput (replacing it blurs the textarea mid-typing and collapses
+    // tag autocomplete — same regression class as Character 38d3898 / Img2Img c9edf4b).
+    // ⚠️ rules_v2_book is `_rulebook_dict_from_dsl(rules_v2)` whose Rule.id is a fresh
+    // uuid4 on every parse (core/conditional/block_model.py) — so it churns on EVERY echo
+    // and, if not excluded here, makes the signature change per keystroke → guard fails →
+    // re-render → scroll/focus loss. Exclude all rule text + derived fields (raw_dsl is
+    // edited locally with markDirty, no echo).
     const rest = {...state};
     delete rest.rules;
     delete rest.rules_legacy;
     delete rest.active_rules;
+    delete rest.rules_v2;
+    delete rest.rules_v2_book;
     delete rest.raw_dsl;
+    // module_state_payload nests a FULL copy of the state under `state` (in addition to
+    // flattening it at top level). Deleting only top-level rule fields above leaves the
+    // churning rules_v2_book (fresh uuids) inside rest.state — which alone destabilises the
+    // signature on every keystroke. The nested copy is redundant for the structural
+    // signature (all structural fields are present flattened at top level), so drop it.
+    delete rest.state;
     return JSON.stringify(rest);
   }
 

@@ -81,14 +81,66 @@ def _should_apply_closed_eyes_sync(context: PromptContext) -> bool:
     return not any(_is_eye_feature_tag(tag) for tag in random_prompt_tags)
 
 
-def _remove_eye_feature_tags(tags: list) -> tuple[list, list]:
-    kept = []
-    removed = []
-    for tag in tags or []:
-        if _is_eye_feature_tag(tag):
-            removed.append(tag)
+def _leading_open_parens(raw: str) -> str:
+    """raw 서브태그 선행부의 여는 괄호('(')만 추출(사이 공백은 무시). 구조 보존용."""
+    out = []
+    for ch in raw:
+        if ch == "(":
+            out.append("(")
+        elif ch.isspace():
+            continue
         else:
-            kept.append(tag)
+            break
+    return "".join(out)
+
+
+def _remove_eye_feature_tags(tags: list) -> tuple[list, list]:
+    """Closed Eyes Sync: eye-feature 태그를 제거하되 **괄호 균형을 깨지 않는다**.
+
+    ⚠️ ``split_tags_smart`` 가 괄호를 추적하지 않아 가중치 그룹 ``(__wc__, tag:0.75)`` 는
+    ``(__wc__`` / ``tag:0.75)`` 두 조각으로 쪼개진다. 와일드카드가 'eyes' 포함값으로
+    전개되면(예: ``(blue eyes, blonde hair``) 토큰 전체를 지우던 기존 로직이 그룹의 여는
+    ``(`` 와 비-eye 태그(blonde hair)까지 통째로 날려 닫는 ``)`` 가 고아가 됐다(사용자 보고,
+    ComfyUI/WEBUI 전용 — Codex 적대리뷰 확인). → 콤마/불균형 괄호를 가진 '조각' 토큰은
+    콤마로 쪼개 **eye 서브태그만 제거**하고, 제거된 서브태그의 선행 여는 괄호는 다음 생존
+    서브태그로 이월해 균형을 유지한다. 모든 서브태그가 eye라 비어도 선행 ``(`` 는 보존한다
+    (닫는 ``)`` 고아 방지). 단순 토큰(콤마 없고 괄호 균형, 예: ``blue eyes`` /
+    ``(green pupils:0.8)``)은 기존대로 통째 판정한다(회귀 방지·NAI ``::`` 경로 불변)."""
+    kept: list = []
+    removed: list = []
+    for tag in tags or []:
+        text = str(tag)
+        # 단순 토큰: 콤마 없고 괄호 균형 → 기존 동작(통째 판정).
+        if "," not in text and (text.count("(") == text.count(")")):
+            if _is_eye_feature_tag(text):
+                removed.append(tag)
+            else:
+                kept.append(tag)
+            continue
+        # 분절/복합 토큰(쪼개진 가중치 그룹 조각): 콤마로 나눠 eye 서브태그만 제거.
+        survivors: list[str] = []
+        pending_open = ""
+        changed = False
+        for raw_part in text.split(","):
+            core = raw_part.strip()
+            if core and _is_eye_feature_tag(core):
+                removed.append(core)
+                changed = True
+                pending_open += _leading_open_parens(raw_part)  # 구조용 여는 괄호 이월
+                continue
+            if not core:
+                continue
+            survivors.append(pending_open + core)
+            pending_open = ""
+        if not changed:
+            kept.append(tag)  # 아무것도 안 지웠으면 원본 그대로(공백/형태 보존)
+            continue
+        if survivors:
+            if pending_open:  # 드문 dangling 여는 괄호 — 괄호 수 보존
+                survivors[-1] = survivors[-1] + pending_open
+            kept.append(", ".join(survivors))
+        elif pending_open:
+            kept.append(pending_open)  # 전부 eye → 닫는 ')' 고아 방지 위해 lone '(' 보존
     return kept, removed
 
 

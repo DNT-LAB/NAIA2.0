@@ -41,6 +41,20 @@ def search_base_frame(context: WebSessionContext):
     return None
 
 
+def _dedup_by_id(frame):
+    """검색/합치기 결과의 post id 중복 제거(keep-first). id-keyed 태그필터 적용(`id.isin`)이 행 단위
+    매칭과 어긋나지 않도록 데이터 정합을 원천 보장한다(중복 id면 매칭 안 된 형제 행까지 적용 풀에
+    딸려 들어가 검색 count와 어긋나는 문제). 정상(유니크 id) 데이터엔 무영향 — 중복이 실제로 있을
+    때만 행을 줄인다(주로 겹치는 custom parquet 합치기). 'cheap defense'."""
+    try:
+        if frame is not None and not getattr(frame, "empty", True) and "id" in frame.columns:
+            if frame["id"].duplicated().any():
+                return frame.drop_duplicates(subset="id", keep="first").reset_index(drop=True)
+    except Exception:
+        pass
+    return frame
+
+
 def filter_source_frame(
     frame: Any,
     *,
@@ -276,6 +290,7 @@ def run_search_command(
             ratings=ratings,
             progress_callback=progress_callback,
         )
+        searched = _dedup_by_id(searched)
         context.search_results.set_dataframe(searched)
         context.search_results_snapshot = searched.copy()
         context.search_results_master_base_snapshot = searched.copy()
@@ -289,7 +304,7 @@ def run_search_command(
     base = search_base_frame(context)
     if base is None:
         return context.search_state_payload()
-    searched = filter_source_frame(base, query=query, exclude=exclude, ratings=ratings)
+    searched = _dedup_by_id(filter_source_frame(base, query=query, exclude=exclude, ratings=ratings))
     context.search_results_snapshot = searched.copy() if searched is not None else None
     context.active_tag_filter_ids = None
     context.pending_tag_filter = None
@@ -464,6 +479,7 @@ def load_or_merge_custom_parquet(
         current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
         if current is not None and not current.empty:
             frame = pd.concat([current, frame], ignore_index=True)
+    frame = _dedup_by_id(frame)   # 합치기 중복 post id 제거 → id-keyed 적용 정합 보장
     context.search_results.set_dataframe(frame)
     context.search_results_snapshot = context.search_results.get_dataframe().copy()
     context.search_results_master_base_snapshot = context.search_results_snapshot.copy()

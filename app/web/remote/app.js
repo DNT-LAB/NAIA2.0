@@ -29,6 +29,16 @@ let randomRequestSerial = 0;
 let sessionId = null;
 const urlParams = new URLSearchParams(location.search);
 const isDesktopShell = urlParams.get('desktop_shell') === '1';
+// SEAM observer (관측 전용 포커스-드롭 탐지기) — 기본 OFF. ?seam=1 또는 localStorage.naia_seam='1' 로 활성.
+// 꺼져 있으면 모듈을 동적 import 조차 하지 않는다(오버헤드/위험 0).
+const SEAM_OBSERVE = urlParams.get('seam') === '1'
+  || (() => { try { return localStorage.getItem('naia_seam') === '1'; } catch (_) { return false; } })();
+let seamObserver = null;
+if (SEAM_OBSERVE) {
+  import('./js/features/seamObserver.mjs?v=20260610-seam2')
+    .then(m => { seamObserver = m.seamObserver; seamObserver.init(); })
+    .catch(() => {});
+}
 const isLocalWebHost = (() => {
   const host = String(location.hostname || '').toLowerCase();
   return (
@@ -6140,6 +6150,7 @@ function syncPromptEngineeringPopups() {
 }
 
 function onModuleState(m) {
+  if (seamObserver) seamObserver.watch('module_state', m && m.module_id);
   if (isModuleStateGuarded(m.module_id)) return;
   if (m.module_id) moduleStateCache.set(m.module_id, m);
   // Update status badges regardless of panel open state

@@ -5,6 +5,7 @@ import weakref
 from typing import Dict, Any
 from core.prompt_context import PromptContext
 from core.safe_console import safe_print
+from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) 파이프라인 seam 계측
 from core.wildcard_processor import WildcardProcessor # 이전 단계에서 생성
 from core.resolution_utils import (
     MAX_1MP_PIXELS,
@@ -241,9 +242,12 @@ class PromptProcessor:
 
         for module_hook in hooks_to_run:
             module_title = self._hook_title(module_hook)
+            _seam_before = seam_observer.snapshot(context) if seam_observer.enabled else None
             try:
                 # 각 훅은 context를 받아 수정 후 다시 반환
                 context = module_hook.execute_pipeline_hook(context)
+                if _seam_before is not None:
+                    seam_observer.observe(self.PIPELINE_NAME, hook_point, module_title, _seam_before, context)
                 if prompt_run_id and callable(hook_recorder):
                     hook_recorder(
                         prompt_run_id,

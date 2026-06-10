@@ -15,6 +15,7 @@ from typing import Any, Callable
 from core.api_config_service import ApiConfigService, CloudflaredService
 from core.headless_autocomplete_state import AutocompleteRuntimeState
 from core.headless_event_bus import WebSessionEventBus
+from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) 이벤트 버스 계측
 from core.headless_remote_state_service import REMOTE_OPTION_DEFAULTS, SUPPORTED_API_MODES
 from core.headless_result_service import HeadlessResultStore
 from core.headless_search_state_service import DEFAULT_ACTIVE_RATINGS
@@ -169,11 +170,15 @@ class WebSessionContext:
 
     def subscribe(self, event_name: str, callback: Callable[..., Any]) -> None:
         self.event_bus.subscribe(event_name, callback)
+        if seam_observer.enabled:
+            seam_observer.observe_subscribe(event_name, callback)
 
     def unsubscribe(self, event_name: str, callback: Callable[..., Any]) -> None:
         self.event_bus.unsubscribe(event_name, callback)
 
     def publish(self, event_name: str, *args: Any, **kwargs: Any) -> None:
+        if seam_observer.enabled:
+            seam_observer.observe_publish(event_name)
         self.event_bus.publish(event_name, *args, **kwargs)
 
     def register_pipeline_hook(self, hook_info: dict, module_instance: Any) -> None:

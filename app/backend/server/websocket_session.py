@@ -7,6 +7,8 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
+from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) WS-command 계측
+
 from app.backend.server.anlas_poller import broadcast_anlas, ensure_anlas_poller
 from app.backend.server.api_control_commands import (
     API_CONTROL_COMMAND_TYPES,
@@ -185,6 +187,8 @@ async def handle_json_command(
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
     command_type = str(command.get("type") or "").strip()
+    if seam_observer.enabled:
+        seam_observer.observe_command(command_type)
     if command_type in SESSION_COMMAND_TYPES:
         await handle_session_command(
             ws,

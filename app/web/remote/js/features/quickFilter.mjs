@@ -217,6 +217,7 @@ export function createQuickFilterController(deps) {
       if (input) input.value = '';
     }
     clearAutocomplete();
+    apply();   // U1 완전 라이브: 칩 추가 즉시 검색 → 성공 시 자동 적용(onResult)
   }
 
   function bindAutocompleteInput(inputId, target) {
@@ -356,28 +357,21 @@ export function createQuickFilterController(deps) {
   function removeExcludeTag(index) {
     excludeTags.splice(index, 1);
     renderExcludeChips();
-    invalidateAssignedState();
     if (!includeTags.length && !excludeTags.length) {
       clearFilter();
       return;
     }
-    // Persist the reduced draft first, then clear only the active assignment
-    // (keep_draft) so the clear's search_state echo carries the remaining chips
-    // rather than wiping every chip.
-    save();
-    send({type: 'tag_filter_clear', keep_draft: true});
+    apply();   // U1: 남은 칩으로 즉시 재검색 → 자동 적용 (캐시 재조합, 스캔 0)
   }
 
   function removeIncludeTag(index) {
     includeTags.splice(index, 1);
     renderIncludeChips();
-    invalidateAssignedState();
     if (!includeTags.length && !excludeTags.length) {
       clearFilter();
       return;
     }
-    save();
-    send({type: 'tag_filter_clear', keep_draft: true});
+    apply();   // U1: 남은 칩으로 즉시 재검색 → 자동 적용 (캐시 재조합, 스캔 0)
   }
 
   function apply() {
@@ -398,21 +392,22 @@ export function createQuickFilterController(deps) {
     const assignBtn = getEl('tagFilterAssignBtn');
     ratingCounts = message.rating_counts || null;
     const countEl = getEl('tagFilterCount');
-    if (!countEl || !assignBtn) return;
-    if (message.count > 0) {
-      countEl.textContent = `${message.count.toLocaleString()} matched`;
-      countEl.classList.add('has-result');
-      assignBtn.disabled = false;
-      if (pendingAssignOnRestore) {
-        pendingAssignOnRestore = false;
-        assign();
+    const hasTags = !!(message.tags && message.tags.length);
+    if (countEl) {
+      if (message.count > 0) {
+        countEl.textContent = `${message.count.toLocaleString()} matched`;
+        countEl.classList.add('has-result');
+      } else {
+        countEl.textContent = hasTags ? 'No matches' : '';
+        countEl.classList.remove('has-result');
       }
-    } else {
-      pendingAssignOnRestore = false;
-      countEl.textContent = message.count === 0 && message.tags && message.tags.length ? 'No matches' : '';
-      countEl.classList.remove('has-result');
-      assignBtn.disabled = true;
     }
+    if (assignBtn) assignBtn.disabled = true;
+    pendingAssignOnRestore = false;
+    // U1 완전 라이브: 칩이 있으면 결과를 항상 즉시 적용(0매치 포함) → 활성 필터 == 현재 칩(일관성).
+    // 0매치 시 빈 필터가 적용되어 풀이 비지만, 칩을 고치면 즉시 복원된다. 칩이 없으면 미적용
+    // (빈칩 경로는 clearFilter가 처리).
+    if (hasTags) assign();
   }
 
   function onAssigned(message) {

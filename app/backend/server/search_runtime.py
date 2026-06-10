@@ -62,7 +62,13 @@ def filter_source_frame(
         filtered = engine._apply_filters(filtered, str(query or ""), str(exclude or ""))
         if "tags_string" in filtered.columns:
             filtered = filtered.drop(columns=["tags_string"])
-    if tag_ids and "id" in filtered.columns:
+    # tag_ids 의미: None = 태그필터 비활성(스킵) / set()(빈) = 활성·0매치 → 0행(전체 아님) /
+    # {...} = 활성·매칭. assign 은 0매치 시 빈 set 을 넣으므로(search_commands.py), truthy 검사로는
+    # 빈 set 을 "필터 없음"으로 오인해 전체 풀을 노출한다 → 반드시 `is not None` 으로 구분.
+    # ⚠️ id-keyed 한계(별도 후속 TODO): 같은 post-id 가 다른 태그로 여러 행에 흩어진 악성 중복
+    #    데이터(겹치는 parquet 합치기 등)에선 isin 이 매칭 안 된 형제 행까지 포함 → 검색 count
+    #    (per-row)와 적용 풀이 어긋남. 정상(유니크 id) 데이터엔 무영향. 근본 해결 = 검색/합치기 id dedup.
+    if tag_ids is not None and "id" in filtered.columns:
         filtered = filtered[filtered["id"].isin(tag_ids)]
     if ratings and "rating" in filtered.columns:
         filtered = filtered[filtered["rating"].isin(ratings)]
@@ -304,14 +310,33 @@ def restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
     return search_state_with_runner_save(context)
 
 
-def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
-    import pandas as pd
+_TAG_HITS_CAP = 4000  # 한 데이터셋 내 칩별 캐시 상한 (초과 시 비우고 lazy 재계산; tags_text는 유지)
 
+
+def _tag_filter_cache(context: WebSessionContext, snapshot) -> dict:
+    """칩(태그) 단위 캐시 — 데이터셋(snapshot) 객체 기준.
+
+    snapshot 은 데이터셋이 바뀔 때마다(새 검색 / Parquet 로드·합치기 / 복원 — 전부 `.copy()`로
+    새 객체 할당) 교체되므로, 캐시가 들고 있는 snapshot 과 identity(`is`)가 어긋나면 통째로 폐기한다
+    (= "Parquet 교체 시 캐시 삭제"가 별도 훅 없이 자동 충족). 등급/assign 은 snapshot 을 교체하지
+    않으므로 캐시가 유지된다.
+
+    구조: tags_text(행별 소문자 태그 문자열, 데이터셋당 1회 계산) + tag_hits{태그 → 매칭 id frozenset}.
+    """
+    cache = getattr(context, "_tag_filter_cache", None)
+    if cache is None or cache.get("snapshot") is not snapshot:
+        cache = {"snapshot": snapshot, "tags_text": None, "tag_hits": {}}
+        context._tag_filter_cache = cache
+    return cache
+
+
+def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
     snapshot = getattr(context, "search_results_snapshot", None)
     if snapshot is None or getattr(snapshot, "empty", True):
         snapshot = search_base_frame(context)
         if snapshot is not None:
             context.search_results_snapshot = snapshot.copy()
+            snapshot = context.search_results_snapshot
     normalized = WebSessionContext.normalize_filter_tags(tags)
     if snapshot is None or getattr(snapshot, "empty", True):
         return {
@@ -321,13 +346,37 @@ def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, 
             "rating_counts": rating_counts_from_frame(None),
             "_ids": set(),
         }
-    searchable = snapshot.copy()
-    tag_columns = [column for column in ("copyright", "character", "artist", "meta", "general") if column in searchable.columns]
-    if not tag_columns:
-        tag_columns = ["general"]
-        searchable["general"] = ""
-    tags_text = searchable[tag_columns].fillna("").astype(str).agg(",".join, axis=1).str.lower()
-    mask = pd.Series(True, index=searchable.index)
+
+    cache = _tag_filter_cache(context, snapshot)
+    if cache["tags_text"] is None:
+        tag_columns = [c for c in ("copyright", "character", "artist", "meta", "general") if c in snapshot.columns]
+        if not tag_columns:
+            frame = snapshot.copy()
+            frame["general"] = ""
+            tag_columns = ["general"]
+        else:
+            frame = snapshot
+        cache["frame"] = frame
+        cache["row_count"] = len(frame)
+        cache["has_id"] = "id" in frame.columns
+        cache["tags_text"] = frame[tag_columns].fillna("").astype(str).agg(",".join, axis=1).str.lower()
+    tags_text = cache["tags_text"]
+    row_count = cache["row_count"]
+
+    def _hit_rows(key: str) -> frozenset:
+        # 행(positional) 단위 매칭 집합. id 가 아니라 행 위치로 모아야 중복 id(예: 합친 parquet)에서도
+        # 구버전의 per-row boolean mask 와 동치가 유지된다.
+        cached = cache["tag_hits"].get(key)
+        if cached is None:
+            mask = tags_text.str.contains(key, na=False, regex=False)
+            cached = frozenset(int(i) for i in mask.to_numpy().nonzero()[0])
+            if len(cache["tag_hits"]) >= _TAG_HITS_CAP:
+                cache["tag_hits"].clear()  # 메모리 상한 — tags_text 유지라 재계산 저렴
+            cache["tag_hits"][key] = cached
+        return cached
+
+    include_rows = None          # None = 아직 제한 없음(전체 행)
+    exclude_rows: set = set()
     clean_tags: list[str] = []
     for item in tags:
         raw = str(item or "").strip()
@@ -338,13 +387,20 @@ def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, 
         if not clean:
             continue
         clean_tags.append(("-" if negate else "") + clean)
-        hit = tags_text.str.contains(clean.lower(), na=False, regex=False)
-        mask &= ~hit if negate else hit
-    matched = searchable[mask]
-    if "id" in matched.columns:
-        ids = set(matched["id"].tolist())
-    else:
-        ids = set(matched.index.tolist())
+        rows = _hit_rows(clean.lower())
+        if negate:
+            exclude_rows |= rows
+        elif include_rows is None:
+            include_rows = set(rows)
+        else:
+            include_rows &= rows
+    if include_rows is None:
+        include_rows = set(range(row_count))
+    final_rows = include_rows - exclude_rows
+
+    frame = cache["frame"]
+    matched = frame.iloc[sorted(final_rows)]
+    ids = set(matched["id"].tolist()) if cache["has_id"] else set(matched.index.tolist())
     return {
         "type": "tag_filter_result",
         "count": int(len(matched)),

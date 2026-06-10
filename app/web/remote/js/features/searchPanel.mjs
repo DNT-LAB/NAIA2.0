@@ -299,6 +299,7 @@ export function createSearchPanel({
     }
     setSearchRatingsFromMap(message.ratings);
     const quickFilter = getQuickFilter();
+    if (quickFilter && quickFilter.setPresets) quickFilter.setPresets(message.filter_presets || []);
     const serverPreferences = message.filter_preferences;
     if (serverPreferences && quickFilter) {
       // 시작 후 첫 search_state 에서 영속된 Tag Filter 가 활성+태그 보유 시 자동 Search→Assign 1회.

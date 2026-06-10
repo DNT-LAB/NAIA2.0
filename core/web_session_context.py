@@ -378,6 +378,15 @@ class WebSessionContext:
     def search_state_payload(self) -> dict[str, Any]:
         return self._search_state_service().search_state_payload()
 
+    def get_filter_presets(self) -> list:
+        return self._search_state_service().get_filter_presets()
+
+    def save_filter_preset(self, name: Any, include: Any = None, exclude: Any = None) -> list:
+        return self._search_state_service().save_filter_preset(name, include, exclude)
+
+    def delete_filter_preset(self, name: Any) -> list:
+        return self._search_state_service().delete_filter_preset(name)
+
     def auto_save_state_payload(self) -> dict[str, Any]:
         return self._save_service().auto_save_state_payload()
 

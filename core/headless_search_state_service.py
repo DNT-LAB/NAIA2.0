@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 import json
 import re
+import threading
 
 
 SUPPORTED_RATINGS = ("g", "s", "q", "e")
@@ -17,6 +18,11 @@ SUPPORTED_RATINGS = ("g", "s", "q", "e")
 # real off-by-one was generation_commands' /api/comfyui/random fallback, which now
 # uses context.get_active_ratings() to agree with this default and the sibling paths.
 DEFAULT_ACTIVE_RATINGS = ("g", "s", "q")
+
+# 필터 프리셋 파일의 read-modify-write 직렬화. 단일 백엔드 프로세스를 여러 Remote Web
+# 클라이언트(기기)가 공유하므로, 모듈 단위 락이면 동시 저장/삭제의 lost-update를 막는다.
+# (읽기 get_filter_presets는 os.replace 원자성으로 안전 → 쓰기만 직렬화하면 됨.)
+_PRESETS_LOCK = threading.Lock()
 
 
 def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
@@ -309,6 +315,73 @@ class HeadlessSearchStateService:
             return []
         return sorted(path.name for path in custom_dir.glob("*.parquet") if path.is_file())
 
+    # ---- 저장된 Tag Filter 프리셋 (backend 영속·기기 공유, 태그만: include/exclude) ----
+    def filter_presets_path(self) -> Path:
+        return self.context._save_path("remote_web_filter_presets.json")
+
+    @staticmethod
+    def _normalize_filter_preset(raw: Any) -> dict | None:
+        if not isinstance(raw, dict):
+            return None
+        name = str(raw.get("name") or "").strip()
+        if not name:
+            return None
+
+        def _tags(value: Any) -> list[str]:
+            out: list[str] = []
+            seen: set[str] = set()
+            for item in (value or []):
+                tag = str(item or "").strip()
+                if tag and tag not in seen:
+                    seen.add(tag)
+                    out.append(tag)
+            return out
+
+        return {"name": name, "include": _tags(raw.get("include")), "exclude": _tags(raw.get("exclude"))}
+
+    def get_filter_presets(self) -> list[dict]:
+        try:
+            path = self.filter_presets_path()
+            if path.exists():
+                with path.open(encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    return [p for p in (self._normalize_filter_preset(item) for item in data) if p]
+        except Exception:
+            pass
+        return []
+
+    def _write_filter_presets(self, presets: list[dict]) -> None:
+        try:
+            path = self.filter_presets_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump(presets, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            tmp_path.replace(path)
+        except Exception as exc:
+            print(f"Headless Remote: filter presets save failed - {exc}", flush=True)
+
+    def save_filter_preset(self, name: Any, include: Any = None, exclude: Any = None) -> list[dict]:
+        entry = self._normalize_filter_preset({"name": name, "include": include, "exclude": exclude})
+        if entry is None:
+            return self.get_filter_presets()
+        with _PRESETS_LOCK:
+            # 같은 이름은 덮어쓰기(대소문자 무시 매칭). 락 안에서 read-modify-write 원자화.
+            presets = [p for p in self.get_filter_presets() if p["name"].lower() != entry["name"].lower()]
+            presets.append(entry)
+            presets.sort(key=lambda p: p["name"].lower())
+            self._write_filter_presets(presets)
+            return presets
+
+    def delete_filter_preset(self, name: Any) -> list[dict]:
+        target = str(name or "").strip().lower()
+        with _PRESETS_LOCK:
+            presets = [p for p in self.get_filter_presets() if p["name"].lower() != target]
+            self._write_filter_presets(presets)
+            return presets
+
     def search_state_payload(self) -> dict[str, Any]:
         context = self.context
         active_ratings = self.get_active_ratings()
@@ -343,5 +416,6 @@ class HeadlessSearchStateService:
             "exclude": filter_preferences.get("exclude", ""),
             "ratings": {rating: rating in search_ratings for rating in SUPPORTED_RATINGS},
             "filter_preferences": filter_preferences,
+            "filter_presets": self.get_filter_presets(),
             "parquets": self.custom_parquet_names(),
         }

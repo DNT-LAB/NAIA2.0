@@ -274,7 +274,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260610-tagfilter2')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260610-tagfilter5')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -7414,6 +7414,11 @@ function removeTagFilterTag(idx) { if (quickFilter) quickFilter.removeIncludeTag
 function applyTagFilter() { if (quickFilter) quickFilter.apply(); }
 function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
 function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
+function toggleSaveTagFilterRow() { if (quickFilter) quickFilter.toggleSaveRow(); }
+function toggleTagFilterPresets() { if (quickFilter) quickFilter.togglePresets(); }
+function confirmSaveTagFilterPreset() { if (quickFilter) quickFilter.confirmSavePreset(); }
+function loadTagFilterPreset(i) { if (quickFilter) quickFilter.loadPresetAt(i); }
+function deleteTagFilterPreset(i) { if (quickFilter) quickFilter.deletePresetAt(i); }
 function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
 function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
 function onTagFilterUpdate(m) { if (quickFilter) quickFilter.onUpdate(m); }

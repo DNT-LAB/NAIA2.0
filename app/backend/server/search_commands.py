@@ -33,6 +33,8 @@ SEARCH_COMMAND_TYPES = {
     "tag_filter_search",
     "tag_filter_assign",
     "tag_filter_clear",
+    "save_filter_preset",
+    "delete_filter_preset",
 }
 
 
@@ -211,6 +213,23 @@ async def handle_search_command(
             "rating_counts": {rating: 0 for rating in "gsqe"},
         })
         await _send_json(ws, state)
+        return True
+
+    if command_type == "save_filter_preset":
+        name = str(command.get("name") or "").strip()
+        include = command.get("include") if isinstance(command.get("include"), list) else []
+        exclude = command.get("exclude") if isinstance(command.get("exclude"), list) else []
+        if name:
+            await run_in_thread(context.save_filter_preset, name, include, exclude)
+        # 갱신된 filter_presets 를 search_state 로 echo (프런트가 목록 재렌더)
+        await _send_json(ws, context.search_state_payload())
+        return True
+
+    if command_type == "delete_filter_preset":
+        name = str(command.get("name") or "").strip()
+        if name:
+            await run_in_thread(context.delete_filter_preset, name)
+        await _send_json(ws, context.search_state_payload())
         return True
 
     return False

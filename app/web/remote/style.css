@@ -15322,7 +15322,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .tag-filter-rating-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   padding: 0 0 8px;
   border-bottom: 1px solid var(--border-dim);
@@ -15337,6 +15337,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 }
 .tag-filter-rating-row .module-rating-bar {
   gap: 4px;
+  margin-left: auto;
 }
 .tag-filter-input-row {
   display: flex; gap: 6px;
@@ -15378,17 +15379,20 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   color: #f47066;
 }
 .tag-filter-actions {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   padding-top: 4px;
   border-top: 1px solid var(--border-dim);
 }
 .tag-filter-count {
-  flex: 1;
+  flex: 0 0 auto;
   font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
-  transition: color 0.15s;
+  padding: 2px 10px; border-radius: 999px;
+  background: var(--bg-elevated); border: 1px solid var(--border-dim);
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
+.tag-filter-count:empty { display: none; }
 .tag-filter-count.has-result {
-  color: #f5e6a3;
+  color: #f5e6a3; border-color: rgba(245, 230, 163, 0.4); background: rgba(245, 230, 163, 0.08);
 }
 .tag-filter-btn-action {
   padding: 5px 14px; border: 1px solid var(--border-dim); border-radius: 6px;
@@ -15406,6 +15410,46 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .tag-filter-btn-action.assign:hover { filter: brightness(1.15); }
 .tag-filter-btn-action.assign:disabled { opacity: 0.35; pointer-events: none; }
 .tag-filter-btn-action.clear:hover { border-color: var(--error); color: var(--error); }
+.tag-filter-btn-action.save {
+  background: var(--accent-blue); border-color: var(--accent-blue); color: #fff;
+}
+.tag-filter-btn-action.save:hover { filter: brightness(1.15); }
+.tag-filter-btn-action.filters:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+
+/* Save-name row + saved-filter presets list */
+.tag-filter-save-row {
+  display: flex; gap: 6px; align-items: center;
+  padding-top: 4px;
+}
+.tag-filter-save-row .tag-filter-input { flex: 1; }
+.tag-filter-presets {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 200px; overflow-y: auto;
+  padding: 6px; margin-top: 4px;
+  background: var(--bg-deep); border: 1px solid var(--border-dim); border-radius: 8px;
+}
+.tf-preset {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 10px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.tf-preset:hover { background: rgba(255, 255, 255, 0.06); }
+.tf-preset-name {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-main);
+  cursor: pointer; min-width: 0;
+}
+.tf-preset-name:hover { color: var(--accent-blue); }
+.tf-preset-meta { font-size: 10px; color: var(--text-dim); flex: 0 0 auto; }
+.tf-preset-x {
+  cursor: pointer; color: var(--text-dim); font-size: 15px; line-height: 1; padding: 0 4px;
+  flex: 0 0 auto;
+}
+.tf-preset-x:hover { color: var(--error); }
+.tf-preset-empty {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  text-align: center; padding: 10px;
+}
 
 /* ==========================================================================
    Setup / API Configuration modal

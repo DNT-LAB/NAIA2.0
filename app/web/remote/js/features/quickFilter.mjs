@@ -429,7 +429,7 @@ export function createQuickFilterController(deps) {
     if (ratingCounts) {
       deps.updateSearchCount(filteredCount(ratingCounts, deps.getRatingState()));
     }
-    deps.showToast(`Tag filter assigned: ${(message.count || 0).toLocaleString()} rows`, 'success');
+    // (토스트 제거 — 라이브 자동 적용이라 매번 토스트는 소음. 행수는 RATING 옆 카운트 라벨로 표시.)
   }
 
   function onUpdate(message) {
@@ -512,12 +512,102 @@ export function createQuickFilterController(deps) {
     return applyPreferences(saved, options);
   }
 
+  // ---- 저장된 필터 프리셋 (backend 영속·기기 공유, 태그만) ----
+  let presets = [];
+
+  function setPresets(list) {
+    presets = Array.isArray(list) ? list.filter(p => p && p.name) : [];
+    renderPresets();
+  }
+
+  function renderPresets() {
+    const el = getEl('tagFilterPresets');
+    if (!el) return;
+    if (!presets.length) {
+      el.innerHTML = '<div class="tf-preset-empty">저장된 필터 없음</div>';
+      return;
+    }
+    el.innerHTML = presets.map((p, i) => {
+      const incArr = p.include || [];
+      const excArr = p.exclude || [];
+      const tip = `Include: ${incArr.join(', ') || '(none)'}\nExclude: ${excArr.join(', ') || '(none)'}`;
+      return `<div class="tf-preset" title="${deps.escHtml(tip)}"><span class="tf-preset-name" onclick="loadTagFilterPreset(${i})">`
+        + `${deps.escHtml(p.name)}<span class="tf-preset-meta">+${incArr.length} −${excArr.length}</span></span>`
+        + `<span class="tf-preset-x" onclick="deleteTagFilterPreset(${i})" title="삭제">&times;</span></div>`;
+    }).join('');
+  }
+
+  function togglePresets() {
+    const el = getEl('tagFilterPresets');
+    if (!el) return;
+    if (!el.hasAttribute('hidden')) { el.setAttribute('hidden', ''); return; }
+    const saveRow = getEl('tagFilterSaveRow');
+    if (saveRow) saveRow.setAttribute('hidden', '');
+    renderPresets();
+    el.removeAttribute('hidden');
+  }
+
+  function toggleSaveRow() {
+    const row = getEl('tagFilterSaveRow');
+    if (!row) return;
+    if (!row.hasAttribute('hidden')) { row.setAttribute('hidden', ''); return; }
+    if (!includeTags.length && !excludeTags.length) {
+      deps.showToast('저장할 필터가 없습니다 (칩을 추가하세요)', 'error');
+      return;
+    }
+    const presetsEl = getEl('tagFilterPresets');
+    if (presetsEl) presetsEl.setAttribute('hidden', '');
+    row.removeAttribute('hidden');
+    const input = getEl('tagFilterPresetName');
+    if (input) { input.value = ''; input.focus(); }
+  }
+
+  function confirmSavePreset() {
+    const input = getEl('tagFilterPresetName');
+    const name = input ? String(input.value || '').trim() : '';
+    if (!name) { if (input) input.focus(); return; }
+    if (!includeTags.length && !excludeTags.length) return;
+    if (!isSocketOpen()) {
+      deps.showToast('연결이 끊겨 저장하지 못했습니다', 'error');
+      return;   // 저장행은 유지 — 재연결 후 다시 시도. 거짓 성공 표시 방지.
+    }
+    send({ type: 'save_filter_preset', name, include: [...includeTags], exclude: [...excludeTags] });
+    const row = getEl('tagFilterSaveRow');
+    if (row) row.setAttribute('hidden', '');
+    deps.showToast(`필터 저장: ${name}`, 'success');
+  }
+
+  function loadPresetAt(i) {
+    const p = presets[i];
+    if (!p) return;
+    includeTags = normalizeTags(p.include);
+    excludeTags = normalizeTags(p.exclude);
+    renderIncludeChips();
+    renderExcludeChips();
+    const el = getEl('tagFilterPresets');
+    if (el) el.setAttribute('hidden', '');
+    if (!includeTags.length && !excludeTags.length) { clearFilter(); return; }
+    apply();   // 라이브 자동 적용 (등급은 건드리지 않음 — 프리셋은 태그만)
+  }
+
+  function deletePresetAt(i) {
+    const p = presets[i];
+    if (!p || !isSocketOpen()) return;
+    send({ type: 'delete_filter_preset', name: p.name });
+  }
+
   return {
     bindInputs,
     toggle,
     open,
     close,
     clear: clearFilter,
+    setPresets,
+    togglePresets,
+    toggleSaveRow,
+    confirmSavePreset,
+    loadPresetAt,
+    deletePresetAt,
     removeExcludeTag,
     removeIncludeTag,
     apply,

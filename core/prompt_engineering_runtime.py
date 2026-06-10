@@ -647,4 +647,3 @@ def register_prompt_engineering_headless_runtime(app_context) -> None:
         )
     subscriber = PromptEngineeringRandomizedSubscriber(app_context)
     app_context.subscribe("random_prompt_triggered", subscriber.handle)
-    app_context.subscribe("random_prompt_triggered_preset_randomizer", subscriber.handle)

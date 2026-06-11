@@ -52,6 +52,7 @@ def _event_combo_tags(
     집계. 인원수(person_id)+등급(rating) 파티션에 한정 — 어시스트의 B 하이브리드용."""
     try:
         from app.backend.server.preset_services import event_preset_service
+        from core.ollama_tag_assist_service import is_generic_event_tag
 
         svc = event_preset_service(context)
         if svc.status().get("dataAvailability", {}).get("main") != "ready":
@@ -62,7 +63,10 @@ def _event_combo_tags(
             for sub in cat.get("subcategories", []):
                 for ev in sub.get("events", []):
                     eid = ev.get("id") or ev.get("eventTag")
-                    if eid:
+                    # 이벤트 태그 자체가 범용 노이즈(looking at viewer/standing 등)면
+                    # 통째로 스킵 — 단어 폴백 쿼리("looking")가 이런 이벤트에 매칭되면
+                    # 조합 집계가 전역 인기 포즈(v/holding hands)로 퇴화한다(실측).
+                    if eid and not is_generic_event_tag(eid):
                         event_ids.append(str(eid))
         weights: dict[str, int] = {}
         for eid in event_ids[: max(1, top_events)]:

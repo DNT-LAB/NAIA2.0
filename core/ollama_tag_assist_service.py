@@ -224,7 +224,38 @@ _EVENT_GENERIC_STOPLIST = frozenset({
     "holding", "holding phone", "solo focus", "simple background", "white background",
     "grey background", "bar censor", "censored", "mosaic censoring", "uncensored",
     "untied", "hand on own hip", "shaving", "shaving crotch", "blush", "open mouth",
+    # 범용 포즈/제스처 — 이벤트 단어 폴백이 전역 인기 포즈를 빈도순으로 끌어오던
+    # 실측 누출분("폰 보는 소녀"에 v/hand up/hands up 주입 → 브이 포즈 이미지).
+    "v", "double v", "peace sign", "hand up", "hands up", "waving",
+    "own hands together", "arms up", "arm up",
 })
+
+
+def is_generic_event_tag(tag: Any) -> bool:
+    """이벤트 태그 *자체*가 범용 노이즈(스톱리스트)인지. 이벤트 참조에서 이런 이벤트는
+    관측 조합 전체가 '전역 인기 포즈 차트'로 퇴화하므로 통째로 건너뛴다(실측: 'looking'
+    단어 폴백이 looking at viewer/back/up/down에 매칭 → v/holding hands 주입)."""
+    return str(tag or "").strip().lower().replace("_", " ") in _EVENT_GENERIC_STOPLIST
+
+
+# 본질적으로 2인 이상을 요구하는 관계 태그 — 확정 인원이 1명인 장면에 boost/event/
+# 오염된 선택 enum으로 새면 POV 손잡기·이마 맞대기 같은 의도 외 구도를 만든다(실측:
+# "lowering head" 후보 오염 → heads together 선택 → e621 부스트가 foreheads touching
+# 연쇄). 요청이 직접 언급한 경우(요청 토큰 겹침)는 호출부에서 면제한다.
+_TWO_PERSON_TAGS = frozenset({
+    "heads together", "foreheads touching", "holding hands", "interlocked fingers",
+    "eye contact", "hug", "kiss", "kissing", "french kiss", "imminent kiss",
+    "couple", "yuri", "yaoi", "cheek-to-cheek", "face-to-face", "back-to-back",
+    "shoulder-to-shoulder", "arm around shoulder", "arm around waist",
+})
+# "another"를 포함하는 태그(hugging another, hand on another's head 등)는 정의상 2인+.
+_ANOTHER_TOKEN_RE = re.compile(r"\banother'?s?\b")
+
+
+def _is_two_person_tag(tag_norm: str) -> bool:
+    """태그가 본질적으로 2인 이상 관계를 의미하는지(큐레이션 목록 + another 패턴)."""
+    t = str(tag_norm).lower().strip()
+    return t in _TWO_PERSON_TAGS or bool(_ANOTHER_TOKEN_RE.search(t))
 
 # 크기 형용사 — "huge dog" 검색이 "huge belly/breasts/balls"를 끌어오는 토큰 오염
 # 차단용. 후보가 쿼리와 *오직 이 형용사로만* 겹치면(내용 토큰 미공유) 드롭한다.
@@ -330,6 +361,20 @@ MAX_ENUM_TAGS = 150
 
 _STOPWORDS = {"the", "and", "with", "near", "from", "into", "onto", "over", "under"}
 
+
+def _with_singular_variants(queries: list[str]) -> list[str]:
+    """단수형 폴백: 리터럴 substring 검색은 "clouds"로 "cloud"(고빈도 canonical)를 못
+    본다(복수형 문자열만 매칭) — count-0 알리아스("clouds")만 후보가 되는 실측 결함.
+    s로 끝나는 한 단어 쿼리에 단수형을 덧붙인다(스템이 같아 retriever 점수는 자연 정렬)."""
+    out = list(queries)
+    for q in queries:
+        qs = str(q).strip()
+        if " " not in qs and len(qs) >= 4 and qs.endswith("s") and not qs.endswith("ss"):
+            singular = qs[:-1]
+            if singular not in out:
+                out.append(singular)
+    return out
+
 # subject 계열 정규화 — "two girls" 같은 자연어는 리터럴 검색으로 "2girls"를 못
 # 찾는다. 진실(인덱스 존재 여부)은 그대로 검색으로 확인하되, 질의만 정규 태그로.
 _SUBJECT_SYNONYMS: dict[str, tuple[str, ...]] = {
@@ -372,12 +417,9 @@ _EVENT_PERSON_IDS = (
 )
 
 
-def _resolve_person_id(selected: list[dict[str, Any]], *, solo: bool = False) -> str:
-    """선택된 subject 태그(1girl/2boys/...)에서 Event Preset 파티션 person_id 추론.
-    solo는 명시적으로 'solo' 태그가 있거나 solo=True일 때만 _solo 파티션을 쓴다 —
-    그 외 단독 인물은 1girl/1boy 파티션(개·다른 객체가 등장하는 장면 포함)."""
-    tags = {str(i.get("tag") or "").lower().replace("_", " ") for i in selected}
-    explicit_solo = solo or "solo" in tags
+def _count_girls_boys(tags: set[str]) -> tuple[int, int]:
+    """정규화된 태그 집합에서 확정 인원수(여, 남)를 센다 — person_id 추론과
+    2인 관계 태그 가드가 공유하는 단일 해석."""
     girls = 0
     boys = 0
     for t in tags:
@@ -393,6 +435,16 @@ def _resolve_person_id(selected: list[dict[str, Any]], *, solo: bool = False) ->
             boys = max(boys, 2)
         elif t in ("3boys", "multiple boys", "6+boys"):
             boys = max(boys, 3)
+    return girls, boys
+
+
+def _resolve_person_id(selected: list[dict[str, Any]], *, solo: bool = False) -> str:
+    """선택된 subject 태그(1girl/2boys/...)에서 Event Preset 파티션 person_id 추론.
+    solo는 명시적으로 'solo' 태그가 있거나 solo=True일 때만 _solo 파티션을 쓴다 —
+    그 외 단독 인물은 1girl/1boy 파티션(개·다른 객체가 등장하는 장면 포함)."""
+    tags = {str(i.get("tag") or "").lower().replace("_", " ") for i in selected}
+    explicit_solo = solo or "solo" in tags
+    girls, boys = _count_girls_boys(tags)
     if girls and boys:
         gp = "1girl" if girls == 1 else ("2girls" if girls == 2 else "multiple_girls")
         bp = "1boy" if boys == 1 else "multiple_boys"
@@ -601,6 +653,40 @@ _VERIFY_INSTRUCTION = (
     "return an empty list. List tags to remove exactly as given.\n\n"
     "Input: "
 )
+
+
+# 주입 게이트 — 코드가 만든 보강 제안(복원·e621 부스트·이벤트 참조)을 무조건 주입하지
+# 않고, 모델이 "이 장면에 맞는가"를 보고 승인한 것만 넣는다. verify 패스(기본 OFF,
+# recall 0.645→0.578 회귀)와 달리 enum이 *제안 목록뿐*이라 — 과제거의 최악에도 잃는 건
+# 보강분뿐, 핵심 장면 태그는 구조적으로 못 건드린다. 불확실하면 거부(보강은 옵션).
+_GATE_INSTRUCTION = (
+    "Task: you are gating EXTRA tags proposed for an anime image prompt. You get the "
+    "user's request, the core tags already chosen, and PROPOSED extra tags that came "
+    "from co-occurrence statistics — they are often generic or off-scene. Approve a "
+    "proposal ONLY if it clearly belongs in THIS exact scene: concretely visible, "
+    "consistent with the stated number of people, the location and the mood, and "
+    "adding a real detail. Reject generic filler poses, anything tied to a specific "
+    "franchise or character not in the request, two-person interactions in a "
+    "single-person scene, and anything off-mood. When unsure, reject — extras are "
+    "optional. List approved tags exactly as given.\n\n"
+    "Input: "
+)
+
+
+def _gate_schema(tags: list[str]) -> dict[str, Any]:
+    """주입 게이트: 승인할 태그를 *제안 목록 안에서만*(enum) 고르게 강제 — 환각 0."""
+    return {
+        "type": "object",
+        "properties": {
+            "approved": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": len(tags),
+                "items": {"type": "string", "enum": list(tags)},
+            },
+        },
+        "required": ["approved"],
+    }
 
 
 # keep_alive 값(Ollama): -1=무기한 상주, 0=즉시 언로드, None=서버 기본(~5분).
@@ -817,6 +903,10 @@ class OllamaTagAssistService:
             if category.lower().startswith(_PROPER_NOUN_CATEGORY_PREFIXES):
                 return None
             if "(" in tag and ")" in tag:
+                return None
+            if int(row.get("count") or 0) <= 0:
+                # count-0 = 알리아스/사어 행(실측: "clouds"/"black clouds") — 실태그로
+                # 안 본다. "cloud"+"clouds" 중복 주입의 원인.
                 return None
             return {
                 "tag": tag,
@@ -1076,6 +1166,8 @@ class OllamaTagAssistService:
             tag = str(row.get("tag") or "").strip()
             if not tag or tag.lower().replace("_", " ") in seen:
                 continue
+            if int(row.get("count") or 0) <= 0:
+                continue  # count-0 알리아스/사어 행으로는 복구하지 않는다(Codex CP4)
             category = str(row.get("group") or "")
             if category.lower().startswith(_PROPER_NOUN_CATEGORY_PREFIXES):
                 continue
@@ -1126,9 +1218,11 @@ class OllamaTagAssistService:
         cfg = _level_cfg(opts.get("level"))
         # 등급 키워드는 원문(한국어 "야한/노출" 등)에서 감지. 그 외 단계는 영어로.
         max_rating = _resolve_max_rating(opts, raw_text)
-        # 진행 단계 총개수(레벨에 따라 가변): 개념·검색·선택은 항상, 이벤트·부스트·자연어는 조건부.
+        # 진행 단계 총개수(레벨에 따라 가변): 개념·검색·선택은 항상, 이벤트·부스트·
+        # 주입 게이트·자연어는 조건부.
         total_stages = 3 + (1 if int(cfg["event_top"]) > 0 else 0) \
             + (1 if int(cfg["boost_top"]) > 0 else 0) \
+            + (1 if (int(cfg["boost_top"]) > 0 or int(cfg["event_top"]) > 0) else 0) \
             + (1 if (int(cfg["enhance_max"]) > 0 or int(cfg["natural_max"]) > 0) else 0)
         self._begin_progress(total_stages, "개념 추출")
         step_no = 1
@@ -1153,6 +1247,14 @@ class OllamaTagAssistService:
                 })
         if not concepts:
             return {"ok": False, "stage": "concepts", "error": "요청에서 시각 개념을 찾지 못했습니다."}
+
+        # 요청 근거 토큰(요청문 + 개념 쿼리만, 태그 유래 토큰은 제외 — 섞으면 자기 면제가
+        # 된다). "요청이 직접 말했는가" 판정용: 2인 관계 태그 가드의 면제 기준.
+        request_tokens: set[str] = set()
+        for _src in [request_text, original_text] + [c["query_en"] for c in concepts]:
+            for _w in re.findall(r"[a-z']+", str(_src).lower()):
+                if len(_w) >= 3 and _w not in _STOPWORDS:
+                    request_tokens.add(_w)
 
         # 코드 — 후보 검색 (진실은 NAIA 태그 인덱스)
         step_no += 1
@@ -1190,7 +1292,7 @@ class OllamaTagAssistService:
                         })
             rows = []
             search_terms = list(queries)  # 어시스트 검색기 whole-word 게이트의 기준 토큰원
-            for q in queries:
+            for q in _with_singular_variants(list(queries)):
                 try:
                     rows.extend(self._searcher(q, CANDIDATES_PER_CONCEPT) or [])
                 except Exception:
@@ -1205,7 +1307,7 @@ class OllamaTagAssistService:
                 for word in words[:3]:
                     word_queries = _SUBJECT_SYNONYMS.get(word.lower()) or (word,)
                     search_terms.extend(word_queries)
-                    for wq in word_queries:
+                    for wq in _with_singular_variants(list(word_queries)):
                         try:
                             rows.extend(self._searcher(wq, max(4, CANDIDATES_PER_CONCEPT // 2)) or [])
                         except Exception:
@@ -1264,8 +1366,8 @@ class OllamaTagAssistService:
             tags = []
             for row in kept_rows:
                 tag = str(row.get("tag") or "").strip()
-                if not tag:
-                    continue
+                if not tag or int(row.get("count") or 0) <= 0:
+                    continue  # count-0 알리아스/사어 행은 후보 가치 없음(cloud/clouds 중복원)
                 tags.append(tag)
                 if tag not in candidate_info:
                     candidate_info[tag] = {
@@ -1445,25 +1547,63 @@ class OllamaTagAssistService:
         # 코드 단계 — 복원(recovery): 소형 모델이 가끔 핵심 명사를 통째로 드롭한다
         # (실측: bikini/beach가 후보에 있는데도 selected=[shy,1girl]). 구체 명사
         # 개념(subject/clothing/background)이 선택에 한 태그도 못 들어갔으면 그 개념의
-        # 최고빈도 후보를 강제 포함한다. action/expression은 후보 자체가 어긋날 수
+        # 후보를 강제 포함한다. action/expression은 후보 자체가 어긋날 수
         # 있어(예: "tied hands"→"tied sleeves") 복원 대상에서 제외 — 오염 방지.
+        # 선정 기준은 count 최대가 아니라 *개념 쿼리 스템 겹침* 우선(겹침 0이면 복원 포기) —
+        # count 최대는 'school hallway'(배경)에 hasu no sora school uniform(작품 교복,
+        # 10k>hallway 5k)을 주입하는 실측 사고를 냈다. 겹침 기준이면 school/hallway가 이긴다.
+        recovery_added: set[str] = set()
         for c in concept_results:
             if c["kind"] not in ("subject", "clothing", "background"):
                 continue
             cands = [t for t in c["candidates"] if t in candidate_info]
             if not cands or any(t in seen for t in cands):
                 continue
-            top = max(cands, key=lambda t: int(candidate_info[t].get("count") or 0))
+            q_stems = _retriever_stems(c["query_en"])
+
+            def _recovery_key(t: str) -> tuple[int, float, int]:
+                t_stems = _retriever_stems(t)
+                overlap = len(q_stems & t_stems)
+                ratio = (overlap / len(t_stems)) if t_stems else 0.0
+                return (overlap, ratio, int(candidate_info[t].get("count") or 0))
+
+            top = max(cands, key=_recovery_key)
+            if _recovery_key(top)[0] <= 0:
+                continue  # 쿼리와 스템 한 개도 안 겹치는 후보뿐 → 강제 주입하지 않는다
             if not _tag_allowed(top.lower().replace("_", " "), max_rating):
                 continue
             seen.add(top)
             selected.append(candidate_info[top])
+            recovery_added.add(top)
+
+        _protected = {it["tag"] for it in forced_subjects}
+
+        # 2인 관계 태그 가드(결정론·전단): 확정 인원이 정확히 1명인데 본질적 2인 태그
+        # (heads together/holding hands류)가 선택에 끼면 — 오염된 후보 enum에서의
+        # 오선택(실측) — 모순이므로 제거한다. 요청이 직접 언급한 경우(request_tokens
+        # 겹침, 예: "pov holding hands")는 면제. boost 시드가 되기 *전에* 잘라 연쇄
+        # (heads together → e621이 foreheads touching)를 차단하고, seen에는 남겨
+        # 후속 단계(boost/event/enhance) 재유입도 막는다. 강제 진실태그는 보호.
+        _girls_n, _boys_n = _count_girls_boys(
+            {str(i.get("tag") or "").lower().replace("_", " ") for i in selected})
+        _single_person_scene = (_girls_n + _boys_n) == 1
+
+        def _two_person_ok(tag: str) -> bool:
+            if not _single_person_scene or tag in _protected:
+                return True
+            norm = str(tag).lower().replace("_", " ").strip()
+            if not _is_two_person_tag(norm):
+                return True
+            toks = {w for w in norm.split() if len(w) >= 3 and w not in _STOPWORDS}
+            return bool(toks & request_tokens)  # 요청이 직접 언급 → 면제
+
+        selected = [it for it in selected if _two_person_ok(it["tag"])]
+        recovery_added &= {it["tag"] for it in selected}
 
         # 변형 축약: 같은 개념의 부분집합 변형(kimono/kimono dress/kimono only)을 한
         # canonical로 합친다. 강제 인원/행위 태그는 보존. ⚠️ 기본 OFF: 격리측정서
         # recall -0.05(0.645→0.598, 원본의 구체변형까지 합침). 검색기 정밀화가 변형
         # 범람을 더 근본적으로 줄이므로 보류, 코드 보존.
-        _protected = {it["tag"] for it in forced_subjects}
         if cfg.get("collapse_variants", False):
             selected = _collapse_variants(selected, _protected)
             seen = {it["tag"] for it in selected}
@@ -1520,15 +1660,17 @@ class OllamaTagAssistService:
                 return max((candidate_info[t]["count"] for t in c["candidates"] if t in candidate_info), default=0)
 
             queryable.sort(key=lambda c: (c["kind"] != "action", -_top_count(c)))
+            # 쿼리는 개념 구문 *그대로*만 쓴다 — 단어 분해 폴백("looking at cell phone"
+            # →"looking")은 범용 동사가 시선/포즈 이벤트 패밀리에 substring 매칭돼 전역
+            # 인기 포즈를 주입하는 퇴화를 실측으로 일으켰다(v/holding hands 사고; 상위
+            # 4개를 스톱리스트로 스킵해도 다음 티어 looking ahead/at animal이 샘).
+            # 이벤트 참조는 개념이 이벤트를 직접 명명할 때(fellatio/hug/kiss류 정형
+            # 행위)만 의미가 있다 — 매칭 0건이면 보강 없이 넘어가는 게 옳다.
             query_terms: list[str] = []
             for c in queryable:
                 term = c["query_en"].strip()
                 if term and term not in query_terms:
                     query_terms.append(term)
-                for w in term.split():
-                    wl = w.lower()
-                    if len(wl) >= 4 and wl not in _STOPWORDS and wl not in query_terms:
-                        query_terms.append(wl)
             agg: dict[str, int] = {}
             n_terms = min(len(query_terms), max(2, event_top // 2))
             for term in query_terms[:n_terms]:
@@ -1558,6 +1700,59 @@ class OllamaTagAssistService:
                 seen.add(tag)
                 event_enrich.append({"tag": tag, "count": weight, "category": "event"})
                 event_added.append(tag)
+
+        # 주입 게이트(LLM 1콜) — 코드가 만든 보강 제안(복원·e621 부스트·이벤트 참조)을
+        # 무조건 주입하지 않고, 모델이 장면 적합성을 승인한 것만 넣는다. enum이 제안
+        # 목록뿐이라 최악(전부 거부)에도 잃는 건 보강분뿐 — verify 패스의 recall 회귀와
+        # 구조적으로 다르다. 거부된 태그는 seen에 남겨 enhance 재유입도 차단. 게이트
+        # 자체가 실패하면(LLM 다운 등) 결정론 가드를 통과한 제안을 그대로 쓴다(best-effort).
+        # finish(호출 3)보다 앞에 둬서 자연어/보완 생성이 오염된 tags_so_far를 보지 않게 한다.
+        injection_rejected: list[str] = []
+        if boost_top > 0 or event_top > 0:
+            proposals: list[str] = []
+            _p_seen: set[str] = set()
+            for t in (
+                [it["tag"] for it in selected if it["tag"] in recovery_added]
+                + [it["tag"] for it in boosted]
+                + [it["tag"] for it in event_enrich]
+            ):
+                if t not in _p_seen:
+                    _p_seen.add(t)
+                    proposals.append(t)
+            if proposals:
+                step_no += 1
+                self._stage(step_no, "주입 게이트")
+                gate_user = json.dumps(
+                    {
+                        "request": request_text,
+                        "core_tags": [
+                            it["tag"].replace("_", " ") for it in selected
+                            if it["tag"] not in recovery_added
+                        ],
+                        "proposed_extras": proposals,
+                    },
+                    ensure_ascii=False,
+                )
+                try:
+                    verdict = self._chat(
+                        _GATE_INSTRUCTION + gate_user, _gate_schema(proposals),
+                        model=target_model, temperature=0.0,
+                    )
+                    approved = {
+                        str(t).strip() for t in (verdict.get("approved") or []) if str(t).strip()
+                    }
+                    rej = {t for t in proposals if t not in approved}
+                    if rej:
+                        injection_rejected = [t for t in proposals if t in rej]
+                        selected = [
+                            it for it in selected
+                            if not (it["tag"] in rej and it["tag"] in recovery_added)
+                        ]
+                        boosted = [it for it in boosted if it["tag"] not in rej]
+                        event_enrich = [it for it in event_enrich if it["tag"] not in rej]
+                        event_added = [t for t in event_added if t not in rej]
+                except Exception:
+                    pass  # 게이트 실패 — 가드 통과 제안을 그대로 사용(파이프라인 불파괴)
 
         # 호출 3 (통합) — 보완 태그 + 자연어 묘사를 한 호출로. 선택+부스트 태그를
         # 보고 작성. 태그는 코드가 인덱스 검증(환각 탈락), 자연어는 창의적(temp↑).
@@ -1607,8 +1802,10 @@ class OllamaTagAssistService:
                 if not _tag_allowed(norm, max_rating):
                     continue
                 # 장면 근거 prune: enhance 태그가 요구/선택 토큰과 하나도 안 겹치면 환각으로 보고 탈락.
+                # 의미 토큰이 아예 없는 태그("v" 같은 단문자/이모티콘)도 근거 불능 → 탈락
+                # (기존엔 빈 토큰셋이 prune을 *우회*해 "v"가 통과하는 구멍이었다).
                 _v_tokens = {w for w in norm.split() if len(w) >= 3 and w not in _STOPWORDS}
-                if _v_tokens and not (_v_tokens & _ground_tokens):
+                if not _v_tokens or not (_v_tokens & _ground_tokens):
                     continue
                 validated = self._validate_tag(norm)
                 if validated and validated["tag"] not in seen:
@@ -1637,9 +1834,11 @@ class OllamaTagAssistService:
                 return True
             return item["tag"].lower().replace("_", " ") in _established_counts
 
-        boosted = [it for it in boosted if _ok_count(it)]
-        enhanced = [it for it in enhanced if _ok_count(it)]
-        event_enrich = [it for it in event_enrich if _ok_count(it)]
+        # 2인 관계 태그 가드를 보강 단계 산출물에도 적용(벨트&서스펜더 — 게이트가
+        # 실패하거나 통과시켜도 단일 인물 장면의 관계 태그는 결정론으로 막는다).
+        boosted = [it for it in boosted if _ok_count(it) and _two_person_ok(it["tag"])]
+        enhanced = [it for it in enhanced if _ok_count(it) and _two_person_ok(it["tag"])]
+        event_enrich = [it for it in event_enrich if _ok_count(it) and _two_person_ok(it["tag"])]
 
         # 최종 검증 패스(LLM 판단) — 토큰 매칭이 못 잡는 의미 오류(shortcake/backpack/
         # connected beard 등)를 제거한다. 소형 모델은 생성보다 판단을 잘한다. enum 제약
@@ -1697,6 +1896,7 @@ class OllamaTagAssistService:
             "boosted": boosted,
             "natural": natural,
             "event_referenced": event_added,
+            "injection_rejected": injection_rejected,
             "person_id": _resolve_person_id(selected, solo=solo),
             "max_rating": max_rating,
             "level": str(opts.get("level") or "standard"),

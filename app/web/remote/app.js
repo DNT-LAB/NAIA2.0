@@ -997,18 +997,18 @@ const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize wildcard panel module', error);
   });
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260611-extpanel1')
-  .then(({createExtensionsPanel}) => {
-    extensionsPanel = createExtensionsPanel({
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260611-extset1')
+  .then(({createExtensionsUi}) => {
+    extensionsPanel = createExtensionsUi({
       document,
-      moduleBody,
       escHtml,
       setModuleParam,
       showToast,
+      requestState: () => requestModuleState('extensions'),
     });
   })
   .catch(error => {
-    console.error('Failed to initialize extensions panel module', error);
+    console.error('Failed to initialize extensions UI module', error);
   });
 const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260512-api-dialog-fallback1')
   .then(({createWildcardManagerPanel}) => {
@@ -2306,6 +2306,8 @@ function onInitComplete() {
   for (const naiToolId of ['character', 'character_reference', 'vibe_transfer']) {
     if (naiToolId !== currentModuleId) requestModuleState(naiToolId);
   }
+  // Extensions 퀵 버튼(Tools/Fn)은 탭을 열지 않아도 부팅 직후 나타나야 한다.
+  requestModuleState('extensions');
   scheduleInitialHistoryRefresh();
   scheduleInitialStateRefresh();
   const cachedPe = moduleStateCache.get('prompt_engineering');
@@ -3799,6 +3801,7 @@ function switchRightTab(tabName, options = {}) {
     tabName = 'result';
   }
   const activeTab = rightTabs ? rightTabs.switchTo(tabName) : tabName;
+  if (activeTab === 'settings') requestModuleState('extensions'); // 진입 시 재발견(새 설치 즉시 반영)
   if (tabName === 'pngInfo' && metadataViewer && !options.skipMetadataRefresh) metadataViewer.refresh();
   if (activeTab === 'thumb' && thumbTabControl) thumbTabControl.load();
   if (artistThumbControl && typeof artistThumbControl.setActive === 'function') {
@@ -5725,7 +5728,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260611-extpanel1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260611-extset1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -5939,7 +5942,6 @@ function openModule(moduleId, options = {}) {
     instant_wildcard: 'Instant Wildcard',
     chunk: '와일드카드 청크',
     e621_event: 'E621 연구모듈',
-    extensions: 'Extensions',
   };
   moduleTitle.textContent = moduleLauncherControl?.moduleTitle(moduleId) || titles[moduleId] || moduleId;
   applyModuleOverviewGuide(moduleId);
@@ -6192,6 +6194,9 @@ function onModuleState(m) {
     }
     updateWebUiHiresfixAssistControls(m);
     if ('enabled' in m) setWebUiHiresfixEnabled(getWebUiHiresfixAssistState().enabled);
+  } else if (m.module_id === 'extensions') {
+    // Settings 페이지 + 퀵 버튼(Tools/Fn) 동기화 — 탭/팝업 표시 여부와 무관하게 소비.
+    renderExtensions(m);
   }
 
   if (m.module_id === 'prompt_engineering') {
@@ -6229,10 +6234,10 @@ function renderModuleState(m) {
   else if (m.module_id === 'extensions') renderExtensions(m);
 }
 
-// ---- Extensions 관리 패널 ----
+// ---- Extensions UI (Settings ▸ Extension + 퀵 버튼/팝업) ----
+// 퀵 버튼 동기화 때문에 탭/팝업 표시 여부와 무관하게 항상 상태를 소비한다.
 function renderExtensions(m) {
-  if (currentModuleId !== 'extensions') return;
-  if (extensionsPanel) extensionsPanel.render(m);
+  if (extensionsPanel) extensionsPanel.onState(m);
 }
 
 function openSaveDirectoryPanel() {

@@ -45,6 +45,9 @@ EXT_CALLBACK_MUTE_THRESHOLD = 5
 # enqueue는 무조건 거부된다(버그성 무한 연쇄의 호스트 측 절대 상한).
 EXT_CHAIN_DEPTH_MAX = 4
 SETTINGS_FILENAME = "settings.json"
+# 확장 퀵 버튼의 메인 UI 노출 위치: 도구바(Tools) / Fn 메뉴 / 없음.
+PLACEMENT_VALUES = ("tools", "fn", "none")
+PLACEMENT_DEFAULT = "tools"
 
 
 def _ext_print(ext_id: str, message: str) -> None:
@@ -240,6 +243,7 @@ class ExtensionRecord:
     approved: bool = False   # 사용자 동의(=import 허용). 동의 전에는 코드 미실행.
     blocked: bool = False    # 하드 OFF — 부팅 시 import 제외(승인보다 우선).
     enabled: bool = True     # 소프트 ON/OFF — 로드된 채 무력화(즉시 발효).
+    placement: str = PLACEMENT_DEFAULT  # 퀵 버튼 위치: tools | fn | none (호스트 UI 설정).
     hooks: int = 0
     subscriptions: int = 0
     # Phase B: ctx.register_panel() 선언 스키마({"title","fields":[...]}) 또는 None.
@@ -269,6 +273,7 @@ class ExtensionRecord:
             "approved": self.approved,
             "blocked": self.blocked,
             "enabled": self.enabled,
+            "placement": self.placement,
             "active": self.is_active,
             "hooks": self.hooks,
             "subscriptions": self.subscriptions,
@@ -762,10 +767,13 @@ class ExtensionManager:
                     f"Remote Web: extensions grandfathered (최초 도입 일괄 승인): {', '.join(newly)}",
                     flush=True,
                 )
+        placement_map = raw.get("placement") if isinstance(raw.get("placement"), dict) else {}
         for record in self.records:
             record.approved = record.ext_id in approved
             record.blocked = record.ext_id in blocked
             record.enabled = record.ext_id not in inactive
+            saved_placement = str(placement_map.get(record.ext_id) or "")
+            record.placement = saved_placement if saved_placement in PLACEMENT_VALUES else PLACEMENT_DEFAULT
         self._write_config_locked()
 
     def _write_config_locked(self) -> None:
@@ -777,6 +785,12 @@ class ExtensionManager:
             # 정규화: inactive ⊆ approved (미승인 확장의 soft 상태는 무의미).
             "inactive": sorted({r.ext_id for r in self.records if r.approved and not r.enabled}),
             "blocked": sorted({r.ext_id for r in self.records if r.blocked}),
+            # 기본값(tools)이 아닌 위치만 기록 — 맵에 없으면 tools.
+            "placement": {
+                r.ext_id: r.placement
+                for r in sorted(self.records, key=lambda item: item.ext_id)
+                if r.placement != PLACEMENT_DEFAULT
+            },
         }
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -880,6 +894,11 @@ class ExtensionManager:
                 record = self._find(rest)
                 if record is not None:
                     record.blocked = _coerce_panel_value({"type": "bool"}, value)[1]
+                    self._write_config_locked()
+            elif action == "placement":
+                record = self._find(rest)
+                if record is not None and str(value) in PLACEMENT_VALUES:
+                    record.placement = str(value)
                     self._write_config_locked()
             elif action == "setting":
                 ext_id, _, field_key = rest.partition(":")

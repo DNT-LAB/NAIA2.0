@@ -82,7 +82,8 @@ def register_state_routes(
                 "artists": True,
                 "characters": True,
                 "studio": True,
-                "settings": False,
+                # Settings 탭(좌: 카테고리, 우: 콘텐츠) — Global(placeholder) + Extension 관리.
+                "settings": True,
             },
             "retired_tabs": {},
         }

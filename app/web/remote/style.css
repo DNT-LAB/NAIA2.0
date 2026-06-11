@@ -16823,6 +16823,65 @@ body.detached-module .mod-grid-3 {
   text-align: center; color: var(--text-muted); font-size: 12px; line-height: 1.9; padding: 18px 8px;
 }
 .ext-empty code { font-size: 11px; background: var(--bg-surface); border-radius: 5px; padding: 1px 5px; }
+
+/* ===== Settings 탭 (좌: 카테고리 네비, 우: 콘텐츠) ===== */
+.settings-root { display: flex; height: 100%; min-height: 0; }
+.settings-nav {
+  width: 150px; flex-shrink: 0; display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 8px; border-right: 1px solid var(--border-dim);
+}
+.settings-nav-item {
+  text-align: left; border: none; background: transparent; color: var(--text-muted);
+  border-radius: 8px; padding: 8px 12px; cursor: pointer; font-size: 13px; font-weight: 600;
+}
+.settings-nav-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.settings-nav-item.active { background: var(--bg-elevated); color: var(--text-primary); }
+.settings-content { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 14px; }
+.settings-page { display: none; }
+.settings-page.active { display: block; }
+.settings-empty { color: var(--text-muted); font-size: 13px; line-height: 1.8; padding: 16px 6px; }
+.settings-empty h3 { color: var(--text-primary); margin: 0 0 6px; }
+
+/* 퀵 버튼 위치 select */
+.ext-placement { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }
+.ext-placement select {
+  background: var(--bg-surface); border: 1px solid var(--border-dim); color: var(--text-primary);
+  border-radius: 7px; padding: 3px 6px; font-size: 11px;
+}
+
+/* 도구바 확장 버튼 */
+.ext-tools-bar { margin-top: 4px; }
+.ext-tool-btn-off { opacity: 0.5; }
+
+/* Fn 메뉴 확장 항목 */
+.ext-fn-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: none; background: transparent; color: var(--text-primary);
+  padding: 8px 12px; cursor: pointer; font-size: 12px; text-align: left;
+  border-top: 1px dashed var(--border-dim);
+}
+.ext-fn-item:hover { background: var(--bg-elevated); }
+
+/* 확장 퀵 팝업 (Activate + 선언 폼) */
+.ext-quick-popup {
+  position: fixed; z-index: 1200; min-width: 250px; max-width: 360px;
+  background: var(--bg-elevated); border: 1px solid var(--border-dim); border-radius: 11px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45); padding: 10px 12px;
+}
+.ext-quick-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ext-quick-title { font-size: 13px; font-weight: 700; }
+.ext-quick-close {
+  border: none; background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 2px 4px;
+}
+.ext-quick-activate {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 8px; padding: 7px 9px; border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-surface); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.ext-quick-popup .ext-fields { border-top: none; padding-top: 0; margin-top: 9px; }
+.ext-quick-nofields { margin-top: 9px; font-size: 11px; color: var(--text-muted); }
+.ext-quick-foot { margin-top: 9px; font-size: 10px; color: var(--text-muted); text-align: right; }
 .seq-btn:hover:not(:disabled) { border-color: var(--border-glow); }
 .seq-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .seq-btn.primary { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }

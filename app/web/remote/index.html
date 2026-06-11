@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260611-extpanel1">
+<link rel="stylesheet" href="style.css?v=20260611-extset1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -1058,10 +1058,22 @@
     <div id="studioRoot" class="studio-root"></div>
   </div>
   <div class="right-tab-pane" id="rightTabSettings" data-right-pane="settings" hidden role="tabpanel">
-    <div class="right-tab-placeholder">
-      <div class="placeholder-kicker">TODO</div>
-      <h2>Settings</h2>
-      <p>저장 경로, API 연결, Web Session, 가시성 설정을 Remote Shell 설정 화면으로 연결할 자리입니다.</p>
+    <div class="settings-root" id="settingsRoot">
+      <nav class="settings-nav" id="settingsNav" aria-label="Settings categories">
+        <button type="button" class="settings-nav-item active" data-settings-page="global">Global</button>
+        <button type="button" class="settings-nav-item" data-settings-page="extension">Extension</button>
+      </nav>
+      <div class="settings-content">
+        <div class="settings-page active" data-settings-page-content="global">
+          <div class="settings-empty">
+            <h3>Global</h3>
+            <p>전역 설정이 이곳으로 모일 예정입니다 (저장 경로 · API 연결 · Web Session · 가시성).</p>
+          </div>
+        </div>
+        <div class="settings-page" data-settings-page-content="extension">
+          <div id="settingsExtensionPane"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1110,6 +1122,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260611-extpanel1"></script>
+<script src="app.js?v=20260611-extset1"></script>
 </body>
 </html>

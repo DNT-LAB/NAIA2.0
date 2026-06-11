@@ -1,13 +1,20 @@
-// Extensions 관리 패널 — 확장 발견/승인(load-on-enable)/soft ON·OFF/차단 + 선언적
-// 설정 폼(제네릭 렌더러). 토글은 승인/soft 전용이고 차단은 ⋯ 메뉴로 분리한다
-// (설계 인스펙션 #4 — 한 토글이 상태에 따라 세 가지 일을 하면 안 된다).
-export function createExtensionsPanel(deps) {
-  const {document, moduleBody, escHtml, setModuleParam, showToast} = deps;
+// Extensions UI 통합 컨트롤러.
+// - Settings 탭 ▸ Extension 페이지: 발견/승인(load-on-enable)/soft ON·OFF/차단/
+//   퀵 버튼 위치(Tools·Fn·없음) 관리 + 선언적 설정 폼.
+// - 메인 UI 퀵 액세스: placement에 따라 도구바(#extToolsBar)/Fn 메뉴(#fnMenu)에
+//   확장 버튼을 동기화하고, 클릭 시 "Activate This Script" 스위치 + 확장 선언
+//   폼을 가진 퀵 팝업을 띄운다(내용은 확장 개발자의 register_panel 스키마).
+// 토글은 승인/soft 전용, 차단은 ⋯ 메뉴로 분리(설계 인스펙션 #4).
+export function createExtensionsUi(deps) {
+  const {document, escHtml, setModuleParam, showToast, requestState} = deps;
 
   let lastState = null;
   let confirmingId = null; // 미승인 확장 활성화 전 신뢰 경고 인라인 확인
   let openMenuId = null;
+  let quickPopupId = null; // 열려 있는 퀵 팝업의 확장 id
+  let navBound = false;
 
+  // ── 공용: 칩/필드 렌더러 (설정 페이지·퀵 팝업 공유) ──────────
   function chipFor(ext) {
     if (ext.status === 'loading') return ['로딩 중…', 'ext-chip-loading'];
     if (ext.status === 'manifest_error') return ['매니페스트 오류', 'ext-chip-error'];
@@ -28,35 +35,36 @@ export function createExtensionsPanel(deps) {
     return '';
   }
 
-  function fieldHtml(ext, field) {
+  function fieldHtml(ext, field, idPrefix) {
     if (field.type === 'action') return ''; // v1 예약 타입 — 렌더하지 않음
     const value = ext.settings && field.key in ext.settings ? ext.settings[field.key] : field.default;
-    const fid = `extf-${ext.id}-${field.key}`;
+    const fid = `${idPrefix}-${ext.id}-${field.key}`;
     const help = field.help ? ` title="${escHtml(field.help)}"` : '';
+    const common = `id="${fid}" data-ext="${escHtml(ext.id)}" data-field="${escHtml(field.key)}"`;
     let input = '';
     if (field.type === 'bool') {
-      input = `<input type="checkbox" id="${fid}" data-ext="${escHtml(ext.id)}" data-field="${escHtml(field.key)}" ${value ? 'checked' : ''}>`;
+      input = `<input type="checkbox" ${common} ${value ? 'checked' : ''}>`;
     } else if (field.type === 'int' || field.type === 'float') {
       const min = field.min !== undefined ? ` min="${field.min}"` : '';
       const max = field.max !== undefined ? ` max="${field.max}"` : '';
       const step = field.step !== undefined ? ` step="${field.step}"` : (field.type === 'float' ? ' step="0.1"' : '');
-      input = `<input type="number" id="${fid}" data-ext="${escHtml(ext.id)}" data-field="${escHtml(field.key)}"${min}${max}${step} value="${escHtml(String(value ?? ''))}">`;
+      input = `<input type="number" ${common}${min}${max}${step} value="${escHtml(String(value ?? ''))}">`;
     } else if (field.type === 'select') {
       const options = (field.options || []).map(opt =>
         `<option value="${escHtml(opt)}" ${String(value) === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('');
-      input = `<select id="${fid}" data-ext="${escHtml(ext.id)}" data-field="${escHtml(field.key)}">${options}</select>`;
+      input = `<select ${common}>${options}</select>`;
     } else if (field.type === 'tags') {
       const text = Array.isArray(value) ? value.join(', ') : String(value ?? '');
-      input = `<input type="text" id="${fid}" class="ext-field-wide" data-ext="${escHtml(ext.id)}" data-field="${escHtml(field.key)}" value="${escHtml(text)}" placeholder="쉼표로 구분">`;
+      input = `<input type="text" class="ext-field-wide" ${common} value="${escHtml(text)}" placeholder="쉼표로 구분">`;
     } else { // text
-      input = `<input type="text" id="${fid}" class="ext-field-wide" data-ext="${escHtml(ext.id)}" data-field="${escHtml(field.key)}" value="${escHtml(String(value ?? ''))}">`;
+      input = `<input type="text" class="ext-field-wide" ${common} value="${escHtml(String(value ?? ''))}">`;
     }
     const error = ext.field_errors && ext.field_errors[field.key]
       ? `<div class="ext-field-error">${escHtml(ext.field_errors[field.key])}</div>` : '';
     return `<div class="ext-field"${help}><label for="${fid}">${escHtml(field.label)}${applyHint(field)}</label>${input}${error}</div>`;
   }
 
-  function fieldsHtml(ext) {
+  function fieldsHtml(ext, idPrefix) {
     if (!ext.panel || !Array.isArray(ext.panel.fields) || ext.status !== 'loaded') return '';
     let html = '';
     let section = null;
@@ -66,11 +74,38 @@ export function createExtensionsPanel(deps) {
         section = field.section || '';
         if (section) html += `<div class="ext-section">${escHtml(section)}</div>`;
       }
-      html += fieldHtml(ext, field);
+      html += fieldHtml(ext, field, idPrefix);
     }
     if (!html) return '';
     const disabled = !ext.active ? ' ext-fields-disabled' : '';
     return `<div class="ext-fields${disabled}">${html}</div>`;
+  }
+
+  function bindFields(root) {
+    root.querySelectorAll('.ext-fields [data-field]').forEach(el => {
+      el.addEventListener('change', () => {
+        const value = el.type === 'checkbox' ? el.checked : el.value;
+        setModuleParam('extensions', `setting:${el.dataset.ext}:${el.dataset.field}`, value);
+      });
+    });
+  }
+
+  function findExt(extId) {
+    return (lastState?.extensions || []).find(item => item.id === extId) || null;
+  }
+
+  // ── Settings ▸ Extension 페이지 ──────────────────────────────
+  function pane() {
+    return document.getElementById('settingsExtensionPane');
+  }
+
+  function placementSelect(ext) {
+    if (ext.status !== 'loaded') return '';
+    const options = [['tools', '도구바 (Tools)'], ['fn', 'Fn 메뉴'], ['none', '없음']]
+      .map(([val, label]) =>
+        `<option value="${val}" ${ext.placement === val ? 'selected' : ''}>${label}</option>`).join('');
+    return `<label class="ext-placement"><span>퀵 버튼 위치</span>
+      <select class="ext-placement-select" data-ext="${escHtml(ext.id)}">${options}</select></label>`;
   }
 
   function rowHtml(ext) {
@@ -110,15 +145,15 @@ export function createExtensionsPanel(deps) {
             <span class="ext-chip ${chipClass}" ${ext.error ? `title="${escHtml(ext.error)}"` : ''}>${chipLabel}</span></span>
           ${desc}
         </div>
-        <div class="ext-controls">${toggle}<button class="ext-menu-btn" data-ext="${escHtml(ext.id)}">⋯</button></div>
+        <div class="ext-controls">${placementSelect(ext)}${toggle}<button class="ext-menu-btn" data-ext="${escHtml(ext.id)}">⋯</button></div>
       </div>
-      ${confirm}${menu}${error}${fieldsHtml(ext)}
+      ${confirm}${menu}${error}${fieldsHtml(ext, 'extset')}
     </div>`;
   }
 
-  function captureFocus() {
+  function captureFocus(root) {
     const active = document.activeElement;
-    if (!active || !moduleBody.contains(active) || !active.dataset || !active.dataset.field) return null;
+    if (!active || !root || !root.contains(active) || !active.dataset || !active.dataset.field) return null;
     return {
       ext: active.dataset.ext,
       field: active.dataset.field,
@@ -127,9 +162,9 @@ export function createExtensionsPanel(deps) {
     };
   }
 
-  function restoreFocus(saved) {
-    if (!saved) return;
-    const el = moduleBody.querySelector(
+  function restoreFocus(root, saved) {
+    if (!saved || !root) return;
+    const el = root.querySelector(
       `[data-ext="${CSS.escape(saved.ext)}"][data-field="${CSS.escape(saved.field)}"]`);
     if (!el) return;
     el.focus();
@@ -138,15 +173,15 @@ export function createExtensionsPanel(deps) {
     }
   }
 
-  function render(m) {
-    if (!m || !m.state) return;
-    lastState = m.state;
-    const saved = captureFocus();
-    const items = Array.isArray(m.state.extensions) ? m.state.extensions : [];
+  function renderSettingsPane() {
+    const root = pane();
+    if (!root || !lastState) return;
+    const saved = captureFocus(root);
+    const items = Array.isArray(lastState.extensions) ? lastState.extensions : [];
     const errors = items.filter(item => item.status === 'error').length;
     const head = `<div class="ext-head">
         <span class="ext-install-label">설치 폴더:</span>
-        <code class="ext-install-path" title="${escHtml(m.state.install_dir || '')}">${escHtml(m.state.install_dir || '')}</code>
+        <code class="ext-install-path" title="${escHtml(lastState.install_dir || '')}">${escHtml(lastState.install_dir || '')}</code>
         <button class="ext-copy-install">복사</button>
         ${errors ? `<button class="ext-retry-all">오류 ${errors}건 재시도</button>` : ''}
       </div>`;
@@ -155,74 +190,228 @@ export function createExtensionsPanel(deps) {
       : `<div class="ext-empty">설치된 확장이 없습니다.<br>
            위 폴더에 <code>&lt;확장-id&gt;/extension.json + main.py</code>를 넣으면 이 목록에 나타납니다.<br>
            샘플: 릴리즈의 <code>release_assets/samples/extensions/seed_fanout</code> 폴더를 복사해 보세요.</div>`;
-    moduleBody.innerHTML = `<div class="ext-panel">${head}${body}</div>`;
-    bind();
-    restoreFocus(saved);
-    if (Array.isArray(m.state.grandfathered) && m.state.grandfathered.length) {
-      showToast(`기존 확장 자동 승인됨: ${m.state.grandfathered.join(', ')} (Extensions 패널에서 관리)`, 'info');
-    }
+    root.innerHTML = `<div class="ext-panel">${head}${body}</div>`;
+    bindSettingsPane(root);
+    restoreFocus(root, saved);
   }
 
-  function findExt(extId) {
-    return (lastState?.extensions || []).find(item => item.id === extId) || null;
-  }
-
-  function bind() {
-    moduleBody.querySelectorAll('.ext-toggle').forEach(el => {
+  function bindSettingsPane(root) {
+    root.querySelectorAll('.ext-toggle').forEach(el => {
       el.addEventListener('change', () => {
         const ext = findExt(el.dataset.ext);
         if (!ext) return;
         if (ext.status === 'discovered') {
-          // 승인은 신뢰 경고 인라인 확인을 거친다 — 토글은 일단 되돌린다.
-          el.checked = false;
+          el.checked = false; // 승인은 신뢰 경고 인라인 확인을 거친다.
           confirmingId = ext.id;
           openMenuId = null;
-          render({state: lastState});
+          renderSettingsPane();
           return;
         }
         setModuleParam('extensions', `enabled:${ext.id}`, el.checked);
       });
     });
-    moduleBody.querySelectorAll('.ext-approve-btn').forEach(el => {
+    root.querySelectorAll('.ext-approve-btn').forEach(el => {
       el.addEventListener('click', () => {
         confirmingId = null;
         setModuleParam('extensions', `approve:${el.dataset.ext}`, true);
       });
     });
-    moduleBody.querySelectorAll('.ext-cancel-btn').forEach(el => {
-      el.addEventListener('click', () => { confirmingId = null; render({state: lastState}); });
+    root.querySelectorAll('.ext-cancel-btn').forEach(el => {
+      el.addEventListener('click', () => { confirmingId = null; renderSettingsPane(); });
     });
-    moduleBody.querySelectorAll('.ext-retry-btn').forEach(el => {
+    root.querySelectorAll('.ext-retry-btn').forEach(el => {
       el.addEventListener('click', () => setModuleParam('extensions', `retry:${el.dataset.ext}`, true));
     });
-    const retryAll = moduleBody.querySelector('.ext-retry-all');
+    const retryAll = root.querySelector('.ext-retry-all');
     if (retryAll) retryAll.addEventListener('click', () => setModuleParam('extensions', 'retry_errors', true));
-    moduleBody.querySelectorAll('.ext-menu-btn').forEach(el => {
+    root.querySelectorAll('.ext-menu-btn').forEach(el => {
       el.addEventListener('click', () => {
         openMenuId = openMenuId === el.dataset.ext ? null : el.dataset.ext;
         confirmingId = null;
-        render({state: lastState});
+        renderSettingsPane();
       });
     });
-    moduleBody.querySelectorAll('.ext-block-btn').forEach(el => {
+    root.querySelectorAll('.ext-block-btn').forEach(el => {
       el.addEventListener('click', () => {
         openMenuId = null;
         setModuleParam('extensions', `blocked:${el.dataset.ext}`, !el.dataset.blocked);
       });
     });
-    moduleBody.querySelectorAll('.ext-copy-dir-btn').forEach(el => {
+    root.querySelectorAll('.ext-copy-dir-btn').forEach(el => {
       el.addEventListener('click', () => copyText(el.dataset.dir));
     });
-    const copyInstall = moduleBody.querySelector('.ext-copy-install');
-    if (copyInstall) {
-      copyInstall.addEventListener('click', () => copyText(lastState?.install_dir || ''));
-    }
-    moduleBody.querySelectorAll('.ext-fields [data-field]').forEach(el => {
+    const copyInstall = root.querySelector('.ext-copy-install');
+    if (copyInstall) copyInstall.addEventListener('click', () => copyText(lastState?.install_dir || ''));
+    root.querySelectorAll('.ext-placement-select').forEach(el => {
       el.addEventListener('change', () => {
-        const value = el.type === 'checkbox' ? el.checked : el.value;
-        setModuleParam('extensions', `setting:${el.dataset.ext}:${el.dataset.field}`, value);
+        setModuleParam('extensions', `placement:${el.dataset.ext}`, el.value);
       });
     });
+    bindFields(root);
+  }
+
+  // ── Settings 좌측 네비 (Global / Extension) ──────────────────
+  function bindNav() {
+    if (navBound) return;
+    const nav = document.getElementById('settingsNav');
+    if (!nav) return;
+    navBound = true;
+    nav.querySelectorAll('.settings-nav-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        nav.querySelectorAll('.settings-nav-item').forEach(b =>
+          b.classList.toggle('active', b === btn));
+        document.querySelectorAll('[data-settings-page-content]').forEach(page => {
+          page.classList.toggle('active', page.dataset.settingsPageContent === btn.dataset.settingsPage);
+        });
+        if (btn.dataset.settingsPage === 'extension' && typeof requestState === 'function') {
+          requestState(); // 페이지 진입 시 재발견(새 설치 즉시 반영)
+        }
+      });
+    });
+  }
+
+  // ── 메인 UI 퀵 버튼 (Tools 바 / Fn 메뉴) ─────────────────────
+  function quickEligible(ext) {
+    return ext.status === 'loaded' && !ext.blocked && ext.placement !== 'none';
+  }
+
+  function syncQuickButtons() {
+    const items = (lastState?.extensions || []).filter(quickEligible);
+    // 도구바: #moduleLauncher 바로 뒤의 전용 컨테이너(런처 render()가 innerHTML을
+    // 다시 쓰므로 내부에 끼어들지 않는다).
+    const launcher = document.getElementById('moduleLauncher');
+    if (launcher) {
+      let bar = document.getElementById('extToolsBar');
+      const toolItems = items.filter(ext => ext.placement === 'tools');
+      if (!toolItems.length) {
+        if (bar) bar.remove();
+      } else {
+        if (!bar) {
+          bar = document.createElement('div');
+          bar.id = 'extToolsBar';
+          bar.className = 'module-bar ext-tools-bar';
+          launcher.insertAdjacentElement('afterend', bar);
+        }
+        bar.innerHTML = toolItems.map(ext =>
+          `<button type="button" class="module-btn ext-tool-btn${ext.enabled ? '' : ' ext-tool-btn-off'}"
+             data-ext="${escHtml(ext.id)}" title="${escHtml(ext.description || ext.name)}">
+             <span>🧩</span><span>${escHtml(ext.name || ext.id)}</span></button>`).join('');
+        bar.querySelectorAll('.ext-tool-btn').forEach(el => {
+          el.addEventListener('click', event => openQuickPopup(el.dataset.ext, event.currentTarget));
+        });
+      }
+    }
+    // Fn 메뉴: 정적 항목 뒤에 확장 항목 추가(자체 항목만 갈아끼움).
+    const fnMenu = document.getElementById('fnMenu');
+    if (fnMenu) {
+      fnMenu.querySelectorAll('.ext-fn-item').forEach(el => el.remove());
+      items.filter(ext => ext.placement === 'fn').forEach(ext => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ext-fn-item';
+        btn.setAttribute('role', 'menuitem');
+        btn.dataset.ext = ext.id;
+        btn.innerHTML = `<span>🧩</span><span>${escHtml(ext.name || ext.id)}${ext.enabled ? '' : ' (꺼짐)'}</span>`;
+        btn.addEventListener('click', event => {
+          fnMenu.hidden = true;
+          openQuickPopup(ext.id, event.currentTarget);
+        });
+        fnMenu.appendChild(btn);
+      });
+    }
+  }
+
+  // ── 퀵 팝업: Activate 스위치 + 확장 선언 폼 ──────────────────
+  function quickPopupEl() {
+    let el = document.getElementById('extQuickPopup');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'extQuickPopup';
+      el.className = 'ext-quick-popup';
+      el.style.display = 'none';
+      document.body.appendChild(el);
+      document.addEventListener('mousedown', event => {
+        if (el.style.display !== 'none' && !el.contains(event.target)
+            && !event.target.closest?.('.ext-tool-btn') && !event.target.closest?.('.ext-fn-item')) {
+          closeQuickPopup();
+        }
+      });
+    }
+    return el;
+  }
+
+  function openQuickPopup(extId, anchor) {
+    if (quickPopupId === extId && quickPopupEl().style.display !== 'none') {
+      closeQuickPopup();
+      return;
+    }
+    quickPopupId = extId;
+    renderQuickPopup();
+    positionQuickPopup(anchor);
+  }
+
+  function closeQuickPopup() {
+    quickPopupId = null;
+    const el = document.getElementById('extQuickPopup');
+    if (el) el.style.display = 'none';
+  }
+
+  function renderQuickPopup() {
+    if (!quickPopupId) return;
+    const ext = findExt(quickPopupId);
+    const el = quickPopupEl();
+    if (!ext || !quickEligible(ext)) { closeQuickPopup(); return; }
+    const saved = captureFocus(el);
+    const fields = fieldsHtml(ext, 'extquick')
+      || '<div class="ext-quick-nofields">이 확장은 설정 항목을 선언하지 않았습니다.</div>';
+    el.innerHTML = `
+      <div class="ext-quick-head">
+        <span class="ext-quick-title">🧩 ${escHtml(ext.name || ext.id)}</span>
+        <button type="button" class="ext-quick-close" title="닫기">×</button>
+      </div>
+      <label class="ext-quick-activate">
+        <span>Activate This Script</span>
+        <label class="ext-switch">
+          <input type="checkbox" class="ext-quick-toggle" ${ext.enabled ? 'checked' : ''}>
+          <span class="ext-slider"></span>
+        </label>
+      </label>
+      ${fields}
+      <div class="ext-quick-foot">관리: Settings ▸ Extension</div>`;
+    el.style.display = 'block';
+    el.querySelector('.ext-quick-close').addEventListener('click', closeQuickPopup);
+    el.querySelector('.ext-quick-toggle').addEventListener('change', event => {
+      setModuleParam('extensions', `enabled:${ext.id}`, event.target.checked);
+    });
+    bindFields(el);
+    restoreFocus(el, saved);
+  }
+
+  function positionQuickPopup(anchor) {
+    const el = quickPopupEl();
+    const rect = anchor?.getBoundingClientRect?.() || {left: 80, bottom: 80, top: 80};
+    // 일단 표시 후 실측으로 클램프(적정 사이즈 = 내용 기반, max-width는 CSS).
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    let left = rect.left;
+    let top = rect.bottom + 8;
+    if (top + height > window.innerHeight - 8) top = Math.max(8, rect.top - height - 8);
+    if (left + width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - width);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }
+
+  // ── 진입점: module_state 브로드캐스트 ───────────────────────
+  function onState(m) {
+    if (!m || !m.state) return;
+    lastState = m.state;
+    bindNav();
+    renderSettingsPane();
+    syncQuickButtons();
+    if (quickPopupId) renderQuickPopup(); // 열려 있으면 라이브 동기화
+    if (Array.isArray(m.state.grandfathered) && m.state.grandfathered.length) {
+      showToast(`기존 확장 자동 승인됨: ${m.state.grandfathered.join(', ')} (Settings ▸ Extension에서 관리)`, 'info');
+    }
   }
 
   function copyText(text) {
@@ -235,5 +424,5 @@ export function createExtensionsPanel(deps) {
     }
   }
 
-  return {render};
+  return {onState, bindNav};
 }

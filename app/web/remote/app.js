@@ -997,7 +997,15 @@ const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize wildcard panel module', error);
   });
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260611-extset2')
+let pendingExtLauncherItems = null;
+function setExtensionLauncherItems(items, onClick) {
+  if (moduleLauncherControl && typeof moduleLauncherControl.setExtensionItems === 'function') {
+    moduleLauncherControl.setExtensionItems(items, onClick);
+    return;
+  }
+  pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
+}
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260611-extset3')
   .then(({createExtensionsUi}) => {
     extensionsPanel = createExtensionsUi({
       document,
@@ -1005,6 +1013,7 @@ const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=2026061
       setModuleParam,
       showToast,
       requestState: () => requestModuleState('extensions'),
+      setLauncherItems: setExtensionLauncherItems,
     });
   })
   .catch(error => {
@@ -5728,7 +5737,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260611-extset1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260611-extset3')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -5748,6 +5757,10 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260611-
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();
+    if (pendingExtLauncherItems) {
+      moduleLauncherControl.setExtensionItems(pendingExtLauncherItems.items, pendingExtLauncherItems.onClick);
+      pendingExtLauncherItems = null;
+    }
     ensureResolutionPresetOptions();
     updateWebUiHiresfixAssistControls();
     refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI');

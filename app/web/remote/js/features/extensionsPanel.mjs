@@ -6,7 +6,16 @@
 //   폼을 가진 퀵 팝업을 띄운다(내용은 확장 개발자의 register_panel 스키마).
 // 토글은 승인/soft 전용, 차단은 ⋯ 메뉴로 분리(설계 인스펙션 #4).
 export function createExtensionsUi(deps) {
-  const {document, escHtml, setModuleParam, showToast, requestState} = deps;
+  const {document, escHtml, setModuleParam, showToast, requestState, setLauncherItems} = deps;
+
+  // 퀵 버튼 배치 선택지 — 도구바(독립 바) / 런처 카테고리 2종 / Fn 메뉴 / 없음.
+  const PLACEMENT_OPTIONS = [
+    ['tools', '도구바 (Tools)'],
+    ['prompt_tools', '프롬프트 도구'],
+    ['assistant_tools', '자동화 / 고급 기능'],
+    ['fn', 'Fn 메뉴'],
+    ['none', '없음'],
+  ];
 
   let lastState = null;
   let confirmingId = null; // 미승인 확장 활성화 전 신뢰 경고 인라인 확인
@@ -52,7 +61,7 @@ export function createExtensionsUi(deps) {
     } else if (field.type === 'select') {
       const options = (field.options || []).map(opt =>
         `<option value="${escHtml(opt)}" ${String(value) === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('');
-      input = `<select ${common}>${options}</select>`;
+      input = `<select class="ext-select" ${common}>${options}</select>`;
     } else if (field.type === 'tags') {
       const text = Array.isArray(value) ? value.join(', ') : String(value ?? '');
       input = `<input type="text" class="ext-field-wide" ${common} value="${escHtml(text)}" placeholder="쉼표로 구분">`;
@@ -99,13 +108,15 @@ export function createExtensionsUi(deps) {
     return document.getElementById('settingsExtensionPane');
   }
 
+  function placementOptionsHtml(ext) {
+    return PLACEMENT_OPTIONS.map(([val, label]) =>
+      `<option value="${val}" ${ext.placement === val ? 'selected' : ''}>${label}</option>`).join('');
+  }
+
   function placementSelect(ext) {
     if (ext.status !== 'loaded') return '';
-    const options = [['tools', '도구바 (Tools)'], ['fn', 'Fn 메뉴'], ['none', '없음']]
-      .map(([val, label]) =>
-        `<option value="${val}" ${ext.placement === val ? 'selected' : ''}>${label}</option>`).join('');
     return `<label class="ext-placement"><span>퀵 버튼 위치</span>
-      <select class="ext-placement-select" data-ext="${escHtml(ext.id)}">${options}</select></label>`;
+      <select class="ext-select ext-placement-select" data-ext="${escHtml(ext.id)}">${placementOptionsHtml(ext)}</select></label>`;
   }
 
   function rowHtml(ext) {
@@ -301,6 +312,21 @@ export function createExtensionsUi(deps) {
         });
       }
     }
+    // 런처 카테고리(프롬프트 도구 / 자동화·고급 기능) 플라이아웃에 주입.
+    if (typeof setLauncherItems === 'function') {
+      setLauncherItems(
+        items
+          .filter(ext => ext.placement === 'prompt_tools' || ext.placement === 'assistant_tools')
+          .map(ext => ({
+            id: ext.id,
+            label: ext.name || ext.id,
+            title: ext.description || ext.name || ext.id,
+            category: ext.placement,
+            enabled: ext.enabled,
+          })),
+        openQuickPopup,
+      );
+    }
     // Fn 메뉴: 정적 항목 뒤에 확장 항목 추가(자체 항목만 갈아끼움).
     const fnMenu = document.getElementById('fnMenu');
     if (fnMenu) {
@@ -364,9 +390,7 @@ export function createExtensionsUi(deps) {
     const saved = captureFocus(el);
     const fields = fieldsHtml(ext, 'extquick')
       || '<div class="ext-quick-nofields">이 확장은 설정 항목을 선언하지 않았습니다.</div>';
-    const placementOptions = [['tools', '도구바 (Tools)'], ['fn', 'Fn 메뉴'], ['none', '없음 (버튼 제거)']]
-      .map(([val, label]) =>
-        `<option value="${val}" ${ext.placement === val ? 'selected' : ''}>${label}</option>`).join('');
+    const placementOptions = placementOptionsHtml(ext);
     el.innerHTML = `
       <div class="ext-quick-head">
         <span class="ext-quick-title">🧩 ${escHtml(ext.name || ext.id)}</span>
@@ -381,7 +405,7 @@ export function createExtensionsUi(deps) {
       </label>
       <label class="ext-quick-placement">
         <span>버튼 위치</span>
-        <select class="ext-quick-placement-select">${placementOptions}</select>
+        <select class="ext-select ext-quick-placement-select">${placementOptions}</select>
       </label>
       ${fields}
       <div class="ext-quick-foot">관리: Settings ▸ Extension</div>`;

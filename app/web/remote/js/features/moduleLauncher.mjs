@@ -194,6 +194,10 @@ export function createModuleLauncher({
   let tooltipEl = null;
   let tooltipOwner = null;
   let eventStreamState = {active: false};
+  // Extensions 퀵 버튼(placement=카테고리)이 주입하는 동적 항목.
+  // [{id, label, title, category: 'prompt_tools'|'assistant_tools', enabled}]
+  let extensionItems = [];
+  let onExtensionItemClick = null;
 
   function tooltipAttr(text) {
     return String(text || '')
@@ -352,8 +356,22 @@ export function createModuleLauncher({
     `;
   }
 
+  function renderExtensionItem(item) {
+    const tooltip = tooltipAttr(item.title || item.label);
+    const offClass = item.enabled ? '' : ' ext-tool-btn-off';
+    return `
+      <button type="button" class="module-btn module-menu-item ext-launcher-item${offClass}" data-ext-item="${tooltipAttr(item.id)}" aria-label="${tooltip}" data-module-tooltip="${tooltip}">
+        <span>🧩 ${tooltipAttr(item.label)}</span>
+      </button>
+    `;
+  }
+
   function renderCategory(category) {
     const items = category.moduleIds.map(moduleId => renderModuleButton(moduleId, 'module-menu-item')).join('');
+    const extItems = extensionItems
+      .filter(item => item.category === category.id)
+      .map(renderExtensionItem)
+      .join('');
     return `
       <div class="module-category" data-module-category="${category.id}">
         <button type="button" class="module-btn module-category-btn" data-category-toggle="${category.id}" aria-label="${tooltipAttr(category.title)}" data-module-tooltip="${tooltipAttr(category.title)}">
@@ -362,9 +380,17 @@ export function createModuleLauncher({
         <div class="module-category-menu" role="menu" aria-label="${category.title}">
           <div class="module-category-title">${category.title}</div>
           ${items}
+          ${extItems}
         </div>
       </div>
     `;
+  }
+
+  function setExtensionItems(items, onClick) {
+    extensionItems = Array.isArray(items) ? items : [];
+    if (typeof onClick === 'function') onExtensionItemClick = onClick;
+    render();
+    updateState();
   }
 
   function render() {
@@ -563,6 +589,13 @@ export function createModuleLauncher({
         toggleCategory(categoryToggle.dataset.categoryToggle);
         return;
       }
+      const extItem = event.target.closest('[data-ext-item]');
+      if (extItem && root.contains(extItem)) {
+        event.preventDefault();
+        closeMenus();
+        onExtensionItemClick?.(extItem.dataset.extItem, extItem);
+        return;
+      }
       const moduleButton = event.target.closest('.module-btn[data-module]');
       if (moduleButton && root.contains(moduleButton)) {
         event.preventDefault();
@@ -631,6 +664,7 @@ export function createModuleLauncher({
       eventStreamState = {...eventStreamState, ...state, active: Boolean(state.active)};
       updateState();
     },
+    setExtensionItems,
     moduleTitle,
   };
 }

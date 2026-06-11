@@ -16848,6 +16848,12 @@ body.detached-module .mod-grid-3 {
   background: var(--bg-surface); border: 1px solid var(--border-dim); color: var(--text-primary);
   border-radius: 7px; padding: 3px 6px; font-size: 11px;
 }
+/* NAIA 표준 커스텀 셀렉트(customSelects.mjs)가 ext 셀렉트를 감쌀 때의 폭 —
+   선택값("+1")이 아니라 가장 긴 옵션("random"/"자동화 / 고급 기능")이 잘리지
+   않도록 버튼·메뉴 최소폭을 보장한다. */
+.custom-select.custom-ext-select { min-width: 132px; }
+.custom-select.custom-ext-select .custom-select-button { width: 100%; justify-content: space-between; }
+.custom-select-menu.custom-ext-select { min-width: 168px; }
 
 /* 도구바 확장 버튼 */
 .ext-tools-bar { margin-top: 4px; }

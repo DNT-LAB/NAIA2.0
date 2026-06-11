@@ -45,8 +45,9 @@ EXT_CALLBACK_MUTE_THRESHOLD = 5
 # enqueue는 무조건 거부된다(버그성 무한 연쇄의 호스트 측 절대 상한).
 EXT_CHAIN_DEPTH_MAX = 4
 SETTINGS_FILENAME = "settings.json"
-# 확장 퀵 버튼의 메인 UI 노출 위치: 도구바(Tools) / Fn 메뉴 / 없음.
-PLACEMENT_VALUES = ("tools", "fn", "none")
+# 확장 퀵 버튼의 메인 UI 노출 위치: 도구바(독립 바) / 런처 카테고리(프롬프트 도구·
+# 자동화/고급 기능) / Fn 메뉴 / 없음.
+PLACEMENT_VALUES = ("tools", "prompt_tools", "assistant_tools", "fn", "none")
 PLACEMENT_DEFAULT = "tools"
 
 

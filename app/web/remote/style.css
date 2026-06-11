@@ -15450,6 +15450,18 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
   text-align: center; padding: 10px;
 }
+/* 프리셋 hover 툴팁 — body 부착 position:fixed (목록 overflow 무시). Include/Exclude 라벨만 색 강조 */
+.tf-preset-tip {
+  position: fixed; z-index: 100000; pointer-events: none; display: none;
+  max-width: 360px; padding: 8px 11px; border-radius: 8px;
+  background: var(--bg-deep); border: 1px solid var(--border-dim);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  line-height: 1.5; word-break: break-word;
+}
+.tf-tip-line + .tf-tip-line { margin-top: 3px; }
+.tf-tip-inc { color: #8fe0a0; font-weight: 700; }   /* 연녹색 */
+.tf-tip-exc { color: #f3a0a0; font-weight: 700; }   /* 연한 적색 */
 
 /* ==========================================================================
    Setup / API Configuration modal

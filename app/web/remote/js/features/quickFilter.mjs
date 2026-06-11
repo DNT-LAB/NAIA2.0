@@ -266,6 +266,7 @@ export function createQuickFilterController(deps) {
   function bindInputs() {
     bindAutocompleteInput('tagFilterInput', 'include');
     bindAutocompleteInput('tagFilterExcludeInput', 'exclude');
+    bindPresetTooltip();
   }
 
   function open() {
@@ -288,6 +289,7 @@ export function createQuickFilterController(deps) {
       if (toggleBtn) toggleBtn.classList.remove('active');
     }
     clearAutocomplete();
+    hidePresetTip();
   }
 
   function toggle() {
@@ -530,17 +532,60 @@ export function createQuickFilterController(deps) {
     el.innerHTML = presets.map((p, i) => {
       const incArr = p.include || [];
       const excArr = p.exclude || [];
-      const tip = `Include: ${incArr.join(', ') || '(none)'}\nExclude: ${excArr.join(', ') || '(none)'}`;
-      return `<div class="tf-preset" title="${deps.escHtml(tip)}"><span class="tf-preset-name" onclick="loadTagFilterPreset(${i})">`
+      return `<div class="tf-preset" data-idx="${i}"><span class="tf-preset-name" onclick="loadTagFilterPreset(${i})">`
         + `${deps.escHtml(p.name)}<span class="tf-preset-meta">+${incArr.length} −${excArr.length}</span></span>`
         + `<span class="tf-preset-x" onclick="deleteTagFilterPreset(${i})" title="삭제">&times;</span></div>`;
     }).join('');
   }
 
+  // 커스텀 hover 툴팁 — Include/Exclude 라벨을 색으로 구분(native title은 색 불가).
+  // body 에 붙인 position:fixed 라 스크롤 목록에서 잘리지 않는다.
+  let tipEl = null;
+  function ensurePresetTip() {
+    if (tipEl && tipEl.isConnected) return tipEl;
+    tipEl = document.createElement('div');
+    tipEl.className = 'tf-preset-tip';
+    tipEl.style.display = 'none';
+    document.body.appendChild(tipEl);
+    return tipEl;
+  }
+  function hidePresetTip() {
+    if (tipEl) tipEl.style.display = 'none';
+  }
+  function showPresetTip(item, p) {
+    const tip = ensurePresetTip();
+    const inc = (p.include || []).join(', ') || '(none)';
+    const exc = (p.exclude || []).join(', ') || '(none)';
+    tip.innerHTML = `<div class="tf-tip-line"><span class="tf-tip-inc">Include:</span> ${deps.escHtml(inc)}</div>`
+      + `<div class="tf-tip-line"><span class="tf-tip-exc">Exclude:</span> ${deps.escHtml(exc)}</div>`;
+    tip.style.display = 'block';
+    const r = item.getBoundingClientRect();
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let top = r.top - th - 8;
+    if (top < 8) top = r.bottom + 8;          // 위 공간 부족 시 아래로
+    let left = r.left;
+    if (left + tw > window.innerWidth - 8) left = window.innerWidth - 8 - tw;
+    if (left < 8) left = 8;
+    tip.style.top = `${top}px`;
+    tip.style.left = `${left}px`;
+  }
+  function bindPresetTooltip() {
+    const list = getEl('tagFilterPresets');
+    if (!list || list._tipBound) return;
+    list._tipBound = true;
+    list.addEventListener('mouseover', (e) => {
+      const item = e.target.closest('.tf-preset');
+      if (!item || !list.contains(item)) return;
+      const p = presets[parseInt(item.dataset.idx, 10)];
+      if (p) showPresetTip(item, p);
+    });
+    list.addEventListener('mouseleave', hidePresetTip);
+  }
+
   function togglePresets() {
     const el = getEl('tagFilterPresets');
     if (!el) return;
-    if (!el.hasAttribute('hidden')) { el.setAttribute('hidden', ''); return; }
+    if (!el.hasAttribute('hidden')) { hidePresetTip(); el.setAttribute('hidden', ''); return; }
     const saveRow = getEl('tagFilterSaveRow');
     if (saveRow) saveRow.setAttribute('hidden', '');
     renderPresets();
@@ -584,6 +629,7 @@ export function createQuickFilterController(deps) {
     excludeTags = normalizeTags(p.exclude);
     renderIncludeChips();
     renderExcludeChips();
+    hidePresetTip();
     const el = getEl('tagFilterPresets');
     if (el) el.setAttribute('hidden', '');
     if (!includeTags.length && !excludeTags.length) { clearFilter(); return; }

@@ -109,4 +109,21 @@ class SeedFanout:
 def register(ctx):
     ext = SeedFanout(ctx)
     ctx.subscribe("generation_request_dispatched", ext.on_generation_dispatched)
-    ctx.log("ready — Generate 시 시드 변형을 큐에 추가합니다 (settings.json으로 조정)")
+    # Extensions 패널에 설정 폼 노출(선언적 — JS 불필요). 값은 settings.json으로
+    # 라운드트립되고 이 확장은 매 생성 시 다시 읽으므로 저장 즉시 반영된다.
+    if hasattr(ctx, "register_panel"):
+        ctx.register_panel(
+            fields=[
+                {"key": "count", "type": "int", "min": 1, "max": MAX_COUNT,
+                 "default": DEFAULT_SETTINGS["count"], "label": "변형 수",
+                 "help": "Generate 1회당 추가로 큐에 넣을 장수", "apply": "next-generation", "order": 1},
+                {"key": "mode", "type": "select", "options": ["random", "+1", "-1"],
+                 "default": DEFAULT_SETTINGS["mode"], "label": "시드 방식",
+                 "apply": "next-generation", "order": 2},
+                {"key": "sources", "type": "tags", "default": list(DEFAULT_SETTINGS["sources"]),
+                 "label": "반응 경로", "help": "반응할 생성 명령 type 목록 (기본: 메인 Generate 버튼)",
+                 "apply": "next-generation", "order": 3},
+            ],
+            title="Seed Fan-out",
+        )
+    ctx.log("ready — Generate 시 시드 변형을 큐에 추가합니다 (Extensions 패널에서 조정)")

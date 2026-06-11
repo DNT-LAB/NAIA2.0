@@ -16732,6 +16732,97 @@ body.detached-module .mod-grid-3 {
   border: 1px solid var(--border-dim); background: var(--bg-elevated); color: var(--text-primary);
   border-radius: 8px; padding: 8px 13px; cursor: pointer; font-size: 12px; font-weight: 600; flex: 1;
 }
+
+/* ===== Extensions 관리 패널 ===== */
+.ext-panel { display: flex; flex-direction: column; gap: 8px; }
+.ext-head {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 6px 8px; border: 1px solid var(--border-dim); border-radius: 9px; background: var(--bg-elevated);
+}
+.ext-install-label { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+.ext-install-path {
+  font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; flex: 1; min-width: 0;
+}
+.ext-copy-install, .ext-retry-all, .ext-retry-btn {
+  border: 1px solid var(--border-dim); background: var(--bg-surface); color: var(--text-primary);
+  border-radius: 7px; padding: 3px 9px; cursor: pointer; font-size: 11px; flex-shrink: 0;
+}
+.ext-retry-all, .ext-retry-btn { color: #ffb454; border-color: rgba(255, 180, 84, 0.45); }
+.ext-row { border: 1px solid var(--border-dim); border-radius: 9px; background: var(--bg-elevated); padding: 8px 10px; }
+.ext-row-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ext-info { min-width: 0; flex: 1; }
+.ext-name { font-size: 13px; font-weight: 700; }
+.ext-ver { font-size: 11px; font-weight: 400; color: var(--text-muted); }
+.ext-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; word-break: break-word; }
+.ext-desc a { color: var(--accent, #6cb6ff); }
+.ext-chip {
+  display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 9px;
+  font-size: 10px; font-weight: 600; vertical-align: 1px;
+}
+.ext-chip-on { background: rgba(80, 200, 120, 0.16); color: #5fd38a; }
+.ext-chip-off { background: rgba(255, 180, 84, 0.15); color: #ffb454; }
+.ext-chip-error { background: rgba(255, 99, 99, 0.15); color: #ff7a7a; }
+.ext-chip-muted { background: var(--bg-surface); color: var(--text-muted); }
+.ext-chip-loading { background: rgba(108, 182, 255, 0.15); color: #6cb6ff; }
+.ext-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ext-menu-btn {
+  border: 1px solid var(--border-dim); background: transparent; color: var(--text-muted);
+  border-radius: 7px; width: 26px; height: 22px; cursor: pointer; font-size: 13px; line-height: 1;
+}
+.ext-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+.ext-switch input { opacity: 0; width: 0; height: 0; }
+.ext-slider {
+  position: absolute; inset: 0; background: var(--bg-surface); border: 1px solid var(--border-dim);
+  border-radius: 11px; cursor: pointer; transition: background 0.15s;
+}
+.ext-slider::before {
+  content: ''; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px;
+  border-radius: 50%; background: var(--text-muted); transition: transform 0.15s, background 0.15s;
+}
+.ext-switch input:checked + .ext-slider { background: rgba(80, 200, 120, 0.35); }
+.ext-switch input:checked + .ext-slider::before { transform: translateX(15px); background: #5fd38a; }
+.ext-switch input:disabled + .ext-slider { opacity: 0.45; cursor: default; }
+.ext-confirm {
+  margin-top: 7px; padding: 8px 10px; border-radius: 8px; font-size: 11px; line-height: 1.6;
+  background: rgba(255, 180, 84, 0.08); border: 1px solid rgba(255, 180, 84, 0.4); color: var(--text-primary);
+}
+.ext-confirm-actions { display: flex; gap: 6px; margin-top: 6px; }
+.ext-approve-btn {
+  border: 1px solid rgba(80, 200, 120, 0.5); background: rgba(80, 200, 120, 0.15); color: #5fd38a;
+  border-radius: 7px; padding: 4px 11px; cursor: pointer; font-size: 11px; font-weight: 700;
+}
+.ext-cancel-btn {
+  border: 1px solid var(--border-dim); background: var(--bg-surface); color: var(--text-muted);
+  border-radius: 7px; padding: 4px 11px; cursor: pointer; font-size: 11px;
+}
+.ext-menu { display: flex; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+.ext-menu button {
+  border: 1px solid var(--border-dim); background: var(--bg-surface); color: var(--text-primary);
+  border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 11px;
+}
+.ext-error { margin-top: 6px; font-size: 11px; color: #ff7a7a; word-break: break-all; }
+.ext-fields { margin-top: 8px; border-top: 1px dashed var(--border-dim); padding-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+.ext-fields-disabled { opacity: 0.5; pointer-events: none; }
+.ext-section { font-size: 11px; font-weight: 700; color: var(--text-muted); margin-top: 3px; }
+.ext-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ext-field label { font-size: 12px; min-width: 110px; }
+.ext-field input[type="number"] { width: 80px; }
+.ext-field-wide { flex: 1; min-width: 140px; }
+.ext-field input, .ext-field select {
+  background: var(--bg-surface); border: 1px solid var(--border-dim); color: var(--text-primary);
+  border-radius: 7px; padding: 4px 8px; font-size: 12px;
+}
+.ext-apply-chip {
+  margin-left: 5px; padding: 0 6px; border-radius: 7px; font-size: 9px; font-weight: 700;
+  background: rgba(255, 99, 99, 0.15); color: #ff7a7a;
+}
+.ext-apply-hint { margin-left: 5px; font-size: 9px; color: var(--text-muted); }
+.ext-field-error { width: 100%; font-size: 10px; color: #ff7a7a; margin-left: 118px; }
+.ext-empty {
+  text-align: center; color: var(--text-muted); font-size: 12px; line-height: 1.9; padding: 18px 8px;
+}
+.ext-empty code { font-size: 11px; background: var(--bg-surface); border-radius: 5px; padding: 1px 5px; }
 .seq-btn:hover:not(:disabled) { border-color: var(--border-glow); }
 .seq-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .seq-btn.primary { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }

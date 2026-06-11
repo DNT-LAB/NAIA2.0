@@ -97,7 +97,19 @@ NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가�
 ```
 
 `<user-data>` 위치: 설치형(A/B) = Windows `%APPDATA%\NAIA`, Portable(C) = `<설치 폴더>\user-data`.
-백엔드를 한 번 실행하면 `extensions/` 폴더가 자동 생성됩니다. 폴더에 확장을 넣고 **백엔드를 재시작**하면 로드됩니다.
+백엔드를 한 번 실행하면 `extensions/` 폴더가 자동 생성됩니다.
+
+### 설치와 On/Off — 🧩 Extensions 패널
+
+폴더에 확장을 넣은 뒤 모듈 런처의 **🧩 Extensions** 패널을 열면 즉시 목록에 나타납니다
+(매니페스트만 읽으며, **승인 전에는 어떤 확장 코드도 실행되지 않습니다**).
+
+- **활성화(최초)**: 토글 클릭 → 신뢰 경고 확인 → 그 자리에서 로드됩니다. **재시작 불필요.**
+- **켜기/끄기(soft)**: 로드된 확장의 토글은 즉시 발효됩니다 — 이벤트/훅/enqueue가 모두 무력화되고, 다시 켜면 곧바로 복귀합니다.
+- **차단(hard)**: ⋯ 메뉴의 차단은 다음 부팅부터 import 자체를 막습니다(코드 업데이트 반영도 재시작 필요 — Python은 안전한 리로드가 불가).
+- 확장이 설정 폼을 선언했다면(아래 `register_panel`) 행 아래에 펼쳐지며, 저장 즉시 `settings.json`에 반영됩니다.
+- 오류 확장은 적색 칩+사유가 표시되고 **재시도** 버튼으로 수정 후 즉시 재로드할 수 있습니다.
+- 기존 설치 사용자: 이 기능 도입 후 첫 실행에서 이미 설치돼 있던 확장은 자동 승인됩니다(1회 안내 토스트). 이후 새로 설치하는 확장부터 승인 절차가 적용됩니다.
 
 ### extension.json
 
@@ -107,7 +119,9 @@ NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가�
   "name": "My Extension",
   "version": "1.0.0",
   "naia_ext_api": 1,
-  "entry": "main.py"
+  "entry": "main.py",
+  "description": "패널에 표시될 한 줄 설명 (선택)",
+  "homepage": "https://... (선택, 패널에 링크 표시; source_url은 향후 업데이트 체크용 예약)"
 }
 ```
 
@@ -151,6 +165,7 @@ class MyHook:
 |--------|------|
 | `ctx.subscribe(event, fn)` / `ctx.unsubscribe(event, fn)` | 이벤트 구독. 콜백 예외는 격리되며 연속 5회 실패 시 자동 음소거 |
 | `ctx.register_hook(hook)` | 프롬프트 파이프라인 훅 등록. priority < 100은 100으로 클램프(0~99 = 코어 예약) |
+| `ctx.register_panel(fields=[...], title=)` | Extensions 패널에 **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags (+action 예약), label, default, min/max/step, options, help, section, order, apply: immediate/next-generation/restart-required}`. 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
 | `ctx.enqueue_generation(prompt=, negative_prompt=, api_mode=, prompt_run_id=, priority=, overrides=, allow_chain=False)` | 생성 요청을 큐에 추가. 반환 `{ok, request_id, message}`. 파생 요청에는 `ext_origin`과 체인 깊이가 찍히며, **확장 파생 이벤트를 처리 중인 동안의 호출은 기본 차단**(확장 간 무한 연쇄 방지 — 의도적 체인은 `allow_chain=True`). 단 체인 깊이 4 초과는 `allow_chain`과 무관하게 무조건 거부 |
 | `ctx.load_settings(defaults)` / `ctx.save_settings(dict)` | `settings.json` 읽기(defaults 병합)/쓰기 |
 | `ctx.log(msg)` | `[ext:<id>]` 접두사 콘솔 로그 |

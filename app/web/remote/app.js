@@ -247,6 +247,7 @@ let characterPanel = null;
 let conditionalPromptPanel = null;
 let eventStreamPanel = null;
 let wildcardPanel = null;
+let extensionsPanel = null;
 let wildcardManagerPanel = null;
 let instantWildcardPanel = null;
 let e621EventPanel = null;
@@ -995,6 +996,19 @@ const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
   })
   .catch(error => {
     console.error('Failed to initialize wildcard panel module', error);
+  });
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260611-extpanel1')
+  .then(({createExtensionsPanel}) => {
+    extensionsPanel = createExtensionsPanel({
+      document,
+      moduleBody,
+      escHtml,
+      setModuleParam,
+      showToast,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize extensions panel module', error);
   });
 const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260512-api-dialog-fallback1')
   .then(({createWildcardManagerPanel}) => {
@@ -5711,7 +5725,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260605-ev-badge1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260611-extpanel1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -5925,6 +5939,7 @@ function openModule(moduleId, options = {}) {
     instant_wildcard: 'Instant Wildcard',
     chunk: '와일드카드 청크',
     e621_event: 'E621 연구모듈',
+    extensions: 'Extensions',
   };
   moduleTitle.textContent = moduleLauncherControl?.moduleTitle(moduleId) || titles[moduleId] || moduleId;
   applyModuleOverviewGuide(moduleId);
@@ -6211,6 +6226,13 @@ function renderModuleState(m) {
   else if (m.module_id === 'wildcard') renderWildcard(m);
   else if (m.module_id === 'instant_wildcard') renderInstantWildcard(m);
   else if (m.module_id === 'e621_event') renderE621Event(m);
+  else if (m.module_id === 'extensions') renderExtensions(m);
+}
+
+// ---- Extensions 관리 패널 ----
+function renderExtensions(m) {
+  if (currentModuleId !== 'extensions') return;
+  if (extensionsPanel) extensionsPanel.render(m);
 }
 
 function openSaveDirectoryPanel() {

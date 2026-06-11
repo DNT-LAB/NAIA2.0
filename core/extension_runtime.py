@@ -126,6 +126,92 @@ def _callback_identity(callback: Callable[..., Any]) -> tuple:
     return (id(callback),)
 
 
+PANEL_FIELD_TYPES = {"bool", "int", "float", "select", "text", "tags", "action"}
+PANEL_APPLY_MODES = {"immediate", "next-generation", "restart-required"}
+
+
+def _normalize_panel_fields(fields: Any) -> list[dict[str, Any]]:
+    """register_panel 스키마 정규화 — 잘못된 필드는 건너뛰고(관용), 유효 필드는
+    (section, order, 선언 순서)로 정렬해 돌려준다. ``action``은 예약 타입으로
+    수용하되 v1 렌더러는 그리지 않는다(인스펙션 #5/#8)."""
+    normalized: list[dict[str, Any]] = []
+    if not isinstance(fields, (list, tuple)):
+        return normalized
+    for index, raw in enumerate(fields):
+        if not isinstance(raw, dict):
+            continue
+        key = str(raw.get("key") or "").strip()
+        ftype = str(raw.get("type") or "").strip().lower()
+        if not key or ftype not in PANEL_FIELD_TYPES:
+            continue
+        entry: dict[str, Any] = {
+            "key": key,
+            "type": ftype,
+            "label": str(raw.get("label") or key),
+            "help": str(raw.get("help") or ""),
+            "section": str(raw.get("section") or ""),
+            "order": int(raw.get("order")) if isinstance(raw.get("order"), (int, float)) else index,
+            "apply": (
+                str(raw.get("apply")) if str(raw.get("apply") or "") in PANEL_APPLY_MODES else "immediate"
+            ),
+            "_index": index,
+        }
+        if "default" in raw:
+            entry["default"] = raw.get("default")
+        if ftype in {"int", "float"}:
+            for bound in ("min", "max", "step"):
+                if isinstance(raw.get(bound), (int, float)):
+                    entry[bound] = raw.get(bound)
+        if ftype == "select":
+            options = [str(opt) for opt in (raw.get("options") or []) if str(opt).strip()]
+            if not options:
+                continue
+            entry["options"] = options
+        normalized.append(entry)
+    normalized.sort(key=lambda item: (item["section"], item["order"], item["_index"]))
+    for entry in normalized:
+        entry.pop("_index", None)
+    return normalized
+
+
+def _coerce_panel_value(field_def: dict[str, Any], value: Any) -> tuple[bool, Any, str]:
+    """패널 입력값을 필드 타입으로 강제 변환한다 → (ok, coerced, error_message).
+
+    실패 시 ok=False + 사용자에게 보여줄 메시지(인스펙션 #6 — 조용한 거부 금지)."""
+    ftype = str(field_def.get("type") or "")
+    try:
+        if ftype == "bool":
+            if isinstance(value, str):
+                return True, value.strip().lower() in {"1", "true", "on", "yes"}, ""
+            return True, bool(value), ""
+        if ftype in {"int", "float"}:
+            number = int(value) if ftype == "int" else float(value)
+            minimum = field_def.get("min")
+            maximum = field_def.get("max")
+            if isinstance(minimum, (int, float)) and number < minimum:
+                number = type(number)(minimum)
+            if isinstance(maximum, (int, float)) and number > maximum:
+                number = type(number)(maximum)
+            return True, number, ""
+        if ftype == "select":
+            text = str(value)
+            options = field_def.get("options") or []
+            if text not in options:
+                return False, None, f"허용값: {', '.join(options)}"
+            return True, text, ""
+        if ftype == "text":
+            return True, str(value), ""
+        if ftype == "tags":
+            if isinstance(value, (list, tuple)):
+                items = [str(item).strip() for item in value]
+            else:
+                items = [part.strip() for part in str(value).split(",")]
+            return True, [item for item in items if item], ""
+        return False, None, f"지원하지 않는 필드 타입: {ftype}"
+    except (SystemExit, Exception) as exc:
+        return False, None, f"값 변환 실패: {_safe_error_text(exc)}"
+
+
 def _generation_service(app_context: Any):
     """app/backend의 generation_service() 헬퍼와 같은 캐시 슬롯을 공유한다."""
     service = getattr(app_context, "headless_generation_service", None)
@@ -143,20 +229,51 @@ class ExtensionRecord:
     directory: Path | None = None
     name: str = ""
     version: str = ""
-    status: str = "pending"  # pending | loaded | disabled | error
+    description: str = ""
+    homepage: str = ""
+    # lifecycle status: discovered(매니페스트만 읽음, 코드 미실행) | loading |
+    # loaded | error | manifest_error. 차단/승인/소프트 on-off는 status가 아니라
+    # 아래 사실(fact) 불리언으로 표현하고 UI 칩은 클라이언트가 조합해 파생한다
+    # (설계 인스펙션 #3: 단일 status 문자열로 뭉개지 않는다).
+    status: str = "discovered"
     error: str = ""
+    approved: bool = False   # 사용자 동의(=import 허용). 동의 전에는 코드 미실행.
+    blocked: bool = False    # 하드 OFF — 부팅 시 import 제외(승인보다 우선).
+    enabled: bool = True     # 소프트 ON/OFF — 로드된 채 무력화(즉시 발효).
     hooks: int = 0
     subscriptions: int = 0
+    # Phase B: ctx.register_panel() 선언 스키마({"title","fields":[...]}) 또는 None.
+    panel: dict[str, Any] | None = None
+    # 매니페스트 파싱 시 확정되는 진입점(검증 완료 경로). 로드 시에만 사용.
+    entry_path: Path | None = None
+    # 설정 검증 실패 피드백(인스펙션 #6) — {field_key: message}, 성공 시 비움.
+    field_errors: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def is_active(self) -> bool:
+        """확장 코드가 실제로 동작해야 하는가 — 모든 래퍼 게이트가 이것만 본다.
+
+        우선순위(인스펙션 #1): blocked > enabled. 로드 안 된 상태면 어차피 코드가
+        없으므로 자연히 비활성."""
+        return self.status == "loaded" and self.enabled and not self.blocked
 
     def status_payload(self) -> dict[str, Any]:
         return {
             "id": self.ext_id,
             "name": self.name,
             "version": self.version,
+            "description": self.description,
+            "homepage": self.homepage,
             "status": self.status,
             "error": self.error,
+            "approved": self.approved,
+            "blocked": self.blocked,
+            "enabled": self.enabled,
+            "active": self.is_active,
             "hooks": self.hooks,
             "subscriptions": self.subscriptions,
+            "panel": self.panel,
+            "field_errors": dict(self.field_errors),
             "directory": str(self.directory or ""),
         }
 
@@ -168,16 +285,18 @@ class _ExtensionHookAdapter:
     - get_title()에 ``ext:<id>:`` 접두사를 붙여 SEAM observer/로그가 회귀
       발생원을 확장 단위로 호명할 수 있게 한다.
     - 실행 예외는 PromptProcessor._run_hooks가 per-hook으로 격리한다.
+    - soft OFF(record.is_active=False)면 context를 그대로 통과시킨다(즉시 발효).
     """
 
-    def __init__(self, ext_id: str, hook: Any):
-        self._ext_id = ext_id
+    def __init__(self, record: ExtensionRecord, hook: Any):
+        self._record = record
+        self._ext_id = record.ext_id
         self._hook = hook
         raw = dict(hook.get_pipeline_hook_info() or {})
         declared = int(raw.get("priority", EXT_HOOK_PRIORITY_MIN) or EXT_HOOK_PRIORITY_MIN)
         priority = max(EXT_HOOK_PRIORITY_MIN, declared)
         if priority != declared:
-            _ext_print(ext_id, f"hook priority {declared} -> {priority} (0~{EXT_HOOK_PRIORITY_MIN - 1}는 코어 예약 대역)")
+            _ext_print(record.ext_id, f"hook priority {declared} -> {priority} (0~{EXT_HOOK_PRIORITY_MIN - 1}는 코어 예약 대역)")
         self._info = {
             "target_pipeline": str(raw.get("target_pipeline") or "PromptProcessor"),
             "hook_point": str(raw.get("hook_point") or "final_hookpoint"),
@@ -198,6 +317,8 @@ class _ExtensionHookAdapter:
         return f"ext:{self._ext_id}:{inner or self._hook.__class__.__name__}"
 
     def execute_pipeline_hook(self, context: Any) -> Any:
+        if not self._record.is_active:
+            return context
         try:
             return self._hook.execute_pipeline_hook(context)
         except SystemExit as exc:
@@ -269,7 +390,7 @@ class ExtensionContext:
         state = {"errors": 0, "muted": False}
 
         def _runner(*args: Any, **kwargs: Any) -> None:
-            if state["muted"]:
+            if state["muted"] or not self._record.is_active:
                 return
             payload = args[0] if args else None
             # 체인 깊이 전파: 확장 파생 요청 이벤트(ext_origin/ext_chain_depth 포함)는
@@ -333,10 +454,27 @@ class ExtensionContext:
             raise TypeError(
                 "hook must implement get_pipeline_hook_info() and execute_pipeline_hook(context)"
             )
-        adapter = _ExtensionHookAdapter(self.ext_id, hook)
+        adapter = _ExtensionHookAdapter(self._record, hook)
         self._app_context.register_pipeline_hook(adapter.get_pipeline_hook_info(), adapter)
         self._hook_adapters.append(adapter)
         self._record.hooks += 1
+
+    # ── 설정 패널 선언(Phase B) ──────────────────────────────────
+    def register_panel(self, fields: list[dict[str, Any]], *, title: str | None = None) -> None:
+        """Extensions 패널에 노출할 선언적 설정 폼을 등록한다(확장은 JS 0줄).
+
+        field: {key(필수), type: bool|int|float|select|text|tags|action(예약),
+        label(=key), default, min/max/step(int/float), options(select),
+        help(툴팁), section(그룹), order(정렬), apply: immediate|next-generation|
+        restart-required(기본 immediate)}. 값은 ``settings.json``으로 라운드트립
+        되며 ``ctx.load_settings()``로 읽는 값과 같은 파일이다. ``action`` 타입은
+        v1에서 예약만 되어 렌더되지 않는다.
+        """
+        normalized = _normalize_panel_fields(fields)
+        self._record.panel = {
+            "title": str(title or self._record.name or self.ext_id),
+            "fields": normalized,
+        }
 
     # ── 생성 큐 ──────────────────────────────────────────────────
     def enqueue_generation(
@@ -363,6 +501,8 @@ class ExtensionContext:
         큐 삽입만 하며 소비 루프를 직접 깨우지는 않는다(생성 흐름 안에서 호출되면
         진행 중인 루프가 이어서 소비).
         """
+        if not self._record.is_active:
+            return {"ok": False, "request_id": "", "message": "extension disabled"}
         current_depth = _current_event_chain_depth()
         child_depth = current_depth + 1
         if child_depth > EXT_CHAIN_DEPTH_MAX:
@@ -463,7 +603,10 @@ class ExtensionContext:
 class ExtensionManager:
     app_context: Any
     records: list[ExtensionRecord] = field(default_factory=list)
+    # 최초 도입 부팅에서 자동 승인(grandfather)된 id — 패널이 1회 안내 후 비운다.
+    grandfathered: list[str] = field(default_factory=list)
     _loaded: bool = field(default=False, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def extensions_root(self) -> Path | None:
         env_dir = os.environ.get(EXT_DIR_ENV)
@@ -484,16 +627,16 @@ class ExtensionManager:
         if os.environ.get(EXT_DISABLE_ENV) == "1":
             print("Remote Web: extensions disabled by NAIA_DISABLE_EXTENSIONS=1", flush=True)
             return self.records
-        root = self.extensions_root()
-        if root is None or not root.is_dir():
-            return self.records
-        disabled = self._disabled_ids()
-        for manifest_path in sorted(root.glob("*/extension.json")):
-            self._load_one(manifest_path, disabled)
+        with self._lock:
+            self._discover_locked()
+            self._apply_config_locked()
+            for record in self.records:
+                if record.status == "discovered" and record.approved and not record.blocked:
+                    self._load_record_locked(record)
         if self.records:
             loaded = sum(1 for record in self.records if record.status == "loaded")
             print(
-                f"Remote Web: extensions loaded {loaded}/{len(self.records)} from {root}",
+                f"Remote Web: extensions loaded {loaded}/{len(self.records)} from {self.extensions_root()}",
                 flush=True,
             )
         return self.records
@@ -501,59 +644,154 @@ class ExtensionManager:
     def status_payload(self) -> list[dict[str, Any]]:
         return [record.status_payload() for record in self.records]
 
-    def _disabled_ids(self) -> set[str]:
-        runtime_paths = getattr(self.app_context, "runtime_paths", None)
-        if runtime_paths is None:
-            return set()
-        try:
-            raw = json.loads(
-                (runtime_paths.config_dir / "extensions.json").read_text(encoding="utf-8")
-            )
-            return {str(item).strip() for item in (raw.get("disabled") or []) if str(item).strip()}
-        except FileNotFoundError:
-            return set()
-        except Exception as exc:
-            print(f"Remote Web: extensions.json read failed - {exc}", flush=True)
-            return set()
+    def _find(self, ext_id: str) -> ExtensionRecord | None:
+        clean = str(ext_id or "").strip()
+        for record in self.records:
+            if record.ext_id == clean:
+                return record
+        return None
 
-    def _load_one(self, manifest_path: Path, disabled: set[str]) -> None:
-        directory = manifest_path.parent
-        record = ExtensionRecord(ext_id=directory.name, directory=directory)
-        self.records.append(record)
-        ctx: ExtensionContext | None = None
+    # ── 발견(코드 미실행) ────────────────────────────────────────
+    def _discover_locked(self) -> None:
+        """매니페스트만 스캔해 레코드를 만든다 — 동의(approve) 전에는 어떤 확장
+        코드도 import/실행되지 않는다(슬라이스1 자동 로드의 보안 교정)."""
+        root = self.extensions_root()
+        if root is None or not root.is_dir():
+            return
+        known = {str(record.directory): record for record in self.records if record.directory}
+        seen: set[str] = set()
+        for manifest_path in sorted(root.glob("*/extension.json")):
+            directory = manifest_path.parent
+            seen.add(str(directory))
+            existing = known.get(str(directory))
+            if existing is not None:
+                if existing.status in {"discovered", "manifest_error"}:
+                    self._parse_manifest_into(manifest_path, existing)
+                continue
+            record = ExtensionRecord(ext_id=directory.name, directory=directory)
+            self.records.append(record)
+            self._parse_manifest_into(manifest_path, record)
+        # 디렉터리가 사라진 미로드 레코드는 목록에서 제거(로드된 것은 세션 동안 유지).
+        self.records[:] = [
+            record
+            for record in self.records
+            if record.status not in {"discovered", "manifest_error"} or str(record.directory) in seen
+        ]
+
+    def _parse_manifest_into(self, manifest_path: Path, record: ExtensionRecord) -> None:
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             if not isinstance(manifest, dict):
                 raise ValueError("extension.json must be a JSON object")
-            record.ext_id = str(manifest.get("id") or directory.name).strip() or directory.name
-            record.name = str(manifest.get("name") or record.ext_id)
-            record.version = str(manifest.get("version") or "")
-
+            directory = manifest_path.parent
+            ext_id = str(manifest.get("id") or directory.name).strip() or directory.name
+            if any(other is not record and other.ext_id == ext_id for other in self.records):
+                raise ValueError(f"duplicate extension id '{ext_id}'")
             declared_api = int(manifest.get("naia_ext_api", 0) or 0)
             if declared_api != NAIA_EXT_API_VERSION:
-                record.status = "error"
-                record.error = (
+                record.ext_id = ext_id
+                raise ValueError(
                     f"unsupported naia_ext_api={declared_api} (host={NAIA_EXT_API_VERSION})"
                 )
-                print(f"Remote Web: extension '{record.ext_id}' skipped - {record.error}", flush=True)
-                return
-            if record.ext_id in disabled:
-                record.status = "disabled"
-                print(f"Remote Web: extension '{record.ext_id}' disabled (config/extensions.json)", flush=True)
-                return
-            if any(
-                other is not record and other.ext_id == record.ext_id and other.status == "loaded"
-                for other in self.records
-            ):
-                raise ValueError(f"duplicate extension id '{record.ext_id}'")
-
             entry = str(manifest.get("entry") or "main.py")
             entry_path = (directory / entry).resolve()
             if not entry_path.is_relative_to(directory.resolve()):
                 raise ValueError(f"entry escapes extension directory: {entry}")
-            if not entry_path.is_file():
-                raise FileNotFoundError(f"entry not found: {entry}")
+            record.ext_id = ext_id
+            record.name = str(manifest.get("name") or ext_id)
+            record.version = str(manifest.get("version") or "")
+            record.description = str(manifest.get("description") or "")
+            # source_url은 향후 업데이트 체크용 예약 — v1은 homepage 폴백으로만 사용.
+            record.homepage = str(manifest.get("homepage") or manifest.get("source_url") or "")
+            record.entry_path = entry_path
+            record.status = "discovered"
+            record.error = ""
+        except (SystemExit, Exception) as exc:
+            record.status = "manifest_error"
+            record.error = _safe_error_text(exc)
+            print(
+                f"Remote Web: extension manifest invalid '{record.ext_id}' - {record.error}",
+                flush=True,
+            )
 
+    # ── 사실(approved/inactive/blocked) 영속 ─────────────────────
+    def _config_path(self) -> Path | None:
+        runtime_paths = getattr(self.app_context, "runtime_paths", None)
+        if runtime_paths is None:
+            return None
+        try:
+            return runtime_paths.config_dir / "extensions.json"
+        except Exception:
+            return None
+
+    def _apply_config_locked(self) -> None:
+        """config/extensions.json의 사실을 레코드에 적용한다.
+
+        우선순위(설계 인스펙션 #1): blocked가 approved/enabled에 우선하며,
+        inactive(soft OFF)는 approved에만 의미가 있다(쓰기 시 정규화).
+        레거시 {"disabled": [...]} 키는 blocked로 이관. ``approved`` 키 자체가
+        없으면(기능 도입 이전 설치 또는 NAIA_EXT_DIR 오버라이드/테스트 모드)
+        현재 발견된 확장을 일괄 자동 승인(grandfather)하고 1회 안내 플래그를
+        남긴다 — 이후 새로 발견되는 확장은 예외 없이 미승인에서 시작한다.
+        """
+        raw: dict[str, Any] = {}
+        path = self._config_path()
+        if path is not None:
+            try:
+                parsed = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(parsed, dict):
+                    raw = parsed
+            except FileNotFoundError:
+                raw = {}
+            except Exception as exc:
+                print(f"Remote Web: extensions.json read failed - {_safe_error_text(exc)}", flush=True)
+
+        def _ids(key: str) -> set[str]:
+            return {str(item).strip() for item in (raw.get(key) or []) if str(item).strip()}
+
+        blocked = _ids("blocked") | _ids("disabled")
+        inactive = _ids("inactive")
+        if isinstance(raw.get("approved"), list):
+            approved = _ids("approved")
+        else:
+            approved = {record.ext_id for record in self.records if record.status == "discovered"}
+            newly = sorted(approved - blocked)
+            if newly:
+                self.grandfathered = newly
+                print(
+                    f"Remote Web: extensions grandfathered (최초 도입 일괄 승인): {', '.join(newly)}",
+                    flush=True,
+                )
+        for record in self.records:
+            record.approved = record.ext_id in approved
+            record.blocked = record.ext_id in blocked
+            record.enabled = record.ext_id not in inactive
+        self._write_config_locked()
+
+    def _write_config_locked(self) -> None:
+        path = self._config_path()
+        if path is None:
+            return
+        payload = {
+            "approved": sorted({r.ext_id for r in self.records if r.approved}),
+            # 정규화: inactive ⊆ approved (미승인 확장의 soft 상태는 무의미).
+            "inactive": sorted({r.ext_id for r in self.records if r.approved and not r.enabled}),
+            "blocked": sorted({r.ext_id for r in self.records if r.blocked}),
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            print(f"Remote Web: extensions.json write failed - {_safe_error_text(exc)}", flush=True)
+
+    # ── 로드(동의 후에만) ────────────────────────────────────────
+    def _load_record_locked(self, record: ExtensionRecord) -> None:
+        ctx: ExtensionContext | None = None
+        record.status = "loading"
+        try:
+            entry_path = record.entry_path
+            if entry_path is None or not entry_path.is_file():
+                raise FileNotFoundError(f"entry not found: {entry_path}")
             module_name = f"naia_ext_{re.sub(r'[^0-9A-Za-z_]', '_', record.ext_id)}"
             spec = importlib.util.spec_from_file_location(module_name, entry_path)
             if spec is None or spec.loader is None:
@@ -568,6 +806,7 @@ class ExtensionManager:
             ctx = ExtensionContext(record, self.app_context)
             register(ctx)
             record.status = "loaded"
+            record.error = ""
             print(
                 f"Remote Web: extension loaded id={record.ext_id} v{record.version or '?'} "
                 f"hooks={record.hooks} subs={record.subscriptions}",
@@ -588,6 +827,124 @@ class ExtensionManager:
                 f"Remote Web: extension '{record.ext_id}' failed to load - {record.error}",
                 flush=True,
             )
+
+    # ── Extensions 패널 API (module_id="extensions") ─────────────
+    def panel_state(self) -> dict[str, Any]:
+        """패널 표시용 상태. 열 때마다 재발견하므로 새로 설치한 확장이 재시작
+        없이 목록에 나타난다(승인은 절대 자동 부여되지 않는다)."""
+        with self._lock:
+            self._discover_locked()
+            entries = []
+            for record in self.records:
+                entry = record.status_payload()
+                entry["settings"] = self._panel_settings_locked(record)
+                entries.append(entry)
+            entries.sort(key=lambda item: (item["status"] != "loaded", str(item["name"]).lower()))
+            notice = list(self.grandfathered)
+            self.grandfathered = []
+            root = self.extensions_root()
+            return {
+                "extensions": entries,
+                "install_dir": str(root) if root is not None else "",
+                "grandfathered": notice,
+            }
+
+    def _panel_settings_locked(self, record: ExtensionRecord) -> dict[str, Any] | None:
+        if not record.panel or record.directory is None:
+            return None
+        values: dict[str, Any] = {}
+        for field_def in record.panel.get("fields", []):
+            if "default" in field_def:
+                values[field_def["key"]] = field_def["default"]
+        try:
+            raw = json.loads((record.directory / SETTINGS_FILENAME).read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                values.update(raw)
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            _ext_print(record.ext_id, f"settings.json read failed ({_safe_error_text(exc)})")
+        return values
+
+    def apply_panel_param(self, key: str, value: Any) -> None:
+        """즉시 발효 키(enabled/blocked/setting). approve/retry는 import가 수반되므로
+        호출자가 워커 스레드에서 load_by_key()로 처리한다(인스펙션 #2)."""
+        action, _, rest = str(key or "").strip().partition(":")
+        with self._lock:
+            if action == "enabled":
+                record = self._find(rest)
+                if record is not None:
+                    record.enabled = _coerce_panel_value({"type": "bool"}, value)[1]
+                    self._write_config_locked()
+            elif action == "blocked":
+                record = self._find(rest)
+                if record is not None:
+                    record.blocked = _coerce_panel_value({"type": "bool"}, value)[1]
+                    self._write_config_locked()
+            elif action == "setting":
+                ext_id, _, field_key = rest.partition(":")
+                self._apply_setting_locked(ext_id, field_key, value)
+
+    def _apply_setting_locked(self, ext_id: str, field_key: str, value: Any) -> None:
+        record = self._find(ext_id)
+        if record is None or not record.panel or record.directory is None:
+            return
+        field_def = next(
+            (item for item in record.panel.get("fields", []) if item.get("key") == field_key),
+            None,
+        )
+        if field_def is None or field_def.get("type") == "action":
+            return
+        ok, coerced, message = _coerce_panel_value(field_def, value)
+        if not ok:
+            record.field_errors[field_key] = message
+            return
+        record.field_errors.pop(field_key, None)
+        path = record.directory / SETTINGS_FILENAME
+        current: dict[str, Any] = {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                current = raw  # 선언 안 된 키 보존(B3)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+        current[field_key] = coerced
+        try:
+            path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            record.field_errors[field_key] = f"저장 실패: {_safe_error_text(exc)}"
+
+    def mark_loading(self, key: str) -> None:
+        """approve/retry 백그라운드 처리 전, 패널에 '로딩 중'을 먼저 보여주기 위한 표시."""
+        with self._lock:
+            for record in self._load_targets(key):
+                if record.status in {"discovered", "error"}:
+                    record.status = "loading"
+
+    def load_by_key(self, key: str) -> None:
+        """approve:<id> / retry:<id> / retry_errors — import가 수반되는 무거운 경로.
+        워커 스레드에서 호출된다(이벤트 루프 비차단, 매니저 락으로 직렬화)."""
+        action, _, _ = str(key or "").strip().partition(":")
+        with self._lock:
+            for record in self._load_targets(key):
+                if action == "approve":
+                    if record.blocked or record.status == "manifest_error":
+                        continue
+                    record.approved = True
+                    self._write_config_locked()
+                if record.approved and not record.blocked and record.status in {"discovered", "loading", "error"}:
+                    self._load_record_locked(record)
+
+    def _load_targets(self, key: str) -> list[ExtensionRecord]:
+        action, _, rest = str(key or "").strip().partition(":")
+        if action in {"approve", "retry"}:
+            record = self._find(rest)
+            return [record] if record is not None else []
+        if action == "retry_errors":
+            return [record for record in self.records if record.status == "error"]
+        return []
 
 
 def load_extensions(app_context: Any) -> ExtensionManager:

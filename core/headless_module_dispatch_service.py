@@ -50,6 +50,12 @@ class HeadlessModuleDispatchService:
             return context._chunk_module_state()
         if clean_id == "e621_event":
             return context._e621_event_module_state()
+        if clean_id == "extensions":
+            from core.extension_runtime import load_extensions
+
+            return context._module_state_payload(
+                "extensions", load_extensions(context).panel_state()
+            )
         if clean_id in HEADLESS_RETIRED_MODULES:
             return self.retired_module_state(clean_id)
         return {
@@ -101,6 +107,14 @@ class HeadlessModuleDispatchService:
             return context._set_instant_wildcard_param(clean_key, value)
         if clean_id == "e621_event":
             return context._set_e621_event_param(clean_key, value)
+        if clean_id == "extensions":
+            # 즉시 발효 키(enabled/blocked/setting)만 여기로 온다 — approve/retry는
+            # import가 수반되므로 module_commands가 백그라운드 태스크로 처리.
+            from core.extension_runtime import load_extensions
+
+            manager = load_extensions(context)
+            manager.apply_panel_param(clean_key, value)
+            return context._module_state_payload("extensions", manager.panel_state())
         if clean_id in HEADLESS_RETIRED_MODULES:
             return self.retired_module_state(clean_id, action=clean_key)
         return None

@@ -134,6 +134,12 @@ const MODULE_REGISTRY = {
     action: 'module',
     badgeId: 'badgeAuto',
   },
+  extensions: {
+    label: '🧩 Extensions',
+    title: 'Extensions (사용자 확장 관리)',
+    category: 'assistant_tools',
+    action: 'module',
+  },
 };
 
 const CATEGORY_REGISTRY = [
@@ -168,7 +174,7 @@ const CATEGORY_REGISTRY = [
     id: 'assistant_tools',
     label: '자동화 / 고급 기능',
     title: '자동화 / 고급 기능',
-    moduleIds: ['automation'],
+    moduleIds: ['automation', 'extensions'],
   },
 ];
 

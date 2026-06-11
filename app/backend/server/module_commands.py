@@ -58,6 +58,37 @@ async def _run_vibe_encode(
             await broadcast_json(clients, message)
 
 
+async def _run_extension_load(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    command: dict[str, Any],
+) -> None:
+    """확장 승인/재시도 — import가 수반되는 무거운 경로. '로딩 중' 상태를 먼저
+    브로드캐스트하고 워커 스레드에서 로드한 뒤 결과를 브로드캐스트한다(매니저
+    락으로 직렬화, 이벤트 루프 비차단)."""
+    import asyncio
+
+    from app.backend.server.websocket_broadcast import broadcast_json
+    from core.extension_runtime import load_extensions
+
+    manager = load_extensions(context)
+    key = str(command.get("key") or "")
+    if not key:
+        return
+    manager.mark_loading(key)
+    await broadcast_json(clients, context._module_state_payload("extensions", manager.panel_state()))
+    try:
+        await asyncio.to_thread(manager.load_by_key, key)
+    except Exception as exc:  # pragma: no cover - load_by_key는 내부 격리가 원칙
+        await broadcast_json(clients, {
+            "type": "toast",
+            "level": "error",
+            "message": f"확장 로드 실패: {exc}",
+            "runtime": "web",
+        })
+    await broadcast_json(clients, context._module_state_payload("extensions", manager.panel_state()))
+
+
 async def handle_module_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -87,6 +118,17 @@ async def handle_module_command(
         import asyncio
 
         asyncio.create_task(_run_vibe_encode(context, clients, command))
+        return True
+
+    # Extensions 승인/재시도는 Python import를 수반하므로 백그라운드 태스크로 —
+    # '로딩 중' 상태를 먼저 브로드캐스트해 패널이 즉시 반응한다.
+    if (
+        str(command.get("module_id") or "") == "extensions"
+        and str(command.get("key") or "").split(":", 1)[0] in {"approve", "retry", "retry_errors"}
+    ):
+        import asyncio
+
+        asyncio.create_task(_run_extension_load(context, clients, command))
         return True
 
     module_state = context.set_module_param(

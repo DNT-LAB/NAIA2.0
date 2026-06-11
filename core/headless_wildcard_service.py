@@ -13,7 +13,7 @@ class HeadlessWildcardService:
     def __init__(self, context: Any):
         self.context = context
 
-    def state(self) -> dict[str, Any]:
+    def state(self, *, live_update: bool = False) -> dict[str, Any]:
         wildcard_count = 0
         manager = self.context.wildcard_manager
         for attr in ("wildcard_dict_tree", "wildcard_dict", "instant_wildcard_dict"):
@@ -23,13 +23,19 @@ class HeadlessWildcardService:
         history, sequential_state = self._collect_runtime_state()
         # NOTE: 필드명을 "state"로 두면 module_state_payload 가 payload["state"]=전체 dict 로
         # 덮어써(키 충돌) 프론트에서 순차 배열이 사라진다. "sequential_state" 로 분리한다.
-        return self.context._module_state_payload("wildcard", {
+        payload = {
             "history": history,
             "sequential_state": sequential_state,
             "prompt_squeeze": bool(self.context.prompt_squeeze_enabled),
             "wildcard_count": wildcard_count,
             "file_browser_available": True,
-        })
+        }
+        # live_update=True 면 프론트가 파일 브라우저 통째 재구축 없이 런타임 섹션
+        # (Used/Sequential)만 in-place 갱신한다(깜빡임/get_file_tree 재요청 회피). Jump 처럼
+        # 즉시 반영이 필요한 경로에서 사용. (생성 라이브 틱과 동일 계약 — generation_commands.)
+        if live_update:
+            payload["live_update"] = True
+        return self.context._module_state_payload("wildcard", payload)
 
     def _collect_runtime_state(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """직전 생성의 PromptContext에서 사용된 와일드카드/순차·종속 상태를 수집한다.
@@ -60,11 +66,65 @@ class HeadlessWildcardService:
                     "current": int(info.get("current", 0) or 0),
                     "total": int(info.get("total", 0) or 0),
                 }
+                # observer(종속) 항목은 wildcard_state 에 master_name 키를 갖는다(미해결 master
+                # 면 'unknown'). 선택이 master 사이클에서 파생돼 카운터 직접 점프가 무효이므로,
+                # 표시값 유무와 무관하게 dependent 로 표식한다 → 프론트가 Jump 버튼을 숨긴다.
+                if "master_name" in info:
+                    entry["dependent"] = True
                 master = info.get("master_name")
                 if master and str(master) not in {"", "unknown"}:
                     entry["master"] = str(master)
                 sequential_state.append(entry)
         return history, sequential_state
+
+    def set_sequential(self, name: str, index: Any) -> dict[str, Any]:
+        """순차 와일드카드 카운터를 강제로 점프시킨다(사용자 요청 [Jump]).
+
+        1.5에서 "생성 N회 예약 후 취소"로 순차 위치를 맞추던 방식을 대체 — 1-based `index`를
+        주면 *다음 생성*의 `__*name__`이 그 위치(=index 번째 항목)를 내도록 카운터를 맞춘다.
+        카운터는 PromptContext.sequential_counters 에 저장되고 매 생성마다
+        prompt_generation_service._create_initial_context 가 직전 컨텍스트에서 복사해 이어가므로,
+        살아있는 current_prompt_context 의 카운터를 직접 세팅하면 다음 생성에 반영된다.
+
+        종속(slave, master 보유) 항목은 master 사이클에서 파생되므로 직접 점프를 막는다.
+        """
+        wildcard_name = str(name or "").strip()
+        if not wildcard_name:
+            return self.context._toast("Jump 대상 와일드카드가 없습니다.", level="error")
+        ctx = getattr(self.context, "current_prompt_context", None)
+        if ctx is None or not isinstance(getattr(ctx, "sequential_counters", None), dict):
+            return self.context._toast("순차 상태가 없습니다. 먼저 한 번 생성하세요.", level="error")
+        state = getattr(ctx, "wildcard_state", None)
+        info = state.get(wildcard_name) if isinstance(state, dict) else None
+        # 종속(observer)은 wildcard_state 에 master_name 키를 갖는다(미해결 master 면 'unknown').
+        # 어느 경우든 slave 선택은 master 사이클에서 파생돼 카운터 직접 점프가 무효이므로,
+        # 'unknown' 포함 master_name 키가 있으면 모두 거부한다(Codex #4: unknown-master no-op 트랩 차단).
+        if isinstance(info, dict) and "master_name" in info:
+            return self.context._toast(
+                "종속(slave) 와일드카드는 직접 점프할 수 없습니다. master 와일드카드를 조정하세요.",
+                level="info",
+            )
+        total = int(info.get("total", 0) or 0) if isinstance(info, dict) else 0
+        if total <= 0:
+            total = len(self._resolve_entries(wildcard_name))
+        if total <= 0:
+            return self.context._toast(f"'{wildcard_name}' 항목을 찾을 수 없습니다.", level="error")
+        try:
+            target = int(index)
+        except (TypeError, ValueError):
+            return self.context._toast("Jump 위치가 올바르지 않습니다.", level="error")
+        target = max(1, min(target, total))
+        # 다음 생성: counter=target-1 → entries[(target-1)%total] = target 번째 항목.
+        ctx.sequential_counters[wildcard_name] = target - 1
+        # 패널에 즉시 반영(생성 전이라도 점프 위치를 보여준다 — 다음 생성이 이 값을 유지).
+        if isinstance(info, dict):
+            info["current"] = target
+            info["total"] = total
+        else:
+            state = state if isinstance(state, dict) else {}
+            state[wildcard_name] = {"current": target, "total": total}
+            ctx.wildcard_state = state
+        return self.state(live_update=True)
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
@@ -74,6 +134,14 @@ class HeadlessWildcardService:
         if key in {"reset_sequential", "reload"}:
             self.reload_manager()
             return self.state()
+        if key == "set_sequential":
+            try:
+                payload = json.loads(str(value or "{}"))
+            except json.JSONDecodeError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            return self.set_sequential(str(payload.get("name") or ""), payload.get("index"))
         if key == "get_file_tree":
             return {"type": "wildcard_manager", "action": "file_tree", "tree": self.scan_tree()}
         if key == "read_file":

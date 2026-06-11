@@ -20,7 +20,21 @@ export function createWildcardPanel({
     return seqState && seqState.length
       ? seqState.map(item => {
         const dep = item.master ? ` <span style="color:var(--text-dim)">(↳ $${escHtml(item.master)})</span>` : '';
-        return `<div>▶ ${escHtml(item.name)}: ${item.current} / ${item.total}${dep}</div>`;
+        const total = Number(item.total) || 0;
+        const current = Number(item.current) || 1;
+        // 종속(observer)은 master 사이클에서 파생되므로 카운터 직접 점프가 무효 → Jump 비노출
+        // (item.master 표시값이 없는 'unknown' master 도 item.dependent 로 걸러진다).
+        // 이름은 data-* 속성에 담고(HTML escape) onclick 은 element(this)만 넘긴다 — 이름을 JS
+        // 소스 문자열로 보간하지 않아 따옴표/특수문자 인젝션이 원천 차단된다(Codex BLOCK 수정).
+        const isDependent = item.master || item.dependent;
+        const jump = (!isDependent && total > 0)
+          ? `<button class="mod-btn-sm wc-jump-btn" title="순차 위치 강제 지정"`
+            + ` data-wc-name="${escHtml(item.name)}" data-wc-total="${total}" data-wc-current="${current}"`
+            + ` onclick="wcJumpSeq(this)">Jump</button>`
+          : '';
+        return `<div class="mod-wc-seq-row">`
+          + `<span class="mod-wc-seq-label">▶ ${escHtml(item.name)}: ${item.current} / ${item.total}${dep}</span>`
+          + `${jump}</div>`;
       }).join('')
       : '<div class="mod-empty">No active sequential wildcards</div>';
   }

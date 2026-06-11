@@ -14226,6 +14226,14 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .mod-wc-browser-inline {
   min-height: 180px;
 }
+/* 순차 상태 행: 라벨(왼쪽) + Jump 버튼(오른쪽). 사용자 요청 [Jump]로 순차 위치를 강제 지정. */
+.mod-wc-seq-row {
+  display: flex; align-items: center; gap: 8px; min-height: 20px;
+}
+.mod-wc-seq-row .mod-wc-seq-label { flex: 1; min-width: 0; word-break: break-word; }
+.mod-wc-seq-row .wc-jump-btn {
+  flex: 0 0 auto; height: 20px; padding: 0 8px; font-size: 10px; line-height: 18px;
+}
 
 /* E621 Event Module */
 .e621-panel {

@@ -986,7 +986,7 @@ const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize event stream panel module', error);
   });
-const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
+const wildcardPanelReady = import('./js/features/wildcardPanel.mjs?v=20260612-wcjump2')
   .then(({createWildcardPanel}) => {
     wildcardPanel = createWildcardPanel({
       document,
@@ -6823,6 +6823,35 @@ function wcSimTab(tab) { if (wildcardManagerPanel) wildcardManagerPanel.setSimTa
 function wcPickSlave() { if (wildcardManagerPanel) wildcardManagerPanel.pickSlave(); }
 function wcClearSlave() { if (wildcardManagerPanel) wildcardManagerPanel.clearSlave(); }
 function wcRoll() { if (wildcardManagerPanel) wildcardManagerPanel.requestInspect(); }
+// 순차 와일드카드 [Jump]: 다음 생성이 사용할 순차 위치를 강제 지정한다(1.5의 "생성 예약 후
+// 취소로 순차 맞추기" 대체). 백엔드가 current_prompt_context 의 sequential_counters 를 세팅.
+// 이름은 버튼의 data-* 에서 읽는다 — onclick 에 이름을 JS 문자열로 보간하지 않아 따옴표/특수
+// 문자 인젝션이 원천 차단된다(Codex BLOCK 수정). dataset 은 HTML 엔티티를 자동 디코드해 원본
+// 이름을 돌려준다.
+async function wcJumpSeq(btn) {
+  const ds = (btn && btn.dataset) || {};
+  const name = ds.wcName || '';
+  const max = Number(ds.wcTotal) || 0;
+  const current = Number(ds.wcCurrent) || 1;
+  if (!name || max <= 0) return;
+  const answer = await Promise.resolve(showPromptDialog(
+    `"${name}" 순차 위치로 점프 (1 ~ ${max}). 다음 생성이 이 위치 항목을 사용합니다.`,
+    {
+      title: '순차 와일드카드 Jump',
+      okText: '이동',
+      cancelText: '취소',
+      defaultValue: String(current || 1),
+      placeholder: `1 ~ ${max}`,
+    },
+  ));
+  if (answer == null) return;
+  const idx = parseInt(String(answer).trim(), 10);
+  if (!Number.isFinite(idx) || idx < 1 || idx > max) {
+    showToast(`1 ~ ${max} 사이의 숫자를 입력하세요.`, 'error');
+    return;
+  }
+  setModuleParam('wildcard', 'set_sequential', JSON.stringify({ name, index: idx }));
+}
 function wcCopySyntax(btn) {
   const row = btn && btn.closest ? btn.closest('.wc-syntax-row') : null;
   const text = row ? (row.querySelector('.wc-syntax')?.textContent || '').trim() : '';

@@ -16894,6 +16894,18 @@ body.detached-module .mod-grid-3 {
   border-radius: 7px; padding: 3px 7px; font-size: 11px;
 }
 .ext-quick-popup .ext-fields { border-top: none; padding-top: 0; margin-top: 9px; }
+.ext-quick-popup.ext-quick-popup-wide { max-width: 620px; }
+/* 2단 패널: 좌=모드/공통 설정, 우=복잡 모드 컨트롤(visible_when으로 등장) */
+.ext-fields-two-col { flex-direction: row; gap: 14px; align-items: flex-start; }
+.ext-fields-col { display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 0; }
+.ext-fields-col-right {
+  border-left: 1px dashed var(--border-dim); padding-left: 14px; flex: 1.2;
+}
+.ext-fields-two-col .ext-field label { min-width: 90px; }
+@media (max-width: 700px) {
+  .ext-fields-two-col { flex-direction: column; }
+  .ext-fields-col-right { border-left: none; padding-left: 0; border-top: 1px dashed var(--border-dim); padding-top: 8px; }
+}
 .ext-quick-nofields { margin-top: 9px; font-size: 11px; color: var(--text-muted); }
 .ext-quick-foot { margin-top: 9px; font-size: 10px; color: var(--text-muted); text-align: right; }
 .seq-btn:hover:not(:disabled) { border-color: var(--border-glow); }

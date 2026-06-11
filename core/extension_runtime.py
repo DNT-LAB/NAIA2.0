@@ -159,8 +159,20 @@ def _normalize_panel_fields(fields: Any) -> list[dict[str, Any]]:
             "apply": (
                 str(raw.get("apply")) if str(raw.get("apply") or "") in PANEL_APPLY_MODES else "immediate"
             ),
+            # 2단 패널: left(기본) | right — right 필드가 하나라도 보이면 렌더러가
+            # 우측 칼럼을 펼친다(복잡 모드 UI).
+            "column": "right" if str(raw.get("column") or "") == "right" else "left",
             "_index": index,
         }
+        # 조건부 표시: {"field": <다른 필드 key>, "in": [허용값...]} — 렌더러가 현재
+        # 설정값으로 평가한다(예: 모드 select 값에 따라 우측 패널 등장).
+        visible_when = raw.get("visible_when")
+        if isinstance(visible_when, dict) and str(visible_when.get("field") or "").strip():
+            allowed = visible_when.get("in")
+            entry["visible_when"] = {
+                "field": str(visible_when.get("field")).strip(),
+                "in": [str(item) for item in allowed] if isinstance(allowed, (list, tuple)) else [],
+            }
         if "default" in raw:
             entry["default"] = raw.get("default")
         if ftype in {"int", "float"}:
@@ -549,6 +561,32 @@ class ExtensionContext:
             "request_id": str(getattr(dispatch, "request_id", "") or ""),
             "message": str(getattr(dispatch, "blocked_reason", "") or ""),
         }
+
+    # ── NAI 캐릭터 스냅샷 ────────────────────────────────────────
+    def resolve_nai_characters(self) -> dict[str, Any] | None:
+        """현재 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷을 돌려준다.
+
+        반환: {"characters": [...], "uc": [...], "character_positions": [...]} 또는
+        None(캐릭터 비활성/NAI 아님/실패). 이 스냅샷을 enqueue_generation의
+        overrides에 그대로 실으면 해당 요청은 실행 시 늦은 바인딩(매번 재전개)
+        대신 스냅샷을 사용한다 — 변형 묶음의 캐릭터 프롬프트 고정용.
+        """
+        try:
+            mode = str(self._app_context.get_api_mode() or "NAI")
+            if mode != "NAI":
+                return None
+            from core.character_settings import character_params_from_settings
+
+            snap = character_params_from_settings(self._app_context, mode=mode)
+            if snap and snap.get("characters"):
+                return {
+                    "characters": [str(c) for c in snap["characters"]],
+                    "uc": [str(u) for u in (snap.get("uc") or [])],
+                    "character_positions": list(snap.get("character_positions") or []),
+                }
+        except (SystemExit, Exception) as exc:
+            self.log(f"resolve_nai_characters failed: {_safe_error_text(exc)}")
+        return None
 
     # ── 설정 영속 ────────────────────────────────────────────────
     def load_settings(self, defaults: dict[str, Any] | None = None) -> dict[str, Any]:

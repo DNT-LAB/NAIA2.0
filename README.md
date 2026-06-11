@@ -131,9 +131,18 @@ NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가�
 > (1회 안내 토스트). 이후 새로 설치하는 확장부터 승인 절차가 적용됩니다.
 
 **Seed Fan-out으로 따라하기**: 샘플을 설치하면 도구바에 `🧩 Seed Fan-out` 버튼이
-나타납니다. 클릭 → 팝업에서 Activate ON, 변형 수 3, 시드 방식 `+1` 확인 → Generate 1회
-→ 큐에 원본+변형 3장(시드 +1/+2/+3)이 쌓입니다. 팝업에서 변형 수를 바꾸면 **다음
-생성부터** 즉시 적용됩니다.
+나타납니다. 두 가지 모드가 있습니다(설정은 **다음 생성부터** 적용):
+
+- **Seed Fan-out**: Generate 1회 → 동일 프롬프트 총 **생성 수**만큼(원본 포함) 큐에
+  쌓입니다. 시드 방식 = `random` / `+1` / `-1` / `fixed`(전부 원본과 같은 시드 —
+  입력창 와일드카드 변주 비교용).
+- **X/Y Plot**: 모드를 바꾸면 팝업 우측에 축 설정이 펼쳐집니다. X/Y 축에
+  `CFG Scale`·`PG.Rescale`(인자 "시작,끝,간격") / `Sampler`(콤마 목록) /
+  `프롬프트 강조`("키워드,시작,끝,간격" — `{kw}`/`[kw]` 가중 스윕) /
+  `프롬프트 스왑`("키워드,대체1,대체2", `^`=콤마)을 조합하면 Generate 1회로
+  그리드 전체가 **동일 시드**로 큐에 쌓입니다(상한 32장).
+- 공통 **캐릭터 프롬프트 고정**(NAI): 켜면 파생 장들이 지금 1회 전개된 캐릭터
+  스냅샷을 공유합니다(캐릭터 와일드카드 재롤 방지).
 
 ### extension.json
 
@@ -189,7 +198,8 @@ class MyHook:
 |--------|------|
 | `ctx.subscribe(event, fn)` / `ctx.unsubscribe(event, fn)` | 이벤트 구독. 콜백 예외는 격리되며 연속 5회 실패 시 자동 음소거 |
 | `ctx.register_hook(hook)` | 프롬프트 파이프라인 훅 등록. priority < 100은 100으로 클램프(0~99 = 코어 예약) |
-| `ctx.register_panel(fields=[...], title=)` | Extensions 패널에 **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags (+action 예약), label, default, min/max/step, options, help, section, order, apply: immediate/next-generation/restart-required}`. 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
+| `ctx.register_panel(fields=[...], title=)` | Extensions 패널에 **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags (+action 예약), label, default, min/max/step, options, help, section, order, apply: immediate/next-generation/restart-required, column: left/right, visible_when: {field, in: [...]}}`. `column:"right"` 필드가 표시되면 패널이 **2단**으로 펼쳐지고, `visible_when`으로 모드별 조건부 표시(예: 복잡 모드 선택 시 우측 패널 등장). 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
+| `ctx.resolve_nai_characters()` | 현재 NAI 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷 `{characters, uc, character_positions}` 또는 None. overrides에 실으면 그 요청은 늦은 바인딩(매장 재전개) 대신 스냅샷 사용 — 변형 묶음의 캐릭터 고정용 |
 | `ctx.enqueue_generation(prompt=, negative_prompt=, api_mode=, prompt_run_id=, priority=, overrides=, allow_chain=False)` | 생성 요청을 큐에 추가. 반환 `{ok, request_id, message}`. 파생 요청에는 `ext_origin`과 체인 깊이가 찍히며, **확장 파생 이벤트를 처리 중인 동안의 호출은 기본 차단**(확장 간 무한 연쇄 방지 — 의도적 체인은 `allow_chain=True`). 단 체인 깊이 4 초과는 `allow_chain`과 무관하게 무조건 거부 |
 | `ctx.load_settings(defaults)` / `ctx.save_settings(dict)` | `settings.json` 읽기(defaults 병합)/쓰기 |
 | `ctx.log(msg)` | `[ext:<id>]` 접두사 콘솔 로그 |

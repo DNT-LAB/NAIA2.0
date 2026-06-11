@@ -71,21 +71,54 @@ export function createExtensionsUi(deps) {
     return `<div class="ext-field"${help}><label for="${fid}">${escHtml(field.label)}${applyHint(field)}</label>${input}${error}</div>`;
   }
 
-  function fieldsHtml(ext, idPrefix) {
-    if (!ext.panel || !Array.isArray(ext.panel.fields) || ext.status !== 'loaded') return '';
+  function fieldValue(ext, key) {
+    if (ext.settings && key in ext.settings) return ext.settings[key];
+    const def = (ext.panel?.fields || []).find(f => f.key === key);
+    return def ? def.default : undefined;
+  }
+
+  function fieldVisible(ext, field) {
+    const cond = field.visible_when;
+    if (!cond || !cond.field) return true;
+    const current = String(fieldValue(ext, cond.field) ?? '');
+    return (cond.in || []).map(String).includes(current);
+  }
+
+  function columnHtml(ext, fields, idPrefix) {
     let html = '';
     let section = null;
-    for (const field of ext.panel.fields) {
-      if (field.type === 'action') continue;
+    for (const field of fields) {
       if ((field.section || '') !== section) {
         section = field.section || '';
         if (section) html += `<div class="ext-section">${escHtml(section)}</div>`;
       }
       html += fieldHtml(ext, field, idPrefix);
     }
-    if (!html) return '';
+    return html;
+  }
+
+  function fieldsHtml(ext, idPrefix) {
+    if (!ext.panel || !Array.isArray(ext.panel.fields) || ext.status !== 'loaded') return '';
+    // visible_when 평가(설정값 기반 — 값 변경은 브로드캐스트 재렌더로 반영) 후
+    // left/right 칼럼 분리. right가 비어 있으면 1단, 있으면 2단(복잡 모드 패널).
+    const visible = ext.panel.fields.filter(field => field.type !== 'action' && fieldVisible(ext, field));
+    const left = visible.filter(field => field.column !== 'right');
+    const right = visible.filter(field => field.column === 'right');
+    const leftHtml = columnHtml(ext, left, idPrefix);
+    const rightHtml = columnHtml(ext, right, idPrefix);
+    if (!leftHtml && !rightHtml) return '';
     const disabled = !ext.active ? ' ext-fields-disabled' : '';
-    return `<div class="ext-fields${disabled}">${html}</div>`;
+    if (!rightHtml) return `<div class="ext-fields${disabled}">${leftHtml}</div>`;
+    return `<div class="ext-fields ext-fields-two-col${disabled}">
+      <div class="ext-fields-col">${leftHtml}</div>
+      <div class="ext-fields-col ext-fields-col-right">${rightHtml}</div>
+    </div>`;
+  }
+
+  function hasRightColumn(ext) {
+    if (!ext?.panel || ext.status !== 'loaded') return false;
+    return ext.panel.fields.some(field =>
+      field.column === 'right' && field.type !== 'action' && fieldVisible(ext, field));
   }
 
   function bindFields(root) {
@@ -394,6 +427,8 @@ export function createExtensionsUi(deps) {
       </label>
       ${fields}
       <div class="ext-quick-foot">관리: Settings ▸ Extension</div>`;
+    // 복잡 모드(우측 칼럼 표시) 시 팝업을 넓힌다.
+    el.classList.toggle('ext-quick-popup-wide', hasRightColumn(ext));
     el.style.display = 'block';
     el.querySelector('.ext-quick-close').addEventListener('click', closeQuickPopup);
     el.querySelector('.ext-quick-toggle').addEventListener('change', event => {

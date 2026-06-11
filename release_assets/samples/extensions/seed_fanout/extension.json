@@ -1,9 +1,9 @@
 {
   "id": "seed_fanout",
   "name": "Seed Fan-out",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "naia_ext_api": 1,
   "entry": "main.py",
-  "description": "Generate 시 동일 프롬프트로 시드만 바꾼 변형 n장을 큐에 추가 (random / +1 / -1)",
+  "description": "Generate 1회로 시드 변형 n장 또는 X/Y 파라미터 그리드를 큐에 추가 (캐릭터 고정 지원)",
   "homepage": "https://github.com/DNT-LAB/NAIA2.0"
 }

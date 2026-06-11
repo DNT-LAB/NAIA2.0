@@ -480,10 +480,16 @@ class HeadlessConditionalRuleEngine:
             needles = self._condition_tag_variants(condition[1:].strip())
             return any(needle in tags for needle in needles)
         if condition.startswith("*"):
+            # `*tag` = exact: 태그 리스트의 한 원소와 정확히 일치해야 한다. 이는 부정형
+            # `~!`(not exact, `needle in tags`)의 양의 짝이어야 하므로 동일한 원소 멤버십을
+            # 쓴다. (이전엔 substring을 써서 `*`/`~!`가 서로 역이 아니었다 — 사용자 버그.)
             needles = self._condition_tag_variants(condition[1:].strip())
-            return any(needle in tag for needle in needles for tag in tags)
+            return any(needle in tags for needle in needles)
+        # 접두사 없는 `tag` = contains(부분 문자열): 부정형 `~`(not contains, substring)의 양의
+        # 짝. 이전엔 exact(`needle in tags`)였어서 `tag`와 `~tag`가 서로 역이 아니었다 →
+        # `(a & ~b)`류에서 양/음 조건이 비대칭으로 동작(사용자 버그 리포트).
         needles = self._condition_tag_variants(condition)
-        return any(needle in tags for needle in needles)
+        return any(needle in tag for needle in needles for tag in tags)
 
     def _parse_tag_list(self, tag_text: str) -> list[str]:
         tag_text = _remove_outer_quotes(tag_text)

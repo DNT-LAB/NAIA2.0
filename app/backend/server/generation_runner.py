@@ -30,6 +30,9 @@ from core.event_stream_vibe import (
     SEQUENCE_VIBE_STRENGTH,
     halve_floor_strength,
 )
+from core.headless_image_module_param_service import (
+    CHARACTER_REFERENCE_LIVE_REFETCH_KEYS,
+)
 from core.web_session_context import WebSessionContext
 
 AUTO_GENERATE_DROPPED_PARAM_KEYS = {
@@ -723,6 +726,16 @@ async def _maybe_continue_auto_generation(
     # resolution stays frozen when Rnd Res is on without Auto Res. (Auto Res still
     # wins afterwards via detected_resolution when both are enabled.)
     _reroll_random_resolution(context, overrides)
+    # Character Reference(NAI v4.5)도 Auto Gen 매 반복마다 라이브 UI 상태를 다시 읽어야 한다.
+    # 직전 생성의 baked params(apply_headless_image_module_params 가 director_reference_* 를
+    # 구워 넣음)가 overrides 로 핀되면, 다음 생성의 apply() 가 'director_reference_descriptions
+    # 이미 존재' 가드(headless_image_module_param_service.apply)에 걸려 라이브 재조회를 건너뛴다
+    # → 사용자가 Auto Gen 도중 캐릭터 레퍼런스를 끄거나 strength/fidelity 를 바꿔도 반영되지
+    # 않는다(사용자 버그 리포트). seed/Rnd Res/vibe 와 동일하게, active_params() 가 만들어내는
+    # director_reference_* 키를 모두 제거해(비활성 시 잔재 키가 남지 않도록) 매 반복 라이브
+    # character_reference_frames 에서 새로 조립되게 한다.
+    for key in CHARACTER_REFERENCE_LIVE_REFETCH_KEYS:
+        overrides.pop(key, None)
     if story_run_id:
         # Carry the story run id so the next completion re-binds to this same cycle.
         overrides["event_stream_run_id"] = story_run_id

@@ -13,6 +13,21 @@ from core.event_stream_vibe import (
 )
 
 
+# Auto Gen 매 반복마다 라이브 Character Reference 상태를 다시 읽기 위해 직전 생성의 baked
+# overrides 에서 제거해야 하는 키 집합. active_character_reference_params() 가 내보내는
+# director_reference_* 전부와 일치해야 한다 — 이 중 하나라도(특히 가드 키
+# director_reference_descriptions) baked 상태로 핀되면 apply() 가 라이브 재조립을 건너뛴다
+# (헤드리스 Auto Gen 중 char-ref 끄기/수치 조절이 반영 안 되던 버그). generation_runner 의
+# Auto Gen continuation 이 이 집합을 pop 한다.
+CHARACTER_REFERENCE_LIVE_REFETCH_KEYS = (
+    "director_reference_descriptions",
+    "director_reference_images",
+    "director_reference_information_extracted",
+    "director_reference_strength_values",
+    "director_reference_secondary_strength_values",
+)
+
+
 class HeadlessImageModuleParamService:
     def __init__(self, context: Any):
         self.context = context

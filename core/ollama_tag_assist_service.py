@@ -358,6 +358,15 @@ def _resolve_max_rating(options: dict[str, Any], request_text: str) -> str:
 MAX_CONCEPTS = 10
 CANDIDATES_PER_CONCEPT = 12
 MAX_ENUM_TAGS = 150
+# P1 autocomplete 보정(실측 근거): autocomplete 랭킹은 UI용이라 빈도순이 아니어서
+# 정답이 얕은 컷에 탈락한다 — looking at phone 21위·holding phone 16위·school uniform
+# 10위(단어 limit 6은 전부 미달). 24면 위 셋을 덮고, head down(31위)은 비용(call2
+# 프롬프트 비대) 대비 효용이 낮아 의도적으로 미포함(오선택은 2인 가드가 차단).
+WORD_SPLIT_LIMIT = 24        # 단어 분해 검색 깊이(기존 6)
+DEEP_INTERSECT_LIMIT = 64    # 교집합 직조회 깊이(leaning out of window 28위)
+DEEP_INTERSECT_KEEP = 8      # 교집합 직조회로 합류시킬 최대 행 수
+PER_CONCEPT_CANDIDATES = 32  # 개념당 후보 캡(기존 48이나 실효 ≤30이었음 — 상한 보존)
+BASE_SUFFIX_LOOKUPS = 6      # 개념당 base 접미 보장 재검색 상한
 
 _STOPWORDS = {"the", "and", "with", "near", "from", "into", "onto", "over", "under"}
 
@@ -931,16 +940,7 @@ class OllamaTagAssistService:
             return self._assist_oneshot(text, model=model, options=options)
         finally:
             self._end_progress()
-            # Auto Boost로 '이 모델'이 상주 중이면 언로드 대신 keep_alive=-1 재확인(assist의
-            # 기본 keep_alive가 상주 타이머를 ~5분으로 덮었을 수 있다). 상주 모델이 아니면
-            # (다른 모델 override 포함) 기존대로 언로드 — 무거운 모델이 VRAM에 남지 않게.
-            with self._resident_meta_lock:
-                is_resident_model = self._keep_resident and target_model == (
-                    self._resident_model or self.default_model)
-            if is_resident_model:
-                self._http_keep_alive_load(target_model)
-            else:
-                self._unload_model(target_model)
+            self._finalize_residency(target_model)
 
     def _assist_oneshot(
         self, text: str, *, model: str | None = None, options: dict[str, Any] | None = None,
@@ -1061,12 +1061,14 @@ class OllamaTagAssistService:
             is_hardcore=lambda t: any(kw in str(t).lower() for kw in _HARDCORE_KEYWORDS),
             has_hangul=_has_hangul,
         )
-        # 레이스 backstop: 이 boost가 keep_alive=-1을 보낸 사이 토글이 OFF로 뒤집혔다면
-        # 모델이 재적재됐을 수 있다 → best-effort 언로드(상주 의도가 사라졌으므로).
+        # 레이스 backstop: 이 boost가 keep_alive=-1을 보낸 사이 토글이 OFF로 뒤집혔거나
+        # 상주 모델이 교체됐다면 모델이 재적재됐을 수 있다 → best-effort 언로드
+        # (전체 조건 재확인 — _finalize_residency와 동일 패턴, Codex R1 HIGH 미러).
         if keep_alive is not None:
             with self._resident_meta_lock:
-                flipped_off = not self._keep_resident
-            if flipped_off:
+                still_resident = self._keep_resident and target_model == (
+                    self._resident_model or self.default_model)
+            if not still_resident:
                 self._unload_model(target_model)
         return result
 
@@ -1148,6 +1150,29 @@ class OllamaTagAssistService:
             self._resident_model = None
         self._unload_model(target)
 
+    def _finalize_residency(self, target_model: str) -> None:
+        """assist/oneshot 종료 시 모델 상주/언로드 정리(공용 finally 경로).
+
+        Auto Boost로 '이 모델'이 상주 중이면 언로드 대신 keep_alive=-1 재확인(assist의
+        기본 keep_alive가 상주 타이머를 ~5분으로 덮었을 수 있다). 상주 모델이 아니면
+        (다른 모델 override 포함) 기존대로 언로드 — 무거운 모델이 VRAM에 남지 않게.
+        P4(Codex CP7): 재적재 도중/직후 토글이 OFF로 뒤집혔으면 best-effort 언로드
+        백스톱 — scene_boost와 동일 패턴('마지막 토글 승리'를 이 경로에도 보장)."""
+        with self._resident_meta_lock:
+            is_resident_model = self._keep_resident and target_model == (
+                self._resident_model or self.default_model)
+        if is_resident_model:
+            self._http_keep_alive_load(target_model)
+            # 재확인은 플래그만이 아니라 *전체 조건* — 적재 중 상주 모델이 A→B로
+            # 교체되면(_keep_resident는 여전히 True) A를 언로드해야 한다(Codex R1 HIGH).
+            with self._resident_meta_lock:
+                still_resident = self._keep_resident and target_model == (
+                    self._resident_model or self.default_model)
+            if not still_resident:
+                self._unload_model(target_model)
+        else:
+            self._unload_model(target_model)
+
     def _recover_tag(
         self, normalized: str, seen: set[str], *, max_rating: str = "e",
     ) -> dict[str, Any] | None:
@@ -1195,16 +1220,7 @@ class OllamaTagAssistService:
             return self._assist(text, model=model, options=options)
         finally:
             self._end_progress()
-            # Auto Boost로 '이 모델'이 상주 중이면 언로드 대신 keep_alive=-1 재확인(assist의
-            # 기본 keep_alive가 상주 타이머를 ~5분으로 덮었을 수 있다). 상주 모델이 아니면
-            # (다른 모델 override 포함) 기존대로 언로드 — 무거운 모델이 VRAM에 남지 않게.
-            with self._resident_meta_lock:
-                is_resident_model = self._keep_resident and target_model == (
-                    self._resident_model or self.default_model)
-            if is_resident_model:
-                self._http_keep_alive_load(target_model)
-            else:
-                self._unload_model(target_model)
+            self._finalize_residency(target_model)
 
     def _assist(
         self, text: str, *, model: str | None = None, options: dict[str, Any] | None = None,
@@ -1248,13 +1264,38 @@ class OllamaTagAssistService:
         if not concepts:
             return {"ok": False, "stage": "concepts", "error": "요청에서 시각 개념을 찾지 못했습니다."}
 
-        # 요청 근거 토큰(요청문 + 개념 쿼리만, 태그 유래 토큰은 제외 — 섞으면 자기 면제가
+        # 요청 근거 스템(요청문 + 개념 쿼리만, 태그 유래 토큰은 제외 — 섞으면 자기 면제가
         # 된다). "요청이 직접 말했는가" 판정용: 2인 관계 태그 가드의 면제 기준.
-        request_tokens: set[str] = set()
-        for _src in [request_text, original_text] + [c["query_en"] for c in concepts]:
-            for _w in re.findall(r"[a-z']+", str(_src).lower()):
-                if len(_w) >= 3 and _w not in _STOPWORDS:
-                    request_tokens.add(_w)
+        # P2(Codex CP2b): 부정 윈도 — 앞 2토큰 안에 no/without/not류가 있으면 그 토큰은
+        # "부정 언급"이라 면제 근거가 못 된다("no holding hands"). 같은 토큰이 다른 곳에서
+        # 긍정 언급되면 긍정이 이긴다(보수적). 한국어 부정("없이/말고")은 사전 번역이
+        # without/no로 정규화하므로 영어 윈도로 충분하다.
+        _NEG_WORDS = frozenset({
+            "no", "not", "without", "never", "don't", "dont", "avoid", "none",
+            "neither", "nor",
+        })
+        _affirmed: set[str] = set()
+        _negated: set[str] = set()
+        for _src in (request_text, original_text):
+            _toks = re.findall(r"[a-z']+", str(_src).lower())
+            for _i, _w in enumerate(_toks):
+                if len(_w) < 3 or _w in _STOPWORDS or _w in _NEG_WORDS:
+                    continue
+                if any(p in _NEG_WORDS for p in _toks[max(0, _i - 2):_i]):
+                    _negated.add(_w)
+                else:
+                    _affirmed.add(_w)
+        _negated_only = _negated - _affirmed
+        _concept_words = {
+            _w
+            for c in concepts
+            for _w in re.findall(r"[a-z']+", str(c["query_en"]).lower())
+            if len(_w) >= 3 and _w not in _STOPWORDS and _w not in _negated_only
+        }
+        # 면제 비교는 스템으로(단·복수 hand/hands 흡수). 부정-전용 토큰의 스템은 제외하되
+        # 긍정 출처가 같은 스템을 내면 긍정이 이긴다.
+        request_stems: set[str] = _retriever_stems(" ".join(_affirmed | _concept_words))
+        request_stems -= (_retriever_stems(" ".join(_negated_only)) - _retriever_stems(" ".join(_affirmed)))
 
         # 코드 — 후보 검색 (진실은 NAIA 태그 인덱스)
         step_no += 1
@@ -1309,9 +1350,67 @@ class OllamaTagAssistService:
                     search_terms.extend(word_queries)
                     for wq in _with_singular_variants(list(word_queries)):
                         try:
-                            rows.extend(self._searcher(wq, max(4, CANDIDATES_PER_CONCEPT // 2)) or [])
+                            rows.extend(self._searcher(wq, WORD_SPLIT_LIMIT) or [])
                         except Exception:
                             continue
+                # 교집합 직조회(P1): 단어별로 더 깊이 훑되, 개념 스템을 2개 이상 공유하는
+                # 후보만 합류 — "looking at cell phone"의 looking at phone(21위),
+                # "leaning against window"의 leaning out of window(28위) 같은 다단어
+                # 직접 표현이 얕은 컷에 묻히는 것을 구제한다. 단일 겹침의 대량 잡음
+                # (head tilt/headphones류)은 합류시키지 않아 enum이 비대해지지 않는다.
+                q_stems_deep = _retriever_stems(query)
+                if len(q_stems_deep) >= 2:
+                    have = {
+                        str(r.get("tag") or "").lower().replace("_", " ") for r in rows
+                    }
+                    harvest: list[dict[str, Any]] = []
+                    h_seen: set[str] = set()
+                    for word in words[:3]:
+                        try:
+                            deep = self._searcher(word, DEEP_INTERSECT_LIMIT) or []
+                        except Exception:
+                            continue
+                        for r in deep:
+                            tl = str(r.get("tag") or "").lower().replace("_", " ")
+                            if not tl or tl in have or tl in h_seen:
+                                continue
+                            if len(_retriever_stems(tl) & q_stems_deep) >= 2:
+                                h_seen.add(tl)
+                                harvest.append(r)
+                    harvest.sort(key=lambda r: int(r.get("count") or 0), reverse=True)
+                    rows.extend(harvest[:DEEP_INTERSECT_KEEP])
+            # base 접미 보장(P1): 후보에 "… school uniform"류 특수화가 있는데 그 base가
+            # row set에 없으면 _is_noisier_specialization이 비교 기준을 잃어 작품 교복이
+            # 살아남는다(실측: search("school") top-6에 school uniform 859k 부재).
+            # 3단어+ 태그의 끝 2단어 base를 정확 일치 재조회로 합류시킨다.
+            if rows:
+                have_tags = {
+                    str(r.get("tag") or "").lower().replace("_", " ") for r in rows
+                }
+                base_lookups = 0
+                for r in list(rows):
+                    if base_lookups >= BASE_SUFFIX_LOOKUPS:
+                        break
+                    tl = str(r.get("tag") or "").lower().replace("_", " ")
+                    parts = tl.split()
+                    if len(parts) < 3 or any(len(p) < 3 for p in parts[-2:]):
+                        continue
+                    base = " ".join(parts[-2:])
+                    if base in have_tags:
+                        continue
+                    have_tags.add(base)  # 실패해도 같은 base를 재조회하지 않는다
+                    base_lookups += 1
+                    try:
+                        hit = next(
+                            (b for b in (self._searcher(base, 4) or [])
+                             if str(b.get("tag") or "").strip().lower().replace("_", " ") == base
+                             and int(b.get("count") or 0) > 0),
+                            None,
+                        )
+                    except Exception:
+                        hit = None
+                    if hit:
+                        rows.append(hit)
             rows.sort(key=lambda r: int(r.get("count") or 0), reverse=True)
             # 특수화형 제거: 같은 후보군에 generic("school uniform")이 있으면 그
             # 접미사 특수화("ooarai school uniform" 등 작품 종속 변형)는 떨어뜨린다 —
@@ -1320,10 +1419,21 @@ class OllamaTagAssistService:
                 str(r.get("tag") or "").strip().lower(): int(r.get("count") or 0)
                 for r in rows
             }
+            # 쿼리 스템(전 검색어 합집합) — 특수화 면제 판정과 retriever 게이트가 공유.
+            _query_stems: set[str] = set()
+            for _t in search_terms:
+                _query_stems |= _retriever_stems(_t)
 
             def _is_noisier_specialization(row):
                 tag_l = str(row.get("tag") or "").strip().lower()
                 count = int(row.get("count") or 0)
+                # 면제(P1): 태그 스템이 *전부* 쿼리 스템에서 온 다단어 태그는 개념의
+                # 직접 합성 표현이다 — "looking at phone"({look,phon}⊆{look,cell,phon})을
+                # base "phone"(111k)의 특수화로 오판해 떨어뜨리던 실측 결함 수정.
+                # 프랜차이즈 특수화(ooarai/hasu …)는 쿼리 밖 스템이 있어 면제 불가.
+                tl_stems = _retriever_stems(tag_l)
+                if len(tl_stems) >= 2 and tl_stems <= _query_stems:
+                    return False
                 # 베이스가 특수화보다 흔할 때만 잡음으로 본다 —
                 # "school uniform"(859k) vs "uniform"(소수)은 유지,
                 # "ooarai school uniform"(9k) vs "school uniform"(859k)은 제거.
@@ -1354,14 +1464,14 @@ class OllamaTagAssistService:
             # ▶ 어시스트 전용 검색기 게이트(Codex 설계): 자동완성 인덱스의 prefix/substring
             # 노이즈를 whole-word(스테밍) 관련성 + 카테고리(음식/고유명) denylist로 거른다.
             # shortcake/backpack(no-wholeword)·mint chocolate(음식)이 검색 단계서 원천 차단.
-            _query_stems: set[str] = set()
-            for _t in search_terms:
-                _query_stems |= _retriever_stems(_t)
-            # 한도는 넉넉히(기존 per-row 루프는 per-concept 캡이 없었다 — 전역
-            # MAX_ENUM_TAGS만). 좁게 캡하면 선택 enum이 줄어 recall이 회귀한다(실측).
+            # (_query_stems는 특수화 면제 판정과 공유 — 위에서 계산)
+            # 한도는 넉넉히 — 좁게 캡하면 선택 enum이 줄어 recall이 회귀한다(실측).
+            # P1로 단어 분해가 깊어져(6→24) rows가 커졌으므로 개념당 32로 캡하되,
+            # 컷은 retriever 점수순(교집합 승격 포함)이라 정답이 컷에 밀리지 않는다.
+            # (기존 캡 48은 rows가 실효 ≤30이라 사실상 무캡이었다 — 상한은 보존됨.)
             kept_rows, _rejected = _retriever_filter(
                 rows, _query_stems, concept["kind"],
-                lambda tl: _tag_allowed(tl, max_rating), 48,
+                lambda tl: _tag_allowed(tl, max_rating), PER_CONCEPT_CANDIDATES,
             )
             tags = []
             for row in kept_rows:
@@ -1410,7 +1520,10 @@ class OllamaTagAssistService:
         _act_haystack = f" {original_text.lower()} \n {request_text.lower()} "
         for keywords, canonical in _FORCED_ACT_TERMS:
             cl = canonical.lower()
-            if cl in forced_seen or cl in candidate_info:
+            # 강제 행위는 *보장*이다 — 이미 후보(candidate_info)여도 강제 포함한다
+            # (canonical 앵커와 동일 결정). 후보 잔류에 맡기면 enum 캡 탈락이나 모델
+            # 선택 누락으로 잃을 수 있다(Codex R1). 중복 주입은 선택 단계 seen이 막는다.
+            if cl in forced_seen:
                 continue
             hit_kw = False
             for kw in keywords:
@@ -1492,7 +1605,29 @@ class OllamaTagAssistService:
         event_added: list[str] = []
         event_top = int(cfg["event_top"])
 
-        candidate_tags = list(candidate_info.keys())[:MAX_ENUM_TAGS]
+        # 선택 enum(스키마) — 전역 캡(150)을 개념 간 round-robin으로 공정 분배한다.
+        # 삽입순이면 단어 분해 상향(P1) 후 앞 개념이 캡을 독식해 뒤 개념(주로 배경)
+        # 후보가 통째로 잘린다. 각 개념의 후보는 점수순이므로 round-robin은 곧
+        # "개념별 상위 N개씩"이 된다.
+        candidate_tags: list[str] = []
+        _rr_seen: set[str] = set()
+        _rr_idx = 0
+        while len(candidate_tags) < MAX_ENUM_TAGS:
+            _advanced = False
+            for c in concept_results:
+                cands = c["candidates"]
+                if _rr_idx >= len(cands):
+                    continue
+                _advanced = True
+                t = cands[_rr_idx]
+                if t not in _rr_seen and t in candidate_info:
+                    _rr_seen.add(t)
+                    candidate_tags.append(t)
+                    if len(candidate_tags) >= MAX_ENUM_TAGS:
+                        break
+            if not _advanced:
+                break
+            _rr_idx += 1
         if not candidate_tags:
             return {
                 "ok": False,
@@ -1505,6 +1640,9 @@ class OllamaTagAssistService:
         # 호출 2 — 후보 중 선택 (새 컨텍스트, enum 강제 = 환각 차단)
         step_no += 1
         self._stage(step_no, "태그 선택")
+        # 모델에 보여주는 후보는 스키마 enum 멤버로 한정 — round-robin 캡(150) 밖
+        # 후보가 보이기만 하고 선택 불가능한(grammar 거부) 불일치를 막는다.
+        _enum_set = set(candidate_tags)
         selection_user = json.dumps(
             {
                 "request": request_text,
@@ -1512,7 +1650,7 @@ class OllamaTagAssistService:
                     {
                         "concept": c["query_en"],
                         "kind": c["kind"],
-                        "candidates": c["candidates"],
+                        "candidates": [t for t in c["candidates"] if t in _enum_set],
                     }
                     for c in concept_results
                     if c["candidates"]
@@ -1594,8 +1732,10 @@ class OllamaTagAssistService:
             norm = str(tag).lower().replace("_", " ").strip()
             if not _is_two_person_tag(norm):
                 return True
-            toks = {w for w in norm.split() if len(w) >= 3 and w not in _STOPWORDS}
-            return bool(toks & request_tokens)  # 요청이 직접 언급 → 면제
+            # 요청이 직접 언급해야 면제 — 태그의 *모든* 스템이 긍정 언급에 있어야 한다
+            # (P2: any-겹침이면 "holding cup, no holding hands"의 holding이 면제를 뚫는다).
+            t_stems = _retriever_stems(norm)
+            return bool(t_stems) and t_stems <= request_stems
 
         selected = [it for it in selected if _two_person_ok(it["tag"])]
         recovery_added &= {it["tag"] for it in selected}

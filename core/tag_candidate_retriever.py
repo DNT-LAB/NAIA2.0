@@ -79,9 +79,17 @@ def score_candidate(
     #    카테고리 hard-reject(음식/고유명)만 남긴다 — 이건 원본 general에 거의 안 나와
     #    recall 중립이면서 shortcake/mint chocolate를 원천 제거한다.
     exact = cand_stems == query_stems
-    overlap = bool(cand_stems & query_stems)
+    overlap_n = len(cand_stems & query_stems)
     rank = math.log10(int(count or 0) + 1) * 10.0
-    rank += 50.0 if exact else (10.0 if overlap else 0.0)
+    if exact:
+        rank += 50.0
+    elif overlap_n >= 2:
+        # 다단어 교집합 승격(P1): 쿼리 스템 2개 이상 공유 = 개념의 직접 표현일 공산
+        # ("looking at cell phone"→looking at phone). count 지배 랭킹이 고빈도
+        # 단일겹침(looking at viewer 3.7M)에 묻어버리던 정답을 enum 상단으로 끌어올린다.
+        rank += 40.0
+    elif overlap_n:
+        rank += 10.0
     return (rank, "")
 
 

@@ -8,8 +8,9 @@ Generate 버튼 1회로 여러 장을 큐에 넣는 확장. 두 가지 모드(NA
   fixed(전부 원본과 같은 시드 — 입력창 와일드카드 변주 비교용).
 - **X/Y Plot**: 파라미터 축 1~2개를 조합한 그리드 생성(전부 동일 시드).
   축 종류를 고르면 그에 맞는 입력칸이 나타난다 — CFG Scale·PG.Rescale(값
-  범위 "시작,끝,간격") / Sampler(쉼표 목록) / 프롬프트 강조(가중 사다리) /
-  프롬프트 스왑(키워드 치환).
+  범위 "시작,끝,간격") / Sampler("auto"=현재 모드 표준 목록 자동) /
+  프롬프트 강조(가중 사다리 — **모드별 문법 자동**: NAI(NAID4/4.5)는
+  ``w::키워드::``, WEBUI/COMFYUI는 ``(키워드:w)``) / 프롬프트 스왑(키워드 치환).
 
 공통: **캐릭터 프롬프트 고정**(NAI) — 켜면 fan-out 시점에 캐릭터 설정을 1회
 전개한 스냅샷을 모든 파생 장에 동봉한다(캐릭터 프롬프트에 와일드카드가 있어도
@@ -47,13 +48,13 @@ DEFAULT_SETTINGS = {
     "char_fix": False,
     "x_axis": AXIS_NONE,
     "x_range": "5,7,1",
-    "x_samplers": "k_euler, k_euler_ancestral",
-    "x_emphasis": "smile,-1,2,1",
+    "x_samplers": "auto",
+    "x_emphasis": "smile,0.6,1.4,0.4",
     "x_swap": "",
     "y_axis": AXIS_NONE,
     "y_range": "0,0.4,0.2",
-    "y_samplers": "k_euler, k_euler_ancestral",
-    "y_emphasis": "smile,-1,2,1",
+    "y_samplers": "auto",
+    "y_emphasis": "smile,0.6,1.4,0.4",
     "y_swap": "",
 }
 
@@ -66,9 +67,16 @@ AXIS_ARG_SUFFIX = {
     AXIS_SWAP: "swap",
 }
 
+# 모드별 표준 샘플러(UI sampler_options_for_mode 미러) — "auto"가 이 목록을 쓴다.
+MODE_SAMPLERS = {
+    "NAI": ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "ddim"],
+    "WEBUI": ["Euler a", "Euler", "DPM++ 2M", "DPM++ 2M Karras"],
+    "COMFYUI": ["euler", "euler_ancestral", "dpmpp_2m", "dpmpp_sde"],
+}
+
 
 def _float_range(args_text):
-    """"시작,끝,간격" → [시작, 시작+간격, ... ≤끝] (소수 1자리 반올림)."""
+    """"시작,끝,간격" → [시작, 시작+간격, ... ≤끝] (소수 2자리 반올림)."""
     parts = [part.strip() for part in str(args_text or "").split(",") if part.strip()]
     start, end, step = float(parts[0]), float(parts[1]), float(parts[2])
     if step <= 0:
@@ -76,29 +84,28 @@ def _float_range(args_text):
     values = []
     current = start
     while current <= end + 1e-9 and len(values) <= MAX_GRID:
-        values.append(round(current, 1))
+        values.append(round(current, 2))
         current += step
     return values
 
 
-def _emphasis_values(args_text):
-    """"키워드,시작,끝,간격"(정수) → [(라벨, 치환문자열)...] — i<0 [kw], i>0 {kw}."""
+def _emphasis_values(args_text, api_mode):
+    """"키워드,시작,끝,간격"(실수 가중) → [(키워드, 치환문자열)...].
+
+    가중 문법은 모드별 자동: NAI(NAID4/4.5)=``w::키워드::`` 수치 강조,
+    WEBUI/COMFYUI=로컬 ``(키워드:w)``."""
     parts = [part.strip() for part in str(args_text or "").split(",")]
     keyword = parts[0]
-    start, end, step = int(parts[1]), int(parts[2]), int(parts[3])
-    if not keyword or step <= 0:
+    if not keyword or len(parts) < 4:
         raise ValueError("키워드,시작,끝,간격 형식이어야 합니다")
+    weights = _float_range(",".join(parts[1:4]))
     values = []
-    for i in range(start, end + 1, step):
-        if i < 0:
-            wrapped = "[" * abs(i) + keyword + "]" * abs(i)
-        elif i == 0:
-            wrapped = keyword
+    for weight in weights:
+        if api_mode == "NAI":
+            wrapped = f"{weight:g}::{keyword}::"
         else:
-            wrapped = "{" * i + keyword + "}" * i
+            wrapped = f"({keyword}:{weight:g})"
         values.append((keyword, wrapped))
-        if len(values) > MAX_GRID:
-            break
     return values
 
 
@@ -177,8 +184,9 @@ class SeedFanout:
 
     # ── 모드 2: X/Y Plot (인스턴트 이벤트 포팅) ──────────────────
     def _run_xy_plot(self, info, params, settings, char_overrides):
-        x_values = self._axis_values("X", settings.get("x_axis"), settings, "x")
-        y_values = self._axis_values("Y", settings.get("y_axis"), settings, "y")
+        api_mode = str(info.get("api_mode") or "")
+        x_values = self._axis_values("X", settings.get("x_axis"), settings, "x", api_mode)
+        y_values = self._axis_values("Y", settings.get("y_axis"), settings, "y", api_mode)
         if x_values is None or y_values is None:
             return  # 축 파싱 실패는 _axis_values가 로그로 안내
         combos = [(x, y) for y in y_values for x in x_values]
@@ -222,10 +230,11 @@ class SeedFanout:
             queued += 1 if result.get("ok") else 0
         self.ctx.log(f"X/Y Plot: {queued}/{len(combos)}장 큐 추가 (seed={base_seed} 고정)")
 
-    def _axis_values(self, axis_name, axis, settings, prefix):
+    def _axis_values(self, axis_name, axis, settings, prefix, api_mode):
         """축 정의 → 조합 항목 리스트. 항목 = None | ("param", (key, value)) |
         ("prompt", (keyword, replacement)). 파싱 실패 시 None(전체 중단).
-        인자는 축 종류별 전용 키(x_range/x_samplers/...)에서 읽는다."""
+        인자는 축 종류별 전용 키(x_range/x_samplers/...)에서 읽고, 샘플러/강조는
+        api_mode를 따른다(샘플러 "auto"=모드 표준 목록, 강조=모드별 가중 문법)."""
         axis = str(axis or AXIS_NONE)
         if axis == AXIS_NONE:
             return [None]
@@ -236,12 +245,18 @@ class SeedFanout:
             if axis == AXIS_RESCALE:
                 return [("param", ("cfg_rescale", value)) for value in _float_range(args_text)]
             if axis == AXIS_SAMPLER:
-                samplers = [part.strip() for part in str(args_text or "").split(",") if part.strip()]
+                text = str(args_text or "").strip()
+                if not text or text.lower() == "auto":
+                    samplers = MODE_SAMPLERS.get(api_mode)
+                    if not samplers:
+                        raise ValueError(f"'{api_mode}' 모드의 표준 샘플러 목록이 없습니다 — 직접 입력하세요")
+                else:
+                    samplers = [part.strip() for part in text.split(",") if part.strip()]
                 if not samplers:
                     raise ValueError("샘플러 콤마 목록이 비었습니다")
                 return [("param", ("sampler", sampler)) for sampler in samplers]
             if axis == AXIS_EMPHASIS:
-                return [("prompt", pair) for pair in _emphasis_values(args_text)]
+                return [("prompt", pair) for pair in _emphasis_values(args_text, api_mode)]
             if axis == AXIS_SWAP:
                 return [("prompt", pair) for pair in _swap_values(args_text)]
         except Exception as exc:
@@ -284,14 +299,16 @@ def _axis_fields(prefix, section, base_order, when_xy):
          "order": base_order + 1,
          "visible_when": {"field": axis_key, "in": [AXIS_CFG, AXIS_RESCALE]}, **common},
         {"key": f"{prefix}_samplers", "default": DEFAULT_SETTINGS[f"{prefix}_samplers"],
-         "label": "샘플러 목록", "placeholder": "k_euler, k_euler_ancestral, …",
-         "help": "쉼표로 구분 — 샘플러 1개당 1장",
+         "label": "샘플러 목록", "placeholder": "auto = 현재 모드 표준 목록",
+         "help": "auto면 현재 모드(NAI/WEBUI/COMFYUI)의 표준 샘플러를 자동 나열 — 1개당 1장. "
+                 "직접 쉼표 목록 입력도 가능",
          "order": base_order + 2,
          "visible_when": {"field": axis_key, "in": [AXIS_SAMPLER]}, **common},
         {"key": f"{prefix}_emphasis", "default": DEFAULT_SETTINGS[f"{prefix}_emphasis"],
-         "label": "강조 사다리", "placeholder": "키워드,시작,끝,간격 — 예: smile,-1,2,1",
-         "help": "키워드를 정수 단계로 가중: 음수=[키워드] 약화 · 0=원본 · 양수={키워드} 강화. "
-                 "예: smile,-1,2,1 → [smile] / smile / {smile} / {{smile}} 4장",
+         "label": "강조 사다리", "placeholder": "키워드,시작,끝,간격 — 예: smile,0.6,1.4,0.4",
+         "help": "키워드 가중을 시작~끝까지 간격씩 스윕(1장씩). 문법은 모드 자동 — "
+                 "NAI(NAID4/4.5)는 w::키워드::, WEBUI/COMFYUI는 (키워드:w). "
+                 "예: smile,0.6,1.4,0.4 → 0.6 / 1 / 1.4 3장",
          "order": base_order + 3,
          "visible_when": {"field": axis_key, "in": [AXIS_EMPHASIS]}, **common},
         {"key": f"{prefix}_swap", "default": DEFAULT_SETTINGS[f"{prefix}_swap"],

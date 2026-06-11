@@ -10,6 +10,8 @@ export function createRightTabsController({document, onLeaveResult}) {
 
   function hideTabButton(button) {
     button.hidden = true;
+    // CSS 규칙(.right-tab-btn[data-right-tab-hidden="true"])과 런타임 상태 동기화.
+    button.setAttribute('data-right-tab-hidden', 'true');
     button.classList.remove('active');
     button.setAttribute('aria-hidden', 'true');
     button.setAttribute('aria-selected', 'false');
@@ -24,6 +26,9 @@ export function createRightTabsController({document, onLeaveResult}) {
 
   function showTabButton(button) {
     button.hidden = false;
+    // hidden 속성만 지우면 마크업의 data-right-tab-hidden="true"가 CSS
+    // display:none !important로 남아 버튼이 영영 보이지 않는다.
+    button.removeAttribute('data-right-tab-hidden');
     button.removeAttribute('aria-hidden');
     button.removeAttribute('tabindex');
   }

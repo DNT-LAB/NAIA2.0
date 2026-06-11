@@ -364,6 +364,9 @@ export function createExtensionsUi(deps) {
     const saved = captureFocus(el);
     const fields = fieldsHtml(ext, 'extquick')
       || '<div class="ext-quick-nofields">이 확장은 설정 항목을 선언하지 않았습니다.</div>';
+    const placementOptions = [['tools', '도구바 (Tools)'], ['fn', 'Fn 메뉴'], ['none', '없음 (버튼 제거)']]
+      .map(([val, label]) =>
+        `<option value="${val}" ${ext.placement === val ? 'selected' : ''}>${label}</option>`).join('');
     el.innerHTML = `
       <div class="ext-quick-head">
         <span class="ext-quick-title">🧩 ${escHtml(ext.name || ext.id)}</span>
@@ -376,12 +379,19 @@ export function createExtensionsUi(deps) {
           <span class="ext-slider"></span>
         </label>
       </label>
+      <label class="ext-quick-placement">
+        <span>버튼 위치</span>
+        <select class="ext-quick-placement-select">${placementOptions}</select>
+      </label>
       ${fields}
       <div class="ext-quick-foot">관리: Settings ▸ Extension</div>`;
     el.style.display = 'block';
     el.querySelector('.ext-quick-close').addEventListener('click', closeQuickPopup);
     el.querySelector('.ext-quick-toggle').addEventListener('change', event => {
       setModuleParam('extensions', `enabled:${ext.id}`, event.target.checked);
+    });
+    el.querySelector('.ext-quick-placement-select').addEventListener('change', event => {
+      setModuleParam('extensions', `placement:${ext.id}`, event.target.value);
     });
     bindFields(el);
     restoreFocus(el, saved);

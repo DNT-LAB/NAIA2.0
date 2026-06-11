@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260611-extset1">
+<link rel="stylesheet" href="style.css?v=20260611-extset2">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -704,15 +704,15 @@
     <button class="right-tab-btn" data-right-tab="studio" onclick="switchRightTab('studio')" role="tab" aria-selected="false">
       <span class="right-tab-icon">▣</span><span>Studio</span>
     </button>
+    <button class="right-tab-btn right-tab-settings" data-right-tab="settings" data-right-tab-hidden="true" onclick="switchRightTab('settings')" role="tab" aria-selected="false" aria-hidden="true" tabindex="-1" hidden>
+      <span class="right-tab-icon">⚙</span><span>Settings</span>
+    </button>
     <div class="boot-indicator" id="bootIndicator" role="status" aria-live="polite">
       <span class="boot-indicator-spinner"></span>
       <span class="boot-indicator-text" id="bootIndicatorText">Connecting…</span>
       <div class="boot-indicator-bar"><div class="boot-indicator-bar-fill" id="bootIndicatorBarFill"></div></div>
     </div>
     <button class="open-browser-btn" type="button" onclick="openInSystemBrowser()" title="기본 브라우저에서 열기">브라우저에서 열기...</button>
-    <button class="right-tab-btn right-tab-settings" data-right-tab="settings" data-right-tab-hidden="true" onclick="switchRightTab('settings')" role="tab" aria-selected="false" aria-hidden="true" tabindex="-1" hidden>
-      <span class="right-tab-icon">⚙</span><span>Settings</span>
-    </button>
   </div>
 
   <div class="right-tab-pane active" id="rightTabResult" data-right-pane="result" role="tabpanel">
@@ -1122,6 +1122,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260611-extset1"></script>
+<script src="app.js?v=20260611-extset2"></script>
 </body>
 </html>

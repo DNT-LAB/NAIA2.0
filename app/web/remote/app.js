@@ -997,7 +997,7 @@ const wildcardPanelReady = import('./js/features/wildcardPanel.mjs')
   .catch(error => {
     console.error('Failed to initialize wildcard panel module', error);
   });
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260611-extset1')
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260611-extset2')
   .then(({createExtensionsUi}) => {
     extensionsPanel = createExtensionsUi({
       document,

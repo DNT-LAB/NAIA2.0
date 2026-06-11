@@ -357,10 +357,10 @@ export function createModuleLauncher({
   }
 
   function renderExtensionItem(item) {
+    // 꺼진 확장은 항목 자체가 안 온다(노출 계약) — off 스타일 분기 없음.
     const tooltip = tooltipAttr(item.title || item.label);
-    const offClass = item.enabled ? '' : ' ext-tool-btn-off';
     return `
-      <button type="button" class="module-btn module-menu-item ext-launcher-item${offClass}" data-ext-item="${tooltipAttr(item.id)}" aria-label="${tooltip}" data-module-tooltip="${tooltip}">
+      <button type="button" class="module-btn module-menu-item ext-launcher-item" data-ext-item="${tooltipAttr(item.id)}" aria-label="${tooltip}" data-module-tooltip="${tooltip}">
         <span>🧩 ${tooltipAttr(item.label)}</span>
       </button>
     `;

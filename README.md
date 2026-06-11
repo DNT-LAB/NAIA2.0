@@ -112,14 +112,19 @@ NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가�
 그 자리에서 로드**됩니다.
 
 **3) 켜기/끄기(soft)**: 로드된 확장의 토글은 즉시 발효 — 이벤트/훅/enqueue가 모두
-무력화되고 다시 켜면 곧바로 복귀합니다. 퀵 팝업의 "Activate This Script" 스위치와 같은
-플래그입니다.
+무력화되고 다시 켜면 곧바로 복귀합니다. **끄면 메인 UI의 퀵 버튼도 함께 사라지며**,
+다시 켜는 곳은 이 설정 화면뿐입니다(퀵 팝업의 "Activate This Script" 스위치와 같은
+플래그 — 팝업에서 끄는 순간 버튼·팝업이 사라집니다).
 
 **4) 퀵 버튼 위치**: 켜진 확장은 행의 **"퀵 버튼 위치"** 선택으로 메인 UI 어디에 버튼을
 둘지 정합니다 — **도구바(Tools)**(TOOLS & ASSISTANTS 아래, 기본값) / **자동화·고급
 기능**(런처 카테고리 메뉴 안) / **없음**. 버튼을 누르면 해당 확장의 **퀵 팝업**이 열립니다:
 `Activate This Script` 스위치 + 확장이 선언한 설정 폼(아래 `register_panel`) — 설정
 변경은 저장 즉시 `settings.json`에 반영됩니다.
+
+> **노출 계약**: Settings ▸ Extension 행은 확장의 **전역 설정**(켜기/끄기·버튼 위치·차단,
+> `scope:"global"` 필드 — 저장 경로 등)만 다루고, **실제 동작 설정**(`scope:"module"`,
+> 기본값)은 퀵 버튼 팝업에만 그려집니다. 두 화면은 서로의 영역을 침범하지 않습니다.
 
 **5) 차단(hard)**: ⋯ 메뉴의 차단은 다음 부팅부터 import 자체를 막습니다. 확장 코드
 업데이트 반영도 재시작이 필요합니다(Python은 안전한 리로드가 불가).
@@ -198,7 +203,7 @@ class MyHook:
 |--------|------|
 | `ctx.subscribe(event, fn)` / `ctx.unsubscribe(event, fn)` | 이벤트 구독. 콜백 예외는 격리되며 연속 5회 실패 시 자동 음소거 |
 | `ctx.register_hook(hook)` | 프롬프트 파이프라인 훅 등록. priority < 100은 100으로 클램프(0~99 = 코어 예약) |
-| `ctx.register_panel(fields=[...], title=)` | Extensions 패널에 **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags (+action 예약), label, default, min/max/step, options, help, section, order, apply: immediate/next-generation/restart-required, column: left/right, visible_when: {field, in: [...]}}`. `column:"right"` 필드가 표시되면 패널이 **2단**으로 펼쳐지고, `visible_when`으로 모드별 조건부 표시(예: 복잡 모드 선택 시 우측 패널 등장). 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
+| `ctx.register_panel(fields=[...], title=)` | **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags (+action 예약), label, default, min/max/step, options, help, section, order, apply: immediate/next-generation/restart-required, scope: module/global, column: left/right, visible_when: {field, in: [...]}}`. **scope가 노출 위치를 결정**: `"module"`(기본)=퀵 버튼 팝업(실제 동작 설정), `"global"`=Settings ▸ Extension 행(전역 설정 — 저장 경로 등). `column:"right"` 필드가 표시되면 **2단**으로 펼쳐지고, `visible_when`으로 모드별 조건부 표시(예: 복잡 모드 선택 시 우측 패널 등장). 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
 | `ctx.resolve_nai_characters()` | 현재 NAI 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷 `{characters, uc, character_positions}` 또는 None. overrides에 실으면 그 요청은 늦은 바인딩(매장 재전개) 대신 스냅샷 사용 — 변형 묶음의 캐릭터 고정용 |
 | `ctx.enqueue_generation(prompt=, negative_prompt=, api_mode=, prompt_run_id=, priority=, overrides=, allow_chain=False)` | 생성 요청을 큐에 추가. 반환 `{ok, request_id, message}`. 파생 요청에는 `ext_origin`과 체인 깊이가 찍히며, **확장 파생 이벤트를 처리 중인 동안의 호출은 기본 차단**(확장 간 무한 연쇄 방지 — 의도적 체인은 `allow_chain=True`). 단 체인 깊이 4 초과는 `allow_chain`과 무관하게 무조건 거부 |
 | `ctx.load_settings(defaults)` / `ctx.save_settings(dict)` | `settings.json` 읽기(defaults 병합)/쓰기 |

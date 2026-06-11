@@ -1,9 +1,12 @@
 // Extensions UI 통합 컨트롤러.
-// - Settings 탭 ▸ Extension 페이지: 발견/승인(load-on-enable)/soft ON·OFF/차단/
-//   퀵 버튼 위치(Tools·Fn·없음) 관리 + 선언적 설정 폼.
-// - 메인 UI 퀵 액세스: placement에 따라 도구바(#extToolsBar)/Fn 메뉴(#fnMenu)에
-//   확장 버튼을 동기화하고, 클릭 시 "Activate This Script" 스위치 + 확장 선언
-//   폼을 가진 퀵 팝업을 띄운다(내용은 확장 개발자의 register_panel 스키마).
+// 노출 계약(사용자 지정):
+// - Settings 탭 ▸ Extension = 전역 설정 전담: 승인/ON·OFF/차단/퀵 버튼 위치 +
+//   scope:"global" 필드(저장 경로 등). 실제 동작(어떻게 생성할 것인지) 요소는
+//   여기에 그리지 않는다.
+// - 퀵 버튼 팝업 = 개별 모듈 UI: Activate This Script + scope:"module"(기본)
+//   필드. 전역 요소(버튼 위치 등)는 여기에 그리지 않는다.
+// - 꺼짐(enabled=false)이면 퀵 버튼을 비활성 표시가 아니라 **아예 숨긴다** —
+//   Settings에서 다시 켜야 보인다.
 // 토글은 승인/soft 전용, 차단은 ⋯ 메뉴로 분리(설계 인스펙션 #4).
 export function createExtensionsUi(deps) {
   const {document, escHtml, setModuleParam, showToast, requestState, setLauncherItems} = deps;
@@ -97,11 +100,16 @@ export function createExtensionsUi(deps) {
     return html;
   }
 
-  function fieldsHtml(ext, idPrefix) {
+  function scopeOf(field) {
+    return field.scope === 'global' ? 'global' : 'module';
+  }
+
+  function fieldsHtml(ext, idPrefix, scope) {
     if (!ext.panel || !Array.isArray(ext.panel.fields) || ext.status !== 'loaded') return '';
-    // visible_when 평가(설정값 기반 — 값 변경은 브로드캐스트 재렌더로 반영) 후
-    // left/right 칼럼 분리. right가 비어 있으면 1단, 있으면 2단(복잡 모드 패널).
-    const visible = ext.panel.fields.filter(field => field.type !== 'action' && fieldVisible(ext, field));
+    // 노출 계약(scope) → visible_when 평가(설정값 기반 — 값 변경은 브로드캐스트
+    // 재렌더로 반영) → left/right 칼럼 분리. right가 있으면 2단(복잡 모드 패널).
+    const visible = ext.panel.fields.filter(field =>
+      field.type !== 'action' && scopeOf(field) === scope && fieldVisible(ext, field));
     const left = visible.filter(field => field.column !== 'right');
     const right = visible.filter(field => field.column === 'right');
     const leftHtml = columnHtml(ext, left, idPrefix);
@@ -118,7 +126,8 @@ export function createExtensionsUi(deps) {
   function hasRightColumn(ext) {
     if (!ext?.panel || ext.status !== 'loaded') return false;
     return ext.panel.fields.some(field =>
-      field.column === 'right' && field.type !== 'action' && fieldVisible(ext, field));
+      field.column === 'right' && field.type !== 'action'
+      && scopeOf(field) === 'module' && fieldVisible(ext, field));
   }
 
   function bindFields(root) {
@@ -189,7 +198,7 @@ export function createExtensionsUi(deps) {
         </div>
         <div class="ext-controls">${placementSelect(ext)}${toggle}<button class="ext-menu-btn" data-ext="${escHtml(ext.id)}">⋯</button></div>
       </div>
-      ${confirm}${menu}${error}${fieldsHtml(ext, 'extset')}
+      ${confirm}${menu}${error}${fieldsHtml(ext, 'extset', 'global')}
     </div>`;
   }
 
@@ -312,9 +321,10 @@ export function createExtensionsUi(deps) {
     });
   }
 
-  // ── 메인 UI 퀵 버튼 (Tools 바 / Fn 메뉴) ─────────────────────
+  // ── 메인 UI 퀵 버튼 (도구바 / 자동화·고급 기능) ──────────────
   function quickEligible(ext) {
-    return ext.status === 'loaded' && !ext.blocked && ext.placement !== 'none';
+    // 꺼짐(enabled=false)은 비활성 표시가 아니라 미노출 — Settings에서 켜야 보인다.
+    return ext.status === 'loaded' && !ext.blocked && ext.enabled && ext.placement !== 'none';
   }
 
   function syncQuickButtons() {
@@ -335,7 +345,7 @@ export function createExtensionsUi(deps) {
           launcher.insertAdjacentElement('afterend', bar);
         }
         bar.innerHTML = toolItems.map(ext =>
-          `<button type="button" class="module-btn ext-tool-btn${ext.enabled ? '' : ' ext-tool-btn-off'}"
+          `<button type="button" class="module-btn ext-tool-btn"
              data-ext="${escHtml(ext.id)}" title="${escHtml(ext.description || ext.name)}">
              <span>🧩</span><span>${escHtml(ext.name || ext.id)}</span></button>`).join('');
         bar.querySelectorAll('.ext-tool-btn').forEach(el => {
@@ -354,7 +364,6 @@ export function createExtensionsUi(deps) {
             label: ext.name || ext.id,
             title: ext.description || ext.name || ext.id,
             category: 'assistant_tools',
-            enabled: ext.enabled,
           })),
         openQuickPopup,
       );
@@ -406,9 +415,9 @@ export function createExtensionsUi(deps) {
     const el = quickPopupEl();
     if (!ext || !quickEligible(ext)) { closeQuickPopup(); return; }
     const saved = captureFocus(el);
-    const fields = fieldsHtml(ext, 'extquick')
+    // 모듈 UI 전담: scope:"module" 필드만. 전역 요소(버튼 위치 등)는 Settings 전담.
+    const fields = fieldsHtml(ext, 'extquick', 'module')
       || '<div class="ext-quick-nofields">이 확장은 설정 항목을 선언하지 않았습니다.</div>';
-    const placementOptions = placementOptionsHtml(ext);
     el.innerHTML = `
       <div class="ext-quick-head">
         <span class="ext-quick-title">🧩 ${escHtml(ext.name || ext.id)}</span>
@@ -421,10 +430,6 @@ export function createExtensionsUi(deps) {
           <span class="ext-slider"></span>
         </label>
       </label>
-      <label class="ext-quick-placement">
-        <span>버튼 위치</span>
-        <select class="ext-select ext-quick-placement-select">${placementOptions}</select>
-      </label>
       ${fields}
       <div class="ext-quick-foot">관리: Settings ▸ Extension</div>`;
     // 복잡 모드(우측 칼럼 표시) 시 팝업을 넓힌다.
@@ -432,10 +437,8 @@ export function createExtensionsUi(deps) {
     el.style.display = 'block';
     el.querySelector('.ext-quick-close').addEventListener('click', closeQuickPopup);
     el.querySelector('.ext-quick-toggle').addEventListener('change', event => {
+      // 끄면 노출 계약에 따라 퀵 버튼·팝업이 함께 사라진다(재활성화는 Settings).
       setModuleParam('extensions', `enabled:${ext.id}`, event.target.checked);
-    });
-    el.querySelector('.ext-quick-placement-select').addEventListener('change', event => {
-      setModuleParam('extensions', `placement:${ext.id}`, event.target.value);
     });
     bindFields(el);
     restoreFocus(el, saved);

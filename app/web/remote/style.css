@@ -16855,9 +16855,8 @@ body.detached-module .mod-grid-3 {
 .custom-select.custom-ext-select .custom-select-button { width: 100%; justify-content: space-between; }
 .custom-select-menu.custom-ext-select { min-width: 168px; }
 
-/* 도구바 확장 버튼 */
+/* 도구바 확장 버튼 (꺼짐=미노출 계약 — off 상태 스타일 없음) */
 .ext-tools-bar { margin-top: 4px; }
-.ext-tool-btn-off { opacity: 0.5; }
 
 /* Fn 메뉴 확장 항목 */
 .ext-fn-item {
@@ -16884,14 +16883,6 @@ body.detached-module .mod-grid-3 {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-top: 8px; padding: 7px 9px; border: 1px solid var(--border-dim); border-radius: 8px;
   background: var(--bg-surface); font-size: 12px; font-weight: 600; cursor: pointer;
-}
-.ext-quick-placement {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  margin-top: 6px; padding: 5px 9px; font-size: 11px; color: var(--text-muted);
-}
-.ext-quick-placement select {
-  background: var(--bg-surface); border: 1px solid var(--border-dim); color: var(--text-primary);
-  border-radius: 7px; padding: 3px 7px; font-size: 11px;
 }
 .ext-quick-popup .ext-fields { border-top: none; padding-top: 0; margin-top: 9px; }
 .ext-quick-popup.ext-quick-popup-wide { max-width: 620px; }

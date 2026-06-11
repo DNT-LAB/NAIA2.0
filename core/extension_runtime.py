@@ -162,6 +162,10 @@ def _normalize_panel_fields(fields: Any) -> list[dict[str, Any]]:
             # 2단 패널: left(기본) | right — right 필드가 하나라도 보이면 렌더러가
             # 우측 칼럼을 펼친다(복잡 모드 UI).
             "column": "right" if str(raw.get("column") or "") == "right" else "left",
+            # 노출 계약: module(기본)=퀵 버튼 팝업(실제 동작 설정 전담) /
+            # global=Settings ▸ Extension(전역 설정 — 저장 경로 등). 두 화면은
+            # 서로의 scope 필드를 렌더하지 않는다.
+            "scope": "global" if str(raw.get("scope") or "") == "global" else "module",
             "_index": index,
         }
         # 조건부 표시: {"field": <다른 필드 key>, "in": [허용값...]} — 렌더러가 현재

@@ -7,20 +7,21 @@ Generate 버튼 1회로 여러 장을 큐에 넣는 확장. 두 가지 모드(NA
   시드 방식 = random(매장 새 시드) / +1 / -1(원본 시드 기준 증감) /
   fixed(전부 원본과 같은 시드 — 입력창 와일드카드 변주 비교용).
 - **X/Y Plot**: 파라미터 축 1~2개를 조합한 그리드 생성(전부 동일 시드).
-  축: CFG Scale · PG.Rescale("시작,끝,간격") / Sampler("콤마 목록") /
-  프롬프트 강조("키워드,시작,끝,간격" — {{kw}}/[kw] 가중 스윕) /
-  프롬프트 스왑("키워드,대체1,대체2…" — '^'는 콤마로 치환).
+  축 종류를 고르면 그에 맞는 입력칸이 나타난다 — CFG Scale·PG.Rescale(값
+  범위 "시작,끝,간격") / Sampler(쉼표 목록) / 프롬프트 강조(가중 사다리) /
+  프롬프트 스왑(키워드 치환).
 
 공통: **캐릭터 프롬프트 고정**(NAI) — 켜면 fan-out 시점에 캐릭터 설정을 1회
 전개한 스냅샷을 모든 파생 장에 동봉한다(캐릭터 프롬프트에 와일드카드가 있어도
 파생 장들끼리 동일; 원본 1장은 자체 실행 시 별도 전개). 끄면 장마다 재전개.
 
 설치: 이 폴더를 user-data의 ``extensions/`` 아래로 복사 → Settings ▸ Extension
-에서 활성화. 설정은 패널(또는 퀵 팝업)에서 편집하며 다음 Generate부터 적용.
+에서 활성화. 동작 설정은 퀵 버튼 팝업에서 편집하며 다음 Generate부터 적용.
 
 확장 API 시연 포인트: register_panel의 2단 칼럼(column)·조건부 표시
-(visible_when), enqueue_generation overrides(시드/CFG/샘플러/캐릭터 스냅샷),
-ext_origin 재귀 가드, settings.json 라이브 리로드.
+(visible_when 계단식 — 축 종류별 입력칸 전환)·placeholder/help,
+enqueue_generation overrides(시드/CFG/샘플러/캐릭터 스냅샷), ext_origin 재귀
+가드, settings.json 라이브 리로드.
 """
 
 import random
@@ -45,9 +46,24 @@ DEFAULT_SETTINGS = {
     "mode": "+1",
     "char_fix": False,
     "x_axis": AXIS_NONE,
-    "x_args": "",
+    "x_range": "5,7,1",
+    "x_samplers": "k_euler, k_euler_ancestral",
+    "x_emphasis": "smile,-1,2,1",
+    "x_swap": "",
     "y_axis": AXIS_NONE,
-    "y_args": "",
+    "y_range": "0,0.4,0.2",
+    "y_samplers": "k_euler, k_euler_ancestral",
+    "y_emphasis": "smile,-1,2,1",
+    "y_swap": "",
+}
+
+# 축 종류 → 전용 입력칸 키 접미사(입력칸은 visible_when으로 축 선택에 따라 전환).
+AXIS_ARG_SUFFIX = {
+    AXIS_CFG: "range",
+    AXIS_RESCALE: "range",
+    AXIS_SAMPLER: "samplers",
+    AXIS_EMPHASIS: "emphasis",
+    AXIS_SWAP: "swap",
 }
 
 
@@ -161,8 +177,8 @@ class SeedFanout:
 
     # ── 모드 2: X/Y Plot (인스턴트 이벤트 포팅) ──────────────────
     def _run_xy_plot(self, info, params, settings, char_overrides):
-        x_values = self._axis_values("X", settings.get("x_axis"), settings.get("x_args"))
-        y_values = self._axis_values("Y", settings.get("y_axis"), settings.get("y_args"))
+        x_values = self._axis_values("X", settings.get("x_axis"), settings, "x")
+        y_values = self._axis_values("Y", settings.get("y_axis"), settings, "y")
         if x_values is None or y_values is None:
             return  # 축 파싱 실패는 _axis_values가 로그로 안내
         combos = [(x, y) for y in y_values for x in x_values]
@@ -206,12 +222,14 @@ class SeedFanout:
             queued += 1 if result.get("ok") else 0
         self.ctx.log(f"X/Y Plot: {queued}/{len(combos)}장 큐 추가 (seed={base_seed} 고정)")
 
-    def _axis_values(self, axis_name, axis, args_text):
+    def _axis_values(self, axis_name, axis, settings, prefix):
         """축 정의 → 조합 항목 리스트. 항목 = None | ("param", (key, value)) |
-        ("prompt", (keyword, replacement)). 파싱 실패 시 None(전체 중단)."""
+        ("prompt", (keyword, replacement)). 파싱 실패 시 None(전체 중단).
+        인자는 축 종류별 전용 키(x_range/x_samplers/...)에서 읽는다."""
         axis = str(axis or AXIS_NONE)
         if axis == AXIS_NONE:
             return [None]
+        args_text = settings.get(f"{prefix}_{AXIS_ARG_SUFFIX.get(axis, 'range')}")
         try:
             if axis == AXIS_CFG:
                 return [("param", ("cfg_scale", value)) for value in _float_range(args_text)]
@@ -250,6 +268,41 @@ class SeedFanout:
         return result
 
 
+def _axis_fields(prefix, section, base_order, when_xy):
+    """축 1개분 패널 필드 — 종류 select + 종류별 전용 입력칸. 입력칸의
+    visible_when은 종류 select를 가리키고, 종류 자신은 모드(feature)에 묶여
+    있어 모드≠X/Y면 계단식으로 함께 숨는다."""
+    axis_key = f"{prefix}_axis"
+    common = {"type": "text", "column": "right", "section": section, "apply": "next-generation"}
+    return [
+        {"key": axis_key, "type": "select", "options": AXIS_OPTIONS, "default": AXIS_NONE,
+         "label": "종류", "order": base_order, "visible_when": when_xy,
+         "column": "right", "section": section, "apply": "next-generation"},
+        {"key": f"{prefix}_range", "default": DEFAULT_SETTINGS[f"{prefix}_range"],
+         "label": "값 범위", "placeholder": "시작,끝,간격 — 예: 5,7,1",
+         "help": "시작,끝,간격. 예: 5,7,1 → 5·6·7 세 값 = 3장",
+         "order": base_order + 1,
+         "visible_when": {"field": axis_key, "in": [AXIS_CFG, AXIS_RESCALE]}, **common},
+        {"key": f"{prefix}_samplers", "default": DEFAULT_SETTINGS[f"{prefix}_samplers"],
+         "label": "샘플러 목록", "placeholder": "k_euler, k_euler_ancestral, …",
+         "help": "쉼표로 구분 — 샘플러 1개당 1장",
+         "order": base_order + 2,
+         "visible_when": {"field": axis_key, "in": [AXIS_SAMPLER]}, **common},
+        {"key": f"{prefix}_emphasis", "default": DEFAULT_SETTINGS[f"{prefix}_emphasis"],
+         "label": "강조 사다리", "placeholder": "키워드,시작,끝,간격 — 예: smile,-1,2,1",
+         "help": "키워드를 정수 단계로 가중: 음수=[키워드] 약화 · 0=원본 · 양수={키워드} 강화. "
+                 "예: smile,-1,2,1 → [smile] / smile / {smile} / {{smile}} 4장",
+         "order": base_order + 3,
+         "visible_when": {"field": axis_key, "in": [AXIS_EMPHASIS]}, **common},
+        {"key": f"{prefix}_swap", "default": DEFAULT_SETTINGS[f"{prefix}_swap"],
+         "label": "키워드 스왑", "placeholder": "키워드,대체1,대체2 — ^는 콤마",
+         "help": "프롬프트 속 키워드를 각 대체값으로 바꿔 1장씩. 대체값 안의 '^'는 콤마로 치환. "
+                 "예: blue hair,red hair,blonde hair",
+         "order": base_order + 4,
+         "visible_when": {"field": axis_key, "in": [AXIS_SWAP]}, **common},
+    ]
+
+
 def register(ctx):
     ext = SeedFanout(ctx)
     ctx.subscribe("generation_request_dispatched", ext.on_generation_dispatched)
@@ -260,6 +313,7 @@ def register(ctx):
             fields=[
                 {"key": "feature", "type": "select", "options": [FEATURE_FANOUT, FEATURE_XY],
                  "default": FEATURE_FANOUT, "label": "모드", "order": 0,
+                 "apply": "next-generation",
                  "help": "Seed Fan-out=시드 변형 n장 · X/Y Plot=파라미터 그리드(인스턴트 이벤트)"},
                 {"key": "count", "type": "int", "min": 1, "max": MAX_TOTAL,
                  "default": DEFAULT_SETTINGS["count"], "label": "생성 수",
@@ -274,22 +328,10 @@ def register(ctx):
                  "help": "NAI 전용. 켜면 파생 장들이 지금 1회 전개한 캐릭터 스냅샷을 공유"
                          "(캐릭터 와일드카드 재롤 방지). 끄면 장마다 재전개",
                  "apply": "next-generation", "order": 3},
-                # ── X/Y Plot (복잡 모드 → 우측 칼럼) ──
-                {"key": "x_axis", "type": "select", "options": AXIS_OPTIONS, "default": AXIS_NONE,
-                 "label": "X 축", "column": "right", "section": "X/Y Plot", "order": 10,
-                 "apply": "next-generation", "visible_when": when_xy},
-                {"key": "x_args", "type": "text", "default": "", "label": "X 인자",
-                 "help": "CFG/Rescale: 시작,끝,간격 · Sampler: 콤마 목록 · "
-                         "강조: 키워드,시작,끝,간격 · 스왑: 키워드,대체1,대체2(^=콤마)",
-                 "column": "right", "section": "X/Y Plot", "order": 11,
-                 "apply": "next-generation", "visible_when": when_xy},
-                {"key": "y_axis", "type": "select", "options": AXIS_OPTIONS, "default": AXIS_NONE,
-                 "label": "Y 축", "column": "right", "section": "X/Y Plot", "order": 12,
-                 "apply": "next-generation", "visible_when": when_xy},
-                {"key": "y_args", "type": "text", "default": "", "label": "Y 인자",
-                 "column": "right", "section": "X/Y Plot", "order": 13,
-                 "apply": "next-generation", "visible_when": when_xy},
+                # ── X/Y Plot (복잡 모드 → 우측 칼럼, 축 종류별 입력칸 전환) ──
+                *_axis_fields("x", "X 축", 10, when_xy),
+                *_axis_fields("y", "Y 축", 20, when_xy),
             ],
             title="Seed Fan-out",
         )
-    ctx.log("ready — Seed Fan-out / X/Y Plot (Settings ▸ Extension 또는 퀵 버튼에서 조정)")
+    ctx.log("ready — Seed Fan-out / X/Y Plot (퀵 버튼 팝업에서 조정, 관리는 Settings ▸ Extension)")

@@ -16886,6 +16886,11 @@ body.detached-module .mod-grid-3 {
 }
 .ext-quick-popup .ext-fields { border-top: none; padding-top: 0; margin-top: 9px; }
 .ext-quick-popup.ext-quick-popup-wide { max-width: 620px; }
+/* 도움말 ⓘ 마커 + apply 집약 노트("다음 생성부터" 칩 반복 대체) */
+.ext-help-mark { color: var(--text-muted); cursor: help; font-size: 11px; }
+.ext-fields-note {
+  margin-top: 6px; font-size: 10px; color: var(--text-muted); text-align: right;
+}
 /* 2단 패널: 좌=모드/공통 설정, 우=복잡 모드 컨트롤(visible_when으로 등장) */
 .ext-fields-two-col { flex-direction: row; gap: 14px; align-items: flex-start; }
 .ext-fields-col { display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 0; }

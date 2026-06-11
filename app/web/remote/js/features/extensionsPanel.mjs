@@ -45,12 +45,12 @@ export function createExtensionsUi(deps) {
     return '';
   }
 
-  function fieldHtml(ext, field, idPrefix) {
+  function fieldHtml(ext, field, idPrefix, suppressApply) {
     if (field.type === 'action') return ''; // v1 예약 타입 — 렌더하지 않음
     const value = ext.settings && field.key in ext.settings ? ext.settings[field.key] : field.default;
     const fid = `${idPrefix}-${ext.id}-${field.key}`;
-    const help = field.help ? ` title="${escHtml(field.help)}"` : '';
     const common = `id="${fid}" data-ext="${escHtml(ext.id)}" data-field="${escHtml(field.key)}"`;
+    const ph = field.placeholder ? ` placeholder="${escHtml(field.placeholder)}"` : '';
     let input = '';
     if (field.type === 'bool') {
       input = `<input type="checkbox" ${common} ${value ? 'checked' : ''}>`;
@@ -58,20 +58,23 @@ export function createExtensionsUi(deps) {
       const min = field.min !== undefined ? ` min="${field.min}"` : '';
       const max = field.max !== undefined ? ` max="${field.max}"` : '';
       const step = field.step !== undefined ? ` step="${field.step}"` : (field.type === 'float' ? ' step="0.1"' : '');
-      input = `<input type="number" ${common}${min}${max}${step} value="${escHtml(String(value ?? ''))}">`;
+      input = `<input type="number" ${common}${min}${max}${step}${ph} value="${escHtml(String(value ?? ''))}">`;
     } else if (field.type === 'select') {
       const options = (field.options || []).map(opt =>
         `<option value="${escHtml(opt)}" ${String(value) === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('');
       input = `<select class="ext-select" ${common}>${options}</select>`;
     } else if (field.type === 'tags') {
       const text = Array.isArray(value) ? value.join(', ') : String(value ?? '');
-      input = `<input type="text" class="ext-field-wide" ${common} value="${escHtml(text)}" placeholder="쉼표로 구분">`;
+      input = `<input type="text" class="ext-field-wide" ${common} value="${escHtml(text)}"${ph || ' placeholder="쉼표로 구분"'}>`;
     } else { // text
-      input = `<input type="text" class="ext-field-wide" ${common} value="${escHtml(String(value ?? ''))}">`;
+      input = `<input type="text" class="ext-field-wide" ${common}${ph} value="${escHtml(String(value ?? ''))}">`;
     }
+    // 도움말은 숨은 row 툴팁 대신 라벨 옆 ⓘ 마커로 발견 가능하게.
+    const helpMark = field.help
+      ? ` <span class="ext-help-mark" title="${escHtml(field.help)}">ⓘ</span>` : '';
     const error = ext.field_errors && ext.field_errors[field.key]
       ? `<div class="ext-field-error">${escHtml(ext.field_errors[field.key])}</div>` : '';
-    return `<div class="ext-field"${help}><label for="${fid}">${escHtml(field.label)}${applyHint(field)}</label>${input}${error}</div>`;
+    return `<div class="ext-field"><label for="${fid}">${escHtml(field.label)}${helpMark}${suppressApply ? '' : applyHint(field)}</label>${input}${error}</div>`;
   }
 
   function fieldValue(ext, key) {
@@ -80,14 +83,21 @@ export function createExtensionsUi(deps) {
     return def ? def.default : undefined;
   }
 
-  function fieldVisible(ext, field) {
+  function fieldVisible(ext, field, seen) {
     const cond = field.visible_when;
     if (!cond || !cond.field) return true;
+    // 계단식: 컨트롤러 필드 자신이 숨어 있으면 종속 필드도 숨는다
+    // (예: 모드≠X/Y면 x_axis가 숨고, x_axis에 묶인 인자 칸들도 연쇄로 숨음).
+    const visited = seen || new Set();
+    if (visited.has(field.key)) return true; // 순환 선언 보호
+    visited.add(field.key);
+    const controller = (ext.panel?.fields || []).find(f => f.key === cond.field);
+    if (controller && !fieldVisible(ext, controller, visited)) return false;
     const current = String(fieldValue(ext, cond.field) ?? '');
     return (cond.in || []).map(String).includes(current);
   }
 
-  function columnHtml(ext, fields, idPrefix) {
+  function columnHtml(ext, fields, idPrefix, suppressApply) {
     let html = '';
     let section = null;
     for (const field of fields) {
@@ -95,10 +105,15 @@ export function createExtensionsUi(deps) {
         section = field.section || '';
         if (section) html += `<div class="ext-section">${escHtml(section)}</div>`;
       }
-      html += fieldHtml(ext, field, idPrefix);
+      html += fieldHtml(ext, field, idPrefix, suppressApply);
     }
     return html;
   }
+
+  const APPLY_NOTES = {
+    'next-generation': '변경은 다음 생성부터 적용됩니다',
+    'restart-required': '변경은 재시작 후 적용됩니다',
+  };
 
   function scopeOf(field) {
     return field.scope === 'global' ? 'global' : 'module';
@@ -110,17 +125,22 @@ export function createExtensionsUi(deps) {
     // 재렌더로 반영) → left/right 칼럼 분리. right가 있으면 2단(복잡 모드 패널).
     const visible = ext.panel.fields.filter(field =>
       field.type !== 'action' && scopeOf(field) === scope && fieldVisible(ext, field));
+    // 표시 필드의 apply가 모두 같으면 라벨마다 칩을 반복하지 않고 하단 1줄로 집약.
+    const applyModes = new Set(visible.map(field => field.apply || 'immediate'));
+    const uniformApply = applyModes.size === 1 ? [...applyModes][0] : '';
+    const suppressApply = Boolean(APPLY_NOTES[uniformApply]);
+    const note = suppressApply ? `<div class="ext-fields-note">${APPLY_NOTES[uniformApply]}</div>` : '';
     const left = visible.filter(field => field.column !== 'right');
     const right = visible.filter(field => field.column === 'right');
-    const leftHtml = columnHtml(ext, left, idPrefix);
-    const rightHtml = columnHtml(ext, right, idPrefix);
+    const leftHtml = columnHtml(ext, left, idPrefix, suppressApply);
+    const rightHtml = columnHtml(ext, right, idPrefix, suppressApply);
     if (!leftHtml && !rightHtml) return '';
     const disabled = !ext.active ? ' ext-fields-disabled' : '';
-    if (!rightHtml) return `<div class="ext-fields${disabled}">${leftHtml}</div>`;
+    if (!rightHtml) return `<div class="ext-fields${disabled}">${leftHtml}</div>${note}`;
     return `<div class="ext-fields ext-fields-two-col${disabled}">
       <div class="ext-fields-col">${leftHtml}</div>
       <div class="ext-fields-col ext-fields-col-right">${rightHtml}</div>
-    </div>`;
+    </div>${note}`;
   }
 
   function hasRightColumn(ext) {
@@ -380,8 +400,11 @@ export function createExtensionsUi(deps) {
       el.style.display = 'none';
       document.body.appendChild(el);
       document.addEventListener('mousedown', event => {
+        // customSelects 메뉴는 body 직속 오버레이 — 옵션 클릭을 외부클릭으로
+        // 오인해 팝업을 닫으면 안 된다(축 select 선택 시 창 닫힘 버그).
         if (el.style.display !== 'none' && !el.contains(event.target)
-            && !event.target.closest?.('.ext-tool-btn') && !event.target.closest?.('.ext-launcher-item')) {
+            && !event.target.closest?.('.ext-tool-btn') && !event.target.closest?.('.ext-launcher-item')
+            && !event.target.closest?.('.custom-select, .custom-select-menu')) {
           closeQuickPopup();
         }
       });

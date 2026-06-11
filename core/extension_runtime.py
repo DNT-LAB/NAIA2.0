@@ -168,8 +168,12 @@ def _normalize_panel_fields(fields: Any) -> list[dict[str, Any]]:
             "scope": "global" if str(raw.get("scope") or "") == "global" else "module",
             "_index": index,
         }
+        # 입력 예시/형식 안내(text/tags/number) — 렌더러가 placeholder 속성으로 표시.
+        if str(raw.get("placeholder") or "").strip():
+            entry["placeholder"] = str(raw.get("placeholder")).strip()
         # 조건부 표시: {"field": <다른 필드 key>, "in": [허용값...]} — 렌더러가 현재
-        # 설정값으로 평가한다(예: 모드 select 값에 따라 우측 패널 등장).
+        # 설정값으로 평가한다(예: 모드 select 값에 따라 우측 패널 등장). 컨트롤러
+        # 필드 자신이 숨으면 종속 필드도 계단식으로 숨는다(렌더러 구현).
         visible_when = raw.get("visible_when")
         if isinstance(visible_when, dict) and str(visible_when.get("field") or "").strip():
             allowed = visible_when.get("in")

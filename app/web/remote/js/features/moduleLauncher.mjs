@@ -592,8 +592,11 @@ export function createModuleLauncher({
       const extItem = event.target.closest('[data-ext-item]');
       if (extItem && root.contains(extItem)) {
         event.preventDefault();
+        // 메뉴를 닫으면 항목 rect가 0,0이 되므로 닫기 전에 캡처해서 넘긴다
+        // (퀵 팝업 앵커 포지셔닝용).
+        const anchorRect = extItem.getBoundingClientRect();
         closeMenus();
-        onExtensionItemClick?.(extItem.dataset.extItem, extItem);
+        onExtensionItemClick?.(extItem.dataset.extItem, anchorRect);
         return;
       }
       const moduleButton = event.target.closest('.module-btn[data-module]');

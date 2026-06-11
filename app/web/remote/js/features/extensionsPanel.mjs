@@ -8,12 +8,10 @@
 export function createExtensionsUi(deps) {
   const {document, escHtml, setModuleParam, showToast, requestState, setLauncherItems} = deps;
 
-  // 퀵 버튼 배치 선택지 — 도구바(독립 바) / 런처 카테고리 2종 / Fn 메뉴 / 없음.
+  // 퀵 버튼 배치 선택지 — 도구바(독립 바) / 자동화·고급 기능 카테고리 / 없음.
   const PLACEMENT_OPTIONS = [
     ['tools', '도구바 (Tools)'],
-    ['prompt_tools', '프롬프트 도구'],
     ['assistant_tools', '자동화 / 고급 기능'],
-    ['fn', 'Fn 메뉴'],
     ['none', '없음'],
   ];
 
@@ -312,38 +310,21 @@ export function createExtensionsUi(deps) {
         });
       }
     }
-    // 런처 카테고리(프롬프트 도구 / 자동화·고급 기능) 플라이아웃에 주입.
+    // 자동화·고급 기능 카테고리 플라이아웃에 주입. moduleLauncher는 메뉴를 닫기
+    // 전에 항목 rect를 캡처해 넘긴다(닫힌 뒤 측정하면 0,0 → 팝업이 좌상단행).
     if (typeof setLauncherItems === 'function') {
       setLauncherItems(
         items
-          .filter(ext => ext.placement === 'prompt_tools' || ext.placement === 'assistant_tools')
+          .filter(ext => ext.placement === 'assistant_tools')
           .map(ext => ({
             id: ext.id,
             label: ext.name || ext.id,
             title: ext.description || ext.name || ext.id,
-            category: ext.placement,
+            category: 'assistant_tools',
             enabled: ext.enabled,
           })),
         openQuickPopup,
       );
-    }
-    // Fn 메뉴: 정적 항목 뒤에 확장 항목 추가(자체 항목만 갈아끼움).
-    const fnMenu = document.getElementById('fnMenu');
-    if (fnMenu) {
-      fnMenu.querySelectorAll('.ext-fn-item').forEach(el => el.remove());
-      items.filter(ext => ext.placement === 'fn').forEach(ext => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'ext-fn-item';
-        btn.setAttribute('role', 'menuitem');
-        btn.dataset.ext = ext.id;
-        btn.innerHTML = `<span>🧩</span><span>${escHtml(ext.name || ext.id)}${ext.enabled ? '' : ' (꺼짐)'}</span>`;
-        btn.addEventListener('click', event => {
-          fnMenu.hidden = true;
-          openQuickPopup(ext.id, event.currentTarget);
-        });
-        fnMenu.appendChild(btn);
-      });
     }
   }
 
@@ -358,7 +339,7 @@ export function createExtensionsUi(deps) {
       document.body.appendChild(el);
       document.addEventListener('mousedown', event => {
         if (el.style.display !== 'none' && !el.contains(event.target)
-            && !event.target.closest?.('.ext-tool-btn') && !event.target.closest?.('.ext-fn-item')) {
+            && !event.target.closest?.('.ext-tool-btn') && !event.target.closest?.('.ext-launcher-item')) {
           closeQuickPopup();
         }
       });
@@ -366,14 +347,18 @@ export function createExtensionsUi(deps) {
     return el;
   }
 
-  function openQuickPopup(extId, anchor) {
+  function openQuickPopup(extId, anchorOrRect) {
     if (quickPopupId === extId && quickPopupEl().style.display !== 'none') {
       closeQuickPopup();
       return;
     }
+    // 앵커 엘리먼트는 직후 메뉴 닫힘 등으로 rect가 0이 될 수 있다 — 진입 즉시 확정.
+    const rect = anchorOrRect && typeof anchorOrRect.getBoundingClientRect === 'function'
+      ? anchorOrRect.getBoundingClientRect()
+      : anchorOrRect;
     quickPopupId = extId;
     renderQuickPopup();
-    positionQuickPopup(anchor);
+    positionQuickPopup(rect);
   }
 
   function closeQuickPopup() {
@@ -421,9 +406,12 @@ export function createExtensionsUi(deps) {
     restoreFocus(el, saved);
   }
 
-  function positionQuickPopup(anchor) {
+  function positionQuickPopup(anchorRect) {
     const el = quickPopupEl();
-    const rect = anchor?.getBoundingClientRect?.() || {left: 80, bottom: 80, top: 80};
+    // rect가 비정상(0,0 — 닫힌 메뉴에서 측정된 경우 등)이면 화면 좌중단 폴백.
+    const usable = anchorRect
+      && (anchorRect.width > 0 || anchorRect.height > 0 || anchorRect.left > 0 || anchorRect.top > 0);
+    const rect = usable ? anchorRect : {left: 80, bottom: 120, top: 120};
     // 일단 표시 후 실측으로 클램프(적정 사이즈 = 내용 기반, max-width는 CSS).
     const width = el.offsetWidth;
     const height = el.offsetHeight;

@@ -78,6 +78,111 @@ clone 하면 실행에 필요한 소스 **외에** maintainer용 빌드/릴리�
 
 ---
 
+## 🧩 Extensions (사용자 확장) — experimental
+
+NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가하는 공식 방법입니다.
+확장은 user-data 아래에 두므로 **앱을 업데이트해도 그대로 유지**됩니다.
+
+> ⚠️ **신뢰 경고**: 확장은 NAIA와 같은 프로세스에서 실행되는 임의의 Python 코드이며
+> 샌드박스가 없습니다. 생성 파이프라인과 API 토큰 등 자격증명에 접근할 수 있으므로,
+> **제작자를 신뢰할 수 있는 확장만** 설치하세요.
+
+### 설치 위치
+
+```
+<user-data>/extensions/<확장-id>/
+├── extension.json    # 매니페스트 (필수)
+├── main.py           # 진입점 — register(ctx) 함수를 export (필수)
+└── settings.json     # 확장별 설정 (선택)
+```
+
+`<user-data>` 위치: 설치형(A/B) = Windows `%APPDATA%\NAIA`, Portable(C) = `<설치 폴더>\user-data`.
+백엔드를 한 번 실행하면 `extensions/` 폴더가 자동 생성됩니다. 폴더에 확장을 넣고 **백엔드를 재시작**하면 로드됩니다.
+
+### extension.json
+
+```json
+{
+  "id": "my_extension",
+  "name": "My Extension",
+  "version": "1.0.0",
+  "naia_ext_api": 1,
+  "entry": "main.py"
+}
+```
+
+`naia_ext_api`는 호스트가 지원하는 확장 API 버전(현재 `1`)과 일치해야 하며, 불일치하면
+해당 확장만 비활성화되고 앱은 정상 부팅합니다.
+
+### main.py — 최소 예제
+
+```python
+def register(ctx):
+    # 1) 생성 요청 구독 (큐에 들어가는 모든 생성)
+    ctx.subscribe("generation_request_dispatched", on_dispatched)
+
+    # 2) 프롬프트 파이프라인 훅 (프롬프트를 직접 변조)
+    ctx.register_hook(MyHook())
+
+    ctx.log("loaded!")   # 콘솔에 [ext:my_extension] loaded!
+
+def on_dispatched(info):
+    if info.get("ext_origin"):       # 확장이 만든 파생 요청이면 무시 (무한 재귀 방지!)
+        return
+    seed = info["params"]["seed"]    # params = 읽기 전용 스냅샷
+    # 추가 생성을 큐에 넣기:
+    # ctx.enqueue_generation(prompt=..., overrides={"seed": seed + 1})
+
+class MyHook:
+    def get_pipeline_hook_info(self):
+        # hook_point: pre_processing | post_processing | after_wildcard | final_hookpoint
+        return {"target_pipeline": "PromptProcessor", "hook_point": "final_hookpoint", "priority": 100}
+    def execute_pipeline_hook(self, context):
+        context.postfix_tags.append("masterpiece")   # 태그 변조
+        return context                               # 반드시 context 반환
+```
+
+### ExtensionContext API (naia_ext_api = 1)
+
+`register(ctx)`로 전달되는 `ctx`의 공개 메서드가 **유일한 공식 표면**입니다.
+그 외 내부 모듈 import는 동작하더라도 다음 릴리즈에서 깨질 수 있습니다.
+
+| 메서드 | 설명 |
+|--------|------|
+| `ctx.subscribe(event, fn)` / `ctx.unsubscribe(event, fn)` | 이벤트 구독. 콜백 예외는 격리되며 연속 5회 실패 시 자동 음소거 |
+| `ctx.register_hook(hook)` | 프롬프트 파이프라인 훅 등록. priority < 100은 100으로 클램프(0~99 = 코어 예약) |
+| `ctx.enqueue_generation(prompt=, negative_prompt=, api_mode=, prompt_run_id=, priority=, overrides=, allow_chain=False)` | 생성 요청을 큐에 추가. 반환 `{ok, request_id, message}`. 파생 요청에는 `ext_origin`과 체인 깊이가 찍히며, **확장 파생 이벤트를 처리 중인 동안의 호출은 기본 차단**(확장 간 무한 연쇄 방지 — 의도적 체인은 `allow_chain=True`). 단 체인 깊이 4 초과는 `allow_chain`과 무관하게 무조건 거부 |
+| `ctx.load_settings(defaults)` / `ctx.save_settings(dict)` | `settings.json` 읽기(defaults 병합)/쓰기 |
+| `ctx.log(msg)` | `[ext:<id>]` 접두사 콘솔 로그 |
+| `ctx.ext_id` `ctx.name` `ctx.version` `ctx.ext_dir` `ctx.api_version` | 식별/경로 |
+
+**공식 이벤트 (v1)**:
+
+| 이벤트 | 페이로드 | 시점 |
+|--------|----------|------|
+| `generation_request_dispatched` | `request_id`, `prompt_run_id`, `api_mode`, `priority`, `source`(명령 type — 메인 Generate 버튼 = `"generate"`), `ext_origin`(확장 파생 요청이면 그 확장 id), `ext_chain_depth`(파생 체인 깊이, 사용자 요청=0), `params`(자격증명·내부 키 제외 **안전 사본** — 변조해도 실 요청에 반영되지 않음) | 생성 요청이 큐에 들어갈 때 |
+| `generation_result_available` | `request_id`, `prompt_run_id`, `api_mode`, `ext_origin`, `ext_chain_depth`(dispatched와 동일한 파생 lineage) | 생성 1장이 완료·저장될 때 |
+| `prompt_generated` | PromptContext | 랜덤 프롬프트 파이프라인 완료 시 |
+
+이외 이벤트도 수신되지만 이름/페이로드의 안정성은 보장하지 않습니다.
+
+### 샘플: Seed Fan-out
+
+[`release_assets/samples/extensions/seed_fanout/`](release_assets/samples/extensions/seed_fanout/)
+— Generate 버튼을 누르면 **동일 프롬프트에서 시드만 바꾼 변형 n장**(Random / +1 / -1 방식)을
+큐에 추가하는 완전한 예제입니다. 폴더를 `<user-data>/extensions/`로 복사하고 재시작하면
+바로 동작하며, `settings.json`으로 장수/방식을 조정합니다(재시작 불필요).
+구독·재귀 가드·enqueue·설정 영속까지 확장 API 전체를 시연하므로 새 확장의 출발점으로 쓰세요.
+
+### 관리/문제해결
+
+- **끄기(개별)**: `<user-data>/config/extensions.json`에 `{"disabled": ["확장id"]}`
+- **끄기(전체)**: 환경변수 `NAIA_DISABLE_EXTENSIONS=1`
+- **로그**: 확장 로드/오류는 백엔드 콘솔에 `Remote Web: extension ...` / `[ext:<id>] ...`로 출력
+- 깨진 확장은 **그 확장만** 비활성화되고 부팅·생성은 계속됩니다(per-extension 격리)
+
+---
+
 ## 더 읽어보기
 
 - 레이아웃·런타임 경계 정책: [`PROJECT_LAYOUT_POLICY.md`](PROJECT_LAYOUT_POLICY.md)

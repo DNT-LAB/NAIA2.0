@@ -19,6 +19,7 @@ from core.event_stream_vibe import (
     EVENT_STREAM_VIBE_MARKER_KEY,
     strip_event_stream_vibe_params,
 )
+from core.extension_runtime import ext_lineage_fields
 from core.generation_request import (
     GenerationRequest,
     NAICharacterData,
@@ -61,6 +62,50 @@ DERIVED_GENERATION_PARAM_KEYS = (
     "cfg_rescale",
     "negative_prompt",
 )
+
+
+def _safe_str(value: Any) -> str:
+    try:
+        return str(value)
+    except (SystemExit, Exception):
+        return "<unrepresentable>"
+
+
+def _safe_repr(value: Any) -> str:
+    try:
+        return repr(value)
+    except (SystemExit, Exception):
+        return "<unrepresentable>"
+
+
+def _event_safe_copy(value: Any, _depth: int = 0) -> Any:
+    """dispatched 이벤트에 싣는 params 값의 fail-closed **무예외** 재귀 안전 사본.
+
+    dict/list/tuple/set은 새 컨테이너로 재구성하고, 불변 스칼라는 그대로 통과,
+    bytes는 불변 사본, 그 외 알 수 없는 타입은 **참조 대신 repr 문자열**로
+    대체한다 — deepcopy 실패 폴백으로 원본 컨테이너가 노출되는 구멍을 없앤다
+    (구독자가 무엇을 변조해도 실행 대기 중인 GenerationRequest.params에 절대
+    닿지 않는다). 전체가 try로 감싸여 있어 적대적 컨테이너(items()/iteration/
+    __str__이 예외를 던지는 서브클래스)도 사본 구성을 터뜨리지 못한다 — 요청이
+    이미 큐에 들어간 뒤의 publish가 누락되는 split-brain을 차단한다.
+    """
+    try:
+        if _depth > 6:
+            return _safe_repr(value)
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {
+                _safe_str(key): _event_safe_copy(item, _depth + 1)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [_event_safe_copy(item, _depth + 1) for item in value]
+        if isinstance(value, (bytes, bytearray)):
+            return bytes(value)
+        return _safe_repr(value)
+    except (SystemExit, Exception):
+        return "<unrepresentable>"
 
 
 @dataclass
@@ -173,24 +218,56 @@ class HeadlessGenerationService:
         self.context.last_generation_request = request
         self.context.last_generation_params = params
         if prompt_run_id:
-            linker = getattr(self.context, "link_generation_to_prompt_run", None)
-            if callable(linker):
-                linker(prompt_run_id, request.request_id)
-            derived_recorder = getattr(self.context, "record_prompt_run_derived", None)
-            if callable(derived_recorder):
-                derived_recorder(
-                    prompt_run_id,
-                    {
-                        "generation_request_id": request.request_id,
-                        "generation_params": self._derived_generation_params(params),
-                    },
+            # 큐 삽입 이후~dispatched 발행 이전의 비치명 부수효과(런 연결/파생 기록)는
+            # 격리한다 — 여기서 예외가 새면 요청은 큐에 있는데 dispatched 이벤트만
+            # 누락되는 split-brain이 된다(이벤트를 계약으로 쓰는 확장이 요청을 영영
+            # 못 보고, 호출자 재시도 시 중복 enqueue 위험).
+            try:
+                linker = getattr(self.context, "link_generation_to_prompt_run", None)
+                if callable(linker):
+                    linker(prompt_run_id, request.request_id)
+                derived_recorder = getattr(self.context, "record_prompt_run_derived", None)
+                if callable(derived_recorder):
+                    derived_recorder(
+                        prompt_run_id,
+                        {
+                            "generation_request_id": request.request_id,
+                            "generation_params": self._derived_generation_params(params),
+                        },
+                    )
+            except Exception as exc:
+                print(
+                    "Headless Remote: prompt run linkage failed (request still queued) - "
+                    f"{_safe_repr(exc)}",
+                    flush=True,
                 )
+        # Extension 표면(v1): source=명령 type(버튼 generate/depth_generate/프리셋 경로
+        # 구분), ext_origin=확장이 enqueue_generation으로 만든 파생 요청 식별(재귀 가드),
+        # params=자격증명·내부(_*) 키를 제외한 읽기 전용 스냅샷(값은 원본 참조 공유 —
+        # 구독자는 변조 금지).
+        # 구독자(확장)가 중첩 컨테이너를 변조해 실행 대기 중인 요청 params를
+        # 오염시키지 못하도록 fail-closed 안전 사본을 발행한다(원본 컨테이너
+        # 참조는 어떤 경우에도 이벤트에 실리지 않는다). 키 문자열화도 무예외
+        # 경로(_safe_str)로 — __str__이 던지는 적대적 키가 스냅샷 구성을 터뜨려
+        # enqueue 이후의 publish를 누락시키지 않게 한다.
+        event_params = {}
+        for key, value in params.items():
+            safe_key = _safe_str(key)
+            if safe_key == "credential" or safe_key.startswith("_"):
+                continue
+            event_params[safe_key] = _event_safe_copy(value)
+        # source도 무예외 경로로 — 적대적 command type(__str__/__bool__ raising)이
+        # enqueue 이후의 publish를 누락시키지 않게 한다.
+        raw_source = command.get("type")
         self.context.publish("generation_request_dispatched", {
             "request_id": request.request_id,
             "generation_request_id": request.request_id,
             "prompt_run_id": prompt_run_id,
             "api_mode": api_mode,
             "priority": priority,
+            "source": _safe_str(raw_source) if raw_source is not None else "",
+            **ext_lineage_fields(params),
+            "params": event_params,
         })
         print(
             "Headless Remote: generation request queued "
@@ -246,11 +323,15 @@ class HeadlessGenerationService:
         api_result["source_row"] = request.source_row
         stored = self.context.result_store.add_api_result(api_result, request)
         request.mark_completed()
+        # ext_origin/ext_chain_depth: dispatched와 동일한 lineage를 결과 이벤트에도
+        # 싣는다 — 확장이 자기 파생 요청의 "결과"를 구독해 재-enqueue하는 경로가
+        # 깊이 추적을 우회(매번 depth 1로 초기화)해 무한 연쇄가 되는 것을 막는다.
         self.context.publish("generation_result_available", {
             "request_id": request.request_id,
             "generation_request_id": request.request_id,
             "prompt_run_id": str(getattr(request, "prompt_run_id", "") or params.get("prompt_run_id") or ""),
             "api_mode": params.get("api_mode", ""),
+            **ext_lineage_fields(params),
         })
         print(
             "Headless Remote: generation completed "
@@ -359,6 +440,15 @@ class HeadlessGenerationService:
 
         overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else {}
         params.update(overrides)
+
+        # 확장 lineage 키의 신뢰된 발급자는 ExtensionContext.enqueue_generation뿐이다.
+        # 다른 ingress(프론트/외부 브릿지)가 보낸 _ext_* 값은 여기서 안전 형태로
+        # 강제 변환해, 이후 publish/체인 캡 로직이 예외나 캡 우회를 겪지 않게 한다
+        # (형식이 깨진 깊이는 상한으로 간주 = fail-closed).
+        if "_ext_origin" in params or "_ext_chain_depth" in params:
+            lineage = ext_lineage_fields(params)
+            params["_ext_origin"] = lineage["ext_origin"]
+            params["_ext_chain_depth"] = lineage["ext_chain_depth"]
 
         # Seed Fix가 꺼져 있으면, 이 요청(overrides)이 시드를 명시하지 않는 한 직전
         # 생성이 remote_params/스키마에 남긴 구체 시드를 재사용하지 않도록 리셋한다 —

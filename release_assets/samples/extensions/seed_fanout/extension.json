@@ -1,0 +1,7 @@
+{
+  "id": "seed_fanout",
+  "name": "Seed Fan-out",
+  "version": "1.0.0",
+  "naia_ext_api": 1,
+  "entry": "main.py"
+}

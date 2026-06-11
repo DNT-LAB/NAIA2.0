@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from app.backend.server.autocomplete_commands import ensure_tag_search_index
 from app.backend.server.generation_commands import random_service
 from app.backend.server.search_runtime import save_runner_parquet
+from core.extension_runtime import load_extensions
 from core.web_session_context import WebSessionContext
 
 
@@ -18,6 +19,13 @@ RunInThread = Callable[..., Awaitable[Any]]
 def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunInThread):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # 사용자 확장 로드(user-data/extensions). 워밍업 프롬프트에도 확장 훅이
+        # 적용되도록 warmup 태스크 생성 전에 동기 로드한다. 개별 확장 실패는
+        # 내부에서 격리되며, 이 try는 로더 자체 결함이 부팅을 막는 것만 방지한다.
+        try:
+            load_extensions(context)
+        except Exception as exc:
+            print(f"Headless Remote: extension load skipped - {exc}", flush=True)
         task = getattr(context, "headless_random_warmup_task", None)
         if task is None or task.done():
             context.headless_random_warmup_task = asyncio.create_task(_run_random_warmup(context, run_in_thread))

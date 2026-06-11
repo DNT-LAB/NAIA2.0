@@ -10,6 +10,7 @@
 from collections import deque
 from threading import Lock
 from typing import Optional, List, Deque
+from core.extension_runtime import _safe_error_text, ext_lineage_fields
 from core.generation_request import GenerationRequest
 
 
@@ -51,14 +52,17 @@ class GenerationQueueManager:
             # 큐 크기 계산
             queue_size = len(self._queue)
 
-        # 이벤트 발행 (Lock 외부에서)
+        # 이벤트 발행 (Lock 외부에서). 확장 lineage(ext_origin/ext_chain_depth)를
+        # 함께 실어, 확장이 큐 이벤트 경유로 재-enqueue해도 체인 깊이 추적이
+        # 끊기지 않게 한다(dispatched/result 이벤트와 동일 계약).
         self._publish_queue_event("request_enqueued", {
             "request_id": request_id,
             "generation_request_id": request_id,
             "prompt_run_id": getattr(request, "prompt_run_id", ""),
             "priority": request.priority,
             "queue_size": queue_size,
-            "position": "back"
+            "position": "back",
+            **ext_lineage_fields(getattr(request, "params", None)),
         })
 
         print(f"[QUEUE] 요청 추가: {request_id[:8]}... (큐 크기: {queue_size})")
@@ -99,14 +103,15 @@ class GenerationQueueManager:
             request_id = request.request_id
             queue_size = len(self._queue)
 
-        # 이벤트 발행
+        # 이벤트 발행 (확장 lineage 동봉 — enqueue_request와 동일 계약)
         self._publish_queue_event("request_enqueued", {
             "request_id": request_id,
             "generation_request_id": request_id,
             "prompt_run_id": getattr(request, "prompt_run_id", ""),
             "priority": request.priority,
             "queue_size": queue_size,
-            "position": position
+            "position": position,
+            **ext_lineage_fields(getattr(request, "params", None)),
         })
 
         priority_text = "긴급" if request.priority > 0 else "일반"
@@ -134,13 +139,14 @@ class GenerationQueueManager:
             request = self._queue.popleft()
             queue_size = len(self._queue)
 
-        # 이벤트 발행
+        # 이벤트 발행 (확장 lineage 동봉)
         self._publish_queue_event("request_dequeued", {
             "request_id": request.request_id,
             "generation_request_id": request.request_id,
             "prompt_run_id": getattr(request, "prompt_run_id", ""),
             "priority": request.priority,
-            "queue_size": queue_size
+            "queue_size": queue_size,
+            **ext_lineage_fields(getattr(request, "params", None)),
         })
 
         print(f"[QUEUE] 요청 가져옴: {request.request_id[:8]}... (남은 큐: {queue_size})")
@@ -240,11 +246,13 @@ class GenerationQueueManager:
             성공 여부 (True/False)
         """
         removed = False
+        removed_request = None
         queue_size = 0
 
         with self._queue_lock:
             for i, request in enumerate(self._queue):
                 if request.request_id == request_id:
+                    removed_request = request
                     del self._queue[i]
                     queue_size = len(self._queue)
                     removed = True
@@ -255,7 +263,8 @@ class GenerationQueueManager:
 
         self._publish_queue_event("request_removed", {
             "request_id": request_id,
-            "queue_size": queue_size
+            "queue_size": queue_size,
+            **ext_lineage_fields(getattr(removed_request, "params", None)),
         })
 
         print(f"[QUEUE] 요청 제거: {request_id[:8]}... (남은 큐: {queue_size})")
@@ -295,7 +304,12 @@ class GenerationQueueManager:
             try:
                 self.app_context.publish(f"queue_{event_name}", data)
             except Exception as e:
-                print(f"[QUEUE] 이벤트 발행 실패: {e}")
+                # 로깅까지 무예외 — __str__이 던지는 예외 객체가 여기서 다시 터지면
+                # 큐 삽입 이후의 enqueue 흐름(dispatched 발행 포함)이 끊긴다.
+                try:
+                    print(f"[QUEUE] 이벤트 발행 실패: {_safe_error_text(e)}")
+                except Exception:
+                    pass
 
     def __repr__(self):
         """문자열 표현"""

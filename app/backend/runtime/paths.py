@@ -25,6 +25,7 @@ WRITABLE_DIR_NAMES = (
     "logs",
     "output",
     "wildcards",
+    "extensions",
 )
 
 SOURCE_BOOTSTRAP_PATHS = (
@@ -144,6 +145,10 @@ class RuntimePaths:
     @property
     def wildcards_dir(self) -> Path:
         return self.writable_dir("wildcards")
+
+    @property
+    def extensions_dir(self) -> Path:
+        return self.writable_dir("extensions")
 
     def ensure_writable_dirs(self, names: Iterable[str] | None = None) -> None:
         for name in names or WRITABLE_DIR_NAMES:

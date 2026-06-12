@@ -109,6 +109,32 @@ def _wrap_emphasis(keyword, weight, api_mode):
     return f"({keyword}:{weight:g})"
 
 
+def _find_tag_span(prompt, phrase):
+    """태그 경계 정렬 매칭 — phrase(쉼표 태그 시퀀스)가 prompt의 태그 경계에서
+    연속으로 정확히 일치하는 **첫 위치**의 문자 구간 (start, end)을 돌려준다.
+    없으면 None.
+
+    단순 substring 치환의 함정을 막는다: prompt가 "bitter smile, closed mouth,
+    smile"일 때 phrase "smile"은 "bitter smile" 안의 부분 문자열이 아니라
+    **독립 태그 smile**(세 번째)에 매칭된다. 치환은 prompt[start:end]만 바꾸므로
+    주변 공백/서식은 원형 그대로 보존된다."""
+    targets = [part.strip() for part in str(phrase or "").split(",") if part.strip()]
+    if not targets:
+        return None
+    text = str(prompt or "")
+    segments = []  # (stripped_tag, content_start, content_end)
+    pos = 0
+    for part in text.split(","):
+        stripped = part.strip()
+        start = pos + (len(part) - len(part.lstrip()))
+        segments.append((stripped, start, start + len(stripped)))
+        pos += len(part) + 1  # ',' 포함
+    for index in range(len(segments) - len(targets) + 1):
+        if all(segments[index + offset][0] == targets[offset] for offset in range(len(targets))):
+            return segments[index][1], segments[index + len(targets) - 1][2]
+    return None
+
+
 class SeedFanout:
     def __init__(self, ctx):
         self.ctx = ctx
@@ -220,16 +246,18 @@ class SeedFanout:
             self.ctx.log(f"X/Y Plot: 조합 {len(combos)}개 → 상한 {MAX_GRID}개로 절단")
             combos = combos[:MAX_GRID]
 
-        # 프롬프트 치환 축의 시작/원본 프롬프트가 실제 프롬프트에 있는지 선검증
-        # — 없으면 토스트로 안내하고 전체 중단(원본 1장은 그대로 생성).
+        # 프롬프트 치환 축의 시작/원본 프롬프트가 실제 프롬프트에 **태그 경계로**
+        # 존재하는지 선검증 — 없으면 토스트로 안내하고 전체 중단(원본만 생성).
+        # substring이 아니라 태그 시퀀스 매칭이다: "smile"은 "bitter smile" 안이
+        # 아니라 독립 태그 smile에만 매칭된다.
         base_prompt = str(params.get("input") or "")
         for axis_values in (x_values, y_values):
             for item in axis_values:
                 if item is None or item[0] != "prompt":
                     continue
                 keyword = item[1][0]
-                if keyword and keyword not in base_prompt:
-                    self._toast(f'"{keyword}" — 시작 프롬프트가 프롬프트에 없습니다')
+                if keyword and _find_tag_span(base_prompt, keyword) is None:
+                    self._toast(f'"{keyword}" — 시작 프롬프트가 프롬프트에 없습니다(태그 단위 일치 기준)')
                     return
                 break  # 축의 키워드는 동일 — 첫 항목만 보면 충분
 
@@ -253,11 +281,12 @@ class SeedFanout:
                     overrides[payload[0]] = payload[1]
                 elif kind == "prompt":
                     keyword, replacement = payload
-                    if keyword not in prompt:
-                        self.ctx.log(f"X/Y Plot: 프롬프트에 '{keyword}'가 없어 건너뜀")
+                    span = _find_tag_span(prompt, keyword)
+                    if span is None:
+                        self.ctx.log(f"X/Y Plot: 프롬프트에 태그 '{keyword}'가 없어 건너뜀")
                         ok = False
                         break
-                    prompt = prompt.replace(keyword, replacement, 1)
+                    prompt = prompt[:span[0]] + replacement + prompt[span[1]:]
             if ok:
                 cells.append((overrides, prompt, index % cols, index // cols))
         if not cells:
@@ -530,8 +559,9 @@ def _axis_fields(prefix, section, base_order, when_xy, samplers):
          "visible_when": {"field": axis_key, "in": [AXIS_SAMPLER]}, **common},
         # ── 강조 사다리: 원본 프롬프트(쉼표 허용) + 시작/스텝/종료 — 전부 필수 ──
         {"key": f"{prefix}_emph_target", "type": "text", "multiline": True, "default": "",
-         "label": "원본 프롬프트", "placeholder": "정확 매칭 — 쉼표 포함 긴 구문 가능",
-         "help": "프롬프트 창에 정확히 존재하는 구간을 그대로 입력(쉼표 포함 긴 구문 가능). "
+         "label": "원본 프롬프트", "placeholder": "태그 단위 정확 매칭 — 쉼표 포함 긴 구문 가능",
+         "help": "프롬프트 창에 존재하는 태그(시퀀스)를 그대로 입력 — 매칭은 태그 경계 기준"
+                 "(smile은 bitter smile 안이 아니라 독립 태그 smile에만 일치). "
                  "이 구간에 가중을 입혀 1장씩 생성 — 문법은 모드 자동(NAI w::…::, 로컬 (…:w))",
          "order": base_order + 3, "visible_when": when_emph, **common},
         {"key": f"{prefix}_emph_start", "type": "float", "default": 0.6, "step": 0.1,
@@ -542,8 +572,9 @@ def _axis_fields(prefix, section, base_order, when_xy, samplers):
          "label": "종료 가중치", "order": base_order + 6, "visible_when": when_emph, **common},
         # ── 프롬프트 스왑: 3번째 칼럼(extra) 빌더 ──
         {"key": f"{prefix}_swap_base", "type": "text", "multiline": True, "default": "",
-         "label": "시작 프롬프트", "placeholder": "프롬프트 창에 정확히 존재해야 함 — 쉼표 포함 긴 구문 가능",
-         "help": "프롬프트 창의 이 구간을 아래 Step들로 바꿔 1장씩 생성. "
+         "label": "시작 프롬프트", "placeholder": "프롬프트 창에 존재하는 태그(시퀀스) — 쉼표 포함 긴 구문 가능",
+         "help": "프롬프트 창의 이 구간을 아래 Step들로 바꿔 1장씩 생성. 매칭은 태그 경계 기준"
+                 "(smile은 bitter smile 안이 아니라 독립 태그 smile에만 일치). "
                  "프롬프트에 없으면 토스트로 안내하고 중단",
          "column": "extra", "section": f"{section} · 프롬프트 스왑", "apply": "next-generation",
          "order": base_order + 7, "visible_when": when_swap},

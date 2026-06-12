@@ -149,7 +149,9 @@ NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가�
   WEBUI/ComfyUI `(키워드:w)`) / `프롬프트 스왑`(키워드를 대체값들로 치환,
   `^`=콤마). 두 축을 조합하면 Generate 1회로 그리드 전체가 **동일 시드**로 큐에
   쌓입니다(상한 32장). **원본 요청은 자동 취소되어 정확히 그리드 장수만
-  생성됩니다.**
+  생성됩니다.** **그리드 합성 저장**(기본 ON)을 켜두면 전 셀 완료 시 축 라벨이
+  붙은 **n×m 합성 PNG**가 저장 폴더의 `grid/` 아래 생성되며, "Grid 폴더 열기"
+  버튼으로 바로 열 수 있습니다.
 - 공통 **캐릭터 프롬프트 고정**(NAI): 켜면 묶음 전체(원본 포함)가 지금 1회
   전개된 캐릭터 스냅샷을 공유합니다(캐릭터 와일드카드 재롤 방지) — Seed
   Fan-out에서는 원본을 취소·대체해 총 N장이 전부 같은 캐릭터가 됩니다.
@@ -208,10 +210,12 @@ class MyHook:
 |--------|------|
 | `ctx.subscribe(event, fn)` / `ctx.unsubscribe(event, fn)` | 이벤트 구독. 콜백 예외는 격리되며 연속 5회 실패 시 자동 음소거 |
 | `ctx.register_hook(hook)` | 프롬프트 파이프라인 훅 등록. priority < 100은 100으로 클램프(0~99 = 코어 예약) |
-| `ctx.register_panel(fields=[...], title=)` | **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags (+action 예약), label, default, min/max/step, options, help, section, order, apply: immediate/next-generation/restart-required, scope: module/global, column: left/right, visible_when: {field, in: [...]}}`. **scope가 노출 위치를 결정**: `"module"`(기본)=퀵 버튼 팝업(실제 동작 설정), `"global"`=Settings ▸ Extension 행(전역 설정 — 저장 경로 등). `column:"right"` 필드가 표시되면 **2단**으로 펼쳐지고, `visible_when`으로 모드별 조건부 표시(예: 복잡 모드 선택 시 우측 패널 등장). 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
+| `ctx.register_panel(fields=[...], title=, on_action=)` | **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags/action, label, default, min/max/step, options, help, placeholder, section, order, apply: immediate/next-generation/restart-required, scope: module/global, column: left/right, visible_when: {field, in: [...]}}`. **scope가 노출 위치를 결정**: `"module"`(기본)=퀵 버튼 팝업(실제 동작 설정), `"global"`=Settings ▸ Extension 행(전역 설정 — 저장 경로 등). `column:"right"` 필드가 표시되면 **2단**으로 펼쳐지고, `visible_when`으로 모드별 조건부 표시. `type:"action"`은 **버튼**으로 렌더 — 클릭 시 `on_action(key)` 호출(설정 저장 없음, 예외 격리). 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
 | `ctx.resolve_nai_characters()` | 현재 NAI 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷 `{characters, uc, character_positions}` 또는 None. overrides에 실으면 그 요청은 늦은 바인딩(매장 재전개) 대신 스냅샷 사용 — 변형 묶음의 캐릭터 고정용 |
 | `ctx.enqueue_generation(prompt=, negative_prompt=, api_mode=, prompt_run_id=, priority=, overrides=, allow_chain=False)` | 생성 요청을 큐에 추가. 반환 `{ok, request_id, message}`. 파생 요청에는 `ext_origin`과 체인 깊이가 찍히며, **확장 파생 이벤트를 처리 중인 동안의 호출은 기본 차단**(확장 간 무한 연쇄 방지 — 의도적 체인은 `allow_chain=True`). 단 체인 깊이 4 초과는 `allow_chain`과 무관하게 무조건 거부 |
 | `ctx.cancel_generation(request_id)` | **대기(pending) 중인** 생성 요청을 큐에서 제거 → `{ok, message}`. 이미 시작/완료된 요청은 실패(ok=False). 용례: 그리드형 확장이 반응한 원본 요청을 파생 묶음으로 대체(X/Y Plot의 "그리드만 생성") — dispatched 콜백 안에서의 취소는 원본 실행 전에 결정적으로 적용 |
+| `ctx.get_result_image(request_id)` | 완료된 요청의 이미지 조회 → `{ok, image(PIL 사본), file_path, message}`. `generation_result_available` 콜백에서 이벤트의 request_id로 호출하는 패턴(저장 경로는 비동기라 ""일 수 있음 — 이미지는 항상 메모리에 있음). 용례: X/Y 그리드 합성 |
+| `ctx.get_save_directory()` | 현재 세션의 자동 저장 디렉터리 경로(str). 확장 산출물(그리드 PNG 등)을 사용자 저장 폴더 곁에 두는 용도 |
 | `ctx.load_settings(defaults)` / `ctx.save_settings(dict)` | `settings.json` 읽기(defaults 병합)/쓰기 |
 | `ctx.log(msg)` | `[ext:<id>]` 접두사 콘솔 로그 |
 | `ctx.ext_id` `ctx.name` `ctx.version` `ctx.ext_dir` `ctx.api_version` | 식별/경로 |

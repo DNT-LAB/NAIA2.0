@@ -12,6 +12,9 @@ Generate 버튼 1회로 여러 장을 큐에 넣는 확장. 두 가지 모드(NA
   범위 "시작,끝,간격") / Sampler("auto"=현재 모드 표준 목록 자동) /
   프롬프트 강조(가중 사다리 — **모드별 문법 자동**: NAI(NAID4/4.5)는
   ``w::키워드::``, WEBUI/COMFYUI는 ``(키워드:w)``) / 프롬프트 스왑(키워드 치환).
+  **그리드 합성 저장**(기본 ON): 전 셀 완료 시 축 라벨이 붙은 n×m 합성 PNG를
+  저장 폴더의 ``grid/`` 아래 생성(NAIA 1.5 인스턴트 이벤트의 그리드 이미지).
+  "Grid 폴더 열기" 버튼(action 필드)으로 바로 연다.
 
 공통: **캐릭터 프롬프트 고정**(NAI) — 켜면 fan-out 시점에 캐릭터 설정을 1회
 전개한 스냅샷을 묶음 전체가 공유한다(캐릭터 와일드카드 재롤 방지). Seed
@@ -27,11 +30,18 @@ enqueue_generation overrides(시드/CFG/샘플러/캐릭터 스냅샷), ext_orig
 가드, settings.json 라이브 리로드.
 """
 
+import os
 import random
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
 
 SEED_SPACE = 10_000_000_000  # 코어 정규화의 randint(0, 9_999_999_999)와 동일 공간
 MAX_TOTAL = 16               # Seed Fan-out 모드 총 장수 상한(원본 포함)
 MAX_GRID = 32                # X/Y Plot 그리드 상한(폭주 방지)
+MAX_PENDING_GRIDS = 3        # 동시 추적 그리드 배치 상한(실패 셀 잔존 대비 GC)
 
 FEATURE_FANOUT = "Seed Fan-out"
 FEATURE_XY = "X/Y Plot"
@@ -48,6 +58,7 @@ DEFAULT_SETTINGS = {
     "count": 3,
     "mode": "+1",
     "char_fix": False,
+    "make_grid": True,
     "x_axis": AXIS_NONE,
     "x_range": "5,7,1",
     "x_samplers": "auto",
@@ -123,6 +134,10 @@ def _swap_values(args_text):
 class SeedFanout:
     def __init__(self, ctx):
         self.ctx = ctx
+        # X/Y 그리드 합성 추적: [{ids: {request_id: (col,row)}, cols, rows,
+        #  x_labels, y_labels, images: {(col,row): PIL}, expected: set}]
+        self._grid_batches = []
+        self._grid_lock = threading.Lock()
 
     # ── 진입점: 모든 큐 삽입 구독 ────────────────────────────────
     def on_generation_dispatched(self, info):
@@ -221,8 +236,9 @@ class SeedFanout:
         # 취소한다 — X/Y Plot은 "그리드만" 생성한다(원본까지 N+1장 생성 방지).
         # 전 셀이 무효(키워드 부재 등)면 원본을 건드리지 않는다.
         base_prompt = str(params.get("input") or "")
+        cols = len(x_values)
         cells = []
-        for x_value, y_value in combos:
+        for index, (x_value, y_value) in enumerate(combos):
             overrides = {"seed": base_seed, **char_overrides}
             prompt = base_prompt
             ok = True
@@ -240,17 +256,145 @@ class SeedFanout:
                         break
                     prompt = prompt.replace(keyword, replacement, 1)
             if ok:
-                cells.append((overrides, prompt))
+                cells.append((overrides, prompt, index % cols, index // cols))
         if not cells:
             self.ctx.log("X/Y Plot: 유효한 조합이 없어 원본만 생성합니다")
             return
         cancelled = self.ctx.cancel_generation(info.get("request_id")).get("ok", False)
         queued = 0
-        for overrides, prompt in cells:
+        id_map = {}
+        for overrides, prompt, col, row in cells:
             result = self._enqueue_clone(info, params, overrides, prompt=prompt)
-            queued += 1 if result.get("ok") else 0
+            if result.get("ok"):
+                queued += 1
+                if result.get("request_id"):
+                    id_map[result["request_id"]] = (col, row)
         origin_note = "원본 취소, 그리드만" if cancelled else "원본 유지(취소 실패)"
         self.ctx.log(f"X/Y Plot: {queued}/{len(cells)}장 큐 추가 ({origin_note}, seed={base_seed} 고정)")
+
+        # n×m 합성 이미지: 전 셀 완료 시 grid/ 폴더에 저장(설정으로 끌 수 있음).
+        if settings.get("make_grid") and id_map:
+            batch = {
+                "ids": id_map,
+                "cols": cols,
+                "rows": len(y_values),
+                "x_labels": [self._axis_label(value) for value in x_values],
+                "y_labels": [self._axis_label(value) for value in y_values],
+                "images": {},
+                "expected": set(id_map.keys()),
+            }
+            with self._grid_lock:
+                self._grid_batches.append(batch)
+                while len(self._grid_batches) > MAX_PENDING_GRIDS:
+                    dropped = self._grid_batches.pop(0)
+                    self.ctx.log(f"그리드 추적 GC: 미완료 배치 폐기({len(dropped['expected'])}셀 미수신)")
+
+    @staticmethod
+    def _axis_label(value):
+        if value is None:
+            return ""
+        kind, payload = value
+        if kind == "param":
+            key, raw = payload
+            prefix = {"cfg_scale": "CFG", "cfg_rescale": "Rescale", "sampler": ""}.get(key, key)
+            text = raw if isinstance(raw, str) else f"{raw:g}"
+            return f"{prefix} {text}".strip()
+        return str(payload[1])  # prompt 축: 치환 문자열 그대로
+
+    # ── 그리드 합성: 결과 이벤트 수집 → 전 셀 완료 시 PNG 저장 ──
+    def on_generation_result(self, info):
+        if not isinstance(info, dict):
+            return
+        rid = str(info.get("request_id") or "")
+        if not rid:
+            return
+        with self._grid_lock:
+            batch = next((item for item in self._grid_batches if rid in item["expected"]), None)
+        if batch is None:
+            return  # 우리 그리드 셀이 아님
+        fetched = self.ctx.get_result_image(rid)
+        with self._grid_lock:
+            batch["expected"].discard(rid)
+            if fetched.get("ok"):
+                batch["images"][batch["ids"][rid]] = fetched["image"]
+            else:
+                self.ctx.log(f"그리드 셀 회수 실패({rid[:8]}): {fetched.get('message')}")
+            done = not batch["expected"]
+            if done:
+                self._grid_batches.remove(batch)
+        if done and batch["images"]:
+            try:
+                path = self._compose_and_save(batch)
+                if path:
+                    self.ctx.log(f"그리드 저장: {path}")
+            except Exception as exc:
+                self.ctx.log(f"그리드 합성 실패: {exc}")
+
+    def _compose_and_save(self, batch):
+        from PIL import Image, ImageDraw, ImageFont
+
+        images = batch["images"]
+        cell_w = max(image.width for image in images.values())
+        cell_h = max(image.height for image in images.values())
+        cols, rows = batch["cols"], batch["rows"]
+        gutter = 6
+        top_band = 34 if any(batch["x_labels"]) else 0
+        left_band = 150 if any(batch["y_labels"]) else 0
+        width = left_band + cols * (cell_w + gutter) + gutter
+        height = top_band + rows * (cell_h + gutter) + gutter
+        canvas = Image.new("RGB", (width, height), (16, 16, 22))
+        draw = ImageDraw.Draw(canvas)
+        try:
+            font = ImageFont.truetype("malgun.ttf", 20)  # Windows 한글 폰트, 실패 시 기본
+        except Exception:
+            font = ImageFont.load_default()
+        for (col, row), image in images.items():
+            canvas.paste(image, (left_band + gutter + col * (cell_w + gutter),
+                                 top_band + gutter + row * (cell_h + gutter)))
+        for col, label in enumerate(batch["x_labels"]):
+            if label:
+                x_center = left_band + gutter + col * (cell_w + gutter) + cell_w // 2
+                draw.text((x_center, top_band // 2), label[:60],
+                          fill=(220, 220, 235), font=font, anchor="mm")
+        for row, label in enumerate(batch["y_labels"]):
+            if label:
+                y_center = top_band + gutter + row * (cell_h + gutter) + cell_h // 2
+                draw.text((8, y_center), label[:24], fill=(220, 220, 235), font=font, anchor="lm")
+        grid_dir = self._grid_dir()
+        if grid_dir is None:
+            self.ctx.log("그리드 저장 실패: 저장 디렉터리를 알 수 없습니다")
+            return None
+        filename = f"grid_{time.strftime('%Y%m%d_%H%M%S')}_{cols}x{rows}.png"
+        path = grid_dir / filename
+        canvas.save(path, format="PNG")
+        return str(path)
+
+    def _grid_dir(self):
+        base = self.ctx.get_save_directory()
+        if not base:
+            return None
+        grid_dir = Path(base) / "grid"
+        grid_dir.mkdir(parents=True, exist_ok=True)
+        return grid_dir
+
+    # ── 패널 action 버튼 ─────────────────────────────────────────
+    def on_action(self, key):
+        if key != "open_grid_folder":
+            return
+        grid_dir = self._grid_dir()
+        if grid_dir is None:
+            self.ctx.log("Grid 폴더를 열 수 없습니다: 저장 디렉터리를 알 수 없습니다")
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(grid_dir))  # noqa: S606 — 로컬 폴더 열기(사용자 액션)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(grid_dir)])
+            else:
+                subprocess.Popen(["xdg-open", str(grid_dir)])
+            self.ctx.log(f"Grid 폴더 열기: {grid_dir}")
+        except Exception as exc:
+            self.ctx.log(f"Grid 폴더 열기 실패: {exc}")
 
     def _axis_values(self, axis_name, axis, settings, prefix, api_mode):
         """축 정의 → 조합 항목 리스트. 항목 = None | ("param", (key, value)) |
@@ -345,6 +489,7 @@ def _axis_fields(prefix, section, base_order, when_xy):
 def register(ctx):
     ext = SeedFanout(ctx)
     ctx.subscribe("generation_request_dispatched", ext.on_generation_dispatched)
+    ctx.subscribe("generation_result_available", ext.on_generation_result)
     if hasattr(ctx, "register_panel"):
         when_fanout = {"field": "feature", "in": [FEATURE_FANOUT]}
         when_xy = {"field": "feature", "in": [FEATURE_XY]}
@@ -370,7 +515,18 @@ def register(ctx):
                 # ── X/Y Plot (복잡 모드 → 우측 칼럼, 축 종류별 입력칸 전환) ──
                 *_axis_fields("x", "X 축", 10, when_xy),
                 *_axis_fields("y", "Y 축", 20, when_xy),
+                {"key": "make_grid", "type": "bool", "default": True,
+                 "label": "그리드 합성 저장",
+                 "help": "전 셀 완료 시 n×m 합성 PNG를 저장 폴더의 grid/ 아래 생성"
+                         "(축 값 라벨 포함)",
+                 "column": "right", "section": "그리드 이미지", "order": 30,
+                 "apply": "next-generation", "visible_when": when_xy},
+                {"key": "open_grid_folder", "type": "action", "label": "Grid 폴더 열기",
+                 "help": "저장 폴더/grid 를 파일 탐색기로 연다(서버 기기 기준)",
+                 "column": "right", "section": "그리드 이미지", "order": 31,
+                 "visible_when": when_xy},
             ],
             title="Seed Fan-out",
+            on_action=ext.on_action,
         )
     ctx.log("ready — Seed Fan-out / X/Y Plot (퀵 버튼 팝업에서 조정, 관리는 Settings ▸ Extension)")

@@ -46,7 +46,14 @@ export function createExtensionsUi(deps) {
   }
 
   function fieldHtml(ext, field, idPrefix, suppressApply) {
-    if (field.type === 'action') return ''; // v1 예약 타입 — 렌더하지 않음
+    if (field.type === 'action') {
+      // 버튼: 클릭 → 백엔드가 확장의 on_action(key) 호출(설정 저장 없음).
+      const helpAttr = field.help ? ` title="${escHtml(field.help)}"` : '';
+      return `<div class="ext-field ext-field-action">
+        <button type="button" class="ext-action-btn" data-ext="${escHtml(ext.id)}"
+          data-action-field="${escHtml(field.key)}"${helpAttr}>${escHtml(field.label)}</button>
+      </div>`;
+    }
     const value = ext.settings && field.key in ext.settings ? ext.settings[field.key] : field.default;
     const fid = `${idPrefix}-${ext.id}-${field.key}`;
     const common = `id="${fid}" data-ext="${escHtml(ext.id)}" data-field="${escHtml(field.key)}"`;
@@ -124,9 +131,11 @@ export function createExtensionsUi(deps) {
     // 노출 계약(scope) → visible_when 평가(설정값 기반 — 값 변경은 브로드캐스트
     // 재렌더로 반영) → left/right 칼럼 분리. right가 있으면 2단(복잡 모드 패널).
     const visible = ext.panel.fields.filter(field =>
-      field.type !== 'action' && scopeOf(field) === scope && fieldVisible(ext, field));
+      scopeOf(field) === scope && fieldVisible(ext, field));
     // 표시 필드의 apply가 모두 같으면 라벨마다 칩을 반복하지 않고 하단 1줄로 집약.
-    const applyModes = new Set(visible.map(field => field.apply || 'immediate'));
+    // (action 버튼은 "적용 시점" 개념이 없으므로 판정에서 제외)
+    const applyModes = new Set(
+      visible.filter(field => field.type !== 'action').map(field => field.apply || 'immediate'));
     const uniformApply = applyModes.size === 1 ? [...applyModes][0] : '';
     const suppressApply = Boolean(APPLY_NOTES[uniformApply]);
     const note = suppressApply ? `<div class="ext-fields-note">${APPLY_NOTES[uniformApply]}</div>` : '';
@@ -146,8 +155,7 @@ export function createExtensionsUi(deps) {
   function hasRightColumn(ext) {
     if (!ext?.panel || ext.status !== 'loaded') return false;
     return ext.panel.fields.some(field =>
-      field.column === 'right' && field.type !== 'action'
-      && scopeOf(field) === 'module' && fieldVisible(ext, field));
+      field.column === 'right' && scopeOf(field) === 'module' && fieldVisible(ext, field));
   }
 
   function bindFields(root) {
@@ -155,6 +163,11 @@ export function createExtensionsUi(deps) {
       el.addEventListener('change', () => {
         const value = el.type === 'checkbox' ? el.checked : el.value;
         setModuleParam('extensions', `setting:${el.dataset.ext}:${el.dataset.field}`, value);
+      });
+    });
+    root.querySelectorAll('.ext-action-btn[data-action-field]').forEach(el => {
+      el.addEventListener('click', () => {
+        setModuleParam('extensions', `setting:${el.dataset.ext}:${el.dataset.actionField}`, true);
       });
     });
   }

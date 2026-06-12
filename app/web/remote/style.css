@@ -16990,6 +16990,16 @@ body.detached-module .mod-grid-3 {
   background: var(--bg-elevated); color: var(--text-primary); font-size: 12px;
 }
 .ext-quick-popup .ext-field-error { grid-column: 2; width: 100%; }
+/* action 버튼 필드: 라벨 칸 없이 풀폭 버튼 */
+.ext-field-action { display: block; }
+.ext-quick-popup .ext-field-action { grid-template-columns: 1fr; }
+.ext-action-btn {
+  width: 100%; min-height: 30px; padding: 5px 10px; cursor: pointer;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: var(--bg-elevated); color: var(--text-primary); font-size: 12px; font-weight: 650;
+  transition: border-color 0.12s, background 0.12s;
+}
+.ext-action-btn:hover { border-color: var(--accent); background: var(--bg-surface); }
 .ext-quick-popup .ext-help-mark { color: var(--accent-light); }
 .ext-quick-popup .ext-fields-note { margin-top: 0; padding: 0 2px; line-height: 1.4; }
 .ext-quick-popup .ext-quick-nofields {

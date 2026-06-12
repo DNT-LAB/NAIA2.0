@@ -137,8 +137,8 @@ PANEL_APPLY_MODES = {"immediate", "next-generation", "restart-required"}
 
 def _normalize_panel_fields(fields: Any) -> list[dict[str, Any]]:
     """register_panel 스키마 정규화 — 잘못된 필드는 건너뛰고(관용), 유효 필드는
-    (section, order, 선언 순서)로 정렬해 돌려준다. ``action``은 예약 타입으로
-    수용하되 v1 렌더러는 그리지 않는다(인스펙션 #5/#8)."""
+    (section, order, 선언 순서)로 정렬해 돌려준다. ``action``은 버튼으로 렌더되어
+    클릭 시 register_panel(on_action=...) 핸들러가 호출된다(설정 저장 없음)."""
     normalized: list[dict[str, Any]] = []
     if not isinstance(fields, (list, tuple)):
         return normalized
@@ -274,6 +274,8 @@ class ExtensionRecord:
     entry_path: Path | None = None
     # 설정 검증 실패 피드백(인스펙션 #6) — {field_key: message}, 성공 시 비움.
     field_errors: dict[str, str] = field(default_factory=dict)
+    # action 타입 필드 버튼 클릭 핸들러(register_panel on_action) — 직렬화 제외.
+    action_handler: Any = None
 
     @property
     def is_active(self) -> bool:
@@ -487,21 +489,31 @@ class ExtensionContext:
         self._record.hooks += 1
 
     # ── 설정 패널 선언(Phase B) ──────────────────────────────────
-    def register_panel(self, fields: list[dict[str, Any]], *, title: str | None = None) -> None:
+    def register_panel(
+        self,
+        fields: list[dict[str, Any]],
+        *,
+        title: str | None = None,
+        on_action: Any = None,
+    ) -> None:
         """Extensions 패널에 노출할 선언적 설정 폼을 등록한다(확장은 JS 0줄).
 
-        field: {key(필수), type: bool|int|float|select|text|tags|action(예약),
+        field: {key(필수), type: bool|int|float|select|text|tags|action,
         label(=key), default, min/max/step(int/float), options(select),
-        help(툴팁), section(그룹), order(정렬), apply: immediate|next-generation|
-        restart-required(기본 immediate)}. 값은 ``settings.json``으로 라운드트립
-        되며 ``ctx.load_settings()``로 읽는 값과 같은 파일이다. ``action`` 타입은
-        v1에서 예약만 되어 렌더되지 않는다.
+        help(툴팁), placeholder, section(그룹), order(정렬), scope, column,
+        visible_when, apply: immediate|next-generation|restart-required(기본
+        immediate)}. 값은 ``settings.json``으로 라운드트립되며
+        ``ctx.load_settings()``로 읽는 값과 같은 파일이다.
+
+        ``action`` 타입은 버튼으로 렌더되고, 클릭 시 ``on_action(key)``가
+        호출된다(설정 저장 없음). on_action 예외는 격리되어 로그만 남는다.
         """
         normalized = _normalize_panel_fields(fields)
         self._record.panel = {
             "title": str(title or self._record.name or self.ext_id),
             "fields": normalized,
         }
+        self._record.action_handler = on_action if callable(on_action) else None
 
     # ── 생성 큐 ──────────────────────────────────────────────────
     def enqueue_generation(
@@ -595,6 +607,51 @@ class ExtensionContext:
         except (SystemExit, Exception) as exc:
             return {"ok": False, "message": _safe_error_text(exc)}
 
+    # ── 결과 조회 / 저장 경로 ────────────────────────────────────
+    def get_result_image(self, request_id: Any) -> dict[str, Any]:
+        """완료된 생성 요청의 이미지를 돌려준다 → {ok, image, file_path, message}.
+
+        image는 히스토리 원본의 **PIL 사본**(확장이 변형해도 히스토리 불변).
+        file_path는 자동 저장이 이미 끝났으면 그 경로, 아니면 ""(저장은 결과
+        이벤트 뒤 비동기일 수 있다). generation_result_available 콜백에서
+        이벤트의 request_id로 호출하는 것이 기본 패턴."""
+        if not self._record.is_active:
+            return {"ok": False, "image": None, "file_path": "", "message": "extension disabled"}
+        try:
+            rid = str(request_id or "").strip()
+            store = getattr(self._app_context, "result_store", None)
+            items = getattr(store, "_items", None)
+            if not rid or items is None:
+                return {"ok": False, "image": None, "file_path": "", "message": "결과 저장소 없음"}
+            for item in list(items):
+                params = getattr(item, "generation_params", None) or {}
+                if str(params.get("generation_request_id") or "") != rid:
+                    continue
+                image = getattr(item, "image", None)
+                if image is None:
+                    break
+                return {
+                    "ok": True,
+                    "image": image.copy(),
+                    "file_path": str(getattr(item, "filepath", "") or ""),
+                    "message": "",
+                }
+            return {"ok": False, "image": None, "file_path": "", "message": "해당 요청의 결과 없음"}
+        except (SystemExit, Exception) as exc:
+            return {"ok": False, "image": None, "file_path": "", "message": _safe_error_text(exc)}
+
+    def get_save_directory(self) -> str:
+        """현재 세션의 이미지 자동 저장 디렉터리 경로(str). 실패 시 ""."""
+        if not self._record.is_active:
+            return ""
+        try:
+            current = getattr(self._app_context, "_current_save_directory", None)
+            if callable(current):
+                return str(current())
+        except (SystemExit, Exception) as exc:
+            self.log(f"get_save_directory failed: {_safe_error_text(exc)}")
+        return ""
+
     # ── NAI 캐릭터 스냅샷 ────────────────────────────────────────
     def resolve_nai_characters(self) -> dict[str, Any] | None:
         """현재 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷을 돌려준다.
@@ -675,6 +732,7 @@ class ExtensionContext:
         self._hook_adapters.clear()
         self._record.hooks = 0
         self._record.subscriptions = 0
+        self._record.action_handler = None
 
 
 @dataclass
@@ -957,6 +1015,7 @@ class ExtensionManager:
         """즉시 발효 키(enabled/blocked/setting). approve/retry는 import가 수반되므로
         호출자가 워커 스레드에서 load_by_key()로 처리한다(인스펙션 #2)."""
         action, _, rest = str(key or "").strip().partition(":")
+        pending_action: Any = None
         with self._lock:
             if action == "enabled":
                 record = self._find(rest)
@@ -975,18 +1034,33 @@ class ExtensionManager:
                     self._write_config_locked()
             elif action == "setting":
                 ext_id, _, field_key = rest.partition(":")
-                self._apply_setting_locked(ext_id, field_key, value)
+                pending_action = self._apply_setting_locked(ext_id, field_key, value)
+        # action 핸들러는 락 밖에서 — 느린 핸들러(폴더 열기 등)가 패널 잠금을
+        # 붙들거나, 핸들러→매니저 재진입 데드락이 생기지 않게 한다.
+        if pending_action is not None:
+            ext_id, field_key, handler = pending_action
+            try:
+                handler(field_key)
+            except (SystemExit, Exception) as exc:
+                _ext_print(ext_id, f"on_action({field_key}) 실패: {_safe_error_text(exc)}")
 
-    def _apply_setting_locked(self, ext_id: str, field_key: str, value: Any) -> None:
+    def _apply_setting_locked(self, ext_id: str, field_key: str, value: Any) -> Any:
+        """일반 필드는 검증·영속까지 끝낸다(반환 None). action 필드는 호출자가
+        락 해제 후 실행할 (ext_id, key, handler)를 돌려준다."""
         record = self._find(ext_id)
         if record is None or not record.panel or record.directory is None:
-            return
+            return None
         field_def = next(
             (item for item in record.panel.get("fields", []) if item.get("key") == field_key),
             None,
         )
-        if field_def is None or field_def.get("type") == "action":
-            return
+        if field_def is None:
+            return None
+        if field_def.get("type") == "action":
+            handler = record.action_handler
+            if record.is_active and callable(handler):
+                return (record.ext_id, field_key, handler)
+            return None
         ok, coerced, message = _coerce_panel_value(field_def, value)
         if not ok:
             record.field_errors[field_key] = message

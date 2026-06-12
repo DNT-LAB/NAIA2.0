@@ -249,17 +249,27 @@ class SeedFanout:
         # 프롬프트 치환 축의 시작/원본 프롬프트가 실제 프롬프트에 **태그 경계로**
         # 존재하는지 선검증 — 없으면 토스트로 안내하고 전체 중단(원본만 생성).
         # substring이 아니라 태그 시퀀스 매칭이다: "smile"은 "bitter smile" 안이
-        # 아니라 독립 태그 smile에만 매칭된다.
+        # 아니라 독립 태그 smile에만 매칭된다. 두 축 모두 프롬프트 축이면 span을
+        # base 기준으로 잡고 겹침을 거부한다(Codex R6-#1: X 치환 결과를 Y가
+        # 다시 잡는 오염 방지 — 셀 빌드도 같은 base span을 쓴다).
         base_prompt = str(params.get("input") or "")
+        axis_spans = []  # 프롬프트 축의 (키워드, base 기준 span) — 축 순서 X, Y
         for axis_values in (x_values, y_values):
             for item in axis_values:
                 if item is None or item[0] != "prompt":
                     continue
                 keyword = item[1][0]
-                if keyword and _find_tag_span(base_prompt, keyword) is None:
+                span = _find_tag_span(base_prompt, keyword) if keyword else None
+                if span is None:
                     self._toast(f'"{keyword}" — 시작 프롬프트가 프롬프트에 없습니다(태그 단위 일치 기준)')
                     return
+                axis_spans.append(span)
                 break  # 축의 키워드는 동일 — 첫 항목만 보면 충분
+        if len(axis_spans) == 2:
+            (s1, e1), (s2, e2) = axis_spans
+            if not (e1 <= s2 or e2 <= s1):
+                self._toast("X·Y 축의 시작/원본 프롬프트 구간이 겹칩니다 — 서로 다른 구간을 지정하세요")
+                return
 
         # 그리드 비교의 본질: 전 항목 동일 시드(원본 시드 고정).
         base_seed = self._base_seed(params.get("seed"))
@@ -271,8 +281,10 @@ class SeedFanout:
         cells = []
         for index, (x_value, y_value) in enumerate(combos):
             overrides = {"seed": base_seed, **char_overrides}
-            prompt = base_prompt
             ok = True
+            # 프롬프트 치환은 전부 base_prompt 기준 span으로 모은 뒤 뒤 구간부터
+            # 적용한다 — X의 교체 결과 안에서 Y가 다시 매칭되는 오염 방지(R6-#1).
+            prompt_ops = []
             for value in (x_value, y_value):
                 if value is None:
                     continue
@@ -281,14 +293,18 @@ class SeedFanout:
                     overrides[payload[0]] = payload[1]
                 elif kind == "prompt":
                     keyword, replacement = payload
-                    span = _find_tag_span(prompt, keyword)
+                    span = _find_tag_span(base_prompt, keyword)
                     if span is None:
                         self.ctx.log(f"X/Y Plot: 프롬프트에 태그 '{keyword}'가 없어 건너뜀")
                         ok = False
                         break
-                    prompt = prompt[:span[0]] + replacement + prompt[span[1]:]
-            if ok:
-                cells.append((overrides, prompt, index % cols, index // cols))
+                    prompt_ops.append((span, replacement))
+            if not ok:
+                continue
+            prompt = base_prompt
+            for (start, end), replacement in sorted(prompt_ops, key=lambda op: op[0][0], reverse=True):
+                prompt = prompt[:start] + replacement + prompt[end:]
+            cells.append((overrides, prompt, index % cols, index // cols))
         if not cells:
             self.ctx.log("X/Y Plot: 유효한 조합이 없어 원본만 생성합니다")
             return

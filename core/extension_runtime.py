@@ -164,67 +164,95 @@ def _normalize_panel_fields(fields: Any) -> list[dict[str, Any]]:
     if not isinstance(fields, (list, tuple)):
         return normalized
     for index, raw in enumerate(fields):
-        if not isinstance(raw, dict):
-            continue
-        key = str(raw.get("key") or "").strip()
-        ftype = str(raw.get("type") or "").strip().lower()
-        if not key or ftype not in PANEL_FIELD_TYPES:
-            continue
-        entry: dict[str, Any] = {
-            "key": key,
-            "type": ftype,
-            "label": str(raw.get("label") or key),
-            "help": str(raw.get("help") or ""),
-            "section": str(raw.get("section") or ""),
-            "order": int(raw.get("order")) if isinstance(raw.get("order"), (int, float)) else index,
-            "apply": (
-                str(raw.get("apply")) if str(raw.get("apply") or "") in PANEL_APPLY_MODES else "immediate"
-            ),
-            # 다단 패널: left(기본) | right | extra — right/extra 필드가 보이면
-            # 렌더러가 해당 칼럼을 펼친다(extra=스왑 빌더처럼 깊은 모드용 3번째 칸).
-            "column": (
-                str(raw.get("column"))
-                if str(raw.get("column") or "") in {"right", "extra"}
-                else "left"
-            ),
-            # 노출 계약: module(기본)=퀵 버튼 팝업(실제 동작 설정 전담) /
-            # global=Settings ▸ Extension(전역 설정 — 저장 경로 등). 두 화면은
-            # 서로의 scope 필드를 렌더하지 않는다.
-            "scope": "global" if str(raw.get("scope") or "") == "global" else "module",
-            "_index": index,
-        }
-        # 입력 예시/형식 안내(text/tags/number) — 렌더러가 placeholder 속성으로 표시.
-        if str(raw.get("placeholder") or "").strip():
-            entry["placeholder"] = str(raw.get("placeholder")).strip()
-        # 긴 프롬프트 구문용: text/list 입력을 textarea(여러 줄)로 렌더.
-        if raw.get("multiline") and ftype in {"text", "list"}:
-            entry["multiline"] = True
-        # 조건부 표시: {"field": <다른 필드 key>, "in": [허용값...]} — 렌더러가 현재
-        # 설정값으로 평가한다(예: 모드 select 값에 따라 우측 패널 등장). 컨트롤러
-        # 필드 자신이 숨으면 종속 필드도 계단식으로 숨는다(렌더러 구현).
-        visible_when = raw.get("visible_when")
-        if isinstance(visible_when, dict) and str(visible_when.get("field") or "").strip():
-            allowed = visible_when.get("in")
-            entry["visible_when"] = {
-                "field": str(visible_when.get("field")).strip(),
-                "in": [str(item) for item in allowed] if isinstance(allowed, (list, tuple)) else [],
-            }
-        if "default" in raw:
-            entry["default"] = raw.get("default")
-        if ftype in {"int", "float"}:
-            for bound in ("min", "max", "step"):
-                if isinstance(raw.get(bound), (int, float)):
-                    entry[bound] = raw.get(bound)
-        if ftype in {"select", "multiselect"}:
-            options = [str(opt) for opt in (raw.get("options") or []) if str(opt).strip()]
-            if not options:
-                continue
-            entry["options"] = options
-        normalized.append(entry)
+        try:
+            entry = _normalize_panel_field(raw, index)
+        except (SystemExit, Exception) as exc:
+            # no-throw(Codex R6-#4): 적대적 메타(__str__/__int__ raising 등)는
+            # 그 필드만 관용 스킵 — 정규화가 코어로 예외를 전파하지 않는다.
+            # 침묵 누락 방지(R7): 어떤 필드가 왜 빠졌는지 로그를 남긴다.
+            # except 핸들러 안이므로 로그 자체도 중첩 가드(R8) — stdout IO 실패
+            # 같은 드문 경우에도 no-throw 계약을 지킨다.
+            try:
+                key_hint = str(raw.get("key")) if isinstance(raw, dict) else ""
+                print(
+                    "Remote Web: extension panel field skipped "
+                    f"(index={index}, key={key_hint or '?'}) — {_safe_error_text(exc)}",
+                    flush=True,
+                )
+            except (SystemExit, Exception):
+                pass
+            entry = None
+        if entry is not None:
+            normalized.append(entry)
     normalized.sort(key=lambda item: (item["section"], item["order"], item["_index"]))
     for entry in normalized:
         entry.pop("_index", None)
     return normalized
+
+
+def _normalize_panel_field(raw: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    key = str(raw.get("key") or "").strip()
+    ftype = str(raw.get("type") or "").strip().lower()
+    if not key or ftype not in PANEL_FIELD_TYPES:
+        return None
+    try:
+        order = int(raw.get("order")) if isinstance(raw.get("order"), (int, float)) else index
+    except (ValueError, OverflowError, TypeError):  # NaN/inf/적대 서브클래스 — 선언 순서 폴백
+        order = index
+    entry: dict[str, Any] = {
+        "key": key,
+        "type": ftype,
+        "label": str(raw.get("label") or key),
+        "help": str(raw.get("help") or ""),
+        "section": str(raw.get("section") or ""),
+        "order": order,
+        "apply": (
+            str(raw.get("apply")) if str(raw.get("apply") or "") in PANEL_APPLY_MODES else "immediate"
+        ),
+        # 다단 패널: left(기본) | right | extra — right/extra 필드가 보이면
+        # 렌더러가 해당 칼럼을 펼친다(extra=스왑 빌더처럼 깊은 모드용 3번째 칸).
+        "column": (
+            str(raw.get("column"))
+            if str(raw.get("column") or "") in {"right", "extra"}
+            else "left"
+        ),
+        # 노출 계약: module(기본)=퀵 버튼 팝업(실제 동작 설정 전담) /
+        # global=Settings ▸ Extension(전역 설정 — 저장 경로 등). 두 화면은
+        # 서로의 scope 필드를 렌더하지 않는다.
+        "scope": "global" if str(raw.get("scope") or "") == "global" else "module",
+        "_index": index,
+    }
+    # 입력 예시/형식 안내(text/tags/number) — 렌더러가 placeholder 속성으로 표시.
+    if str(raw.get("placeholder") or "").strip():
+        entry["placeholder"] = str(raw.get("placeholder")).strip()
+    # 긴 프롬프트 구문용: text/list 입력을 textarea(여러 줄)로 렌더.
+    # `is True` 리터럴 체크 — 적대적 __bool__ 객체의 truthiness 평가를 피한다.
+    if raw.get("multiline") is True and ftype in {"text", "list"}:
+        entry["multiline"] = True
+    # 조건부 표시: {"field": <다른 필드 key>, "in": [허용값...]} — 렌더러가 현재
+    # 설정값으로 평가한다(예: 모드 select 값에 따라 우측 패널 등장). 컨트롤러
+    # 필드 자신이 숨으면 종속 필드도 계단식으로 숨는다(렌더러 구현).
+    visible_when = raw.get("visible_when")
+    if isinstance(visible_when, dict) and str(visible_when.get("field") or "").strip():
+        allowed = visible_when.get("in")
+        entry["visible_when"] = {
+            "field": str(visible_when.get("field")).strip(),
+            "in": [str(item) for item in allowed] if isinstance(allowed, (list, tuple)) else [],
+        }
+    if "default" in raw:
+        entry["default"] = raw.get("default")
+    if ftype in {"int", "float"}:
+        for bound in ("min", "max", "step"):
+            if isinstance(raw.get(bound), (int, float)):
+                entry[bound] = raw.get(bound)
+    if ftype in {"select", "multiselect"}:
+        options = [str(opt) for opt in (raw.get("options") or []) if str(opt).strip()]
+        if not options:
+            return None
+        entry["options"] = options
+    return entry
 
 
 def _coerce_panel_value(field_def: dict[str, Any], value: Any) -> tuple[bool, Any, str]:

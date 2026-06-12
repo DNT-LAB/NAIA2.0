@@ -234,7 +234,14 @@ export function createExtensionsUi(deps) {
             row.remove();
             el.dispatchEvent(new Event('change'));
           });
-          row.querySelector('input, textarea').focus();
+          const rowInput = row.querySelector('input, textarea');
+          rowInput.addEventListener('keydown', event => {
+            // 신규 행도 Ctrl+Enter 선커밋(R6-#2) — bindFields 이후 생성되므로 직접 부착.
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+              rowInput.dispatchEvent(new Event('change', {bubbles: true}));
+            }
+          });
+          rowInput.focus();
         });
         el.querySelectorAll('.ext-list-remove').forEach(btn => {
           btn.addEventListener('click', () => {
@@ -247,6 +254,17 @@ export function createExtensionsUi(deps) {
     root.querySelectorAll('.ext-action-btn[data-action-field]').forEach(el => {
       el.addEventListener('click', () => {
         setModuleParam('extensions', `setting:${el.dataset.ext}:${el.dataset.actionField}`, true);
+      });
+    });
+    // Ctrl+Enter 생성 단축키와의 경합(Codex R6-#2): textarea/input은 blur(change)
+    // 시에만 커밋되므로, 포커스를 둔 채 Ctrl+Enter로 생성하면 스테일 값으로
+    // 돈다 — 단축키가 버블링되기 전에 change를 강제 발화해 먼저 커밋한다
+    // (같은 WS 커넥션이라 setting 메시지가 generate보다 먼저 도착).
+    root.querySelectorAll('.ext-fields input, .ext-fields textarea').forEach(el => {
+      el.addEventListener('keydown', event => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          el.dispatchEvent(new Event('change', {bubbles: true}));
+        }
       });
     });
   }
@@ -342,8 +360,8 @@ export function createExtensionsUi(deps) {
     let el = root.querySelector(
       `[data-ext="${CSS.escape(saved.ext)}"][data-field="${CSS.escape(saved.field)}"]`);
     if (el && saved.listIndex != null) {
-      el = el.querySelector(`input[data-list-index="${CSS.escape(saved.listIndex)}"]`)
-        || el.querySelector('input[type=text]');
+      el = el.querySelector(`[data-list-index="${CSS.escape(saved.listIndex)}"]`)
+        || el.querySelector('input[type=text], textarea');
     }
     if (!el) return;
     el.focus();

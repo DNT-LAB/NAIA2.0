@@ -7,6 +7,8 @@
 // 기록하지 않고 최종 결과만 context='ollama_assist'(effort/등급/모드 메타 포함)로 1건
 // 남기므로, 패널은 그 context만 보여준다. 행 머리=한글 입력(미리보기), 펼치면 최종
 // 프롬프트(태그+자연어). effort/등급 메타로 배지를 단다.
+// 몸통 클릭 = **복원**(onRestore 주입 시) — 팝업의 입력:결과 쌍을 "방금 변환을 마친
+// 것처럼" 되살린다(사용자 요청). 결과 복사는 머리의 ⧉ 버튼으로 분리.
 // 백엔드(/api/translation-history)가 진실의 원천: 목록(GET)은 모든 클라이언트에 열려
 // 있고, 핀/삭제(POST/DELETE)는 호스트 로컬에서만 허용된다(원격이면 403 → 토스트).
 //
@@ -26,6 +28,7 @@ export function createTranslationHistoryPanel({
   showToast = () => {},
   escHtml = value => String(value ?? ''),
   onVisibilityChange = null,   // (visible:boolean) → 팝업이 [기록] 버튼 active 상태 동기화
+  onRestore = null,            // (rec) → 팝업에 입력:결과 쌍 복원. 없으면 몸통 클릭=복사(구동작)
 } = {}) {
   let panel = null;
   let onResize = null;
@@ -155,6 +158,17 @@ export function createTranslationHistoryPanel({
 
     const actions = document.createElement('div');
     actions.className = 'xlation-history-row-actions';
+    // 결과 복사 — 몸통 클릭이 복원으로 바뀌면서 복사는 전용 버튼으로 분리(펼침 불필요).
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'xlation-history-act copy';
+    copyBtn.title = '결과 복사';
+    copyBtn.textContent = '⧉';
+    copyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyText(String(rec.translated || ''), '변환 결과');
+    });
+    actions.appendChild(copyBtn);
     const pinBtn = document.createElement('button');
     pinBtn.type = 'button';
     pinBtn.className = 'xlation-history-act pin' + (rec.pinned ? ' active' : '');
@@ -184,12 +198,16 @@ export function createTranslationHistoryPanel({
     const foot = document.createElement('div');
     foot.className = 'xlation-history-meta';
     const ctxTime = timeLabel(rec.ts);
-    foot.textContent = ctxTime ? `${ctxTime} · 클릭하면 복사` : '클릭하면 복사';
+    const clickHint = (typeof onRestore === 'function') ? '클릭하면 복원' : '클릭하면 복사';
+    foot.textContent = ctxTime ? `${ctxTime} · ${clickHint}` : clickHint;
     body.appendChild(dst);
     body.appendChild(foot);
     body.addEventListener('click', (e) => {
       e.stopPropagation();
-      copyText(String(rec.translated || ''), '변환 결과');
+      // 복원(기본): 팝업의 입력:결과 쌍을 방금 변환을 마친 것처럼 되살린다.
+      // onRestore 미주입(구버전 호스트) 폴백 = 기존 복사 동작.
+      if (typeof onRestore === 'function') onRestore(rec);
+      else copyText(String(rec.translated || ''), '변환 결과');
     });
 
     // 머리 클릭(액션 제외) → 펼침 토글.

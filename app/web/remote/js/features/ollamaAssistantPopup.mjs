@@ -244,6 +244,36 @@ export function createOllamaAssistantPopup({
     }
   }
 
+  // 기록 복원 — 기록 행 클릭 시 입력:결과 쌍을 "방금 변환을 마친 것처럼" 되살린다
+  // (사용자 요청; 이전 동작=결과 복사만). 결과 영역은 renderAssistResult를 재사용해
+  // 액션 버튼(프롬프트에 추가/복사)까지 동일하게 살아난다. 기록에는 최종 프롬프트만
+  // 저장되므로 태그 분해/번역 줄은 재현하지 않는다. 등급/분량 버튼은 메타가 유효한
+  // 값일 때만 동기화(메타의 rating은 실행 당시 *해석된* 등급 — auto로 돌렸다면 복원
+  // 후 명시 등급이 된다). mode는 실행 전략이라 복원하지 않는다(manual 전환은 데이터셋
+  // 다운로드 등 부수효과가 있는 클릭 핸들러 전용).
+  function _syncAssistButtons(selector, datasetKey, want) {
+    let hit = null;
+    const btns = popup.querySelectorAll(selector);
+    btns.forEach(b => { if (String(b.dataset[datasetKey] || '') === want) hit = b; });
+    if (!hit) return false;
+    btns.forEach(b => b.classList.toggle('active', b === hit));
+    return true;
+  }
+
+  function restoreFromHistory(rec) {
+    if (!rec || !popup) return;
+    const input = pick('.ollama-assist-input');
+    if (input) input.value = String(rec.source || '');
+    const meta = (rec && rec.meta) || {};
+    const rating = String(meta.rating || '').toLowerCase() || 'auto';
+    if (_syncAssistButtons('.ollama-assist-rating-btn', 'rating', rating)) assistRating = rating;
+    const level = String(meta.level || '');
+    if (level && _syncAssistButtons('.ollama-assist-level-btn', 'level', level)) assistLevel = level;
+    renderAssistResult({ok: true, prompt: String(rec.translated || '')});
+    position();
+    showToast('기록 복원됨 — 입력·결과가 되살아났습니다', 'success');
+  }
+
   // 변환 기록 — Ollama 팝업 우측에 도킹되는 2단 플로팅 패널(translationHistoryPanel).
   // [기록] 버튼이 토글한다. 패널은 첫 클릭 때 지연 로드(쓰지 않는 사용자는 비용 0).
   let historyPanel = null;
@@ -260,11 +290,12 @@ export function createOllamaAssistantPopup({
   function ensureHistoryPanel() {
     if (historyPanel) return Promise.resolve(historyPanel);
     if (!historyPanelReady) {
-      historyPanelReady = import('./translationHistoryPanel.mjs?v=20260607-xhist6')
+      historyPanelReady = import('./translationHistoryPanel.mjs?v=20260612-histrestore1')
         .then(({createTranslationHistoryPanel}) => {
           historyPanel = createTranslationHistoryPanel({
             document, window: win, showToast, escHtml,
             onVisibilityChange: (visible) => _setHistoryBtnActive(visible),
+            onRestore: restoreFromHistory,
           });
           return historyPanel;
         })

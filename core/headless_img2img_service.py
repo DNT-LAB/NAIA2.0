@@ -45,7 +45,16 @@ class HeadlessImg2ImgService:
             best_w -= 64
             best_h = int(best_w / ratio)
             best_h = (best_h // 64) * 64
-        return max(best_w, 64), max(best_h, 64)
+        best_w = max(best_w, 64)
+        best_h = max(best_h, 64)
+        # 극단 종횡비(예: 1x300)에서는 위 64px 하한 클램프가 곱을 max_pixels 너머로
+        # 되밀 수 있다. 긴 변을 64배수로 다시 줄여 곱<=max_pixels 계약을 지킨다.
+        if best_w * best_h > max_pixels:
+            if best_w >= best_h:
+                best_w = max(64, ((max_pixels // best_h) // 64) * 64)
+            else:
+                best_h = max(64, ((max_pixels // best_w) // 64) * 64)
+        return best_w, best_h
 
     def _normalize_source_image(self, image):
         from PIL import Image
@@ -60,6 +69,24 @@ class HeadlessImg2ImgService:
             return image
         return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
+    def _resize_to_1mp(self, image):
+        """이미지와 가장 가까운 비율의 64배수 ~1MP 해상도로 맞춘다 (업스케일 포함)."""
+        from PIL import Image
+
+        if image.mode not in ("RGB", "RGBA"):
+            image = image.convert("RGBA")
+        target = self._best_resolution(image.width, image.height)
+        if target == image.size:
+            return image
+        return image.resize(target, Image.Resampling.LANCZOS)
+
+    def _session_image_from_bytes(self, source_bytes: bytes, *, resize_1mp: bool):
+        from PIL import Image
+
+        with Image.open(io.BytesIO(source_bytes)) as opened:
+            image = opened.convert("RGBA")
+        return self._resize_to_1mp(image) if resize_1mp else self._normalize_source_image(image)
+
     def open_session_from_bytes(
         self,
         image_bytes: bytes,
@@ -69,13 +96,10 @@ class HeadlessImg2ImgService:
         generation_params: dict[str, Any] | None = None,
         prompt_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from PIL import Image
-
         context = self.context
         if not image_bytes:
             raise ValueError("Image data is unavailable")
-        with Image.open(io.BytesIO(image_bytes)) as opened:
-            image = self._normalize_source_image(opened.convert("RGBA"))
+        image = self._session_image_from_bytes(bytes(image_bytes), resize_1mp=True)
         png_bytes = self._image_to_png_bytes(image)
         preview, preview_width, preview_height = self._image_preview_data_url(image)
         context._img2img_window_counter += 1
@@ -96,6 +120,8 @@ class HeadlessImg2ImgService:
             "window_id": context._img2img_window_counter,
             "mode": clean_mode,
             "source_label": str(label or "Result Image"),
+            "source_bytes": bytes(image_bytes),
+            "resize_1mp": True,
             "image_bytes": png_bytes,
             "width": int(image.width),
             "height": int(image.height),
@@ -157,6 +183,7 @@ class HeadlessImg2ImgService:
             "noise": int(state.get("noise", 0) or 0),
             "noise_value": max(0, min(99, int(state.get("noise", 0) or 0))) / 100.0,
             "repeat": int(state.get("repeat", 1) or 1),
+            "resize_1mp": bool(state.get("resize_1mp", True)),
             "main_prompt": str(state.get("main_prompt") or ""),
             "negative_prompt": str(state.get("negative_prompt") or ""),
             "characters": characters,
@@ -209,6 +236,8 @@ class HeadlessImg2ImgService:
             context.img2img_session["noise"] = max(0, min(99, int(float(value))))
         elif key == "repeat":
             context.img2img_session["repeat"] = max(1, min(99, int(float(value))))
+        elif key == "resize_1mp":
+            return self._set_resize_1mp(context._coerce_bool(value))
         elif key == "mask_png":
             mask_bytes, preview, _ = self._decode_mask(str(value or ""))
             context.img2img_session["mode"] = "inpaint"
@@ -246,6 +275,34 @@ class HeadlessImg2ImgService:
             return self.module_state({"_headless_generation_commands": commands})
         else:
             return None
+        return self.module_state()
+
+    def _set_resize_1mp(self, enabled: bool) -> dict[str, Any]:
+        """1MP 리사이즈 토글: 보관해 둔 원본 바이트에서 세션 이미지를 재파생한다."""
+        context = self.context
+        session = context.img2img_session
+        if bool(session.get("resize_1mp", True)) == enabled:
+            session["resize_1mp"] = enabled
+            return self.module_state()
+        source_bytes = session.get("source_bytes") or session.get("image_bytes") or b""
+        try:
+            image = self._session_image_from_bytes(bytes(source_bytes), resize_1mp=enabled)
+        except Exception:
+            return context._toast("이미지 리사이즈에 실패했습니다", level="error")
+        size_changed = (int(session.get("width") or 0), int(session.get("height") or 0)) != image.size
+        preview, preview_width, preview_height = self._image_preview_data_url(image)
+        session["resize_1mp"] = enabled
+        session["image_bytes"] = self._image_to_png_bytes(image)
+        session["width"] = int(image.width)
+        session["height"] = int(image.height)
+        session["preview"] = preview
+        session["preview_width"] = preview_width
+        session["preview_height"] = preview_height
+        if size_changed and (session.get("has_mask") or session.get("mask_bytes")):
+            # 마스크는 세션 해상도 기준 좌표라 크기가 바뀌면 더 이상 유효하지 않다.
+            session["mask_bytes"] = b""
+            session["mask_preview"] = ""
+            session["has_mask"] = False
         return self.module_state()
 
     def generation_commands(self) -> list[dict[str, Any]]:

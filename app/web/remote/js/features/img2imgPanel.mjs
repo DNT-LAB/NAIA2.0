@@ -179,6 +179,7 @@ export function createImg2ImgPanel({
       has_preview: !!state.preview,
       width: Number(state.width) || 0,
       height: Number(state.height) || 0,
+      resize_1mp: state.resize_1mp !== false,
       source_label: String(state.source_label || ''),
       characters: characters.map(character => [character?.id, !!character?.active]),
     });
@@ -235,6 +236,18 @@ export function createImg2ImgPanel({
     clearDeferredFocusedRender();
     lastRenderedStructureSignature = structureSignature;
     currentState = state || null;
+    if (state && state.active) {
+      // 세션 해상도가 바뀌면(1MP 리사이즈 토글 등, 분리창 동시 편집 포함) 열린 마스크
+      // 편집창의 캔버스 좌표 기준이 무너지므로 닫는다. 초안은 재오픈 시
+      // draftMatchesState가 치수 불일치를 감지해 새로 만든다.
+      const dialogCanvas = document.getElementById('img2imgMaskDialogCanvas');
+      const dialogDraft = dialogCanvas ? maskCanvasDrafts.get(dialogCanvas) : null;
+      if (dialogDraft
+        && (dialogDraft.sourceWidth !== (Number(state.width) || 0)
+          || dialogDraft.sourceHeight !== (Number(state.height) || 0))) {
+        closeMaskEditor();
+      }
+    }
     if (!state || !state.active) {
       closeMaskEditor();
       moduleBody.innerHTML = `
@@ -247,6 +260,7 @@ export function createImg2ImgPanel({
     const strength = Number.isFinite(Number(state.strength)) ? Number(state.strength) : 70;
     const noise = Number.isFinite(Number(state.noise)) ? Number(state.noise) : 0;
     const repeat = Number.isFinite(Number(state.repeat)) ? Number(state.repeat) : 1;
+    const resize1mp = state.resize_1mp !== false;
     const characters = Array.isArray(state.characters) ? state.characters : [];
     const inpaint = isInpaint(state);
     const preview = state.preview
@@ -270,6 +284,10 @@ export function createImg2ImgPanel({
           <label class="mod-field-label">반복</label>
           <input class="mod-input" type="number" min="1" max="99" value="${repeat}" oninput="img2imgRepeat(this.value)">
         </div>
+        <label class="mod-checkbox-item mod-img2img-resize-1mp" title="체크 시 이미지와 가장 가까운 비율의 64배수 ~1MP 해상도로 리사이즈해 생성합니다. 해제 시 원본 이미지 크기를 사용합니다.">
+          <input type="checkbox" ${resize1mp ? 'checked' : ''} oninput="img2imgResize1mp(this.checked)">
+          <span class="mod-checkbox-label">해상도를 1MP로 리사이즈</span>
+        </label>
       </div>`;
     const promptsHtml = `
       <div class="mod-img2img-prompt-block">
@@ -692,6 +710,11 @@ export function createImg2ImgPanel({
     setModuleParam('img2img', 'repeat', String(count));
   }
 
+  function resize1mp(checked) {
+    flushPendingModuleEdit('img2img');
+    setModuleParam('img2img', 'resize_1mp', String(!!checked));
+  }
+
   function text(key, value) {
     onModTextEdit('img2img', key, value);
   }
@@ -782,6 +805,7 @@ export function createImg2ImgPanel({
     render,
     slider,
     repeat,
+    resize1mp,
     text,
     addCharacter,
     removeCharacter,

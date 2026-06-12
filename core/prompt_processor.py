@@ -11,7 +11,6 @@ from core.resolution_utils import (
     MAX_1MP_PIXELS,
     nearest_anima_preset_resolution,
     nearest_standard_1mp_resolution,
-    snap_resolution_to_multiple,
 )
 
 # 가중치 구문 감지 정규식 (C-2: \d+\.?\d* 로 정밀화)
@@ -341,14 +340,13 @@ class PromptProcessor:
                         )
                     elif normalized_mode == 'NAI':
                         # NAI only accepts dimensions that are multiples of 64.
-                        # Above 1MP, snap to the nearest standard NAI resolution;
-                        # at or below 1MP, keep the source size but round each side
-                        # to a multiple of 64 (e.g. 1280x720 -> 1280x704) so the
-                        # request is never rejected with a 500.
-                        if width * height > MAX_1MP_PIXELS:
-                            width, height = nearest_standard_1mp_resolution(width, height)
-                        else:
-                            width, height = snap_resolution_to_multiple(width, height, 64)
+                        # Always fit to the nearest standard ~1MP resolution so a
+                        # low-res source (e.g. 350x600) scales UP instead of
+                        # passing a tiny snapped size (320x576) to generation,
+                        # and an oversized source scales down. Every standard
+                        # combo is a 64-multiple, so requests are never rejected
+                        # with a 500.
+                        width, height = nearest_standard_1mp_resolution(width, height)
                     elif width * height > MAX_1MP_PIXELS:
                         width, height = nearest_standard_1mp_resolution(width, height)
                     context.metadata['detected_resolution'] = (width, height)

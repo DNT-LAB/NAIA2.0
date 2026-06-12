@@ -1087,7 +1087,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260604-img2img-autocomplete1')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260612-i2i1mp2')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -7045,6 +7045,10 @@ function img2imgSlider(key, value) {
 
 function img2imgRepeat(value) {
   if (img2imgPanel) img2imgPanel.repeat(value);
+}
+
+function img2imgResize1mp(checked) {
+  if (img2imgPanel) img2imgPanel.resize1mp(checked);
 }
 
 function img2imgText(key, value) {

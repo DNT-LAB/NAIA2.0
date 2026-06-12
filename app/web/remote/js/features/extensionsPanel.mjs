@@ -594,7 +594,10 @@ export function createExtensionsUi(deps) {
     const cols = visibleColumns(ext);
     el.classList.toggle('ext-quick-popup-wide', cols.has('right') || cols.has('extra'));
     el.classList.toggle('ext-quick-popup-xwide', cols.has('extra'));
-    el.style.display = 'block';
+    // 'flex'로 표시해야 CSS의 column 레이아웃(높이 상한 + 바디 스크롤,
+    // 055337ee)이 산다 — 'block'이면 인라인 스타일이 flex를 무효화해 바디가
+    // 줄지 않고 푸터가 잘린다.
+    el.style.display = 'flex';
     el.querySelector('.ext-quick-close').addEventListener('click', closeQuickPopup);
     el.querySelector('.ext-quick-toggle').addEventListener('change', event => {
       // 모듈 작동 스위치(armed): 작동만 멈추고 버튼·팝업은 유지된다.

@@ -983,6 +983,34 @@ class ImageMetadataExtractor:
         return 'unknown'
 
 
+def json_safe_generation_params(value: Any, _depth: int = 0) -> Any:
+    """Generation params를 JSON-직렬화 가능한 사본으로 변환 (bytes → 자리표시자).
+
+    img2img/inpaint 결과의 ``generation_params``는 큐 리플레이를 위해 원시 이미지/
+    마스크 bytes(``image_bytes``/``mask_bytes`` 등)를 그대로 보존한다
+    (``add_api_result``의 NOTE 참조). FastAPI ``jsonable_encoder``는 bytes를 strict
+    UTF-8로 디코드해 바이너리에서 500을 내고, ``json_safe_metadata``의 lenient
+    디코드는 수 MB짜리 대체문자 문자열로 페이로드를 부풀리므로, 응답 경계에서는
+    바이너리를 길이 자리표시자로 치환한다. 저장본(원본 dict)은 변형하지 않는다.
+    """
+    # bytes 검사를 depth 캡보다 먼저: 깊이 초과 지점의 바이너리가 str(bytes) repr로
+    # 새는 대신 항상 동일한 자리표시자가 되도록 한다 (Codex V4). 캡에 걸린 컨테이너도
+    # str()로 펴면 내부 바이너리 repr이 통째로 새므로 절단 마커로 치환한다.
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"<binary {len(bytes(value))} bytes>"
+    if _depth > 8:
+        if isinstance(value, (dict, list, tuple, set)):
+            return f"<truncated container at depth {_depth}>"
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): json_safe_generation_params(val, _depth + 1) for key, val in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe_generation_params(item, _depth + 1) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 def json_safe_metadata(value: Any, _depth: int = 0) -> Any:
     """Make extracted metadata JSON-serializable.
 

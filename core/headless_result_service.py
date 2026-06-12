@@ -341,10 +341,18 @@ class HeadlessResultStore:
         return result_images.memory_history_thumbnail_payload(item, max_side)
 
     def history_meta_payload(self, history_id: str, include_full: bool = False) -> dict[str, Any]:
+        from utils.image_info import json_safe_generation_params
+
         item = self.get_item(history_id)
         if item is None:
             raise FileNotFoundError("History item not found")
-        payload = result_images.history_item_meta_payload(item, include_full=include_full)
+        # full=1 응답의 raw에는 generation_params가 그대로 실린다 — img2img/inpaint
+        # 항목의 리플레이용 bytes가 JSON 직렬화를 500으로 만들지 않도록 위생 처리.
+        payload = result_images.history_item_meta_payload(
+            item,
+            include_full=include_full,
+            metadata_json_safe=json_safe_generation_params,
+        )
         payload.update(self._history_pipeline_ids(item))
         return payload
 
@@ -451,11 +459,17 @@ class HeadlessResultStore:
                             value = ext_params.get(key)
                         if value not in ("", None):
                             summary[key] = value
+        # img2img/inpaint params는 리플레이용 원시 bytes(image_bytes/mask_bytes)를
+        # 보존한다(add_api_result NOTE) — 응답 경계에서 자리표시자로 치환하지 않으면
+        # FastAPI의 strict UTF-8 bytes 디코드가 /api/result/metadata를 500으로 만든다.
+        # 저장본(item.generation_params)은 사본 변환이라 영향 없다.
+        from utils.image_info import json_safe_generation_params
+
         return {
             "source": "current",
             "label": "Current Result",
             "summary": {key: value for key, value in summary.items() if value not in ("", None)},
-            "raw": raw,
+            "raw": json_safe_generation_params(raw),
             "has_metadata": True,
         }
 

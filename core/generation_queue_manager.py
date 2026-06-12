@@ -34,6 +34,8 @@ class GenerationQueueManager:
         self._queue: Deque[GenerationRequest] = deque()
         self._queue_lock = Lock()
         self._is_paused = False
+        # 실행 직전 건너뛰기 예약(확장 cancel 경합 보강) — mark/consume_cancellation.
+        self._cancelled_ids: list[str] = []
 
     def enqueue_request(self, request: GenerationRequest) -> str:
         """
@@ -234,6 +236,31 @@ class GenerationQueueManager:
         """
         with self._queue_lock:
             return list(self._queue)
+
+    def mark_cancelled(self, request_id: str) -> bool:
+        """대기열에 없는(이미 dequeue됐을 수 있는) 요청의 실행 직전 건너뛰기를 예약한다.
+
+        확장 cancel_generation의 경합 보강: enqueue→dispatched 발행 사이에 러너가
+        먼저 집어간 요청은 remove_request가 놓치므로, 러너가 실행 직전에
+        consume_cancellation으로 톰스톤을 소비해 건너뛴다. 이미 실행을 시작한
+        요청에는 효과가 없다(그 한계는 호출자에게 폴백으로 남는다)."""
+        clean = str(request_id or "").strip()
+        if not clean:
+            return False
+        with self._queue_lock:
+            self._cancelled_ids.append(clean)
+            # 완료/유실된 id가 영구 누적되지 않게 작은 FIFO로 유지.
+            while len(self._cancelled_ids) > 64:
+                self._cancelled_ids.pop(0)
+        return True
+
+    def consume_cancellation(self, request_id: str) -> bool:
+        clean = str(request_id or "").strip()
+        with self._queue_lock:
+            if clean in self._cancelled_ids:
+                self._cancelled_ids.remove(clean)
+                return True
+        return False
 
     def remove_request(self, request_id: str) -> bool:
         """

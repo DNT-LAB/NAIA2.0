@@ -222,10 +222,10 @@ class MyHook:
 | `ctx.get_api_mode()` | 현재 API 모드("NAI"/"WEBUI"/"COMFYUI") — 모드별 옵션 구성(샘플러 목록 등)에 사용 |
 | `ctx.resolve_nai_characters()` | 현재 NAI 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷 `{characters, uc, character_positions}` 또는 None. overrides에 실으면 그 요청은 늦은 바인딩(매장 재전개) 대신 스냅샷 사용 — 변형 묶음의 캐릭터 고정용 |
 | `ctx.enqueue_generation(prompt=, negative_prompt=, api_mode=, prompt_run_id=, priority=, overrides=, allow_chain=False)` | 생성 요청을 큐에 추가. 반환 `{ok, request_id, message}`. 파생 요청에는 `ext_origin`과 체인 깊이가 찍히며, **확장 파생 이벤트를 처리 중인 동안의 호출은 기본 차단**(확장 간 무한 연쇄 방지 — 의도적 체인은 `allow_chain=True`). 단 체인 깊이 4 초과는 `allow_chain`과 무관하게 무조건 거부 |
-| `ctx.cancel_generation(request_id)` | **대기(pending) 중인** 생성 요청을 큐에서 제거 → `{ok, message}`. 이미 시작/완료된 요청은 실패(ok=False). 용례: 그리드형 확장이 반응한 원본 요청을 파생 묶음으로 대체(X/Y Plot의 "그리드만 생성") — dispatched 콜백 안에서의 취소는 원본 실행 전에 결정적으로 적용 |
+| `ctx.cancel_generation(request_id)` | **대기(pending) 중인** 생성 요청을 큐에서 제거 → `{ok, skip_scheduled, message}`. `ok=True`=확정 제거. 큐에 없으면(소비 루프가 먼저 가져간 경합) **실행 전 건너뛰기 톰스톤**을 예약하고 `skip_scheduled=True` — 호출자는 ok와 거의 동일하게 취급하되 이미 실행이 시작된 마이크로초 윈도만 예외. 둘 다 False면 원본이 그대로 생성됨. 용례: X/Y Plot의 "그리드만 생성" |
 | `ctx.get_result_image(request_id)` | 완료된 요청의 이미지 조회 → `{ok, image(PIL 사본), file_path, message}`. `generation_result_available` 콜백에서 이벤트의 request_id로 호출하는 패턴(저장 경로는 비동기라 ""일 수 있음 — 이미지는 항상 메모리에 있음). 용례: X/Y 그리드 합성 |
 | `ctx.get_save_directory()` | 현재 세션의 자동 저장 디렉터리 경로(str). 확장 산출물(그리드 PNG 등)을 사용자 저장 폴더 곁에 두는 용도 |
-| `ctx.load_settings(defaults)` / `ctx.save_settings(dict)` | `settings.json` 읽기(defaults 병합)/쓰기 |
+| `ctx.load_settings(defaults)` / `ctx.save_settings(dict)` | `settings.json` 읽기(defaults 병합)/쓰기. save는 **무손실 여부**를 bool로 반환 — 직렬화 불가 값은 repr 문자열로 강등 기록하고 False(라운드트립 비보장) |
 | `ctx.log(msg)` | `[ext:<id>]` 접두사 콘솔 로그 |
 | `ctx.ext_id` `ctx.name` `ctx.version` `ctx.ext_dir` `ctx.api_version` | 식별/경로 |
 

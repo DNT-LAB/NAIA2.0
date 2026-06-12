@@ -164,11 +164,14 @@ class SeedFanout:
         base = self._base_seed(params.get("seed"))
 
         # 캐릭터 고정 시 원본을 취소하고 총 N장 전부를 스냅샷 공유 묶음으로 대체
-        # — 원본만 캐릭터를 따로 추첨해 묶음과 어긋나는 문제 방지. 취소가 실패하면
-        # (이미 실행 시작 등) 기존처럼 원본 유지 + 변형 N-1장으로 폴백.
+        # — 원본만 캐릭터를 따로 추첨해 묶음과 어긋나는 문제 방지. 확정 제거(ok)
+        # 또는 건너뛰기 예약(skip_scheduled — 러너가 실행 전에 톰스톤 소비)이면
+        # 대체로 간주한다(Codex R2-#2: 예약인데 원본까지 나오는 건 이미 execute가
+        # 시작된 마이크로초 윈도뿐). 둘 다 아니면 원본 유지 + 변형 N-1장 폴백.
         replace_original = False
         if char_overrides:
-            replace_original = self.ctx.cancel_generation(info.get("request_id")).get("ok", False)
+            cancel = self.ctx.cancel_generation(info.get("request_id"))
+            replace_original = bool(cancel.get("ok") or cancel.get("skip_scheduled"))
         seeds = self._variant_seeds(base, variants, mode)
         if replace_original:
             seeds = [base] + seeds
@@ -260,7 +263,7 @@ class SeedFanout:
         if not cells:
             self.ctx.log("X/Y Plot: 유효한 조합이 없어 원본만 생성합니다")
             return
-        cancelled = self.ctx.cancel_generation(info.get("request_id")).get("ok", False)
+        cancel = self.ctx.cancel_generation(info.get("request_id"))
         queued = 0
         id_map = {}
         for overrides, prompt, col, row in cells:
@@ -269,7 +272,12 @@ class SeedFanout:
                 queued += 1
                 if result.get("request_id"):
                     id_map[result["request_id"]] = (col, row)
-        origin_note = "원본 취소, 그리드만" if cancelled else "원본 유지(취소 실패)"
+        if cancel.get("ok"):
+            origin_note = "원본 취소, 그리드만"
+        elif cancel.get("skip_scheduled"):
+            origin_note = "원본 건너뛰기 예약, 그리드만"
+        else:
+            origin_note = "원본 유지(취소 실패)"
         self.ctx.log(f"X/Y Plot: {queued}/{len(cells)}장 큐 추가 ({origin_note}, seed={base_seed} 고정)")
 
         # n×m 합성 이미지: 전 셀 완료 시 grid/ 폴더에 저장(설정으로 끌 수 있음).

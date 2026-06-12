@@ -226,6 +226,18 @@ class HeadlessResultStore:
                 return item
         return None
 
+    def find_by_generation_request_id(self, request_id: str) -> HeadlessHistoryItem | None:
+        """생성 요청 id로 히스토리 항목 조회(없으면 None) — 확장 ctx의
+        get_result_image가 쓰는 public 표면(비공개 _items 직접 스캔 대체)."""
+        clean = str(request_id or "")
+        if not clean:
+            return None
+        for item in list(self._items):  # add/evict 동시 변경 대비 스냅샷 순회
+            params = getattr(item, "generation_params", None) or {}
+            if str(params.get("generation_request_id") or "") == clean:
+                return item
+        return None
+
     def history_total(self) -> int:
         return len(self._items)
 

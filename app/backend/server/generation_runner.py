@@ -353,6 +353,13 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             request = await asyncio.to_thread(context.generation_queue_manager.dequeue_request)
             if request is None:
                 break
+            # 확장 cancel_generation의 dequeue 경합 보강(Codex R1-#2): enqueue 직후
+            # 러너가 큐 제거보다 먼저 집어간 요청은 톰스톤으로 실행 직전에 건너뛴다.
+            consume_cancel = getattr(context.generation_queue_manager, "consume_cancellation", None)
+            if callable(consume_cancel) and consume_cancel(request.request_id):
+                print(f"[QUEUE] 취소 예약 소비 — 실행 건너뜀: {request.request_id[:8]}...", flush=True)
+                await broadcast_json(clients, context.queue_state_payload())
+                continue
             context.is_generating = True
             await broadcast_json(clients, {"type": "status", "is_generating": True, "message": "generating"})
             await broadcast_json(clients, context.queue_state_payload())

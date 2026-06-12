@@ -30,6 +30,7 @@ import os
 import re
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -44,6 +45,8 @@ EXT_CALLBACK_MUTE_THRESHOLD = 5
 # 확장 파생 요청의 최대 체인 깊이. allow_chain=True여도 이 깊이를 넘는
 # enqueue는 무조건 거부된다(버그성 무한 연쇄의 호스트 측 절대 상한).
 EXT_CHAIN_DEPTH_MAX = 4
+# show_toast 남용 방어(Codex R1-#3): 확장당 최소 발행 간격(초) + 재진입 차단.
+EXT_TOAST_MIN_INTERVAL = 0.25
 SETTINGS_FILENAME = "settings.json"
 # 확장 퀵 버튼의 메인 UI 노출 위치: 도구바(독립 바) / 자동화·고급 기능 카테고리 /
 # 없음. (프롬프트 도구는 항목이 많아 스크롤 폴드에 묻히고, Fn 메뉴는 팝업 앵커
@@ -54,6 +57,22 @@ PLACEMENT_DEFAULT = "tools"
 
 def _ext_print(ext_id: str, message: str) -> None:
     print(f"[ext:{ext_id}] {message}", flush=True)
+
+
+def _json_sanitize(value: Any) -> Any:
+    """save_settings 폴백용 재귀 정화 — 비유한 float(NaN/inf)를 repr 문자열로
+    강등해, 폴백 경로에서도 비표준 JSON 리터럴이 파일에 남지 않게 한다
+    (Codex R4-#5; 키는 str 강제, 직렬화 불가 타입은 dumps의 default=repr 몫)."""
+    try:
+        if isinstance(value, dict):
+            return {str(key): _json_sanitize(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [_json_sanitize(item) for item in value]
+        if isinstance(value, float) and (value != value or value in (float("inf"), float("-inf"))):
+            return repr(value)
+        return value
+    except (SystemExit, Exception):
+        return repr(value)
 
 
 def _safe_error_text(exc: BaseException) -> str:
@@ -74,6 +93,8 @@ def _safe_error_text(exc: BaseException) -> str:
 # EXT_CHAIN_DEPTH_MAX 초과는 allow_chain과 무관하게 무조건 차단 — A확장 변형에
 # B확장이 또 생성을 붙이는 무한 연쇄(큐 폭주)를 호스트 차원에서 끊는다.
 _CHAIN_GUARD = threading.local()
+# show_toast 재진입 가드 — extension_toast 구독 콜백 안에서의 재호출(무한 재귀) 차단.
+_TOAST_GUARD = threading.local()
 
 
 def _current_event_chain_depth() -> int:
@@ -401,6 +422,8 @@ class ExtensionContext:
         self._wrapped: dict[tuple, tuple[str, Callable[..., Any]]] = {}
         # 등록한 훅 어댑터(teardown 시 레지스트리에서 제거).
         self._hook_adapters: list[Any] = []
+        # show_toast 레이트 리밋 기준 시각(확장 인스턴스 단위).
+        self._last_toast_at = 0.0
 
     # ── 식별/로그 ────────────────────────────────────────────────
     @property
@@ -617,28 +640,47 @@ class ExtensionContext:
 
         이미 실행을 시작했거나 큐에 없는 요청은 제거되지 않는다(ok=False).
         용례: 그리드형 확장이 자신이 반응한 원본 요청을 파생 묶음으로 대체
-        (예: X/Y Plot — 원본 1장을 취소하고 그리드만 남김). dispatched 이벤트
-        콜백은 큐 소비 루프와 같은 이벤트 루프 턴에서 동기 실행되므로, 콜백
-        안에서의 취소는 원본이 시작되기 전에 결정적으로 적용된다."""
+        (예: X/Y Plot — 원본 1장을 취소하고 그리드만 남김).
+
+        경합 보강(Codex R1-#2/R2): enqueue→dispatched 발행 사이에 소비 루프가
+        먼저 dequeue해 간 요청은 remove가 놓친다 — 이 경우 톰스톤을 남겨
+        러너가 실행 직전에 건너뛴다(mark/consume_cancellation). 반환 dict의
+        ``skip_scheduled``가 True면 그 예약이 걸린 상태다: 호출자는 ok=True와
+        거의 동일하게(원본이 안 나온다고) 취급하되, 이미 execute가 시작된
+        마이크로초 윈도에서는 원본이 그대로 생성될 수 있음을 감안해야 한다
+        (ok=True만이 확정 제거)."""
         if not self._record.is_active:
-            return {"ok": False, "message": "extension disabled"}
+            return {"ok": False, "skip_scheduled": False, "message": "extension disabled"}
         try:
             rid = str(request_id or "").strip()
             if not rid:
-                return {"ok": False, "message": "request_id가 비었습니다"}
+                return {"ok": False, "skip_scheduled": False, "message": "request_id가 비었습니다"}
             queue = getattr(self._app_context, "generation_queue_manager", None)
             remover = getattr(queue, "remove_request", None)
             if not callable(remover):
-                return {"ok": False, "message": "큐 제거를 지원하지 않는 런타임입니다"}
+                return {"ok": False, "skip_scheduled": False, "message": "큐 제거를 지원하지 않는 런타임입니다"}
             if bool(remover(rid)):
-                return {"ok": True, "message": ""}
-            return {"ok": False, "message": "이미 실행 중이거나 큐에 없는 요청"}
+                return {"ok": True, "skip_scheduled": False, "message": ""}
+            marker = getattr(queue, "mark_cancelled", None)
+            if callable(marker) and marker(rid):
+                # 큐엔 없지만 실행 전이면 러너가 톰스톤을 소비해 건너뛴다.
+                return {
+                    "ok": False,
+                    "skip_scheduled": True,
+                    "message": "큐에 없음 — 실행 전이면 건너뛰도록 예약됨",
+                }
+            return {"ok": False, "skip_scheduled": False, "message": "이미 실행 중이거나 큐에 없는 요청"}
         except (SystemExit, Exception) as exc:
-            return {"ok": False, "message": _safe_error_text(exc)}
+            return {"ok": False, "skip_scheduled": False, "message": _safe_error_text(exc)}
 
     # ── 모드/토스트 ──────────────────────────────────────────────
     def get_api_mode(self) -> str:
-        """현재 API 모드("NAI"/"WEBUI"/"COMFYUI") — 실패 시 ""."""
+        """현재 API 모드("NAI"/"WEBUI"/"COMFYUI") — 실패 시 "".
+
+        의도적으로 is_active 게이트가 없다: register(ctx) 시점(status=loading,
+        is_active=False)에 모드별 패널 옵션(샘플러 목록 등)을 구성하는 정당한
+        용례가 있고, 부작용 없는 순수 읽기다(Codex R1-#1 검토 결과 — 상태를
+        만지거나 와일드카드를 소모하는 resolve_nai_characters와 달리 무해)."""
         try:
             return str(self._app_context.get_api_mode() or "")
         except (SystemExit, Exception):
@@ -650,21 +692,38 @@ class ExtensionContext:
         level: info | success | warning | error. 백엔드의 "extension_toast"
         이벤트 → WS 브릿지로 중계되며, 브릿지/클라이언트가 없으면 콘솔 로그만
         남는다(무해). 검증 실패 안내("시작 프롬프트가 프롬프트에 없습니다" 등)
-        같은 사용자 피드백 용도."""
+        같은 사용자 피드백 용도.
+
+        남용 방어(Codex R1-#3): ① 같은 스레드 재진입 차단 — extension_toast를
+        구독한 확장이 콜백에서 다시 show_toast를 불러도 무한 재귀가 되지 않는다.
+        ② 확장당 최소 발행 간격(EXT_TOAST_MIN_INTERVAL) — 루프성 호출은 로그만
+        남기고 드롭해 WS 브로드캐스트 폭주를 막는다."""
         if not self._record.is_active:
+            return
+        if getattr(_TOAST_GUARD, "active", False):
+            self.log("show_toast 재진입 차단(extension_toast 콜백 안에서 호출)")
             return
         try:
             text = str(message or "").strip()
             if not text:
                 return
+            now = time.monotonic()
+            if now - self._last_toast_at < EXT_TOAST_MIN_INTERVAL:
+                self.log(f"toast 드롭(rate-limit {EXT_TOAST_MIN_INTERVAL}s): {text[:80]}")
+                return
+            self._last_toast_at = now
             lvl = str(level or "info").lower()
             if lvl not in {"info", "success", "warning", "error"}:
                 lvl = "info"
             self.log(f"toast({lvl}): {text}")
-            self._app_context.publish(
-                "extension_toast",
-                {"message": text[:300], "level": lvl, "ext_id": self.ext_id},
-            )
+            _TOAST_GUARD.active = True
+            try:
+                self._app_context.publish(
+                    "extension_toast",
+                    {"message": text[:300], "level": lvl, "ext_id": self.ext_id},
+                )
+            finally:
+                _TOAST_GUARD.active = False
         except (SystemExit, Exception) as exc:
             self.log(f"show_toast failed: {_safe_error_text(exc)}")
 
@@ -681,23 +740,19 @@ class ExtensionContext:
         try:
             rid = str(request_id or "").strip()
             store = getattr(self._app_context, "result_store", None)
-            items = getattr(store, "_items", None)
-            if not rid or items is None:
+            finder = getattr(store, "find_by_generation_request_id", None)
+            if not rid or not callable(finder):
                 return {"ok": False, "image": None, "file_path": "", "message": "결과 저장소 없음"}
-            for item in list(items):
-                params = getattr(item, "generation_params", None) or {}
-                if str(params.get("generation_request_id") or "") != rid:
-                    continue
-                image = getattr(item, "image", None)
-                if image is None:
-                    break
-                return {
-                    "ok": True,
-                    "image": image.copy(),
-                    "file_path": str(getattr(item, "filepath", "") or ""),
-                    "message": "",
-                }
-            return {"ok": False, "image": None, "file_path": "", "message": "해당 요청의 결과 없음"}
+            item = finder(rid)
+            image = getattr(item, "image", None) if item is not None else None
+            if image is None:
+                return {"ok": False, "image": None, "file_path": "", "message": "해당 요청의 결과 없음"}
+            return {
+                "ok": True,
+                "image": image.copy(),
+                "file_path": str(getattr(item, "filepath", "") or ""),
+                "message": "",
+            }
         except (SystemExit, Exception) as exc:
             return {"ok": False, "image": None, "file_path": "", "message": _safe_error_text(exc)}
 
@@ -718,10 +773,14 @@ class ExtensionContext:
         """현재 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷을 돌려준다.
 
         반환: {"characters": [...], "uc": [...], "character_positions": [...]} 또는
-        None(캐릭터 비활성/NAI 아님/실패). 이 스냅샷을 enqueue_generation의
-        overrides에 그대로 실으면 해당 요청은 실행 시 늦은 바인딩(매번 재전개)
-        대신 스냅샷을 사용한다 — 변형 묶음의 캐릭터 프롬프트 고정용.
+        None(캐릭터 비활성/NAI 아님/비활성 확장/실패). 이 스냅샷을
+        enqueue_generation의 overrides에 그대로 실으면 해당 요청은 실행 시 늦은
+        바인딩(매번 재전개) 대신 스냅샷을 사용한다 — 변형 묶음의 캐릭터 고정용.
+        전개는 와일드카드 롤을 소모하는 부작용이 있으므로 비활성 확장은 차단
+        (Codex R1-#1).
         """
+        if not self._record.is_active:
+            return None
         try:
             mode = str(self._app_context.get_api_mode() or "NAI")
             if mode != "NAI":
@@ -746,24 +805,50 @@ class ExtensionContext:
         파일이 없거나 깨져 있으면 defaults 사본을 반환한다(읽기 전용 — 파일을
         만들지는 않는다).
         """
-        merged = dict(defaults or {})
-        path = self.ext_dir / SETTINGS_FILENAME
         try:
+            merged = dict(defaults or {})
+        except (SystemExit, Exception):
+            merged = {}
+        try:
+            path = self.ext_dir / SETTINGS_FILENAME
             raw = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 merged.update(raw)
         except FileNotFoundError:
             pass
-        except Exception as exc:
-            self.log(f"settings.json read failed ({exc}) — defaults 사용")
+        except (SystemExit, Exception) as exc:
+            self.log(f"settings.json read failed ({_safe_error_text(exc)}) — defaults 사용")
         return merged
 
-    def save_settings(self, data: dict[str, Any]) -> None:
-        path = self.ext_dir / SETTINGS_FILENAME
-        path.write_text(
-            json.dumps(dict(data or {}), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+    def save_settings(self, data: dict[str, Any]) -> bool:
+        """``settings.json`` 저장 → **무손실 성공 여부**. no-throw(Codex R1-#5/R2).
+
+        True = JSON 라운드트립이 보장되는 저장 — 직렬화 결과를 다시 파싱해
+        원본과 ==로 대조해 판정한다(json.dumps의 **암묵 변환**까지 탐지:
+        비문자열 dict 키의 str 강제, tuple→list 등 — Codex R3-#5). 직렬화 불가
+        값은 repr 문자열로 강등해 기록하고 False(데이터는 남되 라운드트립
+        비보장 — load_settings는 변환된 형태를 돌려준다). IO 실패도 False+로그."""
+        try:
+            payload = dict(data or {})
+            try:
+                # allow_nan=False(Codex R4): NaN/inf는 표준 JSON이 아니다 — 여기서
+                # ValueError로 떨어뜨려 아래 정화 폴백으로 강등한다(엄격한 외부
+                # 파서가 못 읽는 비표준 리터럴을 파일에 남기지 않음).
+                text = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)
+                lossless = json.loads(text) == payload
+                if not lossless:
+                    self.log("save_settings: JSON 암묵 변환 감지(비문자열 키/tuple 등) — 라운드트립 비보장")
+            except (TypeError, ValueError):
+                sanitized = _json_sanitize(payload)
+                text = json.dumps(sanitized, ensure_ascii=False, indent=2, default=repr, allow_nan=False)
+                lossless = False
+                self.log("save_settings: 직렬화 불가/비표준 값을 repr 문자열로 기록(라운드트립 비보장)")
+            path = self.ext_dir / SETTINGS_FILENAME
+            path.write_text(text, encoding="utf-8")
+            return lossless
+        except (SystemExit, Exception) as exc:
+            self.log(f"save_settings failed: {_safe_error_text(exc)}")
+            return False
 
     # ── 내부: 부분 등록 롤백 ─────────────────────────────────────
     def _teardown(self) -> None:

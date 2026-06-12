@@ -51,7 +51,9 @@ AXIS_RESCALE = "PG.Rescale"
 AXIS_SAMPLER = "Sampler"
 AXIS_EMPHASIS = "프롬프트 강조"
 AXIS_SWAP = "프롬프트 스왑"
-AXIS_OPTIONS = [AXIS_NONE, AXIS_CFG, AXIS_RESCALE, AXIS_SAMPLER, AXIS_EMPHASIS, AXIS_SWAP]
+# PG.Rescale(cfg_rescale)은 NAI 전용 파라미터 — 다른 모드에선 축 옵션에서 제외.
+AXIS_OPTIONS_NAI = [AXIS_NONE, AXIS_CFG, AXIS_RESCALE, AXIS_SAMPLER, AXIS_EMPHASIS, AXIS_SWAP]
+AXIS_OPTIONS_LOCAL = [AXIS_NONE, AXIS_CFG, AXIS_SAMPLER, AXIS_EMPHASIS, AXIS_SWAP]
 
 DEFAULT_SETTINGS = {
     "feature": FEATURE_FANOUT,
@@ -60,7 +62,9 @@ DEFAULT_SETTINGS = {
     "char_fix": False,
     "make_grid": True,
     "x_axis": AXIS_NONE,
-    "x_range": "5,7,1",
+    "x_range_start": 5.0,
+    "x_range_step": 1.0,
+    "x_range_end": 7.0,
     "x_samplers_pick": [],
     "x_emph_target": "",
     "x_emph_start": 0.6,
@@ -69,7 +73,9 @@ DEFAULT_SETTINGS = {
     "x_swap_base": "",
     "x_swap_steps": [],
     "y_axis": AXIS_NONE,
-    "y_range": "0,0.4,0.2",
+    "y_range_start": 0.0,
+    "y_range_step": 0.2,
+    "y_range_end": 0.4,
     "y_samplers_pick": [],
     "y_emph_target": "",
     "y_emph_start": 0.6,
@@ -87,12 +93,14 @@ MODE_SAMPLERS = {
 }
 
 
-def _float_range(args_text):
-    """"시작,끝,간격" → [시작, 시작+간격, ... ≤끝] (소수 2자리 반올림)."""
-    parts = [part.strip() for part in str(args_text or "").split(",") if part.strip()]
-    start, end, step = float(parts[0]), float(parts[1]), float(parts[2])
+def _float_ladder(start, step, end):
+    """시작→종료를 스텝 간격으로 오르는 값 사다리(소수 2자리 반올림).
+    검증 실패는 ValueError — 호출자가 토스트로 사용자에게 안내한다."""
+    start, step, end = float(start), float(step), float(end)
     if step <= 0:
-        raise ValueError("간격은 양수여야 합니다")
+        raise ValueError("스텝은 양수여야 합니다")
+    if end < start:
+        raise ValueError("종료 값이 시작 값보다 작습니다")
     values = []
     current = start
     while current <= end + 1e-9 and len(values) <= MAX_GRID:
@@ -476,12 +484,18 @@ class SeedFanout:
         if axis == AXIS_NONE:
             return ([None], "")
         try:
-            if axis == AXIS_CFG:
-                return ([("param", ("cfg_scale", value), f"{value:g}")
-                         for value in _float_range(settings.get(f"{prefix}_range"))], "CFG Scale")
-            if axis == AXIS_RESCALE:
-                return ([("param", ("cfg_rescale", value), f"{value:g}")
-                         for value in _float_range(settings.get(f"{prefix}_range"))], "PG.Rescale")
+            if axis in (AXIS_CFG, AXIS_RESCALE):
+                if axis == AXIS_RESCALE and api_mode != "NAI":
+                    self._toast(f"{axis_name}축 PG.Rescale은 NAI 전용입니다 — 다른 축을 선택하세요")
+                    return None
+                values = _float_ladder(
+                    settings.get(f"{prefix}_range_start"),
+                    settings.get(f"{prefix}_range_step"),
+                    settings.get(f"{prefix}_range_end"),
+                )
+                param_key = "cfg_scale" if axis == AXIS_CFG else "cfg_rescale"
+                return ([("param", (param_key, value), f"{value:g}") for value in values],
+                        "CFG Scale" if axis == AXIS_CFG else "PG.Rescale")
             if axis == AXIS_SAMPLER:
                 # 현재 모드 샘플러 목록에서 체크 선택 — 선택 수 = 생성 수.
                 picked = settings.get(f"{prefix}_samplers_pick")
@@ -499,22 +513,13 @@ class SeedFanout:
                 if not target:
                     self._toast(f"{axis_name}축 강조 사다리: 원본 프롬프트를 입력하세요(모든 칸 필수)")
                     return None
-                start = float(settings.get(f"{prefix}_emph_start"))
-                step = float(settings.get(f"{prefix}_emph_step"))
-                end = float(settings.get(f"{prefix}_emph_end"))
-                if step <= 0:
-                    self._toast(f"{axis_name}축 강조 사다리: 가중치 스텝은 양수여야 합니다")
-                    return None
-                if end < start:
-                    self._toast(f"{axis_name}축 강조 사다리: 종료 가중치가 시작보다 작습니다")
-                    return None
-                items = []
-                weight = start
-                while weight <= end + 1e-9 and len(items) <= MAX_GRID:
-                    rounded = round(weight, 2)
-                    items.append(("prompt", (target, _wrap_emphasis(target, rounded, api_mode)),
-                                  f"{rounded:g}"))
-                    weight += step
+                weights = _float_ladder(
+                    settings.get(f"{prefix}_emph_start"),
+                    settings.get(f"{prefix}_emph_step"),
+                    settings.get(f"{prefix}_emph_end"),
+                )
+                items = [("prompt", (target, _wrap_emphasis(target, weight, api_mode)), f"{weight:g}")
+                         for weight in weights]
                 return (items, f"프롬프트 강조 · {target[:16]}")
             if axis == AXIS_SWAP:
                 # 시작 프롬프트 + Step 대치 프롬프트들(빌더) — 전부 필수.
@@ -551,27 +556,35 @@ class SeedFanout:
         return result
 
 
-def _axis_fields(prefix, section, base_order, when_xy, samplers):
+def _axis_fields(prefix, section, base_order, when_xy, samplers, axis_options):
     """축 1개분 패널 필드 — 종류 select + 종류별 전용 입력칸. 입력칸의
     visible_when은 종류 select를 가리키고, 종류 자신은 모드(feature)에 묶여
     있어 모드≠X/Y면 계단식으로 함께 숨는다. 스왑은 3번째 칼럼(extra)에
-    [시작 프롬프트]+[Step n 대치 프롬프트]+[추가+] 빌더로 펼쳐진다."""
+    [시작 프롬프트]+[Step n 대치 프롬프트]+[추가+] 빌더로 펼쳐진다.
+    axis_options는 모드별(PG.Rescale은 NAI 전용)."""
     axis_key = f"{prefix}_axis"
     common = {"column": "right", "section": section, "apply": "next-generation"}
+    when_range = {"field": axis_key, "in": [AXIS_CFG, AXIS_RESCALE]}
     when_emph = {"field": axis_key, "in": [AXIS_EMPHASIS]}
     when_swap = {"field": axis_key, "in": [AXIS_SWAP]}
     return [
-        {"key": axis_key, "type": "select", "options": AXIS_OPTIONS, "default": AXIS_NONE,
+        {"key": axis_key, "type": "select", "options": axis_options, "default": AXIS_NONE,
          "label": "종류", "order": base_order, "visible_when": when_xy, **common},
-        {"key": f"{prefix}_range", "type": "text", "default": DEFAULT_SETTINGS[f"{prefix}_range"],
-         "label": "값 범위", "placeholder": "시작,끝,간격 — 예: 5,7,1",
-         "help": "시작,끝,간격. 예: 5,7,1 → 5·6·7 세 값 = 3장",
-         "order": base_order + 1,
-         "visible_when": {"field": axis_key, "in": [AXIS_CFG, AXIS_RESCALE]}, **common},
+        # ── CFG Scale · PG.Rescale: 시작/스텝/종료 3칸(강조 사다리와 동일 UI) ──
+        {"key": f"{prefix}_range_start", "type": "float",
+         "default": DEFAULT_SETTINGS[f"{prefix}_range_start"], "step": 0.5,
+         "label": "시작 값", "order": base_order + 1, "visible_when": when_range, **common},
+        {"key": f"{prefix}_range_step", "type": "float",
+         "default": DEFAULT_SETTINGS[f"{prefix}_range_step"], "min": 0.05, "step": 0.05,
+         "label": "값 스텝", "order": base_order + 2, "visible_when": when_range, **common},
+        {"key": f"{prefix}_range_end", "type": "float",
+         "default": DEFAULT_SETTINGS[f"{prefix}_range_end"], "step": 0.5,
+         "label": "종료 값", "help": "시작→종료를 스텝 간격으로 1장씩(상한 32)",
+         "order": base_order + 3, "visible_when": when_range, **common},
         {"key": f"{prefix}_samplers_pick", "type": "multiselect", "options": samplers,
          "default": list(samplers), "label": "샘플러 선택",
          "help": "현재 모드의 샘플러 목록 — 체크한 샘플러 1개당 1장(선택 수 = 생성 수)",
-         "order": base_order + 2,
+         "order": base_order + 4,
          "visible_when": {"field": axis_key, "in": [AXIS_SAMPLER]}, **common},
         # ── 강조 사다리: 원본 프롬프트(쉼표 허용) + 시작/스텝/종료 — 전부 필수 ──
         {"key": f"{prefix}_emph_target", "type": "text", "multiline": True, "default": "",
@@ -579,13 +592,13 @@ def _axis_fields(prefix, section, base_order, when_xy, samplers):
          "help": "프롬프트 창에 존재하는 태그(시퀀스)를 그대로 입력 — 매칭은 태그 경계 기준"
                  "(smile은 bitter smile 안이 아니라 독립 태그 smile에만 일치). "
                  "이 구간에 가중을 입혀 1장씩 생성 — 문법은 모드 자동(NAI w::…::, 로컬 (…:w))",
-         "order": base_order + 3, "visible_when": when_emph, **common},
+         "order": base_order + 5, "visible_when": when_emph, **common},
         {"key": f"{prefix}_emph_start", "type": "float", "default": 0.6, "step": 0.1,
-         "label": "시작 가중치", "order": base_order + 4, "visible_when": when_emph, **common},
+         "label": "시작 가중치", "order": base_order + 6, "visible_when": when_emph, **common},
         {"key": f"{prefix}_emph_step", "type": "float", "default": 0.4, "min": 0.05, "step": 0.05,
-         "label": "가중치 스텝", "order": base_order + 5, "visible_when": when_emph, **common},
+         "label": "가중치 스텝", "order": base_order + 7, "visible_when": when_emph, **common},
         {"key": f"{prefix}_emph_end", "type": "float", "default": 1.4, "step": 0.1,
-         "label": "종료 가중치", "order": base_order + 6, "visible_when": when_emph, **common},
+         "label": "종료 가중치", "order": base_order + 8, "visible_when": when_emph, **common},
         # ── 프롬프트 스왑: 3번째 칼럼(extra) 빌더 ──
         {"key": f"{prefix}_swap_base", "type": "text", "multiline": True, "default": "",
          "label": "시작 프롬프트", "placeholder": "프롬프트 창에 존재하는 태그(시퀀스) — 쉼표 포함 긴 구문 가능",
@@ -593,13 +606,13 @@ def _axis_fields(prefix, section, base_order, when_xy, samplers):
                  "(smile은 bitter smile 안이 아니라 독립 태그 smile에만 일치). "
                  "프롬프트에 없으면 토스트로 안내하고 중단",
          "column": "extra", "section": f"{section} · 프롬프트 스왑", "apply": "next-generation",
-         "order": base_order + 7, "visible_when": when_swap},
+         "order": base_order + 9, "visible_when": when_swap},
         {"key": f"{prefix}_swap_steps", "type": "list", "multiline": True, "default": [],
          "label": "대치할 프롬프트", "placeholder": "이 내용으로 교체 — 쉼표 포함 긴 구문 가능",
          "help": "Step 1개당 1장 — [추가 +]로 늘리고 ×로 제거. "
                  "\"spread legs, pen, the pen glides across warm skin\" 같은 구문 전체 가능",
          "column": "extra", "section": f"{section} · 프롬프트 스왑", "apply": "next-generation",
-         "order": base_order + 8, "visible_when": when_swap},
+         "order": base_order + 10, "visible_when": when_swap},
     ]
 
 
@@ -612,6 +625,8 @@ def _register_panel(ctx, ext):
     if hasattr(ctx, "get_api_mode"):
         mode = str(ctx.get_api_mode() or "")
     samplers = MODE_SAMPLERS.get(mode, MODE_SAMPLERS["NAI"])
+    # PG.Rescale은 NAI 전용 — 다른 모드에선 축 선택지에서 제외(모드 미상=NAI 간주).
+    axis_options = AXIS_OPTIONS_NAI if mode in ("", "NAI") else AXIS_OPTIONS_LOCAL
     when_fanout = {"field": "feature", "in": [FEATURE_FANOUT]}
     when_xy = {"field": "feature", "in": [FEATURE_XY]}
     ctx.register_panel(
@@ -634,8 +649,8 @@ def _register_panel(ctx, ext):
                      "스냅샷을 공유(캐릭터 와일드카드 재롤 방지). 끄면 장마다 재전개",
              "apply": "next-generation", "order": 3},
             # ── X/Y Plot (복잡 모드 → 우측 칼럼, 축 종류별 입력칸 전환) ──
-            *_axis_fields("x", "X 축", 10, when_xy, samplers),
-            *_axis_fields("y", "Y 축", 30, when_xy, samplers),
+            *_axis_fields("x", "X 축", 10, when_xy, samplers, axis_options),
+            *_axis_fields("y", "Y 축", 30, when_xy, samplers, axis_options),
             {"key": "make_grid", "type": "bool", "default": True,
              "label": "그리드 합성 저장",
              "help": "전 셀 완료 시 n×m 합성 PNG를 저장 폴더의 grid/ 아래 생성"

@@ -85,9 +85,12 @@ export function createTranslationHistoryPanel({
       panel.style.right = 'auto';
       panel.style.bottom = 'auto';
       // 정의된 height 필수 — 1:1 flex(고정됨/기록)는 부모 높이가 정의돼야 분할된다(max-height
-      // 만으론 basis-0 섹션이 0으로 붕괴해 행이 사라졌음). 팝업 높이에 맞추되 화면 안으로 클램프.
+      // 만으론 basis-0 섹션이 0으로 붕괴해 행이 사라졌음). ⚠️ 팝업 높이에 묶지 않는다 —
+      // 팝업은 입력+버튼이라 짧지만(~530px) 기록 패널은 고정됨/기록 2단 페이지 리스트라
+      // 세로 공간이 클수록 행이 더 보이고 펼친 결과도 안 잘린다. 가용 뷰포트 높이를 쓰되
+      // 화면 안으로 클램프(최소 240).
       const availH = win.innerHeight - top - margin;
-      const h = Math.round(Math.max(240, Math.min(r.height || availH, availH)));
+      const h = Math.round(Math.max(240, availH));
       panel.style.height = `${h}px`;
       panel.style.maxHeight = `${h}px`;
       return;
@@ -156,9 +159,26 @@ export function createTranslationHistoryPanel({
       badges.appendChild(b);
     }
 
+    const canRestore = (typeof onRestore === 'function');
+
     const actions = document.createElement('div');
     actions.className = 'xlation-history-row-actions';
-    // 결과 복사 — 몸통 클릭이 복원으로 바뀌면서 복사는 전용 버튼으로 분리(펼침 불필요).
+    // 펼침 토글 — 결과를 패널 안에서 미리보기(복원 없이). 복원은 행(머리) 클릭이 담당하므로
+    // 미리보기는 전용 버튼으로 분리(행 클릭=복원과 충돌 방지).
+    const expandBtn = document.createElement('button');
+    expandBtn.type = 'button';
+    expandBtn.className = 'xlation-history-act expand';
+    expandBtn.title = '결과 미리보기';
+    expandBtn.textContent = '⌄';
+    expandBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wasOpen = row.classList.contains('expanded');
+      // 전체(고정됨+기록)에서 한 번에 하나만 펼친다 — 펼침 길이 폭발 방지.
+      if (panel) panel.querySelectorAll('.xlation-history-row.expanded').forEach(r => r.classList.remove('expanded'));
+      if (!wasOpen) row.classList.add('expanded');
+    });
+    actions.appendChild(expandBtn);
+    // 결과 복사 — 복원/미리보기와 별개로 결과만 클립보드에 복사.
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
     copyBtn.className = 'xlation-history-act copy';
@@ -198,22 +218,24 @@ export function createTranslationHistoryPanel({
     const foot = document.createElement('div');
     foot.className = 'xlation-history-meta';
     const ctxTime = timeLabel(rec.ts);
-    const clickHint = (typeof onRestore === 'function') ? '클릭하면 복원' : '클릭하면 복사';
-    foot.textContent = ctxTime ? `${ctxTime} · ${clickHint}` : clickHint;
+    foot.textContent = ctxTime || '';
     body.appendChild(dst);
-    body.appendChild(foot);
+    if (foot.textContent) body.appendChild(foot);
+    // 펼친 결과 클릭도 복원(머리와 동일) — 결과를 보고 바로 되살리는 자연스러운 동작.
     body.addEventListener('click', (e) => {
       e.stopPropagation();
-      // 복원(기본): 팝업의 입력:결과 쌍을 방금 변환을 마친 것처럼 되살린다.
-      // onRestore 미주입(구버전 호스트) 폴백 = 기존 복사 동작.
-      if (typeof onRestore === 'function') onRestore(rec);
+      if (canRestore) onRestore(rec);
       else copyText(String(rec.translated || ''), '변환 결과');
     });
 
-    // 머리 클릭(액션 제외) → 펼침 토글.
+    // 머리(행) 클릭(액션 버튼 제외) → 복원: 입력:결과 쌍을 방금 변환을 마친 것처럼
+    // 되살린다(사용자 기대 = 항목 클릭 = 복원). onRestore 미주입(구버전 호스트) 폴백 =
+    // 기존 펼침 토글. 미리보기는 ⌄ 버튼이 담당.
+    head.classList.toggle('restorable', canRestore);
+    head.title = canRestore ? '클릭하면 입력·결과 복원' : '';
     head.addEventListener('click', () => {
+      if (canRestore) { onRestore(rec); return; }
       const wasOpen = row.classList.contains('expanded');
-      // 전체(고정됨+기록)에서 한 번에 하나만 펼친다 — 펼침 길이 폭발 방지.
       if (panel) panel.querySelectorAll('.xlation-history-row.expanded').forEach(r => r.classList.remove('expanded'));
       if (!wasOpen) row.classList.add('expanded');
     });

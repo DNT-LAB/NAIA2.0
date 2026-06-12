@@ -87,6 +87,8 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
 
         def refresh_tag_state() -> None:
             context.tag_search_index = None
+            # LLM 인덱스 동반 무효화 — 자체 로드 케이스는 identity 검사가 못 잡는다(Codex R1).
+            context.llm_search_index = None
             context.kr_tags_raw = {}
             context.autocomplete_state.kr_tags_loaded = False
 

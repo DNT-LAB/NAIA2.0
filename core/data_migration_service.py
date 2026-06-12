@@ -384,6 +384,11 @@ class DataMigrationService:
         try:
             if hasattr(context, "tag_search_index"):
                 context.tag_search_index = None
+            # LLM 어시스트 전용 인덱스도 동반 무효화 — 자체 로드(built_from=None)로
+            # 빌드된 경우 kr_tags_raw 리셋만으론 identity 검사가 stale을 못 잡는다
+            # (Codex R1). 다음 ensure_llm_search_index 호출이 새 데이터로 재빌드한다.
+            if hasattr(context, "llm_search_index"):
+                context.llm_search_index = None
             if hasattr(context, "kr_tags_raw"):
                 context.kr_tags_raw = {}
             autocomplete_state = getattr(context, "autocomplete_state", None)

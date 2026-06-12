@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from typing import Any, Awaitable, Callable
 
@@ -26,6 +27,8 @@ AsyncRunner = Callable[..., Awaitable[Any]]
 # 인스턴스에 살기 때문에, 중복되면 토글 warm/unload와 boost의 keep_alive 판정이 서로
 # 다른 인스턴스를 보게 된다(캐시가 한쪽으로 정착하기 전까지). 단일 인스턴스 보장.
 _ASSIST_SVC_LOCK = threading.Lock()
+# LLM 검색 인덱스 첫 빌드 직렬화(빌드 ~1s, 중복 빌드 낭비 방지).
+_LLM_INDEX_LOCK = threading.Lock()
 
 
 def _loopback_only_response() -> JSONResponse:
@@ -43,6 +46,87 @@ def _korean_to_english(text: str) -> "str | None":
         return korean_to_english(text)
     except Exception:
         return None
+
+
+_HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
+
+
+def _llm_index_source(context: WebSessionContext) -> "Any":
+    """무효화 identity: 공유 원천(kr_tags_raw)이 있으면 그 객체, 없으면 None."""
+    return getattr(context, "kr_tags_raw", None) or None
+
+
+def ensure_llm_search_index(context: WebSessionContext) -> "Any":
+    """LLM 어시스트 전용 검색 인덱스를 context에 캐시·반환.
+
+    autocomplete와 동일 원천(`load_kr_tag_records`)에서 빌드하되 매칭/배제 규칙이
+    다르다(core/llm_search_index.py 참조). 이미 autocomplete 인덱스가 떠 있으면
+    그 raw(`context.kr_tags_raw`)를 재사용해 이중 로드를 피한다. autocomplete
+    경로가 소유한 context 필드(kr_tags_raw/autocomplete_state)는 건드리지 않는다.
+
+    스테일 방지(패널 B #4): 데이터 마이그레이션/태그 아카이브 교체는
+    `kr_tags_raw`를 리셋한다(data_migration_service / install_manager_routes의
+    refresh_tag_state). 인덱스에 빌드 원천 identity(`built_from`)를 박아 두고
+    현재 kr_tags_raw와 불일치하면 재빌드한다 — 신규 어휘로 자가 갱신.
+    """
+
+    def _fresh(index: "Any") -> bool:
+        return index is not None and getattr(index, "built_from", None) is _llm_index_source(context)
+
+    index = getattr(context, "llm_search_index", None)
+    if _fresh(index):
+        return index
+    with _LLM_INDEX_LOCK:
+        index = getattr(context, "llm_search_index", None)
+        if _fresh(index):
+            return index
+        from core.llm_search_index import LLMSearchIndex
+
+        source = _llm_index_source(context)
+        raw = source
+        if not raw:
+            from app.backend.server.autocomplete_commands import _tag_data_roots
+            from core.kr_tag_loader import load_kr_tag_records
+
+            raw = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context)).raw
+        index = LLMSearchIndex.from_raw_tag_records(raw, built_from=source)
+        context.llm_search_index = index
+        try:
+            stats = index.stats()
+            print(
+                f"Headless Remote: LLM search index ready - {stats['records']} tags, "
+                f"{stats['stems']} stems", flush=True,
+            )
+        except Exception:
+            pass
+        return index
+
+
+def search_llm_tags(context: WebSessionContext, query: str, limit: int = 12) -> list[dict[str, Any]]:
+    """어시스트 searcher 계약 구현: (query, limit) → [{tag, count, desc, group, cat}].
+
+    한국어 쿼리(번역 실패/oneshot 일탈 경로 — 패널 B #8)는 한국어 키워드 색인을
+    가진 구 검색에 위임해 현행 recall을 보존한다. 인덱스 빌드/검색 실패 시에도
+    구 autocomplete 검색으로 폴백(어시스트 생존 우선) — 조용히 갈리지 않도록
+    서버 로그에 1회 경고를 남긴다(silent [] 금지 — scene_boost validate 캐시가
+    프로세스 수명이라 빈 결과는 세션 내내 오염된다).
+    """
+    if _HANGUL_RE.search(str(query or "")):
+        from app.backend.server.autocomplete_commands import search_kr_tags
+
+        return search_kr_tags(context, query, limit=limit)
+    try:
+        return ensure_llm_search_index(context).search(query, limit=limit)
+    except Exception as exc:
+        if not getattr(context, "_llm_search_fallback_warned", False):
+            context._llm_search_fallback_warned = True
+            print(
+                f"Headless Remote: LLM search index unavailable, falling back to autocomplete search - {exc}",
+                flush=True,
+            )
+        from app.backend.server.autocomplete_commands import search_kr_tags
+
+        return search_kr_tags(context, query, limit=limit)
 
 
 def _event_combo_tags(
@@ -90,7 +174,6 @@ def get_assist_service(context: WebSessionContext) -> "Any":
     주입한다(core가 app을 모르도록). Auto Boost 등 라우트 밖에서도 동일 서비스를
     쓰기 위해 모듈 레벨로 노출.
     """
-    from app.backend.server.autocomplete_commands import search_kr_tags
     from core.ollama_assistant_service import DEFAULT_MODEL
     from core.ollama_tag_assist_service import OllamaTagAssistService
 
@@ -109,7 +192,10 @@ def get_assist_service(context: WebSessionContext) -> "Any":
         svc = OllamaTagAssistService(
             base_url=assistant.base_url,
             default_model=DEFAULT_MODEL,
-            searcher=lambda query, limit: search_kr_tags(context, query, limit=limit),
+            # LLM 전용 검색(exact 레인+whole-word 부분 레인) — UI autocomplete 재사용이
+            # 모든 태그 오염의 뿌리였다(OLLAMA_LLM_SEARCH_INDEX_PLAN.md). 빌드 실패 시
+            # search_kr_tags 폴백은 search_llm_tags 내부에서 처리.
+            searcher=lambda query, limit: search_llm_tags(context, query, limit=limit),
             event_combo_provider=lambda rating, person_id, query, top: _event_combo_tags(
                 context, rating, person_id, query, top
             ),

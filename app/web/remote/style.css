@@ -16863,8 +16863,10 @@ body.detached-module .mod-grid-3 {
 .custom-select.custom-ext-select .custom-select-button { width: 100%; justify-content: space-between; }
 .custom-select-menu.custom-ext-select { min-width: 168px; }
 
-/* 도구바 확장 버튼 (꺼짐=미노출 계약 — off 상태 스타일 없음) */
+/* 도구바 확장 버튼. Settings 꺼짐=미노출 / 팝업 Activate(armed) OFF=작동만
+   멈춤 — 노출은 유지하되 흐리게. */
 .ext-tools-bar { margin-top: 4px; }
+.ext-armed-off { opacity: 0.5; }
 
 /* Fn 메뉴 확장 항목 */
 .ext-fn-item {

@@ -34,7 +34,9 @@ export function createExtensionsUi(deps) {
     }
     if (ext.status === 'discovered') return ['미승인', 'ext-chip-muted'];
     if (ext.status === 'loaded') {
-      return ext.enabled ? ['활성', 'ext-chip-on'] : ['꺼짐', 'ext-chip-off'];
+      if (!ext.enabled) return ['꺼짐', 'ext-chip-off'];
+      // enabled인데 armed가 아니면: 노출은 되지만 작동은 멈춘 상태(팝업 Activate OFF).
+      return ext.armed === false ? ['활성 · 작동 OFF', 'ext-chip-muted'] : ['활성', 'ext-chip-on'];
     }
     return [ext.status, 'ext-chip-muted'];
   }
@@ -144,7 +146,10 @@ export function createExtensionsUi(deps) {
     const leftHtml = columnHtml(ext, left, idPrefix, suppressApply);
     const rightHtml = columnHtml(ext, right, idPrefix, suppressApply);
     if (!leftHtml && !rightHtml) return '';
-    const disabled = !ext.active ? ' ext-fields-disabled' : '';
+    // 딤 처리는 Settings(전역) 화면에서 soft-off일 때만. 팝업(module)은 작동
+    // OFF(armed=false) 상태에서도 설정을 편집할 수 있어야 한다(켜기 전 구성).
+    const softOff = !(ext.status === 'loaded' && ext.enabled && !ext.blocked);
+    const disabled = scope === 'global' && softOff ? ' ext-fields-disabled' : '';
     if (!rightHtml) return `<div class="ext-fields${disabled}">${leftHtml}</div>${note}`;
     return `<div class="ext-fields ext-fields-two-col${disabled}">
       <div class="ext-fields-col">${leftHtml}</div>
@@ -378,8 +383,8 @@ export function createExtensionsUi(deps) {
           launcher.insertAdjacentElement('afterend', bar);
         }
         bar.innerHTML = toolItems.map(ext =>
-          `<button type="button" class="module-btn ext-tool-btn"
-             data-ext="${escHtml(ext.id)}" title="${escHtml(ext.description || ext.name)}">
+          `<button type="button" class="module-btn ext-tool-btn${ext.armed === false ? ' ext-armed-off' : ''}"
+             data-ext="${escHtml(ext.id)}" title="${escHtml(ext.description || ext.name)}${ext.armed === false ? ' (작동 꺼짐)' : ''}">
              <span>🧩</span><span>${escHtml(ext.name || ext.id)}</span></button>`).join('');
         bar.querySelectorAll('.ext-tool-btn').forEach(el => {
           el.addEventListener('click', event => openQuickPopup(el.dataset.ext, event.currentTarget));
@@ -395,8 +400,9 @@ export function createExtensionsUi(deps) {
           .map(ext => ({
             id: ext.id,
             label: ext.name || ext.id,
-            title: ext.description || ext.name || ext.id,
+            title: (ext.description || ext.name || ext.id) + (ext.armed === false ? ' (작동 꺼짐)' : ''),
             category: 'assistant_tools',
+            armedOff: ext.armed === false,
           })),
         openQuickPopup,
       );
@@ -463,10 +469,10 @@ export function createExtensionsUi(deps) {
         <button type="button" class="ext-quick-close" title="닫기">×</button>
       </div>
       <div class="ext-quick-body">
-        <label class="ext-quick-activate">
+        <label class="ext-quick-activate" title="작동만 켜고 끕니다 — 꺼도 버튼은 남습니다. 숨김까지 끄려면 Settings ▸ Extension">
           <span class="ext-quick-activate-label">Activate This Script</span>
           <span class="ext-switch">
-            <input type="checkbox" class="ext-quick-toggle" ${ext.enabled ? 'checked' : ''}>
+            <input type="checkbox" class="ext-quick-toggle" ${ext.armed === false ? '' : 'checked'}>
             <span class="ext-slider"></span>
           </span>
         </label>
@@ -478,8 +484,9 @@ export function createExtensionsUi(deps) {
     el.style.display = 'block';
     el.querySelector('.ext-quick-close').addEventListener('click', closeQuickPopup);
     el.querySelector('.ext-quick-toggle').addEventListener('change', event => {
-      // 끄면 노출 계약에 따라 퀵 버튼·팝업이 함께 사라진다(재활성화는 Settings).
-      setModuleParam('extensions', `enabled:${ext.id}`, event.target.checked);
+      // 모듈 작동 스위치(armed): 작동만 멈추고 버튼·팝업은 유지된다.
+      // 노출까지 끄는 것은 Settings ▸ Extension의 토글(enabled) 전담.
+      setModuleParam('extensions', `armed:${ext.id}`, event.target.checked);
     });
     bindFields(el);
     restoreFocus(el, saved);

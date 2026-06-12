@@ -357,10 +357,12 @@ export function createModuleLauncher({
   }
 
   function renderExtensionItem(item) {
-    // 꺼진 확장은 항목 자체가 안 온다(노출 계약) — off 스타일 분기 없음.
+    // Settings에서 꺼진 확장은 항목 자체가 안 온다(노출 계약). armedOff는
+    // "작동만 멈춤"(팝업 Activate OFF) — 노출은 유지하되 흐리게 표시.
     const tooltip = tooltipAttr(item.title || item.label);
+    const offClass = item.armedOff ? ' ext-armed-off' : '';
     return `
-      <button type="button" class="module-btn module-menu-item ext-launcher-item" data-ext-item="${tooltipAttr(item.id)}" aria-label="${tooltip}" data-module-tooltip="${tooltip}">
+      <button type="button" class="module-btn module-menu-item ext-launcher-item${offClass}" data-ext-item="${tooltipAttr(item.id)}" aria-label="${tooltip}" data-module-tooltip="${tooltip}">
         <span>🧩 ${tooltipAttr(item.label)}</span>
       </button>
     `;

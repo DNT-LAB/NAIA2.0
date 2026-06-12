@@ -264,7 +264,8 @@ class ExtensionRecord:
     error: str = ""
     approved: bool = False   # 사용자 동의(=import 허용). 동의 전에는 코드 미실행.
     blocked: bool = False    # 하드 OFF — 부팅 시 import 제외(승인보다 우선).
-    enabled: bool = True     # 소프트 ON/OFF — 로드된 채 무력화(즉시 발효).
+    enabled: bool = True     # Settings ON/OFF — OFF면 작동 정지 + 퀵 버튼 숨김.
+    armed: bool = True       # 모듈 작동 스위치(팝업 Activate) — OFF여도 노출은 유지.
     placement: str = PLACEMENT_DEFAULT  # 퀵 버튼 위치: tools | fn | none (호스트 UI 설정).
     hooks: int = 0
     subscriptions: int = 0
@@ -281,9 +282,11 @@ class ExtensionRecord:
     def is_active(self) -> bool:
         """확장 코드가 실제로 동작해야 하는가 — 모든 래퍼 게이트가 이것만 본다.
 
-        우선순위(인스펙션 #1): blocked > enabled. 로드 안 된 상태면 어차피 코드가
-        없으므로 자연히 비활성."""
-        return self.status == "loaded" and self.enabled and not self.blocked
+        우선순위(인스펙션 #1): blocked > enabled > armed. 로드 안 된 상태면
+        어차피 코드가 없으므로 자연히 비활성. enabled(Settings)는 노출까지
+        끄는 마스터, armed(팝업 Activate)는 작동만 멈추는 모듈 스위치 — 두
+        플래그의 분리는 사용자 계약(작동 OFF ≠ 숨김)."""
+        return self.status == "loaded" and self.enabled and self.armed and not self.blocked
 
     def status_payload(self) -> dict[str, Any]:
         return {
@@ -297,6 +300,7 @@ class ExtensionRecord:
             "approved": self.approved,
             "blocked": self.blocked,
             "enabled": self.enabled,
+            "armed": self.armed,
             "placement": self.placement,
             "active": self.is_active,
             "hooks": self.hooks,
@@ -898,11 +902,13 @@ class ExtensionManager:
                     f"Remote Web: extensions grandfathered (최초 도입 일괄 승인): {', '.join(newly)}",
                     flush=True,
                 )
+        disarmed = _ids("disarmed")
         placement_map = raw.get("placement") if isinstance(raw.get("placement"), dict) else {}
         for record in self.records:
             record.approved = record.ext_id in approved
             record.blocked = record.ext_id in blocked
             record.enabled = record.ext_id not in inactive
+            record.armed = record.ext_id not in disarmed
             saved_placement = str(placement_map.get(record.ext_id) or "")
             record.placement = saved_placement if saved_placement in PLACEMENT_VALUES else PLACEMENT_DEFAULT
         self._write_config_locked()
@@ -915,6 +921,8 @@ class ExtensionManager:
             "approved": sorted({r.ext_id for r in self.records if r.approved}),
             # 정규화: inactive ⊆ approved (미승인 확장의 soft 상태는 무의미).
             "inactive": sorted({r.ext_id for r in self.records if r.approved and not r.enabled}),
+            # 모듈 작동 스위치(팝업 Activate This Script) OFF — 노출은 유지된다.
+            "disarmed": sorted({r.ext_id for r in self.records if r.approved and not r.armed}),
             "blocked": sorted({r.ext_id for r in self.records if r.blocked}),
             # 기본값(tools)이 아닌 위치만 기록 — 맵에 없으면 tools.
             "placement": {
@@ -1021,6 +1029,11 @@ class ExtensionManager:
                 record = self._find(rest)
                 if record is not None:
                     record.enabled = _coerce_panel_value({"type": "bool"}, value)[1]
+                    self._write_config_locked()
+            elif action == "armed":
+                record = self._find(rest)
+                if record is not None:
+                    record.armed = _coerce_panel_value({"type": "bool"}, value)[1]
                     self._write_config_locked()
             elif action == "blocked":
                 record = self._find(rest)

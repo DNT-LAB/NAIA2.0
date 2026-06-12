@@ -257,6 +257,43 @@ def _is_two_person_tag(tag_norm: str) -> bool:
     t = str(tag_norm).lower().strip()
     return t in _TWO_PERSON_TAGS or bool(_ANOTHER_TOKEN_RE.search(t))
 
+
+# 성별 전용 해부학/행위 — 확정 인원이 한 성별뿐인 장면에 반대 성별 태그가 새면 모순이다
+# (실측: "볼펜 자위 소녀"(1girl solo)에 penis/penile masturbation/holding penis 혼입 —
+# 'pen' autocomplete가 penis/penile을 surface + "자위" 검색 1위가 penile masturbation).
+# 2인 가드·인원수 가드의 사촌. futanari 등 의도적 케이스는 요청 토큰으로 면제(호출부).
+# 부분 문자열 매칭(태그는 공백 정규화·소문자) — penis/penile/testicl 등 어근.
+_MALE_ANATOMY_MARKERS = (
+    "penis", "penile", "testicl", "scrotum", "foreskin", "ballsack", "phimosis",
+    "glans", "male masturbation", "male pubic", "male ejaculation", "huge penis",
+    "flaccid", "erection",
+)
+_FEMALE_ANATOMY_MARKERS = (
+    "pussy", "vagina", "vaginal", "clitoris", "clitoral", "vulva", "labia",
+    "cameltoe", "female ejaculation", "female masturbation", "female pubic",
+)
+# 요청이 이걸 명시하면 성별 가드 면제(여성+남성기 등 의도적 조합).
+_INTERSEX_REQUEST_MARKERS = (
+    "futa", "futanari", "newhalf", "dickgirl", "shemale", "trap", "otokonoko",
+    "intersex", "futafem", "남녀", "이상", "후타",
+)
+
+
+def _opposite_sex_anatomy(tag_norm: str, *, girls: int, boys: int) -> bool:
+    """확정 인원이 한 성별뿐인데 태그가 반대 성별 해부학/행위면 True(모순).
+    양성 공존·인원 모호(둘 다 0)면 가드 비활성(False).
+    ⚠️ 단어경계 매칭 — substring이면 'male masturbation'이 'female masturbation'에
+    걸린다('male'⊂'female'). prefix \\b로 어근(penile→penile masturbation)은 잡되
+    female의 male 오탐은 막는다."""
+    t = str(tag_norm).lower().replace("_", " ").strip()
+    if girls and not boys:
+        markers = _MALE_ANATOMY_MARKERS
+    elif boys and not girls:
+        markers = _FEMALE_ANATOMY_MARKERS
+    else:
+        return False
+    return any(re.search(r"\b" + re.escape(m), t) for m in markers)
+
 # 크기 형용사 — "huge dog" 검색이 "huge belly/breasts/balls"를 끌어오는 토큰 오염
 # 차단용. 후보가 쿼리와 *오직 이 형용사로만* 겹치면(내용 토큰 미공유) 드롭한다.
 _SIZE_ADJECTIVES = frozenset({
@@ -1413,6 +1450,12 @@ class OllamaTagAssistService:
         # 긍정 출처가 같은 스템을 내면 긍정이 이긴다.
         request_stems: set[str] = _retriever_stems(" ".join(_affirmed | _concept_words))
         request_stems -= (_retriever_stems(" ".join(_negated_only)) - _retriever_stems(" ".join(_affirmed)))
+        # 성별 해부학 가드 면제 — 요청이 futanari/trap 등 의도적 양성 조합을 명시하면
+        # 반대 성별 해부학을 허용한다(원문 한국어 + 번역문 양쪽 검사).
+        _intersex_request = any(
+            m in f" {original_text.lower()} {request_text.lower()} "
+            for m in _INTERSEX_REQUEST_MARKERS
+        )
 
         # 코드 — 후보 검색 (진실은 NAIA 태그 인덱스)
         step_no += 1
@@ -1858,7 +1901,14 @@ class OllamaTagAssistService:
             t_stems = _retriever_stems(norm)
             return bool(t_stems) and t_stems <= request_stems
 
-        selected = [it for it in selected if _two_person_ok(it["tag"])]
+        def _sex_anatomy_ok(tag: str) -> bool:
+            # 확정 인원이 한 성별뿐인데 반대 성별 해부학이면 제거(실측: 1girl 자위에
+            # penis/penile masturbation). futanari 등 요청 명시 시 면제. 강제 태그 보호.
+            if _intersex_request or tag in _protected:
+                return True
+            return not _opposite_sex_anatomy(tag, girls=_girls_n, boys=_boys_n)
+
+        selected = [it for it in selected if _two_person_ok(it["tag"]) and _sex_anatomy_ok(it["tag"])]
         recovery_added &= {it["tag"] for it in selected}
 
         # 변형 축약: 같은 개념의 부분집합 변형(kimono/kimono dress/kimono only)을 한
@@ -2097,9 +2147,9 @@ class OllamaTagAssistService:
 
         # 2인 관계 태그 가드를 보강 단계 산출물에도 적용(벨트&서스펜더 — 게이트가
         # 실패하거나 통과시켜도 단일 인물 장면의 관계 태그는 결정론으로 막는다).
-        boosted = [it for it in boosted if _ok_count(it) and _two_person_ok(it["tag"])]
-        enhanced = [it for it in enhanced if _ok_count(it) and _two_person_ok(it["tag"])]
-        event_enrich = [it for it in event_enrich if _ok_count(it) and _two_person_ok(it["tag"])]
+        boosted = [it for it in boosted if _ok_count(it) and _two_person_ok(it["tag"]) and _sex_anatomy_ok(it["tag"])]
+        enhanced = [it for it in enhanced if _ok_count(it) and _two_person_ok(it["tag"]) and _sex_anatomy_ok(it["tag"])]
+        event_enrich = [it for it in event_enrich if _ok_count(it) and _two_person_ok(it["tag"]) and _sex_anatomy_ok(it["tag"])]
 
         # 최종 검증 패스(LLM 판단) — 토큰 매칭이 못 잡는 의미 오류(shortcake/backpack/
         # connected beard 등)를 제거한다. 소형 모델은 생성보다 판단을 잘한다. enum 제약

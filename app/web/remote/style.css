@@ -16969,15 +16969,22 @@ body.detached-module .mod-grid-3 {
 .ext-quick-popup .ext-fields-three-col {
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.2fr);
 }
-/* multiselect 체크 칩(샘플러 선택 등) — 선택 수 = 생성 수 */
-.ext-multiselect { display: flex; flex-wrap: wrap; gap: 5px; grid-column: 2; min-width: 0; }
-.ext-ms-chip {
-  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
-  padding: 4px 8px; border: 1px solid var(--border-dim); border-radius: 7px;
-  background: var(--bg-elevated); color: var(--text-muted); font-size: 11px;
+/* multiselect 픽커(샘플러 선택 등): 선택=× 제거 칩, 추가=콤보박스 —
+   WEBUI/ComfyUI처럼 옵션 20+개여도 레이아웃이 밀리지 않는다. 선택 수=생성 수 */
+.ext-multiselect { display: flex; flex-direction: column; gap: 6px; grid-column: 2; min-width: 0; }
+.ext-ms-chips { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.ext-ms-sel {
+  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  padding: 3px 5px 3px 8px; border: 1px solid var(--accent); border-radius: 7px;
+  background: var(--bg-elevated); color: var(--text-primary); font-size: 11px;
 }
-.ext-ms-chip input { margin: 0; accent-color: var(--accent); }
-.ext-ms-chip.on { color: var(--text-primary); border-color: var(--accent); }
+.ext-ms-remove {
+  border: none; background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 0 2px;
+}
+.ext-ms-remove:hover { color: var(--text-primary); }
+.ext-ms-empty { color: var(--text-muted); font-size: 11px; padding: 4px 2px; }
+.ext-multiselect .ext-ms-add { max-width: 220px; }
 /* list 빌더(스왑 Step들) — 행 + [추가 +] */
 .ext-list { display: flex; flex-direction: column; gap: 6px; grid-column: 1 / -1; min-width: 0; }
 .ext-list-row { display: flex; align-items: center; gap: 6px; }

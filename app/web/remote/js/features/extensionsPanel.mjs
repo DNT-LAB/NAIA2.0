@@ -73,13 +73,20 @@ export function createExtensionsUi(deps) {
         `<option value="${escHtml(opt)}" ${String(value) === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('');
       input = `<select class="ext-select" ${common}>${options}</select>`;
     } else if (field.type === 'multiselect') {
-      // 체크 칩 다중 선택(예: 현재 모드의 샘플러 목록) — 선택 수 = 생성 수.
+      // 픽커 패턴: 선택된 항목은 ×로 제거 가능한 칩, 추가는 콤보박스 —
+      // WEBUI/ComfyUI 실측 샘플러처럼 옵션이 20개를 넘어도 UI가 밀리지 않는다.
       const current = (Array.isArray(value) ? value : []).map(String);
-      const chips = (field.options || []).map(opt =>
-        `<label class="ext-ms-chip${current.includes(opt) ? ' on' : ''}">
-           <input type="checkbox" value="${escHtml(opt)}" ${current.includes(opt) ? 'checked' : ''}>
-           <span>${escHtml(opt)}</span></label>`).join('');
-      input = `<div class="ext-multiselect" ${common}>${chips}</div>`;
+      const chips = current.map(item =>
+        `<span class="ext-ms-sel" data-value="${escHtml(item)}">${escHtml(item)}
+           <button type="button" class="ext-ms-remove" title="제거">×</button></span>`).join('');
+      const remaining = (field.options || []).filter(opt => !current.includes(opt));
+      const addOptions = ['<option value="">+ 추가…</option>']
+        .concat(remaining.map(opt => `<option value="${escHtml(opt)}">${escHtml(opt)}</option>`))
+        .join('');
+      input = `<div class="ext-multiselect" ${common}>
+        <div class="ext-ms-chips">${chips || '<span class="ext-ms-empty">선택 없음</span>'}</div>
+        <select class="ext-select ext-ms-add"${remaining.length ? '' : ' disabled'}>${addOptions}</select>
+      </div>`;
     } else if (field.type === 'list') {
       // 동적 행 목록(예: 스왑 Step들) — [추가 +]로 행을 늘리고 ✕로 제거.
       // multiline이면 행을 textarea로(쉼표 섞인 긴 프롬프트 구문 입력용).
@@ -204,10 +211,15 @@ export function createExtensionsUi(deps) {
 
   function bindFields(root) {
     root.querySelectorAll('.ext-fields [data-field]').forEach(el => {
-      el.addEventListener('change', () => {
+      el.addEventListener('change', event => {
         let value;
         if (el.classList.contains('ext-multiselect')) {
-          value = [...el.querySelectorAll('input:checked')].map(input => input.value);
+          // 현재 칩 목록 + (추가 콤보에서 막 고른 값) = 새 선택 배열.
+          value = [...el.querySelectorAll('.ext-ms-sel')].map(chip => chip.dataset.value);
+          const addSel = el.querySelector('.ext-ms-add');
+          if (event && event.target === addSel && addSel.value && !value.includes(addSel.value)) {
+            value.push(addSel.value);
+          }
         } else if (el.classList.contains('ext-list')) {
           value = listValues(el);
         } else {
@@ -215,6 +227,14 @@ export function createExtensionsUi(deps) {
         }
         setModuleParam('extensions', `setting:${el.dataset.ext}:${el.dataset.field}`, value);
       });
+      if (el.classList.contains('ext-multiselect')) {
+        el.querySelectorAll('.ext-ms-remove').forEach(btn => {
+          btn.addEventListener('click', () => {
+            btn.closest('.ext-ms-sel')?.remove();
+            el.dispatchEvent(new Event('change'));
+          });
+        });
+      }
       if (el.classList.contains('ext-list')) {
         // [추가 +]는 로컬로 빈 행만 늘린다(값 전송은 입력 후 change에서 —
         // 빈 행은 저장 시 걸러지므로 브로드캐스트 재렌더에 휘발되지 않게

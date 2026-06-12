@@ -717,6 +717,32 @@ class ExtensionContext:
         except (SystemExit, Exception):
             return ""
 
+    def get_sampler_options(self) -> list[str]:
+        """현재 API 모드에서 **실제 사용 가능한** 샘플러 목록.
+
+        WEBUI/COMFYUI는 연결(옵션 새로고침) 시 캐시된 라이브 목록
+        (remote_option_cache["options_sampler"] — /sdapi/v1/samplers,
+        /object_info 유래, 20개 이상일 수 있음)을 우선 사용하고, 캐시가 없으면
+        (미연결) UI 표준 폴백 목록을 돌려준다. NAI는 표준 목록. 라이브 목록이
+        갱신되면 "api_options_refreshed" 이벤트가 발행되므로, 선택지를 쓰는
+        확장은 그 이벤트에서 register_panel을 다시 호출하면 된다.
+        get_api_mode와 같은 사유로 is_active 게이트 없음(register 시점 사용,
+        순수 읽기)."""
+        try:
+            mode = self.get_api_mode() or "NAI"
+            if mode in ("WEBUI", "COMFYUI"):
+                cache = getattr(self._app_context, "remote_option_cache", None)
+                if isinstance(cache, dict):
+                    cached = (cache.get(mode) or {}).get("options_sampler") or []
+                    cleaned = [str(item).strip() for item in cached if str(item or "").strip()]
+                    if cleaned:
+                        return cleaned
+            from core.headless_session_state_service import HeadlessSessionStateService
+
+            return list(HeadlessSessionStateService.sampler_options_for_mode(mode))
+        except (SystemExit, Exception):
+            return []
+
     def show_toast(self, message: Any, level: str = "info") -> None:
         """사용자에게 토스트 표시(연결된 웹 클라이언트 전원).
 

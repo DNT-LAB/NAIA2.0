@@ -36,6 +36,15 @@ class HeadlessApiOptionService:
                 cache = self.context.remote_option_cache
             cache[normalized_mode] = options
             self._apply_selected_defaults(normalized_mode, options)
+            # 확장 등 구독자에게 라이브 옵션 갱신을 알린다(예: 샘플러 선택지를
+            # 실제 백엔드 목록으로 재구성 — ctx.get_sampler_options 소비자).
+            try:
+                self.context.publish(
+                    "api_options_refreshed",
+                    {"mode": normalized_mode, "keys": sorted(options.keys())},
+                )
+            except Exception:
+                pass
 
         return {
             "type": "api_options",

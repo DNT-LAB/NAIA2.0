@@ -85,12 +85,24 @@ DEFAULT_SETTINGS = {
     "y_swap_steps": [],
 }
 
-# 모드별 표준 샘플러(UI sampler_options_for_mode 미러) — "auto"가 이 목록을 쓴다.
+# 모드별 표준 샘플러(UI sampler_options_for_mode 미러) — ctx.get_sampler_options를
+# 못 쓰는 구런타임 폴백. WEBUI/COMFYUI는 연결 시 실제 백엔드 목록(20+개 가능)이
+# ctx.get_sampler_options로 들어오므로 이 표는 미연결/NAI 기본값일 뿐이다.
 MODE_SAMPLERS = {
     "NAI": ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "ddim"],
     "WEBUI": ["Euler a", "Euler", "DPM++ 2M", "DPM++ 2M Karras"],
     "COMFYUI": ["euler", "euler_ancestral", "dpmpp_2m", "dpmpp_sde"],
 }
+
+
+def _sampler_options(ctx, api_mode):
+    """현재 모드의 실사용 샘플러 목록 — 호스트 라이브 캐시 우선, 폴백은 표준표."""
+    getter = getattr(ctx, "get_sampler_options", None)
+    if callable(getter):
+        live = [str(item) for item in (getter() or []) if str(item or "").strip()]
+        if live:
+            return live
+    return MODE_SAMPLERS.get(api_mode, MODE_SAMPLERS["NAI"])
 
 
 def _float_ladder(start, step, end):
@@ -497,12 +509,12 @@ class SeedFanout:
                 return ([("param", (param_key, value), f"{value:g}") for value in values],
                         "CFG Scale" if axis == AXIS_CFG else "PG.Rescale")
             if axis == AXIS_SAMPLER:
-                # 현재 모드 샘플러 목록에서 체크 선택 — 선택 수 = 생성 수.
+                # 실사용 샘플러 목록(라이브 캐시 우선)에서 고른 것만 — 선택 수 = 생성 수.
                 picked = settings.get(f"{prefix}_samplers_pick")
                 picked = [str(item) for item in picked] if isinstance(picked, (list, tuple)) else []
-                mode_list = MODE_SAMPLERS.get(api_mode)
-                if mode_list:
-                    picked = [item for item in picked if item in mode_list]
+                available = _sampler_options(self.ctx, api_mode)
+                if available:
+                    picked = [item for item in picked if item in available]
                 if not picked:
                     self._toast(f"{axis_name}축 Sampler: 샘플러를 1개 이상 선택하세요")
                     return None
@@ -582,8 +594,9 @@ def _axis_fields(prefix, section, base_order, when_xy, samplers, axis_options):
          "label": "종료 값", "help": "시작→종료를 스텝 간격으로 1장씩(상한 32)",
          "order": base_order + 3, "visible_when": when_range, **common},
         {"key": f"{prefix}_samplers_pick", "type": "multiselect", "options": samplers,
-         "default": list(samplers), "label": "샘플러 선택",
-         "help": "현재 모드의 샘플러 목록 — 체크한 샘플러 1개당 1장(선택 수 = 생성 수)",
+         "default": [], "label": "샘플러 선택",
+         "help": "콤보박스로 추가, 칩의 ×로 제거 — 1개당 1장(선택 수 = 생성 수). "
+                 "WEBUI/COMFYUI는 연결 시 실제 백엔드 샘플러 목록으로 갱신",
          "order": base_order + 4,
          "visible_when": {"field": axis_key, "in": [AXIS_SAMPLER]}, **common},
         # ── 강조 사다리: 원본 프롬프트(쉼표 허용) + 시작/스텝/종료 — 전부 필수 ──
@@ -624,7 +637,8 @@ def _register_panel(ctx, ext):
     mode = ""
     if hasattr(ctx, "get_api_mode"):
         mode = str(ctx.get_api_mode() or "")
-    samplers = MODE_SAMPLERS.get(mode, MODE_SAMPLERS["NAI"])
+    # 실사용 샘플러(라이브 캐시 우선 — WEBUI/COMFYUI 연결 시 실제 백엔드 목록).
+    samplers = _sampler_options(ctx, mode or "NAI")
     # PG.Rescale은 NAI 전용 — 다른 모드에선 축 선택지에서 제외(모드 미상=NAI 간주).
     axis_options = AXIS_OPTIONS_NAI if mode in ("", "NAI") else AXIS_OPTIONS_LOCAL
     when_fanout = {"field": "feature", "in": [FEATURE_FANOUT]}
@@ -671,7 +685,8 @@ def register(ctx):
     ext = SeedFanout(ctx)
     ctx.subscribe("generation_request_dispatched", ext.on_generation_dispatched)
     ctx.subscribe("generation_result_available", ext.on_generation_result)
-    # 모드 전환 시 샘플러 선택지를 그 모드 목록으로 재등록.
+    # 모드 전환·라이브 옵션 갱신(WEBUI/COMFYUI 연결) 시 샘플러 선택지 재등록.
     ctx.subscribe("api_mode_changed", lambda _payload: _register_panel(ctx, ext))
+    ctx.subscribe("api_options_refreshed", lambda _payload: _register_panel(ctx, ext))
     _register_panel(ctx, ext)
     ctx.log("ready — Seed Fan-out / X/Y Plot (퀵 버튼 팝업에서 조정, 관리는 Settings ▸ Extension)")

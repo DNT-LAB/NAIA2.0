@@ -7,14 +7,16 @@ Generate 버튼 1회로 여러 장을 큐에 넣는 확장. 두 가지 모드(NA
   시드 방식 = random(매장 새 시드) / +1 / -1(원본 시드 기준 증감) /
   fixed(전부 원본과 같은 시드 — 입력창 와일드카드 변주 비교용).
 - **X/Y Plot**: 파라미터 축 1~2개를 조합한 그리드 생성(전부 동일 시드).
+  **원본 요청은 자동 취소되어 정확히 그리드 장수만 생성된다.**
   축 종류를 고르면 그에 맞는 입력칸이 나타난다 — CFG Scale·PG.Rescale(값
   범위 "시작,끝,간격") / Sampler("auto"=현재 모드 표준 목록 자동) /
   프롬프트 강조(가중 사다리 — **모드별 문법 자동**: NAI(NAID4/4.5)는
   ``w::키워드::``, WEBUI/COMFYUI는 ``(키워드:w)``) / 프롬프트 스왑(키워드 치환).
 
 공통: **캐릭터 프롬프트 고정**(NAI) — 켜면 fan-out 시점에 캐릭터 설정을 1회
-전개한 스냅샷을 모든 파생 장에 동봉한다(캐릭터 프롬프트에 와일드카드가 있어도
-파생 장들끼리 동일; 원본 1장은 자체 실행 시 별도 전개). 끄면 장마다 재전개.
+전개한 스냅샷을 묶음 전체가 공유한다(캐릭터 와일드카드 재롤 방지). Seed
+Fan-out에서는 원본까지 취소·대체해 **총 N장 전부 같은 캐릭터**가 되게 한다.
+끄면 장마다 재전개.
 
 설치: 이 폴더를 user-data의 ``extensions/`` 아래로 복사 → Settings ▸ Extension
 에서 활성화. 동작 설정은 퀵 버튼 팝업에서 편집하며 다음 Generate부터 적용.
@@ -158,25 +160,40 @@ class SeedFanout:
         if variants <= 0:
             return
         mode = str(settings.get("mode") or "+1")
-        seeds = self._variant_seeds(params.get("seed"), variants, mode)
+        base = self._base_seed(params.get("seed"))
+
+        # 캐릭터 고정 시 원본을 취소하고 총 N장 전부를 스냅샷 공유 묶음으로 대체
+        # — 원본만 캐릭터를 따로 추첨해 묶음과 어긋나는 문제 방지. 취소가 실패하면
+        # (이미 실행 시작 등) 기존처럼 원본 유지 + 변형 N-1장으로 폴백.
+        replace_original = False
+        if char_overrides:
+            replace_original = self.ctx.cancel_generation(info.get("request_id")).get("ok", False)
+        seeds = self._variant_seeds(base, variants, mode)
+        if replace_original:
+            seeds = [base] + seeds
         queued = 0
         for seed in seeds:
             result = self._enqueue_clone(info, params, {"seed": seed, **char_overrides})
             queued += 1 if result.get("ok") else 0
-        self.ctx.log(f"Seed Fan-out: 총 {total}장(원본 1 + 변형 {queued}/{variants}, "
-                     f"mode={mode}, base={params.get('seed')})")
+        origin_note = "원본 대체(캐릭터 고정)" if replace_original else "원본 1 + 변형"
+        self.ctx.log(f"Seed Fan-out: 총 {total}장({origin_note} {queued}/{len(seeds)}, "
+                     f"mode={mode}, base={base})")
 
     @staticmethod
-    def _variant_seeds(base_seed, count, mode):
-        if mode == "random":
-            return [random.randint(0, SEED_SPACE - 1) for _ in range(count)]
+    def _base_seed(raw_seed):
         try:
-            base = int(base_seed)
+            base = int(raw_seed)
         except (TypeError, ValueError):
             base = -1
         if base < 0:
             # WEBUI/COMFYUI는 시드가 -1(백엔드 랜덤)으로 남을 수 있다 — base를 추첨.
             base = random.randint(0, SEED_SPACE - 1)
+        return base
+
+    @staticmethod
+    def _variant_seeds(base, count, mode):
+        if mode == "random":
+            return [random.randint(0, SEED_SPACE - 1) for _ in range(count)]
         if mode == "fixed":
             return [base] * count  # 동일 시드 — 입력창 와일드카드 변주 비교용
         step = -1 if mode == "-1" else 1
@@ -198,15 +215,13 @@ class SeedFanout:
             combos = combos[:MAX_GRID]
 
         # 그리드 비교의 본질: 전 항목 동일 시드(원본 시드 고정).
-        try:
-            base_seed = int(params.get("seed"))
-        except (TypeError, ValueError):
-            base_seed = -1
-        if base_seed < 0:
-            base_seed = random.randint(0, SEED_SPACE - 1)
+        base_seed = self._base_seed(params.get("seed"))
 
+        # 셀을 전부 먼저 빌드(키워드 검증 포함)하고, 1장 이상 유효할 때만 원본을
+        # 취소한다 — X/Y Plot은 "그리드만" 생성한다(원본까지 N+1장 생성 방지).
+        # 전 셀이 무효(키워드 부재 등)면 원본을 건드리지 않는다.
         base_prompt = str(params.get("input") or "")
-        queued = 0
+        cells = []
         for x_value, y_value in combos:
             overrides = {"seed": base_seed, **char_overrides}
             prompt = base_prompt
@@ -224,11 +239,18 @@ class SeedFanout:
                         ok = False
                         break
                     prompt = prompt.replace(keyword, replacement, 1)
-            if not ok:
-                continue
+            if ok:
+                cells.append((overrides, prompt))
+        if not cells:
+            self.ctx.log("X/Y Plot: 유효한 조합이 없어 원본만 생성합니다")
+            return
+        cancelled = self.ctx.cancel_generation(info.get("request_id")).get("ok", False)
+        queued = 0
+        for overrides, prompt in cells:
             result = self._enqueue_clone(info, params, overrides, prompt=prompt)
             queued += 1 if result.get("ok") else 0
-        self.ctx.log(f"X/Y Plot: {queued}/{len(combos)}장 큐 추가 (seed={base_seed} 고정)")
+        origin_note = "원본 취소, 그리드만" if cancelled else "원본 유지(취소 실패)"
+        self.ctx.log(f"X/Y Plot: {queued}/{len(cells)}장 큐 추가 ({origin_note}, seed={base_seed} 고정)")
 
     def _axis_values(self, axis_name, axis, settings, prefix, api_mode):
         """축 정의 → 조합 항목 리스트. 항목 = None | ("param", (key, value)) |
@@ -342,8 +364,8 @@ def register(ctx):
                  "apply": "next-generation", "order": 2, "visible_when": when_fanout},
                 {"key": "char_fix", "type": "bool", "default": False,
                  "label": "캐릭터 프롬프트 고정",
-                 "help": "NAI 전용. 켜면 파생 장들이 지금 1회 전개한 캐릭터 스냅샷을 공유"
-                         "(캐릭터 와일드카드 재롤 방지). 끄면 장마다 재전개",
+                 "help": "NAI 전용. 켜면 묶음 전체(원본 포함)가 지금 1회 전개한 캐릭터 "
+                         "스냅샷을 공유(캐릭터 와일드카드 재롤 방지). 끄면 장마다 재전개",
                  "apply": "next-generation", "order": 3},
                 # ── X/Y Plot (복잡 모드 → 우측 칼럼, 축 종류별 입력칸 전환) ──
                 *_axis_fields("x", "X 축", 10, when_xy),

@@ -148,9 +148,11 @@ NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가�
   사다리 "키워드,시작,끝,간격" — 문법은 모드 자동: NAI(NAID4/4.5) `w::키워드::`,
   WEBUI/ComfyUI `(키워드:w)`) / `프롬프트 스왑`(키워드를 대체값들로 치환,
   `^`=콤마). 두 축을 조합하면 Generate 1회로 그리드 전체가 **동일 시드**로 큐에
-  쌓입니다(상한 32장).
-- 공통 **캐릭터 프롬프트 고정**(NAI): 켜면 파생 장들이 지금 1회 전개된 캐릭터
-  스냅샷을 공유합니다(캐릭터 와일드카드 재롤 방지).
+  쌓입니다(상한 32장). **원본 요청은 자동 취소되어 정확히 그리드 장수만
+  생성됩니다.**
+- 공통 **캐릭터 프롬프트 고정**(NAI): 켜면 묶음 전체(원본 포함)가 지금 1회
+  전개된 캐릭터 스냅샷을 공유합니다(캐릭터 와일드카드 재롤 방지) — Seed
+  Fan-out에서는 원본을 취소·대체해 총 N장이 전부 같은 캐릭터가 됩니다.
 
 ### extension.json
 
@@ -209,6 +211,7 @@ class MyHook:
 | `ctx.register_panel(fields=[...], title=)` | **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags (+action 예약), label, default, min/max/step, options, help, section, order, apply: immediate/next-generation/restart-required, scope: module/global, column: left/right, visible_when: {field, in: [...]}}`. **scope가 노출 위치를 결정**: `"module"`(기본)=퀵 버튼 팝업(실제 동작 설정), `"global"`=Settings ▸ Extension 행(전역 설정 — 저장 경로 등). `column:"right"` 필드가 표시되면 **2단**으로 펼쳐지고, `visible_when`으로 모드별 조건부 표시(예: 복잡 모드 선택 시 우측 패널 등장). 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
 | `ctx.resolve_nai_characters()` | 현재 NAI 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷 `{characters, uc, character_positions}` 또는 None. overrides에 실으면 그 요청은 늦은 바인딩(매장 재전개) 대신 스냅샷 사용 — 변형 묶음의 캐릭터 고정용 |
 | `ctx.enqueue_generation(prompt=, negative_prompt=, api_mode=, prompt_run_id=, priority=, overrides=, allow_chain=False)` | 생성 요청을 큐에 추가. 반환 `{ok, request_id, message}`. 파생 요청에는 `ext_origin`과 체인 깊이가 찍히며, **확장 파생 이벤트를 처리 중인 동안의 호출은 기본 차단**(확장 간 무한 연쇄 방지 — 의도적 체인은 `allow_chain=True`). 단 체인 깊이 4 초과는 `allow_chain`과 무관하게 무조건 거부 |
+| `ctx.cancel_generation(request_id)` | **대기(pending) 중인** 생성 요청을 큐에서 제거 → `{ok, message}`. 이미 시작/완료된 요청은 실패(ok=False). 용례: 그리드형 확장이 반응한 원본 요청을 파생 묶음으로 대체(X/Y Plot의 "그리드만 생성") — dispatched 콜백 안에서의 취소는 원본 실행 전에 결정적으로 적용 |
 | `ctx.load_settings(defaults)` / `ctx.save_settings(dict)` | `settings.json` 읽기(defaults 병합)/쓰기 |
 | `ctx.log(msg)` | `[ext:<id>]` 접두사 콘솔 로그 |
 | `ctx.ext_id` `ctx.name` `ctx.version` `ctx.ext_dir` `ctx.api_version` | 식별/경로 |

@@ -570,6 +570,31 @@ class ExtensionContext:
             "message": str(getattr(dispatch, "blocked_reason", "") or ""),
         }
 
+    # ── 대기 요청 취소 ───────────────────────────────────────────
+    def cancel_generation(self, request_id: Any) -> dict[str, Any]:
+        """대기(pending) 중인 생성 요청을 큐에서 제거한다 → {ok, message}.
+
+        이미 실행을 시작했거나 큐에 없는 요청은 제거되지 않는다(ok=False).
+        용례: 그리드형 확장이 자신이 반응한 원본 요청을 파생 묶음으로 대체
+        (예: X/Y Plot — 원본 1장을 취소하고 그리드만 남김). dispatched 이벤트
+        콜백은 큐 소비 루프와 같은 이벤트 루프 턴에서 동기 실행되므로, 콜백
+        안에서의 취소는 원본이 시작되기 전에 결정적으로 적용된다."""
+        if not self._record.is_active:
+            return {"ok": False, "message": "extension disabled"}
+        try:
+            rid = str(request_id or "").strip()
+            if not rid:
+                return {"ok": False, "message": "request_id가 비었습니다"}
+            queue = getattr(self._app_context, "generation_queue_manager", None)
+            remover = getattr(queue, "remove_request", None)
+            if not callable(remover):
+                return {"ok": False, "message": "큐 제거를 지원하지 않는 런타임입니다"}
+            if bool(remover(rid)):
+                return {"ok": True, "message": ""}
+            return {"ok": False, "message": "이미 실행 중이거나 큐에 없는 요청"}
+        except (SystemExit, Exception) as exc:
+            return {"ok": False, "message": _safe_error_text(exc)}
+
     # ── NAI 캐릭터 스냅샷 ────────────────────────────────────────
     def resolve_nai_characters(self) -> dict[str, Any] | None:
         """현재 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷을 돌려준다.

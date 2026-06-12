@@ -262,6 +262,9 @@ export function createOllamaAssistantPopup({
 
   function restoreFromHistory(rec) {
     if (!rec || !popup) return;
+    // 변환 진행 중 복원 금지 — 진행 중 런이 끝나면 결과 영역을 덮어써서
+    // 복원된 입력과 새 결과가 불일치 쌍으로 남는다(경합).
+    if (assistBusy) { showToast('변환 진행 중에는 복원할 수 없습니다.', 'info'); return; }
     const input = pick('.ollama-assist-input');
     if (input) input.value = String(rec.source || '');
     const meta = (rec && rec.meta) || {};

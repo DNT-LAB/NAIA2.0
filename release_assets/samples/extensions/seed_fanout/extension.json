@@ -1,7 +1,7 @@
 {
   "id": "seed_fanout",
   "name": "Seed Fan-out",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "naia_ext_api": 1,
   "entry": "main.py",
   "description": "Generate 1회로 시드 변형 n장 또는 X/Y 파라미터 그리드를 큐에 추가 (캐릭터 고정 지원)",

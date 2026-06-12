@@ -131,7 +131,7 @@ def _callback_identity(callback: Callable[..., Any]) -> tuple:
     return (id(callback),)
 
 
-PANEL_FIELD_TYPES = {"bool", "int", "float", "select", "text", "tags", "action"}
+PANEL_FIELD_TYPES = {"bool", "int", "float", "select", "multiselect", "text", "tags", "list", "action"}
 PANEL_APPLY_MODES = {"immediate", "next-generation", "restart-required"}
 
 
@@ -159,9 +159,13 @@ def _normalize_panel_fields(fields: Any) -> list[dict[str, Any]]:
             "apply": (
                 str(raw.get("apply")) if str(raw.get("apply") or "") in PANEL_APPLY_MODES else "immediate"
             ),
-            # 2단 패널: left(기본) | right — right 필드가 하나라도 보이면 렌더러가
-            # 우측 칼럼을 펼친다(복잡 모드 UI).
-            "column": "right" if str(raw.get("column") or "") == "right" else "left",
+            # 다단 패널: left(기본) | right | extra — right/extra 필드가 보이면
+            # 렌더러가 해당 칼럼을 펼친다(extra=스왑 빌더처럼 깊은 모드용 3번째 칸).
+            "column": (
+                str(raw.get("column"))
+                if str(raw.get("column") or "") in {"right", "extra"}
+                else "left"
+            ),
             # 노출 계약: module(기본)=퀵 버튼 팝업(실제 동작 설정 전담) /
             # global=Settings ▸ Extension(전역 설정 — 저장 경로 등). 두 화면은
             # 서로의 scope 필드를 렌더하지 않는다.
@@ -187,7 +191,7 @@ def _normalize_panel_fields(fields: Any) -> list[dict[str, Any]]:
             for bound in ("min", "max", "step"):
                 if isinstance(raw.get(bound), (int, float)):
                     entry[bound] = raw.get(bound)
-        if ftype == "select":
+        if ftype in {"select", "multiselect"}:
             options = [str(opt) for opt in (raw.get("options") or []) if str(opt).strip()]
             if not options:
                 continue
@@ -224,6 +228,27 @@ def _coerce_panel_value(field_def: dict[str, Any], value: Any) -> tuple[bool, An
             if text not in options:
                 return False, None, f"허용값: {', '.join(options)}"
             return True, text, ""
+        if ftype == "multiselect":
+            options = [str(opt) for opt in (field_def.get("options") or [])]
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except Exception:
+                    value = [part.strip() for part in value.split(",")]
+            if not isinstance(value, (list, tuple)):
+                return False, None, "목록이어야 합니다"
+            chosen = [str(item) for item in value if str(item) in options]
+            return True, chosen, ""  # 허용 외 값은 조용히 걸러냄(모드 전환 잔존 대비)
+        if ftype == "list":
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except Exception:
+                    value = [value]
+            if not isinstance(value, (list, tuple)):
+                return False, None, "목록이어야 합니다"
+            items = [str(item).strip() for item in value]
+            return True, [item for item in items if item], ""
         if ftype == "text":
             return True, str(value), ""
         if ftype == "tags":
@@ -610,6 +635,38 @@ class ExtensionContext:
             return {"ok": False, "message": "이미 실행 중이거나 큐에 없는 요청"}
         except (SystemExit, Exception) as exc:
             return {"ok": False, "message": _safe_error_text(exc)}
+
+    # ── 모드/토스트 ──────────────────────────────────────────────
+    def get_api_mode(self) -> str:
+        """현재 API 모드("NAI"/"WEBUI"/"COMFYUI") — 실패 시 ""."""
+        try:
+            return str(self._app_context.get_api_mode() or "")
+        except (SystemExit, Exception):
+            return ""
+
+    def show_toast(self, message: Any, level: str = "info") -> None:
+        """사용자에게 토스트 표시(연결된 웹 클라이언트 전원).
+
+        level: info | success | warning | error. 백엔드의 "extension_toast"
+        이벤트 → WS 브릿지로 중계되며, 브릿지/클라이언트가 없으면 콘솔 로그만
+        남는다(무해). 검증 실패 안내("시작 프롬프트가 프롬프트에 없습니다" 등)
+        같은 사용자 피드백 용도."""
+        if not self._record.is_active:
+            return
+        try:
+            text = str(message or "").strip()
+            if not text:
+                return
+            lvl = str(level or "info").lower()
+            if lvl not in {"info", "success", "warning", "error"}:
+                lvl = "info"
+            self.log(f"toast({lvl}): {text}")
+            self._app_context.publish(
+                "extension_toast",
+                {"message": text[:300], "level": lvl, "ext_id": self.ext_id},
+            )
+        except (SystemExit, Exception) as exc:
+            self.log(f"show_toast failed: {_safe_error_text(exc)}")
 
     # ── 결과 조회 / 저장 경로 ────────────────────────────────────
     def get_result_image(self, request_id: Any) -> dict[str, Any]:

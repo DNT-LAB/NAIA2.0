@@ -72,6 +72,25 @@ export function createExtensionsUi(deps) {
       const options = (field.options || []).map(opt =>
         `<option value="${escHtml(opt)}" ${String(value) === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('');
       input = `<select class="ext-select" ${common}>${options}</select>`;
+    } else if (field.type === 'multiselect') {
+      // 체크 칩 다중 선택(예: 현재 모드의 샘플러 목록) — 선택 수 = 생성 수.
+      const current = (Array.isArray(value) ? value : []).map(String);
+      const chips = (field.options || []).map(opt =>
+        `<label class="ext-ms-chip${current.includes(opt) ? ' on' : ''}">
+           <input type="checkbox" value="${escHtml(opt)}" ${current.includes(opt) ? 'checked' : ''}>
+           <span>${escHtml(opt)}</span></label>`).join('');
+      input = `<div class="ext-multiselect" ${common}>${chips}</div>`;
+    } else if (field.type === 'list') {
+      // 동적 행 목록(예: 스왑 Step들) — [추가 +]로 행을 늘리고 ✕로 제거.
+      const items = Array.isArray(value) ? value.map(String) : [];
+      const rows = items.map((item, index) =>
+        `<div class="ext-list-row">
+           <span class="ext-list-step">Step ${index + 1}</span>
+           <input type="text" data-list-index="${index}" value="${escHtml(item)}"${ph}>
+           <button type="button" class="ext-list-remove" data-remove-index="${index}" title="삭제">×</button>
+         </div>`).join('');
+      input = `<div class="ext-list" ${common}>${rows}
+        <button type="button" class="ext-list-add">추가 +</button></div>`;
     } else if (field.type === 'tags') {
       const text = Array.isArray(value) ? value.join(', ') : String(value ?? '');
       input = `<input type="text" class="ext-field-wide" ${common} value="${escHtml(text)}"${ph || ' placeholder="쉼표로 구분"'}>`;
@@ -141,34 +160,81 @@ export function createExtensionsUi(deps) {
     const uniformApply = applyModes.size === 1 ? [...applyModes][0] : '';
     const suppressApply = Boolean(APPLY_NOTES[uniformApply]);
     const note = suppressApply ? `<div class="ext-fields-note">${APPLY_NOTES[uniformApply]}</div>` : '';
-    const left = visible.filter(field => field.column !== 'right');
+    const left = visible.filter(field => !field.column || field.column === 'left');
     const right = visible.filter(field => field.column === 'right');
+    const extra = visible.filter(field => field.column === 'extra');
     const leftHtml = columnHtml(ext, left, idPrefix, suppressApply);
     const rightHtml = columnHtml(ext, right, idPrefix, suppressApply);
-    if (!leftHtml && !rightHtml) return '';
+    const extraHtml = columnHtml(ext, extra, idPrefix, suppressApply);
+    if (!leftHtml && !rightHtml && !extraHtml) return '';
     // 딤 처리는 Settings(전역) 화면에서 soft-off일 때만. 팝업(module)은 작동
     // OFF(armed=false) 상태에서도 설정을 편집할 수 있어야 한다(켜기 전 구성).
     const softOff = !(ext.status === 'loaded' && ext.enabled && !ext.blocked);
     const disabled = scope === 'global' && softOff ? ' ext-fields-disabled' : '';
-    if (!rightHtml) return `<div class="ext-fields${disabled}">${leftHtml}</div>${note}`;
-    return `<div class="ext-fields ext-fields-two-col${disabled}">
+    if (!rightHtml && !extraHtml) return `<div class="ext-fields${disabled}">${leftHtml}</div>${note}`;
+    const extraCol = extraHtml
+      ? `<div class="ext-fields-col ext-fields-col-extra">${extraHtml}</div>` : '';
+    const colClass = extraHtml ? ' ext-fields-three-col' : '';
+    return `<div class="ext-fields ext-fields-two-col${colClass}${disabled}">
       <div class="ext-fields-col">${leftHtml}</div>
       <div class="ext-fields-col ext-fields-col-right">${rightHtml}</div>
+      ${extraCol}
     </div>${note}`;
   }
 
-  function hasRightColumn(ext) {
-    if (!ext?.panel || ext.status !== 'loaded') return false;
-    return ext.panel.fields.some(field =>
-      field.column === 'right' && scopeOf(field) === 'module' && fieldVisible(ext, field));
+  function visibleColumns(ext) {
+    if (!ext?.panel || ext.status !== 'loaded') return new Set();
+    const cols = new Set();
+    ext.panel.fields.forEach(field => {
+      if (scopeOf(field) === 'module' && fieldVisible(ext, field)) cols.add(field.column || 'left');
+    });
+    return cols;
+  }
+
+  function listValues(container) {
+    return [...container.querySelectorAll('input[type=text]')]
+      .map(input => input.value.trim()).filter(Boolean);
   }
 
   function bindFields(root) {
     root.querySelectorAll('.ext-fields [data-field]').forEach(el => {
       el.addEventListener('change', () => {
-        const value = el.type === 'checkbox' ? el.checked : el.value;
+        let value;
+        if (el.classList.contains('ext-multiselect')) {
+          value = [...el.querySelectorAll('input:checked')].map(input => input.value);
+        } else if (el.classList.contains('ext-list')) {
+          value = listValues(el);
+        } else {
+          value = el.type === 'checkbox' ? el.checked : el.value;
+        }
         setModuleParam('extensions', `setting:${el.dataset.ext}:${el.dataset.field}`, value);
       });
+      if (el.classList.contains('ext-list')) {
+        // [추가 +]는 로컬로 빈 행만 늘린다(값 전송은 입력 후 change에서 —
+        // 빈 행은 저장 시 걸러지므로 브로드캐스트 재렌더에 휘발되지 않게
+        // 즉시 포커스를 준다). ✕는 행 제거 후 곧바로 전송.
+        el.querySelector('.ext-list-add')?.addEventListener('click', () => {
+          const addBtn = el.querySelector('.ext-list-add');
+          const index = el.querySelectorAll('.ext-list-row').length;
+          const row = document.createElement('div');
+          row.className = 'ext-list-row';
+          row.innerHTML = `<span class="ext-list-step">Step ${index + 1}</span>
+            <input type="text" data-list-index="${index}">
+            <button type="button" class="ext-list-remove" title="삭제">×</button>`;
+          addBtn.before(row);
+          row.querySelector('.ext-list-remove').addEventListener('click', () => {
+            row.remove();
+            el.dispatchEvent(new Event('change'));
+          });
+          row.querySelector('input').focus();
+        });
+        el.querySelectorAll('.ext-list-remove').forEach(btn => {
+          btn.addEventListener('click', () => {
+            btn.closest('.ext-list-row')?.remove();
+            el.dispatchEvent(new Event('change'));
+          });
+        });
+      }
     });
     root.querySelectorAll('.ext-action-btn[data-action-field]').forEach(el => {
       el.addEventListener('click', () => {
@@ -242,7 +308,19 @@ export function createExtensionsUi(deps) {
 
   function captureFocus(root) {
     const active = document.activeElement;
-    if (!active || !root || !root.contains(active) || !active.dataset || !active.dataset.field) return null;
+    if (!active || !root || !root.contains(active)) return null;
+    // list 행 입력: 컨테이너(data-field)+행 인덱스로 복원 좌표를 잡는다.
+    const listBox = active.closest?.('.ext-list[data-field]');
+    if (listBox && active.dataset && active.dataset.listIndex != null) {
+      return {
+        ext: listBox.dataset.ext,
+        field: listBox.dataset.field,
+        listIndex: active.dataset.listIndex,
+        selStart: active.selectionStart,
+        selEnd: active.selectionEnd,
+      };
+    }
+    if (!active.dataset || !active.dataset.field) return null;
     return {
       ext: active.dataset.ext,
       field: active.dataset.field,
@@ -253,8 +331,12 @@ export function createExtensionsUi(deps) {
 
   function restoreFocus(root, saved) {
     if (!saved || !root) return;
-    const el = root.querySelector(
+    let el = root.querySelector(
       `[data-ext="${CSS.escape(saved.ext)}"][data-field="${CSS.escape(saved.field)}"]`);
+    if (el && saved.listIndex != null) {
+      el = el.querySelector(`input[data-list-index="${CSS.escape(saved.listIndex)}"]`)
+        || el.querySelector('input[type=text]');
+    }
     if (!el) return;
     el.focus();
     if (saved.selStart != null && typeof el.setSelectionRange === 'function') {
@@ -443,6 +525,9 @@ export function createExtensionsUi(deps) {
     quickPopupId = extId;
     renderQuickPopup();
     positionQuickPopup(rect);
+    // 모드 전환 후 첫 오픈 등 stale 옵션(샘플러 목록 등) 대비 — 백엔드 상태를
+    // 재요청하면 브로드캐스트 재렌더가 열린 팝업을 라이브 갱신한다.
+    if (typeof requestState === 'function') requestState();
   }
 
   function closeQuickPopup() {
@@ -479,8 +564,10 @@ export function createExtensionsUi(deps) {
         ${fields}
       </div>
       <div class="ext-quick-foot">관리: Settings ▸ Extension</div>`;
-    // 복잡 모드(우측 칼럼 표시) 시 팝업을 넓힌다.
-    el.classList.toggle('ext-quick-popup-wide', hasRightColumn(ext));
+    // 복잡 모드(우측/3번째 칼럼 표시) 시 팝업을 단계적으로 넓힌다.
+    const cols = visibleColumns(ext);
+    el.classList.toggle('ext-quick-popup-wide', cols.has('right') || cols.has('extra'));
+    el.classList.toggle('ext-quick-popup-xwide', cols.has('extra'));
     el.style.display = 'block';
     el.querySelector('.ext-quick-close').addEventListener('click', closeQuickPopup);
     el.querySelector('.ext-quick-toggle').addEventListener('change', event => {

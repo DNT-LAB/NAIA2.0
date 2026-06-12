@@ -1005,7 +1005,7 @@ function setExtensionLauncherItems(items, onClick) {
   }
   pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
 }
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260612-extset10')
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260612-extset11')
   .then(({createExtensionsUi}) => {
     extensionsPanel = createExtensionsUi({
       document,
@@ -5737,7 +5737,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260611-extset4')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260612-extset11')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,

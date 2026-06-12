@@ -61,23 +61,22 @@ DEFAULT_SETTINGS = {
     "make_grid": True,
     "x_axis": AXIS_NONE,
     "x_range": "5,7,1",
-    "x_samplers": "auto",
-    "x_emphasis": "smile,0.6,1.4,0.4",
-    "x_swap": "",
+    "x_samplers_pick": [],
+    "x_emph_target": "",
+    "x_emph_start": 0.6,
+    "x_emph_step": 0.4,
+    "x_emph_end": 1.4,
+    "x_swap_base": "",
+    "x_swap_steps": [],
     "y_axis": AXIS_NONE,
     "y_range": "0,0.4,0.2",
-    "y_samplers": "auto",
-    "y_emphasis": "smile,0.6,1.4,0.4",
-    "y_swap": "",
-}
-
-# 축 종류 → 전용 입력칸 키 접미사(입력칸은 visible_when으로 축 선택에 따라 전환).
-AXIS_ARG_SUFFIX = {
-    AXIS_CFG: "range",
-    AXIS_RESCALE: "range",
-    AXIS_SAMPLER: "samplers",
-    AXIS_EMPHASIS: "emphasis",
-    AXIS_SWAP: "swap",
+    "y_samplers_pick": [],
+    "y_emph_target": "",
+    "y_emph_start": 0.6,
+    "y_emph_step": 0.4,
+    "y_emph_end": 1.4,
+    "y_swap_base": "",
+    "y_swap_steps": [],
 }
 
 # 모드별 표준 샘플러(UI sampler_options_for_mode 미러) — "auto"가 이 목록을 쓴다.
@@ -102,34 +101,12 @@ def _float_range(args_text):
     return values
 
 
-def _emphasis_values(args_text, api_mode):
-    """"키워드,시작,끝,간격"(실수 가중) → [(키워드, 치환문자열, 라벨=가중치)...].
-
-    가중 문법은 모드별 자동: NAI(NAID4/4.5)=``w::키워드::`` 수치 강조,
-    WEBUI/COMFYUI=로컬 ``(키워드:w)``. 그리드 라벨은 가중치 숫자만 — 키워드는
-    축 타이틀이 담당한다."""
-    parts = [part.strip() for part in str(args_text or "").split(",")]
-    keyword = parts[0]
-    if not keyword or len(parts) < 4:
-        raise ValueError("키워드,시작,끝,간격 형식이어야 합니다")
-    weights = _float_range(",".join(parts[1:4]))
-    values = []
-    for weight in weights:
-        if api_mode == "NAI":
-            wrapped = f"{weight:g}::{keyword}::"
-        else:
-            wrapped = f"({keyword}:{weight:g})"
-        values.append((keyword, wrapped, f"{weight:g}"))
-    return values
-
-
-def _swap_values(args_text):
-    """"키워드,대체1,대체2…" → [(키워드, 대체, 라벨=대체)...]; '^'는 ', '로 치환."""
-    parts = [part.strip() for part in str(args_text or "").split(",")]
-    keyword = parts[0]
-    if not keyword or len(parts) < 2:
-        raise ValueError("키워드,대체1[,대체2…] 형식이어야 합니다")
-    return [(keyword, alt.replace("^", ", "), alt.replace("^", ", ")) for alt in parts[1:] if alt]
+def _wrap_emphasis(keyword, weight, api_mode):
+    """가중 문법은 모드별 자동: NAI(NAID4/4.5)=``w::키워드::``,
+    WEBUI/COMFYUI=로컬 ``(키워드:w)``."""
+    if api_mode == "NAI":
+        return f"{weight:g}::{keyword}::"
+    return f"({keyword}:{weight:g})"
 
 
 class SeedFanout:
@@ -139,6 +116,14 @@ class SeedFanout:
         #  x_labels, y_labels, images: {(col,row): PIL}, expected: set}]
         self._grid_batches = []
         self._grid_lock = threading.Lock()
+
+    def _toast(self, message, level="error"):
+        """사용자 안내 — 토스트 브릿지가 있으면 토스트, 없으면 로그."""
+        notifier = getattr(self.ctx, "show_toast", None)
+        if callable(notifier):
+            notifier(message, level)
+        else:
+            self.ctx.log(message)
 
     # ── 진입점: 모든 큐 삽입 구독 ────────────────────────────────
     def on_generation_dispatched(self, info):
@@ -232,13 +217,25 @@ class SeedFanout:
             self.ctx.log(f"X/Y Plot: 조합 {len(combos)}개 → 상한 {MAX_GRID}개로 절단")
             combos = combos[:MAX_GRID]
 
+        # 프롬프트 치환 축의 시작/원본 프롬프트가 실제 프롬프트에 있는지 선검증
+        # — 없으면 토스트로 안내하고 전체 중단(원본 1장은 그대로 생성).
+        base_prompt = str(params.get("input") or "")
+        for axis_values in (x_values, y_values):
+            for item in axis_values:
+                if item is None or item[0] != "prompt":
+                    continue
+                keyword = item[1][0]
+                if keyword and keyword not in base_prompt:
+                    self._toast(f'"{keyword}" — 시작 프롬프트가 프롬프트에 없습니다')
+                    return
+                break  # 축의 키워드는 동일 — 첫 항목만 보면 충분
+
         # 그리드 비교의 본질: 전 항목 동일 시드(원본 시드 고정).
         base_seed = self._base_seed(params.get("seed"))
 
         # 셀을 전부 먼저 빌드(키워드 검증 포함)하고, 1장 이상 유효할 때만 원본을
         # 취소한다 — X/Y Plot은 "그리드만" 생성한다(원본까지 N+1장 생성 방지).
         # 전 셀이 무효(키워드 부재 등)면 원본을 건드리지 않는다.
-        base_prompt = str(params.get("input") or "")
         cols = len(x_values)
         cells = []
         for index, (x_value, y_value) in enumerate(combos):
@@ -420,44 +417,65 @@ class SeedFanout:
     def _axis_values(self, axis_name, axis, settings, prefix, api_mode):
         """축 정의 → (조합 항목 리스트, 축 타이틀). 항목 = None |
         ("param", (key, value), 라벨) | ("prompt", (keyword, replacement), 라벨).
-        파싱 실패 시 None(전체 중단). 인자는 축 종류별 전용 키(x_range/...)에서
-        읽고, 샘플러/강조는 api_mode를 따른다(샘플러 "auto"=모드 표준 목록,
-        강조=모드별 가중 문법). 타이틀은 축 종류(+키워드) — 그리드 합성의
-        Axis Title 밴드(WEBUI/NAIA 1.5식)가 사용한다."""
+        검증 실패 시 None(전체 중단) — 사용자에겐 토스트로 사유 안내.
+        타이틀은 축 종류(+대상) — 그리드 Axis Title 밴드(WEBUI/1.5식)가 쓴다."""
         axis = str(axis or AXIS_NONE)
         if axis == AXIS_NONE:
             return ([None], "")
-        args_text = settings.get(f"{prefix}_{AXIS_ARG_SUFFIX.get(axis, 'range')}")
         try:
             if axis == AXIS_CFG:
                 return ([("param", ("cfg_scale", value), f"{value:g}")
-                         for value in _float_range(args_text)], "CFG Scale")
+                         for value in _float_range(settings.get(f"{prefix}_range"))], "CFG Scale")
             if axis == AXIS_RESCALE:
                 return ([("param", ("cfg_rescale", value), f"{value:g}")
-                         for value in _float_range(args_text)], "PG.Rescale")
+                         for value in _float_range(settings.get(f"{prefix}_range"))], "PG.Rescale")
             if axis == AXIS_SAMPLER:
-                text = str(args_text or "").strip()
-                if not text or text.lower() == "auto":
-                    samplers = MODE_SAMPLERS.get(api_mode)
-                    if not samplers:
-                        raise ValueError(f"'{api_mode}' 모드의 표준 샘플러 목록이 없습니다 — 직접 입력하세요")
-                else:
-                    samplers = [part.strip() for part in text.split(",") if part.strip()]
-                if not samplers:
-                    raise ValueError("샘플러 콤마 목록이 비었습니다")
-                return ([("param", ("sampler", sampler), sampler) for sampler in samplers], "Sampler")
+                # 현재 모드 샘플러 목록에서 체크 선택 — 선택 수 = 생성 수.
+                picked = settings.get(f"{prefix}_samplers_pick")
+                picked = [str(item) for item in picked] if isinstance(picked, (list, tuple)) else []
+                mode_list = MODE_SAMPLERS.get(api_mode)
+                if mode_list:
+                    picked = [item for item in picked if item in mode_list]
+                if not picked:
+                    self._toast(f"{axis_name}축 Sampler: 샘플러를 1개 이상 선택하세요")
+                    return None
+                return ([("param", ("sampler", sampler), sampler) for sampler in picked], "Sampler")
             if axis == AXIS_EMPHASIS:
-                values = _emphasis_values(args_text, api_mode)
-                keyword = values[0][0] if values else ""
-                return ([("prompt", (kw, wrapped), label) for kw, wrapped, label in values],
-                        f"프롬프트 강조 · {keyword}")
+                # 원본 프롬프트(정확 매칭·쉼표 허용) + 시작/스텝/종료 가중치 — 전부 필수.
+                target = str(settings.get(f"{prefix}_emph_target") or "").strip()
+                if not target:
+                    self._toast(f"{axis_name}축 강조 사다리: 원본 프롬프트를 입력하세요(모든 칸 필수)")
+                    return None
+                start = float(settings.get(f"{prefix}_emph_start"))
+                step = float(settings.get(f"{prefix}_emph_step"))
+                end = float(settings.get(f"{prefix}_emph_end"))
+                if step <= 0:
+                    self._toast(f"{axis_name}축 강조 사다리: 가중치 스텝은 양수여야 합니다")
+                    return None
+                if end < start:
+                    self._toast(f"{axis_name}축 강조 사다리: 종료 가중치가 시작보다 작습니다")
+                    return None
+                items = []
+                weight = start
+                while weight <= end + 1e-9 and len(items) <= MAX_GRID:
+                    rounded = round(weight, 2)
+                    items.append(("prompt", (target, _wrap_emphasis(target, rounded, api_mode)),
+                                  f"{rounded:g}"))
+                    weight += step
+                return (items, f"프롬프트 강조 · {target[:16]}")
             if axis == AXIS_SWAP:
-                values = _swap_values(args_text)
-                keyword = values[0][0] if values else ""
-                return ([("prompt", (kw, alt), label) for kw, alt, label in values],
-                        f"프롬프트 스왑 · {keyword}")
+                # 시작 프롬프트 + Step 대치 프롬프트들(빌더) — 전부 필수.
+                base = str(settings.get(f"{prefix}_swap_base") or "").strip()
+                steps_raw = settings.get(f"{prefix}_swap_steps")
+                steps = [str(item).strip() for item in steps_raw] if isinstance(steps_raw, (list, tuple)) else []
+                steps = [item for item in steps if item]
+                if not base or not steps:
+                    self._toast(f"{axis_name}축 프롬프트 스왑: 시작 프롬프트와 Step을 모두 채워주세요")
+                    return None
+                return ([("prompt", (base, step), step) for step in steps],
+                        f"프롬프트 스왑 · {base[:16]}")
         except Exception as exc:
-            self.ctx.log(f"X/Y Plot: {axis_name}축({axis}) 인자 해석 실패 — {exc}")
+            self._toast(f"X/Y Plot {axis_name}축({axis}) 설정 해석 실패 — {exc}")
             return None
         return ([None], "")
 
@@ -480,84 +498,109 @@ class SeedFanout:
         return result
 
 
-def _axis_fields(prefix, section, base_order, when_xy):
+def _axis_fields(prefix, section, base_order, when_xy, samplers):
     """축 1개분 패널 필드 — 종류 select + 종류별 전용 입력칸. 입력칸의
     visible_when은 종류 select를 가리키고, 종류 자신은 모드(feature)에 묶여
-    있어 모드≠X/Y면 계단식으로 함께 숨는다."""
+    있어 모드≠X/Y면 계단식으로 함께 숨는다. 스왑은 3번째 칼럼(extra)에
+    [시작 프롬프트]+[Step n 대치 프롬프트]+[추가+] 빌더로 펼쳐진다."""
     axis_key = f"{prefix}_axis"
-    common = {"type": "text", "column": "right", "section": section, "apply": "next-generation"}
+    common = {"column": "right", "section": section, "apply": "next-generation"}
+    when_emph = {"field": axis_key, "in": [AXIS_EMPHASIS]}
+    when_swap = {"field": axis_key, "in": [AXIS_SWAP]}
     return [
         {"key": axis_key, "type": "select", "options": AXIS_OPTIONS, "default": AXIS_NONE,
-         "label": "종류", "order": base_order, "visible_when": when_xy,
-         "column": "right", "section": section, "apply": "next-generation"},
-        {"key": f"{prefix}_range", "default": DEFAULT_SETTINGS[f"{prefix}_range"],
+         "label": "종류", "order": base_order, "visible_when": when_xy, **common},
+        {"key": f"{prefix}_range", "type": "text", "default": DEFAULT_SETTINGS[f"{prefix}_range"],
          "label": "값 범위", "placeholder": "시작,끝,간격 — 예: 5,7,1",
          "help": "시작,끝,간격. 예: 5,7,1 → 5·6·7 세 값 = 3장",
          "order": base_order + 1,
          "visible_when": {"field": axis_key, "in": [AXIS_CFG, AXIS_RESCALE]}, **common},
-        {"key": f"{prefix}_samplers", "default": DEFAULT_SETTINGS[f"{prefix}_samplers"],
-         "label": "샘플러 목록", "placeholder": "auto = 현재 모드 표준 목록",
-         "help": "auto면 현재 모드(NAI/WEBUI/COMFYUI)의 표준 샘플러를 자동 나열 — 1개당 1장. "
-                 "직접 쉼표 목록 입력도 가능",
+        {"key": f"{prefix}_samplers_pick", "type": "multiselect", "options": samplers,
+         "default": list(samplers), "label": "샘플러 선택",
+         "help": "현재 모드의 샘플러 목록 — 체크한 샘플러 1개당 1장(선택 수 = 생성 수)",
          "order": base_order + 2,
          "visible_when": {"field": axis_key, "in": [AXIS_SAMPLER]}, **common},
-        {"key": f"{prefix}_emphasis", "default": DEFAULT_SETTINGS[f"{prefix}_emphasis"],
-         "label": "강조 사다리", "placeholder": "키워드,시작,끝,간격 — 예: smile,0.6,1.4,0.4",
-         "help": "키워드 가중을 시작~끝까지 간격씩 스윕(1장씩). 문법은 모드 자동 — "
-                 "NAI(NAID4/4.5)는 w::키워드::, WEBUI/COMFYUI는 (키워드:w). "
-                 "예: smile,0.6,1.4,0.4 → 0.6 / 1 / 1.4 3장",
-         "order": base_order + 3,
-         "visible_when": {"field": axis_key, "in": [AXIS_EMPHASIS]}, **common},
-        {"key": f"{prefix}_swap", "default": DEFAULT_SETTINGS[f"{prefix}_swap"],
-         "label": "키워드 스왑", "placeholder": "키워드,대체1,대체2 — ^는 콤마",
-         "help": "프롬프트 속 키워드를 각 대체값으로 바꿔 1장씩. 대체값 안의 '^'는 콤마로 치환. "
-                 "예: blue hair,red hair,blonde hair",
-         "order": base_order + 4,
-         "visible_when": {"field": axis_key, "in": [AXIS_SWAP]}, **common},
+        # ── 강조 사다리: 원본 프롬프트(쉼표 허용) + 시작/스텝/종료 — 전부 필수 ──
+        {"key": f"{prefix}_emph_target", "type": "text", "default": "",
+         "label": "원본 프롬프트", "placeholder": "정확 매칭 — 쉼표 포함 가능",
+         "help": "프롬프트 창에 정확히 존재하는 구간을 그대로 입력(쉼표 포함 가능). "
+                 "이 구간에 가중을 입혀 1장씩 생성 — 문법은 모드 자동(NAI w::…::, 로컬 (…:w))",
+         "order": base_order + 3, "visible_when": when_emph, **common},
+        {"key": f"{prefix}_emph_start", "type": "float", "default": 0.6, "step": 0.1,
+         "label": "시작 가중치", "order": base_order + 4, "visible_when": when_emph, **common},
+        {"key": f"{prefix}_emph_step", "type": "float", "default": 0.4, "min": 0.05, "step": 0.05,
+         "label": "가중치 스텝", "order": base_order + 5, "visible_when": when_emph, **common},
+        {"key": f"{prefix}_emph_end", "type": "float", "default": 1.4, "step": 0.1,
+         "label": "종료 가중치", "order": base_order + 6, "visible_when": when_emph, **common},
+        # ── 프롬프트 스왑: 3번째 칼럼(extra) 빌더 ──
+        {"key": f"{prefix}_swap_base", "type": "text", "default": "",
+         "label": "시작 프롬프트", "placeholder": "프롬프트 창에 정확히 존재해야 함",
+         "help": "프롬프트 창의 이 구간을 아래 Step들로 바꿔 1장씩 생성. "
+                 "프롬프트에 없으면 토스트로 안내하고 중단",
+         "column": "extra", "section": f"{section} · 프롬프트 스왑", "apply": "next-generation",
+         "order": base_order + 7, "visible_when": when_swap},
+        {"key": f"{prefix}_swap_steps", "type": "list", "default": [],
+         "label": "대치할 프롬프트", "placeholder": "이 내용으로 교체",
+         "help": "Step 1개당 1장 — [추가 +]로 늘리고 ×로 제거",
+         "column": "extra", "section": f"{section} · 프롬프트 스왑", "apply": "next-generation",
+         "order": base_order + 8, "visible_when": when_swap},
     ]
+
+
+def _register_panel(ctx, ext):
+    """패널 (재)등록 — 샘플러 선택지는 현재 API 모드 목록을 따른다.
+    api_mode_changed 구독으로 모드 전환 시 다시 호출된다."""
+    if not hasattr(ctx, "register_panel"):
+        return
+    mode = ""
+    if hasattr(ctx, "get_api_mode"):
+        mode = str(ctx.get_api_mode() or "")
+    samplers = MODE_SAMPLERS.get(mode, MODE_SAMPLERS["NAI"])
+    when_fanout = {"field": "feature", "in": [FEATURE_FANOUT]}
+    when_xy = {"field": "feature", "in": [FEATURE_XY]}
+    ctx.register_panel(
+        fields=[
+            {"key": "feature", "type": "select", "options": [FEATURE_FANOUT, FEATURE_XY],
+             "default": FEATURE_FANOUT, "label": "모드", "order": 0,
+             "apply": "next-generation",
+             "help": "Seed Fan-out=시드 변형 n장 · X/Y Plot=파라미터 그리드(인스턴트 이벤트)"},
+            {"key": "count", "type": "int", "min": 1, "max": MAX_TOTAL,
+             "default": DEFAULT_SETTINGS["count"], "label": "생성 수",
+             "help": "Generate 1회당 총 장수(원본 포함). 1이면 추가 생성 없음",
+             "apply": "next-generation", "order": 1, "visible_when": when_fanout},
+            {"key": "mode", "type": "select", "options": ["random", "+1", "-1", "fixed"],
+             "default": DEFAULT_SETTINGS["mode"], "label": "시드 방식",
+             "help": "fixed=전부 원본과 같은 시드(와일드카드 변주 비교용)",
+             "apply": "next-generation", "order": 2, "visible_when": when_fanout},
+            {"key": "char_fix", "type": "bool", "default": False,
+             "label": "캐릭터 프롬프트 고정",
+             "help": "NAI 전용. 켜면 묶음 전체(원본 포함)가 지금 1회 전개한 캐릭터 "
+                     "스냅샷을 공유(캐릭터 와일드카드 재롤 방지). 끄면 장마다 재전개",
+             "apply": "next-generation", "order": 3},
+            # ── X/Y Plot (복잡 모드 → 우측 칼럼, 축 종류별 입력칸 전환) ──
+            *_axis_fields("x", "X 축", 10, when_xy, samplers),
+            *_axis_fields("y", "Y 축", 30, when_xy, samplers),
+            {"key": "make_grid", "type": "bool", "default": True,
+             "label": "그리드 합성 저장",
+             "help": "전 셀 완료 시 n×m 합성 PNG를 저장 폴더의 grid/ 아래 생성"
+                     "(축 타이틀·값 라벨 포함)",
+             "column": "right", "section": "그리드 이미지", "order": 50,
+             "apply": "next-generation", "visible_when": when_xy},
+            {"key": "open_grid_folder", "type": "action", "label": "Grid 폴더 열기",
+             "help": "저장 폴더/grid 를 파일 탐색기로 연다(서버 기기 기준)",
+             "column": "right", "section": "그리드 이미지", "order": 51,
+             "visible_when": when_xy},
+        ],
+        title="Seed Fan-out",
+        on_action=ext.on_action,
+    )
 
 
 def register(ctx):
     ext = SeedFanout(ctx)
     ctx.subscribe("generation_request_dispatched", ext.on_generation_dispatched)
     ctx.subscribe("generation_result_available", ext.on_generation_result)
-    if hasattr(ctx, "register_panel"):
-        when_fanout = {"field": "feature", "in": [FEATURE_FANOUT]}
-        when_xy = {"field": "feature", "in": [FEATURE_XY]}
-        ctx.register_panel(
-            fields=[
-                {"key": "feature", "type": "select", "options": [FEATURE_FANOUT, FEATURE_XY],
-                 "default": FEATURE_FANOUT, "label": "모드", "order": 0,
-                 "apply": "next-generation",
-                 "help": "Seed Fan-out=시드 변형 n장 · X/Y Plot=파라미터 그리드(인스턴트 이벤트)"},
-                {"key": "count", "type": "int", "min": 1, "max": MAX_TOTAL,
-                 "default": DEFAULT_SETTINGS["count"], "label": "생성 수",
-                 "help": "Generate 1회당 총 장수(원본 포함). 1이면 추가 생성 없음",
-                 "apply": "next-generation", "order": 1, "visible_when": when_fanout},
-                {"key": "mode", "type": "select", "options": ["random", "+1", "-1", "fixed"],
-                 "default": DEFAULT_SETTINGS["mode"], "label": "시드 방식",
-                 "help": "fixed=전부 원본과 같은 시드(와일드카드 변주 비교용)",
-                 "apply": "next-generation", "order": 2, "visible_when": when_fanout},
-                {"key": "char_fix", "type": "bool", "default": False,
-                 "label": "캐릭터 프롬프트 고정",
-                 "help": "NAI 전용. 켜면 묶음 전체(원본 포함)가 지금 1회 전개한 캐릭터 "
-                         "스냅샷을 공유(캐릭터 와일드카드 재롤 방지). 끄면 장마다 재전개",
-                 "apply": "next-generation", "order": 3},
-                # ── X/Y Plot (복잡 모드 → 우측 칼럼, 축 종류별 입력칸 전환) ──
-                *_axis_fields("x", "X 축", 10, when_xy),
-                *_axis_fields("y", "Y 축", 20, when_xy),
-                {"key": "make_grid", "type": "bool", "default": True,
-                 "label": "그리드 합성 저장",
-                 "help": "전 셀 완료 시 n×m 합성 PNG를 저장 폴더의 grid/ 아래 생성"
-                         "(축 값 라벨 포함)",
-                 "column": "right", "section": "그리드 이미지", "order": 30,
-                 "apply": "next-generation", "visible_when": when_xy},
-                {"key": "open_grid_folder", "type": "action", "label": "Grid 폴더 열기",
-                 "help": "저장 폴더/grid 를 파일 탐색기로 연다(서버 기기 기준)",
-                 "column": "right", "section": "그리드 이미지", "order": 31,
-                 "visible_when": when_xy},
-            ],
-            title="Seed Fan-out",
-            on_action=ext.on_action,
-        )
+    # 모드 전환 시 샘플러 선택지를 그 모드 목록으로 재등록.
+    ctx.subscribe("api_mode_changed", lambda _payload: _register_panel(ctx, ext))
+    _register_panel(ctx, ext)
     ctx.log("ready — Seed Fan-out / X/Y Plot (퀵 버튼 팝업에서 조정, 관리는 Settings ▸ Extension)")

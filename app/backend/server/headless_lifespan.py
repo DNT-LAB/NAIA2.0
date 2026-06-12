@@ -19,6 +19,9 @@ RunInThread = Callable[..., Awaitable[Any]]
 def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunInThread):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # 메인 이벤트 루프 핸들 — 코어(임의 스레드)에서 WS 브로드캐스트를 예약하는
+        # 브릿지(확장 토스트 등)가 call_soon_threadsafe 대상으로 쓴다.
+        context.headless_main_loop = asyncio.get_running_loop()
         # 사용자 확장 로드(user-data/extensions). 워밍업 프롬프트에도 확장 훅이
         # 적용되도록 warmup 태스크 생성 전에 동기 로드한다. 개별 확장 실패는
         # 내부에서 격리되며, 이 try는 로더 자체 결함이 부팅을 막는 것만 방지한다.

@@ -463,24 +463,42 @@ export function createModuleLauncher({
       .filter(Boolean);
   }
 
+  function activeExtensionsFor(category) {
+    // 활성(armed) Extension 칩 — "내가 켜둔 확장이 있다"를 카테고리 헤더에서
+    // 바로 알 수 있게 한다(연주황 E{n}, NAI 전용 도구의 C/V 칩 패턴).
+    return extensionItems.filter(item => item.category === category.id && !item.armedOff);
+  }
+
+  function appendExtensionBadge(badgeGroup, activeExts) {
+    const chip = document.createElement('span');
+    chip.className = 'module-category-badge module-category-badge-ext';
+    chip.textContent = `E${activeExts.length}`;
+    const names = activeExts.map(item => item.label).join(', ');
+    chip.setAttribute('aria-label', `활성 Extension: ${names}`);
+    chip.dataset.moduleTooltip = `활성 Extension: ${names}`;
+    badgeGroup.append(chip);
+  }
+
   function applyCategoryBadge(category, categoryEl) {
     const badgeGroup = categoryEl.querySelector('.module-category-badges');
     if (!badgeGroup) return;
     const badges = visibleBadges(category);
-    if (!badges.length) {
+    const activeExts = activeExtensionsFor(category);
+    if (!badges.length && !activeExts.length) {
       if (badgeGroup.dataset.badgeSignature === '' && badgeGroup.classList.contains('hidden')) return;
       badgeGroup.dataset.badgeSignature = '';
       badgeGroup.classList.add('hidden');
       badgeGroup.replaceChildren();
       return;
     }
-    const signature = category.splitBadges
+    const extSignature = activeExts.map(item => item.id).join(',');
+    const signature = (category.splitBadges
       ? badges.map(badge => `${badge.moduleId}:${badge.value}`).join('|')
-      : badges.map(badge => badge.value).join('|');
+      : badges.map(badge => badge.value).join('|')) + `#ext:${extSignature}`;
     if (badgeGroup.dataset.badgeSignature === signature && !badgeGroup.classList.contains('hidden')) return;
     badgeGroup.dataset.badgeSignature = signature;
     badgeGroup.replaceChildren();
-    if (category.splitBadges) {
+    if (category.splitBadges || !badges.length) {
       badges.forEach(badge => {
         const chip = document.createElement('span');
         chip.className = `module-category-badge module-category-badge-${badge.className || badge.moduleId}`;
@@ -489,6 +507,7 @@ export function createModuleLauncher({
         chip.dataset.moduleTooltip = `${badge.title}: ${badge.value}`;
         badgeGroup.append(chip);
       });
+      if (activeExts.length) appendExtensionBadge(badgeGroup, activeExts);
       badgeGroup.classList.remove('hidden');
       return;
     }
@@ -500,6 +519,7 @@ export function createModuleLauncher({
       ? String(numericValues.reduce((sum, value) => sum + value, 0))
       : (values.length === 1 ? values[0] : String(values.length));
     badgeGroup.append(chip);
+    if (activeExts.length) appendExtensionBadge(badgeGroup, activeExts);
     badgeGroup.classList.remove('hidden');
   }
 

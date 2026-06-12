@@ -9247,6 +9247,8 @@ body.resizing-result-info {
 .module-category-badge-vibe { background: rgba(212,160,106,0.24); color: #e8b975; }
 /* 이벤트 스트림(EV 자동화) 활성 칩 — 분홍 */
 .module-category-badge-event-stream { background: rgba(224,110,170,0.24); color: #f2a4cb; }
+/* 활성 Extension 칩(E{n}) — 연주황 (NAI 전용 도구 C/V 칩과 같은 부여 방식) */
+.module-category-badge-ext { background: rgba(240,165,100,0.24); color: #f5bd84; }
 .module-category-badge.hidden { display: none; }
 .module-category-menu {
   display: none;
@@ -16892,6 +16894,9 @@ body.detached-module .mod-grid-3 {
 .ext-quick-popup.ext-quick-popup-wide {
   width: min(620px, calc(100vw - 16px)); max-width: 620px;
 }
+.ext-quick-popup.ext-quick-popup-xwide {
+  width: min(900px, calc(100vw - 16px)); max-width: 900px;
+}
 .ext-quick-head {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 10px 12px; background: var(--bg-surface);
@@ -16949,6 +16954,43 @@ body.detached-module .mod-grid-3 {
   background: var(--bg-surface);
 }
 .ext-quick-popup .ext-fields-col-right { border-left: none; }
+/* 3칼럼(extra): 스왑 빌더처럼 깊은 모드가 우측에 한 칸 더 펼친다 */
+.ext-quick-popup .ext-fields-three-col {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr) minmax(0, 1.2fr);
+}
+/* multiselect 체크 칩(샘플러 선택 등) — 선택 수 = 생성 수 */
+.ext-multiselect { display: flex; flex-wrap: wrap; gap: 5px; grid-column: 2; min-width: 0; }
+.ext-ms-chip {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  padding: 4px 8px; border: 1px solid var(--border-dim); border-radius: 7px;
+  background: var(--bg-elevated); color: var(--text-muted); font-size: 11px;
+}
+.ext-ms-chip input { margin: 0; accent-color: var(--accent); }
+.ext-ms-chip.on { color: var(--text-primary); border-color: var(--accent); }
+/* list 빌더(스왑 Step들) — 행 + [추가 +] */
+.ext-list { display: flex; flex-direction: column; gap: 6px; grid-column: 1 / -1; min-width: 0; }
+.ext-list-row { display: flex; align-items: center; gap: 6px; }
+.ext-list-step {
+  flex: 0 0 52px; font-size: 10px; font-weight: 700; color: var(--accent-light);
+  text-align: right;
+}
+.ext-list-row input {
+  flex: 1; min-width: 0; height: 28px; padding: 4px 8px; font-size: 12px;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: var(--bg-elevated); color: var(--text-primary);
+}
+.ext-list-remove {
+  flex: 0 0 auto; width: 24px; height: 24px; cursor: pointer; line-height: 1;
+  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  color: var(--text-muted); font-size: 14px;
+}
+.ext-list-remove:hover { color: var(--text-primary); border-color: var(--border-dim); }
+.ext-list-add {
+  align-self: flex-start; margin-left: 58px; padding: 4px 12px; cursor: pointer;
+  border: 1px dashed var(--border-dim); border-radius: 7px; background: transparent;
+  color: var(--text-muted); font-size: 11px;
+}
+.ext-list-add:hover { color: var(--text-primary); border-color: var(--accent); }
 /* 섹션 헤더: accent 사각 불릿 + 텍스트 + 잔여폭 구분선 */
 .ext-quick-popup .ext-section {
   display: grid; grid-template-columns: 6px auto 1fr; align-items: center; gap: 7px;

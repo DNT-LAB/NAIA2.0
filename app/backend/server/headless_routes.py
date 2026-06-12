@@ -32,6 +32,33 @@ from core.web_session_context import WebSessionContext
 RunInThread = Callable[..., Awaitable[Any]]
 
 
+def _register_extension_toast_bridge(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """확장 → 사용자 토스트 브릿지(ctx.show_toast의 수신단).
+
+    코어의 "extension_toast" 이벤트는 임의 스레드(이벤트 루프/생성 워커)에서
+    발행되므로, lifespan이 캡처해 둔 메인 루프에 브로드캐스트를 예약한다."""
+    import asyncio
+
+    def _on_extension_toast(payload: Any) -> None:
+        try:
+            data = payload if isinstance(payload, dict) else {}
+            message = str(data.get("message") or "").strip()
+            if not message:
+                return
+            level = str(data.get("level") or "info")
+            toast = {"type": "toast", "message": message[:300], "level": level}
+            loop = getattr(context, "headless_main_loop", None)
+            if loop is None:
+                return
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(broadcast_json(clients, toast))
+            )
+        except Exception:
+            pass
+
+    context.subscribe("extension_toast", _on_extension_toast)
+
+
 def register_headless_routes(
     app: FastAPI,
     context: WebSessionContext,
@@ -42,6 +69,7 @@ def register_headless_routes(
 ) -> None:
     app.state.remote_web_dir = str(root_web_dir)
     register_web_shell_routes(app, root_web_dir)
+    _register_extension_toast_bridge(context, clients)
 
     register_state_routes(
         app,

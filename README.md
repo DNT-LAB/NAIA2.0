@@ -145,16 +145,20 @@ NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가�
   쌓입니다. 시드 방식 = `random` / `+1` / `-1` / `fixed`(전부 원본과 같은 시드 —
   입력창 와일드카드 변주 비교용).
 - **X/Y Plot**: 모드를 바꾸면 팝업 우측에 X/Y 축 설정이 펼쳐집니다. 축 **종류**를
-  고르면 그에 맞는 입력칸이 나타납니다 — `CFG Scale`·`PG.Rescale`(값 범위
-  "시작,끝,간격" — 예: `5,7,1` = 5·6·7 세 값 3장) / `Sampler`(`auto`=현재 모드의
-  표준 샘플러 자동 나열, 직접 쉼표 목록도 가능) / `프롬프트 강조`(키워드 가중
-  사다리 "키워드,시작,끝,간격" — 문법은 모드 자동: NAI(NAID4/4.5) `w::키워드::`,
-  WEBUI/ComfyUI `(키워드:w)`) / `프롬프트 스왑`(키워드를 대체값들로 치환,
-  `^`=콤마). 두 축을 조합하면 Generate 1회로 그리드 전체가 **동일 시드**로 큐에
-  쌓입니다(상한 32장). **원본 요청은 자동 취소되어 정확히 그리드 장수만
-  생성됩니다.** **그리드 합성 저장**(기본 ON)을 켜두면 전 셀 완료 시 축 라벨이
-  붙은 **n×m 합성 PNG**가 저장 폴더의 `grid/` 아래 생성되며, "Grid 폴더 열기"
-  버튼으로 바로 열 수 있습니다.
+  고르면 그에 맞는 입력칸이 나타납니다 —
+  `CFG Scale`·`PG.Rescale`(값 범위 "시작,끝,간격" — 예: `5,7,1` = 5·6·7 세 값
+  3장) / `Sampler`(**현재 모드의 샘플러 목록에서 체크 선택** — 선택 수 = 생성
+  수) / `프롬프트 강조`(**원본 프롬프트**(정확 매칭, 쉼표 포함 가능) + 시작/
+  스텝/종료 **가중치 3칸** — 전부 필수. 문법은 모드 자동: NAI(NAID4/4.5)
+  `w::원본::`, WEBUI/ComfyUI `(원본:w)`) / `프롬프트 스왑`(**3번째 칸이 열리며**
+  [시작 프롬프트] + [Step n 대치 프롬프트] + [추가 +] 빌더로 구성 — Step 1개당
+  1장). 시작/원본 프롬프트가 프롬프트 창에 없으면 **토스트로 안내**하고
+  중단합니다. 두 축을 조합하면 Generate 1회로 그리드 전체가 **동일 시드**로
+  큐에 쌓입니다(상한 32장). **원본 요청은 자동 취소되어 정확히 그리드 장수만
+  생성됩니다.** **그리드 합성 저장**(기본 ON)을 켜두면 전 셀 완료 시 축
+  타이틀·값 라벨이 붙은 **n×m 합성 PNG**가 저장 폴더의 `grid/` 아래 생성되며,
+  "Grid 폴더 열기" 버튼으로 바로 열 수 있습니다. 활성 확장이 있으면 "자동화 /
+  고급 기능" 헤더에 연주황 **E{n}** 칩이 표시됩니다(호버 시 활성 확장 목록).
 - 공통 **캐릭터 프롬프트 고정**(NAI): 켜면 묶음 전체(원본 포함)가 지금 1회
   전개된 캐릭터 스냅샷을 공유합니다(캐릭터 와일드카드 재롤 방지) — Seed
   Fan-out에서는 원본을 취소·대체해 총 N장이 전부 같은 캐릭터가 됩니다.
@@ -213,7 +217,9 @@ class MyHook:
 |--------|------|
 | `ctx.subscribe(event, fn)` / `ctx.unsubscribe(event, fn)` | 이벤트 구독. 콜백 예외는 격리되며 연속 5회 실패 시 자동 음소거 |
 | `ctx.register_hook(hook)` | 프롬프트 파이프라인 훅 등록. priority < 100은 100으로 클램프(0~99 = 코어 예약) |
-| `ctx.register_panel(fields=[...], title=, on_action=)` | **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/text/tags/action, label, default, min/max/step, options, help, placeholder, section, order, apply: immediate/next-generation/restart-required, scope: module/global, column: left/right, visible_when: {field, in: [...]}}`. **scope가 노출 위치를 결정**: `"module"`(기본)=퀵 버튼 팝업(실제 동작 설정), `"global"`=Settings ▸ Extension 행(전역 설정 — 저장 경로 등). `column:"right"` 필드가 표시되면 **2단**으로 펼쳐지고, `visible_when`으로 모드별 조건부 표시. `type:"action"`은 **버튼**으로 렌더 — 클릭 시 `on_action(key)` 호출(설정 저장 없음, 예외 격리). 값은 `settings.json` 라운드트립 — `ctx.load_settings()`와 같은 파일 |
+| `ctx.register_panel(fields=[...], title=, on_action=)` | **선언적 설정 폼** 노출(JS 불필요). field: `{key, type: bool/int/float/select/multiselect/text/tags/list/action, label, default, min/max/step, options, help, placeholder, section, order, apply: immediate/next-generation/restart-required, scope: module/global, column: left/right/extra, visible_when: {field, in: [...]}}`. **scope가 노출 위치를 결정**: `"module"`(기본)=퀵 버튼 팝업, `"global"`=Settings 행. `column:"right"`가 보이면 **2단**, `"extra"`가 보이면 **3단**으로 펼쳐지고, `visible_when`은 계단식 조건부 표시. `type:"multiselect"`=체크 칩 다중 선택(값=문자열 배열, 옵션 외 값은 필터), `type:"list"`=동적 행 빌더([추가 +]/×, 값=문자열 배열), `type:"action"`=버튼 — 클릭 시 `on_action(key)` 호출(설정 저장 없음, 예외 격리). 재호출하면 폼이 교체된다(모드 전환 시 옵션 갱신 등). 값은 `settings.json` 라운드트립 |
+| `ctx.show_toast(message, level="info")` | 연결된 웹 클라이언트 전원에게 토스트 표시(info/success/warning/error) — 검증 실패 안내 등 사용자 피드백용. 브릿지: 백엔드 `extension_toast` 이벤트 → WS `{type:"toast"}` |
+| `ctx.get_api_mode()` | 현재 API 모드("NAI"/"WEBUI"/"COMFYUI") — 모드별 옵션 구성(샘플러 목록 등)에 사용 |
 | `ctx.resolve_nai_characters()` | 현재 NAI 캐릭터 설정을 **지금 1회 전개**(와일드카드 포함)한 스냅샷 `{characters, uc, character_positions}` 또는 None. overrides에 실으면 그 요청은 늦은 바인딩(매장 재전개) 대신 스냅샷 사용 — 변형 묶음의 캐릭터 고정용 |
 | `ctx.enqueue_generation(prompt=, negative_prompt=, api_mode=, prompt_run_id=, priority=, overrides=, allow_chain=False)` | 생성 요청을 큐에 추가. 반환 `{ok, request_id, message}`. 파생 요청에는 `ext_origin`과 체인 깊이가 찍히며, **확장 파생 이벤트를 처리 중인 동안의 호출은 기본 차단**(확장 간 무한 연쇄 방지 — 의도적 체인은 `allow_chain=True`). 단 체인 깊이 4 초과는 `allow_chain`과 무관하게 무조건 거부 |
 | `ctx.cancel_generation(request_id)` | **대기(pending) 중인** 생성 요청을 큐에서 제거 → `{ok, message}`. 이미 시작/완료된 요청은 실패(ok=False). 용례: 그리드형 확장이 반응한 원본 요청을 파생 묶음으로 대체(X/Y Plot의 "그리드만 생성") — dispatched 콜백 안에서의 취소는 원본 실행 전에 결정적으로 적용 |

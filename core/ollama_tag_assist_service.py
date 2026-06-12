@@ -301,6 +301,18 @@ _SIZE_ADJECTIVES = frozenset({
     "small", "tiny", "little", "long", "short",
 })
 
+# 특수화 prefix가 동작/상태(holding/sitting 등)면 base의 *잡음 변형*이 아니라 의미적으로
+# 다른 태그다 — "holding pen"(누가 듦)은 "pen"(사물 존재)과 다른 정보. 특수화 필터가
+# 이걸 base 잡음으로 제거하면, solo 장면에서 'pen'만 남아 NAI가 외부 손이 펜을 들게
+# 그린다(실측 S 케이스). 동작/상태 prefix 태그는 특수화 제거에서 면제한다. 작품/색상/
+# 고유명 prefix(ooarai/red/competition)는 여기 없으므로 정상 제거된다.
+_MEANINGFUL_SPEC_PREFIXES = frozenset({
+    "holding", "sitting", "lying", "standing", "kneeling", "leaning", "squatting",
+    "wielding", "carrying", "grabbing", "gripping", "covering", "hugging", "riding",
+    "wearing", "removing", "spreading", "touching", "licking", "sucking", "straddling",
+    "spread", "open", "closed", "crossed", "raised", "bent", "arched",
+})
+
 # 명시적 핵심 행위 — 소형 모델 개념 추출이 "섹스"처럼 명시 단어를 통째로 흘리는 일이
 # 잦다(실측). 입력(한/영)에 키워드가 있으면 canonical danbooru 태그를 결정론적으로
 # 강제 포함한다(인덱스 실존 + 등급 통과 시). 인원수 강제 포함과 동일 철학 — 진실은 코드.
@@ -1587,6 +1599,11 @@ class OllamaTagAssistService:
             def _is_noisier_specialization(row):
                 tag_l = str(row.get("tag") or "").strip().lower()
                 count = int(row.get("count") or 0)
+                # 면제: 동작/상태 prefix(holding/sitting 등)는 base 잡음이 아니라 의미적
+                # 변형 — "holding pen"이 "pen" 특수화로 제거→solo인데 외부 손이 펜 듦(실측).
+                first = tag_l.split(" ", 1)[0] if tag_l else ""
+                if first in _MEANINGFUL_SPEC_PREFIXES:
+                    return False
                 # 면제(P1): 태그 스템이 *전부* 쿼리 스템에서 온 다단어 태그는 개념의
                 # 직접 합성 표현이다 — "looking at phone"({look,phon}⊆{look,cell,phon})을
                 # base "phone"(111k)의 특수화로 오판해 떨어뜨리던 실측 결함 수정.

@@ -11527,6 +11527,10 @@ body.detached-metadata .metadata-layout {
   width: 100%;
   accent-color: var(--accent);
 }
+.mod-img2img-resize-1mp {
+  grid-column: 1 / -1;
+  margin: 0;
+}
 .mod-img2img:not(.mod-img2img-inpaint) .mod-img2img-controls {
   grid-template-columns: 1fr;
 }
@@ -16886,6 +16890,10 @@ body.detached-module .mod-grid-3 {
 .ext-quick-popup {
   position: fixed; z-index: 1200;
   width: min(390px, calc(100vw - 16px)); min-width: 320px; max-width: 390px;
+  /* 높이 상한: Step 빌더처럼 내용이 자라는 폼이 뷰포트를 뚫지 않게 헤더 고정 +
+     바디 스크롤. 16px = positionQuickPopup의 상하 8px 마진과 대칭. */
+  max-height: calc(100vh - 16px);
+  display: flex; flex-direction: column;
   padding: 0; overflow: hidden;
   color: var(--text-primary); background: var(--bg-surface);
   border: 1px solid var(--border-dim); border-radius: 10px;
@@ -16898,6 +16906,7 @@ body.detached-module .mod-grid-3 {
   width: min(900px, calc(100vw - 16px)); max-width: 900px;
 }
 .ext-quick-head {
+  flex: 0 0 auto;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 10px 12px; background: var(--bg-surface);
   border-bottom: 1px solid var(--border-dim);
@@ -16921,6 +16930,8 @@ body.detached-module .mod-grid-3 {
   color: var(--text-primary); border-color: var(--border-dim); background: var(--bg-elevated);
 }
 .ext-quick-body {
+  flex: 1 1 auto; min-height: 0;            /* flex 자식 스크롤 활성화 필수 */
+  overflow-y: auto; overscroll-behavior: contain;
   display: flex; flex-direction: column; gap: 10px;
   padding: 10px 12px; background: var(--bg-elevated);
 }
@@ -17063,6 +17074,7 @@ body.detached-module .mod-grid-3 {
   background: var(--bg-surface); color: var(--text-muted); font-size: 11px; line-height: 1.45;
 }
 .ext-quick-foot {
+  flex: 0 0 auto;
   padding: 8px 12px 9px; border-top: 1px solid var(--border-dim);
   background: var(--bg-surface); color: var(--text-muted); font-size: 10px; text-align: right;
 }

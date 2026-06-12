@@ -22,6 +22,8 @@ import math
 import re
 from typing import Any, Callable
 
+from core.named_entity_groups import is_generic_char_attribute
+
 # danbooru 한국어 카테고리(KR_tags). 음식 마커 하나로 shortcake(사물/음식)·
 # mint chocolate(음식>맛) 둘 다 잡힌다. 무기/도구/가방 등 일반 사물은 정상 유지.
 _FOOD_MARKER = "음식"
@@ -71,8 +73,13 @@ def score_candidate(
     if kind in _FOOD_GATED_KINDS and _FOOD_MARKER in cat:
         return (0.0, "food-category")
     # ② 고유명 카테고리(캐릭터/저작권/작가): 사용자가 고유명 직접 안 말한 일반 검색의 잡음.
-    if any(m in cat for m in _PROPER_NOUN_MARKERS):
-        return (0.0, "proper-noun-category")
+    for m in _PROPER_NOUN_MARKERS:
+        if m in cat:
+            # "캐릭터 > 직업/종족/유형/..." generic 인물·생물·속성은 고유명 아님 — 면제
+            # (cheerleader/nurse/futanari/dark elf 등; 감사 2026-06-12). franchise는 그대로.
+            if m == "캐릭터" and is_generic_char_attribute(cat, tag):
+                continue
+            return (0.0, "proper-noun-category")
     # ⚠️ 스코어는 count 지배(기존 동작 보존) + exact/overlap 작은 타이브레이크만.
     #    whole-word 데모션은 폐기 — 측정상 정당한 복합어(windowsill↛window)를 하단으로
     #    밀어 recall이 회귀했다(collapse·verify와 동일 패턴: 정밀도 필터가 recall을 깎음).

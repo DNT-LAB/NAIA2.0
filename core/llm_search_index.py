@@ -37,6 +37,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from core.named_entity_groups import is_generic_char_attribute
+
 __all__ = ["LLMSearchIndex", "normalize_query", "stem_token", "query_stems"]
 
 
@@ -186,8 +188,15 @@ def _excluded(norm: str, info: Mapping[str, Any]) -> bool:
     group = str(info.get("group") or "").strip().lower()
     if group.startswith(_PROPER_EN_PREFIXES):
         return True
-    if any(marker in group for marker in _PROPER_KR_MARKERS):
-        return True
+    for marker in _PROPER_KR_MARKERS:
+        if marker in group:
+            # "캐릭터 > 직업/종족/유형/속성/..." generic 인물·생물·속성은 고유명이 아니다
+            # — cheerleader/nurse/ninja/futanari/dark elf/twins 등 ~150 태그가 named
+            # 캐릭터로 오배제되던 것 차단(감사 2026-06-12). franchise(캐릭터>포켓몬/Fate)는
+            # leaf가 화이트리스트 밖이라 그대로 배제.
+            if marker == "캐릭터" and is_generic_char_attribute(group, norm):
+                continue
+            return True
     if "(" in norm and ")" in norm:
         return True
     if _rec_count(info) <= 0:

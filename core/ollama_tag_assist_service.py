@@ -258,6 +258,57 @@ def _is_two_person_tag(tag_norm: str) -> bool:
     return t in _TWO_PERSON_TAGS or bool(_ANOTHER_TOKEN_RE.search(t))
 
 
+# 공기 쿼리 앵커로 쓸 *행위(이벤트)* 어휘. _is_sexual_tag는 노출/의류 상태·부수
+# 해부 명사(nude/underwear/panties/nipples/cleavage 등)까지 잡지만 그것들은 이벤트를
+# 명명하지 않아 공기 쿼리 가치가 낮고 주입게이트 fail-open 시 노이즈원이 된다(Codex).
+# ⚠️ 경계 인식 매칭 — raw substring은 oral⊂pectoral/floral, rape⊂grape/scrape,
+# anal⊂analog, sex⊂sexy/bisexual, cum⊂cucumber를 오매칭한다(Codex R2; LLMSearchIndex
+# pen→penis 함정과 동형). 완전단어는 양끝 \b, 활용 어근(penetrat/masturbat 등)은 prefix \b.
+_ACT_FULL_WORDS = (
+    "sex", "penis", "pussy", "vaginal", "anal", "oral", "fellatio", "cunnilingus",
+    "blowjob", "handjob", "footjob", "paizuri", "cum", "fingering", "missionary",
+    "doggystyle", "cowgirl", "creampie", "bukkake", "ahegao", "fucked", "fucking",
+    "rape", "gangbang", "threesome", "foursome", "fivesome", "orgy", "spitroast",
+    "tribadism", "rimming", "rimjob", "facesitting", "irrumatio", "deepthroat",
+    "mating press", "bestiality", "zoophilia",
+)
+# 활용형(-ing/-ion/과거형)까지 prefix 경계로 잡아야 하는 어근.
+_ACT_STEMS = ("penetrat", "ejaculat", "masturbat", "grop", "orgasm")
+_ACT_ANCHOR_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _ACT_FULL_WORDS) + r")\b"
+    + r"|\b(?:" + "|".join(re.escape(s) for s in _ACT_STEMS) + r")"
+)
+
+
+def _is_act_anchor(tag_norm: str) -> bool:
+    """태그가 공기 쿼리 가치가 있는 *행위/성기접촉* 앵커인지(노출/의류 상태는 제외).
+    경계 인식 — group sex/cum in pussy/double penetration은 ✓, grape/floral/analog/
+    sexy/cucumber는 ✗(Codex R2 오매칭 차단)."""
+    return bool(_ACT_ANCHOR_RE.search(str(tag_norm).lower()))
+
+
+def _act_anchor_terms(selected: list[dict[str, Any]], limit: int = 3) -> list[str]:
+    """확정된 핵심 sexual-act 태그를 Event Preset 공기 쿼리용으로 추출.
+
+    Event Preset 후반 보강은 추출 *개념*(query_en)으로만 쿼리하는데, forced/canonical
+    경로로 들어온 핵심 행위(예: 강간→rape)는 개념이 아니라 그 공기 보강을 통째로 못
+    받았다(실측: 1girl_multiple_boys/e 파티션의 sex·penis·group sex·vaginal·cum 누락).
+    행위 태그는 이벤트를 *직접* 명명하므로 이벤트 참조가 가장 유의미하다. 선택 순서를
+    보존(forced 앵커가 selected 선두라 우선)하고, 노출/의류 상태(_is_act_anchor 밖)·
+    인원수 태그는 제외, 중복 제거, limit 캡(캡 도달 시 즉시 중단 — limit≤0이면 빈 목록).
+    """
+    out: list[str] = []
+    lim = max(0, limit)
+    for it in selected:
+        if len(out) >= lim:
+            break
+        t = str(it.get("tag") or "").strip()
+        nt = t.lower().replace("_", " ")
+        if t and _is_act_anchor(nt) and not _is_person_count_tag(nt) and t not in out:
+            out.append(t)
+    return out
+
+
 # 성별 전용 해부학/행위 — 확정 인원이 한 성별뿐인 장면에 반대 성별 태그가 새면 모순이다
 # (실측: "볼펜 자위 소녀"(1girl solo)에 penis/penile masturbation/holding penis 혼입 —
 # 'pen' autocomplete가 penis/penile을 surface + "자위" 검색 1위가 penile masturbation).
@@ -638,8 +689,12 @@ def _resolve_person_id(selected: list[dict[str, Any]], *, solo: bool = False) ->
         return "2boys" if boys == 2 else "multiple_boys"
     return "1girl_solo" if explicit_solo else "1girl"
 
+from core.named_entity_groups import is_denylisted_franchise_tag, is_generic_char_attribute
+
 # 일반 개념 검색에서 제외할 카테고리 접두 — 캐릭터/저작권/작품 후보는 사용자가
 # 고유명을 직접 말했을 때만 의미가 있다 ("two girls"에 girls und panzer 방지).
+# ⚠️ "캐릭터 > 직업/종족/유형/..." generic 인물·생물·속성은 면제(is_generic_char_attribute)
+# — cheerleader/nurse/futanari 등 generic 태그 오배제 차단(감사 2026-06-12).
 _PROPER_NOUN_CATEGORY_PREFIXES = (
     "캐릭터", "저작권", "미디어", "작품",
     "character", "copyright", "media", "meta > parody", "artist", "아티스트",
@@ -1075,7 +1130,8 @@ class OllamaTagAssistService:
             if tag.lower().replace("_", " ") != normalized:
                 continue
             category = str(row.get("group") or "")
-            if category.lower().startswith(_PROPER_NOUN_CATEGORY_PREFIXES):
+            _cat_l = category.lower()
+            if _cat_l.startswith(_PROPER_NOUN_CATEGORY_PREFIXES) and not is_generic_char_attribute(_cat_l, normalized):
                 return None
             if "(" in tag and ")" in tag:
                 return None
@@ -1345,6 +1401,10 @@ class OllamaTagAssistService:
         """정확 일치 실패 시: 그 용어로 검색해 가장 흔한 실제 태그로 회수.
         고유명/괄호형은 제외. subject 시노님("two girls"→2girls)도 먼저 적용.
         등급 상한(max_rating)을 넘는 태그로의 드리프트도 차단."""
+        # 디나이된 franchise 오염(super saiyan/au ra 등)은 *회수하지 않는다* — 검색 치환이
+        # super saiyan→super crown 류 다른 franchise/무관 태그로 새기 때문(Codex R2). 드롭.
+        if is_denylisted_franchise_tag(normalized):
+            return None
         queries = _SUBJECT_SYNONYMS.get(normalized) or (normalized,)
         rows: list[dict[str, Any]] = []
         for q in queries:
@@ -1360,7 +1420,8 @@ class OllamaTagAssistService:
             if int(row.get("count") or 0) <= 0:
                 continue  # count-0 알리아스/사어 행으로는 복구하지 않는다(Codex CP4)
             category = str(row.get("group") or "")
-            if category.lower().startswith(_PROPER_NOUN_CATEGORY_PREFIXES):
+            _cat_l = category.lower()
+            if _cat_l.startswith(_PROPER_NOUN_CATEGORY_PREFIXES) and not is_generic_char_attribute(_cat_l, tag):
                 continue
             if "(" in tag and ")" in tag:
                 continue
@@ -1427,6 +1488,11 @@ class OllamaTagAssistService:
                     "query_en": str(item["query_en"]).strip(),
                     "kind": str(item.get("kind") or "other"),
                 })
+        # 디나이된 franchise 오염 개념(super saiyan/au ra/os-tan 등)은 검색 전 드롭 — 검색/
+        # 회수가 다른 태그로 치환(super saiyan→super saiyan 4, os-tan→tan)해 새는 것 차단
+        # (Codex R3). generic leaf 디나이(_excluded·리트리버·_recover_tag)와 일관 — 6종은
+        # 인덱스·후보 enum·회수·개념 어디서도 surface 되지 않는다.
+        concepts = [c for c in concepts if not is_denylisted_franchise_tag(c["query_en"])]
         if not concepts:
             return {"ok": False, "stage": "concepts", "error": "요청에서 시각 개념을 찾지 못했습니다."}
 
@@ -1994,13 +2060,17 @@ class OllamaTagAssistService:
             # 4개를 스톱리스트로 스킵해도 다음 티어 looking ahead/at animal이 샘).
             # 이벤트 참조는 개념이 이벤트를 직접 명명할 때(fellatio/hug/kiss류 정형
             # 행위)만 의미가 있다 — 매칭 0건이면 보강 없이 넘어가는 게 옳다.
-            query_terms: list[str] = []
+            # 결정론 핵심 행위 앵커를 공기 쿼리 *선두*에 합류(개념 추출을 우회한 forced
+            # 행위가 인원수 파티션 공기를 못 받던 갭 — _act_anchor_terms docstring 참조).
+            act_terms = _act_anchor_terms(selected, limit=3)
+            query_terms: list[str] = list(act_terms)
             for c in queryable:
                 term = c["query_en"].strip()
                 if term and term not in query_terms:
                     query_terms.append(term)
             agg: dict[str, int] = {}
-            n_terms = min(len(query_terms), max(2, event_top // 2))
+            # 행위 앵커는 개념 예산과 별도 전용 슬롯을 받는다(개념이 행위를 밀어내지 않게).
+            n_terms = min(len(query_terms), len(act_terms) + max(2, event_top // 2))
             for term in query_terms[:n_terms]:
                 try:
                     combo = self._event_combo_provider(max_rating, person_id, term, event_top) or []

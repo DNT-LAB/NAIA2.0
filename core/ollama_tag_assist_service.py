@@ -282,6 +282,107 @@ _FORCED_ACT_TERMS = (
     (("강간", "rape"), "rape"),
 )
 
+
+# 활용형(-ing/-ion)·복수형까지 잡아야 하는 *어근* 키워드 — prefix 단어경계만 적용한다.
+# 그 외 영어 키워드는 완전 단어(양끝 경계)로 매칭해 일상어 오탐을 막는다.
+#   - 동사 어근: masturbat→masturbating, grop→groping, fondl→fondly, caress→caressing
+#   - 복수 흔한 명사: nipple→nipples, areola→areolae, testicle→testicles
+#   - 완전단어로 두는 것(오탐 위험): sex(≠sexy/sexual/unisex/sexes), kiss(≠kissimmee),
+#     rape(≠drape/grape/scrape/rapeseed). 복수형(kisses 등)은 놓치나 대부분 무해.
+_STEM_KEYWORDS = frozenset({
+    "masturbat", "grop", "fondl", "caress", "penetrat", "ejaculat", "orgasm",
+    "nipple", "areola", "testicle",
+})
+
+
+def _kw_in_text(kw: str, haystack: str) -> bool:
+    """경계 인식 키워드 매칭. 한국어=부분일치, 영어 어근(_STEM_KEYWORDS)=prefix 경계,
+    그 외 영어=완전 단어(양끝 경계). haystack은 소문자. unisex/bisexual의 'sex',
+    drape/grape/scrape의 'rape', kissimmee의 'kiss' 같은 오탐을 차단한다."""
+    k = kw.lower()
+    if any("가" <= ch <= "힣" for ch in k):
+        return k in haystack                 # 한국어: 부분일치
+    if k in _STEM_KEYWORDS:
+        return re.search(r"\b" + re.escape(k), haystack) is not None      # 어근: prefix만
+    return re.search(r"\b" + re.escape(k) + r"\b", haystack) is not None  # 완전단어: 양끝
+
+
+def _forced_act_kw_hit(keywords: tuple[str, ...], haystack: str) -> bool:
+    """forced act 키워드 매칭. forced act 루프와 _resolve_max_rating(auto 추론)이 공유
+    — 한국어 행위어 단일 출처. 매칭 규칙은 _kw_in_text(어근/완전단어 구분)."""
+    return any(_kw_in_text(kw, haystack) for kw in keywords)
+
+
+# 등급 수위 다이얼 — forced act가 등급 상한을 넘을 때 "생략"이 아니라 그 등급에서
+# *자연 통과하는* 수위 태그로 변환한다(사용자: "차단 메커니즘을 손봄"). 설계 원칙:
+#   ⚠️ 클램프 면제 없음. 타겟은 전부 해당 등급에서 _tag_allowed를 통과하는 dist-검증
+#      태그만(검열 프레이밍 q·자세·근접·분위기). implied sex(e48)/imminent penetration
+#      (e96)/hetero(e)/spread legs(e) 류는 "암시 단어"여도 danbooru 분포가 노골과 강상관
+#      → NAI가 노골적으로 그려서 **배제**(Opus 패널 B 발견). 약한 쪽에서 시작 — 라이브
+#      A/B(사용자 게이트)로 강도 조정.
+#   검열 프레이밍(convenient censoring q75·hair censor q87 등)이 Q의 핵심 무기.
+#   kiss(g)는 모든 등급 통과 → 테이블 미등재(폴백=원본 그대로).
+_ACT_DOWNGRADE_TABLE: dict[str, dict[str, list[str]]] = {
+    # 각 칸의 태그는 그 등급에서 _tag_allowed를 자연 통과하는 것만(q칸=q이하, s칸=s이하).
+    # 런타임에 한 번 더 필터하므로 안전하지만, 테이블 자체도 등급 정합으로 유지한다.
+    "sex":             {"q": ["on bed", "convenient censoring", "covered nipples"],
+                        "s": ["lying on bed", "blush", "embarrassed"]},
+    "missionary":      {"q": ["on back", "on bed", "convenient censoring"],
+                        "s": ["lying on bed", "blush", "embarrassed"]},
+    "sex from behind": {"q": ["bent over", "ass focus", "from behind"],
+                        "s": ["from behind", "blush"]},
+    "fellatio":        {"q": ["tongue out", "face in crotch", "oral invitation"],
+                        "s": ["open mouth", "kneeling", "blush"]},
+    "cunnilingus":     {"q": ["face in crotch", "oral invitation"],
+                        "s": ["between legs", "lying on bed", "blush"]},
+    "masturbation":    {"q": ["hand between legs", "covering breasts", "sweat"],
+                        "s": ["hand between legs", "blush", "embarrassed"]},
+    "groping":         {"q": ["hand on breast", "breast hold", "covering breasts"],
+                        "s": ["underboob", "bare shoulders", "blush"]},
+    "cum in pussy":    {"q": ["suggestive fluid", "sweat", "steam"],
+                        "s": ["blush", "embarrassed"]},
+    "rape":            {"q": ["torn clothes", "struggling"],
+                        "s": ["struggling", "tears"]},
+    "bestiality":      {"q": ["animal"], "s": ["animal"]},
+}
+
+
+def _downgrade_act(
+    canonical: str, max_rating: str, *,
+    validate_tag: Callable[[str], "dict[str, Any] | None"],
+    tag_allowed: Callable[[str, str], bool],
+) -> list[dict[str, Any]]:
+    """forced act가 상한을 넘으면 그 등급에서 통과하는 수위 태그로 변환. 반환=[태그 dict].
+    타겟은 등급 클램프를 *자연 통과*하는 것만(면제 없음) → e등급 노골 타겟 자동 배제.
+    각 타겟은 인덱스 실존(validate_tag) 재확인. 테이블 미등재/전부 불가면 빈 리스트(=생략).
+    """
+    table = _ACT_DOWNGRADE_TABLE.get(canonical)
+    if not table:
+        return []
+    ceil = _RATING_ORDER.get(str(max_rating or "s").lower(), 1)
+    if ceil < _RATING_ORDER["s"]:
+        return []                        # G = 완전 차단(변환 없이 생략, 사용자 정의)
+    variants: list[str] | None = None
+    for key in (_RATING_INDEX_TO_KEY[ceil], "q", "s"):   # 요청 등급 칸부터 아래로 폴백
+        if key in table:
+            variants = table[key]
+            break
+    if not variants:
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in variants:
+        norm = str(raw).lower().replace("_", " ")
+        if norm in seen or not tag_allowed(norm, max_rating):
+            continue                         # 등급 통과 못 하면 스킵(이중 안전)
+        v = validate_tag(norm)
+        if not v:
+            continue                         # 인덱스 미실존 → 스킵
+        seen.add(norm)
+        out.append({**v, "category": v.get("category") or "downgrade"})
+    return out
+
+
 # 태그별 [g,s,q,e] 분포 (data/danbooru_tag_counts_by_rating.json) lazy 캐시.
 _RATING_DIST: dict[str, list[int]] | None = None
 
@@ -342,16 +443,32 @@ def _tag_allowed(tag_norm: str, max_rating: str) -> bool:
 
 
 def _resolve_max_rating(options: dict[str, Any], request_text: str) -> str:
-    """옵션의 rating/max_rating 우선. 없으면 legacy nsfw bool, 그것도 없으면
-    요청 키워드로 추론(Codex: 명시 키워드는 등급 미지정 시에만 상향)."""
+    """옵션의 rating/max_rating 우선(=사용자 명시 다이얼, 그대로 존중). 없으면 legacy
+    nsfw bool, 그것도 없으면(=UI 'auto' 모드) 요청으로 추론.
+
+    auto 추론(P1): 명시 explicit 키워드 + **forced act 키워드의 canonical 등급**으로
+    상향한다. 한국어 행위어(자위/펠라/정상위…)는 _EXPLICIT_REQUEST_KEYWORDS에 없어
+    s로 떨어지던 결함(QA #1) → _FORCED_ACT_TERMS(한국어 단일 출처)를 재사용해 canonical
+    등급(masturbation=e 등)을 반영. 기본 s 하한은 보존."""
     raw = str(options.get("max_rating") or options.get("rating") or "").lower()
     if raw in _RATING_ORDER:
         return raw
     if "nsfw" in options:
         return "e" if bool(options.get("nsfw")) else "s"
-    if any(kw in request_text.lower() for kw in _EXPLICIT_REQUEST_KEYWORDS):
-        return "e"
-    return "s"
+    text_l = str(request_text or "").lower()
+    hay = f" {text_l} "
+    # 경계 인식 매칭(_kw_in_text) — 무경계 부분일치가 unisex→sex, drape→rape를 오탐하던
+    # 것 차단(Codex Finding 2).
+    rating = "e" if any(_kw_in_text(kw, hay) for kw in _EXPLICIT_REQUEST_KEYWORDS) else "s"
+    if _RATING_ORDER[rating] < _RATING_ORDER["e"]:
+        for keywords, canonical in _FORCED_ACT_TERMS:
+            if _forced_act_kw_hit(keywords, hay):
+                cr = _tag_rating(str(canonical).lower())
+                if _RATING_ORDER[cr] > _RATING_ORDER[rating]:
+                    rating = cr
+                    if rating == "e":
+                        break
+    return rating
 
 
 # 호출당 상한 — 소형 모델 컨텍스트 예산(호출당 ~2k 토큰)을 지키는 캡.
@@ -1525,16 +1642,20 @@ class OllamaTagAssistService:
             # 선택 누락으로 잃을 수 있다(Codex R1). 중복 주입은 선택 단계 seen이 막는다.
             if cl in forced_seen:
                 continue
-            hit_kw = False
-            for kw in keywords:
-                k = kw.lower()
-                if any("가" <= ch <= "힣" for ch in k):
-                    hit_kw = k in _act_haystack            # 한국어: 부분일치
-                else:
-                    hit_kw = re.search(r"\b" + re.escape(k) + r"\b", _act_haystack) is not None
-                if hit_kw:
-                    break
-            if not hit_kw or not _tag_allowed(cl, max_rating):
+            if not _forced_act_kw_hit(keywords, _act_haystack):
+                continue
+            if not _tag_allowed(cl, max_rating):
+                # 등급 초과 → "생략"이 아니라 등급 내 수위 태그로 변환(P2 다이얼).
+                # 변환 타겟은 등급 클램프를 자연 통과하므로 후속 조립서 안 잘린다.
+                forced_seen.add(cl)          # 원본 canonical 재주입 방지(변환으로 대체)
+                for v in _downgrade_act(
+                    cl, max_rating, validate_tag=self._validate_tag, tag_allowed=_tag_allowed,
+                ):
+                    vt = str(v.get("tag") or "").lower().replace("_", " ")
+                    if not vt or vt in forced_seen:
+                        continue
+                    forced_seen.add(vt)
+                    forced_subjects.append(v)
                 continue
             try:
                 act_hit = next(

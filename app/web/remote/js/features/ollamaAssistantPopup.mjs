@@ -31,7 +31,7 @@ export function createOllamaAssistantPopup({
   let pollTimer = null;
   let busy = false;
   let assistMode = 'manual';   // 'fast'(원샷) | 'manual'(파이프라인) — 기본 Manual
-  let assistRating = 's';    // 'g'|'s'|'q'|'e' — 최대 등급(상한 클램프)
+  let assistRating = 'auto'; // 'auto'|'g'|'s'|'q'|'e' — 'auto'면 max_rating 생략→문장 수위 추론(기본)
   let assistLevel = 'rich';  // 'concise'|'standard'|'rich'|'max' — 분량/창의성, 기본 풍부(rich)
   let assistSolo = false;    // Solo 강제 — 켜면 1girl_solo 파티션 + 'solo' 태그
   let datasetReady = false;  // 이벤트 데이터셋(B 실조합 참조) 설치 여부
@@ -224,7 +224,12 @@ export function createOllamaAssistantPopup({
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           text, model: DEFAULT_MODEL, mode: assistMode,
-          options: {max_rating: assistRating, level: assistLevel, solo: assistSolo},
+          options: {
+            // 'auto'면 max_rating을 보내지 않는다 → 백엔드 _resolve_max_rating이 문장
+            // 수위로 추론(한국어 행위어 포함). 명시 등급은 그대로 상한 고정(통제권).
+            ...(assistRating && assistRating !== 'auto' ? {max_rating: assistRating} : {}),
+            level: assistLevel, solo: assistSolo,
+          },
         }),
       });
       stopProgress();
@@ -669,11 +674,12 @@ export function createOllamaAssistantPopup({
           </div>
           <div class="ollama-assist-knobs">
             <span class="ollama-assist-knob-label">등급</span>
-            <div class="ollama-assist-rating" role="group" aria-label="최대 등급">
-              <button type="button" class="ollama-assist-rating-btn" data-rating="g" title="General — 전연령">G</button>
-              <button type="button" class="ollama-assist-rating-btn active" data-rating="s" title="Sensitive — 노출/수영복 허용">S</button>
-              <button type="button" class="ollama-assist-rating-btn" data-rating="q" title="Questionable — 선정적">Q</button>
-              <button type="button" class="ollama-assist-rating-btn" data-rating="e" title="Explicit — 노골적 NSFW">E</button>
+            <div class="ollama-assist-rating" role="group" aria-label="등급 (콘텐츠 수위)">
+              <button type="button" class="ollama-assist-rating-btn active" data-rating="auto" title="자동 — 문장의 수위를 보고 등급을 정함(권장). 직접 고르면 상한 고정">자동</button>
+              <button type="button" class="ollama-assist-rating-btn" data-rating="g" title="General — 성적 요소 완전 차단">G</button>
+              <button type="button" class="ollama-assist-rating-btn" data-rating="s" title="Sensitive — 약간의 노출 + 분위기(직접 노출/행위는 순화)">S</button>
+              <button type="button" class="ollama-assist-rating-btn" data-rating="q" title="Questionable — 직접 노출 + 성행위 암시">Q</button>
+              <button type="button" class="ollama-assist-rating-btn" data-rating="e" title="Explicit — 직접 묘사">E</button>
             </div>
             <span class="ollama-assist-knob-label">분량</span>
             <div class="ollama-assist-level" role="group" aria-label="분량">
@@ -724,7 +730,7 @@ export function createOllamaAssistantPopup({
     });
     popup.querySelectorAll('.ollama-assist-rating-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        assistRating = btn.dataset.rating || 's';
+        assistRating = btn.dataset.rating || 'auto';
         popup.querySelectorAll('.ollama-assist-rating-btn').forEach(b =>
           b.classList.toggle('active', b === btn));
       });

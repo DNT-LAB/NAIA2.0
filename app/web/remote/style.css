@@ -16979,6 +16979,18 @@ body.detached-module .mod-grid-3 {
   border: 1px solid var(--border-dim); border-radius: 7px;
   background: var(--bg-elevated); color: var(--text-primary);
 }
+/* multiline 행/필드: 쉼표 섞인 긴 프롬프트 구문을 편하게 쓰는 textarea */
+.ext-list-row textarea,
+.ext-quick-popup .ext-field textarea {
+  flex: 1; min-width: 0; min-height: 52px; padding: 6px 8px; font-size: 12px;
+  line-height: 1.45; resize: vertical;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: var(--bg-elevated); color: var(--text-primary);
+}
+.ext-quick-popup .ext-field textarea { grid-column: 2; width: 100%; }
+.ext-list-row-multi { align-items: flex-start; }
+.ext-list-row-multi .ext-list-step { padding-top: 8px; }
+.ext-list-row-multi .ext-list-remove { margin-top: 6px; }
 .ext-list-remove {
   flex: 0 0 auto; width: 24px; height: 24px; cursor: pointer; line-height: 1;
   border: 1px solid transparent; border-radius: 6px; background: transparent;

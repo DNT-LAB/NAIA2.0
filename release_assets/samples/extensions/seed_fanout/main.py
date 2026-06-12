@@ -529,9 +529,9 @@ def _axis_fields(prefix, section, base_order, when_xy, samplers):
          "order": base_order + 2,
          "visible_when": {"field": axis_key, "in": [AXIS_SAMPLER]}, **common},
         # ── 강조 사다리: 원본 프롬프트(쉼표 허용) + 시작/스텝/종료 — 전부 필수 ──
-        {"key": f"{prefix}_emph_target", "type": "text", "default": "",
-         "label": "원본 프롬프트", "placeholder": "정확 매칭 — 쉼표 포함 가능",
-         "help": "프롬프트 창에 정확히 존재하는 구간을 그대로 입력(쉼표 포함 가능). "
+        {"key": f"{prefix}_emph_target", "type": "text", "multiline": True, "default": "",
+         "label": "원본 프롬프트", "placeholder": "정확 매칭 — 쉼표 포함 긴 구문 가능",
+         "help": "프롬프트 창에 정확히 존재하는 구간을 그대로 입력(쉼표 포함 긴 구문 가능). "
                  "이 구간에 가중을 입혀 1장씩 생성 — 문법은 모드 자동(NAI w::…::, 로컬 (…:w))",
          "order": base_order + 3, "visible_when": when_emph, **common},
         {"key": f"{prefix}_emph_start", "type": "float", "default": 0.6, "step": 0.1,
@@ -541,15 +541,16 @@ def _axis_fields(prefix, section, base_order, when_xy, samplers):
         {"key": f"{prefix}_emph_end", "type": "float", "default": 1.4, "step": 0.1,
          "label": "종료 가중치", "order": base_order + 6, "visible_when": when_emph, **common},
         # ── 프롬프트 스왑: 3번째 칼럼(extra) 빌더 ──
-        {"key": f"{prefix}_swap_base", "type": "text", "default": "",
-         "label": "시작 프롬프트", "placeholder": "프롬프트 창에 정확히 존재해야 함",
+        {"key": f"{prefix}_swap_base", "type": "text", "multiline": True, "default": "",
+         "label": "시작 프롬프트", "placeholder": "프롬프트 창에 정확히 존재해야 함 — 쉼표 포함 긴 구문 가능",
          "help": "프롬프트 창의 이 구간을 아래 Step들로 바꿔 1장씩 생성. "
                  "프롬프트에 없으면 토스트로 안내하고 중단",
          "column": "extra", "section": f"{section} · 프롬프트 스왑", "apply": "next-generation",
          "order": base_order + 7, "visible_when": when_swap},
-        {"key": f"{prefix}_swap_steps", "type": "list", "default": [],
-         "label": "대치할 프롬프트", "placeholder": "이 내용으로 교체",
-         "help": "Step 1개당 1장 — [추가 +]로 늘리고 ×로 제거",
+        {"key": f"{prefix}_swap_steps", "type": "list", "multiline": True, "default": [],
+         "label": "대치할 프롬프트", "placeholder": "이 내용으로 교체 — 쉼표 포함 긴 구문 가능",
+         "help": "Step 1개당 1장 — [추가 +]로 늘리고 ×로 제거. "
+                 "\"spread legs, pen, the pen glides across warm skin\" 같은 구문 전체 가능",
          "column": "extra", "section": f"{section} · 프롬프트 스왑", "apply": "next-generation",
          "order": base_order + 8, "visible_when": when_swap},
     ]

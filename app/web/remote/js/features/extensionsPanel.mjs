@@ -82,18 +82,24 @@ export function createExtensionsUi(deps) {
       input = `<div class="ext-multiselect" ${common}>${chips}</div>`;
     } else if (field.type === 'list') {
       // 동적 행 목록(예: 스왑 Step들) — [추가 +]로 행을 늘리고 ✕로 제거.
+      // multiline이면 행을 textarea로(쉼표 섞인 긴 프롬프트 구문 입력용).
       const items = Array.isArray(value) ? value.map(String) : [];
+      const rowInput = (item, index) => field.multiline
+        ? `<textarea data-list-index="${index}" rows="2"${ph}>${escHtml(item)}</textarea>`
+        : `<input type="text" data-list-index="${index}" value="${escHtml(item)}"${ph}>`;
       const rows = items.map((item, index) =>
-        `<div class="ext-list-row">
+        `<div class="ext-list-row${field.multiline ? ' ext-list-row-multi' : ''}">
            <span class="ext-list-step">Step ${index + 1}</span>
-           <input type="text" data-list-index="${index}" value="${escHtml(item)}"${ph}>
+           ${rowInput(item, index)}
            <button type="button" class="ext-list-remove" data-remove-index="${index}" title="삭제">×</button>
          </div>`).join('');
-      input = `<div class="ext-list" ${common}>${rows}
+      input = `<div class="ext-list${field.multiline ? ' ext-list-multi' : ''}" ${common}>${rows}
         <button type="button" class="ext-list-add">추가 +</button></div>`;
     } else if (field.type === 'tags') {
       const text = Array.isArray(value) ? value.join(', ') : String(value ?? '');
       input = `<input type="text" class="ext-field-wide" ${common} value="${escHtml(text)}"${ph || ' placeholder="쉼표로 구분"'}>`;
+    } else if (field.multiline) { // 여러 줄 text — 긴 프롬프트 구문 입력용
+      input = `<textarea class="ext-field-wide ext-textarea" ${common} rows="2"${ph}>${escHtml(String(value ?? ''))}</textarea>`;
     } else { // text
       input = `<input type="text" class="ext-field-wide" ${common}${ph} value="${escHtml(String(value ?? ''))}">`;
     }
@@ -192,7 +198,7 @@ export function createExtensionsUi(deps) {
   }
 
   function listValues(container) {
-    return [...container.querySelectorAll('input[type=text]')]
+    return [...container.querySelectorAll('input[type=text], textarea')]
       .map(input => input.value.trim()).filter(Boolean);
   }
 
@@ -216,17 +222,19 @@ export function createExtensionsUi(deps) {
         el.querySelector('.ext-list-add')?.addEventListener('click', () => {
           const addBtn = el.querySelector('.ext-list-add');
           const index = el.querySelectorAll('.ext-list-row').length;
+          const multi = el.classList.contains('ext-list-multi');
           const row = document.createElement('div');
-          row.className = 'ext-list-row';
+          row.className = `ext-list-row${multi ? ' ext-list-row-multi' : ''}`;
           row.innerHTML = `<span class="ext-list-step">Step ${index + 1}</span>
-            <input type="text" data-list-index="${index}">
+            ${multi ? `<textarea data-list-index="${index}" rows="2"></textarea>`
+                    : `<input type="text" data-list-index="${index}">`}
             <button type="button" class="ext-list-remove" title="삭제">×</button>`;
           addBtn.before(row);
           row.querySelector('.ext-list-remove').addEventListener('click', () => {
             row.remove();
             el.dispatchEvent(new Event('change'));
           });
-          row.querySelector('input').focus();
+          row.querySelector('input, textarea').focus();
         });
         el.querySelectorAll('.ext-list-remove').forEach(btn => {
           btn.addEventListener('click', () => {

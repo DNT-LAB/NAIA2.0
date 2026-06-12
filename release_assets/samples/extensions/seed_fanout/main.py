@@ -103,10 +103,11 @@ def _float_range(args_text):
 
 
 def _emphasis_values(args_text, api_mode):
-    """"키워드,시작,끝,간격"(실수 가중) → [(키워드, 치환문자열)...].
+    """"키워드,시작,끝,간격"(실수 가중) → [(키워드, 치환문자열, 라벨=가중치)...].
 
     가중 문법은 모드별 자동: NAI(NAID4/4.5)=``w::키워드::`` 수치 강조,
-    WEBUI/COMFYUI=로컬 ``(키워드:w)``."""
+    WEBUI/COMFYUI=로컬 ``(키워드:w)``. 그리드 라벨은 가중치 숫자만 — 키워드는
+    축 타이틀이 담당한다."""
     parts = [part.strip() for part in str(args_text or "").split(",")]
     keyword = parts[0]
     if not keyword or len(parts) < 4:
@@ -118,17 +119,17 @@ def _emphasis_values(args_text, api_mode):
             wrapped = f"{weight:g}::{keyword}::"
         else:
             wrapped = f"({keyword}:{weight:g})"
-        values.append((keyword, wrapped))
+        values.append((keyword, wrapped, f"{weight:g}"))
     return values
 
 
 def _swap_values(args_text):
-    """"키워드,대체1,대체2…" → [(키워드, 대체)...]; 대체 안의 '^'는 ', '로 치환."""
+    """"키워드,대체1,대체2…" → [(키워드, 대체, 라벨=대체)...]; '^'는 ', '로 치환."""
     parts = [part.strip() for part in str(args_text or "").split(",")]
     keyword = parts[0]
     if not keyword or len(parts) < 2:
         raise ValueError("키워드,대체1[,대체2…] 형식이어야 합니다")
-    return [(keyword, alt.replace("^", ", ")) for alt in parts[1:] if alt]
+    return [(keyword, alt.replace("^", ", "), alt.replace("^", ", ")) for alt in parts[1:] if alt]
 
 
 class SeedFanout:
@@ -217,10 +218,12 @@ class SeedFanout:
     # ── 모드 2: X/Y Plot (인스턴트 이벤트 포팅) ──────────────────
     def _run_xy_plot(self, info, params, settings, char_overrides):
         api_mode = str(info.get("api_mode") or "")
-        x_values = self._axis_values("X", settings.get("x_axis"), settings, "x", api_mode)
-        y_values = self._axis_values("Y", settings.get("y_axis"), settings, "y", api_mode)
-        if x_values is None or y_values is None:
+        x_meta = self._axis_values("X", settings.get("x_axis"), settings, "x", api_mode)
+        y_meta = self._axis_values("Y", settings.get("y_axis"), settings, "y", api_mode)
+        if x_meta is None or y_meta is None:
             return  # 축 파싱 실패는 _axis_values가 로그로 안내
+        x_values, x_title = x_meta
+        y_values, y_title = y_meta
         combos = [(x, y) for y in y_values for x in x_values]
         if len(combos) <= 1 and combos and combos[0] == (None, None):
             self.ctx.log("X/Y Plot: 사용할 축이 없습니다 (X/Y 모두 None)")
@@ -245,7 +248,7 @@ class SeedFanout:
             for value in (x_value, y_value):
                 if value is None:
                     continue
-                kind, payload = value
+                kind, payload = value[0], value[1]
                 if kind == "param":
                     overrides[payload[0]] = payload[1]
                 elif kind == "prompt":
@@ -278,8 +281,12 @@ class SeedFanout:
                 "ids": id_map,
                 "cols": cols,
                 "rows": len(y_values),
-                "x_labels": [self._axis_label(value) for value in x_values],
-                "y_labels": [self._axis_label(value) for value in y_values],
+                # 라벨=축 값(가중치/샘플러명 등), 타이틀=축 종류(+키워드) —
+                # WEBUI/NAIA 1.5 그리드처럼 축 타이틀 밴드를 따로 확보한다.
+                "x_labels": [value[2] if value else "" for value in x_values],
+                "y_labels": [value[2] if value else "" for value in y_values],
+                "x_title": x_title,
+                "y_title": y_title,
                 "images": {},
                 "expected": set(id_map.keys()),
             }
@@ -288,18 +295,6 @@ class SeedFanout:
                 while len(self._grid_batches) > MAX_PENDING_GRIDS:
                     dropped = self._grid_batches.pop(0)
                     self.ctx.log(f"그리드 추적 GC: 미완료 배치 폐기({len(dropped['expected'])}셀 미수신)")
-
-    @staticmethod
-    def _axis_label(value):
-        if value is None:
-            return ""
-        kind, payload = value
-        if kind == "param":
-            key, raw = payload
-            prefix = {"cfg_scale": "CFG", "cfg_rescale": "Rescale", "sampler": ""}.get(key, key)
-            text = raw if isinstance(raw, str) else f"{raw:g}"
-            return f"{prefix} {text}".strip()
-        return str(payload[1])  # prompt 축: 치환 문자열 그대로
 
     # ── 그리드 합성: 결과 이벤트 수집 → 전 셀 완료 시 PNG 저장 ──
     def on_generation_result(self, info):
@@ -338,11 +333,26 @@ class SeedFanout:
         cell_h = max(image.height for image in images.values())
         cols, rows = batch["cols"], batch["rows"]
         gutter = 6
-        top_band = 34 if any(batch["x_labels"]) else 0
-        left_band = 150 if any(batch["y_labels"]) else 0
-        width = left_band + cols * (cell_w + gutter) + gutter
-        height = top_band + rows * (cell_h + gutter) + gutter
-        canvas = Image.new("RGB", (width, height), (16, 16, 22))
+        bg = (16, 16, 22)
+        title_color = (157, 139, 255)   # NAIA accent-light — 축 타이틀
+        label_color = (220, 220, 235)
+        # 밴드 구성(WEBUI/NAIA 1.5식): 축 타이틀 공간을 값 라벨과 별도로 확보.
+        # 상단 = X 타이틀(28) + X 값 라벨(34), 좌측 = Y 타이틀(28, 세로 회전) +
+        # Y 값 라벨(150). 해당 축이 없으면 0.
+        title_band = 28
+        x_title = str(batch.get("x_title") or "")
+        y_title = str(batch.get("y_title") or "")
+        top_title = title_band if x_title else 0
+        top_labels = 34 if any(batch["x_labels"]) else 0
+        left_title = title_band if y_title else 0
+        left_labels = 150 if any(batch["y_labels"]) else 0
+        top_band = top_title + top_labels
+        left_band = left_title + left_labels
+        grid_w = cols * (cell_w + gutter) + gutter
+        grid_h = rows * (cell_h + gutter) + gutter
+        width = left_band + grid_w
+        height = top_band + grid_h
+        canvas = Image.new("RGB", (width, height), bg)
         draw = ImageDraw.Draw(canvas)
         try:
             font = ImageFont.truetype("malgun.ttf", 20)  # Windows 한글 폰트, 실패 시 기본
@@ -351,15 +361,26 @@ class SeedFanout:
         for (col, row), image in images.items():
             canvas.paste(image, (left_band + gutter + col * (cell_w + gutter),
                                  top_band + gutter + row * (cell_h + gutter)))
+        if x_title:
+            draw.text((left_band + grid_w // 2, top_title // 2), x_title[:80],
+                      fill=title_color, font=font, anchor="mm")
         for col, label in enumerate(batch["x_labels"]):
             if label:
                 x_center = left_band + gutter + col * (cell_w + gutter) + cell_w // 2
-                draw.text((x_center, top_band // 2), label[:60],
-                          fill=(220, 220, 235), font=font, anchor="mm")
+                draw.text((x_center, top_title + top_labels // 2), label[:60],
+                          fill=label_color, font=font, anchor="mm")
+        if y_title:
+            # 세로 축 타이틀: 가로로 그린 띠를 90° 회전해 좌측 끝에 부착.
+            strip = Image.new("RGB", (grid_h, title_band), bg)
+            strip_draw = ImageDraw.Draw(strip)
+            strip_draw.text((grid_h // 2, title_band // 2), y_title[:80],
+                            fill=title_color, font=font, anchor="mm")
+            canvas.paste(strip.rotate(90, expand=True), (0, top_band))
         for row, label in enumerate(batch["y_labels"]):
             if label:
                 y_center = top_band + gutter + row * (cell_h + gutter) + cell_h // 2
-                draw.text((8, y_center), label[:24], fill=(220, 220, 235), font=font, anchor="lm")
+                draw.text((left_title + 8, y_center), label[:24],
+                          fill=label_color, font=font, anchor="lm")
         grid_dir = self._grid_dir()
         if grid_dir is None:
             self.ctx.log("그리드 저장 실패: 저장 디렉터리를 알 수 없습니다")
@@ -397,19 +418,23 @@ class SeedFanout:
             self.ctx.log(f"Grid 폴더 열기 실패: {exc}")
 
     def _axis_values(self, axis_name, axis, settings, prefix, api_mode):
-        """축 정의 → 조합 항목 리스트. 항목 = None | ("param", (key, value)) |
-        ("prompt", (keyword, replacement)). 파싱 실패 시 None(전체 중단).
-        인자는 축 종류별 전용 키(x_range/x_samplers/...)에서 읽고, 샘플러/강조는
-        api_mode를 따른다(샘플러 "auto"=모드 표준 목록, 강조=모드별 가중 문법)."""
+        """축 정의 → (조합 항목 리스트, 축 타이틀). 항목 = None |
+        ("param", (key, value), 라벨) | ("prompt", (keyword, replacement), 라벨).
+        파싱 실패 시 None(전체 중단). 인자는 축 종류별 전용 키(x_range/...)에서
+        읽고, 샘플러/강조는 api_mode를 따른다(샘플러 "auto"=모드 표준 목록,
+        강조=모드별 가중 문법). 타이틀은 축 종류(+키워드) — 그리드 합성의
+        Axis Title 밴드(WEBUI/NAIA 1.5식)가 사용한다."""
         axis = str(axis or AXIS_NONE)
         if axis == AXIS_NONE:
-            return [None]
+            return ([None], "")
         args_text = settings.get(f"{prefix}_{AXIS_ARG_SUFFIX.get(axis, 'range')}")
         try:
             if axis == AXIS_CFG:
-                return [("param", ("cfg_scale", value)) for value in _float_range(args_text)]
+                return ([("param", ("cfg_scale", value), f"{value:g}")
+                         for value in _float_range(args_text)], "CFG Scale")
             if axis == AXIS_RESCALE:
-                return [("param", ("cfg_rescale", value)) for value in _float_range(args_text)]
+                return ([("param", ("cfg_rescale", value), f"{value:g}")
+                         for value in _float_range(args_text)], "PG.Rescale")
             if axis == AXIS_SAMPLER:
                 text = str(args_text or "").strip()
                 if not text or text.lower() == "auto":
@@ -420,15 +445,21 @@ class SeedFanout:
                     samplers = [part.strip() for part in text.split(",") if part.strip()]
                 if not samplers:
                     raise ValueError("샘플러 콤마 목록이 비었습니다")
-                return [("param", ("sampler", sampler)) for sampler in samplers]
+                return ([("param", ("sampler", sampler), sampler) for sampler in samplers], "Sampler")
             if axis == AXIS_EMPHASIS:
-                return [("prompt", pair) for pair in _emphasis_values(args_text, api_mode)]
+                values = _emphasis_values(args_text, api_mode)
+                keyword = values[0][0] if values else ""
+                return ([("prompt", (kw, wrapped), label) for kw, wrapped, label in values],
+                        f"프롬프트 강조 · {keyword}")
             if axis == AXIS_SWAP:
-                return [("prompt", pair) for pair in _swap_values(args_text)]
+                values = _swap_values(args_text)
+                keyword = values[0][0] if values else ""
+                return ([("prompt", (kw, alt), label) for kw, alt, label in values],
+                        f"프롬프트 스왑 · {keyword}")
         except Exception as exc:
             self.ctx.log(f"X/Y Plot: {axis_name}축({axis}) 인자 해석 실패 — {exc}")
             return None
-        return [None]
+        return ([None], "")
 
     # ── 공통: 원본 복제 enqueue ──────────────────────────────────
     def _enqueue_clone(self, info, params, overrides, prompt=None):

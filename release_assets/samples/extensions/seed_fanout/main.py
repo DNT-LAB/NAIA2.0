@@ -686,7 +686,14 @@ def register(ctx):
     ctx.subscribe("generation_request_dispatched", ext.on_generation_dispatched)
     ctx.subscribe("generation_result_available", ext.on_generation_result)
     # 모드 전환·라이브 옵션 갱신(WEBUI/COMFYUI 연결) 시 샘플러 선택지 재등록.
-    ctx.subscribe("api_mode_changed", lambda _payload: _register_panel(ctx, ext))
-    ctx.subscribe("api_options_refreshed", lambda _payload: _register_panel(ctx, ext))
+    # run_when_disarmed: 작동 OFF여도 패널은 노출되므로 선택지 갱신은 돌아야
+    # 한다(UI 메타 전용 — 생성 개입 없음).
+    refresh = lambda _payload: _register_panel(ctx, ext)  # noqa: E731
+    try:
+        ctx.subscribe("api_mode_changed", refresh, run_when_disarmed=True)
+        ctx.subscribe("api_options_refreshed", refresh, run_when_disarmed=True)
+    except TypeError:  # 구런타임(옵션 미지원) 폴백
+        ctx.subscribe("api_mode_changed", refresh)
+        ctx.subscribe("api_options_refreshed", refresh)
     _register_panel(ctx, ext)
     ctx.log("ready — Seed Fan-out / X/Y Plot (퀵 버튼 팝업에서 조정, 관리는 Settings ▸ Extension)")

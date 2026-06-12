@@ -477,17 +477,33 @@ class ExtensionContext:
         _ext_print(self.ext_id, str(message))
 
     # ── L1: 이벤트 구독 ──────────────────────────────────────────
-    def subscribe(self, event_name: str, callback: Callable[..., Any]) -> None:
+    def subscribe(
+        self,
+        event_name: str,
+        callback: Callable[..., Any],
+        *,
+        run_when_disarmed: bool = False,
+    ) -> None:
         """이벤트 버스 구독. 콜백 예외는 격리되며 연속 실패 시 자동 음소거된다.
 
         v1 공식 이벤트: ``generation_request_dispatched``(payload에 읽기 전용
         params 스냅샷 포함), ``generation_result_available``, ``prompt_generated``.
         그 외 이벤트도 수신되지만 이름/페이로드 안정성은 보장하지 않는다.
-        """
+
+        ``run_when_disarmed=True``는 **UI 메타 갱신 전용** 옵트인: 팝업
+        Activate(armed)가 꺼져 있어도 콜백이 돈다 — 모드 전환 시 패널 선택지
+        재구성(``api_mode_changed``/``api_options_refreshed`` → register_panel)
+        처럼 생성에 개입하지 않는 갱신용. armed가 꺼져도 패널은 계속 노출되므로
+        이 갱신이 막히면 선택지가 stale로 남는다. Settings OFF(enabled=False)와
+        차단(blocked)·미로드는 여전히 항상 차단된다. 이 콜백 안에서의
+        enqueue/cancel 같은 생성 개입은 금지(어차피 해당 API의 is_active
+        게이트가 거부한다)."""
         key = (str(event_name), *_callback_identity(callback))
         if key in self._wrapped:
             return
-        wrapped = self._safe_callback(str(event_name), callback)
+        wrapped = self._safe_callback(
+            str(event_name), callback, run_when_disarmed=bool(run_when_disarmed)
+        )
         self._wrapped[key] = (str(event_name), wrapped)
         self._app_context.subscribe(str(event_name), wrapped)
         self._record.subscriptions += 1
@@ -498,11 +514,25 @@ class ExtensionContext:
             self._app_context.unsubscribe(entry[0], entry[1])
             self._record.subscriptions = max(0, self._record.subscriptions - 1)
 
-    def _safe_callback(self, event_name: str, callback: Callable[..., Any]) -> Callable[..., Any]:
+    def _safe_callback(
+        self,
+        event_name: str,
+        callback: Callable[..., Any],
+        *,
+        run_when_disarmed: bool = False,
+    ) -> Callable[..., Any]:
         state = {"errors": 0, "muted": False}
 
         def _runner(*args: Any, **kwargs: Any) -> None:
-            if state["muted"] or not self._record.is_active:
+            if state["muted"]:
+                return
+            record = self._record
+            if run_when_disarmed:
+                # UI 메타 갱신 옵트인: armed(작동 스위치)만 우회 — 로드/승인/차단/
+                # Settings OFF 게이트는 그대로 적용된다.
+                if record.status != "loaded" or not record.enabled or record.blocked:
+                    return
+            elif not record.is_active:
                 return
             payload = args[0] if args else None
             # 체인 깊이 전파: 확장 파생 요청 이벤트(ext_origin/ext_chain_depth 포함)는

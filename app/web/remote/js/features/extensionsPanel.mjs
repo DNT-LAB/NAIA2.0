@@ -645,6 +645,14 @@ export function createExtensionsUi(deps) {
     el.style.top = `${top}px`;
   }
 
+  // ── 글로벌 정책: API 모드 전환 ───────────────────────────────
+  // 모드가 바뀌면 열려 있는 퀵 팝업은 stale(모드별 선택지·NAI 전용 축 등) —
+  // 닫고 상태를 재요청해 다음 오픈이 새 모드의 패널로 그려지게 한다.
+  function onApiModeChanged() {
+    if (quickPopupId) closeQuickPopup();
+    if (typeof requestState === 'function') requestState();
+  }
+
   // ── 진입점: module_state 브로드캐스트 ───────────────────────
   function onState(m) {
     if (!m || !m.state) return;
@@ -668,5 +676,5 @@ export function createExtensionsUi(deps) {
     }
   }
 
-  return {onState, bindNav};
+  return {onState, bindNav, onApiModeChanged};
 }

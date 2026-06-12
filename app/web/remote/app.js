@@ -1005,7 +1005,7 @@ function setExtensionLauncherItems(items, onClick) {
   }
   pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
 }
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260612-extset14')
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260612-extset15')
   .then(({createExtensionsUi}) => {
     extensionsPanel = createExtensionsUi({
       document,
@@ -2363,7 +2363,11 @@ const wsMessageHandlers = {
   options: syncOptions,
   params: updateParams,
   generation_dispatched: onGenerationDispatched,
-  mode: m => syncMode(m.mode),
+  mode: m => {
+    syncMode(m.mode);
+    // 글로벌 정책: 모드 전환 시 확장 퀵 팝업은 stale(모드별 선택지) — 닫고 재요청.
+    if (extensionsPanel) extensionsPanel.onApiModeChanged?.();
+  },
   result_enhance_state: m => { if (resultEnhance) resultEnhance.handleState(m); },
   grok_i2i_state: m => { if (grokI2iModal) grokI2iModal.onState(m); },
   nai_director_state: m => { if (naiDirectorModal) naiDirectorModal.onState(m); },

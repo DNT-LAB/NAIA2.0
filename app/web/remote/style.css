@@ -16875,25 +16875,140 @@ body.detached-module .mod-grid-3 {
 }
 .ext-fn-item:hover { background: var(--bg-elevated); }
 
-/* 확장 퀵 팝업 (Activate + 선언 폼) */
+/* 확장 퀵 팝업 — "Parameter Island" 통합형 (Codex 디자인):
+   헤더/바디/푸터 3단 + 칼럼별 island 패널 + 라벨 96px 그리드 정렬 +
+   accent 불릿 섹션 헤더. 설정 페이지 공용 기본형(.ext-field 등)은 건드리지
+   않도록 전부 .ext-quick-popup 하위로 스코프. */
 .ext-quick-popup {
-  position: fixed; z-index: 1200; min-width: 250px; max-width: 360px;
-  background: var(--bg-elevated); border: 1px solid var(--border-dim); border-radius: 11px;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45); padding: 10px 12px;
+  position: fixed; z-index: 1200;
+  width: min(390px, calc(100vw - 16px)); min-width: 320px; max-width: 390px;
+  padding: 0; overflow: hidden;
+  color: var(--text-primary); background: var(--bg-surface);
+  border: 1px solid var(--border-dim); border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.46);
 }
-.ext-quick-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.ext-quick-title { font-size: 13px; font-weight: 700; }
+.ext-quick-popup.ext-quick-popup-wide {
+  width: min(620px, calc(100vw - 16px)); max-width: 620px;
+}
+.ext-quick-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-dim);
+}
+.ext-quick-title {
+  min-width: 0; display: flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 700; line-height: 1.25; color: var(--text-primary);
+}
+.ext-quick-icon {
+  flex: 0 0 auto; width: 18px; height: 18px; display: inline-grid; place-items: center;
+  border: 1px solid var(--border-dim); border-radius: 6px; background: var(--bg-elevated);
+  font-size: 12px;
+}
 .ext-quick-close {
-  border: none; background: transparent; color: var(--text-muted); cursor: pointer;
-  font-size: 16px; line-height: 1; padding: 2px 4px;
+  width: 24px; height: 24px; display: inline-grid; place-items: center;
+  border: 1px solid transparent; border-radius: 6px; background: transparent;
+  color: var(--text-muted); cursor: pointer; font-size: 17px; line-height: 1; padding: 0;
+  transition: background 0.12s, border-color 0.12s;
+}
+.ext-quick-close:hover {
+  color: var(--text-primary); border-color: var(--border-dim); background: var(--bg-elevated);
+}
+.ext-quick-body {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 10px 12px; background: var(--bg-elevated);
 }
 .ext-quick-activate {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  margin-top: 8px; padding: 7px 9px; border: 1px solid var(--border-dim); border-radius: 8px;
-  background: var(--bg-surface); font-size: 12px; font-weight: 600; cursor: pointer;
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px;
+  min-height: 34px; padding: 7px 10px;
+  border: 1px solid var(--border-dim); border-left: 2px solid var(--accent);
+  border-radius: 8px; background: var(--bg-surface); cursor: pointer;
 }
-.ext-quick-popup .ext-fields { border-top: none; padding-top: 0; margin-top: 9px; }
-.ext-quick-popup.ext-quick-popup-wide { max-width: 620px; }
+.ext-quick-activate-label {
+  color: var(--text-primary); font-size: 12px; font-weight: 700; line-height: 1.25;
+}
+.ext-quick-popup .ext-fields {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 0; padding-top: 0; border-top: none;
+}
+.ext-quick-popup .ext-fields-disabled { opacity: 0.55; pointer-events: none; }
+/* 단일 칼럼 폼도 island 패널로 */
+.ext-quick-popup .ext-fields:not(.ext-fields-two-col) {
+  padding: 10px; border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-surface);
+}
+/* 2단: 칼럼 자체가 독립 island — 가운데 점선 대신 패널 경계가 구분을 맡는다 */
+.ext-quick-popup .ext-fields-two-col {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.18fr);
+  gap: 10px; align-items: start;
+}
+.ext-quick-popup .ext-fields-col {
+  min-width: 0; display: flex; flex-direction: column; gap: 9px;
+  padding: 10px; border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-surface);
+}
+.ext-quick-popup .ext-fields-col-right { border-left: none; }
+/* 섹션 헤더: accent 사각 불릿 + 텍스트 + 잔여폭 구분선 */
+.ext-quick-popup .ext-section {
+  display: grid; grid-template-columns: 6px auto 1fr; align-items: center; gap: 7px;
+  margin-top: 4px; color: var(--accent-light);
+  font-size: 11px; font-weight: 800; letter-spacing: 0.03em; line-height: 1.2;
+}
+.ext-quick-popup .ext-section:first-child { margin-top: 0; }
+.ext-quick-popup .ext-section::before {
+  content: ''; width: 6px; height: 6px; border-radius: 2px; background: var(--accent);
+}
+.ext-quick-popup .ext-section::after {
+  content: ''; height: 1px; background: var(--border-dim); align-self: center;
+}
+/* 필드 행: 라벨 96px 고정 2열 그리드 — bool/select/text 모두 같은 수직선 정렬 */
+.ext-quick-popup .ext-field {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center; column-gap: 10px; row-gap: 4px; min-height: 30px;
+}
+.ext-quick-popup .ext-field label {
+  min-width: 0; color: var(--text-muted); font-size: 11px; font-weight: 650; line-height: 1.3;
+  word-break: keep-all; /* 한국어 라벨 음절 중간 꺾임 방지 — 어절 단위 줄바꿈 */
+}
+.ext-quick-popup .ext-field input:not([type=checkbox]),
+.ext-quick-popup .ext-field select {
+  grid-column: 2; width: 100%; min-width: 0; height: 30px;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: var(--bg-elevated); color: var(--text-primary);
+  padding: 5px 8px; font-size: 12px;
+}
+.ext-quick-popup .ext-field-wide { grid-column: 2; width: 100%; min-width: 0; }
+.ext-quick-popup .ext-field input[type=checkbox] {
+  grid-column: 2; justify-self: start; width: 16px; height: 16px; margin: 0;
+  accent-color: var(--accent);
+}
+.ext-quick-popup .ext-field > .custom-select,
+.ext-quick-popup .ext-field > .custom-ext-select {
+  grid-column: 2; width: 100%; min-width: 0;
+}
+.ext-quick-popup .ext-field .custom-select-button {
+  min-height: 30px; padding: 5px 8px; border-radius: 7px;
+  background: var(--bg-elevated); color: var(--text-primary); font-size: 12px;
+}
+.ext-quick-popup .ext-field-error { grid-column: 2; width: 100%; }
+.ext-quick-popup .ext-help-mark { color: var(--accent-light); }
+.ext-quick-popup .ext-fields-note { margin-top: 0; padding: 0 2px; line-height: 1.4; }
+.ext-quick-popup .ext-quick-nofields {
+  padding: 10px; border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-surface); color: var(--text-muted); font-size: 11px; line-height: 1.45;
+}
+.ext-quick-foot {
+  padding: 8px 12px 9px; border-top: 1px solid var(--border-dim);
+  background: var(--bg-surface); color: var(--text-muted); font-size: 10px; text-align: right;
+}
+@media (max-width: 700px) {
+  .ext-quick-popup,
+  .ext-quick-popup.ext-quick-popup-wide {
+    width: calc(100vw - 16px); min-width: 0; max-width: calc(100vw - 16px);
+  }
+  .ext-quick-popup .ext-fields-two-col { grid-template-columns: 1fr; }
+  .ext-quick-popup .ext-fields-col-right { border-top: none; padding-top: 10px; }
+  .ext-quick-popup .ext-field { grid-template-columns: 92px minmax(0, 1fr); }
+}
 /* 도움말 ⓘ 마커 + apply 집약 노트("다음 생성부터" 칩 반복 대체) */
 .ext-help-mark { color: var(--text-muted); cursor: help; font-size: 11px; }
 .ext-fields-note {
@@ -16910,8 +17025,6 @@ body.detached-module .mod-grid-3 {
   .ext-fields-two-col { flex-direction: column; }
   .ext-fields-col-right { border-left: none; padding-left: 0; border-top: 1px dashed var(--border-dim); padding-top: 8px; }
 }
-.ext-quick-nofields { margin-top: 9px; font-size: 11px; color: var(--text-muted); }
-.ext-quick-foot { margin-top: 9px; font-size: 10px; color: var(--text-muted); text-align: right; }
 .seq-btn:hover:not(:disabled) { border-color: var(--border-glow); }
 .seq-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .seq-btn.primary { background: var(--accent, #3b82f6); border-color: transparent; color: #fff; }

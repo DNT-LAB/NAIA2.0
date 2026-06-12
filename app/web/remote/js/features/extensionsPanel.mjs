@@ -443,17 +443,22 @@ export function createExtensionsUi(deps) {
       || '<div class="ext-quick-nofields">이 확장은 설정 항목을 선언하지 않았습니다.</div>';
     el.innerHTML = `
       <div class="ext-quick-head">
-        <span class="ext-quick-title">🧩 ${escHtml(ext.name || ext.id)}</span>
+        <span class="ext-quick-title">
+          <span class="ext-quick-icon" aria-hidden="true">🧩</span>
+          <span>${escHtml(ext.name || ext.id)}</span>
+        </span>
         <button type="button" class="ext-quick-close" title="닫기">×</button>
       </div>
-      <label class="ext-quick-activate">
-        <span>Activate This Script</span>
-        <label class="ext-switch">
-          <input type="checkbox" class="ext-quick-toggle" ${ext.enabled ? 'checked' : ''}>
-          <span class="ext-slider"></span>
+      <div class="ext-quick-body">
+        <label class="ext-quick-activate">
+          <span class="ext-quick-activate-label">Activate This Script</span>
+          <span class="ext-switch">
+            <input type="checkbox" class="ext-quick-toggle" ${ext.enabled ? 'checked' : ''}>
+            <span class="ext-slider"></span>
+          </span>
         </label>
-      </label>
-      ${fields}
+        ${fields}
+      </div>
       <div class="ext-quick-foot">관리: Settings ▸ Extension</div>`;
     // 복잡 모드(우측 칼럼 표시) 시 팝업을 넓힌다.
     el.classList.toggle('ext-quick-popup-wide', hasRightColumn(ext));

@@ -469,7 +469,11 @@ export function createStudioTabController({
 
   function render() {
     if (!root) return;
-    closeCardMenu();  // body에 떠 있는 카드 메뉴는 보드 재구성 시 stale — 닫는다.
+    // 주의: 여기서 closeCardMenu()를 호출하지 않는다. 카드 메뉴는 body에 붙고 frameId로
+    // 동작하므로 보드 재렌더에도 유효하다. render()에서 닫으면, 우클릭 직후 입력 blur가
+    // 유발하는 부수적 change→render()가 방금 연 메뉴를 닫아 "메뉴가 나왔다 안 나왔다"
+    // 하는 경합이 생긴다(사용자 버그). 닫기는 dismiss 리스너(외부클릭/Esc/스크롤/리사이즈)와
+    // 메뉴 동작 핸들러에만 맡긴다.
     const frame = selectedFrame();
     const selectedSummary = frame
       ? previewText(composePrompt(frame), '선택 프레임 없음')
@@ -721,8 +725,8 @@ export function createStudioTabController({
     // 우클릭한 프레임을 선택 상태로(에디터는 토글하지 않음). 메뉴 동작은 id로 다시 해석한다.
     selectedIndex = Math.max(0, Math.min(index, state.frames.length - 1));
     const frameId = frame.id;
-    // 선택 변경을 보드에 먼저 반영한다. render()가 시작 시 stale 메뉴를 닫으므로
-    // 메뉴는 render() '이후'에 생성해 이번 메뉴가 즉시 닫히지 않게 한다.
+    // 선택 변경을 보드에 먼저 반영(render는 더 이상 메뉴를 닫지 않음). 이전 메뉴는 위에서
+    // closeCardMenu()로 교체했고, 이번 메뉴는 render() 이후 새로 만든다.
     render();
     const menu = document.createElement('div');
     menu.className = 'studio-card-menu';

@@ -115,6 +115,24 @@ def _in_action_context() -> bool:
     return bool(getattr(_ACTION_GUARD, "active", False))
 
 
+def _safe_copy_value(value: Any, _depth: int = 0) -> Any:
+    """이벤트/스냅샷 params용 재귀 안전 사본 — 중첩 컨테이너까지 새로 만들어 호스트
+    원본(remote_params 등)과 참조를 공유하지 않게 한다(확장이 변조해도 호스트 불변).
+    알 수 없는 타입은 문자열화(fail-closed), 깊이 폭주는 차단."""
+    if _depth > 8:
+        return None
+    if isinstance(value, dict):
+        return {str(k): _safe_copy_value(v, _depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_safe_copy_value(v, _depth + 1) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    try:
+        return str(value)
+    except (SystemExit, Exception):
+        return None
+
+
 def _coerce_chain_depth(raw: Any) -> int:
     """체인 깊이의 **무예외** 강제 변환.
 
@@ -838,13 +856,9 @@ class ExtensionContext:
                     safe_key = str(key)
                     if safe_key == "credential" or safe_key.startswith("_"):
                         continue
-                    # 호스트 remote_params 오염 방지: 컨테이너만 얕게 복제(스칼라는 불변).
-                    if isinstance(value, dict):
-                        params[safe_key] = dict(value)
-                    elif isinstance(value, list):
-                        params[safe_key] = list(value)
-                    else:
-                        params[safe_key] = value
+                    # 재귀 안전 사본 — 중첩 컨테이너까지 복제해 호스트 remote_params 오염 방지
+                    # (dispatched 이벤트 params와 동일 계약).
+                    params[safe_key] = _safe_copy_value(value)
             params["input"] = str(getattr(app, "prompt_text", "") or "")
             params["negative_prompt"] = str(getattr(app, "negative_prompt_text", "") or "")
             return {
@@ -1363,6 +1377,9 @@ class ExtensionManager:
                 register(ctx)
             record.status = "loaded"
             record.error = ""
+            # 부팅 시에도 hide_arm_when 조건이 맞으면 작동을 끈다 — persisted armed=true가
+            # 팝업을 열기 전까지 passive로 남는 것을 방지(Codex Phase2 #2).
+            self._enforce_hide_arm_locked(record)
             print(
                 f"Remote Web: extension loaded id={record.ext_id} v{record.version or '?'} "
                 f"hooks={record.hooks} subs={record.subscriptions}",
@@ -1494,7 +1511,11 @@ class ExtensionManager:
             return None
         if field_def.get("type") == "action":
             handler = record.action_handler
-            if record.is_active and callable(handler):
+            # 액션(버튼)은 명시적 클릭이라 armed(작동 ON) 없이도 동작한다 — enqueue_generation
+            # 액션 컨텍스트 우회와 같은 게이트(loaded+enabled+!blocked). 작동 OFF·hide_arm_when
+            # 모드(X/Y Plot처럼 armed=false)에서도 버튼으로 즉시 실행할 수 있어야 한다.
+            if (record.status == "loaded" and record.enabled and not record.blocked
+                    and callable(handler)):
                 return (record.ext_id, field_key, handler)
             return None
         ok, coerced, message = _coerce_panel_value(field_def, value)
@@ -1517,6 +1538,41 @@ class ExtensionManager:
             path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as exc:
             record.field_errors[field_key] = f"저장 실패: {_safe_error_text(exc)}"
+        # 설정이 hide_arm_when 조건에 맞으면 작동(armed)을 끈다(host가 source of truth —
+        # 프런트 자동 해제는 백업일 뿐). 예: feature를 X/Y Plot로 바꾸면 즉시 disarm.
+        self._enforce_hide_arm_locked(record)
+
+    def _read_settings_locked(self, record: ExtensionRecord) -> dict[str, Any]:
+        if record.directory is None:
+            return {}
+        try:
+            raw = json.loads((record.directory / SETTINGS_FILENAME).read_text(encoding="utf-8"))
+            return raw if isinstance(raw, dict) else {}
+        except Exception:
+            return {}
+
+    def _enforce_hide_arm_locked(self, record: ExtensionRecord) -> None:
+        """패널 hide_arm_when 조건이 현재 설정과 맞으면 작동(armed)을 끈다 — 부팅·설정
+        변경 모두에서. 그 모드는 action 버튼 전용이라 passive 가로채기를 막아야 한다
+        (X/Y Plot처럼). 조건이 안 맞으면 armed는 그대로(사용자 토글 존중)."""
+        if not record.panel:
+            return
+        cond = record.panel.get("hide_arm_when")
+        if not isinstance(cond, dict) or not str(cond.get("field") or "").strip():
+            return
+        field = str(cond.get("field"))
+        allowed = [str(item) for item in (cond.get("in") or [])]
+        settings = self._read_settings_locked(record)
+        current_val = settings.get(field)
+        if current_val is None:
+            field_def = next(
+                (item for item in record.panel.get("fields", []) if item.get("key") == field),
+                None,
+            )
+            current_val = field_def.get("default") if field_def else None
+        if str(current_val) in allowed and record.armed:
+            record.armed = False
+            self._write_config_locked()
 
     def mark_loading(self, key: str) -> None:
         """approve/retry 백그라운드 처리 전, 패널에 '로딩 중'을 먼저 보여주기 위한 표시."""

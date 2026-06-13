@@ -22,12 +22,14 @@ clothes_list.txt는 franchise/cosplay(괄호형: "2b (nier:automata) (cosplay)")
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable
 
 __all__ = [
     "AXES", "SETTING", "OBJECT", "ACTION", "EXPRESSION", "CLOTHING", "BODY", "COLOR",
     "AXIS_PRIORITY", "build_axis_classifier", "classify_axes_with", "axis_set_sizes",
+    "CENTRAL_ACT_FULL_WORDS", "is_central_act", "central_act_terms",
 ]
 
 SETTING = "setting"
@@ -177,3 +179,45 @@ def build_axis_classifier(
 def axis_set_sizes(data_root: str | Path) -> dict[str, int]:
     """진단용 — 각 축 세트 크기."""
     return {axis: len(s) for axis, s in _sets_for(data_root).items()}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Central act (named sexual interaction) — q/e Scene Boost가 "무엇을 하는 장면인지"를
+# 반드시 프레이밍하도록 priority 최상단으로 승격하고 instruction에 명시할 대상.
+# Codex 교정: anatomy/fluid/result/expression(penis/pussy/cum/ahegao/creampie)은
+# explicit anchor지만 *행위 자체는 아님* → 제외. named interaction(fingering/footjob/
+# fellatio/sex from behind/prone bone/penetration …)만. 경계 인식(\b)으로 analog/grape/
+# sexy/breasts 오매칭 차단. service의 _is_act_anchor보다 좁다(scene boost 전용).
+# ─────────────────────────────────────────────────────────────────────────────
+CENTRAL_ACT_FULL_WORDS = frozenset({
+    "sex", "vaginal", "anal", "oral", "fellatio", "cunnilingus", "blowjob",
+    "handjob", "footjob", "paizuri", "titjob", "fingering", "missionary",
+    "doggystyle", "cowgirl", "reverse cowgirl", "prone bone", "sex from behind",
+    "standing sex", "deepthroat", "irrumatio", "rimjob", "rimming", "facesitting",
+    "tribadism", "spitroast", "gangbang", "threesome", "foursome", "fivesome",
+    "orgy", "mating press", "double penetration", "fucked", "fucking",
+    "grinding", "humping", "frottage", "rape", "bestiality", "zoophilia",
+})
+CENTRAL_ACT_STEMS = ("penetrat", "masturbat", "grop")
+_CENTRAL_ACT_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in CENTRAL_ACT_FULL_WORDS) + r")\b"
+    + r"|\b(?:" + "|".join(re.escape(s) for s in CENTRAL_ACT_STEMS) + r")"
+)
+
+
+def is_central_act(tag: Any) -> bool:
+    """태그가 *named sexual interaction*(핵심 행위)인지. group sex/sex from behind/double
+    penetration ✓; penis/pussy/cum/ahegao/breasts/analog/grape ✗(anatomy/fluid/오매칭 제외)."""
+    return bool(_CENTRAL_ACT_RE.search(_norm(tag)))
+
+
+def central_act_terms(tags: Any, limit: int = 4) -> list[str]:
+    """입력 태그에서 핵심 행위 태그를 입력 순서대로 추출(정규화·중복제거·limit 캡)."""
+    out: list[str] = []
+    for t in tags or []:
+        n = _norm(t)
+        if n and is_central_act(n) and n not in out:
+            out.append(n)
+            if len(out) >= max(0, limit):
+                break
+    return out

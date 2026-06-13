@@ -24,6 +24,7 @@ from typing import Any, Callable, Optional
 # 축 이름 상수(분류기는 서비스가 주입; 여기선 IO 없는 상수만 import → 순수성 유지).
 from core.scene_axis import (
     ACTION, AXIS_PRIORITY, BODY, CLOTHING, COLOR, EXPRESSION, OBJECT, SETTING,
+    is_central_act,
 )
 
 
@@ -587,18 +588,22 @@ def build_grounding(
                 other.append(t)
         else:
             buckets[prim].append(t)
+    # 핵심 행위(named interaction)는 q/e 부스트가 반드시 프레이밍해야 하는 대상 — priority
+    # 최상단으로(salience -1). non-act distinctive(other/object 등)는 그 뒤에 보존(Codex:
+    # act가 슬롯 독점 금지). central_acts는 별도로도 반환해 instruction "Central act" 라인에 쓴다.
+    central_acts = [t for t in descriptive if t not in skip and is_central_act(t)]
     cand = [
         t for t in descriptive
         if prim_of.get(t) not in ("skip", COLOR) and t not in _BLAND_ANCHORS
     ]
-    cand.sort(key=lambda t: _AXIS_SALIENCE.get(prim_of.get(t), 5))
+    cand.sort(key=lambda t: -1 if is_central_act(t) else _AXIS_SALIENCE.get(prim_of.get(t), 5))
     priority: list[str] = []
     for t in cand:
         if t not in priority:
             priority.append(t)
         if len(priority) >= 6:
             break
-    return {"buckets": buckets, "other": other, "priority": priority}
+    return {"buckets": buckets, "other": other, "priority": priority, "central_acts": central_acts}
 
 
 def _format_grounding(grounding: dict[str, Any]) -> str:
@@ -659,6 +664,7 @@ def build_instruction(
     # 않고 *이* 장면의 구체 앵커를 프레이밍하게 한다. Priority는 명물(역할/소품/포즈) 우선.
     anchor_block = ""
     priority_line = ""
+    central_act_line = ""
     if grounding:
         gtext = _format_grounding(grounding)
         if gtext:
@@ -669,6 +675,16 @@ def build_instruction(
         prio = grounding.get("priority") or []
         if prio:
             priority_line = "Priority anchors (frame these first): " + ", ".join(prio[:6]) + "\n"
+        # 핵심 행위(q/e): 모델이 shirt lift/curve 같은 주변 앵커로 도망가지 않고 *무엇을 하는
+        # 장면인지*를 반드시 명명·프레이밍하게 한다(Codex: 핵심 행위 단어를 1회 이상 그대로 포함).
+        cacts = grounding.get("central_acts") or []
+        if cacts and rating in ("q", "e"):
+            central_act_line = (
+                "Central act to frame: " + ", ".join(cacts[:4]) + "\n"
+                "At least ONE phrase must include one of those central-act words verbatim and frame "
+                "how the angle, closeness, and bodies present that interaction — not only isolated "
+                "body parts, clothing, or lighting.\n"
+            )
 
     comp_clause = ""
     if candidates:
@@ -700,6 +716,7 @@ def build_instruction(
         "Task: add only atmosphere and composition (no new facts) to an existing anime image prompt.\n"
         + anchor_block
         + priority_line
+        + central_act_line
         + f"Rating focus [{rating}]: {focus}\n"
         + f"Write {max(1, lo)}-{hi} short English phrases ({wlo}-{whi} words each): frame the anchors "
         "above with concrete lighting, depth, angle and mood, as the Rating focus directs.\n"

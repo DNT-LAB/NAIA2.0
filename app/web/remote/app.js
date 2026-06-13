@@ -1004,6 +1004,12 @@ let pendingExtLauncherItems = null;
 function setExtensionLauncherItems(items, onClick) {
   if (moduleLauncherControl && typeof moduleLauncherControl.setExtensionItems === 'function') {
     moduleLauncherControl.setExtensionItems(items, onClick);
+    // setExtensionItems → render() 가 leaf 버튼을 통째로 다시 그려 char-active/vibe-active/
+    // auto-active 클래스를 날린다(그 후 updateCharacter 등은 모듈 상태 도착 때만 재호출). 확장
+    // 리로드가 이 순서로 끼면 요약(Activated:)은 moduleBadges 캐시라 유지되지만 "NAI 전용
+    // 도구"/Automation 카테고리 버튼은 비활성으로 보였다(Bug 1). 캐시 상태를 replay해 복원.
+    replayLauncherModuleStates();
+    moduleLauncherControl.updateState();
     return;
   }
   pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
@@ -5352,6 +5358,10 @@ function syncMode(mode) {
     const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
     if (btn) btn.classList.toggle('nai-only-disabled', !isNai);
   });
+  // 모드 전환 시 런처 카테고리 상태(category-status = 적용된 Character/Vibe/Ref 표시)를
+  // 재계산한다. updateModeState()는 요약(Activated:)만 갱신하고 런처 버튼은 안 건드렸다 —
+  // 이것이 사용자가 본 "요약은 맞는데 버튼은 비활성"의 경로 분리다(Bug 1, ComfyUI→NAI 재현).
+  if (moduleLauncherControl) moduleLauncherControl.updateState();
   updateModuleHeaderAction(currentModuleId);
   updateModeSelectAvailability();
   if (resultEnhance) resultEnhance.update();

@@ -276,7 +276,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260610-tagfilter6')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260613-tagfiltercount')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -5770,6 +5770,12 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260612-
       moduleLauncherControl.setExtensionItems(pendingExtLauncherItems.items, pendingExtLauncherItems.onClick);
       pendingExtLauncherItems = null;
     }
+    // 재시작 복원: 런처는 async import 라, 적용된 도구(Character/CharRef/Vibe/Automation)의
+    // module_state 가 render 이전에 도착하면 leaf 버튼이 아직 없어 배지 갱신이 no-op 으로 빠진다
+    // (update* 가 btn==null 시 early-return). render 직후 캐시된 상태를 배지 갱신기로 재생해
+    // leaf 클래스를 심고 updateState 로 카테고리 status 를 첫 페인트에 반영한다.
+    replayLauncherModuleStates();
+    moduleLauncherControl.updateState();
     ensureResolutionPresetOptions();
     updateWebUiHiresfixAssistControls();
     refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI');
@@ -6199,6 +6205,12 @@ function onModuleState(m) {
   else if (m.module_id === 'character_reference') updateCharRefBadge(m);
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
   else if (m.module_id === 'save_directory' && saveDirectoryPanel) saveDirectoryPanel.setState(m);
+  // 위 배지 갱신이 leaf 버튼의 상태 클래스(char-active/charref-active/vibe-active/auto-active)를
+  // 바꾸므로, 카테고리 버튼의 category-status 를 그 클래스에서 파생하는 런처를 명시적으로 재계산한다.
+  // (런처의 MutationObserver 는 재시작 시 경합 — 적용된 도구로 부팅해도 첫 페인트에 상태가 안 뜸.)
+  if (['automation', 'character', 'character_reference', 'vibe_transfer'].includes(m.module_id)) {
+    moduleLauncherControl?.updateState();
+  }
   else if (m.module_id === 'event_stream') {
     if (moduleLauncherControl) moduleLauncherControl.updateEventStreamState(m);
     if (eventStreamPanel) eventStreamPanel.setState(m);
@@ -6326,6 +6338,28 @@ function updateCharRefBadge(m) {
 
 function updateVibeBadge(m) {
   if (moduleBadges) moduleBadges.updateVibe(m);
+}
+
+// 런처 render 직후, render 이전에 도착해 leaf 버튼 부재로 흘려보낸 module_state 들을 다시 흘려
+// leaf 상태 클래스를 심는다(부팅 시 적용된 NAI 도구의 카테고리 status 첫 페인트 보장). 캐시는
+// 읽기 전용으로만 소비한다(배지 갱신기는 m 을 변형하지 않음).
+function replayLauncherModuleStates() {
+  const replays = [
+    ['automation', updateAutoBadge],
+    ['character', updateCharBadge],
+    ['character_reference', updateCharRefBadge],
+    ['vibe_transfer', updateVibeBadge],
+  ];
+  replays.forEach(([moduleId, updater]) => {
+    const cached = moduleStateCache.get(moduleId);
+    if (cached) {
+      try { updater(cached); } catch (error) { console.warn('Failed to replay module state', moduleId, error); }
+    }
+  });
+  const stream = moduleStateCache.get('event_stream');
+  if (stream && moduleLauncherControl) {
+    try { moduleLauncherControl.updateEventStreamState(stream); } catch (_) {}
+  }
 }
 
 function renderPromptEngineering(m) {

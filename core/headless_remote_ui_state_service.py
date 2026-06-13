@@ -84,6 +84,33 @@ def _normalize_param_planes(raw: Any, *, legacy_params: dict[str, Any], legacy_m
     return planes
 
 
+def _normalize_prompt_plane(raw: Any) -> dict[str, str]:
+    plane = raw if isinstance(raw, dict) else {}
+    return {
+        "prompt": str(plane.get("prompt") or ""),
+        "negative_prompt": str(plane.get("negative_prompt") or plane.get("negative") or ""),
+    }
+
+
+def _normalize_prompt_planes(
+    raw: Any,
+    *,
+    legacy_prompt: str,
+    legacy_negative: str,
+    legacy_mode: str,
+) -> dict[str, dict[str, str]]:
+    """Per-mode prompt planes. Falls back to migrating the legacy single
+    ``prompt``/``negative_prompt`` blob into the mode it was last used under."""
+    planes: dict[str, dict[str, str]] = {}
+    if isinstance(raw, dict):
+        for mode in SUPPORTED_API_MODES:
+            if mode in raw:
+                planes[mode] = _normalize_prompt_plane(raw.get(mode))
+    if not planes and (legacy_prompt or legacy_negative):
+        planes[legacy_mode] = {"prompt": legacy_prompt, "negative_prompt": legacy_negative}
+    return planes
+
+
 def _normalize_state(raw: Any) -> dict[str, Any]:
     state = raw if isinstance(raw, dict) else {}
     mode = str(state.get("api_mode") or "NAI").strip().upper()
@@ -97,14 +124,25 @@ def _normalize_state(raw: Any) -> dict[str, Any]:
     )
     # Keep the flat remote_params mirror in sync with the active mode's plane.
     active_plane = _strip_runtime_keys(planes.get(mode, {}))
+    legacy_prompt = str(state.get("prompt") or "")
+    legacy_negative = str(state.get("negative_prompt") or state.get("negative") or "")
+    prompt_planes = _normalize_prompt_planes(
+        state.get("prompt_planes"),
+        legacy_prompt=legacy_prompt,
+        legacy_negative=legacy_negative,
+        legacy_mode=mode,
+    )
+    # Keep the flat prompt/negative mirror in sync with the active mode's plane.
+    active_prompt_plane = prompt_planes.get(mode) or {"prompt": legacy_prompt, "negative_prompt": legacy_negative}
     return {
         "version": STATE_VERSION,
         "api_mode": mode,
-        "prompt": str(state.get("prompt") or ""),
-        "negative_prompt": str(state.get("negative_prompt") or state.get("negative") or ""),
+        "prompt": str(active_prompt_plane.get("prompt") or ""),
+        "negative_prompt": str(active_prompt_plane.get("negative_prompt") or ""),
         "remote_options": _normalize_options(state.get("remote_options")),
         "remote_params": active_plane,
         "remote_param_planes": planes,
+        "prompt_planes": prompt_planes,
         "auto_save_state": _normalize_mapping(state.get("auto_save_state")),
         "save_directory_state": _normalize_mapping(state.get("save_directory_state")),
     }
@@ -126,6 +164,17 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
     context.current_api_mode = mode
     context.prompt_text = state["prompt"]
     context.negative_prompt_text = state["negative_prompt"]
+    # Restore per-mode prompt planes; the flat prompt_text/negative_prompt_text
+    # already mirror the active mode's plane (set above from state).
+    prompt_planes = {
+        plane_mode: dict(values)
+        for plane_mode, values in state["prompt_planes"].items()
+    }
+    prompt_planes[mode] = {
+        "prompt": str(context.prompt_text or ""),
+        "negative_prompt": str(context.negative_prompt_text or ""),
+    }
+    context.prompt_planes = prompt_planes
     context.remote_options.update(state["remote_options"])
     # Restore per-mode parameter planes and activate the saved mode's plane.
     # Mutate the existing remote_params dict (rather than replacing it) so any
@@ -160,6 +209,16 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
     # Keep the active mode's plane pointing at the live remote_params (same
     # object the state service swaps), so persistence always captures it.
     planes[mode] = context.remote_params
+    prompt_planes = getattr(context, "prompt_planes", None)
+    if not isinstance(prompt_planes, dict):
+        prompt_planes = {}
+        context.prompt_planes = prompt_planes
+    # Snapshot the active mode's prompt from the live fields (set_prompt and the
+    # random-prompt service write prompt_text directly), so persistence captures it.
+    prompt_planes[mode] = {
+        "prompt": str(context.prompt_text or ""),
+        "negative_prompt": str(context.negative_prompt_text or ""),
+    }
     state = {
         "version": STATE_VERSION,
         "api_mode": mode,
@@ -169,6 +228,11 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
         "remote_param_planes": _json_safe({
             plane_mode: dict(values or {})
             for plane_mode, values in planes.items()
+            if plane_mode in SUPPORTED_API_MODES
+        }),
+        "prompt_planes": _json_safe({
+            plane_mode: dict(values or {})
+            for plane_mode, values in prompt_planes.items()
             if plane_mode in SUPPORTED_API_MODES
         }),
         "auto_save_state": _json_safe(dict(context.auto_save_state or {})),

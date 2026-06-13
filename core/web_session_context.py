@@ -45,6 +45,11 @@ class WebSessionContext:
     cloudflared_status_text: str = ""
     prompt_text: str = ""
     negative_prompt_text: str = ""
+    # Per-mode main/negative prompt memory. Mirrors remote_param_planes: each mode
+    # keeps its own prompt so switching API mode never shows another mode's prompt
+    # (e.g. a NAI random prompt leaking into COMFYUI). prompt_text/negative_prompt_text
+    # always reflect the ACTIVE mode's plane; set_api_mode stashes/activates here.
+    prompt_planes: dict[str, dict[str, str]] = field(default_factory=dict)
     # Ollama Auto Boost — 세션 전용 토글(비영속). 항상 OFF로 시작하고 save/preset에 절대
     # 기록하지 않는다. 사용자가 직접 켜야만 ON이며 Ollama가 준비됐을 때만 enable 가능.
     ollama_auto_boost: bool = False

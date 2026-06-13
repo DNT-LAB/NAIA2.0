@@ -127,6 +127,36 @@ export function createQuickFilterController(deps) {
       : 'Open quick filter';
   }
 
+  // RATING 옆 매치 카운트 라벨. 캐시된 per-rating counts + 현재 활성 등급으로 즉시 재계산하므로
+  // G/S/Q/E 토글에 라이브로 반응하고, search_state reconcile 때도 사라지지 않는다(칩이 있는 한 유지).
+  function renderMatchedCount(label = 'matched') {
+    const countEl = getEl('tagFilterCount');
+    if (!countEl) return;
+    const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+    if (!hasTags) {
+      countEl.textContent = '';
+      countEl.classList.remove('has-result');
+      return;
+    }
+    // 아직 카운트가 없으면(검색 응답 전) 기존 표시를 건드리지 않는다 — 깜빡임/공백 방지.
+    if (!ratingCounts || !Object.keys(ratingCounts).length) return;
+    const matched = filteredCount(ratingCounts, deps.getRatingState()) || 0;
+    if (matched > 0) {
+      countEl.textContent = `${matched.toLocaleString()} ${label}`;
+      countEl.classList.add('has-result');
+    } else {
+      countEl.textContent = 'No matches';
+      countEl.classList.remove('has-result');
+    }
+  }
+
+  // 외부(검색 패널 등급 토글)에서 호출 — 팝업이 열려 있고 칩이 있으면 매치 카운트를 다시 계산한다.
+  function refreshCount() {
+    const popup = getEl('tagFilterPopup');
+    if (!popup || !popup.classList.contains('open')) return;
+    renderMatchedCount(active ? 'assigned' : 'matched');
+  }
+
   function save() {
     const preferences = collectPreferences();
     savePreferences(preferences, storage);
@@ -277,6 +307,9 @@ export function createQuickFilterController(deps) {
     const toggleBtn = getEl('tagFilterToggle');
     if (toggleBtn) toggleBtn.classList.add('active');
     renderIncludeChips();
+    renderExcludeChips();
+    // 캐시된 등급별 카운트가 있으면 열 때 매치 라벨을 즉시 표시(재계산해 유지).
+    renderMatchedCount(active ? 'assigned' : 'matched');
     const input = getEl('tagFilterInput');
     if (input) input.focus();
   }
@@ -393,15 +426,20 @@ export function createQuickFilterController(deps) {
     }
     const assignBtn = getEl('tagFilterAssignBtn');
     ratingCounts = message.rating_counts || null;
-    const countEl = getEl('tagFilterCount');
     const hasTags = !!(message.tags && message.tags.length);
-    if (countEl) {
-      if (message.count > 0) {
-        countEl.textContent = `${message.count.toLocaleString()} matched`;
-        countEl.classList.add('has-result');
-      } else {
-        countEl.textContent = hasTags ? 'No matches' : '';
-        countEl.classList.remove('has-result');
+    if (hasTags && ratingCounts && Object.keys(ratingCounts).length) {
+      // 등급 인식 매치 수(활성 G/S/Q/E 합). 등급 토글에 라이브로 반응한다.
+      renderMatchedCount('matched');
+    } else {
+      const countEl = getEl('tagFilterCount');
+      if (countEl) {
+        if (message.count > 0) {
+          countEl.textContent = `${message.count.toLocaleString()} matched`;
+          countEl.classList.add('has-result');
+        } else {
+          countEl.textContent = hasTags ? 'No matches' : '';
+          countEl.classList.remove('has-result');
+        }
       }
     }
     if (assignBtn) assignBtn.disabled = true;
@@ -420,11 +458,8 @@ export function createQuickFilterController(deps) {
       toggleBtn.classList.remove('active');
       toggleBtn.classList.add('assigned');
     }
-    const countEl = getEl('tagFilterCount');
-    if (countEl) {
-      countEl.textContent = `${(message.count || 0).toLocaleString()} assigned`;
-      countEl.classList.add('has-result');
-    }
+    // 등급 인식 카운트(활성 등급 합)로 표시 — 등급 토글에 라이브 반응하고 RATING 옆에서 유지된다.
+    renderMatchedCount('assigned');
     const assignBtn = getEl('tagFilterAssignBtn');
     if (assignBtn) assignBtn.disabled = true;
     save();
@@ -436,11 +471,7 @@ export function createQuickFilterController(deps) {
 
   function onUpdate(message) {
     if (message.rating_counts) ratingCounts = message.rating_counts;
-    const countEl = getEl('tagFilterCount');
-    if (countEl) {
-      countEl.textContent = `${(message.count || 0).toLocaleString()} assigned`;
-      countEl.classList.add('has-result');
-    }
+    renderMatchedCount('assigned');
     const toggleBtn = getEl('tagFilterToggle');
     if (toggleBtn && active) toggleBtn.classList.add('assigned');
     if (ratingCounts) {
@@ -466,11 +497,16 @@ export function createQuickFilterController(deps) {
       return false;
     }
 
+    // search_state reconcile(같은 칩)인지 판별 — 같다면 캐시된 ratingCounts/매치 라벨을 보존한다.
+    // (이게 "27,301 matched"가 잠깐 떴다 사라지던 원인: 매 search_state 마다 라벨을 비웠음.)
+    const sameTags = JSON.stringify([...includeTags].sort()) === JSON.stringify([...pref.tag_filter].sort())
+      && JSON.stringify([...excludeTags].sort()) === JSON.stringify([...pref.tag_filter_exclude].sort());
+
     setActiveRatings(pref.ratings);
     includeTags = [...pref.tag_filter];
     excludeTags = [...pref.tag_filter_exclude];
     active = pref.tag_filter_active;
-    ratingCounts = null;
+    if (!sameTags) ratingCounts = null;   // 칩이 바뀌면 옛 카운트는 무효
     renderIncludeChips();
     renderExcludeChips();
     deps.syncRatingButtons();
@@ -481,7 +517,10 @@ export function createQuickFilterController(deps) {
     }
 
     const countEl = getEl('tagFilterCount');
-    if (countEl) {
+    if (sameTags) {
+      // 칩 불변: 캐시된 등급별 카운트로 매치 라벨을 다시 그려 유지(reconcile 시 깜빡임/소실 방지).
+      renderMatchedCount(active ? 'assigned' : 'matched');
+    } else if (countEl) {
       countEl.textContent = '';
       countEl.classList.remove('has-result');
     }
@@ -665,6 +704,7 @@ export function createQuickFilterController(deps) {
     applyPreferences,
     restorePreferences,
     updateHighlight,
+    refreshCount,
     savePreferences: save,
     loadPreferences: load,
     reset,

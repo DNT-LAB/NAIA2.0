@@ -201,6 +201,16 @@ async def _handle_set_mode(
         await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
         return
     context.set_api_mode(requested_mode)
+    # Per-mode prompt memory: set_api_mode swapped in the target mode's stored
+    # prompt. Push it so the main prompt box reflects THIS mode's prompt (force:
+    # the previous mode's prompt is no longer valid here). Mirrors prompt_sync.
+    await broadcast_json(clients, {
+        "type": "prompt_sync",
+        "prompt": context.prompt_text,
+        "negative": context.negative_prompt_text,
+        "negative_prompt": context.negative_prompt_text,
+        "force": True,
+    })
     if requested_mode in {"WEBUI", "COMFYUI"}:
         await run_in_thread(context.refresh_api_options, requested_mode)
     recommended_payloads = context._prompt_engineering_service().ensure_first_run_recommended_preset_payloads()

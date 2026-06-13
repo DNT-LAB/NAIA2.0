@@ -65,8 +65,12 @@ class HeadlessRemoteStateService:
         # sampling_mode/comfyui_* …) never leak across modes. Leaking COMFYUI's
         # sampler/scheduler into a NAI generation produced a NAI 500.
         self._stash_active_param_plane(old_mode)
+        # Same per-mode treatment for the main/negative prompt so each mode keeps
+        # its own prompt (a NAI random prompt must not appear while in COMFYUI).
+        self._stash_active_prompt_plane(old_mode)
         self.context.current_api_mode = normalized
         self._activate_param_plane(normalized)
+        self._activate_prompt_plane(normalized)
         self.context.save_remote_ui_state()
         self.context.publish("api_mode_changed", {"old_mode": old_mode, "new_mode": normalized})
 
@@ -91,6 +95,30 @@ class HeadlessRemoteStateService:
             if key in self.context.remote_params and key not in target:
                 target[key] = self.context.remote_params[key]
         self.context.remote_params = target
+
+    def _prompt_planes(self) -> dict[str, dict[str, str]]:
+        planes = getattr(self.context, "prompt_planes", None)
+        if not isinstance(planes, dict):
+            planes = {}
+            self.context.prompt_planes = planes
+        return planes
+
+    def _stash_active_prompt_plane(self, mode: str) -> None:
+        if mode in SUPPORTED_API_MODES:
+            self._prompt_planes()[mode] = {
+                "prompt": str(self.context.prompt_text or ""),
+                "negative_prompt": str(self.context.negative_prompt_text or ""),
+            }
+
+    def _activate_prompt_plane(self, mode: str) -> None:
+        plane = self._prompt_planes().get(mode)
+        if not isinstance(plane, dict):
+            # No remembered prompt for this mode yet — start it blank rather than
+            # carrying the outgoing mode's prompt across (the leak this fixes).
+            plane = {"prompt": "", "negative_prompt": ""}
+            self._prompt_planes()[mode] = plane
+        self.context.prompt_text = str(plane.get("prompt") or "")
+        self.context.negative_prompt_text = str(plane.get("negative_prompt") or "")
 
     def set_option(self, key: str, value: Any) -> None:
         if key not in REMOTE_OPTION_DEFAULTS:

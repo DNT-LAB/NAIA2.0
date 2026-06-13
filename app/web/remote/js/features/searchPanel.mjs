@@ -248,7 +248,11 @@ export function createSearchPanel({
       sendActiveRatings();
     }, 160);
     const quickFilter = getQuickFilter();
-    if (quickFilter) quickFilter.savePreferences();
+    if (quickFilter) {
+      quickFilter.savePreferences();
+      // 등급 토글 시 Tag Filter 팝업의 "N matched" 라벨도 즉시 재계산(캐시된 등급별 카운트 합).
+      if (quickFilter.refreshCount) quickFilter.refreshCount();
+    }
   }
 
   function onFilterReset(message) {

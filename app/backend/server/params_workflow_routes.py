@@ -9,7 +9,11 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app.backend.server.search_runtime import save_runner_parquet
+from app.backend.server.search_runtime import (
+    install_custom_parquet_frame,
+    normalize_custom_parquet_frame,
+    save_runner_parquet,
+)
 from core.web_session_context import WebSessionContext
 
 
@@ -246,25 +250,19 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
 
     import pandas as pd
 
-    frame = pd.read_parquet(io.BytesIO(content))
-    if action == "load":
-        context.search_results.set_dataframe(frame)
-    else:
-        context.search_results.append_dataframe(frame)
-    context.search_results_snapshot = context.search_results.get_dataframe().copy()
-    context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
-    context.search_results_scope = "custom_parquet"
-    # 업로드(불러오기/합치기)한 parquet도 모든 등급의 행을 담을 수 있으므로 활성/검색 등급을
-    # 전부 ON으로 켠다(WS load/merge 경로와 동일, 사용자 요청). search_query_ratings도 켜야
-    # search_state_payload의 체크박스(ratings 맵)가 전부 ON으로 표시된다.
-    context.search_query_ratings = set("gsqe")
-    context.save_search_filter_state(ratings=["g", "s", "q", "e"], search_ratings=["g", "s", "q", "e"])
+    uploaded = normalize_custom_parquet_frame(pd.read_parquet(io.BytesIO(content)))
+    frame = uploaded
+    if action == "merge":
+        current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
+        if current is not None and not current.empty:
+            frame = normalize_custom_parquet_frame(pd.concat([current, uploaded], ignore_index=True))
+    install_custom_parquet_frame(context, frame)
     save_runner_parquet(context)
     return {
         "ok": True,
         "action": action,
         "filename": safe_filename,
-        "rows": int(len(frame)),
+        "rows": int(len(uploaded)),
         "total": int(context.search_results.get_count()),
     }
 

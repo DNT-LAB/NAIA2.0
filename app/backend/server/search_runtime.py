@@ -55,6 +55,44 @@ def _dedup_by_id(frame):
     return frame
 
 
+def normalize_custom_parquet_frame(frame):
+    if frame is None or getattr(frame, "empty", True):
+        return frame
+    import pandas as pd
+
+    # Foreign/custom parquet files may carry a scrambled or non-unique index.
+    # SearchEngine.search_in_file normalizes this before tag filtering; the
+    # upload and saved-parquet paths must do the same.
+    if not isinstance(frame.index, pd.RangeIndex):
+        frame = frame.reset_index(drop=True)
+    return _dedup_by_id(frame)
+
+
+def _reset_active_tag_filter_assignment(context: WebSessionContext) -> None:
+    context.active_tag_filter_ids = None
+    context.pending_tag_filter = None
+    context.active_tag_filter = None
+    if hasattr(context, "_tag_filter_cache"):
+        context._tag_filter_cache = None
+
+
+def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
+    context.search_results.set_dataframe(frame)
+    context.search_results_snapshot = context.search_results.get_dataframe().copy()
+    context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
+    context.search_results_scope = CUSTOM_PARQUET_SCOPE
+    _reset_active_tag_filter_assignment(context)
+    # Custom parquet rows can contain any rating. Loading/merging a new result
+    # base also invalidates the active tag-filter assignment; preserve any draft
+    # chips but mark them inactive so old id sets cannot filter the new snapshot.
+    context.search_query_ratings = set("gsqe")
+    context.save_search_filter_state(
+        ratings=["g", "s", "q", "e"],
+        search_ratings=["g", "s", "q", "e"],
+        tag_filter_active=False,
+    )
+
+
 def filter_source_frame(
     frame: Any,
     *,
@@ -215,9 +253,7 @@ def search_state_with_runner_save(context: WebSessionContext) -> dict[str, Any]:
 
 
 def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True) -> dict[str, Any]:
-    context.active_tag_filter_ids = None
-    context.pending_tag_filter = None
-    context.active_tag_filter = None
+    _reset_active_tag_filter_assignment(context)
     if reset_draft:
         # Explicit "Clear": drop the assigned filter AND the draft include/exclude
         # lists.
@@ -249,21 +285,16 @@ def run_search_command(
     bucket_start = command.get("bucket_start")
     bucket_end = command.get("bucket_end")
     context.search_query_ratings = ratings
-    # Sync the active/generation-pool ratings to the search ratings. The search
-    # panel's rating checkboxes are the only rating control the user touches at
-    # search time, so a search for predominantly-explicit tags (e.g. "gangbang" is
-    # ~99% rating 'e') must not be silently decimated by the pool filter still
-    # sitting at the explicit-off default — that collapsed 15,122 hits down to the
-    # 187 non-explicit ones. Passing ratings= updates state["ratings"] (and thus
-    # remote_active_ratings via save_search_filter_state), so the post-search
-    # apply_search_runtime_filters keeps exactly what the user searched for. The
-    # DEFAULT_ACTIVE_RATINGS first-run safety default is untouched: a default search
-    # keeps 'e' off because the search ratings also default 'e' off — explicit only
-    # enters the pool when the user deliberately checks it and searches.
+    # Persist only the search checkbox state. The active/generation-pool ratings
+    # are a separate user preference; if we overwrite them here, running an
+    # explicit-inclusive search permanently changes the random pool. After the
+    # result frame has already been filtered by the requested search ratings,
+    # we temporarily open the runtime pool to all ratings so the just-searched
+    # result set is not filtered a second time.
     # None values are ignored by the saver -> they keep the persisted range.
     context.save_search_filter_state(
         query=query, exclude=exclude,
-        ratings=ratings, search_ratings=ratings,
+        search_ratings=ratings,
         bucket_start=bucket_start, bucket_end=bucket_end,
     )
 
@@ -299,6 +330,7 @@ def run_search_command(
         context.pending_tag_filter = None
         context.active_tag_filter = None
         context.save_search_filter_state(tag_filter_active=False)
+        context.remote_active_ratings = set("gsqe")
         return apply_search_runtime_filters(context)
 
     base = search_base_frame(context)
@@ -310,6 +342,7 @@ def run_search_command(
     context.pending_tag_filter = None
     context.active_tag_filter = None
     context.save_search_filter_state(tag_filter_active=False)
+    context.remote_active_ratings = set("gsqe")
     return apply_search_runtime_filters(context)
 
 
@@ -469,28 +502,13 @@ def load_or_merge_custom_parquet(
     import pandas as pd
 
     frame = pd.read_parquet(path)
-    # Load-time index normalization (mirrors SearchEngine.search_in_file): a
-    # foreign-imported parquet may ship a scrambled / non-unique index, which
-    # would corrupt tags_string via groupby('index') in the search DSL. The real
-    # id is the 'id' column, so the index carries no meaning — drop it.
-    if not isinstance(frame.index, pd.RangeIndex):
-        frame = frame.reset_index(drop=True)
+    frame = normalize_custom_parquet_frame(frame)
     if merge:
         current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
         if current is not None and not current.empty:
             frame = pd.concat([current, frame], ignore_index=True)
-    frame = _dedup_by_id(frame)   # 합치기 중복 post id 제거 → id-keyed 적용 정합 보장
-    context.search_results.set_dataframe(frame)
-    context.search_results_snapshot = context.search_results.get_dataframe().copy()
-    context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
-    context.search_results_scope = CUSTOM_PARQUET_SCOPE
-    # 로드/합치기한 커스텀 parquet은 어떤 등급(g/s/q/e)의 행이든 담을 수 있다. 활성/검색 등급이
-    # 일부 OFF(기본 explicit OFF 등)면 로드된 결과셋이 등급 필터에 잘려 보이지 않으므로, 로드
-    # 시 모든 등급을 ON으로 켠다(사용자 요청). search_query_ratings는 search_state_payload의
-    # 체크박스 표시(ratings 맵, search_state_payload 318-344)에서 최우선이라 이것도 켜야 UI
-    # 체크박스가 전부 ON으로 보인다(save_search_filter_state는 활성/검색 등급 상태만 갱신).
-    context.search_query_ratings = set("gsqe")
-    context.save_search_filter_state(ratings=["g", "s", "q", "e"], search_ratings=["g", "s", "q", "e"])
+            frame = normalize_custom_parquet_frame(frame)
+    install_custom_parquet_frame(context, frame)
     state = search_state_with_runner_save(context)
     state["merged" if merge else "loaded"] = path.name
     verb = "merged" if merge else "loaded"

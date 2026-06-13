@@ -876,6 +876,9 @@ def _register_panel(ctx, ext):
         ],
         title="여러장 생성-X/Y Plot",
         on_action=ext.on_action,
+        # X/Y Plot은 하단 "▶ 이미지 생성" 버튼 전용 — arming(메인 Generate 가로채기)이
+        # 무의미하므로 그 모드에선 "Activate This Script"를 숨기고 작동을 끈다.
+        hide_arm_when={"field": "feature", "in": [FEATURE_XY]},
     )
 
 

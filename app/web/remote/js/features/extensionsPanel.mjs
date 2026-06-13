@@ -161,6 +161,15 @@ export function createExtensionsUi(deps) {
     return (cond.in || []).map(String).includes(current);
   }
 
+  // hide_arm_when(패널 메타): 현재 설정값이 일치하면 "Activate This Script"(armed)
+  // 토글을 숨기고 작동을 끈다 — 그 모드가 action 버튼 전용일 때(예: X/Y Plot).
+  function armHidden(ext) {
+    const cond = ext.panel?.hide_arm_when;
+    if (!cond || !cond.field) return false;
+    const current = String(fieldValue(ext, cond.field) ?? '');
+    return (cond.in || []).map(String).includes(current);
+  }
+
   function columnHtml(ext, fields, idPrefix, suppressApply) {
     let html = '';
     let section = null;
@@ -759,6 +768,15 @@ export function createExtensionsUi(deps) {
     // 모듈 UI 전담: scope:"module" 필드만. 전역 요소(버튼 위치 등)는 Settings 전담.
     const fields = fieldsHtml(ext, 'extquick', 'module')
       || '<div class="ext-quick-nofields">이 확장은 설정 항목을 선언하지 않았습니다.</div>';
+    const hideArm = armHidden(ext);
+    const activateRow = hideArm ? '' : `
+        <label class="ext-quick-activate" title="작동만 켜고 끕니다 — 꺼도 버튼은 남습니다. 숨김까지 끄려면 Settings ▸ Extension">
+          <span class="ext-quick-activate-label">Activate This Script</span>
+          <span class="ext-switch">
+            <input type="checkbox" class="ext-quick-toggle" ${ext.armed === false ? '' : 'checked'}>
+            <span class="ext-slider"></span>
+          </span>
+        </label>`;
     el.innerHTML = `
       <div class="ext-quick-head">
         <span class="ext-quick-title">
@@ -768,13 +786,7 @@ export function createExtensionsUi(deps) {
         <button type="button" class="ext-quick-close" title="닫기">×</button>
       </div>
       <div class="ext-quick-body">
-        <label class="ext-quick-activate" title="작동만 켜고 끕니다 — 꺼도 버튼은 남습니다. 숨김까지 끄려면 Settings ▸ Extension">
-          <span class="ext-quick-activate-label">Activate This Script</span>
-          <span class="ext-switch">
-            <input type="checkbox" class="ext-quick-toggle" ${ext.armed === false ? '' : 'checked'}>
-            <span class="ext-slider"></span>
-          </span>
-        </label>
+        ${activateRow}
         ${fields}
       </div>
       <div class="ext-quick-foot">관리: Settings ▸ Extension</div>`;
@@ -787,11 +799,19 @@ export function createExtensionsUi(deps) {
     // 줄지 않고 푸터가 잘린다.
     el.style.display = 'flex';
     el.querySelector('.ext-quick-close').addEventListener('click', closeQuickPopup);
-    el.querySelector('.ext-quick-toggle').addEventListener('change', event => {
-      // 모듈 작동 스위치(armed): 작동만 멈추고 버튼·팝업은 유지된다.
-      // 노출까지 끄는 것은 Settings ▸ Extension의 토글(enabled) 전담.
-      setModuleParam('extensions', `armed:${ext.id}`, event.target.checked);
-    });
+    const armToggle = el.querySelector('.ext-quick-toggle');
+    if (armToggle) {
+      armToggle.addEventListener('change', event => {
+        // 모듈 작동 스위치(armed): 작동만 멈추고 버튼·팝업은 유지된다.
+        // 노출까지 끄는 것은 Settings ▸ Extension의 토글(enabled) 전담.
+        setModuleParam('extensions', `armed:${ext.id}`, event.target.checked);
+      });
+    }
+    // hide_arm_when 모드(예: X/Y Plot)는 action 버튼 전용 — 작동(armed)을 자동으로 끈다
+    // (passive 가로채기 방지). idempotent: armed===false면 재전송 안 함(재렌더 루프 방지).
+    if (hideArm && ext.armed !== false) {
+      setModuleParam('extensions', `armed:${ext.id}`, false);
+    }
     bindFields(el);
     restoreFocus(el, saved);
   }

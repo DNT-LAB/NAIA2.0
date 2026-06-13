@@ -666,6 +666,7 @@ class ExtensionContext:
         *,
         title: str | None = None,
         on_action: Any = None,
+        hide_arm_when: dict[str, Any] | None = None,
     ) -> None:
         """Extensions 패널에 노출할 선언적 설정 폼을 등록한다(확장은 JS 0줄).
 
@@ -678,12 +679,24 @@ class ExtensionContext:
 
         ``action`` 타입은 버튼으로 렌더되고, 클릭 시 ``on_action(key)``가
         호출된다(설정 저장 없음). on_action 예외는 격리되어 로그만 남는다.
+
+        ``hide_arm_when``: visible_when과 같은 모양({field, in:[...]}). 현재 설정값이
+        일치하면 호스트가 "Activate This Script"(armed) 토글을 숨기고 작동을 끈다
+        (armed=false) — 그 모드가 action 버튼으로만 동작해 passive 가로채기가 무의미할
+        때 쓴다(예: X/Y Plot은 하단 버튼 전용이라 arming이 불필요).
         """
         normalized = _normalize_panel_fields(fields)
-        self._record.panel = {
+        panel: dict[str, Any] = {
             "title": str(title or self._record.name or self.ext_id),
             "fields": normalized,
         }
+        if isinstance(hide_arm_when, dict) and str(hide_arm_when.get("field") or "").strip():
+            allowed = hide_arm_when.get("in")
+            panel["hide_arm_when"] = {
+                "field": str(hide_arm_when.get("field")).strip(),
+                "in": [str(item) for item in allowed] if isinstance(allowed, (list, tuple)) else [],
+            }
+        self._record.panel = panel
         self._record.action_handler = on_action if callable(on_action) else None
 
     # ── 생성 큐 ──────────────────────────────────────────────────

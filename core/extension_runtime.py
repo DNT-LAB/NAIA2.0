@@ -101,10 +101,18 @@ def _safe_error_text(exc: BaseException) -> str:
 _CHAIN_GUARD = threading.local()
 # show_toast 재진입 가드 — extension_toast 구독 콜백 안에서의 재호출(무한 재귀) 차단.
 _TOAST_GUARD = threading.local()
+# 액션(패널 버튼) 실행 중 표시 — 명시적 사용자 클릭이므로 enqueue_generation·
+# get_current_request가 armed(작동 ON)가 아니어도 동작하도록 허용(작동 OFF여도
+# 버튼은 즉시 생성 가능 — 예: X/Y Plot "그리드 생성" 버튼).
+_ACTION_GUARD = threading.local()
 
 
 def _current_event_chain_depth() -> int:
     return int(getattr(_CHAIN_GUARD, "event_depth", 0) or 0)
+
+
+def _in_action_context() -> bool:
+    return bool(getattr(_ACTION_GUARD, "active", False))
 
 
 def _coerce_chain_depth(raw: Any) -> int:
@@ -703,7 +711,14 @@ class ExtensionContext:
         큐 삽입만 하며 소비 루프를 직접 깨우지는 않는다(생성 흐름 안에서 호출되면
         진행 중인 루프가 이어서 소비).
         """
-        if not self._record.is_active:
+        # armed(작동 ON)가 기본 게이트지만, 패널 버튼(action) 클릭 안에서의 호출은
+        # 명시적 사용자 의도이므로 loaded+enabled+!blocked면 armed 없이도 허용한다.
+        if not self._record.is_active and not (
+            _in_action_context()
+            and self._record.status == "loaded"
+            and self._record.enabled
+            and not self._record.blocked
+        ):
             return {"ok": False, "request_id": "", "message": "extension disabled"}
         current_depth = _current_event_chain_depth()
         child_depth = current_depth + 1
@@ -783,6 +798,51 @@ class ExtensionContext:
             return {"ok": False, "skip_scheduled": False, "message": "이미 실행 중이거나 큐에 없는 요청"}
         except (SystemExit, Exception) as exc:
             return {"ok": False, "skip_scheduled": False, "message": _safe_error_text(exc)}
+
+    # ── 현재 요청 스냅샷 ─────────────────────────────────────────
+    def get_current_request(self) -> dict[str, Any]:
+        """지금 프롬프트 박스·파라미터의 스냅샷(메인 Generate가 쓸 값) → 큐에 넣지
+        않고 반환한다. 패널 버튼에서 '현재 상태로 즉시 생성'하는 확장이 쓴다.
+
+        반환 ``{ok, api_mode, prompt_run_id, params}``. params는 dispatched 이벤트와
+        같은 모양의 안전 사본(input·negative_prompt·seed·width·height 등 — 내부 ``_*``·
+        credential 키 제외). 프런트는 set_prompt/set_param으로 박스·파라미터를 백엔드
+        컨텍스트에 동기화하므로 그 캐시를 읽는다(부작용 없음 — enqueue_remote_request는
+        enqueue=False여도 dispatched를 발행하므로 쓰지 않는다).
+
+        armed(작동 ON)가 아니어도 읽을 수 있다(loaded+enabled면 OK) — 작동 OFF여도
+        버튼으로 구성·실행할 수 있어야 한다(읽기 전용·get_api_mode와 동일 사유)."""
+        record = self._record
+        if not (record.status == "loaded" and record.enabled and not record.blocked):
+            return {"ok": False, "api_mode": "", "prompt_run_id": "", "params": {},
+                    "message": "extension disabled"}
+        try:
+            app = self._app_context
+            remote = getattr(app, "remote_params", None)
+            params: dict[str, Any] = {}
+            if isinstance(remote, dict):
+                for key, value in remote.items():
+                    safe_key = str(key)
+                    if safe_key == "credential" or safe_key.startswith("_"):
+                        continue
+                    # 호스트 remote_params 오염 방지: 컨테이너만 얕게 복제(스칼라는 불변).
+                    if isinstance(value, dict):
+                        params[safe_key] = dict(value)
+                    elif isinstance(value, list):
+                        params[safe_key] = list(value)
+                    else:
+                        params[safe_key] = value
+            params["input"] = str(getattr(app, "prompt_text", "") or "")
+            params["negative_prompt"] = str(getattr(app, "negative_prompt_text", "") or "")
+            return {
+                "ok": True,
+                "api_mode": self.get_api_mode(),
+                "prompt_run_id": "",
+                "params": params,
+            }
+        except (SystemExit, Exception) as exc:
+            return {"ok": False, "api_mode": "", "prompt_run_id": "", "params": {},
+                    "message": _safe_error_text(exc)}
 
     # ── 모드/토스트 ──────────────────────────────────────────────
     def get_api_mode(self) -> str:
@@ -1393,13 +1453,19 @@ class ExtensionManager:
         # 붙들거나, 핸들러→매니저 재진입 데드락이 생기지 않게 한다.
         if pending_action is not None:
             ext_id, field_key, handler = pending_action
+            prev_action = getattr(_ACTION_GUARD, "active", False)
             try:
                 record = self._find(ext_id)
                 scope = _extension_deps_scope(record) if record is not None else nullcontext()
+                # 액션 컨텍스트 표시: 핸들러 안의 enqueue_generation/get_current_request가
+                # armed 없이도 동작(명시적 클릭 = 즉시 생성 허용).
+                _ACTION_GUARD.active = True
                 with scope:
                     handler(field_key)
             except (SystemExit, Exception) as exc:
                 _ext_print(ext_id, f"on_action({field_key}) 실패: {_safe_error_text(exc)}")
+            finally:
+                _ACTION_GUARD.active = prev_action
 
     def _apply_setting_locked(self, ext_id: str, field_key: str, value: Any) -> Any:
         """일반 필드는 검증·영속까지 끝낸다(반환 None). action 필드는 호출자가

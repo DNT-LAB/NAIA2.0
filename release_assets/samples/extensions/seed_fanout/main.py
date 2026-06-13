@@ -331,7 +331,7 @@ class SeedFanout:
         return [(base + step * i) % SEED_SPACE for i in range(1, count + 1)]
 
     # ── 모드 2: X/Y Plot (인스턴트 이벤트 포팅) ──────────────────
-    def _run_xy_plot(self, info, params, settings, char_overrides):
+    def _run_xy_plot(self, info, params, settings, char_overrides, has_original=True):
         api_mode = str(info.get("api_mode") or "").upper()
         x_meta = self._axis_values("X", settings.get("x_axis"), settings, "x", api_mode)
         y_meta = self._axis_values("Y", settings.get("y_axis"), settings, "y", api_mode)
@@ -412,14 +412,20 @@ class SeedFanout:
         if not cells:
             self.ctx.log("X/Y Plot: 유효한 조합이 없어 원본만 생성합니다")
             return
-        cancel = self.ctx.cancel_generation(info.get("request_id"))
-        if not (cancel.get("ok") or cancel.get("skip_scheduled")):
-            self._toast(
-                "X/Y Plot은 그리드 전용 생성이라 원본 취소가 필요합니다. "
-                "원본 취소 실패로 그리드 큐 추가를 중단합니다.",
-                "error",
-            )
-            return
+        if has_original:
+            # 메인 Generate 가로채기 경로(passive) — 원본 1장을 취소하고 그리드만 남긴다.
+            cancel = self.ctx.cancel_generation(info.get("request_id"))
+            if not (cancel.get("ok") or cancel.get("skip_scheduled")):
+                self._toast(
+                    "X/Y Plot은 그리드 전용 생성이라 원본 취소가 필요합니다. "
+                    "원본 취소 실패로 그리드 큐 추가를 중단합니다.",
+                    "error",
+                )
+                return
+            origin_note = "원본 취소, 그리드만" if cancel.get("ok") else "원본 건너뛰기 예약, 그리드만"
+        else:
+            # 버튼(액션) 즉시 생성 경로 — 취소할 원본이 없다(처음부터 그리드만 만든다).
+            origin_note = "버튼 즉시 생성"
         queued = 0
         id_map = {}
         for overrides, prompt, col, row in cells:
@@ -429,10 +435,6 @@ class SeedFanout:
                 if result.get("request_id"):
                     id_map[result["request_id"]] = (col, row)
         failed_tracking = len(cells) - len(id_map)
-        if cancel.get("ok"):
-            origin_note = "원본 취소, 그리드만"
-        elif cancel.get("skip_scheduled"):
-            origin_note = "원본 건너뛰기 예약, 그리드만"
         self.ctx.log(f"X/Y Plot: {queued}/{len(cells)}장 큐 추가 ({origin_note}, seed={base_seed} 고정)")
 
         # n×m 합성 이미지: 전 셀 완료 시 grid/ 폴더에 저장(설정으로 끌 수 있음).
@@ -608,8 +610,48 @@ class SeedFanout:
         grid_dir.mkdir(parents=True, exist_ok=True)
         return grid_dir
 
+    # ── 버튼(액션) 즉시 X/Y 생성 ─────────────────────────────────
+    def run_xy_instant(self):
+        """패널 버튼 진입점 — 지금 프롬프트/파라미터로 X/Y 그리드를 즉시 생성한다
+        (메인 Generate·arming 불필요). 호스트 get_current_request로 현재 상태
+        스냅샷을 받아 _run_xy_plot(has_original=False)로 그리드만 큐에 넣는다."""
+        getter = getattr(self.ctx, "get_current_request", None)
+        if not callable(getter):
+            self._toast("이 NAIA 버전은 버튼 즉시 생성을 지원하지 않습니다(호스트 업데이트 필요)")
+            return
+        snapshot = getter() or {}
+        if not snapshot.get("ok"):
+            self._toast(snapshot.get("message") or "현재 프롬프트/파라미터를 가져오지 못했습니다")
+            return
+        api_mode = str(snapshot.get("api_mode") or "").upper()
+        settings = self.ctx.load_settings(DEFAULT_SETTINGS)
+        settings = _sanitize_settings_for_mode(self.ctx, settings, api_mode, notify=self._toast, persist=True)
+        if str(settings.get("feature") or FEATURE_FANOUT) != FEATURE_XY:
+            self._toast("이 버튼은 X/Y Plot 모드 전용입니다 — 모드를 X/Y Plot으로 바꾸세요")
+            return
+        params = snapshot.get("params") if isinstance(snapshot.get("params"), dict) else {}
+        if not str(params.get("input") or "").strip():
+            self._toast("프롬프트가 비어 있습니다 — 먼저 프롬프트를 입력하세요")
+            return
+        char_overrides = {}
+        if settings.get("char_fix") and api_mode == "NAI":
+            snap = self.ctx.resolve_nai_characters()
+            if snap:
+                char_overrides = snap
+                self.ctx.log(f"캐릭터 프롬프트 고정: {len(snap['characters'])}명 스냅샷")
+        info = {
+            "api_mode": api_mode,
+            "prompt_run_id": snapshot.get("prompt_run_id") or "",
+            "request_id": None,
+            "params": params,
+        }
+        self._run_xy_plot(info, params, settings, char_overrides, has_original=False)
+
     # ── 패널 action 버튼 ─────────────────────────────────────────
     def on_action(self, key):
+        if key == "run_xy":
+            self.run_xy_instant()
+            return
         if key != "open_grid_folder":
             return
         grid_dir = self._grid_dir()
@@ -824,6 +866,12 @@ def _register_panel(ctx, ext):
             {"key": "open_grid_folder", "type": "action", "label": "Grid 폴더 열기",
              "help": "저장 폴더/grid 를 파일 탐색기로 연다(서버 기기 기준)",
              "column": "right", "section": "그리드 이미지", "order": 51,
+             "visible_when": when_xy},
+            # X/Y는 버튼 즉시 생성 — 메인 Generate/Activate 없이 이 버튼으로 그리드를 만든다.
+            {"key": "run_xy", "type": "action", "label": "▶ 이미지 생성 (X/Y 그리드)",
+             "help": "지금 프롬프트/파라미터로 X/Y 그리드를 즉시 생성합니다 — 메인 Generate "
+                     "버튼이나 'Activate This Script' 없이 바로 큐에 들어갑니다",
+             "column": "right", "section": "즉시 생성", "order": 60,
              "visible_when": when_xy},
         ],
         title="여러장 생성-X/Y Plot",

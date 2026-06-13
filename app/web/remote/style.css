@@ -1147,7 +1147,8 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   background: linear-gradient(135deg, rgba(124,106,239,0.95), rgba(92,78,221,0.95));
   color: #fff;
 }
-.studio-toolbar button.danger {
+.studio-toolbar button.danger,
+.studio-editor-actions button.danger {
   border-color: rgba(244,67,54,0.42);
   background: rgba(244,67,54,0.14);
   color: #ff9a90;

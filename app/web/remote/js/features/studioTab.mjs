@@ -42,6 +42,12 @@ export function createStudioTabController({
     return `F${String(index + 1).padStart(2, '0')}`;
   }
 
+  function frameLabel(frame, index) {
+    // 사용자 지정 이름이 있으면 그것을, 없으면 위치 기반 F01 라벨을 쓴다.
+    const name = safeText(frame?.name).trim();
+    return name || frameId(index);
+  }
+
   function randomSeed() {
     return String(Math.floor(Math.random() * 10000000000));
   }
@@ -49,6 +55,7 @@ export function createStudioTabController({
   function createFrame(index) {
     return {
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}-${index}`,
+      name: '',
       enabled: true,
       prompt: '',
       negative: '',
@@ -88,6 +95,7 @@ export function createStudioTabController({
       next.frames = raw.frames.map((frame, index) => ({
         ...createFrame(index),
         id: safeText(frame?.id) || createFrame(index).id,
+        name: safeText(frame?.name).slice(0, 60),
         enabled: frame?.enabled !== false,
         prompt: safeText(frame?.prompt),
         negative: safeText(frame?.negative),
@@ -125,6 +133,7 @@ export function createStudioTabController({
         fixSeed: state.fixSeed,
         frames: state.frames.map(frame => ({
           id: frame.id,
+          name: frame.name,
           enabled: frame.enabled,
           prompt: frame.prompt,
           negative: frame.negative,
@@ -177,7 +186,7 @@ export function createStudioTabController({
       studio_request: true,
       studio_frame_index: frameIndex,
       _remote_queue_source: 'Studio',
-      _remote_queue_label: frameId(frameIndex),
+      _remote_queue_label: frameLabel(frame, frameIndex),
     };
     if (negative) overrides.negative_prompt = negative;
     if (size) {
@@ -265,12 +274,12 @@ export function createStudioTabController({
     const imageUrl = frameImages.get(frame.id);
     const status = statusText(frame);
     const preview = imageUrl
-      ? `<img src="${imageUrl}" alt="${escHtml(frameId(index))}">`
+      ? `<img src="${imageUrl}" alt="${escHtml(frameLabel(frame, index))}">`
       : renderPromptList(frame);
     return `
       <button type="button" class="studio-frame-card${selected ? ' selected' : ''}${open ? ' open' : ''}${frame.enabled ? '' : ' disabled'}" data-studio-frame="${index}" aria-expanded="${open ? 'true' : 'false'}">
         <div class="studio-frame-label">
-          <strong>${escHtml(frameId(index))}</strong>
+          <strong>${escHtml(frameLabel(frame, index))}</strong>
           <span class="studio-status-dot" data-status="${escHtml(status)}" aria-label="${escHtml(status)}"></span>
         </div>
         <div class="studio-frame-preview${imageUrl ? ' has-image' : ''}">${preview}</div>
@@ -349,13 +358,13 @@ export function createStudioTabController({
     if (!imageUrl) {
       return `
         <div class="studio-editor-image empty">
-          <span>${escHtml(frameId(selectedIndex))}</span>
+          <span>${escHtml(frameLabel(frame, selectedIndex))}</span>
           <small>이미지 없음</small>
         </div>`;
     }
     return `
       <div class="studio-editor-image">
-        <img src="${imageUrl}" alt="${escHtml(frameId(selectedIndex))}">
+        <img src="${imageUrl}" alt="${escHtml(frameLabel(frame, selectedIndex))}">
       </div>`;
   }
 
@@ -367,7 +376,7 @@ export function createStudioTabController({
         <div class="studio-editor-head">
           <div>
             <div class="studio-kicker">Frame Editor</div>
-            <h3>${escHtml(frameId(selectedIndex))}</h3>
+            <h3>${escHtml(frameLabel(frame, selectedIndex))}</h3>
           </div>
           <div class="studio-editor-head-actions">
             <label class="studio-toggle">
@@ -390,6 +399,10 @@ export function createStudioTabController({
         </label>
         <div class="studio-editor-grid">
           <label class="studio-field">
+            <span>Frame Name</span>
+            <input type="text" maxlength="60" data-studio-frame-field="name" value="${escHtml(frame.name)}" placeholder="${escHtml(frameId(selectedIndex))}" spellcheck="false">
+          </label>
+          <label class="studio-field">
             <span>Resolution</span>
             <select data-studio-frame-field="resolution">${renderResolutionOptions(frame.resolution)}</select>
           </label>
@@ -403,6 +416,7 @@ export function createStudioTabController({
           <button type="button" data-studio-action="apply-current">메인에 적용</button>
           <button type="button" data-studio-action="duplicate-frame">복제</button>
           <button type="button" data-studio-action="clear-frame">비우기</button>
+          <button type="button" data-studio-action="delete-frame" class="danger">삭제</button>
           <button type="button" data-studio-action="generate-selected" class="primary">선택 생성</button>
         </div>
       </section>`;
@@ -412,7 +426,7 @@ export function createStudioTabController({
     const enabled = state.frames.filter(frame => frame.enabled).length;
     const total = enabled * Math.max(1, state.repeat);
     const runningText = activeJob
-      ? `${frameId(activeJob.frameIndex)} 생성 중`
+      ? `${frameLabel(state.frames[activeJob.frameIndex], activeJob.frameIndex)} 생성 중`
       : running
       ? '대기 중'
       : '준비됨';
@@ -441,6 +455,7 @@ export function createStudioTabController({
             <button type="button" data-studio-action="capture-current-new">현재 캡처</button>
             <button type="button" data-studio-action="toggle-import">줄별 배치</button>
             <button type="button" data-studio-action="add-frame">빈 프레임</button>
+            <button type="button" data-studio-action="reset-frames" ${running || activeJob ? 'disabled' : ''}>초기화</button>
             <button type="button" data-studio-action="start-sequence" class="primary" ${running || activeJob ? 'disabled' : ''}>순차 생성</button>
             <button type="button" data-studio-action="stop-sequence" class="danger" ${running || activeJob ? '' : 'disabled'}>중지</button>
           </div>
@@ -622,6 +637,7 @@ export function createStudioTabController({
     if (!frame) return;
     const copy = {
       ...createFrame(state.frames.length),
+      name: frame.name.trim() ? `${frame.name.trim()} 복사`.slice(0, 60) : '',
       enabled: frame.enabled,
       prompt: frame.prompt,
       negative: frame.negative,
@@ -635,6 +651,49 @@ export function createStudioTabController({
     render();
   }
 
+  async function deleteSelectedFrame() {
+    const frame = selectedFrame();
+    if (!frame) return;
+    if (running || activeJob) {
+      // 큐/activeJob이 프레임 인덱스를 들고 있어 도중 splice는 큐를 오염시킨다.
+      showToast('Studio 생성이 끝난 뒤 프레임을 삭제하세요', 'error');
+      return;
+    }
+    if (state.frames.length <= 1) {
+      showToast('마지막 프레임은 삭제할 수 없습니다 — 비우기를 사용하세요', 'error');
+      return;
+    }
+    const targetId = frame.id;
+    const hasContent = Boolean(frame.prompt.trim() || frame.negative.trim() || frameImages.get(targetId));
+    if (hasContent) {
+      const confirmed = await Promise.resolve(confirmDialog(
+        `${frameLabel(frame, state.frames.indexOf(frame))} 프레임을 삭제할까요?`,
+        {title: '프레임 삭제', okText: '삭제', cancelText: '취소'},
+      ));
+      if (!confirmed) return;
+      // 확인 대기 중 생성이 시작되었을 수 있다 — 재검사 (Codex V6).
+      if (running || activeJob) {
+        showToast('Studio 생성이 끝난 뒤 프레임을 삭제하세요', 'error');
+        return;
+      }
+    }
+    // 확인 대기 중 선택/구성이 바뀌었을 수 있으므로 인덱스가 아니라 id로 다시 찾는다.
+    const targetIndex = state.frames.findIndex(item => item.id === targetId);
+    if (targetIndex < 0) return;
+    if (state.frames.length <= 1) {
+      showToast('마지막 프레임은 삭제할 수 없습니다 — 비우기를 사용하세요', 'error');
+      return;
+    }
+    const oldUrl = frameImages.get(targetId);
+    if (oldUrl) URL.revokeObjectURL(oldUrl);
+    frameImages.delete(targetId);
+    state.frames.splice(targetIndex, 1);
+    if (selectedIndex > targetIndex) selectedIndex -= 1;
+    selectedIndex = Math.max(0, Math.min(selectedIndex, state.frames.length - 1));
+    saveState();
+    render();
+  }
+
   function addFrame() {
     state.frames.push(createFrame(state.frames.length));
     selectedIndex = state.frames.length - 1;
@@ -644,12 +703,21 @@ export function createStudioTabController({
   }
 
   async function resetFrames() {
+    // 버튼 disabled만으로는 부족 — 액션 키 디스패치 경로가 남는다 (Codex V5).
+    if (running || activeJob) {
+      showToast('Studio 생성이 끝난 뒤 초기화하세요', 'error');
+      return;
+    }
     const confirmed = await Promise.resolve(confirmDialog('Studio 프레임을 9칸 기본 상태로 초기화할까요?', {
       title: 'Studio 초기화',
       okText: '초기화',
       cancelText: '취소',
     }));
     if (!confirmed) return;
+    if (running || activeJob) {
+      showToast('Studio 생성이 끝난 뒤 초기화하세요', 'error');
+      return;
+    }
     frameImages.forEach(url => URL.revokeObjectURL(url));
     frameImages.clear();
     queue = [];
@@ -852,6 +920,7 @@ export function createStudioTabController({
     if (action === 'sync-current') syncSelectedFromMain();
     else if (action === 'apply-current') applySelectedToMain();
     else if (action === 'duplicate-frame') duplicateFrame();
+    else if (action === 'delete-frame') deleteSelectedFrame();
     else if (action === 'clear-frame') clearSelectedFrame();
     else if (action === 'capture-current-new') captureCurrentAsNewFrame();
     else if (action === 'add-frame') addFrame();

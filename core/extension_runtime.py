@@ -31,6 +31,7 @@ import re
 import sys
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -382,15 +383,18 @@ class ExtensionRecord:
 
     @property
     def deps_ready(self) -> bool:
-        """선언된 의존성이 없거나, 이미 격리 설치(.deps)된 상태인가."""
+        """선언된 의존성이 없거나, 이미 격리 설치(서명 일치)된 상태인가.
+
+        매니페스트 서명(.naia_deps.json) 비교라 (a) 전부 host-satisfied인 noop도
+        ready로 보고, (b) requirements가 바뀌면 재설치를 유도한다."""
         if not self.requirements:
             return True
         if self.directory is None:
             return False
         try:
-            from core.extension_deps_service import has_installed_deps
+            from core.extension_deps_service import deps_satisfy
 
-            return has_installed_deps(self.directory)
+            return deps_satisfy(self.directory, self.requirements)
         except Exception:
             return False
 
@@ -419,6 +423,17 @@ class ExtensionRecord:
             "field_errors": dict(self.field_errors),
             "directory": str(self.directory or ""),
         }
+
+
+def _extension_deps_scope(record: ExtensionRecord):
+    if record.directory is None or not record.requirements:
+        return nullcontext()
+    try:
+        from core.extension_deps_service import extension_syspath
+
+        return extension_syspath(record.directory)
+    except Exception:
+        return nullcontext()
 
 
 class _ExtensionHookAdapter:
@@ -463,7 +478,8 @@ class _ExtensionHookAdapter:
         if not self._record.is_active:
             return context
         try:
-            return self._hook.execute_pipeline_hook(context)
+            with _extension_deps_scope(self._record):
+                return self._hook.execute_pipeline_hook(context)
         except SystemExit as exc:
             # sys.exit()는 Exception이 아니라 코어 per-hook 격리(except Exception)를
             # 뚫고 생성 스레드를 죽인다 — 어댑터 경계에서 차단하고 no-op 처리.
@@ -589,7 +605,8 @@ class ExtensionContext:
                 event_depth = EXT_CHAIN_DEPTH_MAX
             _CHAIN_GUARD.event_depth = event_depth
             try:
-                callback(*args, **kwargs)
+                with _extension_deps_scope(record):
+                    callback(*args, **kwargs)
                 state["errors"] = 0
             # SystemExit(sys.exit())는 Exception이 아니라 격리를 뚫는다 — 명시적으로
             # 잡아 같은 음소거 경로로 보낸다. KeyboardInterrupt는 의도적으로 통과.
@@ -1257,23 +1274,20 @@ class ExtensionManager:
             # 전에 sys.path에 얹는다.
             if record.requirements and not record.deps_ready:
                 raise ExtensionDependencyError("의존성이 설치되지 않았습니다.")
-            if record.directory is not None and record.requirements:
-                from core.extension_deps_service import inject_syspath
-
-                inject_syspath(record.directory)
             module_name = f"naia_ext_{re.sub(r'[^0-9A-Za-z_]', '_', record.ext_id)}"
             spec = importlib.util.spec_from_file_location(module_name, entry_path)
             if spec is None or spec.loader is None:
                 raise ImportError(f"cannot import entry: {entry_path}")
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
-            spec.loader.exec_module(module)
+            with _extension_deps_scope(record):
+                spec.loader.exec_module(module)
 
-            register = getattr(module, "register", None)
-            if not callable(register):
-                raise AttributeError("entry must export register(ctx)")
-            ctx = ExtensionContext(record, self.app_context)
-            register(ctx)
+                register = getattr(module, "register", None)
+                if not callable(register):
+                    raise AttributeError("entry must export register(ctx)")
+                ctx = ExtensionContext(record, self.app_context)
+                register(ctx)
             record.status = "loaded"
             record.error = ""
             print(
@@ -1380,7 +1394,10 @@ class ExtensionManager:
         if pending_action is not None:
             ext_id, field_key, handler = pending_action
             try:
-                handler(field_key)
+                record = self._find(ext_id)
+                scope = _extension_deps_scope(record) if record is not None else nullcontext()
+                with scope:
+                    handler(field_key)
             except (SystemExit, Exception) as exc:
                 _ext_print(ext_id, f"on_action({field_key}) 실패: {_safe_error_text(exc)}")
 
@@ -1426,7 +1443,7 @@ class ExtensionManager:
         """approve/retry 백그라운드 처리 전, 패널에 '로딩 중'을 먼저 보여주기 위한 표시."""
         with self._lock:
             for record in self._load_targets(key):
-                if record.status in {"discovered", "error"}:
+                if record.status in {"discovered", "error", "dependency_error"}:
                     record.status = "loading"
 
     def load_by_key(self, key: str) -> None:
@@ -1440,9 +1457,17 @@ class ExtensionManager:
                         continue
                     record.approved = True
                     self._write_config_locked()
-                if record.approved and not record.blocked and record.status in {"discovered", "loading", "error"}:
+                if record.approved and not record.blocked and record.status in {"discovered", "loading", "error", "dependency_error"}:
                     # ②단계: 선언 의존성이 미설치면 import 전에 격리 설치(host 재사용·
                     # 무거운 ML 차단·wheel-only). 실패하면 로드하지 않고 사유를 남긴다.
+                    # 크래시로 .deps가 사라지고 백업만 남았으면 먼저 복원(재설치 회피).
+                    if record.requirements and record.directory is not None:
+                        try:
+                            from core.extension_deps_service import recover_orphaned_deps
+
+                            recover_orphaned_deps(record.directory)
+                        except Exception:
+                            pass
                     if record.requirements and not record.deps_ready and not self._install_deps_locked(record):
                         continue
                     self._load_record_locked(record)
@@ -1486,7 +1511,7 @@ class ExtensionManager:
             record = self._find(rest)
             return [record] if record is not None else []
         if action == "retry_errors":
-            return [record for record in self.records if record.status == "error"]
+            return [record for record in self.records if record.status in {"error", "dependency_error", "loading"}]
         return []
 
 

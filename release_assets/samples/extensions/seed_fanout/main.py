@@ -6,9 +6,11 @@ Generate 버튼 1회로 여러 장을 큐에 넣는 확장. 두 가지 모드(NA
 - **Seed Fan-out**: 동일 프롬프트로 시드만 바꿔 총 N장(원본 포함) 생성.
   시드 방식 = random(매장 새 시드) / +1 / -1(원본 시드 기준 증감) /
   fixed(전부 원본과 같은 시드 — 입력창 와일드카드 변주 비교용).
+  WEBUI/COMFYUI에서 원본 시드가 백엔드 랜덤(-1)이면 +1/-1/fixed는 원본을
+  취소하고 확정 seed 묶음으로 대체한다(취소 실패 시 중단·토스트).
 - **X/Y Plot**: 파라미터 축 1~2개를 조합한 그리드 생성(전부 동일 시드).
   **원본 요청은 자동 취소되어 정확히 그리드 장수만 생성된다.**
-  축 종류를 고르면 그에 맞는 입력칸이 나타난다 — CFG Scale·PG.Rescale(값
+  축 종류를 고르면 그에 맞는 입력칸이 나타난다 — CFG Scale·PG.Rescale(NAI 전용, 값
   범위 "시작,끝,간격") / Sampler("auto"=현재 모드 표준 목록 자동) /
   프롬프트 강조(가중 사다리 — **모드별 문법 자동**: NAI(NAID4/4.5)는
   ``w::키워드::``, WEBUI/COMFYUI는 ``(키워드:w)``) / 프롬프트 스왑(키워드 치환).
@@ -42,6 +44,7 @@ SEED_SPACE = 10_000_000_000  # 코어 정규화의 randint(0, 9_999_999_999)와 
 MAX_TOTAL = 16               # Seed Fan-out 모드 총 장수 상한(원본 포함)
 MAX_GRID = 32                # X/Y Plot 그리드 상한(폭주 방지)
 MAX_PENDING_GRIDS = 3        # 동시 추적 그리드 배치 상한(실패 셀 잔존 대비 GC)
+GRID_BATCH_TIMEOUT = 30 * 60 # 실패/취소 셀이 결과 이벤트를 못 보내도 배치를 정리
 
 FEATURE_FANOUT = "Seed Fan-out"
 FEATURE_XY = "X/Y Plot"
@@ -97,6 +100,7 @@ MODE_SAMPLERS = {
 
 def _sampler_options(ctx, api_mode):
     """현재 모드의 실사용 샘플러 목록 — 호스트 라이브 캐시 우선, 폴백은 표준표."""
+    api_mode = str(api_mode or "NAI").upper()
     getter = getattr(ctx, "get_sampler_options", None)
     if callable(getter):
         live = [str(item) for item in (getter() or []) if str(item or "").strip()]
@@ -115,15 +119,61 @@ def _float_ladder(start, step, end):
         raise ValueError("종료 값이 시작 값보다 작습니다")
     values = []
     current = start
-    while current <= end + 1e-9 and len(values) <= MAX_GRID:
+    while current <= end + 1e-9 and len(values) < MAX_GRID:
         values.append(round(current, 2))
         current += step
     return values
 
 
+def _sanitize_settings_for_mode(ctx, settings, api_mode, notify=None, persist=False):
+    """NAI-only settings that survived a mode switch are converted to safe no-ops."""
+    mode = str(api_mode or "").upper()
+    clean = dict(settings or {})
+    if mode in ("", "NAI"):
+        return clean
+    changed = []
+    for prefix, label in (("x", "X"), ("y", "Y")):
+        key = f"{prefix}_axis"
+        if clean.get(key) == AXIS_RESCALE:
+            clean[key] = AXIS_NONE
+            changed.append(label)
+    if changed:
+        message = f"{'/'.join(changed)}축 PG.Rescale은 NAI 전용이라 {mode}에서는 None으로 전환했습니다"
+        if persist:
+            saver = getattr(ctx, "save_settings", None)
+            if callable(saver):
+                saver(clean)
+        if callable(notify):
+            notify(message, "warning")
+        else:
+            logger = getattr(ctx, "log", None)
+            if callable(logger):
+                logger(message)
+    return clean
+
+
+def _cap_grid_axes(x_values, y_values):
+    """Return rectangular axis prefixes whose cell count does not exceed MAX_GRID."""
+    x_values = list(x_values or [None])
+    y_values = list(y_values or [None])
+    original = len(x_values) * len(y_values)
+    if original <= MAX_GRID:
+        return x_values, y_values, original
+    best_cells, best_cols, best_rows = 0, 1, 1
+    for rows in range(1, len(y_values) + 1):
+        cols = min(len(x_values), MAX_GRID // rows)
+        if cols <= 0:
+            break
+        cells = cols * rows
+        if cells > best_cells or (cells == best_cells and cols > best_cols):
+            best_cells, best_cols, best_rows = cells, cols, rows
+    return x_values[:best_cols], y_values[:best_rows], original
+
+
 def _wrap_emphasis(keyword, weight, api_mode):
     """가중 문법은 모드별 자동: NAI(NAID4/4.5)=``w::키워드::``,
     WEBUI/COMFYUI=로컬 ``(키워드:w)``."""
+    api_mode = str(api_mode or "").upper()
     if api_mode == "NAI":
         return f"{weight:g}::{keyword}::"
     return f"({keyword}:{weight:g})"
@@ -179,12 +229,20 @@ class SeedFanout:
             return  # 재귀 가드: 확장 파생 요청에는 절대 다시 반응하지 않는다.
         if str(info.get("source") or "") != "generate":
             return  # 메인 Generate 버튼 경로에만 반응(그 외 경로는 적용 불가).
+        api_mode = str(info.get("api_mode") or "").upper()
         settings = self.ctx.load_settings(DEFAULT_SETTINGS)
+        settings = _sanitize_settings_for_mode(
+            self.ctx,
+            settings,
+            api_mode,
+            notify=self._toast,
+            persist=True,
+        )
         params = info.get("params") if isinstance(info.get("params"), dict) else {}
 
         # 캐릭터 프롬프트 고정(NAI): 지금 1회 전개한 스냅샷을 파생 전 장에 동봉.
         char_overrides = {}
-        if settings.get("char_fix") and str(info.get("api_mode") or "") == "NAI":
+        if settings.get("char_fix") and api_mode == "NAI":
             snapshot = self.ctx.resolve_nai_characters()
             if snapshot:
                 char_overrides = snapshot
@@ -207,17 +265,29 @@ class SeedFanout:
         if variants <= 0:
             return
         mode = str(settings.get("mode") or "+1")
+        api_mode = str(info.get("api_mode") or "").upper()
+        seed_known = self._known_seed(params.get("seed")) is not None
         base = self._base_seed(params.get("seed"))
+        needs_seeded_original = (
+            api_mode in {"WEBUI", "COMFYUI"}
+            and mode in {"+1", "-1", "fixed"}
+            and not seed_known
+        )
 
-        # 캐릭터 고정 시 원본을 취소하고 총 N장 전부를 스냅샷 공유 묶음으로 대체
-        # — 원본만 캐릭터를 따로 추첨해 묶음과 어긋나는 문제 방지. 확정 제거(ok)
-        # 또는 건너뛰기 예약(skip_scheduled — 러너가 실행 전에 톰스톤 소비)이면
-        # 대체로 간주한다(Codex R2-#2: 예약인데 원본까지 나오는 건 이미 execute가
-        # 시작된 마이크로초 윈도뿐). 둘 다 아니면 원본 유지 + 변형 N-1장 폴백.
+        # 캐릭터 고정 또는 WEBUI/COMFYUI의 backend-random(-1) 상대 시드 모드에서는
+        # 원본을 취소하고 총 N장 전부를 확정된 파생 요청으로 대체한다. 원본이 -1로
+        # 그대로 실행되면 +1/-1/fixed가 "원본 시드 기준"이라는 계약을 지킬 수 없다.
         replace_original = False
-        if char_overrides:
+        if char_overrides or needs_seeded_original:
             cancel = self.ctx.cancel_generation(info.get("request_id"))
             replace_original = bool(cancel.get("ok") or cancel.get("skip_scheduled"))
+            if needs_seeded_original and not replace_original:
+                self._toast(
+                    f"{api_mode} {mode} 시드 방식은 원본 -1 시드를 알 수 없어 "
+                    "원본 대체가 필요합니다. 원본 취소 실패로 fan-out을 중단합니다.",
+                    "error",
+                )
+                return
         seeds = self._variant_seeds(base, variants, mode)
         if replace_original:
             seeds = [base] + seeds
@@ -225,20 +295,31 @@ class SeedFanout:
         for seed in seeds:
             result = self._enqueue_clone(info, params, {"seed": seed, **char_overrides})
             queued += 1 if result.get("ok") else 0
-        origin_note = "원본 대체(캐릭터 고정)" if replace_original else "원본 1 + 변형"
+        if replace_original and char_overrides:
+            origin_note = "원본 대체(캐릭터 고정)"
+        elif replace_original:
+            origin_note = "원본 대체(시드 확정)"
+        else:
+            origin_note = "원본 1 + 변형"
         self.ctx.log(f"Seed Fan-out: 총 {total}장({origin_note} {queued}/{len(seeds)}, "
                      f"mode={mode}, base={base})")
 
     @staticmethod
-    def _base_seed(raw_seed):
+    def _known_seed(raw_seed):
         try:
-            base = int(raw_seed)
+            seed = int(raw_seed)
         except (TypeError, ValueError):
-            base = -1
-        if base < 0:
-            # WEBUI/COMFYUI는 시드가 -1(백엔드 랜덤)으로 남을 수 있다 — base를 추첨.
-            base = random.randint(0, SEED_SPACE - 1)
-        return base
+            return None
+        return seed if seed >= 0 else None
+
+    @classmethod
+    def _base_seed(cls, raw_seed):
+        seed = cls._known_seed(raw_seed)
+        if seed is not None:
+            return seed
+        # WEBUI/COMFYUI는 시드가 -1(백엔드 랜덤)으로 남을 수 있다 — 대체 원본용
+        # 확정 base를 추첨하고, 필요한 모드에서는 원본을 취소한 뒤 이 seed로 재큐잉.
+        return random.randint(0, SEED_SPACE - 1)
 
     @staticmethod
     def _variant_seeds(base, count, mode):
@@ -251,20 +332,23 @@ class SeedFanout:
 
     # ── 모드 2: X/Y Plot (인스턴트 이벤트 포팅) ──────────────────
     def _run_xy_plot(self, info, params, settings, char_overrides):
-        api_mode = str(info.get("api_mode") or "")
+        api_mode = str(info.get("api_mode") or "").upper()
         x_meta = self._axis_values("X", settings.get("x_axis"), settings, "x", api_mode)
         y_meta = self._axis_values("Y", settings.get("y_axis"), settings, "y", api_mode)
         if x_meta is None or y_meta is None:
             return  # 축 파싱 실패는 _axis_values가 로그로 안내
         x_values, x_title = x_meta
         y_values, y_title = y_meta
+        x_values, y_values, original_combo_count = _cap_grid_axes(x_values, y_values)
         combos = [(x, y) for y in y_values for x in x_values]
         if len(combos) <= 1 and combos and combos[0] == (None, None):
             self.ctx.log("X/Y Plot: 사용할 축이 없습니다 (X/Y 모두 None)")
             return
-        if len(combos) > MAX_GRID:
-            self.ctx.log(f"X/Y Plot: 조합 {len(combos)}개 → 상한 {MAX_GRID}개로 절단")
-            combos = combos[:MAX_GRID]
+        if original_combo_count > len(combos):
+            self.ctx.log(
+                f"X/Y Plot: 조합 {original_combo_count}개 → "
+                f"{len(combos)}개({len(x_values)}x{len(y_values)}) 직사각형으로 절단"
+            )
 
         # 프롬프트 치환 축의 시작/원본 프롬프트가 실제 프롬프트에 **태그 경계로**
         # 존재하는지 선검증 — 없으면 토스트로 안내하고 전체 중단(원본만 생성).
@@ -329,6 +413,13 @@ class SeedFanout:
             self.ctx.log("X/Y Plot: 유효한 조합이 없어 원본만 생성합니다")
             return
         cancel = self.ctx.cancel_generation(info.get("request_id"))
+        if not (cancel.get("ok") or cancel.get("skip_scheduled")):
+            self._toast(
+                "X/Y Plot은 그리드 전용 생성이라 원본 취소가 필요합니다. "
+                "원본 취소 실패로 그리드 큐 추가를 중단합니다.",
+                "error",
+            )
+            return
         queued = 0
         id_map = {}
         for overrides, prompt, col, row in cells:
@@ -337,34 +428,67 @@ class SeedFanout:
                 queued += 1
                 if result.get("request_id"):
                     id_map[result["request_id"]] = (col, row)
+        failed_tracking = len(cells) - len(id_map)
         if cancel.get("ok"):
             origin_note = "원본 취소, 그리드만"
         elif cancel.get("skip_scheduled"):
             origin_note = "원본 건너뛰기 예약, 그리드만"
-        else:
-            origin_note = "원본 유지(취소 실패)"
         self.ctx.log(f"X/Y Plot: {queued}/{len(cells)}장 큐 추가 ({origin_note}, seed={base_seed} 고정)")
 
         # n×m 합성 이미지: 전 셀 완료 시 grid/ 폴더에 저장(설정으로 끌 수 있음).
-        if settings.get("make_grid") and id_map:
-            batch = {
-                "ids": id_map,
-                "cols": cols,
-                "rows": len(y_values),
-                # 라벨=축 값(가중치/샘플러명 등), 타이틀=축 종류(+키워드) —
-                # WEBUI/NAIA 1.5 그리드처럼 축 타이틀 밴드를 따로 확보한다.
-                "x_labels": [value[2] if value else "" for value in x_values],
-                "y_labels": [value[2] if value else "" for value in y_values],
-                "x_title": x_title,
-                "y_title": y_title,
-                "images": {},
-                "expected": set(id_map.keys()),
-            }
-            with self._grid_lock:
-                self._grid_batches.append(batch)
-                while len(self._grid_batches) > MAX_PENDING_GRIDS:
-                    dropped = self._grid_batches.pop(0)
-                    self.ctx.log(f"그리드 추적 GC: 미완료 배치 폐기({len(dropped['expected'])}셀 미수신)")
+        if settings.get("make_grid"):
+            if failed_tracking:
+                self.ctx.log(f"그리드 합성 생략: 추적 불가/큐 추가 실패 셀 {failed_tracking}개")
+            elif id_map:
+                batch = {
+                    "ids": id_map,
+                    "cols": cols,
+                    "rows": len(y_values),
+                    # 라벨=축 값(가중치/샘플러명 등), 타이틀=축 종류(+키워드) —
+                    # WEBUI/NAIA 1.5 그리드처럼 축 타이틀 밴드를 따로 확보한다.
+                    "x_labels": [value[2] if value else "" for value in x_values],
+                    "y_labels": [value[2] if value else "" for value in y_values],
+                    "x_title": x_title,
+                    "y_title": y_title,
+                    "images": {},
+                    "failed": 0,
+                    "expected": set(id_map.keys()),
+                }
+                self._track_grid_batch(batch)
+
+    def _track_grid_batch(self, batch):
+        timer = threading.Timer(GRID_BATCH_TIMEOUT, self._expire_grid_batch, args=(batch,))
+        timer.daemon = True
+        batch["timer"] = timer
+        dropped_batches = []
+        with self._grid_lock:
+            self._grid_batches.append(batch)
+            while len(self._grid_batches) > MAX_PENDING_GRIDS:
+                dropped_batches.append(self._grid_batches.pop(0))
+        for dropped in dropped_batches:
+            self._cancel_grid_timer(dropped)
+            self.ctx.log(f"그리드 추적 GC: 미완료 배치 폐기({len(dropped['expected'])}셀 미수신)")
+        timer.start()
+
+    @staticmethod
+    def _cancel_grid_timer(batch):
+        timer = batch.get("timer") if isinstance(batch, dict) else None
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:
+                pass
+
+    def _expire_grid_batch(self, batch):
+        with self._grid_lock:
+            if batch not in self._grid_batches:
+                return
+            self._grid_batches.remove(batch)
+            missing = len(batch.get("expected") or [])
+            received = len(batch.get("images") or {})
+        self.ctx.log(
+            f"그리드 배치 만료: {missing}셀 미완료, {received}셀 수신 — 합성 취소"
+        )
 
     # ── 그리드 합성: 결과 이벤트 수집 → 전 셀 완료 시 PNG 저장 ──
     def on_generation_result(self, info):
@@ -379,14 +503,21 @@ class SeedFanout:
             return  # 우리 그리드 셀이 아님
         fetched = self.ctx.get_result_image(rid)
         with self._grid_lock:
+            if batch not in self._grid_batches:
+                return
             batch["expected"].discard(rid)
             if fetched.get("ok"):
                 batch["images"][batch["ids"][rid]] = fetched["image"]
             else:
+                batch["failed"] = int(batch.get("failed") or 0) + 1
                 self.ctx.log(f"그리드 셀 회수 실패({rid[:8]}): {fetched.get('message')}")
             done = not batch["expected"]
             if done:
                 self._grid_batches.remove(batch)
+                self._cancel_grid_timer(batch)
+        if done and batch.get("failed"):
+            self.ctx.log(f"그리드 합성 생략: 결과 이미지 수신 실패 {batch['failed']}셀")
+            return
         if done and batch["images"]:
             try:
                 path = self._compose_and_save(batch)
@@ -455,10 +586,19 @@ class SeedFanout:
         if grid_dir is None:
             self.ctx.log("그리드 저장 실패: 저장 디렉터리를 알 수 없습니다")
             return None
-        filename = f"grid_{time.strftime('%Y%m%d_%H%M%S')}_{cols}x{rows}.png"
-        path = grid_dir / filename
+        path = self._unique_grid_path(grid_dir, cols, rows)
         canvas.save(path, format="PNG")
         return str(path)
+
+    @staticmethod
+    def _unique_grid_path(grid_dir, cols, rows):
+        stem = f"grid_{time.strftime('%Y%m%d_%H%M%S')}_{time.time_ns() % 1_000_000_000:09d}_{cols}x{rows}"
+        path = grid_dir / f"{stem}.png"
+        index = 1
+        while path.exists():
+            path = grid_dir / f"{stem}_{index}.png"
+            index += 1
+        return path
 
     def _grid_dir(self):
         base = self.ctx.get_save_directory()
@@ -542,7 +682,11 @@ class SeedFanout:
                 if not base or not steps:
                     self._toast(f"{axis_name}축 프롬프트 스왑: 시작 프롬프트와 Step을 모두 채워주세요")
                     return None
-                return ([("prompt", (base, step), step) for step in steps],
+                # 시작 프롬프트(원본·미치환)를 첫 셀로 포함 → 시작→step1→step2처럼
+                # 기준선 1장이 함께 나온다(다른 축의 시작값과 동일한 감각). (base→base)는
+                # 항등 치환이라 프롬프트가 그대로 유지된다.
+                return ([("prompt", (base, base), "원본")]
+                        + [("prompt", (base, step), step) for step in steps],
                         f"프롬프트 스왑 · {base[:16]}")
         except Exception as exc:
             self._toast(f"X/Y Plot {axis_name}축({axis}) 설정 해석 실패 — {exc}")
@@ -636,7 +780,13 @@ def _register_panel(ctx, ext):
         return
     mode = ""
     if hasattr(ctx, "get_api_mode"):
-        mode = str(ctx.get_api_mode() or "")
+        mode = str(ctx.get_api_mode() or "").upper()
+    _sanitize_settings_for_mode(
+        ctx,
+        ctx.load_settings(DEFAULT_SETTINGS) if hasattr(ctx, "load_settings") else DEFAULT_SETTINGS,
+        mode or "NAI",
+        persist=True,
+    )
     # 실사용 샘플러(라이브 캐시 우선 — WEBUI/COMFYUI 연결 시 실제 백엔드 목록).
     samplers = _sampler_options(ctx, mode or "NAI")
     # PG.Rescale은 NAI 전용 — 다른 모드에선 축 선택지에서 제외(모드 미상=NAI 간주).
@@ -676,7 +826,7 @@ def _register_panel(ctx, ext):
              "column": "right", "section": "그리드 이미지", "order": 51,
              "visible_when": when_xy},
         ],
-        title="Seed Fan-out",
+        title="여러장 생성-X/Y Plot",
         on_action=ext.on_action,
     )
 
@@ -696,4 +846,4 @@ def register(ctx):
         ctx.subscribe("api_mode_changed", refresh)
         ctx.subscribe("api_options_refreshed", refresh)
     _register_panel(ctx, ext)
-    ctx.log("ready — Seed Fan-out / X/Y Plot (퀵 버튼 팝업에서 조정, 관리는 Settings ▸ Extension)")
+    ctx.log("ready — 여러장 생성-X/Y Plot (퀵 버튼 팝업에서 조정, 관리는 Settings ▸ Extension)")

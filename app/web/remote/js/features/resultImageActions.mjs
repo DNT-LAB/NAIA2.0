@@ -172,6 +172,9 @@ export function createResultImageActions({
       } else if (action === 'vibe' && currentMode() === 'NAI') {
         openModule('vibe_transfer');
         showToast(data.message || 'Vibe Transfer image added', 'success');
+      } else if (action === 'character_reference' && currentMode() === 'NAI') {
+        openModule('character_reference');
+        showToast(data.message || 'Character Reference image added', 'success');
       }
     } catch (error) {
       console.error('Image action request failed', error);

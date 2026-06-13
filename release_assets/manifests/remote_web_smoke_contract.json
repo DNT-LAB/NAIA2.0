@@ -340,6 +340,13 @@
       "expected_json_keys": ["error"]
     },
     {
+      "feature": "image_action_character_reference_empty",
+      "method": "POST",
+      "path": "/api/image-action/character_reference?label=Smoke",
+      "expected_status": [400],
+      "expected_json_keys": ["error"]
+    },
+    {
       "feature": "character_reference_storage_thumb_asset",
       "method": "GET",
       "path": "/api/module-storage/character-reference/thumb?file_hash=smoke_char_ref_thumb",

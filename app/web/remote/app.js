@@ -499,7 +499,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260602-insert-history1')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260613-set-cr-vt1')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -620,7 +620,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260606-mobile-ui2')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260613-set-cr-vt1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -650,6 +650,8 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onGrokI2I: context => { if (grokI2iModal) grokI2iModal.open(context); },
       onGrokI2V: context => { if (grokI2vModal) grokI2vModal.open(context); },
       onDirector: context => openNaiDirector(context),
+      onSetCharacterReference: context => callResultImageAction('requestContextImageAction', context, 'character_reference'),
+      onSetVibeTransfer: context => callResultImageAction('requestContextImageAction', context, 'vibe'),
       onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       canUseDesktopImg2Img,

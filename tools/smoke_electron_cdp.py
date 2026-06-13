@@ -769,6 +769,7 @@ def _verify_feature_workflows_surface(client: CdpClient, timeout: float) -> dict
     {{key: "result_save_empty", feature: "save_output", method: "POST", path: "/api/result/action/save", expectedStatus: [400]}},
     {{key: "image_action_img2img_empty", feature: "img2img", method: "POST", path: "/api/image-action/img2img?label=CDP%20Smoke", body: "", contentType: "application/octet-stream", expectedStatus: [400]}},
     {{key: "image_action_vibe_empty", feature: "vibe_transfer_storage", method: "POST", path: "/api/image-action/vibe?label=CDP%20Smoke", body: "", contentType: "application/octet-stream", expectedStatus: [400]}},
+    {{key: "image_action_character_reference_empty", feature: "character_reference", method: "POST", path: "/api/image-action/character_reference?label=CDP%20Smoke", body: "", contentType: "application/octet-stream", expectedStatus: [400]}},
   ];
   for (const check of routeChecks) {{
     await runRouteCheck(check);
@@ -897,6 +898,7 @@ def _verify_feature_workflows_surface(client: CdpClient, timeout: float) -> dict
     {{name: "dom.character_tab", ok: domOk("character_tab")}},
     {{name: "dom.character_reference_button", ok: domOk("character_reference_button")}},
     {{name: "route.character_viewer_state", ok: routeOk("character_viewer_state")}},
+    {{name: "route.image_action_character_reference_empty", ok: routeOk("image_action_character_reference_empty")}},
   ]);
   markFeature("automation", [
     {{name: "dom.automation_button", ok: domOk("automation_button")}},

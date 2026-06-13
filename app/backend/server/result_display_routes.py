@@ -1195,7 +1195,7 @@ def register_result_display_routes(
     @app.post("/api/image-action/{action}")
     async def api_image_action(action: str, req: Request):
         action = (action or "").strip().lower()
-        if action not in {"img2img", "inpaint", "vibe", "danbooru"}:
+        if action not in {"img2img", "inpaint", "vibe", "character_reference", "danbooru"}:
             return JSONResponse({"error": "Unsupported action"}, status_code=400)
         image_bytes = await req.body()
         if not image_bytes:
@@ -1263,6 +1263,28 @@ def register_result_display_routes(
                     "action": action,
                     "state": module_state,
                     "message": "Vibe Transfer image added",
+                }
+            if action == "character_reference":
+                if session_context.get_api_mode() != "NAI":
+                    return JSONResponse({"error": "Character Reference is available in NAI mode only"}, status_code=403)
+                # Character Reference only applies to NAID4.5F/C models. Mirror the panel,
+                # which hides Upload entirely off-NAID4.5, by refusing here instead of
+                # silently appending a frame the panel can't render.
+                if not session_context._is_naid45_model():
+                    return JSONResponse({"error": "Character Reference requires a NAID4.5F/C model"}, status_code=403)
+                module_state = await run_in_thread(
+                    session_context.set_module_param,
+                    "character_reference",
+                    "upload_image",
+                    base64.b64encode(image_bytes).decode("ascii"),
+                )
+                if isinstance(module_state, dict):
+                    await broadcast_json(clients, module_state)
+                return {
+                    "ok": True,
+                    "action": action,
+                    "state": module_state,
+                    "message": "Character Reference image added",
                 }
         except Exception as exc:
             return JSONResponse({"error": f"Image action failed: {exc}"}, status_code=500)

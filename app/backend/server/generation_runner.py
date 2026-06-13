@@ -427,6 +427,15 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
             for _evicted in stored.evicted_payloads:
                 await broadcast_json(clients, _evicted)
+            # NAI 생성은 Anlas를 소비한다 — 완료 직후 잔량을 재조회해 pill에 즉시 반영한다
+            # (future01 패리티; 5분 폴링/재연결을 기다리지 않음). NAI 모드 한정 — 다른 백엔드는
+            # Anlas와 무관해 불필요한 브로드캐스트만 낸다. build_anlas_payload가 NAI+토큰일 때만
+            # 실측 조회하고, 프런트는 값이 감소했을 때만 pill을 점멸시킨다(소비 시각 피드백).
+            if str(context.get_api_mode() or "").upper() == "NAI":
+                try:
+                    await broadcast_anlas(context, clients)
+                except Exception:
+                    pass
             # 직전 생성에 사용된 와일드카드(순차/종속 카운터 + Used)를 라이브 반영.
             # auto-continue 가 다음 프롬프트로 context 를 덮어쓰기 전에 push 한다.
             await _broadcast_wildcard_state(context, clients)

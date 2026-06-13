@@ -16123,6 +16123,13 @@ select.setup-input { cursor: pointer; }
   user-select: none;
 }
 .anlas-pill.hidden { display: none; }
+/* Anlas 소비(잔량 감소) 시 짧게 점멸 — 상단/뷰어 pill 공통. */
+@keyframes anlas-flash-kf {
+  0%   { box-shadow: 0 0 0 0 rgba(255,196,72,0); }
+  22%  { box-shadow: 0 0 11px 3px rgba(255,196,72,0.78); background: rgba(255,196,72,0.22); transform: scale(1.07); }
+  100% { box-shadow: 0 0 0 0 rgba(255,196,72,0); transform: scale(1); }
+}
+.anlas-pill.anlas-flash { animation: anlas-flash-kf 0.7s ease-out; }
 .shell-toolbar .anlas-pill {
   position: static;
   z-index: auto;

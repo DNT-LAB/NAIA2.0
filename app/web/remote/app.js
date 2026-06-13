@@ -5653,16 +5653,30 @@ function setLauncherConn(on) {
 // NOTE: Opus 등급도 Anlas 를 소모하므로 무제한/∞ 표시 안 함. 단순 숫자만.
 const anlasPill = $('anlasPill');
 const anlasValue = $('anlasValue');
+let lastAnlasValue = null;       // 직전 표시 잔량 — 감소 감지(소비 점멸)용.
+let anlasFlashTimer = null;
+function flashAnlasPill() {
+  if (!anlasPill) return;
+  anlasPill.classList.remove('anlas-flash');
+  void anlasPill.offsetWidth;    // reflow로 애니메이션 재시작(연속 소비 시 매번 점멸).
+  anlasPill.classList.add('anlas-flash');
+  if (anlasFlashTimer) clearTimeout(anlasFlashTimer);
+  anlasFlashTimer = setTimeout(() => { if (anlasPill) anlasPill.classList.remove('anlas-flash'); }, 750);
+}
 function onAnlasUpdate(m) {
   if (!anlasPill || !anlasValue) return;
   if (!m.available) {
     anlasPill.classList.add('hidden');
+    lastAnlasValue = null;       // 숨김 시 기준 리셋 — 재표시 첫 값에 오점멸 방지.
     return;
   }
   anlasPill.classList.remove('hidden');
   const n = Number(m.anlas || 0);
   anlasPill.classList.toggle('low', n > 0 && n < 100);
   anlasValue.textContent = n.toLocaleString();
+  // 잔량이 줄었을 때만(=소비) pill을 짧게 점멸. 초기 로드(기준 없음)·충전(증가)은 제외.
+  if (lastAnlasValue !== null && n < lastAnlasValue) flashAnlasPill();
+  lastAnlasValue = n;
 }
 
 function updateApiStatus(m) {

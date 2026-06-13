@@ -37,6 +37,7 @@ NAIA_EXT_API_VERSION = 1
 MAX_DOWNLOAD_BYTES = 60 * 1024 * 1024      # 60MB
 MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024  # 200MB(추출 총량)
 MAX_MEMBERS = 5000
+EXT_ID_RE = re.compile(r"[0-9A-Za-z][0-9A-Za-z_.-]{0,63}")
 
 try:
     import certifi
@@ -57,6 +58,20 @@ def _safe_dir_name(ext_id: str) -> str:
     return cleaned[:64]
 
 
+def _validate_ext_id(ext_id: str) -> str:
+    """설치 id는 디렉터리명과 1:1이어야 한다.
+
+    자동 정규화로 다른 manifest id가 같은 디렉터리에 충돌하면 승인/차단 상태가
+    엉킬 수 있으므로, GitHub 설치 경로에서는 안전한 id만 받는다.
+    """
+    text = str(ext_id or "").strip()
+    if not EXT_ID_RE.fullmatch(text) or _safe_dir_name(text) != text:
+        raise ExtensionInstallError(
+            "extension.json의 id는 영문/숫자로 시작하고 영문/숫자/._-만 사용할 수 있습니다."
+        )
+    return text
+
+
 def parse_github_url(url: str) -> tuple[str, str, str | None]:
     """GitHub URL/짧은 형식 → (owner, repo, ref|None). github.com만 허용.
 
@@ -68,7 +83,7 @@ def parse_github_url(url: str) -> tuple[str, str, str | None]:
     ref: str | None = None
     if "://" in raw or raw.lower().startswith("github.com"):
         parsed = urllib.parse.urlparse(raw if "://" in raw else f"https://{raw}")
-        if parsed.scheme not in ("", "https", "http"):
+        if parsed.scheme != "https":
             raise ExtensionInstallError("HTTPS GitHub 주소만 지원합니다.")
         host = (parsed.hostname or "").lower()
         if host not in ("github.com", "www.github.com"):
@@ -97,6 +112,16 @@ def parse_github_url(url: str) -> tuple[str, str, str | None]:
 
 def _codeload_url(owner: str, repo: str, ref: str) -> str:
     return f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{ref}"
+
+
+def _codeload_urls(owner: str, repo: str, ref: str, *, explicit: bool) -> list[tuple[str, str]]:
+    if not explicit:
+        return [(f"heads/{ref}", _codeload_url(owner, repo, ref))]
+    return [
+        (f"heads/{ref}", _codeload_url(owner, repo, ref)),
+        (f"tags/{ref}", f"https://codeload.github.com/{owner}/{repo}/zip/refs/tags/{ref}"),
+        (ref, f"https://codeload.github.com/{owner}/{repo}/zip/{ref}"),
+    ]
 
 
 def _detect_default_branch(owner: str, repo: str) -> str:
@@ -167,7 +192,7 @@ class ExtensionInstallService:
             owner, repo, ref = parse_github_url(url)
             refs = [ref] if ref else ["main", "master"]
             self._set(phase="download", percent=5, message=f"{owner}/{repo} 내려받는 중...")
-            zip_bytes = self._download_first_available(owner, repo, refs)
+            zip_bytes = self._download_first_available(owner, repo, refs, explicit_ref=bool(ref))
             self._guard_cancel()
             self._set(phase="extract", percent=70, message="압축 해제 중...")
             ext_dir, ext_id, ext_name = self._extract_extension(zip_bytes, staging, repo)
@@ -189,7 +214,14 @@ class ExtensionInstallService:
             shutil.rmtree(staging, ignore_errors=True)
 
     # ── 다운로드 ─────────────────────────────────────────────────
-    def _download_first_available(self, owner: str, repo: str, refs: list[str]) -> bytes:
+    def _download_first_available(
+        self,
+        owner: str,
+        repo: str,
+        refs: list[str],
+        *,
+        explicit_ref: bool = False,
+    ) -> bytes:
         last_error: Exception | None = None
         tried: list[str] = []
         # ref 미지정이면 default branch 조회를 우선 시도하도록 보강.
@@ -199,16 +231,17 @@ class ExtensionInstallService:
                 refs = [detected, *refs]
         for ref in refs:
             self._guard_cancel()
-            try:
-                return self._download(_codeload_url(owner, repo, ref))
-            except urllib.error.HTTPError as exc:
-                last_error = exc
-                tried.append(ref)
-                if exc.code in (404, 403):
-                    continue  # 브랜치 없음 → 다음 후보
-                raise ExtensionInstallError(f"다운로드 실패(HTTP {exc.code}): {exc.reason}")
-            except urllib.error.URLError as exc:
-                raise ExtensionInstallError(f"네트워크 오류: {exc.reason}")
+            for label, url in _codeload_urls(owner, repo, ref, explicit=explicit_ref):
+                try:
+                    return self._download(url)
+                except urllib.error.HTTPError as exc:
+                    last_error = exc
+                    tried.append(label)
+                    if exc.code in (404, 403):
+                        continue  # 브랜치/태그 없음 → 다음 후보
+                    raise ExtensionInstallError(f"다운로드 실패(HTTP {exc.code}): {exc.reason}")
+                except urllib.error.URLError as exc:
+                    raise ExtensionInstallError(f"네트워크 오류: {exc.reason}")
         raise ExtensionInstallError(
             f"브랜치를 찾을 수 없습니다(시도: {', '.join(tried) or '?'}). "
             "주소에 /tree/<브랜치>를 포함해 보세요."
@@ -302,9 +335,7 @@ class ExtensionInstallService:
             raise ExtensionInstallError(f"extension.json을 읽을 수 없습니다: {exc}")
         if not isinstance(manifest, dict):
             raise ExtensionInstallError("extension.json 형식이 올바르지 않습니다.")
-        ext_id = str(manifest.get("id") or manifest_path.parent.name).strip()
-        if not ext_id:
-            raise ExtensionInstallError("extension.json에 id가 없습니다.")
+        ext_id = _validate_ext_id(str(manifest.get("id") or manifest_path.parent.name).strip())
         try:
             api = int(manifest.get("naia_ext_api", 0) or 0)
         except (TypeError, ValueError):
@@ -320,26 +351,20 @@ class ExtensionInstallService:
 
     # ── 배치(staging → extensions/<id>) ─────────────────────────
     def _place(self, source_dir: Path, ext_id: str) -> None:
-        safe = _safe_dir_name(ext_id)
+        safe = _validate_ext_id(ext_id)
         target = (self.extensions_root / safe).resolve()
         if not target.is_relative_to(self.extensions_root.resolve()):
             raise ExtensionInstallError("설치 경로가 올바르지 않습니다.")
         self.extensions_root.mkdir(parents=True, exist_ok=True)
-        backup: Path | None = None
         if target.exists():
-            # 업데이트: 기존을 백업해 두고 실패 시 복원(원자적 교체에 근접).
-            backup = target.with_name(f"{safe}.bak-{int(time.time() * 1000)}")
-            target.replace(backup)
+            raise ExtensionInstallError(
+                f"확장 '{safe}'이 이미 설치되어 있습니다. 업데이트는 재승인 흐름이 추가된 뒤 지원됩니다."
+            )
         try:
             shutil.copytree(source_dir, target)
         except Exception:
-            if backup is not None and not target.exists():
-                backup.replace(target)  # 복원
-                backup = None
+            shutil.rmtree(target, ignore_errors=True)
             raise
-        finally:
-            if backup is not None:
-                shutil.rmtree(backup, ignore_errors=True)
 
     # ── 내부 ─────────────────────────────────────────────────────
     def _guard_cancel(self) -> None:

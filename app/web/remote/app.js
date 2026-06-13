@@ -248,6 +248,7 @@ let conditionalPromptPanel = null;
 let eventStreamPanel = null;
 let wildcardPanel = null;
 let extensionsPanel = null;
+let lastExtensionsState = null;
 let wildcardManagerPanel = null;
 let instantWildcardPanel = null;
 let e621EventPanel = null;
@@ -1018,6 +1019,7 @@ const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=2026061
       setLauncherItems: setExtensionLauncherItems,
       openExternalUrl: openUrlInSystemBrowser,
     });
+    if (lastExtensionsState) extensionsPanel.onState(lastExtensionsState);
   })
   .catch(error => {
     console.error('Failed to initialize extensions UI module', error);
@@ -6257,6 +6259,7 @@ function renderModuleState(m) {
 // ---- Extensions UI (Settings ▸ Extension + 퀵 버튼/팝업) ----
 // 퀵 버튼 동기화 때문에 탭/팝업 표시 여부와 무관하게 항상 상태를 소비한다.
 function renderExtensions(m) {
+  lastExtensionsState = m;
   if (extensionsPanel) extensionsPanel.onState(m);
 }
 
@@ -7539,6 +7542,7 @@ Promise.all([
   conditionalPromptPanelReady,
   eventStreamPanelReady,
   wildcardPanelReady,
+  extensionsPanelReady,
   wildcardManagerPanelReady,
   instantWildcardPanelReady,
   e621EventPanelReady,

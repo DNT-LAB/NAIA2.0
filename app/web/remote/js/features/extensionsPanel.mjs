@@ -28,6 +28,7 @@ export function createExtensionsUi(deps) {
     ['on', '입력 기억 ON'],
     ['off', '입력 기억 OFF'],
   ];
+  const ERROR_STATUSES = new Set(['error', 'dependency_error']);
 
   let lastState = null;
   let confirmingId = null; // 미승인 확장 활성화 전 신뢰 경고 인라인 확인
@@ -364,15 +365,16 @@ export function createExtensionsUi(deps) {
 
   function rowHtml(ext) {
     const [chipLabel, chipClass] = chipFor(ext);
-    const showToggle = !['manifest_error', 'error'].includes(ext.status) && !ext.blocked;
+    const hasRecoverableError = ERROR_STATUSES.has(ext.status);
+    const showToggle = !['manifest_error', 'error', 'dependency_error'].includes(ext.status) && !ext.blocked;
     const toggleChecked = ext.status === 'loaded' ? ext.enabled : false;
-    const toggleDisabled = ext.status === 'loading';
+    const toggleDisabled = ext.status === 'loading' || ext.status === 'installing_deps';
     const toggle = showToggle
       ? `<label class="ext-switch" title="${ext.status === 'discovered' ? '활성화(승인 필요)' : '켜기/끄기 (즉시)'}">
            <input type="checkbox" class="ext-toggle" data-ext="${escHtml(ext.id)}" ${toggleChecked ? 'checked' : ''} ${toggleDisabled ? 'disabled' : ''}>
            <span class="ext-slider"></span>
          </label>`
-      : (ext.status === 'error'
+      : (hasRecoverableError
         ? `<button class="ext-retry-btn" data-ext="${escHtml(ext.id)}">재시도</button>` : '');
     // 홈페이지: Electron 셸에선 기본 a[target=_blank]가 내부 팝업(새 NAIA 창)을
     // 띄우므로, 클릭을 가로채 시스템 브라우저로 연다(웹에선 새 탭). data-ext-home에
@@ -382,7 +384,7 @@ export function createExtensionsUi(deps) {
     const desc = ext.description || home
       ? `<div class="ext-desc">${escHtml(ext.description || '')}${home}</div>` : '';
     const error = ext.error
-      ? `<div class="ext-error" title="${escHtml(ext.error)}">${escHtml(ext.error)}${ext.status === 'error' ? ' — 수정 후 재시도하거나 재시작' : ''}</div>` : '';
+      ? `<div class="ext-error" title="${escHtml(ext.error)}">${escHtml(ext.error)}${hasRecoverableError ? ' — 수정 후 재시도하거나 재시작' : ''}</div>` : '';
     const needsDeps = Array.isArray(ext.requirements) && ext.requirements.length && !ext.deps_ready;
     const depsNote = needsDeps
       ? `<div class="ext-confirm-deps">📦 의존성 ${ext.requirements.length}개를 격리 설치합니다(본체 미오염·미리 빌드된 wheel만):
@@ -538,7 +540,7 @@ export function createExtensionsUi(deps) {
     if (!root || !lastState) return;
     const saved = captureFocus(root);
     const items = Array.isArray(lastState.extensions) ? lastState.extensions : [];
-    const errors = items.filter(item => item.status === 'error').length;
+    const errors = items.filter(item => ERROR_STATUSES.has(item.status)).length;
     const head = `<div class="ext-head">
         <span class="ext-install-label">설치 폴더:</span>
         <code class="ext-install-path" title="${escHtml(lastState.install_dir || '')}">${escHtml(lastState.install_dir || '')}</code>

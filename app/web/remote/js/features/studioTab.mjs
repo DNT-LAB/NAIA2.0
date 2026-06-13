@@ -22,7 +22,7 @@ export function createStudioTabController({
 }) {
   const root = document.getElementById('studioRoot');
   const STORAGE_KEY = 'naia.studio.v1';
-  const DEFAULT_FRAME_COUNT = 9;
+  const DEFAULT_FRAME_COUNT = 1;
   const GENERATION_IDLE_GRACE_MS = 3500;
   const SEED_MODES = new Set(['random', 'reuse_previous', 'increment_previous']);
   // JSON Export/Import 계약 (Codex 설계 검토).
@@ -41,6 +41,9 @@ export function createStudioTabController({
   let importOpen = false;
   let importText = '';
   let idleFailTimer = null;
+  let dragSrcIndex = null;       // 진행 중인 카드 reorder 드래그의 출발 인덱스
+  let suppressNextClick = false; // 실제 드래그 직후의 click이 에디터를 토글하지 않게 차단
+  let cardMenu = null;           // {el, frameId, cleanup} — body에 붙는 카드 우클릭 메뉴
   const frameImages = new Map();
 
   function safeText(value) {
@@ -294,12 +297,21 @@ export function createStudioTabController({
       ? `<img src="${imageUrl}" alt="${escHtml(frameLabel(frame, index))}">`
       : renderPromptList(frame);
     return `
-      <button type="button" class="studio-frame-card${selected ? ' selected' : ''}${open ? ' open' : ''}${frame.enabled ? '' : ' disabled'}" data-studio-frame="${index}" aria-expanded="${open ? 'true' : 'false'}">
+      <button type="button" class="studio-frame-card${selected ? ' selected' : ''}${open ? ' open' : ''}${frame.enabled ? '' : ' disabled'}" data-studio-frame="${index}" draggable="true" aria-expanded="${open ? 'true' : 'false'}">
         <div class="studio-frame-label">
+          <span class="studio-frame-grip" aria-hidden="true">⋮⋮</span>
           <strong>${escHtml(frameLabel(frame, index))}</strong>
           <span class="studio-status-dot" data-status="${escHtml(status)}" aria-label="${escHtml(status)}"></span>
         </div>
         <div class="studio-frame-preview${imageUrl ? ' has-image' : ''}">${preview}</div>
+      </button>`;
+  }
+
+  function renderAddCard() {
+    return `
+      <button type="button" class="studio-frame-add" data-studio-action="add-frame" aria-label="새 프레임 추가">
+        <span class="studio-frame-add-icon">+</span>
+        <span class="studio-frame-add-label">새 프레임</span>
       </button>`;
   }
 
@@ -457,6 +469,7 @@ export function createStudioTabController({
 
   function render() {
     if (!root) return;
+    closeCardMenu();  // body에 떠 있는 카드 메뉴는 보드 재구성 시 stale — 닫는다.
     const frame = selectedFrame();
     const selectedSummary = frame
       ? previewText(composePrompt(frame), '선택 프레임 없음')
@@ -491,6 +504,7 @@ export function createStudioTabController({
             </div>
             <div class="studio-frame-grid">
               ${state.frames.map(renderFrameCard).join('')}
+              ${renderAddCard()}
             </div>
             ${renderEditor()}
             ${renderFixedPromptPanel()}
@@ -589,6 +603,195 @@ export function createStudioTabController({
     render();
   }
 
+  // ---- 카드 드래그 reorder ----
+  function clearDragIndicators() {
+    if (!root) return;
+    root.querySelectorAll('.studio-frame-card.drag-over-before, .studio-frame-card.drag-over-after, .studio-frame-card.dragging')
+      .forEach(card => card.classList.remove('drag-over-before', 'drag-over-after', 'dragging'));
+  }
+
+  function frameIndexFromEvent(event) {
+    const card = event.target?.closest?.('[data-studio-frame]');
+    if (!card || (root && !root.contains(card))) return null;
+    const index = Number(card.dataset.studioFrame);
+    return Number.isInteger(index) ? index : null;
+  }
+
+  function onCardDragStart(event) {
+    const index = frameIndexFromEvent(event);
+    if (index === null) return;
+    if (running || activeJob) {
+      // 큐/activeJob이 프레임 인덱스를 들고 있어 reorder는 큐를 오염시킨다.
+      event.preventDefault();
+      showToast('Studio 생성이 끝난 뒤 순서를 바꾸세요', 'error');
+      return;
+    }
+    dragSrcIndex = index;
+    suppressNextClick = true;
+    closeCardMenu();
+    try {
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', String(index));  // Firefox는 데이터 필요
+      }
+    } catch (_) { /* noop */ }
+    const card = event.target?.closest?.('[data-studio-frame]');
+    if (card) {
+      card.classList.add('dragging');
+      // drop 후 render()가 이 카드를 DOM에서 떼어내면 root 위임 dragend가 안 올 수 있다
+      // (Codex R1). 출발 카드에 직접 1회용 dragend를 달아 suppressNextClick 해제를 보장.
+      if (card.addEventListener) card.addEventListener('dragend', onCardDragEnd, {once: true});
+    }
+  }
+
+  function onCardDragOver(event) {
+    if (dragSrcIndex === null) return;
+    const card = event.target?.closest?.('[data-studio-frame]');
+    if (!card || (root && !root.contains(card))) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    let dropAfter = false;
+    const rect = card.getBoundingClientRect ? card.getBoundingClientRect() : null;
+    if (rect && rect.width) dropAfter = (Number(event.clientX) - rect.left) > rect.width / 2;
+    card.classList.remove('drag-over-before', 'drag-over-after');
+    card.classList.add(dropAfter ? 'drag-over-after' : 'drag-over-before');
+  }
+
+  function onCardDragLeave(event) {
+    const card = event.target?.closest?.('[data-studio-frame]');
+    if (card) card.classList.remove('drag-over-before', 'drag-over-after');
+  }
+
+  function onCardDrop(event) {
+    if (dragSrcIndex === null) return;
+    const card = event.target?.closest?.('[data-studio-frame]');
+    if (!card || (root && !root.contains(card))) return;
+    event.preventDefault();
+    const targetIndex = Number(card.dataset.studioFrame);
+    let dropAfter = false;
+    const rect = card.getBoundingClientRect ? card.getBoundingClientRect() : null;
+    if (rect && rect.width) dropAfter = (Number(event.clientX) - rect.left) > rect.width / 2;
+    const srcIndex = dragSrcIndex;
+    dragSrcIndex = null;
+    moveFrame(srcIndex, targetIndex, dropAfter);
+    // 성공 드롭은 render()로 출발 카드를 떼어내 dragend가 누락될 수 있으므로,
+    // 여기서도 suppressNextClick을 확실히 해제한다(트레일링 click이 있으면 그쪽이 먼저 소비).
+    setTimeoutFn(() => { suppressNextClick = false; }, 0);
+  }
+
+  function onCardDragEnd() {
+    dragSrcIndex = null;
+    clearDragIndicators();
+    // 드래그 후 click이 안 오는 경우(일반적), 다음 정상 click이 억제되지 않도록 해제.
+    // click이 오면 그쪽이 먼저 플래그를 소비한다.
+    setTimeoutFn(() => { suppressNextClick = false; }, 0);
+  }
+
+  function moveFrame(srcIndex, targetIndex, dropAfter) {
+    if (!Number.isInteger(srcIndex) || !Number.isInteger(targetIndex)) { clearDragIndicators(); return; }
+    if (running || activeJob) { clearDragIndicators(); return; }  // 드래그 중 생성 시작 방어
+    if (srcIndex < 0 || srcIndex >= state.frames.length) { clearDragIndicators(); return; }
+    let insertIndex = targetIndex + (dropAfter ? 1 : 0);
+    if (insertIndex === srcIndex || insertIndex === srcIndex + 1) { clearDragIndicators(); return; }  // 제자리
+    const selectedId = selectedFrame()?.id;
+    const wasEditorOpen = editorOpen;
+    const [moved] = state.frames.splice(srcIndex, 1);
+    if (srcIndex < insertIndex) insertIndex -= 1;  // src 제거로 한 칸 당겨짐
+    insertIndex = Math.max(0, Math.min(insertIndex, state.frames.length));
+    state.frames.splice(insertIndex, 0, moved);
+    const foundSelected = state.frames.findIndex(frame => frame.id === selectedId);
+    selectedIndex = foundSelected >= 0 ? foundSelected : Math.max(0, Math.min(selectedIndex, state.frames.length - 1));
+    editorOpen = wasEditorOpen;
+    saveState();
+    render();
+  }
+
+  // ---- 카드 우클릭 메뉴 (복제 / 삭제) ----
+  function closeCardMenu() {
+    if (!cardMenu) return;
+    try { cardMenu.cleanup(); } catch (_) { /* noop */ }
+    if (cardMenu.el && cardMenu.el.remove) cardMenu.el.remove();
+    cardMenu = null;
+  }
+
+  function openCardMenu(index, x, y) {
+    closeCardMenu();
+    const frame = state.frames[index];
+    if (!frame) return;
+    // 우클릭한 프레임을 선택 상태로(에디터는 토글하지 않음). 메뉴 동작은 id로 다시 해석한다.
+    selectedIndex = Math.max(0, Math.min(index, state.frames.length - 1));
+    const frameId = frame.id;
+    // 선택 변경을 보드에 먼저 반영한다. render()가 시작 시 stale 메뉴를 닫으므로
+    // 메뉴는 render() '이후'에 생성해 이번 메뉴가 즉시 닫히지 않게 한다.
+    render();
+    const menu = document.createElement('div');
+    menu.className = 'studio-card-menu';
+    menu.innerHTML = `
+      <button type="button" class="studio-card-menu-item" data-studio-card-menu="duplicate">복제</button>
+      <button type="button" class="studio-card-menu-item danger" data-studio-card-menu="delete">삭제</button>`;
+    if (menu.style) {
+      menu.style.position = 'fixed';
+      menu.style.left = `${Math.max(0, Number(x) || 0)}px`;
+      menu.style.top = `${Math.max(0, Number(y) || 0)}px`;
+    }
+    menu.addEventListener('click', event => {
+      const item = event.target?.closest?.('[data-studio-card-menu]');
+      if (!item) return;
+      const menuAction = item.dataset.studioCardMenu;
+      closeCardMenu();
+      runCardMenuAction(menuAction, frameId);
+    });
+    const onDocMouseDown = event => {
+      if (cardMenu && cardMenu.el && cardMenu.el.contains && cardMenu.el.contains(event.target)) return;
+      closeCardMenu();
+    };
+    const onKeyDown = event => { if (event.key === 'Escape') closeCardMenu(); };
+    const onScrollOrResize = () => closeCardMenu();
+    document.addEventListener('mousedown', onDocMouseDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    if (root && root.addEventListener) root.addEventListener('scroll', onScrollOrResize, true);
+    if (globalThis.addEventListener) {
+      globalThis.addEventListener('resize', onScrollOrResize, true);
+      globalThis.addEventListener('scroll', onScrollOrResize, true);
+    }
+    const cleanup = () => {
+      document.removeEventListener('mousedown', onDocMouseDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+      if (root && root.removeEventListener) root.removeEventListener('scroll', onScrollOrResize, true);
+      if (globalThis.removeEventListener) {
+        globalThis.removeEventListener('resize', onScrollOrResize, true);
+        globalThis.removeEventListener('scroll', onScrollOrResize, true);
+      }
+    };
+    if (document.body) document.body.appendChild(menu);
+    cardMenu = {el: menu, frameId, cleanup};
+    clampCardMenu(menu, x, y);
+  }
+
+  function clampCardMenu(menu, x, y) {
+    if (!menu || !menu.getBoundingClientRect || !menu.style) return;
+    const rect = menu.getBoundingClientRect();
+    const vw = Number(globalThis.innerWidth) || 0;
+    const vh = Number(globalThis.innerHeight) || 0;
+    if (vw && rect.width && (Number(x) + rect.width) > vw) menu.style.left = `${Math.max(0, vw - rect.width - 4)}px`;
+    if (vh && rect.height && (Number(y) + rect.height) > vh) menu.style.top = `${Math.max(0, vh - rect.height - 4)}px`;
+  }
+
+  function runCardMenuAction(menuAction, frameId) {
+    const index = state.frames.findIndex(frame => frame.id === frameId);
+    if (index < 0) return;  // 메뉴가 떠 있는 동안 프레임이 사라짐
+    selectedIndex = index;
+    if (menuAction === 'duplicate') duplicateFrame();
+    else if (menuAction === 'delete') deleteSelectedFrame();
+  }
+
+  function onCardContextMenu(event) {
+    const index = frameIndexFromEvent(event);
+    if (index === null) return;
+    event.preventDefault();
+    openCardMenu(index, event.clientX, event.clientY);
+  }
+
   function syncSelectedFromMain() {
     const frame = selectedFrame();
     if (!frame) return;
@@ -656,6 +859,11 @@ export function createStudioTabController({
   function duplicateFrame() {
     const frame = selectedFrame();
     if (!frame) return;
+    if (running || activeJob) {
+      // 복제는 selectedIndex+1에 삽입해 인덱스를 밀어 큐를 오염시킨다 — 생성 중 차단.
+      showToast('Studio 생성이 끝난 뒤 복제하세요', 'error');
+      return;
+    }
     const copy = {
       ...createFrame(state.frames.length),
       name: frame.name.trim() ? `${frame.name.trim()} 복사`.slice(0, 60) : '',
@@ -729,7 +937,7 @@ export function createStudioTabController({
       showToast('Studio 생성이 끝난 뒤 초기화하세요', 'error');
       return;
     }
-    const confirmed = await Promise.resolve(confirmDialog('Studio 프레임을 9칸 기본 상태로 초기화할까요?', {
+    const confirmed = await Promise.resolve(confirmDialog('Studio 보드를 기본 상태(1개 프레임)로 초기화할까요?', {
       title: 'Studio 초기화',
       okText: '초기화',
       cancelText: '취소',
@@ -1154,6 +1362,11 @@ export function createStudioTabController({
   function bind() {
     if (!root) return;
     root.addEventListener('click', event => {
+      if (suppressNextClick) {
+        // 실제 드래그 직후 발생하는 합성 click — 에디터 토글을 차단.
+        suppressNextClick = false;
+        return;
+      }
       const frameButton = event.target.closest('[data-studio-frame]');
       if (frameButton && root.contains(frameButton)) {
         selectFrame(frameButton.dataset.studioFrame);
@@ -1164,6 +1377,12 @@ export function createStudioTabController({
         handleAction(action.dataset.studioAction);
       }
     });
+    root.addEventListener('dragstart', onCardDragStart);
+    root.addEventListener('dragover', onCardDragOver);
+    root.addEventListener('dragleave', onCardDragLeave);
+    root.addEventListener('drop', onCardDrop);
+    root.addEventListener('dragend', onCardDragEnd);
+    root.addEventListener('contextmenu', onCardContextMenu);
     root.addEventListener('input', event => {
       const globalField = event.target.dataset.studioGlobal;
       const frameField = event.target.dataset.studioFrameField;

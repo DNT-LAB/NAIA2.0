@@ -1408,6 +1408,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   padding: 12px 14px 18px;
 }
 .studio-frame-card {
+  position: relative;
   min-width: 0;
   height: clamp(168px, 18vh, 220px);
   min-height: 0;
@@ -1421,9 +1422,97 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
+  /* 카드 내부 텍스트 드래그(선택 드래그) 차단 — 드래그는 카드 reorder 전용 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 .studio-frame-card:hover {
   border-color: rgba(157,139,255,0.45);
+}
+.studio-frame-card.dragging {
+  opacity: 0.5;
+}
+.studio-frame-card.drag-over-before {
+  box-shadow: -3px 0 0 0 var(--accent);
+}
+.studio-frame-card.drag-over-after {
+  box-shadow: 3px 0 0 0 var(--accent);
+}
+.studio-frame-grip {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: -2px;
+  cursor: grab;
+  opacity: 0.6;
+}
+.studio-frame-card:hover .studio-frame-grip {
+  opacity: 1;
+}
+/* 대시 테두리 + 카드 추가 */
+.studio-frame-add {
+  min-width: 0;
+  height: clamp(168px, 18vh, 220px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1.5px dashed var(--border-dim);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.studio-frame-add:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.studio-frame-add-icon {
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 300;
+}
+.studio-frame-add-label {
+  font-family: var(--font-display);
+  font-size: 12px;
+}
+/* 카드 우클릭 메뉴 */
+.studio-card-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 116px;
+  padding: 4px;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: rgba(24,24,34,0.98);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.studio-card-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 13px;
+  cursor: pointer;
+}
+.studio-card-menu-item:hover {
+  background: rgba(124,106,239,0.18);
+}
+.studio-card-menu-item.danger {
+  color: #ff9a90;
+}
+.studio-card-menu-item.danger:hover {
+  background: rgba(244,67,54,0.16);
 }
 .studio-frame-card.selected {
   border-color: var(--accent);

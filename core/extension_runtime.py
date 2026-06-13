@@ -330,6 +330,10 @@ def _generation_service(app_context: Any):
     return service
 
 
+class ExtensionDependencyError(Exception):
+    """로드 직전 의존성 미설치 — 승인 흐름이 먼저 설치해야 한다."""
+
+
 @dataclass
 class ExtensionRecord:
     ext_id: str
@@ -352,6 +356,9 @@ class ExtensionRecord:
     # 전역 정책(부팅 시 적용): 시작 동작·입력 필드 기억.
     startup: str = STARTUP_DEFAULT       # remember | auto_off | auto_on.
     remember_inputs: bool = True         # OFF면 부팅 시 settings.json을 비워 기본값으로 시작.
+    # ②단계: manifest python.requirements(격리 설치 대상) + 크기 cap.
+    requirements: list[str] = field(default_factory=list)
+    max_install_mb: int = 0              # 0=기본(서비스 DEFAULT). manifest python.max_install_mb.
     hooks: int = 0
     subscriptions: int = 0
     # Phase B: ctx.register_panel() 선언 스키마({"title","fields":[...]}) 또는 None.
@@ -373,6 +380,20 @@ class ExtensionRecord:
         플래그의 분리는 사용자 계약(작동 OFF ≠ 숨김)."""
         return self.status == "loaded" and self.enabled and self.armed and not self.blocked
 
+    @property
+    def deps_ready(self) -> bool:
+        """선언된 의존성이 없거나, 이미 격리 설치(.deps)된 상태인가."""
+        if not self.requirements:
+            return True
+        if self.directory is None:
+            return False
+        try:
+            from core.extension_deps_service import has_installed_deps
+
+            return has_installed_deps(self.directory)
+        except Exception:
+            return False
+
     def status_payload(self) -> dict[str, Any]:
         return {
             "id": self.ext_id,
@@ -389,6 +410,8 @@ class ExtensionRecord:
             "placement": self.placement,
             "startup": self.startup,
             "remember_inputs": self.remember_inputs,
+            "requirements": list(self.requirements),
+            "deps_ready": self.deps_ready,
             "active": self.is_active,
             "hooks": self.hooks,
             "subscriptions": self.subscriptions,
@@ -1083,6 +1106,17 @@ class ExtensionManager:
             # source_url은 향후 업데이트 체크용 예약 — v1은 homepage 폴백으로만 사용.
             record.homepage = str(manifest.get("homepage") or manifest.get("source_url") or "")
             record.entry_path = entry_path
+            # ②단계: python.requirements(격리 설치 대상) + max_install_mb 선언.
+            python_section = manifest.get("python")
+            if isinstance(python_section, dict):
+                from core.extension_deps_service import normalize_requirements
+
+                record.requirements = normalize_requirements(python_section.get("requirements"))
+                cap = python_section.get("max_install_mb")
+                record.max_install_mb = int(cap) if isinstance(cap, (int, float)) and cap > 0 else 0
+            else:
+                record.requirements = []
+                record.max_install_mb = 0
             record.status = "discovered"
             record.error = ""
         except (SystemExit, Exception) as exc:
@@ -1218,6 +1252,15 @@ class ExtensionManager:
             entry_path = record.entry_path
             if entry_path is None or not entry_path.is_file():
                 raise FileNotFoundError(f"entry not found: {entry_path}")
+            # ②단계: 선언된 의존성이 아직 설치 안 됐으면 로드 불가(승인 흐름이
+            # 먼저 의존성을 설치한다 — _ensure_deps_locked). 격리 .deps를 import
+            # 전에 sys.path에 얹는다.
+            if record.requirements and not record.deps_ready:
+                raise ExtensionDependencyError("의존성이 설치되지 않았습니다.")
+            if record.directory is not None and record.requirements:
+                from core.extension_deps_service import inject_syspath
+
+                inject_syspath(record.directory)
             module_name = f"naia_ext_{re.sub(r'[^0-9A-Za-z_]', '_', record.ext_id)}"
             spec = importlib.util.spec_from_file_location(module_name, entry_path)
             if spec is None or spec.loader is None:
@@ -1387,8 +1430,8 @@ class ExtensionManager:
                     record.status = "loading"
 
     def load_by_key(self, key: str) -> None:
-        """approve:<id> / retry:<id> / retry_errors — import가 수반되는 무거운 경로.
-        워커 스레드에서 호출된다(이벤트 루프 비차단, 매니저 락으로 직렬화)."""
+        """approve:<id> / retry:<id> / retry_errors — import(+의존성 설치)가 수반되는
+        무거운 경로. 워커 스레드에서 호출된다(이벤트 루프 비차단, 매니저 락 직렬화)."""
         action, _, _ = str(key or "").strip().partition(":")
         with self._lock:
             for record in self._load_targets(key):
@@ -1398,7 +1441,44 @@ class ExtensionManager:
                     record.approved = True
                     self._write_config_locked()
                 if record.approved and not record.blocked and record.status in {"discovered", "loading", "error"}:
+                    # ②단계: 선언 의존성이 미설치면 import 전에 격리 설치(host 재사용·
+                    # 무거운 ML 차단·wheel-only). 실패하면 로드하지 않고 사유를 남긴다.
+                    if record.requirements and not record.deps_ready and not self._install_deps_locked(record):
+                        continue
                     self._load_record_locked(record)
+
+    def _install_deps_locked(self, record: ExtensionRecord) -> bool:
+        """확장 의존성 격리 설치 → 성공 여부. 실패 시 status=dependency_error."""
+        if record.directory is None:
+            record.status = "error"
+            record.error = "확장 디렉터리를 찾을 수 없습니다."
+            return False
+        try:
+            from core.extension_deps_service import ExtensionDepsError, ExtensionDepsInstaller
+
+            record.status = "installing_deps"
+            installer = ExtensionDepsInstaller(record.directory)
+            result = installer.install(
+                record.requirements,
+                max_install_mb=record.max_install_mb or None,
+            )
+            installed = result.get("installed") or []
+            reused = result.get("host_satisfied") or []
+            print(
+                f"Remote Web: extension deps id={record.ext_id} "
+                f"installed={len(installed)} reused={len(reused)}",
+                flush=True,
+            )
+            return True
+        except ExtensionDepsError as exc:
+            record.status = "dependency_error"
+            record.error = _safe_error_text(exc)
+            print(f"Remote Web: extension deps failed '{record.ext_id}' - {record.error}", flush=True)
+            return False
+        except (SystemExit, Exception) as exc:
+            record.status = "dependency_error"
+            record.error = _safe_error_text(exc)
+            return False
 
     def _load_targets(self, key: str) -> list[ExtensionRecord]:
         action, _, rest = str(key or "").strip().partition(":")

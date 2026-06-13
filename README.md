@@ -173,12 +173,36 @@ NAIA의 **메인 코드를 수정하지 않고** Python으로 기능을 추가�
   "naia_ext_api": 1,
   "entry": "main.py",
   "description": "패널에 표시될 한 줄 설명 (선택)",
-  "homepage": "https://... (선택, 패널에 링크 표시; source_url은 향후 업데이트 체크용 예약)"
+  "homepage": "https://... (선택, 패널에 링크 표시; source_url은 향후 업데이트 체크용 예약)",
+  "python": {
+    "requirements": ["rapidfuzz>=3.9", "orjson"],
+    "max_install_mb": 200
+  }
 }
 ```
 
 `naia_ext_api`는 호스트가 지원하는 확장 API 버전(현재 `1`)과 일치해야 하며, 불일치하면
 해당 확장만 비활성화되고 앱은 정상 부팅합니다.
+
+**설치 방법 두 가지**:
+1. 폴더(`<id>/extension.json + main.py`)를 `<user-data>/extensions/`에 복사.
+2. **GitHub URL** — Settings ▸ Extension 상단에 `https://github.com/owner/repo`를 넣고
+   "GitHub에서 설치"(git 불필요, zip 다운로드). 설치는 **파일 배치까지만** 하며,
+   목록에 "미승인"으로 떠서 직접 승인해야 코드가 실행됩니다(동의 모델).
+
+**의존성(`python.requirements`) 정책** — SSOT를 지키기 위해 의도적으로 제한됩니다:
+
+| | 동작 |
+|---|---|
+| 본체가 이미 가진 패키지(numpy·Pillow·scipy 등) | **재사용** (설치 안 함 — 단일 출처) |
+| 본체에 없는 **경량 순수/wheel 패키지** | 확장 폴더 안 `.deps/`에 **격리 설치** (본체 미오염) |
+| 본체에 있는데 **다른 버전** 요구 | **거부** (본체 버전을 바꾸지 않음) |
+| **무거운 ML**(torch·tensorflow·onnxruntime-gpu·transformers 등) | **거부** — 추론은 백엔드(ComfyUI 등)에 위임 |
+| **소스 빌드/URL/VCS** requirement | **거부** — 미리 빌드된 wheel만 (`--only-binary`) |
+
+의존성은 **승인 시 자동 설치**됩니다(신뢰 경고에 목록 표시). `onnxruntime`(CPU)·rapidfuzz
+같은 경량 추론/유틸은 잘 동작하지만, torch급 무거운 ML을 in-process로 돌리려는 시도는
+막힙니다(디스크·ABI 충돌·SSOT). 그런 추론은 ComfyUI 노드 등 **외부 백엔드의 몫**입니다.
 
 ### main.py — 최소 예제
 
@@ -238,6 +262,40 @@ class MyHook:
 | `prompt_generated` | PromptContext | 랜덤 프롬프트 파이프라인 완료 시 |
 
 이외 이벤트도 수신되지만 이름/페이로드의 안정성은 보장하지 않습니다.
+
+### 확장이 할 수 있는 것 / 없는 것 (능력 경계)
+
+NAIA는 **가벼운 오케스트레이터**이고 이미지 생성·ML은 외부 백엔드(NovelAI/WEBUI/
+ComfyUI)에 위임합니다. 확장도 그 철학을 따릅니다 — "생성을 조합·가공"하되 "생성
+엔진이 되지는 않습니다".
+
+**✅ 수정/조작할 수 있는 것**
+- **프롬프트**: 파이프라인 훅으로 `prefix/main/postfix_tags`·`final_prompt`를 직접 변조
+  (4개 훅 포인트). 조건부·와일드카드 이후 단계까지 개입 가능.
+- **생성 큐**: `enqueue_generation`으로 동일/변형 프롬프트를 **추가 생성**, `cancel_generation`
+  으로 **대기 요청 취소**(예: X/Y 그리드 — 원본 취소 후 그리드만).
+- **생성 결과**: `get_result_image`로 완료 이미지를 PIL로 받아 **가공/합성**하고
+  `get_save_directory` 아래에 저장(예: n×m 그리드 PNG).
+- **패널 UI**: `register_panel` 선언적 폼(입력·콤보·빌더·버튼) — JS 없이 설정 화면 구성.
+- **사용자 피드백**: `show_toast`. **자체 설정**: `settings.json`. **NAI 캐릭터 스냅샷**:
+  `resolve_nai_characters`(변형 묶음 캐릭터 고정).
+- **의존성**: 경량 wheel을 `.deps/`에 격리하여 자체 로직(퍼지 매칭·빠른 직렬화·
+  CPU onnx 추론 등) 구현.
+
+**❌ 할 수 없는 것 (경계 — 의도적)**
+- **생성 엔진 교체/직접 API 호출 변조**: NAI/WEBUI/ComfyUI 호출은 NAIA가 담당. 확장은
+  파라미터(`overrides`)와 프롬프트를 조정할 뿐, 엔진을 바꾸지 않습니다.
+- **무거운 ML in-process**(torch 등): 디스크·ABI·크래시·SSOT 문제로 차단. 추론은
+  백엔드 위임이 단일 진실입니다.
+- **본체 패키지 버전 변경**: 본체가 쓰는 numpy 등을 다른 버전으로 못 바꿉니다(재사용만).
+- **자격증명 직접 접근**: 이벤트 `params`는 토큰·credential·내부 키가 제외된 안전 사본이며,
+  변조해도 실 요청에 반영되지 않습니다.
+- **다른 확장 간섭 / 코어 내부 모듈**: 확장은 서로 격리되고, `ctx` 표면 밖 내부 import는
+  비공식(릴리즈마다 깨질 수 있음).
+
+요약하면 — **프롬프트·큐·결과·UI는 자유롭게 주무르되, 생성 엔진과 자격증명·본체 환경은
+건드리지 못하는** 모델입니다. "이미지에서 프롬프트 추론" 같은 무거운 작업은 ComfyUI의
+태거 노드에 맡기고 그 결과를 확장이 받아 조합하는 것이 NAIA 철학에 맞습니다.
 
 ### 샘플: Seed Fan-out
 

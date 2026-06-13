@@ -16886,6 +16886,11 @@ body.detached-module .mod-grid-3 {
 .ext-install-note { margin-top: 5px; font-size: 11px; padding: 4px 8px; border-radius: 7px; }
 .ext-install-note.ext-install-ok { color: #5fd38a; background: rgba(80, 200, 120, 0.1); }
 .ext-install-note.ext-install-error { color: #ff7a7a; background: rgba(255, 99, 99, 0.1); }
+.ext-confirm-deps {
+  margin-top: 6px; padding: 5px 8px; border-radius: 7px; font-size: 11px; line-height: 1.5;
+  background: rgba(108, 182, 255, 0.1); color: var(--text-muted);
+}
+.ext-confirm-deps code { color: var(--accent-light); font-size: 10px; }
 .ext-row { border: 1px solid var(--border-dim); border-radius: 9px; background: var(--bg-elevated); padding: 8px 10px; }
 .ext-row-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .ext-info { min-width: 0; flex: 1; }

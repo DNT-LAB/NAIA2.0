@@ -42,12 +42,20 @@ export function createExtensionsUi(deps) {
   // ── 공용: 칩/필드 렌더러 (설정 페이지·퀵 팝업 공유) ──────────
   function chipFor(ext) {
     if (ext.status === 'loading') return ['로딩 중…', 'ext-chip-loading'];
+    if (ext.status === 'installing_deps') return ['의존성 설치 중…', 'ext-chip-loading'];
     if (ext.status === 'manifest_error') return ['매니페스트 오류', 'ext-chip-error'];
+    if (ext.status === 'dependency_error') return ['의존성 오류', 'ext-chip-error'];
     if (ext.status === 'error') return ['오류', 'ext-chip-error'];
     if (ext.blocked) {
       return [ext.status === 'loaded' ? '차단됨 (재시작 시 완전 차단)' : '차단됨', 'ext-chip-muted'];
     }
-    if (ext.status === 'discovered') return ['미승인', 'ext-chip-muted'];
+    if (ext.status === 'discovered') {
+      // 의존성이 선언됐는데 미설치면 "승인 시 설치"를 알린다.
+      if (Array.isArray(ext.requirements) && ext.requirements.length && !ext.deps_ready) {
+        return [`미승인 · 의존성 ${ext.requirements.length}`, 'ext-chip-muted'];
+      }
+      return ['미승인', 'ext-chip-muted'];
+    }
     if (ext.status === 'loaded') {
       if (!ext.enabled) return ['꺼짐', 'ext-chip-off'];
       // enabled인데 armed가 아니면: 노출은 되지만 작동은 멈춘 상태(팝업 Activate OFF).
@@ -366,11 +374,16 @@ export function createExtensionsUi(deps) {
       ? `<div class="ext-desc">${escHtml(ext.description || '')}${home}</div>` : '';
     const error = ext.error
       ? `<div class="ext-error" title="${escHtml(ext.error)}">${escHtml(ext.error)}${ext.status === 'error' ? ' — 수정 후 재시도하거나 재시작' : ''}</div>` : '';
+    const needsDeps = Array.isArray(ext.requirements) && ext.requirements.length && !ext.deps_ready;
+    const depsNote = needsDeps
+      ? `<div class="ext-confirm-deps">📦 의존성 ${ext.requirements.length}개를 격리 설치합니다(본체 미오염·미리 빌드된 wheel만):
+           <code>${escHtml(ext.requirements.join(', '))}</code></div>` : '';
     const confirm = confirmingId === ext.id
       ? `<div class="ext-confirm">⚠️ 이 확장은 NAIA와 같은 권한으로 <b>임의 Python 코드</b>를 실행하며
            생성 파이프라인과 API 토큰 등 자격증명에 접근할 수 있습니다. 제작자를 신뢰할 때만 활성화하세요.
+           ${depsNote}
            <div class="ext-confirm-actions">
-             <button class="ext-approve-btn" data-ext="${escHtml(ext.id)}">신뢰하고 활성화</button>
+             <button class="ext-approve-btn" data-ext="${escHtml(ext.id)}">${needsDeps ? '신뢰하고 설치·활성화' : '신뢰하고 활성화'}</button>
              <button class="ext-cancel-btn" data-ext="${escHtml(ext.id)}">취소</button>
            </div></div>` : '';
     const menu = openMenuId === ext.id

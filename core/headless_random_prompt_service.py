@@ -555,31 +555,64 @@ class HeadlessRandomPromptService:
         return None
 
     def _apply_character_settings(self, settings: dict[str, Any]) -> None:
-        from core.character_settings import character_params_from_settings
+        from core.character_settings import (
+            read_character_roll_snapshot,
+            read_reroll_on_generate,
+            roll_character_params,
+        )
 
-        # NOTE(이벤트 스트림 freeze): 캐릭터 freeze의 단일 소비 지점은 api_service의
-        # 페이로드 빌드(EventStreamFreeze 분기)다 — 여기서 settings["characters"]에
-        # frozen 값을 넣어도 실제 생성에는 닿지 않아 페이지마다 재롤되는 버그가 있었다.
-        # 이 함수는 항상 pristine 베이스를 계산한다(프롬프트 파이프라인/조건부용).
-
+        # SSOT character roll. There is exactly ONE roll at runtime:
+        # context._character_roll_snapshot[MODE]. Random, the Refresh Preview button,
+        # and Generate are the only authoritative writers; state reads never re-roll.
+        #
+        # reroll_on_generate ("Process wildcards on Generate"):
+        #   - False (default): RANDOM rolls the character wildcards ONCE here and
+        #     stores the snapshot; Generate then reuses the snapshot (no re-roll).
+        #   - True: RANDOM does NOT touch the character wildcards (snapshot stays);
+        #     Generate re-rolls once and updates the snapshot.
+        # Either way we ALWAYS publish the (just-rolled or reused) snapshot into
+        # settings["characters"]/["uc"] so the random prompt + Ollama boost ground
+        # on exactly the same characters Generate will use. The override-first and
+        # active-frame checks live inside character_params_from_settings/roll_*, so a
+        # disabled module / active conditional override is honored here too:
+        #   - disabled / no active frames → returns no characters → settings left
+        #     untouched (no stale characters grounded),
+        #   - an active conditional override is returned as-is and not persisted.
+        #
         # A NEW prompt run must derive the character base from the PRISTINE character
-        # frames, not the previous run's conditional result. The conditional hook stores
-        # its per-prompt character override on current_prompt_context.metadata; if we let
-        # character_params_from_settings(reuse_current_context=True) pick that up as the
-        # base, a conditional rule like `char:1+=__wc__` re-appends every generation
-        # (1girl -> 1girl, a -> 1girl, a, b -> ...). Drop the stale conditional override
-        # here so reuse_current_context=True — which we keep so character-prompt wildcards
-        # still share the main prompt's sequential/dependent counters — falls through to
-        # the frame-based pristine base. (Mirrors the reset in headless_character_service.)
+        # frames, not the previous run's conditional result. Drop the stale conditional
+        # override first so a rule like `char:1+=__wc__` does not re-append every run.
         self._clear_conditional_character_override()
-        params = character_params_from_settings(
+        # Drop legacy Ollama freeze field — superseded by the SSOT snapshot.
+        self.context._ollama_frozen_character_params = None
+
+        mode = self.context.get_api_mode()
+        reroll_on_generate = read_reroll_on_generate(self.context, mode)
+
+        if reroll_on_generate:
+            # Roll deferred to Generate — reuse the existing snapshot (if any) for
+            # the random prompt / boost grounding; do NOT advance the roll here and
+            # do NOT create one if absent (Generate makes the first roll).
+            snapshot = read_character_roll_snapshot(self.context, mode)
+            if snapshot is not None:
+                settings["characters"] = list(snapshot.get("characters") or [])
+                settings["uc"] = list(snapshot.get("uc") or [])
+            return
+
+        # reroll_on_generate is False → Random is the authoritative roll. roll_*
+        # short-circuits on an inactive module / active conditional override, rolls
+        # once otherwise, and stores the mode-keyed snapshot. reuse_current_context=
+        # True keeps character-prompt wildcards sharing the main prompt's sequential/
+        # dependent counters (general random wildcards don't advance any counter),
+        # expanding from the pristine frame base.
+        params = roll_character_params(
             self.context,
-            mode=self.context.get_api_mode(),
+            mode=mode,
             reuse_current_context=True,
         )
         if params.get("characters"):
-            settings["characters"] = params["characters"]
-            settings["uc"] = params.get("uc", [])
+            settings["characters"] = list(params.get("characters") or [])
+            settings["uc"] = list(params.get("uc") or [])
 
     def _clear_conditional_character_override(self) -> None:
         context = getattr(self.context, "current_prompt_context", None)

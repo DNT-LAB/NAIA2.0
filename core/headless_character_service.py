@@ -67,26 +67,37 @@ class HeadlessCharacterService:
         mode = context.get_api_mode()
         settings = self.settings_cache()
         frames = settings.setdefault("character_frames", [])
+        # SSOT snapshot bookkeeping:
+        #   - content edits invalidate the snapshot (next authoritative roll reflects
+        #     the new content),
+        #   - "preview_refresh" performs ONE fresh roll and stores it (manual seed),
+        #   - "activated" / "reroll_on_generate" toggles do NOT touch the snapshot.
+        invalidate_snapshot = False
+        refresh_snapshot = False
         if key == "activated":
             settings["is_active"] = context._coerce_bool(value)
         elif key == "reroll_on_generate":
             settings["reroll_on_generate"] = context._coerce_bool(value)
         elif key == "add_character":
             frames.append({"prompt": "", "uc": "", "is_enabled": True, "slot_state": "active", "custom_name": ""})
+            invalidate_snapshot = True
         elif key == "preview_refresh":
-            pass
+            refresh_snapshot = True
         elif key.startswith("remove_character_"):
             index = context._index_from_key(key, "remove_character_")
             if index is not None and 0 <= index < len(frames) and len(frames) > 1:
                 frames.pop(index)
+                invalidate_snapshot = True
         elif key.startswith("char_prompt_"):
             index = context._index_from_key(key, "char_prompt_")
             if index is not None:
                 self.ensure_frame(frames, index)["prompt"] = str(value or "")
+                invalidate_snapshot = True
         elif key.startswith("char_uc_"):
             index = context._index_from_key(key, "char_uc_")
             if index is not None:
                 self.ensure_frame(frames, index)["uc"] = str(value or "")
+                invalidate_snapshot = True
         elif key.startswith("char_active_"):
             index = context._index_from_key(key, "char_active_")
             if index is not None:
@@ -94,6 +105,7 @@ class HeadlessCharacterService:
                 active = context._coerce_bool(value)
                 frame["is_enabled"] = active
                 frame["slot_state"] = "active" if active else "inactive"
+                invalidate_snapshot = True
         elif key.startswith("char_slot_state_"):
             index = context._index_from_key(key, "char_slot_state_")
             if index is not None:
@@ -106,10 +118,12 @@ class HeadlessCharacterService:
                         frame["return_slot_state"] = str(frame.get("slot_state") or "inactive")
                     frame["slot_state"] = requested
                     frame["is_enabled"] = requested == "active"
+                    invalidate_snapshot = True
         elif key.startswith("char_slot_name_"):
             index = context._index_from_key(key, "char_slot_name_")
             if index is not None:
                 self.ensure_frame(frames, index)["custom_name"] = str(value or "")
+                invalidate_snapshot = True
         else:
             return None
         prompt_context = getattr(context, "current_prompt_context", None)
@@ -119,4 +133,20 @@ class HeadlessCharacterService:
             metadata.pop("_conditional_character_slots", None)
             metadata.pop("conditional_character_skips", None)
         self.save_settings(mode, settings)
+        # SSOT snapshot maintenance (after save so the roll sees the latest frames).
+        if refresh_snapshot:
+            from core.character_settings import roll_character_params
+
+            roll_character_params(
+                context,
+                mode=mode,
+                settings=settings,
+                reuse_current_context=False,
+            )
+        elif invalidate_snapshot:
+            from core.character_settings import clear_character_roll_snapshot
+
+            # The panel edits the active mode's frames — invalidate only that mode's
+            # snapshot so an unrelated mode's valid roll is preserved.
+            clear_character_roll_snapshot(context, mode)
         return self.state()

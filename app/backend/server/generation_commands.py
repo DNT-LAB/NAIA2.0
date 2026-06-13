@@ -258,16 +258,23 @@ def _build_boost_input(result: Any, settings: dict) -> "str | None":
         return None
     meta = getattr(ctx, "metadata", None) or {}
 
+    # 후처리(remove_color/object/features 등) + 와일드카드 전개를 반영한 main 스냅샷을 우선
+    # 근거로 쓴다. raw source_row['general']은 전처리 *전*이라, 사용자가 remove_color 등으로
+    # 제거한 색/객체/특징을 부스트가 prose로 되살려 그 설정을 무력화했다(_step_3 캡처본 사용).
+    # 스냅샷 없으면 후처리 main_tags, 그것도 없으면 raw general 폴백.
     base = ""
-    src = getattr(ctx, "source_row", None)
-    if src is not None:
-        try:
-            base = str(src.get("general") or "")
-        except Exception:
-            base = ""
+    boost_main = meta.get("boost_main_tags")
+    if isinstance(boost_main, list) and any(str(t).strip() for t in boost_main):
+        base = ", ".join(str(t) for t in boost_main)
     if not base.strip():
-        # 폴백(source_row 없음/와일드카드 단독): processed main_tags.
         base = ", ".join(str(t) for t in (getattr(ctx, "main_tags", None) or []))
+    if not base.strip():
+        src = getattr(ctx, "source_row", None)
+        if src is not None:
+            try:
+                base = str(src.get("general") or "")
+            except Exception:
+                base = ""
 
     parts = [strip_weight_syntax(base)]
     if settings.get("include_prefix"):
@@ -281,6 +288,14 @@ def _build_boost_input(result: Any, settings: dict) -> "str | None":
         e_tags = _e621_meta_tags(ctx)
         if e_tags:
             parts.append(strip_weight_syntax(", ".join(e_tags)))
+    # NAI v4/v4.5 캐릭터 프롬프트(이번 run의 전개본)도 접지에 포함 — 부스트가 캐릭터 의상/행위/
+    # 소품을 참조할 수 있고, 환각 가드가 캐릭터 태그를 미입력으로 오판해 드롭하지 않는다.
+    # (Phase3 freeze가 random-time 롤을 생성까지 고정하므로 부스트 접지 = 실제 생성 캐릭터.)
+    char_prompts = (getattr(ctx, "settings", None) or {}).get("characters") or []
+    for cp in char_prompts:
+        cs = strip_weight_syntax(str(cp or ""))
+        if cs:
+            parts.append(cs)
     inp = ", ".join(p for p in parts if p)
     return inp or None
 

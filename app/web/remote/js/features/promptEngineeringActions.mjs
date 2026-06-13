@@ -195,6 +195,16 @@ export function createPromptEngineeringActions({
     const lastState = getLastPromptEngineeringState();
     if (lastState) lastState.ollama_auto_boost = !!checked;
     setModuleParam('prompt_engineering', 'ollama_auto_boost', checked ? 'true' : 'false');
+    // Ollama 모드에서는 캐릭터 프롬프트 와일드카드가 Random 시점에 1회 전개·고정되어야
+    // 부스트가 접지한 캐릭터 = 실제 생성 캐릭터가 된다. "Process wildcards on Generate"
+    // (생성 시 전개)를 강제 해제하고 동작을 토스트로 안내한다(백엔드는 Ollama ON이면
+    // reroll 체크와 무관하게 스냅샷을 고정하지만, UI 표시·기대치를 맞춘다).
+    if (checked) {
+      setModuleParam('character', 'reroll_on_generate', 'false');
+      if (typeof showToast === 'function') {
+        showToast('Ollama 모드: 랜덤 시 캐릭터 프롬프트 와일드카드가 먼저 전개·고정됩니다 (생성 시 전개 해제).', 'info');
+      }
+    }
   }
 
   return {

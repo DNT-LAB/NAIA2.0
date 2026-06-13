@@ -25,7 +25,11 @@ from core.reference_inset_service import (
 )
 from core.character_settings import (
     character_params_from_settings,
+    conditional_character_override_active,
     loaded_character_module_is_active,
+    read_character_roll_snapshot,
+    read_reroll_on_generate,
+    store_character_roll_snapshot,
 )
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 
@@ -785,7 +789,9 @@ class APIService:
                                     characters = frozen_chars["characters"]
                                     ucs = frozen_chars.get("uc", [])
                                     character_positions = []
-                        # 5) Late Binding — 메인 UI CharacterModule (직접 생성)
+                        # 5) Late Binding — 메인 UI CharacterModule (직접 생성).
+                        # Desktop archive only; absent in headless. The live desktop
+                        # roll outranks the headless snapshot when a module is loaded.
                         if not characters:
                             char_module = _get_loaded_middle_module(self.app_context, "CharacterModule")
                             if loaded_character_module_is_active(char_module):
@@ -795,16 +801,52 @@ class APIService:
                                     characters = char_params["characters"]
                                     ucs = char_params["uc"]
                                     character_positions = char_params.get("character_positions", [])
+                        # 5-1) SSOT character roll — Generate's single consume/refresh
+                        # point for headless (the EventStreamFreeze above wins when a
+                        # storyteller/manual sequence is active). character_params_from_
+                        # settings enforces the precedence centrally: an active conditional
+                        # override wins, a disabled module / no active frames yields NO
+                        # characters (a stale snapshot is NOT consumed while inactive), and
+                        # only then does the reroll_on_generate gate apply:
+                        #   - reroll OFF (default) / Ollama → prefer_snapshot=True: reuse the
+                        #     roll Random/Refresh produced so preview == random == generate.
+                        #   - reroll ON (or no snapshot yet) → prefer_snapshot=False: FRESH
+                        #     expansion, then stored below so the preview reflects what was
+                        #     generated. ollama_auto_boost is OR'd in for robustness, but
+                        #     reroll_on_generate is the primary gate.
                         if not characters:
+                            _char_mode = params.get("api_mode", "NAI")
+                            _reroll_on_generate = read_reroll_on_generate(self.app_context, _char_mode)
+                            _prefer_snapshot = (not _reroll_on_generate) or getattr(
+                                self.app_context, "ollama_auto_boost", False
+                            )
+                            # Capture whether a reusable snapshot existed BEFORE resolving,
+                            # so we know if the result is a reuse (don't re-store) or a fresh
+                            # expansion (store, unless it's a per-run conditional override).
+                            _had_snapshot = (
+                                _prefer_snapshot
+                                and read_character_roll_snapshot(self.app_context, _char_mode) is not None
+                            )
+                            _had_override = conditional_character_override_active(self.app_context)
                             char_params = character_params_from_settings(
                                 self.app_context,
-                                mode=params.get("api_mode", "NAI"),
+                                mode=_char_mode,
+                                prefer_snapshot=_prefer_snapshot,
                             )
                             if char_params and char_params.get("characters"):
-                                char_source = "HeadlessSettings"
+                                char_source = "Snapshot" if _had_snapshot else "HeadlessSettings"
                                 characters = char_params["characters"]
                                 ucs = char_params.get("uc", [])
                                 character_positions = []
+                                # Persist a genuine fresh roll (reroll ON, or snapshot was
+                                # empty) so the preview reflects what was generated. Never
+                                # persist a reused snapshot or a per-run conditional override.
+                                if not _had_snapshot and not _had_override:
+                                    store_character_roll_snapshot(
+                                        self.app_context,
+                                        {"characters": characters, "uc": ucs},
+                                        _char_mode,
+                                    )
 
                 # 공통 적용: 정규화된 캐릭터 데이터를 v4_prompt에 추가
                 if characters:

@@ -372,6 +372,11 @@ class PromptProcessor:
             if isinstance(getattr(context, "metadata", None), dict):
                 context.metadata["prefix_wildcard_tags"] = list(prefix_wc_sink)
                 context.metadata["postfix_wildcard_tags"] = list(postfix_wc_sink)
+                # Ollama Boost 접지용: 후처리(remove_color/object/features 등) + 와일드카드 전개 후,
+                # 최종 포맷(인물수→prefix 이동) 전의 main 스냅샷. raw source_row['general'] 대신 이걸
+                # 근거로 써서, 사용자가 전처리로 제거한 색/객체/특징을 부스트가 prose로 재주입해
+                # remove_* 설정을 무력화하던 버그를 막는다(사용자 지정: prefix+main+postfix 처리 단계).
+                context.metadata["boost_main_tags"] = list(context.main_tags or [])
         except Exception:
             pass
         return context

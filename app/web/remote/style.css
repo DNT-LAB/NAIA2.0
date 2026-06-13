@@ -16860,6 +16860,32 @@ body.detached-module .mod-grid-3 {
   border-radius: 7px; padding: 3px 9px; cursor: pointer; font-size: 11px; flex-shrink: 0;
 }
 .ext-retry-all, .ext-retry-btn { color: #ffb454; border-color: rgba(255, 180, 84, 0.45); }
+/* GitHub URL 설치 폼 + 진행률 */
+.ext-install-github { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+.ext-install-url {
+  flex: 1; min-width: 0; height: 30px; padding: 4px 9px; font-size: 12px;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: var(--bg-surface); color: var(--text-primary);
+}
+.ext-install-btn {
+  flex: 0 0 auto; height: 30px; padding: 0 12px; cursor: pointer; font-size: 12px; font-weight: 650;
+  border: 1px solid var(--accent); border-radius: 7px; background: var(--bg-elevated); color: var(--text-primary);
+}
+.ext-install-btn:hover { background: var(--accent); color: #fff; }
+.ext-install-progress {
+  flex: 1; min-width: 0; height: 8px; border-radius: 5px; overflow: hidden;
+  background: var(--bg-surface); border: 1px solid var(--border-dim);
+}
+.ext-install-bar { height: 100%; background: var(--accent); transition: width 0.2s; }
+.ext-install-msg { font-size: 11px; color: var(--text-muted); flex-shrink: 0; max-width: 45%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-install-cancel {
+  flex: 0 0 auto; height: 26px; padding: 0 9px; cursor: pointer; font-size: 11px;
+  border: 1px solid var(--border-dim); border-radius: 7px; background: transparent; color: var(--text-muted);
+}
+.ext-install-note { margin-top: 5px; font-size: 11px; padding: 4px 8px; border-radius: 7px; }
+.ext-install-note.ext-install-ok { color: #5fd38a; background: rgba(80, 200, 120, 0.1); }
+.ext-install-note.ext-install-error { color: #ff7a7a; background: rgba(255, 99, 99, 0.1); }
 .ext-row { border: 1px solid var(--border-dim); border-radius: 9px; background: var(--bg-elevated); padding: 8px 10px; }
 .ext-row-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .ext-info { min-width: 0; flex: 1; }

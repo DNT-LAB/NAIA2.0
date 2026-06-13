@@ -34,6 +34,10 @@ export function createExtensionsUi(deps) {
   let openMenuId = null;
   let quickPopupId = null; // 열려 있는 퀵 팝업의 확장 id
   let navBound = false;
+  // GitHub URL 설치(REST /api/extensions/install) 진행 상태 + 입력 드래프트.
+  let installState = null;
+  let installUrlDraft = '';
+  let installPollTimer = null;
 
   // ── 공용: 칩/필드 렌더러 (설정 페이지·퀵 팝업 공유) ──────────
   function chipFor(ext) {
@@ -425,6 +429,88 @@ export function createExtensionsUi(deps) {
     }
   }
 
+  // ── GitHub URL 설치 (REST + 진행률 폴링) ─────────────────────
+  function installFormHtml() {
+    const active = installState && installState.active;
+    if (active) {
+      const pct = Math.max(0, Math.min(100, installState.percent || 0));
+      return `<div class="ext-install-github ext-install-running">
+        <div class="ext-install-progress">
+          <div class="ext-install-bar" style="width:${pct}%"></div>
+        </div>
+        <span class="ext-install-msg">${escHtml(installState.message || '설치 중...')}</span>
+        <button type="button" class="ext-install-cancel">취소</button>
+      </div>`;
+    }
+    const note = installState && installState.error
+      ? `<div class="ext-install-note ext-install-error">${escHtml(installState.error)}</div>`
+      : (installState && installState.done && installState.installed_name
+        ? `<div class="ext-install-note ext-install-ok">'${escHtml(installState.installed_name)}' 설치됨 — 아래에서 승인하세요.</div>`
+        : '');
+    return `<div class="ext-install-github">
+      <input type="text" class="ext-install-url" placeholder="https://github.com/owner/repo"
+        value="${escHtml(installUrlDraft)}" spellcheck="false">
+      <button type="button" class="ext-install-btn">GitHub에서 설치</button>
+    </div>${note}`;
+  }
+
+  async function postInstall(path, body) {
+    const res = await fetch(`/api/extensions/install${path}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {}),
+    });
+    return res.json();
+  }
+
+  function stopInstallPoll() {
+    if (installPollTimer) { clearInterval(installPollTimer); installPollTimer = null; }
+  }
+
+  function startInstallPoll() {
+    stopInstallPoll();
+    installPollTimer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/extensions/install');
+        const state = await res.json();
+        installState = state;
+        if (!state.active) {
+          stopInstallPoll();
+          if (state.done && state.installed_id) {
+            installUrlDraft = '';
+            showToast(`확장 '${state.installed_name || state.installed_id}' 설치됨 — 승인하면 사용됩니다.`, 'success');
+            if (typeof requestState === 'function') requestState(); // 재발견(미승인 등록)
+          } else if (state.error) {
+            showToast(`설치 실패: ${state.error}`, 'error');
+          }
+        }
+        renderSettingsPane();
+      } catch (_) { /* 폴링 실패는 다음 틱에 복구 */ }
+    }, 600);
+  }
+
+  async function startInstall(url) {
+    const target = String(url || '').trim();
+    if (!target) { showToast('GitHub 주소를 입력하세요.', 'error'); return; }
+    installState = {active: true, percent: 0, message: '설치 준비 중...', error: '', done: false};
+    renderSettingsPane();
+    try {
+      const state = await postInstall('', {url: target});
+      if (state && state.ok === false) {
+        installState = {active: false, error: state.error || '설치 시작 실패', done: false};
+        showToast(state.error || '설치 시작 실패', 'error');
+        renderSettingsPane();
+        return;
+      }
+      installState = state;
+      startInstallPoll();
+      renderSettingsPane();
+    } catch (error) {
+      installState = {active: false, error: String(error), done: false};
+      renderSettingsPane();
+    }
+  }
+
   function renderSettingsPane() {
     const root = pane();
     if (!root || !lastState) return;
@@ -436,7 +522,7 @@ export function createExtensionsUi(deps) {
         <code class="ext-install-path" title="${escHtml(lastState.install_dir || '')}">${escHtml(lastState.install_dir || '')}</code>
         <button class="ext-copy-install">복사</button>
         ${errors ? `<button class="ext-retry-all">오류 ${errors}건 재시도</button>` : ''}
-      </div>`;
+      </div>${installFormHtml()}`;
     const body = items.length
       ? items.map(rowHtml).join('')
       : `<div class="ext-empty">설치된 확장이 없습니다.<br>
@@ -494,6 +580,21 @@ export function createExtensionsUi(deps) {
     });
     const copyInstall = root.querySelector('.ext-copy-install');
     if (copyInstall) copyInstall.addEventListener('click', () => copyText(lastState?.install_dir || ''));
+    // GitHub URL 설치 폼.
+    const urlInput = root.querySelector('.ext-install-url');
+    if (urlInput) {
+      urlInput.addEventListener('input', () => { installUrlDraft = urlInput.value; });
+      urlInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault(); startInstall(urlInput.value); }
+      });
+    }
+    const installBtn = root.querySelector('.ext-install-btn');
+    if (installBtn) installBtn.addEventListener('click', () =>
+      startInstall(root.querySelector('.ext-install-url')?.value || installUrlDraft));
+    const cancelBtn = root.querySelector('.ext-install-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', async () => {
+      await postInstall('/cancel', {});
+    });
     root.querySelectorAll('.ext-placement-select').forEach(el => {
       el.addEventListener('change', () => {
         setModuleParam('extensions', `placement:${el.dataset.ext}`, el.value);

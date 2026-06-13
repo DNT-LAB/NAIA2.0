@@ -400,7 +400,7 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Character Viewer tab module', error);
   });
-const studioTabReady = import('./js/features/studioTab.mjs?v=20260613-studio-frame1')
+const studioTabReady = import('./js/features/studioTab.mjs?v=20260613-studio-io1')
   .then(({createStudioTabController}) => {
     studioTabControl = createStudioTabController({
       document,

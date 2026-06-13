@@ -1117,6 +1117,13 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.studio-toolbar-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 20px;
+  margin: 0 2px;
+  background: var(--border-dim);
+}
 .studio-toolbar button,
 .studio-editor-actions button,
 .studio-editor-head-actions button,
@@ -16780,7 +16787,10 @@ body.detached-module .mod-grid-3 {
 .ext-chip-error { background: rgba(255, 99, 99, 0.15); color: #ff7a7a; }
 .ext-chip-muted { background: var(--bg-surface); color: var(--text-muted); }
 .ext-chip-loading { background: rgba(108, 182, 255, 0.15); color: #6cb6ff; }
-.ext-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.ext-controls { display: flex; align-items: flex-start; gap: 6px; flex-shrink: 0; }
+/* 전역 정책 콤보 묶음: 퀵 버튼 위치 / 시작 동작 / 입력 필드 (세로 스택) */
+.ext-policies { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+.ext-policies .ext-placement { justify-content: flex-end; }
 .ext-menu-btn {
   border: 1px solid var(--border-dim); background: transparent; color: var(--text-muted);
   border-radius: 7px; width: 26px; height: 22px; cursor: pointer; font-size: 13px; line-height: 1;

@@ -16,12 +16,21 @@ export function createStudioTabController({
   confirmDialog = async () => false,
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout,
+  BlobRef = globalThis.Blob,
+  URLRef = globalThis.URL,
+  FileReaderRef = globalThis.FileReader,
 }) {
   const root = document.getElementById('studioRoot');
   const STORAGE_KEY = 'naia.studio.v1';
   const DEFAULT_FRAME_COUNT = 9;
   const GENERATION_IDLE_GRACE_MS = 3500;
   const SEED_MODES = new Set(['random', 'reuse_previous', 'increment_previous']);
+  // JSON Export/Import 계약 (Codex 설계 검토).
+  const EXPORT_TYPE = 'naia.studio.board';
+  const EXPORT_VERSION = 1;
+  const MAX_IMPORT_BYTES = 16 * 1024 * 1024;  // 이미지 미포함 보드는 작음 — 악성 거대 파일 방어용 상한
+  const MAX_IMPORT_FRAMES = 300;
+  let importing = false;
   let state = createDefaultState();
   let selectedIndex = 0;
   let queue = [];
@@ -121,31 +130,39 @@ export function createStudioTabController({
     selectedIndex = Math.max(0, Math.min(selectedIndex, state.frames.length - 1));
   }
 
+  function serializeBoardState() {
+    // 영속(saveState)과 JSON 내보내기(exportBoard)가 공유하는 단일 직렬화 — 필드 드리프트 방지.
+    // frameImages(생성 결과 objectURL)는 휘발성이라 의도적으로 제외한다.
+    return {
+      prefix: state.prefix,
+      postfix: state.postfix,
+      globalNegative: state.globalNegative,
+      globalResolution: state.globalResolution,
+      repeat: state.repeat,
+      seedMode: state.seedMode,
+      fixSeed: state.fixSeed,
+      frames: state.frames.map(frame => ({
+        id: frame.id,
+        name: frame.name,
+        enabled: frame.enabled,
+        prompt: frame.prompt,
+        negative: frame.negative,
+        resolution: frame.resolution,
+        seed: frame.seed,
+        runCount: frame.runCount,
+        lastSeed: frame.lastSeed,
+        lastUpdated: frame.lastUpdated,
+      })),
+    };
+  }
+
   function saveState() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        prefix: state.prefix,
-        postfix: state.postfix,
-        globalNegative: state.globalNegative,
-        globalResolution: state.globalResolution,
-        repeat: state.repeat,
-        seedMode: state.seedMode,
-        fixSeed: state.fixSeed,
-        frames: state.frames.map(frame => ({
-          id: frame.id,
-          name: frame.name,
-          enabled: frame.enabled,
-          prompt: frame.prompt,
-          negative: frame.negative,
-          resolution: frame.resolution,
-          seed: frame.seed,
-          runCount: frame.runCount,
-          lastSeed: frame.lastSeed,
-          lastUpdated: frame.lastUpdated,
-        })),
-      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeBoardState()));
+      return true;
     } catch (error) {
       console.warn('Studio state save failed', error);
+      return false;
     }
   }
 
@@ -455,6 +472,10 @@ export function createStudioTabController({
             <button type="button" data-studio-action="capture-current-new">현재 캡처</button>
             <button type="button" data-studio-action="toggle-import">줄별 배치</button>
             <button type="button" data-studio-action="add-frame">빈 프레임</button>
+            <span class="studio-toolbar-sep" aria-hidden="true"></span>
+            <button type="button" data-studio-action="export-board">JSON 내보내기</button>
+            <button type="button" data-studio-action="import-board" ${running || activeJob ? 'disabled' : ''}>JSON 불러오기</button>
+            <span class="studio-toolbar-sep" aria-hidden="true"></span>
             <button type="button" data-studio-action="reset-frames" ${running || activeJob ? 'disabled' : ''}>초기화</button>
             <button type="button" data-studio-action="start-sequence" class="primary" ${running || activeJob ? 'disabled' : ''}>순차 생성</button>
             <button type="button" data-studio-action="stop-sequence" class="danger" ${running || activeJob ? '' : 'disabled'}>중지</button>
@@ -730,6 +751,190 @@ export function createStudioTabController({
     render();
   }
 
+  function boardHasContent() {
+    if (state.prefix.trim() || state.postfix.trim() || state.globalNegative.trim()) return true;
+    return state.frames.some(frame =>
+      frame.prompt.trim() || frame.negative.trim() || frame.name.trim() || frameImages.get(frame.id));
+  }
+
+  function exportTimestamp() {
+    // app 코드라 new Date() 사용 가능(Workflow 스크립트 제한과 무관). 파일명용 로컬 타임스탬프.
+    const now = new Date();
+    const pad = value => String(value).padStart(2, '0');
+    return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+      + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  }
+
+  function exportBoard() {
+    // export는 읽기 전용 스냅샷 — 생성 중에도 허용 (Codex 설계 검토).
+    let url = '';
+    try {
+      const payload = {
+        type: EXPORT_TYPE,
+        version: EXPORT_VERSION,
+        exportedAt: new Date().toISOString(),
+        storageKey: STORAGE_KEY,
+        board: serializeBoardState(),
+      };
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new BlobRef([json], {type: 'application/json'});
+      url = URLRef.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `naia-studio-${exportTimestamp()}.json`;
+      if (document.body) document.body.appendChild(anchor);
+      anchor.click();
+      if (anchor.remove) anchor.remove();
+      showToast(`Studio 보드를 JSON으로 내보냈습니다 (${state.frames.length} 프레임)`, 'success');
+    } catch (error) {
+      console.error('Studio export failed', error);
+      showToast('Studio 내보내기에 실패했습니다', 'error');
+    } finally {
+      if (url) setTimeoutFn(() => { try { URLRef.revokeObjectURL(url); } catch (_) { /* noop */ } }, 0);
+    }
+  }
+
+  function parseImportPayload(text) {
+    let raw = String(text ?? '');
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);  // UTF-8 BOM 제거
+    if (raw.length > MAX_IMPORT_BYTES) return {ok: false, error: '파일이 너무 큽니다'};
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (_) {
+      return {ok: false, error: 'JSON 형식이 올바르지 않습니다'};
+    }
+    if (!parsed || typeof parsed !== 'object' || parsed.type !== EXPORT_TYPE) {
+      return {ok: false, error: 'NAIA Studio 보드 파일이 아닙니다'};
+    }
+    // 버전 검증: 모르는(상위) 버전은 의미가 달라졌을 수 있어 조용히 받지 않는다 (Codex V8).
+    const fileVersion = Number(parsed.version);
+    if (!Number.isFinite(fileVersion) || fileVersion < 1) {
+      return {ok: false, error: '버전 정보가 없는 파일입니다'};
+    }
+    if (fileVersion > EXPORT_VERSION) {
+      return {ok: false, error: '더 최신 버전에서 만든 파일입니다. 앱을 업데이트하세요'};
+    }
+    const board = parsed.board;
+    if (!board || typeof board !== 'object' || !Array.isArray(board.frames)) {
+      return {ok: false, error: '보드 데이터가 없습니다'};
+    }
+    // 명시적 import는 빈 frames를 9칸 기본값으로 슬그머니 만들지 않는다(sanitizeState 폴백과 분리).
+    if (!board.frames.length) return {ok: false, error: '프레임이 비어 있는 파일입니다'};
+    if (board.frames.length > MAX_IMPORT_FRAMES) {
+      return {ok: false, error: `프레임이 너무 많습니다 (최대 ${MAX_IMPORT_FRAMES}개)`};
+    }
+    return {ok: true, board};
+  }
+
+  function readFileText(file) {
+    return new Promise((resolve, reject) => {
+      let reader;
+      try {
+        reader = new FileReaderRef();
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(reader.error || new Error('file read failed'));
+      reader.onabort = () => reject(new Error('file read aborted'));
+      reader.readAsText(file);
+    });
+  }
+
+  function applyImportedBoard(board) {
+    // sanitizeState로 모든 필드 정규화 후, 파일 내 중복/라이브 frameImages 키 충돌을 막기 위해
+    // 프레임 id를 새로 발급한다 (Codex 설계 검토).
+    const sanitized = sanitizeState(board);
+    sanitized.frames = sanitized.frames.map((frame, index) => ({
+      ...frame,
+      id: createFrame(index).id,
+      status: 'idle',
+    }));
+    frameImages.forEach(objectUrl => { try { URLRef.revokeObjectURL(objectUrl); } catch (_) { /* noop */ } });
+    frameImages.clear();
+    queue = [];
+    activeJob = null;
+    running = false;
+    state = sanitized;
+    selectedIndex = 0;
+    editorOpen = false;
+    const saved = saveState();
+    render();
+    if (saved) showToast(`Studio 보드를 불러왔습니다 (${state.frames.length} 프레임)`, 'success');
+    else showToast('불러왔지만 저장 공간이 부족해 영속되지 않았습니다', 'error');
+  }
+
+  async function handleImportFile(file) {
+    if (!file) return;
+    if (running || activeJob) {
+      showToast('Studio 생성이 끝난 뒤 불러오세요', 'error');
+      return;
+    }
+    if (importing) return;
+    if (Number(file.size) > MAX_IMPORT_BYTES) {
+      showToast('파일이 너무 큽니다', 'error');
+      return;
+    }
+    importing = true;
+    try {
+      let text;
+      try {
+        text = await readFileText(file);
+      } catch (error) {
+        console.error('Studio import read failed', error);
+        showToast('파일을 읽지 못했습니다', 'error');
+        return;
+      }
+      const result = parseImportPayload(text);
+      if (!result.ok) {
+        showToast(result.error, 'error');
+        return;
+      }
+      // 파일 읽기(async) 사이에 생성이 시작됐을 수 있다 — 재검사.
+      if (running || activeJob) {
+        showToast('Studio 생성이 끝난 뒤 불러오세요', 'error');
+        return;
+      }
+      if (boardHasContent()) {
+        const confirmed = await Promise.resolve(confirmDialog(
+          '현재 Studio 보드를 불러온 내용으로 교체할까요?',
+          {title: 'Studio 불러오기', okText: '불러오기', cancelText: '취소'},
+        ));
+        if (!confirmed) return;
+        if (running || activeJob) {
+          showToast('Studio 생성이 끝난 뒤 불러오세요', 'error');
+          return;
+        }
+      }
+      applyImportedBoard(result.board);
+    } finally {
+      importing = false;
+    }
+  }
+
+  function importBoard() {
+    if (running || activeJob) {
+      showToast('Studio 생성이 끝난 뒤 불러오세요', 'error');
+      return;
+    }
+    if (importing) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json';
+    if (input.style) input.style.display = 'none';
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      if (input.remove) input.remove();
+      // 같은 파일 재선택 시 change가 다시 발화하도록 value 리셋(분리 전이라 무해).
+      try { input.value = ''; } catch (_) { /* noop */ }
+      handleImportFile(file);
+    });
+    if (document.body) document.body.appendChild(input);
+    input.click();
+  }
+
   function frameFromLine(line, index) {
     return {
       ...createFrame(index),
@@ -924,6 +1129,8 @@ export function createStudioTabController({
     else if (action === 'clear-frame') clearSelectedFrame();
     else if (action === 'capture-current-new') captureCurrentAsNewFrame();
     else if (action === 'add-frame') addFrame();
+    else if (action === 'export-board') exportBoard();
+    else if (action === 'import-board') importBoard();
     else if (action === 'reset-frames') resetFrames();
     else if (action === 'toggle-global') {
       globalOpen = !globalOpen;

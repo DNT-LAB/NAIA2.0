@@ -326,7 +326,7 @@ _FEMALE_ANATOMY_MARKERS = (
 # 요청이 이걸 명시하면 성별 가드 면제(여성+남성기 등 의도적 조합).
 _INTERSEX_REQUEST_MARKERS = (
     "futa", "futanari", "newhalf", "dickgirl", "shemale", "trap", "otokonoko",
-    "intersex", "futafem", "남녀", "이상", "후타",
+    "intersex", "futafem", "후타", "후타나리", "인터섹스", "간성", "양성구유", "남녀추니",
 )
 
 
@@ -411,6 +411,15 @@ def _forced_act_kw_hit(keywords: tuple[str, ...], haystack: str) -> bool:
     """forced act 키워드 매칭. forced act 루프와 _resolve_max_rating(auto 추론)이 공유
     — 한국어 행위어 단일 출처. 매칭 규칙은 _kw_in_text(어근/완전단어 구분)."""
     return any(_kw_in_text(kw, haystack) for kw in keywords)
+
+
+def _intersex_marker_in_text(marker: str, haystack: str) -> bool:
+    """성별 해부학 가드 면제 마커 매칭.
+
+    영어/라틴 마커는 단어 경계를 지켜 strapless/trapped/trapeze 같은 일상어 오탐을
+    막고, 한국어 마커는 띄어쓰기 없는 입력을 고려해 제한된 명시어만 부분일치한다.
+    """
+    return _kw_in_text(marker, haystack)
 
 
 # 등급 수위 다이얼 — forced act가 등급 상한을 넘을 때 "생략"이 아니라 그 등급에서
@@ -885,7 +894,7 @@ _VERIFY_INSTRUCTION = (
 )
 
 
-# 주입 게이트 — 코드가 만든 보강 제안(복원·e621 부스트·이벤트 참조)을 무조건 주입하지
+# 주입 게이트 — 코드가 만든 보강 제안(e621 부스트·이벤트 참조)을 무조건 주입하지
 # 않고, 모델이 "이 장면에 맞는가"를 보고 승인한 것만 넣는다. verify 패스(기본 OFF,
 # recall 0.645→0.578 회귀)와 달리 enum이 *제안 목록뿐*이라 — 과제거의 최악에도 잃는 건
 # 보강분뿐, 핵심 장면 태그는 구조적으로 못 건드린다. 불확실하면 거부(보강은 옵션).
@@ -1543,10 +1552,31 @@ class OllamaTagAssistService:
         request_stems -= (_retriever_stems(" ".join(_negated_only)) - _retriever_stems(" ".join(_affirmed)))
         # 성별 해부학 가드 면제 — 요청이 futanari/trap 등 의도적 양성 조합을 명시하면
         # 반대 성별 해부학을 허용한다(원문 한국어 + 번역문 양쪽 검사).
+        _intersex_haystack = f" {original_text.lower()} {request_text.lower()} "
         _intersex_request = any(
-            m in f" {original_text.lower()} {request_text.lower()} "
+            _intersex_marker_in_text(m, _intersex_haystack)
             for m in _INTERSEX_REQUEST_MARKERS
         )
+
+        # 의도보존 관계 anchor(결정론·fail-closed) — 원문/번역에서 관계(부녀/모자/가족…)를
+        # 회수해 관계 태그(father and daughter 등)를 출력에 보존한다. 번역+1girl/1boy 압축으로
+        # 관계가 증발하던 문제 수정. anchor 없으면 빈 packet → 무변경(관계 환각 0). LLM 호출 0.
+        # 강한 제약(자연어 prune)은 두지 않고 soft contract로만 안내(개인 편집 가능).
+        from core.scene_anchors import extract_scene_anchors, family_safe_contract_line
+
+        scene_anchors = extract_scene_anchors(
+            original_text, request_text, negated_words=_negated_only
+        )
+        # 관계 태그 1개만 강제 — most-specific 우선, 인덱스+등급 검증 통과하는 첫 1개.
+        forced_relations: list[dict[str, Any]] = []
+        for _rel in scene_anchors.get("relationships", ()):
+            _rel_norm = str(_rel).strip().lower().replace("_", " ")
+            if not _rel_norm or not _tag_allowed(_rel_norm, max_rating):
+                continue
+            _rel_valid = self._validate_tag(_rel_norm)
+            if _rel_valid:
+                forced_relations.append(_rel_valid)
+                break
 
         # 코드 — 후보 검색 (진실은 NAIA 태그 인덱스)
         step_no += 1
@@ -1936,6 +1966,14 @@ class OllamaTagAssistService:
                 continue
             seen.add(tag)
             selected.append(item)
+        # 관계 anchor 태그(부녀 등)를 강제 포함 — 인원수 태그처럼 핵심 의도라 LLM 선택에
+        # 맡기지 않는다. _protected에도 들어가 injection gate/2인 가드가 제거하지 못한다.
+        for item in forced_relations:
+            tag = item["tag"]
+            if tag in seen:
+                continue
+            seen.add(tag)
+            selected.append(item)
         for tag in picked.get("selected") or []:
             tag = str(tag or "").strip()
             if tag and tag in candidate_info and tag not in seen:
@@ -1950,7 +1988,6 @@ class OllamaTagAssistService:
         # 선정 기준은 count 최대가 아니라 *개념 쿼리 스템 겹침* 우선(겹침 0이면 복원 포기) —
         # count 최대는 'school hallway'(배경)에 hasu no sora school uniform(작품 교복,
         # 10k>hallway 5k)을 주입하는 실측 사고를 냈다. 겹침 기준이면 school/hallway가 이긴다.
-        recovery_added: set[str] = set()
         for c in concept_results:
             if c["kind"] not in ("subject", "clothing", "background"):
                 continue
@@ -1972,9 +2009,8 @@ class OllamaTagAssistService:
                 continue
             seen.add(top)
             selected.append(candidate_info[top])
-            recovery_added.add(top)
 
-        _protected = {it["tag"] for it in forced_subjects}
+        _protected = {it["tag"] for it in forced_subjects} | {it["tag"] for it in forced_relations}
 
         # 2인 관계 태그 가드(결정론·전단): 확정 인원이 정확히 1명인데 본질적 2인 태그
         # (heads together/holding hands류)가 선택에 끼면 — 오염된 후보 enum에서의
@@ -2005,7 +2041,6 @@ class OllamaTagAssistService:
             return not _opposite_sex_anatomy(tag, girls=_girls_n, boys=_boys_n)
 
         selected = [it for it in selected if _two_person_ok(it["tag"]) and _sex_anatomy_ok(it["tag"])]
-        recovery_added &= {it["tag"] for it in selected}
 
         # 변형 축약: 같은 개념의 부분집합 변형(kimono/kimono dress/kimono only)을 한
         # canonical로 합친다. 강제 인원/행위 태그는 보존. ⚠️ 기본 OFF: 격리측정서
@@ -2112,10 +2147,11 @@ class OllamaTagAssistService:
                 event_enrich.append({"tag": tag, "count": weight, "category": "event"})
                 event_added.append(tag)
 
-        # 주입 게이트(LLM 1콜) — 코드가 만든 보강 제안(복원·e621 부스트·이벤트 참조)을
+        # 주입 게이트(LLM 1콜) — 코드가 만든 보강 제안(e621 부스트·이벤트 참조)을
         # 무조건 주입하지 않고, 모델이 장면 적합성을 승인한 것만 넣는다. enum이 제안
-        # 목록뿐이라 최악(전부 거부)에도 잃는 건 보강분뿐 — verify 패스의 recall 회귀와
-        # 구조적으로 다르다. 거부된 태그는 seen에 남겨 enhance 재유입도 차단. 게이트
+        # 목록뿐이라 최악(전부 거부)에도 잃는 건 보강분뿐 — recovery로 복원한 핵심
+        # subject/clothing/background 앵커는 이미 selected의 core tag이며 게이트가
+        # 제거하지 않는다. 거부된 태그는 seen에 남겨 enhance 재유입도 차단. 게이트
         # 자체가 실패하면(LLM 다운 등) 결정론 가드를 통과한 제안을 그대로 쓴다(best-effort).
         # finish(호출 3)보다 앞에 둬서 자연어/보완 생성이 오염된 tags_so_far를 보지 않게 한다.
         injection_rejected: list[str] = []
@@ -2123,8 +2159,7 @@ class OllamaTagAssistService:
             proposals: list[str] = []
             _p_seen: set[str] = set()
             for t in (
-                [it["tag"] for it in selected if it["tag"] in recovery_added]
-                + [it["tag"] for it in boosted]
+                [it["tag"] for it in boosted]
                 + [it["tag"] for it in event_enrich]
             ):
                 if t not in _p_seen:
@@ -2138,7 +2173,6 @@ class OllamaTagAssistService:
                         "request": request_text,
                         "core_tags": [
                             it["tag"].replace("_", " ") for it in selected
-                            if it["tag"] not in recovery_added
                         ],
                         "proposed_extras": proposals,
                     },
@@ -2155,10 +2189,6 @@ class OllamaTagAssistService:
                     rej = {t for t in proposals if t not in approved}
                     if rej:
                         injection_rejected = [t for t in proposals if t in rej]
-                        selected = [
-                            it for it in selected
-                            if not (it["tag"] in rej and it["tag"] in recovery_added)
-                        ]
                         boosted = [it for it in boosted if it["tag"] not in rej]
                         event_enrich = [it for it in event_enrich if it["tag"] not in rej]
                         event_added = [t for t in event_added if t not in rej]
@@ -2188,7 +2218,7 @@ class OllamaTagAssistService:
                     _finish_instruction(
                         enhance_max=enhance_max, natural_max=natural_max,
                         nat_words=cfg["nat_words"],
-                    ) + finish_user,
+                    ) + family_safe_contract_line(scene_anchors) + finish_user,
                     _FINISH_SCHEMA, model=target_model, temperature=0.4,
                 )
             except Exception:

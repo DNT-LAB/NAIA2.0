@@ -432,6 +432,50 @@ class HeadlessPromptEngineeringService:
             context.save_remote_ui_state()
             context.publish("remote_params_changed", context.generation_param_schema_payload())
 
+    def restore_main_prompt_from_preset(self) -> bool:
+        """Bug 2b — lazy empty-prompt restore. When the active mode's main prompt
+        box is empty, pull the matched (last-used, else resolved current) preset's
+        ``main_settings.prompt`` into it and persist that into the mode's prompt
+        plane. Returns True iff a non-empty prompt was restored.
+
+        No-op (returns False) when the box already has content, no preset matches,
+        or the preset's stored prompt is empty — the caller then falls back to a
+        single Random. Only the main prompt is restored; the negative prompt has
+        its own plane and is intentionally left untouched (the user's request was
+        specifically about the *main* prompt)."""
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        context = self.context
+        if str(context.prompt_text or "").strip():
+            return False
+        store = get_prompt_engineering_store(context)
+        mode = context.get_api_mode()
+        # Resolve to the *validated* current preset, not the raw last-used name:
+        # store.state() already resolves a stale/nonexistent last-used preset down
+        # to "default", so this also covers the "matched (last-used) preset" the
+        # request means without us re-implementing that fallback (Codex finding).
+        try:
+            preset_name = str(store.state(mode).get("current_preset") or "")
+        except Exception:
+            preset_name = ""
+        if not preset_name or preset_name in {"*randomized", "(프리셋 없음)"}:
+            return False
+        try:
+            preset_data = store.read_preset_data(preset_name, mode)
+        except Exception:
+            preset_data = None
+        main_settings = preset_data.get("main_settings") if isinstance(preset_data, dict) else None
+        prompt = (
+            str((main_settings or {}).get("prompt") or "").strip()
+            if isinstance(main_settings, dict)
+            else ""
+        )
+        if not prompt:
+            return False
+        context.prompt_text = prompt
+        context.save_remote_ui_state()
+        return True
+
     def _webui_remote_options(self, option_key: str) -> list[str]:
         context = self.context
         option_cache = getattr(context, "remote_option_cache", {}) or {}

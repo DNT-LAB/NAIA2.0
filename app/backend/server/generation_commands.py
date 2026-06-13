@@ -490,6 +490,53 @@ async def handle_bootstrap_random_command(
         context.bootstrap_random_prompt_inflight = False
 
 
+async def run_random_fallback_for_empty_prompt(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    *,
+    broadcast_json: BroadcastJson,
+) -> bool:
+    """Bug 2b final fallback — when the prompt box is still empty after the preset
+    restore (mode switch), run a single Random so a freshly-entered mode never
+    shows an empty box. Mirrors the bootstrap-random path (sync boost + persist +
+    broadcast result/wildcard state) but carries NO bootstrap guards and dispatches
+    NO auto-generation. Returns True iff a non-empty prompt was produced.
+
+    Best-effort: any failure is swallowed (logged) and returns False so a Random
+    hiccup never aborts the surrounding mode switch — the box just stays empty."""
+    if str(context.prompt_text or "").strip():
+        return False
+    try:
+        # This advances the pool just like a manual/REST Random, so discard any
+        # Auto Gen prefetch reservation first (parity with handle_random_command).
+        invalidate_auto_gen_prefetch(context)
+        active_ratings = context.get_active_ratings()
+        result = await asyncio.to_thread(
+            random_service(context).generate,
+            active_ratings=active_ratings,
+            overrides=None,
+            random_request_id="",
+        )
+        # 단발 random과 동일하게 그 시점 동기 부스트 적용(Ollama Auto Boost ON일 때).
+        await apply_ollama_auto_boost(context, result)
+        await persist_prompt_engineering_settings(context)
+        if getattr(result, "success", False):
+            payload = result.websocket_payload()
+            # Tag as bootstrap_random so the client accepts it as a non-pending
+            # generated prompt (full apply: box + generated-resolution + highlight).
+            # The default source "random" is only accepted against a pending user
+            # Random, so it would silently drop here (Codex finding).
+            payload["source"] = "bootstrap_random"
+            await broadcast_json(clients, payload)
+            for message in result.extra_messages:
+                await broadcast_json(clients, message)
+            await _broadcast_wildcard_state(context, clients)
+        return bool(getattr(result, "success", False) and str(context.prompt_text or "").strip())
+    except Exception as exc:  # noqa: BLE001 — never let the fallback break mode switch
+        print(f"Remote Web: empty-prompt Random fallback failed: {exc}", flush=True)
+        return False
+
+
 async def handle_generate_command(
     ws: WebSocket,
     context: WebSessionContext,

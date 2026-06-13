@@ -201,9 +201,36 @@ async def _handle_set_mode(
         await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
         return
     context.set_api_mode(requested_mode)
+    # Bug 2b — lazy empty-prompt restore for the mode we just entered. set_api_mode
+    # activated this mode's prompt plane (blank if it was never used this session).
+    # When the box is blank AND Prompt Fixed is off: (a) restore the matched
+    # (last-used) preset's main_settings.prompt; (b) if that is empty too, run a
+    # single Random so the box is never left empty on mode entry. Skipped entirely
+    # when Prompt Fixed is on (the user pinned whatever prompt was there).
+    #
+    # Runs BEFORE the first-run recommended preset below — that's intentional and
+    # safe: the recommended preset only seeds params/negative/module-settings, never
+    # the main prompt, so it can't overwrite (or be overwritten by) this. Whatever
+    # this lands in the box is persisted to the mode's plane, so later switches back
+    # find it remembered and skip this entirely.
+    pe_service = context._prompt_engineering_service()
+    if not context.get_options().get("prompt_fixed") and not str(context.prompt_text or "").strip():
+        try:
+            restored = pe_service.restore_main_prompt_from_preset()
+        except Exception as exc:  # noqa: BLE001 — never let restore break mode switch
+            print(f"Remote Web: empty-prompt preset restore failed: {exc}", flush=True)
+            restored = False
+        if not restored:
+            from app.backend.server.generation_commands import (
+                run_random_fallback_for_empty_prompt,
+            )
+
+            await run_random_fallback_for_empty_prompt(
+                context, clients, broadcast_json=broadcast_json
+            )
     # Per-mode prompt memory: set_api_mode swapped in the target mode's stored
-    # prompt. Push it so the main prompt box reflects THIS mode's prompt (force:
-    # the previous mode's prompt is no longer valid here). Mirrors prompt_sync.
+    # prompt (possibly just restored above). Push it so the main prompt box reflects
+    # THIS mode's prompt (force: the previous mode's prompt is no longer valid here).
     await broadcast_json(clients, {
         "type": "prompt_sync",
         "prompt": context.prompt_text,
@@ -213,7 +240,7 @@ async def _handle_set_mode(
     })
     if requested_mode in {"WEBUI", "COMFYUI"}:
         await run_in_thread(context.refresh_api_options, requested_mode)
-    recommended_payloads = context._prompt_engineering_service().ensure_first_run_recommended_preset_payloads()
+    recommended_payloads = pe_service.ensure_first_run_recommended_preset_payloads()
     await broadcast_json(clients, {
         "type": "mode_result",
         "success": True,

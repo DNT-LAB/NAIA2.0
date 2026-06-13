@@ -16,8 +16,6 @@ export function createPromptEngineeringPopupRenderers({
     '자연어 가중치 — 보강된 자연어 프롬프트에 부여할 가중치입니다. '
     + 'NAI는 {v}::..:: , 로컬(WEBUI/COMFYUI)은 (..:v) 구문으로 적용됩니다.\\n\\n'
     + 'Effort — 보강 자연어의 길이·창의성. 간결(concise) / 표준(standard) / 풍부(rich).\\n\\n'
-    + 'Scene Brief — Danbooru 태그를 먼저 제한된 장면 요약으로 읽은 뒤, 그 요약을 '
-    + '최종 보강 단계의 컨텍스트로 씁니다. 디테일은 좋아질 수 있지만 Ollama 호출이 1회 늘어납니다.\\n\\n'
     + 'Input 구성 — Ollama에 보낼 입력에 PE Prefix / PE Postfix / e621 Auto-Boost 태그를 '
     + '포함할지 선택합니다.\\n\\n'
     + '⚠️ Prefix / Postfix는 **와일드카드 출력만** 반영됩니다. 고정 아티스트·퀄리티 태그'
@@ -529,7 +527,6 @@ export function createPromptEngineeringPopupRenderers({
     const includePrefix = !!boost.include_prefix;
     const includePostfix = !!boost.include_postfix;
     const includeE621 = !!boost.include_e621;
-    const sceneBrief = boost.scene_brief !== false;
     const effortHtml = OLLAMA_BOOST_EFFORTS.map(([value, label]) => `
       <label class="mod-checkbox-item">
         <input type="radio" name="modOllamaBoostEffort" value="${escHtml(value)}"${effort === value ? ' checked' : ''}>
@@ -554,14 +551,6 @@ export function createPromptEngineeringPopupRenderers({
       <div class="mod-boost-head"><span class="mod-boost-name">Effort</span></div>
       <div class="mod-checkbox-grid" id="modOllamaBoostEffort">${effortHtml}</div>
       <div class="mod-boost-caption">보강 자연어의 길이·창의성(scene_boost level).</div>
-    </div>
-    <div class="mod-boost-block">
-      <div class="mod-boost-head"><span class="mod-boost-name">Scene Brief</span></div>
-      <label class="mod-checkbox-item">
-        <input type="checkbox" id="modOllamaBoostSceneBrief"${sceneBrief ? ' checked' : ''}>
-        <span class="mod-checkbox-label">Danbooru 태그를 먼저 장면 요약으로 정리</span>
-      </label>
-      <div class="mod-boost-caption">태그 증거 안에서 분위기와 디테일 방향을 먼저 추론한 뒤 보강합니다. Ollama 호출이 1회 늘어납니다.</div>
     </div>
     <div>
       <div class="mod-section-label">Input 구성</div>

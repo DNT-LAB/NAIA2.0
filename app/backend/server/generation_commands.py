@@ -315,14 +315,8 @@ async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bo
         settings = ollama_boost_settings(context)
         # [기능3] Ollama 입력 = 메인 장면 태그 + 선택된 prefix/postfix/e621(가중치 제거). 폴백=전체.
         boost_input = _build_boost_input(result, settings) or prompt
-        # 설정을 이 호출에 freeze해 입력 구성과 boost stage 옵션이 서로 갈라지지 않게 한다.
-        boosted = await asyncio.to_thread(
-            scene_boost_prompt,
-            context,
-            boost_input,
-            level=settings.get("effort"),
-            scene_brief=settings.get("scene_brief"),
-        )
+        # scene_boost_prompt가 Effort([기능2])를 레벨로 읽는다.
+        boosted = await asyncio.to_thread(scene_boost_prompt, context, boost_input)
         if not isinstance(boosted, dict) or not boosted.get("ok"):
             return False
         # 구도태그(무가중) + 자연어([기능1] nl_weight 래핑)를 메인 섹션 끝(e621 위치)에 삽입.

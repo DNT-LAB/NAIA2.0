@@ -168,7 +168,6 @@ export function createPromptEngineeringActions({
       include_prefix: !!document.getElementById('modOllamaBoostIncludePrefix')?.checked,
       include_postfix: !!document.getElementById('modOllamaBoostIncludePostfix')?.checked,
       include_e621: !!document.getElementById('modOllamaBoostIncludeE621')?.checked,
-      scene_brief: !!document.getElementById('modOllamaBoostSceneBrief')?.checked,
     };
     setModuleParam('prompt_engineering', 'ollama_boost_settings', JSON.stringify(payload));
   }

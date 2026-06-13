@@ -16968,6 +16968,12 @@ body.detached-module .mod-grid-3 {
   text-align: center; color: var(--text-muted); font-size: 12px; line-height: 1.9; padding: 18px 8px;
 }
 .ext-empty code { font-size: 11px; background: var(--bg-surface); border-radius: 5px; padding: 1px 5px; }
+.ext-empty-cta { margin-top: 12px; }
+.ext-install-sample {
+  cursor: pointer; height: 32px; padding: 0 16px; font-size: 12px; font-weight: 650;
+  border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: #fff;
+}
+.ext-install-sample:hover { filter: brightness(1.08); }
 
 /* ===== Settings 탭 (좌: 카테고리 네비, 우: 콘텐츠) ===== */
 .settings-root { display: flex; height: 100%; min-height: 0; }

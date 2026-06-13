@@ -89,6 +89,27 @@ def register_extension_install_routes(
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"설치 시작 실패: {exc}"}, status_code=500)
 
+    @app.post("/api/extensions/install/sample")
+    async def api_extension_install_sample(req: Request):
+        # 번들 샘플 확장 원클릭 설치(로컬 파일 복사) — GitHub 설치와 동일하게 loopback 전용.
+        if not _is_local_request(req):
+            return _loopback_only()
+        try:
+            body = await req.json()
+        except Exception:
+            body = {}
+        sample = str((body or {}).get("sample") or "seed_fanout").strip() or "seed_fanout"
+        runtime_paths = getattr(context, "runtime_paths", None)
+        if runtime_paths is None:
+            return JSONResponse({"ok": False, "error": "Runtime paths are not available"}, status_code=500)
+        samples_root = runtime_paths.resource_path("release_assets/samples/extensions")
+        try:
+            return await run_in_thread(
+                extension_install_service(context).install_sample, sample, samples_root
+            )
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"샘플 설치 실패: {exc}"}, status_code=500)
+
     @app.post("/api/extensions/install/cancel")
     async def api_extension_install_cancel(req: Request):
         if not _is_local_request(req):

@@ -487,6 +487,30 @@ export function createExtensionsUi(deps) {
     return res.json();
   }
 
+  // 번들 샘플(seed_fanout) 원클릭 설치 — 폴더를 손으로 옮기지 않아도 됨. 설치 후엔
+  // 재발견되어 discovered(미승인)로 뜨므로, 사용자는 기존대로 신뢰 승인을 거친다.
+  async function installSample() {
+    let state;
+    try {
+      state = await postInstall('/sample', {sample: 'seed_fanout'});
+    } catch (error) {
+      state = {ok: false, error: String(error)};
+    }
+    if (!state || state.ok === false || state.error) {
+      const msg = (state && state.error) || '샘플 설치 실패';
+      installState = (state && state.error) ? state : installState;
+      showToast(msg, 'error');
+      renderSettingsPane();
+      return;
+    }
+    installState = state;
+    if (state.installed_name) {
+      showToast(`'${state.installed_name}' 설치됨 — 아래에서 승인하세요.`, 'success');
+    }
+    if (typeof requestState === 'function') requestState(); // 재발견 + 패널 갱신
+    renderSettingsPane();
+  }
+
   function stopInstallPoll() {
     if (installPollTimer) { clearInterval(installPollTimer); installPollTimer = null; }
   }
@@ -551,7 +575,10 @@ export function createExtensionsUi(deps) {
       ? items.map(rowHtml).join('')
       : `<div class="ext-empty">설치된 확장이 없습니다.<br>
            위 폴더에 <code>&lt;확장-id&gt;/extension.json + main.py</code>를 넣으면 이 목록에 나타납니다.<br>
-           샘플: 릴리즈의 <code>release_assets/samples/extensions/seed_fanout</code> 폴더를 복사해 보세요.</div>`;
+           샘플 <code>seed_fanout</code>(여러장 생성-X/Y Plot)을 한 번에 설치할 수 있습니다.
+           <div class="ext-empty-cta">
+             <button type="button" class="ext-install-sample">샘플 바로 사용하기</button>
+           </div></div>`;
     root.innerHTML = `<div class="ext-panel">${head}${body}</div>`;
     bindSettingsPane(root);
     restoreFocus(root, saved);
@@ -586,6 +613,8 @@ export function createExtensionsUi(deps) {
     });
     const retryAll = root.querySelector('.ext-retry-all');
     if (retryAll) retryAll.addEventListener('click', () => setModuleParam('extensions', 'retry_errors', true));
+    const sampleBtn = root.querySelector('.ext-install-sample');
+    if (sampleBtn) sampleBtn.addEventListener('click', () => installSample());
     root.querySelectorAll('.ext-menu-btn').forEach(el => {
       el.addEventListener('click', () => {
         openMenuId = openMenuId === el.dataset.ext ? null : el.dataset.ext;

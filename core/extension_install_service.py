@@ -186,6 +186,53 @@ class ExtensionInstallService:
                 self._state["message"] = "설치 취소 중..."
         return self.snapshot()
 
+    def install_sample(self, sample_name: str, samples_root: Path | str) -> dict[str, Any]:
+        """번들 샘플 확장(``release_assets/samples/extensions/<name>``)을
+        ``user-data/extensions``로 복사한다. GitHub 설치와 달리 로컬 파일 복사라
+        동기·즉시(스레드/진행률 불요) — 일반 사용자가 폴더를 손으로 옮기지 않아도
+        '바로 사용하기'로 설치된다. **파일 배치까지만** 하며, 발견·승인은 기존 흐름이
+        처리한다(동의 모델 유지: 복사 후에도 ``discovered``로 떠서 사용자가 명시 승인해야
+        import 된다)."""
+        with self._lock:
+            if self._state.get("active"):
+                return dict(self._state)  # GitHub 설치 진행 중이면 양보(상태 공유)
+            # active를 *선점*한다(단순 확인이 아니라) — 확인~_place 사이에 GitHub start()가
+            # active=false로 끼어들어 동시 _place/_state 접근하는 TOCTOU 방지(Codex).
+            self._state = self._idle_state()
+            self._state.update({
+                "active": True, "phase": "sample", "percent": 0,
+                "message": "샘플 설치 중...",
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            })
+        try:
+            samples_resolved = Path(samples_root).resolve()
+            source = (samples_resolved / _safe_dir_name(sample_name)).resolve()
+            # path 탈출 방어: 정규화된 source가 samples 루트 안에 있어야 한다.
+            if not source.is_relative_to(samples_resolved):
+                raise ExtensionInstallError("샘플 경로가 올바르지 않습니다.")
+            manifest = source / "extension.json"
+            if not source.is_dir() or not manifest.is_file():
+                raise ExtensionInstallError(f"샘플 확장을 찾을 수 없습니다: {sample_name}")
+            try:
+                meta = json.loads(manifest.read_text(encoding="utf-8"))
+            except Exception:
+                raise ExtensionInstallError("샘플 extension.json을 읽을 수 없습니다.")
+            ext_id = str((meta or {}).get("id") or _safe_dir_name(sample_name)).strip()
+            ext_name = str((meta or {}).get("name") or ext_id).strip()
+            self._place(source, ext_id)  # 재사용: id 검증·중복 거부·copytree
+            return self._set(
+                active=False, phase="complete", percent=100, done=True,
+                installed_id=ext_id, installed_name=ext_name, url="", error="",
+                message=f"'{ext_name}' 설치됨 — Settings에서 승인하면 사용됩니다.",
+            )
+        except ExtensionInstallError as exc:
+            return self._set(active=False, phase="error", percent=0, done=False,
+                             message=str(exc), error=str(exc))
+        except Exception as exc:  # 예기치 못한 실패도 사용자 메시지로
+            msg = f"샘플 설치 실패: {exc}"
+            return self._set(active=False, phase="error", percent=0, done=False,
+                             message=msg, error=msg)
+
     def _run(self, url: str) -> None:
         staging = self.extensions_root / f".install-staging-{int(time.time() * 1000)}"
         try:
@@ -361,7 +408,8 @@ class ExtensionInstallService:
                 f"확장 '{safe}'이 이미 설치되어 있습니다. 업데이트는 재승인 흐름이 추가된 뒤 지원됩니다."
             )
         try:
-            shutil.copytree(source_dir, target)
+            # __pycache__/*.pyc는 빌드 산출물 — 배치 시 제외(스테일 바이트코드 복사 방지).
+            shutil.copytree(source_dir, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         except Exception:
             shutil.rmtree(target, ignore_errors=True)
             raise

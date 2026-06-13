@@ -159,6 +159,7 @@ def _ollama_boost_settings_token(context: WebSessionContext) -> tuple:
         return (
             round(float(s.get("nl_weight", 1.0)), 3), str(s.get("effort") or "rich"),
             bool(s.get("include_prefix")), bool(s.get("include_postfix")), bool(s.get("include_e621")),
+            bool(s.get("scene_brief", True)),
         )
     except Exception:
         return ()
@@ -262,7 +263,13 @@ def _kickoff_auto_gen_prefetch(context: WebSessionContext, request) -> None:
         # Effort([기능2]) 명시 전달 + 설정을 holder에 freeze — 소비 시 kickoff 시점 설정으로
         # 조립해, 생성 중 설정을 바꿔도 옛 boost를 새 설정으로 삽입하지 않는다(Codex Must-fix 3).
         task = asyncio.create_task(
-            asyncio.to_thread(scene_boost_prompt, context, boost_input, level=boost_settings.get("effort"))
+            asyncio.to_thread(
+                scene_boost_prompt,
+                context,
+                boost_input,
+                level=boost_settings.get("effort"),
+                scene_brief=boost_settings.get("scene_brief"),
+            )
         )
         context._auto_gen_prefetch = {
             "state_key": _auto_gen_prefetch_state_key(context, ratings),

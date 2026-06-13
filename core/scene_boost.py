@@ -110,6 +110,29 @@ _STOPWORDS = frozenset({
     "is", "are", "be", "this", "that", "soft", "warm",
 })
 
+# Scene Brief 2단계가 최종 문장까지 살아남게 하는 후필터. 이런 문구는 태그 기반
+# 디테일 없이 분위기만 뭉개는 경향이 강해, 앵커가 있어도 버린다.
+_GENERIC_FILLER_RE = re.compile(
+    r"\b(raw heat|breathless tension|yearning shadow|deep\s*,?\s*yearning|sensuous composition|"
+    r"sensual composition|warm\s*,?\s*hazy glow|hazy\s*,?\s*warm glow)\b",
+    re.I,
+)
+_SOLO_RELATION_RE = re.compile(
+    r"\b(them|their|theirs|they|both|pair|couple|duo|together|between them|two bodies|two figures)\b",
+    re.I,
+)
+_ANCHOR_EXCLUDE = frozenset({
+    "solo", "solo focus", "1girl", "1boy", "2girls", "2boys", "multiple girls", "multiple boys",
+    "standing", "sitting", "holding", "looking", "parted lips", "open mouth", "blush", "nose blush",
+    "breasts", "thighs", "lips", "back", "from side", "from behind", "from below", "from above",
+    "upper body", "close-up", "portrait", "depth of field", "blurry", "blurry background",
+})
+_ANCHOR_FALLBACK_ALLOW = frozenset({
+    "armlet", "bracelet", "jewelry", "dagger", "knife", "weapon", "cloud", "moon", "sky", "dress",
+    "hat", "collar", "gem", "steam", "sweat", "sweatdrop", "shirt", "shorts", "candlelight",
+    "moonlight", "shadow",
+})
+
 
 # ---------------------------------------------------------------------------
 # 1) 파싱(코드) — 원문 보존 + bare 서술 태그 추출 + 보호 토큰 분리.
@@ -204,6 +227,61 @@ def parse_prompt(prompt: str) -> dict[str, Any]:
         "existing_camera": existing_camera,
         "all_words": all_words,
     }
+
+
+def _is_solo_scene(parsed: dict[str, Any]) -> bool:
+    tags = {str(t or "").lower() for t in parsed.get("descriptive") or []}
+    counts = {str(t or "").lower() for t in parsed.get("subject_count") or []}
+    if any(t in tags or t in counts for t in ("2girls", "2boys", "multiple girls", "multiple boys")):
+        return False
+    return "solo" in tags or "solo focus" in tags or "solo" in counts
+
+
+def _anchor_words(anchor: str) -> list[str]:
+    return [
+        w for w in re.findall(r"[a-zA-Z0-9']+", str(anchor or "").lower())
+        if len(w) >= 4 and w not in _STOPWORDS
+    ]
+
+
+def _description_uses_anchor(text: str, anchors: list[str]) -> bool:
+    lower = str(text or "").lower()
+    words = set(re.findall(r"[a-zA-Z0-9']+", lower))
+    for anchor in anchors or []:
+        a = str(anchor or "").lower().strip()
+        if not a:
+            continue
+        if a in lower:
+            return True
+        aw = _anchor_words(a)
+        if aw and any(w in words or (w == "moon" and "moonlight" in lower) for w in aw):
+            return True
+    return False
+
+
+def extract_visual_anchors(descriptive: list[str], *, max_items: int = 12) -> list[str]:
+    """최종 자연어가 붙잡을 구체 태그 앵커. 소품/의상/광원/날씨/배경을 우선하고,
+    순수 포즈·인원·범용 분위기 태그는 제외한다."""
+    preferred: list[str] = []
+    fallback: list[str] = []
+    seen: set[str] = set()
+    for tag in descriptive or []:
+        t = str(tag or "").strip().lower().replace("_", " ")
+        if not t or t in seen or _PERSON_COUNT_RE.match(t):
+            continue
+        seen.add(t)
+        words = _anchor_words(t)
+        if not words:
+            continue
+        if t in _ANCHOR_EXCLUDE:
+            if t in _ANCHOR_FALLBACK_ALLOW:
+                fallback.append(t)
+            continue
+        if len(words) >= 2 or t in _ANCHOR_FALLBACK_ALLOW:
+            preferred.append(t)
+        elif len(t) >= 5:
+            fallback.append(t)
+    return (preferred + fallback)[:max_items]
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +382,8 @@ def filter_descriptions(
     level_cfg: dict[str, Any],
     *,
     has_hangul: Optional[Callable[[str], bool]] = None,
+    visual_anchors: Optional[list[str]] = None,
+    solo_scene: bool = False,
 ) -> list[str]:
     """LLM 자연어 묘사를 검열: 한글/길이초과/새 인물도입/태그에코/중복 제거."""
     _, word_hi = level_cfg.get("words", (6, 18))
@@ -322,6 +402,12 @@ def filter_descriptions(
             continue                        # 너무 김 → 태그 프롬프트 희석
         if _SUBJECT_INTRO_RE.search(s):
             continue                        # 새 인물 도입(드리프트)
+        if solo_scene and _SOLO_RELATION_RE.search(s):
+            continue                        # solo/solo focus에서 관계·복수 암시 금지
+        if _GENERIC_FILLER_RE.search(s):
+            continue                        # 장면 앵커 없는 범용 관능어 템플릿 제거
+        if visual_anchors and not _description_uses_anchor(s, visual_anchors):
+            continue                        # 2단계 brief의 구체 앵커가 최종 문장에 남아야 함
         # 에코: 묘사의 내용어가 거의 다 입력 태그 단어면(순수 재진술) 버린다.
         content = [w.lower() for w in re.findall(r"[a-zA-Z']+", s) if w.lower() not in _STOPWORDS]
         if content:
@@ -364,13 +450,114 @@ def filter_composition(
 
 
 # ---------------------------------------------------------------------------
-# 5) LLM 호출 — 지시문 + 스키마. 단일 few-shot, enum 제약, minItems 0(빈 출력 허용).
+# 5) Scene Brief(선택 1단계) — 태그 나열을 제한된 장면 요약으로 바꿔 최종 boost를 구체화.
+#    brief 자체는 최종 프롬프트에 직접 들어가지 않으며, 실패하면 기존 1콜 경로로 폴백한다.
+# ---------------------------------------------------------------------------
+def scene_brief_schema(level_cfg: dict[str, Any]) -> dict[str, Any]:
+    max_items = 6 if int(level_cfg.get("comp_max", 2)) >= 3 else 4
+    item = {"type": "string", "maxLength": 96}
+    return {
+        "type": "object",
+        "properties": {
+            "facts": {"type": "array", "minItems": 0, "maxItems": max_items, "items": item},
+            "mood": {"type": "array", "minItems": 0, "maxItems": 4, "items": item},
+            "visual_anchors": {"type": "array", "minItems": 0, "maxItems": max_items + 4, "items": item},
+            "detail_directions": {"type": "array", "minItems": 0, "maxItems": max_items, "items": item},
+            "forbidden_new_facts": {"type": "array", "minItems": 0, "maxItems": max_items, "items": item},
+        },
+        "required": ["facts", "mood", "visual_anchors", "detail_directions", "forbidden_new_facts"],
+    }
+
+
+def build_scene_brief_instruction(descriptive: list[str], rating: str) -> str:
+    tags_line = ", ".join(descriptive[:70])
+    return (
+        "Task: read Danbooru tags as evidence and write a conservative anime scene brief.\n"
+        f"Rating boundary: {rating}. Never raise the rating or add sexual content beyond existing tags.\n"
+        "You may infer ordinary scene texture only when it is directly supported by tags "
+        "(for example classroom -> desks/chalk dust, rain -> wet window light).\n"
+        "Do NOT invent named characters, relationships, new people, new props, new actions, "
+        "new locations, or a backstory motivation.\n"
+        "Output JSON arrays:\n"
+        "- facts: grounded subject/outfit/action/place facts from the tags.\n"
+        "- mood: short mood or time-of-day reading supported by the tags.\n"
+        "- visual_anchors: concrete visible tags or tag phrases the next stage should explicitly name "
+        "(objects, clothing, weather, light sources, background, accessories).\n"
+        "- detail_directions: otaku-style visual details that stay inside those facts.\n"
+        "- forbidden_new_facts: facts the next stage must not add.\n\n"
+        f"Evidence tags: {tags_line}\n"
+        "Output JSON:"
+    )
+
+
+def _brief_items(
+    raw_items: Any,
+    *,
+    max_items: int,
+    max_words: int,
+    has_hangul: Optional[Callable[[str], bool]],
+    reject_subject_intro: bool = True,
+) -> list[str]:
+    if not isinstance(raw_items, (list, tuple)):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw_items:
+        text = str(item or "").strip().strip(".,;").strip()
+        if not text:
+            continue
+        if has_hangul is not None and has_hangul(text):
+            continue
+        if reject_subject_intro and _SUBJECT_INTRO_RE.search(text):
+            continue
+        words = text.split()
+        if len(words) > max_words:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def normalize_scene_brief(
+    raw: Any,
+    level_cfg: dict[str, Any],
+    *,
+    has_hangul: Optional[Callable[[str], bool]] = None,
+) -> dict[str, list[str]]:
+    if not isinstance(raw, dict):
+        raw = {}
+    max_items = 6 if int(level_cfg.get("comp_max", 2)) >= 3 else 4
+    return {
+        "facts": _brief_items(raw.get("facts"), max_items=max_items, max_words=10, has_hangul=has_hangul),
+        "mood": _brief_items(raw.get("mood"), max_items=4, max_words=8, has_hangul=has_hangul),
+        "visual_anchors": _brief_items(
+            raw.get("visual_anchors"), max_items=max_items + 4, max_words=5, has_hangul=has_hangul
+        ),
+        "detail_directions": _brief_items(
+            raw.get("detail_directions"), max_items=max_items, max_words=12, has_hangul=has_hangul
+        ),
+        "forbidden_new_facts": _brief_items(
+            raw.get("forbidden_new_facts"), max_items=max_items, max_words=10, has_hangul=has_hangul,
+            reject_subject_intro=False,
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 6) LLM 호출 — 지시문 + 스키마. 단일 few-shot, enum 제약, minItems 0(빈 출력 허용).
 # ---------------------------------------------------------------------------
 def build_instruction(
     descriptive: list[str],
     rating: str,
     level_cfg: dict[str, Any],
     candidates: list[str],
+    scene_brief: dict[str, list[str]] | None = None,
+    solo_scene: bool = False,
 ) -> str:
     lo, hi = level_cfg.get("phrases", (2, 3))
     wlo, whi = level_cfg.get("words", (8, 16))
@@ -385,6 +572,26 @@ def build_instruction(
             f"framing/angle/shot for THIS exact scene (only from the list, invent none): "
             f"{', '.join(candidates)}.\n"
         )
+    brief_clause = ""
+    if scene_brief and any(scene_brief.get(key) for key in ("facts", "mood", "visual_anchors", "detail_directions")):
+        anchors = ", ".join(scene_brief.get("visual_anchors") or []) or "none"
+        brief_clause = (
+            "Scene brief derived from the same tags (context only; do not add facts outside it):\n"
+            f"- Grounded facts: {', '.join(scene_brief.get('facts') or []) or 'none'}\n"
+            f"- Mood reading: {', '.join(scene_brief.get('mood') or []) or 'none'}\n"
+            f"- Concrete visual anchors: {anchors}\n"
+            f"- Detail directions: {', '.join(scene_brief.get('detail_directions') or []) or 'none'}\n"
+            f"- Forbidden new facts: {', '.join(scene_brief.get('forbidden_new_facts') or []) or 'new people, props, locations, actions'}\n"
+            "Every description should explicitly include at least one concrete visual anchor above; "
+            "prefer object, clothing, weather, light-source, background, or accessory anchors. "
+            "Do not output generic mood-only phrases such as raw heat, breathless tension, "
+            "yearning shadow, sensuous composition, or warm hazy glow.\n"
+        )
+    solo_clause = (
+        "Solo guard: this is a solo scene; never imply another person or a relationship with words "
+        "such as them, their, between them, both, pair, couple, together.\n"
+        if solo_scene else ""
+    )
     return (
         "Task: add only atmosphere and composition (no new facts) to an existing anime image prompt.\n"
         f"Rating focus [{rating}]: {focus}\n"
@@ -395,8 +602,10 @@ def build_instruction(
         "artist, or style; (2) do not merely re-list the existing tags verbatim — but you MAY frame "
         "and present what they already depict; (3) if nothing fitting can be added, return empty "
         "arrays — never invent. English only.\n"
-        + comp_clause +
-        "Bad — never do: \"another girl walks in\", \"a bed in the background\" (unless a bed tag "
+        + brief_clause
+        + solo_clause
+        + comp_clause
+        + "Bad — never do: \"another girl walks in\", \"a bed in the background\" (unless a bed tag "
         "already exists), introducing any new character, prop, or location.\n"
         "Example tags: 1girl, school uniform, classroom, sitting, looking out window\n"
         'Example output: {"descriptions": ["late afternoon light pooling across empty desks", '
@@ -429,7 +638,7 @@ def normalize_level(level: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 6) 오케스트레이션 — 전 과정. 실패 시 원문 그대로 반환(원샷 계약: 재시도 없음).
+# 7) 오케스트레이션 — 전 과정. 실패 시 원문 그대로 반환(원샷 계약: 재시도 없음).
 # ---------------------------------------------------------------------------
 def run_scene_boost(
     prompt: str,
@@ -468,8 +677,28 @@ def run_scene_boost(
     candidates = composition_candidates(
         rating, parsed["existing_camera"], lvl_cfg,
         validate_tag=validate_tag, tag_allowed=tag_allowed)
+    scene_brief: dict[str, list[str]] | None = None
+    visual_anchors: list[str] = []
+    if options.get("scene_brief"):
+        try:
+            brief_raw = chat(
+                build_scene_brief_instruction(descriptive, rating),
+                scene_brief_schema(lvl_cfg),
+                model=default_model,
+                temperature=0.15,
+                num_predict=220,
+            )
+            scene_brief = normalize_scene_brief(brief_raw, lvl_cfg, has_hangul=has_hangul)
+            visual_anchors = extract_visual_anchors(descriptive)
+            merged = list(dict.fromkeys((scene_brief.get("visual_anchors") or []) + visual_anchors))
+            scene_brief["visual_anchors"] = merged[: max(8, int(lvl_cfg.get("comp_max", 2)) * 4)]
+        except Exception:
+            scene_brief = None
 
-    instruction = build_instruction(descriptive, rating, lvl_cfg, candidates)
+    solo_scene = _is_solo_scene(parsed)
+    instruction = build_instruction(
+        descriptive, rating, lvl_cfg, candidates, scene_brief=scene_brief, solo_scene=solo_scene
+    )
     schema = boost_schema(lvl_cfg, candidates)
     try:
         out = chat(instruction, schema, model=default_model,
@@ -481,7 +710,9 @@ def run_scene_boost(
     if not isinstance(out, dict):
         out = {}
     descs = filter_descriptions(
-        out.get("descriptions") or [], parsed["all_words"], lvl_cfg, has_hangul=has_hangul)
+        out.get("descriptions") or [], parsed["all_words"], lvl_cfg, has_hangul=has_hangul,
+        visual_anchors=scene_brief.get("visual_anchors") if scene_brief else None,
+        solo_scene=solo_scene)
     comp = filter_composition(
         out.get("composition_tags") or [], candidates, parsed["existing_camera"], lvl_cfg)
 
@@ -492,6 +723,7 @@ def run_scene_boost(
     return {
         "ok": True, "stage": "done", "prompt": boosted, "rating": rating, "level": level,
         "additions": {"composition_tags": comp, "descriptions": descs},
+        "scene_brief": scene_brief or {},
     }
 
 
@@ -499,5 +731,6 @@ __all__ = [
     "SCENE_BOOST_LEVELS", "DEFAULT_LEVEL", "normalize_level",
     "parse_prompt", "aggregate_rating", "composition_candidates",
     "filter_descriptions", "filter_composition",
+    "extract_visual_anchors", "build_scene_brief_instruction", "scene_brief_schema", "normalize_scene_brief",
     "build_instruction", "boost_schema", "run_scene_boost",
 ]

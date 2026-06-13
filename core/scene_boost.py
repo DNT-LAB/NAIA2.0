@@ -685,6 +685,17 @@ def build_instruction(
                 "how the angle, closeness, and bodies present that interaction — not only isolated "
                 "body parts, clothing, or lighting.\n"
             )
+        # q/s/e 공통: 모델이 'full body / her figure / curves of her body / smiling face' 같은
+        # generic·표정-only로 도망가는 것을 막고, 위 priority의 *구체* distinctive 앵커(노출/의상/
+        # 신체부위/포즈/각도)를 프레이밍하도록 강제한다. 앵커 선택은 priority(salience 자동)에
+        # 위임 — 케이스별 손튜닝 불요(사용자: 앵커 주는 방식 자동화).
+        if prio and rating in ("s", "q", "e"):
+            central_act_line += (
+                "Do NOT center any phrase on generic whole-body wording ('full body', 'her figure', "
+                "'her form', 'her curves', 'her body', 'silhouette') or on an expression alone "
+                "('smiling face', 'her smile'); every phrase must frame a SPECIFIC anchor listed above "
+                "— a garment, a bared/exposed body part, the pose, or the camera angle.\n"
+            )
 
     comp_clause = ""
     if candidates:

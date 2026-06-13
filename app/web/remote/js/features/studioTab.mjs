@@ -93,6 +93,45 @@ export function createStudioTabController({
     };
   }
 
+  function normalizedRepeat(value) {
+    return Math.max(1, Math.min(99, Math.round(Number(value) || 1)));
+  }
+
+  function normalizedSeedMode(raw) {
+    return SEED_MODES.has(raw?.seedMode) ? raw.seedMode : (raw?.fixSeed ? 'reuse_previous' : 'random');
+  }
+
+  function hasBoardRunSettings(board) {
+    if (!board || typeof board !== 'object') return false;
+    if (safeText(board.globalResolution).trim()) return true;
+    if (normalizedRepeat(board.repeat) !== 1) return true;
+    if (normalizedSeedMode(board) !== 'random') return true;
+    if (Boolean(board.fixSeed)) return true;
+    return false;
+  }
+
+  function hasFramePersistentState(frame) {
+    if (!frame || typeof frame !== 'object') return false;
+    if (safeText(frame.name).trim()) return true;
+    if (safeText(frame.prompt).trim()) return true;
+    if (safeText(frame.negative).trim()) return true;
+    if (safeText(frame.resolution).trim()) return true;
+    if (safeText(frame.seed).trim()) return true;
+    if (frame.enabled === false) return true;
+    if (Math.max(0, Math.round(Number(frame.runCount) || 0)) > 0) return true;
+    if (safeText(frame.lastSeed).trim()) return true;
+    if (safeText(frame.lastUpdated).trim()) return true;
+    return false;
+  }
+
+  function isBlankLegacyNineFrameBoard(raw, normalized) {
+    if (!raw || typeof raw !== 'object') return false;
+    if (!Array.isArray(raw.frames) || raw.frames.length !== 9) return false;
+    if (safeText(raw.prefix).trim() || safeText(raw.postfix).trim() || safeText(raw.globalNegative).trim()) return false;
+    if (hasBoardRunSettings(normalized)) return false;
+    return normalized.frames.every(frame => !hasFramePersistentState(frame));
+  }
+
   function sanitizeState(raw) {
     const next = createDefaultState();
     if (!raw || typeof raw !== 'object') return next;
@@ -100,8 +139,8 @@ export function createStudioTabController({
     next.postfix = safeText(raw.postfix);
     next.globalNegative = safeText(raw.globalNegative);
     next.globalResolution = safeText(raw.globalResolution);
-    next.repeat = Math.max(1, Math.min(99, Math.round(Number(raw.repeat) || 1)));
-    next.seedMode = SEED_MODES.has(raw.seedMode) ? raw.seedMode : (raw.fixSeed ? 'reuse_previous' : 'random');
+    next.repeat = normalizedRepeat(raw.repeat);
+    next.seedMode = normalizedSeedMode(raw);
     next.fixSeed = Boolean(raw.fixSeed);
     if (Array.isArray(raw.frames) && raw.frames.length) {
       next.frames = raw.frames.map((frame, index) => ({
@@ -125,7 +164,14 @@ export function createStudioTabController({
   function loadState() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) state = sanitizeState(JSON.parse(raw));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        state = sanitizeState(parsed);
+        if (isBlankLegacyNineFrameBoard(parsed, state)) {
+          state = createDefaultState();
+          saveState();
+        }
+      }
     } catch (error) {
       console.warn('Studio state restore failed', error);
       state = createDefaultState();
@@ -409,7 +455,7 @@ export function createStudioTabController({
           </div>
           <div class="studio-editor-head-actions">
             <label class="studio-toggle">
-              <input type="checkbox" data-studio-frame-field="enabled"${frame.enabled ? ' checked' : ''}>
+              <input type="checkbox" data-studio-frame-field="enabled" data-studio-frame-id="${escHtml(frame.id)}"${frame.enabled ? ' checked' : ''}>
               <span>사용</span>
             </label>
             <button type="button" data-studio-action="close-editor" aria-label="프레임 편집기 닫기">닫기</button>
@@ -419,21 +465,21 @@ export function createStudioTabController({
           ${renderEditorImage(frame)}
           <label class="studio-field studio-field-tall studio-frame-prompt-field">
             <span>Frame Prompt</span>
-            <textarea data-studio-frame-field="prompt" spellcheck="false">${escHtml(frame.prompt)}</textarea>
+            <textarea data-studio-frame-field="prompt" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false">${escHtml(frame.prompt)}</textarea>
           </label>
         </div>
         <label class="studio-field">
           <span>Additional Negative</span>
-          <textarea data-studio-frame-field="negative" spellcheck="false" placeholder="공통 네거티브 뒤에 추가할 프레임 전용 네거티브">${escHtml(frame.negative)}</textarea>
+          <textarea data-studio-frame-field="negative" data-studio-frame-id="${escHtml(frame.id)}" spellcheck="false" placeholder="공통 네거티브 뒤에 추가할 프레임 전용 네거티브">${escHtml(frame.negative)}</textarea>
         </label>
         <div class="studio-editor-grid">
           <label class="studio-field">
             <span>Frame Name</span>
-            <input type="text" maxlength="60" data-studio-frame-field="name" value="${escHtml(frame.name)}" placeholder="${escHtml(frameId(selectedIndex))}" spellcheck="false">
+            <input type="text" maxlength="60" data-studio-frame-field="name" data-studio-frame-id="${escHtml(frame.id)}" value="${escHtml(frame.name)}" placeholder="${escHtml(frameId(selectedIndex))}" spellcheck="false">
           </label>
           <label class="studio-field">
             <span>Resolution</span>
-            <select data-studio-frame-field="resolution">${renderResolutionOptions(frame.resolution)}</select>
+            <select data-studio-frame-field="resolution" data-studio-frame-id="${escHtml(frame.id)}">${renderResolutionOptions(frame.resolution)}</select>
           </label>
           <label class="studio-field">
             <span>Seed</span>
@@ -529,7 +575,7 @@ export function createStudioTabController({
 
   function updateGlobal(field, target, options = {}) {
     if (field === 'repeat') {
-      state.repeat = Math.max(1, Math.min(99, Math.round(Number(target.value) || 1)));
+      state.repeat = normalizedRepeat(target.value);
     } else if (field === 'seedMode') {
       state.seedMode = SEED_MODES.has(target.value) ? target.value : 'random';
     } else if (field === 'fixSeed') {
@@ -541,8 +587,16 @@ export function createStudioTabController({
     if (options.render !== false) render();
   }
 
+  function frameForFieldTarget(target) {
+    const targetFrameId = safeText(target?.dataset?.studioFrameId).trim();
+    if (targetFrameId) {
+      return state.frames.find(frame => frame.id === targetFrameId) || null;
+    }
+    return selectedFrame();
+  }
+
   function updateFrame(field, target, options = {}) {
-    const frame = selectedFrame();
+    const frame = frameForFieldTarget(target);
     if (!frame) return;
     if (field === 'enabled') frame.enabled = Boolean(target.checked);
     else frame[field] = safeText(target.value);
@@ -965,8 +1019,10 @@ export function createStudioTabController({
 
   function boardHasContent() {
     if (state.prefix.trim() || state.postfix.trim() || state.globalNegative.trim()) return true;
+    if (hasBoardRunSettings(state)) return true;
+    if (state.frames.length !== DEFAULT_FRAME_COUNT) return true;
     return state.frames.some(frame =>
-      frame.prompt.trim() || frame.negative.trim() || frame.name.trim() || frameImages.get(frame.id));
+      hasFramePersistentState(frame) || frameImages.get(frame.id));
   }
 
   function exportTimestamp() {

@@ -9,13 +9,24 @@
 //   Settings에서 다시 켜야 보인다.
 // 토글은 승인/soft 전용, 차단은 ⋯ 메뉴로 분리(설계 인스펙션 #4).
 export function createExtensionsUi(deps) {
-  const {document, escHtml, setModuleParam, showToast, requestState, setLauncherItems} = deps;
+  const {document, escHtml, setModuleParam, showToast, requestState, setLauncherItems,
+    openExternalUrl} = deps;
 
   // 퀵 버튼 배치 선택지 — 도구바(독립 바) / 자동화·고급 기능 카테고리 / 없음.
   const PLACEMENT_OPTIONS = [
     ['tools', '도구바 (Tools)'],
     ['assistant_tools', '자동화 / 고급 기능'],
     ['none', '없음'],
+  ];
+  // 전역 정책: 시작 동작 / 입력 필드 기억.
+  const STARTUP_OPTIONS = [
+    ['remember', '종료 상태 기억'],
+    ['auto_off', '자동 OFF'],
+    ['auto_on', '자동 ON'],
+  ];
+  const REMEMBER_INPUTS_OPTIONS = [
+    ['on', '입력 기억 ON'],
+    ['off', '입력 기억 OFF'],
   ];
 
   let lastState = null;
@@ -303,10 +314,31 @@ export function createExtensionsUi(deps) {
       `<option value="${val}" ${ext.placement === val ? 'selected' : ''}>${label}</option>`).join('');
   }
 
+  function startupOptionsHtml(ext) {
+    const current = ext.startup || 'remember';
+    return STARTUP_OPTIONS.map(([val, label]) =>
+      `<option value="${val}" ${current === val ? 'selected' : ''}>${label}</option>`).join('');
+  }
+
+  function rememberInputsOptionsHtml(ext) {
+    const current = ext.remember_inputs === false ? 'off' : 'on';
+    return REMEMBER_INPUTS_OPTIONS.map(([val, label]) =>
+      `<option value="${val}" ${current === val ? 'selected' : ''}>${label}</option>`).join('');
+  }
+
   function placementSelect(ext) {
     if (ext.status !== 'loaded') return '';
-    return `<label class="ext-placement"><span>퀵 버튼 위치</span>
-      <select class="ext-select ext-placement-select" data-ext="${escHtml(ext.id)}">${placementOptionsHtml(ext)}</select></label>`;
+    // 퀵 버튼 위치 + 그 아래 전역 정책 콤보(시작 동작 / 입력 필드 기억).
+    return `<div class="ext-policies">
+      <label class="ext-placement"><span>퀵 버튼 위치</span>
+        <select class="ext-select ext-placement-select" data-ext="${escHtml(ext.id)}">${placementOptionsHtml(ext)}</select></label>
+      <label class="ext-placement"><span>시작 동작</span>
+        <select class="ext-select ext-startup-select" data-ext="${escHtml(ext.id)}"
+          title="다음 시작부터 적용 — 종료 상태 기억 / 자동 OFF / 자동 ON">${startupOptionsHtml(ext)}</select></label>
+      <label class="ext-placement"><span>입력 필드</span>
+        <select class="ext-select ext-remember-inputs-select" data-ext="${escHtml(ext.id)}"
+          title="OFF면 시작 시 설정값이 기본값으로 초기화됩니다">${rememberInputsOptionsHtml(ext)}</select></label>
+    </div>`;
   }
 
   function rowHtml(ext) {
@@ -321,8 +353,11 @@ export function createExtensionsUi(deps) {
          </label>`
       : (ext.status === 'error'
         ? `<button class="ext-retry-btn" data-ext="${escHtml(ext.id)}">재시도</button>` : '');
+    // 홈페이지: Electron 셸에선 기본 a[target=_blank]가 내부 팝업(새 NAIA 창)을
+    // 띄우므로, 클릭을 가로채 시스템 브라우저로 연다(웹에선 새 탭). data-ext-home에
+    // URL을 담아 bindSettingsPane이 핸들러를 건다.
     const home = ext.homepage
-      ? ` · <a href="${escHtml(ext.homepage)}" target="_blank" rel="noopener">홈페이지</a>` : '';
+      ? ` · <a href="${escHtml(ext.homepage)}" class="ext-home-link" data-ext-home="${escHtml(ext.homepage)}" target="_blank" rel="noopener noreferrer">홈페이지</a>` : '';
     const desc = ext.description || home
       ? `<div class="ext-desc">${escHtml(ext.description || '')}${home}</div>` : '';
     const error = ext.error
@@ -462,6 +497,25 @@ export function createExtensionsUi(deps) {
     root.querySelectorAll('.ext-placement-select').forEach(el => {
       el.addEventListener('change', () => {
         setModuleParam('extensions', `placement:${el.dataset.ext}`, el.value);
+      });
+    });
+    root.querySelectorAll('.ext-startup-select').forEach(el => {
+      el.addEventListener('change', () => {
+        setModuleParam('extensions', `startup:${el.dataset.ext}`, el.value);
+      });
+    });
+    root.querySelectorAll('.ext-remember-inputs-select').forEach(el => {
+      el.addEventListener('change', () => {
+        setModuleParam('extensions', `remember_inputs:${el.dataset.ext}`, el.value === 'on');
+      });
+    });
+    root.querySelectorAll('.ext-home-link[data-ext-home]').forEach(el => {
+      el.addEventListener('click', event => {
+        // 시스템 브라우저로 — 헬퍼가 없으면 기본 동작(웹: 새 탭) 유지.
+        if (typeof openExternalUrl === 'function') {
+          event.preventDefault();
+          openExternalUrl(el.dataset.extHome);
+        }
       });
     });
     bindFields(root);

@@ -1005,7 +1005,7 @@ function setExtensionLauncherItems(items, onClick) {
   }
   pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
 }
-const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260612-extset15')
+const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260613-extset16')
   .then(({createExtensionsUi}) => {
     extensionsPanel = createExtensionsUi({
       document,
@@ -1014,6 +1014,7 @@ const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=2026061
       showToast,
       requestState: () => requestModuleState('extensions'),
       setLauncherItems: setExtensionLauncherItems,
+      openExternalUrl: openUrlInSystemBrowser,
     });
   })
   .catch(error => {

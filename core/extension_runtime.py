@@ -53,6 +53,11 @@ SETTINGS_FILENAME = "settings.json"
 # UX가 나빠 제외 — 저장돼 있던 구 값은 로드 시 기본값 tools로 폴백된다.)
 PLACEMENT_VALUES = ("tools", "assistant_tools", "none")
 PLACEMENT_DEFAULT = "tools"
+# 시작 동작(전역 정책): 작동 스위치(armed)를 부팅 시 어떻게 초기화할지.
+#  remember = 종료 시점 상태 복원(disarmed config) / auto_off = 항상 꺼짐 /
+#  auto_on = 항상 켜짐. 부팅(로드) 시에만 적용 — 런타임 토글은 그대로.
+STARTUP_VALUES = ("remember", "auto_off", "auto_on")
+STARTUP_DEFAULT = "remember"
 
 
 def _ext_print(ext_id: str, message: str) -> None:
@@ -344,6 +349,9 @@ class ExtensionRecord:
     enabled: bool = True     # Settings ON/OFF — OFF면 작동 정지 + 퀵 버튼 숨김.
     armed: bool = True       # 모듈 작동 스위치(팝업 Activate) — OFF여도 노출은 유지.
     placement: str = PLACEMENT_DEFAULT  # 퀵 버튼 위치: tools | fn | none (호스트 UI 설정).
+    # 전역 정책(부팅 시 적용): 시작 동작·입력 필드 기억.
+    startup: str = STARTUP_DEFAULT       # remember | auto_off | auto_on.
+    remember_inputs: bool = True         # OFF면 부팅 시 settings.json을 비워 기본값으로 시작.
     hooks: int = 0
     subscriptions: int = 0
     # Phase B: ctx.register_panel() 선언 스키마({"title","fields":[...]}) 또는 None.
@@ -379,6 +387,8 @@ class ExtensionRecord:
             "enabled": self.enabled,
             "armed": self.armed,
             "placement": self.placement,
+            "startup": self.startup,
+            "remember_inputs": self.remember_inputs,
             "active": self.is_active,
             "hooks": self.hooks,
             "subscriptions": self.subscriptions,
@@ -1132,15 +1142,41 @@ class ExtensionManager:
                     flush=True,
                 )
         disarmed = _ids("disarmed")
+        forget_inputs = _ids("forget_inputs")
         placement_map = raw.get("placement") if isinstance(raw.get("placement"), dict) else {}
+        startup_map = raw.get("startup") if isinstance(raw.get("startup"), dict) else {}
         for record in self.records:
             record.approved = record.ext_id in approved
             record.blocked = record.ext_id in blocked
             record.enabled = record.ext_id not in inactive
-            record.armed = record.ext_id not in disarmed
+            saved_startup = str(startup_map.get(record.ext_id) or "")
+            record.startup = saved_startup if saved_startup in STARTUP_VALUES else STARTUP_DEFAULT
+            # 시작 동작 정책으로 부팅 시 armed 초기화(런타임 토글은 이후 별도).
+            if record.startup == "auto_off":
+                record.armed = False
+            elif record.startup == "auto_on":
+                record.armed = True
+            else:  # remember — 종료 시점 상태(disarmed) 복원
+                record.armed = record.ext_id not in disarmed
+            record.remember_inputs = record.ext_id not in forget_inputs
+            # 입력 필드 기억 OFF: 부팅 시 settings.json을 비워 기본값으로 시작.
+            if not record.remember_inputs:
+                self._clear_settings_file(record)
             saved_placement = str(placement_map.get(record.ext_id) or "")
             record.placement = saved_placement if saved_placement in PLACEMENT_VALUES else PLACEMENT_DEFAULT
         self._write_config_locked()
+
+    @staticmethod
+    def _clear_settings_file(record: "ExtensionRecord") -> None:
+        """확장의 settings.json을 제거한다(입력 필드 기억 OFF). 없으면 무시,
+        실패도 무해(다음 load_settings가 defaults를 돌려줄 뿐)."""
+        directory = getattr(record, "directory", None)
+        if directory is None:
+            return
+        try:
+            (directory / SETTINGS_FILENAME).unlink(missing_ok=True)
+        except (SystemExit, Exception):
+            pass
 
     def _write_config_locked(self) -> None:
         path = self._config_path()
@@ -1153,11 +1189,19 @@ class ExtensionManager:
             # 모듈 작동 스위치(팝업 Activate This Script) OFF — 노출은 유지된다.
             "disarmed": sorted({r.ext_id for r in self.records if r.approved and not r.armed}),
             "blocked": sorted({r.ext_id for r in self.records if r.blocked}),
+            # 입력 필드 기억 OFF(기본 ON이라 OFF인 것만 기록).
+            "forget_inputs": sorted({r.ext_id for r in self.records if r.approved and not r.remember_inputs}),
             # 기본값(tools)이 아닌 위치만 기록 — 맵에 없으면 tools.
             "placement": {
                 r.ext_id: r.placement
                 for r in sorted(self.records, key=lambda item: item.ext_id)
                 if r.placement != PLACEMENT_DEFAULT
+            },
+            # 기본값(remember)이 아닌 시작 동작만 기록.
+            "startup": {
+                r.ext_id: r.startup
+                for r in sorted(self.records, key=lambda item: item.ext_id)
+                if r.startup != STARTUP_DEFAULT
             },
         }
         try:
@@ -1273,6 +1317,17 @@ class ExtensionManager:
                 record = self._find(rest)
                 if record is not None and str(value) in PLACEMENT_VALUES:
                     record.placement = str(value)
+                    self._write_config_locked()
+            elif action == "startup":
+                record = self._find(rest)
+                if record is not None and str(value) in STARTUP_VALUES:
+                    # 다음 부팅부터 적용(현재 armed는 건드리지 않음 — 의도된 계약).
+                    record.startup = str(value)
+                    self._write_config_locked()
+            elif action == "remember_inputs":
+                record = self._find(rest)
+                if record is not None:
+                    record.remember_inputs = _coerce_panel_value({"type": "bool"}, value)[1]
                     self._write_config_locked()
             elif action == "setting":
                 ext_id, _, field_key = rest.partition(":")

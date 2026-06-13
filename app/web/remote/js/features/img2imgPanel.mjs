@@ -284,7 +284,7 @@ export function createImg2ImgPanel({
           <label class="mod-field-label">반복</label>
           <input class="mod-input" type="number" min="1" max="99" value="${repeat}" oninput="img2imgRepeat(this.value)">
         </div>
-        <label class="mod-checkbox-item mod-img2img-resize-1mp" title="체크 시 이미지와 가장 가까운 비율의 64배수 ~1MP 해상도로 리사이즈해 생성합니다. 해제 시 원본 이미지 크기를 사용합니다.">
+        <label class="mod-checkbox-item mod-img2img-resize-1mp" title="체크 시 이미지와 가장 가까운 비율의 64배수 ~1MP 해상도로 리사이즈해 생성합니다. 해제 시 원본 크기를 최대한 유지하되 NAI 제약에 맞춰 64배수 보정 및 1MP 초과 축소가 적용될 수 있습니다.">
           <input type="checkbox" ${resize1mp ? 'checked' : ''} oninput="img2imgResize1mp(this.checked)">
           <span class="mod-checkbox-label">해상도를 1MP로 리사이즈</span>
         </label>

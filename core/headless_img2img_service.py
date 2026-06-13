@@ -11,6 +11,7 @@ import io
 from typing import Any
 
 from core.headless_image_utils import data_url_payload, image_to_png_bytes
+from core.resolution_utils import MAX_1MP_PIXELS, snap_resolution_to_multiple
 
 
 class HeadlessImg2ImgService:
@@ -35,7 +36,7 @@ class HeadlessImg2ImgService:
         return f"data:image/png;base64,{encoded}", int(preview.width), int(preview.height)
 
     @staticmethod
-    def _best_resolution(width: int, height: int, max_pixels: int = 1024 * 1024) -> tuple[int, int]:
+    def _best_resolution(width: int, height: int, max_pixels: int = MAX_1MP_PIXELS) -> tuple[int, int]:
         ratio = max(1, int(width)) / max(1, int(height))
         best_w = int((max_pixels * ratio) ** 0.5)
         best_h = int((max_pixels / ratio) ** 0.5)
@@ -56,15 +57,38 @@ class HeadlessImg2ImgService:
                 best_h = max(64, ((max_pixels // best_w) // 64) * 64)
         return best_w, best_h
 
+    @staticmethod
+    def _provider_safe_original_resolution(
+        width: int,
+        height: int,
+        max_pixels: int = MAX_1MP_PIXELS,
+    ) -> tuple[int, int]:
+        """Keep original size as closely as NAI allows without filling to 1MP."""
+        width = max(1, int(width))
+        height = max(1, int(height))
+        snapped_w, snapped_h = snap_resolution_to_multiple(width, height, 64)
+        if snapped_w * snapped_h <= max_pixels:
+            return snapped_w, snapped_h
+
+        scale = min(1.0, (max_pixels / max(1, width * height)) ** 0.5)
+        target_w = max(64, (max(1, int(width * scale)) // 64) * 64)
+        target_h = max(64, (max(1, int(height * scale)) // 64) * 64)
+        if target_w * target_h > max_pixels:
+            if target_w >= target_h:
+                target_w = max(64, ((max_pixels // target_h) // 64) * 64)
+            else:
+                target_h = max(64, ((max_pixels // target_w) // 64) * 64)
+        return target_w, target_h
+
     def _normalize_source_image(self, image):
         from PIL import Image
 
         if image.mode not in ("RGB", "RGBA"):
             image = image.convert("RGBA")
         width, height = image.size
-        if width % 64 == 0 and height % 64 == 0 and width * height <= 1024 * 1024:
+        if width % 64 == 0 and height % 64 == 0 and width * height <= MAX_1MP_PIXELS:
             return image
-        new_w, new_h = self._best_resolution(width, height)
+        new_w, new_h = self._provider_safe_original_resolution(width, height)
         if (new_w, new_h) == (width, height):
             return image
         return image.resize((new_w, new_h), Image.Resampling.LANCZOS)

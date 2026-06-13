@@ -207,7 +207,7 @@ def get_assist_service(context: WebSessionContext) -> "Any":
 
 def ollama_boost_settings(context: WebSessionContext) -> dict[str, Any]:
     """PE 저장소의 ``ollama_boost_settings``를 정규화해 반환(없으면 기본값).
-    nl_weight(0.75~3)·effort(concise/standard/rich)·include_prefix/postfix/e621."""
+    nl_weight(0.75~3)·effort(concise/standard/rich)·include_prefix/postfix/e621·style options."""
     from core.prompt_engineering_settings import normalize_ollama_boost_settings
     try:
         from core.prompt_engineering_settings import get_prompt_engineering_store
@@ -218,24 +218,51 @@ def ollama_boost_settings(context: WebSessionContext) -> dict[str, Any]:
         return normalize_ollama_boost_settings(None)
 
 
-def scene_boost_prompt(context: WebSessionContext, prompt: str, *, level: str | None = None) -> dict[str, Any]:
+def scene_boost_prompt(
+    context: WebSessionContext,
+    prompt: str,
+    *,
+    level: str | None = None,
+    allow_scent_style: bool | None = None,
+    allow_material_style: bool | None = None,
+    allow_light_style: bool | None = None,
+) -> dict[str, Any]:
     """Ollama Auto Boost — 주어진 프롬프트를 Scene Boost로 강화한다(best-effort).
 
     토글(``context.ollama_auto_boost``)이 OFF면 그대로 통과. ON이어도 Ollama가 꺼져
     있으면 scene_boost 내부 chat이 빠르게 실패(connection refused)해 원문을 돌려준다 —
     생성 루프를 절대 깨지 않는다. 반환은 scene_boost 결과 dict(없으면 패스 표시).
-    level 미지정 시 설정의 Effort([기능2])를 레벨로 쓴다.
+    level/style 옵션 미지정 시 설정값을 쓴다.
     """
     src = str(prompt or "")
     if not getattr(context, "ollama_auto_boost", False) or not src.strip():
         return {"ok": False, "skipped": True, "prompt": src}
+    settings: dict[str, Any] | None = None
     if level is None:
-        level = ollama_boost_settings(context).get("effort") or "rich"
+        settings = ollama_boost_settings(context)
+        level = settings.get("effort") or "rich"
+    if allow_scent_style is None or allow_material_style is None or allow_light_style is None:
+        if settings is None:
+            settings = ollama_boost_settings(context)
+        if allow_scent_style is None:
+            allow_scent_style = bool(settings.get("allow_scent_style", True))
+        if allow_material_style is None:
+            allow_material_style = bool(settings.get("allow_material_style", True))
+        if allow_light_style is None:
+            allow_light_style = bool(settings.get("allow_light_style", True))
     try:
         svc = get_assist_service(context)
         if not hasattr(svc, "scene_boost"):
             return {"ok": False, "skipped": True, "prompt": src}
-        result = svc.scene_boost(src, options={"level": str(level or "rich")})
+        result = svc.scene_boost(
+            src,
+            options={
+                "level": str(level or "rich"),
+                "allow_scent_style": bool(allow_scent_style),
+                "allow_material_style": bool(allow_material_style),
+                "allow_light_style": bool(allow_light_style),
+            },
+        )
         if isinstance(result, dict) and result.get("prompt"):
             return result
     except Exception:

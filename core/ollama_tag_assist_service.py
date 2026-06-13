@@ -1241,6 +1241,18 @@ class OllamaTagAssistService:
         )
         return result
 
+    def _get_axis_classifier(self):
+        """Scene 축 분류기(서비스 1회 캐시). 실패해도 None 반환(boost는 degrade-safe)."""
+        if not hasattr(self, "_axis_classifier"):
+            try:
+                import os
+                from core.scene_axis import build_axis_classifier
+                repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                self._axis_classifier = build_axis_classifier(repo)
+            except Exception:
+                self._axis_classifier = None
+        return self._axis_classifier
+
     def scene_boost(
         self, prompt: str, *, model: str | None = None, options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1282,6 +1294,7 @@ class OllamaTagAssistService:
             is_sexual=_is_sexual_tag,
             is_hardcore=lambda t: any(kw in str(t).lower() for kw in _HARDCORE_KEYWORDS),
             has_hangul=_has_hangul,
+            classify_axes=self._get_axis_classifier(),
         )
         # 레이스 backstop: 이 boost가 keep_alive=-1을 보낸 사이 토글이 OFF로 뒤집혔거나
         # 상주 모델이 교체됐다면 모델이 재적재됐을 수 있다 → best-effort 언로드

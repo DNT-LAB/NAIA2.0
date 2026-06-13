@@ -117,7 +117,7 @@ def default_preprocessing_options() -> dict[str, bool]:
 
 # Ollama Boost — 자연어 보강 프롬프트 설정(영속). e621_settings 와 동일한 저장/로드/병합
 # 패턴을 따른다. nl_weight 는 [0.75, 3.0] 으로 clamp, effort 는 concise/standard/rich 중
-# 하나로 강제(기본 rich), 3개의 include 플래그는 bool 로 강제.
+# 하나로 강제(기본 rich), include/style 플래그는 bool 로 강제.
 OLLAMA_BOOST_EFFORTS = ("concise", "standard", "rich")
 OLLAMA_BOOST_NL_WEIGHT_MIN = 0.75
 OLLAMA_BOOST_NL_WEIGHT_MAX = 3.0
@@ -127,6 +127,9 @@ OLLAMA_BOOST_DEFAULTS: dict[str, Any] = {
     "include_prefix": False,
     "include_postfix": False,
     "include_e621": False,
+    "allow_scent_style": True,
+    "allow_material_style": True,
+    "allow_light_style": True,
 }
 
 
@@ -134,7 +137,7 @@ def normalize_ollama_boost_settings(settings: dict[str, Any] | None) -> dict[str
     """Coerce raw Ollama Boost settings to the canonical schema/defaults.
 
     nl_weight → float clamped to [0.75, 3.0]; effort → one of concise/standard/rich
-    (fallback rich); include_prefix/postfix/e621 → bool. Unknown keys are dropped."""
+    (fallback rich); include_prefix/postfix/e621 and style options → bool. Unknown keys are dropped."""
     source = settings if isinstance(settings, dict) else {}
     try:
         nl_weight = float(source.get("nl_weight", OLLAMA_BOOST_DEFAULTS["nl_weight"]))
@@ -152,6 +155,11 @@ def normalize_ollama_boost_settings(settings: dict[str, Any] | None) -> dict[str
         "include_prefix": bool(source.get("include_prefix", False)),
         "include_postfix": bool(source.get("include_postfix", False)),
         "include_e621": bool(source.get("include_e621", False)),
+        "allow_scent_style": bool(source.get("allow_scent_style", OLLAMA_BOOST_DEFAULTS["allow_scent_style"])),
+        "allow_material_style": bool(
+            source.get("allow_material_style", OLLAMA_BOOST_DEFAULTS["allow_material_style"])
+        ),
+        "allow_light_style": bool(source.get("allow_light_style", OLLAMA_BOOST_DEFAULTS["allow_light_style"])),
     }
 
 

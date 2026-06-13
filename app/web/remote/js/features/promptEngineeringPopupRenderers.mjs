@@ -16,6 +16,8 @@ export function createPromptEngineeringPopupRenderers({
     '자연어 가중치 — 보강된 자연어 프롬프트에 부여할 가중치입니다. '
     + 'NAI는 {v}::..:: , 로컬(WEBUI/COMFYUI)은 (..:v) 구문으로 적용됩니다.\\n\\n'
     + 'Effort — 보강 자연어의 길이·창의성. 간결(concise) / 표준(standard) / 풍부(rich).\\n\\n'
+    + 'Style 확장 — 향·재질·광원 같은 감각적 보강을 태그에 직접 없어도 허용할지 선택합니다. '
+    + '미입력 대상 색상과 눈색은 항상 차단됩니다.\\n\\n'
     + 'Input 구성 — Ollama에 보낼 입력에 PE Prefix / PE Postfix / e621 Auto-Boost 태그를 '
     + '포함할지 선택합니다.\\n\\n'
     + '⚠️ Prefix / Postfix는 **와일드카드 출력만** 반영됩니다. 고정 아티스트·퀄리티 태그'
@@ -527,6 +529,9 @@ export function createPromptEngineeringPopupRenderers({
     const includePrefix = !!boost.include_prefix;
     const includePostfix = !!boost.include_postfix;
     const includeE621 = !!boost.include_e621;
+    const allowScentStyle = boost.allow_scent_style !== false;
+    const allowMaterialStyle = boost.allow_material_style !== false;
+    const allowLightStyle = boost.allow_light_style !== false;
     const effortHtml = OLLAMA_BOOST_EFFORTS.map(([value, label]) => `
       <label class="mod-checkbox-item">
         <input type="radio" name="modOllamaBoostEffort" value="${escHtml(value)}"${effort === value ? ' checked' : ''}>
@@ -551,6 +556,24 @@ export function createPromptEngineeringPopupRenderers({
       <div class="mod-boost-head"><span class="mod-boost-name">Effort</span></div>
       <div class="mod-checkbox-grid" id="modOllamaBoostEffort">${effortHtml}</div>
       <div class="mod-boost-caption">보강 자연어의 길이·창의성(scene_boost level).</div>
+    </div>
+    <div>
+      <div class="mod-section-label">Style 확장</div>
+      <div class="mod-checkbox-grid">
+        <label class="mod-checkbox-item">
+          <input type="checkbox" id="modOllamaBoostAllowScent"${allowScentStyle ? ' checked' : ''}>
+          <span class="mod-checkbox-label">향·공기감 허용</span>
+        </label>
+        <label class="mod-checkbox-item">
+          <input type="checkbox" id="modOllamaBoostAllowMaterial"${allowMaterialStyle ? ' checked' : ''}>
+          <span class="mod-checkbox-label">재질·텍스처 허용</span>
+        </label>
+        <label class="mod-checkbox-item">
+          <input type="checkbox" id="modOllamaBoostAllowLight"${allowLightStyle ? ' checked' : ''}>
+          <span class="mod-checkbox-label">광원·색조 허용</span>
+        </label>
+      </div>
+      <div class="mod-boost-caption">미입력 대상 색상과 눈색은 항상 차단합니다. 광원 색조·향·재질은 태그에 직접 없어도 스타일 보강으로 허용할지 선택합니다.</div>
     </div>
     <div>
       <div class="mod-section-label">Input 구성</div>

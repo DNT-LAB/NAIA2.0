@@ -168,6 +168,9 @@ export function createPromptEngineeringActions({
       include_prefix: !!document.getElementById('modOllamaBoostIncludePrefix')?.checked,
       include_postfix: !!document.getElementById('modOllamaBoostIncludePostfix')?.checked,
       include_e621: !!document.getElementById('modOllamaBoostIncludeE621')?.checked,
+      allow_scent_style: !!document.getElementById('modOllamaBoostAllowScent')?.checked,
+      allow_material_style: !!document.getElementById('modOllamaBoostAllowMaterial')?.checked,
+      allow_light_style: !!document.getElementById('modOllamaBoostAllowLight')?.checked,
     };
     setModuleParam('prompt_engineering', 'ollama_boost_settings', JSON.stringify(payload));
   }

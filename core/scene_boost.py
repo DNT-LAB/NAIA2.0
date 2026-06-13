@@ -21,6 +21,11 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Optional
 
+# 축 이름 상수(분류기는 서비스가 주입; 여기선 IO 없는 상수만 import → 순수성 유지).
+from core.scene_axis import (
+    ACTION, AXIS_PRIORITY, BODY, CLOTHING, COLOR, EXPRESSION, OBJECT, SETTING,
+)
+
 
 # ---------------------------------------------------------------------------
 # 강도 레벨 — 문장 수·길이·구도태그 수·temperature를 한 손잡이로(_LEVELS 미러). 기본=rich.
@@ -109,6 +114,42 @@ _STOPWORDS = frozenset({
     "his", "its", "their", "into", "over", "under", "as", "by", "for", "from",
     "is", "are", "be", "this", "that", "soft", "warm",
 })
+
+_COLOR_ALIASES = {
+    "blond": "blonde",
+    "golden": "gold",
+    "grey": "gray",
+}
+_COLOR_WORDS = frozenset({
+    "amber", "aqua", "beige", "black", "blond", "blonde", "blue", "brown", "crimson",
+    "cyan", "gold", "golden", "gray", "grey", "green", "indigo", "ivory", "lavender",
+    "magenta", "maroon", "navy", "orange", "peach", "pink", "purple", "red", "rose",
+    "ruby", "scarlet", "silver", "teal", "turquoise", "violet", "white", "yellow",
+})
+_EYE_COLOR_TARGET_RE = re.compile(
+    r"\b(?P<color>amber|aqua|black|blue|brown|crimson|cyan|gold|golden|gray|grey|green|"
+    r"pink|purple|red|silver|teal|turquoise|violet|white|yellow)\s+"
+    r"(eyes?|gaze|irises?|pupils?)\b|\b(?P<hyphen>amber|aqua|black|blue|brown|crimson|cyan|"
+    r"gold|golden|gray|grey|green|pink|purple|red|silver|teal|turquoise|violet|white|yellow)-eyed\b",
+    re.I,
+)
+_SCENT_RE = re.compile(r"\b(scent|smell|aroma|fragrance|perfume|musk|jasmine|incense)\b", re.I)
+_MATERIAL_RE = re.compile(
+    r"\b(fabric|cloth|leather|silk|satin|velvet|lace|latex|metal|metallic|denim|glossy|sheen|texture)\b",
+    re.I,
+)
+_LIGHT_STYLE_RE = re.compile(
+    r"\b(light|lighting|glow|haze|sunlight|moonlight|daylight|backlight|backlighting|rim light|"
+    r"rays?|flare|illumination|spotlight|shadow|golden hour)\b",
+    re.I,
+)
+_LIGHT_COLOR_CONTEXT_RE = re.compile(
+    r"\b(amber|gold|golden|blue|white|pink|red|purple|violet|orange|silver)\s+"
+    r"(light|lighting|glow|haze|rays?|flare|illumination|sunlight|moonlight|daylight|hour)\b|"
+    r"\b(light|lighting|glow|haze|rays?|flare|illumination|sunlight|moonlight|daylight)\s+"
+    r"(amber|gold|golden|blue|white|pink|red|purple|violet|orange|silver)\b",
+    re.I,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +245,107 @@ def parse_prompt(prompt: str) -> dict[str, Any]:
         "existing_camera": existing_camera,
         "all_words": all_words,
     }
+
+
+def _norm_color(color: str) -> str:
+    c = str(color or "").strip().lower()
+    return _COLOR_ALIASES.get(c, c)
+
+
+def _input_colors(tags: list[str]) -> set[str]:
+    colors: set[str] = set()
+    for tag in tags or []:
+        for word in re.findall(r"[a-zA-Z]+", str(tag or "").lower()):
+            if word in _COLOR_WORDS:
+                colors.add(_norm_color(word))
+    return colors
+
+
+def _input_eye_colors(tags: list[str]) -> set[str]:
+    colors: set[str] = set()
+    for tag in tags or []:
+        text = str(tag or "").lower()
+        for match in _EYE_COLOR_TARGET_RE.finditer(text):
+            color = match.group("color") or match.group("hyphen")
+            if color:
+                colors.add(_norm_color(color))
+    return colors
+
+
+def _contains_style_source(tags: list[str], pattern: re.Pattern[str]) -> bool:
+    return any(pattern.search(str(tag or "")) for tag in tags or [])
+
+
+def _description_has_uninput_color(text: str, allowed_colors: set[str], *, allow_light_style: bool) -> bool:
+    low = str(text or "").lower()
+    for m in re.finditer(r"[a-zA-Z]+", low):
+        word = m.group(0)
+        if word not in _COLOR_WORDS:
+            continue
+        color = _norm_color(word)
+        if color in allowed_colors:
+            continue
+        if allow_light_style:
+            # 이 색 단어의 *국소* 이웃(±16자)만 검사 — 'golden glow' 같은 조명색만 면제하고,
+            # 같은 구절 다른 위치의 조명색이 객체색('blue dress')까지 면제하던 버그를 막는다.
+            a = max(0, m.start() - 16)
+            b = min(len(low), m.end() + 16)
+            if _LIGHT_COLOR_CONTEXT_RE.search(low[a:b]):
+                continue
+        return True
+    return False
+
+
+def _description_has_uninput_eye_color(text: str, allowed_eye_colors: set[str]) -> bool:
+    for match in _EYE_COLOR_TARGET_RE.finditer(str(text or "")):
+        color = _norm_color(match.group("color") or match.group("hyphen") or "")
+        if color and color not in allowed_eye_colors:
+            return True
+    return False
+
+
+def _style_options(options: dict[str, Any] | None) -> dict[str, bool]:
+    source = options if isinstance(options, dict) else {}
+    return {
+        "allow_scent_style": bool(source.get("allow_scent_style", True)),
+        "allow_material_style": bool(source.get("allow_material_style", True)),
+        "allow_light_style": bool(source.get("allow_light_style", True)),
+    }
+
+
+# 미입력 OBJECT/SETTING 명사 도입(환각) 가드의 면제 어휘 — 지시문이 허용하는 분위기/조명/
+# 시간/날씨/구도 + 인물 프레이밍 generic. 이들은 태그가 없어도 자연어 분위기로 허용한다.
+# (실측: sky/clouds/sunset/moon/light/shadow는 SETTING으로 분류되지만 분위기 어휘라 면제;
+#  bird/duck/flower/bed/window/classroom/desk/animal/chick은 그대로 환각으로 걸린다.)
+_AMBIENT_ALLOW = frozenset({
+    "light", "lights", "lighting", "lit", "sunlight", "moonlight", "daylight", "backlight",
+    "backlit", "backlighting", "glow", "glowing", "haze", "hazy", "shadow", "shadows", "shade",
+    "ray", "rays", "sunbeam", "sunbeams", "beam", "beams", "flare", "bokeh", "spotlight",
+    "candlelight", "chiaroscuro", "rim", "silhouette", "neon", "illumination", "highlight",
+    "highlights", "gleam", "shine", "shimmer", "reflection", "reflections", "luminous",
+    "sky", "skies", "cloud", "clouds", "sun", "sunrise", "sunset", "dawn", "dusk", "twilight",
+    "moon", "moonlit", "star", "stars", "starlight", "night", "evening", "morning", "noon",
+    "afternoon", "midday", "horizon", "mist", "fog", "rain", "snow", "breeze", "wind", "air",
+    "atmosphere", "ambience", "dust", "weather", "golden", "depth", "field", "focus", "blur",
+    "angle", "frame", "framing", "perspective", "view", "scene", "scenery", "background",
+    "backdrop", "foreground", "distance", "surroundings", "figure", "figures", "form", "pose",
+    "composition", "scale", "space", "setting", "ground",
+})
+
+
+def _introduces_object(
+    text: str, input_words: set[str], classify_axes: Callable[[str], frozenset[str]]
+) -> bool:
+    """미입력 OBJECT/SETTING 태그(prop/장소/동물)를 새로 도입하면 True(환각). 분위기/프레이밍
+    어휘(_AMBIENT_ALLOW)와 입력 태그 단어, body/clothing 류는 면제 — 'duck'/'bed'/'flower'는
+    잡고 'skin'/'hand'/'shadow'/'sky'는 통과시킨다(가드 후필터, classify_axes 주입 시만 작동)."""
+    for w in re.findall(r"[a-z']{3,}", str(text or "").lower()):
+        if w in _STOPWORDS or w in _AMBIENT_ALLOW or w in input_words:
+            continue
+        axes = classify_axes(w)
+        if OBJECT in axes or SETTING in axes:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -303,12 +445,22 @@ def filter_descriptions(
     input_words: set[str],
     level_cfg: dict[str, Any],
     *,
+    input_tags: Optional[list[str]] = None,
+    style_options: Optional[dict[str, bool]] = None,
     has_hangul: Optional[Callable[[str], bool]] = None,
+    classify_axes: Optional[Callable[[str], frozenset[str]]] = None,
 ) -> list[str]:
-    """LLM 자연어 묘사를 검열: 한글/길이초과/새 인물도입/태그에코/중복 제거."""
+    """LLM 자연어 묘사를 검열: 한글/길이초과/새 인물도입/미입력 객체·색/태그에코/중복 제거."""
     _, word_hi = level_cfg.get("words", (6, 18))
     max_words = int(word_hi) + 4            # slack
     phrase_hi = int(level_cfg.get("phrases", (1, 3))[1])
+    input_tags = input_tags or []
+    style = _style_options(style_options)
+    allowed_colors = _input_colors(input_tags)
+    allowed_eye_colors = _input_eye_colors(input_tags)
+    has_scent_source = _contains_style_source(input_tags, _SCENT_RE)
+    has_material_source = _contains_style_source(input_tags, _MATERIAL_RE)
+    has_light_source = _contains_style_source(input_tags, _LIGHT_STYLE_RE)
     out: list[str] = []
     seen: set[str] = set()
     for d in descs or []:
@@ -322,6 +474,18 @@ def filter_descriptions(
             continue                        # 너무 김 → 태그 프롬프트 희석
         if _SUBJECT_INTRO_RE.search(s):
             continue                        # 새 인물 도입(드리프트)
+        if _description_has_uninput_eye_color(s, allowed_eye_colors):
+            continue                        # 미입력 눈색 hallucination
+        if _description_has_uninput_color(s, allowed_colors, allow_light_style=style["allow_light_style"]):
+            continue                        # 미입력 색상 hallucination
+        if classify_axes is not None and _introduces_object(s, input_words, classify_axes):
+            continue                        # 미입력 OBJECT/SETTING 명사 도입(환각 prop/장소/동물)
+        if not style["allow_scent_style"] and not has_scent_source and _SCENT_RE.search(s):
+            continue
+        if not style["allow_material_style"] and not has_material_source and _MATERIAL_RE.search(s):
+            continue
+        if not style["allow_light_style"] and not has_light_source and _LIGHT_STYLE_RE.search(s):
+            continue
         # 에코: 묘사의 내용어가 거의 다 입력 태그 단어면(순수 재진술) 버린다.
         content = [w.lower() for w in re.findall(r"[a-zA-Z']+", s) if w.lower() not in _STOPWORDS]
         if content:
@@ -364,6 +528,115 @@ def filter_composition(
 
 
 # ---------------------------------------------------------------------------
+# 4.5) 접지(코드) — 입력 태그를 축 버킷 + Priority anchors로 정리(라벨만, prose 없음).
+#   classify_axes(서비스 주입)로 결정론 분류 → LLM에 "무엇을 프레이밍할지" 근거를 준다.
+#   prose 요약을 만들지 않는다(2-stage 환각통로 차단, Claude+Codex 협의 2026-06-13).
+# ---------------------------------------------------------------------------
+# 너무 흔해 앵커로서 변별력 없는 태그 — Priority/other에서 다운랭크(버킷엔 남는다).
+_BLAND_ANCHORS = frozenset({
+    "solo", "smile", "blush", "looking at viewer", "closed mouth", "open mouth", "grin",
+    "simple background", "white background", "standing", "bangs", "parted lips", "teeth",
+    "looking away", "long hair", "short hair",
+})
+# 버킷 표시 순서/라벨.
+_BUCKET_ORDER: tuple[tuple[str, str], ...] = (
+    (ACTION, "Action/pose"), (OBJECT, "Objects"), (SETTING, "Setting"),
+    (CLOTHING, "Clothing"), (BODY, "Body"), (EXPRESSION, "Expression"),
+)
+# Priority anchor salience(낮을수록 우선): 미분류 명물(None) 최상 → object/action → setting → 의류 → 신체/표정.
+_AXIS_SALIENCE = {None: 0, OBJECT: 1, ACTION: 1, SETTING: 2, CLOTHING: 3, BODY: 4, EXPRESSION: 4, COLOR: 9}
+
+# 메타/상태/POV 태그 — 프레이밍 대상이 아님("the in-universe location"처럼 어색해진다).
+# 버킷·priority에서 제외(immutable 태그줄엔 남아 모델이 보긴 한다). 부재(no~)·미착용·POV·in-universe.
+_META_NOISE_ANCHORS = frozenset({"in-universe location", "pov peephole", "unworn eyewear"})
+_META_NOISE_RE = re.compile(r"^(no|unworn|partially)\b|^pov\b|in-universe", re.I)
+
+
+def _is_meta_noise(tag: str) -> bool:
+    t = str(tag or "")
+    return t in _META_NOISE_ANCHORS or bool(_META_NOISE_RE.search(t))
+
+
+def build_grounding(
+    descriptive: list[str],
+    *,
+    classify_axes: Optional[Callable[[str], frozenset[str]]] = None,
+    existing_camera: Optional[list[str]] = None,
+    subject_count: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """입력 태그를 축 버킷 + other-notable(미분류 명물) + priority anchors로 묶는다.
+
+    카메라/인원수 태그는 앵커가 아니라 제외. 색 태그는 버킷 제외(가드 담당). classify_axes
+    없으면(목/폴백) 전부 미분류 → buckets 비고 other/priority만 채워진다(degrade-safe)."""
+    skip = set(existing_camera or []) | set(subject_count or [])
+    buckets: dict[str, list[str]] = {axis: [] for axis, _ in _BUCKET_ORDER}
+    other: list[str] = []
+    prim_of: dict[str, Optional[str]] = {}
+    for t in descriptive:
+        if t in skip or _is_meta_noise(t):
+            prim_of[t] = "skip"
+            continue
+        axes = classify_axes(t) if classify_axes else frozenset()
+        prim = next((a for a in AXIS_PRIORITY if a in axes and a in buckets), None)
+        if prim is None and COLOR in axes:
+            prim_of[t] = COLOR
+            continue
+        prim_of[t] = prim
+        if prim is None:
+            if t not in _BLAND_ANCHORS:
+                other.append(t)
+        else:
+            buckets[prim].append(t)
+    cand = [
+        t for t in descriptive
+        if prim_of.get(t) not in ("skip", COLOR) and t not in _BLAND_ANCHORS
+    ]
+    cand.sort(key=lambda t: _AXIS_SALIENCE.get(prim_of.get(t), 5))
+    priority: list[str] = []
+    for t in cand:
+        if t not in priority:
+            priority.append(t)
+        if len(priority) >= 6:
+            break
+    return {"buckets": buckets, "other": other, "priority": priority}
+
+
+def _format_grounding(grounding: dict[str, Any]) -> str:
+    """접지 dict → LLM 프롬프트용 compact 라벨 블록(prose 아님, 라벨:값 나열)."""
+    lines: list[str] = []
+    buckets = grounding.get("buckets") or {}
+    for axis, label in _BUCKET_ORDER:
+        vals = buckets.get(axis) or []
+        if vals:
+            lines.append(f"- {label}: {', '.join(vals[:12])}")
+    other = grounding.get("other") or []
+    if other:
+        lines.append(f"- Other notable: {', '.join(other[:8])}")
+    return "\n".join(lines)
+
+
+def _drop_if_all_generic(descs: list[str], grounding: dict[str, Any]) -> list[str]:
+    """앵커가 있는데(priority 존재) 살아남은 묘사가 *전부* 앵커-free generic이면 통째 드롭.
+    한 구절이라도 입력 앵커 단어를 참조하면 전부 유지(Codex: ALL generic일 때만 drop)."""
+    if not descs or not grounding or not grounding.get("priority"):
+        return descs
+    sources = list(grounding.get("priority") or []) + list(grounding.get("other") or [])
+    for vals in (grounding.get("buckets") or {}).values():
+        sources.extend(vals)
+    anchor_words: set[str] = set()
+    for t in sources:
+        for w in str(t).split():
+            if len(w) >= 3 and w not in _STOPWORDS:
+                anchor_words.add(w)
+    if not anchor_words:
+        return descs
+    for d in descs:
+        if set(re.findall(r"[a-z']+", str(d).lower())) & anchor_words:
+            return descs           # 최소 한 구절이 앵커 참조 → 전부 유지
+    return []                       # 전부 generic → 드롭
+
+
+# ---------------------------------------------------------------------------
 # 5) LLM 호출 — 지시문 + 스키마. 단일 few-shot, enum 제약, minItems 0(빈 출력 허용).
 # ---------------------------------------------------------------------------
 def build_instruction(
@@ -371,12 +644,32 @@ def build_instruction(
     rating: str,
     level_cfg: dict[str, Any],
     candidates: list[str],
+    *,
+    style_options: Optional[dict[str, bool]] = None,
+    grounding: Optional[dict[str, Any]] = None,
 ) -> str:
     lo, hi = level_cfg.get("phrases", (2, 3))
     wlo, whi = level_cfg.get("words", (8, 16))
     tone = ", ".join(_TONE_PALETTE.get(rating, _TONE_PALETTE["s"]))
     focus = _RATING_FOCUS.get(rating, _RATING_FOCUS["s"])
     tags_line = ", ".join(descriptive[:60])
+    style = _style_options(style_options)
+
+    # 접지 블록(코드가 만든 라벨:값) — 지시문 선두에 둬서 모델이 일반 분위기로 도망가지
+    # 않고 *이* 장면의 구체 앵커를 프레이밍하게 한다. Priority는 명물(역할/소품/포즈) 우선.
+    anchor_block = ""
+    priority_line = ""
+    if grounding:
+        gtext = _format_grounding(grounding)
+        if gtext:
+            anchor_block = (
+                "Concrete anchors to frame (build every phrase from these — introduce no nouns that "
+                "are not listed here):\n" + gtext + "\n"
+            )
+        prio = grounding.get("priority") or []
+        if prio:
+            priority_line = "Priority anchors (frame these first): " + ", ".join(prio[:6]) + "\n"
+
     comp_clause = ""
     if candidates:
         cmax = int(level_cfg.get("comp_max", 2))
@@ -385,22 +678,42 @@ def build_instruction(
             f"framing/angle/shot for THIS exact scene (only from the list, invent none): "
             f"{', '.join(candidates)}.\n"
         )
+
+    style_clause = (
+        "Grounding rules: every phrase must frame at least one concrete anchor above (its object, "
+        "clothing, pose, role, body, or setting) — the nouns you write must come from the anchors. "
+        "You MAY add lighting, time-of-day, weather, shadow, or depth atmosphere even when untagged, "
+        "but add NO named concrete location or prop that is not listed above (no 'classroom', 'bed', "
+        "'flower', 'window' unless it appears in the anchors). Never invent colors or eye colors: a "
+        "color word is allowed only when that color appears in Existing tags, eye color only when an "
+        "eye-color tag exists. "
+    )
+    if not style["allow_scent_style"]:
+        style_clause += "Do not add scent, aroma, perfume, musk, jasmine, or incense unless tagged. "
+    if not style["allow_material_style"]:
+        style_clause += "Do not add new material or texture words unless tagged. "
+    if not style["allow_light_style"]:
+        style_clause += "Do not add new light, glow, haze, ray, flare, spotlight, or shadow details unless tagged. "
+    style_clause += "\n"
+
     return (
         "Task: add only atmosphere and composition (no new facts) to an existing anime image prompt.\n"
-        f"Rating focus [{rating}]: {focus}\n"
-        f"Write {max(1, lo)}-{hi} short English phrases ({wlo}-{whi} words each), {tone} in tone, "
-        "as the Rating focus above directs — lighting, depth, mood, and the composition/framing the "
-        "existing tags imply.\n"
+        + anchor_block
+        + priority_line
+        + f"Rating focus [{rating}]: {focus}\n"
+        + f"Write {max(1, lo)}-{hi} short English phrases ({wlo}-{whi} words each): frame the anchors "
+        "above with concrete lighting, depth, angle and mood, as the Rating focus directs.\n"
         "Rules: (1) never add or change subjects, count, outfit, location, props, named series, "
-        "artist, or style; (2) do not merely re-list the existing tags verbatim — but you MAY frame "
-        "and present what they already depict; (3) if nothing fitting can be added, return empty "
-        "arrays — never invent. English only.\n"
+        "artist, or style; (2) do not merely re-list the tags verbatim — frame and present what they "
+        "depict; (3) if nothing fitting can be added, return empty arrays — never invent. English only.\n"
+        + style_clause
+        + f"Tone (secondary — atmosphere only, must never replace the anchors): {tone}.\n"
         + comp_clause +
-        "Bad — never do: \"another girl walks in\", \"a bed in the background\" (unless a bed tag "
-        "already exists), introducing any new character, prop, or location.\n"
-        "Example tags: 1girl, school uniform, classroom, sitting, looking out window\n"
-        'Example output: {"descriptions": ["late afternoon light pooling across empty desks", '
-        '"a hush of chalk dust in the golden quiet"], "composition_tags": ["depth of field", "backlighting"]}\n\n'
+        "Bad — never do: \"another girl walks in\", \"a bed in the background\" (unless a bed anchor "
+        "exists), introducing any new character, prop, or location.\n"
+        "Example anchors — Action/pose: sitting, looking out window | Clothing: school uniform | Setting: classroom\n"
+        'Example output: {"descriptions": ["late afternoon light washing across the quiet classroom", '
+        '"a soft glow tracing the collar of her school uniform"], "composition_tags": ["depth of field", "backlighting"]}\n\n'
         f"Existing tags (IMMUTABLE — never change, add to, or contradict): {tags_line}\n"
         "Output JSON:"
     )
@@ -443,6 +756,7 @@ def run_scene_boost(
     is_sexual: Optional[Callable[[str], bool]] = None,
     is_hardcore: Optional[Callable[[str], bool]] = None,
     has_hangul: Optional[Callable[[str], bool]] = None,
+    classify_axes: Optional[Callable[[str], frozenset[str]]] = None,
 ) -> dict[str, Any]:
     """Scene Boost 1회 실행. 원문은 verbatim 보존, 검증된 구도태그 + 필터링된 자연어만 덧붙인다."""
     options = options or {}
@@ -465,11 +779,24 @@ def run_scene_boost(
 
     rating = aggregate_rating(
         descriptive, tag_rating=tag_rating, is_sexual=is_sexual, is_hardcore=is_hardcore)
+    # 톤/구도용 *유효* 등급: q/e인데 성적 신호(노출/행위)가 전혀 없으면(lying·on back 같은 자세
+    # 태그만으로 올라간 SFW) s로 강등 — sultry/feverish 톤·moody 조명이 SFW에 새는 것 차단.
+    # explicit(노출/행위 태그 존재)은 그대로 유지된다(tone drift 가드, Codex 검토).
+    sexual_present = bool(
+        (is_sexual and any(is_sexual(t) for t in descriptive))
+        or (is_hardcore and is_hardcore(" ".join(descriptive).lower()))
+    )
+    tone_rating = "s" if (rating in ("q", "e") and not sexual_present) else rating
     candidates = composition_candidates(
-        rating, parsed["existing_camera"], lvl_cfg,
+        tone_rating, parsed["existing_camera"], lvl_cfg,
         validate_tag=validate_tag, tag_allowed=tag_allowed)
+    grounding = build_grounding(
+        descriptive, classify_axes=classify_axes,
+        existing_camera=parsed["existing_camera"], subject_count=parsed["subject_count"])
 
-    instruction = build_instruction(descriptive, rating, lvl_cfg, candidates)
+    style = _style_options(options)
+    instruction = build_instruction(
+        descriptive, tone_rating, lvl_cfg, candidates, style_options=style, grounding=grounding)
     schema = boost_schema(lvl_cfg, candidates)
     try:
         out = chat(instruction, schema, model=default_model,
@@ -481,7 +808,10 @@ def run_scene_boost(
     if not isinstance(out, dict):
         out = {}
     descs = filter_descriptions(
-        out.get("descriptions") or [], parsed["all_words"], lvl_cfg, has_hangul=has_hangul)
+        out.get("descriptions") or [], parsed["all_words"], lvl_cfg,
+        input_tags=descriptive, style_options=style, has_hangul=has_hangul,
+        classify_axes=classify_axes)
+    descs = _drop_if_all_generic(descs, grounding)
     comp = filter_composition(
         out.get("composition_tags") or [], candidates, parsed["existing_camera"], lvl_cfg)
 
@@ -492,12 +822,13 @@ def run_scene_boost(
     return {
         "ok": True, "stage": "done", "prompt": boosted, "rating": rating, "level": level,
         "additions": {"composition_tags": comp, "descriptions": descs},
+        "grounding": grounding,
     }
 
 
 __all__ = [
     "SCENE_BOOST_LEVELS", "DEFAULT_LEVEL", "normalize_level",
     "parse_prompt", "aggregate_rating", "composition_candidates",
-    "filter_descriptions", "filter_composition",
+    "build_grounding", "filter_descriptions", "filter_composition",
     "build_instruction", "boost_schema", "run_scene_boost",
 ]

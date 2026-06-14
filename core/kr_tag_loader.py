@@ -8,7 +8,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from core.tag_knowledge import apply_translation_overrides, merge_parquet_tag_records
+from core.tag_knowledge import (
+    apply_translation_overrides,
+    merge_parquet_tag_records,
+    merge_rating_count_records,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +25,7 @@ class KrTagLoadResult:
     filter_count: int = 0
     dict_count: int = 0
     parquet_stats: Any | None = None
+    rating_count_stats: Any | None = None
     override_stats: Any | None = None
     warnings: list[str] = field(default_factory=list)
 
@@ -202,12 +207,20 @@ def load_kr_tag_records(
         except Exception as exc:
             _warn(warnings, f"dict {module_name} load failed - {exc}", warn)
 
+    rating_count_stats = merge_rating_count_records(
+        raw,
+        _first_existing(resolved_data_roots, "danbooru_tag_counts_by_rating.json"),
+    )
+    for error in rating_count_stats.errors:
+        _warn(warnings, f"tag count merge warning - {error}", warn)
+
     return KrTagLoadResult(
         raw=raw,
         interactive_count=interactive_count,
         filter_count=filter_count,
         dict_count=dict_count,
         parquet_stats=parquet_stats,
+        rating_count_stats=rating_count_stats,
         override_stats=override_stats,
         warnings=warnings,
     )
@@ -215,14 +228,17 @@ def load_kr_tag_records(
 
 def format_kr_tag_load_summary(result: KrTagLoadResult) -> str:
     parquet = result.parquet_stats
+    rating_counts = result.rating_count_stats
     overrides = result.override_stats
     return (
         f"{result.interactive_count} interactive + {getattr(parquet, 'added', 0)} parquet "
         f"+ {getattr(parquet, 'records_updated', 0)} KR merges "
-        f"(desc fill {getattr(parquet, 'description_filled', 0)}, "
+        f"(count fill {getattr(parquet, 'count_filled', 0)}, "
+        f"desc fill {getattr(parquet, 'description_filled', 0)}, "
         f"desc replace {getattr(parquet, 'description_replaced', 0)}, "
         f"kw fill {getattr(parquet, 'keywords_filled', 0)}, "
         f"kw replace {getattr(parquet, 'keywords_replaced', 0)}) "
+        f"+ {getattr(rating_counts, 'records_updated', 0)} rating-count fills "
         f"+ {getattr(overrides, 'applied', 0)} overrides "
         f"+ {result.filter_count} filter + {result.dict_count} dict = {len(result.raw)} total"
     )

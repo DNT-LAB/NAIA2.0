@@ -41,11 +41,21 @@ def normalize_display_tag(tag: Any) -> str:
 class ParquetTagMergeStats:
     added: int = 0
     records_updated: int = 0
+    count_filled: int = 0
     description_filled: int = 0
     description_replaced: int = 0
     keywords_filled: int = 0
     keywords_replaced: int = 0
     missing_sources: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RatingCountMergeStats:
+    path: str = ""
+    records_seen: int = 0
+    records_updated: int = 0
+    missing_path: bool = False
     errors: list[str] = field(default_factory=list)
 
 
@@ -92,6 +102,30 @@ def _merge_text_field(
     return None
 
 
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _fill_missing_count(
+    record: MutableMapping[str, Any],
+    count: Any,
+    *,
+    source: str,
+) -> bool:
+    candidate = _coerce_int(count)
+    if candidate <= 0:
+        return False
+    current = _coerce_int(record.get("freq", record.get("count", 0)))
+    if current > 0:
+        return False
+    record["freq"] = candidate
+    record["_count_source"] = source
+    return True
+
+
 def merge_parquet_tag_records(
     raw: MutableMapping[str, MutableMapping[str, Any]],
     parquet_sources: Iterable[tuple[str | Path, int]],
@@ -131,6 +165,10 @@ def merge_parquet_tag_records(
             if tag_lower in raw:
                 existing = raw[tag_lower]
                 updated = False
+
+                if _fill_missing_count(existing, row.get("count", 0), source=str(path)):
+                    stats.count_filled += 1
+                    updated = True
 
                 desc_action = _merge_text_field(
                     existing,
@@ -181,6 +219,46 @@ def merge_parquet_tag_records(
             _refresh_lookup_fields(entry)
             raw[tag_lower] = entry
             stats.added += 1
+
+    return stats
+
+
+def merge_rating_count_records(
+    raw: MutableMapping[str, MutableMapping[str, Any]],
+    counts_path: str | Path,
+) -> RatingCountMergeStats:
+    stats = RatingCountMergeStats(path=str(counts_path))
+    path = Path(counts_path)
+    if not path.exists():
+        stats.missing_path = True
+        return stats
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        stats.errors.append(f"{path}: {exc}")
+        return stats
+
+    if not isinstance(payload, dict):
+        stats.errors.append(f"{path}: expected object")
+        return stats
+
+    for raw_tag, value in payload.items():
+        if raw_tag == "_meta":
+            continue
+        stats.records_seen += 1
+        tag_lower = normalize_tag_key(raw_tag)
+        record = raw.get(tag_lower)
+        if record is None:
+            continue
+        if isinstance(value, list):
+            total = sum(_coerce_int(item) for item in value)
+        elif isinstance(value, dict):
+            total = sum(_coerce_int(item) for item in value.values())
+        else:
+            total = _coerce_int(value)
+        if _fill_missing_count(record, total, source=str(path)):
+            stats.records_updated += 1
 
     return stats
 

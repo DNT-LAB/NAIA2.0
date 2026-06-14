@@ -211,6 +211,16 @@ _HARDCORE_KEYWORDS = (
     "fucked", "fucking", "during sex", "spread pussy",
 )
 
+# 맥락-중립 위치/장소 태그 — explicit 장면과 공기율(co-occurrence)이 높지만 태그
+# 자체는 비명시적이다. 전체-아카이브 rating-count 도입 후 이런 위치 태그의 explicit
+# 베이스레이트가 es>=0.40 임계를 넘어 'e'로 오분류되는 회귀를 막기 위해 'q' 이하로
+# 캡한다(_HARDCORE_KEYWORDS 강제-E의 역방향 대칭). _ACT_DOWNGRADE_TABLE의 q-tier
+# 안전 다운그레이드 타깃(on bed/on back 등) 큐레이션을 보존하기 위함.
+_POSITIONAL_NEUTRAL_TAGS = frozenset({
+    "on bed", "on back", "on side", "on stomach",
+    "on couch", "on floor", "on chair", "on table",
+})
+
 # NAIA rating 4단계 (danbooru). 어시스트는 "선택 등급 이하 허용"(상한 클램프).
 _RATING_ORDER = {"g": 0, "s": 1, "q": 2, "e": 3}
 _RATING_INDEX_TO_KEY = ("g", "s", "q", "e")
@@ -541,6 +551,10 @@ def _tag_rating(tag_norm: str) -> str:
     if any(kw in t for kw in _HARDCORE_KEYWORDS):
         return "e"
     if _RATING_ORDER[rating] < _RATING_ORDER["q"] and _is_sexual_tag(t):
+        rating = "q"
+    # 맥락-중립 위치 태그는 explicit 공기율(베이스레이트)이 높아도 'q' 이하로 캡한다.
+    # (명시적 성적 키워드가 있으면 위 _HARDCORE_KEYWORDS override가 이미 'e'를 반환했다.)
+    if t in _POSITIONAL_NEUTRAL_TAGS and _RATING_ORDER[rating] > _RATING_ORDER["q"]:
         rating = "q"
     return rating
 

@@ -60,8 +60,11 @@ def _collect_strings(data: Any) -> list[str]:
             elif isinstance(x, (list, dict)):
                 out.extend(_collect_strings(x))
     elif isinstance(data, dict):
+        tag = data.get("tag")
+        if isinstance(tag, str) and tag.strip():
+            out.append(tag)
         for key, value in data.items():
-            if key in ("version", "description"):
+            if key in ("version", "description", "tag"):
                 continue
             out.extend(_collect_strings(value))
     return out

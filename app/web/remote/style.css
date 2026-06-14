@@ -17019,6 +17019,12 @@ body.detached-module .mod-grid-3 {
 .settings-page.active { display: block; }
 .settings-empty { color: var(--text-muted); font-size: 13px; line-height: 1.8; padding: 16px 6px; }
 .settings-empty h3 { color: var(--text-primary); margin: 0 0 6px; }
+.settings-group { padding: 4px 6px 14px; }
+.settings-group-title { color: var(--text-primary); font-size: 13px; font-weight: 600; margin: 0 0 10px; }
+.settings-toggle-row { display: flex; flex-direction: column; gap: 6px; }
+.settings-toggle-row .opt-toggle.settings-toggle { flex: 0 0 auto; align-self: flex-start; }
+.settings-toggle-desc { color: var(--text-muted); font-size: 12px; line-height: 1.6; margin: 0; max-width: 520px; }
+.settings-toggle-note { display: inline; color: var(--accent); }
 
 /* 퀵 버튼 위치 select */
 .ext-placement { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }

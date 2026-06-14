@@ -29,6 +29,8 @@ from core.semantic_tag_discovery import (
     clean_tag_discovery_subject,
     discover_prompt_tags,
     discover_semantic_tags,
+    infer_category_axis_from_text,
+    normalize_category_axis,
 )
 
 
@@ -134,6 +136,7 @@ class IntentFrame:
     language: str = "ko"
     confidence: float = 0.0
     expansion_queries: tuple[str, ...] = ()
+    category_axis: str = "general"
 
 
 @dataclass(frozen=True)
@@ -145,6 +148,7 @@ class IntentDecision:
     reason_code: str = ""
     next_call: str = "none"
     confidence: float = 0.0
+    category_axis: str = "general"
 
     def summary(self) -> dict[str, Any]:
         return asdict(self)
@@ -158,11 +162,13 @@ class ActionRequest:
     limit: int = 12
     reason: str = ""
     expansion_queries: tuple[str, ...] = ()
+    category_axis: str = "general"
 
     def key(self, context: GenerationInfoContext | None = None) -> str:
         context_key = context.key() if context else ""
         expansion_key = "\n".join(q.strip().lower() for q in self.expansion_queries)
-        return f"{self.action}\n{self.query.strip().lower()}\n{self.limit}\n{expansion_key}\n{context_key}"
+        axis_key = normalize_category_axis(self.category_axis)
+        return f"{self.action}\n{self.query.strip().lower()}\n{self.limit}\n{expansion_key}\n{axis_key}\n{context_key}"
 
 
 @dataclass(frozen=True)
@@ -260,6 +266,7 @@ def extract_intent_frame(
             tag_subject = m.group(1)
             break
     subject = _clean_subject(subject or text or ctx.prompt)
+    category_axis = infer_category_axis_from_text(text)
     has_context = bool(ctx.prompt or ctx.tags or ctx.metadata)
     context_ref = any(k in text for k in ("여기", "현재", "이 프롬프트", "이 태그", "이거", "변형", "관련", "더", "뜻"))
     wants_prompt = "프롬프트" in grounded or "prompt" in lowered or (has_context and context_ref)
@@ -269,6 +276,7 @@ def extract_intent_frame(
             intent=INTENT_PROMPT_RECOMMENDATION,
             subject=subject,
             confidence=0.72,
+            category_axis=category_axis,
         )
     wants_tag = "태그" in text or "tag" in lowered
     wants_tag_discovery = wants_tag and any(k in text for k in ("있", "찾", "추천", "알려", "묘사", "상황", "어울", "관련"))
@@ -283,6 +291,7 @@ def extract_intent_frame(
                 action="discover",
                 language="ko" if _HANGUL_RE.search(grounded) else "en",
                 confidence=0.7,
+                category_axis=category_axis,
             )
     return IntentFrame(
         intent="unknown",
@@ -292,6 +301,7 @@ def extract_intent_frame(
         action="",
         language="ko" if _HANGUL_RE.search(grounded) else "en",
         confidence=0.2 if subject else 0.0,
+        category_axis=category_axis,
     )
 
 
@@ -323,6 +333,7 @@ def decide_intent_route(
             reason_code="source_mutation_blocked",
             next_call="none",
             confidence=0.9,
+            category_axis=normalize_category_axis(intent.category_axis),
         )
 
     if intent.intent == INTENT_PROMPT_RECOMMENDATION and intent.subject:
@@ -334,6 +345,7 @@ def decide_intent_route(
             reason_code="prompt_search_allowed",
             next_call=ACTION_PROMPT_SEARCH,
             confidence=max(0.0, min(1.0, intent.confidence)),
+            category_axis=normalize_category_axis(intent.category_axis),
         )
     if intent.intent == INTENT_TAG_DISCOVERY and intent.subject:
         return IntentDecision(
@@ -344,6 +356,7 @@ def decide_intent_route(
             reason_code="semantic_tag_search_allowed",
             next_call=ACTION_SEMANTIC_TAG_SEARCH,
             confidence=max(0.0, min(1.0, intent.confidence)),
+            category_axis=normalize_category_axis(intent.category_axis),
         )
 
     if _contains_any(lowered, _NAIA_FEATURE_KEYWORDS) or context_ref:
@@ -355,6 +368,7 @@ def decide_intent_route(
             reason_code="naia_readonly_question",
             next_call="readonly_answer",
             confidence=max(0.35, min(0.75, intent.confidence or 0.5)),
+            category_axis=normalize_category_axis(intent.category_axis),
         )
 
     return IntentDecision(
@@ -365,6 +379,7 @@ def decide_intent_route(
         reason_code="non_naia_request",
         next_call="none",
         confidence=max(0.4, min(0.8, 1.0 - (intent.confidence or 0.0))),
+        category_axis=normalize_category_axis(intent.category_axis),
     )
 
 
@@ -401,6 +416,7 @@ def build_action_requests(
                 query=intent.subject,
                 limit=12,
                 expansion_queries=intent.expansion_queries,
+                category_axis=normalize_category_axis(intent.category_axis),
                 reason=(
                     "사용자가 자연어 장면 설명에 맞는 실제 태그 후보를 요청했고, "
                     "semantic_tag_search 후보 검색이 필요함."
@@ -416,6 +432,7 @@ def build_action_requests(
             query=intent.subject,
             limit=12,
             expansion_queries=intent.expansion_queries,
+            category_axis=normalize_category_axis(intent.category_axis),
             reason=(
                 "사용자가 현재 생성물 맥락에서 관련 프롬프트 후보를 요청했고, "
                 "prompt_search 후보 검색이 필요함."
@@ -523,6 +540,7 @@ class IntentActionPipeline:
                     limit=action.limit,
                     expansion_queries=action.expansion_queries,
                     translator=self.translator,
+                    category_axis=action.category_axis,
                 )
             else:
                 rows = discover_prompt_tags(
@@ -532,6 +550,7 @@ class IntentActionPipeline:
                     limit=action.limit,
                     expansion_queries=action.expansion_queries,
                     translator=self.translator,
+                    category_axis=action.category_axis,
                 )
             return ToolResult(
                 action_id=action.id,

@@ -103,6 +103,61 @@ _LOCAL_KO_QUERY_EXPANSIONS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] 
     (("메이드복", "메이드 옷", "maid"), ("maid outfit", "maid")),
     (("블루 아카이브", "blue archive"), ("blue archive",)),
 )
+_CATEGORY_AXES = frozenset({
+    "clothing",
+    "action",
+    "expression",
+    "background",
+    "body",
+    "object",
+    "general",
+})
+_CATEGORY_AXIS_ALLOWED_TOPS = {
+    # Enumerated from load_kr_tag_records().raw top-level group labels. Keep
+    # this mapping code-owned; the model only proposes the compact axis label.
+    "clothing": frozenset({
+        "패션", "의상", "복장", "의류", "복식", "코스프레", "코스튬", "특정 의상",
+        "의상 조합", "복장 조합", "의상/상태", "의상/사물", "의상/디테일",
+        "캐릭터/의상", "신발", "신발/디테일", "액세서리", "악세사리", "장신구",
+        "모자", "갑옷", "스킨", "clothing", "fashion", "attire",
+    }),
+    "action": frozenset({
+        "행위", "행동", "동작", "자세", "자세/행동", "포즈", "표정/행동",
+        "신체 자세", "성행위", "성적 행위", "체위", "활동", "놀이", "움직임",
+        "상호작용", "구속", "신체 구속", "BDSM", "Actions", "action", "actions",
+        "pose",
+    }),
+    "expression": frozenset({
+        "표정", "표현", "표정/행동", "표정/상태", "Expressions", "감정", "얼굴",
+        "눈", "화장", "메이크업", "expression", "expressions",
+    }),
+    "background": frozenset({
+        "배경", "장소", "자연", "풍경", "환경", "지형", "지리", "건축", "건물",
+        "배경/사물", "배경/문화", "background", "location", "nature",
+    }),
+    "body": frozenset({"신체", "body"}),
+    "object": frozenset({"사물", "물체", "오브젝트", "사물/음식", "음식", "object", "prop"}),
+}
+_CATEGORY_AXIS_TOP_MARKERS = {
+    # The corpus has many one-off franchise labels such as "블루 아카이브 복식".
+    # Marker matching covers those top-levels without blocking valid costume
+    # leaves like "패션 > 코스튬".
+    "clothing": frozenset({"의상", "복장", "의류", "복식", "코스튬", "신발", "액세서리", "악세사리", "장신구"}),
+    "action": frozenset({"행동", "행위", "동작", "자세", "포즈", "성행위", "상호작용", "움직임", "구속"}),
+    "expression": frozenset({"표정", "표현", "감정", "얼굴", "메이크업"}),
+    "background": frozenset({"배경", "장소", "자연", "풍경", "환경", "지형", "지리", "건축", "건물"}),
+    "body": frozenset({"신체", "체형", "외형", "외모", "헤어", "성기"}),
+    "object": frozenset({"사물", "물체", "오브젝트", "음식", "아이템", "도구", "소품", "장비", "무기", "가구", "악기", "식기", "탈것"}),
+}
+_CATEGORY_AXIS_ALLOWED_TOPS_FOLDED = {
+    axis: frozenset(item.casefold() for item in tops)
+    for axis, tops in _CATEGORY_AXIS_ALLOWED_TOPS.items()
+}
+_CATEGORY_AXIS_FUNCTION_WORD_TAGS = frozenset({
+    "action",
+    "can",
+    "only",
+})
 
 
 def discover_semantic_tags(
@@ -113,6 +168,7 @@ def discover_semantic_tags(
     limit: int = 12,
     expansion_queries: Iterable[str] | None = None,
     translator: TranslatorFn | None = None,
+    category_axis: str = "general",
 ) -> list[dict[str, Any]]:
     """Return ranked tag rows for a natural-language scene description."""
     text = _coerce_text(query, limit=1000).strip()
@@ -125,6 +181,7 @@ def discover_semantic_tags(
             queries = _dedupe_queries(list(queries) + [_normalize_booru_query(translated)])
     merged = _collect_search_rows(queries, searcher=searcher, context=context, limit=limit)
     ranked = rank_semantic_tag_rows(text, merged.values(), context=context)
+    ranked = filter_rows_by_category_axis(ranked, category_axis)
     return ranked[: max(0, int(limit or 12))]
 
 
@@ -136,6 +193,7 @@ def discover_prompt_tags(
     limit: int = 12,
     expansion_queries: Iterable[str] | None = None,
     translator: TranslatorFn | None = None,
+    category_axis: str = "general",
 ) -> list[dict[str, Any]]:
     """Return ranked grounded tag rows for prompt-recommendation chat requests."""
     text = _coerce_text(query, limit=1000).strip()
@@ -144,7 +202,91 @@ def discover_prompt_tags(
     queries = prompt_tag_queries(text, expansion_queries=expansion_queries, translator=translator)
     merged = _collect_search_rows(queries, searcher=searcher, context=context, limit=limit)
     ranked = rank_semantic_tag_rows(text, merged.values(), context=context)
+    ranked = filter_rows_by_category_axis(ranked, category_axis)
     return ranked[: max(0, int(limit or 12))]
+
+
+def normalize_category_axis(value: Any) -> str:
+    axis = _coerce_text(value, limit=40).strip().lower().replace("-", "_")
+    aliases = {
+        "clothes": "clothing",
+        "clothings": "clothing",
+        "costume": "clothing",
+        "costumes": "clothing",
+        "fashion": "clothing",
+        "outfit": "clothing",
+        "outfits": "clothing",
+        "attire": "clothing",
+        "pose": "action",
+        "poses": "action",
+        "posture": "action",
+        "postures": "action",
+        "movement": "action",
+        "movements": "action",
+        "behavior": "action",
+        "behaviors": "action",
+        # 데이터 top-level이 'Actions'/'Expressions' 복수형이라 소형 모델이 복수/대문자를
+        # 낼 가능성이 높다 → 정규화 누락 시 필터가 general로 풀려 노이즈가 부활한다(Codex R1).
+        "actions": "action",
+        "face": "expression",
+        "faces": "expression",
+        "expressions": "expression",
+        "emotion": "expression",
+        "emotions": "expression",
+        "location": "background",
+        "locations": "background",
+        "place": "background",
+        "places": "background",
+        "scene": "background",
+        "scenes": "background",
+        "backgrounds": "background",
+        "bodies": "body",
+        "prop": "object",
+        "props": "object",
+        "item": "object",
+        "items": "object",
+        "objects": "object",
+        "misc": "general",
+        "unknown": "general",
+        "none": "general",
+    }
+    axis = aliases.get(axis, axis)
+    return axis if axis in _CATEGORY_AXES else "general"
+
+
+def infer_category_axis_from_text(value: str) -> str:
+    text = _coerce_text(value, limit=1000).lower()
+    if _contains_any(text, ("의상", "옷", "복장", "입은", "clothing", "clothes", "outfit", "costume")):
+        return "clothing"
+    if _contains_any(text, ("행동", "행위", "동작", "포즈", "자세", "action", "pose", "posture", "movement", "behavior")):
+        return "action"
+    if _contains_any(text, ("표정", "얼굴", "expression", "face")):
+        return "expression"
+    if _contains_any(text, ("배경", "장소", "background", "location", "place")):
+        return "background"
+    if _contains_any(text, ("신체", "몸", "body")):
+        return "body"
+    if _contains_any(text, ("사물", "소품", "물체", "object", "prop", "item")):
+        return "object"
+    return "general"
+
+
+def filter_rows_by_category_axis(
+    rows: Iterable[dict[str, Any]],
+    category_axis: str,
+) -> list[dict[str, Any]]:
+    """Filter grounded rows by a code-owned category axis.
+
+    Return only rows that match the axis. If no grounded rows match, return an
+    empty list and let the route's empty-tool handling produce an honest chat
+    fallback; never reintroduce unfiltered noise.
+    """
+    axis = normalize_category_axis(category_axis)
+    original = [dict(row) for row in rows or []]
+    if axis == "general":
+        return original
+    kept = [row for row in original if _row_matches_category_axis(row, axis)]
+    return kept
 
 
 def semantic_tag_queries(query: str, expansion_queries: Iterable[str] | None = None) -> list[str]:
@@ -473,6 +615,8 @@ def _generic_noise_floor(tag: str, row: dict[str, Any]) -> tuple[float, str]:
     tag_norm = _norm_tag(tag)
     if tag_norm in _EXACT_NOISE_TAGS or any(tag_norm.startswith(prefix) for prefix in _NOISE_PREFIXES):
         return -1.25, "메타/동사 매칭 노이즈"
+    if tag_norm in _CATEGORY_AXIS_FUNCTION_WORD_TAGS:
+        return -1.25, "기능어 매칭 노이즈"
     if any(part in tag_norm for part in _GENITAL_NOISE_PARTS):
         return -0.95, "요청과 직접 관련 없는 신체/성적 세부 노이즈"
     if tag_norm in _SOFT_NOISE_TAGS:
@@ -490,6 +634,30 @@ def _generic_noise_floor(tag: str, row: dict[str, Any]) -> tuple[float, str]:
     except Exception:
         pass
     return 0.0, ""
+
+
+def _row_matches_category_axis(row: dict[str, Any], axis: str) -> bool:
+    tag = _norm_tag(row.get("tag"))
+    if tag in _CATEGORY_AXIS_FUNCTION_WORD_TAGS:
+        return False
+    allowed = _CATEGORY_AXIS_ALLOWED_TOPS.get(axis)
+    allowed_folded = _CATEGORY_AXIS_ALLOWED_TOPS_FOLDED.get(axis, frozenset())
+    markers = _CATEGORY_AXIS_TOP_MARKERS.get(axis, frozenset())
+    if not allowed and not markers:
+        return True
+    category = _coerce_text(row.get("group") or row.get("_kr_category") or row.get("cat") or row.get("_cat"), limit=200)
+    top, _leaves = _category_parts(category)
+    top_fold = top.casefold()
+    if top in allowed or top_fold in allowed_folded:
+        return True
+    return any(marker.casefold() in top_fold for marker in markers)
+
+
+def _category_parts(value: str) -> tuple[str, set[str]]:
+    parts = [part.strip() for part in _coerce_text(value, limit=200).split(">") if part.strip()]
+    if not parts:
+        return "", set()
+    return parts[0], set(parts[1:])
 
 
 def _scene_signals(lowered: str) -> set[str]:
@@ -616,6 +784,9 @@ __all__ = [
     "clean_prompt_search_subject",
     "discover_prompt_tags",
     "discover_semantic_tags",
+    "filter_rows_by_category_axis",
+    "infer_category_axis_from_text",
+    "normalize_category_axis",
     "prompt_tag_queries",
     "rank_semantic_tag_rows",
     "semantic_tag_queries",

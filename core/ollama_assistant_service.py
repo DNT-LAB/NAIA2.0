@@ -421,13 +421,16 @@ class OllamaAssistantService:
             "Use naia_tool only for prompt/tag/current-generation requests that should return grounded candidate chips.\n"
             "Use intent=tag_discovery when the user describes a scene and asks whether matching prompt tags exist.\n"
             "For every naia_tool decision, subject must be a concise English booru-style search concept, not Korean prose.\n"
-            "Strip scaffolding verbs/particles such as describe, emphasize, recommend, prompt, tag, 묘사, 강조, 알려주세요, 프롬프트, 태그.\n"
+            "Strip scaffolding verbs/particles such as describe, emphasize, recommend, prompt, tag, 할 수 있는, 만, 하는, 들, 관련, 묘사, 강조, 알려주세요, 프롬프트, 태그.\n"
+            "Return category_axis as exactly one of: clothing, action, expression, background, body, object, general.\n"
+            "Map clothing for 의상/옷/복장/입은; action for 행동/행위/동작/포즈/자세; expression for 표정/얼굴; background for 배경/장소; body for 신체/몸; object for 사물/소품; general when unclear.\n"
             "Return expansion_queries as 1-6 concise English booru-style search queries. Use known entity aliases when present.\n"
-            "Examples: 'blue archive의 kokona를 묘사하는' -> subject='kokona', expansion_queries=['kokona (blue archive)','kokona']; '가슴골을 강조하는' -> subject='cleavage', expansion_queries=['cleavage','large breasts'].\n"
+            "Do not output function words like can/action/only as subject or expansion queries; for '메이드만 할 수 있는 행동' use subject='maid', category_axis='action'.\n"
+            "Examples: 'blue archive의 kokona를 묘사하는' -> subject='kokona', category_axis='general', expansion_queries=['kokona (blue archive)','kokona']; '가슴골을 강조하는' -> subject='cleavage', category_axis='general', expansion_queries=['cleavage','large breasts']; 'maid 의상' -> subject='maid', category_axis='clothing', expansion_queries=['maid']; '메이드만 할 수 있는 행동' -> subject='maid', category_axis='action', expansion_queries=['cleaning','serving','bowing','holding','playing'].\n"
             "Do not choose tool names or invent final chip tags; the server maps intent to tools and verifies all tags against the index.\n"
             "Use blocked for source code/file mutation requests.\n"
             "Use out_of_scope for general chat such as lunch recommendations.\n"
-            "Fields: route, domain, intent, subject, expansion_queries, reason_code, confidence.\n\n"
+            "Fields: route, domain, intent, subject, category_axis, expansion_queries, reason_code, confidence.\n\n"
             f"Current context: {json.dumps(ctx, ensure_ascii=False)[:5000]}\n"
             f"Recent turns: {json.dumps(recent, ensure_ascii=False)[:3000]}\n"
             f"User message: {str(user_input or '')[:2000]}"
@@ -440,10 +443,20 @@ class OllamaAssistantService:
             ],
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0.0, "num_predict": 256},
+            # 추론(<think>) 모델은 JSON 앞에 긴 사고 블록을 낸다. think=False로 억제하지만
+            # 일부 양자화 모델(E2B IQ3_M 등)은 긴 프롬프트에서 think=False를 무시하고 사고를
+            # 이어간다 → num_predict가 작으면(256) 사고가 예산을 다 먹고 content가 빈 채
+            # done_reason=length로 끊겨 게이트가 매번 실패한다(deterministic fallback 추락).
+            # num_predict는 상한이지 고정비용이 아니므로(억제 성공 시 ~115토큰서 stop) 상한을
+            # 1024로 올려도 빠른 경로엔 무비용이고, 사고가 새도 완주 후 JSON을 낸다.
+            "think": False,
+            "options": {"temperature": 0.0, "num_predict": 1024},
         }
         try:
-            response = self._http_post("/api/chat", payload, timeout=(5, 60))
+            # num_predict=1024 사고-완주 경로가 저사양(타깃 사용자) 머신에서 60s를 넘겨
+            # 타임아웃→deterministic 추락하지 않도록 chat()과 동일한 읽기 타임아웃(180s)을
+            # 쓴다. think=False 빠른 경로는 ~수초라 상한일 뿐 비용이 아니다(Codex R1).
+            response = self._http_post("/api/chat", payload, timeout=(5, 180))
             status_code = int(getattr(response, "status_code", 0) or 0)
             data = response.json() or {}
             if status_code != 200:

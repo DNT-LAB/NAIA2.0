@@ -34,6 +34,7 @@ from core.intent_action_pipeline import (
     structured_output,
 )
 from core.ollama_assistant_service import OllamaAssistantService
+from core.semantic_tag_discovery import normalize_category_axis
 from core.web_session_context import WebSessionContext
 
 AsyncRunner = Callable[..., Awaitable[Any]]
@@ -608,6 +609,11 @@ def register_ollama_routes(
             confidence = fallback_decision.confidence
         confidence = max(0.0, min(1.0, confidence))
         expansion_queries = _coerce_expansion_queries(raw)
+        category_axis = (
+            normalize_category_axis(raw.get("category_axis") or fallback_intent.category_axis)
+            if route == "naia_tool"
+            else normalize_category_axis(fallback_intent.category_axis)
+        )
         intent = IntentFrame(
             intent=(intent_name if route == "naia_tool" else intent_name),
             subject=subject,
@@ -617,6 +623,7 @@ def register_ollama_routes(
             language=fallback_intent.language,
             confidence=confidence,
             expansion_queries=expansion_queries if route == "naia_tool" else (),
+            category_axis=category_axis if route == "naia_tool" else normalize_category_axis(fallback_intent.category_axis),
         )
         reason_code = str(raw.get("reason_code") or "").strip()[:100]
         if not reason_code:
@@ -643,6 +650,7 @@ def register_ollama_routes(
             reason_code=reason_code,
             next_call=next_call,
             confidence=confidence,
+            category_axis=category_axis,
         )
         return intent, decision
 

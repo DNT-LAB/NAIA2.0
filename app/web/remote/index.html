@@ -1068,9 +1068,20 @@
       </nav>
       <div class="settings-content">
         <div class="settings-page active" data-settings-page-content="global">
+          <div class="settings-group">
+            <h3 class="settings-group-title">생성</h3>
+            <div class="settings-toggle-row">
+              <button type="button" class="opt-toggle settings-toggle" id="optNaiStreaming"
+                      data-option="nai_streaming_preview" data-checked="false" aria-pressed="false"
+                      onclick="toggleOptionButton('nai_streaming_preview')">
+                <span class="opt-box" aria-hidden="true"></span>
+                <span class="opt-label">NAI Stream</span>
+              </button>
+              <p class="settings-toggle-desc">NovelAI 생성 시 generate-image-stream(SSE)을 사용해 생성 중간 단계 이미지를 메인 뷰어에 실시간으로 표시합니다. NAI 모드 + 기본 생성(txt2img)에서만 동작하며 Anlas 소모량은 동일합니다. <span class="settings-toggle-note">※ 스트리밍 특성상 첫 프레임 표시까지 약간의 지연이 있을 수 있습니다.</span></p>
+            </div>
+          </div>
           <div class="settings-empty">
-            <h3>Global</h3>
-            <p>전역 설정이 이곳으로 모일 예정입니다 (저장 경로 · API 연결 · Web Session · 가시성).</p>
+            <p>그 외 전역 설정이 이곳으로 모일 예정입니다 (저장 경로 · API 연결 · Web Session · 가시성).</p>
           </div>
         </div>
         <div class="settings-page" data-settings-page-content="extension">
@@ -1125,6 +1136,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260614-ollama-chat-tools3"></script>
+<script src="app.js?v=20260614-naistream-ollamachat"></script>
 </body>
 </html>

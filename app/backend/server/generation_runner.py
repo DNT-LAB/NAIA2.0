@@ -15,7 +15,7 @@ from app.backend.server.generation_commands import (
 )
 from app.backend.server.anlas_poller import broadcast_anlas, broadcast_anlas_if_vibe_encoded
 from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
-from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
+from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json, broadcast_preview_image
 from core import result_image_payload_service as result_images
 # 특수 요청 판정은 core와 공유한다(Storyteller Use Vibe가 같은 기준으로 plain generate를
 # 가르므로) — 정의가 두 군데로 갈라지지 않게 core/auto_generation_flags.py가 단일 출처.
@@ -354,11 +354,33 @@ async def _consume_auto_gen_prefetch(context: WebSessionContext, overrides, requ
         return None
 
 
+def _make_nai_preview_callback(clients: set[WebSocket], loop: asyncio.AbstractEventLoop):
+    """워커 스레드(asyncio.to_thread)에서 호출되는 NAI 스트리밍 프리뷰 콜백을 만든다.
+
+    콜백은 동기 함수지만 WebSocket 브로드캐스트는 코루틴이므로,
+    ``run_coroutine_threadsafe``로 메인 이벤트 루프에 넘긴다(스레드 안전).
+    프레임은 fire-and-forget으로 전송한다(워커 블로킹 방지).
+    """
+    def _cb(image_bytes: bytes, step, total) -> None:
+        try:
+            info = {"step": int(step), "total": int(total)}
+        except Exception:
+            info = {}
+        try:
+            asyncio.run_coroutine_threadsafe(
+                broadcast_preview_image(clients, image_bytes, info), loop
+            )
+        except Exception:
+            pass
+    return _cb
+
+
 async def run_generation_queue(context: WebSessionContext, clients: set[WebSocket]) -> None:
     if getattr(context, "headless_generation_runner_active", False):
         return
     context.headless_generation_runner_active = True
     try:
+        loop = asyncio.get_running_loop()
         while True:
             request = await asyncio.to_thread(context.generation_queue_manager.dequeue_request)
             if request is None:
@@ -380,8 +402,19 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # 임시 vibe 를 주입한다(enqueue 시점엔 인코딩이 없어 실행 시점 주입). 캡처 프레임/
             # 비활성 런/비NAI/모델 불일치는 no-op.
             _inject_sequence_vibe(context, request)
+            # 🎬 NAI 스트리밍 미리보기: 옵션이 켜져 있고 NAI 모드일 때만 프리뷰 콜백 연결
+            preview_callback = None
             try:
-                stored = await asyncio.to_thread(generation_service(context).execute_request, request)
+                streaming_on = bool(context.remote_options.get("nai_streaming_preview", False))
+            except Exception:
+                streaming_on = False
+            if streaming_on and (getattr(request, "params", {}) or {}).get("api_mode") == "NAI":
+                preview_callback = _make_nai_preview_callback(clients, loop)
+            try:
+                stored = await asyncio.to_thread(
+                    generation_service(context).execute_request, request,
+                    preview_callback,
+                )
             except Exception as exc:
                 _release_auto_gen_prefetch(context)  # 생성 실패 → 이번 예약 홀더 폐기(stale 방지)
                 await _broadcast_generation_error(context, clients, request, str(exc))

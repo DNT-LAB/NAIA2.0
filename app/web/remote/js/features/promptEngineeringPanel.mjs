@@ -58,11 +58,9 @@ const PE_QUICK_PRESET_GUIDE = [
 
 const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
 
-// Ollama Auto Boost — readiness gating. Mirrors the model used by the Ollama
-// assistant popup (ollamaAssistantPopup.mjs DEFAULT_MODEL). "ready" means the
-// local Ollama is installed AND its server is running AND the target model is
-// present (installed && running && model_installed).
-const PE_OLLAMA_MODEL = 'hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M';
+// Ollama Auto Boost — readiness gating. 대상 모델은 백엔드(연결 설정)가 SSOT —
+// status 쿼리에 model을 보내지 않아 커스텀 엔드포인트/모델에서도 구성된 모델 기준으로
+// 판정된다. "ready" = installed && running && model_installed.
 const PE_OLLAMA_POLL_MS = 5000;
 const PE_OLLAMA_BOOST_GUIDE = 'Ollama가 준비됐을 때만 켤 수 있음 · 매 생성 직전 프롬프트를 자연어 배경/구도/분위기로 보강 · 저장/프리셋에 기록되지 않음(항상 OFF로 시작)';
 
@@ -155,8 +153,7 @@ export function createPromptEngineeringPanel({
     ollamaStatusInFlight = true;
     let ready = false;
     try {
-      const url = `/api/ollama/status?model=${encodeURIComponent(PE_OLLAMA_MODEL)}`;
-      const response = await fetch(url);
+      const response = await fetch('/api/ollama/status');
       const data = await response.json().catch(() => null);
       ready = !!(data && data.installed === true && data.running === true && data.model_installed === true);
     } catch (error) {

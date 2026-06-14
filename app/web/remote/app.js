@@ -780,7 +780,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260
   });
 // --- Ollama Local Assistant popup: Tools & Assistants 헤더 버튼 → 로컬 LLM 슬롯(초기 hold) ---
 let ollamaAssistantPopup = null;
-const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260612-histrestore2')
+const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs?v=20260614-conncustom')
   .then(({createOllamaAssistantPopup}) => {
     ollamaAssistantPopup = createOllamaAssistantPopup({
       document,
@@ -5809,7 +5809,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260612-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260607-ollama-boost3')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260614-conncustom')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

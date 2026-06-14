@@ -279,6 +279,53 @@ def save_ollama_boost_settings(settings: dict[str, Any], *, save_root: str | Pat
     )
 
 
+# 고급 연결 설정 — 셀프호스팅(cloudflared 등) 사용자가 NAIA 백엔드가 프록시할 Ollama
+# 엔드포인트/모델을 직접 지정하기 위한 전역(모드 무관) 설정. 빈 endpoint/model은
+# "기본값 사용"을 뜻한다(env NAIA_OLLAMA_URL → 코드 기본 localhost / 코드 기본 모델).
+OLLAMA_CONNECTION_DEFAULTS: dict[str, str] = {"endpoint": "", "model": ""}
+
+
+def normalize_ollama_connection_settings(settings: dict[str, Any] | None) -> dict[str, str]:
+    """{endpoint, model} 위생화. endpoint는 http/https만 허용하고 trailing slash와
+    실수로 붙인 OpenAI 호환 접미사(``/v1``)를 제거한다(네이티브 API는 ``/api/...``를
+    직접 붙이므로 ``/v1``이 들어오면 깨진다). 스킴이 없으면 ``http://``를 보충하고,
+    여전히 유효하지 않으면 빈 문자열(=기본값 사용)로 떨어뜨린다 — 호출부(라우트)가
+    '입력은 있었지만 무효'를 구분해 거부할 수 있도록 빈 입력과 무효 입력 모두 ''가 된다."""
+    data = settings if isinstance(settings, dict) else {}
+    endpoint = str(data.get("endpoint") or "").strip()
+    if endpoint:
+        if "://" not in endpoint:
+            endpoint = "http://" + endpoint
+        endpoint = endpoint.rstrip("/")
+        if endpoint.lower().endswith("/v1"):
+            endpoint = endpoint[:-3].rstrip("/")
+        from urllib.parse import urlparse
+
+        parsed = urlparse(endpoint)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            endpoint = ""
+    model = str(data.get("model") or "").strip()
+    return {"endpoint": endpoint, "model": model}
+
+
+def load_ollama_connection_settings(*, save_root: str | Path | None = None) -> dict[str, str]:
+    path = _existing_save_file("ollama_connection_user.json", save_root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return dict(OLLAMA_CONNECTION_DEFAULTS)
+    return normalize_ollama_connection_settings(data if isinstance(data, dict) else {})
+
+
+def save_ollama_connection_settings(settings: dict[str, Any], *, save_root: str | Path | None = None) -> None:
+    path = _coerce_save_root(save_root) / "ollama_connection_user.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(normalize_ollama_connection_settings(settings), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def last_used_preset_file(*, save_root: str | Path | None = None) -> Path:
     return _coerce_save_root(save_root) / "presets" / "last_used_preset.json"
 

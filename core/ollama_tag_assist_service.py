@@ -985,6 +985,30 @@ class OllamaTagAssistService:
             "active": False, "step": 0, "total": 0, "stage": "", "started_at": 0.0, "done": True,
         }
 
+    def set_endpoint(
+        self, *, base_url: str | None = None, default_model: str | None = None
+    ) -> None:
+        """라이브 엔드포인트/모델 변경(고급 연결 설정). 호스트가 바뀌면 이전 호스트의
+        상주 적재에는 닿을 수 없으므로 ``_resident_loaded`` 추적만 리셋해 새 호스트에
+        대해 다시 warm 하도록 한다(이전 호스트 언로드는 불가/불요). 상주 추적이 기존
+        기본 모델을 가리키고 있었다면 새 기본 모델을 따라가게 한다. 실제 재-warm은
+        호출부(라우트)가 직후 ``set_resident``를 부르면 일어난다 — 여기서 부르면
+        비재진입 ``_resident_meta_lock``에 데드락이 나므로 부르지 않는다."""
+        with self._resident_meta_lock:
+            if base_url is not None:
+                new_url = str(base_url).rstrip("/")
+                if new_url != self.base_url:
+                    self.base_url = new_url
+                    self._resident_loaded = False
+            if default_model is not None and str(default_model).strip():
+                new_model = str(default_model).strip()
+                if new_model != self.default_model:
+                    old_default = self.default_model
+                    self.default_model = new_model
+                    if self._resident_model == old_default:
+                        self._resident_model = new_model
+                    self._resident_loaded = False
+
     def _begin_progress(self, total: int, label: str) -> None:
         with self._progress_lock:
             self._progress = {

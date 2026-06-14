@@ -16489,6 +16489,26 @@ body.detached-module .mod-grid-3 {
 .ollama-assist-input:focus { outline: none; border-color: var(--border-glow); }
 .ollama-assist-modelnote { font-size: 10.5px; color: var(--text-dim); }
 .ollama-assist-modelnote code { font-family: var(--font-mono); color: var(--text-muted); }
+.ollama-conn-remote { color: #e5b567; font-weight: 700; }
+/* 고급 연결(⚙) — 헤더 톱니 버튼 + 셀프호스팅 엔드포인트/모델 에디터 */
+.ollama-assistant-pop-cfg { border: none; background: transparent; color: var(--text-muted); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; flex: 0 0 auto; }
+.ollama-assistant-pop-cfg:hover { color: var(--text-primary); }
+.ollama-assistant-popup.minimized .ollama-assistant-pop-cfg { display: none; }
+.ollama-conn-editor {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 10px; border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-deep);
+}
+.ollama-conn-title { font-size: 11.5px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
+.ollama-conn-label { font-size: 10.5px; font-weight: 600; color: var(--text-muted); }
+.ollama-conn-endpoint, .ollama-conn-model {
+  width: 100%; box-sizing: border-box; padding: 6px 8px; border-radius: 6px;
+  border: 1px solid var(--border-dim); background: rgba(0,0,0,0.28);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
+}
+.ollama-conn-endpoint:focus, .ollama-conn-model:focus { outline: none; border-color: rgba(150,170,255,0.8); }
+.ollama-conn-hint { font-size: 10px; color: var(--text-dim); line-height: 1.4; }
+.ollama-conn-actions { display: flex; gap: 8px; margin-top: 2px; }
 .ollama-assist-controls { display: flex; align-items: center; gap: 8px; }
 .ollama-assist-controls .ollama-assist-run { flex: 1 1 auto; }
 .ollama-assist-mode { display: inline-flex; border: 1px solid var(--border-dim); border-radius: 8px; overflow: hidden; flex: 0 0 auto; }

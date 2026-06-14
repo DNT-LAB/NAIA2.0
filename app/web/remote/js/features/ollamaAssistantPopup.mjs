@@ -35,6 +35,13 @@ export function createOllamaAssistantPopup({
   let assistLevel = 'rich';  // 'concise'|'standard'|'rich'|'max' — 분량/창의성, 기본 풍부(rich)
   let assistSolo = false;    // Solo 강제 — 켜면 1girl_solo 파티션 + 'solo' 태그
   let datasetReady = false;  // 이벤트 데이터셋(B 실조합 참조) 설치 여부
+  // 고급 연결 설정 — 셀프호스팅(cloudflared 등) Ollama 엔드포인트/모델. 백엔드
+  // /api/ollama/connection(루프백)에서 받아 런타임으로 쓴다. 하드코딩 상수는
+  // 폴백/플레이스홀더로만 남긴다.
+  let connModel = DEFAULT_MODEL;   // assist/status/pull/표시에 쓰는 현재 모델
+  let connEndpointBase = '';       // 현재 base URL(슬래시·/v1 없음) — 에디터/복사용
+  let connIsCustom = false;        // 원격(비-로컬) 엔드포인트 여부
+  let canConfigure = false;        // GET /connection 성공(=루프백 호스트)일 때만 ⚙ 노출
 
   function pick(selector) {
     return popup ? popup.querySelector(selector) : null;
@@ -223,7 +230,9 @@ export function createOllamaAssistantPopup({
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-          text, model: DEFAULT_MODEL, mode: assistMode,
+          // 모델 미전송 — 백엔드(연결 설정)가 SSOT(self.default_model). 원격
+          // 클라이언트가 stale 기본 모델을 강제 송신하던 버그 차단.
+          text, mode: assistMode,
           options: {
             // 'auto'면 max_rating을 보내지 않는다 → 백엔드 _resolve_max_rating이 문장
             // 수위로 추론(한국어 행위어 포함). 명시 등급은 그대로 상한 고정(통제권).
@@ -378,6 +387,103 @@ export function createOllamaAssistantPopup({
     win.open(DOWNLOAD_PAGE, '_blank', 'noopener');
   }
 
+  // ------------------------------------------------------------------
+  // 고급 연결 설정 — 셀프호스팅(cloudflared 등) Ollama 엔드포인트/모델.
+  // 백엔드 /api/ollama/connection(루프백 전용)에서 받고 저장한다. 원격 클라이언트는
+  // 403을 받아 ⚙ 버튼이 숨겨진다(호스트의 프록시 타깃을 바꿀 수 없게).
+  // ------------------------------------------------------------------
+  async function fetchConnection() {
+    try {
+      const {status, payload} = await fetchJson('/api/ollama/connection');
+      if (status === 403 || !payload || payload.ok === false) {
+        canConfigure = false;  // 비-루프백 클라이언트 — 설정 불가, ⚙ 숨김
+        updateCfgButton();
+        return;
+      }
+      canConfigure = true;
+      connEndpointBase = String(payload.endpoint || '');
+      connModel = String(payload.model || '') || DEFAULT_MODEL;
+      connIsCustom = !!payload.is_custom;
+    } catch (error) {
+      canConfigure = false;
+    }
+    updateCfgButton();
+    updateModelNote();
+  }
+
+  function updateCfgButton() {
+    const btn = pick('.ollama-assistant-pop-cfg');
+    if (btn) btn.classList.toggle('hidden', !canConfigure);
+  }
+
+  function updateModelNote() {
+    const note = pick('.ollama-assist-modelnote');
+    if (!note) return;
+    // connModel은 status.model(공개 sanitized에도 포함)에서 채워지므로 원격
+    // 클라이언트도 실제 구성 모델명을 표시한다(엔드포인트 URL은 비노출 유지).
+    const remote = connIsCustom ? ' <span class="ollama-conn-remote">· 원격</span>' : '';
+    note.innerHTML = `Model: <code>${escHtml(_shortModel(connModel))}</code>${remote}`;
+  }
+
+  function toggleConnEditor(forceOpen) {
+    const editor = pick('.ollama-conn-editor');
+    if (!editor) return;
+    const willOpen = forceOpen != null ? forceOpen : editor.classList.contains('hidden');
+    if (willOpen) {
+      // 현재값 프리필 — 기본(로컬)이면 빈 칸으로 둬 placeholder가 기본값을 보이게.
+      const epIn = pick('.ollama-conn-endpoint');
+      const mdIn = pick('.ollama-conn-model');
+      if (epIn) epIn.value = connIsCustom ? connEndpointBase : '';
+      if (mdIn) mdIn.value = (connModel && connModel !== DEFAULT_MODEL) ? connModel : '';
+    }
+    editor.classList.toggle('hidden', !willOpen);
+    position();
+  }
+
+  async function saveConnection() {
+    const epIn = pick('.ollama-conn-endpoint');
+    const mdIn = pick('.ollama-conn-model');
+    const endpoint = String(epIn?.value || '').trim();
+    const model = String(mdIn?.value || '').trim();
+    const saveBtn = pick('.ollama-conn-save');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '저장 중…'; }
+    try {
+      const {status, payload} = await fetchJson('/api/ollama/connection', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({endpoint, model}),
+      });
+      if (status === 403) {
+        showToast(payload.error || 'NAIA가 실행 중인 PC에서만 가능합니다.', 'error');
+        return;
+      }
+      if (!payload || payload.ok === false) {
+        showToast(payload?.error || '연결 설정 저장 실패', 'error');
+        return;
+      }
+      connEndpointBase = String(payload.endpoint || '');
+      connModel = String(payload.model || '') || DEFAULT_MODEL;
+      connIsCustom = !!payload.is_custom;
+      updateModelNote();
+      toggleConnEditor(false);
+      showToast(connIsCustom ? '원격 Ollama 엔드포인트로 전환했습니다.' : '기본 로컬 Ollama로 설정했습니다.', 'success');
+      refreshStatus(true);
+    } catch (error) {
+      showToast('연결 설정 요청 실패', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '저장'; }
+    }
+  }
+
+  async function resetConnection() {
+    // 빈 endpoint/model 저장 = 기본값(로컬·기본 모델) 복귀.
+    const epIn = pick('.ollama-conn-endpoint');
+    const mdIn = pick('.ollama-conn-model');
+    if (epIn) epIn.value = '';
+    if (mdIn) mdIn.value = '';
+    await saveConnection();
+  }
+
   function renderActions(html) {
     // 어시스트 블록 내부에도 .ollama-assistant-actions(스타일 공유)가 있으므로
     // 메인 액션 컨테이너는 전용 클래스로 정확히 지정한다.
@@ -416,10 +522,12 @@ export function createOllamaAssistantPopup({
     setProgress(0, false);
     setAssistVisible(false);
     setWarning('');  // 경로가 고쳐졌을 수 있으니 매 갱신 시 초기화 후 재설정.
+    await fetchConnection();  // 현재 엔드포인트/모델 동기화(⚙ 노출 여부·connModel 포함)
     let data = null;
     try {
       // fresh=1(다시 확인): 백엔드 CLI 프로브 캐시 우회 — 방금 설치한 Ollama가 즉시 잡힌다.
-      const {payload} = await fetchJson(`/api/ollama/status?model=${encodeURIComponent(DEFAULT_MODEL)}&fresh=${fresh ? 1 : 0}`);
+      // model 미전송 — 백엔드 SSOT 기준으로 model_installed 판정(원격도 구성 모델 기준).
+      const {payload} = await fetchJson(`/api/ollama/status?fresh=${fresh ? 1 : 0}`);
       data = payload;
     } catch (error) {
       setBadge('확인 실패', 'err');
@@ -432,10 +540,23 @@ export function createOllamaAssistantPopup({
       setStatus(String(data?.error || 'Ollama 상태를 확인하지 못했습니다.'), 'error');
       return;
     }
+    // 모델은 백엔드 SSOT — status가 알려주는 실제 구성 모델로 표시를 맞춘다(원격 포함).
+    if (data.model) { connModel = String(data.model); updateModelNote(); }
     // 비-ASCII(한글) 모델 경로 경고는 설치/실행/모델 상태와 무관하게 항상 노출한다
     // (모델 로딩 단계에서 터지는 llama-server 에러를 미리 안내). 원격 클라이언트는
     // path_warning 미포함 → 자동 숨김.
     setWarning(data.path_warning || '');
+    // 원격(커스텀) 엔드포인트가 응답하지 않으면 '미설치/설치 페이지'가 아니라 연결
+    // 문제로 안내한다 — 원격 서버는 NAIA가 켤 수 없으므로 '서버 시작' 버튼도 없다.
+    if (data.is_custom_endpoint && !data.running) {
+      setBadge('원격 연결 안 됨', 'err');
+      setStatus('원격 Ollama 서버에 연결할 수 없습니다. 주소를 확인하거나 원격 호스트에서 직접 실행하세요. (⚙ 고급에서 주소 변경)');
+      renderActions(`
+        <button type="button" class="ollama-assistant-action secondary" data-act="recheck">다시 확인</button>`);
+      bindActions();
+      position();
+      return;
+    }
     if (!data.installed) {
       setBadge('Ollama 미설치', 'err');
       setStatus('이 PC에 Ollama가 없습니다. 설치 후 "다시 확인"을 누르세요.');
@@ -592,7 +713,7 @@ export function createOllamaAssistantPopup({
       const {status, payload} = await fetchJson('/api/ollama/pull', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({model: DEFAULT_MODEL}),
+        body: JSON.stringify({}),  // 모델은 백엔드 SSOT(self.default_model)
       });
       if (status === 403) {
         showToast(payload.error || 'NAIA가 실행 중인 PC에서만 가능합니다.', 'error');
@@ -667,8 +788,8 @@ export function createOllamaAssistantPopup({
         else if (act === 'pull') startPull();
         else if (act === 'cancel-pull') cancelPull();
         else if (act === 'dataset') startDataset();
-        else if (act === 'copy-run') copyText(RUN_COMMAND, '실행 명령');
-        else if (act === 'copy-endpoint') copyText(DEFAULT_ENDPOINT, '엔드포인트');
+        else if (act === 'copy-run') copyText('ollama run ' + connModel, '실행 명령');
+        else if (act === 'copy-endpoint') copyText((connEndpointBase || 'http://localhost:11434') + '/v1', '엔드포인트');
       });
     });
   }
@@ -691,10 +812,24 @@ export function createOllamaAssistantPopup({
         <span class="ollama-assistant-pop-title">Ollama</span>
         <span class="ollama-assistant-pop-fulltitle"> · Local Assistant</span>
         <span class="ollama-assistant-badge"></span>
+        <button type="button" class="ollama-assistant-pop-cfg hidden" aria-label="고급 연결 설정" title="고급 — Ollama 엔드포인트/모델 변경">⚙</button>
         <button type="button" class="ollama-assistant-pop-min" aria-label="최소화">&minus;</button>
         <button type="button" class="ollama-assistant-pop-x" aria-label="닫기">&times;</button>
       </div>
       <div class="ollama-assistant-pop-body">
+        <div class="ollama-conn-editor hidden">
+          <div class="ollama-conn-title">고급 연결 — 셀프호스팅 Ollama</div>
+          <label class="ollama-conn-label">엔드포인트 URL</label>
+          <input type="text" class="ollama-conn-endpoint" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:11434 (비우면 기본 로컬)" />
+          <label class="ollama-conn-label">모델</label>
+          <input type="text" class="ollama-conn-model" spellcheck="false" autocomplete="off" placeholder="비우면 기본 모델" />
+          <div class="ollama-conn-hint">cloudflared 등으로 호스팅한 Ollama 주소를 넣으면 NAIA가 그쪽으로 프록시합니다. (이 PC에서만 설정 가능)</div>
+          <div class="ollama-conn-actions">
+            <button type="button" class="ollama-assistant-action ollama-conn-save">저장</button>
+            <button type="button" class="ollama-assistant-action secondary ollama-conn-reset">기본값</button>
+            <button type="button" class="ollama-assistant-action secondary ollama-conn-cancel">취소</button>
+          </div>
+        </div>
         <div class="ollama-assist hidden">
           <div class="ollama-assist-modelnote">Model: <code>${escHtml(_shortModel(DEFAULT_MODEL))}</code></div>
           <textarea class="ollama-assist-input" rows="6" placeholder="예: 교복 입은 소녀가 창가에 앉아 웃고 있는 장면"></textarea>
@@ -782,6 +917,14 @@ export function createOllamaAssistantPopup({
       b.classList.toggle('active', assistSolo);
       b.setAttribute('aria-pressed', assistSolo ? 'true' : 'false');
     });
+    // 고급 연결 설정(⚙) — stopPropagation으로 헤더 클릭(최소화 복귀)과 분리.
+    pick('.ollama-assistant-pop-cfg')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleConnEditor();
+    });
+    pick('.ollama-conn-save')?.addEventListener('click', saveConnection);
+    pick('.ollama-conn-reset')?.addEventListener('click', resetConnection);
+    pick('.ollama-conn-cancel')?.addEventListener('click', () => toggleConnEditor(false));
 
     position();
     win.requestAnimationFrame(() => position());

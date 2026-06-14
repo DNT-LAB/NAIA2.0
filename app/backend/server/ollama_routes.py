@@ -174,7 +174,6 @@ def get_assist_service(context: WebSessionContext) -> "Any":
     주입한다(core가 app을 모르도록). Auto Boost 등 라우트 밖에서도 동일 서비스를
     쓰기 위해 모듈 레벨로 노출.
     """
-    from core.ollama_assistant_service import DEFAULT_MODEL
     from core.ollama_tag_assist_service import OllamaTagAssistService
 
     # double-checked locking — 락 밖 빠른 경로(이미 캐시됨) + 락 안 재확인(첫 생성 직렬화).
@@ -191,7 +190,7 @@ def get_assist_service(context: WebSessionContext) -> "Any":
             context.ollama_assistant_service = assistant
         svc = OllamaTagAssistService(
             base_url=assistant.base_url,
-            default_model=DEFAULT_MODEL,
+            default_model=assistant.default_model,
             # LLM 전용 검색(exact 레인+whole-word 부분 레인) — UI autocomplete 재사용이
             # 모든 태그 오염의 뿌리였다(OLLAMA_LLM_SEARCH_INDEX_PLAN.md). 빌드 실패 시
             # search_kr_tags 폴백은 search_llm_tags 내부에서 처리.
@@ -284,14 +283,17 @@ def register_ollama_routes(
         return existing
 
     @app.get("/api/ollama/status")
-    async def ollama_status(request: Request, model: str | None = None, fresh: int = 0):
+    async def ollama_status(request: Request, fresh: int = 0):
         # 서브프로세스 프로브(+HTTP)라 스레드로 — 이벤트 루프 비차단.
         # 비-루프백 클라이언트에는 호스트 인벤토리(버전/모델 목록/엔드포인트)를
         # 제외한 요약만 준다 (install-manager의 원격 새니타이즈와 동일 결정).
         # fresh=1(다시 확인 버튼)은 CLI 프로브 캐시를 우회한다.
+        # 모델은 백엔드(연결 설정)가 SSOT — 클라이언트가 보낸 model 쿼리는 받지 않는다
+        # (stale 캐시/원격 클라이언트가 옛 기본 모델을 강제하지 못하게). 항상
+        # self.default_model 기준으로 model_installed를 판정한다.
         local = _is_local_request(request)
         return await run_in_thread(
-            lambda: service().status(model, include_details=local, fresh=bool(fresh) and local)
+            lambda: service().status(include_details=local, fresh=bool(fresh) and local)
         )
 
     @app.post("/api/ollama/server/start")
@@ -338,6 +340,95 @@ def register_ollama_routes(
             return _loopback_only_response()
         return service().cancel_pull()
 
+    # ── 고급 연결 설정 — 셀프호스팅(cloudflared 등) Ollama 엔드포인트/모델 지정. ──
+    @app.get("/api/ollama/connection")
+    async def ollama_connection_get(request: Request):
+        # 호스트 인벤토리(엔드포인트 주소)라 루프백 전용 — 원격 클라이언트엔 미노출.
+        if not _is_local_request(request):
+            return _loopback_only_response()
+        from core.ollama_assistant_service import (
+            DEFAULT_MODEL,
+            DEFAULT_OLLAMA_BASE,
+            _endpoint_is_local,
+        )
+
+        svc = service()
+        return {
+            "ok": True,
+            "endpoint": svc.base_url,
+            "model": svc.default_model,
+            "is_custom": (not _endpoint_is_local(svc.base_url)),
+            "default_endpoint": DEFAULT_OLLAMA_BASE,
+            "default_model": DEFAULT_MODEL,
+        }
+
+    @app.post("/api/ollama/connection")
+    async def ollama_connection_set(request: Request):
+        # 백엔드가 임의 주소로 프록시하게 만드는 SSRF 면 — 루프백 전용으로 막는다
+        # (원격 폰/터널 클라이언트가 호스트의 Ollama 타깃을 바꿀 수 없게).
+        if not _is_local_request(request):
+            return _loopback_only_response()
+        raw_endpoint = ""
+        raw_model = ""
+        try:
+            payload = await request.json()
+            if isinstance(payload, dict):
+                raw_endpoint = str(payload.get("endpoint") or "").strip()
+                raw_model = str(payload.get("model") or "").strip()
+        except Exception:
+            pass
+
+        def _apply() -> dict[str, Any]:
+            import os as _os
+
+            from core.ollama_assistant_service import (
+                DEFAULT_MODEL,
+                DEFAULT_OLLAMA_BASE,
+                _endpoint_is_local,
+            )
+            from core.prompt_engineering_settings import (
+                normalize_ollama_connection_settings,
+                save_ollama_connection_settings,
+            )
+
+            norm = normalize_ollama_connection_settings(
+                {"endpoint": raw_endpoint, "model": raw_model}
+            )
+            # 입력은 있었지만 정규화가 비웠다 = 유효하지 않은 URL → 저장 않고 거부.
+            if raw_endpoint and not norm["endpoint"]:
+                return {"ok": False, "error": "올바른 http(s) 엔드포인트 주소가 아닙니다."}
+            save_ollama_connection_settings(norm)
+            # 영속값(빈값=리셋)을 라이브 base_url/model로 환원: 빈 endpoint→env→기본.
+            resolved_url = (
+                norm["endpoint"]
+                or _os.environ.get("NAIA_OLLAMA_URL")
+                or DEFAULT_OLLAMA_BASE
+            ).rstrip("/")
+            resolved_model = norm["model"] or DEFAULT_MODEL
+            # 양 서비스 라이브 갱신(재시작 불요).
+            assistant = service()
+            assistant.set_connection(base_url=resolved_url, default_model=resolved_model)
+            tag_svc = getattr(context, "ollama_tag_assist_service", None)
+            if tag_svc is not None:
+                try:
+                    tag_svc.set_endpoint(
+                        base_url=resolved_url, default_model=resolved_model
+                    )
+                    # 호스트가 바뀌었으니 Auto Boost가 켜져 있으면 새 호스트에 재-warm.
+                    tag_svc.set_resident(
+                        bool(getattr(context, "ollama_auto_boost", False))
+                    )
+                except Exception:
+                    pass
+            return {
+                "ok": True,
+                "endpoint": resolved_url,
+                "model": resolved_model,
+                "is_custom": (not _endpoint_is_local(resolved_url)),
+            }
+
+        return await run_in_thread(_apply)
+
     def assist_service() -> "OllamaTagAssistService":
         # 공용 모듈 레벨 팩토리에 위임(Auto Boost 등 라우트 밖 경로와 동일 인스턴스 공유).
         return get_assist_service(context)
@@ -360,23 +451,23 @@ def register_ollama_routes(
         # 무거운 LLM 호출 + 인덱스 검색이라 스레드로.
         # mode=fast → 원샷(1호출, 빠르지만 보수적), 그 외 → 파이프라인(정밀).
         text = ""
-        model = None
         mode = "manual"
         options: dict[str, Any] = {}
         try:
             payload = await request.json()
             if isinstance(payload, dict):
                 text = str(payload.get("text") or "")
-                model = payload.get("model")
                 mode = str(payload.get("mode") or "manual").lower()
                 if isinstance(payload.get("options"), dict):
                     options = payload["options"]
         except Exception:
             text = ""
+        # 모델은 백엔드(연결 설정)가 SSOT — 클라이언트가 보낸 model은 무시하고 항상
+        # self.default_model을 쓴다(원격/stale 클라이언트의 옛 기본 모델 강제 차단).
         svc = assist_service()
         if mode == "fast":
-            return await run_in_thread(lambda: svc.assist_oneshot(text, model=model, options=options))
-        return await run_in_thread(lambda: svc.assist(text, model=model, options=options))
+            return await run_in_thread(lambda: svc.assist_oneshot(text, options=options))
+        return await run_in_thread(lambda: svc.assist(text, options=options))
 
     # ── Auto Boost 모델 상주 — 토글 ON 시 warm-up(미리 적재+상주), OFF 시 즉시 언로드. ──
     # 토글 핸들러(PE 서비스)가 publish하면 set_resident에 위임한다. set_resident는

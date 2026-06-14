@@ -44,19 +44,56 @@ def _no_window_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
+def _endpoint_is_local(url: str) -> bool:
+    """엔드포인트가 NAIA 실행 머신 자신을 가리키는지(=로컬 Ollama 제어 가능).
+
+    원격(cloudflared/LAN 등)이면 False — 그때는 ``ollama serve`` 스폰과 로컬 CLI
+    설치 판정이 무의미하므로 status/start_server가 원격 모드로 적응한다."""
+    try:
+        from urllib.parse import urlparse
+
+        raw = str(url) if "://" in str(url) else "http://" + str(url)
+        host = (urlparse(raw).hostname or "").lower()
+        return host in {"127.0.0.1", "localhost", "0.0.0.0", "::1", ""}
+    except Exception:
+        return False
+
+
+def _resolve_connection_defaults() -> tuple[str, str]:
+    """(base_url, model) 우선순위: 영속 설정 → env ``NAIA_OLLAMA_URL`` → 코드 기본.
+
+    고급 연결 설정(셀프호스팅 엔드포인트)을 UI에서 바꾸면 ``ollama_connection_user.json``에
+    영속되고, 다음 서비스 생성 시 이 함수가 그 값을 최우선으로 집어 온다. env는 기존
+    파워유저/개발 경로를 위해 폴백으로 유지한다."""
+    endpoint = ""
+    model = ""
+    try:
+        from core.prompt_engineering_settings import load_ollama_connection_settings
+
+        saved = load_ollama_connection_settings()
+        endpoint = str(saved.get("endpoint") or "").strip()
+        model = str(saved.get("model") or "").strip()
+    except Exception:
+        pass
+    base = endpoint or os.environ.get("NAIA_OLLAMA_URL") or DEFAULT_OLLAMA_BASE
+    return str(base).rstrip("/"), (model or DEFAULT_MODEL)
+
+
 class OllamaAssistantService:
     def __init__(
         self,
         *,
         base_url: str | None = None,
+        default_model: str | None = None,
         version_probe: Callable[[], str | None] | None = None,
         http_get: Callable[..., Any] | None = None,
         http_stream: Callable[..., Any] | None = None,
         server_spawner: Callable[[], Any] | None = None,
     ):
-        self.base_url = str(
-            base_url or os.environ.get("NAIA_OLLAMA_URL") or DEFAULT_OLLAMA_BASE
-        ).rstrip("/")
+        # 우선순위: 명시 인자(테스트 주입) > 영속 설정 > env > 코드 기본.
+        resolved_url, resolved_model = _resolve_connection_defaults()
+        self.base_url = str(base_url or resolved_url).rstrip("/")
+        self.default_model = str(default_model or resolved_model)
         # 테스트 주입 지점들 — 실환경에서는 전부 기본 구현 사용.
         self._version_probe = version_probe or self._probe_cli_version
         self._http_get = http_get or self._default_http_get
@@ -76,6 +113,19 @@ class OllamaAssistantService:
         self._version_cache: tuple[float, str | None] = (0.0, None)
         self._version_cache_ttl = 5.0
         self._version_probe_lock = Lock()
+
+    def set_connection(
+        self, *, base_url: str | None = None, default_model: str | None = None
+    ) -> None:
+        """라이브 연결 변경(재시작 불요). 영속화는 호출부(라우트)가 담당한다.
+
+        ``base_url``을 바꾸면 다음 status/제어 호출이 즉시 새 호스트를 가리킨다. 단
+        이미 만들어진 :class:`OllamaTagAssistService`는 생성 시점 값을 들고 있으므로
+        라우트가 그쪽에도 ``set_endpoint``를 호출해 동기화해야 한다."""
+        if base_url is not None:
+            self.base_url = str(base_url).rstrip("/")
+        if default_model is not None and str(default_model).strip():
+            self.default_model = str(default_model).strip()
 
     # ------------------------------------------------------------------
     # 기본 IO 구현
@@ -173,8 +223,12 @@ class OllamaAssistantService:
         설치 모델 목록·엔드포인트 등 호스트 인벤토리를 제외한 요약만 준다.
         ``fresh=True``(다시 확인 버튼)는 CLI 프로브 캐시를 우회해, 사용자가
         방금 설치한 Ollama가 TTL 안에서도 즉시 잡히게 한다."""
-        target = str(model or DEFAULT_MODEL).strip()
-        version = self._cached_version_probe(fresh=fresh)
+        target = str(model or self.default_model).strip()
+        is_custom = not _endpoint_is_local(self.base_url)
+        # 원격 엔드포인트(cloudflared/LAN 등)는 로컬 CLI 프로브로 설치 상태를 알 수 없고
+        # 매 폴링마다 subprocess를 띄우는 것도 낭비다 — 프로브를 건너뛰고 /api/tags
+        # 도달성(=running)만으로 '설치됨'을 판정한다.
+        version = None if is_custom else self._cached_version_probe(fresh=fresh)
         installed = version is not None
         running = False
         models: list[str] = []
@@ -190,8 +244,8 @@ class OllamaAssistantService:
                 ]
         except Exception:
             running = False
-        # 서버가 떠 있으면 CLI 프로브 실패와 무관하게 "설치됨"으로 본다
-        # (PATH에 없지만 서비스로 도는 경우).
+        # 서버가 떠 있으면 "설치됨"으로 본다 — 로컬: PATH에 없지만 서비스로 도는 경우,
+        # 원격: 로컬 CLI 프로브가 불가하므로 도달성만으로 판정.
         if running:
             installed = True
         model_installed = any(
@@ -205,6 +259,11 @@ class OllamaAssistantService:
                 "running": running,
                 "model_installed": model_installed,
                 "control_allowed": False,
+                "is_custom_endpoint": is_custom,
+                "can_start_server": False,
+                # 활성 모델명만 노출(원격 모델노트/실행명령 정직성용). 호스트 인벤토리
+                # (버전/전체 모델 목록/엔드포인트 URL)는 계속 숨긴다 — 엔드포인트가 민감.
+                "model": target,
             }
         return {
             "ok": True,
@@ -213,12 +272,17 @@ class OllamaAssistantService:
             "version": version or "",
             "models": models,
             "model": target,
+            "default_model": self.default_model,
             "model_installed": model_installed,
             "endpoint": f"{self.base_url}/v1",
+            # 원격이면 NAIA가 'ollama serve'로 켤 수 없다(다른 머신) → 프론트가 서버
+            # 시작 버튼을 숨기고 '원격에서 직접 실행' 안내로 대체한다.
+            "is_custom_endpoint": is_custom,
+            "can_start_server": (not is_custom),
             "download_page": "https://ollama.com/download",
             "control_allowed": True,
-            # 비-ASCII(한글) 모델 경로 경고 — 빈 문자열이면 문제 없음(프론트가 게이트).
-            "path_warning": self._models_path_warning(),
+            # 비-ASCII(한글) 모델 경로 경고는 로컬 모델 경로 한정 — 원격 모델엔 무의미.
+            "path_warning": ("" if is_custom else self._models_path_warning()),
         }
 
     # ------------------------------------------------------------------
@@ -236,6 +300,14 @@ class OllamaAssistantService:
             return False
 
     def start_server(self, *, wait_seconds: float = 10.0) -> dict[str, Any]:
+        # 원격 엔드포인트는 다른 머신의 프로세스라 NAIA가 켤 수 없다 — 로컬 'ollama
+        # serve'를 잘못 띄우지 않도록 명시적으로 거부하고 사용자에게 안내한다.
+        if not _endpoint_is_local(self.base_url):
+            return {
+                "ok": False,
+                "running": False,
+                "error": "원격 Ollama 엔드포인트는 NAIA가 시작할 수 없습니다. 원격 호스트에서 직접 'ollama serve'를 실행하세요.",
+            }
         if self.status().get("running"):
             return {"ok": True, "running": True, "message": "Ollama 서버가 이미 실행 중입니다."}
         # 우리가 띄운 프로세스가 아직 살아있으면(기동 중) 중복 스폰하지 않고
@@ -286,7 +358,9 @@ class OllamaAssistantService:
         return self.pull_state()
 
     def start_pull(self, model: str | None = None) -> dict[str, Any]:
-        target = str(model or DEFAULT_MODEL).strip()
+        # 모델 미지정 시 연결 설정의 기본 모델(self.default_model)을 받는다 — 커스텀
+        # 엔드포인트/모델에서도 옳은 모델을 pull(모듈 상수 DEFAULT_MODEL 폴백 금지).
+        target = str(model or self.default_model).strip()
         with self._lock:
             if self._pull_state.get("active"):
                 return dict(self._pull_state)

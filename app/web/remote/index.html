@@ -670,6 +670,13 @@
         <span class="opt-box" aria-hidden="true"></span>
         <span class="opt-label">WC Solo</span>
       </button>
+      <button type="button" class="opt-toggle" id="optNaiStreaming"
+              data-option="nai_streaming_preview" data-checked="false" aria-pressed="false"
+              data-naia-guide="NAI 스트리밍 미리보기. NovelAI 생성 시 generate-image-stream(SSE)을 사용해 생성 중간 단계 이미지를 메인 뷰어에 실시간으로 표시합니다. NAI 모드 + 기본 생성(txt2img)에서만 동작하며 Anlas 소모량은 동일합니다."
+              onclick="toggleOptionButton('nai_streaming_preview')">
+        <span class="opt-box" aria-hidden="true"></span>
+        <span class="opt-label">NAI Stream</span>
+      </button>
     </div>
     <div class="quick-params">
       <select class="param-select quick-select" id="qResolution" onchange="setParam('resolution',this.value)"></select>

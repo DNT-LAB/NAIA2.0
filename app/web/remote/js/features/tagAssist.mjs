@@ -256,8 +256,12 @@ export function createTagAssistController({
       mirror.style[name] = style[name];
     });
     mirror.style.whiteSpace = source.tagName === 'TEXTAREA' ? 'pre-wrap' : 'pre';
-    mirror.style.wordBreak = 'break-word';
-    mirror.style.overflowWrap = 'break-word';
+    // 줄바꿈 규칙은 원본 textarea에서 그대로 복사한다. 프롬프트/모듈 textarea는
+    // word-break:break-all 이라 긴 토큰을 글자 단위로 끊는데, 미러가 'break-word'(=normal)
+    // 로 고정돼 있으면 미러는 긴 토큰을 끊지 않아 캐럿 마커가 박스 오른쪽 바깥으로
+    // 밀려나고(좌표는 클리핑돼도 살아있음) 자동완성 팝업이 캐럿이 아닌 화면 오른쪽에 뜬다.
+    mirror.style.wordBreak = style.wordBreak || 'normal';
+    mirror.style.overflowWrap = style.overflowWrap || style.wordWrap || 'normal';
   }
 
   function getInputCaretPoint(target) {
@@ -276,6 +280,15 @@ export function createTagAssistController({
     mirror.style.height = `${rect.height}px`;
     mirror.style.overflow = 'hidden';
     copyCaretMirrorStyle(target, mirror);
+    // 세로 스크롤바가 떠 있으면 textarea의 실제 줄바꿈 폭은 스크롤바만큼 좁다.
+    // 미러는 overflow:hidden 이라 스크롤바가 없어 그만큼 더 넓게 줄바꿈하므로,
+    // 스크롤바 폭을 오른쪽 패딩으로 예약해 줄바꿈 지점을 맞춘다(없으면 0).
+    const cs = window.getComputedStyle(target);
+    const scrollbarW = Math.max(0, target.offsetWidth - target.clientWidth
+      - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0));
+    if (scrollbarW > 0) {
+      mirror.style.paddingRight = `${(parseFloat(cs.paddingRight) || 0) + scrollbarW}px`;
+    }
     mirror.textContent = String(target.value || '').slice(0, target.selectionStart);
     marker.textContent = '\u200b';
     mirror.appendChild(marker);
@@ -2864,6 +2877,7 @@ export function createTagAssistController({
     bindDefaultTextareas,
     bindTagAssist,
     lookupPromptInfoTag,
+    hidePromptInfoTooltip,
     onTagLookupResult,
     onAutocompleteResult,
     positionTagTooltip,

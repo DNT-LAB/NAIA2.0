@@ -87,6 +87,7 @@ class OllamaAssistantService:
         default_model: str | None = None,
         version_probe: Callable[[], str | None] | None = None,
         http_get: Callable[..., Any] | None = None,
+        http_post: Callable[..., Any] | None = None,
         http_stream: Callable[..., Any] | None = None,
         server_spawner: Callable[[], Any] | None = None,
     ):
@@ -97,6 +98,7 @@ class OllamaAssistantService:
         # 테스트 주입 지점들 — 실환경에서는 전부 기본 구현 사용.
         self._version_probe = version_probe or self._probe_cli_version
         self._http_get = http_get or self._default_http_get
+        self._http_post = http_post or self._default_http_post
         self._http_stream = http_stream or self._default_http_stream
         self._server_spawner = server_spawner or self._default_server_spawner
         self._lock = Lock()
@@ -157,6 +159,13 @@ class OllamaAssistantService:
         return requests.post(
             f"{self.base_url}{path}", json=payload, stream=True, timeout=(5, 600),
         )
+
+    def _default_http_post(
+        self, path: str, payload: dict[str, Any], *, timeout: Any = (5, 180)
+    ) -> Any:
+        import requests
+
+        return requests.post(f"{self.base_url}{path}", json=payload, timeout=timeout)
 
     def _default_server_spawner(self) -> Any:
         """``ollama serve``를 창 없이 분리 실행 (Dev0714 start_server 동일)."""
@@ -331,6 +340,121 @@ class OllamaAssistantService:
             except Exception:
                 continue
         return {"ok": False, "running": False, "error": "서버가 제한 시간 안에 응답하지 않았습니다."}
+
+    # ------------------------------------------------------------------
+    # 자유 Chat (Ollama Assist와 분리된 신규 surface)
+    # ------------------------------------------------------------------
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        system: str = "",
+        temperature: float = 0.35,
+        num_predict: int = 512,
+    ) -> dict[str, Any]:
+        cleaned: list[dict[str, str]] = []
+        sys_text = str(system or "").strip()
+        if sys_text:
+            cleaned.append({"role": "system", "content": sys_text[:6000]})
+        for item in messages or []:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "user").strip().lower()
+            if role not in {"user", "assistant"}:
+                role = "user"
+            content = str(item.get("content") or "").strip()
+            if content:
+                cleaned.append({"role": role, "content": content[:8000]})
+        if not any(msg["role"] == "user" for msg in cleaned):
+            return {"ok": False, "error": "메시지를 입력하세요."}
+        payload = {
+            "model": self.default_model,
+            "messages": cleaned[-16:],
+            "stream": False,
+            "options": {
+                "temperature": max(0.0, min(1.5, float(temperature))),
+                "num_predict": max(32, min(2048, int(num_predict))),
+            },
+        }
+        try:
+            response = self._http_post("/api/chat", payload, timeout=(5, 180))
+            status_code = int(getattr(response, "status_code", 0) or 0)
+            data = response.json() or {}
+            if status_code != 200:
+                return {"ok": False, "error": str(data.get("error") or f"Ollama HTTP {status_code}")}
+            content = str((data.get("message") or {}).get("content") or "").strip()
+            if not content:
+                return {"ok": False, "error": "Ollama 응답이 비어 있습니다."}
+            return {
+                "ok": True,
+                "message": content,
+                "model": str(data.get("model") or self.default_model),
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc) or "Ollama Chat 요청 실패"}
+
+    def extract_intent_decision(
+        self,
+        *,
+        user_input: str,
+        context: dict[str, Any] | None = None,
+        history: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Chat+Tools gate용 JSON extractor.
+
+        실패 시 호출부가 deterministic fallback을 사용한다. 모델 출력은 곧바로 실행하지
+        않고 호출부가 route/next_call을 allow-list로 clamp한다.
+        """
+        ctx = context or {}
+        recent = []
+        for item in (history or [])[-6:]:
+            if isinstance(item, dict):
+                role = str(item.get("role") or "user")[:20]
+                content = str(item.get("content") or "")[:600]
+                if content:
+                    recent.append({"role": role, "content": content})
+        instruction = (
+            "Classify this NAIA chat message for tool use. Return JSON only.\n"
+            "Allowed route values: naia_tool, naia_readonly, out_of_scope, blocked.\n"
+            "Allowed naia_tool intent values: prompt_recommendation, tag_discovery.\n"
+            "Use naia_tool only for prompt/tag/current-generation requests that should return grounded candidate chips.\n"
+            "Use intent=tag_discovery when the user describes a scene and asks whether matching prompt tags exist.\n"
+            "For every naia_tool decision, subject must be a concise English booru-style search concept, not Korean prose.\n"
+            "Strip scaffolding verbs/particles such as describe, emphasize, recommend, prompt, tag, 묘사, 강조, 알려주세요, 프롬프트, 태그.\n"
+            "Return expansion_queries as 1-6 concise English booru-style search queries. Use known entity aliases when present.\n"
+            "Examples: 'blue archive의 kokona를 묘사하는' -> subject='kokona', expansion_queries=['kokona (blue archive)','kokona']; '가슴골을 강조하는' -> subject='cleavage', expansion_queries=['cleavage','large breasts'].\n"
+            "Do not choose tool names or invent final chip tags; the server maps intent to tools and verifies all tags against the index.\n"
+            "Use blocked for source code/file mutation requests.\n"
+            "Use out_of_scope for general chat such as lunch recommendations.\n"
+            "Fields: route, domain, intent, subject, expansion_queries, reason_code, confidence.\n\n"
+            f"Current context: {json.dumps(ctx, ensure_ascii=False)[:5000]}\n"
+            f"Recent turns: {json.dumps(recent, ensure_ascii=False)[:3000]}\n"
+            f"User message: {str(user_input or '')[:2000]}"
+        )
+        payload = {
+            "model": self.default_model,
+            "messages": [
+                {"role": "system", "content": "Return compact valid JSON only. No markdown."},
+                {"role": "user", "content": instruction},
+            ],
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0.0, "num_predict": 256},
+        }
+        try:
+            response = self._http_post("/api/chat", payload, timeout=(5, 60))
+            status_code = int(getattr(response, "status_code", 0) or 0)
+            data = response.json() or {}
+            if status_code != 200:
+                return {"ok": False, "error": str(data.get("error") or f"Ollama HTTP {status_code}")}
+            content = str((data.get("message") or {}).get("content") or "").strip()
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                return {"ok": False, "error": "intent json is not object"}
+            return {"ok": True, "data": parsed}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc) or "intent json extraction failed"}
 
     # ------------------------------------------------------------------
     # 모델 다운로드 (Ollama REST /api/pull 스트리밍)

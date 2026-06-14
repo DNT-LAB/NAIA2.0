@@ -802,6 +802,28 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
   .catch(error => {
     console.error('Failed to initialize ollama assistant popup module', error);
   });
+let ollamaChatPopup = null;
+const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260614-chat6')
+  .then(({createOllamaChatPopup}) => {
+    ollamaChatPopup = createOllamaChatPopup({
+      document, window, showToast, escHtml,
+      getContext: () => ({
+        prompt: promptEdit?.value || '',
+        tags: Array.from(new Set([
+          ...Array.from(resultInfoContent?.querySelectorAll?.('.generation-info-tag[data-tag]') || [])
+            .map(el => el?.dataset?.tag || ''),
+          ...String(promptEdit?.value || '').split(','),
+        ].map(tag => String(tag || '').trim()).filter(Boolean))).slice(0, 200),
+        negative: negEdit?.value || '',
+        resultInfo: resultInfoContent?.innerText || '',
+      }),
+      lookupTagInfo: lookupPromptInfoTag,
+      hideTagInfo: () => tagAssist?.hidePromptInfoTooltip?.(),
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize ollama chat popup module', error);
+  });
 // --- Translation History: Ollama 팝업이 소유하는 우측 도킹 2단 패널(translationHistoryPanel).
 // 팝업의 작은 [🕘 기록] 버튼이 토글하며, 첫 클릭 때 지연 로드된다(ollamaAssistantPopup.mjs).
 // app.js는 더 이상 직접 인스턴스화하지 않는다. ---
@@ -2121,6 +2143,7 @@ const resultUnsavedSaveBtn = $('resultUnsavedSaveBtn');
 const resultUnsavedDeleteBtn = $('resultUnsavedDeleteBtn');
 const naiDirectorBtn = $('naiDirectorBtn');
 const ollamaAssistantBtn = $('ollamaAssistantBtn');
+const ollamaChatBtn = $('ollamaChatBtn');
 const optBoxes = {
   prompt_fixed: $('optPromptFixed'),
   auto_generate: $('optAutoGen'),
@@ -4260,14 +4283,32 @@ async function openOllamaAssistant() {
   }
   ollamaAssistantPopup.open();
 }
+async function openOllamaChat() {
+  await ollamaChatPopupReady;
+  if (!ollamaChatPopup) {
+    showToast('Ollama Chat 모듈을 불러오지 못했습니다.', 'error');
+    return;
+  }
+  ollamaChatPopup.open();
+}
 if (ollamaAssistantBtn) {
   ollamaAssistantBtn.addEventListener('click', async () => {
-    // [Ollama] 버튼 재클릭 = 토글: 열려 있으면 닫고, 아니면 연다.
+    // [Ollama Assist] 버튼 재클릭 = 토글: 열려 있으면 닫고, 아니면 연다.
     await ollamaAssistantPopupReady;
     if (ollamaAssistantPopup && ollamaAssistantPopup.isOpen && ollamaAssistantPopup.isOpen()) {
       ollamaAssistantPopup.close();
     } else {
       openOllamaAssistant();
+    }
+  });
+}
+if (ollamaChatBtn) {
+  ollamaChatBtn.addEventListener('click', async () => {
+    await ollamaChatPopupReady;
+    if (ollamaChatPopup && ollamaChatPopup.isOpen && ollamaChatPopup.isOpen()) {
+      ollamaChatPopup.close();
+    } else {
+      openOllamaChat();
     }
   });
 }
@@ -7482,7 +7523,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260609-scrollfix1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260614-caretfix2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -7605,6 +7646,7 @@ Promise.all([
   instantWildcardPanelReady,
   e621EventPanelReady,
   ollamaAssistantPopupReady,
+  ollamaChatPopupReady,
   translationHistoryPanelReady,
   imageModulePanelsReady,
   img2imgPanelReady,

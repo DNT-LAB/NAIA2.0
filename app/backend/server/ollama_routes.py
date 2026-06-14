@@ -17,6 +17,22 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.backend.server.install_manager_routes import _is_local_request
+from core.intent_action_pipeline import (
+    ACTION_PROMPT_SEARCH,
+    ACTION_SEMANTIC_TAG_SEARCH,
+    GenerationInfoContext,
+    IntentActionPipeline,
+    IntentDecision,
+    IntentFrame,
+    INTENT_PROMPT_RECOMMENDATION,
+    INTENT_TAG_DISCOVERY,
+    ROUTE_BLOCKED,
+    ROUTE_NAIA_TOOL,
+    ROUTE_OUT_OF_SCOPE,
+    decide_intent_route,
+    extract_intent_frame,
+    structured_output,
+)
 from core.ollama_assistant_service import OllamaAssistantService
 from core.web_session_context import WebSessionContext
 
@@ -29,6 +45,20 @@ AsyncRunner = Callable[..., Awaitable[Any]]
 _ASSIST_SVC_LOCK = threading.Lock()
 # LLM 검색 인덱스 첫 빌드 직렬화(빌드 ~1s, 중복 빌드 낭비 방지).
 _LLM_INDEX_LOCK = threading.Lock()
+
+_CHAT_GENERAL_HINTS = (
+    "점심", "저녁", "아침", "메뉴", "음식", "레시피", "맛집", "날씨", "뉴스",
+    "시간", "운세", "여행", "영화", "노래", "운동", "joke", "weather", "news",
+    "lunch", "dinner", "breakfast", "recipe",
+)
+_CHAT_TOOL_OR_CONTEXT_HINTS = (
+    "naia", "프롬프트", "prompt", "태그", "tag", "검색", "찾아", "여기", "현재",
+    "이 프롬프트", "이 태그", "이거", "그거", "결과", "생성물", "이 이미지",
+    "변형", "관련", "더", "뜻", "의상", "옷", "포즈", "표정", "배경", "구도",
+)
+_CHAT_STRONG_CONTEXT_REFS = (
+    "여기", "이 프롬프트", "이 태그", "이거", "이 이미지", "이 그림", "현재", "지금",
+)
 
 
 def _loopback_only_response() -> JSONResponse:
@@ -433,6 +463,231 @@ def register_ollama_routes(
         # 공용 모듈 레벨 팩토리에 위임(Auto Boost 등 라우트 밖 경로와 동일 인스턴스 공유).
         return get_assist_service(context)
 
+    def _chat_latest_user(messages: list[dict[str, Any]]) -> str:
+        for item in reversed(messages or []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("role") or "user").lower() == "user":
+                text = str(item.get("content") or "").strip()
+                if text:
+                    return text
+        return ""
+
+    def _chat_generation_context(raw: Any) -> GenerationInfoContext:
+        if not isinstance(raw, dict):
+            raw = {}
+        metadata: dict[str, Any] = {}
+        if raw.get("negative"):
+            metadata["negative_prompt"] = str(raw.get("negative") or "")[:3000]
+        if raw.get("resultInfo"):
+            metadata["result_info"] = str(raw.get("resultInfo") or "")[:3000]
+        if isinstance(raw.get("metadata"), dict):
+            metadata.update(raw["metadata"])
+        return GenerationInfoContext.from_value({
+            "prompt": raw.get("prompt") or raw.get("current_prompt") or "",
+            "tags": raw.get("tags") or raw.get("current_tags") or [],
+            "metadata": metadata,
+        })
+
+    def _chat_system_prompt(gen_context: GenerationInfoContext) -> str:
+        parts = [
+            "You are NAIA Ollama Chat. Answer briefly and pragmatically.",
+            "The user is working in an image generation tool. Use the current generation context when relevant.",
+            "You do not have authoritative NAIA source or documentation access in this chat. If unsure about NAIA-specific facts, say so instead of inventing details.",
+            "Do not reveal private chain-of-thought. Give useful final answers only.",
+            "If the request requires NAIA tool output, the server will provide grounded tool results separately.",
+        ]
+        if gen_context.prompt:
+            parts.append(f"Current prompt:\n{gen_context.prompt[:3000]}")
+        negative = str(gen_context.metadata.get("negative_prompt") or "")
+        if negative:
+            parts.append(f"Current negative prompt:\n{negative[:1200]}")
+        result_info = str(gen_context.metadata.get("result_info") or "")
+        if result_info:
+            parts.append(f"Current generation info:\n{result_info[:1800]}")
+        return "\n\n".join(parts)
+
+    def _chat_tool_searcher(query: str, limit: int, _gen_context: GenerationInfoContext) -> list[dict[str, Any]]:
+        # Chat 도구 검색은 pipeline에서 영어 subject/expansion으로 정리된 뒤 들어온다.
+        # Hangul/mixed query는 pipeline의 최후 fallback에서만 도달한다.
+        rows = search_llm_tags(context, query, limit=limit)
+        if rows or _HANGUL_RE.search(str(query or "")):
+            return rows
+        if not ("(" in str(query or "") and ")" in str(query or "")):
+            return rows
+        try:
+            from app.backend.server.autocomplete_commands import search_kr_tags
+
+            fallback_rows = search_kr_tags(context, query, limit=limit)
+        except Exception:
+            return rows
+        query_words = set(re.findall(r"[a-z0-9]+", str(query or "").lower()))
+        if not query_words:
+            return fallback_rows[:limit]
+        filtered: list[dict[str, Any]] = []
+        for row in fallback_rows:
+            tag = str(row.get("tag") or "").lower().replace("_", " ")
+            tag_words = set(re.findall(r"[a-z0-9]+", tag))
+            if str(query or "").strip().lower() in tag or (query_words & tag_words):
+                filtered.append(row)
+            if len(filtered) >= limit:
+                break
+        return filtered
+
+    def _chat_chip_rows(run: Any) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for result in run.tool_results:
+            if result.ok:
+                rows.extend(result.rows)
+        return rows
+
+    def _chat_has_strong_context_ref(latest_user: str, gen_context: GenerationInfoContext) -> bool:
+        if not (gen_context.prompt or gen_context.tags):
+            return False
+        text = str(latest_user or "")
+        return any(ref in text for ref in _CHAT_STRONG_CONTEXT_REFS)
+
+    def _chat_chips_message(run: Any, latest_user: str, gen_context: GenerationInfoContext) -> str:
+        if run.intent.intent == INTENT_TAG_DISCOVERY:
+            return "장면 설명과 맞는 실제 태그 후보입니다."
+        if _chat_has_strong_context_ref(latest_user, gen_context):
+            return "현재 프롬프트에 어울리는 후보입니다."
+        return "요청하신 내용에 맞는 후보입니다."
+
+    def _skip_llm_gate_for_confident_out_of_scope(latest_user: str, decision: IntentDecision) -> bool:
+        if decision.route != ROUTE_OUT_OF_SCOPE:
+            return False
+        lowered = str(latest_user or "").lower()
+        # Obvious general-chat turns should not pay a gate call before raw chat.
+        # Ambiguous context/tool references still go through the JSON extractor.
+        if any(hint in lowered for hint in _CHAT_TOOL_OR_CONTEXT_HINTS):
+            return False
+        return any(hint in lowered for hint in _CHAT_GENERAL_HINTS)
+
+    def _coerce_chat_gate(
+        raw: dict[str, Any],
+        *,
+        fallback_intent: IntentFrame,
+        fallback_decision: IntentDecision,
+    ) -> tuple[IntentFrame, IntentDecision]:
+        route = str(raw.get("route") or fallback_decision.route).strip().lower()
+        if route not in {"naia_tool", "naia_readonly", "out_of_scope", "blocked"}:
+            route = fallback_decision.route
+        # Deterministic blocked is a hard boundary. LLM cannot downgrade it.
+        if fallback_decision.route == ROUTE_BLOCKED:
+            route = ROUTE_BLOCKED
+        domain = str(raw.get("domain") or ("naia" if route.startswith("naia") else "general")).strip().lower()
+        if route in {"naia_tool", "naia_readonly"}:
+            domain = "naia"
+        elif route == "blocked":
+            domain = "source_code"
+        elif domain not in {"naia", "general", "source_code"}:
+            domain = "general"
+        subject = str(raw.get("subject") or fallback_intent.subject or "").strip()[:200]
+        intent_name = str(raw.get("intent") or fallback_intent.intent or "unknown").strip().lower()[:80]
+        if intent_name in {"semantic_tag_search", "tag_search", "tag_recommendation", "find_tags"}:
+            intent_name = INTENT_TAG_DISCOVERY
+        elif route == "naia_tool" and intent_name not in {INTENT_TAG_DISCOVERY, INTENT_PROMPT_RECOMMENDATION}:
+            intent_name = (
+                fallback_intent.intent
+                if fallback_intent.intent in {INTENT_TAG_DISCOVERY, INTENT_PROMPT_RECOMMENDATION}
+                else INTENT_PROMPT_RECOMMENDATION
+            )
+        if route == "naia_tool" and not subject:
+            # Tool-worthy지만 모델이 세부 subject를 비웠으면 기존 fallback을 유지한다.
+            subject = subject or fallback_intent.subject
+        if route == "naia_tool" and intent_name == "unknown":
+            intent_name = (
+                fallback_intent.intent
+                if fallback_intent.intent in {INTENT_TAG_DISCOVERY, INTENT_PROMPT_RECOMMENDATION}
+                else INTENT_PROMPT_RECOMMENDATION
+            )
+        try:
+            confidence = float(raw.get("confidence", fallback_decision.confidence))
+        except Exception:
+            confidence = fallback_decision.confidence
+        confidence = max(0.0, min(1.0, confidence))
+        expansion_queries = _coerce_expansion_queries(raw)
+        intent = IntentFrame(
+            intent=(intent_name if route == "naia_tool" else intent_name),
+            subject=subject,
+            relation=("semantic" if intent_name == INTENT_TAG_DISCOVERY else fallback_intent.relation) if route == "naia_tool" else "",
+            object=("tag" if intent_name == INTENT_TAG_DISCOVERY else fallback_intent.object) if route == "naia_tool" else "",
+            action=("discover" if intent_name == INTENT_TAG_DISCOVERY else fallback_intent.action) if route == "naia_tool" else "",
+            language=fallback_intent.language,
+            confidence=confidence,
+            expansion_queries=expansion_queries if route == "naia_tool" else (),
+        )
+        reason_code = str(raw.get("reason_code") or "").strip()[:100]
+        if not reason_code:
+            reason_code = {
+                "naia_tool": (
+                    "llm_semantic_tag_search_allowed"
+                    if intent_name == INTENT_TAG_DISCOVERY
+                    else "llm_prompt_search_allowed"
+                ),
+                "naia_readonly": "llm_naia_readonly_question",
+                "out_of_scope": "llm_non_naia_request",
+                "blocked": "source_mutation_blocked",
+            }.get(route, fallback_decision.reason_code)
+        next_call = "none"
+        if route == "naia_tool":
+            next_call = ACTION_SEMANTIC_TAG_SEARCH if intent_name == INTENT_TAG_DISCOVERY else ACTION_PROMPT_SEARCH
+        elif route == "naia_readonly":
+            next_call = "readonly_answer"
+        decision = IntentDecision(
+            route=route,
+            domain=domain,
+            tool_allowed=(route == "naia_tool"),
+            read_only=True,
+            reason_code=reason_code,
+            next_call=next_call,
+            confidence=confidence,
+        )
+        return intent, decision
+
+    def _coerce_expansion_queries(raw: dict[str, Any]) -> tuple[str, ...]:
+        value = raw.get("expansion_queries")
+        if value is None:
+            value = raw.get("queries")
+        if not isinstance(value, list):
+            return ()
+        out: list[str] = []
+        for item in value:
+            text = " ".join(str(item or "").strip().split())[:80]
+            if text and text not in out:
+                out.append(text)
+            if len(out) >= 6:
+                break
+        return tuple(out)
+
+    def _chat_gate(
+        latest_user: str,
+        gen_context: GenerationInfoContext,
+        messages: list[dict[str, Any]],
+    ) -> tuple[IntentFrame, IntentDecision]:
+        fallback_intent = extract_intent_frame(latest_user, gen_context)
+        fallback_decision = decide_intent_route(fallback_intent, latest_user, gen_context)
+        if fallback_decision.route == ROUTE_BLOCKED:
+            return fallback_intent, fallback_decision
+        if _skip_llm_gate_for_confident_out_of_scope(latest_user, fallback_decision):
+            return fallback_intent, fallback_decision
+        extractor = getattr(service(), "extract_intent_decision", None)
+        if not callable(extractor):
+            return fallback_intent, fallback_decision
+        result = extractor(
+            user_input=latest_user,
+            context=gen_context.summary(),
+            history=messages,
+        )
+        if not isinstance(result, dict) or not result.get("ok") or not isinstance(result.get("data"), dict):
+            return fallback_intent, fallback_decision
+        return _coerce_chat_gate(
+            result["data"],
+            fallback_intent=fallback_intent,
+            fallback_decision=fallback_decision,
+        )
+
     @app.get("/api/ollama/assist/progress")
     async def ollama_assist_progress():
         # 현재 파이프라인 단계 + 경과초(FE 폴링). 백엔드 단일 블로킹 호출이라
@@ -468,6 +723,109 @@ def register_ollama_routes(
         if mode == "fast":
             return await run_in_thread(lambda: svc.assist_oneshot(text, options=options))
         return await run_in_thread(lambda: svc.assist(text, options=options))
+
+    @app.post("/api/ollama/chat")
+    async def ollama_chat(request: Request):
+        # Chat + Tools 오케스트레이터. 클라이언트가 보낸 system/model은 신뢰하지 않는다.
+        # 매 메시지마다 서버측 IntentDecision gate를 통과한 뒤 typed response를 반환한다.
+        messages: list[dict[str, Any]] = []
+        gen_context = GenerationInfoContext()
+        temperature = 0.35
+        num_predict = 512
+        try:
+            payload = await request.json()
+            if isinstance(payload, dict):
+                raw_messages = payload.get("messages")
+                if isinstance(raw_messages, list):
+                    messages = [m for m in raw_messages if isinstance(m, dict)]
+                gen_context = _chat_generation_context(payload.get("context"))
+                try:
+                    temperature = float(payload.get("temperature", temperature))
+                except Exception:
+                    temperature = 0.35
+                try:
+                    num_predict = int(payload.get("num_predict", num_predict))
+                except Exception:
+                    num_predict = 512
+        except Exception:
+            pass
+        latest_user = _chat_latest_user(messages)
+        if not latest_user:
+            return {"ok": False, "type": "chat", "error": "메시지를 입력하세요."}
+
+        def _orchestrate() -> dict[str, Any]:
+            intent, decision = _chat_gate(latest_user, gen_context, messages)
+            pipeline = IntentActionPipeline(
+                searcher=_chat_tool_searcher,
+                journal_path=None,
+                translator=_korean_to_english,
+            )
+            run = pipeline.run(latest_user, gen_context, intent=intent, decision=decision)
+            decision = run.decision.summary()
+            if run.decision.route == ROUTE_BLOCKED:
+                return {
+                    "ok": True,
+                    "type": "blocked",
+                    "message": run.final_output,
+                    "anchor": latest_user,
+                    "decision": decision,
+                    "structured_output": structured_output(run),
+                }
+            if run.decision.route == ROUTE_NAIA_TOOL:
+                rows = _chat_chip_rows(run)
+                chips = [
+                    {
+                        "tag": str(row.get("tag") or ""),
+                        "count": int(row.get("count") or 0),
+                        "desc": str(row.get("desc") or ""),
+                        "group": str(row.get("group") or ""),
+                        "cat": str(row.get("cat") or ""),
+                        **({
+                            "score": float(row.get("score") or 0.0),
+                        } if row.get("score") is not None else {}),
+                        **({"reason": str(row.get("reason") or "")} if row.get("reason") else {}),
+                        **({"role": str(row.get("role") or "")} if row.get("role") else {}),
+                    }
+                    for row in rows
+                    if row.get("tag")
+                ]
+                if not chips:
+                    return {
+                        "ok": True,
+                        "type": "chat",
+                        "message": run.final_output,
+                        "anchor": latest_user,
+                        "tool_empty": True,
+                        "decision": decision,
+                        "structured_output": structured_output(run),
+                    }
+                return {
+                    "ok": True,
+                    "type": "chips",
+                    "message": _chat_chips_message(run, latest_user, gen_context),
+                    "anchor": latest_user,
+                    "chips": chips,
+                    "decision": decision,
+                    "structured_output": structured_output(run),
+                }
+            chat_result = service().chat(
+                messages,
+                system=_chat_system_prompt(gen_context),
+                temperature=temperature,
+                num_predict=num_predict,
+            )
+            return {
+                "ok": bool(chat_result.get("ok")),
+                "type": "chat",
+                "message": str(chat_result.get("message") or ""),
+                "model": str(chat_result.get("model") or service().default_model),
+                "error": str(chat_result.get("error") or ""),
+                "anchor": latest_user,
+                "decision": decision,
+                "structured_output": structured_output(run),
+            }
+
+        return await run_in_thread(_orchestrate)
 
     # ── Auto Boost 모델 상주 — 토글 ON 시 warm-up(미리 적재+상주), OFF 시 즉시 언로드. ──
     # 토글 핸들러(PE 서비스)가 publish하면 set_resident에 위임한다. set_resident는

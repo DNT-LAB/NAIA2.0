@@ -123,6 +123,29 @@ def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
         }
     if extra_info:
         result["extra_tag_info"] = extra_info
+    if result.get("cat") == "character":
+        try:
+            from app.backend.server.character_viewer_routes import character_viewer_service
+
+            match = character_viewer_service(context).find_by_tag(tag)
+            if match is not None:
+                group_key, cdata = match
+                distribution = ((cdata.get("breast_size") or {}).get("distribution") or [])
+                bs_top = ""
+                if isinstance(distribution, list) and distribution:
+                    valid_distribution = [entry for entry in distribution if isinstance(entry, dict)]
+                    if valid_distribution:
+                        best = max(valid_distribution, key=lambda entry: float(entry.get("pct") or 0))
+                        bs_top = str(best.get("tag") or "")
+                result["character_details"] = {
+                    "copyright": group_key,
+                    "personal_color": cdata.get("personal_color", []),
+                    "characteristics": cdata.get("characteristics", []),
+                    "breast_size_top": bs_top,
+                    "total_rows": cdata.get("total_rows", 0),
+                }
+        except Exception:
+            pass
     return result
 
 

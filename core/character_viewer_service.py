@@ -38,6 +38,7 @@ class CharacterViewerService:
         self.tags_path = self.save_dir / "character_viewer_tags.json"
         self._groups: dict[str, Any] | None = None
         self._analysis: dict[str, Any] | None = None
+        self._tag_index: dict[str, tuple[str, dict[str, Any]]] | None = None
         self._thumb_index: dict[str, str] | None = None
 
     def data_available(self) -> bool:
@@ -58,6 +59,41 @@ class CharacterViewerService:
         if self._analysis is None:
             self._analysis = self._load_json(self.analysis_path, {})
         return self._analysis
+
+    def find_by_tag(self, tag: str) -> tuple[str, dict[str, Any]] | None:
+        normalized = re.sub(r"\\([()])", r"\1", str(tag or "")).strip().lower()
+        if not normalized:
+            return None
+        if self._tag_index is None:
+            index: dict[str, tuple[str, dict[str, Any]]] = {}
+            try:
+                analysis = self.analysis()
+            except Exception:
+                self._tag_index = index
+                return None
+            if isinstance(analysis, dict):
+                for group_key, chars in analysis.items():
+                    if not isinstance(chars, dict):
+                        continue
+                    for char_name, data in chars.items():
+                        if not isinstance(data, dict):
+                            continue
+                        key = str(char_name or "").strip().lower()
+                        if not key:
+                            continue
+                        current = index.get(key)
+                        try:
+                            total_rows = int(data.get("total_rows", 0) or 0)
+                        except Exception:
+                            total_rows = 0
+                        try:
+                            current_rows = int(current[1].get("total_rows", 0) or 0) if current else -1
+                        except Exception:
+                            current_rows = -1
+                        if current is None or total_rows > current_rows:
+                            index[key] = (str(group_key), data)
+            self._tag_index = index
+        return self._tag_index.get(normalized)
 
     def thumb_index(self) -> dict[str, str]:
         if self._thumb_index is None:

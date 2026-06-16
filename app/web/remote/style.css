@@ -8840,6 +8840,11 @@ body.resizing-result-info {
 .assistants-ollama-btn:last-child {
   border-right: 0;
 }
+/* Ollama Chat은 내부 용도로만 노출(기본 숨김) → 단독 Ollama Assist 버튼의 우측 구분선 제거.
+   내부 활성화(.chat-enabled) 시 2-버튼 세그먼트로 복귀. */
+.assistants-ollama-segment:not(.chat-enabled) #ollamaAssistantBtn {
+  border-right: 0;
+}
 .assistants-ollama-btn:hover {
   background: rgba(96, 120, 255, 0.2);
 }

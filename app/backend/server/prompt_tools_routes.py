@@ -60,6 +60,153 @@ def _tag_data_roots(context: WebSessionContext) -> list[Path]:
     return roots
 
 
+def _prompt_highlight_data_file(context: WebSessionContext, *parts: str) -> Path:
+    for root in _tag_data_roots(context):
+        candidate = root.joinpath(*parts)
+        if candidate.exists():
+            return candidate
+    roots = _tag_data_roots(context)
+    return roots[0].joinpath(*parts) if roots else Path(*parts)
+
+
+def _prompt_highlight_norm_tag(value: Any) -> str:
+    return (
+        str(value or "")
+        .replace("\\(", "(")
+        .replace("\\)", ")")
+        .replace("_", " ")
+        .strip()
+        .lower()
+    )
+
+
+def _prompt_highlight_add_tags(target: set[str], values: Any) -> None:
+    if not values:
+        return
+    for value in values:
+        tag = _prompt_highlight_norm_tag(value)
+        if tag:
+            target.add(tag)
+
+
+def _prompt_highlight_read_json_tags(path: Path) -> set[str]:
+    tags: set[str] = set()
+    if not path.exists():
+        return tags
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        def _collect_tag_lists(node: Any, depth: int = 0) -> None:
+            if depth > 4:
+                return
+            if isinstance(node, list):
+                _prompt_highlight_add_tags(tags, node)
+                return
+            if not isinstance(node, dict):
+                return
+            for key in ("tags", "modifiers", "uncategorized"):
+                if isinstance(node.get(key), list):
+                    _prompt_highlight_add_tags(tags, node.get(key))
+            for key in ("groups", "categories", "regions"):
+                value = node.get(key)
+                if isinstance(value, dict):
+                    for child in value.values():
+                        _collect_tag_lists(child, depth + 1)
+                elif isinstance(value, list):
+                    _prompt_highlight_add_tags(tags, value)
+
+        if isinstance(data, dict):
+            _collect_tag_lists(data)
+        elif isinstance(data, list):
+            _prompt_highlight_add_tags(tags, data)
+    except Exception as exc:
+        print(f"Remote: prompt highlight taglist load failed ({path}): {exc}")
+    return tags
+
+
+def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
+    raw_tags = getattr(context, "kr_tags_raw", None)
+    if not isinstance(raw_tags, dict) or not raw_tags:
+        from core.kr_tag_loader import load_kr_tag_records
+        from core.tag_relation_ranker import TagRelationRanker
+
+        load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
+        raw_tags = load_result.raw
+        context.kr_tags_raw = raw_tags
+        context.tag_relation_ranker = TagRelationRanker(raw_tags) if raw_tags else None
+    if not isinstance(raw_tags, dict):
+        raw_tags = {}
+
+    raw_id = id(raw_tags)
+    cached = getattr(context, "_prompt_highlight_index_cache", None)
+    cached_raw_id = getattr(context, "_prompt_highlight_index_cache_raw_id", None)
+    if isinstance(cached, dict) and cached_raw_id == raw_id:
+        return cached
+
+    high_value: set[str] = set()
+    high_value.update(_prompt_highlight_read_json_tags(_prompt_highlight_data_file(context, "taglist", "expression_tags.json")))
+    high_value.update(_prompt_highlight_read_json_tags(_prompt_highlight_data_file(context, "taglist", "pose_action_tags.json")))
+
+    mid_value: set[str] = set()
+    mid_value.update(_prompt_highlight_read_json_tags(_prompt_highlight_data_file(context, "taglist", "object_tags.json")))
+    mid_value.update(_prompt_highlight_read_json_tags(_prompt_highlight_data_file(context, "taglist", "clothing_regions.json")))
+    clothes_path = _prompt_highlight_data_file(context, "clothes_list.txt")
+    if clothes_path.exists():
+        try:
+            with open(clothes_path, "r", encoding="utf-8") as f:
+                _prompt_highlight_add_tags(mid_value, [line.strip() for line in f if line.strip()])
+        except Exception as exc:
+            print(f"Remote: prompt highlight clothes list load failed: {exc}")
+
+    artist_tags: set[str] = set()
+    character_tags: set[str] = set()
+    copyright_tags: set[str] = set()
+    known_tags: set[str] = set()
+    for tag_lower, info in raw_tags.items():
+        if not isinstance(info, dict):
+            continue
+        tag = _prompt_highlight_norm_tag(info.get("_tag", tag_lower))
+        if not tag:
+            continue
+        cat = str(info.get("_cat", "") or "")
+        if cat == "artist":
+            artist_tags.add(tag)
+        elif cat == "character":
+            character_tags.add(tag)
+        elif cat == "copyright":
+            copyright_tags.add(tag)
+        else:
+            known_tags.add(tag)
+
+    known_tags.update(high_value)
+    known_tags.update(mid_value)
+    known_tags.update(_prompt_highlight_read_json_tags(_prompt_highlight_data_file(context, "taglist", "style_meta_tags.json")))
+    known_tags.difference_update(artist_tags)
+    known_tags.difference_update(character_tags)
+    known_tags.difference_update(copyright_tags)
+
+    payload = {
+        "highValueTags": sorted(high_value),
+        "midValueTags": sorted(mid_value),
+        "knownTags": sorted(known_tags),
+        "artistTags": sorted(artist_tags),
+        "characterTags": sorted(character_tags),
+        "copyrightTags": sorted(copyright_tags),
+        "stats": {
+            "high": len(high_value),
+            "mid": len(mid_value),
+            "known": len(known_tags),
+            "artists": len(artist_tags),
+            "characters": len(character_tags),
+            "copyrights": len(copyright_tags),
+        },
+    }
+    context._prompt_highlight_index_cache = payload
+    context._prompt_highlight_index_cache_raw_id = raw_id
+    return payload
+
+
 def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
     raw_tags = getattr(context, "kr_tags_raw", None)
     if not isinstance(raw_tags, dict) or not raw_tags:
@@ -299,8 +446,12 @@ def register_prompt_tools_routes(
 
     @app.get("/api/prompt-highlight-index")
     async def api_prompt_highlight_index():
+        try:
+            data = await run_in_thread(prompt_highlight_index, session_context)
+        except Exception:
+            data = prompt_highlight_empty_index()
         return Response(
-            content=json.dumps(prompt_highlight_empty_index(), ensure_ascii=False),
+            content=json.dumps(data, ensure_ascii=False),
             media_type="application/json",
             headers=_no_cache_headers(),
         )

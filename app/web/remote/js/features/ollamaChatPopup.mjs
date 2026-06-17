@@ -188,6 +188,22 @@ export function createOllamaChatPopup({
     return header;
   }
 
+  function makeCopyAllRow(tags) {
+    const list = (Array.isArray(tags) ? tags : []).map(t => String(t || '').trim()).filter(Boolean);
+    const seen = new Set();
+    const uniq = list.filter(t => (seen.has(t) ? false : seen.add(t)));
+    const row = document.createElement('div');
+    row.className = 'ollama-chat-copyall-row';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ollama-chat-copyall-btn';
+    btn.textContent = `\u{1F4CB} Copy All (${uniq.length})`;
+    btn.disabled = !uniq.length;
+    btn.addEventListener('click', () => { void copyChip(uniq.join(', ')); });
+    row.appendChild(btn);
+    return row;
+  }
+
   function renderMessages() {
     if (typeof hideTagInfo === 'function') hideTagInfo();
     const log = pick('.ollama-chat-log');
@@ -257,6 +273,7 @@ export function createOllamaChatPopup({
         });
         panel.appendChild(header);
         panel.appendChild(chips);
+        panel.appendChild(makeCopyAllRow(msg.chips.map(c => c?.tag).filter(Boolean)));
         item.appendChild(panel);
       }
       if (msg.role === 'assistant' && msg.type === 'scene' && Array.isArray(msg.segments) && msg.segments.length && !msg.dismissed) {
@@ -279,6 +296,10 @@ export function createOllamaChatPopup({
           row.appendChild(chips);
           panel.appendChild(row);
         });
+        const sceneFlat = (Array.isArray(msg.flatTags) && msg.flatTags.length)
+          ? msg.flatTags
+          : msg.segments.flatMap(s => (Array.isArray(s.tags) ? s.tags : []).map(t => t?.tag));
+        panel.appendChild(makeCopyAllRow(sceneFlat));
         item.appendChild(panel);
       }
       if (msg.role === 'assistant' && msg.type === 'combos' && Array.isArray(msg.combos) && msg.combos.length && !msg.dismissed) {

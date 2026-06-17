@@ -37,20 +37,30 @@ _CLOTHES_COMBO_RE = re.compile(
     re.IGNORECASE,
 )
 _RELATED_RE = re.compile(r"(관련|추천|recommend|suggest)", re.IGNORECASE)
+_BARE_RECOMMEND_RE = re.compile(
+    r"^\s*(추천(?:해줘|해주세요)?|recommend|suggest|suggestions?)\s*[.!?。？]*\s*$",
+    re.IGNORECASE,
+)
 _MAKE_SCENE_RE = re.compile(
     r"(만들|만들어|장면|구도|scene|compose|create|build|입고|잡는|붙잡|따르는|누워|해변|칼날|여전사)",
     re.IGNORECASE,
 )
+_CLEAR_SCENE_MARKER_RE = re.compile(
+    r"(구도|장면|scene|composition|compose|그려|그림|만들|만들어|create|build)",
+    re.IGNORECASE,
+)
 _VISUAL_DECLARATIVE_RE = re.compile(
     r"(입은|입고|신고|들고|낀|쓴|멘|맨|매고|앉아|서\s*있|누운|누워|짓는|하는|머리를\s*한|"
-    r"wearing|standing|sitting|holding|lying)",
+    r"마시|먹고|바라보|wearing|standing|sitting|holding|lying|drinking|eating|looking)",
     re.IGNORECASE,
 )
 _VISUAL_CONTENT_RE = re.compile(
     r"(소녀|소년|여자|남자|캐릭터|머리|금발|붉은\s*머리|흰머리|백발|코트|조끼|셔츠|넥타이|"
     r"재킷|자켓|부츠|스커트|드레스|후드티|비키니|수영복|피아노|촛불|칼날|검|해변|배경|"
+    r"창가|창문|소파|커피|의자|테이블|침대|"
     r"girl|boy|woman|man|character|hair|blonde|red hair|white hair|coat|vest|shirt|necktie|"
-    r"jacket|boots|skirt|dress|hoodie|bikini|swimsuit|piano|candle|sword|blade|beach)",
+    r"jacket|boots|skirt|dress|hoodie|bikini|swimsuit|piano|candle|sword|blade|beach|"
+    r"window|sofa|couch|coffee|chair|table|bed)",
     re.IGNORECASE,
 )
 _QUESTION_RE = re.compile(
@@ -290,6 +300,8 @@ class OllamaChatPipeline:
         user_input: str = "",
         clothes_tags: list[dict[str, Any]] | None = None,
     ) -> bool:
+        if self._is_clear_scene(user_input):
+            return False
         event_set = {_norm(item.get("tag")) for item in event_tags or []}
         scene_meaningful = [
             tag for tag in final_tags or []
@@ -351,6 +363,7 @@ class OllamaChatPipeline:
         has_context = bool(gen_context.prompt or gen_context.tags or gen_context.metadata)
         context_ref = bool(_CONTEXT_REF_RE.search(text))
         visual_scene = self._looks_visual_declarative(text)
+        clear_scene = self._is_clear_scene(text)
         goal = str(raw.get("goal") or "chat").strip()
         if goal not in {
             "scene_compose", "clothes_combo", "event_lookup",
@@ -361,7 +374,7 @@ class OllamaChatPipeline:
             goal = "blocked"
         elif _CLOTHES_COMBO_RE.search(text):
             goal = "clothes_combo"
-        elif (_MAKE_SCENE_RE.search(text) or visual_scene) and not _RELATED_RE.search(text):
+        elif clear_scene or ((_MAKE_SCENE_RE.search(text) or visual_scene) and not _RELATED_RE.search(text)):
             goal = "scene_compose"
         elif _RELATED_RE.search(text):
             goal = "tag_discovery"
@@ -403,9 +416,20 @@ class OllamaChatPipeline:
             proceed = False
             ambiguity["level"] = "high"
             clarification = self._clarification_for(text)
-        if ambiguity["level"] == "high" or (goal not in {"chat", "blocked"} and not subjects):
+        elif _BARE_RECOMMEND_RE.match(text):
+            goal = "chat"
+            proceed = False
+            ambiguity["level"] = "high"
+            clarification = self._clarification_for(text)
+        elif clear_scene and goal == "scene_compose":
+            proceed = True
+            clarification = ""
+            if ambiguity["level"] == "high":
+                ambiguity["level"] = "low"
+        elif ambiguity["level"] == "high" or (goal not in {"chat", "blocked"} and not subjects):
             proceed = False
             clarification = clarification or self._clarification_for(text)
+        params["needs_tools"] = goal not in {"chat", "blocked"}
         note = str(raw.get("interpretation_note") or "").strip()
         if ambiguity["level"] == "medium" and not note:
             note = "요청이 넓어서 가장 가능성 높은 의미로 먼저 해석했습니다."
@@ -483,7 +507,23 @@ class OllamaChatPipeline:
 
     def _looks_scene_like(self, text: str) -> bool:
         text = str(text or "")
-        return bool(_MAKE_SCENE_RE.search(text) or self._looks_visual_declarative(text))
+        return bool(self._is_clear_scene(text) or _MAKE_SCENE_RE.search(text) or self._looks_visual_declarative(text))
+
+    def _is_clear_scene(self, text: str) -> bool:
+        text = str(text or "").strip()
+        if len(text) < 8:
+            return False
+        if _VAGUE_REFERENTIAL_RE.search(text) or _CLOTHES_COMBO_RE.search(text):
+            return False
+        if _SOURCE_OBJECT_RE.search(text) and _MUTATION_ACTION_RE.search(text):
+            return False
+        marker = bool(_CLEAR_SCENE_MARKER_RE.search(text))
+        visual = self._looks_visual_declarative(text)
+        if not marker:
+            return visual
+        if _CONTEXT_REF_RE.search(text) and not (visual or _VISUAL_CONTENT_RE.search(text)):
+            return False
+        return bool(visual or _VISUAL_CONTENT_RE.search(text) or len(text) >= 14)
 
     def _looks_visual_declarative(self, text: str) -> bool:
         text = str(text or "").strip()

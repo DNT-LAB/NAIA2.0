@@ -90,6 +90,15 @@ body {
   100% { background-position: -200% 0; }
 }
 
+/* GPU: 창이 비포커스/숨김일 때 모든 애니메이션 정지. Electron 컴포지터는 창이 가려져도
+   (occluded) 무한 CSS 애니메이션 때문에 매 프레임을 계속 생성 → backdrop-filter 재계산으로
+   GPU를 점유한다. app.js가 blur/focus/visibilitychange로 html.anims-paused를 토글. */
+html.anims-paused *,
+html.anims-paused *::before,
+html.anims-paused *::after {
+  animation-play-state: paused !important;
+}
+
 /* ---- Header ---- */
 header {
   display: flex;
@@ -4288,7 +4297,7 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .stats-pill.save-toggle:hover { background: rgba(40,40,60,0.85); }
 .stats-pill.save-toggle.off {
   color: #fff;
-  animation: save-off-pulse 2s ease-in-out infinite;
+  border-color: rgba(244,67,54,0.55);
 }
 .stats-pill.save-toggle.off .stats-dot { background: #F44336; animation: none; }
 @keyframes save-off-pulse {
@@ -4398,7 +4407,6 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   background: var(--success, #4CAF50);
   margin-right: 4px;
   vertical-align: middle;
-  animation: stats-dot-pulse 2s ease-in-out infinite;
 }
 @keyframes stats-dot-pulse {
   0%, 100% { opacity: 1; }

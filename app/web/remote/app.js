@@ -13,6 +13,19 @@ let activePromptTab = 'prompt';
 let presetGenerationPending = null;
 let latestImageMeta = null;
 
+// --- GPU 절약: 창이 비포커스/숨김일 때 모든 CSS 애니메이션 정지 ---
+// Electron 컴포지터는 창이 가려져도 무한 애니메이션 때문에 매 프레임을 계속 그려
+// backdrop-filter 재계산으로 GPU를 점유한다. 앞에 없을 땐 html.anims-paused로 멈춘다.
+(() => {
+  const root = document.documentElement;
+  const setPaused = (paused) => { if (root) root.classList.toggle('anims-paused', !!paused); };
+  const update = () => setPaused(document.hidden || (typeof document.hasFocus === 'function' && !document.hasFocus()));
+  window.addEventListener('blur', () => setPaused(true));
+  window.addEventListener('focus', () => setPaused(false));
+  document.addEventListener('visibilitychange', update);
+  update();
+})();
+
 let _initDone = false;  // init_complete 수신 후 true → 초기 시딩 제외
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 // 사용자가 로컬 편집을 했지만 아직 서버로 flush되지 않은 상태 — 서버 브로드캐스트 덮어쓰기 차단

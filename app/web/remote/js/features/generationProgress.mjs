@@ -27,13 +27,13 @@ export function createGenerationProgress({
     clearProgressTimer();
     clearFinishTimeout();
 
+    // 진행 중에는 transition을 켜지 않는다(=instant). 50ms마다 width를 갱신하는데
+    // 'width 0.3s' transition이 켜져 있으면 갱신마다 0.3s 컴포지트가 겹쳐 매 프레임
+    // 합성 → 생성 중 GPU 폭증(주사율 비례)했다. instant 갱신은 paint만 발생(저비용).
     bar.style.transition = 'none';
     bar.style.width = '0%';
     bar2.style.transition = 'none';
     bar2.style.width = '0%';
-    void bar.offsetWidth;
-    bar.style.transition = 'width 0.3s linear';
-    bar2.style.transition = 'width 0.3s linear';
     wrap.classList.add('active');
 
     const durations = getDurations();
@@ -49,7 +49,7 @@ export function createGenerationProgress({
         const overPct = Math.min(((elapsed - estimated) / estimated) * 100, 100);
         bar2.style.width = overPct + '%';
       }
-    }, 50);
+    }, 33);
   }
 
   function finish() {

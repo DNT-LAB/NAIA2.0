@@ -592,12 +592,26 @@ export function createModuleLauncher({
     });
   }
 
+  function observeRoot() {
+    if (observer && root) {
+      observer.observe(root, {
+        subtree: true, attributes: true, childList: true, characterData: true,
+        attributeFilter: ['class', 'disabled'],
+      });
+    }
+  }
+
   function scheduleUpdateState() {
     if (updateQueued) return;
     updateQueued = true;
     document.defaultView.requestAnimationFrame(() => {
       updateQueued = false;
-      updateState();
+      // updateState()는 root 하위의 class/disabled를 바꾼다 → 이를 관찰하는
+      // MutationObserver가 다시 fire → scheduleUpdateState → rAF → updateState …
+      // 매 프레임 도는 무한 rAF 루프(idle GPU 점유)였다. 자기 변경은 관찰에서
+      // 빼기 위해 disconnect→updateState→reconnect.
+      if (observer) observer.disconnect();
+      try { updateState(); } finally { observeRoot(); }
     });
   }
 
@@ -660,13 +674,7 @@ export function createModuleLauncher({
       if (event.key === 'Escape') closeMenus();
     });
     observer = new MutationObserver(scheduleUpdateState);
-    observer.observe(root, {
-      subtree: true,
-      attributes: true,
-      childList: true,
-      characterData: true,
-      attributeFilter: ['class', 'disabled'],
-    });
+    observeRoot();
     updateState();
   }
 

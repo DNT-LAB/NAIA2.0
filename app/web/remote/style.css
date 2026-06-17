@@ -73,9 +73,7 @@ body {
   height: 100%;
   width: 0%;
   border-radius: 0 2px 2px 0;
-  transition: width 0.3s linear;
   background-size: 200% 100%;
-  animation: progressShimmer 1.5s ease-in-out infinite;
 }
 .gen-progress-bar {
   background: linear-gradient(90deg, var(--accent) 0%, var(--accent-glow) 50%, var(--accent) 100%);
@@ -8725,7 +8723,6 @@ body.resizing-result-info {
 }
 .btn-gen.generating {
   background: linear-gradient(135deg, #b8860b, #e8a84c);
-  animation: btnPulse 1.5s ease-in-out infinite;
 }
 
 /* ---- Options row ---- */

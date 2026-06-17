@@ -26,6 +26,63 @@ let latestImageMeta = null;
   update();
 })();
 
+// --- GPU-PROBE (진단용·기본 OFF): `?gpuprobe=1` URL 또는 localStorage 'naia_gpuprobe'='1'로만 활성.
+//     idle/생성 GPU 소스(rAF 루프·transition·streaming) 추적용. 다시 쓸 수 있어 제거 대신 숨김. ---
+(() => {
+  try {
+    const on = (new URLSearchParams(location.search).get('gpuprobe') === '1')
+      || (typeof localStorage !== 'undefined' && localStorage.getItem('naia_gpuprobe') === '1');
+    if (!on) return;
+  } catch (_) { return; }
+  let rafN = 0, rafLast = 0;
+  const callers = {};
+  const _raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = function (cb) {
+    rafN++;
+    if (rafN % 3 === 0) {
+      try {
+        const s = (new Error().stack || '').split('\n');
+        const ln = s[2] || s[1] || '';
+        const m = ln.match(/([\w.\-]+\.(?:m?js))(?::(\d+))?/);
+        const k = m ? (m[1] + (m[2] ? ':' + m[2] : '')) : 'native';
+        callers[k] = (callers[k] || 0) + 1;
+      } catch (_) {}
+    }
+    return _raf(cb);
+  };
+  let imgN = 0, imgLast = 0;
+  try {
+    const rv = document.getElementById('resultViewer') || document.querySelector('.viewer') || document.body;
+    new MutationObserver(() => { imgN++; }).observe(rv, { subtree: true, attributes: true, childList: true, attributeFilter: ['src', 'style', 'class'] });
+  } catch (_) {}
+  const box = document.createElement('div');
+  box.id = '__gpuprobe';
+  box.style.cssText = 'position:fixed;left:6px;bottom:6px;z-index:2147483647;background:rgba(0,0,0,0.9);color:#3f6;font:10px/1.4 monospace;padding:6px 8px;border:1px solid #3f6;border-radius:4px;max-width:440px;white-space:pre-wrap;pointer-events:none;';
+  const upd = () => {
+    try {
+      if (document.body && !document.getElementById('__gpuprobe')) document.body.appendChild(box);
+      const hz = rafN - rafLast; rafLast = rafN;
+      const top = Object.entries(callers).sort((a, b) => b[1] - a[1]).slice(0, 3).map(e => e[0] + '×' + e[1]).join('  ');
+      const anims = (document.getAnimations ? document.getAnimations() : []).filter(a => a.playState === 'running');
+      const vids = [...document.querySelectorAll('video')];
+      const imgHz = imgN - imgLast; imgLast = imgN;
+      const animDetail = anims.map(a => {
+        const t = a.effect && a.effect.target;
+        const tag = t ? (t.id || (t.className || '').toString().split(' ')[0] || t.tagName || '').toString().trim().slice(0, 22) : '';
+        return ((a.transitionProperty || a.animationName || (a.constructor && a.constructor.name) || '?')) + '@' + tag;
+      }).slice(0, 5).join(' | ');
+      box.textContent = 'GPU-PROBE v3\n'
+        + 'rafHz=' + hz + '  imgHz=' + imgHz + '\n'
+        + 'topRAF: ' + (top || '-') + '\n'
+        + 'anims(' + anims.length + '): ' + (animDetail || '-') + '\n'
+        + 'paused=' + document.documentElement.classList.contains('anims-paused')
+        + '  videos=' + vids.length + '/' + vids.filter(v => !v.paused).length;
+    } catch (e) { box.textContent = 'GPU-PROBE err: ' + (e && e.message); }
+  };
+  setInterval(upd, 1000);
+  setTimeout(upd, 600);
+})();
+
 let _initDone = false;  // init_complete 수신 후 true → 초기 시딩 제외
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 // 사용자가 로컬 편집을 했지만 아직 서버로 flush되지 않은 상태 — 서버 브로드캐스트 덮어쓰기 차단
@@ -893,7 +950,7 @@ const updateBannerReady = import('./js/features/updateBannerControls.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize update banner module', error);
   });
-const generationProgressReady = import('./js/features/generationProgress.mjs')
+const generationProgressReady = import('./js/features/generationProgress.mjs?v=20260617-gpufix')
   .then(({createGenerationProgress}) => {
     generationProgress = createGenerationProgress({
       document,
@@ -5853,7 +5910,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260612-extset11')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260617-gpufix')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,

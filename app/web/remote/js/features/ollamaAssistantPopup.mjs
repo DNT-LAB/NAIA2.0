@@ -3,19 +3,15 @@
 // 찌르면 폰/LAN/Cloudflared 세션에서는 그 기기 자신의 localhost를 가리켜 오동작한다.
 // Dev0714 ollama_module의 3상태(미설치/서버OFF/연결됨) + 설치 안내(ollama.com) 패턴.
 
-const DEFAULT_ENDPOINT = 'http://localhost:11434/v1';
-const DEFAULT_MODEL = 'hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M';
+import {
+  DEFAULT_MODEL,
+  fetchOllamaConnection,
+  postOllamaConnectionModel,
+  setOllamaModelSelectOptions,
+  shortOllamaModel,
+} from './ollamaModelSelect.mjs?v=20260617-modelsel';
 
-// 헤더 표기용 짧은 모델 라벨 — "<리포 끝 이름>:<양자화>"만 남긴다.
-function _shortModel(full) {
-  const s = String(full || '');
-  const colon = s.lastIndexOf(':');
-  const quant = colon >= 0 ? s.slice(colon + 1) : '';
-  let name = colon >= 0 ? s.slice(0, colon) : s;
-  name = name.split('/').pop() || name;
-  return quant ? `${name}:${quant}` : name;
-}
-const RUN_COMMAND = `ollama run ${DEFAULT_MODEL}`;
+const DEFAULT_ENDPOINT = 'http://localhost:11434/v1';
 const DOWNLOAD_PAGE = 'https://ollama.com/download';
 
 export function createOllamaAssistantPopup({
@@ -42,6 +38,7 @@ export function createOllamaAssistantPopup({
   let connEndpointBase = '';       // 현재 base URL(슬래시·/v1 없음) — 에디터/복사용
   let connIsCustom = false;        // 원격(비-로컬) 엔드포인트 여부
   let canConfigure = false;        // GET /connection 성공(=루프백 호스트)일 때만 ⚙ 노출
+  let installedModels = [];
 
   function pick(selector) {
     return popup ? popup.querySelector(selector) : null;
@@ -394,10 +391,11 @@ export function createOllamaAssistantPopup({
   // ------------------------------------------------------------------
   async function fetchConnection() {
     try {
-      const {status, payload} = await fetchJson('/api/ollama/connection');
+      const {status, payload} = await fetchOllamaConnection(win);
       if (status === 403 || !payload || payload.ok === false) {
         canConfigure = false;  // 비-루프백 클라이언트 — 설정 불가, ⚙ 숨김
         updateCfgButton();
+        updateModelSelect();
         return;
       }
       canConfigure = true;
@@ -409,6 +407,7 @@ export function createOllamaAssistantPopup({
     }
     updateCfgButton();
     updateModelNote();
+    updateModelSelect();
   }
 
   function updateCfgButton() {
@@ -422,7 +421,16 @@ export function createOllamaAssistantPopup({
     // connModel은 status.model(공개 sanitized에도 포함)에서 채워지므로 원격
     // 클라이언트도 실제 구성 모델명을 표시한다(엔드포인트 URL은 비노출 유지).
     const remote = connIsCustom ? ' <span class="ollama-conn-remote">· 원격</span>' : '';
-    note.innerHTML = `Model: <code>${escHtml(_shortModel(connModel))}</code>${remote}`;
+    note.innerHTML = `Model: <code>${escHtml(shortOllamaModel(connModel))}</code>${remote}`;
+  }
+
+  function updateModelSelect() {
+    const select = pick('.ollama-assist-model-select');
+    setOllamaModelSelectOptions(select, {
+      models: installedModels,
+      currentModel: connModel,
+      disabled: !canConfigure,
+    });
   }
 
   function toggleConnEditor(forceOpen) {
@@ -465,6 +473,7 @@ export function createOllamaAssistantPopup({
       connModel = String(payload.model || '') || DEFAULT_MODEL;
       connIsCustom = !!payload.is_custom;
       updateModelNote();
+      updateModelSelect();
       toggleConnEditor(false);
       showToast(connIsCustom ? '원격 Ollama 엔드포인트로 전환했습니다.' : '기본 로컬 Ollama로 설정했습니다.', 'success');
       refreshStatus(true);
@@ -472,6 +481,41 @@ export function createOllamaAssistantPopup({
       showToast('연결 설정 요청 실패', 'error');
     } finally {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '저장'; }
+    }
+  }
+
+  async function saveSelectedModel(model) {
+    const selected = String(model || '').trim();
+    if (!selected || !canConfigure) {
+      updateModelSelect();
+      return;
+    }
+    const select = pick('.ollama-assist-model-select');
+    if (select) select.disabled = true;
+    try {
+      const {status, payload} = await postOllamaConnectionModel(win, {
+        endpoint: connEndpointBase,
+        model: selected,
+      });
+      if (status === 403) {
+        showToast(payload.error || 'NAIA가 실행 중인 PC에서만 가능합니다.', 'error');
+        return;
+      }
+      if (!payload || payload.ok === false) {
+        showToast(payload?.error || '모델 설정 저장 실패', 'error');
+        return;
+      }
+      connEndpointBase = String(payload.endpoint || '');
+      connModel = String(payload.model || '') || selected || DEFAULT_MODEL;
+      connIsCustom = !!payload.is_custom;
+      updateModelNote();
+      updateModelSelect();
+      showToast('Ollama 모델 설정을 저장했습니다.', 'success');
+      refreshStatus(true);
+    } catch (error) {
+      showToast('모델 설정 요청 실패', 'error');
+    } finally {
+      updateModelSelect();
     }
   }
 
@@ -541,7 +585,10 @@ export function createOllamaAssistantPopup({
       return;
     }
     // 모델은 백엔드 SSOT — status가 알려주는 실제 구성 모델로 표시를 맞춘다(원격 포함).
-    if (data.model) { connModel = String(data.model); updateModelNote(); }
+    installedModels = Array.isArray(data.models) ? data.models.map(item => String(item || '')).filter(Boolean) : [];
+    if (data.model) { connModel = String(data.model); }
+    updateModelNote();
+    updateModelSelect();
     // 비-ASCII(한글) 모델 경로 경고는 설치/실행/모델 상태와 무관하게 항상 노출한다
     // (모델 로딩 단계에서 터지는 llama-server 에러를 미리 안내). 원격 클라이언트는
     // path_warning 미포함 → 자동 숨김.
@@ -831,7 +878,11 @@ export function createOllamaAssistantPopup({
           </div>
         </div>
         <div class="ollama-assist hidden">
-          <div class="ollama-assist-modelnote">Model: <code>${escHtml(_shortModel(DEFAULT_MODEL))}</code></div>
+          <div class="ollama-assist-modelnote">Model: <code>${escHtml(shortOllamaModel(connModel))}</code></div>
+          <div class="ollama-model-select-row">
+            <label class="ollama-model-select-label">Model</label>
+            <select class="ollama-model-select ollama-assist-model-select" aria-label="Ollama 모델 선택"></select>
+          </div>
           <textarea class="ollama-assist-input" rows="6" placeholder="예: 교복 입은 소녀가 창가에 앉아 웃고 있는 장면"></textarea>
           <div class="ollama-assist-controls">
             <div class="ollama-assist-mode" role="group" aria-label="변환 모드">
@@ -870,6 +921,9 @@ export function createOllamaAssistantPopup({
 
     pick('.ollama-assistant-pop-x')?.addEventListener('click', close);
     pick('.ollama-assistant-pop-min')?.addEventListener('click', toggleMinimize);
+    pick('.ollama-assist-model-select')?.addEventListener('change', event => {
+      void saveSelectedModel(event.target.value);
+    });
     // 최소화 상태에서 헤더(타이틀) 클릭 시 다시 펼친다.
     pick('.ollama-assistant-pop-header')?.addEventListener('click', (e) => {
       if (popup.classList.contains('minimized') &&

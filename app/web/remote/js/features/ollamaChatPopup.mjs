@@ -1,3 +1,11 @@
+import {
+  DEFAULT_MODEL,
+  fetchOllamaConnection,
+  fetchOllamaStatus,
+  postOllamaConnectionModel,
+  setOllamaModelSelectOptions,
+} from './ollamaModelSelect.mjs?v=20260617-modelsel';
+
 export function createOllamaChatPopup({
   document,
   window: win = window,
@@ -12,6 +20,10 @@ export function createOllamaChatPopup({
   let busy = false;
   let serverReady = false;
   let eventChecked = false;
+  let connModel = DEFAULT_MODEL;
+  let connEndpointBase = '';
+  let canConfigure = false;
+  let installedModels = [];
   const messages = [];
 
   function pick(selector) {
@@ -77,6 +89,65 @@ export function createOllamaChatPopup({
     if (!el) return;
     el.className = 'ollama-chat-status' + (type ? ' ' + type : '');
     el.textContent = text || '';
+  }
+
+  function updateModelSelect() {
+    setOllamaModelSelectOptions(pick('.ollama-chat-model-select'), {
+      models: installedModels,
+      currentModel: connModel,
+      disabled: !canConfigure,
+    });
+  }
+
+  async function refreshConnection() {
+    try {
+      const {status, payload} = await fetchOllamaConnection(win);
+      if (status === 403 || !payload || payload.ok === false) {
+        canConfigure = false;
+        updateModelSelect();
+        return;
+      }
+      canConfigure = true;
+      connEndpointBase = String(payload.endpoint || '');
+      connModel = String(payload.model || '') || connModel || DEFAULT_MODEL;
+    } catch (_) {
+      canConfigure = false;
+    }
+    updateModelSelect();
+  }
+
+  async function saveSelectedModel(model) {
+    const selected = String(model || '').trim();
+    if (!selected || !canConfigure) {
+      updateModelSelect();
+      return;
+    }
+    const select = pick('.ollama-chat-model-select');
+    if (select) select.disabled = true;
+    try {
+      const {status, payload} = await postOllamaConnectionModel(win, {
+        endpoint: connEndpointBase,
+        model: selected,
+      });
+      if (status === 403) {
+        showToast(payload.error || 'NAIA가 실행 중인 PC에서만 가능합니다.', 'error');
+        return;
+      }
+      if (!payload || payload.ok === false) {
+        showToast(payload?.error || '모델 설정 저장 실패', 'error');
+        return;
+      }
+      connEndpointBase = String(payload.endpoint || '');
+      connModel = String(payload.model || '') || selected || DEFAULT_MODEL;
+      canConfigure = true;
+      updateModelSelect();
+      showToast('Ollama 모델 설정을 저장했습니다.', 'success');
+      void refreshReadiness(true);
+    } catch (_) {
+      showToast('모델 설정 요청 실패', 'error');
+    } finally {
+      updateModelSelect();
+    }
   }
 
   function makeChip(tag, meta) {
@@ -331,6 +402,10 @@ export function createOllamaChatPopup({
         messages.push({role: 'assistant', type: 'chat', content: String(payload.message || '')});
       }
       renderMessages();
+      if (payload.model) {
+        connModel = String(payload.model);
+        updateModelSelect();
+      }
       setStatus(payload.model ? `model: ${payload.model}` : '', payload.model ? 'info' : '');
     } catch (error) {
       setStatus(String(error?.message || 'Ollama Chat 요청 실패'), 'error');
@@ -373,13 +448,14 @@ export function createOllamaChatPopup({
     });
   }
 
-  async function refreshReadiness() {
+  async function refreshReadiness(fresh = false) {
     if (!popup) return;
     serverReady = false;
     updateSendGate();
+    await refreshConnection();
     renderReadiness('<span class="ollama-chat-ready-msg">Ollama 상태 확인 중…</span>');
     let data = {};
-    try { data = (await fetchJson('/api/ollama/status?fresh=0')).payload; }
+    try { data = (await fetchOllamaStatus(win, {fresh})).payload; }
     catch (_) { data = {ok: false}; }
     if (!popup) return;
     const recheck = '<button type="button" class="ollama-chat-ready-btn secondary" data-act="recheck">다시 확인</button>';
@@ -387,6 +463,9 @@ export function createOllamaChatPopup({
       renderReadiness('<span class="ollama-chat-ready-msg err">백엔드에 연결할 수 없습니다.</span>' + recheck);
       return;
     }
+    installedModels = Array.isArray(data.models) ? data.models.map(item => String(item || '')).filter(Boolean) : [];
+    if (data.model) connModel = String(data.model);
+    updateModelSelect();
     if (!data.installed && !data.is_custom_endpoint) {
       renderReadiness('<span class="ollama-chat-ready-msg err">이 PC에 Ollama가 설치되어 있지 않습니다.</span>' + recheck);
       return;
@@ -448,6 +527,10 @@ export function createOllamaChatPopup({
         <span class="ollama-chat-title">Ollama · Chat</span>
         <button type="button" class="ollama-chat-x" aria-label="닫기">&times;</button>
       </div>
+      <div class="ollama-model-select-row ollama-chat-model-row">
+        <label class="ollama-model-select-label">Model</label>
+        <select class="ollama-model-select ollama-chat-model-select" aria-label="Ollama 모델 선택"></select>
+      </div>
       <div class="ollama-chat-bodywrap">
         <div class="ollama-chat-ready" hidden></div>
         <div class="ollama-chat-log"></div>
@@ -460,6 +543,9 @@ export function createOllamaChatPopup({
     document.body.appendChild(popup);
     pick('.ollama-chat-x')?.addEventListener('click', close);
     pick('.ollama-chat-send')?.addEventListener('click', send);
+    pick('.ollama-chat-model-select')?.addEventListener('change', event => {
+      void saveSelectedModel(event.target.value);
+    });
     pick('.ollama-chat-input')?.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();

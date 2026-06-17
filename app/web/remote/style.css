@@ -16506,6 +16506,38 @@ body.detached-module .mod-grid-3 {
 .ollama-assist-modelnote { font-size: 10.5px; color: var(--text-dim); }
 .ollama-assist-modelnote code { font-family: var(--font-mono); color: var(--text-muted); }
 .ollama-conn-remote { color: #e5b567; font-weight: 700; }
+.ollama-model-select-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.ollama-model-select-label {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 700;
+}
+.ollama-model-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 25px;
+  padding: 0 28px 0 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: rgba(0,0,0,0.28);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.ollama-model-select:focus {
+  outline: none;
+  border-color: rgba(150,170,255,0.8);
+}
+.ollama-model-select:disabled {
+  opacity: 0.68;
+  cursor: default;
+}
 /* 고급 연결(⚙) — 헤더 톱니 버튼 + 셀프호스팅 엔드포인트/모델 에디터 */
 .ollama-assistant-pop-cfg { border: none; background: transparent; color: var(--text-muted); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; flex: 0 0 auto; }
 .ollama-assistant-pop-cfg:hover { color: var(--text-primary); }
@@ -16638,6 +16670,11 @@ body.detached-module .mod-grid-3 {
   padding: 0 2px;
 }
 .ollama-chat-x:hover { color: var(--text-primary); }
+.ollama-chat-model-row {
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.12);
+}
 .ollama-chat-bodywrap {
   display: flex;
   flex-direction: column;

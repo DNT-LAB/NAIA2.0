@@ -40,8 +40,26 @@ _MAKE_SCENE_RE = re.compile(
     r"(만들|만들어|장면|구도|scene|compose|create|build|입고|잡는|붙잡|따르는|누워|해변|칼날|여전사)",
     re.IGNORECASE,
 )
+_VISUAL_DECLARATIVE_RE = re.compile(
+    r"(입은|입고|신고|들고|낀|쓴|멘|맨|매고|앉아|서\s*있|누운|누워|짓는|하는|머리를\s*한|"
+    r"wearing|standing|sitting|holding|lying)",
+    re.IGNORECASE,
+)
+_VISUAL_CONTENT_RE = re.compile(
+    r"(소녀|소년|여자|남자|캐릭터|머리|금발|붉은\s*머리|흰머리|백발|코트|조끼|셔츠|넥타이|"
+    r"재킷|자켓|부츠|스커트|드레스|후드티|비키니|수영복|피아노|촛불|칼날|검|해변|배경|"
+    r"girl|boy|woman|man|character|hair|blonde|red hair|white hair|coat|vest|shirt|necktie|"
+    r"jacket|boots|skirt|dress|hoodie|bikini|swimsuit|piano|candle|sword|blade|beach)",
+    re.IGNORECASE,
+)
+_QUESTION_RE = re.compile(
+    r"(\?|？|있나요|있을까|뭐|무엇|어떻게|어때|없나|추천|관련|how|what|why|when|where)",
+    re.IGNORECASE,
+)
 _SOURCE_OBJECT_RE = re.compile(r"(소스|코드|파일|repo|repository|저장소|source|code|file)", re.IGNORECASE)
 _MUTATION_ACTION_RE = re.compile(r"(수정|고쳐|패치|삭제|commit|push|write|delete|patch)", re.IGNORECASE)
+_EVENT_SEED_AXES = {"action", "pose", "object", "gaze", "expression", "background", "general"}
+_EVENT_EXCLUDED_AXES = {"clothing", "character"}
 
 _EVENT_STOP_TAGS = {
     "girl", "boy", "character", "scene", "composition", "pose", "hands", "dog",
@@ -290,9 +308,9 @@ class OllamaChatPipeline:
         gen_context: GenerationInfoContext,
     ) -> ClampedIntent:
         text = str(user_input or "")
-        lowered = text.lower()
         has_context = bool(gen_context.prompt or gen_context.tags or gen_context.metadata)
         context_ref = bool(_CONTEXT_REF_RE.search(text))
+        visual_scene = self._looks_visual_declarative(text)
         goal = str(raw.get("goal") or "chat").strip()
         if goal not in {
             "scene_compose", "clothes_combo", "event_lookup",
@@ -303,16 +321,20 @@ class OllamaChatPipeline:
             goal = "blocked"
         elif _CLOTHES_COMBO_RE.search(text):
             goal = "clothes_combo"
-        elif _MAKE_SCENE_RE.search(text) and not _RELATED_RE.search(text):
+        elif (_MAKE_SCENE_RE.search(text) or visual_scene) and not _RELATED_RE.search(text):
             goal = "scene_compose"
         elif _RELATED_RE.search(text):
             goal = "tag_discovery"
 
         subjects = self._normalize_subjects(raw.get("subjects"), text)
         if goal == "scene_compose" and not subjects:
-            subjects = [{"text": self._fallback_subject(text), "kind": "scene", "axis": "general", "confidence": 0.5}]
+            subject = self._fallback_subject(text)
+            if subject:
+                subjects = [{"text": subject, "kind": "scene", "axis": "general", "confidence": 0.5}]
         if goal == "tag_discovery" and not subjects:
-            subjects = [{"text": self._fallback_subject(text), "kind": "subject", "axis": "general", "confidence": 0.5}]
+            subject = self._fallback_subject(text)
+            if subject:
+                subjects = [{"text": subject, "kind": "subject", "axis": "general", "confidence": 0.5}]
 
         ambiguity = raw.get("ambiguity") if isinstance(raw.get("ambiguity"), dict) else {}
         level = str(ambiguity.get("level") or "low").lower()
@@ -389,6 +411,8 @@ class OllamaChatPipeline:
             return self._fallback_subject(user_input)
         value = re.sub(r"\b(thing|object|scene|prompt|tags?|recommendation|related)\b", " ", value)
         value = " ".join(value.split())
+        if len(value) > 40 or len(value.split()) > 7:
+            return ""
         return value[:80]
 
     def _fallback_subject(self, text: str) -> str:
@@ -404,8 +428,12 @@ class OllamaChatPipeline:
             return "bikini"
         if "섹시" in text:
             return "sexy"
+        if self._looks_visual_declarative(text):
+            return ""
         cleaned = re.sub(r"(관련|추천|프롬프트|태그|만들어줘|만들|장면|구도)", " ", text)
         cleaned = " ".join(cleaned.split())
+        if len(cleaned) > 40:
+            return ""
         return cleaned[:80]
 
     def _clarification_for(self, text: str) -> str:
@@ -414,7 +442,21 @@ class OllamaChatPipeline:
         return "어떤 방향으로 만들고 싶은지 한 가지 키워드만 더 알려주세요."
 
     def _looks_scene_like(self, text: str) -> bool:
-        return bool(_MAKE_SCENE_RE.search(str(text or "")))
+        text = str(text or "")
+        return bool(_MAKE_SCENE_RE.search(text) or self._looks_visual_declarative(text))
+
+    def _looks_visual_declarative(self, text: str) -> bool:
+        text = str(text or "").strip()
+        if not text:
+            return False
+        if _QUESTION_RE.search(text) or _RELATED_RE.search(text) or _CLOTHES_COMBO_RE.search(text):
+            return False
+        if _SOURCE_OBJECT_RE.search(text) and _MUTATION_ACTION_RE.search(text):
+            return False
+        content_hits = _VISUAL_CONTENT_RE.findall(text)
+        if _VISUAL_DECLARATIVE_RE.search(text) and len(content_hits) >= 2:
+            return True
+        return len(text) >= 28 and len(content_hits) >= 3
 
     def _translate(self, user_input: str) -> dict[str, Any]:
         mt = ""
@@ -551,12 +593,13 @@ class OllamaChatPipeline:
             out.append(text)
 
         for segment in segments or []:
+            axis = _norm(segment.get("axis"))
+            if axis in _EVENT_EXCLUDED_AXES or axis not in _EVENT_SEED_AXES:
+                continue
             for row in segment.get("tags") or []:
                 add(str(row.get("concept") or ""))
                 add(str(row.get("tag") or ""))
-        for tag in flat_tags:
-            add(tag)
-        joined = " ".join(out + [str(clean_english or "").lower()])
+        joined = " ".join(out).lower()
         if any(word in joined for word in ("tea", "teapot", "pour")):
             for item in ("teapot", "holding teapot", "serving", "pouring"):
                 add(item)
@@ -565,8 +608,6 @@ class OllamaChatPipeline:
                 add(item)
         if "beach" in joined:
             add("beach")
-        if "bikini" in joined or "swimsuit" in joined:
-            add("bikini")
         if "lying" in joined or "reclin" in joined:
             add("lying down")
         return out[:10]

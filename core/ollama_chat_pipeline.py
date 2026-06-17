@@ -239,7 +239,7 @@ class OllamaChatPipeline:
 
             self._stage(5, "최종")
             final_tags = self._final_tags(flat_tags, event_tags)
-            if self._is_near_empty(final_tags, event_tags, user_input):
+            if self._is_near_empty(final_tags, event_tags, user_input, clothes_tags):
                 return self._clarification(user_input, intent)
             return {
                 "handled": True,
@@ -288,15 +288,24 @@ class OllamaChatPipeline:
         final_tags: list[str],
         event_tags: list[dict[str, Any]],
         user_input: str = "",
+        clothes_tags: list[dict[str, Any]] | None = None,
     ) -> bool:
         event_set = {_norm(item.get("tag")) for item in event_tags or []}
         scene_meaningful = [
             tag for tag in final_tags or []
             if _norm(tag) not in event_set and self._is_meaningful_tag(tag)
         ]
-        if _VAGUE_REFERENTIAL_RE.search(str(user_input or "")) and len(scene_meaningful) <= 2:
+        # Clothing/event enrichment is real content: a scene with a grounded outfit
+        # or scenario is not "empty" even when the decompose itself comes back thin
+        # (E4B occasionally under-decomposes clothing-only scenes → don't clarify it).
+        has_enrichment = bool(event_tags) or bool(clothes_tags)
+        if (
+            _VAGUE_REFERENTIAL_RE.search(str(user_input or ""))
+            and len(scene_meaningful) <= 2
+            and not clothes_tags
+        ):
             return True
-        if event_tags:
+        if has_enrichment:
             return False
         meaningful: list[str] = []
         for tag in final_tags or []:

@@ -36,6 +36,7 @@ from core.intent_action_pipeline import (
     structured_output,
 )
 from core.ollama_assistant_service import OllamaAssistantService
+from core.ollama_chat_pipeline import OllamaChatPipeline
 from core.semantic_tag_discovery import ground_scene_segments, normalize_category_axis
 from core.web_session_context import WebSessionContext
 
@@ -200,6 +201,272 @@ def _event_combo_tags(
         return []
 
 
+def _event_combo_tag_stats(
+    context: WebSessionContext, rating: str, person_id: str, query: str, top_events: int,
+) -> list[dict[str, Any]]:
+    """Event co-occurrence rows with corroborating event support counts."""
+    try:
+        from app.backend.server.preset_services import event_preset_service
+        from core.ollama_tag_assist_service import is_generic_event_tag
+
+        svc = event_preset_service(context)
+        if svc.status().get("dataAvailability", {}).get("main") != "ready":
+            return []
+        boot = svc.bootstrap(rating_id=rating, person_id=person_id, search=query)
+        event_ids: list[str] = []
+        for cat in boot.get("categories", []):
+            for sub in cat.get("subcategories", []):
+                for ev in sub.get("events", []):
+                    eid = str(ev.get("id") or ev.get("eventTag") or "").strip()
+                    if eid and not is_generic_event_tag(eid):
+                        event_ids.append(eid)
+        weights: dict[str, dict[str, int]] = {}
+        for eid in event_ids[: max(1, int(top_events or 1))]:
+            det = svc.observed_combos({"ratingId": rating, "personId": person_id, "eventId": eid})
+            event = det.get("event") or {}
+            seen_in_event: set[str] = set()
+            for combo in (event.get("observedCombos") or [])[:12]:
+                cnt = int(combo.get("count") or 1)
+                for tag in combo.get("tags") or []:
+                    text = str(tag).strip()
+                    if not text:
+                        continue
+                    row = weights.setdefault(text, {"count": 0, "support": 0})
+                    row["count"] += cnt
+                    seen_in_event.add(text)
+            for tag in seen_in_event:
+                weights.setdefault(tag, {"count": 0, "support": 0})["support"] += 1
+        ranked = sorted(weights.items(), key=lambda item: item[1]["count"], reverse=True)
+        return [
+            {"tag": tag, "count": data["count"], "support": data["support"]}
+            for tag, data in ranked[:30]
+        ]
+    except Exception:
+        return []
+
+
+_SCENE_EVENT_STOP_TAGS = {
+    "girl",
+    "boy",
+    "character",
+    "scene",
+    "composition",
+    "pose",
+    "hands",
+    "dog",
+    "looking at viewer",
+    "standing",
+    "sitting",
+    "holding",
+}
+_SCENE_EVENT_STOP_PARTS = (
+    "pussy",
+    "futanari",
+    "genital",
+    "pantyshot",
+    "wardrobe malfunction",
+    "popped button",
+    "flying button",
+    "clothes lift",
+    "bikini top lift",
+    "bikini pull",
+    "bikini in mouth",
+    "clothes in mouth",
+    "tearing clothes",
+    "torn clothes",
+    "instrument on back",
+    "mouth hold",
+    "undone bikini",
+    "onto self",
+    "zettai ryouiki",
+    "uniform",
+    "blood from eyes",
+)
+
+
+def _event_label_text(event: dict[str, Any]) -> str:
+    return str(
+        event.get("labelKo")
+        or event.get("labelEn")
+        or event.get("label")
+        or event.get("tag")
+        or event.get("id")
+        or ""
+    ).strip()
+
+
+def _scene_event_query_candidates(flat_tags: list[str], segments: list[dict[str, Any]]) -> list[str]:
+    axis_rank = {
+        "action": 0,
+        "object": 1,
+        "background": 2,
+        "clothing": 3,
+        "expression": 4,
+        "body": 5,
+        "gaze": 6,
+        "general": 7,
+    }
+    tagged: list[tuple[int, str]] = []
+    for segment in segments or ():
+        axis = str(segment.get("axis") or "general").strip().lower()
+        rank = axis_rank.get(axis, 7)
+        for row in segment.get("tags") or ():
+            tag = str(row.get("tag") or "").strip().lower().replace("_", " ")
+            if tag:
+                tagged.append((rank, tag))
+            concept = str(row.get("concept") or "").strip().lower().replace("_", " ")
+            if concept and concept != tag:
+                tagged.append((rank, concept))
+    for tag in flat_tags or ():
+        text = str(tag or "").strip().lower().replace("_", " ")
+        if text:
+            tagged.append((5, text))
+    tagged.sort(key=lambda item: item[0])
+
+    out: list[str] = []
+
+    def add(value: str) -> None:
+        text = " ".join(str(value or "").strip().lower().replace("_", " ").split())
+        if not text or _HANGUL_RE.search(text) or text in _SCENE_EVENT_STOP_TAGS:
+            return
+        if text not in out:
+            out.append(text)
+
+    tag_set = {tag for _rank, tag in tagged}
+    tea_context = any("tea" in item or "teapot" in item for item in tag_set)
+    if tea_context:
+        add("teapot")
+        add("holding teapot")
+        add("serving")
+    if "falling" in tag_set and "holding" in tag_set:
+        add("catching")
+    if "warrior" in tag_set and ("holding" in tag_set or "catching" in tag_set):
+        add("holding sword")
+        add("sword")
+
+    catch_context = "falling" in tag_set and "holding" in tag_set
+    for _rank, tag in tagged:
+        if catch_context and tag == "falling":
+            continue
+        if tea_context and tag == "pouring":
+            continue
+        if "catch" in tag:
+            add("catching")
+        if "sword" in tag or "blade" in tag:
+            if any("catch" in item for item in tag_set):
+                add("catching")
+            add("holding sword")
+            add("sword")
+        if "tea" in tag or "teapot" in tag:
+            add("teapot")
+            add("holding teapot")
+            add("serving")
+        if tag in {"lying", "on back"} or "lying" in tag:
+            add("lying")
+            add("on back")
+        if tag in {"bikini", "swimsuit"}:
+            add("bikini")
+        if tag == "beach":
+            add("beach")
+        add(tag)
+        if len(out) >= 10:
+            break
+    return out[:10]
+
+
+def _scene_event_labels(
+    context: WebSessionContext,
+    *,
+    rating: str,
+    person_id: str,
+    query: str,
+    top_events: int,
+) -> list[str]:
+    try:
+        from app.backend.server.preset_services import event_preset_service
+        from core.ollama_tag_assist_service import is_generic_event_tag
+
+        svc = event_preset_service(context)
+        boot = svc.bootstrap(rating_id=rating, person_id=person_id, search=query)
+        labels: list[str] = []
+        for cat in boot.get("categories", []):
+            for sub in cat.get("subcategories", []):
+                for ev in sub.get("events", []):
+                    eid = str(ev.get("id") or ev.get("eventTag") or "").strip()
+                    if not eid or is_generic_event_tag(eid):
+                        continue
+                    label = _event_label_text(ev)
+                    if label and label not in labels:
+                        labels.append(label)
+                    if len(labels) >= top_events:
+                        return labels
+        return labels
+    except Exception:
+        return []
+
+
+def _scene_event_enrichment(
+    context: WebSessionContext,
+    *,
+    flat_tags: list[str],
+    segments: list[dict[str, Any]],
+    limit: int = 15,
+) -> dict[str, Any]:
+    try:
+        from app.backend.server.preset_services import event_preset_service
+        from core.ollama_tag_assist_service import is_generic_event_tag
+
+        status = event_preset_service(context).status()
+        if status.get("dataAvailability", {}).get("main") != "ready":
+            return {"eventTags": [], "eventLabels": [], "eventQuery": {}}
+        existing = {
+            " ".join(str(tag or "").strip().lower().replace("_", " ").split())
+            for tag in flat_tags or []
+        }
+        weights: dict[str, int] = {}
+        labels: list[str] = []
+        queries = _scene_event_query_candidates(flat_tags, segments)
+        ratings = ("s", "g")
+        person_id = "1girl_solo"
+        for query in queries[:8]:
+            for rating in ratings:
+                for label in _scene_event_labels(
+                    context,
+                    rating=rating,
+                    person_id=person_id,
+                    query=query,
+                    top_events=3,
+                ):
+                    if label not in labels:
+                        labels.append(label)
+                for tag, count in _event_combo_tags(context, rating, person_id, query, 4):
+                    norm = " ".join(str(tag or "").strip().lower().replace("_", " ").split())
+                    if (
+                        not norm
+                        or norm in existing
+                        or norm in _SCENE_EVENT_STOP_TAGS
+                        or any(part in norm for part in _SCENE_EVENT_STOP_PARTS)
+                        or is_generic_event_tag(norm)
+                    ):
+                        continue
+                    weights[norm] = weights.get(norm, 0) + int(count or 0)
+        ranked = sorted(weights.items(), key=lambda item: item[1], reverse=True)
+        return {
+            "eventTags": [
+                {"tag": tag, "count": count}
+                for tag, count in ranked[: max(0, int(limit or 15))]
+            ],
+            "eventLabels": labels[:8],
+            "eventQuery": {
+                "ratings": list(ratings),
+                "personId": person_id,
+                "queries": queries[:8],
+            },
+        }
+    except Exception:
+        return {"eventTags": [], "eventLabels": [], "eventQuery": {}}
+
+
 def get_assist_service(context: WebSessionContext) -> "Any":
     """OllamaTagAssistService를 context에 캐시·반환(라우트/생성 경로 공용 팩토리).
 
@@ -315,6 +582,28 @@ def register_ollama_routes(
             context.ollama_assistant_service = existing
         return existing
 
+    def chat_pipeline_service() -> OllamaChatPipeline:
+        existing = getattr(context, "ollama_chat_pipeline", None)
+        assistant = service()
+        assist = get_assist_service(context)
+        if isinstance(existing, OllamaChatPipeline):
+            existing.assistant = assistant
+            existing.assist = assist
+            return existing
+        existing = OllamaChatPipeline(
+            assistant=assistant,
+            assist_helpers=assist,
+            searcher=lambda query, limit, gen_context: (
+                [] if _HANGUL_RE.search(str(query or "")) else search_llm_tags(context, query, limit=limit)
+            ),
+            event_provider=lambda rating, person_id, query, top: _event_combo_tag_stats(
+                context, rating, person_id, query, top
+            ),
+            translator=_korean_to_english,
+        )
+        context.ollama_chat_pipeline = existing
+        return existing
+
     @app.get("/api/ollama/status")
     async def ollama_status(request: Request, fresh: int = 0):
         # 서브프로세스 프로브(+HTTP)라 스레드로 — 이벤트 루프 비차단.
@@ -365,7 +654,14 @@ def register_ollama_routes(
     async def ollama_dataset_download(request: Request):
         if not _is_local_request(request):
             return _loopback_only_response()
-        return await run_in_thread(lambda: _dataset_service().start(main_only=True))
+        force = False
+        try:
+            payload = await request.json()
+            if isinstance(payload, dict):
+                force = bool(payload.get("force"))
+        except Exception:
+            force = False
+        return await run_in_thread(lambda: _dataset_service().start(main_only=True, force=force))
 
     @app.post("/api/ollama/pull/cancel")
     async def ollama_pull_cancel(request: Request):
@@ -733,6 +1029,13 @@ def register_ollama_routes(
         except Exception:
             return {"active": False}
 
+    @app.get("/api/ollama/chat/progress")
+    async def ollama_chat_progress():
+        try:
+            return chat_pipeline_service().progress()
+        except Exception:
+            return {"active": False}
+
     @app.post("/api/ollama/assist")
     async def ollama_assist(request: Request):
         # 추론은 생성과 같은 제품 기능 — 원격 세션(폰/터널)에도 공개.
@@ -787,6 +1090,33 @@ def register_ollama_routes(
             return {"ok": False, "type": "chat", "error": "메시지를 입력하세요."}
 
         def _orchestrate() -> dict[str, Any]:
+            fallback_intent = extract_intent_frame(latest_user, gen_context)
+            fallback_decision = decide_intent_route(fallback_intent, latest_user, gen_context)
+            if fallback_decision.route == ROUTE_BLOCKED:
+                blocked_run = IntentActionPipeline(
+                    searcher=_chat_tool_searcher,
+                    journal_path=None,
+                    translator=_korean_to_english,
+                ).run(latest_user, gen_context, intent=fallback_intent, decision=fallback_decision)
+                return {
+                    "ok": True,
+                    "type": "blocked",
+                    "message": blocked_run.final_output,
+                    "anchor": latest_user,
+                    "decision": blocked_run.decision.summary(),
+                    "structured_output": structured_output(blocked_run),
+                }
+            stepwise_intent = None
+            if not _skip_llm_gate_for_confident_out_of_scope(latest_user, fallback_decision):
+                stepwise = chat_pipeline_service().run(
+                    latest_user,
+                    gen_context=gen_context,
+                    history=messages,
+                )
+                if isinstance(stepwise, dict) and stepwise.get("handled"):
+                    stepwise.setdefault("anchor", latest_user)
+                    return stepwise
+                stepwise_intent = stepwise.get("intent") if isinstance(stepwise, dict) else None
             intent, decision = _chat_gate(latest_user, gen_context, messages)
             pipeline = IntentActionPipeline(
                 searcher=_chat_tool_searcher,
@@ -831,6 +1161,12 @@ def register_ollama_routes(
                             if tag and tag not in seen_flat:
                                 seen_flat.add(tag)
                                 flat_tags.append(tag)
+                    event_enrichment = _scene_event_enrichment(
+                        context,
+                        flat_tags=flat_tags,
+                        segments=segments,
+                        limit=15,
+                    )
                     return {
                         "ok": True,
                         "type": "scene",
@@ -838,6 +1174,9 @@ def register_ollama_routes(
                         "anchor": latest_user,
                         "segments": segments,
                         "flatTags": flat_tags,
+                        "eventTags": event_enrichment.get("eventTags") or [],
+                        "eventLabels": event_enrichment.get("eventLabels") or [],
+                        "eventQuery": event_enrichment.get("eventQuery") or {},
                         "decision": decision,
                         "structured_output": structured_output(run),
                     }
@@ -854,6 +1193,7 @@ def register_ollama_routes(
                         "message": f"{run.intent.subject} 의상과 어울리는 조합입니다.",
                         "combos": combos,
                         "anchor": latest_user,
+                        **({"intent": stepwise_intent} if stepwise_intent else {}),
                         "decision": decision,
                         "structured_output": structured_output(run),
                     }
@@ -882,6 +1222,7 @@ def register_ollama_routes(
                         "message": run.final_output,
                         "anchor": latest_user,
                         "tool_empty": True,
+                        **({"intent": stepwise_intent} if stepwise_intent else {}),
                         "decision": decision,
                         "structured_output": structured_output(run),
                     }
@@ -891,6 +1232,7 @@ def register_ollama_routes(
                     "message": _chat_chips_message(run, latest_user, gen_context),
                     "anchor": latest_user,
                     "chips": chips,
+                    **({"intent": stepwise_intent} if stepwise_intent else {}),
                     "decision": decision,
                     "structured_output": structured_output(run),
                 }
@@ -907,6 +1249,7 @@ def register_ollama_routes(
                 "model": str(chat_result.get("model") or service().default_model),
                 "error": str(chat_result.get("error") or ""),
                 "anchor": latest_user,
+                **({"intent": stepwise_intent} if stepwise_intent else {}),
                 "decision": decision,
                 "structured_output": structured_output(run),
             }

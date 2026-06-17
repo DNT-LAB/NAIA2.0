@@ -16699,7 +16699,8 @@ body.detached-module .mod-grid-3 {
 }
 .ollama-chat-status.error { color: #e09098; }
 .ollama-chat-status.info { color: var(--text-muted); }
-.ollama-chat-ready {
+.ollama-chat-ready,
+.ollama-chat-dataset {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -16710,10 +16711,35 @@ body.detached-module .mod-grid-3 {
   border-radius: 8px;
   background: rgba(120, 95, 30, 0.18);
 }
-.ollama-chat-ready[hidden] { display: none; }
+.ollama-chat-dataset {
+  border-color: rgba(130,150,255,0.34);
+  background: rgba(96,120,255,0.09);
+}
+.ollama-chat-ready[hidden],
+.ollama-chat-dataset[hidden] { display: none; }
 .ollama-chat-ready-msg { flex: 1 1 auto; font-size: 11px; line-height: 1.4; color: var(--text-primary); }
 .ollama-chat-ready-msg.warn { color: #e0c070; }
 .ollama-chat-ready-msg.err { color: #e09098; }
+.ollama-chat-dataset-meter {
+  flex: 1 1 90px;
+  height: 6px;
+  min-width: 80px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.26);
+  overflow: hidden;
+}
+.ollama-chat-dataset-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: rgba(96,120,255,0.82);
+}
+.ollama-chat-dataset-mb {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
 .ollama-chat-ready-btn {
   flex: 0 0 auto;
   height: 24px;
@@ -16803,6 +16829,24 @@ body.detached-module .mod-grid-3 {
   margin: 5px 0 0 2px;
 }
 .ollama-chat-scene-seg .ollama-chat-chips { padding: 4px 0 2px; }
+.ollama-chat-event-section {
+  margin: 4px 8px 0;
+  padding: 7px 0 2px;
+  border-top: 1px solid rgba(130,150,255,0.16);
+}
+.ollama-chat-event-title {
+  color: var(--text-primary);
+  font-size: 10.5px;
+  font-weight: 700;
+  margin: 0 0 2px 2px;
+}
+.ollama-chat-event-caption {
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.35;
+  margin: 0 0 2px 2px;
+}
+.ollama-chat-event-section .ollama-chat-chips { padding: 4px 0 2px; }
 .ollama-chat-combo {
   display: flex;
   flex-wrap: wrap;
@@ -16839,6 +16883,20 @@ body.detached-module .mod-grid-3 {
 }
 .ollama-chat-copyall-btn:hover:not(:disabled) { background: rgba(96,120,255,0.32); }
 .ollama-chat-copyall-btn:disabled { opacity: 0.5; cursor: default; }
+.ollama-chat-scene-note { font-size: 11px; color: var(--text-secondary, #b9c0d4); padding: 4px 10px 0; line-height: 1.4; }
+.ollama-chat-scene-en { color: var(--text-dim, #8089a3); font-style: italic; }
+.ollama-chat-clarify-examples { display: flex; flex-direction: column; gap: 4px; padding: 4px 10px 8px; }
+.ollama-chat-clarify-example {
+  text-align: left;
+  padding: 5px 9px;
+  border: 1px solid rgba(130,150,255,0.30);
+  border-radius: 6px;
+  background: rgba(96,120,255,0.10);
+  color: var(--text-primary, #e6e9f2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ollama-chat-clarify-example:hover { background: rgba(96,120,255,0.22); }
 .ollama-chat-chip.generation-info-tag {
   display: inline-flex;
   align-items: center;

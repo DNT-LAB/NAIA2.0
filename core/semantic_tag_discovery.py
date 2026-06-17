@@ -171,6 +171,30 @@ _SCENE_FUZZY_FRANCHISE_MARKERS = frozenset({
     "raimun",
 })
 
+_SCENE_CONCEPT_ALIASES = {
+    "laying down": "lying",
+    "lay down": "lying",
+    "lying down": "lying",
+    "reclining": "lying",
+    "laying": "lying",
+    "tea cup": "teacup",
+    "maid outfit": "maid",
+    "maid uniform": "maid",
+    "catching blade": "catching",
+    "grabbing blade": "grabbing",
+    "holding blade": "holding sword",
+}
+
+
+def normalize_scene_concept(value: Any) -> str:
+    """Canonicalize LLM scene concepts before index lookup."""
+    concept = _norm_tag(value)
+    if not concept:
+        return ""
+    if concept in _SCENE_CONCEPT_ALIASES:
+        return _SCENE_CONCEPT_ALIASES[concept]
+    return concept
+
 
 def ground_scene_segments(
     segments: Iterable[dict[str, Any]],
@@ -200,7 +224,7 @@ def ground_scene_segments(
             continue
         tags: list[dict[str, Any]] = []
         for concept_raw in concepts_raw:
-            concept = _norm_tag(concept_raw)
+            concept = normalize_scene_concept(concept_raw)
             if not concept or _HANGUL_RE.search(concept):
                 continue
             try:

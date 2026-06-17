@@ -1063,6 +1063,28 @@ class OllamaTagAssistService:
                 pass
         return text, original
 
+    def translate_to_english(self, text: str) -> tuple[str, str]:
+        """Public wrapper for Chat pipelines that need Assist's translator lane."""
+        return self._to_english(text)
+
+    def validate_tag(self, normalized: str) -> dict[str, Any] | None:
+        """Public wrapper around the grounded exact tag validator."""
+        return self._validate_tag(normalized)
+
+    def recover_tag(
+        self, normalized: str, seen: set[str], *, max_rating: str = "e",
+    ) -> dict[str, Any] | None:
+        """Public wrapper around the no-LLM tag recovery path."""
+        return self._recover_tag(normalized, seen, max_rating=max_rating)
+
+    def collapse_variants(self, items: list[dict[str, Any]], protect: set[str]) -> list[dict[str, Any]]:
+        """Public wrapper for Assist's subset-variant collapse."""
+        return _collapse_variants(items, protect)
+
+    def tag_allowed(self, tag_norm: str, max_rating: str) -> bool:
+        """Public wrapper for rating policy checks."""
+        return _tag_allowed(tag_norm, max_rating)
+
     def _unload_model(self, model: str) -> None:
         """파이프라인 종료 후 모델을 VRAM에서 즉시 내린다(keep_alive=0).
         ComfyUI 등과 VRAM을 공유하는 사용자 보호 — 한 번 변환 후 점유 해제.

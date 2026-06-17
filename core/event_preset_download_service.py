@@ -43,6 +43,7 @@ class EventPresetDownloadService:
         self._cancel = Event()
         self._thread: Thread | None = None
         self._main_only = False  # main(조합)만 받기 — 어시스트 B 참조용
+        self._force_main = False
         self._state: dict[str, Any] = {
             "active": False,
             "phase": "idle",
@@ -65,14 +66,14 @@ class EventPresetDownloadService:
             state["availability"] = {}
         return state
 
-    def start(self, *, main_only: bool = False) -> dict[str, Any]:
+    def start(self, *, main_only: bool = False, force: bool = False) -> dict[str, Any]:
         # main_only=True → 조합 데이터(main, ~385MB)만. 썸네일(갤러리용 ~434MB)은
         # 건너뛴다. Ollama 어시스트의 B 실조합 참조는 main만 필요.
         status = self._status_provider()
         availability = status.get("dataAvailability", {}) if isinstance(status, dict) else {}
         main_ready = availability.get("main") == "ready"
         thumb_ready = availability.get("thumbnails") == "ready"
-        if main_ready and (main_only or thumb_ready):
+        if not force and main_ready and (main_only or thumb_ready):
             return self._set_state(
                 active=False,
                 phase="complete",
@@ -89,6 +90,7 @@ class EventPresetDownloadService:
                 return dict(self._state)
             self._cancel.clear()
             self._main_only = bool(main_only)
+            self._force_main = bool(force)
             self._state.update({
                 "active": True,
                 "phase": "main",
@@ -116,7 +118,8 @@ class EventPresetDownloadService:
         main_path = self.data_root / "event_preset" / "naia_prompt_preset"
         thumb_path = self.thumbnail_root / "event_preset_thumbnail"
         try:
-            if not main_path.exists() or not self._validate_event_preset_zip(main_path):
+            force_main = bool(self._force_main)
+            if force_main or not main_path.exists() or not self._validate_event_preset_zip(main_path):
                 self._download_file(
                     phase="main",
                     target_path=main_path,

@@ -20,6 +20,7 @@ export function createOllamaChatPopup({
   let busy = false;
   let serverReady = false;
   let eventChecked = false;
+  let eventPollTimer = null;
   let connModel = DEFAULT_MODEL;
   let connEndpointBase = '';
   let canConfigure = false;
@@ -32,6 +33,7 @@ export function createOllamaChatPopup({
 
   function close() {
     if (typeof hideTagInfo === 'function') hideTagInfo();
+    stopEventDatasetPolling();
     if (onResize) {
       win.removeEventListener('resize', onResize);
       onResize = null;
@@ -89,6 +91,48 @@ export function createOllamaChatPopup({
     if (!el) return;
     el.className = 'ollama-chat-status' + (type ? ' ' + type : '');
     el.textContent = text || '';
+  }
+
+  function eventMainAvailability(payload) {
+    const availability = payload?.availability || payload?.dataAvailability || {};
+    return String(availability.main || payload?.main || '').toLowerCase();
+  }
+
+  function stopEventDatasetPolling() {
+    if (eventPollTimer) {
+      win.clearInterval(eventPollTimer);
+      eventPollTimer = null;
+    }
+  }
+
+  function renderDatasetState(html) {
+    const el = pick('.ollama-chat-dataset');
+    if (!el) return;
+    if (!html) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    el.hidden = false;
+    el.innerHTML = html;
+    el.querySelectorAll('[data-dataset-act]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.datasetAct === 'download') void startEventDatasetDownload();
+        else void checkEventDatasetOnce({force: true});
+      });
+    });
+  }
+
+  function renderDatasetDownload(payload) {
+    const percent = Math.max(0, Math.min(100, Number(payload?.percent) || 0));
+    const mb = payload?.total_mb
+      ? `${Number(payload.downloaded_mb || 0).toFixed(1)} / ${Number(payload.total_mb || 0).toFixed(1)} MB`
+      : `${Number(payload?.downloaded_mb || 0).toFixed(1)} MB`;
+    const msg = escHtml(String(payload?.message || '이벤트 데이터를 받는 중입니다.'));
+    renderDatasetState(`
+      <span class="ollama-chat-ready-msg">${msg}</span>
+      <span class="ollama-chat-dataset-meter"><span style="width:${percent}%"></span></span>
+      <span class="ollama-chat-dataset-mb">${escHtml(mb)}</span>`);
   }
 
   function updateModelSelect() {
@@ -280,6 +324,18 @@ export function createOllamaChatPopup({
         const panel = document.createElement('div');
         panel.className = 'ollama-chat-chip-panel';
         panel.appendChild(makePanelHead(index, `scene: ${String(msg.anchor || '').slice(0, 64)}`));
+        if (msg.note) {
+          const note = document.createElement('div');
+          note.className = 'ollama-chat-scene-note';
+          note.textContent = msg.note;
+          panel.appendChild(note);
+        }
+        if (msg.cleanEnglish) {
+          const ce = document.createElement('div');
+          ce.className = 'ollama-chat-scene-note ollama-chat-scene-en';
+          ce.textContent = '→ ' + msg.cleanEnglish;
+          panel.appendChild(ce);
+        }
         msg.segments.forEach(seg => {
           const row = document.createElement('div');
           row.className = 'ollama-chat-scene-seg';
@@ -299,7 +355,33 @@ export function createOllamaChatPopup({
         const sceneFlat = (Array.isArray(msg.flatTags) && msg.flatTags.length)
           ? msg.flatTags
           : msg.segments.flatMap(s => (Array.isArray(s.tags) ? s.tags : []).map(t => t?.tag));
-        panel.appendChild(makeCopyAllRow(sceneFlat));
+        const eventTags = Array.isArray(msg.eventTags) ? msg.eventTags : [];
+        if (eventTags.length) {
+          const ev = document.createElement('div');
+          ev.className = 'ollama-chat-event-section';
+          const evTitle = document.createElement('div');
+          evTitle.className = 'ollama-chat-event-title';
+          evTitle.textContent = '관련 이벤트';
+          ev.appendChild(evTitle);
+          if (Array.isArray(msg.eventLabels) && msg.eventLabels.length) {
+            const cap = document.createElement('div');
+            cap.className = 'ollama-chat-event-caption';
+            cap.textContent = msg.eventLabels.slice(0, 4).join(' · ');
+            ev.appendChild(cap);
+          }
+          const chips = document.createElement('div');
+          chips.className = 'ollama-chat-chips';
+          eventTags.forEach(t => {
+            const tag = String(t?.tag || '').trim();
+            if (tag) chips.appendChild(makeChip(tag, {count: t.count, match: 'event'}));
+          });
+          ev.appendChild(chips);
+          panel.appendChild(ev);
+        }
+        const copyTags = (Array.isArray(msg.finalTags) && msg.finalTags.length)
+          ? msg.finalTags
+          : sceneFlat.concat(eventTags.map(t => t?.tag).filter(Boolean));
+        panel.appendChild(makeCopyAllRow(copyTags));
         item.appendChild(panel);
       }
       if (msg.role === 'assistant' && msg.type === 'combos' && Array.isArray(msg.combos) && msg.combos.length && !msg.dismissed) {
@@ -325,6 +407,22 @@ export function createOllamaChatPopup({
           panel.appendChild(card);
         });
         item.appendChild(panel);
+      }
+      if (msg.role === 'assistant' && msg.type === 'clarification' && Array.isArray(msg.examples) && msg.examples.length) {
+        const ex = document.createElement('div');
+        ex.className = 'ollama-chat-clarify-examples';
+        msg.examples.forEach(q => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ollama-chat-clarify-example';
+          b.textContent = q;
+          b.addEventListener('click', () => {
+            const inputEl = pick('.ollama-chat-input');
+            if (inputEl) { inputEl.value = q; inputEl.focus(); }
+          });
+          ex.appendChild(b);
+        });
+        item.appendChild(ex);
       }
       log.appendChild(item);
     });
@@ -371,7 +469,15 @@ export function createOllamaChatPopup({
     busy = true;
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending'; }
     setStatus('Ollama 응답을 기다리는 중입니다.', 'info');
+    let progressTimer = null;
     try {
+      progressTimer = win.setInterval(async () => {
+        if (!busy) return;
+        try {
+          const pr = await (await win.fetch('/api/ollama/chat/progress')).json();
+          if (pr && pr.active && pr.label && busy) setStatus(`${pr.label} … (${pr.step}/${pr.total})`, 'info');
+        } catch (_) {}
+      }, 700);
       const response = await win.fetch('/api/ollama/chat', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -410,6 +516,8 @@ export function createOllamaChatPopup({
           anchor: String(payload.anchor || text),
           segments: Array.isArray(payload.segments) ? payload.segments : [],
           flatTags: Array.isArray(payload.flatTags) ? payload.flatTags : [],
+          eventTags: Array.isArray(payload.eventTags) ? payload.eventTags : [],
+          eventLabels: Array.isArray(payload.eventLabels) ? payload.eventLabels : [],
         });
       } else if (payload.type === 'combos') {
         messages.push({
@@ -418,6 +526,28 @@ export function createOllamaChatPopup({
           content: String(payload.message || ''),
           subject: String(payload.subject || ''),
           combos: Array.isArray(payload.combos) ? payload.combos : [],
+        });
+      } else if (payload.type === 'scene_pipeline') {
+        messages.push({
+          role: 'assistant',
+          type: 'scene',
+          content: String(payload.message || ''),
+          anchor: String((payload.translation && payload.translation.source) || payload.anchor || text),
+          segments: Array.isArray(payload.segments) ? payload.segments : [],
+          eventTags: Array.isArray(payload.eventTags) ? payload.eventTags : [],
+          eventLabels: Array.isArray(payload.eventLabels) ? payload.eventLabels : [],
+          finalTags: Array.isArray(payload.finalTags) ? payload.finalTags : [],
+          note: String((payload.intent && payload.intent.interpretation_note) || ''),
+          cleanEnglish: String((payload.translation && payload.translation.cleanEnglish) || ''),
+        });
+      } else if (payload.type === 'clarification') {
+        messages.push({
+          role: 'assistant',
+          type: 'clarification',
+          content: String(payload.question || '조금 더 구체적으로 알려주실 수 있나요?'),
+          examples: Array.isArray(payload.examples)
+            ? payload.examples.map(e => String(e || '').trim()).filter(Boolean)
+            : [],
         });
       } else {
         messages.push({role: 'assistant', type: 'chat', content: String(payload.message || '')});
@@ -431,6 +561,7 @@ export function createOllamaChatPopup({
     } catch (error) {
       setStatus(String(error?.message || 'Ollama Chat 요청 실패'), 'error');
     } finally {
+      if (progressTimer) win.clearInterval(progressTimer);
       busy = false;
       if (sendBtn) sendBtn.textContent = 'Send';
       updateSendGate();
@@ -519,17 +650,55 @@ export function createOllamaChatPopup({
     await refreshReadiness();
   }
 
-  async function checkEventDatasetOnce() {
-    // 이벤트 데이터셋 1회 체크(정보성). 미설치여도 채팅/의상조합엔 무영향 — 이벤트 도구
-    // 신설 시 이 상태로 게이트한다. GET /api/ollama/dataset 재사용(Assist와 동일).
-    if (eventChecked) return;
+  async function checkEventDatasetOnce({force = false} = {}) {
+    if (eventChecked && !force) return;
     eventChecked = true;
+    let ds = {};
     try {
-      const ds = (await fetchJson('/api/ollama/dataset')).payload;
-      if (ds && ds.ready === false) {
-        win.console?.info?.('[Ollama Chat] event preset dataset not installed — event features disabled until downloaded.');
+      ds = (await fetchJson('/api/ollama/dataset')).payload;
+    } catch (_) {
+      renderDatasetState('');
+      return;
+    }
+    if (!popup) return;
+    if (ds && ds.active) {
+      renderDatasetDownload(ds);
+      if (!eventPollTimer) {
+        eventPollTimer = win.setInterval(() => { void checkEventDatasetOnce({force: true}); }, 1200);
       }
-    } catch (_) {}
+      return;
+    }
+    stopEventDatasetPolling();
+    if (eventMainAvailability(ds) === 'ready') {
+      renderDatasetState('');
+      return;
+    }
+    const error = ds?.error ? `<span class="ollama-chat-ready-msg err">${escHtml(ds.error)}</span>` : '';
+    renderDatasetState(`
+      ${error || '<span class="ollama-chat-ready-msg warn">이벤트 데이터가 없어 장면 자동 보강이 비활성화됩니다.</span>'}
+      <button type="button" class="ollama-chat-ready-btn" data-dataset-act="download">이벤트 데이터 받기</button>
+      <button type="button" class="ollama-chat-ready-btn secondary" data-dataset-act="recheck">다시 확인</button>`);
+  }
+
+  async function startEventDatasetDownload() {
+    renderDatasetState('<span class="ollama-chat-ready-msg">이벤트 데이터 다운로드 시작 중…</span>');
+    try {
+      const result = (await fetchJson('/api/ollama/dataset', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({force: true}),
+      })).payload;
+      if (result && result.error) {
+        renderDatasetState(`<span class="ollama-chat-ready-msg err">${escHtml(result.error)}</span>`);
+        return;
+      }
+      renderDatasetDownload(result || {});
+    } catch (_) {
+      renderDatasetState('<span class="ollama-chat-ready-msg err">이벤트 데이터 다운로드를 시작하지 못했습니다.</span>');
+      return;
+    }
+    stopEventDatasetPolling();
+    eventPollTimer = win.setInterval(() => { void checkEventDatasetOnce({force: true}); }, 1200);
   }
 
   function open() {
@@ -554,6 +723,7 @@ export function createOllamaChatPopup({
       </div>
       <div class="ollama-chat-bodywrap">
         <div class="ollama-chat-ready" hidden></div>
+        <div class="ollama-chat-dataset" hidden></div>
         <div class="ollama-chat-log"></div>
         <textarea class="ollama-chat-input" rows="3" placeholder="현재 프롬프트/결과에 대해 질문..."></textarea>
         <div class="ollama-chat-actions">

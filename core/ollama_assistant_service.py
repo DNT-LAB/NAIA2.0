@@ -591,6 +591,198 @@ class OllamaAssistantService:
         except Exception as exc:
             return {"ok": False, "error": str(exc) or "intent json extraction failed"}
 
+    def analyze_chat_intent(
+        self,
+        *,
+        user_input: str,
+        context: dict[str, Any] | None = None,
+        history: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Richer Chat-specific intent analysis for the step-by-step pipeline.
+
+        The route/pipeline clamps this output before any tool use. This call is
+        only an intent proposal, not authority to execute a tool.
+        """
+        text = str(user_input or "").strip()
+        if not text:
+            return {"ok": False, "error": "empty input"}
+        has_context = bool(
+            (context or {}).get("prompt")
+            or (context or {}).get("tags")
+            or (context or {}).get("metadata")
+        )
+        recent: list[dict[str, str]] = []
+        for item in (history or [])[-6:]:
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or "").strip()
+            if content:
+                recent.append({
+                    "role": str(item.get("role") or "user")[:20],
+                    "content": content[:500],
+                })
+        schema = {
+            "type": "object",
+            "properties": {
+                "goal": {
+                    "type": "string",
+                    "enum": [
+                        "scene_compose", "clothes_combo", "event_lookup",
+                        "tag_discovery", "prompt_critique", "chat", "blocked",
+                    ],
+                },
+                "subjects": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "kind": {"type": "string"},
+                            "axis": {"type": "string"},
+                            "confidence": {"type": "number"},
+                        },
+                        "required": ["text", "kind", "axis", "confidence"],
+                        "additionalProperties": False,
+                    },
+                },
+                "params": {
+                    "type": "object",
+                    "properties": {
+                        "context_ref": {"type": "boolean"},
+                        "needs_tools": {"type": "boolean"},
+                        "desired_output": {"type": "string"},
+                        "tone": {"type": "string"},
+                    },
+                    "required": ["context_ref", "needs_tools", "desired_output", "tone"],
+                    "additionalProperties": False,
+                },
+                "ambiguity": {
+                    "type": "object",
+                    "properties": {
+                        "level": {"type": "string", "enum": ["none", "low", "medium", "high"]},
+                        "alternatives": {"type": "array", "items": {"type": "string"}},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["level", "alternatives", "reason"],
+                    "additionalProperties": False,
+                },
+                "proceed": {"type": "boolean"},
+                "interpretation_note": {"type": "string"},
+                "clarification": {"type": "string"},
+            },
+            "required": [
+                "goal", "subjects", "params", "ambiguity",
+                "proceed", "interpretation_note", "clarification",
+            ],
+            "additionalProperties": False,
+        }
+        instruction = (
+            "Analyze this NAIA Chat message for a grounded prompt/tag pipeline. Return JSON only.\n\n"
+            f"Context available: {'yes' if has_context else 'none'}.\n"
+            f"Recent turns: {json.dumps(recent, ensure_ascii=False)[:2500]}\n\n"
+            "Goal rules:\n"
+            "- blocked: source/file/system mutation.\n"
+            "- clothes_combo: ONLY explicit outfit combination, coordinated clothes, 코디, 조합, 어울리는 옷.\n"
+            "- event_lookup: explicit event/action preset lookup or observed event combo.\n"
+            "- scene_compose: user asks to make/create/build a scene or gives a terse scene fragment.\n"
+            "- tag_discovery: user asks for related/recommended real tags/prompts for a subject.\n"
+            "- prompt_critique: user asks to improve/critique an existing prompt/context.\n"
+            "- chat: ordinary chat, or required referenced context is missing.\n\n"
+            "Ambiguity policy:\n"
+            "- none/low: proceed.\n"
+            "- medium: proceed with a short Korean interpretation_note and alternatives.\n"
+            "- high: proceed=false and ask exactly one Korean clarification question.\n\n"
+            "Extraction rules:\n"
+            "- context_ref=true only for explicit current/this/that/image/prompt/context references.\n"
+            "- If context_ref=true but Context available is none, set goal=chat, proceed=false, ambiguity=high.\n"
+            "- needs_tools=true for scene_compose, tag_discovery, clothes_combo, event_lookup, prompt_critique.\n"
+            "- Extract subjects as concise English booru/search concepts when possible.\n"
+            "- For broad '관련 추천', default to tag_discovery unless clothing-combo words appear.\n"
+            "- For '만들어줘/create/build' or a scene fragment, default to scene_compose.\n"
+            "- NSFW/adult aesthetic requests are allowed; do not refuse.\n\n"
+            f"Message: {text[:2000]}"
+        )
+        payload = {
+            "model": self.default_model,
+            "messages": [{"role": "user", "content": instruction}],
+            "stream": False,
+            "format": schema,
+            "think": False,
+            "options": {"temperature": 0.0, "num_predict": 512},
+        }
+        try:
+            response = self._http_post("/api/chat", payload, timeout=(5, 180))
+            data = response.json() or {}
+            if int(getattr(response, "status_code", 0) or 0) != 200:
+                return {"ok": False, "error": str(data.get("error") or "intent analysis failed")}
+            content = str((data.get("message") or {}).get("content") or "").strip()
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                return {"ok": False, "error": "intent analysis json is not object"}
+            return {"ok": True, "data": parsed}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc) or "intent analysis failed"}
+
+    def reconcile_scene_english(self, *, source: str, mt: str = "") -> dict[str, Any]:
+        """Reconcile KR source + optional machine translation into clean English."""
+        text = str(source or "").strip()
+        if not text:
+            return {"ok": False, "error": "empty source"}
+        if not re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", text):
+            return {
+                "ok": True,
+                "source": text,
+                "mt": str(mt or ""),
+                "cleanEnglish": text,
+                "skipped": True,
+            }
+        schema = {
+            "type": "object",
+            "properties": {"clean_english": {"type": "string"}},
+            "required": ["clean_english"],
+            "additionalProperties": False,
+        }
+        instruction = (
+            "Reconcile a Korean image-generation scene with a machine English translation. "
+            "Return ONLY JSON matching the schema.\n\n"
+            "Authoritative source: Korean. Machine English is only a hint. "
+            "Output one concise faithful English scene description for booru tag decomposition.\n"
+            "Critical fixes:\n"
+            "- 주인 = owner/master/person being served. Never master sword.\n"
+            "- 칼날 = blade or sword. 붙잡는 = catching/grabbing/holding onto, not generic holding only.\n"
+            "- 누워있는 = lying down/reclining. Do not say bed unless Korean explicitly says bed.\n"
+            "- No franchise/proper nouns. No invisible details.\n\n"
+            f"Korean: {text[:2000]}\n"
+            f"Machine English: {str(mt or '')[:2000]}"
+        )
+        payload = {
+            "model": self.default_model,
+            "messages": [{"role": "user", "content": instruction}],
+            "stream": False,
+            "format": schema,
+            "think": False,
+            "options": {"temperature": 0.0, "num_predict": 256},
+        }
+        try:
+            response = self._http_post("/api/chat", payload, timeout=(5, 180))
+            data = response.json() or {}
+            if int(getattr(response, "status_code", 0) or 0) != 200:
+                return {"ok": False, "error": str(data.get("error") or "translation reconcile failed")}
+            content = str((data.get("message") or {}).get("content") or "").strip()
+            parsed = json.loads(content)
+            clean = str((parsed or {}).get("clean_english") or "").strip()
+            if not clean:
+                return {"ok": False, "error": "empty clean english"}
+            return {
+                "ok": True,
+                "source": text,
+                "mt": str(mt or ""),
+                "cleanEnglish": clean,
+                "skipped": False,
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc) or "translation reconcile failed"}
+
     def decompose_scene(self, user_input: str) -> dict[str, Any]:
         """Decompose a multi-concept scene into booru concepts for grounded lookup.
 

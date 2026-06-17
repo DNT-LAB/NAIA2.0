@@ -803,7 +803,7 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
     console.error('Failed to initialize ollama assistant popup module', error);
   });
 let ollamaChatPopup = null;
-const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260617-pipeline')
+const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260617-clothes')
   .then(({createOllamaChatPopup}) => {
     ollamaChatPopup = createOllamaChatPopup({
       document, window, showToast, escHtml,

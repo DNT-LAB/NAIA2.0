@@ -21,6 +21,7 @@ from core.semantic_tag_discovery import ground_scene_segments, normalize_scene_c
 
 SearchFn = Callable[[str, int, GenerationInfoContext], list[dict[str, Any]]]
 EventProvider = Callable[[str, str, str, int], list[dict[str, Any]]]
+ClothesProvider = Callable[[str, int], list[dict[str, Any]]]
 
 _HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 _CONTEXT_REF_RE = re.compile(
@@ -85,6 +86,32 @@ _CATCHING_INCOMPATIBLE_PARTS = (
     "drawing", "unsheath", "sheathed", "sheath", "pointing", "licking",
     "left-handed", "suicide", "to throat", "sword writing",
 )
+_CLOTHES_STOP_TAGS = {
+    "1girl", "1boy", "solo", "girl", "boy", "woman", "man", "person",
+    "male", "female", "standing", "sitting", "lying", "looking at viewer",
+    "looking back", "looking ahead", "holding", "pose", "hands",
+    "panties", "underwear", "thong", "lingerie", "bra",
+    "thighhighs", "headset", "detached sleeves", "wa maid", "male maid",
+    "bag charm", "pocket", "bloomers", "hair stick", "mob cap",
+}
+_CLOTHES_STOP_PARTS = (
+    "looking ", "standing", "sitting", "lying", "holding ", "pose",
+    "background", "from ", "pov", "open mouth", "smile", "tears",
+    "sweat", "blush", "sex", "pussy", "penis", "breasts",
+    "panties", "underwear", "thong", "lingerie", "bra", "nipple",
+    "areola", "cameltoe", "genital", "thighhighs",
+)
+_CLOTHES_BLOCKED_CATEGORY_PARTS = ("패턴", "가방", "노출")
+_CLOTHES_ALLOWED_CATEGORY_PARTS = (
+    "패션", "의류", "복식", "clothing", "fashion", "accessor", "shoe", "footwear",
+)
+_CLOTHES_LIFT_GLOBAL_FLOOR = 1000
+_CLOTHES_MIN_COOCCUR = 80
+_CLOTHES_WEAK_SEED_TAGS = {
+    "shirt", "collared shirt", "necktie", "tie", "ribbon", "bow",
+    "skirt", "dress", "hat", "gloves", "boots", "shoes", "socks",
+    "long sleeves", "short sleeves",
+}
 
 
 @dataclass
@@ -141,12 +168,14 @@ class OllamaChatPipeline:
         assist_helpers: Any,
         searcher: SearchFn,
         event_provider: EventProvider,
+        clothes_provider: ClothesProvider | None = None,
         translator: Callable[[str], str | None] | None = None,
     ) -> None:
         self.assistant = assistant
         self.assist = assist_helpers
         self.searcher = searcher
         self.event_provider = event_provider
+        self.clothes_provider = clothes_provider
         self.translator = translator
         self._progress = ChatPipelineProgress()
 
@@ -206,6 +235,7 @@ class OllamaChatPipeline:
             self._stage(4, "가지치기")
             flat_tags = self._flat_scene_tags(segments)
             event_tags = self._event_tags(segments, flat_tags, clean)
+            clothes_tags = self._clothes_tags(segments, flat_tags)
 
             self._stage(5, "최종")
             final_tags = self._final_tags(flat_tags, event_tags)
@@ -223,6 +253,7 @@ class OllamaChatPipeline:
                 },
                 "segments": segments,
                 "eventTags": event_tags,
+                "clothesTags": clothes_tags,
                 "finalTags": final_tags,
                 "message": "이렇게 이해하고 실제 태그 후보로 정리했습니다.",
             }
@@ -576,6 +607,123 @@ class OllamaChatPipeline:
         collapsed.sort(key=lambda item: int(item.get("count") or 0), reverse=True)
         return collapsed[:6]
 
+    def _clothes_tags(
+        self,
+        segments: list[dict[str, Any]],
+        flat_tags: list[str],
+    ) -> list[dict[str, Any]]:
+        provider = self.clothes_provider
+        if not callable(provider):
+            return []
+        scene_set = {_norm(tag) for tag in flat_tags or []}
+        seeds: list[str] = []
+        seed_seen: set[str] = set()
+        for segment in segments or []:
+            if _norm(segment.get("axis")) != "clothing":
+                continue
+            phrase = _norm(segment.get("phrase"))
+            for row in segment.get("tags") or []:
+                tag = _norm(row.get("tag"))
+                if not self._clothes_seed_matches_phrase(tag, phrase):
+                    continue
+                if tag and tag not in seed_seen:
+                    seed_seen.add(tag)
+                    seeds.append(tag)
+        if not seeds:
+            return []
+
+        query_seeds = [seed for seed in seeds if seed not in _CLOTHES_WEAK_SEED_TAGS]
+        if not query_seeds:
+            query_seeds = seeds
+
+        weighted: dict[str, int] = {}
+        for seed in query_seeds[:6]:
+            try:
+                combos = list(provider(seed, 8) or [])
+            except Exception:
+                combos = []
+            for combo in combos:
+                if not isinstance(combo, dict):
+                    continue
+                try:
+                    count = int(combo.get("count") or combo.get("post_count") or 0)
+                except Exception:
+                    count = 0
+                if count <= 0:
+                    count = 1
+                tags = combo.get("tags") if isinstance(combo.get("tags"), list) else []
+                for tag in tags:
+                    norm = _norm(tag)
+                    if not norm or norm == seed or norm in scene_set or self._clothes_stop(norm):
+                        continue
+                    weighted[norm] = weighted.get(norm, 0) + count
+        if not weighted:
+            return []
+
+        candidates: list[dict[str, Any]] = []
+        seen: set[str] = set(scene_set)
+        global_counts: dict[str, int] = {}
+        for tag, count in weighted.items():
+            count = int(count)
+            if count < _CLOTHES_MIN_COOCCUR:
+                continue
+            if tag in seen:
+                continue
+            if not self.assist.tag_allowed(tag, "e"):
+                continue
+            validated = self.assist.validate_tag(tag)
+            if not validated:
+                continue
+            if not self._clothes_category_allowed(validated.get("category")):
+                continue
+            real_tag = _norm(validated.get("tag"))
+            if not real_tag or real_tag in seen or self._clothes_stop(real_tag):
+                continue
+            global_count = self._clothes_global_count(real_tag, validated, global_counts)
+            score = float(count)
+            lift = 0.0
+            if global_count > 0:
+                lift = count / max(global_count, _CLOTHES_LIFT_GLOBAL_FLOOR)
+                score = lift
+            seen.add(real_tag)
+            candidates.append({
+                "tag": real_tag,
+                "count": count,
+                "_score": score,
+                "_lift": lift,
+                "_global": global_count,
+            })
+        candidates.sort(
+            key=lambda item: (float(item.get("_score") or 0.0), int(item.get("count") or 0)),
+            reverse=True,
+        )
+        protected = set(scene_set)
+        seed_tokens = [
+            {word for word in seed.split() if len(word) > 1}
+            for seed in seeds
+        ]
+        for item in candidates:
+            tag = _norm(item.get("tag"))
+            tag_tokens = {word for word in tag.split() if len(word) > 1}
+            if any(tokens and tokens <= tag_tokens for tokens in seed_tokens):
+                protected.add(tag)
+        collapsed = self.assist.collapse_variants(candidates, protected)
+        collapsed.sort(
+            key=lambda item: (float(item.get("_score") or 0.0), int(item.get("count") or 0)),
+            reverse=True,
+        )
+        out: list[dict[str, Any]] = []
+        seen = set(scene_set)
+        for item in collapsed:
+            tag = _norm(item.get("tag"))
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            out.append({"tag": tag, "count": int(item.get("count") or 0)})
+            if len(out) >= 8:
+                break
+        return out
+
     def _event_queries(
         self,
         segments: list[dict[str, Any]],
@@ -616,6 +764,58 @@ class OllamaChatPipeline:
         if tag in _EVENT_STOP_TAGS:
             return True
         return any(part in tag for part in _EVENT_STOP_PARTS)
+
+    def _clothes_stop(self, tag: str) -> bool:
+        if tag in _CLOTHES_STOP_TAGS or tag in _EVENT_STOP_TAGS or tag in _NEAR_EMPTY_GENERIC_TAGS:
+            return True
+        return any(part in tag for part in _CLOTHES_STOP_PARTS)
+
+    def _clothes_category_allowed(self, category: Any) -> bool:
+        text = str(category or "").strip()
+        if not text:
+            return False
+        if any(part in text for part in _CLOTHES_BLOCKED_CATEGORY_PARTS):
+            return False
+        lowered = text.lower()
+        return any(part in lowered or part in text for part in _CLOTHES_ALLOWED_CATEGORY_PARTS)
+
+    def _clothes_global_count(
+        self,
+        tag: str,
+        validated: dict[str, Any],
+        cache: dict[str, int],
+    ) -> int:
+        tag = _norm(tag)
+        if tag in cache:
+            return cache[tag]
+        try:
+            count = int(validated.get("count") or 0)
+        except Exception:
+            count = 0
+        if count <= 0:
+            try:
+                rows = list(self.searcher(tag, 1, GenerationInfoContext()) or [])
+            except Exception:
+                rows = []
+            for row in rows:
+                row_tag = _norm(row.get("tag"))
+                if row_tag != tag:
+                    continue
+                try:
+                    count = int(row.get("count") or 0)
+                except Exception:
+                    count = 0
+                break
+        cache[tag] = max(0, count)
+        return cache[tag]
+
+    def _clothes_seed_matches_phrase(self, tag: str, phrase: str) -> bool:
+        if not tag or not phrase:
+            return bool(tag)
+        words = [word for word in tag.split() if len(word) > 1]
+        if not words:
+            return False
+        return all(word in phrase for word in words)
 
     def _final_tags(self, flat_tags: list[str], event_tags: list[dict[str, Any]]) -> list[str]:
         out: list[str] = []

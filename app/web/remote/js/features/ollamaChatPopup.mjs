@@ -378,9 +378,27 @@ export function createOllamaChatPopup({
           ev.appendChild(chips);
           panel.appendChild(ev);
         }
-        const copyTags = (Array.isArray(msg.finalTags) && msg.finalTags.length)
+        const clothesTags = Array.isArray(msg.clothesTags) ? msg.clothesTags : [];
+        if (clothesTags.length) {
+          const cl = document.createElement('div');
+          cl.className = 'ollama-chat-event-section';
+          const clTitle = document.createElement('div');
+          clTitle.className = 'ollama-chat-event-title';
+          clTitle.textContent = '의상 조합';
+          cl.appendChild(clTitle);
+          const clChips = document.createElement('div');
+          clChips.className = 'ollama-chat-chips';
+          clothesTags.forEach(t => {
+            const tag = String(t?.tag || '').trim();
+            if (tag) clChips.appendChild(makeChip(tag, {count: t.count, match: 'clothes'}));
+          });
+          cl.appendChild(clChips);
+          panel.appendChild(cl);
+        }
+        const copyTags = ((Array.isArray(msg.finalTags) && msg.finalTags.length)
           ? msg.finalTags
-          : sceneFlat.concat(eventTags.map(t => t?.tag).filter(Boolean));
+          : sceneFlat.concat(eventTags.map(t => t?.tag).filter(Boolean)))
+          .concat(clothesTags.map(t => t?.tag).filter(Boolean));
         panel.appendChild(makeCopyAllRow(copyTags));
         item.appendChild(panel);
       }
@@ -536,6 +554,7 @@ export function createOllamaChatPopup({
           segments: Array.isArray(payload.segments) ? payload.segments : [],
           eventTags: Array.isArray(payload.eventTags) ? payload.eventTags : [],
           eventLabels: Array.isArray(payload.eventLabels) ? payload.eventLabels : [],
+          clothesTags: Array.isArray(payload.clothesTags) ? payload.clothesTags : [],
           finalTags: Array.isArray(payload.finalTags) ? payload.finalTags : [],
           note: String((payload.intent && payload.intent.interpretation_note) || ''),
           cleanEnglish: String((payload.translation && payload.translation.cleanEnglish) || ''),

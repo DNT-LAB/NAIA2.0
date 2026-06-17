@@ -586,9 +586,13 @@ def register_ollama_routes(
         existing = getattr(context, "ollama_chat_pipeline", None)
         assistant = service()
         assist = get_assist_service(context)
+        def _clothes_provider(tag: str, limit: int) -> list[dict[str, Any]]:
+            return clothes_preset_service(context).combos_for_tag(tag, limit=limit)
+
         if isinstance(existing, OllamaChatPipeline):
             existing.assistant = assistant
             existing.assist = assist
+            existing.clothes_provider = _clothes_provider
             return existing
         existing = OllamaChatPipeline(
             assistant=assistant,
@@ -599,6 +603,7 @@ def register_ollama_routes(
             event_provider=lambda rating, person_id, query, top: _event_combo_tag_stats(
                 context, rating, person_id, query, top
             ),
+            clothes_provider=_clothes_provider,
             translator=_korean_to_english,
         )
         context.ollama_chat_pipeline = existing

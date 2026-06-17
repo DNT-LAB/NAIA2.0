@@ -8840,11 +8840,6 @@ body.resizing-result-info {
 .assistants-ollama-btn:last-child {
   border-right: 0;
 }
-/* Ollama Chat은 내부 용도로만 노출(기본 숨김) → 단독 Ollama Assist 버튼의 우측 구분선 제거.
-   내부 활성화(.chat-enabled) 시 2-버튼 세그먼트로 복귀. */
-.assistants-ollama-segment:not(.chat-enabled) #ollamaAssistantBtn {
-  border-right: 0;
-}
 .assistants-ollama-btn:hover {
   background: rgba(96, 120, 255, 0.2);
 }
@@ -16667,6 +16662,38 @@ body.detached-module .mod-grid-3 {
 }
 .ollama-chat-status.error { color: #e09098; }
 .ollama-chat-status.info { color: var(--text-muted); }
+.ollama-chat-ready {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(220, 180, 90, 0.45);
+  border-radius: 8px;
+  background: rgba(120, 95, 30, 0.18);
+}
+.ollama-chat-ready[hidden] { display: none; }
+.ollama-chat-ready-msg { flex: 1 1 auto; font-size: 11px; line-height: 1.4; color: var(--text-primary); }
+.ollama-chat-ready-msg.warn { color: #e0c070; }
+.ollama-chat-ready-msg.err { color: #e09098; }
+.ollama-chat-ready-btn {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(96, 120, 255, 0.92);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ollama-chat-ready-btn.secondary {
+  background: rgba(120, 130, 160, 0.22);
+  color: var(--text-primary);
+}
+.ollama-chat-ready-btn:hover { filter: brightness(1.1); }
 .ollama-chat-msg {
   display: flex;
   flex-direction: column;
@@ -16732,6 +16759,35 @@ body.detached-module .mod-grid-3 {
   gap: 5px;
   padding: 8px;
 }
+.ollama-chat-scene-seg { padding: 0 8px; }
+.ollama-chat-scene-label {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin: 5px 0 0 2px;
+}
+.ollama-chat-scene-seg .ollama-chat-chips { padding: 4px 0 2px; }
+.ollama-chat-combo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(130,150,255,0.12);
+}
+.ollama-chat-combo .ollama-chat-chips { flex: 1 1 auto; padding: 0; }
+.ollama-chat-combo-copy {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(96,120,255,0.85);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ollama-chat-combo-copy:hover { filter: brightness(1.1); }
 .ollama-chat-chip.generation-info-tag {
   display: inline-flex;
   align-items: center;

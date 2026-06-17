@@ -76,6 +76,7 @@ TranslatorFn = Callable[[str], str | None]
 
 INTENT_PROMPT_RECOMMENDATION = "prompt_recommendation"
 INTENT_TAG_DISCOVERY = "tag_discovery"
+INTENT_CLOTHES_COMBINATION = "clothes_combination"
 
 ACTION_PROMPT_SEARCH = "prompt_search"
 ACTION_SEARCH_TAGS = ACTION_PROMPT_SEARCH  # backward-compatible alias for earlier Phase 0 tests.
@@ -669,7 +670,7 @@ def compose_final_output(run: PipelineRun) -> str:
         return "NAIA 기능 또는 현재 생성물 맥락과 무관한 요청으로 분류되어 NAIA 도구를 사용하지 않았습니다."
     if run.decision.route == ROUTE_NAIA_READONLY:
         return "NAIA 관련 읽기전용 질문으로 분류했습니다. 현재 v1에서는 후보 검색 도구가 필요한 요청만 실행합니다."
-    if run.intent.intent not in {INTENT_PROMPT_RECOMMENDATION, INTENT_TAG_DISCOVERY}:
+    if run.intent.intent not in {INTENT_PROMPT_RECOMMENDATION, INTENT_TAG_DISCOVERY, INTENT_CLOTHES_COMBINATION}:
         return "요청 의도를 Instant 프롬프트 검색 작업으로 확정하지 못했습니다."
     rows: list[dict[str, Any]] = []
     for result in run.tool_results:
@@ -678,6 +679,8 @@ def compose_final_output(run: PipelineRun) -> str:
     if not rows:
         if run.intent.intent == INTENT_TAG_DISCOVERY:
             return f"{run.intent.subject} 상황을 묘사하는 태그 후보를 찾지 못했습니다."
+        if run.intent.intent == INTENT_CLOTHES_COMBINATION:
+            return f"{run.intent.subject} 의상 조합 후보를 찾지 못했습니다."
         return f"{run.intent.subject} 관련 프롬프트 후보를 찾지 못했습니다."
     all_tags = _dedupe([str(row["tag"]) for row in rows if row.get("tag")])
     tags = all_tags[:8]
@@ -721,6 +724,7 @@ __all__ = [
     "IntentActionPipeline",
     "IntentDecision",
     "IntentFrame",
+    "INTENT_CLOTHES_COMBINATION",
     "INTENT_PROMPT_RECOMMENDATION",
     "INTENT_TAG_DISCOVERY",
     "PipelineLoopGuard",

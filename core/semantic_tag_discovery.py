@@ -158,6 +158,78 @@ _CATEGORY_AXIS_FUNCTION_WORD_TAGS = frozenset({
     "can",
     "only",
 })
+_SCENE_FUZZY_FRANCHISE_MARKERS = frozenset({
+    "mitakihara",
+    "ooarai",
+    "uranohoshi",
+    "tokiwadai",
+    "honnouji",
+    "shuuchiin",
+    "nijigasaki",
+    "tracen",
+    "sakugawa",
+    "raimun",
+})
+
+
+def ground_scene_segments(
+    segments: Iterable[dict[str, Any]],
+    *,
+    searcher: SearchFn,
+    context: Any = None,
+    per_concept_limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Ground decomposed scene concepts against the English tag index.
+
+    Exact tag matches are accepted before category-axis filtering. This keeps
+    real tags such as ``all fours`` and ``bound`` from being removed by broad
+    action-axis filters when the corpus categorizes them under posture/sexual
+    restraint groups.
+    """
+    out: list[dict[str, Any]] = []
+    seen_tags: set[str] = set()
+    limit = max(1, min(24, int(per_concept_limit or 5)))
+    for segment in segments or ():
+        if not isinstance(segment, dict):
+            continue
+        phrase = _coerce_text(segment.get("phrase"), limit=200).strip()
+        axis = _coerce_text(segment.get("axis") or "general", limit=40).strip().lower().replace("-", "_")
+        filter_axis = normalize_category_axis(axis)
+        concepts_raw = segment.get("concepts")
+        if not isinstance(concepts_raw, list):
+            continue
+        tags: list[dict[str, Any]] = []
+        for concept_raw in concepts_raw:
+            concept = _norm_tag(concept_raw)
+            if not concept or _HANGUL_RE.search(concept):
+                continue
+            try:
+                rows = list(searcher(concept, limit, context) or [])
+            except Exception:
+                rows = []
+            exact_row = _first_exact_scene_row(rows, concept, seen_tags)
+            if exact_row is not None:
+                tag = _norm_tag(exact_row.get("tag"))
+                seen_tags.add(tag)
+                tags.append(_scene_grounded_row(exact_row, concept, "exact"))
+                continue
+            for row in rows:
+                tag = _norm_tag(row.get("tag"))
+                if not tag or tag in seen_tags:
+                    continue
+                if _is_scene_fuzzy_franchise_row(tag, row):
+                    continue
+                floor_delta, _reason = _generic_noise_floor(tag, row)
+                if floor_delta <= -0.9:
+                    continue
+                if filter_axis != "general" and not _row_matches_category_axis(row, filter_axis):
+                    continue
+                seen_tags.add(tag)
+                tags.append(_scene_grounded_row(row, concept, "fuzzy"))
+                break
+        if tags:
+            out.append({"phrase": phrase, "axis": axis or "general", "tags": tags})
+    return out
 
 
 def discover_semantic_tags(
@@ -653,6 +725,41 @@ def _row_matches_category_axis(row: dict[str, Any], axis: str) -> bool:
     return any(marker.casefold() in top_fold for marker in markers)
 
 
+def _first_exact_scene_row(
+    rows: Iterable[dict[str, Any]],
+    concept: str,
+    seen_tags: set[str],
+) -> dict[str, Any] | None:
+    concept_norm = _norm_tag(concept)
+    for row in rows or ():
+        tag = _norm_tag(row.get("tag"))
+        if tag and tag == concept_norm and tag not in seen_tags:
+            return row
+    return None
+
+
+def _scene_grounded_row(row: dict[str, Any], concept: str, match: str) -> dict[str, Any]:
+    return {
+        "tag": _norm_tag(row.get("tag")),
+        "count": _safe_int(row.get("count")),
+        "desc": _coerce_text(row.get("desc") or row.get("description"), limit=500),
+        "group": _coerce_text(row.get("group") or row.get("_kr_category"), limit=200),
+        "cat": _coerce_text(row.get("cat") or row.get("_cat"), limit=80),
+        "concept": _norm_tag(concept),
+        "match": match,
+    }
+
+
+def _is_scene_fuzzy_franchise_row(tag: str, row: dict[str, Any]) -> bool:
+    tag_norm = _norm_tag(tag)
+    if "(" in tag_norm and ")" in tag_norm:
+        return True
+    if any(marker in tag_norm for marker in _SCENE_FUZZY_FRANCHISE_MARKERS):
+        return True
+    cat = _norm_tag(row.get("cat") or row.get("_cat") or row.get("group"))
+    return any(marker in cat for marker in ("character", "copyright", "artist", "캐릭터", "저작권", "작가"))
+
+
 def _category_parts(value: str) -> tuple[str, set[str]]:
     parts = [part.strip() for part in _coerce_text(value, limit=200).split(">") if part.strip()]
     if not parts:
@@ -785,6 +892,7 @@ __all__ = [
     "discover_prompt_tags",
     "discover_semantic_tags",
     "filter_rows_by_category_axis",
+    "ground_scene_segments",
     "infer_category_axis_from_text",
     "normalize_category_axis",
     "prompt_tag_queries",

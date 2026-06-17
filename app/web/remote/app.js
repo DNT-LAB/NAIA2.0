@@ -803,7 +803,7 @@ const ollamaAssistantPopupReady = import('./js/features/ollamaAssistantPopup.mjs
     console.error('Failed to initialize ollama assistant popup module', error);
   });
 let ollamaChatPopup = null;
-const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260614-chat6')
+const ollamaChatPopupReady = import('./js/features/ollamaChatPopup.mjs?v=20260617-scene')
   .then(({createOllamaChatPopup}) => {
     ollamaChatPopup = createOllamaChatPopup({
       document, window, showToast, escHtml,
@@ -4341,23 +4341,6 @@ if (ollamaChatBtn) {
     }
   });
 }
-// Ollama Chat은 내부 용도로만 노출한다(기본 숨김 = 일반 사용자에겐 Ollama Assist만 보임).
-// 활성화: localStorage 'naia_ollama_chat_internal'='1' 또는 URL ?ollamaChatInternal=1(지속화).
-// 코드/백엔드(/api/ollama/chat·ollamaChatPopup)는 그대로 유지 — UI 노출만 게이트.
-(function gateInternalOllamaChat() {
-  if (!ollamaChatBtn) return;
-  let on = false;
-  try {
-    const params = new URLSearchParams(location.search);
-    if (params.get('ollamaChatInternal') === '1') {
-      localStorage.setItem('naia_ollama_chat_internal', '1');
-    }
-    on = localStorage.getItem('naia_ollama_chat_internal') === '1';
-  } catch (_) {}
-  const seg = ollamaChatBtn.closest('.assistants-ollama-segment');
-  ollamaChatBtn.hidden = !on;
-  if (seg) seg.classList.toggle('chat-enabled', on);
-})();
 
 function loadMetadataImageBlob(blob, label = 'Input Image') {
   if (!metadataViewer || typeof metadataViewer.loadImageBlob !== 'function') {

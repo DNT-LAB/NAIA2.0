@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -27,6 +28,50 @@ DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434"
 # (0.215→0.182)·VRAM 절반(3.1GB)·2.3배 빠름. 파이프라인이 추론을 코드로 외부화해
 # 작은 모델이 더 순종적(노이즈↓). E2B는 IQ3_M만 로드 가능(_P 양자화는 llama.cpp 미지원).
 DEFAULT_MODEL = "hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M"
+
+_SCENE_SEGMENT_AXES = frozenset({
+    "clothing",
+    "action",
+    "gaze",
+    "expression",
+    "body",
+    "background",
+    "object",
+    "character",
+    "general",
+})
+_SCENE_SCAFFOLD_CONCEPTS = frozenset({
+    "girl",
+    "boy",
+    "character",
+    "scene",
+    "composition",
+    "구도",
+    "소녀",
+    "dog",
+    "hands",
+    "pose",
+})
+_SCENE_ACTION_MARKERS = (
+    "묶", "구속", "속박", "bound", "tied", "all fours", "kneeling",
+    "crossed arms", "네발",
+)
+_SCENE_GAZE_MARKERS = ("viewer", "looking", "올려다", "카메라")
+_SCENE_SOURCE_CONCEPT_RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
+    (("교복", "school uniform"), "교복", "clothing", "school uniform"),
+    (("수영복", "swimsuit"), "수영복", "clothing", "swimsuit"),
+    (("기모노", "kimono"), "기모노", "clothing", "kimono"),
+    (("후드티", "hoodie"), "후드티", "clothing", "hoodie"),
+    (("양손", "팔을 묶", "arms bound", "arms tied"), "양손을 묶인", "action", "arms behind back"),
+    (("묶", "구속", "속박", "bound", "tied"), "묶인", "action", "bound"),
+    (("개 같은", "네발", "all fours"), "네발기기 자세", "action", "all fours"),
+    (("viewer", "카메라", "올려다", "looking at viewer"), "viewer를 보는", "gaze", "looking at viewer"),
+    (("째려", "노려", "glaring"), "째려보는", "expression", "glaring"),
+    (("혀", "tongue"), "혀를 내미는", "expression", "tongue out"),
+    (("무릎", "kneel"), "무릎 꿇은", "action", "kneeling"),
+    (("울먹", "눈물", "tear"), "울먹이는", "expression", "tears"),
+    (("팔짱", "crossed arms"), "팔짱", "action", "crossed arms"),
+)
 
 _IDLE_PULL_STATE: dict[str, Any] = {
     "active": False,
@@ -77,6 +122,82 @@ def _resolve_connection_defaults() -> tuple[str, str]:
         pass
     base = endpoint or os.environ.get("NAIA_OLLAMA_URL") or DEFAULT_OLLAMA_BASE
     return str(base).rstrip("/"), (model or DEFAULT_MODEL)
+
+
+def _split_scene_concept(value: Any) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [
+        part.strip()
+        for part in re.split(r"\s*(?:[,;]|\band\b)\s*", text, flags=re.IGNORECASE)
+        if part.strip()
+    ]
+
+
+def _normalize_scene_concept(value: Any) -> str:
+    text = str(value or "").replace("_", " ").strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    return text.strip(" .,:;!?\"'“”‘’<>")
+
+
+def _map_scene_idiom(concept: str, phrase: str, source_lower: str) -> str:
+    text = f"{phrase} {source_lower}".lower()
+    if concept in {"dog-like pose", "dog pose", "like a dog", "on all fours"}:
+        return "all fours"
+    if concept in {"staring", "glare", "scowl"} and any(marker in text for marker in ("째려", "노려", "glaring", "glare")):
+        return "glaring"
+    if concept in {"crying", "tearful", "watery eyes"} and any(marker in text for marker in ("울먹", "tear", "cry")):
+        return "tears"
+    return concept
+
+
+def _drop_scene_concept(concept: str, phrase: str, source_lower: str) -> bool:
+    if not concept or concept in _SCENE_SCAFFOLD_CONCEPTS:
+        return True
+    # The small model sometimes literalizes the idiom "dog-like pose"; keep only
+    # the mapped pose tag, never the animal/scaffold wording.
+    if "dog" in concept and ("pose" in concept or "like" in concept):
+        return True
+    phrase_lower = str(phrase or "").lower()
+    visible_text = f"{phrase_lower} {source_lower}"
+    if concept == "school uniform" and not any(marker in visible_text for marker in ("교복", "school uniform", "uniform")):
+        return True
+    if concept == "kneeling" and not any(marker in visible_text for marker in ("무릎", "kneel", "kneeling")):
+        return True
+    return False
+
+
+def _normalize_scene_axis(axis: str, phrase: str, concepts: list[str]) -> str:
+    axis_norm = axis if axis in _SCENE_SEGMENT_AXES else "general"
+    text = " ".join([phrase, axis_norm, *concepts]).lower()
+    if any(marker in text for marker in _SCENE_ACTION_MARKERS):
+        return "action"
+    if any(marker in text for marker in _SCENE_GAZE_MARKERS):
+        return "gaze"
+    return axis_norm
+
+
+def _augment_scene_segments_from_source(
+    segments: list[dict[str, Any]],
+    source_text: str,
+) -> list[dict[str, Any]]:
+    text = str(source_text or "").lower()
+    if not text:
+        return segments
+    seen = {
+        _normalize_scene_concept(concept)
+        for segment in segments
+        for concept in (segment.get("concepts") or [])
+    }
+    out = list(segments)
+    for markers, phrase, axis, concept in _SCENE_SOURCE_CONCEPT_RULES:
+        if concept in seen:
+            continue
+        if any(marker.lower() in text for marker in markers):
+            out.append({"phrase": phrase, "axis": axis, "concepts": [concept]})
+            seen.add(concept)
+    return out
 
 
 class OllamaAssistantService:
@@ -417,16 +538,17 @@ class OllamaAssistantService:
         instruction = (
             "Classify this NAIA chat message for tool use. Return JSON only.\n"
             "Allowed route values: naia_tool, naia_readonly, out_of_scope, blocked.\n"
-            "Allowed naia_tool intent values: prompt_recommendation, tag_discovery.\n"
-            "Use naia_tool only for prompt/tag/current-generation requests that should return grounded candidate chips.\n"
-            "Use intent=tag_discovery when the user describes a scene and asks whether matching prompt tags exist.\n"
+            "Allowed naia_tool intent values: prompt_recommendation, tag_discovery, clothes_combination.\n"
+            "Use naia_tool only for prompt/tag/current-generation requests that should return grounded candidate chips or grounded clothing combinations.\n"
+            "Use intent=tag_discovery when the user describes a scene and asks whether matching prompt tags exist, or when the message is a multi-concept scene/composition description that should be decomposed into grounded tags.\n"
+            "Use intent=clothes_combination when the user asks for outfit/clothing combinations, coordinated items, what clothes go with a clothing item, 코디, 의상/옷 조합, or ~와 어울리는 의상/옷. Subject must be the seed clothing booru tag and category_axis='clothing'.\n"
             "For every naia_tool decision, subject must be a concise English booru-style search concept, not Korean prose.\n"
             "Strip scaffolding verbs/particles such as describe, emphasize, recommend, prompt, tag, 할 수 있는, 만, 하는, 들, 관련, 묘사, 강조, 알려주세요, 프롬프트, 태그.\n"
             "Return category_axis as exactly one of: clothing, action, expression, background, body, object, general.\n"
             "Map clothing for 의상/옷/복장/입은; action for 행동/행위/동작/포즈/자세; expression for 표정/얼굴; background for 배경/장소; body for 신체/몸; object for 사물/소품; general when unclear.\n"
             "Return expansion_queries as 1-6 concise English booru-style search queries. Use known entity aliases when present.\n"
             "Do not output function words like can/action/only as subject or expansion queries; for '메이드만 할 수 있는 행동' use subject='maid', category_axis='action'.\n"
-            "Examples: 'blue archive의 kokona를 묘사하는' -> subject='kokona', category_axis='general', expansion_queries=['kokona (blue archive)','kokona']; '가슴골을 강조하는' -> subject='cleavage', category_axis='general', expansion_queries=['cleavage','large breasts']; 'maid 의상' -> subject='maid', category_axis='clothing', expansion_queries=['maid']; '메이드만 할 수 있는 행동' -> subject='maid', category_axis='action', expansion_queries=['cleaning','serving','bowing','holding','playing'].\n"
+            "Examples: 'blue archive의 kokona를 묘사하는' -> subject='kokona', category_axis='general', expansion_queries=['kokona (blue archive)','kokona']; '가슴골을 강조하는' -> subject='cleavage', category_axis='general', expansion_queries=['cleavage','large breasts']; 'maid 의상' -> subject='maid', category_axis='clothing', expansion_queries=['maid']; '메이드만 할 수 있는 행동' -> subject='maid', category_axis='action', expansion_queries=['cleaning','serving','bowing','holding','playing']; '교복을 입은 소녀가 양손을 묶인 채로 개 같은 자세로 viewer를 올려다 보면서 째려보는 구도' -> intent='tag_discovery', subject='scene', category_axis='general', expansion_queries=['school uniform','bound','all fours','looking at viewer','glaring']; '메이드복에 어울리는 조합' -> intent='clothes_combination', subject='maid', category_axis='clothing'; '수영복 코디' -> intent='clothes_combination', subject='swimsuit', category_axis='clothing'.\n"
             "Do not choose tool names or invent final chip tags; the server maps intent to tools and verifies all tags against the index.\n"
             "Use blocked for source code/file mutation requests.\n"
             "Use out_of_scope for general chat such as lunch recommendations.\n"
@@ -468,6 +590,98 @@ class OllamaAssistantService:
             return {"ok": True, "data": parsed}
         except Exception as exc:
             return {"ok": False, "error": str(exc) or "intent json extraction failed"}
+
+    def decompose_scene(self, user_input: str) -> dict[str, Any]:
+        """Decompose a multi-concept scene into booru concepts for grounded lookup.
+
+        This call only proposes search concepts. The chat route must validate every
+        concept against NAIA's tag index before returning chips.
+        """
+        text = str(user_input or "").strip()
+        if not text:
+            return {"ok": False, "segments": [], "error": "empty scene"}
+        instruction = (
+            "Decompose the user's image-generation scene into visible booru tag concepts. Return JSON only.\n"
+            "Output shape: {\"segments\":[{\"phrase\":\"original short phrase\",\"axis\":\"clothing|action|gaze|expression|body|background|object|character|general\",\"concepts\":[\"one booru tag\"]}]}\n"
+            "Each concept string must contain exactly one booru tag. Do not combine tags with commas, semicolons, or 'and'.\n"
+            "Use English Danbooru/e621-style tag names with spaces, not Korean prose. Map idioms to real tags, not literal words.\n"
+            "action includes pose, restraint, and body-position tags. body is physical attributes only, not poses or restraints.\n"
+            "Use gaze for looking at viewer / looking up / camera gaze concepts.\n"
+            "Do not add tags that are not visible or strongly implied by the scene.\n"
+            "Avoid scaffold words like girl, character, scene, composition, pose, hands, dog.\n"
+            "Examples:\n"
+            "교복을 입은 -> {\"phrase\":\"교복을 입은\",\"axis\":\"clothing\",\"concepts\":[\"school uniform\"]}\n"
+            "양손을 묶인 -> {\"phrase\":\"양손을 묶인\",\"axis\":\"action\",\"concepts\":[\"arms behind back\",\"bound\"]}\n"
+            "개 같은 자세 / 네발기기 -> {\"phrase\":\"개 같은 자세\",\"axis\":\"action\",\"concepts\":[\"all fours\"]}\n"
+            "viewer를 올려다 보면서 -> {\"phrase\":\"viewer를 올려다 보면서\",\"axis\":\"gaze\",\"concepts\":[\"looking at viewer\"]}\n"
+            "째려보는 / 노려보는 -> {\"phrase\":\"째려보는\",\"axis\":\"expression\",\"concepts\":[\"glaring\"]}\n"
+            "혀를 내미는 -> {\"phrase\":\"혀를 내미는\",\"axis\":\"expression\",\"concepts\":[\"tongue out\"]}\n"
+            "울먹이는 -> {\"phrase\":\"울먹이는\",\"axis\":\"expression\",\"concepts\":[\"tears\"]}\n"
+            "User scene:\n"
+            f"{text[:2000]}"
+        )
+        payload = {
+            "model": self.default_model,
+            "messages": [
+                {"role": "system", "content": "Return compact valid JSON only. No markdown."},
+                {"role": "user", "content": instruction},
+            ],
+            "stream": False,
+            "format": "json",
+            "think": False,
+            "options": {"temperature": 0.0, "num_predict": 1024},
+        }
+        try:
+            response = self._http_post("/api/chat", payload, timeout=(5, 180))
+            status_code = int(getattr(response, "status_code", 0) or 0)
+            data = response.json() or {}
+            if status_code != 200:
+                return {"ok": False, "segments": [], "error": str(data.get("error") or f"Ollama HTTP {status_code}")}
+            content = str((data.get("message") or {}).get("content") or "").strip()
+            parsed = json.loads(content)
+            segments = self._clean_scene_segments(parsed, text)
+            if not segments:
+                return {"ok": False, "segments": [], "error": "empty scene decomposition"}
+            return {"ok": True, "segments": segments}
+        except Exception as exc:
+            return {"ok": False, "segments": [], "error": str(exc) or "scene decomposition failed"}
+
+    @staticmethod
+    def _clean_scene_segments(parsed: Any, source_text: str) -> list[dict[str, Any]]:
+        if not isinstance(parsed, dict):
+            return []
+        raw_segments = parsed.get("segments")
+        if not isinstance(raw_segments, list):
+            return []
+        cleaned: list[dict[str, Any]] = []
+        source_lower = str(source_text or "").lower()
+        for item in raw_segments[:12]:
+            if not isinstance(item, dict):
+                continue
+            phrase = str(item.get("phrase") or item.get("text") or "").strip()[:160]
+            axis = str(item.get("axis") or "general").strip().lower().replace("-", "_")
+            raw_concepts = item.get("concepts")
+            if raw_concepts is None:
+                raw_concepts = item.get("tags")
+            if isinstance(raw_concepts, str):
+                raw_concepts = [raw_concepts]
+            if not isinstance(raw_concepts, list):
+                continue
+            concepts: list[str] = []
+            for concept in raw_concepts:
+                for part in _split_scene_concept(concept):
+                    normalized = _normalize_scene_concept(part)
+                    normalized = _map_scene_idiom(normalized, phrase, source_lower)
+                    if _drop_scene_concept(normalized, phrase, source_lower):
+                        continue
+                    if normalized and normalized not in concepts:
+                        concepts.append(normalized)
+            if not concepts:
+                continue
+            axis = _normalize_scene_axis(axis, phrase, concepts)
+            cleaned.append({"phrase": phrase or ", ".join(concepts), "axis": axis, "concepts": concepts[:6]})
+        return _augment_scene_segments_from_source(cleaned, source_text)[:12]
+
 
     # ------------------------------------------------------------------
     # 모델 다운로드 (Ollama REST /api/pull 스트리밍)

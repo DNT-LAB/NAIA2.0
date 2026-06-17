@@ -321,6 +321,37 @@ class ClothesPresetService:
                 candidates.append(combo)
         return candidates
 
+    def combos_for_tag(self, tag: str, limit: int = 8) -> list[dict[str, Any]]:
+        try:
+            self._ensure_ready()
+            normalized = self._normalize_tag(tag)
+            if not normalized:
+                return []
+            try:
+                cap = max(0, int(limit))
+            except Exception:
+                cap = 8
+            if cap <= 0:
+                return []
+            candidates = self._lucky_candidates([normalized])
+            candidates.sort(key=lambda combo: int(getattr(combo, "post_count", 0) or 0), reverse=True)
+            out: list[dict[str, Any]] = []
+            for combo in candidates:
+                tags = [str(value) for value in getattr(combo, "tags", []) or [] if str(value)]
+                tag_sig = {self._normalize_tag(value) for value in tags if value}
+                if tag_sig == {normalized}:
+                    continue
+                out.append({
+                    "tags": tags,
+                    "count": int(getattr(combo, "post_count", 0) or 0),
+                    "comboText": str(getattr(combo, "clothing_combo", "") or ""),
+                })
+                if len(out) >= cap:
+                    break
+            return out
+        except Exception:
+            return []
+
     def combo_rows(self, payload: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
         request = self._coerce_payload(payload, kwargs)
         self._ensure_ready()

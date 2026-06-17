@@ -17,6 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.backend.server.install_manager_routes import _is_local_request
+from app.backend.server.preset_services import clothes_preset_service
 from core.intent_action_pipeline import (
     ACTION_PROMPT_SEARCH,
     ACTION_SEMANTIC_TAG_SEARCH,
@@ -24,6 +25,7 @@ from core.intent_action_pipeline import (
     IntentActionPipeline,
     IntentDecision,
     IntentFrame,
+    INTENT_CLOTHES_COMBINATION,
     INTENT_PROMPT_RECOMMENDATION,
     INTENT_TAG_DISCOVERY,
     ROUTE_BLOCKED,
@@ -34,7 +36,7 @@ from core.intent_action_pipeline import (
     structured_output,
 )
 from core.ollama_assistant_service import OllamaAssistantService
-from core.semantic_tag_discovery import normalize_category_axis
+from core.semantic_tag_discovery import ground_scene_segments, normalize_category_axis
 from core.web_session_context import WebSessionContext
 
 AsyncRunner = Callable[..., Awaitable[Any]]
@@ -586,12 +588,15 @@ def register_ollama_routes(
             domain = "general"
         subject = str(raw.get("subject") or fallback_intent.subject or "").strip()[:200]
         intent_name = str(raw.get("intent") or fallback_intent.intent or "unknown").strip().lower()[:80]
+        allowed_tool_intents = {INTENT_TAG_DISCOVERY, INTENT_PROMPT_RECOMMENDATION, INTENT_CLOTHES_COMBINATION}
         if intent_name in {"semantic_tag_search", "tag_search", "tag_recommendation", "find_tags"}:
             intent_name = INTENT_TAG_DISCOVERY
-        elif route == "naia_tool" and intent_name not in {INTENT_TAG_DISCOVERY, INTENT_PROMPT_RECOMMENDATION}:
+        elif intent_name in {"clothes_combo", "clothing_combination", "outfit_combination", "outfit_combo", "clothing_combo"}:
+            intent_name = INTENT_CLOTHES_COMBINATION
+        elif route == "naia_tool" and intent_name not in allowed_tool_intents:
             intent_name = (
                 fallback_intent.intent
-                if fallback_intent.intent in {INTENT_TAG_DISCOVERY, INTENT_PROMPT_RECOMMENDATION}
+                if fallback_intent.intent in allowed_tool_intents
                 else INTENT_PROMPT_RECOMMENDATION
             )
         if route == "naia_tool" and not subject:
@@ -600,7 +605,7 @@ def register_ollama_routes(
         if route == "naia_tool" and intent_name == "unknown":
             intent_name = (
                 fallback_intent.intent
-                if fallback_intent.intent in {INTENT_TAG_DISCOVERY, INTENT_PROMPT_RECOMMENDATION}
+                if fallback_intent.intent in allowed_tool_intents
                 else INTENT_PROMPT_RECOMMENDATION
             )
         try:
@@ -609,17 +614,31 @@ def register_ollama_routes(
             confidence = fallback_decision.confidence
         confidence = max(0.0, min(1.0, confidence))
         expansion_queries = _coerce_expansion_queries(raw)
+        raw_category_axis = raw.get("category_axis") or (
+            "clothing" if intent_name == INTENT_CLOTHES_COMBINATION else fallback_intent.category_axis
+        )
         category_axis = (
-            normalize_category_axis(raw.get("category_axis") or fallback_intent.category_axis)
+            normalize_category_axis(raw_category_axis)
             if route == "naia_tool"
             else normalize_category_axis(fallback_intent.category_axis)
         )
+        relation = fallback_intent.relation
+        obj = fallback_intent.object
+        action = fallback_intent.action
+        if intent_name == INTENT_TAG_DISCOVERY:
+            relation = "semantic"
+            obj = "tag"
+            action = "discover"
+        elif intent_name == INTENT_CLOTHES_COMBINATION:
+            relation = "combination"
+            obj = "clothing"
+            action = "combine"
         intent = IntentFrame(
             intent=(intent_name if route == "naia_tool" else intent_name),
             subject=subject,
-            relation=("semantic" if intent_name == INTENT_TAG_DISCOVERY else fallback_intent.relation) if route == "naia_tool" else "",
-            object=("tag" if intent_name == INTENT_TAG_DISCOVERY else fallback_intent.object) if route == "naia_tool" else "",
-            action=("discover" if intent_name == INTENT_TAG_DISCOVERY else fallback_intent.action) if route == "naia_tool" else "",
+            relation=relation if route == "naia_tool" else "",
+            object=obj if route == "naia_tool" else "",
+            action=action if route == "naia_tool" else "",
             language=fallback_intent.language,
             confidence=confidence,
             expansion_queries=expansion_queries if route == "naia_tool" else (),
@@ -627,19 +646,25 @@ def register_ollama_routes(
         )
         reason_code = str(raw.get("reason_code") or "").strip()[:100]
         if not reason_code:
+            tool_reason = "llm_prompt_search_allowed"
+            if intent_name == INTENT_TAG_DISCOVERY:
+                tool_reason = "llm_semantic_tag_search_allowed"
+            elif intent_name == INTENT_CLOTHES_COMBINATION:
+                tool_reason = "llm_clothes_combination_allowed"
             reason_code = {
-                "naia_tool": (
-                    "llm_semantic_tag_search_allowed"
-                    if intent_name == INTENT_TAG_DISCOVERY
-                    else "llm_prompt_search_allowed"
-                ),
+                "naia_tool": tool_reason,
                 "naia_readonly": "llm_naia_readonly_question",
                 "out_of_scope": "llm_non_naia_request",
                 "blocked": "source_mutation_blocked",
             }.get(route, fallback_decision.reason_code)
         next_call = "none"
         if route == "naia_tool":
-            next_call = ACTION_SEMANTIC_TAG_SEARCH if intent_name == INTENT_TAG_DISCOVERY else ACTION_PROMPT_SEARCH
+            if intent_name == INTENT_TAG_DISCOVERY:
+                next_call = ACTION_SEMANTIC_TAG_SEARCH
+            elif intent_name == INTENT_CLOTHES_COMBINATION:
+                next_call = INTENT_CLOTHES_COMBINATION
+            else:
+                next_call = ACTION_PROMPT_SEARCH
         elif route == "naia_readonly":
             next_call = "readonly_answer"
         decision = IntentDecision(
@@ -779,6 +804,59 @@ def register_ollama_routes(
                     "decision": decision,
                     "structured_output": structured_output(run),
                 }
+            if run.decision.route == ROUTE_NAIA_TOOL and run.intent.intent == INTENT_TAG_DISCOVERY:
+                segments: list[dict[str, Any]] = []
+                try:
+                    decompose = service().decompose_scene(latest_user)
+                    if isinstance(decompose, dict) and decompose.get("ok") and isinstance(decompose.get("segments"), list):
+                        def _scene_searcher(query: str, limit: int, _gen_context: GenerationInfoContext) -> list[dict[str, Any]]:
+                            if _HANGUL_RE.search(str(query or "")):
+                                return []
+                            return search_llm_tags(context, query, limit=limit)
+
+                        segments = ground_scene_segments(
+                            decompose["segments"],
+                            searcher=_scene_searcher,
+                            context=run.context,
+                            per_concept_limit=5,
+                        )
+                except Exception:
+                    segments = []
+                if segments:
+                    flat_tags: list[str] = []
+                    seen_flat: set[str] = set()
+                    for segment in segments:
+                        for tag_row in segment.get("tags") or ():
+                            tag = str(tag_row.get("tag") or "")
+                            if tag and tag not in seen_flat:
+                                seen_flat.add(tag)
+                                flat_tags.append(tag)
+                    return {
+                        "ok": True,
+                        "type": "scene",
+                        "message": "장면을 실제 태그 후보로 분해했습니다.",
+                        "anchor": latest_user,
+                        "segments": segments,
+                        "flatTags": flat_tags,
+                        "decision": decision,
+                        "structured_output": structured_output(run),
+                    }
+            if run.decision.route == ROUTE_NAIA_TOOL and run.intent.intent == INTENT_CLOTHES_COMBINATION:
+                try:
+                    combos = clothes_preset_service(context).combos_for_tag(run.intent.subject, limit=8)
+                except Exception:
+                    combos = []
+                if combos:
+                    return {
+                        "ok": True,
+                        "type": "combos",
+                        "subject": run.intent.subject,
+                        "message": f"{run.intent.subject} 의상과 어울리는 조합입니다.",
+                        "combos": combos,
+                        "anchor": latest_user,
+                        "decision": decision,
+                        "structured_output": structured_output(run),
+                    }
             if run.decision.route == ROUTE_NAIA_TOOL:
                 rows = _chat_chip_rows(run)
                 chips = [

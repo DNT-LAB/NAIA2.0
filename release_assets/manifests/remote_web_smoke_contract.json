@@ -124,7 +124,7 @@
       "method": "GET",
       "path": "/api/prompt-highlight-index",
       "expected_status": [200],
-      "expected_json_subset": {"version": "runtime-empty"}
+      "expected_json_subset": {"version": "runtime-loaded"}
     },
     {
       "feature": "prompt_tools_tag_lookup",

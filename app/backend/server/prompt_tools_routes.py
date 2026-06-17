@@ -187,6 +187,7 @@ def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
     known_tags.difference_update(copyright_tags)
 
     payload = {
+        "version": "runtime-loaded",
         "highValueTags": sorted(high_value),
         "midValueTags": sorted(mid_value),
         "knownTags": sorted(known_tags),

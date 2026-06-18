@@ -570,7 +570,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260613-set-cr-vt1')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260618-outpaint')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -691,7 +691,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260613-set-cr-vt1')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260618-outpaint')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -717,6 +717,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onSaveImage: context => callResultImageAction('saveImageFromContext', context),
       onCopyImage: (context, format) => callResultImageAction('copyImageFromContext', context, format),
       onUpscaleNai: context => callResultImageAction('upscaleFromContext', context),
+      onInstantOutpaint: context => callResultImageAction('outpaintFromContext', context),
       onWebUiEnhance: context => requestResultEnhanceFromContext(context),
       onGrokI2I: context => { if (grokI2iModal) grokI2iModal.open(context); },
       onGrokI2V: context => { if (grokI2vModal) grokI2vModal.open(context); },

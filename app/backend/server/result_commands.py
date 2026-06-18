@@ -26,6 +26,7 @@ RESULT_COMMAND_TYPES = {
     "set_result_enhance_config",
     "result_image_action",
     "result_upscale",
+    "result_outpaint",
 }
 
 
@@ -359,6 +360,59 @@ def perform_nai_result_upscale(context: WebSessionContext, payload: dict[str, An
     return stored, str(result.get("message") or "NAI 2x upscale complete")
 
 
+def perform_nai_result_outpaint(context: WebSessionContext, payload: dict[str, Any] | None):
+    if context.get_api_mode() != "NAI":
+        raise RuntimeError("Outpainting is available in NAI mode only")
+    image_bytes, label, generation_params, prompt_context = resolve_result_image_action_source(context, payload)
+    service = getattr(context, "api_service", None)
+    if service is None:
+        from core.api_service import APIService
+
+        service = APIService(context)
+        context.api_service = service
+
+    params = copy.deepcopy(generation_params)
+    _prompt_from_result_context(context, params, prompt_context)
+    for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
+        params.pop(key, None)
+    # 원본 항목(img2img/inpaint/이전 outpaint)에서 상속된 raw 바이트/비직렬화 값은 저장 params에
+    # 절대 남기지 않는다(메타데이터/히스토리 직렬화 계약 + 결과스토어 비대화 방지, Codex 리뷰
+    # HIGH). 또한 상속된 outpaint_canvas_bytes/outpaint_mask_bytes가 api 호출로 새 나가면
+    # _single_pass_outpainting이 신규 자동 캔버스 생성을 건너뛰어(잘못된 캔버스) 버린다 →
+    # dict(params) 이전에 제거해 새 image_bytes만 auto_outpainting으로 나가게 한다.
+    for key in [
+        k for k, v in list(params.items())
+        if isinstance(v, (bytes, bytearray)) or k in ("full_mask_pil", "type", "cropped_image_request")
+    ]:
+        params.pop(key, None)
+    params.update({
+        "api_mode": "NAI",
+        "result_outpaint_request": True,
+        "result_outpaint_source_label": label,
+        "_remote_queue_source": "Result Outpaint",
+        "_remote_queue_label": label,
+    })
+    api_params = dict(params)
+    api_params["type"] = "auto_outpainting"
+    api_params["image_bytes"] = image_bytes
+    result = service.call_generation_api(api_params)
+    if not isinstance(result, dict) or result.get("status") != "success":
+        raise RuntimeError(str((result or {}).get("message") or "Outpainting failed"))
+
+    source_item = _history_item_from_result_payload(context, payload)
+    request = GenerationRequest(
+        params=params,
+        source_row=getattr(source_item, "source_row", None),
+    )
+    stored = context.result_store.add_api_result(result, request)
+    if context._coerce_bool(context.auto_save_state.get("auto_save", True)):
+        try:
+            context.save_history_item(stored.item)
+        except Exception:
+            pass
+    return stored, str(result.get("message") or "Outpainting complete")
+
+
 async def handle_result_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -411,6 +465,37 @@ async def handle_result_command(
             "message": message,
             "runtime": "web",
         })
+        await _send_json(ws, {
+            "type": "toast",
+            "level": "success",
+            "message": message,
+            "runtime": "web",
+        })
+        return True
+
+    if command_type == "result_outpaint":
+        await _send_json(ws, {
+            "type": "toast",
+            "level": "info",
+            "message": "Outpainting running",
+            "runtime": "web",
+        })
+        try:
+            stored, message = await run_in_thread(perform_nai_result_outpaint, context, command)
+        except Exception as exc:
+            message = f"Outpainting failed: {exc}"
+            await _send_json(ws, {
+                "type": "toast",
+                "level": "error",
+                "message": message,
+                "runtime": "web",
+            })
+            return True
+        await broadcast_image(clients, stored.item.webp_bytes, stored.image_meta)
+        await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
+        for _evicted in stored.evicted_payloads:
+            await broadcast_json(clients, _evicted)
+        await broadcast_json(clients, context.auto_save_state_payload())
         await _send_json(ws, {
             "type": "toast",
             "level": "success",

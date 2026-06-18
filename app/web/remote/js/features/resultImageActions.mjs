@@ -649,6 +649,29 @@ export function createResultImageActions({
     }
   }
 
+  function outpaintFromContext(context = {}) {
+    if (currentMode() !== 'NAI') {
+      showToast('Outpaint is only available in NAI mode', 'error');
+      return;
+    }
+    const ws = getWs();
+    if (!ws || ws.readyState !== window.WebSocket.OPEN) {
+      showToast('Remote connection is not open', 'error');
+      return;
+    }
+    try {
+      ws.send(JSON.stringify({
+        type: 'result_outpaint',
+        source: context.source || '',
+        path: context.source === 'current' ? '' : (context.path || ''),
+      }));
+      showToast('Outpaint 요청됨', 'success');
+    } catch (error) {
+      console.error('Outpaint request failed', error);
+      showToast('Outpaint request failed', 'error');
+    }
+  }
+
   function resultContextCommandPayload(context = {}) {
     return {
       source: context.source || '',
@@ -852,6 +875,7 @@ export function createResultImageActions({
     saveImageFromContext,
     copyImageFromContext,
     upscaleFromContext,
+    outpaintFromContext,
     requestContextImageAction,
     showMetadataInTab,
     handleInternalImageDrop,

@@ -9,6 +9,7 @@ const ACTION_OPEN_LOCATION = 'open_location';
 const ACTION_SAVE_IMAGE = 'save_image';
 const ACTION_COPY_IMAGE = 'copy_image';
 const ACTION_UPSCALE_NAI = 'upscale_nai';
+const ACTION_OUTPAINT = 'outpaint';
 const ACTION_METADATA_DETACHED = 'show_metadata_detached';
 const ACTION_WEBUI_ENHANCE = 'webui_enhance';
 const ACTION_DELETE_RESULT = 'delete_result';
@@ -110,7 +111,7 @@ const MAIN_IMAGE_MENU = [
       {label: 'Director Tools', action: ACTION_DIRECTOR, modes: ['NAI']},
       {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true, modes: ['NAI']},
       {label: 'Send to Inpaint', action: ACTION_IMAGE_ACTION, imageAction: 'inpaint', capability: 'inpaint', desktopImg2Img: true, modes: ['NAI']},
-      {label: 'Instant Outpaint Request'},
+      {label: 'Instant Outpaint Request', action: ACTION_OUTPAINT, capability: 'image_action', modes: ['NAI']},
       {label: 'Send to Outpainting'},
       {label: 'Use as outpainting base'},
       {label: 'Set as Character Reference', action: ACTION_SET_CHAR_REF, modes: ['NAI']},
@@ -200,6 +201,7 @@ export function createResultContextMenu({
   onSaveImage = null,
   onCopyImage = null,
   onUpscaleNai = null,
+  onInstantOutpaint = null,
   onWebUiEnhance = null,
   onGrokI2I = null,
   onGrokI2V = null,
@@ -349,6 +351,9 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_UPSCALE_NAI) {
       return typeof onUpscaleNai === 'function';
+    }
+    if (item.action === ACTION_OUTPAINT) {
+      return typeof onInstantOutpaint === 'function' && hasCapability(context, 'image_action');
     }
     if (item.action === ACTION_WEBUI_ENHANCE) {
       return typeof onWebUiEnhance === 'function';
@@ -619,6 +624,8 @@ export function createResultContextMenu({
           onCopyImage(context, button.dataset.copyFormat || 'png');
         } else if (action === ACTION_UPSCALE_NAI) {
           onUpscaleNai(context);
+        } else if (action === ACTION_OUTPAINT) {
+          if (typeof onInstantOutpaint === 'function') onInstantOutpaint(context);
         } else if (action === ACTION_WEBUI_ENHANCE) {
           onWebUiEnhance(context);
         } else if (action === ACTION_IMAGE_ACTION) {

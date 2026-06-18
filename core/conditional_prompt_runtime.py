@@ -299,13 +299,36 @@ class HeadlessConditionalRuleEngine:
             context.metadata = {}
             metadata = context.metadata
 
+        # 슬롯 베이스에 직접 입력된 와일드카드(__wc__/<a|b>/$wc) 확장. 조건부 훅은
+        # after_wildcard(유일한 확장 패스 이후)에 실행되므로, 여기서 확장하지 않으면 이
+        # override가 그대로 페이로드로 나가 직접 입력 토큰이 리터럴로 남는다(조건부가 *주입*한
+        # 태그는 _expand_action_tags로 이미 확장됨 — 직접 입력 베이스만 누락되던 회귀:
+        # "조건부는 개봉, 직접 입력은 미개봉"). 확장 결과를 슬롯에 write-back 해 반복 store
+        # 시 재롤/카운터 재전진을 막는다(이미 확장된 리터럴은 토큰이 없어 no-op).
+        def _expand_slot_field(slot, field):
+            raw = str(slot.get(field) or "").strip()
+            if not raw or not (("__" in raw) or ("<" in raw) or ("$" in raw)):
+                return raw
+            pieces = [piece.strip() for piece in split_tags_smart(raw) if piece.strip()]
+            expanded = self._expand_action_tags(context, pieces)
+            value = ", ".join(str(piece).strip() for piece in expanded if str(piece).strip()) or raw
+            slot[field] = value  # write-back: 반복 store 시 같은 토큰 재확장 방지
+            return value
+
         characters: list[str] = []
         ucs: list[str] = []
         for slot in slots:
-            prompt = str(slot.get("prompt") or "").strip()
-            if slot.get("active") and prompt:
-                characters.append(prompt)
-                ucs.append(str(slot.get("uc") or "").strip())
+            # 확장은 *실제 페이로드에 나갈 슬롯*(active + 비어있지 않은 prompt)에 한해 수행한다.
+            # 비활성/빈 프롬프트 슬롯까지 확장하면 __*wc__(순차)·$m:s(옵저버)가 메인 프롬프트와
+            # 공유하는 카운터를 헛소비해 시퀀스가 어긋난다(Codex 리뷰 지적). 정상 캐릭터 경로
+            # (active_character_frames → _expand_character_text)의 필터-후-확장 순서와 일치.
+            if not slot.get("active") or not str(slot.get("prompt") or "").strip():
+                continue
+            prompt = _expand_slot_field(slot, "prompt")
+            if not prompt:
+                continue
+            characters.append(prompt)
+            ucs.append(_expand_slot_field(slot, "uc"))
 
         settings["characters"] = characters
         settings["uc"] = ucs

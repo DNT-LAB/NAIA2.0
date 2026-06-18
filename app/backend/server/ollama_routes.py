@@ -163,85 +163,39 @@ def search_llm_tags(context: WebSessionContext, query: str, limit: int = 12) -> 
         return search_kr_tags(context, query, limit=limit)
 
 
-def _relation_norm_tag(value: Any) -> str:
-    return (
-        " ".join(
-            str(value or "")
-            .replace("\\(", "(")
-            .replace("\\)", ")")
-            .replace("_", " ")
-            .strip()
-            .lower()
-            .split()
-        )
-    )
-
-
-def _ensure_tag_relation_ranker(context: WebSessionContext) -> tuple[dict[str, Any], Any]:
-    raw_tags = getattr(context, "kr_tags_raw", None)
-    ranker = getattr(context, "tag_relation_ranker", None)
-    if not isinstance(raw_tags, dict) or not raw_tags or ranker is None:
-        from app.backend.server.prompt_tools_routes import _tag_data_roots
-        from core.kr_tag_loader import load_kr_tag_records
-        from core.tag_relation_ranker import TagRelationRanker
-
-        load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
-        raw_tags = load_result.raw
-        context.kr_tags_raw = raw_tags
-        ranker = TagRelationRanker(raw_tags) if raw_tags else None
-        context.tag_relation_ranker = ranker
-    return (raw_tags if isinstance(raw_tags, dict) else {}), ranker
-
-
 def related_tags_for_chat(context: WebSessionContext, seeds: Iterable[str], limit: int = 8) -> list[dict[str, Any]]:
-    raw_tags, ranker = _ensure_tag_relation_ranker(context)
-    if not raw_tags or ranker is None:
-        return []
-    ranked: dict[str, dict[str, Any]] = {}
-    seed_keys: set[str] = set()
+    """Related-tag candidates for the Chat ≥1-expansion fallback.
+
+    TagRelationRanker's relation graph (ui/interactive/interactive) is NOT shipped
+    in this deployment, so it always returns empty. The real co-occurrence data
+    that exists at runtime is the Event Preset dataset, so related tags come from
+    the event co-occurrence index (_event_combo_tag_stats). The pipeline applies
+    tag-hygiene (validate/collapse/dedup vs seeds) on top of these candidates.
+    """
+    weights: dict[str, dict[str, Any]] = {}
     for seed in seeds or []:
-        key = _relation_norm_tag(seed)
-        if not key:
+        query = str(seed or "").strip()
+        if not query:
             continue
-        info = raw_tags.get(key)
-        if not info:
-            try:
-                rows = search_llm_tags(context, key, limit=4)
-            except Exception:
-                rows = []
-            chosen = None
-            for row in rows:
-                if _relation_norm_tag(row.get("tag")) == key:
-                    chosen = row
-                    break
-            if chosen is None and rows:
-                chosen = rows[0]
-            if isinstance(chosen, dict):
-                key = _relation_norm_tag(chosen.get("tag"))
-                info = raw_tags.get(key)
-        if not key or not info:
-            continue
-        seed_keys.add(key)
         try:
-            related = ranker.rank(key, info, limit=max(limit * 2, limit))
+            rows = _event_combo_tag_stats(context, "e", "1girl_solo", query, 6)
         except Exception:
-            related = []
-        for item in related:
-            tag = _relation_norm_tag(getattr(item, "tag", ""))
-            if not tag or tag in seed_keys:
+            rows = []
+        for row in rows:
+            tag = str(row.get("tag") or "").strip()
+            if not tag:
                 continue
-            tag_info = raw_tags.get(tag, {}) or {}
-            try:
-                count = int(tag_info.get("freq") or 0)
-            except Exception:
-                count = 0
-            score = float(getattr(item, "score", 0.0) or 0.0)
-            prev = ranked.get(tag)
-            if prev is None or score > float(prev.get("score") or 0.0):
-                ranked[tag] = {"tag": tag, "count": count, "score": score}
-    out = list(ranked.values())
-    out.sort(key=lambda row: (float(row.get("score") or 0.0), int(row.get("count") or 0)), reverse=True)
-    return out[: max(0, int(limit or 8))]
+            cur = weights.setdefault(tag, {"tag": tag, "count": 0, "score": 0.0})
+            cnt = int(row.get("count") or 0)
+            support = int(row.get("support") or 0)
+            cur["count"] = max(int(cur["count"]), cnt)
+            cur["score"] = float(cur["score"]) + float(cnt) * (1.0 + support)
+    ranked = sorted(
+        weights.values(),
+        key=lambda row: (float(row.get("score") or 0.0), int(row.get("count") or 0)),
+        reverse=True,
+    )
+    return ranked[: max(0, int(limit or 8))]
 
 
 def _event_combo_tags(

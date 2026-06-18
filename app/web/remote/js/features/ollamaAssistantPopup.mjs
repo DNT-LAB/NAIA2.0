@@ -774,21 +774,8 @@ export function createOllamaAssistantPopup({
     busy = true;
     const targetModel = String(model || connModel || '').trim();
     try {
-      if (targetModel && targetModel !== connModel && canConfigure) {
-        const {status, payload} = await postOllamaConnectionModel(win, {
-          endpoint: connEndpointBase,
-          model: targetModel,
-        });
-        if (status === 403 || !payload || payload.ok === false) {
-          showToast(payload?.error || '모델 설정 저장 실패', 'error');
-          return;
-        }
-        connEndpointBase = String(payload.endpoint || '');
-        connModel = String(payload.model || '') || targetModel || DEFAULT_MODEL;
-        connIsCustom = !!payload.is_custom;
-        updateModelNote();
-        updateModelSelect();
-      }
+      // 다운로드는 활성 모델을 바꾸지 않는다 — pull은 {model}로 직접 받고, 설치 완료 후
+      // 사용자가 셀렉터에서 선택해 활성화한다(미설치 모델로 활성 모델이 바뀌는 footgun 방지).
       const {status, payload} = await fetchJson('/api/ollama/pull', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},

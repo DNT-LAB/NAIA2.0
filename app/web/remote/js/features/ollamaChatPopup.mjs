@@ -629,19 +629,8 @@ export function createOllamaChatPopup({
     if (!target) return;
     renderReadiness('<span class="ollama-chat-ready-msg">모델 다운로드 시작 중…</span>');
     try {
-      if (target !== connModel && canConfigure) {
-        const {status, payload} = await postOllamaConnectionModel(win, {
-          endpoint: connEndpointBase,
-          model: target,
-        });
-        if (status === 403 || !payload || payload.ok === false) {
-          renderReadiness(`<span class="ollama-chat-ready-msg err">${escHtml(payload?.error || '모델 설정 저장 실패')}</span>`);
-          return;
-        }
-        connEndpointBase = String(payload.endpoint || '');
-        connModel = String(payload.model || '') || target || DEFAULT_MODEL;
-        updateModelSelect();
-      }
+      // 다운로드는 활성 모델을 바꾸지 않는다 — pull은 {model}로 직접 받고, 설치 완료 후
+      // 사용자가 셀렉터에서 선택해 활성화한다(미설치 모델로 활성 모델이 바뀌는 footgun 방지).
       const {status, payload} = await fetchJson('/api/ollama/pull', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},

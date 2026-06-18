@@ -223,6 +223,14 @@ def character_params_from_settings(
     if save_root is None:
         save_root = _save_root_from_context(app_context)
     # (1) Conditional override is per-run and outranks the snapshot.
+    # ⚠️ 불변식(재발 버그 영역 — "피곤한 버그"): 이 분기는 아래 step 4의
+    # _expand_character_text(와일드카드 전개)를 *우회*한다. 조건부 훅은 after_wildcard
+    # (파이프라인의 유일한 전개 패스 이후)에 돌기 때문에, override 생산자
+    # (conditional_prompt_runtime._store_character_overrides)가 emit하는 모든 캐릭터
+    # 텍스트의 와일드카드를 *스스로* 전개해 둬야 한다. 표면별로 하나씩 누락돼 5회 재발했다:
+    #   S1 액션 주입(char:N+=__wc__) 5c72e6e6 · S2 char_replace 8dd8bb9e ·
+    #   S3 슬롯 베이스(캐릭터 칸 직접 입력) 97572409.
+    # override에는 raw 토큰을 절대 넣지 말 것. (로컬 상세: CONDITIONAL_CHAR_WILDCARD_TRAP.md)
     override = _conditional_character_override(app_context, reuse_current_context=reuse_current_context)
     if override is not None:
         return override

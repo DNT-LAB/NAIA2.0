@@ -55,6 +55,11 @@ _ASSIST_EXTRA_RULES: tuple[dict[str, Any], ...] = (
     {"id": "a_eyepatch", "axis": "clothing", "patterns": ["\uc548\ub300"], "tags": ["eyepatch"], "confidence": 0.82},
     {"id": "a_open_mouth", "axis": "expression", "patterns": ["\uc785\uc744 \ubc8c", "\uc785 \ubc8c", "\ubc8c\ub9b0 \uc785"],
      "tags": ["open mouth"], "confidence": 0.8},
+    # \uba54\ub871/\ud600 \ub0b4\ubc00\uae30 \u2014 \uad6c\uc5b4 "\uba54\ub871"\uc740 \uad6c\uae00 \ubc88\uc5ed\uc11c "pleased expression"\uc73c\ub85c \ubb49\uac1c\uc838 tongue out
+    # \uc2e0\ud638\uac00 LLM \ub3c4\ub2ec \uc804 \uc18c\uc2e4\ub41c\ub2e4. \uc6d0\ubb38 \ud55c\uad6d\uc5b4\uc5d0 \uc9c1\uc811 \uacb0\uc815\ub860 \uc575\ucee4(\ubc88\uc5ed \ubb34\uad00).
+    {"id": "a_tongue_out", "axis": "expression",
+     "patterns": ["\uba54\ub871", "\ud600\ub97c \ub0b4\ubbf8", "\ud600 \ub0b4\ubbf8", "\ud600\ub97c \ub0b4\ubc00", "\ud600 \ub0b4\ubc00", "\ud600\ub97c \uc3d9"],
+     "tags": ["tongue out"], "confidence": 0.82},
 )
 
 
@@ -2273,6 +2278,11 @@ class OllamaTagAssistService:
                 },
                 ensure_ascii=False,
             )
+            # 26B 등 광컨텍스트 모델이 자유형 descriptions 문자열을 무한 반복하며 폭주하던
+            # 루프 차단: 출력 토큰 상한(레벨 비례). 스키마 강제라 정상 출력은 안 잘리고
+            # 폭주만 막는다 — max(보완12·자연어6×36단어)도 ~500토큰이라 상한 1088은 여유.
+            nat_hi = int(cfg["nat_words"][1])
+            finish_cap = 320 + enhance_max * 10 + natural_max * (nat_hi * 3)
             try:
                 finished = self._chat(
                     _finish_instruction(
@@ -2280,6 +2290,7 @@ class OllamaTagAssistService:
                         nat_words=cfg["nat_words"],
                     ) + family_safe_contract_line(scene_anchors) + finish_user,
                     _FINISH_SCHEMA, model=target_model, temperature=0.4,
+                    num_predict=finish_cap,
                 )
             except Exception:
                 finished = {}

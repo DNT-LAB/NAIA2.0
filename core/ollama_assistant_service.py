@@ -784,6 +784,7 @@ class OllamaAssistantService:
             "- 주인 = owner/master/person being served. Never master sword.\n"
             "- 칼날 = blade or sword. 붙잡는 = catching/grabbing/holding onto, not generic holding only.\n"
             "- 누워있는 = lying down/reclining. Do not say bed unless Korean explicitly says bed.\n"
+            "- 메롱 / 혀를 내미는 = sticking tongue out (tongue out), a playful taunt. Never 'pleased expression'.\n"
             "- No franchise/proper nouns. No invisible details.\n\n"
             f"Korean: {text[:2000]}\n"
             f"Machine English: {str(mt or '')[:2000]}"

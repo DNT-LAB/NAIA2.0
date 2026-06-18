@@ -22,6 +22,7 @@ from core.semantic_tag_discovery import ground_scene_segments, normalize_scene_c
 SearchFn = Callable[[str, int, GenerationInfoContext], list[dict[str, Any]]]
 EventProvider = Callable[[str, str, str, int], list[dict[str, Any]]]
 ClothesProvider = Callable[[str, int], list[dict[str, Any]]]
+RelatedProvider = Callable[[Iterable[str], int], list[dict[str, Any]]]
 
 _HANGUL_RE = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 _CONTEXT_REF_RE = re.compile(
@@ -37,6 +38,12 @@ _CLOTHES_COMBO_RE = re.compile(
     re.IGNORECASE,
 )
 _RELATED_RE = re.compile(r"(관련|추천|recommend|suggest)", re.IGNORECASE)
+_RELATED_TAG_QUERY_RE = re.compile(
+    r"(관련\s*(?:있는\s*)?태그|연관\s*태그|태그(?:들)?(?:에)?\s*대해\s*알려|"
+    r"태그\s*알려|에\s*대해\s*알려|related\s+tags|tags\s+related\s+to|"
+    r"associated\s+tags|tell\s+me\s+about)",
+    re.IGNORECASE,
+)
 _BARE_RECOMMEND_RE = re.compile(
     r"^\s*(추천(?:해줘|해주세요)?|recommend|suggest|suggestions?)\s*[.!?。？]*\s*$",
     re.IGNORECASE,
@@ -179,6 +186,7 @@ class OllamaChatPipeline:
         searcher: SearchFn,
         event_provider: EventProvider,
         clothes_provider: ClothesProvider | None = None,
+        related_provider: RelatedProvider | None = None,
         translator: Callable[[str], str | None] | None = None,
     ) -> None:
         self.assistant = assistant
@@ -186,6 +194,7 @@ class OllamaChatPipeline:
         self.searcher = searcher
         self.event_provider = event_provider
         self.clothes_provider = clothes_provider
+        self.related_provider = related_provider
         self.translator = translator
         self._progress = ChatPipelineProgress()
 
@@ -222,6 +231,11 @@ class OllamaChatPipeline:
                 return self._clarification(user_input, intent)
             if intent.goal not in {"scene_compose", "event_lookup", "tag_discovery"}:
                 return {"handled": False, "intent": intent.summary()}
+            related_query = self._is_related_tag_query(user_input)
+            if intent.goal == "tag_discovery" and related_query:
+                related_result = self._run_related_query(user_input, intent, gen_context)
+                if related_result.get("handled"):
+                    return related_result
             if intent.goal == "tag_discovery" and not self._looks_scene_like(user_input):
                 return {"handled": False, "intent": intent.summary()}
 
@@ -246,10 +260,23 @@ class OllamaChatPipeline:
             flat_tags = self._flat_scene_tags(segments)
             event_tags = self._event_tags(segments, flat_tags, clean)
             clothes_tags = self._clothes_tags(segments, flat_tags)
+            related_tags: list[dict[str, Any]] = []
 
             self._stage(5, "최종")
             final_tags = self._final_tags(flat_tags, event_tags)
-            if self._is_near_empty(final_tags, event_tags, user_input, clothes_tags):
+            meaningful_flat = self._meaningful_tags(flat_tags)
+            expanded = (
+                bool(event_tags)
+                or bool(clothes_tags)
+                or len(set(meaningful_flat)) >= 2
+            )
+            if not expanded:
+                related_seeds = meaningful_flat or self._meaningful_tags(final_tags) or flat_tags[:1]
+                related_tags = self._related_tags(related_seeds, limit=8)
+                expanded = bool(related_tags)
+            if not expanded:
+                return self._clarification(user_input, intent)
+            if not related_tags and self._is_near_empty(final_tags, event_tags, user_input, clothes_tags):
                 return self._clarification(user_input, intent)
             return {
                 "handled": True,
@@ -264,6 +291,7 @@ class OllamaChatPipeline:
                 "segments": segments,
                 "eventTags": event_tags,
                 "clothesTags": clothes_tags,
+                "relatedTags": related_tags,
                 "finalTags": final_tags,
                 "message": "이렇게 이해하고 실제 태그 후보로 정리했습니다.",
             }
@@ -325,6 +353,16 @@ class OllamaChatPipeline:
                 meaningful.append(_norm(tag))
         return len(meaningful) <= 1
 
+    def _meaningful_tags(self, tags: Iterable[Any]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for tag in tags or []:
+            norm = _norm(tag)
+            if norm and norm not in seen and self._is_meaningful_tag(norm):
+                seen.add(norm)
+                out.append(norm)
+        return out
+
     def _is_meaningful_tag(self, tag: Any) -> bool:
         norm = _norm(tag)
         if not norm:
@@ -334,6 +372,257 @@ class OllamaChatPipeline:
         if any(part in norm for part in ("mood", "lighting", "background", "atmosphere", "vibe")):
             return False
         return True
+
+    def _is_related_tag_query(self, text: str) -> bool:
+        return bool(_RELATED_TAG_QUERY_RE.search(str(text or "")))
+
+    def _run_related_query(
+        self,
+        user_input: str,
+        intent: ClampedIntent,
+        gen_context: GenerationInfoContext,
+    ) -> dict[str, Any]:
+        self._stage(2, "검색")
+        seeds = self._ground_related_seeds(user_input, intent, gen_context)
+        related_tags = self._related_tags(seeds, limit=8)
+        if not related_tags:
+            return self._clarification(user_input, intent)
+        seed_rows = [
+            {"tag": seed, "count": 0, "match": "seed"}
+            for seed in seeds
+            if seed
+        ]
+        return {
+            "handled": True,
+            "ok": True,
+            "type": "scene_pipeline",
+            "intent": intent.summary(),
+            "translation": {
+                "source": user_input,
+                "mt": "",
+                "cleanEnglish": ", ".join(seeds) or user_input,
+            },
+            "segments": [{
+                "phrase": "related tags",
+                "axis": "general",
+                "tags": seed_rows,
+            }] if seed_rows else [],
+            "eventTags": [],
+            "clothesTags": [],
+            "relatedTags": related_tags,
+            "finalTags": seeds,
+            "message": "요청하신 태그와 연관된 실제 태그 후보입니다.",
+        }
+
+    def _ground_related_seeds(
+        self,
+        user_input: str,
+        intent: ClampedIntent,
+        gen_context: GenerationInfoContext,
+    ) -> list[str]:
+        seeds: list[str] = []
+        seen: set[str] = set()
+        for query in self._related_seed_candidates(user_input, intent):
+            q = normalize_scene_concept(query)
+            if _HANGUL_RE.search(q):
+                try:
+                    translated = self.translator(q) if callable(self.translator) else None
+                except Exception:
+                    translated = None
+                q = normalize_scene_concept(translated or self._fallback_subject(q))
+            if not q:
+                continue
+            rows = self._clean_searcher(q, 8, gen_context)
+            chosen = None
+            q_norm = _norm(q)
+            for row in rows:
+                if _norm(row.get("tag")) == q_norm:
+                    chosen = row
+                    break
+            if chosen is None and rows:
+                for row in rows:
+                    tag = _norm(row.get("tag"))
+                    if tag and self._is_meaningful_tag(tag):
+                        chosen = row
+                        break
+            tag = _norm(chosen.get("tag")) if isinstance(chosen, dict) else ""
+            if not tag:
+                validated = None
+                if callable(getattr(self.assist, "validate_tag", None)):
+                    validated = self._assist_validate_tag(q)
+                tag = _norm(validated.get("tag")) if validated else ""
+            if tag and tag not in seen and self._is_meaningful_tag(tag):
+                seen.add(tag)
+                seeds.append(tag)
+            if len(seeds) >= 4:
+                break
+        return seeds
+
+    def _related_seed_candidates(self, user_input: str, intent: ClampedIntent) -> list[str]:
+        out: list[str] = []
+
+        def add(value: Any) -> None:
+            text = self._clean_related_seed(value)
+            if text and text not in out:
+                out.append(text)
+
+        text = str(user_input or "").strip()
+        for subject in intent.subjects or []:
+            if isinstance(subject, dict):
+                add(subject.get("text"))
+        patterns = (
+            r"^\s*(.+?)(?:와|과|랑|하고)?\s*(?:관련\s*(?:있는\s*)?태그|연관\s*태그)",
+            r"^\s*(.+?)(?:에)?\s*대해\s*알려",
+            r"^\s*(.+?)\s*태그(?:들)?(?:을|를)?\s*알려",
+            r"tags\s+related\s+to\s+(.+)$",
+            r"related\s+tags(?:\s+(?:for|about))?\s+(.+)$",
+            r"associated\s+tags(?:\s+(?:for|about))?\s+(.+)$",
+            r"tell\s+me\s+about\s+(.+)$",
+        )
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                add(match.group(1))
+        add(self._fallback_subject(text))
+        return out[:6]
+
+    def _clean_related_seed(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        text = text.strip("`'\"“”‘’[]() ")
+        text = re.sub(
+            r"(관련\s*(?:있는\s*)?태그|연관\s*태그|태그(?:들)?|프롬프트|"
+            r"알려\s*(?:줘|주세요)?|추천\s*(?:해줘|해주세요)?|related\s+tags|"
+            r"tags\s+related\s+to|tell\s+me\s+about|associated\s+tags)",
+            " ",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(r"(?:와|과|랑|하고|에|에\s*대한|에\s*대해)$", " ", text.strip())
+        text = " ".join(text.replace("_", " ").split())
+        if len(text) > 80:
+            return ""
+        return text
+
+    def _related_tags(self, seeds: Iterable[Any], limit: int = 8) -> list[dict[str, Any]]:
+        provider = self.related_provider
+        seed_list = self._meaningful_tags(seeds)
+        if not callable(provider) or not seed_list:
+            return []
+        seed_set = {_norm(seed) for seed in seed_list}
+        try:
+            rows = list(provider(seed_list, max(limit * 2, limit)) or [])
+        except Exception:
+            rows = []
+        if not rows:
+            return []
+        seen: set[str] = set(seed_set)
+        validated: list[dict[str, Any]] = []
+        for row in rows:
+            if isinstance(row, str):
+                raw_tag = row
+                count = 0
+                score = 0.0
+            elif isinstance(row, dict):
+                raw_tag = row.get("tag")
+                count = row.get("count", 0)
+                score = row.get("score", 0.0)
+            else:
+                continue
+            tag = _norm(raw_tag)
+            if not tag or tag in seed_set or tag in seen or not self._is_meaningful_tag(tag):
+                continue
+            if not self._assist_tag_allowed(tag, "e"):
+                continue
+            validated_row = self._assist_validate_tag(tag)
+            if not validated_row:
+                validated_row = self._assist_recover_tag(tag, seen, max_rating="e")
+            if not validated_row:
+                continue
+            real_tag = _norm(validated_row.get("tag"))
+            if not real_tag or real_tag in seed_set or real_tag in seen or not self._is_meaningful_tag(real_tag):
+                continue
+            seen.add(real_tag)
+            try:
+                count_int = int(count or validated_row.get("count") or 0)
+            except Exception:
+                count_int = 0
+            try:
+                score_float = float(score or 0.0)
+            except Exception:
+                score_float = 0.0
+            item = {"tag": real_tag, "count": count_int, "score": score_float}
+            validated.append(item)
+        collapsed = self._assist_collapse_variants(validated, set(seed_set))
+        collapsed.sort(
+            key=lambda item: (float(item.get("score") or 0.0), int(item.get("count") or 0)),
+            reverse=True,
+        )
+        out: list[dict[str, Any]] = []
+        seen = set(seed_set)
+        for item in collapsed:
+            tag = _norm(item.get("tag"))
+            if not tag or tag in seen:
+                continue
+            seen.add(tag)
+            out.append({
+                "tag": tag,
+                "count": int(item.get("count") or 0),
+                "score": float(item.get("score") or 0.0),
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+    def _assist_tag_allowed(self, tag: str, max_rating: str = "e") -> bool:
+        fn = getattr(self.assist, "tag_allowed", None)
+        if not callable(fn):
+            return True
+        try:
+            return bool(fn(tag, max_rating))
+        except Exception:
+            return False
+
+    def _assist_validate_tag(self, tag: str) -> dict[str, Any] | None:
+        fn = getattr(self.assist, "validate_tag", None)
+        if not callable(fn):
+            return {"tag": _norm(tag), "count": 0}
+        try:
+            row = fn(tag)
+            return row if isinstance(row, dict) else None
+        except Exception:
+            return None
+
+    def _assist_recover_tag(
+        self,
+        tag: str,
+        seen: set[str],
+        *,
+        max_rating: str = "e",
+    ) -> dict[str, Any] | None:
+        fn = getattr(self.assist, "recover_tag", None)
+        if not callable(fn):
+            return None
+        try:
+            row = fn(tag, seen, max_rating=max_rating)
+            return row if isinstance(row, dict) else None
+        except Exception:
+            return None
+
+    def _assist_collapse_variants(
+        self,
+        items: list[dict[str, Any]],
+        protect: set[str],
+    ) -> list[dict[str, Any]]:
+        fn = getattr(self.assist, "collapse_variants", None)
+        if not callable(fn):
+            return items
+        try:
+            result = fn(items, protect)
+            return result if isinstance(result, list) else items
+        except Exception:
+            return items
 
     def _analyze(
         self,
@@ -374,6 +663,8 @@ class OllamaChatPipeline:
             goal = "blocked"
         elif _CLOTHES_COMBO_RE.search(text):
             goal = "clothes_combo"
+        elif _RELATED_TAG_QUERY_RE.search(text):
+            goal = "tag_discovery"
         elif clear_scene or ((_MAKE_SCENE_RE.search(text) or visual_scene) and not _RELATED_RE.search(text)):
             goal = "scene_compose"
         elif _RELATED_RE.search(text):
@@ -421,6 +712,11 @@ class OllamaChatPipeline:
             proceed = False
             ambiguity["level"] = "high"
             clarification = self._clarification_for(text)
+        elif _RELATED_TAG_QUERY_RE.search(text) and goal == "tag_discovery":
+            proceed = True
+            clarification = ""
+            if ambiguity["level"] == "high":
+                ambiguity["level"] = "medium"
         elif clear_scene and goal == "scene_compose":
             proceed = True
             clarification = ""

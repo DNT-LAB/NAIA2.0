@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 import threading
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Iterable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -161,6 +161,87 @@ def search_llm_tags(context: WebSessionContext, query: str, limit: int = 12) -> 
         from app.backend.server.autocomplete_commands import search_kr_tags
 
         return search_kr_tags(context, query, limit=limit)
+
+
+def _relation_norm_tag(value: Any) -> str:
+    return (
+        " ".join(
+            str(value or "")
+            .replace("\\(", "(")
+            .replace("\\)", ")")
+            .replace("_", " ")
+            .strip()
+            .lower()
+            .split()
+        )
+    )
+
+
+def _ensure_tag_relation_ranker(context: WebSessionContext) -> tuple[dict[str, Any], Any]:
+    raw_tags = getattr(context, "kr_tags_raw", None)
+    ranker = getattr(context, "tag_relation_ranker", None)
+    if not isinstance(raw_tags, dict) or not raw_tags or ranker is None:
+        from app.backend.server.prompt_tools_routes import _tag_data_roots
+        from core.kr_tag_loader import load_kr_tag_records
+        from core.tag_relation_ranker import TagRelationRanker
+
+        load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
+        raw_tags = load_result.raw
+        context.kr_tags_raw = raw_tags
+        ranker = TagRelationRanker(raw_tags) if raw_tags else None
+        context.tag_relation_ranker = ranker
+    return (raw_tags if isinstance(raw_tags, dict) else {}), ranker
+
+
+def related_tags_for_chat(context: WebSessionContext, seeds: Iterable[str], limit: int = 8) -> list[dict[str, Any]]:
+    raw_tags, ranker = _ensure_tag_relation_ranker(context)
+    if not raw_tags or ranker is None:
+        return []
+    ranked: dict[str, dict[str, Any]] = {}
+    seed_keys: set[str] = set()
+    for seed in seeds or []:
+        key = _relation_norm_tag(seed)
+        if not key:
+            continue
+        info = raw_tags.get(key)
+        if not info:
+            try:
+                rows = search_llm_tags(context, key, limit=4)
+            except Exception:
+                rows = []
+            chosen = None
+            for row in rows:
+                if _relation_norm_tag(row.get("tag")) == key:
+                    chosen = row
+                    break
+            if chosen is None and rows:
+                chosen = rows[0]
+            if isinstance(chosen, dict):
+                key = _relation_norm_tag(chosen.get("tag"))
+                info = raw_tags.get(key)
+        if not key or not info:
+            continue
+        seed_keys.add(key)
+        try:
+            related = ranker.rank(key, info, limit=max(limit * 2, limit))
+        except Exception:
+            related = []
+        for item in related:
+            tag = _relation_norm_tag(getattr(item, "tag", ""))
+            if not tag or tag in seed_keys:
+                continue
+            tag_info = raw_tags.get(tag, {}) or {}
+            try:
+                count = int(tag_info.get("freq") or 0)
+            except Exception:
+                count = 0
+            score = float(getattr(item, "score", 0.0) or 0.0)
+            prev = ranked.get(tag)
+            if prev is None or score > float(prev.get("score") or 0.0):
+                ranked[tag] = {"tag": tag, "count": count, "score": score}
+    out = list(ranked.values())
+    out.sort(key=lambda row: (float(row.get("score") or 0.0), int(row.get("count") or 0)), reverse=True)
+    return out[: max(0, int(limit or 8))]
 
 
 def _event_combo_tags(
@@ -593,6 +674,7 @@ def register_ollama_routes(
             existing.assistant = assistant
             existing.assist = assist
             existing.clothes_provider = _clothes_provider
+            existing.related_provider = lambda seeds, limit: related_tags_for_chat(context, seeds, limit=limit)
             return existing
         existing = OllamaChatPipeline(
             assistant=assistant,
@@ -604,6 +686,7 @@ def register_ollama_routes(
                 context, rating, person_id, query, top
             ),
             clothes_provider=_clothes_provider,
+            related_provider=lambda seeds, limit: related_tags_for_chat(context, seeds, limit=limit),
             translator=_korean_to_english,
         )
         context.ollama_chat_pipeline = existing

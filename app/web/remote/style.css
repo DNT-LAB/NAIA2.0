@@ -16839,6 +16839,19 @@ body.detached-module .mod-grid-3 {
   padding: 7px 0 2px;
   border-top: 1px solid rgba(130,150,255,0.16);
 }
+.ollama-chat-curated {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+.ollama-chat-curated-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
 .ollama-chat-event-title {
   color: var(--text-primary);
   font-size: 10.5px;

@@ -9,7 +9,7 @@ import {
   postOllamaConnectionModel,
   setOllamaModelSelectOptions,
   shortOllamaModel,
-} from './ollamaModelSelect.mjs?v=20260617-modelsel';
+} from './ollamaModelSelect.mjs?v=20260618-related-curated';
 
 const DEFAULT_ENDPOINT = 'http://localhost:11434/v1';
 const DOWNLOAD_PAGE = 'https://ollama.com/download';
@@ -39,6 +39,7 @@ export function createOllamaAssistantPopup({
   let connIsCustom = false;        // 원격(비-로컬) 엔드포인트 여부
   let canConfigure = false;        // GET /connection 성공(=루프백 호스트)일 때만 ⚙ 노출
   let installedModels = [];
+  let curatedModels = [];
 
   function pick(selector) {
     return popup ? popup.querySelector(selector) : null;
@@ -433,6 +434,21 @@ export function createOllamaAssistantPopup({
     });
   }
 
+  function curatedModelActions(canControl) {
+    const items = Array.isArray(curatedModels) ? curatedModels : [];
+    if (!items.length) return '';
+    return items.map(item => {
+      const model = String(item?.model || '').trim();
+      const label = escHtml(String(item?.label || shortOllamaModel(model)));
+      const size = item?.size ? ` · ${escHtml(String(item.size))}` : '';
+      const state = item?.installed ? '설치됨' : '미설치';
+      const button = (!item?.installed && canControl && model)
+        ? `<button type="button" class="ollama-assistant-action" data-act="pull" data-model="${escHtml(model)}">${label}${size} 다운로드</button>`
+        : `<span class="ollama-assistant-natural-line">${label}${size} · ${escHtml(state)}</span>`;
+      return button;
+    }).join('');
+  }
+
   function toggleConnEditor(forceOpen) {
     const editor = pick('.ollama-conn-editor');
     if (!editor) return;
@@ -586,6 +602,7 @@ export function createOllamaAssistantPopup({
     }
     // 모델은 백엔드 SSOT — status가 알려주는 실제 구성 모델로 표시를 맞춘다(원격 포함).
     installedModels = Array.isArray(data.models) ? data.models.map(item => String(item || '')).filter(Boolean) : [];
+    curatedModels = Array.isArray(data.curated) ? data.curated : [];
     if (data.model) { connModel = String(data.model); }
     updateModelNote();
     updateModelSelect();
@@ -639,10 +656,9 @@ export function createOllamaAssistantPopup({
       setStatus(canControl
         ? '서버는 켜져 있지만 대상 모델이 없습니다. 다운로드하세요 (수 GB).'
         : '대상 모델이 없습니다 — 다운로드는 NAIA가 실행 중인 PC에서 시작하세요.');
-      renderActions(canControl ? `
-        <button type="button" class="ollama-assistant-action" data-act="pull">모델 다운로드</button>
-        <button type="button" class="ollama-assistant-action secondary" data-act="copy-run">실행 명령 복사</button>` : `
-        <button type="button" class="ollama-assistant-action secondary" data-act="copy-run">실행 명령 복사</button>`);
+      const curated = curatedModelActions(canControl);
+      renderActions((curated ? curated : '')
+        + `<button type="button" class="ollama-assistant-action secondary" data-act="copy-run">실행 명령 복사</button>`);
     } else {
       setBadge(`실행 중 · 모델 준비됨 ✓`, 'ok');
       setStatus('아래에 원하는 장면을 한국어로 적으면 실제 태그로 변환합니다.');
@@ -753,14 +769,30 @@ export function createOllamaAssistantPopup({
     }
   }
 
-  async function startPull() {
+  async function startPull(model = '') {
     if (busy) return;
     busy = true;
+    const targetModel = String(model || connModel || '').trim();
     try {
+      if (targetModel && targetModel !== connModel && canConfigure) {
+        const {status, payload} = await postOllamaConnectionModel(win, {
+          endpoint: connEndpointBase,
+          model: targetModel,
+        });
+        if (status === 403 || !payload || payload.ok === false) {
+          showToast(payload?.error || '모델 설정 저장 실패', 'error');
+          return;
+        }
+        connEndpointBase = String(payload.endpoint || '');
+        connModel = String(payload.model || '') || targetModel || DEFAULT_MODEL;
+        connIsCustom = !!payload.is_custom;
+        updateModelNote();
+        updateModelSelect();
+      }
       const {status, payload} = await fetchJson('/api/ollama/pull', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({}),  // 모델은 백엔드 SSOT(self.default_model)
+        body: JSON.stringify(targetModel ? {model: targetModel} : {}),
       });
       if (status === 403) {
         showToast(payload.error || 'NAIA가 실행 중인 PC에서만 가능합니다.', 'error');
@@ -832,7 +864,7 @@ export function createOllamaAssistantPopup({
         if (act === 'install') openDownloadPage();
         else if (act === 'recheck') refreshStatus(true);
         else if (act === 'start-server') startServer();
-        else if (act === 'pull') startPull();
+        else if (act === 'pull') startPull(btn.dataset.model || '');
         else if (act === 'cancel-pull') cancelPull();
         else if (act === 'dataset') startDataset();
         else if (act === 'copy-run') copyText('ollama run ' + connModel, '실행 명령');

@@ -24,10 +24,26 @@ from typing import Any, Callable
 
 DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434"
 # 프론트(ollamaAssistantPopup.mjs)의 DEFAULT_MODEL과 미러 — 요청에 model이 없을 때 폴백.
-# E2B-IQ3_M로 전환: round-trip eval에서 E4B Q4_K_M 대비 recall↑(0.615→0.665)·noise↓
-# (0.215→0.182)·VRAM 절반(3.1GB)·2.3배 빠름. 파이프라인이 추론을 코드로 외부화해
-# 작은 모델이 더 순종적(노이즈↓). E2B는 IQ3_M만 로드 가능(_P 양자화는 llama.cpp 미지원).
+# E4B는 현재 기본 권장 모델이다. 더 가벼운/강한 모델은 CURATED_MODELS에서
+# 다운로드·활성화할 수 있고, DEFAULT_MODEL은 첫 실행/연결 실패 시의 단일 폴백만 담당한다.
 DEFAULT_MODEL = "hf.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q4_K_M"
+CURATED_MODELS: tuple[dict[str, str], ...] = (
+    {
+        "model": "hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M",
+        "label": "E2B · 가벼움",
+        "size": "~4.1GB",
+    },
+    {
+        "model": "hf.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q4_K_M",
+        "label": "E4B · 권장",
+        "size": "~6.3GB",
+    },
+    {
+        "model": "hf.co/HauhauCS/Gemma4-26B-A4B-Uncensored-HauhauCS-Balanced:IQ4_XS",
+        "label": "E26B · 강력",
+        "size": "~15GB",
+    },
+)
 
 _SCENE_SEGMENT_AXES = frozenset({
     "clothing",
@@ -102,6 +118,14 @@ def _endpoint_is_local(url: str) -> bool:
         return host in {"127.0.0.1", "localhost", "0.0.0.0", "::1", ""}
     except Exception:
         return False
+
+
+def _model_name_matches(installed: str, target: str) -> bool:
+    left = str(installed or "").strip()
+    right = str(target or "").strip()
+    if not left or not right:
+        return False
+    return left == right or left.split(":", 1)[0] == right.split(":", 1)[0]
 
 
 def _resolve_connection_defaults() -> tuple[str, str]:
@@ -378,9 +402,7 @@ class OllamaAssistantService:
         # 원격: 로컬 CLI 프로브가 불가하므로 도달성만으로 판정.
         if running:
             installed = True
-        model_installed = any(
-            name == target or name.split(":")[0] == target for name in models if name
-        )
+        model_installed = any(_model_name_matches(name, target) for name in models if name)
         if not include_details:
             # 원격 클라이언트: 진행 상태 렌더에 필요한 최소만 (호스트 인벤토리 비노출).
             return {
@@ -401,6 +423,17 @@ class OllamaAssistantService:
             "running": running,
             "version": version or "",
             "models": models,
+            "curated": [
+                {
+                    **item,
+                    "installed": any(
+                        _model_name_matches(name, item.get("model", ""))
+                        for name in models
+                        if name
+                    ),
+                }
+                for item in CURATED_MODELS
+            ],
             "model": target,
             "default_model": self.default_model,
             "model_installed": model_installed,

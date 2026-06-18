@@ -1,4 +1,4 @@
-const DEFAULT_MODEL = 'hf.co/HauhauCS/Gemma-4-E2B-Uncensored-HauhauCS-Aggressive:IQ3_M';
+const DEFAULT_MODEL = 'hf.co/HauhauCS/Gemma-4-E4B-Uncensored-HauhauCS-Aggressive:Q4_K_M';
 
 function shortOllamaModel(full) {
   const s = String(full || '');

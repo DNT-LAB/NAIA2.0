@@ -4,7 +4,7 @@ import {
   fetchOllamaStatus,
   postOllamaConnectionModel,
   setOllamaModelSelectOptions,
-} from './ollamaModelSelect.mjs?v=20260617-modelsel';
+} from './ollamaModelSelect.mjs?v=20260618-related-curated';
 
 export function createOllamaChatPopup({
   document,
@@ -21,10 +21,12 @@ export function createOllamaChatPopup({
   let serverReady = false;
   let eventChecked = false;
   let eventPollTimer = null;
+  let modelPullTimer = null;
   let connModel = DEFAULT_MODEL;
   let connEndpointBase = '';
   let canConfigure = false;
   let installedModels = [];
+  let curatedModels = [];
   const messages = [];
 
   function pick(selector) {
@@ -34,6 +36,7 @@ export function createOllamaChatPopup({
   function close() {
     if (typeof hideTagInfo === 'function') hideTagInfo();
     stopEventDatasetPolling();
+    stopModelPullPolling();
     if (onResize) {
       win.removeEventListener('resize', onResize);
       onResize = null;
@@ -320,7 +323,12 @@ export function createOllamaChatPopup({
         panel.appendChild(makeCopyAllRow(msg.chips.map(c => c?.tag).filter(Boolean)));
         item.appendChild(panel);
       }
-      if (msg.role === 'assistant' && msg.type === 'scene' && Array.isArray(msg.segments) && msg.segments.length && !msg.dismissed) {
+      if (msg.role === 'assistant' && msg.type === 'scene' && !msg.dismissed && (
+        (Array.isArray(msg.segments) && msg.segments.length)
+        || (Array.isArray(msg.eventTags) && msg.eventTags.length)
+        || (Array.isArray(msg.clothesTags) && msg.clothesTags.length)
+        || (Array.isArray(msg.relatedTags) && msg.relatedTags.length)
+      )) {
         const panel = document.createElement('div');
         panel.className = 'ollama-chat-chip-panel';
         panel.appendChild(makePanelHead(index, `scene: ${String(msg.anchor || '').slice(0, 64)}`));
@@ -395,10 +403,28 @@ export function createOllamaChatPopup({
           cl.appendChild(clChips);
           panel.appendChild(cl);
         }
+        const relatedTags = Array.isArray(msg.relatedTags) ? msg.relatedTags : [];
+        if (relatedTags.length) {
+          const rel = document.createElement('div');
+          rel.className = 'ollama-chat-event-section';
+          const relTitle = document.createElement('div');
+          relTitle.className = 'ollama-chat-event-title';
+          relTitle.textContent = '연관 태그';
+          rel.appendChild(relTitle);
+          const relChips = document.createElement('div');
+          relChips.className = 'ollama-chat-chips';
+          relatedTags.forEach(t => {
+            const tag = String(t?.tag || '').trim();
+            if (tag) relChips.appendChild(makeChip(tag, {count: t.count, match: 'related'}));
+          });
+          rel.appendChild(relChips);
+          panel.appendChild(rel);
+        }
         const copyTags = ((Array.isArray(msg.finalTags) && msg.finalTags.length)
           ? msg.finalTags
           : sceneFlat.concat(eventTags.map(t => t?.tag).filter(Boolean)))
-          .concat(clothesTags.map(t => t?.tag).filter(Boolean));
+          .concat(clothesTags.map(t => t?.tag).filter(Boolean))
+          .concat(relatedTags.map(t => t?.tag).filter(Boolean));
         panel.appendChild(makeCopyAllRow(copyTags));
         item.appendChild(panel);
       }
@@ -536,6 +562,7 @@ export function createOllamaChatPopup({
           flatTags: Array.isArray(payload.flatTags) ? payload.flatTags : [],
           eventTags: Array.isArray(payload.eventTags) ? payload.eventTags : [],
           eventLabels: Array.isArray(payload.eventLabels) ? payload.eventLabels : [],
+          relatedTags: Array.isArray(payload.relatedTags) ? payload.relatedTags : [],
         });
       } else if (payload.type === 'combos') {
         messages.push({
@@ -555,6 +582,7 @@ export function createOllamaChatPopup({
           eventTags: Array.isArray(payload.eventTags) ? payload.eventTags : [],
           eventLabels: Array.isArray(payload.eventLabels) ? payload.eventLabels : [],
           clothesTags: Array.isArray(payload.clothesTags) ? payload.clothesTags : [],
+          relatedTags: Array.isArray(payload.relatedTags) ? payload.relatedTags : [],
           finalTags: Array.isArray(payload.finalTags) ? payload.finalTags : [],
           note: String((payload.intent && payload.intent.interpretation_note) || ''),
           cleanEnglish: String((payload.translation && payload.translation.cleanEnglish) || ''),
@@ -596,6 +624,67 @@ export function createOllamaChatPopup({
     return {status: r.status, payload: payload || {}};
   }
 
+  async function startModelPull(model) {
+    const target = String(model || connModel || '').trim();
+    if (!target) return;
+    renderReadiness('<span class="ollama-chat-ready-msg">모델 다운로드 시작 중…</span>');
+    try {
+      if (target !== connModel && canConfigure) {
+        const {status, payload} = await postOllamaConnectionModel(win, {
+          endpoint: connEndpointBase,
+          model: target,
+        });
+        if (status === 403 || !payload || payload.ok === false) {
+          renderReadiness(`<span class="ollama-chat-ready-msg err">${escHtml(payload?.error || '모델 설정 저장 실패')}</span>`);
+          return;
+        }
+        connEndpointBase = String(payload.endpoint || '');
+        connModel = String(payload.model || '') || target || DEFAULT_MODEL;
+        updateModelSelect();
+      }
+      const {status, payload} = await fetchJson('/api/ollama/pull', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({model: target}),
+      });
+      if (status === 403) {
+        renderReadiness(`<span class="ollama-chat-ready-msg err">${escHtml(payload.error || 'NAIA가 실행 중인 PC에서만 가능합니다.')}</span>`);
+        return;
+      }
+      if (!payload || payload.error) {
+        renderReadiness(`<span class="ollama-chat-ready-msg err">${escHtml(payload?.error || '모델 다운로드를 시작하지 못했습니다.')}</span>`);
+        return;
+      }
+      renderModelPull(payload);
+    } catch (_) {
+      renderReadiness('<span class="ollama-chat-ready-msg err">모델 다운로드 요청 실패</span>');
+      return;
+    }
+    stopModelPullPolling();
+    modelPullTimer = win.setInterval(() => { void checkModelPull(); }, 1200);
+  }
+
+  async function checkModelPull() {
+    let payload = {};
+    try {
+      payload = (await fetchJson('/api/ollama/pull/status')).payload;
+    } catch (_) {
+      return;
+    }
+    if (payload && payload.active) {
+      renderModelPull(payload);
+      return;
+    }
+    stopModelPullPolling();
+    if (payload?.error) {
+      renderReadiness(`<span class="ollama-chat-ready-msg err">${escHtml(payload.error)}</span>`
+        + '<button type="button" class="ollama-chat-ready-btn secondary" data-act="recheck">다시 확인</button>');
+      return;
+    }
+    if (payload?.done) showToast('모델 다운로드 완료', 'success');
+    void refreshReadiness(true);
+  }
+
   function updateSendGate() {
     const sendBtn = pick('.ollama-chat-send');
     const input = pick('.ollama-chat-input');
@@ -614,9 +703,53 @@ export function createOllamaChatPopup({
     el.querySelectorAll('[data-act]').forEach(btn => {
       btn.addEventListener('click', () => {
         if (btn.dataset.act === 'start-server') void startServer();
+        else if (btn.dataset.act === 'pull-model') void startModelPull(btn.dataset.model || '');
         else void refreshReadiness();
       });
     });
+  }
+
+  function stopModelPullPolling() {
+    if (modelPullTimer) {
+      win.clearInterval(modelPullTimer);
+      modelPullTimer = null;
+    }
+  }
+
+  function curatedDownloadHtml(canControl) {
+    const items = Array.isArray(curatedModels) ? curatedModels : [];
+    if (!items.length) return '';
+    const rows = items.map(item => {
+      const model = String(item?.model || '').trim();
+      const label = escHtml(String(item?.label || shortModelLabel(model)));
+      const size = item?.size ? ` <span class="ollama-chat-ready-msg">${escHtml(String(item.size))}</span>` : '';
+      const installed = !!item?.installed;
+      const btn = (!installed && canControl && model)
+        ? ` <button type="button" class="ollama-chat-ready-btn" data-act="pull-model" data-model="${escHtml(model)}">다운로드</button>`
+        : '';
+      const state = installed ? '설치됨' : '미설치';
+      return `<div class="ollama-chat-curated-row"><span>${label}${size} · ${escHtml(state)}</span>${btn}</div>`;
+    }).join('');
+    return `<div class="ollama-chat-curated">${rows}</div>`;
+  }
+
+  function shortModelLabel(model) {
+    const text = String(model || '');
+    const tail = text.split('/').pop() || text;
+    return tail.length > 42 ? tail.slice(0, 39) + '...' : tail;
+  }
+
+  function renderModelPull(payload) {
+    const percent = Math.max(0, Math.min(100, Number(payload?.percent) || 0));
+    const mb = payload?.total_mb
+      ? `${Number(payload.completed_mb || 0).toFixed(1)} / ${Number(payload.total_mb || 0).toFixed(1)} MB`
+      : `${Number(payload?.completed_mb || 0).toFixed(1)} MB`;
+    const msg = escHtml(String(payload?.status || '모델을 받는 중입니다.'));
+    renderReadiness(`
+      <span class="ollama-chat-ready-msg">${msg}</span>
+      <span class="ollama-chat-dataset-meter"><span style="width:${percent}%"></span></span>
+      <span class="ollama-chat-dataset-mb">${escHtml(mb)}</span>
+      <button type="button" class="ollama-chat-ready-btn secondary" data-act="recheck">다시 확인</button>`);
   }
 
   async function refreshReadiness(fresh = false) {
@@ -635,6 +768,7 @@ export function createOllamaChatPopup({
       return;
     }
     installedModels = Array.isArray(data.models) ? data.models.map(item => String(item || '')).filter(Boolean) : [];
+    curatedModels = Array.isArray(data.curated) ? data.curated : [];
     if (data.model) connModel = String(data.model);
     updateModelSelect();
     if (!data.installed && !data.is_custom_endpoint) {
@@ -648,6 +782,23 @@ export function createOllamaChatPopup({
         : 'Ollama 서버가 꺼져 있습니다.';
       renderReadiness(`<span class="ollama-chat-ready-msg warn">${escHtml(msg)}</span>`
         + (canControl ? '<button type="button" class="ollama-chat-ready-btn" data-act="start-server">서버 시작</button>' : '')
+        + recheck);
+      return;
+    }
+    const canControl = data.control_allowed !== false && !data.is_custom_endpoint;
+    let pull = {};
+    try { pull = (await fetchJson('/api/ollama/pull/status')).payload; } catch (_) { pull = {}; }
+    if (pull && pull.active) {
+      renderModelPull(pull);
+      if (!modelPullTimer) modelPullTimer = win.setInterval(() => { void checkModelPull(); }, 1200);
+      return;
+    }
+    if (!data.model_installed) {
+      const hint = canControl
+        ? '대상 모델이 없습니다. 아래 curated 모델 중 하나를 받으세요.'
+        : '대상 모델이 없습니다. 다운로드는 NAIA가 실행 중인 PC에서 시작하세요.';
+      renderReadiness(`<span class="ollama-chat-ready-msg warn">${escHtml(hint)}</span>`
+        + curatedDownloadHtml(canControl)
         + recheck);
       return;
     }

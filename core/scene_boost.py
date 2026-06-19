@@ -138,19 +138,19 @@ _EYE_COLOR_TARGET_RE = re.compile(
 # 양쪽에 쓰인다. \b…\b 단어 매칭이라 형태 변화형(scented/silky/glowing/hazy…)이 새던 것을
 # 명시 변형으로 보강한다(불명확한 stem은 피하고 확실한 스타일 단어만 — 오탐 최소화).
 _SCENT_RE = re.compile(
-    r"\b(scent|scented|smell|smelling|aroma|aromatic|fragrance|fragrant|perfume|perfumed|"
+    r"\b(scent|scented|smell|smells|smelling|aroma|aromatic|fragrance|fragrant|perfume|perfumed|"
     r"musk|musky|jasmine|incense)\b",
     re.I,
 )
 _MATERIAL_RE = re.compile(
     r"\b(fabric|cloth|leather|leathery|silk|silky|satin|satiny|velvet|velvety|lace|lacy|latex|"
-    r"metal|metallic|denim|gloss|glossy|sheen|texture|textured)\b",
+    r"metal|metals|metallic|denim|gloss|glossy|sheen|texture|textures|textured)\b",
     re.I,
 )
 _LIGHT_STYLE_RE = re.compile(
     r"\b(light|lighting|glow|glowing|glows|haze|hazy|sunlight|sunlit|moonlight|moonlit|daylight|"
     r"backlight|backlit|backlighting|rim light|lamplight|candlelit|sunbeam|sunbeams|dappled|dimly|"
-    r"rays?|flare|illumination|spotlight|shadow|golden hour)\b",
+    r"rays?|flares?|illumination|spotlight|shadow|shadowy|golden hour)\b",
     re.I,
 )
 _LIGHT_COLOR_CONTEXT_RE = re.compile(

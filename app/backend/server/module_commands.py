@@ -135,9 +135,12 @@ async def handle_module_command(
     # Vibe Storage 관리(파일 삭제 / OS 탐색기 열기)는 서버 머신 로컬 동작이라 루프백 클라이언트
     # 전용으로 게이트한다(기존 result open-location 경계와 일치, Codex 리뷰). 원격 web 클라이언트는
     # vibe 적용/사용은 그대로 가능하며 이 두 관리 동작만 차단된다.
+    # ⚠️ 다운스트림 dispatch가 module_id/key를 .strip() 하므로(headless_module_dispatch_service),
+    # 여기서도 반드시 strip 후 비교 — 안 하면 "delete_storage "(공백) 등으로 게이트 우회 가능
+    # (Codex CRITICAL: 정규화 불일치 우회).
     if (
-        str(command.get("module_id") or "") == "vibe_transfer"
-        and str(command.get("key") or "") in {"open_location", "delete_storage"}
+        str(command.get("module_id") or "").strip() == "vibe_transfer"
+        and str(command.get("key") or "").strip() in {"open_location", "delete_storage"}
         and not is_loopback_host(client_host)
     ):
         await _send_json(ws, {

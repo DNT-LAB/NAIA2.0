@@ -629,11 +629,13 @@ class HeadlessVibeTransferService:
         except Exception:
             roots = []
         chosen_root = None
+        # scan_storage가 models[name]=items로 *마지막* 루트를 표시하므로(_existing_save_dirs 동일
+        # 순서로 순회), 동일 model/hash가 여러 루트에 있을 때 삭제/열기도 *마지막* 일치 루트를
+        # 골라 scan이 보여준 바로 그 파일과 일치시킨다(Codex HIGH: 중복 루트 모호성).
         for root in roots:
             try:
                 if (root / model / f"{file_hash}.json").exists():
-                    chosen_root = root
-                    break
+                    chosen_root = root  # last match wins (no break)
             except Exception:
                 continue
         if chosen_root is None:

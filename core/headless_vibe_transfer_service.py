@@ -519,12 +519,17 @@ class HeadlessVibeTransferService:
                 source = base64.b64decode(str(image_b64))
                 with Image.open(io.BytesIO(source)) as opened:
                     png_bytes = image_to_png_bytes(opened.convert("RGBA"))
+                file_hash = image_hash(png_bytes)
             else:
                 placeholder = Image.new("RGB", (112, 112), "black")
                 png_bytes = image_to_png_bytes(placeholder.convert("RGBA"))
+                # 이미지 없는 vibe는 플레이스홀더가 전부 동일 → image_hash가 충돌해 여러 vibe가
+                # 한 항목으로 병합되고 1개만 들어오던 버그. 인코딩 내용으로 해시해 vibe별 고유
+                # file_hash를 보장(서로 다른 인코딩 = 서로 다른 항목).
+                _content = json.dumps(encodings_by_model, sort_keys=True, ensure_ascii=False)
+                file_hash = image_hash(_content.encode("utf-8"))
         except Exception:
             return ""
-        file_hash = image_hash(png_bytes)
         # importInfo.strength: 공식 NAI가 vibe별 저장 강도를 적용(예: 0.21/0.1/0.9). 유한·[-1,1]
         # 범위만 수용, 없으면 None(적용 시 기본 0.6).
         import_info = vibe.get("importInfo") if isinstance(vibe.get("importInfo"), dict) else {}

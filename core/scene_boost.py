@@ -134,13 +134,22 @@ _EYE_COLOR_TARGET_RE = re.compile(
     r"gold|golden|gray|grey|green|pink|purple|red|silver|teal|turquoise|violet|white|yellow)-eyed\b",
     re.I,
 )
-_SCENT_RE = re.compile(r"\b(scent|smell|aroma|fragrance|perfume|musk|jasmine|incense)\b", re.I)
+# 스타일 감지 정규식 — 입력 소스 탐지(_contains_style_source)와 설명문 필터(filter_descriptions)
+# 양쪽에 쓰인다. \b…\b 단어 매칭이라 형태 변화형(scented/silky/glowing/hazy…)이 새던 것을
+# 명시 변형으로 보강한다(불명확한 stem은 피하고 확실한 스타일 단어만 — 오탐 최소화).
+_SCENT_RE = re.compile(
+    r"\b(scent|scented|smell|smelling|aroma|aromatic|fragrance|fragrant|perfume|perfumed|"
+    r"musk|musky|jasmine|incense)\b",
+    re.I,
+)
 _MATERIAL_RE = re.compile(
-    r"\b(fabric|cloth|leather|silk|satin|velvet|lace|latex|metal|metallic|denim|glossy|sheen|texture)\b",
+    r"\b(fabric|cloth|leather|leathery|silk|silky|satin|satiny|velvet|velvety|lace|lacy|latex|"
+    r"metal|metallic|denim|gloss|glossy|sheen|texture|textured)\b",
     re.I,
 )
 _LIGHT_STYLE_RE = re.compile(
-    r"\b(light|lighting|glow|haze|sunlight|moonlight|daylight|backlight|backlighting|rim light|"
+    r"\b(light|lighting|glow|glowing|glows|haze|hazy|sunlight|sunlit|moonlight|moonlit|daylight|"
+    r"backlight|backlit|backlighting|rim light|lamplight|candlelit|sunbeam|sunbeams|dappled|dimly|"
     r"rays?|flare|illumination|spotlight|shadow|golden hour)\b",
     re.I,
 )

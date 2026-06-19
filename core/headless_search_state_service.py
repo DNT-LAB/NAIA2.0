@@ -388,6 +388,18 @@ class HeadlessSearchStateService:
         filter_preferences = self.normalize_search_filter_state(
             getattr(context, "search_filter_state", None)
         )
+        # 풀(생성) 등급의 단일 권위값은 라이브 active_ratings 다. 검색은 메모리에서만
+        # remote_active_ratings 를 gsqe 로 열고(run_search_command — 결과 재필터 방지) 디스크
+        # search_filter_state["ratings"] 는 기본값(gsq, e OFF)으로 남길 수 있다. 이때 페이로드의
+        # filter_preferences.ratings(=디스크값)와 active_ratings(=라이브 gsqe)가 갈라지면,
+        # 프론트 onSearchState→applyPreferences 가 라이브값을 디스크값으로 덮어써(searchPanel.mjs)
+        # 풀 토글이 gsq 로 desync → 수동 Random 이 explicit 결과를 못 뽑아 "처리할 프롬프트가 더
+        # 이상 없습니다" 로 죽는다(오토메이션은 백엔드 active_ratings 사용이라 정상). 페이로드에서
+        # filter_preferences.ratings 를 라이브 active_ratings 로 일치시켜 desync 를 차단한다(디스크
+        # 영속은 건드리지 않음 — '검색이 풀 취향을 영구 변경'하지 않는 기존 의도 보존).
+        filter_preferences["ratings"] = [
+            rating for rating in SUPPORTED_RATINGS if rating in active_ratings
+        ]
         search_ratings = self.normalize_rating_list(
             getattr(context, "search_query_ratings", None)
             or filter_preferences.get("search_ratings")

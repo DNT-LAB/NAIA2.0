@@ -384,6 +384,33 @@ async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bo
         return False
 
 
+def _random_pool_has_hidden_rows(context: WebSessionContext) -> bool:
+    """현재 rating/태그 필터로 가려졌을 뿐 실제 행은 남아 있는지(=필터 완화로 회복 가능한지)."""
+    search_results = getattr(context, "search_results", None)
+    if search_results is not None:
+        try:
+            if search_results.get_count() > 0:
+                return True
+        except Exception:
+            pass
+    for attr in ("search_results_snapshot", "search_results_master_base_snapshot"):
+        frame = getattr(context, attr, None)
+        if frame is not None and not getattr(frame, "empty", True):
+            return True
+    return False
+
+
+def _reset_random_pool_to_gsqe(context: WebSessionContext) -> dict[str, Any]:
+    """막힌 랜덤 풀 회복: 풀 등급을 gsqe로 강제 + 활성 태그필터(Quick Filter) 초기화 후 재적용.
+    재적용된 search_state(payload)를 반환한다. (디스크+메모리 모두 gsqe로 영속해 이후 일관 사용.)"""
+    from app.backend.server.search_runtime import clear_active_tag_filter
+
+    context.save_search_filter_state(ratings=["g", "s", "q", "e"])
+    # reset_draft=True: 퀵필터 draft 칩까지 비우고 필터를 gsqe(태그필터 없음)로 재적용 →
+    # search_state_payload 반환. (save 가 끝에 remote_active_ratings = state["ratings"] = gsqe 유지)
+    return clear_active_tag_filter(context, True)
+
+
 async def handle_random_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -404,6 +431,33 @@ async def handle_random_command(
         overrides=overrides,
         random_request_id=request_id,
     )
+    # Fail-safe: 풀이 비어 보이지만(등급/Quick Filter 과제한) 실제 행이 남아 있으면 gsqe 로 강제
+    # 초기화하고 1회 재시도 — 사용자가 '처리할 프롬프트가 더 이상 없습니다'로 막히지 않게 자동
+    # 회복한다. (등급 desync = 검색이 풀을 gsqe 로 열어도 프론트가 gsq 로 되돌려 explicit 결과를
+    # 못 뽑던 케이스 / stale 태그필터가 풀을 비운 케이스 모두 흡수.) 이미 gsqe·태그필터 없음이면
+    # 재시도해도 의미 없으므로 건너뛴다.
+    pool_already_full = set(active_ratings) == {"g", "s", "q", "e"} and not (
+        getattr(context, "active_tag_filter", None) or getattr(context, "active_tag_filter_ids", None)
+    )
+    if (
+        not result.success
+        and not bool((overrides or {}).get("wildcard_standalone"))
+        and not pool_already_full
+        and _random_pool_has_hidden_rows(context)
+    ):
+        recovered_state = await asyncio.to_thread(_reset_random_pool_to_gsqe, context)
+        await _broadcast_json(clients, recovered_state)
+        await _broadcast_json(clients, {
+            "type": "toast",
+            "level": "warning",
+            "message": "랜덤 풀이 비어 있어 등급 필터를 전체(G/S/Q/E)로 초기화했습니다.",
+        })
+        result = await asyncio.to_thread(
+            random_service(context).generate,
+            active_ratings={"g", "s", "q", "e"},
+            overrides=overrides,
+            random_request_id=request_id,
+        )
     # 수동 1회 random: 그 시점에 동기 부스트(프런트가 Random 버튼을 응답까지 disable).
     # Auto Gen 오버랩(파트4)은 별도 — 여기는 단발 경로.
     await apply_ollama_auto_boost(context, result)

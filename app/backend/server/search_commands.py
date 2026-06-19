@@ -61,6 +61,20 @@ async def handle_search_command(
         return True
 
     if command_type == "get_search_state":
+        # Startup-restore reliability: the random warmup that restores the last runner
+        # parquet into search_results runs async during lifespan, so a client that asks
+        # for search state before warmup finishes would see an empty pool. Lazily ensure
+        # the results are restored here (idempotent; respects the same fallback-skip
+        # rules as warmup — a filtered legacy cache is still skipped). Cheap no-op once
+        # search_results is populated.
+        if context.search_results is None or context.search_results.is_empty():
+            service = getattr(context, "headless_random_prompt_service", None)
+            if service is None:
+                from core.headless_random_prompt_service import HeadlessRandomPromptService
+
+                service = HeadlessRandomPromptService(context)
+                context.headless_random_prompt_service = service
+            await run_in_thread(service._ensure_search_results, {})
         await _send_json(ws, context.search_state_payload())
         return True
 

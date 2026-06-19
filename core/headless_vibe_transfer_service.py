@@ -150,6 +150,18 @@ class HeadlessVibeTransferService:
         encodings = {str(k): str(v) for k, v in encodings.items() if v}
         file_hash = str(raw.get("file_hash") or "")
         source_model = str(raw.get("target_model") or raw.get("source_model") or "")
+        # IE 잠금 플래그 복원: 영속 프레임에 no_source가 있으면 그대로, 없으면(이 수정 이전에
+        # 영속된 분) storage json에서 보강(SSOT=storage). 재시작 후에도 이미지 없는 번들 vibe는
+        # IE 잠긴 채 유지된다.
+        no_source = bool(raw.get("no_source"))
+        if not no_source and file_hash and source_model:
+            try:
+                _jp = self.context._existing_save_path("vibe_transfer", source_model, f"{file_hash}.json")
+                if _jp.exists():
+                    _d = json.loads(_jp.read_text(encoding="utf-8"))
+                    no_source = bool(isinstance(_d, dict) and _d.get("no_source"))
+            except Exception:
+                no_source = False
         image_data = ""
         thumbnail = ""
         if file_hash and not raw.get("is_no_image"):
@@ -175,6 +187,7 @@ class HeadlessVibeTransferService:
             "thumbnail": thumbnail,
             "is_enabled": bool(raw.get("is_enabled")),
             "is_no_image": bool(raw.get("is_no_image", True)),
+            "no_source": no_source,  # 재시작 복원: 이미지 없는 번들 vibe의 IE 잠금 유지
             "is_naid3": "NAID3" in source_model,
             "reference_strength": _as_float(raw.get("reference_strength"), 0.6),
             "information_extracted": _as_float(raw.get("information_extracted"), 1.0),
@@ -193,6 +206,7 @@ class HeadlessVibeTransferService:
             "information_extracted": _as_float(frame.get("information_extracted"), 1.0),
             "is_enabled": bool(frame.get("is_enabled")),
             "is_no_image": bool(frame.get("is_no_image")),
+            "no_source": bool(frame.get("no_source")),  # IE 잠금 플래그 영속(재시작 후 복원)
             "target_model": str(frame.get("source_model") or frame.get("target_model") or ""),
             "storage_type": str(frame.get("storage_type") or ""),
             "vibe_encodings": {str(k): str(v) for k, v in (frame.get("vibe_encodings") or {}).items() if v},

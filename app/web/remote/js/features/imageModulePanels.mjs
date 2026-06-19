@@ -876,10 +876,11 @@ export function createImageModulePanels({
       const items = (message.models[name] || []).map(item => {
         const ieKeys = (item.encoding_keys || []);
         const defaultIe = ieKeys.length ? ieKeys[0] : 1.0;
+        const isNew = !!item.session_new;  // 이번 세션 import분 → 흰 테두리+이름 강조
         return `
-        <div class="mod-storage-item" onclick="applyVibeStorage('${escHtml(name)}','${escHtml(item.file_hash)}',${defaultIe})" title="${escHtml(item.file_name)}">
+        <div class="mod-storage-item" ${isNew ? 'style="outline:2px solid #ffffff;outline-offset:-1px"' : ''} onclick="applyVibeStorage('${escHtml(name)}','${escHtml(item.file_hash)}',${defaultIe})" oncontextmenu="showVibeStorageMenu(event,'${escHtml(name)}','${escHtml(item.file_hash)}');return false" title="${escHtml(item.file_name)}">
           ${storageThumbMarkup(item)}
-          <span class="mod-storage-name">${escHtml(item.file_name)}</span>
+          <span class="mod-storage-name" ${isNew ? 'style="color:#ffffff;font-weight:700"' : ''}>${escHtml(item.file_name)}</span>
           ${ieKeys.length ? `<span class="mod-encode-keys">IE: ${ieKeys.map(key => Number(key).toFixed(2)).join(', ')}</span>` : ''}
         </div>`;
       }).join('');

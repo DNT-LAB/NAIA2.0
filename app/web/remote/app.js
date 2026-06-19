@@ -1170,7 +1170,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20260603-
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260619-vibeimport3')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260619-vibestorage')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -7153,6 +7153,42 @@ function importVibeFile(file) {
     reader.onerror = () => console.error('Vibe import read failed');
     reader.readAsText(file);
   }
+}
+
+// Vibe Storage 아이템 우클릭 메뉴: 위치 열기 / 삭제. 백엔드 set_param으로 위임.
+function closeVibeStorageMenu() {
+  document.getElementById('vibeStorageMenu')?.remove();
+}
+function showVibeStorageMenu(event, model, fileHash) {
+  if (event) event.preventDefault();
+  closeVibeStorageMenu();
+  const menu = document.createElement('div');
+  menu.id = 'vibeStorageMenu';
+  menu.style.cssText = 'position:fixed;z-index:99999;min-width:140px;padding:4px;'
+    + 'background:var(--bg-panel,#1a1830);border:1px solid var(--border-dim,#3a3550);'
+    + 'border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.5);font-family:var(--font-mono,monospace)';
+  const btn = 'display:block;width:100%;text-align:left;background:none;border:none;'
+    + 'padding:7px 10px;font-size:12px;cursor:pointer;border-radius:4px';
+  menu.innerHTML = `
+    <button type="button" data-act="open" style="${btn};color:#e8e6f0">위치 열기</button>
+    <button type="button" data-act="delete" style="${btn};color:#ff8a8a">삭제</button>`;
+  document.body.appendChild(menu);
+  const w = menu.offsetWidth || 150;
+  const h = menu.offsetHeight || 80;
+  menu.style.left = Math.max(4, Math.min(event.clientX, window.innerWidth - w - 4)) + 'px';
+  menu.style.top = Math.max(4, Math.min(event.clientY, window.innerHeight - h - 4)) + 'px';
+  menu.addEventListener('click', ev => {
+    const act = ev.target && ev.target.dataset ? ev.target.dataset.act : '';
+    if (act === 'open') {
+      setModuleParam('vibe_transfer', 'open_location', model + '|' + fileHash);
+    } else if (act === 'delete') {
+      if (window.confirm('이 Vibe를 Storage에서 삭제할까요?')) {
+        setModuleParam('vibe_transfer', 'delete_storage', model + '|' + fileHash);
+      }
+    }
+    closeVibeStorageMenu();
+  });
+  setTimeout(() => document.addEventListener('click', closeVibeStorageMenu, {once: true}), 0);
 }
 
 // ---- Slider debounce for image modules ----

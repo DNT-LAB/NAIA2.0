@@ -98,6 +98,8 @@ def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float, *, model_key
 class HeadlessVibeTransferService:
     def __init__(self, context: Any):
         self.context = context
+        # 이번 세션(서버 프로세스 수명)에 import된 vibe file_hash — Storage에서 강조 표시용.
+        self._session_imported: set[str] = set()
 
     # ----- 영속 (재시작 복원): VibeTransferModule_{mode}.json -----
     def _settings_mode(self) -> str:
@@ -523,6 +525,15 @@ class HeadlessVibeTransferService:
         except Exception:
             return ""
         file_hash = image_hash(png_bytes)
+        # importInfo.strength: 공식 NAI가 vibe별 저장 강도를 적용(예: 0.21/0.1/0.9). 유한·[-1,1]
+        # 범위만 수용, 없으면 None(적용 시 기본 0.6).
+        import_info = vibe.get("importInfo") if isinstance(vibe.get("importInfo"), dict) else {}
+        reference_strength: float | None = None
+        raw_strength = import_info.get("strength")
+        if raw_strength is not None:
+            strength = _as_float(raw_strength, 0.6)
+            if math.isfinite(strength):
+                reference_strength = max(-1.0, min(1.0, round(strength, 2)))
         stored_any = False
         for bundle_key, model_encodings in encodings_by_model.items():
             model_key = _BUNDLE_MODEL_MAP.get(str(bundle_key))
@@ -546,12 +557,20 @@ class HeadlessVibeTransferService:
                     vibe_encodings[f"{ie:.2f}"] = str(encoding_value)
             if not vibe_encodings:
                 continue
-            if self._write_imported_storage(model_key, file_hash, png_bytes, vibe_encodings):
+            if self._write_imported_storage(model_key, file_hash, png_bytes, vibe_encodings, reference_strength):
                 stored_any = True
-        return file_hash if stored_any else ""
+        if stored_any:
+            self._session_imported.add(file_hash)
+            return file_hash
+        return ""
 
     def _write_imported_storage(
-        self, model_key: str, file_hash: str, png_bytes: bytes, vibe_encodings: dict[str, str]
+        self,
+        model_key: str,
+        file_hash: str,
+        png_bytes: bytes,
+        vibe_encodings: dict[str, str],
+        reference_strength: float | None = None,
     ) -> bool:
         """Persist imported encodings to vibe_transfer/{model}/{hash}.json (+ image), merging
         into any existing entry. Mirrors _save_encoding_to_storage's on-disk contract."""
@@ -576,6 +595,8 @@ class HeadlessVibeTransferService:
                 "file_name": existing.get("file_name") or f"{file_hash}.png",
                 "encodings": enc,
             })
+            if reference_strength is not None:
+                existing["reference_strength"] = float(reference_strength)
             json_path.write_text(json.dumps(existing, ensure_ascii=False, indent=4), encoding="utf-8")
             img_path = context._save_path("vibe_transfer", model_key, "images", f"{file_hash}.png")
             img_path.parent.mkdir(parents=True, exist_ok=True)
@@ -585,6 +606,77 @@ class HeadlessVibeTransferService:
         except Exception as exc:
             print(f"[ERROR] Vibe bundle import storage save failed: {exc}")
             return False
+
+    # ----- Storage 항목 우클릭 액션 (삭제 / 위치 열기) -----
+    def _safe_storage_target(self, value: str):
+        """"model|file_hash" → (model, file_hash, json_path, image_path). 경로 위생: 두 토큰을
+        Path(...).name으로 정규화(경로 이탈 차단)하고, 결과 경로가 vibe_transfer 루트 하위인지
+        검증. 부적합하면 None."""
+        parts = str(value or "").split("|")
+        if len(parts) < 2:
+            return None
+        model = Path(str(parts[0])).name
+        file_hash = Path(str(parts[1])).name
+        if not model or not file_hash:
+            return None
+        context = self.context
+        try:
+            root = context._save_path("vibe_transfer").resolve()
+            json_path = context._save_path("vibe_transfer", model, f"{file_hash}.json")
+            image_path = context._save_path("vibe_transfer", model, "images", f"{file_hash}.png")
+            if root not in json_path.resolve().parents:
+                return None
+        except Exception:
+            return None
+        return model, file_hash, json_path, image_path
+
+    def delete_storage(self, value: str) -> Any:
+        """Storage에서 vibe 항목(json + 이미지) 삭제. 삭제 후 [toast, storage_list] 반환(브라우저
+        즉시 갱신). 프레임에는 영향 없음(이미 적용된 프레임은 그대로)."""
+        context = self.context
+        target = self._safe_storage_target(value)
+        if target is None:
+            return context._toast("삭제할 Vibe 항목을 찾지 못했습니다.", level="error")
+        _model, file_hash, json_path, image_path = target
+        removed = False
+        for path in (json_path, image_path):
+            try:
+                if path.exists():
+                    path.unlink()
+                    removed = True
+            except Exception as exc:
+                print(f"[ERROR] Vibe storage delete failed: {exc}")
+        self._session_imported.discard(file_hash)
+        if not removed:
+            return [context._toast("이미 삭제된 항목입니다.", level="info"), self.scan_storage()]
+        return [context._toast("Vibe를 Storage에서 삭제했어요.", level="success"), self.scan_storage()]
+
+    def open_storage_location(self, value: str) -> Any:
+        """vibe 항목 파일이 있는 위치를 탐색기에서 연다(가능하면 파일 선택). 루프백/로컬 전용
+        동작이며 set_param 경로만 호출한다."""
+        context = self.context
+        target = self._safe_storage_target(value)
+        if target is None:
+            return context._toast("위치를 찾지 못했습니다.", level="error")
+        _model, _file_hash, json_path, image_path = target
+        reveal = image_path if image_path.exists() else json_path
+        try:
+            import os
+            import subprocess
+            import sys
+
+            if os.name == "nt":
+                if reveal.exists():
+                    subprocess.Popen(["explorer", "/select,", str(reveal)])
+                else:
+                    os.startfile(str(reveal.parent))  # type: ignore[attr-defined]
+            elif sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", "-R", str(reveal)] if reveal.exists() else ["open", str(reveal.parent)])
+            else:
+                subprocess.Popen(["xdg-open", str(reveal.parent)])
+        except Exception as exc:
+            return context._toast(f"위치 열기 실패: {exc}", level="error")
+        return context._toast("탐색기에서 위치를 열었어요.", level="info")
 
     def module_state(self) -> dict[str, Any]:
         context = self.context
@@ -685,6 +777,10 @@ class HeadlessVibeTransferService:
             return self.scan_storage()
         elif key == "import_vibe_file":
             return self.import_vibe_file(str(value or ""))
+        elif key == "delete_storage":
+            return self.delete_storage(str(value or ""))
+        elif key == "open_location":
+            return self.open_storage_location(str(value or ""))
         elif key == "apply_storage":
             applied = self.apply_storage(str(value or ""))
             if isinstance(applied, dict):
@@ -728,6 +824,7 @@ class HeadlessVibeTransferService:
                         "file_hash": file_hash,
                         "file_name": str(data.get("file_name") or image_path.name),
                         "encoding_keys": encoding_keys,
+                        "session_new": file_hash in self._session_imported,
                         "thumbnail": "",
                         "thumbnail_url": (
                             "/api/module-storage/vibe/thumb"

@@ -303,16 +303,33 @@ class HeadlessConditionalRuleEngine:
         # after_wildcard(유일한 확장 패스 이후)에 실행되므로, 여기서 확장하지 않으면 이
         # override가 그대로 페이로드로 나가 직접 입력 토큰이 리터럴로 남는다(조건부가 *주입*한
         # 태그는 _expand_action_tags로 이미 확장됨 — 직접 입력 베이스만 누락되던 회귀:
-        # "조건부는 개봉, 직접 입력은 미개봉"). 확장 결과를 슬롯에 write-back 해 반복 store
-        # 시 재롤/카운터 재전진을 막는다(이미 확장된 리터럴은 토큰이 없어 no-op).
+        # "조건부는 개봉, 직접 입력은 미개봉").
+        # ★정상 캐릭터 경로의 SSOT 전개기 `_expand_character_text`를 *그대로 재사용*한다 —
+        # 과거 override가 정상 경로의 전개를 표면별로 *재구현*하다 발산해 회귀한 클래스라,
+        # 같은 함수를 호출해 동치를 구조적으로 보장한다. 와일드카드가 빈 옵션을 고르면(`<keep|>`
+        # 빈 가지 등) 정상 경로처럼 빈 결과를 그대로 써(원문 토큰 미잔존) 리터럴 누출 + 후속
+        # store의 시퀀스 카운터 재전진을 막는다. 매니저 없음/예외 → 원문 보존(전개 미실행=불변).
+        from core.character_settings import _expand_character_text
+        processor = None
+        _manager = getattr(self.app_context, "wildcard_manager", None)
+        if _manager is not None:
+            try:
+                from core.wildcard_processor import WildcardProcessor
+                processor = WildcardProcessor(_manager)
+            except Exception:
+                processor = None
+
         def _expand_slot_field(slot, field):
             raw = str(slot.get(field) or "").strip()
             if not raw or not (("__" in raw) or ("<" in raw) or ("$" in raw)):
                 return raw
-            pieces = [piece.strip() for piece in split_tags_smart(raw) if piece.strip()]
-            expanded = self._expand_action_tags(context, pieces)
-            value = ", ".join(str(piece).strip() for piece in expanded if str(piece).strip()) or raw
-            slot[field] = value  # write-back: 반복 store 시 같은 토큰 재확장 방지
+            if processor is None:
+                return raw
+            try:
+                value = _expand_character_text(raw, processor, context)
+            except Exception:
+                return raw  # 전개 실패 → 콘텐츠 손실 방지(원문 보존, 카운터는 이미 진행분만)
+            slot[field] = value  # write-back(빈 결과 포함): 반복 store 시 같은 토큰 재확장 방지
             return value
 
         characters: list[str] = []

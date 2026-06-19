@@ -399,8 +399,14 @@ def composition_candidates(
     *,
     validate_tag: Optional[Callable[[str], Optional[dict]]] = None,
     tag_allowed: Optional[Callable[[str, str], bool]] = None,
+    allow_lighting: bool = True,
 ) -> list[str]:
-    """등급에 맞는 코드 큐레이션 구도/조명 태그 후보. LLM은 이 enum 안에서만 고른다."""
+    """등급에 맞는 코드 큐레이션 구도/조명 태그 후보. LLM은 이 enum 안에서만 고른다.
+
+    allow_lighting=False면 조명/톤 태그(bright·moody 풀: sunlight·chiaroscuro·dim
+    lighting 등)를 후보에서 제외하고 앵글/샷/심도(any 풀)만 제안한다. '광원·색조 허용'
+    (allow_light_style) OFF 시 조명 태그가 *구도 태그*로 계속 추가되던 버그 수정 —
+    설명문 경로는 filter_descriptions가 이미 차단하지만, 구도 후보는 게이트가 없었다."""
     prefer = "moody" if rating in ("q", "e") else "bright"
     existing = set(existing_camera or [])
     blocked = {_CAMERA_CONTRADICTIONS.get(t) for t in existing}
@@ -423,7 +429,13 @@ def composition_candidates(
                 return False               # 인덱스에 없는 태그 → 드롭
         return True
 
-    prefer_list = [t for t, l in _COMPOSITION_POOL if l == prefer and _eligible(t)]
+    # bright/moody 풀은 전부 조명 태그 — allow_lighting=False면 통째로 비운다(앵글/심도
+    # 'any' 풀만 남는다). 후보 enum에서 빠지면 LLM이 고를 수도, filter_composition이
+    # 통과시킬 수도 없으므로 조명 태그가 구도로 새지 않는다.
+    prefer_list = (
+        [t for t, l in _COMPOSITION_POOL if l == prefer and _eligible(t)]
+        if allow_lighting else []
+    )
     any_list = [t for t, l in _COMPOSITION_POOL if l == "any" and _eligible(t)]
     # LLM 선택지는 넉넉히(캡의 약 3배)만 — 너무 길면 소형 모델이 흔들린다. 등급별 톤(prefer)을
     # 범용(any)과 *교차*로 채워, 캡에 잘려도 톤 태그가 반드시 후보에 들어가게 한다.
@@ -815,14 +827,21 @@ def run_scene_boost(
         or (is_hardcore and is_hardcore(" ".join(descriptive).lower()))
     )
     tone_rating = "s" if (rating in ("q", "e") and not sexual_present) else rating
+    style = _style_options(options)
+    # '광원·색조 허용'(allow_light_style) OFF면 조명 구도 태그도 후보에서 제외한다.
+    # 단, 입력 태그에 이미 조명 소스가 있으면 설명문 가드와 동일하게 면제(이미 그 장면의
+    # 사실이므로 강조해도 환각 아님).
+    allow_lighting = bool(style["allow_light_style"]) or _contains_style_source(
+        descriptive, _LIGHT_STYLE_RE
+    )
     candidates = composition_candidates(
         tone_rating, parsed["existing_camera"], lvl_cfg,
-        validate_tag=validate_tag, tag_allowed=tag_allowed)
+        validate_tag=validate_tag, tag_allowed=tag_allowed,
+        allow_lighting=allow_lighting)
     grounding = build_grounding(
         descriptive, classify_axes=classify_axes,
         existing_camera=parsed["existing_camera"], subject_count=parsed["subject_count"])
 
-    style = _style_options(options)
     instruction = build_instruction(
         descriptive, tone_rating, lvl_cfg, candidates, style_options=style, grounding=grounding)
     schema = boost_schema(lvl_cfg, candidates)

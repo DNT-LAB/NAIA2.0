@@ -61,13 +61,18 @@ class HeadlessPromptEngineeringService:
     def state(self) -> dict[str, Any]:
         from core.prompt_engineering_settings import (
             get_prompt_engineering_store,
-            normalize_ollama_boost_settings,
+            load_ollama_boost_settings,
         )
 
         context = self.context
         store = get_prompt_engineering_store(context)
         self.ensure_first_run_recommended_preset()
         settings = store.collect_settings()
+        # Ollama Boost 설정은 *전역*(디스크 SSOT)이라 모드별 캐시(settings)가 아니라
+        # 디스크에서 fresh 읽는다 — 모드 전환 시 stale 값 표시 → 재저장 시 데이터 손실
+        # (다른 모드에서 바꾼 nl_weight를 덮어씀) 방지. boost-time 읽기와 동일 SSOT.
+        _runtime_paths = getattr(context, "runtime_paths", None)
+        ollama_boost = load_ollama_boost_settings(save_root=getattr(_runtime_paths, "save_dir", None))
         state = store.state()
         preset_options = store.preset_options()
 
@@ -112,7 +117,7 @@ class HeadlessPromptEngineeringService:
             "ollama_auto_boost": bool(getattr(context, "ollama_auto_boost", False)),
             "e621_settings": dict(settings.get("e621_settings") or {}),
             "danbooru_settings": dict(settings.get("danbooru_weight_settings") or {}),
-            "ollama_boost_settings": normalize_ollama_boost_settings(settings.get("ollama_boost_settings")),
+            "ollama_boost_settings": ollama_boost,
             "debug_snapshot": self.debug_snapshot(),
             "preset_can_save_current": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized"),
             "preset_can_delete": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized", "default"),
@@ -376,7 +381,15 @@ class HeadlessPromptEngineeringService:
         surface params/prompt_sync so the client UI updates."""
         context = self.context
         try:
-            preset_data = store.read_preset_data(preset_name)
+            # Read the preset from the ACTIVE mode's directory. Omitting the mode
+            # makes read_preset_data default to "NAI", so in COMFYUI/WEBUI this
+            # read the wrong (NAI) preset — applying NAI main_settings (sampler/
+            # scheduler/steps/cfg + negative) on top of a COMFYUI/WEBUI session
+            # (reset to NAI values when a same-named NAI preset existed) or
+            # returning {} for COMFYUI/WEBUI-only names (no params/negative applied
+            # at all). set_preset() above already reads module_settings with the
+            # active mode, so this must match it.
+            preset_data = store.read_preset_data(preset_name, context.get_api_mode())
         except Exception:
             preset_data = None
         main_settings = preset_data.get("main_settings") if isinstance(preset_data, dict) else None

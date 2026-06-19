@@ -301,13 +301,27 @@ def _build_boost_input(result: Any, settings: dict) -> "str | None":
 
 
 def _compose_addition(add: dict, settings: dict, context: WebSessionContext) -> str:
-    """삽입 문자열 조립: 구도태그(무가중) + 자연어([기능1] nl_weight 래핑). 메인 섹션에 삽입."""
+    """삽입 문자열 조립: 구도태그(무가중) + 자연어([기능1] nl_weight 래핑). 메인 섹션에 삽입.
+
+    WEBUI/ComfyUI에서는 ``()`` 가 가중치 문법이므로, LLM 자연어 묘사에 들어 있는
+    **리터럴 괄호**를 ``\\(`` ``\\)`` 로 이스케이프한다. Auto Boost는 파이프라인 *이후*에
+    삽입돼 ``prompt_processor._escape_main_tags_parens`` 를 우회하므로, 여기서 직접
+    처리하지 않으면 'soft glow (warm tone)' 같은 구절의 괄호가 A1111/ComfyUI 가중치
+    파서에 오인식돼 강조가 깨진다(nl_weight>1로 ``(...:w)`` 래핑 시엔 중첩까지 발생).
+    NAI는 파이프라인과 동일하게 이스케이프하지 않는다(가중치 wrap 괄호는 보존)."""
     from core.scene_boost import format_nl_weight
 
-    comp_str = ", ".join(str(c) for c in (add.get("composition_tags") or []) if str(c).strip())
-    desc_str = ", ".join(str(d) for d in (add.get("descriptions") or []) if str(d).strip())
+    is_nai = str(getattr(context, "current_api_mode", "") or "").upper() == "NAI"
+    comp_parts = [str(c) for c in (add.get("composition_tags") or []) if str(c).strip()]
+    desc_parts = [str(d) for d in (add.get("descriptions") or []) if str(d).strip()]
+    if not is_nai:
+        from core.prompt_processor import _escape_parens_in_content
+
+        comp_parts = [_escape_parens_in_content(c) for c in comp_parts]
+        desc_parts = [_escape_parens_in_content(d) for d in desc_parts]
+    comp_str = ", ".join(comp_parts)
+    desc_str = ", ".join(desc_parts)
     if desc_str:
-        is_nai = str(getattr(context, "current_api_mode", "") or "").upper() == "NAI"
         desc_str = format_nl_weight(desc_str, settings.get("nl_weight", 1.0), is_nai)
     return ", ".join(p for p in [comp_str, desc_str] if p)
 

@@ -540,14 +540,22 @@ def get_assist_service(context: WebSessionContext) -> "Any":
 
 
 def ollama_boost_settings(context: WebSessionContext) -> dict[str, Any]:
-    """PE 저장소의 ``ollama_boost_settings``를 정규화해 반환(없으면 기본값).
-    nl_weight(0.75~3)·effort(concise/standard/rich)·include_prefix/postfix/e621·style options."""
-    from core.prompt_engineering_settings import normalize_ollama_boost_settings
-    try:
-        from core.prompt_engineering_settings import get_prompt_engineering_store
+    """전역 Ollama Boost 설정을 디스크 SSOT(``ollama_boost_user.json``)에서 직접 읽어
+    정규화 반환. nl_weight(0.75~3)·effort·include_*·style options.
 
-        store = get_prompt_engineering_store(context)
-        return normalize_ollama_boost_settings(store.collect_settings().get("ollama_boost_settings"))
+    ⚠️ 모드별 PE 캐시(``store.collect_settings()``)를 읽으면 안 된다 — 이 설정은
+    *전역*인데 캐시는 모드별 사본이라, 한 모드(예: NAI)에서 값을 바꾸면 다른 모드
+    (COMFYUI/WEBUI) 캐시는 stale로 남아 nl_weight=1.0 → ``(text:weight)`` 래핑이
+    빠진다(사용자 보고: WEBUI/ComfyUI에서 (text) 처리 안 됨). e621/danbooru boost
+    서비스가 매 호출 디스크에서 fresh 로드하는 것과 동일한 패턴으로 맞춘다."""
+    from core.prompt_engineering_settings import (
+        load_ollama_boost_settings,
+        normalize_ollama_boost_settings,
+    )
+    try:
+        runtime_paths = getattr(context, "runtime_paths", None)
+        save_root = getattr(runtime_paths, "save_dir", None)
+        return load_ollama_boost_settings(save_root=save_root)
     except Exception:
         return normalize_ollama_boost_settings(None)
 

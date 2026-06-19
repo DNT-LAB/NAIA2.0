@@ -352,8 +352,10 @@ class HeadlessVibeTransferService:
             return {"ok": False, "messages": [context._toast("이미 인코딩 중입니다.", level="info")]}
         if not self._runtime_can_encode():
             return {"ok": False, "messages": [context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다 (NAID3 제외).", level="error")]}
-        if frame.get("is_no_image") or not self._frame_has_source(frame):
-            return {"ok": False, "messages": [context._toast("인코딩할 소스 이미지가 없습니다.", level="error")]}
+        if frame.get("is_no_image") or frame.get("no_source") or not self._frame_has_source(frame):
+            # no_source = 번들 placeholder(원본 이미지 없음) → 재인코딩하면 검정 사각형을 인코딩한
+            # 쓰레기가 되고 Anlas만 소비. UI는 이미 막지만 직접 WS encode_* 호출도 서버에서 차단.
+            return {"ok": False, "messages": [context._toast("원본 이미지가 없는 vibe는 재인코딩할 수 없습니다.", level="error")]}
         frame["encoding_in_progress"] = True
         return {"ok": True, "messages": [self.module_state()]}
 
@@ -750,6 +752,7 @@ class HeadlessVibeTransferService:
             frame_can_encode = (
                 runtime_can_encode
                 and not frame.get("is_no_image")
+                and not frame.get("no_source")  # placeholder(원본 없음)는 재인코딩 불가
                 and self._frame_has_source(frame)
             )
             frames.append({

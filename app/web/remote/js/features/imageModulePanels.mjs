@@ -464,6 +464,22 @@ export function createImageModulePanels({
       };
     }
 
+    // 인코딩이 있는 vibe(번들 import / 일반 인코딩 무관)는 IE가 인코딩 시점에 고정된다.
+    // 사후 IE 슬라이더 조정은 인코딩↔IE 불일치로 *깨진 이미지*를 만든다(공식 사양: 인코딩된
+    // vibe는 Reference Strength만 조정 가능). → IE 슬라이더 제거, 인코딩된 IE만 읽기 표시
+    // (인코딩이 여러 개면 칩으로 선택 — 모두 유효 인코딩이라 안전). 미인코딩(업로드 직후)
+    // vibe만 IE 선택 + 인코딩(Anlas) 흐름을 유지한다.
+    if (encodedKeys.length > 0) {
+      return {
+        frameFlags,
+        html: `
+          <div class="mod-vibe-encode-row">
+            <span class="mod-encode-status encoded">Encoded IE ${currentIe}</span>
+            ${encodedKeys.length > 1 && encodedChips ? `<div class="mod-ie-chip-list">${encodedChips}</div>` : ''}
+          </div>`,
+      };
+    }
+
     const statusText = frame.can_encode === false && !hasCurrentEncoding
       ? 'Use stored encoded Vibe entries'
       : frame.encoding_in_progress

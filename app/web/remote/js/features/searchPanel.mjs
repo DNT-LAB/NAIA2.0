@@ -310,7 +310,14 @@ export function createSearchPanel({
       // (그 이후 search_state 는 기존대로 {send:false} — 카운트 갱신마다 재검색/재할당 방지)
       const hasActiveTags = serverPreferences.tag_filter_active
         && (((serverPreferences.tag_filter || []).length) || ((serverPreferences.tag_filter_exclude || []).length));
-      const autoApply = !initialFilterRestoreDone && !!hasActiveTags;
+      // 데이터셋이 아직 로드되기 전(랜덤 warmup 레이스로 total_count==0)이면 자동 적용을 '소비'하지
+      // 않는다. 빈 스냅샷에 필터를 걸면 0매칭 → 빈 필터가 할당돼 풀이 비고(Random "no matching
+      // rows"), 매치 카운트 라벨도 비어버린다(사용자 리포트: 4,810 매칭인데 라벨 공백). 데이터가
+      // 실제로 로드된(total_count>0) 첫 search_state 에서만 1회 자동 Search→Assign 하여, 라벨이
+      // 실데이터 기준 매치 수로 채워지고 풀이 비지 않게 한다. (백엔드 get_search_state 지연복원이
+      // total_count 를 채워 트리거를 보장 — 미배포 시엔 검색/파퀘 로드 등 후속 이벤트가 트리거.)
+      const dataReady = (Number(message.total_count) || 0) > 0;
+      const autoApply = !initialFilterRestoreDone && !!hasActiveTags && dataReady;
       if (autoApply) initialFilterRestoreDone = true;
       quickFilter.applyPreferences(serverPreferences, {send: autoApply, updateCount: false});
     } else if (serverPreferences) {

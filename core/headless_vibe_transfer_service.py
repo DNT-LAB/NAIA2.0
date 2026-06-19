@@ -520,6 +520,7 @@ class HeadlessVibeTransferService:
                 with Image.open(io.BytesIO(source)) as opened:
                     png_bytes = image_to_png_bytes(opened.convert("RGBA"))
                 file_hash = image_hash(png_bytes)
+                no_source = False  # 원본 이미지 있음 → 재인코딩 가능 → IE 조정 허용
             else:
                 placeholder = Image.new("RGB", (112, 112), "black")
                 png_bytes = image_to_png_bytes(placeholder.convert("RGBA"))
@@ -528,6 +529,7 @@ class HeadlessVibeTransferService:
                 # file_hash를 보장(서로 다른 인코딩 = 서로 다른 항목).
                 _content = json.dumps(encodings_by_model, sort_keys=True, ensure_ascii=False)
                 file_hash = image_hash(_content.encode("utf-8"))
+                no_source = True  # 원본 이미지 없음(placeholder) → 재인코딩 불가 → IE 잠금 대상
         except Exception:
             return ""
         # importInfo.strength: 공식 NAI가 vibe별 저장 강도를 적용(예: 0.21/0.1/0.9). 유한·[-1,1]
@@ -562,7 +564,7 @@ class HeadlessVibeTransferService:
                     vibe_encodings[f"{ie:.2f}"] = str(encoding_value)
             if not vibe_encodings:
                 continue
-            if self._write_imported_storage(model_key, file_hash, png_bytes, vibe_encodings, reference_strength):
+            if self._write_imported_storage(model_key, file_hash, png_bytes, vibe_encodings, reference_strength, no_source):
                 stored_any = True
                 self._session_imported.add(f"{model_key}|{file_hash}")  # per (model, hash)
         return file_hash if stored_any else ""
@@ -574,9 +576,14 @@ class HeadlessVibeTransferService:
         png_bytes: bytes,
         vibe_encodings: dict[str, str],
         reference_strength: float | None = None,
+        no_source: bool = False,
     ) -> bool:
         """Persist imported encodings to vibe_transfer/{model}/{hash}.json (+ image), merging
-        into any existing entry. Mirrors _save_encoding_to_storage's on-disk contract."""
+        into any existing entry. Mirrors _save_encoding_to_storage's on-disk contract.
+
+        no_source=True (번들에 원본 이미지 없음 → placeholder): 재인코딩이 불가능하므로 프런트가
+        IE 슬라이더를 잠그도록 플래그를 남긴다. (scan_storage가 skip하는 is_no_image와는 별개 —
+        Storage에는 정상 노출하되 IE만 고정.)"""
         context = self.context
         if not file_hash or not model_key:
             return False
@@ -600,6 +607,8 @@ class HeadlessVibeTransferService:
             })
             if reference_strength is not None:
                 existing["reference_strength"] = float(reference_strength)
+            if no_source:
+                existing["no_source"] = True
             json_path.write_text(json.dumps(existing, ensure_ascii=False, indent=4), encoding="utf-8")
             img_path = context._save_path("vibe_transfer", model_key, "images", f"{file_hash}.png")
             img_path.parent.mkdir(parents=True, exist_ok=True)
@@ -735,6 +744,7 @@ class HeadlessVibeTransferService:
                 "file_name": frame.get("file_name", ""),
                 "is_enabled": bool(frame.get("is_enabled")),
                 "is_no_image": bool(frame.get("is_no_image")),
+                "no_source": bool(frame.get("no_source")),  # 번들 placeholder(재인코딩 불가) → 프런트 IE 잠금
                 "is_naid3": context._is_naid3_model(),
                 "reference_strength": _as_float(frame.get("reference_strength"), 0.6),
                 "information_extracted": information_extracted,
@@ -921,6 +931,7 @@ class HeadlessVibeTransferService:
                 "information_extracted": closest_ie,
                 "vibe_encodings": encodings,
                 "storage_type": str(data.get("storage_type") or ""),
+                "no_source": bool(data.get("no_source")),  # 원본 이미지 없음(번들 placeholder) → IE 잠금
                 "source_model": model,
             }
             context.vibe_transfer_frames.append(frame)

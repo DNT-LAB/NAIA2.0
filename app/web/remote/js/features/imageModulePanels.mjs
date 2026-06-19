@@ -464,6 +464,26 @@ export function createImageModulePanels({
       };
     }
 
+    // 원본 이미지 없는(번들 placeholder) vibe만 IE 잠금: 재인코딩이 불가능해 슬라이더로 IE를
+    // 바꾸면 인코딩↔IE 불일치로 깨진 이미지가 나온다. 값은 보여주되 슬라이더 disabled + 인코딩된
+    // 칩 중에서만 선택. 정상 업로드/이미지 포함 vibe(no_source=false)는 아래의 조정 가능한
+    // 슬라이더 + 인코딩(Anlas) 흐름을 그대로 유지한다.
+    if (frame.no_source && encodedKeys.length > 0) {
+      return {
+        frameFlags,
+        html: `
+          <div class="mod-slider-row mod-vibe-ie-row">
+            <span class="mod-slider-label">Info Extracted</span>
+            <input class="mod-vibe-ie-slider" type="range" min="1" max="100" step="1" value="${Math.round(Number(currentIe) * 100)}" disabled title="원본 이미지가 없는 vibe는 재인코딩이 불가해 IE가 고정됩니다 (인코딩된 값만 사용)">
+            <span class="mod-slider-value mod-vibe-ie-value">${currentIe}</span>
+          </div>
+          <div class="mod-vibe-encode-row">
+            <span class="mod-encode-status encoded">Encoded IE ${currentIe}</span>
+            ${encodedKeys.length > 1 && encodedChips ? `<div class="mod-ie-chip-list">${encodedChips}</div>` : ''}
+          </div>`,
+      };
+    }
+
     const statusText = frame.can_encode === false && !hasCurrentEncoding
       ? 'Use stored encoded Vibe entries'
       : frame.encoding_in_progress

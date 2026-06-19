@@ -671,6 +671,10 @@ def build_instruction(
     focus = _RATING_FOCUS.get(rating, _RATING_FOCUS["s"])
     tags_line = ", ".join(descriptive[:60])
     style = _style_options(style_options)
+    # '광원·색조 허용'(allow_light_style) OFF면 지시문 자체가 조명/톤을 권하지 않도록 한다
+    # (긍정 지시·few-shot 예시가 부정 지시를 무력화하던 모순 제거). 입력에 이미 조명 태그가
+    # 있으면 면제 — 구도 후보 게이트·설명문 필터와 동일 기준.
+    light_ok = bool(style["allow_light_style"]) or _contains_style_source(descriptive, _LIGHT_STYLE_RE)
 
     # 접지 블록(코드가 만든 라벨:값) — 지시문 선두에 둬서 모델이 일반 분위기로 도망가지
     # 않고 *이* 장면의 구체 앵커를 프레이밍하게 한다. Priority는 명물(역할/소품/포즈) 우선.
@@ -718,10 +722,16 @@ def build_instruction(
             f"{', '.join(candidates)}.\n"
         )
 
+    may_clause = (
+        "You MAY add lighting, time-of-day, weather, shadow, or depth atmosphere even when untagged, "
+        if light_ok else
+        "You MAY add time-of-day, weather, or depth-of-field atmosphere even when untagged (but NOT "
+        "lighting, glow, shadow, sunlight, or color/tone wording), "
+    )
     style_clause = (
         "Grounding rules: every phrase must frame at least one concrete anchor above (its object, "
         "clothing, pose, role, body, or setting) — the nouns you write must come from the anchors. "
-        "You MAY add lighting, time-of-day, weather, shadow, or depth atmosphere even when untagged, "
+        + may_clause +
         "but add NO named concrete location or prop that is not listed above (no 'classroom', 'bed', "
         "'flower', 'window' unless it appears in the anchors). Never invent colors or eye colors: a "
         "color word is allowed only when that color appears in Existing tags, eye color only when an "
@@ -742,8 +752,11 @@ def build_instruction(
         + central_act_line
         + f"Rating focus [{rating}]: {focus}\n"
         + f"Write {max(1, lo)}-{hi} short English phrases ({wlo}-{whi} words each): frame the anchors "
-        "above with concrete lighting, depth, angle and mood, as the Rating focus directs.\n"
-        "Rules: (1) never add or change subjects, count, outfit, location, props, named series, "
+        + ("above with concrete lighting, depth, angle and mood, as the Rating focus directs.\n"
+           if light_ok else
+           "above with concrete depth, angle, framing and pose, as the Rating focus directs "
+           "(no lighting, glow, shadow, or color/tone).\n")
+        + "Rules: (1) never add or change subjects, count, outfit, location, props, named series, "
         "artist, or style; (2) do not merely re-list the tags verbatim — frame and present what they "
         "depict; (3) if nothing fitting can be added, return empty arrays — never invent. English only.\n"
         + style_clause
@@ -752,9 +765,12 @@ def build_instruction(
         "Bad — never do: \"another girl walks in\", \"a bed in the background\" (unless a bed anchor "
         "exists), introducing any new character, prop, or location.\n"
         "Example anchors — Action/pose: sitting, looking out window | Clothing: school uniform | Setting: classroom\n"
-        'Example output: {"descriptions": ["late afternoon light washing across the quiet classroom", '
-        '"a soft glow tracing the collar of her school uniform"], "composition_tags": ["depth of field", "backlighting"]}\n\n'
-        f"Existing tags (IMMUTABLE — never change, add to, or contradict): {tags_line}\n"
+        + ('Example output: {"descriptions": ["late afternoon light washing across the quiet classroom", '
+           '"a soft glow tracing the collar of her school uniform"], "composition_tags": ["depth of field", "backlighting"]}\n\n'
+           if light_ok else
+           'Example output: {"descriptions": ["a low angle emphasizing her relaxed posture by the window", '
+           '"the loose drape of her school uniform across one shoulder"], "composition_tags": ["depth of field", "from below"]}\n\n')
+        + f"Existing tags (IMMUTABLE — never change, add to, or contradict): {tags_line}\n"
         "Output JSON:"
     )
 

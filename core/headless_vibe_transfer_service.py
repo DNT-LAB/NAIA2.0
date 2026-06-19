@@ -461,26 +461,52 @@ class HeadlessVibeTransferService:
         if truncated:
             vibes = vibes[:_MAX_IMPORT_VIBES]
         imported = 0
+        imported_hashes: list[str] = []
         for vibe in vibes:
             try:
-                if self._import_single_vibe(vibe):
-                    imported += 1
+                file_hash = self._import_single_vibe(vibe)
             except Exception as exc:  # 한 vibe가 깨져도 나머지/소켓을 살린다
                 print(f"[ERROR] Vibe import: skipped a malformed vibe: {exc}")
                 continue
+            if file_hash:
+                imported += 1
+                if file_hash not in imported_hashes:
+                    imported_hashes.append(file_hash)
         if imported == 0:
             return context._toast("가져올 수 있는 Vibe 인코딩이 없습니다.", level="error")
-        message = f"{imported}개의 Vibe를 가져왔습니다. Storage에서 선택해 적용하세요 (Anlas 0)."
+
+        # 즉시 윈도우 반영(사용자 요청): 가져온 vibe를 현재 모델 프레임으로 바로 적용(최대
+        # 슬롯까지). Storage 창은 띄우지 않는다(불편). 현재 모델 인코딩이 없는 vibe는 적용은
+        # 못 하지만 Storage에 남아 모델 전환 시 사용 가능.
+        current_model = str(context._current_model_key() or "")
+        applied = 0
+        for file_hash in imported_hashes:
+            if not current_model or len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
+                break
+            if not context._existing_save_path("vibe_transfer", current_model, f"{file_hash}.json").exists():
+                continue  # 현재 모델 인코딩 없음 → 프레임 적용 불가(스토리지엔 보존)
+            if isinstance(self.apply_storage(f"{current_model}|{file_hash}|1.0"), dict):
+                break  # MAX/에러 토스트 → 적용 중단(나머지는 Storage)
+            applied += 1
+        if applied:
+            self._persist()
+
+        message = f"{imported}개의 Vibe를 가져왔습니다."
+        if applied:
+            message += f" {applied}개를 창에 바로 적용했어요."
+        leftover = imported - applied
+        if leftover > 0:
+            message += f" 나머지 {leftover}개는 Storage에 있어요."
         if truncated:
             message += f" (최대 {_MAX_IMPORT_VIBES}개까지만 처리)"
-        return [context._toast(message, level="success"), self.scan_storage()]
+        return [context._toast(message, level="success"), self.module_state()]
 
-    def _import_single_vibe(self, vibe: dict[str, Any]) -> bool:
-        """Write one vibe's pre-encoded encodings into per-model storage. Returns True if
-        at least one model's encodings were stored."""
+    def _import_single_vibe(self, vibe: dict[str, Any]) -> str:
+        """Write one vibe's pre-encoded encodings into per-model storage. Returns the
+        file_hash if at least one model's encodings were stored, else ""."""
         encodings_by_model = vibe.get("encodings") if isinstance(vibe.get("encodings"), dict) else {}
         if not encodings_by_model:
-            return False
+            return ""
         # 이미지(없으면 플레이스홀더) -> 정규화 PNG + 해시 (frame_from_bytes 규약과 동일하게
         # image_hash(정규화 PNG)를 써야 scan_storage/apply_storage가 일관되게 찾는다).
         try:
@@ -495,7 +521,7 @@ class HeadlessVibeTransferService:
                 placeholder = Image.new("RGB", (112, 112), "black")
                 png_bytes = image_to_png_bytes(placeholder.convert("RGBA"))
         except Exception:
-            return False
+            return ""
         file_hash = image_hash(png_bytes)
         stored_any = False
         for bundle_key, model_encodings in encodings_by_model.items():
@@ -522,7 +548,7 @@ class HeadlessVibeTransferService:
                 continue
             if self._write_imported_storage(model_key, file_hash, png_bytes, vibe_encodings):
                 stored_any = True
-        return stored_any
+        return file_hash if stored_any else ""
 
     def _write_imported_storage(
         self, model_key: str, file_hash: str, png_bytes: bytes, vibe_encodings: dict[str, str]

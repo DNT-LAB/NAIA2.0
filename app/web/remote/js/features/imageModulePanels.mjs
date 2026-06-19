@@ -602,13 +602,18 @@ export function createImageModulePanels({
       <button class="mod-btn-upload" onclick="pasteModuleImage('vibe_transfer')">Paste</button>
       <input type="file" id="vibeFileInput" accept="image/*" style="display:none"
         onchange="uploadModuleImage('vibe_transfer',this.files[0]);this.value=''">
-      <button class="mod-btn-upload" title="NAI .naiv4vibe / .naiv4vibebundle 파일 가져오기 (사전 인코딩 · Anlas 0)" onclick="document.getElementById('vibeImportInput').click()">Import .naiv4vibe</button>
-      <input type="file" id="vibeImportInput" accept=".naiv4vibe,.naiv4vibebundle,application/json" style="display:none"
-        onchange="importVibeFile(this.files[0]);this.value=''">
       <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('vibe_transfer')">Storage</button>
       <button class="mod-btn-upload mod-btn-storage" onclick="openVibeClusterListPanel()">Cluster</button>
       <span class="mod-frame-count">${message.frame_count}/${message.max_frames}</span>
       ${enabledCount > includedFrames ? `<span class="mod-frame-count">${enabledCount} active</span>` : ''}
+    </div>
+    <div class="mod-upload-bar">
+      <button class="mod-btn-upload" style="flex:1" title="단일 NAI vibe 파일(.naiv4vibe) 가져오기 · 사전 인코딩 · Anlas 0" onclick="document.getElementById('vibeSingleInput').click()">Import .naiv4vibe</button>
+      <input type="file" id="vibeSingleInput" accept=".naiv4vibe,application/json" style="display:none"
+        onchange="importVibeFile(this.files[0]);this.value=''">
+      <button class="mod-btn-upload" style="flex:1" title="NAI vibe 번들(.naiv4vibebundle) 가져오기 · 사전 인코딩 · Anlas 0" onclick="document.getElementById('vibeBundleInput').click()">Import .naiv4vibebundle</button>
+      <input type="file" id="vibeBundleInput" accept=".naiv4vibebundle,application/json" style="display:none"
+        onchange="importVibeFile(this.files[0]);this.value=''">
     </div>
     <label class="mod-checkbox-item" style="margin-bottom:8px">
       <input type="checkbox" ${message.normalize ? 'checked' : ''}

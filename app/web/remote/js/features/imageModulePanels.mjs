@@ -602,6 +602,9 @@ export function createImageModulePanels({
       <button class="mod-btn-upload" onclick="pasteModuleImage('vibe_transfer')">Paste</button>
       <input type="file" id="vibeFileInput" accept="image/*" style="display:none"
         onchange="uploadModuleImage('vibe_transfer',this.files[0]);this.value=''">
+      <button class="mod-btn-upload" title="NAI .naiv4vibe / .naiv4vibebundle 파일 가져오기 (사전 인코딩 · Anlas 0)" onclick="document.getElementById('vibeImportInput').click()">Import .naiv4vibe</button>
+      <input type="file" id="vibeImportInput" accept=".naiv4vibe,.naiv4vibebundle,application/json" style="display:none"
+        onchange="importVibeFile(this.files[0]);this.value=''">
       <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('vibe_transfer')">Storage</button>
       <button class="mod-btn-upload mod-btn-storage" onclick="openVibeClusterListPanel()">Cluster</button>
       <span class="mod-frame-count">${message.frame_count}/${message.max_frames}</span>

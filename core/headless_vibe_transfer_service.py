@@ -6,6 +6,7 @@ import base64
 import hashlib
 import io
 import json
+import math
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -30,6 +31,15 @@ _NAI_MODEL_MAP = {
     "NAID4.0C": "nai-diffusion-4-curated-preview",
     "NAID3": "nai-diffusion-3",
 }
+# .naiv4vibe / .naiv4vibebundle 의 NAI API 모델 키 -> NAIA 내부 모델 키(스토리지 폴더명).
+_BUNDLE_MODEL_MAP = {
+    "v4-5full": "NAID4.5F",
+    "v4-5curated": "NAID4.5C",
+    "v4full": "NAID4.0F",
+    "v4curated": "NAID4.0C",
+}
+# 한 번에 가져올 수 있는 vibe 최대 수(DoS 가드 — 악성/거대 번들이 수천 파일을 쓰는 것 차단).
+_MAX_IMPORT_VIBES = 512
 _ENCODE_VIBE_URL = "https://image.novelai.net/ai/encode-vibe"
 _ENCODE_UNAVAILABLE_REASON = "Vibe 인코딩은 NAI 모드 + NAI 토큰 + 소스 이미지가 있을 때만 가능합니다."
 
@@ -417,6 +427,139 @@ class HeadlessVibeTransferService:
         except Exception as exc:
             print(f"[ERROR] Vibe encoding storage save failed: {exc}")
 
+    # ----- .naiv4vibe / .naiv4vibebundle 가져오기 (사전 인코딩, encode-vibe 호출/Anlas 없음) -----
+    def import_vibe_file(self, raw_text: str) -> Any:
+        """Import a .naiv4vibe / .naiv4vibebundle file's PRE-ENCODED vibes into per-model
+        storage (vibe_transfer/{model}/{hash}.json + images/). No /ai/encode-vibe call →
+        no Anlas. Returns [toast, storage_list] so the Storage browser refreshes with the
+        imported entries (the user then applies one from Storage)."""
+        context = self.context
+        try:
+            data = json.loads(raw_text)
+        except Exception:
+            return context._toast("Vibe 파일을 읽지 못했습니다(JSON 아님).", level="error")
+        if not isinstance(data, dict):
+            return context._toast("Vibe 파일 형식이 올바르지 않습니다.", level="error")
+        identifier = str(data.get("identifier") or "")
+        if identifier == "novelai-vibe-transfer-bundle":
+            raw_vibes = data.get("vibes")
+            # vibes가 list가 아니면(예: "vibes":1) 빈 리스트로 — 반복 중 TypeError가 핸들러
+            # 밖으로 튀어 WS 소켓을 끊는 것 방지. 멤버는 선언된 형식대로 'novelai-vibe-transfer'만.
+            vibes = [
+                item
+                for item in (raw_vibes if isinstance(raw_vibes, list) else [])
+                if isinstance(item, dict)
+                and str(item.get("identifier") or "") == "novelai-vibe-transfer"
+            ]
+        elif identifier == "novelai-vibe-transfer":
+            vibes = [data]
+        else:
+            return context._toast(
+                "알 수 없는 형식입니다 (.naiv4vibe / .naiv4vibebundle 만 지원).", level="error"
+            )
+        truncated = len(vibes) > _MAX_IMPORT_VIBES
+        if truncated:
+            vibes = vibes[:_MAX_IMPORT_VIBES]
+        imported = 0
+        for vibe in vibes:
+            try:
+                if self._import_single_vibe(vibe):
+                    imported += 1
+            except Exception as exc:  # 한 vibe가 깨져도 나머지/소켓을 살린다
+                print(f"[ERROR] Vibe import: skipped a malformed vibe: {exc}")
+                continue
+        if imported == 0:
+            return context._toast("가져올 수 있는 Vibe 인코딩이 없습니다.", level="error")
+        message = f"{imported}개의 Vibe를 가져왔습니다. Storage에서 선택해 적용하세요 (Anlas 0)."
+        if truncated:
+            message += f" (최대 {_MAX_IMPORT_VIBES}개까지만 처리)"
+        return [context._toast(message, level="success"), self.scan_storage()]
+
+    def _import_single_vibe(self, vibe: dict[str, Any]) -> bool:
+        """Write one vibe's pre-encoded encodings into per-model storage. Returns True if
+        at least one model's encodings were stored."""
+        encodings_by_model = vibe.get("encodings") if isinstance(vibe.get("encodings"), dict) else {}
+        if not encodings_by_model:
+            return False
+        # 이미지(없으면 플레이스홀더) -> 정규화 PNG + 해시 (frame_from_bytes 규약과 동일하게
+        # image_hash(정규화 PNG)를 써야 scan_storage/apply_storage가 일관되게 찾는다).
+        try:
+            from PIL import Image
+
+            image_b64 = vibe.get("image")
+            if image_b64:
+                source = base64.b64decode(str(image_b64))
+                with Image.open(io.BytesIO(source)) as opened:
+                    png_bytes = image_to_png_bytes(opened.convert("RGBA"))
+            else:
+                placeholder = Image.new("RGB", (112, 112), "black")
+                png_bytes = image_to_png_bytes(placeholder.convert("RGBA"))
+        except Exception:
+            return False
+        file_hash = image_hash(png_bytes)
+        stored_any = False
+        for bundle_key, model_encodings in encodings_by_model.items():
+            model_key = _BUNDLE_MODEL_MAP.get(str(bundle_key))
+            if not model_key or not isinstance(model_encodings, dict):
+                continue
+            vibe_encodings: dict[str, str] = {}
+            for _encoding_id, encoding_info in model_encodings.items():
+                if not isinstance(encoding_info, dict):
+                    continue
+                encoding_value = encoding_info.get("encoding")
+                params = encoding_info.get("params") if isinstance(encoding_info.get("params"), dict) else {}
+                ie = _as_float(params.get("information_extracted"), 1.0)
+                # 비유한값(inf/nan) 차단 후 유효 IE 범위로 clamp. json.loads는 1e309→inf, NaN을
+                # 그대로 통과시키고 _as_float는 못 거른다 → IE 키가 "inf"/"nan"이 되면
+                # scan_storage가 Infinity/NaN을 직렬화해 브라우저 JSON.parse가 거부, 이후 Vibe
+                # Storage 새로고침이 통째로 깨진다(Codex HIGH). info_extracted_ 핸들러와 동일 clamp.
+                if not math.isfinite(ie):
+                    ie = 1.0
+                ie = max(0.01, min(1.0, round(ie, 2)))
+                if encoding_value:
+                    vibe_encodings[f"{ie:.2f}"] = str(encoding_value)
+            if not vibe_encodings:
+                continue
+            if self._write_imported_storage(model_key, file_hash, png_bytes, vibe_encodings):
+                stored_any = True
+        return stored_any
+
+    def _write_imported_storage(
+        self, model_key: str, file_hash: str, png_bytes: bytes, vibe_encodings: dict[str, str]
+    ) -> bool:
+        """Persist imported encodings to vibe_transfer/{model}/{hash}.json (+ image), merging
+        into any existing entry. Mirrors _save_encoding_to_storage's on-disk contract."""
+        context = self.context
+        if not file_hash or not model_key:
+            return False
+        try:
+            json_path = context._save_path("vibe_transfer", model_key, f"{file_hash}.json")
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            existing: dict[str, Any] = {}
+            if json_path.exists():
+                try:
+                    loaded = json.loads(json_path.read_text(encoding="utf-8"))
+                    if isinstance(loaded, dict):
+                        existing = loaded
+                except Exception:
+                    existing = {}
+            enc = existing.get("encodings") if isinstance(existing.get("encodings"), dict) else {}
+            enc.update({str(k): str(v) for k, v in vibe_encodings.items() if v})
+            existing.update({
+                "file_hash": file_hash,
+                "file_name": existing.get("file_name") or f"{file_hash}.png",
+                "encodings": enc,
+            })
+            json_path.write_text(json.dumps(existing, ensure_ascii=False, indent=4), encoding="utf-8")
+            img_path = context._save_path("vibe_transfer", model_key, "images", f"{file_hash}.png")
+            img_path.parent.mkdir(parents=True, exist_ok=True)
+            if png_bytes and not img_path.exists():
+                img_path.write_bytes(png_bytes)
+            return True
+        except Exception as exc:
+            print(f"[ERROR] Vibe bundle import storage save failed: {exc}")
+            return False
+
     def module_state(self) -> dict[str, Any]:
         context = self.context
         self._ensure_loaded()
@@ -514,6 +657,8 @@ class HeadlessVibeTransferService:
             return context._toast("Vibe encoding is not available in this runtime; use stored encoded Vibe entries.", level="error")
         elif key == "get_storage":
             return self.scan_storage()
+        elif key == "import_vibe_file":
+            return self.import_vibe_file(str(value or ""))
         elif key == "apply_storage":
             applied = self.apply_storage(str(value or ""))
             if isinstance(applied, dict):

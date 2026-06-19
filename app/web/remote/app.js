@@ -1170,7 +1170,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20260603-
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260603-vibe-encode1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260619-vibeimport')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -7135,6 +7135,24 @@ function pasteModuleImage(moduleId) {
 
 function uploadModuleImage(moduleId, file) {
   if (imageModulePanels) imageModulePanels.uploadImage(moduleId, file);
+}
+
+// NAI .naiv4vibe / .naiv4vibebundle 가져오기: 파일(JSON 텍스트)을 읽어 백엔드로 전송.
+// 백엔드가 사전 인코딩을 per-model 스토리지에 기록(Anlas 0) 후 [toast, storage_list] 반환 →
+// Storage 브라우저가 즉시 갱신된다.
+function importVibeFile(file) {
+  if (!file) return;
+  const send = text => {
+    if (text && text.trim()) setModuleParam('vibe_transfer', 'import_vibe_file', text);
+  };
+  if (typeof file.text === 'function') {
+    file.text().then(send).catch(err => console.error('Vibe import read failed', err));
+  } else {
+    const reader = new FileReader();
+    reader.onload = () => send(String(reader.result || ''));
+    reader.onerror = () => console.error('Vibe import read failed');
+    reader.readAsText(file);
+  }
 }
 
 // ---- Slider debounce for image modules ----

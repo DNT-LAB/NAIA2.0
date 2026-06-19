@@ -1170,7 +1170,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20260603-
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260619-vibeimport2')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260619-vibeimport3')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,

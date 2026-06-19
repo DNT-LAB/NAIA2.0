@@ -608,10 +608,10 @@ export function createImageModulePanels({
       ${enabledCount > includedFrames ? `<span class="mod-frame-count">${enabledCount} active</span>` : ''}
     </div>
     <div class="mod-upload-bar">
-      <button class="mod-btn-upload" style="flex:1" title="단일 NAI vibe 파일(.naiv4vibe) 가져오기 · 사전 인코딩 · Anlas 0" onclick="document.getElementById('vibeSingleInput').click()">Import .naiv4vibe</button>
+      <button class="mod-btn-upload" style="flex:1;background:color-mix(in srgb, var(--accent) 64%, #14122a 36%)" title="단일 NAI vibe 파일(.naiv4vibe) 가져오기 · 사전 인코딩 · Anlas 0" onclick="document.getElementById('vibeSingleInput').click()">Import .naiv4vibe</button>
       <input type="file" id="vibeSingleInput" accept=".naiv4vibe,application/json" style="display:none"
         onchange="importVibeFile(this.files[0]);this.value=''">
-      <button class="mod-btn-upload" style="flex:1" title="NAI vibe 번들(.naiv4vibebundle) 가져오기 · 사전 인코딩 · Anlas 0" onclick="document.getElementById('vibeBundleInput').click()">Import .naiv4vibebundle</button>
+      <button class="mod-btn-upload" style="flex:1;background:color-mix(in srgb, var(--accent) 64%, #14122a 36%)" title="NAI vibe 번들(.naiv4vibebundle) 가져오기 · 사전 인코딩 · Anlas 0" onclick="document.getElementById('vibeBundleInput').click()">Import .naiv4vibebundle</button>
       <input type="file" id="vibeBundleInput" accept=".naiv4vibebundle,application/json" style="display:none"
         onchange="importVibeFile(this.files[0]);this.value=''">
     </div>

@@ -559,10 +559,8 @@ class HeadlessVibeTransferService:
                 continue
             if self._write_imported_storage(model_key, file_hash, png_bytes, vibe_encodings, reference_strength):
                 stored_any = True
-        if stored_any:
-            self._session_imported.add(file_hash)
-            return file_hash
-        return ""
+                self._session_imported.add(f"{model_key}|{file_hash}")  # per (model, hash)
+        return file_hash if stored_any else ""
 
     def _write_imported_storage(
         self,
@@ -609,9 +607,15 @@ class HeadlessVibeTransferService:
 
     # ----- Storage 항목 우클릭 액션 (삭제 / 위치 열기) -----
     def _safe_storage_target(self, value: str):
-        """"model|file_hash" → (model, file_hash, json_path, image_path). 경로 위생: 두 토큰을
-        Path(...).name으로 정규화(경로 이탈 차단)하고, 결과 경로가 vibe_transfer 루트 하위인지
-        검증. 부적합하면 None."""
+        """"model|file_hash" → (model, file_hash, json_path, image_path) 또는 None.
+
+        경로 위생(파괴적 삭제/OS 열기 입력):
+        - 두 토큰을 Path(...).name으로 정규화(구분자/이탈 제거).
+        - scan_storage가 *보여준 바로 그 파일*을 대상으로: 존재하는 vibe_transfer 루트(기본+레거시
+          폴백)를 뒤져 {model}/{file_hash}.json이 있는 루트를 선택(없으면 기본 루트=삭제 멱등용).
+        - json·image **둘 다** 선택 루트 하위로 resolve되는지 검증 → images/ 등이 정션/심볼릭으로
+          외부를 가리켜도 외부 파일 삭제/열기 차단(Codex CRITICAL).
+        """
         parts = str(value or "").split("|")
         if len(parts) < 2:
             return None
@@ -621,10 +625,29 @@ class HeadlessVibeTransferService:
             return None
         context = self.context
         try:
-            root = context._save_path("vibe_transfer").resolve()
-            json_path = context._save_path("vibe_transfer", model, f"{file_hash}.json")
-            image_path = context._save_path("vibe_transfer", model, "images", f"{file_hash}.png")
-            if root not in json_path.resolve().parents:
+            roots = list(context._existing_save_dirs("vibe_transfer"))
+        except Exception:
+            roots = []
+        chosen_root = None
+        for root in roots:
+            try:
+                if (root / model / f"{file_hash}.json").exists():
+                    chosen_root = root
+                    break
+            except Exception:
+                continue
+        if chosen_root is None:
+            try:
+                chosen_root = context._save_path("vibe_transfer")
+            except Exception:
+                return None
+        try:
+            root_resolved = chosen_root.resolve()
+            json_path = chosen_root / model / f"{file_hash}.json"
+            image_path = chosen_root / model / "images" / f"{file_hash}.png"
+            if root_resolved not in json_path.resolve().parents:
+                return None
+            if root_resolved not in image_path.resolve().parents:
                 return None
         except Exception:
             return None
@@ -637,7 +660,7 @@ class HeadlessVibeTransferService:
         target = self._safe_storage_target(value)
         if target is None:
             return context._toast("삭제할 Vibe 항목을 찾지 못했습니다.", level="error")
-        _model, file_hash, json_path, image_path = target
+        model, file_hash, json_path, image_path = target
         removed = False
         for path in (json_path, image_path):
             try:
@@ -646,7 +669,7 @@ class HeadlessVibeTransferService:
                     removed = True
             except Exception as exc:
                 print(f"[ERROR] Vibe storage delete failed: {exc}")
-        self._session_imported.discard(file_hash)
+        self._session_imported.discard(f"{model}|{file_hash}")
         if not removed:
             return [context._toast("이미 삭제된 항목입니다.", level="info"), self.scan_storage()]
         return [context._toast("Vibe를 Storage에서 삭제했어요.", level="success"), self.scan_storage()]
@@ -824,7 +847,7 @@ class HeadlessVibeTransferService:
                         "file_hash": file_hash,
                         "file_name": str(data.get("file_name") or image_path.name),
                         "encoding_keys": encoding_keys,
-                        "session_new": file_hash in self._session_imported,
+                        "session_new": f"{model_dir.name}|{file_hash}" in self._session_imported,
                         "thumbnail": "",
                         "thumbnail_url": (
                             "/api/module-storage/vibe/thumb"

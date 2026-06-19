@@ -5,6 +5,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket
 
+from core.headless_payload_utils import is_loopback_host
 from core.web_session_context import WebSessionContext
 
 
@@ -129,6 +130,22 @@ async def handle_module_command(
         import asyncio
 
         asyncio.create_task(_run_extension_load(context, clients, command))
+        return True
+
+    # Vibe Storage 관리(파일 삭제 / OS 탐색기 열기)는 서버 머신 로컬 동작이라 루프백 클라이언트
+    # 전용으로 게이트한다(기존 result open-location 경계와 일치, Codex 리뷰). 원격 web 클라이언트는
+    # vibe 적용/사용은 그대로 가능하며 이 두 관리 동작만 차단된다.
+    if (
+        str(command.get("module_id") or "") == "vibe_transfer"
+        and str(command.get("key") or "") in {"open_location", "delete_storage"}
+        and not is_loopback_host(client_host)
+    ):
+        await _send_json(ws, {
+            "type": "toast",
+            "level": "error",
+            "message": "이 동작은 로컬(이 PC)에서만 가능합니다.",
+            "runtime": "web",
+        })
         return True
 
     module_state = context.set_module_param(

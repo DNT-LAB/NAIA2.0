@@ -20,6 +20,17 @@ export function createImageModulePanels({
   promptDialog = async () => null,
 }) {
   const sliderDebounce = {};
+  // 미커밋 IE draft 보존: 사용자가 IE 슬라이더를 드래그했지만 아직 인코딩(2 Anlas)하지 않은 값을
+  // 보관한다. Ref Strength 조정/패널 재오픈으로 module_state가 재렌더돼도 IE가 백엔드 저장값(보통
+  // 1.00)으로 스냅백되지 않게 한다. 생성은 항상 vibe_encodings를 쓰므로 이 draft는 순수 표시용이고
+  // IE↔인코딩 불일치를 만들지 않는다.
+  //   key   = frame index (제거 외에는 재렌더 간 안정 — 백엔드가 vibe 프레임을 재정렬하지 않음)
+  //   value = { ie, hash, baseIe }
+  //     hash   = frame.file_hash. index가 다른 프레임을 가리키게 되면(프레임 제거로 시프트) 무효화.
+  //              동일 이미지 2회 추가(같은 hash·다른 index)도 index 키라 교차 오염되지 않는다.
+  //     baseIe = draft 생성 시점의 백엔드 IE. 이후 백엔드 IE가 달라지면(인코딩 완료/외부 세션 변경)
+  //              draft를 해소해 정당한 백엔드 값이 가려지지 않게 한다.
+  const vibeIeDrafts = new Map();
   let storageView = null;
   let vibeClusterListOpen = false;
   let vibeClusterSaveOpen = false;
@@ -339,12 +350,37 @@ export function createImageModulePanels({
       .filter(Number.isFinite);
   }
 
+  // 재렌더 시 frame(index)에 적용할 IE draft를 해소한다. 다음이면 draft를 버리고 백엔드 값을 쓴다:
+  //  - index가 다른 프레임을 가리킴(제거로 시프트) → hash 불일치
+  //  - 백엔드 IE가 draft 생성 시점(baseIe)과 달라짐 → 인코딩 완료 또는 외부 변경 → 해소
+  // 그 외(백엔드 IE 불변)에는 미커밋 draft를 유지해 스냅백을 막는다.
+  function resolveVibeIeDraft(frame, index, backendIe) {
+    const entry = vibeIeDrafts.get(index);
+    if (!entry) return '';
+    if (entry.hash !== String(frame?.file_hash || '') || backendIe !== entry.baseIe) {
+      vibeIeDrafts.delete(index);
+      return '';
+    }
+    return entry.ie;
+  }
+
   function updateVibeIeDraft(index, rawValue) {
     const frameElement = getVibeFrameElement(index);
     if (!frameElement) return null;
     const ieText = formatIe(Number(rawValue) / 100);
     const encodedKeys = getFrameEncodedKeys(frameElement);
     const encoded = hasEncodedIe(encodedKeys, ieText);
+    // 인코딩된 값은 commitVibeIeDraft가 백엔드로 커밋 → 백엔드 IE가 곧 보유하므로 draft 불필요.
+    // 미인코딩 값만 재렌더 대비 보존(생성 시점 백엔드 IE=baseIe로 외부 변경 감지).
+    if (encoded) {
+      vibeIeDrafts.delete(index);
+    } else {
+      vibeIeDrafts.set(index, {
+        ie: ieText,
+        hash: frameElement.dataset.fileHash || '',
+        baseIe: frameElement.dataset.backendIe || '',
+      });
+    }
     const canEncode = frameElement.dataset.canEncode === 'true';
     const sliderValue = frameElement.querySelector('.mod-vibe-ie-value');
     const encodeButton = frameElement.querySelector('[data-vibe-encode-btn]');
@@ -385,6 +421,7 @@ export function createImageModulePanels({
   function selectVibeEncoding(index, ieValue) {
     const ieText = formatIe(ieValue);
     const frameElement = getVibeFrameElement(index);
+    vibeIeDrafts.delete(index);  // 인코딩된 칩을 명시 선택 → 백엔드로 커밋되므로 draft 폐기
     const slider = frameElement?.querySelector('.mod-vibe-ie-slider');
     if (slider) slider.value = String(Math.round(Number(ieText) * 100));
     updateVibeIeDraft(index, Number(ieText) * 100);
@@ -437,12 +474,19 @@ export function createImageModulePanels({
 
   function renderVibeEncodingControls(frame, index) {
     const encodedKeys = getEncodedIeValues(frame);
-    const currentIe = formatIe(frame.information_extracted);
+    const backendIe = formatIe(frame.information_extracted);
+    // locked 분기(이미지 없음 / no_source 번들)는 IE가 인코딩에 고정 → draft를 적용하지 않고
+    // 항상 backendIe를 쓴다(슬라이더가 없어 draft가 생성될 일도 없지만 방어적으로 차단).
+    // 편집 가능한 정상 vibe만 미커밋 draft를 우선 표시해 스냅백을 막는다.
+    const isLocked = frame.is_no_image || (frame.no_source && encodedKeys.length > 0);
+    const currentIe = (!isLocked && resolveVibeIeDraft(frame, index, backendIe)) || backendIe;
     const hasCurrentEncoding = hasEncodedIe(encodedKeys, currentIe);
     const canEncode = frame.can_encode !== false && !frame.is_no_image && !frame.is_naid3 && !frame.encoding_in_progress;
     const keyData = encodedKeys.map(formatIe).join(',');
     const frameFlags = [
       `data-vibe-index="${index}"`,
+      `data-file-hash="${escHtml(String(frame.file_hash || ''))}"`,
+      `data-backend-ie="${backendIe}"`,
       `data-pending-ie="${currentIe}"`,
       `data-encoding-keys="${keyData}"`,
       `data-can-encode="${canEncode ? 'true' : 'false'}"`,
@@ -568,7 +612,19 @@ export function createImageModulePanels({
 
   function renderVibeTransfer(message) {
     vibeClusterCanWrite = message.can_write_clusters !== false;
-    const frames = (message.frames || []).map((frame, index) => {
+    // stale IE draft 정리: 해당 index에 프레임이 없거나(제거) 다른 프레임이 와 있으면(제거로 시프트)
+    // 폐기. 메모리는 동시 프레임 수(≤MAX)로 bounded.
+    // 알려진 LOW 잔여 엣지: 동일 이미지를 2개 프레임으로 올린 뒤 앞쪽을 제거하면, 뒤 프레임이 같은
+    // index로 시프트되며 hash·baseIe가 모두 같을 경우 제거된 프레임의 draft가 살아남아 엉뚱한
+    // 프레임에 표시될 수 있다. 표시 전용·자가치유(슬라이더 조작/인코딩/백엔드 IE 변경 시 해소)이며
+    // 생성(vibe_encodings)에는 영향 없음. 프레임 instance 식별이 불가능한 프론트 한계 — 완전 차단은
+    // 백엔드 안정 frame id 필요(사용자 결정으로 미적용).
+    const liveFrames = message.frames || [];
+    for (const [index, entry] of [...vibeIeDrafts.entries()]) {
+      const frame = liveFrames[index];
+      if (!frame || String(frame.file_hash || '') !== entry.hash) vibeIeDrafts.delete(index);
+    }
+    const frames = liveFrames.map((frame, index) => {
       const thumbHtml = frame.is_no_image
         ? '<div class="mod-ref-noimage">No Image</div>'
         : `<img class="mod-ref-thumb" src="data:image/jpeg;base64,${frame.thumbnail}" alt="${escHtml(frame.file_name)}">`;

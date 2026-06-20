@@ -699,6 +699,14 @@ class HeadlessRandomPromptService:
             safe_print(f"🌐 Headless Remote: search_results restored from memory snapshot ({self.context.search_results.get_count()} rows)")
             return True
 
+        # 마지막 검색(작업 데이터셋) 복원 (Part 3) — runner 캐시보다 우선이며, 태그필터가 영속돼
+        # 있어도 무조건 복원한다(이건 사용자의 실제 마지막 *원본* 데이터셋이라 _should_skip_fallback
+        # 대상이 아님; 풀 등급/태그필터는 복원 위에 재적용된다). 재시작/가져오기 후에도 데이터가
+        # 살아 있어 빈 풀/빈 매치 라벨 레이스(Codex 잔여)도 함께 해소된다.
+        if self.context.restore_last_search():
+            safe_print(f"🌐 Headless Remote: search_results restored from last-search cache ({self.context.search_results.get_count()} rows)")
+            return True
+
         for path, label in self._fallback_sources():
             if not path.exists():
                 continue

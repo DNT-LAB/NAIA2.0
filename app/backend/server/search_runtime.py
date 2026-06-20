@@ -91,6 +91,8 @@ def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
         search_ratings=["g", "s", "q", "e"],
         tag_filter_active=False,
     )
+    # 작업 데이터셋이 바뀌었으니 마지막-검색 영속도 갱신 (Part 3 — 재시작/가져오기 복원용).
+    context.persist_last_search()
 
 
 def filter_source_frame(
@@ -331,6 +333,7 @@ def run_search_command(
         context.active_tag_filter = None
         context.save_search_filter_state(tag_filter_active=False)
         context.remote_active_ratings = set("gsqe")
+        context.persist_last_search()  # Part 3: 재시작/가져오기 후 복원용
         return apply_search_runtime_filters(context)
 
     base = search_base_frame(context)
@@ -343,6 +346,7 @@ def run_search_command(
     context.active_tag_filter = None
     context.save_search_filter_state(tag_filter_active=False)
     context.remote_active_ratings = set("gsqe")
+    context.persist_last_search()  # Part 3: 재시작/가져오기 후 복원용
     return apply_search_runtime_filters(context)
 
 

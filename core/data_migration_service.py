@@ -53,11 +53,13 @@ MIGRATION_BUCKETS: tuple[tuple[str, str, str], ...] = (
     ("ui_assets", "ui_assets", "썸네일·UI 자산"),            # user-data layout (incl. artist_thumb)
     ("artist_thumb", "ui_assets/artist_thumb", "아티스트 필터 상태"),  # legacy checkout layout
     ("config", "config", "API 설정·토큰"),                  # user-data layout (NAI 토큰 등)
-    # Last random-pool cache (the "temp parquet"). Lets 가져오기 carry the previous
-    # install's pool so the user isn't dropped to an empty pool after import. Single
-    # file under cache/; skipped if absent. (Filtered last-search persistence is a
-    # separate, deliberate non-goal — the runner cache holds the unfiltered pool.)
+    # Last random-pool cache (the unfiltered auto-gen "temp parquet") + the user's last
+    # SEARCH (working dataset, Part 3). Lets 가져오기 carry the previous install's data so
+    # the user isn't dropped to an empty pool after import. Single files under cache/;
+    # skipped if absent. naia_last_search is restored preferentially on startup so the last
+    # search survives restart/import.
     ("cache/naia_temp_rows.parquet", "cache/naia_temp_rows.parquet", "랜덤 풀 캐시 (temp parquet)"),
+    ("cache/naia_last_search.parquet", "cache/naia_last_search.parquet", "마지막 검색 데이터셋"),
     # User-generated content under ``data/`` that previously was not migrated.
     # Each subdir is a known user-state directory (the rest of ``data/`` is
     # bundled with the app or re-downloadable via Install Manager — never

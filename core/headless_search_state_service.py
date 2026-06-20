@@ -243,6 +243,62 @@ class HeadlessSearchStateService:
             return context.runtime_paths.cache_dir / "naia_temp_rows.parquet"
         return Path(context.repo_root) / "naia_temp_rows.parquet"
 
+    # ---- 마지막 검색(작업 데이터셋) 영속 (Part 3) ----
+    # runner 캐시(naia_temp_rows = 비필터 오토젠 풀, 필터 검색은 의도적으로 transient)와는 별개의
+    # 전용 파일. 사용자가 마지막으로 검색/로드한 *원본*(master_base = 풀 등급·태그필터 적용 전 전체)
+    # 을 저장해, 재시작/가져오기 후에도 그 데이터셋이 복원되게 한다. 복원 위에 풀 등급/태그필터가
+    # 다시 적용되므로 runner-cache의 'filtered cache는 복원 안 함' 계약을 건드리지 않는다.
+    def last_search_parquet_path(self) -> Path:
+        context = self.context
+        if context.runtime_paths is not None:
+            return context.runtime_paths.cache_dir / "naia_last_search.parquet"
+        return Path(context.repo_root) / "naia_last_search.parquet"
+
+    def persist_last_search(self) -> Path | None:
+        """현재 작업 데이터셋을 전용 파일로 저장. best-effort.
+
+        snapshot(=실제 마지막 검색 결과/작업 뷰) 우선, 없으면 master_base. 아카이브 검색·커스텀
+        로드에선 둘이 같지만, 로드된 셋 *안에서* 재검색한 경우 snapshot=부분집합(사용자가 마지막에
+        본 것)이라 그게 더 충실한 '마지막 검색'이다."""
+        context = self.context
+        frame = getattr(context, "search_results_snapshot", None)
+        if frame is None or getattr(frame, "empty", True):
+            frame = getattr(context, "search_results_master_base_snapshot", None)
+        if frame is None or getattr(frame, "empty", True):
+            return None
+        try:
+            path = self.last_search_parquet_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            frame.to_parquet(path, index=False)
+            return path
+        except Exception as exc:
+            print(f"Headless Remote: last-search persist failed - {exc}", flush=True)
+            return None
+
+    def restore_last_search(self) -> bool:
+        """전용 last-search 파일이 있으면 search_results/snapshot/master_base 로 복원(True=복원).
+        runner-cache 스킵(태그필터 활성 시)과 무관하게 무조건 복원 — 사용자의 실제 마지막 작업
+        데이터셋(비필터 원본)이라, 풀 등급/태그필터는 그 위에 재적용된다."""
+        context = self.context
+        try:
+            path = self.last_search_parquet_path()
+            if not path.exists():
+                return False
+            import pandas as pd
+            from core.search_result_model import SearchResultModel
+
+            frame = pd.read_parquet(path)
+            if frame is None or frame.empty:
+                return False
+            frame = frame.reset_index(drop=True)
+            context.search_results = SearchResultModel(frame)
+            context.search_results_snapshot = frame.copy()
+            context.search_results_master_base_snapshot = frame.copy()
+            return True
+        except Exception as exc:
+            print(f"Headless Remote: last-search restore failed - {exc}", flush=True)
+            return False
+
     def tag_archive_parquet_sources(self) -> list[tuple[Path, str]]:
         """Return the active image-tag archive shards for full search.
 

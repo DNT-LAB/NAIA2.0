@@ -171,6 +171,7 @@ export function createPromptEngineeringActions({
       allow_scent_style: !!document.getElementById('modOllamaBoostAllowScent')?.checked,
       allow_material_style: !!document.getElementById('modOllamaBoostAllowMaterial')?.checked,
       allow_light_style: !!document.getElementById('modOllamaBoostAllowLight')?.checked,
+      emphasize_framing: !!document.getElementById('modOllamaBoostEmphasizeFraming')?.checked,
     };
     setModuleParam('prompt_engineering', 'ollama_boost_settings', JSON.stringify(payload));
   }

@@ -532,6 +532,7 @@ export function createPromptEngineeringPopupRenderers({
     const allowScentStyle = boost.allow_scent_style !== false;
     const allowMaterialStyle = boost.allow_material_style !== false;
     const allowLightStyle = boost.allow_light_style !== false;
+    const emphasizeFraming = !!boost.emphasize_framing;
     const effortHtml = OLLAMA_BOOST_EFFORTS.map(([value, label]) => `
       <label class="mod-checkbox-item">
         <input type="radio" name="modOllamaBoostEffort" value="${escHtml(value)}"${effort === value ? ' checked' : ''}>
@@ -572,8 +573,12 @@ export function createPromptEngineeringPopupRenderers({
           <input type="checkbox" id="modOllamaBoostAllowLight"${allowLightStyle ? ' checked' : ''}>
           <span class="mod-checkbox-label">광원·색조 허용</span>
         </label>
+        <label class="mod-checkbox-item">
+          <input type="checkbox" id="modOllamaBoostEmphasizeFraming"${emphasizeFraming ? ' checked' : ''}>
+          <span class="mod-checkbox-label">구도(close-up) 강조</span>
+        </label>
       </div>
-      <div class="mod-boost-caption">미입력 대상 색상과 눈색은 항상 차단합니다. 광원 색조·향·재질은 태그에 직접 없어도 스타일 보강으로 허용할지 선택합니다.</div>
+      <div class="mod-boost-caption">미입력 대상 색상과 눈색은 항상 차단합니다. 광원 색조·향·재질은 태그에 직접 없어도 스타일 보강으로 허용할지 선택합니다. <b>구도(close-up) 강조</b>: 자연어 본문이 카메라 샷·앵글(close-up·low angle)을 직접 묘사하도록 허용해 기존 사양에 가까운 프레이밍을 냅니다(기본 OFF=다양성 우선).</div>
     </div>
     <div>
       <div class="mod-section-label">Input 구성</div>

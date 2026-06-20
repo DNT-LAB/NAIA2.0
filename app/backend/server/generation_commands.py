@@ -353,6 +353,7 @@ async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bo
             allow_scent_style=settings.get("allow_scent_style"),
             allow_material_style=settings.get("allow_material_style"),
             allow_light_style=settings.get("allow_light_style"),
+            emphasize_framing=settings.get("emphasize_framing"),
         )
         if not isinstance(boosted, dict) or not boosted.get("ok"):
             return False

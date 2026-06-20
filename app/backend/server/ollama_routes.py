@@ -568,6 +568,7 @@ def scene_boost_prompt(
     allow_scent_style: bool | None = None,
     allow_material_style: bool | None = None,
     allow_light_style: bool | None = None,
+    emphasize_framing: bool | None = None,
 ) -> dict[str, Any]:
     """Ollama Auto Boost — 주어진 프롬프트를 Scene Boost로 강화한다(best-effort).
 
@@ -592,6 +593,10 @@ def scene_boost_prompt(
             allow_material_style = bool(settings.get("allow_material_style", True))
         if allow_light_style is None:
             allow_light_style = bool(settings.get("allow_light_style", True))
+    if emphasize_framing is None:
+        if settings is None:
+            settings = ollama_boost_settings(context)
+        emphasize_framing = bool(settings.get("emphasize_framing", False))
     try:
         svc = get_assist_service(context)
         if not hasattr(svc, "scene_boost"):
@@ -603,6 +608,7 @@ def scene_boost_prompt(
                 "allow_scent_style": bool(allow_scent_style),
                 "allow_material_style": bool(allow_material_style),
                 "allow_light_style": bool(allow_light_style),
+                "emphasize_framing": bool(emphasize_framing),
             },
         )
         if isinstance(result, dict) and result.get("prompt"):

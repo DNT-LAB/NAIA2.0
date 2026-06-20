@@ -99,16 +99,12 @@ _RATING_FOCUS: dict[str, str] = {
     "q": ("Sensual focus: directly frame the exposure the tags already show — the bared skin, "
           "the pose, and the heated tension. You MAY reference the "
           "existing exposed pose/body to frame it concretely (that is NOT 'repeating tags'); only "
-          "invent no new people, body parts, or sexual acts. Avoid vague shadow/mist filler. "
-          "Do NOT name camera shots or angles in the prose — the "
-          "composition tags handle the camera."),
+          "invent no new people, body parts, or sexual acts. Avoid vague shadow/mist filler."),
     "e": ("Explicit focus: directly and boldly frame the exposed, intimate scene the tags already "
           "depict — the bared body, the act, and the raw "
           "physical heat and tension. You MAY reference the existing exposure/pose/act to frame it "
           "concretely (NOT vague shadows or mist); only invent no new people, body parts, props, "
-          "or acts. At least half the phrases must be about the body, pose, and act, not weather. "
-          "Do NOT name camera shots or angles in the prose — the "
-          "composition tags handle the camera."),
+          "or acts. At least half the phrases must be about the body, pose, and act, not weather."),
 }
 
 # NAI/A1111 가중치·강조 래퍼 — bare 태그 추출용.
@@ -506,6 +502,10 @@ def filter_descriptions(
     has_light_source = _contains_style_source(input_tags, _LIGHT_STYLE_RE)
     out: list[str] = []
     seen: set[str] = set()
+    # echo만 걸린(다른 모든 가드는 통과한) 후보 — 전부 echo로 잘려 빈 출력이 되는 것을 막는
+    # 최후 폴백용. 신체 위주(q/e) 프롬프트는 본문이 노출/신체를 *참조*해야 하므로(등급 focus의
+    # 의도) echo가 잦다 — 이때 통째 빈 출력 대신 겹침이 가장 적은 하나를 되살린다.
+    echo_only: list[tuple[float, str]] = []
     for d in descs or []:
         s = str(d or "").strip().strip(".,").strip()
         if not s:
@@ -534,6 +534,7 @@ def filter_descriptions(
         if content:
             overlap = sum(1 for w in content if w in input_words)
             if overlap / len(content) >= 0.7:   # 거의 입력 태그의 재진술 → 분위기 0
+                echo_only.append((overlap / len(content), s))
                 continue
         key = s.lower()
         if key in seen:
@@ -542,6 +543,11 @@ def filter_descriptions(
         out.append(s)
         if len(out) >= phrase_hi:
             break
+    # 최후 폴백: echo로만 전부 잘려 빈 출력이면, 겹침이 가장 적은(=가장 덜 재진술) 후보 하나를
+    # 되살린다 — 다른 환각 가드는 이미 통과했으므로 안전. (q/e 신체 위주 프롬프트가 통째로
+    # 자연어 0이 되던 문제 수정.)
+    if not out and echo_only:
+        out.append(min(echo_only, key=lambda x: x[0])[1])
     return out
 
 
@@ -711,6 +717,12 @@ _EXAMPLE_BANK_LIGHT = (
     '{"descriptions": ["a gentle sidelight grazing her school uniform", "the classroom bathed in calm diffused daylight"], "composition_tags": ["from above", "soft lighting"]}',
     '{"descriptions": ["dappled light scattering over the desk beside her", "her uniform softly lit as she sits by the window"], "composition_tags": ["from side", "dappled sunlight"]}',
 )
+# close-up 강화(emphasize_framing) 전용 — 본문이 카메라 샷/앵글을 명명하는 기존 사양 스타일.
+_EXAMPLE_BANK_FRAMING = (
+    '{"descriptions": ["a tight close-up framing her bared chest and pose", "a low angle accentuating the lifted shirt"], "composition_tags": ["close-up", "from below"]}',
+    '{"descriptions": ["a low angle emphasizing her exposed body", "a close shot centered on her squeezed cleavage"], "composition_tags": ["from below", "close-up"]}',
+    '{"descriptions": ["an intimate close framing of her bared skin", "a steep low angle over her pose"], "composition_tags": ["close-up", "dutch angle"]}',
+)
 
 
 def build_instruction(
@@ -722,6 +734,7 @@ def build_instruction(
     style_options: Optional[dict[str, bool]] = None,
     grounding: Optional[dict[str, Any]] = None,
     variety_seed: int = 0,
+    emphasize_framing: bool = False,
 ) -> str:
     lo, hi = level_cfg.get("phrases", (2, 3))
     wlo, whi = level_cfg.get("words", (8, 16))
@@ -805,7 +818,18 @@ def build_instruction(
         style_clause += "Do not add new light, glow, haze, ray, flare, spotlight, or shadow details unless tagged. "
     style_clause += "\n"
 
-    example_bank = _EXAMPLE_BANK_LIGHT if light_ok else _EXAMPLE_BANK_NOLIGHT
+    # close-up 강화 ON → 카메라 샷/앵글을 본문에서 명명 허용(기존 사양 스타일). OFF → 관심사
+    # 분리(본문=신체/포즈/무드, 카메라=구도 태그). 단일 카메라 정책 라인으로 모순 없이 전환.
+    framing_clause = (
+        "Framing emphasis: you MAY name the camera shot or angle in the phrases (e.g. a close-up "
+        "or a low angle) when it strengthens how the exposure is presented.\n"
+        if emphasize_framing else
+        "Do NOT name camera shots or angles in the phrases — the composition tags handle the camera.\n"
+    )
+    if emphasize_framing:
+        example_bank = _EXAMPLE_BANK_FRAMING
+    else:
+        example_bank = _EXAMPLE_BANK_LIGHT if light_ok else _EXAMPLE_BANK_NOLIGHT
     # 예시 선택은 구도 회전과 *다른* 시드(상수 XOR)로 — 같은 variety_seed를 둘 다 쓰면
     # (후보 회전, 예시) 쌍이 매 장면 고정 정렬돼 같은 태그를 이중 prime할 수 있다(Codex B1).
     example_out = example_bank[(variety_seed ^ 0xA5A5) % len(example_bank)] if example_bank else "{}"
@@ -817,12 +841,11 @@ def build_instruction(
         + central_act_line
         + f"Rating focus [{rating}]: {focus}\n"
         + f"Write {max(1, lo)}-{hi} short English phrases ({wlo}-{whi} words each): frame the anchors "
-        + ("above with concrete lighting, mood and atmosphere, as the Rating focus directs "
-           "(camera shots/angles belong in composition tags, NOT in the phrases).\n"
+        + ("above with concrete lighting, mood and atmosphere, as the Rating focus directs.\n"
            if light_ok else
            "above with concrete pose, body detail and mood, as the Rating focus directs "
-           "(no lighting/glow/shadow/color-tone, and no camera shots/angles — those belong in "
-           "composition tags).\n")
+           "(no lighting/glow/shadow/color-tone).\n")
+        + framing_clause
         + "Rules: (1) never add or change subjects, count, outfit, location, props, named series, "
         "artist, or style; (2) do not merely re-list the tags verbatim — frame and present what they "
         "depict; (3) if nothing fitting can be added, return empty arrays — never invent. English only.\n"
@@ -926,7 +949,7 @@ def run_scene_boost(
 
     instruction = build_instruction(
         descriptive, tone_rating, lvl_cfg, candidates, style_options=style, grounding=grounding,
-        variety_seed=variety_seed)
+        variety_seed=variety_seed, emphasize_framing=bool(options.get("emphasize_framing")))
     schema = boost_schema(lvl_cfg, candidates)
     try:
         out = chat(instruction, schema, model=default_model,

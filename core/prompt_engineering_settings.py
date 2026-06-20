@@ -130,6 +130,9 @@ OLLAMA_BOOST_DEFAULTS: dict[str, Any] = {
     "allow_scent_style": True,
     "allow_material_style": True,
     "allow_light_style": True,
+    # close-up 강화(옵트인) — ON이면 자연어 본문이 카메라 샷/앵글(close-up·low angle)을
+    # 명명하도록 허용해 기존 사양에 가까운 프레이밍-중심 보강을 낸다(기본 OFF=다양성 우선).
+    "emphasize_framing": False,
 }
 
 
@@ -160,6 +163,7 @@ def normalize_ollama_boost_settings(settings: dict[str, Any] | None) -> dict[str
             source.get("allow_material_style", OLLAMA_BOOST_DEFAULTS["allow_material_style"])
         ),
         "allow_light_style": bool(source.get("allow_light_style", OLLAMA_BOOST_DEFAULTS["allow_light_style"])),
+        "emphasize_framing": bool(source.get("emphasize_framing", OLLAMA_BOOST_DEFAULTS["emphasize_framing"])),
     }
 
 

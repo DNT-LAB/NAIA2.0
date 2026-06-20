@@ -272,6 +272,7 @@ def _kickoff_auto_gen_prefetch(context: WebSessionContext, request) -> None:
                 allow_scent_style=boost_settings.get("allow_scent_style"),
                 allow_material_style=boost_settings.get("allow_material_style"),
                 allow_light_style=boost_settings.get("allow_light_style"),
+                emphasize_framing=boost_settings.get("emphasize_framing"),
             )
         )
         context._auto_gen_prefetch = {

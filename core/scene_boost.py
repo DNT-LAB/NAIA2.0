@@ -697,11 +697,15 @@ _EXAMPLE_BANK_NOLIGHT = (
     '{"descriptions": ["her school uniform settling as she sits by the window", "a quiet, unhurried air about her at the desk"], "composition_tags": ["depth of field", "from side"]}',
     '{"descriptions": ["the loose drape of her uniform across one shoulder", "her attention drifting toward the window"], "composition_tags": ["from behind", "bokeh"]}',
     '{"descriptions": ["her hands resting on the desk as she turns slightly", "the hushed stillness of the classroom around her"], "composition_tags": ["dutch angle", "depth of field"]}',
+    '{"descriptions": ["her posture relaxed as she gazes through the window", "the school uniform draping over her seated frame"], "composition_tags": ["from above", "depth of field"]}',
+    '{"descriptions": ["a calm poise to her shoulders as she sits", "her uniform skirt fanning lightly over the chair"], "composition_tags": ["from side", "motion blur"]}',
 )
 _EXAMPLE_BANK_LIGHT = (
     '{"descriptions": ["late afternoon light washing across the quiet classroom", "a soft glow tracing the collar of her school uniform"], "composition_tags": ["depth of field", "backlighting"]}',
     '{"descriptions": ["warm window light pooling on the desk beside her", "her uniform catching the soft afternoon glow"], "composition_tags": ["from side", "dappled sunlight"]}',
     '{"descriptions": ["a hazy backlight outlining her as she gazes outside", "soft shadows settling across the quiet classroom"], "composition_tags": ["rim lighting", "depth of field"]}',
+    '{"descriptions": ["a gentle sidelight grazing her school uniform", "the classroom bathed in calm diffused daylight"], "composition_tags": ["from above", "soft lighting"]}',
+    '{"descriptions": ["dappled light scattering over the desk beside her", "her uniform softly lit as she sits by the window"], "composition_tags": ["from side", "dappled sunlight"]}',
 )
 
 
@@ -798,7 +802,9 @@ def build_instruction(
     style_clause += "\n"
 
     example_bank = _EXAMPLE_BANK_LIGHT if light_ok else _EXAMPLE_BANK_NOLIGHT
-    example_out = example_bank[variety_seed % len(example_bank)] if example_bank else "{}"
+    # 예시 선택은 구도 회전과 *다른* 시드(상수 XOR)로 — 같은 variety_seed를 둘 다 쓰면
+    # (후보 회전, 예시) 쌍이 매 장면 고정 정렬돼 같은 태그를 이중 prime할 수 있다(Codex B1).
+    example_out = example_bank[(variety_seed ^ 0xA5A5) % len(example_bank)] if example_bank else "{}"
 
     return (
         "Task: add only atmosphere and composition (no new facts) to an existing anime image prompt.\n"
@@ -819,7 +825,7 @@ def build_instruction(
         + comp_clause +
         "Bad — never do: \"another girl walks in\", \"a bed in the background\" (unless a bed anchor "
         "exists), introducing any new character, prop, or location.\n"
-        "Example anchors — Action/pose: sitting, looking out window | Clothing: school uniform | Setting: classroom\n"
+        "Example anchors — Action/pose: sitting, looking out window | Clothing: school uniform | Setting: classroom, desk\n"
         + "Example output: " + example_out + "\n\n"
         + f"Existing tags (IMMUTABLE — never change, add to, or contradict): {tags_line}\n"
         "Output JSON:"

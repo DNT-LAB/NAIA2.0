@@ -27,6 +27,20 @@ CHARACTER_REFERENCE_LIVE_REFETCH_KEYS = (
     "director_reference_secondary_strength_values",
 )
 
+# Vibe Transfer 도 char-ref 와 동일 클래스 — Auto Gen 매 반복마다 라이브 모듈 프레임 상태(교체/
+# 삭제/강도·IE 조절)를 다시 읽기 위해 직전 생성의 baked params 에서 제거해야 하는 키 집합.
+# active_vibe_transfer_params()(= vibe active_params)가 내보내는 키와 일치해야 한다 — 특히
+# reference_image_multiple 이 baked 로 핀되면 apply() 의 'reference_image_multiple 존재' 가드가
+# active_vibe_transfer_params() 라이브 재조립을 건너뛴다(Auto Gen 중 vibe 교체/삭제가 반영 안 되던
+# 버그). 클러스터 vibe 도 load_cluster 가 모듈 프레임으로 넣으므로 이 재조회로 함께 갱신된다.
+# generation_runner 의 Auto Gen continuation 이 이 집합을 pop 한다.
+VIBE_TRANSFER_LIVE_REFETCH_KEYS = (
+    "reference_image_multiple",
+    "reference_strength_multiple",
+    "normalize_reference_strength_multiple",
+    "reference_information_extracted_multiple",
+)
+
 
 class HeadlessImageModuleParamService:
     def __init__(self, context: Any):

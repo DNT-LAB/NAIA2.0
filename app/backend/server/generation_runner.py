@@ -32,6 +32,7 @@ from core.event_stream_vibe import (
 )
 from core.headless_image_module_param_service import (
     CHARACTER_REFERENCE_LIVE_REFETCH_KEYS,
+    VIBE_TRANSFER_LIVE_REFETCH_KEYS,
 )
 from core.web_session_context import WebSessionContext
 
@@ -796,20 +797,18 @@ async def _maybe_continue_auto_generation(
     # character_reference_frames 에서 새로 조립되게 한다.
     for key in CHARACTER_REFERENCE_LIVE_REFETCH_KEYS:
         overrides.pop(key, None)
+    # Vibe Transfer(NAI 모듈 프레임)도 char-ref와 동일 — Auto Gen 매 반복 라이브 재조회. 직전
+    # 생성의 baked reference_image_multiple이 overrides로 핀되면 apply()의 'reference_image_multiple
+    # 존재' 가드가 active_vibe_transfer_params() 라이브 재조립을 건너뛴다 → Auto Gen 도중 vibe를
+    # 교체/삭제/강도조절해도 생성 시작 시점 vibe가 계속 적용되던 버그(사용자 리포트). 클러스터 vibe도
+    # load_cluster가 모듈 프레임으로 넣으므로 함께 갱신된다. story 'Use Vibe'의 '딱 1장' 보장도 이
+    # pop으로 충족된다(직전 일반+스트림 vibe 제거 → enqueue에서 라이브 일반 + 현재 스트림 1장 재조립).
+    for key in VIBE_TRANSFER_LIVE_REFETCH_KEYS:
+        overrides.pop(key, None)
     if story_run_id:
         # Carry the story run id so the next completion re-binds to this same cycle.
         overrides["event_stream_run_id"] = story_run_id
         queue_source = "Storyteller"
-        # 직전 페이지 params에 바인딩된 vibe reference(일반+스트림)가 overrides로 핀되지
-        # 않게 제거 — 다음 페이지는 enqueue 시점에 라이브 일반 vibe + 현재 스트림 vibe
-        # 1장을 새로 받는다(누적/고착 차단, Use Vibe '딱 1장' 보장의 1차 방어).
-        for key in (
-            "reference_image_multiple",
-            "reference_strength_multiple",
-            "normalize_reference_strength_multiple",
-            "reference_information_extracted_multiple",
-        ):
-            overrides.pop(key, None)
     elif automation_run_id:
         queue_source = "Automation"
     else:

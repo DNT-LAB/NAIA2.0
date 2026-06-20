@@ -267,9 +267,15 @@ class HeadlessSearchStateService:
         if frame is None or getattr(frame, "empty", True):
             return None
         try:
+            import os
+
             path = self.last_search_parquet_path()
             path.parent.mkdir(parents=True, exist_ok=True)
-            frame.to_parquet(path, index=False)
+            # atomic write(Codex): temp 에 쓰고 os.replace 로 교체 — 대형 프레임/동시 재시작 시
+            # 부분쓰기 손상을 막는다.
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            frame.to_parquet(tmp, index=False)
+            os.replace(tmp, path)
             return path
         except Exception as exc:
             print(f"Headless Remote: last-search persist failed - {exc}", flush=True)
@@ -290,10 +296,21 @@ class HeadlessSearchStateService:
             frame = pd.read_parquet(path)
             if frame is None or frame.empty:
                 return False
+            # 컬럼 검증(Codex): 프롬프트 컬럼('general')이 없으면 검색 결과가 아닌 외부/손상 파일로
+            # 보고 설치하지 않는다(fall-through 으로 다른 복원 소스 시도). id/rating 은
+            # SearchResultModel 이 없을 때 graceful degrade 하므로 강제하지 않는다(=id 없는 정상
+            # 커스텀셋도 수용).
+            if "general" not in getattr(frame, "columns", []):
+                print("Headless Remote: last-search restore skipped — 'general' 컬럼 없음", flush=True)
+                return False
             frame = frame.reset_index(drop=True)
             context.search_results = SearchResultModel(frame)
             context.search_results_snapshot = frame.copy()
             context.search_results_master_base_snapshot = frame.copy()
+            # 복원셋은 디스크에서 로드된 작업셋 → custom_parquet 스코프로 표기(Codex: scope 미설정
+            # 수정). 현재 정보용이며 green 검색은 스코프와 무관하게 아카이브를 재스캔한다. 상수는
+            # app.backend 계층이라 core 에서 import 하지 않고 리터럴을 쓴다.
+            context.search_results_scope = "custom_parquet"
             return True
         except Exception as exc:
             print(f"Headless Remote: last-search restore failed - {exc}", flush=True)

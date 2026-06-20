@@ -5966,7 +5966,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260607-ollama-boost3')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260620-emphframing1')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -6206,7 +6206,7 @@ const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peOllamaBoostPanel = $('peOllamaBoostPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260607-ollama-boost3')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260620-emphframing1')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
@@ -6233,7 +6233,7 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering popup renderers module', error);
   });
-const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopups.mjs?v=20260607-ollama-boost3')
+const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopups.mjs?v=20260620-emphframing1')
   .then(({createPromptEngineeringPopups}) => {
     promptEngineeringPopups = createPromptEngineeringPopups({
       getWs: () => ws,

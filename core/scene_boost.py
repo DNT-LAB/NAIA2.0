@@ -96,15 +96,19 @@ _RATING_FOCUS: dict[str, str] = {
           "No exposure, no intimacy, no suggestive framing."),
     "s": ("Suggestive, inviting atmosphere centered on the existing subject(s): soft warm tone "
           "with gentle emphasis on the figure and the setting. No explicit anatomy or acts."),
-    "q": ("Sensual focus: directly frame the exposure and intimate composition the tags already "
-          "show — the angle, intimate framing, bared skin and heated tension. You MAY reference the "
+    "q": ("Sensual focus: directly frame the exposure the tags already show — the bared skin, "
+          "the pose, and the heated tension. You MAY reference the "
           "existing exposed pose/body to frame it concretely (that is NOT 'repeating tags'); only "
-          "invent no new people, body parts, or sexual acts. Avoid vague shadow/mist filler."),
+          "invent no new people, body parts, or sexual acts. Avoid vague shadow/mist filler. "
+          "Do NOT name camera shots or angles in the prose — the "
+          "composition tags handle the camera."),
     "e": ("Explicit focus: directly and boldly frame the exposed, intimate scene the tags already "
-          "depict — how the angle and framing present the bared body and the act, the raw "
+          "depict — the bared body, the act, and the raw "
           "physical heat and tension. You MAY reference the existing exposure/pose/act to frame it "
           "concretely (NOT vague shadows or mist); only invent no new people, body parts, props, "
-          "or acts. At least half the phrases must be about the body/pose/framing, not weather."),
+          "or acts. At least half the phrases must be about the body, pose, and act, not weather. "
+          "Do NOT name camera shots or angles in the prose — the "
+          "composition tags handle the camera."),
 }
 
 # NAI/A1111 가중치·강조 래퍼 — bare 태그 추출용.
@@ -752,7 +756,7 @@ def build_instruction(
             central_act_line = (
                 "Central act to frame: " + ", ".join(cacts[:4]) + "\n"
                 "At least ONE phrase must include one of those central-act words verbatim and frame "
-                "how the angle, framing, and bodies present that interaction — not only isolated "
+                "how the bodies and pose present that interaction — not only isolated "
                 "body parts, clothing, or lighting.\n"
             )
         # q/s/e 공통: 모델이 'full body / her figure / curves of her body / smiling face' 같은
@@ -764,7 +768,7 @@ def build_instruction(
                 "Do NOT center any phrase on generic whole-body wording ('full body', 'her figure', "
                 "'her form', 'her curves', 'her body', 'silhouette') or on an expression alone "
                 "('smiling face', 'her smile'); every phrase must frame a SPECIFIC anchor listed above "
-                "— a garment, a bared/exposed body part, the pose, or the camera angle.\n"
+                "— a garment, a bared/exposed body part, or the pose (NOT a camera shot/angle).\n"
             )
 
     comp_clause = ""
@@ -813,10 +817,12 @@ def build_instruction(
         + central_act_line
         + f"Rating focus [{rating}]: {focus}\n"
         + f"Write {max(1, lo)}-{hi} short English phrases ({wlo}-{whi} words each): frame the anchors "
-        + ("above with concrete lighting, depth, angle and mood, as the Rating focus directs.\n"
+        + ("above with concrete lighting, mood and atmosphere, as the Rating focus directs "
+           "(camera shots/angles belong in composition tags, NOT in the phrases).\n"
            if light_ok else
-           "above with concrete depth, angle, framing and pose, as the Rating focus directs "
-           "(no lighting, glow, shadow, or color/tone).\n")
+           "above with concrete pose, body detail and mood, as the Rating focus directs "
+           "(no lighting/glow/shadow/color-tone, and no camera shots/angles — those belong in "
+           "composition tags).\n")
         + "Rules: (1) never add or change subjects, count, outfit, location, props, named series, "
         "artist, or style; (2) do not merely re-list the tags verbatim — frame and present what they "
         "depict; (3) if nothing fitting can be added, return empty arrays — never invent. English only.\n"

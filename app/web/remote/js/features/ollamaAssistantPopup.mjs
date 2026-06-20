@@ -851,7 +851,7 @@ export function createOllamaAssistantPopup({
         if (act === 'install') openDownloadPage();
         else if (act === 'recheck') refreshStatus(true);
         else if (act === 'start-server') startServer();
-        else if (act === 'pull') startPull(btn.dataset.model || '');
+        else if (act === 'pull') startPull(button.dataset.model || '');
         else if (act === 'cancel-pull') cancelPull();
         else if (act === 'dataset') startDataset();
         else if (act === 'copy-run') copyText('ollama run ' + connModel, '실행 명령');

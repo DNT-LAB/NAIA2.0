@@ -688,6 +688,23 @@ def _drop_if_all_generic(descs: list[str], grounding: dict[str, Any]) -> list[st
 # ---------------------------------------------------------------------------
 # 5) LLM 호출 — 지시문 + 스키마. 단일 few-shot, enum 제약, minItems 0(빈 출력 허용).
 # ---------------------------------------------------------------------------
+# few-shot 예시 뱅크 — 단일 고정 예시는 소형 모델이 그 표현(예: "a low angle …")을 매 장면
+# 그대로 복붙해 다양성을 죽인다. variety_seed로 회전해 장면마다 다른 예시를 보여준다. 설명문은
+# 카메라-샷 단어("close-up"/"low angle"/"from below")를 쓰지 않고 앵커·무드만 프레이밍하고,
+# 카메라/앵글은 composition_tags가 담당한다(설명문 단어 복붙 고착 차단). 위 "Example anchors"
+# (sitting/looking out window/school uniform/classroom)와 일치하게 구성.
+_EXAMPLE_BANK_NOLIGHT = (
+    '{"descriptions": ["her school uniform settling as she sits by the window", "a quiet, unhurried air about her at the desk"], "composition_tags": ["depth of field", "from side"]}',
+    '{"descriptions": ["the loose drape of her uniform across one shoulder", "her attention drifting toward the window"], "composition_tags": ["from behind", "bokeh"]}',
+    '{"descriptions": ["her hands resting on the desk as she turns slightly", "the hushed stillness of the classroom around her"], "composition_tags": ["dutch angle", "depth of field"]}',
+)
+_EXAMPLE_BANK_LIGHT = (
+    '{"descriptions": ["late afternoon light washing across the quiet classroom", "a soft glow tracing the collar of her school uniform"], "composition_tags": ["depth of field", "backlighting"]}',
+    '{"descriptions": ["warm window light pooling on the desk beside her", "her uniform catching the soft afternoon glow"], "composition_tags": ["from side", "dappled sunlight"]}',
+    '{"descriptions": ["a hazy backlight outlining her as she gazes outside", "soft shadows settling across the quiet classroom"], "composition_tags": ["rim lighting", "depth of field"]}',
+)
+
+
 def build_instruction(
     descriptive: list[str],
     rating: str,
@@ -696,6 +713,7 @@ def build_instruction(
     *,
     style_options: Optional[dict[str, bool]] = None,
     grounding: Optional[dict[str, Any]] = None,
+    variety_seed: int = 0,
 ) -> str:
     lo, hi = level_cfg.get("phrases", (2, 3))
     wlo, whi = level_cfg.get("words", (8, 16))
@@ -752,8 +770,8 @@ def build_instruction(
             f"Composition: choose {min(1, cmax)}-{cmax} tags from THIS enum that strengthen the "
             f"framing/angle/shot for THIS exact scene (only from the list, invent none): "
             f"{', '.join(candidates)}. Use AT MOST ONE shot-distance tag (close-up, upper body, "
-            f"portrait, cowboy shot, wide shot); prefer a varied camera angle (from below/side/"
-            f"behind, dutch angle) and do NOT default to close-up.\n"
+            f"portrait, cowboy shot, wide shot), and vary the camera angle/shot from scene to scene "
+            f"— do not settle on one default framing.\n"
         )
 
     may_clause = (
@@ -779,6 +797,9 @@ def build_instruction(
         style_clause += "Do not add new light, glow, haze, ray, flare, spotlight, or shadow details unless tagged. "
     style_clause += "\n"
 
+    example_bank = _EXAMPLE_BANK_LIGHT if light_ok else _EXAMPLE_BANK_NOLIGHT
+    example_out = example_bank[variety_seed % len(example_bank)] if example_bank else "{}"
+
     return (
         "Task: add only atmosphere and composition (no new facts) to an existing anime image prompt.\n"
         + anchor_block
@@ -799,11 +820,7 @@ def build_instruction(
         "Bad — never do: \"another girl walks in\", \"a bed in the background\" (unless a bed anchor "
         "exists), introducing any new character, prop, or location.\n"
         "Example anchors — Action/pose: sitting, looking out window | Clothing: school uniform | Setting: classroom\n"
-        + ('Example output: {"descriptions": ["late afternoon light washing across the quiet classroom", '
-           '"a soft glow tracing the collar of her school uniform"], "composition_tags": ["depth of field", "backlighting"]}\n\n'
-           if light_ok else
-           'Example output: {"descriptions": ["a low angle emphasizing her relaxed posture by the window", '
-           '"the loose drape of her school uniform across one shoulder"], "composition_tags": ["depth of field", "from below"]}\n\n')
+        + "Example output: " + example_out + "\n\n"
         + f"Existing tags (IMMUTABLE — never change, add to, or contradict): {tags_line}\n"
         "Output JSON:"
     )
@@ -896,7 +913,8 @@ def run_scene_boost(
         existing_camera=parsed["existing_camera"], subject_count=parsed["subject_count"])
 
     instruction = build_instruction(
-        descriptive, tone_rating, lvl_cfg, candidates, style_options=style, grounding=grounding)
+        descriptive, tone_rating, lvl_cfg, candidates, style_options=style, grounding=grounding,
+        variety_seed=variety_seed)
     schema = boost_schema(lvl_cfg, candidates)
     try:
         out = chat(instruction, schema, model=default_model,

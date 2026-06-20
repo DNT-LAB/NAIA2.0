@@ -401,14 +401,16 @@ def _random_pool_has_hidden_rows(context: WebSessionContext) -> bool:
 
 
 def _reset_random_pool_to_gsqe(context: WebSessionContext) -> dict[str, Any]:
-    """막힌 랜덤 풀 회복: 풀 등급을 gsqe로 강제 + 활성 태그필터(Quick Filter) 초기화 후 재적용.
-    재적용된 search_state(payload)를 반환한다. (디스크+메모리 모두 gsqe로 영속해 이후 일관 사용.)"""
+    """막힌 랜덤 풀 회복: 풀 등급을 gsqe로 강제 + 활성 태그필터 '할당' 해제(저장 칩은 보존) 후
+    재적용. 재적용된 search_state(payload)를 반환한다. (등급은 디스크+메모리 모두 gsqe로 영속.)"""
     from app.backend.server.search_runtime import clear_active_tag_filter
 
     context.save_search_filter_state(ratings=["g", "s", "q", "e"])
-    # reset_draft=True: 퀵필터 draft 칩까지 비우고 필터를 gsqe(태그필터 없음)로 재적용 →
-    # search_state_payload 반환. (save 가 끝에 remote_active_ratings = state["ratings"] = gsqe 유지)
-    return clear_active_tag_filter(context, True)
+    # reset_draft=False: 활성 태그필터 '할당'만 해제(in-memory active_tag_filter/ids=None →
+    # 재시도 pop 이 전체 풀에서 성공)하되, 사용자가 저장한 include/exclude 칩(draft)은 보존한다.
+    # 막힌 풀 회복이 저장 필터를 삭제하면 안 된다(Codex High#2) — 칩은 비활성으로 남아 재적용 가능.
+    # (save 가 끝에 remote_active_ratings = state["ratings"] = gsqe 유지)
+    return clear_active_tag_filter(context, False)
 
 
 async def handle_random_command(
@@ -450,7 +452,7 @@ async def handle_random_command(
         await _broadcast_json(clients, {
             "type": "toast",
             "level": "warning",
-            "message": "랜덤 풀이 비어 있어 등급 필터를 전체(G/S/Q/E)로 초기화했습니다.",
+            "message": "랜덤 풀이 비어 있어 등급을 전체(G/S/Q/E)로 열고 태그 필터를 해제했습니다. (저장한 필터 칩은 보존됨)",
         })
         result = await asyncio.to_thread(
             random_service(context).generate,

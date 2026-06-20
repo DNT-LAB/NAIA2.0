@@ -128,6 +128,29 @@ def _model_name_matches(installed: str, target: str) -> bool:
     return left == right or left.split(":", 1)[0] == right.split(":", 1)[0]
 
 
+def _friendly_ollama_error(raw: Any) -> str:
+    """Ollama 모델 로드/아키텍처 미지원 에러를 사용자 안내 메시지로 매핑(그 외는 원문 유지).
+
+    예: E26B(Gemma4-26B)는 `gemma4` 아키텍처를 선언하는데 구버전 Ollama(llama.cpp)가
+    이를 모르면 `unable to load model`/`unknown model architecture`만 반환한다 → raw 메시지는
+    원인을 알기 어렵다. Ollama 업데이트(또는 자원 확인)로 유도한다."""
+    text = str(raw or "")
+    low = text.lower()
+    if (
+        "unable to load model" in low
+        or "error loading model" in low
+        or "unknown model architecture" in low
+        or "failed to load model" in low
+        or "failed to create server" in low
+    ):
+        return (
+            "모델 로드에 실패했습니다 — 이 모델은 최신 Ollama 런타임이 필요할 수 있습니다. "
+            "Ollama를 최신 버전으로 업데이트하거나, GPU/메모리 자원이 충분한지 확인하세요. "
+            "(가벼운 모델 E4B/E2B는 현재 런타임에서 동작합니다.)"
+        )
+    return text
+
+
 def _resolve_connection_defaults() -> tuple[str, str]:
     """(base_url, model) 우선순위: 영속 설정 → env ``NAIA_OLLAMA_URL`` → 코드 기본.
 
@@ -403,6 +426,19 @@ class OllamaAssistantService:
         if running:
             installed = True
         model_installed = any(_model_name_matches(name, target) for name in models if name)
+        # 설정/기본 모델(E4B 등)이 미설치여도 큐레이션 모델(E2B/E4B/E26B) 중 설치된 게 하나라도
+        # 있으면 그걸 활성 모델로 채택한다 — 사용자가 받은 모델로 어시스턴트가 바로 켜지게(다운로드한
+        # 모델이 무시되고 model_installed=False 로 "대상 모델 없음"에 갇히던 버그). self.default_model
+        # 을 갱신하므로 이후 모든 어시스트 호출(= self.default_model 사용)이 설치된 모델을 쓴다.
+        # model 인자가 명시된 호출(특정 모델 조회)은 건드리지 않고, CURATED_MODELS 순서로 첫 설치본 선택.
+        if not model_installed and model is None:
+            for _item in CURATED_MODELS:
+                _cm = str(_item.get("model") or "").strip()
+                if _cm and any(_model_name_matches(name, _cm) for name in models if name):
+                    self.default_model = _cm
+                    target = _cm
+                    model_installed = True
+                    break
         if not include_details:
             # 원격 클라이언트: 진행 상태 렌더에 필요한 최소만 (호스트 인벤토리 비노출).
             return {
@@ -536,7 +572,7 @@ class OllamaAssistantService:
             status_code = int(getattr(response, "status_code", 0) or 0)
             data = response.json() or {}
             if status_code != 200:
-                return {"ok": False, "error": str(data.get("error") or f"Ollama HTTP {status_code}")}
+                return {"ok": False, "error": str(_friendly_ollama_error(data.get("error")) or f"Ollama HTTP {status_code}")}
             content = str((data.get("message") or {}).get("content") or "").strip()
             if not content:
                 return {"ok": False, "error": "Ollama 응답이 비어 있습니다."}
@@ -615,7 +651,7 @@ class OllamaAssistantService:
             status_code = int(getattr(response, "status_code", 0) or 0)
             data = response.json() or {}
             if status_code != 200:
-                return {"ok": False, "error": str(data.get("error") or f"Ollama HTTP {status_code}")}
+                return {"ok": False, "error": str(_friendly_ollama_error(data.get("error")) or f"Ollama HTTP {status_code}")}
             content = str((data.get("message") or {}).get("content") or "").strip()
             parsed = json.loads(content)
             if not isinstance(parsed, dict):
@@ -747,7 +783,7 @@ class OllamaAssistantService:
             response = self._http_post("/api/chat", payload, timeout=(5, 180))
             data = response.json() or {}
             if int(getattr(response, "status_code", 0) or 0) != 200:
-                return {"ok": False, "error": str(data.get("error") or "intent analysis failed")}
+                return {"ok": False, "error": str(_friendly_ollama_error(data.get("error")) or "intent analysis failed")}
             content = str((data.get("message") or {}).get("content") or "").strip()
             parsed = json.loads(content)
             if not isinstance(parsed, dict):
@@ -801,7 +837,7 @@ class OllamaAssistantService:
             response = self._http_post("/api/chat", payload, timeout=(5, 180))
             data = response.json() or {}
             if int(getattr(response, "status_code", 0) or 0) != 200:
-                return {"ok": False, "error": str(data.get("error") or "translation reconcile failed")}
+                return {"ok": False, "error": str(_friendly_ollama_error(data.get("error")) or "translation reconcile failed")}
             content = str((data.get("message") or {}).get("content") or "").strip()
             parsed = json.loads(content)
             clean = str((parsed or {}).get("clean_english") or "").strip()
@@ -862,7 +898,7 @@ class OllamaAssistantService:
             status_code = int(getattr(response, "status_code", 0) or 0)
             data = response.json() or {}
             if status_code != 200:
-                return {"ok": False, "segments": [], "error": str(data.get("error") or f"Ollama HTTP {status_code}")}
+                return {"ok": False, "segments": [], "error": str(_friendly_ollama_error(data.get("error")) or f"Ollama HTTP {status_code}")}
             content = str((data.get("message") or {}).get("content") or "").strip()
             parsed = json.loads(content)
             segments = self._clean_scene_segments(parsed, text)

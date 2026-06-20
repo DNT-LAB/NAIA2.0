@@ -72,6 +72,14 @@ _CAMERA_CONTRADICTIONS: dict[str, str] = {
     "portrait": "wide shot",
 }
 
+# 샷 거리(프레임에 피사체가 얼마나 담기나) — 상호 배타 그룹. 하나의 컷이 close-up이면서
+# 동시에 upper body·portrait일 수 없다. 광원 차단 후 소형 모델이 close-up+upper body+
+# portrait를 한꺼번에 적층하던 단조로움을 차단하기 위해 결과에 최대 1개만 허용한다(angle/
+# depth 축과는 별개라 from below·depth of field 등과는 함께 쓸 수 있다).
+_SHOT_DISTANCE_TAGS = frozenset({
+    "close-up", "upper body", "portrait", "cowboy shot", "wide shot",
+})
+
 # 톤 팔레트 — *사실이 아닌 단어 힌트*(Codex E). LLM 묘사의 어조만 끌고, 명사/행위는 안 만든다.
 _TONE_PALETTE: dict[str, tuple[str, ...]] = {
     "g": ("serene", "wholesome", "gentle", "bright", "innocent", "airy"),
@@ -89,11 +97,11 @@ _RATING_FOCUS: dict[str, str] = {
     "s": ("Suggestive, inviting atmosphere centered on the existing subject(s): soft warm tone "
           "with gentle emphasis on the figure and the setting. No explicit anatomy or acts."),
     "q": ("Sensual focus: directly frame the exposure and intimate composition the tags already "
-          "show — the angle, closeness, bared skin and heated tension. You MAY reference the "
+          "show — the angle, intimate framing, bared skin and heated tension. You MAY reference the "
           "existing exposed pose/body to frame it concretely (that is NOT 'repeating tags'); only "
           "invent no new people, body parts, or sexual acts. Avoid vague shadow/mist filler."),
     "e": ("Explicit focus: directly and boldly frame the exposed, intimate scene the tags already "
-          "depict — how the angle and close framing present the bared body and the act, the raw "
+          "depict — how the angle and framing present the bared body and the act, the raw "
           "physical heat and tension. You MAY reference the existing exposure/pose/act to frame it "
           "concretely (NOT vague shadows or mist); only invent no new people, body parts, props, "
           "or acts. At least half the phrases must be about the body/pose/framing, not weather."),
@@ -409,13 +417,19 @@ def composition_candidates(
     validate_tag: Optional[Callable[[str], Optional[dict]]] = None,
     tag_allowed: Optional[Callable[[str, str], bool]] = None,
     allow_lighting: bool = True,
+    variety_seed: int = 0,
 ) -> list[str]:
     """등급에 맞는 코드 큐레이션 구도/조명 태그 후보. LLM은 이 enum 안에서만 고른다.
 
     allow_lighting=False면 조명/톤 태그(bright·moody 풀: sunlight·chiaroscuro·dim
     lighting 등)를 후보에서 제외하고 앵글/샷/심도(any 풀)만 제안한다. '광원·색조 허용'
     (allow_light_style) OFF 시 조명 태그가 *구도 태그*로 계속 추가되던 버그 수정 —
-    설명문 경로는 filter_descriptions가 이미 차단하지만, 구도 후보는 게이트가 없었다."""
+    설명문 경로는 filter_descriptions가 이미 차단하지만, 구도 후보는 게이트가 없었다.
+
+    variety_seed!=0이면 'any'(앵글/샷/심도) 풀을 그만큼 회전시켜 매 장면 후보 enum의 선두가
+    달라지게 한다. 캡(cap)이 풀보다 작아 일부 장면은 close-up이 enum에서 빠지므로, 광원
+    차단 후 모델이 close-up만 반복하던 고착을 결정론적으로 분산한다(같은 입력→같은 회전,
+    테스트 가능). run_scene_boost가 장면 태그에서 안정 해시를 만들어 전달한다."""
     prefer = "moody" if rating in ("q", "e") else "bright"
     existing = set(existing_camera or [])
     blocked = {_CAMERA_CONTRADICTIONS.get(t) for t in existing}
@@ -446,6 +460,9 @@ def composition_candidates(
         if allow_lighting else []
     )
     any_list = [t for t, l in _COMPOSITION_POOL if l == "any" and _eligible(t)]
+    if variety_seed and len(any_list) > 1:
+        off = variety_seed % len(any_list)
+        any_list = any_list[off:] + any_list[:off]
     # LLM 선택지는 넉넉히(캡의 약 3배)만 — 너무 길면 소형 모델이 흔들린다. 등급별 톤(prefer)을
     # 범용(any)과 *교차*로 채워, 캡에 잘려도 톤 태그가 반드시 후보에 들어가게 한다.
     cap = max(6, int(level_cfg.get("comp_max", 2)) * 3)
@@ -536,12 +553,18 @@ def filter_composition(
     cap = int(level_cfg.get("comp_max", 2))
     out: list[str] = []
     used = set(existing)
+    # 샷 거리 태그는 결과(+기존 카메라)를 통틀어 1개만 — close-up+upper body+portrait 적층 방지.
+    shot_used = any(t in _SHOT_DISTANCE_TAGS for t in existing)
     for p in picks or []:
         t = str(p or "").strip().lower().replace("_", " ")
         if t not in allowed or t in used:
             continue
         if _CAMERA_CONTRADICTIONS.get(t) in used:
             continue                        # 이미 고른 것과 모순
+        if t in _SHOT_DISTANCE_TAGS:
+            if shot_used:
+                continue                    # 샷 거리 중복 → 스킵
+            shot_used = True
         used.add(t)
         out.append(t)
         if len(out) >= cap:
@@ -707,7 +730,7 @@ def build_instruction(
             central_act_line = (
                 "Central act to frame: " + ", ".join(cacts[:4]) + "\n"
                 "At least ONE phrase must include one of those central-act words verbatim and frame "
-                "how the angle, closeness, and bodies present that interaction — not only isolated "
+                "how the angle, framing, and bodies present that interaction — not only isolated "
                 "body parts, clothing, or lighting.\n"
             )
         # q/s/e 공통: 모델이 'full body / her figure / curves of her body / smiling face' 같은
@@ -728,7 +751,9 @@ def build_instruction(
         comp_clause = (
             f"Composition: choose {min(1, cmax)}-{cmax} tags from THIS enum that strengthen the "
             f"framing/angle/shot for THIS exact scene (only from the list, invent none): "
-            f"{', '.join(candidates)}.\n"
+            f"{', '.join(candidates)}. Use AT MOST ONE shot-distance tag (close-up, upper body, "
+            f"portrait, cowboy shot, wide shot); prefer a varied camera angle (from below/side/"
+            f"behind, dutch angle) and do NOT default to close-up.\n"
         )
 
     may_clause = (
@@ -859,10 +884,13 @@ def run_scene_boost(
     allow_lighting = bool(style["allow_light_style"]) or _contains_style_source(
         descriptive, _LIGHT_STYLE_RE
     )
+    # 장면 태그에서 안정 해시(PYTHONHASHSEED 무관) → 후보 enum 회전 시드. 장면마다 제시되는
+    # 카메라 후보 선두/구성이 달라져, 광원 차단 후 close-up만 반복하던 고착을 분산한다.
+    variety_seed = sum(ord(c) for c in "".join(descriptive))
     candidates = composition_candidates(
         tone_rating, parsed["existing_camera"], lvl_cfg,
         validate_tag=validate_tag, tag_allowed=tag_allowed,
-        allow_lighting=allow_lighting)
+        allow_lighting=allow_lighting, variety_seed=variety_seed)
     grounding = build_grounding(
         descriptive, classify_axes=classify_axes,
         existing_camera=parsed["existing_camera"], subject_count=parsed["subject_count"])

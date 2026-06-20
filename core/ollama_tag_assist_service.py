@@ -1183,7 +1183,12 @@ class OllamaTagAssistService:
                 detail = str((response.json() or {}).get("error") or "")
             except Exception:
                 pass
-            raise RuntimeError(detail or f"Ollama HTTP {response.status_code}")
+            from core.ollama_assistant_service import _friendly_ollama_error
+
+            # 모델 로드/아키텍처 미지원 에러를 안내 메시지로 매핑(Codex 갭②). 이 raise 는 모든
+            # _chat 호출부(primary /assist·Chat·Auto Boost)가 except 로 잡아 str(exc) 로 표면화하므로
+            # 한 곳만 매핑해도 전 경로가 친절 메시지를 받는다.
+            raise RuntimeError(_friendly_ollama_error(detail) or f"Ollama HTTP {response.status_code}")
         content = (response.json().get("message") or {}).get("content") or "{}"
         return json.loads(content)
 

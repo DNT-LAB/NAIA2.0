@@ -670,9 +670,22 @@ def register_ollama_routes(
         # (stale 캐시/원격 클라이언트가 옛 기본 모델을 강제하지 못하게). 항상
         # self.default_model 기준으로 model_installed를 판정한다.
         local = _is_local_request(request)
-        return await run_in_thread(
+        result = await run_in_thread(
             lambda: service().status(include_details=local, fresh=bool(fresh) and local)
         )
+        # status()가 설치된 큐레이션 모델로 활성 모델을 채택했으면 tag-assist 서비스(primary
+        # /api/ollama/assist·Chat·Auto Boost 경로)에도 동기화한다 — 두 서비스가 같은 모델을 쓰게
+        # (채택이 OllamaAssistantService 에만 반영되고 OllamaTagAssistService 는 stale 기본 모델을
+        # 쓰던 갭, Codex). set_endpoint 가 _resident_loaded 도 리셋해 새 모델로 re-warm 한다.
+        adopted = str(result.get("model") or "")
+        if adopted:
+            tag_svc = getattr(context, "ollama_tag_assist_service", None)
+            if tag_svc is not None and str(getattr(tag_svc, "default_model", "")) != adopted:
+                try:
+                    tag_svc.set_endpoint(default_model=adopted)
+                except Exception:
+                    pass
+        return result
 
     @app.post("/api/ollama/server/start")
     async def ollama_server_start(request: Request):

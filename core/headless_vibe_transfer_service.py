@@ -23,6 +23,21 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
+def _vibe_model_family(model_key: Any) -> str:
+    """모델 키를 vibe 호환 '가족'(버전)으로 정규화. vibe 인코딩은 모델 버전별로 다르므로 복원 시
+    버전 불일치만 경고하면 된다. F/C(full/curated)·별칭(NAID4.5/NAID4)은 같은 버전으로 묶어
+    거짓 경고를 막는다. 알 수 없으면 ''(경고 안 함, fail-safe).
+    모델 옵션: NAID4.5F/C, NAID4.5(별칭), NAID4.0F/C·NAID4(별칭), NAID3."""
+    key = str(model_key or "").upper()
+    if "NAID3" in key:
+        return "v3"
+    if "4.5" in key:        # NAID4.5F / NAID4.5C / NAID4.5
+        return "v4.5"
+    if "NAID4" in key:      # NAID4.0F / NAID4.0C / NAID4(별칭=v4.0)
+        return "v4.0"
+    return ""
+
+
 # NAI UI model key -> encode-vibe API model string (mirrors api_service.py model_mapping).
 _NAI_MODEL_MAP = {
     "NAID4.5F": "nai-diffusion-4-5-full",
@@ -778,14 +793,13 @@ class HeadlessVibeTransferService:
             "cluster_delete",
             "cluster_rename",
             "cluster_thumbnail",
-            "restore_metadata",
         ]
         if not runtime_can_encode:
             unavailable_actions.insert(0, "encode")
         return context._module_state_payload("vibe_transfer", {
             "can_encode": runtime_can_encode,
             "can_write_clusters": False,
-            "can_restore_metadata": False,
+            "can_restore_metadata": True,
             "unavailable_actions": unavailable_actions,
             "normalize": bool(context.vibe_transfer_normalize),
             "enabled_count": enabled_count,
@@ -848,7 +862,9 @@ class HeadlessVibeTransferService:
             loaded = self.load_cluster(str(value or ""))
             if isinstance(loaded, dict):
                 return loaded
-        elif key in {"cluster_save", "cluster_delete", "cluster_rename", "cluster_thumbnail", "restore_metadata"}:
+        elif key == "restore_metadata":
+            return self.restore_metadata(str(value or ""))
+        elif key in {"cluster_save", "cluster_delete", "cluster_rename", "cluster_thumbnail"}:
             return context._toast(f"Vibe Transfer action is not available in this runtime: {key}", level="info")
         else:
             return None
@@ -956,6 +972,93 @@ class HeadlessVibeTransferService:
             return None
         except Exception as exc:
             return context._toast(f"Failed to load Vibe storage: {exc}", level="error")
+
+    def restore_metadata(self, value: str) -> Any:
+        """메타데이터 뷰어의 'Vibe Transfer 복원' — 생성 이미지 메타데이터에서 추출한
+        reference_image_multiple(이미 인코딩된 vibe들) + 강도/IE/normalize를 받아 현재 Vibe
+        Transfer 프레임으로 복원한다. 원본 이미지가 없는 인코딩 전용이므로 is_no_image 프레임으로
+        만든다(IE 슬라이더 없이 'Stored encoded vibe'로 렌더, 재인코딩 차단, Anlas 0). 인코딩은
+        그대로 active_params → 생성에 사용된다. 반환 [toast, module_state]로 패널 갱신 + 결과 안내."""
+        context = self.context
+        self._ensure_loaded()
+        try:
+            payload = json.loads(value) if value else {}
+        except Exception:
+            return context._toast("Vibe Transfer 메타데이터를 읽을 수 없습니다(JSON 아님).", level="error")
+        if not isinstance(payload, dict):
+            return context._toast("Vibe Transfer 메타데이터 형식이 올바르지 않습니다.", level="error")
+        raw_refs = payload.get("reference_image_multiple")
+        if not isinstance(raw_refs, list) or not raw_refs:
+            return context._toast("메타데이터에 Vibe Transfer 데이터가 없습니다.", level="error")
+        strengths = payload.get("reference_strength_multiple")
+        if not isinstance(strengths, list):
+            strengths = []
+        ies = payload.get("reference_information_extracted_multiple")
+        if not isinstance(ies, list):
+            ies = []
+        source_model = str(payload.get("source_model") or context._current_model_key() or "")
+        is_naid3 = "NAID3" in source_model
+        available = MAX_NAI_VIBE_REFERENCES - len(context.vibe_transfer_frames)
+        if available <= 0:
+            return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
+        # raw_refs는 외부 페이로드라 크기가 무제한일 수 있다. 비싼 작업(문자열화 + 프레임 생성)은
+        # available(≤MAX) 개로 바운드한다 — 캡에 도달하면 즉시 break(전체 materialize 안 함).
+        added = 0
+        truncated = False
+        for index, raw_encoding in enumerate(raw_refs):
+            if added >= available:
+                truncated = True
+                break
+            encoding = str(raw_encoding) if raw_encoding else ""
+            if not encoding:
+                continue
+            strength = _as_float(strengths[index], 0.6) if index < len(strengths) else 0.6
+            if not math.isfinite(strength):
+                strength = 0.6
+            strength = max(-1.0, min(1.0, round(strength, 2)))
+            ie = _as_float(ies[index], 1.0) if index < len(ies) else 1.0
+            if not math.isfinite(ie):
+                ie = 1.0
+            ie = max(0.01, min(1.0, round(ie, 2)))
+            # 인코딩 내용으로 고유 file_hash 부여(동일 인코딩 충돌 방지, placeholder처럼 내용 해시).
+            file_hash = image_hash(f"{source_model}|{ie:.2f}|{encoding}".encode("utf-8"))
+            context.vibe_transfer_frames.append({
+                "file_hash": file_hash,
+                "file_name": f"metadata_vibe_{file_hash[:8]}.png",
+                "file_path": "",
+                "image_bytes": b"",
+                "image_data": "",
+                "thumbnail": "",
+                "is_enabled": True,
+                "is_no_image": True,   # 원본 이미지 없음 → 'No Image' 렌더 + IE 슬라이더 없음
+                "no_source": True,     # 재인코딩 불가(begin_encode 차단), 재시작 복원 시 storage 조회 생략
+                "is_naid3": is_naid3,
+                "reference_strength": strength,
+                "information_extracted": ie,
+                "vibe_encodings": {f"{ie:.2f}": str(encoding)},
+                "storage_type": "metadata_vibe",
+                "source_model": source_model,
+            })
+            added += 1
+        if not added:
+            return context._toast("복원할 Vibe Transfer 데이터가 없습니다.", level="error")
+        norm = payload.get("normalize_reference_strength_multiple")
+        if isinstance(norm, bool):
+            context.vibe_transfer_normalize = norm
+        context._disable_all_character_reference_frames()
+        self._persist()
+        message = f"메타데이터에서 Vibe {added}개를 복원했어요."
+        if truncated:
+            message += f" (슬롯 한계 {MAX_NAI_VIBE_REFERENCES}개 초과분 제외)"
+        # 모델 불일치 경고: vibe 인코딩은 모델 버전별로 다르다. 정확한 키 비교는 별칭(NAID4.5 등)·
+        # F/C 차이로 거짓 경고를 내므로 '가족'(버전) 단위로 비교 — v4.0/v4.5/v3 실제 불일치만 알린다.
+        current_model = str(context._current_model_key() or "")
+        src_family = _vibe_model_family(source_model)
+        cur_family = _vibe_model_family(current_model)
+        model_mismatch = bool(src_family and cur_family and src_family != cur_family)
+        if model_mismatch:
+            message += f" ⚠ 이 vibe는 {source_model}({src_family})용이라 현재 모델({current_model})과 달라 결과가 바뀔 수 있어요."
+        return [context._toast(message, level="warning" if model_mismatch else "success"), self.module_state()]
 
     def scan_clusters(self) -> dict[str, Any]:
         from core.vibe_cluster_resolver import list_vibe_clusters

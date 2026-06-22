@@ -947,9 +947,18 @@ def _gate_schema(tags: list[str]) -> dict[str, Any]:
     }
 
 
-# keep_alive 값(Ollama): -1=무기한 상주, 0=즉시 언로드, None=서버 기본(~5분).
-# Auto Boost ON이면 2B 모델을 -1로 살려 둬 매 boost의 콜드 로드를 없앤다.
-_KEEP_ALIVE_RESIDENT = -1
+# keep_alive(초, Ollama): 모델이 VRAM에 머무는 유휴 시간. 매 호출이 타이머를 리셋하므로 활성
+# 사용 중엔 계속 상주하고, 마지막 호출 후 이 시간이 지나면 Ollama(llama.cpp)가 자동 언로드한다.
+# 사용자 요청(VRAM 안전): 모든 호출을 3분(180s) 유휴 캡으로 통일하고 예전의 무기한(-1) 상주는
+# 폐지한다 — 알 수 없는 상황에서 모델이 GPU/VRAM을 계속 점유하던 문제를 차단(3분간 호출이 없으면
+# 자동 해제). 0=즉시 언로드. NAIA_OLLAMA_KEEP_ALIVE_SECONDS 환경변수로 조정 가능(음수=무기한 복원).
+import os as _os
+try:
+    _KEEP_ALIVE_DEFAULT = int(_os.environ.get("NAIA_OLLAMA_KEEP_ALIVE_SECONDS", "180"))
+except (TypeError, ValueError):
+    _KEEP_ALIVE_DEFAULT = 180
+# Auto Boost warm-up도 동일한 3분 유휴 캡을 쓴다(예전 -1 무기한 상주 폐지). 이름은 호환 위해 유지.
+_KEEP_ALIVE_RESIDENT = _KEEP_ALIVE_DEFAULT
 _KEEP_ALIVE_UNLOAD = 0
 # Scene Boost 전용 chat 타임아웃(connect, read). 일반 assist(5,180)보다 짧게 — 동기 Random
 # 경로가 Ollama 지연에 길게 묶이지 않도록 worst-case를 묶는다(정상 boost는 1~5s).
@@ -1168,10 +1177,10 @@ class OllamaTagAssistService:
         # 먹어 빈 출력이 되던 회귀를 think=False로 차단). 사고를 다시 켜려면 think=None 전달.
         if think is not None:
             payload["think"] = bool(think)
-        # keep_alive: -1=무기한 유지(Auto Boost 모드 — 모델 상주로 매 boost 재로드 없음),
-        # 0=언로드, None=Ollama 기본(~5분). Auto Boost scene_boost는 -1로 모델을 살려 둔다.
-        if keep_alive is not None:
-            payload["keep_alive"] = keep_alive
+        # keep_alive(초): 항상 페이로드에 포함해 유휴 언로드를 보장한다 — None이면 3분(_KEEP_ALIVE_DEFAULT)
+        # 기본. 매 호출이 타이머를 리셋하므로 활성 사용 중엔 상주하고, 3분간 호출이 없으면 자동 언로드된다
+        # (사용자 요청: 무기한 상주 폐지로 VRAM 점유 방지). 0=즉시 언로드.
+        payload["keep_alive"] = _KEEP_ALIVE_DEFAULT if keep_alive is None else keep_alive
         response = requests.post(
             f"{self.base_url}/api/chat",
             json=payload,
@@ -1392,8 +1401,9 @@ class OllamaTagAssistService:
     # ------------------------------------------------------------------
 
     def _http_keep_alive_load(self, model: str) -> bool:
-        """/api/generate에 빈 프롬프트 + keep_alive=-1 → 모델 적재 후 무기한 상주.
-        성공하면 True. best-effort(예외/비200 = False, 결과에 영향 없음)."""
+        """/api/generate에 빈 프롬프트 + keep_alive=_KEEP_ALIVE_DEFAULT(3분) → 모델 적재 후
+        3분 유휴 캡으로 warm-up(예전 -1 무기한 상주 폐지 — 매 호출이 타이머 리셋, 3분 미사용 시
+        자동 언로드). 성공하면 True. best-effort(예외/비200 = False, 결과에 영향 없음)."""
         target = str(model or "").strip()
         if not target:
             return False

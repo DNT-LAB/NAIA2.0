@@ -101,6 +101,16 @@ _IDLE_PULL_STATE: dict[str, Any] = {
 }
 
 
+# 모든 Ollama generate/chat 요청에 주입하는 keep_alive 기본값(초). 모델은 마지막 호출 후 이 시간이
+# 지나면 VRAM에서 자동 언로드된다(매 호출이 타이머 리셋 → 활성 사용 중엔 상주). 사용자 요청(VRAM
+# 안전): 3분(180s) 유휴 캡 — 무기한 상주로 GPU/VRAM이 계속 점유되던 문제 방지. 0=즉시 언로드.
+# NAIA_OLLAMA_KEEP_ALIVE_SECONDS 환경변수로 조정 가능(음수=무기한 복원).
+try:
+    OLLAMA_KEEP_ALIVE_DEFAULT = int(os.environ.get("NAIA_OLLAMA_KEEP_ALIVE_SECONDS", "180"))
+except (TypeError, ValueError):
+    OLLAMA_KEEP_ALIVE_DEFAULT = 180
+
+
 def _no_window_flags() -> int:
     return subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
@@ -333,6 +343,14 @@ class OllamaAssistantService:
     ) -> Any:
         import requests
 
+        # 모든 generate/chat 호출에 유휴 언로드(keep_alive) 기본 주입 — 모델이 VRAM에 무기한 남지
+        # 않도록(사용자 요청: 3분 유휴 후 자동 해제). 호출부가 keep_alive를 명시했으면 존중한다.
+        if (
+            isinstance(payload, dict)
+            and path in ("/api/chat", "/api/generate")
+            and "keep_alive" not in payload
+        ):
+            payload = {**payload, "keep_alive": OLLAMA_KEEP_ALIVE_DEFAULT}
         return requests.post(f"{self.base_url}{path}", json=payload, timeout=timeout)
 
     def _default_server_spawner(self) -> Any:

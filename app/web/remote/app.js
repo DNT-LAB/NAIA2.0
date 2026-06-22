@@ -4191,6 +4191,13 @@ function attachCurrentModule() {
 function handleDetachedMessage(event) {
   if (event.origin !== window.location.origin) return;
   const data = event.data || {};
+  // 분리된 메타데이터 창의 'Vibe Transfer 복원' 위임 → 메인 창에서 실제 복원 수행(메인 VT 갱신).
+  // 메인 창은 isDetachedShell=false 라 applyMetadataVibeTransfer 가 로컬 경로(forceOpen+복원)로 동작.
+  if (data.type === 'naia_restore_vibe' && data.vibeTransfer) {
+    applyMetadataVibeTransfer({ vibeTransfer: data.vibeTransfer });
+    window.focus?.();
+    return;
+  }
   if (data.type !== 'naia_attach_module' || !data.moduleId) return;
   const moduleId = String(data.moduleId);
   const transferredState = (data.state && data.state.module_id === moduleId) ? data.state : null;
@@ -4578,22 +4585,34 @@ function applyMetadataCharacterSettings(payload) {
 }
 
 function applyMetadataVibeTransfer(payload) {
-  if ((currentMode || modeSelect.value) !== 'NAI') {
-    showToast('Vibe Transfer is only available in NAI mode', 'error');
-    return;
-  }
   const vibeTransfer = payload?.vibeTransfer;
   if (!vibeTransfer || !Array.isArray(vibeTransfer.reference_image_multiple) || !vibeTransfer.reference_image_multiple.length) {
     showToast('No Vibe Transfer data in metadata', 'error');
+    return;
+  }
+  // 분리/팝업 메타데이터 창에서 호출되면(=opener 존재) 메인 창으로 복원을 위임한다. 분리창에서 직접
+  // openModule('vibe_transfer') 하면 분리창 안에 VT 팝업이 뜨고, 복원이 분리창 ws 로만 가서 메인 VT는
+  // 안 바뀐다(사용자 리포트: 메타데이터 팝업에서 복원 시 VT 창이 닫힌/안 뜬 것처럼 보임). 메인이
+  // forceOpen 으로 VT를 열고 자기 ws 로 복원하면 메인 VT가 정상 갱신된다. 모드/연결 검증은 메인이 수행.
+  if (isDetachedShell && window.opener && !window.opener.closed) {
+    try {
+      window.opener.postMessage({ type: 'naia_restore_vibe', vibeTransfer }, window.location.origin);
+      showToast('메인 창의 Vibe Transfer로 복원 요청을 보냈습니다', 'success');
+      return;
+    } catch (error) {
+      // 위임 실패 시 아래 로컬 경로로 폴백.
+    }
+  }
+  if ((currentMode || modeSelect.value) !== 'NAI') {
+    showToast('Vibe Transfer is only available in NAI mode', 'error');
     return;
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     showToast('Remote connection is not open', 'error');
     return;
   }
-  if (currentModuleId !== 'vibe_transfer') {
-    openModule('vibe_transfer');
-  }
+  // forceOpen: VT가 이미 열려 있으면 토글로 닫지 않고 제자리 갱신, 닫혀 있으면 연다(복원 시 닫힘 차단).
+  openModule('vibe_transfer', { forceOpen: true });
   setModuleParam('vibe_transfer', 'restore_metadata', JSON.stringify(vibeTransfer));
   showToast(`Vibe Transfer restore requested (${vibeTransfer.reference_image_multiple.length})`, 'success');
 }

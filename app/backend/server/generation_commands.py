@@ -428,6 +428,11 @@ async def handle_random_command(
     active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
     # 수동 random은 풀을 advance하므로 Auto Gen 프리페치 예약행을 무효화(폐기).
     invalidate_auto_gen_prefetch(context)
+    # 영속된 활성 태그필터가 아직 in-memory 로 재조립되지 않았으면(재시작/가져오기 직후) 백엔드가
+    # 직접 재구성한다. 안 하면 필터가 무시된 전체 풀에서 뽑혀(result.success=True) 아래 failsafe 도
+    # 안 걸리고, 표시 카운트(필터 기준)와 실제 풀(전체)이 어긋난다(사용자 리포트). no-op if already assigned.
+    from app.backend.server.search_runtime import reconstruct_active_tag_filter
+    await asyncio.to_thread(reconstruct_active_tag_filter, context)
     result = await asyncio.to_thread(
         random_service(context).generate,
         active_ratings=active_ratings,
@@ -912,6 +917,12 @@ async def _maybe_enqueue_random_auto_generation(
     generation_overrides["auto_generate"] = True
     generation_overrides["_remote_queue_source"] = queue_source
     generation_overrides["_remote_queue_label"] = queue_source
+    # 첫 홉(수동 Random → Auto Gen 시작) 해상도 처리를 continuation 루프(generation_runner)와 일치시킨다:
+    # Rnd Res 가 켜져 있으면 먼저 새 랜덤 해상도를 굴려 두고(폴백), AutoRes(detected)가 나오면 그 값으로
+    # 덮어쓴다(AutoRes 우선 = '3→1 fallback'). 이게 없으면 dims 없는 소스 행에서 random 폴백이 걸리지
+    # 않아 직전 고정 해상도가 그대로 박힌다(첫홉 갭). _reroll 은 random_resolution 이 꺼져 있으면 no-op.
+    from app.backend.server.generation_runner import _reroll_random_resolution
+    _reroll_random_resolution(context, generation_overrides)
     if result.detected_resolution:
         width, height = result.detected_resolution
         generation_overrides["width"] = width
@@ -970,6 +981,10 @@ def register_generation_rest_routes(
         request_id = str(command.get("random_request_id") or command.get("requestId") or "")
         active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
         invalidate_auto_gen_prefetch(context)  # REST random도 풀 advance → 예약 무효화
+        # WS Random과 동일하게 영속 활성 태그필터를 백엔드가 재조립(재시작/가져오기 후 REST random 이
+        # 필터를 무시하고 전체 풀에서 뽑는 것 방지 — Codex F3). no-op if already assigned.
+        from app.backend.server.search_runtime import reconstruct_active_tag_filter
+        await asyncio.to_thread(reconstruct_active_tag_filter, context)
         result = await asyncio.to_thread(
             random_service(context).generate,
             active_ratings=active_ratings,

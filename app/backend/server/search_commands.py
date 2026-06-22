@@ -10,6 +10,7 @@ from app.backend.server.search_runtime import (
     apply_search_runtime_filters,
     clear_active_tag_filter,
     load_or_merge_custom_parquet,
+    reconstruct_active_tag_filter,
     restore_search_snapshot,
     run_search_command,
     search_parquet_action,
@@ -75,6 +76,9 @@ async def handle_search_command(
                 service = HeadlessRandomPromptService(context)
                 context.headless_random_prompt_service = service
             await run_in_thread(service._ensure_search_results, {})
+        # 영속된 활성 태그필터를 백엔드가 직접 재조립(권위) — 프론트 warmup 재적용 타이밍과 무관하게
+        # 표시 카운트와 실제 랜덤 풀이 일치하도록(재시작/가져오기 후 'random 이 필터 무시/꼬임' 수정).
+        await run_in_thread(reconstruct_active_tag_filter, context)
         await _send_json(ws, context.search_state_payload())
         return True
 

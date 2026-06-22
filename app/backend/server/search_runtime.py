@@ -272,6 +272,55 @@ def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True
     return apply_search_runtime_filters(context)
 
 
+def reconstruct_active_tag_filter(context: WebSessionContext) -> bool:
+    """재시작/가져오기 후 영속된 '활성' 태그필터를 백엔드가 스냅샷 위에서 직접 재조립한다(권위 SSOT).
+
+    in-memory 할당(active_tag_filter / active_tag_filter_ids)은 영속되지 않으므로 재시작 직후엔
+    None 이다. 하지만 디스크 search_filter_state.tag_filter_active 는 True 로 남아 프론트엔 칩이
+    보이고 카운트도 필터 기준으로 표시된다 → 사용자에겐 '필터 적용 중'으로 보이지만 실제 랜덤
+    풀은 미적용(전체)이거나, 프론트의 1회성 warmup 재적용이 타이밍을 놓치면 표시 카운트와 실제
+    풀이 어긋난다(사용자 리포트: 재시작 후 Random 이 필터를 무시/꼬임 → Quick→Clear 후 재입력
+    해야 정상. result.success=True 라 빈-풀 failsafe 도 안 잡힘). 백엔드가 스냅샷 위에서 직접
+    재검색→재할당하면 프론트 타이밍과 무관하게 '표시 == 실제 풀' 정합이 보장된다.
+
+    - 이미 in-memory 할당이 있으면(=정상 작동 중) no-op.
+    - import(install_custom_parquet_frame)/일반 검색(run_search_command)은 의도적으로
+      tag_filter_active=False 로 두므로 여기서 재구성되지 않는다(기존 설계 보존).
+    - 0매치여도 '활성' 의도는 보존한다(빈 풀은 handle_random_command failsafe 가 흡수). 백엔드가
+      사용자 필터를 임의 해제하지 않는다.
+    """
+    if getattr(context, "active_tag_filter", None) or getattr(context, "active_tag_filter_ids", None) is not None:
+        return False
+    state = context.normalize_search_filter_state(getattr(context, "search_filter_state", None))
+    if not state.get("tag_filter_active"):
+        return False
+    include = [str(tag) for tag in (state.get("tag_filter") or []) if str(tag).strip()]
+    exclude = [str(tag) for tag in (state.get("tag_filter_exclude") or []) if str(tag).strip()]
+    if not include and not exclude:
+        return False
+    snapshot = getattr(context, "search_results_snapshot", None)
+    if snapshot is None or getattr(snapshot, "empty", True):
+        return False
+    tags = [*include, *[f"-{tag}" for tag in exclude]]
+    result = tag_filter_search(context, tags)
+    ids = result.get("_ids", set())
+    # 쓰기 순서 주의(Codex F2): 각 속성 대입은 GIL 하에서 원자적이고, 소비자 우선순위가 active_tag_filter
+    # (dict)이므로 dict 를 마지막에 둔다 → dict 가 보이면 ids 도 이미 set. 반대(ids set·dict None)로
+    # 찢긴 읽기는 _active_tag_filter_state 가 ids 로 임시 상태를 복원해 graceful. 동시 호출(get_search_state
+    # + random 레이스)은 guard 를 둘 다 통과해 tag_filter_search 가 중복 실행될 수 있으나 결과가 동일
+    # (idempotent)이라 무해 — 시작 시점 한정 드문 경우라 락은 두지 않는다.
+    context.active_tag_filter_ids = set(ids)
+    context.active_tag_filter = {
+        "tags": [str(tag) for tag in result.get("tags", [])],
+        "ids": set(ids),
+        "count": int(result.get("count") or 0),
+        "request_id": "",
+        "rating_counts": dict(result.get("rating_counts") or {}),
+    }
+    apply_search_runtime_filters(context)
+    return True
+
+
 def run_search_command(
     context: WebSessionContext,
     command: dict[str, Any],

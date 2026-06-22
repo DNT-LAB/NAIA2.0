@@ -478,8 +478,20 @@ class HeadlessSearchStateService:
             or filter_preferences.get("search_ratings")
             or list(DEFAULT_ACTIVE_RATINGS)
         )
+        # 활성 태그필터가 있으면 표시 등급별 카운트도 '필터 매칭' 기준으로 — 스냅샷 전체 카운트를
+        # 쓰면 표시(전체)와 실제 랜덤 풀(필터 매칭)이 어긋난다(사용자 리포트: 하단 데이터 정합성).
+        # 백엔드 재조립(reconstruct_active_tag_filter)/할당이 채운 매칭 등급별 카운트를 우선 사용한다.
+        active_tag_filter = getattr(context, "active_tag_filter", None)
+        tag_filter_rating_counts = (
+            active_tag_filter.get("rating_counts") if isinstance(active_tag_filter, dict) else None
+        )
         snapshot = getattr(context, "search_results_snapshot", None)
-        if snapshot is not None and not getattr(snapshot, "empty", True) and "rating" in snapshot.columns:
+        if tag_filter_rating_counts:
+            rating_counts = {
+                rating: int(tag_filter_rating_counts.get(rating, 0) or 0)
+                for rating in SUPPORTED_RATINGS
+            }
+        elif snapshot is not None and not getattr(snapshot, "empty", True) and "rating" in snapshot.columns:
             rating_counts = {
                 rating: int((snapshot["rating"] == rating).sum())
                 for rating in SUPPORTED_RATINGS

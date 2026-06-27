@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from functools import partial
 import json
 import uuid
@@ -75,6 +76,48 @@ RunInThread = Callable[..., Awaitable[Any]]
 BroadcastJson = Callable[[set[WebSocket], dict[str, Any]], Awaitable[None]]
 GenerationRunnerStarter = Callable[[WebSessionContext, set[WebSocket]], None]
 
+# B4: 무거운 라이브 태그필터 검색은 백그라운드 태스크로 디스패치한다 — receive 루프가 막히지
+# 않아 검색이 도는 동안에도 다음 키 입력(autocomplete 등)이 즉시 읽혀 응답한다. 대형 풀(100만+
+# 행)에서 첫 칩 검색이 수십 초 걸려도 UI(autocomplete)가 죽지 않게 하는 것이 목적.
+# assign 은 B3 재사용으로 가벼워 인라인 유지(검색 결과 round-trip 이후에만 도착하므로 순서 보존).
+LIVE_DISPATCH_TYPES = {"tag_filter_search"}
+
+
+async def _run_live_command(
+    ws: WebSocket,
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    client_host: str,
+    command: dict[str, Any],
+    *,
+    run_in_thread: RunInThread,
+    broadcast_json: BroadcastJson,
+    start_generation_runner: GenerationRunnerStarter,
+) -> None:
+    """백그라운드 태스크로 라이브 명령을 실행. 예외가 receive 루프로 새지 않도록 격리하고
+    실패 시 토스트로 알린다(create_task 라 호출부 try/except 가 잡지 못함)."""
+    try:
+        await handle_json_command(
+            ws,
+            context,
+            clients,
+            client_host,
+            command,
+            run_in_thread=run_in_thread,
+            broadcast_json=broadcast_json,
+            start_generation_runner=start_generation_runner,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        try:
+            await ws.send_text(json.dumps(
+                {"type": "toast", "message": f"Tag filter failed: {exc}", "level": "error"},
+                ensure_ascii=False,
+            ))
+        except Exception:
+            pass
+
 
 def register_websocket_session(
     app: FastAPI,
@@ -91,6 +134,19 @@ def register_websocket_session(
         clients.add(ws)
         session_id = uuid.uuid4().hex[:8]
         client_host = client_host_from_websocket(ws)
+        # B4: 동일 연결의 동시 send 를 직렬화한다 — 백그라운드 라이브-필터 태스크와 인라인 핸들러가
+        # 동시에 보내도 프레임이 섞이지 않게(asyncio 단일 스레드라 Lock 1개로 충분). send_text/
+        # send_bytes/send_json 이 모두 통과하는 ASGI 레벨 ws.send 를 감싸 전 경로를 직렬화한다
+        # (send_text 만 감싸면 grok send_json·이미지 broadcast send_bytes 가 빠져나간다 — Codex 지적).
+        _raw_send = ws.send
+        _send_lock = asyncio.Lock()
+
+        async def _locked_send(message, *args, **kwargs):
+            async with _send_lock:
+                return await _raw_send(message, *args, **kwargs)
+
+        ws.send = _locked_send  # type: ignore[method-assign]
+        live_tasks: set[asyncio.Task] = set()
         try:
             await send_startup_messages(
                 ws,
@@ -109,16 +165,37 @@ def register_websocket_session(
                     except json.JSONDecodeError:
                         command = {"type": ""}
                     if isinstance(command, dict):
-                        await handle_json_command(
-                            ws,
-                            context,
-                            clients,
-                            client_host,
-                            command,
-                            run_in_thread=run_in_thread,
-                            broadcast_json=broadcast_json,
-                            start_generation_runner=start_generation_runner,
-                        )
+                        ctype = str(command.get("type") or "").strip()
+                        if ctype in LIVE_DISPATCH_TYPES:
+                            # B4: 무거운 검색을 백그라운드로 — receive 루프는 즉시 다음 메시지를
+                            # 읽어 autocomplete 가 검색 중에도 응답한다. seq 로 superseded 검색 폐기.
+                            context._tag_filter_search_seq = seq = (
+                                getattr(context, "_tag_filter_search_seq", 0) + 1
+                            )
+                            command["_seq"] = seq
+                            live_task = asyncio.create_task(_run_live_command(
+                                ws,
+                                context,
+                                clients,
+                                client_host,
+                                command,
+                                run_in_thread=run_in_thread,
+                                broadcast_json=broadcast_json,
+                                start_generation_runner=start_generation_runner,
+                            ))
+                            live_tasks.add(live_task)
+                            live_task.add_done_callback(live_tasks.discard)
+                        else:
+                            await handle_json_command(
+                                ws,
+                                context,
+                                clients,
+                                client_host,
+                                command,
+                                run_in_thread=run_in_thread,
+                                broadcast_json=broadcast_json,
+                                start_generation_runner=start_generation_runner,
+                            )
                     else:
                         await handle_text_command(
                             ws,
@@ -143,6 +220,9 @@ def register_websocket_session(
             clients.discard(ws)
             return
         finally:
+            # 연결 종료 시 백그라운드 라이브-필터 태스크 정리(누수/끊긴 소켓 send 방지).
+            for _task in list(live_tasks):
+                _task.cancel()
             clients.discard(ws)
 
 

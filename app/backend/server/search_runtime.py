@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from pathlib import Path
@@ -105,23 +106,34 @@ def filter_source_frame(
 ):
     if frame is None or getattr(frame, "empty", True):
         return frame
-    filtered = frame.copy()
-    if query or exclude:
-        from core.search_engine import SearchEngine
-
-        engine = SearchEngine()
-        for column in engine.TAG_COLUMNS:
-            if column not in filtered.columns:
-                filtered[column] = ""
-        filtered = engine._apply_filters(filtered, str(query or ""), str(exclude or ""))
-        if "tags_string" in filtered.columns:
-            filtered = filtered.drop(columns=["tags_string"])
     # tag_ids 의미: None = 태그필터 비활성(스킵) / set()(빈) = 활성·0매치 → 0행(전체 아님) /
     # {...} = 활성·매칭. assign 은 0매치 시 빈 set 을 넣으므로(search_commands.py), truthy 검사로는
     # 빈 set 을 "필터 없음"으로 오인해 전체 풀을 노출한다 → 반드시 `is not None` 으로 구분.
     # ⚠️ id-keyed 한계(별도 후속 TODO): 같은 post-id 가 다른 태그로 여러 행에 흩어진 악성 중복
     #    데이터(겹치는 parquet 합치기 등)에선 isin 이 매칭 안 된 형제 행까지 포함 → 검색 count
     #    (per-row)와 적용 풀이 어긋남. 정상(유니크 id) 데이터엔 무영향. 근본 해결 = 검색/합치기 id dedup.
+    if not query and not exclude:
+        # 빠른 경로(라이브 태그필터/등급 적용): 전체 스냅샷을 두 번 copy 하지 않고 단일 boolean
+        # mask 로 한 번만 슬라이스+copy 한다(대형 풀에서 assign 비용 절반). query/exclude 가 없을
+        # 때만 — _apply_filters 경로는 컬럼 보강/tags_string 부수효과가 있어 기존대로 둔다.
+        import pandas as pd
+
+        mask = pd.Series(True, index=frame.index)
+        if tag_ids is not None and "id" in frame.columns:
+            mask &= frame["id"].isin(tag_ids)
+        if ratings and "rating" in frame.columns:
+            mask &= frame["rating"].isin(ratings)
+        return frame[mask].copy()
+    filtered = frame.copy()
+    from core.search_engine import SearchEngine
+
+    engine = SearchEngine()
+    for column in engine.TAG_COLUMNS:
+        if column not in filtered.columns:
+            filtered[column] = ""
+    filtered = engine._apply_filters(filtered, str(query or ""), str(exclude or ""))
+    if "tags_string" in filtered.columns:
+        filtered = filtered.drop(columns=["tags_string"])
     if tag_ids is not None and "id" in filtered.columns:
         filtered = filtered[filtered["id"].isin(tag_ids)]
     if ratings and "rating" in filtered.columns:
@@ -208,11 +220,35 @@ def apply_search_runtime_filters(context: WebSessionContext) -> dict[str, Any]:
         source = search_base_frame(context)
         if source is not None and not getattr(source, "empty", True):
             context.search_results_snapshot = source.copy()
-    filtered = filter_source_frame(
-        source,
-        ratings=context.get_active_ratings(),
-        tag_ids=getattr(context, "active_tag_filter_ids", None),
-    )
+            source = context.search_results_snapshot
+    active_ids = getattr(context, "active_tag_filter_ids", None)
+    # B3: assign 직후엔 tag_filter_search 가 이미 슬라이스한 매칭 프레임(등급-무관)을 재사용해
+    # 전체 스냅샷 isin 재스캔/이중 copy 를 건너뛴다. 가드(identity): 프레임이 *현재*
+    # active_tag_filter_ids 객체(assign 이 세팅한 그 set)와 *현재* snapshot 에 귀속될 때만 재사용.
+    # 다른 경로(reconstruct/random/depth/clear)가 active_tag_filter_ids 를 새 객체로 재할당하거나
+    # snapshot 이 교체되면 identity 가 어긋나 안전하게 filter_source_frame 폴백 — 무효화 사이트를
+    # 일일이 건드릴 필요가 없다.
+    reuse_frame = getattr(context, "active_tag_filter_frame", None)
+    reuse_for = getattr(context, "active_tag_filter_frame_for", None)
+    reuse_snap = getattr(context, "active_tag_filter_frame_snapshot", None)
+    if (
+        reuse_frame is not None
+        and active_ids is not None
+        and reuse_for is active_ids
+        and source is not None
+        and reuse_snap is source
+    ):
+        ratings = context.get_active_ratings()
+        if ratings and "rating" in reuse_frame.columns:
+            filtered = reuse_frame[reuse_frame["rating"].isin(ratings)].copy()
+        else:
+            filtered = reuse_frame.copy()
+    else:
+        filtered = filter_source_frame(
+            source,
+            ratings=context.get_active_ratings(),
+            tag_ids=active_ids,
+        )
     if filtered is None or getattr(filtered, "empty", True):
         import pandas as pd
 
@@ -460,7 +496,12 @@ def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, 
         cache["frame"] = frame
         cache["row_count"] = len(frame)
         cache["has_id"] = "id" in frame.columns
-        cache["tags_text"] = frame[tag_columns].fillna("").astype(str).agg(",".join, axis=1).str.lower()
+        # 벡터화 빌드(str.cat, C-level)로 행별 Python 조인(.agg(",".join, axis=1))의 GIL 점유를
+        # 제거 — 대형 풀(100만+ 행)에서 첫 칩 응답이 핵심 병목이라 ~2x + GIL 친화적이다.
+        # _hit_rows 의 ",".join 구분자/소문자/contains 의미를 그대로 보존(동치 검증됨).
+        parts = [frame[c].fillna("").astype(str) for c in tag_columns]
+        tags_text = parts[0] if len(parts) == 1 else parts[0].str.cat(parts[1:], sep=",")
+        cache["tags_text"] = tags_text.str.lower()
     tags_text = cache["tags_text"]
     row_count = cache["row_count"]
 
@@ -479,22 +520,28 @@ def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, 
     include_rows = None          # None = 아직 제한 없음(전체 행)
     exclude_rows: set = set()
     clean_tags: list[str] = []
+    # 각 항목을 쉼표/개행으로 먼저 분리한다 — 프론트가 "1girl, armpits" 한 칩을 통째로 보내도
+    # 두 태그로 매칭/표기되도록(예약 버그). negate('-')는 분리 후 서브토큰별로 판정한다
+    # ('1girl, -armpits' → include 1girl + exclude armpits).
     for item in tags:
-        raw = str(item or "").strip()
-        if not raw:
-            continue
-        negate = raw.startswith("-")
-        clean = raw.lstrip("-").strip().replace("_", " ")
-        if not clean:
-            continue
-        clean_tags.append(("-" if negate else "") + clean)
-        rows = _hit_rows(clean.lower())
-        if negate:
-            exclude_rows |= rows
-        elif include_rows is None:
-            include_rows = set(rows)
-        else:
-            include_rows &= rows
+        for raw in re.split(r"[,\n]", str(item or "")):
+            raw = raw.strip()
+            if not raw:
+                continue
+            negate = raw.startswith("-")
+            # replace 후 strip: "1girl, armpits"→프론트가 보낸 "_armpits"의 선행 '_'(원래 공백)가
+            # 공백이 된 뒤 제거되도록(strip→replace 순서면 " armpits"로 남아 매칭이 깨진다).
+            clean = raw.lstrip("-").replace("_", " ").strip()
+            if not clean:
+                continue
+            clean_tags.append(("-" if negate else "") + clean)
+            rows = _hit_rows(clean.lower())
+            if negate:
+                exclude_rows |= rows
+            elif include_rows is None:
+                include_rows = set(rows)
+            else:
+                include_rows &= rows
     if include_rows is None:
         include_rows = set(range(row_count))
     final_rows = include_rows - exclude_rows
@@ -508,6 +555,9 @@ def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, 
         "tags": clean_tags,
         "rating_counts": rating_counts_from_frame(matched),
         "_ids": ids,
+        # B3: 이미 슬라이스된 매칭 프레임(등급-무관)을 동봉 → assign 이 active 로 이관해
+        # apply_search_runtime_filters 가 전체 스냅샷 isin 재스캔을 건너뛴다(가드는 호출부).
+        "_frame": matched,
     }
 
 

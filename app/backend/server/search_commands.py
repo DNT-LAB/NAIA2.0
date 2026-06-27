@@ -164,12 +164,21 @@ async def handle_search_command(
         tags = command.get("tags") if isinstance(command.get("tags"), list) else []
         request_id = str(command.get("request_id") or "")
         result = await run_in_thread(tag_filter_search, context, tags)
+        # B4: 검색이 백그라운드 태스크(websocket_session)라 완료 시점에 더 새로운 검색이 시작됐을 수
+        # 있다(to_thread 는 취소로 안 멈춤). superseded(seq 불일치) 면 pending 미기록·미전송으로 폐기
+        # — 최신 seq 만 통과해 stale 결과가 pending 을 덮어쓰는 reorder 해저드를 막는다.
+        seq = command.get("_seq")
+        if seq is not None and seq != getattr(context, "_tag_filter_search_seq", seq):
+            return True
         ids = result.pop("_ids", set())
+        # B3: 매칭 프레임은 DataFrame 이라 JSON 전송 전에 반드시 pop(직렬화 불가). assign 이 active 로 옮긴다.
+        matched_frame = result.pop("_frame", None)
         if request_id:
             result["request_id"] = request_id
         context.pending_tag_filter = {
             "tags": result.get("tags", []),
             "ids": ids,
+            "frame": matched_frame,
             "count": result.get("count", 0),
             "request_id": request_id,
             "rating_counts": result.get("rating_counts", {}),
@@ -195,6 +204,12 @@ async def handle_search_command(
             })
             return True
         context.active_tag_filter_ids = set(pending.get("ids") or set())
+        # B3: 매칭 프레임을 *이* active ids 객체 + 현재 snapshot 에 귀속 → apply_search_runtime_filters
+        # 가 전체 스냅샷 재스캔 없이 재사용한다(identity 가드는 apply 쪽). 다른 경로가 ids 를 새
+        # 객체로 바꾸면 자동 무효화되므로 별도 clear 불필요.
+        context.active_tag_filter_frame = pending.get("frame")
+        context.active_tag_filter_frame_for = context.active_tag_filter_ids
+        context.active_tag_filter_frame_snapshot = getattr(context, "search_results_snapshot", None)
         tags = [str(tag) for tag in pending.get("tags", [])]
         context.active_tag_filter = {
             "tags": tags,

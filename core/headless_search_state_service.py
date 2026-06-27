@@ -112,13 +112,19 @@ class HeadlessSearchStateService:
         if isinstance(tags, str):
             raw_items = re.split(r"[,\n]", tags)
         elif isinstance(tags, (list, tuple, set)):
-            raw_items = list(tags)
+            # 리스트 항목도 쉼표/개행으로 분리한다 — 프론트가 "1girl, armpits"를 한 항목으로
+            # 보내도 두 태그로 분해(예약 버그). str 분기와 동형. 저장/에코 상태가 분리되어
+            # search_state echo→applyPreferences로 칩이 2개로 자기교정된다.
+            raw_items = []
+            for x in tags:
+                raw_items.extend(re.split(r"[,\n]", str(x)))
         else:
             return []
         normalized: list[str] = []
         seen: set[str] = set()
         for item in raw_items:
-            text = str(item or "").strip().replace("_", " ")
+            # replace 후 strip: 쉼표분리로 생긴 "_armpits"의 선행 '_'(원래 공백)를 제거.
+            text = str(item or "").replace("_", " ").strip()
             if not text:
                 continue
             key = text.lower()
@@ -204,6 +210,17 @@ class HeadlessSearchStateService:
             if bkey in updates and updates[bkey] is not None:
                 state[bkey] = self._coerce_bucket_index(updates[bkey])
         state = self.normalize_search_filter_state(state)
+        # B2: updated_at 제외 내용이 직전 상태와 동일하면 디스크 tmp+replace 쓰기를 생략한다.
+        # 라이브 Quick Filter 는 칩마다 save 를 여러 번 호출(중복 동일 쓰기)하므로 disk churn 완화.
+        # 메모리 상태/등급은 일관성 위해 계속 갱신(updated_at 은 직전 값 보존).
+        prev = getattr(context, "search_filter_state", None)
+        if isinstance(prev, dict):
+            prev_cmp = {k: v for k, v in prev.items() if k != "updated_at"}
+            next_cmp = {k: v for k, v in state.items() if k != "updated_at"}
+            if prev_cmp == next_cmp:
+                context.search_filter_state = prev
+                context.remote_active_ratings = set(prev.get("ratings", state.get("ratings", [])))
+                return prev
         state["updated_at"] = datetime.now().isoformat(timespec="seconds")
         context.search_filter_state = state
         context.remote_active_ratings = set(state["ratings"])

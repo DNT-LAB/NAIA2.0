@@ -557,7 +557,10 @@ export function createResultImageActions({
       });
     } catch (error) {
       if (error?.name === 'AbortError') return null;
-      throw error;
+      // 일부 모바일/인앱(WebView) 환경은 picker를 노출만 하고 호출 시 거부한다.
+      // 예외를 삼키고 false를 반환해 downloadBlob 폴백을 타게 한다.
+      console.warn('showSaveFilePicker unavailable, falling back to download', error);
+      return false;
     }
   }
 
@@ -577,9 +580,15 @@ export function createResultImageActions({
       if (saveHandle === null) return;
       const blob = await fetchContextImageBlob(context, {format: 'png'});
       if (saveHandle) {
-        await writeBlobToFileHandle(saveHandle, blob);
-        showToast('Image saved', 'success');
-        return;
+        try {
+          await writeBlobToFileHandle(saveHandle, blob);
+          showToast('Image saved', 'success');
+          return;
+        } catch (writeError) {
+          if (writeError?.name === 'AbortError') return;
+          // createWritable/write가 플랫폼에 막힌 경우(인앱 브라우저/WebView 등) 일반 다운로드로 폴백.
+          console.warn('File write unavailable, falling back to download', writeError);
+        }
       }
       downloadBlob(blob, filename);
       showToast('Image download started', 'success');

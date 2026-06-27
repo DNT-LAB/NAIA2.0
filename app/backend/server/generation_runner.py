@@ -52,6 +52,26 @@ AUTO_GENERATE_DROPPED_PARAM_KEYS = {
     "webui_custom_payload_enabled",
 }
 
+# Auto Gen continuation 에서 overrides 로 핀하면 안 되는 라이브 PARAMS 의 예외(전용 로직이 관리).
+# seed: 매 반복 -1 리셋(랜덤 재시드) 또는 seed_fixed 시 유지. resolution/width/height/random_resolution:
+# Rnd Res 재추첨/Auto Res 가 별도 처리. 이 키들만 빼고 remote_params 의 나머지 키는 모두 제거한다.
+AUTO_GEN_PARAM_PIN_EXEMPT = {"seed", "seed_fixed", "resolution", "width", "height", "random_resolution"}
+
+
+def _drop_live_param_overrides(overrides: dict[str, Any], remote_params: Any) -> None:
+    """Auto Gen continuation: PARAMS 패널 값(steps/cfg/sampler/scheduler/model + ComfyUI
+    sampling_mode/rescale_cfg/anima_weight/comfyui_workflow*, WEBUI hr_* 등)은 모두 remote_params
+    에 사는 라이브 세션 설정이다 — webui_custom_payload 와 같은 클래스. 직전 생성에서 baked 된 값이
+    overrides 로 핀되면 enqueue 의 ``params.update(overrides)`` 가 라이브 ``params.update(remote_params)``
+    를 덮어써 Auto Gen 도중 PARAMS 변경이 무시된다(특히 ComfyUI/ANIMA 사용자 리포트). remote_params
+    에 존재하는 키를 overrides 에서 제거해 매 반복 라이브 재조회되게 한다(seed/해상도 계열 제외)."""
+    try:
+        for key in list(remote_params or {}):
+            if key not in AUTO_GEN_PARAM_PIN_EXEMPT:
+                overrides.pop(key, None)
+    except Exception:
+        pass
+
 
 async def _broadcast_automation_state(context: WebSessionContext, clients: set[WebSocket]) -> None:
     """Broadcast the automation runtime as a proper ``module_state`` message.
@@ -805,6 +825,9 @@ async def _maybe_continue_auto_generation(
     # pop으로 충족된다(직전 일반+스트림 vibe 제거 → enqueue에서 라이브 일반 + 현재 스트림 1장 재조립).
     for key in VIBE_TRANSFER_LIVE_REFETCH_KEYS:
         overrides.pop(key, None)
+    # PARAMS 패널 값(라이브 remote_params)도 char-ref/vibe 와 동일하게 매 반복 라이브 재조회되게
+    # overrides 에서 제거한다 — Auto Gen 도중 PARAMS(특히 ComfyUI/ANIMA) 변경 미반영 버그 수정.
+    _drop_live_param_overrides(overrides, getattr(context, "remote_params", {}))
     if story_run_id:
         # Carry the story run id so the next completion re-binds to this same cycle.
         overrides["event_stream_run_id"] = story_run_id
@@ -833,7 +856,11 @@ async def _maybe_continue_auto_generation(
         # Auto Res(detected)는 생성 후 정상 적용된다. 스텝이 해상도를 지정하면 생성 후
         # 그 값이 최종 우선.
         if story_plan is not None and not (story_plan.get("width") and story_plan.get("height")):
-            if not context._coerce_bool(overrides.get("random_resolution", False)):
+            # Rnd Res 결정은 _reroll_random_resolution 과 동일하게 라이브 remote_params 우선 —
+            # 그래야 라이브-ON/핀-OFF(stale) 상태에서 이 게이트가 방금 재추첨한 해상도를 base 로
+            # 되돌리지 않는다(Codex 리뷰 잔여 우려 해소).
+            _rp = getattr(context, "remote_params", None) or {}
+            if not context._coerce_bool(_rp.get("random_resolution", overrides.get("random_resolution", False))):
                 base = story_plan.get("base_resolution") or {}
                 if base.get("width") and base.get("height"):
                     overrides["width"] = base["width"]
@@ -1013,7 +1040,11 @@ def _reroll_random_resolution(context: WebSessionContext, overrides: dict[str, A
     the manual Random behaviour here, drawing from the same option set the dropdown
     offers (NAI standard 1MP labels, or the resolution preset labels for WEBUI/COMFYUI).
     """
-    if not context._coerce_bool(overrides.get("random_resolution", False)):
+    # Rnd Res 결정값(random_resolution / resolution_preset_enabled / resolution_preset)은 라이브
+    # remote_params 를 우선 읽는다 — Auto Gen 도중 Rnd Res·프리셋 토글을 즉시 반영(핀된 overrides
+    # 는 fallback). (Codex 리뷰: reroll 결정이 직전 핀값을 써서 한 박자 stale 했음.)
+    rp = getattr(context, "remote_params", None) or {}
+    if not context._coerce_bool(rp.get("random_resolution", overrides.get("random_resolution", False))):
         return
     from core.resolution_utils import (
         ANIMA_RESOLUTION_PRESET_LABELS,
@@ -1023,8 +1054,12 @@ def _reroll_random_resolution(context: WebSessionContext, overrides: dict[str, A
 
     mode = str(overrides.get("api_mode") or context.get_api_mode() or "").strip().upper()
     labels: tuple[str, ...] = ()
-    if mode in {"WEBUI", "COMFYUI"} and context._coerce_bool(overrides.get("resolution_preset_enabled", False)):
-        preset = normalize_anima_resolution_preset_id(overrides.get("resolution_preset"))
+    if mode in {"WEBUI", "COMFYUI"} and context._coerce_bool(
+        rp.get("resolution_preset_enabled", overrides.get("resolution_preset_enabled", False))
+    ):
+        preset = normalize_anima_resolution_preset_id(
+            rp.get("resolution_preset", overrides.get("resolution_preset"))
+        )
         labels = ANIMA_RESOLUTION_PRESET_LABELS.get(preset) or ()
     if not labels:
         # Res Preset이 아니면 해상도 매니저가 저장한 모드별 사용자 목록에서 추첨

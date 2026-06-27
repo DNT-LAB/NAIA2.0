@@ -470,9 +470,13 @@ async def handle_random_command(
     # Auto Gen 오버랩(파트4)은 별도 — 여기는 단발 경로.
     await apply_ollama_auto_boost(context, result)
     await persist_prompt_engineering_settings(context)
-    await _send_json(ws, result.websocket_payload())
+    # prompt_generated 는 유니캐스트가 아니라 브로드캐스트한다 — 요청 소켓이 half-open/끊긴 직후라도
+    # (재연결한 새 소켓 포함) 모든 클라이언트가 좌측 패널에 적용 프롬프트를 받게 한다(RC-1: 적용은
+    # 됐는데 좌측 창에 안 뜨던 버그). source 는 "random" 유지 — 프런트는 패널 갱신은 무조건 수용하고
+    # 버튼 unlock 만 request-id 일치로 게이트한다(isMyRandom). extra_messages 도 함께 브로드캐스트.
+    await _broadcast_json(clients, result.websocket_payload())
     for message in result.extra_messages:
-        await _send_json(ws, message)
+        await _broadcast_json(clients, message)
     dispatch = await _maybe_enqueue_random_auto_generation(
         context,
         result=result,

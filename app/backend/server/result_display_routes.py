@@ -296,6 +296,17 @@ def _scan_viewer_folder(context: WebSessionContext) -> list[dict[str, Any]]:
     return entries
 
 
+def _has_wildcards(prompt_context: Any) -> bool:
+    """True if the per-image prompt_context carries applied-wildcard data (Wildcard
+    Watch). Gates the result context-menu '와일드카드' item so it hides when empty.
+    Disk-only images (no in-session item) report False — their wildcards, if any,
+    live in the PNG chunk and surface via the Payload viewer instead."""
+    if not isinstance(prompt_context, dict):
+        return False
+    wildcards = prompt_context.get("wildcards")
+    return bool(isinstance(wildcards, dict) and (wildcards.get("history") or wildcards.get("state")))
+
+
 def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str, Any]:
     item = context.result_store.latest_item
     metadata_payload = context.result_store.latest_metadata_payload if isinstance(context.result_store.latest_metadata_payload, dict) else {}
@@ -352,6 +363,8 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
             # True whenever a history item backs this result (saved or unsaved);
             # the route resolves the item by its __history_item__ rel_path.
             "delete": bool(item),
+            # Wildcard Watch '와일드카드' 항목 게이트 — 적용된 와일드카드가 있을 때만 노출.
+            "has_wildcards": _has_wildcards(prompt_context),
         },
     }
 
@@ -418,6 +431,8 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             # delete enabled for any history-backed saved result; disk-only viewer
             # targets (no item) stay false — this route can only remove history items.
             "delete": bool(item),
+            # Wildcard Watch '와일드카드' 항목 게이트(in-session 항목 한정; 디스크 전용은 False).
+            "has_wildcards": _has_wildcards(getattr(item, "prompt_context", None) if item else None),
         },
     }
 

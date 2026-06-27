@@ -201,17 +201,29 @@ class CharacterViewerService:
         if not raw:
             return True
         exact = raw.startswith("*")
-        text = raw[1:].strip() if exact else raw
-        if not text:
+        body = raw[1:].strip() if exact else raw
+        if not body:
+            return True
+        # 콤마로 다중어를 분리해 '모든' term이 매칭돼야 한다(AND) — 사용자 리포트: "blonde hair,
+        # flat chest" 처럼 여러 태그로 검색 가능. 각 term은 공백을 포함할 수 있어 콤마로만 나눈다
+        # ("blonde hair"가 "blonde"+"hair"로 쪼개지면 안 됨). 콤마가 없으면 term 1개 → 기존 단일
+        # 부분문자열 동작과 동일(하위호환).
+        terms = [term.strip() for term in body.split(",") if term.strip()]
+        if not terms:
             return True
         display = name.lower()
         tag_str = self._tag_search_str(data).lower()
         if exact:
-            if re.search(r"\b" + re.escape(text) + r"\b", display):
-                return True
             tags = {part.strip().lower() for part in tag_str.split(",") if part.strip()}
-            return text in tags
-        return text in display or text in tag_str
+            # 각 term의 선행 '*'도 허용한다(예: "*a, *b"). 쿼리 전체의 '*'로 이미 exact 모드이므로
+            # term별 잔여 '*'는 떼고 정확 매칭한다(콤마 split 이 첫 '*'만 떼어내는 점 보완).
+            cleaned = [term[1:].strip() if term.startswith("*") else term for term in terms]
+            return all(
+                bool(re.search(r"\b" + re.escape(term) + r"\b", display)) or term in tags
+                for term in cleaned
+                if term
+            )
+        return all(term in display or term in tag_str for term in terms)
 
     def _thumb_key(self, group_key: str, name: str, variant_label: str = "") -> str:
         key = f"{group_key}::{name}"

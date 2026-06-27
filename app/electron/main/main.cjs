@@ -2407,6 +2407,17 @@ ipcMain.handle("naia:pick-directory", async () => {
   }
   return result.filePaths[0];
 });
+// 이미지 저장 폴더 선택 전용 — 데이터-마이그레이션 핸들러와 분리(제목/생성옵션 다름). createDirectory 로
+// 새 폴더 생성 허용(macOS 전용 플래그지만 Windows 네이티브 다이얼로그는 이미 "새 폴더" 지원, 무해).
+ipcMain.handle("naia:pick-save-directory", async () => {
+  const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null;
+  const options = { properties: ["openDirectory", "createDirectory"], title: "이미지 저장 폴더 선택" };
+  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+  if (result.canceled || !Array.isArray(result.filePaths) || result.filePaths.length === 0) {
+    return null;
+  }
+  return result.filePaths[0];
+});
 ipcMain.handle("naia:check-update", () => checkForUpdate());
 ipcMain.handle("naia:download-update", () => downloadUpdate());
 ipcMain.handle("naia:apply-update", () => applyUpdate());

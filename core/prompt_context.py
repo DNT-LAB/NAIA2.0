@@ -29,9 +29,14 @@ class PromptContext:
     
     # 이번 생성에 사용된 모든 와일드카드와 그 결과를 기록 (히스토리)
     wildcard_history: Dict[str, List[str]] = field(default_factory=dict)
-    
+
     # 순차/종속 와일드카드의 현재 상태(n/m)를 기록
     wildcard_state: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
+    # 위치 인식 롤 기록(Wildcard Watch 블록별 뷰/위치 스코핑 freeze용). wildcard_history 가
+    # 키만 보존하는 것과 달리, 각 롤을 발생 위치와 함께 순서대로 적재한다.
+    # 항목: {'key', 'value', 'location'(prefix/postfix/main/character/None), 'slot'?(캐릭터 슬롯)}
+    wildcard_rolls: List[Dict[str, Any]] = field(default_factory=list)
 
     # --- 처리 결과 ---
     removed_tags: List[str] = field(default_factory=list)

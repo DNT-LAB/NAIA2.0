@@ -1,4 +1,6 @@
 const ACTION_METADATA = 'show_metadata';
+const ACTION_SHOW_PAYLOAD = 'show_payload';     // 우측 팝업: 풀 페이로드를 읽기좋은 HTML로
+const ACTION_SHOW_WILDCARDS = 'show_wildcards';  // 우측 팝업: 블록별 적용 와일드카드(없으면 숨김)
 const ACTION_PASTE_IMAGE = 'paste_image';
 const ACTION_IMAGE_ACTION = 'image_action';
 const ACTION_LOAD_PROMPT = 'load_prompt';
@@ -26,6 +28,7 @@ const DEFAULT_CAPABILITIES = {
   queue: false,
   restore_params: false,
   metadata: false,
+  has_wildcards: false,
   paste_image: true,
   image_action: false,
   open_file: false,
@@ -102,6 +105,8 @@ const MAIN_IMAGE_MENU = [
       {label: '새 창으로 열기', action: ACTION_METADATA_DETACHED},
     ],
   },
+  {label: 'Payload 확인', action: ACTION_SHOW_PAYLOAD, capability: 'metadata'},
+  {label: '와일드카드', action: ACTION_SHOW_WILDCARDS, capability: 'has_wildcards', hideWhenDisabled: true},
   {type: 'separator'},
   {
     label: 'NAI 도구',
@@ -162,6 +167,8 @@ const THUMBNAIL_MENU = [
       {label: '새 창으로 열기', action: ACTION_METADATA_DETACHED, requiresPath: true},
     ],
   },
+  {label: 'Payload 확인', action: ACTION_SHOW_PAYLOAD, capability: 'metadata'},
+  {label: '와일드카드', action: ACTION_SHOW_WILDCARDS, capability: 'has_wildcards', hideWhenDisabled: true},
   {
     label: 'NAI 도구',
     modes: ['NAI'],
@@ -218,6 +225,7 @@ export function createResultContextMenu({
 }) {
   let menu = null;
   let metadataModal = null;
+  let sidePopup = null;
   let menuVersion = 0;
   const submenuCloseTimers = new WeakMap();
   const DELETE_MODE_KEY = 'naia_result_delete_mode';
@@ -337,6 +345,12 @@ export function createResultContextMenu({
     if (item.action === ACTION_METADATA_DETACHED) {
       return typeof onShowMetadataDetached === 'function' && hasCapability(context, 'metadata');
     }
+    if (item.action === ACTION_SHOW_PAYLOAD) {
+      return hasCapability(context, 'metadata');
+    }
+    if (item.action === ACTION_SHOW_WILDCARDS) {
+      return hasCapability(context, 'has_wildcards');
+    }
     if (item.action === ACTION_PASTE_IMAGE) {
       return hasCapability(context, 'paste_image');
     }
@@ -406,6 +420,8 @@ export function createResultContextMenu({
     const hasChildren = Array.isArray(item.children) && item.children.length > 0;
     const danger = item.danger ? ' danger' : '';
     const enabled = isItemEnabled(item, context);
+    // '와일드카드'처럼 데이터 없을 땐 비활성 대신 항목 자체를 숨긴다(사용자 요청: 없으면 숨김).
+    if (item.hideWhenDisabled && !enabled) return '';
     const disabledAttr = enabled ? '' : ' disabled aria-disabled="true"';
     const actionAttr = item.action ? ` data-action="${item.action}"` : '';
     const imageActionAttr = item.imageAction ? ` data-image-action="${item.imageAction}"` : '';
@@ -614,6 +630,10 @@ export function createResultContextMenu({
           showMetadata(context);
         } else if (action === ACTION_METADATA_DETACHED) {
           if (typeof onShowMetadataDetached === 'function') onShowMetadataDetached(context);
+        } else if (action === ACTION_SHOW_PAYLOAD) {
+          showPayload(context);
+        } else if (action === ACTION_SHOW_WILDCARDS) {
+          showWildcards(context);
         } else if (action === ACTION_PASTE_IMAGE) {
           onPasteImage();
         } else if (action === ACTION_OPEN_LOCATION) {
@@ -895,6 +915,207 @@ export function createResultContextMenu({
     return JSON.stringify(value);
   }
 
+  // ===== 우측 모듈형 팝업 (Payload / 와일드카드) =====
+  // 데이터는 JSON(SSOT) 그대로 받고, 표시는 HTML로 렌더한다(앱 전체 패널과 동일 패턴).
+  function closeSidePopup() {
+    if (!sidePopup) return;
+    sidePopup.remove();
+    sidePopup = null;
+  }
+
+  function openSidePopup(title, bodyHtml) {
+    closeSidePopup();
+    sidePopup = document.createElement('div');
+    sidePopup.className = 'result-side-popup';
+    sidePopup.innerHTML = `
+      <div class="result-side-popup-header">
+        <span class="result-side-popup-title">${escapeText(title)}</span>
+        <button type="button" class="result-side-popup-close" data-close="side" aria-label="Close">×</button>
+      </div>
+      <div class="result-side-popup-body">${bodyHtml}</div>`;
+    document.body.appendChild(sidePopup);
+    // 오른쪽에서 슬라이드 인.
+    window.requestAnimationFrame(() => { if (sidePopup) sidePopup.classList.add('open'); });
+    sidePopup.addEventListener('click', event => {
+      if (event.target instanceof window.Element && event.target.closest('[data-close="side"]')) {
+        closeSidePopup();
+      }
+    });
+  }
+
+  async function fetchFullMeta(context) {
+    const path = context && context.path ? context.path : '';
+    const useCurrent = !path && context && context.source === 'current';
+    if (!path && !useCurrent) return null;
+    const url = path ? viewerMetaUrl(path, true) : '/api/result/metadata';
+    const response = await fetchFn(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  }
+
+  function rawFromMeta(data) {
+    if (data && typeof data === 'object' && 'raw' in data) return data.raw && typeof data.raw === 'object' ? data.raw : {};
+    return data && typeof data === 'object' ? data : {};
+  }
+
+  async function showPayload(context) {
+    try {
+      const data = await fetchFullMeta(context);
+      if (!data) { showToast('No image is selected', 'error'); return; }
+      openSidePopup('Payload', renderPayloadHtml(data));
+    } catch (error) {
+      console.error('Failed to load payload', error);
+      showToast('Failed to load payload', 'error');
+    }
+  }
+
+  async function showWildcards(context) {
+    try {
+      const data = await fetchFullMeta(context);
+      if (!data) { showToast('No image is selected', 'error'); return; }
+      const promptContext = rawFromMeta(data).prompt_context || {};
+      openSidePopup('적용된 와일드카드', renderWildcardsHtml(promptContext));
+    } catch (error) {
+      console.error('Failed to load wildcards', error);
+      showToast('Failed to load wildcards', 'error');
+    }
+  }
+
+  function plSection(title, html, open) {
+    return `<details class="pl-section"${open ? ' open' : ''}><summary>${escapeText(title)}</summary>`
+      + `<div class="pl-section-body">${html}</div></details>`;
+  }
+
+  // 제네릭 JSON→HTML 재귀 렌더러(저유지보수: 새 필드 자동 노출). depth 캡으로 폭주 방지.
+  function jsonToHtml(value, depth = 0) {
+    if (value === null || value === undefined) return '<span class="j-null">null</span>';
+    if (depth > 8) return `<span class="j-str">${escapeText(JSON.stringify(value))}</span>`;
+    const type = typeof value;
+    if (type === 'string') return `<span class="j-str">${escapeText(value)}</span>`;
+    if (type === 'number' || type === 'boolean') return `<span class="j-num">${escapeText(String(value))}</span>`;
+    if (Array.isArray(value)) {
+      if (!value.length) return '<span class="j-empty">[]</span>';
+      return '<div class="j-arr">' + value.map((entry, index) =>
+        `<div class="j-row"><span class="j-key">${index}</span>${jsonToHtml(entry, depth + 1)}</div>`).join('') + '</div>';
+    }
+    if (type === 'object') {
+      const keys = Object.keys(value);
+      if (!keys.length) return '<span class="j-empty">{}</span>';
+      return '<div class="j-obj">' + keys.map(key =>
+        `<div class="j-row"><span class="j-key">${escapeText(key)}</span>${jsonToHtml(value[key], depth + 1)}</div>`).join('') + '</div>';
+    }
+    return `<span class="j-str">${escapeText(String(value))}</span>`;
+  }
+
+  // 파이프라인 단계 델타(추가/제거/롤/노트) — Hooker 대체 읽기전용 로그.
+  function renderPipelineTraceHtml(stages) {
+    if (!Array.isArray(stages) || !stages.length) return '';
+    return '<div class="trace-list">' + stages.map(stage => {
+      const added = Array.isArray(stage.added) ? stage.added : [];
+      const removed = Array.isArray(stage.removed) ? stage.removed : [];
+      const rolls = Array.isArray(stage.rolls) ? stage.rolls : [];
+      const changed = stage.changed && (added.length || removed.length || rolls.length || stage.note);
+      let body = '';
+      if (added.length) body += `<div class="trace-added">+ ${added.map(escapeText).join(', ')}</div>`;
+      if (removed.length) body += `<div class="trace-removed">− ${removed.map(escapeText).join(', ')}</div>`;
+      if (rolls.length) body += `<div class="trace-rolls">${rolls.map(roll => `${escapeText(roll.from)} → ${escapeText(roll.to)}`).join(', ')}</div>`;
+      if (!changed && !body) body = '<div class="trace-nochange">변경 없음</div>';
+      const note = stage.note ? `<span class="trace-note">${escapeText(stage.note)}</span>` : '';
+      return `<div class="trace-stage${changed ? '' : ' unchanged'}">`
+        + `<div class="trace-stage-head"><span class="trace-stage-label">${escapeText(stage.label || stage.stage || '')}</span>${note}</div>`
+        + body + '</div>';
+    }).join('') + '</div>';
+  }
+
+  // 블록별(prefix/postfix/main/character[+slot]) 적용 와일드카드.
+  function renderWildcardsHtml(promptContext) {
+    const wildcards = (promptContext && promptContext.wildcards) || {};
+    const history = Array.isArray(wildcards.history) ? wildcards.history : [];
+    const state = Array.isArray(wildcards.state) ? wildcards.state : [];
+    if (!history.length && !state.length) {
+      return '<div class="result-side-empty">이 이미지에 적용된 와일드카드가 없습니다.</div>';
+    }
+    const LOC_LABELS = {prefix: 'Prefix', postfix: 'Postfix', main: 'Main 프롬프트'};
+    const LOC_ORDER = {prefix: 0, main: 1, postfix: 2, character: 3};
+    const blockLabel = entry => {
+      const loc = entry.location || '기타';
+      if (loc === 'character') return entry.slot != null ? `캐릭터 ${entry.slot}` : '캐릭터';
+      return LOC_LABELS[loc] || loc;
+    };
+    const blocks = new Map();
+    history.forEach(entry => {
+      const label = blockLabel(entry);
+      if (!blocks.has(label)) blocks.set(label, {order: LOC_ORDER[entry.location] ?? 9, slot: entry.slot ?? 0, rows: []});
+      blocks.get(label).rows.push(entry);
+    });
+    const ordered = Array.from(blocks.entries()).sort((a, b) =>
+      (a[1].order - b[1].order) || (a[1].slot - b[1].slot) || a[0].localeCompare(b[0]));
+    let html = '';
+    ordered.forEach(([label, info]) => {
+      html += `<div class="wc-block"><div class="wc-block-title">${escapeText(label)}</div>`;
+      info.rows.forEach(entry => {
+        html += `<div class="wc-row"><span class="wc-name">${escapeText(entry.name)}</span>`
+          + `<span class="wc-arrow">→</span><span class="wc-val">${escapeText(entry.value)}</span></div>`;
+      });
+      html += '</div>';
+    });
+    if (state.length) {
+      html += '<div class="wc-block"><div class="wc-block-title">순차 / 종속 상태</div>';
+      state.forEach(entry => {
+        const dep = entry.dependent ? ` <span class="wc-dep">(종속${entry.master ? ' · ' + escapeText(entry.master) : ''})</span>` : '';
+        html += `<div class="wc-row"><span class="wc-name">${escapeText(entry.name)}</span>`
+          + `<span class="wc-val">${escapeText(String(entry.current))}/${escapeText(String(entry.total))}${dep}</span></div>`;
+      });
+      html += '</div>';
+    }
+    return html;
+  }
+
+  function renderPayloadHtml(data) {
+    const raw = rawFromMeta(data);
+    const gen = (raw && raw.generation_params) || {};
+    const promptContext = (raw && raw.prompt_context) || {};
+    const apiMeta = (raw && raw.api_metadata) || {};
+    const sections = [];
+
+    // 프롬프트 + 캐릭터
+    const mainPrompt = promptContext.main_prompt || promptContext.final_prompt || gen.input || gen.prompt || '';
+    const negPrompt = gen.negative_prompt || gen.uc || promptContext.negative_prompt || '';
+    let promptHtml = '';
+    if (mainPrompt) promptHtml += `<div class="pl-field"><div class="pl-label">Prompt</div><div class="pl-text">${escapeText(mainPrompt)}</div></div>`;
+    if (negPrompt) promptHtml += `<div class="pl-field"><div class="pl-label">Negative</div><div class="pl-text">${escapeText(negPrompt)}</div></div>`;
+    const chars = Array.isArray(gen._executed_characters) ? gen._executed_characters
+      : (Array.isArray(promptContext.characters) ? promptContext.characters : []);
+    if (chars.length) {
+      promptHtml += '<div class="pl-field"><div class="pl-label">캐릭터</div>';
+      chars.forEach((entry, index) => {
+        const text = typeof entry === 'string' ? entry : JSON.stringify(entry);
+        promptHtml += `<div class="pl-text"><b>Character ${index + 1}</b> ${escapeText(text)}</div>`;
+      });
+      promptHtml += '</div>';
+    }
+    if (promptHtml) sections.push(plSection('프롬프트', promptHtml, true));
+
+    const traceHtml = renderPipelineTraceHtml(promptContext.pipeline_trace);
+    if (traceHtml) sections.push(plSection('파이프라인 로그', traceHtml, true));
+
+    const wc = promptContext.wildcards;
+    if (wc && ((Array.isArray(wc.history) && wc.history.length) || (Array.isArray(wc.state) && wc.state.length))) {
+      sections.push(plSection('와일드카드', renderWildcardsHtml(promptContext), true));
+    }
+
+    if (gen && Object.keys(gen).length) sections.push(plSection('생성 파라미터', jsonToHtml(gen), false));
+    if (apiMeta && Object.keys(apiMeta).length) sections.push(plSection('API 메타데이터', jsonToHtml(apiMeta), false));
+
+    const hasRaw = raw && Object.keys(raw).length;
+    if (hasRaw) {
+      sections.push(`<details class="result-side-raw"><summary>raw JSON</summary>`
+        + `<pre>${escapeText(JSON.stringify(raw, null, 2))}</pre></details>`);
+    }
+    if (!sections.length) return '<div class="result-side-empty">메타데이터가 없습니다.</div>';
+    return sections.join('');
+  }
+
   function onContextMenu(event) {
     const target = event.target;
     if (!target || !(target instanceof window.Element)) return;
@@ -928,6 +1149,7 @@ export function createResultContextMenu({
       if (event.key === 'Escape') {
         close();
         closeMetadataModal();
+        closeSidePopup();
       }
     });
     window.addEventListener('resize', close);
@@ -940,6 +1162,7 @@ export function createResultContextMenu({
   };
 }
 
+// cache-bust marker: 20260627-payload-wc (Payload viewer + per-block wildcard popup)
 function defaultEscHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({
     '&': '&amp;',

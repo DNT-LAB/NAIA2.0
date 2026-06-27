@@ -122,6 +122,20 @@ class HeadlessResultStore:
             "final_prompt": params.get("input", ""),
             "negative_prompt": params.get("negative_prompt", ""),
         }
+        # 읽기 전용 생성 추적을 이 이미지에 영속한다(execute_request 가 current_prompt_context
+        # 에서 떠서 api_result 에 실어 보낸다). prompt_context 는 HeadlessHistoryItem·메타데이터
+        # API 3종·PNG naia_prompt_context 청크로 자동 전파되므로 한 번 쓰면 모든 조회면에 보인다.
+        #  • pipeline_trace: 단계별 added/removed/note (제거된 Hooker의 코드 실행을 관측으로 대체)
+        #  • wildcards: 이 이미지에 적용된 와일드카드 history/state (Wildcard Watch)
+        # 전부 JSON-safe(문자열/정수/리스트/딕트) — raw bytes 없음(과거 image_bytes 직렬화 500 회피).
+        trace_payload = api_result.get("naia_generation_trace")
+        if isinstance(trace_payload, dict):
+            stages = trace_payload.get("pipeline_trace")
+            if isinstance(stages, list) and stages:
+                prompt_context["pipeline_trace"] = stages
+            wildcards = trace_payload.get("wildcards")
+            if isinstance(wildcards, dict) and (wildcards.get("history") or wildcards.get("state")):
+                prompt_context["wildcards"] = wildcards
         # ComfyUI 결과 메타데이터 보강 (단일 저장 합류점 패턴, WEBUI embed_webui_parameters와 동형).
         # 데스크톱 generation_controller 보강(82856b6)이 헤드리스 이관(30542db 아카이브) 시
         # 누락된 회귀를 복구하는 경로. prompt_context/params가 조립된 이 시점에서 호출한다.

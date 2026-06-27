@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 import re
 
+from core import image_classification
 from core import result_image_payload_service as result_images
 from core.headless_payload_utils import is_loopback_host
 
@@ -180,6 +181,7 @@ class HeadlessSaveService:
         self,
         base_path: str | None = None,
         use_timestamp_folder: bool | None = None,
+        classification_subfolder: str | None = None,
     ) -> Path:
         context = self.context
         raw_base = str(base_path or context.save_directory_state.get("base_path") or "output")
@@ -193,7 +195,14 @@ class HeadlessSaveService:
             use_timestamp_folder = context._coerce_bool(
                 context.save_directory_state.get("use_timestamp_folder", True)
             )
-        return base / context.session_timestamp if use_timestamp_folder else base
+        directory = base / context.session_timestamp if use_timestamp_folder else base
+        # 분류 하위 폴더는 타임스탬프 폴더 뒤에 붙는다(데스크톱 get_save_directory와 동일 순서):
+        #   timestamp ON : base/<timestamp>/<classification>/<file>
+        #   timestamp OFF: base/<classification>/<file>
+        if classification_subfolder:
+            for part in Path(classification_subfolder).parts:
+                directory = directory / part
+        return directory
 
     def next_save_filename(self, item: Any, extension: str) -> str:
         context = self.context
@@ -216,8 +225,57 @@ class HeadlessSaveService:
         context.save_directory_state["save_counter"] = counter + 1
         return f"{stem}.{extension}"
 
+    def _classification_subfolder_for_item(self, item: Any) -> str | None:
+        """이 아이템의 태그에 분류 규칙을 적용해 저장 하위 폴더를 결정합니다.
+
+        method가 "none"/빈값이면 분류는 no-op(None)이며 기존 저장 경로가 그대로 유지됩니다.
+        """
+        context = self.context
+        method = str(context.save_directory_state.get("classification_method") or "none")
+        if method == "none":
+            return None
+        rules = str(context.save_directory_state.get("classification_rules") or "")
+        # 분류는 켰지만 규칙이 비어/공백이면 분류하지 않는다(no-op). 안 그러면 빈 규칙에서
+        # classify가 "misc"를 돌려줘 모든 이미지가 misc/ 로 쏠리는 footgun이 된다(Codex MEDIUM).
+        # 규칙 없는 활성은 기존처럼 베이스 폴더에 저장.
+        if not rules.strip():
+            return None
+        return image_classification.classify(
+            self._item_classification_tags(item),
+            method,
+            rules,
+        )
+
+    @staticmethod
+    def _item_classification_tags(item: Any) -> str:
+        """분류에 사용할 프롬프트 문자열을 아이템에서 추출합니다.
+
+        저장 메타와 일관되도록, add_api_result가 기록한 실행본 프롬프트를 우선 사용한다:
+        prompt_context["main_prompt"]/["final_prompt"] → generation_params["input"]/["prompt"].
+        분리는 image_classification.classify 내부에서 split_tags_smart로 수행한다.
+        """
+        prompt_context = getattr(item, "prompt_context", {}) or {}
+        if isinstance(prompt_context, dict):
+            for key in ("main_prompt", "final_prompt"):
+                value = prompt_context.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+        params = getattr(item, "generation_params", {}) or {}
+        if isinstance(params, dict):
+            for key in ("input", "prompt"):
+                value = params.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+        return ""
+
     def _save_history_item_to_directory(self, item: Any, directory: Path, *, save_as_webp: bool) -> Path:
         context = self.context
+        # 분류 하위 폴더(없으면 None)를 결정해 전달받은 기준 디렉터리 뒤에 붙인다.
+        subfolder = self._classification_subfolder_for_item(item)
+        if subfolder:
+            for part in Path(subfolder).parts:
+                directory = directory / part
+            directory.mkdir(parents=True, exist_ok=True)
         extension = "webp" if save_as_webp else "png"
         filename = self.next_save_filename(item, extension)
         target = self.unique_output_path(directory / filename)

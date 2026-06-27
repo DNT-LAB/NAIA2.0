@@ -330,6 +330,11 @@ class HeadlessGenerationService:
             raise RuntimeError(error_message)
         api_result["generation_params"] = params
         api_result["source_row"] = request.source_row
+        # 읽기 전용 생성 추적(파이프라인 단계 델타 + 적용된 와일드카드)을 이 이미지에 붙인다.
+        # current_prompt_context 는 process()와 _expand_input_wildcards를 거친 직후라 권위본.
+        trace_payload = self._build_generation_trace(request)
+        if trace_payload:
+            api_result["naia_generation_trace"] = trace_payload
         stored = self.context.result_store.add_api_result(api_result, request)
         request.mark_completed()
         # ext_origin/ext_chain_depth: dispatched와 동일한 lineage를 결과 이벤트에도
@@ -349,6 +354,105 @@ class HeadlessGenerationService:
             flush=True,
         )
         return stored
+
+    def _build_generation_trace(self, request=None) -> dict[str, Any]:
+        """직전 파이프라인 실행(current_prompt_context)에서 읽기 전용 생성 추적을 수집한다.
+
+        - ``pipeline_trace``: 각 파이프라인 단계가 프롬프트에 한 일(added/removed/note) — Hooker 대체.
+          prompt_processor 가 ``context.metadata['pipeline_trace']`` 에 누적해 둔다.
+        - ``wildcards``: ``{history:[{name,value}], state:[{name,current,total,...}]}`` —
+          이 이미지에 실제 적용된 와일드카드(Wildcard Watch). 셰이프는 headless_wildcard_service.
+          _collect_runtime_state 와 동일해 프론트 렌더를 재사용한다.
+
+        JSON-safe(문자열/정수/리스트/딕트)만 담는다 — 매 PNG ``naia_prompt_context`` 청크와 모든
+        메타데이터 페이로드에 임베드되므로 raw bytes/Series 는 절대 넣지 않는다. 실패해도 절대
+        raise 하지 않는다(결과 저장을 막지 않음)."""
+        trace: dict[str, Any] = {}
+        try:
+            ctx = getattr(self.context, "current_prompt_context", None)
+            if ctx is None:
+                return trace
+
+            meta = getattr(ctx, "metadata", None)
+            # 리플레이 안전: 이 요청이 명시적으로 *다른* prompt run 에 속하면(예: '원본 유지' 큐
+            # 리플레이가 과거 run_id 를 실어오면) current_prompt_context 는 이 이미지의 것이 아니다
+            # → 추적을 붙이지 않는다. 둘 중 하나라도 비어 있으면(일반 경로) 억제하지 않는다.
+            ctx_run = str((meta or {}).get("prompt_run_id") or "")
+            req_run = str(getattr(request, "prompt_run_id", "") or "")
+            if req_run and ctx_run and req_run != ctx_run:
+                return trace
+
+            # 매 저장 PNG(naia_prompt_context 청크)와 모든 메타데이터 페이로드에 임베드되므로
+            # 항목 수·문자열 길이를 캡해 비정상적으로 긴 프롬프트/다수 와일드카드에서도 바운드한다
+            # (pipeline_trace 는 prompt_processor 에서 이미 캡됨).
+            _MAX_ITEMS = 60
+            _MAX_LEN = 200
+            _cap = lambda s: (s[:_MAX_LEN] + "…") if len(s) > _MAX_LEN else s
+
+            if isinstance(meta, dict):
+                stages = meta.get("pipeline_trace")
+                if isinstance(stages, list) and stages:
+                    trace["pipeline_trace"] = list(stages)
+
+            history: list[dict[str, Any]] = []
+            rolls = getattr(ctx, "wildcard_rolls", None)
+            if isinstance(rolls, list) and rolls:
+                # 위치 인식 롤(블록별 뷰/위치 스코핑 freeze). (location, key, slot) 단위로 마지막
+                # 값을 유지해 같은 키가 prefix·postfix 등 다른 블록에 있어도 따로 표시된다.
+                seen: dict = {}
+                for roll in rolls:
+                    if not isinstance(roll, dict):
+                        continue
+                    key = str(roll.get("key", ""))
+                    if not key:
+                        continue
+                    seen[(roll.get("location"), key, roll.get("slot"))] = roll
+                for (loc, key, slot), roll in seen.items():
+                    entry = {"name": _cap(key), "value": _cap(str(roll.get("value", "")))}
+                    if loc is not None:
+                        entry["location"] = str(loc)
+                    if slot is not None:
+                        entry["slot"] = slot
+                    history.append(entry)
+                    if len(history) >= _MAX_ITEMS:
+                        break
+            else:
+                # 폴백: 위치 인식 롤이 없으면(구 경로/캐릭터 스냅샷 재사용) 키-only 히스토리.
+                wc_history = getattr(ctx, "wildcard_history", None)
+                if isinstance(wc_history, dict):
+                    for name, values in wc_history.items():
+                        if not values:
+                            continue
+                        chosen = values[-1] if isinstance(values, (list, tuple)) else values
+                        history.append({"name": _cap(str(name)), "value": _cap(str(chosen))})
+                        if len(history) >= _MAX_ITEMS:
+                            break
+
+            state: list[dict[str, Any]] = []
+            wc_state = getattr(ctx, "wildcard_state", None)
+            if isinstance(wc_state, dict):
+                for name, info in wc_state.items():
+                    if not isinstance(info, dict):
+                        continue
+                    entry: dict[str, Any] = {
+                        "name": _cap(str(name)),
+                        "current": int(info.get("current", 0) or 0),
+                        "total": int(info.get("total", 0) or 0),
+                    }
+                    if "master_name" in info:
+                        entry["dependent"] = True
+                    master = info.get("master_name")
+                    if master and str(master) not in {"", "unknown"}:
+                        entry["master"] = _cap(str(master))
+                    state.append(entry)
+                    if len(state) >= _MAX_ITEMS:
+                        break
+
+            if history or state:
+                trace["wildcards"] = {"history": history, "state": state}
+        except Exception:
+            pass
+        return trace
 
     def _expand_input_wildcards(self, params: dict[str, Any]) -> None:
         """프롬프트 입력창의 와일드카드(__wc__/__*wc__/__$m:s__/$wc/<wc>)를 생성 직전에
@@ -405,7 +509,8 @@ class HeadlessGenerationService:
                     continue
                 cleaned_tags.append(processed)
 
-            expanded_tags = processor.expand_tags(cleaned_tags, prompt_context)
+            # 입력창 와일드카드는 메인 프롬프트로 취급(location='main')해 위치 인식 롤에 기록.
+            expanded_tags = processor.expand_tags(cleaned_tags, prompt_context, location='main')
             result_parts = list(expanded_tags)
             if prompt_context.global_append_tags:
                 result_parts.extend(prompt_context.global_append_tags)

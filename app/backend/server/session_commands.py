@@ -18,6 +18,7 @@ SESSION_COMMAND_TYPES = {
     "set_mode",
     "set_prompt",
     "set_param",
+    "get_prompt",
 }
 API_OPTION_TOKEN_KEYS = {
     "WEBUI": "webui_url",
@@ -149,6 +150,18 @@ async def handle_session_command(
             "prompt": context.prompt_text,
             "negative": context.negative_prompt_text,
             "negative_prompt": context.negative_prompt_text,
+        }, ensure_ascii=False))
+        return True
+    if command_type == "get_prompt":
+        # 재연결 시 좌측 패널을 '현재 적용 프롬프트'로 강제 재동기(force) — session 메시지가 누락/레이스
+        # 되어도 복구를 보장한다(RC-2). 요청 시점의 context.prompt_text 를 읽으므로 boost-window 레이스
+        # (RC-4)도 피한다. force:True 라 편집 중이어도 덮어쓴다(사용자 선택).
+        await ws.send_text(json.dumps({
+            "type": "prompt_sync",
+            "prompt": context.prompt_text,
+            "negative": context.negative_prompt_text,
+            "negative_prompt": context.negative_prompt_text,
+            "force": True,
         }, ensure_ascii=False))
         return True
     if command_type == "set_param":

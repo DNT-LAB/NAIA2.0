@@ -182,14 +182,17 @@ def conditional_character_override_active(app_context) -> bool:
     return _conditional_character_override(app_context, reuse_current_context=True) is not None
 
 
-def _expand_character_text(text: str, processor: WildcardProcessor | None, context: PromptContext) -> str:
+def _expand_character_text(text: str, processor: WildcardProcessor | None, context: PromptContext, slot=None) -> str:
     pieces = [piece.strip() for piece in split_tags_smart(str(text or ""))]
     pieces = [piece for piece in pieces if piece]
     if not pieces:
         return ""
     if processor is None:
         return ", ".join(pieces)
-    return ", ".join(processor.expand_tags(pieces, context))
+    # location='character'(+slot)으로 캐릭터 블록 와일드카드 롤을 위치 인식 기록한다(Wildcard
+    # Watch 블록별 뷰). 단, 이 경로는 reuse_current_context=True(Random)일 때만 라이브 context 에
+    # 기록된다 — 스냅샷 재사용/throwaway context 경로에선 롤이 남지 않을 수 있다(알려진 한계).
+    return ", ".join(processor.expand_tags(pieces, context, location='character', slot=slot))
 
 
 def character_params_from_settings(
@@ -262,9 +265,12 @@ def character_params_from_settings(
 
     characters = []
     ucs = []
-    for frame in frames:
-        prompt = _expand_character_text(frame.get("prompt", ""), processor, context)
-        uc = _expand_character_text(frame.get("uc", ""), processor, context)
+    # slot = 활성 프레임 1-based 인덱스(=백엔드 char id, 화면 'Character N'과 정렬). Phase B에서
+    # 안정적 uuid 도입 시 frame['id']로 교체 예정.
+    for slot_index, frame in enumerate(frames, 1):
+        slot = frame.get("id") or slot_index
+        prompt = _expand_character_text(frame.get("prompt", ""), processor, context, slot=slot)
+        uc = _expand_character_text(frame.get("uc", ""), processor, context, slot=slot)
         if prompt:
             characters.append(prompt)
             ucs.append(uc)

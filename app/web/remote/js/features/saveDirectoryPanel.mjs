@@ -23,6 +23,8 @@ export function createSaveDirectoryPanel({
 
     const controlAllowed = !!m.control_allowed;
     const browseAllowed = !!m.browse_allowed;
+    // 네이티브 폴더 선택은 Electron 쉘에서만(원격/일반 브라우저는 텍스트 입력 폴백). naiaShell 존재로 판정.
+    const canPick = browseAllowed && !!(globalThis.naiaShell && globalThis.naiaShell.pickSaveDirectory);
     const filenameOptions = (m.filename_format_options || []).map(opt =>
       `<option value="${escHtml(opt.value)}" ${opt.value === m.filename_format ? 'selected' : ''}>${escHtml(opt.label)}</option>`
     ).join('');
@@ -56,6 +58,7 @@ export function createSaveDirectoryPanel({
                  onkeydown="if(event.key==='Enter') browseSaveDirectory()">
           <div class="mod-inline-row">
             <button class="mod-btn-secondary" ${browseAllowed ? '' : 'disabled'} onclick="browseSaveDirectory()">Apply Path</button>
+            ${canPick ? `<button class="mod-btn-secondary" id="saveDirPickBtn" onclick="pickSaveDirectory()">📁 폴더 선택…</button>` : ''}
           </div>
           ${browseNotice}
         </label>
@@ -83,8 +86,12 @@ export function createSaveDirectoryPanel({
           <label class="mod-field">
             <span class="mod-field-label">Classification Rules</span>
             <textarea class="mod-textarea mod-textarea-lg" ${controlAllowed ? '' : 'disabled'}
-                      placeholder="*1girl, (*solo&*1girl), (landscape|scenery)"
+                      placeholder="*1girl, *2girls, (landscape|scenery)"
                       oninput="onModTextEdit('save_directory','classification_rules',this.value)">${escHtml(m.classification_rules || '')}</textarea>
+            <div style="font-size:11px;color:var(--text-muted,#9aa);line-height:1.7;margin-top:6px;word-break:keep-all">
+              <b>*태그</b>=정확일치 · <b>태그</b>=포함 · <b>&amp;</b>=AND · <b>|</b>=OR · <b>( )</b>=그룹 · 쉼표=우선순위(먼저 맞는 규칙) · 미매칭→<b>misc</b><br>
+              예: <code>*1girl, *2girls, (landscape|scenery)</code> — 가중치(0.7::)는 자동 무시되어 매칭됩니다.
+            </div>
           </label>
         ` : ''}
       </div>
@@ -103,6 +110,23 @@ export function createSaveDirectoryPanel({
       render(lastState);
     }
     setModuleParam('save_directory', 'base_path', value);
+  }
+
+  // 네이티브 탐색기로 저장 폴더 선택/생성(Electron 전용). 고른 절대경로를 텍스트칸에 반영하고
+  // browse()와 동일하게 base_path 로 적용한다. 백엔드는 저장 시점에 lazy mkdir 하므로 미존재 폴더도 OK.
+  async function pickAndApply() {
+    const shell = globalThis.naiaShell;
+    if (!shell || typeof shell.pickSaveDirectory !== 'function') {
+      if (showToast) showToast('폴더 선택은 데스크톱 앱에서만 지원됩니다. 경로를 직접 입력해 주세요.', 'info');
+      return;
+    }
+    let folder = null;
+    try { folder = await shell.pickSaveDirectory(); } catch (_) { folder = null; }
+    if (!folder) return;   // 사용자 취소
+    const input = document.getElementById('saveDirBasePath');
+    if (input) input.value = folder;
+    if (lastState) { lastState.base_path = folder; render(lastState); }
+    setModuleParam('save_directory', 'base_path', folder);   // browse()와 동일 적용 경로
   }
 
   function onTimestampToggle(checked) {
@@ -131,6 +155,7 @@ export function createSaveDirectoryPanel({
     open,
     render,
     browse,
+    pickAndApply,
     onTimestampToggle,
     onFilenameFormatChange,
     onClassificationChange,

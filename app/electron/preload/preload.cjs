@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("naiaShell", {
   openDataFolder: () => ipcRenderer.invoke("naia:open-data-folder"),
   openLogs: () => ipcRenderer.invoke("naia:open-logs"),
   pickDirectory: () => ipcRenderer.invoke("naia:pick-directory"),
+  pickSaveDirectory: () => ipcRenderer.invoke("naia:pick-save-directory"),
   checkUpdate: () => ipcRenderer.invoke("naia:check-update"),
   downloadUpdate: () => ipcRenderer.invoke("naia:download-update"),
   applyUpdate: () => ipcRenderer.invoke("naia:apply-update"),

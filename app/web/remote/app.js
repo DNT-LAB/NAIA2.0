@@ -691,7 +691,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260618-outpaint')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260627-payload-wc')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -1010,7 +1010,7 @@ const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260514-un
   .catch(error => {
     console.error('Failed to initialize auto save panel module', error);
   });
-const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs')
+const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20260622-savedir-picker2')
   .then(({createSaveDirectoryPanel}) => {
     saveDirectoryPanel = createSaveDirectoryPanel({
       document,
@@ -2600,6 +2600,14 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
         setLauncherConn(false);
         modeSwitching = false;
         if (modeSelect) modeSelect.disabled = true;
+        // 끊김 중이던 수동 Random 의 pending 상태 정리(FIX-C/RC-2): 안 비우면 재연결 후 좌측 패널
+        // 재동기(scheduleInitialStateRefresh)가 awaitingMyRandom/pendingRandomRequestId 가드에 막혀
+        // 영원히 deferral 되고, 늦게 도착한 random 브로드캐스트도 stale id 로 거부된다. 버튼도 재활성화.
+        awaitingMyRandom = false;
+        pendingRandomRequestId = '';
+        if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
+        if (typeof btnRnd !== 'undefined' && btnRnd) btnRnd.disabled = false;
+        if (typeof stopRndTimer === 'function') stopRndTimer();  // Ollama boost 경과시간 라벨 복원(Codex INFO)
       },
     });
   })
@@ -3031,13 +3039,22 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   const source = message.source;
   const isPresetSource = source === 'event_preset' || source === 'preset';
   const acceptsBootstrapPrompt = source === 'bootstrap_random';
-  const acceptsRandomPrompt = source === 'random' && isExpectedRandomPrompt(message);
+  // 패널 갱신은 'random' 프롬프트를 무조건 수용한다(single-user). 예전엔 request-id 일치
+  // (isExpectedRandomPrompt)가 게이트라, 브로드캐스트/재연결로 도착한 '적용된' random 프롬프트가
+  // 좌측 패널에 안 떴다(RC-1). 버튼 unlock 만 아래에서 request-id 로 게이트한다(isMyRandom).
+  const isMyRandom = source === 'random' && isExpectedRandomPrompt(message);
+  // 빈 프롬프트로는 패널을 비우지 않는다(Codex LOW): 내 random 응답(isMyRandom)이 아닌 한 prompt 가
+  // 있을 때만 수용 — 남/stale random 의 빈 prompt 가 좌측 패널을 지우는 일 방지. (성공 random 은 항상
+  // prompt 보유, 실패는 random_failed 로 분기되므로 실질 빈-수용은 발생하지 않음.)
+  const acceptsRandomPrompt = source === 'random' && (!!prompt || isMyRandom);
   const acceptsGeneratedPrompt = (
     acceptsBootstrapPrompt ||
     acceptsRandomPrompt
     || isPresetSource
     || source === 'auto_generate'
     || source === 'result_reroll'
+    || source === 'storyteller'   // RC-3: 스토리텔러 자동생성 프롬프트도 좌측 패널에 반영
+    || source === 'automation'    // RC-3: 자동화 프롬프트도 좌측 패널에 반영
   );
   if (!prompt && !acceptsGeneratedPrompt) return;
   const messagePresetRequestId = String(
@@ -3057,7 +3074,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   }
   // 명시적인 prompt 생성 이벤트는 서버의 generation state가 authoritative하다.
   if (acceptsGeneratedPrompt) {
-    if (source === 'random') unlockRandomButton();
+    if (isMyRandom) unlockRandomButton();   // 내가 요청한 random 응답일 때만 버튼 unlock(브로드캐스트로 온 남/재연결분은 패널만 갱신)
     if (promptSendTimer) {
       clearTimeout(promptSendTimer);
       promptSendTimer = null;
@@ -6074,6 +6091,9 @@ function scheduleInitialStateRefresh(delayMs = 5000) {
     }
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     ws.send(JSON.stringify({type: 'get_search_state'}));
+    // 재연결 시 좌측 패널을 현재 적용 프롬프트로 강제 재동기(FIX-B/RC-2) — session 메시지가 누락/레이스
+    // 돼도 복구 보장. 백엔드가 prompt_sync{force:true} 로 응답한다.
+    ws.send(JSON.stringify({type: 'get_prompt'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'event_stream'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'storyteller'}));
     ws.send(JSON.stringify({type: 'get_module_state', module_id: 'webui_hiresfix_assist'}));
@@ -6489,6 +6509,10 @@ function downloadUnsavedHistory() {
 
 function browseSaveDirectory() {
   if (saveDirectoryPanel) saveDirectoryPanel.browse();
+}
+
+function pickSaveDirectory() {
+  if (saveDirectoryPanel) saveDirectoryPanel.pickAndApply();
 }
 
 function onSaveDirectoryToggle(checked) {

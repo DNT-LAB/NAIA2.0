@@ -67,8 +67,29 @@ class WildcardProcessor:
 
         return None
 
+    def _record_roll(self, context, key, value) -> None:
+        """위치 인식 롤 기록(Wildcard Watch 블록별 뷰/freeze용). expand_tags가 세팅한
+        위치 마커(_wc_location/_wc_slot)를 읽어 context.wildcard_rolls에 적재한다.
+        절대 raise 하지 않는다(기록 실패가 전개를 막지 않음)."""
+        try:
+            rolls = getattr(context, "wildcard_rolls", None)
+            if not isinstance(rolls, list):
+                return
+            entry = {
+                "key": str(key),
+                "value": str(value),
+                "location": getattr(context, "_wc_location", None),
+            }
+            slot = getattr(context, "_wc_slot", None)
+            if slot is not None:
+                entry["slot"] = slot
+            rolls.append(entry)
+        except Exception:
+            pass
+
     def expand_tags(self, tag_list: List[str], context: PromptContext,
-                    wildcard_sink: "list | None" = None) -> List[str]:
+                    wildcard_sink: "list | None" = None,
+                    location: "str | None" = None, slot=None) -> List[str]:
         """
         태그 리스트를 받아 리스트 내의 모든 와일드카드를 확장합니다.
         이것이 다른 모듈에서 호출할 기본 진입점(entry-point)이 됩니다.
@@ -76,7 +97,16 @@ class WildcardProcessor:
         ``wildcard_sink``가 주어지면 *와일드카드(__name__/<name>/$instant)에서 나온* 출력
         태그만 따로 수집한다(고정 태그는 제외). Ollama Boost가 prefix/postfix의 **와일드카드
         출력만** 캡처하는 용도(설정 [기능3]) — 고정 아티스트/퀄리티 태그 오염 방지.
+
+        ``location``(prefix/postfix/main/character)과 ``slot``(캐릭터 슬롯 식별자)은 이 호출에서
+        나오는 롤의 발생 위치를 context 마커에 세팅해 _record_roll이 wildcard_rolls에 기록하게 한다.
+        호출은 순차적(중첩 없음)이라 매 호출 상단에서 세팅하면 충분하다(복원 불필요).
         """
+        try:
+            context._wc_location = location
+            context._wc_slot = slot
+        except Exception:
+            pass
         expanded_list = []
         for tag in tag_list:
             is_wildcard = ('__' in tag) or ('<' in tag) or tag.strip().startswith('$')
@@ -84,6 +114,7 @@ class WildcardProcessor:
             # $ 로 시작하는 인스턴트 와일드카드 처리
             if tag.startswith('$'):
                 instant_key = tag[1:].strip()  # $ 제거
+                instant_choice = None  # Wildcard Watch 기록용: 선택된 인스턴트 값
                 # ":" 포함 여부 확인하여 필터링 적용
                 if ":" in instant_key:
                     parts = instant_key.split(":", 1)
@@ -102,6 +133,7 @@ class WildcardProcessor:
                             random_key = random.choice(list(src.keys()))
                             random_value = src[random_key]
                             produced = [t.strip() for t in random_value.split(',') if t.strip()]
+                            instant_choice = random_value
                     else:
                         produced = [tag]  # 그룹 못 찾으면 원본 유지
                 # ":" 없이 단순 그룹명인 경우
@@ -111,14 +143,24 @@ class WildcardProcessor:
                         random_key = random.choice(list(group_dict.keys()))
                         random_value = group_dict[random_key]
                         produced = [t.strip() for t in random_value.split(',') if t.strip()]
+                        instant_choice = random_value
                     else:
                         produced = [tag]
                 # tree에 없으면 기존 instant_wildcard_dict에서 검색
                 elif instant_key in self.wildcard_manager.instant_wildcard_dict:
                     instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
                     produced = [t.strip() for t in instant_value.split(',') if t.strip()]
+                    instant_choice = instant_value
                 else:
                     produced = [tag]  # 인스턴트 와일드카드 못 찾으면 원본 유지
+                # Wildcard Watch: 인스턴트 와일드카드 선택을 history에 기록(파일 와일드카드 동형).
+                # _get_wildcard_line 과 달리 $instant 는 기록 경로가 없어 누락되던 갭 보완.
+                if instant_choice is not None:
+                    try:
+                        context.wildcard_history.setdefault(instant_key, []).append(instant_choice)
+                    except Exception:
+                        pass
+                    self._record_roll(context, instant_key, instant_choice)
             else:
                 # 일반 와일드카드 처리(고정 태그는 그대로 통과)
                 produced = self._expand_recursive(tag, context)
@@ -359,4 +401,5 @@ class WildcardProcessor:
             chosen_line = random.choices([t for _, t in entries], weights=weights, k=1)[0]
 
         context.wildcard_history.setdefault(actual_wildcard_key, []).append(chosen_line)
+        self._record_roll(context, actual_wildcard_key, chosen_line)
         return chosen_line

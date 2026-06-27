@@ -2,6 +2,7 @@ import math
 import re
 import pandas as pd
 import weakref
+from collections import Counter
 from typing import Dict, Any
 from core.prompt_context import PromptContext
 from core.safe_console import safe_print
@@ -25,6 +26,178 @@ def _escape_parens_in_content(s: str) -> str:
     result = result.replace('(', '\\(').replace(')', '\\)')
     result = result.replace('\x00', '\\(').replace('\x01', '\\)')
     return result
+
+
+# =====================================================================================
+# 파이프라인 트레이스 (읽기 전용 관측)
+# -------------------------------------------------------------------------------------
+# 제거된 Dev0714 "Hooker"(코드 실행)를 대체한다. 코드를 실행하는 대신, 각 파이프라인 단계가
+# 프롬프트 태그에 무엇을 했는지(추가/제거 + 노트)만 단계별로 기록해 context.metadata['pipeline_trace']
+# 에 누적한다. add_api_result 단계에서 이미지 항목에 영속되어, 히스토리에서 이미지별로 조회된다.
+#
+# 설계 불변식(seam_observer와 동일 철학):
+#   - 절대 raise 하지 않는다 / context 를 변형하지 않는다 / 제어 흐름을 바꾸지 않는다.
+#   - JSON-safe(문자열/리스트/딕트)만 저장한다(매 PNG·메타데이터에 임베드되므로 raw bytes 금지).
+#   - 매 단계 출력 목록은 상한으로 캡한다(긴 프롬프트에서도 메모리/페이로드 바운드).
+# =====================================================================================
+
+# 트레이스 비교 대상 = 프롬프트 태그 버스(전개/포맷 결과가 보이는 곳).
+_TRACE_PROMPT_FIELDS = ("prefix_tags", "main_tags", "postfix_tags")
+_TRACE_MAX_ITEMS = 60          # added/removed 각 목록 상한
+_TRACE_MAX_TAG_LEN = 200       # 개별 태그 문자열 상한
+_TRACE_STAGE_LABELS = {
+    "pre_processing": "전처리 (pre)",
+    "resolution_fit": "해상도 맞춤",
+    "post_processing": "후처리 (post)",
+    "wildcard_expand": "와일드카드 전개",
+    "after_wildcard": "와일드카드 후",
+    "final_hookpoint": "최종 훅",
+    "final_format": "최종 포맷",
+}
+
+
+def _trace_norm_tag(tag: Any):
+    """트레이스 비교용 태그 정규화. get_all_tags()의 '\\n\\n' 부작용·'#마커'·빈값은 제외."""
+    try:
+        s = str(tag).strip()
+    except Exception:
+        return None
+    if not s or s.startswith('#') or '\n' in s:
+        return None
+    return s
+
+
+def _trace_prompt_snapshot(context: PromptContext) -> list:
+    """현재 prefix+main+postfix의 정규화된 태그 목록(순서 보존, 얕은 복사)."""
+    out: list = []
+    for field_name in _TRACE_PROMPT_FIELDS:
+        value = getattr(context, field_name, None)
+        if isinstance(value, list):
+            for tag in value:
+                norm = _trace_norm_tag(tag)
+                if norm is not None:
+                    out.append(norm)
+    return out
+
+
+def _trace_delta(before: list, after: list):
+    """multiset 델타. (added, removed) — 중복/순서 노이즈를 줄이되 순서는 대체로 보존."""
+    bc = Counter(before)
+    ac = Counter(after)
+    added = list((ac - bc).elements())
+    removed = list((bc - ac).elements())
+    return added, removed
+
+
+def _trace_cap_list(items: list):
+    """목록을 상한으로 자르고 각 항목 길이도 캡. (capped_list, overflow_count) 반환."""
+    capped = [
+        (s[:_TRACE_MAX_TAG_LEN] + '…') if len(s) > _TRACE_MAX_TAG_LEN else s
+        for s in items[:_TRACE_MAX_ITEMS]
+    ]
+    overflow = max(0, len(items) - _TRACE_MAX_ITEMS)
+    return capped, overflow
+
+
+def _trace_resolution_note(context: PromptContext) -> str:
+    try:
+        res = context.metadata.get('detected_resolution')
+        if isinstance(res, (tuple, list)) and len(res) == 2:
+            return f"{res[0]}x{res[1]}"
+    except Exception:
+        pass
+    return ""
+
+
+def _trace_wildcard_rolls(context: PromptContext) -> list:
+    """이번 생성에서 전개된 와일드카드 {from: 키, to: 마지막 선택값} 목록(JSON-safe)."""
+    rolls: list = []
+    try:
+        history = getattr(context, 'wildcard_history', None)
+        if isinstance(history, dict):
+            for key, values in history.items():
+                if values:
+                    rolls.append({
+                        "from": str(key)[:_TRACE_MAX_TAG_LEN],
+                        "to": str(values[-1])[:_TRACE_MAX_TAG_LEN],
+                    })
+                if len(rolls) >= _TRACE_MAX_ITEMS:
+                    break
+    except Exception:
+        pass
+    return rolls
+
+
+def _trace_final_note(context: PromptContext) -> str:
+    try:
+        fp = context.final_prompt or ""
+        parts = [
+            p.strip() for p in str(fp).split(',')
+            if p.strip() and not p.strip().startswith('#')
+        ]
+        return f"최종 {len(parts)}개 태그"
+    except Exception:
+        return ""
+
+
+class _PipelineTracer:
+    """파이프라인 단계별 태그 델타를 모으는 읽기 전용 관측기. 절대 예외를 밖으로 던지지 않는다."""
+
+    def __init__(self, context: PromptContext) -> None:
+        self.records: list = []
+        try:
+            self.prev = _trace_prompt_snapshot(context)
+        except Exception:
+            self.prev = []
+
+    def record(self, stage: str, context: PromptContext, note: str = "", rolls=None) -> None:
+        try:
+            after = _trace_prompt_snapshot(context)
+            added, removed = _trace_delta(self.prev, after)
+            self.prev = after
+            added_c, added_more = _trace_cap_list(added)
+            removed_c, removed_more = _trace_cap_list(removed)
+            rec = {
+                "stage": stage,
+                "label": _TRACE_STAGE_LABELS.get(stage, stage),
+                "added": added_c,
+                "removed": removed_c,
+                "changed": bool(added or removed or rolls or note),
+            }
+            if added_more:
+                rec["added_more"] = added_more
+            if removed_more:
+                rec["removed_more"] = removed_more
+            if note:
+                rec["note"] = str(note)[:_TRACE_MAX_TAG_LEN]
+            if rolls:
+                rec["rolls"] = rolls
+            self.records.append(rec)
+        except Exception:
+            pass
+
+    def record_note_only(self, stage: str, context: PromptContext, note: str = "") -> None:
+        """포맷 단계처럼 문자열 변형(이스케이프/가중치)이 델타를 오염시키는 단계용 — 노트만 기록."""
+        try:
+            # prev 스냅샷은 갱신해 두되(이후 단계 없음) added/removed는 노이즈라 생략.
+            self.prev = _trace_prompt_snapshot(context)
+            self.records.append({
+                "stage": stage,
+                "label": _TRACE_STAGE_LABELS.get(stage, stage),
+                "added": [],
+                "removed": [],
+                "note": str(note)[:_TRACE_MAX_TAG_LEN],
+                "changed": True,
+            })
+        except Exception:
+            pass
+
+    def finalize(self, context: PromptContext) -> None:
+        try:
+            if isinstance(getattr(context, "metadata", None), dict):
+                context.metadata["pipeline_trace"] = self.records
+        except Exception:
+            pass
 
 
 def _find_weighted_indices(tags: list, start: int) -> set:
@@ -131,10 +304,19 @@ def _get_random_prompt_weight_raw(app_context, settings: Dict[str, Any], *, allo
     raw = settings.get('random_prompt_weight')
     if raw is None:
         raw = settings.get('anima_weight')
-    if raw is None and allow_window_fallback and hasattr(app_context, 'main_window'):
-        mw = app_context.main_window
-        if hasattr(mw, 'anima_weight_edit'):
-            raw = mw.anima_weight_edit.text().strip() or None
+    if raw is None and allow_window_fallback:
+        # Headless: PARAMS 패널 값은 remote_params 에 산다 — 데스크톱 main_window.anima_weight_edit
+        # 의 등가물. 이게 없으면 ANIMA 모델 기본 가중치(예: 0.8)가 settings 로 전파되지 않아 랜덤
+        # 프롬프트/캐릭터 가중치 래핑이 통째로 생략되던 버그(ComfyUI/ANIMA 사용자 리포트).
+        remote_params = getattr(app_context, 'remote_params', None)
+        if isinstance(remote_params, dict):
+            candidate = remote_params.get('anima_weight') or remote_params.get('random_prompt_weight')
+            if candidate not in (None, ''):
+                raw = candidate
+        if raw is None and hasattr(app_context, 'main_window'):
+            mw = app_context.main_window
+            if hasattr(mw, 'anima_weight_edit'):
+                raw = mw.anima_weight_edit.text().strip() or None
     return raw
 
 
@@ -223,14 +405,37 @@ class PromptProcessor:
 
         # [수정] _step_1_initialize를 여기에서 호출하지 않고, 컨트롤러가 context 생성 시 초기화하도록 변경
 
+        # 읽기 전용 파이프라인 트레이스 — 각 단계가 프롬프트에 무엇을 했는지 관측만 한다(Hooker 대체).
+        tracer = _PipelineTracer(context)
+
         context = self._run_hooks('pre_processing', context)
+        tracer.record('pre_processing', context)
+
         context = self._step_2_fit_resolution(context)
+        tracer.record('resolution_fit', context, note=_trace_resolution_note(context))
+
         context = self._run_hooks('post_processing', context)
+        tracer.record('post_processing', context)
+
         context = self._step_3_expand_wildcards(context)
+        _wc_rolls = _trace_wildcard_rolls(context)
+        tracer.record(
+            'wildcard_expand', context,
+            note=(f"{len(_wc_rolls)}개 전개" if _wc_rolls else ""),
+            rolls=_wc_rolls,
+        )
+
         context = self._run_hooks('after_wildcard', context)
+        tracer.record('after_wildcard', context)
+
         context = self._run_hooks('final_hookpoint', context)
+        tracer.record('final_hookpoint', context)
+
         context.final_prompt = self._step_final_format(context)
-        
+        tracer.record_note_only('final_format', context, note=_trace_final_note(context))
+
+        tracer.finalize(context)
+
         return context
     
     def _run_hooks(self, hook_point: str, context: PromptContext) -> PromptContext:
@@ -362,11 +567,11 @@ class PromptProcessor:
         prefix_wc_sink: list[str] = []
         postfix_wc_sink: list[str] = []
         context.prefix_tags = self.wildcard_processor.expand_tags(
-            context.prefix_tags, context, wildcard_sink=prefix_wc_sink)
+            context.prefix_tags, context, wildcard_sink=prefix_wc_sink, location='prefix')
         context.prefix_tags = self._expand_preset_tokens(context.prefix_tags, context)
         context.main_tags = self._expand_preset_tokens(context.main_tags, context)
         context.postfix_tags = self.wildcard_processor.expand_tags(
-            context.postfix_tags, context, wildcard_sink=postfix_wc_sink)
+            context.postfix_tags, context, wildcard_sink=postfix_wc_sink, location='postfix')
         context.postfix_tags = self._expand_preset_tokens(context.postfix_tags, context)
         try:
             if isinstance(getattr(context, "metadata", None), dict):

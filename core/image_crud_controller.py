@@ -22,6 +22,8 @@ from datetime import datetime
 import io
 import json
 
+from core import image_classification
+
 
 class ImageCrudController:
     """이미지 파일의 생성(Create), 읽기(Read), 삭제(Delete) 작업을 관리하는 컨트롤러"""
@@ -629,215 +631,22 @@ class ImageCrudController:
     # 🆕 Phase 2: 분류 규칙 파싱 유틸리티
     # ========================================================================
 
+    # NOTE: 분류 DSL 엔진(규칙 분리/평가/폴더명 변환/괄호 매칭)은 core/image_classification.py로
+    # 추출되어 헤드리스 저장 경로와 공유된다. 이 데스크톱 컨트롤러의 아래 메서드들은 동일 동작을
+    # 유지하기 위한 얇은 위임 래퍼다(로깅이 있는 _classify_by_prompt/_apply_secondary_classification은
+    # 기존 print를 그대로 보존). 의미는 변경되지 않았다.
+
     def _split_classification_rules(self, rules_text: str) -> List[str]:
-        """
-        쉼표로 구분된 분류 규칙을 리스트로 분리합니다.
-
-        Parameters:
-            rules_text (str): "*1girl, (*solo&*1girl), (landscape|scenery)"
-
-        Returns:
-            List[str]: ["*1girl", "(*solo&*1girl)", "(landscape|scenery)"]
-        """
-        if not rules_text:
-            return []
-
-        # 쉼표로 분리하고 공백 제거
-        rules = [rule.strip() for rule in rules_text.split(',') if rule.strip()]
-        return rules
+        """쉼표로 구분된 분류 규칙을 리스트로 분리합니다(공유 엔진 위임)."""
+        return image_classification.split_rules(rules_text)
 
     def _condition_to_folder_name(self, condition_text: str) -> str:
-        """
-        조건 텍스트를 폴더명으로 변환합니다.
-
-        규칙:
-        - 괄호 () 제거
-        - & → _and_
-        - | → _or_
-        - * 제거 (퍼펙트 매칭 표시)
-        - 공백 → _ (언더스코어)
-        - 파일시스템에 안전하지 않은 문자 제거
-
-        Parameters:
-            condition_text (str): "(*solo&*1girl)" 또는 "(landscape|scenery)"
-
-        Returns:
-            str: "solo_and_1girl" 또는 "landscape_or_scenery"
-        """
-        import re
-
-        folder_name = condition_text.strip()
-
-        # 괄호 제거
-        folder_name = folder_name.replace('(', '').replace(')', '')
-
-        # 논리 연산자 치환
-        folder_name = folder_name.replace('&', '_and_')
-        folder_name = folder_name.replace('|', '_or_')
-
-        # * 제거 (퍼펙트 매칭 표시)
-        folder_name = folder_name.replace('*', '')
-
-        # 공백 → 언더스코어
-        folder_name = folder_name.replace(' ', '_')
-
-        # 파일시스템에 안전한 문자만 유지 (알파벳, 숫자, _, -)
-        folder_name = re.sub(r'[^\w_-]', '', folder_name)
-
-        # 빈 문자열 방지
-        if not folder_name:
-            folder_name = "misc"
-
-        return folder_name
+        """조건 텍스트를 폴더명으로 변환합니다(공유 엔진 위임)."""
+        return image_classification.condition_to_folder_name(condition_text)
 
     def _evaluate_classification_condition(self, condition: str, tags: List[str]) -> bool:
-        """
-        분류 조건을 평가합니다.
-
-        조건 형식:
-        - *tag: 정확 일치 (퍼펙트 매칭)
-        - (a&b): AND 연산
-        - (c|d): OR 연산
-        - 중첩 가능: ((a&b)|(c&d))
-
-        Parameters:
-            condition (str): "*1girl" 또는 "(*solo&*1girl)"
-            tags (List[str]): ["1girl", "solo", "standing"]
-
-        Returns:
-            bool: 조건 만족 여부
-        """
-        condition = condition.strip()
-
-        # 논리 연산자 포함 여부 확인
-        if '&' in condition or '|' in condition:
-            return self._evaluate_logical_expression(condition, tags)
-
-        # 단일 조건 평가
-        return self._evaluate_single_condition(condition, tags)
-
-    def _matching_paren(self, s: str, start: int) -> int:
-        """
-        시작 괄호의 짝을 찾습니다.
-
-        Parameters:
-            s (str): 문자열
-            start (int): 시작 괄호 위치
-
-        Returns:
-            int: 끝 괄호 위치, 찾지 못하면 -1
-        """
-        depth = 1
-        for i in range(start + 1, len(s)):
-            if s[i] == '(':
-                depth += 1
-            elif s[i] == ')':
-                depth -= 1
-                if depth == 0:
-                    return i
-        return -1
-
-    def _split_by_operator(self, expression: str, operator: str) -> List[str]:
-        """
-        괄호 밖의 연산자로만 분할합니다.
-
-        Parameters:
-            expression (str): "a&b&c" 또는 "a|b|c"
-            operator (str): "&" 또는 "|"
-
-        Returns:
-            List[str]: ["a", "b", "c"] 또는 [expression] (분할 안 됨)
-        """
-        parts = []
-        current = ""
-        depth = 0
-
-        for char in expression:
-            if char == '(':
-                depth += 1
-                current += char
-            elif char == ')':
-                depth -= 1
-                current += char
-            elif char == operator and depth == 0:
-                # 괄호 밖의 연산자
-                parts.append(current.strip())
-                current = ""
-            else:
-                current += char
-
-        if current.strip():
-            parts.append(current.strip())
-
-        return parts if len(parts) > 1 else [expression]
-
-    def _evaluate_logical_expression(self, expression: str, tags: List[str]) -> bool:
-        """
-        논리 표현식을 평가합니다 (AND, OR, 중첩 괄호 지원).
-
-        Parameters:
-            expression (str): "(*solo&*1girl)" 또는 "(landscape|scenery)"
-            tags (List[str]): ["1girl", "solo", "standing"]
-
-        Returns:
-            bool: 표현식 평가 결과
-        """
-        expression = expression.strip()
-
-        if not expression:
-            return True
-
-        # 최외곽 괄호 제거 (매칭되는 경우만)
-        while expression.startswith('(') and expression.endswith(')'):
-            matching_index = self._matching_paren(expression, 0)
-            if matching_index == len(expression) - 1:
-                expression = expression[1:-1].strip()
-            else:
-                break
-
-        # AND 연산자 분할 (괄호 밖에서만)
-        and_parts = self._split_by_operator(expression, '&')
-        if len(and_parts) > 1:
-            # 모든 부분이 True여야 함
-            return all(self._evaluate_logical_expression(part, tags) for part in and_parts)
-
-        # OR 연산자 분할 (괄호 밖에서만)
-        or_parts = self._split_by_operator(expression, '|')
-        if len(or_parts) > 1:
-            # 하나라도 True이면 됨
-            return any(self._evaluate_logical_expression(part, tags) for part in or_parts)
-
-        # 단일 조건 평가
-        return self._evaluate_single_condition(expression, tags)
-
-    def _evaluate_single_condition(self, condition: str, tags: List[str]) -> bool:
-        """
-        단일 조건을 평가합니다.
-
-        조건 형식:
-        - *tag: 정확 일치 (퍼펙트 매칭)
-        - tag: 포함 검사 (부분 일치)
-
-        Parameters:
-            condition (str): "*1girl" 또는 "girl"
-            tags (List[str]): ["1girl", "solo", "standing"]
-
-        Returns:
-            bool: 조건 만족 여부
-        """
-        condition = condition.strip()
-
-        if condition.startswith('*'):
-            # 퍼펙트 매칭: 정확 일치
-            tag = condition[1:].strip()
-            result = tag in tags
-            # print(f"  [DEBUG] *{tag} → {result} (tags: {tags[:5]}...)")
-            return result
-        else:
-            # 포함 검사: 부분 일치
-            result = any(condition in element for element in tags)
-            # print(f"  [DEBUG] {condition} → {result}")
-            return result
+        """분류 조건을 평가합니다(단일/논리 표현식, 공유 엔진 위임)."""
+        return image_classification.evaluate_condition(condition, tags)
 
     def _classify_by_prompt(self, classification_info: dict) -> str:
         """

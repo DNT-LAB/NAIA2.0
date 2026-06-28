@@ -10,7 +10,7 @@ import ipaddress
 from pathlib import Path
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.resolution_utils import (
@@ -309,6 +309,37 @@ class APIService:
         if isinstance(hr_negative, str) and hr_negative.strip():
             payload["hr_negative_prompt"] = hr_negative
 
+    @staticmethod
+    def _swap_comfyui_sampling_mode(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """ComfyUI 생성 자동 복구용 EPS↔ANIMA 모드 스왑.
+
+        eps → anima, anima → eps 로 ``sampling_mode``/``workflow_type`` 을 in-place
+        변경하고, 다음 ``_call_comfyui_api`` 호출이 새 모드로 워크플로우를 재빌드하도록
+        사전 빌드된 ``workflow`` 캐시를 제거한다. 모델 파일명은 바꾸지 않는다(사용자 선택
+        모델 유지 — 모드/모델 불일치 복구가 목적). v_prediction 등은 스왑 대상 아님 → None.
+        """
+        current = str(
+            params.get("sampling_mode") or params.get("comfyui_sampling_mode") or ""
+        ).strip().lower()
+        if current == "anima":
+            new_mode, new_wf = "eps", "checkpoint"
+        elif current == "eps":
+            new_mode, new_wf = "anima", "unet"
+        else:
+            # v_prediction 등은 스왑 대상 아님(요청 스펙: EPS↔ANIMA만).
+            return None
+        descriptor = {
+            "from": current,
+            "to": new_mode,
+            "from_workflow_type": params.get("workflow_type"),
+            "to_workflow_type": new_wf,
+        }
+        params["sampling_mode"] = new_mode
+        params["comfyui_sampling_mode"] = new_mode
+        params["workflow_type"] = new_wf
+        params.pop("workflow", None)  # 사전 빌드 워크플로우 무효화 → 새 모드로 재빌드
+        return descriptor
+
     def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
@@ -455,10 +486,34 @@ class APIService:
         max_retries = 3  # 5회에서 3회로 줄임
         last_exception = None
 
+        # ComfyUI 자동 모드 스왑 자격: basic(내장) eps/anima 워크플로우만(스펙: EPS↔ANIMA).
+        # custom/bypass/free 워크플로우·artist thumbnail·사전 빌드 workflow dict·v_prediction은 제외.
+        # 2회 실패 시 마지막(3회차) 시도에서 EPS↔ANIMA 전환해 모드/모델 불일치를 복구한다.
+        comfyui_swap_eligible = (
+            api_mode == "COMFYUI"
+            and not parameters.get("comfyui_workflow_has_custom")
+            and not parameters.get("artist_thumb_request")
+            and not isinstance(parameters.get("workflow"), dict)
+            and str(
+                parameters.get("sampling_mode") or parameters.get("comfyui_sampling_mode") or ""
+            ).strip().lower() in {"eps", "anima"}
+        )
+        pending_swap: Optional[Dict[str, Any]] = None
+
         result = None
         for attempt in range(1, max_retries + 1):
             if attempt > 1:
                 print(f"[RETRY] 재시도 {attempt}/{max_retries}...")
+            # 2회 실패 후 마지막 시도에서만 EPS↔ANIMA 자동 전환. 성공 시에만 result에
+            # 스왑 정보를 실어(호출부가 UI 확정 + 노란 경고 토스트 처리).
+            if comfyui_swap_eligible and attempt == max_retries and pending_swap is None:
+                pending_swap = self._swap_comfyui_sampling_mode(parameters)
+                if pending_swap:
+                    print(
+                        f"[COMFYUI-SWAP] {max_retries - 1} fail - swap mode "
+                        f"{pending_swap['from']} -> {pending_swap['to']}, retrying",
+                        flush=True,
+                    )
             try:
                 if api_mode == "NAI":
                     result = self._call_nai_api(parameters, progress_callback=progress_callback, preview_callback=preview_callback)
@@ -494,7 +549,11 @@ class APIService:
                 if result and result.get('status') == 'success' and parameters.get('cropped_image_request'):
                     print("✂️ Cropped image request enabled, extracting mask area...")
                     result = self._extract_cropped_image(result, parameters)
-                
+
+                # 자동 스왑한 3회차가 성공한 경우에만 스왑 확정 신호를 결과에 싣는다.
+                if pending_swap and isinstance(result, dict) and result.get('status') == 'success':
+                    result['naia_comfyui_mode_swap'] = pending_swap
+
                 return result
                 
             except Exception as e:

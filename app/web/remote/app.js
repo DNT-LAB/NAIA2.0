@@ -2541,6 +2541,12 @@ const wsMessageHandlers = {
   wildcard_manager: onWildcardManager,
   filter_reset: onFilterReset,
   toast: m => { showToast(m.message, m.level || 'success'); if (m.sound) playNotifySound(); if (m.sound === 'complete') flashTaskbarAttention(); },
+  comfyui_sampling_mode_swapped: m => {
+    // 백엔드 ComfyUI 자동 EPS↔ANIMA 스왑 확정 — UI sampling 플래그를 새 모드로 동기화.
+    // (경고 토스트는 별도 toast 메시지로 처리됨)
+    const sm = m.sampling_mode;
+    if (sm === 'eps' || sm === 'v_prediction' || sm === 'anima') setSamplingMode(sm);
+  },
   character_viewer_error: m => {
     if (characterViewerControl && typeof characterViewerControl.handleGenerationError === 'function') {
       characterViewerControl.handleGenerationError(m);

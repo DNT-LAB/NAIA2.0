@@ -482,6 +482,9 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             await broadcast_json(clients, context.result_store.viewer_new_image_payload(stored.item))
             for _evicted in stored.evicted_payloads:
                 await broadcast_json(clients, _evicted)
+            # ComfyUI 자동 EPS↔ANIMA 스왑이 3회차에 성공했으면 모드를 확정한다 —
+            # 프런트 UI 플래그 + 백엔드 remote_params(Auto Gen 연속 SSOT) 갱신 + 노란 경고.
+            await _commit_comfyui_mode_swap(context, clients, getattr(stored, "comfyui_mode_swap", None))
             # NAI 생성은 Anlas를 소비한다 — 완료 직후 잔량을 재조회해 pill에 즉시 반영한다
             # (future01 패리티; 5분 폴링/재연결을 기다리지 않음). NAI 모드 한정 — 다른 백엔드는
             # Anlas와 무관해 불필요한 브로드캐스트만 낸다. build_anlas_payload가 NAI+토큰일 때만
@@ -1119,6 +1122,65 @@ async def _auto_save_generated_history_item(context: WebSessionContext, item):
         return await asyncio.to_thread(context.save_history_item, item)
     except Exception as exc:
         return {"error": str(exc)}
+
+
+_COMFYUI_MODE_LABELS = {"eps": "EPS", "v_prediction": "V-Pred", "anima": "ANIMA"}
+
+
+async def _commit_comfyui_mode_swap(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    swap,
+) -> None:
+    """ComfyUI 자동 EPS↔ANIMA 스왑이 성공(3회차)했을 때만 호출된다 — 모드를 확정한다.
+
+    백엔드 ``remote_params``(Auto Gen 연속 + 이후 생성의 sampling_mode SSOT)와 프런트
+    UI 플래그를 새 모드로 동기화하고, 노란 경고 토스트로 자동 전환을 사용자에게 알린다.
+    실패한 생성에는 ``stored.comfyui_mode_swap`` 이 실리지 않으므로 호출되지 않는다
+    (= 실패 시 스왑 미확정/원복).
+    """
+    if not isinstance(swap, dict):
+        return
+    new_mode = str(swap.get("to") or "").strip().lower()
+    new_wf = str(swap.get("to_workflow_type") or "").strip().lower()
+    from_mode = str(swap.get("from") or "").strip().lower()
+    if new_mode not in {"eps", "anima"}:
+        return
+    # 백엔드 SSOT 갱신 — Auto Gen 연속/이후 생성이 확정된 모드를 쓰도록.
+    try:
+        rp = getattr(context, "remote_params", None)
+        if isinstance(rp, dict):
+            # 스테일니스 가드: 생성 중 사용자가 모드를 바꿨으면(라이브 != 원래 from) 확정을
+            # 건너뛴다 — 자동 스왑이 사용자의 라이브 선택을 덮어쓰지(stomp) 않도록.
+            live_mode = str(
+                rp.get("sampling_mode") or rp.get("comfyui_sampling_mode") or ""
+            ).strip().lower()
+            if live_mode and from_mode and live_mode != from_mode:
+                return
+            rp["sampling_mode"] = new_mode
+            rp["comfyui_sampling_mode"] = new_mode
+            if new_wf:
+                rp["workflow_type"] = new_wf
+    except Exception:
+        pass
+    # 프런트 UI 플래그 확정(setSamplingMode 경유).
+    await broadcast_json(clients, {
+        "type": "comfyui_sampling_mode_swapped",
+        "sampling_mode": new_mode,
+        "workflow_type": new_wf,
+        "from": from_mode,
+    })
+    # 노란 경고 토스트.
+    from_label = _COMFYUI_MODE_LABELS.get(from_mode, from_mode or "?")
+    to_label = _COMFYUI_MODE_LABELS.get(new_mode, new_mode)
+    await broadcast_json(clients, {
+        "type": "toast",
+        "level": "warning",
+        "message": (
+            f"ComfyUI 생성이 2회 실패해 모드를 {from_label}→{to_label}(으)로 자동 전환했습니다. "
+            f"3회차에 성공하여 모드를 {to_label}(으)로 확정합니다."
+        ),
+    })
 
 
 async def _broadcast_generation_error(

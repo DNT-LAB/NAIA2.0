@@ -8,7 +8,7 @@ import io
 from pathlib import Path
 import uuid
 import zipfile
-from typing import Any
+from typing import Any, Optional
 
 from PIL import Image
 
@@ -57,6 +57,11 @@ class HeadlessStoredResult:
     # metadata (e.g. server ran with --disable-metadata) and NAIA injected its own.
     # The caller surfaces a one-time warning toast on the first such image.
     comfyui_metadata_injected: bool = False
+    # Set when the ComfyUI generation only succeeded after an automatic EPS↔ANIMA
+    # sampling-mode swap (2 failures → 3rd attempt swapped). Shape:
+    # {from, to, from_workflow_type, to_workflow_type}. The caller commits the swap
+    # to the UI flags + remote_params and shows a yellow warning toast.
+    comfyui_mode_swap: Optional[dict[str, Any]] = None
 
 
 class HeadlessResultStore:
@@ -97,6 +102,14 @@ class HeadlessResultStore:
                 value = executed.get(key)
                 if isinstance(value, str) and value and value != params.get(key):
                     params[key] = value
+            # ComfyUI 자동 EPS↔ANIMA 스왑이 성공한 경우, 저장 메타/리플레이가 "실제 생성된
+            # 모드"를 반영하도록 스왑된 sampling_mode/workflow_type 도 실행본에서 덮어쓴다
+            # (스왑 미발생 시엔 naia_comfyui_mode_swap 부재 → 원본 모드 그대로 유지).
+            if isinstance(api_result.get("naia_comfyui_mode_swap"), dict):
+                for key in ("sampling_mode", "comfyui_sampling_mode", "workflow_type"):
+                    value = executed.get(key)
+                    if value:
+                        params[key] = value
             # NAI 캐릭터는 페이로드 빌드 시점 늦은 바인딩이라 요청 params에 없다 —
             # api_service가 기록한 실행본(_executed_*)을 메타데이터로 보존한다
             # (메타데이터 뷰어 캐릭터 슬롯 표시용). 리플레이된 request.params에 직전

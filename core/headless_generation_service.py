@@ -336,6 +336,11 @@ class HeadlessGenerationService:
         if trace_payload:
             api_result["naia_generation_trace"] = trace_payload
         stored = self.context.result_store.add_api_result(api_result, request)
+        # ComfyUI 자동 EPS↔ANIMA 스왑이 일어나 3회차에 성공한 경우, 러너가 UI 확정 +
+        # 노란 경고 토스트를 처리하도록 신호를 stored 에 싣는다(성공 시에만 존재).
+        swap = api_result.get("naia_comfyui_mode_swap")
+        if isinstance(swap, dict):
+            stored.comfyui_mode_swap = swap
         request.mark_completed()
         # ext_origin/ext_chain_depth: dispatched와 동일한 lineage를 결과 이벤트에도
         # 싣는다 — 확장이 자기 파생 요청의 "결과"를 구독해 재-enqueue하는 경로가

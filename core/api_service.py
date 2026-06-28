@@ -733,7 +733,20 @@ class APIService:
                     api_parameters["mask"] = processed_mask
                     
                     api_parameters["add_original_image"] = True
-                    api_parameters["inpaintImg2ImgStrength"] = params.get('strength', 1.0)
+                    # NAI 인페인트 강도(strength) 적용 수정: 평면 inpaintImg2ImgStrength 만으론
+                    # NAI V4/V4.5 서버가 강도를 무시해 슬라이더가 무반응이었다(사용자 제보·실증).
+                    # NAI 웹과 동일하게 parameters.img2img.strength 로도 실어야 실제 블렌딩 강도가
+                    # 적용된다. 둘 다 실어 하위호환 유지.
+                    _inpaint_strength = params.get('strength', 1.0)
+                    api_parameters["inpaintImg2ImgStrength"] = _inpaint_strength
+                    # 중첩 img2img 페이로드(+color_correct)는 V4/V4.5 인페인트에서만 실증됨.
+                    # NAID3 회귀 방지로 V4 계열에 한정한다 — V3 은 평면 inpaintImg2ImgStrength
+                    # 기존 동작을 그대로 유지(추가 파라미터/색보정 토글 미주입).
+                    if 'nai-diffusion-4' in model_name:
+                        api_parameters["img2img"] = {
+                            "strength": _inpaint_strength,
+                            "color_correct": True,
+                        }
                     api_parameters["noise"] = 0
                     api_parameters["deliberate_euler_ancestral_bug"] = False
                     api_parameters["controlnet_strength"] = 1

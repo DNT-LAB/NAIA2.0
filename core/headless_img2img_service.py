@@ -111,6 +111,65 @@ class HeadlessImg2ImgService:
             image = opened.convert("RGBA")
         return self._resize_to_1mp(image) if resize_1mp else self._normalize_source_image(image)
 
+    def _session_characters_from_sources(
+        self, params: dict[str, Any], prompt_ctx: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        """인페인트/img2img 세션 캐릭터 슬롯을 *소스 이미지의* 캐릭터로 채운다.
+
+        future01(ui/img2img_window.py set_from_history_item) 패리티 — future02 헤드리스
+        이관 때 누락돼 슬롯이 항상 비어 있던 회귀 복구. 우선순위:
+          1) prompt_context['character_prompts']               (이미지 메타 직접 저장분)
+          2) generation_params['sketchbook_character_prompts'] (소스가 img2img였던 경우)
+          3) generation_params['_executed_characters'(+_uc)]   (NAI 실행 기록 — 일반 생성 이미지)
+        세션은 항상 *특정 이미지* 에서 열리므로(외부/임포트 포함) 그 이미지의 캐릭터만 쓴다.
+        라이브 메인 UI 캐릭터로 폴백하지 않는다 — 메타 없는 외부 이미지에 무관한 활성
+        캐릭터를 silently 주입하는 의외 동작을 방지(Codex). 메타 없으면 빈 슬롯이 정상이며
+        future01 set_from_history_item 도 라이브 폴백을 하지 않았다(그건 별개의 fresh-open 경로).
+        반환 형식 = 세션/모듈스테이트가 쓰는 [{'prompt','uc','active'}].
+        """
+        def _norm(prompt, uc, active=True):
+            text = str(prompt or "").strip()
+            if not text:
+                return None
+            return {"prompt": text, "uc": str(uc or ""), "active": bool(active)}
+
+        # 1) prompt_context character_prompts
+        cps = prompt_ctx.get("character_prompts")
+        if isinstance(cps, list) and cps:
+            out = [c for c in (
+                _norm(item.get("prompt"), item.get("uc"), item.get("active", True))
+                for item in cps if isinstance(item, dict)
+            ) if c]
+            if out:
+                return out
+        # 2) sketchbook_character_prompts (dict 또는 (prompt, uc) 튜플/리스트)
+        skb = params.get("sketchbook_character_prompts")
+        if isinstance(skb, (list, tuple)) and skb:
+            out = []
+            for item in skb:
+                if isinstance(item, dict):
+                    c = _norm(item.get("prompt"), item.get("uc"), item.get("active", True))
+                elif isinstance(item, (list, tuple)) and item:
+                    c = _norm(item[0], item[1] if len(item) > 1 else "", True)
+                else:
+                    c = None
+                if c:
+                    out.append(c)
+            if out:
+                return out
+        # 3) _executed_characters / _executed_characters_uc (병렬 리스트)
+        ec = params.get("_executed_characters")
+        if isinstance(ec, list) and ec:
+            ucs = params.get("_executed_characters_uc") or []
+            out = []
+            for i, prompt in enumerate(ec):
+                c = _norm(prompt, ucs[i] if i < len(ucs) else "", True)
+                if c:
+                    out.append(c)
+            if out:
+                return out
+        return []
+
     def open_session_from_bytes(
         self,
         image_bytes: bytes,
@@ -160,7 +219,8 @@ class HeadlessImg2ImgService:
             "repeat": 1,
             "main_prompt": main_prompt,
             "negative_prompt": negative_prompt,
-            "characters": [],
+            # 캐릭터 프롬프트 슬롯을 소스 이미지/라이브 메인 UI에서 자동 채움(future01 패리티 복구).
+            "characters": self._session_characters_from_sources(params, prompt_ctx),
         }
         return self.module_state()
 

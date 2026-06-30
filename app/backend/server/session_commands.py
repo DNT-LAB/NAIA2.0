@@ -261,6 +261,20 @@ async def _handle_set_mode(
         "message": f"{context.get_api_mode()} mode active",
     })
     await broadcast_json(clients, {"type": "mode", "mode": context.get_api_mode()})
+    # 모드 전환 시 NAI 전용 모듈(Character / Character Reference / Vibe Transfer) 상태를
+    # 새 모드 기준으로 재전송한다. set_api_mode 는 api_mode 만 swap 하고 모듈 상태를 push 하지
+    # 않아, 비-NAI(ComfyUI/WEBUI)로 부팅한 뒤 NAI 로 전환하면 프론트가 부팅 시 로드한 빈
+    # 상태에 고착되던 버그를 해소한다(서비스 _ensure_loaded 가 새 모드 파일에서 로드 → payload
+    # 반영). NAI 진입 시에만 — 타 모드에선 해당 모듈이 숨김이라 불필요.
+    if context.get_api_mode() == "NAI":
+        for _nai_module_id in ("character", "character_reference", "vibe_transfer"):
+            try:
+                await broadcast_json(clients, context.module_state_payload(_nai_module_id))
+            except Exception as exc:  # noqa: BLE001 — 상태 push 실패가 모드 전환을 막지 않게
+                print(
+                    f"Remote Web: NAI module-state push failed ({_nai_module_id}): {exc}",
+                    flush=True,
+                )
     if recommended_payloads:
         for payload in recommended_payloads:
             await broadcast_json(clients, payload)

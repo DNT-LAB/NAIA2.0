@@ -272,6 +272,8 @@ class HeadlessWildcardService:
             return self.delete_file(str(value or ""))
         if key == "create_file":
             return self.create_file(str(value or ""))
+        if key == "open_folder":
+            return self.open_folder()
         if key == "preview_wildcard":
             return {
                 "type": "wildcard_manager",
@@ -292,6 +294,33 @@ class HeadlessWildcardService:
                 payload.get("n", 12),
             )
         return context._toast(f"Wildcard action is not supported in this runtime: {key}", level="info")
+
+    def open_folder(self) -> dict[str, Any]:
+        """와일드카드 폴더를 OS 파일 탐색기에서 연다(없으면 생성).
+
+        사용자가 NAIA-Portable/user-data/wildcards 경로를 몰라 와일드카드 파일을
+        배치하지 못하던 문제 해소용. vibe_transfer.open_storage_location 과 동일한
+        로컬 전용 동작(set_param 경로로만 호출)이며, base_dir() 로 포터블/개발 경로를
+        일관되게 해석한다. 프론트가 오른쪽 브라우저에서 버튼으로 호출한다."""
+        context = self.context
+        base = self.base_dir()
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            return context._toast(f"와일드카드 폴더를 만들지 못했습니다: {exc}", level="error")
+        try:
+            import subprocess
+            import sys
+
+            if os.name == "nt":
+                os.startfile(str(base))  # type: ignore[attr-defined]
+            elif sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", str(base)])
+            else:
+                subprocess.Popen(["xdg-open", str(base)])
+        except Exception as exc:
+            return context._toast(f"폴더 열기 실패: {exc}", level="error")
+        return context._toast("와일드카드 폴더를 탐색기에서 열었어요.", level="info")
 
     def base_dir(self) -> Path:
         manager = self.context.wildcard_manager

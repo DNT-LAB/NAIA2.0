@@ -1129,7 +1129,7 @@ const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=2026061
   .catch(error => {
     console.error('Failed to initialize extensions UI module', error);
   });
-const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260512-api-dialog-fallback1')
+const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260704-wc-openfolder')
   .then(({createWildcardManagerPanel}) => {
     wildcardManagerPanel = createWildcardManagerPanel({
       document,
@@ -7182,6 +7182,10 @@ function wcToggleFolder(element) {
 
 function wcOpenFile(element) {
   if (wildcardManagerPanel) wildcardManagerPanel.openFile(element);
+}
+
+function wcOpenFolder() {
+  if (wildcardManagerPanel) wildcardManagerPanel.openFolder();
 }
 
 // ---- Image upload helper ----

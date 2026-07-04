@@ -39,6 +39,12 @@ export function createWildcardManagerPanel({
     setModuleParam('wildcard', 'get_file_tree', '');
   }
 
+  // 와일드카드 폴더(user-data/wildcards)를 탐색기에서 연다. 경로를 몰라 파일을 못 넣던
+  // 이슈 해소용 — 백엔드가 base_dir 을 해석해 없으면 생성 후 OS 파일 관리자로 연다(로컬 전용).
+  function openFolder() {
+    setModuleParam('wildcard', 'open_folder', '');
+  }
+
   function renderInlineBrowser() {
     renderMode = 'inline';
     const target = getTarget();
@@ -150,7 +156,10 @@ export function createWildcardManagerPanel({
     html += '</div>';
     if (fullMode) {
       html += `<div class="mod-section" style="margin-top:10px">
-        <div class="mod-section-label">Wildcard Syntax Guide</div>
+        <div class="mod-section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span>Wildcard Syntax Guide</span>
+          <button class="mod-btn-sm" onclick="wcOpenFolder()" title="와일드카드 폴더를 탐색기에서 엽니다 (파일을 여기에 넣으세요)">📁 폴더 열기</button>
+        </div>
         <div class="wc-syntax-guide">
           <div><code>__name__</code> — Random pick from <code>name.txt</code></div>
           <div><code>__*name__</code> — Sequential (ordered)</div>
@@ -415,6 +424,7 @@ export function createWildcardManagerPanel({
 
   return {
     openBrowser,
+    openFolder,
     setSimTab,
     pickSlave,
     clearSlave,

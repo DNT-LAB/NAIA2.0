@@ -1052,6 +1052,12 @@ class APIService:
                     # Character Reference Module에서 추가된 파라미터들
                     api_parameters['controlnet_strength'] = nai_ref_data.controlnet_strength
                     api_parameters['inpaintImg2ImgStrength'] = nai_ref_data.inpaint_img2img_strength
+                    if action_type == "infill":
+                        self._mirror_nai_inpaint_img2img_strength(
+                            api_parameters,
+                            nai_ref_data.inpaint_img2img_strength,
+                            model_name=model_name,
+                        )
                     api_parameters['normalize_reference_strength_multiple'] = nai_ref_data.normalize_reference_strength_multiple
 
                     print(f"  - Director images: {len(nai_ref_data.director_reference_images)}")
@@ -1078,14 +1084,25 @@ class APIService:
                         api_parameters['controlnet_strength'] = params['controlnet_strength']
                     if 'inpaintImg2ImgStrength' in params:
                         api_parameters['inpaintImg2ImgStrength'] = params['inpaintImg2ImgStrength']
+                        if action_type == "infill":
+                            self._mirror_nai_inpaint_img2img_strength(
+                                api_parameters,
+                                params['inpaintImg2ImgStrength'],
+                                model_name=model_name,
+                            )
                     if 'normalize_reference_strength_multiple' in params:
                         api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
 
                     print(f"  - Director images: {len(params['director_reference_images'])}")
-            
+
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):
-                self._apply_custom_nai_params(api_parameters, params)
+                self._apply_custom_nai_params(
+                    api_parameters,
+                    params,
+                    model_name=model_name,
+                    action_type=action_type,
+                )
 
             # 커스텀 파라미터(use_custom_api_params)는 api_parameters를 직접 update하므로
             # 사용자 JSON에 width/height가 있으면 앞선 64배수 보정을 덮어쓸 수 있다. 이
@@ -1418,7 +1435,52 @@ class APIService:
             api_parameters["width"] = snapped_width
             api_parameters["height"] = snapped_height
 
-    def _apply_custom_nai_params(self, api_parameters: dict, params: dict) -> None:
+    @staticmethod
+    def _mirror_nai_inpaint_img2img_strength(api_parameters: dict, strength: Any, *, model_name: str = "") -> None:
+        if 'nai-diffusion-4' not in str(model_name or ''):
+            return
+        img2img = api_parameters.get("img2img")
+        if isinstance(img2img, dict):
+            img2img["strength"] = strength
+            img2img.setdefault("color_correct", True)
+        else:
+            api_parameters["img2img"] = {
+                "strength": strength,
+                "color_correct": True,
+            }
+
+    @staticmethod
+    def _reconcile_custom_nai_inpaint_img2img(
+        api_parameters: dict,
+        custom_params: dict,
+        *,
+        model_name: str = "",
+        action_type: str = "",
+    ) -> dict:
+        if action_type != "infill" or 'nai-diffusion-4' not in str(model_name or ''):
+            return custom_params
+        custom_img2img = custom_params.get("img2img")
+        if not isinstance(custom_img2img, dict):
+            return custom_params
+        merged = {}
+        existing_img2img = api_parameters.get("img2img")
+        if isinstance(existing_img2img, dict):
+            merged.update(existing_img2img)
+        merged.update(custom_img2img)
+        reconciled = dict(custom_params)
+        # For NAI V4 inpaint, nested img2img.strength is authoritative after
+        # custom JSON is applied; keep other generated/custom img2img keys.
+        reconciled["img2img"] = merged
+        return reconciled
+
+    def _apply_custom_nai_params(
+        self,
+        api_parameters: dict,
+        params: dict,
+        *,
+        model_name: str = "",
+        action_type: str = "",
+    ) -> None:
         """
         NovelAI API 전용 커스텀 파라미터를 처리하고 api_parameters에 적용합니다.
         NAI는 직접 parameters 객체를 수정하는 방식을 사용합니다.
@@ -1446,10 +1508,33 @@ class APIService:
 
         # 성공적으로 파싱된 경우 api_parameters에 업데이트
         if isinstance(custom_params, dict):
+            applied_params = self._reconcile_custom_nai_inpaint_img2img(
+                api_parameters,
+                custom_params,
+                model_name=model_name,
+                action_type=action_type,
+            )
             # NAI API parameters에 직접 병합
-            api_parameters.update(custom_params)
+            api_parameters.update(applied_params)
+            # 평면/중첩 strength 동기화 방향은 "사용자 JSON이 지정한 쪽"을 따른다:
+            # 사용자가 img2img.strength(중첩)를 줬으면 중첩이 권위 → 평면을 중첩에 맞춤.
+            # 평면 inpaintImg2ImgStrength만 줬으면 사용자 의도를 중첩으로 전파
+            # (V4 계열 인페인트 서버는 중첩만 읽으므로, 평면만 갱신하면 무시된다).
+            if action_type == "infill" and 'nai-diffusion-4' in str(model_name or ''):
+                custom_img2img = custom_params.get("img2img")
+                if (
+                    isinstance(custom_img2img, dict)
+                    and "strength" in custom_img2img
+                    and isinstance(api_parameters.get("img2img"), dict)
+                ):
+                    api_parameters["inpaintImg2ImgStrength"] = api_parameters["img2img"]["strength"]
+                elif (
+                    "inpaintImg2ImgStrength" in custom_params
+                    and isinstance(api_parameters.get("img2img"), dict)
+                ):
+                    api_parameters["img2img"]["strength"] = custom_params["inpaintImg2ImgStrength"]
             print(f"Custom NAI parameters applied: {len(custom_params)} parameters")
-            
+
             # 적용된 파라미터들을 로그에 출력 (디버깅용)
             for key, value in custom_params.items():
                 print(f"   - {key}: {value}")

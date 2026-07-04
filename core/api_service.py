@@ -63,7 +63,7 @@ class APIService:
         if runtime_paths is not None:
             return runtime_paths.save_dir / filename
         return Path("save") / filename
-    
+
     def _cleanup_http_threads(self):
         """HTTP 연결 관련 스레드 정리"""
         try:
@@ -75,7 +75,7 @@ class APIService:
                     poolmanager._default_pool = None
             except Exception:
                 pass
-            
+
             # requests 세션 정리
             try:
                 if hasattr(requests, 'sessions'):
@@ -84,7 +84,7 @@ class APIService:
                         session.close()
             except Exception:
                 pass
-            
+
             # 가비지 컬렉션
             gc.collect()
         except Exception:
@@ -362,12 +362,12 @@ class APIService:
                 processed_tag = tag.replace('\n', '').strip()
                 if processed_tag and not processed_tag.startswith('#'):
                     cleaned_tags.append(processed_tag)
-            
+
             cleaned_prompt = ', '.join(cleaned_tags)
             if original_prompt != cleaned_prompt:
                 parameters['input'] = cleaned_prompt
                 print(f"[CLEAN] APIService: 주석/개행문자 제거 후 프롬프트: '{cleaned_prompt[:100]}...'")
-        
+
         # resolution:, seed:, cfg_scale:, cfg_rescale:, sampler:, scheduler: 파라미터 처리
         if 'input' in parameters and isinstance(parameters['input'], str):
             processed_prompt = parameters['input']
@@ -523,19 +523,19 @@ class APIService:
                     result = self._call_comfyui_api(parameters, progress_callback=progress_callback)
                 else:
                     result = {'status': 'error', 'message': f"지원하지 않는 API 모드: {api_mode}"}
-                
+
                 # 🔧 FIX: API 호출 결과가 error인 경우에도 재시도하도록 수정
                 if result and result.get('status') == 'error':
                     error_msg = result.get('message', 'Unknown error')
                     print(f"[WARNING] API 오류 응답 (시도 {attempt}/{max_retries}): {error_msg}")
-                    
+
                     # HTTP 520 등 서버 오류는 재시도 가능
                     if 'HTTP 520' in error_msg or 'HTTP 502' in error_msg or 'HTTP 503' in error_msg or 'HTTP 504' in error_msg:
                         if attempt < max_retries:
                             print(f"[WAIT] 서버 오류 감지. {2 * attempt}초 후 재시도합니다...")
                             time.sleep(2 * attempt)  # 점진적으로 대기 시간 증가
                             continue
-                    
+
                     # 재시도할 수 없는 오류는 즉시 반환
                     last_exception = error_msg
                     if attempt < max_retries:
@@ -544,7 +544,7 @@ class APIService:
                     else:
                         # 마지막 시도에서도 실패하면 에러 반환
                         return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {error_msg}"}
-                
+
                 # Check if cropped_image_request is enabled
                 if result and result.get('status') == 'success' and parameters.get('cropped_image_request'):
                     print("✂️ Cropped image request enabled, extracting mask area...")
@@ -555,7 +555,7 @@ class APIService:
                     result['naia_comfyui_mode_swap'] = pending_swap
 
                 return result
-                
+
             except Exception as e:
                 print(f"[WARNING] API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
                 last_exception = e
@@ -654,7 +654,7 @@ class APIService:
                 "NAID4.0C": 'nai-diffusion-4-curated-preview',
                 "NAID3": 'nai-diffusion-3'
             }
-            
+
             # 모델 이름 가져오기 및 매핑
             model_key = params.get('model', 'NAID4.5F')
             model_name = model_mapping.get(model_key, 'nai-diffusion-4-5-full')
@@ -704,7 +704,7 @@ class APIService:
                 "legacy": False,
                 "legacy_v3_extend": False,
             }
-            
+
             # skip_cfg_above_sigma 처리 (VAR+ 파라미터에 따라)
             if params.get('VAR+', False):
                 # VAR+가 True일 때 모델에 따라 다른 값 설정
@@ -768,7 +768,7 @@ class APIService:
                 else: # img2img
                     api_parameters["strength"] = params.get('strength', 0.5)
                     api_parameters["noise"] = params.get('noise', 0.05)
-            
+
             # Reference Inset 자동 삽입 (생성 직전 문자열 매칭 가드).
             # 파이프라인 훅(modules/reference_inset_module.py)은 [랜덤/다음 프롬프트]
             # 시점에만 동작하므로, 사용자가 textbox 의 캐시 프롬프트로 바로 [생성]을
@@ -786,7 +786,7 @@ class APIService:
             if 'nai-diffusion-4' in model_name:
                 main_prompt = params.get('input', '')
                 negative_prompt = params.get('negative_prompt', '')
-                
+
                 api_parameters.update({
                     'params_version': 3,
                     'add_original_image': True,
@@ -1047,7 +1047,7 @@ class APIService:
                             print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 전용
-            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']: # 다음 모델 제외: 
+            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']: # 다음 모델 제외:
                 generation_request = params.get('_generation_request')
                 if generation_request and generation_request.nai_character_reference:
                     print("✅ [EarlyBinding] Character Reference Data from GenerationRequest")
@@ -1183,11 +1183,11 @@ class APIService:
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
-            
+
             # HTTP 스레드 정리
             self._cleanup_http_threads()
             response.raise_for_status()
-            
+
             # 이미지 처리
             image_data = self._process_nai_response(response.content)
             if image_data:
@@ -1275,9 +1275,9 @@ class APIService:
                     print(f"   - inpaint_full_res: {payload['inpaint_full_res']}")
                     print(f"   - inpaint_full_res_padding: {payload['inpaint_full_res_padding']}")
                     print(f"   - inpainting_mask_invert: {payload['inpainting_mask_invert']}")
-            
+
             self._apply_webui_hires_params(payload, params, is_img2img=is_img2img)
-            
+
             # 🔥 WEBUI 전용 custom payload(alwayson_scripts) 주입.
             # NAI 경로의 use_custom_api_params와 분리된 키라 WEBUI payload가 NAI 생성으로 새지 않는다.
             # 값은 remote_params 경유(_normalized_params 병합)라 모든 생성 경로
@@ -1286,14 +1286,14 @@ class APIService:
                 webui_custom = str(params.get('webui_custom_payload') or '').strip()
                 if webui_custom:
                     self._apply_custom_api_params(payload, {'custom_api_params': webui_custom})
-            
+
             print(f"📤 WEBUI API 요청 페이로드 요약:")
             print(f"   - 엔드포인트: {api_endpoint}")
             print(f"   - 해상도: {payload['width']}x{payload['height']}")
             print(f"   - 커스텀 스크립트: {len(payload.get('alwayson_scripts', {}))}개")
-            
+
             self.app_context.store_api_payload(payload, "WEBUI")
-            
+
             headers = {"Content-Type": "application/json"}
             # HTTP 세션을 사용하여 연결 정리
             with requests.Session() as session:
@@ -1304,18 +1304,18 @@ class APIService:
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
-            
+
             # HTTP 스레드 정리
             self._cleanup_http_threads()
             response.raise_for_status()
-            
+
             result = response.json()
-            
+
             if 'images' in result and len(result['images']) > 0:
                 image_b64 = result['images'][0]
                 image_data = base64.b64decode(image_b64)
                 image = Image.open(io.BytesIO(image_data))
-                
+
                 info_text = result.get('info', '')
                 # forge-neo / some forks return an empty or unreadable `info`, which would
                 # leave the saved PNG with no metadata at all. If forge gives us nothing
@@ -1342,7 +1342,7 @@ class APIService:
                 }
             else:
                 raise Exception("응답에서 이미지를 찾을 수 없습니다.")
-        
+
         except Exception as e:
             print(f"❌ WEBUI API 호출 중 예외 발생: {e}")
             return {'status': 'error', 'message': str(e)}
@@ -1414,10 +1414,10 @@ class APIService:
         def fix_args_array(match):
             # "args": [ 와 ] 사이의 모든 내용을 가져옴
             content = match.group(1)
-            
+
             # content 내부에서 "숫자": 패턴을 모두 제거
             content_fixed = re.sub(r'"\d+"\s*:\s*', '', content)
-            
+
             # "args": [ 와 수정된 내용을 다시 합쳐서 반환
             return f'"args": [{content_fixed}]'
 
@@ -1433,7 +1433,7 @@ class APIService:
         corrected = re.sub(r'{\s*,', '{', corrected)
         # 예: "key": value, } -> "key": value }
         corrected = re.sub(r',(\s*[}\]])', r'\1', corrected)
-        
+
         return corrected
 
     def _snap_nai_api_parameters_resolution(self, api_parameters: dict) -> None:
@@ -1668,19 +1668,19 @@ class APIService:
             comfyui_url = params.get('credential')
             if not comfyui_url:
                 raise ValueError("ComfyUI 서버 URL이 제공되지 않았습니다.")
-            
+
             # URL 정규화 (http:// 프로토콜 추가)
             if not comfyui_url.startswith("http"):
                 comfyui_url = f"http://{comfyui_url}"
-            
+
             # 2. ComfyUI 서비스 초기화
             if not self.comfyui_service or self.comfyui_service.server_url != comfyui_url:
                 self.comfyui_service = ComfyUIService(comfyui_url)
-            
+
             # 3. 연결 테스트
             if not self.comfyui_service.test_connection():
                 raise Exception("ComfyUI 서버에 연결할 수 없습니다.")
-            
+
             # 4. 워크플로우 생성
             workflow = params.get('workflow')
             if not isinstance(workflow, dict):
@@ -1745,7 +1745,7 @@ class APIService:
                 extra_pnginfo=extra_pnginfo,
                 preferred_output_node_id=params.get("_comfyui_output_node_id"),
             )
-            
+
             if result and result['status'] == 'success':
                 print(f"✅ ComfyUI 이미지 생성 완료: {result['filename']}")
                 # 빌드한 API 워크플로우를 결과에 노출한다 — 저장 단계(add_api_result)의
@@ -1760,7 +1760,7 @@ class APIService:
             else:
                 error_msg = result.get('message', '알 수 없는 오류') if result else 'API 호출 실패'
                 raise Exception(error_msg)
-                
+
         except Exception as e:
             print(f"❌ ComfyUI API 호출 중 예외 발생: {e}")
             return {'status': 'error', 'message': str(e)}
@@ -1892,33 +1892,33 @@ class APIService:
             traceback.print_exc()
             # 폴백: 원본 데이터를 그대로 base64 인코딩
             return base64.b64encode(mask_bytes).decode()
-    
+
     def _extract_cropped_image(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Extract only the mask area from the generated image.
         Returns the cropped image without EXIF data.
-        
+
         Args:
             result: Generation result with image bytes
             parameters: Original generation parameters including full_mask_pil
-            
+
         Returns:
             Modified result with cropped image
         """
         try:
             print("✂️ Starting cropped image extraction...")
-            
+
             # 1. Get the generated image
             generated_image = result.get('image')
             if not generated_image:
                 print("   ⚠️ No generated image found, returning original result")
                 return result
-            
+
             # 2. Get the mask
             mask_image = parameters.get('full_mask_pil')
             if mask_image:
                 print(f"   ℹ️ Using provided mask: {mask_image.size}")
-                
+
                 # Ensure mask is in grayscale mode
                 if mask_image.mode != 'L':
                     mask_image = mask_image.convert('L')
@@ -1926,11 +1926,11 @@ class APIService:
                 if mask_image.size != generated_image.size:
                     print(f"   ℹ️ Resizing mask from {mask_image.size} to {generated_image.size}")
                     mask_image = mask_image.resize(generated_image.size, Image.NEAREST)
-                
+
                 # Find bounding box of the mask (white areas)
                 mask_array = np.array(mask_image)
                 white_pixels = np.where(mask_array > 127)
-                
+
                 if len(white_pixels[0]) > 0:
                     # Get bounding box of the masked area
                     y_min, y_max = white_pixels[0].min(), white_pixels[0].max()
@@ -1989,9 +1989,9 @@ class APIService:
                     print("   ⚠️ No mask area found, returning original image")
             else:
                 print("   ⚠️ No mask provided, returning original image")
-            
+
             return result
-            
+
         except Exception as e:
             print(f"❌ Cropped image extraction failed: {e}")
             import traceback
@@ -2423,7 +2423,7 @@ class APIService:
             import traceback
             traceback.print_exc()
             return {'status': 'error', 'message': f'Auto-outpainting 실패: {e}'}
-    
+
     def upscale_NAI(self, pixmap: Any, token: str = None, raw_bytes: bytes = None) -> Dict[str, Any]:
         """
         NovelAI Upscale API를 사용하여 이미지를 2배 업스케일합니다.
@@ -2438,7 +2438,7 @@ class APIService:
             Dict with 'status', 'image' (PIL Image), 'raw_bytes', and 'message'
         """
         import zipfile
-        
+
         try:
             # 토큰 가져오기
             if not token:
@@ -2448,7 +2448,7 @@ class APIService:
                         'status': 'error',
                         'message': 'NAI 토큰이 설정되지 않았습니다.'
                     }
-            
+
             # Base64 인코딩 (raw_bytes 우선, 없으면 PIL Image만 지원)
             if raw_bytes:
                 image_bytes = raw_bytes
@@ -2462,7 +2462,7 @@ class APIService:
                     'message': 'Upscale requires raw image bytes or a PIL image.'
                 }
             img_base64 = base64.b64encode(image_bytes).decode()
-            
+
             # 원본 이미지 크기
             width_attr = getattr(pixmap, "width", None)
             height_attr = getattr(pixmap, "height", None)
@@ -2471,7 +2471,7 @@ class APIService:
             if not width or not height:
                 with Image.open(io.BytesIO(image_bytes)) as source_image:
                     width, height = source_image.size
-            
+
             # API 요청 데이터
             data = {
                 "image": img_base64,
@@ -2479,7 +2479,7 @@ class APIService:
                 "height": height,
                 "scale": 2  # 2배 업스케일
             }
-            
+
             # API 호출
             print(f"🔍 NAI Upscale API 호출 중... (원본: {width}x{height})")
             # HTTP 세션을 사용하여 연결 정리
@@ -2496,10 +2496,10 @@ class APIService:
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
-            
+
             # HTTP 스레드 정리
             self._cleanup_http_threads()
-            
+
             if response.status_code != 200:
                 error_msg = f"API 에러 (코드: {response.status_code})"
                 try:
@@ -2511,7 +2511,7 @@ class APIService:
                     'status': 'error',
                     'message': error_msg
                 }
-            
+
             # 응답이 ZIP 파일 형식
             try:
                 zipped = zipfile.ZipFile(io.BytesIO(response.content))
@@ -2520,13 +2520,13 @@ class APIService:
                         'status': 'error',
                         'message': '업스케일 결과가 비어있습니다.'
                     }
-                
+
                 # 첫 번째 이미지 추출
                 file_info = zipped.infolist()[0]
                 image_bytes = zipped.read(file_info)
-                
+
                 upscaled_image = self._image_result_from_bytes(image_bytes)
-                
+
                 if upscaled_image is None:
                     return {
                         'status': 'error',
@@ -2537,7 +2537,7 @@ class APIService:
                 upscaled_height_attr = getattr(upscaled_image, "height", None)
                 upscaled_width = upscaled_width_attr() if callable(upscaled_width_attr) else upscaled_width_attr
                 upscaled_height = upscaled_height_attr() if callable(upscaled_height_attr) else upscaled_height_attr
-                
+
                 print(f"✅ 업스케일 성공: {upscaled_width}x{upscaled_height}")
 
                 return {
@@ -2546,13 +2546,13 @@ class APIService:
                     'raw_bytes': image_bytes,
                     'message': f'이미지가 {upscaled_width}x{upscaled_height}로 업스케일되었습니다.'
                 }
-                
+
             except zipfile.BadZipFile:
                 return {
                     'status': 'error',
                     'message': '업스케일 응답 형식이 올바르지 않습니다.'
                 }
-                
+
         except requests.exceptions.Timeout:
             return {
                 'status': 'error',
@@ -2598,10 +2598,10 @@ class APIService:
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
-            
+
             # HTTP 스레드 정리
             self._cleanup_http_threads()
-            
+
             if response.status_code == 200:
                 data = response.json()
                 training_steps = data.get('trainingStepsLeft', {})
@@ -2609,28 +2609,28 @@ class APIService:
                 purchased_steps = int(training_steps.get('purchasedTrainingSteps', 0))
                 anlas = fixed_steps + purchased_steps
                 return anlas
-            
+
         except Exception as e:
             print(f"⚠️ Anlas 조회 실패: {e}")
-        
+
         return None
-    
+
     def nai_bg_removal_pil(self, pil_image: Image.Image, save_counter: int, token: str = None) -> Dict[str, Any]:
         """
         NovelAI BG-Removal API를 사용하여 이미지 배경을 제거합니다 (PIL Image 버전).
-        
+
         Args:
             pil_image: PIL Image 형식의 이미지
             save_counter: 저장 카운터
             token: NAI 토큰 (선택적, 제공되지 않으면 context에서 가져옴)
-        
+
         Returns:
             Dict with 'status', 'selected_image' (3rd image as PIL Image), and 'message'
         """
         import zipfile
         import io
         import base64
-        
+
         try:
             # 토큰 가져오기
             if not token:
@@ -2640,18 +2640,18 @@ class APIService:
                         'status': 'error',
                         'message': 'NAI 토큰이 설정되지 않았습니다.'
                     }
-            
+
             # PIL Image를 bytes로 변환
             img_buffer = io.BytesIO()
             pil_image.save(img_buffer, format="PNG")
             image_bytes = img_buffer.getvalue()
-            
+
             # Base64 인코딩
             img_base64 = base64.b64encode(image_bytes).decode()
-            
+
             # 원본 이미지 크기
             width, height = pil_image.size
-            
+
             # API 요청 데이터
             data = {
                 "image": img_base64,
@@ -2659,7 +2659,7 @@ class APIService:
                 "height": height,
                 "req_type": "bg-removal"
             }
-            
+
             # API 호출
             # HTTP 세션을 사용하여 연결 정리
             with requests.Session() as session:
@@ -2675,10 +2675,10 @@ class APIService:
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
-            
+
             # HTTP 스레드 정리
             self._cleanup_http_threads()
-            
+
             if response.status_code != 200:
                 error_msg = f"API 에러 (코드: {response.status_code})"
                 try:
@@ -2690,31 +2690,31 @@ class APIService:
                     'status': 'error',
                     'message': error_msg
                 }
-            
+
             # 응답이 ZIP 파일 형식으로 3개 이미지 포함
             try:
                 zipped = zipfile.ZipFile(io.BytesIO(response.content))
                 file_list = zipped.namelist()
-                
+
                 if not file_list:
                     return {
                         'status': 'error',
                         'message': '배경 제거 결과가 비어있습니다.'
                     }
-                
+
                 # bg_removal 폴더 생성
                 save_path = self.app_context.session_save_path / "bg_removal"
                 save_path.mkdir(parents=True, exist_ok=True)
-                
+
                 # 모든 이미지 추출 및 저장
                 images = []
                 image_bytes_list = []
                 suffixes = ["_masked", "_generated", "_blend"]
-                
+
                 for idx, file_info in enumerate(zipped.infolist()):
                     img_bytes = zipped.read(file_info)
                     image_bytes_list.append(img_bytes)
-                    
+
                     image_obj = self._image_result_from_bytes(img_bytes)
                     if image_obj is not None:
                         images.append(image_obj)
@@ -2722,7 +2722,7 @@ class APIService:
                             filename = f"{save_counter:05d}{suffixes[idx]}.png"
                             filepath = save_path / filename
                             filepath.write_bytes(img_bytes)
-                
+
                 # 3번째 이미지 선택 (인덱스 2)
                 selected_image = None
                 selected_bytes = None
@@ -2733,26 +2733,26 @@ class APIService:
                     # 3개 미만인 경우 마지막 이미지 선택
                     selected_image = images[-1]
                     selected_bytes = image_bytes_list[-1]
-                
+
                 if not selected_image:
                     return {
                         'status': 'error',
                         'message': '배경 제거된 이미지를 로드할 수 없습니다.'
                     }
-                
+
                 return {
                     'status': 'success',
                     'selected_image': selected_image,  # 선택된 3번째 이미지
                     'raw_bytes': selected_bytes,  # 선택된 이미지의 원본 바이트
                     'message': f'배경 제거 완료: {len(images)}개 이미지 생성'
                 }
-                
+
             except zipfile.BadZipFile:
                 return {
                     'status': 'error',
                     'message': '배경 제거 응답 형식이 올바르지 않습니다.'
                 }
-                
+
         except requests.exceptions.Timeout:
             return {
                 'status': 'error',
@@ -2768,16 +2768,16 @@ class APIService:
                 'status': 'error',
                 'message': f'배경 제거 중 오류 발생: {str(e)}'
             }
-    
+
     def upscale_NAI_from_inpaint(self, pil_image: Image.Image, target_width: int, target_height: int) -> Dict[str, Any]:
         """
         Inpaint 패널에서 PIL 이미지를 업스케일하고 원본 크기로 리사이징합니다.
-        
+
         Args:
             pil_image: 업스케일할 PIL 이미지
             target_width: 최종 리사이징할 너비
             target_height: 최종 리사이징할 높이
-        
+
         Returns:
             Dict with 'status', 'image' (PIL Image), and 'message'
         """
@@ -2786,7 +2786,7 @@ class APIService:
             buffered = io.BytesIO()
             pil_image.save(buffered, format="PNG")
             image_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-            
+
             # 2. NAI 토큰 가져오기
             token = self.app_context.secure_token_manager.get_token('nai_token')
             if not token:
@@ -2794,13 +2794,13 @@ class APIService:
                     'status': 'error',
                     'message': 'NAI 토큰이 없습니다.'
                 }
-            
+
             # 3. NAI Upscale API 호출
             # 디버깅: 원본 이미지 크기 확인
             print(f"🔍 DEBUG - Original image size: {pil_image.width}x{pil_image.height}")
             print(f"🔍 DEBUG - Target upscale size: {pil_image.width * 2}x{pil_image.height * 2}")
             print(f"🔍 DEBUG - Base64 string length: {len(image_base64)}")
-            
+
             # NAI API는 width/height가 아닌 원본 크기를 받고 scale로 배수를 결정
             data = {
                 "image": image_base64,
@@ -2808,13 +2808,13 @@ class APIService:
                 "height": pil_image.height,  # 원본 높이
                 "scale": 2  # 2배 업스케일 (scale 4는 4배를 의미)
             }
-            
+
             # 디버깅: 요청 데이터 확인
             print(f"🔍 DEBUG - Request data keys: {data.keys()}")
             print(f"🔍 DEBUG - Width: {data['width']}, Height: {data['height']}, Scale: {data['scale']}")
             print(f"🔍 DEBUG - Token exists: {bool(token)}")
             print(f"🔍 DEBUG - Token length: {len(token) if token else 0}")
-            
+
             # HTTP 세션을 사용하여 연결 정리
             with requests.Session() as session:
                 response = session.post(
@@ -2829,20 +2829,20 @@ class APIService:
                     for adapter in session.adapters.values():
                         if hasattr(adapter, 'poolmanager') and adapter.poolmanager:
                             adapter.poolmanager.clear()
-            
+
             # HTTP 스레드 정리
             self._cleanup_http_threads()
-            
+
             # 디버깅: 응답 상세 정보
             print(f"🔍 DEBUG - Response status code: {response.status_code}")
             print(f"🔍 DEBUG - Response headers: {dict(response.headers)}")
-            
+
             if response.status_code != 200:
                 # 디버깅: 에러 응답 내용 확인
                 try:
                     error_content = response.text
                     print(f"🔍 DEBUG - Error response content: {error_content}")
-                    
+
                     # JSON 응답인 경우 파싱 시도
                     try:
                         error_json = response.json()
@@ -2851,37 +2851,37 @@ class APIService:
                         pass
                 except:
                     print(f"🔍 DEBUG - Could not read error response")
-                
+
                 return {
                     'status': 'error',
                     'message': f'API 오류: {response.status_code}\n응답: {response.text[:500] if response.text else "No response text"}'
                 }
-            
+
             # 4. 응답 처리 (ZIP 파일)
             zip_data = io.BytesIO(response.content)
             with zipfile.ZipFile(zip_data, 'r') as zip_file:
                 image_data = zip_file.read(zip_file.namelist()[0])
-            
+
             # 5. 업스케일된 이미지를 PIL로 변환
             upscaled_image = Image.open(io.BytesIO(image_data))
-            
+
             # 6. 원본 크기로 리사이징 (LANCZOS)
             resized_image = upscaled_image.resize(
                 (target_width, target_height),
                 Image.Resampling.LANCZOS
             )
-            
+
             print(f"✅ 업스케일 완료: {pil_image.width}x{pil_image.height} → "
                   f"{upscaled_image.width}x{upscaled_image.height} → "
                   f"{resized_image.width}x{resized_image.height}")
-            
+
             return {
                 'status': 'success',
                 'image': resized_image,
                 'raw_bytes': image_data,
                 'message': '업스케일 성공'
             }
-            
+
         except requests.exceptions.Timeout:
             return {
                 'status': 'error',

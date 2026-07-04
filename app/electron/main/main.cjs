@@ -1,7 +1,7 @@
 "use strict";
 
 const { app, BrowserWindow, WebContentsView, dialog, ipcMain, Menu, session, shell } = require("electron");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -58,11 +58,25 @@ const UPDATE_DIR_NAME = ".updates";
 // install (everything except the preserved user-data folder) into backup/ and
 // the staged build into place, rolling back on failure, and relaunches.
 // NOTE: kept free of ${...} and backticks so it survives the JS template literal.
+// 업데이트 스왑 헬퍼. 2.0.29 업데이트 사고(여러 PC에서 설치 파손) 이후 하드닝:
+//  1) swap 전 잠금 선검사(Find-LockedItem, rename 왕복 = 비파괴 원자 연산) — ollama serve /
+//     cloudflared 처럼 naia-backend 를 CWD 로 상속한 상주 자식이 폴더를 잠근 채 남아 있으면
+//     설치를 건드리지 않고 중단(marker 기록) 후 기존 버전을 재실행한다.
+//  2) 실패 복원을 Copy 기반 전체 복원(Restore-FromBackup)으로 교체 — 기존 롤백은 실패한
+//     항목이 moved 목록에 등록되기 전이라 복원 대상에서 빠졌고, Move-Item 의 재귀 이동이
+//     resources 알맹이를 backup 으로 옮긴 뒤라 설치가 반파된 채 남았다(재현 실증).
+//     Copy 는 잠긴 디렉터리 안으로도 파일을 되돌릴 수 있고 backup 은 수동 복구용으로 남긴다.
+//  3) 실패 사유를 markerPath 에 기록 — 재실행된 앱이 시작 시 읽어 사용자에게 표면화한다.
+// (PS1 내부 주석은 인코딩 안전을 위해 ASCII/영문만 사용 — powershell 5.1 이 BOM 없는
+//  UTF-8 스크립트를 ANSI 로 읽는 환경이 있다.)
 const APPLY_SCRIPT_PS1 = `param([string]$ConfigPath)
 $ErrorActionPreference = 'Stop'
 $cfg = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
 function Write-ApplyLog($m) {
   try { "$([DateTime]::Now.ToString('s')) $m" | Out-File -LiteralPath $cfg.logPath -Append -Encoding utf8 } catch {}
+}
+function Write-ApplyMarker($m) {
+  try { if ($cfg.markerPath) { $m | Out-File -LiteralPath $cfg.markerPath -Encoding utf8 } } catch {}
 }
 function Move-WithRetry($src, $dest) {
   for ($r = 0; $r -lt 6; $r++) {
@@ -77,6 +91,40 @@ function Remove-WithRetry($target) {
     if (-not (Test-Path -LiteralPath $target)) { return }
   }
 }
+function Find-LockedItem($root, $preserve) {
+  # Pre-swap lock probe: rename each top-level item back and forth. Rename is an
+  # atomic non-destructive operation; a resident child process that inherited its
+  # CWD from the backend (ollama serve / cloudflared) makes it fail cleanly here
+  # instead of half-destroying the install mid-swap.
+  foreach ($item in Get-ChildItem -LiteralPath $root -Force) {
+    if ($preserve -contains $item.Name) { continue }
+    $probeName = $item.Name + '.__swap_probe__'
+    $probePath = Join-Path $root $probeName
+    try {
+      Rename-Item -LiteralPath $item.FullName -NewName $probeName -Force
+    } catch { return $item.FullName }
+    for ($r = 0; $r -lt 10; $r++) {
+      try { Rename-Item -LiteralPath $probePath -NewName $item.Name -Force; $probePath = ''; break } catch { Start-Sleep -Milliseconds 300 }
+    }
+    if ($probePath) { return $item.FullName }
+  }
+  return $null
+}
+function Restore-FromBackup($backupRoot, $installRoot) {
+  # Copy (not move) everything back so files can be restored even into a locked
+  # directory, and the backup stays behind for manual recovery.
+  foreach ($item in Get-ChildItem -LiteralPath $backupRoot -Force) {
+    $dest = Join-Path $installRoot $item.Name
+    try {
+      if ($item.PSIsContainer) {
+        if (-not (Test-Path -LiteralPath $dest)) { New-Item -ItemType Directory -Path $dest -Force | Out-Null }
+        Copy-Item -Path (Join-Path $item.FullName '*') -Destination $dest -Recurse -Force
+      } else {
+        Copy-Item -LiteralPath $item.FullName -Destination $dest -Force
+      }
+    } catch { Write-ApplyLog "restore FAILED for $($item.Name): $_" }
+  }
+}
 Write-ApplyLog "apply start pid=$($cfg.pid) install=$($cfg.installRoot)"
 for ($i = 0; $i -lt 240; $i++) {
   $proc = Get-Process -Id $cfg.pid -ErrorAction SilentlyContinue
@@ -85,14 +133,25 @@ for ($i = 0; $i -lt 240; $i++) {
 }
 Start-Sleep -Milliseconds 1000
 $preserve = @($cfg.preserve)
+$locked = $null
+for ($i = 0; $i -lt 20; $i++) {
+  $locked = Find-LockedItem $cfg.installRoot $preserve
+  if (-not $locked) { break }
+  Start-Sleep -Milliseconds 1000
+}
+if ($locked) {
+  Write-ApplyLog "swap ABORTED (locked): $locked"
+  Write-ApplyMarker "LOCKED: $locked"
+  try { Start-Process -FilePath $cfg.exePath } catch { Write-ApplyLog "relaunch FAILED: $_" }
+  Write-ApplyLog "apply end (aborted, install untouched)"
+  exit 0
+}
 if (Test-Path -LiteralPath $cfg.backupRoot) { Remove-Item -LiteralPath $cfg.backupRoot -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Path $cfg.backupRoot -Force | Out-Null
-$moved = New-Object System.Collections.ArrayList
 try {
   Get-ChildItem -LiteralPath $cfg.installRoot -Force | ForEach-Object {
     if ($preserve -contains $_.Name) { return }
     Move-WithRetry $_.FullName (Join-Path $cfg.backupRoot $_.Name)
-    [void]$moved.Add($_.Name)
   }
   Get-ChildItem -LiteralPath $cfg.stagedRoot -Force | ForEach-Object {
     if ($preserve -contains $_.Name) { return }
@@ -100,14 +159,10 @@ try {
   }
   Write-ApplyLog "swap ok"
 } catch {
-  Write-ApplyLog "swap FAILED: $_ rolling back"
-  foreach ($name in $moved) {
-    $cur = Join-Path $cfg.installRoot $name
-    if (Test-Path -LiteralPath $cur) { Remove-Item -LiteralPath $cur -Recurse -Force -ErrorAction SilentlyContinue }
-    $bak = Join-Path $cfg.backupRoot $name
-    if (Test-Path -LiteralPath $bak) { Move-Item -LiteralPath $bak -Destination $cur -Force -ErrorAction SilentlyContinue }
-  }
-  Write-ApplyLog "rollback done"
+  Write-ApplyLog "swap FAILED: $_ restoring from backup"
+  Restore-FromBackup $cfg.backupRoot $cfg.installRoot
+  Write-ApplyMarker "SWAP_FAILED: $_"
+  Write-ApplyLog "restore done (backup kept at $($cfg.backupRoot))"
 }
 foreach ($d in @($cfg.cleanupDirs)) {
   try { Remove-WithRetry $d; Write-ApplyLog "cleaned $d" } catch { Write-ApplyLog "cleanup FAILED $d : $_" }
@@ -1288,6 +1343,29 @@ async function downloadUpdate() {
   return updateDownloadPromise;
 }
 
+// 직전 자동 업데이트 스왑이 중단/실패했으면(marker 존재) 사용자에게 표면화한다.
+// 스왑 헬퍼는 별도 프로세스라 앱이 죽은 뒤 실패하고, 재실행된 앱만 이를 알릴 수 있다.
+function surfaceLastApplyError() {
+  try {
+    const marker = path.join(updatesRoot(), "last_apply_error.txt");
+    if (!fs.existsSync(marker)) {
+      return;
+    }
+    const raw = fs.readFileSync(marker, "utf8").trim();
+    fs.rmSync(marker, { force: true });
+    if (!raw) {
+      return;
+    }
+    appendBackendLog("shell", `Previous update apply did not complete: ${raw}`);
+    const friendly = raw.startsWith("LOCKED:")
+      ? `업데이트를 적용하지 못했습니다 — 설치 폴더를 다른 프로세스가 사용 중이었습니다 (${raw.slice(7).trim()}). Ollama/Cloudflared 등을 종료한 뒤 다시 시도하거나, 릴리스 페이지에서 새로 받아 설치하세요.`
+      : `업데이트 적용 중 오류가 발생해 이전 버전으로 복원했습니다 (${raw}). 다시 시도하거나 릴리스 페이지에서 새로 받아 설치하세요.`;
+    setUpdateState({ phase: "error", error: friendly });
+  } catch (_e) {
+    // 표면화 실패는 앱 기동을 막지 않는다
+  }
+}
+
 function buildApplyConfig() {
   const root = updatesRoot();
   const installRoot = path.dirname(app.getPath("exe"));
@@ -1307,6 +1385,8 @@ function buildApplyConfig() {
     preserve,
     cleanupDirs: [path.join(root, "staging"), path.join(root, "download")],
     logPath: path.join(root, "apply.log"),
+    // 스왑 헬퍼가 중단/실패 사유를 남기는 파일 — 재실행된 앱이 시작 시 읽어 표면화.
+    markerPath: path.join(root, "last_apply_error.txt"),
   };
 }
 
@@ -1589,6 +1669,22 @@ function stopBackend() {
   }
   backendState = "stopping";
   broadcastShellState();
+  // Windows: 백엔드 python 이 낳은 상주 자식(ollama serve / cloudflared)까지 트리째 종료.
+  // kill() 은 본체만 죽여서, cwd 를 상속한 자식이 resources/naia-backend 를 계속 잠근 채
+  // 남아 자동 업데이트 스왑을 실패시키고 설치를 파손시켰다(2.0.29 업데이트 사고 —
+  // apply.log 'being used by another process'). 외부에서 사용자가 직접 켠 프로세스는
+  // 이 트리에 속하지 않으므로 건드리지 않는다.
+  if (process.platform === "win32" && backendProcess.pid) {
+    try {
+      spawnSync("taskkill", ["/PID", String(backendProcess.pid), "/T", "/F"], {
+        windowsHide: true,
+        timeout: 10000,
+      });
+      return;
+    } catch (_e) {
+      // taskkill 실패 시 기존 동작으로 폴백
+    }
+  }
   backendProcess.kill();
 }
 
@@ -2668,6 +2764,7 @@ if (!lock) {
   app.whenReady().then(async () => {
     configureApplicationMenu();
     configureDownloads();
+    surfaceLastApplyError();
     // Resolve the Grok proxy port first so the backend env carries it (multi-instance).
     await resolveGrokProxyPort();
     createMainWindow();

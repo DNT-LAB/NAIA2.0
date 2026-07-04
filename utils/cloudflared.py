@@ -146,11 +146,15 @@ def start_tunnel(
     if on_progress:
         on_progress("Cloudflared 터널 연결 중...")
 
+    # cwd 를 사용자 홈으로 격리 — cwd 미지정 시 백엔드의 CWD(resources/naia-backend)를
+    # 상속하는데, 터널은 상주 프로세스라 NAIA 종료 후에도 그 폴더를 잠가 자동 업데이트
+    # 스왑을 실패시키고 설치를 파손시켰다(2.0.29 업데이트 사고). cwd 의존성 없음.
     proc = subprocess.Popen(
         [str(exe), "tunnel", "--url", f"http://127.0.0.1:{port}"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         encoding="utf-8",
+        cwd=str(Path.home()),
     )
 
     tunnel_url = metrics_url = ""

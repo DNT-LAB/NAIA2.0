@@ -354,12 +354,18 @@ class OllamaAssistantService:
         return requests.post(f"{self.base_url}{path}", json=payload, timeout=timeout)
 
     def _default_server_spawner(self) -> Any:
-        """``ollama serve``를 창 없이 분리 실행 (Dev0714 start_server 동일)."""
+        """``ollama serve``를 창 없이 분리 실행 (Dev0714 start_server 동일).
+
+        cwd 를 사용자 홈으로 격리한다 — cwd 미지정 시 백엔드의 CWD(resources/naia-backend)를
+        상속하는데, ollama serve 는 NAIA 가 종료된 뒤에도 상주하므로 그 폴더를 계속 잠가
+        자동 업데이트 스왑을 실패시키고 설치를 파손시켰다(2.0.29 업데이트 사고, apply.log
+        'being used by another process'). ollama 는 cwd 에 의존하지 않는다."""
         return subprocess.Popen(
             ["ollama", "serve"],
             creationflags=_no_window_flags(),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            cwd=os.path.expanduser("~"),
         )
 
     # ------------------------------------------------------------------

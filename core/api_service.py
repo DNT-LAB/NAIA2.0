@@ -721,17 +721,31 @@ class APIService:
                 # VAR+가 False일 때는 null (Python에서는 None이지만 JSON 전송 시 제외됨)
                 api_parameters["skip_cfg_above_sigma"] = None
 
+            # NAID3 전용 SMEA/DYN 복원(사용자 버그 리포트): 2.0 페이로드가 V4.5 기준으로
+            # 작성되어 V3 의 sm/sm_dyn 이 한 번도 전송되지 않았다(future01 동일 누락 — 회귀
+            # 아님). V4 계열은 autoSmea(자동)를 쓰므로 sm/sm_dyn 을 안 보내는 기존 동작 유지.
+            # NAI 웹 미러: DYN 은 SMEA 의 하위 옵션(DYN 체크 시 SMEA 함께 활성), ddim 샘플러와
+            # V3 인페인트(inpainting 모델)는 SMEA 미지원이라 강제 False.
+            if 'nai-diffusion-4' not in model_name:
+                _smea_dyn = bool(params.get('DYN', False))
+                _smea = bool(params.get('SMEA', False)) or _smea_dyn
+                if 'ddim' in str(api_parameters.get('sampler') or '') or action_type == 'infill':
+                    _smea = False
+                    _smea_dyn = False
+                api_parameters["sm"] = _smea
+                api_parameters["sm_dyn"] = _smea_dyn
+
             if is_img2img:
                 api_parameters["image"] = base64.b64encode(params['image_bytes']).decode()
-                
+
                 if action_type == "infill":
                     # 🔥 핵심 수정: 마스크 데이터 처리 개선
                     mask_bytes = params['mask_bytes']
-                    
+
                     # 마스크 데이터 형식 확인 및 변환
                     processed_mask = self._process_mask_data(mask_bytes, is_nai=True)
                     api_parameters["mask"] = processed_mask
-                    
+
                     api_parameters["add_original_image"] = True
                     # NAI 인페인트 강도(strength) 적용 수정: 평면 inpaintImg2ImgStrength 만으론
                     # NAI V4/V4.5 서버가 강도를 무시해 슬라이더가 무반응이었다(사용자 제보·실증).

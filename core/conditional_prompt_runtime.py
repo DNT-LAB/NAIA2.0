@@ -7,7 +7,7 @@ from core.conditional_prompt_settings import (
     get_conditional_prompt_store,
     normalize_conditional_engine_options,
 )
-from core.wildcard_processor import split_tags_smart
+from core.conditional_tag_split import split_tags_bracket_aware
 
 
 _WEIGHT_NAI_RE = re.compile(r"^\s*[+-]?\d+(?:\.\d+)?::(.*?)\s*::\s*$")
@@ -74,7 +74,7 @@ class HeadlessConditionalRuleEngine:
         if not isinstance(value, str):
             return variants
         add_variants(value)
-        for tag in split_tags_smart(value):
+        for tag in split_tags_bracket_aware(value):
             add_variants(tag)
         return variants
 
@@ -413,7 +413,7 @@ class HeadlessConditionalRuleEngine:
         if char_index < 0 or char_index >= len(slots):
             self._record_character_skip(context, f"char_replace({char_index + 1})", "index missing")
             return
-        tags = [tag.strip() for tag in split_tags_smart(str(slots[char_index].get("prompt") or "")) if tag.strip()]
+        tags = [tag.strip() for tag in split_tags_bracket_aware(str(slots[char_index].get("prompt") or "")) if tag.strip()]
         old_value = str(old_tag or "").strip()
         # Expand wildcard tokens in the replacement, mirroring _execute_action's other
         # branches: the conditional hook runs at 'after_wildcard' (after the only expansion
@@ -536,8 +536,18 @@ class HeadlessConditionalRuleEngine:
         if "^" in tag_text:
             tags = [tag.strip() for tag in tag_text.split("^") if tag.strip()]
         else:
-            tags = [tag.strip() for tag in split_tags_smart(tag_text) if tag.strip()]
+            tags = [tag.strip() for tag in split_tags_bracket_aware(tag_text) if tag.strip()]
         return [_remove_outer_quotes(tag) for tag in tags]
+
+    @staticmethod
+    def _flatten_tag_elements(tags: list[str]) -> list[str]:
+        flattened: list[str] = []
+        for tag in tags or []:
+            for part in split_tags_bracket_aware(str(tag)):
+                part = part.strip()
+                if part:
+                    flattened.append(part)
+        return flattened
 
     def _split_rules_with_quotes(self, rules_text: str) -> list[str]:
         # Rules are separated by a top-level comma OR newline. A comma/newline is a
@@ -624,7 +634,7 @@ class HeadlessConditionalRuleEngine:
             return None
         func_name = match.group(1)
         args_text = match.group(2).strip()
-        args = [arg.strip() for arg in args_text.split(",")] if args_text else []
+        args = [arg.strip() for arg in split_tags_bracket_aware(args_text)] if args_text else []
         if func_name == "char_set" and len(args) == 2:
             try:
                 char_index = int(args[0]) - 1
@@ -815,9 +825,9 @@ class HeadlessConditionalRuleEngine:
         rules = self._parse_rules(rules_text)
         if not rules:
             return context
-        prefix_tags = list(context.prefix_tags)
-        main_tags = list(context.main_tags)
-        postfix_tags = list(context.postfix_tags)
+        prefix_tags = self._flatten_tag_elements(context.prefix_tags)
+        main_tags = self._flatten_tag_elements(context.main_tags)
+        postfix_tags = self._flatten_tag_elements(context.postfix_tags)
         seen: set[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]] = set()
 
         for _pass_index in range(max(1, int(max_passes or 1))):

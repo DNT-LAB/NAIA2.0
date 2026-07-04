@@ -1061,13 +1061,14 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260704-
   .catch(error => {
     console.error('Failed to initialize character panel module', error);
   });
-const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260609-condscroll3')
+const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel.mjs?v=20260703-cond-split')
   .then(({createConditionalPromptPanel}) => {
     conditionalPromptPanel = createConditionalPromptPanel({
       document,
       escHtml,
       onModTextEdit,
       setModuleParam,
+      bindTagAssist,
     });
   })
   .catch(error => {

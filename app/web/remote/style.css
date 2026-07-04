@@ -14105,6 +14105,10 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
+  /* 액션 페인에서 이 컨테이너가 flex:1 1 auto 로 세로로 늘어날 때, wrap 된 칩 줄들이
+     남는 세로 공간을 분배(align-content 기본 stretch)받아 벌어지는 것을 막는다 — 줄을 위로
+     packing하고 남는 공간은 아래로(스크롤). "추가할 태그" 동적 상하 마진 깨짐 수정. */
+  align-content: flex-start;
   gap: 6px;
   border: 1px solid rgba(120, 128, 170, 0.22);
   border-radius: 6px;

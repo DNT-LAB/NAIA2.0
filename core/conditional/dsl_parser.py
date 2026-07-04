@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
+from core.conditional_tag_split import split_tags_bracket_aware
 from core.conditional.block_model import (
     Action,
     ActionKind,
@@ -272,7 +273,7 @@ def _try_parse_func_action(text: str):
         return None
     func = m.group(1)
     args_str = m.group(2).strip()
-    args = [a.strip() for a in args_str.split(",")] if args_str else []
+    args = [a.strip() for a in split_tags_bracket_aware(args_str)] if args_str else []
 
     if func == "char_set":
         if len(args) != 2:
@@ -313,10 +314,8 @@ def _parse_tag_list(text: str) -> List[str]:
         return []
     if "^" in t:
         parts = [p.strip() for p in t.split("^")]
-    elif "," in t:
-        parts = [p.strip() for p in t.split(",")]
     else:
-        parts = [t]
+        parts = [p.strip() for p in split_tags_bracket_aware(t)]
     cleaned = []
     for p in parts:
         p = _strip_outer_quotes(p.strip())

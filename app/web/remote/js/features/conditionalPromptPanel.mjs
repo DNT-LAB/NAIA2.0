@@ -3,6 +3,7 @@ export function createConditionalPromptPanel({
   escHtml,
   onModTextEdit,
   setModuleParam,
+  bindTagAssist = () => {},
 }) {
   const moduleBody = document.getElementById('modulePopupBody');
   const sendModuleParam = setModuleParam || ((moduleId, key, value) => {
@@ -765,6 +766,25 @@ export function createConditionalPromptPanel({
         ${renderPresetDialog()}
       </div>`;
     updateDynamicText();
+    bindV2Autocomplete();
+  }
+
+  // New Editor(v2)의 태그 입력칸에 태그 자동완성을 부착한다. tagAssist는 전역 위임 바인더가
+  // 없어 입력칸마다 명시적으로 bindTagAssist를 호출해야 한다. renderV2가 innerHTML로 매번 새
+  // 엘리먼트를 만들므로 렌더 직후 재바인딩(중복 리스너 누적 없음). 숫자/인덱스/체크박스 입력 제외.
+  function bindV2Autocomplete() {
+    try {
+      moduleBody.querySelectorAll([
+        '.cond-chip-input[data-tag-input]',
+        'input[data-cond-node-field="tag_value"]',
+        'input[data-cond-node-field="char_tag_value"]',
+        'input[data-cond-action-field="old_tag"]',
+        'input[data-cond-action-field="char_old_tag"]',
+        'input[data-cond-action-field="char_new_tag"]',
+      ].join(', ')).forEach(el => bindTagAssist(el));
+    } catch (error) {
+      /* tagAssist 미준비 — 이후 렌더에서 바인딩됨 */
+    }
   }
 
   function renderPresetDialog() {
@@ -1531,8 +1551,23 @@ export function createConditionalPromptPanel({
     }
     if (!target?.dataset?.tagInput) return;
     if (event.key !== 'Enter' && event.key !== ',') return;
+    // 가중치 그룹 `(blue eyes, red hair:0.75)` 지원: 미닫힘 괄호 안의 쉼표는 칩 커밋이
+    // 아니라 문자 그대로 입력되게 둔다(백엔드 splitter도 괄호인식 — split_tags_bracket_aware).
+    // Enter는 기존대로 무조건 커밋.
+    if (event.key === ',' && hasUnclosedBracket(target.value)) return;
     event.preventDefault();
     addTag(target.dataset.tagInput, target.value);
+  }
+
+  // <...>, (...), [...] 의 미닫힘 여부 — split_tags_bracket_aware(백엔드)와 동일한
+  // 관용적 depth 카운트(종류 매칭 없음, 음수 방지).
+  function hasUnclosedBracket(text) {
+    let depth = 0;
+    for (const ch of String(text || '')) {
+      if (ch === '(' || ch === '[' || ch === '<') depth += 1;
+      else if (ch === ')' || ch === ']' || ch === '>') depth = Math.max(0, depth - 1);
+    }
+    return depth > 0;
   }
 
   function bindEvents() {

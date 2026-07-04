@@ -1045,7 +1045,7 @@ class ArtistThumbnailService:
         temp_path = target_path.with_suffix(target_path.suffix + ".tmp")
         try:
             target_path.parent.mkdir(parents=True, exist_ok=True)
-            request = urllib.request.Request(url, headers={"User-Agent": "NAIA/2.0.28 ArtistThumb Headless"})
+            request = urllib.request.Request(url, headers={"User-Agent": "NAIA/2.0.29 ArtistThumb Headless"})
             self._set_download_state(message="다운로드 연결 중...")
             with urllib.request.urlopen(request, timeout=30) as response:
                 total_size = int(response.headers.get("content-length", 0) or 0)

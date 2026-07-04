@@ -753,14 +753,15 @@ class APIService:
                     # 적용된다. 둘 다 실어 하위호환 유지.
                     _inpaint_strength = params.get('strength', 1.0)
                     api_parameters["inpaintImg2ImgStrength"] = _inpaint_strength
-                    # 중첩 img2img 페이로드(+color_correct)는 V4/V4.5 인페인트에서만 실증됨.
-                    # NAID3 회귀 방지로 V4 계열에 한정한다 — V3 은 평면 inpaintImg2ImgStrength
-                    # 기존 동작을 그대로 유지(추가 파라미터/색보정 토글 미주입).
-                    if 'nai-diffusion-4' in model_name:
-                        api_parameters["img2img"] = {
-                            "strength": _inpaint_strength,
-                            "color_correct": True,
-                        }
+                    # 평면 inpaintImg2ImgStrength 만으론 NAI 서버가 인페인트 강도를 무시한다.
+                    # 처음엔 V4/V4.5 에서만 실증돼 V4 게이트를 뒀으나, 사용자 제보로 V3 도 동일
+                    # 확인(strength 0.01 에서도 마스크 영역이 크게 변함=강도 무반영) → 중첩
+                    # img2img.strength 를 모든 NAI 인페인트 모델(V3/V4/V4.5)에 전송한다.
+                    # color_correct 는 버전 공통 img2img 색보정 파라미터.
+                    api_parameters["img2img"] = {
+                        "strength": _inpaint_strength,
+                        "color_correct": True,
+                    }
                     api_parameters["noise"] = 0
                     api_parameters["deliberate_euler_ancestral_bug"] = False
                     api_parameters["controlnet_strength"] = 1
@@ -1477,7 +1478,9 @@ class APIService:
         model_name: str = "",
         action_type: str = "",
     ) -> dict:
-        if action_type != "infill" or 'nai-diffusion-4' not in str(model_name or ''):
+        # 인페인트는 모든 NAI 모델(V3/V4/V4.5)이 중첩 img2img.strength 를 사용하므로
+        # (평면 무시), 커스텀 img2img JSON 을 생성된 img2img 와 병합해 일관 유지한다.
+        if action_type != "infill":
             return custom_params
         custom_img2img = custom_params.get("img2img")
         if not isinstance(custom_img2img, dict):
@@ -1488,8 +1491,8 @@ class APIService:
             merged.update(existing_img2img)
         merged.update(custom_img2img)
         reconciled = dict(custom_params)
-        # For NAI V4 inpaint, nested img2img.strength is authoritative after
-        # custom JSON is applied; keep other generated/custom img2img keys.
+        # nested img2img.strength is authoritative after custom JSON is applied;
+        # keep other generated/custom img2img keys.
         reconciled["img2img"] = merged
         return reconciled
 
@@ -1539,8 +1542,8 @@ class APIService:
             # 평면/중첩 strength 동기화 방향은 "사용자 JSON이 지정한 쪽"을 따른다:
             # 사용자가 img2img.strength(중첩)를 줬으면 중첩이 권위 → 평면을 중첩에 맞춤.
             # 평면 inpaintImg2ImgStrength만 줬으면 사용자 의도를 중첩으로 전파
-            # (V4 계열 인페인트 서버는 중첩만 읽으므로, 평면만 갱신하면 무시된다).
-            if action_type == "infill" and 'nai-diffusion-4' in str(model_name or ''):
+            # (NAI 인페인트 서버는 모든 모델에서 중첩만 읽으므로, 평면만 갱신하면 무시된다).
+            if action_type == "infill":
                 custom_img2img = custom_params.get("img2img")
                 if (
                     isinstance(custom_img2img, dict)

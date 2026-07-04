@@ -1088,7 +1088,7 @@ const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize event stream panel module', error);
   });
-const wildcardPanelReady = import('./js/features/wildcardPanel.mjs?v=20260612-wcjump2')
+const wildcardPanelReady = import('./js/features/wildcardPanel.mjs?v=20260704-wc-openfolder')
   .then(({createWildcardPanel}) => {
     wildcardPanel = createWildcardPanel({
       document,
@@ -1197,7 +1197,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260612-i2i1mp2')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260704-v3-nodenoise')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -1208,6 +1208,8 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260612-i2i1
       flushPendingModuleEdit,
       showToast,
       bindTagAssist,
+      // V3 인페인트는 디노이징 미지원 → 강도 슬라이더 숨김(백엔드 img2img.strength 게이트와 동일 기준).
+      hideInpaintStrength: () => naiModelBlocksReference(),
     });
   })
   .catch(error => {
@@ -3490,15 +3492,17 @@ function setParam(key, value) {
   } else if (key === 'model' && artistThumbControl && typeof artistThumbControl.syncPromptFormat === 'function') {
     artistThumbControl.syncPromptFormat();
   }
-  // NAID3 로 바꾸면 CR/VT 를 즉시 차단(런처 비활성 재계산 + 열려 있으면 닫기).
+  // NAID3 로 바꾸면 NAI 전용 캐릭터 계열(Character/CR/VT)을 즉시 차단(런처 비활성 재계산 +
+  // 열려 있으면 닫기)하고, 인페인트 강도 슬라이더 표시 여부도 갱신한다(V3=디노이징 미지원).
   if (key === 'model') {
     if (moduleLauncherControl) moduleLauncherControl.updateState();
-    if (['character_reference', 'vibe_transfer'].includes(currentModuleId)
+    if (['character', 'character_reference', 'vibe_transfer'].includes(currentModuleId)
         && naiModelBlocksReference()
         && modulePopup.classList.contains('open')) {
       closeModule();
-      showToast('NAID3에서는 Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'info');
+      showToast('NAID3에서는 Character / Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'info');
     }
+    if (img2imgPanel) img2imgPanel.refresh();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));
@@ -6152,9 +6156,9 @@ function openModule(moduleId, options = {}) {
     showToast('This module is only available in NAI mode', 'error');
     return;
   }
-  // NAID3 에서 CR/VT 차단 (다른 사양 — 일시 미지원)
-  if (['character_reference', 'vibe_transfer'].includes(moduleId) && naiModelBlocksReference()) {
-    showToast('NAID3에서는 Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'error');
+  // NAID3 에서 Character / CR / VT 차단 (다른 사양 — 일시 미지원)
+  if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && naiModelBlocksReference()) {
+    showToast('NAID3에서는 Character / Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'error');
     return;
   }
   if (imageModulePanels && moduleId !== 'vibe_transfer') {

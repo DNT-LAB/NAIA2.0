@@ -9,6 +9,7 @@ export function createImg2ImgPanel({
   bindTagAssist = () => {},
   setTimeoutFn = globalThis.setTimeout,
   clearTimeoutFn = globalThis.clearTimeout,
+  hideInpaintStrength = () => false,
 }) {
   const MASK_CELL_SIZE = 8;
   const MASK_OVERLAY_COLOR = 'rgba(0, 0, 255, 0.47)';
@@ -270,12 +271,16 @@ export function createImg2ImgPanel({
     const generateLabel = inpaint ? '인페인트 생성' : '생성';
     const generateDisabled = state.can_generate ? '' : 'disabled';
     const generateTitle = state.requires_mask ? ' title="생성 전에 인페인트 마스크를 적용하세요"' : '';
-    const controlsHtml = `
-      <div class="mod-img2img-controls">
+    // V3 인페인트는 디노이징(강도) 개념이 없어 강도 슬라이더를 숨긴다(사용자 확인). V4/V4.5
+    // 인페인트와 일반 img2img 는 그대로 표시.
+    const hideStrength = inpaint && hideInpaintStrength();
+    const strengthHtml = hideStrength ? '' : `
         <div class="mod-img2img-range">
           <label>강도 <strong id="img2imgStrengthValue">${formatRatio(state.strength_value)}</strong></label>
           <input type="range" min="1" max="99" value="${strength}" oninput="img2imgSlider('strength', this.value)">
-        </div>
+        </div>`;
+    const controlsHtml = `
+      <div class="mod-img2img-controls">${strengthHtml}
         <div class="mod-img2img-range">
           <label>노이즈 <strong id="img2imgNoiseValue">${formatRatio(state.noise_value)}</strong></label>
           <input type="range" min="0" max="99" value="${noise}" oninput="img2imgSlider('noise', this.value)">
@@ -801,8 +806,14 @@ export function createImg2ImgPanel({
     setModuleParam('img2img', 'clear_mask', 'true');
   }
 
+  // 모델 변경 등 외부 요인으로 강도 슬라이더 표시 여부가 바뀔 때 캐시된 상태로 재렌더한다.
+  function refresh() {
+    if (currentState) render(currentState);
+  }
+
   return {
     render,
+    refresh,
     slider,
     repeat,
     resize1mp,

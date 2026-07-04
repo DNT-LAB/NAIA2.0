@@ -274,8 +274,9 @@ export function createModuleLauncher({
     if (!config) return false;
     if (!isVisibleInMode(moduleId)) return true;
     if (config.disabled) return true;
-    // NAID3(V3)는 Character Reference / Vibe Transfer 가 다른 사양이라 일시 차단(사용자 요청).
-    if ((moduleId === 'character_reference' || moduleId === 'vibe_transfer') && naiReferenceBlocked()) {
+    // NAID3(V3)는 Character / Character Reference / Vibe Transfer 가 V4 계열과 사양이 달라
+    // 일시 차단(사용자 요청). V3 는 V4 멀티 캐릭터/레퍼런스/바이브 스펙을 지원하지 않는다.
+    if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && naiReferenceBlocked()) {
       return true;
     }
     if (moduleId === 'comfyui_workflow_default') {

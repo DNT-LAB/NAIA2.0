@@ -83,13 +83,16 @@ class WildcardProcessor:
             slot = getattr(context, "_wc_slot", None)
             if slot is not None:
                 entry["slot"] = slot
+            slot_label = getattr(context, "_wc_slot_label", None)
+            if slot_label is not None:
+                entry["slot_label"] = slot_label
             rolls.append(entry)
         except Exception:
             pass
 
     def expand_tags(self, tag_list: List[str], context: PromptContext,
                     wildcard_sink: "list | None" = None,
-                    location: "str | None" = None, slot=None) -> List[str]:
+                    location: "str | None" = None, slot=None, slot_label=None) -> List[str]:
         """
         태그 리스트를 받아 리스트 내의 모든 와일드카드를 확장합니다.
         이것이 다른 모듈에서 호출할 기본 진입점(entry-point)이 됩니다.
@@ -105,6 +108,7 @@ class WildcardProcessor:
         try:
             context._wc_location = location
             context._wc_slot = slot
+            context._wc_slot_label = slot_label
         except Exception:
             pass
         expanded_list = []
@@ -177,25 +181,25 @@ class WildcardProcessor:
     def _expand_recursive(self, tag: str, context: PromptContext, depth=0) -> List[str]:
         """하나의 태그를 재귀적으로 확장합니다."""
         if depth > 10: return [tag]
-        
+
         # $ 로 시작하는 인스턴트 와일드카드 처리 (재귀 호출에서도)
         if tag.startswith('$'):
             instant_key = tag[1:].strip()
-            
+
             # ":" 포함 여부 확인하여 필터링 적용
             if ":" in instant_key:
                 parts = instant_key.split(":", 1)
                 group_name = parts[0]
                 filter_text = parts[1].lower() if len(parts) > 1 else ""
-                
+
                 # tree에서 그룹 찾기
                 if group_name in self.wildcard_manager.instant_wildcard_tree:
                     group_dict = self.wildcard_manager.instant_wildcard_tree[group_name]
-                    
+
                     # filter_text를 포함하는 key들만 추출
                     if filter_text and group_dict:
                         filtered_dict = {k: v for k, v in group_dict.items() if filter_text in k.lower()}
-                        
+
                         if filtered_dict:
                             # 필터링된 결과에서 무작위 선택
                             random_key = random.choice(list(filtered_dict.keys()))
@@ -211,12 +215,12 @@ class WildcardProcessor:
                     else:
                         # 그룹이 비어있으면 원본 유지
                         return [tag]
-                        
+
                     # 값을 콤마로 분리하여 개별 태그로 추가
                     instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
                     return instant_tags
                 return [tag]
-            
+
             # ":" 없이 단순 그룹명인 경우
             elif instant_key in self.wildcard_manager.instant_wildcard_tree:
                 # tree에서 해당 그룹의 딕셔너리 가져오기
@@ -258,9 +262,9 @@ class WildcardProcessor:
             # 파일 기반 와일드카드 처리 - <태그명> 형태는 기존 로직 유지
             line = self._get_wildcard_line(wildcard_name, context)
             if line is None: return [tag]
-            
+
             resolved_tags = self._expand_recursive(line, context, depth + 1)
-            
+
             final_tags_in_place = []
             for resolved_tag in resolved_tags:
                 sub_tags = [t.strip() for t in resolved_tag.split(',')]
@@ -273,18 +277,18 @@ class WildcardProcessor:
                 elif tags_to_append:
                     final_tags_in_place.append(tags_to_append[0])
                     context.global_append_tags.extend(tags_to_append[1:])
-            
+
             return final_tags_in_place if final_tags_in_place else []
-        
+
         # 복합 와일드카드 처리 (__...__)
         if '__' in tag:
             parts = re.split(r'(__.*?__)', tag)
             result_parts = []
-            
+
             for part in parts:
                 if not part:
                     continue
-                    
+
                 if part.startswith('__') and part.endswith('__'):
                     # __태그명__ 형태: global_append_tags 없이 현재 위치에 일괄 나열
                     wildcard_name = part[2:-2]
@@ -301,10 +305,34 @@ class WildcardProcessor:
                         result_parts.append(part)  # 확장 실패시 원본 유지
                 else:
                     result_parts.append(part)
-            
+
             return [''.join(result_parts)]
 
         return [tag]
+
+    def _consume_override(self, actual_wildcard_key: str, context: PromptContext):
+        ctx_ref = getattr(self.wildcard_manager, '_app_context_ref', None)
+        ctx = ctx_ref() if ctx_ref else None
+        overrides = getattr(ctx, 'wildcard_override', None) if ctx is not None else None
+        if not isinstance(overrides, dict):
+            return None
+        location = str(getattr(context, '_wc_location', None) or '').strip()
+        container = None
+        if location:
+            scoped = overrides.get(location)
+            if isinstance(scoped, dict) and actual_wildcard_key in scoped:
+                container = scoped
+        if container is None and actual_wildcard_key in overrides:
+            legacy_value = overrides.get(actual_wildcard_key)
+            if not isinstance(legacy_value, dict):
+                container = overrides
+        if container is None:
+            return None
+        override_val = container.get(actual_wildcard_key)
+        if isinstance(override_val, list):
+            override_val = override_val.pop(0) if override_val else None
+        return override_val
+
 
     def _get_wildcard_line(self, wildcard_name: str, context: PromptContext) -> str | None:
         """WildcardManager에서 와일드카드 내용을 가져옵니다. 순차/종속 모드를 처리합니다."""
@@ -336,15 +364,9 @@ class WildcardProcessor:
         chosen_line = ""
         total_entries = len(entries)
 
-        # 🔒 오버라이드 확인 (모든 모드 공통, 카운터 동결)
-        # list 형태는 큐처럼 앞에서 한 개씩 소비하고, 소진 시 일반 분기로 폴백한다.
-        # str 형태는 기존 동작과 같이 단일 고정값을 반환한다.
-        ctx_ref = getattr(self.wildcard_manager, '_app_context_ref', None)
-        ctx = ctx_ref() if ctx_ref else None
-        override_val = ctx.wildcard_override.get(actual_wildcard_key) if ctx else None
-        if isinstance(override_val, list):
-            override_val = override_val.pop(0) if override_val else None
-
+        # Override lookup: location-scoped {location:{key:value}} wins; legacy
+        # flat {key:value} remains a global fallback for old callers.
+        override_val = self._consume_override(actual_wildcard_key, context)
         if override_val is not None:
             chosen_line = override_val
 

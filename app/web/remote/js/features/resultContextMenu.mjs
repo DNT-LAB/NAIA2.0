@@ -216,6 +216,8 @@ export function createResultContextMenu({
   onSetCharacterReference = null,
   onSetVibeTransfer = null,
   onDelete = null,
+  getWildcardFreezeState = () => ({}),
+  onToggleWildcardFreeze = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
   canUseDesktopImg2Img = () => true,
@@ -937,7 +939,14 @@ export function createResultContextMenu({
     // 오른쪽에서 슬라이드 인.
     window.requestAnimationFrame(() => { if (sidePopup) sidePopup.classList.add('open'); });
     sidePopup.addEventListener('click', event => {
-      if (event.target instanceof window.Element && event.target.closest('[data-close="side"]')) {
+      if (!(event.target instanceof window.Element)) return;
+      const freezeButton = event.target.closest('[data-wc-freeze]');
+      if (freezeButton) {
+        event.preventDefault();
+        handleWildcardFreezeClick(freezeButton);
+        return;
+      }
+      if (event.target.closest('[data-close="side"]')) {
         closeSidePopup();
       }
     });
@@ -958,6 +967,61 @@ export function createResultContextMenu({
     return data && typeof data === 'object' ? data : {};
   }
 
+  function currentWildcardFreezeState() {
+    try {
+      const state = typeof getWildcardFreezeState === 'function' ? getWildcardFreezeState() : {};
+      return state && typeof state === 'object' ? state : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function isLocationFrozen(entry) {
+    const state = currentWildcardFreezeState();
+    const locations = Array.isArray(state.locations) ? state.locations : [];
+    return locations.some(item => String(item.location || '') === String(entry.location || '')
+      && String(item.name || '') === String(entry.name || ''));
+  }
+
+  function isCharacterFrozen(slot) {
+    const state = currentWildcardFreezeState();
+    const characters = Array.isArray(state.characters) ? state.characters : [];
+    return characters.some(item => String(item.slot || '') === String(slot || ''));
+  }
+
+  function encodeFreezePayload(payload) {
+    return encodeURIComponent(JSON.stringify(payload || {}));
+  }
+
+  function decodeFreezePayload(value) {
+    try {
+      return JSON.parse(decodeURIComponent(String(value || '')));
+    } catch (error) {
+      return {};
+    }
+  }
+
+  function freezeButtonHtml(payload, frozen, title) {
+    const pressed = frozen ? 'true' : 'false';
+    return `<button type="button" class="wc-pin-toggle${frozen ? ' active' : ''}" data-wc-freeze="${encodeFreezePayload(payload)}" data-wc-frozen="${frozen ? '1' : '0'}" aria-pressed="${pressed}" title="${escapeText(title || 'Freeze')}">📌</button>`;
+  }
+
+  function updateFreezeButton(button, frozen) {
+    button.dataset.wcFrozen = frozen ? '1' : '0';
+    button.setAttribute('aria-pressed', frozen ? 'true' : 'false');
+    button.classList.toggle('active', frozen);
+  }
+
+  function handleWildcardFreezeClick(button) {
+    const payload = decodeFreezePayload(button.dataset.wcFreeze || '');
+    const nextFrozen = button.dataset.wcFrozen !== '1';
+    if (typeof onToggleWildcardFreeze === 'function') {
+      onToggleWildcardFreeze(payload, nextFrozen);
+    }
+    updateFreezeButton(button, nextFrozen);
+    showToast(nextFrozen ? 'Wildcard freeze enabled' : 'Wildcard freeze cleared', 'success');
+  }
+
   async function showPayload(context) {
     try {
       const data = await fetchFullMeta(context);
@@ -973,8 +1037,10 @@ export function createResultContextMenu({
     try {
       const data = await fetchFullMeta(context);
       if (!data) { showToast('No image is selected', 'error'); return; }
-      const promptContext = rawFromMeta(data).prompt_context || {};
-      openSidePopup('적용된 와일드카드', renderWildcardsHtml(promptContext));
+      const raw = rawFromMeta(data);
+      const promptContext = raw.prompt_context || {};
+      const generationParams = raw.generation_params || {};
+      openSidePopup('적용된 와일드카드', renderWildcardsHtml(promptContext, generationParams));
     } catch (error) {
       console.error('Failed to load wildcards', error);
       showToast('Failed to load wildcards', 'error');
@@ -1028,7 +1094,7 @@ export function createResultContextMenu({
   }
 
   // 블록별(prefix/postfix/main/character[+slot]) 적용 와일드카드.
-  function renderWildcardsHtml(promptContext) {
+  function renderWildcardsHtml(promptContext, generationParams = {}) {
     const wildcards = (promptContext && promptContext.wildcards) || {};
     const history = Array.isArray(wildcards.history) ? wildcards.history : [];
     const state = Array.isArray(wildcards.state) ? wildcards.state : [];
@@ -1037,30 +1103,75 @@ export function createResultContextMenu({
     }
     const LOC_LABELS = {prefix: 'Prefix', postfix: 'Postfix', main: 'Main 프롬프트'};
     const LOC_ORDER = {prefix: 0, main: 1, postfix: 2, character: 3};
+    const executedCharacters = Array.isArray(generationParams._executed_characters)
+      ? generationParams._executed_characters : [];
+    const executedUcs = Array.isArray(generationParams._executed_characters_uc)
+      ? generationParams._executed_characters_uc : [];
+    const executedIds = Array.isArray(generationParams._executed_character_ids)
+      ? generationParams._executed_character_ids.map(value => String(value || '')) : [];
     const blockLabel = entry => {
       const loc = entry.location || '기타';
-      if (loc === 'character') return entry.slot != null ? `캐릭터 ${entry.slot}` : '캐릭터';
+      if (loc === 'character') {
+        const label = entry.slot_label != null ? entry.slot_label : entry.slot;
+        return label != null ? `캐릭터 ${label}` : '캐릭터';
+      }
       return LOC_LABELS[loc] || loc;
+    };
+    const characterPayload = (slot, slotLabel) => {
+      let index = executedIds.indexOf(String(slot || ''));
+      if (index < 0 && slotLabel != null && String(slotLabel).trim()) {
+        const parsed = Number.parseInt(String(slotLabel), 10);
+        if (Number.isFinite(parsed) && parsed > 0) index = parsed - 1;
+      }
+      if (index < 0 || index >= executedCharacters.length) return null;
+      const prompt = String(executedCharacters[index] || '').trim();
+      if (!prompt) return null;
+      return {
+        kind: 'character',
+        slot: String(slot || executedIds[index] || slotLabel || index + 1),
+        prompt,
+        uc: String(executedUcs[index] || ''),
+      };
     };
     const blocks = new Map();
     history.forEach(entry => {
       const label = blockLabel(entry);
-      if (!blocks.has(label)) blocks.set(label, {order: LOC_ORDER[entry.location] ?? 9, slot: entry.slot ?? 0, rows: []});
-      blocks.get(label).rows.push(entry);
+      const key = entry.location === 'character'
+        ? `character:${entry.slot ?? entry.slot_label ?? label}`
+        : `location:${entry.location || 'other'}`;
+      if (!blocks.has(key)) {
+        blocks.set(key, {
+          label,
+          order: LOC_ORDER[entry.location] ?? 9,
+          slot: entry.slot ?? '',
+          slotLabel: entry.slot_label ?? '',
+          location: entry.location || '',
+          rows: [],
+        });
+      }
+      blocks.get(key).rows.push(entry);
     });
-    const ordered = Array.from(blocks.entries()).sort((a, b) =>
-      (a[1].order - b[1].order) || (a[1].slot - b[1].slot) || a[0].localeCompare(b[0]));
+    const ordered = Array.from(blocks.values()).sort((a, b) =>
+      (a.order - b.order) || String(a.slotLabel || a.slot).localeCompare(String(b.slotLabel || b.slot))
+        || a.label.localeCompare(b.label));
     let html = '';
-    ordered.forEach(([label, info]) => {
-      html += `<div class="wc-block"><div class="wc-block-title">${escapeText(label)}</div>`;
+    ordered.forEach(info => {
+      const charFreezePayload = info.location === 'character' ? characterPayload(info.slot, info.slotLabel) : null;
+      const titlePin = charFreezePayload
+        ? freezeButtonHtml(charFreezePayload, isCharacterFrozen(charFreezePayload.slot), '캐릭터 블럭 freeze')
+        : '';
+      html += `<div class="wc-block"><div class="wc-block-title-row">${titlePin}<div class="wc-block-title">${escapeText(info.label)}</div></div>`;
       info.rows.forEach(entry => {
-        html += `<div class="wc-row"><span class="wc-name">${escapeText(entry.name)}</span>`
+        const rowPin = entry.location && entry.location !== 'character'
+          ? freezeButtonHtml({kind: 'location', location: entry.location, key: entry.name, value: entry.value}, isLocationFrozen(entry), '와일드카드 freeze')
+          : '';
+        html += `<div class="wc-row">${rowPin}<span class="wc-name">${escapeText(entry.name)}</span>`
           + `<span class="wc-arrow">→</span><span class="wc-val">${escapeText(entry.value)}</span></div>`;
       });
       html += '</div>';
     });
     if (state.length) {
-      html += '<div class="wc-block"><div class="wc-block-title">순차 / 종속 상태</div>';
+      html += '<div class="wc-block"><div class="wc-block-title-row"><div class="wc-block-title">순차 / 종속 상태</div></div>';
       state.forEach(entry => {
         const dep = entry.dependent ? ` <span class="wc-dep">(종속${entry.master ? ' · ' + escapeText(entry.master) : ''})</span>` : '';
         html += `<div class="wc-row"><span class="wc-name">${escapeText(entry.name)}</span>`
@@ -1101,7 +1212,7 @@ export function createResultContextMenu({
 
     const wc = promptContext.wildcards;
     if (wc && ((Array.isArray(wc.history) && wc.history.length) || (Array.isArray(wc.state) && wc.state.length))) {
-      sections.push(plSection('와일드카드', renderWildcardsHtml(promptContext), true));
+      sections.push(plSection('와일드카드', renderWildcardsHtml(promptContext, gen), true));
     }
 
     if (gen && Object.keys(gen).length) sections.push(plSection('생성 파라미터', jsonToHtml(gen), false));
@@ -1162,7 +1273,7 @@ export function createResultContextMenu({
   };
 }
 
-// cache-bust marker: 20260627-payload-wc (Payload viewer + per-block wildcard popup)
+// cache-bust marker: 20260704-wc-freeze-run2 (Payload viewer + wildcard freeze pins)
 function defaultEscHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({
     '&': '&amp;',

@@ -5787,6 +5787,26 @@ body.resizing-result-info {
 .wc-arrow { color: var(--text-dim); }
 .wc-val { color: var(--text-muted); }
 .wc-dep { color: var(--text-dim); font-size: 10px; }
+.wc-pin-toggle {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.wc-pin-toggle:hover { border-color: var(--accent); color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.wc-pin-toggle.active { border-color: rgba(245, 190, 80, 0.55); color: #f2c36b; background: rgba(245, 190, 80, 0.12); }
+.wc-block-title-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.wc-block-title-row .wc-block-title { margin-bottom: 0; }
+
 
 .j-obj, .j-arr { display: flex; flex-direction: column; gap: 1px; }
 .j-row { display: grid; grid-template-columns: minmax(80px, max-content) minmax(0, 1fr); gap: 8px; align-items: baseline; }

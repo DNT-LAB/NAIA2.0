@@ -29,6 +29,7 @@ class HeadlessWildcardService:
             "prompt_squeeze": bool(self.context.prompt_squeeze_enabled),
             "wildcard_count": wildcard_count,
             "file_browser_available": True,
+            "frozen": self._frozen_state(),
         }
         # live_update=True 면 프론트가 파일 브라우저 통째 재구축 없이 런타임 섹션
         # (Used/Sequential)만 in-place 갱신한다(깜빡임/get_file_tree 재요청 회피). Jump 처럼
@@ -76,6 +77,100 @@ class HeadlessWildcardService:
                     entry["master"] = str(master)
                 sequential_state.append(entry)
         return history, sequential_state
+
+    @staticmethod
+    def _freeze_value_preview(value: Any) -> str:
+        if isinstance(value, list):
+            return str(value[0] if value else "")
+        return str(value or "")
+
+    def _frozen_state(self) -> dict[str, Any]:
+        overrides = getattr(self.context, "wildcard_override", None)
+        locations: list[dict[str, str]] = []
+        legacy: list[dict[str, str]] = []
+        if isinstance(overrides, dict):
+            for location, value in sorted(overrides.items(), key=lambda item: str(item[0])):
+                if isinstance(value, dict):
+                    for name, frozen_value in sorted(value.items(), key=lambda item: str(item[0])):
+                        locations.append({
+                            "location": str(location),
+                            "name": str(name),
+                            "value": self._freeze_value_preview(frozen_value),
+                        })
+                else:
+                    legacy.append({
+                        "name": str(location),
+                        "value": self._freeze_value_preview(value),
+                    })
+        try:
+            from core.character_settings import frozen_character_slots_payload
+
+            characters = frozen_character_slots_payload(self.context)
+        except Exception:
+            characters = []
+        return {"locations": locations, "legacy": legacy, "characters": characters}
+
+    def _freeze_location(self, payload: dict[str, Any]) -> bool:
+        location = str(payload.get("location") or "").strip()
+        name = str(payload.get("key") or payload.get("name") or "").strip()
+        value = str(payload.get("value") or "")
+        if not location or not name:
+            return False
+        overrides = getattr(self.context, "wildcard_override", None)
+        if not isinstance(overrides, dict):
+            overrides = {}
+            self.context.wildcard_override = overrides
+        scoped = overrides.setdefault(location, {})
+        if not isinstance(scoped, dict):
+            scoped = {}
+            overrides[location] = scoped
+        scoped[name] = value
+        return True
+
+    def _unfreeze_location(self, payload: dict[str, Any]) -> bool:
+        location = str(payload.get("location") or "").strip()
+        name = str(payload.get("key") or payload.get("name") or "").strip()
+        overrides = getattr(self.context, "wildcard_override", None)
+        if not isinstance(overrides, dict) or not name:
+            return False
+        if location:
+            scoped = overrides.get(location)
+            if isinstance(scoped, dict):
+                changed = scoped.pop(name, None) is not None
+                if not scoped:
+                    overrides.pop(location, None)
+                return changed
+            return False
+        return overrides.pop(name, None) is not None
+
+    def freeze(self, payload: dict[str, Any]) -> dict[str, Any]:
+        kind = str(payload.get("kind") or payload.get("type") or "").strip().lower()
+        if kind == "character" or payload.get("slot"):
+            from core.character_settings import set_frozen_character_slot
+
+            ok = set_frozen_character_slot(
+                self.context,
+                payload.get("slot"),
+                payload.get("prompt"),
+                payload.get("uc", ""),
+            )
+            if not ok:
+                return self.context._toast("Invalid character wildcard freeze payload", level="error")
+            return self.state(live_update=True)
+        if not self._freeze_location(payload):
+            return self.context._toast("Invalid wildcard freeze payload", level="error")
+        return self.state(live_update=True)
+
+    def unfreeze(self, payload: dict[str, Any]) -> dict[str, Any]:
+        kind = str(payload.get("kind") or payload.get("type") or "").strip().lower()
+        if kind == "character" or payload.get("slot"):
+            from core.character_settings import clear_frozen_character_slot
+
+            clear_frozen_character_slot(self.context, payload.get("slot"))
+            return self.state(live_update=True)
+        self._unfreeze_location(payload)
+        return self.state(live_update=True)
+
 
     def set_sequential(self, name: str, index: Any) -> dict[str, Any]:
         """순차 와일드카드 카운터를 강제로 점프시킨다(사용자 요청 [Jump]).
@@ -142,6 +237,16 @@ class HeadlessWildcardService:
             if not isinstance(payload, dict):
                 payload = {}
             return self.set_sequential(str(payload.get("name") or ""), payload.get("index"))
+        if key in {"wildcard_freeze", "wildcard_unfreeze"}:
+            try:
+                payload = json.loads(str(value or "{}"))
+            except json.JSONDecodeError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            if key == "wildcard_freeze":
+                return self.freeze(payload)
+            return self.unfreeze(payload)
         if key == "get_file_tree":
             return {"type": "wildcard_manager", "action": "file_tree", "tree": self.scan_tree()}
         if key == "read_file":

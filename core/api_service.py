@@ -816,7 +816,7 @@ class APIService:
                 # 캐릭터 모듈 처리 — 소스별 정규화 후 공통 적용
                 # 정규화 형식: characters=[str], ucs=[str], positions=[{'x','y'}]
                 char_source = None
-                characters, ucs, character_positions = [], [], []
+                characters, ucs, character_positions, character_ids = [], [], [], []
 
                 if params.get('sketchbook_character_prompts'):
                     # 1) Sketchbook / Img2ImgWindow 오버라이드
@@ -839,6 +839,7 @@ class APIService:
                         nai_char_data = generation_request.nai_characters
                         characters = list(nai_char_data.characters)
                         ucs = list(nai_char_data.uc)
+                        character_ids = [str(index + 1) for index in range(len(characters))]
                         character_positions = [pos.to_dict() for pos in nai_char_data.character_positions]
 
                     elif params.get('character_asset_request') and params.get('characters'):
@@ -846,6 +847,7 @@ class APIService:
                         characters = params['characters']
                         ucs = params.get('uc', [])
                         character_positions = params.get('character_positions', [])
+                        character_ids = list(params.get('_executed_character_ids') or params.get('character_ids') or [])
 
                     elif self.app_context.temp_window_mode and self.app_context.temp_window_character_tab:
                         # 3) Temporary Window — VirtualCharacterTab
@@ -857,6 +859,7 @@ class APIService:
                                 characters = char_params["characters"]
                                 ucs = char_params["uc"]
                                 character_positions = char_params.get("character_positions", [])
+                                character_ids = list(char_params.get("character_ids") or [])
 
                     elif params.get('characters'):
                         # 4) Saved Params — Enhance 등 저장된 generation_params 재사용
@@ -864,6 +867,7 @@ class APIService:
                         characters = params['characters']
                         ucs = params.get('uc', [])
                         character_positions = params.get('character_positions', [])
+                        character_ids = list(params.get('_executed_character_ids') or params.get('character_ids') or [])
 
                     else:
                         # 5-0) 이벤트 스트림(스토리/수동 진행) freeze — 시퀀스가 도는 동안
@@ -883,6 +887,7 @@ class APIService:
                                     characters = frozen_chars["characters"]
                                     ucs = frozen_chars.get("uc", [])
                                     character_positions = []
+                                    character_ids = list(frozen_chars.get("character_ids") or [])
                         # 5) Late Binding — 메인 UI CharacterModule (직접 생성).
                         # Desktop archive only; absent in headless. The live desktop
                         # roll outranks the headless snapshot when a module is loaded.
@@ -895,6 +900,7 @@ class APIService:
                                     characters = char_params["characters"]
                                     ucs = char_params["uc"]
                                     character_positions = char_params.get("character_positions", [])
+                                    character_ids = list(char_params.get("character_ids") or [])
                         # 5-1) SSOT character roll — Generate's single consume/refresh
                         # point for headless (the EventStreamFreeze above wins when a
                         # storyteller/manual sequence is active). character_params_from_
@@ -932,18 +938,27 @@ class APIService:
                                 characters = char_params["characters"]
                                 ucs = char_params.get("uc", [])
                                 character_positions = []
+                                character_ids = list(char_params.get("character_ids") or [])
                                 # Persist a genuine fresh roll (reroll ON, or snapshot was
                                 # empty) so the preview reflects what was generated. Never
                                 # persist a reused snapshot or a per-run conditional override.
                                 if not _had_snapshot and not _had_override:
                                     store_character_roll_snapshot(
                                         self.app_context,
-                                        {"characters": characters, "uc": ucs},
+                                        {
+                                            "characters": characters,
+                                            "uc": ucs,
+                                            "character_ids": character_ids,
+                                            "wildcard_rolls": char_params.get("wildcard_rolls"),
+                                        },
                                         _char_mode,
                                     )
 
                 # 공통 적용: 정규화된 캐릭터 데이터를 v4_prompt에 추가
                 if characters:
+                    character_ids = [str(value) for value in character_ids if str(value).strip()]
+                    if len(character_ids) < len(characters):
+                        character_ids.extend(str(index + 1) for index in range(len(character_ids), len(characters)))
                     default_center = {"x": 0.5, "y": 0.5}
                     for i, prompt in enumerate(characters):
                         centers = [character_positions[i]] if i < len(character_positions) else [default_center]
@@ -962,10 +977,11 @@ class APIService:
                     # 실제로 생성된 캐릭터"를 보여줄 수 있도록 언더스코어 키로 기록한다
                     # (분기 판정은 'characters' 키만 보므로 리플레이 의미 불변).
                     params['_executed_characters'] = [str(c) for c in characters]
+                    params['_executed_character_ids'] = [str(c) for c in character_ids[:len(characters)]]
                     params['_executed_characters_uc'] = [
                         str(ucs[i]) if i < len(ucs) else "" for i in range(len(characters))
                     ]
-            
+
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
             generation_request = params.get('_generation_request')
             if generation_request and generation_request.nai_vibe_transfer:

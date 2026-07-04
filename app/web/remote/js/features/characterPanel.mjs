@@ -313,7 +313,7 @@ export function createCharacterPanel({
     const customName = String(character.custom_name || '').trim();
     const label = customName ? `${escHtml(customName)} <span class="mod-char-id-muted">C${character.id}</span>` : `C${character.id}`;
     return `
-      <div class="mod-char-block" data-char-index="${index}">
+      <div class="mod-char-block" data-char-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}">
         <div class="mod-char-header">
           <label class="mod-checkbox-item" style="margin:0">
             <input type="checkbox" ${character.active ? 'checked' : ''} oninput="setModuleParam('character','char_active_${index}',String(this.checked))">
@@ -335,7 +335,7 @@ export function createCharacterPanel({
     const searchText = coldSearchText(character, index);
     const hasCustomName = Boolean(String(character.custom_name || '').trim());
     return `
-      <article class="mod-cold-card" tabindex="0" data-cold-index="${index}" data-cold-search="${escAttr(searchText)}">
+      <article class="mod-cold-card" tabindex="0" data-cold-index="${index}" data-slot-uuid="${escAttr(character.slot_uuid || '')}" data-cold-search="${escAttr(searchText)}">
         <span class="mod-cold-id">C${character.id}</span>
         <div class="mod-cold-summary ${hasCustomName ? 'custom' : ''}">${escHtml(summary)}</div>
         <div class="mod-cold-actions">

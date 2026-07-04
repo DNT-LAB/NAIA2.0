@@ -299,6 +299,7 @@ class HeadlessGenerationService:
         # 실행의 값이 이번 결과 메타데이터로 둔갑하지 않게 항상 비우고 시작한다
         # (NAI가 아니거나 캐릭터가 꺼진 실행에서 stale 캐릭터 표시 방지).
         params.pop("_executed_characters", None)
+        params.pop("_executed_character_ids", None)
         params.pop("_executed_characters_uc", None)
         # Storyteller Use Vibe: 정지 후 실행되는 큐 잔존 페이지가 휘발성 스트림 vibe를
         # 보내지 않도록 실행 시점 검증 — 마커의 run_id가 활성 스트림과 다르면 스트림
@@ -418,6 +419,9 @@ class HeadlessGenerationService:
                         entry["location"] = str(loc)
                     if slot is not None:
                         entry["slot"] = slot
+                    slot_label = roll.get("slot_label")
+                    if slot_label is not None:
+                        entry["slot_label"] = slot_label
                     history.append(entry)
                     if len(history) >= _MAX_ITEMS:
                         break

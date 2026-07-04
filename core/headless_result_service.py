@@ -114,7 +114,7 @@ class HeadlessResultStore:
             # api_service가 기록한 실행본(_executed_*)을 메타데이터로 보존한다
             # (메타데이터 뷰어 캐릭터 슬롯 표시용). 리플레이된 request.params에 직전
             # 실행의 값이 남아 있을 수 있으므로 항상 실행본 기준으로 재설정한다.
-            for key in ("_executed_characters", "_executed_characters_uc"):
+            for key in ("_executed_characters", "_executed_character_ids", "_executed_characters_uc"):
                 params.pop(key, None)
                 value = executed.get(key)
                 if isinstance(value, list) and value:

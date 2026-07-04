@@ -317,6 +317,7 @@ let characterPanel = null;
 let conditionalPromptPanel = null;
 let eventStreamPanel = null;
 let wildcardPanel = null;
+let latestWildcardFreezeState = {locations: [], legacy: [], characters: []};
 let extensionsPanel = null;
 let lastExtensionsState = null;
 let wildcardManagerPanel = null;
@@ -691,7 +692,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260627-payload-wc')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260704-wc-freeze-run2')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -726,6 +727,10 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onSetVibeTransfer: context => callResultImageAction('requestContextImageAction', context, 'vibe'),
       onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
+      getWildcardFreezeState: () => latestWildcardFreezeState,
+      onToggleWildcardFreeze: (payload, freeze) => {
+        setModuleParam('wildcard', freeze ? 'wildcard_freeze' : 'wildcard_unfreeze', JSON.stringify(payload || {}));
+      },
       canUseDesktopImg2Img,
       canOpenLocalFiles: () => isLocalWebHost || isDesktopShell,
       isGrokReady: () => grokReady,  // Grok 변형/영상 항목은 로그인(proxy ready) 시에만 표시
@@ -1042,7 +1047,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260531-char-ac-focus1')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260704-char-uuid-run2')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -6940,6 +6945,7 @@ function renderEventStream(m) {
 
 // ---- Wildcard Module ----
 function renderWildcard(m) {
+  latestWildcardFreezeState = (m && m.frozen) ? m.frozen : {locations: [], legacy: [], characters: []};
   if (wildcardPanel) wildcardPanel.render(m);
 }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -65,20 +66,42 @@ def normalize_slot_state(value: Any, is_enabled: bool = False) -> str:
     return "active" if is_enabled else "inactive"
 
 
-def normalize_character_settings(raw: dict | None) -> dict:
+def _new_character_uuid() -> str:
+    return uuid.uuid4().hex
+
+
+def _frame_uuid(frame: dict[str, Any], *, create: bool = False) -> str:
+    for key in ("uuid", "slot_uuid"):
+        value = str(frame.get(key) or "").strip()
+        if value:
+            return value
+    legacy = frame.get("id")
+    if isinstance(legacy, str):
+        value = legacy.strip()
+        if value and not value.isdigit():
+            return value
+    return _new_character_uuid() if create else ""
+
+
+def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict, bool]:
     data = raw if isinstance(raw, dict) else {}
     settings = default_character_settings()
     settings["is_active"] = bool(data.get("is_active", settings["is_active"]))
     settings["reroll_on_generate"] = bool(data.get("reroll_on_generate", settings["reroll_on_generate"]))
     frames = data.get("character_frames", [])
     normalized_frames = []
+    migrated = False
     if isinstance(frames, list):
         for frame in frames:
             if not isinstance(frame, dict):
                 continue
             is_enabled = bool(frame.get("is_enabled", False))
             slot_state = normalize_slot_state(frame.get("slot_state"), is_enabled)
+            frame_uuid = _frame_uuid(frame, create=True)
+            if frame.get("uuid") != frame_uuid:
+                migrated = True
             normalized_frames.append({
+                "uuid": frame_uuid,
                 "prompt": str(frame.get("prompt") or ""),
                 "uc": str(frame.get("uc") or ""),
                 "is_enabled": slot_state == "active",
@@ -87,7 +110,20 @@ def normalize_character_settings(raw: dict | None) -> dict:
                 "custom_name": str(frame.get("custom_name") or frame.get("slot_name") or ""),
             })
     settings["character_frames"] = normalized_frames
+    return settings, migrated
+
+
+def normalize_character_settings(raw: dict | None) -> dict:
+    settings, _migrated = _normalize_character_settings_with_migration(raw)
     return settings
+
+
+def _save_migrated_character_settings(path: Path, mode_key: str, settings: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({mode_key: settings}, ensure_ascii=False, indent=4), encoding="utf-8")
+    except Exception as exc:
+        print(f"[WARN] Character settings migration save failed: {exc}")
 
 
 def _checked(widget: Any) -> bool:
@@ -123,9 +159,11 @@ def load_character_settings(
     try:
         if target.exists():
             data = json.loads(target.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and isinstance(data.get(mode_key), dict):
-                return normalize_character_settings(data.get(mode_key))
-            return normalize_character_settings(data)
+            raw_settings = data.get(mode_key) if isinstance(data, dict) and isinstance(data.get(mode_key), dict) else data
+            normalized, migrated = _normalize_character_settings_with_migration(raw_settings)
+            if migrated:
+                _save_migrated_character_settings(target, mode_key, normalized)
+            return normalized
     except Exception as exc:
         print(f"[ERROR] Character settings load failed: {exc}")
     return default_character_settings()
@@ -182,7 +220,155 @@ def conditional_character_override_active(app_context) -> bool:
     return _conditional_character_override(app_context, reuse_current_context=True) is not None
 
 
-def _expand_character_text(text: str, processor: WildcardProcessor | None, context: PromptContext, slot=None) -> str:
+CHARACTER_FREEZE_STORE_ATTR = "_character_freeze_store"
+
+
+def _character_freeze_store(app_context, *, create: bool = False) -> dict[str, dict[str, str]] | None:
+    if app_context is None:
+        return None
+    store = getattr(app_context, CHARACTER_FREEZE_STORE_ATTR, None)
+    if isinstance(store, dict):
+        return store
+    if not create:
+        return None
+    store = {}
+    setattr(app_context, CHARACTER_FREEZE_STORE_ATTR, store)
+    return store
+
+
+def read_frozen_character_slots(app_context) -> dict[str, dict[str, str]]:
+    store = _character_freeze_store(app_context)
+    if not isinstance(store, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for slot, payload in store.items():
+        if not isinstance(payload, dict):
+            continue
+        prompt = str(payload.get("prompt") or "")
+        if not prompt.strip():
+            continue
+        out[str(slot)] = {"prompt": prompt, "uc": str(payload.get("uc") or "")}
+    return out
+
+
+def frozen_character_slots_payload(app_context) -> list[dict[str, str]]:
+    return [
+        {"slot": slot, "prompt": payload["prompt"], "uc": payload.get("uc", "")}
+        for slot, payload in sorted(read_frozen_character_slots(app_context).items())
+    ]
+
+
+def set_frozen_character_slot(app_context, slot: Any, prompt: Any, uc: Any = "") -> bool:
+    slot_key = str(slot or "").strip()
+    prompt_text = str(prompt or "").strip()
+    if not slot_key or not prompt_text:
+        return False
+    store = _character_freeze_store(app_context, create=True)
+    if store is None:
+        return False
+    store[slot_key] = {"prompt": prompt_text, "uc": str(uc or "")}
+    return True
+
+
+def clear_frozen_character_slot(app_context, slot: Any | None = None) -> bool:
+    store = _character_freeze_store(app_context)
+    if not isinstance(store, dict):
+        return False
+    if slot is None:
+        changed = bool(store)
+        store.clear()
+        return changed
+    return store.pop(str(slot or "").strip(), None) is not None
+
+
+def _active_frame_slot_ids(frames: list[dict]) -> list[str]:
+    return [str(_frame_uuid(frame) or index) for index, frame in enumerate(frames, 1)]
+
+
+def _snapshot_result(snapshot: dict, frame_slot_ids: list[str]) -> dict:
+    characters = [str(value) for value in snapshot.get("characters") or []]
+    ucs = [str(value) for value in snapshot.get("uc") or []]
+    ids = [str(value) for value in snapshot.get("character_ids") or [] if str(value).strip()]
+    if not ids:
+        ids = frame_slot_ids[:len(characters)]
+    while len(ucs) < len(characters):
+        ucs.append("")
+    result = {"characters": characters, "uc": ucs, "character_ids": ids}
+    rolls = snapshot.get("wildcard_rolls")
+    if isinstance(rolls, list) and rolls:
+        result["wildcard_rolls"] = [dict(roll) for roll in rolls if isinstance(roll, dict)]
+    return result
+
+
+def _overlay_frozen_character_slots(app_context, result: dict, frame_slot_ids: list[str]) -> dict:
+    frozen = read_frozen_character_slots(app_context)
+    if not frozen:
+        return result
+    characters = list(result.get("characters") or [])
+    ucs = list(result.get("uc") or [])
+    ids = [str(value) for value in result.get("character_ids") or []]
+    if not ids:
+        ids = frame_slot_ids[:len(characters)]
+    id_to_index = {slot_id: index for index, slot_id in enumerate(ids) if slot_id}
+    for frame_index, slot_id in enumerate(frame_slot_ids):
+        payload = frozen.get(slot_id)
+        if not payload:
+            continue
+        index = id_to_index.get(slot_id, frame_index if frame_index < len(characters) else None)
+        if index is None:
+            continue
+        while len(characters) <= index:
+            characters.append("")
+        while len(ucs) <= index:
+            ucs.append("")
+        while len(ids) <= index:
+            ids.append(frame_slot_ids[len(ids)] if len(ids) < len(frame_slot_ids) else slot_id)
+        characters[index] = payload["prompt"]
+        ucs[index] = payload.get("uc", "")
+        ids[index] = slot_id
+    return {"characters": characters, "uc": ucs, "character_ids": ids}
+
+
+def _character_rolls_from_context(context: PromptContext, start_index: int) -> list[dict[str, Any]]:
+    rolls = getattr(context, "wildcard_rolls", None)
+    if not isinstance(rolls, list) or len(rolls) <= start_index:
+        return []
+    return [
+        dict(roll)
+        for roll in rolls[start_index:]
+        if isinstance(roll, dict) and roll.get("location") == "character"
+    ]
+
+
+def _replay_character_snapshot_rolls(app_context, snapshot: dict, *, reuse_current_context: bool) -> None:
+    if not reuse_current_context:
+        return
+    rolls = snapshot.get("wildcard_rolls")
+    if not isinstance(rolls, list) or not rolls:
+        return
+    context = getattr(app_context, "current_prompt_context", None)
+    if context is None:
+        return
+    target_rolls = getattr(context, "wildcard_rolls", None)
+    if isinstance(target_rolls, list):
+        target_rolls.extend(dict(roll) for roll in rolls if isinstance(roll, dict))
+    history = getattr(context, "wildcard_history", None)
+    if isinstance(history, dict):
+        for roll in rolls:
+            if not isinstance(roll, dict):
+                continue
+            key = str(roll.get("key") or "")
+            if key:
+                history.setdefault(key, []).append(str(roll.get("value") or ""))
+
+
+def _expand_character_text(
+    text: str,
+    processor: WildcardProcessor | None,
+    context: PromptContext,
+    slot=None,
+    slot_label=None,
+) -> str:
     pieces = [piece.strip() for piece in split_tags_smart(str(text or ""))]
     pieces = [piece for piece in pieces if piece]
     if not pieces:
@@ -190,9 +376,8 @@ def _expand_character_text(text: str, processor: WildcardProcessor | None, conte
     if processor is None:
         return ", ".join(pieces)
     # location='character'(+slot)으로 캐릭터 블록 와일드카드 롤을 위치 인식 기록한다(Wildcard
-    # Watch 블록별 뷰). 단, 이 경로는 reuse_current_context=True(Random)일 때만 라이브 context 에
-    # 기록된다 — 스냅샷 재사용/throwaway context 경로에선 롤이 남지 않을 수 있다(알려진 한계).
-    return ", ".join(processor.expand_tags(pieces, context, location='character', slot=slot))
+    # Watch 블록별 뷰). slot은 안정 uuid, slot_label은 표시용 1-based 번호다.
+    return ", ".join(processor.expand_tags(pieces, context, location='character', slot=slot, slot_label=slot_label))
 
 
 def character_params_from_settings(
@@ -247,14 +432,17 @@ def character_params_from_settings(
     if not frames:
         return {"characters": None}
 
-    # (3) Reuse the stored roll without re-rolling.
+    frame_slot_ids = _active_frame_slot_ids(frames)
+
+    # (3) Reuse the stored roll without re-rolling. Frozen slots overlay the
+    # snapshot so a user pin wins without forcing unrelated slots to reroll.
     if prefer_snapshot:
         snapshot = read_character_roll_snapshot(app_context, mode)
         if snapshot is not None:
-            return {
-                "characters": list(snapshot.get("characters") or []),
-                "uc": list(snapshot.get("uc") or []),
-            }
+            result = _snapshot_result(snapshot, frame_slot_ids)
+            result = _overlay_frozen_character_slots(app_context, result, frame_slot_ids)
+            _replay_character_snapshot_rolls(app_context, snapshot, reuse_current_context=reuse_current_context)
+            return result
 
     # (4) Fresh expansion (not stored here — see docstring).
     processor = None
@@ -262,25 +450,47 @@ def character_params_from_settings(
     if wildcard_manager is not None:
         processor = WildcardProcessor(wildcard_manager)
     context = _get_prompt_context(app_context, reuse_current_context=reuse_current_context)
+    roll_start = len(context.wildcard_rolls) if isinstance(getattr(context, "wildcard_rolls", None), list) else 0
+    frozen = read_frozen_character_slots(app_context)
 
     characters = []
     ucs = []
-    # slot = 활성 프레임 1-based 인덱스(=백엔드 char id, 화면 'Character N'과 정렬). Phase B에서
-    # 안정적 uuid 도입 시 frame['id']로 교체 예정.
+    character_ids = []
     for slot_index, frame in enumerate(frames, 1):
-        slot = frame.get("id") or slot_index
-        prompt = _expand_character_text(frame.get("prompt", ""), processor, context, slot=slot)
-        uc = _expand_character_text(frame.get("uc", ""), processor, context, slot=slot)
+        slot = frame_slot_ids[slot_index - 1] if slot_index - 1 < len(frame_slot_ids) else str(slot_index)
+        frozen_payload = frozen.get(slot)
+        if frozen_payload:
+            prompt = frozen_payload["prompt"]
+            uc = frozen_payload.get("uc", "")
+        else:
+            prompt = _expand_character_text(
+                frame.get("prompt", ""),
+                processor,
+                context,
+                slot=slot,
+                slot_label=slot_index,
+            )
+            uc = _expand_character_text(
+                frame.get("uc", ""),
+                processor,
+                context,
+                slot=slot,
+                slot_label=slot_index,
+            )
         if prompt:
             characters.append(prompt)
             ucs.append(uc)
+            character_ids.append(slot)
 
     if not characters:
         return {"characters": None}
     return {
         "characters": characters,
         "uc": ucs,
+        "character_ids": character_ids,
+        "wildcard_rolls": _character_rolls_from_context(context, roll_start),
     }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -348,6 +558,12 @@ def store_character_roll_snapshot(app_context, params: dict | None, mode: str = 
         "characters": [str(value) for value in params.get("characters") or []],
         "uc": [str(value) for value in params.get("uc") or []],
     }
+    character_ids = [str(value) for value in params.get("character_ids") or [] if str(value).strip()]
+    if character_ids:
+        snapshot["character_ids"] = character_ids
+    rolls = params.get("wildcard_rolls")
+    if isinstance(rolls, list) and rolls:
+        snapshot["wildcard_rolls"] = [dict(roll) for roll in rolls if isinstance(roll, dict)]
     store[_snapshot_mode_key(mode)] = snapshot
     return snapshot
 
@@ -452,6 +668,7 @@ def character_state_from_settings(
         slot_state = normalize_slot_state(frame.get("slot_state"), bool(frame.get("is_enabled")))
         characters.append({
             "id": idx + 1,
+            "slot_uuid": str(_frame_uuid(frame) or ""),
             "active": slot_state == "active",
             "slot_state": slot_state,
             "return_slot_state": str(frame.get("return_slot_state") or ""),

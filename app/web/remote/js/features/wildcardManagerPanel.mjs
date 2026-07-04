@@ -135,6 +135,7 @@ export function createWildcardManagerPanel({
     }
     html += '<button class="mod-btn-sm" onclick="wcPromptNewFile()">+ New File</button>'
       + '<button class="mod-btn-sm" onclick="setModuleParam(\'wildcard\',\'get_file_tree\',\'\')">Refresh</button>'
+      + '<button class="mod-btn-sm wc-open-folder-btn" onclick="wcOpenFolder()" title="와일드카드 폴더를 탐색기에서 엽니다 (파일을 여기에 넣으세요)" style="margin-left:auto;background:var(--accent);color:#fff;border-color:transparent">📁 폴더 열기</button>'
       + '</div>';
     html += `<div class="mod-wc-tree${fullMode ? '' : ' inline'}">`;
     if (!cachedTree.length) {
@@ -156,10 +157,7 @@ export function createWildcardManagerPanel({
     html += '</div>';
     if (fullMode) {
       html += `<div class="mod-section" style="margin-top:10px">
-        <div class="mod-section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <span>Wildcard Syntax Guide</span>
-          <button class="mod-btn-sm" onclick="wcOpenFolder()" title="와일드카드 폴더를 탐색기에서 엽니다 (파일을 여기에 넣으세요)">📁 폴더 열기</button>
-        </div>
+        <div class="mod-section-label">Wildcard Syntax Guide</div>
         <div class="wc-syntax-guide">
           <div><code>__name__</code> — Random pick from <code>name.txt</code></div>
           <div><code>__*name__</code> — Sequential (ordered)</div>

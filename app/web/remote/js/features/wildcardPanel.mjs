@@ -78,10 +78,7 @@ export function createWildcardPanel({
         </label>
       </div>
       <div class="mod-section">
-        <div class="mod-section-label" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-          <span>와일드카드 호출법</span>
-          <button class="mod-btn-sm" onclick="setModuleParam('wildcard','open_folder','')" title="와일드카드 폴더를 탐색기에서 엽니다 (파일을 여기에 넣으세요)">📁 폴더 열기</button>
-        </div>
+        <div class="mod-section-label">와일드카드 호출법</div>
         <div class="wc-syntax-guide">
           <div><code>__name__</code> — 일반 (랜덤 1줄)</div>
           <div><code>__*name__</code> — 순차 (순서대로)</div>

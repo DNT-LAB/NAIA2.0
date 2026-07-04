@@ -1088,7 +1088,7 @@ const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize event stream panel module', error);
   });
-const wildcardPanelReady = import('./js/features/wildcardPanel.mjs?v=20260704-wc-openfolder')
+const wildcardPanelReady = import('./js/features/wildcardPanel.mjs?v=20260704-wc-folder2')
   .then(({createWildcardPanel}) => {
     wildcardPanel = createWildcardPanel({
       document,
@@ -1129,7 +1129,7 @@ const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=2026061
   .catch(error => {
     console.error('Failed to initialize extensions UI module', error);
   });
-const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260704-wc-openfolder')
+const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260704-wc-folder2')
   .then(({createWildcardManagerPanel}) => {
     wildcardManagerPanel = createWildcardManagerPanel({
       document,
@@ -6139,15 +6139,16 @@ function scheduleInitialHistoryRefresh(delayMs = 5000) {
   }, Math.max(250, Number(delayMs) || 5000));
 }
 
-// NAID3(V3)는 Character Reference / Vibe Transfer 가 V4 계열과 다른 사양이라 일시 차단한다
-// (사용자 요청). 백엔드 게이트(_apply_vibe='nai-diffusion-4' in model_name)와 동일 기준으로
-// 미러링한다 — 모델이 확정되기 전(빈 값)에는 차단하지 않는다(백엔드가 최종 안전망).
+// NAID3(V3)는 Character / Character Reference / Vibe Transfer 가 V4 계열과 다른 사양이라
+// 일시 차단한다(사용자 요청). pModel 값은 짧은 코드(NAID3 / NAID4.5F ...)이고 백엔드도
+// `"NAID3" in model`(headless_remote_state_service)로 V3 를 판정하므로 동일 기준으로
+// NAID3 일 때만 차단한다. NAID4.x/4.5 는 정상 허용. 모델 미확정(빈 값)이면 차단 안 함.
 function naiModelBlocksReference() {
   if ((currentMode || modeSelect.value) !== 'NAI') return false;
   const sel = document.getElementById('pModel');
-  const model = sel ? String(sel.value || '').trim() : '';
+  const model = sel ? String(sel.value || '').trim().toUpperCase() : '';
   if (!model) return false;
-  return !model.includes('nai-diffusion-4');
+  return model.includes('NAID3');
 }
 
 function openModule(moduleId, options = {}) {

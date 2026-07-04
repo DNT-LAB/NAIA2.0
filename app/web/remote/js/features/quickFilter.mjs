@@ -2,6 +2,14 @@ import { RATING_KEYS, filteredCount } from './ratingStore.mjs';
 
 const STORAGE_KEY = 'naia_quick_filter_options';
 const DEFAULT_RATING_KEYS = ['g', 's', 'q'];
+const SEARCH_DEBOUNCE_MS = 280;
+
+function normalizeTagParts(value) {
+  const text = String(value || '');
+  return text.split(/[,\n]/)
+    .map(item => item.replace(/_/g, ' ').trim().replace(/^-+/, '').replace(/ /g, '_'))
+    .filter(Boolean);
+}
 
 export function normalizeRatings(value) {
   if (!Array.isArray(value)) return [...DEFAULT_RATING_KEYS];
@@ -14,10 +22,11 @@ export function normalizeTags(value) {
   const seen = new Set();
   const out = [];
   value.forEach(item => {
-    const tag = String(item || '').trim().replace(/^-+/, '').replace(/ /g, '_');
-    if (!tag || seen.has(tag)) return;
-    seen.add(tag);
-    out.push(tag);
+    normalizeTagParts(item).forEach(tag => {
+      if (seen.has(tag)) return;
+      seen.add(tag);
+      out.push(tag);
+    });
   });
   return out;
 }
@@ -80,6 +89,8 @@ export function createQuickFilterController(deps) {
   let acTarget = 'include';
   let searchSeq = 0;
   let latestSearchRequestId = '';
+  let searchDebounceTimer = null;
+  let latestAcRequest = {target: '', query: ''};
 
   const getEl = id => doc.getElementById(id);
   const isSocketOpen = () => {
@@ -115,6 +126,37 @@ export function createQuickFilterController(deps) {
     tag_filter_exclude: [...excludeTags],
     tag_filter_active: active,
   });
+  const tagInputIds = ['tagFilterInput', 'tagFilterExcludeInput'];
+  const focusedTagInput = () => {
+    const activeElement = doc.activeElement;
+    if (!activeElement || !tagInputIds.includes(activeElement.id)) return null;
+    return activeElement;
+  };
+  const captureFocusedInputState = () => {
+    const input = focusedTagInput();
+    if (!input) return null;
+    return {
+      id: input.id,
+      value: input.value,
+      selectionStart: input.selectionStart,
+      selectionEnd: input.selectionEnd,
+      acResults: [...acResults],
+      acSelection,
+    };
+  };
+  const restoreFocusedInputState = state => {
+    if (!state) return;
+    const input = getEl(state.id);
+    if (!input) return;
+    input.value = state.value;
+    input.focus();
+    try {
+      input.setSelectionRange(state.selectionStart, state.selectionEnd);
+    } catch (_) {}
+    acResults = state.acResults;
+    acSelection = state.acSelection;
+    renderAutocomplete();
+  };
 
   function updateHighlight() {
     const toggleBtn = getEl('tagFilterToggle');
@@ -164,6 +206,16 @@ export function createQuickFilterController(deps) {
     send({type: 'save_search_filter_state', ...preferences});
   }
 
+  function updateCommitButton() {
+    const button = getEl('tagFilterCommitBtn');
+    if (!button) return;
+    const hasPendingText = tagInputIds.some(id => {
+      const input = getEl(id);
+      return input && input.value.trim();
+    });
+    button.disabled = !hasPendingText;
+  }
+
   function load() {
     return loadPreferences(storage);
   }
@@ -199,6 +251,27 @@ export function createQuickFilterController(deps) {
     if (el) el.innerHTML = '';
   }
 
+  function cancelPendingSearch() {
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = null;
+    }
+  }
+
+  function sendSearchNow() {
+    cancelPendingSearch();
+    if (!includeTags.length && !excludeTags.length) return;
+    if (!isSocketOpen()) return;
+    send({type: 'tag_filter_search', tags: payload(), request_id: nextSearchRequestId()});
+  }
+
+  function scheduleSearch() {
+    if (!includeTags.length && !excludeTags.length) return;
+    invalidateSearchRequest();
+    cancelPendingSearch();
+    searchDebounceTimer = setTimeout(sendSearchNow, SEARCH_DEBOUNCE_MS);
+  }
+
   function renderAutocomplete() {
     const el = getEl('tagFilterAc');
     if (!el) return;
@@ -226,28 +299,47 @@ export function createQuickFilterController(deps) {
     });
   }
 
-  function selectAutocomplete(tag) {
-    const clean = String(tag || '').replace(/ /g, '_');
-    if (!clean) return;
-    if (acTarget === 'exclude') {
-      if (!excludeTags.includes(clean)) {
-        excludeTags.push(clean);
-        renderExcludeChips();
-        save();
-      }
-      const input = getEl('tagFilterExcludeInput');
-      if (input) input.value = '';
-    } else {
-      if (!includeTags.includes(clean)) {
-        includeTags.push(clean);
-        renderIncludeChips();
-        save();
-      }
-      const input = getEl('tagFilterInput');
-      if (input) input.value = '';
+  function commitTags(target, rawValue) {
+    const tags = normalizeTags([rawValue]);
+    if (!tags.length) return false;
+    const targetList = target === 'exclude' ? excludeTags : includeTags;
+    let changed = false;
+    tags.forEach(tag => {
+      if (targetList.includes(tag)) return;
+      targetList.push(tag);
+      changed = true;
+    });
+    if (changed) {
+      if (target === 'exclude') renderExcludeChips();
+      else renderIncludeChips();
     }
+    return changed;
+  }
+
+  function selectAutocomplete(tag) {
+    if (!normalizeTags([tag]).length) return;
+    const changed = commitTags(acTarget, tag);
+    const input = getEl(acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput');
+    if (input) input.value = '';
     clearAutocomplete();
-    apply();   // U1 완전 라이브: 칩 추가 즉시 검색 → 성공 시 자동 적용(onResult)
+    updateCommitButton();
+    if (changed) apply();   // U1 live: chip add schedules one search, then onResult auto-applies.
+  }
+
+  function commitPendingInputs() {
+    const includeInput = getEl('tagFilterInput');
+    const excludeInput = getEl('tagFilterExcludeInput');
+    const includeText = includeInput ? includeInput.value.trim() : '';
+    const excludeText = excludeInput ? excludeInput.value.trim() : '';
+    if (!includeText && !excludeText) return;
+    let changed = false;
+    if (includeText) changed = commitTags('include', includeText) || changed;
+    if (excludeText) changed = commitTags('exclude', excludeText) || changed;
+    if (includeInput) includeInput.value = '';
+    if (excludeInput) excludeInput.value = '';
+    clearAutocomplete();
+    updateCommitButton();
+    if (changed) apply();
   }
 
   function bindAutocompleteInput(inputId, target) {
@@ -260,6 +352,7 @@ export function createQuickFilterController(deps) {
 
     input.addEventListener('input', function() {
       acTarget = target;
+      updateCommitButton();
       const query = this.value.trim();
       if (query.length < 2) {
         clearAutocomplete();
@@ -267,6 +360,7 @@ export function createQuickFilterController(deps) {
       }
       clearTimeout(acTimer);
       acTimer = setTimeout(() => {
+        latestAcRequest = {target, query};
         send({type: 'tag_filter_ac', query});
       }, 150);
     });
@@ -289,6 +383,7 @@ export function createQuickFilterController(deps) {
         }
       } else if (event.key === 'Escape') {
         clearAutocomplete();
+        updateCommitButton();
       }
     });
   }
@@ -297,6 +392,7 @@ export function createQuickFilterController(deps) {
     bindAutocompleteInput('tagFilterInput', 'include');
     bindAutocompleteInput('tagFilterExcludeInput', 'exclude');
     bindPresetTooltip();
+    updateCommitButton();
   }
 
   function open() {
@@ -342,8 +438,10 @@ export function createQuickFilterController(deps) {
     ratingCounts = null;
     pendingAssignOnRestore = false;
     invalidateSearchRequest();
+    cancelPendingSearch();
     renderIncludeChips();
     renderExcludeChips();
+    updateCommitButton();
 
     const countEl = getEl('tagFilterCount');
     if (countEl) {
@@ -378,6 +476,7 @@ export function createQuickFilterController(deps) {
     active = false;
     ratingCounts = null;
     invalidateSearchRequest();
+    cancelPendingSearch();
     const assignBtn = getEl('tagFilterAssignBtn');
     if (assignBtn) assignBtn.disabled = true;
     const countEl = getEl('tagFilterCount');
@@ -392,6 +491,7 @@ export function createQuickFilterController(deps) {
   function removeExcludeTag(index) {
     excludeTags.splice(index, 1);
     renderExcludeChips();
+    updateCommitButton();
     if (!includeTags.length && !excludeTags.length) {
       clearFilter();
       return;
@@ -402,6 +502,7 @@ export function createQuickFilterController(deps) {
   function removeIncludeTag(index) {
     includeTags.splice(index, 1);
     renderIncludeChips();
+    updateCommitButton();
     if (!includeTags.length && !excludeTags.length) {
       clearFilter();
       return;
@@ -411,9 +512,9 @@ export function createQuickFilterController(deps) {
 
   function apply() {
     if (!includeTags.length && !excludeTags.length) return;
-    if (!isSocketOpen()) return;
     save();
-    send({type: 'tag_filter_search', tags: payload(), request_id: nextSearchRequestId()});
+    if (!isSocketOpen()) return;
+    scheduleSearch();
   }
 
   function assign() {
@@ -485,6 +586,11 @@ export function createQuickFilterController(deps) {
     const inputId = acTarget === 'exclude' ? 'tagFilterExcludeInput' : 'tagFilterInput';
     const input = getEl(inputId);
     if (!input || input.value.trim().length < 2) return;
+    const query = String(message.query || '').trim();
+    const currentQuery = input.value.trim();
+    if (query && query !== currentQuery) return;
+    if (latestAcRequest.query && latestAcRequest.query !== currentQuery) return;
+    if (latestAcRequest.target && latestAcRequest.target !== acTarget) return;
     acResults = message.results || [];
     acSelection = -1;
     renderAutocomplete();
@@ -496,6 +602,7 @@ export function createQuickFilterController(deps) {
       updateHighlight();
       return false;
     }
+    const focusedInputState = captureFocusedInputState();
 
     // search_state reconcile(같은 칩)인지 판별 — 같다면 캐시된 ratingCounts/매치 라벨을 보존한다.
     // (이게 "27,301 matched"가 잠깐 떴다 사라지던 원인: 매 search_state 마다 라벨을 비웠음.)
@@ -509,6 +616,7 @@ export function createQuickFilterController(deps) {
     if (!sameTags) ratingCounts = null;   // 칩이 바뀌면 옛 카운트는 무효
     renderIncludeChips();
     renderExcludeChips();
+    updateCommitButton();
     deps.syncRatingButtons();
 
     if (options.updateCount !== false) {
@@ -538,9 +646,11 @@ export function createQuickFilterController(deps) {
       const tags = payload();
       if (tags.length) {
         pendingAssignOnRestore = active;
-        send({type: 'tag_filter_search', tags, request_id: nextSearchRequestId()});
+        scheduleSearch();
       }
     }
+    restoreFocusedInputState(focusedInputState);
+    updateCommitButton();
     return true;
   }
 
@@ -668,6 +778,7 @@ export function createQuickFilterController(deps) {
     excludeTags = normalizeTags(p.exclude);
     renderIncludeChips();
     renderExcludeChips();
+    updateCommitButton();
     hidePresetTip();
     const el = getEl('tagFilterPresets');
     if (el) el.setAttribute('hidden', '');
@@ -690,6 +801,7 @@ export function createQuickFilterController(deps) {
     setPresets,
     togglePresets,
     toggleSaveRow,
+    commitPendingInputs,
     confirmSavePreset,
     loadPresetAt,
     deletePresetAt,

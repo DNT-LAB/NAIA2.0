@@ -347,7 +347,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260613-tagfiltercount')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260704-quickfilter-run1')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -7804,6 +7804,7 @@ function removeTagFilterExcludeTag(idx) { if (quickFilter) quickFilter.removeExc
 function removeTagFilterTag(idx) { if (quickFilter) quickFilter.removeIncludeTag(idx); }
 function applyTagFilter() { if (quickFilter) quickFilter.apply(); }
 function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
+function commitPendingTagFilterText() { if (quickFilter) quickFilter.commitPendingInputs(); }
 function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
 function toggleSaveTagFilterRow() { if (quickFilter) quickFilter.toggleSaveRow(); }
 function toggleTagFilterPresets() { if (quickFilter) quickFilter.togglePresets(); }

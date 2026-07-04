@@ -984,7 +984,11 @@ class APIService:
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
             generation_request = params.get('_generation_request')
-            if generation_request and generation_request.nai_vibe_transfer:
+            # NAID3(V3)는 Vibe Transfer 가 V4 계열과 다른 사양이라 사용자 요청으로 일시 차단한다.
+            # V4/V4.5 에서만 reference(vibe) 를 적용한다(Character Reference 는 아래 4.5 게이트에서
+            # 이미 차단됨). 되돌리려면 이 게이트(_apply_vibe)만 제거하면 된다.
+            _apply_vibe = 'nai-diffusion-4' in model_name
+            if _apply_vibe and generation_request and generation_request.nai_vibe_transfer:
                 print("✅ [EarlyBinding] Vibe Transfer Data from GenerationRequest")
                 nai_vibe_data = generation_request.nai_vibe_transfer
 
@@ -1001,7 +1005,7 @@ class APIService:
                 print(f"  - {len(nai_vibe_data.reference_image_multiple)} vibe(s) added")
                 print(f"  - Normalization: {nai_vibe_data.normalize}")
                 print(f"  - Strengths: {nai_vibe_data.reference_strength_multiple}")
-            elif params.get('_vibe_cluster_override') and params.get('reference_image_multiple'):
+            elif _apply_vibe and params.get('_vibe_cluster_override') and params.get('reference_image_multiple'):
                 cluster_info = params.get('_vibe_cluster_override') or {}
                 print(f"✅ [PromptOverride] Vibe cluster: {cluster_info.get('name', '')}")
                 api_parameters['normalize_reference_strength_multiple'] = params.get('normalize_reference_strength_multiple', False)
@@ -1013,7 +1017,7 @@ class APIService:
                 print(f"  - {len(api_parameters['reference_image_multiple'])} vibe(s) added")
                 print(f"  - Normalization: {api_parameters['normalize_reference_strength_multiple']}")
                 print(f"  - Strengths: {api_parameters['reference_strength_multiple']}")
-            else:
+            elif _apply_vibe:
                 # 🔄 Late Binding fallback for direct generation (non-queue)
                 if params.get('_skip_vibe_transfer_late_binding'):
                     print("⏭️ [LateBinding] Vibe Transfer skipped")

@@ -3490,6 +3490,16 @@ function setParam(key, value) {
   } else if (key === 'model' && artistThumbControl && typeof artistThumbControl.syncPromptFormat === 'function') {
     artistThumbControl.syncPromptFormat();
   }
+  // NAID3 로 바꾸면 CR/VT 를 즉시 차단(런처 비활성 재계산 + 열려 있으면 닫기).
+  if (key === 'model') {
+    if (moduleLauncherControl) moduleLauncherControl.updateState();
+    if (['character_reference', 'vibe_transfer'].includes(currentModuleId)
+        && naiModelBlocksReference()
+        && modulePopup.classList.contains('open')) {
+      closeModule();
+      showToast('NAID3에서는 Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'info');
+    }
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'set_param', key, value}));
   }
@@ -5959,7 +5969,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260617-gpufix')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-v3-refblock')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -5976,6 +5986,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260617-
       uploadComfyUiFreeWorkflow,
       openComfyUiWeb,
       setModuleParam,
+      naiReferenceBlocked: () => naiModelBlocksReference(),
     });
     moduleLauncherControl.render();
     moduleLauncherControl.bind();
@@ -6124,10 +6135,26 @@ function scheduleInitialHistoryRefresh(delayMs = 5000) {
   }, Math.max(250, Number(delayMs) || 5000));
 }
 
+// NAID3(V3)는 Character Reference / Vibe Transfer 가 V4 계열과 다른 사양이라 일시 차단한다
+// (사용자 요청). 백엔드 게이트(_apply_vibe='nai-diffusion-4' in model_name)와 동일 기준으로
+// 미러링한다 — 모델이 확정되기 전(빈 값)에는 차단하지 않는다(백엔드가 최종 안전망).
+function naiModelBlocksReference() {
+  if ((currentMode || modeSelect.value) !== 'NAI') return false;
+  const sel = document.getElementById('pModel');
+  const model = sel ? String(sel.value || '').trim() : '';
+  if (!model) return false;
+  return !model.includes('nai-diffusion-4');
+}
+
 function openModule(moduleId, options = {}) {
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
+    return;
+  }
+  // NAID3 에서 CR/VT 차단 (다른 사양 — 일시 미지원)
+  if (['character_reference', 'vibe_transfer'].includes(moduleId) && naiModelBlocksReference()) {
+    showToast('NAID3에서는 Character Reference / Vibe Transfer를 지원하지 않습니다 (다른 사양)', 'error');
     return;
   }
   if (imageModulePanels && moduleId !== 'vibe_transfer') {

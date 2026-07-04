@@ -187,6 +187,7 @@ export function createModuleLauncher({
   uploadComfyUiFreeWorkflow,
   openComfyUiWeb,
   setModuleParam,
+  naiReferenceBlocked = () => false,
 }) {
   const root = document.getElementById('moduleLauncher');
   let observer = null;
@@ -273,6 +274,10 @@ export function createModuleLauncher({
     if (!config) return false;
     if (!isVisibleInMode(moduleId)) return true;
     if (config.disabled) return true;
+    // NAID3(V3)는 Character Reference / Vibe Transfer 가 다른 사양이라 일시 차단(사용자 요청).
+    if ((moduleId === 'character_reference' || moduleId === 'vibe_transfer') && naiReferenceBlocked()) {
+      return true;
+    }
     if (moduleId === 'comfyui_workflow_default') {
       const state = typeof getComfyUiWorkflowState === 'function' ? getComfyUiWorkflowState() : null;
       return !Boolean(state?.has_custom);

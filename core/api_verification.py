@@ -36,7 +36,10 @@ class VerifyResult:
 
 
 NAI_TEST_TOKEN = "api_test_BCF13af9#d"
-NAI_SUBSCRIPTION_URL = "https://api.novelai.net/user/subscription"
+# NAI 서버 이전 공지(2026-07): /user/information, /user/data, /user/subscription 은
+# https://image.novelai.net 에서 호출해야 하며 기존 api.novelai.net 경로는 이미 죽었다.
+# (생성/업스케일 등 다른 엔드포인트는 이전 대상 아님.)
+NAI_SUBSCRIPTION_URL = "https://image.novelai.net/user/subscription"
 
 
 def verify_nai_token(token: str) -> VerifyResult:

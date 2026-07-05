@@ -307,6 +307,30 @@ def _has_wildcards(prompt_context: Any) -> bool:
     return bool(isinstance(wildcards, dict) and (wildcards.get("history") or wildcards.get("state")))
 
 
+def _current_wildcard_frozen_state(context: WebSessionContext) -> dict[str, Any]:
+    try:
+        service = context._wildcard_service()
+        getter = getattr(service, "_frozen_state", None)
+        state = getter() if callable(getter) else None
+    except Exception:
+        state = None
+    if not isinstance(state, dict):
+        return {"locations": [], "legacy": [], "characters": []}
+    return {
+        "locations": list(state.get("locations") or []),
+        "legacy": list(state.get("legacy") or []),
+        "characters": list(state.get("characters") or []),
+    }
+
+
+def _with_current_wildcard_frozen_state(context: WebSessionContext, payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    out["frozen"] = _current_wildcard_frozen_state(context)
+    return out
+
+
 def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str, Any]:
     item = context.result_store.latest_item
     metadata_payload = context.result_store.latest_metadata_payload if isinstance(context.result_store.latest_metadata_payload, dict) else {}
@@ -824,7 +848,7 @@ def register_result_display_routes(
         payload = session_context.result_store.latest_metadata_payload
         if payload is None:
             return JSONResponse({"error": "No image generated yet"}, status_code=404)
-        return payload
+        return _with_current_wildcard_frozen_state(session_context, payload)
 
     @app.get("/api/history/list")
     async def api_history_list(page: int = 0, per_page: int = 30):
@@ -926,11 +950,13 @@ def register_result_display_routes(
         item = history_item_from_viewer_path(session_context, path)
         target = validate_viewer_path(session_context, path)
         if item is not None:
-            return session_context.result_store.history_meta_payload(item.history_id, include_full=full)
+            payload = session_context.result_store.history_meta_payload(item.history_id, include_full=full)
+            return _with_current_wildcard_frozen_state(session_context, payload)
         if target is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         try:
-            return await run_in_thread(_metadata_for_disk_image, target, target.name, full)
+            payload = await run_in_thread(_metadata_for_disk_image, target, target.name, full)
+            return _with_current_wildcard_frozen_state(session_context, payload)
         except Exception as exc:
             return JSONResponse({"error": f"Metadata extract failed: {exc}"}, status_code=400)
 
@@ -964,7 +990,8 @@ def register_result_display_routes(
     @app.get("/api/history/meta/{history_id}")
     async def api_history_meta(history_id: str, full: bool = False):
         try:
-            return session_context.result_store.history_meta_payload(history_id, include_full=full)
+            payload = session_context.result_store.history_meta_payload(history_id, include_full=full)
+            return _with_current_wildcard_frozen_state(session_context, payload)
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
 

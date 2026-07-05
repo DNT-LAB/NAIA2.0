@@ -281,8 +281,59 @@ def clear_frozen_character_slot(app_context, slot: Any | None = None) -> bool:
     return store.pop(str(slot or "").strip(), None) is not None
 
 
+def _all_frame_slot_ids(settings: dict | None) -> list[str]:
+    frames = settings.get("character_frames") if isinstance(settings, dict) else []
+    if not isinstance(frames, list):
+        return []
+    return [str(_frame_uuid(frame) or index) for index, frame in enumerate(frames, 1) if isinstance(frame, dict)]
+
+
+def _prune_frozen_character_slots(app_context, settings: dict | None) -> bool:
+    store = _character_freeze_store(app_context)
+    if not isinstance(store, dict) or not store:
+        return False
+    valid_slots = set(_all_frame_slot_ids(settings))
+    removed = False
+    for slot in list(store.keys()):
+        if str(slot) not in valid_slots:
+            store.pop(slot, None)
+            removed = True
+    return removed
+
+
 def _active_frame_slot_ids(frames: list[dict]) -> list[str]:
     return [str(_frame_uuid(frame) or index) for index, frame in enumerate(frames, 1)]
+
+
+def _frozen_character_roll(slot: Any, prompt: Any, slot_label: Any = None) -> dict[str, Any]:
+    roll: dict[str, Any] = {
+        "key": "(frozen)",
+        "value": str(prompt or ""),
+        "location": "character",
+        "slot": str(slot or ""),
+    }
+    if slot_label is not None:
+        roll["slot_label"] = slot_label
+    return roll
+
+
+def _append_frozen_character_roll(rolls: list, slot: Any, prompt: Any, slot_label: Any = None) -> None:
+    rolls.append(_frozen_character_roll(slot, prompt, slot_label))
+
+
+def _replace_frozen_character_roll(rolls: list[dict[str, Any]], slot: Any, prompt: Any, slot_label: Any = None) -> list[dict[str, Any]]:
+    slot_key = str(slot or "")
+    kept = [
+        dict(roll)
+        for roll in rolls
+        if not (
+            isinstance(roll, dict)
+            and roll.get("location") == "character"
+            and str(roll.get("slot") or "") == slot_key
+        )
+    ]
+    kept.append(_frozen_character_roll(slot_key, prompt, slot_label))
+    return kept
 
 
 def _snapshot_result(snapshot: dict, frame_slot_ids: list[str]) -> dict:
@@ -310,6 +361,7 @@ def _overlay_frozen_character_slots(app_context, result: dict, frame_slot_ids: l
     if not ids:
         ids = frame_slot_ids[:len(characters)]
     id_to_index = {slot_id: index for index, slot_id in enumerate(ids) if slot_id}
+    rolls = [dict(roll) for roll in result.get("wildcard_rolls") or [] if isinstance(roll, dict)]
     for frame_index, slot_id in enumerate(frame_slot_ids):
         payload = frozen.get(slot_id)
         if not payload:
@@ -326,7 +378,11 @@ def _overlay_frozen_character_slots(app_context, result: dict, frame_slot_ids: l
         characters[index] = payload["prompt"]
         ucs[index] = payload.get("uc", "")
         ids[index] = slot_id
-    return {"characters": characters, "uc": ucs, "character_ids": ids}
+        rolls = _replace_frozen_character_roll(rolls, slot_id, payload["prompt"], frame_index + 1)
+    merged = {"characters": characters, "uc": ucs, "character_ids": ids}
+    if rolls:
+        merged["wildcard_rolls"] = rolls
+    return merged
 
 
 def _character_rolls_from_context(context: PromptContext, start_index: int) -> list[dict[str, Any]]:
@@ -427,6 +483,7 @@ def character_params_from_settings(
         if settings is not None
         else load_character_settings(mode, save_root=save_root)
     )
+    _prune_frozen_character_slots(app_context, normalized)
     # (2) Inactive / no active frames → never consume a stale snapshot.
     frames = active_character_frames(normalized)
     if not frames:
@@ -441,7 +498,7 @@ def character_params_from_settings(
         if snapshot is not None:
             result = _snapshot_result(snapshot, frame_slot_ids)
             result = _overlay_frozen_character_slots(app_context, result, frame_slot_ids)
-            _replay_character_snapshot_rolls(app_context, snapshot, reuse_current_context=reuse_current_context)
+            _replay_character_snapshot_rolls(app_context, result, reuse_current_context=reuse_current_context)
             return result
 
     # (4) Fresh expansion (not stored here — see docstring).
@@ -462,6 +519,9 @@ def character_params_from_settings(
         if frozen_payload:
             prompt = frozen_payload["prompt"]
             uc = frozen_payload.get("uc", "")
+            rolls = getattr(context, "wildcard_rolls", None)
+            if isinstance(rolls, list):
+                _append_frozen_character_roll(rolls, slot, prompt, slot_index)
         else:
             prompt = _expand_character_text(
                 frame.get("prompt", ""),

@@ -217,6 +217,7 @@ export function createResultContextMenu({
   onSetVibeTransfer = null,
   onDelete = null,
   getWildcardFreezeState = () => ({}),
+  setWildcardFreezeState = null,
   onToggleWildcardFreeze = null,
   getMode = () => '',
   getCurrentSavedPath = () => '',
@@ -228,6 +229,7 @@ export function createResultContextMenu({
   let menu = null;
   let metadataModal = null;
   let sidePopup = null;
+  let popupWildcardFreezeState = null;
   let menuVersion = 0;
   const submenuCloseTimers = new WeakMap();
   const DELETE_MODE_KEY = 'naia_result_delete_mode';
@@ -967,13 +969,61 @@ export function createResultContextMenu({
     return data && typeof data === 'object' ? data : {};
   }
 
+  function normalizeWildcardFreezeState(state) {
+    const src = state && typeof state === 'object' ? state : {};
+    return {
+      locations: Array.isArray(src.locations) ? src.locations.slice() : [],
+      legacy: Array.isArray(src.legacy) ? src.legacy.slice() : [],
+      characters: Array.isArray(src.characters) ? src.characters.slice() : [],
+    };
+  }
+
+  function setPopupWildcardFreezeState(state) {
+    popupWildcardFreezeState = normalizeWildcardFreezeState(state);
+    if (typeof setWildcardFreezeState === 'function') {
+      setWildcardFreezeState(popupWildcardFreezeState);
+    }
+  }
+
+  function syncWildcardFreezeStateFromMeta(data) {
+    if (data && typeof data === 'object' && data.frozen && typeof data.frozen === 'object') {
+      setPopupWildcardFreezeState(data.frozen);
+    }
+  }
+
   function currentWildcardFreezeState() {
+    if (popupWildcardFreezeState) return popupWildcardFreezeState;
     try {
       const state = typeof getWildcardFreezeState === 'function' ? getWildcardFreezeState() : {};
-      return state && typeof state === 'object' ? state : {};
+      return normalizeWildcardFreezeState(state);
     } catch (error) {
-      return {};
+      return normalizeWildcardFreezeState({});
     }
+  }
+
+  function applyWildcardFreezeMutation(payload, frozen) {
+    const next = normalizeWildcardFreezeState(currentWildcardFreezeState());
+    const kind = String(payload?.kind || payload?.type || '').toLowerCase();
+    if (kind === 'character' || payload?.slot) {
+      const slot = String(payload?.slot || '');
+      next.characters = next.characters.filter(item => String(item.slot || '') !== slot);
+      if (frozen && slot) {
+        next.characters.push({
+          slot,
+          prompt: String(payload?.prompt || ''),
+          uc: String(payload?.uc || ''),
+        });
+      }
+      setPopupWildcardFreezeState(next);
+      return;
+    }
+    const location = String(payload?.location || '');
+    const name = String(payload?.key || payload?.name || '');
+    next.locations = next.locations.filter(item => !(String(item.location || '') === location && String(item.name || '') === name));
+    if (frozen && location && name) {
+      next.locations.push({location, name, value: String(payload?.value || '')});
+    }
+    setPopupWildcardFreezeState(next);
   }
 
   function isLocationFrozen(entry) {
@@ -1018,6 +1068,7 @@ export function createResultContextMenu({
     if (typeof onToggleWildcardFreeze === 'function') {
       onToggleWildcardFreeze(payload, nextFrozen);
     }
+    applyWildcardFreezeMutation(payload, nextFrozen);
     updateFreezeButton(button, nextFrozen);
     showToast(nextFrozen ? 'Wildcard freeze enabled' : 'Wildcard freeze cleared', 'success');
   }
@@ -1026,6 +1077,7 @@ export function createResultContextMenu({
     try {
       const data = await fetchFullMeta(context);
       if (!data) { showToast('No image is selected', 'error'); return; }
+      syncWildcardFreezeStateFromMeta(data);
       openSidePopup('Payload', renderPayloadHtml(data));
     } catch (error) {
       console.error('Failed to load payload', error);
@@ -1037,6 +1089,7 @@ export function createResultContextMenu({
     try {
       const data = await fetchFullMeta(context);
       if (!data) { showToast('No image is selected', 'error'); return; }
+      syncWildcardFreezeStateFromMeta(data);
       const raw = rawFromMeta(data);
       const promptContext = raw.prompt_context || {};
       const generationParams = raw.generation_params || {};
@@ -1273,7 +1326,7 @@ export function createResultContextMenu({
   };
 }
 
-// cache-bust marker: 20260704-wc-freeze-run2 (Payload viewer + wildcard freeze pins)
+// cache-bust marker: 20260705-wc-freeze-bugs (Payload viewer + wildcard freeze pins)
 function defaultEscHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({
     '&': '&amp;',

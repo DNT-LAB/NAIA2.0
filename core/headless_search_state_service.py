@@ -298,19 +298,22 @@ class HeadlessSearchStateService:
             print(f"Headless Remote: last-search persist failed - {exc}", flush=True)
             return None
 
-    def restore_last_search(self) -> bool:
+    def restore_last_search(self, progress=None) -> bool:
         """전용 last-search 파일이 있으면 search_results/snapshot/master_base 로 복원(True=복원).
         runner-cache 스킵(태그필터 활성 시)과 무관하게 무조건 복원 — 사용자의 실제 마지막 작업
-        데이터셋(비필터 원본)이라, 풀 등급/태그필터는 그 위에 재적용된다."""
+        데이터셋(비필터 원본)이라, 풀 등급/태그필터는 그 위에 재적용된다.
+
+        ``progress(loaded, total)`` 가 주어지면 대용량 파일을 row-batch 청크로 읽어(이벤트 루프
+        양보 + 진행률 보고) 시작 대기시간 체감을 줄인다(결과는 통짜 read 와 동일)."""
         context = self.context
         try:
             path = self.last_search_parquet_path()
             if not path.exists():
                 return False
-            import pandas as pd
+            from core.parquet_chunk_loader import read_parquet_chunked
             from core.search_result_model import SearchResultModel
 
-            frame = pd.read_parquet(path)
+            frame = read_parquet_chunked(path, progress=progress)
             if frame is None or frame.empty:
                 return False
             # 컬럼 검증(Codex): 프롬프트 컬럼('general')이 없으면 검색 결과가 아닌 외부/손상 파일로
@@ -318,7 +321,7 @@ class HeadlessSearchStateService:
             # SearchResultModel 이 없을 때 graceful degrade 하므로 강제하지 않는다(=id 없는 정상
             # 커스텀셋도 수용).
             if "general" not in getattr(frame, "columns", []):
-                print("Headless Remote: last-search restore skipped — 'general' 컬럼 없음", flush=True)
+                print("Headless Remote: last-search restore skipped - no 'general' column", flush=True)
                 return False
             frame = frame.reset_index(drop=True)
             context.search_results = SearchResultModel(frame)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any
 import weakref
 
@@ -19,6 +19,11 @@ from core.web_session_context import WebSessionContext
 
 
 DEFAULT_RATINGS = ("g", "s", "q", "e")
+
+# Guards the lazy creation of the per-context search-pool load lock so a warmup
+# thread and an early client thread can't each mint a *different* lock (which
+# would defeat the serialization and start duplicate large parquet reads).
+_SEARCH_POOL_LOCK_CREATE_GUARD = Lock()
 
 
 @dataclass
@@ -81,7 +86,9 @@ class HeadlessRandomPromptService:
         """Preload the expensive headless prompt runtime without generating."""
 
         self._ensure_headless_runtime()
-        ready = self._ensure_search_results({})
+        # announce=True: stream chunk progress so a large startup pool shows the
+        # Tag/Tag-Filter lock + '풀 로딩 N%' instead of a silent stall.
+        ready = self._ensure_search_results({}, announce=True)
         if ready and self.context.search_results is not None:
             prime = getattr(self.context.search_results, "prime_random_cache", None)
             if callable(prime):
@@ -686,7 +693,21 @@ class HeadlessRandomPromptService:
             fallback_data_dirs=fallback_data_roots,
         )
 
-    def _ensure_search_results(self, settings: dict[str, Any]) -> bool:
+    def _search_pool_load_lock(self):
+        # Serialize disk restores so the startup warmup and a client's
+        # get_search_state don't both read the (large) pool parquet at once.
+        # Double-checked creation under a module guard so racing threads share
+        # the SAME lock (a plain check-then-set could mint two).
+        lock = getattr(self.context, "_search_pool_load_lock_obj", None)
+        if lock is None:
+            with _SEARCH_POOL_LOCK_CREATE_GUARD:
+                lock = getattr(self.context, "_search_pool_load_lock_obj", None)
+                if lock is None:
+                    lock = Lock()
+                    self.context._search_pool_load_lock_obj = lock
+        return lock
+
+    def _ensure_search_results(self, settings: dict[str, Any], *, announce: bool = False) -> bool:
         if settings.get("wildcard_standalone", False):
             return True
 
@@ -699,37 +720,71 @@ class HeadlessRandomPromptService:
             safe_print(f"🌐 Headless Remote: search_results restored from memory snapshot ({self.context.search_results.get_count()} rows)")
             return True
 
-        # 마지막 검색(작업 데이터셋) 복원 (Part 3) — runner 캐시보다 우선이며, 태그필터가 영속돼
-        # 있어도 무조건 복원한다(이건 사용자의 실제 마지막 *원본* 데이터셋이라 _should_skip_fallback
-        # 대상이 아님; 풀 등급/태그필터는 복원 위에 재적용된다). 재시작/가져오기 후에도 데이터가
-        # 살아 있어 빈 풀/빈 매치 라벨 레이스(Codex 잔여)도 함께 해소된다.
-        if self.context.restore_last_search():
-            safe_print(f"🌐 Headless Remote: search_results restored from last-search cache ({self.context.search_results.get_count()} rows)")
-            return True
-
-        for path, label in self._fallback_sources():
-            if not path.exists():
-                continue
-            if self._should_skip_fallback_source(label, None):
-                continue
-            try:
-                frame = pd.read_parquet(path)
-                if self._should_skip_fallback_source(label, frame):
-                    continue
-                if "rating" in frame.columns and label == "fallback parquet":
-                    frame = frame[frame["rating"] == "s"]
-                if frame.empty:
-                    continue
-                frame = frame.reset_index(drop=True)
-                self.context.search_results = SearchResultModel(frame)
-                self.context.search_results_snapshot = frame.copy()
-                if "tag archive" in label:
-                    self.context.search_results_scope = "tag_archive"
-                safe_print(f"🌐 Headless Remote: search_results restored from {label} ({self.context.search_results.get_count()} rows)")
+        # Disk restore — serialized. ``announce`` streams chunk progress to the
+        # Remote Web clients (Tag/Tag-Filter lock + '풀 로딩 N%') so a large temp
+        # pool no longer stalls startup as one opaque wait.
+        with self._search_pool_load_lock():
+            if self.context.search_results is not None and not self.context.search_results.is_empty():
                 return True
-            except Exception as exc:
-                safe_print(f"🌐 Headless Remote: search_results restore failed from {path} — {exc}")
-        return False
+            snapshot = getattr(self.context, "search_results_snapshot", None)
+            if snapshot is not None and not getattr(snapshot, "empty", True):
+                self.context.search_results = SearchResultModel(snapshot.copy())
+                safe_print(f"🌐 Headless Remote: search_results restored from memory snapshot ({self.context.search_results.get_count()} rows)")
+                return True
+
+            from core.parquet_chunk_loader import read_parquet_chunked
+
+            def _new_progress():
+                # A FRESH announce lifecycle per read source: the silent/announced
+                # decision is made from each source's own row count, so a tiny
+                # invalid last-search file can't suppress the progress/lock for a
+                # subsequent large fallback in the same restore attempt.
+                if not announce:
+                    return None, None
+                from core.parquet_chunk_loader import make_search_load_progress
+
+                return make_search_load_progress(self.context)
+
+            # 마지막 검색(작업 데이터셋) 복원 (Part 3) — runner 캐시보다 우선이며, 태그필터가 영속돼
+            # 있어도 무조건 복원한다(이건 사용자의 실제 마지막 *원본* 데이터셋이라 _should_skip_fallback
+            # 대상이 아님; 풀 등급/태그필터는 복원 위에 재적용된다). 재시작/가져오기 후에도 데이터가
+            # 살아 있어 빈 풀/빈 매치 라벨 레이스(Codex 잔여)도 함께 해소된다.
+            progress, done = _new_progress()
+            try:
+                if self.context.restore_last_search(progress=progress):
+                    safe_print(f"🌐 Headless Remote: search_results restored from last-search cache ({self.context.search_results.get_count()} rows)")
+                    return True
+            finally:
+                if done is not None:
+                    done()
+
+            for path, label in self._fallback_sources():
+                if not path.exists():
+                    continue
+                if self._should_skip_fallback_source(label, None):
+                    continue
+                progress, done = _new_progress()
+                try:
+                    frame = read_parquet_chunked(path, progress=progress)
+                    if self._should_skip_fallback_source(label, frame):
+                        continue
+                    if "rating" in frame.columns and label == "fallback parquet":
+                        frame = frame[frame["rating"] == "s"]
+                    if frame.empty:
+                        continue
+                    frame = frame.reset_index(drop=True)
+                    self.context.search_results = SearchResultModel(frame)
+                    self.context.search_results_snapshot = frame.copy()
+                    if "tag archive" in label:
+                        self.context.search_results_scope = "tag_archive"
+                    safe_print(f"🌐 Headless Remote: search_results restored from {label} ({self.context.search_results.get_count()} rows)")
+                    return True
+                except Exception as exc:
+                    safe_print(f"🌐 Headless Remote: search_results restore failed from {path} — {exc}")
+                finally:
+                    if done is not None:
+                        done()
+            return False
 
     def _should_skip_fallback_source(self, label: str, frame: Any | None) -> bool:
         if label not in {

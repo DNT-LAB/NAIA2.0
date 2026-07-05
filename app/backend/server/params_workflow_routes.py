@@ -249,14 +249,21 @@ def _apply_uploaded_search_parquet(context: WebSessionContext, content: bytes, a
         raise ValueError("Uploaded parquet is empty")
 
     import pandas as pd
+    from core.parquet_chunk_loader import read_parquet_chunked, make_search_load_progress
 
-    uploaded = normalize_custom_parquet_frame(pd.read_parquet(io.BytesIO(content)))
-    frame = uploaded
-    if action == "merge":
-        current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
-        if current is not None and not current.empty:
-            frame = normalize_custom_parquet_frame(pd.concat([current, uploaded], ignore_index=True))
-    install_custom_parquet_frame(context, frame)
+    # Chunked read of the uploaded bytes + progress broadcast (Tag/Tag-Filter lock
+    # + '풀 로딩 N%'), matching the saved load/merge path.
+    progress, done = make_search_load_progress(context)
+    try:
+        uploaded = normalize_custom_parquet_frame(read_parquet_chunked(content, progress=progress))
+        frame = uploaded
+        if action == "merge":
+            current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
+            if current is not None and not current.empty:
+                frame = normalize_custom_parquet_frame(pd.concat([current, uploaded], ignore_index=True))
+        install_custom_parquet_frame(context, frame)
+    finally:
+        done()
     save_runner_parquet(context)
     return {
         "ok": True,
@@ -310,7 +317,13 @@ def register_params_workflow_routes(
             return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:
             return JSONResponse({"error": f"Parquet upload failed: {exc}"}, status_code=400)
-        await broadcast_json(clients, session_context.search_state_payload())
+        # Carry the pool-swap marker (loaded/merged) so the frontend auto re-applies
+        # the tag filter to the new pool — same as the WS load_parquet/merge_parquet path.
+        state = session_context.search_state_payload()
+        if isinstance(state, dict):
+            key = "merged" if action == "merge" else "loaded"
+            state[key] = (result.get("filename") if isinstance(result, dict) else None) or True
+        await broadcast_json(clients, state)
         return result
 
     @app.get("/api/comfyui/workflow/state")

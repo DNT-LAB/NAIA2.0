@@ -10,6 +10,8 @@ export function createSearchPanel({
   getQuickFilter,
   getCurrentModuleId,
   bindTagAssist,
+  lockTagSurface = () => {},
+  unlockTagSurface = () => {},
 }) {
   let searchingActive = false;
   let initialFilterRestoreDone = false; // 시작 시 Tag Filter 자동 Search→Assign 1회 가드
@@ -103,6 +105,7 @@ export function createSearchPanel({
   function sendActiveRatings() {
     const ws = getWs();
     if (ws && ws.readyState === WebSocket.OPEN) {
+      lockTagSurface();   // G/S/Q/E recompute in flight → released by onSearchState
       ws.send(JSON.stringify({ type: 'set_active_ratings', ratings: getActiveRatings() }));
     }
   }
@@ -188,6 +191,9 @@ export function createSearchPanel({
       action: mode === 'merge' ? 'merge' : 'load',
       filename: file.name || 'uploaded.parquet',
     });
+    // Lock now; the successful path stays locked until the server broadcasts
+    // search_state (onSearchState releases). Only failures unlock here.
+    lockTagSurface();
     try {
       const response = await fetch(`/api/search/parquet/upload?${params}`, {
         method: 'POST',
@@ -203,9 +209,11 @@ export function createSearchPanel({
           // Keep the generic message when the server did not return JSON.
         }
         console.error(message);
+        unlockTagSurface();
       }
     } catch (error) {
       console.error('Parquet upload failed', error);
+      unlockTagSurface();
     }
   }
 
@@ -230,6 +238,7 @@ export function createSearchPanel({
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     closeParquetMenu();
+    lockTagSurface();
     ws.send(JSON.stringify({type: 'search_parquet_action', action}));
   }
 
@@ -306,10 +315,15 @@ export function createSearchPanel({
     if (quickFilter && quickFilter.setPresets) quickFilter.setPresets(message.filter_presets || []);
     const serverPreferences = message.filter_preferences;
     if (serverPreferences && quickFilter) {
-      // 시작 후 첫 search_state 에서 영속된 Tag Filter 가 활성+태그 보유 시 자동 Search→Assign 1회.
+      // 시작 후 첫 search_state 에서 영속된 Tag Filter 칩이 있으면 자동 Search→Assign 1회.
       // (그 이후 search_state 는 기존대로 {send:false} — 카운트 갱신마다 재검색/재할당 방지)
-      const hasActiveTags = serverPreferences.tag_filter_active
-        && (((serverPreferences.tag_filter || []).length) || ((serverPreferences.tag_filter_exclude || []).length));
+      // ⚠️ '칩 존재' 기준(과거엔 tag_filter_active 도 요구): Parquet 로드가 필터를 비활성으로
+      // 영속(tag_filter_active=false)해도 칩은 draft 로 남으므로, 재시작 시 그 칩이 재적용되지
+      // 않고 'N matched' 가 비어버리던 문제(사용자 리포트). 칩이 있으면 사용자가 원하는 필터로 보고
+      // startup 1회 재적용 → active=true 로 재영속(assign→save). 시작 경로 한정(initialFilterRestoreDone
+      // 가드)이라 green search/일반 search_state 에는 영향 없음.
+      const hasActiveTags = ((serverPreferences.tag_filter || []).length)
+        || ((serverPreferences.tag_filter_exclude || []).length);
       // 데이터셋이 아직 로드되기 전(랜덤 warmup 레이스)이면 자동 적용을 '소비'하지 않는다. 빈
       // 스냅샷에 필터를 걸면 0매칭 → 빈 필터가 할당돼 풀이 비고(Random "no matching rows"), 매치
       // 카운트 라벨도 비어버린다(사용자 리포트: 4,810 매칭인데 라벨 공백). 데이터가 실제로 로드된
@@ -329,6 +343,15 @@ export function createSearchPanel({
       syncRatingButtons();
     } else {
       syncRatingButtons();
+    }
+    // Parquet load/merge swapped the working pool → the backend deactivated the
+    // filter and kept the chips as a draft, leaving the Tag Filter's 'N matched'
+    // stale (old pool). Auto re-apply the draft to the NEW pool so the filter
+    // follows the dataset and every count recomputes (user-chosen sync). Guarded
+    // to parquet-swap states only (assign/rating search_states carry no
+    // loaded/merged, so this never loops).
+    if ((message.loaded || message.merged) && quickFilter && quickFilter.onPoolSwap) {
+      quickFilter.onPoolSwap();
     }
     if (getCurrentModuleId() === 'search') renderSearch(message);
   }
@@ -537,6 +560,7 @@ export function createSearchPanel({
       ratings['rating_' + key] = searchRatingState[key];
     }
     searchingActive = true;
+    lockTagSurface();   // heavy archive scan → released by onSearchState (search_progress keeps it alive)
     saveFilterState({query, exclude});
     const bucketRange = bucketState.loaded
       ? { bucket_start: bucketState.start, bucket_end: bucketState.end }
@@ -551,6 +575,7 @@ export function createSearchPanel({
   function loadParquet(filename) {
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    lockTagSurface();
     ws.send(JSON.stringify({
       type: parquetPickMode === 'merge' ? 'merge_parquet' : 'load_parquet',
       filename,
@@ -560,6 +585,7 @@ export function createSearchPanel({
   function restoreSnapshot() {
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    lockTagSurface();
     ws.send(JSON.stringify({ type: 'restore_snapshot' }));
   }
 

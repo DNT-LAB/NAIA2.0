@@ -347,7 +347,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260704-quickfilter-run1')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260705-parqswap')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -364,6 +364,7 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260704-quickf
       catStyle,
       fmtCount,
       showToast,
+      lockTagSurface,
     });
     quickFilter.bindInputs();
   })
@@ -692,7 +693,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260704-wc-freeze-run2')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260705-wc-freeze-bugs')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -728,6 +729,9 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       getWildcardFreezeState: () => latestWildcardFreezeState,
+      setWildcardFreezeState: state => {
+        latestWildcardFreezeState = (state && typeof state === 'object') ? state : {locations: [], legacy: [], characters: []};
+      },
       onToggleWildcardFreeze: (payload, freeze) => {
         setModuleParam('wildcard', freeze ? 'wildcard_freeze' : 'wildcard_unfreeze', JSON.stringify(payload || {}));
       },
@@ -1261,7 +1265,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260602-tagfilter1')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260705-parqswap2')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -1273,6 +1277,8 @@ const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260602-tagfil
       getQuickFilter: () => quickFilter,
       getCurrentModuleId: () => currentModuleId,
       bindTagAssist,
+      lockTagSurface,
+      unlockTagSurface,
     });
   })
   .catch(error => {
@@ -2534,6 +2540,7 @@ const wsMessageHandlers = {
   search_state: onSearchState,
   rating_update: onRatingUpdate,
   search_progress: onSearchProgress,
+  search_loading: onSearchLoading,
   bucket_dates: onBucketDates,
   depth_state: onDepthState,
   depth_sample: onDepthSample,
@@ -5153,6 +5160,12 @@ function send(cmd) {
     return;
   }
   if (cmd === 'random') {
+    // Pool still loading (chunk load / parquet load-merge-upload) → block Random
+    // (covers the ALT+ENTER shortcut, which bypasses the button's pointer-events).
+    if (poolLoad.isActive()) {
+      showToast('검색 풀을 불러오는 중입니다. 완료 후 다시 시도해주세요.', 'error');
+      return;
+    }
     // Sequence 탭에서 메인 Random = 현재 매칭 전체에서 랜덤 그룹 연속 생성(req2/3).
     if (activePromptTab === 'sequence' && sequencePresetControl?.randomGenerate) {
       sequencePresetControl.randomGenerate();
@@ -5959,6 +5972,153 @@ let currentModuleId = null;
 let moduleSendTimer = null;
 let pendingModuleEdit = null;
 
+// ── Tag / Tag Filter surface lock ────────────────────────────────────────────
+// A search / parquet load-merge / rating toggle / tag-filter search on a large
+// archive (or a slow machine) mutates the shared result pool. Interleaving a
+// second op before the first's reply corrupts the pool/rating state, so we lock
+// the Tag Filter popup and (when open) the Search module while any such request
+// is in flight. Release is keyed to the actual completion WS event, not a fixed
+// timeout — so a fast backend barely shows the overlay while a slow one stays
+// protected until it truly finishes.
+//
+// Lock reasons are tracked per SOURCE (not a single boolean) so an overlapping
+// op can't be unlocked by another op's completion. Two independent completion
+// channels exist: 'pool' ops (search / rating / parquet / restore / chunk-load)
+// settle on search_state (or search_loading:false); a background 'tagfilter'
+// search settles on tag_filter_result / _assigned. The pool ops are serialized
+// server-side, so collapsing them to one 'pool' key is safe; only 'tagfilter'
+// genuinely overlaps them. A 120ms show-delay suppresses the flash for
+// sub-perceptual round-trips; the 90s safety timer force-clears every source if
+// a reply is genuinely lost (re-armed by search_progress for long scans).
+const tagSurfaceLock = (() => {
+  const SHOW_DELAY_MS = 120;
+  const SAFETY_MS = 90000;
+  const sources = new Set();   // active lock reasons: 'pool' | 'tagfilter'
+  let showTimer = null;
+  let safetyTimer = null;
+  const isBusy = () => sources.size > 0;
+  function paint() {
+    const on = isBusy();
+    const tf = document.getElementById('tagFilterLock');
+    if (tf) tf.classList.toggle('active', on);
+    syncModuleSearchLock();
+  }
+  function syncModuleSearchLock() {
+    const el = document.getElementById('moduleSearchLock');
+    if (el) el.classList.toggle('active', isBusy() && currentModuleId === 'search');
+  }
+  function setCaption(text) {
+    const value = String(text || '');
+    document.querySelectorAll('.panel-lock-caption').forEach(el => { el.textContent = value; });
+  }
+  function clearTimers() {
+    if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+    if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
+  }
+  function armSafety() {
+    if (safetyTimer) clearTimeout(safetyTimer);
+    safetyTimer = setTimeout(clearAll, SAFETY_MS);
+  }
+  function begin(source) {
+    armSafety();
+    const wasBusy = isBusy();
+    sources.add(String(source || 'pool'));
+    if (wasBusy) return;          // overlay already shown/pending — just tracked the extra source
+    if (showTimer) clearTimeout(showTimer);
+    showTimer = setTimeout(() => { showTimer = null; paint(); }, SHOW_DELAY_MS);
+  }
+  function refresh() { if (isBusy()) armSafety(); }   // progress heartbeat keeps a long scan locked
+  function end(source) {
+    sources.delete(String(source || 'pool'));
+    if (isBusy()) { paint(); return; }   // other sources still in flight — stay locked
+    clearTimers();
+    setCaption('');
+    paint();
+  }
+  function clearAll() {
+    sources.clear();
+    clearTimers();
+    setCaption('');
+    paint();
+  }
+  return { begin, refresh, end, clearAll, setCaption, syncModuleSearchLock, isBusy };
+})();
+
+// ── Search-pool load (chunk-load) progress + Random gate ─────────────────────
+// A dedicated, authoritative state for the *pool load* (startup temp parquet,
+// custom parquet load/merge/upload). Distinct from the tag-surface overlay: it
+// owns (a) a persistent, always-visible progress toast (so the user sees it even
+// with no panel open) and (b) the Random button gate. The gate is re-asserted on
+// an interval so an unrelated button re-render can't silently re-enable Random
+// mid-load; it clears ONLY on the genuine completion signal (search_loading
+// loading:false), never on a stray event. Row progress re-arms nothing here —
+// completion is explicit.
+const poolLoad = (() => {
+  const SAFETY_MS = 180000;   // force-release only if the authoritative search_state is genuinely lost
+  let active = false;
+  let loaded = 0;
+  let total = 0;
+  let phase = 'load';   // 'load' (chunk read, %) | 'filter' (tag-filter index build) | 'prepare' (between phases)
+  let reassertTimer = null;
+  let safetyTimer = null;
+  function render() {
+    const toast = document.getElementById('poolLoadToast');
+    if (toast) {
+      if (active) {
+        if (phase === 'filter') {
+          toast.textContent = '태그 필터 적용 중…  (대용량 풀 전처리)';
+        } else if (phase === 'prepare') {
+          toast.textContent = '검색 풀 준비 중…';
+        } else {
+          const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : null;
+          toast.textContent = pct !== null
+            ? `검색 풀 로딩 중… ${pct}%   (${loaded.toLocaleString()} / ${total.toLocaleString()}행)`
+            : '검색 풀 로딩 중…';
+        }
+        toast.classList.add('active');
+      } else {
+        toast.classList.remove('active');
+      }
+    }
+    const btn = document.getElementById('btnRnd');
+    if (btn) btn.classList.toggle('pool-locked', active);
+  }
+  function armTimers() {
+    // Re-assert the gate periodically: if any other render clears .pool-locked,
+    // it comes back within the interval while the pool is still preparing.
+    if (!reassertTimer) reassertTimer = setInterval(render, 400);
+    if (safetyTimer) clearTimeout(safetyTimer);
+    safetyTimer = setTimeout(stop, SAFETY_MS);
+  }
+  function update(l, t, ph) {
+    active = true;
+    phase = ph === 'filter' ? 'filter' : 'load';
+    loaded = Number(l) || 0;
+    total = Number(t) || 0;
+    render();
+    armTimers();
+  }
+  // A phase's heavy work reported done, but the pool isn't authoritatively ready
+  // yet (a reconstruct/assign may follow). Stay gated with an indeterminate
+  // status until the final search_state calls stop() — no ungate gap between
+  // load → reconstruct → filter.
+  function hold() {
+    if (!active) return;
+    phase = 'prepare';
+    render();
+    armTimers();
+  }
+  function stop() {
+    active = false;
+    if (reassertTimer) { clearInterval(reassertTimer); reassertTimer = null; }
+    if (safetyTimer) { clearTimeout(safetyTimer); safetyTimer = null; }
+    render();
+  }
+  return { update, hold, stop, isActive: () => active, curPhase: () => (active ? phase : null) };
+})();
+const lockTagSurface = source => tagSurfaceLock.begin(source);
+const unlockTagSurface = source => tagSurfaceLock.end(source);
+
 function openDanbooruBrowserTool() {
   if (danbooruTabControl?.openBrowser) {
     danbooruTabControl.openBrowser();
@@ -6281,6 +6441,9 @@ function updateModuleBtnState() {
   const pb = document.querySelector('.module-prompt-btn');
   if (pb) pb.classList.toggle('active', currentModuleId === 'search');
   if (moduleLauncherControl) moduleLauncherControl.updateState();
+  // Reflect the busy overlay whenever the active module changes (the search-side
+  // lock only applies while the Search module is the one on screen).
+  tagSurfaceLock.syncModuleSearchLock();
 }
 
 const peE621Panel = $('peE621Panel');
@@ -7510,6 +7673,7 @@ function toggleRating(r) {
 
 function onFilterReset(m) {
   if (searchPanelControl) searchPanelControl.onFilterReset(m);
+  tagSurfaceLock.end('tagfilter');
 }
 
 function onRatingUpdate(m) {
@@ -7526,10 +7690,57 @@ function updateSearchCount(count) {
 
 function onSearchState(m) {
   if (searchPanelControl) searchPanelControl.onSearchState(m);
+  tagSurfaceLock.end('pool');   // completion of search / parquet load-merge / rating recompute / restore
+  poolLoad.stop();              // authoritative 'pool ready' — clears load/reconstruct/filter gate + toast
 }
 
 function onSearchProgress(m) {
   if (searchPanelControl) searchPanelControl.onSearchProgress(m);
+  tagSurfaceLock.refresh();   // long archive scan still running — keep locked, re-arm safety
+}
+
+function onSearchLoading(m) {
+  // Chunked pool load (startup temp parquet / custom load-merge): lock Tag/Tag
+  // Filter with a '풀 로딩 N%' caption while it streams, release + refresh on done.
+  if (m && m.loading) {
+    const phase = m.phase === 'filter' ? 'filter' : 'load';
+    const total = Number(m.total) || 0;
+    const loaded = Number(m.loaded) || 0;
+    // Authoritative pool-prepare state: persistent toast + robust Random gate.
+    poolLoad.update(loaded, total, phase);
+    // Also raise the tag-surface overlay + caption (for an open Search/Filter popup).
+    tagSurfaceLock.begin('pool');
+    tagSurfaceLock.refresh();
+    if (phase === 'filter') {
+      tagSurfaceLock.setCaption('태그 필터 적용 중…');
+    } else {
+      if (total > 0) {
+        const pct = Math.min(100, Math.round((loaded / total) * 100));
+        tagSurfaceLock.setCaption(`풀 로딩 ${pct}% (${loaded.toLocaleString()} / ${total.toLocaleString()}행)`);
+      } else {
+        tagSurfaceLock.setCaption('풀 로딩 중…');
+      }
+      // Live-climb the toolbar 'Prompt: N' with rows read so far (settles to the
+      // authoritative filtered count on the completion search_state). Direct DOM —
+      // the search panel module may not be ready this early at startup.
+      const countEl = document.getElementById('searchCount');
+      if (countEl) countEl.textContent = String(loaded);
+    }
+    return;
+  }
+  // A phase finished (load or filter), but the pool isn't authoritatively ready
+  // until the final search_state — hold the gate (no ungate gap between load →
+  // reconstruct → filter). After a LOAD phase, fetch the state to drive the
+  // reconstruct; after a FILTER phase the natural tag_filter_result→assign→
+  // search_state flow completes it, so don't kick a redundant get_search_state
+  // (which could trigger an extra reconstruct).
+  const wasFilterPhase = poolLoad.curPhase() === 'filter';
+  poolLoad.hold();
+  tagSurfaceLock.setCaption('검색 풀 준비 중…');
+  tagSurfaceLock.refresh();
+  if (!wasFilterPhase && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'get_search_state'}));
+  }
 }
 
 function onBucketDates(m) {
@@ -7848,8 +8059,8 @@ function toggleTagFilterPresets() { if (quickFilter) quickFilter.togglePresets()
 function confirmSaveTagFilterPreset() { if (quickFilter) quickFilter.confirmSavePreset(); }
 function loadTagFilterPreset(i) { if (quickFilter) quickFilter.loadPresetAt(i); }
 function deleteTagFilterPreset(i) { if (quickFilter) quickFilter.deletePresetAt(i); }
-function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); }
-function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); }
+function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); tagSurfaceLock.end('tagfilter'); }
+function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); tagSurfaceLock.end('tagfilter'); }
 function onTagFilterUpdate(m) { if (quickFilter) quickFilter.onUpdate(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
 Promise.all([

@@ -377,8 +377,8 @@ class WebSessionContext:
     def persist_last_search(self):
         return self._search_state_service().persist_last_search()
 
-    def restore_last_search(self) -> bool:
-        return self._search_state_service().restore_last_search()
+    def restore_last_search(self, progress=None) -> bool:
+        return self._search_state_service().restore_last_search(progress=progress)
 
     def runner_parquet_sources(self) -> list[tuple[Path, str]]:
         return self._search_state_service().runner_parquet_sources()

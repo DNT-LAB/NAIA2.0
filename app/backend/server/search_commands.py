@@ -68,6 +68,21 @@ async def handle_search_command(
         # the results are restored here (idempotent; respects the same fallback-skip
         # rules as warmup — a filtered legacy cache is still skipped). Cheap no-op once
         # search_results is populated.
+        # A chunked pool load already in flight (startup warmup or another client):
+        # don't start a second read or block — lock this client with progress; the
+        # load's completion broadcast prompts a refresh.
+        loading = getattr(context, "_search_pool_loading", None)
+        if isinstance(loading, dict) and loading.get("active"):
+            payload = {
+                "type": "search_loading",
+                "loading": True,
+                "loaded": int(loading.get("loaded") or 0),
+                "total": int(loading.get("total") or 0),
+            }
+            if loading.get("phase"):
+                payload["phase"] = loading.get("phase")
+            await _send_json(ws, payload)
+            return True
         if context.search_results is None or context.search_results.is_empty():
             service = getattr(context, "headless_random_prompt_service", None)
             if service is None:
@@ -75,7 +90,7 @@ async def handle_search_command(
 
                 service = HeadlessRandomPromptService(context)
                 context.headless_random_prompt_service = service
-            await run_in_thread(service._ensure_search_results, {})
+            await run_in_thread(service._ensure_search_results, {}, announce=True)
         # 영속된 활성 태그필터를 백엔드가 직접 재조립(권위) — 프론트 warmup 재적용 타이밍과 무관하게
         # 표시 카운트와 실제 랜덤 풀이 일치하도록(재시작/가져오기 후 'random 이 필터 무시/꼬임' 수정).
         await run_in_thread(reconstruct_active_tag_filter, context)

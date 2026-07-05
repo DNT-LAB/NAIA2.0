@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -11,6 +12,20 @@ from core.web_session_context import WebSessionContext
 
 CUSTOM_PARQUET_SCOPE = "custom_parquet"
 TAG_ARCHIVE_SCOPE = "tag_archive"
+
+# Serializes the startup persisted-filter reconstruct so two concurrent
+# get_search_state calls (one triggered by the frontend re-requesting state on
+# load completion) can't both run the heavy 1M+ row tag-filter index build. The
+# first sets active_tag_filter; the second re-checks the guard under the lock and
+# returns fast.
+_RECONSTRUCT_LOCK = threading.Lock()
+
+# Serializes the per-dataset tags_text index build (str.cat + lower over 1M+
+# rows — the first-chip bottleneck). Two concurrent tag_filter_search tasks
+# (fast chip edits / multi-client, dispatched as live background tasks) would
+# otherwise both see tags_text is None and both run the heavy build. Double-
+# checked under this lock: the second reuses the freshly built index.
+_TAG_INDEX_BUILD_LOCK = threading.Lock()
 
 
 def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
@@ -309,6 +324,13 @@ def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True
 
 
 def reconstruct_active_tag_filter(context: WebSessionContext) -> bool:
+    # Serialized: only one reconstruct builds the heavy index; a concurrent caller
+    # re-checks the guard inside and returns fast (no duplicate 1M-row scan).
+    with _RECONSTRUCT_LOCK:
+        return _reconstruct_active_tag_filter_impl(context)
+
+
+def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
     """재시작/가져오기 후 영속된 '활성' 태그필터를 백엔드가 스냅샷 위에서 직접 재조립한다(권위 SSOT).
 
     in-memory 할당(active_tag_filter / active_tag_filter_ids)은 영속되지 않으므로 재시작 직후엔
@@ -467,7 +489,51 @@ def _tag_filter_cache(context: WebSessionContext, snapshot) -> dict:
     return cache
 
 
+def _broadcast_pool_loading(context: WebSessionContext, active: bool, *, phase: str | None = None) -> None:
+    """Surface a pool-preparing status to Remote Web clients (Tag/Tag-Filter lock
+    + Random gate + persistent toast). Also flips ``context._search_pool_loading``
+    so a concurrent get_search_state sees 'loading' and skips a duplicate heavy
+    scan. Used to wrap the one-time tag-filter text-index build — the dominant
+    first-chip / startup-reconstruct bottleneck on a 1M+ row pool."""
+    try:
+        context._search_pool_loading = {
+            "active": bool(active),
+            "loaded": 0,
+            "total": 0,
+            "phase": phase if active else None,
+        }
+    except Exception:
+        pass
+    try:
+        payload = {"type": "search_loading", "loading": bool(active)}
+        if active and phase:
+            payload["phase"] = phase
+        context.publish("search_pool_broadcast", payload)
+    except Exception:
+        pass
+
+
 def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
+    # Announce the 'filter' phase ONLY when the heavy per-dataset text index is
+    # about to be built (first chip / startup reconstruct on a large pool). A
+    # cached rebuild stays silent (no flash / no needless Random lock).
+    building = False
+    _snap = getattr(context, "search_results_snapshot", None)
+    if _snap is not None and not getattr(_snap, "empty", True):
+        try:
+            building = _tag_filter_cache(context, _snap).get("tags_text") is None
+        except Exception:
+            building = False
+    if building:
+        _broadcast_pool_loading(context, True, phase="filter")
+    try:
+        return _tag_filter_search_impl(context, tags)
+    finally:
+        if building:
+            _broadcast_pool_loading(context, False)
+
+
+def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
     snapshot = getattr(context, "search_results_snapshot", None)
     if snapshot is None or getattr(snapshot, "empty", True):
         snapshot = search_base_frame(context)
@@ -486,22 +552,26 @@ def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, 
 
     cache = _tag_filter_cache(context, snapshot)
     if cache["tags_text"] is None:
-        tag_columns = [c for c in ("copyright", "character", "artist", "meta", "general") if c in snapshot.columns]
-        if not tag_columns:
-            frame = snapshot.copy()
-            frame["general"] = ""
-            tag_columns = ["general"]
-        else:
-            frame = snapshot
-        cache["frame"] = frame
-        cache["row_count"] = len(frame)
-        cache["has_id"] = "id" in frame.columns
-        # 벡터화 빌드(str.cat, C-level)로 행별 Python 조인(.agg(",".join, axis=1))의 GIL 점유를
-        # 제거 — 대형 풀(100만+ 행)에서 첫 칩 응답이 핵심 병목이라 ~2x + GIL 친화적이다.
-        # _hit_rows 의 ",".join 구분자/소문자/contains 의미를 그대로 보존(동치 검증됨).
-        parts = [frame[c].fillna("").astype(str) for c in tag_columns]
-        tags_text = parts[0] if len(parts) == 1 else parts[0].str.cat(parts[1:], sep=",")
-        cache["tags_text"] = tags_text.str.lower()
+        # Double-checked build under a lock so a concurrent search reuses the
+        # index instead of rebuilding the whole 1M+ row text column.
+        with _TAG_INDEX_BUILD_LOCK:
+            if cache["tags_text"] is None:
+                tag_columns = [c for c in ("copyright", "character", "artist", "meta", "general") if c in snapshot.columns]
+                if not tag_columns:
+                    frame = snapshot.copy()
+                    frame["general"] = ""
+                    tag_columns = ["general"]
+                else:
+                    frame = snapshot
+                cache["frame"] = frame
+                cache["row_count"] = len(frame)
+                cache["has_id"] = "id" in frame.columns
+                # 벡터화 빌드(str.cat, C-level)로 행별 Python 조인(.agg(",".join, axis=1))의 GIL 점유를
+                # 제거 — 대형 풀(100만+ 행)에서 첫 칩 응답이 핵심 병목이라 ~2x + GIL 친화적이다.
+                # _hit_rows 의 ",".join 구분자/소문자/contains 의미를 그대로 보존(동치 검증됨).
+                parts = [frame[c].fillna("").astype(str) for c in tag_columns]
+                tags_text = parts[0] if len(parts) == 1 else parts[0].str.cat(parts[1:], sep=",")
+                cache["tags_text"] = tags_text.str.lower()
     tags_text = cache["tags_text"]
     row_count = cache["row_count"]
 
@@ -603,15 +673,22 @@ def load_or_merge_custom_parquet(
     if not path.exists():
         return context.search_state_payload(), {"type": "toast", "message": f"Parquet not found: {filename}", "level": "error"}
     import pandas as pd
+    from core.parquet_chunk_loader import read_parquet_chunked, make_search_load_progress
 
-    frame = pd.read_parquet(path)
-    frame = normalize_custom_parquet_frame(frame)
-    if merge:
-        current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
-        if current is not None and not current.empty:
-            frame = pd.concat([current, frame], ignore_index=True)
-            frame = normalize_custom_parquet_frame(frame)
-    install_custom_parquet_frame(context, frame)
+    # Chunked read + progress broadcast so a large custom parquet load/merge shows
+    # the Tag/Tag-Filter lock + '풀 로딩 N%' (the frontend also locks on click).
+    progress, done = make_search_load_progress(context)
+    try:
+        frame = read_parquet_chunked(path, progress=progress)
+        frame = normalize_custom_parquet_frame(frame)
+        if merge:
+            current = context.search_results.get_dataframe() if context.search_results else pd.DataFrame()
+            if current is not None and not current.empty:
+                frame = pd.concat([current, frame], ignore_index=True)
+                frame = normalize_custom_parquet_frame(frame)
+        install_custom_parquet_frame(context, frame)
+    finally:
+        done()
     state = search_state_with_runner_save(context)
     state["merged" if merge else "loaded"] = path.name
     verb = "merged" if merge else "loaded"

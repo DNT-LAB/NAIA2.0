@@ -641,6 +641,76 @@ header {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ---- Panel-scoped lock overlay (Tag / Tag Filter busy) ----
+   Covers a single floating panel while a search/parquet/rating/tag-filter
+   request is in flight, so state can't be corrupted by interleaved edits on
+   large datasets or slow machines. Released on the actual completion event
+   (search_state / tag_filter_result / tag_filter_assigned / filter_reset),
+   so fast machines barely see it while slow ones stay protected. */
+.panel-lock {
+  display: none;
+  position: absolute; inset: 0;
+  z-index: 100;
+  background: rgba(10,10,15,0.42);
+  align-items: center; justify-content: center;
+  cursor: wait;
+  border-radius: inherit;
+}
+.panel-lock.active { display: flex; }
+.panel-lock-box {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 10px;
+}
+.panel-lock-caption {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text, #e8e8ee);
+  text-align: center;
+  padding: 0 12px;
+  min-height: 14px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+}
+.panel-lock-caption:empty { display: none; }
+/* Random button gated while the result pool loads/rebuilds (a 'pool' op is in
+   flight). A class — not [disabled] — so it never fights the generation
+   lifecycle's own disabled state; cleared the moment the pool op completes. */
+.btn-rnd.pool-locked {
+  pointer-events: none;
+  opacity: 0.45;
+  cursor: wait;
+}
+/* Persistent pool-load progress banner — always visible (independent of panels)
+   while the search pool streams in; NOT auto-dismissed (hidden only on the
+   completion signal). */
+.pool-load-toast {
+  display: none;
+  position: fixed;
+  top: 60px; left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  padding: 9px 18px;
+  border-radius: 9px;
+  background: rgba(20,20,28,0.96);
+  border: 1px solid var(--accent-blue, #7c6aef);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+  color: var(--text, #e8e8ee);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.pool-load-toast.active { display: block; }
+/* Keep each locked popup's header (close / detach) above the overlay so the
+   panel can still be dismissed while a request is in flight. The solid surface
+   background hides the overlay tint behind the header (popups clip to their
+   rounded corners via overflow:hidden). */
+.module-popup > .module-popup-header,
+.tag-filter-popup > .module-popup-header {
+  position: relative;
+  z-index: 101;
+  background: var(--bg-surface);
+}
+
 /* ---- Toast ---- */
 .toast {
   position: fixed;

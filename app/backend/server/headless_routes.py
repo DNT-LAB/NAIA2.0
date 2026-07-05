@@ -60,6 +60,30 @@ def _register_extension_toast_bridge(context: WebSessionContext, clients: set[We
     context.subscribe("extension_toast", _on_extension_toast)
 
 
+def _register_search_loading_bridge(context: WebSessionContext, clients: set[WebSocket]) -> None:
+    """검색 풀 청크 로딩 진행률/완료 브릿지.
+
+    코어(임의 스레드)의 chunked 로더가 발행하는 'search_pool_broadcast' 페이로드
+    (search_loading WS 메시지)를 lifespan 이 캡처한 메인 루프에서 전 클라이언트로
+    브로드캐스트한다. 프론트는 이 신호로 Tag/Tag Filter 를 잠그고 진행률을 표시한다."""
+    import asyncio
+
+    def _on_search_pool_broadcast(payload: Any) -> None:
+        try:
+            if not isinstance(payload, dict):
+                return
+            loop = getattr(context, "headless_main_loop", None)
+            if loop is None:
+                return
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(broadcast_json(clients, payload))
+            )
+        except Exception:
+            pass
+
+    context.subscribe("search_pool_broadcast", _on_search_pool_broadcast)
+
+
 def register_headless_routes(
     app: FastAPI,
     context: WebSessionContext,
@@ -71,6 +95,7 @@ def register_headless_routes(
     app.state.remote_web_dir = str(root_web_dir)
     register_web_shell_routes(app, root_web_dir)
     _register_extension_toast_bridge(context, clients)
+    _register_search_loading_bridge(context, clients)
 
     register_state_routes(
         app,

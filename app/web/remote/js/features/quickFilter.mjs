@@ -101,6 +101,7 @@ export function createQuickFilterController(deps) {
     if (!isSocketOpen()) return;
     deps.getWs().send(JSON.stringify(payload));
   };
+  const lockTagSurface = typeof deps.lockTagSurface === 'function' ? deps.lockTagSurface : () => {};
   const getActiveRatings = () => {
     const ratingState = deps.getRatingState();
     return RATING_KEYS.filter(key => ratingState[key]);
@@ -262,6 +263,7 @@ export function createQuickFilterController(deps) {
     cancelPendingSearch();
     if (!includeTags.length && !excludeTags.length) return;
     if (!isSocketOpen()) return;
+    lockTagSurface('tagfilter');   // background tag-filter search → released by onTagFilterResult/Assigned
     send({type: 'tag_filter_search', tags: payload(), request_id: nextSearchRequestId()});
   }
 
@@ -515,6 +517,25 @@ export function createQuickFilterController(deps) {
     save();
     if (!isSocketOpen()) return;
     scheduleSearch();
+  }
+
+  // Custom parquet load/merge swapped the pool: the backend deactivated the
+  // filter and kept the chips as a draft, so the cached 'N matched' count is now
+  // stale (old pool). Auto re-apply the chips to the NEW pool (fresh search +
+  // assign) so the filter follows the dataset and the counts recompute. Old
+  // counts are invalidated first so no stale label flashes before the fresh
+  // result lands.
+  function onPoolSwap() {
+    ratingCounts = null;
+    const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+    // Clear the stale label explicitly — renderMatchedCount() no-ops while
+    // ratingCounts is null, so it would otherwise leave the old '982,029 matched'.
+    const countEl = getEl('tagFilterCount');
+    if (countEl) {
+      countEl.textContent = hasTags ? '재적용 중…' : '';
+      countEl.classList.remove('has-result');
+    }
+    if (hasTags) apply();
   }
 
   function assign() {
@@ -808,6 +829,7 @@ export function createQuickFilterController(deps) {
     removeExcludeTag,
     removeIncludeTag,
     apply,
+    onPoolSwap,
     assign,
     onResult,
     onAssigned,

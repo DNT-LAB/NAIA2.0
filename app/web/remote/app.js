@@ -318,6 +318,7 @@ let conditionalPromptPanel = null;
 let eventStreamPanel = null;
 let wildcardPanel = null;
 let latestWildcardFreezeState = {locations: [], legacy: [], characters: []};
+let frozenWildcardBar = null;
 let extensionsPanel = null;
 let lastExtensionsState = null;
 let wildcardManagerPanel = null;
@@ -693,7 +694,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260705-wc-freeze-bugs')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260705-frozenwcbar')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -729,9 +730,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       getWildcardFreezeState: () => latestWildcardFreezeState,
-      setWildcardFreezeState: state => {
-        latestWildcardFreezeState = (state && typeof state === 'object') ? state : {locations: [], legacy: [], characters: []};
-      },
+      setWildcardFreezeState: state => { updateFrozenWildcardBar(state); },
       onToggleWildcardFreeze: (payload, freeze) => {
         setModuleParam('wildcard', freeze ? 'wildcard_freeze' : 'wildcard_unfreeze', JSON.stringify(payload || {}));
       },
@@ -743,6 +742,22 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
   })
   .catch(error => {
     console.error('Failed to initialize result context menu module', error);
+  });
+const frozenWildcardBarReady = import('./js/features/frozenWildcardBar.mjs?v=20260705-multichar')
+  .then(({createFrozenWildcardBar}) => {
+    frozenWildcardBar = createFrozenWildcardBar({
+      document,
+      mount: document.getElementById('frozenWcBar'),
+      escHtml,
+      onUnfreeze: payload => setModuleParam('wildcard', 'wildcard_unfreeze', JSON.stringify(payload || {})),
+      onReroll: payload => setModuleParam('wildcard', 'wildcard_reroll', JSON.stringify(payload || {})),
+      onUnfreezeAll: payloads => (payloads || []).forEach(payload =>
+        setModuleParam('wildcard', 'wildcard_unfreeze', JSON.stringify(payload || {}))),
+    });
+    frozenWildcardBar.render(latestWildcardFreezeState);
+  })
+  .catch(error => {
+    console.error('Failed to initialize frozen wildcard bar module', error);
   });
 const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260603-caret-align1')
   .then(({createPromptHighlighter}) => {
@@ -2462,6 +2477,9 @@ function onInitComplete() {
   for (const naiToolId of ['character', 'character_reference', 'vibe_transfer']) {
     if (naiToolId !== currentModuleId) requestModuleState(naiToolId);
   }
+  // Frozen wildcard bar hydration — session-only freezes survive a front-end
+  // reload while the backend stays up; pull them so the bar repopulates.
+  if (currentModuleId !== 'wildcard') requestModuleState('wildcard');
   // Extensions 퀵 버튼(Tools/Fn)은 탭을 열지 않아도 부팅 직후 나타나야 한다.
   requestModuleState('extensions');
   scheduleInitialHistoryRefresh();
@@ -6652,6 +6670,9 @@ function onModuleState(m) {
   if (m.module_id === 'chunk' && isChunkOpen()) {
     renderChunk(m);
   }
+  // Frozen wildcard bar must stay live even when the wildcard panel isn't the
+  // open module — freeze/unfreeze/reroll all broadcast a fresh wildcard state.
+  if (m.module_id === 'wildcard') updateFrozenWildcardBar(m.frozen);
 
   if (m.module_id !== currentModuleId) return;
   renderModuleState(m);
@@ -7140,8 +7161,20 @@ function renderEventStream(m) {
 }
 
 // ---- Wildcard Module ----
+// Central sink for the wildcard freeze state → drives the top-left frozen bar.
+// Wildcard module states only broadcast on user actions (freeze/unfreeze/reroll/
+// jump/reload/boot), so an unconditional re-render is cheap; we deliberately do
+// NOT dedupe, because the bar mutates its own state optimistically on unfreeze
+// and a stale JSON guard could skip a needed authoritative re-render.
+function updateFrozenWildcardBar(frozen) {
+  const state = (frozen && typeof frozen === 'object')
+    ? frozen : {locations: [], legacy: [], characters: []};
+  latestWildcardFreezeState = state;
+  if (frozenWildcardBar) frozenWildcardBar.render(state);
+}
+
 function renderWildcard(m) {
-  latestWildcardFreezeState = (m && m.frozen) ? m.frozen : {locations: [], legacy: [], characters: []};
+  updateFrozenWildcardBar(m && m.frozen);
   if (wildcardPanel) wildcardPanel.render(m);
 }
 
@@ -8082,6 +8115,7 @@ Promise.all([
   resultImageInputReady,
   queuePanelReady,
   resultContextMenuReady,
+  frozenWildcardBarReady,
   promptHighlighterReady,
   tokenDisplayReady,
   moduleLauncherReady,

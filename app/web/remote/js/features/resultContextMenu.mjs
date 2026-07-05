@@ -1291,7 +1291,7 @@ export function createResultContextMenu({
       return;
     }
 
-    if (target.closest('.stats-island, .viewer-panel, .right-tab-bar')) {
+    if (target.closest('.stats-island, .viewer-panel, .right-tab-bar, .frozen-wc-bar')) {
       return;
     }
 
@@ -1326,7 +1326,7 @@ export function createResultContextMenu({
   };
 }
 
-// cache-bust marker: 20260705-wc-freeze-bugs (Payload viewer + wildcard freeze pins)
+// cache-bust marker: 20260705-frozenwcbar (skip .frozen-wc-bar in image context menu)
 function defaultEscHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({
     '&': '&amp;',

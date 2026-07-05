@@ -171,6 +171,68 @@ class HeadlessWildcardService:
         self._unfreeze_location(payload)
         return self.state(live_update=True)
 
+    def _reroll_value(self, name: str) -> str | None:
+        """Pick a fresh weighted-random line for a wildcard key (same weighting as
+        the random-mode expansion). None if the wildcard has no resolvable entries."""
+        entries = self._resolve_entries(name)
+        if not entries:
+            return None
+        texts = [text for _, text in entries]
+        weights = [weight for weight, _ in entries]
+        try:
+            return random.choices(texts, weights=weights, k=1)[0]
+        except (ValueError, IndexError):
+            return texts[0] if texts else None
+
+    def reroll(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Re-roll an *already frozen* wildcard/character to a fresh value while
+        keeping it frozen. Location/legacy wildcards re-pick from their entry pool;
+        character slots re-expand their source frame template (see
+        ``reroll_frozen_character_slot``)."""
+        kind = str(payload.get("kind") or payload.get("type") or "").strip().lower()
+        if kind == "character" or payload.get("slot"):
+            return self._reroll_character(payload)
+        name = str(payload.get("key") or payload.get("name") or "").strip()
+        if not name:
+            return self.context._toast("Invalid wildcard reroll payload", level="error")
+        new_value = self._reroll_value(name)
+        if new_value is None:
+            return self.context._toast(f"'{name}' 항목을 찾을 수 없습니다.", level="error")
+        location = str(payload.get("location") or "").strip()
+        overrides = getattr(self.context, "wildcard_override", None)
+        if not isinstance(overrides, dict):
+            overrides = {}
+            self.context.wildcard_override = overrides
+        if location:
+            scoped = overrides.get(location)
+            if not isinstance(scoped, dict):
+                scoped = {}
+                overrides[location] = scoped
+            scoped[name] = new_value
+        else:
+            overrides[name] = new_value
+        return self.state(live_update=True)
+
+    def _reroll_character(self, payload: dict[str, Any]) -> dict[str, Any]:
+        slot = str(payload.get("slot") or "").strip()
+        if not slot:
+            return self.context._toast("Invalid character reroll payload", level="error")
+        # An optional `key` re-rolls just that one wildcard inside the character
+        # (e.g. only __의상__); absent → the whole character re-rolls.
+        component_key = str(payload.get("key") or "").strip() or None
+        mode = "NAI"
+        getter = getattr(self.context, "get_api_mode", None)
+        if callable(getter):
+            try:
+                mode = getter() or "NAI"
+            except Exception:
+                mode = "NAI"
+        from core.character_settings import reroll_frozen_character_slot
+
+        if not reroll_frozen_character_slot(self.context, slot, mode, component_key=component_key):
+            return self.context._toast(
+                "이 캐릭터 슬롯은 리롤할 수 없습니다(원본 슬롯을 찾지 못함).", level="info")
+        return self.state(live_update=True)
 
     def set_sequential(self, name: str, index: Any) -> dict[str, Any]:
         """순차 와일드카드 카운터를 강제로 점프시킨다(사용자 요청 [Jump]).
@@ -237,7 +299,7 @@ class HeadlessWildcardService:
             if not isinstance(payload, dict):
                 payload = {}
             return self.set_sequential(str(payload.get("name") or ""), payload.get("index"))
-        if key in {"wildcard_freeze", "wildcard_unfreeze"}:
+        if key in {"wildcard_freeze", "wildcard_unfreeze", "wildcard_reroll"}:
             try:
                 payload = json.loads(str(value or "{}"))
             except json.JSONDecodeError:
@@ -246,6 +308,8 @@ class HeadlessWildcardService:
                 payload = {}
             if key == "wildcard_freeze":
                 return self.freeze(payload)
+            if key == "wildcard_reroll":
+                return self.reroll(payload)
             return self.unfreeze(payload)
         if key == "get_file_tree":
             return {"type": "wildcard_manager", "action": "file_tree", "tree": self.scan_tree()}

@@ -251,11 +251,124 @@ def read_frozen_character_slots(app_context) -> dict[str, dict[str, str]]:
     return out
 
 
-def frozen_character_slots_payload(app_context) -> list[dict[str, str]]:
-    return [
-        {"slot": slot, "prompt": payload["prompt"], "uc": payload.get("uc", "")}
-        for slot, payload in sorted(read_frozen_character_slots(app_context).items())
-    ]
+def frozen_character_slots_payload(app_context) -> list[dict[str, Any]]:
+    store = _character_freeze_store(app_context)
+    if not isinstance(store, dict):
+        return []
+    out: list[dict[str, Any]] = []
+    for slot, payload in sorted(store.items()):
+        if not isinstance(payload, dict):
+            continue
+        prompt = str(payload.get("prompt") or "")
+        if not prompt.strip():
+            continue
+        entry: dict[str, Any] = {"slot": str(slot), "prompt": prompt, "uc": str(payload.get("uc") or "")}
+        # slot_label = the 1-based character number, so the bar can tell multiple
+        # frozen characters apart ("캐릭터 1" vs "캐릭터 2") instead of a bare "캐릭터".
+        if payload.get("slot_label") is not None:
+            entry["slot_label"] = payload.get("slot_label")
+        # Per-wildcard components let the front-end bar reroll one wildcard inside a
+        # frozen character (e.g. just __의상__) — only surfaced when the character
+        # actually decomposed into wildcards.
+        components = payload.get("components")
+        if isinstance(components, list) and components:
+            comp = [
+                {"name": str(c.get("name") or ""), "value": str(c.get("value") or "")}
+                for c in components
+                if isinstance(c, dict) and str(c.get("name") or "")
+            ]
+            if comp:
+                entry["components"] = comp
+        out.append(entry)
+    return out
+
+
+# ── Per-wildcard character freeze (slot-scoped overrides) ────────────────────
+# A frozen character stays generation-side a single expanded blob (the snapshot
+# overlay path is unchanged), but we ALSO capture its per-wildcard rolls so the
+# bar can reroll one wildcard at a time. The captured rolls live slot-scoped in
+# app_context.wildcard_override_character[slot] = {resolved_key: value}; on a
+# per-component reroll we drop the target key, re-expand the frame (the others
+# pinned via _consume_override, the target re-rolling fresh), and rewrite the blob.
+CHARACTER_WC_OVERRIDE_ATTR = "wildcard_override_character"
+
+
+def _character_wc_override_store(app_context, *, create: bool = False) -> dict[str, dict[str, str]] | None:
+    if app_context is None:
+        return None
+    store = getattr(app_context, CHARACTER_WC_OVERRIDE_ATTR, None)
+    if isinstance(store, dict):
+        return store
+    if not create:
+        return None
+    store = {}
+    setattr(app_context, CHARACTER_WC_OVERRIDE_ATTR, store)
+    return store
+
+
+def _character_rolls_map(context, slot_key: str) -> dict[str, str]:
+    """Newest-wins {resolved_key: value} of the character-block wildcard rolls the
+    context recorded for this slot. Skips the synthetic '(frozen)' marker roll."""
+    rolls = getattr(context, "wildcard_rolls", None)
+    out: dict[str, str] = {}
+    if not isinstance(rolls, list):
+        return out
+    for roll in rolls:
+        if not isinstance(roll, dict):
+            continue
+        if str(roll.get("location") or "") != "character":
+            continue
+        if str(roll.get("slot") or "") != slot_key:
+            continue
+        key = str(roll.get("key") or "")
+        if not key or key == "(frozen)":
+            continue
+        out[key] = str(roll.get("value") or "")
+    return out
+
+
+def _character_slot_label(context, slot_key: str) -> Any:
+    """The 1-based character number recorded on this slot's rolls (all rolls for a
+    slot share it), for a human-readable multi-character label. None if unknown."""
+    rolls = getattr(context, "wildcard_rolls", None)
+    if not isinstance(rolls, list):
+        return None
+    for roll in rolls:
+        if not isinstance(roll, dict):
+            continue
+        if str(roll.get("location") or "") != "character":
+            continue
+        if str(roll.get("slot") or "") != slot_key:
+            continue
+        if roll.get("slot_label") is not None:
+            return roll.get("slot_label")
+    return None
+
+
+def _write_character_freeze(
+    app_context,
+    slot_key: str,
+    prompt: str,
+    uc: str,
+    components_map: dict[str, str],
+    slot_label: Any = None,
+) -> bool:
+    store = _character_freeze_store(app_context, create=True)
+    if store is None:
+        return False
+    payload: dict[str, Any] = {"prompt": prompt, "uc": str(uc or "")}
+    if slot_label is not None:
+        payload["slot_label"] = slot_label
+    if components_map:
+        payload["components"] = [{"name": k, "value": v} for k, v in components_map.items()]
+    store[slot_key] = payload
+    override_store = _character_wc_override_store(app_context, create=True)
+    if override_store is not None:
+        if components_map:
+            override_store[slot_key] = dict(components_map)
+        else:
+            override_store.pop(slot_key, None)
+    return True
 
 
 def set_frozen_character_slot(app_context, slot: Any, prompt: Any, uc: Any = "") -> bool:
@@ -263,22 +376,120 @@ def set_frozen_character_slot(app_context, slot: Any, prompt: Any, uc: Any = "")
     prompt_text = str(prompt or "").strip()
     if not slot_key or not prompt_text:
         return False
-    store = _character_freeze_store(app_context, create=True)
-    if store is None:
-        return False
-    store[slot_key] = {"prompt": prompt_text, "uc": str(uc or "")}
-    return True
+    # Capture the per-wildcard breakdown + the 1-based character number from the
+    # generation that produced this character (for individual reroll + a distinct
+    # multi-character label).
+    context = getattr(app_context, "current_prompt_context", None)
+    components = _character_rolls_map(context, slot_key)
+    slot_label = _character_slot_label(context, slot_key)
+    return _write_character_freeze(app_context, slot_key, prompt_text, str(uc or ""), components, slot_label)
 
 
 def clear_frozen_character_slot(app_context, slot: Any | None = None) -> bool:
     store = _character_freeze_store(app_context)
+    override_store = _character_wc_override_store(app_context)
+    if slot is None:
+        changed = bool(store) if isinstance(store, dict) else False
+        if isinstance(store, dict):
+            store.clear()
+        if isinstance(override_store, dict):
+            override_store.clear()
+        return changed
+    slot_key = str(slot or "").strip()
+    if isinstance(override_store, dict):
+        override_store.pop(slot_key, None)
     if not isinstance(store, dict):
         return False
-    if slot is None:
-        changed = bool(store)
-        store.clear()
-        return changed
-    return store.pop(str(slot or "").strip(), None) is not None
+    return store.pop(slot_key, None) is not None
+
+
+def _find_character_frame(app_context, slot_key: str, mode: str, save_root) -> dict | None:
+    # Character frames are a NAI concept; try the live mode first, then fall back
+    # to NAI so a lingering freeze still resolves after a mode switch.
+    for candidate_mode in _dedupe_modes(mode):
+        normalized = load_character_settings(candidate_mode, save_root=save_root)
+        frames = normalized.get("character_frames") if isinstance(normalized, dict) else []
+        for candidate in frames or []:
+            if isinstance(candidate, dict) and str(_frame_uuid(candidate)) == slot_key:
+                return candidate
+    return None
+
+
+def reroll_frozen_character_slot(
+    app_context,
+    slot: Any,
+    mode: str = "NAI",
+    *,
+    component_key: Any | None = None,
+    save_root: Path | str | None = None,
+) -> bool:
+    """Re-roll a *frozen* character slot — whole, or one wildcard component.
+
+    The source template (with wildcard tokens) still lives on the character frame,
+    keyed by the same uuid we froze under. We re-expand it in a throwaway context
+    (so live generation state is untouched). For a per-component reroll, the OTHER
+    components are pinned via ``wildcard_override_character`` (consumed by
+    ``_consume_override``) while the target key is dropped so it alone re-rolls;
+    for a whole reroll everything re-rolls. The reassembled prompt becomes the new
+    frozen blob (the generation path stays blob-based), and the fresh per-wildcard
+    rolls become the new components.
+
+    Returns False when the slot isn't frozen, its frame is gone, or the expansion
+    is empty — the caller keeps the existing freeze and toasts.
+    """
+    slot_key = str(slot or "").strip()
+    if not slot_key:
+        return False
+    store = _character_freeze_store(app_context)
+    if not isinstance(store, dict) or slot_key not in store:
+        return False
+    if save_root is None:
+        save_root = _save_root_from_context(app_context)
+    frame = _find_character_frame(app_context, slot_key, mode, save_root)
+    if frame is None:
+        return False
+
+    override_store = _character_wc_override_store(app_context, create=True)
+    working = dict((override_store or {}).get(slot_key) or {})
+    comp_key = str(component_key or "").strip()
+    if comp_key:
+        # Single component: drop just this pin so ONLY it re-rolls; keep the rest.
+        # Tolerate a short token vs. the resolved (subfolder) key on either side.
+        for existing in list(working.keys()):
+            if existing == comp_key or existing.endswith("/" + comp_key) or existing.endswith("\\" + comp_key) \
+                    or comp_key.endswith("/" + existing) or comp_key.endswith("\\" + existing):
+                working.pop(existing, None)
+    else:
+        working = {}  # whole character: everything re-rolls
+    if override_store is not None:
+        override_store[slot_key] = working  # pin the fixed set for this re-expansion
+
+    processor = None
+    wildcard_manager = getattr(app_context, "wildcard_manager", None)
+    if wildcard_manager is not None:
+        processor = WildcardProcessor(wildcard_manager)
+    context = _get_prompt_context(app_context, reuse_current_context=False)
+    prompt = _expand_character_text(frame.get("prompt", ""), processor, context, slot=slot_key)
+    if not str(prompt).strip():
+        # restore the prior override map so a failed reroll doesn't strip the pin
+        if override_store is not None and isinstance(store.get(slot_key), dict):
+            prior = {c.get("name"): c.get("value") for c in store[slot_key].get("components") or [] if isinstance(c, dict)}
+            override_store[slot_key] = {k: v for k, v in prior.items() if k}
+        return False
+    uc = _expand_character_text(frame.get("uc", ""), processor, context, slot=slot_key)
+    # New components = fixed (pinned) + freshly re-rolled, straight from the rolls.
+    new_map = _character_rolls_map(context, slot_key)
+    prior_label = store[slot_key].get("slot_label") if isinstance(store.get(slot_key), dict) else None
+    return _write_character_freeze(app_context, slot_key, prompt, uc, new_map, prior_label)
+
+
+def _dedupe_modes(mode: Any) -> list[str]:
+    ordered = [str(mode or "NAI").upper(), "NAI"]
+    seen: list[str] = []
+    for item in ordered:
+        if item and item not in seen:
+            seen.append(item)
+    return seen
 
 
 def _all_frame_slot_ids(settings: dict | None) -> list[str]:
@@ -290,9 +501,15 @@ def _all_frame_slot_ids(settings: dict | None) -> list[str]:
 
 def _prune_frozen_character_slots(app_context, settings: dict | None) -> bool:
     store = _character_freeze_store(app_context)
+    override_store = _character_wc_override_store(app_context)
+    valid_slots = set(_all_frame_slot_ids(settings))
+    # keep the per-wildcard override map in lockstep with the freeze store
+    if isinstance(override_store, dict):
+        for slot in list(override_store.keys()):
+            if str(slot) not in valid_slots:
+                override_store.pop(slot, None)
     if not isinstance(store, dict) or not store:
         return False
-    valid_slots = set(_all_frame_slot_ids(settings))
     removed = False
     for slot in list(store.keys()):
         if str(slot) not in valid_slots:

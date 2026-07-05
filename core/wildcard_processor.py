@@ -313,10 +313,27 @@ class WildcardProcessor:
     def _consume_override(self, actual_wildcard_key: str, context: PromptContext):
         ctx_ref = getattr(self.wildcard_manager, '_app_context_ref', None)
         ctx = ctx_ref() if ctx_ref else None
+        location = str(getattr(context, '_wc_location', None) or '').strip()
+
+        # Slot-scoped character freeze: an individually-frozen character-block
+        # wildcard is pinned per (slot, key) so two characters using the same
+        # wildcard don't collide. Consulted only during character expansion; the
+        # frozen-character reassembly (character_settings) publishes this map.
+        if location == 'character' and ctx is not None:
+            slot = str(getattr(context, '_wc_slot', None) or '').strip()
+            char_overrides = getattr(ctx, 'wildcard_override_character', None)
+            if slot and isinstance(char_overrides, dict):
+                slot_map = char_overrides.get(slot)
+                if isinstance(slot_map, dict) and actual_wildcard_key in slot_map:
+                    val = slot_map.get(actual_wildcard_key)
+                    if isinstance(val, list):
+                        val = val.pop(0) if val else None
+                    if val is not None:
+                        return val
+
         overrides = getattr(ctx, 'wildcard_override', None) if ctx is not None else None
         if not isinstance(overrides, dict):
             return None
-        location = str(getattr(context, '_wc_location', None) or '').strip()
         container = None
         if location:
             scoped = overrides.get(location)

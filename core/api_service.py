@@ -2094,9 +2094,11 @@ class APIService:
                 return None
             
             # HTTP 세션을 사용하여 연결 정리
+            # NAI 서버 이전 공지(2026-07): /user/subscription 은 image.novelai.net 으로
+            # 이전됨(기존 api.novelai.net 경로는 이미 죽음 -> Anlas 조회 실패하던 것 수정).
             with requests.Session() as session:
                 response = session.get(
-                    "https://api.novelai.net/user/subscription",
+                    "https://image.novelai.net/user/subscription",
                     headers={"Authorization": f"Bearer {nai_access_token}"},
                     timeout=3
                 )

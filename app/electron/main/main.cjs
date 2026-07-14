@@ -1946,6 +1946,7 @@ function createMainWindow() {
   mainWindow.on("closed", () => {
     danbooruView = null;
     danbooruViewAttached = false;
+    danbooruWarmupState = "idle";
     mainWindow = null;
   });
   // 창을 다시 보면(포커스) 작업표시줄 깜빡임을 멈춘다 — Windows는 포커스 시 자동
@@ -2053,6 +2054,18 @@ let danbooruViewAttached = false;
 const DANBOORU_HOSTS = new Set(["danbooru.donmai.us", "www.danbooru.donmai.us"]);
 const DANBOORU_POST_RE = /danbooru\.donmai\.us\/posts\/(\d+)/;
 const DANBOORU_HOME_URL = "https://danbooru.donmai.us/";
+// 한국에서 danbooru.donmai.us 직접 연결이 막혀, 같은 Cloudflare(donmai.us) 형제
+// 프로퍼티인 safebooru 로 먼저 접속해 챌린지를 통과시킨 뒤 조용히 danbooru 로
+// 천이한다. safebooru 는 워밍업 홉일 뿐이라 임베드 뷰가 두 호스트를 모두 허용해야
+// (CF 챌린지 리다이렉트는 same-host) 하지만 태그 추출/포스트 인식은 danbooru 전용.
+const SAFEBOORU_HOME_URL = "https://safebooru.donmai.us/";
+const DANBOORU_VIEW_HOSTS = new Set([
+  "danbooru.donmai.us",
+  "www.danbooru.donmai.us",
+  "safebooru.donmai.us",
+]);
+// idle=미시작 / safebooru=워밍업 로드중 / transitioned=danbooru 로 천이함 / done=완료.
+let danbooruWarmupState = "idle";
 // Tag extraction = crawl the page the view ALREADY loaded (Dev0714 tabs/web_view.py:307-334),
 // reading data-tag-name from each <ul class="{category}-tag-list">. No server-side donmai
 // request, so Cloudflare (which resets the backend's plain client) is bypassed entirely.
@@ -2175,6 +2188,46 @@ async function sendDanbooruImageToHistory(srcURL) {
   }
 }
 
+// Cloudflare 워밍업 상태 머신. did-finish-load 마다 호출되어, 현재 페이지가 CF
+// 챌린지("Just a moment…" / window._cf_chl_opt)면 그대로 대기하고(챌린지가 스스로
+// 다시 로드하며 이 훅을 재발화), safebooru 에서 정상 페이지가 확인되면 danbooru 로
+// 조용히 천이한다. danbooru 정상 페이지가 뜨면 done 으로 잠가 재천이를 막는다.
+async function maybeAdvanceDanbooruWarmup() {
+  if (danbooruWarmupState === "idle" || danbooruWarmupState === "done") {
+    return;
+  }
+  if (!danbooruView || danbooruView.webContents.isDestroyed()) {
+    return;
+  }
+  const wc = danbooruView.webContents;
+  let info;
+  try {
+    info = await wc.executeJavaScript(
+      "({cf: !!window._cf_chl_opt, title: String(document.title || ''), host: String(location.hostname || '')})",
+      true,
+    );
+  } catch (_error) {
+    return;
+  }
+  if (!info || typeof info !== "object") {
+    return;
+  }
+  const isChallenge = !!info.cf
+    || /just a moment|attention required|잠시\s*만|사람인지 확인/i.test(String(info.title || ""));
+  if (isChallenge) {
+    return; // CF 진행 중 — 챌린지가 다음 로드를 다시 발화한다.
+  }
+  const host = String(info.host || "").toLowerCase();
+  if (danbooruWarmupState === "safebooru" && host === "safebooru.donmai.us") {
+    danbooruWarmupState = "transitioned";
+    try { wc.loadURL(DANBOORU_HOME_URL); } catch (_error) {}
+    return;
+  }
+  if (danbooruWarmupState === "transitioned" && DANBOORU_HOSTS.has(host)) {
+    danbooruWarmupState = "done";
+  }
+}
+
 function ensureDanbooruView() {
   if (danbooruView) {
     return danbooruView;
@@ -2191,7 +2244,7 @@ function ensureDanbooruView() {
   wc.setWindowOpenHandler(({ url }) => {
     try {
       const host = new URL(url).hostname.toLowerCase();
-      if (DANBOORU_HOSTS.has(host)) {
+      if (DANBOORU_VIEW_HOSTS.has(host)) {
         wc.loadURL(url);
       } else if (isHttpLikeUrl(url)) {
         shell.openExternal(url);
@@ -2199,14 +2252,15 @@ function ensureDanbooruView() {
     } catch (_error) {}
     return { action: "deny" };
   });
-  // Keep the embedded view strictly on http(s) danbooru.donmai.us — reject other
-  // schemes (javascript:/file:/…) and off-allowlist server redirects.
+  // Keep the embedded view strictly on http(s) danbooru/safebooru.donmai.us — reject
+  // other schemes (javascript:/file:/…) and off-allowlist server redirects. safebooru
+  // is allowed because the Cloudflare warm-up hop redirects within its own host.
   const guardNavigation = (event, url) => {
     let allowed = false;
     try {
       const parsed = new URL(url);
       allowed = ["http:", "https:"].includes(parsed.protocol)
-        && DANBOORU_HOSTS.has((parsed.hostname || "").toLowerCase());
+        && DANBOORU_VIEW_HOSTS.has((parsed.hostname || "").toLowerCase());
     } catch (_error) {
       allowed = false;
     }
@@ -2221,6 +2275,9 @@ function ensureDanbooruView() {
   wc.on("will-redirect", guardNavigation);
   wc.on("did-navigate", () => sendDanbooruNav());
   wc.on("did-navigate-in-page", () => sendDanbooruNav());
+  // Cloudflare 워밍업 진행: 각 로드 완료마다 챌린지 통과 여부를 확인하고, safebooru
+  // 에서 정상 페이지가 확인되면 조용히 danbooru 로 천이한다.
+  wc.on("did-finish-load", () => { void maybeAdvanceDanbooruWarmup(); });
   // 우클릭 컨텍스트 메뉴: 이미지에 한해 복사 / 저장 (donmai 임베드 뷰).
   wc.on("context-menu", (_event, params) => {
     if (params.mediaType !== "image" || !params.srcURL) {
@@ -2249,7 +2306,11 @@ function attachDanbooruView(rect) {
   }
   view.setBounds(roundRect(rect));
   if (!view.webContents.getURL()) {
-    view.webContents.loadURL(DANBOORU_HOME_URL);
+    // Cold 로드: danbooru 직접 접속이 (한국에서) 막히므로 safebooru 로 먼저 붙어
+    // Cloudflare 를 통과시키고, 정상 페이지 확인 후 maybeAdvanceDanbooruWarmup 이
+    // danbooru 로 천이한다.
+    danbooruWarmupState = "safebooru";
+    view.webContents.loadURL(SAFEBOORU_HOME_URL);
   }
   sendDanbooruNav();
   return true;

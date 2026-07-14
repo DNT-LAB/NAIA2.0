@@ -190,6 +190,47 @@ const THUMBNAIL_MENU = [
   DELETE_SETTINGS_MENU_ITEM,
 ];
 
+export function buildCharacterFreezePayload({
+  slot = '',
+  slotLabel = '',
+  rows = [],
+  executedCharacters = [],
+  executedUcs = [],
+  executedIds = [],
+} = {}) {
+  const ids = Array.isArray(executedIds)
+    ? executedIds.map(value => String(value || '')) : [];
+  let index = ids.indexOf(String(slot || ''));
+  if (index < 0 && slotLabel != null && String(slotLabel).trim()) {
+    const parsed = Number.parseInt(String(slotLabel), 10);
+    if (Number.isFinite(parsed) && parsed > 0) index = parsed - 1;
+  }
+  if (index < 0 || index >= executedCharacters.length) return null;
+  const prompt = String(executedCharacters[index] || '').trim();
+  if (!prompt) return null;
+
+  // The selected result's prompt_context is the provenance boundary. Always
+  // include an explicit components array (even empty) so the backend never
+  // falls back to the latest generation's current_prompt_context.
+  const componentMap = new Map();
+  (Array.isArray(rows) ? rows : []).forEach(row => {
+    if (!row || typeof row !== 'object') return;
+    const name = String(row.name ?? row.key ?? '').trim();
+    if (!name || name === '(frozen)') return;
+    componentMap.set(name, String(row.value ?? ''));
+  });
+  const resolvedLabel = slotLabel != null && String(slotLabel).trim()
+    ? slotLabel : index + 1;
+  return {
+    kind: 'character',
+    slot: String(slot || ids[index] || slotLabel || index + 1),
+    slot_label: resolvedLabel,
+    prompt,
+    uc: String((Array.isArray(executedUcs) ? executedUcs[index] : '') || ''),
+    components: Array.from(componentMap, ([name, value]) => ({name, value})),
+  };
+}
+
 export function createResultContextMenu({
   document,
   window,
@@ -1170,22 +1211,6 @@ export function createResultContextMenu({
       }
       return LOC_LABELS[loc] || loc;
     };
-    const characterPayload = (slot, slotLabel) => {
-      let index = executedIds.indexOf(String(slot || ''));
-      if (index < 0 && slotLabel != null && String(slotLabel).trim()) {
-        const parsed = Number.parseInt(String(slotLabel), 10);
-        if (Number.isFinite(parsed) && parsed > 0) index = parsed - 1;
-      }
-      if (index < 0 || index >= executedCharacters.length) return null;
-      const prompt = String(executedCharacters[index] || '').trim();
-      if (!prompt) return null;
-      return {
-        kind: 'character',
-        slot: String(slot || executedIds[index] || slotLabel || index + 1),
-        prompt,
-        uc: String(executedUcs[index] || ''),
-      };
-    };
     const blocks = new Map();
     history.forEach(entry => {
       const label = blockLabel(entry);
@@ -1209,7 +1234,16 @@ export function createResultContextMenu({
         || a.label.localeCompare(b.label));
     let html = '';
     ordered.forEach(info => {
-      const charFreezePayload = info.location === 'character' ? characterPayload(info.slot, info.slotLabel) : null;
+      const charFreezePayload = info.location === 'character'
+        ? buildCharacterFreezePayload({
+            slot: info.slot,
+            slotLabel: info.slotLabel,
+            rows: info.rows,
+            executedCharacters,
+            executedUcs,
+            executedIds,
+          })
+        : null;
       const titlePin = charFreezePayload
         ? freezeButtonHtml(charFreezePayload, isCharacterFrozen(charFreezePayload.slot), '캐릭터 블럭 freeze')
         : '';

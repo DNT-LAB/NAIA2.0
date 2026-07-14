@@ -371,18 +371,58 @@ def _write_character_freeze(
     return True
 
 
-def set_frozen_character_slot(app_context, slot: Any, prompt: Any, uc: Any = "") -> bool:
+def _explicit_character_components(components: Any) -> dict[str, str]:
+    if isinstance(components, dict):
+        return {
+            str(name): str(value or "")
+            for name, value in components.items()
+            if str(name or "").strip() and str(name) != "(frozen)"
+        }
+    if not isinstance(components, list):
+        return {}
+    out: dict[str, str] = {}
+    for item in components:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or item.get("key") or "").strip()
+        if not name or name == "(frozen)":
+            continue
+        out[name] = str(item.get("value") or "")
+    return out
+
+
+def set_frozen_character_slot(
+    app_context,
+    slot: Any,
+    prompt: Any,
+    uc: Any = "",
+    components: Any = None,
+    slot_label: Any = None,
+) -> bool:
     slot_key = str(slot or "").strip()
     prompt_text = str(prompt or "").strip()
     if not slot_key or not prompt_text:
         return False
-    # Capture the per-wildcard breakdown + the 1-based character number from the
-    # generation that produced this character (for individual reroll + a distinct
-    # multi-character label).
-    context = getattr(app_context, "current_prompt_context", None)
-    components = _character_rolls_map(context, slot_key)
-    slot_label = _character_slot_label(context, slot_key)
-    return _write_character_freeze(app_context, slot_key, prompt_text, str(uc or ""), components, slot_label)
+    if components is not None:
+        # Result-history callers provide the selected image's exact provenance.
+        # An explicit empty list is meaningful: do not leak components from the
+        # latest generation's current_prompt_context into an older image.
+        components_map = _explicit_character_components(components)
+        resolved_slot_label = slot_label
+    else:
+        # Backward-compatible live freeze: capture the current generation's
+        # per-wildcard breakdown and display label.
+        context = getattr(app_context, "current_prompt_context", None)
+        components_map = _character_rolls_map(context, slot_key)
+        resolved_slot_label = _character_slot_label(context, slot_key)
+    return _write_character_freeze(
+        app_context,
+        slot_key,
+        prompt_text,
+        str(uc or ""),
+        components_map,
+        resolved_slot_label,
+    )
 
 
 def clear_frozen_character_slot(app_context, slot: Any | None = None) -> bool:

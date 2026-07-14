@@ -153,6 +153,8 @@ class HeadlessWildcardService:
                 payload.get("slot"),
                 payload.get("prompt"),
                 payload.get("uc", ""),
+                payload.get("components") if "components" in payload else None,
+                payload.get("slot_label"),
             )
             if not ok:
                 return self.context._toast("Invalid character wildcard freeze payload", level="error")

@@ -410,7 +410,12 @@ export function createSearchPanel({
       quickFilter.onSearchReleased();
     }
     if (getCurrentModuleId() === 'search') renderSearch(message);
-    return true;   // authoritative 상태 처리 완료 → app.js 가 pool 잠금/게이트 해제 가능
+    // app.js 는 이 반환값이 true 일 때만 pool 잠금/Random 게이트를 해제한다. pool 잠금 해제는
+    // 실제 pool 작업 완료일 때만이어야 한다: green 검색 진행 중(wasSearching)이면 그 검색의
+    // 완료 마커(search_completed=isSearchDone)에만 해제하고, 끼어든 authoritative state
+    // (rating/tag_filter broadcast 등, 마커 없음)로는 조기 해제하지 않는다(Codex §3-1).
+    // 검색 진행 중이 아니면(parquet load/merge·restore·rating 완료 등) 정상 해제.
+    return isSearchDone || !wasSearching;
   }
 
   function onSearchProgress(message) {

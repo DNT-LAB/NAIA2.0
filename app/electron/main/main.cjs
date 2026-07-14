@@ -2066,6 +2066,9 @@ const DANBOORU_VIEW_HOSTS = new Set([
 ]);
 // idle=미시작 / safebooru=워밍업 로드중 / transitioned=danbooru 로 천이함 / done=완료.
 let danbooruWarmupState = "idle";
+// 워밍업 중 로드 실패(네트워크/차단) 재시도 상한 — 무한 재시도 방지(cold 로드마다 리셋).
+let danbooruWarmupRetries = 0;
+const DANBOORU_WARMUP_MAX_RETRIES = 3;
 // Tag extraction = crawl the page the view ALREADY loaded (Dev0714 tabs/web_view.py:307-334),
 // reading data-tag-name from each <ul class="{category}-tag-list">. No server-side donmai
 // request, so Cloudflare (which resets the backend's plain client) is bypassed entirely.
@@ -2278,6 +2281,23 @@ function ensureDanbooruView() {
   // Cloudflare 워밍업 진행: 각 로드 완료마다 챌린지 통과 여부를 확인하고, safebooru
   // 에서 정상 페이지가 확인되면 조용히 danbooru 로 천이한다.
   wc.on("did-finish-load", () => { void maybeAdvanceDanbooruWarmup(); });
+  // 워밍업 실패 복구: safebooru 로드나 danbooru 천이가 네트워크 오류/차단으로 실패하면
+  // did-finish-load 가 안 와 뷰가 멈춘다. safebooru 로 되돌려 재워밍업(상한까지). ERR_ABORTED
+  // (-3, CF 리다이렉트로 앞선 로드가 대체된 경우)는 정상이라 무시한다.
+  wc.on("did-fail-load", (_event, errorCode, _errorDesc, _validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    if (danbooruWarmupState !== "safebooru" && danbooruWarmupState !== "transitioned") return;
+    if (danbooruWarmupRetries >= DANBOORU_WARMUP_MAX_RETRIES) return;
+    danbooruWarmupRetries += 1;
+    danbooruWarmupState = "safebooru";
+    setTimeout(() => {
+      try {
+        if (danbooruView && !danbooruView.webContents.isDestroyed()) {
+          danbooruView.webContents.loadURL(SAFEBOORU_HOME_URL);
+        }
+      } catch (_error) {}
+    }, 1500);
+  });
   // 우클릭 컨텍스트 메뉴: 이미지에 한해 복사 / 저장 (donmai 임베드 뷰).
   wc.on("context-menu", (_event, params) => {
     if (params.mediaType !== "image" || !params.srcURL) {
@@ -2309,6 +2329,7 @@ function attachDanbooruView(rect) {
     // Cold 로드: danbooru 직접 접속이 (한국에서) 막히므로 safebooru 로 먼저 붙어
     // Cloudflare 를 통과시키고, 정상 페이지 확인 후 maybeAdvanceDanbooruWarmup 이
     // danbooru 로 천이한다.
+    danbooruWarmupRetries = 0;
     danbooruWarmupState = "safebooru";
     view.webContents.loadURL(SAFEBOORU_HOME_URL);
   }

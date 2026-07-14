@@ -51,6 +51,7 @@ def register_state_routes(
             payload = {}
         action = str(payload.get("action") or "").strip().lower()
         manager = session_context.generation_queue_manager
+        img2img_lifecycle_changed = False
         if action == "pause":
             await run_in_thread(manager.pause_queue)
         elif action == "resume":
@@ -58,18 +59,41 @@ def register_state_routes(
             if session_context.headless_generation_execute_enabled:
                 start_generation_runner(session_context, clients)
         elif action == "clear":
-            await run_in_thread(manager.clear_queue)
+            pending_requests = await run_in_thread(manager.clear_queue)
+            service = session_context._img2img_service()
+            for request in pending_requests or []:
+                img2img_lifecycle_changed = (
+                    service.record_generation_failed(
+                        getattr(request, "params", {}) or {},
+                        str(getattr(request, "request_id", "") or ""),
+                        "Removed from generation queue",
+                    )
+                    or img2img_lifecycle_changed
+                )
         elif action == "remove":
             request_id = str(payload.get("request_id") or payload.get("id") or "").strip()
             if not request_id:
                 return JSONResponse({"error": "request_id is required"}, status_code=400)
+            pending_request = next(
+                (request for request in await run_in_thread(manager.get_all_requests)
+                 if str(getattr(request, "request_id", "") or "") == request_id),
+                None,
+            )
             removed = await run_in_thread(manager.remove_request, request_id)
             if not removed:
                 return JSONResponse({"error": "request not found"}, status_code=404)
+            if pending_request is not None:
+                img2img_lifecycle_changed = session_context._img2img_service().record_generation_failed(
+                    getattr(pending_request, "params", {}) or {},
+                    request_id,
+                    "Removed from generation queue",
+                )
         else:
             return JSONResponse({"error": "Unsupported queue action"}, status_code=400)
         state = session_context.queue_state_payload()
         await broadcast_json(clients, state)
+        if img2img_lifecycle_changed:
+            await broadcast_json(clients, session_context._img2img_service().generation_event_payload())
         return {"ok": True, "action": action, "queue": state}
 
     def runtime_capabilities_payload() -> dict[str, Any]:

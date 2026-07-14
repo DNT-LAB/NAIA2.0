@@ -221,6 +221,23 @@ class HeadlessImg2ImgService:
             "negative_prompt": negative_prompt,
             # 캐릭터 프롬프트 슬롯을 소스 이미지/라이브 메인 UI에서 자동 채움(future01 패리티 복구).
             "characters": self._session_characters_from_sources(params, prompt_ctx),
+            # 생성 요청은 팝업 수명과 분리해 추적한다. 세션/마스크는 완료 뒤에도
+            # 살아 있어 같은 마스크로 재시도할 수 있고, 다른 Web 클라이언트나 분리창도
+            # 동일한 submission 상태를 관찰한다.
+            "generation_sequence": 0,
+            "generation_submission_id": "",
+            "generation_status": "idle",
+            "generation_expected_count": 0,
+            "generation_dispatch_count": 0,
+            "generation_queued_count": 0,
+            "generation_started_count": 0,
+            "generation_completed_count": 0,
+            "generation_failed_count": 0,
+            "generation_request_ids": [],
+            "generation_dispatch_indices": [],
+            "generation_started_request_ids": [],
+            "generation_terminal_request_ids": [],
+            "generation_error": "",
         }
         return self.module_state()
 
@@ -250,6 +267,8 @@ class HeadlessImg2ImgService:
             for index, character in enumerate(state.get("characters") or [])
         ]
         mode = str(state.get("mode") or "img2img")
+        generation_status = str(state.get("generation_status") or "idle")
+        generation_busy = generation_status in {"submitting", "queued", "running"}
         payload = context._module_state_payload("img2img", {
             "active": True,
             "window_id": int(state.get("window_id", 0) or 0),
@@ -272,11 +291,182 @@ class HeadlessImg2ImgService:
             "negative_prompt": str(state.get("negative_prompt") or ""),
             "characters": characters,
             "requires_mask": mode == "inpaint" and not bool(state.get("has_mask")),
-            "can_generate": bool(state.get("image_bytes")) and (mode != "inpaint" or bool(state.get("has_mask"))),
+            "can_generate": (
+                bool(state.get("image_bytes"))
+                and (mode != "inpaint" or bool(state.get("has_mask")))
+                and not generation_busy
+            ),
+            **self._generation_state_fields(state),
         })
         if extra:
             payload.update(extra)
         return payload
+
+    @staticmethod
+    def _generation_state_fields(state: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "generation_submission_id": str(state.get("generation_submission_id") or ""),
+            "generation_status": str(state.get("generation_status") or "idle"),
+            "generation_expected_count": int(state.get("generation_expected_count", 0) or 0),
+            "generation_queued_count": int(state.get("generation_queued_count", 0) or 0),
+            "generation_started_count": int(state.get("generation_started_count", 0) or 0),
+            "generation_completed_count": int(state.get("generation_completed_count", 0) or 0),
+            "generation_failed_count": int(state.get("generation_failed_count", 0) or 0),
+            "generation_request_ids": list(state.get("generation_request_ids") or []),
+            "generation_error": str(state.get("generation_error") or ""),
+        }
+
+    def generation_event_payload(self) -> dict[str, Any]:
+        """Small cross-client lifecycle event; deliberately excludes image/mask bytes."""
+        state = self.context.img2img_session if isinstance(self.context.img2img_session, dict) else {}
+        if not state.get("active"):
+            return {
+                "type": "img2img_generation_state",
+                "module_id": "img2img",
+                "active": False,
+                "generation_status": "inactive",
+                "can_retry": False,
+                "can_generate": False,
+            }
+        mode = str(state.get("mode") or "img2img")
+        fields = self._generation_state_fields(state)
+        retryable = bool(state.get("image_bytes")) and (mode != "inpaint" or bool(state.get("has_mask")))
+        generation_busy = fields["generation_status"] in {"submitting", "queued", "running"}
+        return {
+            "type": "img2img_generation_state",
+            "module_id": "img2img",
+            "active": True,
+            "window_id": int(state.get("window_id", 0) or 0),
+            "mode": mode,
+            "has_mask": bool(state.get("has_mask")),
+            "can_retry": retryable,
+            "can_generate": retryable and not generation_busy,
+            **fields,
+        }
+
+    def _matches_generation(self, params: dict[str, Any] | None) -> bool:
+        state = self.context.img2img_session if isinstance(self.context.img2img_session, dict) else {}
+        params = params if isinstance(params, dict) else {}
+        if not state.get("active"):
+            return False
+        try:
+            marker_window = int(params.get("_img2img_window_id", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        return (
+            marker_window == int(state.get("window_id", 0) or 0)
+            and str(params.get("_img2img_submission_id") or "")
+            == str(state.get("generation_submission_id") or "")
+        )
+
+    def record_generation_dispatch(
+        self,
+        command: dict[str, Any],
+        *,
+        request_id: str = "",
+        error: str = "",
+    ) -> bool:
+        overrides = command.get("overrides") if isinstance(command, dict) else None
+        if not self._matches_generation(overrides):
+            return False
+        state = self.context.img2img_session
+        try:
+            index = int(overrides.get("_img2img_submission_index", -1))
+        except (TypeError, ValueError):
+            index = -1
+        seen = state.setdefault("generation_dispatch_indices", [])
+        if index in seen:
+            return False
+        seen.append(index)
+        state["generation_dispatch_count"] = int(state.get("generation_dispatch_count", 0) or 0) + 1
+        request_id = str(request_id or "")
+        if request_id:
+            ids = state.setdefault("generation_request_ids", [])
+            if request_id not in ids:
+                ids.append(request_id)
+                state["generation_queued_count"] = int(state.get("generation_queued_count", 0) or 0) + 1
+        else:
+            state["generation_failed_count"] = int(state.get("generation_failed_count", 0) or 0) + 1
+            if error:
+                state["generation_error"] = str(error)
+        return True
+
+    def finalize_generation_dispatch(self) -> bool:
+        state = self.context.img2img_session if isinstance(self.context.img2img_session, dict) else {}
+        if not state.get("active") or str(state.get("generation_status") or "") != "submitting":
+            return False
+        if int(state.get("generation_queued_count", 0) or 0) > 0:
+            state["generation_status"] = "queued"
+        else:
+            state["generation_status"] = "error"
+            state["generation_error"] = str(state.get("generation_error") or "Generation enqueue failed")
+        return True
+
+    def record_generation_started(self, params: dict[str, Any] | None, request_id: str) -> bool:
+        if not self._matches_generation(params):
+            return False
+        state = self.context.img2img_session
+        request_id = str(request_id or "")
+        seen = state.setdefault("generation_started_request_ids", [])
+        if (
+            not request_id
+            or request_id in seen
+            or request_id in state.setdefault("generation_terminal_request_ids", [])
+        ):
+            return False
+        seen.append(request_id)
+        state["generation_started_count"] = int(state.get("generation_started_count", 0) or 0) + 1
+        state["generation_status"] = "running"
+        return True
+
+    def _record_generation_terminal(
+        self,
+        params: dict[str, Any] | None,
+        request_id: str,
+        *,
+        error: str = "",
+    ) -> bool:
+        if not self._matches_generation(params):
+            return False
+        state = self.context.img2img_session
+        request_id = str(request_id or "")
+        terminal = state.setdefault("generation_terminal_request_ids", [])
+        if not request_id or request_id in terminal:
+            return False
+        terminal.append(request_id)
+        if error:
+            state["generation_failed_count"] = int(state.get("generation_failed_count", 0) or 0) + 1
+            state["generation_error"] = str(error)
+        else:
+            state["generation_completed_count"] = int(state.get("generation_completed_count", 0) or 0) + 1
+        expected = int(state.get("generation_expected_count", 0) or 0)
+        finished = (
+            int(state.get("generation_completed_count", 0) or 0)
+            + int(state.get("generation_failed_count", 0) or 0)
+        )
+        if expected > 0 and finished >= expected:
+            failed = int(state.get("generation_failed_count", 0) or 0)
+            completed = int(state.get("generation_completed_count", 0) or 0)
+            if failed and completed:
+                state["generation_status"] = "completed_with_errors"
+            elif failed:
+                state["generation_status"] = "error"
+            else:
+                state["generation_status"] = "completed"
+        else:
+            state["generation_status"] = "running"
+        return True
+
+    def record_generation_completed(self, params: dict[str, Any] | None, request_id: str) -> bool:
+        return self._record_generation_terminal(params, request_id)
+
+    def record_generation_failed(
+        self,
+        params: dict[str, Any] | None,
+        request_id: str,
+        error: str,
+    ) -> bool:
+        return self._record_generation_terminal(params, request_id, error=str(error or "Generation failed"))
 
     def _decode_mask(self, value: str) -> tuple[bytes, str, int]:
         from PIL import Image
@@ -355,7 +545,40 @@ class HeadlessImg2ImgService:
             if index is not None and 0 <= index < len(chars):
                 chars[index]["uc"] = str(value or "")
         elif key == "generate":
-            commands = self.generation_commands()
+            state = context.img2img_session
+            if str(state.get("generation_status") or "idle") in {"submitting", "queued", "running"}:
+                return self.module_state({
+                    "_headless_extra_messages": [
+                        context._toast("Img2Img generation is already queued or running", level="info")
+                    ]
+                })
+            sequence = int(state.get("generation_sequence", 0) or 0) + 1
+            submission_id = f"{int(state.get('window_id', 0) or 0)}:{sequence}"
+            repeat = max(1, min(99, int(state.get("repeat", 1) or 1)))
+            state.update({
+                "generation_sequence": sequence,
+                "generation_submission_id": submission_id,
+                "generation_status": "submitting",
+                "generation_expected_count": repeat,
+                "generation_dispatch_count": 0,
+                "generation_queued_count": 0,
+                "generation_started_count": 0,
+                "generation_completed_count": 0,
+                "generation_failed_count": 0,
+                "generation_request_ids": [],
+                "generation_dispatch_indices": [],
+                "generation_started_request_ids": [],
+                "generation_terminal_request_ids": [],
+                "generation_error": "",
+            })
+            try:
+                commands = self.generation_commands(submission_id=submission_id)
+            except Exception as exc:
+                # 직접 WebSocket 호출이나 stale UI에서도 준비 실패가 `submitting`으로
+                # 고착되지 않게 한다. 세션/소스는 유지해 전제 보완 후 재시도할 수 있다.
+                state["generation_status"] = "error"
+                state["generation_error"] = str(exc)
+                raise
             return self.module_state({"_headless_generation_commands": commands})
         else:
             return None
@@ -389,7 +612,7 @@ class HeadlessImg2ImgService:
             session["has_mask"] = False
         return self.module_state()
 
-    def generation_commands(self) -> list[dict[str, Any]]:
+    def generation_commands(self, *, submission_id: str = "") -> list[dict[str, Any]]:
         state = self.context.img2img_session
         if not state.get("image_bytes"):
             raise RuntimeError("Img2Img source image is unavailable")
@@ -425,11 +648,16 @@ class HeadlessImg2ImgService:
             overrides["img2img_batch_request"] = True
             overrides["img2img_batch_total"] = repeat
         overrides["img2img_batch_window_id"] = int(state.get("window_id", 0) or 0)
-        return [
-            {
+        submission_id = str(submission_id or state.get("generation_submission_id") or "")
+        commands = []
+        for index in range(repeat):
+            command_overrides = dict(overrides)
+            command_overrides["_img2img_window_id"] = int(state.get("window_id", 0) or 0)
+            command_overrides["_img2img_submission_id"] = submission_id
+            command_overrides["_img2img_submission_index"] = index
+            commands.append({
                 "type": "generate",
                 "api_mode": "NAI",
-                "overrides": dict(overrides),
-            }
-            for _ in range(repeat)
-        ]
+                "overrides": command_overrides,
+            })
+        return commands

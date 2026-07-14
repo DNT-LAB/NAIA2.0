@@ -189,9 +189,10 @@ class GenerationQueueManager:
         print(f"[QUEUE] ▶️ 큐 재개 (대기 중: {queue_size})")
 
     def clear_queue(self):
-        """큐 비우기 (모든 대기 중인 요청 제거)"""
+        """큐 비우기 (모든 대기 중인 요청 제거) 후 실제 제거된 요청을 반환한다."""
         with self._queue_lock:
-            cleared_count = len(self._queue)
+            cleared_requests = list(self._queue)
+            cleared_count = len(cleared_requests)
             self._queue.clear()
 
         self._publish_queue_event("queue_cleared", {
@@ -199,6 +200,7 @@ class GenerationQueueManager:
         })
 
         print(f"[QUEUE] 🗑️ 큐 비우기 완료: {cleared_count}개 요청 제거됨")
+        return cleared_requests
 
     def get_queue_size(self) -> int:
         """현재 큐 크기 반환"""

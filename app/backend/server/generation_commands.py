@@ -832,12 +832,26 @@ async def enqueue_headless_generation_commands(
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
     queued = 0
+    img2img_service = None
+    lifecycle_touched = False
+    if any(
+        isinstance(command, dict)
+        and isinstance(command.get("overrides"), dict)
+        and command["overrides"].get("_img2img_submission_id")
+        for command in commands
+    ):
+        img2img_service = context._img2img_service()
     for command in commands:
         if not isinstance(command, dict):
             continue
         try:
             result = await enqueue_generation_request(context, command)
         except Exception as exc:
+            if img2img_service is not None:
+                lifecycle_touched = (
+                    img2img_service.record_generation_dispatch(command, error=str(exc))
+                    or lifecycle_touched
+                )
             await _send_json(ws, {
                 "type": "toast",
                 "level": "error",
@@ -846,6 +860,15 @@ async def enqueue_headless_generation_commands(
             await _rollback_storyteller_command(ws, context, command, str(exc))
             continue
         await _send_json(ws, result.websocket_payload())
+        if img2img_service is not None:
+            lifecycle_touched = (
+                img2img_service.record_generation_dispatch(
+                    command,
+                    request_id=result.request_id if result.ok else "",
+                    error=result.blocked_reason if not result.ok else "",
+                )
+                or lifecycle_touched
+            )
         if not result.ok:
             await _send_json(ws, {
                 "type": "toast",
@@ -867,8 +890,14 @@ async def enqueue_headless_generation_commands(
             "message": f"{queued} generation request(s) queued",
         })
         await _send_json(ws, context.queue_state_payload())
+        if lifecycle_touched and img2img_service is not None:
+            if img2img_service.finalize_generation_dispatch():
+                await _broadcast_json(clients, img2img_service.generation_event_payload())
         if context.headless_generation_execute_enabled:
             start_generation_runner(context, clients)
+    elif lifecycle_touched and img2img_service is not None:
+        if img2img_service.finalize_generation_dispatch():
+            await _broadcast_json(clients, img2img_service.generation_event_payload())
 
 
 async def _send_generation_queued_state(ws: WebSocket, context: WebSessionContext) -> None:

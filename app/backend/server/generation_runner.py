@@ -111,6 +111,26 @@ async def _broadcast_wildcard_state(context: WebSessionContext, clients: set[Web
     await broadcast_json(clients, payload)
 
 
+async def _broadcast_img2img_generation_state(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+) -> None:
+    """Broadcast the lightweight session lifecycle without resending image/mask data."""
+    service = _img2img_lifecycle_service(context)
+    if service is not None:
+        await broadcast_json(clients, service.generation_event_payload())
+
+
+def _img2img_lifecycle_service(context: WebSessionContext):
+    factory = getattr(context, "_img2img_service", None)
+    if not callable(factory):
+        return None
+    try:
+        return factory()
+    except Exception:
+        return None
+
+
 def ensure_generation_runner(context: WebSessionContext, clients: set[WebSocket]) -> None:
     task = getattr(context, "headless_generation_runner_task", None)
     if task is not None and not task.done():
@@ -407,16 +427,34 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             request = await asyncio.to_thread(context.generation_queue_manager.dequeue_request)
             if request is None:
                 break
+            request_params = getattr(request, "params", {}) or {}
+            img2img_service = _img2img_lifecycle_service(context)
             # 확장 cancel_generation의 dequeue 경합 보강(Codex R1-#2): enqueue 직후
             # 러너가 큐 제거보다 먼저 집어간 요청은 톰스톤으로 실행 직전에 건너뛴다.
             consume_cancel = getattr(context.generation_queue_manager, "consume_cancellation", None)
             if callable(consume_cancel) and consume_cancel(request.request_id):
                 print(f"[QUEUE] 취소 예약 소비 — 실행 건너뜀: {request.request_id[:8]}...", flush=True)
+                img2img_cancelled = bool(
+                    img2img_service
+                    and img2img_service.record_generation_failed(
+                        request_params,
+                        request.request_id,
+                        "Generation cancelled",
+                    )
+                )
                 await broadcast_json(clients, context.queue_state_payload())
+                if img2img_cancelled:
+                    await _broadcast_img2img_generation_state(context, clients)
                 continue
+            img2img_started = bool(
+                img2img_service
+                and img2img_service.record_generation_started(request_params, request.request_id)
+            )
             context.is_generating = True
             await broadcast_json(clients, {"type": "status", "is_generating": True, "message": "generating"})
             await broadcast_json(clients, context.queue_state_payload())
+            if img2img_started:
+                await _broadcast_img2img_generation_state(context, clients)
             # Ollama Auto Boost 오버랩 생산자 — 다음 랜덤 행 예약 + boost를 백그라운드 선행해
             # 현재 이미지 생성(아래 execute_request 대기)과 겹친다. 자격 미달이면 no-op.
             _kickoff_auto_gen_prefetch(context, request)
@@ -446,6 +484,10 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 except Exception:
                     pass
                 continue
+            img2img_completed = bool(
+                img2img_service
+                and img2img_service.record_generation_completed(request_params, request.request_id)
+            )
             auto_save_result = await _auto_save_generated_history_item(context, stored.item)
 
             context.is_generating = False
@@ -547,6 +589,8 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                     "level": "error",
                     "message": f"Auto Save failed: {auto_save_result['error']}",
                 })
+            if img2img_completed:
+                await _broadcast_img2img_generation_state(context, clients)
     finally:
         context.is_generating = False
         context.headless_generation_runner_active = False
@@ -1191,6 +1235,11 @@ async def _broadcast_generation_error(
 ) -> None:
     context.is_generating = False
     params = getattr(request, "params", {}) or {}
+    img2img_service = _img2img_lifecycle_service(context)
+    img2img_failed = bool(
+        img2img_service
+        and img2img_service.record_generation_failed(params, request.request_id, message)
+    )
     await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "error"})
     await broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
     await broadcast_json(clients, {"type": "generation_error", "message": message})
@@ -1236,6 +1285,8 @@ async def _broadcast_generation_error(
             "message": message,
         })
     await broadcast_json(clients, context.queue_state_payload())
+    if img2img_failed:
+        await _broadcast_img2img_generation_state(context, clients)
 
 
 async def _save_character_viewer_thumbnail(

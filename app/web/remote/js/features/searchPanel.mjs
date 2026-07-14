@@ -315,9 +315,11 @@ export function createSearchPanel({
       // Websocket broadcasts from concurrent tabs may complete out of order.
       // quickFilter also observes requester-only assigned/update messages, so
       // consult both guards before applying any part of an older search state.
-      if (tagFilterRevision < latestTagFilterRevision) return;
+      // stale/superseded 상태: 처리하지 않고 false 반환 → app.js 가 pool 잠금/게이트를
+      // 조기 해제하지 않게 한다(newer 작업이 아직 진행 중; Codex NEW 선재 결함).
+      if (tagFilterRevision < latestTagFilterRevision) return false;
       if (quickFilter?.noteAuthoritativeRevision
-          && !quickFilter.noteAuthoritativeRevision(tagFilterRevision)) return;
+          && !quickFilter.noteAuthoritativeRevision(tagFilterRevision)) return false;
       latestTagFilterRevision = tagFilterRevision;
     }
     if (message.rating_counts) cachedRatingCounts = message.rating_counts;
@@ -408,6 +410,7 @@ export function createSearchPanel({
       quickFilter.onSearchReleased();
     }
     if (getCurrentModuleId() === 'search') renderSearch(message);
+    return true;   // authoritative 상태 처리 완료 → app.js 가 pool 잠금/게이트 해제 가능
   }
 
   function onSearchProgress(message) {

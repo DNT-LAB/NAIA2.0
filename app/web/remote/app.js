@@ -7810,7 +7810,10 @@ function updateSearchCount(count) {
 }
 
 function onSearchState(m) {
-  if (searchPanelControl) searchPanelControl.onSearchState(m);
+  // stale/superseded search_state(revision 가드 거부)는 pool 준비 완료가 아니므로 pool 잠금/
+  // Random 게이트를 조기 해제하지 않는다 — newer 작업이 아직 진행 중(Codex NEW 선재 결함).
+  const authoritative = searchPanelControl ? searchPanelControl.onSearchState(m) : true;
+  if (authoritative === false) return;
   tagSurfaceLock.end('pool');   // completion of search / parquet load-merge / rating recompute / restore
   poolLoad.stop();              // authoritative 'pool ready' — clears load/reconstruct/filter gate + toast
 }

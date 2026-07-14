@@ -8,8 +8,11 @@ from fastapi import WebSocket
 from app.backend.server.search_runtime import (
     clear_active_tag_filter,
     filter_source_frame,
+    mark_search_pool_replaced,
     next_custom_parquet_path,
+    reset_active_tag_filter_assignment,
     search_base_frame,
+    search_pool_state_guard,
 )
 from core.web_session_context import WebSessionContext
 
@@ -220,12 +223,12 @@ def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> 
     elif action == "assign":
         current = state.get("current")
         if current is not None:
-            context.active_tag_filter_ids = None
-            context.pending_tag_filter = None
-            context.active_tag_filter = None
-            context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
-            context.search_results.set_dataframe(current.copy())
-            context.search_results_snapshot = current.copy()
+            with search_pool_state_guard(context):
+                reset_active_tag_filter_assignment(context)
+                context.save_search_filter_state(tag_filter=[], tag_filter_exclude=[], tag_filter_active=False)
+                context.search_results.set_dataframe(current.copy())
+                context.search_results_snapshot = current.copy()
+                mark_search_pool_replaced(context)
         return depth_payload(context), context.search_state_payload()
     elif action == "promote":
         current = state.get("current")

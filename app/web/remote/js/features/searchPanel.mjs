@@ -15,6 +15,7 @@ export function createSearchPanel({
 }) {
   let searchingActive = false;
   let initialFilterRestoreDone = false; // 시작 시 Tag Filter 자동 Search→Assign 1회 가드
+  let latestTagFilterRevision = 0;
   // Rating state lives in one store holding BOTH the generation-pool ratings
   // (active) and the search-execution ratings (search) — distinct concepts,
   // managed together. ratingState/searchRatingState alias the store's live
@@ -270,7 +271,11 @@ export function createSearchPanel({
     if (serverPreferences) {
       setRatingsFromList(serverPreferences.ratings);
       if (quickFilter) {
-        quickFilter.applyPreferences(serverPreferences, {send: false, updateCount: false});
+        quickFilter.applyPreferences(serverPreferences, {
+          send: false,
+          updateCount: false,
+          persistLocal: true,
+        });
       } else {
         syncRatingButtons();
       }
@@ -304,14 +309,35 @@ export function createSearchPanel({
   }
 
   function onSearchState(message) {
+    const quickFilter = getQuickFilter();
+    const tagFilterRevision = Number(message.tag_filter_revision) || 0;
+    if (tagFilterRevision > 0) {
+      // Websocket broadcasts from concurrent tabs may complete out of order.
+      // quickFilter also observes requester-only assigned/update messages, so
+      // consult both guards before applying any part of an older search state.
+      if (tagFilterRevision < latestTagFilterRevision) return;
+      if (quickFilter?.noteAuthoritativeRevision
+          && !quickFilter.noteAuthoritativeRevision(tagFilterRevision)) return;
+      latestTagFilterRevision = tagFilterRevision;
+    }
     if (message.rating_counts) cachedRatingCounts = message.rating_counts;
     updateSearchCount(message.count || 0);
-    searchingActive = false;
+    // 라이브 green [검색] 이 방금 완료됐는지(잠금 해제 오버레이 판정용) + startup autoApply 로
+    // 재적용됐는지 캡처. 검색은 워커 스레드로 돌아(비블로킹) 그동안 rating/tag_filter broadcast
+    // 등 다른 search_state 가 끼어들 수 있으므로(Codex A3), 백엔드가 실제 green 검색 완료에만
+    // 다는 `search_completed` 마커가 있을 때만 완료로 취급한다 — 끼어든 broadcast 는 무시.
+    const wasSearching = searchingActive;
+    const isSearchDone = !!message.search_completed;
+    let autoApplied = false;
+    if (isSearchDone) searchingActive = false;
     if (message.active_ratings) {
       setRatingsFromList(message.active_ratings);
     }
     setSearchRatingsFromMap(message.ratings);
-    const quickFilter = getQuickFilter();
+    // A backend-authoritative tag assignment/clear was broadcast to every tab.
+    // Treat it as the completed restore so passive receivers do not launch a
+    // duplicate Search→Assign cycle from the same persisted chips.
+    if (message.tag_filter_settled) initialFilterRestoreDone = true;
     if (quickFilter && quickFilter.setPresets) quickFilter.setPresets(message.filter_presets || []);
     const serverPreferences = message.filter_preferences;
     if (serverPreferences && quickFilter) {
@@ -337,12 +363,29 @@ export function createSearchPanel({
       const dataReady = ratingTotal > 0 || (Number(message.total_count) || 0) > 0;
       const autoApply = !initialFilterRestoreDone && !!hasActiveTags && dataReady;
       if (autoApply) initialFilterRestoreDone = true;
-      quickFilter.applyPreferences(serverPreferences, {send: autoApply, updateCount: false});
+      autoApplied = autoApply;
+      quickFilter.applyPreferences(serverPreferences, {
+        send: autoApply,
+        updateCount: false,
+        persistLocal: true,
+      });
     } else if (serverPreferences) {
       setRatingsFromList(serverPreferences.ratings);
       syncRatingButtons();
     } else {
       syncRatingButtons();
+    }
+    // Passive tabs receive the authoritative search_state rather than the
+    // requester's tag_filter_assigned event. Rehydrate the filter-specific
+    // per-rating counts after the chips/active flag above have reconciled so
+    // every tab retains the same "N assigned" label.
+    if (
+      message.tag_filter_settled
+      && serverPreferences?.tag_filter_active
+      && message.tag_filter_rating_counts
+      && quickFilter?.onUpdate
+    ) {
+      quickFilter.onUpdate({rating_counts: message.tag_filter_rating_counts});
     }
     // Parquet load/merge swapped the working pool → the backend deactivated the
     // filter and kept the chips as a draft, leaving the Tag Filter's 'N matched'
@@ -352,6 +395,17 @@ export function createSearchPanel({
     // loaded/merged, so this never loops).
     if ((message.loaded || message.merged) && quickFilter && quickFilter.onPoolSwap) {
       quickFilter.onPoolSwap();
+    } else if (
+      wasSearching
+      && isSearchDone
+      && !autoApplied
+      && !message.tag_filter_settled
+      && quickFilter && quickFilter.onSearchReleased
+    ) {
+      // 실제 green [검색] 완료(search_completed 마커)가 활성 태그필터를 백엔드에서 해제(칩=draft)
+      // → 자동 재적용 대신 '해제됨' 오버레이(블러 + [재적용]/[초기화])로 사용자 선택을 받는다.
+      // 끼어든 rating/tag_filter broadcast 는 마커가 없어 여기서 걸러진다(A3 false-positive 방지).
+      quickFilter.onSearchReleased();
     }
     if (getCurrentModuleId() === 'search') renderSearch(message);
   }

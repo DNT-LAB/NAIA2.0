@@ -81,6 +81,11 @@ export function createQuickFilterController(deps) {
   let includeTags = [];
   let excludeTags = [];
   let active = false;
+  // 필터가 실제로 적용(assign)된 적이 있는지 — green 검색이 백엔드에서 active 를 끄면
+  // applyPreferences 가 active=false 로 만들어 onSearchReleased 시점엔 active 를 못 믿는다.
+  // '해제됨' 오버레이는 진짜 적용됐던 필터에만 띄우고, 미적용 draft 칩(280ms 디바운스 중)엔
+  // 안 띄우기 위한 별도 플래그(Codex MED). onAssigned 에서 set, clear/reset 에서 unset.
+  let filterWasApplied = false;
   let acResults = [];
   let acSelection = -1;
   let acTimer = null;
@@ -89,6 +94,7 @@ export function createQuickFilterController(deps) {
   let acTarget = 'include';
   let searchSeq = 0;
   let latestSearchRequestId = '';
+  let latestTagFilterRevision = 0;
   let searchDebounceTimer = null;
   let latestAcRequest = {target: '', query: ''};
 
@@ -102,6 +108,7 @@ export function createQuickFilterController(deps) {
     deps.getWs().send(JSON.stringify(payload));
   };
   const lockTagSurface = typeof deps.lockTagSurface === 'function' ? deps.lockTagSurface : () => {};
+  const unlockTagSurface = typeof deps.unlockTagSurface === 'function' ? deps.unlockTagSurface : () => {};
   const getActiveRatings = () => {
     const ratingState = deps.getRatingState();
     return RATING_KEYS.filter(key => ratingState[key]);
@@ -261,10 +268,11 @@ export function createQuickFilterController(deps) {
 
   function sendSearchNow() {
     cancelPendingSearch();
-    if (!includeTags.length && !excludeTags.length) return;
-    if (!isSocketOpen()) return;
+    if (!includeTags.length && !excludeTags.length) return false;
+    if (!isSocketOpen()) return false;
     lockTagSurface('tagfilter');   // background tag-filter search → released by onTagFilterResult/Assigned
     send({type: 'tag_filter_search', tags: payload(), request_id: nextSearchRequestId()});
+    return true;
   }
 
   function scheduleSearch() {
@@ -437,6 +445,7 @@ export function createQuickFilterController(deps) {
     includeTags = [];
     excludeTags = [];
     active = false;
+    filterWasApplied = false;
     ratingCounts = null;
     pendingAssignOnRestore = false;
     invalidateSearchRequest();
@@ -535,7 +544,66 @@ export function createQuickFilterController(deps) {
       countEl.textContent = hasTags ? '재적용 중…' : '';
       countEl.classList.remove('has-result');
     }
-    if (hasTags) apply();
+    if (hasTags) {
+      // Pool-swap search_state releases the 'pool' lock immediately after this
+      // callback. Raise the independent tag-filter lock synchronously, without
+      // the normal 280 ms typing debounce, so Random never sees the unfiltered
+      // replacement pool in that gap.
+      save();
+      sendSearchNow();
+    }
+  }
+
+  function setReleasedOverlay(show) {
+    const el = getEl('tagFilterReleased');
+    if (el) el.hidden = !show;
+  }
+
+  // 라이브 green [검색] 이 활성 태그필터를 백엔드에서 해제(칩은 draft 로 보존)한 직후 호출.
+  // 파켓 스왑(onPoolSwap)과 달리 자동 재적용하지 않고, Quick Filter 를 '해제됨' 상태
+  // (블러 오버레이 + [재적용]/[초기화])로 두어 사용자가 명시적으로 선택하게 한다(설계 사양).
+  // stale 'N matched'(이전 풀 기준)도 함께 무효화한다.
+  function onSearchReleased() {
+    const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+    // 진짜 적용됐던 필터 + 칩이 있을 때만 '해제됨' 오버레이. 미적용 draft 칩엔 안 띄운다(MED).
+    if (!filterWasApplied || !hasTags) { setReleasedOverlay(false); return false; }
+    active = false;
+    ratingCounts = null;
+    // green 검색이 in-flight 태그필터 왕복 중 발생했다면 그 요청을 폐기 → 늦게 온 stale 응답이
+    // request_id 불일치로 잠금을 ~90초 남기던 누수(Codex A1-2)를 막기 위해 'tagfilter' 잠금을
+    // 명시적으로 해제한다(해제됨 상태는 잠금 스캔이 아니므로 안전; Set 이라 idempotent).
+    invalidateSearchRequest();
+    cancelPendingSearch();
+    unlockTagSurface('tagfilter');
+    const countEl = getEl('tagFilterCount');
+    if (countEl) {
+      countEl.textContent = '';
+      countEl.classList.remove('has-result');
+    }
+    const toggleBtn = getEl('tagFilterToggle');
+    if (toggleBtn) {
+      toggleBtn.classList.remove('active');
+      toggleBtn.classList.remove('assigned');
+    }
+    setReleasedOverlay(true);
+    return true;
+  }
+
+  function reapplyReleased() {
+    // [재적용]: 현재 칩을 새 풀에 재적용. sendSearchNow 가 'tagfilter' 잠금을 걸고,
+    // onResult→assign→assigned 가 active=true 로 재적용/재영속한다(스캔 전체 잠금은
+    // 백엔드 announce + Fix 1 이 result~assigned 창까지 유지).
+    const hasTags = includeTags.length > 0 || excludeTags.length > 0;
+    if (!hasTags) { setReleasedOverlay(false); return; }
+    save();
+    // 소켓이 끊겨 실제 전송이 안 되면 오버레이를 유지한다 — "재적용됨"으로 거짓 표시 방지(LOW).
+    if (sendSearchNow()) setReleasedOverlay(false);
+  }
+
+  function resetReleased() {
+    // [초기화]: 칩/필터를 모두 해제.
+    setReleasedOverlay(false);
+    clearFilter();
   }
 
   function assign() {
@@ -544,7 +612,7 @@ export function createQuickFilterController(deps) {
 
   function onResult(message) {
     if (message.request_id && message.request_id !== latestSearchRequestId) {
-      return;
+      return false;
     }
     const assignBtn = getEl('tagFilterAssignBtn');
     ratingCounts = message.rating_counts || null;
@@ -569,11 +637,26 @@ export function createQuickFilterController(deps) {
     // U1 완전 라이브: 칩이 있으면 결과를 항상 즉시 적용(0매치 포함) → 활성 필터 == 현재 칩(일관성).
     // 0매치 시 빈 필터가 적용되어 풀이 비지만, 칩을 고치면 즉시 복원된다. 칩이 없으면 미적용
     // (빈칩 경로는 clearFilter가 처리).
-    if (hasTags) assign();
+    // GAP A 수정: assign 을 쏘면 false 를 반환해 tagfilter 잠금을 유지한다 →
+    // result~assigned 커밋 왕복 동안 풀이 미필터/미잠금으로 노출되던 창을 닫는다
+    // (onStale 의 `!sendSearchNow()` 와 동일 계약; 잠금 해제는 onAssigned/onStale 이 소유).
+    if (hasTags) {
+      assign();
+      return false;
+    }
+    return true;
   }
 
   function onAssigned(message) {
+    if (message.request_id && message.request_id !== latestSearchRequestId) {
+      return false;
+    }
+    // A different tab can commit a newer assignment while this request's
+    // websocket send is delayed. Unlock this completed local request, but never
+    // repaint the shared UI with its older authoritative state.
+    if (!noteAuthoritativeRevision(message.tag_filter_revision)) return true;
     active = true;
+    filterWasApplied = true;
     if (message.rating_counts) ratingCounts = message.rating_counts;
     const toggleBtn = getEl('tagFilterToggle');
     if (toggleBtn) {
@@ -584,14 +667,37 @@ export function createQuickFilterController(deps) {
     renderMatchedCount('assigned');
     const assignBtn = getEl('tagFilterAssignBtn');
     if (assignBtn) assignBtn.disabled = true;
-    save();
+    // The backend commit already persisted this assignment. Sending another
+    // save_search_filter_state here creates a cross-tab race: an older
+    // requester's delayed acknowledgement can overwrite the newer committed
+    // draft without changing the active filter. Keep this requester-local;
+    // the following revisioned search_state is the shared persistence authority.
+    savePreferences(collectPreferences(), storage);
+    updateHighlight();
     if (ratingCounts) {
       deps.updateSearchCount(filteredCount(ratingCounts, deps.getRatingState()));
     }
     // (토스트 제거 — 라이브 자동 적용이라 매번 토스트는 소음. 행수는 RATING 옆 카운트 라벨로 표시.)
+    return true;
+  }
+
+  function onStale(message) {
+    if (message.request_id && message.request_id !== latestSearchRequestId) {
+      return false;
+    }
+    const countEl = getEl('tagFilterCount');
+    if (countEl) {
+      countEl.textContent = '재적용 중…';
+      countEl.classList.remove('has-result');
+    }
+    // Pool replacement or another tab may have superseded the single pending
+    // assignment. Re-run against the now-current pool. Returning false keeps
+    // the existing lock source alive while the replacement request is in flight.
+    return !sendSearchNow();
   }
 
   function onUpdate(message) {
+    if (!noteAuthoritativeRevision(message.tag_filter_revision)) return false;
     if (message.rating_counts) ratingCounts = message.rating_counts;
     renderMatchedCount('assigned');
     const toggleBtn = getEl('tagFilterToggle');
@@ -599,6 +705,15 @@ export function createQuickFilterController(deps) {
     if (ratingCounts) {
       deps.updateSearchCount(filteredCount(ratingCounts, deps.getRatingState()));
     }
+    return true;
+  }
+
+  function noteAuthoritativeRevision(value) {
+    const revision = Number(value) || 0;
+    if (revision <= 0) return true;
+    if (revision < latestTagFilterRevision) return false;
+    latestTagFilterRevision = revision;
+    return true;
   }
 
   function onAutocompleteResult(message) {
@@ -670,6 +785,7 @@ export function createQuickFilterController(deps) {
         scheduleSearch();
       }
     }
+    if (options.persistLocal) savePreferences(pref, storage);
     restoreFocusedInputState(focusedInputState);
     updateCommitButton();
     return true;
@@ -830,10 +946,15 @@ export function createQuickFilterController(deps) {
     removeIncludeTag,
     apply,
     onPoolSwap,
+    onSearchReleased,
+    reapplyReleased,
+    resetReleased,
     assign,
     onResult,
     onAssigned,
+    onStale,
     onUpdate,
+    noteAuthoritativeRevision,
     onAutocompleteResult,
     applyPreferences,
     restorePreferences,

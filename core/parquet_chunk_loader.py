@@ -171,7 +171,36 @@ def make_search_load_progress(
     after the frame is installed (or the load is abandoned) to clear the loading
     flag and release the client lock. Both are exception-safe.
     """
+    # Route through the context's shared depth-counted pool-loading ownership so a
+    # parquet LOAD and a concurrent tag-filter FILTER can't clear each other's
+    # loading flag (they share one counter; the flag stays until BOTH end). Fall
+    # back to direct state writes for contexts without the ownership API (test
+    # doubles). Crucially, a silent (small) load NEVER touches the flag now, so it
+    # can't clobber a concurrently-active filter.
+    use_owner = hasattr(context, "pool_loading_begin")
     state = {"announced": False, "silent": False}
+
+    def _begin(total: int) -> None:
+        if use_owner:
+            context.pool_loading_begin("load")
+            context.pool_loading_progress("load", 0, int(total or 0))
+        else:
+            _set_loading_state(context, True, 0, total)
+            _publish(context, {"type": "search_loading", "loading": True, "loaded": 0, "total": int(total or 0)})
+
+    def _tick(loaded: int, total: int) -> None:
+        if use_owner:
+            context.pool_loading_progress("load", int(loaded), int(total or loaded))
+        else:
+            _set_loading_state(context, True, loaded, total)
+            _publish(context, {"type": "search_loading", "loading": True, "loaded": int(loaded), "total": int(total or loaded)})
+
+    def _finish() -> None:
+        if use_owner:
+            context.pool_loading_end()
+        else:
+            _set_loading_state(context, False, 0, 0)
+            _publish(context, {"type": "search_loading", "loading": False})
 
     def progress(loaded: int, total: int) -> None:
         if state["silent"]:
@@ -181,16 +210,15 @@ def make_search_load_progress(
             if total and total < threshold:
                 state["silent"] = True
                 return
-            _set_loading_state(context, True, 0, total)
-            _publish(context, {"type": "search_loading", "loading": True, "loaded": 0, "total": int(total or 0)})
+            _begin(total)
             return
-        _set_loading_state(context, True, loaded, total)
-        _publish(context, {"type": "search_loading", "loading": True, "loaded": int(loaded), "total": int(total or loaded)})
+        _tick(loaded, total)
 
     def done() -> None:
-        _set_loading_state(context, False, 0, 0)
+        # Only the announced (non-silent) load owns a begin, so only it ends. A
+        # silent load leaves the shared flag untouched (no clobber).
         if state["announced"] and not state["silent"]:
-            _publish(context, {"type": "search_loading", "loading": False})
+            _finish()
 
     return progress, done
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -324,13 +325,18 @@ class HeadlessSearchStateService:
                 print("Headless Remote: last-search restore skipped - no 'general' column", flush=True)
                 return False
             frame = frame.reset_index(drop=True)
-            context.search_results = SearchResultModel(frame)
-            context.search_results_snapshot = frame.copy()
-            context.search_results_master_base_snapshot = frame.copy()
-            # 복원셋은 디스크에서 로드된 작업셋 → custom_parquet 스코프로 표기(Codex: scope 미설정
-            # 수정). 현재 정보용이며 green 검색은 스코프와 무관하게 아카이브를 재스캔한다. 상수는
-            # app.backend 계층이라 core 에서 import 하지 않고 리터럴을 쓴다.
-            context.search_results_scope = "custom_parquet"
+            guard = getattr(context, "search_pool_state_guard", None)
+            with guard() if callable(guard) else nullcontext():
+                context.search_results = SearchResultModel(frame)
+                context.search_results_snapshot = frame.copy()
+                context.search_results_master_base_snapshot = frame.copy()
+                # 복원셋은 디스크에서 로드된 작업셋 → custom_parquet 스코프로 표기(Codex: scope 미설정
+                # 수정). 현재 정보용이며 green 검색은 스코프와 무관하게 아카이브를 재스캔한다. 상수는
+                # app.backend 계층이라 core 에서 import 하지 않고 리터럴을 쓴다.
+                context.search_results_scope = "custom_parquet"
+                marker = getattr(context, "mark_search_pool_replaced", None)
+                if callable(marker):
+                    marker()
             return True
         except Exception as exc:
             print(f"Headless Remote: last-search restore failed - {exc}", flush=True)
@@ -525,6 +531,7 @@ class HeadlessSearchStateService:
         )
         return {
             "type": "search_state",
+            "tag_filter_revision": int(getattr(context, "_tag_filter_revision", 0) or 0),
             "count": int(count or 0),
             "total_count": int(context.search_results.get_count() if context.search_results else 0),
             "active_ratings": [rating for rating in SUPPORTED_RATINGS if rating in active_ratings],

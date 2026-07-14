@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 import re
 import threading
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from core.web_session_context import WebSessionContext
 
@@ -26,6 +29,58 @@ _RECONSTRUCT_LOCK = threading.Lock()
 # otherwise both see tags_text is None and both run the heavy build. Double-
 # checked under this lock: the second reuses the freshly built index.
 _TAG_INDEX_BUILD_LOCK = threading.Lock()
+
+# Announce + gate the 'filter' phase only for pools this large. Below it the
+# tag-filter scan is near-instant, so a lock/toast would only flash. Mirrors
+# core.parquet_chunk_loader.DEFAULT_LOADING_THRESHOLD (kept as a literal to avoid
+# import coupling on this hot module).
+_POOL_LOADING_THRESHOLD = 200_000
+
+# Row-batch size for the chunked tags_text index build. Caps the transient peak
+# to one batch of (per-column str + cat + lower) instead of holding the whole
+# pool's columns materialized at once, and yields a progress heartbeat per batch.
+_TAGS_TEXT_BATCH = 100_000
+
+
+def search_pool_state_guard(context: WebSessionContext):
+    """Return the context-owned guard, with a no-op fallback for test doubles."""
+    getter = getattr(context, "search_pool_state_guard", None)
+    if callable(getter):
+        return getter()
+    lock = getattr(context, "_search_pool_state_lock", None)
+    return lock if lock is not None else nullcontext()
+
+
+def current_search_pool_generation(context: WebSessionContext) -> int:
+    getter = getattr(context, "search_pool_generation", None)
+    if callable(getter):
+        return int(getter() or 0)
+    return int(getattr(context, "_search_pool_generation", 0) or 0)
+
+
+def mark_search_pool_replaced(context: WebSessionContext) -> int:
+    marker = getattr(context, "mark_search_pool_replaced", None)
+    if callable(marker):
+        return int(marker() or 0)
+    value = current_search_pool_generation(context) + 1
+    setattr(context, "_search_pool_generation", value)
+    return value
+
+
+def current_tag_filter_revision(context: WebSessionContext) -> int:
+    getter = getattr(context, "tag_filter_revision", None)
+    if callable(getter):
+        return int(getter() or 0)
+    return int(getattr(context, "_tag_filter_revision", 0) or 0)
+
+
+def mark_tag_filter_changed(context: WebSessionContext) -> int:
+    marker = getattr(context, "mark_tag_filter_changed", None)
+    if callable(marker):
+        return int(marker() or 0)
+    value = current_tag_filter_revision(context) + 1
+    setattr(context, "_tag_filter_revision", value)
+    return value
 
 
 def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
@@ -87,26 +142,40 @@ def normalize_custom_parquet_frame(frame):
 def _reset_active_tag_filter_assignment(context: WebSessionContext) -> None:
     context.active_tag_filter_ids = None
     context.pending_tag_filter = None
+    pending_by_client = getattr(context, "pending_tag_filters", None)
+    if isinstance(pending_by_client, dict):
+        pending_by_client.clear()
     context.active_tag_filter = None
+    context.active_tag_filter_frame = None
+    context.active_tag_filter_frame_for = None
+    context.active_tag_filter_frame_snapshot = None
     if hasattr(context, "_tag_filter_cache"):
         context._tag_filter_cache = None
+    mark_tag_filter_changed(context)
+
+
+def reset_active_tag_filter_assignment(context: WebSessionContext) -> None:
+    """Public invalidation hook for pool-replacement paths outside this module."""
+    _reset_active_tag_filter_assignment(context)
 
 
 def install_custom_parquet_frame(context: WebSessionContext, frame) -> None:
-    context.search_results.set_dataframe(frame)
-    context.search_results_snapshot = context.search_results.get_dataframe().copy()
-    context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
-    context.search_results_scope = CUSTOM_PARQUET_SCOPE
-    _reset_active_tag_filter_assignment(context)
-    # Custom parquet rows can contain any rating. Loading/merging a new result
-    # base also invalidates the active tag-filter assignment; preserve any draft
-    # chips but mark them inactive so old id sets cannot filter the new snapshot.
-    context.search_query_ratings = set("gsqe")
-    context.save_search_filter_state(
-        ratings=["g", "s", "q", "e"],
-        search_ratings=["g", "s", "q", "e"],
-        tag_filter_active=False,
-    )
+    with search_pool_state_guard(context):
+        context.search_results.set_dataframe(frame)
+        context.search_results_snapshot = context.search_results.get_dataframe().copy()
+        context.search_results_master_base_snapshot = context.search_results_snapshot.copy()
+        context.search_results_scope = CUSTOM_PARQUET_SCOPE
+        mark_search_pool_replaced(context)
+        _reset_active_tag_filter_assignment(context)
+        # Custom parquet rows can contain any rating. Loading/merging a new result
+        # base also invalidates the active tag-filter assignment; preserve any draft
+        # chips but mark them inactive so old id sets cannot filter the new snapshot.
+        context.search_query_ratings = set("gsqe")
+        context.save_search_filter_state(
+            ratings=["g", "s", "q", "e"],
+            search_ratings=["g", "s", "q", "e"],
+            tag_filter_active=False,
+        )
     # 작업 데이터셋이 바뀌었으니 마지막-검색 영속도 갱신 (Part 3 — 재시작/가져오기 복원용).
     context.persist_last_search()
 
@@ -306,21 +375,22 @@ def search_state_with_runner_save(context: WebSessionContext) -> dict[str, Any]:
 
 
 def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True) -> dict[str, Any]:
-    _reset_active_tag_filter_assignment(context)
-    if reset_draft:
-        # Explicit "Clear": drop the assigned filter AND the draft include/exclude
-        # lists.
-        context.save_search_filter_state(
-            tag_filter=[],
-            tag_filter_exclude=[],
-            tag_filter_active=False,
-        )
-    else:
-        # Chip edit: only the assignment is stale — keep the persisted draft lists
-        # so the returned search_state echo does not wipe the remaining chips in
-        # the popup (save_search_filter_state merges, leaving tag_filter intact).
-        context.save_search_filter_state(tag_filter_active=False)
-    return apply_search_runtime_filters(context)
+    with search_pool_state_guard(context):
+        _reset_active_tag_filter_assignment(context)
+        if reset_draft:
+            # Explicit "Clear": drop the assigned filter AND the draft include/exclude
+            # lists.
+            context.save_search_filter_state(
+                tag_filter=[],
+                tag_filter_exclude=[],
+                tag_filter_active=False,
+            )
+        else:
+            # Chip edit: only the assignment is stale — keep the persisted draft lists
+            # so the returned search_state echo does not wipe the remaining chips in
+            # the popup (save_search_filter_state merges, leaving tag_filter intact).
+            context.save_search_filter_state(tag_filter_active=False)
+        return apply_search_runtime_filters(context)
 
 
 def reconstruct_active_tag_filter(context: WebSessionContext) -> bool:
@@ -362,20 +432,29 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
     tags = [*include, *[f"-{tag}" for tag in exclude]]
     result = tag_filter_search(context, tags)
     ids = result.get("_ids", set())
+    source_snapshot = result.get("_source_snapshot")
+    source_generation = int(result.get("_pool_generation") or 0)
     # 쓰기 순서 주의(Codex F2): 각 속성 대입은 GIL 하에서 원자적이고, 소비자 우선순위가 active_tag_filter
     # (dict)이므로 dict 를 마지막에 둔다 → dict 가 보이면 ids 도 이미 set. 반대(ids set·dict None)로
     # 찢긴 읽기는 _active_tag_filter_state 가 ids 로 임시 상태를 복원해 graceful. 동시 호출(get_search_state
     # + random 레이스)은 guard 를 둘 다 통과해 tag_filter_search 가 중복 실행될 수 있으나 결과가 동일
     # (idempotent)이라 무해 — 시작 시점 한정 드문 경우라 락은 두지 않는다.
-    context.active_tag_filter_ids = set(ids)
-    context.active_tag_filter = {
-        "tags": [str(tag) for tag in result.get("tags", [])],
-        "ids": set(ids),
-        "count": int(result.get("count") or 0),
-        "request_id": "",
-        "rating_counts": dict(result.get("rating_counts") or {}),
-    }
-    apply_search_runtime_filters(context)
+    with search_pool_state_guard(context):
+        if (
+            source_snapshot is not getattr(context, "search_results_snapshot", None)
+            or source_generation != current_search_pool_generation(context)
+        ):
+            return False
+        context.active_tag_filter_ids = set(ids)
+        context.active_tag_filter = {
+            "tags": [str(tag) for tag in result.get("tags", [])],
+            "ids": set(ids),
+            "count": int(result.get("count") or 0),
+            "request_id": "",
+            "rating_counts": dict(result.get("rating_counts") or {}),
+        }
+        mark_tag_filter_changed(context)
+        apply_search_runtime_filters(context)
     return True
 
 
@@ -431,15 +510,15 @@ def run_search_command(
             progress_callback=progress_callback,
         )
         searched = _dedup_by_id(searched)
-        context.search_results.set_dataframe(searched)
-        context.search_results_snapshot = searched.copy()
-        context.search_results_master_base_snapshot = searched.copy()
-        context.search_results_scope = TAG_ARCHIVE_SCOPE
-        context.active_tag_filter_ids = None
-        context.pending_tag_filter = None
-        context.active_tag_filter = None
-        context.save_search_filter_state(tag_filter_active=False)
-        context.remote_active_ratings = set("gsqe")
+        with search_pool_state_guard(context):
+            context.search_results.set_dataframe(searched)
+            context.search_results_snapshot = searched.copy()
+            context.search_results_master_base_snapshot = searched.copy()
+            context.search_results_scope = TAG_ARCHIVE_SCOPE
+            mark_search_pool_replaced(context)
+            _reset_active_tag_filter_assignment(context)
+            context.save_search_filter_state(tag_filter_active=False)
+            context.remote_active_ratings = set("gsqe")
         context.persist_last_search()  # Part 3: 재시작/가져오기 후 복원용
         return apply_search_runtime_filters(context)
 
@@ -447,12 +526,12 @@ def run_search_command(
     if base is None:
         return context.search_state_payload()
     searched = _dedup_by_id(filter_source_frame(base, query=query, exclude=exclude, ratings=ratings))
-    context.search_results_snapshot = searched.copy() if searched is not None else None
-    context.active_tag_filter_ids = None
-    context.pending_tag_filter = None
-    context.active_tag_filter = None
-    context.save_search_filter_state(tag_filter_active=False)
-    context.remote_active_ratings = set("gsqe")
+    with search_pool_state_guard(context):
+        context.search_results_snapshot = searched.copy() if searched is not None else None
+        mark_search_pool_replaced(context)
+        _reset_active_tag_filter_assignment(context)
+        context.save_search_filter_state(tag_filter_active=False)
+        context.remote_active_ratings = set("gsqe")
     context.persist_last_search()  # Part 3: 재시작/가져오기 후 복원용
     return apply_search_runtime_filters(context)
 
@@ -460,13 +539,80 @@ def run_search_command(
 def restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
     base = search_base_frame(context)
     if base is not None:
-        context.search_results_snapshot = base.copy()
-        context.active_tag_filter_ids = None
-        context.pending_tag_filter = None
-        context.active_tag_filter = None
-        context.save_search_filter_state(tag_filter_active=False)
-        context.search_results.set_dataframe(base.copy())
+        with search_pool_state_guard(context):
+            context.search_results_snapshot = base.copy()
+            mark_search_pool_replaced(context)
+            _reset_active_tag_filter_assignment(context)
+            context.save_search_filter_state(tag_filter_active=False)
+            context.search_results.set_dataframe(base.copy())
     return search_state_with_runner_save(context)
+
+
+def commit_pending_tag_filter_assignment(
+    context: WebSessionContext,
+    pending: dict[str, Any],
+    request_id: str,
+    client_key: str = "",
+) -> dict[str, Any]:
+    """Atomically validate and commit one pending tag-filter result.
+
+    ``tag_filter_search`` is deliberately lock-free while scanning a large frame.
+    This commit point is the ownership boundary: the pending object, request id,
+    source DataFrame identity, and pool generation must all still match. Holding
+    the pool-state lock through the cheap pre-sliced-frame apply prevents a
+    concurrent parquet/search replacement from landing between validation and
+    assignment.
+    """
+    with search_pool_state_guard(context):
+        pending_by_client = getattr(context, "pending_tag_filters", None)
+        if client_key and isinstance(pending_by_client, dict):
+            pending_is_current = pending_by_client.get(client_key) is pending
+        else:
+            pending_is_current = getattr(context, "pending_tag_filter", None) is pending
+        if not pending_is_current:
+            return {"ok": False, "reason": "superseded"}
+        if request_id and str(pending.get("request_id") or "") != request_id:
+            return {"ok": False, "reason": "request_mismatch"}
+        if (
+            pending.get("source_snapshot") is not getattr(context, "search_results_snapshot", None)
+            or int(pending.get("pool_generation") or 0) != current_search_pool_generation(context)
+        ):
+            if client_key and isinstance(pending_by_client, dict):
+                pending_by_client.pop(client_key, None)
+            if getattr(context, "pending_tag_filter", None) is pending:
+                context.pending_tag_filter = None
+            return {"ok": False, "reason": "pool_changed"}
+
+        context.active_tag_filter_ids = set(pending.get("ids") or set())
+        context.active_tag_filter_frame = pending.get("frame")
+        context.active_tag_filter_frame_for = context.active_tag_filter_ids
+        context.active_tag_filter_frame_snapshot = pending.get("source_snapshot")
+        tags = [str(tag) for tag in pending.get("tags", [])]
+        context.active_tag_filter = {
+            "tags": tags,
+            "ids": set(context.active_tag_filter_ids),
+            "count": int(pending.get("count") or 0),
+            "request_id": request_id,
+            "rating_counts": dict(pending.get("rating_counts") or {}),
+        }
+        mark_tag_filter_changed(context)
+        context.save_search_filter_state(
+            tag_filter=[tag for tag in tags if not tag.startswith("-")],
+            tag_filter_exclude=[tag.lstrip("-") for tag in tags if tag.startswith("-")],
+            tag_filter_active=True,
+        )
+        if client_key and isinstance(pending_by_client, dict):
+            pending_by_client.pop(client_key, None)
+        if getattr(context, "pending_tag_filter", None) is pending:
+            context.pending_tag_filter = None
+        state = apply_search_runtime_filters(context)
+        return {
+            "ok": True,
+            "state": state,
+            "count": int(pending.get("count") or 0),
+            "tags": tags,
+            "rating_counts": dict(pending.get("rating_counts") or {}),
+        }
 
 
 _TAG_HITS_CAP = 4000  # 한 데이터셋 내 칩별 캐시 상한 (초과 시 비우고 lazy 재계산; tags_text는 유지)
@@ -480,7 +626,7 @@ def _tag_filter_cache(context: WebSessionContext, snapshot) -> dict:
     (= "Parquet 교체 시 캐시 삭제"가 별도 훅 없이 자동 충족). 등급/assign 은 snapshot 을 교체하지
     않으므로 캐시가 유지된다.
 
-    구조: tags_text(행별 소문자 태그 문자열, 데이터셋당 1회 계산) + tag_hits{태그 → 매칭 id frozenset}.
+    구조: tags_text(행별 소문자 태그 문자열, 데이터셋당 1회 계산) + tag_hits{태그 → 행별 numpy bool 마스크}.
     """
     cache = getattr(context, "_tag_filter_cache", None)
     if cache is None or cache.get("snapshot") is not snapshot:
@@ -489,57 +635,57 @@ def _tag_filter_cache(context: WebSessionContext, snapshot) -> dict:
     return cache
 
 
-def _broadcast_pool_loading(context: WebSessionContext, active: bool, *, phase: str | None = None) -> None:
-    """Surface a pool-preparing status to Remote Web clients (Tag/Tag-Filter lock
-    + Random gate + persistent toast). Also flips ``context._search_pool_loading``
-    so a concurrent get_search_state sees 'loading' and skips a duplicate heavy
-    scan. Used to wrap the one-time tag-filter text-index build — the dominant
-    first-chip / startup-reconstruct bottleneck on a 1M+ row pool."""
-    try:
-        context._search_pool_loading = {
-            "active": bool(active),
-            "loaded": 0,
-            "total": 0,
-            "phase": phase if active else None,
-        }
-    except Exception:
-        pass
-    try:
-        payload = {"type": "search_loading", "loading": bool(active)}
-        if active and phase:
-            payload["phase"] = phase
-        context.publish("search_pool_broadcast", payload)
-    except Exception:
-        pass
+# Pool-loading ownership (Tag/Tag-Filter lock + Random gate + toast) lives on
+# WebSessionContext: context.pool_loading_begin/progress/end. The counter + lock +
+# publish-under-lock are shared with the chunked parquet LOAD phase so neither phase
+# clears the other's still-active flag and the WS event order matches the state
+# transition (no stale loading:true after loading:false). This module calls those
+# methods directly (tag_filter_search gating + build/match heartbeats).
+
+
+def _build_tags_text(frame, tag_columns: list[str], heartbeat=None):
+    """Build the per-row lowercased tag-text index in row-batches so the transient
+    peak is one batch of (per-column str + str.cat + str.lower) rather than the
+    whole pool's columns materialized at once. Result is identical to the single
+    pass ``parts[0].str.cat(parts[1:], sep=',').str.lower()`` — row order and
+    index labels are preserved (positional masks stay aligned to ``frame``).
+    ``heartbeat(loaded_rows, total_rows)`` is called per batch."""
+    import pandas as pd
+
+    n = len(frame)
+    if n == 0:
+        base = frame[tag_columns[0]].fillna("").astype(str)
+        return base.str.lower()
+    chunks = []
+    for start in range(0, n, _TAGS_TEXT_BATCH):
+        sl = slice(start, start + _TAGS_TEXT_BATCH)
+        sub = [frame[c].iloc[sl].fillna("").astype(str) for c in tag_columns]
+        txt = sub[0] if len(sub) == 1 else sub[0].str.cat(sub[1:], sep=",")
+        chunks.append(txt.str.lower())
+        if heartbeat is not None:
+            try:
+                heartbeat(min(start + _TAGS_TEXT_BATCH, n), n)
+            except Exception:
+                pass
+    return chunks[0] if len(chunks) == 1 else pd.concat(chunks)
 
 
 def tag_filter_search(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
-    # Announce the 'filter' phase ONLY when the heavy per-dataset text index is
-    # about to be built (first chip / startup reconstruct on a large pool). A
-    # cached rebuild stays silent (no flash / no needless Random lock).
-    building = False
-    _snap = getattr(context, "search_results_snapshot", None)
-    if _snap is not None and not getattr(_snap, "empty", True):
-        try:
-            building = _tag_filter_cache(context, _snap).get("tags_text") is None
-        except Exception:
-            building = False
-    if building:
-        _broadcast_pool_loading(context, True, phase="filter")
-    try:
-        return _tag_filter_search_impl(context, tags)
-    finally:
-        if building:
-            _broadcast_pool_loading(context, False)
+    return _tag_filter_search_impl(context, tags)
 
 
 def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict[str, Any]:
-    snapshot = getattr(context, "search_results_snapshot", None)
-    if snapshot is None or getattr(snapshot, "empty", True):
-        snapshot = search_base_frame(context)
-        if snapshot is not None:
-            context.search_results_snapshot = snapshot.copy()
-            snapshot = context.search_results_snapshot
+    # Capture snapshot identity and its monotonic generation under the same lock.
+    # The expensive scan runs lock-free, but result/assign must prove both values
+    # are still current before publishing or committing the matched frame.
+    with search_pool_state_guard(context):
+        snapshot = getattr(context, "search_results_snapshot", None)
+        if snapshot is None or getattr(snapshot, "empty", True):
+            snapshot = search_base_frame(context)
+            if snapshot is not None:
+                context.search_results_snapshot = snapshot.copy()
+                snapshot = context.search_results_snapshot
+        source_generation = current_search_pool_generation(context)
     normalized = WebSessionContext.normalize_filter_tags(tags)
     if snapshot is None or getattr(snapshot, "empty", True):
         return {
@@ -548,8 +694,42 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
             "tags": normalized,
             "rating_counts": rating_counts_from_frame(None),
             "_ids": set(),
+            "_source_snapshot": snapshot,
+            "_pool_generation": source_generation,
         }
 
+    # Announce + gate the 'filter' phase AFTER the snapshot is resolved — the
+    # resolution above can recover a LARGE frame via search_base_frame, which a
+    # pre-resolution size check (in the caller) would miss and then scan un-gated.
+    # Large pool (cached or not): even a cached index runs one str.contains per chip
+    # over the whole pool, and with many persisted chips that interval can outlast
+    # the frontend safety timers. Small pools (< threshold) stay silent — near-
+    # instant, so a lock/toast would only flash. The heartbeat re-arms both frontend
+    # timers across the entire build + per-chip matching lifetime.
+    heavy = False
+    try:
+        heavy = len(snapshot) >= _POOL_LOADING_THRESHOLD
+    except Exception:
+        heavy = False
+    if not heavy:
+        result = _run_tag_filter(context, snapshot, tags, heartbeat=None)
+        result["_source_snapshot"] = snapshot
+        result["_pool_generation"] = source_generation
+        return result
+    context.pool_loading_begin("filter")
+    try:
+        def heartbeat(loaded: int, total: int) -> None:
+            context.pool_loading_progress("filter", loaded, total)
+
+        result = _run_tag_filter(context, snapshot, tags, heartbeat=heartbeat)
+        result["_source_snapshot"] = snapshot
+        result["_pool_generation"] = source_generation
+        return result
+    finally:
+        context.pool_loading_end()
+
+
+def _run_tag_filter(context: WebSessionContext, snapshot, tags: list[Any], *, heartbeat=None) -> dict[str, Any]:
     cache = _tag_filter_cache(context, snapshot)
     if cache["tags_text"] is None:
         # Double-checked build under a lock so a concurrent search reuses the
@@ -566,58 +746,72 @@ def _tag_filter_search_impl(context: WebSessionContext, tags: list[Any]) -> dict
                 cache["frame"] = frame
                 cache["row_count"] = len(frame)
                 cache["has_id"] = "id" in frame.columns
-                # 벡터화 빌드(str.cat, C-level)로 행별 Python 조인(.agg(",".join, axis=1))의 GIL 점유를
-                # 제거 — 대형 풀(100만+ 행)에서 첫 칩 응답이 핵심 병목이라 ~2x + GIL 친화적이다.
-                # _hit_rows 의 ",".join 구분자/소문자/contains 의미를 그대로 보존(동치 검증됨).
-                parts = [frame[c].fillna("").astype(str) for c in tag_columns]
-                tags_text = parts[0] if len(parts) == 1 else parts[0].str.cat(parts[1:], sep=",")
-                cache["tags_text"] = tags_text.str.lower()
+                # 행별 소문자 태그-텍스트 인덱스를 row-batch 청크로 빌드(_build_tags_text). 피크 메모리를
+                # 배치 1개분으로 상한(전체 parts×N + cat + lower 동시보유 제거) + 배치마다 heartbeat 로
+                # 프론트 안전타이머 재무장. 결과는 단일 패스 str.cat/lower 와 동일(순서/인덱스 보존).
+                cache["tags_text"] = _build_tags_text(frame, tag_columns, heartbeat=heartbeat)
     tags_text = cache["tags_text"]
     row_count = cache["row_count"]
 
-    def _hit_rows(key: str) -> frozenset:
-        # 행(positional) 단위 매칭 집합. id 가 아니라 행 위치로 모아야 중복 id(예: 합친 parquet)에서도
-        # 구버전의 per-row boolean mask 와 동치가 유지된다.
+    def _hit_mask(key: str):
+        # 행(positional) 단위 boolean 마스크(numpy). id 가 아니라 행 위치 기준이라 중복 id(합친
+        # parquet)에서도 구버전 per-row mask 와 동치. 파이썬 int frozenset(원소당 ~28바이트) 대신
+        # 1 byte/row bool 배열 → 대형 풀에서 매칭 메모리 스파이크(스와핑)를 제거한다.
         cached = cache["tag_hits"].get(key)
         if cached is None:
-            mask = tags_text.str.contains(key, na=False, regex=False)
-            cached = frozenset(int(i) for i in mask.to_numpy().nonzero()[0])
+            cached = tags_text.str.contains(key, na=False, regex=False).to_numpy()
             if len(cache["tag_hits"]) >= _TAG_HITS_CAP:
                 cache["tag_hits"].clear()  # 메모리 상한 — tags_text 유지라 재계산 저렴
             cache["tag_hits"][key] = cached
         return cached
 
-    include_rows = None          # None = 아직 제한 없음(전체 행)
-    exclude_rows: set = set()
+    def _beat():
+        # bracket 하트비트: 각 (미캐시 가능) str.contains scan 직전과 최종 materialize 직전에 발행 →
+        # 개별 scan tail 이나 결과 슬라이싱이 안전타이머(180s/90s)를 넘겨도 잠금 유지(총 텍스트만 표시).
+        if heartbeat is None:
+            return
+        try:
+            heartbeat(0, 0)
+        except Exception:
+            pass
+
+    # 먼저 모든 칩을 (clean, negate)로 분해 — 프론트가 "1girl, armpits" 한 칩을 통째로 보내도 두
+    # 태그로 매칭/표기(예약 버그). negate('-')는 분리 후 서브토큰별 판정('1girl, -armpits' →
+    # include 1girl + exclude armpits).
+    parsed: list[tuple[str, bool]] = []
     clean_tags: list[str] = []
-    # 각 항목을 쉼표/개행으로 먼저 분리한다 — 프론트가 "1girl, armpits" 한 칩을 통째로 보내도
-    # 두 태그로 매칭/표기되도록(예약 버그). negate('-')는 분리 후 서브토큰별로 판정한다
-    # ('1girl, -armpits' → include 1girl + exclude armpits).
     for item in tags:
         for raw in re.split(r"[,\n]", str(item or "")):
             raw = raw.strip()
             if not raw:
                 continue
             negate = raw.startswith("-")
-            # replace 후 strip: "1girl, armpits"→프론트가 보낸 "_armpits"의 선행 '_'(원래 공백)가
-            # 공백이 된 뒤 제거되도록(strip→replace 순서면 " armpits"로 남아 매칭이 깨진다).
+            # replace 후 strip: 프론트가 보낸 "_armpits"의 선행 '_'(원래 공백)가 공백→제거되도록
+            # (strip→replace 순서면 " armpits"로 남아 매칭이 깨진다).
             clean = raw.lstrip("-").replace("_", " ").strip()
             if not clean:
                 continue
             clean_tags.append(("-" if negate else "") + clean)
-            rows = _hit_rows(clean.lower())
-            if negate:
-                exclude_rows |= rows
-            elif include_rows is None:
-                include_rows = set(rows)
-            else:
-                include_rows &= rows
-    if include_rows is None:
-        include_rows = set(range(row_count))
-    final_rows = include_rows - exclude_rows
+            parsed.append((clean, negate))
+
+    include_mask = None                                  # None = 아직 제한 없음(전체 행)
+    exclude_mask = np.zeros(row_count, dtype=bool)
+    for clean, negate in parsed:
+        _beat()                                          # 이 칩의 str.contains scan 직전
+        m = _hit_mask(clean.lower())
+        if negate:
+            exclude_mask |= m
+        elif include_mask is None:
+            include_mask = m.copy()                      # copy → 이후 &= 가 캐시 마스크를 변형하지 않음
+        else:
+            include_mask &= m
+    if include_mask is None:
+        include_mask = np.ones(row_count, dtype=bool)
+    _beat()                                              # 마지막 scan tail + 최종 materialize 직전
+    final_mask = include_mask & ~exclude_mask if exclude_mask.any() else include_mask
 
     frame = cache["frame"]
-    matched = frame.iloc[sorted(final_rows)]
+    matched = frame[final_mask]                           # positional boolean index (set(range())/sorted() 제거)
     ids = set(matched["id"].tolist()) if cache["has_id"] else set(matched.index.tolist())
     return {
         "type": "tag_filter_result",

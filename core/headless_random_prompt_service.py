@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
@@ -454,15 +455,22 @@ class HeadlessRandomPromptService:
                 rating = str(row.get("rating") or "").strip().lower()
                 if rating in rating_counts:
                     rating_counts[rating] = max(0, int(rating_counts.get(rating) or 0) - 1)
+            marker = getattr(self.context, "mark_tag_filter_changed", None)
+            if callable(marker):
+                marker()
+            else:
+                self.context._tag_filter_revision = int(
+                    getattr(self.context, "_tag_filter_revision", 0) or 0
+                ) + 1
             return True
         except Exception as exc:
             safe_print(f"Headless Remote: tag filter consume update failed - {exc}", flush=True)
             return False
 
-    @staticmethod
-    def _tag_filter_update_payload(tag_filter: dict[str, Any]) -> dict[str, Any]:
+    def _tag_filter_update_payload(self, tag_filter: dict[str, Any]) -> dict[str, Any]:
         payload = {
             "type": "tag_filter_update",
+            "tag_filter_revision": int(getattr(self.context, "_tag_filter_revision", 0) or 0),
             "count": int(tag_filter.get("count") or 0),
             "tags": tag_filter.get("tags") or [],
         }
@@ -478,29 +486,31 @@ class HeadlessRandomPromptService:
         self,
         active_ratings: set[str],
     ) -> tuple[pd.Series | None, dict[str, Any] | None, str]:
-        tag_filter = self._active_tag_filter_state()
-        if not tag_filter:
-            return None, None, ""
+        guard = getattr(self.context, "search_pool_state_guard", None)
+        with guard() if callable(guard) else nullcontext():
+            tag_filter = self._active_tag_filter_state()
+            if not tag_filter:
+                return None, None, ""
 
-        ids = tag_filter.get("ids")
-        if not isinstance(ids, set) or not ids or int(tag_filter.get("count") or 0) <= 0:
-            return None, None, "Tag filter: no matching rows"
+            ids = tag_filter.get("ids")
+            if not isinstance(ids, set) or not ids or int(tag_filter.get("count") or 0) <= 0:
+                return None, None, "Tag filter: no matching rows"
 
-        row = None
-        search_results = getattr(self.context, "search_results", None)
-        if search_results is not None and not search_results.is_empty():
-            pop_with_id_filter = getattr(search_results, "pop_random_row_with_id_filter", None)
-            if callable(pop_with_id_filter):
-                row = pop_with_id_filter(active_ratings, ids)
+            row = None
+            search_results = getattr(self.context, "search_results", None)
+            if search_results is not None and not search_results.is_empty():
+                pop_with_id_filter = getattr(search_results, "pop_random_row_with_id_filter", None)
+                if callable(pop_with_id_filter):
+                    row = pop_with_id_filter(active_ratings, ids)
 
-        if row is None:
-            row = self._pick_active_tag_filter_snapshot_row(active_ratings, ids)
+            if row is None:
+                row = self._pick_active_tag_filter_snapshot_row(active_ratings, ids)
 
-        if row is None:
-            return None, None, "Tag filter: no matching rows"
-        if not self._consume_active_tag_filter_row(tag_filter, row):
-            return None, None, "Tag filter: no matching rows"
-        return row, self._tag_filter_update_payload(tag_filter), ""
+            if row is None:
+                return None, None, "Tag filter: no matching rows"
+            if not self._consume_active_tag_filter_row(tag_filter, row):
+                return None, None, "Tag filter: no matching rows"
+            return row, self._tag_filter_update_payload(tag_filter), ""
 
     def _random_settings(self, overrides: dict[str, Any] | None) -> dict[str, Any]:
         request_overrides = overrides if isinstance(overrides, dict) else {}
@@ -773,10 +783,15 @@ class HeadlessRandomPromptService:
                     if frame.empty:
                         continue
                     frame = frame.reset_index(drop=True)
-                    self.context.search_results = SearchResultModel(frame)
-                    self.context.search_results_snapshot = frame.copy()
-                    if "tag archive" in label:
-                        self.context.search_results_scope = "tag_archive"
+                    guard = getattr(self.context, "search_pool_state_guard", None)
+                    with guard() if callable(guard) else nullcontext():
+                        self.context.search_results = SearchResultModel(frame)
+                        self.context.search_results_snapshot = frame.copy()
+                        if "tag archive" in label:
+                            self.context.search_results_scope = "tag_archive"
+                        marker = getattr(self.context, "mark_search_pool_replaced", None)
+                        if callable(marker):
+                            marker()
                     safe_print(f"🌐 Headless Remote: search_results restored from {label} ({self.context.search_results.get_count()} rows)")
                     return True
                 except Exception as exc:

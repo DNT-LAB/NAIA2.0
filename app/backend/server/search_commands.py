@@ -9,17 +9,21 @@ from fastapi import WebSocket
 from app.backend.server.search_runtime import (
     apply_search_runtime_filters,
     clear_active_tag_filter,
+    commit_pending_tag_filter_assignment,
+    current_search_pool_generation,
     load_or_merge_custom_parquet,
     reconstruct_active_tag_filter,
     restore_search_snapshot,
     run_search_command,
     search_parquet_action,
+    search_pool_state_guard,
     tag_filter_search,
 )
 from core.web_session_context import WebSessionContext
 
 
 AsyncRunner = Callable[..., Awaitable[Any]]
+BroadcastJson = Callable[[set[WebSocket], dict[str, Any]], Awaitable[None]]
 
 SEARCH_COMMAND_TYPES = {
     "set_active_ratings",
@@ -43,12 +47,32 @@ async def _send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
     await ws.send_text(json.dumps(payload, ensure_ascii=False))
 
 
+async def _send_shared_search_state(
+    ws: WebSocket,
+    payload: dict[str, Any],
+    *,
+    clients: set[WebSocket] | None,
+    broadcast_json: BroadcastJson | None,
+) -> None:
+    """Publish one authoritative search state to every connected view.
+
+    Direct unit callers do not own a client registry, so they retain the old
+    requester-only behavior. The websocket runtime supplies both arguments.
+    """
+    if clients is not None and broadcast_json is not None:
+        await broadcast_json(clients, payload)
+    else:
+        await _send_json(ws, payload)
+
+
 async def handle_search_command(
     ws: WebSocket,
     context: WebSessionContext,
     command: dict[str, Any],
     *,
     run_in_thread: AsyncRunner,
+    clients: set[WebSocket] | None = None,
+    broadcast_json: BroadcastJson | None = None,
 ) -> bool:
     command_type = str(command.get("type") or "").strip()
     if command_type not in SEARCH_COMMAND_TYPES:
@@ -150,6 +174,13 @@ async def handle_search_command(
             "completed": progress_total,
             "total": progress_total,
         })
+        # 이 search_state 가 '실제 green 검색 완료'임을 표시한다. 검색은 워커 스레드로
+        # 돌아(비블로킹) 그동안 rating 토글/tag_filter 공유 broadcast 등 다른 search_state 가
+        # 끼어들 수 있는데, 프론트가 그걸 검색 완료로 오인해 Quick Filter '해제됨' 오버레이를
+        # 잘못 띄우고 pool 잠금을 조기 해제하던 문제(Codex A3). 이 명령이 보내는 완료 state 에만
+        # 마커를 달아, 프론트가 끼어든 broadcast 를 무시하게 한다.
+        if isinstance(state, dict):
+            state["search_completed"] = True
         await _send_json(ws, state)
         return True
 
@@ -178,74 +209,112 @@ async def handle_search_command(
     if command_type == "tag_filter_search":
         tags = command.get("tags") if isinstance(command.get("tags"), list) else []
         request_id = str(command.get("request_id") or "")
+        client_key = str(command.get("_tag_filter_client_key") or "")
         result = await run_in_thread(tag_filter_search, context, tags)
         # B4: 검색이 백그라운드 태스크(websocket_session)라 완료 시점에 더 새로운 검색이 시작됐을 수
         # 있다(to_thread 는 취소로 안 멈춤). superseded(seq 불일치) 면 pending 미기록·미전송으로 폐기
         # — 최신 seq 만 통과해 stale 결과가 pending 을 덮어쓰는 reorder 해저드를 막는다.
         seq = command.get("_seq")
-        if seq is not None and seq != getattr(context, "_tag_filter_search_seq", seq):
+        seq_guard = command.get("_seq_guard")
+        if isinstance(seq_guard, dict):
+            latest_seq = seq_guard.get("seq", seq)
+        else:
+            # Backward-compatible path for direct callers and older tests.
+            latest_seq = getattr(context, "_tag_filter_search_seq", seq)
+        if seq is not None and seq != latest_seq:
             return True
         ids = result.pop("_ids", set())
         # B3: 매칭 프레임은 DataFrame 이라 JSON 전송 전에 반드시 pop(직렬화 불가). assign 이 active 로 옮긴다.
         matched_frame = result.pop("_frame", None)
+        source_snapshot = result.pop("_source_snapshot", None)
+        source_generation = int(result.pop("_pool_generation", 0) or 0)
         if request_id:
             result["request_id"] = request_id
-        context.pending_tag_filter = {
-            "tags": result.get("tags", []),
-            "ids": ids,
-            "frame": matched_frame,
-            "count": result.get("count", 0),
-            "request_id": request_id,
-            "rating_counts": result.get("rating_counts", {}),
-        }
+        with search_pool_state_guard(context):
+            pool_changed = (
+                source_snapshot is not getattr(context, "search_results_snapshot", None)
+                or source_generation != current_search_pool_generation(context)
+            )
+            if not pool_changed:
+                pending = {
+                    "tags": result.get("tags", []),
+                    "ids": ids,
+                    "frame": matched_frame,
+                    "source_snapshot": source_snapshot,
+                    "pool_generation": source_generation,
+                    "count": result.get("count", 0),
+                    "request_id": request_id,
+                    "rating_counts": result.get("rating_counts", {}),
+                }
+                context.pending_tag_filter = pending
+                pending_by_client = getattr(context, "pending_tag_filters", None)
+                if client_key and isinstance(pending_by_client, dict):
+                    pending_by_client[client_key] = pending
+        if pool_changed:
+            await _send_json(ws, {
+                "type": "tag_filter_stale",
+                "request_id": request_id,
+                "reason": "pool_changed",
+            })
+            return True
         await _send_json(ws, result)
         return True
 
     if command_type == "tag_filter_assign":
-        pending = getattr(context, "pending_tag_filter", None)
+        client_key = str(command.get("_tag_filter_client_key") or "")
+        pending_by_client = getattr(context, "pending_tag_filters", None)
+        pending = (
+            pending_by_client.get(client_key)
+            if client_key and isinstance(pending_by_client, dict)
+            else getattr(context, "pending_tag_filter", None)
+        )
         request_id = str(command.get("request_id") or "")
         if not pending:
             await _send_json(ws, {
-                "type": "toast",
-                "message": "No pending search to assign",
-                "level": "error",
+                "type": "tag_filter_stale",
+                "request_id": request_id,
+                "reason": "pending_missing",
             })
             return True
         if request_id and str(pending.get("request_id") or "") != request_id:
             await _send_json(ws, {
-                "type": "toast",
-                "message": "Tag filter search is stale. Search again.",
-                "level": "error",
+                "type": "tag_filter_stale",
+                "request_id": request_id,
+                "reason": "request_mismatch",
             })
             return True
-        context.active_tag_filter_ids = set(pending.get("ids") or set())
-        # B3: 매칭 프레임을 *이* active ids 객체 + 현재 snapshot 에 귀속 → apply_search_runtime_filters
-        # 가 전체 스냅샷 재스캔 없이 재사용한다(identity 가드는 apply 쪽). 다른 경로가 ids 를 새
-        # 객체로 바꾸면 자동 무효화되므로 별도 clear 불필요.
-        context.active_tag_filter_frame = pending.get("frame")
-        context.active_tag_filter_frame_for = context.active_tag_filter_ids
-        context.active_tag_filter_frame_snapshot = getattr(context, "search_results_snapshot", None)
-        tags = [str(tag) for tag in pending.get("tags", [])]
-        context.active_tag_filter = {
-            "tags": tags,
-            "ids": set(context.active_tag_filter_ids),
-            "count": int(pending.get("count") or 0),
-            "request_id": request_id,
-            "rating_counts": dict(pending.get("rating_counts") or {}),
-        }
-        context.save_search_filter_state(
-            tag_filter=[tag for tag in tags if not tag.startswith("-")],
-            tag_filter_exclude=[tag.lstrip("-") for tag in tags if tag.startswith("-")],
-            tag_filter_active=True,
+        committed = await run_in_thread(
+            commit_pending_tag_filter_assignment,
+            context,
+            pending,
+            request_id,
+            client_key,
         )
-        state = await run_in_thread(apply_search_runtime_filters, context)
+        if not committed.get("ok"):
+            reason = str(committed.get("reason") or "stale")
+            await _send_json(ws, {
+                "type": "tag_filter_stale",
+                "request_id": request_id,
+                "reason": reason,
+            })
+            return True
+        state = committed["state"]
+        state["tag_filter_settled"] = True
+        state["tag_filter_rating_counts"] = committed.get("rating_counts", {})
         await _send_json(ws, {
             "type": "tag_filter_assigned",
-            "count": pending.get("count", 0),
-            "tags": tags,
-            "rating_counts": pending.get("rating_counts", {}),
+            "request_id": request_id,
+            "tag_filter_revision": int(state.get("tag_filter_revision") or 0),
+            "count": committed.get("count", 0),
+            "tags": committed.get("tags", []),
+            "rating_counts": committed.get("rating_counts", {}),
         })
-        await _send_json(ws, state)
+        await _send_shared_search_state(
+            ws,
+            state,
+            clients=clients,
+            broadcast_json=broadcast_json,
+        )
         return True
 
     if command_type == "tag_filter_clear":
@@ -254,13 +323,19 @@ async def handle_search_command(
         # wipe the remaining chips. Absent (explicit "Clear") resets the draft too.
         keep_draft = bool(command.get("keep_draft"))
         state = await run_in_thread(clear_active_tag_filter, context, not keep_draft)
+        state["tag_filter_settled"] = True
         await _send_json(ws, {
             "type": "tag_filter_result",
             "count": 0,
             "tags": [],
             "rating_counts": {rating: 0 for rating in "gsqe"},
         })
-        await _send_json(ws, state)
+        await _send_shared_search_state(
+            ws,
+            state,
+            clients=clients,
+            broadcast_json=broadcast_json,
+        )
         return True
 
     if command_type == "save_filter_preset":

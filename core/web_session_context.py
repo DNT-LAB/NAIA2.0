@@ -8,6 +8,7 @@ generation behavior onto this container without restoring the old WebShell path.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -69,6 +70,7 @@ class WebSessionContext:
     search_query_ratings: set[str] = field(default_factory=lambda: set(DEFAULT_ACTIVE_RATINGS))
     active_tag_filter_ids: set[Any] | None = None
     pending_tag_filter: dict[str, Any] | None = None
+    pending_tag_filters: dict[str, dict[str, Any]] = field(default_factory=dict)
     active_tag_filter: dict[str, Any] | None = None
     current_source_row: Any = None
     current_prompt_context: Any = None
@@ -93,7 +95,26 @@ class WebSessionContext:
     def __post_init__(self) -> None:
         from core.headless_context_bootstrap import initialize_web_session_context
 
+        # Authoritative search-pool ownership. A tag-filter search may run in a
+        # worker while another websocket replaces the active parquet/search
+        # snapshot. The generation token + lock let the result/assign path prove
+        # that it still belongs to the same pool before committing it.
+        self._search_pool_state_lock = threading.RLock()
+        self._search_pool_generation = 0
+        # Monotonic ordering token for every authoritative tag-filter mutation.
+        # Pool generation proves dataset ownership; this independent revision
+        # lets each browser reject an older websocket payload that arrives after
+        # a newer assignment/clear/consume transition from another tab.
+        self._tag_filter_revision = 0
         initialize_web_session_context(self)
+        # Pool-loading ownership (Tag/Tag-Filter lock + Random gate + toast). Both
+        # the chunked parquet loader (LOAD phase) and the tag-filter index build /
+        # matching (FILTER phase) announce through the SAME depth counter so one
+        # phase's end can't clear the other's still-active flag, and so a concurrent
+        # get_search_state keeps short-circuiting until the LAST operation ends.
+        self._pool_loading_lock = threading.Lock()
+        self._pool_loading_depth = 0
+        self._search_pool_loading = {"active": False, "loaded": 0, "total": 0, "phase": None}
 
     def _create_event_stream_runtime(self):
         return self._event_stream_service().runtime(create=True)
@@ -185,6 +206,96 @@ class WebSessionContext:
         if seam_observer.enabled:
             seam_observer.observe_publish(event_name)
         self.event_bus.publish(event_name, *args, **kwargs)
+
+    # ── Search-pool snapshot ownership ──────────────────────────────────────
+    def search_pool_state_guard(self):
+        """Return the re-entrant lock guarding pool replacement/filter commit."""
+        return self._search_pool_state_lock
+
+    def search_pool_generation(self) -> int:
+        return int(getattr(self, "_search_pool_generation", 0) or 0)
+
+    def mark_search_pool_replaced(self) -> int:
+        """Advance the identity token after installing a new authoritative pool.
+
+        Callers that already hold ``search_pool_state_guard`` may call this safely;
+        the lock is re-entrant because replacement and generation publication are
+        one state transition.
+        """
+        with self._search_pool_state_lock:
+            self._search_pool_generation = self.search_pool_generation() + 1
+            return self._search_pool_generation
+
+    def tag_filter_revision(self) -> int:
+        return int(getattr(self, "_tag_filter_revision", 0) or 0)
+
+    def mark_tag_filter_changed(self) -> int:
+        """Advance the authoritative tag-filter ordering token.
+
+        State mutations call this while holding ``search_pool_state_guard``.
+        The re-entrant fallback here also keeps direct/legacy callers atomic.
+        """
+        with self._search_pool_state_lock:
+            self._tag_filter_revision = self.tag_filter_revision() + 1
+            return self._tag_filter_revision
+
+    # ── Pool-loading ownership ────────────────────────────────────────────────
+    # Depth-counted so overlapping LOAD (parquet chunk read) and FILTER (tag-filter
+    # index build/match) operations don't clear each other's loading flag. The WS
+    # event is published WHILE the lock is held so its observable order matches the
+    # state transition — a progress tick that loses the race to a final ``end`` sees
+    # depth 0 under the same lock and skips, so the frontend never gets a stale
+    # ``loading:true`` after ``loading:false`` (which would strand the lock). Only
+    # the non-blocking headless bridge subscribes to this event, so publishing under
+    # the lock cannot deadlock; a subscriber must not re-enter these methods.
+    def _pool_loading_publish(self, payload: dict) -> None:
+        try:
+            self.publish("search_pool_broadcast", payload)
+        except Exception:
+            pass
+
+    def pool_loading_begin(self, phase: str | None = None) -> None:
+        lock = getattr(self, "_pool_loading_lock", None)
+        if lock is None:  # defensive: pre-__post_init__ / test doubles
+            return
+        with lock:
+            self._pool_loading_depth = int(getattr(self, "_pool_loading_depth", 0) or 0) + 1
+            self._search_pool_loading = {"active": True, "loaded": 0, "total": 0, "phase": phase}
+            if self._pool_loading_depth == 1:  # 0 -> 1 edge only
+                payload = {"type": "search_loading", "loading": True, "loaded": 0, "total": 0}
+                if phase:
+                    payload["phase"] = phase
+                self._pool_loading_publish(payload)
+
+    def pool_loading_end(self) -> None:
+        lock = getattr(self, "_pool_loading_lock", None)
+        if lock is None:
+            return
+        with lock:
+            depth = int(getattr(self, "_pool_loading_depth", 0) or 0)
+            if depth <= 0:  # unbalanced end -> no publish (never a spurious 0->0 false)
+                self._pool_loading_depth = 0
+                return
+            depth -= 1
+            self._pool_loading_depth = depth
+            if depth == 0:  # 1 -> 0 edge only
+                self._search_pool_loading = {"active": False, "loaded": 0, "total": 0, "phase": None}
+                self._pool_loading_publish({"type": "search_loading", "loading": False})
+
+    def pool_loading_progress(self, phase: str | None, loaded: int, total: int) -> None:
+        lock = getattr(self, "_pool_loading_lock", None)
+        if lock is None:
+            return
+        with lock:
+            if int(getattr(self, "_pool_loading_depth", 0) or 0) <= 0:
+                return  # not owned -> ignore stray tick (and never publish after end)
+            self._search_pool_loading = {
+                "active": True, "loaded": int(loaded or 0), "total": int(total or 0), "phase": phase,
+            }
+            payload = {"type": "search_loading", "loading": True, "loaded": int(loaded or 0), "total": int(total or 0)}
+            if phase:
+                payload["phase"] = phase
+            self._pool_loading_publish(payload)
 
     def register_pipeline_hook(self, hook_info: dict, module_instance: Any) -> None:
         self._pipeline_hook_service().register_pipeline_hook(hook_info, module_instance)
@@ -390,7 +501,11 @@ class WebSessionContext:
         return self._search_state_service().custom_parquet_names()
 
     def search_state_payload(self) -> dict[str, Any]:
-        return self._search_state_service().search_state_payload()
+        # Keep the tag-filter fields and their revision from one atomic view.
+        # This lock is re-entrant because assignment/clear paths build the state
+        # while already holding the same ownership guard.
+        with self._search_pool_state_lock:
+            return self._search_state_service().search_state_payload()
 
     def get_filter_presets(self) -> list:
         return self._search_state_service().get_filter_presets()

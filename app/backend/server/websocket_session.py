@@ -147,6 +147,9 @@ def register_websocket_session(
 
         ws.send = _locked_send  # type: ignore[method-assign]
         live_tasks: set[asyncio.Task] = set()
+        # Latest-search ownership is per websocket. A search typed in another
+        # browser tab must not supersede this tab's still-valid result.
+        tag_filter_seq_guard = {"seq": 0}
         try:
             await send_startup_messages(
                 ws,
@@ -166,13 +169,15 @@ def register_websocket_session(
                         command = {"type": ""}
                     if isinstance(command, dict):
                         ctype = str(command.get("type") or "").strip()
+                        if ctype in {"tag_filter_search", "tag_filter_assign"}:
+                            command["_tag_filter_client_key"] = session_id
                         if ctype in LIVE_DISPATCH_TYPES:
                             # B4: 무거운 검색을 백그라운드로 — receive 루프는 즉시 다음 메시지를
                             # 읽어 autocomplete 가 검색 중에도 응답한다. seq 로 superseded 검색 폐기.
-                            context._tag_filter_search_seq = seq = (
-                                getattr(context, "_tag_filter_search_seq", 0) + 1
-                            )
+                            tag_filter_seq_guard["seq"] += 1
+                            seq = tag_filter_seq_guard["seq"]
                             command["_seq"] = seq
+                            command["_seq_guard"] = tag_filter_seq_guard
                             live_task = asyncio.create_task(_run_live_command(
                                 ws,
                                 context,
@@ -223,6 +228,16 @@ def register_websocket_session(
             # 연결 종료 시 백그라운드 라이브-필터 태스크 정리(누수/끊긴 소켓 send 방지).
             for _task in list(live_tasks):
                 _task.cancel()
+            guard = getattr(context, "search_pool_state_guard", None)
+            if callable(guard):
+                with guard():
+                    pending_by_client = getattr(context, "pending_tag_filters", None)
+                    pending = (
+                        pending_by_client.pop(session_id, None)
+                        if isinstance(pending_by_client, dict) else None
+                    )
+                    if getattr(context, "pending_tag_filter", None) is pending:
+                        context.pending_tag_filter = None
             clients.discard(ws)
 
 
@@ -285,6 +300,8 @@ async def handle_json_command(
             context,
             command,
             run_in_thread=run_in_thread,
+            clients=clients,
+            broadcast_json=broadcast_json,
         )
     elif command_type in API_CONTROL_COMMAND_TYPES:
         await handle_api_control_command(

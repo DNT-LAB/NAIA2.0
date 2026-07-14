@@ -671,6 +671,45 @@ header {
   text-shadow: 0 1px 3px rgba(0,0,0,0.7);
 }
 .panel-lock-caption:empty { display: none; }
+/* 라이브 검색이 활성 태그필터를 해제한 뒤의 '해제됨' 오버레이(블러 + 재적용/초기화).
+   panel-lock(로딩 잠금)과 별개 — 사용자가 [재적용]/[초기화] 할 때까지 지속된다. */
+.tag-filter-released {
+  position: absolute; inset: 0;
+  z-index: 110;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10,10,15,0.55);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  border-radius: inherit;
+}
+.tag-filter-released[hidden] { display: none; }
+.tag-filter-released-box {
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  padding: 20px 24px; max-width: 92%;
+}
+.tag-filter-released-msg {
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px; font-weight: 700;
+  color: var(--text, #e8e8ee);
+  text-align: center; line-height: 1.5;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+}
+.tag-filter-released-actions { display: inline-flex; gap: 10px; }
+.tag-filter-released-btn {
+  padding: 8px 18px; border-radius: 8px;
+  font-size: 12px; font-weight: 700; cursor: pointer;
+  border: 1px solid transparent;
+}
+.tag-filter-released-btn.reapply {
+  border-color: rgba(139,118,255,0.7);
+  background: rgba(139,118,255,0.16); color: var(--accent-glow, #a091ff);
+}
+.tag-filter-released-btn.reapply:hover { background: rgba(139,118,255,0.28); }
+.tag-filter-released-btn.reset {
+  border-color: rgba(255,107,107,0.55);
+  background: rgba(255,107,107,0.12); color: #ff9a9a;
+}
+.tag-filter-released-btn.reset:hover { background: rgba(255,107,107,0.22); }
 /* Random button gated while the result pool loads/rebuilds (a 'pool' op is in
    flight). A class — not [disabled] — so it never fights the generation
    lifecycle's own disabled state; cleared the moment the pool op completes. */
@@ -6242,6 +6281,93 @@ body.resizing-result-info {
 .danbooru-tool-panel.open {
   display: flex;
 }
+/* Grok I2V 진행 pill 방식: 생성 시작→팝업 자동 숨김→결과 뷰어 하단 중앙에
+   플로팅 dock(재개 pill + 정리 X)으로 상태 표시. pill 클릭=세션(소스/마스크) 복원,
+   X=세션 정리(닫기). */
+.img2img-resume-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.img2img-resume-dock[hidden] { display: none; }
+.img2img-resume-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 118, 255, 0.7);
+  background: var(--bg-elevated);
+  color: var(--accent-glow);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.img2img-resume-btn:hover {
+  background: var(--bg-surface);
+  border-color: rgba(160, 145, 255, 0.95);
+}
+.img2img-resume-btn[data-status="queued"],
+.img2img-resume-btn[data-status="running"] {
+  border-color: rgba(255, 193, 7, 0.85);
+  color: #ffd76a;
+}
+.img2img-resume-btn[data-status="completed_with_errors"],
+.img2img-resume-btn[data-status="error"] {
+  border-color: rgba(255, 107, 107, 0.85);
+  color: #ff9a9a;
+}
+.img2img-resume-ico { font-size: 14px; line-height: 1; }
+.img2img-resume-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 107, 107, 0.55);
+  background: var(--bg-elevated);
+  color: #ff9a9a;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.55);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.img2img-resume-dismiss:hover {
+  background: rgba(255, 107, 107, 0.16);
+  border-color: rgba(255, 107, 107, 0.9);
+}
+.danbooru-tab-root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  background: var(--bg-primary);
+}
+.danbooru-tool-panel.danbooru-tab-panel {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  background: var(--bg-primary);
+}
+.danbooru-tool-panel.danbooru-tab-panel[hidden] {
+  display: none;
+}
 .danbooru-tool-dialog {
   width: min(920px, 100%);
   max-height: min(760px, calc(100vh - 48px));
@@ -6479,6 +6605,20 @@ body.resizing-result-info {
   cursor: pointer;
 }
 .danbooru-min-btn:hover { background: rgba(255,255,255,0.08); }
+.danbooru-mode-btn {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(139, 118, 255, 0.4);
+  border-radius: 6px;
+  background: rgba(139, 118, 255, 0.12);
+  color: var(--accent-glow);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.danbooru-mode-btn:hover { background: rgba(139, 118, 255, 0.22); }
 
 /* Minimized floating island — anchored near the Auto Save pill */
 .danbooru-mini-island {
@@ -12194,6 +12334,26 @@ body.detached-metadata .metadata-layout {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+.mod-img2img-generation-status {
+  margin-bottom: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(139, 118, 255, 0.28);
+  border-radius: 6px;
+  background: rgba(139, 118, 255, 0.08);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.mod-img2img-generation-status[data-status="queued"],
+.mod-img2img-generation-status[data-status="running"] {
+  border-color: rgba(255, 193, 7, 0.3);
+  color: #e8c65f;
+}
+.mod-img2img-generation-status[data-status="error"],
+.mod-img2img-generation-status[data-status="completed_with_errors"] {
+  border-color: rgba(255, 107, 107, 0.34);
+  color: #ff9a9a;
 }
 .mod-img2img-actions .mod-action-btn {
   min-height: 40px;

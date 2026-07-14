@@ -27,6 +27,9 @@ export function createDanbooruBrowserController({
   window: win = window,
   fetch: fetchFn = window.fetch.bind(window),
   showToast,
+  hostElement = null,
+  onRequestTab = null,
+  onDisplayModeChange = null,
   onLoadPrompt = null,
   onGenerateFromPrompt = null,
   onInsertImageToHistory = null,
@@ -34,6 +37,19 @@ export function createDanbooruBrowserController({
   // Electron shell exposes a native WebContentsView bridge; a plain browser does not.
   const naia = (win && win.naiaShell) || null;
   const embedMode = !!(naia && typeof naia.danbooruAttach === 'function');
+  // Electron App은 native WebContentsView를 우측 탭 안에 호스팅할 수 있다(canTabMode).
+  // 사용자는 팝업 오버레이 / 우측 탭을 헤더 토글로 선택한다(기본=팝업, localStorage 저장).
+  // 일반 Web은 native surface가 없어 항상 기존 경량 lookup 팝업.
+  const canTabMode = !!(embedMode && hostElement);
+  const DISPLAY_MODE_KEY = 'naia.danbooru.displayMode';
+  let displayMode = 'popup';
+  if (canTabMode) {
+    try {
+      const saved = win.localStorage && win.localStorage.getItem(DISPLAY_MODE_KEY);
+      if (saved === 'tab' || saved === 'popup') displayMode = saved;
+    } catch (_error) {}
+  }
+  function isTabMode() { return canTabMode && displayMode === 'tab'; }
 
   let panel = null;
   let queryInput = null;
@@ -401,7 +417,10 @@ export function createDanbooruBrowserController({
       if (showToast) showToast('히스토리 추가 실패', 'error');
       return;
     }
-    if (ok) minimizePanel();
+    if (ok) {
+      if (isTabMode() && typeof onRequestTab === 'function') onRequestTab('result');
+      else minimizePanel();
+    }
   }
 
   // ---- Minimize-to-island --------------------------------------------------
@@ -486,6 +505,11 @@ export function createDanbooruBrowserController({
   }
 
   function minimizePanel() {
+    if (isTabMode()) {
+      if (typeof onRequestTab === 'function') onRequestTab('result');
+      else setActive(false);
+      return;
+    }
     if (minimized) return;
     if (!panel || !panel.classList.contains('open')) return;
     minimized = true;
@@ -515,8 +539,9 @@ export function createDanbooruBrowserController({
             <h2>Danbooru Browser</h2>
           </div>
           <div class="danbooru-header-actions">
-            <button type="button" class="danbooru-min-btn" data-danbooru-minimize aria-label="최소화" title="최소화">–</button>
-            <button type="button" class="danbooru-close-btn" data-danbooru-close aria-label="Close">×</button>
+            ${canTabMode ? `<button type="button" class="danbooru-mode-btn" data-danbooru-toggle-mode title="팝업 오버레이 / 우측 탭 전환">${isTabMode() ? '⤢ 팝업으로' : '⤡ 탭으로'}</button>` : ''}
+            ${isTabMode() ? '' : `<button type="button" class="danbooru-min-btn" data-danbooru-minimize aria-label="최소화" title="최소화">–</button>
+            <button type="button" class="danbooru-close-btn" data-danbooru-close aria-label="Close">×</button>`}
           </div>
         </header>
         <div class="danbooru-embed-body">
@@ -563,8 +588,10 @@ export function createDanbooruBrowserController({
     panel = document.createElement('section');
     panel.className = 'danbooru-tool-panel';
     if (embedMode) panel.classList.add('danbooru-tool-panel-embed');
+    if (isTabMode()) panel.classList.add('danbooru-tab-panel');
     panel.innerHTML = embedMode ? embedDialogHtml() : lookupDialogHtml();
-    document.body.append(panel);
+    (isTabMode() ? hostElement : document.body).append(panel);
+    if (isTabMode()) panel.hidden = true;
     queryInput = panel.querySelector('[data-danbooru-query]');
     addressInput = panel.querySelector('[data-danbooru-address]');
     viewRegion = panel.querySelector('[data-danbooru-view-region]');
@@ -593,6 +620,8 @@ export function createDanbooruBrowserController({
         applyPrompt();
       } else if (target.closest('[data-danbooru-generate]')) {
         generateFromPost();
+      } else if (target.closest('[data-danbooru-toggle-mode]')) {
+        toggleDisplayMode();
       } else if (target.closest('[data-danbooru-minimize]')) {
         minimizePanel();
       } else if (target.closest('[data-danbooru-copy-group]')) {
@@ -631,9 +660,14 @@ export function createDanbooruBrowserController({
     hideIsland();
     if (queryInput && query) queryInput.value = query;
     if (embedMode && addressInput && query) addressInput.value = query;
-    panel.hidden = false;
-    panel.classList.add('open');
-    if (embedMode) {
+    if (isTabMode() && typeof onRequestTab === 'function') {
+      const activeTab = onRequestTab('danbooru');
+      setActive(activeTab === 'danbooru');
+    } else {
+      panel.hidden = false;
+      panel.classList.add('open');
+    }
+    if (embedMode && panel.classList.contains('open')) {
       attachEmbed();
       setStatus('포스트를 열면 자동으로 태그를 읽습니다.', 'muted');
       if (query) navigateEmbed(query);
@@ -646,6 +680,11 @@ export function createDanbooruBrowserController({
 
   function closePanel() {
     if (!panel) return;
+    if (isTabMode()) {
+      if (typeof onRequestTab === 'function') onRequestTab('result');
+      else setActive(false);
+      return;
+    }
     detachEmbed();
     minimized = false;
     hideIsland();
@@ -657,12 +696,72 @@ export function createDanbooruBrowserController({
     return openPanel(options);
   }
 
+  function setActive(active) {
+    if (!isTabMode()) return false;
+    if (!active && !panel) return false;
+    ensurePanel();
+    const nextActive = !!active;
+    panel.hidden = !nextActive;
+    panel.classList.toggle('open', nextActive);
+    if (nextActive) {
+      attachEmbed();
+      win.requestAnimationFrame(() => win.requestAnimationFrame(reportBounds));
+    } else {
+      detachEmbed();
+    }
+    return nextActive;
+  }
+
+  function setDisplayMode(next) {
+    if (!canTabMode) return;
+    if (next !== 'tab' && next !== 'popup') return;
+    if (next === displayMode) return;
+    // 열려 있던 상태면 새 모드로 재오픈하기 위해 현재 패널을 완전히 헐고(native 뷰는
+    // detach만 — 페이지/워밍업 상태 보존) 다른 부모/마크업으로 다시 만든다.
+    const wasOpen = !!(panel && !panel.hidden);
+    // 재구성으로 패널 DOM 이 비워지지만 native 뷰는 같은 포스트를 유지한다. lastAutoPostId 를
+    // 그대로 두면 재부착 후 같은 페이지의 재추출이 억제돼 태그 패널이 빈 채로 남는다(Codex MED).
+    // 이전 포스트를 기억했다가 재부착 후 다시 읽는다.
+    const priorPost = lastAutoPostId;
+    detachEmbed();
+    minimized = false;
+    hideIsland();
+    if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
+    panel = null;
+    queryInput = addressInput = viewRegion = statusEl = resultEl = null;
+    lastAutoPostId = null;
+    displayMode = next;
+    try {
+      if (win.localStorage) win.localStorage.setItem(DISPLAY_MODE_KEY, next);
+    } catch (_error) {}
+    // 우측 탭 가용성(app.js)을 갱신 — 팝업 모드=탭 숨김, 탭 모드=탭 노출.
+    if (typeof onDisplayModeChange === 'function') {
+      try { onDisplayModeChange(next); } catch (_error) {}
+    }
+    if (wasOpen) {
+      openPanel();
+      if (priorPost) {
+        if (autoExtractTimer) win.clearTimeout(autoExtractTimer);
+        autoExtractTimer = win.setTimeout(() => loadPost(priorPost), 300);
+      }
+    }
+  }
+
+  function toggleDisplayMode() {
+    if (!canTabMode) return;
+    setDisplayMode(displayMode === 'tab' ? 'popup' : 'tab');
+  }
+
   return {
     closePanel,
     loadPost,
     openBrowser,
     openExternalBrowser,
     openPanel,
+    setActive,
+    setDisplayMode,
+    getDisplayMode: () => displayMode,
+    get mode() { return isTabMode() ? 'app' : 'web'; },
   };
 }
 

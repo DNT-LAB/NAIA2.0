@@ -60,11 +60,13 @@
         "app/web/assets.py",
         "app/web/remote/index.html",
         "app/web/remote/style.css",
-        "app/web/remote/app.js"
+        "app/web/remote/app.js",
+        "app/web/remote/js/features/studioTab.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [
         {"method": "GET", "path": "/", "smoke": "static"},
+        {"method": "GET", "path": "/bootstrap.html", "smoke": "static"},
         {"method": "GET", "path": "/style.css", "smoke": "static"},
         {"method": "GET", "path": "/app.js", "smoke": "static"},
         {"method": "GET", "path": "/js/{asset_path:path}", "smoke": "static"}
@@ -190,6 +192,8 @@
       "source_files": [
         "core/web_session_app.py",
         "app/backend/server/danbooru_routes.py",
+        "app/electron/main/main.cjs",
+        "app/web/remote/index.html",
         "app/web/remote/js/features/danbooruTab.mjs"
       ],
       "legacy_dependency": "external",
@@ -272,6 +276,9 @@
         "core/web_session_app.py",
         "core/web_session_context.py",
         "core/result_image_payload_service.py",
+        "core/headless_img2img_service.py",
+        "app/backend/server/generation_commands.py",
+        "app/backend/server/generation_runner.py",
         "app/web/remote/js/features/resultImageActions.mjs",
         "app/web/remote/js/features/resultHistory.mjs",
         "app/web/remote/js/features/metadataViewer.mjs",
@@ -288,6 +295,7 @@
         {"method": "GET", "path": "/api/result/asset/current", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/result/asset/saved", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/image/fetch", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/image/insert-history", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/metadata/extract", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/result/metadata", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/history/list", "smoke": "non_destructive"},

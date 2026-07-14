@@ -8,6 +8,8 @@ export function createStudioTabController({
   negEdit,
   getResolutionOptions,
   getCurrentResolution,
+  getCurrentCfgScale = () => '',
+  isCfgScaleLocked = () => false,
   setParam,
   setPromptFields,
   generate,
@@ -27,7 +29,7 @@ export function createStudioTabController({
   const SEED_MODES = new Set(['random', 'reuse_previous', 'increment_previous']);
   // JSON Export/Import 계약 (Codex 설계 검토).
   const EXPORT_TYPE = 'naia.studio.board';
-  const EXPORT_VERSION = 1;
+  const EXPORT_VERSION = 2;
   const MAX_IMPORT_BYTES = 16 * 1024 * 1024;  // 이미지 미포함 보드는 작음 — 악성 거대 파일 방어용 상한
   const MAX_IMPORT_FRAMES = 300;
   let importing = false;
@@ -72,6 +74,7 @@ export function createStudioTabController({
       prompt: '',
       negative: '',
       resolution: '',
+      cfgScale: '',
       seed: '',
       status: 'idle',
       runCount: 0,
@@ -101,6 +104,15 @@ export function createStudioTabController({
     return SEED_MODES.has(raw?.seedMode) ? raw.seedMode : (raw?.fixSeed ? 'reuse_previous' : 'random');
   }
 
+  function normalizedCfgScale(value) {
+    const text = safeText(value).trim();
+    if (!text) return '';
+    const numeric = Number(text);
+    if (!Number.isFinite(numeric)) return '';
+    const clamped = Math.max(1, Math.min(10, numeric));
+    return String(Math.round(clamped * 10) / 10);
+  }
+
   function hasBoardRunSettings(board) {
     if (!board || typeof board !== 'object') return false;
     if (safeText(board.globalResolution).trim()) return true;
@@ -116,6 +128,7 @@ export function createStudioTabController({
     if (safeText(frame.prompt).trim()) return true;
     if (safeText(frame.negative).trim()) return true;
     if (safeText(frame.resolution).trim()) return true;
+    if (normalizedCfgScale(frame.cfgScale)) return true;
     if (safeText(frame.seed).trim()) return true;
     if (frame.enabled === false) return true;
     if (Math.max(0, Math.round(Number(frame.runCount) || 0)) > 0) return true;
@@ -151,6 +164,7 @@ export function createStudioTabController({
         prompt: safeText(frame?.prompt),
         negative: safeText(frame?.negative),
         resolution: safeText(frame?.resolution),
+        cfgScale: normalizedCfgScale(frame?.cfgScale),
         seed: safeText(frame?.seed),
         status: 'idle',
         runCount: Math.max(0, Math.round(Number(frame?.runCount) || 0)),
@@ -197,6 +211,7 @@ export function createStudioTabController({
         prompt: frame.prompt,
         negative: frame.negative,
         resolution: frame.resolution,
+        cfgScale: frame.cfgScale,
         seed: frame.seed,
         runCount: frame.runCount,
         lastSeed: frame.lastSeed,
@@ -259,6 +274,8 @@ export function createStudioTabController({
       overrides.width = size.width;
       overrides.height = size.height;
     }
+    const cfgScale = normalizedCfgScale(frame?.cfgScale);
+    if (cfgScale && !isCfgScaleLocked()) overrides.cfg_scale = Number(cfgScale);
     if (seed) {
       const numericSeed = Number(seed);
       overrides.seed = Number.isFinite(numericSeed) ? Math.trunc(numericSeed) : seed;
@@ -446,6 +463,13 @@ export function createStudioTabController({
   function renderEditor() {
     const frame = selectedFrame();
     if (!frame || !editorOpen) return '';
+    const cfgLocked = !!isCfgScaleLocked();
+    const currentCfgScale = normalizedCfgScale(getCurrentCfgScale());
+    const cfgPlaceholder = cfgLocked
+      ? 'ComfyUI Free에서 잠김'
+      : currentCfgScale
+      ? `비워두면 현재값 (${currentCfgScale})`
+      : '비워두면 현재 설정 사용';
     return `
       <section class="studio-editor">
         <div class="studio-editor-head">
@@ -480,6 +504,10 @@ export function createStudioTabController({
           <label class="studio-field">
             <span>Resolution</span>
             <select data-studio-frame-field="resolution" data-studio-frame-id="${escHtml(frame.id)}">${renderResolutionOptions(frame.resolution)}</select>
+          </label>
+          <label class="studio-field" title="비워두면 생성 시점의 메인 CFG Scale을 사용합니다.">
+            <span>CFG Scale${cfgLocked ? ' · 잠김' : ''}</span>
+            <input type="number" min="1" max="10" step="0.1" data-studio-frame-field="cfgScale" data-studio-frame-id="${escHtml(frame.id)}" value="${escHtml(frame.cfgScale)}" placeholder="${escHtml(cfgPlaceholder)}"${cfgLocked ? ' disabled' : ''}>
           </label>
           <label class="studio-field">
             <span>Seed</span>
@@ -599,6 +627,7 @@ export function createStudioTabController({
     const frame = frameForFieldTarget(target);
     if (!frame) return;
     if (field === 'enabled') frame.enabled = Boolean(target.checked);
+    else if (field === 'cfgScale') frame.cfgScale = normalizedCfgScale(target.value);
     else frame[field] = safeText(target.value);
     frame.status = frame.enabled ? 'idle' : 'idle';
     saveState();
@@ -611,6 +640,7 @@ export function createStudioTabController({
       prompt: promptEdit?.value || '',
       negative: negEdit?.value || '',
       resolution: getCurrentResolution() || '',
+      cfgScale: isCfgScaleLocked() ? '' : normalizedCfgScale(getCurrentCfgScale()),
     };
   }
 
@@ -640,6 +670,7 @@ export function createStudioTabController({
       prompt: '',
       negative: '',
       resolution: '',
+      cfgScale: '',
       seed: '',
       status: 'idle',
       runCount: 0,
@@ -856,6 +887,7 @@ export function createStudioTabController({
     frame.prompt = promptEdit?.value || '';
     frame.negative = negEdit?.value || '';
     frame.resolution = getCurrentResolution() || frame.resolution || '';
+    frame.cfgScale = isCfgScaleLocked() ? frame.cfgScale : normalizedCfgScale(getCurrentCfgScale());
     frame.status = 'idle';
     saveState();
     render();
@@ -865,6 +897,8 @@ export function createStudioTabController({
   function applyFrameParams(frame, seed) {
     const resolution = frame.resolution || state.globalResolution;
     if (resolution) setParam('resolution', resolution);
+    const cfgScale = normalizedCfgScale(frame.cfgScale);
+    if (cfgScale && !isCfgScaleLocked()) setParam('cfg_scale', cfgScale);
     if (seed) {
       setParam('seed', seed);
       setParam('seed_fixed', 'true');
@@ -929,6 +963,7 @@ export function createStudioTabController({
       prompt: frame.prompt,
       negative: frame.negative,
       resolution: frame.resolution,
+      cfgScale: frame.cfgScale,
       seed: frame.seed,
     };
     state.frames.splice(selectedIndex + 1, 0, copy);
@@ -951,7 +986,12 @@ export function createStudioTabController({
       return;
     }
     const targetId = frame.id;
-    const hasContent = Boolean(frame.prompt.trim() || frame.negative.trim() || frameImages.get(targetId));
+    const hasContent = Boolean(
+      frame.prompt.trim()
+      || frame.negative.trim()
+      || normalizedCfgScale(frame.cfgScale)
+      || frameImages.get(targetId)
+    );
     if (hasContent) {
       const confirmed = await Promise.resolve(confirmDialog(
         `${frameLabel(frame, state.frames.indexOf(frame))} 프레임을 삭제할까요?`,
@@ -1209,6 +1249,7 @@ export function createStudioTabController({
       prompt: safeText(line).trim(),
       negative: negEdit?.value || '',
       resolution: state.globalResolution || getCurrentResolution() || '',
+      cfgScale: isCfgScaleLocked() ? '' : normalizedCfgScale(getCurrentCfgScale()),
     };
   }
 

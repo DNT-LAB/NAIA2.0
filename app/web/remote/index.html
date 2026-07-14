@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260705-charcomponents">
+<link rel="stylesheet" href="style.css?v=20260714-qf-released">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -406,6 +406,16 @@
     </div>
   </div>
   <div class="panel-lock" id="tagFilterLock" aria-hidden="true"><div class="panel-lock-box"><div class="ui-lock-spinner"></div><div class="panel-lock-caption"></div></div></div>
+  <!-- 라이브 검색이 활성 태그필터를 해제한 뒤의 '해제됨' 상태(블러 + 재적용/초기화). -->
+  <div class="tag-filter-released" id="tagFilterReleased" hidden>
+    <div class="tag-filter-released-box">
+      <div class="tag-filter-released-msg">검색으로 인해 Quick Filter가 해제되었습니다.</div>
+      <div class="tag-filter-released-actions">
+        <button type="button" class="tag-filter-released-btn reapply" onclick="reapplyReleasedTagFilter()">재적용</button>
+        <button type="button" class="tag-filter-released-btn reset" onclick="resetReleasedTagFilter()">초기화</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <main class="app-layout">
@@ -708,6 +718,9 @@
     <button class="right-tab-btn" data-right-tab="characters" onclick="switchRightTab('characters')" role="tab" aria-selected="false">
       <span class="right-tab-icon">👤</span><span>Characters</span>
     </button>
+    <button class="right-tab-btn" data-right-tab="danbooru" data-right-tab-hidden="true" onclick="switchRightTab('danbooru')" role="tab" aria-selected="false" aria-hidden="true" tabindex="-1" hidden>
+      <span class="right-tab-icon">D</span><span>Danbooru</span>
+    </button>
     <button class="right-tab-btn" data-right-tab="studio" onclick="switchRightTab('studio')" role="tab" aria-selected="false">
       <span class="right-tab-icon">▣</span><span>Studio</span>
     </button>
@@ -729,6 +742,11 @@
           <img id="preview" alt="">
           <span class="viewer-empty" id="emptyMsg"></span>
           <div class="frozen-wc-bar" id="frozenWcBar" aria-label="고정된 와일드카드" hidden></div>
+          <!-- Img2Img/Inpaint 재개 dock (Grok I2V pill 방식) — 결과 뷰어 하단 중앙 플로팅. -->
+          <div class="img2img-resume-dock" id="img2imgResumeDock" hidden>
+            <button class="img2img-resume-btn" id="img2imgResumeBtn" type="button" onclick="resumeImg2ImgSession()">↺ Inpaint</button>
+            <button class="img2img-resume-dismiss" id="img2imgResumeDismiss" type="button" onclick="dismissImg2ImgResume()" title="세션 정리(닫기)" aria-label="세션 정리">✕</button>
+          </div>
           <div class="stats-island" id="statsIsland">
             <button type="button" class="stats-pill stats-history-toggle" id="statsGenCount" title="Total generations this session" onclick="toggleMobileHistoryRail()" aria-label="Open result history"></button>
           </div>
@@ -1064,6 +1082,9 @@
       </section>
     </div>
   </div>
+  <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" hidden role="tabpanel">
+    <div id="danbooruTabRoot" class="danbooru-tab-root"></div>
+  </div>
   <div class="right-tab-pane" id="rightTabStudio" data-right-pane="studio" hidden role="tabpanel">
     <div id="studioRoot" class="studio-root"></div>
   </div>
@@ -1153,6 +1174,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260705-multichar"></script>
+<script src="app.js?v=20260714-a3fix"></script>
 </body>
 </html>

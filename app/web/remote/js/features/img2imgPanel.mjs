@@ -178,6 +178,7 @@ export function createImg2ImgPanel({
       has_mask: !!state.has_mask,
       has_mask_preview: !!state.mask_preview,
       has_preview: !!state.preview,
+      generation_status: String(state.generation_status || 'idle'),
       width: Number(state.width) || 0,
       height: Number(state.height) || 0,
       resize_1mp: state.resize_1mp !== false,
@@ -309,7 +310,20 @@ export function createImg2ImgPanel({
         <span class="mod-char-meta">캐릭터 슬롯 ${characters.length}개</span>
       </div>
       ${characters.map(renderCharacter).join('')}`;
+    const generationStatus = String(state.generation_status || 'idle');
+    const generationStatusLabels = {
+      submitting: '생성 요청을 준비하는 중…',
+      queued: '생성 큐에 등록됨 · 창을 닫아도 마스크는 유지됩니다.',
+      running: '생성 중 · 완료 후 같은 마스크로 다시 시도할 수 있습니다.',
+      completed: '생성 완료 · 같은 마스크로 다시 시도할 수 있습니다.',
+      completed_with_errors: '일부 생성 실패 · 현재 마스크로 다시 시도할 수 있습니다.',
+      error: state.generation_error || '생성 실패 · 현재 마스크로 다시 시도할 수 있습니다.',
+    };
+    const lifecycleHtml = generationStatusLabels[generationStatus]
+      ? `<div class="mod-img2img-generation-status" data-status="${escHtml(generationStatus)}">${escHtml(generationStatusLabels[generationStatus])}</div>`
+      : '';
     const actionsHtml = `
+      ${lifecycleHtml}
       <div class="mod-img2img-actions">
         <button type="button" class="mod-action-btn mod-start" ${generateDisabled}${generateTitle} onclick="img2imgGenerate()">${generateLabel}</button>
         <button type="button" class="mod-btn-secondary" onclick="img2imgClose()">세션 닫기</button>

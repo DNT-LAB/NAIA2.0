@@ -326,6 +326,7 @@ let instantWildcardPanel = null;
 let e621EventPanel = null;
 let imageModulePanels = null;
 let img2imgPanel = null;
+let lastAutoHiddenImg2ImgSubmission = '';
 let refinePanelControl = null;
 let tagSearchController = null;
 let mobileViewportControl = null;
@@ -348,7 +349,7 @@ let promptHighlightIndexPromise = null;
 const moduleStateCache = new Map();
 let detachedAttachPosted = false;
 let transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
-const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260705-parqswap')
+const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260714-a3fix')
   .then(({createQuickFilterController}) => {
     quickFilter = createQuickFilterController({
       document,
@@ -366,6 +367,7 @@ const quickFilterReady = import('./js/features/quickFilter.mjs?v=20260705-parqsw
       fmtCount,
       showToast,
       lockTagSurface,
+      unlockTagSurface,
     });
     quickFilter.bindInputs();
   })
@@ -390,10 +392,11 @@ const rightTabsReady = import('./js/features/rightTabs.mjs')
 function applyRightTabAvailability(tabAvailability) {
   if (!tabAvailability || typeof tabAvailability !== 'object') return;
   if (rightTabs && typeof rightTabs.setAvailability === 'function') {
-    rightTabs.setAvailability(tabAvailability);
+    const activeTab = rightTabs.setAvailability(tabAvailability);
+    danbooruTabControl?.setActive?.(activeTab === 'danbooru');
     return;
   }
-  pendingRightTabAvailability = {...tabAvailability};
+  pendingRightTabAvailability = {...(pendingRightTabAvailability || {}), ...tabAvailability};
 }
 
 async function loadRuntimeCapabilities() {
@@ -410,16 +413,22 @@ async function loadRuntimeCapabilities() {
 }
 
 loadRuntimeCapabilities();
-const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260602-danbooru-insert1')
+const danbooruTabReady = import('./js/features/danbooruTab.mjs?v=20260714-a3fix')
   .then(({createDanbooruBrowserController}) => {
     danbooruTabControl = createDanbooruBrowserController({
       document,
       fetch: window.fetch.bind(window),
+      hostElement: document.getElementById('danbooruTabRoot'),
+      onRequestTab: tabName => switchRightTab(tabName),
+      // 사용자가 헤더 토글로 팝업/우측탭을 바꾸면 우측 탭 가용성을 재적용한다
+      // (팝업 모드=탭 숨김, 탭 모드=탭 노출).
+      onDisplayModeChange: mode => applyRightTabAvailability({danbooru: mode === 'tab'}),
       showToast,
       onLoadPrompt,
       onGenerateFromPrompt,
       onInsertImageToHistory: payload => callResultImageAction('insertExternalToHistory', payload),
     });
+    applyRightTabAvailability({danbooru: danbooruTabControl.mode === 'app'});
   })
   .catch(error => {
     console.error('Failed to initialize Danbooru browser module', error);
@@ -474,7 +483,7 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Character Viewer tab module', error);
   });
-const studioTabReady = import('./js/features/studioTab.mjs?v=20260613-studio-cards2')
+const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1')
   .then(({createStudioTabController}) => {
     studioTabControl = createStudioTabController({
       document,
@@ -488,6 +497,8 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260613-studio-car
         .map(option => option.value || option.textContent || '')
         .filter(Boolean),
       getCurrentResolution: () => paramEls.resolution?.value || qResolution?.value || '',
+      getCurrentCfgScale: () => paramEls.cfg_scale?.value || '',
+      isCfgScaleLocked: () => isComfyUiFreeWorkflowActive(),
       setParam,
       setPromptFields: applyPromptFields,
       generate: requestGenerate,
@@ -601,7 +612,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize result image actions module', error);
   });
-const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260605-meta-charslots1')
+const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20260705-vibe-charref')
   .then(({createMetadataViewer}) => {
     metadataViewer = createMetadataViewer({
       document,
@@ -694,7 +705,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260705-frozenwcbar')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260713-search-contract-r5')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -1216,7 +1227,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260704-v3-nodenoise')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20260713-lifecycle1')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -1280,7 +1291,7 @@ const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-
   .catch(error => {
     console.error('Failed to initialize mobile viewport module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260705-parqswap2')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260714-a3fix')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -2529,6 +2540,7 @@ const wsMessageHandlers = {
   options: syncOptions,
   params: updateParams,
   generation_dispatched: onGenerationDispatched,
+  img2img_generation_state: onImg2ImgGenerationState,
   mode: m => {
     syncMode(m.mode);
     // 글로벌 정책: 모드 전환 시 확장 퀵 팝업은 stale(모드별 선택지) — 닫고 재요청.
@@ -2568,6 +2580,7 @@ const wsMessageHandlers = {
   translation_result: onTranslationResult,
   tag_filter_result: onTagFilterResult,
   tag_filter_assigned: onTagFilterAssigned,
+  tag_filter_stale: onTagFilterStale,
   tag_filter_update: onTagFilterUpdate,
   tag_filter_ac_result: onTagFilterAcResult,
   storage_list: onStorageList,
@@ -4027,6 +4040,10 @@ function switchRightTab(tabName, options = {}) {
     characterViewerControl.setActive(activeTab === 'characters');
   }
   if (activeTab === 'characters' && characterViewerControl) characterViewerControl.load();
+  if (danbooruTabControl && typeof danbooruTabControl.setActive === 'function') {
+    danbooruTabControl.setActive(activeTab === 'danbooru');
+  }
+  return activeTab;
 }
 
 function buildDetachedUrl(kind, params = {}) {
@@ -6084,7 +6101,10 @@ const poolLoad = (() => {
     if (toast) {
       if (active) {
         if (phase === 'filter') {
-          toast.textContent = '태그 필터 적용 중…  (대용량 풀 전처리)';
+          const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : null;
+          toast.textContent = pct !== null
+            ? `태그 필터 전처리 ${pct}%   (${loaded.toLocaleString()} / ${total.toLocaleString()}행)`
+            : '태그 필터 적용 중…  (대용량 풀 전처리)';
         } else if (phase === 'prepare') {
           toast.textContent = '검색 풀 준비 중…';
         } else {
@@ -6634,6 +6654,7 @@ function onModuleState(m) {
   else if (m.module_id === 'character_reference') updateCharRefBadge(m);
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
   else if (m.module_id === 'save_directory' && saveDirectoryPanel) saveDirectoryPanel.setState(m);
+  else if (m.module_id === 'img2img') updateImg2ImgResumeButton(m);
   // 위 배지 갱신이 leaf 버튼의 상태 클래스(char-active/charref-active/vibe-active/auto-active)를
   // 바꾸므로, 카테고리 버튼의 category-status 를 그 클래스에서 파생하는 런처를 명시적으로 재계산한다.
   // (런처의 MutationObserver 는 재시작 시 경합 — 적용된 도구로 부팅해도 첫 페인트에 상태가 안 뜸.)
@@ -7590,6 +7611,73 @@ function renderImg2Img(m) {
   if (img2imgPanel) img2imgPanel.render(m);
 }
 
+function updateImg2ImgResumeButton(state) {
+  const button = document.getElementById('img2imgResumeBtn');
+  const dock = document.getElementById('img2imgResumeDock');
+  if (!button) return;
+  const status = String(state?.generation_status || 'idle');
+  const mode = String(state?.mode || 'img2img').toLowerCase();
+  const retryable = !!state?.active && (mode !== 'inpaint' || !!state?.has_mask);
+  const hasSubmission = !['', 'idle', 'inactive', 'submitting'].includes(status);
+  if (dock) dock.hidden = !(retryable && hasSubmission);
+  const label = mode === 'inpaint' ? 'Inpaint' : 'Img2Img';
+  const ico = document.createElement('span');
+  ico.className = 'img2img-resume-ico';
+  ico.textContent = mode === 'inpaint' ? '🖌' : '🎨';
+  const txt = document.createElement('span');
+  txt.textContent =
+    status === 'queued' || status === 'running' ? `${label} 생성 중…`
+    : status === 'completed_with_errors' ? `${label} 일부 실패 · 재시도`
+    : status === 'error' ? `${label} 실패 · 재시도`
+    : `${label} 재시도`;
+  button.replaceChildren(ico, txt);
+  button.dataset.status = status;
+  button.title = status === 'running' || status === 'queued'
+    ? '현재 생성 세션과 마스크를 다시 열기 (생성 완료 후 재시도 가능)'
+    : '현재 소스와 마스크를 유지한 채 다시 열기';
+  if (!state?.active) lastAutoHiddenImg2ImgSubmission = '';
+}
+
+function onImg2ImgGenerationState(message) {
+  if (!message) return;
+  const cached = moduleStateCache.get('img2img');
+  const sameSession = cached
+    && (!message.window_id || Number(cached.window_id) === Number(message.window_id));
+  if (sameSession) {
+    const merged = {...cached, ...message, type: 'module_state', module_id: 'img2img'};
+    moduleStateCache.set('img2img', merged);
+    if (currentModuleId === 'img2img') renderImg2Img(merged);
+  }
+  updateImg2ImgResumeButton(message);
+
+  const submissionId = String(message.generation_submission_id || '');
+  if (message.generation_status !== 'queued'
+    || !submissionId
+    || submissionId === lastAutoHiddenImg2ImgSubmission) return;
+  lastAutoHiddenImg2ImgSubmission = submissionId;
+  if (isDetachedModule && detachedModuleId === 'img2img') {
+    window.close();
+    return;
+  }
+  if (currentModuleId === 'img2img' && modulePopup.classList.contains('open')) {
+    closeModule();
+  }
+  switchRightTab('result');
+}
+
+function resumeImg2ImgSession() {
+  openModule('img2img', {forceOpen: true});
+}
+
+function dismissImg2ImgResume() {
+  // 재개 dock 의 X — 세션을 정리(닫기)한다. 백엔드가 inactive img2img 상태를
+  // 브로드캐스트하면 dock 이 확정 숨김되지만, 즉시성 위해 낙관적으로 먼저 숨긴다.
+  const dock = document.getElementById('img2imgResumeDock');
+  if (dock) dock.hidden = true;
+  lastAutoHiddenImg2ImgSubmission = '';
+  img2imgClose();
+}
+
 function img2imgSlider(key, value) {
   if (img2imgPanel) img2imgPanel.slider(key, value);
 }
@@ -7745,7 +7833,12 @@ function onSearchLoading(m) {
     tagSurfaceLock.begin('pool');
     tagSurfaceLock.refresh();
     if (phase === 'filter') {
-      tagSurfaceLock.setCaption('태그 필터 적용 중…');
+      if (total > 0) {
+        const pct = Math.min(100, Math.round((loaded / total) * 100));
+        tagSurfaceLock.setCaption(`태그 필터 전처리 ${pct}% (${loaded.toLocaleString()} / ${total.toLocaleString()}행)`);
+      } else {
+        tagSurfaceLock.setCaption('태그 필터 적용 중…');
+      }
     } else {
       if (total > 0) {
         const pct = Math.min(100, Math.round((loaded / total) * 100));
@@ -8087,13 +8180,22 @@ function applyTagFilter() { if (quickFilter) quickFilter.apply(); }
 function assignTagFilter() { if (quickFilter) quickFilter.assign(); }
 function commitPendingTagFilterText() { if (quickFilter) quickFilter.commitPendingInputs(); }
 function clearTagFilter() { if (quickFilter) quickFilter.clear(); }
+function reapplyReleasedTagFilter() { if (quickFilter) quickFilter.reapplyReleased(); }
+function resetReleasedTagFilter() { if (quickFilter) quickFilter.resetReleased(); }
 function toggleSaveTagFilterRow() { if (quickFilter) quickFilter.toggleSaveRow(); }
 function toggleTagFilterPresets() { if (quickFilter) quickFilter.togglePresets(); }
 function confirmSaveTagFilterPreset() { if (quickFilter) quickFilter.confirmSavePreset(); }
 function loadTagFilterPreset(i) { if (quickFilter) quickFilter.loadPresetAt(i); }
 function deleteTagFilterPreset(i) { if (quickFilter) quickFilter.deletePresetAt(i); }
-function onTagFilterResult(m) { if (quickFilter) quickFilter.onResult(m); tagSurfaceLock.end('tagfilter'); }
-function onTagFilterAssigned(m) { if (quickFilter) quickFilter.onAssigned(m); tagSurfaceLock.end('tagfilter'); }
+function onTagFilterResult(m) {
+  if (!quickFilter || quickFilter.onResult(m)) tagSurfaceLock.end('tagfilter');
+}
+function onTagFilterAssigned(m) {
+  if (!quickFilter || quickFilter.onAssigned(m)) tagSurfaceLock.end('tagfilter');
+}
+function onTagFilterStale(m) {
+  if (!quickFilter || quickFilter.onStale(m)) tagSurfaceLock.end('tagfilter');
+}
 function onTagFilterUpdate(m) { if (quickFilter) quickFilter.onUpdate(m); }
 function onTagFilterAcResult(m) { if (quickFilter) quickFilter.onAutocompleteResult(m); }
 Promise.all([

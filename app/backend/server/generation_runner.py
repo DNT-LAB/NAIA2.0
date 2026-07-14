@@ -1258,12 +1258,18 @@ async def _broadcast_generation_error(
     await broadcast_json(clients, {"type": "toast", "level": "error", "message": message})
     await broadcast_json(clients, {"type": "generation_error", "message": message})
     story_run_id = str(params.get("event_stream_run_id") or "")
-    if story_run_id and context._storyteller_service().is_running(story_run_id):
+    if story_run_id and not context._storyteller_service().is_running(story_run_id):
+        story_run_id = ""
+    if story_run_id:
         failure = context._storyteller_service().fail(story_run_id, message)
         await _broadcast_storyteller_state(context, clients)
         for extra_message in failure.get("messages", []):
             await broadcast_json(clients, extra_message)
-    automation_run_id = str(params.get("automation_run_id") or "")
+    automation_run_id = ""
+    if not story_run_id:
+        automation_run_id = str(params.get("automation_run_id") or "")
+        if not automation_run_id and _automation_should_bind(context, request):
+            automation_run_id = context._automation_service().active_run_id()
     if automation_run_id:
         failure = context._automation_service().fail(automation_run_id, message)
         await _broadcast_automation_state(context, clients)

@@ -21,6 +21,8 @@ export function createMetadataViewer({
   const negativeEl = document.getElementById('metadataNegative');
   const charactersTitleEl = document.getElementById('metadataCharactersTitle');
   const charactersEl = document.getElementById('metadataCharacters');
+  const charRefTitleEl = document.getElementById('metadataCharacterRefTitle');
+  const charRefEl = document.getElementById('metadataCharacterRef');
   const paramsEl = document.getElementById('metadataParams');
   const rawEl = document.getElementById('metadataRaw');
   const refreshBtn = document.getElementById('metadataRefreshBtn');
@@ -109,6 +111,25 @@ export function createMetadataViewer({
       ['NovelAI Diffusion V4 37442FCA', 'NAID4.0F'],
     ];
     const matched = modelMap.find(([needle]) => text.includes(needle));
+    return matched ? matched[1] : '';
+  }
+
+  // Freshly-generated in-memory history items carry no `Source` hash (NAI only
+  // writes that into the saved PNG), so fall back to the NAI `model` field. Handles
+  // both the short code the UI stores ("NAID4.5F") and the wire string
+  // ("nai-diffusion-4-5-full"); returns '' for non-NAI models (no vibe there).
+  function naiModelCode(data) {
+    const raw = String(findValue(data, ['model', 'Model', 'model_name']) || '').trim();
+    if (/^NAID/i.test(raw)) return raw;
+    const text = raw.toLowerCase();
+    const map = [
+      ['nai-diffusion-4-5-full', 'NAID4.5F'],
+      ['nai-diffusion-4-5-curated', 'NAID4.5C'],
+      ['nai-diffusion-4-full', 'NAID4.0F'],
+      ['nai-diffusion-4-curated', 'NAID4.0C'],
+      ['nai-diffusion-3', 'NAID3'],
+    ];
+    const matched = map.find(([needle]) => text.includes(needle));
     return matched ? matched[1] : '';
   }
 
@@ -233,7 +254,10 @@ export function createMetadataViewer({
     if (!referenceImages.length) return null;
 
     const source = findValue(data, ['Source', 'source']);
-    const sourceModel = modelFromSource(source);
+    // Saved PNGs resolve via the NAI `Source` hash; in-memory history items have no
+    // Source, so fall back to the `model` field (that was the bug — vibe hidden on
+    // freshly generated results even though the reference images are present).
+    const sourceModel = modelFromSource(source) || naiModelCode(data);
     if (!sourceModel) return null;
 
     const strengths = alignNumberList(
@@ -316,6 +340,11 @@ export function createMetadataViewer({
       charactersEl.style.display = 'none';
       charactersEl.innerHTML = '';
     }
+    if (charRefTitleEl) charRefTitleEl.style.display = 'none';
+    if (charRefEl) {
+      charRefEl.style.display = 'none';
+      charRefEl.innerHTML = '';
+    }
     if (paramsEl) paramsEl.innerHTML = '';
     if (rawEl) rawEl.textContent = '';
     updateActionButtons();
@@ -396,6 +425,35 @@ export function createMetadataViewer({
     return getCharacters(data);
   }
 
+  // NAI v4 Character Reference (director_reference_*) — like vibe transfer, the data
+  // is stored in generation_params but had no render path, so it never showed.
+  function formatCharacterReference(data) {
+    const images = normalizeArray(tryParseJson(findValue(data, ['director_reference_images'])));
+    if (!images.length) return '';
+    const descriptions = normalizeArray(tryParseJson(findValue(data, ['director_reference_descriptions'])));
+    const strengths = normalizeNumberList(findValue(data, ['director_reference_strength_values']));
+    return images.map((_, index) => {
+      const desc = descriptions[index];
+      let type = '';
+      if (isObject(desc)) type = desc?.caption?.base_caption || '';
+      else if (typeof desc === 'string') type = desc;
+      const parts = [`Ref ${index + 1}`];
+      if (isPresent(type)) parts.push(safeText(type));
+      if (Number.isFinite(strengths[index])) parts.push(`strength ${strengths[index]}`);
+      return parts.join(' · ');
+    }).join('\n');
+  }
+
+  function renderCharacterReference(data) {
+    const text = formatCharacterReference(data);
+    const has = Boolean(text);
+    if (charRefTitleEl) charRefTitleEl.style.display = has ? '' : 'none';
+    if (charRefEl) {
+      charRefEl.style.display = has ? '' : 'none';
+      charRefEl.textContent = text;
+    }
+  }
+
   function renderParams(paramRows) {
     if (!paramsEl) return;
     if (!paramRows.length) {
@@ -458,6 +516,7 @@ export function createMetadataViewer({
     const prompt = getPrompt(payload);
     const negative = getNegative(payload);
     const characters = renderCharacters(payload);
+    renderCharacterReference(payload);
     const charactersUc = getCharacterNegatives(payload);
     const vibeTransfer = getVibeTransferData(payload);
     const {rows, canonical} = buildParams(payload, vibeTransfer);

@@ -31,6 +31,7 @@ from core.character_settings import (
     read_reroll_on_generate,
     store_character_roll_snapshot,
 )
+from core.nai_model_contract import resolve_nai_api_model
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 
 
@@ -647,17 +648,9 @@ class APIService:
             if not token:
                 raise ValueError("NAI 토큰이 제공되지 않았습니다.")
 
-            model_mapping = {
-                "NAID4.5F": 'nai-diffusion-4-5-full',
-                "NAID4.5C": 'nai-diffusion-4-5-curated',
-                "NAID4.0F": 'nai-diffusion-4-full',
-                "NAID4.0C": 'nai-diffusion-4-curated-preview',
-                "NAID3": 'nai-diffusion-3'
-            }
-
             # 모델 이름 가져오기 및 매핑
             model_key = params.get('model', 'NAID4.5F')
-            model_name = model_mapping.get(model_key, 'nai-diffusion-4-5-full')
+            model_name = resolve_nai_api_model(model_key)
 
             # ✅ Img2Img 분기 처리
             is_img2img = 'image_bytes' in params and params['image_bytes'] is not None

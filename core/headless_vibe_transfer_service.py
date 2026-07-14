@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import quote
 
 from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
+from core.nai_model_contract import resolve_nai_api_model
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
 
 
@@ -38,14 +39,6 @@ def _vibe_model_family(model_key: Any) -> str:
     return ""
 
 
-# NAI UI model key -> encode-vibe API model string (mirrors api_service.py model_mapping).
-_NAI_MODEL_MAP = {
-    "NAID4.5F": "nai-diffusion-4-5-full",
-    "NAID4.5C": "nai-diffusion-4-5-curated",
-    "NAID4.0F": "nai-diffusion-4-full",
-    "NAID4.0C": "nai-diffusion-4-curated-preview",
-    "NAID3": "nai-diffusion-3",
-}
 # .naiv4vibe / .naiv4vibebundle 의 NAI API 모델 키 -> NAIA 내부 모델 키(스토리지 폴더명).
 _BUNDLE_MODEL_MAP = {
     "v4-5full": "NAID4.5F",
@@ -103,7 +96,7 @@ def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float, *, model_key
     if not token:
         raise RuntimeError("NAI 토큰이 필요합니다 (API 설정 → NAI).")
     ie = max(0.01, min(1.0, round(float(ie), 2)))
-    api_model = _NAI_MODEL_MAP.get(resolved_model, "nai-diffusion-4-5-full")
+    api_model = resolve_nai_api_model(resolved_model)
     encoding = _post_encode_vibe(token, bytes(source_bytes), ie, api_model)
     if not encoding:
         raise RuntimeError("Vibe 인코딩 응답이 비어 있습니다.")
@@ -408,7 +401,7 @@ class HeadlessVibeTransferService:
                 ie = round(_as_float(value, _as_float(frame.get("information_extracted"), 1.0)), 2)
                 ie = max(0.01, min(1.0, ie))
                 model_key = context._current_model_key()
-                api_model = _NAI_MODEL_MAP.get(model_key, "nai-diffusion-4-5-full")
+                api_model = resolve_nai_api_model(model_key)
                 encoding = _post_encode_vibe(token, source_bytes, ie, api_model)
                 if not encoding:
                     toast = context._toast("Vibe 인코딩 응답이 비어 있습니다.", level="error")

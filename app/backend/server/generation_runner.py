@@ -36,6 +36,13 @@ from core.headless_image_module_param_service import (
 )
 from core.web_session_context import WebSessionContext
 
+# Event/Remote Preset completions count toward a running Automation's count/timer.
+# Server-side preset continuation remains suppressed; the frontend owns that loop.
+_AUTOMATION_BINDABLE_DESPITE_SUPPRESSION = {
+    "event_preset_request",
+    "remote_preset_request",
+}
+
 AUTO_GENERATE_DROPPED_PARAM_KEYS = {
     "_generation_request",
     "credential",
@@ -1032,15 +1039,22 @@ async def _maybe_continue_auto_generation(
 
 
 def _automation_should_bind(context: WebSessionContext, request) -> bool:
-    """Whether a completed request should count against the running Automation
-    controller. Mirrors the Auto Generate suppression rules so special requests
-    (event preset, character viewer, img2img, etc.) never consume the limit."""
+    """Whether a completed request should count against the running Automation.
+
+    Event/Remote Preset completions consume the Automation limit even though they
+    remain suppressed from the separate server-side Auto Generate continuation.
+    Other suppressed and special requests never consume the limit.
+    """
     if not context._automation_service().is_running():
         return False
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
-    if any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS):
+    if any(
+        context._coerce_bool(params.get(key, False))
+        for key in AUTO_GENERATE_SUPPRESSED_FLAGS
+        if key not in _AUTOMATION_BINDABLE_DESPITE_SUPPRESSION
+    ):
         return False
     request_type = str(params.get("type") or "").strip().lower()
     if request_type in SPECIAL_REQUEST_TYPES:

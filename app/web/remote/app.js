@@ -11,6 +11,8 @@ let rndTimer = null, rndStartTime = 0;
 const _RND_BTN_LABEL = '<span class="shortcut-hint">ALT + ENTER</span>Random';
 let activePromptTab = 'prompt';
 let presetGenerationPending = null;
+let presetAutoGenToken = 0;
+let presetAutoGenTimer = null;
 let latestImageMeta = null;
 
 // --- GPU 절약: 창이 비포커스/숨김일 때 모든 CSS 애니메이션 정지 ---
@@ -2363,6 +2365,7 @@ function handleWsBlob(data) {
     clearPresetGenerationOptions({autoGenerate: false});
     eventPresetPanel?.focusResultImage?.();
     presetGenerationPending = null;
+    maybeContinuePresetAutoGen();
   }
   setGen(false);
   // Stats update — init_complete 이후의 blob만 카운트
@@ -4804,6 +4807,7 @@ function toggleDrawer() {
 
 function switchTab(name) {
   activePromptTab = name || 'prompt';
+  if (activePromptTab !== 'preset') clearPresetAutoGenTimer();
   if (promptDrawerControl) promptDrawerControl.switchTab(name);
   if (eventPresetPanel) eventPresetPanel.setActiveTab(activePromptTab === 'preset');
   updateGenerateButtonMode();
@@ -5042,6 +5046,7 @@ function currentPromptTabFromDom() {
 
 function syncPromptTabStateFromDom() {
   activePromptTab = currentPromptTabFromDom();
+  if (activePromptTab !== 'preset') clearPresetAutoGenTimer();
   if (eventPresetPanel) eventPresetPanel.setActiveTab(activePromptTab === 'preset');
   updateGenerateButtonMode();
 }
@@ -5275,8 +5280,37 @@ function clearPresetGenerationOptions({autoGenerate = true} = {}) {
   if (getOptionChecked('wildcard_standalone')) setOption('wildcard_standalone', false);
 }
 
+function clearPresetAutoGenTimer() {
+  presetAutoGenToken += 1;
+  if (presetAutoGenTimer) {
+    window.clearTimeout(presetAutoGenTimer);
+    presetAutoGenTimer = null;
+  }
+}
+
+function presetAutoGenConditionsHold(token = null, {requireIdle = false} = {}) {
+  if (token !== null && token !== presetAutoGenToken) return false;
+  if (activePromptTab !== 'preset') return false;
+  if (!getOptionChecked('auto_generate')) return false;
+  if (getOptionChecked('prompt_fixed')) return false;
+  if (!eventPresetPanel?.canRandomize?.()) return false;
+  if (requireIdle && (!!presetGenerationPending || generating)) return false;
+  return true;
+}
+
+function maybeContinuePresetAutoGen() {
+  clearPresetAutoGenTimer();
+  if (!presetAutoGenConditionsHold()) return;
+  const token = ++presetAutoGenToken;
+  presetAutoGenTimer = window.setTimeout(() => {
+    presetAutoGenTimer = null;
+    if (!presetAutoGenConditionsHold(token, {requireIdle: true})) return;
+    void randomizeFromPresetTab({continuationToken: token});
+  }, 250);
+}
+
 async function generateFromPresetTab() {
-  if (getOptionChecked('prompt_fixed')) {
+  if (getOptionChecked('prompt_fixed') || !!presetGenerationPending || generating) {
     updateGenerateButtonMode();
     return;
   }
@@ -5293,17 +5327,29 @@ async function generateFromPresetTab() {
   updateGenerateButtonMode();
 }
 
-async function randomizeFromPresetTab() {
+async function randomizeFromPresetTab({continuationToken = null} = {}) {
+  const isContinuation = continuationToken !== null;
+  if (!isContinuation) clearPresetAutoGenTimer();
+  if (isContinuation && !presetAutoGenConditionsHold(continuationToken, {requireIdle: true})) {
+    updateGenerateButtonMode();
+    return;
+  }
   if (getOptionChecked('prompt_fixed') || !!presetGenerationPending || generating) {
     updateGenerateButtonMode();
     return;
   }
   btnRnd.disabled = true;
   try {
-    const shouldGenerate = getOptionChecked('auto_generate');
     const changed = await eventPresetPanel?.randomizeCurrentCategory?.();
-    if (!changed) showToast(eventPresetPanel?.randomizeUnavailableMessage?.() || '랜덤 선택 가능한 Preset이 없습니다.', 'error');
-    else if (shouldGenerate) await generateFromPresetTab();
+    if (!changed) {
+      showToast(eventPresetPanel?.randomizeUnavailableMessage?.() || '랜덤 선택 가능한 Preset이 없습니다.', 'error');
+    } else if (isContinuation) {
+      if (presetAutoGenConditionsHold(continuationToken, {requireIdle: true})) {
+        await generateFromPresetTab();
+      }
+    } else if (getOptionChecked('auto_generate')) {
+      await generateFromPresetTab();
+    }
   } catch (error) {
     showToast(error?.message || 'Event Preset 랜덤 생성에 실패했습니다.', 'error');
   } finally {
@@ -5379,6 +5425,7 @@ function applyOptionState(key, value, options = {}) {
   }
   control.setAttribute('aria-pressed', next ? 'true' : 'false');
 
+  if (key === 'auto_generate' && !next) clearPresetAutoGenTimer();
   if (key === 'prompt_fixed') {
     btnRnd.disabled = next;
     btnRnd.style.opacity = next ? '0.4' : '';

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import threading
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -23,12 +25,140 @@ JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
 GenerationRunnerStarter = Callable[[WebSessionContext, set[Any]], None]
 
 
+_EVENT_PRESET_PIPELINE_LOCK_CREATE_GUARD = threading.Lock()
+_MISSING = object()
+_CONDITIONAL_CHARACTER_METADATA_KEYS = (
+    "conditional_character_overrides",
+    "_conditional_character_slots",
+    "conditional_character_skips",
+)
+_PROMPT_CONTEXT_WILDCARD_STATE_FIELDS = (
+    "sequential_counters",
+    "wildcard_state",
+    "wildcard_history",
+    "wildcard_rolls",
+    "global_append_tags",
+    "_wc_location",
+    "_wc_slot",
+    "_wc_slot_label",
+)
+
+
 def _generation_service(context: WebSessionContext) -> HeadlessGenerationService:
     service = getattr(context, "headless_generation_service", None)
     if service is None:
         service = HeadlessGenerationService(context)
         context.headless_generation_service = service
     return service
+
+
+def _random_prompt_service(context: WebSessionContext) -> "HeadlessRandomPromptService":
+    from core.headless_random_prompt_service import HeadlessRandomPromptService
+
+    service = getattr(context, "headless_random_prompt_service", None)
+    if service is None:
+        service = HeadlessRandomPromptService(context)
+        context.headless_random_prompt_service = service
+    return service
+
+
+def _event_preset_pipeline_lock(context: WebSessionContext) -> threading.RLock:
+    lock = getattr(context, "_event_preset_pipeline_lock", None)
+    if lock is None:
+        with _EVENT_PRESET_PIPELINE_LOCK_CREATE_GUARD:
+            lock = getattr(context, "_event_preset_pipeline_lock", None)
+            if lock is None:
+                lock = threading.RLock()
+                context._event_preset_pipeline_lock = lock
+    return lock
+
+
+def _snapshot_optional_attr(owner: Any, name: str) -> Any:
+    if not hasattr(owner, name):
+        return _MISSING
+    return copy.deepcopy(getattr(owner, name))
+
+
+def _restore_optional_attr(owner: Any, name: str, value: Any) -> None:
+    if value is _MISSING:
+        try:
+            delattr(owner, name)
+        except AttributeError:
+            pass
+        return
+    setattr(owner, name, copy.deepcopy(value))
+
+
+def _generate_event_preset_prompt(
+    context: WebSessionContext,
+    source_row: dict[str, Any],
+    *,
+    overrides: dict[str, Any],
+    request_id: str,
+):
+    # update_context=False restores the four primary prompt fields, but character
+    # preparation mutates the live context before that snapshot. Preserve those
+    # pre-pipeline fields as well so this route cannot erase main-tab runtime state.
+    with _event_preset_pipeline_lock(context):
+        saved_source = getattr(context, "current_source_row", None)
+        saved_context = getattr(context, "current_prompt_context", None)
+        saved_prompt = str(getattr(context, "prompt_text", "") or "")
+        saved_negative = str(getattr(context, "negative_prompt_text", "") or "")
+        saved_ollama_character_params = _snapshot_optional_attr(
+            context,
+            "_ollama_frozen_character_params",
+        )
+        saved_character_roll_snapshot = _snapshot_optional_attr(
+            context,
+            "_character_roll_snapshot",
+        )
+
+        saved_prompt_context_fields: dict[str, Any] = {}
+        saved_conditional_metadata: dict[str, Any] = {}
+        metadata = getattr(saved_context, "metadata", None)
+        if saved_context is not None:
+            saved_prompt_context_fields = {
+                name: _snapshot_optional_attr(saved_context, name)
+                for name in _PROMPT_CONTEXT_WILDCARD_STATE_FIELDS
+            }
+        if isinstance(metadata, dict):
+            saved_conditional_metadata = {
+                key: copy.deepcopy(metadata[key]) if key in metadata else _MISSING
+                for key in _CONDITIONAL_CHARACTER_METADATA_KEYS
+            }
+
+        try:
+            return _random_prompt_service(context).generate_from_source_row(
+                source_row,
+                overrides=overrides,
+                random_request_id=request_id,
+                source="event_preset",
+                update_context=False,
+            )
+        finally:
+            _restore_optional_attr(
+                context,
+                "_ollama_frozen_character_params",
+                saved_ollama_character_params,
+            )
+            _restore_optional_attr(
+                context,
+                "_character_roll_snapshot",
+                saved_character_roll_snapshot,
+            )
+            if saved_context is not None:
+                for name, value in saved_prompt_context_fields.items():
+                    _restore_optional_attr(saved_context, name, value)
+            if isinstance(metadata, dict):
+                for key, value in saved_conditional_metadata.items():
+                    if value is _MISSING:
+                        metadata.pop(key, None)
+                    else:
+                        metadata[key] = copy.deepcopy(value)
+            context.current_source_row = saved_source
+            context.current_prompt_context = saved_context
+            context.prompt_text = saved_prompt
+            context.negative_prompt_text = saved_negative
 
 
 def _event_preset_bootstrap(
@@ -60,25 +190,39 @@ def _preset_source_to_generation_command(
     *,
     source: str,
     overrides: dict[str, Any] | None = None,
+    prompt_override: str | None = None,
+    prompt_run_id_override: str = "",
 ) -> dict[str, Any]:
     source_row_data = result.get("sourceRow") if isinstance(result.get("sourceRow"), dict) else {}
     if not source_row_data.get("general"):
         raise ValueError("Preset prompt source is empty.")
     request_id = str(result.get("requestId") or uuid.uuid4().hex)
     result["requestId"] = request_id
-    prompt_run_id = _record_preset_prompt_run(
-        context,
-        result,
-        source=source,
-        request_id=request_id,
-        source_row_data=source_row_data,
+    use_prompt_override = source == "event_preset" and prompt_override is not None
+    prompt = (
+        str(prompt_override)
+        if use_prompt_override
+        else str(source_row_data.get("general") or "")
     )
+    if use_prompt_override:
+        prompt_run_id = str(prompt_run_id_override or "")
+        result["prompt_run_id"] = prompt_run_id
+        result["promptRunId"] = prompt_run_id
+        result["promptPreview"] = prompt
+    else:
+        prompt_run_id = _record_preset_prompt_run(
+            context,
+            result,
+            source=source,
+            request_id=request_id,
+            source_row_data=source_row_data,
+        )
     generation_overrides = dict(overrides or {})
     result_overrides = result.get("overrides") if isinstance(result.get("overrides"), dict) else {}
     generation_overrides.update(result_overrides)
     generation_overrides.update({
-        "input": str(source_row_data.get("general") or ""),
-        "_raw_input": str(source_row_data.get("general") or ""),
+        "input": prompt,
+        "_raw_input": prompt,
         "_source_row_data": source_row_data,
         "_source_name": str(result.get("sourceName") or f"{source}:{request_id}"),
         "_remote_queue_source": "Preset",
@@ -102,7 +246,7 @@ def _preset_source_to_generation_command(
     return {
         "type": "generate",
         "api_mode": generation_overrides.get("api_mode") or context.get_api_mode(),
-        "prompt": str(source_row_data.get("general") or ""),
+        "prompt": prompt,
         "negative_prompt": (
             str(generation_overrides.get("negative_prompt") or "")
             if "negative_prompt" in generation_overrides
@@ -442,11 +586,29 @@ def register_event_preset_routes(
             payload = {}
         try:
             result = await run_in_thread(event_preset_service(session_context).generation_source, payload)
+            request_id = str(result.get("requestId") or uuid.uuid4().hex)
+            result["requestId"] = request_id
+            source_row_data = result.get("sourceRow") if isinstance(result.get("sourceRow"), dict) else {}
+            pipeline_overrides = payload.get("overrides") if isinstance(payload.get("overrides"), dict) else {}
+            processed = await run_in_thread(
+                _generate_event_preset_prompt,
+                session_context,
+                source_row_data,
+                overrides=pipeline_overrides,
+                request_id=request_id,
+            )
+            if not processed.success:
+                return JSONResponse(
+                    {"error": processed.error or "Event Preset prompt processing failed."},
+                    status_code=400,
+                )
             command = _preset_source_to_generation_command(
                 session_context,
                 result,
                 source="event_preset",
-                overrides=payload.get("overrides") if isinstance(payload.get("overrides"), dict) else {},
+                overrides=pipeline_overrides,
+                prompt_override=processed.prompt,
+                prompt_run_id_override=processed.prompt_run_id,
             )
             dispatch = await run_in_thread(_generation_service(session_context).enqueue_remote_request, command)
         except RuntimeError as exc:

@@ -184,6 +184,7 @@ class HeadlessGenerationService:
         source_row = self._source_row(params)
         params.pop("_source_row_data", None)
         params.pop("_source_name", None)
+        base_negative = str(params.get("negative_prompt") or "")
         prompt_run_id = self._prompt_run_id_for_command(command, params)
         if not prompt_run_id:
             prompt_run_id = self._create_direct_prompt_run(command, params, source_row)
@@ -203,6 +204,7 @@ class HeadlessGenerationService:
             nai_vibe_transfer=nai_vibe_transfer,
             nai_character_reference=nai_character_reference,
             prompt_run_id=prompt_run_id,
+            base_negative_prompt=base_negative,
         )
         params["generation_request_id"] = request.request_id
         if params.get("result_enhance_request"):

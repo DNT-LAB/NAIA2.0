@@ -210,7 +210,7 @@ class HeadlessRandomPromptService:
             )
 
         self.context.prompt_text = result.final_prompt or ""
-        self.context.negative_prompt_text = str(settings.get("negative_prompt") or self.context.negative_prompt_text or "")
+        self.context.negative_prompt_text = self._resolve_negative_prompt(settings)
         self.context.save_remote_ui_state()
         if result.context is not None and callable(publish):
             publish("prompt_generated", result.context)
@@ -330,7 +330,7 @@ class HeadlessRandomPromptService:
 
         if update_context:
             self.context.prompt_text = result.final_prompt or ""
-            self.context.negative_prompt_text = str(settings.get("negative_prompt") or self.context.negative_prompt_text or "")
+            self.context.negative_prompt_text = self._resolve_negative_prompt(settings)
             self.context.save_remote_ui_state()
             publish = getattr(self.context, "publish", None)
             if result.context is not None and callable(publish):
@@ -512,6 +512,22 @@ class HeadlessRandomPromptService:
                 return None, None, "Tag filter: no matching rows"
             return row, self._tag_filter_update_payload(tag_filter), ""
 
+    def _resolve_negative_prompt(self, settings: dict[str, Any]) -> str:
+        """Resolve the session negative after a roll.
+
+        An EXPLICIT negative override in ``settings`` wins even when it is empty:
+        the Auto Gen continuation grounds each iteration on the PRISTINE base
+        negative (empty for users with no negative box), so a truthiness ``or``
+        fallback to ``context.negative_prompt_text`` would re-inject the previous
+        iteration's conditionally-merged value and restart the accumulation
+        (Codex review BLOCKER). Only fall back to the current session value when
+        the caller supplied no ``negative_prompt`` key at all (e.g. a plain manual
+        Random that does not carry the field).
+        """
+        if isinstance(settings, dict) and "negative_prompt" in settings:
+            return str(settings.get("negative_prompt") or "")
+        return str(self.context.negative_prompt_text or "")
+
     def _random_settings(self, overrides: dict[str, Any] | None) -> dict[str, Any]:
         request_overrides = overrides if isinstance(overrides, dict) else {}
         option_state = self.context.get_options()
@@ -614,6 +630,7 @@ class HeadlessRandomPromptService:
             if snapshot is not None:
                 settings["characters"] = list(snapshot.get("characters") or [])
                 settings["uc"] = list(snapshot.get("uc") or [])
+                settings["character_ids"] = list(snapshot.get("character_ids") or [])
             return
 
         # reroll_on_generate is False → Random is the authoritative roll. roll_*
@@ -630,6 +647,7 @@ class HeadlessRandomPromptService:
         if params.get("characters"):
             settings["characters"] = list(params.get("characters") or [])
             settings["uc"] = list(params.get("uc") or [])
+            settings["character_ids"] = list(params.get("character_ids") or [])
 
     def _clear_conditional_character_override(self) -> None:
         context = getattr(self.context, "current_prompt_context", None)

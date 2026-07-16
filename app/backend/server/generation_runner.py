@@ -848,6 +848,17 @@ async def _maybe_continue_auto_generation(
     # 단, 스토리는 매 페이지 새 구도를 뽑아야 하므로 prompt_fixed/hold_prompt를 무시한다.
     effective_prompt_fixed = (prompt_fixed or hold_prompt) and not story_run_id
     overrides = _auto_generation_overrides(params)
+    # Pristine base negative for the next iteration. The request's base_negative_prompt
+    # is captured BEFORE conditional merge (enqueue_remote_request) and is present on
+    # every GenerationRequest, so it is the authoritative pristine value even when it is
+    # legitimately empty. Only fall back to params/context when the field is ABSENT
+    # (legacy request) — a truthiness-based `or` would let an empty base leak back to the
+    # conditionally-merged params value and re-start the accumulation for empty-negative users.
+    if hasattr(request, "base_negative_prompt"):
+        base_negative = str(request.base_negative_prompt or "")
+    else:
+        base_negative = str(params.get("negative_prompt") or context.negative_prompt_text or "")
+    overrides["negative_prompt"] = base_negative
     overrides["auto_generate"] = True
     overrides["prompt_fixed"] = effective_prompt_fixed
     # Auto Gen은 매 반복마다 새 랜덤 시드를 사용한다 (사용자가 seed_fixed로 명시 고정한 경우 제외).
@@ -895,7 +906,7 @@ async def _maybe_continue_auto_generation(
 
     request_id = f"auto-{uuid.uuid4().hex}"
     prompt = str(params.get("input") or params.get("_raw_input") or context.prompt_text or "")
-    negative = str(params.get("negative_prompt") or context.negative_prompt_text or "")
+    negative = base_negative
 
     # Storyteller 다음 페이지의 스텝별 해상도 계획. carry(의상/배경 유지)는 더 이상
     # 여기서 다루지 않는다 — EventStreamRuntime이 prepare 시점에 노드 policy로 직접

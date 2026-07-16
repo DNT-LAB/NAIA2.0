@@ -215,6 +215,25 @@ class HeadlessConditionalRuleEngine:
         settings = getattr(context, "settings", None) or {}
         settings_chars = list(settings.get("characters") or []) if isinstance(settings, dict) else []
         settings_ucs = list(settings.get("uc") or []) if isinstance(settings, dict) else []
+        settings_character_ids = (
+            [str(cid) for cid in settings.get("character_ids") or []]
+            if isinstance(settings, dict)
+            else []
+        )
+        # Ground active slots by STABLE UUID only when the id vector is trustworthy:
+        # aligned 1:1 with the character values, all non-empty, and unique. A partial,
+        # duplicate, or empty id list would silently mis-bind slots (Codex review), so
+        # fall back to the legacy all-positional grounding (empty map) in that case.
+        _ids_valid = (
+            len(settings_character_ids) == len(settings_chars)
+            and all(settings_character_ids)
+            and len(set(settings_character_ids)) == len(settings_character_ids)
+        )
+        id_to_index = (
+            {cid: index for index, cid in enumerate(settings_character_ids)}
+            if _ids_valid
+            else {}
+        )
         slots: list[dict[str, Any]] = []
 
         if frames:
@@ -225,10 +244,12 @@ class HeadlessConditionalRuleEngine:
                 prompt = str(frame.get("prompt") or "")
                 uc = str(frame.get("uc") or "")
                 if active:
-                    if active_position < len(settings_chars):
-                        prompt = str(settings_chars[active_position] or "")
-                    if active_position < len(settings_ucs):
-                        uc = str(settings_ucs[active_position] or "")
+                    frame_uuid = str(frame.get("uuid") or "")
+                    grounded_position = id_to_index.get(frame_uuid, active_position)
+                    if grounded_position < len(settings_chars):
+                        prompt = str(settings_chars[grounded_position] or "")
+                    if grounded_position < len(settings_ucs):
+                        uc = str(settings_ucs[grounded_position] or "")
                     active_position += 1
                 slots.append({"prompt": prompt, "uc": uc, "active": active})
             return slots

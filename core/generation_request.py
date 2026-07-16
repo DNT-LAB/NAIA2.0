@@ -406,6 +406,7 @@ class GenerationRequest:
     # 자동 생성 필드
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     prompt_run_id: str = ""
+    base_negative_prompt: str = ""
     created_at: datetime = field(default_factory=datetime.now)
 
     # 우선순위 및 상태
@@ -467,6 +468,7 @@ class GenerationRequest:
             'request_id': self.request_id,
             'generation_request_id': self.request_id,
             'prompt_run_id': self.prompt_run_id,
+            'base_negative_prompt': self.base_negative_prompt,
             'priority': self.priority,
             'status': self.status,
             'retry_count': self.retry_count,

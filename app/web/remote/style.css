@@ -18330,6 +18330,18 @@ body.detached-module .mod-grid-3 {
 .seq-fixhint { color: var(--text-muted); font-size: 11px; }
 
 /* ===== Character Asset tab (charAssets) ===== */
+/* 캐릭터 모듈 팝업의 Assets 진입 버튼 - Cold 옆, 밝은 하늘색~파란색 강조 */
+.mod-btn-sm.mod-btn-assets {
+  background: #3fa9f5;
+  border-color: #7cc6fa;
+  color: #06263f;
+  font-weight: 700;
+}
+.mod-btn-sm.mod-btn-assets:hover {
+  background: #6fc0fa;
+  border-color: #a5d8ff;
+  color: #041a2c;
+}
 .char-asset-root { height: 100%; overflow-y: auto; padding: 10px; }
 .char-asset-shell { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .char-asset-banner {

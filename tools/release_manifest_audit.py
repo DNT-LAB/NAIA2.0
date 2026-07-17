@@ -137,6 +137,13 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/tag_bucket_dates.json",
     "*/data/e621_boost_static.py",
     "*/data/danbooru_tag_counts_by_rating.json",
+    # 캐릭터 생성 벤치 랜덤 슬롯 풀(2.0.33) - 없으면 클린 설치에서 랜덤생성이
+    # 404로 죽는다. SOURCE_BOOTSTRAP_PATHS/release_include_exclude_draft/
+    # runtime_asset_classification과 함께 4곳 등록 세트.
+    "data/random_character.txt",
+    "data/random_outfits.txt",
+    "*/data/random_character.txt",
+    "*/data/random_outfits.txt",
 )
 FORBIDDEN_PACKAGE_NAMES = (
     "PyQt6",

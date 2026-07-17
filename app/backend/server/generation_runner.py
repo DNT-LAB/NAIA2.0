@@ -21,6 +21,7 @@ from core import result_image_payload_service as result_images
 # 가르므로) — 정의가 두 군데로 갈라지지 않게 core/auto_generation_flags.py가 단일 출처.
 from core.auto_generation_flags import (
     AUTO_GENERATE_SUPPRESSED_FLAGS,
+    REFERENCE_INSET_PIN_MARKER,
     SPECIAL_REQUEST_TYPES,
     is_special_request,
 )
@@ -901,7 +902,7 @@ async def _maybe_continue_auto_generation(
     # 레퍼런스 인셋 핀도 라이브 재조회 - baked 캔버스/type이 overrides로 핀되면
     # 핀 해제 후에도 계속 인셋 인페인트로 나간다. 마커가 있을 때만 pop한다
     # (width/height는 일반 키 - 무조건 pop하면 남의 해상도를 지운다).
-    if overrides.get("_reference_inset_pin"):
+    if overrides.get(REFERENCE_INSET_PIN_MARKER):
         for key in REFERENCE_INSET_LIVE_REFETCH_KEYS:
             overrides.pop(key, None)
     # PARAMS 패널 값(라이브 remote_params)도 char-ref/vibe 와 동일하게 매 반복 라이브 재조회되게
@@ -1082,7 +1083,10 @@ def _automation_should_bind(context: WebSessionContext, request) -> bool:
     ):
         return False
     request_type = str(params.get("type") or "").strip().lower()
-    if request_type in SPECIAL_REQUEST_TYPES:
+    if request_type in SPECIAL_REQUEST_TYPES and not context._coerce_bool(
+        params.get(REFERENCE_INSET_PIN_MARKER, False)
+    ):
+        # 레퍼런스 인셋 핀 생성은 type=inpaint지만 plain - Automation 카운트에 포함.
         return False
     return True
 
@@ -1100,10 +1104,10 @@ def _should_continue_auto_generation(context: WebSessionContext, request) -> boo
     queue_manager = context.generation_queue_manager
     if queue_manager.is_paused() or not queue_manager.is_empty():
         return False
-    if any(context._coerce_bool(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS):
-        return False
-    request_type = str(params.get("type") or "").strip().lower()
-    if request_type in SPECIAL_REQUEST_TYPES:
+    # 플래그+type 판정은 is_special_request(SSOT)로 - 인라인 복제는 레퍼런스 인셋
+    # 마커 화이트리스트(type=inpaint여도 plain)를 놓쳐 인셋 핀 상태에서 Auto Gen
+    # 연쇄가 조용히 멈췄다(사용자 결함 제보 2026-07-18).
+    if is_special_request(params, context._coerce_bool):
         return False
     return True
 
@@ -1177,6 +1181,9 @@ def _auto_generation_overrides(params: dict[str, Any]) -> dict[str, Any]:
             "_remote_queue_source",
             "_remote_queue_label",
             "_skip_vibe_transfer_late_binding",
+            # 인셋 마커가 유실되면 continuation의 인셋 키 pop 가드가 영영 발동하지
+            # 않아 baked 캔버스(type/image_bytes)가 다음 반복에 박제된다.
+            REFERENCE_INSET_PIN_MARKER,
         }:
             continue
         overrides[key] = value

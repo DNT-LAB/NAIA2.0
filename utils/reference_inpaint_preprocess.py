@@ -215,7 +215,6 @@ def build_reference_inpaint_prompt(
         (
             base_subject,
             _join_tags(artists),
-            "2koma",
             "borderless panels",
             _join_tags(general_tags),
             _join_tags(quality_tags),

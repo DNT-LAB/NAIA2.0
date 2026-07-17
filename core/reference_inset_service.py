@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any, Dict
 
 
-# 인셋 마커 태그들. Dev0714는 "reference inset"을 썼으나 실제 NAI 인셋 스캐폴드는
-# "2koma, borderless panels"다(사용자 지시 2026-07-18). 태그별로 개별 삽입/검사한다 -
-# 사용자가 이미 하나(예: 2koma)만 넣어둔 프롬프트에는 누락분만 보충된다.
-REFERENCE_INSET_TAGS = ("2koma", "borderless panels")
+# 인셋 마커 태그. Dev0714의 "reference inset"을 "borderless panels"로 교체(사용자
+# 지시 2026-07-18). "2koma" 동반 확장은 품질 이슈로 취소 - 단독 태그만 쓴다.
+# 튜플 구조(태그별 개별 삽입/검사, 이미 있으면 누락분만 보충)는 유지.
+REFERENCE_INSET_TAGS = ("borderless panels",)
 # 하위 호환 표기(로그/표시용 조합 문자열)
 REFERENCE_INSET_TAG = ", ".join(REFERENCE_INSET_TAGS)
 REFERENCE_INSET_PERSON_TAGS = frozenset(

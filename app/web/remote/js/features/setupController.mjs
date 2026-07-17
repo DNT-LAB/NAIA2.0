@@ -13,6 +13,7 @@ export function createSetupController({
   const setupOverlay = byId('apiPopupOverlay');
   const setupDialog = byId('setupDialog');
   const setupCloseBtn = byId('setupClose');
+  const setupReprobeBtn = byId('setupReprobe');
   const setupSubTitle = document.querySelector('.setup-sub');
   const setupSubDefault = setupSubTitle ? setupSubTitle.textContent : '';
   const setupNavDots = { NAI: byId('setupDotNai'), WEBUI: byId('setupDotWebui'), COMFYUI: byId('setupDotComfyui') };
@@ -36,6 +37,15 @@ export function createSetupController({
   let initialProbeDone = false;
   let probeCompleted = false;
   let pendingForcedClose = false;
+  // 절전 복귀 등 일시적 네트워크 공백으로 runtime 강제 게이트가 켜진 뒤 아무도 재프로브를
+  // 트리거하지 않으면 영구히 갇힌다(닫기 버튼 없는 모달). 게이트가 켜져 있는 동안 재시도.
+  // 죽은 네트워크에서는 프로브 1회가 백엔드 타임아웃(10초/모드)까지 소켓 명령 루프를 점유하므로
+  // 고정 간격 대신 지수 백오프(12초 → 최대 60초)로 부하를 제한한다.
+  const FORCED_REPROBE_INTERVAL_MS = 12000;
+  const FORCED_REPROBE_MAX_INTERVAL_MS = 60000;
+  let forcedReprobeTimer = null;
+  let forcedReprobeDelayMs = FORCED_REPROBE_INTERVAL_MS;
+  let probeSnapshot = null;
   const probeState = { NAI: null, WEBUI: null, COMFYUI: null };
   const clearPending = { NAI: false, WEBUI: false, COMFYUI: false };
   const clearTimers = { NAI: null, WEBUI: null, COMFYUI: null };
@@ -70,6 +80,42 @@ export function createSetupController({
     refreshSetupGateDisplay();
   }
 
+  function isRuntimeSetupForced() {
+    return runtimeSetupForced;
+  }
+
+  function hasConfiguredMode() {
+    return ['NAI', 'WEBUI', 'COMFYUI'].some(isModeConfigured);
+  }
+
+  function scheduleForcedReprobe() {
+    forcedReprobeTimer = setTimeout(() => {
+      if (!runtimeSetupForced) {
+        forcedReprobeTimer = null;
+        return;
+      }
+      // setup_gate 차단 클라이언트(비로컬/Cloudflared 활성)는 probe_api 가 setup_blocked 로
+      // 거절되므로 보내지 않는다. 저장된 백엔드가 하나도 없으면 프로브할 대상이 없다.
+      if (setupAllowed && !isProbePending() && hasConfiguredMode()) {
+        probeApi();
+      }
+      forcedReprobeDelayMs = Math.min(forcedReprobeDelayMs * 2, FORCED_REPROBE_MAX_INTERVAL_MS);
+      scheduleForcedReprobe();
+    }, forcedReprobeDelayMs);
+  }
+
+  function syncForcedReprobeTimer() {
+    // runtime 강제(연결 유실)일 때만 자동 재프로브. server 강제(setup_required)는 저장된
+    // 백엔드가 하나도 없는 상태라 프로브할 대상 자체가 없다.
+    if (runtimeSetupForced && !forcedReprobeTimer) {
+      forcedReprobeDelayMs = FORCED_REPROBE_INTERVAL_MS;
+      scheduleForcedReprobe();
+    } else if (!runtimeSetupForced && forcedReprobeTimer) {
+      clearTimeout(forcedReprobeTimer);
+      forcedReprobeTimer = null;
+    }
+  }
+
   function isModeConfigured(mode) {
     const last = apiStatusLast || {};
     if (mode === 'NAI') return !!last.nai_configured;
@@ -98,11 +144,17 @@ export function createSetupController({
     } else {
       setupCloseBtn.classList.remove('hidden');
       if (pendingForcedClose) {
-        // 강제 설정이 해제됨(백엔드 연결 성공) → 모달 자동 닫기
+        // 강제 설정이 해제됨(백엔드 연결 성공) → 모달 자동 닫기.
+        // 단, 사용자가 다이얼로그 안 입력창에 뭔가 쓰는 중이면 닫지 않는다
+        // (자동 재프로브 성공이 입력 중인 토큰/URL을 날리는 것 방지 — 닫기 버튼은 복원됨).
         pendingForcedClose = false;
-        setupOverlay.classList.remove('open');
+        const active = document.activeElement;
+        const editing = !!(active && setupDialog.contains(active)
+          && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && active.value);
+        if (!editing) setupOverlay.classList.remove('open');
       }
     }
+    syncForcedReprobeTimer();
     if (setupSubTitle) {
       if (setupAllowed) {
         setupSubTitle.classList.remove('blocked');
@@ -129,8 +181,15 @@ export function createSetupController({
   }
 
   function probeApi() {
+    // setup_gate 차단 클라이언트(비로컬/Cloudflared 활성)는 probe_api 가 setup_blocked 로
+    // 거절된다. 모든 호출 경로(재연결 초기 프로브·자동 재시도·수동 버튼)를 여기서 일괄 차단해
+    // 마지막으로 알려진 연결 상태(probeState)를 파괴하지 않는다.
+    if (!setupAllowed) return;
     const ws = getWs();
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // 게이트가 전송 후 서버측에서 뒤집히는 레이스(예: 프로브 비행 중 Cloudflared 활성화) 대비:
+    // 거절되면 이 스냅샷으로 복원한다. probeCompleted 를 바꾸기 전에 캡처할 것.
+    probeSnapshot = { states: { ...probeState }, completed: probeCompleted };
     probeCompleted = false;
     const last = apiStatusLast || {};
     probeState.NAI = last.nai_configured ? 'probing' : null;
@@ -141,6 +200,7 @@ export function createSetupController({
   }
 
   function onProbeResult(message) {
+    probeSnapshot = null;
     probeCompleted = true;
     const results = message.results || {};
     ['NAI', 'WEBUI', 'COMFYUI'].forEach(mode => {
@@ -148,6 +208,12 @@ export function createSetupController({
       else if (results[mode] === false) probeState[mode] = 'err';
       else probeState[mode] = null;
     });
+    if (setupForced && hasConnectedMode()) {
+      // 강제 게이트 중 프로브(자동 재시도 포함) 성공 → verify 성공과 동일하게
+      // 게이트 해제 시점에 모달 자동 닫기 예약
+      pendingForcedClose = true;
+      showToast('백엔드 연결이 복구되었습니다.', 'success');
+    }
     refreshDotsFromProbe();
   }
 
@@ -162,7 +228,23 @@ export function createSetupController({
       else if (state === 'probing') className += ' warn';
       element.className = className;
     });
+    if (setupReprobeBtn) setupReprobeBtn.disabled = isProbePending();
     updateModeSelectAvailability();
+  }
+
+  function reprobeConnections() {
+    if (!setupAllowed) {
+      // setup_gate 차단 클라이언트: 백엔드가 probe_api 를 setup_blocked 로 거절하므로 보내지 않음
+      showToast(setupBlockReason || '이 클라이언트에서는 설정이 차단되었습니다.', 'error');
+      return;
+    }
+    const ws = getWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showToast('백엔드와 연결 중입니다. 잠시 후 다시 시도하세요.', 'error');
+      return;
+    }
+    if (isProbePending()) return;
+    probeApi();
   }
 
   function closeApiPopup() {
@@ -332,7 +414,25 @@ export function createSetupController({
   }
 
   function onSetupBlocked(message) {
-    if (message.command === 'probe_api') return;
+    if (message.command === 'probe_api') {
+      // 프로브가 게이트에 거절됨(probe_result 없음): 'probing' 을 방치하면 isProbePending 이
+      // 영구 true 가 되어 재확인 버튼/모드 셀렉터가 잠긴다. 프로브 직전 스냅샷으로 복원해
+      // 마지막으로 알려진 연결 상태(ok 등)를 보존한다. 토스트는 생략
+      // (수동 클릭은 reprobeConnections 의 setupAllowed 사전 체크가 이미 안내).
+      if (probeSnapshot) {
+        Object.keys(probeState).forEach(mode => {
+          probeState[mode] = probeSnapshot.states[mode] ?? null;
+        });
+        probeCompleted = probeSnapshot.completed;
+        probeSnapshot = null;
+      } else {
+        Object.keys(probeState).forEach(mode => {
+          if (probeState[mode] === 'probing') probeState[mode] = null;
+        });
+      }
+      refreshDotsFromProbe();
+      return;
+    }
     showToast(message.reason || '이 클라이언트에서는 설정이 차단되었습니다.', 'error');
   }
 
@@ -436,8 +536,10 @@ export function createSetupController({
     isProbePending,
     hasProbeCompleted,
     setRuntimeSetupForced,
+    isRuntimeSetupForced,
     openApiPopup,
     probeApi,
+    reprobeConnections,
     onProbeResult,
     closeApiPopup,
     onSetupBackdrop,

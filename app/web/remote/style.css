@@ -16210,6 +16210,17 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 }
 .setup-close:hover { color: var(--text-primary); border-color: var(--accent); background: var(--bg-hover); }
 .setup-close.hidden { display: none; }
+.setup-reprobe {
+  height: 28px; padding: 0 12px;
+  background: transparent; border: 1px solid var(--border-dim); border-radius: 6px;
+  color: var(--text-muted); cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.3px;
+  line-height: 1; white-space: nowrap;
+  transition: all 160ms;
+  flex-shrink: 0;
+}
+.setup-reprobe:hover:not(:disabled) { color: var(--text-primary); border-color: var(--accent); background: var(--bg-hover); }
+.setup-reprobe:disabled { opacity: 0.45; cursor: default; }
 .hidden { display: none !important; }
 
 .setup-body {

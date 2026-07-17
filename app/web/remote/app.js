@@ -866,7 +866,7 @@ const cloudflaredControlsReady = import('./js/features/cloudflaredControls.mjs?v
   .catch(error => {
     console.error('Failed to initialize cloudflared controls module', error);
   });
-const setupControllerReady = import('./js/features/setupController.mjs?v=20260526-setup-autoclose1')
+const setupControllerReady = import('./js/features/setupController.mjs?v=20260716-sleepwake-reprobe1')
   .then(({createSetupController}) => {
     setupController = createSetupController({
       document,
@@ -5674,8 +5674,11 @@ function reconcileActiveApiMode(reason = '') {
 
   const probeSettled = setupController.hasProbeCompleted?.() && !setupController.isProbePending?.();
   if (probeSettled && !setupController.hasConnectedMode?.()) {
+    // 자동 재프로브가 12초마다 실패 결과를 다시 가져오므로, 이미 강제 상태면 openApiPopup 을
+    // 반복 호출하지 않는다 (dataBootstrapPanel.refresh 등 부수효과 반복 방지).
+    const alreadyForced = setupController.isRuntimeSetupForced?.();
     setupController.setRuntimeSetupForced?.(true, '연결된 백엔드가 없습니다. API 설정을 확인하세요.');
-    if (reason !== 'api_status') openApiPopup();
+    if (reason !== 'api_status' && !alreadyForced) openApiPopup();
   }
 }
 
@@ -5894,6 +5897,11 @@ function openCurrentDataFolder() {
 
 function probeApi() {
   if (setupController) setupController.probeApi();
+}
+
+// Setup 모달 "연결 다시 확인" 버튼 (index.html onclick) — WS 미연결 시 토스트 피드백 포함
+function reprobeApiConnections() {
+  if (setupController) setupController.reprobeConnections();
 }
 
 function onProbeResult(m) {

@@ -486,7 +486,7 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Character Viewer tab module', error);
   });
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20260717-bench1')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20260717-bench2')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,

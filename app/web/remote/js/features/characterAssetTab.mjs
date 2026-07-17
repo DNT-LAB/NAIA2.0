@@ -528,7 +528,11 @@ export function createCharacterAssetTabController({
     const requestId = String(meta.character_asset_request_id || '');
     if (meta.character_asset_bench) {
       if (!benchRequestId || requestId !== benchRequestId) return;
-      const candidate = benchCandidates[Number(meta.character_asset_candidate)];
+      // stable candidate.index lookup - benchDiscard() splices the array, so
+      // positional access would rebind results to the wrong candidate.
+      const candidate = benchCandidates.find(
+        item => item.index === Number(meta.character_asset_candidate)
+      );
       if (!candidate || candidate.status === 'done') return;
       candidate.status = 'done';
       candidate.historyId = String(meta.history_id || '');
@@ -548,7 +552,7 @@ export function createCharacterAssetTabController({
     if (!message || typeof message !== 'object') return;
     const requestId = String(message.requestId || '');
     if (benchRequestId && requestId === benchRequestId) {
-      const candidate = benchCandidates[Number(message.candidate)];
+      const candidate = benchCandidates.find(item => item.index === Number(message.candidate));
       if (!candidate || candidate.status === 'done') return;
       candidate.status = 'error';
       candidate.message = String(message.message || 'generation failed');
@@ -613,7 +617,15 @@ export function createCharacterAssetTabController({
       return;
     }
     if (benchChar && benchChar.id !== detail.id) {
-      // 다른 캐릭터로 전환 - 이전 배치 상관관계는 무효
+      if (benchCandidates.some(candidate => candidate.status === 'pending')) {
+        // 진행 중 배치의 request_id를 버리면 이미 과금된 결과가 미아가 된다 -
+        // 전환을 막고 기존 캐릭터의 벤치를 다시 연다.
+        showToast('진행 중인 생성 배치가 있어 캐릭터 전환이 불가합니다 - 기존 벤치를 엽니다', 'warning');
+        benchOpen = true;
+        renderBench();
+        return;
+      }
+      // 다른 캐릭터로 전환 - 종료된 배치 상관관계는 폐기
       benchCandidates = [];
       benchSelected = -1;
       benchRequestId = '';
@@ -679,7 +691,9 @@ export function createCharacterAssetTabController({
       });
       const accepted = new Set(result?.accepted || []);
       (result?.rejected || []).forEach(rejection => {
-        const candidate = benchCandidates[Number(rejection?.candidate)];
+        const candidate = benchCandidates.find(
+          item => item.index === Number(rejection?.candidate)
+        );
         if (candidate) {
           candidate.status = 'error';
           candidate.message = String(rejection?.message || rejection?.reason || 'rejected');
@@ -700,8 +714,12 @@ export function createCharacterAssetTabController({
     renderBench();
   }
 
+  function benchSelectedCandidate() {
+    return benchCandidates.find(candidate => candidate.index === benchSelected) || null;
+  }
+
   async function benchSave() {
-    const candidate = benchCandidates[benchSelected];
+    const candidate = benchSelectedCandidate();
     if (!candidate?.historyId || candidate.saved || benchBusy || !benchChar) return;
     benchBusy = true;
     renderBench();
@@ -718,9 +736,11 @@ export function createCharacterAssetTabController({
   }
 
   function benchDiscard() {
-    if (benchSelected < 0) return;
-    benchCandidates.splice(benchSelected, 1);
-    benchSelected = benchCandidates.findIndex(candidate => candidate.status === 'done');
+    const position = benchCandidates.findIndex(candidate => candidate.index === benchSelected);
+    if (position < 0) return;
+    benchCandidates.splice(position, 1);
+    const nextDone = benchCandidates.find(candidate => candidate.status === 'done');
+    benchSelected = nextDone ? nextDone.index : -1;
     renderBench();
   }
 
@@ -742,7 +762,7 @@ export function createCharacterAssetTabController({
     }
     const nai = isNai();
     const pendingCount = benchCandidates.filter(candidate => candidate.status === 'pending').length;
-    const selected = benchCandidates[benchSelected];
+    const selected = benchSelectedCandidate();
     const strip = benchCandidates.map(candidate => {
       if (candidate.status === 'pending') {
         return `<div class="char-bench-thumb pending">생성 중...</div>`;
@@ -1027,7 +1047,10 @@ export function createCharacterAssetTabController({
           });
           const actions = zone.querySelector('.char-asset-var-actions');
           if (actions) {
-            actions.hidden = !selectedVariation;
+            // 행 전체가 아니라 승격/삭제 span만 토글 - 행을 숨기면 상시 노출이어야
+            // 하는 [+ 바리에이션 추가] 버튼까지 사라진다.
+            const variationOnly = actions.querySelector('span');
+            if (variationOnly) variationOnly.hidden = !selectedVariation;
             const deleteBtn = actions.querySelector('[data-action="delete-variation"]');
             if (deleteBtn) deleteBtn.textContent = '바리에이션 삭제';
           }

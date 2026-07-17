@@ -664,6 +664,14 @@ class HeadlessCharacterAssetService:
             raw = getattr(item, "raw_bytes", None)
             if not raw or not bytes(raw).startswith(PNG_SIGNATURE):
                 raise ValueError("bench result is not an original PNG")
+            # Provenance: only THIS character's bench results are croppable - a
+            # coincidental 1152x896 result or another character's bench canvas
+            # must not be filed as a variation.
+            params_check = item.generation_params if isinstance(item.generation_params, dict) else {}
+            if not params_check.get("character_asset_bench"):
+                raise ValueError("history item is not a variation bench result")
+            if str(params_check.get("character_asset_bench_character") or "") != character_id:
+                raise ValueError("bench result belongs to a different character")
             spec = VariationInpaintSpec()
             with Image.open(io.BytesIO(bytes(raw))) as source:
                 source.load()

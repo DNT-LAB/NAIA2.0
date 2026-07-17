@@ -330,7 +330,10 @@ def register_character_asset_routes(
                 return JSONResponse({"error": f"bench generate failed: {exc}"}, status_code=500)
             dispatch = await run_in_thread(
                 generation.enqueue_remote_request,
-                {"type": "generate", "overrides": overrides},
+                # api_mode is pinned: the NAI check ran in build_bench_overrides,
+                # but the mode could flip between that await and this enqueue
+                # (img2img service does the same).
+                {"type": "generate", "api_mode": "NAI", "overrides": overrides},
             )
             if dispatch.ok:
                 accepted.append(candidate)
@@ -391,7 +394,7 @@ def register_character_asset_routes(
                 )
             dispatch = await run_in_thread(
                 generation.enqueue_remote_request,
-                {"type": "generate", "overrides": overrides},
+                {"type": "generate", "api_mode": "NAI", "overrides": overrides},
             )
             if dispatch.ok:
                 accepted.append(candidate)

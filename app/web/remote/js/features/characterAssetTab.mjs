@@ -572,8 +572,12 @@ export function createCharacterAssetTabController({
   let benchLayer = null;
   let benchOpen = false;
   let benchChar = null;          // {id, name, prompt, uc, revision}
-  let benchMain = '';
-  let benchNegative = '';
+  let benchMode = 'inpaint';     // 'inpaint' | 'char_reference'
+  // Main Prompt / 추가 Negative는 생성 모드별로 따로 관리된다.
+  const benchFields = {
+    inpaint: {main: '', negative: ''},
+    char_reference: {main: '', negative: ''},
+  };
   let benchCount = 2;
   let benchDefaultsLoaded = false;
   let benchRequestId = '';
@@ -591,6 +595,13 @@ export function createCharacterAssetTabController({
       if (!button || button.disabled) return;
       const action = button.dataset.action;
       if (action === 'bench-close') closeBench();
+      else if (action === 'bench-mode') {
+        const nextMode = button.dataset.mode === 'char_reference' ? 'char_reference' : 'inpaint';
+        if (nextMode !== benchMode) {
+          benchMode = nextMode;
+          renderBench();
+        }
+      }
       else if (action === 'bench-generate') benchGenerate();
       else if (action === 'bench-save') benchSave();
       else if (action === 'bench-discard') benchDiscard();
@@ -604,8 +615,8 @@ export function createCharacterAssetTabController({
       if (!field) return;
       if (field.dataset.field === 'bench-prompt' && benchChar) benchChar.prompt = field.value;
       else if (field.dataset.field === 'bench-uc' && benchChar) benchChar.uc = field.value;
-      else if (field.dataset.field === 'bench-main') benchMain = field.value;
-      else if (field.dataset.field === 'bench-negative') benchNegative = field.value;
+      else if (field.dataset.field === 'bench-main') benchFields[benchMode].main = field.value;
+      else if (field.dataset.field === 'bench-negative') benchFields[benchMode].negative = field.value;
       else if (field.dataset.field === 'bench-count') benchCount = Number(field.value) || 1;
     });
     return benchLayer;
@@ -640,8 +651,18 @@ export function createCharacterAssetTabController({
     if (!benchDefaultsLoaded) {
       try {
         const defaults = await api(API.benchDefaults);
-        benchMain = String(defaults.main_prompt || '');
-        benchNegative = String(defaults.extra_negative || '');
+        for (const mode of ['inpaint', 'char_reference']) {
+          const block = defaults?.[mode];
+          if (block && typeof block === 'object') {
+            benchFields[mode].main = String(block.main_prompt || '');
+            benchFields[mode].negative = String(block.extra_negative || '');
+          }
+        }
+        // 구버전 flat 응답 호환
+        if (typeof defaults?.main_prompt === 'string') {
+          benchFields.inpaint.main = defaults.main_prompt;
+          benchFields.inpaint.negative = String(defaults.extra_negative || '');
+        }
         benchDefaultsLoaded = true;
       } catch (error) {
         console.error('bench defaults load failed', error);
@@ -675,17 +696,18 @@ export function createCharacterAssetTabController({
     const count = Math.max(1, Math.min(GENERATE_MAX, Number(benchCount) || 1));
     benchRequestId = newRequestId();
     benchCandidates = Array.from({length: count}, (_, index) => ({
-      index, status: 'pending', historyId: '', message: '', saved: false,
+      index, status: 'pending', historyId: '', message: '', saved: false, mode: benchMode,
     }));
     benchSelected = -1;
     renderBench();
     try {
       const result = await postJson(API.benchGenerate, {
         id: benchChar.id,
+        generation_mode: benchMode,
         character_prompt: prompt,
         character_uc: String(benchChar.uc || '').trim(),
-        main_prompt: benchMain,
-        extra_negative: benchNegative,
+        main_prompt: benchFields[benchMode].main,
+        extra_negative: benchFields[benchMode].negative,
         count,
         request_id: benchRequestId,
       });
@@ -754,6 +776,18 @@ export function createCharacterAssetTabController({
     `;
   }
 
+  function benchResultImg(candidate) {
+    // char_reference 결과는 이미 768x1344 완성본 - 크롭 없이 그대로 표시.
+    if (candidate?.mode === 'char_reference') {
+      return `
+        <div class="char-bench-crop plain">
+          <img class="char-bench-plain-img" src="${API.historyImage(candidate.historyId)}" alt="">
+        </div>
+      `;
+    }
+    return benchCropImg(candidate.historyId);
+  }
+
   function renderBench() {
     const layer = ensureBenchLayer();
     if (!benchOpen || !benchChar) {
@@ -773,7 +807,7 @@ export function createCharacterAssetTabController({
       return `
         <button class="char-bench-thumb done ${candidate.index === benchSelected ? 'selected' : ''} ${candidate.saved ? 'saved' : ''}"
           data-action="bench-pick" data-index="${candidate.index}">
-          ${benchCropImg(candidate.historyId)}
+          ${benchResultImg(candidate)}
           ${candidate.saved ? '<span class="char-bench-saved-badge">저장됨</span>' : ''}
         </button>
       `;
@@ -793,10 +827,17 @@ export function createCharacterAssetTabController({
             <textarea class="mod-textarea char-bench-ta" data-field="bench-prompt">${escHtml(benchChar.prompt)}</textarea>
             <div class="mod-section-label">Character UC</div>
             <textarea class="mod-textarea mod-uc char-bench-ta-sm" data-field="bench-uc">${escHtml(benchChar.uc)}</textarea>
-            <div class="mod-section-label">Main Prompt (자세/배경만)</div>
-            <textarea class="mod-textarea char-bench-ta-sm" data-field="bench-main">${escHtml(benchMain)}</textarea>
+            <div class="mod-section-label">Generation Mode</div>
+            <div class="char-bench-mode-toggle">
+              <button class="char-bench-mode-btn ${benchMode === 'inpaint' ? 'active' : ''}"
+                data-action="bench-mode" data-mode="inpaint">1/2 Inpaint</button>
+              <button class="char-bench-mode-btn ${benchMode === 'char_reference' ? 'active' : ''}"
+                data-action="bench-mode" data-mode="char_reference">Char Reference</button>
+            </div>
+            <div class="mod-section-label">Main Prompt ${benchMode === 'char_reference' ? '(자세/배경 - 모드별 별도 저장)' : '(자세/배경만)'}</div>
+            <textarea class="mod-textarea char-bench-ta-sm" data-field="bench-main">${escHtml(benchFields[benchMode].main)}</textarea>
             <div class="mod-section-label">추가 Negative (메인 네거티브에 이어붙임)</div>
-            <textarea class="mod-textarea mod-uc char-bench-ta-sm" data-field="bench-negative">${escHtml(benchNegative)}</textarea>
+            <textarea class="mod-textarea mod-uc char-bench-ta-sm" data-field="bench-negative">${escHtml(benchFields[benchMode].negative)}</textarea>
             <div class="char-bench-gen-row">
               <label class="char-asset-gen-count">횟수
                 <input type="number" min="1" max="${GENERATE_MAX}" value="${Number(benchCount) || 1}" data-field="bench-count">
@@ -805,7 +846,9 @@ export function createCharacterAssetTabController({
                 ${nai && !benchBusy && !pendingCount ? '' : 'disabled'}
                 ${nai ? '' : 'title="NAI 모드 전용"'}>${pendingCount ? `생성 중... (${pendingCount})` : '바리에이션 생성'}</button>
             </div>
-            <div class="char-asset-count">인페인트 고정: strength 1.0 / noise 0.0 / 좁은 마스크(512x896)</div>
+            <div class="char-asset-count">${benchMode === 'char_reference'
+              ? 'Char Reference: 원본(A) late-binding / 768x1344 / {1girl|1boy} + MAIN + PREFIX + solo + POSTFIX'
+              : '인페인트 고정: strength 1.0 / noise 0.0 / 좁은 마스크(512x896) / MAIN + PREFIX + POSTFIX'}</div>
           </section>
           <section class="char-bench-compare">
             <div class="char-bench-pane">
@@ -818,7 +861,7 @@ export function createCharacterAssetTabController({
               <div class="mod-section-label">생성 결과 (B)</div>
               <div class="char-bench-fit">
                 ${selected?.historyId
-                  ? benchCropImg(selected.historyId)
+                  ? benchResultImg(selected)
                   : '<div class="char-bench-crop empty"><div class="mod-empty">생성된 결과가 여기 표시됩니다.</div></div>'}
               </div>
               <div class="char-bench-save-row">

@@ -342,6 +342,7 @@ def register_character_asset_routes(
         if accepted:
             await run_in_thread(
                 service.save_bench_defaults,
+                str(payload.get("generation_mode") or "inpaint"),
                 str(payload.get("main_prompt") or ""),
                 str(payload.get("extra_negative") or ""),
             )

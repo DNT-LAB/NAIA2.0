@@ -18547,3 +18547,23 @@ body.detached-module .mod-grid-3 {
   .char-bench-strip-body { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
   .char-bench-thumb { width: 104px; }
 }
+
+/* ===== bench generation mode toggle + char_reference plain results ===== */
+.char-bench-mode-toggle {
+  display: flex; gap: 0; border: 1px solid var(--border-dim); border-radius: 8px; overflow: hidden;
+}
+.char-bench-mode-btn {
+  flex: 1 1 50%; padding: 9px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+  background: rgba(255, 255, 255, 0.03); color: var(--text-muted); border: none;
+  font-family: var(--font-mono); letter-spacing: 0.2px;
+}
+.char-bench-mode-btn + .char-bench-mode-btn { border-left: 1px solid var(--border-dim); }
+.char-bench-mode-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+.char-bench-mode-btn.active {
+  background: #3fa9f5; color: #06263f;
+}
+/* char_reference 결과는 완성본 - 크롭 오프셋 없이 그대로 채워 표시 */
+.char-bench-crop.plain .char-bench-plain-img {
+  position: absolute; inset: 0; left: 0; width: 100%; height: 100%;
+  object-fit: cover; max-width: 100%;
+}

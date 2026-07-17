@@ -37,6 +37,11 @@ MAX_DISPLAY_NAME_LEN = 80
 BENCH_DEFAULTS_FILE = "bench_defaults.json"
 BENCH_DEFAULT_MAIN_PROMPT = "2koma, borderless panel"
 BENCH_DEFAULT_EXTRA_NEGATIVE = "border"
+BENCH_MODES = ("inpaint", "char_reference")
+BENCH_MODE_DEFAULTS = {
+    "inpaint": {"main_prompt": BENCH_DEFAULT_MAIN_PROMPT, "extra_negative": BENCH_DEFAULT_EXTRA_NEGATIVE},
+    "char_reference": {"main_prompt": "", "extra_negative": ""},
+}
 
 
 def reencode_with_nai_meta(edited_image, source_image, parameters: dict) -> bytes:
@@ -111,6 +116,8 @@ class HeadlessCharacterAssetService:
         # (primary path, mtime_ns) -> (canvas_png, small_mask_png). Canvases are
         # ~1MB each; keep only a handful.
         self._bench_canvas_cache: dict[tuple[str, int], tuple[bytes, bytes]] = {}
+        # (primary path, mtime_ns) -> normalized CR image_data (base64, ~1-2MB).
+        self._bench_reference_cache: dict[tuple[str, int], str] = {}
 
     # ------------------------------------------------------------------ roots
     def write_root(self) -> Path:
@@ -531,38 +538,106 @@ class HeadlessCharacterAssetService:
         return Path(self.context._save_path(CHARACTER_ASSET_DIR_NAME, BENCH_DEFAULTS_FILE))
 
     def bench_defaults(self) -> dict[str, Any]:
-        defaults = {
-            "main_prompt": BENCH_DEFAULT_MAIN_PROMPT,
-            "extra_negative": BENCH_DEFAULT_EXTRA_NEGATIVE,
-        }
+        """Per-mode bench form defaults. Main prompts are managed SEPARATELY per
+        generation mode; a legacy flat file (pre mode-split) maps to inpaint."""
+        defaults = {mode: dict(values) for mode, values in BENCH_MODE_DEFAULTS.items()}
         try:
             path = self._bench_defaults_path()
             if path.exists():
                 data = json.loads(path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    for key in defaults:
-                        if isinstance(data.get(key), str):
-                            defaults[key] = data[key]
+                    if isinstance(data.get("main_prompt"), str):
+                        # legacy flat layout -> inpaint mode values
+                        data = {"inpaint": data}
+                    for mode in BENCH_MODES:
+                        block = data.get(mode)
+                        if not isinstance(block, dict):
+                            continue
+                        for key in ("main_prompt", "extra_negative"):
+                            if isinstance(block.get(key), str):
+                                defaults[mode][key] = block[key]
         except Exception as exc:
             print(f"[CharacterAsset] bench defaults load failed: {exc}")
         return defaults
 
-    def save_bench_defaults(self, main_prompt: str, extra_negative: str) -> None:
+    def save_bench_defaults(self, mode: str, main_prompt: str, extra_negative: str) -> None:
+        mode = str(mode or "inpaint").strip().lower()
+        if mode not in BENCH_MODES:
+            mode = "inpaint"
         try:
+            merged = self.bench_defaults()
+            merged[mode] = {
+                "main_prompt": str(main_prompt or ""),
+                "extra_negative": str(extra_negative or ""),
+            }
             path = self._bench_defaults_path()
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_name(path.name + ".tmp")
-            tmp.write_text(
-                json.dumps(
-                    {"main_prompt": str(main_prompt or ""), "extra_negative": str(extra_negative or "")},
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+            tmp.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
             tmp.replace(path)
         except Exception as exc:
             print(f"[CharacterAsset] bench defaults save failed: {exc}")
+
+    def _pe_pre_post(self) -> tuple[str, str]:
+        """Current PREFIX/POSTFIX from the user's Prompt Engineering module."""
+        try:
+            from core.prompt_engineering_settings import get_prompt_engineering_store
+
+            settings = get_prompt_engineering_store(self.context).collect_settings()
+            return (
+                str(settings.get("pre_prompt") or "").strip(),
+                str(settings.get("post_prompt") or "").strip(),
+            )
+        except Exception as exc:
+            print(f"[CharacterAsset] prompt engineering settings unavailable: {exc}")
+            return "", ""
+
+    @staticmethod
+    def _count_tag_for(character_prompt: str) -> str:
+        """1girl/1boy by girl/boy presence in the user's character prompt."""
+        tags = [tag.strip().lower() for tag in str(character_prompt or "").split(",")]
+        if "boy" in tags:
+            return "1boy"
+        if "girl" in tags:
+            return "1girl"
+        if re.search(r"\bboys?\b", str(character_prompt or ""), re.IGNORECASE):
+            return "1boy"
+        return "1girl"
+
+    def _bench_reference_params(self, character_id: str) -> dict[str, Any]:
+        """Late-bind the character's primary image as a Character Reference for
+        THIS request only (mirrors HeadlessCharacterReferenceService.active_params
+        with the default frame: character&style, strength 1.0, fidelity 0.8).
+        image_data() normalizes any resolution onto the nearest NAI canvas."""
+        from PIL import Image
+
+        primary = self.resolve_image_path(character_id)
+        try:
+            cache_key = (str(primary), primary.stat().st_mtime_ns)
+        except OSError as exc:
+            raise FileNotFoundError(f"primary image unavailable: {exc}")
+        cached = self._bench_reference_cache.get(cache_key)
+        if cached is None:
+            reference_service = self.context._character_reference_service()
+            with Image.open(primary) as opened:
+                opened.load()
+                cached = reference_service.image_data(opened)
+            if len(self._bench_reference_cache) > 8:
+                self._bench_reference_cache.clear()
+            self._bench_reference_cache[cache_key] = cached
+        return {
+            "director_reference_descriptions": [{
+                "caption": {"base_caption": "character&style", "char_captions": []},
+                "legacy_uc": False,
+            }],
+            "director_reference_images": [cached],
+            "director_reference_information_extracted": [1],
+            "director_reference_strength_values": [1.0],
+            "director_reference_secondary_strength_values": [0.2],  # 1 - fidelity(0.8)
+            "controlnet_strength": 1,
+            "inpaintImg2ImgStrength": 1,
+            "normalize_reference_strength_multiple": True,
+        }
 
     def _bench_canvas(self, character_id: str) -> tuple[bytes, bytes]:
         """Build (or reuse) the variation inpaint canvas + NAI small mask for a
@@ -594,16 +669,25 @@ class HeadlessCharacterAssetService:
         return payload
 
     def build_bench_overrides(self, payload: dict[str, Any], candidate: int) -> dict[str, Any]:
-        """Inpaint overrides for one variation candidate - mirrors the shape the
-        img2img service enqueues (proven consumer path), plus the Dev0714
-        variation contract: fixed strength 1.0 / noise 0.0, reference inset tag,
-        sketchbook character override, and NO cropped_image_request (the bbox
-        shrink would make results unusable for reuse)."""
+        """Overrides for one variation candidate, per generation mode.
+
+        - "inpaint" (Dev0714 parity): reference-inset inpaint on the 1152x896
+          canvas - img2img-shaped overrides, fixed strength 1.0 / noise 0.0,
+          reference inset tag, NO cropped_image_request (bbox shrink trap).
+        - "char_reference": no inpaint plumbing - the primary image is
+          late-bound as a Character Reference and a normal 768x1344 generation
+          runs with the composition
+          {1girl|1boy} + MAIN + PREFIX + "solo" + POSTFIX
+          (PREFIX/POSTFIX from the user's Prompt Engineering module).
+        """
         from utils.reference_inpaint_preprocess import VariationInpaintSpec
 
         if str(self.context.get_api_mode() or "").upper() != "NAI":
             raise ValueError("variation bench requires NAI mode")
         payload = payload if isinstance(payload, dict) else {}
+        generation_mode = str(payload.get("generation_mode") or "inpaint").strip().lower()
+        if generation_mode not in BENCH_MODES:
+            raise ValueError(f"unknown generation mode: {generation_mode}")
         character_id = self._validate_id(str(payload.get("id") or ""))
         character_prompt = str(payload.get("character_prompt") or "").strip()
         if not character_prompt:
@@ -612,45 +696,77 @@ class HeadlessCharacterAssetService:
         request_id = str(payload.get("request_id") or "").strip()
         if not request_id:
             raise ValueError("request_id is required")
-        main_prompt = str(payload.get("main_prompt") or "").strip() or BENCH_DEFAULT_MAIN_PROMPT
+        main_prompt = str(payload.get("main_prompt") or "").strip()
         extra_negative = str(payload.get("extra_negative") or "").strip()
         base_negative = str(getattr(self.context, "negative_prompt_text", "") or "").strip()
         negative = ", ".join(part for part in (base_negative, extra_negative) if part)
-        canvas_png, mask_png = self._bench_canvas(character_id)
-        spec = VariationInpaintSpec()
+        prefix, postfix = self._pe_pre_post()
         label = character_prompt.split(",")[0].strip()[:40] or character_id
-        return {
-            "type": "inpaint",
-            "image_bytes": canvas_png,
-            "mask_bytes": mask_png,
-            "input": main_prompt,
-            "_raw_input": main_prompt,
+        common = {
             "negative_prompt": negative,
-            "strength": 1.0,
-            "noise": 0.0,
-            "width": spec.canvas_width,
-            "height": spec.canvas_height,
             "random_resolution": False,
             "sketchbook_character_prompts": [(character_prompt, character_uc)],
-            "reference_inset_tag_required": True,
             "character_asset_request": True,
             "character_asset_request_id": request_id,
             "character_asset_candidate": int(candidate),
             "character_asset_bench": True,
             "character_asset_bench_character": character_id,
+            "character_asset_bench_mode": generation_mode,
             "_remote_queue_source": "Character Asset",
             "_remote_queue_label": f"variation: {label}",
             "seed": -1,
             "seed_fixed": False,
             "_skip_vibe_transfer_late_binding": True,
-            "_skip_character_reference_late_binding": True,
             "wildcard_standalone": True,
         }
 
+        if generation_mode == "char_reference":
+            is_naid45 = getattr(self.context, "_is_naid45_model", None)
+            if callable(is_naid45) and not is_naid45():
+                raise ValueError("Char Reference mode requires a NAI 4.5 model")
+            count_tag = self._count_tag_for(character_prompt)
+            composed = ", ".join(
+                part for part in (count_tag, main_prompt, prefix, "solo", postfix) if part
+            )
+            return {
+                **common,
+                "input": composed,
+                "_raw_input": composed,
+                "width": GENERATION_WIDTH,
+                "height": GENERATION_HEIGHT,
+                # our own director params below double as the late-binding
+                # suppressor for the user's active CR frames
+                "_skip_character_reference_late_binding": True,
+                **self._bench_reference_params(character_id),
+            }
+
+        composed = ", ".join(part for part in (main_prompt or BENCH_DEFAULT_MAIN_PROMPT, prefix, postfix) if part)
+        canvas_png, mask_png = self._bench_canvas(character_id)
+        spec = VariationInpaintSpec()
+        return {
+            **common,
+            "type": "inpaint",
+            "image_bytes": canvas_png,
+            "mask_bytes": mask_png,
+            "input": composed,
+            "_raw_input": composed,
+            "strength": 1.0,
+            "noise": 0.0,
+            "width": spec.canvas_width,
+            "height": spec.canvas_height,
+            "reference_inset_tag_required": True,
+            "_skip_character_reference_late_binding": True,
+        }
+
     def save_bench_result(self, character_id: str, history_id: str) -> dict[str, Any]:
-        """Crop the 512x896 edit rect out of a bench canvas result, transplant
-        the NAI tEXt metadata, LANCZOS-upscale 1.5x to 768x1344 (exact 4:7
-        landing) and store it as a variation of the character."""
+        """Store a bench result as a variation of the character.
+
+        - inpaint results: crop the 512x896 edit rect out of the 1152x896
+          canvas, transplant the NAI tEXt metadata, LANCZOS-upscale 1.5x to
+          768x1344 (exact 4:7 landing).
+        - char_reference results: already finished 768x1344 PNGs with their own
+          NAI Comment - stored byte-identical (no re-encode).
+        """
         from PIL import Image
 
         from utils.reference_inpaint_preprocess import VariationInpaintSpec
@@ -664,14 +780,24 @@ class HeadlessCharacterAssetService:
             raw = getattr(item, "raw_bytes", None)
             if not raw or not bytes(raw).startswith(PNG_SIGNATURE):
                 raise ValueError("bench result is not an original PNG")
-            # Provenance: only THIS character's bench results are croppable - a
-            # coincidental 1152x896 result or another character's bench canvas
+            # Provenance: only THIS character's bench results are saveable - a
+            # coincidental same-size result or another character's bench result
             # must not be filed as a variation.
-            params_check = item.generation_params if isinstance(item.generation_params, dict) else {}
-            if not params_check.get("character_asset_bench"):
+            params = item.generation_params if isinstance(item.generation_params, dict) else {}
+            if not params.get("character_asset_bench"):
                 raise ValueError("history item is not a variation bench result")
-            if str(params_check.get("character_asset_bench_character") or "") != character_id:
+            if str(params.get("character_asset_bench_character") or "") != character_id:
                 raise ValueError("bench result belongs to a different character")
+            bench_mode = str(params.get("character_asset_bench_mode") or "inpaint")
+
+            if bench_mode == "char_reference":
+                # finished full-resolution generation - save the original bytes
+                self._ensure_current(character_id)
+                path = asset_storage.save_character_variation(
+                    character_id, raw_bytes=bytes(raw), root=self.write_root()
+                )
+                return {"character_id": character_id, "hash": path.stem}
+
             spec = VariationInpaintSpec()
             with Image.open(io.BytesIO(bytes(raw))) as source:
                 source.load()
@@ -681,7 +807,6 @@ class HeadlessCharacterAssetService:
                 target_width = (spec.edit_right - spec.edit_left) * 3 // 2
                 target_height = (spec.edit_bottom - spec.edit_top) * 3 // 2
                 upscaled = crop.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                params = item.generation_params if isinstance(item.generation_params, dict) else {}
                 png = reencode_with_nai_meta(upscaled, source, params)
             self._ensure_current(character_id)
             path = asset_storage.save_character_variation(

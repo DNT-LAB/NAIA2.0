@@ -605,6 +605,8 @@ export function createImageModulePanels({
       <input type="file" id="charRefFileInput" accept="image/*" style="display:none"
         onchange="uploadModuleImage('character_reference',this.files[0]);this.value=''">
       <button class="mod-btn-upload mod-btn-storage" onclick="requestStorage('character_reference')">Storage</button>
+      <button class="mod-btn-upload mod-btn-danger" onclick="setModuleParam('character_reference','clear_frames','')"
+        title="로드된 레퍼런스 프레임을 모두 비웁니다 (Storage 보관본은 유지)">Clear</button>
     </div>
     ${frames.length ? frames : '<div class="mod-empty">No character references loaded</div>'}
   `;

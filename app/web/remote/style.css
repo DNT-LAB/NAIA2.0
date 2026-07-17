@@ -40,6 +40,9 @@
   --z-setup-modal: 10000;
   --z-floating-select: 10100;
   --z-floating-select-preview: 10110;
+  /* title 흡수 툴팁은 모든 레이어 위에 떠야 한다 - 기능 모달(9000)/셀렉트(10100)
+     안에서 hover 했을 때 뒤로 숨던 문제(사용자 제보). 툴팁은 순간 표시라 최상단이 안전. */
+  --z-title-tooltip: 10200;
   --z-app-confirm: 11000;
   --z-toast: 11100;
 }
@@ -9570,7 +9573,7 @@ body.resizing-result-info {
 .naia-title-tooltip {
   display: none;
   position: fixed;
-  z-index: calc(var(--z-floating-module-tooltip) + 5);
+  z-index: var(--z-title-tooltip);
   max-width: min(360px, calc(100vw - 16px));
   padding: 7px 9px;
   background: rgba(12,12,20,0.98);
@@ -13089,6 +13092,14 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .tag-tooltip.ac-mode {
   pointer-events: auto;
   padding: 4px 0;
+}
+/* Character Asset bench sits above ordinary module popups. Elevate only the
+   autocomplete surfaces owned by a bench textarea, not every global tooltip. */
+.tag-tooltip.feature-modal-target {
+  z-index: calc(var(--z-feature-modal) + 2);
+}
+.tag-chip-info-tooltip.feature-modal-target {
+  z-index: calc(var(--z-feature-modal) + 3);
 }
 .tag-ac-list {
   display: flex;
@@ -18407,39 +18418,201 @@ body.detached-module .mod-grid-3 {
   position: absolute; top: 2px; left: 4px; font-size: 11px; color: #ffd657; text-shadow: 0 0 3px rgba(0,0,0,0.9);
 }
 .char-asset-var-actions { display: flex; gap: 6px; }
-.char-asset-prompt-block { display: flex; flex-direction: column; gap: 4px; }
+.char-asset-prompt-block { display: flex; flex-direction: column; gap: 6px; }
+.char-asset-prompt-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.char-asset-edit-btn { min-width: 68px; letter-spacing: 0.06em; }
 .char-asset-pre {
-  margin: 0; padding: 6px 8px; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  margin: 0; padding: 8px 10px; min-height: 82px; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
   color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-dim); border-radius: 6px;
-  max-height: 130px; overflow-y: auto;
+  max-height: 170px; overflow-y: auto;
 }
+.char-asset-pre-uc { min-height: 50px; }
+.char-asset-edit-prompt { min-height: 112px; resize: vertical; }
+.char-asset-edit-uc { min-height: 64px; resize: vertical; }
+.char-asset-prompt-edit-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .char-asset-warn { color: #e2b74a; font-weight: 400; }
 .char-asset-apply-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.char-asset-generate {
-  display: flex; flex-direction: column; gap: 6px; padding: 10px;
-  border: 1px solid var(--border-dim); border-radius: 8px; background: var(--bg-surface);
-}
-.char-asset-gen-prompt { min-height: 64px; }
-.char-asset-gen-uc { min-height: 40px; }
-.char-asset-gen-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .char-asset-gen-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }
 .char-asset-gen-count input {
   width: 52px; padding: 3px 6px; font-size: 12px; color: var(--text-primary);
   background: var(--bg-surface); border: 1px solid var(--border-dim); border-radius: 6px;
 }
-.char-asset-candidate-strip { display: flex; gap: 8px; overflow-x: auto; padding-top: 4px; }
-.char-asset-candidate {
-  flex: 0 0 96px; width: 96px; display: flex; flex-direction: column; gap: 4px;
-  border: 1px solid var(--border-dim); border-radius: 8px; overflow: hidden; background: #111;
+/* 생성 벤치: 프리필 버튼 행 + 결과 단일 패널(원본 A 비교가 없다) */
+.char-bench-prefill-row { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 랜덤 슬롯: 주변 입력과 구분되도록 island로 감싼다 */
+.char-bench-random-island {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 2px 0 8px; padding: 8px 9px 9px;
+  border: 1px solid rgba(139, 118, 255, 0.3); border-radius: 8px;
+  background: rgba(125, 105, 230, 0.07);
 }
-.char-asset-candidate img { width: 100%; aspect-ratio: 4 / 7; object-fit: cover; }
-.char-asset-candidate-body {
-  min-height: 120px; display: flex; align-items: center; justify-content: center;
-  font-size: 11px; color: var(--text-muted);
+.char-bench-random-island > .mod-section-label { margin: 0; }
+.char-bench-random-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.char-bench-gender-toggle { flex: 0 0 auto; width: 118px; }
+.char-bench-gender-toggle .char-bench-mode-btn { padding: 6px 4px; font-size: 11px; }
+.char-bench-random-btn { margin-left: auto; }
+.char-bench-random-hint { color: var(--text-muted); font-size: 11px; }
+/* 캐릭터 생성 옆 슬롯머신: 랜덤 1회 굴린 뒤 바로 생성 (생성 버튼과 같은 높이) */
+.char-bench-slot-btn {
+  flex: 0 0 auto; width: 40px; padding: 0 !important; line-height: 1;
+  height: var(--char-bench-gen-height, 40px); box-sizing: border-box;
+  font-size: 15px; text-align: center;
 }
-.char-asset-candidate.error .char-asset-candidate-body { color: #e2685f; }
-.char-asset-candidate.saved { border-color: var(--accent-blue); }
-.char-asset-candidate-actions { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
+.char-bench-compare-single .char-bench-pane { flex: 1 1 100%; }
+/* 결과 영역 좌상단 플로팅 도구 - 이미지 크기/창 크기와 무관하게 고정 위치 */
+.char-bench-fit { position: relative; }
+.char-bench-float-tools {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  /* 상하 스택 + stretch = 두 버튼이 같은 너비(가장 긴 라벨 기준)로 정렬 */
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  max-width: calc(100% - 16px);
+}
+/* 핀 썸네일은 stretch에서 제외 - 작게 유지 */
+.char-bench-float-tools .char-bench-pin-thumb { align-self: flex-start; }
+/* 인페인트 핀 썸네일 - X로 즉시 해제, 본체 클릭 = 마스크 편집기 토글 */
+.char-bench-pin-thumb { position: relative; width: 92px; margin-top: 2px; }
+.char-bench-pin-open {
+  display: block; width: 100%; padding: 0; cursor: pointer;
+  border: 2px solid #f0d882; border-radius: 8px; overflow: hidden;
+  background: #111; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.char-bench-pin-open img { display: block; width: 100%; height: auto; }
+.char-bench-pin-open:hover { border-color: #fff4cc; }
+.char-bench-pin-x {
+  position: absolute; top: -7px; right: -7px; width: 20px; height: 20px;
+  border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.5); cursor: pointer;
+  background: #f0d882; color: #33280a; font: 700 11px/1 var(--font-mono);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.char-bench-pin-x:hover { background: #ffe9a1; }
+.char-bench-float-btn {
+  padding: 6px 10px; border-radius: 7px; cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(12, 12, 20, 0.82);
+  color: var(--text-primary); font: 600 11px var(--font-mono);
+  backdrop-filter: blur(6px);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.char-bench-float-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+/* 캐릭터 레퍼런스 = 연보라(NAIA CR 관례), 인페인트 = 연노랑 */
+.char-bench-float-btn.tone-reference {
+  border-color: rgba(178, 160, 255, 0.5); color: #cfc2ff;
+  background: rgba(96, 78, 190, 0.28);
+}
+.char-bench-float-btn.tone-reference:hover:not(:disabled) {
+  border-color: #b2a0ff; color: #e6ddff; background: rgba(125, 105, 230, 0.44);
+}
+.char-bench-float-btn.tone-reference.active {
+  background: #b2a0ff; color: #1b1430; border-color: transparent;
+}
+.char-bench-float-btn.tone-inpaint {
+  border-color: rgba(240, 216, 130, 0.5); color: #f2e2a6;
+  background: rgba(160, 132, 40, 0.24);
+}
+.char-bench-float-btn.tone-inpaint:hover:not(:disabled) {
+  border-color: #f0d882; color: #fff4cc; background: rgba(196, 162, 48, 0.4);
+}
+.char-bench-float-btn.tone-inpaint.active {
+  background: #f0d882; color: #33280a; border-color: transparent;
+}
+/* 레퍼런스 인셋 핀 배지 - Result 뷰어 좌상단 고정, X로 즉시 해제 */
+.reference-inset-badge {
+  position: absolute; top: 10px; left: 10px; z-index: var(--z-viewer-overlay);
+  width: 96px; border: 2px solid rgba(139, 118, 255, 0.85); border-radius: 9px;
+  background: rgba(12, 12, 20, 0.94); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.reference-inset-badge img {
+  display: block; width: 100%; height: auto; border-radius: 7px 7px 0 0;
+  user-select: none; -webkit-user-drag: none;
+}
+.reference-inset-badge-label {
+  padding: 4px 6px 5px; text-align: center; color: #cfc4ff;
+  font: 700 10px var(--font-mono); line-height: 1.4; letter-spacing: 0.02em;
+}
+.reference-inset-badge-x {
+  position: absolute; top: -7px; right: -7px; width: 20px; height: 20px;
+  border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.5); cursor: pointer;
+  background: #b2a0ff; color: #1d1440; font: 700 11px/1 var(--font-mono);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+.reference-inset-badge-x:hover { background: #d0c4ff; }
+
+/* 생성 벤치 프롬프트 입력 - 추가 Negative 제거분만큼 여유 높이(사용자 지시) */
+.char-bench-create-ta { min-height: 200px; }
+.char-bench-create-uc { min-height: 96px; }
+
+/* 인페인트 마스크 편집기 - 벤치 재렌더에서 살아남는 persistent sibling 레이어.
+   벤치(--z-feature-modal + 1)보다 위에 뜬다. */
+.char-bench-mask-layer[hidden] { display: none; }
+.char-bench-mask-backdrop {
+  position: fixed; inset: 0; z-index: calc(var(--z-feature-modal) + 10);
+  background: rgba(0, 0, 0, 0.66);
+}
+.char-bench-mask-dialog {
+  position: fixed; inset: 4vh 8vw; z-index: calc(var(--z-feature-modal) + 11);
+  display: flex; flex-direction: column; gap: 8px; padding: 12px;
+  background: var(--bg-surface); border: 1px solid rgba(240, 216, 130, 0.5);
+  border-radius: 10px; box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.char-bench-mask-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.char-bench-mask-tools {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.char-bench-mask-tools .mod-btn-sm.active {
+  background: #f0d882; color: #33280a; border-color: transparent;
+}
+.char-bench-mask-brush {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--text-secondary); font: 600 11px var(--font-mono);
+}
+.char-bench-mask-brush input[type="range"] { width: 120px; }
+.char-bench-mask-stage {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.35); border-radius: 8px; overflow: auto;
+}
+.char-bench-mask-frame {
+  position: relative; display: inline-block; max-width: 100%; max-height: 100%;
+}
+.char-bench-mask-frame img {
+  display: block; max-width: 100%; max-height: calc(92vh - 150px);
+  user-select: none; -webkit-user-drag: none;
+}
+.char-bench-mask-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  cursor: crosshair; touch-action: none;
+}
+.char-bench-mask-foot {
+  color: var(--text-secondary); font: 500 11px var(--font-mono);
+}
+
+/* 플로팅 도구 패널 - 결과 이미지 위에 떠서 창 크기에 영향받지 않는다 */
+.char-bench-float-panel {
+  position: absolute; top: 44px; left: 8px; z-index: 3;
+  /* 레퍼런스 카드(썸네일+Enable/Remove+슬라이더)가 안 잘리게 넉넉히 */
+  width: min(430px, calc(100% - 16px)); max-height: calc(100% - 56px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  border: 1px solid rgba(139, 118, 255, 0.36); border-radius: 8px;
+  background: rgba(12, 12, 20, 0.97); box-shadow: 0 18px 44px rgba(0,0,0,0.52);
+}
+.char-bench-float-panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  color: var(--text-primary); font: 700 11px var(--font-mono); letter-spacing: 0.05em;
+}
+.char-bench-ref-storage {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px;
+}
+.char-bench-ref-storage-item {
+  padding: 0; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden;
+  background: #111; cursor: pointer; aspect-ratio: 2 / 3;
+}
+.char-bench-ref-storage-item:hover { border-color: var(--accent-blue); }
+.char-bench-ref-storage-item img { width: 100%; height: 100%; object-fit: cover; }
+.char-asset-create-btn { border-color: rgba(63, 169, 245, 0.55); color: #9fd6ff; }
 @media (max-width: 767px) {
   .char-asset-columns { flex-direction: column; }
   .char-asset-gallery, .char-asset-detail { flex: 1 1 auto; width: 100%; }
@@ -18460,6 +18633,8 @@ body.detached-module .mod-grid-3 {
 }
 .char-asset-var-actions > span { display: inline-flex; gap: 6px; }
 .char-bench-layer { position: relative; }
+/* X로 닫아도 DOM은 유지 - hidden 속성으로만 숨긴다(다른 캐릭터 오픈 시 재구축). */
+.char-bench-layer[hidden] { display: none; }
 .char-bench-backdrop {
   position: fixed; inset: 0; z-index: var(--z-feature-modal);
   background: rgba(0, 0, 0, 0.62);
@@ -18489,15 +18664,44 @@ body.detached-module .mod-grid-3 {
   width: 64px; padding: 7px 8px; font-size: 13px;
 }
 .char-bench-form {
-  flex: 0 0 380px; max-width: 380px; display: flex; flex-direction: column; gap: 4px;
-  min-width: 0; overflow-y: auto; padding-right: 4px;
+  flex: 0 0 380px; max-width: 380px; display: flex; flex-direction: column;
+  min-width: 0; min-height: 0; overflow: hidden;
 }
 .char-bench-form .mod-section-label { margin-top: 8px; }
+.char-bench-form-scroll {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 4px 10px 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+/* 좁은 높이에서 토글/프리셋 행이 통째로 사라지던 문제(사용자 제보):
+   overflow:hidden인 flex 아이템은 min-height:auto가 0으로 풀려 0px까지 눌린다.
+   스크롤 컨테이너의 자식은 줄지 말고 컨테이너가 스크롤해야 한다. */
+.char-bench-form-scroll > * { flex-shrink: 0; }
+.char-bench-form-footer {
+  flex: 0 0 auto; padding: 12px 4px 2px 0;
+  border-top: 1px solid var(--border-dim); background: var(--bg-surface);
+}
+.char-bench-form-footer .char-bench-gen-row { margin-top: 0; }
+.char-bench .mod-slider-row { margin: 5px 0; }
+.char-bench .mod-slider-label { min-width: 82px; font-size: 11px; }
+.char-bench .mod-slider-value { font-size: 11px; }
 .char-bench-ta { min-height: 150px; font-size: 13px; line-height: 1.5; }
 .char-bench-ta-sm { min-height: 64px; font-size: 13px; line-height: 1.5; }
-.char-bench-gen-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+/* CUSTOM 패널 PREFIX/POSTFIX/NEGATIVE - 3슬롯이라 높이는 중간값으로 */
+.char-bench-custom-ta { min-height: 96px; font-size: 13px; line-height: 1.5; }
+.char-bench-custom-ta-sm { min-height: 56px; font-size: 13px; line-height: 1.5; }
+/* 횟수 입력 / 캐릭터 생성 / 슬롯머신을 한 줄에서 같은 높이로 정렬 */
+.char-bench-gen-row {
+  --char-bench-gen-height: 40px;
+  display: flex; align-items: stretch; gap: 10px; margin-top: 10px; flex-wrap: nowrap;
+}
+.char-bench-gen-row .char-asset-gen-count { align-items: stretch; }
+.char-bench-gen-row .char-asset-gen-count input {
+  height: var(--char-bench-gen-height); box-sizing: border-box;
+}
 .char-bench-generate-btn {
-  flex: 1 1 auto; padding: 11px 16px !important; font-size: 13px !important; font-weight: 700;
+  flex: 1 1 auto; min-width: 0;
+  height: var(--char-bench-gen-height); box-sizing: border-box;
+  padding: 0 16px !important; font-size: 13px !important; font-weight: 700;
 }
 .char-bench-compare { flex: 1 1 auto; display: flex; gap: 14px; min-width: 0; min-height: 0; }
 .char-bench-pane { flex: 1 1 50%; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -18549,10 +18753,22 @@ body.detached-module .mod-grid-3 {
   position: absolute; top: 4px; right: 4px; font-size: 10px; font-weight: 700;
   color: #eaffea; background: rgba(46, 160, 67, 0.85); border-radius: 6px; padding: 1px 6px;
 }
+/* 후보/바리에이션 생성 방식 배지: INP(1/2 인페인트) / CR / ENH */
+.char-bench-mode-badge, .char-asset-var-origin {
+  position: absolute; top: 4px; left: 4px; z-index: 1; padding: 1px 5px; border-radius: 5px;
+  font: 700 8px var(--font-mono); letter-spacing: 0.05em;
+  color: #cfd8ff; background: rgba(16, 20, 36, 0.85);
+}
+.char-bench-mode-badge.mode-char_reference, .char-asset-var-origin.mode-char_reference { color: #8fd4ff; }
+.char-bench-mode-badge.mode-enhance, .char-asset-var-origin.mode-enhance { color: #a9f0b4; }
+.char-asset-var-origin { top: auto; bottom: 3px; left: 3px; }
+.char-bench-enhance-btn { background: rgba(46, 160, 67, 0.22); }
 @media (max-width: 900px) {
   .char-bench { inset: 2vh 2vw; }
   .char-bench-body { flex-direction: column; overflow-y: auto; }
-  .char-bench-form { flex: 0 0 auto; max-width: none; }
+  .char-bench-form { flex: 0 0 auto; max-width: none; overflow: visible; }
+  .char-bench-form-scroll { overflow: visible; }
+  .char-bench-form-footer { position: sticky; bottom: 0; z-index: 2; padding: 10px 0; }
   .char-bench-compare { flex-direction: row; min-height: 46vh; }
   .char-bench-strip { flex: 0 0 auto; }
   .char-bench-strip-body { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
@@ -18573,6 +18789,75 @@ body.detached-module .mod-grid-3 {
 .char-bench-mode-btn.active {
   background: #3fa9f5; color: #06263f;
 }
+.char-bench-profile-toggle {
+  display: flex; gap: 0; border: 1px solid var(--border-dim); border-radius: 7px; overflow: hidden;
+}
+.char-bench-profile-btn {
+  flex: 1 1 33.333%; padding: 8px 5px; border: 0; background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted); font: 700 11px var(--font-mono); cursor: pointer;
+}
+.char-bench-profile-btn + .char-bench-profile-btn { border-left: 1px solid var(--border-dim); }
+.char-bench-profile-btn:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-hover); }
+.char-bench-profile-btn.active { color: #fff; background: rgba(125, 105, 230, 0.78); }
+.char-bench-profile-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+/* 미리보기는 인라인이 아니라 customSelects의 prompt-preset 플로팅 팝업이 담당
+   (콤보박스를 연 동안만 우측에 표시 - Quick Preset 미리보기 스펙 공유). */
+.char-bench-preset-select { margin-top: 3px; }
+/* CUSTOM: 선택 프로파일을 시드로 일부 값을 일시 수정(영구 저장 없음) */
+.char-bench-custom-btn {
+  margin-top: 4px; width: 100%; padding: 7px 8px; text-align: left;
+  border: 1px dashed var(--border-dim); border-radius: 7px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.03); color: var(--text-muted);
+  font: 700 11px var(--font-mono); letter-spacing: 0.03em;
+}
+.char-bench-custom-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+.char-bench-custom-btn.active {
+  border-style: solid; border-color: rgba(125, 105, 230, 0.78);
+  color: #cfc4ff; background: rgba(125, 105, 230, 0.16);
+}
+/* CUSTOM 편집 패널 - 원본(A)/생성 결과 영역 위 오버레이.
+   너비를 pane에 묶으면 작은 창에서 패널이 뭉개진다(사용자 버그 제보) -
+   pane 밖으로 넘치더라도 항상 적절한 너비를 갖는다(z 3, 이웃 pane 위). */
+.char-bench-custom-panel {
+  position: absolute; top: 8px; left: 8px; bottom: 8px; z-index: 3; overflow-y: auto;
+  width: min(520px, calc(100vw - 64px));
+  display: flex; flex-direction: column; gap: 6px; padding: 10px;
+  border: 1px solid rgba(125, 105, 230, 0.5); border-radius: 8px;
+  background: rgba(12, 12, 20, 0.97); box-shadow: 0 18px 44px rgba(0, 0, 0, 0.52);
+}
+/* CUSTOM 프롬프트 슬롯 접기/펼치기 - 3슬롯 상시 노출은 패널이 좁아 접근성이 나빴다 */
+.char-bench-custom-fold {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; padding: 7px 9px; cursor: pointer; text-align: left;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: rgba(255, 255, 255, 0.03); color: var(--text-secondary);
+  font: 700 11px var(--font-mono); letter-spacing: 0.04em;
+}
+.char-bench-custom-fold:hover { color: var(--text-primary); background: var(--bg-hover); }
+.char-bench-custom-fold.open { color: #cfc4ff; border-color: rgba(125, 105, 230, 0.5); }
+.char-bench-custom-fold-count { color: var(--text-muted); font-weight: 500; flex-shrink: 0; }
+
+.char-bench-custom-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px;
+}
+.char-bench-custom-grid > label {
+  display: flex; flex-direction: column; gap: 3px;
+  color: var(--text-secondary); font: 600 10px var(--font-mono);
+}
+.char-bench-custom-grid input[type="number"] {
+  padding: 5px 7px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: var(--bg-input, rgba(255, 255, 255, 0.05)); color: var(--text-primary);
+  font: 500 12px var(--font-mono);
+}
+.char-bench-custom-grid .char-bench-custom-varplus {
+  flex-direction: row; align-items: center; grid-column: 1 / -1;
+}
+.char-bench-custom-model {
+  color: var(--text-primary); font: 700 11px var(--font-mono);
+}
+.char-bench-custom-model span { color: var(--text-muted); font-weight: 500; }
+.char-bench-custom-hint { color: var(--text-muted); font: 500 10px var(--font-mono); }
+.char-bench-custom-actions { display: flex; gap: 6px; }
 /* char_reference 결과는 완성본 - 크롭 오프셋 없이 그대로 채워 표시 */
 .char-bench-crop.plain .char-bench-plain-img {
   position: absolute; inset: 0; left: 0; width: 100%; height: 100%;

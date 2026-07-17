@@ -29,6 +29,11 @@ AUTO_GENERATE_SUPPRESSED_FLAGS = {
 # img2img류 요청 타입: 위 플래그와 동일하게 특수 취급.
 SPECIAL_REQUEST_TYPES = {"img2img", "inpaint", "outpaint", "auto_outpainting"}
 
+# 레퍼런스 인셋 핀([C1 + 레퍼런스 인셋 적용])이 plain generate에 주입하는 마커.
+# 이 생성은 type=inpaint로 나가지만 사용자 관점에선 일반 생성이다 - 특수 취급하면
+# 핀 상태에서 Auto Gen 연쇄가 조용히 멈추고 Automation 카운트에서 빠진다.
+REFERENCE_INSET_PIN_MARKER = "_reference_inset_pin"
+
 
 def _default_coerce(value: Any) -> bool:
     if isinstance(value, str):
@@ -46,4 +51,8 @@ def is_special_request(
     coerce = coerce_bool if callable(coerce_bool) else _default_coerce
     if any(coerce(params.get(key, False)) for key in AUTO_GENERATE_SUPPRESSED_FLAGS):
         return True
+    # 인셋 핀 마커가 있으면 plain generate다(억제 플래그가 없을 때만 - 벤치 인페인트
+    # 등은 위 플래그가 먼저 잡는다). type=inpaint 판정보다 앞서야 한다.
+    if coerce(params.get(REFERENCE_INSET_PIN_MARKER, False)):
+        return False
     return str(params.get("type") or "").strip().lower() in SPECIAL_REQUEST_TYPES

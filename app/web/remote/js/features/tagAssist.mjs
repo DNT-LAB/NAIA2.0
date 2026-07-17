@@ -231,7 +231,9 @@ export function createTagAssistController({
   }
 
   function syncTooltipSide() {
-    if (!tagTooltip || window.innerWidth < 768) return;
+    if (!tagTooltip) return;
+    tagTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
+    if (window.innerWidth < 768) return;
     const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup');
     tagTooltip.classList.toggle('left-side', !!inModule);
   }
@@ -1140,6 +1142,7 @@ export function createTagAssistController({
     const title = anchor.dataset.tooltipTitle || anchor.dataset.insert || '';
     const meta = [anchor.dataset.tooltipCount, anchor.dataset.tooltipGroup].filter(Boolean).join(' · ');
     const chipTooltip = ensureTagChipInfoTooltip();
+    chipTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
     chipTooltip.innerHTML =
       `<div class="tag-chip-info-title">${escHtml(title)}</div>` +
       (meta ? `<div class="tag-chip-info-meta">${escHtml(meta)}</div>` : '') +

@@ -261,7 +261,11 @@
         "app/backend/server/character_asset_routes.py",
         "core/headless_character_asset_service.py",
         "utils/character_asset_storage.py",
-        "app/web/remote/js/features/characterAssetTab.mjs"
+        "utils/inpaint_mask.py",
+        "app/web/remote/js/features/characterAssetTab.mjs",
+        "app/web/remote/js/features/benchCandidates.mjs",
+        "app/web/remote/js/features/characterCreationBench.mjs",
+        "app/web/remote/js/features/maskCanvas.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [
@@ -302,6 +306,11 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/update-prompt",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/delete",
           "smoke": "asset_runtime"
         },
@@ -329,6 +338,61 @@
           "method": "POST",
           "path": "/api/character-asset/bench/generate",
           "smoke": "external_live"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/bench/enhance",
+          "smoke": "external_live"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/candidate/image",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/candidate/pin",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/candidate/unpin",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/candidate/pin-image",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/inset/state",
+          "smoke": "non_destructive"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/unpin",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/random-character",
+          "smoke": "non_destructive"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/random-outfit",
+          "smoke": "non_destructive"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/reference/storage",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/reference/upload",
+          "smoke": "asset_runtime"
         },
         {
           "method": "POST",
@@ -473,6 +537,12 @@
     }
   ],
   "data_dependencies": [
+    {
+      "feature": "character_asset",
+      "description": "Creation bench random slot pools (one comma-separated tag set per line).",
+      "paths": ["data/random_character.txt", "data/random_outfits.txt"],
+      "provisioning": "bundled"
+    },
     {
       "feature": "core_status_queue",
       "description": "Core filter dictionaries shipped as small bootstrap text/json.",

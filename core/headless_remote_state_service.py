@@ -165,8 +165,9 @@ class HeadlessRemoteStateService:
         return model or "NAID4.5F"
 
     def is_naid45_model(self) -> bool:
-        model = self.current_model_key()
-        return "NAID4.5F" in model or "NAID4.5C" in model
+        # 단독 별칭 "NAID4.5"도 4.5다(nai_model_contract 매핑/모델 콤보 노출 대상).
+        # F/C만 검사하면 별칭 선택 시 CR 게이트가 오거부한다(Codex).
+        return "NAID4.5" in self.current_model_key()
 
     def is_naid3_model(self) -> bool:
         return "NAID3" in self.current_model_key()

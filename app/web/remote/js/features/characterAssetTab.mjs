@@ -188,13 +188,19 @@ export function createCharacterAssetTabController({
 
   function updateApplyButtons() {
     const enabled = isNai() && !busy && !!detail?.recovered;
-    ['apply-c1', 'apply-add'].forEach(action => {
+    ['apply-c1', 'apply-c1-cr', 'apply-add'].forEach(action => {
       const button = root?.querySelector(`[data-action="${action}"]`);
       if (!button) return;
       button.disabled = !enabled;
-      button.title = detail?.recovered
-        ? (isNai() ? '' : 'NAI 모드 전용')
-        : '이 이미지에는 NAI 캐릭터 블록이 없습니다';
+      if (!detail?.recovered) {
+        button.title = '이 이미지에는 NAI 캐릭터 블록이 없습니다';
+      } else if (!isNai()) {
+        button.title = 'NAI 모드 전용';
+      } else {
+        button.title = action === 'apply-c1-cr'
+          ? 'C1 슬롯 적용 + 이 이미지를 Character Reference로 등록 (해상도는 자동 정규화)'
+          : '';
+      }
     });
   }
 
@@ -317,7 +323,7 @@ export function createCharacterAssetTabController({
     }
   }
 
-  async function applySlot(mode) {
+  async function applySlot(mode, withReference = false) {
     if (!selectedId || busy) return;
     if (!isNai()) {
       showToast('캐릭터 슬롯 적용은 NAI 모드 전용입니다', 'error');
@@ -326,8 +332,21 @@ export function createCharacterAssetTabController({
     busy = true;
     render();
     try {
-      await postJson(API.apply, {id: selectedId, variation: selectedVariation, mode});
-      showToast(mode === 'add_slot' ? '새 캐릭터 슬롯으로 추가됨' : 'C1 슬롯에 적용됨', 'success');
+      const result = await postJson(API.apply, {
+        id: selectedId,
+        variation: selectedVariation,
+        mode,
+        with_reference: withReference,
+      });
+      if (withReference) {
+        if (result.reference_attached) {
+          showToast('C1 슬롯 + Character Reference 적용됨', 'success');
+        } else {
+          showToast('C1 슬롯은 적용됐지만 Character Reference 등록에 실패했습니다', 'warning');
+        }
+      } else {
+        showToast(mode === 'add_slot' ? '새 캐릭터 슬롯으로 추가됨' : 'C1 슬롯에 적용됨', 'success');
+      }
     } catch (error) {
       showToast(`슬롯 적용 실패: ${error.message}`, 'error');
     } finally {
@@ -644,6 +663,8 @@ export function createCharacterAssetTabController({
       </div>
       <div class="char-asset-apply-actions">
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1" ${applyDisabled} ${applyTitle}>C1 적용 (단독)</button>
+        <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-cr" ${applyDisabled} ${applyTitle}
+          title="C1 슬롯 적용 + 이 이미지를 Character Reference로 등록 (해상도는 자동 정규화)">C1 + CR 적용</button>
         <button class="mod-btn-sm" data-action="apply-add" ${applyDisabled} ${applyTitle}>새 슬롯으로 추가</button>
       </div>
     `;
@@ -745,6 +766,7 @@ export function createCharacterAssetTabController({
       else if (action === 'staged-variation') saveStaged({kind: 'variation', character_id: selectedId});
       else if (action === 'staged-cancel') { staged = null; render(); }
       else if (action === 'apply-c1') applySlot('c1');
+      else if (action === 'apply-c1-cr') applySlot('c1', true);
       else if (action === 'apply-add') applySlot('add_slot');
       else if (action === 'rename') renameSelected();
       else if (action === 'delete-character') deleteSelected();

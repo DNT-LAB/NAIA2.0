@@ -199,12 +199,14 @@ def register_character_asset_routes(
     @app.post("/api/character-asset/apply")
     async def api_character_asset_apply(req: Request):
         payload = await _read_json(req)
+        with_reference = bool(payload.get("with_reference"))
         try:
             result = await run_in_thread(
                 _asset_service(session_context).apply_to_slot,
                 str(payload.get("id") or ""),
                 str(payload.get("variation") or ""),
                 str(payload.get("mode") or "c1"),
+                with_reference,
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -212,16 +214,24 @@ def register_character_asset_routes(
             return JSONResponse({"error": str(exc)}, status_code=404)
         except Exception as exc:
             return JSONResponse({"error": f"Character Asset apply failed: {exc}"}, status_code=500)
-        # Push the refreshed character module state to every client so an open
-        # Character Prompt panel reflects the applied slot immediately.
+        # Push the refreshed module states to every client so open panels and
+        # launcher badges reflect the applied slot / reference immediately.
         try:
             await broadcast_json(clients, session_context.module_state_payload("character"))
+            if with_reference:
+                await broadcast_json(
+                    clients, session_context.module_state_payload("character_reference")
+                )
+                await broadcast_json(
+                    clients, session_context.module_state_payload("vibe_transfer")
+                )
         except Exception as exc:
             print(f"[CharacterAsset] module state broadcast failed: {exc}")
         return {
             "ok": True,
             "character_prompt": result.get("character_prompt", ""),
             "character_uc": result.get("character_uc", ""),
+            "reference_attached": bool(result.get("reference_attached")),
         }
 
     @app.post("/api/character-asset/rename")

@@ -347,7 +347,46 @@ class HeadlessCharacterAssetService:
             return False
 
     # ------------------------------------------------------------ slot apply
-    def apply_to_slot(self, character_id: str, variation: str = "", mode: str = "c1") -> dict[str, Any]:
+    def _attach_character_reference(self, image_path: Path) -> None:
+        """Register the asset image as an enabled Character Reference frame.
+
+        Mirrors the CR module's apply_storage semantics: build an enabled frame
+        (image_data() normalizes any resolution onto the nearest NAI canvas -
+        2:3 1024x1536 / 3:2 1536x1024 / 1:1 1472x1472, letterboxed), persist the
+        storage PNG, and cross-disable Vibe frames (mutual exclusion contract).
+        Re-applying the same image enables the existing frame instead of
+        stacking a duplicate.
+        """
+        context = self.context
+        service = context._character_reference_service()
+        service._ensure_loaded()
+        image_bytes = image_path.read_bytes()
+        frame = service.frame_from_bytes(
+            image_bytes,
+            file_name=image_path.name,
+            file_path=str(image_path),
+            enabled=True,
+        )
+        frames = context.character_reference_frames
+        existing = next(
+            (item for item in frames if item.get("file_hash") == frame["file_hash"]), None
+        )
+        if existing is not None:
+            existing["is_enabled"] = True
+            service.save_storage(existing)
+        else:
+            frames.append(frame)
+            service.save_storage(frame)
+        context._disable_all_vibe_frames()
+        service._persist()
+
+    def apply_to_slot(
+        self,
+        character_id: str,
+        variation: str = "",
+        mode: str = "c1",
+        with_reference: bool = False,
+    ) -> dict[str, Any]:
         self._bootstrap()
         context = self.context
         if str(context.get_api_mode() or "").upper() != "NAI":
@@ -362,11 +401,19 @@ class HeadlessCharacterAssetService:
         if not prompt:
             raise ValueError("no NAI character block in this image - cannot recover the character prompt")
         state = context._character_service().apply_asset(prompt, uc, mode)
+        reference_attached = False
+        if with_reference:
+            try:
+                self._attach_character_reference(path)
+                reference_attached = True
+            except Exception as exc:
+                print(f"[CharacterAsset] character reference attach failed: {exc}")
         return {
             "ok": True,
             "state": state,
             "character_prompt": prompt,
             "character_uc": uc,
+            "reference_attached": reference_attached,
         }
 
     # ------------------------------------------------ reference generation

@@ -297,41 +297,13 @@ def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
     return result
 
 
-def _preview_candidates(context: WebSessionContext, preset_name: str, mode: str = "") -> list[Path]:
-    safe_name = Path(str(preset_name or "").strip()).name
-    if not safe_name or safe_name == "*randomized":
-        return []
-    mode_key = _normalize_preset_mode(context, mode, allow_empty=True)
-    candidates = [
-        preview_dir / f"{safe_name}{ext}"
-        for preview_dir in context._existing_save_dirs("presets", "previews")
-        for ext in (".png", ".webp", ".jpg", ".jpeg")
-    ]
-    try:
-        favorites_path = context._existing_save_path("presets", "favorites.json")
-        favorite_items = json.loads(favorites_path.read_text(encoding="utf-8")) if favorites_path.exists() else []
-        if any(
-            isinstance(item, dict)
-            and item.get("name") == safe_name
-            and (not mode_key or item.get("mode") == mode_key)
-            for item in favorite_items
-        ):
-            for favorite_dir in context._existing_save_dirs("presets", "favorites"):
-                candidates.extend(favorite_dir / f"{safe_name}{ext}" for ext in (".png", ".webp", ".jpg", ".jpeg"))
-    except Exception:
-        pass
-    return candidates
-
-
 def _preview_path(context: WebSessionContext, preset_name: str, mode: str = "") -> Path | None:
-    for candidate in _preview_candidates(context, preset_name, mode):
-        try:
-            target = candidate.resolve()
-        except Exception:
-            continue
-        if target.is_file():
-            return target
-    return None
+    # 파일 탐색 로직은 core로 이동 — 상태 요약(preset_summary)과 이 라우트가
+    # 같은 해석을 공유해야 "파일은 있는데 항상 No image"가 재발하지 않는다.
+    from core.prompt_engineering_settings import preset_preview_file
+
+    mode_key = _normalize_preset_mode(context, mode, allow_empty=True)
+    return preset_preview_file(context, preset_name, mode_key)
 
 
 def _normalize_preset_mode(

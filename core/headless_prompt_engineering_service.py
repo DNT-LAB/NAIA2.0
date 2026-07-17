@@ -76,7 +76,11 @@ class HeadlessPromptEngineeringService:
         state = store.state()
         preset_options = store.preset_options()
 
-        def preset_summary(name: str, mode: str | None = None) -> dict[str, Any]:
+        def preset_summary(
+            name: str,
+            mode: str | None = None,
+            thumbnails: dict[str, str] | None = None,
+        ) -> dict[str, Any]:
             if name == "*randomized":
                 return {
                     "name": name,
@@ -88,21 +92,32 @@ class HeadlessPromptEngineeringService:
             data = store.read_preset_data(name, mode or context.get_api_mode())
             module_settings = data.get("module_settings") if isinstance(data, dict) else {}
             module_settings = module_settings if isinstance(module_settings, dict) else {}
+            api_mode = str(data.get("api_mode") or mode or context.get_api_mode())
             return {
                 "name": name,
-                "api_mode": str(data.get("api_mode") or mode or context.get_api_mode()),
+                "api_mode": api_mode,
                 "description": str(data.get("description") or ""),
                 "pre_prompt_preview": str(module_settings.get("pre_prompt") or ""),
-                "thumbnail_url": str(data.get("thumbnail_url") or ""),
+                # 썸네일 SSOT는 previews 디렉터리의 파일 — 프리셋 JSON에는
+                # thumbnail_url이 기록된 적이 없어 항상 "No image"가 나오던 버그.
+                # 목록 단위 벌크 맵으로 조회(프리셋별 stat 프로브 방지).
+                "thumbnail_url": str((thumbnails or {}).get(name) or data.get("thumbnail_url") or ""),
             }
 
         webui_presets = store.list_preset_names("WEBUI")
+        from core.prompt_engineering_settings import preset_thumbnail_url_map
+
+        current_mode_key = str(context.get_api_mode() or "").strip().upper()
+        current_thumbs = preset_thumbnail_url_map(context, list(preset_options), current_mode_key)
+        webui_thumbs = preset_thumbnail_url_map(context, list(webui_presets), "WEBUI")
         payload = {
             "preset": state["current_preset"],
             "preset_options": preset_options,
-            "preset_summaries": [preset_summary(name) for name in preset_options],
+            "preset_summaries": [preset_summary(name, thumbnails=current_thumbs) for name in preset_options],
             "webui_preset_options": webui_presets,
-            "webui_preset_summaries": [preset_summary(name, "WEBUI") for name in webui_presets],
+            "webui_preset_summaries": [
+                preset_summary(name, "WEBUI", thumbnails=webui_thumbs) for name in webui_presets
+            ],
             "randomized_active": state["current_preset"] == "*randomized",
             "randomized_preset_list": list(state["randomized_preset_list"]),
             "randomized_available_presets": store.randomized_available_presets(),

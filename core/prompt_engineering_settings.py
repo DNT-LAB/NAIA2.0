@@ -482,6 +482,141 @@ def read_preset_data(
         return {}
 
 
+def preset_preview_file(context: Any, preset_name: str, mode_key: str = "") -> Path | None:
+    """Resolve the preset thumbnail file on disk.
+
+    thumbnail_url은 프리셋 JSON에 기록된 적이 없다(작성 코드 부재) — 썸네일의
+    SSOT는 save/presets/previews/<name>.<ext> 파일이며, 즐겨찾기 등록 프리셋은
+    save/presets/favorites/도 함께 본다. prompt_tools_routes의 GET 라우트와
+    상태 요약이 같은 해석을 쓰도록 core에 둔다.
+    """
+    safe_name = Path(str(preset_name or "").strip()).name
+    if not safe_name or safe_name == "*randomized":
+        return None
+    exts = (".png", ".webp", ".jpg", ".jpeg")
+    # 썸네일은 장식 — 경로 헬퍼가 없는 축소 컨텍스트(테스트 하네스 등)에서도
+    # 프리셋 목록 자체를 실패시키지 않는다.
+    try:
+        preview_dirs = context._existing_save_dirs("presets", "previews")
+    except Exception:
+        return None
+    candidates = [
+        preview_dir / f"{safe_name}{ext}"
+        for preview_dir in preview_dirs
+        for ext in exts
+    ]
+    try:
+        favorites_path = context._existing_save_path("presets", "favorites.json")
+        favorite_items = json.loads(favorites_path.read_text(encoding="utf-8")) if favorites_path.exists() else []
+        if any(
+            isinstance(item, dict)
+            and item.get("name") == safe_name
+            and (not mode_key or item.get("mode") == mode_key)
+            for item in favorite_items
+        ):
+            for favorite_dir in context._existing_save_dirs("presets", "favorites"):
+                candidates.extend(favorite_dir / f"{safe_name}{ext}" for ext in exts)
+    except Exception:
+        pass
+    for candidate in candidates:
+        try:
+            target = candidate.resolve()
+        except Exception:
+            continue
+        if target.is_file():
+            return target
+    return None
+
+
+def preset_thumbnail_url(context: Any, preset_name: str, mode_key: str = "") -> str:
+    """File-derived thumbnail URL for preset previews ("" when no file)."""
+    from urllib.parse import quote
+
+    target = preset_preview_file(context, preset_name, mode_key)
+    if target is None:
+        return ""
+    safe_name = Path(str(preset_name or "").strip()).name
+    try:
+        version = int(target.stat().st_mtime)
+    except OSError:
+        version = 0
+    return (
+        "/api/prompt-engineering/preset-thumbnail"
+        f"?name={quote(safe_name, safe='')}&mode={quote(str(mode_key or ''), safe='')}&v={version}"
+    )
+
+
+def preset_thumbnail_url_map(context: Any, names: list[str], mode_key: str = "") -> dict[str, str]:
+    """Bulk ``preset_thumbnail_url`` for whole preset lists.
+
+    state()가 module_state마다 프리셋 전수를 요약하므로, 프리셋별 확장자 stat
+    프로브(n x 4) + favorites.json 재읽기 대신 디렉터리당 1회 listing으로
+    줄인다(Codex CONCERN). 후보 순서(디렉터리 우선, 확장자 순)는 단건 버전과
+    동일하다.
+    """
+    from urllib.parse import quote
+
+    result = {str(name): "" for name in names}
+    if not result:
+        return result
+    exts = (".png", ".webp", ".jpg", ".jpeg")
+    try:
+        preview_dirs = list(context._existing_save_dirs("presets", "previews"))
+    except Exception:
+        return result
+
+    def _dir_listing(dirs: list[Path]) -> list[tuple[Path, set[str]]]:
+        listing: list[tuple[Path, set[str]]] = []
+        for directory in dirs:
+            try:
+                listing.append((Path(directory), set(os.listdir(directory))))
+            except OSError:
+                continue
+        return listing
+
+    preview_listing = _dir_listing(preview_dirs)
+    favorite_names: set[str] = set()
+    favorite_listing: list[tuple[Path, set[str]]] = []
+    try:
+        favorites_path = context._existing_save_path("presets", "favorites.json")
+        favorite_items = json.loads(favorites_path.read_text(encoding="utf-8")) if favorites_path.exists() else []
+        favorite_names = {
+            str(item.get("name"))
+            for item in favorite_items
+            if isinstance(item, dict) and (not mode_key or item.get("mode") == mode_key)
+        }
+        if favorite_names:
+            favorite_listing = _dir_listing(list(context._existing_save_dirs("presets", "favorites")))
+    except Exception:
+        pass
+
+    def _find(listing: list[tuple[Path, set[str]]], safe_name: str) -> Path | None:
+        for directory, entries in listing:
+            for ext in exts:
+                if f"{safe_name}{ext}" in entries:
+                    return directory / f"{safe_name}{ext}"
+        return None
+
+    for name in names:
+        safe_name = Path(str(name or "").strip()).name
+        if not safe_name or safe_name == "*randomized":
+            continue
+        target = _find(preview_listing, safe_name)
+        if target is None and safe_name in favorite_names:
+            target = _find(favorite_listing, safe_name)
+        if target is None:
+            continue
+        try:
+            version = int(target.stat().st_mtime)
+        except OSError:
+            version = 0
+        result[str(name)] = (
+            "/api/prompt-engineering/preset-thumbnail"
+            f"?name={quote(safe_name, safe='')}&mode={quote(str(mode_key or ''), safe='')}&v={version}"
+        )
+    return result
+
+
 def write_preset_data(
     preset_name: str,
     mode: str | None,

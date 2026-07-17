@@ -676,9 +676,13 @@ class HeadlessCharacterAssetService:
           reference inset tag, NO cropped_image_request (bbox shrink trap).
         - "char_reference": no inpaint plumbing - the primary image is
           late-bound as a Character Reference and a normal 768x1344 generation
-          runs with the composition
-          {1girl|1boy} + MAIN + PREFIX + "solo" + POSTFIX
-          (PREFIX/POSTFIX from the user's Prompt Engineering module).
+          runs.
+
+        Prompt composition (PREFIX/POSTFIX from the Prompt Engineering module):
+          inpaint        = {1girl|1boy} + MAIN + PREFIX + "solo" + POSTFIX
+                           (MAIN leads after the count tag - NAI inpainting spec
+                           needs the 2koma scaffold up front)
+          char_reference = {1girl|1boy} + PREFIX + MAIN + "solo" + POSTFIX
         """
         from utils.reference_inpaint_preprocess import VariationInpaintSpec
 
@@ -726,7 +730,7 @@ class HeadlessCharacterAssetService:
                 raise ValueError("Char Reference mode requires a NAI 4.5 model")
             count_tag = self._count_tag_for(character_prompt)
             composed = ", ".join(
-                part for part in (count_tag, main_prompt, prefix, "solo", postfix) if part
+                part for part in (count_tag, prefix, main_prompt, "solo", postfix) if part
             )
             return {
                 **common,
@@ -740,7 +744,12 @@ class HeadlessCharacterAssetService:
                 **self._bench_reference_params(character_id),
             }
 
-        composed = ", ".join(part for part in (main_prompt or BENCH_DEFAULT_MAIN_PROMPT, prefix, postfix) if part)
+        count_tag = self._count_tag_for(character_prompt)
+        composed = ", ".join(
+            part
+            for part in (count_tag, main_prompt or BENCH_DEFAULT_MAIN_PROMPT, prefix, "solo", postfix)
+            if part
+        )
         canvas_png, mask_png = self._bench_canvas(character_id)
         spec = VariationInpaintSpec()
         return {

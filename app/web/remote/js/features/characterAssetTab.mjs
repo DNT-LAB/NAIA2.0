@@ -847,8 +847,8 @@ export function createCharacterAssetTabController({
                 ${nai ? '' : 'title="NAI 모드 전용"'}>${pendingCount ? `생성 중... (${pendingCount})` : '바리에이션 생성'}</button>
             </div>
             <div class="char-asset-count">${benchMode === 'char_reference'
-              ? 'Char Reference: 원본(A) late-binding / 768x1344 / {1girl|1boy} + MAIN + PREFIX + solo + POSTFIX'
-              : '인페인트 고정: strength 1.0 / noise 0.0 / 좁은 마스크(512x896) / MAIN + PREFIX + POSTFIX'}</div>
+              ? 'Char Reference: 원본(A) late-binding / 768x1344 / {1girl|1boy} + PREFIX + MAIN + solo + POSTFIX'
+              : '인페인트 고정: strength 1.0 / noise 0.0 / 좁은 마스크(512x896) / {1girl|1boy} + MAIN + PREFIX + solo + POSTFIX'}</div>
           </section>
           <section class="char-bench-compare">
             <div class="char-bench-pane">

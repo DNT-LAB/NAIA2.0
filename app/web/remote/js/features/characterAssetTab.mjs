@@ -150,26 +150,116 @@ export function createCharacterAssetTabController({
     }
   }
 
-  async function select(id, variation = '') {
-    selectedId = String(id || '');
-    selectedVariation = String(variation || '');
-    detail = null;
-    disarmDelete();
-    if (!selectedId) {
+  let selectToken = 0;
+
+  function revisionFor(id) {
+    const entry = characters.find(item => item.id === id);
+    return entry?.revision || 0;
+  }
+
+  function previewUrlFor(hash) {
+    if (!detail) return '';
+    if (hash) {
+      const variation = (detail.variations || []).find(item => item.hash === hash);
+      return API.image(detail.id, hash, variation?.revision || 0);
+    }
+    return API.image(detail.id, '', detail.revision || revisionFor(detail.id));
+  }
+
+  function updateGridSelection() {
+    root?.querySelectorAll('.char-asset-card').forEach(card => {
+      card.classList.toggle('selected', card.dataset.id === selectedId);
+    });
+  }
+
+  function swapPreviewImage(url) {
+    // 기존 <img>를 유지한 채 새 이미지를 프리로드 후 src만 교체 - 디코딩이
+    // 끝나기 전까지 이전 이미지가 그대로 보여 깜빡임이 없다.
+    const img = root?.querySelector('[data-role="preview-img"]');
+    if (!img || !url) return;
+    if (img.getAttribute('src') === url) return;
+    img.dataset.pendingSrc = url;
+    const probe = new Image();
+    probe.onload = () => {
+      if (img.isConnected && img.dataset.pendingSrc === url) img.src = url;
+    };
+    probe.src = url;
+  }
+
+  function updateApplyButtons() {
+    const enabled = isNai() && !busy && !!detail?.recovered;
+    ['apply-c1', 'apply-add'].forEach(action => {
+      const button = root?.querySelector(`[data-action="${action}"]`);
+      if (!button) return;
+      button.disabled = !enabled;
+      button.title = detail?.recovered
+        ? (isNai() ? '' : 'NAI 모드 전용')
+        : '이 이미지에는 NAI 캐릭터 블록이 없습니다';
+    });
+  }
+
+  function patchDetail() {
+    // 카드 전환용 부분 갱신 - pane 구조는 유지하고 내용만 바꾼다(전체
+    // innerHTML 재구성은 UI가 재설정되며 깜빡인다).
+    const nameEl = root?.querySelector('[data-role="detail-name"]');
+    const zone = root?.querySelector('[data-role="variations-zone"]');
+    if (!nameEl || !zone || !detail) {
       render();
       return;
     }
-    detailLoading = true;
-    render();
+    const entry = characters.find(item => item.id === selectedId);
+    nameEl.textContent = summaryName({...entry, id: selectedId, display_name: detail.display_name});
+    const idEl = root.querySelector('[data-role="detail-id"]');
+    if (idEl) idEl.textContent = selectedId;
+    const promptEl = root.querySelector('[data-role="prompt-pre"]');
+    if (promptEl) promptEl.textContent = detail.character_prompt || '(empty)';
+    const ucEl = root.querySelector('[data-role="uc-pre"]');
+    if (ucEl) ucEl.textContent = detail.character_uc || '(empty)';
+    const warnEl = root.querySelector('[data-role="recover-warn"]');
+    if (warnEl) warnEl.hidden = !!detail.recovered;
+    zone.innerHTML = renderVariationsZone();
+    const deleteBtn = root.querySelector('[data-action="delete-character"]');
+    if (deleteBtn) deleteBtn.textContent = '캐릭터 삭제';
+    updateApplyButtons();
+    swapPreviewImage(previewUrlFor(selectedVariation));
+  }
+
+  async function select(id, variation = '') {
+    const token = ++selectToken;
+    selectedId = String(id || '');
+    selectedVariation = String(variation || '');
+    disarmDelete();
+    if (!selectedId) {
+      detail = null;
+      render();
+      return;
+    }
+    const detailMounted = !!root?.querySelector('[data-role="detail-head"]');
+    if (detailMounted) {
+      // in-place 경로: 선택 표시와 뷰어 이미지를 즉시 갱신하고, 상세 데이터가
+      // 도착하면 텍스트/스트립만 패치한다. 이전 상세 텍스트는 그동안 유지.
+      updateGridSelection();
+      swapPreviewImage(API.image(selectedId, selectedVariation, revisionFor(selectedId)));
+    } else {
+      detail = null;
+      detailLoading = true;
+      render();
+    }
     try {
-      detail = await api(API.detail(selectedId));
+      const next = await api(API.detail(selectedId));
+      if (token !== selectToken) return;
+      detail = next;
     } catch (error) {
+      if (token !== selectToken) return;
       console.error('Character Asset detail failed', error);
       showToast(`에셋 상세 로드 실패: ${error.message}`, 'error');
       detail = null;
     } finally {
-      detailLoading = false;
-      render();
+      if (token === selectToken) {
+        detailLoading = false;
+        if (detailMounted && detail && detail.id === selectedId) patchDetail();
+        else render();
+      }
     }
   }
 
@@ -502,6 +592,19 @@ export function createCharacterAssetTabController({
     return `<div class="char-asset-var-strip">${primary}${variations}</div>`;
   }
 
+  function renderVariationsZone() {
+    const variationDeleteArmed = deleteArmed === `variation:${selectedVariation}`;
+    return `
+      ${renderVariationStrip()}
+      <div class="char-asset-var-actions" ${selectedVariation ? '' : 'hidden'}>
+        <button class="mod-btn-sm" data-action="promote">★ 대표로 승격</button>
+        <button class="mod-btn-sm mod-btn-danger" data-action="delete-variation">
+          ${variationDeleteArmed ? '한 번 더 클릭하면 삭제' : '바리에이션 삭제'}
+        </button>
+      </div>
+    `;
+  }
+
   function renderDetail() {
     if (!selectedId) {
       return '<div class="mod-empty char-asset-detail-empty">캐릭터를 선택하세요.</div>';
@@ -516,12 +619,11 @@ export function createCharacterAssetTabController({
     const applyTitle = detail.recovered ? naiTitle : 'title="이 이미지에는 NAI 캐릭터 블록이 없습니다"';
     const revision = detail.revision || 0;
     const charDeleteArmed = deleteArmed === `char:${selectedId}`;
-    const variationDeleteArmed = deleteArmed === `variation:${selectedVariation}`;
     const entry = characters.find(item => item.id === selectedId);
     return `
-      <div class="char-asset-detail-head">
-        <div class="char-asset-detail-name">${escHtml(summaryName({...entry, display_name: detail.display_name}))}
-          <span class="char-asset-detail-id">${escHtml(selectedId)}</span>
+      <div class="char-asset-detail-head" data-role="detail-head">
+        <div class="char-asset-detail-name"><span data-role="detail-name">${escHtml(summaryName({...entry, display_name: detail.display_name}))}</span>
+          <span class="char-asset-detail-id" data-role="detail-id">${escHtml(selectedId)}</span>
         </div>
         <div class="char-asset-detail-head-actions">
           <button class="mod-btn-sm" data-action="rename">이름변경</button>
@@ -531,20 +633,14 @@ export function createCharacterAssetTabController({
         </div>
       </div>
       <div class="char-asset-preview">
-        <img src="${API.image(detail.id, selectedVariation, revision)}" alt="">
+        <img data-role="preview-img" src="${API.image(detail.id, selectedVariation, revision)}" alt="">
       </div>
-      ${renderVariationStrip()}
-      <div class="char-asset-var-actions" ${selectedVariation ? '' : 'hidden'}>
-        <button class="mod-btn-sm" data-action="promote">★ 대표로 승격</button>
-        <button class="mod-btn-sm mod-btn-danger" data-action="delete-variation">
-          ${variationDeleteArmed ? '한 번 더 클릭하면 삭제' : '바리에이션 삭제'}
-        </button>
-      </div>
+      <div data-role="variations-zone">${renderVariationsZone()}</div>
       <div class="char-asset-prompt-block">
-        <div class="mod-section-label">Character Prompt ${detail.recovered ? '' : '<span class="char-asset-warn">(복구 불가 - NAI 캐릭터 블록 없음)</span>'}</div>
-        <pre class="char-asset-pre">${escHtml(detail.character_prompt || '(empty)')}</pre>
+        <div class="mod-section-label">Character Prompt <span class="char-asset-warn" data-role="recover-warn" ${detail.recovered ? 'hidden' : ''}>(복구 불가 - NAI 캐릭터 블록 없음)</span></div>
+        <pre class="char-asset-pre" data-role="prompt-pre">${escHtml(detail.character_prompt || '(empty)')}</pre>
         <div class="mod-section-label">Character UC</div>
-        <pre class="char-asset-pre">${escHtml(detail.character_uc || '(empty)')}</pre>
+        <pre class="char-asset-pre" data-role="uc-pre">${escHtml(detail.character_uc || '(empty)')}</pre>
       </div>
       <div class="char-asset-apply-actions">
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1" ${applyDisabled} ${applyTitle}>C1 적용 (단독)</button>
@@ -623,7 +719,22 @@ export function createCharacterAssetTabController({
       else if (action === 'select-variation') {
         selectedVariation = button.dataset.hash || '';
         disarmDelete();
-        render();
+        const zone = root.querySelector('[data-role="variations-zone"]');
+        if (zone && detail) {
+          // 스트립 선택 표시와 뷰어 이미지만 갱신 - 전체 재렌더 깜빡임 방지.
+          zone.querySelectorAll('.char-asset-var').forEach(item => {
+            item.classList.toggle('selected', String(item.dataset.hash || '') === selectedVariation);
+          });
+          const actions = zone.querySelector('.char-asset-var-actions');
+          if (actions) {
+            actions.hidden = !selectedVariation;
+            const deleteBtn = actions.querySelector('[data-action="delete-variation"]');
+            if (deleteBtn) deleteBtn.textContent = '바리에이션 삭제';
+          }
+          swapPreviewImage(previewUrlFor(selectedVariation));
+        } else {
+          render();
+        }
       }
       else if (action === 'refresh') refreshAll();
       else if (action === 'toggle-generate') {

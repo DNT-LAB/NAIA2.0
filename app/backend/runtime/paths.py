@@ -37,6 +37,9 @@ SOURCE_BOOTSTRAP_PATHS = (
     "data/clothes_list.txt",
     "data/color.txt",
     "data/characteristic_list.txt",
+    # 캐릭터 생성 벤치 랜덤 슬롯 풀 - 없으면 랜덤생성이 404로 죽는다.
+    "data/random_character.txt",
+    "data/random_outfits.txt",
     "data/taglist",
 )
 

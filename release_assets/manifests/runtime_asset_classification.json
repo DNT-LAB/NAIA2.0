@@ -245,6 +245,8 @@
         "data/clothes_list.txt",
         "data/color.txt",
         "data/characteristic_list.txt",
+        "data/random_character.txt",
+        "data/random_outfits.txt",
         "data/taglist/*.json"
       ],
       "decision": "bundle_source_bootstrap",
@@ -257,6 +259,8 @@
         "data/clothes_list.txt",
         "data/color.txt",
         "data/characteristic_list.txt",
+        "data/random_character.txt",
+        "data/random_outfits.txt",
         "data/taglist/*.json"
       ],
       "owner": "release_assets/manifests/release_include_exclude_draft.json",

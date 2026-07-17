@@ -23,6 +23,8 @@
       "data/clothes_list.txt",
       "data/color.txt",
       "data/characteristic_list.txt",
+      "data/random_character.txt",
+      "data/random_outfits.txt",
       "data/taglist/*.json",
       "app_data_template/**",
       "release_assets/samples/**"

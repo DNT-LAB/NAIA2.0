@@ -10,7 +10,7 @@ import base64
 import io
 from typing import Any
 
-from core.headless_image_utils import data_url_payload, image_to_png_bytes
+from core.headless_image_utils import image_to_png_bytes
 from core.resolution_utils import MAX_1MP_PIXELS, snap_resolution_to_multiple
 
 
@@ -469,7 +469,9 @@ class HeadlessImg2ImgService:
         return self._record_generation_terminal(params, request_id, error=str(error or "Generation failed"))
 
     def _decode_mask(self, value: str) -> tuple[bytes, str, int]:
-        from PIL import Image
+        # 디코드 본체는 utils.inpaint_mask 공유 유틸(캐릭터 벤치와 공용). 여기는
+        # 세션 결합(활성 검사 + target_size)과 RuntimeError 계약만 유지한다.
+        from utils.inpaint_mask import decode_mask_to_small_png
 
         context = self.context
         if not context.img2img_session.get("active"):
@@ -478,20 +480,11 @@ class HeadlessImg2ImgService:
             int(context.img2img_session.get("width") or 1),
             int(context.img2img_session.get("height") or 1),
         )
-        mask_bytes = base64.b64decode(data_url_payload(value))
-        with Image.open(io.BytesIO(mask_bytes)) as opened:
-            full_mask = opened.convert("L").resize(target_size)
-        threshold = [0 if i <= 127 else 255 for i in range(256)]
-        full_mask = full_mask.point(threshold, "L")
-        white_pixels = int(full_mask.histogram()[255])
-        small_size = (max(1, target_size[0] // 8), max(1, target_size[1] // 8))
-        small_mask = full_mask.resize(small_size).point(threshold, "L")
-        painted_blocks = int(small_mask.histogram()[255])
-        if white_pixels <= 0 or painted_blocks < 8:
-            raise RuntimeError("Inpaint mask is too small" if white_pixels > 0 else "Inpaint mask is empty")
-        preview_bytes = self._image_to_png_bytes(full_mask)
-        preview = "data:image/png;base64," + base64.b64encode(preview_bytes).decode("ascii")
-        return self._image_to_png_bytes(small_mask), preview, painted_blocks
+        try:
+            decoded = decode_mask_to_small_png(str(value or ""), target_size)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        return decoded.small_png, decoded.preview_data_url, decoded.painted_blocks
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context

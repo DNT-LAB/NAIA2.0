@@ -123,6 +123,16 @@ class HeadlessCharacterReferenceService:
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=4), encoding="utf-8")
         except Exception as exc:
             print(f"[ERROR] Character Reference settings save failed: {exc}")
+        # 레퍼런스 인셋 강제 종료(사용자 계약): CR이 하나라도 활성화되면 인셋 핀을
+        # 해제한다 - 두 기법은 개념이 겹쳐 함께 켜면 안 된다. _persist는 모든 CR
+        # 변이(enable/upload/apply_storage/에셋 attach)의 공통 통과점이다.
+        try:
+            if any(frame.get("is_enabled") for frame in context.character_reference_frames):
+                asset_getter = getattr(context, "_character_asset_service", None)
+                if callable(asset_getter) and asset_getter().clear_reference_inset_pin():
+                    print("[CharacterAsset] reference inset pin released - Character Reference enabled")
+        except Exception:
+            pass
 
     def image_data(self, image) -> str:
         from PIL import Image
@@ -220,6 +230,9 @@ class HeadlessCharacterReferenceService:
             index = context._index_from_key(key, "remove_frame_")
             if index is not None and 0 <= index < len(context.character_reference_frames):
                 context.character_reference_frames.pop(index)
+        elif key == "clear_frames":
+            # 프레임만 비운다 - storage(save/character_reference/images)는 보존.
+            context.character_reference_frames.clear()
         elif key.startswith("enable_"):
             index = context._index_from_key(key, "enable_")
             if index is not None and 0 <= index < len(context.character_reference_frames):

@@ -41,6 +41,24 @@ VIBE_TRANSFER_LIVE_REFETCH_KEYS = (
     "reference_information_extracted_multiple",
 )
 
+# 레퍼런스 인셋 핀도 동일 클래스 - Auto Gen continuation의 baked overrides에서
+# 제거해야 매 반복 라이브 핀 상태로 재조립된다(핀 해제 후에도 baked 캔버스로
+# 계속 인셋 생성되는 버그 방지). _reference_inset_pin 마커가 있을 때만 pop한다 -
+# width/height는 일반 키라 무조건 pop하면 남의 해상도를 지운다.
+REFERENCE_INSET_LIVE_REFETCH_KEYS = (
+    "type",
+    "image_bytes",
+    "mask_bytes",
+    "width",
+    "height",
+    "resolution",
+    "strength",
+    "noise",
+    "add_original_image",
+    "reference_inset_tag_required",
+    "_reference_inset_pin",
+)
+
 
 class HeadlessImageModuleParamService:
     def __init__(self, context: Any):
@@ -59,11 +77,44 @@ class HeadlessImageModuleParamService:
             "_skip_character_reference_late_binding"
         ):
             params.update(self.active_character_reference_params())
-        if params.get("_skip_vibe_transfer_late_binding"):
+        if not params.get("_skip_vibe_transfer_late_binding"):
+            if not params.get("reference_image_multiple"):
+                params.update(self.active_vibe_transfer_params())
+            self._apply_event_stream_vibe(params)
+        # 인셋 핀은 마지막에 - type=inpaint 주입이 위 스트림 vibe의 plain 판정을
+        # 건드리지 않도록(마커 화이트리스트가 있지만 순서로도 안전하게).
+        self._apply_reference_inset_pin(params)
+
+    # ------------------------------------ 레퍼런스 인셋 핀 (C1 + 레퍼런스 인셋)
+    def _apply_reference_inset_pin(self, params: dict[str, Any]) -> None:
+        """핀이 살아 있는 동안 plain 생성을 1152x896 인셋 인페인트로 바꾼다.
+
+        - 인페인트/img2img 등 이미 이미지 배관을 가진 요청은 인셋을 역으로
+          무시한다(사용자 계약) - type/image_bytes 가드가 그 관문이다.
+        - 특수 요청(벤치/프리셋/인핸스)도 대상 밖 - Result 탭 일반 생성뿐이다.
+        - CR과는 상호배타: 요청에 CR 파라미터가 실려 있으면(활성 CR 프레임
+          late-binding) 인셋 핀을 강제 종료한다(생성 단계 이중 체크 - 사용자 계약).
+        """
+        asset_service_getter = getattr(self.context, "_character_asset_service", None)
+        if not callable(asset_service_getter):
             return
-        if not params.get("reference_image_multiple"):
-            params.update(self.active_vibe_transfer_params())
-        self._apply_event_stream_vibe(params)
+        if params.get("type") or params.get("image_bytes"):
+            return
+        if is_special_request(params, getattr(self.context, "_coerce_bool", None)):
+            return
+        try:
+            asset_service = asset_service_getter()
+            if params.get("director_reference_descriptions"):
+                # plain 생성에 CR이 실렸다 = CR 활성. _persist 훅이 놓친 경로가
+                # 있어도 여기서 핀을 확정 종료한다(주입도 하지 않는다).
+                if asset_service.clear_reference_inset_pin():
+                    print("[CharacterAsset] reference inset pin released - CR present at generation")
+                return
+            pin_params = asset_service.reference_inset_generation_params()
+        except Exception:
+            return
+        if pin_params:
+            params.update(pin_params)
 
     # ------------------------------------ Storyteller "Use Vibe" (1회성 스트림 vibe)
     def _apply_event_stream_vibe(self, params: dict[str, Any]) -> None:

@@ -397,6 +397,8 @@ function applyRightTabAvailability(tabAvailability) {
   if (rightTabs && typeof rightTabs.setAvailability === 'function') {
     const activeTab = rightTabs.setAvailability(tabAvailability);
     danbooruTabControl?.setActive?.(activeTab === 'danbooru');
+    // Assets 탭이 숨겨지며 Result로 복귀한 경우 컨트롤 활성 상태도 동기화.
+    characterAssetControl?.setActive?.(activeTab === 'charAssets');
     return;
   }
   pendingRightTabAvailability = {...(pendingRightTabAvailability || {}), ...tabAvailability};
@@ -486,7 +488,7 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
   .catch(error => {
     console.error('Failed to initialize Character Viewer tab module', error);
   });
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20260717-crmode2')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20260718-fix3')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,
@@ -494,15 +496,86 @@ const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=202607
       escHtml,
       showToast,
       showPromptDialog,
+      bindTagAssist,
       getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
       // onModuleState가 모든 module_state를 일반 캐시하므로(접속 직후 일괄 요청 포함)
       // 캐릭터 패널을 연 적이 없어도 C1 프리필이 최신 상태를 읽는다.
       getCharacterState: () => moduleStateCache.get('character') || null,
+      // CR capability(is_naid45)는 모듈 팝업을 연 적 없어도 캐시에서 읽는다.
+      // 게이트에서 버려지는 건 renderModuleState뿐이고 캐시 적재는 그 앞에서 일어난다.
+      getCharacterReferenceState: () => moduleStateCache.get('character_reference') || null,
+      onReferenceInsetPin: state => setReferenceInsetBadge(state),
     });
+    // 리로드 복원: 백엔드 인셋 핀은 리로드와 무관하게 살아 있다(생성이 계속
+    // 인셋으로 나감) - 배지가 없으면 사용자가 이유 모를 1152x896 생성을 본다.
+    fetch('/api/character-asset/inset/state')
+      .then(response => (response.ok ? response.json() : null))
+      .then(state => setReferenceInsetBadge(state))
+      .catch(() => {});
   })
   .catch(error => {
     console.error('Failed to initialize Character Asset tab module', error);
   });
+
+// ---------------------------------------------------------------------------
+// 레퍼런스 인셋 핀 배지 - Result 뷰어 좌상단 고정(캐릭터 에셋 [C1+레퍼런스 인셋]).
+// 핀이 살아 있는 동안 plain 생성이 전부 1152x896 인셋 인페인트로 나가므로,
+// 항상 보이는 배지 + X 즉시 해제를 제공한다(사용자 계약).
+let referenceInsetState = null;
+
+function setReferenceInsetBadge(state) {
+  referenceInsetState = state && state.active ? state : null;
+  renderReferenceInsetBadge();
+}
+
+function syncReferenceInsetWithCharRef(m) {
+  // 강제 종료 조건(사용자 계약): CR이 활성화되면 백엔드(_persist 훅)가 인셋 핀을
+  // 해제한다 - 여기서는 배지를 서버 상태로 재동기화하고 사용자에게 알린다.
+  if (!referenceInsetState) return;
+  const frames = Array.isArray(m.frames) ? m.frames : [];
+  if (!frames.some(frame => frame && frame.is_enabled)) return;
+  fetch('/api/character-asset/inset/state')
+    .then(response => (response.ok ? response.json() : null))
+    .then(state => {
+      if (state && state.active) return;
+      setReferenceInsetBadge(null);
+      showToast('Character Reference 활성화로 레퍼런스 인셋이 해제되었습니다', 'warning');
+    })
+    .catch(() => {});
+}
+
+function renderReferenceInsetBadge() {
+  const viewer = document.getElementById('resultViewer');
+  if (!viewer) return;
+  let badge = document.getElementById('referenceInsetBadge');
+  if (!referenceInsetState) {
+    badge?.remove();
+    return;
+  }
+  const characterId = String(referenceInsetState.character_id || '');
+  const variation = String(referenceInsetState.variation || '');
+  const thumb = `/api/character-asset/thumb?id=${encodeURIComponent(characterId)}`
+    + (variation ? `&variation=${encodeURIComponent(variation)}` : '') + '&size=grid';
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.id = 'referenceInsetBadge';
+    badge.className = 'reference-inset-badge';
+    viewer.appendChild(badge);
+  }
+  badge.innerHTML = `
+    <img src="${thumb}" alt="레퍼런스 인셋 핀">
+    <button type="button" class="reference-inset-badge-x" aria-label="레퍼런스 인셋 해제">x</button>
+    <div class="reference-inset-badge-label">레퍼런스 인셋<br>1152x896 고정</div>`;
+  badge.querySelector('.reference-inset-badge-x').onclick = async () => {
+    try {
+      await fetch('/api/character-asset/inset/unpin', {method: 'POST'});
+    } catch (error) {
+      console.error('reference inset unpin failed', error);
+    }
+    setReferenceInsetBadge(null);
+    showToast('레퍼런스 인셋 핀 해제됨 - 일반 생성으로 복귀합니다', 'success');
+  };
+}
 const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1')
   .then(({createStudioTabController}) => {
     studioTabControl = createStudioTabController({
@@ -1243,7 +1316,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20260603-
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260619-vibeie-draft')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260717-crclear1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -3433,6 +3506,9 @@ function updateParams(m) {
   // 모드별 표시/숨김
   const mode = m.api_mode || '';
   document.querySelectorAll('.mode-nai').forEach(el => el.style.display = mode === 'NAI' ? '' : 'none');
+  // Assets 탭은 NAI 전용(사용자 지시 2026-07-18): 다른 모드로 바뀌면 숨기고,
+  // 사용자가 그 탭을 펼치고 있었다면 setAvailability가 Result로 복귀시킨다.
+  if (mode) applyRightTabAvailability({charAssets: mode === 'NAI'});
   $('webuiParams').style.display = mode === 'WEBUI' ? '' : 'none';
   $('comfyuiParams').style.display = mode === 'COMFYUI' ? '' : 'none';
   if (
@@ -4454,6 +4530,10 @@ function onViewerHistoryRemoved(message) {
     releaseLatestResultBuffers();
   }
   if (resultHistory) resultHistory.onRemoved(message);
+  // 캐릭터 에셋 벤치 후보는 history_id로 저장한다 - 퇴출되면 만료 표시.
+  if (characterAssetControl && typeof characterAssetControl.handleHistoryRemoved === 'function') {
+    characterAssetControl.handleHistoryRemoved(message);
+  }
   scheduleResultUnsavedActionRefresh(80);
 }
 function onViewerHistoryCleared(message) {
@@ -6751,7 +6831,10 @@ function onModuleState(m) {
   if (m.module_id === 'automation') updateAutoBadge(m);
   else if (m.module_id === 'auto_save' && autoSavePanel) autoSavePanel.setState(m);
   else if (m.module_id === 'character') updateCharBadge(m);
-  else if (m.module_id === 'character_reference') updateCharRefBadge(m);
+  else if (m.module_id === 'character_reference') {
+    updateCharRefBadge(m);
+    syncReferenceInsetWithCharRef(m);
+  }
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
   else if (m.module_id === 'save_directory' && saveDirectoryPanel) saveDirectoryPanel.setState(m);
   else if (m.module_id === 'img2img') updateImg2ImgResumeButton(m);
@@ -8214,7 +8297,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260614-caretfix2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260717-charbench1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

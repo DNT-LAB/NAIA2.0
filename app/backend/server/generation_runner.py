@@ -32,6 +32,7 @@ from core.event_stream_vibe import (
 )
 from core.headless_image_module_param_service import (
     CHARACTER_REFERENCE_LIVE_REFETCH_KEYS,
+    REFERENCE_INSET_LIVE_REFETCH_KEYS,
     VIBE_TRANSFER_LIVE_REFETCH_KEYS,
 )
 from core.web_session_context import WebSessionContext
@@ -518,6 +519,13 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 await _broadcast_prompt_preset_thumbnail_update(context, clients, stored, params)
             if params.get("character_viewer_request"):
                 await _save_character_viewer_thumbnail(context, stored, params)
+            if params.get("character_asset_request"):
+                # 벤치 후보는 화면에 떠 있는 동안 저장 가능해야 한다 - 결과 저장소가
+                # 상한을 넘겨 퇴출해도 캐릭터 에셋 서비스가 bounded FIFO로 붙잡는다.
+                try:
+                    context._character_asset_service().retain_candidate(stored.item)
+                except Exception as exc:
+                    print(f"[CharacterAsset] candidate retain failed: {exc}")
             if params.get("result_enhance_request"):
                 await broadcast_json(clients, {
                     "type": "result_enhance_state",
@@ -890,6 +898,12 @@ async def _maybe_continue_auto_generation(
     # pop으로 충족된다(직전 일반+스트림 vibe 제거 → enqueue에서 라이브 일반 + 현재 스트림 1장 재조립).
     for key in VIBE_TRANSFER_LIVE_REFETCH_KEYS:
         overrides.pop(key, None)
+    # 레퍼런스 인셋 핀도 라이브 재조회 - baked 캔버스/type이 overrides로 핀되면
+    # 핀 해제 후에도 계속 인셋 인페인트로 나간다. 마커가 있을 때만 pop한다
+    # (width/height는 일반 키 - 무조건 pop하면 남의 해상도를 지운다).
+    if overrides.get("_reference_inset_pin"):
+        for key in REFERENCE_INSET_LIVE_REFETCH_KEYS:
+            overrides.pop(key, None)
     # PARAMS 패널 값(라이브 remote_params)도 char-ref/vibe 와 동일하게 매 반복 라이브 재조회되게
     # overrides 에서 제거한다 — Auto Gen 도중 PARAMS(특히 ComfyUI/ANIMA) 변경 미반영 버그 수정.
     _drop_live_param_overrides(overrides, getattr(context, "remote_params", {}))

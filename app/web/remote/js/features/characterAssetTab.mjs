@@ -801,25 +801,28 @@ export function createCharacterAssetTabController({
               <label class="char-asset-gen-count">횟수
                 <input type="number" min="1" max="${GENERATE_MAX}" value="${Number(benchCount) || 1}" data-field="bench-count">
               </label>
-              <button class="mod-btn-sm mod-btn-encode" data-action="bench-generate"
+              <button class="mod-btn-sm mod-btn-encode char-bench-generate-btn" data-action="bench-generate"
                 ${nai && !benchBusy && !pendingCount ? '' : 'disabled'}
-                ${nai ? '' : 'title="NAI 모드 전용"'}>바리에이션 생성</button>
-              ${pendingCount ? `<span class="char-asset-count">${pendingCount}건 생성 중...</span>` : ''}
+                ${nai ? '' : 'title="NAI 모드 전용"'}>${pendingCount ? `생성 중... (${pendingCount})` : '바리에이션 생성'}</button>
             </div>
             <div class="char-asset-count">인페인트 고정: strength 1.0 / noise 0.0 / 좁은 마스크(512x896)</div>
           </section>
           <section class="char-bench-compare">
             <div class="char-bench-pane">
               <div class="mod-section-label">원본 (A)</div>
-              <div class="char-bench-a"><img src="${API.image(benchChar.id, '', benchChar.revision)}" alt=""></div>
+              <div class="char-bench-fit">
+                <div class="char-bench-a"><img src="${API.image(benchChar.id, '', benchChar.revision)}" alt=""></div>
+              </div>
             </div>
             <div class="char-bench-pane">
               <div class="mod-section-label">생성 결과 (B)</div>
-              ${selected?.historyId
-                ? benchCropImg(selected.historyId)
-                : '<div class="char-bench-crop empty"><div class="mod-empty">생성된 결과가 여기 표시됩니다.</div></div>'}
+              <div class="char-bench-fit">
+                ${selected?.historyId
+                  ? benchCropImg(selected.historyId)
+                  : '<div class="char-bench-crop empty"><div class="mod-empty">생성된 결과가 여기 표시됩니다.</div></div>'}
+              </div>
               <div class="char-bench-save-row">
-                <button class="mod-btn-sm mod-btn-encode" data-action="bench-save"
+                <button class="mod-btn-sm mod-btn-encode char-bench-save-btn" data-action="bench-save"
                   ${selected?.historyId && !selected.saved && !benchBusy ? '' : 'disabled'}>
                   ${selected?.saved ? '저장됨' : '바리에이션으로 저장'}</button>
                 <button class="mod-btn-sm" data-action="bench-discard" ${selected ? '' : 'disabled'}>버리기</button>
@@ -827,7 +830,10 @@ export function createCharacterAssetTabController({
             </div>
           </section>
           <aside class="char-bench-strip">
-            ${strip || '<div class="mod-empty">후보 없음</div>'}
+            <div class="mod-section-label">후보</div>
+            <div class="char-bench-strip-body">
+              ${strip || '<div class="mod-empty char-bench-strip-empty">아직 후보가 없습니다.<br>좌측에서 생성을 시작하세요.</div>'}
+            </div>
           </aside>
         </div>
       </div>

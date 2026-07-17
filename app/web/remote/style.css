@@ -18451,7 +18451,7 @@ body.detached-module .mod-grid-3 {
 .char-bench-layer { position: relative; }
 .char-bench-backdrop {
   position: fixed; inset: 0; z-index: var(--z-feature-modal);
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.62);
 }
 .char-bench {
   position: fixed; inset: 3vh 3vw; z-index: calc(var(--z-feature-modal) + 1);
@@ -18461,47 +18461,78 @@ body.detached-module .mod-grid-3 {
   overflow: hidden;
 }
 .char-bench-header {
-  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
   border-bottom: 1px solid var(--border-dim); flex: 0 0 auto;
 }
-.char-bench-head-thumb { width: 26px; height: 44px; object-fit: cover; border-radius: 4px; background: #111; }
-.char-bench-title { flex: 1 1 auto; font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.char-bench-head-thumb { width: 28px; height: 48px; object-fit: cover; border-radius: 4px; background: #111; }
+.char-bench-title { flex: 1 1 auto; font-size: 14px; font-weight: 700; color: var(--text-primary); }
 .char-bench-body {
-  flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; padding: 12px; overflow: auto;
+  flex: 1 1 auto; min-height: 0; display: flex; gap: 14px; padding: 14px; overflow: hidden;
+}
+/* 벤치 내부 컨트롤은 기본 mod-btn-sm(9px)보다 크게 */
+.char-bench .mod-btn-sm {
+  font-size: 12px; padding: 8px 14px; border-radius: 6px;
+}
+.char-bench .char-asset-gen-count { font-size: 13px; }
+.char-bench .char-asset-gen-count input {
+  width: 64px; padding: 7px 8px; font-size: 13px;
 }
 .char-bench-form {
-  flex: 0 0 320px; display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-y: auto;
+  flex: 0 0 380px; max-width: 380px; display: flex; flex-direction: column; gap: 4px;
+  min-width: 0; overflow-y: auto; padding-right: 4px;
 }
-.char-bench-ta { min-height: 96px; }
-.char-bench-ta-sm { min-height: 48px; }
-.char-bench-gen-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-.char-bench-compare { flex: 1 1 auto; display: flex; gap: 12px; min-width: 0; }
-.char-bench-pane { flex: 1 1 50%; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.char-bench-a, .char-bench-crop {
-  flex: 1 1 auto; min-height: 0; border: 1px solid var(--border-dim); border-radius: 8px;
-  background: #111; overflow: hidden; position: relative; aspect-ratio: 4 / 7; max-height: 100%;
-  align-self: center; width: auto; height: 100%;
+.char-bench-form .mod-section-label { margin-top: 8px; }
+.char-bench-ta { min-height: 150px; font-size: 13px; line-height: 1.5; }
+.char-bench-ta-sm { min-height: 64px; font-size: 13px; line-height: 1.5; }
+.char-bench-gen-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.char-bench-generate-btn {
+  flex: 1 1 auto; padding: 11px 16px !important; font-size: 13px !important; font-weight: 700;
 }
-.char-bench-a img { width: 100%; height: 100%; object-fit: contain; }
+.char-bench-compare { flex: 1 1 auto; display: flex; gap: 14px; min-width: 0; min-height: 0; }
+.char-bench-pane { flex: 1 1 50%; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+/* 4:7 이미지 박스를 pane 안에 '넘치지 않게' 맞추는 사이징 컨테이너.
+   컨테이너 쿼리 단위로 height = min(가용 높이, 가용 폭 * 896/512)을 계산해
+   aspect-ratio가 폭을 파생 - 어느 축이 좁아도 절대 이웃 칼럼을 침범하지 않는다. */
+.char-bench-fit {
+  flex: 1 1 auto; min-height: 0; min-width: 0;
+  container-type: size;
+  display: flex; align-items: center; justify-content: center;
+}
+.char-bench-fit .char-bench-a,
+.char-bench-fit .char-bench-crop {
+  height: min(100cqh, calc(100cqw * 896 / 512));
+  aspect-ratio: 512 / 896;
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  background: #111; overflow: hidden; position: relative;
+}
+.char-bench-a img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .char-bench-crop img {
   position: absolute; top: 0; left: -112.5%; height: 100%; width: auto; max-width: none;
 }
 .char-bench-crop.empty { display: flex; align-items: center; justify-content: center; }
-.char-bench-save-row { display: flex; gap: 8px; flex: 0 0 auto; justify-content: center; padding-top: 2px; }
+.char-bench-save-row { display: flex; gap: 10px; flex: 0 0 auto; justify-content: center; padding-top: 6px; }
+.char-bench-save-btn { min-width: 200px; font-weight: 700; }
 .char-bench-strip {
-  flex: 0 0 118px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+  flex: 0 0 156px; display: flex; flex-direction: column; gap: 6px; min-height: 0;
+  background: rgba(255, 255, 255, 0.035); border: 1px solid var(--border-dim);
+  border-radius: 8px; padding: 8px;
 }
+.char-bench-strip-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.char-bench-strip-empty { padding: 14px 4px; text-align: center; line-height: 1.6; }
 .char-bench-thumb {
-  position: relative; flex: 0 0 auto; width: 104px; border: 1px solid var(--border-dim);
+  position: relative; flex: 0 0 auto; width: 100%; border: 1px solid var(--border-dim);
   border-radius: 8px; overflow: hidden; background: #111; padding: 0; cursor: pointer;
   color: var(--text-muted); font-size: 11px;
 }
 .char-bench-thumb .char-bench-crop { aspect-ratio: 4 / 7; width: 100%; height: auto; }
 .char-bench-thumb.pending, .char-bench-thumb.error {
-  display: flex; align-items: center; justify-content: center; min-height: 150px; cursor: default;
+  display: flex; align-items: center; justify-content: center; min-height: 170px; cursor: default;
 }
 .char-bench-thumb.error { color: #e2685f; }
-.char-bench-thumb.selected { border-color: var(--accent-blue); box-shadow: 0 0 0 1px var(--accent-blue); }
+.char-bench-thumb.selected { border-color: var(--accent-blue); box-shadow: 0 0 0 2px var(--accent-blue); }
 .char-bench-thumb.saved { border-color: #2ea043; }
 .char-bench-saved-badge {
   position: absolute; top: 4px; right: 4px; font-size: 10px; font-weight: 700;
@@ -18509,8 +18540,10 @@ body.detached-module .mod-grid-3 {
 }
 @media (max-width: 900px) {
   .char-bench { inset: 2vh 2vw; }
-  .char-bench-body { flex-direction: column; }
-  .char-bench-form { flex: 0 0 auto; }
-  .char-bench-compare { flex-direction: row; min-height: 40vh; }
-  .char-bench-strip { flex: 0 0 auto; flex-direction: row; overflow-x: auto; }
+  .char-bench-body { flex-direction: column; overflow-y: auto; }
+  .char-bench-form { flex: 0 0 auto; max-width: none; }
+  .char-bench-compare { flex-direction: row; min-height: 46vh; }
+  .char-bench-strip { flex: 0 0 auto; }
+  .char-bench-strip-body { flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+  .char-bench-thumb { width: 104px; }
 }

@@ -425,6 +425,10 @@ class HeadlessResultStore:
                 payload[key] = value
             elif str(key).startswith("remote_preset_"):
                 payload[key] = value
+            elif str(key).startswith("character_asset_"):
+                payload[key] = value
+        if payload.get("character_asset_request"):
+            payload["history_id"] = str(getattr(item, "history_id", "") or "")
         if payload.get("artist_thumb_request") and not payload.get("artist_thumb_artist"):
             payload["artist_thumb_artist"] = str(params.get("_remote_queue_label") or "")
         return payload

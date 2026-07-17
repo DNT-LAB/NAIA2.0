@@ -45,6 +45,10 @@ HEADLESS_SERVICE_SPECS = {
         "HeadlessConditionalPromptService",
     ),
     "character": HeadlessServiceSpec("core.headless_character_service", "HeadlessCharacterService"),
+    "character_asset": HeadlessServiceSpec(
+        "core.headless_character_asset_service",
+        "HeadlessCharacterAssetService",
+    ),
     "wildcard": HeadlessServiceSpec("core.headless_wildcard_service", "HeadlessWildcardService"),
     "instant_wildcard": HeadlessServiceSpec(
         "core.headless_instant_wildcard_service",

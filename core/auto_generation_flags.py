@@ -14,6 +14,7 @@ from typing import Any, Callable
 # "plain generate"가 아니면 캡처도 주입도 하지 않는다.
 AUTO_GENERATE_SUPPRESSED_FLAGS = {
     "artist_thumb_request",
+    "character_asset_request",
     "character_viewer_request",
     "event_preset_request",
     "interactive_mode_request",

@@ -1315,6 +1315,13 @@ async def _broadcast_generation_error(
             "frame": str(params.get("sequence_preset_frame") or ""),
             "message": message,
         })
+    if params.get("character_asset_request"):
+        await broadcast_json(clients, {
+            "type": "character_asset_generation_error",
+            "requestId": str(params.get("character_asset_request_id") or ""),
+            "candidate": params.get("character_asset_candidate"),
+            "message": message,
+        })
     await broadcast_json(clients, context.queue_state_payload())
     if img2img_failed:
         await _broadcast_img2img_generation_state(context, clients)

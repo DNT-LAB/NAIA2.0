@@ -1,0 +1,673 @@
+// Character Asset tab — persistent image-based character library (web port of
+// the desktop character asset storage, Dev0714). Gallery + detail + standard
+// reference generation. Server state is the source of truth; the whole pane is
+// re-rendered from fetched data and events are bound once via delegation.
+
+const API = {
+  list: '/api/character-asset/list',
+  detail: id => `/api/character-asset/detail?id=${encodeURIComponent(id)}`,
+  thumb: (id, revision) => `/api/character-asset/thumb?id=${encodeURIComponent(id)}&size=grid&v=${revision || 0}`,
+  variationThumb: (id, hash, revision) =>
+    `/api/character-asset/thumb?id=${encodeURIComponent(id)}&variation=${encodeURIComponent(hash)}&size=grid&v=${revision || 0}`,
+  image: (id, hash, revision) =>
+    `/api/character-asset/image?id=${encodeURIComponent(id)}${hash ? `&variation=${encodeURIComponent(hash)}` : ''}&v=${revision || 0}`,
+  save: '/api/character-asset/save',
+  apply: '/api/character-asset/apply',
+  rename: '/api/character-asset/rename',
+  remove: '/api/character-asset/delete',
+  removeVariation: '/api/character-asset/delete-variation',
+  promote: '/api/character-asset/promote',
+  generate: '/api/character-asset/generate',
+  historyThumb: id => `/api/history/thumb/${encodeURIComponent(id)}`,
+};
+
+const GENERATE_MAX = 8;
+
+export function createCharacterAssetTabController({
+  document,
+  fetch,
+  escHtml,
+  showToast,
+  showPromptDialog = null,
+  getGenerationMode,
+  getCharacterState = null,
+}) {
+  const root = document.getElementById('charAssetRoot');
+  let active = false;
+  let loadedOnce = false;
+  let loading = false;
+  let characters = [];
+  let selectedId = '';
+  let selectedVariation = '';
+  let detail = null;
+  let detailLoading = false;
+  let staged = null;              // {source:{kind,...}, label}
+  let deleteArmed = '';           // 'char:<id>' | 'variation:<hash>' (2-step confirm)
+  let deleteArmTimer = null;
+  let generateOpen = false;
+  let genPrompt = '';
+  let genUc = '';
+  let genCount = 4;
+  let genRequestId = '';
+  let genCandidates = [];         // [{index, status:'pending'|'done'|'error', historyId, message}]
+  let busy = false;
+
+  function escAttr(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function isNai() {
+    try {
+      return String(getGenerationMode ? getGenerationMode() : 'NAI').toUpperCase() === 'NAI';
+    } catch {
+      return false;
+    }
+  }
+
+  function newRequestId() {
+    try {
+      return globalThis.crypto.randomUUID().replace(/-/g, '');
+    } catch {
+      return `ca${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    }
+  }
+
+  async function api(url, options = null) {
+    const response = await fetch(url, options || undefined);
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    if (!response.ok) {
+      throw new Error(String(payload?.error || `HTTP ${response.status}`));
+    }
+    return payload || {};
+  }
+
+  function postJson(url, body) {
+    return api(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body || {}),
+    });
+  }
+
+  function summaryName(entry) {
+    const custom = String(entry?.display_name || '').trim();
+    if (custom) return custom;
+    return String(entry?.id || '').slice(0, 8);
+  }
+
+  function disarmDelete() {
+    deleteArmed = '';
+    if (deleteArmTimer) {
+      globalThis.clearTimeout(deleteArmTimer);
+      deleteArmTimer = null;
+    }
+  }
+
+  function armDelete(key) {
+    disarmDelete();
+    deleteArmed = key;
+    deleteArmTimer = globalThis.setTimeout(() => {
+      deleteArmed = '';
+      deleteArmTimer = null;
+      render();
+    }, 3000);
+  }
+
+  // ------------------------------------------------------------- data loads
+
+  async function load(force = false) {
+    if (loading) return;
+    if (loadedOnce && !force && characters.length) {
+      render();
+      return;
+    }
+    loading = true;
+    render();
+    try {
+      const state = await api(API.list);
+      characters = Array.isArray(state?.characters) ? state.characters : [];
+      loadedOnce = true;
+      if (selectedId && !characters.some(entry => entry.id === selectedId)) {
+        selectedId = '';
+        selectedVariation = '';
+        detail = null;
+      }
+    } catch (error) {
+      console.error('Character Asset list failed', error);
+      showToast(`에셋 목록 로드 실패: ${error.message}`, 'error');
+    } finally {
+      loading = false;
+      render();
+    }
+  }
+
+  async function select(id, variation = '') {
+    selectedId = String(id || '');
+    selectedVariation = String(variation || '');
+    detail = null;
+    disarmDelete();
+    if (!selectedId) {
+      render();
+      return;
+    }
+    detailLoading = true;
+    render();
+    try {
+      detail = await api(API.detail(selectedId));
+    } catch (error) {
+      console.error('Character Asset detail failed', error);
+      showToast(`에셋 상세 로드 실패: ${error.message}`, 'error');
+      detail = null;
+    } finally {
+      detailLoading = false;
+      render();
+    }
+  }
+
+  async function refreshAll({keepSelection = true} = {}) {
+    const keptId = keepSelection ? selectedId : '';
+    const keptVariation = keepSelection ? selectedVariation : '';
+    await load(true);
+    if (keptId && characters.some(entry => entry.id === keptId)) {
+      await select(keptId, keptVariation);
+    }
+  }
+
+  // ---------------------------------------------------------------- actions
+
+  async function saveStaged(target) {
+    if (!staged || busy) return;
+    busy = true;
+    render();
+    try {
+      const result = await postJson(API.save, {source: staged.source, target});
+      staged = null;
+      if (result.character_prompt_recovered === false) {
+        showToast('저장됨 - 단, 이 이미지에는 NAI 캐릭터 블록이 없어 C1 적용은 불가합니다', 'warning');
+      } else {
+        showToast(target?.kind === 'variation' ? '바리에이션으로 저장됨' : '캐릭터 에셋으로 저장됨', 'success');
+      }
+      busy = false;
+      await load(true);
+      await select(result.character_id || '');
+    } catch (error) {
+      busy = false;
+      showToast(`에셋 저장 실패: ${error.message}`, 'error');
+      render();
+    }
+  }
+
+  async function saveCandidate(candidate, target) {
+    if (!candidate?.historyId || busy) return;
+    busy = true;
+    render();
+    try {
+      const result = await postJson(API.save, {
+        source: {kind: 'history', history_id: candidate.historyId},
+        target,
+      });
+      showToast(target?.kind === 'variation' ? '바리에이션으로 저장됨' : '캐릭터 에셋으로 저장됨', 'success');
+      candidate.saved = true;
+      busy = false;
+      await load(true);
+      await select(result.character_id || selectedId);
+    } catch (error) {
+      busy = false;
+      showToast(`후보 저장 실패: ${error.message}`, 'error');
+      render();
+    }
+  }
+
+  async function applySlot(mode) {
+    if (!selectedId || busy) return;
+    if (!isNai()) {
+      showToast('캐릭터 슬롯 적용은 NAI 모드 전용입니다', 'error');
+      return;
+    }
+    busy = true;
+    render();
+    try {
+      await postJson(API.apply, {id: selectedId, variation: selectedVariation, mode});
+      showToast(mode === 'add_slot' ? '새 캐릭터 슬롯으로 추가됨' : 'C1 슬롯에 적용됨', 'success');
+    } catch (error) {
+      showToast(`슬롯 적용 실패: ${error.message}`, 'error');
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  async function renameSelected() {
+    if (!selectedId || !showPromptDialog) return;
+    const current = String(detail?.display_name || '');
+    const next = await showPromptDialog('표시 이름을 입력하세요. 비우면 id 요약을 사용합니다.', {
+      title: 'Character Asset',
+      okText: 'Apply',
+      cancelText: 'Cancel',
+      defaultValue: current,
+    });
+    if (next === null) return;
+    try {
+      await postJson(API.rename, {id: selectedId, display_name: next.trim()});
+      showToast('이름이 변경되었습니다', 'success');
+      await refreshAll();
+    } catch (error) {
+      showToast(`이름 변경 실패: ${error.message}`, 'error');
+    }
+  }
+
+  async function deleteSelected() {
+    if (!selectedId || busy) return;
+    const key = `char:${selectedId}`;
+    if (deleteArmed !== key) {
+      armDelete(key);
+      render();
+      return;
+    }
+    disarmDelete();
+    busy = true;
+    render();
+    try {
+      await postJson(API.remove, {id: selectedId});
+      showToast('캐릭터가 삭제되었습니다', 'success');
+      selectedId = '';
+      selectedVariation = '';
+      detail = null;
+      busy = false;
+      await load(true);
+    } catch (error) {
+      busy = false;
+      showToast(`삭제 실패: ${error.message}`, 'error');
+      render();
+    }
+  }
+
+  async function deleteSelectedVariation() {
+    if (!selectedId || !selectedVariation || busy) return;
+    const key = `variation:${selectedVariation}`;
+    if (deleteArmed !== key) {
+      armDelete(key);
+      render();
+      return;
+    }
+    disarmDelete();
+    try {
+      await postJson(API.removeVariation, {id: selectedId, hash: selectedVariation});
+      showToast('바리에이션이 삭제되었습니다', 'success');
+      await refreshAll({keepSelection: true});
+      selectedVariation = '';
+      await select(selectedId);
+    } catch (error) {
+      showToast(`바리에이션 삭제 실패: ${error.message}`, 'error');
+    }
+  }
+
+  async function promoteSelectedVariation() {
+    if (!selectedId || !selectedVariation || busy) return;
+    try {
+      await postJson(API.promote, {id: selectedId, hash: selectedVariation});
+      showToast('대표 이미지로 승격되었습니다', 'success');
+      selectedVariation = '';
+      await refreshAll();
+    } catch (error) {
+      showToast(`승격 실패: ${error.message}`, 'error');
+    }
+  }
+
+  // ------------------------------------------------------------- generation
+
+  function prefillFromC1() {
+    const state = typeof getCharacterState === 'function' ? getCharacterState() : null;
+    const frames = Array.isArray(state?.characters) ? state.characters : [];
+    const c1 = frames[0];
+    if (!c1 || !String(c1.prompt || '').trim()) {
+      showToast('C1 슬롯이 비어 있거나 캐릭터 모듈 상태를 아직 받지 못했습니다', 'error');
+      return;
+    }
+    genPrompt = String(c1.prompt || '');
+    genUc = String(c1.uc || '');
+    render();
+  }
+
+  function prefillFromSelected() {
+    if (!detail || !detail.recovered) {
+      showToast('선택된 에셋에서 캐릭터 프롬프트를 복구할 수 없습니다', 'error');
+      return;
+    }
+    genPrompt = String(detail.character_prompt || '');
+    genUc = String(detail.character_uc || '');
+    render();
+  }
+
+  async function startGeneration() {
+    if (busy) return;
+    if (!isNai()) {
+      showToast('표준 레퍼런스 생성은 NAI 모드 전용입니다', 'error');
+      return;
+    }
+    if (genCandidates.some(candidate => candidate.status === 'pending')) {
+      // 이미 과금된 이전 배치의 request_id를 교체하면 그 결과들이 영영 매칭되지
+      // 않는다 - 모든 후보가 terminal 상태가 될 때까지 재실행을 막는다.
+      showToast('이전 생성 배치가 아직 진행 중입니다', 'error');
+      return;
+    }
+    const prompt = genPrompt.trim();
+    if (!prompt) {
+      showToast('캐릭터 프롬프트를 입력하세요', 'error');
+      return;
+    }
+    busy = true;
+    const count = Math.max(1, Math.min(GENERATE_MAX, Number(genCount) || 1));
+    genRequestId = newRequestId();
+    genCandidates = Array.from({length: count}, (_, index) => ({
+      index,
+      status: 'pending',
+      historyId: '',
+      message: '',
+      saved: false,
+    }));
+    render();
+    try {
+      const result = await postJson(API.generate, {
+        character_prompt: prompt,
+        character_uc: genUc.trim(),
+        count,
+        request_id: genRequestId,
+      });
+      const accepted = new Set(result?.accepted || []);
+      (result?.rejected || []).forEach(rejection => {
+        const candidate = genCandidates[Number(rejection?.candidate)];
+        if (candidate) {
+          candidate.status = 'error';
+          candidate.message = String(rejection?.message || rejection?.reason || 'rejected');
+        }
+      });
+      if (!accepted.size) {
+        showToast('생성 요청이 큐에 들어가지 못했습니다', 'error');
+      } else {
+        showToast(`표준 레퍼런스 생성 ${accepted.size}건 요청됨`, 'success');
+      }
+    } catch (error) {
+      genCandidates.forEach(candidate => {
+        if (candidate.status === 'pending') {
+          candidate.status = 'error';
+          candidate.message = error.message;
+        }
+      });
+      showToast(`생성 요청 실패: ${error.message}`, 'error');
+    }
+    busy = false;
+    render();
+  }
+
+  function handleResultMeta(meta) {
+    if (!meta || typeof meta !== 'object') return;
+    if (!meta.character_asset_request) return;
+    if (String(meta.character_asset_request_id || '') !== genRequestId || !genRequestId) return;
+    const candidate = genCandidates[Number(meta.character_asset_candidate)];
+    if (!candidate || candidate.status === 'done') return;
+    candidate.status = 'done';
+    candidate.historyId = String(meta.history_id || '');
+    render();
+  }
+
+  function handleGenerationError(message) {
+    if (!message || typeof message !== 'object') return;
+    if (String(message.requestId || '') !== genRequestId || !genRequestId) return;
+    const candidate = genCandidates[Number(message.candidate)];
+    if (!candidate || candidate.status === 'done') return;
+    candidate.status = 'error';
+    candidate.message = String(message.message || 'generation failed');
+    render();
+  }
+
+  // ---------------------------------------------------------------- staging
+
+  function stageFromContext(context = {}) {
+    // The caller must pin a stable path (history rel_path or saved rel_path) at
+    // click time - a floating "current result" reference could save a different
+    // image if a new result lands before the user picks a save target.
+    const path = String(context?.path || '');
+    if (!path) {
+      showToast('저장할 이미지를 특정할 수 없습니다', 'error');
+      return;
+    }
+    staged = {source: {kind: 'viewer', rel_path: path}, label: String(context?.label || path)};
+    generateOpen = false;
+    render();
+  }
+
+  // --------------------------------------------------------------- rendering
+
+  function renderStagedBanner() {
+    if (!staged) return '';
+    const variationDisabled = !selectedId ? 'disabled' : '';
+    return `
+      <div class="char-asset-banner">
+        <div class="char-asset-banner-label">저장 대기: ${escHtml(staged.label)}</div>
+        <div class="char-asset-banner-actions">
+          <button class="mod-btn-sm" data-action="staged-new" ${busy ? 'disabled' : ''}>새 캐릭터로 저장</button>
+          <button class="mod-btn-sm" data-action="staged-variation" ${variationDisabled || (busy ? 'disabled' : '')}
+            title="${selectedId ? '' : '갤러리에서 대상 캐릭터를 먼저 선택하세요'}">선택 캐릭터의 바리에이션으로</button>
+          <button class="mod-btn-sm" data-action="staged-cancel">취소</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderGrid() {
+    const cards = characters.map(entry => `
+      <button class="char-asset-card ${entry.id === selectedId ? 'selected' : ''}" data-action="select" data-id="${escAttr(entry.id)}">
+        <img class="char-asset-card-img" loading="lazy" src="${API.thumb(entry.id, entry.revision)}" alt="">
+        <span class="char-asset-card-name">${escHtml(summaryName(entry))}</span>
+        <span class="char-asset-card-count">${entry.variation_count ? `+${entry.variation_count}` : ''}</span>
+      </button>
+    `).join('');
+    return `
+      <div class="char-asset-toolbar">
+        <button class="mod-btn-sm ${generateOpen ? 'active' : ''}" data-action="toggle-generate">+ 표준 레퍼런스 생성</button>
+        <button class="mod-btn-sm" data-action="refresh">↻</button>
+        <span class="char-asset-count">${characters.length} characters</span>
+      </div>
+      <div class="char-asset-grid">
+        ${loading ? '<div class="mod-empty">Loading...</div>' : (cards || '<div class="mod-empty">저장된 캐릭터 에셋이 없습니다. 결과 이미지 우클릭 → "캐릭터 에셋으로 저장" 또는 표준 레퍼런스 생성으로 시작하세요.</div>')}
+      </div>
+    `;
+  }
+
+  function renderVariationStrip() {
+    if (!detail) return '';
+    const primarySelected = !selectedVariation;
+    const primary = `
+      <button class="char-asset-var ${primarySelected ? 'selected' : ''}" data-action="select-variation" data-hash="">
+        <img loading="lazy" src="${API.thumb(detail.id, detail.revision)}" alt="">
+        <span class="char-asset-var-star">★</span>
+      </button>
+    `;
+    const variations = (detail.variations || []).map(variation => `
+      <button class="char-asset-var ${variation.hash === selectedVariation ? 'selected' : ''}"
+        data-action="select-variation" data-hash="${escAttr(variation.hash)}">
+        <img loading="lazy" src="${API.variationThumb(detail.id, variation.hash, variation.revision)}" alt="">
+      </button>
+    `).join('');
+    return `<div class="char-asset-var-strip">${primary}${variations}</div>`;
+  }
+
+  function renderDetail() {
+    if (!selectedId) {
+      return '<div class="mod-empty char-asset-detail-empty">캐릭터를 선택하세요.</div>';
+    }
+    if (detailLoading || !detail) {
+      return '<div class="mod-empty char-asset-detail-empty">Loading...</div>';
+    }
+    const nai = isNai();
+    const naiTitle = nai ? '' : 'title="NAI 모드 전용"';
+    const naiDisabled = nai && !busy ? '' : 'disabled';
+    const applyDisabled = detail.recovered ? naiDisabled : 'disabled';
+    const applyTitle = detail.recovered ? naiTitle : 'title="이 이미지에는 NAI 캐릭터 블록이 없습니다"';
+    const revision = detail.revision || 0;
+    const charDeleteArmed = deleteArmed === `char:${selectedId}`;
+    const variationDeleteArmed = deleteArmed === `variation:${selectedVariation}`;
+    const entry = characters.find(item => item.id === selectedId);
+    return `
+      <div class="char-asset-detail-head">
+        <div class="char-asset-detail-name">${escHtml(summaryName({...entry, display_name: detail.display_name}))}
+          <span class="char-asset-detail-id">${escHtml(selectedId)}</span>
+        </div>
+        <div class="char-asset-detail-head-actions">
+          <button class="mod-btn-sm" data-action="rename">이름변경</button>
+          <button class="mod-btn-sm mod-btn-danger" data-action="delete-character" ${busy ? 'disabled' : ''}>
+            ${charDeleteArmed ? '한 번 더 클릭하면 삭제' : '캐릭터 삭제'}
+          </button>
+        </div>
+      </div>
+      <div class="char-asset-preview">
+        <img src="${API.image(detail.id, selectedVariation, revision)}" alt="">
+      </div>
+      ${renderVariationStrip()}
+      <div class="char-asset-var-actions" ${selectedVariation ? '' : 'hidden'}>
+        <button class="mod-btn-sm" data-action="promote">★ 대표로 승격</button>
+        <button class="mod-btn-sm mod-btn-danger" data-action="delete-variation">
+          ${variationDeleteArmed ? '한 번 더 클릭하면 삭제' : '바리에이션 삭제'}
+        </button>
+      </div>
+      <div class="char-asset-prompt-block">
+        <div class="mod-section-label">Character Prompt ${detail.recovered ? '' : '<span class="char-asset-warn">(복구 불가 - NAI 캐릭터 블록 없음)</span>'}</div>
+        <pre class="char-asset-pre">${escHtml(detail.character_prompt || '(empty)')}</pre>
+        <div class="mod-section-label">Character UC</div>
+        <pre class="char-asset-pre">${escHtml(detail.character_uc || '(empty)')}</pre>
+      </div>
+      <div class="char-asset-apply-actions">
+        <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1" ${applyDisabled} ${applyTitle}>C1 적용 (단독)</button>
+        <button class="mod-btn-sm" data-action="apply-add" ${applyDisabled} ${applyTitle}>새 슬롯으로 추가</button>
+      </div>
+    `;
+  }
+
+  function renderCandidates() {
+    if (!genCandidates.length) return '';
+    const cards = genCandidates.map(candidate => {
+      if (candidate.status === 'pending') {
+        return `<div class="char-asset-candidate pending"><div class="char-asset-candidate-body">생성 중...</div></div>`;
+      }
+      if (candidate.status === 'error') {
+        return `<div class="char-asset-candidate error"><div class="char-asset-candidate-body" title="${escAttr(candidate.message)}">실패</div></div>`;
+      }
+      return `
+        <div class="char-asset-candidate done ${candidate.saved ? 'saved' : ''}">
+          <img loading="lazy" src="${API.historyThumb(candidate.historyId)}" alt="">
+          <div class="char-asset-candidate-actions">
+            <button class="mod-btn-sm" data-action="candidate-new" data-index="${candidate.index}" ${busy ? 'disabled' : ''}>새 캐릭터</button>
+            <button class="mod-btn-sm" data-action="candidate-variation" data-index="${candidate.index}"
+              ${selectedId && !busy ? '' : 'disabled'} title="${selectedId ? '' : '대상 캐릭터를 먼저 선택하세요'}">바리에이션</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+    return `<div class="char-asset-candidate-strip">${cards}</div>`;
+  }
+
+  function renderGenerateForm() {
+    if (!generateOpen) return '';
+    const nai = isNai();
+    return `
+      <div class="char-asset-generate">
+        <div class="mod-section-label">표준 레퍼런스 생성 - 고정 전신 스캐폴드(768x1344) + 캐릭터 프롬프트</div>
+        <textarea class="mod-textarea char-asset-gen-prompt" data-field="gen-prompt" placeholder="character prompt...">${escHtml(genPrompt)}</textarea>
+        <textarea class="mod-textarea mod-uc char-asset-gen-uc" data-field="gen-uc" placeholder="character UC (optional)...">${escHtml(genUc)}</textarea>
+        <div class="char-asset-gen-controls">
+          <button class="mod-btn-sm" data-action="prefill-c1">C1에서 가져오기</button>
+          <button class="mod-btn-sm" data-action="prefill-selected" ${detail?.recovered ? '' : 'disabled'}>선택 에셋에서</button>
+          <label class="char-asset-gen-count">횟수
+            <input type="number" min="1" max="${GENERATE_MAX}" value="${Number(genCount) || 1}" data-field="gen-count">
+          </label>
+          <button class="mod-btn-sm mod-btn-encode" data-action="generate-start" ${nai && !busy ? '' : 'disabled'}
+            ${nai ? '' : 'title="NAI 모드 전용"'}>생성 시작</button>
+        </div>
+        ${renderCandidates()}
+      </div>
+    `;
+  }
+
+  function render() {
+    if (!root) return;
+    root.innerHTML = `
+      <div class="char-asset-shell">
+        ${renderStagedBanner()}
+        ${renderGenerateForm()}
+        <div class="char-asset-columns">
+          <section class="char-asset-gallery">${renderGrid()}</section>
+          <section class="char-asset-detail">${renderDetail()}</section>
+        </div>
+      </div>
+    `;
+  }
+
+  // ---------------------------------------------------------------- events
+
+  if (root) {
+    root.addEventListener('click', event => {
+      const button = event.target.closest('[data-action]');
+      if (!button || button.disabled) return;
+      const action = button.dataset.action;
+      if (action === 'select') select(button.dataset.id || '');
+      else if (action === 'select-variation') {
+        selectedVariation = button.dataset.hash || '';
+        disarmDelete();
+        render();
+      }
+      else if (action === 'refresh') refreshAll();
+      else if (action === 'toggle-generate') {
+        generateOpen = !generateOpen;
+        render();
+      }
+      else if (action === 'staged-new') saveStaged({kind: 'new'});
+      else if (action === 'staged-variation') saveStaged({kind: 'variation', character_id: selectedId});
+      else if (action === 'staged-cancel') { staged = null; render(); }
+      else if (action === 'apply-c1') applySlot('c1');
+      else if (action === 'apply-add') applySlot('add_slot');
+      else if (action === 'rename') renameSelected();
+      else if (action === 'delete-character') deleteSelected();
+      else if (action === 'delete-variation') deleteSelectedVariation();
+      else if (action === 'promote') promoteSelectedVariation();
+      else if (action === 'prefill-c1') prefillFromC1();
+      else if (action === 'prefill-selected') prefillFromSelected();
+      else if (action === 'generate-start') startGeneration();
+      else if (action === 'candidate-new') {
+        const candidate = genCandidates[Number(button.dataset.index)];
+        saveCandidate(candidate, {kind: 'new'});
+      }
+      else if (action === 'candidate-variation') {
+        const candidate = genCandidates[Number(button.dataset.index)];
+        saveCandidate(candidate, {kind: 'variation', character_id: selectedId});
+      }
+    });
+    root.addEventListener('input', event => {
+      const field = event.target.closest('[data-field]');
+      if (!field) return;
+      if (field.dataset.field === 'gen-prompt') genPrompt = field.value;
+      else if (field.dataset.field === 'gen-uc') genUc = field.value;
+      else if (field.dataset.field === 'gen-count') genCount = Number(field.value) || 1;
+    });
+  }
+
+  return {
+    setActive(next) {
+      active = !!next;
+      if (!active) disarmDelete();
+    },
+    load: () => load(false),
+    handleResultMeta,
+    handleGenerationError,
+    stageFromContext,
+  };
+}

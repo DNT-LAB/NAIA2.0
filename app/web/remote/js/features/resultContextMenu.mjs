@@ -21,6 +21,7 @@ const ACTION_GROK_I2V = 'grok_i2v'; // Grok 영상 (제거 가능)
 const ACTION_DIRECTOR = 'nai_director_tool'; // NAI Director Tools (제거 가능)
 const ACTION_SET_CHAR_REF = 'set_character_reference'; // 결과 이미지를 Character Reference 창에 할당
 const ACTION_SET_VIBE = 'set_vibe_transfer';           // 결과 이미지를 Vibe Transfer 창에 할당
+const ACTION_SAVE_CHAR_ASSET = 'save_character_asset'; // 결과 이미지를 캐릭터 에셋 라이브러리에 저장
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -121,6 +122,7 @@ const MAIN_IMAGE_MENU = [
       {label: 'Use as outpainting base'},
       {label: 'Set as Character Reference', action: ACTION_SET_CHAR_REF, modes: ['NAI']},
       {label: 'Set as Vibe Transfer', action: ACTION_SET_VIBE, modes: ['NAI']},
+      {label: '캐릭터 에셋으로 저장', action: ACTION_SAVE_CHAR_ASSET, modes: ['NAI']},
     ],
   },
   {type: 'separator'},
@@ -178,6 +180,7 @@ const THUMBNAIL_MENU = [
       {label: 'Send to img2img', action: ACTION_IMAGE_ACTION, imageAction: 'img2img', capability: 'image_action', desktopImg2Img: true, modes: ['NAI']},
       {label: 'Set as Character Reference', action: ACTION_SET_CHAR_REF, modes: ['NAI']},
       {label: 'Set as Vibe Transfer', action: ACTION_SET_VIBE, modes: ['NAI']},
+      {label: '캐릭터 에셋으로 저장', action: ACTION_SAVE_CHAR_ASSET, modes: ['NAI']},
     ],
   },
   {type: 'separator'},
@@ -256,6 +259,7 @@ export function createResultContextMenu({
   onDirector = null,
   onSetCharacterReference = null,
   onSetVibeTransfer = null,
+  onSaveCharacterAsset = null,
   onDelete = null,
   getWildcardFreezeState = () => ({}),
   setWildcardFreezeState = null,
@@ -437,6 +441,9 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_SET_VIBE) {
       return typeof onSetVibeTransfer === 'function' && Boolean(context?.hasImage);
+    }
+    if (item.action === ACTION_SAVE_CHAR_ASSET) {
+      return typeof onSaveCharacterAsset === 'function' && Boolean(context?.hasImage);
     }
     if (item.action === ACTION_DELETE_RESULT) {
       // capability 'delete'는 위에서 이미 검증됨 (백엔드 asset이 history item 존재 시 true).
@@ -705,6 +712,8 @@ export function createResultContextMenu({
           if (typeof onSetCharacterReference === 'function') onSetCharacterReference(context);
         } else if (action === ACTION_SET_VIBE) {
           if (typeof onSetVibeTransfer === 'function') onSetVibeTransfer(context);
+        } else if (action === ACTION_SAVE_CHAR_ASSET) {
+          if (typeof onSaveCharacterAsset === 'function') onSaveCharacterAsset(context);
         } else if (action === ACTION_DELETE_RESULT) {
           if (typeof onDelete === 'function') onDelete(context, deleteMode);
         }

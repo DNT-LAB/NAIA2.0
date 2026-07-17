@@ -418,6 +418,7 @@ export function createCharacterPanel({
             <button class="mod-btn-sm" onclick="addCharacterSlot()">+ Add Character</button>
             <button class="mod-btn-sm mod-btn-encode" onclick="refreshCharacterPreview()">Refresh Preview</button>
             <button class="mod-btn-sm mod-cold-toggle ${coldPanelOpen ? 'active' : ''}" onclick="toggleCharacterColdPanel()">Cold (${coldSlots.length})</button>
+            <button class="mod-btn-sm" title="캐릭터 에셋 라이브러리 (이미지 기반 영구 보관함)" onclick="openCharacterAssetTab()">Assets</button>
             <span class="mod-char-meta">${nextState.active_count || 0} active / ${workingSlots.length} work / ${coldSlots.length} cold</span>
           </div>
           ${charsHtml}

@@ -134,6 +134,9 @@ class WebSessionContext:
     def _character_reference_service(self):
         return self._lazy_service("character_reference")
 
+    def _character_asset_service(self):
+        return self._lazy_service("character_asset")
+
     def _vibe_transfer_service(self):
         return self._lazy_service("vibe_transfer")
 

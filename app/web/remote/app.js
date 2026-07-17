@@ -316,6 +316,7 @@ function initNaiaTitleTooltips() {
 
 let automationPanel = null;
 let characterPanel = null;
+let characterAssetControl = null;
 let conditionalPromptPanel = null;
 let eventStreamPanel = null;
 let wildcardPanel = null;
@@ -484,6 +485,23 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
   })
   .catch(error => {
     console.error('Failed to initialize Character Viewer tab module', error);
+  });
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20260717-init1')
+  .then(({createCharacterAssetTabController}) => {
+    characterAssetControl = createCharacterAssetTabController({
+      document,
+      fetch: window.fetch.bind(window),
+      escHtml,
+      showToast,
+      showPromptDialog,
+      getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
+      // onModuleState가 모든 module_state를 일반 캐시하므로(접속 직후 일괄 요청 포함)
+      // 캐릭터 패널을 연 적이 없어도 C1 프리필이 최신 상태를 읽는다.
+      getCharacterState: () => moduleStateCache.get('character') || null,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize Character Asset tab module', error);
   });
 const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1')
   .then(({createStudioTabController}) => {
@@ -707,7 +725,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260713-search-contract-r5')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260717-charasset1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -740,6 +758,23 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onDirector: context => openNaiDirector(context),
       onSetCharacterReference: context => callResultImageAction('requestContextImageAction', context, 'character_reference'),
       onSetVibeTransfer: context => callResultImageAction('requestContextImageAction', context, 'vibe'),
+      onSaveCharacterAsset: context => {
+        if (!characterAssetControl) {
+          showToast('Character Asset tab is not ready', 'error');
+          return;
+        }
+        // 클릭 시점의 이미지를 안정 경로로 고정한다 - '현재 결과'는 rel_path가
+        // 없으므로 히스토리 최신 항목(__history_item__/{id})으로 핀한다. 저장
+        // 버튼을 누르기 전에 새 결과가 도착해도 대상이 바뀌지 않는다.
+        const pinnedPath = String(context?.path || '')
+          || (resultHistory ? String(resultHistory.latestImagePath || '') : '');
+        if (!pinnedPath) {
+          showToast('저장할 이미지를 특정할 수 없습니다', 'error');
+          return;
+        }
+        characterAssetControl.stageFromContext({...(context || {}), path: pinnedPath});
+        switchRightTab('charAssets');
+      },
       onDelete: (context, mode) => deleteResultFromContext(context, mode),
       onQueueResult: (context, options) => callResultImageAction('queueResultFromContext', context, options),
       getWildcardFreezeState: () => latestWildcardFreezeState,
@@ -1079,7 +1114,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260704-char-uuid-run2')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20260717-charasset1')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -2559,6 +2594,9 @@ const wsMessageHandlers = {
     if (resultEnhance) resultEnhance.setConfig(m);
   },
   queue_state: m => { if (queuePanel) queuePanel.handleState(m); },
+  character_asset_generation_error: m => {
+    if (characterAssetControl) characterAssetControl.handleGenerationError(m);
+  },
   comfyui_workflow_state: onComfyUiWorkflowState,
   mode_result: onModeResult,
   api_status: updateApiStatus,
@@ -2694,6 +2732,9 @@ function updateMeta(m) {
   }
   if (characterViewerControl && typeof characterViewerControl.handleResultMeta === 'function') {
     characterViewerControl.handleResultMeta(m);
+  }
+  if (characterAssetControl && typeof characterAssetControl.handleResultMeta === 'function') {
+    characterAssetControl.handleResultMeta(m);
   }
   if (resultEnhance) {
     resultEnhanceAssetRequestId += 1;
@@ -4043,6 +4084,10 @@ function switchRightTab(tabName, options = {}) {
     characterViewerControl.setActive(activeTab === 'characters');
   }
   if (activeTab === 'characters' && characterViewerControl) characterViewerControl.load();
+  if (characterAssetControl && typeof characterAssetControl.setActive === 'function') {
+    characterAssetControl.setActive(activeTab === 'charAssets');
+  }
+  if (activeTab === 'charAssets' && characterAssetControl) characterAssetControl.load();
   if (danbooruTabControl && typeof danbooruTabControl.setActive === 'function') {
     danbooruTabControl.setActive(activeTab === 'danbooru');
   }
@@ -7197,6 +7242,11 @@ function renderAutomation(m) {
 // ---- Character module ----
 function renderCharacter(m) {
   if (characterPanel) characterPanel.render(m);
+}
+
+function openCharacterAssetTab() {
+  closeModule();
+  switchRightTab('charAssets');
 }
 
 // ---- Conditional Prompt module ----

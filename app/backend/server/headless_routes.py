@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI, WebSocket
 
 from app.backend.server.artist_thumbnail_routes import register_artist_thumbnail_routes
+from app.backend.server.character_asset_routes import register_character_asset_routes
 from app.backend.server.character_viewer_routes import register_character_viewer_routes
 from app.backend.server.data_migration_routes import register_data_migration_routes
 from app.backend.server.danbooru_routes import register_danbooru_routes
@@ -159,6 +160,13 @@ def register_headless_routes(
         start_generation_runner=ensure_generation_runner,
     )
     register_character_viewer_routes(
+        app,
+        context,
+        run_in_thread=run_in_thread,
+        clients=clients,
+        start_generation_runner=ensure_generation_runner,
+    )
+    register_character_asset_routes(
         app,
         context,
         run_in_thread=run_in_thread,

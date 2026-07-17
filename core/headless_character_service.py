@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 
 class HeadlessCharacterService:
     def __init__(self, context: Any):
         self.context = context
+        # Serializes every read-modify-save commit on the shared settings dict
+        # and CharacterModule_{MODE}.json - WS set_param runs on the event loop
+        # while REST bulk applies run on worker threads.
+        self._commit_lock = threading.RLock()
 
     def settings_by_mode(self) -> dict[str, dict[str, Any]]:
         cache = getattr(self.context, "_character_settings_state", None)
@@ -62,7 +67,69 @@ class HeadlessCharacterService:
         state["runtime"] = "web"
         return state
 
+    def apply_asset(self, prompt: str, uc: str, mode: str = "c1") -> dict[str, Any]:
+        with self._commit_lock:
+            return self._apply_asset_locked(prompt, uc, mode)
+
+    def _apply_asset_locked(self, prompt: str, uc: str, mode: str = "c1") -> dict[str, Any]:
+        """Bulk slot apply for the Character Asset library.
+
+        Shares set_param's commit invariants (conditional metadata cleanup,
+        save_settings, snapshot invalidation) instead of letting callers poke
+        the settings cache directly.
+
+        - "c1": Dev0714 assign_c1 parity — write frames[0], make it the only
+          active slot. Cold slots keep their state; custom names/uuids are
+          preserved (only prompt/uc/state fields change).
+        - "add_slot": append a fresh active frame.
+        Either way the module itself is activated.
+        """
+        context = self.context
+        api_mode = context.get_api_mode()
+        settings = self.settings_cache()
+        frames = settings.setdefault("character_frames", [])
+        apply_mode = str(mode or "c1").strip().lower()
+        if apply_mode == "add_slot":
+            frames.append({
+                "prompt": str(prompt or ""),
+                "uc": str(uc or ""),
+                "is_enabled": True,
+                "slot_state": "active",
+                "custom_name": "",
+            })
+        elif apply_mode == "c1":
+            frame = self.ensure_frame(frames, 0)
+            frame["prompt"] = str(prompt or "")
+            frame["uc"] = str(uc or "")
+            frame["is_enabled"] = True
+            frame["slot_state"] = "active"
+            for other in frames[1:]:
+                if not isinstance(other, dict):
+                    continue
+                if str(other.get("slot_state") or "").strip().lower() == "cold":
+                    continue
+                other["is_enabled"] = False
+                other["slot_state"] = "inactive"
+        else:
+            raise ValueError(f"unknown apply mode: {apply_mode}")
+        settings["is_active"] = True
+        prompt_context = getattr(context, "current_prompt_context", None)
+        metadata = getattr(prompt_context, "metadata", None)
+        if isinstance(metadata, dict):
+            metadata.pop("conditional_character_overrides", None)
+            metadata.pop("_conditional_character_slots", None)
+            metadata.pop("conditional_character_skips", None)
+        self.save_settings(api_mode, settings)
+        from core.character_settings import clear_character_roll_snapshot
+
+        clear_character_roll_snapshot(context, api_mode)
+        return self.state()
+
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
+        with self._commit_lock:
+            return self._set_param_locked(key, value)
+
+    def _set_param_locked(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
         mode = context.get_api_mode()
         settings = self.settings_cache()

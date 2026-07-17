@@ -6,6 +6,7 @@
   "route_sources": [
     "core/web_session_app.py",
     "app/backend/server/artist_thumbnail_routes.py",
+    "app/backend/server/character_asset_routes.py",
     "app/backend/server/character_viewer_routes.py",
     "app/backend/server/data_migration_routes.py",
     "app/backend/server/danbooru_routes.py",
@@ -251,6 +252,74 @@
         {"method": "POST", "path": "/api/character-viewer/options", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/character-viewer/thumbnail", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/character-viewer/generate", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "character_asset",
+      "name": "Character Asset library (image-based character storage)",
+      "source_files": [
+        "app/backend/server/character_asset_routes.py",
+        "core/headless_character_asset_service.py",
+        "utils/character_asset_storage.py",
+        "app/web/remote/js/features/characterAssetTab.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/api/character-asset/list",
+          "smoke": "non_destructive"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/detail",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/thumb",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/image",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/save",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/apply",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/rename",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/delete",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/delete-variation",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/promote",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/generate",
+          "smoke": "external_live"
+        }
       ]
     },
     {

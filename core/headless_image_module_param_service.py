@@ -55,7 +55,9 @@ class HeadlessImageModuleParamService:
     def apply(self, params: dict[str, Any], api_mode: str) -> None:
         if str(api_mode or "").upper() != "NAI":
             return
-        if not params.get("director_reference_descriptions"):
+        if not params.get("director_reference_descriptions") and not params.get(
+            "_skip_character_reference_late_binding"
+        ):
             params.update(self.active_character_reference_params())
         if params.get("_skip_vibe_transfer_late_binding"):
             return

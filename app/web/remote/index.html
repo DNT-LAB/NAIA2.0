@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260714-qf-released">
+<link rel="stylesheet" href="style.css?v=20260717-charasset1">
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -718,6 +718,9 @@
     <button class="right-tab-btn" data-right-tab="characters" onclick="switchRightTab('characters')" role="tab" aria-selected="false">
       <span class="right-tab-icon">👤</span><span>Characters</span>
     </button>
+    <button class="right-tab-btn" data-right-tab="charAssets" onclick="switchRightTab('charAssets')" role="tab" aria-selected="false">
+      <span class="right-tab-icon">🧍</span><span>Assets</span>
+    </button>
     <button class="right-tab-btn" data-right-tab="danbooru" data-right-tab-hidden="true" onclick="switchRightTab('danbooru')" role="tab" aria-selected="false" aria-hidden="true" tabindex="-1" hidden>
       <span class="right-tab-icon">D</span><span>Danbooru</span>
     </button>
@@ -1082,6 +1085,10 @@
       </section>
     </div>
   </div>
+  <div class="right-tab-pane" id="rightTabCharAssets" data-right-pane="charAssets" hidden role="tabpanel">
+    <div class="char-asset-root" id="charAssetRoot"></div>
+  </div>
+
   <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" hidden role="tabpanel">
     <div id="danbooruTabRoot" class="danbooru-tab-root"></div>
   </div>
@@ -1174,6 +1181,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260714-predeploy1"></script>
+<script src="app.js?v=20260717-charasset1"></script>
 </body>
 </html>

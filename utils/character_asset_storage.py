@@ -6,21 +6,28 @@ New layout (MVP: character as a group of variations):
 save/character_asset/
   characters/
     {character_id}/
-      primary.png              ← 대표 이미지 (C1 프롬프트/UC 원본)
+      primary.png              <- main image (C1 prompt/UC source)
+      meta.json                <- optional sidecar (display_name only)
       variations/
-        {hash}.png             ← 의상/자세 바리에이션
-  images/                      ← legacy flat layout (자동 마이그레이션 대상)
+        {hash}.png             <- outfit/pose variations
+  images/                      <- legacy flat layout (auto-migrated)
 ```
 
 `character_id` is derived from the primary image's SHA-256 prefix (16 chars) —
 same scheme the legacy layout used for file names, so migrated entries keep
 their identity.
+
+All public helpers accept an optional ``root`` argument. ``None`` keeps the
+historical CWD-relative default (`save/character_asset`) for desktop parity;
+the headless web service passes an absolute root resolved from the runtime
+save path service instead.
 """
 
 from __future__ import annotations
 
 import hashlib
 import io
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +45,23 @@ CHARACTER_ASSET_CHARACTERS_DIR = CHARACTER_ASSET_ROOT_DIR / "characters"
 
 PRIMARY_FILE_NAME = "primary.png"
 VARIATIONS_DIR_NAME = "variations"
+META_FILE_NAME = "meta.json"
+
+
+def _root_dir(root: Optional[Path] = None) -> Path:
+    return Path(root) if root is not None else CHARACTER_ASSET_ROOT_DIR
+
+
+def _legacy_images_dir(root: Optional[Path] = None) -> Path:
+    return _root_dir(root) / "images"
+
+
+def _legacy_metadata_dir(root: Optional[Path] = None) -> Path:
+    return _root_dir(root) / "metadata"
+
+
+def _characters_dir(root: Optional[Path] = None) -> Path:
+    return _root_dir(root) / "characters"
 
 
 @dataclass(frozen=True)
@@ -51,28 +75,28 @@ class CharacterRecord:
     mtime: float
 
 
-def ensure_character_asset_storage_dirs() -> None:
+def ensure_character_asset_storage_dirs(root: Optional[Path] = None) -> None:
     """Ensure the asset storage folders exist."""
-    CHARACTER_ASSET_CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
+    _characters_dir(root).mkdir(parents=True, exist_ok=True)
     # Keep legacy dir around for compatibility (migration reads from it).
-    CHARACTER_ASSET_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    _legacy_images_dir(root).mkdir(parents=True, exist_ok=True)
 
 
-def get_legacy_character_asset_metadata_path(file_hash: str) -> Path:
+def get_legacy_character_asset_metadata_path(file_hash: str, root: Optional[Path] = None) -> Path:
     """Return the legacy metadata JSON path used by previous builds."""
-    return CHARACTER_ASSET_LEGACY_METADATA_DIR / f"{file_hash}.json"
+    return _legacy_metadata_dir(root) / f"{file_hash}.json"
 
 
-def get_character_dir(character_id: str) -> Path:
-    return CHARACTER_ASSET_CHARACTERS_DIR / character_id
+def get_character_dir(character_id: str, root: Optional[Path] = None) -> Path:
+    return _characters_dir(root) / character_id
 
 
-def get_character_primary_path(character_id: str) -> Path:
-    return get_character_dir(character_id) / PRIMARY_FILE_NAME
+def get_character_primary_path(character_id: str, root: Optional[Path] = None) -> Path:
+    return get_character_dir(character_id, root) / PRIMARY_FILE_NAME
 
 
-def get_character_variations_dir(character_id: str) -> Path:
-    return get_character_dir(character_id) / VARIATIONS_DIR_NAME
+def get_character_variations_dir(character_id: str, root: Optional[Path] = None) -> Path:
+    return get_character_dir(character_id, root) / VARIATIONS_DIR_NAME
 
 
 def _compute_hash_prefix(raw_bytes: bytes) -> str:
@@ -154,15 +178,59 @@ def load_character_asset_metadata(
 
 
 # ---------------------------------------------------------------------------
+# Sidecar meta (display name only — prompt data stays inside the PNG)
+# ---------------------------------------------------------------------------
+
+
+def read_character_meta(character_id: str, root: Optional[Path] = None) -> Dict[str, Any]:
+    """Read the optional sidecar meta (currently: display_name)."""
+    meta_path = get_character_dir(character_id, root) / META_FILE_NAME
+    if not meta_path.exists():
+        return {}
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        print(f"Failed to read character meta {meta_path}: {exc}")
+        return {}
+
+
+def write_character_meta(character_id: str, meta: Dict[str, Any], root: Optional[Path] = None) -> bool:
+    """Atomically write the sidecar meta (tmp file + replace)."""
+    character_dir = get_character_dir(character_id, root)
+    if not character_dir.exists():
+        return False
+    meta_path = character_dir / META_FILE_NAME
+    tmp_path = character_dir / (META_FILE_NAME + ".tmp")
+    try:
+        tmp_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(meta_path)
+        return True
+    except Exception as exc:
+        print(f"Failed to write character meta {meta_path}: {exc}")
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+
+# ---------------------------------------------------------------------------
 # New grouped layout API
 # ---------------------------------------------------------------------------
 
 
-def list_characters() -> List[CharacterRecord]:
-    """Enumerate all on-disk characters, sorted by primary mtime (newest first)."""
-    ensure_character_asset_storage_dirs()
+def list_characters(root: Optional[Path] = None) -> List[CharacterRecord]:
+    """Enumerate all on-disk characters, sorted by primary mtime (newest first).
+
+    Read-only: does NOT create storage dirs (the headless service also lists a
+    legacy root that must never be mutated). Writers ensure dirs themselves.
+    """
+    characters_dir = _characters_dir(root)
+    if not characters_dir.exists():
+        return []
     records: List[CharacterRecord] = []
-    for character_dir in CHARACTER_ASSET_CHARACTERS_DIR.iterdir():
+    for character_dir in characters_dir.iterdir():
         if not character_dir.is_dir():
             continue
         primary = character_dir / PRIMARY_FILE_NAME
@@ -185,9 +253,9 @@ def list_characters() -> List[CharacterRecord]:
     return records
 
 
-def list_character_variations(character_id: str) -> List[Path]:
+def list_character_variations(character_id: str, root: Optional[Path] = None) -> List[Path]:
     """List variation image files (sorted newest first)."""
-    variations_dir = get_character_variations_dir(character_id)
+    variations_dir = get_character_variations_dir(character_id, root)
     if not variations_dir.exists():
         return []
     files: List[Path] = []
@@ -200,6 +268,7 @@ def list_character_variations(character_id: str) -> List[Path]:
 def save_new_character(
     raw_bytes: Optional[bytes] = None,
     image: Optional[Image.Image] = None,
+    root: Optional[Path] = None,
 ) -> tuple[str, Path]:
     """Create a new character folder and save the primary image.
 
@@ -209,8 +278,8 @@ def save_new_character(
     data = _ensure_raw_bytes(raw_bytes, image)
     character_id = _compute_hash_prefix(data)
 
-    ensure_character_asset_storage_dirs()
-    character_dir = get_character_dir(character_id)
+    ensure_character_asset_storage_dirs(root)
+    character_dir = get_character_dir(character_id, root)
     character_dir.mkdir(parents=True, exist_ok=True)
     variations_dir = character_dir / VARIATIONS_DIR_NAME
     variations_dir.mkdir(parents=True, exist_ok=True)
@@ -226,12 +295,13 @@ def save_character_variation(
     character_id: str,
     raw_bytes: Optional[bytes] = None,
     image: Optional[Image.Image] = None,
+    root: Optional[Path] = None,
 ) -> Path:
     """Save a variation image under the given character's variations folder."""
     data = _ensure_raw_bytes(raw_bytes, image)
     variation_hash = _compute_hash_prefix(data)
 
-    character_dir = get_character_dir(character_id)
+    character_dir = get_character_dir(character_id, root)
     if not character_dir.exists():
         raise FileNotFoundError(f"Character {character_id} does not exist.")
 
@@ -245,9 +315,9 @@ def save_character_variation(
     return variation_path
 
 
-def delete_character(character_id: str) -> bool:
+def delete_character(character_id: str, root: Optional[Path] = None) -> bool:
     """Remove an entire character folder (primary + all variations)."""
-    character_dir = get_character_dir(character_id)
+    character_dir = get_character_dir(character_id, root)
     if not character_dir.exists():
         return False
     try:
@@ -258,10 +328,10 @@ def delete_character(character_id: str) -> bool:
         return False
 
 
-def delete_variation(character_id: str, variation_path: Path) -> bool:
+def delete_variation(character_id: str, variation_path: Path, root: Optional[Path] = None) -> bool:
     """Delete a single variation file under a character."""
     try:
-        expected_dir = get_character_variations_dir(character_id).resolve()
+        expected_dir = get_character_variations_dir(character_id, root).resolve()
         target = variation_path.resolve()
         if expected_dir not in target.parents:
             print(f"Refusing to delete variation outside character dir: {target}")
@@ -274,14 +344,14 @@ def delete_variation(character_id: str, variation_path: Path) -> bool:
         return False
 
 
-def promote_variation_to_primary(character_id: str, variation_path: Path) -> bool:
+def promote_variation_to_primary(character_id: str, variation_path: Path, root: Optional[Path] = None) -> bool:
     """Swap a variation with the character's primary image.
 
     The existing primary is preserved as a new variation so nothing is lost.
     The character_id itself is NOT changed — it stays pinned to the original
     hash so other references continue to resolve.
     """
-    character_dir = get_character_dir(character_id)
+    character_dir = get_character_dir(character_id, root)
     primary_path = character_dir / PRIMARY_FILE_NAME
     variations_dir = character_dir / VARIATIONS_DIR_NAME
     if not primary_path.exists() or not variation_path.exists():
@@ -311,25 +381,26 @@ def promote_variation_to_primary(character_id: str, variation_path: Path) -> boo
 # ---------------------------------------------------------------------------
 
 
-def migrate_legacy_flat_layout() -> int:
+def migrate_legacy_flat_layout(root: Optional[Path] = None) -> int:
     """Promote legacy `images/{hash}.png` files to the grouped layout.
 
     Each legacy file becomes a 1-character-1-primary entry (no variations).
     Returns the number of migrated files. Idempotent — already migrated
     characters are skipped silently.
     """
-    if not CHARACTER_ASSET_IMAGE_DIR.exists():
+    legacy_images_dir = _legacy_images_dir(root)
+    if not legacy_images_dir.exists():
         return 0
 
-    ensure_character_asset_storage_dirs()
+    ensure_character_asset_storage_dirs(root)
     migrated = 0
-    for legacy_file in list(CHARACTER_ASSET_IMAGE_DIR.iterdir()):
+    for legacy_file in list(legacy_images_dir.iterdir()):
         if not legacy_file.is_file():
             continue
         if legacy_file.suffix.lower() not in (".png", ".jpg", ".jpeg", ".bmp", ".webp"):
             continue
         character_id = legacy_file.stem
-        character_dir = get_character_dir(character_id)
+        character_dir = get_character_dir(character_id, root)
         primary_path = character_dir / PRIMARY_FILE_NAME
         if primary_path.exists():
             # Already migrated — drop the legacy copy.
@@ -348,14 +419,15 @@ def migrate_legacy_flat_layout() -> int:
 
     # Clean up legacy metadata sidecars — they have been unused since NAI
     # Comment-based recovery took over.
-    if CHARACTER_ASSET_LEGACY_METADATA_DIR.exists():
-        for legacy_meta in list(CHARACTER_ASSET_LEGACY_METADATA_DIR.iterdir()):
+    legacy_metadata_dir = _legacy_metadata_dir(root)
+    if legacy_metadata_dir.exists():
+        for legacy_meta in list(legacy_metadata_dir.iterdir()):
             try:
                 legacy_meta.unlink()
             except Exception:
                 pass
         try:
-            CHARACTER_ASSET_LEGACY_METADATA_DIR.rmdir()
+            legacy_metadata_dir.rmdir()
         except Exception:
             pass
 

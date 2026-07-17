@@ -16,6 +16,7 @@ display name only.
 from __future__ import annotations
 
 import io
+import json
 import re
 import shutil
 import threading
@@ -33,6 +34,70 @@ GENERATION_WIDTH = 768
 GENERATION_HEIGHT = 1344
 MAX_GENERATION_COUNT = 8
 MAX_DISPLAY_NAME_LEN = 80
+BENCH_DEFAULTS_FILE = "bench_defaults.json"
+BENCH_DEFAULT_MAIN_PROMPT = "2koma, borderless panel"
+BENCH_DEFAULT_EXTRA_NEGATIVE = "border"
+
+
+def reencode_with_nai_meta(edited_image, source_image, parameters: dict) -> bytes:
+    """Re-save ``edited_image`` as PNG carrying over NAI tEXt chunks from
+    ``source_image.info`` (Dev0714 storage-window port, pure PIL). Falls back to
+    synthesising a minimal Comment JSON from ``parameters`` when the original
+    lacks the core NAI fields. Keeps PNG Info / prompt recovery working for
+    cropped variation saves.
+    """
+    import json as _json
+
+    from PIL.PngImagePlugin import PngInfo
+
+    pnginfo = PngInfo()
+    source_info = getattr(source_image, "info", {}) or {}
+    preserved_keys = (
+        "Title",
+        "Description",
+        "Software",
+        "Source",
+        "Comment",
+        "Generation time",
+        "Author",
+    )
+    added_any = False
+    for key in preserved_keys:
+        value = source_info.get(key)
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="ignore")
+        if isinstance(value, str) and value:
+            pnginfo.add_text(key, value)
+            added_any = True
+
+    has_core_nai = bool(source_info.get("Software")) and bool(source_info.get("Comment"))
+    if not has_core_nai:
+        comment_payload: dict = {
+            "prompt": parameters.get("input", "") or "",
+            "uc": parameters.get("negative_prompt", "") or "",
+        }
+        for key in ("steps", "scale", "seed", "sampler", "noise_schedule", "cfg_rescale", "sm", "sm_dyn"):
+            if parameters.get(key) is not None:
+                comment_payload[key] = parameters[key]
+        try:
+            comment_json = _json.dumps(comment_payload, ensure_ascii=False)
+        except Exception:
+            comment_json = None
+        if not source_info.get("Software"):
+            pnginfo.add_text("Software", "NovelAI")
+            added_any = True
+        if not source_info.get("Description"):
+            description_text = parameters.get("input", "") or ""
+            if description_text:
+                pnginfo.add_text("Description", description_text)
+                added_any = True
+        if not source_info.get("Comment") and comment_json:
+            pnginfo.add_text("Comment", comment_json)
+            added_any = True
+
+    buffer = io.BytesIO()
+    edited_image.save(buffer, format="PNG", pnginfo=pnginfo if added_any else None)
+    return buffer.getvalue()
 
 
 class HeadlessCharacterAssetService:
@@ -43,6 +108,9 @@ class HeadlessCharacterAssetService:
         # (path, mtime_ns) -> extracted prompt meta. Bounded like the viewer
         # thumb cache: cleared wholesale past 256 entries.
         self._prompt_meta_cache: dict[tuple[str, int], dict[str, Any]] = {}
+        # (primary path, mtime_ns) -> (canvas_png, small_mask_png). Canvases are
+        # ~1MB each; keep only a handful.
+        self._bench_canvas_cache: dict[tuple[str, int], tuple[bytes, bytes]] = {}
 
     # ------------------------------------------------------------------ roots
     def write_root(self) -> Path:
@@ -457,3 +525,158 @@ class HeadlessCharacterAssetService:
             "seed": -1,
             "seed_fixed": False,
         }
+
+    # ------------------------------------------------ variation bench
+    def _bench_defaults_path(self) -> Path:
+        return Path(self.context._save_path(CHARACTER_ASSET_DIR_NAME, BENCH_DEFAULTS_FILE))
+
+    def bench_defaults(self) -> dict[str, Any]:
+        defaults = {
+            "main_prompt": BENCH_DEFAULT_MAIN_PROMPT,
+            "extra_negative": BENCH_DEFAULT_EXTRA_NEGATIVE,
+        }
+        try:
+            path = self._bench_defaults_path()
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    for key in defaults:
+                        if isinstance(data.get(key), str):
+                            defaults[key] = data[key]
+        except Exception as exc:
+            print(f"[CharacterAsset] bench defaults load failed: {exc}")
+        return defaults
+
+    def save_bench_defaults(self, main_prompt: str, extra_negative: str) -> None:
+        try:
+            path = self._bench_defaults_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(
+                json.dumps(
+                    {"main_prompt": str(main_prompt or ""), "extra_negative": str(extra_negative or "")},
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            tmp.replace(path)
+        except Exception as exc:
+            print(f"[CharacterAsset] bench defaults save failed: {exc}")
+
+    def _bench_canvas(self, character_id: str) -> tuple[bytes, bytes]:
+        """Build (or reuse) the variation inpaint canvas + NAI small mask for a
+        character's primary image. Narrow 512x896 edit rect - keeps NAI from
+        painting a second character into the free area (Dev0714 spec)."""
+        from PIL import Image
+
+        from utils.reference_inpaint_preprocess import prepare_variation_inpaint_canvas
+
+        primary = self.resolve_image_path(character_id)
+        try:
+            cache_key = (str(primary), primary.stat().st_mtime_ns)
+        except OSError as exc:
+            raise FileNotFoundError(f"primary image unavailable: {exc}")
+        cached = self._bench_canvas_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        with Image.open(primary) as opened:
+            opened.load()
+            result = prepare_variation_inpaint_canvas(opened)
+        canvas_buffer = io.BytesIO()
+        result.canvas_image.save(canvas_buffer, format="PNG")
+        mask_buffer = io.BytesIO()
+        result.small_mask_image.save(mask_buffer, format="PNG")
+        payload = (canvas_buffer.getvalue(), mask_buffer.getvalue())
+        if len(self._bench_canvas_cache) > 8:
+            self._bench_canvas_cache.clear()
+        self._bench_canvas_cache[cache_key] = payload
+        return payload
+
+    def build_bench_overrides(self, payload: dict[str, Any], candidate: int) -> dict[str, Any]:
+        """Inpaint overrides for one variation candidate - mirrors the shape the
+        img2img service enqueues (proven consumer path), plus the Dev0714
+        variation contract: fixed strength 1.0 / noise 0.0, reference inset tag,
+        sketchbook character override, and NO cropped_image_request (the bbox
+        shrink would make results unusable for reuse)."""
+        from utils.reference_inpaint_preprocess import VariationInpaintSpec
+
+        if str(self.context.get_api_mode() or "").upper() != "NAI":
+            raise ValueError("variation bench requires NAI mode")
+        payload = payload if isinstance(payload, dict) else {}
+        character_id = self._validate_id(str(payload.get("id") or ""))
+        character_prompt = str(payload.get("character_prompt") or "").strip()
+        if not character_prompt:
+            raise ValueError("character_prompt is required")
+        character_uc = str(payload.get("character_uc") or "").strip()
+        request_id = str(payload.get("request_id") or "").strip()
+        if not request_id:
+            raise ValueError("request_id is required")
+        main_prompt = str(payload.get("main_prompt") or "").strip() or BENCH_DEFAULT_MAIN_PROMPT
+        extra_negative = str(payload.get("extra_negative") or "").strip()
+        base_negative = str(getattr(self.context, "negative_prompt_text", "") or "").strip()
+        negative = ", ".join(part for part in (base_negative, extra_negative) if part)
+        canvas_png, mask_png = self._bench_canvas(character_id)
+        spec = VariationInpaintSpec()
+        label = character_prompt.split(",")[0].strip()[:40] or character_id
+        return {
+            "type": "inpaint",
+            "image_bytes": canvas_png,
+            "mask_bytes": mask_png,
+            "input": main_prompt,
+            "_raw_input": main_prompt,
+            "negative_prompt": negative,
+            "strength": 1.0,
+            "noise": 0.0,
+            "width": spec.canvas_width,
+            "height": spec.canvas_height,
+            "random_resolution": False,
+            "sketchbook_character_prompts": [(character_prompt, character_uc)],
+            "reference_inset_tag_required": True,
+            "character_asset_request": True,
+            "character_asset_request_id": request_id,
+            "character_asset_candidate": int(candidate),
+            "character_asset_bench": True,
+            "character_asset_bench_character": character_id,
+            "_remote_queue_source": "Character Asset",
+            "_remote_queue_label": f"variation: {label}",
+            "seed": -1,
+            "seed_fixed": False,
+            "_skip_vibe_transfer_late_binding": True,
+            "_skip_character_reference_late_binding": True,
+            "wildcard_standalone": True,
+        }
+
+    def save_bench_result(self, character_id: str, history_id: str) -> dict[str, Any]:
+        """Crop the 512x896 edit rect out of a bench canvas result, transplant
+        the NAI tEXt metadata, LANCZOS-upscale 1.5x to 768x1344 (exact 4:7
+        landing) and store it as a variation of the character."""
+        from PIL import Image
+
+        from utils.reference_inpaint_preprocess import VariationInpaintSpec
+
+        self._bootstrap()
+        with self._lock:
+            character_id = self._validate_id(character_id)
+            item = self.context.result_store.get_item(str(history_id or "").strip())
+            if item is None:
+                raise FileNotFoundError("bench result not found in history (already evicted?)")
+            raw = getattr(item, "raw_bytes", None)
+            if not raw or not bytes(raw).startswith(PNG_SIGNATURE):
+                raise ValueError("bench result is not an original PNG")
+            spec = VariationInpaintSpec()
+            with Image.open(io.BytesIO(bytes(raw))) as source:
+                source.load()
+                if source.size != (spec.canvas_width, spec.canvas_height):
+                    raise ValueError("history item is not a variation bench canvas result")
+                crop = source.crop((spec.edit_left, spec.edit_top, spec.edit_right, spec.edit_bottom))
+                target_width = (spec.edit_right - spec.edit_left) * 3 // 2
+                target_height = (spec.edit_bottom - spec.edit_top) * 3 // 2
+                upscaled = crop.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                params = item.generation_params if isinstance(item.generation_params, dict) else {}
+                png = reencode_with_nai_meta(upscaled, source, params)
+            self._ensure_current(character_id)
+            path = asset_storage.save_character_variation(
+                character_id, raw_bytes=png, root=self.write_root()
+            )
+            return {"character_id": character_id, "hash": path.stem}

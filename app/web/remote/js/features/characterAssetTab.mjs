@@ -19,6 +19,10 @@ const API = {
   promote: '/api/character-asset/promote',
   generate: '/api/character-asset/generate',
   historyThumb: id => `/api/history/thumb/${encodeURIComponent(id)}`,
+  historyImage: id => `/api/history/image/${encodeURIComponent(id)}`,
+  benchDefaults: '/api/character-asset/bench/defaults',
+  benchGenerate: '/api/character-asset/bench/generate',
+  benchSave: '/api/character-asset/bench/save',
 };
 
 const GENERATE_MAX = 8;
@@ -521,7 +525,18 @@ export function createCharacterAssetTabController({
   function handleResultMeta(meta) {
     if (!meta || typeof meta !== 'object') return;
     if (!meta.character_asset_request) return;
-    if (String(meta.character_asset_request_id || '') !== genRequestId || !genRequestId) return;
+    const requestId = String(meta.character_asset_request_id || '');
+    if (meta.character_asset_bench) {
+      if (!benchRequestId || requestId !== benchRequestId) return;
+      const candidate = benchCandidates[Number(meta.character_asset_candidate)];
+      if (!candidate || candidate.status === 'done') return;
+      candidate.status = 'done';
+      candidate.historyId = String(meta.history_id || '');
+      if (benchSelected < 0) benchSelected = candidate.index;
+      if (benchOpen) renderBench();
+      return;
+    }
+    if (requestId !== genRequestId || !genRequestId) return;
     const candidate = genCandidates[Number(meta.character_asset_candidate)];
     if (!candidate || candidate.status === 'done') return;
     candidate.status = 'done';
@@ -531,12 +546,272 @@ export function createCharacterAssetTabController({
 
   function handleGenerationError(message) {
     if (!message || typeof message !== 'object') return;
-    if (String(message.requestId || '') !== genRequestId || !genRequestId) return;
+    const requestId = String(message.requestId || '');
+    if (benchRequestId && requestId === benchRequestId) {
+      const candidate = benchCandidates[Number(message.candidate)];
+      if (!candidate || candidate.status === 'done') return;
+      candidate.status = 'error';
+      candidate.message = String(message.message || 'generation failed');
+      if (benchOpen) renderBench();
+      return;
+    }
+    if (requestId !== genRequestId || !genRequestId) return;
     const candidate = genCandidates[Number(message.candidate)];
     if (!candidate || candidate.status === 'done') return;
     candidate.status = 'error';
     candidate.message = String(message.message || 'generation failed');
     render();
+  }
+
+  // ------------------------------------------------------- variation bench
+
+  let benchLayer = null;
+  let benchOpen = false;
+  let benchChar = null;          // {id, name, prompt, uc, revision}
+  let benchMain = '';
+  let benchNegative = '';
+  let benchCount = 2;
+  let benchDefaultsLoaded = false;
+  let benchRequestId = '';
+  let benchCandidates = [];      // {index, status, historyId, message, saved}
+  let benchSelected = -1;
+  let benchBusy = false;
+
+  function ensureBenchLayer() {
+    if (benchLayer) return benchLayer;
+    benchLayer = document.createElement('div');
+    benchLayer.className = 'char-bench-layer';
+    document.body.append(benchLayer);
+    benchLayer.addEventListener('click', event => {
+      const button = event.target.closest('[data-action]');
+      if (!button || button.disabled) return;
+      const action = button.dataset.action;
+      if (action === 'bench-close') closeBench();
+      else if (action === 'bench-generate') benchGenerate();
+      else if (action === 'bench-save') benchSave();
+      else if (action === 'bench-discard') benchDiscard();
+      else if (action === 'bench-pick') {
+        benchSelected = Number(button.dataset.index);
+        renderBench();
+      }
+    });
+    benchLayer.addEventListener('input', event => {
+      const field = event.target.closest('[data-field]');
+      if (!field) return;
+      if (field.dataset.field === 'bench-prompt' && benchChar) benchChar.prompt = field.value;
+      else if (field.dataset.field === 'bench-uc' && benchChar) benchChar.uc = field.value;
+      else if (field.dataset.field === 'bench-main') benchMain = field.value;
+      else if (field.dataset.field === 'bench-negative') benchNegative = field.value;
+      else if (field.dataset.field === 'bench-count') benchCount = Number(field.value) || 1;
+    });
+    return benchLayer;
+  }
+
+  async function openBench() {
+    if (!detail || !detail.recovered) {
+      showToast('캐릭터 프롬프트를 복구할 수 없는 에셋입니다', 'error');
+      return;
+    }
+    if (benchChar && benchChar.id !== detail.id) {
+      // 다른 캐릭터로 전환 - 이전 배치 상관관계는 무효
+      benchCandidates = [];
+      benchSelected = -1;
+      benchRequestId = '';
+    }
+    benchChar = {
+      id: detail.id,
+      name: summaryName({id: detail.id, display_name: detail.display_name}),
+      prompt: String(detail.character_prompt || ''),
+      uc: String(detail.character_uc || ''),
+      revision: detail.revision || 0,
+    };
+    if (!benchDefaultsLoaded) {
+      try {
+        const defaults = await api(API.benchDefaults);
+        benchMain = String(defaults.main_prompt || '');
+        benchNegative = String(defaults.extra_negative || '');
+        benchDefaultsLoaded = true;
+      } catch (error) {
+        console.error('bench defaults load failed', error);
+      }
+    }
+    benchOpen = true;
+    renderBench();
+  }
+
+  function closeBench() {
+    benchOpen = false;
+    if (benchLayer) benchLayer.innerHTML = '';
+  }
+
+  async function benchGenerate() {
+    if (benchBusy || !benchChar) return;
+    if (!isNai()) {
+      showToast('바리에이션 생성은 NAI 모드 전용입니다', 'error');
+      return;
+    }
+    if (benchCandidates.some(candidate => candidate.status === 'pending')) {
+      showToast('이전 생성 배치가 아직 진행 중입니다', 'error');
+      return;
+    }
+    const prompt = String(benchChar.prompt || '').trim();
+    if (!prompt) {
+      showToast('캐릭터 프롬프트를 입력하세요', 'error');
+      return;
+    }
+    benchBusy = true;
+    const count = Math.max(1, Math.min(GENERATE_MAX, Number(benchCount) || 1));
+    benchRequestId = newRequestId();
+    benchCandidates = Array.from({length: count}, (_, index) => ({
+      index, status: 'pending', historyId: '', message: '', saved: false,
+    }));
+    benchSelected = -1;
+    renderBench();
+    try {
+      const result = await postJson(API.benchGenerate, {
+        id: benchChar.id,
+        character_prompt: prompt,
+        character_uc: String(benchChar.uc || '').trim(),
+        main_prompt: benchMain,
+        extra_negative: benchNegative,
+        count,
+        request_id: benchRequestId,
+      });
+      const accepted = new Set(result?.accepted || []);
+      (result?.rejected || []).forEach(rejection => {
+        const candidate = benchCandidates[Number(rejection?.candidate)];
+        if (candidate) {
+          candidate.status = 'error';
+          candidate.message = String(rejection?.message || rejection?.reason || 'rejected');
+        }
+      });
+      if (!accepted.size) showToast('생성 요청이 큐에 들어가지 못했습니다', 'error');
+      else showToast(`바리에이션 생성 ${accepted.size}건 요청됨`, 'success');
+    } catch (error) {
+      benchCandidates.forEach(candidate => {
+        if (candidate.status === 'pending') {
+          candidate.status = 'error';
+          candidate.message = error.message;
+        }
+      });
+      showToast(`생성 요청 실패: ${error.message}`, 'error');
+    }
+    benchBusy = false;
+    renderBench();
+  }
+
+  async function benchSave() {
+    const candidate = benchCandidates[benchSelected];
+    if (!candidate?.historyId || candidate.saved || benchBusy || !benchChar) return;
+    benchBusy = true;
+    renderBench();
+    try {
+      await postJson(API.benchSave, {id: benchChar.id, history_id: candidate.historyId});
+      candidate.saved = true;
+      showToast('바리에이션으로 저장됨', 'success');
+      refreshAll().catch(() => {});
+    } catch (error) {
+      showToast(`바리에이션 저장 실패: ${error.message}`, 'error');
+    }
+    benchBusy = false;
+    renderBench();
+  }
+
+  function benchDiscard() {
+    if (benchSelected < 0) return;
+    benchCandidates.splice(benchSelected, 1);
+    benchSelected = benchCandidates.findIndex(candidate => candidate.status === 'done');
+    renderBench();
+  }
+
+  function benchCropImg(historyId) {
+    // 1152x896 캔버스 결과에서 512x896 편집영역(576..1088)만 CSS로 크롭 표시.
+    // 컨테이너 폭 W 기준: 이미지 폭 = 1152/512 * W = 2.25W, 좌측 오프셋 = 576/512 * W.
+    return `
+      <div class="char-bench-crop">
+        <img src="${API.historyImage(historyId)}" alt="">
+      </div>
+    `;
+  }
+
+  function renderBench() {
+    const layer = ensureBenchLayer();
+    if (!benchOpen || !benchChar) {
+      layer.innerHTML = '';
+      return;
+    }
+    const nai = isNai();
+    const pendingCount = benchCandidates.filter(candidate => candidate.status === 'pending').length;
+    const selected = benchCandidates[benchSelected];
+    const strip = benchCandidates.map(candidate => {
+      if (candidate.status === 'pending') {
+        return `<div class="char-bench-thumb pending">생성 중...</div>`;
+      }
+      if (candidate.status === 'error') {
+        return `<div class="char-bench-thumb error" title="${escAttr(candidate.message)}">실패</div>`;
+      }
+      return `
+        <button class="char-bench-thumb done ${candidate.index === benchSelected ? 'selected' : ''} ${candidate.saved ? 'saved' : ''}"
+          data-action="bench-pick" data-index="${candidate.index}">
+          ${benchCropImg(candidate.historyId)}
+          ${candidate.saved ? '<span class="char-bench-saved-badge">저장됨</span>' : ''}
+        </button>
+      `;
+    }).join('');
+    layer.innerHTML = `
+      <div class="char-bench-backdrop"></div>
+      <div class="char-bench" role="dialog" aria-label="바리에이션 제작 벤치">
+        <header class="char-bench-header">
+          <img class="char-bench-head-thumb" src="${API.thumb(benchChar.id, benchChar.revision)}" alt="">
+          <div class="char-bench-title">바리에이션 제작 - ${escHtml(benchChar.name)}
+            <span class="char-asset-detail-id">${escHtml(benchChar.id)}</span></div>
+          <button class="module-popup-icon-btn" data-action="bench-close" aria-label="닫기">x</button>
+        </header>
+        <div class="char-bench-body">
+          <section class="char-bench-form">
+            <div class="mod-section-label">Character Prompt (의상/악세서리/디테일)</div>
+            <textarea class="mod-textarea char-bench-ta" data-field="bench-prompt">${escHtml(benchChar.prompt)}</textarea>
+            <div class="mod-section-label">Character UC</div>
+            <textarea class="mod-textarea mod-uc char-bench-ta-sm" data-field="bench-uc">${escHtml(benchChar.uc)}</textarea>
+            <div class="mod-section-label">Main Prompt (자세/배경만)</div>
+            <textarea class="mod-textarea char-bench-ta-sm" data-field="bench-main">${escHtml(benchMain)}</textarea>
+            <div class="mod-section-label">추가 Negative (메인 네거티브에 이어붙임)</div>
+            <textarea class="mod-textarea mod-uc char-bench-ta-sm" data-field="bench-negative">${escHtml(benchNegative)}</textarea>
+            <div class="char-bench-gen-row">
+              <label class="char-asset-gen-count">횟수
+                <input type="number" min="1" max="${GENERATE_MAX}" value="${Number(benchCount) || 1}" data-field="bench-count">
+              </label>
+              <button class="mod-btn-sm mod-btn-encode" data-action="bench-generate"
+                ${nai && !benchBusy && !pendingCount ? '' : 'disabled'}
+                ${nai ? '' : 'title="NAI 모드 전용"'}>바리에이션 생성</button>
+              ${pendingCount ? `<span class="char-asset-count">${pendingCount}건 생성 중...</span>` : ''}
+            </div>
+            <div class="char-asset-count">인페인트 고정: strength 1.0 / noise 0.0 / 좁은 마스크(512x896)</div>
+          </section>
+          <section class="char-bench-compare">
+            <div class="char-bench-pane">
+              <div class="mod-section-label">원본 (A)</div>
+              <div class="char-bench-a"><img src="${API.image(benchChar.id, '', benchChar.revision)}" alt=""></div>
+            </div>
+            <div class="char-bench-pane">
+              <div class="mod-section-label">생성 결과 (B)</div>
+              ${selected?.historyId
+                ? benchCropImg(selected.historyId)
+                : '<div class="char-bench-crop empty"><div class="mod-empty">생성된 결과가 여기 표시됩니다.</div></div>'}
+              <div class="char-bench-save-row">
+                <button class="mod-btn-sm mod-btn-encode" data-action="bench-save"
+                  ${selected?.historyId && !selected.saved && !benchBusy ? '' : 'disabled'}>
+                  ${selected?.saved ? '저장됨' : '바리에이션으로 저장'}</button>
+                <button class="mod-btn-sm" data-action="bench-discard" ${selected ? '' : 'disabled'}>버리기</button>
+              </div>
+            </div>
+          </section>
+          <aside class="char-bench-strip">
+            ${strip || '<div class="mod-empty">후보 없음</div>'}
+          </aside>
+        </div>
+      </div>
+    `;
   }
 
   // ---------------------------------------------------------------- staging
@@ -613,13 +888,17 @@ export function createCharacterAssetTabController({
 
   function renderVariationsZone() {
     const variationDeleteArmed = deleteArmed === `variation:${selectedVariation}`;
+    const benchDisabled = detail?.recovered ? '' : 'disabled title="캐릭터 프롬프트를 복구할 수 없는 에셋입니다"';
     return `
       ${renderVariationStrip()}
-      <div class="char-asset-var-actions" ${selectedVariation ? '' : 'hidden'}>
-        <button class="mod-btn-sm" data-action="promote">★ 대표로 승격</button>
-        <button class="mod-btn-sm mod-btn-danger" data-action="delete-variation">
-          ${variationDeleteArmed ? '한 번 더 클릭하면 삭제' : '바리에이션 삭제'}
-        </button>
+      <div class="char-asset-var-actions">
+        <span ${selectedVariation ? '' : 'hidden'}>
+          <button class="mod-btn-sm" data-action="promote">★ 대표로 승격</button>
+          <button class="mod-btn-sm mod-btn-danger" data-action="delete-variation">
+            ${variationDeleteArmed ? '한 번 더 클릭하면 삭제' : '바리에이션 삭제'}
+          </button>
+        </span>
+        <button class="mod-btn-sm char-asset-bench-btn" data-action="open-bench" ${benchDisabled}>+ 바리에이션 추가</button>
       </div>
     `;
   }
@@ -772,6 +1051,7 @@ export function createCharacterAssetTabController({
       else if (action === 'delete-character') deleteSelected();
       else if (action === 'delete-variation') deleteSelectedVariation();
       else if (action === 'promote') promoteSelectedVariation();
+      else if (action === 'open-bench') openBench();
       else if (action === 'prefill-c1') prefillFromC1();
       else if (action === 'prefill-selected') prefillFromSelected();
       else if (action === 'generate-start') startGeneration();

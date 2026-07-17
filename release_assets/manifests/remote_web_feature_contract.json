@@ -319,6 +319,21 @@
           "method": "POST",
           "path": "/api/character-asset/generate",
           "smoke": "external_live"
+        },
+        {
+          "method": "GET",
+          "path": "/api/character-asset/bench/defaults",
+          "smoke": "non_destructive"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/bench/generate",
+          "smoke": "external_live"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/bench/save",
+          "smoke": "asset_runtime"
         }
       ]
     },

@@ -300,6 +300,74 @@ def register_character_asset_routes(
             return JSONResponse({"error": f"Character Asset promote failed: {exc}"}, status_code=500)
         return {"ok": bool(promoted)}
 
+    @app.get("/api/character-asset/bench/defaults")
+    async def api_character_asset_bench_defaults():
+        try:
+            return await run_in_thread(_asset_service(session_context).bench_defaults)
+        except Exception as exc:
+            return JSONResponse({"error": f"bench defaults failed: {exc}"}, status_code=500)
+
+    @app.post("/api/character-asset/bench/generate")
+    async def api_character_asset_bench_generate(req: Request):
+        payload = await _read_json(req)
+        try:
+            count = int(payload.get("count") or 1)
+        except (TypeError, ValueError):
+            count = 1
+        count = max(1, min(MAX_GENERATION_COUNT, count))
+        service = _asset_service(session_context)
+        generation = _generation_service(session_context)
+        accepted: list[int] = []
+        rejected: list[dict[str, Any]] = []
+        for candidate in range(count):
+            try:
+                overrides = await run_in_thread(service.build_bench_overrides, payload, candidate)
+            except ValueError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=400)
+            except FileNotFoundError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=404)
+            except Exception as exc:
+                return JSONResponse({"error": f"bench generate failed: {exc}"}, status_code=500)
+            dispatch = await run_in_thread(
+                generation.enqueue_remote_request,
+                {"type": "generate", "overrides": overrides},
+            )
+            if dispatch.ok:
+                accepted.append(candidate)
+            else:
+                rejected.append({"candidate": candidate, **dispatch.websocket_payload()})
+        if accepted:
+            await run_in_thread(
+                service.save_bench_defaults,
+                str(payload.get("main_prompt") or ""),
+                str(payload.get("extra_negative") or ""),
+            )
+            if session_context.headless_generation_execute_enabled:
+                start_generation_runner(session_context, clients)
+        return {
+            "ok": bool(accepted),
+            "request_id": str(payload.get("request_id") or ""),
+            "accepted": accepted,
+            "rejected": rejected,
+        }
+
+    @app.post("/api/character-asset/bench/save")
+    async def api_character_asset_bench_save(req: Request):
+        payload = await _read_json(req)
+        try:
+            result = await run_in_thread(
+                _asset_service(session_context).save_bench_result,
+                str(payload.get("id") or ""),
+                str(payload.get("history_id") or ""),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"bench save failed: {exc}"}, status_code=500)
+        return {"ok": True, **result}
+
     @app.post("/api/character-asset/generate")
     async def api_character_asset_generate(req: Request):
         payload = await _read_json(req)

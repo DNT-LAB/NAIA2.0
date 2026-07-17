@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any, Dict
 
 
-REFERENCE_INSET_TAG = "reference inset"
+# 인셋 마커 태그. Dev0714는 "reference inset"을 썼으나 "borderless panels"가 실제
+# NAI 인셋/2koma 스캐폴드와 일치한다(사용자 지시 2026-07-18). 이 상수가 강제 삽입/
+# 중복검사/컨텍스트 주입의 SSOT라 여기만 바꾸면 전 경로가 일관되게 따라온다.
+REFERENCE_INSET_TAG = "borderless panels"
 REFERENCE_INSET_PERSON_TAGS = frozenset(
     {
         "1boy",

@@ -629,7 +629,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260531-imgdel3')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260715-multiselect7')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -641,6 +641,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260531-im
       resultInfoContent,
       escHtml,
       showToast,
+      confirmDialog: showConfirmDialog,
       renderPromptInfoHtml,
       onPromptInfoTagLookup: lookupPromptInfoTag,
       onDiskImageSelected: onResultHistorySelectionChanged,

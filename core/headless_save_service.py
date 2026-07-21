@@ -177,6 +177,56 @@ class HeadlessSaveService:
             "current_save_directory": str(directory),
         }
 
+    def save_history_items(
+        self,
+        items: list[Any],
+        *,
+        save_as_webp: bool = True,
+        same_directory: bool = True,
+    ) -> dict[str, Any]:
+        """Save selected history items together in the current result folder.
+
+        Bulk selection is an explicit export action, so it can force WebP without
+        changing the user's Auto Save preference.  ``same_directory`` deliberately
+        bypasses classification subfolders so every selected image lands beside the
+        others in the one folder shown by the Save Directory module.
+        """
+        context = self.context
+        directory = self.current_save_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+        saved_paths: list[str] = []
+        failed: list[dict[str, str]] = []
+        seen_ids: set[str] = set()
+
+        for item in list(items or []):
+            history_id = str(getattr(item, "history_id", "") or "")
+            if not history_id or history_id in seen_ids:
+                continue
+            seen_ids.add(history_id)
+            try:
+                target = self._save_history_item_to_directory(
+                    item,
+                    directory,
+                    save_as_webp=bool(save_as_webp),
+                    apply_classification=not bool(same_directory),
+                )
+                saved_paths.append(str(target))
+            except Exception as exc:
+                failed.append({
+                    "history_id": history_id,
+                    "error": str(exc),
+                })
+
+        return {
+            "saved": len(saved_paths),
+            "failed": failed,
+            "paths": saved_paths,
+            "format": "webp" if save_as_webp else "png",
+            "same_directory": bool(same_directory),
+            "current_save_directory": str(directory),
+            "remaining": context.result_store.unsaved_history_count(),
+        }
+
     def current_save_directory(
         self,
         base_path: str | None = None,
@@ -268,10 +318,17 @@ class HeadlessSaveService:
                     return value
         return ""
 
-    def _save_history_item_to_directory(self, item: Any, directory: Path, *, save_as_webp: bool) -> Path:
+    def _save_history_item_to_directory(
+        self,
+        item: Any,
+        directory: Path,
+        *,
+        save_as_webp: bool,
+        apply_classification: bool = True,
+    ) -> Path:
         context = self.context
         # 분류 하위 폴더(없으면 None)를 결정해 전달받은 기준 디렉터리 뒤에 붙인다.
-        subfolder = self._classification_subfolder_for_item(item)
+        subfolder = self._classification_subfolder_for_item(item) if apply_classification else None
         if subfolder:
             for part in Path(subfolder).parts:
                 directory = directory / part

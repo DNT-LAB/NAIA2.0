@@ -124,7 +124,7 @@ export function createResultHistoryController({
 
   function selectionBarMarkup(scope) {
     return `
-      <div class="history-selection-count" data-history-selection-count>0개 선택됨</div>
+      <div class="history-selection-count" data-history-selection-count>다중 선택 · 0개 선택됨</div>
       <div class="history-selection-actions">
         <button type="button" class="history-selection-btn save" data-history-selection-action="save">WebP 저장 (0)</button>
         <button type="button" class="history-selection-btn delete" data-history-selection-action="delete">선택 삭제 (0)</button>
@@ -152,8 +152,8 @@ export function createResultHistoryController({
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'viewerSelectionBar';
-      bar.className = 'history-selection-bar viewer-panel-selection hidden';
-      bar.innerHTML = selectionBarMarkup('');
+      bar.className = 'history-selection-bar viewer-panel-selection';
+      bar.innerHTML = selectionBarMarkup('Cmd/Ctrl · Shift · 드래그 · Cmd/Ctrl+A · Esc');
       const header = viewerPanel.querySelector('.viewer-panel-header');
       if (header) header.insertAdjacentElement('afterend', bar);
       else viewerPanel.prepend(bar);
@@ -170,12 +170,11 @@ export function createResultHistoryController({
       thumb.setAttribute('aria-selected', selected ? 'true' : 'false');
     });
     document.querySelectorAll('.history-selection-bar').forEach(bar => {
-      // 드래그 도중 막대가 나타나거나 사라지면 그리드가 움직여 선택 좌표가 달라진다.
-      if (!dragSelection?.active) bar.classList.toggle('hidden', count === 0);
       const countEl = bar.querySelector('[data-history-selection-count]');
-      if (countEl) countEl.textContent = `${count}개 선택됨`;
+      if (countEl) countEl.textContent = `다중 선택 · ${count}개 선택됨`;
       const save = bar.querySelector('[data-history-selection-action="save"]');
       const remove = bar.querySelector('[data-history-selection-action="delete"]');
+      const clear = bar.querySelector('[data-history-selection-action="clear"]');
       if (save) {
         save.textContent = `WebP 저장 (${count})`;
         save.disabled = selectionBusy || count === 0;
@@ -184,6 +183,7 @@ export function createResultHistoryController({
         remove.textContent = `선택 삭제 (${count})`;
         remove.disabled = selectionBusy || count === 0;
       }
+      if (clear) clear.disabled = selectionBusy || count === 0;
     });
     if (viewerPanel) viewerPanel.classList.toggle('has-history-selection', count > 0);
   }
@@ -912,8 +912,8 @@ export function createResultHistoryController({
         <span class="viewer-panel-title">History <span id="vpCount">${viewerTotal}</span></span>
         <button class="history-close" onclick="closeViewerPopup()">&times;</button>
       </div>
-      <div class="history-selection-bar viewer-popup-selection hidden" id="vpSelectionBar">
-        ${selectionBarMarkup('')}
+      <div class="history-selection-bar viewer-popup-selection" id="vpSelectionBar">
+        ${selectionBarMarkup('Cmd/Ctrl · Shift · 드래그 · Cmd/Ctrl+A · Esc')}
       </div>
       <div class="viewer-popup-body">
         <div class="viewer-popup-left" id="vpGrid"></div>

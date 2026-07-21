@@ -629,7 +629,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260715-multiselect7')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260721-multiselect-visible1')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,

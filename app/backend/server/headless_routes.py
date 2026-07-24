@@ -21,6 +21,7 @@ from app.backend.server.module_storage_routes import register_module_storage_rou
 from app.backend.server.ollama_routes import register_ollama_routes
 from app.backend.server.translation_history_routes import register_translation_history_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
+from app.backend.server.prompt_engineering_filter_routes import register_pe_filter_routes
 from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
 from app.backend.server.result_display_routes import register_result_display_routes
 from app.backend.server.state_routes import register_state_routes
@@ -132,6 +133,7 @@ def register_headless_routes(
         start_generation_runner=ensure_generation_runner,
     )
     register_style_thumbnail_routes(app, context, run_in_thread=run_in_thread)
+    register_pe_filter_routes(app, context, run_in_thread=run_in_thread)
     register_module_storage_routes(app, context, run_in_thread=run_in_thread)
     register_data_migration_routes(app, context, run_in_thread=run_in_thread)
     register_danbooru_routes(app, context, run_in_thread=run_in_thread)

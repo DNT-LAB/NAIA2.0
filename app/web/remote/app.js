@@ -6476,7 +6476,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260614-conncustom')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260724-catfilter9')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -6492,7 +6492,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260620-emphframing1')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20260724-catfilter9')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -6755,7 +6755,7 @@ const pePresetManagePanel = $('pePresetManagePanel');
 const peDanbooruPanel = $('peDanbooruPanel');
 const peOllamaBoostPanel = $('peOllamaBoostPanel');
 const peDebugPanel = $('peDebugPanel');
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260620-emphframing1')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20260723-catfilter9')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       document,
@@ -6769,6 +6769,13 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
       setRandomizedWildcard: setRandomizedPromptWildcard,
       bindTagAssist,
       bindDanbooruFeedback,
+      saveCategoryFilter: savePromptEngineeringCategoryFilter,
+      // 사전 chip 호버 시 autocomplete 와 동일한 태그 설명 툴팁 재사용.
+      bindTagHoverInfo: (root, selector) => {
+        if (tagAssist && typeof tagAssist.bindTagChipInfoHover === 'function') {
+          tagAssist.bindTagChipInfoHover(root, selector);
+        }
+      },
       panels: {
         e621: peE621Panel,
         presetAdd: pePresetAddPanel,
@@ -7099,8 +7106,8 @@ function renderPePresetManagePanel(m) {
   if (promptEngineeringPopupRenderers) promptEngineeringPopupRenderers.renderPresetManage(m);
 }
 
-function renderPromptEngineeringDebug(snapshot) {
-  return promptEngineeringPopupRenderers ? promptEngineeringPopupRenderers.renderDebugSnapshot(snapshot) : '';
+function renderPromptEngineeringDebug(snapshot, categoryFilters = {}) {
+  return promptEngineeringPopupRenderers ? promptEngineeringPopupRenderers.renderDebugSnapshot(snapshot, categoryFilters) : '';
 }
 
 function renderPeE621Panel(m) {
@@ -7225,6 +7232,11 @@ function refreshPromptEngineeringDebug() {
   if (promptEngineeringActions) promptEngineeringActions.refreshDebug();
 }
 
+function savePromptEngineeringCategoryFilter(category, exclude, include) {
+  if (!promptEngineeringActions) return false;
+  return promptEngineeringActions.saveCategoryFilter(category, exclude, include);
+}
+
 function flushPendingModuleEdit(moduleId = null) {
   if (!pendingModuleEdit) return;
   if (moduleId && pendingModuleEdit.moduleId !== moduleId) return;
@@ -7257,9 +7269,17 @@ function setPromptEngineeringOllamaAutoBoost(checked) {
 
 function setModuleParam(moduleId, key, value, options = {}) {
   if (!options.skipPendingFlush) flushPendingModuleEdit(moduleId);
+  // 전송 성공 여부 반환 — 재연결 중 조용히 유실되면 호출부(카테고리 필터 저장 등)가
+  // dirty 를 유지하고 사용자에게 실패를 알릴 수 있어야 한다(Codex 리뷰 반영).
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'set_module_param', module_id: moduleId, key, value}));
+    try {
+      ws.send(JSON.stringify({type: 'set_module_param', module_id: moduleId, key, value}));
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
+  return false;
 }
 
 function onModTextEdit(moduleId, key, value) {
@@ -8382,7 +8402,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260717-charbench1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260724-catfilter6')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

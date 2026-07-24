@@ -60,6 +60,128 @@ COLOR_EXCEPTION_EXACT = [
 ]
 
 
+def _norm_tag(tag: Any) -> str:
+    """카테고리 오버라이드 비교용 정규화 (strip + lower). 사전 태그가 소문자
+    관례이므로 대소문자·주변 공백만 무시하고 저장값 원형은 보존한다."""
+    return str(tag or "").strip().lower()
+
+
+def _pattern_norm(value: Any) -> str:
+    """패턴 매칭용 정규화 — lower만(strip 금지). ``_x_``/``_x``/``x_`` 의 경계
+    공백은 needle 안에 유지돼야 __x__(단순 포함)과 구분되므로 strip 하지 않는다."""
+    return str(value or "").lower()
+
+
+def compile_hide_pattern(item, *, normalize=None):
+    """Auto-Hide 스타일 묶음 문법을 substring 매처(predicate)로 컴파일.
+
+    반환 None = plain(정확일치 대상), 아니면 keyword -> bool predicate.
+
+    관대한 일반화 규칙 (2026-07-24, 사용자 결정 — 밑줄 개수를 외울 필요 없게):
+      - 감싸면(앞뒤 모두, 개수 무관: ``__x__``/``_x_``/``__x_``/``_x__``) : 포함 매치
+      - 앞에만(개수 무관: ``_x``/``__x``) : " x" — 앞에 공백이 오는 단어 경계 매치
+      - 뒤에만(개수 무관: ``x_``/``x__``) : 포함 매치
+      - 밑줄 없음 : None (plain, 정확일치)
+      - 중간 밑줄은 공백으로 취급 (``__blue_eyes__`` = "blue eyes" 포함 —
+        Danbooru 표기 복붙 호환. 앞뒤 밑줄이 전혀 없으면 plain 그대로)
+      - 심(core)이 비면 None (``____`` 가 전체 매치로 폭주하던 기존 결함 차단)
+
+    normalize 가 주어지면 needle 과 대상 keyword 양쪽에 적용해 비교한다(카테고리
+    오버라이드는 lower 기준). 미지정(None) 시 원형 그대로 비교(auto-hide, 대소문자
+    구분)."""
+    if not isinstance(item, str):
+        return None
+    stripped_lead = item.lstrip("_")
+    lead = len(item) - len(stripped_lead)
+    core = stripped_lead.rstrip("_")
+    trail = len(stripped_lead) - len(core)
+    if lead == 0 and trail == 0:
+        return None
+    # 심이 비면(밑줄만) 빈 needle -> 전체 매치가 되므로 차단.
+    if not core.strip():
+        return None
+    needle = core.replace("_", " ")
+    if lead > 0 and trail == 0:
+        needle = " " + needle
+    if normalize is None:
+        return lambda keyword: needle in keyword
+    needle_n = normalize(needle)
+    if not needle_n.strip():
+        return None
+    return lambda keyword: needle_n in normalize(keyword)
+
+
+def _parse_override_terms(items):
+    """오버라이드 항목 리스트를 (exact_set, pattern_predicates)로 분리.
+
+    Auto-Hide 묶음 문법이면 패턴 predicate, 아니면 정규화 정확일치 set.
+    ``~text`` 는 카테고리에서 특수 의미가 없어 plain(정확일치)로 취급된다
+    (밑줄 패턴이 아니므로 compile_hide_pattern 이 None -> exact)."""
+    exact = set()
+    preds = []
+    for raw in (items or []):
+        text = str(raw or "")
+        if not text.strip():
+            continue
+        pred = compile_hide_pattern(text, normalize=_pattern_norm)
+        if pred is not None:
+            preds.append(pred)
+        else:
+            exact.add(_norm_tag(text))
+    return exact, preds
+
+
+def _override_sets(category_overrides, option_key):
+    """해당 라운드(option_key)의 (exclude, include) 를 반환.
+
+    각각 (exact_set, pattern_predicates) 튜플. 오버라이드 없으면 빈 형태.
+    (하위 라운드는 이 튜플을 그대로 _apply_round_overrides 에 전달만 한다.)"""
+    entry = (category_overrides or {}).get(option_key) if isinstance(category_overrides, dict) else None
+    if not isinstance(entry, dict):
+        return (set(), []), (set(), [])
+    exclude = _parse_override_terms(entry.get("exclude"))
+    include = _parse_override_terms(entry.get("include"))
+    return exclude, include
+
+
+def _matches_terms(keyword, terms):
+    """keyword 가 (exact_set, predicates) 에 정확일치 또는 패턴 매치하면 True."""
+    exact, preds = terms
+    if _norm_tag(keyword) in exact:
+        return True
+    return any(pred(keyword) for pred in preds)
+
+
+def _terms_empty(terms):
+    exact, preds = terms
+    return not exact and not preds
+
+
+def _apply_round_overrides(temp, main_tags, exclude, include):
+    """정확일치/부분일치 라운드의 제거 후보(temp)에 exclude/include 오버라이드를 적용.
+
+    exclude/include 는 각각 (exact_set, pattern_predicates).
+    - exclude: temp 에서 정확일치 ∪ 패턴 매치하는 태그를 보호(제거하지 않음).
+    - include: main_tags 중 정확일치·패턴 매치하는 태그를 추가 제거 대상으로 편입.
+    우선순위: exclude(모든 형태) > include(모든 형태).
+    반환 순서는 원래 temp 순서 뒤에 include 추가분을 잇는다."""
+    if _terms_empty(exclude) and _terms_empty(include):
+        return temp
+    result = [k for k in temp if not _matches_terms(k, exclude)]
+    if not _terms_empty(include):
+        scheduled = {_norm_tag(k) for k in result}
+        for keyword in main_tags:
+            nk = _norm_tag(keyword)
+            if nk in scheduled:
+                continue
+            if _matches_terms(keyword, exclude):
+                continue  # exclude 우선
+            if _matches_terms(keyword, include):
+                result.append(keyword)
+                scheduled.add(nk)
+    return result
+
+
 def _is_color_exception(tag: str) -> bool:
     """
     색상 필터링 예외 여부를 판단합니다.
@@ -135,22 +257,14 @@ def _process_auto_hide(main_tags: List[str], removed_tags: List[str],
         main_tags.remove(keyword)
         removed_tags.append(keyword)
 
-    # 패턴 매칭 처리
+    # 패턴 매칭 처리 — compile_hide_pattern 헬퍼로 통일(카테고리 오버라이드와 동일 문법).
+    # normalize 미지정 = 원형 substring 비교라 기존 동작이 그대로 보존된다.
     to_remove = []
     for item in auto_hide:
-        modified_item = item
-        if item.startswith("__") and item.endswith("__"):
-            modified_item = modified_item.replace("_", "")
-            to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-        elif item.startswith("_") and item.endswith("_"):
-            modified_item = modified_item.replace("_", " ")
-            to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-        elif item.startswith("_"):
-            modified_item = modified_item.replace("_", " ", 1)
-            to_remove += [keyword for keyword in main_tags if modified_item in keyword]
-        elif item.endswith("_"):
-            modified_item = " " + modified_item.rstrip("_") + " "
-            to_remove += [keyword for keyword in main_tags if modified_item.strip() in keyword]
+        pred = compile_hide_pattern(item)
+        if pred is None:
+            continue
+        to_remove += [keyword for keyword in main_tags if pred(keyword)]
 
     # 보호된 키워드를 to_remove에서 제외
     to_remove = list(set(to_remove))
@@ -182,6 +296,7 @@ def apply_tag_filters(
     auto_hide: List[str],
     filter_manager,
     track_clothing_regions: bool = False,
+    category_overrides: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     공통 태그 필터링 로직. main_tags, removed_tags를 in-place 수정.
@@ -203,6 +318,11 @@ def apply_tag_filters(
         auto_hide: 자동 숨김 태그 리스트
         filter_manager: FilterDataManager 인스턴스 (None이면 필터 건너뜀)
         track_clothing_regions: 의류 Region 추적 여부
+        category_overrides: 카테고리별 사용자 오버라이드
+            {option_key: {"exclude": [...], "include": [...]}}.
+            exclude=해당 라운드가 어떤 방식으로 매칭했든 제거하지 않음(보호).
+            include=라운드 enabled 일 때만 정확일치 태그를 함께 제거.
+            Auto Hide(라운드 1)는 자체 문법을 가지므로 오버라이드 대상 아님.
 
     Returns:
         dict: {'removed_clothes_by_region': dict} (추적 시) or {}
@@ -215,6 +335,7 @@ def apply_tag_filters(
     _process_auto_hide(main_tags, removed_tags, auto_hide)
     filter_log.append({
         'name': 'Auto Hide',
+        'key': 'auto_hide',
         'enabled': True,
         'removed': removed_tags[before_len:],
     })
@@ -227,13 +348,16 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_character_features", False)
     before_len = len(removed_tags)
     if enabled:
+        exclude_set, include_set = _override_sets(category_overrides, "remove_character_features")
         characteristics = filter_manager.characteristic_list
         temp = [keyword for keyword in main_tags if keyword in characteristics]
+        temp = _apply_round_overrides(temp, main_tags, exclude_set, include_set)
         for keyword in temp:
             main_tags.remove(keyword)
             removed_tags.append(keyword)
     filter_log.append({
         'name': '캐릭터 특징',
+        'key': 'remove_character_features',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -242,8 +366,10 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_clothes", False)
     before_len = len(removed_tags)
     if enabled:
+        exclude_set, include_set = _override_sets(category_overrides, "remove_clothes")
         clothes = filter_manager.clothes_list
         temp = [keyword for keyword in main_tags if keyword in clothes]
+        temp = _apply_round_overrides(temp, main_tags, exclude_set, include_set)
 
         if track_clothing_regions and temp:
             removed_by_region = defaultdict(list)
@@ -257,6 +383,7 @@ def apply_tag_filters(
             removed_tags.append(keyword)
     filter_log.append({
         'name': '의류',
+        'key': 'remove_clothes',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -265,8 +392,10 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_clothing_event", False)
     before_len = len(removed_tags)
     if enabled:
+        exclude_set, include_set = _override_sets(category_overrides, "remove_clothing_event")
         event_set = filter_manager._clothing_event_set
         temp = [keyword for keyword in main_tags if keyword in event_set]
+        temp = _apply_round_overrides(temp, main_tags, exclude_set, include_set)
 
         if track_clothing_regions and temp:
             removed_by_category = defaultdict(list)
@@ -280,6 +409,7 @@ def apply_tag_filters(
             removed_tags.append(keyword)
     filter_log.append({
         'name': '의상 이벤트',
+        'key': 'remove_clothing_event',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -288,14 +418,24 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_color", False)
     before_len = len(removed_tags)
     if enabled:
+        exclude, include = _override_sets(category_overrides, "remove_color")
         colors = filter_manager.color_list
+        # 색상 라운드는 '단어' 부분일치라 exclude 가 이중 의미를 갖는다:
+        # - exclude 항목이 색상 단어와 (정확일치·패턴) 매치하면 그 단어를 통째로 보호
+        #   (예: exclude 'blue' -> 'blue hair', 'blue dress' 전부 제거 안 함)
+        # - 그 외 항목은 아래 _apply_round_overrides 의 완성-태그 보호
+        #   (예: exclude 'blue hair' -> 'blue hair' 만 보호)
+        if not _terms_empty(exclude):
+            colors = [color for color in colors if not _matches_terms(color, exclude)]
         temp = [keyword for keyword in main_tags
                 if not _is_color_exception(keyword) and any(color in keyword for color in colors)]
+        temp = _apply_round_overrides(temp, main_tags, exclude, include)
         for keyword in temp:
             main_tags.remove(keyword)
             removed_tags.append(keyword)
     filter_log.append({
         'name': '색상',
+        'key': 'remove_color',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -304,13 +444,16 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_location_and_background_color", False)
     before_len = len(removed_tags)
     if enabled:
+        exclude_set, include_set = _override_sets(category_overrides, "remove_location_and_background_color")
         location_set = filter_manager._location_set
         temp = [keyword for keyword in main_tags if keyword in location_set]
+        temp = _apply_round_overrides(temp, main_tags, exclude_set, include_set)
         for keyword in temp:
             main_tags.remove(keyword)
             removed_tags.append(keyword)
     filter_log.append({
         'name': '위치/배경',
+        'key': 'remove_location_and_background_color',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -319,13 +462,16 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_expression", False)
     before_len = len(removed_tags)
     if enabled:
+        exclude_set, include_set = _override_sets(category_overrides, "remove_expression")
         expression_set = filter_manager._expression_set
         temp = [keyword for keyword in main_tags if keyword in expression_set]
+        temp = _apply_round_overrides(temp, main_tags, exclude_set, include_set)
         for keyword in temp:
             main_tags.remove(keyword)
             removed_tags.append(keyword)
     filter_log.append({
         'name': '표정',
+        'key': 'remove_expression',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -334,13 +480,16 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_pose_action", False)
     before_len = len(removed_tags)
     if enabled:
+        exclude_set, include_set = _override_sets(category_overrides, "remove_pose_action")
         pose_action_set = filter_manager._pose_action_set
         temp = [keyword for keyword in main_tags if keyword in pose_action_set]
+        temp = _apply_round_overrides(temp, main_tags, exclude_set, include_set)
         for keyword in temp:
             main_tags.remove(keyword)
             removed_tags.append(keyword)
     filter_log.append({
         'name': '포즈/동작',
+        'key': 'remove_pose_action',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -349,13 +498,16 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_meta_tags", True)
     before_len = len(removed_tags)
     if enabled:
+        exclude_set, include_set = _override_sets(category_overrides, "remove_meta_tags")
         meta_set = filter_manager._meta_set
         temp = [keyword for keyword in main_tags if keyword in meta_set]
+        temp = _apply_round_overrides(temp, main_tags, exclude_set, include_set)
         for keyword in temp:
             main_tags.remove(keyword)
             removed_tags.append(keyword)
     filter_log.append({
         'name': '메타',
+        'key': 'remove_meta_tags',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -364,13 +516,16 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_object_tags", False)
     before_len = len(removed_tags)
     if enabled:
+        exclude_set, include_set = _override_sets(category_overrides, "remove_object_tags")
         object_set = filter_manager._object_set
         temp = [keyword for keyword in main_tags if keyword in object_set]
+        temp = _apply_round_overrides(temp, main_tags, exclude_set, include_set)
         for keyword in temp:
             main_tags.remove(keyword)
             removed_tags.append(keyword)
     filter_log.append({
         'name': '사물',
+        'key': 'remove_object_tags',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })
@@ -379,12 +534,25 @@ def apply_tag_filters(
     enabled = checkbox_options.get("remove_noise_tags", False)
     before_len = len(removed_tags)
     if enabled:
-        filtered = filter_manager.filter_noise_tags(main_tags)
-        removed = [t for t in main_tags if t not in set(filtered)]
-        main_tags[:] = filtered
-        removed_tags.extend(removed)
+        exclude, include = _override_sets(category_overrides, "remove_noise_tags")
+        filtered_set = set(filter_manager.filter_noise_tags(main_tags))
+        # 빈도 기반이라 temp 후처리 대신 filtered 결과에 exclude 태그를 되살리는 방식.
+        # exclude=보호(정확일치·패턴), include=강제 제거(정확일치·패턴). exclude 우선.
+        new_main = []
+        removed_here = []
+        for keyword in main_tags:
+            protected = _matches_terms(keyword, exclude)
+            forced = _matches_terms(keyword, include)
+            should_remove = (keyword not in filtered_set or forced) and not protected
+            if should_remove:
+                removed_here.append(keyword)
+            else:
+                new_main.append(keyword)
+        main_tags[:] = new_main
+        removed_tags.extend(removed_here)
     filter_log.append({
         'name': '노이즈 태그',
+        'key': 'remove_noise_tags',
         'enabled': enabled,
         'removed': removed_tags[before_len:],
     })

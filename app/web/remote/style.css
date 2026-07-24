@@ -11699,6 +11699,407 @@ body.detached-metadata .metadata-layout {
 .mod-debug-round-title span {
   color: var(--text-dim);
 }
+.mod-debug-round-title .mod-debug-round-name {
+  color: var(--text-primary);
+}
+.mod-debug-round-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* 카테고리 필터 설정 토글(⚙) — ghost: 평시 dim, hover 밝게, 열림 시 accent. */
+.mod-debug-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s, transform 0.2s;
+}
+.mod-debug-gear:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.08);
+  border-color: var(--border-dim);
+  opacity: 1;
+}
+.mod-debug-gear.is-open {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(80,150,255,0.12);
+  opacity: 1;
+  transform: rotate(45deg);
+}
+/* 열린 슬롯 강조 — 라운드 좌측 accent 힌트 + 타이틀 강조. */
+.mod-debug-round.is-open {
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+  margin-left: -2px;
+}
+.mod-debug-round.is-open .mod-debug-round-name {
+  color: var(--accent);
+}
+/* 카테고리 편집기 카드 — 펼침은 CSS transition 만(opacity/transform, 레이아웃 점프 회피). */
+.mod-debug-cat-editor {
+  margin-top: 6px;
+  padding: 10px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  transform-origin: top;
+  animation: modDebugCatIn 0.16s ease;
+}
+@keyframes modDebugCatIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mod-debug-cat-editor[hidden] {
+  display: none;
+}
+.mod-debug-cat-editor .mod-debug-cat-input {
+  min-height: 40px;
+}
+.mod-debug-cat-inner {
+  display: flex;
+  flex-direction: column;
+}
+/* 섹션 — hairline divider 로 구획한 카드 리듬. */
+.mod-debug-cat-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.mod-debug-cat-sec:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+.mod-debug-cat-sechead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mod-debug-cat-sectitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--text-dim);
+}
+.mod-debug-cat-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: rgba(255,255,255,0.06);
+  border-radius: 8px;
+}
+/* 검색 행 — pill input(인라인 🔍) + 우측 dim 카운트 배지. */
+.mod-debug-cat-searchrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mod-debug-cat-searchbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 10px;
+  background: var(--bg-input, rgba(255,255,255,0.03));
+  border: 1px solid var(--border-dim);
+  border-radius: 999px;
+  transition: border-color 0.15s;
+}
+.mod-debug-cat-searchbox:focus-within {
+  border-color: var(--accent);
+}
+.mod-debug-cat-searchicon {
+  font-size: 10px;
+  opacity: 0.6;
+  flex: 0 0 auto;
+}
+.mod-debug-cat-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+}
+.mod-debug-cat-count {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* 사전 태그 chip cloud — 스크롤 영역 + 하단 fade 힌트. */
+.mod-debug-cat-dictwrap {
+  position: relative;
+}
+.mod-debug-cat-dictwrap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 18px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(0,0,0,0), var(--bg-deep));
+  border-radius: 0 0 6px 6px;
+}
+.mod-debug-cat-dict {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 172px;
+  overflow-y: auto;
+  padding: 2px 2px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-glow, rgba(255,255,255,0.18)) transparent;
+}
+.mod-debug-cat-dict::-webkit-scrollbar {
+  width: 7px;
+}
+.mod-debug-cat-dict::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.14);
+  border-radius: 4px;
+}
+.mod-debug-cat-dict::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mod-debug-cat-loading,
+.mod-debug-cat-empty,
+.mod-debug-cat-error,
+.mod-debug-cat-note,
+.mod-debug-cat-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 2px;
+}
+.mod-debug-cat-hint {
+  opacity: 0.8;
+}
+.mod-debug-cat-error {
+  color: var(--danger, #e57373);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* chip — 작고 촘촘하게. */
+.mod-debug-tag-chip,
+.mod-debug-removed-chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  max-width: 100%;
+  word-break: break-all;
+}
+.mod-debug-tag-chip:hover,
+.mod-debug-removed-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--border-glow, var(--accent));
+  background: rgba(255,255,255,0.07);
+}
+/* 제외 상태 강조 — accent 틴트 + 취소선(채도 절제). */
+.mod-debug-tag-chip.is-excluded,
+.mod-debug-removed-chip.is-excluded {
+  color: var(--accent);
+  border-color: rgba(80,150,255,0.5);
+  background: rgba(80,150,255,0.1);
+  text-decoration: line-through;
+}
+.mod-debug-tag-chip.is-disabled {
+  cursor: default;
+  opacity: 0.4;
+  text-decoration: none;
+}
+.mod-debug-tag-chip.is-disabled:hover {
+  color: var(--text-muted);
+  border-color: var(--border-dim);
+  background: rgba(255,255,255,0.03);
+}
+.mod-debug-cat-more {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px dashed var(--border-dim);
+  border-radius: 6px;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+.mod-debug-cat-more:hover {
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+/* 빠른 제외 — 미리보기의 제거된 태그 chip 목록 */
+.mod-debug-removed-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+/* "제외 중" 현재 목록 */
+.mod-debug-cat-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mod-debug-cat-selected-empty {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+.mod-debug-cat-selchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  background: rgba(80,150,255,0.1);
+  border: 1px solid rgba(80,150,255,0.45);
+  border-radius: 6px;
+  padding: 2px 3px 2px 7px;
+}
+/* 패턴 exclude chip — 정확일치와 구분(점선 테두리). */
+.mod-debug-cat-selchip.is-pattern {
+  border-style: dashed;
+  background: rgba(80,150,255,0.06);
+}
+.mod-debug-cat-selx {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.mod-debug-cat-selx:hover {
+  color: var(--text-primary);
+  opacity: 1;
+}
+/* 검색어가 패턴일 때 dict 위 액션 행. */
+.mod-debug-cat-patternrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px;
+  background: rgba(80,150,255,0.07);
+  border: 1px dashed rgba(80,150,255,0.4);
+  border-radius: 6px;
+}
+.mod-debug-cat-patternrow[hidden] {
+  display: none;
+}
+.mod-debug-cat-patterninfo {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  min-width: 0;
+  word-break: break-all;
+}
+.mod-debug-cat-patterntag {
+  color: var(--accent);
+}
+.mod-debug-cat-patternactions {
+  display: inline-flex;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.mod-debug-cat-patternbtn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid rgba(80,150,255,0.45);
+  border-radius: 5px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.mod-debug-cat-patternbtn:hover {
+  background: rgba(80,150,255,0.16);
+}
+.mod-debug-cat-patternbtn:disabled {
+  color: var(--text-dim);
+  border-color: var(--border-dim);
+  cursor: default;
+  background: transparent;
+}
+/* 액션 행 + 저장 버튼 — 비dirty ghost, dirty 시 accent 채움, 저장 직후 저장됨. */
+.mod-debug-cat-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.mod-debug-cat-save {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  padding: 4px 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.mod-debug-cat-save:hover {
+  color: var(--text-primary);
+  border-color: var(--border-glow, var(--accent));
+}
+.mod-debug-cat-save.is-dirty {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.mod-debug-cat-save.is-dirty:hover {
+  background: var(--accent-hover, var(--accent));
+}
+.mod-debug-cat-save.is-saved {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(80,150,255,0.12);
+}
 .mod-debug-block {
   margin: 0;
   white-space: pre-wrap;

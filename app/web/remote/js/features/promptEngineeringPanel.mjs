@@ -75,10 +75,10 @@ const PE_POSTFIX_GUIDE = 'Postfix Prompt — 랜덤 프롬프트 뒤에 결합�
 const PE_AUTOHIDE_GUIDE = [
   'Auto-Hide (Filter) — 랜덤 프롬프트가 Prefix·Postfix와 결합될 때, 패턴에 맞는 태그를 결과에서 제거합니다. (WC Solo 모드에서는 미적용)',
   '텍스트 — 정확히 같은 태그만 제거',
-  '__텍스트__ — 텍스트를 포함하는 모든 태그 제거 (부분일치, 가장 넓음)',
-  '_텍스트_ — 밑줄을 공백으로 바꾼 " 텍스트 " 구를 포함하는 태그 제거',
-  '_텍스트 — 앞에 공백이 오는 " 텍스트"로 매칭 (단어 경계)',
+  '__텍스트__ 또는 _텍스트_ — 텍스트를 포함하는 모든 태그 제거 (부분일치, 밑줄 개수 무관)',
+  '_텍스트 또는 __텍스트 — 앞에 공백이 오는 " 텍스트"로 매칭 (단어 경계)',
   '텍스트_ — 텍스트를 포함하는 태그 제거 (부분일치)',
+  '중간 밑줄은 공백으로 취급 — blue_eyes 는 "blue eyes"와 같음 (Danbooru 표기 복붙 호환)',
   '~텍스트 — 보호: 텍스트를 포함하는 태그는 위 규칙으로도 제거하지 않음 (예외)',
 ].join('\\n\\n');
 
@@ -322,7 +322,7 @@ export function createPromptEngineeringPanel({
       </div>
     </div>
     <div>
-      <div class="mod-section-label has-actions"><span>Preprocessing Options</span><span class="mod-head-actions"><button type="button" class="header-action-btn" onclick="openPeDebugPanel()">Debug Snapshot</button><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
+      <div class="mod-section-label has-actions"><span>Preprocessing Options</span><span class="mod-head-actions"><button type="button" class="header-action-btn" onclick="openPeDebugPanel()">Setting &amp; Preview</button><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
       <!-- Ollama Auto Boost를 그리드 마지막 셀로 — Tag Implication(좌) 우측 칸을 채워 균일하게. -->
       <div class="mod-checkbox-grid">${preprocessingHtml}${ollamaBoostHtml}</div>
     </div>

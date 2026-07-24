@@ -283,6 +283,83 @@ def save_ollama_boost_settings(settings: dict[str, Any], *, save_root: str | Pat
     )
 
 
+# 카테고리별 랜덤 프롬프트 전처리 필터 커스터마이즈 — 전역(모드 무관) 디스크 SSOT.
+# 각 전처리 카테고리(remove_* 체크박스)마다 exclude(자동 제거에서 보호할 태그)/
+# include(해당 카테고리 ON일 때 함께 제거할 추가 태그)를 사용자가 지정한다.
+# Auto Hide 라운드는 자체 문법(~/__..__)을 가지므로 여기서 제외한다.
+CATEGORY_FILTER_OPTION_KEYS = (
+    "remove_character_features",
+    "remove_clothes",
+    "remove_clothing_event",
+    "remove_color",
+    "remove_location_and_background_color",
+    "remove_expression",
+    "remove_pose_action",
+    "remove_meta_tags",
+    "remove_object_tags",
+    "remove_noise_tags",
+)
+
+
+def sanitize_tag_list(value: Any) -> list[str]:
+    """list[str] 위생화 — 비문자열/빈 항목 제거, 정규화(strip+lower) 기준 중복 제거.
+    저장값은 사용자가 입력한 원형(대소문자 포함)을 보존한다."""
+    if not isinstance(value, list):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(text)
+    return cleaned
+
+
+def normalize_category_filter_overrides(overrides: Any) -> dict[str, Any]:
+    """전체 오버라이드 맵을 정규화. {schema_version, categories:{...}} 래핑 형태와
+    맨 {option_key: {...}} 형태를 모두 받아 화이트리스트 키만, exclude/include 가
+    하나라도 있는 카테고리만 남긴다(파일 청결 유지)."""
+    data = overrides if isinstance(overrides, dict) else {}
+    categories_raw = data.get("categories") if isinstance(data.get("categories"), dict) else data
+    if not isinstance(categories_raw, dict):
+        categories_raw = {}
+    result: dict[str, Any] = {}
+    for key in CATEGORY_FILTER_OPTION_KEYS:
+        entry = categories_raw.get(key)
+        if not isinstance(entry, dict):
+            continue
+        exclude = sanitize_tag_list(entry.get("exclude"))
+        include = sanitize_tag_list(entry.get("include"))
+        if exclude or include:
+            result[key] = {"exclude": exclude, "include": include}
+    return result
+
+
+def load_category_filter_overrides(*, save_root: str | Path | None = None) -> dict[str, Any]:
+    """pp_category_filters.json 에서 카테고리 오버라이드 맵을 로드.
+    손상 파일/형식 오류는 빈 dict 로 떨어뜨린다."""
+    path = _existing_save_file("pp_category_filters.json", save_root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return normalize_category_filter_overrides(data if isinstance(data, dict) else {})
+
+
+def save_category_filter_overrides(overrides: dict[str, Any], *, save_root: str | Path | None = None) -> None:
+    path = _coerce_save_root(save_root) / "pp_category_filters.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"schema_version": 1, "categories": normalize_category_filter_overrides(overrides)}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 # 고급 연결 설정 — 셀프호스팅(cloudflared 등) 사용자가 NAIA 백엔드가 프록시할 Ollama
 # 엔드포인트/모델을 직접 지정하기 위한 전역(모드 무관) 설정. 빈 endpoint/model은
 # "기본값 사용"을 뜻한다(env NAIA_OLLAMA_URL → 코드 기본 localhost / 코드 기본 모델).

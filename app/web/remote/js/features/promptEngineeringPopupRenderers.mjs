@@ -10,8 +10,139 @@ export function createPromptEngineeringPopupRenderers({
   setRandomizedWildcard,
   bindTagAssist,
   bindDanbooruFeedback,
+  saveCategoryFilter,
+  bindTagHoverInfo,
   panels,
 }) {
+  const CATEGORY_EDITOR_INPUT_CLASS = 'mod-debug-cat-input';
+  const CATEGORY_SEARCH_CLASS = 'mod-debug-cat-search';
+  const CATEGORY_TAGS_ENDPOINT = '/api/prompt-engineering/category-tags';
+  const CATEGORY_PAGE_LIMIT = 200;
+  // 사전 클릭-제외가 실제 태그 단위로 의미가 없는(부분일치 색상 단어) 카테고리.
+  // (비어 있음) 색상 카테고리도 이제 클릭-제외 가능 — 백엔드가 색상 '단어' exclude 를
+  // 패턴 보호로 처리한다(exclude 'blue' = blue* 부분일치 제거 전체 보호).
+  const DICT_CLICK_DISABLED_CATEGORIES = new Set();
+
+  // 열려 있는 카테고리 편집기의 전체 작업 상태 — module_state push 로 인한 재렌더
+  // 후에도 이 상태로 편집기를 복원해 미저장 선택이 절대 소실되지 않게 한다(한 번에
+  // 하나만 열림). workingExclude 는 정규화(lower) 집합, excludeDisplay 는 정규화→원형.
+  let editorState = null;
+  let searchDebounceTimer = null;
+  let savedFlashUntil = 0;   // "저장됨" 피드백이 재렌더에도 잠깐 유지되도록 하는 만료 타임스탬프
+
+  function parseTagInput(value) {
+    return String(value || '')
+      .split(',')
+      .map(tag => tag.trim())
+      .filter(Boolean);
+  }
+
+  function normTag(value) {
+    return String(value == null ? '' : value).trim().toLowerCase();
+  }
+
+  function cssEscape(value) {
+    if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(value);
+    return String(value).replace(/["\\\]]/g, '\\$&');
+  }
+
+  // Auto-Hide 묶음 문법 미러(백엔드 compile_hide_pattern 과 동일한 관대한 일반화 규칙).
+  // 감싸면(개수 무관) 포함 / 앞에만 " x" 경계 / 뒤에만 포함 / 중간 밑줄=공백 / 심 비면 null.
+  // 반환 null = plain(정확일치), 아니면 (keyword)->bool 포함-매치 predicate.
+  function compileHidePattern(item) {
+    if (typeof item !== 'string') return null;
+    const strippedLead = item.replace(/^_+/, '');
+    const lead = item.length - strippedLead.length;
+    const core = strippedLead.replace(/_+$/, '');
+    const trail = strippedLead.length - core.length;
+    if (lead === 0 && trail === 0) return null;
+    if (!core.trim()) return null;               // 밑줄만("____") -> 전체 매치 폭주 차단
+    let needle = core.replace(/_/g, ' ');
+    if (lead > 0 && trail === 0) needle = ' ' + needle;
+    // lower만(trim 금지) — 앞 경계 공백을 needle 안에 유지.
+    const n = needle.toLowerCase();
+    if (!n.trim()) return null;
+    return (keyword) => String(keyword == null ? '' : keyword).toLowerCase().includes(n);
+  }
+
+  function isPatternTerm(item) {
+    return compileHidePattern(item) !== null;
+  }
+
+  // 항목 리스트를 {exact:Set(정규화), preds:[predicate]} 매처로 컴파일(1회).
+  function buildExcludeMatcher(entries) {
+    const exact = new Set();
+    const preds = [];
+    (entries || []).forEach(entry => {
+      const text = String(entry || '');
+      if (!text.trim()) return;
+      const pred = compileHidePattern(text);
+      if (pred) preds.push(pred);
+      else exact.add(normTag(text));
+    });
+    return { exact, preds };
+  }
+
+  function matcherHas(matcher, tag) {
+    if (!matcher) return false;
+    if (matcher.exact.has(normTag(tag))) return true;
+    return matcher.preds.some(pred => pred(tag));
+  }
+
+  function newEditorState(key, categoryFilters) {
+    const entry = (categoryFilters && typeof categoryFilters === 'object' ? categoryFilters[key] : null) || {};
+    const workingExclude = new Set();
+    const excludeDisplay = new Map();
+    (Array.isArray(entry.exclude) ? entry.exclude : []).forEach(tag => {
+      const n = normTag(tag);
+      if (!n) return;
+      workingExclude.add(n);
+      if (!excludeDisplay.has(n)) excludeDisplay.set(n, String(tag));
+    });
+    const include = Array.isArray(entry.include) ? entry.include.join(', ') : '';
+    return {
+      key,
+      q: '',
+      tags: [],
+      infoMap: {},       // 태그 → {desc, count, group} (autocomplete 설명 툴팁용, 페이지 누적)
+      total: 0,
+      fullTotal: null,
+      loaded: 0,
+      workingExclude,
+      excludeDisplay,
+      workingInclude: include,
+      dirty: false,
+      loading: false,
+      error: null,
+      supported: null,   // null=아직 미조회, true/false=조회 결과
+      reason: '',
+      _excludeMatcher: null,   // workingExclude 변경 시 재빌드하는 매처 캐시(패턴 포함)
+    };
+  }
+
+  // workingExclude(정확일치+패턴 문자열)로부터 매처 재빌드/조회. 매 chip 재컴파일 방지.
+  function rebuildExcludeMatcher() {
+    if (!editorState) return;
+    const entries = [...editorState.workingExclude].map(n => editorState.excludeDisplay.get(n) || n);
+    editorState._excludeMatcher = buildExcludeMatcher(entries);
+  }
+
+  function ensureExcludeMatcher() {
+    if (editorState && !editorState._excludeMatcher) rebuildExcludeMatcher();
+    return (editorState && editorState._excludeMatcher) || { exact: new Set(), preds: [] };
+  }
+
+  function isWorkingExcluded(tag) {
+    return matcherHas(ensureExcludeMatcher(), tag);
+  }
+
+  // 카테고리별 exclude 매처: 편집 중이면 workingExclude(미저장 포함), 아니면 저장된 값.
+  function excludeMatcherFor(key, categoryFilters) {
+    if (editorState && editorState.key === key) return ensureExcludeMatcher();
+    const arr = (categoryFilters && categoryFilters[key] && Array.isArray(categoryFilters[key].exclude))
+      ? categoryFilters[key].exclude : [];
+    return buildExcludeMatcher(arr);
+  }
   const OLLAMA_BOOST_GUIDE =
     '자연어 가중치 — 보강된 자연어 프롬프트에 부여할 가중치입니다. '
     + 'NAI는 {v}::..:: , 로컬(WEBUI/COMFYUI)은 (..:v) 구문으로 적용됩니다.\\n\\n'
@@ -358,18 +489,58 @@ export function createPromptEngineeringPopupRenderers({
     }
   }
 
-  function renderDebugSnapshot(snapshot) {
+  // 카테고리 라운드에서 제거된 태그를 클릭 가능한 chip 으로 — "방금 지워진 이 태그를
+  // 앞으로 지우지 마"의 최단 경로(클릭=편집기 열림 + 제외 토글).
+  function renderRemovedChips(key, removed, categoryFilters) {
+    const matcher = excludeMatcherFor(key, categoryFilters);
+    const chips = removed.map(tag => {
+      const excluded = matcherHas(matcher, tag);
+      return `<button type="button" class="mod-debug-removed-chip${excluded ? ' is-excluded' : ''}"`
+        + ` data-removed-cat="${escHtml(key)}" data-removed-tag="${escHtml(tag)}"`
+        + ` title="클릭: 이 카테고리 필터에서 제외(보호)">${escHtml(tag)}</button>`;
+    }).join('');
+    return `<div class="mod-debug-removed-chips" data-removed-catbox="${escHtml(key)}">${chips}</div>`;
+  }
+
+  // 편집기 컨테이너는 빈 placeholder — 내용은 editorState 로부터 renderEditorInto() 가
+  // 채운다(단일 소스: 재렌더에도 미저장 상태 보존).
+  function renderCategoryEditorShell(key) {
+    return `<div class="mod-debug-cat-editor" data-cat-editor="${escHtml(key)}" hidden></div>`;
+  }
+
+  // 스냅샷 없이도 설정 행을 그릴 수 있는 카테고리 정의(백엔드 filter_log 이름과 동일).
+  const CATEGORY_ROUNDS = [
+    ['remove_character_features', '캐릭터 특징'],
+    ['remove_clothes', '의류'],
+    ['remove_clothing_event', '의상 이벤트'],
+    ['remove_color', '색상'],
+    ['remove_location_and_background_color', '위치/배경'],
+    ['remove_expression', '표정'],
+    ['remove_pose_action', '포즈/동작'],
+    ['remove_meta_tags', '메타'],
+    ['remove_object_tags', '사물'],
+    ['remove_noise_tags', '노이즈 태그'],
+  ];
+
+  function renderDebugSnapshot(snapshot, categoryFilters = {}, preprocessing = {}) {
     const sourceInfo = snapshot.source_info || {};
-    const filterLog = Array.isArray(snapshot.filter_log) ? snapshot.filter_log : [];
+    let filterLog = Array.isArray(snapshot.filter_log) ? snapshot.filter_log : [];
     const implicationInfo = Array.isArray(snapshot.implication_info) ? snapshot.implication_info : [];
     const e621Info = snapshot.e621_info || {};
     const originalCount = Number(snapshot.original_count || 0);
     const remainingCount = Number(snapshot.remaining_count || 0);
     const hasDebugData = filterLog.length || implicationInfo.length || (e621Info.results || []).length || Object.values(sourceInfo).some(Boolean);
 
-    if (!hasDebugData) {
-      return '<div class="mod-debug-empty">No debug data yet. Generate a prompt once.</div>';
+    // 첫 생성 전에도 설정은 가능해야 한다(Codex 리뷰 반영) — 미리보기 데이터만 비운 채
+    // 고정 카테고리 행(⚙ 포함)을 합성 렌더. enabled 는 현재 preprocessing 체크 상태.
+    if (!filterLog.length) {
+      filterLog = CATEGORY_ROUNDS.map(([key, name]) => ({
+        key, name, enabled: !!(preprocessing || {})[key], removed: [],
+      }));
     }
+    const emptyNote = hasDebugData
+      ? ''
+      : '<div class="mod-debug-empty">미리보기 데이터 없음 — 프롬프트를 한 번 생성하면 제거 내역이 표시됩니다. 필터 설정(⚙)은 지금도 가능합니다.</div>';
 
     const sourceRows = Object.entries(sourceInfo)
       .filter(([, value]) => value != null && String(value).trim() !== '')
@@ -379,10 +550,29 @@ export function createPromptEngineeringPopupRenderers({
     const filterRounds = filterLog.map(entry => {
       const removed = Array.isArray(entry.removed) ? entry.removed : [];
       const status = !entry.enabled ? 'OFF' : (removed.length ? `ON · ${removed.length} removed` : 'ON');
+      const catKey = String(entry.key || '');
+      // Auto Hide(자체 문법)는 카테고리 오버라이드 대상이 아니므로 ⚙ 미노출.
+      const editable = catKey && catKey !== 'auto_hide';
+      const isOpen = editable && editorState && editorState.key === catKey;
+      const gear = editable
+        ? `<button type="button" class="mod-debug-gear${isOpen ? ' is-open' : ''}" data-cat-gear="${escHtml(catKey)}"`
+          + ` data-naia-guide="${escHtml(categoryGuide(catKey))}" aria-label="필터 예외/추가 태그 설정">⚙</button>`
+        : '';
+      // 카테고리 라운드는 제거된 태그를 클릭 chip 으로(빠른 제외), 나머지는 pre 유지.
+      const removedBlock = removed.length
+        ? (editable
+            ? renderRemovedChips(catKey, removed, categoryFilters)
+            : `<pre class="mod-debug-block">${escHtml(removed.join(', '))}</pre>`)
+        : '';
+      const editor = editable ? renderCategoryEditorShell(catKey) : '';
       return `
-      <div class="mod-debug-round">
-        <div class="mod-debug-round-title">${escHtml(entry.name || 'Round')} <span>${status}</span></div>
-        ${removed.length ? `<pre class="mod-debug-block">${escHtml(removed.join(', '))}</pre>` : ''}
+      <div class="mod-debug-round${isOpen ? ' is-open' : ''}"${editable ? ` data-cat-round="${escHtml(catKey)}"` : ''}>
+        <div class="mod-debug-round-title">
+          <span class="mod-debug-round-name">${escHtml(entry.name || 'Round')}</span>
+          <span class="mod-debug-round-meta"><span>${status}</span>${gear}</span>
+        </div>
+        ${removedBlock}
+        ${editor}
       </div>
     `;
     }).join('');
@@ -409,7 +599,8 @@ export function createPromptEngineeringPopupRenderers({
 
     return `
     ${sourceRows ? `<div class="mod-debug-meta-grid">${sourceRows}</div>` : ''}
-    <div class="mod-debug-summary">Original ${originalCount} → Remaining ${remainingCount} · Removed ${Math.max(0, originalCount - remainingCount)}</div>
+    ${emptyNote}
+    ${hasDebugData ? `<div class="mod-debug-summary">Original ${originalCount} → Remaining ${remainingCount} · Removed ${Math.max(0, originalCount - remainingCount)}</div>` : ''}
     ${filterRounds}
     ${implicationHtml}
     ${e621Html}
@@ -604,15 +795,488 @@ export function createPromptEngineeringPopupRenderers({
   `;
   }
 
+  // ===== 카테고리 편집기 엔진 (editorState 단일 소스) ===== //
+  // 설명문은 UI 에서 빼고 ⚙ 버튼의 data-naia-guide 툴팁으로 옮긴다(텍스트 다이어트).
+  const CATEGORY_GUIDES = {
+    default: '제외 태그: 이 카테고리가 ON이어도 제거되지 않습니다(보호).\n추가 제거: 이 카테고리가 ON일 때 함께 제거됩니다.\n사전 태그를 클릭하거나, 미리보기의 제거된 태그를 클릭해 제외하세요.',
+    remove_color: '색상은 단어 부분일치로 제거됩니다.\n사전의 색상 단어를 제외하면 그 색상 전체가 보호됩니다 (예: blue → blue hair, blue dress 유지).\n미리보기의 제거된 태그를 클릭하면 그 태그 하나만 보호됩니다.\n추가 제거: 이 카테고리가 ON일 때 함께 제거됩니다.',
+    remove_noise_tags: '빈도 기반이라 사전 목록이 없습니다.\n미리보기의 제거된 태그를 클릭해 제외하거나, 추가 제거 태그를 직접 입력하세요.',
+  };
+
+  // Auto-Hide 묶음 문법을 exclude/추가 제거/검색에 그대로 쓸 수 있다(텍스트 다이어트: 상세는 여기 툴팁).
+  const PATTERN_GUIDE_LINE = '\n\n묶음 문법(밑줄 개수 무관): __x__·_x_ = x 포함 / _x·__x = " x" 앞 단어 경계 / x_ = x 포함 / plain = 정확일치. 중간 밑줄은 공백 취급(blue_eyes = "blue eyes"). (~ 는 미지원=정확일치 취급)';
+
+  function categoryGuide(key) {
+    return (CATEGORY_GUIDES[key] || CATEGORY_GUIDES.default) + PATTERN_GUIDE_LINE;
+  }
+
+  function fmtCount(value) {
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? n.toLocaleString() : '0';
+  }
+
+  function editorContainer() {
+    const body = getBody(panels.debug);
+    if (!body || !editorState) return null;
+    return body.querySelector(`[data-cat-editor="${cssEscape(editorState.key)}"]`);
+  }
+
+  function refreshRemovedChipHighlights(key) {
+    const body = getBody(panels.debug);
+    if (!body || !editorState || editorState.key !== key) return;
+    const box = body.querySelector(`[data-removed-catbox="${cssEscape(key)}"]`);
+    if (!box) return;
+    const matcher = ensureExcludeMatcher();
+    box.querySelectorAll('[data-removed-tag]').forEach(btn => {
+      btn.classList.toggle('is-excluded', matcherHas(matcher, btn.dataset.removedTag || ''));
+    });
+  }
+
+  function isSavedFlashing() {
+    return Date.now() < savedFlashUntil;
+  }
+
+  function saveButtonLabel(dirty) {
+    if (dirty) return '저장 *';
+    return isSavedFlashing() ? '저장됨' : '저장';
+  }
+
+  function updateSaveDirty() {
+    const container = editorContainer();
+    if (!container || !editorState) return;
+    const btn = container.querySelector('[data-cat-save]');
+    if (!btn) return;
+    const dirty = !!editorState.dirty;
+    btn.classList.toggle('is-dirty', dirty);
+    btn.classList.toggle('is-saved', !dirty && isSavedFlashing());
+    btn.textContent = saveButtonLabel(dirty);
+  }
+
+  function flashSaved() {
+    savedFlashUntil = Date.now() + 1400;
+    updateSaveDirty();
+    setTimeout(updateSaveDirty, 1450);
+  }
+
+  function updateSelected() {
+    const container = editorContainer();
+    if (!container || !editorState) return;
+    const items = [...editorState.workingExclude];
+    const badge = container.querySelector('.mod-debug-cat-selcount');
+    if (badge) badge.textContent = String(items.length);
+    const sel = container.querySelector('.mod-debug-cat-selected');
+    if (!sel) return;
+    if (!items.length) {
+      sel.innerHTML = '<span class="mod-debug-cat-selected-empty">없음</span>';
+      return;
+    }
+    sel.innerHTML = items.map(n => {
+      const disp = editorState.excludeDisplay.get(n) || n;
+      const pat = isPatternTerm(disp);
+      return `<span class="mod-debug-cat-selchip${pat ? ' is-pattern' : ''}"${pat ? ' title="패턴: 포함 일치"' : ''}>${escHtml(disp)}`
+        + `<button type="button" class="mod-debug-cat-selx" data-sel-remove="${escHtml(n)}" title="제외 해제">×</button></span>`;
+    }).join('');
+    sel.querySelectorAll('[data-sel-remove]').forEach(btn => {
+      btn.addEventListener('click', () => removeExclude(btn.dataset.selRemove || ''));
+    });
+  }
+
+  // 검색어가 패턴이면 dict 위에 액션 행 — "제외에 추가 / 추가 제거에 추가"(N개 일치).
+  function updatePatternRow() {
+    const container = editorContainer();
+    if (!container || !editorState) return;
+    const row = container.querySelector('.mod-debug-cat-patternrow');
+    if (!row) return;
+    const q = editorState.q;
+    if (!q || !isPatternTerm(q)) {
+      row.hidden = true;
+      row.innerHTML = '';
+      return;
+    }
+    row.hidden = false;
+    const already = editorState.workingExclude.has(normTag(q));
+    row.innerHTML = `
+      <span class="mod-debug-cat-patterninfo"><span class="mod-debug-cat-patterntag">${escHtml(q)}</span> · ${fmtCount(editorState.total)}개 일치</span>
+      <span class="mod-debug-cat-patternactions">
+        <button type="button" class="mod-debug-cat-patternbtn" data-pattern-exclude${already ? ' disabled' : ''}>${already ? '제외됨' : '제외에 추가'}</button>
+        <button type="button" class="mod-debug-cat-patternbtn" data-pattern-include>추가 제거에 추가</button>
+      </span>`;
+    const exBtn = row.querySelector('[data-pattern-exclude]');
+    if (exBtn && !already) exBtn.addEventListener('click', () => addPatternToExclude(q));
+    const inBtn = row.querySelector('[data-pattern-include]');
+    if (inBtn) inBtn.addEventListener('click', () => addPatternToInclude(q));
+  }
+
+  function updateDict() {
+    const container = editorContainer();
+    if (!container || !editorState) return;
+    const count = container.querySelector('.mod-debug-cat-count');
+    if (count) {
+      count.textContent = (editorState.fullTotal != null && editorState.q)
+        ? `${fmtCount(editorState.total)} / ${fmtCount(editorState.fullTotal)}`
+        : fmtCount(editorState.total);
+    }
+    updatePatternRow();
+    const dict = container.querySelector('.mod-debug-cat-dict');
+    if (!dict) return;
+    if (editorState.error) {
+      dict.innerHTML = `<div class="mod-debug-cat-error">사전 로드 실패: ${escHtml(editorState.error)} `
+        + '<button type="button" class="mod-btn-secondary mod-btn-compact" data-cat-retry>재시도</button></div>';
+      const retry = dict.querySelector('[data-cat-retry]');
+      if (retry) retry.addEventListener('click', () => fetchCategoryTags(true));
+      return;
+    }
+    if (editorState.loading && editorState.tags.length === 0) {
+      dict.innerHTML = '<div class="mod-debug-cat-loading">불러오는 중...</div>';
+      return;
+    }
+    const disabled = DICT_CLICK_DISABLED_CATEGORIES.has(editorState.key);
+    const infoMap = editorState.infoMap || {};
+    const matcher = ensureExcludeMatcher();
+    const chipsHtml = editorState.tags.map(tag => {
+      const excluded = matcherHas(matcher, tag);
+      // autocomplete 와 동일한 호버 설명 툴팁 — desc 없이 count/group 만 있어도 부여
+      // (설명 미등재 태그도 최소 빈도는 보여준다).
+      const info = infoMap[tag];
+      let tooltipAttrs = '';
+      if (info && (info.desc || Number(info.count || 0) > 0 || info.group)) {
+        tooltipAttrs = ` data-tooltip-title="${escHtml(tag)}"`;
+        if (info.desc) tooltipAttrs += ` data-tooltip-desc="${escHtml(info.desc)}"`;
+        const cnt = Number(info.count || 0);
+        if (cnt > 0) tooltipAttrs += ` data-tooltip-count="${escHtml(cnt.toLocaleString())}"`;
+        if (info.group) tooltipAttrs += ` data-tooltip-group="${escHtml(info.group)}"`;
+      }
+      return `<button type="button" class="mod-debug-tag-chip${excluded ? ' is-excluded' : ''}${disabled ? ' is-disabled' : ''}"`
+        + `${disabled ? ' disabled' : ''} data-dict-tag="${escHtml(tag)}"${tooltipAttrs}>${escHtml(tag)}</button>`;
+    }).join('');
+    const remaining = editorState.total - editorState.loaded;
+    const more = remaining > 0
+      ? `<button type="button" class="mod-debug-cat-more" data-cat-more>더 보기 +${Math.min(CATEGORY_PAGE_LIMIT, remaining)}</button>`
+      : '';
+    dict.innerHTML = (chipsHtml + more) || '<div class="mod-debug-cat-empty">일치하는 사전 태그가 없습니다.</div>';
+    if (!disabled) {
+      dict.querySelectorAll('[data-dict-tag]').forEach(btn => {
+        btn.addEventListener('click', () => toggleExclude(btn.dataset.dictTag || ''));
+      });
+    }
+    const moreBtn = dict.querySelector('[data-cat-more]');
+    if (moreBtn) {
+      moreBtn.addEventListener('click', () => {
+        if (editorState && editorState.loading) return;   // 연타 방지(같은 offset 중복 요청)
+        fetchCategoryTags(false);
+      });
+    }
+    if (typeof bindTagHoverInfo === 'function') {
+      bindTagHoverInfo(dict, '.mod-debug-tag-chip[data-tooltip-title]');
+    }
+  }
+
+  function toggleExclude(tag) {
+    if (!editorState) return;
+    const n = normTag(tag);
+    if (!n) return;
+    if (editorState.workingExclude.has(n)) {
+      editorState.workingExclude.delete(n);
+    } else {
+      editorState.workingExclude.add(n);
+      if (!editorState.excludeDisplay.has(n)) editorState.excludeDisplay.set(n, String(tag));
+    }
+    editorState.dirty = true;
+    rebuildExcludeMatcher();
+    updateDict();
+    updateSelected();
+    updateSaveDirty();
+    refreshRemovedChipHighlights(editorState.key);
+  }
+
+  // 검색 패턴 문자열 자체를 exclude/include 에 추가(원형 보존).
+  function addPatternToExclude(patternStr) {
+    if (!editorState) return;
+    const n = normTag(patternStr);
+    if (!n) return;
+    if (!editorState.workingExclude.has(n)) {
+      editorState.workingExclude.add(n);
+      editorState.excludeDisplay.set(n, String(patternStr));
+    }
+    editorState.dirty = true;
+    rebuildExcludeMatcher();
+    updateDict();
+    updateSelected();
+    updateSaveDirty();
+    refreshRemovedChipHighlights(editorState.key);
+  }
+
+  function addPatternToInclude(patternStr) {
+    if (!editorState) return;
+    const term = String(patternStr || '').trim();
+    if (!term) return;
+    const current = parseTagInput(editorState.workingInclude);
+    if (!current.map(normTag).includes(normTag(term))) current.push(term);
+    editorState.workingInclude = current.join(', ');
+    editorState.dirty = true;
+    const container = editorContainer();
+    const ta = container ? container.querySelector('[data-cat-include]') : null;
+    if (ta) ta.value = editorState.workingInclude;
+    updateSaveDirty();
+  }
+
+  function removeExclude(n) {
+    if (!editorState) return;
+    editorState.workingExclude.delete(n);
+    rebuildExcludeMatcher();
+    editorState.dirty = true;
+    updateDict();
+    updateSelected();
+    updateSaveDirty();
+    refreshRemovedChipHighlights(editorState.key);
+  }
+
+  function saveEditor() {
+    if (!editorState || typeof saveCategoryFilter !== 'function') return;
+    const exclude = [...editorState.workingExclude].map(n => editorState.excludeDisplay.get(n) || n);
+    const include = parseTagInput(editorState.workingInclude);
+    // 전송 실패(재연결 중 등) 시 dirty 유지 — 미저장 상태가 조용히 사라지지 않게 한다.
+    const sent = saveCategoryFilter(editorState.key, exclude, include);
+    if (sent === false) {
+      updateSaveDirty();
+      return;
+    }
+    editorState.dirty = false;
+    flashSaved();
+  }
+
+  async function fetchCategoryTags(reset) {
+    if (!editorState) return;
+    const key = editorState.key;
+    const offset = reset ? 0 : editorState.loaded;
+    // 요청 세대 가드 — 이전 쿼리/페이지의 늦은 응답이 최신 상태를 덮어쓰지 않게 한다
+    // (같은 카테고리 안에서도 검색어 변경·더 보기 연타 레이스 차단, Codex 리뷰 반영).
+    const seq = (editorState._fetchSeq = (editorState._fetchSeq || 0) + 1);
+    editorState.loading = true;
+    editorState.error = null;
+    updateDict();
+    let data;
+    try {
+      const url = `${CATEGORY_TAGS_ENDPOINT}?category=${encodeURIComponent(key)}`
+        + `&q=${encodeURIComponent(editorState.q)}&offset=${offset}&limit=${CATEGORY_PAGE_LIMIT}`;
+      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    } catch (err) {
+      if (!editorState || editorState.key !== key || editorState._fetchSeq !== seq) return;
+      editorState.loading = false;
+      editorState.error = String(err && err.message ? err.message : err);
+      updateDict();
+      return;
+    }
+    // 편집기 전환/닫힘/새 요청 발행 사이에 도착한 낡은 응답은 폐기.
+    if (!editorState || editorState.key !== key || editorState._fetchSeq !== seq) return;
+    editorState.loading = false;
+    if (data && data.supported === false) {
+      editorState.supported = false;
+      editorState.reason = String(data.reason || '');
+      editorState.tags = [];
+      editorState.total = 0;
+      editorState.loaded = 0;
+      const container = editorContainer();
+      if (container) renderEditorInto(container);   // dict 영역 제거 → 스켈레톤 재구성
+      return;
+    }
+    editorState.supported = true;
+    const incoming = Array.isArray(data && data.tags) ? data.tags : [];
+    const incomingInfo = (data && typeof data.info === 'object' && data.info) || {};
+    editorState.infoMap = reset ? {...incomingInfo} : {...editorState.infoMap, ...incomingInfo};
+    if (reset) {
+      editorState.tags = incoming;
+    } else {
+      // 더 보기 연타/재시도로 같은 페이지가 두 번 도착해도 중복 chip 을 만들지 않는다.
+      const seen = new Set(editorState.tags.map(normTag));
+      editorState.tags = editorState.tags.concat(incoming.filter(t => !seen.has(normTag(t))));
+    }
+    editorState.loaded = editorState.tags.length;
+    editorState.total = Number(data && data.total || 0);
+    if (editorState.q === '' && editorState.fullTotal == null) editorState.fullTotal = editorState.total;
+    updateDict();
+  }
+
+  function renderEditorInto(container) {
+    if (!container || !editorState) return;
+    const key = editorState.key;
+    const showDict = editorState.supported !== false;
+    const noteHtml = editorState.supported === false
+      ? `<div class="mod-debug-cat-sec">
+          <div class="mod-debug-cat-note">${
+            editorState.reason === 'frequency-based'
+              ? '빈도 기반 · 사전 목록 없음 — 미리보기의 제거된 태그를 클릭해 제외'
+              : '사전 미로드 — 미리보기의 제거된 태그를 클릭해 제외'
+          }</div>
+        </div>`
+      : '';
+    const colorHint = key === 'remove_color'
+      ? '<div class="mod-debug-cat-hint">색상 단어 제외 = 그 색상 전체 보호 · 제거된 태그 클릭 = 그 태그만 보호</div>'
+      : '';
+    const dictHtml = showDict
+      ? `<div class="mod-debug-cat-sec mod-debug-cat-dictsec">
+          <div class="mod-debug-cat-searchrow">
+            <span class="mod-debug-cat-searchbox">
+              <span class="mod-debug-cat-searchicon" aria-hidden="true">🔍</span>
+              <input type="text" class="${CATEGORY_SEARCH_CLASS}" placeholder="사전 검색 · __패턴__ 지원"
+                     autocomplete="off" spellcheck="false" value="${escHtml(editorState.q)}">
+            </span>
+            <span class="mod-debug-cat-count"></span>
+          </div>
+          <div class="mod-debug-cat-patternrow" hidden></div>
+          <div class="mod-debug-cat-dictwrap"><div class="mod-debug-cat-dict"></div></div>
+          ${colorHint}
+        </div>`
+      : '';
+    container.innerHTML = `
+      <div class="mod-debug-cat-inner">
+        ${dictHtml}
+        ${noteHtml}
+        <div class="mod-debug-cat-sec mod-debug-cat-selsec">
+          <div class="mod-debug-cat-sechead">
+            <span class="mod-debug-cat-sectitle">제외 중</span>
+            <span class="mod-debug-cat-badge mod-debug-cat-selcount">0</span>
+          </div>
+          <div class="mod-debug-cat-selected"></div>
+        </div>
+        <div class="mod-debug-cat-sec">
+          <div class="mod-debug-cat-sechead"><span class="mod-debug-cat-sectitle">추가 제거</span></div>
+          <textarea class="mod-textarea ${CATEGORY_EDITOR_INPUT_CLASS}" data-cat-include rows="2"
+                    placeholder="함께 제거할 태그 (쉼표)">${escHtml(editorState.workingInclude)}</textarea>
+        </div>
+        <div class="mod-debug-cat-actions">
+          <button type="button" class="mod-debug-cat-save${editorState.dirty ? ' is-dirty' : (isSavedFlashing() ? ' is-saved' : '')}" data-cat-save>${saveButtonLabel(!!editorState.dirty)}</button>
+        </div>
+      </div>`;
+
+    const searchInput = container.querySelector(`.${CATEGORY_SEARCH_CLASS}`);
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        if (!editorState) return;
+        editorState.q = searchInput.value.trim();
+        if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => fetchCategoryTags(true), 250);
+      });
+    }
+    const includeInput = container.querySelector('[data-cat-include]');
+    if (includeInput) {
+      includeInput.addEventListener('input', () => {
+        if (!editorState) return;
+        editorState.workingInclude = includeInput.value;
+        editorState.dirty = true;
+        updateSaveDirty();
+      });
+      if (typeof bindTagAssist === 'function') bindTagAssist(includeInput);
+    }
+    const saveBtn = container.querySelector('[data-cat-save]');
+    if (saveBtn) saveBtn.addEventListener('click', saveEditor);
+
+    updateSelected();
+    if (showDict) updateDict();
+  }
+
+  // 단일 슬롯 아코디언 — 열린 카테고리만 펼치고, 라운드/⚙ 에 is-open 표시.
+  function applyOpenSlotState(body) {
+    const scope = body || getBody(panels.debug);
+    if (!scope) return;
+    const key = editorState ? editorState.key : null;
+    scope.querySelectorAll('[data-cat-editor]').forEach(el => {
+      if (el.dataset.catEditor !== key) el.hidden = true;
+    });
+    scope.querySelectorAll('[data-cat-round]').forEach(el => {
+      el.classList.toggle('is-open', !!key && el.dataset.catRound === key);
+    });
+    scope.querySelectorAll('[data-cat-gear]').forEach(el => {
+      el.classList.toggle('is-open', !!key && el.dataset.catGear === key);
+    });
+  }
+
+  function openEditor(key, categoryFilters) {
+    if (!editorState || editorState.key !== key) {
+      editorState = newEditorState(key, categoryFilters);
+      if (key === 'remove_noise_tags') { editorState.supported = false; editorState.reason = 'frequency-based'; }
+    }
+    const container = editorContainer();
+    if (container) {
+      container.hidden = false;
+      renderEditorInto(container);
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => {
+          try { container.scrollIntoView({ block: 'nearest' }); } catch (_error) {}
+        });
+      }
+    }
+    applyOpenSlotState();
+    if (editorState.supported !== false && editorState.tags.length === 0 && !editorState.loading) {
+      fetchCategoryTags(true);
+    }
+  }
+
+  function closeEditor() {
+    const container = editorContainer();
+    if (container) container.hidden = true;
+    editorState = null;
+    applyOpenSlotState();
+  }
+
+  function quickExclude(key, tag, categoryFilters) {
+    if (!editorState || editorState.key !== key) {
+      openEditor(key, categoryFilters);
+    }
+    toggleExclude(tag);
+  }
+
+  function bindDebugPanelEvents(body, categoryFilters) {
+    body.querySelectorAll('[data-cat-gear]').forEach(button => {
+      button.addEventListener('click', () => {
+        const key = button.dataset.catGear || '';
+        if (editorState && editorState.key === key) closeEditor();
+        else openEditor(key, categoryFilters);
+      });
+    });
+    body.querySelectorAll('[data-removed-tag]').forEach(button => {
+      button.addEventListener('click', () => {
+        quickExclude(button.dataset.removedCat || '', button.dataset.removedTag || '', categoryFilters);
+      });
+    });
+    // 재렌더 후 열려 있던 편집기 복원(editorState 로부터).
+    if (editorState) {
+      const container = body.querySelector(`[data-cat-editor="${cssEscape(editorState.key)}"]`);
+      if (container) {
+        container.hidden = false;
+        renderEditorInto(container);
+        if (editorState.supported !== false && editorState.tags.length === 0
+            && !editorState.loading && !editorState.error) {
+          fetchCategoryTags(true);
+        }
+      } else {
+        editorState = null;
+      }
+    }
+    applyOpenSlotState(body);
+  }
+
   function renderDebugPanel(m) {
     const body = getBody(panels.debug);
     if (!body) return;
+    // 재렌더 가드 — 검색 input / include textarea 편집 중이면(module_state push 로 인한)
+    // 파괴적 재렌더를 건너뛴다. editorState 가 미저장 선택을 들고 있으므로 안전.
+    const active = document.activeElement;
+    if (active && panels.debug && panels.debug.contains(active) && active.classList
+        && (active.classList.contains(CATEGORY_EDITOR_INPUT_CLASS)
+            || active.classList.contains(CATEGORY_SEARCH_CLASS))) {
+      return;
+    }
+    const categoryFilters = (m && typeof m.category_filters === 'object' && m.category_filters) || {};
     body.innerHTML = `
     <div class="mod-inline-row">
       <button class="mod-btn-secondary" onclick="refreshPromptEngineeringDebug()">Refresh Debug</button>
     </div>
-    ${renderDebugSnapshot(m.debug_snapshot || {})}
+    ${renderDebugSnapshot(m.debug_snapshot || {}, categoryFilters, m.preprocessing || {})}
   `;
+    bindDebugPanelEvents(body, categoryFilters);
   }
 
   return {

@@ -302,6 +302,24 @@ class PromptEngineeringHeadlessPostHook:
         settings = get_prompt_engineering_store(self.app_context).collect_settings()
         return _split_settings(settings)
 
+    def _category_filter_overrides(self) -> dict:
+        """카테고리별 전처리 필터 오버라이드를 context 캐시에서 lazy load.
+
+        매 생성마다 디스크를 읽지 않도록 context._pp_category_filter_cache 에 1회
+        적재하고, 저장 커맨드(set_param category_filters)가 write-through 로 갱신한다."""
+        ctx = self.app_context
+        cache = getattr(ctx, "_pp_category_filter_cache", None)
+        if cache is None:
+            from core.prompt_engineering_settings import load_category_filter_overrides
+
+            runtime_paths = getattr(ctx, "runtime_paths", None)
+            try:
+                cache = load_category_filter_overrides(save_root=getattr(runtime_paths, "save_dir", None))
+            except Exception:
+                cache = {}
+            setattr(ctx, "_pp_category_filter_cache", cache)
+        return cache if isinstance(cache, dict) else {}
+
     def execute_pipeline_hook(self, context: PromptContext) -> PromptContext:
         if getattr(self.app_context, "skip_prompt_engineering_hook", False):
             return context
@@ -369,6 +387,7 @@ class PromptEngineeringHeadlessPostHook:
             auto_hide,
             filter_manager,
             track_clothing_regions=True,
+            category_overrides=self._category_filter_overrides(),
         )
         if filter_result.get("removed_clothes_by_region"):
             context.metadata["removed_clothes_by_region"] = filter_result["removed_clothes_by_region"]

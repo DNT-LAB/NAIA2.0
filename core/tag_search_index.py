@@ -764,6 +764,14 @@ class TagSearchIndex:
             lookup[tag] = axis
         return lookup
 
+    def entry_for(self, tag: Any) -> TagSearchEntry | None:
+        """정규화된 정확일치 엔트리 조회 (없으면 None).
+
+        autocomplete 결과행이 쓰는 desc/freq/category 를 임의 태그에 대해 공개
+        API 로 노출한다 — Setting & Preview 사전 chip 호버 설명 등 정확일치
+        소비자용."""
+        return self._entries.get(normalize_tag(tag))
+
     def search(
         self,
         query: str,

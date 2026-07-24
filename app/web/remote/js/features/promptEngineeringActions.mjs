@@ -180,6 +180,24 @@ export function createPromptEngineeringActions({
     setModuleParam('prompt_engineering', 'debug_refresh', 'true');
   }
 
+  // 카테고리별 전처리 필터 오버라이드 저장(단일 카테고리 부분 업데이트).
+  // exclude/include 는 이미 프론트에서 split+trim+빈 항목 제거된 배열.
+  // 반환: 전송 성공 여부 — 실패(재연결 중 등) 시 호출부가 dirty 를 유지해야 한다.
+  function saveCategoryFilter(category, exclude, include) {
+    const name = String(category || '').trim();
+    if (!name) return false;
+    const sent = setModuleParam('prompt_engineering', 'category_filters', JSON.stringify({
+      category: name,
+      exclude: Array.isArray(exclude) ? exclude : [],
+      include: Array.isArray(include) ? include : [],
+    }));
+    if (typeof showToast === 'function') {
+      if (sent) showToast('카테고리 필터 저장됨', 'success');
+      else showToast('연결이 끊겨 저장하지 못했습니다 — 재연결 후 다시 저장하세요', 'error');
+    }
+    return sent !== false;
+  }
+
   function setOption(key, checked) {
     const lastState = getLastPromptEngineeringState();
     if (lastState) {
@@ -224,6 +242,7 @@ export function createPromptEngineeringActions({
     saveDanbooruSettings,
     saveOllamaBoostSettings,
     refreshDebug,
+    saveCategoryFilter,
     setOption,
     setOllamaAutoBoost,
   };

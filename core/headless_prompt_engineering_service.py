@@ -61,6 +61,7 @@ class HeadlessPromptEngineeringService:
     def state(self) -> dict[str, Any]:
         from core.prompt_engineering_settings import (
             get_prompt_engineering_store,
+            load_category_filter_overrides,
             load_ollama_boost_settings,
         )
 
@@ -73,6 +74,8 @@ class HeadlessPromptEngineeringService:
         # (다른 모드에서 바꾼 nl_weight를 덮어씀) 방지. boost-time 읽기와 동일 SSOT.
         _runtime_paths = getattr(context, "runtime_paths", None)
         ollama_boost = load_ollama_boost_settings(save_root=getattr(_runtime_paths, "save_dir", None))
+        # 카테고리 필터 오버라이드도 전역 디스크 SSOT — 모드 캐시가 아니라 fresh 읽는다.
+        category_filters = load_category_filter_overrides(save_root=getattr(_runtime_paths, "save_dir", None))
         state = store.state()
         preset_options = store.preset_options()
 
@@ -133,6 +136,7 @@ class HeadlessPromptEngineeringService:
             "e621_settings": dict(settings.get("e621_settings") or {}),
             "danbooru_settings": dict(settings.get("danbooru_weight_settings") or {}),
             "ollama_boost_settings": ollama_boost,
+            "category_filters": category_filters,
             "debug_snapshot": self.debug_snapshot(),
             "preset_can_save_current": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized"),
             "preset_can_delete": state["current_preset"] not in ("", "(프리셋 없음)", "*randomized", "default"),
@@ -272,6 +276,41 @@ class HeadlessPromptEngineeringService:
             normalized = normalize_ollama_boost_settings(settings)
             store.save_ollama_boost_settings(normalized)
             store.apply_settings({"ollama_boost_settings": normalized})
+        elif key == "category_filters":
+            # 단일 카테고리 부분 업데이트: {"category": <option_key>, "exclude": [...], "include": [...]}.
+            # 전체 맵에 머지 후 전역 디스크 SSOT(pp_category_filters.json)에 영속화하고
+            # 런타임 캐시를 write-through 갱신한다. 둘 다 비면 해당 카테고리 삭제.
+            from core.prompt_engineering_settings import (
+                CATEGORY_FILTER_OPTION_KEYS,
+                load_category_filter_overrides,
+                sanitize_tag_list,
+                save_category_filter_overrides,
+            )
+
+            try:
+                payload = json.loads(text_value or "{}")
+            except Exception:
+                payload = None
+            if not isinstance(payload, dict):
+                return context._toast("Invalid category filter settings", level="error")
+            category = str(payload.get("category") or "").strip()
+            if category not in CATEGORY_FILTER_OPTION_KEYS:
+                return context._toast(f"Unknown filter category: {category}", level="error")
+            raw_exclude = payload.get("exclude", [])
+            raw_include = payload.get("include", [])
+            if not isinstance(raw_exclude, list) or not isinstance(raw_include, list):
+                return context._toast("Invalid category filter tags", level="error")
+            exclude = sanitize_tag_list(raw_exclude)
+            include = sanitize_tag_list(raw_include)
+            save_root = getattr(getattr(context, "runtime_paths", None), "save_dir", None)
+            overrides = load_category_filter_overrides(save_root=save_root)
+            if exclude or include:
+                overrides[category] = {"exclude": exclude, "include": include}
+            else:
+                overrides.pop(category, None)
+            save_category_filter_overrides(overrides, save_root=save_root)
+            # 다음 생성이 디스크 재읽기 없이 반영하도록 런타임 캐시를 갱신(정규화된 SSOT 재적재).
+            context._pp_category_filter_cache = load_category_filter_overrides(save_root=save_root)
         elif key == "debug_refresh":
             pass
         elif key == "ollama_auto_boost":

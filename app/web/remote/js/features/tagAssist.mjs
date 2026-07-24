@@ -1135,25 +1135,29 @@ export function createTagAssistController({
 
   function showTagChipInfoTooltip(anchor, event = null) {
     const desc = anchor.dataset.tooltipDesc || '';
-    if (!desc) {
+    const meta = [anchor.dataset.tooltipCount, anchor.dataset.tooltipGroup].filter(Boolean).join(' · ');
+    // desc 없이 count/group 메타만 있어도 표시 — 설명 미등재 태그의 빈도 확인용
+    // (기존 소비자는 desc 있을 때만 data-tooltip-* 를 달므로 동작 불변).
+    if (!desc && !meta) {
       hideTagChipInfoTooltip();
       return;
     }
     const title = anchor.dataset.tooltipTitle || anchor.dataset.insert || '';
-    const meta = [anchor.dataset.tooltipCount, anchor.dataset.tooltipGroup].filter(Boolean).join(' · ');
     const chipTooltip = ensureTagChipInfoTooltip();
     chipTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
     chipTooltip.innerHTML =
       `<div class="tag-chip-info-title">${escHtml(title)}</div>` +
       (meta ? `<div class="tag-chip-info-meta">${escHtml(meta)}</div>` : '') +
-      `<div class="tag-chip-info-desc">${escHtml(desc)}</div>`;
+      (desc ? `<div class="tag-chip-info-desc">${escHtml(desc)}</div>` : '');
     chipTooltip.classList.add('open');
     chipTooltip.classList.toggle('preset-event-info-tooltip', isPresetEventInfoAnchor(anchor));
     positionTagChipInfoTooltip(anchor, event);
   }
 
-  function bindTagChipInfoHover(root) {
-    root.querySelectorAll('.tag-tooltip-extra-tag[data-tooltip-desc]').forEach(el => {
+  // selector 는 외부 소비자(예: Setting & Preview 사전 chip)가 자기 chip 셀렉터로
+  // 같은 호버 설명 툴팁을 재사용할 수 있게 일반화. 기본값=기존 내부 사용처 유지.
+  function bindTagChipInfoHover(root, selector = '.tag-tooltip-extra-tag[data-tooltip-desc]') {
+    root.querySelectorAll(selector).forEach(el => {
       el.addEventListener('mouseenter', e => showTagChipInfoTooltip(el, e));
       el.addEventListener('mousemove', e => positionTagChipInfoTooltip(el, e));
       el.addEventListener('mouseleave', hideTagChipInfoTooltip);
@@ -2879,6 +2883,7 @@ export function createTagAssistController({
   return {
     bindDefaultTextareas,
     bindTagAssist,
+    bindTagChipInfoHover,
     lookupPromptInfoTag,
     hidePromptInfoTooltip,
     onTagLookupResult,

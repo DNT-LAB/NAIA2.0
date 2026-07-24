@@ -19,6 +19,7 @@ from app.backend.server.sequence_preset_routes import register_sequence_preset_r
 from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.module_storage_routes import register_module_storage_routes
+from app.backend.server.nai_model_routes import register_nai_model_routes
 from app.backend.server.ollama_routes import register_ollama_routes
 from app.backend.server.translation_history_routes import register_translation_history_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
@@ -135,6 +136,13 @@ def register_headless_routes(
     )
     register_style_thumbnail_routes(app, context, run_in_thread=run_in_thread)
     register_font_routes(app, context, root_web_dir, run_in_thread=run_in_thread)
+    register_nai_model_routes(
+        app,
+        context,
+        run_in_thread=run_in_thread,
+        clients=clients,
+        broadcast_json=broadcast_json,
+    )
     register_pe_filter_routes(app, context, run_in_thread=run_in_thread)
     register_module_storage_routes(app, context, run_in_thread=run_in_thread)
     register_data_migration_routes(app, context, run_in_thread=run_in_thread)

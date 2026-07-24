@@ -1309,11 +1309,14 @@ def register_result_display_routes(
             if action == "character_reference":
                 if session_context.get_api_mode() != "NAI":
                     return JSONResponse({"error": "Character Reference is available in NAI mode only"}, status_code=403)
-                # Character Reference only applies to NAID4.5F/C models. Mirror the panel,
-                # which hides Upload entirely off-NAID4.5, by refusing here instead of
-                # silently appending a frame the panel can't render.
+                # Character Reference only applies to models whose shared contract
+                # declares v4.5 compatibility. Refuse unsupported profiles instead of
+                # silently appending a frame the panel cannot apply.
                 if not session_context._is_naid45_model():
-                    return JSONResponse({"error": "Character Reference requires a NAID4.5F/C model"}, status_code=403)
+                    return JSONResponse(
+                        {"error": "Character Reference requires a v4.5-compatible NAI model"},
+                        status_code=403,
+                    )
                 module_state = await run_in_thread(
                     session_context.set_module_param,
                     "character_reference",

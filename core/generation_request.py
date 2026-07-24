@@ -19,6 +19,7 @@ import uuid
 import pandas as pd
 from datetime import datetime
 
+from core.nai_model_contract import NaiModelSpec
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES
 
 
@@ -402,6 +403,9 @@ class GenerationRequest:
     nai_characters: Optional[NAICharacterData] = None
     nai_vibe_transfer: Optional[NAIVibeTransferData] = None
     nai_character_reference: Optional[NAICharacterReferenceData] = None
+    # 큐 등록 시점의 모델 배선 스냅샷. 사용자 레지스트리 수정이 이미 대기 중인
+    # 요청의 wire model/payload profile을 뒤늦게 바꾸지 못하게 한다.
+    nai_model_spec: Optional[NaiModelSpec] = None
 
     # 자동 생성 필드
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))

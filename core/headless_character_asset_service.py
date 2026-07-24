@@ -25,7 +25,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from core.nai_model_contract import resolve_nai_api_model
+from core.nai_model_contract import resolve_nai_model_for_context
 from utils import character_asset_storage as asset_storage
 
 CHARACTER_ASSET_DIR_NAME = "character_asset"
@@ -44,8 +44,6 @@ BENCH_DEFAULT_EXTRA_NEGATIVE = "border, border, nsfw"
 BENCH_LEGACY_DEFAULT_EXTRA_NEGATIVE = "border"
 BENCH_MODES = ("inpaint", "char_reference")
 BENCH_REFERENCE_TYPES = {"character&style", "character"}
-# director reference를 실제로 존중하는 모델(api_service.py:1047 화이트리스트와 동기).
-# 비지원 모델이면 NAI가 레퍼런스를 조용히 무시하므로 빌더가 명시 거부한다.
 # 생성 벤치 랜덤 슬롯 풀(data/random_*.txt). 각 줄 = 콤마로 구분된 태그 한 세트.
 RANDOM_CHARACTER_POOLS = {
     "appearance": "random_character.txt",
@@ -54,12 +52,6 @@ RANDOM_CHARACTER_POOLS = {
 RANDOM_GENDER_TAGS = ("girl", "boy")
 # 의상 스왑에서 보존할 리전 - 머리/목 장식은 캐릭터 정체성이라 옷과 함께 벗기지 않는다.
 OUTFIT_KEEP_REGION = "HEAD_NECK_FACE"
-CREATION_REFERENCE_MODELS = {
-    "nai-diffusion-4-5-full",
-    "nai-diffusion-4-5-curated",
-    "nai-diffusion-4-5-full-inpainting",
-    "nai-diffusion-4-5-curated-inpainting",
-}
 BENCH_PROMPT_SOURCES = {"primary", "current", "preset"}
 BENCH_MODE_DEFAULTS = {
     "inpaint": {"main_prompt": BENCH_DEFAULT_MAIN_PROMPT, "extra_negative": BENCH_DEFAULT_EXTRA_NEGATIVE},
@@ -1225,8 +1217,7 @@ class HeadlessCharacterAssetService:
                     return value
         return None
 
-    @staticmethod
-    def _normalize_nai_model(value: Any, source: Any = "") -> str:
+    def _normalize_nai_model(self, value: Any, source: Any = "") -> str:
         source_text = str(source or "")
         for marker, model in _NAI_SOURCE_MODELS:
             if marker in source_text:
@@ -1234,6 +1225,12 @@ class HeadlessCharacterAssetService:
         raw = str(value or "").strip()
         if raw.upper().startswith("NAID"):
             return raw
+        try:
+            custom_key = self.context._nai_model_registry().key_for_api_model(raw)
+            if custom_key:
+                return custom_key
+        except Exception:
+            pass
         wire_map = {
             "nai-diffusion-4-5-full": "NAID4.5F",
             "nai-diffusion-4-5-curated": "NAID4.5C",
@@ -1247,12 +1244,11 @@ class HeadlessCharacterAssetService:
                 return model
         return raw
 
-    @classmethod
-    def _profile_generation_params(cls, *sources: dict[str, Any]) -> dict[str, Any]:
+    def _profile_generation_params(self, *sources: dict[str, Any]) -> dict[str, Any]:
         valid_sources = tuple(source for source in sources if isinstance(source, dict))
         result: dict[str, Any] = {}
         for target, aliases in _BENCH_PROFILE_PARAM_ALIASES.items():
-            value = cls._metadata_value(valid_sources, aliases)
+            value = self._metadata_value(valid_sources, aliases)
             if value is not None and value != "":
                 if target in {"SMEA", "DYN", "VAR+", "DECRISP"}:
                     if isinstance(value, str):
@@ -1260,9 +1256,9 @@ class HeadlessCharacterAssetService:
                     else:
                         value = bool(value)
                 result[target] = value
-        source = cls._metadata_value(valid_sources, ("Source", "source"))
+        source = self._metadata_value(valid_sources, ("Source", "source"))
         if "model" in result or source:
-            model = cls._normalize_nai_model(result.get("model"), source)
+            model = self._normalize_nai_model(result.get("model"), source)
             if model:
                 result["model"] = model
         return result
@@ -1310,7 +1306,7 @@ class HeadlessCharacterAssetService:
                 "params": self._profile_generation_params(extracted, comment, parameters),
             }
             # params에서만 유도되므로 mtime 캐시에 넣어도 안전하다.
-            profile["cr_capable"] = self._profile_cr_capability(profile)
+            profile["cr_capable"] = self._profile_cr_capability(profile, self.context)
         if len(self._bench_profile_cache) > 32:
             self._bench_profile_cache.clear()
         self._bench_profile_cache[cache_key] = profile
@@ -1359,7 +1355,7 @@ class HeadlessCharacterAssetService:
             ),
             "params": self._profile_generation_params(main_settings),
         }
-        profile["cr_capable"] = self._profile_cr_capability(profile)
+        profile["cr_capable"] = self._profile_cr_capability(profile, self.context)
         return profile
 
     def _current_prompt_profile(self) -> dict[str, Any]:
@@ -1462,7 +1458,7 @@ class HeadlessCharacterAssetService:
             "negative_prompt": str(raw.get("negative_prompt") or "").strip(),
             "params": params,
         }
-        profile["cr_capable"] = self._profile_cr_capability(profile)
+        profile["cr_capable"] = self._profile_cr_capability(profile, self.context)
         return profile
 
     def _bench_prompt_profile(self, character_id: str, source: str, preset_name: str = "") -> dict[str, Any]:
@@ -1715,26 +1711,30 @@ class HeadlessCharacterAssetService:
         return self.context._character_reference_service().scan_storage()
 
     @staticmethod
-    def _profile_cr_capability(profile: dict[str, Any]) -> Optional[bool]:
+    def _profile_cr_capability(
+        profile: dict[str, Any],
+        context: Any = None,
+    ) -> Optional[bool]:
         """프로파일이 model을 덮어쓸 때만 CR 가능 여부를 판정한다(None = live 위임).
 
         PRESET/PRIMARY params의 model은 라이브 세션 모델을 덮어쓰므로, 라이브가
-        4.5여도 실제 요청은 4.0이 될 수 있다. api_service는 비4.5 모델에서
-        director reference를 조용히 버리기 때문에(api_service.py:1047 화이트리스트)
-        게이트는 effective model로 판단해야 한다(Codex RC).
+        4.5여도 실제 요청은 4.0이 될 수 있다. 생성 경로와 같은 모델 계약으로
+        effective model의 Character Reference 기능을 판정해야 한다.
         """
         params = profile.get("params") if isinstance(profile, dict) else None
         model = str((params or {}).get("model") or "").strip()
         if not model:
             return None
-        return resolve_nai_api_model(model) in CREATION_REFERENCE_MODELS
+        return resolve_nai_model_for_context(
+            context,
+            model,
+        ).supports_character_reference
 
     def _effective_model_key(self, profile: dict[str, Any]) -> str:
         """모델의 최종 권위 = 프로파일이 덮어쓴 값 우선, 없으면 라이브 세션 값.
 
         PRESET params가 model을 포함하면 라이브 모델이 4.5여도 실제 요청은 4.0이 될
-        수 있고, api_service는 비지원 모델에서 director reference를 조용히 무시한다
-        (api_service.py:1047 화이트리스트). 따라서 게이트는 이 값으로 판단한다.
+        수 있다. 따라서 Character Reference 게이트는 이 값으로 판단한다.
         """
         params = profile.get("params") if isinstance(profile, dict) else None
         model = str((params or {}).get("model") or "").strip()
@@ -1761,11 +1761,16 @@ class HeadlessCharacterAssetService:
         if not references:
             return {}
         model_key = self._effective_model_key(profile)
-        api_model = resolve_nai_api_model(model_key) if model_key else ""
-        if api_model and api_model not in CREATION_REFERENCE_MODELS:
+        model_spec = (
+            resolve_nai_model_for_context(self.context, model_key)
+            if model_key
+            else None
+        )
+        if model_spec is not None and not model_spec.supports_character_reference:
             # 조용한 drop 금지: 비지원 모델이면 명시 거부(Codex).
             raise ValueError(
-                f"Character Reference requires a NAI 4.5 model (effective model: {model_key})"
+                "Character Reference requires a model with the v4.5 compatibility "
+                f"profile (effective model: {model_key})"
             )
         service = self.context._character_reference_service()
         descriptions: list[dict[str, Any]] = []
@@ -1960,9 +1965,8 @@ class HeadlessCharacterAssetService:
 
         if generation_mode == "char_reference":
             # 게이트 권위 = effective model. 프로파일이 model을 덮으면(PRIMARY/PRESET)
-            # 라이브 모델 판정은 무의미하다 - 4.0 강제 프로파일이 라이브 4.5 게이트를
-            # 통과하면 api_service가 director reference를 조용히 버린다(Codex RC).
-            cr_capable = self._profile_cr_capability(profile)
+            # 라이브 모델 판정은 무의미하다. 생성 경로와 같은 모델 계약을 사용한다.
+            cr_capable = self._profile_cr_capability(profile, self.context)
             if cr_capable is False:
                 forced_model = str((profile.get("params") or {}).get("model") or "")
                 raise ValueError(

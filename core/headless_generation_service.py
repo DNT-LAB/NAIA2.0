@@ -27,6 +27,7 @@ from core.generation_request import (
     NAIVibeTransferData,
 )
 from core.headless_result_service import HeadlessStoredResult
+from core.nai_model_contract import resolve_nai_model_for_context
 from core.resolution_utils import snap_resolution_to_multiple
 from core.web_session_context import WebSessionContext
 
@@ -41,6 +42,7 @@ SCHEMA_ONLY_KEYS = {
     "type",
     "schema_only",
     "options_model",
+    "options_model_meta",
     "options_sampler",
     "options_scheduler",
     "options_resolution",
@@ -184,6 +186,19 @@ class HeadlessGenerationService:
         source_row = self._source_row(params)
         params.pop("_source_row_data", None)
         params.pop("_source_name", None)
+        nai_model_spec = None
+        if api_mode == "NAI":
+            try:
+                nai_model_spec = resolve_nai_model_for_context(
+                    self.context,
+                    params.get("model") or "NAID4.5F",
+                )
+            except (KeyError, RuntimeError, ValueError) as exc:
+                return HeadlessGenerationDispatch(
+                    request=None,
+                    api_mode=api_mode,
+                    blocked_reason=str(exc),
+                )
         base_negative = str(params.get("negative_prompt") or "")
         prompt_run_id = self._prompt_run_id_for_command(command, params)
         if not prompt_run_id:
@@ -203,6 +218,7 @@ class HeadlessGenerationService:
             nai_characters=nai_characters,
             nai_vibe_transfer=nai_vibe_transfer,
             nai_character_reference=nai_character_reference,
+            nai_model_spec=nai_model_spec,
             prompt_run_id=prompt_run_id,
             base_negative_prompt=base_negative,
         )

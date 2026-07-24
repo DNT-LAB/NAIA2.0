@@ -140,6 +140,9 @@ class WebSessionContext:
     def _vibe_transfer_service(self):
         return self._lazy_service("vibe_transfer")
 
+    def _nai_model_registry(self):
+        return self._lazy_service("nai_model_registry")
+
     def _image_module_param_service(self):
         return self._lazy_service("image_module_param")
 
@@ -578,6 +581,9 @@ class WebSessionContext:
 
     def _is_naid3_model(self) -> bool:
         return self._remote_state_service().is_naid3_model()
+
+    def _nai_model_supports_vibe(self) -> bool:
+        return self._remote_state_service().nai_model_supports_vibe()
 
     def _character_reference_image_data(self, image) -> str:
         return self._character_reference_service().image_data(image)

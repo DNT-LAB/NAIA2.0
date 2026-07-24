@@ -14,6 +14,7 @@
     "app/backend/server/font_routes.py",
     "app/backend/server/install_manager_routes.py",
     "app/backend/server/module_storage_routes.py",
+    "app/backend/server/nai_model_routes.py",
     "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_engineering_filter_routes.py",
     "app/backend/server/prompt_tools_routes.py",
@@ -560,6 +561,26 @@
         {"method": "POST", "path": "/api/fonts/upload", "smoke": "asset_runtime"},
         {"method": "DELETE", "path": "/api/fonts/{font_id}", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/fonts/{filename}", "smoke": "static"}
+      ]
+    },
+    {
+      "id": "nai_custom_models",
+      "name": "User-defined NovelAI model registry and provider routing",
+      "source_files": [
+        "app/backend/server/nai_model_routes.py",
+        "core/nai_model_registry.py",
+        "core/nai_model_contract.py",
+        "core/generation_request.py",
+        "core/headless_generation_service.py",
+        "core/api_service.py",
+        "core/headless_vibe_transfer_service.py",
+        "app/backend/server/result_display_routes.py"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/nai-models", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/nai-models", "smoke": "state_mutation"},
+        {"method": "DELETE", "path": "/api/nai-models/{model_key}", "smoke": "state_mutation"}
       ]
     },
     {

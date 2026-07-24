@@ -161,7 +161,7 @@ class HeadlessStorytellerService:
         return messages
 
     def _use_vibe_mode_messages(self, steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Use Vibe 스텝이 있는데 인코딩 불가 런타임(비NAI 모드/NAID3)이면 1회 경고 —
+        """Use Vibe 스텝이 있는데 인코딩 불가 런타임이면 1회 경고 —
         라이브에선 조용히 아무 일도 안 일어나므로 명시한다(토큰 유무는 실행 시점 검증).
         마지막 스텝의 use_vibe는 어차피 강제 OFF라 경고 대상에서 제외한다."""
         if not steps or not any(step.get("use_vibe") for step in steps[:-1]):
@@ -170,13 +170,13 @@ class HeadlessStorytellerService:
             return []
         try:
             mode = str(self.context.get_api_mode() or "").upper()
-            naid3 = bool(self.context._is_naid3_model())
+            supports_vibe = bool(self.context._nai_model_supports_vibe())
         except Exception:
             return []
-        if mode == "NAI" and not naid3:
+        if mode == "NAI" and supports_vibe:
             return []
         reason = (
-            "NAID3 모델은 Vibe 인코딩을 지원하지 않습니다"
+            "현재 모델의 호환 프로필은 Vibe 인코딩을 지원하지 않습니다"
             if mode == "NAI"
             else "NAI 모드에서만 동작합니다"
         )

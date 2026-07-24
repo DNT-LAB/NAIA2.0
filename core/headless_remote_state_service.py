@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.nai_model_contract import resolve_nai_model_for_context
+
 
 SUPPORTED_API_MODES = ("NAI", "WEBUI", "COMFYUI")
 # Mode-agnostic params that must survive a per-mode plane swap (e.g. the web
@@ -164,13 +166,26 @@ class HeadlessRemoteStateService:
         model = str(self.context.remote_params.get("model") or "NAID4.5F").strip()
         return model or "NAID4.5F"
 
+    def _current_nai_model_spec(self):
+        try:
+            return resolve_nai_model_for_context(
+                self.context,
+                self.current_model_key(),
+            )
+        except (KeyError, RuntimeError, ValueError):
+            return None
+
     def is_naid45_model(self) -> bool:
-        # 단독 별칭 "NAID4.5"도 4.5다(nai_model_contract 매핑/모델 콤보 노출 대상).
-        # F/C만 검사하면 별칭 선택 시 CR 게이트가 오거부한다(Codex).
-        return "NAID4.5" in self.current_model_key()
+        spec = self._current_nai_model_spec()
+        return bool(spec and spec.supports_character_reference)
 
     def is_naid3_model(self) -> bool:
-        return "NAID3" in self.current_model_key()
+        spec = self._current_nai_model_spec()
+        return bool(spec and spec.payload_profile == "v3")
+
+    def nai_model_supports_vibe(self) -> bool:
+        spec = self._current_nai_model_spec()
+        return bool(spec and spec.supports_vibe)
 
     @staticmethod
     def coerce_remote_param(key: str, value: Any) -> Any:

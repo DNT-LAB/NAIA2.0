@@ -7,6 +7,7 @@ from typing import Any
 import re
 
 from core.headless_remote_state_service import HeadlessRemoteStateService
+from core.nai_model_contract import NAI_REMOTE_MODEL_KEYS
 
 # 해상도 매니저가 저장하는 모드 키 (params_workflow_routes.REMOTE_RESOLUTION_MODES와 동일).
 _RESOLUTION_MODES = ("NAI", "WEBUI", "COMFYUI")
@@ -279,6 +280,19 @@ class HeadlessSessionStateService:
             values = cached_options.get(key)
             if isinstance(values, list) and values:
                 payload[key] = values[0]
+        if mode == "NAI":
+            # 사용자 모델 레지스트리가 NAI 모델 선택지의 최종 권위다. 기존
+            # remote_option_cache가 서버 재시작 전 목록을 들고 있어도 새 모델을
+            # 가리지 않으며, 프런트 관리 화면 없이도 기존 모델 select에 즉시 노출된다.
+            registry = context._nai_model_registry()
+            model_options = registry.option_keys()
+            selected_model = str(payload.get("model") or "").strip().upper()
+            if registry.has_key(selected_model) and selected_model not in model_options:
+                model_options.append(selected_model)
+            payload["options_model"] = model_options
+            payload["options_model_meta"] = registry.option_metadata(
+                include_keys=[selected_model] if selected_model else None
+            )
         return payload
 
     def initial_websocket_messages(
@@ -316,7 +330,7 @@ class HeadlessSessionStateService:
             return ["Stable Diffusion"]
         if mode == "COMFYUI":
             return ["ComfyUI Workflow"]
-        return ["NAID4.5F", "NAID4.5", "NAID4", "NAID3"]
+        return list(NAI_REMOTE_MODEL_KEYS)
 
     @staticmethod
     def sampler_options_for_mode(mode: str) -> list[str]:

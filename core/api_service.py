@@ -31,7 +31,11 @@ from core.character_settings import (
     read_reroll_on_generate,
     store_character_roll_snapshot,
 )
-from core.nai_model_contract import resolve_nai_api_model
+from core.nai_model_contract import (
+    NaiModelSpec,
+    normalize_nai_model_key,
+    resolve_nai_model_for_context,
+)
 from utils.comfyui_png_metadata import build_comfyui_extra_pnginfo
 
 
@@ -650,7 +654,16 @@ class APIService:
 
             # 모델 이름 가져오기 및 매핑
             model_key = params.get('model', 'NAID4.5F')
-            model_name = resolve_nai_api_model(model_key)
+            generation_request = params.get('_generation_request')
+            frozen_model_spec = getattr(generation_request, "nai_model_spec", None)
+            if (
+                isinstance(frozen_model_spec, NaiModelSpec)
+                and frozen_model_spec.key == normalize_nai_model_key(model_key)
+            ):
+                model_spec = frozen_model_spec
+            else:
+                model_spec = resolve_nai_model_for_context(self.app_context, model_key)
+            model_name = model_spec.api_model
 
             # ✅ Img2Img 분기 처리
             is_img2img = 'image_bytes' in params and params['image_bytes'] is not None
@@ -658,7 +671,11 @@ class APIService:
             if is_img2img:
                 action_type = "infill" if params.get('type') == 'inpaint' else "img2img"
             if params.get('type') == 'inpaint':
-                model_name += "-inpainting"
+                if not model_spec.inpainting_api_model:
+                    raise ValueError(
+                        f"모델 {model_spec.key}에는 inpainting_api_model이 설정되지 않았습니다."
+                    )
+                model_name = model_spec.inpainting_api_model
 
             # NAI 서버는 seed를 uint64로 파싱하므로 음수 방지
             nai_seed = params.get('seed', 0)
@@ -700,16 +717,9 @@ class APIService:
 
             # skip_cfg_above_sigma 처리 (VAR+ 파라미터에 따라)
             if params.get('VAR+', False):
-                # VAR+가 True일 때 모델에 따라 다른 값 설정
-                if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated']:
-                    api_parameters["skip_cfg_above_sigma"] = 58
-                elif model_name in ['nai-diffusion-4-full', 'nai-diffusion-4-curated', 'nai-diffusion-3']:
-                    api_parameters["skip_cfg_above_sigma"] = 19
-                # inpainting 모델도 동일하게 처리
-                elif model_name in ['nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']:
-                    api_parameters["skip_cfg_above_sigma"] = 58
-                elif model_name in ['nai-diffusion-4-full-inpainting', 'nai-diffusion-4-curated-inpainting', 'nai-diffusion-3-inpainting']:
-                    api_parameters["skip_cfg_above_sigma"] = 19
+                skip_cfg = model_spec.skip_cfg_above_sigma
+                if skip_cfg is not None:
+                    api_parameters["skip_cfg_above_sigma"] = skip_cfg
             else:
                 # VAR+가 False일 때는 null (Python에서는 None이지만 JSON 전송 시 제외됨)
                 api_parameters["skip_cfg_above_sigma"] = None
@@ -719,7 +729,7 @@ class APIService:
             # 아님). V4 계열은 autoSmea(자동)를 쓰므로 sm/sm_dyn 을 안 보내는 기존 동작 유지.
             # NAI 웹 미러: DYN 은 SMEA 의 하위 옵션(DYN 체크 시 SMEA 함께 활성), ddim 샘플러와
             # V3 인페인트(inpainting 모델)는 SMEA 미지원이라 강제 False.
-            if 'nai-diffusion-4' not in model_name:
+            if model_spec.uses_legacy_smea:
                 _smea_dyn = bool(params.get('DYN', False))
                 _smea = bool(params.get('SMEA', False)) or _smea_dyn
                 if 'ddim' in str(api_parameters.get('sampler') or '') or action_type == 'infill':
@@ -750,7 +760,7 @@ class APIService:
                     # 전용이다. V3 인페인트는 디노이징(강도) 개념 자체가 없어(사용자 확인) 강도를
                     # 보내지 않는다 — 프론트도 V3 인페인트에서 강도 슬라이더를 숨긴다.
                     # color_correct 는 img2img 색보정 파라미터.
-                    if 'nai-diffusion-4' in model_name:
+                    if model_spec.uses_v4_payload:
                         api_parameters["img2img"] = {
                             "strength": _inpaint_strength,
                             "color_correct": True,
@@ -777,7 +787,7 @@ class APIService:
                 print(f"⚠️ reference inset 삽입 실패: {exc}")
 
             # V4 특화 설정 (기존과 동일)
-            if 'nai-diffusion-4' in model_name:
+            if model_spec.uses_v4_payload:
                 main_prompt = params.get('input', '')
                 negative_prompt = params.get('negative_prompt', '')
 
@@ -981,7 +991,7 @@ class APIService:
             # NAID3(V3)는 Vibe Transfer 가 V4 계열과 다른 사양이라 사용자 요청으로 일시 차단한다.
             # V4/V4.5 에서만 reference(vibe) 를 적용한다(Character Reference 는 아래 4.5 게이트에서
             # 이미 차단됨). 되돌리려면 이 게이트(_apply_vibe)만 제거하면 된다.
-            _apply_vibe = 'nai-diffusion-4' in model_name
+            _apply_vibe = model_spec.supports_vibe
             if _apply_vibe and generation_request and generation_request.nai_vibe_transfer:
                 print("✅ [EarlyBinding] Vibe Transfer Data from GenerationRequest")
                 nai_vibe_data = generation_request.nai_vibe_transfer
@@ -1045,7 +1055,7 @@ class APIService:
                             print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 전용
-            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']: # 다음 모델 제외:
+            if model_spec.supports_character_reference:
                 generation_request = params.get('_generation_request')
                 if generation_request and generation_request.nai_character_reference:
                     print("✅ [EarlyBinding] Character Reference Data from GenerationRequest")
@@ -1071,6 +1081,7 @@ class APIService:
                             api_parameters,
                             nai_ref_data.inpaint_img2img_strength,
                             model_name=model_name,
+                            uses_v4_payload=model_spec.uses_v4_payload,
                         )
                     api_parameters['normalize_reference_strength_multiple'] = nai_ref_data.normalize_reference_strength_multiple
 
@@ -1103,6 +1114,7 @@ class APIService:
                                 api_parameters,
                                 params['inpaintImg2ImgStrength'],
                                 model_name=model_name,
+                                uses_v4_payload=model_spec.uses_v4_payload,
                             )
                     if 'normalize_reference_strength_multiple' in params:
                         api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
@@ -1116,6 +1128,7 @@ class APIService:
                     params,
                     model_name=model_name,
                     action_type=action_type,
+                    uses_v4_payload=model_spec.uses_v4_payload,
                 )
 
             # 커스텀 파라미터(use_custom_api_params)는 api_parameters를 직접 update하므로
@@ -1450,8 +1463,19 @@ class APIService:
             api_parameters["height"] = snapped_height
 
     @staticmethod
-    def _mirror_nai_inpaint_img2img_strength(api_parameters: dict, strength: Any, *, model_name: str = "") -> None:
-        if 'nai-diffusion-4' not in str(model_name or ''):
+    def _mirror_nai_inpaint_img2img_strength(
+        api_parameters: dict,
+        strength: Any,
+        *,
+        model_name: str = "",
+        uses_v4_payload: bool | None = None,
+    ) -> None:
+        is_v4_payload = (
+            bool(uses_v4_payload)
+            if uses_v4_payload is not None
+            else 'nai-diffusion-4' in str(model_name or '')
+        )
+        if not is_v4_payload:
             return
         img2img = api_parameters.get("img2img")
         if isinstance(img2img, dict):
@@ -1470,10 +1494,16 @@ class APIService:
         *,
         model_name: str = "",
         action_type: str = "",
+        uses_v4_payload: bool | None = None,
     ) -> dict:
         # 중첩 img2img 는 V4/V4.5 인페인트 전용(V3 는 디노이징 미지원). 커스텀 img2img JSON 을
         # 생성된 img2img 와 병합해 일관 유지한다.
-        if action_type != "infill" or 'nai-diffusion-4' not in str(model_name or ''):
+        is_v4_payload = (
+            bool(uses_v4_payload)
+            if uses_v4_payload is not None
+            else 'nai-diffusion-4' in str(model_name or '')
+        )
+        if action_type != "infill" or not is_v4_payload:
             return custom_params
         custom_img2img = custom_params.get("img2img")
         if not isinstance(custom_img2img, dict):
@@ -1496,6 +1526,7 @@ class APIService:
         *,
         model_name: str = "",
         action_type: str = "",
+        uses_v4_payload: bool | None = None,
     ) -> None:
         """
         NovelAI API 전용 커스텀 파라미터를 처리하고 api_parameters에 적용합니다.
@@ -1529,6 +1560,7 @@ class APIService:
                 custom_params,
                 model_name=model_name,
                 action_type=action_type,
+                uses_v4_payload=uses_v4_payload,
             )
             # NAI API parameters에 직접 병합
             api_parameters.update(applied_params)
@@ -1536,7 +1568,12 @@ class APIService:
             # 사용자가 img2img.strength(중첩)를 줬으면 중첩이 권위 → 평면을 중첩에 맞춤.
             # 평면 inpaintImg2ImgStrength만 줬으면 사용자 의도를 중첩으로 전파
             # (V4/V4.5 인페인트 서버는 중첩만 읽으므로, 평면만 갱신하면 무시된다. V3 은 제외).
-            if action_type == "infill" and 'nai-diffusion-4' in str(model_name or ''):
+            is_v4_payload = (
+                bool(uses_v4_payload)
+                if uses_v4_payload is not None
+                else 'nai-diffusion-4' in str(model_name or '')
+            )
+            if action_type == "infill" and is_v4_payload:
                 custom_img2img = custom_params.get("img2img")
                 if (
                     isinstance(custom_img2img, dict)

@@ -57,6 +57,7 @@ HEADLESS_SERVICE_SPECS = {
     "save": HeadlessServiceSpec("core.headless_save_service", "HeadlessSaveService"),
     "search_state": HeadlessServiceSpec("core.headless_search_state_service", "HeadlessSearchStateService"),
     "session_state": HeadlessServiceSpec("core.headless_session_state_service", "HeadlessSessionStateService"),
+    "nai_model_registry": HeadlessServiceSpec("core.nai_model_registry", "NaiModelRegistry"),
     "runtime_path": HeadlessServiceSpec("core.headless_runtime_path_service", "HeadlessRuntimePathService"),
     "pipeline_run": HeadlessServiceSpec("core.headless_pipeline_run_service", "HeadlessPipelineRunService"),
     "pipeline_hook": HeadlessServiceSpec("core.headless_pipeline_hook_service", "HeadlessPipelineHookService"),

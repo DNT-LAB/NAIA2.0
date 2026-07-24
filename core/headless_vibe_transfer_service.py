@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import quote
 
 from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
-from core.nai_model_contract import resolve_nai_api_model
+from core.nai_model_contract import resolve_nai_model_for_context
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES, NAI_VIBE_INCLUDED_REFERENCES
 
 
@@ -24,12 +24,19 @@ def _as_float(value: Any, default: float) -> float:
         return default
 
 
-def _vibe_model_family(model_key: Any) -> str:
+def _vibe_model_family(model_key: Any, context: Any = None) -> str:
     """모델 키를 vibe 호환 '가족'(버전)으로 정규화. vibe 인코딩은 모델 버전별로 다르므로 복원 시
     버전 불일치만 경고하면 된다. F/C(full/curated)·별칭(NAID4.5/NAID4)은 같은 버전으로 묶어
     거짓 경고를 막는다. 알 수 없으면 ''(경고 안 함, fail-safe).
     모델 옵션: NAID4.5F/C, NAID4.5(별칭), NAID4.0F/C·NAID4(별칭), NAID3."""
     key = str(model_key or "").upper()
+    if context is not None:
+        try:
+            registry = context._nai_model_registry()
+            if registry.has_key(key):
+                return str(registry.resolve(key).family or "")
+        except Exception:
+            pass
     if "NAID3" in key:
         return "v3"
     if "4.5" in key:        # NAID4.5F / NAID4.5C / NAID4.5
@@ -79,14 +86,14 @@ def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float, *, model_key
     모델로 인코딩해 라이브 컨텍스트 모델 드리프트와 무관하게 한다). 미지정 시 현재 모델(기존 동작)."""
     if str(context.get_api_mode() or "").upper() != "NAI":
         raise RuntimeError("Vibe 인코딩은 NAI 모드에서만 가능합니다.")
-    if model_key is not None:
-        resolved_model = str(model_key or "")
-        is_naid3 = "NAID3" in resolved_model.upper()
-    else:
-        resolved_model = str(context._current_model_key() or "")
-        is_naid3 = context._is_naid3_model()
-    if is_naid3:
-        raise RuntimeError("NAID3 모델은 Vibe 인코딩을 지원하지 않습니다.")
+    resolved_model = (
+        str(model_key or "")
+        if model_key is not None
+        else str(context._current_model_key() or "")
+    )
+    model_spec = resolve_nai_model_for_context(context, resolved_model)
+    if not model_spec.supports_vibe:
+        raise RuntimeError(f"{model_spec.key} 모델은 Vibe 인코딩을 지원하지 않습니다.")
     if not source_bytes:
         raise RuntimeError("인코딩할 소스 이미지가 없습니다.")
     try:
@@ -96,7 +103,7 @@ def encode_vibe_bytes(context: Any, source_bytes: bytes, ie: float, *, model_key
     if not token:
         raise RuntimeError("NAI 토큰이 필요합니다 (API 설정 → NAI).")
     ie = max(0.01, min(1.0, round(float(ie), 2)))
-    api_model = resolve_nai_api_model(resolved_model)
+    api_model = model_spec.api_model
     encoding = _post_encode_vibe(token, bytes(source_bytes), ie, api_model)
     if not encoding:
         raise RuntimeError("Vibe 인코딩 응답이 비어 있습니다.")
@@ -305,7 +312,11 @@ class HeadlessVibeTransferService:
         context = self.context
         if str(context.get_api_mode() or "").upper() != "NAI":
             return False
-        if context._is_naid3_model():
+        supports_vibe = getattr(context, "_nai_model_supports_vibe", None)
+        if callable(supports_vibe):
+            if not supports_vibe():
+                return False
+        elif context._is_naid3_model():
             return False
         try:
             return bool(context.secure_token_manager.get_token("nai_token"))
@@ -359,7 +370,15 @@ class HeadlessVibeTransferService:
         if frame.get("encoding_in_progress"):
             return {"ok": False, "messages": [context._toast("이미 인코딩 중입니다.", level="info")]}
         if not self._runtime_can_encode():
-            return {"ok": False, "messages": [context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다 (NAID3 제외).", level="error")]}
+            return {
+                "ok": False,
+                "messages": [
+                    context._toast(
+                        "Vibe 인코딩은 지원 프로필의 NAI 모델 + NAI 토큰이 필요합니다.",
+                        level="error",
+                    )
+                ],
+            }
         if frame.get("is_no_image") or frame.get("no_source") or not self._frame_has_source(frame):
             # no_source = 번들 placeholder(원본 이미지 없음) → 재인코딩하면 검정 사각형을 인코딩한
             # 쓰레기가 되고 Anlas만 소비. UI는 이미 막지만 직접 WS encode_* 호출도 서버에서 차단.
@@ -392,7 +411,10 @@ class HeadlessVibeTransferService:
             source_bytes = b"" if frame.get("is_no_image") else self._frame_source_bytes(frame)
             token = (context.secure_token_manager.get_token("nai_token") or "") if can else ""
             if not can:
-                toast = context._toast("Vibe 인코딩은 NAI 모드 + NAI 토큰이 필요합니다.", level="error")
+                toast = context._toast(
+                    "Vibe 인코딩은 지원 프로필의 NAI 모델 + NAI 토큰이 필요합니다.",
+                    level="error",
+                )
             elif not source_bytes:
                 toast = context._toast("인코딩할 소스 이미지를 찾을 수 없습니다.", level="error")
             elif not token:
@@ -401,7 +423,10 @@ class HeadlessVibeTransferService:
                 ie = round(_as_float(value, _as_float(frame.get("information_extracted"), 1.0)), 2)
                 ie = max(0.01, min(1.0, ie))
                 model_key = context._current_model_key()
-                api_model = resolve_nai_api_model(model_key)
+                model_spec = resolve_nai_model_for_context(context, model_key)
+                if not model_spec.supports_vibe:
+                    raise RuntimeError(f"{model_spec.key} 모델은 Vibe 인코딩을 지원하지 않습니다.")
+                api_model = model_spec.api_model
                 encoding = _post_encode_vibe(token, source_bytes, ie, api_model)
                 if not encoding:
                     toast = context._toast("Vibe 인코딩 응답이 비어 있습니다.", level="error")
@@ -1046,8 +1071,8 @@ class HeadlessVibeTransferService:
         # 모델 불일치 경고: vibe 인코딩은 모델 버전별로 다르다. 정확한 키 비교는 별칭(NAID4.5 등)·
         # F/C 차이로 거짓 경고를 내므로 '가족'(버전) 단위로 비교 — v4.0/v4.5/v3 실제 불일치만 알린다.
         current_model = str(context._current_model_key() or "")
-        src_family = _vibe_model_family(source_model)
-        cur_family = _vibe_model_family(current_model)
+        src_family = _vibe_model_family(source_model, context)
+        cur_family = _vibe_model_family(current_model, context)
         model_mismatch = bool(src_family and cur_family and src_family != cur_family)
         if model_mismatch:
             message += f" ⚠ 이 vibe는 {source_model}({src_family})용이라 현재 모델({current_model})과 달라 결과가 바뀔 수 있어요."

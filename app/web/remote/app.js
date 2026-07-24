@@ -338,6 +338,7 @@ let chunkPanelControl = null;
 let sequencePresetControl = null;
 let danbooruFeedbackControl = null;
 let resolutionManagerPanel = null;
+let naiModelManagerPanel = null;
 let danbooruTabControl = null;
 let thumbTabControl = null;
 let artistThumbControl = null;
@@ -1578,6 +1579,35 @@ const resolutionManagerReady = import('./js/features/resolutionManagerPanel.mjs'
   .catch(error => {
     console.error('Failed to initialize resolution manager module', error);
   });
+const naiModelManagerReady = import('./js/features/naiModelManagerPanel.mjs?v=20260724-nai-models2')
+  .then(({createNaiModelManagerPanel}) => {
+    naiModelManagerPanel = createNaiModelManagerPanel({
+      document,
+      window,
+      showToast,
+      onStateChanged: payload => {
+        const state = payload?.state || {};
+        const metadata = [
+          ...(Array.isArray(state.built_in) ? state.built_in : []),
+          ...(Array.isArray(state.custom) ? state.custom : []),
+        ];
+        const selectedKey = payload?.model?.key
+          || (payload?.selection_reset ? state.default_model : paramEls.model?.value)
+          || state.default_model;
+        updateParams({
+          schema_only: true,
+          api_mode: 'NAI',
+          options_model: Array.isArray(state.options) ? state.options : [],
+          options_model_meta: metadata,
+          model: selectedKey,
+        });
+        if (payload?.model?.key) setParam('model', payload.model.key);
+      },
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize NAI model manager module', error);
+  });
 
 function parseParamNumber(value, fallback = null) {
   if (value === undefined || value === null || String(value).trim() === '') return fallback;
@@ -2449,6 +2479,7 @@ const qRndRes = $('qRndRes');
 const qAutoRes = $('qAutoRes');
 let baseResolutionOptions = [];
 let baseResolutionValue = '';
+const naiModelMetaByKey = new Map();
 let syncingParams = false;
 const resultInfoContent = $('resultInfoContent');
 const statsGenCount  = $('statsGenCount');
@@ -3367,12 +3398,32 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
 
 // ---- Params ----
 
-function populateSelect(el, options, current) {
+function populateSelect(el, options, current, labels = null) {
+  if (!el) return;
   const previous = el.value;
   if (options && options.length) {
-    const existing = Array.from(el.options).map(o => o.value);
-    if (existing.length !== options.length || existing.some((v, i) => v !== options[i])) {
-      el.innerHTML = options.map(o => `<option value="${o}">${o}</option>`).join('');
+    const normalized = options.map(value => String(value));
+    const labelFor = value => {
+      if (labels instanceof Map && labels.has(value)) return String(labels.get(value));
+      if (labels && typeof labels === 'object' && value in labels) return String(labels[value]);
+      return value;
+    };
+    const existing = Array.from(el.options);
+    const changed = (
+      existing.length !== normalized.length
+      || existing.some((option, index) => (
+        option.value !== normalized[index]
+        || option.textContent !== labelFor(normalized[index])
+      ))
+    );
+    if (changed) {
+      el.textContent = '';
+      normalized.forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = labelFor(value);
+        el.append(option);
+      });
     }
   }
   if (current !== undefined) el.value = current;
@@ -3586,9 +3637,24 @@ function onComfyUiWorkflowState(m) {
 
 function updateParams(m) {
   const schemaOnly = !!m.schema_only;
+  const mode = m.api_mode || currentMode || modeSelect?.value || '';
   syncingParams = true;
   ensureResolutionPresetOptions();
-  populateSelect(paramEls.model, m.options_model, m.model);
+  if (Array.isArray(m.options_model_meta)) {
+    naiModelMetaByKey.clear();
+    m.options_model_meta.forEach(item => {
+      const key = String(item?.key || '').trim().toUpperCase();
+      if (key) naiModelMetaByKey.set(key, item);
+    });
+  }
+  const modelLabels = mode === 'NAI'
+    ? new Map(
+      Array.from(naiModelMetaByKey.entries())
+        .filter(([, item]) => item?.source === 'user')
+        .map(([key, item]) => [key, String(item?.label || key)])
+    )
+    : null;
+  populateSelect(paramEls.model, m.options_model, m.model, modelLabels);
   populateSelect(paramEls.sampler, m.options_sampler, m.sampler);
   populateSelect(paramEls.scheduler, m.options_scheduler, m.scheduler);
   if (Array.isArray(m.options_resolution) && m.options_resolution.length) {
@@ -3606,8 +3672,10 @@ function updateParams(m) {
     paramEls.steps.max = m.steps_range[1];
   }
   // 모드별 표시/숨김
-  const mode = m.api_mode || '';
   document.querySelectorAll('.mode-nai').forEach(el => el.style.display = mode === 'NAI' ? '' : 'none');
+  if (mode && mode !== 'NAI' && naiModelManagerPanel?.isOpen()) {
+    naiModelManagerPanel.close();
+  }
   // Assets 탭은 NAI 전용(사용자 지시 2026-07-18): 다른 모드로 바뀌면 숨기고,
   // 사용자가 그 탭을 펼치고 있었다면 setAvailability가 Result로 복귀시킨다.
   if (mode) applyRightTabAvailability({charAssets: mode === 'NAI'});
@@ -6628,6 +6696,8 @@ function naiModelBlocksReference() {
   const sel = document.getElementById('pModel');
   const model = sel ? String(sel.value || '').trim().toUpperCase() : '';
   if (!model) return false;
+  const metadata = naiModelMetaByKey.get(model);
+  if (metadata?.capabilities && metadata.capabilities.v4_payload === false) return true;
   return model.includes('NAID3');
 }
 
@@ -6861,6 +6931,8 @@ function closeAuxiliaryPopups(exceptPanel = null, options = {}) {
   if (exceptPanel !== peDebugPanel && promptEngineeringPopups?.isOpen('debug')) closePeDebugPanel();
   const resolutionPanel = document.getElementById('resolutionManagerPanel');
   if (exceptPanel !== resolutionPanel && resolutionManagerPanel?.isOpen()) closeResolutionManager();
+  const naiModelPanel = document.getElementById('naiModelManagerPanel');
+  if (exceptPanel !== naiModelPanel && naiModelManagerPanel?.isOpen()) closeNaiModelManager();
   const wildcardEditorPanel = document.getElementById('wildcardEditorPopup');
   if (exceptPanel !== wildcardEditorPanel && wildcardManagerPanel?.isEditorOpen()) wildcardManagerPanel.closeEditor();
 
@@ -6878,6 +6950,20 @@ function openResolutionManager() {
 
 function closeResolutionManager() {
   if (resolutionManagerPanel) resolutionManagerPanel.close();
+}
+
+function openNaiModelManager() {
+  if ((currentMode || modeSelect?.value || '').toUpperCase() !== 'NAI') {
+    showToast('NAI 모드에서만 사용자 모델을 관리할 수 있습니다.', 'info');
+    return;
+  }
+  const panel = document.getElementById('naiModelManagerPanel');
+  closeAuxiliaryPopups(panel);
+  if (naiModelManagerPanel) naiModelManagerPanel.open();
+}
+
+function closeNaiModelManager() {
+  if (naiModelManagerPanel) naiModelManagerPanel.close();
 }
 
 function openPePresetAddPanel() {
@@ -8567,6 +8653,7 @@ Promise.all([
   chunkPanelReady,
   danbooruFeedbackReady,
   resolutionManagerReady,
+  naiModelManagerReady,
   promptEngineeringPopupRenderersReady,
   promptEngineeringPanelReady,
   promptEngineeringActionsReady,

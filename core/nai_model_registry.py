@@ -24,8 +24,9 @@ from core.nai_model_contract import (
 
 
 REGISTRY_FILENAME = "nai_models.json"
-REGISTRY_VERSION = 1
+REGISTRY_VERSION = 2
 MAX_CUSTOM_NAI_MODELS = 32
+MAX_MODEL_PARAMETER_RULES = 64
 
 _MODEL_KEY_RE = re.compile(r"^[A-Z0-9][A-Z0-9._-]{0,39}$")
 _API_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
@@ -70,6 +71,66 @@ class NaiModelRegistry:
             )
         return text
 
+    @staticmethod
+    def _clean_parameter_name(value: Any, *, field: str) -> str:
+        if not isinstance(value, str):
+            raise NaiModelValidationError(f"{field}의 파라미터 이름은 문자열이어야 합니다.")
+        name = value.strip()
+        if not name or len(name) > 128 or any(ord(char) < 32 for char in name):
+            raise NaiModelValidationError(
+                f"{field}의 파라미터 이름은 제어문자 없이 128자 이하여야 합니다."
+            )
+        return name
+
+    @classmethod
+    def _clean_parameter_overrides(cls, value: Any) -> dict[str, Any]:
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise NaiModelValidationError("api_parameter_overrides는 JSON 객체여야 합니다.")
+        if len(value) > MAX_MODEL_PARAMETER_RULES:
+            raise NaiModelValidationError(
+                f"API 파라미터 덮어쓰기는 최대 {MAX_MODEL_PARAMETER_RULES}개까지 가능합니다."
+            )
+        cleaned: dict[str, Any] = {}
+        for raw_name, raw_value in value.items():
+            name = cls._clean_parameter_name(raw_name, field="api_parameter_overrides")
+            try:
+                serialized = json.dumps(raw_value, ensure_ascii=False, allow_nan=False)
+                cleaned[name] = json.loads(serialized)
+            except (TypeError, ValueError) as exc:
+                raise NaiModelValidationError(
+                    f"api_parameter_overrides.{name} 값은 유효한 JSON 값이어야 합니다."
+                ) from exc
+        return cleaned
+
+    @classmethod
+    def _clean_parameter_removals(cls, value: Any) -> tuple[str, ...]:
+        if value in (None, ""):
+            return ()
+        if isinstance(value, str):
+            values = re.split(r"[\r\n,]+", value)
+        elif isinstance(value, (list, tuple)):
+            values = list(value)
+        else:
+            raise NaiModelValidationError(
+                "api_parameter_removals는 파라미터 이름 배열이어야 합니다."
+            )
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for raw_name in values:
+            if isinstance(raw_name, str) and not raw_name.strip():
+                continue
+            name = cls._clean_parameter_name(raw_name, field="api_parameter_removals")
+            if name not in seen:
+                seen.add(name)
+                cleaned.append(name)
+        if len(cleaned) > MAX_MODEL_PARAMETER_RULES:
+            raise NaiModelValidationError(
+                f"API 파라미터 강제 제거는 최대 {MAX_MODEL_PARAMETER_RULES}개까지 가능합니다."
+            )
+        return tuple(cleaned)
+
     @classmethod
     def normalize_entry(cls, raw: Any) -> NaiModelSpec:
         if not isinstance(raw, dict):
@@ -96,6 +157,12 @@ class NaiModelRegistry:
             raise NaiModelValidationError(
                 "family는 영문/숫자로 시작하고 . _ - 만 사용하는 32자 이하여야 합니다."
             )
+        parameter_overrides = cls._clean_parameter_overrides(
+            raw.get("api_parameter_overrides")
+        )
+        parameter_removals = cls._clean_parameter_removals(
+            raw.get("api_parameter_removals")
+        )
         return NaiModelSpec(
             key=key,
             label=cls._clean_label(raw.get("label"), fallback=key),
@@ -105,6 +172,8 @@ class NaiModelRegistry:
             family=family,
             source="user",
             selectable=True,
+            api_parameter_overrides=parameter_overrides,
+            api_parameter_removals=parameter_removals,
         )
 
     def _load(self) -> None:
@@ -143,6 +212,8 @@ class NaiModelRegistry:
                     "payload_profile": spec.payload_profile,
                     "inpainting_api_model": spec.inpainting_api_model,
                     "family": spec.family,
+                    "api_parameter_overrides": dict(spec.api_parameter_overrides),
+                    "api_parameter_removals": list(spec.api_parameter_removals),
                 }
                 for spec in self._custom.values()
             ],
@@ -208,7 +279,8 @@ class NaiModelRegistry:
                 "default_model": DEFAULT_NAI_MODEL_KEY,
                 "payload_profiles": sorted(NAI_PAYLOAD_PROFILES),
                 "max_custom_models": MAX_CUSTOM_NAI_MODELS,
-                "default_payload_profile": "passthrough",
+                # UI의 Auto 프로필이 미지 모델을 기본으로 태우는 파이프라인과 일치시킨다.
+                "default_payload_profile": "v4.5",
                 "built_in": [
                     spec.to_payload() for spec in BUILTIN_NAI_MODEL_SPECS.values()
                 ],

@@ -572,9 +572,14 @@
         "core/nai_model_contract.py",
         "core/generation_request.py",
         "core/headless_generation_service.py",
+        "core/headless_session_state_service.py",
         "core/api_service.py",
         "core/headless_vibe_transfer_service.py",
-        "app/backend/server/result_display_routes.py"
+        "app/backend/server/result_display_routes.py",
+        "app/web/remote/index.html",
+        "app/web/remote/style.css",
+        "app/web/remote/app.js",
+        "app/web/remote/js/features/naiModelManagerPanel.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [

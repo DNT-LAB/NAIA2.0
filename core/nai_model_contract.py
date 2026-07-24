@@ -8,7 +8,8 @@ payload 호환 프로필을 한 계약으로 묶어 모든 NAI 호출 경로가 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import copy
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 
@@ -30,6 +31,8 @@ class NaiModelSpec:
     family: str = ""
     source: str = "builtin"
     selectable: bool = True
+    api_parameter_overrides: Mapping[str, Any] = field(default_factory=dict)
+    api_parameter_removals: tuple[str, ...] = ()
 
     @property
     def uses_v4_payload(self) -> bool:
@@ -66,6 +69,8 @@ class NaiModelSpec:
             "family": self.family,
             "source": self.source,
             "selectable": self.selectable,
+            "api_parameter_overrides": copy.deepcopy(dict(self.api_parameter_overrides)),
+            "api_parameter_removals": list(self.api_parameter_removals),
             "capabilities": {
                 "v4_payload": self.uses_v4_payload,
                 "vibe": self.supports_vibe,
@@ -139,8 +144,7 @@ BUILTIN_NAI_MODEL_SPECS: dict[str, NaiModelSpec] = {
         "NovelAI Diffusion V4 Curated",
         "nai-diffusion-4-curated-preview",
         "v4",
-        # 기존 APIService가 base wire name에 "-inpainting"을 붙이던 결과를 보존한다.
-        inpainting_api_model="nai-diffusion-4-curated-preview-inpainting",
+        inpainting_api_model="nai-diffusion-4-curated-inpainting",
         family="v4.0",
         selectable=False,
     ),

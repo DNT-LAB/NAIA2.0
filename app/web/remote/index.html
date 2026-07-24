@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260722-font1">
+<link rel="stylesheet" href="style.css?v=20260724-nai-models2">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -378,6 +378,15 @@
   <div class="resolution-manager-body" data-resolution-manager-body></div>
 </div>
 
+<div class="nai-model-manager-popup" id="naiModelManagerPanel"
+     role="dialog" aria-labelledby="naiModelManagerTitle" aria-modal="false">
+  <div class="module-popup-header">
+    <span class="module-popup-title" id="naiModelManagerTitle">Add / Manage NAI Models</span>
+    <button class="history-close" onclick="closeNaiModelManager()" aria-label="닫기">&times;</button>
+  </div>
+  <div class="nai-model-manager-body" data-nai-model-manager-body></div>
+</div>
+
 <div class="pe-popup" id="chunkPanel">
   <div class="module-popup-header">
     <span class="module-popup-title">Chunk</span>
@@ -516,7 +525,11 @@
           <div class="params-grid" id="paramsGrid">
             <div class="param-row">
               <span class="param-label">Model</span>
-              <select class="param-select" id="pModel" onchange="setParam('model',this.value)"></select>
+              <div class="param-inline param-inline-model">
+                <button type="button" class="param-manage-btn mode-nai"
+                        onclick="openNaiModelManager()">Add / Manage Models</button>
+                <select class="param-select" id="pModel" onchange="setParam('model',this.value)"></select>
+              </div>
             </div>
             <div class="param-row">
               <span class="param-label">Sampler</span>
@@ -1221,6 +1234,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260722-font1"></script>
+<script src="app.js?v=20260724-nai-models2"></script>
 </body>
 </html>

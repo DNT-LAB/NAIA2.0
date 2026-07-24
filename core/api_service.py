@@ -32,6 +32,7 @@ from core.character_settings import (
     store_character_roll_snapshot,
 )
 from core.nai_model_contract import (
+    DEFAULT_NAI_MODEL_SPEC,
     NaiModelSpec,
     normalize_nai_model_key,
     resolve_nai_model_for_context,
@@ -663,6 +664,7 @@ class APIService:
                 model_spec = frozen_model_spec
             else:
                 model_spec = resolve_nai_model_for_context(self.app_context, model_key)
+            selected_model_spec = model_spec
             model_name = model_spec.api_model
 
             # ✅ Img2Img 분기 처리
@@ -672,10 +674,23 @@ class APIService:
                 action_type = "infill" if params.get('type') == 'inpaint' else "img2img"
             if params.get('type') == 'inpaint':
                 if not model_spec.inpainting_api_model:
-                    raise ValueError(
-                        f"모델 {model_spec.key}에는 inpainting_api_model이 설정되지 않았습니다."
+                    if model_spec.source != "user":
+                        raise ValueError(
+                            f"모델 {model_spec.key}에는 inpainting_api_model이 설정되지 않았습니다."
+                        )
+                    # 사용자 모델은 아직 인페인트 wire 이름이 공개되지 않았거나 별도
+                    # 인페인트 모델이 없을 수 있다. 이 경우에만 검증된 4.5 Full
+                    # 인페인트 계약으로 전환한다. payload capability 역시 fallback
+                    # 모델 기준이어야 V4.5의 v4_prompt/img2img 구조가 빠지지 않는다.
+                    model_spec = DEFAULT_NAI_MODEL_SPEC
+                    model_name = str(model_spec.inpainting_api_model or "")
+                    params["_nai_inpaint_fallback_model"] = model_spec.key
+                    print(
+                        f"↪️ [NAI] {selected_model_spec.key} 인페인트 모델 미설정: "
+                        f"{model_spec.key} ({model_name}) fallback"
                     )
-                model_name = model_spec.inpainting_api_model
+                else:
+                    model_name = model_spec.inpainting_api_model
 
             # NAI 서버는 seed를 uint64로 파싱하므로 음수 방지
             nai_seed = params.get('seed', 0)
@@ -1131,10 +1146,33 @@ class APIService:
                     uses_v4_payload=model_spec.uses_v4_payload,
                 )
 
+            # 모델 레지스트리의 파라미터 규칙은 기존 NAI/custom payload 조립이 끝난
+            # 뒤 적용한다. 동일 key는 모델 규칙이 최종 덮어쓰며, JSON 값은 요청별로
+            # 복제해 queued NaiModelSpec의 스냅샷이 변형되지 않게 한다.
+            model_overrides = dict(selected_model_spec.api_parameter_overrides)
+            if model_overrides:
+                api_parameters.update(copy.deepcopy(model_overrides))
+                print(
+                    f"🧩 [NAI Model] {selected_model_spec.key}: "
+                    f"{len(model_overrides)} parameter override(s)"
+                )
+
             # 커스텀 파라미터(use_custom_api_params)는 api_parameters를 직접 update하므로
             # 사용자 JSON에 width/height가 있으면 앞선 64배수 보정을 덮어쓸 수 있다. 이
             # 페이로드 직전 지점이 NAI로 나가는 진짜 마지막 단계이므로 여기서 최종 보정한다.
             self._snap_nai_api_parameters_resolution(api_parameters)
+
+            # 강제 제거는 해상도 보정까지 포함한 모든 조립 단계보다 뒤에 둔다.
+            # 사용자가 명시한 key가 뒤 단계에서 다시 생기지 않도록 payload 생성 직전
+            # 단 한 번 pop하며, 없는 key는 안전하게 무시한다.
+            model_removals = tuple(selected_model_spec.api_parameter_removals)
+            if model_removals:
+                for key in model_removals:
+                    api_parameters.pop(key, None)
+                print(
+                    f"🧹 [NAI Model] {selected_model_spec.key}: "
+                    f"{len(model_removals)} parameter removal(s)"
+                )
 
             # 🎬 NAI 스트리밍 미리보기 사용 여부 결정
             # preview_callback이 있고 기본 txt2img(generate) 액션일 때만 스트리밍.

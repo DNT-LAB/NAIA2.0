@@ -9006,6 +9006,11 @@ body.resizing-result-info {
   flex: 1;
   min-width: 0;
 }
+.param-inline-model .param-manage-btn {
+  padding-inline: 8px;
+  font-size: 9px;
+  white-space: nowrap;
+}
 .param-manage-btn {
   flex: 0 0 auto;
   padding: 5px 9px;
@@ -13239,6 +13244,320 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   opacity: 0.55;
   cursor: wait;
 }
+
+.nai-model-manager-popup {
+  display: none;
+  position: fixed;
+  z-index: var(--z-floating-module-aux);
+  width: min(980px, 96vw);
+  max-height: 88dvh;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glow);
+  border-radius: 12px;
+  box-shadow: 0 12px 42px rgba(0,0,0,0.58);
+  flex-direction: column;
+  overflow: hidden;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+.nai-model-manager-popup.open { display: flex; }
+.nai-model-manager-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px 16px;
+}
+.nai-model-manager-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.9fr) minmax(340px, 1.1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px 16px;
+  min-height: 0;
+  height: min(690px, calc(88dvh - 76px));
+}
+.nai-model-manager-left,
+.nai-model-manager-right {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.nai-model-manager-right {
+  display: grid;
+  /* 오버라이드 / 제거 입력 / V4.5 샘플 파라미터 — 제거 블럭 공간을 절반씩 나눈다 */
+  grid-template-rows: minmax(190px, 1.2fr) minmax(104px, 0.55fr) minmax(120px, 0.55fr);
+  overflow: hidden;
+}
+.nai-model-manager-section-head,
+.nai-model-manager-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.nai-model-manager-section-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.nai-model-manager-section-head span,
+.nai-model-manager-editor-head span {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+.nai-model-manager-list {
+  flex: 0 0 auto;
+  max-height: 168px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: 7px;
+  background: var(--bg-deep);
+}
+.nai-model-manager-empty {
+  padding: 18px 10px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-align: center;
+}
+.nai-model-manager-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.015);
+}
+.nai-model-manager-row:hover,
+.nai-model-manager-row.selected {
+  border-color: var(--border-glow);
+}
+.nai-model-manager-row.selected {
+  background: rgba(124,106,239,0.12);
+}
+.nai-model-manager-row-main,
+.nai-model-manager-row-delete {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.nai-model-manager-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 8px;
+  text-align: left;
+  font-family: var(--font-mono);
+}
+.nai-model-manager-row-main strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+.nai-model-manager-row-main span,
+.nai-model-manager-row-main small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+.nai-model-manager-row-delete {
+  font-size: 17px;
+  border-left: 1px solid var(--border-dim);
+}
+.nai-model-manager-row-delete:hover {
+  color: #ff8e9c;
+  background: rgba(212,70,90,0.10);
+}
+.nai-model-manager-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.nai-model-manager-field > span {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.nai-model-manager-field input,
+.nai-model-manager-field textarea,
+.nai-model-manager-field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 9px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.nai-model-manager-field textarea {
+  flex: 1;
+  min-height: 130px;
+  resize: vertical;
+  line-height: 1.55;
+}
+.nai-model-manager-field input:focus,
+.nai-model-manager-field textarea:focus,
+.nai-model-manager-field select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124,106,239,0.12);
+}
+.nai-model-manager-field small {
+  color: var(--text-dim);
+  line-height: 1.45;
+}
+.nai-model-manager-field code,
+.nai-model-manager-guide code {
+  color: #b9afff;
+  font-family: var(--font-mono);
+}
+.nai-model-manager-field.grow {
+  min-height: 0;
+}
+.nai-model-manager-field.removal textarea {
+  min-height: 64px;
+}
+.nai-model-manager-sample {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: 7px;
+  background: var(--bg-deep);
+}
+.nai-model-manager-sample-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.nai-model-manager-sample-head span {
+  color: var(--text-dim);
+  font-size: 9px;
+}
+.nai-model-manager-sample-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.nai-model-manager-sample-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.nai-model-manager-sample-chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+.nai-model-manager-sample-chip.active {
+  background: rgba(255,120,140,0.14);
+  border-color: rgba(255,120,140,0.55);
+  color: #ff9caa;
+  text-decoration: line-through;
+}
+.nai-model-manager-guide {
+  padding: 10px 11px;
+  border: 1px solid rgba(124,106,239,0.23);
+  border-radius: 7px;
+  background: rgba(124,106,239,0.07);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.5;
+}
+.nai-model-manager-guide strong {
+  color: var(--text-muted);
+}
+.nai-model-manager-guide ol {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+.nai-model-manager-guide li + li {
+  margin-top: 3px;
+}
+.nai-model-manager-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 11px;
+  border-top: 1px solid var(--border-dim);
+}
+.nai-model-manager-footer > span {
+  margin-right: auto;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.nai-model-manager-footer > span[data-level="error"] { color: #ff8e9c; }
+.nai-model-manager-footer > span[data-level="success"] { color: #91dfad; }
+.nai-model-manager-btn {
+  padding: 7px 11px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: var(--bg-deep);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.nai-model-manager-btn:hover {
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+.nai-model-manager-btn.primary {
+  border-color: rgba(124,106,239,0.52);
+  background: rgba(124,106,239,0.18);
+  color: var(--accent-glow);
+}
+.nai-model-manager-popup.is-busy .nai-model-manager-layout {
+  cursor: wait;
+}
+.nai-model-manager-popup button:disabled,
+.nai-model-manager-popup input:disabled,
+.nai-model-manager-popup textarea:disabled,
+.nai-model-manager-popup select:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
 @media (max-width: 520px) {
   .resolution-manager-add {
     grid-template-columns: 1fr;
@@ -13249,6 +13568,34 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   }
   .resolution-manager-footer span {
     flex-basis: 100%;
+  }
+}
+@media (max-width: 820px) {
+  .nai-model-manager-popup {
+    width: min(620px, 96vw);
+    max-height: 92dvh;
+  }
+  .nai-model-manager-body {
+    overflow-y: auto;
+  }
+  .nai-model-manager-layout {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+  }
+  .nai-model-manager-left,
+  .nai-model-manager-right {
+    overflow: visible;
+  }
+  .nai-model-manager-right {
+    display: flex;
+  }
+  .nai-model-manager-footer {
+    position: sticky;
+    bottom: -14px;
+    margin: 0 -16px -14px;
+    padding: 10px 16px;
+    background: var(--bg-surface);
   }
 }
 #chunkPanel { width: min(420px, 94vw); }

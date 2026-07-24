@@ -25,6 +25,16 @@
   --guide-tip-text: #f4f7ff;
   --font-display: 'Outfit', "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
   --font-mono: 'JetBrains Mono', "Malgun Gothic", "Apple SD Gothic Neo", monospace;
+  /* 자유 텍스트 입력창 전용 폰트 (프롬프트/네거티브/각종 textarea).
+     Settings > Global > 폰트에서 교체하며, 미설정 시 --font-mono 와 동일하다.
+     숫자·파라미터 입력과 API 키 입력은 자릿수 정렬/문자 판별 때문에 --font-mono 를 유지한다.
+     ※ .prompt-edit(투명 textarea)와 .prompt-highlight(색칠 미러)는 반드시 이 변수를
+        함께 참조해야 한다. 한쪽만 바뀌면 캐럿이 글자와 어긋난다. */
+  --font-editor: var(--font-mono);
+  /* 원래 본문 폰트를 상속(font-family: inherit)하던 프롬프트 입력용.
+     --font-editor 를 그대로 쓰면 설정을 건드리지 않은 사용자의 화면이 mono 로 바뀌므로,
+     기본값을 inherit 로 두고 사용자가 폰트를 고를 때만 패널이 함께 덮어쓴다. */
+  --font-editor-inherit: inherit;
   --z-viewer-plane: 0;
   --z-viewer-overlay: 20;
   --z-viewer-modal: 100;
@@ -864,7 +874,7 @@ header {
   border-radius: 8px;
   background: rgba(6,6,12,0.76);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 13px;
 }
 .app-confirm-input:focus {
@@ -1368,7 +1378,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   background: var(--bg-primary);
   color: var(--text-primary);
   padding: 9px 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 11px;
   line-height: 1.55;
   resize: vertical;
@@ -1414,6 +1424,9 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   outline: none;
 }
 .studio-field textarea {
+  /* Studio 프레임의 prefix/postfix/negative/frame prompt 는 메인 프롬프트와 같은
+     성격의 자유 텍스트다. 같은 규칙에 묶인 input/select 는 숫자·선택지라 고정폭 유지. */
+  font-family: var(--font-editor);
   min-height: 54px;
   max-height: 140px;
   padding: 8px 9px;
@@ -1931,7 +1944,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   width: min(320px, 42%); min-width: 180px; height: 32px; padding: 0 10px;
   border: 1px solid var(--border-dim); border-radius: 5px; outline: none;
   background: rgba(0, 0, 0, 0.22); color: var(--text-primary);
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-editor); font-size: 11px;
 }
 .thumb-search:focus { border-color: var(--accent-blue); }
 .thumb-layout {
@@ -2224,6 +2237,8 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   font-size: 11px;
   font-weight: 700;
 }
+/* 검색어 입력은 자유 텍스트 - 같은 규칙의 select/download 버튼은 고정폭 유지 */
+.artist-thumb-search { font-family: var(--font-editor); }
 .artist-thumb-search {
   width: 100%;
   min-width: 180px;
@@ -2418,7 +2433,7 @@ body.desktop-shell .boot-indicator.hidden + .open-browser-btn {
   outline: none;
   background: rgba(0, 0, 0, 0.22);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -2647,7 +2662,7 @@ body.artist-thumb-result-spotlight:not(:has(#rightTabArtists.active))::before {
   outline: none;
   background: rgba(0, 0, 0, 0.22);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 11px;
 }
 .character-viewer-input,
@@ -6426,6 +6441,7 @@ body.resizing-result-info {
   border-radius: 6px;
   background: var(--bg-deep);
   color: var(--text-primary);
+  font-family: var(--font-editor);  /* Danbooru 태그 검색 */
 }
 .danbooru-load-btn,
 .danbooru-open-btn,
@@ -7410,7 +7426,7 @@ body.resizing-result-info {
   border: 1px solid var(--border-dim);
   border-radius: 6px;
   padding: 8px 10px;
-  font-family: var(--font-mono); font-size: 11.5px; font-weight: 300;
+  font-family: var(--font-editor); font-size: 11.5px; font-weight: 300;
   line-height: 1.65; color: var(--text-primary);
   word-break: break-all; white-space: pre-wrap;
   resize: vertical;
@@ -7515,7 +7531,7 @@ body.resizing-result-info {
   background: var(--bg-deep);
   color: var(--text-primary);
   outline: none;
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 12px;
   line-height: 1.55;
 }
@@ -7711,7 +7727,7 @@ body.resizing-result-info {
   border: 0;
   background: transparent;
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 12px;
   font-weight: 650;
   outline: none;
@@ -8406,7 +8422,7 @@ body.resizing-result-info {
   border-radius: 6px;
   background: var(--bg-deep);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 9.5px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -8649,7 +8665,7 @@ body.resizing-result-info {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   padding: 14px 16px 48px;
-  font-family: var(--font-mono); font-size: 11.5px; font-weight: 300;
+  font-family: var(--font-editor); font-size: 11.5px; font-weight: 300;
   line-height: 1.65;
   word-break: break-all; white-space: pre-wrap;
   color: var(--text-primary);
@@ -10201,7 +10217,7 @@ body.resizing-result-info {
   min-height: 100px;
   resize: vertical;
   padding: 8px 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 12px;
   line-height: 1.5;
   color: var(--text-primary);
@@ -11244,7 +11260,7 @@ body.detached-metadata .metadata-layout {
   border: 1px solid var(--border-dim);
   border-radius: 6px;
   padding: 8px 10px;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 300;
+  font-family: var(--font-editor); font-size: 11px; font-weight: 300;
   line-height: 1.6; color: var(--text-primary);
   word-break: break-all; white-space: pre-wrap;
   resize: vertical;
@@ -11486,7 +11502,7 @@ body.detached-metadata .metadata-layout {
 .pe-randomized-wc-input {
   width: 100%;
   margin-top: 4px;
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   resize: vertical;
 }
 .mod-dan-feedback-subtitle {
@@ -11627,7 +11643,31 @@ body.detached-metadata .metadata-layout {
   outline: none;
   transition: border-color 0.2s;
 }
+/* .mod-input 은 숫자 17곳 / 텍스트 9곳이 섞인 범용 클래스이고, Automation 의
+   delay·repeat·timer·count 는 숫자인데도 type="text" 라 [type=number] 로는 갈라낼 수
+   없다. 잘못 갈라 숫자 정렬을 깨느니 클래스 전체를 고정폭으로 둔다 - 프롬프트 등
+   진짜 자유 텍스트 표면은 .mod-textarea / .wc-editor / .tag-filter-input 등 전용
+   클래스를 이미 갖고 있다. */
 .mod-input:focus { border-color: var(--accent); }
+/* .mod-input 을 쓰지만 실제로는 사용자가 한글/태그를 직접 치는 자유 텍스트 칸.
+   클래스 전체를 바꿀 수 없으므로(숫자 17곳과 공유) 여기만 명시적으로 승격한다.
+   새 자유 텍스트 입력을 .mod-input 으로 만들면 이 목록에 추가할 것. */
+#searchQuery, #searchExclude, #e621SearchInput,
+#iwcKey, #modPresetNewName, #saveDirBasePath {
+  font-family: var(--font-editor);
+}
+/* 컨테이너 단위 승격 - ID 를 하나씩 쫓으면 계속 샌다.
+   각 패널의 자유 텍스트 칸만 골라내되, 숫자 입력(type=number)은 제외한다.
+   Automation 처럼 숫자를 type="text" 로 쓰는 패널은 여기 넣지 않는다. */
+.cond-root .mod-input:not([type="number"]),
+.cond-preset-dialog-input,
+#depthQuery, #depthExclude,
+.studio-field input[type="text"],
+.ext-list-row [data-list-index] {
+  font-family: var(--font-editor);
+}
+/* Sequence 프리셋 포함/제외 태그 입력 (폰트 선언이 없어 body 를 상속하던 칸) */
+.seq-input { font-family: var(--font-editor-inherit); }
 .mod-grid-2,
 .mod-grid-3 {
   display: grid;
@@ -11837,7 +11877,7 @@ body.detached-metadata .metadata-layout {
 .mod-debug-cat-search {
   flex: 1 1 auto;
   min-width: 0;
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 11px;
   color: var(--text-primary);
   background: transparent;
@@ -12196,7 +12236,7 @@ body.detached-metadata .metadata-layout {
   border-radius: 6px;
   background: var(--bg-deep);
   color: #f7f6ff;
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 11px;
   padding: 7px 9px;
   outline: none;
@@ -13236,7 +13276,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   padding: 6px 10px;
   color: var(--text);
   font-size: 12px;
-  font-family: var(--font-body);
+  font-family: var(--font-editor-inherit);
   box-sizing: border-box;
 }
 .tag-search-input::placeholder { color: var(--text-dim); }
@@ -13843,7 +13883,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   border-radius: 4px;
   background: rgba(0,0,0,0.16);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 10px;
   padding: 0 7px;
   outline: none;
@@ -14382,7 +14422,9 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   position: absolute;
   top: 0; left: 0; right: 0; bottom: 0;
   padding: 8px 10px;
-  font-family: var(--font-mono);
+  /* .cond-rules-input(투명 textarea)의 미러다. 메인 프롬프트와 같은 2중 레이어라
+     폰트 메트릭이 어긋나면 캐럿이 글자와 따로 논다 - 반드시 짝과 같은 변수를 볼 것. */
+  font-family: var(--font-editor);
   font-size: 11px;
   font-weight: 300;
   line-height: 1.5;
@@ -14403,7 +14445,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   caret-color: var(--text-primary);
   color: transparent !important;
   min-height: 140px;
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -14943,11 +14985,12 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   color: var(--text-primary);
   font-size: 12px;
   line-height: 24px;
+  font-family: var(--font-editor);  /* 조건 태그 자유 입력 */
 }
 .cond-raw-editor {
   flex: 1;
   min-height: 0;
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
 }
 .cond-dsl-viewer {
   flex: 0 1 auto;
@@ -14969,7 +15012,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   padding: 8px 10px;
   background: rgba(7, 7, 12, 0.96);
   color: var(--text-primary);
-  font-family: var(--font-display);
+  font-family: var(--font-editor-inherit);
   font-size: 14px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -15870,7 +15913,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .wc-editor {
   width: 100%; min-height: 160px; max-height: 300px; resize: vertical;
   background: var(--bg-deep); border: 1px solid var(--border-dim); border-radius: 4px;
-  color: var(--text-muted); font-family: var(--font-mono); font-size: 11px;
+  color: var(--text-muted); font-family: var(--font-editor); font-size: 11px;
   padding: 8px; line-height: 1.5; box-sizing: border-box;
 }
 .wc-editor.editing { border-color: var(--accent-glow); color: var(--text-primary); }
@@ -15878,7 +15921,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .wc-add-input {
   flex: 1; background: var(--bg-deep); border: 1px solid var(--border-dim);
   border-radius: 4px; color: var(--text-primary); padding: 4px 8px;
-  font-family: var(--font-mono); font-size: 11px;
+  font-family: var(--font-editor); font-size: 11px;
 }
 .wc-add-weight {
   background: var(--bg-deep); border: 1px solid var(--border-dim);
@@ -16038,7 +16081,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   border-radius: 4px;
   background: var(--bg-deep);
   color: var(--text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-editor);
   font-size: 11px;
   padding: 7px 8px;
 }
@@ -16429,7 +16472,7 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   flex: 1; padding: 7px 10px;
   background: var(--bg-deep); border: 1px solid var(--border-dim);
   border-radius: 6px; color: var(--text-main);
-  font-family: var(--font-mono); font-size: 12px;
+  font-family: var(--font-editor); font-size: 12px;
   outline: none;
 }
 .tag-filter-input:focus { border-color: var(--accent-blue); }
@@ -17320,7 +17363,7 @@ body.detached-module .mod-grid-3 {
   resize: vertical; min-height: 54px;
   background: var(--bg-deep); color: var(--text-primary);
   border: 1px solid var(--border-dim); border-radius: 8px;
-  padding: 8px 10px; font-size: 12px; line-height: 1.5; font-family: inherit;
+  padding: 8px 10px; font-size: 12px; line-height: 1.5; font-family: var(--font-editor-inherit);
 }
 .grok-prompt:focus { outline: none; border-color: var(--accent); }
 .grok-prompt-main { min-height: 132px; }
@@ -17365,7 +17408,7 @@ body.detached-module .mod-grid-3 {
   width: 100%; min-height: 44px; resize: vertical; box-sizing: border-box;
   background: var(--bg-deep); color: var(--text-primary);
   border: 1px solid var(--border-dim); border-radius: 8px;
-  padding: 7px 9px; font-size: 12px; line-height: 1.45; font-family: inherit;
+  padding: 7px 9px; font-size: 12px; line-height: 1.45; font-family: var(--font-editor-inherit);
 }
 .nai-director-prompt:focus { outline: none; border-color: var(--accent); }
 .nai-director-pop-actions { display: flex; }
@@ -17467,7 +17510,7 @@ body.detached-module .mod-grid-3 {
   width: 100%; box-sizing: border-box; resize: vertical; min-height: 44px;
   background: var(--bg-deep); color: var(--text-primary);
   border: 1px solid var(--border-dim); border-radius: 8px;
-  padding: 8px 10px; font-size: 12px; font-family: inherit; line-height: 1.45;
+  padding: 8px 10px; font-size: 12px; font-family: var(--font-editor-inherit); line-height: 1.45;
 }
 .ollama-assist-input:focus { outline: none; border-color: var(--border-glow); }
 .ollama-assist-modelnote { font-size: 10.5px; color: var(--text-dim); }
@@ -17903,7 +17946,7 @@ body.detached-module .mod-grid-3 {
   border-radius: 6px;
   background: rgba(0,0,0,0.24);
   color: var(--text-primary);
-  font: 12px var(--font-mono);
+  font: 12px var(--font-editor);
   line-height: 1.45;
   padding: 8px 9px;
 }
@@ -17971,7 +18014,7 @@ body.detached-module .mod-grid-3 {
   width: 100%; box-sizing: border-box;
   background: var(--bg-deep); color: var(--text-primary);
   border: 1px solid var(--border-dim); border-radius: 8px;
-  padding: 6px 9px; font-size: 11.5px; font-family: inherit;
+  padding: 6px 9px; font-size: 11.5px; font-family: var(--font-editor-inherit);
 }
 .xlation-history-search:focus { outline: none; border-color: var(--border-glow); }
 .xlation-history-pinned, .xlation-history-section {
@@ -18332,6 +18375,9 @@ body.detached-module .mod-grid-3 {
 .ext-field label { font-size: 12px; min-width: 110px; }
 .ext-field input[type="number"] { width: 80px; }
 .ext-field-wide { flex: 1; min-width: 140px; }
+/* 확장 설정의 자유 텍스트 필드(값/프롬프트). 원래 폰트 선언이 없어 본문을 상속했으므로
+   미설정 시 무변화를 위해 inherit 계열 변수를 쓴다. */
+.ext-field-wide, .ext-textarea { font-family: var(--font-editor-inherit); }
 .ext-field input, .ext-field select {
   background: var(--bg-surface); border: 1px solid var(--border-dim); color: var(--text-primary);
   border-radius: 7px; padding: 4px 8px; font-size: 12px;
@@ -18377,6 +18423,58 @@ body.detached-module .mod-grid-3 {
 .settings-action-btn { flex: 0 0 auto; align-self: flex-start; }
 .settings-toggle-desc { color: var(--text-muted); font-size: 12px; line-height: 1.6; margin: 0; max-width: 520px; }
 .settings-toggle-note { display: inline; color: var(--accent); }
+
+/* ===== Settings > 폰트 (fontSettingsPanel.mjs) ===== */
+.font-settings { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+.font-settings-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.font-current {
+  flex: 1; min-width: 0; padding: 7px 10px;
+  background: var(--bg-deep); border: 1px solid var(--border-dim); border-radius: 7px;
+  color: var(--text-primary); font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.font-scale-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-muted); }
+.font-scale-row input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.font-scale-row input[type="range"]:disabled { opacity: 0.4; }
+.font-scale-value { min-width: 38px; text-align: right; font-family: var(--font-mono); }
+/* 미리보기는 --font-editor 를 상속받아 선택 결과를 그대로 보여준다. */
+.font-preview {
+  padding: 10px 12px; border-radius: 8px;
+  background: var(--bg-deep); border: 1px solid var(--border-dim);
+  color: var(--text-primary);
+  font-family: var(--font-editor); font-size: 11.5px; font-weight: 300; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-all;
+}
+.font-add-panel {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px; border-radius: 8px;
+  background: var(--bg-surface); border: 1px solid var(--border-dim);
+}
+.font-add-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.font-add-filter {
+  width: 100%; padding: 6px 9px; border-radius: 6px;
+  background: var(--bg-deep); border: 1px solid var(--border-dim);
+  color: var(--text-primary); font-size: 11px; outline: none;
+  font-family: var(--font-editor);
+}
+.font-add-filter:focus { border-color: var(--accent); }
+.font-add-section h4 { margin: 0 0 5px; font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.font-list { list-style: none; margin: 0; padding: 0; max-height: 210px; overflow-y: auto; }
+.font-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 6px; font-size: 12px; color: var(--text-primary);
+}
+.font-row:hover { background: var(--bg-hover); }
+.font-row.empty { color: var(--text-dim); font-size: 11px; font-family: var(--font-display); }
+.font-row-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.font-row-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.font-row-btn {
+  flex: 0 0 auto; padding: 3px 8px; border-radius: 5px; cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--border-dim);
+  color: var(--text-muted); font-family: var(--font-display); font-size: 11px;
+}
+.font-row-btn:hover { color: var(--text-primary); border-color: var(--accent); }
+.font-row-btn.danger:hover { color: #ffb4b4; border-color: #ff6b6b; }
 
 /* 퀵 버튼 위치 select */
 .ext-placement { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }

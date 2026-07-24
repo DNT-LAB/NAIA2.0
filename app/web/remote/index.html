@@ -6,7 +6,29 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260718-fix3">
+<link rel="stylesheet" href="style.css?v=20260722-font1">
+<script>
+// 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
+// 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
+// 저장 포맷/키의 정의는 js/features/fontSettingsPanel.mjs (STORAGE_KEY, buildSelection).
+(function () {
+  try {
+    var raw = localStorage.getItem('naia_font_editor');
+    if (!raw) return;
+    var saved = JSON.parse(raw);
+    if (!saved || !saved.stack) return;
+    if (saved.face) {
+      var style = document.createElement('style');
+      style.id = 'naiaFontEditorFace';
+      style.textContent = saved.face;
+      document.head.appendChild(style);
+    }
+    // 두 변수를 함께 세팅한다 (fontSettingsPanel.mjs 의 setFontVars 와 동일해야 함).
+    document.documentElement.style.setProperty('--font-editor', saved.stack);
+    document.documentElement.style.setProperty('--font-editor-inherit', saved.stack);
+  } catch (error) { /* 폰트 복원 실패는 비치명 - 기본 폰트로 뜬다 */ }
+})();
+</script>
 </head>
 <body>
 <div class="gen-progress" id="genProgress"><div class="gen-progress-bar" id="genProgressBar"></div><div class="gen-progress-bar2" id="genProgressBar2"></div></div>
@@ -1124,6 +1146,13 @@
                 <span class="opt-label">NAI Stream</span>
               </button>
               <p class="settings-toggle-desc">NovelAI 생성 시 generate-image-stream(SSE)을 사용해 생성 중간 단계 이미지를 메인 뷰어에 실시간으로 표시합니다. NAI 모드 + 기본 생성(txt2img)에서만 동작하며 Anlas 소모량은 동일합니다. <span class="settings-toggle-note">※ 스트리밍 특성상 첫 프레임 표시까지 약간의 지연이 있을 수 있습니다.</span></p>
+            </div>
+          </div>
+          <div class="settings-group">
+            <h3 class="settings-group-title">폰트</h3>
+            <div class="settings-toggle-row">
+              <div class="font-settings" id="fontSettings"></div>
+              <p class="settings-toggle-desc">프롬프트 · 네거티브를 비롯한 <b>텍스트 입력창</b>의 폰트를 바꿉니다. 시스템에 설치된 폰트를 고르거나, 폰트 파일(otf · ttf · woff · woff2)을 직접 추가할 수 있습니다. 추가한 폰트는 서버에 보관되어 다른 기기에서도 목록에 나타나지만, <span class="settings-toggle-note">어떤 폰트를 쓸지는 기기마다 따로 저장됩니다.</span> 숫자 · 파라미터 입력과 API 키 칸은 자릿수 정렬을 위해 고정폭 폰트를 유지합니다.</p>
             </div>
           </div>
           <div class="settings-group">

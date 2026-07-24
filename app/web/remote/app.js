@@ -1346,6 +1346,23 @@ const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=2026061
   .catch(error => {
     console.error('Failed to initialize extensions UI module', error);
   });
+// Settings > Global > 폰트. 저장된 선택 자체는 index.html 의 인라인 부트 스크립트가
+// 이미 적용해 둔 상태이고, 여기서는 UI 를 붙이고 서버 폰트 목록을 채운다.
+let fontSettingsPanel = null;
+const fontSettingsPanelReady = import('./js/features/fontSettingsPanel.mjs?v=20260722-font2')
+  .then(({createFontSettingsPanel}) => {
+    fontSettingsPanel = createFontSettingsPanel({
+      document,
+      localStorage,
+      escHtml,
+      showToast,
+      confirmDialog: showConfirmDialog,
+    });
+    fontSettingsPanel.init();
+  })
+  .catch(error => {
+    console.error('Failed to initialize font settings panel module', error);
+  });
 const wildcardManagerPanelReady = import('./js/features/wildcardManagerPanel.mjs?v=20260704-wc-folder2')
   .then(({createWildcardManagerPanel}) => {
     wildcardManagerPanel = createWildcardManagerPanel({
@@ -8533,6 +8550,7 @@ Promise.all([
   eventStreamPanelReady,
   wildcardPanelReady,
   extensionsPanelReady,
+  fontSettingsPanelReady,
   wildcardManagerPanelReady,
   instantWildcardPanelReady,
   e621EventPanelReady,

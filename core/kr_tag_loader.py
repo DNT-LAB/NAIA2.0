@@ -96,7 +96,18 @@ def load_kr_tag_records(
     warnings: list[str] = []
     raw: dict[str, dict[str, Any]] = {}
 
-    interactive_path = repo_root / "ui" / "interactive" / "interactive"
+    # 태그 관계/분류 사전. group/subgroup/freq/relations(children·siblings·parent·word_match)/
+    # description/keywords_kr 를 담고 있고, 아래 parquet merge 가 이 위에 얹힌다.
+    #
+    # 원래 PyQt 시절 `ui/interactive/interactive`(확장자 없음)에 있었는데 ui/ 제거와 함께
+    # 사라져서, future02 에서는 relations 가 **0건**이 되어 TagRelationRanker 가 죽어 있었다.
+    # 이제 data/ 로 옮겼고 runtime data_dir -> repo data 순으로 찾는다(다른 데이터 접근과 동일).
+    # 구 레이아웃 경로는 마지막 폴백으로만 남긴다.
+    interactive_path = _first_existing(resolved_data_roots, "interactive_tags.json")
+    if not interactive_path.exists():
+        legacy_path = repo_root / "ui" / "interactive" / "interactive"
+        if legacy_path.exists():
+            interactive_path = legacy_path
     if interactive_path.exists():
         with interactive_path.open("r", encoding="utf-8") as f:
             data = json.load(f)

@@ -70,11 +70,13 @@ def _sanitize_snapshot_for_remote(snapshot: Any) -> Any:
             "data_initialized": runtime.get("data_initialized"),
         }
     sanitized.pop("samples", None)
-    archive = sanitized.get("tag_archive")
-    if isinstance(archive, dict):
-        archive = dict(archive)
-        archive.pop("target", None)
-        sanitized["tag_archive"] = archive
+    # 아카이브가 늘어날 때 여기를 빠뜨리면 절대 경로가 원격으로 샌다.
+    for key in ("tag_archive", "corpus_archive"):
+        archive = sanitized.get(key)
+        if isinstance(archive, dict):
+            archive = dict(archive)
+            archive.pop("target", None)
+            sanitized[key] = archive
     return sanitized
 
 
@@ -92,9 +94,18 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
             context.kr_tags_raw = {}
             context.autocomplete_state.kr_tags_loaded = False
 
+        def refresh_corpus_state() -> None:
+            # 새로 설치된 코퍼스를 즉시 쓰려면 경로/메타데이터/파티션 캐시를 모두 버려야 한다.
+            # (EventCorpusIndex.invalidate 는 epoch 도 올려서 진행 중이던 질의 결과가
+            #  새 캐시에 되살아나는 것을 막는다.)
+            from app.backend.server.event_corpus_commands import invalidate_event_corpus_service
+
+            invalidate_event_corpus_service(context)
+
         service = RuntimeInstallManager(
             runtime_paths,
             on_tag_archive_complete=refresh_tag_state,
+            on_corpus_archive_complete=refresh_corpus_state,
         )
         context.runtime_install_manager = service
     return service
@@ -135,6 +146,28 @@ def register_install_manager_routes(
             return await run_in_thread(manager.snapshot)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Tag archive download failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/corpus-archive/download")
+    async def api_install_manager_corpus_archive_download(req: Request):
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            await run_in_thread(manager.start_corpus_archive_download)
+            return await run_in_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Corpus archive download failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/corpus-archive/download/cancel")
+    async def api_install_manager_corpus_archive_download_cancel(req: Request):
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            await run_in_thread(manager.cancel_archive_download)
+            return await run_in_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Corpus archive download cancel failed: {exc}"}, status_code=500)
 
     @app.post("/api/install-manager/tag-archive/download/cancel")
     async def api_install_manager_tag_archive_download_cancel(req: Request):

@@ -880,6 +880,83 @@ const frozenWildcardBarReady = import('./js/features/frozenWildcardBar.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize frozen wildcard bar module', error);
   });
+let interactivePanel = null;
+// WS 응답 라우팅. 모듈 로드 전에 도착한 메시지는 조용히 버려진다(요청한 적이 없으므로 안전).
+let eventCorpusHandlers = null;
+let resetEventCorpus = () => {};
+let interactiveAutocomplete = null;
+let interactiveBrowse = null;
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260724-ia3')
+  .then(async ({createInteractivePanel}) => {
+    const {
+      requestEventCorpusQuery, requestEventCorpusStatus,
+      onEventCorpusStatusResult, onEventCorpusQueryResult, resetEventCorpusClient,
+    } = await import('./js/features/eventCorpusClient.mjs?v=20260723-ia1');
+    const {createInteractiveAutocomplete} =
+      await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
+    const {createInteractiveBrowse} =
+      await import('./js/features/interactiveBrowse.mjs?v=20260724-iab4');
+    eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
+    resetEventCorpus = resetEventCorpusClient;
+    const wsSend = payload => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) throw Object.assign(new Error('offline'), {code: 'disconnected'});
+      ws.send(JSON.stringify(payload));
+    };
+    interactiveAutocomplete = createInteractiveAutocomplete({document, window, escHtml, send: wsSend});
+    interactiveBrowse = createInteractiveBrowse({document, escHtml, send: wsSend});
+    interactivePanel = createInteractivePanel({
+      document,
+      blocksMount: $('iaBlocks'),
+      panelMount: $('iaPanel'),
+      toggleButton: $('iaModeToggle'),
+      escHtml,
+      showToast,
+      autocomplete: interactiveAutocomplete,
+      browse: interactiveBrowse,
+      queryCorpus: params => requestEventCorpusQuery(wsSend, params),
+      corpusStatus: () => requestEventCorpusStatus(wsSend),
+      onPromptChange: promptText => {
+        // 블록 -> 프롬프트 문자열. Interactive 가 켜져 있는 동안 프롬프트의 소유자는 블록이다.
+        //
+        // 'input' 이벤트를 dispatch 하면 안 된다 — 프롬프트 자동완성이 그 경로에 붙어 있어서
+        // 블록에서 태그를 넣을 때마다 엉뚱한 자동완성 팝업이 뜬다(라이브 테스트에서 확인).
+        // 하이라이트/토큰/백엔드 전송만 필요하므로 onPromptEdit() 을 직접 부른다.
+        if (promptEdit && promptEdit.value !== promptText) {
+          promptEdit.value = promptText;
+          onPromptEdit();
+        }
+      },
+      onActiveChange: applyInteractiveModeGate,
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize interactive panel module', error);
+  });
+
+// Interactive 모드에서는 Prompt Fixed / WC Solo 를 쓸 수 없다. 블록에서 프롬프트를
+// 결정론적으로 조립하는데, prompt_fixed(랜덤 생성 잠금)와 wildcard_standalone(빈 source_row)
+// 은 서로 다른 소스를 다투게 만든다.
+//
+// 여기서 하는 것은 **표시 전용**이다. 저장된 사용자 옵션 값은 건드리지 않는다 — set_option 은
+// 전 클라이언트에 broadcast 되고 remote_options 로 영속되므로, 한 탭이 Interactive 를 켰다고
+// 다른 탭의 설정과 저장값을 꺼버리면 안 된다. 실제 강제는 백엔드가 생성 요청 단위로 한다
+// (app/backend/server/event_corpus_commands.py: apply_interactive_generation_gate).
+const INTERACTIVE_BLOCKED_OPTIONS = ['prompt_fixed', 'wildcard_standalone'];
+function applyInteractiveModeGate(isActive) {
+  // Interactive 에서는 최종 프롬프트를 상시 노출하지 않는다(사용자 결정). 전체 문자열은
+  // 나중에 별도 미리보기 팝업으로만 확인한다. 값 자체는 유지되므로 토글을 끄면 그대로 보인다.
+  document.body.classList.toggle('interactive-mode', !!isActive);
+  for (const key of INTERACTIVE_BLOCKED_OPTIONS) {
+    const control = optBoxes[key];
+    if (!control) continue;
+    control.disabled = !!isActive;
+    control.classList.toggle('is-disabled', !!isActive);
+    control.title = isActive
+      ? 'Interactive 모드에서는 사용할 수 없습니다 (블록이 프롬프트를 직접 조립합니다).'
+      : '';
+  }
+}
+
 const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260603-caret-align1')
   .then(({createPromptHighlighter}) => {
     promptHighlighter = createPromptHighlighter({
@@ -2697,6 +2774,11 @@ const wsMessageHandlers = {
   tag_filter_stale: onTagFilterStale,
   tag_filter_update: onTagFilterUpdate,
   tag_filter_ac_result: onTagFilterAcResult,
+  event_corpus_status_result: m => eventCorpusHandlers?.onStatus(m),
+  event_corpus_query_result: m => eventCorpusHandlers?.onQuery(m),
+  interactive_autocomplete_result: m => interactiveAutocomplete?.onResult(m),
+  interactive_related_result: m => interactiveAutocomplete?.onResult(m),
+  interactive_browse_result: m => interactiveBrowse?.onResult(m),
   storage_list: onStorageList,
   wildcard_manager: onWildcardManager,
   filter_reset: onFilterReset,
@@ -2760,6 +2842,9 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
           clearTimeout(initialHistoryRefreshTimer);
           initialHistoryRefreshTimer = null;
         }
+        // 대기 중인 코퍼스 질의 정리. 안 하면 재연결 후에도 영원히 pending 인 Promise 가
+        // 남아 Interactive 패널의 "불러오는 중…" 이 풀리지 않는다.
+        try { resetEventCorpus('disconnected'); } catch (error) { /* non-fatal */ }
         // 재연결 사이클을 위해 boot finalize 상태 리셋 (다음 init_complete 가 다시 시퀀스 시작)
         resetBootIndicatorState();
         setBootIndicator('Reconnecting…', 20, false);
@@ -8409,6 +8494,7 @@ Promise.all([
   queuePanelReady,
   resultContextMenuReady,
   frozenWildcardBarReady,
+  interactivePanelReady,
   promptHighlighterReady,
   tokenDisplayReady,
   moduleLauncherReady,

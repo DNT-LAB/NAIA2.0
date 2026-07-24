@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAIA Remote — Interactive Mode 목업</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+<!-- 실제 UI CSS를 그대로 링크한다. 목업 전용 스타일은 아래 .ia-* 만 추가. -->
+<link rel="stylesheet" href="../../app/web/remote/style.css">
+<style>
+/* =========================================================================
+   Interactive Mode 목업 전용 스타일 (.ia-*)
+   실제 구현 시 style.css 로 이관 대상. 기존 클래스는 건드리지 않는다.
+   ========================================================================= */
+
+/* --- 목업 표식 --- */
+.ia-mock-badge {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 1px; color: var(--generating-pulse);
+  border: 1px solid rgba(232,168,76,0.45); border-radius: 4px;
+  padding: 2px 6px; margin-left: 8px; white-space: nowrap;
+}
+
+/* --- 좌측: 상단 슬림 바 (프롬프트 창을 대체) ---
+   Interactive 모드에서는 최종 프롬프트를 상시 노출하지 않는다. 토큰 수만 남기고,
+   전체 문자열은 [미리보기] 팝업으로만 확인한다. */
+.ia-topbar {
+  display: flex; align-items: center; gap: 9px;
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-card);
+}
+.ia-topbar-tokens {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  color: var(--text-muted);
+}
+.ia-topbar-sub { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); }
+.ia-topbar-spacer { flex: 1; }
+.ia-topbar-btn {
+  border: 1px solid var(--border-glow); border-radius: 6px; background: rgba(255,255,255,0.04);
+  color: var(--text-muted); font-family: var(--font-display); font-size: 10px; font-weight: 600;
+  padding: 4px 9px; cursor: pointer; white-space: nowrap;
+}
+.ia-topbar-btn:hover { color: var(--accent-glow); border-color: var(--accent); }
+
+/* --- 좌측: 블록 리스트 ---
+   2단 그리드: [아이콘+이름] | [칩] | [배지]. 헤더 행을 따로 쓰지 않아
+   칩이 한 줄인 블록은 53px -> 46px 로 줄어든다. 46px 바닥을 만드는 건
+   좌측 라벨의 2행(이름 + axis)이라, axis 를 빼면 34px 까지 내려간다. */
+.ia-blocks {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-top: 6px; overflow-y: auto; flex: 1 1 auto; min-height: 0;
+  padding-right: 2px;
+}
+.ia-block {
+  background: var(--bg-card);
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  padding: 7px 9px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: center;
+  /* .ia-blocks 가 column flex 라 기본 flex-shrink:1 이면 목록이 넘칠 때
+     블록 내용이 잘린다(펼친 캐릭터의 마지막 행이 사라짐). */
+  flex: 0 0 auto;
+}
+.ia-block-label {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  border-right: 1px solid var(--border-dim);
+  padding-right: 9px; margin-right: -1px;
+  align-self: stretch; justify-content: center;
+}
+.ia-block-title { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.ia-block-meta { display: flex; align-items: center; gap: 5px; }
+.ia-block:hover { border-color: var(--border-glow); background: var(--bg-elevated); }
+.ia-block.is-open {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(124,106,239,0.10), rgba(124,106,239,0.03));
+}
+.ia-block.is-empty .ia-block-chips { opacity: 0.5; }
+
+.ia-block-icon {
+  width: 18px; height: 18px; flex: 0 0 18px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 5px; font-size: 11px; line-height: 1;
+  background: rgba(255,255,255,0.05); color: var(--text-muted);
+}
+.ia-block.is-open .ia-block-icon { background: rgba(124,106,239,0.22); color: var(--accent-glow); }
+.ia-block-name {
+  font-family: var(--font-display); font-size: 11.5px; font-weight: 600;
+  color: var(--text-primary); letter-spacing: 0.2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-block-axis {
+  font-family: var(--font-mono); font-size: 8px; color: var(--text-dim);
+  letter-spacing: 0.2px; padding-left: 23px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-block-count {
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
+  min-width: 14px; text-align: right;
+}
+.ia-block-wc {
+  font-size: 10px; color: var(--generating-pulse);
+  border: 1px solid rgba(232,168,76,0.4); border-radius: 4px;
+  padding: 1px 4px; line-height: 1.4;
+}
+.ia-block-off { opacity: 0.4; }
+
+/* --- 프롬프트 엔지니어링 링크 행 ---
+   슬롯이 아니라 "다른 모듈로 가는 링크"라 점선 + 파란 톤으로 구분한다.
+   그리드 폭은 .ia-block 과 동일해서 라벨 구분선이 세로로 맞물린다. */
+.ia-pe {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) auto;
+  column-gap: 10px; align-items: center;
+  padding: 4px 9px;              /* 내용은 툴팁으로 보므로 1줄이면 충분 */
+  border: 1px dashed var(--border-glow); border-radius: 8px;
+  background: none; cursor: pointer; text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+  flex: 0 0 auto;
+}
+.ia-pe:hover { border-color: var(--accent-blue); background: rgba(40,120,216,0.08); }
+.ia-pe.is-open {
+  border-style: solid; border-color: var(--accent-blue);
+  background: rgba(40,120,216,0.13);
+}
+.ia-pe-label {
+  display: flex; flex-direction: row; align-items: center; gap: 5px; min-width: 0;
+  border-right: 1px solid var(--border-dim);
+  padding-right: 9px; align-self: stretch;
+}
+.ia-pe-icon {
+  width: 18px; height: 18px; flex: 0 0 18px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 5px; font-size: 11px; line-height: 1;
+  background: rgba(40,120,216,0.18); color: #8fc0ff;
+}
+.ia-pe-name {
+  font-family: var(--font-display); font-size: 11px; font-weight: 600;
+  color: #9fc4f0; white-space: nowrap;
+}
+.ia-pe-preview {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-pe-preview.is-empty { font-style: italic; opacity: 0.65; }
+.ia-pe-open { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.ia-pe:hover .ia-pe-open { color: #9fc4f0; }
+
+/* 호버 툴팁 — 앱의 guide tooltip 색 변수를 그대로 쓴다 */
+.ia-tip {
+  position: fixed; z-index: var(--z-title-tooltip);
+  max-width: 340px; display: none;
+  background: var(--guide-tip-bg);
+  border: 1px solid var(--guide-tip-border);
+  color: var(--guide-tip-text);
+  border-radius: 8px; padding: 9px 11px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.55);
+  pointer-events: none;
+}
+.ia-tip.open { display: block; }
+.ia-tip-head {
+  font-family: var(--font-display); font-size: 9.5px; font-weight: 700;
+  letter-spacing: 0.8px; color: var(--accent-light); margin-bottom: 5px;
+}
+.ia-tip-body {
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-all;
+}
+
+/* --- 칩 --- */
+.ia-block-chips { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.ia-chip {
+  font-family: var(--font-mono); font-size: 10px; line-height: 1;
+  padding: 3px 6px; border-radius: 4px;
+  background: rgba(255,255,255,0.055);
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.ia-chip.is-wc {
+  background: rgba(232,168,76,0.12);
+  border-color: rgba(232,168,76,0.34);
+  color: #f0c98a;
+}
+.ia-chip.is-raw {
+  background: rgba(255,255,255,0.03);
+  border-color: var(--border-dim);
+  color: var(--text-dim);
+  font-style: italic;
+}
+.ia-chip.is-more { background: none; color: var(--text-dim); padding-left: 2px; }
+/* 구도 3축 — 자유 태그가 아니라 정해진 값에서 고른 것 */
+.ia-chip.is-axis {
+  background: rgba(40,120,216,0.14); border-color: rgba(40,120,216,0.35);
+  color: #9fc4f0; font-family: var(--font-display); font-weight: 600;
+}
+.ia-chip-empty { font-family: var(--font-display); font-size: 10px; color: var(--text-dim); font-style: italic; }
+
+/* =========================================================================
+   캐릭터 블록 — 유일하게 헤더를 되찾는 블록.
+   캐릭터마다 서브 슬롯 4종(+NAI 네거티브)을 가지므로 1행 그리드로는 안 담긴다.
+   접힘이 기본이고, 아코디언(한 번에 하나만 펼침)으로 세로 폭발을 막는다.
+   ========================================================================= */
+.ia-block.is-character { display: block; padding: 0; overflow: hidden; }
+.ia-cblock-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--border-dim);
+}
+.ia-cblock-head .ia-block-name { flex: 0 0 auto; }
+.ia-cblock-mode {
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.4px;
+  color: var(--success); border: 1px solid rgba(92,184,122,0.35);
+  border-radius: 3px; padding: 1px 4px;
+}
+
+.ia-char { border-bottom: 1px solid var(--border-dim); }
+.ia-char:last-of-type { border-bottom: 0; }
+.ia-char-head {
+  display: grid;
+  grid-template-columns: 10px 24px minmax(0, 1fr) auto auto;
+  align-items: center; column-gap: 7px;
+  padding: 5px 9px; cursor: pointer;
+}
+.ia-char-head:hover { background: var(--bg-hover); }
+.ia-char-caret {
+  color: var(--text-dim); font-size: 8px; line-height: 1;
+  transition: transform 0.15s;
+}
+.ia-char.is-open .ia-char-caret { transform: rotate(90deg); }
+.ia-char-id {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700;
+  color: var(--accent-glow);
+}
+.ia-char.is-cold .ia-char-id { color: var(--text-dim); }
+/* 접힌 캐릭터의 미리보기 — 특징~표정 전부를 담으므로 줄바꿈을 허용한다.
+   자르면 "접었을 때도 다 보인다"는 목적이 깨진다. */
+.ia-char-sum {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
+  line-height: 1.55; word-break: break-word;
+}
+.ia-char-sum .ia-char-nick { color: var(--text-primary); font-weight: 600; }
+.ia-char-sum .ia-char-wc { color: #f0c98a; }   /* 매번 굴러가는 값임을 색으로 구분 */
+.ia-char.is-cold .ia-char-sum { opacity: 0.5; }
+.ia-char-state {
+  font-family: var(--font-mono); font-size: 7.5px; letter-spacing: 0.5px;
+  border-radius: 3px; padding: 1px 4px; text-transform: uppercase;
+}
+.ia-char-state.active { color: var(--success); border: 1px solid rgba(92,184,122,0.4); }
+.ia-char-state.cold { color: var(--text-dim); border: 1px solid var(--border-dim); }
+
+/* 펼침 영역 — 최상위 블록과 같은 형태의 서브 블록이 들어간다.
+   한 번에 한 캐릭터만 펼치므로 여기가 무거워도 총량은 제어된다. */
+.ia-char-body { display: none; padding: 2px 9px 8px 20px; flex-direction: column; gap: 4px; }
+.ia-char.is-open .ia-char-body { display: flex; }
+.ia-sub-block {
+  display: grid;
+  /* 104px: 가장 긴 축 이름(characteristic)이 잘리지 않는 최소치 */
+  grid-template-columns: 104px minmax(0, 1fr) auto;
+  column-gap: 10px; align-items: center;
+  padding: 6px 8px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-dim);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ia-sub-block:hover { border-color: var(--border-glow); background: var(--bg-card); }
+.ia-sub-block.is-empty .ia-block-chips { opacity: 0.5; }
+.ia-sub-block .ia-block-icon { width: 16px; height: 16px; flex: 0 0 16px; font-size: 10px; }
+.ia-sub-block .ia-block-name { font-size: 11px; }
+.ia-sub-block .ia-block-axis { padding-left: 21px; font-size: 7.5px; }
+/* 네거티브만 성격이 다르다 — 나머지 4개는 prompt 로, 이건 uc 로 빠진다. */
+.ia-sub-block.is-neg { border-color: rgba(199,125,186,0.3); background: rgba(199,125,186,0.05); }
+.ia-sub-block.is-neg .ia-block-icon { background: rgba(199,125,186,0.2); color: var(--accent-secondary); }
+.ia-sub-block.is-neg .ia-block-name { color: #e5b5da; }
+/* 좌표 — 값이 하나뿐이라 칩 + 매핑 결과만 */
+.ia-chip.is-pos {
+  font-weight: 700; color: var(--accent-glow);
+  background: rgba(124,106,239,0.16); border-color: rgba(124,106,239,0.35);
+}
+.ia-pos-hint { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
+.ia-char-pos {
+  font-family: var(--font-mono); font-size: 8px; font-weight: 700;
+  color: var(--accent-glow); background: rgba(124,106,239,0.14);
+  border-radius: 3px; padding: 1px 4px;
+}
+.ia-char.is-cold .ia-char-pos { color: var(--text-dim); background: rgba(255,255,255,0.05); }
+
+/* 우측 패널의 5x5 좌표 피커 */
+.ia-pos-wrap { display: flex; gap: 16px; align-items: flex-start; }
+.ia-pos-grid {
+  display: grid;
+  grid-template-columns: 14px repeat(5, 42px);
+  grid-template-rows: 14px repeat(5, 42px);
+  gap: 3px;
+}
+.ia-pos-hdr {
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+}
+.ia-pos-cell {
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: var(--bg-deep); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 9px; color: transparent;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.ia-pos-cell:hover { border-color: var(--accent); color: var(--text-dim); }
+.ia-pos-cell.is-on {
+  background: rgba(124,106,239,0.22); border-color: var(--accent);
+  color: var(--accent-glow); font-weight: 700;
+}
+.ia-pos-info { display: flex; flex-direction: column; gap: 8px; padding-top: 16px; }
+.ia-pos-cur {
+  font-family: var(--font-mono); font-size: 26px; font-weight: 700;
+  color: var(--accent-glow); line-height: 1;
+}
+.ia-pos-map { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+
+.ia-char-foot { padding: 3px 9px 8px 20px; display: flex; gap: 5px; }
+.ia-charcard-add {
+  border: 1px dashed var(--border-glow); border-radius: 6px;
+  padding: 3px 9px; background: none; cursor: pointer;
+  color: var(--text-dim); font-family: var(--font-display); font-size: 10px;
+}
+.ia-charcard-add:hover { color: var(--accent-glow); border-color: var(--accent); }
+
+/* --- Interactive 토글 (Tools & Assistants 행) --- */
+.ia-mode-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 10px;
+  border: 1px solid var(--border-glow); border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  font-family: var(--font-display); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.3px; cursor: pointer; white-space: nowrap;
+  transition: all 0.15s;
+}
+.ia-mode-toggle:hover { border-color: var(--accent); color: var(--text-primary); }
+.ia-mode-toggle.is-on {
+  background: rgba(124,106,239,0.18);
+  border-color: var(--accent);
+  color: var(--accent-glow);
+  box-shadow: 0 0 0 1px rgba(124,106,239,0.18);
+}
+.ia-mode-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-dim); flex: 0 0 6px;
+}
+.ia-mode-toggle.is-on .ia-mode-dot { background: var(--accent-glow); box-shadow: 0 0 6px var(--accent-glow); }
+
+/* --- 우측 작업 패널 --- */
+.ia-panel {
+  position: fixed;
+  top: 46px; bottom: 14px; left: 494px;
+  width: min(560px, calc(100vw - 520px));
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glow);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  display: none; flex-direction: column; overflow: hidden;
+  z-index: var(--z-floating-module);
+}
+.ia-panel.open { display: flex; }
+
+.ia-panel-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 14px 10px;
+  border-bottom: 1px solid var(--border-dim);
+  flex-shrink: 0;
+}
+.ia-panel-title {
+  font-family: var(--font-display); font-size: 14px; font-weight: 700;
+  color: var(--text-primary);
+}
+.ia-panel-sub {
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
+  border: 1px solid var(--border-dim); border-radius: 4px; padding: 2px 6px;
+}
+.ia-panel-close {
+  margin-left: auto; width: 26px; height: 26px; border-radius: 7px;
+  border: 1px solid var(--border-dim); background: none;
+  color: var(--text-dim); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.ia-panel-close:hover { color: var(--text-primary); border-color: var(--border-glow); }
+
+.ia-panel-body { flex: 1; overflow-y: auto; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 14px; }
+
+.ia-sec-label {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim);
+  display: flex; align-items: center; gap: 8px; margin-bottom: 7px;
+}
+.ia-sec-label::after { content: ''; flex: 1; height: 1px; background: var(--border-dim); }
+
+/* 검색 입력 */
+.ia-search {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-deep); padding: 0 10px; height: 34px;
+}
+.ia-search:focus-within { border-color: var(--accent); }
+.ia-search input {
+  flex: 1; background: none; border: 0; outline: none;
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 12px;
+}
+.ia-search input::placeholder { color: var(--text-dim); font-style: italic; }
+.ia-search-scope {
+  font-family: var(--font-mono); font-size: 9px; color: var(--accent-glow);
+  background: rgba(124,106,239,0.14); border-radius: 4px; padding: 2px 6px;
+}
+
+/* 선택된 태그 */
+.ia-selected { display: flex; flex-wrap: wrap; gap: 5px; min-height: 30px; }
+.ia-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 5px 6px 5px 9px; border-radius: 6px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-dim);
+  color: var(--text-primary);
+}
+.ia-tag-kr { color: var(--text-dim); font-size: 9.5px; }
+.ia-tag-x {
+  border: 0; background: none; cursor: pointer; padding: 0 2px;
+  color: var(--text-dim); font-size: 13px; line-height: 1;
+}
+.ia-tag-x:hover { color: var(--accent-secondary); }
+.ia-tag.is-wc { background: rgba(232,168,76,0.12); border-color: rgba(232,168,76,0.34); color: #f0c98a; }
+
+/* 카테고리 브라우저 */
+.ia-cats { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 9px; }
+.ia-cat {
+  font-family: var(--font-display); font-size: 10.5px; font-weight: 500;
+  padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border-dim); background: none; color: var(--text-dim);
+  transition: all 0.14s;
+}
+.ia-cat:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.ia-cat.is-on {
+  background: rgba(124,106,239,0.18); border-color: var(--accent); color: var(--accent-glow);
+}
+.ia-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+.ia-grid-tag {
+  font-family: var(--font-mono); font-size: 10.5px;
+  padding: 5px 8px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--border-dim); background: var(--bg-card); color: var(--text-muted);
+  display: inline-flex; align-items: baseline; gap: 6px;
+}
+.ia-grid-tag:hover { border-color: var(--accent); color: var(--text-primary); background: var(--bg-elevated); }
+.ia-grid-tag.is-picked { border-color: var(--accent); background: rgba(124,106,239,0.14); color: var(--accent-glow); }
+.ia-grid-kr { font-size: 9px; color: var(--text-dim); }
+
+/* 와일드카드 바인딩 */
+.ia-wc-list { display: flex; flex-direction: column; gap: 6px; }
+.ia-wc-item {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid rgba(232,168,76,0.3); border-radius: 7px;
+  background: rgba(232,168,76,0.07); padding: 7px 9px;
+}
+.ia-wc-token { font-family: var(--font-mono); font-size: 11px; color: #f0c98a; }
+.ia-wc-meta { font-family: var(--font-display); font-size: 9.5px; color: var(--text-dim); }
+.ia-wc-actions { margin-left: auto; display: flex; gap: 5px; }
+.ia-wc-btn {
+  border: 1px solid var(--border-dim); border-radius: 5px; background: none;
+  color: var(--text-dim); font-family: var(--font-display); font-size: 9.5px;
+  padding: 3px 7px; cursor: pointer;
+}
+.ia-wc-btn:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.ia-wc-add {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.ia-wc-add button {
+  flex: 1 1 auto;
+  border: 1px dashed var(--border-glow); border-radius: 7px; background: none;
+  color: var(--text-dim); font-family: var(--font-display); font-size: 10.5px;
+  padding: 8px 10px; cursor: pointer; transition: all 0.14s;
+}
+.ia-wc-add button:hover { color: var(--accent-glow); border-color: var(--accent); background: rgba(124,106,239,0.06); }
+
+/* 구도 3축 패널 */
+.ia-comp-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.ia-comp-lbl {
+  font-family: var(--font-display); font-size: 10.5px; font-weight: 600;
+  color: var(--text-dim); width: 104px; flex: 0 0 104px; padding-top: 1px;
+}
+.ia-comp-select { flex: 1; min-width: 0; }
+.ia-comp-out {
+  margin-top: 9px; padding: 8px 10px;
+  border: 1px solid var(--border-dim); border-left: 2px solid var(--accent-blue);
+  border-radius: 6px; background: rgba(40,120,216,0.06);
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6;
+  color: var(--text-muted); word-break: break-word;
+}
+
+/* 프롬프트 엔지니어링 패널 */
+.ia-pe-note {
+  font-family: var(--font-display); font-size: 10.5px; line-height: 1.6;
+  color: var(--text-dim);
+  border: 1px solid var(--border-dim); border-left: 2px solid var(--accent-blue);
+  border-radius: 6px; padding: 8px 10px; background: rgba(40,120,216,0.06);
+}
+.ia-pe-note b { color: #9fc4f0; }
+.ia-pe-edit {
+  width: 100%; min-height: 86px; resize: vertical;
+  background: var(--bg-deep); color: var(--text-primary);
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  padding: 9px 10px; outline: none;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+}
+.ia-pe-edit.is-on { border-color: var(--accent-blue); box-shadow: 0 0 0 1px rgba(40,120,216,0.25); }
+
+/* 캐릭터 패널 전용 */
+.ia-charslots { display: flex; flex-direction: column; gap: 8px; }
+.ia-charslot {
+  border: 1px solid var(--border-dim); border-radius: 9px;
+  background: var(--bg-card); padding: 9px 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ia-charslot.is-cold { opacity: 0.55; }
+.ia-charslot-head { display: flex; align-items: center; gap: 7px; }
+.ia-charslot-id {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: var(--accent-glow);
+  background: rgba(124,106,239,0.16); border-radius: 5px; padding: 2px 7px;
+}
+.ia-charslot-name {
+  background: none; border: 0; outline: none; color: var(--text-primary);
+  font-family: var(--font-display); font-size: 11.5px; font-weight: 600; flex: 1;
+}
+.ia-charslot-state {
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.6px;
+  border-radius: 4px; padding: 2px 6px; text-transform: uppercase;
+}
+.ia-charslot-state.active { color: var(--success); border: 1px solid rgba(92,184,122,0.4); }
+.ia-charslot-state.cold { color: var(--text-dim); border: 1px solid var(--border-dim); }
+.ia-charfields { display: flex; flex-direction: column; gap: 6px; }
+.ia-charfield { display: flex; align-items: flex-start; gap: 8px; }
+.ia-charfield-lbl {
+  font-family: var(--font-display); font-size: 10px; color: var(--text-dim);
+  width: 52px; flex: 0 0 52px; padding-top: 5px;
+}
+.ia-charfield-chips { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; }
+.ia-charfield.is-neg { border-top: 1px dashed var(--border-dim); padding-top: 7px; margin-top: 2px; }
+.ia-charfield.is-neg .ia-charfield-lbl { color: var(--accent-secondary); }
+
+/* 우측 뷰어 자리 표시 */
+.ia-stage {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--border-glow); font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 2px;
+}
+</style>
+</head>
+<body>
+
+<header class="shell-toolbar">
+  <div class="shell-brand">
+    <div class="shell-brand-copy">
+      <span class="shell-brand-title">NAIA2</span>
+      <span class="shell-brand-subtitle">Automation Tool</span>
+    </div>
+  </div>
+  <span class="ia-mock-badge">MOCKUP</span>
+  <div class="prompt-quick-control toolbar-prompt-control">
+    <button class="module-prompt-btn prompt-count-btn">Prompt: <span>1,204</span></button>
+    <button class="quick-filter-btn tag-filter-toggle">Quick</button>
+  </div>
+  <div class="mode-api-combo">
+    <select class="mode-select"><option>NAI</option><option>WEBUI</option><option>COMFYUI</option></select>
+    <button class="setup-launcher">API</button>
+  </div>
+</header>
+
+<main class="app-layout">
+
+<div class="control-panel">
+  <div class="prompt-drawer open">
+    <div class="prompt-inner">
+
+      <div class="tab-bar">
+        <button class="tab-btn active"><span class="tab-icon">&#9998;</span><span>Prompt</span></button>
+        <button class="tab-btn"><span class="tab-icon">&#9776;</span><span>Params</span></button>
+        <button class="tab-btn"><span class="tab-icon">&#8856;</span><span>Negative</span></button>
+        <button class="tab-btn fn-menu-trigger"><span class="tab-icon">&#9638;</span><span>Fn</span></button>
+      </div>
+
+      <div class="tab-content">
+        <div class="tab-page active">
+
+          <!-- 프롬프트 창은 Interactive 모드에서 숨긴다. 토큰 수만 남기고
+               최종 문자열은 [미리보기] 팝업에서만 확인 (별도 구현 예정). -->
+          <div class="ia-topbar">
+            <span class="ia-topbar-tokens">72 tokens</span>
+            <span class="ia-topbar-sub">Main 61 + Char 11</span>
+            <span class="ia-topbar-spacer"></span>
+            <button class="ia-topbar-btn">&#128065; 미리보기</button>
+          </div>
+
+          <!-- ============ Interactive 블록 리스트 ============ -->
+          <div class="ia-blocks" id="iaBlocks"></div>
+        </div>
+      </div>
+
+      <div class="assistants-section">
+        <div class="assistants-label">
+          <span class="assistants-title">Tools &amp; Assistants <span class="assistants-info">i</span></span>
+          <!-- ★ Interactive 토글 위치 -->
+          <button class="ia-mode-toggle is-on" id="iaToggle">
+            <span class="ia-mode-dot"></span><span>Interactive</span>
+          </button>
+          <div class="assistants-ollama-segment">
+            <button class="assistants-ollama-btn">Ollama Assist</button>
+            <button class="assistants-ollama-btn">Chat</button>
+          </div>
+        </div>
+        <div class="module-bar module-launcher"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="bottom-controls">
+    <div class="options-row">
+      <button class="opt-toggle"><span class="opt-box"></span><span class="opt-label">Prompt Fixed</span></button>
+      <button class="opt-toggle"><span class="opt-box"></span><span class="opt-label">Auto Gen</span></button>
+      <button class="opt-toggle"><span class="opt-box"></span><span class="opt-label">WC Solo</span></button>
+    </div>
+    <div class="quick-params">
+      <select class="param-select quick-select"><option>896 x 1152</option></select>
+      <span class="quick-flag-btn">Rnd Res</span>
+      <span class="quick-flag-btn">Auto Res</span>
+    </div>
+    <div class="ctrl-buttons">
+      <button class="ctrl-btn btn-rnd"><span class="shortcut-hint">ALT + ENTER</span>Random</button>
+      <button class="ctrl-btn btn-gen"><span class="shortcut-hint">CTRL + ENTER</span>Generate</button>
+    </div>
+  </div>
+</div>
+
+<div class="viewer-wrapper">
+  <div class="right-tab-bar">
+    <button class="right-tab-btn active">Result</button>
+    <button class="right-tab-btn">PNG Info</button>
+    <button class="right-tab-btn">Thumb</button>
+    <button class="right-tab-btn">Artists</button>
+    <button class="right-tab-btn">Characters</button>
+    <button class="right-tab-btn">Assets</button>
+    <button class="right-tab-btn">Studio</button>
+  </div>
+  <div class="ia-stage">RESULT VIEWER</div>
+
+  <div class="ia-tip" id="iaTip"><div class="ia-tip-head" id="iaTipHead"></div><div class="ia-tip-body" id="iaTipBody"></div></div>
+
+  <!-- ============ 우측 작업 패널 ============ -->
+  <aside class="ia-panel" id="iaPanel">
+    <div class="ia-panel-head">
+      <span class="ia-panel-title" id="iaPanelTitle">의상</span>
+      <span class="ia-panel-sub" id="iaPanelAxis">clothing</span>
+      <button class="ia-panel-close" id="iaPanelClose">&times;</button>
+    </div>
+    <div class="ia-panel-body" id="iaPanelBody"></div>
+  </aside>
+</div>
+
+</main>
+
+<script>
+/* =========================================================================
+   목업 데이터 — 실제 구현에서는 백엔드 태그 사전에서 온다.
+   axis 값은 core/tag_axis_registry.py 의 실제 축 이름을 그대로 사용.
+   ========================================================================= */
+const BLOCKS = [
+  {
+    id: 'character', name: '캐릭터', icon: '\u{1F464}', axis: 'character', axisShort: 'character',
+    kind: 'character',
+    /* 캐릭터마다 동일한 서브 슬롯 4종 + NAI 전용 네거티브 1종 */
+    subs: ['특징', '의상', '액션', '표정'],
+    chars: [
+      { id: 'C1', name: '', state: 'active', open: false,
+        fields: { '특징': ['1girl','long hair','blue eyes'],
+                  '의상': ['sailor collar','pleated skirt'],
+                  '액션': ['standing'], '표정': ['smile'] },
+        /* 캐릭터별 슬롯 와일드카드 — 백엔드의 wildcard_override_character[slot_uuid][key] 에 대응 */
+        wcs: { '의상': [{ token: '__의상풀__', kind: '파일', size: 128 }] },
+        pos: 'B3', neg: ['bad hands'] },
+      { id: 'C2', name: '뒤쪽 인물', state: 'cold', open: false,
+        fields: { '특징': ['1boy','short hair'], '의상': [], '액션': [], '표정': [] },
+        pos: 'D2', neg: [] }
+    ]
+  },
+  /* 의상 / 액션 / 표정 블록은 캐릭터 슬롯으로 통합되어 최상위에서 제거됨.
+     남는 최상위 블록은 "장면 단위" 속성(구도·배경)과 기타뿐이다. */
+  {
+    id: 'composition', name: '구도', icon: '\u{1F5BC}', axis: 'meta + person_focus', axisShort: 'meta+focus',
+    /* 3축은 콤보(정해진 값), 그 아래 자유 태그는 사전에서 고른다. 둘은 합쳐져 나간다. */
+    comp: { x: 0, y: 3, z: 4, pov: false, specials: [] },
+    cats: ['샷 크기','시점','포커스','인원'],
+    tags: ['solo focus'],
+    wc: [],
+    pool: [
+      ['solo focus','단독 포커스'],['depth of field','피사계 심도'],['blurry background','배경 흐림'],
+      ['looking at viewer','정면 응시'],['looking away','시선 회피'],
+      ['portrait','인물 구도'],['scenery','풍경 구도']
+    ]
+  },
+  {
+    id: 'background', name: '배경', icon: '\u{1F3DE}', axis: 'location', axisShort: 'location',
+    cats: ['실내','실외','자연','시간','날씨','추상'],
+    tags: ['classroom','sunset'],
+    wc: [{ token: '$배경팔레트', kind: '인스턴트', size: 24 }],
+    pool: [
+      ['classroom','교실'],['sunset','노을'],['rooftop','옥상'],
+      ['night','밤'],['cherry blossoms','벚꽃'],['rain','비'],
+      ['city street','도시 거리'],['simple background','단순 배경']
+    ]
+  },
+  {
+    id: 'etc', name: '기타', icon: '⚙', axis: 'object · uncategorized · raw', axisShort: 'etc · raw',
+    cats: ['품질','연도','사물','미분류'],
+    tags: ['best quality','masterpiece','year 2024'],
+    raw: ['artist:kanzarin','0.38::epi zero ::'],
+    wc: [],
+    pool: [
+      ['best quality','최고 품질'],['masterpiece','걸작'],['year 2024','2024년'],
+      ['very absurdres','초고해상도'],['holding cup','컵 들기'],['desk','책상']
+    ]
+  }
+];
+
+const MAX_CHIPS = 6;
+let openId = null;
+
+/* 네거티브 서브 슬롯은 NAI 모드에서만 존재한다 (NAI 캐릭터 캡션의 uc 필드).
+   WEBUI/COMFYUI 에는 대응 필드가 없으므로 행 자체를 렌더하지 않는다. */
+const API_MODE = 'NAI';
+
+/* 캐릭터 서브 슬롯도 최상위 블록과 같은 생김새를 쓴다 — 아이콘/이름/축이 동일해야
+   "같은 종류인데 이 캐릭터에 한정된 것"으로 읽힌다. 아이콘은 최상위와 일부러 공유. */
+/* 의상·액션·표정은 최상위 블록에서 내려와 캐릭터 슬롯에 통합됐다.
+   따라서 사전 카테고리/풀도 여기(서브 슬롯 정의)가 단일 출처다. */
+const SUB_META = {
+  '특징': {
+    icon: '\u{1F9EC}', axis: 'characteristic',
+    cats: ['체형', '머리', '눈', '피부', '귀·꼬리', '종족'],
+    pool: [['1girl','여성 1인'],['long hair','긴 머리'],['blue eyes','파란 눈'],
+           ['twintails','트윈테일'],['ahoge','아호게'],['animal ears','동물 귀'],
+           ['short hair','짧은 머리'],['silver hair','은발']]
+  },
+  '의상': {
+    icon: '\u{1F457}', axis: 'clothing',
+    cats: ['머리·목', '상의', '하의', '팔·손', '다리·발', '전신', '스타일'],
+    pool: [['school uniform','교복'],['serafuku','세일러복'],['pleated skirt','주름치마'],
+           ['thighhighs','니삭스'],['cardigan','가디건'],['necktie','넥타이'],
+           ['blazer','블레이저'],['loafers','로퍼'],['sailor collar','세일러 카라']]
+  },
+  '액션': {
+    icon: '\u{1F3C3}', axis: 'pose_action',
+    cats: ['서기', '앉기', '눕기', '들기', '제스처', '활동', '전투'],
+    pool: [['standing','서 있음'],['sitting','앉음'],['hands on own hips','허리에 손'],
+           ['arms behind back','뒷짐'],['walking','걷기'],['leaning forward','앞으로 기댐'],
+           ['holding book','책 들기'],['stretching','기지개']]
+  },
+  '표정': {
+    icon: '\u{1F60A}', axis: 'expression',
+    cats: ['눈', '입', '감정', '상태'],
+    pool: [['closed eyes','눈 감음'],['open mouth','입 벌림'],['blush','홍조'],
+           ['smile','미소'],['embarrassed','당황'],['half-closed eyes','반쯤 감은 눈'],
+           ['light smile','옅은 미소'],['pout','볼 부풀림']]
+  },
+  /* 좌표는 태그가 아니라 5x5 그리드 값이다. NAI V4 전용
+     (character_positions -> v4_prompt.caption.char_captions[].centers).
+     Dev0714 Interactive 는 char_captions 를 빈 배열로 보내 이 기능이 없었다. */
+  'POS': { name: '좌표', icon: '\u{1F4CD}', axis: 'position' },
+  'NEG': {
+    name: '네거티브', icon: '&#8856;', axis: 'negative',
+    cats: ['품질', '해부', '기타'],
+    pool: [['bad hands','손 뭉개짐'],['extra digits','손가락 과다'],
+           ['lowres','저해상도'],['missing limb','사지 결손']]
+  }
+};
+
+/* ---------- 좌측 블록 리스트 ---------- */
+function chip(text, cls) {
+  return '<span class="ia-chip' + (cls ? ' ' + cls : '') + '">' + escapeHtml(text) + '</span>';
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* 프롬프트 엔지니어링 고정 프롬프트 — 슬롯이 아니라 기존 모듈로 가는 링크.
+   선행은 캐릭터 블록 바로 아래(= 메인 프롬프트 문자열의 시작점), 후행은 맨 끝. */
+const PE = {
+  prefix: {
+    id: 'prefix', name: '선행 고정', sub: 'PREFIX', icon: '&#8593;',
+    content: 'masterpiece, best quality, very aesthetic, absurdres,\n0.9::light particles ::,\n__작가풀__'
+  },
+  postfix: {
+    id: 'postfix', name: '후행 고정', sub: 'POSTFIX', icon: '&#8595;',
+    content: 'year 2024, year 2025,\n-1::widescreen, blurry ::'
+  }
+};
+
+function peRow(pe) {
+  const flat = String(pe.content || '').replace(/\s*\n\s*/g, ' ').trim();
+  const empty = !flat;
+  return '<button class="ia-pe' + (openId === 'pe-' + pe.id ? ' is-open' : '') +
+         '" data-pe="' + pe.id + '">' +
+    '<span class="ia-pe-label">' +
+      '<span class="ia-pe-icon">' + pe.icon + '</span>' +
+      '<span class="ia-pe-name">' + pe.name + '</span>' +
+    '</span>' +
+    '<span class="ia-pe-preview' + (empty ? ' is-empty' : '') + '">' +
+      escapeHtml(empty ? '비어 있음' : flat) + '</span>' +
+    '<span class="ia-pe-open">열기 &#8599;</span>' +
+  '</button>';
+}
+
+/* ---------- 구도 3축 ----------
+   Dev0714 ui/interactive/composition_block.py 의 항목/태그를 그대로 옮겼다.
+   콤보 라벨은 원본의 긴 설명문을 유지하고(초보자용), 좌측 블록 칩에는 short 를 쓴다. */
+const COMP_AXES = [
+  { key: 'x', label: 'X · 수평 시점', items: [
+    ['정의하지 않음', '—', ''],
+    ['정면', '정면', 'front view'],
+    ['강한 정면', '강한 정면', 'front view, 0.5::straight-on ::'],
+    ['측면(옆모습)', '측면', 'side view, 0.5::from side ::'],
+    ['3/4(반측면)', '3/4', 'three-quarter view'],
+    ['후면(등)', '후면', 'rear view, 0.5::from behind ::']
+  ]},
+  { key: 'y', label: 'Y · 상하 시점', items: [
+    ['정의하지 않음(중앙)', '—', ''],
+    ['정확히 위에서 내려다보기(탑다운)', '탑다운', "bird's-eye view, 0.5::from above ::"],
+    ['약간 위에서 내려다보기', '하이앵글', 'high-angle view, 0.5::from above ::'],
+    ['약간 아래에서 올려다보기', '로우앵글', 'low-angle view, 0.5::from below ::'],
+    ['정확히 아래에서 올려다보기(바닥시점)', '바닥시점', "worm's-eye view, 0.5::from below ::"]
+  ]},
+  { key: 'z', label: 'Z · 거리 / 샷 크기', items: [
+    ['정의하지 않음', '—', ''],
+    ['초근접(얼굴 위주)', '초근접', 'close-up'],
+    ['상반신(가슴~머리)', '상반신', 'upper body'],
+    ['반신(허리 위)', '반신', 'half body'],
+    ['카우보이 샷(허벅지/무릎 위)', '카우보이', 'cowboy shot'],
+    ['전신', '전신', 'full body'],
+    ['원거리(배경 많이)', '원거리', 'wide shot']
+  ]}
+];
+const COMP_SPECIALS = [
+  ['뒤집기', 'upside-down'], ['90도', 'sideways'], ['원근감', 'perspective'],
+  ['기울임', 'dutch angle'], ['역동감', 'foreshortening']
+];
+const COMP_POV = 'pov, first person view';
+
+/* 축 선택 -> 실제로 프롬프트에 나가는 태그들 */
+function compTags(comp) {
+  const out = [];
+  if (comp.pov) out.push(COMP_POV);
+  COMP_AXES.forEach(ax => {
+    const item = ax.items[comp[ax.key] || 0];
+    if (item && item[2]) out.push(item[2]);
+  });
+  (comp.specials || []).forEach(t => out.push(t));
+  return out;
+}
+/* 좌측 블록에 보일 짧은 칩 라벨 */
+function compChips(comp) {
+  const out = [];
+  if (comp.pov) out.push('POV');
+  COMP_AXES.forEach(ax => {
+    const i = comp[ax.key] || 0;
+    if (i > 0) out.push(ax.key.toUpperCase() + ' ' + ax.items[i][1]);
+  });
+  (comp.specials || []).forEach(t => {
+    const s = COMP_SPECIALS.find(x => x[1] === t);
+    if (s) out.push(s[0]);
+  });
+  return out;
+}
+
+/* ---------- 좌표 ----------
+   core/api_service.py 의 매핑을 그대로 따른다: A-E -> x 0.1~0.9, 1-5 -> y 0.1~0.9.
+   미지정 fallback 은 {x:0.5, y:0.5} = C3. */
+const POS_COLS = ['A', 'B', 'C', 'D', 'E'];
+const POS_DEFAULT = 'C3';
+function posCenters(p) {
+  const cx = POS_COLS.indexOf(String(p || POS_DEFAULT)[0]);
+  const cy = Number(String(p || POS_DEFAULT)[1]) - 1;
+  const f = i => (i < 0 ? 0.5 : 0.1 + i * 0.2);
+  return { x: f(cx), y: f(cy) };
+}
+function posText(p) {
+  const c = posCenters(p);
+  return 'x ' + c.x.toFixed(2) + ' / y ' + c.y.toFixed(2);
+}
+
+/* ---------- 캐릭터 블록 (헤더 + 접이식 캐릭터 카드) ---------- */
+function charSubRow(c, label, tags, isNeg) {
+  const m = SUB_META[label];
+  if (label === 'POS') {
+    // 좌표는 태그 목록이 아니라 단일 값이라 칩 하나 + 매핑 결과만 보여준다.
+    return '<div class="ia-sub-block is-pos" data-cid="' + c.id + '" data-sub="POS">' +
+      '<div class="ia-block-label">' +
+        '<span class="ia-block-title">' +
+          '<span class="ia-block-icon">' + m.icon + '</span>' +
+          '<span class="ia-block-name">' + m.name + '</span>' +
+        '</span>' +
+        '<span class="ia-block-axis">' + m.axis + '</span>' +
+      '</div>' +
+      '<div class="ia-block-chips">' +
+        '<span class="ia-chip is-pos">' + (c.pos || POS_DEFAULT) + '</span>' +
+        '<span class="ia-pos-hint">' + posText(c.pos) + '</span>' +
+      '</div>' +
+      '<div class="ia-block-meta"></div>' +
+    '</div>';
+  }
+  const wcs = (c.wcs && c.wcs[label]) || [];
+  const shown = wcs.map(w => chip('\u{1F3B2} ' + w.token, 'is-wc'))
+                   .concat(tags.slice(0, MAX_CHIPS).map(t => chip(t)));
+  const over = tags.length - MAX_CHIPS;
+  if (over > 0) shown.push(chip('+' + over, 'is-more'));
+  const chips = shown.length ? shown.join('') : '<span class="ia-chip-empty">비어 있음</span>';
+  return '<div class="ia-sub-block' + (isNeg ? ' is-neg' : '') +
+         (shown.length ? '' : ' is-empty') +
+         '" data-cid="' + c.id + '" data-sub="' + label + '">' +
+    '<div class="ia-block-label">' +
+      '<span class="ia-block-title">' +
+        '<span class="ia-block-icon">' + m.icon + '</span>' +
+        '<span class="ia-block-name">' + (m.name || label) + '</span>' +
+      '</span>' +
+      '<span class="ia-block-axis">' + m.axis + '</span>' +
+    '</div>' +
+    '<div class="ia-block-chips">' + chips + '</div>' +
+    '<div class="ia-block-meta"><span class="ia-block-count">' +
+      (tags.length || '') + '</span></div>' +
+  '</div>';
+}
+
+function characterBlockHtml(b) {
+  const active = b.chars.filter(c => c.state === 'active').length;
+  const rows = b.chars.map((c, i) => {
+    const nick = c.name ? '<span class="ia-char-nick">' + escapeHtml(c.name) + '</span> · ' : '';
+    // 접힌 상태의 미리보기는 특징~표정 전부를 보여준다(네거티브는 uc 로 빠지므로 제외).
+    // 슬롯 와일드카드도 토큰 그대로 노출해서 "여기는 매번 굴러간다"는 걸 드러낸다.
+    const sum = b.subs.flatMap(s =>
+      ((c.wcs && c.wcs[s]) || [])
+        .map(w => '<span class="ia-char-wc">' + escapeHtml(w.token) + '</span>')
+        .concat((c.fields[s] || []).map(escapeHtml))
+    ).join(', ') || '(비어 있음)';
+    // 좌표/네거티브는 NAI 전용 (v4_prompt 계약). 다른 모드에서는 행 자체가 없다.
+    const subs = b.subs.map(s => charSubRow(c, s, c.fields[s] || [], false)).join('') +
+                 (API_MODE === 'NAI'
+                   ? charSubRow(c, 'POS', [], false) + charSubRow(c, 'NEG', c.neg || [], true)
+                   : '');
+    return '<div class="ia-char' + (c.open ? ' is-open' : '') +
+           (c.state === 'cold' ? ' is-cold' : '') + '" data-char="' + i + '">' +
+      '<div class="ia-char-head">' +
+        '<span class="ia-char-caret">&#9654;</span>' +
+        '<span class="ia-char-id">' + c.id + '</span>' +
+        '<span class="ia-char-sum">' + nick + sum + '</span>' +
+        (API_MODE === 'NAI'
+          ? '<span class="ia-char-pos" title="' + posText(c.pos) + '">' +
+            (c.pos || POS_DEFAULT) + '</span>' : '') +
+        '<span class="ia-char-state ' + c.state + '">' + c.state + '</span>' +
+      '</div>' +
+      '<div class="ia-char-body">' + subs + '</div>' +
+    '</div>';
+  }).join('');
+
+  return '<div class="ia-block is-character' + (b.id === openId ? ' is-open' : '') +
+         '" data-id="' + b.id + '">' +
+    '<div class="ia-cblock-head">' +
+      '<span class="ia-block-icon">' + b.icon + '</span>' +
+      '<span class="ia-block-name">' + b.name + '</span>' +
+      (API_MODE === 'NAI' ? '<span class="ia-cblock-mode">NAI 슬롯</span>' : '') +
+      '<span style="flex:1"></span>' +
+      '<span class="ia-block-count">' + active + ' 활성</span>' +
+    '</div>' + rows +
+    '<div class="ia-char-foot"><button class="ia-charcard-add">+ 캐릭터 슬롯</button></div>' +
+  '</div>';
+}
+
+function blockHtml(b) {
+    if (b.kind === 'character') return characterBlockHtml(b);
+    const isOpen = b.id === openId;
+    let body;
+    let count;
+
+    {
+      // 구도의 3축 선택은 자유 태그보다 앞에, 별도 색으로 붙는다.
+      const axisChips = b.comp ? compChips(b.comp).map(t => chip(t, 'is-axis')) : [];
+      const wcChips = (b.wc || []).map(w => chip('\u{1F3B2} ' + w.token, 'is-wc'));
+      const rawChips = (b.raw || []).map(t => chip(t, 'is-raw'));
+      const tagChips = (b.tags || []).slice(0, MAX_CHIPS).map(t => chip(t));
+      const overflow = (b.tags || []).length - MAX_CHIPS;
+      const all = [...axisChips, ...wcChips, ...tagChips, ...rawChips];
+      if (overflow > 0) {
+        all.splice(axisChips.length + wcChips.length + MAX_CHIPS, 0, chip('+' + overflow, 'is-more'));
+      }
+      count = (b.comp ? compTags(b.comp).length : 0) +
+              (b.tags || []).length + (b.raw || []).length;
+      body = '<div class="ia-block-chips">' +
+             (all.length ? all.join('') : '<span class="ia-chip-empty">비어 있음 — 클릭해서 추가</span>') +
+             '</div>';
+    }
+
+    const wcBadge = (b.wc && b.wc.length)
+      ? '<span class="ia-block-wc">\u{1F3B2}' + b.wc.length + '</span>' : '';
+
+    return '<div class="ia-block' + (isOpen ? ' is-open' : '') + (count ? '' : ' is-empty') +
+           '" data-id="' + b.id + '">' +
+      '<div class="ia-block-label">' +
+        '<span class="ia-block-title">' +
+          '<span class="ia-block-icon">' + b.icon + '</span>' +
+          '<span class="ia-block-name">' + b.name + '</span>' +
+        '</span>' +
+        '<span class="ia-block-axis">' + (b.axisShort || b.axis) + '</span>' +
+      '</div>' +
+      body +
+      '<div class="ia-block-meta">' + wcBadge +
+        '<span class="ia-block-count">' + count + '</span></div>' +
+    '</div>';
+}
+
+function renderBlocks() {
+  const host = document.getElementById('iaBlocks');
+  const parts = [];
+  BLOCKS.forEach(b => {
+    parts.push(blockHtml(b));
+    // 캐릭터 블록은 NAI 캐릭터 슬롯으로 빠지므로 메인 프롬프트 문자열은 그 아래에서 시작한다.
+    if (b.id === 'character') parts.push(peRow(PE.prefix));
+  });
+  parts.push(peRow(PE.postfix));
+  host.innerHTML = parts.join('');
+
+  host.querySelectorAll('.ia-block:not(.is-character)').forEach(el => {
+    el.addEventListener('click', () => openPanel(el.dataset.id));
+  });
+  // 캐릭터 블록은 헤더 / 카드 헤드 / 서브 슬롯이 각기 다른 동작을 갖는다.
+  host.querySelectorAll('.ia-cblock-head').forEach(el => {
+    el.addEventListener('click', () => openPanel('character'));
+  });
+  host.querySelectorAll('.ia-char-head').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      toggleChar(Number(el.parentElement.dataset.char));
+    });
+  });
+  host.querySelectorAll('.ia-sub-block').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      openCharSub(el.dataset.cid, el.dataset.sub);
+    });
+  });
+  host.querySelectorAll('.ia-charcard-add').forEach(el => {
+    el.addEventListener('click', e => e.stopPropagation());
+  });
+  host.querySelectorAll('.ia-pe').forEach(el => {
+    const pe = PE[el.dataset.pe];
+    el.addEventListener('click', () => openPeEditor(pe.id));
+    el.addEventListener('mouseenter', () => showTip(el, pe));
+    el.addEventListener('mouseleave', hideTip);
+  });
+}
+
+/* ---------- 캐릭터 접기/펼치기 ----------
+   아코디언: 한 번에 하나만 펼친다. 캐릭터가 6명까지 늘어날 수 있어
+   다중 펼침을 허용하면 좌측이 즉시 넘친다(NAIA 좌측 모듈의 기존 관행과도 일치). */
+function toggleChar(i) {
+  const chars = BLOCKS.find(b => b.kind === 'character').chars;
+  const willOpen = !chars[i].open;
+  chars.forEach((c, j) => { c.open = (j === i) && willOpen; });
+  renderBlocks();
+}
+
+/* 서브 슬롯 클릭 → 우측 패널이 (캐릭터, 서브슬롯) 컨텍스트로 열린다. */
+function openCharSub(cid, sub) {
+  const b = BLOCKS.find(x => x.kind === 'character');
+  const c = b.chars.find(x => x.id === cid);
+  const src = SUB_META[sub];
+  const idx = b.chars.indexOf(c);
+  openId = 'character';
+  document.getElementById('iaPanelTitle').textContent = c.id + ' · ' + (src.name || sub);
+  document.getElementById('iaPanelAxis').textContent = src.axis;
+  document.getElementById('iaPanel').classList.add('open');
+
+  const target = sub === 'POS' ? 'character_positions[' + idx + ']'
+               : sub === 'NEG' ? 'character_frames[' + idx + '].uc'
+                               : 'character_frames[' + idx + '].prompt';
+  const note = '<div class="ia-pe-note">캐릭터 <b>' + c.id + '</b>' +
+    (c.name ? ' (' + escapeHtml(c.name) + ')' : '') + ' 의 <b>' + (src.name || sub) +
+    '</b> 슬롯 — <b>' + target + '</b> 로 결합됩니다.</div>';
+
+  document.getElementById('iaPanelBody').innerHTML = note + (
+    sub === 'POS'
+      ? posPanel(c)
+      : tagPanel({ axis: src.axis, cats: src.cats || [], pool: src.pool || [],
+                   tags: sub === 'NEG' ? (c.neg || []) : (c.fields[sub] || []),
+                   wc: (c.wcs && c.wcs[sub]) || [] })
+  );
+
+  if (sub === 'POS') {
+    document.querySelectorAll('#iaPanelBody [data-pos]').forEach(el => {
+      el.addEventListener('click', () => { c.pos = el.dataset.pos; openCharSub(cid, 'POS'); });
+    });
+  }
+  renderBlocks();
+}
+
+/* 5x5 좌표 피커. 셀 라벨은 선택/호버 시에만 드러나 격자가 조용하다. */
+function posPanel(c) {
+  const cur = c.pos || POS_DEFAULT;
+  let cells = '<div class="ia-pos-hdr"></div>' +
+    POS_COLS.map(col => '<div class="ia-pos-hdr">' + col + '</div>').join('');
+  for (let r = 1; r <= 5; r++) {
+    cells += '<div class="ia-pos-hdr">' + r + '</div>';
+    cells += POS_COLS.map(col => {
+      const p = col + r;
+      return '<div class="ia-pos-cell' + (p === cur ? ' is-on' : '') +
+             '" data-pos="' + p + '">' + p + '</div>';
+    }).join('');
+  }
+  return '<section><div class="ia-sec-label">캔버스 위치 &middot; NAI V4</div>' +
+    '<div class="ia-pos-wrap">' +
+      '<div class="ia-pos-grid">' + cells + '</div>' +
+      '<div class="ia-pos-info">' +
+        '<div class="ia-pos-cur">' + cur + '</div>' +
+        '<div class="ia-pos-map">centers<br>' + posText(cur) + '</div>' +
+        '<button class="ia-wc-btn" data-pos="' + POS_DEFAULT + '">중앙으로</button>' +
+      '</div>' +
+    '</div></section>';
+}
+
+/* ---------- 호버 툴팁 ---------- */
+function showTip(el, pe) {
+  const tip = document.getElementById('iaTip');
+  document.getElementById('iaTipHead').textContent = '프롬프트 엔지니어링 · ' + pe.sub;
+  document.getElementById('iaTipBody').textContent = pe.content || '(비어 있음)';
+  tip.classList.add('open');
+  const r = el.getBoundingClientRect();
+  const t = tip.getBoundingClientRect();
+  let top = r.top - t.height - 8;
+  if (top < 8) top = r.bottom + 8;
+  tip.style.top = top + 'px';
+  tip.style.left = Math.max(8, Math.min(r.left, window.innerWidth - t.width - 12)) + 'px';
+}
+function hideTip() { document.getElementById('iaTip').classList.remove('open'); }
+
+/* ---------- 프롬프트 엔지니어링 창 ---------- */
+function openPeEditor(which) {
+  openId = 'pe-' + which;
+  const pe = PE[which];
+  document.getElementById('iaPanelTitle').textContent = '프롬프트 엔지니어링';
+  document.getElementById('iaPanelAxis').textContent = pe.sub;
+  document.getElementById('iaPanel').classList.add('open');
+  document.getElementById('iaPanelBody').innerHTML = pePanel(pe);
+  renderBlocks();
+}
+
+function pePanel(active) {
+  const field = (p) => {
+    const on = p.id === active.id;
+    return '<section><div class="ia-sec-label">' + p.sub + ' &middot; ' + p.name +
+      (on ? ' — 편집 중' : '') + '</div>' +
+      '<textarea class="ia-pe-edit' + (on ? ' is-on' : '') + '" spellcheck="false">' +
+      escapeHtml(p.content) + '</textarea></section>';
+  };
+  return '<div class="ia-pe-note">기존 <b>프롬프트 엔지니어링</b> 모듈이 그대로 열립니다 — ' +
+         'Interactive 전용 화면이 아니라 같은 모듈을 공유합니다.</div>' +
+         field(PE.prefix) + field(PE.postfix);
+}
+
+/* ---------- 우측 작업 패널 ---------- */
+function openPanel(id) {
+  openId = id;
+  const b = BLOCKS.find(x => x.id === id);
+  document.getElementById('iaPanelTitle').textContent = b.name;
+  document.getElementById('iaPanelAxis').textContent = b.axis;
+  document.getElementById('iaPanel').classList.add('open');
+  document.getElementById('iaPanelBody').innerHTML =
+    b.kind === 'character' ? charPanel(b)
+    : b.comp ? compPanel(b) + tagPanel(b)
+    : tagPanel(b);
+  if (b.comp) bindCompPanel(b);
+  renderBlocks();
+}
+
+/* ---------- 구도 3축 패널 (Dev0714 CompositionBlock 이식) ---------- */
+function compPanel(b) {
+  const selects = COMP_AXES.map(ax =>
+    '<div class="ia-comp-row">' +
+      '<span class="ia-comp-lbl">' + ax.label + '</span>' +
+      '<select class="param-select ia-comp-select" data-axis="' + ax.key + '">' +
+        ax.items.map((it, i) =>
+          '<option value="' + i + '"' + (i === (b.comp[ax.key] || 0) ? ' selected' : '') + '>' +
+          escapeHtml(it[0]) + '</option>').join('') +
+      '</select>' +
+    '</div>').join('');
+
+  const specials = COMP_SPECIALS.map(([label, tag]) =>
+    '<button class="ia-cat' + (b.comp.specials.includes(tag) ? ' is-on' : '') +
+    '" data-special="' + tag + '">' + label + '</button>').join('');
+
+  const emitted = compTags(b.comp);
+  return '<section>' +
+    '<div class="ia-sec-label">축 설정</div>' +
+    selects +
+    '<div class="ia-comp-row">' +
+      '<span class="ia-comp-lbl">1인칭</span>' +
+      '<button class="ia-cat' + (b.comp.pov ? ' is-on' : '') + '" data-pov="1">POV</button>' +
+    '</div>' +
+    '<div class="ia-comp-row" style="align-items:flex-start">' +
+      '<span class="ia-comp-lbl">스페셜</span>' +
+      '<div class="ia-cats" style="margin:0">' + specials + '</div>' +
+    '</div>' +
+    '<div class="ia-comp-out">' +
+      (emitted.length ? escapeHtml(emitted.join(', ')) : '축 미설정 — 태그 없음') +
+    '</div>' +
+  '</section>';
+}
+
+function bindCompPanel(b) {
+  const body = document.getElementById('iaPanelBody');
+  body.querySelectorAll('.ia-comp-select').forEach(el => {
+    el.addEventListener('change', () => {
+      b.comp[el.dataset.axis] = Number(el.value);
+      openPanel(b.id);
+    });
+  });
+  const pov = body.querySelector('[data-pov]');
+  if (pov) pov.addEventListener('click', () => { b.comp.pov = !b.comp.pov; openPanel(b.id); });
+  body.querySelectorAll('[data-special]').forEach(el => {
+    el.addEventListener('click', () => {
+      const tag = el.dataset.special;
+      const i = b.comp.specials.indexOf(tag);
+      if (i >= 0) b.comp.specials.splice(i, 1); else b.comp.specials.push(tag);
+      openPanel(b.id);
+    });
+  });
+}
+
+function tagPanel(b) {
+  const selected = [
+    ...(b.wc || []).map(w =>
+      '<span class="ia-tag is-wc">\u{1F3B2} ' + escapeHtml(w.token) +
+      '<button class="ia-tag-x">&times;</button></span>'),
+    ...(b.tags || []).map(t =>
+      '<span class="ia-tag">' + escapeHtml(t) + '<button class="ia-tag-x">&times;</button></span>'),
+    ...(b.raw || []).map(t =>
+      '<span class="ia-tag" style="font-style:italic;opacity:.7">' + escapeHtml(t) +
+      '<button class="ia-tag-x">&times;</button></span>')
+  ].join('') || '<span class="ia-chip-empty">아직 선택된 태그가 없습니다</span>';
+
+  const cats = (b.cats || []).map((c, i) =>
+    '<button class="ia-cat' + (i === 0 ? ' is-on' : '') + '">' + c + '</button>').join('');
+
+  const grid = (b.pool || []).map(([en, kr]) => {
+    const picked = (b.tags || []).includes(en);
+    return '<button class="ia-grid-tag' + (picked ? ' is-picked' : '') + '">' +
+           escapeHtml(en) + '<span class="ia-grid-kr">' + escapeHtml(kr) + '</span></button>';
+  }).join('');
+
+  const wcList = (b.wc || []).length
+    ? '<div class="ia-wc-list">' + b.wc.map(w =>
+        '<div class="ia-wc-item">' +
+          '<span class="ia-wc-token">\u{1F3B2} ' + escapeHtml(w.token) + '</span>' +
+          '<span class="ia-wc-meta">' + w.kind + ' · ' + w.size + '줄</span>' +
+          '<span class="ia-wc-actions">' +
+            '<button class="ia-wc-btn">리롤</button>' +
+            '<button class="ia-wc-btn">\u{1F4CC} 고정</button>' +
+            '<button class="ia-wc-btn">해제</button>' +
+          '</span>' +
+        '</div>').join('') + '</div>'
+    : '';
+
+  return '' +
+    '<section><div class="ia-sec-label">검색</div>' +
+      '<div class="ia-search">' +
+        '<input placeholder="태그 검색 (한글/영문)...">' +
+        '<span class="ia-search-scope">' + b.axis + ' 한정</span>' +
+      '</div>' +
+    '</section>' +
+    '<section><div class="ia-sec-label">선택됨</div>' +
+      '<div class="ia-selected">' + selected + '</div>' +
+    '</section>' +
+    '<section><div class="ia-sec-label">사전 탐색</div>' +
+      '<div class="ia-cats">' + cats + '</div>' +
+      '<div class="ia-grid">' + grid + '</div>' +
+    '</section>' +
+    '<section><div class="ia-sec-label">와일드카드</div>' +
+      wcList +
+      '<div class="ia-wc-add" style="margin-top:' + (wcList ? '7px' : '0') + '">' +
+        '<button>\u{1F4C1} 파일에서</button>' +
+        '<button>⚡ 인스턴트에서</button>' +
+        '<button>✨ 선택한 태그로 즉석 생성</button>' +
+      '</div>' +
+    '</section>';
+}
+
+function charPanel(b) {
+  const slots = b.chars.map(c => {
+    const entries = Object.entries(c.fields);
+    if (API_MODE === 'NAI') entries.push(['NEG', c.neg || []]);
+    const posRow = API_MODE === 'NAI'
+      ? '<div class="ia-charfield"><span class="ia-charfield-lbl">좌표</span>' +
+        '<div class="ia-charfield-chips"><span class="ia-chip is-pos">' +
+        (c.pos || POS_DEFAULT) + '</span>' +
+        '<span class="ia-pos-hint">' + posText(c.pos) + '</span></div></div>'
+      : '';
+    const fields = entries.map(([label, tags]) =>
+      '<div class="ia-charfield' + (label === 'NEG' ? ' is-neg' : '') + '">' +
+        '<span class="ia-charfield-lbl">' + label + '</span>' +
+        '<div class="ia-charfield-chips">' +
+          (tags.length ? tags.map(t => chip(t)).join('')
+                       : '<span class="ia-chip-empty">비어 있음</span>') +
+        '</div>' +
+      '</div>').join('');
+    return '<div class="ia-charslot' + (c.state === 'cold' ? ' is-cold' : '') + '">' +
+      '<div class="ia-charslot-head">' +
+        '<span class="ia-charslot-id">' + c.id + '</span>' +
+        '<input class="ia-charslot-name" value="' + escapeHtml(c.name) + '" placeholder="이름 없음">' +
+        '<span class="ia-charslot-state ' + c.state + '">' + c.state + '</span>' +
+      '</div>' +
+      '<div class="ia-charfields">' + posRow + fields + '</div>' +
+    '</div>';
+  }).join('');
+
+  return '' +
+    '<section><div class="ia-sec-label">가상 캐릭터 슬롯 — character_frames 직결</div>' +
+      '<div class="ia-charslots">' + slots + '</div>' +
+    '</section>' +
+    '<section>' +
+      '<div class="ia-wc-add">' +
+        '<button>+ 슬롯 추가</button>' +
+        '<button>\u{1F9CA} cold 로 보관</button>' +
+        '<button>\u{1F4DA} 라이브러리에서</button>' +
+      '</div>' +
+    '</section>';
+}
+
+document.getElementById('iaPanelClose').addEventListener('click', () => {
+  openId = null;
+  document.getElementById('iaPanel').classList.remove('open');
+  renderBlocks();
+});
+document.getElementById('iaToggle').addEventListener('click', e => {
+  e.currentTarget.classList.toggle('is-on');
+});
+
+/* 해시로 초기 상태를 지정한다 (스크린샷 캡처/리뷰용).
+     #outfit, #character …  슬롯 패널
+     #pe-prefix, #pe-postfix  프롬프트 엔지니어링 창
+     #tip-prefix, #tip-postfix  해당 버튼의 호버 툴팁까지 띄운 상태
+     #char1, #char2 …          해당 캐릭터를 펼친 상태 */
+renderBlocks();
+const hash = location.hash.replace('#', '');
+/* #char1 / #char1-POS / #char1-NEG */
+const charMatch = /^char(\d+)(?:-(POS|NEG))?$/.exec(hash);
+if (charMatch) {
+  const idx = Number(charMatch[1]) - 1;
+  toggleChar(idx);
+  const chars = BLOCKS.find(b => b.kind === 'character').chars;
+  if (charMatch[2] && chars[idx]) openCharSub(chars[idx].id, charMatch[2]);
+  else openPanel('character');
+} else if (hash.startsWith('tip-')) {
+  const pe = PE[hash.slice(4)];
+  if (pe) {
+    openPanel('character');
+    const row = document.querySelector('.ia-pe[data-pe="' + pe.id + '"]');
+    if (row) showTip(row, pe);
+  } else { openPanel('character'); }
+} else if (hash.startsWith('pe-') && PE[hash.slice(3)]) {
+  openPeEditor(hash.slice(3));
+} else {
+  openPanel(BLOCKS.some(b => b.id === hash) ? hash : 'character');
+}
+</script>
+</body>
+</html>

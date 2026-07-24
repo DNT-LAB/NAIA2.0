@@ -11,9 +11,11 @@
     "app/backend/server/data_migration_routes.py",
     "app/backend/server/danbooru_routes.py",
     "app/backend/server/event_preset_routes.py",
+    "app/backend/server/font_routes.py",
     "app/backend/server/install_manager_routes.py",
     "app/backend/server/module_storage_routes.py",
     "app/backend/server/params_workflow_routes.py",
+    "app/backend/server/prompt_engineering_filter_routes.py",
     "app/backend/server/prompt_tools_routes.py",
     "app/backend/server/result_display_routes.py",
     "app/backend/server/state_routes.py",
@@ -107,7 +109,9 @@
         {"method": "GET", "path": "/api/install-manager", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/install-manager/initialize", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/install-manager/tag-archive/download", "smoke": "asset_runtime"},
-        {"method": "POST", "path": "/api/install-manager/tag-archive/download/cancel", "smoke": "state_mutation"}
+        {"method": "POST", "path": "/api/install-manager/tag-archive/download/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/install-manager/corpus-archive/download", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/install-manager/corpus-archive/download/cancel", "smoke": "state_mutation"}
       ]
     },
     {
@@ -477,6 +481,9 @@
         "core/web_session_app.py",
         "app/backend/server/websocket_session.py",
         "core/web_session_context.py",
+        "app/backend/server/event_corpus_commands.py",
+        "core/event_corpus_index.py",
+        "core/event_corpus_search_service.py",
         "app/web/remote/js/core/remoteWsClient.mjs",
         "app/web/remote/js/core/wsDispatcher.mjs"
       ],
@@ -502,7 +509,9 @@
         "result_image_action",
         "result_enhance",
         "set_result_enhance_config",
-        "queue_action"
+        "queue_action",
+        "event_corpus_status",
+        "event_corpus_query"
       ]
     },
     {
@@ -533,6 +542,40 @@
         {"method": "GET", "path": "/api/translation-history", "smoke": "non_destructive"},
         {"method": "DELETE", "path": "/api/translation-history/{record_id}", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/translation-history/{record_id}/pin", "smoke": "state_mutation"}
+      ]
+    },
+    {
+      "id": "editor_font",
+      "name": "Editor font settings (Settings > Global > font)",
+      "source_files": [
+        "app/backend/server/font_routes.py",
+        "core/font_asset_service.py",
+        "app/web/remote/js/features/fontSettingsPanel.mjs",
+        "app/web/remote/index.html",
+        "app/web/remote/style.css"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/fonts", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/fonts/upload", "smoke": "asset_runtime"},
+        {"method": "DELETE", "path": "/api/fonts/{font_id}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/fonts/{filename}", "smoke": "static"}
+      ]
+    },
+    {
+      "id": "pe_category_filter_settings",
+      "name": "PE preprocessing category filter settings (Setting & Preview)",
+      "source_files": [
+        "app/backend/server/prompt_engineering_filter_routes.py",
+        "core/tag_filter_helpers.py",
+        "core/prompt_engineering_settings.py",
+        "core/prompt_engineering_runtime.py",
+        "core/headless_prompt_engineering_service.py",
+        "app/web/remote/js/features/promptEngineeringPopupRenderers.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/prompt-engineering/category-tags", "smoke": "non_destructive"}
       ]
     }
   ],
@@ -574,6 +617,7 @@
       "paths": [
         "data/KR_tags.parquet",
         "data/e621_KR_tags.parquet",
+        "data/interactive_tags.json",
         "data/tag_index/**",
         "artist_dictionary.py",
         "danbooru_character.py",
@@ -587,6 +631,13 @@
       "paths": ["data/tags/**"],
       "provisioning": "downloader",
       "provisioned_by": "POST /api/install-manager/tag-archive/download"
+    },
+    {
+      "feature": "install_manager",
+      "description": "Event corpus (.tgp) tag co-occurrence partitions for Interactive mode recommendations. Absent on a clean install; Interactive still works for direct tag entry, only the recommendation panel reports state=missing.",
+      "paths": ["data/quick_search/**"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/install-manager/corpus-archive/download"
     },
     {
       "feature": "thumb_character_viewer",

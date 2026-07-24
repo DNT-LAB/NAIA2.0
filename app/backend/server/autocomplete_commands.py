@@ -30,6 +30,29 @@ AUTOCOMPLETE_COMMAND_TYPES = {
     "autocomplete_preset",
     "tag_lookup",
     "translate_text",
+    "interactive_autocomplete",
+    "interactive_related",
+    "interactive_browse",
+}
+
+# Interactive 슬롯 <-> group 매핑.
+#
+# 축(tag_axis_overrides)이 아니라 group 으로 거른다. 이유: 축 오버라이드는 세부 태그
+# 대부분이 uncategorized 라, 축으로 거르면 "smile"·"seductive smile" 같은 표정 태그가
+# 통째로 빠진다. 반대로 uncategorized 를 통과시키면 "unicorn"(Creatures)·"microphone
+# stand"(Food_Object) 같은 노이즈가 clothing 슬롯에 새어든다.
+#
+# interactive_tags.json 의 group 은 16,698 태그 전부 채워져 있고(9대분류), 실측상
+# 노이즈/신호를 정확히 가른다. group 문자열이 파티션 그대로라 완전일치로 비교한다.
+# (KR_tags 병합분은 "패션 > 디테일"처럼 다른 스킴이라 여기 없을 수 있다 → uncategorized 취급.)
+INTERACTIVE_SLOT_GROUPS: dict[str, set[str]] = {
+    "characteristic": {"Person_Body", "Creatures"},
+    "clothing": {"Clothing_Wear"},
+    "pose_action": {"Expression_Action"},
+    "expression": {"Expression_Action"},
+    "meta": {"Composition_Meta"},
+    "location": {"Location_Background"},
+    "object": {"Food_Object"},
 }
 
 
@@ -46,17 +69,32 @@ def _tag_data_roots(context: WebSessionContext) -> list[Path]:
     return roots
 
 
-def ensure_tag_search_index(context: WebSessionContext):
-    index = getattr(context, "tag_search_index", None)
-    if index is not None:
-        return index
+def _ensure_kr_raw(context: WebSessionContext) -> dict[str, Any]:
+    """KR 병합 raw 레코드를 세션당 1회만 로드한다.
+
+    tag_search_index / relation_ranker / browse_index 가 전부 이 raw 위에 빌드된다. 각자
+    로드하면 168k corpus 를 여러 번 읽어(측정상 첫 질의 7초+) 서로 다른 스냅샷을 들게 된다
+    (Codex H3). 여기 한 곳으로 모아 재로드를 막고, 재프로비저닝 시 이 하나만 비우면 된다.
+    """
+    raw = getattr(context, "kr_tags_raw", None)
+    if isinstance(raw, dict) and raw:
+        return raw
     from core.kr_tag_loader import load_kr_tag_records
-    from core.tag_search_index import TagSearchIndex
 
     result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
     context.kr_tags_raw = result.raw
     context.autocomplete_state.kr_tags_loaded = bool(result.raw)
-    index = TagSearchIndex.from_raw_tag_records(result.raw)
+    return result.raw if isinstance(result.raw, dict) else {}
+
+
+def ensure_tag_search_index(context: WebSessionContext):
+    index = getattr(context, "tag_search_index", None)
+    if index is not None:
+        return index
+    from core.tag_search_index import TagSearchIndex
+
+    raw = _ensure_kr_raw(context)
+    index = TagSearchIndex.from_raw_tag_records(raw)
     context.tag_search_index = index
     return index
 
@@ -69,7 +107,168 @@ def _autocomplete_row(result: Any) -> dict[str, Any]:
         "desc": getattr(entry, "desc", "") or "",
         "group": getattr(entry, "category", "") or "",
         "cat": getattr(entry, "cat", "") or "",
+        # 축은 Interactive 슬롯 자동완성이 클라이언트에서 스코프 표시/필터하는 데 쓴다.
+        # 기존 소비자(일반 autocomplete/tag_search)는 이 키를 무시하므로 계약 파괴가 아니다.
+        "axis": getattr(entry, "axis", "") or "",
     }
+
+
+def _ensure_relation_ranker(context: WebSessionContext):
+    """TagRelationRanker + raw 레코드. prompt_tools_routes 와 같은 세션 캐시를 공유한다."""
+    raw = _ensure_kr_raw(context)   # 이미 로드됐으면 재로드하지 않는다(H3)
+    ranker = getattr(context, "tag_relation_ranker", None)
+    if ranker is not None:
+        return ranker, raw
+    from core.tag_relation_ranker import TagRelationRanker
+
+    ranker = TagRelationRanker(raw) if raw else None
+    context.tag_relation_ranker = ranker
+    return ranker, raw
+
+
+def _ensure_browse_index(context: WebSessionContext):
+    """InteractiveBrowseIndex. 세션당 1회 빌드(~120ms). 관계 랭커와 같은 raw 를 공유한다."""
+    idx = getattr(context, "interactive_browse_index", None)
+    if idx is not None:
+        return idx
+    from core.interactive_browse_index import InteractiveBrowseIndex
+
+    _, raw = _ensure_relation_ranker(context)
+    idx = InteractiveBrowseIndex(raw if isinstance(raw, dict) else {})
+    context.interactive_browse_index = idx
+    return idx
+
+
+def browse_interactive(
+    context: WebSessionContext,
+    slot: str,
+    subgroup: str = "",
+    parent: str = "",
+    offset: int = 0,
+    limit: int = 60,
+) -> dict[str, Any]:
+    """계층 브라우징. depth 는 어떤 인자가 채워졌는지로 결정된다.
+
+    - parent 지정  -> Depth3: 그 태그의 children
+    - subgroup 지정 -> Depth2: 그 subgroup 의 태그
+    - 둘 다 없음    -> Depth1: 슬롯의 subgroup 목록
+    """
+    idx = _ensure_browse_index(context)
+    if parent:
+        payload = idx.children_of(parent, slot=slot, limit=limit)
+        payload["depth"] = 3
+    elif subgroup:
+        payload = idx.tags_in(slot, subgroup, offset=offset, limit=limit)
+        payload["depth"] = 2
+    else:
+        payload = {"items": idx.subgroups(slot), "depth": 1, "total": 0, "hasMore": False}
+        payload["total"] = len(payload["items"])
+    return payload
+
+
+def search_interactive_tags(
+    context: WebSessionContext,
+    query: str,
+    axis: str = "",
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """축 스코프 자동완성. 슬롯(axis)의 group 집합에 속하는 태그만 반환한다.
+
+    Interactive WS 명령은 7개 슬롯 전용이다. axis 가 슬롯 매핑에 없으면(오타/미지) 스코프가
+    없어 전역 결과가 새어나가므로 **fail-closed**(빈 결과)로 처리한다(Codex M6).
+    """
+    from core.tag_search_index import normalize_search_query
+
+    q = normalize_search_query(str(query or ""))
+    if not q:
+        return []
+    groups = INTERACTIVE_SLOT_GROUPS.get(str(axis or "").strip().lower())
+    if groups is None:
+        return []   # unknown/empty axis — 슬롯 전용이므로 fail-closed
+    index = ensure_tag_search_index(context)
+    _, raw = _ensure_relation_ranker(context)
+
+    def _group_of(tag: str) -> str:
+        rec = raw.get(tag) if isinstance(raw, dict) else None
+        return str(rec.get("group", "") or "") if isinstance(rec, dict) else ""
+
+    def _group_ok(tag: str) -> bool:
+        # 슬롯 group 에 속하면 통과. 빈 group(데이터상 1건)은 어느 슬롯에도 못 붙이므로 버린다.
+        return _group_of(tag) in groups
+
+    # filter-before-limit: 상위 limit*5 만 잘라서 필터하면, 슬롯 group 이 희소한 경우
+    # (예: location 슬롯의 "h") 유효 결과가 상위권 밖에 있어 통째로 누락된다(Codex H4).
+    # 검색 자체를 넉넉히 받아 필터한 뒤 limit 을 적용한다. group 조회는 O(1) 라 순회는 싸다.
+    fetch = max(limit * 20, 300)
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for result in index.search_autocomplete(q, limit=fetch, axes=None):
+        if not _group_ok(result.tag):
+            continue
+        row = _autocomplete_row(result)
+        if row["tag"] in seen:
+            continue
+        seen.add(row["tag"])
+        rows.append(row)
+        if len(rows) >= limit:
+            break
+    # 한글 입력은 KR 메타데이터 폴백까지 뒤진다(일반 autocomplete 와 동일 정책).
+    if len(rows) < limit and re.search(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", str(query or "")):
+        for result in index.search_metadata_fallback(q, limit=fetch, exclude_noisy_categories=True):
+            if not _group_ok(result.tag):
+                continue
+            row = _autocomplete_row(result)
+            if row["tag"] in seen:
+                continue
+            seen.add(row["tag"])
+            rows.append(row)
+            if len(rows) >= limit:
+                break
+    return rows[:limit]
+
+
+def related_interactive_tags(
+    context: WebSessionContext,
+    tag: str,
+    axis: str = "",
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    """이미 놓인 태그에서 뻗어나가는 관계 추천(children/siblings/word_match).
+
+    interactive_tags.json 의 relations 를 TagRelationRanker 가 스코어링한다.
+    axis 가 주어지면 후보를 그 슬롯 축으로 한 번 더 거른다.
+    """
+    from core.tag_axis_registry import normalize_tag as _norm
+
+    ranker, raw = _ensure_relation_ranker(context)
+    if ranker is None or not raw:
+        return []
+    key = _norm(str(tag or ""))
+    info = raw.get(key)
+    if not isinstance(info, dict):
+        return []
+    groups = INTERACTIVE_SLOT_GROUPS.get(str(axis or "").strip().lower())
+    if groups is None:
+        return []   # unknown/empty axis — fail-closed (M6)
+    # filter-before-limit: 관계 후보를 넉넉히 랭크한 뒤 group 필터하고 자른다(H4).
+    ranked = ranker.rank(key, info, limit=max(limit * 8, 60))
+    rows: list[dict[str, Any]] = []
+    for item in ranked:
+        cand = raw.get(item.tag, {}) or {}
+        g = str(cand.get("group", "") or "")
+        # group 을 못 찾으면 통과(부모가 이 슬롯이라 관계로 뽑힌 것). 다른 group 이면 버림.
+        if g and g not in groups:
+            continue
+        rows.append({
+            "tag": item.tag,
+            "count": int(cand.get("freq", 0) or 0),
+            "desc": str(cand.get("description", "") or ""),
+            "group": str(cand.get("group", "") or ""),
+            "source": item.source,   # children / siblings / word_match
+        })
+        if len(rows) >= limit:
+            break
+    return rows
 
 
 def search_kr_tags(context: WebSessionContext, query: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -399,6 +598,56 @@ async def handle_autocomplete_command(
     if command_type == "autocomplete":
         results = await run_in_thread(search_kr_tags, context, query, 12)
         await _send_json(ws, {"type": "autocomplete_result", "query": query, "results": results})
+        return True
+
+    if command_type == "interactive_autocomplete":
+        axis = str(command.get("axis") or "")
+        request_id = str(command.get("requestId") or command.get("request_id") or "")
+        results = await run_in_thread(search_interactive_tags, context, query, axis, 16)
+        await _send_json(ws, {
+            "type": "interactive_autocomplete_result",
+            "query": query,
+            "axis": axis,
+            "requestId": request_id,
+            "results": results,
+        })
+        return True
+
+    if command_type == "interactive_related":
+        axis = str(command.get("axis") or "")
+        tag = str(command.get("tag") or query or "")
+        request_id = str(command.get("requestId") or command.get("request_id") or "")
+        results = await run_in_thread(related_interactive_tags, context, tag, axis, 12)
+        await _send_json(ws, {
+            "type": "interactive_related_result",
+            "tag": tag,
+            "axis": axis,
+            "requestId": request_id,
+            "results": results,
+        })
+        return True
+
+    if command_type == "interactive_browse":
+        axis = str(command.get("axis") or "")
+        subgroup = str(command.get("subgroup") or "")
+        parent = str(command.get("parent") or "")
+        request_id = str(command.get("requestId") or command.get("request_id") or "")
+        try:
+            offset = max(0, int(command.get("offset") or 0))
+            limit = max(1, min(int(command.get("limit") or 60), 200))
+        except (TypeError, ValueError):
+            offset, limit = 0, 60
+        payload = await run_in_thread(
+            browse_interactive, context, axis, subgroup, parent, offset, limit
+        )
+        await _send_json(ws, {
+            "type": "interactive_browse_result",
+            "axis": axis,
+            "subgroup": subgroup,
+            "parent": parent,
+            "requestId": request_id,
+            **payload,
+        })
         return True
 
     if command_type == "autocomplete_translate":

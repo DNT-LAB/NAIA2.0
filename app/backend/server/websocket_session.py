@@ -19,6 +19,10 @@ from app.backend.server.autocomplete_commands import (
     AUTOCOMPLETE_COMMAND_TYPES,
     handle_autocomplete_command,
 )
+from app.backend.server.event_corpus_commands import (
+    EVENT_CORPUS_COMMAND_TYPES,
+    handle_event_corpus_command,
+)
 from app.backend.server.depth_search_commands import (
     DEPTH_SEARCH_COMMAND_TYPES,
     handle_depth_search_command,
@@ -80,7 +84,10 @@ GenerationRunnerStarter = Callable[[WebSessionContext, set[WebSocket]], None]
 # 않아 검색이 도는 동안에도 다음 키 입력(autocomplete 등)이 즉시 읽혀 응답한다. 대형 풀(100만+
 # 행)에서 첫 칩 검색이 수십 초 걸려도 UI(autocomplete)가 죽지 않게 하는 것이 목적.
 # assign 은 B3 재사용으로 가벼워 인라인 유지(검색 결과 round-trip 이후에만 도착하므로 순서 보존).
-LIVE_DISPATCH_TYPES = {"tag_filter_search"}
+# event_corpus_query 도 같은 이유로 백그라운드 디스패치한다(대형 파티션 집계).
+# 단 seq 카운터는 커맨드 계열별로 분리한다 — 공유하면 태그필터 검색이 진행 중인 코퍼스
+# 질의를 superseded 로 죽이고(그 반대도) 서로를 무효화한다.
+LIVE_DISPATCH_TYPES = {"tag_filter_search", "event_corpus_query"}
 
 
 async def _run_live_command(
@@ -147,9 +154,16 @@ def register_websocket_session(
 
         ws.send = _locked_send  # type: ignore[method-assign]
         live_tasks: set[asyncio.Task] = set()
+        # 커맨드 계열별 최신 in-flight task. 새 요청이 오면 이전 것을 취소해 적재를 막는다.
+        live_by_type: dict[str, asyncio.Task] = {}
         # Latest-search ownership is per websocket. A search typed in another
         # browser tab must not supersede this tab's still-valid result.
         tag_filter_seq_guard = {"seq": 0}
+        event_corpus_seq_guard = {"seq": 0}
+        live_seq_guards = {
+            "tag_filter_search": tag_filter_seq_guard,
+            "event_corpus_query": event_corpus_seq_guard,
+        }
         try:
             await send_startup_messages(
                 ws,
@@ -174,10 +188,20 @@ def register_websocket_session(
                         if ctype in LIVE_DISPATCH_TYPES:
                             # B4: 무거운 검색을 백그라운드로 — receive 루프는 즉시 다음 메시지를
                             # 읽어 autocomplete 가 검색 중에도 응답한다. seq 로 superseded 검색 폐기.
-                            tag_filter_seq_guard["seq"] += 1
-                            seq = tag_filter_seq_guard["seq"]
+                            guard = live_seq_guards[ctype]
+                            guard["seq"] += 1
+                            seq = guard["seq"]
                             command["_seq"] = seq
-                            command["_seq_guard"] = tag_filter_seq_guard
+                            command["_seq_guard"] = guard
+                            # 계열당 in-flight 1개로 제한한다. seq guard 는 stale 결과의
+                            # '전송'만 막을 뿐 task/future 적재는 막지 못한다 — 칩을 연타하면
+                            # 죽은 집계들이 executor worker 를 계속 점유한다.
+                            # (to_thread 취소가 스레드를 멈추지는 않지만, 콜백과 송신은 끊기고
+                            #  task 누적은 사라진다. 서비스 쪽 should_abort 가 청크 경계에서
+                            #  협조적으로 빠져나온다.)
+                            previous = live_by_type.get(ctype)
+                            if previous is not None and not previous.done():
+                                previous.cancel()
                             live_task = asyncio.create_task(_run_live_command(
                                 ws,
                                 context,
@@ -189,6 +213,7 @@ def register_websocket_session(
                                 start_generation_runner=start_generation_runner,
                             ))
                             live_tasks.add(live_task)
+                            live_by_type[ctype] = live_task
                             live_task.add_done_callback(live_tasks.discard)
                         else:
                             await handle_json_command(
@@ -313,6 +338,13 @@ async def handle_json_command(
         )
     elif command_type in AUTOCOMPLETE_COMMAND_TYPES:
         await handle_autocomplete_command(
+            ws,
+            context,
+            command,
+            run_in_thread=run_in_thread,
+        )
+    elif command_type in EVENT_CORPUS_COMMAND_TYPES:
+        await handle_event_corpus_command(
             ws,
             context,
             command,

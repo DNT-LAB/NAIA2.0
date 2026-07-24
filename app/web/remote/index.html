@@ -476,6 +476,9 @@
               <div class="activated-summary hidden" id="activatedSummary" aria-live="polite"></div>
             </div>
           </div>
+          <!-- Interactive Mode: 프롬프트를 의미 슬롯으로 분해한 블록 리스트.
+               Interactive 토글이 켜졌을 때만 표시된다(모듈이 hidden 을 제어). -->
+          <div class="ia-blocks" id="iaBlocks" hidden></div>
           <!-- Tag search bar (reserved for future: event/outfit/preset) -->
           <div class="tag-search-bar" id="tagSearchBar" style="display:none">
             <input class="tag-search-input" id="tagSearchInput" type="text" placeholder="태그 검색 (한글/영문)..." autocomplete="off">
@@ -647,6 +650,10 @@
         <div class="assistants-section">
           <div class="assistants-label">
             <span class="assistants-title">Tools &amp; Assistants <span class="assistants-info">i</span></span>
+            <button type="button" class="ia-mode-toggle" id="iaModeToggle" aria-pressed="false"
+                    data-naia-guide="Interactive 모드. 프롬프트를 캐릭터/의상/액션/표정/구도/배경 슬롯으로 나눠 편집합니다. 켜져 있는 동안 Prompt Fixed와 WC Solo는 사용할 수 없습니다(블록에서 프롬프트를 직접 조립하므로 충돌합니다).">
+              <span class="ia-mode-dot" aria-hidden="true"></span><span>Interactive</span>
+            </button>
             <div class="assistants-ollama-segment" role="group" aria-label="Ollama tools">
               <button type="button" class="assistants-ollama-btn" id="ollamaAssistantBtn" aria-label="Ollama Assist">Ollama Assist</button>
               <button type="button" class="assistants-ollama-btn" id="ollamaChatBtn" aria-label="Ollama Chat">Chat</button>
@@ -704,6 +711,8 @@
 
 <!-- Right tab wrapper -->
 <div class="viewer-wrapper">
+  <!-- Interactive Mode 작업 패널. 좌측 블록을 클릭하면 열린다. -->
+  <aside class="ia-panel" id="iaPanel" aria-label="Interactive slot editor"></aside>
   <div class="right-tab-bar" role="tablist" aria-label="Right panel tabs">
     <button class="right-tab-btn active" data-right-tab="result" onclick="switchRightTab('result')" role="tab" aria-selected="true">
       <span class="right-tab-icon">🖼</span><span>Result</span>

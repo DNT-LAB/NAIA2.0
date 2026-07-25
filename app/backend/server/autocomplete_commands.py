@@ -146,6 +146,8 @@ def browse_interactive(
     parent: str = "",
     offset: int = 0,
     limit: int = 60,
+    include: Any = None,
+    exclude: Any = None,
 ) -> dict[str, Any]:
     """계층 브라우징. depth 는 어떤 인자가 채워졌는지로 결정된다.
 
@@ -161,7 +163,11 @@ def browse_interactive(
         payload = idx.tags_in(slot, subgroup, offset=offset, limit=limit)
         payload["depth"] = 2
     else:
-        payload = {"items": idx.subgroups(slot), "depth": 1, "total": 0, "hasMore": False}
+        # Depth1 만 섹션 스코프(구도 vs 효과)를 건다. Depth2/3 은 선택한 subgroup 으로 자연 스코프.
+        payload = {
+            "items": idx.subgroups(slot, include=include, exclude=exclude),
+            "depth": 1, "total": 0, "hasMore": False,
+        }
         payload["total"] = len(payload["items"])
     return payload
 
@@ -637,8 +643,12 @@ async def handle_autocomplete_command(
             limit = max(1, min(int(command.get("limit") or 60), 200))
         except (TypeError, ValueError):
             offset, limit = 0, 60
+        include = command.get("subgroupInclude")
+        exclude = command.get("subgroupExclude")
+        include = include if isinstance(include, list) else None
+        exclude = exclude if isinstance(exclude, list) else None
         payload = await run_in_thread(
-            browse_interactive, context, axis, subgroup, parent, offset, limit
+            browse_interactive, context, axis, subgroup, parent, offset, limit, include, exclude
         )
         await _send_json(ws, {
             "type": "interactive_browse_result",

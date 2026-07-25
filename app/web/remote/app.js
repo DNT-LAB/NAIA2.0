@@ -292,6 +292,9 @@ function initNaiaTitleTooltips() {
       }
       mutation.addedNodes.forEach(node => scanTitles(node));
     });
+    // hover 중이던 owner 가 재렌더로 DOM 에서 사라지면 pointerout 이 오지 않아 툴팁이 남는다
+    // (인터랙티브 칩은 편집마다 재렌더됨). 고아 툴팁을 닫는다.
+    if (owner && !owner.isConnected) hideTooltip();
   }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['title']});
 
   document.addEventListener('pointerover', event => {
@@ -887,7 +890,7 @@ let eventCorpusHandlers = null;
 let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260724-ia3')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260724-ia14')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -896,7 +899,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveAutocomplete} =
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
     const {createInteractiveBrowse} =
-      await import('./js/features/interactiveBrowse.mjs?v=20260724-iab4');
+      await import('./js/features/interactiveBrowse.mjs?v=20260724-iab6');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -914,6 +917,10 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       showToast,
       autocomplete: interactiveAutocomplete,
       browse: interactiveBrowse,
+      // 슬롯 입력창(textarea)에 범용 자동완성을 붙인다. 팝업 검색창에는 붙이지 않는다.
+      bindTagAssist,
+      getAutocompleteTarget: getTagAssistTarget,
+      getMode: () => currentMode || modeSelect?.value || 'NAI',
       queryCorpus: params => requestEventCorpusQuery(wsSend, params),
       corpusStatus: () => requestEventCorpusStatus(wsSend),
       onPromptChange: promptText => {
@@ -955,6 +962,23 @@ function applyInteractiveModeGate(isActive) {
     control.title = isActive
       ? 'Interactive 모드에서는 사용할 수 없습니다 (블록이 프롬프트를 직접 조립합니다).'
       : '';
+  }
+  updateInteractiveNaiToolBlock();
+}
+
+// Interactive 모드에서는 NAI 전용 Character / Character Reference 도구를 차단한다 —
+// 캐릭터는 Interactive 블록이 직접 관리하므로 별도 도구와 소스가 다투면 안 된다.
+// Vibe Transfer 만 사용 가능. 버튼을 비활성화하고, 열려 있으면 닫는다.
+// (백엔드 스트립은 캐릭터->생성 배선 Phase 2 와 함께 처리한다.)
+const INTERACTIVE_BLOCKED_NAI_TOOLS = ['character', 'character_reference'];
+function updateInteractiveNaiToolBlock() {
+  const blocked = document.body.classList.contains('interactive-mode');
+  INTERACTIVE_BLOCKED_NAI_TOOLS.forEach(mid => {
+    const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
+    if (btn) btn.classList.toggle('interactive-blocked', blocked);
+  });
+  if (blocked && INTERACTIVE_BLOCKED_NAI_TOOLS.includes(currentModuleId)) {
+    closeModule({ keepChunk: false });
   }
 }
 
@@ -5954,6 +5978,8 @@ function syncMode(mode) {
     const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
     if (btn) btn.classList.toggle('nai-only-disabled', !isNai);
   });
+  updateInteractiveNaiToolBlock();   // Interactive 활성 시 Character/CharRef 차단 유지
+
   // 모드 전환 시 런처 카테고리 상태(category-status = 적용된 Character/Vibe/Ref 표시)를
   // 재계산한다. updateModeState()는 요약(Activated:)만 갱신하고 런처 버튼은 안 건드렸다 —
   // 이것이 사용자가 본 "요약은 맞는데 버튼은 비활성"의 경로 분리다(Bug 1, ComfyUI→NAI 재현).

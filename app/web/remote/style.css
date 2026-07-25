@@ -9569,6 +9569,8 @@ body.resizing-result-info {
 .module-btn.vibe-active { border-color: #d4a06a; color: #d4a06a; }
 .module-btn.vibe-active.active { border-color: var(--accent-glow); color: #fff; }
 .module-btn.nai-only-disabled { opacity: 0.35; pointer-events: none; }
+/* Interactive 모드: Character / Char Ref 차단(Vibe 만 허용). */
+.module-btn.interactive-blocked { opacity: 0.35; pointer-events: none; }
 .module-tooltip {
   display: none;
   position: fixed;
@@ -19789,6 +19791,13 @@ body.detached-module .mod-grid-3 {
   color: var(--text-muted); white-space: nowrap;
 }
 .ia-chip.is-more { background: none; color: var(--text-dim); padding-left: 2px; }
+/* 통합 칩: 자연어 '문장 칩'은 태그 칩과 시각 구분(이탤릭·다른 색·말줄임, 전체는 호버 title). */
+.ia-chip.is-prose {
+  font-family: var(--font-editor); font-style: italic;
+  background: rgba(124,106,239,0.13); border-color: rgba(124,106,239,0.30);
+  color: var(--text-primary);
+  max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+}
 .ia-chip-empty { font-family: var(--font-display); font-size: 10px; color: var(--text-dim); font-style: italic; }
 
 /* --- 캐릭터 블록: 헤더 + 접이식 카드(아코디언) --- */
@@ -19800,23 +19809,60 @@ body.detached-module .mod-grid-3 {
 .ia-char { border-bottom: 1px solid var(--border-dim); }
 .ia-char:last-of-type { border-bottom: 0; }
 .ia-char-head {
-  display: grid; grid-template-columns: 10px 24px minmax(0, 1fr) auto;
-  align-items: center; column-gap: 7px; padding: 5px 9px; cursor: pointer;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px;
+  padding: 5px 9px; cursor: pointer;
 }
 .ia-char-head:hover { background: var(--bg-hover); }
-.ia-char-caret { color: var(--text-dim); font-size: 8px; line-height: 1; transition: transform 0.15s; }
+.ia-char-caret { color: var(--text-dim); font-size: 8px; line-height: 1; transition: transform 0.15s; flex: 0 0 auto; }
 .ia-char.is-open .ia-char-caret { transform: rotate(90deg); }
-.ia-char-id { font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--accent-glow); }
+.ia-char-id { font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: var(--accent-glow); flex: 0 0 auto; }
+.ia-char-spring { flex: 1 1 auto; }
+.ia-char.is-disabled { opacity: 0.5; }
+/* 요약(특징~표정 미리보기)은 컨트롤 아래 줄 전체로. 펼쳤을 때는 본문이 있으니 숨긴다. */
 .ia-char-sum {
   font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
-  line-height: 1.55; word-break: break-word;
+  line-height: 1.55; word-break: break-word; flex-basis: 100%; min-width: 0;
 }
+.ia-char.is-open .ia-char-sum { display: none; }
+
+/* 성별 세그먼트 토글 [ Male | Female ] */
+.ia-char-gender {
+  display: inline-flex; flex: 0 0 auto; border: 1px solid var(--border-dim);
+  border-radius: 5px; overflow: hidden;
+}
+.ia-genbtn {
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.3px;
+  padding: 2px 7px; border: 0; background: none; color: var(--text-dim); cursor: pointer;
+}
+.ia-genbtn + .ia-genbtn { border-left: 1px solid var(--border-dim); }
+.ia-genbtn:hover { color: var(--text-muted); background: var(--bg-hover); }
+.ia-genbtn.on { color: var(--text-primary); background: rgba(124,106,239,0.22); }
+
+/* Reference 목업 버튼 */
+.ia-char-ref {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 8.5px; padding: 2px 8px;
+  border: 1px solid var(--border-dim); border-radius: 5px; background: none;
+  color: var(--text-dim); cursor: pointer;
+}
+.ia-char-ref:hover { color: var(--accent-glow); border-color: var(--accent); }
+
+/* 삭제 버튼 */
+.ia-char-del {
+  flex: 0 0 auto; width: 18px; height: 18px; line-height: 1; border-radius: 5px;
+  border: 1px solid var(--border-dim); background: none; color: var(--text-dim);
+  font-size: 13px; cursor: pointer;
+}
+.ia-char-del:hover { color: var(--accent-secondary); border-color: var(--accent-secondary); }
+
+/* 상태 = Enable/Disable 토글 버튼 */
 .ia-char-state {
-  font-family: var(--font-mono); font-size: 7.5px; letter-spacing: 0.5px;
-  border-radius: 3px; padding: 1px 4px; text-transform: uppercase;
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 7.5px; letter-spacing: 0.5px;
+  border-radius: 3px; padding: 2px 5px; text-transform: uppercase;
+  background: none; border: 1px solid transparent; cursor: pointer;
 }
-.ia-char-state.active { color: var(--success); border: 1px solid rgba(92,184,122,0.4); }
-.ia-char-state.cold { color: var(--text-dim); border: 1px solid var(--border-dim); }
+.ia-char-state.active { color: var(--success); border-color: rgba(92,184,122,0.4); }
+.ia-char-state.disabled, .ia-char-state.cold { color: var(--text-dim); border-color: var(--border-dim); }
+.ia-char-state:hover { border-color: var(--accent); color: var(--text-primary); }
 .ia-char-body { display: none; padding: 2px 9px 8px 20px; flex-direction: column; gap: 4px; }
 .ia-char.is-open .ia-char-body { display: flex; }
 .ia-sub-block {
@@ -19907,6 +19953,54 @@ body.detached-module .mod-grid-3 {
 }
 .ia-grid-tag:hover { border-color: var(--accent); color: var(--text-primary); background: var(--bg-elevated); }
 .ia-grid-kr { font-size: 9px; color: var(--text-dim); }
+
+/* --- 슬롯 인라인 텍스트 편집 (칩 <-> 텍스트) --- */
+.ia-slot-input {
+  width: 100%; resize: none; overflow-y: auto;
+  min-height: 58px; max-height: 160px; box-sizing: border-box;
+  padding: 5px 8px; border-radius: 6px;
+  border: 1px solid var(--accent); background: var(--bg-deep);
+  color: var(--text-primary); font-family: var(--font-editor); font-size: 11px;
+  line-height: 1.5; cursor: text; outline: none;
+}
+.ia-slot-input::placeholder { color: var(--text-dim); font-style: italic; }
+.ia-block.is-editing, .ia-sub-block.is-editing { cursor: text; }
+/* 편집 중 슬롯은 3줄 입력창을 담으므로 세로 가운데 정렬을 위로 올린다. */
+.ia-block.is-editing, .ia-sub-block.is-editing { align-items: start; }
+.ia-block.is-editing .ia-block-label, .ia-sub-block.is-editing .ia-block-label { padding-top: 4px; }
+
+/* --- 앵커 팝업(검색창 상단 통합 + 분류 탐색) --- */
+.ia-panel { max-height: calc(100vh - 24px); }
+.ia-search.ia-search-top { margin: 10px 14px 2px; flex-shrink: 0; }
+.ia-search.ia-search-top input { font-size: 11px; }
+.ia-panel-body { padding-top: 6px; }
+
+/* 구도 3축 콤보 프리셋 패널 (Dev0714 복원) */
+.ia-comp-panel {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 2px 2px 10px; margin-bottom: 8px; border-bottom: 1px solid var(--border-dim);
+}
+.ia-comp-row { display: flex; align-items: center; gap: 8px; }
+.ia-comp-row-top { align-items: flex-start; }
+.ia-comp-lbl { flex: 0 0 82px; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted); }
+.ia-comp-select {
+  flex: 1; min-width: 0; height: 28px; padding: 0 8px; border-radius: 6px;
+  border: 1px solid var(--border-dim); background: var(--bg-deep); color: var(--text-primary);
+  font-family: var(--font-editor); font-size: 11px; cursor: pointer;
+}
+.ia-comp-select:focus { border-color: var(--accent); outline: none; }
+.ia-comp-cats { flex: 1; display: flex; flex-wrap: wrap; gap: 4px; }
+.ia-comp-cat {
+  font-family: var(--font-mono); font-size: 9.5px; padding: 3px 8px; border-radius: 5px;
+  border: 1px solid var(--border-dim); background: none; color: var(--text-dim); cursor: pointer;
+}
+.ia-comp-cat:hover { color: var(--text-muted); border-color: var(--border-glow); }
+.ia-comp-cat.is-on { color: var(--text-primary); background: rgba(124,106,239,0.22); border-color: var(--accent); }
+.ia-comp-out {
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--accent-glow);
+  background: rgba(124,106,239,0.10); border-radius: 6px; padding: 6px 8px; line-height: 1.5;
+  word-break: break-word;
+}
 
 /* Interactive 모드에서는 프롬프트 입력창을 감춘다. 최종 문자열은 별도 미리보기로만 본다.
    값은 그대로 유지되므로 토글을 끄면 다시 보인다. */

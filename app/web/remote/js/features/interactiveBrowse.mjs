@@ -27,6 +27,9 @@ export function createInteractiveBrowse({
   let reqSeq = 0;
   let uidSeq = 0;
   let tip = null;
+  let filterQuery = '';   // 팝업 검색창이 넣는 필터(라벨 부분일치). 빈 값=전체 표시.
+  let sgInclude = null;   // 섹션 스코프: Depth1 subgroup allowlist (구도 섹션)
+  let sgExclude = null;   // 섹션 스코프: Depth1 subgroup denylist (효과 섹션)
 
   let d1 = emptyCol();
   let d2 = {...emptyCol(), subgroup: '', hasMore: false, offset: 0};
@@ -65,7 +68,10 @@ export function createInteractiveBrowse({
   function loadSubgroups() {
     if (!mount) return;
     d1.loading = true; render();
-    if (!issue('d1', {})) { d1.loading = false; render(); }
+    const extra = {};
+    if (sgInclude) extra.subgroupInclude = sgInclude;   // 섹션 스코프를 백엔드 Depth1 에 전달
+    if (sgExclude) extra.subgroupExclude = sgExclude;
+    if (!issue('d1', extra)) { d1.loading = false; render(); }
   }
   function loadTags(subgroup, offset = 0) {
     if (d2.loading) return;   // M8: 중복 요청 방지
@@ -195,6 +201,23 @@ export function createInteractiveBrowse({
       if (s) b.scrollTop = s;
     });
     bind();
+    applyFilter();
+  }
+
+  /** 검색어(부분일치)로 현재 표시 중인 행을 숨긴다. 빈 값이면 전부 표시. */
+  function applyFilter() {
+    if (!mount) return;
+    const q = filterQuery;
+    mount.querySelectorAll('.ia-brz-item, .ia-brz-row, .ia-brz-tnode').forEach(row => {
+      if (!q) { row.style.display = ''; return; }
+      const label = (row.querySelector('.ia-brz-label')?.textContent || '').toLowerCase();
+      row.style.display = label.includes(q) ? '' : 'none';
+    });
+  }
+
+  function setFilter(query) {
+    filterQuery = String(query == null ? '' : query).trim().toLowerCase();
+    applyFilter();
   }
 
   function subgroupLabel(id) {
@@ -290,17 +313,22 @@ export function createInteractiveBrowse({
 
   // ---------------------------------------------------------------- api
 
-  function attach(nextMount, {axis: nextAxis = '', onPick: pick = () => {}, getExisting: existing = () => []} = {}) {
+  function attach(nextMount, {axis: nextAxis = '', onPick: pick = () => {}, getExisting: existing = () => [],
+                              subgroupInclude = null, subgroupExclude = null} = {}) {
     detach();
     mount = nextMount || null;
     onPick = typeof pick === 'function' ? pick : () => {};
     getExisting = typeof existing === 'function' ? existing : () => [];
     axis = String(nextAxis || '');
+    sgInclude = Array.isArray(subgroupInclude) && subgroupInclude.length ? subgroupInclude : null;
+    sgExclude = Array.isArray(subgroupExclude) && subgroupExclude.length ? subgroupExclude : null;
     reset();
   }
   function detach() {
     mount = null; pending.clear(); uidMap.clear(); hideTip();
     latest.d1 = latest.d2 = latest.d3root = '';
+    filterQuery = '';   // 슬롯을 바꾸면 필터도 리셋
+    sgInclude = sgExclude = null;
   }
   function reset() {
     d1 = emptyCol();
@@ -313,6 +341,6 @@ export function createInteractiveBrowse({
   }
   function refreshDupes() { render(); }
 
-  return {attach, detach, reset, onResult, refreshDupes,
+  return {attach, detach, reset, onResult, refreshDupes, setFilter,
     destroy: () => { detach(); if (tip) { tip.remove(); tip = null; } }};
 }

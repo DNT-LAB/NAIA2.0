@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260725-ax50';
+} from './interactiveAxes.mjs?v=20260725-ax52';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -121,7 +121,8 @@ function compChips(comp) {
 // 슬롯/축 정의는 interactiveAxes.mjs(와일드카드에서 생성)가 SSOT.
 const CHAR_SUBS = [
   ...CHAR_SLOTS,
-  {key: '의상', icon: '\u{1F457}', axis: 'clothing'},
+  // 의상/소품·장식도 CHAR_SLOTS(생성 파일)로 옮겼다 — 썸네일 축 22개 + 탐색기를
+  // 함께 가지므로 sections 가 필요하다. 여기에 리터럴로 남기면 슬롯이 중복된다.
   {key: '액션', icon: '\u{1F3C3}', axis: 'pose_action'},
   // 표정은 CHAR_SLOTS(생성 파일)로 옮겼다 — 썸네일 축(홍조·눈물·땀 27장)과
   // 탐색기를 함께 가지므로 sections 가 필요하다.

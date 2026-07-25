@@ -1,0 +1,16 @@
+apron
+cape
+capelet
+waist apron
+cloak
+frilled apron
+tabard
+hooded cloak
+fur-trimmed capelet
+fur-trimmed cape
+waist cape
+hooded capelet
+hagoromo
+hooded cape
+frilled capelet
+two-sided cape

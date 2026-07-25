@@ -1,0 +1,559 @@
+# -*- coding: utf-8 -*-
+"""의상 슬롯 축 분류 — wildcards/thumb/cloth_*.txt 를 생성한다.
+
+특징 슬롯(thumb_axes_build.py)과 분리한 이유: 의상 풀이 4,017개로 특징 전체보다 크고
+축 성격도 다르다(부위별 착용물 + 상태/디테일/스타일).
+
+## 규모 결정
+freq>=2000 + 제외군 -> 1,052개. 특징 슬롯 실적(1,480장)과 같은 자릿수라 현실적이다.
+freq>=60 까지 열면 3,774개로 2.5배가 되어 하루 단위 작업이 불가능하다.
+
+## catch-all 금지
+body_expose 에서 '나머지 전부' 버킷을 만들었다가 176개 중 131개가 오분류였다.
+여기서는 모든 태그를 명시 배정하거나 명시 제외하고, 남는 것은 '미분류'로 보고한다.
+"""
+import json
+import re
+from collections import Counter
+from pathlib import Path
+
+from core.kr_tag_loader import load_kr_tag_records
+import core.interactive_browse_index as ib
+
+CUT = 2000
+OUT = Path("wildcards/thumb")
+
+raw = load_kr_tag_records().raw
+idx = ib.InteractiveBrowseIndex(raw)
+F = lambda t: int((raw.get(t) or {}).get("freq", 0) or 0)
+D = lambda t: str((raw.get(t) or {}).get("description") or "")
+
+POOL: dict[str, int] = {}
+SUB: dict[str, str] = {}
+for _s in idx.subgroups("clothing"):
+    for _it in idx.tags_in("clothing", _s["id"], 0, 5000)["items"]:
+        POOL[_it["tag"]] = _it["count"]
+        SUB[_it["tag"]] = _s["id"]
+
+# ── 1. 다른 슬롯으로 내보내는 것 ────────────────────────────────────────────
+# 의상 슬롯에 있으나 보이는 것이 옷이 아닌 것들. 목적지 축은 이미 존재한다.
+TO_SKIN = [   # 옷이 만든 자국이지만 화면에 보이는 것은 피부색 경계다 -> 신체>피부
+    "tanlines", "one-piece tan", "bikini tan", "shorts tan", "shirt tan",
+    "revealing tanlines", "tanline peek", "accessory tan",
+]
+TO_MARKING = [   # 얼굴·손에 칠하는 것. facepaint 를 표식으로 옮긴 것과 같은 논리.
+    "makeup", "lipstick", "eyeshadow", "eyeliner", "mascara", "nail polish",
+    "black nails", "red nails", "pink nails", "blue nails", "purple nails",
+    "green nails", "yellow nails", "orange nails", "white nails", "gold nails",
+    "toenail polish", "colored nails", "multicolored nails", "french manicure",
+    "sparkle nails", "star nails", "heart nails",
+]
+TO_CONDITION = [   # 붕대는 부상의 표현이다. 5개는 이미 부상·오염 축에 있어 중복이었다.
+    "bandaged arm", "bandaged leg", "bandaged head", "bandaged neck",
+    "bandaged wrist", "bandaged chest", "bandaged foot", "bandaged hand",
+    "bandaged ankle", "bandaged knees", "bandaged ear", "bandaged tail",
+    "bandaged horn", "bandage on leg", "bandages", "bandaid", "bandaid on knee",
+    "bandaid on arm", "bandaid on neck", "bandaid on head", "bandaid on shoulder",
+    "bandaid on face", "bandaid on cheek", "bandaid on nose", "bandaid on leg",
+    "bandages over eyes", "bandage over one eye", "blood on clothes",
+]
+TO_SPECIES = [   # 초보자는 뿔을 찾으러 뿔 축에 간다. 가짜라도 화면에는 뿔이 보인다.
+    "fake horns", "fake wings", "fake antlers", "fake antennae",
+    "fake tail", "fake animal ears",
+]
+# `drawn ears` / `drawn tail` 은 소품이 아니라 몸에 **그린** 표시다(Codex 지적).
+# 입체 부속이 아니므로 종족 축이 아니라 문신·표식 축이 맞다.
+TO_MARKING_DRAWN = ["drawn ears", "drawn tail", "drawn whiskers"]
+MOVED_OUT = {t: dest for dest, lst in (
+    ("skin", TO_SKIN), ("marking", TO_MARKING + TO_MARKING_DRAWN),
+    ("body_condition", TO_CONDITION), ("species_axes", TO_SPECIES),
+) for t in lst}
+
+# ── 2. 제외군 ───────────────────────────────────────────────────────────────
+# (a) 규칙 제외 — 이유가 태그 이름/설명에 드러난다.
+RE_FRANCHISE = re.compile(r"\(")                     # 작품/캐릭터 한정 의상
+# 괄호가 작품명이 아니라 동명이의 구분자인 경우가 있다 — `pom pom (clothes)`(28,680),
+# `shrug (clothing)`(16,737), `charm (object)` 등 10개를 통째로 버리고 있었다(Codex 지적).
+RE_DISAMBIG = re.compile(
+    r"\((clothes|clothing|object|medium|weapon|item|garment|footwear|legwear"
+    r"|headwear|accessory|food|animal|plant|vehicle|style)\)$")
+RE_COSPLAY = re.compile(r"\bcosplay\b")
+RE_UNWORN = re.compile(r"^(unworn|removed) ")        # 아무도 착용하지 않은 옷 = 소품
+RE_ALTERNATE = re.compile(r"^(alternate|official alternate|costume switch)")
+# "를 사용한다" 형태의 리다이렉트를 빠뜨려 `highleg swimsuit` 가 살아남았다(Codex 지적).
+RE_DEPRECATED = re.compile(
+    r"(폐기|사용하지|대신 사용|로 대체|모호한 태그|를 사용한다|을 사용한다|를 쓴다)")
+# (b) 1인 썸네일에서 렌더 불가 — 상대·비교 대상·원본 디자인이 필요하다.
+EXCLUDE_EXPLICIT = {
+    "clothes swap", "cosplay", "crossdressing", "gender swap",   # 원본 비교 필요
+    "casual", "contemporary",            # "평소와 다른" 의미 — 기준이 없다
+    "clothes theft", "undressing another",                       # 2인 필요
+    "adjusting clothes", "adjusting headwear", "adjusting hair",  # 손동작 = 액션 슬롯
+    "clothes pull", "clothes lift", "skirt lift", "shirt lift",   # 행위 = 액션 슬롯
+    "dress lift", "clothes down", "clothing aside",
+    # 옷이 없는 상태는 의상 그리드에 둘 것이 아니다(Codex 지적). 태그는 탐색기에 남는다.
+    "nude", "completely nude", "nude cover",
+    "unbuttoned shirt",                  # open shirt 와 같은 그림
+    "reverse outfit",                    # 원래 의상과 비교해야 성립
+}
+# `multiple belts` / `multiple bracelets` / `multiple rings` 는 '개수 = 구도성'이라고
+# 판단해 제외했는데 틀렸다(Codex 지적) — 한 캐릭터가 팔찌를 여러 개 차면 그대로 보인다.
+
+# (c) 색상 조합 — 썸네일을 낭비할 필요가 없다.
+# `white shirt` / `black skirt` / `red bow` 는 이름만으로 100% 짐작 가능한데도 각각
+# 이미지를 한 장씩 먹는다. 머리/눈/피부 색을 팔레트로 처리한 것과 같은 문제다.
+# 여기서는 '본체 태그 + 색 팔레트'로 조합해 emit 하도록 따로 모아둔다(썸네일 생성 제외).
+CLOTH_COLORS = [
+    "red", "blue", "green", "yellow", "black", "white", "pink", "purple", "orange",
+    "brown", "grey", "gray", "silver", "gold", "beige", "aqua", "navy", "teal",
+    "light blue", "dark blue", "light green", "dark green", "light brown",
+    "dark brown", "light purple", "purple", "two-tone", "multicolored",
+]
+
+# 무늬 조합도 같은 성질이다. Codex 1차가 `striped shirt`/`checkered skirt`/`ribbed dress`
+# 를 cloth_pattern 으로 옮기라고 했는데, 그러면 무늬 축이 '무늬 달린 옷' 목록이 된다.
+# 색 조합과 똑같이 **본체 + 수식어**로 보는 것이 맞다 — `striped` 자체는 이미 무늬 축에 있다.
+CLOTH_PATTERNS = [
+    "striped", "vertical-striped", "horizontal-striped", "diagonal-striped",
+    "plaid", "checkered", "polka dot", "floral print", "camouflage", "argyle",
+    "ribbed", "lace-trimmed", "fur-trimmed", "ribbon-trimmed", "frilled",
+    "leopard print", "zebra print", "tiger print", "cow print", "star print",
+    "heart print", "food print", "print", "patterned",
+]
+
+
+def modifier_combo(t: str) -> tuple[str, str]:
+    """`white shirt` -> ('white', 'shirt'). 본체가 풀 안에 있을 때만 조합으로 본다."""
+    for c in sorted(CLOTH_COLORS + CLOTH_PATTERNS, key=len, reverse=True):
+        if t.startswith(c + " "):
+            head = t[len(c) + 1:]
+            if head in POOL:
+                return c, head
+    return "", ""
+
+
+def excluded(t: str) -> str:
+    if t in EXCLUDE_EXPLICIT:
+        return "렌더 불가/액션"
+    if RE_FRANCHISE.search(t) and not RE_DISAMBIG.search(t):
+        return "작품·캐릭터 한정"
+    if RE_COSPLAY.search(t):
+        return "cosplay"
+    if RE_UNWORN.search(t):
+        return "미착용(소품)"
+    if RE_ALTERNATE.search(t):
+        return "원본 비교 필요"
+    if RE_DEPRECATED.search(D(t)):
+        return "폐기·모호"
+    return ""
+
+# ── 3. subgroup -> 축 (attire 를 뺀 나머지는 subgroup 이 충분히 동질적이다) ──
+SUB_AXIS = {
+    "headwear": "cloth_headwear",
+    "hair_accessories": "cloth_hairacc",
+    "neck_and_neckwear": "cloth_neck",
+    "footwear": "cloth_footwear",
+    "legwear": "cloth_legwear",
+    "handwear": "cloth_handwear",
+    "eyewear": "cloth_eyewear",
+    "mask": "cloth_eyewear",
+    "face_accessories": "cloth_eyewear",
+    "accessories": "cloth_accessory",
+    "armor": "cloth_armor",
+    "sleeves": "cloth_sleeve",
+    "patterns": "cloth_pattern",
+    "prints": "cloth_pattern",
+    "design_elements": "cloth_detail",
+    "panties": "cloth_under",
+    "bra": "cloth_under",
+    "underwear": "cloth_under",
+    "fashion_style": "cloth_style",
+    "clothing_state": "cloth_state",
+    "states": "cloth_state",
+    "covering": "cloth_state",
+    "sexual_attire": "cloth_nsfw",
+    "clothes": "cloth_state",
+    "other_animals": "cloth_headwear",   # rabbit hood / reindeer hood 등
+    "cats": "cloth_headwear",            # cat hood
+    "objects": "cloth_accessory",        # sign around neck / head flag
+    "animal_interaction": "cloth_accessory",   # animal around neck
+    "weather": "cloth_headwear",         # snow on headwear
+    "interaction": "cloth_state",        # wings through clothes
+}
+
+# ── 4. attire(가장 큰 subgroup) 4분할 ───────────────────────────────────────
+# 옷 종류 / 착의 상태 / 디테일·실루엣 / 스타일·용도. 순서대로 검사한다.
+#   ⚠️ 첫 판에서 `(clothes|clothing|outfit|dress|shirt|skirt|top|bottom)$` 를 썼다가
+#   shirt / pleated skirt / t-shirt / tank top 까지 '착의 상태'로 삼켰다(158개 중 121개
+#   오분류). body_expose 의 catch-all 과 같은 병을 정규식으로 재발시킨 것이다.
+#   상태는 '옷의 조건'을 나타내는 수식어로만 판정한다 — 의류 명사로는 판정하지 않는다.
+A_STATE = re.compile(
+    r"^(open|torn|ripped|wet|dirty|burnt|loose|undone|untied|unbuttoned|unzipped"
+    r"|partially|half-|tied|taut)\b"
+    r"|^(hood up|hood down|topless|bottomless|nude|naked|no pants|no bra"
+    r"|no panties|no shirt|no shoes|clothes removed|underwear only)\b"
+    r"|^(covered|exposed)\b"
+    # 접미 형태의 상태 — 첫 판이 전부 놓쳤다(Codex 18건 적발). 조건 수식어가 뒤에 온다:
+    # `bikini under clothes` / `bra peek` / `bra visible through clothes` / `overskirt`
+    # / `coat on shoulders` / `crop top overhang`. 이것들은 '입을 수 있는 옷'이 아니라
+    # 겹쳐 입기·비침 상태다.
+    r"|\b(under clothes|under skirt|under pantyhose|peek|visible through clothes"
+    r"|on shoulders|overhang|through clothes)$"
+    r"|^(overskirt|panty straps|bra strap)$"
+)
+A_DETAIL = re.compile(
+    r"(cutout|slit|halter|strapless|off shoulder|spaghetti strap|underbust"
+    r"|highleg|pelvic curtain|backless|frill|ruffle|lace trim|fur trim|fur-trimmed"
+    r"|double-breasted|pocket|zipper|button|collar|hem|waistband|drawstring"
+    r"|sash|belt|buckle|cape$|train$|slitted|cleavage|side-tie|criss-cross"
+    r"|skin tight|tight|taut|oversized|cropped|layered|asymmetric)"
+)
+A_STYLE = re.compile(
+    r"(formal|casual|sportswear|winter clothes|summer|pajamas|sleepwear|loungewear"
+    r"|magical girl|gothic|lolita|punk|streetwear|business|office|athletic|gym"
+    r"|japanese clothes|chinese clothes|korean clothes|western|traditional"
+    r"|revealing clothes|erotic|fashion|wedding|funeral|mourning)"
+)
+A_TRAD = re.compile(
+    r"(japanese clothes|chinese clothes|korean clothes|indian clothes|arabian clothes"
+    r"|kimono|yukata|hakama|haori|happi|jinbei|miko|kariginu|hanbok|qipao"
+    r"|cheongsam|tangzhuang|hanfu|sari|salwar|kebaya|ao dai|dirndl|lederhosen"
+    r"|kilt|toga|sarong|thawb|abaya|obi|geta|tabi|zori|sarashi|fundoshi)"
+)
+A_UNIFORM = re.compile(
+    r"(uniform|serafuku|school|military|nurse|maid|police|firefighter|waitress"
+    r"|stewardess|cheerleader|scout|sailor|band|marching|judo|karate|kendo"
+    r"|santa|witch|nun|habit|priest|cassock|monk|shrine|track suit|gym uniform"
+    r"|playboy bunny|bunnysuit|kigurumi|mascot|costume|armor$)"
+)
+A_SWIM = re.compile(r"(swimsuit|bikini|swim briefs|swim trunks|rash guard|wetsuit)")
+A_UNDER = re.compile(
+    r"(underwear|panties|panty|\bbra\b|lingerie|chemise|corset|bustier|girdle"
+    r"|garter|thong|briefs|boxers|camisole|slip|petticoat|bloomers|buruma|bandeau)"
+)
+# `dress shirt` 는 셔츠다 — 첫 판에서 `dress` 만 보고 원피스로 보냈다(Codex 지적).
+A_DRESS = re.compile(
+    r"\bdress\b(?! shirt| pants| shoes| socks)|(gown|robe|leotard|bodysuit|unitard"
+    r"|jumpsuit|overalls|romper|onesie|coverall|sundress|microdress)"
+)
+# 원피스와 겉옷은 성격이 다르다 — 케이프/망토/앞치마는 다른 옷 위에 걸치는 것이다.
+# 첫 판에서 한 축(cloth_onepiece)에 몰아 드레스·정장·앞치마·망토가 섞였다.
+A_OUTER = re.compile(r"(apron|tabard|poncho|cloak|cape|capelet|shawl|stole|mantle)")
+A_BOTTOM = re.compile(
+    r"(skirt|shorts|pants|trousers|jeans|slacks|culottes|leggings|chaps|breeches)"
+)
+A_TOP = re.compile(
+    r"(shirt|blouse|sweater|hoodie|cardigan|vest|jacket|coat|jersey|tunic"
+    r"|tank top|turtleneck|blazer|parka|windbreaker|pullover|sweatshirt"
+    r"|crop top|tube top|top)"
+)
+
+# ── 판정 기준: "이 태그 하나로 '무엇을 입었나'에 답할 수 있는가" ──────────────
+# Codex 1차 리뷰가 `pleated skirt`/`frilled skirt`/`long skirt`/`miniskirt`/`pencil skirt`
+# 를 전부 cloth_detail 로 옮기라고 했다(수식어가 핵심이라는 논리). 받지 않았다.
+# 그대로 하면 하의 축에 `skirt`/`shorts`/`pants` 6개만 남고 디테일 축이 '모든 치마 변형'
+# 150개 잡동사니가 된다 — body_expose 에서 겪은 catch-all 이 이름만 바꿔 재발한다.
+# 초보자가 의상>하의를 열었을 때 봐야 하는 것은 실제 선택지(`pleated skirt`,
+# `miniskirt`, `pencil skirt`)다.
+#
+# 그래서 기준을 뒤집는 대신 명문화한다:
+#   - 태그 하나로 착용 가능한 옷이면 -> 그 옷의 부위 축   (`pleated skirt` = 치마)
+#   - 혼자서는 입을 수 없는 부분·구조면 -> cloth_detail   (`side slit`, `v-neck`,
+#     `cleavage cutout`, `hip vent`, `plunging neckline`, `lapels`, `strap gap`)
+# Codex 지적 중 이 기준으로도 옳은 것(정체성 오판·상태·수영복 순서·NSFW)만 반영했다.
+#
+# 검사 순서가 분류를 결정한다. **의류 정체성이 수식어보다 앞선다** —
+# 첫 판에서 디테일(A_DETAIL)을 앞에 두어 `frilled skirt` 가 하의가 아니라 디테일로
+# 갔다. 프릴 달린 치마는 여전히 치마다. 그래서 디테일·스타일을 맨 뒤로 옮겼고,
+# 그 결과 A_DETAIL 에는 머리 명사 자체가 디테일인 것(cleavage cutout, side slit,
+# halterneck)만 남는다.
+_ATTIRE_ORDER = (
+    (A_STATE, "cloth_state"),            # 조건 수식어(접두/접미)
+    (A_TRAD, "cloth_traditional"),
+    # 수영복이 제복보다 앞선다 — `school swimsuit` / `maid bikini` / `sailor bikini` 가
+    # 제복으로 갔다(Codex 5건). 학교 지급이든 메이드 테마든 수영복은 수영복이다.
+    (A_SWIM, "cloth_swim"),
+    (A_UNIFORM, "cloth_uniform"),
+    (A_UNDER, "cloth_under"),
+    (A_OUTER, "cloth_outer"),
+    (A_DRESS, "cloth_dress"),
+    (A_BOTTOM, "cloth_bottom"),
+    (A_TOP, "cloth_top"),
+    (A_DETAIL, "cloth_detail"),
+    (A_STYLE, "cloth_style"),
+)
+
+# `naked shirt` / `naked apron` / `naked towel` = "그것만 걸치고 나머지는 나체".
+# covering subgroup 에 있어 착의 상태로 갔는데 실제로는 명시적 성인 표현이다(Codex 7건).
+# 개별 나열 대신 규칙으로 둔다 — 앞으로 추가되는 `naked *` 도 자동으로 격리된다.
+A_NAKED = re.compile(r"^naked \w|^untied (bikini|swimsuit)$")
+# 소스의 `patterns` subgroup 은 이름이 틀렸다 — 트림·재질·여밈 부품이 섞여 있다.
+# 무늬가 아닌 것은 디테일이다(Codex 14건).
+A_MATERIAL = re.compile(
+    r"\b(trim|frills?|zipper|latex|denim|leather|satin|velvet|fabric)$"
+    r"|^(shiny clothes|cross-laced clothes|center frills|two-sided fabric)$"
+    r"|cutout$"
+)
+
+
+def attire_axis(t: str) -> str:
+    for pat, axis in _ATTIRE_ORDER:
+        if pat.search(t):
+            return axis
+    return ""
+
+# ── 5. 규칙이 놓치는 것 손배정 ──────────────────────────────────────────────
+# 규칙 통과 후 남은 것을 전수 확인해 하나씩 넣는다(catch-all 버킷을 만들지 않는다).
+EXPLICIT = {
+    # 정장 — 상하 세트라 상의/하의 어디에도 안 맞는다 -> 원피스·한벌 축
+    "suit": "cloth_dress",
+    # 넥라인·컷아웃 = 디테일
+    "hip vent": "cloth_detail", "strap gap": "cloth_detail",
+    "v-neck": "cloth_detail", "plunging neckline": "cloth_detail",
+    "lapels": "cloth_detail",
+    # 제복
+    "gakuran": "cloth_uniform", "dougi": "cloth_uniform",
+    # 전통
+    "furisode": "cloth_traditional", "hagoromo": "cloth_traditional",
+    "loincloth": "cloth_traditional",
+    # 하의
+    "cutoffs": "cloth_bottom",
+    # 속옷·잠옷
+    "babydoll": "cloth_under",
+    # 수영복
+    "male swimwear": "cloth_swim",
+    # 2차 잔여 8개 — 전통/제복/디테일/상태로 갈린다.
+    "egyptian clothes": "cloth_traditional", "ainu clothes": "cloth_traditional",
+    "idol clothes": "cloth_uniform", "tactical clothes": "cloth_uniform",
+    "reverse outfit": "cloth_detail", "sideless outfit": "cloth_detail",
+    "undersized clothes": "cloth_state",
+
+    # ── Codex 1차 리뷰 반영 ──────────────────────────────────────────────
+    # (1) 옷의 정체성을 규칙이 잘못 읽은 것
+    "dress shirt": "cloth_top",          # `dress` 에 걸려 원피스로 갔다
+    "military jacket": "cloth_top",      # 군복 전체가 아니라 재킷 단품
+    "sailor shirt": "cloth_top",         # 세일러 칼라가 달린 셔츠
+    "sailor dress": "cloth_dress",
+    "china dress": "cloth_traditional",  # 옆트임 중국식 드레스
+    "meiji schoolgirl uniform": "cloth_traditional",   # 메이지 기모노·하카마 복식
+    "lab coat": "cloth_uniform",         # 직업복
+    "pilot suit": "cloth_uniform", "plugsuit": "cloth_uniform",
+    "spacesuit": "cloth_uniform",        # 전부 직업·특수복이다
+    "harem outfit": "cloth_uniform",     # 국가 전통복이 아니라 공연 코스튬
+    "buruma": "cloth_uniform",           # 체육복 하의 = 교복 계열
+    "skirt set": "cloth_dress", "skirt suit": "cloth_dress",   # 상하 한벌
+    "sarong": "cloth_bottom",            # 허리에 둘러 입는 하의
+    "undershirt": "cloth_under",
+    # 전통 속옷은 기능이 속옷이다. 전통 축은 겉옷을 담는다.
+    "sarashi": "cloth_under", "chest sarashi": "cloth_under",
+    "fundoshi": "cloth_under", "loincloth": "cloth_under",
+    "hagoromo": "cloth_outer",           # 몸에 두르는 얇은 숄
+    "waist cape": "cloth_outer",
+
+    # (2) 노출(성인) 축으로 격리 — 초보자가 기본으로 보는 그리드에 둘 것이 아니다.
+    #     태그는 지우지 않는다(필요한 사용자가 있다). 축 전체가 블러 + 보류다.
+    "micro bikini": "cloth_nsfw", "thong bikini": "cloth_nsfw",
+    "eyepatch bikini": "cloth_nsfw", "bikini top only": "cloth_nsfw",
+    "bikini bottom only": "cloth_nsfw", "microskirt": "cloth_nsfw",
+    "micro shorts": "cloth_nsfw", "microdress": "cloth_nsfw",
+    "showgirl skirt": "cloth_nsfw", "reverse bunnysuit": "cloth_nsfw",
+    "no bra": "cloth_nsfw", "no panties": "cloth_nsfw", "wet panties": "cloth_nsfw",
+    "impossible shirt": "cloth_nsfw", "impossible bodysuit": "cloth_nsfw",
+    "see-through shirt": "cloth_nsfw", "see-through dress": "cloth_nsfw",
+    "see-through leotard": "cloth_nsfw",
+    # `playboy bunny`(62,919) 는 판단이 갈린다 — 잘 알려진 코스튬이지만 성적 맥락이
+    # 기본이다. 격리해도 태그는 그대로 제공되므로 안전한 쪽을 택했다. 되돌리기 쉽다.
+    "playboy bunny": "cloth_nsfw",
+
+    # ── Codex 2차 리뷰 반영 ──────────────────────────────────────────────
+    # (1) 노출(성인)로 격리 — 노출 상태 자체가 태그의 요지다.
+    "covered nipples": "cloth_nsfw", "topless": "cloth_nsfw",
+    "bottomless": "cloth_nsfw", "no pants": "cloth_nsfw",
+    "topless male": "cloth_nsfw", "see-through cleavage": "cloth_nsfw",
+    "underboob cutout": "cloth_nsfw", "framed breasts": "cloth_nsfw",
+    "revealing clothes": "cloth_nsfw",
+    # 밀착 원단이 가슴 형태를 그대로 드러내는 계열. 하위(impossible shirt/bodysuit)를
+    # 이미 격리했으므로 상위도 같이 옮긴다.
+    "impossible clothes": "cloth_nsfw",
+    # (2) 구조·실루엣 -> 디테일
+    "covered navel": "cloth_detail", "button gap": "cloth_detail",
+    "undersized clothes": "cloth_detail",
+    "tail through clothes": "cloth_detail", "hair through headwear": "cloth_detail",
+    "wings through clothes": "cloth_detail",
+    # (3) 개수는 렌더된다 — 제외를 철회했다
+    "multiple belts": "cloth_accessory", "multiple bracelets": "cloth_accessory",
+    "multiple rings": "cloth_accessory",
+    # (4) 괄호가 구분자인 것들
+    "shrug (clothing)": "cloth_top", "pom pom (clothes)": "cloth_detail",
+    "charm (object)": "cloth_accessory", "hanten (clothes)": "cloth_traditional",
+    "train (clothing)": "cloth_detail",
+}
+
+# 명시 제외 + 사유. EXPLICIT 에 빈 문자열로 넣으면 사유가 뭉개져 여기로 분리했다.
+EXCLUDE_REASON = {
+    "matching outfits": "2인 필요",
+    "adapted costume": "원본 비교 필요",   # 캐릭터의 평상시 설정과 비교해야 성립
+    "enmaided": "원본 비교 필요",
+    "traditional nun": "근접 중복(habit)",
+    "casual one-piece swimsuit": "근접 중복(one-piece swimsuit)",
+    "sleeveless sweater": "근접 중복(sweater vest)",
+}
+# `g-string`/`thong` 과 `turtleneck sweater`/`turtleneck` 도 근접 중복으로 지적됐지만
+# 남겼다 — 둘 다 고빈도 상용 태그이고 초보자가 속옷·상의를 고를 때 실제로 구분해서 찾는다.
+
+# ── 5b. 후처리 규칙 (Codex 3차 리뷰 반영) ───────────────────────────────────
+# subgroup 이 부위별로는 맞지만 '착용물 / 착용 상태 / 구성 부품'을 구분하지 않는다.
+# 개별 나열 대신 규칙으로 둔다 — 앞으로 추가되는 같은 형태의 태그도 자동으로 잡힌다.
+POST_RULES: tuple[tuple[re.Pattern, str], ...] = (
+    # 한쪽만 착용 / 위치를 옮겨 착용 / 손상 = 상태다. 착용물 종류가 아니다.
+    (re.compile(r"^single \w"), "cloth_state"),
+    # `loose` 는 접두 규칙에서 뺐다 — `loose socks`(6,399)는 상태가 아니라 교복과 함께
+    # 신는 양말 '종류'다. `loose necktie` 만 단건으로 상태 처리한다.
+    (re.compile(r"^(torn|tilted|backwards|popped|open) \w"), "cloth_state"),
+    (re.compile(r"(on head|around neck|on headwear|between breasts"
+                r"|rolled up|pushed up|over long sleeves)$"), "cloth_state"),
+    (re.compile(r"^no (shoes|socks|panties|bra)$"), "cloth_state"),
+    # 좌우가 다르다 / 크기가 다르다 = 디자인 특성이다.
+    (re.compile(r"^(mismatched|asymmetrical|uneven|large|small) \w"), "cloth_detail"),
+    # 머리카락에 붙는 것은 모자가 아니다 — 소스 headwear subgroup 이 둘을 섞고 있다.
+    (re.compile(r"^hair (bow|bows|ribbon|tie|bell|stick|beads|tubes|ornament)"
+                r"|hairband$|hairpin|kanzashi|scrunchie$|bun cover"
+                r"|^multiple hair bows$|^tress ribbon$|^frilled hair tubes$"), "cloth_hairacc"),
+    # 목에 거는 것은 액세서리가 아니라 목 축이다(초커가 목에 있는데 목걸이가 딴 데 있었다).
+    (re.compile(r"necklace$|^pendant$|^neck (ring|ruff)$|^dog tags$"
+                r"|^feather boa$"), "cloth_neck"),
+    # 옷깃의 형태는 옷의 부분이다.
+    (re.compile(r"^(sailor|wing|frilled shirt|high) collar$"), "cloth_detail"),
+    # 여밈·부품·부착 장식 = 혼자 입을 수 없다 -> 디테일 (명문화한 판정 기준 그대로)
+    (re.compile(r"^(buttons|o-ring|buckle|belt buckle|drawstring|zipper pull tab"
+                r"|epaulettes|fringe trim|strap|diamond button|dress bow|waist bow"
+                r"|ofuda on clothes|shoulder spikes|footwear bow)$"), "cloth_detail"),
+    # 구속구는 초보자용 그리드에 둘 것이 아니다.
+    (re.compile(r"gag(ged)?$|^(ball|bit|improvised|wiffle) gag$"), "cloth_nsfw"),
+)
+# 규칙으로 일반화되지 않는 단건.
+POST_EXPLICIT = {
+    "horn ornament": "cloth_accessory",        # 머리가 아니라 뿔에 찬다
+    "animal ear headphones": "cloth_accessory", "cat ear headphones": "cloth_accessory",
+    "wrist scrunchie": "cloth_accessory", "knee pads": "cloth_accessory",
+    "forehead jewel": "cloth_accessory",
+    "thigh strap": "cloth_accessory", "thighlet": "cloth_accessory",
+    "anklet": "cloth_accessory",                # 의류가 아니라 발찌
+    "armored boots": "cloth_armor",
+    "tabi": "cloth_legwear",                    # 일본 전통 양말
+    "legwear garter": "cloth_legwear",
+    "garter straps": "cloth_under",
+    "bikini armor": "cloth_nsfw",
+    "loose necktie": "cloth_state", "loose bikini": "cloth_state",
+}
+# 제외 — 평소 착장과 비교해야 성립 / 작품 고유 아이템 / 상대 필요 / 근접 중복.
+POST_EXCLUDE = {
+    "no headwear": "원본 비교 필요", "no legwear": "원본 비교 필요",
+    "bespectacled": "원본 비교 필요",
+    "super crown": "작품 고유 아이템", "v-fin": "작품 고유 아이템",
+    "interface headset": "작품 고유 아이템", "dynamax band": "작품 고유 아이템",
+    "character hair ornament": "작품 고유 아이템",
+    "chain leash": "상대·고정점 필요",
+    "shoe soles": "발 자세(액션 슬롯)",
+    "hair rings": "헤어스타일(머리 슬롯)",
+    "sleeves pushed up": "근접 중복(sleeves rolled up)",
+    "wristwatch": "근접 중복(watch)",
+    "pauldrons": "근접 중복(shoulder armor)",
+    "arm guards": "근접 중복(vambraces)",
+    "very long sleeves": "근접 중복(sleeves past fingers)",
+    "semi-rimless eyewear": "근접 중복(under-rim/over-rim eyewear)",
+    "crossed bandaids": "부상·오염 축",          # 장신구가 아니라 반창고
+}
+# `puffy sleeves`(우산 태그)와 `shawl` 은 Codex 제안을 받지 않았다 —
+# 전자는 고빈도이고 하위와 시각적으로 구분되며, 후자는 겉옷 축(신설)이 상의보다 맞다.
+
+
+# ── 6. 조립 ────────────────────────────────────────────────────────────────
+AXES: dict[str, list[str]] = {}
+EXCLUDED: dict[str, str] = {}
+COMBO: dict[str, tuple[str, str]] = {}
+UNASSIGNED: list[str] = []
+
+# 1단계: 조합 분해를 빼고 전량 배정한다.
+for t, f in POOL.items():
+    if t in MOVED_OUT:
+        continue
+    why = excluded(t)
+    if why:
+        EXCLUDED[t] = why
+        continue
+    if f < CUT:
+        EXCLUDED[t] = f"freq<{CUT}"
+        continue
+    if t in EXCLUDE_REASON:
+        EXCLUDED[t] = EXCLUDE_REASON[t]
+        continue
+    if t in EXPLICIT:
+        AXES.setdefault(EXPLICIT[t], []).append(t)
+        continue
+    if A_NAKED.search(t):
+        AXES.setdefault("cloth_nsfw", []).append(t)
+        continue
+    sub = SUB.get(t, "")
+    axis = SUB_AXIS.get(sub) or attire_axis(t)
+    # patterns/prints subgroup 안의 트림·재질·컷아웃은 무늬가 아니라 디테일이다.
+    if axis == "cloth_pattern" and A_MATERIAL.search(t):
+        axis = "cloth_detail"
+    if not axis:
+        UNASSIGNED.append(t)
+        continue
+    AXES.setdefault(axis, []).append(t)
+
+# 1.5단계: 후처리 규칙으로 재배정한다.
+for _axis in list(AXES):
+    for t in list(AXES[_axis]):
+        if t in POST_EXCLUDE:
+            AXES[_axis].remove(t)
+            EXCLUDED[t] = POST_EXCLUDE[t]
+            continue
+        dest = POST_EXPLICIT.get(t)
+        if not dest:
+            for _pat, _d in POST_RULES:
+                if _pat.search(t):
+                    dest = _d
+                    break
+        if dest and dest != _axis:
+            AXES[_axis].remove(t)
+            AXES.setdefault(dest, []).append(t)
+
+# 2단계: 조합으로 분해한다 — **수식어를 실제로 고를 수 있을 때만**.
+# 처음에는 CLOTH_PATTERNS 전체를 수식어로 썼는데, `frilled`/`plaid`/`ribbed`/`fur-trimmed`
+# 등 8개는 단독 태그가 없거나 제외돼 있었다. 그대로 분해하면 `frilled skirt` 가
+# '고를 수 없는 수식어 + 치마'가 되어 태그 자체에 도달할 수 없다.
+# 색은 팔레트(_palette.json)가 항상 제공하므로 무조건 유효하고,
+# 무늬는 cloth_pattern 축에 남아 있는 것만 유효하다.
+_valid_mods = set(CLOTH_COLORS) | set(AXES.get("cloth_pattern", ()))
+_assigned = {t for v in AXES.values() for t in v}
+for _axis in list(AXES):
+    _keep = []
+    for t in AXES[_axis]:
+        mod, head = modifier_combo(t)
+        if mod and mod in _valid_mods and head in _assigned:
+            COMBO[t] = (mod, head)
+        else:
+            _keep.append(t)
+    AXES[_axis] = _keep
+
+for k in AXES:
+    AXES[k].sort(key=lambda t: -F(t))
+
+if __name__ == "__main__":
+    print(f"의상 풀 {len(POOL)}개 / 절단선 freq>={CUT}")
+    print(f"  다른 슬롯으로: {len(MOVED_OUT)}개 "
+          f"{dict(Counter(MOVED_OUT.values()))}")
+    print(f"  제외: {len(EXCLUDED)}개 {dict(Counter(EXCLUDED.values()))}")
+    print(f"  색 조합(팔레트 후보, 썸네일 제외): {len(COMBO)}개")
+    _heads = Counter(h for _, h in COMBO.values())
+    print(f"    본체 {len(_heads)}종: "
+          + ", ".join(f"{h}×{n}" for h, n in _heads.most_common(12)))
+    print(f"  배정: {sum(len(v) for v in AXES.values())}개 / {len(AXES)}축")
+    for k, v in sorted(AXES.items(), key=lambda kv: -len(kv[1])):
+        print(f"    {k:20s} {len(v):4d}")
+    print(f"  미분류: {len(UNASSIGNED)}개")
+    for t in sorted(UNASSIGNED, key=lambda x: -F(x))[:40]:
+        print(f"    {t:34s} f={F(t):>8d} [{SUB.get(t,''):16s}] {D(t)[:34]}")

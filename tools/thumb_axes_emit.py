@@ -87,6 +87,9 @@ SLOTS = [
         # 신체 부위는 두 성격으로 나눈다 — '부위가 보인다'(구도성) vs '그 특징이 있다'(특징성).
         ("thumb", "노출·강조", "body_expose"),
         ("thumb", "신체 특징", "body_feature"),
+        # 문신·피어싱은 원래 '표식·문신' 슬롯이었다. 표식류를 정리하고 나니 축이 하나만
+        # 남아 슬롯을 유지할 이유가 없다 — 몸에 새기는 영구 장식이므로 신체 특징 뒤에 붙인다.
+        ("thumb", "문신·피어싱", "marking"),
         # 명시적 노출은 별도 축 + 기본 블러(호버 해제). 태그는 제공하되 눈에 먼저 안 띄게.
         # 부상은 일시적 상태라 영구 특징(신체 특징)과 섞지 않고 별도 섹션으로 둔다.
         ("thumb", "부상·오염", "body_condition"),
@@ -105,12 +108,48 @@ SLOTS = [
         # 탐색기 제거: 종족 220 이 legendary_creatures/kemonomimi 를 덮고,
         # 귀 98 + 꼬리 93 + 날개 41 + 뿔 32 가 animal_features 를 덮는다.
     ]),
-    # 표식·기타 -> 표식·문신. browse 전용이었고 성격이 뒤섞여 있었다(실측 133개 중
-    # 개조 11 + 이형 해부 9 는 이형 부위로 옮기고, 캐릭터 메타 12 는 제외했다 —
-    # 성별·연령은 캐릭터 헤더 토글이 담당하고 faceless/*focus 는 구도다).
-    # 남은 문신/피어싱/표식 계열 86개만 모아 썸네일 축으로 승격한다.
-    ("표식·문신", "\\u2728", "characteristic", [
-        ("thumb", "문신·피어싱", "marking"),
+    # (옛 '표식·기타' 슬롯은 폐지됐다. browse 전용이었고 성격이 뒤섞여 있었다 — 실측 133개
+    #  중 개조 11 + 이형 해부 9 는 이형 부위로, 문신/피어싱 86 은 신체 슬롯으로 옮기고,
+    #  캐릭터 메타 12 는 제외했다: 성별·연령은 캐릭터 헤더 토글이 담당하고 *focus 는 구도다.)
+    #
+    # ── 의상 ────────────────────────────────────────────────────────────────
+    # 의상 풀 4,017개를 freq>=2000 + 제외군으로 915개 23축으로 정리했다
+    # (tools/thumb_clothing_build.py 가 SSOT, 근거는 tools/CLOTHING_PLAN.md).
+    # 22축(성인 제외)을 팝업 하나에 담으면 스크롤이 불가능하므로 두 슬롯으로 나눈다:
+    #   의상    = 몸에 입는 것
+    #   소품·장식 = 부위에 차거나 거는 것
+    ("의상", "\\u{1F457}", "clothing", [
+        ("thumb", "상의", "cloth_top"),
+        ("thumb", "하의", "cloth_bottom"),
+        ("thumb", "원피스·한벌", "cloth_dress"),
+        ("thumb", "겉옷", "cloth_outer"),
+        ("thumb", "전통 의상", "cloth_traditional"),
+        ("thumb", "제복·코스튬", "cloth_uniform"),
+        ("thumb", "수영복", "cloth_swim"),
+        ("thumb", "속옷", "cloth_under"),
+        ("thumb", "착의 상태", "cloth_state"),
+        ("thumb", "디테일·실루엣", "cloth_detail"),
+        ("thumb", "무늬·프린트", "cloth_pattern"),
+        ("thumb", "스타일·용도", "cloth_style"),
+        ("thumb", "노출 의상(성인)", "cloth_nsfw"),
+        # 썸네일이 freq>=2000 만 덮으므로 나머지 3,100개는 탐색기가 담당한다.
+        ("browse", "의상 전체", ["attire", "clothing_state", "fashion_style",
+                                "sexual_attire", "covering", "medical"]),
+    ]),
+    ("소품·장식", "\\u{1F452}", "clothing", [
+        ("thumb", "모자", "cloth_headwear"),
+        ("thumb", "머리 장식", "cloth_hairacc"),
+        ("thumb", "목", "cloth_neck"),
+        ("thumb", "안경·마스크", "cloth_eyewear"),
+        ("thumb", "손", "cloth_handwear"),
+        ("thumb", "소매", "cloth_sleeve"),
+        ("thumb", "다리", "cloth_legwear"),
+        ("thumb", "신발", "cloth_footwear"),
+        ("thumb", "액세서리", "cloth_accessory"),
+        ("thumb", "갑옷", "cloth_armor"),
+        ("browse", "소품 전체", ["accessories", "headwear", "hair_accessories",
+                                "neck_and_neckwear", "footwear", "legwear",
+                                "handwear", "eyewear", "mask", "armor", "sleeves"]),
     ]),
 ]
 
@@ -150,9 +189,32 @@ out.append("// 썸네일 축의 태그 목록. 썸네일 파일명 = <axis>/<tag
 out.append("export const THUMB_TAGS = {")
 # 와일드카드 폴더의 .txt 를 전부 축으로 등록한다(매니페스트에 없는 신규 파일도 자동 반영).
 _FRAMING_DEFAULT = {"tail": "full", "wings": "full", "body_type": "full",
-                    "body_expose": "full", "species": "upper"}
+                    "body_expose": "full", "species": "upper",
+                    # 의상 축 — tools/thumb_bench_init.py 의 CLOTH_BATCHES 와 맞춘다.
+                    # 기본값(portrait)으로 떨어지면 벤치와 어긋나 표시가 거짓이 된다.
+                    "cloth_headwear": "portrait", "cloth_hairacc": "portrait",
+                    "cloth_neck": "portrait", "cloth_eyewear": "portrait",
+                    "cloth_top": "upper", "cloth_sleeve": "upper",
+                    "cloth_handwear": "upper",
+                    "cloth_legwear": "lower", "cloth_footwear": "lower",
+                    "cloth_bottom": "cowboy", "cloth_under": "cowboy",
+                    "cloth_swim": "cowboy", "cloth_state": "cowboy",
+                    "cloth_detail": "cowboy", "cloth_pattern": "cowboy",
+                    "cloth_accessory": "cowboy", "cloth_dress": "cowboy",
+                    "cloth_outer": "cowboy", "cloth_traditional": "cowboy",
+                    "cloth_uniform": "cowboy", "cloth_style": "cowboy",
+                    "cloth_armor": "cowboy", "cloth_nsfw": "explicit"}
 framings = {a["key"]: a.get("framing", "portrait") for a in man.get("axes", [])}
 _axis_files = sorted(p.stem for p in SRC.glob("*.txt"))
+# 슬롯이 참조하지 않는 축은 내보내지 않는다. 의상 축(cloth_*, 915개)이 분류만 끝나고
+# 아직 배선되지 않았는데, 그대로 등록하면 렌더되지도 않는 태그·설명을 브라우저로 보낸다.
+# 슬롯에 붙이는 순간 자동으로 포함된다.
+_referenced = {sec[2] for _, _, _, secs in SLOTS for sec in secs if sec[0] != "browse"}
+# face.txt 는 슬롯이 직접 참조하지 않는다 — face_eyes/face_parts/face_mark 로 파생되고
+# PACK_AXIS 가 팩 키로 되돌린다. 빼면 그 223개의 툴팁 설명이 사라진다.
+_referenced.add("face")
+_skipped_axes = [k for k in _axis_files if k not in _referenced]
+_axis_files = [k for k in _axis_files if k in _referenced]
 for key in _axis_files:
     tags = lines(key)
     if not tags: continue
@@ -222,7 +284,7 @@ for _k3 in _axis_files:
 for _k, _v in _groups.items():
     _thumb_all.update(_v)
 # NSFW 축은 태그를 나열하지 않고 축 전체를 블러한다(항목이 늘어도 자동 적용).
-SENSITIVE_AXES = ["body_nsfw"]
+SENSITIVE_AXES = ["body_nsfw", "cloth_nsfw"]
 _sensitive = [t for t in SENSITIVE if t in _thumb_all]
 _missing_sensitive = [t for t in SENSITIVE if t not in _thumb_all]
 for _ax in SENSITIVE_AXES:
@@ -298,4 +360,7 @@ print(f"  슬라이더: {list((man.get('sliders') or {}).keys())}")
 tt = {a['key']: len(lines(a['key'])) for a in man.get('axes',[]) if lines(a['key'])}
 print(f"  썸네일 축 {len(tt)}개 / 총 {sum(tt.values())}장: {tt}")
 print(f"  슬롯 {len(SLOTS)}개: {[s[0] for s in SLOTS]}")
+if _skipped_axes:
+    _n = sum(len(lines(k)) for k in _skipped_axes)
+    print(f"  미배선 축 {len(_skipped_axes)}개 / {_n}장 제외: {_skipped_axes}")
 print(f"  민감 태그 {len(_sensitive)}개 블러" + (f" / 목록에 없어 제외: {_missing_sensitive}" if _missing_sensitive else ""))

@@ -1,0 +1,62 @@
+open clothes
+open jacket
+torn clothes
+no shoes
+no bra
+open shirt
+no panties
+single thighhigh
+underwear only
+hood up
+wet clothes
+open coat
+single glove
+single earring
+bikini under clothes
+wet shirt
+torn pantyhose
+taut clothes
+open cardigan
+tilted headwear
+tied shirt
+swimsuit under clothes
+crop top overhang
+open kimono
+torn thighhighs
+shorts under skirt
+leotard under clothes
+torn shirt
+single sock
+coat on shoulders
+open vest
+open hoodie
+no shirt
+torn pants
+single leg pantyhose
+torn dress
+single sleeve
+single shoe
+covered collarbone
+popped collar
+single elbow glove
+loose necktie
+open collar
+taut shirt
+single detached sleeve
+wet swimsuit
+backwards hat
+no socks
+single kneehigh
+torn skirt
+torn bodysuit
+bodysuit under clothes
+open shorts
+torn cape
+torn sleeves
+open dress
+overskirt
+torn shorts
+panty straps
+single pauldron
+bike shorts under skirt
+dirty clothes

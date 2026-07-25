@@ -127,6 +127,74 @@ BATCHES = {
     "_redo_tail":        (TAILV, 3.0, "tail"),
 }
 
+
+# ── 의상 슬롯 템플릿 ────────────────────────────────────────────────────────
+# 특징 축의 핵심 장치는 `nude, safe` 였다 — 옷이 특징을 가리지 않게 하고 NAI 가 필수
+# 요소에만 집중하게 만든다. **의상은 옷이 주제이므로 이 장치를 쓸 수 없다.**
+#
+# 대체 장치가 '대조 의상(control garment)'이다. `pleated skirt` 를 찍을 때 상의를
+# 지정하지 않으면 NAI 가 매번 다른 상의를 그려서 그리드 전체가 시각적으로 시끄러워진다.
+# 변하지 않는 쪽을 고정하면 변하는 쪽(=축의 태그)만 눈에 남는다.
+#
+# 프레이밍은 사용자 지침을 따른다: "썸네일 크기로는 full body 소화가 불가능" ->
+# 기본은 cowboy shot 이고, 다리·신발만 하반신으로 내린다.
+#   ⚠️ 원피스·제복·전통은 기장이 정체성인데 cowboy shot 은 밑단을 잘라낸다.
+#   `short dress` / `long dress` 는 구분되지 않는다(34개 중 2개). 사용자 판단 대기.
+_CQ = "rating:general, white background, simple background"
+# 상의·소매·손: 상반신. 하의가 보이지 않아 대조 의상이 필요 없다.
+C_UPPER = (f"1girl, {ARTIST}, young female, solo, front view, upper body, <<VARY>>, "
+           f"looking at viewer, {_CQ}, {QUALITY}")
+# 모자·머리장식·목·안경: 초상. 흰 셔츠로 목선을 고정해 장식만 달라지게 한다.
+C_HEAD = (f"1girl, {ARTIST}, young female, solo, front view, portrait, <<VARY>>, "
+          f"white shirt, close-up, looking at viewer, {_CQ}, {QUALITY}")
+# 하의·속옷·수영복·상태·디테일·무늬: cowboy shot. 하의 축에는 흰 셔츠를 고정한다.
+C_TORSO = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
+           f"looking at viewer, {_CQ}, {QUALITY}")
+C_BOTTOM = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
+            f"white shirt, looking at viewer, {_CQ}, {QUALITY}")
+# 다리·신발: 하반신. 주름치마 + 흰 셔츠를 고정해 다리·발만 달라지게 한다.
+C_LOWER = (f"1girl, {ARTIST}, young female, solo, front view, lower body, standing, "
+           f"<<VARY>>, pleated skirt, white shirt, {_CQ}, {QUALITY}")
+# 원피스·한벌·전통·제복·겉옷·갑옷: cowboy shot(사용자 규칙). 대조 의상 없음.
+C_OUTFIT = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
+            f"looking at viewer, {_CQ}, {QUALITY}")
+
+CLOTH_BATCHES = {
+    "cloth_top":         (C_UPPER, 2.0, "cloth_upper"),
+    "cloth_sleeve":      (C_UPPER, 2.0, "cloth_upper"),
+    "cloth_handwear":    (C_UPPER, 2.0, "cloth_upper"),
+    "cloth_headwear":    (C_HEAD, 2.0, "cloth_head"),
+    "cloth_hairacc":     (C_HEAD, 2.0, "cloth_head"),
+    "cloth_neck":        (C_HEAD, 2.0, "cloth_head"),
+    "cloth_eyewear":     (C_HEAD, 2.0, "cloth_head"),
+    "cloth_bottom":      (C_BOTTOM, 2.0, "cloth_bottom"),
+    "cloth_under":       (C_TORSO, 2.0, "cloth_torso"),
+    "cloth_swim":        (C_TORSO, 2.0, "cloth_torso"),
+    "cloth_state":       (C_TORSO, 2.0, "cloth_torso"),
+    "cloth_detail":      (C_TORSO, 2.0, "cloth_torso"),
+    "cloth_pattern":     (C_TORSO, 2.0, "cloth_torso"),
+    "cloth_accessory":   (C_TORSO, 2.0, "cloth_torso"),
+    "cloth_legwear":     (C_LOWER, 2.0, "cloth_lower"),
+    "cloth_footwear":    (C_LOWER, 2.0, "cloth_lower"),
+    "cloth_dress":       (C_OUTFIT, 2.0, "cloth_outfit"),
+    "cloth_outer":       (C_OUTFIT, 2.0, "cloth_outfit"),
+    "cloth_traditional": (C_OUTFIT, 2.0, "cloth_outfit"),
+    "cloth_uniform":     (C_OUTFIT, 2.0, "cloth_outfit"),
+    "cloth_style":       (C_OUTFIT, 2.0, "cloth_outfit"),
+    "cloth_armor":       (C_OUTFIT, 2.0, "cloth_outfit"),
+    # 파일럿 전용(축당 3장). 프레이밍 실패를 싸게 잡는다 — 특징 슬롯에서 파일럿 27장이
+    # 축 단위 실패 3건을 잡아 수백 장을 절약했다.
+    "_pilot_upper":      (C_UPPER, 2.0, "cloth_upper"),
+    "_pilot_head":       (C_HEAD, 2.0, "cloth_head"),
+    "_pilot_bottom":     (C_BOTTOM, 2.0, "cloth_bottom"),
+    "_pilot_torso":      (C_TORSO, 2.0, "cloth_torso"),
+    "_pilot_lower":      (C_LOWER, 2.0, "cloth_lower"),
+    "_pilot_outfit":     (C_OUTFIT, 2.0, "cloth_outfit"),
+}
+# cloth_nsfw 는 의도적으로 없다 — body_nsfw 와 같이 사람이 직접 한다.
+BATCHES.update(CLOTH_BATCHES)
+
+
 bench = {
     "note": [
         "축별 고정 베이스의 SSOT. tools/thumb_bench.py 가 이 파일을 읽는다.",

@@ -1,0 +1,314 @@
+{
+ "black bikini": {
+  "mod": "black",
+  "base": "bikini"
+ },
+ "black bodysuit": {
+  "mod": "black",
+  "base": "bodysuit"
+ },
+ "black bow": {
+  "mod": "black",
+  "base": "bow"
+ },
+ "black choker": {
+  "mod": "black",
+  "base": "choker"
+ },
+ "black cloak": {
+  "mod": "black",
+  "base": "cloak"
+ },
+ "black coat": {
+  "mod": "black",
+  "base": "coat"
+ },
+ "black dress": {
+  "mod": "black",
+  "base": "dress"
+ },
+ "black gloves": {
+  "mod": "black",
+  "base": "gloves"
+ },
+ "black jacket": {
+  "mod": "black",
+  "base": "jacket"
+ },
+ "black leotard": {
+  "mod": "black",
+  "base": "leotard"
+ },
+ "black necktie": {
+  "mod": "black",
+  "base": "necktie"
+ },
+ "black panties": {
+  "mod": "black",
+  "base": "panties"
+ },
+ "black ribbon": {
+  "mod": "black",
+  "base": "ribbon"
+ },
+ "black serafuku": {
+  "mod": "black",
+  "base": "serafuku"
+ },
+ "black shirt": {
+  "mod": "black",
+  "base": "shirt"
+ },
+ "black skirt": {
+  "mod": "black",
+  "base": "skirt"
+ },
+ "black thighhighs": {
+  "mod": "black",
+  "base": "thighhighs"
+ },
+ "blue bikini": {
+  "mod": "blue",
+  "base": "bikini"
+ },
+ "blue bow": {
+  "mod": "blue",
+  "base": "bow"
+ },
+ "blue bowtie": {
+  "mod": "blue",
+  "base": "bowtie"
+ },
+ "blue dress": {
+  "mod": "blue",
+  "base": "dress"
+ },
+ "blue jacket": {
+  "mod": "blue",
+  "base": "jacket"
+ },
+ "blue necktie": {
+  "mod": "blue",
+  "base": "necktie"
+ },
+ "blue ribbon": {
+  "mod": "blue",
+  "base": "ribbon"
+ },
+ "brown gloves": {
+  "mod": "brown",
+  "base": "gloves"
+ },
+ "brown jacket": {
+  "mod": "brown",
+  "base": "jacket"
+ },
+ "green bow": {
+  "mod": "green",
+  "base": "bow"
+ },
+ "green dress": {
+  "mod": "green",
+  "base": "dress"
+ },
+ "multicolored dress": {
+  "mod": "multicolored",
+  "base": "dress"
+ },
+ "multicolored gloves": {
+  "mod": "multicolored",
+  "base": "gloves"
+ },
+ "multicolored jacket": {
+  "mod": "multicolored",
+  "base": "jacket"
+ },
+ "multicolored skirt": {
+  "mod": "multicolored",
+  "base": "skirt"
+ },
+ "multicolored swimsuit": {
+  "mod": "multicolored",
+  "base": "swimsuit"
+ },
+ "orange bow": {
+  "mod": "orange",
+  "base": "bow"
+ },
+ "orange ribbon": {
+  "mod": "orange",
+  "base": "ribbon"
+ },
+ "pink bikini": {
+  "mod": "pink",
+  "base": "bikini"
+ },
+ "pink bow": {
+  "mod": "pink",
+  "base": "bow"
+ },
+ "pink dress": {
+  "mod": "pink",
+  "base": "dress"
+ },
+ "pink ribbon": {
+  "mod": "pink",
+  "base": "ribbon"
+ },
+ "purple bikini": {
+  "mod": "purple",
+  "base": "bikini"
+ },
+ "purple bow": {
+  "mod": "purple",
+  "base": "bow"
+ },
+ "red bikini": {
+  "mod": "red",
+  "base": "bikini"
+ },
+ "red bow": {
+  "mod": "red",
+  "base": "bow"
+ },
+ "red bowtie": {
+  "mod": "red",
+  "base": "bowtie"
+ },
+ "red dress": {
+  "mod": "red",
+  "base": "dress"
+ },
+ "red jacket": {
+  "mod": "red",
+  "base": "jacket"
+ },
+ "red neckerchief": {
+  "mod": "red",
+  "base": "neckerchief"
+ },
+ "red necktie": {
+  "mod": "red",
+  "base": "necktie"
+ },
+ "red ribbon": {
+  "mod": "red",
+  "base": "ribbon"
+ },
+ "red skirt": {
+  "mod": "red",
+  "base": "skirt"
+ },
+ "striped bikini": {
+  "mod": "striped",
+  "base": "bikini"
+ },
+ "striped bow": {
+  "mod": "striped",
+  "base": "bow"
+ },
+ "striped bowtie": {
+  "mod": "striped",
+  "base": "bowtie"
+ },
+ "striped dress": {
+  "mod": "striped",
+  "base": "dress"
+ },
+ "striped jacket": {
+  "mod": "striped",
+  "base": "jacket"
+ },
+ "striped necktie": {
+  "mod": "striped",
+  "base": "necktie"
+ },
+ "striped panties": {
+  "mod": "striped",
+  "base": "panties"
+ },
+ "striped pants": {
+  "mod": "striped",
+  "base": "pants"
+ },
+ "striped pantyhose": {
+  "mod": "striped",
+  "base": "pantyhose"
+ },
+ "striped ribbon": {
+  "mod": "striped",
+  "base": "ribbon"
+ },
+ "striped scarf": {
+  "mod": "striped",
+  "base": "scarf"
+ },
+ "striped shirt": {
+  "mod": "striped",
+  "base": "shirt"
+ },
+ "striped skirt": {
+  "mod": "striped",
+  "base": "skirt"
+ },
+ "striped socks": {
+  "mod": "striped",
+  "base": "socks"
+ },
+ "white apron": {
+  "mod": "white",
+  "base": "apron"
+ },
+ "white bikini": {
+  "mod": "white",
+  "base": "bikini"
+ },
+ "white capelet": {
+  "mod": "white",
+  "base": "capelet"
+ },
+ "white cloak": {
+  "mod": "white",
+  "base": "cloak"
+ },
+ "white coat": {
+  "mod": "white",
+  "base": "coat"
+ },
+ "white gloves": {
+  "mod": "white",
+  "base": "gloves"
+ },
+ "white leotard": {
+  "mod": "white",
+  "base": "leotard"
+ },
+ "white pants": {
+  "mod": "white",
+  "base": "pants"
+ },
+ "white shirt": {
+  "mod": "white",
+  "base": "shirt"
+ },
+ "white thighhighs": {
+  "mod": "white",
+  "base": "thighhighs"
+ },
+ "yellow bikini": {
+  "mod": "yellow",
+  "base": "bikini"
+ },
+ "yellow bow": {
+  "mod": "yellow",
+  "base": "bow"
+ },
+ "yellow dress": {
+  "mod": "yellow",
+  "base": "dress"
+ },
+ "yellow ribbon": {
+  "mod": "yellow",
+  "base": "ribbon"
+ }
+}

@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260725-ax41';
+} from './interactiveAxes.mjs?v=20260725-ax43';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -885,12 +885,18 @@ export function createInteractivePanel({
     }
   }
 
-  /** 팝업을 편집 슬롯 오른쪽(공간 없으면 화면 안으로 clamp)에 앵커한다. */
+  /** 팝업을 슬롯 목록 오른쪽(공간 없으면 화면 안으로 clamp)에 앵커한다.
+   *
+   *  상단은 '편집 중인 슬롯'이 아니라 '그 캐릭터의 첫 슬롯(머리)'을 기준으로 잡는다.
+   *  아래쪽 슬롯을 열면 시작점이 그만큼 내려가 팝업이 짧아지고, 썸네일 그리드처럼
+   *  키가 큰 내용에서 바닥이 화면 밖으로 잘렸다.
+   *  하단은 CSS 기본값(bottom:14px)을 유지한다 — bottom:auto 로 두면 높이가 내용만큼
+   *  무한정 늘어나 .ia-panel-body 의 flex:1 + overflow-y:auto 가 스크롤을 만들지 못한다.
+   */
   function positionPopup() {
     const el = editingEl();
     if (!el) return;
     const vw = window.innerWidth;
-    const vh = window.innerHeight;
     if (vw <= 767) {
       // 모바일: 하단 시트(CSS 미디어쿼리)에 맡긴다. 인라인 앵커 좌표를 비운다.
       panelMount.style.top = panelMount.style.left = panelMount.style.width = panelMount.style.bottom = '';
@@ -898,21 +904,16 @@ export function createInteractivePanel({
     }
     const W = Math.min(560, vw - 32);
     const host = blocksMount.getBoundingClientRect();
-    const rect = el.getBoundingClientRect();
     let left = host.right + 12;
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
+    // 같은 캐릭터 블록의 첫 슬롯 = 시작점. 못 찾으면 슬롯 목록 상단으로 폴백.
+    const firstSlot = blocksMount.querySelector(
+      `.ia-sub-block[data-cid="${panelContext?.cid}"]`) || el;
+    const anchor = firstSlot.getBoundingClientRect();
     panelMount.style.width = W + 'px';
     panelMount.style.left = left + 'px';
-    panelMount.style.top = Math.max(12, rect.top) + 'px';
-    panelMount.style.bottom = 'auto';
-    // 실제 높이 측정 후 아래로 넘치면 위로 당긴다.
-    requestAnimationFrame(() => {
-      if (!panelContext) return;
-      const ph = panelMount.getBoundingClientRect().height;
-      let top = Math.max(12, rect.top);
-      if (top + ph > vh - 12) top = Math.max(12, vh - 12 - ph);
-      panelMount.style.top = top + 'px';
-    });
+    panelMount.style.top = Math.max(12, anchor.top) + 'px';
+    panelMount.style.bottom = '';
   }
 
   let recommendations = [];

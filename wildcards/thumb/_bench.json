@@ -1,0 +1,148 @@
+{
+  "note": [
+    "축별 고정 베이스의 SSOT. tools/thumb_bench.py 가 이 파일을 읽는다.",
+    "<<VARY>> 자리에 '가중치::태그 ::' 가 들어간다.",
+    "파라미터/네거티브는 사용자가 승인한 이미지 메타데이터에서 뽑은 실측값이다.",
+    "young female 고정 + 네거티브의 {adolescent, mature female} 로 성인 여성 톤을 회피한다.",
+    "nude + safe 조합은 옷이 특징을 가리지 않게 하면서 등급을 안전하게 유지한다.",
+    "body_nsfw 는 의도적으로 뺐다 — 명시적 성적 이미지 생성은 사람이 직접 한다."
+  ],
+  "defaults": {
+    "model": "nai-diffusion-4-5-full",
+    "weight": 2.0,
+    "negative": "blurry, lowres, upscaled, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, negative space, blank page, {{{ai-generated,watermarks, text, abs, muscular female, Watermark, artist logo, patreon username, patreon logo }}}, {bad}, error, fewer, extra, missing, watermark, unfinished, displeasing, signature, extra digits, username, scan, [abstract], chromatic, bad anatomy, bad hands, low quality, normal quality, mutation, mutated, extra limb, poorly drawn hands, malformed hands, long neck, long body, extra fingers, mosaic, bad faces, bad face, bad eyes, bad feet, extra toes, western comics (style), anime screencap, anime coloring, [[[[[[bkub, chabo (fuketsudan), fuzukikai, beanis, pixel art, tsuzuri (tu-san house)]]]]]],  limited palette, {adolescent, mature female}, thick outlines, blender (medium), [[[[hara (harayutaka), naxius noxy,queasy s, ringsel]]]], dorachan r, upscaled, [[[dagasi, agwing86]]], oldest female, simply drawn genitalia, unusual genitalia, text",
+    "parameters": {
+      "n_samples": 1,
+      "sampler": "k_euler_ancestral",
+      "steps": 28,
+      "scale": 5.4,
+      "cfg_rescale": 0.28,
+      "noise_schedule": "karras",
+      "width": 1024,
+      "height": 1024,
+      "sm": false,
+      "sm_dyn": false,
+      "skip_cfg_above_sigma": 58.0,
+      "params_version": 3,
+      "legacy": false,
+      "legacy_v3_extend": false,
+      "legacy_uc": false,
+      "add_original_image": true,
+      "autoSmea": true,
+      "prefer_brownian": true,
+      "ucPreset": 0,
+      "use_coords": false,
+      "deliberate_euler_ancestral_bug": true,
+      "controlnet_strength": 1,
+      "dynamic_thresholding": false,
+      "uncond_scale": 1.0
+    }
+  },
+  "batches": {
+    "hair_style": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "portrait"
+    },
+    "hair_style_male": {
+      "template": "1boy, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, mature male, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "portrait"
+    },
+    "bangs": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "portrait"
+    },
+    "eye_pattern": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "portrait"
+    },
+    "face_male": {
+      "template": "1boy, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, mature male, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "portrait"
+    },
+    "body_feature": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, head out of frame, close-up, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    },
+    "body_feature_male": {
+      "template": "1boy, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, mature male, solo, front view, cowboy shot, <<VARY>>, head out of frame, close-up, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    },
+    "horns": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "portrait"
+    },
+    "ears": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "portrait"
+    },
+    "state": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "portrait"
+    },
+    "state_body": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, head out of frame, close-up, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    },
+    "species": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, upper body, <<VARY>>, looking at viewer, bare shoulders, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "upper"
+    },
+    "species_male": {
+      "template": "1boy, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, mature male, solo, front view, upper body, <<VARY>>, looking at viewer, bare shoulders, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "upper"
+    },
+    "skin": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, upper body, <<VARY>>, looking at viewer, bare shoulders, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "upper"
+    },
+    "tail": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, from behind, cowboy shot, <<VARY>>, tail raised, bare shoulders, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "tail"
+    },
+    "wings": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, from behind, upper body, <<VARY>>, spread wings, bare shoulders, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "wings"
+    },
+    "wings_portrait": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "portrait"
+    },
+    "body_nonhuman": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, head out of frame, close-up, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    },
+    "body_nonhuman_portrait": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "portrait"
+    },
+    "body_nonhuman_full": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, standing, <<VARY>>, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "full"
+    },
+    "body_nonhuman_male": {
+      "template": "1boy, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, mature male, solo, front view, cowboy shot, <<VARY>>, head out of frame, close-up, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    }
+  }
+}

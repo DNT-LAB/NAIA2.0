@@ -1,0 +1,288 @@
+{
+  "note": [
+    "프레이밍은 축별로 다르다. bench 를 그대로 복붙해 쓴다.",
+    "부위/체형 축은 cowboy shot + head out of frame — 썸네일 크기에서는 전신이 소화되지 않아",
+    "얼굴을 버리고 몸통에 화소를 몰아주는 것이 판별에 유리하다(승인된 body_type 31장의 레시피).",
+    "꼬리/날개는 부속물이 프레임에 다 들어와야 하므로 전신을 유지한다.",
+    "베이스에 머리 길이를 고정하지 말 것 — NAI 가중치가 형태를 자동 보정한다.",
+    "남성 고정 태그(수염, -boy, -man)는 1girl 베이스로 렌더되지 않는다 -> bench_male 로 따로 배치.",
+    "생성 대기 목록은 wildcards/thumb/_todo/ 이며 make_todo.py 로 갱신한다(멱등)."
+  ],
+  "vary": "2::__*thumb/<wildcard>__ ::",
+  "framing_base": {
+    "portrait": "portrait, close-up, front view, looking at viewer",
+    "upper": "upper body, front view, looking at viewer",
+    "cowboy": "cowboy shot, head out of frame, close-up, front view",
+    "full": "full body, standing, front view, looking at viewer",
+    "explicit": "cowboy shot, head out of frame, close-up, front view"
+  },
+  "axes": [
+    {
+      "key": "bangs",
+      "label": "앞머리",
+      "framing": "portrait",
+      "count": 22,
+      "done": 15,
+      "todo_female": 7,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/bangs__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "body_expose",
+      "label": "노출·강조",
+      "framing": "cowboy",
+      "count": 42,
+      "done": 42,
+      "todo_female": 0,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_expose__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "body_feature",
+      "label": "신체 특징",
+      "framing": "cowboy",
+      "count": 68,
+      "done": 68,
+      "todo_female": 0,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_feature__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "body_nonhuman",
+      "label": "이형 부위",
+      "framing": "cowboy",
+      "count": 45,
+      "done": 17,
+      "todo_female": 8,
+      "todo_male": 1,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_nonhuman__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      },
+      "bench_male": {
+        "prefix": "1boy, solo, mature male, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_nonhuman_male__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "body_nsfw",
+      "label": "노출(성인)",
+      "framing": "explicit",
+      "count": 33,
+      "done": 0,
+      "todo_female": 31,
+      "todo_male": 2,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_nsfw__ ::, simple background, white background, nsfw, rating:explicit",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      },
+      "bench_male": {
+        "prefix": "1boy, solo, mature male, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_nsfw_male__ ::, simple background, white background, nsfw, rating:explicit",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "body_type",
+      "label": "체형",
+      "framing": "cowboy",
+      "count": 55,
+      "done": 55,
+      "todo_female": 0,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_type__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "ears",
+      "label": "귀",
+      "framing": "portrait",
+      "count": 101,
+      "done": 0,
+      "todo_female": 101,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/ears__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "eye_pattern",
+      "label": "눈 패턴",
+      "framing": "portrait",
+      "count": 4,
+      "done": 1,
+      "todo_female": 3,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/eye_pattern__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "face",
+      "label": "얼굴",
+      "framing": "portrait",
+      "count": 227,
+      "done": 227,
+      "todo_female": 0,
+      "todo_male": 12,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/face__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      },
+      "bench_male": {
+        "prefix": "1boy, solo, mature male, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/face_male__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "hair_pattern",
+      "label": "머리 패턴",
+      "framing": "portrait",
+      "count": 7,
+      "done": 7,
+      "todo_female": 0,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/hair_pattern__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "hair_style",
+      "label": "머리 모양",
+      "framing": "portrait",
+      "count": 193,
+      "done": 87,
+      "todo_female": 100,
+      "todo_male": 6,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/hair_style__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      },
+      "bench_male": {
+        "prefix": "1boy, solo, mature male, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/hair_style_male__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "horns",
+      "label": "뿔",
+      "framing": "portrait",
+      "count": 32,
+      "done": 0,
+      "todo_female": 32,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/horns__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "skin",
+      "label": "피부",
+      "framing": "upper",
+      "count": 18,
+      "done": 18,
+      "todo_female": 0,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "upper body, front view, looking at viewer, 2::__*thumb/_todo/skin__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "species",
+      "label": "종족",
+      "framing": "upper",
+      "count": 279,
+      "done": 0,
+      "todo_female": 243,
+      "todo_male": 36,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "upper body, front view, looking at viewer, 2::__*thumb/_todo/species__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      },
+      "bench_male": {
+        "prefix": "1boy, solo, mature male, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "upper body, front view, looking at viewer, 2::__*thumb/_todo/species_male__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "state",
+      "label": "상태",
+      "framing": "upper",
+      "count": 60,
+      "done": 0,
+      "todo_female": 60,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "upper body, front view, looking at viewer, 2::__*thumb/_todo/state__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "tail",
+      "label": "꼬리",
+      "framing": "full",
+      "count": 96,
+      "done": 0,
+      "todo_female": 96,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "full body, standing, front view, looking at viewer, 2::__*thumb/_todo/tail__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "wings",
+      "label": "날개",
+      "framing": "full",
+      "count": 42,
+      "done": 0,
+      "todo_female": 42,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "full body, standing, front view, looking at viewer, 2::__*thumb/_todo/wings__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    }
+  ],
+  "palette_shape": "rect",
+  "sensitive_axes": [
+    "body_nsfw"
+  ]
+}

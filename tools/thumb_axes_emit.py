@@ -1,0 +1,289 @@
+# -*- coding: utf-8 -*-
+"""wildcards/thumb/* -> app/web/remote/js/features/interactiveAxes.mjs 생성.
+
+와일드카드 .txt / _palette.json 이 단일 출처다. 프론트 모듈은 여기서 파생시켜
+손으로 옮길 때 생기는 드리프트를 막는다.
+"""
+import json
+from pathlib import Path
+
+SRC = Path("wildcards/thumb")
+DST = Path("app/web/remote/js/features/interactiveAxes.mjs")
+
+palette = json.loads((SRC / "_palette.json").read_text(encoding="utf-8"))
+man = json.loads((SRC / "_manifest.json").read_text(encoding="utf-8"))
+
+def lines(name):
+    p = SRC / f"{name}.txt"
+    if not p.exists(): return []
+    return [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+# ---- 얼굴 축의 '표시용' 하위 그룹 ----
+# 생성은 face.txt(228) 한 파일로 계속 돈다(순차 와일드카드 진행 중). UI 에서만 subgroup 기준으로
+# 나눠 보여주고, 썸네일 이미지는 모두 팩의 face/* 키를 쓴다(packAxis).
+from core.kr_tag_loader import load_kr_tag_records as _lk   # noqa: E402
+import core.interactive_browse_index as _ib                 # noqa: E402
+_raw2 = _lk().raw
+_idx2 = _ib.InteractiveBrowseIndex(_raw2)
+_F2 = lambda t: int((_raw2.get(t) or {}).get("freq", 0) or 0)
+_SG2 = lambda t: str((_raw2.get(t) or {}).get("subgroup", "")).lower()
+_face_all = lines("face")
+# 눈 색 패턴(추가 색상이 필요한 것들). heterochromia 는 subgroup 'eyes',
+# two-tone/gradient eyes 는 계층 밖이라 face.txt 에 없다 -> 별도 와일드카드로 만든다.
+EYE_PATTERN = ["multicolored eyes", "heterochromia", "two-tone eyes", "gradient eyes"]
+_eye_pattern = [t for t in EYE_PATTERN if t in _raw2]
+_ep = SRC / "eye_pattern.txt"
+_ep.write_text("\n".join(sorted(_eye_pattern, key=lambda t: -_F2(t))) + "\n", encoding="utf-8")
+_eye_pattern = lines("eye_pattern")
+_groups = {"face_eyes": [], "face_parts": [], "face_mark": []}
+_bucket = {"eyes_tags": "face_eyes", "face_tags": "face_parts",
+           "face_meta": "face_mark", "face": "face_mark"}
+for _t in _face_all:
+    if _t in _eye_pattern:
+        continue
+    _key = _bucket.get(_SG2(_t))
+    if _key:
+        _groups[_key].append(_t)
+for _k in _groups:
+    _groups[_k].sort(key=lambda t: -_F2(t))
+
+# 슬롯 = 사용자가 인지하는 카테고리. 그 안에 축(팔레트/슬라이더/썸네일/탐색)을 배치한다.
+# 팝업이 축을 모아 보여주므로 좌측 슬롯 수를 늘리지 않는다.
+SLOTS = [
+    ("머리", "\\u{1F487}", "characteristic", [
+        ("palette", "색", "hair_color"),
+        ("slider", "길이", "hair_length"),
+        ("thumb", "모양", "hair_style"),
+        ("thumb", "앞머리", "bangs"),
+        # 추가 색상 팔레트는 패턴 섹션 안(그리드 위)에 넣는다 — 아래에 두면 그리드에 가린다.
+        ("thumb_extra", "패턴", "hair_pattern", "hair_color"),
+    ]),
+    ("눈·얼굴", "\\u{1F441}", "characteristic", [
+        ("palette", "눈 색", "eye_color"),
+        # 색 관련(오드아이/다색/그라데이션)은 머리 패턴과 같은 방식으로 분리 — 추가 색상 동반.
+        ("thumb_extra", "눈 색 패턴", "eye_pattern", "eye_color"),
+        ("thumb", "눈·눈썹·동공", "face_eyes"),
+        ("thumb", "얼굴·입·코", "face_parts"),
+        ("thumb", "표식·수염", "face_mark"),
+        # 얼굴 썸네일 228장이 face_tags/eyes_tags/face_meta/face 를 전부 덮으므로 탐색기 제거.
+    ]),
+    ("신체", "\\u{1F9CD}", "characteristic", [
+        ("slider", "가슴", "breast_size"),
+        ("thumb", "체형", "body_type"),
+        # colored / multicolored skin 을 고르면 그리드 위에 피부 색 팔레트가 나온다.
+        ("thumb_color", "피부", "skin", "skin_color"),
+        # 신체 부위는 두 성격으로 나눈다 — '부위가 보인다'(구도성) vs '그 특징이 있다'(특징성).
+        ("thumb", "노출·강조", "body_expose"),
+        ("thumb", "신체 특징", "body_feature"),
+        # 명시적 노출은 별도 축 + 기본 블러(호버 해제). 태그는 제공하되 눈에 먼저 안 띄게.
+        ("thumb", "노출(성인)", "body_nsfw"),
+        ("browse", "그 외 부위", ["body_parts", "shoulders", "ass", "hands"]),
+    ]),
+    # 상태는 데이터상 6개 그룹에 흩어져 있다 — sweat=pose, wet=effects, injury=body_parts,
+    # panting=Actions, tired=Expressions, steaming body=body_functions.
+    # 한 축으로 모았다. 경상(ryona)도 여기 포함 — 하드 고어와 분리되는 지점이다.
+    ("상태", "\\u{1F4A6}", "characteristic", [
+        ("thumb", "상태", "state"),
+    ]),
+    ("종족·수인", "\\u{1F9EC}", "characteristic", [
+        ("thumb", "종족", "species"),
+        ("thumb", "귀", "ears"),
+        ("thumb", "꼬리", "tail"),
+        ("thumb", "날개", "wings"),
+        ("thumb", "뿔", "horns"),
+        # 이형 해부(아가미/물갈퀴/짐승 발 등) — body_expose 에 섞여 있던 것을 여기로 모았다.
+        ("thumb", "이형 부위", "body_nonhuman"),
+        ("browse", "생물", ["legendary_creatures", "kemonomimi", "animal_features", "technology"]),
+    ]),
+    ("표식·기타", "\\u2728", "characteristic", [
+        ("browse", "표식·개조", ["tattoo", "piercings", "skin_markings", "prosthetic",
+                              "mechanical", "body_modification", "body_marks", "surreal",
+                              "focus_tags", "body_meta", "cosmetics", "gesture"]),
+    ]),
+]
+
+def js(v):
+    return json.dumps(v, ensure_ascii=False)
+
+out = []
+out.append("// 생성 파일 — 직접 수정하지 말 것.")
+out.append("// 출처: wildcards/thumb/*.txt + _palette.json (scratchpad/gen_axes_module.py 로 재생성)")
+out.append("//")
+out.append("// 축 입력 방식 3종:")
+out.append("//   palette : 색 스와치(직사각형). 태그 하나 선택.")
+out.append("//   slider  : 서열 축(길이/가슴). 단계 선택.")
+out.append("//   thumb   : 시각 패턴. 썸네일 그리드(이미지 없으면 텍스트 칩으로 폴백).")
+out.append("//   browse  : 나머지 — 기존 3단 계층 탐색 + 검색.")
+out.append("")
+out.append(f"export const PALETTE_SHAPE = {js(palette.get('swatch_shape','rect'))};")
+out.append("")
+out.append("export const PALETTES = {")
+for key in ("hair_color", "eye_color", "skin_color"):
+    rows = palette.get(key) or []
+    out.append(f"  {key}: [")
+    for d in rows:
+        row = d.get("row", 1)
+        out.append(f"    {{tag: {js(d['tag'])}, hex: {js(d['hex'])}, row: {row}}},")
+    out.append("  ],")
+out.append("};")
+out.append("")
+out.append("export const SLIDERS = {")
+for key, d in (man.get("sliders") or {}).items():
+    steps = [s["tag"] for s in d["steps"]]
+    extra = f", default: {js(d['default'])}" if d.get("default") else ""
+    out.append(f"  {key}: {{label: {js(d['label'])}, steps: {js(steps)}{extra}}},")
+out.append("};")
+out.append("")
+out.append("// 썸네일 축의 태그 목록. 썸네일 파일명 = <axis>/<tag를 slug 화>.webp")
+out.append("export const THUMB_TAGS = {")
+# 와일드카드 폴더의 .txt 를 전부 축으로 등록한다(매니페스트에 없는 신규 파일도 자동 반영).
+_FRAMING_DEFAULT = {"tail": "full", "wings": "full", "body_type": "full",
+                    "body_expose": "full", "species": "upper"}
+framings = {a["key"]: a.get("framing", "portrait") for a in man.get("axes", [])}
+_axis_files = sorted(p.stem for p in SRC.glob("*.txt"))
+for key in _axis_files:
+    tags = lines(key)
+    if not tags: continue
+    out.append(f"  {key}: {js(tags)},")
+    framings.setdefault(key, _FRAMING_DEFAULT.get(key, "portrait"))
+# 얼굴 표시 그룹은 파일이 아니라 face.txt 에서 파생된 것이라 따로 등록한다.
+for _k, _v in _groups.items():
+    out.append(f"  {_k}: {js(_v)},")
+    framings.setdefault(_k, "portrait")
+out.append("};")
+out.append("")
+out.append("export const THUMB_FRAMING = " + js(framings) + ";")
+out.append("")
+# 태그 설명(호버 툴팁용). 썸네일/팔레트/슬라이더에 등장하는 태그만 담는다.
+from core.kr_tag_loader import load_kr_tag_records   # noqa: E402
+_raw = load_kr_tag_records().raw
+_need = set()
+for _k2 in _axis_files:
+    _need.update(lines(_k2))
+for _k in ("hair_color", "eye_color"):
+    _need.update(d["tag"] for d in (palette.get(_k) or []))
+for _d in (man.get("sliders") or {}).values():
+    _need.update(s["tag"] for s in _d["steps"])
+_desc = {}
+for _t in sorted(_need):
+    _m = _raw.get(_t) or {}
+    _s = str(_m.get("description") or "").strip()
+    if _s:
+        _desc[_t] = _s
+out.append("// 호버 툴팁용 태그 설명(있는 것만).")
+out.append("export const TAG_DESC = " + js(_desc) + ";")
+out.append("")
+out.append("// 얼굴 축의 표시용 하위 그룹(THUMB_TAGS 에도 같이 등록됨).")
+out.append("export const FACE_GROUPS = " + js({**{k: len(v) for k, v in _groups.items()}, "eye_pattern": len(_eye_pattern)}) + ";")
+out.append("")
+out.append("// 표시 축 -> 썸네일 팩 축(생성 단위). 없으면 축 이름 그대로.")
+out.append("export const PACK_AXIS = " + js({k: "face" for k in _groups}) + ";")
+out.append("")
+
+# ---- 민감(혐오감 유발 가능) 태그 ----
+# 신체 결손 / 과다 / 봉합 / 혈흔 / 기괴한 눈. 초보자가 목록을 훑을 때 갑자기 보이면 불편하므로
+# 썸네일을 블러 처리하고 호버 시에만 보여준다(태그 자체는 지우지 않는다 — 필요한 사용자도 있다).
+# 스타일 표현(slit pupils, third eye, scar on face, snout, beak 등)은 일부러 제외했다.
+# 서브에이전트 vision 판정(39장 실측)으로 32개를 해제하고 7개만 남겼다.
+# 태그 이름으로 추정했던 초기 목록은 크게 과했다 — 예: no eyes/no mouth/hidden face 는
+# 실제 이미지가 평범한 초상이고, hollow eyes/compound eyes 는 스타일 표현이었다.
+# 남긴 7개는 화면에 실제로 상처·혈흔·봉합·이빨 과다가 보이는 것들이다.
+SENSITIVE = [
+    "one-eyed",        # 눈이 하나(사이클롭스)
+    "extra mouth",     # 이빨이 겹쳐 벌어진 입
+    "extra teeth",     # 과도하게 날카로운 이빨
+    "glasgow smile",   # 양 볼까지 찢긴 입 + 봉합
+    "stitched mouth",  # 입을 실로 봉함
+    "stitched face",   # 얼굴 봉합선
+    "blood on teeth",  # 입가 혈흔
+    # 체형 축 — 절단/아사 계열. one-eyed 와 같은 성격이라 같이 블러한다.
+    "amputee", "missing limb", "double amputee", "triple amputee",
+    "quadruple amputee", "no legs", "no hands", "emaciated",
+    # 체모 — 여성 신체에 털이 보이면 불편해하는 사용자가 있다는 실사용 피드백.
+    # 태그는 남기고(필요한 사용자도 있다) 썸네일만 블러 + 호버 해제.
+    "body hair", "chest hair", "arm hair", "leg hair", "armpit hair",
+    "navel hair", "hairy", "colored armpit hair",
+]
+_thumb_all = set()
+for _k3 in _axis_files:
+    _thumb_all.update(lines(_k3))
+for _k, _v in _groups.items():
+    _thumb_all.update(_v)
+# NSFW 축은 태그를 나열하지 않고 축 전체를 블러한다(항목이 늘어도 자동 적용).
+SENSITIVE_AXES = ["body_nsfw"]
+_sensitive = [t for t in SENSITIVE if t in _thumb_all]
+_missing_sensitive = [t for t in SENSITIVE if t not in _thumb_all]
+for _ax in SENSITIVE_AXES:
+    for _t in lines(_ax):
+        if _t not in _sensitive:
+            _sensitive.append(_t)
+out.append("// 민감 태그 — 썸네일을 블러하고 호버 시 해제한다(태그는 유지).")
+out.append("export const SENSITIVE_TAGS = " + js(_sensitive) + ";")
+out.append("")
+
+# 축 규칙(도메인 지식 — 관계 데이터에 없다).
+# hair_pattern: multicolored hair 는 부모 태그다. 하위 패턴(two-tone/gradient/streaked...)을 하나라도
+# 고르면 자동으로 붙고 그동안 해제할 수 없다. 그리고 여러 색을 지정해야 의미가 있으므로
+# 그동안 머리 색 팔레트는 다중 선택(n개)으로 바뀐다.
+out.append("export const AXIS_RULES = {")
+out.append("  hair_pattern: {")
+out.append("    parent: \"multicolored hair\",")
+out.append("    multiPalette: \"hair_color\",")
+out.append("    multiOn: \"parent\",")   # 부모가 붙어 있을 때 추가 색상 노출
+out.append("    parentLockedHint: \"하위 패턴이 선택돼 있어 해제할 수 없습니다. 패턴을 먼저 해제하세요.\",")
+out.append("  },")
+# 눈: heterochromia 는 '양쪽 눈 색이 다름'이라 multicolored eyes(한 눈 안의 다색)의 하위가 아니다.
+# 그래서 부모 자동 배정은 two-tone/gradient 에만 적용하고, 추가 색상은 축의 무엇이든 고르면 나온다.
+out.append("  eye_pattern: {")
+out.append("    parent: \"multicolored eyes\",")
+out.append("    parentFor: [\"two-tone eyes\", \"gradient eyes\"],")
+out.append("    multiPalette: \"eye_color\",")
+out.append("    multiOn: \"any\",")
+out.append("    parentLockedHint: \"하위 패턴이 선택돼 있어 해제할 수 없습니다. 패턴을 먼저 해제하세요.\",")
+out.append("  },")
+# 피부: colored skin = "인간에게는 부자연스러운 색의 피부"(69k)로 이색 피부의 우산 태그다.
+# 색 자체(blue skin 등 10색)는 Danbooru 에서 colored skin 의 하위이고 subgroup 이 비어 있어
+# 계층 밖이라 썸네일 축에 없다 -> 팔레트로 제공한다.
+# colored skin 또는 multicolored skin 이 붙어 있을 때만 팔레트를 노출하고,
+# multicolored skin 일 때만 추가 색상(n개)까지 허용한다.
+out.append("  skin: {")
+out.append("    parent: \"colored skin\",")
+out.append("    parentFor: [\"multicolored skin\"],")
+out.append("    mainPalette: \"skin_color\",")
+out.append("    mainOn: [\"colored skin\", \"multicolored skin\"],")
+out.append("    multiPalette: \"skin_color\",")
+out.append("    multiOn: \"tags\",")
+out.append("    multiTags: [\"multicolored skin\"],")
+out.append("    parentLockedHint: \"multicolored skin 이 선택돼 있어 해제할 수 없습니다.\",")
+out.append("  },")
+out.append("};")
+out.append("")
+out.append("export const CHAR_SLOTS = [")
+for label, icon, axis, sections in SLOTS:
+    out.append(f"  {{key: {js(label)}, icon: '{icon}', axis: {js(axis)}, sections: [")
+    for sec in sections:
+        kind, secLabel, ref = sec[0], sec[1], sec[2]
+        if kind == "browse":
+            out.append(f"    {{kind: 'browse', label: {js(secLabel)}, subgroups: {js(ref)}}},")
+        elif kind == "thumb_extra":
+            # 썸네일 섹션 + 그 안(그리드 위)에 붙는 추가 색상 팔레트
+            out.append(f"    {{kind: 'thumb', label: {js(secLabel)}, ref: {js(ref)}, "
+                       f"extraPalette: {js(sec[3])}}},")
+        elif kind == "thumb_color":
+            # 썸네일 섹션 + 그리드 위에 주 색상 팔레트(조건부) + 추가 색상 팔레트(조건부)
+            out.append(f"    {{kind: 'thumb', label: {js(secLabel)}, ref: {js(ref)}, "
+                       f"mainPalette: {js(sec[3])}, extraPalette: {js(sec[3])}}},")
+        else:
+            out.append(f"    {{kind: {js(kind)}, label: {js(secLabel)}, ref: {js(ref)}}},")
+    out.append("  ]},")
+out.append("];")
+out.append("")
+
+DST.write_text("\n".join(out) + "\n", encoding="utf-8")
+print(f"생성: {DST}  ({len(out)} 줄)")
+print(f"  팔레트: hair {len(palette['hair_color'])} / eye {len(palette['eye_color'])}")
+print(f"  슬라이더: {list((man.get('sliders') or {}).keys())}")
+tt = {a['key']: len(lines(a['key'])) for a in man.get('axes',[]) if lines(a['key'])}
+print(f"  썸네일 축 {len(tt)}개 / 총 {sum(tt.values())}장: {tt}")
+print(f"  슬롯 {len(SLOTS)}개: {[s[0] for s in SLOTS]}")
+print(f"  민감 태그 {len(_sensitive)}개 블러" + (f" / 목록에 없어 제외: {_missing_sensitive}" if _missing_sensitive else ""))

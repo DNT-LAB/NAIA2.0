@@ -1,0 +1,276 @@
+{
+  "note": "색은 팔레트에서 직접 선택한다(썸네일 불필요). in_hierarchy=false 는 브라우징 계층 밖 — 생성/자동완성에서는 정상 동작.",
+  "hair_color": [
+    {
+      "tag": "black hair",
+      "hex": "#1a1a1e",
+      "freq": 815553,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "brown hair",
+      "hex": "#6b4226",
+      "freq": 792375,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "blonde hair",
+      "hex": "#f2d14e",
+      "freq": 797066,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "red hair",
+      "hex": "#c02a1e",
+      "freq": 267048,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "orange hair",
+      "hex": "#e8791f",
+      "freq": 128673,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "green hair",
+      "hex": "#2f9e44",
+      "freq": 196656,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "blue hair",
+      "hex": "#1c6fd6",
+      "freq": 436569,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "purple hair",
+      "hex": "#7c4dbe",
+      "freq": 339743,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "pink hair",
+      "hex": "#ec6fa9",
+      "freq": 366151,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "grey hair",
+      "hex": "#9aa0a6",
+      "freq": 379772,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "white hair",
+      "hex": "#f2f2f0",
+      "freq": 409090,
+      "in_hierarchy": true,
+      "row": 1
+    },
+    {
+      "tag": "light brown hair",
+      "hex": "#a9764a",
+      "freq": 77583,
+      "in_hierarchy": false,
+      "row": 2
+    },
+    {
+      "tag": "platinum blonde hair",
+      "hex": "#efe6c0",
+      "freq": 4962,
+      "in_hierarchy": false,
+      "row": 2
+    },
+    {
+      "tag": "light blue hair",
+      "hex": "#8fc4f0",
+      "freq": 30665,
+      "in_hierarchy": false,
+      "row": 2
+    },
+    {
+      "tag": "aqua hair",
+      "hex": "#4fd1c5",
+      "freq": 134211,
+      "in_hierarchy": false,
+      "row": 2
+    },
+    {
+      "tag": "light green hair",
+      "hex": "#a5d86e",
+      "freq": 4043,
+      "in_hierarchy": false,
+      "row": 2
+    },
+    {
+      "tag": "light purple hair",
+      "hex": "#b79ae0",
+      "freq": 22606,
+      "in_hierarchy": false,
+      "row": 2
+    },
+    {
+      "tag": "silver hair",
+      "hex": "#c8cdd3",
+      "freq": 17638,
+      "in_hierarchy": false,
+      "row": 2
+    },
+    {
+      "tag": "dark blue hair",
+      "hex": "#24346b",
+      "freq": 15797,
+      "in_hierarchy": false,
+      "row": 2
+    }
+  ],
+  "eye_color": [
+    {
+      "tag": "blue eyes",
+      "hex": "#2b7fd4",
+      "freq": 972538,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "brown eyes",
+      "hex": "#7a4a24",
+      "freq": 905516,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "red eyes",
+      "hex": "#cf2b2b",
+      "freq": 680641,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "purple eyes",
+      "hex": "#8455c8",
+      "freq": 467099,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "green eyes",
+      "hex": "#2f9e5f",
+      "freq": 453883,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "yellow eyes",
+      "hex": "#e8c02a",
+      "freq": 394396,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "grey eyes",
+      "hex": "#98a0a8",
+      "freq": 209257,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "pink eyes",
+      "hex": "#ee7fb0",
+      "freq": 146917,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "black eyes",
+      "hex": "#201f24",
+      "freq": 111125,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "orange eyes",
+      "hex": "#ef8a2a",
+      "freq": 102207,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "aqua eyes",
+      "hex": "#45cfc2",
+      "freq": 88226,
+      "in_hierarchy": true
+    },
+    {
+      "tag": "white eyes",
+      "hex": "#f0f0ee",
+      "freq": 19045,
+      "in_hierarchy": false
+    }
+  ],
+  "swatch_shape": "rect",
+  "swatch_hint": "직사각형 스와치. 원형 아님.",
+  "skin_color": [
+    {
+      "tag": "white skin",
+      "hex": "#f4f1ec",
+      "freq": 47712,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "blue skin",
+      "hex": "#4a7fd0",
+      "freq": 29035,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "green skin",
+      "hex": "#4f9e58",
+      "freq": 22372,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "grey skin",
+      "hex": "#98a0a6",
+      "freq": 16523,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "red skin",
+      "hex": "#c8443a",
+      "freq": 14603,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "purple skin",
+      "hex": "#8459bd",
+      "freq": 13055,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "black skin",
+      "hex": "#2a2528",
+      "freq": 9720,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "pink skin",
+      "hex": "#ef9ab5",
+      "freq": 9254,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "yellow skin",
+      "hex": "#e5c453",
+      "freq": 5077,
+      "in_hierarchy": false
+    },
+    {
+      "tag": "orange skin",
+      "hex": "#e8842c",
+      "freq": 2481,
+      "in_hierarchy": false
+    }
+  ]
+}

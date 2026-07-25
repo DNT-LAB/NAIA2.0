@@ -46,6 +46,15 @@ FRAMING_SPLIT = {
     "wings": {
         "portrait": ["head wings", "hair wings", "single head wing"],
     },
+    # 표식: 얼굴·머리(귀 피어싱/이마 문신/입술)는 portrait, 몸통(팔·가슴·배 문신)은 cowboy.
+    "marking": {
+        "portrait": ["ear piercing", "neck tattoo", "animal ear piercing", "eyebrow piercing",
+                     "lip piercing", "star facial mark", "heart facial mark", "teardrop tattoo",
+                     "forehead tattoo", "flower over eye", "joestar birthmark", "ear birthmark",
+                     "tongue tattoo", "head tattoo", "lipstick mark on face", "lip ring",
+                     "labret piercing", "spiked ear piercing", "ear bar", "eyeliner",
+                     "lipstick mark on neck", "collarbone piercing", "horn piercing"],
+    },
     "body_nonhuman": {
         "portrait": ["gills", "blowhole", "antennae", "moth antennae", "head fins",
                      "neck fur", "chest tuft", "third eye on chest", "core",

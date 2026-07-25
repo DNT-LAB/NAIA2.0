@@ -90,6 +90,20 @@ AXES["species"] = _species_keep
 AXES["ears"] = pool(('ears_tags',))
 AXES["tail"] = pool(('tail',))
 AXES["wings"] = pool(('wings',))
+# ── 표식(문신/피어싱) 축 ────────────────────────────────────────────────────
+# 표식·기타 슬롯은 browse 전용이었고 성격이 뒤섞여 있었다. 실측(index 직접 질의)으로
+# 133개가 오는데, 그 중 문신/피어싱/표식 계열만 코히런트하다. 나머지는 재배치한다.
+#   개조(prosthetic/mechanical) -> 이형 부위 (prosthetic hand 가 이미 거기 있다)
+#   이형 해부(extra arms/legs/horns, multiple heads, detached arm/legs) -> 이형 부위
+#   초현실(object head, hollow body, conjoined) -> 이형 부위
+#   캐릭터 메타(otoko no ko, mature male/female, faceless, minigirl ...) -> 제외.
+#     성별·연령은 캐릭터 헤더의 성별 토글이 담당하고, faceless/*focus 는 구도다.
+MARKING_SUBS = ('tattoo', 'piercings', 'skin_markings', 'cosmetics',
+                'body_marks', 'body_modification')
+# subgroup 이 gesture 로 잘못 붙은 표식들(실측)
+MARKING_EXTRA = ["hand tattoo", "scar on hand", "fingerprint"]
+AXES["marking"] = pool(MARKING_SUBS) + [t for t in MARKING_EXTRA if t in raw]
+
 AXES["skin"] = pool(('skin_color',))
 AXES["body_type"] = [t for t in pool(('body_type',)) if t not in BREAST_SIZE]
 # ── 신체 부위 분할 ─────────────────────────────────────────────────────────
@@ -130,6 +144,13 @@ BODY_NONHUMAN = [   # 이형·수인 해부 -> 종족·수인 슬롯의 새 축
     "hooves", "animal hands", "animal feet", "bird legs", "digitigrade",
     "reverse-jointed legs", "suction cups", "thorns", "antennae", "moth antennae",
     "crab claw", "prosthetic hand", "sharp toenails",
+    # 표식·기타 슬롯 재정렬에서 합류 — 기계·의체·이형 해부는 이형 부위가 맞다.
+    "prosthesis", "prosthetic arm", "prosthetic leg", "hook hand", "peg leg", "automail",
+    "mechanical arms", "mechanical wings", "mechanical legs", "mechanical horns",
+    "mechanical spine",
+    "extra arms", "extra legs", "extra horns", "multiple heads",
+    "detached arm", "detached legs",
+    "object head", "hollow body", "conjoined",
 ]
 BODY_NSFW_ADD = ["pussy juice on fingers", "glands of montgomery"]
 # 썸네일 축에서 빼는 것들 — 다른 슬롯(액션/효과/의상)이 browse 로 담당한다.
@@ -238,6 +259,10 @@ for t in body:
     elif FEATURE.search(t): feat.append(t)
     else: unclassified.append(t)          # catch-all 금지 — 드러내서 손으로 배정한다
 AXES["body_expose"], AXES["body_feature"] = exp, feat
+# BODY_NONHUMAN 에는 pool(body_parts/hands/ass/shoulders) 밖의 태그도 있다 —
+# prosthetic/mechanical/body_meta/surreal subgroup 은 그 pool 에 안 잡힌다.
+# STATE 와 같게 목록을 직접 합치고 데이터 존재만 확인한다(EXCLUDE 는 뒤에서 걸린다).
+nonhuman = nonhuman + [t for t in BODY_NONHUMAN if t in raw and t not in nonhuman]
 AXES["body_nonhuman"], AXES["body_nsfw"], AXES["horns"] = nonhuman, nsfw, horns
 # STATE 는 Person_Body 뿐 아니라 Expression_Action / Composition_Meta / Clothing_Wear 에도
 # 흩어져 있어 pool() 로는 못 모은다. 목록 그대로 쓰고 데이터 존재만 확인한다.
@@ -335,6 +360,18 @@ EXCLUDE = {
     "no bangs",                  # 앞머리가 그대로 남는다(부정 태그)
     "stand (jojo)",              # 초록 배경만 나온다. 종족이 아니라 초능력 개념
     "duel monster",              # 특징 없이 그냥 소녀. 카드 게임 몬스터 분류라 종족이 아니다
+    # ── 표식·기타 재정렬에서 제외 ──────────────────────────────────────
+    # 성별·연령 메타: 캐릭터 헤더의 성별 토글이 담당한다
+    "otoko no ko", "mature male", "mature female", "bishounen", "girly boy",
+    # 구도 메타: 얼굴이 안 보이는 것은 특징이 아니다
+    "faceless", "faceless male",
+    # 환경 대비 크기 — 단독 썸네일로 표현 불가
+    "mini person", "minigirl",
+    "alternate breast size",     # 원작 대비 비교가 필요
+    "left-handed",               # 왼손잡이는 시각으로 판별되지 않는다
+    "disembodied limb",          # 데이터: "분리된 손/발을 참고하세요"
+    "disembodied head", "headless",   # 머리 없음 = 고어/구도
+    "impossible hair",           # 머리 축이 담당
     # ── 재검수(시드 변경 + 가중치 3.0)에서도 두 번 실패한 것들 ──────────
     "alpaca tail", "giraffe tail",   # 두 번 모두 동물을 통째로 그렸다
     "bandaged head",             # 머리 붕대가 머리띠로만 나온다

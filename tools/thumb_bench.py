@@ -58,10 +58,18 @@ def load_bench() -> dict:
     return json.loads(BENCH_FILE.read_text(encoding="utf-8"))
 
 
-def batch_tags(name: str) -> list[str]:
+def batch_tags(name: str, required: bool = True) -> list[str]:
+    """배치 목록. 파일이 없으면 빈 목록(required=False) 또는 종료.
+
+    계획은 생성 전에 한 번에 만든다. 없는 배치 하나가 SystemExit 을 내면 뒤에 있는
+    멀쩡한 배치까지 통째로 죽는다(실측: 5개 중 4번째가 없어 0장 생성). 배치는 다 끝나면
+    thumb_todo 가 파일을 지우므로 '없음'은 정상 상황이다 -> 경고만 하고 건너뛴다.
+    """
     path = TODO_DIR / f"{name}.txt"
     if not path.exists():
-        raise SystemExit(f"배치 파일이 없습니다: {path}")
+        if required:
+            print(f"  !! 배치 파일이 없어 건너뜁니다(이미 완료된 축일 수 있음): {path.name}")
+        return []
     return [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
 
 
@@ -167,6 +175,9 @@ def main() -> int:
         print(f"!! 계획 {len(plan)}장이 상한 {cap}회를 넘습니다. 앞 {cap}장만 진행합니다.")
         plan = plan[:cap]
 
+    if not plan:
+        print("생성할 것이 없습니다(모든 배치가 비었거나 파일이 없습니다).")
+        return 0
     print(f"배치 {len(args.batches)}개 / 총 {len(plan)}장 / 딜레이 {args.delay}s "
           f"±{int(args.jitter * 100)}% / 시드 {args.seed}")
     if args.dry_run:

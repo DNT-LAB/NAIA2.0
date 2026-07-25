@@ -77,7 +77,8 @@ SLOTS = [
         ("thumb", "신체 특징", "body_feature"),
         # 명시적 노출은 별도 축 + 기본 블러(호버 해제). 태그는 제공하되 눈에 먼저 안 띄게.
         ("thumb", "노출(성인)", "body_nsfw"),
-        ("browse", "그 외 부위", ["body_parts", "shoulders", "ass", "hands"]),
+        # 탐색기 제거: 노출·강조 42 + 신체 특징 68 + 이형 37 이 body_parts/shoulders/
+        # ass/hands 를 전부 덮는다. 남겨두면 같은 태그를 두 경로로 보여주게 된다.
     ]),
     # 상태는 데이터상 6개 그룹에 흩어져 있다 — sweat=pose, wet=effects, injury=body_parts,
     # panting=Actions, tired=Expressions, steaming body=body_functions.
@@ -93,12 +94,15 @@ SLOTS = [
         ("thumb", "뿔", "horns"),
         # 이형 해부(아가미/물갈퀴/짐승 발 등) — body_expose 에 섞여 있던 것을 여기로 모았다.
         ("thumb", "이형 부위", "body_nonhuman"),
-        ("browse", "생물", ["legendary_creatures", "kemonomimi", "animal_features", "technology"]),
+        # 탐색기 제거: 종족 220 이 legendary_creatures/kemonomimi 를 덮고,
+        # 귀 98 + 꼬리 93 + 날개 41 + 뿔 32 가 animal_features 를 덮는다.
     ]),
-    ("표식·기타", "\\u2728", "characteristic", [
-        ("browse", "표식·개조", ["tattoo", "piercings", "skin_markings", "prosthetic",
-                              "mechanical", "body_modification", "body_marks", "surreal",
-                              "focus_tags", "body_meta", "cosmetics", "gesture"]),
+    # 표식·기타 -> 표식·문신. browse 전용이었고 성격이 뒤섞여 있었다(실측 133개 중
+    # 개조 11 + 이형 해부 9 는 이형 부위로 옮기고, 캐릭터 메타 12 는 제외했다 —
+    # 성별·연령은 캐릭터 헤더 토글이 담당하고 faceless/*focus 는 구도다).
+    # 남은 문신/피어싱/표식 계열 86개만 모아 썸네일 축으로 승격한다.
+    ("표식·문신", "\\u2728", "characteristic", [
+        ("thumb", "문신·피어싱", "marking"),
     ]),
 ]
 

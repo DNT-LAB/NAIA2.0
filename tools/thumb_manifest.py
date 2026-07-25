@@ -22,7 +22,7 @@ FRAMING = {
     # 전신은 썸네일 크기에서 소화가 안 된다(사용자 판단) -> 부위 축은 cowboy shot.
     # 승인된 body_type 31장이 이 레시피로 생성됐으므로 나머지도 같은 레시피를 쓴다.
     "body_type": "cowboy", "body_expose": "cowboy", "body_feature": "cowboy",
-    "body_nonhuman": "cowboy",
+    "body_nonhuman": "cowboy", "marking": "cowboy",
     # 꼬리/날개는 부속물 전체가 프레임에 들어와야 하므로 전신을 유지한다.
     "tail": "full", "wings": "full",
     "body_nsfw": "explicit",
@@ -31,7 +31,7 @@ LABEL = {
     "hair_style": "머리 모양", "bangs": "앞머리", "hair_pattern": "머리 패턴",
     "face": "얼굴", "eye_pattern": "눈 패턴", "ears": "귀", "skin": "피부",
     "species": "종족", "tail": "꼬리", "wings": "날개", "body_type": "체형",
-    "body_expose": "노출·강조", "body_feature": "신체 특징", "body_nsfw": "노출(성인)", "body_nonhuman": "이형 부위", "horns": "뿔", "state": "상태",
+    "body_expose": "노출·강조", "body_feature": "신체 특징", "body_nsfw": "노출(성인)", "body_nonhuman": "이형 부위", "horns": "뿔", "state": "상태", "marking": "문신·피어싱",
 }
 PACK_AXIS = {"face_eyes": "face", "face_mouth": "face", "face_etc": "face"}
 

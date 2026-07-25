@@ -114,6 +114,8 @@ BATCHES = {
     "body_nonhuman_male":     (male(TORSO), 2.5, "cowboy"),
     # Vision 검수에서 태그가 렌더되지 않은 것들을 다른 시드로 한 번 더 돌린다.
     # 프레이밍은 원래 축과 같게 두고 시드만 바꾼다(--seed).
+    "marking":           (TORSO, 2.5, "cowboy"),      # 팔·가슴·배 문신
+    "marking_portrait":  (HEAD, 2.5, "portrait"),     # 귀 피어싱 / 얼굴 표식
     "_redo_portrait":    (HEAD, 3.0, "portrait"),
     "_redo_cowboy":      (TORSO, 3.0, "cowboy"),
     "_redo_tail":        (TAILV, 3.0, "tail"),

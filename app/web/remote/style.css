@@ -20091,8 +20091,13 @@ body.detached-module .mod-grid-3 {
   /* 행 높이를 내용 기준으로 고정한다. 안 하면 max-height 안에 전 행을 밀어넣으려고
      행이 압축돼 셀이 납작해진다(22행 x 12px). align-content:start 로 분배도 막는다. */
   grid-auto-rows: max-content; align-content: start;
-  /* 3열 실측: 셀 185px(이미지 162 + 캡션) -> 3줄 = 3*185 + 2*6 = 567 */
-  max-height: 567px; overflow-y: auto; overscroll-behavior: contain;
+  /* 3열 실측: 셀 185px(이미지 162 + 캡션) -> 3줄 = 3*185 + 2*6 = 567.
+     단 567 고정은 화면이 짧거나 확대된 상태에서 패널 본문보다 그리드가 커진다.
+     그러면 본문 스크롤과 그리드 스크롤이 중첩되고 마지막 행이 패널 밖에서 잘린다.
+     -> 실제 남는 높이로 상한을 건다. 354px = 패널 여백 + 헤드 + 선택칩 + 다른
+     아코디언 헤더들의 실측 합계. 200px 바닥을 둬서 아주 짧은 화면에서도 한 행은 보인다. */
+  max-height: clamp(200px, calc(100dvh - 354px), 567px);
+  overflow-y: auto; overscroll-behavior: contain;
   padding-right: 4px;   /* 스크롤바가 셀을 덮지 않게 */
 }
 /* 스크롤바를 '보이게' 둔다 — 사용자가 스크롤 가능함을 알아야 한다. */

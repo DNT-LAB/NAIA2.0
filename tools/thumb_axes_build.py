@@ -266,10 +266,46 @@ nonhuman = nonhuman + [t for t in BODY_NONHUMAN if t in raw and t not in nonhuma
 AXES["body_nonhuman"], AXES["body_nsfw"], AXES["horns"] = nonhuman, nsfw, horns
 # STATE 는 Person_Body 뿐 아니라 Expression_Action / Composition_Meta / Clothing_Wear 에도
 # 흩어져 있어 pool() 로는 못 모은다. 목록 그대로 쓰고 데이터 존재만 확인한다.
-AXES["state"] = [t for t in STATE if t in raw]
+# ── 상태 축 해체 (사용자 판단) ──────────────────────────────────────────────
+# 조사 결과 상태 59개는 4개 개념의 묶음이었고, 누적 빈도의 78%가 실제로는 표정이었다.
+# 데이터도 그렇게 말한다 — tears/blush/saliva/sweatdrop 의 subgroup 은 expression 이고
+# blush 설명은 "부끄러움 등으로", sweatdrop 은 "긴장이나 당혹감을 나타내는" 이다.
+# 그래서 슬롯을 없애고 성격대로 분배한다. 이미 생성한 이미지는 --prune 이 축만 옮긴다.
+#   감정의 부수 현상 + 생리 상태 -> 표정 슬롯의 썸네일 축
+#   부상·오염 -> 신체 슬롯의 별도 섹션(신체 특징에 섞으면 영구 특징과 일시 부상이 뒤섞인다)
+#   머리 상태 -> 머리 모양 축
+#   wet / steam -> 효과, wet clothes -> 의상 (각 그룹의 browse 가 자동으로 담당)
+EXPRESSION_STATE = [
+    # 감정의 시각적 표현
+    "blush", "nose blush", "light blush", "full-face blush", "ear blush",
+    "blushing profusely", "blush stickers", "tears", "tearing up",
+    "saliva", "saliva string", "saliva trail", "drooling",
+    "sweatdrop", "flying sweatdrops", "nervous sweat",
+    "heavy breathing", "panting", "tired",
+    # 생리 상태 — 감정과 같은 화면(얼굴)에 나타난다
+    "sweat", "very sweaty", "sweating profusely", "sweaty armpits",
+    "steaming body", "trembling", "shivering", "unconscious",
+]
+BODY_CONDITION = [
+    # 부상(ryona) — 일시적 상태라 '신체 특징'(영구)과 섞지 않고 별도 축으로 둔다
+    "injury", "bruise", "cuts", "scratches", "bleeding", "stitches",
+    "blood on face", "blood on hands", "blood on arm", "blood on leg", "blood on chest",
+    "slap mark", "whip marks", "broken arm", "broken leg", "bite mark", "hickey",
+    "bandages", "bandaged arm", "bandaged leg", "bandaged head", "bandaged hand",
+    "bandage over one eye",
+    # 오염
+    "dirty", "dirty feet", "dirty hands", "soaking feet",
+]
+HAIR_STATE = ["wet hair", "messy hair"]
+AXES["expression_state"] = [t for t in EXPRESSION_STATE if t in raw]
+AXES["body_condition"] = [t for t in BODY_CONDITION if t in raw]
+AXES["hair_style"] = AXES["hair_style"] + [t for t in HAIR_STATE
+                                           if t in raw and t not in AXES["hair_style"]]
+STATE = EXPRESSION_STATE + BODY_CONDITION + HAIR_STATE
 _missing_state = [t for t in STATE if t not in raw]
+# 상태 축은 해체됐다 — 아래 dedup/보고에서 쓰던 이름만 유지한다.
 # body_* 축에 STATE 태그가 남아 있으면 중복이므로 뺀다.
-_state_set = set(AXES["state"])
+_state_set = set(AXES["expression_state"]) | set(AXES["body_condition"])
 # state 는 머리(messy hair / wet hair)와도 겹친다. 같은 태그가 두 축에 있으면 두 번
 # 생성되고 팩 키도 갈린다(빌더는 먼저 읽은 축으로 배정한다) -> 여기서 한쪽만 남긴다.
 for _k in ("body_expose", "body_feature", "body_nonhuman", "body_nsfw", "horns",
@@ -440,7 +476,7 @@ print(f"\n총 {total}장" + ("  (dry-run: 파일 안 씀)" if args.dry else ""))
 if dropped:
     print(f"EXCLUDE 로 제외 {len(dropped)}개: {', '.join(sorted(dropped))}")
 print(f"썸네일 축 밖으로 이동(액션/효과/의상) {len(MOVED_OUT)}개 / 하드 고어 제외 {len(GORE)}개")
-print(f"상태(STATE) 축 {len(AXES['state'])}개" + (f"  데이터에 없어 제외: {_missing_state}" if _missing_state else ""))
+print(f"상태 해체: 표정 {len(AXES['expression_state'])} + 부상·오염 {len(AXES['body_condition'])} + 머리 {len(HAIR_STATE)}" + (f"  데이터에 없어 제외: {_missing_state}" if _missing_state else ""))
 # STATE 는 pool 루프 밖에서 배정하므로 여기서 미분류로 보이는 게 정상이다(중복 보고 방지).
 _un = [t for t in unclassified if t not in EXCLUDE and t not in set(STATE)]
 if _un:

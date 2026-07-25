@@ -67,6 +67,14 @@ SLOTS = [
         ("thumb", "표식·수염", "face_mark"),
         # 얼굴 썸네일 228장이 face_tags/eyes_tags/face_meta/face 를 전부 덮으므로 탐색기 제거.
     ]),
+    # 표정 슬롯을 썸네일+탐색기 병행으로 승격한다. 해체한 상태 축의 감정 부수 현상
+    # (blush/tears/saliva/sweatdrop)과 생리 상태를 여기로 모았다 — 데이터가 그것들을
+    # expression subgroup 으로 분류하고 설명도 "부끄러움 등으로"/"긴장이나 당혹감"이다.
+    # smile(1664k) 등 나머지 감정 표현은 아직 썸네일이 없어 탐색기가 담당한다.
+    ("표정", "\\u{1F60A}", "expression", [
+        ("thumb", "홍조·눈물·땀", "expression_state"),
+        ("browse", "표정 전체", ["expression", "eyes_tags", "mouth"]),
+    ]),
     ("신체", "\\u{1F9CD}", "characteristic", [
         ("slider", "가슴", "breast_size"),
         ("thumb", "체형", "body_type"),
@@ -76,15 +84,11 @@ SLOTS = [
         ("thumb", "노출·강조", "body_expose"),
         ("thumb", "신체 특징", "body_feature"),
         # 명시적 노출은 별도 축 + 기본 블러(호버 해제). 태그는 제공하되 눈에 먼저 안 띄게.
+        # 부상은 일시적 상태라 영구 특징(신체 특징)과 섞지 않고 별도 섹션으로 둔다.
+        ("thumb", "부상·오염", "body_condition"),
         ("thumb", "노출(성인)", "body_nsfw"),
         # 탐색기 제거: 노출·강조 42 + 신체 특징 68 + 이형 37 이 body_parts/shoulders/
         # ass/hands 를 전부 덮는다. 남겨두면 같은 태그를 두 경로로 보여주게 된다.
-    ]),
-    # 상태는 데이터상 6개 그룹에 흩어져 있다 — sweat=pose, wet=effects, injury=body_parts,
-    # panting=Actions, tired=Expressions, steaming body=body_functions.
-    # 한 축으로 모았다. 경상(ryona)도 여기 포함 — 하드 고어와 분리되는 지점이다.
-    ("상태", "\\u{1F4A6}", "characteristic", [
-        ("thumb", "상태", "state"),
     ]),
     ("종족·수인", "\\u{1F9EC}", "characteristic", [
         ("thumb", "종족", "species"),

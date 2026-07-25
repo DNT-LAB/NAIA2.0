@@ -60,6 +60,24 @@ const COMP_POV = 'pov, first person view';
 
 function newComposition() { return {x: 0, y: 0, z: 0, pov: false, specials: []}; }
 
+// ---------- 캐릭터 캔버스 위치 (NAI V4 char_captions[].centers) ----------
+// core/api_service.py 매핑을 따른다: A-E -> x 0.1~0.9, 1-5 -> y 0.1~0.9. 미지정 fallback = 중앙.
+const POS_COLS = ['A', 'B', 'C', 'D', 'E'];
+const POS_DEFAULT = 'C3';
+
+function posCenters(pos) {
+  const raw = String(pos || POS_DEFAULT);
+  const cx = POS_COLS.indexOf(raw[0]);
+  const cy = Number(raw[1]) - 1;
+  const f = i => (i < 0 || Number.isNaN(i) ? 0.5 : 0.1 + i * 0.2);
+  return {x: f(cx), y: f(cy)};
+}
+
+function posText(pos) {
+  const c = posCenters(pos);
+  return `x ${c.x.toFixed(1)} · y ${c.y.toFixed(1)}`;
+}
+
 /** 축 선택 -> 실제 프롬프트에 나가는 태그들. */
 function compTags(comp) {
   if (!comp) return [];
@@ -98,6 +116,9 @@ const CHAR_SUBS = [
 ];
 
 const MAX_CHIPS = 6;
+// NAI char_captions 상한. core/generation_request.py NAICharacterData 가 5 초과를 거부하므로
+// 슬롯도 5 로 맞춘다(6 을 허용하면 생성 시 조용히 하나가 드롭된다).
+const MAX_NAI_CHARACTERS = 5;
 
 export function createInteractivePanel({
   document,
@@ -142,6 +163,7 @@ export function createInteractivePanel({
       open: !!open,
       state: 'active',   // 'active' | 'disabled'
       gender: 'female',  // 'female' | 'male'
+      pos: POS_DEFAULT,  // 캔버스 위치(NAI 전용). 'A1'~'E5', 기본 중앙 C3
       fields: {'특징': [], '의상': [], '액션': [], '표정': [], '사물': []},
     };
   }
@@ -184,6 +206,27 @@ export function createInteractivePanel({
     return base ? `${g}, ${base}` : g;
   }
 
+  /** 캐릭터에 실제 태그가 하나라도 있나(성별 주입은 태그로 세지 않는다). */
+  function charHasTags(c) {
+    return CHAR_SUBS.some(s => (c.fields[s.key] || []).length > 0);
+  }
+
+  /** 생성 요청에 실을 캐릭터. 활성 + 태그가 있는 것만, NAI 상한(5)까지.
+   *  비어 있는 활성 슬롯까지 보내면 내용 없는 char_caption("girl")이 생기므로 제외한다.
+   *  메인 프롬프트의 1girl/1boy 카운트는 별도로 계산되므로 여기서 빠져도 인원수는 유지된다. */
+  function generationCharacters() {
+    const rows = [];
+    for (const c of state.chars) {
+      if (c.state !== 'active' || !charHasTags(c)) continue;
+      const prompt = buildCharPrompt(c);
+      if (!prompt) continue;
+      // 캐릭터별 네거티브 UI 는 아직 없어 uc 는 빈 문자열. center 는 NAI V4 전용.
+      rows.push({prompt, uc: '', center: posCenters(c.pos)});
+      if (rows.length >= MAX_NAI_CHARACTERS) break;
+    }
+    return rows;
+  }
+
   function emitChange() {
     onPromptChange(renderPrompt(), {
       characters: state.chars.map((c, i) => ({
@@ -193,6 +236,7 @@ export function createInteractivePanel({
         state: c.state,
         enabled: c.state === 'active',
         gender: c.gender || 'female',
+        pos: c.pos || POS_DEFAULT,
         prompt: buildCharPrompt(c),
       })),
     });
@@ -256,6 +300,8 @@ export function createInteractivePanel({
   }
 
   function charBlockHtml() {
+    // Position(캔버스 좌표)은 NAI V4 char_captions 전용이라 NAI 모드에서만 노출한다.
+    const isNai = String(getMode() || '').toUpperCase() === 'NAI';
     const rows = state.chars.map((c, i) => {
       const summary = CHAR_SUBS.flatMap(s => c.fields[s.key] || []).join(', ') || '(비어 있음)';
       const subs = CHAR_SUBS.map(s => {
@@ -283,7 +329,7 @@ export function createInteractivePanel({
             <button type="button" class="ia-genbtn${g === 'male' ? ' on' : ''}" data-gender="male" data-cid="${cid}">Male</button>
             <button type="button" class="ia-genbtn${g === 'female' ? ' on' : ''}" data-gender="female" data-cid="${cid}">Female</button>
           </div>
-          <button type="button" class="ia-char-ref" data-charref data-cid="${cid}" title="레퍼런스 이미지 (준비 중)">Reference</button>
+          ${isNai ? `<button type="button" class="ia-char-pos" data-charpos data-cid="${cid}" title="캔버스 위치 (NAI V4 centers)">Position ${escHtml(c.pos || POS_DEFAULT)}</button>` : ''}
           ${canDelete ? `<button type="button" class="ia-char-del" data-chardel data-cid="${cid}" aria-label="캐릭터 삭제" title="이 캐릭터 슬롯 삭제">&times;</button>` : ''}
           <span class="ia-char-spring"></span>
           <button type="button" class="ia-char-state ${c.state}" data-charenable data-cid="${cid}" aria-pressed="${enabled}" title="${enabled ? '비활성화 (생성에서 제외)' : '활성화'}">${enabled ? 'ACTIVE' : 'OFF'}</button>
@@ -299,6 +345,7 @@ export function createInteractivePanel({
         <span class="ia-block-icon">\u{1F464}</span>
         <span class="ia-block-name">캐릭터</span>
         <span style="flex:1"></span>
+        ${isNai ? '<button type="button" class="ia-char-ref" data-charref title="레퍼런스 이미지 (준비 중) — NAI 는 캐릭터별이 아니라 세트 단위로 받는다">Reference</button>' : ''}
         <span class="ia-block-count">${activeCount} 활성</span>
       </div>
       ${rows}
@@ -341,7 +388,13 @@ export function createInteractivePanel({
     blocksMount.querySelectorAll('[data-charref]').forEach(el => {
       el.addEventListener('click', event => {
         event.stopPropagation();
-        onCharReference(el.dataset.cid);
+        onCharReference();
+      });
+    });
+    blocksMount.querySelectorAll('[data-charpos]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        openPositionPicker(el, el.dataset.cid);
       });
     });
     blocksMount.querySelectorAll('[data-chardel]').forEach(el => {
@@ -374,8 +427,8 @@ export function createInteractivePanel({
   }
 
   function addCharacter() {
-    if (state.chars.length >= 6) {
-      showToast('캐릭터 슬롯은 최대 6개입니다.', 'error');
+    if (state.chars.length >= MAX_NAI_CHARACTERS) {
+      showToast(`캐릭터 슬롯은 최대 ${MAX_NAI_CHARACTERS}개입니다 (NAI 제한).`, 'error');
       return;
     }
     const next = newCharacter(true);
@@ -400,9 +453,104 @@ export function createInteractivePanel({
     emitChange();
   }
 
-  /** Reference — 목업 버튼(추후 레퍼런스 이미지 연결). */
-  function onCharReference(_cid) {
+  /** Reference — 목업 버튼(추후 레퍼런스 이미지 연결). NAI 는 캐릭터별이 아니라 세트 단위라
+   *  캐릭터 블록 헤더에 하나만 둔다. */
+  function onCharReference() {
     showToast('Reference 기능은 준비 중입니다.');
+  }
+
+  // ---- 캔버스 위치(Position) 팝업 — 5x5 그리드 ----
+
+  let posPopup = null;      // 지연 생성 후 재사용
+  let posPopupCid = null;
+
+  function ensurePosPopup() {
+    if (posPopup) return posPopup;
+    posPopup = document.createElement('div');
+    posPopup.className = 'ia-pos-popup';
+    posPopup.hidden = true;
+    document.body.appendChild(posPopup);
+    // 팝업 내부 mousedown 기본동작을 막아 헤더 클릭(펼치기)이나 포커스 이동을 유발하지 않는다.
+    posPopup.addEventListener('mousedown', event => event.preventDefault());
+    posPopup.addEventListener('click', event => {
+      const cell = event.target.closest('[data-pos]');
+      if (!cell) return;
+      event.stopPropagation();
+      setCharPosition(posPopupCid, cell.dataset.pos);
+    });
+    return posPopup;
+  }
+
+  function posPopupHtml(cur) {
+    let cells = '<div class="ia-pos-hdr"></div>' +
+      POS_COLS.map(col => `<div class="ia-pos-hdr">${col}</div>`).join('');
+    for (let row = 1; row <= 5; row++) {
+      cells += `<div class="ia-pos-hdr">${row}</div>`;
+      cells += POS_COLS.map(col => {
+        const p = col + row;
+        return `<button type="button" class="ia-pos-cell${p === cur ? ' is-on' : ''}" data-pos="${p}">${p}</button>`;
+      }).join('');
+    }
+    return `<div class="ia-pos-head">캔버스 위치 · NAI V4</div>
+      <div class="ia-pos-wrap">
+        <div class="ia-pos-grid">${cells}</div>
+        <div class="ia-pos-info">
+          <div class="ia-pos-cur">${escHtml(cur)}</div>
+          <div class="ia-pos-map">centers<br>${escHtml(posText(cur))}</div>
+          <button type="button" class="ia-pos-reset" data-pos="${POS_DEFAULT}">중앙으로</button>
+        </div>
+      </div>`;
+  }
+
+  function openPositionPicker(anchor, cid) {
+    const character = state.chars.find(x => x.id === cid);
+    if (!character) return;
+    if (posPopupCid === cid && posPopup && !posPopup.hidden) { closePositionPicker(); return; }
+    const popup = ensurePosPopup();
+    posPopupCid = cid;
+    popup.innerHTML = posPopupHtml(character.pos || POS_DEFAULT);
+    popup.hidden = false;
+    // 버튼 아래에 앵커. 화면 밖으로 넘치면 안쪽으로 clamp(위로 뒤집기 포함).
+    const rect = anchor.getBoundingClientRect();
+    const pr = popup.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = Math.max(8, Math.min(rect.left, vw - pr.width - 8));
+    let top = rect.bottom + 6;
+    if (top + pr.height > vh - 8) top = Math.max(8, rect.top - pr.height - 6);
+    popup.style.left = `${Math.round(left)}px`;
+    popup.style.top = `${Math.round(top)}px`;
+    document.addEventListener('mousedown', onPosOutside, true);
+    document.addEventListener('keydown', onPosKeydown, true);
+  }
+
+  function closePositionPicker() {
+    posPopupCid = null;
+    if (posPopup) { posPopup.hidden = true; posPopup.innerHTML = ''; }
+    document.removeEventListener('mousedown', onPosOutside, true);
+    document.removeEventListener('keydown', onPosKeydown, true);
+  }
+
+  function onPosOutside(event) {
+    if (posPopup && posPopup.contains(event.target)) return;
+    if (event.target.closest?.('[data-charpos]')) return;   // 토글은 버튼 핸들러가 처리
+    closePositionPicker();
+  }
+
+  function onPosKeydown(event) {
+    if (event.key === 'Escape') { event.preventDefault(); closePositionPicker(); }
+  }
+
+  /** 위치 선택 → 버튼 라벨만 in-place 갱신(편집 중 슬롯을 건드리지 않는다). */
+  function setCharPosition(cid, pos) {
+    const character = state.chars.find(x => x.id === cid);
+    if (!character) return;
+    const next = /^[A-E][1-5]$/.test(String(pos || '')) ? String(pos) : POS_DEFAULT;
+    character.pos = next;
+    const btn = blocksMount.querySelector(`.ia-char[data-cid="${cid}"] [data-charpos]`);
+    if (btn) btn.textContent = `Position ${next}`;
+    if (posPopup && !posPopup.hidden) posPopup.innerHTML = posPopupHtml(next);
+    emitChange();
   }
 
   /** 마지막 하나가 아니면 캐릭터 슬롯 삭제. */
@@ -926,7 +1074,7 @@ export function createInteractivePanel({
       toggleButton.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
     blocksMount.hidden = !active;
-    if (!active) closePanel();
+    if (!active) { closePositionPicker(); closePanel(); }
     else { renderBlocks(); void probeStatus(); }
     onActiveChange(active);
     if (!silent && active) emitChange();
@@ -967,12 +1115,19 @@ export function createInteractivePanel({
       if (person) state.person = person;
     },
     getPrompt: renderPrompt,
+    // 생성 요청용 캐릭터(활성 + 태그 보유, NAI 상한 5). app.js 가 overrides.characters/uc/
+    // character_positions 로 싣는다.
+    getGenerationCharacters: generationCharacters,
+    // 모드 전환 시 호출 — Position 버튼/Reference 는 NAI 전용이라 헤더를 다시 그려야 한다.
+    onModeChanged: () => { if (active) { closePositionPicker(); renderBlocks(); } },
     destroy: () => {
       // 하위 모듈의 리스너/타이머/팝업/툴팁까지 정리한다.
       if (autocomplete) { try { autocomplete.unbind(); } catch (e) {} }
       if (browse) { try { browse.destroy(); } catch (e) {} }
       if (toggleButton) toggleButton.removeEventListener('click', onToggleClick);
       panelMount.removeEventListener('mousedown', onPanelMouseDown);
+      closePositionPicker();
+      if (posPopup) { posPopup.remove(); posPopup = null; }
       blocksMount.innerHTML = '';
       panelMount.classList.remove('open');
       panelMount.style.top = panelMount.style.left = panelMount.style.width = '';

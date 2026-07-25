@@ -1181,6 +1181,12 @@ def _auto_generation_overrides(params: dict[str, Any]) -> dict[str, Any]:
             "_remote_queue_source",
             "_remote_queue_label",
             "_skip_vibe_transfer_late_binding",
+            # Interactive 모드 캐릭터 소유권 마커. 유실되면 continuation 2회차부터 캐릭터
+            # 모듈 프레임과 Character Reference 가 다시 새어 들어온다(Interactive 는 캐릭터를
+            # overrides.characters 로 직접 싣고 모듈 경로를 차단한다). 활성 캐릭터가 없는
+            # Interactive 세션에서는 characters 키 자체가 없어 이 플래그가 유일한 방어선이다.
+            "_skip_character_late_binding",
+            "_skip_character_reference_late_binding",
             # 인셋 마커가 유실되면 continuation의 인셋 키 pop 가드가 영영 발동하지
             # 않아 baked 캔버스(type/image_bytes)가 다음 반복에 박제된다.
             REFERENCE_INSET_PIN_MARKER,

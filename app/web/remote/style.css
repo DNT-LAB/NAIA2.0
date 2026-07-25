@@ -19846,6 +19846,52 @@ body.detached-module .mod-grid-3 {
 }
 .ia-char-ref:hover { color: var(--accent-glow); border-color: var(--accent); }
 
+/* 캔버스 위치(Position) 버튼 — NAI 전용 */
+.ia-char-pos {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 8.5px; padding: 2px 8px;
+  border: 1px solid var(--border-dim); border-radius: 5px; background: none;
+  color: var(--text-dim); cursor: pointer; white-space: nowrap;
+}
+.ia-char-pos:hover { color: var(--accent-glow); border-color: var(--accent); }
+
+/* 좌표 팝업 (5x5 그리드) */
+.ia-pos-popup {
+  position: fixed; z-index: var(--z-floating-module);
+  background: var(--bg-surface); border: 1px solid var(--border-glow);
+  border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+  padding: 10px 12px 12px;
+}
+.ia-pos-popup[hidden] { display: none; }
+.ia-pos-head {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px;
+}
+.ia-pos-wrap { display: flex; gap: 14px; align-items: flex-start; }
+.ia-pos-grid { display: grid; grid-template-columns: repeat(6, 26px); gap: 3px; }
+.ia-pos-hdr {
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+  display: flex; align-items: center; justify-content: center; height: 22px;
+}
+.ia-pos-cell {
+  height: 22px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border-dim); background: var(--bg-deep);
+  color: transparent; font-family: var(--font-mono); font-size: 8px; line-height: 1;
+}
+.ia-pos-cell:hover { border-color: var(--accent); color: var(--text-dim); }
+.ia-pos-cell.is-on {
+  border-color: var(--accent); background: rgba(124,106,239,0.30); color: var(--text-primary);
+}
+.ia-pos-info { display: flex; flex-direction: column; gap: 7px; padding-top: 18px; }
+.ia-pos-cur {
+  font-family: var(--font-mono); font-size: 15px; font-weight: 700; color: var(--accent-glow);
+}
+.ia-pos-map { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); line-height: 1.5; }
+.ia-pos-reset {
+  font-family: var(--font-mono); font-size: 9px; padding: 3px 8px; border-radius: 5px;
+  border: 1px solid var(--border-dim); background: none; color: var(--text-muted); cursor: pointer;
+}
+.ia-pos-reset:hover { color: var(--text-primary); border-color: var(--accent); }
+
 /* 삭제 버튼 */
 .ia-char-del {
   flex: 0 0 auto; width: 18px; height: 18px; line-height: 1; border-radius: 5px;

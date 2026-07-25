@@ -888,6 +888,14 @@ class APIService:
                         character_positions = params.get('character_positions', [])
                         character_ids = list(params.get('_executed_character_ids') or params.get('character_ids') or [])
 
+                    elif params.get('_skip_character_late_binding'):
+                        # 4-1) 캐릭터 소유자가 요청자 자신인 경우(Interactive 모드) — 모듈/스냅샷/
+                        # 스트림 freeze 에서 캐릭터를 끌어오지 않는다. 캐릭터가 있으면 위의
+                        # EarlyBinding/SavedParams 로 이미 실렸고, 없으면 '없는 것'이 정답이다.
+                        # (이 가드가 없으면 Interactive 를 켠 뒤에도 직전에 활성화해 둔 캐릭터
+                        #  모듈 프레임이 그대로 새어 들어온다.)
+                        char_source = "SkipLateBinding"
+
                     else:
                         # 5-0) 이벤트 스트림(스토리/수동 진행) freeze — 시퀀스가 도는 동안
                         # 캐릭터(와일드카드 롤 포함)는 스냅샷의 전개-리터럴로 고정된다.

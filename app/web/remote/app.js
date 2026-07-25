@@ -890,7 +890,7 @@ let eventCorpusHandlers = null;
 let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260724-ia14')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260725-ia16')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -2459,7 +2459,34 @@ function buildWebGenerationOverrides(prompt, negativePrompt) {
   overrides._raw_input = prompt;
   overrides._remote_web_session_params = true;
   overrides._remote_queue_source = 'Web';
+  applyInteractiveCharacterOverrides(overrides);
   return overrides;
+}
+
+// Interactive 모드에서는 캐릭터의 소유자가 Interactive 블록이다. 캐릭터 프롬프트를
+// overrides.characters/uc 로 실어 NAI char_captions 에 반영하고, 같은 요청에서 캐릭터
+// 모듈 / Character Reference 의 late-binding 을 차단한다(Vibe Transfer 는 유지 — 사용자 계약).
+//
+// characters 를 싣기만 해도 api_service 의 EarlyBinding 이 모듈 스냅샷보다 우선하지만,
+// 활성 캐릭터가 없을 때는 fallback 이 캐릭터 모듈 프레임을 끌어오므로 skip 플래그가 필요하다.
+// NAI 전용: characters/char-ref 는 다른 백엔드에서 쓰이지 않는다.
+function applyInteractiveCharacterOverrides(overrides) {
+  if (!interactivePanel?.isActive?.()) return;
+  const mode = String(currentMode || modeSelect?.value || 'NAI').toUpperCase();
+  if (mode !== 'NAI') return;
+  overrides._skip_character_late_binding = true;
+  overrides._skip_character_reference_late_binding = true;
+  let rows = [];
+  try { rows = interactivePanel.getGenerationCharacters?.() || []; } catch (_) { rows = []; }
+  if (!rows.length) return;
+  // uc / character_positions 길이는 characters 와 반드시 일치해야 한다 — 어긋나면
+  // NAICharacterData 가 거부하고 캐릭터가 조용히 사라진다(generation_request.py __post_init__).
+  overrides.characters = rows.map(row => String(row.prompt || ''));
+  overrides.uc = rows.map(row => String(row.uc || ''));
+  overrides.character_positions = rows.map(row => ({
+    x: Number(row.center?.x ?? 0.5),
+    y: Number(row.center?.y ?? 0.5),
+  }));
 }
 
 const $ = id => document.getElementById(id);
@@ -5979,6 +6006,8 @@ function syncMode(mode) {
     if (btn) btn.classList.toggle('nai-only-disabled', !isNai);
   });
   updateInteractiveNaiToolBlock();   // Interactive 활성 시 Character/CharRef 차단 유지
+  // Interactive 헤더의 Position/Reference 는 NAI 전용 — 모드가 바뀌면 다시 그린다.
+  if (interactivePanel?.onModeChanged) interactivePanel.onModeChanged();
 
   // 모드 전환 시 런처 카테고리 상태(category-status = 적용된 Character/Vibe/Ref 표시)를
   // 재계산한다. updateModeState()는 요약(Activated:)만 갱신하고 런처 버튼은 안 건드렸다 —

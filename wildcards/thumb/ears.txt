@@ -69,8 +69,8 @@ tamandua ears
 hamster ears
 elephant ears
 eevee ears
-armadillo ears
 antelope ears
+armadillo ears
 ferret ears
 komainu ears
 unaligned ears
@@ -92,7 +92,7 @@ porcupine ears
 mismatched animal ear colors
 ears up
 pangolin ears
-boar ears
 detached ears
+boar ears
 chinchilla ears
 dragon ears

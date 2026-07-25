@@ -89,24 +89,29 @@ for wc in sorted(OUT.glob("*.txt")):
         continue
     tags = [l.strip() for l in wc.read_text(encoding="utf-8").splitlines() if l.strip()]
     h = have.get(PACK_AXIS.get(ax, ax), set())
-    male = [t for t in tags if is_male(t)]                      # 보유 여부 무관 — 전부 재생성
+    # 수염 계열은 한때 1girl 베이스로 잘못 생성돼(소녀 얼굴에 수염만 얹힘) 팩에 있어도
+    # 강제 재생성 대상이었다. 1boy/mature male 로 다시 뽑아 들어갔으므로 이제는 다른
+    # 축과 같게 '팩에 없는 것만' 남긴다.
     fem = [t for t in tags if t not in h and not is_male(t)]
-    male = [t for t in male if t not in h or FACIAL_HAIR.search(t)]
+    male = [t for t in tags if is_male(t) and t not in h]
     fem.sort(key=lambda t: -F(t)); male.sort(key=lambda t: -F(t))
     # 한 축 안에서 프레이밍이 갈리면 배치를 쪼갠다 — 안 그러면 절반이 프레임 밖으로 나간다.
+    split_n = 0
     split = FRAMING_SPLIT.get(ax)
     if split and fem:
         for _fr, _tags in split.items():
             _sub = [t for t in fem if t in _tags]
             if _sub:
                 (TODO / f"{ax}_{_fr}.txt").write_text("\n".join(_sub) + "\n", encoding="utf-8")
+                split_n += len(_sub)
         fem = [t for t in fem if not any(t in v for v in split.values())]
     if fem:
         (TODO / f"{ax}.txt").write_text("\n".join(fem) + "\n", encoding="utf-8")
     if male:
         (TODO / f"{ax}_male.txt").write_text("\n".join(male) + "\n", encoding="utf-8")
-    total += len(fem) + len(male)
-    rows.append((ax, len(tags), len(h), len(fem), len(male)))
+    # 분할분(split_n)을 합계에 넣지 않아 실제보다 적게 보고하던 버그를 고쳤다.
+    total += len(fem) + len(male) + split_n
+    rows.append((ax, len(tags), len(h), len(fem) + split_n, len(male)))
 
 print(f"{'축':<14}{'목록':>5}{'보유':>5}{'남을것(여)':>10}{'남성':>6}")
 for ax, n, hv, f_, m_ in rows:

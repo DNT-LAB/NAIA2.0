@@ -326,6 +326,13 @@ EXCLUDE = {
     "mini dragon",               # 152. "small_dragon 으로 이동되었습니다"
     "beast",                     # 78. "모호한 태그" — monster 사용
     *SPECIES_CUT,                # 종족 정리(위 SPECIES_MIN_FREQ / RESCUE 규칙)
+    # ── Vision 검수 2차: NAI 가 태그를 렌더하지 않은 것들(실측) ──────────
+    "fins",                      # "물고기 인형을 든 소녀" — dorsal/shark fin 과 중복
+    "crab claw",                 # "손 위에 게 한 마리" — 집게손이 안 된다
+    "dragon (arms)",             # 노란 인형을 든 소녀
+    "prehensile ribbon",         # 아무것도 렌더되지 않는다
+    "blowhole", "extra breasts", "fluff",   # 아무것도 렌더되지 않는다
+    "no bangs",                  # 앞머리가 그대로 남는다(부정 태그)
 
     # dirty / dirty feet / dirty hands 는 STATE 축으로 살렸다(아래에서 EXCLUDE 에서 뺀다).
 }

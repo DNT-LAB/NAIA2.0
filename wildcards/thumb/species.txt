@@ -107,16 +107,16 @@ monkey boy
 pegasus
 saiyan
 blob
-owl girl
 monkey girl
+owl girl
 fallen angel
 pikmin (creature)
 dwarf
 leopard boy
 giant monster
 wyvern
-goat boy
 penguin girl
+goat boy
 floating skull
 valkyrie
 horse boy
@@ -129,14 +129,14 @@ seraph
 familiar
 komainu
 phoenix
-dullahan
 dolphin girl
+dullahan
 orca girl
 rito
 jackal boy
 shadow (shadows house)
-female orc
 kneeless mermaid
+female orc
 chimera
 hedgehog girl
 bee girl
@@ -179,12 +179,12 @@ sheep boy
 cockroach girl
 cheetah girl
 ferret girl
-whale girl
 ghost girl
 deer boy
-snake girl
-slug girl
+whale girl
 zebra girl
+slug girl
+snake girl
 sphinx
 dryad
 capybara girl
@@ -203,13 +203,13 @@ stoat girl
 rhinoceros girl
 chameleon girl
 jellyfish girl
-snail girl
 squid girl
+snail girl
 panther girl
 skunk girl
 camel girl
-chupacabra
 axolotl girl
+chupacabra
 frog boy
 lynx girl
 crab girl

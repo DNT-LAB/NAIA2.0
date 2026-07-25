@@ -1,6 +1,5 @@
 claws
 animal hands
-fins
 antennae
 head fins
 suction cups
@@ -20,11 +19,9 @@ dorsal fin
 multiple legs
 webbed hands
 no feet
-blowhole
-prehensile ribbon
 shark fin
-prosthetic hand
 multiple hands
+prosthetic hand
 chest tuft
 tiger paws
 spines
@@ -38,8 +35,4 @@ extra hands
 webbed feet
 third eye on chest
 male with breasts
-fluff
-dragon (arms)
-extra breasts
-crab claw
 cat feet

@@ -76,8 +76,10 @@ TAILV = (f"1girl, {ARTIST}, young female, solo, from behind, cowboy shot, <<VARY
 WINGV = (f"1girl, {ARTIST}, young female, solo, from behind, upper body, <<VARY>>, "
          f"spread wings, bare shoulders, nude, safe, rating:general, "
          f"white background, {QUALITY}")
+# nude + safe 를 빠뜨렸다가 원피스를 입고 나와 발·다리 특징(발굽/새 다리/물갈퀴)이
+# 전부 가려졌다(실측 13장). 사용자 원칙 그대로 — 옷이 필수 요소를 가리면 안 된다.
 FULL = (f"1girl, {ARTIST}, young female, solo, front view, full body, standing, <<VARY>>, "
-        f"rating:general, white background, {QUALITY}")
+        f"nude, safe, rating:general, white background, {QUALITY}")
 
 def male(tpl: str) -> str:
     """남성 배치 — 1girl/young female 을 바꾼다. 이것만 바꿔야 나머지 톤이 유지된다."""

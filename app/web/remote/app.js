@@ -890,7 +890,7 @@ let eventCorpusHandlers = null;
 let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260725-ia16')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260725-ia41')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -919,8 +919,11 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       browse: interactiveBrowse,
       // 슬롯 입력창(textarea)에 범용 자동완성을 붙인다. 팝업 검색창에는 붙이지 않는다.
       bindTagAssist,
-      getAutocompleteTarget: getTagAssistTarget,
       getMode: () => currentMode || modeSelect?.value || 'NAI',
+      // 자동완성 '대상'이 아니라 '실제로 열려 있는지'를 넘긴다 — tagAssist 는 드롭다운을 닫아도
+      // acTarget 을 비우지 않으므로, 대상만 보면 Enter/Escape 를 영원히 양보해 슬롯 편집이
+      // 닫히지 않는다(실측 확인).
+      getAutocompleteTarget: () => (isTagAutocompleteOpen() ? getTagAssistTarget() : null),
       queryCorpus: params => requestEventCorpusQuery(wsSend, params),
       corpusStatus: () => requestEventCorpusStatus(wsSend),
       onPromptChange: promptText => {
@@ -8521,6 +8524,13 @@ function getTagAssistTarget() {
   return tagAssist ? tagAssist.getAcTarget() : null;
 }
 
+/** 자동완성 드롭다운이 실제로 열려 있는가. tagAssist 는 tagTooltip 을 ac-mode 로 재사용한다.
+ *  (acTarget 은 드롭다운을 닫아도 남아 있어 '열림' 판정에 쓸 수 없다.) */
+function isTagAutocompleteOpen() {
+  const tooltip = $('tagTooltip');
+  return !!tooltip && tooltip.classList.contains('open') && tooltip.classList.contains('ac-mode');
+}
+
 function positionTagTooltip() {
   if (tagAssist) tagAssist.positionTagTooltip();
 }
@@ -8560,7 +8570,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260724-catfilter6')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260725-iasup2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -8582,6 +8592,9 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260724-catfilter6
       catStyle,
       showToast,
       getEventPresetPanel: () => eventPresetPanel,
+      // Interactive 슬롯 편집 중에는 태그 정보 툴팁(설명 + RELATED)을 띄우지 않는다 —
+      // 앵커 팝업(팔레트/썸네일) 위에 겹쳐 가린다. 자동완성 드롭다운은 그대로 동작한다.
+      isTagInfoSuppressed: () => document.body.classList.contains('interactive-editing'),
     });
     tagAssist.bindDefaultTextareas();
     pendingTagAssistBinds.splice(0).forEach(([textarea, options]) => {

@@ -287,6 +287,10 @@ _HIGH_CONF2_OVERRIDE: dict[tuple[str, str], str] = {
     # Food_Object -> Clothing_Wear (2)
     ("Food_Object", "sign around neck"): "Clothing_Wear",
     ("Food_Object", "head flag"): "Clothing_Wear",
+    # Person_Body -> Expression_Action (1)
+    # sway back = "지지대 없이 뒤로 기대어 서 있는 모습" = 자세다. 원본이 body_type 에
+    # 넣어놨지만 같은 개념인 arched back / leaning back 은 pose/posture 로 분류돼 있다.
+    ("Person_Body", "sway back"): "Expression_Action",
 }
 
 TAG_GROUP_OVERRIDE: dict[tuple[str, str], str] = {

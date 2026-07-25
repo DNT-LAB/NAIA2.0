@@ -12,6 +12,12 @@
 //
 // cache-bust marker: 20260723-ia1
 
+// 축 정의(팔레트/슬라이더/썸네일/탐색) — wildcards/thumb 에서 생성된 파생 모듈.
+import {
+  CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
+  PACK_AXIS, SENSITIVE_TAGS,
+} from './interactiveAxes.mjs?v=20260725-ax41';
+
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
 // focus_tags 는 subgroup 채로는 구도에 남고(ass focus 등 초점), 캐릭터 특징 10개만 태그 단위로
@@ -57,6 +63,9 @@ const COMP_SPECIALS = [
   ['기울임', 'dutch angle'], ['역동감', 'foreshortening'],
 ];
 const COMP_POV = 'pov, first person view';
+
+/** 하위 슬롯 표시명. key 는 상태 필드명(짧고 셀렉터 안전), label 은 화면 표기. */
+function subLabel(meta) { return (meta && (meta.label || meta.key)) || ''; }
 
 function newComposition() { return {x: 0, y: 0, z: 0, pov: false, specials: []}; }
 
@@ -107,13 +116,37 @@ function compChips(comp) {
   return out;
 }
 
+// 특징은 5개 슬롯으로 나뉜다. 각 슬롯은 팝업에서 여러 '축'(팔레트/슬라이더/썸네일/탐색)을
+// 모아 보여준다 — 팝업이 무거운 일을 하므로 좌측 슬롯 수를 늘리지 않는다.
+// 슬롯/축 정의는 interactiveAxes.mjs(와일드카드에서 생성)가 SSOT.
 const CHAR_SUBS = [
-  {key: '특징', icon: '\u{1F9EC}', axis: 'characteristic'},
+  ...CHAR_SLOTS,
   {key: '의상', icon: '\u{1F457}', axis: 'clothing'},
   {key: '액션', icon: '\u{1F3C3}', axis: 'pose_action'},
   {key: '표정', icon: '\u{1F60A}', axis: 'expression'},
   {key: '사물', icon: '⚙', axis: 'object'},   // 캐릭터가 든 무기/소품 등
 ];
+
+/** 팔레트/슬라이더는 축 안에서 하나만 유효하다 — 그 축의 모든 태그(소문자). */
+function axisTagSet(kind, ref) {
+  if (kind === 'palette') return (PALETTES[ref] || []).map(d => d.tag.toLowerCase());
+  if (kind === 'slider') return ((SLIDERS[ref] || {}).steps || []).map(t => t.toLowerCase());
+  return [];
+}
+
+/** 슬라이더 기본값(예: 머리 길이 = medium hair)을 새 캐릭터 필드에 미리 넣는다.
+ *  slot key -> [태그...]. 기본값이 없는 축은 비어 있다. */
+function defaultFieldsFor(slotKey) {
+  const slot = CHAR_SLOTS.find(s => s.key === slotKey);
+  if (!slot || !Array.isArray(slot.sections)) return [];
+  const out = [];
+  for (const sec of slot.sections) {
+    if (sec.kind !== 'slider') continue;
+    const def = (SLIDERS[sec.ref] || {}).default;
+    if (def) out.push(def);
+  }
+  return out;
+}
 
 const MAX_CHIPS = 6;
 // NAI char_captions 상한. core/generation_request.py NAICharacterData 가 5 초과를 거부하므로
@@ -164,7 +197,9 @@ export function createInteractivePanel({
       state: 'active',   // 'active' | 'disabled'
       gender: 'female',  // 'female' | 'male'
       pos: POS_DEFAULT,  // 캔버스 위치(NAI 전용). 'A1'~'E5', 기본 중앙 C3
-      fields: {'특징': [], '의상': [], '액션': [], '표정': [], '사물': []},
+      // 하위 슬롯 목록에서 파생 — CHAR_SUBS 를 늘릴 때 여기를 같이 고칠 필요가 없다.
+      // 슬라이더 기본값(머리 길이=medium)은 미리 채워, 초보자가 비워둬도 합리적 결과가 나온다.
+      fields: Object.fromEntries(CHAR_SUBS.map(s => [s.key, defaultFieldsFor(s.key)])),
     };
   }
 
@@ -309,7 +344,7 @@ export function createInteractivePanel({
         const editing = isEditing('char', c.id, s.key);
         return `<div class="ia-sub-block${editing ? ' is-editing' : ''}${tags.length ? '' : ' is-empty'}" data-cid="${c.id}" data-sub="${s.key}">
           <div class="ia-block-label">
-            <span class="ia-block-title"><span class="ia-block-icon">${s.icon}</span><span class="ia-block-name">${s.key}</span></span>
+            <span class="ia-block-title"><span class="ia-block-icon">${s.icon}</span><span class="ia-block-name">${escHtml(subLabel(s))}</span></span>
             <span class="ia-block-axis">${s.axis}</span>
           </div>
           ${slotBody(editing, tags)}
@@ -335,7 +370,13 @@ export function createInteractivePanel({
           <button type="button" class="ia-char-state ${c.state}" data-charenable data-cid="${cid}" aria-pressed="${enabled}" title="${enabled ? '비활성화 (생성에서 제외)' : '활성화'}">${enabled ? 'ACTIVE' : 'OFF'}</button>
           <span class="ia-char-sum">${escHtml(summary)}</span>
         </div>
-        <div class="ia-char-body">${subs}</div>
+        <div class="ia-char-body">
+          <div class="ia-char-preset-row">
+            <button type="button" class="ia-char-preset" data-charpreset data-cid="${cid}"
+              title="캐릭터 프리셋 (준비 중) — 머리/눈/체형을 한 번에 채우는 프리셋">캐릭터 프리셋</button>
+          </div>
+          ${subs}
+        </div>
       </div>`;
     }).join('');
 
@@ -389,6 +430,12 @@ export function createInteractivePanel({
       el.addEventListener('click', event => {
         event.stopPropagation();
         onCharReference();
+      });
+    });
+    blocksMount.querySelectorAll('[data-charpreset]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        showToast('캐릭터 프리셋은 준비 중입니다.');
       });
     });
     blocksMount.querySelectorAll('[data-charpos]').forEach(el => {
@@ -617,6 +664,8 @@ export function createInteractivePanel({
     if (!opts.fromInput) syncEditingInput();
     updateEditingMeta();
     if (browse) browse.refreshDupes();   // 브라우저의 '있음' 표시 갱신(재요청 없음)
+    // 직접 타이핑으로 축 값이 바뀐 경우에도 팔레트/슬라이더 선택 표시를 맞춘다.
+    if (opts.fromInput) refreshAxisSections();
     emitChange();
   }
 
@@ -703,21 +752,61 @@ export function createInteractivePanel({
   function openCharSub(cid, sub) {
     const meta = CHAR_SUBS.find(s => s.key === sub);
     if (!meta) return;
-    panelContext = {kind: 'char', cid, sub, title: `${cid} · ${sub}`, axis: meta.axis};
+    // 표시 라벨은 C1..Cn (내부 id 는 c1/c2.. 안정 고유값이라 사용자에게 보여주지 않는다).
+    const index = state.chars.findIndex(c => c.id === cid);
+    const label = index >= 0 ? 'C' + (index + 1) : cid;
+    panelContext = {
+      kind: 'char', cid, sub,
+      title: `${label} · ${subLabel(meta)}`,
+      axis: meta.axis,
+      // 축 섹션(팔레트/슬라이더/썸네일/탐색). 없으면 기존 검색+탐색 팝업.
+      sections: meta.sections || null,
+      // 하위 슬롯이 subgroup 스코프를 가지면 분류 탐색을 그 범위로 좁힌다(구도/효과와 동일 기법).
+      // sections 가 있으면 browse 섹션의 subgroups 를 스코프로 쓴다.
+      subgroupInclude: meta.subgroups || browseScopeOf(meta) || null,
+      subgroupExclude: meta.subgroupsExclude || null,
+    };
     enterEditing();
+  }
+
+  /** 이 슬롯에 전체 태그 탐색기(3단 계층 + 검색)를 붙일까.
+   *  축 섹션(팔레트/슬라이더/썸네일)만으로 충분한 슬롯(예: 머리)에서는 숨긴다 —
+   *  sections 가 없는 기존 슬롯(의상/액션/표정/사물)과 browse 섹션을 가진 슬롯만 붙인다. */
+  function wantsBrowse() {
+    const secs = panelContext?.sections;
+    if (!Array.isArray(secs) || !secs.length) return true;          // 기존 슬롯 = 탐색기 전용
+    return secs.some(sec => sec.kind === 'browse');
+  }
+
+  /** sections 안의 browse 섹션들이 지정한 subgroup 을 모아 계층 탐색 스코프로 쓴다. */
+  function browseScopeOf(meta) {
+    if (!meta || !Array.isArray(meta.sections)) return null;
+    const out = [];
+    for (const sec of meta.sections) {
+      if (sec.kind === 'browse' && Array.isArray(sec.subgroups)) out.push(...sec.subgroups);
+    }
+    return out.length ? out : null;
   }
 
   /** 슬롯을 텍스트 입력으로 펼치고, 그 옆에 검색+탐색 팝업을 띄운다. */
   function enterEditing() {
+    thumbScroll.clear();       // 슬롯을 바꾸면 썸네일 스크롤을 처음으로
+    // 아코디언 기본값 = 그 슬롯의 첫 썸네일 섹션(선택된 게 있으면 그 섹션을 우선 펼친다).
+    openThumbAxis = firstThumbAxis();
+    // 팩 인덱스는 한 번만 받고, 도착하면 축 영역만 다시 그린다(이미지 셀로 승격).
+    void loadThumbIndex().then(() => { if (panelContext) refreshAxisSections(); });
     openId = panelContext.kind === 'scene' ? panelContext.slotId : 'character';
     renderBlocks();            // 편집 슬롯만 textarea 로, 나머지는 칩으로
     renderPanel();             // 검색창 + 분류 탐색
     panelMount.classList.add('open');
+    // 편집 중 표시 — tagAssist 의 태그 정보 툴팁을 억제한다(팝업 위에 겹쳐 가림).
+    document.body.classList.add('interactive-editing');
     focusEditingInput();       // 슬롯 textarea 포커스(끝으로)
     positionPopup();           // 편집 슬롯 옆에 앵커
   }
 
   function closePanel() {
+    document.body.classList.remove('interactive-editing');
     if (autocomplete) autocomplete.unbind();
     if (browse) browse.detach();
     openId = null;
@@ -889,17 +978,19 @@ export function createInteractivePanel({
         <span class="ia-panel-sub">${escHtml(panelContext.axis)}</span>
         <button type="button" class="ia-panel-close" data-close="1">&times;</button>
       </div>
-      <div class="ia-search ia-search-top">
+      ${wantsBrowse() ? `<div class="ia-search ia-search-top">
         <input type="text" id="iaTagInput" placeholder="분류·태그 검색 (아래 목록 필터)" autocomplete="off">
         <span class="ia-search-scope">${escHtml(panelContext.axis)}</span>
-      </div>
+      </div>` : ''}
       <div class="ia-panel-body">
         ${panelContext.slotId === 'composition' ? compPanelHtml() : ''}
-        <div class="ia-browse-mount" id="iaBrowseMount"></div>
+        ${axisSectionsHtml()}
+        ${wantsBrowse() ? '<div class="ia-browse-mount" id="iaBrowseMount"></div>' : ''}
       </div>`;
 
     panelMount.querySelector('[data-close]')?.addEventListener('click', closePanel);
     if (panelContext.slotId === 'composition') bindCompPanel();
+    bindAxisSections();
     // 계층 브라우저를 이 슬롯 축으로 마운트한다. 없으면 섹션은 비어 있다.
     if (browse) {
       const browseMount = panelMount.querySelector('#iaBrowseMount');
@@ -926,6 +1017,375 @@ export function createInteractivePanel({
         if (event.key === 'Escape') { event.preventDefault(); input.value = ''; applyFilter(); }
       });
     }
+  }
+
+  // ---- 축 섹션 (팔레트 / 슬라이더 / 썸네일) ----
+
+  const thumbHave = new Map();       // axisKey -> Set(썸네일 이미지가 있는 태그)
+  const thumbScroll = new Map();     // axisKey -> scrollTop (재렌더 시 복원)
+  let openThumbAxis = null;          // 아코디언 — 썸네일 섹션은 한 번에 하나만 펼친다
+
+  // 민감 태그(신체 결손/봉합/혈흔 등)는 썸네일을 블러하고 호버 시에만 보여준다.
+  const SENSITIVE = new Set((SENSITIVE_TAGS || []).map(t => String(t).toLowerCase()));
+  const isSensitive = tag => SENSITIVE.has(String(tag).toLowerCase());
+
+  /** 호버 툴팁 문구: 태그 + 설명. 설명이 없으면 태그만. */
+  function tagTip(tag) {
+    const desc = (TAG_DESC || {})[tag];
+    return desc ? `${tag} · ${desc}` : String(tag);
+  }
+
+  /** 이 슬롯에서 기본으로 펼칠 썸네일 축 — 선택된 값이 있는 축을 우선, 없으면 첫 축. */
+  function firstThumbAxis() {
+    const secs = panelContext?.sections;
+    if (!Array.isArray(secs)) return null;
+    const thumbs = secs.filter(s => s.kind === 'thumb').map(s => s.ref);
+    if (!thumbs.length) return null;
+    const sel = currentLower();
+    const withSel = thumbs.find(axis =>
+      (THUMB_TAGS[axis] || []).some(t => sel.has(t.toLowerCase())));
+    return withSel || thumbs[0];
+  }
+
+  /** 팩 인덱스를 한 번 받아, 이미지가 있는 태그만 <img> 로 그린다(없으면 텍스트 셀). */
+  async function loadThumbIndex() {
+    if (thumbHave.size) return;
+    try {
+      const res = await fetch('/api/interactive-thumb/index', {cache: 'no-store'});
+      if (!res.ok) return;
+      const data = await res.json();
+      for (const [axis, tags] of Object.entries(data?.axes || {})) {
+        thumbHave.set(axis, new Set((tags || []).map(t => String(t))));
+      }
+    } catch (_) { /* 팩이 없으면 전부 텍스트 셀 */ }
+  }
+
+  /** 표시 축 -> 팩 축. 얼굴은 생성이 face.txt 한 파일이라 표시 그룹이 달라도 이미지는 face/* 다. */
+  function packAxisOf(axis) { return (PACK_AXIS || {})[axis] || axis; }
+
+  function thumbUrl(axis, tag) {
+    const pa = packAxisOf(axis);
+    return `/api/interactive-thumb?axis=${encodeURIComponent(pa)}&tag=${encodeURIComponent(tag)}`;
+  }
+
+  /** 현재 슬롯 태그를 소문자 Set 으로. */
+  function currentLower() {
+    return new Set(currentTags().map(t => String(t).toLowerCase()));
+  }
+
+  // ---- 축 규칙: 부모 태그 자동 배정 / 팔레트 다중 선택 전환 ----
+
+  /** 슬롯에 들어 있는 이 팔레트 소속 태그들을 '순서대로' 돌려준다.
+   *  첫 번째 = 주 색상, 나머지 = 추가 색상. 순서가 역할을 encode 하므로 별도 상태가 없다. */
+  function paletteChosen(paletteRef) {
+    const family = new Set((PALETTES[paletteRef] || []).map(d => d.tag.toLowerCase()));
+    return currentTags().filter(t => family.has(String(t).toLowerCase()));
+  }
+
+  /** 추가 색상 팔레트를 보여줄까.
+   *  패턴(멀티컬러)이 붙어 있거나, 이미 색이 2개 이상이면(숨은 상태 방지) 보여준다. */
+  function extraPaletteVisible(paletteRef) {
+    const on = Object.entries(AXIS_RULES || {})
+      .some(([axisRef, rule]) => rule.multiPalette === paletteRef && multiRuleOn(axisRef, rule));
+    return on || paletteChosen(paletteRef).length > 1;
+  }
+
+  /** 추가 색상을 허용하는 '규칙 조건'만 판정한다(이미 여러 색이 골라져 있는지는 보지 않는다).
+   *  정리(clear) 판단에서 쓰므로 '색이 2개 이상이면 보여준다'는 예외를 섞으면 안 된다. */
+  function multiRuleOn(axisRef, rule) {
+    // 'any'  = 그 축의 아무 태그든(예: heterochromia)
+    // 'tags' = 명시한 태그가 붙어 있을 때만(예: multicolored skin)
+    // 기본   = 부모 태그가 붙어 있을 때
+    if (rule.multiOn === 'any') return axisHasAny(axisRef);
+    if (rule.multiOn === 'tags') return anySelected(rule.multiTags);
+    return !!rule.parent && currentLower().has(rule.parent.toLowerCase());
+  }
+
+  /** 주 색상 팔레트를 조건부로 보여주는 축(피부)이 있다 — 머리/눈처럼 상시 노출이 아니다.
+   *  colored skin 처럼 '색을 지정해야 의미가 생기는' 태그가 붙었을 때만 띄운다. */
+  function mainPaletteVisible(paletteRef) {
+    return Object.values(AXIS_RULES || {}).some(rule =>
+      rule.mainPalette === paletteRef && anySelected(rule.mainOn))
+      || paletteChosen(paletteRef).length > 0;
+  }
+
+  function anySelected(tags) {
+    if (!Array.isArray(tags) || !tags.length) return false;
+    const sel = currentLower();
+    return tags.some(t => sel.has(String(t).toLowerCase()));
+  }
+
+  /** 주 색상 = 첫 번째 항목만 교체한다. 추가 색상은 건드리지 않는다. */
+  function setMainColor(paletteRef, tag) {
+    const chosen = paletteChosen(paletteRef);
+    const main = chosen[0];
+    if (main && main.toLowerCase() === String(tag).toLowerCase()) {
+      setCurrentTags(currentTags().filter(t => t !== main));   // 같은 색 재클릭 = 해제
+      return;
+    }
+    if (!main) { addTags([tag]); return; }
+    setCurrentTags(currentTags().map(t => (t === main ? tag : t)));   // 자리를 유지하며 교체
+  }
+
+  /** 추가 색상 = 주 색상을 제외하고 n개 토글. */
+  function toggleExtraColor(paletteRef, tag) {
+    const chosen = paletteChosen(paletteRef);
+    const main = chosen[0];
+    if (main && main.toLowerCase() === String(tag).toLowerCase()) {
+      showToast('주 색상입니다. 위쪽 색 팔레트에서 변경하세요.', 'error');
+      return;
+    }
+    toggleTag(tag);
+  }
+
+  /** 이 축의 부모 태그가 지금 잠겨 있나(하위 항목이 하나라도 선택됨). */
+  function parentLocked(axisRef) {
+    const rule = (AXIS_RULES || {})[axisRef];
+    if (!rule || !rule.parent) return false;
+    const sel = currentLower();
+    const parentLower = rule.parent.toLowerCase();
+    const needs = Array.isArray(rule.parentFor)
+      ? rule.parentFor.map(t => t.toLowerCase())
+      : (THUMB_TAGS[axisRef] || []).map(t => t.toLowerCase()).filter(t => t !== parentLower);
+    return needs.some(t => sel.has(t));
+  }
+
+  /** 이 축에 선택된 태그가 하나라도 있나(부모 포함). */
+  function axisHasAny(axisRef) {
+    const sel = currentLower();
+    return (THUMB_TAGS[axisRef] || []).some(t => sel.has(t.toLowerCase()));
+  }
+
+  /** 썸네일 축 클릭. 부모 태그 규칙(자동 배정/해제 금지)을 적용한다. */
+  function pickThumb(axisRef, tag) {
+    const rule = (AXIS_RULES || {})[axisRef];
+    if (!rule || !rule.parent) { toggleTag(tag); return; }
+    const parent = rule.parent;
+    const isParent = String(tag).toLowerCase() === parent.toLowerCase();
+    if (isParent && parentLocked(axisRef)) {
+      showToast(rule.parentLockedHint || '하위 항목이 선택돼 있어 해제할 수 없습니다.', 'error');
+      return;
+    }
+    toggleTag(tag);
+    if (!isParent && parentLocked(axisRef)) {
+      addTags([parent]);   // 하위 패턴을 골랐으면 부모를 자동으로 붙인다
+      return;
+    }
+    // 조건부 주 팔레트(피부): 트리거가 전부 빠지면 팔레트가 사라지므로 색도 전부 비운다.
+    // 안 비우면 UI 에서 안 보이는 색 태그가 프롬프트에 남는다.
+    if (rule.mainPalette && Array.isArray(rule.mainOn) && !anySelected(rule.mainOn)) {
+      clearAllColors(rule.mainPalette);
+      return;
+    }
+    // 패턴이 완전히 해제됐으면 추가 색상도 함께 비운다 —
+    // 멀티컬러가 아닌데 색이 여러 개 남아 있으면 프롬프트가 모순된다.
+    if (rule.multiPalette && !multiRuleOn(axisRef, rule)) clearExtraColors(rule.multiPalette);
+  }
+
+  /** 팔레트 소속 색을 전부 제거한다(조건부 팔레트가 닫힐 때). */
+  function clearAllColors(paletteRef) {
+    const chosen = paletteChosen(paletteRef);
+    if (!chosen.length) return;
+    const drop = new Set(chosen);
+    setCurrentTags(currentTags().filter(t => !drop.has(t)));
+    showToast(`색 지정을 해제해 색상 ${drop.size}개도 함께 해제했습니다.`);
+  }
+
+  /** 주 색상(첫 번째)만 남기고 같은 팔레트의 나머지 색을 제거한다. */
+  function clearExtraColors(paletteRef) {
+    const chosen = paletteChosen(paletteRef);
+    if (chosen.length <= 1) return;
+    const drop = new Set(chosen.slice(1));
+    setCurrentTags(currentTags().filter(t => !drop.has(t)));
+    showToast(`패턴을 해제해 추가 색상 ${drop.size}개도 함께 해제했습니다.`);
+  }
+
+  /** 축 안에서 하나만 유효 — 같은 축의 다른 값은 지우고 하나를 넣는다(없으면 해제). */
+  function setExclusive(kind, ref, tag) {
+    const family = new Set(axisTagSet(kind, ref));
+    const kept = currentTags().filter(t => !family.has(String(t).toLowerCase()));
+    const lower = String(tag || '').toLowerCase();
+    const already = currentLower().has(lower);
+    setCurrentTags(already ? kept : [...kept, tag]);   // 같은 값 재클릭 = 해제
+  }
+
+  /** 주 색상 팔레트(항상 하나) / 추가 색상 팔레트(n개) — 같은 스와치 UI 의 미러. */
+  function paletteHtml(sec, {extra = false} = {}) {
+    const rows = PALETTES[sec.ref] || [];
+    if (extra && !extraPaletteVisible(sec.ref)) return '';
+    const chosen = paletteChosen(sec.ref);
+    const main = (chosen[0] || '').toLowerCase();
+    const extras = new Set(chosen.slice(1).map(t => t.toLowerCase()));
+    const cells = rows.map(d => {
+      const lower = d.tag.toLowerCase();
+      const isMain = lower === main;
+      const on = extra ? extras.has(lower) : isMain;
+      // 추가 팔레트에서 주 색상 칸은 '이미 주 색상'임을 표시하고 선택 대상에서 뺀다.
+      const dim = extra && isMain;
+      return `<button type="button" class="ia-sw${on ? ' on' : ''}${dim ? ' is-main' : ''}"
+        style="background:${d.hex}"
+        data-ax="${extra ? 'palette_extra' : 'palette'}" data-ref="${escHtml(sec.ref)}" data-val="${escHtml(d.tag)}"
+        title="${escHtml(tagTip(d.tag))}${dim ? ' (주 색상)' : ''}" aria-label="${escHtml(d.tag)}" aria-pressed="${on}"></button>`;
+    }).join('');
+    const cols = rows.filter(d => d.row !== 2).length || rows.length;
+    const hint = extra
+      ? `<span class="ia-ax-multi">n개 가능${extras.size ? ` · ${extras.size}` : ''}</span>` : '';
+    // 추가 색상 위에 '메인 색상 : [스와치]' 한 줄. 누르면 주 색상 팔레트로 스크롤한다.
+    let head = '';
+    if (extra) {
+      const mainRow = rows.find(d => d.tag.toLowerCase() === main);
+      const chip = mainRow
+        ? `<span class="ia-mainsw" style="background:${mainRow.hex}"></span><span class="ia-maintag">${escHtml(mainRow.tag)}</span>`
+        : '<span class="ia-maintag is-none">미지정</span>';
+      head = `<button type="button" class="ia-main-line" data-goto-main="${escHtml(sec.ref)}"
+        title="주 색상 팔레트로 이동">메인 색상 : ${chip}</button>`;
+    }
+    return `<div class="ia-ax-row"><span class="ia-ax-lbl">${escHtml(sec.label)}${hint}</span>
+      <div class="ia-sw-col">${head}
+        <div class="ia-sw-grid${extra ? ' is-extra' : ''}" style="grid-template-columns:repeat(${cols},1fr)">${cells}</div>
+      </div></div>`;
+  }
+
+  function sliderHtml(sec) {
+    const def = SLIDERS[sec.ref] || {steps: []};
+    const steps = def.steps || [];
+    const sel = currentLower();
+    const at = steps.findIndex(t => sel.has(t.toLowerCase()));
+    const cells = steps.map((t, i) =>
+      `<button type="button" class="ia-step${i === at ? ' on' : ''}"
+        data-ax="slider" data-ref="${escHtml(sec.ref)}" data-val="${escHtml(t)}"
+        title="${escHtml(tagTip(t))}" aria-pressed="${i === at}">${i + 1}</button>`).join('');
+    const cur = at >= 0 ? steps[at] : '미지정';
+    return `<div class="ia-ax-row"><span class="ia-ax-lbl">${escHtml(sec.label)}</span>
+      <div class="ia-step-wrap"><div class="ia-steps">${cells}</div>
+      <span class="ia-step-cur">${escHtml(cur)}</span></div></div>`;
+  }
+
+  /** 3열 그리드 박스 + 아코디언. 한 번에 하나의 썸네일 섹션만 펼친다(시각 소음 감소).
+   *  펼친 섹션은 3줄 높이만 보이고 나머지는 박스 안에서 스크롤한다(우측 스크롤바). */
+  function thumbHtml(sec) {
+    const axis = sec.ref;
+    const all = THUMB_TAGS[axis] || [];
+    const sel = currentLower();
+    const chosenCount = all.filter(t => sel.has(t.toLowerCase())).length;
+    const open = openThumbAxis === axis;
+    const head = `<button type="button" class="ia-acc-head${open ? ' is-open' : ''}"
+      data-acc-ax="${escHtml(axis)}" aria-expanded="${open}">
+      <span class="ia-acc-caret">${open ? '&#9662;' : '&#9656;'}</span>
+      <span class="ia-acc-name">${escHtml(sec.label)}</span>
+      <span class="ia-acc-n">${all.length}</span>
+      ${chosenCount ? `<span class="ia-acc-sel">${chosenCount} 선택</span>` : ''}
+    </button>`;
+    if (!open) return `<div class="ia-ax-row ia-acc-row">${head}</div>`;
+    const have = thumbHave.get(packAxisOf(axis)) || new Set();
+    // 부모 태그(예: multicolored hair)는 하위 패턴이 선택된 동안 자동 배정 + 해제 불가.
+    const rule = (AXIS_RULES || {})[axis] || {};
+    const locked = rule.parent && parentLocked(axis) ? rule.parent.toLowerCase() : '';
+    const cells = all.map(t => {
+      const on = sel.has(t.toLowerCase());
+      const isLocked = locked && t.toLowerCase() === locked;
+      const media = have.has(t)
+        ? `<img src="${escHtml(thumbUrl(axis, t))}" alt="" loading="lazy" decoding="async">`
+        : '<span class="ia-cell-none">준비 중</span>';
+      const sens = isSensitive(t);
+      return `<button type="button" class="ia-cell${on ? ' on' : ''}${isLocked ? ' is-locked' : ''}${sens ? ' is-sensitive' : ''}"
+        data-ax="thumb" data-ref="${escHtml(axis)}" data-val="${escHtml(t)}"
+        aria-pressed="${on}" title="${escHtml(tagTip(t))}${isLocked ? ' (자동 · 해제 불가)' : ''}">
+        <span class="ia-cell-img">${media}${sens ? '<span class="ia-cell-veil">보기</span>' : ''}</span>
+        <span class="ia-cell-cap">${isLocked ? '\u{1F512} ' : ''}${escHtml(t)}</span></button>`;
+    }).join('');
+    // 색 팔레트는 그리드 '위'에 둔다 — 아래에 두면 3줄 그리드에 가려 안 보인다.
+    // 피부처럼 주 색상 팔레트 자체가 조건부인 축은 여기서 함께 렌더한다.
+    const mainPal = sec.mainPalette && mainPaletteVisible(sec.mainPalette)
+      ? paletteHtml({ref: sec.mainPalette, label: '피부 색'})
+      : '';
+    const extra = sec.extraPalette && extraPaletteVisible(sec.extraPalette)
+      ? paletteHtml({ref: sec.extraPalette, label: '추가 색상'}, {extra: true})
+      : '';
+    return `<div class="ia-ax-row ia-acc-row is-open">${head}
+      <div class="ia-cell-wrap">${mainPal}${extra}
+        <div class="ia-cell-grid" data-scroll-ax="${escHtml(axis)}">${cells}</div></div>
+    </div>`;
+  }
+
+  function axisSectionsHtml() {
+    const secs = panelContext?.sections;
+    if (!Array.isArray(secs) || !secs.length) return '';
+    const body = secs.map(sec => {
+      if (sec.kind === 'palette') return paletteHtml(sec);
+      // palette_extra 는 독립 섹션이 아니라 패턴 썸네일 섹션 안(그리드 위)에 붙는다(thumbHtml).
+      if (sec.kind === 'slider') return sliderHtml(sec);
+      if (sec.kind === 'thumb') return thumbHtml(sec);
+      return '';   // browse 는 아래 계층 탐색 섹션이 담당
+    }).filter(Boolean).join('');
+    if (!body) return '';
+    return `<div class="ia-axes" id="iaAxes">${body}</div>`;
+  }
+
+  function bindAxisSections() {
+    const host = panelMount.querySelector('#iaAxes');
+    if (!host) return;
+    host.querySelectorAll('[data-ax]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        const {ax, ref, val} = el.dataset;
+        if (ax === 'thumb') pickThumb(ref, val);                 // 조합 가능(+부모 태그 규칙)
+        else if (ax === 'palette') setMainColor(ref, val);       // 주 색상 = 항상 하나
+        else if (ax === 'palette_extra') toggleExtraColor(ref, val);  // 추가 색상 = n개
+        else setExclusive(ax, ref, val);                         // 슬라이더는 축 내 배타
+        refreshAxisSections();
+      });
+    });
+    // 아코디언 헤더 — 누른 섹션만 펼치고 나머지는 접는다(같은 걸 누르면 접기).
+    host.querySelectorAll('[data-acc-ax]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        const axis = el.dataset.accAx;
+        openThumbAxis = (openThumbAxis === axis) ? null : axis;
+        refreshAxisSections();
+      });
+    });
+    // '메인 색상 : [ ]' 클릭 -> 주 색상 팔레트로 스크롤(팝업 본문이 스크롤 컨테이너).
+    host.querySelectorAll('[data-goto-main]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        const ref = el.dataset.gotoMain;
+        const target = host.querySelector(`[data-ax="palette"][data-ref="${ref}"]`);
+        const row = target?.closest('.ia-ax-row');
+        if (!row) return;
+        row.scrollIntoView({behavior: 'smooth', block: 'center'});
+        row.classList.add('is-flash');
+        setTimeout(() => row.classList.remove('is-flash'), 900);
+      });
+    });
+    // 스크롤 박스: 위치를 계속 기억해 재렌더(선택 토글) 때 위로 튀지 않게 한다.
+    host.querySelectorAll('[data-scroll-ax]').forEach(box => {
+      const axis = box.dataset.scrollAx;
+      const saved = thumbScroll.get(axis);
+      if (saved) box.scrollTop = saved;
+      else scrollSelectedIntoView(box);      // 첫 렌더에 선택 항목이 있으면 거기로
+      box.addEventListener('scroll', () => { thumbScroll.set(axis, box.scrollTop); }, {passive: true});
+    });
+  }
+
+  /** 선택된 셀이 박스 밖이면 보이는 위치로 맞춘다(스크롤바 점프 없이). */
+  function scrollSelectedIntoView(box) {
+    const on = box.querySelector('.ia-cell.on');
+    if (!on) return;
+    const top = on.offsetTop - box.clientHeight / 2 + on.offsetHeight / 2;
+    box.scrollTop = Math.max(0, top);
+  }
+
+  /** 축 영역만 다시 그린다 — 검색창/브라우저는 건드리지 않는다.
+   *  outerHTML 교체는 스크롤 박스를 새로 만들므로 위치를 먼저 저장한다. */
+  function refreshAxisSections() {
+    const host = panelMount.querySelector('#iaAxes');
+    if (!host) return;
+    host.querySelectorAll('[data-scroll-ax]').forEach(box => {
+      thumbScroll.set(box.dataset.scrollAx, box.scrollTop);
+    });
+    host.outerHTML = axisSectionsHtml();
+    bindAxisSections();
   }
 
   // ---- 구도 3축 콤보 프리셋 패널 (Dev0714 복원) ----
@@ -1127,6 +1587,7 @@ export function createInteractivePanel({
       if (toggleButton) toggleButton.removeEventListener('click', onToggleClick);
       panelMount.removeEventListener('mousedown', onPanelMouseDown);
       closePositionPicker();
+      document.body.classList.remove('interactive-editing');
       if (posPopup) { posPopup.remove(); posPopup = null; }
       blocksMount.innerHTML = '';
       panelMount.classList.remove('open');

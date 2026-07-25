@@ -44,8 +44,28 @@ export function createTagAssistController({
   catStyle,
   showToast,
   getEventPresetPanel,
+  // 태그 정보 툴팁(캐럿 위 태그 설명 + RELATED)을 억제할지 묻는 훅. Interactive 편집 팝업처럼
+  // 화면을 이미 점유한 UI 위에 큰 툴팁이 겹치면 방해가 된다. 자동완성 드롭다운은 영향 없다.
+  isTagInfoSuppressed = () => false,
 }) {
   const tagTooltip = tooltip;
+
+  /** 태그 정보 툴팁 억제 여부. 훅이 던져도 툴팁 로직이 죽지 않게 감싼다. */
+  function suppressedTagInfo() {
+    try { return !!isTagInfoSuppressed(); } catch (_) { return false; }
+  }
+
+  /** 억제 상태에서 이미 떠 있는 태그 정보 툴팁을 닫는다.
+   *  정보 툴팁은 tagLookupReadOnly 여부에 따라 두 요소를 쓴다 — 둘 다 닫아야 한다.
+   *  (자동완성은 ac-mode 로 같은 tagTooltip 을 쓰므로 acMode 일 때는 건드리지 않는다.) */
+  function closeTagInfoTooltips() {
+    hidePromptInfoTooltip();
+    if (!acMode) {
+      tagTooltip.classList.remove(
+        'open', 'ac-mode', 'left-side', 'preset-event-mode', 'preset-event-observed-mode',
+        'preset-event-staged-mode', 'preset-event-expression-mode');
+    }
+  }
   let lastLookupTag = '';
   let tagLookupTimer = null;
   let tagLookupReadOnly = false;
@@ -1242,6 +1262,8 @@ export function createTagAssistController({
 
   function checkTagHint() {
     if (acMode) return;
+    // 호스트가 억제 중이면 조회 자체를 하지 않는다(WS 왕복도 아낀다).
+    if (suppressedTagInfo()) { closeTagInfoTooltips(); lastLookupTag = ''; return; }
     const target = acTarget || promptEdit;
     const tag = getTagAtCursor(target);
     if (tag === lastLookupTag) return;
@@ -1282,6 +1304,8 @@ export function createTagAssistController({
 
   function onTagLookupResult(m) {
     if (acMode) return;
+    // 조회를 보낸 뒤 억제 상태가 됐거나 응답이 늦게 도착한 경우에도 띄우지 않는다.
+    if (suppressedTagInfo() && !tagLookupReadOnly) { closeTagInfoTooltips(); return; }
     hideTagChipInfoTooltip();
     if (!m.tag) {
       if (tagLookupReadOnly) {

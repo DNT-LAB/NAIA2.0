@@ -2,26 +2,60 @@ bandages
 bandaged arm
 blood on face
 injury
+food on face
 bandaged leg
+drunk
 stitches
 dirty
 blood on hands
 soaking feet
+nosebleed
 bruise
 bandaged hand
+mouth drool
+turn pale
+blood from mouth
 bandage over one eye
 bleeding
 cuts
 bandaged head
+dirty face
+snot
 bite mark
 scratches
+nose bubble
 slap mark
+bruise on face
 hickey
 blood on arm
+pain
+paint splatter on face
+saliva drip
 blood on leg
+rice on face
 dirty feet
+wet face
+runny nose
+chocolate on face
+full mouth
 whip marks
+bruised eye
+fever
 blood on chest
+foaming at the mouth
+snot trail
 broken arm
+dizzy
+dazed
+blood on feet
+bleeding from forehead
+steam from mouth
+slap mark on face
 dirty hands
+veiny face
+blood on mouth
+tipsy
 broken leg
+mouth submerged
+headache
+hangover

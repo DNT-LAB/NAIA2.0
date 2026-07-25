@@ -114,6 +114,9 @@ BATCHES = {
     "body_nonhuman_male":     (male(TORSO), 2.5, "cowboy"),
     # Vision 검수에서 태그가 렌더되지 않은 것들을 다른 시드로 한 번 더 돌린다.
     # 프레이밍은 원래 축과 같게 두고 시드만 바꾼다(--seed).
+    "expression":        (HEAD, 2.5, "portrait"),    # 감정 표정
+    "expression_symbol": (HEAD, 2.5, "portrait"),    # 만화 기호 표정
+    "face_shape":        (HEAD, 2.5, "portrait"),    # 눈·입·눈썹 형태
     "expression_state":  (HEAD, 2.5, "portrait"),    # 홍조·눈물·침·땀 (상태 축 해체분)
     "body_condition":    (TORSO, 2.5, "cowboy"),     # 부상·붕대·오염 (상태 축 해체분)
     "marking":           (TORSO, 2.5, "cowboy"),      # 팔·가슴·배 문신

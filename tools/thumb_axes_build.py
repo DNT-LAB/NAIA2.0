@@ -47,20 +47,46 @@ FEATURE = re.compile(r'horn|antler|claw|talon|pawpad|paw\b|fin\b|fins|antenna|sc
                      r'|hair\b|hairy|amputee|prosthe|piercing|animal (hands|feet|legs)'
                      r'|bird legs|digitigrade|dirty|blood|hickey|slap mark|bump', re.I)
 
+# ── 신체 축 정리 (Codex 리뷰) — 데이터 설명이 뒷받침하는 무손실 이동만 ──────
+BODY_TO_TYPE = ["belly"]          # "다소 통통한 복부" = 체형
+BODY_TO_FEATURE = ["covered abs"]  # "옷 위로 윤곽" = 노출이 아니다
+BODY_TO_CONDITION = ["blood on feet"]  # 다른 blood on X 는 모두 부상 축에 있다
+BODY_TO_HAIR = ["bald girl"]      # "대머리 여성" = 머리카락 특징
+
 AXES = {}
 # 머리
 hair = [t for t in pool(('hair_styles', 'hair'))
         if t not in LENGTH and t not in PATTERN and not BANGS.search(t)]
-AXES["hair_style"] = hair
-AXES["bangs"] = [t for t in pool(('hair_styles', 'hair')) if BANGS.search(t)]
-AXES["hair_pattern"] = [t for t in PATTERN if t in raw]
+# ── 머리 축 정리 (Codex 리뷰 REQUEST-CHANGES 34건) ──────────────────────────
+# 이미지가 이미 있으므로 '이동'만 한다(--prune 이 팩 키를 옮겨 무손실).
+#   수염 6개는 hair_style 과 face(표식·수염) 로 흩어져 있었다 -> face 로 통합.
+#   색상·패턴 5개는 hair_pattern 축이 맞다(머리 '모양'이 아니다).
+#   장식 3개(hair tubes 36k 포함)는 머리카락이 아니라 착용물이다 -> 의상 성격.
+#   japari bun 은 케모노프렌즈 '식품', mane 은 동물 갈기다.
+HAIR_TO_FACE = ["beard stubble", "long beard", "full beard", "thick beard",
+                "tied beard", "pencil mustache"]
+HAIR_TO_PATTERN = ["roots (hair)", "dyed ahoge", "patterned hair", "hair blush"]
+HAIR_MOVED_OUT = {
+    "hair tubes", "single hair tube", "flower braid",   # 장식(착용물)
+    "japari bun",        # 케모노프렌즈 식품 — 사물
+    "mane",              # 동물 갈기 — 이형
+    "hair on horn", "food on hair", "hair behind eyewear",  # 다른 요소와의 위치 관계
+    "cowlick",           # 데이터: '바보털' = ahoge 와 동일어
+}
+hair = [t for t in hair if t not in HAIR_TO_FACE + HAIR_TO_PATTERN
+        and t not in HAIR_MOVED_OUT]
+AXES["hair_style"] = hair + [t for t in BODY_TO_HAIR if t in raw]
+AXES["bangs"] = [t for t in pool(('hair_styles', 'hair'))
+                 if BANGS.search(t) and t != "dyed bangs"]
+AXES["hair_pattern"] = ([t for t in PATTERN if t in raw]
+                        + [t for t in HAIR_TO_PATTERN + ["dyed bangs"] if t in raw])
 # 눈 색 패턴
 AXES["eye_pattern"] = [t for t in EYE_PATTERN if t in raw]
 # 얼굴(전량 유지)
 # eye_pattern 축이 따로 담당하는 태그(multicolored eyes 등)는 face 에서 뺀다 —
 # 양쪽에 있으면 같은 태그를 두 번 생성하게 되고 팩 키도 갈린다.
 AXES["face"] = [t for t in pool(('face_tags', 'eyes_tags', 'face_meta', 'face'))
-                if t not in EYE_PATTERN]
+                if t not in EYE_PATTERN] + [t for t in HAIR_TO_FACE if t in raw]
 # 종족 = 캐릭터형(-girl/-boy) + 환상종/케모미미. 일반 동물(rabbit, bat)은 캐릭터 특징이 아니라 제외.
 crea = pool(('legendary_creatures', 'kemonomimi', 'cats', 'dogs', 'other_animals',
              'fish', 'birds', 'insects', 'reptiles', 'technology', 'archetype', 'furry'))
@@ -89,7 +115,7 @@ AXES["species"] = _species_keep
 
 AXES["ears"] = pool(('ears_tags',))
 AXES["tail"] = pool(('tail',))
-AXES["wings"] = pool(('wings',))
+AXES["wings"] = pool(('wings',)) + [t for t in ["mechanical wings"] if t in raw]
 # ── 표식(문신/피어싱) 축 ────────────────────────────────────────────────────
 # 표식·기타 슬롯은 browse 전용이었고 성격이 뒤섞여 있었다. 실측(index 직접 질의)으로
 # 133개가 오는데, 그 중 문신/피어싱/표식 계열만 코히런트하다. 나머지는 재배치한다.
@@ -102,10 +128,23 @@ MARKING_SUBS = ('tattoo', 'piercings', 'skin_markings', 'cosmetics',
                 'body_marks', 'body_modification')
 # subgroup 이 gesture 로 잘못 붙은 표식들(실측)
 MARKING_EXTRA = ["hand tattoo", "scar on hand", "fingerprint"]
-AXES["marking"] = pool(MARKING_SUBS) + [t for t in MARKING_EXTRA if t in raw]
+# NSFW 누출 — piercings subgroup 을 통째로 가져오면서 성기·유두 피어싱을 걸러내지
+# 않았다. 표식 축은 초보자에게 기본 노출되므로 노출(성인) 축(블러+보류)으로 옮긴다.
+# Codex 가 3건을 잡았고 전수 재검사로 2건(mole on areola, slave tattoo)을 더 찾았다.
+MARKING_TO_NSFW = ["nipple chain", "clitoris ring", "mole on areola", "frenulum piercing"]
+# 데이터가 다른 태그를 쓰라고 지시하거나, nude 베이스에서 표현 불가한 것
+MARKING_DROP = {
+    "slave tattoo",      # "노예 낙인을 사용하세요" + 정신 파괴·부패 맥락
+    "ear bar",           # "industrial piercing 을 사용한다"
+    "covered piercing",  # "옷 위로 피어싱의 자국" — nude 베이스에서 불가
+    "fingerprint",       # "지문이 표면에 찍힌" — 캐릭터 표식이 아니다
+}
+AXES["marking"] = [t for t in pool(MARKING_SUBS) + [x for x in MARKING_EXTRA if x in raw]
+                   if t not in MARKING_TO_NSFW and t not in MARKING_DROP]
 
 AXES["skin"] = pool(('skin_color',))
-AXES["body_type"] = [t for t in pool(('body_type',)) if t not in BREAST_SIZE]
+AXES["body_type"] = ([t for t in pool(('body_type',)) if t not in BREAST_SIZE]
+                     + [t for t in BODY_TO_TYPE if t in raw])
 # ── 신체 부위 분할 ─────────────────────────────────────────────────────────
 # 이전 규칙은 'NSFW 정규식 -> nsfw, FEATURE 정규식 -> feature, 나머지 전부 -> expose'
 # 였다. 이 catch-all 이 '미분류 0'을 보장한 대가로, 규칙에 안 걸린 모든 것을 노출·강조에
@@ -117,11 +156,19 @@ BODY_EXPOSE = [   # "그 부위가 보인다/강조된다"
     "barefoot", "stomach", "midriff", "armpits", "feet", "bare arms", "toes",
     "bare legs", "legs", "sideboob", "ass visible through thighs", "soles",
     "underboob", "back", "thigh gap", "forehead", "butt crack", "kneepits",
-    "armpit crease", "bare back", "shoulder blades", "single bare shoulder", "belly",
+    "armpit crease", "bare back", "shoulder blades", "single bare shoulder",
     "pectoral cleavage", "backboob", "nape", "neck", "sidepec", "underpec",
     "underbutt", "ass peek", "single bare leg", "single bare arm", "bare hips",
-    "toe cleavage", "covered abs", "covered armpit", "palms",
+    "toe cleavage", "covered armpit", "palms",
 ]
+# ── 신체 축 정리 (Codex 리뷰) — 데이터 설명이 뒷받침하는 무손실 이동만 ──────
+#   belly="다소 통통한 복부" -> 체형 / covered abs="옷 위로 윤곽" -> 노출이 아니다
+#   blood on feet -> 부상(다른 blood on X 는 모두 거기 있는데 이것만 남아 있었다)
+#   bald girl="대머리 여성" -> 머리카락 특징 / box body="표현 스타일" -> 제외
+#   very long fingernails: 데이터 정의가 long fingernails 와 똑같이 "1cm 이상" -> 중복
+# Codex 가 legs/forehead 등을 '구도'라며 뺄 것을 제안했지만 받지 않았다 —
+# 노출·강조 축의 정의 자체가 '그 부위가 보인다/강조된다'이므로 구도성이 곧 성격이다.
+# loli/teenage/three sizes 제외 제안도 받지 않았다(사용자가 명시적으로 유지 결정).
 BODY_FEATURE_ADD = [   # "몸에 그 특징이 있다" — FEATURE 정규식에 안 걸리는 것들
     "huge ass", "flat ass", "biceps", "navel hair", "ribs", "knees", "linea alba",
     "median furrow", "dimples of venus", "obliques", "thick arms", "hip bones",
@@ -132,6 +179,7 @@ BODY_FEATURE_ADD = [   # "몸에 그 특징이 있다" — FEATURE 정규식에 
     "veiny thighs", "deltoids", "triceps", "forearms", "long toes", "large feet",
     "adam's apple", "jaw", "armpit stubble", "shaved body", "thick neck",
     "unaligned breasts", "small hands",
+    *BODY_TO_FEATURE,
 ]
 BODY_NONHUMAN = [   # 이형·수인 해부 -> 종족·수인 슬롯의 새 축
     "arthropod limbs", "gills", "blowhole", "spines", "core", "pincers",
@@ -146,8 +194,9 @@ BODY_NONHUMAN = [   # 이형·수인 해부 -> 종족·수인 슬롯의 새 축
     "crab claw", "prosthetic hand", "sharp toenails",
     # 표식·기타 슬롯 재정렬에서 합류 — 기계·의체·이형 해부는 이형 부위가 맞다.
     "prosthesis", "prosthetic arm", "prosthetic leg", "hook hand", "peg leg", "automail",
-    "mechanical arms", "mechanical wings", "mechanical legs", "mechanical horns",
-    "mechanical spine",
+    "mechanical arms", "mechanical legs", "mechanical spine",
+    # mechanical wings -> 날개 축, mechanical horns -> 뿔 축 (Codex 지적).
+    # mechanical 5개를 통째로 이형에 넣은 것이 내 실수였다.
     "extra arms", "extra legs", "extra horns", "multiple heads",
     "detached arm", "detached legs",
     "object head", "hollow body", "conjoined",
@@ -243,6 +292,9 @@ _assign = {t: "body_expose" for t in BODY_EXPOSE}
 _assign.update({t: "body_feature" for t in BODY_FEATURE_ADD})
 _assign.update({t: "body_nonhuman" for t in BODY_NONHUMAN})
 _assign.update({t: "body_nsfw" for t in BODY_NSFW_ADD})
+# belly 는 BODY_EXPOSE 에서 빼 체형으로 보냈다 — pool 루프에 명시 배정을 남겨
+# '미분류'로 보고되지 않게 한다(체형 축에는 위에서 이미 넣었다).
+_assign.update({t: None for t in BODY_TO_TYPE})
 for _s in (MOVED_OUT, GORE, NEAR_DUP, WEAR2, NEGATIVE):
     _assign.update({t: None for t in _s})
 exp, feat, nonhuman, nsfw, horns, unclassified = [], [], [], [], [], []
@@ -286,6 +338,74 @@ EXPRESSION_STATE = [
     "sweat", "very sweaty", "sweating profusely", "sweaty armpits",
     "steaming body", "trembling", "shivering", "unconscious",
 ]
+# ── 표정 축 (Codex 리뷰 REQUEST-CHANGES 15/18/7 반영) ───────────────────────
+# 표정 후보 254개를 전수 손배정했다. 핵심 교정 두 가지는 내가 놓친 것이다.
+#   1) 2인 이상이 필요한 태그 9개(cheek-to-cheek, licking another's face,
+#      forehead-to-forehead ...)를 액션에 두고 있었다. Interactive 는 캐릭터 1명
+#      기준이라 상대가 없으면 렌더될 수 없다 -> 제외.
+#   2) 눈썹 4개(raised eyebrows/furrowed brow/raised eyebrow/cocked eyebrow)는
+#      감정이 아니라 구조다 -> 눈·입 형태 축.
+# 그 밖에 teardrop("희화적으로 묘사")·head steam 은 기호로, drunk/tipsy 는 상태로,
+# facepaint 는 표식으로 옮겼고, ara ara 는 NSFW 에서 뺐다(성적 함의가 명시적이지 않다).
+EXPRESSION_EMOTION = [
+    'smile', 'grin', 'expressionless', 'frown', 'embarrassed', 'happy',
+    'crying', 'light smile', 'surprised', 'crying with eyes open', 'angry',
+    'serious', 'pout', 'smirk', 'smug', 'light frown', 'laughing',
+    'scared', 'evil smile', 'nervous', 'annoyed', 'sad', 'sleepy', 'wince',
+    'shy', 'streaming tears', 'nervous smile', 'evil grin',
+    'gloom (expression)', 'scowl', 'thinking', 'grimace', 'confused',
+    'worried', 'false smile', 'jealous', 'doyagao', 'happy tears',
+    'crazy smile', 'disgust', 'unamused', 'excited', 'exhausted',
+    'blank stare', 'gesugao', 'determined', 'panicking', 'hungry',
+    'unhappy', 'forced smile', 'sobbing', 'depressed', 'single tear',
+    'sad smile', 'curious', 'furious', 'clueless', 'horrified', 'tantrum',
+    'despair', 'traumatized', 'giggling', 'disdain', 'disappointed',
+    'lonely', 'sneer', 'distress', 'awestruck', 'grumpy', 'crazy grin',
+    'mourning', 'peaceful', 'envy', 'deadpan',
+]
+EXPRESSION_SYMBOL = [
+    ':d', ':o', ':3', '^_^', ';d', '>_<', '...', '^^^', 'anger vein', ':p',
+    '@_@', ':q', ':<', '+_+', ';)', ':t', '!?', '=_=', '>:)', 'o_o', '|_|',
+    ':>', ':/', '=3', ';o', 'zzz', ':|', '3:', '0_0', 'd:', 'teardrop',
+    'spoken blush', ';p', 'xd', '>:(', ';q', ':i', '>_o', ';3', 'u_u',
+    '^o^', 'o3o', 'x_x', '._.', 'c:', '>o<', ':x', '<o>_<o>', '...?',
+    '<|>_<|>', ';(', 'x3', 'head steam', ':c', ';<', '...!', 'd;', ';t',
+    ';>', 'uwu', 'dx', 't t', ';|', '3_3', '>3<', '+_-', '6_9',
+]
+FACE_SHAPE = [
+    'open mouth', 'closed mouth', 'closed eyes', 'one eye closed',
+    'half-closed eyes', 'wavy mouth', 'raised eyebrows', 'furrowed brow',
+    'chestnut mouth', 'triangle mouth', 'raised eyebrow', 'sideways mouth',
+    'dot mouth', 'cheek squash', 'cheek bulge', 'puffy cheeks',
+    'rectangular mouth', 'square mouth', 'diamond mouth',
+    'heart-shaped mouth', 'cocked eyebrow',
+]
+FACE_CONDITION = [
+    'food on face', 'drunk', 'nosebleed', 'mouth drool', 'turn pale',
+    'blood from mouth', 'dirty face', 'snot', 'nose bubble',
+    'bruise on face', 'pain', 'paint splatter on face', 'saliva drip',
+    'rice on face', 'wet face', 'runny nose', 'chocolate on face',
+    'full mouth', 'bruised eye', 'fever', 'foaming at the mouth',
+    'snot trail', 'dizzy', 'dazed', 'bleeding from forehead',
+    'steam from mouth', 'slap mark on face', 'veiny face',
+    'blood on mouth', 'tipsy', 'headache', 'mouth submerged', 'hangover',
+]
+FACE_NSFW = [
+    'naughty face', 'seductive smile', 'moaning', 'body blush',
+    'shoulder blush', 'knee blush', 'full-body blush',
+]
+AXES["expression"] = [t for t in EXPRESSION_EMOTION if t in raw]
+AXES["expression_symbol"] = [t for t in EXPRESSION_SYMBOL if t in raw]
+AXES["face_shape"] = [t for t in FACE_SHAPE if t in raw]
+# facepaint 는 의도적 얼굴 무늬라 표식 축이 맞다(Codex 지적).
+AXES["marking"] = AXES["marking"] + [t for t in ["facepaint"] if t in raw]
+# 성적 함의가 명시된 7개는 노출(성인) 축으로. 그 축은 보류라 생성하지 않는다.
+AXES["body_nsfw"] = (AXES["body_nsfw"]
+                     + [t for t in FACE_NSFW if t in raw]
+                     # MARKING_TO_NSFW 는 piercings/skin_markings subgroup 이라
+                     # body pool 루프에 안 잡힌다 -> 여기서 직접 합친다.
+                     + [t for t in MARKING_TO_NSFW if t in raw])
+# 얼굴 오염·부상은 아래 BODY_CONDITION 정의에 FACE_CONDITION 으로 합류한다.
 BODY_CONDITION = [
     # 부상(ryona) — 일시적 상태라 '신체 특징'(영구)과 섞지 않고 별도 축으로 둔다
     "injury", "bruise", "cuts", "scratches", "bleeding", "stitches",
@@ -295,6 +415,9 @@ BODY_CONDITION = [
     "bandage over one eye",
     # 오염
     "dirty", "dirty feet", "dirty hands", "soaking feet",
+    # 얼굴 오염·부상(Codex 리뷰 분류) 합류 — 같은 성격이다.
+    *FACE_CONDITION,
+    *BODY_TO_CONDITION,
 ]
 HAIR_STATE = ["wet hair", "messy hair"]
 AXES["expression_state"] = [t for t in EXPRESSION_STATE if t in raw]
@@ -394,6 +517,25 @@ EXCLUDE = {
     "prehensile ribbon",         # 아무것도 렌더되지 않는다
     "blowhole", "extra breasts", "fluff",   # 아무것도 렌더되지 않는다
     "no bangs",                  # 앞머리가 그대로 남는다(부정 태그)
+    # ── 종족·수인 슬롯 (Codex 리뷰 9/2) ───────────────────────────────────
+    "male with breasts",         # 성별 특성 — 이형 종족 특징이 아니다
+    "conjoined",                 # "두 명 이상의 사람이 이어져" — 단일 캐릭터 불가
+    "extra horns",               # 원작 비교 필요 + 데이터가 multiple horns 안내
+    "hedgehog ears", "hedgehog tail",   # 데이터가 성별별 태그를 "참고하세요"
+    "ear down",                  # ears down(3757)과 동일 — 빈도 높은 쪽만 남긴다
+    "ox horns",                  # 데이터가 cow horns(12038)와 똑같이 "소나 황소의 뿔"
+    # ── 얼굴·종족 슬롯 (Codex 리뷰 27/3) ─────────────────────────────────
+    "pouty lips", "chin", "big eyes", "cat nose",   # 데이터가 다른 태그를 쓰라고 명시
+    "lipstick mark",             # "단단한 표면에 남긴" — 캐릭터가 아니다
+    "snow on head",              # 머리 위 환경 효과 — 얼굴 특징이 아니다
+    "alternate facial hair", "no heterochromia", "alternate eyebrows", "no freckles",
+    "doppelganger",              # 원작·원본과의 비교가 필요하다
+    "angel and devil",           # "천사와 악마가 함께" — 2인 필요
+    "familiar",                  # "특정 인물에 의해 소환되는" — 관계 필요
+    "kaijuu",                    # "도쿠사츠 엔터테인먼트 장르" — 종족이 아니다
+    "octarian",                  # 데이터가 이 태그를 쓰지 말라고 안내
+    "box body",                  # 데이터: "표현 스타일" — 체형이 아니다
+    "very long fingernails",     # long fingernails 와 정의가 동일("1cm 이상")
     "stand (jojo)",              # 초록 배경만 나온다. 종족이 아니라 초능력 개념
     "duel monster",              # 특징 없이 그냥 소녀. 카드 게임 몬스터 분류라 종족이 아니다
     # ── 표식·기타 재정렬에서 제외 ──────────────────────────────────────

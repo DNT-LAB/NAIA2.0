@@ -82,11 +82,10 @@ enpera
 hair horns
 mohawk
 hair strand
-loose hair strand
 quad tails
+loose hair strand
 inverted bob
 front ponytail
-beard stubble
 pompadour
 hair ears
 buzz cut
@@ -117,9 +116,7 @@ low-tied sidelocks
 low-braided long hair
 starry hair
 tri braids
-long beard
 heart hair
-roots (hair)
 detached ahoge
 asymmetrical sidelocks
 folded hair
@@ -146,24 +143,22 @@ shaved head
 side ahoge
 nihongami
 flattop
-dyed ahoge
 wolf cut
 mizura
 balding
+bald girl
 side up bun
 unkempt
 low braid
 beehive hairdo
 folded twintails
 heart antenna hair
-full beard
 single bang
 lion hair
 receding hairline
 lone nape hair
 flower braid
 quiff
-patterned hair
 hair half undone
 cloud hair
 low side ponytail
@@ -171,21 +166,17 @@ hair undone
 tall hair
 twisted hair
 food on hair
-lightning ahoge
 hair dye
+lightning ahoge
 heart hair bun
 disheveled
-pencil mustache
 hair floating upwards
 crew cut
 bald spot
 hair around ear
 ribbon hair
-thick beard
-hair blush
 hair tuft
 sidelocks tied back
-tied beard
 tri drills
 hair behind eyewear
 mechanical hair

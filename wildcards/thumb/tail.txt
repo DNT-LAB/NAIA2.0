@@ -40,7 +40,6 @@ otter tail
 cable tail
 deer tail
 multicolored tail
-hedgehog tail
 penguin tail
 scorpion tail
 fiery tail
@@ -65,14 +64,14 @@ moose tail
 hyena tail
 fur-tipped tail
 panda tail
-panther tail
 meerkat tail
+panther tail
 very long tail
 tamandua tail
 short tail
 eevee tail
-pikachu tail
 skunk tail
+pikachu tail
 zebra tail
 trimmed tail
 elephant tail

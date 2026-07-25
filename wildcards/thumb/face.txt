@@ -81,10 +81,10 @@ skin fangs
 tusks
 tongue piercing
 scar on forehead
-lipstick mark
 hikimayu
 eyebrow cut
 fangs out
+beard stubble
 stitched face
 buck teeth
 fake facial hair
@@ -108,7 +108,6 @@ nostrils
 pursed lips
 goatee stubble
 crescent facial mark
-pouty lips
 solid eyes
 mismatched eyebrows
 extra faces
@@ -128,13 +127,14 @@ stitched mouth
 mismatched sclera
 huge eyebrows
 clock eyes
-long nose
+long beard
 hidden face
+long nose
 bulging eyes
 chin piercing
 drop-shaped pupils
-wide oval eyes
 compound eyes
+wide oval eyes
 thick mustache
 solid circle pupils
 cross-eyed
@@ -143,7 +143,6 @@ long eyebrows
 bloodshot eyes
 tooth
 very long tongue
-alternate facial hair
 sparse stubble
 curly eyebrows
 byakugan
@@ -159,16 +158,13 @@ butterfly-shaped pupils
 extra pupils
 glowing mouth
 triangle-shaped pupils
-snow on head
 missing tooth
-chin
 rectangular pupils
 screw in head
 wall-eyed
 marking on cheek
 square pupils
 rainbow eyes
-big eyes
 sunken cheeks
 missing eye
 mismatched eyelashes
@@ -177,6 +173,7 @@ pac-man eyes
 power symbol-shaped pupils
 googly eyes
 crosshair pupils
+full beard
 braided beard
 prehensile tongue
 cleft chin
@@ -197,31 +194,30 @@ lens eye
 lazy eye
 clover-shaped pupils
 mob face
+pencil mustache
 soul patch
 single tooth
-no heterochromia
 geass
 bad face
 hollow mouth
 puffy lips
 extra teeth
 disembodied tongue
+thick beard
+tied beard
 nose shade
 double chin
 mystic eyes of death perception
 persona eyes
 partially shaded face
-too many eyes
 extra tongue
-artificial eyes
+too many eyes
 spiral-only eyes
-cat nose
+artificial eyes
 heart cheeks
 shiny lips
-no freckles
 long mustache
 blood on teeth
 paw-shaped pupils
-alternate eyebrows
 money-shaped pupils
 broken tooth

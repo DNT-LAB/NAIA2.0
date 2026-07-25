@@ -7,7 +7,6 @@ extra arms
 prosthesis
 suction cups
 prosthetic arm
-mechanical wings
 animal feet
 talons
 mechanical legs
@@ -29,8 +28,8 @@ webbed hands
 no feet
 shark fin
 object head
-multiple hands
 prosthetic hand
+multiple hands
 extra legs
 chest tuft
 tiger paws
@@ -47,11 +46,8 @@ extra hands
 webbed feet
 peg leg
 third eye on chest
-male with breasts
 mechanical spine
 detached legs
 automail
 hollow body
 cat feet
-conjoined
-extra horns

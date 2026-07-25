@@ -65,6 +65,8 @@ SLOTS = [
         ("thumb", "눈·눈썹·동공", "face_eyes"),
         ("thumb", "얼굴·입·코", "face_parts"),
         ("thumb", "표식·수염", "face_mark"),
+        # 눈·입·눈썹의 형태는 감정이 아니라 구조다(Codex 지적) — 여기가 맞다.
+        ("thumb", "눈·입 형태", "face_shape"),
         # 얼굴 썸네일 228장이 face_tags/eyes_tags/face_meta/face 를 전부 덮으므로 탐색기 제거.
     ]),
     # 표정 슬롯을 썸네일+탐색기 병행으로 승격한다. 해체한 상태 축의 감정 부수 현상
@@ -72,6 +74,8 @@ SLOTS = [
     # expression subgroup 으로 분류하고 설명도 "부끄러움 등으로"/"긴장이나 당혹감"이다.
     # smile(1664k) 등 나머지 감정 표현은 아직 썸네일이 없어 탐색기가 담당한다.
     ("표정", "\\u{1F60A}", "expression", [
+        ("thumb", "감정", "expression"),
+        ("thumb", "기호 표정", "expression_symbol"),
         ("thumb", "홍조·눈물·땀", "expression_state"),
         ("browse", "표정 전체", ["expression", "eyes_tags", "mouth"]),
     ]),

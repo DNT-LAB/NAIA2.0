@@ -21,8 +21,8 @@
       "key": "bangs",
       "label": "앞머리",
       "framing": "portrait",
-      "count": 21,
-      "done": 21,
+      "count": 20,
+      "done": 20,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
@@ -35,9 +35,9 @@
       "key": "body_condition",
       "label": "body_condition",
       "framing": "portrait",
-      "count": 27,
-      "done": 27,
-      "todo_female": 0,
+      "count": 61,
+      "done": 28,
+      "todo_female": 33,
       "todo_male": 0,
       "bench": {
         "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
@@ -49,8 +49,8 @@
       "key": "body_expose",
       "label": "노출·강조",
       "framing": "cowboy",
-      "count": 42,
-      "done": 42,
+      "count": 40,
+      "done": 40,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
@@ -63,8 +63,8 @@
       "key": "body_feature",
       "label": "신체 특징",
       "framing": "cowboy",
-      "count": 68,
-      "done": 68,
+      "count": 67,
+      "done": 67,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
@@ -77,9 +77,9 @@
       "key": "body_nonhuman",
       "label": "이형 부위",
       "framing": "cowboy",
-      "count": 57,
-      "done": 37,
-      "todo_female": 20,
+      "count": 53,
+      "done": 45,
+      "todo_female": 8,
       "todo_male": 0,
       "bench": {
         "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
@@ -91,9 +91,9 @@
       "key": "body_nsfw",
       "label": "노출(성인)",
       "framing": "explicit",
-      "count": 33,
-      "done": 0,
-      "todo_female": 31,
+      "count": 44,
+      "done": 4,
+      "todo_female": 38,
       "todo_male": 2,
       "bench": {
         "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
@@ -124,13 +124,27 @@
       "key": "ears",
       "label": "귀",
       "framing": "portrait",
-      "count": 98,
-      "done": 98,
+      "count": 96,
+      "done": 96,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
         "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
         "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/ears__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "expression",
+      "label": "expression",
+      "framing": "portrait",
+      "count": 74,
+      "done": 0,
+      "todo_female": 74,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/expression__ ::, rating:general, simple background, white background",
         "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
       }
     },
@@ -145,6 +159,20 @@
       "bench": {
         "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
         "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/expression_state__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
+      "key": "expression_symbol",
+      "label": "expression_symbol",
+      "framing": "portrait",
+      "count": 67,
+      "done": 0,
+      "todo_female": 67,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/expression_symbol__ ::, rating:general, simple background, white background",
         "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
       }
     },
@@ -166,8 +194,8 @@
       "key": "face",
       "label": "얼굴",
       "framing": "portrait",
-      "count": 227,
-      "done": 227,
+      "count": 223,
+      "done": 223,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
@@ -177,11 +205,25 @@
       }
     },
     {
+      "key": "face_shape",
+      "label": "face_shape",
+      "framing": "portrait",
+      "count": 21,
+      "done": 0,
+      "todo_female": 21,
+      "todo_male": 0,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "portrait, close-up, front view, looking at viewer, 2::__*thumb/_todo/face_shape__ ::, rating:general, simple background, white background",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
+    },
+    {
       "key": "hair_pattern",
       "label": "머리 패턴",
       "framing": "portrait",
-      "count": 7,
-      "done": 7,
+      "count": 12,
+      "done": 12,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
@@ -194,9 +236,9 @@
       "key": "hair_style",
       "label": "머리 모양",
       "framing": "portrait",
-      "count": 193,
-      "done": 193,
-      "todo_female": 0,
+      "count": 184,
+      "done": 183,
+      "todo_female": 1,
       "todo_male": 0,
       "bench": {
         "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
@@ -208,8 +250,8 @@
       "key": "horns",
       "label": "뿔",
       "framing": "portrait",
-      "count": 32,
-      "done": 32,
+      "count": 31,
+      "done": 31,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
@@ -222,9 +264,9 @@
       "key": "marking",
       "label": "문신·피어싱",
       "framing": "cowboy",
-      "count": 86,
-      "done": 0,
-      "todo_female": 64,
+      "count": 83,
+      "done": 82,
+      "todo_female": 1,
       "todo_male": 0,
       "bench": {
         "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
@@ -250,8 +292,8 @@
       "key": "species",
       "label": "종족",
       "framing": "upper",
-      "count": 220,
-      "done": 220,
+      "count": 215,
+      "done": 215,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
@@ -264,8 +306,8 @@
       "key": "tail",
       "label": "꼬리",
       "framing": "full",
-      "count": 91,
-      "done": 91,
+      "count": 90,
+      "done": 90,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {
@@ -278,8 +320,8 @@
       "key": "wings",
       "label": "날개",
       "framing": "full",
-      "count": 41,
-      "done": 41,
+      "count": 42,
+      "done": 42,
       "todo_female": 0,
       "todo_male": 0,
       "bench": {

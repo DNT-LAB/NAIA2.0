@@ -4,6 +4,7 @@ ear piercing
 mole on breast
 arm tattoo
 shoulder tattoo
+facepaint
 chest tattoo
 oripathy lesion (arknights)
 leg tattoo
@@ -37,7 +38,6 @@ linked piercing
 tribal tattoo
 butterfly tattoo
 scar on hand
-nipple chain
 joestar birthmark
 dragon tattoo
 ear birthmark
@@ -51,27 +51,25 @@ cross tattoo
 bat tattoo
 finger tattoo
 fish tattoo
-clitoris ring
 slave tattoo
 plug (piercing)
 corset piercing
 covered piercing
-tongue tattoo
 skull tattoo
+tongue tattoo
 irezumi
 lipstick mark on face
 subdermal port
 lipstick mark on ass
-lipstick mark on breast
 horn piercing
+lipstick mark on breast
 ear bar
 lipstick mark on leg
-lipstick mark on stomach
 spade tattoo
+lipstick mark on stomach
 labret piercing
 hip tattoo
 spike piercing
-mole on areola
 scorpion tattoo
 sun tattoo
 branded
@@ -82,5 +80,4 @@ anchor tattoo
 wing tattoo
 wing piercing
 collarbone piercing
-frenulum piercing
 lip ring

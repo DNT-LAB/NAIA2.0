@@ -54,7 +54,6 @@ slime girl
 orc
 jellyfish
 squirrel girl
-octarian
 harvin
 slime (creature)
 dragon boy
@@ -80,14 +79,12 @@ lion boy
 robot girl
 yordle
 deer girl
-angel and devil
 fish boy
 werewolf
 unicorn
 zora
 undead
 tengu
-kaijuu
 centauroid
 minotaur
 leopard girl
@@ -124,13 +121,12 @@ chipmunk girl
 kappa
 qilin (mythology)
 seraph
-familiar
 phoenix
 komainu
 dullahan
 dolphin girl
-rito
 orca girl
+rito
 jackal boy
 shadow (shadows house)
 kneeless mermaid
@@ -154,7 +150,6 @@ prairie dog girl
 western dragon
 alpaca girl
 ogre
-doppelganger
 griffin
 otter girl
 jaguar boy
@@ -193,12 +188,12 @@ donkey girl
 centipede girl
 gargoyle
 lich
-ant girl
 dinosaur boy
+ant girl
 giraffe girl
 futakuchi-onna
-rhinoceros girl
 stoat girl
+rhinoceros girl
 chameleon girl
 jellyfish girl
 squid girl

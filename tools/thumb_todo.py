@@ -42,6 +42,22 @@ FRAMING_SPLIT = {
                  "blood on leg", "dirty feet", "whip marks", "blood on chest",
                  "broken arm", "dirty hands", "broken leg", "bleeding"],
     },
+    # 부상·오염: 얼굴 오염·부상(코피/얼굴 멍/침 흘림)을 몸통 배치(cowboy + head out of
+    # frame)로 돌렸더니 흰 후드티만 나왔다(실측 33장 중 대부분). 얼굴 태그는 portrait 다.
+    # 내 실수 — FACE_CONDITION 을 body_condition 에 합류시키면서 그 축의 프레이밍을
+    # 고려하지 않았다.
+    "body_condition": {
+        "portrait": [
+            "food on face", "dirty face", "rice on face", "chocolate on face",
+            "paint splatter on face", "wet face", "snot", "snot trail", "runny nose",
+            "nose bubble", "saliva drip", "mouth drool", "nosebleed",
+            "blood from mouth", "blood on mouth", "bruise on face", "bruised eye",
+            "slap mark on face", "bleeding from forehead", "veiny face", "turn pale",
+            "fever", "pain", "dazed", "foaming at the mouth", "steam from mouth",
+            "headache", "hangover", "dizzy", "drunk", "tipsy", "full mouth",
+            "mouth submerged",
+        ],
+    },
     # 날개: 머리 날개는 portrait 로 따로 — spread wings 베이스에선 머리가 잘린다.
     "wings": {
         "portrait": ["head wings", "hair wings", "single head wing"],

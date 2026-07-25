@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import random
@@ -123,8 +124,18 @@ def generate_one(token: str, payload: dict, timeout: int = 180) -> bytes:
 
 
 def slug(tag: str) -> str:
+    """파일명용 슬러그. 태그마다 반드시 달라야 한다.
+
+    기호 표정 축에서 실측 사고가 났다: 구두점을 전부 '_' 로 바꾸면 ^_^ / >_< / ... /
+    @_@ / =_= / |_| / ._. 가 모두 '___' 이 된다(67개 태그 -> 38개 슬러그). 그러면
+    --skip-existing 이 남의 파일을 보고 29개를 건너뛴다. 짧은 해시를 붙여 단사로 만든다.
+    (팩 빌더는 파일명이 아니라 PNG 메타데이터의 2::태그 :: 로 축을 판정하므로,
+     해시가 붙어도 분류에는 영향이 없다.)
+    """
     keep = "".join(c if (c.isalnum() or c in " -_") else "_" for c in tag)
-    return "_".join(keep.split()) or "tag"
+    base = "_".join(keep.split()) or "tag"
+    digest = hashlib.sha1(tag.encode("utf-8")).hexdigest()[:6]
+    return f"{base}-{digest}"
 
 
 def main() -> int:
@@ -178,6 +189,14 @@ def main() -> int:
     if not plan:
         print("생성할 것이 없습니다(모든 배치가 비었거나 파일이 없습니다).")
         return 0
+    # 벤치 정의를 미리 전부 확인한다. 없는 정의는 build_prompt 에서 SystemExit 을 내는데,
+    # 그게 첫 장 생성 시점이라 계획을 다 세운 뒤에 죽는다(실측: 49장 계획 후 0장 생성).
+    # 요청을 하나도 보내기 전에 걸러야 한다.
+    undefined = sorted({name for name, _ in plan if name not in bench["batches"]})
+    if undefined:
+        print(f"!! _bench.json 에 정의가 없는 배치: {undefined}")
+        print("   tools/thumb_bench_init.py 를 다시 실행해 정의를 만드세요.")
+        return 2
     print(f"배치 {len(args.batches)}개 / 총 {len(plan)}장 / 딜레이 {args.delay}s "
           f"±{int(args.jitter * 100)}% / 시드 {args.seed}")
     if args.dry_run:

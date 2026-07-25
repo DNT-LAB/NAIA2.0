@@ -143,7 +143,8 @@ AXES["marking"] = [t for t in pool(MARKING_SUBS) + [x for x in MARKING_EXTRA if 
                    if t not in MARKING_TO_NSFW and t not in MARKING_DROP]
 
 AXES["skin"] = pool(('skin_color',))
-AXES["body_type"] = ([t for t in pool(('body_type',)) if t not in BREAST_SIZE]
+AXES["body_type"] = ([t for t in pool(('body_type',))
+                      if t not in BREAST_SIZE and t not in BODY_TO_HAIR]
                      + [t for t in BODY_TO_TYPE if t in raw])
 # ── 신체 부위 분할 ─────────────────────────────────────────────────────────
 # 이전 규칙은 'NSFW 정규식 -> nsfw, FEATURE 정규식 -> feature, 나머지 전부 -> expose'

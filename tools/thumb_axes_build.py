@@ -333,6 +333,13 @@ EXCLUDE = {
     "prehensile ribbon",         # 아무것도 렌더되지 않는다
     "blowhole", "extra breasts", "fluff",   # 아무것도 렌더되지 않는다
     "no bangs",                  # 앞머리가 그대로 남는다(부정 태그)
+    "stand (jojo)",              # 초록 배경만 나온다. 종족이 아니라 초능력 개념
+    "duel monster",              # 특징 없이 그냥 소녀. 카드 게임 몬스터 분류라 종족이 아니다
+    # ── 재검수(시드 변경 + 가중치 3.0)에서도 두 번 실패한 것들 ──────────
+    "alpaca tail", "giraffe tail",   # 두 번 모두 동물을 통째로 그렸다
+    "bandaged head",             # 머리 붕대가 머리띠로만 나온다
+    "thorns",                    # 옷만 나오고 가시가 렌더되지 않는다
+    "bite mark", "hickey",       # 목/피부 자국이 cowboy 프레이밍에서 옷에 가린다
 
     # dirty / dirty feet / dirty hands 는 STATE 축으로 살렸다(아래에서 EXCLUDE 에서 뺀다).
 }

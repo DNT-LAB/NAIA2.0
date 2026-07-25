@@ -15,7 +15,6 @@ witch
 creature
 fairy
 draph
-duel monster
 erune
 kitsune
 vampire
@@ -54,7 +53,6 @@ hyur
 slime girl
 orc
 jellyfish
-stand (jojo)
 squirrel girl
 octarian
 harvin
@@ -107,16 +105,16 @@ monkey boy
 pegasus
 saiyan
 blob
-monkey girl
 owl girl
+monkey girl
 fallen angel
 pikmin (creature)
 dwarf
 leopard boy
 giant monster
 wyvern
-penguin girl
 goat boy
+penguin girl
 floating skull
 valkyrie
 horse boy
@@ -127,12 +125,12 @@ kappa
 qilin (mythology)
 seraph
 familiar
-komainu
 phoenix
-dolphin girl
+komainu
 dullahan
-orca girl
+dolphin girl
 rito
+orca girl
 jackal boy
 shadow (shadows house)
 kneeless mermaid
@@ -177,13 +175,13 @@ mouse boy
 cerberus
 sheep boy
 cockroach girl
-cheetah girl
 ferret girl
-ghost girl
+cheetah girl
 deer boy
+ghost girl
 whale girl
-zebra girl
 slug girl
+zebra girl
 snake girl
 sphinx
 dryad
@@ -195,24 +193,24 @@ donkey girl
 centipede girl
 gargoyle
 lich
-dinosaur boy
 ant girl
+dinosaur boy
 giraffe girl
 futakuchi-onna
-stoat girl
 rhinoceros girl
+stoat girl
 chameleon girl
 jellyfish girl
 squid girl
 snail girl
 panther girl
-skunk girl
 camel girl
-axolotl girl
+skunk girl
 chupacabra
+axolotl girl
 frog boy
-lynx girl
 crab girl
+lynx girl
 moose girl
 pig boy
 snake boy

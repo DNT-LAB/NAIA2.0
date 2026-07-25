@@ -42,7 +42,6 @@ deer tail
 multicolored tail
 hedgehog tail
 penguin tail
-alpaca tail
 scorpion tail
 fiery tail
 weasel tail
@@ -66,7 +65,6 @@ moose tail
 hyena tail
 fur-tipped tail
 panda tail
-giraffe tail
 panther tail
 meerkat tail
 very long tail

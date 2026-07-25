@@ -135,7 +135,7 @@
       "framing": "portrait"
     },
     "body_nonhuman_full": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, standing, <<VARY>>, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, standing, <<VARY>>, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.5,
       "framing": "full"
     },
@@ -143,6 +143,21 @@
       "template": "1boy, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, mature male, solo, front view, cowboy shot, <<VARY>>, head out of frame, close-up, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.5,
       "framing": "cowboy"
+    },
+    "_redo_portrait": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 3.0,
+      "framing": "portrait"
+    },
+    "_redo_cowboy": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, head out of frame, close-up, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 3.0,
+      "framing": "cowboy"
+    },
+    "_redo_tail": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, from behind, cowboy shot, <<VARY>>, tail raised, bare shoulders, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 3.0,
+      "framing": "tail"
     }
   }
 }

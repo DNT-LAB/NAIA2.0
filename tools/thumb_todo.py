@@ -80,6 +80,8 @@ for k in pack:
 # 기존 _todo 는 매번 비운다(다 끝난 축의 파일이 남아 헷갈리지 않게)
 TODO.mkdir(exist_ok=True)
 for old in TODO.glob("*.txt"):
+    if old.stem.startswith("_"):
+        continue        # _redo_* 같은 손으로 만든 재검수 배치는 보존한다
     old.unlink()
 
 rows, total = [], 0

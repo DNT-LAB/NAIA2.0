@@ -66,6 +66,27 @@ crea = pool(('legendary_creatures', 'kemonomimi', 'cats', 'dogs', 'other_animals
              'fish', 'birds', 'insects', 'reptiles', 'technology', 'archetype', 'furry'))
 AXES["species"] = [t for t in crea
                    if re.search(r'\b(girl|boy)$', t) or SGL(t) in ('legendary_creatures', 'kemonomimi', 'archetype')]
+# 종족 축 정리 — "사용자가 만들려는 캐릭터의 종족"만 남긴다.
+# 기준: (1) X girl / X boy 조합형은 전부 유지(설명이 필요 없고 썸네일이 곧 설명이다),
+#       (2) 고유명사는 freq >= 300,
+#       (3) 그 아래라도 널리 알려진 신화·판타지 원형은 되살린다(RESCUE).
+# 걸러지는 것은 작품을 모르면 의미 없는 고유 종족과, 종족이 아닌 것(부위/행위/사물)이다.
+# harvin(1923) / draph(8231) / erune(7904) / miqo'te(6685) 처럼 인기 있는 작품 종족은
+# 빈도로 자동 통과한다 — 작품 소속 여부가 아니라 실사용량이 기준이다.
+SPECIES_MIN_FREQ = 300
+SPECIES_RESCUE = {
+    "yuki onna", "golem", "ogre", "griffin", "western dragon", "tiefling", "halfling",
+    "genie", "satyr", "sphinx", "dryad", "gargoyle", "lich", "cerberus", "doppelganger",
+    "gnome", "mindflayer", "chupacabra", "futakuchi-onna",
+}
+_KEMO_FORM = re.compile(r'\b(girl|boy)$')
+_species_keep = [t for t in AXES["species"]
+                 if _KEMO_FORM.search(t) or F(t) >= SPECIES_MIN_FREQ
+                 or t in SPECIES_RESCUE]
+# 아래 EXCLUDE 에 넣어야 유니온(기존 목록 합집합)이 되돌려 넣지 않는다 — 세 번째로 겪는 함정.
+SPECIES_CUT = {t for t in AXES["species"] if t not in _species_keep}
+AXES["species"] = _species_keep
+
 AXES["ears"] = pool(('ears_tags',))
 AXES["tail"] = pool(('tail',))
 AXES["wings"] = pool(('wings',))
@@ -159,7 +180,9 @@ STATE = [
     # 젖음·김
     "wet", "wet hair", "wet clothes", "steam", "soaking feet",
     # 경상(ryona) — 사용자 판단으로 살린 것들. 인기 태그 위주.
-    "injury", "bruise", "blood", "blood on face", "blood on hands", "blood on arm",
+    # blood(제네릭)는 제외 — NAI 가 코피 분수를 그리고(실측), blood on face/arm/leg/
+    # chest/hands 로 이미 세분화돼 중복이다.
+    "injury", "bruise", "blood on face", "blood on hands", "blood on arm",
     "blood on leg", "blood on chest", "bleeding", "scratches", "cuts", "stitches",
     "bite mark", "slap mark", "hickey", "whip marks", "broken arm", "broken leg",
     # 붕대
@@ -222,7 +245,10 @@ AXES["state"] = [t for t in STATE if t in raw]
 _missing_state = [t for t in STATE if t not in raw]
 # body_* 축에 STATE 태그가 남아 있으면 중복이므로 뺀다.
 _state_set = set(AXES["state"])
-for _k in ("body_expose", "body_feature", "body_nonhuman", "body_nsfw", "horns"):
+# state 는 머리(messy hair / wet hair)와도 겹친다. 같은 태그가 두 축에 있으면 두 번
+# 생성되고 팩 키도 갈린다(빌더는 먼저 읽은 축으로 배정한다) -> 여기서 한쪽만 남긴다.
+for _k in ("body_expose", "body_feature", "body_nonhuman", "body_nsfw", "horns",
+           "hair_style", "bangs", "ears", "tail", "wings", "skin", "species"):
     AXES[_k] = [t for t in AXES[_k] if t not in _state_set]
 
 # 축에서 제외 — 단독 썸네일로 성립하지 않거나, 초보자 원클릭 칩으로 부적합한 것들.
@@ -299,6 +325,7 @@ EXCLUDE = {
     "hybrid",                    # 198. "애매한 태그" — fusion/chimera 사용
     "mini dragon",               # 152. "small_dragon 으로 이동되었습니다"
     "beast",                     # 78. "모호한 태그" — monster 사용
+    *SPECIES_CUT,                # 종족 정리(위 SPECIES_MIN_FREQ / RESCUE 규칙)
 
     # dirty / dirty feet / dirty hands 는 STATE 축으로 살렸다(아래에서 EXCLUDE 에서 뺀다).
 }
@@ -328,13 +355,23 @@ def existing(name):
     if not p.exists(): return []
     return [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
 
-# 임계값 때문에 '이미 생성한' 태그가 빠지면 뽑아둔 썸네일이 버려진다 -> 기존 목록과 합집합.
-# 단, 명시 배정(EXPLICIT)이 있는 태그는 그 축에만 들어간다 — 안 그러면 옮긴 태그가
-# 기존 파일에서 원래 축으로 되돌아와 재분류가 무력화된다.
+# 임계값 때문에 '이미 생성한' 태그가 빠지면 뽑아둔 썸네일이 버려진다 -> 되살린다.
+# 단 되살리는 기준은 '기존 목록에 있었는가'가 아니라 **팩에 이미지가 있는가**다.
+# 목록 기준으로 하면 방금 다른 축으로 옮기거나 제외한 태그가 그대로 되돌아와 재분류가
+# 무력화된다(네 번 겪었다: 명시 배정분 / 정규식 배정분 / 종족 정리분 / state 제거분).
+# 이미지 유무를 기준으로 하면 그 사고가 구조적으로 불가능하다 — 목적(생성분 보존)은
+# 그대로 달성하면서 재분류를 방해하지 않는다.
+_pack_path = Path("data/interactive_thumbnails.json")
+_have = {}
+if _pack_path.exists():
+    import json as _json
+    for _key in _json.loads(_pack_path.read_text(encoding="utf-8")):
+        _ax, _, _tag = _key.partition("/")
+        _have.setdefault(_ax, set()).add(_tag)
 kept_below = {}
 for _k in list(AXES):
-    old = [t for t in existing(_k) if t in raw and EXPLICIT.get(t, _k) == _k]
-    add = [t for t in old if t not in AXES[_k]]
+    add = [t for t in sorted(_have.get(_k, ()))
+           if t in raw and t not in AXES[_k] and EXPLICIT.get(t, _k) == _k]
     if add: kept_below[_k] = add
     AXES[_k] = AXES[_k] + add
 

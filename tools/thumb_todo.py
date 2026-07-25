@@ -32,9 +32,12 @@ PACK_AXIS = {"face_eyes": "face", "face_mouth": "face", "face_etc": "face"}
 FRAMING_SPLIT = {
     # 상태: 얼굴 현상(홍조/눈물/땀)은 portrait, 몸통·사지(붕대/멍/더러운 발)는 cowboy.
     "state": {
-        "body": ["bandages", "wet clothes", "bandaged arm", "steaming body", "injury",
+        # bandage over one eye / steaming body 는 몸통 배치에서 실패했다(실측):
+        # 안대는 눈에 있어 head out of frame 이면 프레임 밖이고, 김은 몸 전체에서
+        # 올라오는데 하복부 클로즈업이 나왔다 -> 얼굴 배치(state)로 되돌린다.
+        "body": ["bandages", "wet clothes", "bandaged arm", "injury",
                  "bandaged leg", "stitches", "blood on hands", "soaking feet", "bruise",
-                 "bandaged hand", "sweaty armpits", "bandage over one eye", "cuts",
+                 "bandaged hand", "sweaty armpits", "cuts",
                  "bite mark", "scratches", "slap mark", "hickey", "blood on arm",
                  "blood on leg", "dirty feet", "whip marks", "blood on chest",
                  "broken arm", "dirty hands", "broken leg", "bleeding"],

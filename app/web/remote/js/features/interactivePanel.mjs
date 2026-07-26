@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS,
-} from './interactiveAxes.mjs?v=20260726-ax76';
+} from './interactiveAxes.mjs?v=20260726-ax77';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -792,12 +792,23 @@ export function createInteractivePanel({
     return secs.some(sec => sec.kind === 'browse');
   }
 
-  /** sections 안의 browse 섹션들이 지정한 subgroup 을 모아 계층 탐색 스코프로 쓴다. */
+  /** 검색창을 붙일까. 계층 탐색과 **따로** 판단한다 — 둘은 성격이 다른 도구다.
+   *  자세 슬롯은 트리를 떼고(중복 74% + 남는 514개가 설명 없는 저빈도) 검색만 남긴다.
+   *  `scope` 섹션은 트리 없이 검색 범위만 주는 표시다. */
+  function wantsSearch() {
+    const secs = panelContext?.sections;
+    if (!Array.isArray(secs) || !secs.length) return true;
+    return secs.some(sec => sec.kind === 'browse' || sec.kind === 'scope');
+  }
+
+  /** sections 의 browse/scope 섹션이 지정한 subgroup 을 모아 검색·탐색 스코프로 쓴다. */
   function browseScopeOf(meta) {
     if (!meta || !Array.isArray(meta.sections)) return null;
     const out = [];
     for (const sec of meta.sections) {
-      if (sec.kind === 'browse' && Array.isArray(sec.subgroups)) out.push(...sec.subgroups);
+      if ((sec.kind === 'browse' || sec.kind === 'scope') && Array.isArray(sec.subgroups)) {
+        out.push(...sec.subgroups);
+      }
     }
     return out.length ? out : null;
   }
@@ -806,6 +817,7 @@ export function createInteractivePanel({
   function enterEditing() {
     armedTag = armedAxis = null;   // 슬롯을 바꾸면 '살펴보기' 상태 해제
     thumbScroll.clear();       // 슬롯을 바꾸면 썸네일 스크롤을 처음으로
+    thumbFilter = '';          // 검색어도 슬롯 단위다 — 남기면 다음 슬롯이 걸러진 채 열린다
     // 아코디언 기본값 = 그 슬롯의 첫 썸네일 섹션(선택된 게 있으면 그 섹션을 우선 펼친다).
     openThumbAxis = firstThumbAxis();
     // 팩 인덱스는 한 번만 받고, 도착하면 축 영역만 다시 그린다(이미지 셀로 승격).
@@ -1240,8 +1252,9 @@ export function createInteractivePanel({
         <span class="ia-panel-sub">${escHtml(panelContext.axis)}</span>
         <button type="button" class="ia-panel-close" data-close="1">&times;</button>
       </div>
-      ${wantsBrowse() ? `<div class="ia-search ia-search-top">
-        <input type="text" id="iaTagInput" placeholder="분류·태그 검색 (아래 목록 필터)" autocomplete="off">
+      ${wantsSearch() ? `<div class="ia-search ia-search-top">
+        <input type="text" id="iaTagInput" placeholder="${wantsBrowse()
+          ? '분류·태그 검색 (아래 목록 필터)' : '태그 검색 — 아는 태그를 바로 넣습니다'}" autocomplete="off">
         <span class="ia-search-scope">${escHtml(panelContext.axis)}</span>
       </div>` : ''}
       <div class="ia-panel-body">
@@ -1271,9 +1284,16 @@ export function createInteractivePanel({
     }
     const input = panelMount.querySelector('#iaTagInput');
     if (input) {
-      // 팝업 검색창은 자동완성이 아니라 아래 '분류 탐색' 목록을 걸러내는 필터다.
+      // 팝업 검색창은 자동완성이 아니라 목록을 걸러내는 필터다. 계층 탐색기가 있으면
+      // 그 트리를, 없으면(자세) 썸네일 그리드를 거른다.
       // (태그 입력용 자동완성은 슬롯 입력창 쪽에 붙어 있다.)
-      const applyFilter = () => { if (browse) browse.setFilter(input.value); };
+      const applyFilter = () => {
+        if (wantsBrowse()) { if (browse) browse.setFilter(input.value); return; }
+        const next = String(input.value || '').trim().toLowerCase();
+        if (next === thumbFilter) return;
+        thumbFilter = next;
+        refreshAxisSections();
+      };
       input.addEventListener('input', applyFilter);
       input.addEventListener('keydown', event => {
         if (event.key === 'Escape') { event.preventDefault(); input.value = ''; applyFilter(); }
@@ -1286,6 +1306,16 @@ export function createInteractivePanel({
   const thumbHave = new Map();       // axisKey -> Set(썸네일 이미지가 있는 태그)
   const thumbScroll = new Map();     // axisKey -> scrollTop (재렌더 시 복원)
   let openThumbAxis = null;          // 아코디언 — 썸네일 섹션은 한 번에 하나만 펼친다
+  let thumbFilter = '';              // 검색창이 그리드를 거를 때의 질의(트리 없는 슬롯)
+
+  /** 태그명과 한글 설명 양쪽을 본다 — 사용자가 `앉` 으로 `sitting` 을 찾을 수 있어야 한다. */
+  function matchesFilter(tag) {
+    const q = thumbFilter;
+    if (!q) return true;
+    if (String(tag).toLowerCase().includes(q)) return true;
+    const desc = (TAG_DESC || {})[tag];
+    return !!desc && String(desc).toLowerCase().includes(q);
+  }
 
   // 민감 태그(신체 결손/봉합/혈흔 등)는 썸네일을 블러하고 호버 시에만 보여준다.
   const SENSITIVE = new Set((SENSITIVE_TAGS || []).map(t => String(t).toLowerCase()));
@@ -1527,15 +1557,21 @@ export function createInteractivePanel({
    *  펼친 섹션은 3줄 높이만 보이고 나머지는 박스 안에서 스크롤한다(우측 스크롤바). */
   function thumbHtml(sec) {
     const axis = sec.ref;
-    const all = THUMB_TAGS[axis] || [];
+    const full = THUMB_TAGS[axis] || [];
+    // 계층 탐색기가 없는 슬롯(자세)에서는 검색창이 **그리드를 거른다**. 트리를 떼고
+    // 검색만 남겼으니 걸러줄 대상이 그리드여야 한다 — 아니면 죽은 입력창이 된다.
+    const all = thumbFilter ? full.filter(t => matchesFilter(t)) : full;
     const sel = currentLower();
     const chosenCount = all.filter(t => sel.has(t.toLowerCase())).length;
-    const open = openThumbAxis === axis;
+    // 검색 중에는 결과가 있는 축을 모두 펼친다 — 아코디언 하나만 열면 다른 축의
+    // 일치 항목을 찾을 수 없다.
+    const open = thumbFilter ? all.length > 0 : openThumbAxis === axis;
+    if (thumbFilter && !all.length) return '';
     const head = `<button type="button" class="ia-acc-head${open ? ' is-open' : ''}"
       data-acc-ax="${escHtml(axis)}" aria-expanded="${open}">
       <span class="ia-acc-caret">${open ? '&#9662;' : '&#9656;'}</span>
       <span class="ia-acc-name">${escHtml(sec.label)}</span>
-      <span class="ia-acc-n">${all.length}</span>
+      <span class="ia-acc-n">${thumbFilter ? `${all.length}/${full.length}` : all.length}</span>
       ${chosenCount ? `<span class="ia-acc-sel">${chosenCount} 선택</span>` : ''}
     </button>`;
     if (!open) return `<div class="ia-ax-row ia-acc-row">${head}</div>`;
@@ -1584,9 +1620,16 @@ export function createInteractivePanel({
       // palette_extra 는 독립 섹션이 아니라 패턴 썸네일 섹션 안(그리드 위)에 붙는다(thumbHtml).
       if (sec.kind === 'slider') return sliderHtml(sec);
       if (sec.kind === 'thumb') return thumbHtml(sec);
-      return '';   // browse 는 아래 계층 탐색 섹션이 담당
+      return '';   // browse/scope 는 렌더하지 않는다 (트리는 아래 탐색 섹션이 담당)
     }).filter(Boolean).join('');
-    if (!body) return '';
+    // 검색 결과가 0건이어도 컨테이너는 남겨야 한다. refreshAxisSections 가 `#iaAxes` 를
+    // outerHTML 로 갈아치우므로, 빈 문자열을 돌려주면 호스트가 사라져 검색어를 지워도
+    // 되돌아오지 않는다.
+    if (!body) {
+      if (!thumbFilter) return '';
+      return `<div class="ia-axes" id="iaAxes"><div class="ia-axes-empty">`
+        + `${escHtml(thumbFilter)} — 맞는 태그가 없습니다.</div></div>`;
+    }
     return `<div class="ia-axes" id="iaAxes">${body}</div>`;
   }
 

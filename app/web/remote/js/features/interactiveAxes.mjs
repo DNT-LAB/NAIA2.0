@@ -208,7 +208,7 @@ export const CHAR_SLOTS = [
     {kind: "thumb", label: "감정", ref: "expression"},
     {kind: "thumb", label: "기호 표정", ref: "expression_symbol"},
     {kind: "thumb", label: "홍조·눈물·땀", ref: "expression_state"},
-    {kind: 'browse', label: "표정 전체", subgroups: ["expression", "eyes_tags", "mouth"]},
+    {kind: "browse", label: "표정 전체", subgroups: ["expression", "eyes_tags", "mouth"]},
   ]},
   {key: "신체", icon: '\u{1F9CD}', axis: "characteristic", sections: [
     {kind: "slider", label: "가슴", ref: "breast_size"},
@@ -242,7 +242,7 @@ export const CHAR_SLOTS = [
     {kind: "thumb", label: "무늬·프린트", ref: "cloth_pattern"},
     {kind: "thumb", label: "스타일·용도", ref: "cloth_style"},
     {kind: "thumb", label: "노출 의상(성인)", ref: "cloth_nsfw"},
-    {kind: 'browse', label: "의상 전체", subgroups: ["attire", "panties", "patterns", "sexual_attire", "bra", "fashion_style", "covering", "medical", "design_elements", "clothing_state", "prints", "tan_marks", "alternate", "costume_props", "states", "clothes", "cosmetics", "interaction", "underwear"]},
+    {kind: "browse", label: "의상 전체", subgroups: ["attire", "panties", "patterns", "sexual_attire", "bra", "fashion_style", "covering", "medical", "design_elements", "clothing_state", "prints", "tan_marks", "alternate", "costume_props", "states", "clothes", "cosmetics", "interaction", "underwear"]},
   ]},
   {key: "소품·장식", icon: '\u{1F452}', axis: "clothing", sections: [
     {kind: "thumb", label: "모자", ref: "cloth_headwear"},
@@ -257,7 +257,7 @@ export const CHAR_SLOTS = [
     {kind: "thumb", label: "소지품", ref: "cloth_carried"},
     {kind: "thumb", label: "장식", ref: "cloth_accessory"},
     {kind: "thumb", label: "갑옷", ref: "cloth_armor"},
-    {kind: 'browse', label: "소품 전체", subgroups: ["accessories", "headwear", "hair_accessories", "neck_and_neckwear", "footwear", "armor", "legwear", "mask", "handwear", "eyewear", "sleeves", "face_accessories", "other_animals", "objects", "animal_interaction", "cats", "weather"]},
+    {kind: "browse", label: "소품 전체", subgroups: ["accessories", "headwear", "hair_accessories", "neck_and_neckwear", "footwear", "armor", "legwear", "mask", "handwear", "eyewear", "sleeves", "face_accessories", "other_animals", "objects", "animal_interaction", "cats", "weather"]},
   ]},
   {key: "자세", icon: '\u{1F3C3}', axis: "pose_action", sections: [
     {kind: "thumb", label: "자세", ref: "pose_posture"},
@@ -279,7 +279,7 @@ export const CHAR_SLOTS = [
     {kind: "thumb", label: "시선", ref: "pose_gaze"},
     {kind: "thumb", label: "전투", ref: "pose_combat"},
     {kind: "thumb", label: "몸 보여주기", ref: "pose_display"},
-    {kind: 'browse', label: "자세 전체", subgroups: ["pose", "posture", "gesture", "gestures", "activity", "verbs_and_gerunds", "hands", "combat_actions", "clothing_action", "dances"]},
+    {kind: "scope", label: "자세 전체", subgroups: ["pose", "posture", "gesture", "gestures", "activity", "verbs_and_gerunds", "hands", "combat_actions", "clothing_action", "dances"]},
   ]},
 ];
 

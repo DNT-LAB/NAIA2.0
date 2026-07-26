@@ -20101,6 +20101,10 @@ body.detached-module .mod-grid-3 {
 .ia-aside-chip:hover { color: var(--text-primary); border-color: var(--accent); }
 .ia-aside-chip.on { color: var(--accent-glow); border-color: var(--accent); }
 .ia-aside-chip.bad { color: #ffb4b4; border-color: rgba(255,107,107,0.4); }
+.ia-axes-empty {
+  padding: 18px 12px; text-align: center;
+  font-family: var(--font-display); font-size: 12px; color: var(--text-dim);
+}
 @media (max-width: 1279px) { .ia-aside { display: none !important; } }
 
 .ia-panel-head {

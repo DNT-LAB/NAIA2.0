@@ -195,10 +195,14 @@ SLOTS = [
     # 신설 `pose_leg`/`pose_body_touch` 는 빠지고 라벨은 옛 이름("얼굴·몸에 손")
     # 그대로였다. _pose_axes.json 이 축과 라벨의 SSOT 다(_POSE_SECTIONS 참조).
     ("자세", "\\u{1F3C3}", "pose_action", _POSE_SECTIONS + [
-        # 썸네일이 freq>=100 만 덮으므로 나머지는 탐색기가 담당한다.
-        ("browse", "자세 전체", ["pose", "posture", "gesture", "gestures", "activity",
-                                "verbs_and_gerunds", "hands", "combat_actions",
-                                "clothing_action", "dances"]),
+        # 원래 계층 탐색기를 붙였다 — "썸네일이 freq>=100 만 덮으니 나머지는 탐색기가
+        # 담당한다"는 전제였다. 전제는 맞았다(100 이상은 한 개도 새지 않았다). 그래서
+        # 탐색기에만 남는 것이 무엇이냐가 문제였는데, 세어 보니 쓸 수 없는 것들이었다.
+        # 그래서 트리는 떼고 `scope` 로 **검색 범위만** 남긴다 — 아는 태그는 검색으로
+        # 여전히 넣을 수 있고, 19축 썸네일이 볼 만한 것은 전부 덮는다.
+        ("scope", "자세 전체", ["pose", "posture", "gesture", "gestures", "activity",
+                              "verbs_and_gerunds", "hands", "combat_actions",
+                              "clothing_action", "dances"]),
     ]),
 ]
 
@@ -259,7 +263,9 @@ _axis_files = sorted(p.stem for p in SRC.glob("*.txt"))
 # 슬롯이 참조하지 않는 축은 내보내지 않는다. 의상 축(cloth_*, 915개)이 분류만 끝나고
 # 아직 배선되지 않았는데, 그대로 등록하면 렌더되지도 않는 태그·설명을 브라우저로 보낸다.
 # 슬롯에 붙이는 순간 자동으로 포함된다.
-_referenced = {sec[2] for _, _, _, secs in SLOTS for sec in secs if sec[0] != "browse"}
+# browse/scope 의 sec[2] 는 축 이름이 아니라 subgroup 목록(list)이다 — 섞으면 unhashable.
+_referenced = {sec[2] for _, _, _, secs in SLOTS for sec in secs
+               if sec[0] not in ("browse", "scope")}
 # face.txt 는 슬롯이 직접 참조하지 않는다 — face_eyes/face_parts/face_mark 로 파생되고
 # PACK_AXIS 가 팩 키로 되돌린다. 빼면 그 223개의 툴팁 설명이 사라진다.
 _referenced.add("face")
@@ -390,8 +396,12 @@ for label, icon, axis, sections in SLOTS:
     out.append(f"  {{key: {js(label)}, icon: '{icon}', axis: {js(axis)}, sections: [")
     for sec in sections:
         kind, secLabel, ref = sec[0], sec[1], sec[2]
-        if kind == "browse":
-            out.append(f"    {{kind: 'browse', label: {js(secLabel)}, subgroups: {js(ref)}}},")
+        if kind in ("browse", "scope"):
+            # scope = 계층 탐색은 안 붙이고 **검색 범위만** 준다. 자세 슬롯이 그 경우다:
+            # 탐색기가 보여주는 2,360개 중 1,757개(74%)가 이미 썸네일에 있는 중복이고,
+            # 나머지 514개는 전부 freq<100 에 한글 설명이 0/514 라 무엇인지 알 수 없다.
+            # 그중 9개는 freq 0 비표준 별칭이라 정식 태그(썸네일에 있다)보다 나쁘다.
+            out.append(f"    {{kind: {js(kind)}, label: {js(secLabel)}, subgroups: {js(ref)}}},")
         elif kind == "thumb_extra":
             # 썸네일 섹션 + 그 안(그리드 위)에 붙는 추가 색상 팔레트
             out.append(f"    {{kind: 'thumb', label: {js(secLabel)}, ref: {js(ref)}, "

@@ -1,0 +1,28 @@
+{
+ "axes": [
+  "pose_posture_m",
+  "pose_arm_m",
+  "pose_hand_m",
+  "pose_face_touch_m",
+  "pose_mouth_m",
+  "pose_holding_m",
+  "pose_clothing_m",
+  "pose_action_m",
+  "pose_action_m_2",
+  "pose_display_m",
+  "pose_combat_m"
+ ],
+ "label": {
+  "pose_action_m": "행동(다인원)",
+  "pose_action_m_2": "행동(다인원) 2",
+  "pose_arm_m": "팔·다리 위치(다인원)",
+  "pose_clothing_m": "옷 다루기(다인원)",
+  "pose_combat_m": "전투(다인원)",
+  "pose_display_m": "몸 보여주기(다인원)",
+  "pose_face_touch_m": "얼굴·몸에 손(다인원)",
+  "pose_hand_m": "손짓(다인원)",
+  "pose_holding_m": "들고 있는 것(다인원)",
+  "pose_mouth_m": "입·먹기(다인원)",
+  "pose_posture_m": "자세(다인원)"
+ }
+}

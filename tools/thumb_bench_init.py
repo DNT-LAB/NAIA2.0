@@ -211,6 +211,64 @@ CLOTH_BATCHES = {
 BATCHES.update(CLOTH_BATCHES)
 
 
+# ── 자세 슬롯 템플릿 ────────────────────────────────────────────────────────
+# 자세는 특징·의상과 다르다. 옷은 `nude, safe` 를 못 쓰고, 자세는 **몸 전체가 곧
+# 정보**라 손짓 말고는 전신이 필요하다. 사용자 규칙("full body 는 썸네일에서 소화
+# 불가")과 충돌하지만, `sitting` 을 cowboy 로 찍으면 앉았는지 서 있는지 알 수 없어
+# 이미지가 아예 무의미해진다. 전신 축은 작게 보이는 대가를 감수한다.
+#
+# 옷은 흰 셔츠+주름치마로 고정한다 — 자세가 변수이므로 의상이 매번 달라지면
+# 그리드가 시끄럽고, 나체로 두면 등급이 튄다.
+_PQ = "rating:general, white background, simple background"
+_POUTFIT = "white shirt, pleated skirt"
+P_HEAD = (f"1girl, {ARTIST}, young female, solo, front view, portrait, <<VARY>>, "
+          f"{_POUTFIT}, close-up, looking at viewer, {_PQ}, {QUALITY}")
+P_UPPER = (f"1girl, {ARTIST}, young female, solo, front view, upper body, <<VARY>>, "
+           f"{_POUTFIT}, looking at viewer, {_PQ}, {QUALITY}")
+P_TORSO = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
+           f"{_POUTFIT}, looking at viewer, {_PQ}, {QUALITY}")
+P_FULL = (f"1girl, {ARTIST}, young female, solo, front view, full body, <<VARY>>, "
+          f"{_POUTFIT}, {_PQ}, {QUALITY}")
+
+POSE_BATCHES = {
+    "pose_action": (P_FULL, 2.0, "pose_full"),
+    "pose_action_2": (P_FULL, 2.0, "pose_full"),
+    "pose_action_3": (P_FULL, 2.0, "pose_full"),
+    "pose_action_m": (P_FULL, 2.0, "pose_full"),
+    "pose_action_m_2": (P_FULL, 2.0, "pose_full"),
+    "pose_arm": (P_UPPER, 2.0, "pose_upper"),
+    "pose_arm_2": (P_UPPER, 2.0, "pose_upper"),
+    "pose_arm_m": (P_UPPER, 2.0, "pose_upper"),
+    "pose_clothing": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_clothing_2": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_clothing_m": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_combat": (P_FULL, 2.0, "pose_full"),
+    "pose_combat_m": (P_FULL, 2.0, "pose_full"),
+    "pose_display": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_display_m": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_face_touch": (P_HEAD, 2.0, "pose_portrait"),
+    "pose_face_touch_m": (P_HEAD, 2.0, "pose_portrait"),
+    "pose_gaze": (P_HEAD, 2.0, "pose_portrait"),
+    "pose_hand": (P_HEAD, 2.0, "pose_portrait"),
+    "pose_hand_m": (P_HEAD, 2.0, "pose_portrait"),
+    "pose_holding": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_holding_2": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_holding_3": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_holding_m": (P_TORSO, 2.0, "pose_cowboy"),
+    "pose_mouth": (P_HEAD, 2.0, "pose_portrait"),
+    "pose_mouth_m": (P_HEAD, 2.0, "pose_portrait"),
+    "pose_posture": (P_FULL, 2.0, "pose_full"),
+    "pose_posture_2": (P_FULL, 2.0, "pose_full"),
+    "pose_posture_m": (P_FULL, 2.0, "pose_full"),
+    # 파일럿 — 프레이밍 4종 x 3장.
+    "_pilot_pose_head":  (P_HEAD, 2.0, "pose_portrait"),
+    "_pilot_pose_upper": (P_UPPER, 2.0, "pose_upper"),
+    "_pilot_pose_torso": (P_TORSO, 2.0, "pose_cowboy"),
+    "_pilot_pose_full":  (P_FULL, 2.0, "pose_full"),
+}
+BATCHES.update(POSE_BATCHES)
+
+
 bench = {
     "note": [
         "축별 고정 베이스의 SSOT. tools/thumb_bench.py 가 이 파일을 읽는다.",

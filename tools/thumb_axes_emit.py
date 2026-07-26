@@ -173,6 +173,35 @@ SLOTS = [
         ("thumb", "갑옷", "cloth_armor"),
         ("browse", "소품 전체", _BROWSE_GEAR),
     ]),
+    # ── 자세 ────────────────────────────────────────────────────────────────
+    # **1명으로 되는 자세만** 여기 둔다. 2명 이상이 필요한 것은 씬의 '다인원 자세'가
+    # 담당한다 — 판정 근거는 이벤트 프리셋 파티션의 실측 solo 비율과 태그명의
+    # own/another's 다(tools/build_pose_slots.py).
+    # 축 순서는 초보자가 쓰는 순서에 맞췄다: 몸 전체 -> 팔다리 -> 손 -> 얼굴 -> 물건.
+    ("자세", "\\u{1F3C3}", "pose_action", [
+        ("thumb", "자세", "pose_posture"),
+        ("thumb", "자세 2", "pose_posture_2"),
+        ("thumb", "팔·다리 위치", "pose_arm"),
+        ("thumb", "팔·다리 위치 2", "pose_arm_2"),
+        ("thumb", "손짓", "pose_hand"),
+        ("thumb", "얼굴·몸에 손", "pose_face_touch"),
+        ("thumb", "시선", "pose_gaze"),
+        ("thumb", "입·먹기", "pose_mouth"),
+        ("thumb", "들고 있는 것", "pose_holding"),
+        ("thumb", "들고 있는 것 2", "pose_holding_2"),
+        ("thumb", "들고 있는 것 3", "pose_holding_3"),
+        ("thumb", "옷 다루기", "pose_clothing"),
+        ("thumb", "옷 다루기 2", "pose_clothing_2"),
+        ("thumb", "행동", "pose_action"),
+        ("thumb", "행동 2", "pose_action_2"),
+        ("thumb", "행동 3", "pose_action_3"),
+        ("thumb", "몸 보여주기", "pose_display"),
+        ("thumb", "전투", "pose_combat"),
+        # 썸네일이 freq>=100 만 덮으므로 나머지는 탐색기가 담당한다.
+        ("browse", "자세 전체", ["pose", "posture", "gesture", "gestures", "activity",
+                                "verbs_and_gerunds", "hands", "combat_actions",
+                                "clothing_action", "dances"]),
+    ]),
 ]
 
 def js(v):
@@ -236,6 +265,9 @@ _referenced = {sec[2] for _, _, _, secs in SLOTS for sec in secs if sec[0] != "b
 # face.txt 는 슬롯이 직접 참조하지 않는다 — face_eyes/face_parts/face_mark 로 파생되고
 # PACK_AXIS 가 팩 키로 되돌린다. 빼면 그 223개의 툴팁 설명이 사라진다.
 _referenced.add("face")
+# 다인원 자세 축은 SLOTS 가 아니라 프론트의 SCENE_SLOTS(POSE_MULTI_SECTIONS)가 참조한다.
+# 여기서 빼면 씬 슬롯이 빈 그리드를 그린다.
+_referenced.update(p.stem for p in SRC.glob("pose_*_m*.txt"))
 _skipped_axes = [k for k in _axis_files if k not in _referenced]
 _axis_files = [k for k in _axis_files if k in _referenced]
 for key in _axis_files:

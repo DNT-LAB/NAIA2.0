@@ -48,7 +48,7 @@ DEFAULT_OUT = ROOT / "NAIA-Portable" / "user-data" / "output" / "_thumb_bench"
 NAI_URL = "https://image.novelai.net/ai/generate-image"
 
 # 사용자 승인 한도 — 코드에서 강제한다.
-HARD_MAX_REQUESTS = 3000
+HARD_MAX_REQUESTS = 3500
 HARD_MAX_STEPS = 28
 HARD_SIZE = 1024
 

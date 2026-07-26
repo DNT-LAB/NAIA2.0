@@ -419,6 +419,28 @@ out.append("")
 # 다인원 자세는 캐릭터 슬롯이 아니라 씬의 '다인원 자세' 팝업이 쓴다. 패널에 손으로
 # 적어 뒀더니 신설 `pose_leg_m` 26개와 `pose_body_touch_m` 10개가 빠져, 찍어도
 # 화면에 안 나오는 상태였다. 여기서 같이 내보낸다.
+# 의상 분류에서 `<색> <옷>` 을 분해해 뒀는데(`_cloth_combo.json`) 색을 고를 곳이 없어서
+# `white shirt`(541,974 — DB 최다 의상 태그)에 닿는 길이 계층 탐색기뿐이었다. 조합을
+# 프론트로 내보내 그리드에서 고른 옷에 색을 붙일 수 있게 한다.
+# 베이스마다 **확정된 색만** 낸다 — 28색을 다 열면 `green shirt` 처럼 실측으로 확인되지
+# 않은 조합을 권하게 된다. 목록에 없는 색은 슬롯 입력창에 직접 쓰면 된다.
+_combo = json.loads((SRC / "_cloth_combo.json").read_text(encoding="utf-8"))
+_by_base: dict[str, dict[str, str]] = {}
+for _tag, _v in sorted(_combo.items()):
+    _by_base.setdefault(_v["base"], {})[_v["mod"]] = _tag
+out.append("// 의상 색 조합. base -> {수식어: 합쳐진 태그}. tools/build_clothing_harmony 계열이")
+out.append("// 아니라 thumb_clothing_build 의 분해 결과(_cloth_combo.json)가 출처다.")
+out.append("export const CLOTH_COMBO = {")
+for _b, _mods in sorted(_by_base.items()):
+    out.append(f"  {js(_b)}: {js(_mods)},")
+out.append("};")
+out.append("")
+out.append("// 합쳐진 태그 -> {base, mod}. 색을 바꾸거나 뗄 때 역방향으로 쓴다.")
+out.append("export const CLOTH_COMBO_REV = {")
+for _tag, _v in sorted(_combo.items()):
+    out.append(f"  {js(_tag)}: {js([_v['base'], _v['mod']])},")
+out.append("};")
+out.append("")
 out.append("// 씬 슬롯 '다인원 자세' 전용. 2명 이상이 있어야 성립하는 축들이다.")
 out.append("export const POSE_MULTI_SECTIONS = [")
 for _ax in _POSE_MULTI:

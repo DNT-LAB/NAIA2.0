@@ -20101,6 +20101,31 @@ body.detached-module .mod-grid-3 {
 .ia-aside-chip:hover { color: var(--text-primary); border-color: var(--accent); }
 .ia-aside-chip.on { color: var(--accent-glow); border-color: var(--accent); }
 .ia-aside-chip.bad { color: #ffb4b4; border-color: rgba(255,107,107,0.4); }
+/* 색 조합 칩 — 마지막에 고른 옷에 색을 붙인다(`shirt` + 흰색 -> `white shirt`).
+   추천 썸네일과 달리 한 번 눌러 적용한다: 3~10개짜리 라벨 버튼이라 오클릭 위험이 없다. */
+.ia-combo-row { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 0 1px; }
+.ia-combo {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px 3px 6px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border-dim); background: var(--bg-elev-1);
+  color: var(--text-secondary); font-family: var(--font-display); font-size: 10.5px;
+}
+.ia-combo:hover { border-color: var(--accent); color: var(--text-primary); }
+.ia-combo.on {
+  border-color: transparent; color: #fff; font-weight: 700;
+  background: linear-gradient(135deg, #7c6aef, #a892f0);
+}
+.ia-combo-dot {
+  width: 11px; height: 11px; border-radius: 3px; flex: 0 0 11px;
+  border: 1px solid rgba(255,255,255,0.28);
+}
+/* 색이 아닌 수식어는 무늬로 보여준다 — 스와치 색을 정할 수 없다. */
+.ia-combo-dot.is-striped {
+  background: repeating-linear-gradient(45deg, #e8e8ee 0 3px, #4a4a55 3px 6px);
+}
+.ia-combo-dot.is-multicolored {
+  background: conic-gradient(#e05a5a, #e0c05a, #5ac06a, #5a9ae0, #a45ae0, #e05a5a);
+}
 .ia-axes-empty {
   padding: 18px 12px; text-align: center;
   font-family: var(--font-display); font-size: 12px; color: var(--text-dim);

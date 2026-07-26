@@ -15,8 +15,8 @@
 // 축 정의(팔레트/슬라이더/썸네일/탐색) — wildcards/thumb 에서 생성된 파생 모듈.
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
-  PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS,
-} from './interactiveAxes.mjs?v=20260726-ax77';
+  PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, CLOTH_COMBO, CLOTH_COMBO_REV,
+} from './interactiveAxes.mjs?v=20260726-ax79';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -870,6 +870,16 @@ export function createInteractivePanel({
     // 한 번 누르면 '살펴보기'(강조만), 한 번 더 누르면 적용한다.
     // 썸네일이 작아 오클릭이 잦은데 바로 프롬프트에 들어가면 되돌리기가 번거롭다.
     asideMount.addEventListener('click', ev => {
+      // 색 조합은 한 번 눌러 적용한다. 추천 썸네일의 두 번 클릭은 150칸 그리드에서
+      // 오클릭이 잦아 넣은 것인데, 색은 3~10개짜리 라벨 버튼이라 그럴 위험이 없다.
+      const c = ev.target.closest('[data-combo-mod]');
+      if (c) {
+        applyCombo(c.getAttribute('data-combo-base'), c.getAttribute('data-combo-mod'));
+        renderBlocks();
+        refreshAxisSections();
+        void renderAside();
+        return;
+      }
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
       const tag = b.getAttribute('data-advice-add');
@@ -939,6 +949,69 @@ export function createInteractivePanel({
   }
 
   /** 선택된 태그들의 조언을 모아 오른쪽에 그린다. */
+  // ---- 의상 색 조합 ----
+  // `_cloth_combo.json` 이 확정한 조합만 쓴다. 28색을 다 열면 `green shirt` 처럼 실측으로
+  // 확인되지 않은 태그를 권하게 된다 — 목록에 없는 색은 슬롯 입력창에 직접 쓰면 된다.
+  const COMBO_SWATCH = {
+    black: '#1b1b20', white: '#f2f2f4', red: '#c0392b', blue: '#2f6fc0', green: '#3a8f4e',
+    yellow: '#d8b933', pink: '#e08bb0', purple: '#8158b8', orange: '#d8853a', brown: '#7a5638',
+    grey: '#8a8a92', gray: '#8a8a92',
+  };
+  const COMBO_LABEL = {
+    black: '검정', white: '흰색', red: '빨강', blue: '파랑', green: '초록', yellow: '노랑',
+    pink: '분홍', purple: '보라', orange: '주황', brown: '갈색', grey: '회색', gray: '회색',
+    striped: '줄무늬', multicolored: '여러 색',
+  };
+
+  /** seed 태그의 (base, 현재 색). 조합 태그면 분해하고, 베이스면 색 없음으로 본다. */
+  function comboStateOf(tag) {
+    const t = String(tag || '');
+    const rev = (CLOTH_COMBO_REV || {})[t];
+    if (rev) return { base: rev[0], mod: rev[1] };
+    if ((CLOTH_COMBO || {})[t]) return { base: t, mod: '' };
+    return null;
+  }
+
+  function comboRowHtml(seedTag) {
+    const st = comboStateOf(seedTag);
+    if (!st) return '';
+    const mods = (CLOTH_COMBO || {})[st.base] || {};
+    const keys = Object.keys(mods);
+    if (!keys.length) return '';
+    const cells = keys.map(mod => {
+      const on = mod === st.mod;
+      const sw = COMBO_SWATCH[mod];
+      const chip = sw
+        ? `<span class="ia-combo-dot" style="background:${sw}"></span>`
+        : `<span class="ia-combo-dot is-${escHtml(mod)}"></span>`;
+      return `<button type="button" class="ia-combo${on ? ' on' : ''}"
+        data-combo-base="${escHtml(st.base)}" data-combo-mod="${escHtml(mod)}"
+        title="${escHtml(mods[mod])}">${chip}${escHtml(COMBO_LABEL[mod] || mod)}</button>`;
+    }).join('');
+    return '<div class="ia-aside-card"><div class="ia-aside-title">색·무늬' +
+      `<span class="ia-aside-count">${escHtml(st.base)}</span></div>` +
+      `<div class="ia-combo-row">${cells}</div>` +
+      (st.mod ? '<div class="ia-aside-hint soft">누르면 색을 뗍니다.</div>' : '') +
+      '</div>';
+  }
+
+  /** 색을 붙이거나(base -> `white shirt`) 바꾸거나 뗀다. 슬롯에서 한 자리만 차지한다. */
+  function applyCombo(base, mod) {
+    const mods = (CLOTH_COMBO || {})[base] || {};
+    const target = mods[mod];
+    if (!target) return;
+    const cur = currentTags();
+    const owned = new Set([base.toLowerCase(), ...Object.values(mods).map(t => t.toLowerCase())]);
+    const kept = cur.filter(t => !owned.has(t.toLowerCase()));
+    const wasOn = cur.some(t => t.toLowerCase() === target.toLowerCase());
+    const next = wasOn ? base : target;      // 같은 색을 다시 누르면 색만 뗀다
+    // 원래 자리를 지킨다 — 뒤에 붙이면 프롬프트 순서가 바뀌어 그림이 달라진다.
+    const at = cur.findIndex(t => owned.has(t.toLowerCase()));
+    kept.splice(at < 0 ? kept.length : at, 0, next);
+    setCurrentTags(kept);
+    lastPicked = next;
+  }
+
   async function renderAside() {
     const host = ensureAside();
     if (!panelContext) { host.classList.remove('open'); host.innerHTML = ''; return; }
@@ -1027,6 +1100,12 @@ export function createInteractivePanel({
     const seedLabel = seed ? seed.tag : '';
 
     const parts = [];
+    // 색 조합. `white shirt`(541,974) 처럼 `<색> <옷>` 은 분해해 뒀는데 색을 고를 곳이
+    // 없어서, 계층 탐색기가 유일한 경로였다. **마지막에 고른 옷 하나**에만 붙인다 —
+    // 슬롯 전체에 색 팔레트를 두면 shirt + skirt 를 고른 뒤 흰색을 눌렀을 때 어느 쪽이
+    // 흰색인지 정할 수 없다.
+    const colorRow = comboRowHtml(seedTag);
+    if (colorRow) parts.push(colorRow);
     if (clashes.length) {
       parts.push('<div class="ia-aside-card"><div class="ia-aside-title">같이 쓰지 않습니다' +
         `<span class="ia-aside-count">${clashes.length}</span></div>` +
@@ -1071,10 +1150,14 @@ export function createInteractivePanel({
     const box = panelMount.getBoundingClientRect();
     const W = 258, GAP = 12;
     const left = box.right + GAP;
+    // 떼기만 하고 다시 붙이지 않아서, 한 번 좁아지면 창을 넓혀도 플로트가 돌아오지
+    // 않았다(다음 renderAside 까지). 색 조합이 이 플로트에 있으니 옷 색을 고를 길이
+    // 아예 막힌다 — 들어갈 자리가 생기면 다시 붙인다.
     if (vw < 1280 || left + W > vw - 12) { asideMount.classList.remove('open'); return; }
     asideMount.style.left = left + 'px';
     asideMount.style.top = Math.max(12, box.top) + 'px';
     asideMount.style.bottom = Math.max(12, window.innerHeight - box.bottom) + 'px';
+    if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
   }
 
   function closePanel() {

@@ -20063,11 +20063,19 @@ body.detached-module .mod-grid-3 {
   border-color: var(--accent); background: rgba(124, 106, 239, 0.16);
   box-shadow: 0 0 0 1px var(--accent) inset;
 }
-.ia-aside-thumb.on span {
-  background: linear-gradient(135deg, #7c6aef, #a892f0);
-  color: #fff; font-weight: 700;
+.ia-aside-thumb.on img, .ia-aside-thumb.on .ia-aside-thumb-none {
+  position: relative;
 }
-.ia-aside-thumb.on span::before { content: '✓ '; }
+.ia-aside-thumb.on { position: relative; }
+.ia-aside-thumb.on::after {
+  content: '선택됨';
+  position: absolute; top: 3px; left: 3px;
+  padding: 1px 5px; border-radius: 4px;
+  background: linear-gradient(135deg, #7c6aef, #a892f0);
+  color: #fff; font-size: 8px; font-weight: 700;
+  font-family: var(--font-display); line-height: 1.3;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.35); pointer-events: none;
+}
 /* 한 번 누르면 라벨 자리가 버튼이 된다. 한 번 더 눌러야 실행된다. */
 .ia-aside-thumb.armed-on, .ia-aside-thumb.armed-off {
   box-shadow: 0 0 0 2px currentColor inset;
@@ -20267,11 +20275,17 @@ body.detached-module .mod-grid-3 {
 /* 선택된 셀은 누르지 않아도 캡션까지 강조한다 — 테두리만으로는 150칸 안에서
    찾기 어렵다는 실사용 지적. */
 .ia-cell.on { border: 2px solid var(--accent); background: rgba(124,106,239,0.14); }
-.ia-cell.on .ia-cell-cap {
+/* 캡션은 건드리지 않는다 — 그 자리는 '추가/제외' 버튼 전용이다.
+   선택은 테두리와 좌상단 배지로만 알린다. */
+.ia-cell.on .ia-cell-img::after {
+  content: '선택됨';
+  position: absolute; top: 4px; left: 4px;
+  padding: 2px 6px; border-radius: 5px;
   background: linear-gradient(135deg, #7c6aef, #a892f0);
-  color: #fff; font-weight: 700;
+  color: #fff; font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
+  font-family: var(--font-display); line-height: 1.3;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.35); pointer-events: none;
 }
-.ia-cell.on .ia-cell-cap::before { content: '✓ '; }
 /* 선택된 셀을 '제외' 로 무장하면 분홍이 이겨야 한다 — 보라 위에 보라를 덧대면
    무슨 상태인지 알 수 없다(실사용 지적). */
 .ia-cell.on.armed-off .ia-cell-cap {

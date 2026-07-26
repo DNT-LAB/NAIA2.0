@@ -82,8 +82,8 @@ enpera
 hair horns
 mohawk
 hair strand
-quad tails
 loose hair strand
+quad tails
 inverted bob
 front ponytail
 pompadour
@@ -171,14 +171,14 @@ hair dye
 heart hair bun
 disheveled
 hair floating upwards
-crew cut
 bald spot
+crew cut
 hair around ear
 ribbon hair
 sidelocks tied back
 hair tuft
-hair behind eyewear
 tri drills
+hair behind eyewear
 mechanical hair
 comb over
 flower-shaped hair

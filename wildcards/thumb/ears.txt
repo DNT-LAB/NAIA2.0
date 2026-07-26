@@ -53,8 +53,8 @@ hyena ears
 tapir ears
 ox ears
 hippopotamus ears
-zebra ears
 aardwolf ears
+zebra ears
 tasmanian devil ears
 anteater ears
 prairie dog ears
@@ -68,13 +68,13 @@ tamandua ears
 hamster ears
 elephant ears
 eevee ears
-antelope ears
 armadillo ears
+antelope ears
 ferret ears
 komainu ears
 unaligned ears
-pikachu ears
 lynx ears
+pikachu ears
 donkey ears
 skunk ears
 rhinoceros ears
@@ -85,8 +85,8 @@ colored inner animal ears
 badger ears
 fiery ears
 multiple animal ears
-lemur ears
 camel ears
+lemur ears
 porcupine ears
 mismatched animal ear colors
 ears up

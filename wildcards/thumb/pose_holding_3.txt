@@ -1,5 +1,3 @@
-holding pickaxe
-holding bow (music)
 holding sketchbook
 holding jar
 holding reins

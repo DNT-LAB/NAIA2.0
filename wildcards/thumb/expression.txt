@@ -9,18 +9,23 @@ light smile
 surprised
 crying with eyes open
 angry
+empty eyes
 serious
 pout
 smirk
 smug
 light frown
+rolling eyes
 laughing
 scared
 evil smile
 nervous
+blank eyes
 annoyed
+sparkling eyes
 sad
 sleepy
+half-closed eye
 wince
 shy
 streaming tears
@@ -28,20 +33,28 @@ nervous smile
 evil grin
 gloom (expression)
 scowl
+crazy eyes
 thinking
+narrowed eyes
+rubbing eyes
 grimace
+averting eyes
 confused
 worried
+upturned eyes
 false smile
 jealous
 doyagao
 happy tears
 crazy smile
 disgust
+unusually open eyes
 unamused
 excited
 exhausted
 blank stare
+eyelid pull
+covering one eye
 gesugao
 determined
 panicking
@@ -55,6 +68,7 @@ sad smile
 curious
 furious
 clueless
+evil eyes
 horrified
 tantrum
 despair

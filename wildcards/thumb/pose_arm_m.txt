@@ -9,10 +9,8 @@ locked arms
 hand on another's arm
 arms around neck
 hands on another's shoulders
-arm around waist
 hands on another's face
 hand on another's back
-hand on another's hip
 hand on another's chest
 arm hug
 hand in another's hair
@@ -21,8 +19,6 @@ arm around neck
 arm held back
 hands on another's head
 pokemon on head
-hand on another's waist
-hand on another's stomach
 heart hands duo
 hand on another's neck
 head on another's shoulder
@@ -30,10 +26,7 @@ pokemon on shoulder
 arm on another's shoulder
 guiding hand
 hands on another's cheeks
-arms around waist
-hands on another's hips
 hand on another's hand
-hands on another's thighs
 head on chest
 hand under shirt
 arm around back
@@ -43,10 +36,7 @@ hand on another's wrist
 arm on shoulder
 shoulder grab
 hands on another's back
-hands on another's stomach
-hands on another's waist
 heart hands failure
-head between thighs
 arm over shoulder
 head between pecs
 grabbing another's arm
@@ -63,7 +53,6 @@ paper on head
 hand around neck
 hand in another's clothes
 shoulder massage
-hand around waist
 hand over another's eyes
 grabbing another's shoulder
 hands on another's arm

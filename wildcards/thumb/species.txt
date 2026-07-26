@@ -121,12 +121,12 @@ chipmunk girl
 kappa
 qilin (mythology)
 seraph
-phoenix
 komainu
+phoenix
 dullahan
 dolphin girl
-rito
 orca girl
+rito
 jackal boy
 shadow (shadows house)
 kneeless mermaid
@@ -155,8 +155,8 @@ otter girl
 jaguar boy
 tiefling
 octopus boy
-shark boy
 halfling
+shark boy
 mantis girl
 genie
 satyr
@@ -170,14 +170,14 @@ mouse boy
 cerberus
 sheep boy
 cockroach girl
-cheetah girl
 ferret girl
-whale girl
-ghost girl
+cheetah girl
 deer boy
+ghost girl
+whale girl
+zebra girl
 snake girl
 slug girl
-zebra girl
 sphinx
 dryad
 capybara girl
@@ -188,24 +188,24 @@ donkey girl
 centipede girl
 gargoyle
 lich
-ant girl
 dinosaur boy
+ant girl
 giraffe girl
 futakuchi-onna
-stoat girl
 rhinoceros girl
+stoat girl
 chameleon girl
 jellyfish girl
-snail girl
 squid girl
+snail girl
 panther girl
-camel girl
 skunk girl
-axolotl girl
+camel girl
 chupacabra
+axolotl girl
 frog boy
-lynx girl
 crab girl
+lynx girl
 moose girl
 pig boy
 snake boy

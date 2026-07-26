@@ -36,7 +36,6 @@ holding frying pan
 holding riding crop
 holding shirt
 holding mop
-holding leg
 holding heart
 holding drumsticks
 holding pizza
@@ -49,7 +48,6 @@ holding shovel
 holding cross
 holding breath
 holding suitcase
-holding with feet
 holding map
 holding briefcase
 holding toothbrush
@@ -102,3 +100,5 @@ holding blanket
 holding whistle
 holding skewer
 holding own knot
+holding pickaxe
+holding bow (music)

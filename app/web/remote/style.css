@@ -20009,11 +20009,12 @@ body.detached-module .mod-grid-3 {
   background: rgba(255,255,255,0.03);
 }
 .ia-aside-thumb span {
-  font-family: var(--font-mono); font-size: 8.5px; line-height: 1.25;
-  color: var(--text-secondary); padding: 0 3px 4px;
+  font-family: var(--font-mono); font-size: 9.5px; line-height: 1.3;
+  color: #fff; background: rgba(0,0,0,0.55);
+  padding: 3px 4px 4px; width: 100%;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ia-aside-thumb:hover span { color: var(--text-primary); }
+.ia-aside-thumb:hover span { background: rgba(0,0,0,0.75); }
 
 .ia-aside-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .ia-aside-chip {

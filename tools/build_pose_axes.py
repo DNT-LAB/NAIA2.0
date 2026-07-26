@@ -182,27 +182,33 @@ def main() -> int:
                 key = "pose_leg"
             axes.setdefault(key + suffix, []).append(t)
         print(f"\n[{src}] {len(tags)}개 -> {len(axes)}축  (규칙·기본값행 {len(unmatched)})")
-        # 150 을 넘는 축은 빈도로 반 나눈다. `pose_action 395` 를 한 그리드에 넣으면
-        # 44스크롤이라 초보자가 끝까지 볼 수 없다. 이름은 `<축>_2`, 라벨에 ' 2' 를 붙여
-        # 자주 쓰는 쪽을 먼저 보게 한다.
-        split_extra = {}
-        for k in list(axes):
-            v = axes[k]
-            if len(v) <= 150:
-                continue
-            v.sort(key=lambda t: -freq_of(t))
-            n = -(-len(v) // 150)          # 150 이하가 되도록 필요한 조각 수
-            size = -(-len(v) // n)
-            axes[k] = v[:size]
-            for i in range(1, n):
-                split_extra[f"{k}_{i + 1}"] = v[i * size:(i + 1) * size]
-        axes.update(split_extra)
-        for k, v in sorted(axes.items(), key=lambda kv: -len(kv[1])):
-            mark = "  ⚠️150 초과" if len(v) > 150 else ""
-            print(f"  {k:22s} {len(v):4d}{mark}")
-            (OUT / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
-            all_axes[k] = v
-            total_written += len(v)
+        # 패스마다 쓰지 않고 합쳐 둔다. `expression_from_pose` 처럼 접미사가 안 붙는
+        # 축은 두 패스가 같은 파일을 노려서, 패스 안에서 쓰면 다인원이 솔로를 덮는다.
+        # 실제로 솔로 14개가 사라지고 `rolling eyes` 하나만 남아 있었다.
+        for k, v in axes.items():
+            all_axes.setdefault(k, []).extend(v)
+
+    # 150 을 넘는 축은 빈도로 반 나눈다. `pose_action 395` 를 한 그리드에 넣으면
+    # 44스크롤이라 초보자가 끝까지 볼 수 없다. 이름은 `<축>_2`, 라벨에 ' 2' 를 붙여
+    # 자주 쓰는 쪽을 먼저 보게 한다.
+    split_extra = {}
+    for k in list(all_axes):
+        v = all_axes[k]
+        if len(v) <= 150:
+            continue
+        v.sort(key=lambda t: -freq_of(t))
+        n = -(-len(v) // 150)          # 150 이하가 되도록 필요한 조각 수
+        size = -(-len(v) // n)
+        all_axes[k] = v[:size]
+        for i in range(1, n):
+            split_extra[f"{k}_{i + 1}"] = v[i * size:(i + 1) * size]
+    all_axes.update(split_extra)
+    print()
+    for k, v in sorted(all_axes.items(), key=lambda kv: -len(kv[1])):
+        mark = "  ⚠️150 초과" if len(v) > 150 else ""
+        print(f"  {k:22s} {len(v):4d}{mark}")
+        (OUT / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+        total_written += len(v)
 
     SUF = ("", "_2", "_3", "_m", "_m_2", "_m_3")
     frames = {k + s: fr for k, _l, fr, _s in AXIS_SPEC for s in SUF}

@@ -396,6 +396,14 @@ FACE_NSFW = [
     'shoulder blush', 'knee blush', 'full-body blush',
 ]
 AXES["expression"] = [t for t in EXPRESSION_EMOTION if t in raw]
+# 자세 분류에서 넘어온 눈 태그(rubbing eyes, averting eyes ...). 전신 축으로 갈 뻔한
+# 것을 build_pose_axes 가 얼굴 스케일로 돌려 `expression_from_pose.txt` 에 적어 둔다.
+# 여기서 합치지 않으면 파일만 있고 어느 축에도 안 속해 팩에서 통째로 빠진다.
+_FROM_POSE = Path("wildcards/thumb/expression_from_pose.txt")
+if _FROM_POSE.exists():
+    _extra = [l.strip() for l in _FROM_POSE.read_text(encoding="utf-8").splitlines() if l.strip()]
+    _seen = set(AXES["expression"])
+    AXES["expression"] += [t for t in _extra if t in raw and t not in _seen]
 AXES["expression_symbol"] = [t for t in EXPRESSION_SYMBOL if t in raw]
 AXES["face_shape"] = [t for t in FACE_SHAPE if t in raw]
 # facepaint 는 의도적 얼굴 무늬라 표식 축이 맞다(Codex 지적).

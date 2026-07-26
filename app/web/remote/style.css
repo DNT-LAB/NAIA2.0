@@ -20022,6 +20022,16 @@ body.detached-module .mod-grid-3 {
 .ia-cell.armed-off { border-color: #e0a83c; box-shadow: 0 0 0 2px #e0a83c inset; }
 .ia-cell.armed-off .ia-cell-cap { background: #8a6212; color: #fff; font-weight: 700; }
 
+/* `.ia-cell` 은 이미지와 캡션 사이에 gap:3px 을 둔다. 평소엔 카드 배경과 캡션이
+   둘 다 어두워 안 보이는데, 캡션이 초록·앰버가 되면 그 틈이 검은 띠로 드러났다.
+   armed 상태에서는 셀 배경도 같은 색으로 칠해 틈을 지운다. */
+.ia-cell.armed-on { border-color: #3ddc84; box-shadow: 0 0 0 2px #3ddc84 inset;
+                    background: #1e7a49; }
+.ia-cell.armed-on .ia-cell-cap { background: #1e7a49; color: #fff; font-weight: 700; }
+.ia-cell.armed-off { border-color: #e0a83c; box-shadow: 0 0 0 2px #e0a83c inset;
+                     background: #8a6212; }
+.ia-cell.armed-off .ia-cell-cap { background: #8a6212; color: #fff; font-weight: 700; }
+
 /* 지금 고른 것들과도 어울리는 추천 — 배경으로 구분한다.
    추천이 마지막 선택 하나를 기준으로 나오므로, 나머지와도 맞는 것은 더 안전한 선택이다. */
 .ia-aside-thumb.match {
@@ -20029,9 +20039,16 @@ body.detached-module .mod-grid-3 {
   background: rgba(126, 231, 179, 0.09);
 }
 .ia-aside-thumb.match span { background: rgba(18, 62, 44, 0.72); }
-/* 이미 넣은 것 — 목록에 남겨 되돌릴 수 있게 한다. */
-.ia-aside-thumb.on { border-color: var(--accent); }
-.ia-aside-thumb.on span { background: rgba(88, 72, 160, 0.8); }
+/* 이미 넣은 것 — 목록에 남겨 되돌릴 수 있게 하고, 누르지 않은 상태에서도
+   눈에 띄게 한다. 그리드가 최대 150칸이라 '내가 뭘 골랐더라'를 찾기 어렵다. */
+.ia-aside-thumb.on {
+  border-color: var(--accent); background: rgba(124, 106, 239, 0.16);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.ia-aside-thumb.on span {
+  background: var(--accent); color: #fff; font-weight: 700;
+}
+.ia-aside-thumb.on span::before { content: '✓ '; }
 /* 한 번 누르면 라벨 자리가 버튼이 된다. 한 번 더 눌러야 실행된다. */
 .ia-aside-thumb.armed-on, .ia-aside-thumb.armed-off {
   box-shadow: 0 0 0 2px currentColor inset;
@@ -20219,6 +20236,13 @@ body.detached-module .mod-grid-3 {
 }
 .ia-cell:hover { border-color: var(--accent); }
 .ia-cell.on { border: 2px solid var(--accent); background: rgba(124,106,239,0.14); }
+/* 선택된 셀은 누르지 않아도 캡션까지 강조한다 — 테두리만으로는 150칸 안에서
+   찾기 어렵다는 실사용 지적. */
+.ia-cell.on { border: 2px solid var(--accent); background: rgba(124,106,239,0.14); }
+.ia-cell.on .ia-cell-cap {
+  background: var(--accent); color: #fff; font-weight: 700;
+}
+.ia-cell.on .ia-cell-cap::before { content: '✓ '; }
 .ia-cell-img {
   display: block; aspect-ratio: 1; width: 100%; overflow: hidden;
   background: var(--bg-elevated); display: flex; align-items: center; justify-content: center;

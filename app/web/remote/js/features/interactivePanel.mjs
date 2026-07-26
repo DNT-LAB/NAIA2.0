@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260726-ax68';
+} from './interactiveAxes.mjs?v=20260726-ax70';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -885,8 +885,7 @@ export function createInteractivePanel({
         if (sp) sp.textContent = `${tag} ${on ? '제외' : '추가'}`;
         return;
       }
-      armedTag = null;
-      toggleTag(tag, { fromAside: true });
+      toggleTag(tag, { fromAside: true });   // armed 유지 — 바로 되돌릴 수 있게
     });
     return asideMount;
   }
@@ -1614,7 +1613,9 @@ export function createInteractivePanel({
             refreshAxisSections();
             return;
           }
-          armedTag = null; armedAxis = null;
+          // 실행 후에도 armed 를 유지한다. 방금 넣은 것 위에 바로 `제외` 가 떠서
+          // 오클릭을 그 자리에서 물릴 수 있다 — 오클릭은 직후에 알아차린다.
+          // 다른 셀을 누르거나 슬롯을 바꾸면 풀린다.
           pickThumb(ref, val);                                   // 조합 가능(+부모 태그 규칙)
         }
         else if (ax === 'palette') setMainColor(ref, val);       // 주 색상 = 항상 하나

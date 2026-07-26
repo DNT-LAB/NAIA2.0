@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260726-ax72';
+} from './interactiveAxes.mjs?v=20260726-ax73';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -1611,12 +1611,15 @@ export function createInteractivePanel({
           if (armedTag !== val || armedAxis !== ref) {
             armedTag = val; armedAxis = ref;
             refreshAxisSections();
+            ensureCellVisible(ref, val);   // '추가' 버튼이 잘려 안 보이면 끌어올린다
             return;
           }
           // 실행 후에도 armed 를 유지한다. 방금 넣은 것 위에 바로 `제외` 가 떠서
           // 오클릭을 그 자리에서 물릴 수 있다 — 오클릭은 직후에 알아차린다.
           // 다른 셀을 누르거나 슬롯을 바꾸면 풀린다.
           pickThumb(ref, val);                                   // 조합 가능(+부모 태그 규칙)
+          // 적용 뒤엔 같은 자리에 `제외` 가 뜬다. 그것도 보여야 되돌릴 수 있다.
+          setTimeout(() => ensureCellVisible(ref, val), 0);
         }
         else if (ax === 'palette') setMainColor(ref, val);       // 주 색상 = 항상 하나
         else if (ax === 'palette_extra') toggleExtraColor(ref, val);  // 추가 색상 = n개
@@ -1665,6 +1668,34 @@ export function createInteractivePanel({
     if (!on) return;
     const top = on.offsetTop - box.clientHeight / 2 + on.offsetHeight / 2;
     box.scrollTop = Math.max(0, top);
+  }
+
+  /** 방금 누른 셀이 스크롤 박스 안에 온전히 보이게 최소한만 움직인다.
+   *
+   *  한 번 누르면 캡션 자리가 `{태그} 추가` 버튼이 되는데, 그 셀이 박스 아래쪽에
+   *  걸쳐 있으면 정작 그 버튼이 잘려 안 보인다. 무엇을 누르라는 건지 알 수 없다.
+   *  화면 가운데로 끌어오지는 않는다 — 주변 셀을 훑던 시선이 끊긴다. */
+  function ensureCellVisible(axis, val) {
+    const box = panelMount.querySelector(`[data-scroll-ax="${cssEsc(axis)}"]`);
+    if (!box) return;
+    const cell = box.querySelector(`.ia-cell[data-val="${cssEsc(val)}"]`);
+    if (!cell) return;
+    const pad = 6;
+    const over = (cell.offsetTop + cell.offsetHeight + pad)
+      - (box.scrollTop + box.clientHeight);
+    const under = box.scrollTop - (cell.offsetTop - pad);
+    let next = box.scrollTop;
+    if (over > 0) next += over;
+    else if (under > 0) next -= under;
+    if (next !== box.scrollTop) {
+      box.scrollTop = Math.max(0, next);
+      thumbScroll.set(axis, box.scrollTop);   // 재렌더 때 되돌아가지 않게
+    }
+  }
+
+  /** querySelector 용 이스케이프. 태그에 따옴표·괄호가 들어간다(`pom pom (clothes)`). */
+  function cssEsc(v) {
+    return window.CSS && CSS.escape ? CSS.escape(v) : String(v).replace(/["\\]/g, '\\$&');
   }
 
   /** 축 영역만 다시 그린다 — 검색창/브라우저는 건드리지 않는다.

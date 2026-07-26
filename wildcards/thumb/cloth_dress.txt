@@ -32,3 +32,38 @@ skirt suit
 lace-trimmed dress
 turtleneck dress
 ribbed dress
+backless leotard
+impossible leotard
+side-tie leotard
+impossible dress
+turtleneck leotard
+sleeveless turtleneck leotard
+hooded robe
+tuxedo
+ribbed bodysuit
+cocktail dress
+pant suit
+ribbon-trimmed dress
+short jumpsuit
+romper
+shorts under dress
+pencil dress
+frilled leotard
+ribbed leotard
+gown
+hooded bodysuit
+two-sided dress
+tube dress
+athletic leotard
+tight dress
+onesie
+cross-laced dress
+coat dress
+hooded dress
+checkered dress
+vietnamese dress
+unitard
+bathrobe
+pinstripe suit
+hospital gown
+wardrobe error

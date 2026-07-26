@@ -475,7 +475,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20260609-scr
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260609-scrollfix1')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260726-cvthumbdel1')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,
@@ -890,7 +890,7 @@ let eventCorpusHandlers = null;
 let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260726-ia53')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260726-ia55')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,

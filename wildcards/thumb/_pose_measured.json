@@ -1,0 +1,23 @@
+{
+  "_note": [
+    "tools/query_tag_cooccurrence.py 로 원본 parquet 을 직접 쿼리한 결과를 고정한 것.",
+    "이벤트 프리셋 파티션(data/interactive_preset_facts.json)에 없거나 표본이 부족한",
+    "태그만 담는다. share = solo / (solo + multi).",
+    "기본 10샤드(65.6만건)로 돌렸고, 표본이 30건 미만인 6개만 30샤드(205.9만건)로 확장했다.",
+    "belly poke / holding head 는 205만건에서도 0회라 사실상 쓰이지 않는 태그로 보고 제외한다."
+  ],
+  "shards": 10,
+  "shards_extended": 30,
+  "verdict": {
+    "cheek pinching":  {"solo": 7,   "multi": 129, "share": 0.051, "slot": "global"},
+    "cheek pull":      {"solo": 12,  "multi": 69,  "share": 0.148, "slot": "global"},
+    "cheek press":     {"solo": 32,  "multi": 76,  "share": 0.296, "slot": "individual"},
+    "incoming hug":    {"solo": 82,  "multi": 10,  "share": 0.891, "slot": "individual"},
+    "hands in hair":   {"solo": 248, "multi": 49,  "share": 0.835, "slot": "individual"},
+    "hands on feet":   {"solo": 68,  "multi": 17,  "share": 0.800, "slot": "individual"},
+    "looking at hands":{"solo": 75,  "multi": 53,  "share": 0.586, "slot": "individual"},
+    "hanging legs":    {"solo": 5,   "multi": 46,  "share": 0.098, "slot": "global"},
+    "belly poke":      {"solo": 0,   "multi": 0,   "share": null,  "slot": "drop"},
+    "holding head":    {"solo": 0,   "multi": 0,   "share": null,  "slot": "drop"}
+  }
+}

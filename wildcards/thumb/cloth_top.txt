@@ -53,3 +53,50 @@ oversized shirt
 fur coat
 bomber jacket
 raincoat
+fishnet top
+untucked shirt
+hooded sweater
+two-sided jacket
+tight shirt
+cropped hoodie
+cropped vest
+bodice
+polo shirt
+straitjacket
+off-shoulder jacket
+hooded cardigan
+duffel coat
+hawaiian shirt
+sleeveless hoodie
+tented shirt
+sideless shirt
+denim jacket
+sleeveless coat
+jersey
+overcoat
+pinstripe shirt
+see-through jacket
+cropped sweater
+no jacket
+cardigan vest
+frilled jacket
+sukajan
+halter shirt
+long shirt
+parka
+long jacket
+kariyushi shirt
+hooded vest
+hooded track jacket
+fur-trimmed shirt
+fur jacket
+side-tie shirt
+metamoran vest
+cross-laced top
+sweater tucked in
+layered shirt
+single-shoulder shirt
+down jacket
+two-sided coat
+turtleneck jacket
+checkered shirt

@@ -20,7 +20,16 @@ from pathlib import Path
 from core.kr_tag_loader import load_kr_tag_records
 import core.interactive_browse_index as ib
 
-CUT = 2000
+# 절단선. 2000 으로 시작해 864장을 만든 뒤 500 으로 내렸다(사용자 승인, 2026-07-26).
+#
+# 처음에 "희귀 태그는 렌더가 불안정하다"를 근거로 들었는데 **틀렸다** — 특징 슬롯은
+# freq>=60 까지 열어서 잘 나왔다(`harvin` 같은 저빈도 종족도 렌더됐다).
+# 실제 제약은 품질이 아니라 분량과 그리드 크기다.
+#
+# 절단선별 생성 장수(실측): 2000->864 / 1000->1195 / 500->1536 / 200->2068 / 60->2955.
+# 200 까지 열면 액세서리 318·제복 203·모자 193 으로 세 축이 그리드 한도(150)를 넘어
+# 축 재분할이 선행돼야 한다. 500 은 액세서리 하나만 한도 근처라 그대로 감당된다.
+CUT = 500
 OUT = Path("wildcards/thumb")
 
 raw = load_kr_tag_records().raw
@@ -365,6 +374,34 @@ EXPLICIT = {
     # 기본이다. 격리해도 태그는 그대로 제공되므로 안전한 쪽을 택했다. 되돌리기 쉽다.
     "playboy bunny": "cloth_nsfw",
 
+    # ── 절단선 500 으로 내리며 들어온 500~2000 대역의 손배정 ──────────────
+    # 규칙이 freq>=2000 인구에 맞춰져 있어 41개가 샜다. 전량 확인해 배정했다.
+    "notched lapels": "cloth_detail", "low neckline": "cloth_detail",
+    "single strap": "cloth_detail", "multiple straps": "cloth_detail",
+    "low-cut armhole": "cloth_detail", "scoop neck": "cloth_detail",
+    "baggy clothes": "cloth_detail",
+    "bodice": "cloth_top", "sukajan": "cloth_top",
+    "tutu": "cloth_bottom",                    # 발레 스커트
+    "tuxedo": "cloth_dress", "pant suit": "cloth_dress",
+    "pinstripe suit": "cloth_dress",
+    "tankini": "cloth_swim",
+    "elbow sleeve": "cloth_sleeve",
+    "bib": "cloth_neck",                       # 목에 두른다
+    "dudou": "cloth_under",                    # 중국 전통 속옷 상의 (sarashi 와 같은 처리)
+    "stained clothes": "cloth_state", "paint on clothes": "cloth_state",
+    "biker clothes": "cloth_style",
+    "wrestling outfit": "cloth_uniform", "diving suit": "cloth_uniform",
+    "bikesuit": "cloth_uniform", "prison clothes": "cloth_uniform",
+    "singlet": "cloth_uniform",
+    "kappougi": "cloth_traditional", "german clothes": "cloth_traditional",
+    "greco-roman clothes": "cloth_traditional",
+    "ancient greek clothes": "cloth_traditional",
+    "uchikake": "cloth_traditional", "kesa": "cloth_traditional",
+    # 노출이 요지인 것 -> 격리
+    "virgin killer outfit": "cloth_nsfw",
+    # 유아복이지만 이 데이터셋에서는 페티시 태그로 쓰인다. 지우지 않고 격리한다.
+    "diaper": "cloth_nsfw",
+
     # ── Codex 2차 리뷰 반영 ──────────────────────────────────────────────
     # (1) 노출(성인)로 격리 — 노출 상태 자체가 태그의 요지다.
     "covered nipples": "cloth_nsfw", "topless": "cloth_nsfw",
@@ -397,6 +434,18 @@ EXCLUDE_REASON = {
     "traditional nun": "근접 중복(habit)",
     "casual one-piece swimsuit": "근접 중복(one-piece swimsuit)",
     "sleeveless sweater": "근접 중복(sweater vest)",
+
+    # 500 대역에서 나온 제외분.
+    "borrowed clothes": "원본 비교 필요",        # 다른 캐릭터의 옷을 빌린 모습
+    # 괄호가 없어 '작품·캐릭터 한정' 규칙이 못 잡는 것들.
+    "zero suit": "작품 고유 아이템",              # 메트로이드 사무스
+    "normal suit": "작품 고유 아이템",            # 건담 파일럿 슈트
+    "taimanin suit": "작품 고유 아이템",          # 대마인 시리즈
+    "okamisty": "작품 고유 아이템",               # 동방 미스티아 로렐라이
+    "clothes": "너무 넓은 총칭",                  # 설명이 "의복의 총칭"이다
+    "living clothes": "렌더 불가",                # "스스로 움직이고 말하는 옷"
+    # 데이터 오류: 태그명이 숫자 39 인데 설명은 훈도시다. NAI 에 39 를 넣어봐야 의미가 없다.
+    "39": "데이터 오류(태그명 손상)",
 }
 # `g-string`/`thong` 과 `turtleneck sweater`/`turtleneck` 도 근접 중복으로 지적됐지만
 # 남겼다 — 둘 다 고빈도 상용 태그이고 초보자가 속옷·상의를 고를 때 실제로 구분해서 찾는다.
@@ -466,6 +515,68 @@ POST_EXCLUDE = {
 }
 # `puffy sleeves`(우산 태그)와 `shawl` 은 Codex 제안을 받지 않았다 —
 # 전자는 고빈도이고 하위와 시각적으로 구분되며, 후자는 겉옷 축(신설)이 상의보다 맞다.
+
+
+
+# ── 액세서리 축 부위 재분할 ─────────────────────────────────────────────────
+# `cloth_accessory` 220개는 착용 부위가 7곳에 흩어져 있어 한 그리드로는 대부분이
+# 쓸모없는 썸네일이 된다(귀걸이를 cowboy shot 으로 찍는 것과 같다).
+# 의상 프리셋의 region6 매핑(`data/interactive_clothing_harmony.json`)을 근거로 쪼갠다.
+#
+# ⚠️ region6 를 그대로 믿으면 안 된다. `subgroup_fallback`(confidence 0.7)이
+# "accessories 서브그룹이니 일단 HEAD_NECK_FACE" 로 몰아넣어서 `bag`/`sash`/`obi`/
+# `backpack` 까지 머리·목·얼굴로 들어가 있었다(154개 중 122개). 근거가 태그 이름이나
+# 서브그룹 직결인 것만 쓰고, 나머지는 이름 규칙으로 보완한다.
+#
+# 끝까지 남는 83개(`bow`/`jewelry`/`ribbon`/`chain`/`gem`/`brooch`)는 매핑 실패가
+# 아니라 **부위 무관 장식**이다 — 리본은 머리에도 허리에도 붙는다. 이건 그대로 둔다.
+_ACC_REGION_AXIS = {
+    "HEAD_NECK_FACE": "cloth_hairacc",   # 귀걸이·헤드폰·머리핀
+    "ARMS_HANDS": "cloth_handwear",
+    "LEGS": "cloth_legwear",
+    "FEET": "cloth_footwear",
+    "UPPER_BODY": "cloth_detail",
+    "WAIST_HIP": "cloth_waist",          # 신설 — 벨트류가 갈 곳이 없었다
+    "CARRIED": "cloth_carried",          # 신설 — 가방은 착용물이 아니라 소지품이다
+}
+_ACC_NAME_RULES = (
+    ("CARRIED", re.compile(r"(bag|backpack|purse|satchel|briefcase|randoseru"
+                           r"|fanny pack|lanyard|umbrella)")),
+    ("ARMS_HANDS", re.compile(r"(bracelet|wrist|armlet|armband|arm|bangle"
+                              r"|^ring$|nail|glove|cuff)")),
+    ("WAIST_HIP", re.compile(r"(belt|sash|obi|waist|buckle|suspender|holster"
+                             r"|pouch|hip)")),
+    ("LEGS", re.compile(r"(anklet|thigh|leg|knee|garter)")),
+    ("FEET", re.compile(r"(foot|feet|toe|horseshoe)")),
+    ("HEAD_NECK_FACE", re.compile(r"(earring|ear|headphone|hair|head|tiara"
+                                  r"|crown|circlet|piercing|earphone)")),
+)
+
+
+def _split_accessory(axes: dict) -> None:
+    try:
+        harmony = json.loads(
+            Path("data/interactive_clothing_harmony.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return                              # 캐시가 없으면 재분할하지 않는다
+    region = harmony.get("region", {})
+    acc = list(axes.get("cloth_accessory", ()))
+    keep, moved = [], {}
+    for t in acc:
+        r = region.get(t)
+        if not r:
+            for name, pat in _ACC_NAME_RULES:
+                if pat.search(t):
+                    r = name
+                    break
+        dest = _ACC_REGION_AXIS.get(r or "")
+        if dest:
+            axes.setdefault(dest, []).append(t)
+            moved[t] = dest
+        else:
+            keep.append(t)                  # 부위 무관 장식
+    axes["cloth_accessory"] = keep
+    _split_accessory.moved = moved
 
 
 # ── 6. 조립 ────────────────────────────────────────────────────────────────
@@ -539,6 +650,7 @@ for _axis in list(AXES):
             _keep.append(t)
     AXES[_axis] = _keep
 
+_split_accessory(AXES)
 for k in AXES:
     AXES[k].sort(key=lambda t: -F(t))
 
@@ -554,6 +666,11 @@ if __name__ == "__main__":
     print(f"  배정: {sum(len(v) for v in AXES.values())}개 / {len(AXES)}축")
     for k, v in sorted(AXES.items(), key=lambda kv: -len(kv[1])):
         print(f"    {k:20s} {len(v):4d}")
+    _mv = getattr(_split_accessory, "moved", {})
+    if _mv:
+        print(f"  액세서리 재분할: {len(_mv)}개 이동, "
+              f"{len(AXES['cloth_accessory'])}개는 부위 무관 장식으로 유지")
+        print("    ", dict(Counter(_mv.values())))
     print(f"  미분류: {len(UNASSIGNED)}개")
     for t in sorted(UNASSIGNED, key=lambda x: -F(x))[:40]:
         print(f"    {t:34s} f={F(t):>8d} [{SUB.get(t,''):16s}] {D(t)[:34]}")

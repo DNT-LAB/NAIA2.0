@@ -47,6 +47,24 @@ for _t in _face_all:
 for _k in _groups:
     _groups[_k].sort(key=lambda t: -_F2(t))
 
+# ── 의상 탐색기 스코프 파생 ─────────────────────────────────────────────────
+# 의상 슬롯의 36개 서브그룹을 두 슬롯에 빠짐없이 나눈다. 손으로 나열하면 반드시 샌다
+# (실제로 19개 259개가 빠졌다 — 팬티 75·브라 45 포함).
+# 기준은 thumb_clothing_build.SUB_AXIS 의 축 배정이고, 매핑이 없는 서브그룹
+# (attire / 이관된 tan_marks·cosmetics / alternate·costume_props)은 '의상'으로 보낸다.
+import tools.thumb_clothing_build as _cb   # noqa: E402
+
+_GEAR_AXES = {"cloth_headwear", "cloth_hairacc", "cloth_neck", "cloth_eyewear",
+              "cloth_handwear", "cloth_sleeve", "cloth_legwear", "cloth_footwear",
+              "cloth_accessory", "cloth_armor"}
+_BROWSE_WEAR, _BROWSE_GEAR = [], []
+for _s in _idx2.subgroups("clothing"):
+    _dst = _GEAR_AXES.__contains__(_cb.SUB_AXIS.get(_s["id"], ""))
+    (_BROWSE_GEAR if _dst else _BROWSE_WEAR).append(_s["id"])
+_missing = ({s["id"] for s in _idx2.subgroups("clothing")}
+            - set(_BROWSE_WEAR) - set(_BROWSE_GEAR))
+assert not _missing, f"탐색기에서 빠진 서브그룹: {_missing}"
+
 # 슬롯 = 사용자가 인지하는 카테고리. 그 안에 축(팔레트/슬라이더/썸네일/탐색)을 배치한다.
 # 팝업이 축을 모아 보여주므로 좌측 슬롯 수를 늘리지 않는다.
 SLOTS = [
@@ -133,8 +151,10 @@ SLOTS = [
         ("thumb", "스타일·용도", "cloth_style"),
         ("thumb", "노출 의상(성인)", "cloth_nsfw"),
         # 썸네일이 freq>=2000 만 덮으므로 나머지 3,100개는 탐색기가 담당한다.
-        ("browse", "의상 전체", ["attire", "clothing_state", "fashion_style",
-                                "sexual_attire", "covering", "medical"]),
+        # ⚠️ 목록을 손으로 적었더니 36개 서브그룹 중 19개(259개, 팬티 75·브라 45 포함)가
+        #    빠져 탐색기에서 접근 불가가 됐다. 옛 의상 슬롯은 sections 가 없어 전체가
+        #    보였는데 섹션을 넣으면서 좁혀버린 것이다. 아래 _BROWSE_* 로 파생시킨다.
+        ("browse", "의상 전체", _BROWSE_WEAR),
     ]),
     ("소품·장식", "\\u{1F452}", "clothing", [
         ("thumb", "모자", "cloth_headwear"),
@@ -145,11 +165,13 @@ SLOTS = [
         ("thumb", "소매", "cloth_sleeve"),
         ("thumb", "다리", "cloth_legwear"),
         ("thumb", "신발", "cloth_footwear"),
-        ("thumb", "액세서리", "cloth_accessory"),
+        ("thumb", "허리", "cloth_waist"),
+        ("thumb", "소지품", "cloth_carried"),
+        # 부위가 정해지지 않는 장식(리본·보석·체인)만 남았다. 부위별 120개는
+        # 각 부위 축으로 옮겼다 — 근거는 의상 프리셋 region6 매핑.
+        ("thumb", "장식", "cloth_accessory"),
         ("thumb", "갑옷", "cloth_armor"),
-        ("browse", "소품 전체", ["accessories", "headwear", "hair_accessories",
-                                "neck_and_neckwear", "footwear", "legwear",
-                                "handwear", "eyewear", "mask", "armor", "sleeves"]),
+        ("browse", "소품 전체", _BROWSE_GEAR),
     ]),
 ]
 
@@ -201,6 +223,7 @@ _FRAMING_DEFAULT = {"tail": "full", "wings": "full", "body_type": "full",
                     "cloth_swim": "cowboy", "cloth_state": "cowboy",
                     "cloth_detail": "cowboy", "cloth_pattern": "cowboy",
                     "cloth_accessory": "cowboy", "cloth_dress": "cowboy",
+                    "cloth_waist": "cowboy", "cloth_carried": "cowboy",
                     "cloth_outer": "cowboy", "cloth_traditional": "cowboy",
                     "cloth_uniform": "cowboy", "cloth_style": "cowboy",
                     "cloth_armor": "cowboy", "cloth_nsfw": "explicit"}

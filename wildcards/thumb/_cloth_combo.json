@@ -111,6 +111,26 @@
   "mod": "green",
   "base": "dress"
  },
+ "multicolored bikini": {
+  "mod": "multicolored",
+  "base": "bikini"
+ },
+ "multicolored bodysuit": {
+  "mod": "multicolored",
+  "base": "bodysuit"
+ },
+ "multicolored bow": {
+  "mod": "multicolored",
+  "base": "bow"
+ },
+ "multicolored cape": {
+  "mod": "multicolored",
+  "base": "cape"
+ },
+ "multicolored coat": {
+  "mod": "multicolored",
+  "base": "coat"
+ },
  "multicolored dress": {
   "mod": "multicolored",
   "base": "dress"
@@ -119,9 +139,33 @@
   "mod": "multicolored",
   "base": "gloves"
  },
+ "multicolored hairband": {
+  "mod": "multicolored",
+  "base": "hairband"
+ },
  "multicolored jacket": {
   "mod": "multicolored",
   "base": "jacket"
+ },
+ "multicolored kimono": {
+  "mod": "multicolored",
+  "base": "kimono"
+ },
+ "multicolored leotard": {
+  "mod": "multicolored",
+  "base": "leotard"
+ },
+ "multicolored ribbon": {
+  "mod": "multicolored",
+  "base": "ribbon"
+ },
+ "multicolored scarf": {
+  "mod": "multicolored",
+  "base": "scarf"
+ },
+ "multicolored shirt": {
+  "mod": "multicolored",
+  "base": "shirt"
  },
  "multicolored skirt": {
   "mod": "multicolored",
@@ -211,17 +255,49 @@
   "mod": "striped",
   "base": "bowtie"
  },
+ "striped bra": {
+  "mod": "striped",
+  "base": "bra"
+ },
+ "striped coat": {
+  "mod": "striped",
+  "base": "coat"
+ },
  "striped dress": {
   "mod": "striped",
   "base": "dress"
+ },
+ "striped gloves": {
+  "mod": "striped",
+  "base": "gloves"
+ },
+ "striped hairband": {
+  "mod": "striped",
+  "base": "hairband"
+ },
+ "striped hoodie": {
+  "mod": "striped",
+  "base": "hoodie"
  },
  "striped jacket": {
   "mod": "striped",
   "base": "jacket"
  },
+ "striped kimono": {
+  "mod": "striped",
+  "base": "kimono"
+ },
+ "striped neckerchief": {
+  "mod": "striped",
+  "base": "neckerchief"
+ },
  "striped necktie": {
   "mod": "striped",
   "base": "necktie"
+ },
+ "striped one-piece swimsuit": {
+  "mod": "striped",
+  "base": "one-piece swimsuit"
  },
  "striped panties": {
   "mod": "striped",
@@ -247,6 +323,10 @@
   "mod": "striped",
   "base": "shirt"
  },
+ "striped shorts": {
+  "mod": "striped",
+  "base": "shorts"
+ },
  "striped skirt": {
   "mod": "striped",
   "base": "skirt"
@@ -254,6 +334,14 @@
  "striped socks": {
   "mod": "striped",
   "base": "socks"
+ },
+ "striped sweater": {
+  "mod": "striped",
+  "base": "sweater"
+ },
+ "striped vest": {
+  "mod": "striped",
+  "base": "vest"
  },
  "white apron": {
   "mod": "white",

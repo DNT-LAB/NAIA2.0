@@ -41,3 +41,35 @@ fur scarf
 magatama necklace
 pendant choker
 star necklace
+star choker
+carrot necklace
+loose bowtie
+bow choker
+checkered necktie
+mask around neck
+key necklace
+ribbon-trimmed collar
+bolo tie
+spiked choker
+tooth necklace
+undone necktie
+cross tie
+heart collar
+lace choker
+flower necklace
+cross choker
+frilled ascot
+frilled sailor collar
+floating scarf
+scarf over mouth
+anchor necklace
+shell necklace
+anchor choker
+fur-trimmed collar
+skull necklace
+flower choker
+lace-trimmed choker
+studded collar
+studded choker
+bib
+undone neck ribbon

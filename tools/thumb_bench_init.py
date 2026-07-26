@@ -174,6 +174,10 @@ CLOTH_BATCHES = {
     "cloth_detail":      (C_TORSO, 2.0, "cloth_torso"),
     "cloth_pattern":     (C_TORSO, 2.0, "cloth_torso"),
     "cloth_accessory":   (C_TORSO, 2.0, "cloth_torso"),
+    # 액세서리 축을 부위로 쪼개며 신설. 벨트는 허리, 가방은 손에 들거나 메므로
+    # 둘 다 cowboy shot 이면 프레임에 들어온다.
+    "cloth_waist":       (C_TORSO, 2.0, "cloth_torso"),
+    "cloth_carried":     (C_TORSO, 2.0, "cloth_torso"),
     "cloth_legwear":     (C_LOWER, 2.0, "cloth_lower"),
     "cloth_footwear":    (C_LOWER, 2.0, "cloth_lower"),
     "cloth_dress":       (C_OUTFIT, 2.0, "cloth_outfit"),
@@ -182,6 +186,15 @@ CLOTH_BATCHES = {
     "cloth_uniform":     (C_OUTFIT, 2.0, "cloth_outfit"),
     "cloth_style":       (C_OUTFIT, 2.0, "cloth_outfit"),
     "cloth_armor":       (C_OUTFIT, 2.0, "cloth_outfit"),
+    # Vision 검수에서 렌더되지 않은 태그를 다른 시드로 다시 돌리는 배치.
+    # 2026-07-26 예약 실행이 만들었는데 init 에 없어서 _bench.json 재생성 때
+    # 정의가 날아갔다. 프레이밍은 원래 축과 같게 두고 --seed 로만 바꾼다.
+    "_redo_cloth_portrait": (C_HEAD, 2.0, "cloth_head"),
+    "_redo_cloth_torso":    (C_TORSO, 2.0, "cloth_torso"),
+    "_redo_cloth_upper":    (C_UPPER, 2.0, "cloth_upper"),
+    # 작은 액세서리(귀걸이·반지·팔찌)가 cowboy shot 에서 안 보인다는 판단으로
+    # 만들어진 파일럿. 부위 재분할로 근본 해결됐지만 검증용으로 남긴다.
+    "_pilot_acc_portrait":  (C_HEAD, 2.0, "cloth_head"),
     # 파일럿 전용(축당 3장). 프레이밍 실패를 싸게 잡는다 — 특징 슬롯에서 파일럿 27장이
     # 축 단위 실패 3건을 잡아 수백 장을 절약했다.
     "_pilot_upper":      (C_UPPER, 2.0, "cloth_upper"),

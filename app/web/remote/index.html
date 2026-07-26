@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260724-nai-models2">
+<link rel="stylesheet" href="style.css?v=20260726-cvthumbdel1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -1119,6 +1119,7 @@
                   <label><input id="characterViewerContinuous" type="checkbox"> 연속 생성</label>
                   <label><input id="characterViewerEmptyOnly" type="checkbox" checked> 빈 썸네일만</label>
                   <label><input id="characterViewerNoSave" type="checkbox"> 이미지 저장 안함</label>
+                  <button type="button" class="character-viewer-btn character-viewer-thumb-delete-btn" id="characterViewerDeleteThumbBtn" title="현재 보고 있는 썸네일을 즉시 삭제합니다 (확인 없음)" disabled>DELETE</button>
                 </div>
                 <div class="character-viewer-generate-row">
                   <button type="button" class="character-viewer-generate" id="characterViewerGenerateBtn" disabled>Generate 896 x 1152</button>
@@ -1234,6 +1235,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260726-ia53"></script>
+<script src="app.js?v=20260726-ia55"></script>
 </body>
 </html>

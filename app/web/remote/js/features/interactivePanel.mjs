@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260726-ax70';
+} from './interactiveAxes.mjs?v=20260726-ax71';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -1650,7 +1650,10 @@ export function createInteractivePanel({
     host.querySelectorAll('[data-scroll-ax]').forEach(box => {
       const axis = box.dataset.scrollAx;
       const saved = thumbScroll.get(axis);
-      if (saved) box.scrollTop = saved;
+      // `if (saved)` 였다가 **scrollTop 0 이 falsy** 라서, 맨 위에 있을 때만
+      // 복원을 건너뛰고 scrollSelectedIntoView 가 돌았다. 첫 행 셀을 누르면
+      // 스크롤이 살짝 내려가는 버그의 원인이다.
+      if (saved !== undefined) box.scrollTop = saved;
       else scrollSelectedIntoView(box);      // 첫 렌더에 선택 항목이 있으면 거기로
       box.addEventListener('scroll', () => { thumbScroll.set(axis, box.scrollTop); }, {passive: true});
     });

@@ -20016,6 +20016,27 @@ body.detached-module .mod-grid-3 {
 }
 .ia-aside-thumb:hover span { background: rgba(0,0,0,0.75); }
 
+/* 지금 고른 것들과도 어울리는 추천 — 배경으로 구분한다.
+   추천이 마지막 선택 하나를 기준으로 나오므로, 나머지와도 맞는 것은 더 안전한 선택이다. */
+.ia-aside-thumb.match {
+  border-color: rgba(126, 231, 179, 0.5);
+  background: rgba(126, 231, 179, 0.09);
+}
+.ia-aside-thumb.match span { background: rgba(18, 62, 44, 0.72); }
+/* 이미 넣은 것 — 목록에 남겨 되돌릴 수 있게 한다. */
+.ia-aside-thumb.on { border-color: var(--accent); }
+.ia-aside-thumb.on span { background: rgba(88, 72, 160, 0.8); }
+/* 한 번 누르면 라벨 자리가 버튼이 된다. 한 번 더 눌러야 실행된다. */
+.ia-aside-thumb.armed-on, .ia-aside-thumb.armed-off {
+  box-shadow: 0 0 0 2px currentColor inset;
+}
+.ia-aside-thumb.armed-on { border-color: #3ddc84; color: #3ddc84; }
+.ia-aside-thumb.armed-on span { background: #1e7a49; color: #fff; font-weight: 700; }
+/* 제외는 앰버. 빨강은 오류를 뜻하는데 이건 사용자가 스스로 고른 것을 되돌리는 것이라
+   경고할 일이 아니다. */
+.ia-aside-thumb.armed-off { border-color: #e0a83c; color: #e0a83c; }
+.ia-aside-thumb.armed-off span { background: #8a6212; color: #fff; font-weight: 700; }
+
 .ia-aside-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .ia-aside-chip {
   font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);

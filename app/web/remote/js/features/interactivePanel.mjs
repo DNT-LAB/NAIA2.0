@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260726-ax63';
+} from './interactiveAxes.mjs?v=20260726-ax67';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -852,6 +852,8 @@ export function createInteractivePanel({
   });
 
   let asideMount = null;
+  let armedTag = null;    // 한 번 눌러 '살펴보기' 상태인 추천 칩
+  let lastPicked = '';    // 추천의 기준이 되는 마지막 선택 태그
   let asideSeq = 0;
   const adviceCache = new Map();
 
@@ -860,10 +862,29 @@ export function createInteractivePanel({
     asideMount = document.createElement('div');
     asideMount.className = 'ia-aside';
     document.body.appendChild(asideMount);
+    // 한 번 누르면 '살펴보기'(강조만), 한 번 더 누르면 적용한다.
+    // 썸네일이 작아 오클릭이 잦은데 바로 프롬프트에 들어가면 되돌리기가 번거롭다.
     asideMount.addEventListener('click', ev => {
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
-      toggleTag(b.getAttribute('data-advice-add'));
+      const tag = b.getAttribute('data-advice-add');
+      if (armedTag !== tag) {
+        armedTag = tag;
+        asideMount.querySelectorAll('.ia-aside-thumb')
+          .forEach(e => {
+            e.classList.remove('armed-on', 'armed-off');
+            const n = e.getAttribute('data-advice-add');
+            const sp = e.querySelector('span');
+            if (sp && n) sp.textContent = n;
+          });
+        const on = b.classList.contains('on');
+        b.classList.add(on ? 'armed-off' : 'armed-on');
+        const sp = b.querySelector('span');
+        if (sp) sp.textContent = `${tag} ${on ? '제외' : '추가'}`;
+        return;
+      }
+      armedTag = null;
+      toggleTag(tag, { fromAside: true });
     });
     return asideMount;
   }
@@ -890,14 +911,26 @@ export function createInteractivePanel({
 
   /** 추천 칩을 썸네일 셀로 그린다(2열). 팩에 이미지가 없으면 이름만 나온다. */
   function recThumbsHtml(list) {
-    return list.map(t => {
+    return list.map(o => {
+      const t = typeof o === 'string' ? o : o.tag;
+      const match = typeof o === 'object' && o.match;
       const axis = Object.keys(THUMB_TAGS).find(a => THUMB_TAGS[a].includes(t)) || '';
       const has = axis && (thumbHave.get(packAxisOf(axis)) || new Set()).has(t);
       const img = has
         ? `<img src="${escHtml(thumbUrl(axis, t))}" alt="" loading="lazy" decoding="async">`
         : '<span class="ia-aside-thumb-none"></span>';
-      return `<button type="button" class="ia-aside-thumb" data-advice-add="${escHtml(t)}"` +
-        ` title="${escHtml(t)}">${img}<span>${escHtml(t)}</span></button>`;
+      const on = typeof o === 'object' && o.on;
+      const armed = armedTag === t;
+      // 라벨 자리가 곧 버튼이다. 한 번 누르면 '추가/제외'로 바뀌고 한 번 더 눌러야 실행된다.
+      // 제외는 빨강이 아니라 앰버다 — 사용자가 스스로 고른 것을 되돌리는 것이지
+      // 오류가 아니라서 경고색을 쓸 이유가 없다.
+      const cls = 'ia-aside-thumb' + (match ? ' match' : '') + (on ? ' on' : '')
+        + (armed ? (on ? ' armed-off' : ' armed-on') : '');
+      const label = armed ? `${t} ${on ? '제외' : '추가'}` : t;
+      const tip = on ? `${t} — 이미 넣었습니다` :
+        (match ? `${t} — 지금 고른 것들과도 어울립니다` : t);
+      return `<button type="button" class="${cls}" data-advice-add="${escHtml(t)}"` +
+        ` title="${escHtml(tip)}">${img}<span>${escHtml(label)}</span></button>`;
     }).join('');
   }
 
@@ -952,22 +985,42 @@ export function createInteractivePanel({
     // 추천은 **부위별로 나눠** 보여준다. 점수 순 상위만 쓰면 같은 부위 변형이 줄줄이
     // 나온다 — `sweater` 를 고르면 ribbed/turtleneck/off-shoulder sweater 로 8칸이 찬다.
     // 서로 다른 부위를 보여줘야 다음에 뭘 고를지 알려주는 값이 있다.
-    const byRegion = new Map();
+    // 추천은 **마지막에 고른 태그** 하나를 기준으로 낸다.
+    // 선택한 것 전부의 추천을 합쳤더니 잡탕이 됐다 — `heart-shaped eyewear` + `bikini`
+    // + `bandage on face` 를 고르면 서로 무관한 것이 뒤섞여 무엇과 어울린다는 건지
+    // 알 수 없었다. 기준이 하나여야 "이것과 어울리는 것"이라는 말이 성립한다.
+    // 기준을 한 번 정하면 고정한다. "목록의 마지막"으로 폴백만 하면 플로트에서
+    // 추가할 때마다 그 태그가 기준이 되어 목록이 갈리고, 방금 넣은 것을 되돌릴 수 없다.
+    // 기준이 목록에서 빠졌을 때만(직접 지웠을 때) 다시 잡는다.
+    if (!lastPicked || !lower.has(lastPicked.toLowerCase())) {
+      lastPicked = tags[tags.length - 1];
+    }
+    const seedTag = lastPicked;
+    const seed = items.find(it => it.tag === seedTag) || items[items.length - 1];
+    // 나머지 선택분도 추천하는 것 = 옷 전체와 어울리는 것 -> 강조한다.
+    const others = new Set();
     for (const it of items) {
-      for (const g of (it.recommendGroups || [])) {
-        const cur = byRegion.get(g.label) || [];
-        for (const t of g.tags) {
-          if (lower.has(String(t).toLowerCase())) continue;
-          if (!cur.includes(t)) cur.push(t);
+      if (!it || it === seed) continue;
+      for (const t of (it.recommend || [])) others.add(String(t).toLowerCase());
+    }
+    const byRegion = new Map();
+    for (const g of (seed?.recommendGroups || [])) {
+      const cur = byRegion.get(g.label) || [];
+      for (const t of g.tags) {
+        // 이미 고른 것도 남긴다. 목록에서 빼면 '제외'로 되돌릴 방법이 없어진다.
+        if (!cur.some(x => x.tag === t)) {
+          cur.push({ tag: t, match: others.has(String(t).toLowerCase()),
+                     on: lower.has(String(t).toLowerCase()) });
         }
-        byRegion.set(g.label, cur);
       }
+      byRegion.set(g.label, cur);
     }
     const recGroups = [...byRegion.entries()]
       .filter(([, v]) => v.length)
       .sort((a, b) => b[1].length - a[1].length)
       .slice(0, 3)                       // 화면에는 3개 부위까지
       .map(([label, tags]) => ({ label, tags: tags.slice(0, 6) }));
+    const seedLabel = seed ? seed.tag : '';
 
     const parts = [];
     if (clashes.length) {
@@ -992,7 +1045,7 @@ export function createInteractivePanel({
     // 실제로 고를 것을 보여주는 쪽이 값이 크다. 데이터는 그대로 있으니 되살리기 쉽다.
     if (recGroups.length) {
       parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">함께 쓰는 것' +
-        `<span class="ia-aside-count">${recGroups.length}부위</span></div>` +
+        `<span class="ia-aside-count">${escHtml(seedLabel)} 기준</span></div>` +
         recGroups.map(g =>
           `<div class="ia-aside-group"><div class="ia-aside-group-label">${escHtml(g.label)}</div>` +
           `<div class="ia-aside-thumbs">${recThumbsHtml(g.tags)}</div></div>`).join('') +
@@ -1087,7 +1140,10 @@ export function createInteractivePanel({
       setTimeout(() => {
         if (panelContext !== ctx) return;                 // 슬롯 전환됨 — 새 편집이 관리
         const a = document.activeElement;
-        if (a && (panelMount.contains(a) || a.classList?.contains('ia-slot-input'))) return;
+        // 조언 플로트는 팝업 DOM 밖에 있어서(fixed 별도 마운트) 여기서 빼면
+        // 추천 칩을 누르는 순간 팝업이 닫힌다.
+        if (a && (panelMount.contains(a) || asideMount?.contains(a)
+                  || a.classList?.contains('ia-slot-input'))) return;
         // 자동완성 드롭다운(외부 #tagTooltip)과 상호작용 중이면 닫지 않는다.
         if (getAutocompleteTarget && getAutocompleteTarget() === ta) return;
         closePanel();
@@ -1679,9 +1735,13 @@ export function createInteractivePanel({
 
   /** 브라우저/추천에서의 클릭 = 토글. 있으면 제거, 없으면 추가.
    *  브라우저의 ✓(dupe) 판정이 대소문자 무시라, 제거 비교도 대소문자 무시로 맞춘다. */
-  function toggleTag(tag) {
+  function toggleTag(tag, opts = {}) {
     const normalized = String(tag || '').trim();
     if (!normalized) return;
+    // 조언 플로트의 추천 기준. **플로트에서 고를 때는 바꾸지 않는다** —
+    // 기준이 따라 움직이면 목록이 통째로 갈려서 방금 넣은 것을 되돌릴 수 없다.
+    // 기준은 그리드·탐색기에서 고른 것으로만 바뀐다.
+    if (!opts.fromAside) lastPicked = normalized;
     const current = currentTags();
     const lower = normalized.toLowerCase();
     const existing = current.find(t => t.toLowerCase() === lower);

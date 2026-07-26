@@ -43,9 +43,15 @@ AXIS_SPEC: list[tuple[str, str, str, tuple[str, ...]]] = [
      ("sitting", "standing", "lying", "kneeling", "crouching", "leaning",
       "posture_other", "location", "pose_surface", "pose_in_container",
       "pose_resting", "pose_acrobatic")),
-    ("pose_arm", "팔·다리 위치", "upper",
-     ("limb_arms", "limb_body", "limb_hands", "limb_legs",
-      "pose_arm_rest", "pose_feet_legs", "pose_between", "pose_on_body")),
+    # 팔과 다리를 한 축에 두면 프레이밍이 갈린다 — upper 로 찍으면 팔은 완벽한데
+    # (`arms up`/`outstretched arms`/`hands on own hips`) 다리는 프레임 밖이다.
+    # 실측: `legs apart` 는 아예 안 보였고 `spread legs`/`knees up` 은 하단에 걸렸다.
+    # 236개 중 67개(28%)가 다리 계열이라 나눈다.
+    ("pose_arm", "팔 위치", "upper",
+     ("limb_arms", "limb_body", "limb_hands",
+      "pose_arm_rest", "pose_between", "pose_on_body")),
+    ("pose_leg", "다리 위치", "full",
+     ("limb_legs", "pose_feet_legs")),
     ("pose_hand", "손짓", "portrait",
      ("gesture_hand_sign", "gesture_pointing", "gesture_arm_raise",
       "gesture_expressive", "gesture_other")),
@@ -95,9 +101,33 @@ FALLBACK: tuple[tuple[str, re.Pattern], ...] = (
     ("pose_clothing", re.compile(r"(clothes|clothing|shirt|skirt|dress|panties|bra)"
                                  r"\s*(lift|pull|tug|aside|grab|removed?)|undress|dressing")),
     ("pose_gaze", re.compile(r"looking|gaze|glance|eye contact")),
-    ("pose_arm", re.compile(r"\b(arm|arms|leg|legs|hand|hands|knee|foot|feet)\b")),
+    ("pose_leg", re.compile(r"\b(leg|legs|knee|knees|feet|foot|thigh|ankle|toe)\b"
+                            r"|straddl|spread legs")),
+    ("pose_arm", re.compile(r"\b(arm|arms|hand|hands|elbow|shoulder|wrist)\b")),
 )
+# subcategory 로는 팔 축에 갔지만 이름이 다리인 것들. 프레이밍이 갈리므로 옮긴다.
+RE_LEG_NAME = re.compile(r"\b(leg|legs|knee|knees|feet|foot|thigh|ankle|toe)\b"
+                         r"|straddl|spread legs")
 DEFAULT_AXIS = "pose_action"
+
+# ── 얼굴 스케일 태그를 전신 축에서 빼낸다 ───────────────────────────────────
+# pose_action 132장을 실제 크기로 검수하다 잡았다. 프리셋 subcategory 가
+# `activity_other` 인 것이 전부 pose_action(full) 으로 갔는데, 그중 눈·입 태그가
+# 섞여 있었다. 전신 프레이밍에서 눈은 몇 픽셀이라 아예 렌더되지 않는다 —
+# `empty eyes` / `wide-eyed` 는 태그가 무시되고 빗자루 든 일반 포즈가 나왔고,
+# `licking own lips` 와 `licking lips` 는 혀가 안 보이는 똑같은 앉은 자세였다.
+#
+# 판정은 **태그 이름**으로 한다. 설명으로 걸렀더니 `fishing` 이 "물고기"의
+# '물고' 에 걸리는 식으로 오탐이 났다.
+RE_NAME_EYE = re.compile(r"\b(eyes?|eyelid|pupil|iris|blink|wink|squint)\b")
+RE_NAME_MOUTH = re.compile(r"\b(lips?|tongue|mouth|teeth|tooth|yawn|lick|bite|biting"
+                           r"|drool|saliva|kiss|whistle|spit|vomit|chew|akanbe)\b")
+# 이름에 눈·입이 들어가도 전신 포즈인 것.
+FACE_KEEP = {"eye contact", "closed eyes", "eye beam", "spit take"}
+# 배설물·체액 계열은 성인 축이 담당한다.
+FACE_NSFW = {"urine in own mouth", "feces in own mouth", "cumshot in own mouth"}
+FACE_EYE_AXIS = "expression"        # 표정 슬롯의 감정 축으로 보낸다
+FACE_MOUTH_AXIS = "pose_mouth"      # 이미 portrait 프레이밍이다
 
 
 def main() -> int:
@@ -113,6 +143,7 @@ def main() -> int:
     for key, _label, _fr, subs in AXIS_SPEC:
         for sub in subs:
             sub_axis[sub] = key
+    FULL_AXES = {k for k, _l, fr, _s in AXIS_SPEC if fr == "full"}
 
     total_written = 0
     for src, suffix in (("pose_solo", ""), ("pose_multi", "_m")):
@@ -134,6 +165,20 @@ def main() -> int:
             if not key:
                 key = DEFAULT_AXIS
                 unmatched.append(t)
+            # 전신 축으로 갈 뻔한 얼굴 스케일 태그를 여기서 돌린다.
+            if key in FULL_AXES and t not in FACE_KEEP:
+                if t in FACE_NSFW:
+                    axes.setdefault("pose_nsfw_face", []).append(t)
+                    continue
+                if RE_NAME_EYE.search(t):
+                    # 눈은 인원과 무관하게 표정 슬롯이 담당한다(솔로/다인원 구분 없음).
+                    axes.setdefault(FACE_EYE_AXIS + "_from_pose", []).append(t)
+                    continue
+                if RE_NAME_MOUTH.search(t):
+                    key = FACE_MOUTH_AXIS   # suffix 는 아래에서 그대로 붙는다
+            # 팔 축(upper)에 다리 태그가 섞이면 프레임 밖으로 나간다.
+            if key == "pose_arm" and RE_LEG_NAME.search(t):
+                key = "pose_leg"
             axes.setdefault(key + suffix, []).append(t)
         print(f"\n[{src}] {len(tags)}개 -> {len(axes)}축  (규칙·기본값행 {len(unmatched)})")
         # 150 을 넘는 축은 빈도로 반 나눈다. `pose_action 395` 를 한 그리드에 넣으면

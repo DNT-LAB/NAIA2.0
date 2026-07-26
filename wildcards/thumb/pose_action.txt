@@ -4,15 +4,12 @@ sleeping
 wading
 walking
 pulling own clothes
-empty eyes
 wide-eyed
 reaching
 hugging object
 flying
 adjusting clothes
 running
-licking own lips
-licking lips
 jumping
 wind lift
 talking
@@ -23,26 +20,20 @@ animal on head
 tiptoes
 playing instrument
 tying hair
-blank eyes
-sparkling eyes
 weapon on back
 dancing
 playing card
-biting
 sheet grab
 singing
-weapon over shoulder
 falling
 adjusting headwear
 yawning
 pillow hug
-half-closed eye
 shouting
 taking picture
 falling leaves
 tail wagging
 cooking
-animal on shoulder
 playing games
 recording
 waking up
@@ -52,23 +43,19 @@ steepled fingers
 peeking out
 bubble blowing
 drawing
-biting own lip
 fingers together
 hair tucking
-crazy eyes
 swimming
 bird on head
 exercise
 hair twirling
 showering
 giving
-narrowed eyes
 writing
 pillow grab
 head back
 throwing
 hugging doll
-rubbing eyes
 playing with own hair
 petting
 driving
@@ -76,11 +63,9 @@ drawing (object)
 spread fingers
 praying
 smelling
-averting eyes
 spilling
 curtain grab
 drawing tablet
-upturned eyes
 horseback riding
 pulling
 spanked
@@ -93,22 +78,18 @@ tickling
 opening door
 pyrokinesis
 fishing
-unusually open eyes
 animal hug
 cheering
 incoming food
-bird on shoulder
 wiping face
 breathing fire
 falling feathers
-sword over shoulder
 talking on phone
 tripping
 painting (action)
 pouring onto self
 cheek press
 telekinesis
-brushing teeth
 action
 sword on back
 freediving
@@ -117,7 +98,6 @@ hair lift
 livestream
 untying
 thighhighs pull
-mouth pull
 dropping
 cat on head
 psychic
@@ -128,5 +108,12 @@ climbing
 picnic
 balancing
 lap pillow invitation
-eyelid pull
-covering one eye
+fanning self
+hydrokinesis
+squinting
+shopping
+laundry
+ruffling hair
+bunching hair
+toilet use
+struggling

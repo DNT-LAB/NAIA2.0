@@ -2,6 +2,7 @@ horns
 demon horns
 dragon horns
 single horn
+fake horns
 cow horns
 antlers
 curled horns
@@ -13,6 +14,7 @@ broken horn
 striped horns
 asymmetrical horns
 small horns
+fake antlers
 fiery horns
 uneven horns
 multicolored horns

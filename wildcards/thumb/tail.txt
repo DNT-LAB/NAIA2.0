@@ -6,6 +6,7 @@ rabbit tail
 demon tail
 multiple tails
 wolf tail
+fake tail
 dragon tail
 dog tail
 fish tail

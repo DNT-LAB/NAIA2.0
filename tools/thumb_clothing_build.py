@@ -654,6 +654,39 @@ _split_accessory(AXES)
 for k in AXES:
     AXES[k].sort(key=lambda t: -F(t))
 
+
+# ── 이관 실제 적용 ──────────────────────────────────────────────────────────
+# MOVED_OUT 은 "의상 축에서 뺀다"만 하고 목적지 축 파일에는 쓰지 않고 있었다.
+# 그래서 이관 52건 중 47건이 어느 축에도 없는 상태가 됐다 — 장부에는 이관인데
+# 실제로는 유실이다. 여기서 목적지 파일에 실제로 붙인다.
+#
+# `species_axes` 는 목적지가 하나가 아니라 태그별로 갈린다(뿔/날개/꼬리/귀).
+_SPECIES_DEST = {
+    "fake horns": "horns", "fake antlers": "horns",
+    "fake wings": "wings", "fake tail": "tail",
+    "fake animal ears": "ears", "fake antennae": "body_nonhuman",
+}
+
+
+def apply_moved_out() -> dict:
+    """이관 태그를 목적지 축 파일에 실제로 추가한다. 중복은 넣지 않는다."""
+    added = {}
+    for tag, dest in sorted(MOVED_OUT.items()):
+        if tag not in POOL:
+            continue
+        target = _SPECIES_DEST.get(tag, dest) if dest == "species_axes" else dest
+        f = OUT / (target + ".txt")
+        cur = ([l.strip() for l in f.read_text(encoding="utf-8").splitlines()
+                if l.strip()] if f.exists() else [])
+        if tag in cur:
+            continue
+        cur.append(tag)
+        cur.sort(key=lambda t: -F(t))
+        f.write_text("\n".join(cur) + "\n", encoding="utf-8")
+        added[target] = added.get(target, 0) + 1
+    return added
+
+
 if __name__ == "__main__":
     print(f"의상 풀 {len(POOL)}개 / 절단선 freq>={CUT}")
     print(f"  다른 슬롯으로: {len(MOVED_OUT)}개 "
@@ -671,6 +704,9 @@ if __name__ == "__main__":
         print(f"  액세서리 재분할: {len(_mv)}개 이동, "
               f"{len(AXES['cloth_accessory'])}개는 부위 무관 장식으로 유지")
         print("    ", dict(Counter(_mv.values())))
+    _added = apply_moved_out()
+    if _added:
+        print(f"  이관 실제 적용: {sum(_added.values())}개 {_added}")
     print(f"  미분류: {len(UNASSIGNED)}개")
     for t in sorted(UNASSIGNED, key=lambda x: -F(x))[:40]:
         print(f"    {t:34s} f={F(t):>8d} [{SUB.get(t,''):16s}] {D(t)[:34]}")

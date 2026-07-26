@@ -19952,6 +19952,80 @@ body.detached-module .mod-grid-3 {
 @media (max-width: 767px) {
   .ia-panel { top: auto; bottom: 60px; left: 4vw; right: 4vw; width: auto; max-height: 55dvh; }
 }
+/* --- 조언 플로트 (팝업 오른쪽) ---
+   그리드가 팝업 폭을 다 쓰고 오른쪽이 비어 있어, 전제조건·충돌·추천을 여기 띄운다.
+   팝업 안에 넣으면 그리드를 밀어내고, 아래에 붙이면 스크롤해야 보인다.
+   화면이 좁으면(플로트 자리가 안 나오면) 아예 표시하지 않는다 — 그리드가 우선이다. */
+.ia-aside {
+  position: fixed; top: 46px; bottom: 14px;
+  width: 258px; display: none; flex-direction: column; gap: 10px;
+  z-index: var(--z-floating-module); pointer-events: none;
+}
+.ia-aside.open { display: flex; }
+.ia-aside-card {
+  background: var(--bg-surface); border: 1px solid var(--border-glow);
+  border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  padding: 11px 12px 12px; pointer-events: auto;
+  display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+}
+.ia-aside-card.scroll { flex: 1; overflow-y: auto; }
+.ia-aside-title {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim);
+  display: flex; align-items: center; gap: 6px;
+}
+.ia-aside-count {
+  font-size: 9px; color: var(--text-dim); border: 1px solid var(--border-dim);
+  border-radius: 4px; padding: 1px 5px;
+}
+.ia-aside-empty { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+.ia-aside-hint {
+  font-size: 11.5px; line-height: 1.55; color: var(--text-primary);
+  background: rgba(255,255,255,0.03); border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0; padding: 7px 9px;
+}
+.ia-aside-hint.soft { border-left-color: var(--border-glow); color: var(--text-dim); }
+.ia-aside-warn {
+  font-size: 11.5px; line-height: 1.55; color: #ffb4b4;
+  background: rgba(255,80,80,0.07); border-left: 2px solid #ff6b6b;
+  border-radius: 0 6px 6px 0; padding: 7px 9px;
+}
+.ia-aside-group { display: flex; flex-direction: column; gap: 5px; }
+.ia-aside-group + .ia-aside-group { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border-dim); }
+.ia-aside-group-label {
+  font-size: 10px; color: var(--text-dim); letter-spacing: 0.4px;
+}
+/* 2열 — 플로트 폭 258px 에서 한 칸 약 112px. 그리드 썸네일(192px)보다 작지만
+   "이런 게 있다"를 알리는 용도라 이 크기로 충분하다. */
+.ia-aside-thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.ia-aside-thumb {
+  display: flex; flex-direction: column; gap: 3px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid var(--border-dim); border-radius: 7px;
+  overflow: hidden; text-align: center;
+}
+.ia-aside-thumb:hover { border-color: var(--accent); }
+.ia-aside-thumb img, .ia-aside-thumb-none {
+  width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+  background: rgba(255,255,255,0.03);
+}
+.ia-aside-thumb span {
+  font-family: var(--font-mono); font-size: 8.5px; line-height: 1.25;
+  color: var(--text-secondary); padding: 0 3px 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-aside-thumb:hover span { color: var(--text-primary); }
+
+.ia-aside-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.ia-aside-chip {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
+  border: 1px solid var(--border-dim); border-radius: 5px;
+  padding: 3px 7px; cursor: pointer; background: none; text-align: left;
+}
+.ia-aside-chip:hover { color: var(--text-primary); border-color: var(--accent); }
+.ia-aside-chip.on { color: var(--accent-glow); border-color: var(--accent); }
+.ia-aside-chip.bad { color: #ffb4b4; border-color: rgba(255,107,107,0.4); }
+@media (max-width: 1279px) { .ia-aside { display: none !important; } }
+
 .ia-panel-head {
   display: flex; align-items: center; gap: 8px;
   padding: 11px 14px 10px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0;

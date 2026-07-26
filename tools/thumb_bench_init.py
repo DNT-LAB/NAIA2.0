@@ -119,6 +119,9 @@ BATCHES = {
     "face_shape":        (HEAD, 2.5, "portrait"),    # 눈·입·눈썹 형태
     "expression_state":  (HEAD, 2.5, "portrait"),    # 홍조·눈물·침·땀 (상태 축 해체분)
     "body_condition":    (TORSO, 2.5, "cowboy"),     # 부상·붕대·오염 (상태 축 해체분)
+    # 다리·발 부상(붕대 발목/무릎/발)은 cowboy shot 에서 프레임 밖이다.
+    # 의상 축의 C_LOWER 와 같은 발상 — 하반신으로 내린다.
+    "body_condition_lower": (FULL, 2.5, "full"),
     "body_condition_portrait": (HEAD, 2.5, "portrait"),  # 얼굴 오염·부상
     "marking":           (TORSO, 2.5, "cowboy"),      # 팔·가슴·배 문신
     "marking_portrait":  (HEAD, 2.5, "portrait"),     # 귀 피어싱 / 얼굴 표식

@@ -169,6 +169,11 @@
       "weight": 2.5,
       "framing": "cowboy"
     },
+    "body_condition_lower": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, standing, <<VARY>>, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "full"
+    },
     "body_condition_portrait": {
       "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, bare shoulders, close-up, looking at viewer, nude, safe, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.5,

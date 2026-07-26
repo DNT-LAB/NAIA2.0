@@ -320,6 +320,10 @@ class TagDependencyIndex:
         self.strict = strict
         self._axis_of: dict[str, str] = {}
         for p in (axis_dir or AXIS_DIR).glob("*.txt"):
+            # 자세 목록(pose_solo/pose_multi/...)은 축이 아니다. 넣으면 전제조건
+            # 라벨에 `pose_solo` 같은 내부 이름이 그대로 새어나온다(실측 확인).
+            if p.stem.startswith("pose_") or p.stem.startswith("_"):
+                continue
             for line in p.read_text(encoding="utf-8").splitlines():
                 t = line.strip()
                 if t:

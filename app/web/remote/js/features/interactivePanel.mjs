@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260726-ax55';
+} from './interactiveAxes.mjs?v=20260726-ax61';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -668,6 +668,7 @@ export function createInteractivePanel({
     if (browse) browse.refreshDupes();   // 브라우저의 '있음' 표시 갱신(재요청 없음)
     // 직접 타이핑으로 축 값이 바뀐 경우에도 팔레트/슬라이더 선택 표시를 맞춘다.
     if (opts.fromInput) refreshAxisSections();
+    void renderAside();   // 오른쪽 조언 플로트 — 선택이 바뀔 때마다 다시 계산
     emitChange();
   }
 
@@ -805,6 +806,198 @@ export function createInteractivePanel({
     document.body.classList.add('interactive-editing');
     focusEditingInput();       // 슬롯 textarea 포커스(끝으로)
     positionPopup();           // 편집 슬롯 옆에 앵커
+    void renderAside();        // 오른쪽 조언 플로트
+  }
+
+
+  /** 받침 유무로 조사를 고른다. 한글 라벨(축 이름)에만 쓴다 — 영문 태그 뒤에는
+   *  발음을 따져야 해서(`tail 이` vs `set 이`) 아예 조사가 안 붙는 문장을 쓴다. */
+  function josa(word, withJong, withoutJong) {
+    const ch = String(word || '').trim().slice(-1);
+    const code = ch.charCodeAt(0);
+    if (!(code >= 0xac00 && code <= 0xd7a3)) return withoutJong;
+    return (code - 0xac00) % 28 ? withJong : withoutJong;
+  }
+
+  // ---- 조언 플로트 (팝업 오른쪽) ----
+  // 그리드가 팝업 폭을 다 쓰고 오른쪽이 비어 있어서 전제조건·충돌·추천을 거기 띄운다.
+  // 데이터는 /api/interactive-advice — 근거가 전부 실측이다(공식 tag implications +
+  // 의상 프리셋 gsq_1girl_solo 파티션 통계).
+  // 창 크기가 바뀌면 팝업·플로트 좌표가 어긋난다(둘 다 fixed + 인라인 좌표).
+  // 원래 리사이즈 대응이 아예 없어서 팝업이 화면 밖으로 나가기도 했다.
+  window.addEventListener('resize', () => {
+    if (!panelContext) return;
+    positionPopup();
+    positionAside();
+  });
+
+  let asideMount = null;
+  let asideSeq = 0;
+  const adviceCache = new Map();
+
+  function ensureAside() {
+    if (asideMount && document.body.contains(asideMount)) return asideMount;
+    asideMount = document.createElement('div');
+    asideMount.className = 'ia-aside';
+    document.body.appendChild(asideMount);
+    asideMount.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-advice-add]');
+      if (!b) return;
+      toggleTag(b.getAttribute('data-advice-add'));
+    });
+    return asideMount;
+  }
+
+  async function fetchAdvice(tags) {
+    const want = tags.filter(t => !adviceCache.has(t));
+    if (want.length) {
+      try {
+        const r = await fetch('/api/interactive-advice/batch?tags=' +
+          encodeURIComponent(want.slice(0, 40).join(',')));
+        const j = await r.json();
+        (j.items || []).forEach(it => adviceCache.set(it.tag, it));
+      } catch { want.forEach(t => adviceCache.set(t, null)); }
+    }
+    return tags.map(t => adviceCache.get(t)).filter(Boolean);
+  }
+
+  function chipsHtml(list, cls) {
+    const cur = new Set(currentTags().map(x => x.toLowerCase()));
+    return list.map(t =>
+      `<button type="button" class="ia-aside-chip ${cur.has(String(t).toLowerCase()) ? 'on' : (cls || '')}"` +
+      ` data-advice-add="${escHtml(t)}">${escHtml(t)}</button>`).join('');
+  }
+
+  /** 추천 칩을 썸네일 셀로 그린다(2열). 팩에 이미지가 없으면 이름만 나온다. */
+  function recThumbsHtml(list) {
+    return list.map(t => {
+      const axis = Object.keys(THUMB_TAGS).find(a => THUMB_TAGS[a].includes(t)) || '';
+      const has = axis && (thumbHave.get(packAxisOf(axis)) || new Set()).has(t);
+      const img = has
+        ? `<img src="${escHtml(thumbUrl(axis, t))}" alt="" loading="lazy" decoding="async">`
+        : '<span class="ia-aside-thumb-none"></span>';
+      return `<button type="button" class="ia-aside-thumb" data-advice-add="${escHtml(t)}"` +
+        ` title="${escHtml(t)}">${img}<span>${escHtml(t)}</span></button>`;
+    }).join('');
+  }
+
+  /** 선택된 태그들의 조언을 모아 오른쪽에 그린다. */
+  async function renderAside() {
+    const host = ensureAside();
+    if (!panelContext) { host.classList.remove('open'); host.innerHTML = ''; return; }
+    const tags = currentTags();
+    const seq = ++asideSeq;
+    if (!tags.length) {
+      host.classList.add('open');
+      host.innerHTML = '<div class="ia-aside-card"><div class="ia-aside-title">도움말</div>' +
+        '<div class="ia-aside-empty">태그를 고르면 필요한 것과 어울리는 조합을 여기에 보여줍니다.</div></div>';
+      positionAside();
+      return;
+    }
+    const items = await fetchAdvice(tags);
+    if (seq !== asideSeq || !panelContext) return;   // 그 사이 슬롯이 바뀌었다
+
+    // 전제조건 — 아직 안 고른 축만 알린다. 이미 골랐으면 안내할 이유가 없다.
+    const chosenAxes = new Set();
+    for (const t of tags) {
+      for (const [ax, list] of Object.entries(THUMB_TAGS)) {
+        if (list.includes(t)) chosenAxes.add(ax);
+      }
+    }
+    // `...r` 를 뒤에 펼치면 r.tag(부모 태그)가 it.tag(고른 태그)를 덮어써서
+    // "skirt lift 가 필요합니다" 대신 "skirt 가 필요합니다" 로 나온다. source 로 분리한다.
+    const needs = [];
+    const needSeen = new Set();
+    for (const it of items) {
+      for (const r of (it.requires || [])) {
+        if (chosenAxes.has(r.axis)) continue;
+        const key = r.axis + '|' + it.tag;
+        if (needSeen.has(key)) continue;      // 같은 축을 두 번 안내하지 않는다
+        needSeen.add(key);
+        needs.push({ axis: r.axis, label: r.label, strong: r.strong, source: it.tag });
+      }
+    }
+    // 충돌 — 전용 엔드포인트로 묻는다.
+    // 태그별 conflict 목록은 화면용으로 12개까지만 잘라 보내므로, 그걸로 교집합을
+    // 구하면 잘린 뒤쪽 쌍을 놓친다(실측: china dress + skirt set 이 안 잡혔다).
+    const lower = new Set(tags.map(x => x.toLowerCase()));
+    let clashes = [];
+    try {
+      const cr = await fetch('/api/interactive-advice/conflicts?tags=' +
+        encodeURIComponent(tags.slice(0, 40).join(',')));
+      const cj = await cr.json();
+      clashes = (cj.pairs || []).map(p => [p.a, p.b]);
+    } catch { clashes = []; }
+    if (seq !== asideSeq || !panelContext) return;
+    // 추천은 **부위별로 나눠** 보여준다. 점수 순 상위만 쓰면 같은 부위 변형이 줄줄이
+    // 나온다 — `sweater` 를 고르면 ribbed/turtleneck/off-shoulder sweater 로 8칸이 찬다.
+    // 서로 다른 부위를 보여줘야 다음에 뭘 고를지 알려주는 값이 있다.
+    const byRegion = new Map();
+    for (const it of items) {
+      for (const g of (it.recommendGroups || [])) {
+        const cur = byRegion.get(g.label) || [];
+        for (const t of g.tags) {
+          if (lower.has(String(t).toLowerCase())) continue;
+          if (!cur.includes(t)) cur.push(t);
+        }
+        byRegion.set(g.label, cur);
+      }
+    }
+    const recGroups = [...byRegion.entries()]
+      .filter(([, v]) => v.length)
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, 3)                       // 화면에는 3개 부위까지
+      .map(([label, tags]) => ({ label, tags: tags.slice(0, 6) }));
+
+    const parts = [];
+    if (clashes.length) {
+      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">같이 쓰지 않습니다' +
+        `<span class="ia-aside-count">${clashes.length}</span></div>` +
+        clashes.map(([a, b]) =>
+          `<div class="ia-aside-warn">${escHtml(a)} + ${escHtml(b)}<br>실제 이미지에서 함께 쓰인 적이 없습니다.</div>`).join('') +
+        '</div>');
+    }
+    if (needs.length) {
+      const strong = needs.filter(n => n.strong);
+      const soft = needs.filter(n => !n.strong);
+      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">필요한 것' +
+        `<span class="ia-aside-count">${needs.length}</span></div>` +
+        strong.map(n => `<div class="ia-aside-hint"><code>${escHtml(n.source)}</code>` +
+          ` — <b>${escHtml(n.label)}</b>${josa(n.label, '을', '를')} 함께 골라야 제대로 나옵니다.</div>`).join('') +
+        soft.map(n => `<div class="ia-aside-hint soft"><code>${escHtml(n.source)}</code>` +
+          ` — ${escHtml(n.label)}${josa(n.label, '을', '를')} 함께 고르면 더 잘 나옵니다.</div>`).join('') +
+        '</div>');
+    }
+    // '잘 안 어울립니다'(비권장)는 뺐다 — 초보자에게 하지 말라는 목록은 부담만 주고,
+    // 실제로 고를 것을 보여주는 쪽이 값이 크다. 데이터는 그대로 있으니 되살리기 쉽다.
+    if (recGroups.length) {
+      parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">함께 쓰는 것' +
+        `<span class="ia-aside-count">${recGroups.length}부위</span></div>` +
+        recGroups.map(g =>
+          `<div class="ia-aside-group"><div class="ia-aside-group-label">${escHtml(g.label)}</div>` +
+          `<div class="ia-aside-thumbs">${recThumbsHtml(g.tags)}</div></div>`).join('') +
+        '</div>');
+    }
+    if (!parts.length) {
+      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">도움말</div>' +
+        '<div class="ia-aside-empty">이 조합에 대해 알려드릴 것이 없습니다. 그대로 쓰셔도 됩니다.</div></div>');
+    }
+    host.classList.add('open');
+    host.innerHTML = parts.join('');
+    positionAside();
+  }
+
+  /** 팝업 오른쪽에 붙인다. 자리가 안 나오면 숨긴다 — 그리드가 우선이다. */
+  function positionAside() {
+    if (!asideMount) return;
+    const vw = window.innerWidth;
+    const box = panelMount.getBoundingClientRect();
+    const W = 258, GAP = 12;
+    const left = box.right + GAP;
+    if (vw < 1280 || left + W > vw - 12) { asideMount.classList.remove('open'); return; }
+    asideMount.style.left = left + 'px';
+    asideMount.style.top = Math.max(12, box.top) + 'px';
+    asideMount.style.bottom = Math.max(12, window.innerHeight - box.bottom) + 'px';
   }
 
   function closePanel() {
@@ -815,6 +1008,7 @@ export function createInteractivePanel({
     panelContext = null;
     panelMount.classList.remove('open');
     panelMount.innerHTML = '';
+    if (asideMount) { asideMount.classList.remove('open'); asideMount.innerHTML = ''; }
     panelMount.style.top = panelMount.style.left = panelMount.style.width = '';
     renderBlocks();            // 편집 중이던 슬롯을 칩으로 되돌린다
   }
@@ -889,11 +1083,12 @@ export function createInteractivePanel({
 
   /** 팝업을 슬롯 목록 오른쪽(공간 없으면 화면 안으로 clamp)에 앵커한다.
    *
-   *  상단은 '편집 중인 슬롯'이 아니라 '그 캐릭터의 첫 슬롯(머리)'을 기준으로 잡는다.
-   *  아래쪽 슬롯을 열면 시작점이 그만큼 내려가 팝업이 짧아지고, 썸네일 그리드처럼
-   *  키가 큰 내용에서 바닥이 화면 밖으로 잘렸다.
-   *  하단은 CSS 기본값(bottom:14px)을 유지한다 — bottom:auto 로 두면 높이가 내용만큼
-   *  무한정 늘어나 .ia-panel-body 의 flex:1 + overflow-y:auto 가 스크롤을 만들지 못한다.
+   *  **세로 위치는 슬롯을 따라가지 않고 화면 상단에 고정한다.**
+   *  처음에는 편집 중인 슬롯에 맞췄다가, 아래쪽 슬롯을 열면 팝업이 그만큼 짧아져
+   *  바닥이 잘렸다. 그래서 '그 캐릭터의 첫 슬롯' 기준으로 바꿨는데, 캐릭터가 여러 명이면
+   *  두 번째 캐릭터부터 여전히 아래에서 시작하고 위쪽 공간이 통째로 비었다.
+   *  높이를 최대로 쓰는 것이 그리드에 이득이라 세로는 CSS 기본값(top:46px/bottom:14px)에
+   *  맡기고, 여기서는 가로만 잡는다.
    */
   function positionPopup() {
     const el = editingEl();
@@ -908,13 +1103,9 @@ export function createInteractivePanel({
     const host = blocksMount.getBoundingClientRect();
     let left = host.right + 12;
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
-    // 같은 캐릭터 블록의 첫 슬롯 = 시작점. 못 찾으면 슬롯 목록 상단으로 폴백.
-    const firstSlot = blocksMount.querySelector(
-      `.ia-sub-block[data-cid="${panelContext?.cid}"]`) || el;
-    const anchor = firstSlot.getBoundingClientRect();
     panelMount.style.width = W + 'px';
     panelMount.style.left = left + 'px';
-    panelMount.style.top = Math.max(12, anchor.top) + 'px';
+    panelMount.style.top = '';      // CSS 기본값(46px) — 항상 상단에서 시작한다
     panelMount.style.bottom = '';
   }
 

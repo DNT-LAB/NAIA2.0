@@ -15,6 +15,7 @@ from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.extension_install_routes import register_extension_install_routes
 from app.backend.server.font_routes import register_font_routes
 from app.backend.server.interactive_thumbnail_routes import register_interactive_thumbnail_routes
+from app.backend.server.interactive_advice_routes import register_interactive_advice_routes
 from app.backend.server.generation_commands import register_generation_rest_routes
 from app.backend.server.sequence_preset_routes import register_sequence_preset_routes
 from app.backend.server.generation_runner import ensure_generation_runner
@@ -173,6 +174,7 @@ def register_headless_routes(
         start_generation_runner=ensure_generation_runner,
     )
     register_interactive_thumbnail_routes(app, context)
+    register_interactive_advice_routes(app, context)
     register_character_viewer_routes(
         app,
         context,

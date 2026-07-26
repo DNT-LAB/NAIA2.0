@@ -4,6 +4,7 @@ cat ears
 animal ear fluff
 rabbit ears
 fox ears
+fake animal ears
 horse ears
 wolf ears
 extra ears

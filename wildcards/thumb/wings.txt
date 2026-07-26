@@ -20,6 +20,7 @@ mechanical wings
 multiple wings
 multicolored wings
 energy wings
+fake wings
 transparent wings
 large wings
 hair wings

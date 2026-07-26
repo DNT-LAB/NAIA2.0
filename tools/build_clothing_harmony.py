@@ -44,8 +44,8 @@ AXIS_DIR = Path("wildcards/thumb")
 OUT = Path("data/interactive_clothing_harmony.json")
 
 CONFLICT_MIN = 0.9      # exclusion_score
-REC_TOP = 8             # 시드당 추천 개수
-AVOID_TOP = 5           # 시드당 비권장 개수
+REC_TOP = 30           # 시드당 추천 후보 (부위별로 나눠 보여주므로 풀이 넓어야 한다)
+AVOID_TOP = 5           # 비권장은 화면에서 뺐지만 데이터는 남긴다
 REGION_LABEL_KO = {
     "HEAD_NECK_FACE": "머리·목·얼굴", "UPPER_BODY": "상체", "ARMS_HANDS": "팔·손",
     "WAIST_HIP": "허리·엉덩이", "LEGS": "다리", "FEET": "발",

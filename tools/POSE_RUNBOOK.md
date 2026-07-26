@@ -40,14 +40,54 @@
 | `pose_action_m` | 통과. 60칸 중 약 5개만 약함(imagining/peeking/twitching — 그림으로 표현이 안 되는 것) |
 | `pose_face_touch` | 재분할로 해소 (아래) |
 
-### 남은 문제 — `pose_display` 는 프레이밍이 아니라 분류다
+### 남은 문제 — `pose_display` 에 성격·유형(persona)이 섞였다
 
-`tomboy` · `tsundere` · `jimiko` · `mesugaki` 는 **자세가 아니라 캐릭터 유형**이라
-기본 그림과 구분이 안 된다. 다시 찍어서 해결되지 않는다 — 축에서 빼야 한다.
-그 외에 `have to pee` · `shaking head` · `hobble` · `object floating above hand` ·
-`spread navel` · `spread armpit` 도 렌더가 안 된다(약 12/55).
+⚠️ **첫 판정은 틀렸다.** "`tomboy`/`tsundere`/`jimiko`/`mesugaki` 는 렌더가 안 되고
+기본 그림과 구분이 안 된다"고 적었는데, 원본을 열어 보니 **제대로 나온다**:
 
-**결정 대기**: 이 태그들을 자세 썸네일에서 빼고 탐색기로만 노출할지.
+- `jimiko` — 검은 뿔테 + 단정한 단발 + 홍조 + 뒷짐. 지미코 원형 그대로
+- `mesugaki` — 반쯤 감은 내려보는 눈 + 도발적 웃음 + 트윈테일 + 앞으로 기운 자세
+
+**192px 컨택트 시트에서 봤기 때문에 "그냥 여자애"로 읽혔다.** 축소본으로 판정하면
+안경·표정 같은 작은 신호가 사라진다 — 의심스러우면 원본을 열어야 한다.
+
+그러니 문제는 렌더가 아니라 **소속**이다. 성격은 자세가 아니다.
+태그 DB 는 이미 `Expression_Action/personality` 로 17개를 분류해 두었는데,
+내 fallback 이 이것들을 자세로 쓸어넣었다:
+
+| 태그 | freq | 지금 위치 | solo 비율(실측) |
+|---|---|---|---|
+| `assertive female` | 5,866 | pose_display_m | 0.02 |
+| `tomboy` | 4,069 | pose_display | 0.57 |
+| `female pervert` | 2,808 | pose_display_m | 0.13 |
+| `tsundere` | 2,342 | pose_display | 0.36 |
+| `jimiko` | 1,056 | pose_display | 0.65 |
+| `chuunibyou` | 679 | pose_display | 0.54 |
+| `mesugaki` | 638 | pose_display | 0.59 |
+| `messy sleeper` · `clumsy` | 201 · 123 | pose_display | 0.20 · 0.53 |
+| `muscular uke` | 210 | pose_drop | — |
+| `ptsd`·`hikikomori`·`unaware`·`glutton`·`age conscious`·`kuudere` | 57~94 | **어디에도 없음** | — |
+
+다인원 배정(`assertive female` 등 solo 비율 0.02~0.13)은 실측 근거가 있다 —
+그 성격은 상대가 있는 장면에서 쓰인다. **인원 분류가 틀린 게 아니라 축이 틀렸다.**
+
+관련 태그가 다른 곳에도 있다: `gyaru`(8,477)는 `cloth_style`(패션 스타일이니 타당),
+`serious`(16,007)·`shy`(4,141)는 `expression`(표정이니 맞음), `yandere`(3,500)는 없음.
+
+**제안**: `persona` 축(성격·유형)을 신설해 표정 슬롯에 붙인다(태그 DB 가 이미
+`Expression_Action` 소속으로 본다). 프레이밍은 cowboy 이고 **의상을 고정하지 않는다** —
+성격은 머리·의상·표정을 한꺼번에 바꾸는데 `white shirt, pleated skirt` 로 묶으면
+표현 통로 하나를 막는다(그래도 mesugaki 는 분홍 베스트를 밀어 넣었다).
+대상 약 18개(personality 17 + `yandere`), 약 18장. **결정 대기.**
+
+선별 판단이 필요한 것: `ptsd`(정신질환 — 시각 원형이 아니다) · `muscular uke`(BL
+전용, 이미 제외) · `female pervert`(성적 함의) · `height conscious`/`age conscious`
+(관계 서술이라 성격이 아니다) · `unaware`(장면 상태).
+
+### 렌더가 실제로 안 되는 것 (별건)
+
+`have to pee` · `shaking head` · `hobble` · `object floating above hand` ·
+`spread navel` · `spread armpit` — 이쪽은 그림으로 표현할 대상이 없다. 제외 후보.
 
 ### 계층 탐색기는 뺐다 (2026-07-26 결정)
 

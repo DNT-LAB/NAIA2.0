@@ -146,6 +146,7 @@ def main() -> int:
     FULL_AXES = {k for k, _l, fr, _s in AXIS_SPEC if fr == "full"}
 
     total_written = 0
+    all_axes: dict[str, list[str]] = {}     # 두 패스를 합쳐 _todo 를 쓴다
     for src, suffix in (("pose_solo", ""), ("pose_multi", "_m")):
         path = OUT / f"{src}.txt"
         if not path.exists():
@@ -200,6 +201,7 @@ def main() -> int:
             mark = "  ⚠️150 초과" if len(v) > 150 else ""
             print(f"  {k:22s} {len(v):4d}{mark}")
             (OUT / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+            all_axes[k] = v
             total_written += len(v)
 
     SUF = ("", "_2", "_3", "_m", "_m_2", "_m_3")
@@ -209,7 +211,28 @@ def main() -> int:
               for k, lb, _f, _s in AXIS_SPEC for s in SUF}
     (OUT / "_pose_axes.json").write_text(json.dumps(
         {"framing": frames, "label": labels}, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(f"\n총 {total_written}장 / _pose_axes.json 기록")
+
+    # thumb_bench 는 `<axis>.txt` 가 아니라 `_todo/<axis>.txt` 를 읽는다. 여기서 같이
+    # 갱신하지 않으면 두 목록이 갈라진다 — 실제로 갈라져서, 재분할 뒤에도 벤치가 옛
+    # 목록을 찍고 있었고 **신설 축(pose_leg 71장)은 `_todo` 파일이 없어 경고 한 줄만
+    # 남기고 통째로 건너뛰었다**(batch_tags 는 없는 파일을 정상으로 본다). 조용히 비는
+    # 쪽이라 결과물을 세어보기 전엔 드러나지 않는다.
+    # 렌더 축만 큐에 올린다. 성인 축은 사용자가 직접 하고, expression_from_pose 는
+    # 표정 슬롯 소속이라 자세 배치가 아니다.
+    NOT_QUEUED = {"pose_nsfw", "pose_nsfw_face"}
+    todo = OUT / "_todo"
+    todo.mkdir(exist_ok=True)
+    written = set()
+    for k, v in all_axes.items():
+        if not k.startswith("pose_") or k in NOT_QUEUED:
+            continue
+        (todo / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+        written.add(k)
+    stale = [p for p in todo.glob("pose_*.txt") if p.stem not in written]
+    for p in stale:
+        p.unlink()
+    print(f"\n총 {total_written}장 / _pose_axes.json + _todo/ {len(written)}개 기록"
+          + (f" / 낡은 _todo {len(stale)}개 삭제: {[p.stem for p in stale]}" if stale else ""))
     return 0
 
 

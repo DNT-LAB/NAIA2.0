@@ -14,6 +14,7 @@
   - 아티스트 0.38 저가중 + watercolor 0.4: 라인이 얇고 배경이 흰 균일한 톤.
 """
 import json
+import re
 from pathlib import Path
 
 OUT = Path("wildcards/thumb/_bench.json")
@@ -230,42 +231,57 @@ P_TORSO = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VAR
 P_FULL = (f"1girl, {ARTIST}, young female, solo, front view, full body, <<VARY>>, "
           f"{_POUTFIT}, {_PQ}, {QUALITY}")
 
+# 다인원 축(`_m`)은 **상대가 있어야 자세가 성립한다**. 그런데 처음엔 위 솔로 템플릿을
+# 그대로 물려서 `1girl, solo` 로 찍었고, NAI 는 `solo` 를 이겨내지 못했다 — 실측:
+# `hug` 은 인형을 안은 1인, `piggyback` 은 혼자 허리 숙인 그림이 나왔다.
+# 자세 축을 개별/글로벌로 가른 이유 자체를 템플릿이 뒤집고 있었다.
+#
+# 인원 구성은 최신 10개 parquet 실측상 girl+boy 41~57% / 2girls 29~47% 로 우열이
+# 없다. 데이터가 답을 주지 않으므로 솔로 축과 화면 톤을 맞추는 쪽으로 `2girls` 고정.
+# `looking at viewer` 는 뺀다 — 둘이 서로에게 하는 동작이 주제고, 둘 다 정면을
+# 보면 상호작용이 죽는다.
+_PDUO = "2girls, multiple girls"
+PM_UPPER = (f"{_PDUO}, {ARTIST}, young female, front view, upper body, <<VARY>>, "
+            f"{_POUTFIT}, {_PQ}, {QUALITY}")
+PM_TORSO = (f"{_PDUO}, {ARTIST}, young female, front view, cowboy shot, <<VARY>>, "
+            f"{_POUTFIT}, {_PQ}, {QUALITY}")
+PM_FULL = (f"{_PDUO}, {ARTIST}, young female, front view, full body, <<VARY>>, "
+           f"{_POUTFIT}, {_PQ}, {QUALITY}")
+
+# 축 목록을 손으로 나열하면 새 축(pose_leg)이 빠지고 없어진 축(pose_arm_2)이 남는다 —
+# 탐색기 서브그룹에서 이미 같은 실수로 259개를 흘렸다. 축 정의에서 파생시키고 검증한다.
+_PSOLO_TPL = {"portrait": (P_HEAD, "pose_portrait"), "upper": (P_UPPER, "pose_upper"),
+              "cowboy": (P_TORSO, "pose_cowboy"), "full": (P_FULL, "pose_full")}
+# 다인원에는 portrait 이 없다. 파일럿에서 `headpat` 은 상대가 손만 남고 `spitting` 은
+# 받는 쪽이 화면 밖으로 잘렸다 — close-up 크롭에 두 사람이 안 들어간다.
+# 얼굴 축이라도 다인원이면 upper body 로 올린다. 1024 안에 머리 둘이면 입·손은 충분히 읽힌다.
+_PMULTI_TPL = {"portrait": (PM_UPPER, "pose_upper"), "upper": (PM_UPPER, "pose_upper"),
+               "cowboy": (PM_TORSO, "pose_cowboy"), "full": (PM_FULL, "pose_full")}
+# `_m` 은 접미사로만 판정한다. `in ax` 로 보면 pose_mo|u|th 의 `_m` 에 걸린다.
+_RE_MULTI = re.compile(r"_m(_\d+)?$")
+
+_pose_spec = json.loads(Path("wildcards/thumb/_pose_axes.json").read_text(encoding="utf-8"))
 POSE_BATCHES = {
-    "pose_action": (P_FULL, 2.0, "pose_full"),
-    "pose_action_2": (P_FULL, 2.0, "pose_full"),
-    "pose_action_3": (P_FULL, 2.0, "pose_full"),
-    "pose_action_m": (P_FULL, 2.0, "pose_full"),
-    "pose_action_m_2": (P_FULL, 2.0, "pose_full"),
-    "pose_arm": (P_UPPER, 2.0, "pose_upper"),
-    "pose_arm_2": (P_UPPER, 2.0, "pose_upper"),
-    "pose_arm_m": (P_UPPER, 2.0, "pose_upper"),
-    "pose_clothing": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_clothing_2": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_clothing_m": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_combat": (P_FULL, 2.0, "pose_full"),
-    "pose_combat_m": (P_FULL, 2.0, "pose_full"),
-    "pose_display": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_display_m": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_face_touch": (P_HEAD, 2.0, "pose_portrait"),
-    "pose_face_touch_m": (P_HEAD, 2.0, "pose_portrait"),
-    "pose_gaze": (P_HEAD, 2.0, "pose_portrait"),
-    "pose_hand": (P_HEAD, 2.0, "pose_portrait"),
-    "pose_hand_m": (P_HEAD, 2.0, "pose_portrait"),
-    "pose_holding": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_holding_2": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_holding_3": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_holding_m": (P_TORSO, 2.0, "pose_cowboy"),
-    "pose_mouth": (P_HEAD, 2.0, "pose_portrait"),
-    "pose_mouth_m": (P_HEAD, 2.0, "pose_portrait"),
-    "pose_posture": (P_FULL, 2.0, "pose_full"),
-    "pose_posture_2": (P_FULL, 2.0, "pose_full"),
-    "pose_posture_m": (P_FULL, 2.0, "pose_full"),
     # 파일럿 — 프레이밍 4종 x 3장.
     "_pilot_pose_head":  (P_HEAD, 2.0, "pose_portrait"),
     "_pilot_pose_upper": (P_UPPER, 2.0, "pose_upper"),
     "_pilot_pose_torso": (P_TORSO, 2.0, "pose_cowboy"),
     "_pilot_pose_full":  (P_FULL, 2.0, "pose_full"),
 }
+for _ax, _fr in sorted(_pose_spec["framing"].items()):
+    if not (Path("wildcards/thumb") / f"{_ax}.txt").exists():
+        continue                      # n-way 분할에서 안 쓰인 슬롯
+    _tpl, _key = (_PMULTI_TPL if _RE_MULTI.search(_ax) else _PSOLO_TPL)[_fr]
+    POSE_BATCHES[_ax] = (_tpl, 2.0, _key)
+
+# 렌더 축이 아닌 중간 산출물. 분류 결과(solo/multi/drop)와 보류한 성인 축이
+# 축과 같은 `pose_*` 접두를 쓴다 — 의존성 힌트에서 `pose_solo` 가 축 이름으로
+# 샜던 것과 같은 뿌리다. 글로브로 조용히 거르지 않고 이름을 적어 의도를 남긴다.
+_POSE_NOT_AXES = {"pose_solo", "pose_multi", "pose_drop",       # 인원 분류 결과
+                  "pose_nsfw", "pose_nsfw_face"}               # 사용자가 직접 생성
+_pose_files = {p.stem for p in Path("wildcards/thumb").glob("pose_*.txt")} - _POSE_NOT_AXES
+_uncovered = _pose_files - set(POSE_BATCHES)
+assert not _uncovered, f"배치 정의가 없는 자세 축: {sorted(_uncovered)}"
 BATCHES.update(POSE_BATCHES)
 
 

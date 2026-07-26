@@ -374,151 +374,6 @@
       "weight": 2.0,
       "framing": "cloth_outfit"
     },
-    "pose_action": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_action_2": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_action_3": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_action_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_action_m_2": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_arm": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, upper body, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_upper"
-    },
-    "pose_arm_2": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, upper body, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_upper"
-    },
-    "pose_arm_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, upper body, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_upper"
-    },
-    "pose_clothing": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_clothing_2": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_clothing_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_combat": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_combat_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_display": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_display_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_face_touch": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_portrait"
-    },
-    "pose_face_touch_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_portrait"
-    },
-    "pose_gaze": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_portrait"
-    },
-    "pose_hand": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_portrait"
-    },
-    "pose_hand_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_portrait"
-    },
-    "pose_holding": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_holding_2": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_holding_3": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_holding_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_cowboy"
-    },
-    "pose_mouth": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_portrait"
-    },
-    "pose_mouth_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_portrait"
-    },
-    "pose_posture": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_posture_2": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
-    "pose_posture_m": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "pose_full"
-    },
     "_pilot_pose_head": {
       "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.0,
@@ -536,6 +391,156 @@
     },
     "_pilot_pose_full": {
       "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_action": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_action_2": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_action_3": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_action_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_action_m_2": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_arm": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, upper body, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_upper"
+    },
+    "pose_arm_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, upper body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_upper"
+    },
+    "pose_clothing": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_clothing_2": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_clothing_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_combat": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_combat_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_display": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_display_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_face_touch": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_portrait"
+    },
+    "pose_face_touch_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, upper body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_upper"
+    },
+    "pose_gaze": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_portrait"
+    },
+    "pose_hand": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_portrait"
+    },
+    "pose_hand_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, upper body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_upper"
+    },
+    "pose_holding": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_holding_2": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_holding_3": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_holding_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, cowboy shot, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_cowboy"
+    },
+    "pose_leg": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_leg_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_mouth": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, portrait, <<VARY>>, white shirt, pleated skirt, close-up, looking at viewer, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_portrait"
+    },
+    "pose_mouth_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, upper body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_upper"
+    },
+    "pose_posture": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_posture_2": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "pose_full"
+    },
+    "pose_posture_m": {
+      "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.0,
       "framing": "pose_full"
     }

@@ -5,9 +5,12 @@
 손으로 옮길 때 생기는 드리프트를 막는다.
 """
 import json
+import re
 from pathlib import Path
 
 SRC = Path("wildcards/thumb")
+# `_m` 접미사로만 판정한다. `in ax` 로 보면 pose_mo|u|th 의 `_m` 에 걸린다.
+_RE_POSE_MULTI = re.compile(r"_m(_\d+)?$")
 DST = Path("app/web/remote/js/features/interactiveAxes.mjs")
 
 palette = json.loads((SRC / "_palette.json").read_text(encoding="utf-8"))
@@ -64,6 +67,16 @@ for _s in _idx2.subgroups("clothing"):
 _missing = ({s["id"] for s in _idx2.subgroups("clothing")}
             - set(_BROWSE_WEAR) - set(_BROWSE_GEAR))
 assert not _missing, f"탐색기에서 빠진 서브그룹: {_missing}"
+
+# 자세 축은 build_pose_axes 가 정하고 _pose_axes.json 에 라벨까지 적는다. 여기서 다시
+# 적으면 갈라진다 — 실제로 갈라져서 없어진 축이 남고 신설 축이 빠져 있었다.
+# 개별 슬롯에는 1인 축만 온다. `_m` 은 씬의 '다인원 자세' 담당이다.
+_pose_axes = json.loads((SRC / "_pose_axes.json").read_text(encoding="utf-8"))
+_POSE_SECTIONS = [("thumb", _pose_axes["label"][_ax], _ax)
+                  for _ax in _pose_axes["label"]
+                  if (SRC / f"{_ax}.txt").exists() and not _RE_POSE_MULTI.search(_ax)]
+_POSE_MULTI = [_ax for _ax in _pose_axes["label"]
+               if (SRC / f"{_ax}.txt").exists() and _RE_POSE_MULTI.search(_ax)]
 
 # 슬롯 = 사용자가 인지하는 카테고리. 그 안에 축(팔레트/슬라이더/썸네일/탐색)을 배치한다.
 # 팝업이 축을 모아 보여주므로 좌측 슬롯 수를 늘리지 않는다.
@@ -178,25 +191,10 @@ SLOTS = [
     # 담당한다 — 판정 근거는 이벤트 프리셋 파티션의 실측 solo 비율과 태그명의
     # own/another's 다(tools/build_pose_slots.py).
     # 축 순서는 초보자가 쓰는 순서에 맞췄다: 몸 전체 -> 팔다리 -> 손 -> 얼굴 -> 물건.
-    ("자세", "\\u{1F3C3}", "pose_action", [
-        ("thumb", "자세", "pose_posture"),
-        ("thumb", "자세 2", "pose_posture_2"),
-        ("thumb", "팔·다리 위치", "pose_arm"),
-        ("thumb", "팔·다리 위치 2", "pose_arm_2"),
-        ("thumb", "손짓", "pose_hand"),
-        ("thumb", "얼굴·몸에 손", "pose_face_touch"),
-        ("thumb", "시선", "pose_gaze"),
-        ("thumb", "입·먹기", "pose_mouth"),
-        ("thumb", "들고 있는 것", "pose_holding"),
-        ("thumb", "들고 있는 것 2", "pose_holding_2"),
-        ("thumb", "들고 있는 것 3", "pose_holding_3"),
-        ("thumb", "옷 다루기", "pose_clothing"),
-        ("thumb", "옷 다루기 2", "pose_clothing_2"),
-        ("thumb", "행동", "pose_action"),
-        ("thumb", "행동 2", "pose_action_2"),
-        ("thumb", "행동 3", "pose_action_3"),
-        ("thumb", "몸 보여주기", "pose_display"),
-        ("thumb", "전투", "pose_combat"),
+    # 목록은 손으로 적지 않는다 — 적어 뒀더니 `pose_arm_2` 가 없어진 뒤에도 남고
+    # 신설 `pose_leg`/`pose_body_touch` 는 빠지고 라벨은 옛 이름("얼굴·몸에 손")
+    # 그대로였다. _pose_axes.json 이 축과 라벨의 SSOT 다(_POSE_SECTIONS 참조).
+    ("자세", "\\u{1F3C3}", "pose_action", _POSE_SECTIONS + [
         # 썸네일이 freq>=100 만 덮으므로 나머지는 탐색기가 담당한다.
         ("browse", "자세 전체", ["pose", "posture", "gesture", "gestures", "activity",
                                 "verbs_and_gerunds", "hands", "combat_actions",
@@ -405,6 +403,16 @@ for label, icon, axis, sections in SLOTS:
         else:
             out.append(f"    {{kind: {js(kind)}, label: {js(secLabel)}, ref: {js(ref)}}},")
     out.append("  ]},")
+out.append("];")
+out.append("")
+
+# 다인원 자세는 캐릭터 슬롯이 아니라 씬의 '다인원 자세' 팝업이 쓴다. 패널에 손으로
+# 적어 뒀더니 신설 `pose_leg_m` 26개와 `pose_body_touch_m` 10개가 빠져, 찍어도
+# 화면에 안 나오는 상태였다. 여기서 같이 내보낸다.
+out.append("// 씬 슬롯 '다인원 자세' 전용. 2명 이상이 있어야 성립하는 축들이다.")
+out.append("export const POSE_MULTI_SECTIONS = [")
+for _ax in _POSE_MULTI:
+    out.append(f"  {{kind: 'thumb', label: {js(_pose_axes['label'][_ax])}, ref: {js(_ax)}}},")
 out.append("];")
 out.append("")
 

@@ -15,8 +15,8 @@
 // 축 정의(팔레트/슬라이더/썸네일/탐색) — wildcards/thumb 에서 생성된 파생 모듈.
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
-  PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260726-ax74';
+  PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS,
+} from './interactiveAxes.mjs?v=20260726-ax75';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -25,20 +25,8 @@ import {
 const COMPOSITION_PRIMARY = ['image_composition', 'composition', 'framing', 'focus_tags', 'focus', 'count'];
 // 2명 이상이 필요한 자세. 캐릭터별 슬롯에 두면 1명짜리 그림에서 모델이 유령 상대를
 // 그려내 그림이 망가진다 — 그래서 이미지 전체에 적용되는 씬 슬롯이 담당한다.
-// 축 목록은 wildcards/thumb/_pose_multi_axes.json (tools/build_pose_axes.py 가 만든다).
-const POSE_MULTI_SECTIONS = [
-  {kind: 'thumb', label: "자세(다인원)", ref: 'pose_posture_m'},
-  {kind: 'thumb', label: "팔·다리 위치(다인원)", ref: 'pose_arm_m'},
-  {kind: 'thumb', label: "손짓(다인원)", ref: 'pose_hand_m'},
-  {kind: 'thumb', label: "얼굴·몸에 손(다인원)", ref: 'pose_face_touch_m'},
-  {kind: 'thumb', label: "입·먹기(다인원)", ref: 'pose_mouth_m'},
-  {kind: 'thumb', label: "들고 있는 것(다인원)", ref: 'pose_holding_m'},
-  {kind: 'thumb', label: "옷 다루기(다인원)", ref: 'pose_clothing_m'},
-  {kind: 'thumb', label: "행동(다인원)", ref: 'pose_action_m'},
-  {kind: 'thumb', label: "행동(다인원) 2", ref: 'pose_action_m_2'},
-  {kind: 'thumb', label: "몸 보여주기(다인원)", ref: 'pose_display_m'},
-  {kind: 'thumb', label: "전투(다인원)", ref: 'pose_combat_m'},
-];
+// 목록은 interactiveAxes.mjs 가 준다(POSE_MULTI_SECTIONS). 여기에 손으로 적어 뒀더니
+// 신설 `pose_leg_m`·`pose_body_touch_m` 36개가 빠져 찍어도 안 보이는 상태였다.
 
 const SCENE_SLOTS = [
   {id: 'composition', name: '구도', icon: '\u{1F5BC}', axis: 'meta', subgroupInclude: COMPOSITION_PRIMARY},

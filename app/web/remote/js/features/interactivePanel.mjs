@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS,
-} from './interactiveAxes.mjs?v=20260726-ax75';
+} from './interactiveAxes.mjs?v=20260726-ax76';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -754,7 +754,10 @@ export function createInteractivePanel({
     if (!slot) return;
     panelContext = {
       kind: 'scene', slotId, title: slot.name, axis: slot.axis,
-      subgroupInclude: slot.subgroupInclude || null,
+      // 축 섹션을 넘기지 않아 '다인원 자세' 팝업이 통째로 비어 있었다 — 캐릭터
+      // 경로(openCharSub)에만 있던 줄이다. 씬 슬롯도 sections 를 가질 수 있다.
+      sections: slot.sections || null,
+      subgroupInclude: slot.subgroupInclude || browseScopeOf(slot) || null,
       subgroupExclude: slot.subgroupExclude || null,
     };
     enterEditing();

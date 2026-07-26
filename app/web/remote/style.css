@@ -20016,6 +20016,12 @@ body.detached-module .mod-grid-3 {
 }
 .ia-aside-thumb:hover span { background: rgba(0,0,0,0.75); }
 
+/* 메인 그리드도 두 번 클릭. 캡션 자리가 버튼이 된다(플로트와 같은 규칙). */
+.ia-cell.armed-on { border-color: #3ddc84; box-shadow: 0 0 0 2px #3ddc84 inset; }
+.ia-cell.armed-on .ia-cell-cap { background: #1e7a49; color: #fff; font-weight: 700; }
+.ia-cell.armed-off { border-color: #e0a83c; box-shadow: 0 0 0 2px #e0a83c inset; }
+.ia-cell.armed-off .ia-cell-cap { background: #8a6212; color: #fff; font-weight: 700; }
+
 /* 지금 고른 것들과도 어울리는 추천 — 배경으로 구분한다.
    추천이 마지막 선택 하나를 기준으로 나오므로, 나머지와도 맞는 것은 더 안전한 선택이다. */
 .ia-aside-thumb.match {

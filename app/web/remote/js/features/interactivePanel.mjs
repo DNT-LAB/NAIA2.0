@@ -16,7 +16,7 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS,
-} from './interactiveAxes.mjs?v=20260726-ax67';
+} from './interactiveAxes.mjs?v=20260726-ax68';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -813,6 +813,7 @@ export function createInteractivePanel({
 
   /** 슬롯을 텍스트 입력으로 펼치고, 그 옆에 검색+탐색 팝업을 띄운다. */
   function enterEditing() {
+    armedTag = armedAxis = null;   // 슬롯을 바꾸면 '살펴보기' 상태 해제
     thumbScroll.clear();       // 슬롯을 바꾸면 썸네일 스크롤을 처음으로
     // 아코디언 기본값 = 그 슬롯의 첫 썸네일 섹션(선택된 게 있으면 그 섹션을 우선 펼친다).
     openThumbAxis = firstThumbAxis();
@@ -852,7 +853,8 @@ export function createInteractivePanel({
   });
 
   let asideMount = null;
-  let armedTag = null;    // 한 번 눌러 '살펴보기' 상태인 추천 칩
+  let armedTag = null;    // 한 번 눌러 '살펴보기' 상태인 칩/셀
+  let armedAxis = null;   // 그 셀이 속한 축(같은 태그가 여러 축에 있을 수 있다)
   let lastPicked = '';    // 추천의 기준이 되는 마지막 선택 태그
   let asideSeq = 0;
   const adviceCache = new Map();
@@ -1558,11 +1560,17 @@ export function createInteractivePanel({
         ? `<img src="${escHtml(thumbUrl(axis, t))}" alt="" loading="lazy" decoding="async">`
         : '<span class="ia-cell-none">준비 중</span>';
       const sens = isSensitive(t);
-      return `<button type="button" class="ia-cell${on ? ' on' : ''}${isLocked ? ' is-locked' : ''}${sens ? ' is-sensitive' : ''}"
+      // 조언 플로트와 같은 두 번 클릭. 한 번 누르면 캡션이 `{태그} 추가/제외` 버튼이
+      // 되고 한 번 더 눌러야 실행된다. 한 축이 최대 150칸이라 오클릭이 잦다.
+      // 잠긴 셀(부모 자동 배정)은 어차피 해제가 안 되므로 예외로 둔다.
+      const armed = !isLocked && armedTag === t && armedAxis === axis;
+      const cap = armed ? `${t} ${on ? '제외' : '추가'}` : t;
+      const armCls = armed ? (on ? ' armed-off' : ' armed-on') : '';
+      return `<button type="button" class="ia-cell${on ? ' on' : ''}${isLocked ? ' is-locked' : ''}${sens ? ' is-sensitive' : ''}${armCls}"
         data-ax="thumb" data-ref="${escHtml(axis)}" data-val="${escHtml(t)}"
         aria-pressed="${on}" title="${escHtml(tagTip(t))}${isLocked ? ' (자동 · 해제 불가)' : ''}">
         <span class="ia-cell-img">${media}${sens ? '<span class="ia-cell-veil">보기</span>' : ''}</span>
-        <span class="ia-cell-cap">${isLocked ? '\u{1F512} ' : ''}${escHtml(t)}</span></button>`;
+        <span class="ia-cell-cap">${isLocked ? '\u{1F512} ' : ''}${escHtml(cap)}</span></button>`;
     }).join('');
     // 색 팔레트는 그리드 '위'에 둔다 — 아래에 두면 3줄 그리드에 가려 안 보인다.
     // 피부처럼 주 색상 팔레트 자체가 조건부인 축은 여기서 함께 렌더한다.
@@ -1599,7 +1607,16 @@ export function createInteractivePanel({
       el.addEventListener('click', event => {
         event.stopPropagation();
         const {ax, ref, val} = el.dataset;
-        if (ax === 'thumb') pickThumb(ref, val);                 // 조합 가능(+부모 태그 규칙)
+        if (ax === 'thumb') {
+          // 1차 = 살펴보기(캡션이 버튼으로 바뀐다), 2차 = 실행.
+          if (armedTag !== val || armedAxis !== ref) {
+            armedTag = val; armedAxis = ref;
+            refreshAxisSections();
+            return;
+          }
+          armedTag = null; armedAxis = null;
+          pickThumb(ref, val);                                   // 조합 가능(+부모 태그 규칙)
+        }
         else if (ax === 'palette') setMainColor(ref, val);       // 주 색상 = 항상 하나
         else if (ax === 'palette_extra') toggleExtraColor(ref, val);  // 추가 색상 = n개
         else setExclusive(ax, ref, val);                         // 슬라이더는 축 내 배타

@@ -44,6 +44,13 @@ WEIGHT_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?::\s*(.+?)\s*::")
 PACK_AXIS = {"face_eyes": "face", "face_parts": "face", "face_mark": "face"}
 
 
+# 축이 아닌 중간 산출물. 축과 같은 폴더에 같은 접두로 있어서 축으로 세어졌다.
+# setdefault 는 알파벳 순 첫 파일이 이기므로 `pose_multi` 가 `pose_posture_m` 의
+# 31개를 가로채 그 31장이 UI 에서 안 보였다. 자세 분류 결과(solo/multi/drop)와
+# 표정으로 넘긴 목록이 여기 해당한다 — 글로브로 조용히 거르지 않고 이름을 적는다.
+NOT_AXES = {"pose_solo", "pose_multi", "pose_drop", "expression_from_pose"}
+
+
 def load_axis_tags() -> dict[str, str]:
     """tag(소문자) -> axis. wildcards/thumb/<axis>.txt 가 출처."""
     table: dict[str, str] = {}
@@ -51,6 +58,8 @@ def load_axis_tags() -> dict[str, str]:
         raise SystemExit(f"와일드카드 폴더가 없습니다: {WILDCARD_DIR}")
     for path in sorted(WILDCARD_DIR.glob("*.txt")):
         axis = path.stem
+        if axis in NOT_AXES:
+            continue
         for line in path.read_text(encoding="utf-8").splitlines():
             tag = line.strip()
             if tag:

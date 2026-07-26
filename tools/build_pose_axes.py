@@ -55,9 +55,12 @@ AXIS_SPEC: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("pose_hand", "손짓", "portrait",
      ("gesture_hand_sign", "gesture_pointing", "gesture_arm_raise",
       "gesture_expressive", "gesture_other")),
-    ("pose_face_touch", "얼굴·몸에 손", "portrait",
-     ("gesture_self_face", "gesture_self_body", "gesture_covering",
-      "gesture_hair", "gesture_mouth")),
+    # 원래 "얼굴·몸에 손" 하나였다. 축 이름에 두 부위가 들어가면 프레이밍이 갈린다는
+    # 신호인데(이번이 네 번째다) 그대로 뒀더니 portrait 크롭에 `toe scrunch`,
+    # `hand on own thigh`, `covering privates` 가 들어와 13장이 무의미했다.
+    ("pose_face_touch", "얼굴에 손", "portrait",
+     ("gesture_self_face", "gesture_covering", "gesture_hair", "gesture_mouth")),
+    ("pose_body_touch", "몸에 손", "cowboy", ("gesture_self_body",)),
     ("pose_holding", "들고 있는 것", "cowboy",
      ("holding_tool_prop", "holding_food_drink", "holding_weapon",
       "holding_instrument", "holding_device_media", "holding_document_sign",
@@ -106,8 +109,11 @@ FALLBACK: tuple[tuple[str, re.Pattern], ...] = (
     ("pose_arm", re.compile(r"\b(arm|arms|hand|hands|elbow|shoulder|wrist)\b")),
 )
 # subcategory 로는 팔 축에 갔지만 이름이 다리인 것들. 프레이밍이 갈리므로 옮긴다.
-RE_LEG_NAME = re.compile(r"\b(leg|legs|knee|knees|feet|foot|thigh|ankle|toe)\b"
+RE_LEG_NAME = re.compile(r"\b(leg|legs|knee|knees|feet|foot|thigh|thighs|ankle|toe|toes)\b"
                          r"|straddl|spread legs")
+# 허리 아래·배는 portrait 에도 upper 에도 안 들어간다. `hand on own hip` 을 상반신으로
+# 찍으면 손이 프레임 밖이라 그냥 서 있는 그림이 된다. cowboy 축으로 내린다.
+RE_TORSO_NAME = re.compile(r"\b(hip|hips|waist|stomach|belly|navel|crotch|privates|butt|groin)\b")
 DEFAULT_AXIS = "pose_action"
 
 # ── 얼굴 스케일 태그를 전신 축에서 빼낸다 ───────────────────────────────────
@@ -144,6 +150,7 @@ def main() -> int:
         for sub in subs:
             sub_axis[sub] = key
     FULL_AXES = {k for k, _l, fr, _s in AXIS_SPEC if fr == "full"}
+    AXIS_FRAMING = {k: fr for k, _l, fr, _s in AXIS_SPEC}
 
     total_written = 0
     all_axes: dict[str, list[str]] = {}     # 두 패스를 합쳐 _todo 를 쓴다
@@ -177,9 +184,14 @@ def main() -> int:
                     continue
                 if RE_NAME_MOUTH.search(t):
                     key = FACE_MOUTH_AXIS   # suffix 는 아래에서 그대로 붙는다
-            # 팔 축(upper)에 다리 태그가 섞이면 프레임 밖으로 나간다.
-            if key == "pose_arm" and RE_LEG_NAME.search(t):
+            # 프레임 밖으로 나가는 이름은 subcategory 를 이긴다. 축이 어디 소속이냐보다
+            # **그 축의 크롭 안에 보이느냐**가 먼저다 — 안 보이면 썸네일이 아니다.
+            # 팔 축 하나만 막았더니 gaze 의 `looking through own legs`, hand 의
+            # `presenting foot` 처럼 같은 실수가 다른 축에서 반복됐다.
+            if AXIS_FRAMING.get(key) != "full" and RE_LEG_NAME.search(t):
                 key = "pose_leg"
+            elif AXIS_FRAMING.get(key) in ("portrait", "upper") and RE_TORSO_NAME.search(t):
+                key = "pose_body_touch"
             axes.setdefault(key + suffix, []).append(t)
         print(f"\n[{src}] {len(tags)}개 -> {len(axes)}축  (규칙·기본값행 {len(unmatched)})")
         # 패스마다 쓰지 않고 합쳐 둔다. `expression_from_pose` 처럼 접미사가 안 붙는

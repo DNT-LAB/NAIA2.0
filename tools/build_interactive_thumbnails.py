@@ -48,6 +48,8 @@ PACK_AXIS = {"face_eyes": "face", "face_parts": "face", "face_mark": "face"}
 # setdefault 는 알파벳 순 첫 파일이 이기므로 `pose_multi` 가 `pose_posture_m` 의
 # 31개를 가로채 그 31장이 UI 에서 안 보였다. 자세 분류 결과(solo/multi/drop)와
 # 표정으로 넘긴 목록이 여기 해당한다 — 글로브로 조용히 거르지 않고 이름을 적는다.
+# `_` 접두 파일은 축이 아니다(작업 목록·보존 목록). 이름을 하나씩 적다가
+# `_relational_meta` 를 빠뜨려 키 하나가 그 축으로 들어갔다 — 접두로 막는다.
 NOT_AXES = {"pose_solo", "pose_multi", "pose_drop", "expression_from_pose"}
 
 
@@ -58,7 +60,7 @@ def load_axis_tags() -> dict[str, str]:
         raise SystemExit(f"와일드카드 폴더가 없습니다: {WILDCARD_DIR}")
     for path in sorted(WILDCARD_DIR.glob("*.txt")):
         axis = path.stem
-        if axis in NOT_AXES:
+        if axis in NOT_AXES or axis.startswith("_"):
             continue
         for line in path.read_text(encoding="utf-8").splitlines():
             tag = line.strip()

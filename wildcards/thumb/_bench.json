@@ -155,12 +155,22 @@
       "framing": "loc_backdrop"
     },
     "loc_indoor": {
-      "template": "no humans, <<VARY>>, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "template": "no humans, scenery, indoors, <<VARY>>, -1:: food, plate, still life, cake, sky, cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.0,
       "framing": "loc_interior"
     },
     "loc_place": {
       "template": "no humans, scenery, <<VARY>>, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "loc_scenery"
+    },
+    "loc_object": {
+      "template": "no humans, scenery, <<VARY>>, -1:: sky, cloud, cumulonimbus cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "loc_object"
+    },
+    "_t_obj": {
+      "template": "no humans, scenery, <<VARY>>, -1:: sky, cloud, cumulonimbus cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.0,
       "framing": "loc_scenery"
     },

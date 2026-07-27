@@ -25,7 +25,8 @@ CUT = 500
 AXIS_SPEC = (
     ("loc_backdrop", "배경 처리", "backdrop", ()),      # 이름 규칙으로만 채운다
     ("loc_indoor",   "실내",      "interior", ()),      # 이름 규칙으로만 채운다
-    ("loc_place",    "장소·건물", "scenery", ("locations", "real_world_locations")),
+    ("loc_place",    "장소",      "scenery", ("locations", "real_world_locations")),
+    ("loc_object",   "구조물·사물", "object", ()),      # 이름 목록으로만 채운다
     ("loc_nature",   "자연",      "scenery", ("nature",)),
     ("loc_water",    "물",        "scenery", ("water",)),
     ("loc_sky",      "하늘·천체", "scenery", ("backgrounds",)),
@@ -45,6 +46,32 @@ RE_INDOOR = re.compile(
     r"|^onsen$|^pool$|^cafe|^restaurant|^shop|^store|^church|^shrine interior)")
 # 실외지만 실내 규칙에 걸리는 것 — 되돌린다.
 RE_NOT_INDOOR = re.compile(r"(city|street|rooftop|stone wall|brick wall|castle wall)")
+
+# ── 장소 축의 3분할 (검수 실측 기반) ────────────────────────────────────────
+# 1차 생성 104장을 눈으로 보고 나눴다. 이름 규칙으로는 안 갈린다 — "그 안에 서서
+# 둘러볼 수 있는가" 는 데이터에 없는 구분이라 목록으로 적되 assert 로 누락을 막는다.
+#
+# 광경(loc_place)     하늘이 자연스럽다. 상쇄를 걸면 오히려 밋밋해진다.
+# 구조물(loc_object)  화면을 못 채워 뭉게구름이 들어찼다 -> 하늘을 눌러야 한다.
+# 실내(loc_indoor)    애초에 실내인데 `locations` subgroup 이라 여기 섞였다.
+_TO_INDOOR = {
+    "tatami", "under covers", "bath", "chalkboard", "train interior", "stage",
+    "bar (place)", "shouji", "sink", "car interior", "toilet stall", "infirmary",
+    "prison", "elevator", "interior", "urinal", "closet", "loaded interior",
+    "sauna", "casino", "cockpit", "wrestling ring",
+}
+_TO_OBJECT = {
+    "building", "house", "castle", "temple", "shrine", "torii", "pagoda", "tower",
+    "clock tower", "lighthouse", "windmill", "apartment", "skyscraper", "bridge",
+    "gate", "fence", "railing", "guard rail", "lamppost", "power lines",
+    "utility pole", "smokestack", "arch", "fountain", "ferris wheel", "food stand",
+    "convenience store", "bus stop", "tent", "porch", "door", "sliding doors",
+    "open door", "doorway", "pov doorway", "open window", "broken window",
+    "round window", "balcony", "veranda", "pool ladder", "debris", "broken glass",
+    "tombstone", "beach umbrella", "neon lights", "city lights", "architecture",
+    "east asian architecture", "scarlet devil mansion", "school", "train station",
+    "gym", "flight deck",
+}
 
 
 def main() -> int:
@@ -68,13 +95,23 @@ def main() -> int:
     for tag, sg in pool.items():
         if F(tag) < CUT:
             continue
-        if RE_BACKDROP.search(tag):
+        if tag in _TO_INDOOR:
+            key = "loc_indoor"
+        elif tag in _TO_OBJECT:
+            key = "loc_object"
+        elif RE_BACKDROP.search(tag):
             key = "loc_backdrop"
         elif RE_INDOOR.search(tag) and not RE_NOT_INDOOR.search(tag):
             key = "loc_indoor"
         else:
             key = sub_axis.get(sg, "loc_place")
         axes.setdefault(key, []).append(tag)
+
+    # 목록에 적은 태그가 실제로 풀에 있었는지 — 오타나 절단선 변경으로 조용히 빠지면
+    # 그 태그는 원래 축에 남아 잘못된 프레이밍으로 다시 찍힌다.
+    _placed = {t for v in axes.values() for t in v}
+    _lost = (_TO_INDOOR | _TO_OBJECT) - _placed
+    assert not _lost, f"목록에 있으나 풀에서 사라진 태그: {sorted(_lost)}"
 
     total = 0
     for key, _l, _f, _s in AXIS_SPEC:

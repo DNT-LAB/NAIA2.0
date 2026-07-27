@@ -3,6 +3,7 @@
   "loc_backdrop": "backdrop",
   "loc_indoor": "interior",
   "loc_place": "scenery",
+  "loc_object": "object",
   "loc_nature": "scenery",
   "loc_water": "scenery",
   "loc_sky": "scenery",
@@ -12,7 +13,8 @@
  "label": {
   "loc_backdrop": "배경 처리",
   "loc_indoor": "실내",
-  "loc_place": "장소·건물",
+  "loc_place": "장소",
+  "loc_object": "구조물·사물",
   "loc_nature": "자연",
   "loc_water": "물",
   "loc_sky": "하늘·천체",

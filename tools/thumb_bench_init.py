@@ -163,6 +163,7 @@ BATCHES = {
     "loc_backdrop":        (BACKDR, 2.0, "loc_backdrop"),
     "loc_indoor":          (INTERIOR, 2.0, "loc_interior"),
     "loc_place":           (SCENERY, 2.0, "loc_scenery"),
+    "loc_object":       (SCENERY_OBJ, 2.0, "loc_object"),
     "_t_obj":            (SCENERY_OBJ, 2.0, "loc_scenery"),
     "loc_nature":          (SCENERY, 2.0, "loc_scenery"),
     "loc_water":           (SCENERY, 2.0, "loc_scenery"),

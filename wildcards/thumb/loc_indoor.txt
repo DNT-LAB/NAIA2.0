@@ -6,21 +6,31 @@ tiles
 pool
 onsen
 classroom
+tatami
 tile floor
 bedroom
 wall
+under covers
 bathroom
+bath
+chalkboard
 bathtub
 tile wall
 checkered floor
+train interior
 kitchen
 shop
+stage
 floor
+bar (place)
 ceiling
+shouji
 library
 hallway
+sink
 locker room
 restaurant
+car interior
 reflective floor
 cafe
 wooden wall
@@ -30,11 +40,23 @@ shower (place)
 stone floor
 room
 gym storeroom
+cockpit
 cracked wall
+sauna
 storefront
 brick floor
 cracked floor
 glory wall
 messy room
+wrestling ring
+casino
+toilet stall
+infirmary
 restroom
+prison
 fitting room
+loaded interior
+elevator
+interior
+urinal
+closet

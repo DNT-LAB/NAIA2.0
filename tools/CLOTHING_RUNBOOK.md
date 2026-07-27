@@ -163,7 +163,13 @@ cloth 23축이 정상 포함돼 있다. 확인은 `grep -c cloth_ interactiveAxe
 4. **다리·신발 프레이밍** — ✅**해결.** 파일럿·본배치 모두 통과했다(§1, 52/52 선명).
    더 이상 판단 대상이 아니다.
 
-5. **🆕 소형 장신구 38개의 프레이밍 — 이번 실행 최대 발견.**
+5. **소형 장신구 프레이밍** — ✅**2026-07-27 해결.** `cloth_small`(22개) 을 portrait
+   축으로 분리했다. 파일럿 3/3 + 본배치 21/22 통과 — 프레임이 좁으면 모델이 손을
+   얼굴 쪽으로 올린다. 발·꼬리·뿔에 붙는 것(anklet/toe ring/tail ring/horn ring)은
+   portrait 이 오히려 프레임 밖이라 넣지 않았다.
+   아래는 판단 당시의 기록이다.
+
+   **(원문) 소형 장신구 38개의 프레이밍 — 이번 실행 최대 발견.**
    `cloth_accessory` 116개 중 **38개(33%)** 가 `cowboy shot` 에서 판독 불가다:
    귀 19(`earrings`·`hoop earrings`·`earclip`·`ear ribbon` …) / 손가락·손목 12
    (`ring`·`bracelet`·`bangle`·`watch` …) / 소형 일반 7(`jewelry`·`gem`·`chain` …).
@@ -213,7 +219,12 @@ cloth 23축이 정상 포함돼 있다. 확인은 `grep -c cloth_ interactiveAxe
 | `nude` / `completely nude` | 269,994 / 109,029 | 보류한 성인 계열 |
 | `cosplay` / `official alternate costume` | 72,527 / 194,610 | 메타 태그 — 축 소속 판단 필요 |
 
-`unworn *` 계열을 `cloth_state` 로 옮기고 `alternate *` 를 머리 슬롯으로 넘기면
+✅ **2026-07-27 처리됨.** `unworn *` 27개(freq>=500)를 `cloth_state` 로 편입했다
+(108 -> 135). `alternate *` 는 **머리 슬롯으로 넘기지 않았다** — 실측에서 캐릭터
+이름과 100% 동반하는 관계형 메타로 확인돼 `_relational_meta.txt` 로 뺐다(28개).
+`no headwear` 도 넣지 않았다. `no panties` 와 같은 부재 태그라 그릴 대상이 없다.
+
+(원안) `unworn *` 계열을 `cloth_state` 로 옮기고 `alternate *` 를 머리 슬롯으로 넘기면
 의상 탐색기도 뗄 수 있는 상태가 된다. 옮긴 태그는 썸네일이 없어 '준비 중' 으로
 뜨므로 생성이 뒤따라야 한다(약 20~30장).
 

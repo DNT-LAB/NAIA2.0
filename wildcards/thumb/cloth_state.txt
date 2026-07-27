@@ -12,7 +12,9 @@ wet clothes
 open coat
 single glove
 single earring
+unworn headwear
 bikini under clothes
+unworn hat
 wet shirt
 torn pantyhose
 taut clothes
@@ -20,24 +22,31 @@ open cardigan
 tilted headwear
 tied shirt
 swimsuit under clothes
+unworn eyewear
 crop top overhang
 open kimono
 torn thighhighs
+unworn shoes
 shorts under skirt
 leotard under clothes
 torn shirt
 single sock
 coat on shoulders
 open vest
+unworn panties
 open hoodie
+unworn skirt
 no shirt
 torn pants
+unworn clothes
 single leg pantyhose
+unworn jacket
 torn dress
 single sleeve
 single shoe
 covered collarbone
 popped collar
+unworn mask
 single elbow glove
 loose necktie
 open collar
@@ -48,14 +57,17 @@ backwards hat
 no socks
 single kneehigh
 torn skirt
+unworn bra
 torn bodysuit
 bodysuit under clothes
 open shorts
 torn cape
 torn sleeves
+unworn shirt
 open dress
 overskirt
 torn shorts
+unworn helmet
 panty straps
 single pauldron
 bike shorts under skirt
@@ -69,7 +81,12 @@ taut dress
 single gauntlet
 single strap
 open skirt
+unworn boots
+unworn bikini top
 single pantsleg
+unworn sandals
+unworn bag
+unworn gloves
 open bra
 torn jacket
 torn scarf
@@ -79,6 +96,7 @@ open-chest sweater
 torn leotard
 torn gloves
 torn jeans
+unworn socks
 single epaulette
 single wrist cuff
 burnt clothes
@@ -87,8 +105,10 @@ torn bodystocking
 single boot
 loose shirt
 tied jacket
+unworn coat
 floating cape
 single thigh boot
+unworn dress
 open bodysuit
 torn panties
 single knee pad
@@ -96,8 +116,12 @@ stained clothes
 pants under skirt
 shirt overhang
 torn swimsuit
+unworn bikini bottom
 single garter strap
+unworn shorts
 taut leotard
+unworn necktie
+unworn bikini
 wet skirt
 leotard peek
 paint on clothes
@@ -106,3 +130,6 @@ taut swimsuit
 torn cloak
 torn coat
 single bridal gauntlet
+unworn goggles
+unworn eyepatch
+unworn jewelry

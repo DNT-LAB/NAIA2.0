@@ -1,0 +1,27 @@
+unworn headwear
+unworn hat
+unworn eyewear
+unworn shoes
+unworn panties
+unworn skirt
+unworn clothes
+unworn jacket
+unworn mask
+unworn bra
+unworn shirt
+unworn helmet
+unworn boots
+unworn bikini top
+unworn sandals
+unworn bag
+unworn gloves
+unworn socks
+unworn coat
+unworn dress
+unworn bikini bottom
+unworn shorts
+unworn necktie
+unworn bikini
+unworn goggles
+unworn eyepatch
+unworn jewelry

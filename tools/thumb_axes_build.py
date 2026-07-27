@@ -405,6 +405,31 @@ if _FROM_POSE.exists():
     _seen = set(AXES["expression"])
     AXES["expression"] += [t for t in _extra if t in raw and t not in _seen]
 AXES["expression_symbol"] = [t for t in EXPRESSION_SYMBOL if t in raw]
+
+# ── 성격·유형(persona) ──────────────────────────────────────────────────────
+# 태그 DB 가 이미 `Expression_Action/personality` 로 분류해 둔 것을 그대로 쓴다.
+# 원래 자세 fallback 이 이것들을 `pose_display` 로 쓸어넣었는데, 성격은 자세가 아니다.
+#
+# ⚠️ "렌더가 안 된다"는 첫 판정은 틀렸다 — 192px 컨택트 시트로 봐서 그렇게 보였을 뿐,
+# 원본은 제대로 나온다(`jimiko` = 검은 뿔테+단발+홍조+뒷짐, `mesugaki` = 내려보는
+# 눈+도발적 웃음+트윈테일). 축소본으로 판정하지 말 것.
+#
+# 성격은 머리·의상·표정을 한꺼번에 바꾸므로 **의상을 고정하지 않는** 벤치를 쓴다
+# (`_bench.json` 의 `persona` 배치). 자세 템플릿의 `white shirt, pleated skirt` 가
+# 표현 통로 하나를 막고 있었다.
+_PERSONA_DROP = {
+    "ptsd",              # 정신질환이지 시각 원형이 아니다
+    "muscular uke",      # BL 전용. 이미 pose_drop 에 있다
+    "female pervert",    # 성적 함의
+    "height conscious",  # 관계 서술(상대와 비교) — 성격이 아니다
+    "age conscious",     # 위와 같음
+    "unaware",           # 장면 상태
+}
+_PERSONA_ADD = ["yandere"]   # personality subgroup 에 없는데 같은 부류다(freq 3,500)
+_persona_src = list(idx._tree.get("Expression_Action", {}).get("personality", []))
+AXES["persona"] = [t for t in _persona_src + _PERSONA_ADD
+                   if t in raw and t not in _PERSONA_DROP]
+
 AXES["face_shape"] = [t for t in FACE_SHAPE if t in raw]
 # facepaint 는 의도적 얼굴 무늬라 표식 축이 맞다(Codex 지적).
 AXES["marking"] = AXES["marking"] + [t for t in ["facepaint"] if t in raw]

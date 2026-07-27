@@ -108,7 +108,12 @@ SLOTS = [
         ("thumb", "감정", "expression"),
         ("thumb", "기호 표정", "expression_symbol"),
         ("thumb", "홍조·눈물·땀", "expression_state"),
-        ("browse", "표정 전체", ["expression", "eyes_tags", "mouth"]),
+        # 성격·유형. 자세 fallback 이 `pose_display` 로 쓸어넣고 있던 것을 되돌렸다 —
+        # 성격은 자세가 아니다. 태그 DB 도 `Expression_Action` 소속으로 본다.
+        ("thumb", "성격·유형", "persona"),
+        # 자세 슬롯과 같은 판정. 탐색기가 보여주던 279개 중 258개(92%)가 이미 썸네일에
+        # 있는 중복이고, 전용 21개는 전부 저빈도다. 트리는 떼고 검색 범위만 남긴다.
+        ("scope", "표정 전체", ["expression", "eyes_tags", "mouth"]),
     ]),
     ("신체", "\\u{1F9CD}", "characteristic", [
         ("slider", "가슴", "breast_size"),
@@ -183,6 +188,9 @@ SLOTS = [
         # 부위가 정해지지 않는 장식(리본·보석·체인)만 남았다. 부위별 120개는
         # 각 부위 축으로 옮겼다 — 근거는 의상 프리셋 region6 매핑.
         ("thumb", "장식", "cloth_accessory"),
+        # 귀걸이·반지·팔찌는 프레이밍이 다르다(portrait). 같은 축에 두면
+        # cowboy 화소로는 보이지 않아 1/3이 빈 썸네일이 된다.
+        ("thumb", "작은 장신구", "cloth_small"),
         ("thumb", "갑옷", "cloth_armor"),
         ("browse", "소품 전체", _BROWSE_GEAR),
     ]),

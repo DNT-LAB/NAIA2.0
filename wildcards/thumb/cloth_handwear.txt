@@ -1,9 +1,7 @@
 gloves
 elbow gloves
 fingerless gloves
-bracelet
 wrist cuffs
-ring
 armband
 wristband
 bridal gauntlets
@@ -12,24 +10,19 @@ partially fingerless gloves
 handbag
 wrist scrunchie
 half gloves
-bangle
 paw gloves
-bead bracelet
 fur-trimmed gloves
 mittens
-spiked bracelet
 frilled gloves
 wrist ribbon
 spiked armlet
 ankle cuffs
 sleeve garter
 bandaid on hand
-nail art
 boxing gloves
 yugake
 leather gloves
 latex gloves
-pearl bracelet
 fishnet gloves
 no gloves
 sleeve bow
@@ -40,9 +33,7 @@ arm cuffs
 oven mitts
 wrist bow
 wrist wrap
-flower bracelet
 sleeve ribbon
-studded bracelet
 rubber gloves
 fur cuffs
 hand wraps

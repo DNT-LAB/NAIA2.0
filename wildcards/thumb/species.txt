@@ -110,8 +110,8 @@ dwarf
 leopard boy
 giant monster
 wyvern
-penguin girl
 goat boy
+penguin girl
 floating skull
 valkyrie
 horse boy
@@ -121,16 +121,16 @@ chipmunk girl
 kappa
 qilin (mythology)
 seraph
-komainu
 phoenix
+komainu
 dullahan
 dolphin girl
-orca girl
 rito
+orca girl
 jackal boy
 shadow (shadows house)
-kneeless mermaid
 female orc
+kneeless mermaid
 chimera
 hedgehog girl
 bee girl
@@ -155,8 +155,8 @@ otter girl
 jaguar boy
 tiefling
 octopus boy
-halfling
 shark boy
+halfling
 mantis girl
 genie
 satyr
@@ -173,11 +173,11 @@ cockroach girl
 ferret girl
 cheetah girl
 deer boy
-ghost girl
 whale girl
-zebra girl
-snake girl
+ghost girl
 slug girl
+snake girl
+zebra girl
 sphinx
 dryad
 capybara girl
@@ -192,15 +192,15 @@ dinosaur boy
 ant girl
 giraffe girl
 futakuchi-onna
-rhinoceros girl
 stoat girl
+rhinoceros girl
 chameleon girl
 jellyfish girl
-squid girl
 snail girl
+squid girl
 panther girl
-skunk girl
 camel girl
+skunk girl
 chupacabra
 axolotl girl
 frog boy

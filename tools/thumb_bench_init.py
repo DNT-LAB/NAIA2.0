@@ -64,6 +64,11 @@ HEAD = (f"1girl, {ARTIST}, young female, solo, front view, portrait, <<VARY>>, "
         f"white background, {QUALITY}")
 TORSO = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
          f"head out of frame, close-up, rating:general, white background, {QUALITY}")
+# PERSONA 성격·유형: 의상·표정·머리를 **고정하지 않는다**. 그 셋이 동시에 바뀌는 것이
+# 유형의 정체라, 하나라도 묶으면 태그가 표현할 통로를 잃는다.
+PERSONA = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
+           f"looking at viewer, rating:general, white background, simple background, "
+           f"{QUALITY}")
 UPPER = (f"1girl, {ARTIST}, young female, solo, front view, upper body, <<VARY>>, "
          f"looking at viewer, bare shoulders, nude, safe, rating:general, "
          f"white background, {QUALITY}")
@@ -115,6 +120,12 @@ BATCHES = {
     "body_nonhuman_male":     (male(TORSO), 2.5, "cowboy"),
     # Vision 검수에서 태그가 렌더되지 않은 것들을 다른 시드로 한 번 더 돌린다.
     # 프레이밍은 원래 축과 같게 두고 시드만 바꾼다(--seed).
+    # 성격·유형은 다른 축과 반대로 **아무것도 고정하지 않는다**. 성격은 머리·의상·
+    # 표정·자세를 한꺼번에 바꾸는 게 정체성인데, 자세 템플릿의 `white shirt,
+    # pleated skirt` 가 그 통로를 막고 있었다(그래도 mesugaki 는 분홍 베스트를 밀어
+    # 넣었다). nude/safe 도 쓰지 않는다 — 의상 자체가 유형의 신호다.
+    # cowboy: 머리·표정과 상의가 같이 보여야 유형이 읽힌다.
+    "persona":           (PERSONA, 2.0, "cowboy"),   # 성격·유형(tomboy/tsundere/...)
     "expression":        (HEAD, 2.5, "portrait"),    # 감정 표정
     "expression_symbol": (HEAD, 2.5, "portrait"),    # 만화 기호 표정
     "face_shape":        (HEAD, 2.5, "portrait"),    # 눈·입·눈썹 형태
@@ -178,6 +189,9 @@ CLOTH_BATCHES = {
     "cloth_detail":      (C_TORSO, 2.0, "cloth_torso"),
     "cloth_pattern":     (C_TORSO, 2.0, "cloth_torso"),
     "cloth_accessory":   (C_TORSO, 2.0, "cloth_torso"),
+    # 소형 장신구는 portrait 다. 192px 크롭에서 귀걸이는 약 15px 라 cowboy 로는
+    # 화소가 없어 시드로도 해결되지 않는다 — 파일럿에서 portrait 은 통과했다.
+    "cloth_small":       (C_HEAD, 2.0, "cloth_head"),
     # 액세서리 축을 부위로 쪼개며 신설. 벨트는 허리, 가방은 손에 들거나 메므로
     # 둘 다 cowboy shot 이면 프레임에 들어온다.
     "cloth_waist":       (C_TORSO, 2.0, "cloth_torso"),
@@ -262,6 +276,10 @@ _RE_MULTI = re.compile(r"_m(_\d+)?$")
 
 _pose_spec = json.loads(Path("wildcards/thumb/_pose_axes.json").read_text(encoding="utf-8"))
 POSE_BATCHES = {
+    # 렌더가 안 된 자세 태그의 시드 재시도. **프레이밍·템플릿은 원래 축과 같게 두고
+    # 시드만 바꾼다** — 다르게 두면 개선이 시드 덕인지 템플릿 덕인지 알 수 없다.
+    # 의상 섹션에서 30장 재생성 중 19장이 이 방식으로 살아났다.
+    "_redo_pose_display": (P_TORSO, 2.0, "pose_cowboy"),
     # 파일럿 — 프레이밍 4종 x 3장.
     "_pilot_pose_head":  (P_HEAD, 2.0, "pose_portrait"),
     "_pilot_pose_upper": (P_UPPER, 2.0, "pose_upper"),

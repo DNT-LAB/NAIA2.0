@@ -116,6 +116,17 @@ RE_LEG_NAME = re.compile(r"\b(leg|legs|knee|knees|feet|foot|thigh|thighs|ankle|t
 RE_TORSO_NAME = re.compile(r"\b(hip|hips|waist|stomach|belly|navel|crotch|privates|butt|groin)\b")
 DEFAULT_AXIS = "pose_action"
 
+
+def _persona_tags() -> set[str]:
+    """thumb_axes_build 가 만든 성격 축. 파일이 없으면 빈 집합(첫 빌드 순서 무관)."""
+    p = OUT / "persona.txt"
+    if not p.exists():
+        return set()
+    return {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()}
+
+
+PERSONA_TAGS = _persona_tags()
+
 # ── 얼굴 스케일 태그를 전신 축에서 빼낸다 ───────────────────────────────────
 # pose_action 132장을 실제 크기로 검수하다 잡았다. 프리셋 subcategory 가
 # `activity_other` 인 것이 전부 pose_action(full) 으로 갔는데, 그중 눈·입 태그가
@@ -192,6 +203,11 @@ def main() -> int:
                 key = "pose_leg"
             elif AXIS_FRAMING.get(key) in ("portrait", "upper") and RE_TORSO_NAME.search(t):
                 key = "pose_body_touch"
+            # 성격(persona)은 자세가 아니다. 태그 DB 의 `personality` 분류를 fallback 이
+            # 자세로 쓸어넣고 있었다 — thumb_axes_build 의 `persona` 축이 담당한다.
+            # 인원 분류(solo/multi)는 실측 근거가 있지만 축이 틀렸던 것이다.
+            if t in PERSONA_TAGS:
+                continue
             axes.setdefault(key + suffix, []).append(t)
         print(f"\n[{src}] {len(tags)}개 -> {len(axes)}축  (규칙·기본값행 {len(unmatched)})")
         # 패스마다 쓰지 않고 합쳐 둔다. `expression_from_pose` 처럼 접미사가 안 붙는

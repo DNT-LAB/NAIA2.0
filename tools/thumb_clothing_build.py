@@ -579,6 +579,36 @@ def _split_accessory(axes: dict) -> None:
     _split_accessory.moved = moved
 
 
+# ── 소형 장신구 — 프레이밍이 달라 축을 가른다 ───────────────────────────────
+# 192px 팩 크롭에서 귀걸이는 약 15px 다. cowboy/upper 로 찍으면 화소가 없어 시드로도
+# 해결되지 않는다(의상 검수 실측). 파일럿에서 `earrings`/`ring`/`bracelet` 을 portrait
+# 로 찍으니 셋 다 또렷하게 읽혔다 — 프레임이 좁으면 모델이 손을 얼굴 쪽으로 올린다.
+#
+# **발·꼬리·뿔에 붙는 것은 넣지 않는다.** portrait 은 그쪽이 오히려 프레임 밖이다
+# (`anklet`·`toe ring`·`tail ring`·`horn ring`). 허리(`belly chain`)도 cowboy 가 맞다.
+_RE_SMALL_ACC = re.compile(
+    r"(earring|earclip|ear ribbon|ear ornament|bracelet|bangle|nail art"
+    r"|\bring\b|\bwatch\b|^jewelry$|^gem$|^chain$|pendant)", re.I)
+_RE_SMALL_SKIP = re.compile(
+    r"o-ring|nose ring|cock ring|tail ring|horn ring|toe ring|anklet"
+    r"|belly chain|chainmail|z-ring|soul gem", re.I)
+
+
+def _split_small_accessory(axes: dict) -> None:
+    moved = {}
+    for src in ("cloth_accessory", "cloth_handwear", "cloth_detail"):
+        keep = []
+        for t in axes.get(src, ()):
+            if _RE_SMALL_ACC.search(t) and not _RE_SMALL_SKIP.search(t):
+                axes.setdefault("cloth_small", []).append(t)
+                moved[t] = src
+            else:
+                keep.append(t)
+        if src in axes:
+            axes[src] = keep
+    _split_small_accessory.moved = moved
+
+
 # ── 6. 조립 ────────────────────────────────────────────────────────────────
 AXES: dict[str, list[str]] = {}
 EXCLUDED: dict[str, str] = {}
@@ -651,6 +681,42 @@ for _axis in list(AXES):
     AXES[_axis] = _keep
 
 _split_accessory(AXES)
+_split_small_accessory(AXES)     # 부위 분배 뒤에 소형만 따로 뽑는다
+
+# ── 벗겨진 옷(`unworn *`) 편입 ────────────────────────────────────────────────
+# 어느 축에도 없어서 계층 탐색기로만 닿던 것들이다(`unworn headwear` 18,232 ·
+# `unworn hat` 13,706 · `unworn panties` 5,380 …).
+#
+# `no panties` 같은 **부재** 태그와는 다르다. 부재는 그릴 대상이 없어 렌더가 안 되지만
+# (의상 검수에서 확인), `unworn X` 는 X 가 존재하되 몸에서 벗겨진 상태라 그려진다.
+# 손에 들고 있거나 바닥에 있거나 한쪽 다리에 걸려 있다.
+_UNWORN = sorted((t for t in POOL
+                  if t.startswith("unworn ") and F(t) >= CUT
+                  and not any(t in v for v in AXES.values())),
+                 key=lambda t: -F(t))
+AXES["cloth_state"].extend(_UNWORN)
+
+# ── 관계형 메타 태그 — 축이 아니라 캐릭터쪽으로 뺀다 ────────────────────────
+# `alternate hairstyle`(60,753) · `official alternate costume`(194,610) ·
+# `cosplay`(72,527) 류는 "이 캐릭터의 정본과 다르다" 는 뜻이라 **명명된 캐릭터가
+# 있어야만** 의미가 성립한다. 실측: 최신 10개 parquet 에서 이것들은 캐릭터 이름과
+# **100%** 동반한다(n=5,247 / 29,228 / 6,866). 전체 기준선은 89% 다.
+# 반면 `unworn *` 는 76~94% 로 기준선 수준 — 평범한 시각 태그다.
+#
+# 그래서 썸네일 축에 넣지 않는다. 일반 `1girl` 에는 참조할 정본이 없어 그릴 것이 없다.
+# 캐릭터 기능쪽에서 쓸 수 있도록 목록만 남긴다(사용자 지시 2026-07-27).
+_RE_RELATIONAL = re.compile(
+    r"^(official )?alternate \w|^cosplay$|\bcosplay$|^adapted costume$")
+# 의상 POOL 이 아니라 **전체 태그 DB** 에서 모은다 — `alternate hairstyle`(60,753)은
+# 머리 서브그룹이라 의상 풀에 없어서 처음에 8개만 잡혔다.
+RELATIONAL_META = sorted(
+    (t for t in raw if _RE_RELATIONAL.search(t) and F(t) >= 300),
+    key=lambda t: -F(t))
+for _t in RELATIONAL_META:
+    for _v in AXES.values():
+        if _t in _v:
+            _v.remove(_t)
+
 for k in AXES:
     AXES[k].sort(key=lambda t: -F(t))
 
@@ -704,6 +770,24 @@ if __name__ == "__main__":
         print(f"  액세서리 재분할: {len(_mv)}개 이동, "
               f"{len(AXES['cloth_accessory'])}개는 부위 무관 장식으로 유지")
         print("    ", dict(Counter(_mv.values())))
+    # 축을 계산만 하고 파일로 쓰지 않고 있었다. .txt 는 2026-07-26 에 한 번 쓰인 뒤
+    # 코드와 갈라져, `unworn *` 27개를 AXES 에 넣어도 파일에는 반영되지 않았다.
+    # (자세 쪽 `_todo` 분리와 같은 유형 — 목록이 두 벌이면 반드시 갈라진다.)
+    _written = 0
+    for _k, _v in sorted(AXES.items()):
+        (OUT / f"{_k}.txt").write_text("\n".join(_v) + "\n", encoding="utf-8")
+        _written += len(_v)
+    print(f"  축 파일 {len(AXES)}개 저장 / {_written}개")
+
+    # 관계형 메타는 축이 아니라 목록으로만 남긴다(캐릭터 기능에서 회수).
+    # `_` 접두라 thumb 도구들이 축으로 읽지 않는다.
+    (OUT / "_relational_meta.txt").write_text(
+        "\n".join(RELATIONAL_META) + "\n", encoding="utf-8")
+    print(f"  관계형 메타 {len(RELATIONAL_META)}개 -> _relational_meta.txt "
+          f"(캐릭터 이름 100% 동반. 축에 넣지 않는다)")
+
+    # apply_moved_out 은 **위 저장 뒤에** 와야 한다. 목적지 축(horns/wings/...)에
+    # 덧붙이는 작업인데 먼저 하면 방금 쓴 파일이 덮어써 이관분이 사라진다.
     _added = apply_moved_out()
     if _added:
         print(f"  이관 실제 적용: {sum(_added.values())}개 {_added}")

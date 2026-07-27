@@ -1,21 +1,15 @@
 bow
-jewelry
 ribbon
-chain
 tassel
-gem
 brooch
 beads
-watch
 shawl
 tail ornament
 name tag
-wedding ring
 arm strap
 ear covers
 horn ornament
 frilled bow
-ear ornament
 magatama
 tasuki
 chest jewel
@@ -32,14 +26,10 @@ earpiece
 suitcase
 crescent pin
 elbow pads
-earclip
 tail ribbon
-ear ribbon
 horn ribbon
 horn bow
-thumb ring
 tie clip
-pocket watch
 heart brooch
 ankle ribbon
 button badge
@@ -55,7 +45,6 @@ safety pin
 soul gem
 chest strap
 prayer beads
-claw ring
 shoulder boards
 shoulder strap
 flower ornament
@@ -67,14 +56,12 @@ star sticker
 tail ring
 lapel pin
 horn ring
-ornate ring
 rolling suitcase
 wing ornament
 star brooch
 huge bow
 star ornament
 bandolier
-heart pendant
 amulet
 heart on chest
 wet towel

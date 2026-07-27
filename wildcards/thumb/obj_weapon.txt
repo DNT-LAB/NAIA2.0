@@ -140,3 +140,203 @@ yumi (bow)
 star wand
 paralyzer
 grenade pin
+mauser 98
+broken sword
+whip sword
+firelock
+crescent rose
+kriss vector
+m16
+ray gun
+baton (weapon)
+mosin-nagant
+optical sight
+control rod
+ak-47
+keyblade
+chakram
+nail bat
+staff of homa (genshin impact)
+musket
+minigun
+splattershot (splatoon)
+glaive (polearm)
+anti-aircraft
+weapon behind back
+shinai
+flail
+flintlock
+bokken
+beretta 92
+tonfa
+sword of the creator
+anti-aircraft gun
+song of broken pines (genshin impact)
+ball and chain (weapon)
+tank shell
+myrtenaster
+h&k g11
+artillery
+alternate weapon
+lance of longinus (evangelion)
+energy weapon
+brass knuckles
+mg42
+ak-12
+particle cannon case
+funnels (gundam)
+railgun
+an-94
+laser sight
+grimoire of alice
+lunatic gun
+detonator
+m4 sopmod ii
+m16a1
+shakujou
+drum magazine
+primordial jade winged-spear (genshin impact)
+walther wa 2000
+ballistic shield
+heavenly boat maanna
+sig 556
+ruyi jingu bang
+virtuous contract
+eotech
+flamethrower
+bear paw hammer
+m1903 springfield
+floating sword
+heavy machine gun
+arisaka
+desert eagle
+kanshou & bakuya (fate)
+dragonslayer (sword)
+lit fuse
+h&k mp7
+polearm behind back
+energy blade
+thompson submachine gun
+casing ejection
+monado
+hylian shield
+bident
+calamity queller (genshin impact)
+compound bow
+gunpod
+h&k mp5
+arm shield
+dynamite
+machete
+saw cleaver
+caliburn (fate)
+wraith's kunai
+cheytac m200
+yume no tsue
+bishamonten's spear
+cutlass
+mp40
+lee-enfield
+sig mpx
+boomerang
+nunchaku
+ninjatou
+hoshi no tsue
+m14
+sig p220/p226
+tachi (weapon)
+beam cannon
+amos' bow (genshin impact)
+concealed weapon
+power fist
+fn scar
+churchill (tank)
+double-blade
+smoke grenade
+heart wand
+masamune (ff7)
+rhongomyniad (fate)
+scimitar
+spiked knuckles
+suomi kp/-31
+vortex vanquisher (genshin impact)
+magical musket
+meslamtaea (weapon)
+needle sword
+b3 wingman
+folding stock
+spiked mace
+ember celica (rwby)
+beretta 1301
+dragunov svd
+spiked ball and chain
+nameless dagger (fate)
+photon ray (fate)
+kingdom key
+h&k g36
+rpg (weapon)
+crystal sword
+spike ball
+barrett m82
+mauser c96
+welrod
+zanpakutou
+lead pipe
+riot shield
+harpoon
+luger p08
+underbarrel grenade launcher
+l85
+nail (hollow knight)
+pgm hecate ii
+fn fal
+fin funnels
+imi uzi
+mk 18 carbine
+gate of babylon (fate)
+sig 516
+galaxia (sword)
+h&k psg1
+muzzle device
+tank turret
+gambol shroud
+mine (weapon)
+ppsh-41
+two-handed sword
+long sword
+umbrella gun
+ragnell
+tokarev tt-33
+engulfing lightning (genshin impact)
+akm
+bazooka (gundam)
+famas
+lanchester smg
+lever action
+outseal
+saya (scabbard)
+crossed swords
+spas-12
+h&k p30
+howa type 89
+machine pistol
+iwi tavor
+s&w m&p
+stielhandgranate
+walther ppk
+bolter
+flashbang
+splat roller (splatoon)
+p-chan (p90)
+wolf's gravestone (genshin impact)
+cross (weapon)
+energy shield
+broken bottle
+qbz-95
+z saber
+rakuyo (bloodborne)
+twinmyniad (fate)
+h&k g3
+chainsword
+splat charger (splatoon)
+x buster

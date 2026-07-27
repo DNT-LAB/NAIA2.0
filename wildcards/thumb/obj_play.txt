@@ -46,3 +46,43 @@ acoustic guitar
 kantele
 knight (chess)
 spell card
+cello
+record
+pawn (chess)
+kagura suzu
+hanafuda
+biwa lute
+tambourine
+ability card (touhou)
+euphonium
+card parody
+taiko drum
+maracas
+fender stratocaster
+pipa (instrument)
+cymbals
+tarot (card)
+clow card
+piano keys
+shogi piece
+horn (instrument)
+saxophone
+shamisen
+queen (playing card)
+poker
+floating card
+ace of diamonds
+ace of clubs
+twister
+french horn
+ocarina
+ukulele
+fender precision bass
+tsuzumi
+trombone
+king (playing card)
+bachi
+fender telecaster
+music stand
+erhu
+servant card (fate/grand order)

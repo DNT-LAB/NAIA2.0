@@ -149,36 +149,6 @@
       "weight": 2.0,
       "framing": "cowboy"
     },
-    "_p_obj": {
-      "template": "no humans, <<VARY>>, simple background, white background, -1:: sky, cloud, food, plate, cake ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "object"
-    },
-    "_p_food": {
-      "template": "no humans, <<VARY>>, simple background, white background, -1:: sky, cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "food"
-    },
-    "_p_room": {
-      "template": "no humans, indoors, <<VARY>>, -1:: food, plate, cake, sky, cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "room"
-    },
-    "_p_veh": {
-      "template": "no humans, <<VARY>>, simple background, -1:: food, plate, cake ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "vehicle"
-    },
-    "_p_ani": {
-      "template": "no humans, <<VARY>>, simple background, white background, -1:: food, plate, cake, sky, cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "animal"
-    },
-    "_p_fx": {
-      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, upper body, <<VARY>>, looking at viewer, white shirt, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
-      "weight": 2.0,
-      "framing": "subject"
-    },
     "obj_food": {
       "template": "no humans, <<VARY>>, simple background, white background, -1:: sky, cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.0,
@@ -225,6 +195,11 @@
       "framing": "object"
     },
     "ani_mammal": {
+      "template": "no humans, <<VARY>>, simple background, white background, -1:: food, plate, cake, sky, cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "animal"
+    },
+    "ani_plant": {
       "template": "no humans, <<VARY>>, simple background, white background, -1:: food, plate, cake, sky, cloud ::, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.0,
       "framing": "animal"

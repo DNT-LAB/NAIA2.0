@@ -1,34 +1,12 @@
-sky
-blue sky
-cloudy sky
-night sky
-scenery
-horizon
-cityscape
-space
-brick wall
-mountainous horizon
-pillar
-gradient sky
-orange sky
-constellation
-grey sky
-contrail
-purple sky
-rubble
-wooden fence
-skyline
-stone wall
-column
-single horizontal stripe
-pavement
-lattice
-stone stairs
-chimney
-double horizontal stripe
-windowsill
-brick
-wallpaper (object)
-billboard
-lane line
-cobblestone
+wall of text
+tile ceiling
+concrete
+tile roof
+static
+wooden ceiling
+truss
+sett
+bamboo fence
+stage curtains
+skylight
+wainscoting

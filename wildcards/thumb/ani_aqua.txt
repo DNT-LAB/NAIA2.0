@@ -14,3 +14,19 @@ koi
 flying fish
 orca
 merman
+angelfish
+school of fish
+eel
+manta ray
+sacabambaspis
+conch
+tuna
+salmonid
+lobster
+stingray
+clam
+axolotl
+surgeonfish
+whale shark
+puffer fish
+hermit crab

@@ -1,28 +1,119 @@
-outdoors
-beach
-city
-road
-ruins
-poolside
-street
-shore
-rooftop
-path
-town
-alley
-cave
-railroad tracks
-stadium
-crosswalk
-garden
-park
-real world location
-concert
-graveyard
-island
-sidewalk
-pier
-track and field
-mount fuji
-dock
-rural
+abandoned
+village
+amusement park
+market stall
+hakurei shrine
+vehicle interior
+rice paddy
+hospital
+bathhouse
+carousel
+transmission tower
+railroad crossing
+prison cell
+playground
+dungeon
+running track
+tokyo (city)
+in-universe location
+wind turbine
+urban
+movie theater
+coco's
+pyramid (structure)
+train station platform
+arcade
+tennis court
+european architecture
+grave
+stone walkway
+aztec
+racetrack
+tactile paving
+fusuma
+awning
+germany
+pink fire
+glory hole
+japan
+hangar
+laboratory
+bus interior
+mansion
+bakery
+united states
+dirt road
+brick road
+cathedral
+boom barrier
+dome
+entrance
+handrail
+market
+love hotel
+cave interior
+underground
+traffic mirror
+tunnel
+spire
+boxing ring
+traffic
+russia
+supermarket
+spacecraft interior
+france
+escalator
+italy
+water slide
+against fence
+mexico
+roller coaster
+airplane interior
+in orbit
+stairwell
+horse racing track
+parking lot
+factory
+mitsukoshi (department store)
+in locker
+maid cafe
+no entry sign
+farm
+tokyo big sight
+tavern
+laundromat
+izakaya
+basketball court
+wooden bridge
+on moon
+tokyo tower
+warp pipe
+space station
+gothic architecture
+soapland
+snow shelter
+airport
+field of blades
+yatai
+well
+united kingdom
+industrial
+floral arch
+ryokan
+highway
+eiffel tower
+stalactite
+gazebo
+drainpipe
+7-eleven
+railroad signal
+diner
+display
+kourindou
+spiral staircase
+elizabeth tower
+tank interior
+on stairs
+human village (touhou)
+kindergarten
+barn

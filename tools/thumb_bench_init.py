@@ -183,9 +183,6 @@ BATCHES = {
     # cowboy: 머리·표정과 상의가 같이 보여야 유형이 읽힌다.
     "persona":           (PERSONA, 2.0, "cowboy"),   # 성격·유형(tomboy/tsundere/...)
     # 사물·동물·효과 (build_object/creature/effect_axes.py 가 축을 정한다)
-    "_p_obj":  (OBJTPL, 2.0, "object"),   "_p_food": (FOODTPL, 2.0, "food"),
-    "_p_room": (ROOMTPL, 2.0, "room"),    "_p_veh":  (VEHTPL, 2.0, "vehicle"),
-    "_p_ani":  (ANITPL, 2.0, "animal"),   "_p_fx":   (FXTPL, 2.0, "subject"),
     "obj_food":            (FOODTPL, 2.0, "food"),
     "obj_tool":            (OBJTPL, 2.0, "object"),
     "obj_weapon":          (OBJTPL, 2.0, "object"),
@@ -196,6 +193,7 @@ BATCHES = {
     "obj_play":            (OBJTPL, 2.0, "object"),
     "obj_etc":             (OBJTPL, 2.0, "object"),
     "ani_mammal":          (ANITPL, 2.0, "animal"),
+    "ani_plant":         (ANITPL, 2.0, "animal"),
     "ani_bird":            (ANITPL, 2.0, "animal"),
     "ani_bug":             (ANITPL, 2.0, "animal"),
     "ani_aqua":            (ANITPL, 2.0, "animal"),

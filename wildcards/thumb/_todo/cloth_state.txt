@@ -1,27 +1,68 @@
-unworn headwear
-unworn hat
-unworn eyewear
-unworn shoes
-unworn panties
-unworn skirt
-unworn clothes
-unworn jacket
-unworn mask
-unworn bra
-unworn shirt
-unworn helmet
-unworn boots
-unworn bikini top
-unworn sandals
-unworn bag
-unworn gloves
-unworn socks
-unworn coat
-unworn dress
-unworn bikini bottom
-unworn shorts
-unworn necktie
-unworn bikini
-unworn goggles
-unworn eyepatch
-unworn jewelry
+unworn hair ornament
+torn hat
+half-skirt
+unworn bowtie
+torn bikini
+unworn legwear
+expressive clothes
+towel around waist
+single sandal
+unworn thighhighs
+unworn pants
+torn bike shorts
+unworn scarf
+unworn swimsuit
+unworn necklace
+folded clothes
+loose bikini
+unworn hairband
+unworn cape
+torn kimono
+unworn crown
+unworn slippers
+food on clothes
+torn socks
+unworn kimono
+backwards virgin killer sweater
+single fishnet legwear
+whale tail (clothing)
+unworn gag
+single knee boot
+shibari under clothes
+torn sleeve
+just shoes
+open jumpsuit
+single off shoulder
+unworn swim cap
+single earphone removed
+torn bra
+unworn pantyhose
+open pajamas
+single legwear garter
+undersized breast cup
+torn boots
+single shoulder pad
+single over-kneehigh
+unworn armor
+unworn belt
+towel on one shoulder
+unworn headgear
+rags
+open cloak
+single vambrace
+see-through shawl
+unworn blindfold
+torn capelet
+liquid clothes
+single elbow pad
+taut skirt
+tied sweater
+unworn vest
+unworn sweater
+torn ribbon
+torn sweater
+torn vest
+unworn ribbon
+taut sweater
+towel on legs
+single half glove

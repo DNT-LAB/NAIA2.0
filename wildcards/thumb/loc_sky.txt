@@ -32,3 +32,15 @@ wallpaper (object)
 billboard
 lane line
 cobblestone
+wall of text
+tile ceiling
+concrete
+tile roof
+static
+wooden ceiling
+truss
+sett
+bamboo fence
+stage curtains
+skylight
+wainscoting

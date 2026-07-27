@@ -15,3 +15,9 @@ messenger bag
 cat bag
 frilled umbrella
 coin purse
+weapon bag
+bookbag
+kindergarten bag
+tote bag
+belt bag
+heart-shaped bag

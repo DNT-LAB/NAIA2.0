@@ -1,40 +1,57 @@
-motor vehicle
-car
-abyssal ship
-aircraft
-military vehicle
-airplane
-watercraft
-tank
-motorcycle
-bicycle
-boat
-ship
-train
-spacecraft
-drone
-sports car
-thrusters
-steering wheel
-jet
-skateboard
-truck
-fighter jet
-ground vehicle
-helicopter
-crane (machine)
-ufo
-race vehicle
-scooter
-bus
-racecar
-spoiler (automobile)
-mast
-panzer iv
-seatbelt
-rocket
-honda
-inflatable raft
-airship
-cart
-police car
+nissan
+van
+variable fighter
+toyota
+convertible
+tiger i
+pickup truck
+biplane
+dirigible
+japari bus
+submarine
+snowboard
+sail
+hot air balloon
+sailboat
+sleigh
+m4 sherman
+sports utility vehicle
+aircraft carrier
+mazda
+subway
+e16a zuiun
+starfighter
+flying nimbus
+seaplane
+armored vehicle
+carriage
+carro veloce cv-33
+banana boat
+pirate ship
+yamaha
+sled
+locomotive
+titan (titanfall)
+rowboat
+nissan skyline
+destroyer
+taxi
+prydwen (fate)
+suzuki (company)
+t-34
+muscle car
+bt-42
+mercedes-benz
+bmw
+tiger ii
+wagon
+a6m zero
+flying saucer
+ford
+raft
+porsche
+subaru (brand)
+ferrari
+streetcar
+formula racer
+warp star

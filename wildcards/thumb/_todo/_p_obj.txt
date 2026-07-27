@@ -1,4 +1,0 @@
-sword
-book
-phone
-umbrella

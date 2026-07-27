@@ -29,7 +29,9 @@ import core.interactive_browse_index as ib
 # 절단선별 생성 장수(실측): 2000->864 / 1000->1195 / 500->1536 / 200->2068 / 60->2955.
 # 200 까지 열면 액세서리 318·제복 203·모자 193 으로 세 축이 그리드 한도(150)를 넘어
 # 축 재분할이 선행돼야 한다. 500 은 액세서리 하나만 한도 근처라 그대로 감당된다.
-CUT = 500
+# 절단선 500 -> 149 (사용자 지시 2026-07-27). 이 아래는 한글 설명이 거의 없어
+# 그림이 유일한 설명 수단이 된다 — 썸네일의 값이 오히려 큰 구간이다.
+CUT = 149
 OUT = Path("wildcards/thumb")
 
 raw = load_kr_tag_records().raw
@@ -155,6 +157,38 @@ def excluded(t: str) -> str:
     if RE_DEPRECATED.search(D(t)):
         return "폐기·모호"
     return ""
+
+# 절단선을 149 로 낮추자 `attire` 에서 43개가 미분류로 떨어졌다(500 에서는 0이었다).
+# catch-all 을 만들지 않는다는 원칙대로 하나씩 배정한다 — 설명을 읽고 정했다.
+CUT149_ATTIRE = {
+    # 한 벌 의상·제복·코스튬
+    "roman clothes": "cloth_traditional", "chiton": "cloth_traditional",
+    "peplos": "cloth_traditional", "changpao": "cloth_traditional",
+    "kataginu": "cloth_traditional", "jinbaori": "cloth_traditional",
+    "chihaya (clothing)": "cloth_traditional", "shiromuku": "cloth_traditional",
+    "russian clothes": "cloth_traditional", "telnyashka": "cloth_traditional",
+    "haramaki": "cloth_traditional",
+    "aristocratic clothes": "cloth_uniform", "racing suit": "cloth_uniform",
+    "fortified suit": "cloth_uniform", "test plugsuit": "cloth_uniform",
+    "gantz suit": "cloth_uniform", "hazmat suit": "cloth_uniform",
+    "scuba gear": "cloth_uniform", "diamond clan outfit": "cloth_uniform",
+    "vocaloid append": "cloth_uniform", "anna miller": "cloth_uniform",
+    "smock": "cloth_uniform", "workout clothes": "cloth_uniform",
+    "striped suit": "cloth_uniform",
+    "catsuit": "cloth_swim", "kittysuit": "cloth_swim",
+    "bodycon": "cloth_dress", "sheet ghost": "cloth_dress",
+    "rags": "cloth_state", "folded clothes": "cloth_state",
+    "food on clothes": "cloth_state", "liquid clothes": "cloth_state",
+    "expressive clothes": "cloth_state",
+    "undersized breast cup": "cloth_state", "whale tail (clothing)": "cloth_state",
+    # 실루엣·디테일
+    "square neckline": "cloth_detail", "empire waist": "cloth_detail",
+    "racerback": "cloth_detail", "lace-up": "cloth_detail",
+    "crinoline": "cloth_detail", "sleeveless duster": "cloth_outer",
+    "bell-bottoms": "cloth_bottom",
+    # `khakis` 는 설명이 "대신 다음 중 하나를 사용하세요" — 리다이렉트 태그다.
+    "khakis": "",
+}
 
 # ── 3. subgroup -> 축 (attire 를 뺀 나머지는 subgroup 이 충분히 동질적이다) ──
 SUB_AXIS = {
@@ -628,6 +662,13 @@ for t, f in POOL.items():
         continue
     if t in EXCLUDE_REASON:
         EXCLUDED[t] = EXCLUDE_REASON[t]
+        continue
+    if t in CUT149_ATTIRE:
+        dest = CUT149_ATTIRE[t]
+        if dest:
+            AXES.setdefault(dest, []).append(t)
+        else:
+            EXCLUDED[t] = "리다이렉트 태그"
         continue
     if t in EXPLICIT:
         AXES.setdefault(EXPLICIT[t], []).append(t)

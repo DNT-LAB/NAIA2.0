@@ -4,13 +4,15 @@
   "ani_bird": "animal",
   "ani_bug": "animal",
   "ani_aqua": "animal",
-  "ani_etc": "animal"
+  "ani_etc": "animal",
+  "ani_plant": "animal"
  },
  "label": {
   "ani_mammal": "포유류",
   "ani_bird": "새",
   "ani_bug": "곤충·거미",
   "ani_aqua": "물고기·수생",
-  "ani_etc": "기타 생물"
+  "ani_etc": "기타 생물",
+  "ani_plant": "식물·꽃"
  }
 }

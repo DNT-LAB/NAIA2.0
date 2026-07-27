@@ -1,15 +1,15 @@
-bird
-chick
-penguin
-crow
-chicken
-duck
-seagull
-owl
-dove
-eagle
-duckling
-pigeon
-crane (animal)
-sparrow
-bald eagle
+rooster
+parrot
+hawk
+ostrich
+swan
+goose
+sweets bird
+emperor penguin
+flamingo
+simple bird
+seabird
+falcon
+peacock
+eurasian tree sparrow
+parakeet

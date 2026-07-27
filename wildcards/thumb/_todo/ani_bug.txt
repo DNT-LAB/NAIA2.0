@@ -1,8 +1,17 @@
-bug
-butterfly
-spider
-white butterfly
-moth
-beetle
-bee
-ladybug
+dragonfly
+centipede
+cockroach
+fly
+worm
+green butterfly
+black butterfly
+ant
+praying mantis
+caterpillar
+cicada
+rhinoceros beetle
+stinger
+grasshopper
+firefly
+mandibles
+scorpion

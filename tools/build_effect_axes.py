@@ -19,7 +19,9 @@ import re
 from pathlib import Path
 
 OUT = Path("wildcards/thumb")
-CUT = 500
+# 절단선 500 -> 149 (사용자 지시 2026-07-27). 이 아래는 한글 설명이 거의 없어
+# 그림이 유일한 설명 수단이 된다 — 썸네일의 값이 오히려 큰 구간이다.
+CUT = 149
 
 AXIS_SPEC = (
     ("fx_effect", "시각 효과", "subject", ("effects",)),
@@ -41,9 +43,13 @@ def main() -> int:
     idx = ib.InteractiveBrowseIndex(raw)
     F = lambda t: int((raw.get(t) or {}).get("freq", 0) or 0)   # noqa: E731
 
+    # **자기 출력 파일을 읽으면 안 된다.** 두 번째 실행에서 직전 결과가 전부
+    # `assigned` 로 잡혀 축이 스스로를 밀어낸다(실측: ani_mammal 27 -> 9,
+    # fx_effect 135 -> 75). 이 축들이 만드는 파일은 제외한다.
+    _own = {k for k, _l, _f, _s in AXIS_SPEC}
     assigned = set()
     for p in OUT.glob("*.txt"):
-        if p.stem.startswith("_"):
+        if p.stem.startswith("_") or p.stem in _own:
             continue
         assigned |= {l.strip() for l in p.read_text(encoding="utf-8").splitlines()
                      if l.strip()}

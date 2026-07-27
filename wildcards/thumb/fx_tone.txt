@@ -26,3 +26,7 @@ grey theme
 multiple monochrome
 iridescent
 blue outline
+monochrome background
+neon palette
+color coordination
+sepia background

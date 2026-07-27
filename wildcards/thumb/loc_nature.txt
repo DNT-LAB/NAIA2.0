@@ -31,3 +31,30 @@ floating island
 dirt
 floating rock
 multiple torii
+jungle
+wheat field
+wreckage
+meadow
+mud
+hedge
+coral reef
+boulder
+icicle
+meteor
+saturn (planet)
+crater
+grasslands
+planetary ring
+tropical
+vegetation
+savannah
+tall grass
+wetland
+flower bed
+canyon
+valley
+asteroid
+pebble
+shipwreck
+ice shard
+jupiter (planet)

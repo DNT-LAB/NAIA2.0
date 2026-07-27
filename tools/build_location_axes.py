@@ -19,7 +19,9 @@ import re
 from pathlib import Path
 
 OUT = Path("wildcards/thumb")
-CUT = 500
+# 절단선 500 -> 149 (사용자 지시 2026-07-27). 이 아래는 한글 설명이 거의 없어
+# 그림이 유일한 설명 수단이 된다 — 썸네일의 값이 오히려 큰 구간이다.
+CUT = 149
 
 # (축, 라벨, 벤치 프레이밍, 이 축을 채우는 subgroup)
 AXIS_SPEC = (

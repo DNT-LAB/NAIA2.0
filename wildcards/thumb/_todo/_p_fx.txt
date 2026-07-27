@@ -1,5 +1,0 @@
-monochrome
-sparkle
-heart
-speech bubble
-blurry

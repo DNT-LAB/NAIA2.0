@@ -110,3 +110,69 @@ canteen
 shampoo bottle
 ketchup bottle
 pitcher (container)
+container
+tea set
+plastic bottle
+bicycle basket
+paint can
+champagne bottle
+cocktail shaker
+spray bottle
+package
+cracked glass
+glass door
+fish tank
+jug (bottle)
+nail polish bottle
+beaker
+erlenmeyer flask
+wooden box
+shopping basket
+canister
+ink bottle
+shot glass
+toolbox
+flower basket
+ammunition box
+case
+fishbowl
+ice cream cup
+gift wrapping
+mailbox (incoming mail)
+pastry box
+cd case
+alcohol carton
+salt shaker
+cupping glass
+mortar (bowl)
+basin
+postbox (outgoing mail)
+lunchbox
+canned food
+food wrapper
+ring box
+bottle to cheek
+backpack basket
+open bag
+recycle bin
+tankard
+open box
+hongbao
+phone with ears
+bucket of water
+wrapped bento
+furoshiki
+creamer (vessel)
+hurricane glass
+pill bottle
+money bag
+gashapon
+plate stack
+sanbou
+insect cage
+corked bottle
+fruit bowl
+planter
+lid
+washbowl
+dvd case

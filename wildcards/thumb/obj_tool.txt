@@ -194,3 +194,153 @@ ring-con
 folder
 mousetrap
 hook
+vacuum cleaner
+flagpole
+tuanshan
+bridle
+clothes pin
+weights
+leaf umbrella
+sewing needle
+chisel
+miracle mallet
+rag
+doorknob
+nata (tool)
+crowbar
+heart straw
+bolt
+barbell
+compass
+golf club
+windsock
+magnet
+traffic baton
+toothpick
+spray paint
+barcode scanner
+pin
+shamoji
+table tennis paddle
+duct tape
+kickboard
+oar
+wheelbarrow
+balance scale
+kaleidostick
+art brush
+circular saw
+vertical foregrip
+toothpaste
+winding key
+wooden spoon
+iv stand
+spork
+scalpel
+sledgehammer
+trowel
+door handle
+hishaku
+pliers
+cue stick
+fire extinguisher
+super soaker
+foregrip
+baseball helmet
+log pose
+large syringe
+stocks
+pilot helmet
+incense
+sorcerer's sutra scroll
+fishing hook
+great ball
+hane (hanetsuki)
+target
+utensil
+medicine
+board eraser
+diploma
+ship's wheel
+yoga mat
+relay baton
+paperclip
+binder
+crutch
+pull cord
+kite
+paint tube
+feather duster
+pitchfork
+cold pack
+armillary sphere
+compact (cosmetics)
+matches
+ice cream spoon
+toy hammer
+pillory
+parachute
+gauge
+luxury ball
+handle
+knitting needle
+mega stone
+baking sheet
+upright restraints
+penlight (glowstick)
+dishes
+starting block
+oonusa
+stapler
+piston
+spool
+dive ball
+blueprint (object)
+cotton swab
+giant brush
+paint roller
+wood carving tool
+razor
+wok
+bubble pipe
+bear trap
+bible (object)
+crosier
+planted umbrella
+pop filter
+stasis tank
+feather fan
+lasso
+dart
+incense burner
+side-view mirror
+repair bucket
+photo album
+minecraft pickaxe
+stepladder
+wooden staff
+test tube rack
+hoe
+pincushion
+firewood
+textbook
+vs seeker
+colored pencil
+diary
+fishing net
+rake
+teaspoon
+frisbee
+scuba
+light stick
+microphone wand
+string phone
+postcard
+badminton racket
+staple
+horizontal bar
+nose hook
+ink stamp
+skis
+hashitsuki nata
+mosquito coil

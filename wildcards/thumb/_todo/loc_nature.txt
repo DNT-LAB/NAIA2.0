@@ -1,33 +1,27 @@
-grass
-nature
-forest
-sand
-rock
-mountain
-ice
-autumn leaves
-field
-planet
-flower field
-shooting star
-landscape
-spider lily
-earth (planet)
-hill
-cliff
-desert
-bamboo forest
-wisteria
-overgrown
-log
-tree stump
-stone
-foliage
-flock
-morning glory
-sunflower field
-lily of the valley
-floating island
-dirt
-floating rock
-multiple torii
+jungle
+wheat field
+wreckage
+meadow
+mud
+hedge
+coral reef
+boulder
+icicle
+meteor
+saturn (planet)
+crater
+grasslands
+planetary ring
+tropical
+vegetation
+savannah
+tall grass
+wetland
+flower bed
+canyon
+valley
+asteroid
+pebble
+shipwreck
+ice shard
+jupiter (planet)

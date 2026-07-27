@@ -1,11 +1,1 @@
-white background
-gradient background
-blurry foreground
-multicolored background
-pink theme
-red theme
-diffraction spikes
-paint splatter
-tan background
-lavender background
-flag background
+sofmap background

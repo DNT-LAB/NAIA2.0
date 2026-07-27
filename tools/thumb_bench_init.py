@@ -95,7 +95,25 @@ FULL = (f"1girl, {ARTIST}, young female, solo, front view, full body, standing, 
 # `wide shot` 은 웅장한 원경으로 끌어당긴다(forest/snowing 이 둘 다 설산).
 # -> 배경 축에서는 아티스트와 wide shot 을 빼고, scenery 를 축별로 켠다.
 SCENERY = (f"no humans, scenery, <<VARY>>, rating:general, {QUALITY}")
-INTERIOR = (f"no humans, <<VARY>>, rating:general, {QUALITY}")
+# 작은 사물(railing/fence/lamppost/door)은 화면을 못 채워 NAI 가 나머지를 거대한
+# 뭉게구름으로 메운다(실측: loc_place 60장 중 22장). 실내의 음식 정물과 같은 현상.
+# 장소 축에는 하늘 태그가 없으므로(loc_sky 로 분리) 하늘을 직접 눌러도 안전하다.
+SCENERY_OBJ = (f"no humans, scenery, <<VARY>>, "
+               f"-1:: sky, cloud, cumulonimbus cloud ::, rating:general, {QUALITY}")
+INTERIOR = (f"no humans, scenery, indoors, <<VARY>>, "
+            f"-1:: food, plate, still life, cake, sky, cloud ::, "
+            f"rating:general, {QUALITY}")
+# 실내 템플릿은 세 번 고쳤다. `no humans` 만 두면 NAI 가 빈 화면을 못 견디고 **음식
+# 정물**을 채운다 — 실측으로 40장 중 12장이 접시 그림이었다(wooden floor/tiles/
+# kitchen/floor/brick floor/restaurant/cafe...). `indoors` 를 더해도 안 되고
+# `wide shot` 도 안 됐다. `-1:: food, plate, still life, cake ::` 로 직접 상쇄해야 멎는다.
+# `scenery` 를 다시 넣은 이유는 표면 태그(wooden floor)를 "그 바닥을 가진 공간"으로
+# 끌어올리기 위해서다 — library/locker room 이 선 그림에서 실제 공간으로 바뀌었다.
+# 그런데 `scenery` 를 넣자 이번엔 **하늘**이 들어왔다(40장 중 14장). 음식을 눌렀더니
+# 구름으로 바뀐 것이다 — 빈 공간을 무엇으로 채우느냐의 문제라 **둘 다 눌러야** 한다.
+# 이것이 배경 섹션의 핵심 교훈이다: 태그가 화면을 못 채우면 NAI 는 자기 기본값으로
+# 메우고, 그 기본값은 맥락마다 다르다(실내=음식 정물, 실외=뭉게구름).
+
 # 배경 '처리'(white/gradient background, *theme)는 반대로 **주체가 필요하다** —
 # 무엇 뒤에 있는지를 말하는 태그라 인물 없이는 의미가 없다. 여기선 아티스트를 쓴다.
 BACKDR = (f"1girl, {ARTIST}, young female, solo, front view, upper body, <<VARY>>, "
@@ -145,6 +163,7 @@ BATCHES = {
     "loc_backdrop":        (BACKDR, 2.0, "loc_backdrop"),
     "loc_indoor":          (INTERIOR, 2.0, "loc_interior"),
     "loc_place":           (SCENERY, 2.0, "loc_scenery"),
+    "_t_obj":            (SCENERY_OBJ, 2.0, "loc_scenery"),
     "loc_nature":          (SCENERY, 2.0, "loc_scenery"),
     "loc_water":           (SCENERY, 2.0, "loc_scenery"),
     "loc_sky":             (SCENERY, 2.0, "loc_scenery"),

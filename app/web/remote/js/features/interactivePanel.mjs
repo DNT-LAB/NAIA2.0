@@ -16,8 +16,9 @@
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
+  OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260727-ax81';
+} from './interactiveAxes.mjs?v=20260727-ax82';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -36,7 +37,13 @@ const SCENE_SLOTS = [
   // 다르다 — 실내는 `scenery` 를 빼야 살고 날씨는 있어야 산다(파일럿 25장).
   {id: 'background', name: '배경', icon: '\u{1F3DE}', axis: 'location',
    sections: LOC_SECTIONS},
-  {id: 'etc', name: '사물', icon: '⚙', axis: 'object'},   // Food_Object 전용 — '기타'보다 '사물'이 정확(Codex 조사)
+  // 사물도 썸네일 슬롯이 됐다(995장 9축). food 를 별도 축으로 갈랐다 —
+  // 다른 축에 거는 `-1:: food ::` 상쇄가 음식 181개를 죽이기 때문이다.
+  {id: 'etc', name: '사물', icon: '⚙', axis: 'object', sections: OBJ_SECTIONS},
+  // 동물은 축이 아예 없어 소품 탐색기가 유일한 경로였다(animal 61,629).
+  {id: 'animal', name: '동물', icon: '\u{1F43E}', axis: 'object', sections: ANI_SECTIONS},
+  // 효과·기호·색조. 구도(콤보 프리셋)와 인원(캐릭터 헤더)은 여기 넣지 않는다.
+  {id: 'fx', name: '효과·기호', icon: '✨', axis: 'meta', sections: FX_SECTIONS},
   {id: 'pose_multi', name: '다인원 자세', icon: '\u{1F46F}', axis: 'pose_action',
    sections: POSE_MULTI_SECTIONS},
 ];

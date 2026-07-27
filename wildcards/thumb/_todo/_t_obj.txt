@@ -1,0 +1,6 @@
+railing
+fence
+lamppost
+door
+power lines
+rooftop

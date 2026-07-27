@@ -1,0 +1,142 @@
+weapon
+sword
+gun
+katana
+staff
+knife
+sheath
+polearm
+rifle
+handgun
+shield
+spear
+turret
+bow (weapon)
+assault rifle
+arrow (projectile)
+cannon
+dagger
+axe
+scythe
+scabbard
+submachine gun
+sniper rifle
+torpedo
+huge weapon
+water gun
+arm cannon
+baseball bat
+explosive
+bolt action
+whip
+unsheathed
+planted sword
+revolver
+scope
+machine gun
+glowing weapon
+lance
+bullet
+shotgun
+trident
+rapier
+bullpup
+kunai
+magazine (weapon)
+chainsaw
+gae bolg (fate)
+energy gun
+energy sword
+grenade
+shell casing
+club (weapon)
+greatsword
+glowing sword
+torpedo tubes
+kalashnikov rifle
+excalibur (fate/stay night)
+short sword
+suppressor
+m4 carbine
+h&k hk416
+claw (weapon)
+torpedo launcher
+shuriken
+laevatein (touhou)
+rocket launcher
+crossbow
+mace
+anti-materiel rifle
+adapted turret
+beam rifle
+gun sling
+sig sauer
+lord camelot (fate)
+bomb
+e.g.o (project moon)
+sword behind back
+gatling gun
+musou isshin (genshin impact)
+kitchen knife
+battle axe
+wooden sword
+hamaya
+spiked club
+naginata
+master sword
+arm blade
+missile
+battle rifle
+multiple swords
+kanabou
+ammunition
+ar-15
+excalibur morgan (fate)
+flaming weapon
+h&k ump
+shoulder cannon
+broken weapon
+buster sword
+saber (weapon)
+sword of hisou
+halberd
+bayonet
+energy cannon
+falchion (fire emblem)
+beam saber
+floating weapon
+aestus estus
+blade
+wakizashi
+missile pod
+flaming sword
+grenade launcher
+antique firearm
+m1911
+shotgun shell
+light machine gun
+smoking gun
+lightsaber
+tantou
+ootachi
+stiletto (weapon)
+p90
+mage staff
+cleaver
+multiple weapons
+aegis sword (xenoblade)
+walther
+fuuin no tsue
+spear the gungnir
+pump action
+cartridge
+gunblade
+scissor blade (kill la kill)
+clarent (fate)
+sickle
+glock
+combat knife
+yumi (bow)
+star wand
+paralyzer
+grenade pin

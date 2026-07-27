@@ -99,7 +99,8 @@ SCENERY = (f"no humans, scenery, <<VARY>>, rating:general, {QUALITY}")
 # 뭉게구름으로 메운다(실측: loc_place 60장 중 22장). 실내의 음식 정물과 같은 현상.
 # 장소 축에는 하늘 태그가 없으므로(loc_sky 로 분리) 하늘을 직접 눌러도 안전하다.
 SCENERY_OBJ = (f"no humans, scenery, <<VARY>>, "
-               f"-1:: sky, cloud, cumulonimbus cloud ::, rating:general, {QUALITY}")
+               f"-1:: sky, cloud, cumulonimbus cloud, food, plate, cake ::, "
+               f"rating:general, {QUALITY}")
 INTERIOR = (f"no humans, scenery, indoors, <<VARY>>, "
             f"-1:: food, plate, still life, cake, sky, cloud ::, "
             f"rating:general, {QUALITY}")
@@ -118,6 +119,28 @@ INTERIOR = (f"no humans, scenery, indoors, <<VARY>>, "
 # 무엇 뒤에 있는지를 말하는 태그라 인물 없이는 의미가 없다. 여기선 아티스트를 쓴다.
 BACKDR = (f"1girl, {ARTIST}, young female, solo, front view, upper body, <<VARY>>, "
           f"looking at viewer, white shirt, rating:general, {QUALITY}")
+
+
+# ── 사물 / 동물 / 효과 ──────────────────────────────────────────────────────
+# 사물은 주체다 — 흰 배경에 물건 하나(특징 슬롯 방식). 배경 섹션과 반대 상황이다.
+# 다만 같은 교훈이 적용된다: 화면을 못 채우면 기본값이 들어온다. 사물 축은 하늘·정물
+# 둘 다 눌러야 하는데, **음식 축만은 예외**다(음식이 주제인데 음식을 누를 수 없다).
+OBJTPL = (f"no humans, <<VARY>>, simple background, white background, "
+          f"-1:: sky, cloud, food, plate, cake ::, rating:general, {QUALITY}")
+FOODTPL = (f"no humans, <<VARY>>, simple background, white background, "
+           f"-1:: sky, cloud ::, rating:general, {QUALITY}")
+# 가구는 방 맥락이 있어야 크기가 읽힌다. 탈것은 실외.
+ROOMTPL = (f"no humans, indoors, <<VARY>>, "
+           f"-1:: food, plate, cake, sky, cloud ::, rating:general, {QUALITY}")
+VEHTPL = (f"no humans, <<VARY>>, simple background, "
+          f"-1:: food, plate, cake ::, rating:general, {QUALITY}")
+# 동물은 흰 배경 단독. 상호작용(animal on head)은 자세 슬롯 소속이다.
+ANITPL = (f"no humans, <<VARY>>, simple background, white background, "
+          f"-1:: food, plate, cake, sky, cloud ::, rating:general, {QUALITY}")
+# 효과·기호·색조는 **주체가 있어야 보인다**. `monochrome` 을 빈 화면에 걸면
+# 흑백 아무것도 아닌 그림이 된다 — 배경 처리 축과 같은 성격이다.
+FXTPL = (f"1girl, {ARTIST}, young female, solo, front view, upper body, <<VARY>>, "
+         f"looking at viewer, white shirt, rating:general, {QUALITY}")
 
 
 def male(tpl: str) -> str:
@@ -159,6 +182,27 @@ BATCHES = {
     # 넣었다). nude/safe 도 쓰지 않는다 — 의상 자체가 유형의 신호다.
     # cowboy: 머리·표정과 상의가 같이 보여야 유형이 읽힌다.
     "persona":           (PERSONA, 2.0, "cowboy"),   # 성격·유형(tomboy/tsundere/...)
+    # 사물·동물·효과 (build_object/creature/effect_axes.py 가 축을 정한다)
+    "_p_obj":  (OBJTPL, 2.0, "object"),   "_p_food": (FOODTPL, 2.0, "food"),
+    "_p_room": (ROOMTPL, 2.0, "room"),    "_p_veh":  (VEHTPL, 2.0, "vehicle"),
+    "_p_ani":  (ANITPL, 2.0, "animal"),   "_p_fx":   (FXTPL, 2.0, "subject"),
+    "obj_food":            (FOODTPL, 2.0, "food"),
+    "obj_tool":            (OBJTPL, 2.0, "object"),
+    "obj_weapon":          (OBJTPL, 2.0, "object"),
+    "obj_container":       (OBJTPL, 2.0, "object"),
+    "obj_tech":            (OBJTPL, 2.0, "object"),
+    "obj_furniture":       (ROOMTPL, 2.0, "room"),
+    "obj_vehicle":         (VEHTPL, 2.0, "vehicle"),
+    "obj_play":            (OBJTPL, 2.0, "object"),
+    "obj_etc":             (OBJTPL, 2.0, "object"),
+    "ani_mammal":          (ANITPL, 2.0, "animal"),
+    "ani_bird":            (ANITPL, 2.0, "animal"),
+    "ani_bug":             (ANITPL, 2.0, "animal"),
+    "ani_aqua":            (ANITPL, 2.0, "animal"),
+    "ani_etc":             (ANITPL, 2.0, "animal"),
+    "fx_effect":           (FXTPL, 2.0, "subject"),
+    "fx_symbol":           (FXTPL, 2.0, "subject"),
+    "fx_tone":             (FXTPL, 2.0, "subject"),
     # 배경 — 파일럿 25장으로 프레이밍이 세 갈래임을 확인했다(build_location_axes.py).
     "loc_backdrop":        (BACKDR, 2.0, "loc_backdrop"),
     "loc_indoor":          (INTERIOR, 2.0, "loc_interior"),

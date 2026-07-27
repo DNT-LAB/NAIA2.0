@@ -1,0 +1,12 @@
+{
+ "framing": {
+  "fx_effect": "subject",
+  "fx_symbol": "subject",
+  "fx_tone": "subject"
+ },
+ "label": {
+  "fx_effect": "시각 효과",
+  "fx_symbol": "기호·말풍선",
+  "fx_tone": "색조·화풍"
+ }
+}

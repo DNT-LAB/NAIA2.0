@@ -1,0 +1,24 @@
+{
+ "framing": {
+  "obj_food": "food",
+  "obj_tool": "object",
+  "obj_weapon": "object",
+  "obj_container": "object",
+  "obj_tech": "object",
+  "obj_furniture": "room",
+  "obj_vehicle": "vehicle",
+  "obj_play": "object",
+  "obj_etc": "object"
+ },
+ "label": {
+  "obj_food": "음식·음료",
+  "obj_tool": "도구·소지품",
+  "obj_weapon": "무기",
+  "obj_container": "그릇·용기",
+  "obj_tech": "기계·전자",
+  "obj_furniture": "가구",
+  "obj_vehicle": "탈것",
+  "obj_play": "악기·놀이",
+  "obj_etc": "기타"
+ }
+}

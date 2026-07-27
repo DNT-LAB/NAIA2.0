@@ -84,6 +84,16 @@ _loc = json.loads((SRC / "_loc_axes.json").read_text(encoding="utf-8"))
 _LOC_SECTIONS = [("thumb", _loc["label"][_ax], _ax)
                  for _ax in _loc["label"] if (SRC / f"{_ax}.txt").exists()]
 
+# 사물·동물·효과 축도 같은 방식으로 파생시킨다(각 build_*_axes.py 가 SSOT).
+def _sections(js_name):
+    spec = json.loads((SRC / js_name).read_text(encoding="utf-8"))
+    return [("thumb", spec["label"][a], a) for a in spec["label"]
+            if (SRC / f"{a}.txt").exists()]
+
+_OBJ_SECTIONS = _sections("_obj_axes.json")
+_ANI_SECTIONS = _sections("_ani_axes.json")
+_FX_SECTIONS = _sections("_fx_axes.json")
+
 # 슬롯 = 사용자가 인지하는 카테고리. 그 안에 축(팔레트/슬라이더/썸네일/탐색)을 배치한다.
 # 팝업이 축을 모아 보여주므로 좌측 슬롯 수를 늘리지 않는다.
 SLOTS = [
@@ -296,6 +306,8 @@ _referenced.update(p.stem for p in SRC.glob("pose_*_m*.txt"))
 # 배경 축도 SLOTS 가 아니라 프론트의 SCENE_SLOTS(LOC_SECTIONS)가 참조한다.
 # 빼면 THUMB_TAGS 에 태그가 없어 씬 슬롯이 빈 그리드를 그린다 — 다인원과 같은 함정.
 _referenced.update(_rf for _kind, _lb, _rf in _LOC_SECTIONS)
+_referenced.update(_rf for _s in (_OBJ_SECTIONS, _ANI_SECTIONS, _FX_SECTIONS)
+                   for _kind, _lb, _rf in _s)
 _skipped_axes = [k for k in _axis_files if k not in _referenced]
 _axis_files = [k for k in _axis_files if k in _referenced]
 for key in _axis_files:
@@ -472,6 +484,16 @@ for _k, _lb, _rf in _LOC_SECTIONS:
     out.append(f"  {{kind: 'thumb', label: {js(_lb)}, ref: {js(_rf)}}},")
 out.append("];")
 out.append("")
+for _name, _secs, _ko in (("OBJ_SECTIONS", _OBJ_SECTIONS, "사물"),
+                          ("ANI_SECTIONS", _ANI_SECTIONS, "동물"),
+                          ("FX_SECTIONS", _FX_SECTIONS, "효과·기호")):
+    out.append(f"// 씬 슬롯 '{_ko}' 전용.")
+    out.append(f"export const {_name} = [")
+    for _k, _lb, _rf in _secs:
+        out.append(f"  {{kind: 'thumb', label: {js(_lb)}, ref: {js(_rf)}}},")
+    out.append("];")
+    out.append("")
+
 out.append("// 씬 슬롯 '다인원 자세' 전용. 2명 이상이 있어야 성립하는 축들이다.")
 out.append("export const POSE_MULTI_SECTIONS = [")
 for _ax in _POSE_MULTI:

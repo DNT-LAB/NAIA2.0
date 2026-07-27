@@ -1,0 +1,28 @@
+monochrome
+greyscale
+spot color
+blue theme
+alternate color
+limited palette
+flat color
+sepia
+purple theme
+muted color
+green theme
+greyscale with colored background
+colorful
+yellow theme
+white theme
+anime coloring
+orange theme
+brown theme
+rainbow gradient
+high contrast
+aqua theme
+black theme
+pastel colors
+color connection
+grey theme
+multiple monochrome
+iridescent
+blue outline

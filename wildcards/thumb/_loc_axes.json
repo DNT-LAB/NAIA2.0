@@ -1,0 +1,22 @@
+{
+ "framing": {
+  "loc_backdrop": "backdrop",
+  "loc_indoor": "interior",
+  "loc_place": "scenery",
+  "loc_nature": "scenery",
+  "loc_water": "scenery",
+  "loc_sky": "scenery",
+  "loc_weather": "scenery",
+  "loc_time": "scenery"
+ },
+ "label": {
+  "loc_backdrop": "배경 처리",
+  "loc_indoor": "실내",
+  "loc_place": "장소·건물",
+  "loc_nature": "자연",
+  "loc_water": "물",
+  "loc_sky": "하늘·천체",
+  "loc_weather": "날씨·빛",
+  "loc_time": "시간·계절"
+ }
+}

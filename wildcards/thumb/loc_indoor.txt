@@ -1,0 +1,40 @@
+indoors
+window
+wooden floor
+stairs
+tiles
+pool
+onsen
+classroom
+tile floor
+bedroom
+wall
+bathroom
+bathtub
+tile wall
+checkered floor
+kitchen
+shop
+floor
+ceiling
+library
+hallway
+locker room
+restaurant
+reflective floor
+cafe
+wooden wall
+church
+office
+shower (place)
+stone floor
+room
+gym storeroom
+cracked wall
+storefront
+brick floor
+cracked floor
+glory wall
+messy room
+restroom
+fitting room

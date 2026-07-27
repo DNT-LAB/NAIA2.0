@@ -15,8 +15,9 @@
 // 축 정의(팔레트/슬라이더/썸네일/탐색) — wildcards/thumb 에서 생성된 파생 모듈.
 import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
-  PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260726-ax79';
+  PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
+  CLOTH_COMBO, CLOTH_COMBO_REV,
+} from './interactiveAxes.mjs?v=20260727-ax80';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -31,7 +32,10 @@ const COMPOSITION_PRIMARY = ['image_composition', 'composition', 'framing', 'foc
 const SCENE_SLOTS = [
   {id: 'composition', name: '구도', icon: '\u{1F5BC}', axis: 'meta', subgroupInclude: COMPOSITION_PRIMARY},
   {id: 'composition_fx', name: '효과', icon: '✨', axis: 'meta', subgroupExclude: COMPOSITION_PRIMARY},
-  {id: 'background', name: '배경', icon: '\u{1F3DE}', axis: 'location'},
+  // 배경도 썸네일 슬롯이 됐다(295장 8축). 사람이 주인공이 아니라 프레이밍 전제가
+  // 다르다 — 실내는 `scenery` 를 빼야 살고 날씨는 있어야 산다(파일럿 25장).
+  {id: 'background', name: '배경', icon: '\u{1F3DE}', axis: 'location',
+   sections: LOC_SECTIONS},
   {id: 'etc', name: '사물', icon: '⚙', axis: 'object'},   // Food_Object 전용 — '기타'보다 '사물'이 정확(Codex 조사)
   {id: 'pose_multi', name: '다인원 자세', icon: '\u{1F46F}', axis: 'pose_action',
    sections: POSE_MULTI_SECTIONS},

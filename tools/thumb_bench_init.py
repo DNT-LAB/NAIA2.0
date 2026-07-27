@@ -87,6 +87,21 @@ WINGV = (f"1girl, {ARTIST}, young female, solo, from behind, upper body, <<VARY>
 FULL = (f"1girl, {ARTIST}, young female, solo, front view, full body, standing, <<VARY>>, "
         f"nude, safe, rating:general, white background, {QUALITY}")
 
+# ── 배경(location) ──────────────────────────────────────────────────────────
+# 파일럿 25장의 결론: **`scenery` 는 실내를 죽이고 날씨를 살린다.**
+#   classroom + scenery -> 하늘 그림  /  scenery 없이 -> 완벽한 교실 내부
+#   snowing  + scenery -> 설산       /  scenery 없이 -> 눈사람(개념이 틀림)
+# 그리고 아티스트 세트는 인물 일러스트레이터라 풍경에서 하늘·구름이 화면을 먹는다.
+# `wide shot` 은 웅장한 원경으로 끌어당긴다(forest/snowing 이 둘 다 설산).
+# -> 배경 축에서는 아티스트와 wide shot 을 빼고, scenery 를 축별로 켠다.
+SCENERY = (f"no humans, scenery, <<VARY>>, rating:general, {QUALITY}")
+INTERIOR = (f"no humans, <<VARY>>, rating:general, {QUALITY}")
+# 배경 '처리'(white/gradient background, *theme)는 반대로 **주체가 필요하다** —
+# 무엇 뒤에 있는지를 말하는 태그라 인물 없이는 의미가 없다. 여기선 아티스트를 쓴다.
+BACKDR = (f"1girl, {ARTIST}, young female, solo, front view, upper body, <<VARY>>, "
+          f"looking at viewer, white shirt, rating:general, {QUALITY}")
+
+
 def male(tpl: str) -> str:
     """남성 배치 — 1girl/young female 을 바꾼다. 이것만 바꿔야 나머지 톤이 유지된다."""
     return tpl.replace("1girl, ", "1boy, ", 1).replace("young female", "mature male", 1)
@@ -126,6 +141,15 @@ BATCHES = {
     # 넣었다). nude/safe 도 쓰지 않는다 — 의상 자체가 유형의 신호다.
     # cowboy: 머리·표정과 상의가 같이 보여야 유형이 읽힌다.
     "persona":           (PERSONA, 2.0, "cowboy"),   # 성격·유형(tomboy/tsundere/...)
+    # 배경 — 파일럿 25장으로 프레이밍이 세 갈래임을 확인했다(build_location_axes.py).
+    "loc_backdrop":        (BACKDR, 2.0, "loc_backdrop"),
+    "loc_indoor":          (INTERIOR, 2.0, "loc_interior"),
+    "loc_place":           (SCENERY, 2.0, "loc_scenery"),
+    "loc_nature":          (SCENERY, 2.0, "loc_scenery"),
+    "loc_water":           (SCENERY, 2.0, "loc_scenery"),
+    "loc_sky":             (SCENERY, 2.0, "loc_scenery"),
+    "loc_weather":         (SCENERY, 2.0, "loc_scenery"),
+    "loc_time":            (SCENERY, 2.0, "loc_scenery"),
     "expression":        (HEAD, 2.5, "portrait"),    # 감정 표정
     "expression_symbol": (HEAD, 2.5, "portrait"),    # 만화 기호 표정
     "face_shape":        (HEAD, 2.5, "portrait"),    # 눈·입·눈썹 형태

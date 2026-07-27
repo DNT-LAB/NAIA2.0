@@ -78,6 +78,12 @@ _POSE_SECTIONS = [("thumb", _pose_axes["label"][_ax], _ax)
 _POSE_MULTI = [_ax for _ax in _pose_axes["label"]
                if (SRC / f"{_ax}.txt").exists() and _RE_POSE_MULTI.search(_ax)]
 
+# 배경 축은 build_location_axes 가 정하고 `_loc_axes.json` 에 라벨까지 적는다.
+# 자세와 같은 방식 — 여기서 다시 적으면 갈라진다.
+_loc = json.loads((SRC / "_loc_axes.json").read_text(encoding="utf-8"))
+_LOC_SECTIONS = [("thumb", _loc["label"][_ax], _ax)
+                 for _ax in _loc["label"] if (SRC / f"{_ax}.txt").exists()]
+
 # 슬롯 = 사용자가 인지하는 카테고리. 그 안에 축(팔레트/슬라이더/썸네일/탐색)을 배치한다.
 # 팝업이 축을 모아 보여주므로 좌측 슬롯 수를 늘리지 않는다.
 SLOTS = [
@@ -172,7 +178,11 @@ SLOTS = [
         # ⚠️ 목록을 손으로 적었더니 36개 서브그룹 중 19개(259개, 팬티 75·브라 45 포함)가
         #    빠져 탐색기에서 접근 불가가 됐다. 옛 의상 슬롯은 sections 가 없어 전체가
         #    보였는데 섹션을 넣으면서 좁혀버린 것이다. 아래 _BROWSE_* 로 파생시킨다.
-        ("browse", "의상 전체", _BROWSE_WEAR),
+        # 탐색기 전용 1,239개를 분해해 보니 **1,171개(95%)가 의도적 제외분**이었다
+        # (저빈도 824 · 작품/캐릭터 한정 293 · 폐기·모호 17 · 근접 중복 …). 나머지도
+        # 색 조합 59(팔레트로 접근) + 관계형 메타 7 이다. 즉 탐색기는 분류에서
+        # 일부러 뺀 태그를 사용자에게 다시 권하고 있었다 — 트리는 떼고 검색만 남긴다.
+        ("scope", "의상 전체", _BROWSE_WEAR),
     ]),
     ("소품·장식", "\\u{1F452}", "clothing", [
         ("thumb", "모자", "cloth_headwear"),
@@ -192,6 +202,9 @@ SLOTS = [
         # cowboy 화소로는 보이지 않아 1/3이 빈 썸네일이 된다.
         ("thumb", "작은 장신구", "cloth_small"),
         ("thumb", "갑옷", "cloth_armor"),
+        # 소품은 유지한다. 전용 811개 중 **119개가 의상 풀 밖**이고 그중 30개가
+        # freq>=1000 이다 — `animal`(61,629)·`cat`(39,884)·`rabbit`(14,071) 같은
+        # **동물 동반**은 축이 아예 없어 탐색기가 유일한 경로다. 축이 생기면 뗀다.
         ("browse", "소품 전체", _BROWSE_GEAR),
     ]),
     # ── 자세 ────────────────────────────────────────────────────────────────
@@ -280,6 +293,9 @@ _referenced.add("face")
 # 다인원 자세 축은 SLOTS 가 아니라 프론트의 SCENE_SLOTS(POSE_MULTI_SECTIONS)가 참조한다.
 # 여기서 빼면 씬 슬롯이 빈 그리드를 그린다.
 _referenced.update(p.stem for p in SRC.glob("pose_*_m*.txt"))
+# 배경 축도 SLOTS 가 아니라 프론트의 SCENE_SLOTS(LOC_SECTIONS)가 참조한다.
+# 빼면 THUMB_TAGS 에 태그가 없어 씬 슬롯이 빈 그리드를 그린다 — 다인원과 같은 함정.
+_referenced.update(_rf for _kind, _lb, _rf in _LOC_SECTIONS)
 _skipped_axes = [k for k in _axis_files if k not in _referenced]
 _axis_files = [k for k in _axis_files if k in _referenced]
 for key in _axis_files:
@@ -448,6 +464,13 @@ out.append("export const CLOTH_COMBO_REV = {")
 for _tag, _v in sorted(_combo.items()):
     out.append(f"  {js(_tag)}: {js([_v['base'], _v['mod']])},")
 out.append("};")
+out.append("")
+out.append("// 씬 슬롯 '배경' 전용. 사람이 주인공이 아니라 프레이밍 전제가 다르다 —")
+out.append("// 실내는 `scenery` 를 빼야 살고 날씨는 있어야 산다(파일럿 25장).")
+out.append("export const LOC_SECTIONS = [")
+for _k, _lb, _rf in _LOC_SECTIONS:
+    out.append(f"  {{kind: 'thumb', label: {js(_lb)}, ref: {js(_rf)}}},")
+out.append("];")
 out.append("")
 out.append("// 씬 슬롯 '다인원 자세' 전용. 2명 이상이 있어야 성립하는 축들이다.")
 out.append("export const POSE_MULTI_SECTIONS = [")

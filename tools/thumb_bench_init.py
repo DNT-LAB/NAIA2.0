@@ -24,6 +24,27 @@ QUALITY = ("0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-ge
            "best quality, masterpiece, very absurdres, year 2024, year 2025, "
            "-1::widescreen, blurry ::")
 
+# 남성 배치 네거티브 — 여성 톤 제어 토큰을 빼고 `furry male, manly` 를 넣는다(사용자 지시).
+# 프롬프트 쪽 `-1::` 상쇄로는 반대로 넘어갔다(파일럿 8/8이 소녀가 됐다). 완전 수인과
+# '아저씨' 는 네거티브로 잡는 편이 확실하다.
+#   빼는 것: muscular female / {adolescent, mature female} / oldest female
+#            -> 전부 '어린 여성 톤' 을 만들려고 넣은 것이라 남성 베이스에서는 방해만 된다.
+#   넣는 것: furry male(머리까지 짐승) / manly(수염 난 노년)
+# **빼는 것은 `muscular female` 하나뿐이다.** 처음엔 여성 토큰을 전부 뺐는데
+# `{adolescent, mature female}` 가 남성 배치에서도 **유일한 나이 제어**였다 —
+# 빼자 넷 다 수염 난 노년이 됐다(파일럿 4/4). 여성 토큰이라도 톤을 잡아 주므로 둔다.
+MALE_NEG_DROP = ("muscular female",)
+
+
+def male_negative(neg: str) -> str:
+    out = neg
+    for t in MALE_NEG_DROP:
+        out = out.replace(t + ", ", "").replace(", " + t, "").replace(t, "")
+    # `manly` 는 뺐다. 사용자 제안대로 넣어 봤더니 남성성 자체를 눌러 37장 중
+    # 대부분이 소녀로 읽혔다(실측). 수인만 누르는 `furry male` 은 남긴다.
+    return "furry male, " + out
+
+
 # 승인된 이미지에서 그대로 뽑은 네거티브. mature female / adolescent / oldest female /
 # muscular female 을 명시적으로 눌러 '어린 여성' 톤을 유지한다.
 NEGATIVE = (
@@ -42,6 +63,8 @@ NEGATIVE = (
     "[[[[hara (harayutaka), naxius noxy,queasy s, ringsel]]]], dorachan r, upscaled, "
     "[[[dagasi, agwing86]]], oldest female, simply drawn genitalia, unusual genitalia, text"
 )
+
+NEGATIVE_MALE = male_negative(NEGATIVE)
 
 # 승인 이미지 메타데이터 실측값. steps/해상도는 도구가 한 번 더 상한을 강제한다.
 PARAMETERS = {
@@ -147,6 +170,23 @@ def male(tpl: str) -> str:
     """남성 배치 — 1girl/young female 을 바꾼다. 이것만 바꿔야 나머지 톤이 유지된다."""
     return tpl.replace("1girl, ", "1boy, ", 1).replace("young female", "mature male", 1)
 
+
+# 남성 종족 전용. 여섯 번 재서 남은 조합이다(파일럿 30장).
+#   · `1boy, mature male, male focus` — `young male` 은 네거티브의 `{adolescent}` 와
+#     부딪혀 8/8 이 소녀가 됐다. 성인 남성으로 잡는다.
+#   · `animal ears` 명시 — 없으면 `wolf boy` 가 귀를 통째로 잃었다.
+#   · `-1:: furry ... ::` — 완전 수인(머리까지 짐승)은 프롬프트 상쇄만 듣는다.
+#     네거티브의 `furry male` 만으로는 4/4 가 사자·늑대 머리 그대로였다.
+#   · `-1:: beard, facial hair, old ::` — 이게 없으면 5/5 가 수염 난 중년이 된다.
+#     `mature male` 은 나이를 위로 끌기 때문이다.
+#   · 네거티브에서 `manly` 는 **뺐다**. 사용자 제안대로 넣었더니 남성성 자체를 눌러
+#     37장 대부분이 소녀로 읽혔다(전량 실측). `furry male` 만 남긴다.
+_NOFUR = "-1:: furry, furry male, snout, animal nose, body fur ::"
+MALE_SPECIES = (f"1boy, {ARTIST}, mature male, male focus, solo, front view, upper body, "
+                f"<<VARY>>, animal ears, looking at viewer, bare shoulders, nude, safe, "
+                f"{_NOFUR}, -1:: beard, facial hair, old ::, "
+                f"rating:general, white background, {QUALITY}")
+
 BATCHES = {
     # 이미 승인된 레시피(메타데이터 실측)
     "hair_style":        (HEAD, 2.5, "portrait"),
@@ -165,7 +205,14 @@ BATCHES = {
     "state":             (HEAD, 2.5, "portrait"),
     "state_body":        (TORSO, 2.5, "cowboy"),
     "species":           (UPPER, 2.0, "upper"),     # 케모미미는 귀+얼굴+어깨
-    "species_male":      (male(UPPER), 2.0, "upper"),
+    # 남성 종족 36개는 여성 배치(`species`)에 섞여 여성 템플릿으로 나갔다. 결과가
+    # 두 갈래로 깨졌다 — `wolf/tiger/lion boy` 는 **머리까지 짐승**(완전 수인)이고
+    # `cat/dragon/fish boy` 는 **수염 난 노년 남성**이 됐다. 여성 쪽은 전부 케모미미라
+    # 같은 축에 두 종류가 섞여 보인다(사용자 지적).
+    #   · `mature male` 만으로는 나이가 안 잡힌다 -> `young male`(56,921) 로 바꾼다.
+    #     여성의 `young female` 과 대응하는 태그다.
+    #   · 완전 수인은 `-1::` 로 직접 상쇄한다. 맥락 태그로는 안 잡힌다(배경 축 교훈).
+    "species_male":      (MALE_SPECIES, 2.0, "upper"),
     "skin":              (UPPER, 2.0, "upper"),
     "tail":              (TAILV, 2.5, "tail"),
     "wings":             (WINGV, 2.5, "wings"),
@@ -403,7 +450,9 @@ bench = {
     ],
     "defaults": {"model": "nai-diffusion-4-5-full", "weight": 2.0,
                  "negative": NEGATIVE, "parameters": PARAMETERS},
-    "batches": {k: {"template": t, "weight": w, "framing": f}
+    # `_male` 배치만 네거티브를 갈아 끼운다(thumb_bench 가 spec.negative 를 먼저 본다).
+    "batches": {k: ({"template": t, "weight": w, "framing": f}
+                    | ({"negative": NEGATIVE_MALE} if "_male" in k else {}))
                 for k, (t, w, f) in BATCHES.items()},
 }
 OUT.write_text(json.dumps(bench, ensure_ascii=False, indent=2), encoding="utf-8")

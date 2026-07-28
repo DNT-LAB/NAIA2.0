@@ -112,6 +112,7 @@ _species_keep = [t for t in AXES["species"]
 # 아래 EXCLUDE 에 넣어야 유니온(기존 목록 합집합)이 되돌려 넣지 않는다 — 세 번째로 겪는 함정.
 SPECIES_CUT = {t for t in AXES["species"] if t not in _species_keep}
 AXES["species"] = _species_keep
+# 남성형 종족(`cat boy` 등)은 **팩 복원 뒤에** 갈라낸다 — 아래 `_MALE_FORM` 참조.
 
 AXES["ears"] = pool(('ears_tags',))
 AXES["tail"] = pool(('tail',))
@@ -648,6 +649,19 @@ for _k in list(AXES):
            if t in raw and t not in AXES[_k] and EXPLICIT.get(t, _k) == _k]
     if add: kept_below[_k] = add
     AXES[_k] = AXES[_k] + add
+
+# ── 남성형 종족을 갈라낸다 (팩 복원 **뒤에**) ─────────────────────────────
+# 한 축에 섞어 두니 여성 템플릿(`1girl, young female`)으로 전부 생성돼 결과가 두
+# 갈래로 깨졌다(실측): `wolf/tiger/lion boy` 는 **머리까지 짐승**이 됐고
+# `cat/dragon/fish boy` 는 **수염 난 노년 남성**이 됐다. 여성 쪽은 전부 케모미미라
+# 같은 축에 성격이 다른 그림이 섞여 보인다(사용자 지적). 성별은 프레이밍이 아니라
+# **베이스 인물**이 다른 것이라 축을 갈라야 한다(`_male` 접미는 hair_style/face 방식).
+#
+# 위치가 중요하다. 남성형 36개는 대부분 임계값 아래라 pool 에 없고 **팩 복원으로만**
+# 들어온다 — 복원 앞에서 가르면 species_male 이 0 이 된다(실측).
+_MALE_FORM = re.compile(r'(boy|male|man)$')
+AXES["species_male"] = [t for t in AXES["species"] if _MALE_FORM.search(t)]
+AXES["species"] = [t for t in AXES["species"] if not _MALE_FORM.search(t)]
 
 total = 0
 dropped = []

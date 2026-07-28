@@ -1,3 +1,184 @@
+food
+fruit
+candy
+alcohol
+cake
+lollipop
+popsicle
+drink
+ice cream
+chocolate
+strawberry
+apple
+jack-o'-lantern
+pocky
+carrot
+wagashi
+pumpkin
+bread
+tea
+burger
+doughnut
+cookie
+coffee
+mushroom
+beer
+watermelon
+rice
+egg
+cherry
+wine
+dango
+ice cream cone
+peach
+meat
+noodles
+cake slice
+onigiri
+heart-shaped chocolate
+sake
+bubble tea
+lemon
+grapes
+macaron
+milk
+sandwich
+pizza
+pancake
+tomato
+candy apple
+vegetable
+parfait
+chips (food)
+cream
+cupcake
+sushi
+ice cube
+french fries
+baozi
+banana
+pill
+ramen
+cheese
+omelet
+birthday cake
+candy cane
+lemon slice
+shaved ice
+mochi
+pudding
+bento
+dessert
+crepe
+potato chips
+curry
+egg (food)
+strawberry shortcake
+sweets
+swirl lollipop
+whipped cream
+sanshoku dango
+fried egg
+blueberry
+omurice
+baguette
+toast
+ramune
+sweet potato
+lettuce
+chocolate bar
+fish (food)
+taiyaki
+ketchup
+berry
+monster energy
+cotton candy
+coca-cola
+pie
+tempura
+takoyaki
+sausage
+checkerboard cookie
+champagne
+oversized food
+curry rice
+soup
+tropical drink
+pasta
+cup ramen
+energy drink
+popcorn
+cocktail
+boned meat
+pizza slice
+sundae
+pastry
+pancake stack
+bag of chips
+butterfly net
+coconut
+makizushi
+berry (pokemon)
+hot dog
+soda
+snack
+corn
+dumpling
+potato
+honey
+beans
+watermelon bar
+eggplant
+watermelon slice
+butter
+whiskey
+chicken (food)
+cucumber
+crumbs
+steak
+cola
+fast food
+spaghetti
+icing
+kiwi (fruit)
+acorn
+bad food
+onion
+chocolate cake
+ice cream float
+shrimp tempura
+syrup
+bamboo shoot
+salad
+juice
+pineapple
+sugar cube
+food bite
+tamagoyaki
+swiss roll
+lime (fruit)
+broccoli
+ehoumaki
+food art
+croissant
+kagami mochi
+roasted sweet potato
+wheat
+melon
+soft serve
+canned coffee
+marshmallow
+radish
+chili pepper
+fish bone
+melon bread
+saury
+golden apple
+vodka
+butterfly ornament
+sauce
+fried chicken
+bacon
 raspberry
 sprinkles
 wafer stick

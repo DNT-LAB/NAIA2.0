@@ -1,5 +1,4 @@
 book
-bandages
 umbrella
 bandaid
 towel

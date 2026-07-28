@@ -1,3 +1,72 @@
+pillow
+bed sheet
+bed
+chair
+table
+curtains
+couch
+desk
+mirror
+blanket
+bookshelf
+on chair
+school desk
+lamp
+bench
+invisible chair
+stool
+cushion
+shelf
+futon
+school chair
+swivel chair
+armchair
+locker
+throne
+kotatsu
+office chair
+microphone stand
+toilet
+frilled pillow
+carpet
+heart pillow
+clothes hanger
+candlestand
+counter
+rug
+drawer
+beach chair
+wooden table
+park bench
+window blinds
+cabinet
+refrigerator
+chandelier
+window shade
+birdcage
+desk lamp
+stove
+yes-no pillow
+tablecloth
+lounge chair
+fireplace
+chest of drawers
+bar stool
+wheelchair
+zabuton
+wooden chair
+hospital bed
+dakimakura (object)
+folding chair
+gaming chair
+hammock
+bean bag chair
+bulletin board
+mat
+canopy bed
+hanging light
+bath stool
+cupboard
 poker table
 broken mirror
 glass table

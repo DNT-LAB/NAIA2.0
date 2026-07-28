@@ -1,3 +1,43 @@
+motor vehicle
+car
+abyssal ship
+aircraft
+military vehicle
+airplane
+watercraft
+tank
+motorcycle
+bicycle
+boat
+ship
+train
+spacecraft
+drone
+sports car
+thrusters
+steering wheel
+jet
+skateboard
+truck
+fighter jet
+ground vehicle
+helicopter
+crane (machine)
+ufo
+race vehicle
+scooter
+bus
+racecar
+spoiler (automobile)
+mast
+panzer iv
+seatbelt
+rocket
+honda
+inflatable raft
+airship
+cart
+police car
 nissan
 van
 variable fighter

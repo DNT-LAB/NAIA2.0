@@ -1,3 +1,115 @@
+cup
+bottle
+box
+drinking glass
+plate
+gift
+tray
+teacup
+bowl
+mug
+can
+gift box
+disposable cup
+basket
+glass
+wine glass
+bucket
+teapot
+water bottle
+sack
+saucer
+sakazuki
+cardboard box
+beer mug
+coffee mug
+vase
+wine bottle
+heart-shaped box
+test tube
+jar
+tissue box
+beer can
+paper bag
+soda can
+coffee cup
+gourd
+trash can
+cage
+plastic bag
+flower pot
+pot
+sake bottle
+flask
+cocktail glass
+milk bottle
+champagne flute
+vial
+stained glass
+tokkuri
+yunomi
+milk carton
+instrument case
+juice box
+barrel
+choko (cup)
+rice bowl
+lotion bottle
+magnifying glass
+tube
+wooden bucket
+potion
+treasure chest
+cooking pot
+cooler
+picnic basket
+kettle
+soda bottle
+crate
+mixing bowl
+gift bag
+trash bag
+guitar case
+round-bottom flask
+condom box
+pencil case
+school briefcase
+grocery bag
+box of chocolates
+coffin
+spray can
+pet bowl
+blood bag
+bamboo steamer
+wallet
+weapon case
+hourglass
+chalice
+thermos
+glass bottle
+baby bottle
+perfume bottle
+drum (container)
+pizza box
+smartphone case
+beer bottle
+soap bottle
+cigarette pack
+donation box
+bagged fish
+glass shards
+masu
+cauldron
+fruit cup
+inkwell
+coffee pot
+ashtray
+laundry basket
+carton
+canteen
+shampoo bottle
+ketchup bottle
+pitcher (container)
 container
 tea set
 plastic bottle

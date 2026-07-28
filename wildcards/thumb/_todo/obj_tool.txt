@@ -1,4 +1,198 @@
-bandages
+book
+umbrella
+bandaid
+towel
+hand fan
+drinking straw
+poke ball
+paper
+cuffs
+open book
+leash
+spoon
+broom
+chopsticks
+fork
+poke ball (basic)
+ofuda
+pen
+folding fan
+pom pom (cheerleading)
+wand
+clock
+cable
+anchor
+oil-paper umbrella
+key
+paintbrush
+gohei
+handcuffs
+pencil
+string
+syringe
+parasol
+clipboard
+book stack
+smoking pipe
+hammer
+whistle
+tape
+scissors
+scroll
+notebook
+stick
+paper fan
+hose
+quiver
+lock
+cane
+ladle
+envelope
+letter
+fishing rod
+pole
+folded fan
+closed umbrella
+map
+briefcase
+wrench
+talisman
+calligraphy brush
+frying pan
+riding crop
+stethoscope
+needle
+megaphone
+skates
+kiseru
+binoculars
+padlock
+shovel
+ladder
+uchiwa
+surfboard
+quill
+paddle
+paint
+cosmetics
+torch
+newspaper
+toothbrush
+calendar (object)
+wire
+mop
+spatula
+racket
+magazine (object)
+nail
+mallet
+industrial pipe
+eraser
+faucet
+mimikaki
+skewer
+menu
+bendy straw
+sketchbook
+comb
+marker
+tennis racket
+whisk
+ink
+brush
+watering can
+notepad
+pointer
+hair brush
+intravenous drip
+mechanical pencil
+hagoita
+dumbbell
+palette (object)
+tissue
+crime prevention buzzer
+baseball mitt
+handkerchief
+rod of remorse
+cat teaser
+cutting board
+globe
+weighing scale
+bookmark
+flashlight
+ritual baton
+canvas (object)
+sheet music
+lighter
+snorkel
+duster
+mini-hakkero
+reins
+saw
+wall clock
+pendulum
+chalk
+sponge
+napkin
+ruler
+yarn
+ultra ball
+tools
+kine
+drill
+thread
+easel
+pickaxe
+toilet paper
+paper stack
+tongs
+telescope
+dowsing rod
+screw
+yarn ball
+saddle
+screwdriver
+hair dryer
+sticky note
+papers
+hand mirror
+lipgloss
+thermometer
+crayon
+crazy straw
+note
+grill
+stopwatch
+net
+poke ball (legends)
+tape measure
+nib pen (object)
+analog clock
+hauchiwa
+knife sheath
+ball and chain restraint
+makeup brush
+boxcutter
+duel disk
+fishing line
+shopping cart
+dusk ball
+ear protection
+first aid kit
+gauze
+grimoire
+bamboo broom
+pastry bag
+bipod
+pregnancy test
+tripod
+baton (conducting)
+popsicle stick
+clothesline
+ring-con
+folder
+mousetrap
+hook
 vacuum cleaner
 flagpole
 tuanshan

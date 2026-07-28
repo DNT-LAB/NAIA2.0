@@ -1,3 +1,51 @@
+bell
+jingle bell
+instrument
+microphone
+card
+id card
+guitar
+cowbell
+card (medium)
+electric guitar
+chess piece
+trading card
+dice
+drum
+violin
+flute
+piano
+drumsticks
+poker chip
+plectrum
+bass guitar
+board game
+ace (playing card)
+tarot
+trumpet
+gibson les paul
+bow (music)
+keyboard (instrument)
+harp
+rook (chess)
+queen (chess)
+bishop (chess)
+mahjong
+drum set
+lyre
+king (chess)
+ace of hearts
+bass clef
+recorder
+lute (instrument)
+grand piano
+mahjong tile
+ace of spades
+chessboard
+acoustic guitar
+kantele
+knight (chess)
+spell card
 cello
 record
 pawn (chess)

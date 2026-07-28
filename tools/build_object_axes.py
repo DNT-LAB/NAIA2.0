@@ -65,9 +65,20 @@ def main() -> int:
     missing = {sg for sg in set(pool.values())} - set(sub_axis)
     assert not missing, f"축에 배정되지 않은 서브그룹: {sorted(missing)}"
 
+    # 다른 슬롯이 이미 가져간 태그는 넣지 않는다. `bandages` 가 의상->부상 축으로
+    # 이관됐는데 사물 풀에도 있어 두 축에 실렸고, 팩 빌더는 알파벳 순 첫 축이 이기므로
+    # `obj_tool/bandages` 가 영영 안 채워졌다(생성해도 body_condition 으로 간다).
+    # 동물·효과 빌더에는 이 검사가 있었는데 사물에만 없었다.
+    _own = {k for k, _l, _f, _s in AXIS_SPEC}
+    taken = set()
+    for f in OUT.glob("*.txt"):
+        if f.stem.startswith("_") or f.stem in _own:
+            continue
+        taken |= {l.strip() for l in f.read_text(encoding="utf-8").splitlines() if l.strip()}
+
     axes: dict[str, list[str]] = {}
     for tag, sg in pool.items():
-        if F(tag) < CUT:
+        if F(tag) < CUT or tag in taken:
             continue
         axes.setdefault(sub_axis[sg], []).append(tag)
 

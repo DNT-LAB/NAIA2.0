@@ -116,6 +116,15 @@ def _guard_adult(batch: str, positive: str) -> None:
             f"       연령을 만드는 것은 이 태그 하나뿐입니다(실측). 근거는\n"
             f"       wildcards/nsfw/_DEFERRED_body_nsfw.md 참조."
         )
+    if not ("rating:explicit" in positive or "rating:questionable" in positive):
+        raise SystemExit(f"거부: 성인 배치 '{batch}' 에 등급 태그가 없습니다.")
+    missing = [c for c in ("faceless female", "head out of frame", "close-up")
+               if c not in positive]
+    if missing:
+        raise SystemExit(
+            f"거부: 성인 배치 '{batch}' 에 은닉 태그가 빠졌습니다 {missing}.\n"
+            f"       썸네일은 '무슨 행위인지'만 보이면 되고 외형은 안 보여야 합니다."
+        )
 
 
 def payload_for(bench: dict, positive: str, negative: str, seed: int) -> dict:

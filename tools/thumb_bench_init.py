@@ -96,26 +96,44 @@ TORSO = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>
 #   mature female   연령을 만드는 유일한 태그(실측: 빼거나 가슴으로 대체하면 안 움직인다)
 #   medium breasts  연령이 아니라 **일관성** 담당(축 내 실루엣 고정)
 #   faceless female 신원을 지운다(3/3). `head out of frame` 단독은 불안정해 함께 건다
-_ADULT_ID = "faceless female, head out of frame"
+#   close-up        사용자 사양 — "작은 썸네일 상자 안에서 무슨 행위인지만 알면 충분".
+#                   프레이밍이 정보를 깎는 게 아니라 필요한 정보만 남긴다.
 _ADULT_WHO = "mature female, medium breasts"
+_ADULT_CONCEAL = "faceless female, head out of frame, close-up"
+
+# 등급 2단계(사용자 사양).
+#   노골적 — `-1:: rating:general ::` 로 general 을 직접 밀어낸다. 맥락 태그만으로는
+#            NAI 가 안전한 쪽으로 되돌아간다(배경 축에서 배운 것과 같은 성질).
+#   그 외  — questionable. 대부분이 여기 들어간다.
+_RATING_EXPLICIT = "nsfw, rating:explicit, -1:: rating:general ::"
+_RATING_QUEST = "rating:questionable"
 
 
-def adult_base(framing: str) -> str:
-    return (f"1girl, {ARTIST}, {_ADULT_WHO}, solo, front view, {framing}, <<VARY>>, "
-            f"{_ADULT_ID}, close-up, white background, {QUALITY}")
+def adult_base(rating: str) -> str:
+    return (f"1girl, {ARTIST}, {_ADULT_WHO}, solo, front view, <<VARY>>, "
+            f"{_ADULT_CONCEAL}, {rating}, white background, {QUALITY}")
 
 
 # 네거티브에서 `mature female` 을 빼야 한다 — 안 빼면 포지티브와 정면으로 싸운다.
 # `adolescent` 는 남긴다(밀어내는 쪽이라 방향이 맞다).
 NEGATIVE_ADULT = NEGATIVE.replace("{adolescent, mature female}", "{adolescent}")
+# 노골적 쪽은 `safe` 를 네거티브에 넣는다(사용자 사양).
+NEGATIVE_EXPLICIT = "safe, " + NEGATIVE_ADULT
 
-# 성인 축 -> 프레이밍. 축 성격에 맞춘다.
+# 도감 분류 -> 등급. 목록 파일(wildcards/nsfw/<이름>.txt)과 배치 이름이 1:1 이다.
 ADULT_BATCHES = {
-    "cloth_nsfw":     ("cowboy shot", "cowboy"),   # 옷이 주제 — 얼굴 없이도 읽힌다
-    "body_nsfw":      ("cowboy shot", "cowboy"),
-    "pose_nsfw":      ("cowboy shot", "cowboy"),
-    "pose_nsfw_face": (None, None),                # 얼굴이 있어야 성립 -> 자동화 불가
+    # 노골적 — 그림 자체가 해부·체액이다
+    "nsfw_genital": "explicit",   # 43
+    "nsfw_fluid":   "explicit",   # 23
+    "nsfw_nipple":  "explicit",   # 18
+    "nsfw_pubic":   "explicit",   # 9
+    # 그 외 — 무슨 행위/무슨 옷인지만 보이면 된다
+    "nsfw_exposure": "quest",     # 77
+    "nsfw_breast":   "quest",     # 49
+    "nsfw_butt":     "quest",     # 18
+    "nsfw_bondage":  "quest",     # 9
 }
+# `pose_nsfw_face`(3)는 얼굴이 있어야 성립하므로 자동화하지 않는다 — 은닉과 모순된다.
 
 # ── 연령 신호: 가슴 태그로 대체 가능한가 (2026-07-28 실측 12장) ───────────
 # 사용자 제안: `mature female` 대신 `adult female` + `medium breasts`(최대 large).
@@ -273,9 +291,10 @@ BATCHES = {
     #     여성의 `young female` 과 대응하는 태그다.
     #   · 완전 수인은 `-1::` 로 직접 상쇄한다. 맥락 태그로는 안 잡힌다(배경 축 교훈).
     "species_male":      (MALE_SPECIES, 2.0, "upper"),
-    # 성인 축 — 베이스가 고정된다. 목록(`wildcards/nsfw/*.txt`)은 사용자가 큐에 올린다.
-    **{_k: (adult_base(_fr), 2.0, _key)
-       for _k, (_fr, _key) in ADULT_BATCHES.items() if _fr},
+    # 성인 축 — 베이스와 등급이 고정된다. 목록은 사용자가 `_todo/` 에 올린다.
+    **{_k: (adult_base(_RATING_EXPLICIT if _t == "explicit" else _RATING_QUEST),
+            2.0, "cowboy")
+       for _k, _t in ADULT_BATCHES.items()},
     "skin":              (UPPER, 2.0, "upper"),
     "tail":              (TAILV, 2.5, "tail"),
     "wings":             (WINGV, 2.5, "wings"),
@@ -516,7 +535,9 @@ bench = {
     # `_male` 배치만 네거티브를 갈아 끼운다(thumb_bench 가 spec.negative 를 먼저 본다).
     "batches": {k: ({"template": t, "weight": w, "framing": f}
                     | ({"negative": NEGATIVE_MALE} if "_male" in k else {})
-                    | ({"negative": NEGATIVE_ADULT} if k in ADULT_BATCHES else {}))
+                    | ({"negative": NEGATIVE_EXPLICIT
+                        if ADULT_BATCHES.get(k) == "explicit" else NEGATIVE_ADULT}
+                       if k in ADULT_BATCHES else {}))
                 for k, (t, w, f) in BATCHES.items()},
 }
 # 성인 배치가 어린 외형 태그를 갖는 일은 없어야 한다. 손으로 고쳐도 여기서 죽는다.
@@ -529,6 +550,12 @@ for _k in ADULT_BATCHES:
     _bad = [t for t in _DANGER_AGE if t in _spec["template"]]
     assert not _bad, f"성인 배치 {_k} 에 어린 외형 태그: {_bad}"
     assert "mature female" in _spec["template"], f"성인 배치 {_k} 에 mature female 이 없다"
+    # 등급이 빠지면 NAI 가 안전한 쪽으로 되돌아가 무엇을 만들었는지 알 수 없어진다.
+    assert ("rating:explicit" in _spec["template"]
+            or "rating:questionable" in _spec["template"]), f"성인 배치 {_k} 에 등급이 없다"
+    # 은닉 3종은 사용자 사양이다 — 하나라도 빠지면 얼굴이 돌아온다.
+    for _c in ("faceless female", "head out of frame", "close-up"):
+        assert _c in _spec["template"], f"성인 배치 {_k} 에 은닉 태그 없음: {_c}"
 
 OUT.write_text(json.dumps(bench, ensure_ascii=False, indent=2), encoding="utf-8")
 

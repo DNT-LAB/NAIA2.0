@@ -87,6 +87,16 @@ HEAD = (f"1girl, {ARTIST}, young female, solo, front view, portrait, <<VARY>>, "
         f"white background, {QUALITY}")
 TORSO = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
          f"head out of frame, close-up, rating:general, white background, {QUALITY}")
+
+# ── 신원 은닉: 무엇이 실제로 듣는가 (2026-07-28 실측 9장) ────────────────
+# 사용자 질문: "캐릭터 외모 안 보이게 할 방법이 없을까요."
+#   `head out of frame`(12,662) — 머리를 자른다. 다만 **불안정하다**: 몸통 태그에서는
+#     모델이 머리를 다시 넣는다(3장 중 2장이 턱·머리카락이 남았다).
+#   `faceless female`(4,955) — 머리는 두고 **이목구비를 지운다**. 3/3 성공.
+#     신원을 지우는 쪽은 이것이다.
+#   `mature female` — 얼굴과 무관하게 **몸이 성인으로** 바뀐다. 연령 신호는 몸이 낸다.
+# 즉 얼굴을 가려도 연령은 몸이 말하므로, 둘은 대체가 아니라 **함께** 써야 한다.
+# 성인 축 레시피는 wildcards/nsfw/_DEFERRED_body_nsfw.md 에 적어 뒀다(사용자 직접 실행).
 # PERSONA 성격·유형: 의상·표정·머리를 **고정하지 않는다**. 그 셋이 동시에 바뀌는 것이
 # 유형의 정체라, 하나라도 묶으면 태그가 표현할 통로를 잃는다.
 PERSONA = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "

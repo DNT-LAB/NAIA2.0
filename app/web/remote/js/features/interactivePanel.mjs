@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260728-ax95';
+} from './interactiveAxes.mjs?v=20260728-ax99';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -989,6 +989,16 @@ export function createInteractivePanel({
         void renderAside();
         return;
       }
+      // '필요한 것' 버튼은 한 번에 넣는다. 그리드처럼 살펴보기를 거칠 이유가 없다 —
+      // 답이 하나로 정해져 있고, 오클릭이 잦은 150칸 그리드도 아니다(색 조합과 같다).
+      const nd = ev.target.closest('[data-need-add]');
+      if (nd) {
+        // `fromAside` — 플로트에서 넣은 것은 추천 기준(seed)을 옮기지 않는다.
+        // 기준이 따라 움직이면 목록이 갈려서 방금 넣은 것을 되돌릴 수 없다.
+        toggleTag(nd.getAttribute('data-need-add'), { fromAside: true });
+        refreshAxisSections();     // 그리드의 '선택됨' 표시도 맞춘다
+        return;
+      }
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
       const tag = b.getAttribute('data-advice-add');
@@ -1001,6 +1011,9 @@ export function createInteractivePanel({
       }
       inspectTag = '';
       toggleTag(tag, { fromAside: true });
+      // 그리드가 안 따라와서 플로트에서 넣은 태그는 그리드에서 선택 안 된 것처럼
+      // 보였다(setCurrentTags 는 fromInput 일 때만 갱신한다).
+      refreshAxisSections();
     });
     return asideMount;
   }
@@ -1142,17 +1155,33 @@ export function createInteractivePanel({
     }
     // `...r` 를 뒤에 펼치면 r.tag(부모 태그)가 it.tag(고른 태그)를 덮어써서
     // "skirt lift 가 필요합니다" 대신 "skirt 가 필요합니다" 로 나온다. source 로 분리한다.
-    const needs = [];
-    const needSeen = new Set();
+    // **필요한 태그 기준으로 합친다.** 출처별로 나누면 `blazer` + `hooded jacket` 을
+    // 고른 순간 `+ jacket` 이 두 줄로 겹쳐 나온다 — 넣을 것은 하나인데 두 번 권한다.
+    const needMap = new Map();
+    const chosenLower = new Set(tags.map(x => x.toLowerCase()));
     for (const it of items) {
       for (const r of (it.requires || [])) {
-        if (chosenAxes.has(r.axis)) continue;
-        const key = r.axis + '|' + it.tag;
-        if (needSeen.has(key)) continue;      // 같은 축을 두 번 안내하지 않는다
-        needSeen.add(key);
-        needs.push({ axis: r.axis, label: r.label, strong: r.strong, source: it.tag });
+        // 판정은 **태그** 로 한다. 축으로만 보면 `blazer`(상의)를 골랐을 때
+        // `military jacket` 이 요구하는 `jacket` 이 충족된 것으로 처리됐다 —
+        // implication 은 문자 그대로라 다른 상의가 대신하지 못한다.
+        // 태그를 모르는 경우(백엔드가 축만 준 경우)에만 예전 축 판정으로 돌아간다.
+        if (r.tag ? chosenLower.has(String(r.tag).toLowerCase())
+                  : chosenAxes.has(r.axis)) continue;
+        // `r.tag` 가 실제로 넣어야 할 태그다(예: military jacket -> jacket).
+        // 예전엔 `r.label`(축 이름 '상의')만 썼는데 그건 우리 분류지 사용자가 넣을
+        // 수 있는 것이 아니다 — 무엇을 골라야 하는지 알 수 없었다.
+        const key = (r.tag || '#' + r.axis).toLowerCase();
+        const cur = needMap.get(key);
+        if (cur) {
+          if (!cur.sources.includes(it.tag)) cur.sources.push(it.tag);
+          cur.strong = cur.strong || !!r.strong;   // 하나라도 필수면 필수다
+          continue;
+        }
+        needMap.set(key, { axis: r.axis, label: r.label, tag: r.tag || '',
+                           strong: !!r.strong, sources: [it.tag] });
       }
     }
+    const needs = [...needMap.values()];
     // 충돌 — 전용 엔드포인트로 묻는다.
     // 태그별 conflict 목록은 화면용으로 12개까지만 잘라 보내므로, 그걸로 교집합을
     // 구하면 잘린 뒤쪽 쌍을 놓친다(실측: china dress + skirt set 이 안 잡혔다).
@@ -1207,11 +1236,8 @@ export function createInteractivePanel({
     const seedLabel = seed ? seed.tag : '';
 
     const parts = [];
-    if (inspecting) {
-      parts.push('<div class="ia-aside-card ia-aside-inspect">' +
-        `<div class="ia-aside-title">살펴보는 중<span class="ia-aside-count">${escHtml(inspecting)}</span></div>` +
-        '<div class="ia-aside-empty">아직 넣지 않았습니다. 그림 위의 <b>선택</b>을 누르면 들어갑니다.</div></div>');
-    }
+    // '살펴보는 중' 상자는 뒀다가 뺐다 — 무엇을 보고 있는지는 셀의 파란 테두리와
+    // 아래 '함께 쓰는 것 <태그> 기준' 머리말이 이미 말한다. 같은 말을 세 번 하게 된다.
     // 색 조합. `white shirt`(541,974) 처럼 `<색> <옷>` 은 분해해 뒀는데 색을 고를 곳이
     // 없어서, 계층 탐색기가 유일한 경로였다. **마지막에 고른 옷 하나**에만 붙인다 —
     // 슬롯 전체에 색 팔레트를 두면 shirt + skirt 를 고른 뒤 흰색을 눌렀을 때 어느 쪽이
@@ -1226,14 +1252,23 @@ export function createInteractivePanel({
         '</div>');
     }
     if (needs.length) {
-      const strong = needs.filter(n => n.strong);
-      const soft = needs.filter(n => !n.strong);
+      // 강한 것(없으면 제대로 안 나온다)을 위로. 각 줄은 **누를 수 있는 태그**다.
+      const row = n => {
+        const t = n.tag || n.label;          // tag 가 없으면 축 이름으로라도 알린다
+        const can = !!n.tag;
+        const btn = can
+          ? `<button type="button" class="ia-aside-need-btn" data-need-add="${escHtml(t)}"` +
+            ` title="${escHtml(tagTip(t))}">+ ${escHtml(t)}</button>`
+          : `<span class="ia-aside-need-btn is-off">${escHtml(t)}</span>`;
+        return `<div class="ia-aside-need${n.strong ? '' : ' soft'}">${btn}` +
+          '<div class="ia-aside-need-why">' +
+          n.sources.map(x => `<code>${escHtml(x)}</code>`).join(', ') +
+          `${n.strong ? ' 에 필요합니다' : ' 에 있으면 더 좋습니다'}</div></div>`;
+      };
       parts.push('<div class="ia-aside-card"><div class="ia-aside-title">필요한 것' +
         `<span class="ia-aside-count">${needs.length}</span></div>` +
-        strong.map(n => `<div class="ia-aside-hint"><code>${escHtml(n.source)}</code>` +
-          ` — <b>${escHtml(n.label)}</b>${josa(n.label, '을', '를')} 함께 골라야 제대로 나옵니다.</div>`).join('') +
-        soft.map(n => `<div class="ia-aside-hint soft"><code>${escHtml(n.source)}</code>` +
-          ` — ${escHtml(n.label)}${josa(n.label, '을', '를')} 함께 고르면 더 잘 나옵니다.</div>`).join('') +
+        needs.filter(n => n.strong).map(row).join('') +
+        needs.filter(n => !n.strong).map(row).join('') +
         '</div>');
     }
     // '잘 안 어울립니다'(비권장)는 뺐다 — 초보자에게 하지 말라는 목록은 부담만 주고,
@@ -1247,8 +1282,12 @@ export function createInteractivePanel({
         '</div>');
     }
     if (!parts.length) {
-      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">도움말</div>' +
-        '<div class="ia-aside-empty">이 조합에 대해 알려드릴 것이 없습니다. 그대로 쓰셔도 됩니다.</div></div>');
+      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">도움말' +
+        (inspecting ? `<span class="ia-aside-count">${escHtml(inspecting)}</span>` : '') +
+        '</div><div class="ia-aside-empty">' +
+        (inspecting ? '이 태그에 대해 알려드릴 것이 없습니다. 그냥 고르셔도 됩니다.'
+                    : '이 조합에 대해 알려드릴 것이 없습니다. 그대로 쓰셔도 됩니다.') +
+        '</div></div>');
     }
     host.classList.add('open');
     host.innerHTML = parts.join('');

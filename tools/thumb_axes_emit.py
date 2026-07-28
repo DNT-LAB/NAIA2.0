@@ -306,9 +306,37 @@ _referenced.update(_rf for _s in (_OBJ_SECTIONS, _ANI_SECTIONS, _FX_SECTIONS)
                    for _kind, _lb, _rf in _s)
 _skipped_axes = [k for k in _axis_files if k not in _referenced]
 _axis_files = [k for k in _axis_files if k in _referenced]
+# ── 축 색 지정 태그 분리 ──────────────────────────────────────────────────
+# `black headwear` 는 모자가 아니라 색이다. 그리드에 옷과 나란히 두면 `beret` 과
+# 같은 종류로 보인다. 지우지는 않는다 — Danbooru 에 `black hat` 이 없어 이것이
+# "검은 모자"를 말하는 유일한 방법이고, CLOTH_COMBO 에도 모자 베이스가 없다.
+_COLOR_MOD = {
+    "black", "white", "red", "blue", "green", "yellow", "pink", "purple", "orange",
+    "brown", "grey", "gray", "silver", "gold", "beige", "aqua", "navy", "tan",
+    "multicolored", "two-tone", "rainbow",
+    "striped", "checkered", "plaid", "patterned",
+}
+# 분류 우산 — 그 자체로는 그릴 대상이 아니고 '어느 부위인가'만 말한다.
+_UMBRELLA = {"headwear", "footwear", "legwear", "handwear", "neckwear", "eyewear",
+             "headgear", "underwear", "outerwear", "swimwear", "sleeves"}
+# `cloth_pattern` 은 제외한다. 그 축은 '무늬를 옷 전체에 건다'가 정체라
+# 범위가 clothes/sleeves 인 것이 오히려 맞다.
+_COLOR_SKIP_AXES = {"cloth_pattern", "fx_symbol", "fx_effect", "fx_tone"}
+
+def _is_axis_color(tag: str) -> bool:
+    w = tag.split()
+    return (len(w) >= 2 and w[-1] in _UMBRELLA
+            and " ".join(w[:-1]) in _COLOR_MOD)
+
+axis_colors: dict[str, list[str]] = {}
 for key in _axis_files:
     tags = lines(key)
     if not tags: continue
+    if key not in _COLOR_SKIP_AXES:
+        picked = [t for t in tags if _is_axis_color(t)]
+        if picked:
+            axis_colors[key] = picked
+            tags = [t for t in tags if t not in set(picked)]
     out.append(f"  {key}: {js(tags)},")
     framings.setdefault(key, _FRAMING_DEFAULT.get(key, "portrait"))
 # 얼굴 표시 그룹은 파일이 아니라 face.txt 에서 파생된 것이라 따로 등록한다.
@@ -316,6 +344,11 @@ for _k, _v in _groups.items():
     out.append(f"  {_k}: {js(_v)},")
     framings.setdefault(_k, "portrait")
 out.append("};")
+out.append("")
+out.append("// 축 전체에 거는 색·무늬(`black headwear` 류). 그리드가 아니라 그 위 한 줄에")
+out.append("// 나온다 — 옷이 아니라 '그 부위의 색'이라 옷들과 나란히 놓으면 종류를 오해한다.")
+out.append("// 팩 키는 축 그대로라 썸네일도 그대로 쓸 수 있다.")
+out.append(f"export const AXIS_COLOR_TAGS = {js(axis_colors)};")
 out.append("")
 out.append("export const THUMB_FRAMING = " + js(framings) + ";")
 out.append("")

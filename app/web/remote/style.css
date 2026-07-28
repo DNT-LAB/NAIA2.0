@@ -20014,6 +20014,24 @@ body.detached-module .mod-grid-3 {
   margin-top: 4px; font-size: 10.5px; line-height: 1.45; color: var(--text-dim);
 }
 .ia-aside-need-why code { font-family: var(--font-mono); color: var(--text-secondary); }
+/* 축 색 지정 줄 — 그리드 '위'에 둔다(팔레트와 같은 이유: 아래면 그리드에 가린다). */
+.ia-axcolor {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 8px; margin-bottom: 6px;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: rgba(255,255,255,0.02);
+}
+.ia-axcolor-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px;
+  color: var(--text-dim); white-space: nowrap;
+}
+.ia-axcolor .ia-combo-row { flex: 1; min-width: 0; }
+/* 태그 사전 카드(implies / related) — 조언이 없는 태그의 자리를 대신한다. */
+.ia-aside-meta {
+  font-size: 10px; color: var(--text-dim); font-family: var(--font-mono);
+  margin-bottom: 5px;
+}
+.ia-aside-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 6px; }
 .ia-aside-warn {
   font-size: 11.5px; line-height: 1.55; color: #ffb4b4;
   background: rgba(255,80,80,0.07); border-left: 2px solid #ff6b6b;

@@ -17,8 +17,8 @@ import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
-  CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260728-ax99';
+  CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS,
+} from './interactiveAxes.mjs?v=20260728-ax100';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -1018,6 +1018,47 @@ export function createInteractivePanel({
     return asideMount;
   }
 
+  // 태그 사전(자동완성 툴팁이 쓰는 그 데이터). 조언이 없는 태그에도 보여줄 것이 있다.
+  const lookupCache = new Map();
+  async function fetchLookup(tag) {
+    if (!tag) return null;
+    if (lookupCache.has(tag)) return lookupCache.get(tag);
+    let v = null;
+    try {
+      const r = await fetch('/api/tag/lookup?tag=' + encodeURIComponent(tag));
+      v = await r.json();
+      if (v && v.error) v = null;
+    } catch { v = null; }
+    lookupCache.set(tag, v);
+    return v;
+  }
+
+  /** implies/related 를 칩으로. 조언(전제조건·충돌·추천)이 없는 태그가 대부분이라
+   *  '알려드릴 것이 없습니다' 만 띄우던 자리를 이것이 대신한다. */
+  function lookupCardHtml(info) {
+    if (!info) return '';
+    const sel = currentLower();
+    const chip = t => `<button type="button" class="ia-aside-chip${sel.has(String(t).toLowerCase()) ? ' on' : ''}"` +
+      ` data-need-add="${escHtml(t)}">${escHtml(t)}</button>`;
+    const rows = [];
+    if (info.desc) rows.push(`<div class="ia-aside-hint soft">${escHtml(info.desc)}</div>`);
+    if (info.implications && info.implications.length) {
+      rows.push('<div class="ia-aside-group-label">함께 딸려옵니다</div>' +
+        `<div class="ia-aside-chips">${info.implications.map(chip).join('')}</div>`);
+    }
+    if (info.related && info.related.length) {
+      rows.push('<div class="ia-aside-group-label">비슷한 것</div>' +
+        `<div class="ia-aside-chips">${info.related.slice(0, 10).map(chip).join('')}</div>`);
+    }
+    if (!rows.length) return '';
+    const meta = [info.group, info.subgroup].filter(Boolean).join(' / ');
+    return '<div class="ia-aside-card"><div class="ia-aside-title">태그 사전' +
+      `<span class="ia-aside-count">${escHtml(info.tag || '')}</span></div>` +
+      (meta ? `<div class="ia-aside-meta">${escHtml(meta)}` +
+              (info.count ? ` · ${info.count.toLocaleString()}` : '') + '</div>' : '') +
+      rows.join('') + '</div>';
+  }
+
   async function fetchAdvice(tags) {
     const want = tags.filter(t => !adviceCache.has(t));
     if (want.length) {
@@ -1281,14 +1322,14 @@ export function createInteractivePanel({
           `<div class="ia-aside-thumbs">${recThumbsHtml(g.tags)}</div></div>`).join('') +
         '</div>');
     }
-    if (!parts.length) {
-      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">도움말' +
-        (inspecting ? `<span class="ia-aside-count">${escHtml(inspecting)}</span>` : '') +
-        '</div><div class="ia-aside-empty">' +
-        (inspecting ? '이 태그에 대해 알려드릴 것이 없습니다. 그냥 고르셔도 됩니다.'
-                    : '이 조합에 대해 알려드릴 것이 없습니다. 그대로 쓰셔도 됩니다.') +
-        '</div></div>');
-    }
+    // 조언(전제조건·충돌·추천)은 태그 대부분에 없다. 그 자리에 '알려드릴 것이
+    // 없습니다' 를 띄우면 상자만 남는다 — 대신 태그 사전(implies/related)을 보여준다.
+    const info = await fetchLookup(seedTag);
+    if (seq !== asideSeq || !panelContext) return;
+    const dict = lookupCardHtml(info);
+    if (dict) parts.push(dict);
+    // 그래도 아무것도 없으면 아예 닫는다. 빈 상자는 자리만 먹는다(사용자 지적).
+    if (!parts.length) { host.classList.remove('open'); host.innerHTML = ''; return; }
     host.classList.add('open');
     host.innerHTML = parts.join('');
     positionAside();
@@ -1792,6 +1833,41 @@ export function createInteractivePanel({
 
   /** 3열 그리드 박스 + 아코디언. 한 번에 하나의 썸네일 섹션만 펼친다(시각 소음 감소).
    *  펼친 섹션은 3줄 높이만 보이고 나머지는 박스 안에서 스크롤한다(우측 스크롤바). */
+  /** 축 전체에 거는 색·무늬 줄. `black headwear` 는 모자가 아니라 색이라
+   *  그리드에 옷과 나란히 두면 `beret` 과 같은 종류로 보인다(사용자 지적).
+   *  지우지 않는 이유 — Danbooru 에 `black hat` 이 없어 이것이 "검은 모자"를 말하는
+   *  유일한 방법이고, CLOTH_COMBO 에도 모자·신발 베이스가 없다. */
+  function axisColorRowHtml(axis) {
+    const list = (AXIS_COLOR_TAGS || {})[axis] || [];
+    if (!list.length) return '';
+    const sel = currentLower();
+    const have = thumbHave.get(packAxisOf(axis)) || new Set();
+    const cells = list.map(t => {
+      const mod = t.split(' ').slice(0, -1).join(' ');
+      const on = sel.has(t.toLowerCase());
+      const sw = COMBO_SWATCH[mod];
+      const dot = sw
+        ? `<span class="ia-combo-dot" style="background:${sw}"></span>`
+        : `<span class="ia-combo-dot is-${escHtml(mod)}"></span>`;
+      // 이미 만들어 둔 썸네일이 그대로 살아 있다(팩 키가 축 그대로다).
+      const tip = have.has(t) ? `${t} — 이 부위 전체에 겁니다` : t;
+      return `<button type="button" class="ia-combo${on ? ' on' : ''}"
+        data-axcolor="${escHtml(axis)}" data-axcolor-tag="${escHtml(t)}"
+        title="${escHtml(tip)}">${dot}${escHtml(COMBO_LABEL[mod] || mod)}</button>`;
+    }).join('');
+    return `<div class="ia-axcolor"><span class="ia-axcolor-label">색·무늬</span>` +
+      `<div class="ia-combo-row">${cells}</div></div>`;
+  }
+
+  /** 축 안에서 배타 — `black headwear` 와 `striped headwear` 는 동시에 못 쓴다. */
+  function applyAxisColor(axis, tag) {
+    const owned = new Set(((AXIS_COLOR_TAGS || {})[axis] || []).map(x => x.toLowerCase()));
+    const cur = currentTags();
+    const had = cur.some(x => x.toLowerCase() === tag.toLowerCase());
+    const kept = cur.filter(x => !owned.has(x.toLowerCase()));
+    setCurrentTags(had ? kept : kept.concat([tag]));
+  }
+
   function thumbHtml(sec) {
     const axis = sec.ref;
     const full = THUMB_TAGS[axis] || [];
@@ -1845,7 +1921,7 @@ export function createInteractivePanel({
       ? paletteHtml({ref: sec.extraPalette, label: '추가 색상'}, {extra: true})
       : '';
     return {tab, pane: `<div class="ia-ax-row is-open">
-      <div class="ia-cell-wrap">${mainPal}${extra}
+      <div class="ia-cell-wrap">${mainPal}${extra}${axisColorRowHtml(axis)}
         <div class="ia-cell-grid" data-scroll-ax="${escHtml(axis)}">${cells}</div></div>
     </div>`};
   }
@@ -1880,6 +1956,13 @@ export function createInteractivePanel({
   function bindAxisSections() {
     const host = panelMount.querySelector('#iaAxes');
     if (!host) return;
+    host.querySelectorAll('[data-axcolor]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        applyAxisColor(el.dataset.axcolor, el.dataset.axcolorTag);
+        refreshAxisSections();
+      });
+    });
     host.querySelectorAll('[data-ax]').forEach(el => {
       el.addEventListener('click', event => {
         event.stopPropagation();

@@ -391,11 +391,19 @@ FACE_CONDITION = [
     'steam from mouth', 'slap mark on face', 'veiny face',
     'blood on mouth', 'tipsy', 'headache', 'mouth submerged', 'hangover',
 ]
-FACE_NSFW = [
-    'naughty face', 'seductive smile', 'moaning', 'body blush',
-    'shoulder blush', 'knee blush', 'full-body blush',
+# ⚠️ 이 7개를 `body_nsfw` 로 보낸 것은 **내 오분류였다**(2026-07-28 정정).
+# 성적 함의가 있다고 판단했지만 화면에 보이는 것은 **표정과 홍조**다 — 노출이 아니다.
+# `naughty face`(14,948)·`seductive smile`(6,925) 는 표정이고, `body blush` 계열은
+# 홍조 범위다. 성인 축에 두면 그 축은 보류라 영영 안 나온다.
+FACE_EXPR_MISFILED = [
+    'naughty face', 'seductive smile', 'moaning',
 ]
-AXES["expression"] = [t for t in EXPRESSION_EMOTION if t in raw]
+BLUSH_MISFILED = [
+    'body blush', 'shoulder blush', 'knee blush', 'full-body blush',
+]
+FACE_NSFW = []
+AXES["expression"] = ([t for t in EXPRESSION_EMOTION if t in raw]
+                      + [t for t in FACE_EXPR_MISFILED if t in raw])
 # 자세 분류에서 넘어온 눈 태그(rubbing eyes, averting eyes ...). 전신 축으로 갈 뻔한
 # 것을 build_pose_axes 가 얼굴 스케일로 돌려 `expression_from_pose.txt` 에 적어 둔다.
 # 여기서 합치지 않으면 파일만 있고 어느 축에도 안 속해 팩에서 통째로 빠진다.
@@ -405,6 +413,9 @@ if _FROM_POSE.exists():
     _seen = set(AXES["expression"])
     AXES["expression"] += [t for t in _extra if t in raw and t not in _seen]
 AXES["expression_symbol"] = [t for t in EXPRESSION_SYMBOL if t in raw]
+# 홍조는 `홍조·눈물·땀` 축이 이미 담당한다.
+AXES["expression_state"] = (AXES.get("expression_state", [])
+                            + [t for t in BLUSH_MISFILED if t in raw])
 
 # ── 성격·유형(persona) ──────────────────────────────────────────────────────
 # 태그 DB 가 이미 `Expression_Action/personality` 로 분류해 둔 것을 그대로 쓴다.

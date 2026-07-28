@@ -90,7 +90,6 @@ shirt tucked in
 hand between legs
 holding staff
 pulling own clothes
-empty eyes
 wide-eyed
 head rest
 hands on own hips
@@ -145,6 +144,7 @@ looking ahead
 outstretched hand
 heart hands
 on head
+unbuttoned
 adjusting hair
 drinking
 hand to own mouth
@@ -152,6 +152,7 @@ holding polearm
 holding microphone
 w
 pose
+partially unbuttoned
 panties around one leg
 hand on own chin
 open hand
@@ -199,9 +200,7 @@ holding spoon
 pants pull
 bikini pull
 tying hair
-blank eyes
 holding chopsticks
-sparkling eyes
 holding fruit
 trigger discipline
 pigeon-toed
@@ -246,7 +245,6 @@ holding card
 hands on own cheeks
 holding strap
 pillow hug
-half-closed eye
 shushing
 shouting
 open hands
@@ -272,7 +270,6 @@ elbow rest
 playing games
 holding bowl
 recording
-tomboy
 hands on own knees
 holding mask
 bra pull
@@ -334,7 +331,6 @@ holding doll
 holding smoking pipe
 toe scrunch
 knees to chest
-crazy eyes
 holding basket
 afloat
 on shoulder
@@ -365,9 +361,7 @@ holding arrow
 frogtie
 have to pee
 holding syringe
-tsundere
 giving
-narrowed eyes
 watson cross
 food on head
 writing
@@ -385,7 +379,6 @@ clothes in mouth
 holding sign
 hugging doll
 hand on own leg
-rubbing eyes
 playing with own hair
 petting
 holding lantern
@@ -413,7 +406,6 @@ jack-o' challenge
 leotard pull
 smelling
 shirt tug
-averting eyes
 in tree
 hands on own head
 spilling
@@ -437,7 +429,6 @@ on bench
 hand on eyewear
 holding brush
 sleeping upright
-upturned eyes
 fetal position
 two-handed
 horseback riding
@@ -471,8 +462,10 @@ holding scissors
 holding water gun
 hands in opposite sleeves
 drying
+buttoned cuffs
 tied up (nonsexual)
 index fingers together
+butterfly on hand
 teasing
 tickling
 tail wrap
@@ -482,7 +475,6 @@ holding hose
 pyrokinesis
 fishing
 double fox shadow puppet
-unusually open eyes
 animal hug
 holding jacket
 leg hold
@@ -554,7 +546,6 @@ belly grab
 animal on lap
 presenting foot
 sitting on stairs
-jimiko
 hands on feet
 holding ribbon
 cleaning
@@ -629,8 +620,6 @@ sitting on table
 lap pillow invitation
 hand gesture
 clothes between thighs
-eyelid pull
-covering one eye
 fanning self
 holding remote control
 holding needle
@@ -705,7 +694,6 @@ holding mop
 glove biting
 hand on forehead
 hand over eye
-chuunibyou
 holding leg
 holding heart
 chained wrists
@@ -714,12 +702,12 @@ swinging
 holding drumsticks
 jacket lift
 arm on knee
+popped button
 toast in mouth
 holding pizza
 looking at own belly
 soccer
 thong aside
-mesugaki
 hand on headphones
 confession
 holding pole
@@ -807,6 +795,7 @@ holding plectrum
 sitting sideways
 bikini bottom pull
 holding binoculars
+butterfly sitting
 food on hand
 on stool
 casting spell
@@ -891,6 +880,7 @@ fruit on head
 x fingers
 fingers to mouth
 calligraphy
+flying button
 blowing smoke
 chess
 on scooter
@@ -1030,7 +1020,6 @@ apologizing
 hands on headphones
 slouching
 catching
-evil eyes
 coat partially removed
 dying
 on pillow
@@ -1126,6 +1115,7 @@ holding skirt
 sliding
 tossing
 blood in mouth
+holding butterfly net
 holding club
 holding flower pot
 sweater tug
@@ -1149,6 +1139,7 @@ world war i
 breathing on hands
 holding string
 money gesture
+butterfly on head
 clothes in front
 sweeping
 knitting
@@ -1252,7 +1243,6 @@ cardigan lift
 cat's cradle
 holding cooking pot
 knee to chest
-messy sleeper
 hanged
 hatching
 holding mushroom
@@ -1320,6 +1310,7 @@ hand in pants
 mouse on head
 pajamas pull
 sarong lift
+unbuttoning
 against rock
 constriction
 double thumbs up
@@ -1365,6 +1356,7 @@ sumo
 t-pose
 finger to head
 arabesque (pose)
+butterfly on nose
 holding bomb
 holding rock
 licking weapon
@@ -1498,7 +1490,6 @@ hand on own throat
 holding boxcutter
 undone bikini
 adjusting headphones
-clumsy
 hanging food
 holding scale
 holding stomach
@@ -1539,6 +1530,7 @@ howling
 knife in mouth
 drumming
 reverse prayer
+buttoning
 flipping food
 hands on own arms
 on mecha

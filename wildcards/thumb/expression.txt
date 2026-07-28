@@ -12,6 +12,7 @@ angry
 empty eyes
 serious
 pout
+naughty face
 smirk
 smug
 light frown
@@ -19,6 +20,7 @@ rolling eyes
 laughing
 scared
 evil smile
+seductive smile
 nervous
 blank eyes
 annoyed
@@ -27,6 +29,7 @@ sad
 sleepy
 half-closed eye
 wince
+moaning
 shy
 streaming tears
 nervous smile

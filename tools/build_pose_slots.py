@@ -54,8 +54,11 @@ MEASURED_PATH = OUT / "_pose_measured.json"
 RE_OWN = re.compile(r"\bown\b")
 RE_OTH = re.compile(r"another's|other's")
 # 성기·가슴·엉덩이 접촉 계열은 성인 축이 따로 담당한다.
+# `butt` 에 단어 경계를 빼먹어 **butterfly·button·headbutt 13개**를 삼켰다
+# (`unbuttoned` 11,251 · `butterfly on hand` 1,419 …). `\bass\b` 는 경계를 걸어
+# 뒀는데 바로 옆의 butt 만 놓쳤다 — 부분문자열은 반드시 경계를 건다.
 RE_NSFW = re.compile(r"(penis|pussy|balls|testicl|nipple|anus|genital|cum\b|breast"
-                     r"|\bass\b|butt|crotch|masturbat|fellatio|paizuri)")
+                     r"|\bass\b|\bbutt(s|ocks)?\b|crotch|masturbat|fellatio|paizuri)")
 # 데이터가 "변형을 쓰라"고 명시한 우산 태그.
 RE_REDIRECT = re.compile(r"(참고하세요|중 하나를|를 사용|모호한 태그)")
 

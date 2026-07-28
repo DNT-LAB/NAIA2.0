@@ -13,7 +13,6 @@ hug from behind
 arm grab
 headpat
 hand on another's face
-rolling eyes
 leg grab
 back-to-back
 facing another
@@ -21,7 +20,6 @@ face-to-face
 holding another's wrist
 princess carry
 torso grab
-assertive female
 imminent kiss
 sitting on lap
 battle
@@ -387,6 +385,7 @@ pushing down
 holding another's waist
 pushing face
 cheek biting
+headbutt
 headshot
 blowing in ear
 shoulder massage

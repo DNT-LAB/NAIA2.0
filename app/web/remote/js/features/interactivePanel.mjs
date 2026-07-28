@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS,
-} from './interactiveAxes.mjs?v=20260728-ax101';
+} from './interactiveAxes.mjs?v=20260728-ax102';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -489,6 +489,18 @@ export function createInteractivePanel({
   }
 
   function renderBlocks() {
+    // **편집 중 textarea 는 이 함수가 통째로 다시 만든다.** 포커스가 거기 있었다면
+    // 재렌더 뒤 body 로 떨어지고, 그 blur 가 '바깥 클릭' 으로 잡혀 팝업이 닫힌다.
+    // 조언 플로트의 색 버튼(`black jacket`)이 renderBlocks 를 부르는 유일한 경로라
+    // 색만 고르면 팝업이 닫혔다(사용자 지적). 캐럿 위치까지 그대로 되돌린다.
+    const prevEl = document.activeElement;
+    const keepFocus = !!(prevEl && prevEl.classList
+                         && prevEl.classList.contains('ia-slot-input')
+                         && blocksMount.contains(prevEl));
+    let caret = null;
+    if (keepFocus) {
+      try { caret = [prevEl.selectionStart, prevEl.selectionEnd]; } catch (_) { caret = null; }
+    }
     const floating = sceneFloatFits();
     // 편집 중인 씬 슬롯은 **인라인으로 남긴다.** 태그를 직접 치는 textarea 가 그
     // 블록 안에 있어서, 전부 버튼으로 빼면 입력창이 사라진다(실측).
@@ -503,6 +515,14 @@ export function createInteractivePanel({
     // 하면 버튼은 생기는데 플로트가 안 열렸다). 레이아웃이 잡힌 다음 프레임에 한 번 더
     // 판정해 순서 의존을 없앤다.
     requestAnimationFrame(positionSceneFloat);
+
+    if (keepFocus) {
+      const ta = editingEl()?.querySelector('.ia-slot-input');
+      if (ta) {
+        ta.focus();
+        if (caret) { try { ta.setSelectionRange(caret[0], caret[1]); } catch (_) {} }
+      }
+    }
 
     blocksMount.querySelectorAll('.ia-block:not(.is-character)').forEach(el => {
       el.addEventListener('click', event => {

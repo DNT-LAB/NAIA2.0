@@ -19999,7 +19999,7 @@ body.detached-module .mod-grid-3 {
    "이런 게 있다"를 알리는 용도라 이 크기로 충분하다. */
 .ia-aside-thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
 .ia-aside-thumb {
-  display: flex; flex-direction: column; gap: 0; padding: 0; cursor: pointer;
+  display: flex; flex-direction: column; gap: 0; padding: 0; cursor: help;
   background: none; border: 1px solid var(--border-dim); border-radius: 7px;
   overflow: hidden; text-align: center;
 }
@@ -20352,9 +20352,19 @@ body.detached-module .mod-grid-3 {
   /* gap 을 0 으로. 3px 틈에 카드 배경이 드러나 캡션을 색칠하면 검은 띠가 됐다. */
   display: flex; flex-direction: column; gap: 0; padding: 0;
   border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden;
-  background: var(--bg-card); cursor: pointer; text-align: center;
+  /* 손가락 커서는 '누르면 적용'을 뜻해 [선택] 버튼과 구분이 안 됐다 — 버튼 밖에서도
+     손가락이 떠서 눌렀는데 아무 일이 없다는 지적. 셀 본문은 '살펴보기'라 `help` 다. */
+  background: var(--bg-card); cursor: help; text-align: center;
 }
 .ia-cell:hover { border-color: var(--accent); }
+/* 살펴보는 중인 셀 — 오른쪽 조언 플로트가 이 태그를 설명하고 있다는 표시.
+   선택(`.on`, 보라 테두리)과 겹칠 수 있으므로 색을 다르게 쓴다. */
+/* 색은 변수로 두지 않는다 — `--accent-glow` 를 썼더니 보라로 풀려 선택(`.on`)과
+   구분이 안 됐다. 선택=보라, 살펴보기=파랑으로 갈라 둔다. */
+.ia-cell.is-inspect, .ia-aside-thumb.is-inspect {
+  border-color: #7cc4ff;
+  box-shadow: 0 0 0 2px rgba(124, 196, 255, 0.32);
+}
 /* 선택된 셀은 누르지 않아도 캡션까지 강조한다 — 테두리만으로는 150칸 안에서
    찾기 어렵다는 실사용 지적. */
 .ia-cell.on { border: 2px solid var(--accent); background: rgba(124,106,239,0.14); }

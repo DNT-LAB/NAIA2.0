@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260728-ax93';
+} from './interactiveAxes.mjs?v=20260728-ax95';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -953,6 +953,21 @@ export function createInteractivePanel({
 
   let asideMount = null;
   let lastPicked = '';    // 추천의 기준이 되는 마지막 선택 태그
+  // 살펴보는 중인 태그(아직 안 고른 것). 셀 본문을 누르면 여기 들어오고,
+  // 조언 플로트가 선택분 대신 이 태그를 기준으로 그려진다.
+  let inspectTag = '';
+
+  /** 살펴보기 표시만 옮긴다. 그리드를 다시 그리면 345칸 축에서 34ms 가 드는데,
+   *  바뀌는 것은 테두리 하나뿐이라 그만한 값이 없다(사용자 성능 기준). */
+  function markInspect() {
+    document.querySelectorAll('.ia-cell.is-inspect, .ia-aside-thumb.is-inspect')
+      .forEach(e => e.classList.remove('is-inspect'));
+    if (!inspectTag) return;
+    document.querySelectorAll('[data-val], [data-advice-add]').forEach(e => {
+      const t = e.getAttribute('data-val') || e.getAttribute('data-advice-add');
+      if (t === inspectTag) e.classList.add('is-inspect');
+    });
+  }
   let asideSeq = 0;
   const adviceCache = new Map();
 
@@ -976,9 +991,16 @@ export function createInteractivePanel({
       }
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
-      // 그리드와 같은 규칙 — 버튼을 눌렀을 때만 실행한다.
-      if (!ev.target.closest('.ia-cell-act')) return;
-      toggleTag(b.getAttribute('data-advice-add'), { fromAside: true });
+      const tag = b.getAttribute('data-advice-add');
+      // 그리드와 같은 규칙 — 본문은 살펴보기, 버튼이 실행이다.
+      if (!ev.target.closest('.ia-cell-act')) {
+        inspectTag = inspectTag === tag ? '' : tag;
+        markInspect();
+        void renderAside();
+        return;
+      }
+      inspectTag = '';
+      toggleTag(tag, { fromAside: true });
     });
     return asideMount;
   }
@@ -1015,7 +1037,8 @@ export function createInteractivePanel({
         : '<span class="ia-aside-thumb-none"></span>';
       const on = typeof o === 'object' && o.on;
       // 그리드와 같은 규칙 — 라벨은 항상 태그 이름이고, 행동은 호버 버튼이 맡는다.
-      const cls = 'ia-aside-thumb' + (match ? ' match' : '') + (on ? ' on' : '');
+      const cls = 'ia-aside-thumb' + (match ? ' match' : '') + (on ? ' on' : '')
+        + (inspectTag === t ? ' is-inspect' : '');
       const tip = on ? `${t} — 이미 넣었습니다` :
         (match ? `${t} — 지금 고른 것들과도 어울립니다` : t);
       const act = `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
@@ -1094,14 +1117,20 @@ export function createInteractivePanel({
     if (!panelContext) { host.classList.remove('open'); host.innerHTML = ''; return; }
     const tags = currentTags();
     const seq = ++asideSeq;
-    if (!tags.length) {
+    // 살펴보는 태그는 **아직 고르지 않은 것**이라 currentTags 에 없다. 조언을 받으려면
+    // 조회 목록에는 넣되, '이미 고른 것' 판정에는 넣지 않는다.
+    const inspecting = inspectTag &&
+      !tags.some(x => x.toLowerCase() === inspectTag.toLowerCase()) ? inspectTag : '';
+    const askTags = inspecting ? [inspecting, ...tags] : tags;
+    if (!askTags.length) {
       host.classList.add('open');
       host.innerHTML = '<div class="ia-aside-card"><div class="ia-aside-title">도움말</div>' +
-        '<div class="ia-aside-empty">태그를 고르면 필요한 것과 어울리는 조합을 여기에 보여줍니다.</div></div>';
+        '<div class="ia-aside-empty">그림을 누르면 그 태그의 설명과 어울리는 조합을 여기에 보여줍니다. ' +
+        '넣는 것은 그림 위의 <b>선택</b> 버튼입니다.</div></div>';
       positionAside();
       return;
     }
-    const items = await fetchAdvice(tags);
+    const items = await fetchAdvice(askTags);
     if (seq !== asideSeq || !panelContext) return;   // 그 사이 슬롯이 바뀌었다
 
     // 전제조건 — 아직 안 고른 축만 알린다. 이미 골랐으면 안내할 이유가 없다.
@@ -1131,7 +1160,7 @@ export function createInteractivePanel({
     let clashes = [];
     try {
       const cr = await fetch('/api/interactive-advice/conflicts?tags=' +
-        encodeURIComponent(tags.slice(0, 40).join(',')));
+        encodeURIComponent(askTags.slice(0, 40).join(',')));
       const cj = await cr.json();
       clashes = (cj.pairs || []).map(p => [p.a, p.b]);
     } catch { clashes = []; }
@@ -1147,9 +1176,10 @@ export function createInteractivePanel({
     // 추가할 때마다 그 태그가 기준이 되어 목록이 갈리고, 방금 넣은 것을 되돌릴 수 없다.
     // 기준이 목록에서 빠졌을 때만(직접 지웠을 때) 다시 잡는다.
     if (!lastPicked || !lower.has(lastPicked.toLowerCase())) {
-      lastPicked = tags[tags.length - 1];
+      lastPicked = tags[tags.length - 1] || '';
     }
-    const seedTag = lastPicked;
+    // 살펴보는 중이면 그것이 기준이다 — 사용자가 방금 "이건 뭔가요" 하고 누른 것이다.
+    const seedTag = inspecting || lastPicked;
     const seed = items.find(it => it.tag === seedTag) || items[items.length - 1];
     // 나머지 선택분도 추천하는 것 = 옷 전체와 어울리는 것 -> 강조한다.
     const others = new Set();
@@ -1177,6 +1207,11 @@ export function createInteractivePanel({
     const seedLabel = seed ? seed.tag : '';
 
     const parts = [];
+    if (inspecting) {
+      parts.push('<div class="ia-aside-card ia-aside-inspect">' +
+        `<div class="ia-aside-title">살펴보는 중<span class="ia-aside-count">${escHtml(inspecting)}</span></div>` +
+        '<div class="ia-aside-empty">아직 넣지 않았습니다. 그림 위의 <b>선택</b>을 누르면 들어갑니다.</div></div>');
+    }
     // 색 조합. `white shirt`(541,974) 처럼 `<색> <옷>` 은 분해해 뒀는데 색을 고를 곳이
     // 없어서, 계층 탐색기가 유일한 경로였다. **마지막에 고른 옷 하나**에만 붙인다 —
     // 슬롯 전체에 색 팔레트를 두면 shirt + skirt 를 고른 뒤 흰색을 눌렀을 때 어느 쪽이
@@ -1243,6 +1278,7 @@ export function createInteractivePanel({
     if (browse) browse.detach();
     openId = null;
     panelContext = null;
+    inspectTag = '';
     panelMount.classList.remove('open');
     panelMount.innerHTML = '';
     if (asideMount) { asideMount.classList.remove('open'); asideMount.innerHTML = ''; }
@@ -1755,7 +1791,7 @@ export function createInteractivePanel({
       // 이중 클릭 시절에는 캡션이 상태와 행동을 번갈아 맡아 읽기 어려웠다.
       const act = isLocked ? '' :
         `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
-      return `<div class="ia-cell${on ? ' on' : ''}${isLocked ? ' is-locked' : ''}${sens ? ' is-sensitive' : ''}"
+      return `<div class="ia-cell${on ? ' on' : ''}${isLocked ? ' is-locked' : ''}${sens ? ' is-sensitive' : ''}${inspectTag === t ? ' is-inspect' : ''}"
         data-ax="thumb" data-ref="${escHtml(axis)}" data-val="${escHtml(t)}"
         aria-pressed="${on}" title="${escHtml(tagTip(t))}${isLocked ? ' (자동 · 해제 불가)' : ''}">
         <span class="ia-cell-img">${media}${sens ? '<span class="ia-cell-veil">보기</span>' : ''}${act}</span>
@@ -1810,10 +1846,16 @@ export function createInteractivePanel({
         event.stopPropagation();
         const {ax, ref, val} = el.dataset;
         if (ax === 'thumb') {
-          // **[선택]/[제거] 버튼을 눌렀을 때만** 실행한다. 셀의 나머지(그림·이름)를
-          // 눌러도 아무 일이 없다 — 한 축이 최대 150칸이라 그리드를 훑다 스치는
-          // 클릭이 잦고, 그걸 막으려고 넣었던 이중 클릭은 오히려 불편했다.
-          if (!event.target.closest('.ia-cell-act')) return;
+          // 셀 본문 = 살펴보기, [선택]/[제거] 버튼 = 실행. 둘을 가르는 이유는
+          // 한 축이 최대 150칸이라 그리드를 훑다 스치는 클릭이 잦기 때문이다 —
+          // 스쳐도 프롬프트는 안 변하고 오른쪽 설명만 바뀐다.
+          if (!event.target.closest('.ia-cell-act')) {
+            inspectTag = inspectTag === val ? '' : val;   // 같은 셀 = 해제
+            markInspect();
+            void renderAside();
+            return;
+          }
+          inspectTag = '';                 // 넣었으면 그 태그가 기준이 된다
           pickThumb(ref, val);                                   // 조합 가능(+부모 태그 규칙)
         }
         else if (ax === 'palette') setMainColor(ref, val);       // 주 색상 = 항상 하나

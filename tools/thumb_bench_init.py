@@ -88,6 +88,16 @@ HEAD = (f"1girl, {ARTIST}, young female, solo, front view, portrait, <<VARY>>, "
 TORSO = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
          f"head out of frame, close-up, rating:general, white background, {QUALITY}")
 
+# ── 연령 신호: 가슴 태그로 대체 가능한가 (2026-07-28 실측 12장) ───────────
+# 사용자 제안: `mature female` 대신 `adult female` + `medium breasts`(최대 large).
+#   `adult female` — **freq 0. 데이터에 없는 태그다.** 써도 아무 일도 안 일어난다.
+#   `medium breasts`(556,726) / `large breasts`(958,454) — 실재하지만 **연령을 안 잡는다**:
+#     X2 medium 만        -> 가슴만 줄고 몸틀은 오히려 더 어려 보인다
+#     X3 large 만         -> 가슴은 커지는데 어깨·허리 비율은 어린 채다
+#                            (= '어린 몸틀 + 큰 가슴' — 피하려던 조합에 더 가깝다)
+#     X4 mature + medium  -> X1(mature 단독)과 사실상 동일. mature 가 지배한다
+# 결론: 연령을 만드는 것은 **몸틀**이고 그것을 움직이는 태그는 `mature female` 뿐이다.
+# 가슴 태그는 연령 제어가 아니라 **일관성 제어**로는 쓸 만하다(축 전체 가슴 크기 고정).
 # ── 신원 은닉: 무엇이 실제로 듣는가 (2026-07-28 실측 9장) ────────────────
 # 사용자 질문: "캐릭터 외모 안 보이게 할 방법이 없을까요."
 #   `head out of frame`(12,662) — 머리를 자른다. 다만 **불안정하다**: 몸통 태그에서는

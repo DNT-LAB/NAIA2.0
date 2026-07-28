@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260728-ax85';
+} from './interactiveAxes.mjs?v=20260728-ax87';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -458,6 +458,7 @@ export function createInteractivePanel({
 
   // 팝업의 CSS 기본 top. 버튼 줄은 여기에 깔고 팝업을 그 아래로 내린다.
   const PANEL_TOP = 46;
+  const PANEL_LEFT = 494;   // .ia-panel 의 CSS 기본 left
 
   function positionSceneFloat() {
     const host = ensureSceneMount();
@@ -465,10 +466,14 @@ export function createInteractivePanel({
     if (!sceneFloatFits() || blocksMount.hidden) { host.classList.remove('open'); return; }
     // 세로로 쌓았더니 결과 영역을 가렸다(실사용 지적). **가로 한 줄**로 깔되,
     // blocksMount.top 에서 위로 빼면 앱 탭바를 덮는다(실측) — 팝업 기준선에 맞춘다.
+    // `blocksMount.right`(465)는 좌측 컬럼의 **안쪽** 끝이라 그 기준으로 붙이면
+    // 컬럼 여백을 파고든다(실측: 컬럼 바깥 끝 480). `.ia-panel` 의 CSS 기본
+    // left(494)가 이미 그 여백을 감안한 값이라 하한으로 쓴다.
     const box = blocksMount.getBoundingClientRect();
-    host.style.left = Math.round(box.right + 12) + 'px';
+    const left = Math.max(Math.round(box.right + 12), PANEL_LEFT);
+    host.style.left = left + 'px';
     host.style.top = PANEL_TOP + 'px';
-    host.style.width = Math.round(window.innerWidth - box.right - 24) + 'px';
+    host.style.width = Math.round(window.innerWidth - left - 12) + 'px';
     if (host.innerHTML) host.classList.add('open');
   }
 
@@ -483,6 +488,10 @@ export function createInteractivePanel({
     const host = ensureSceneMount();
     host.innerHTML = floating ? SCENE_SLOTS.map(sceneButtonHtml).join('') : '';
     positionSceneFloat();
+    // 초기 렌더는 `blocksMount.hidden` 이 아직 true 인 시점에 돌 수 있다(실측: 새로고침
+    // 하면 버튼은 생기는데 플로트가 안 열렸다). 레이아웃이 잡힌 다음 프레임에 한 번 더
+    // 판정해 순서 의존을 없앤다.
+    requestAnimationFrame(positionSceneFloat);
 
     blocksMount.querySelectorAll('.ia-block:not(.is-character)').forEach(el => {
       el.addEventListener('click', event => {
@@ -1344,7 +1353,7 @@ export function createInteractivePanel({
     }
     const W = Math.min(560, vw - 32);
     const host = blocksMount.getBoundingClientRect();
-    let left = host.right + 12;
+    let left = Math.max(host.right + 12, PANEL_LEFT);
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
     panelMount.style.width = W + 'px';
     panelMount.style.left = left + 'px';

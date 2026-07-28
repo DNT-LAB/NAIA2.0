@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS,
-} from './interactiveAxes.mjs?v=20260728-ax100';
+} from './interactiveAxes.mjs?v=20260728-ax101';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -448,6 +448,7 @@ export function createInteractivePanel({
     sceneMount = document.createElement('div');
     sceneMount.className = 'ia-scene-float';
     document.body.appendChild(sceneMount);
+    sceneMount.addEventListener('mousedown', keepEditingFocus);   // 왼쪽 팝업과 동일
     sceneMount.addEventListener('click', event => {
       const b = event.target.closest('[data-slot]');
       if (!b) return;
@@ -951,6 +952,16 @@ export function createInteractivePanel({
     positionAside();
   });
 
+  /** 편집 중 슬롯 입력창의 포커스를 지킨다.
+   *  팝업/플로트는 슬롯 textarea 의 blur 로 닫히는데, 카드 배경·라벨처럼 포커스를
+   *  못 받는 곳을 누르면 activeElement 가 body 로 떨어져 '바깥 클릭' 으로 잡힌다.
+   *  왼쪽 팝업은 이 핸들러 덕에 멀쩡했고 오른쪽 플로트에만 없어서, 조언 카드의
+   *  빈 자리를 누르면 팝업이 통째로 닫혔다(사용자 지적). 입력창 클릭은 예외. */
+  function keepEditingFocus(event) {
+    if (event.target.closest('input, textarea')) return;
+    event.preventDefault();
+  }
+
   let asideMount = null;
   let lastPicked = '';    // 추천의 기준이 되는 마지막 선택 태그
   // 살펴보는 중인 태그(아직 안 고른 것). 셀 본문을 누르면 여기 들어오고,
@@ -976,6 +987,7 @@ export function createInteractivePanel({
     asideMount = document.createElement('div');
     asideMount.className = 'ia-aside';
     document.body.appendChild(asideMount);
+    asideMount.addEventListener('mousedown', keepEditingFocus);   // 왼쪽 팝업과 동일
     // 한 번 누르면 '살펴보기'(강조만), 한 번 더 누르면 적용한다.
     // 썸네일이 작아 오클릭이 잦은데 바로 프롬프트에 들어가면 되돌리기가 번거롭다.
     asideMount.addEventListener('click', ev => {
@@ -2246,11 +2258,8 @@ export function createInteractivePanel({
 
   // 팝업 내부(검색창 제외)를 mousedown 할 때 기본동작을 막아 슬롯 입력창의 포커스를 지킨다.
   // 분류 탐색은 픽마다 재렌더되는데, 포커스가 눌린 버튼에 있으면 재렌더 시 body 로 떨어지고
-  // blur 로 팝업이 닫히던 간헐 버그가 있었다. 입력창(input/textarea) 클릭은 예외.
-  const onPanelMouseDown = event => {
-    if (event.target.closest('input, textarea')) return;
-    event.preventDefault();
-  };
+  // blur 로 팝업이 닫히던 간헐 버그가 있었다. 조언 플로트·씬 플로트도 같은 것을 쓴다.
+  const onPanelMouseDown = keepEditingFocus;
   panelMount.addEventListener('mousedown', onPanelMouseDown);
 
   blocksMount.hidden = true;

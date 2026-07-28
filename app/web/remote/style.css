@@ -20101,6 +20101,49 @@ body.detached-module .mod-grid-3 {
 .ia-aside-chip:hover { color: var(--text-primary); border-color: var(--accent); }
 .ia-aside-chip.on { color: var(--accent-glow); border-color: var(--accent); }
 .ia-aside-chip.bad { color: #ffb4b4; border-color: rgba(255,107,107,0.4); }
+/* 씬 슬롯 플로팅 버튼 — 캐릭터 영역 밖으로 뺀다.
+   전폭 행 7개가 세로를 다 먹고 있었는데, 캐릭터('누구')와 씬('어디/무엇')은
+   성격이 달라 같은 목록에 있을 이유가 없었다.
+   좁은 창(<1180px)에서는 JS 가 인라인 블록으로 되돌린다 — 조언 플로트처럼 숨기면
+   씬 슬롯에 닿을 길이 아예 없어진다(그쪽은 숨겨도 그리드가 남았다). */
+/* 세로로 쌓았더니 결과 영역을 덮었다(실사용 지적) — **가로 한 줄**로 깔고
+   팝업은 그 아래에서 시작한다. 반투명이라 뒤가 비쳐 영역을 뺏지 않는다. */
+.ia-scene-float {
+  position: fixed; z-index: 60; display: none;
+  flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center;
+}
+.ia-scene-float.open { display: flex; }
+.ia-scene-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 6px; cursor: pointer;
+  background: rgba(20, 20, 28, 0.55); border: 1px solid rgba(255,255,255,0.10);
+  color: var(--text-secondary); text-align: left;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.ia-scene-btn:hover {
+  border-color: var(--border-glow); color: var(--text-primary);
+  background: rgba(30, 30, 42, 0.78);
+}
+.ia-scene-btn.is-open {
+  border-color: var(--accent); color: var(--text-primary);
+  background: rgba(124,106,239,0.30);
+}
+.ia-scene-btn .ia-block-icon {
+  width: 14px; height: 14px; flex: 0 0 14px; font-size: 9px; background: none;
+}
+.ia-scene-btn-name {
+  font-family: var(--font-display); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.2px; white-space: nowrap;
+}
+/* 고른 것이 있는 슬롯은 개수를 달아 한눈에 구분한다 — 접힌 버튼이라 칩을 못 보여준다. */
+.ia-scene-btn-n {
+  flex: 0 0 auto; min-width: 15px; padding: 0 4px; border-radius: 999px;
+  background: var(--accent); color: #fff;
+  font-family: var(--font-display); font-size: 9px; font-weight: 700;
+  text-align: center; line-height: 1.5;
+}
+.ia-scene-btn.has-tags { color: var(--text-primary); }
 /* 색 조합 칩 — 마지막에 고른 옷에 색을 붙인다(`shirt` + 흰색 -> `white shirt`).
    추천 썸네일과 달리 한 번 눌러 적용한다: 3~10개짜리 라벨 버튼이라 오클릭 위험이 없다. */
 .ia-combo-row { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 0 1px; }

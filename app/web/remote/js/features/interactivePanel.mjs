@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260727-ax82';
+} from './interactiveAxes.mjs?v=20260728-ax85';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -355,6 +355,20 @@ export function createInteractivePanel({
     </div>`;
   }
 
+  /** 씬 슬롯의 플로팅 버튼 마크업. 전폭 행이 아니라 아이콘+이름+개수의 압축형이다. */
+  function sceneButtonHtml(slot) {
+    const tags = state.slots[slot.id] || [];
+    const chipTags = slot.id === 'composition'
+      ? [...compChips(state.composition), ...tags] : tags;
+    const on = isEditing('scene', slot.id);
+    return `<button type="button" class="ia-scene-btn${on ? ' is-open' : ''}${chipTags.length ? ' has-tags' : ''}"
+      data-slot="${slot.id}" title="${escHtml(slot.name)}">
+      <span class="ia-block-icon">${slot.icon}</span>
+      <span class="ia-scene-btn-name">${escHtml(slot.name)}</span>
+      ${chipTags.length ? `<span class="ia-scene-btn-n">${chipTags.length}</span>` : ''}
+    </button>`;
+  }
+
   function charBlockHtml() {
     // Position(캔버스 좌표)은 NAI V4 char_captions 전용이라 NAI 모드에서만 노출한다.
     const isNai = String(getMode() || '').toUpperCase() === 'NAI';
@@ -415,8 +429,60 @@ export function createInteractivePanel({
     </div>`;
   }
 
+  // 씬 버튼을 담는 플로트. 좁은 창에서는 blocksMount 안으로 되돌린다.
+  let sceneMount = null;
+  const SCENE_FLOAT_MIN = 1180;   // 이 아래는 옆에 자리가 없다
+
+  function ensureSceneMount() {
+    if (sceneMount && document.body.contains(sceneMount)) return sceneMount;
+    sceneMount = document.createElement('div');
+    sceneMount.className = 'ia-scene-float';
+    document.body.appendChild(sceneMount);
+    sceneMount.addEventListener('click', event => {
+      const b = event.target.closest('[data-slot]');
+      if (!b) return;
+      if (isEditing('scene', b.dataset.slot)) { focusEditingInput(); return; }
+      openSlot(b.dataset.slot);
+    });
+    return sceneMount;
+  }
+
+  // 버튼 줄 높이. 팝업이 이만큼 아래에서 시작해 서로 가리지 않는다.
+  const SCENE_FLOAT_H = 30;
+
+  function sceneFloatFits() {
+    if (window.innerWidth < SCENE_FLOAT_MIN) return false;
+    const box = blocksMount.getBoundingClientRect();
+    return box.right + 12 + 360 <= window.innerWidth - 12;   // 가로 한 줄이 들어갈 폭
+  }
+
+  // 팝업의 CSS 기본 top. 버튼 줄은 여기에 깔고 팝업을 그 아래로 내린다.
+  const PANEL_TOP = 46;
+
+  function positionSceneFloat() {
+    const host = ensureSceneMount();
+    // Interactive 가 꺼져 있으면 버튼도 없어야 한다 — blocksMount 가 hidden 이면 끈다.
+    if (!sceneFloatFits() || blocksMount.hidden) { host.classList.remove('open'); return; }
+    // 세로로 쌓았더니 결과 영역을 가렸다(실사용 지적). **가로 한 줄**로 깔되,
+    // blocksMount.top 에서 위로 빼면 앱 탭바를 덮는다(실측) — 팝업 기준선에 맞춘다.
+    const box = blocksMount.getBoundingClientRect();
+    host.style.left = Math.round(box.right + 12) + 'px';
+    host.style.top = PANEL_TOP + 'px';
+    host.style.width = Math.round(window.innerWidth - box.right - 24) + 'px';
+    if (host.innerHTML) host.classList.add('open');
+  }
+
   function renderBlocks() {
-    blocksMount.innerHTML = charBlockHtml() + SCENE_SLOTS.map(sceneBlockHtml).join('');
+    const floating = sceneFloatFits();
+    // 편집 중인 씬 슬롯은 **인라인으로 남긴다.** 태그를 직접 치는 textarea 가 그
+    // 블록 안에 있어서, 전부 버튼으로 빼면 입력창이 사라진다(실측).
+    const inlineScenes = floating
+      ? SCENE_SLOTS.filter(sl => isEditing('scene', sl.id))
+      : SCENE_SLOTS;
+    blocksMount.innerHTML = charBlockHtml() + inlineScenes.map(sceneBlockHtml).join('');
+    const host = ensureSceneMount();
+    host.innerHTML = floating ? SCENE_SLOTS.map(sceneButtonHtml).join('') : '';
+    positionSceneFloat();
 
     blocksMount.querySelectorAll('.ia-block:not(.is-character)').forEach(el => {
       el.addEventListener('click', event => {
@@ -861,6 +927,9 @@ export function createInteractivePanel({
   // 창 크기가 바뀌면 팝업·플로트 좌표가 어긋난다(둘 다 fixed + 인라인 좌표).
   // 원래 리사이즈 대응이 아예 없어서 팝업이 화면 밖으로 나가기도 했다.
   window.addEventListener('resize', () => {
+    // 씬 플로트는 팝업과 무관하게 항상 따라가야 한다 — 창을 좁히면 인라인으로
+    // 되돌려야 하므로 renderBlocks 까지 다시 돈다.
+    renderBlocks();
     if (!panelContext) return;
     positionPopup();
     positionAside();
@@ -1279,7 +1348,9 @@ export function createInteractivePanel({
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
     panelMount.style.width = W + 'px';
     panelMount.style.left = left + 'px';
-    panelMount.style.top = '';      // CSS 기본값(46px) — 항상 상단에서 시작한다
+    // 씬 버튼 줄이 떠 있으면 그 아래에서 시작한다 — 안 그러면 서로 가린다.
+    panelMount.style.top = (sceneFloatFits() && !blocksMount.hidden)
+      ? (PANEL_TOP + SCENE_FLOAT_H + 6) + 'px' : '';
     panelMount.style.bottom = '';
   }
 
@@ -1988,8 +2059,11 @@ export function createInteractivePanel({
       toggleButton.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
     blocksMount.hidden = !active;
-    if (!active) { closePositionPicker(); closePanel(); }
-    else { renderBlocks(); void probeStatus(); }
+    if (!active) {
+      closePositionPicker(); closePanel();
+      // 모드를 끄면 씬 버튼 줄도 사라져야 한다 — blocksMount 만 숨기면 플로트가 남는다.
+      if (sceneMount) { sceneMount.classList.remove('open'); sceneMount.innerHTML = ''; }
+    } else { renderBlocks(); void probeStatus(); }
     onActiveChange(active);
     if (!silent && active) emitChange();
   }

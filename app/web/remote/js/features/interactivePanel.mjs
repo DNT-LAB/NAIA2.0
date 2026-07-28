@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260728-ax89';
+} from './interactiveAxes.mjs?v=20260728-ax90';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -904,7 +904,6 @@ export function createInteractivePanel({
 
   /** 슬롯을 텍스트 입력으로 펼치고, 그 옆에 검색+탐색 팝업을 띄운다. */
   function enterEditing() {
-    armedTag = armedAxis = null;   // 슬롯을 바꾸면 '살펴보기' 상태 해제
     thumbScroll.clear();       // 슬롯을 바꾸면 썸네일 스크롤을 처음으로
     thumbFilter = '';          // 검색어도 슬롯 단위다 — 남기면 다음 슬롯이 걸러진 채 열린다
     // 아코디언 기본값 = 그 슬롯의 첫 썸네일 섹션(선택된 게 있으면 그 섹션을 우선 펼친다).
@@ -948,8 +947,6 @@ export function createInteractivePanel({
   });
 
   let asideMount = null;
-  let armedTag = null;    // 한 번 눌러 '살펴보기' 상태인 칩/셀
-  let armedAxis = null;   // 그 셀이 속한 축(같은 태그가 여러 축에 있을 수 있다)
   let lastPicked = '';    // 추천의 기준이 되는 마지막 선택 태그
   let asideSeq = 0;
   const adviceCache = new Map();
@@ -974,23 +971,9 @@ export function createInteractivePanel({
       }
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
-      const tag = b.getAttribute('data-advice-add');
-      if (armedTag !== tag) {
-        armedTag = tag;
-        asideMount.querySelectorAll('.ia-aside-thumb')
-          .forEach(e => {
-            e.classList.remove('armed-on', 'armed-off');
-            const n = e.getAttribute('data-advice-add');
-            const sp = e.querySelector('span');
-            if (sp && n) sp.textContent = n;
-          });
-        const on = b.classList.contains('on');
-        b.classList.add(on ? 'armed-off' : 'armed-on');
-        const sp = b.querySelector('span');
-        if (sp) sp.textContent = `${tag} ${on ? '제외' : '추가'}`;
-        return;
-      }
-      toggleTag(tag, { fromAside: true });   // armed 유지 — 바로 되돌릴 수 있게
+      // 그리드와 같은 규칙 — 버튼을 눌렀을 때만 실행한다.
+      if (!ev.target.closest('.ia-cell-act')) return;
+      toggleTag(b.getAttribute('data-advice-add'), { fromAside: true });
     });
     return asideMount;
   }
@@ -1026,17 +1009,14 @@ export function createInteractivePanel({
         ? `<img src="${escHtml(thumbUrl(axis, t))}" alt="" loading="lazy" decoding="async">`
         : '<span class="ia-aside-thumb-none"></span>';
       const on = typeof o === 'object' && o.on;
-      const armed = armedTag === t;
-      // 라벨 자리가 곧 버튼이다. 한 번 누르면 '추가/제외'로 바뀌고 한 번 더 눌러야 실행된다.
-      // 제외는 빨강이 아니라 앰버다 — 사용자가 스스로 고른 것을 되돌리는 것이지
-      // 오류가 아니라서 경고색을 쓸 이유가 없다.
-      const cls = 'ia-aside-thumb' + (match ? ' match' : '') + (on ? ' on' : '')
-        + (armed ? (on ? ' armed-off' : ' armed-on') : '');
-      const label = armed ? `${t} ${on ? '제외' : '추가'}` : t;
+      // 그리드와 같은 규칙 — 라벨은 항상 태그 이름이고, 행동은 호버 버튼이 맡는다.
+      const cls = 'ia-aside-thumb' + (match ? ' match' : '') + (on ? ' on' : '');
       const tip = on ? `${t} — 이미 넣었습니다` :
         (match ? `${t} — 지금 고른 것들과도 어울립니다` : t);
-      return `<button type="button" class="${cls}" data-advice-add="${escHtml(t)}"` +
-        ` title="${escHtml(tip)}">${img}<span>${escHtml(label)}</span></button>`;
+      const act = `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
+      return `<div class="${cls}" data-advice-add="${escHtml(t)}"` +
+        ` title="${escHtml(tip)}"><span class="ia-aside-thumb-img">${img}${act}</span>` +
+        `<span>${escHtml(t)}</span></div>`;
     }).join('');
   }
 
@@ -1766,14 +1746,15 @@ export function createInteractivePanel({
       // 조언 플로트와 같은 두 번 클릭. 한 번 누르면 캡션이 `{태그} 추가/제외` 버튼이
       // 되고 한 번 더 눌러야 실행된다. 한 축이 최대 150칸이라 오클릭이 잦다.
       // 잠긴 셀(부모 자동 배정)은 어차피 해제가 안 되므로 예외로 둔다.
-      const armed = !isLocked && armedTag === t && armedAxis === axis;
-      const cap = armed ? `${t} ${on ? '제외' : '추가'}` : t;
-      const armCls = armed ? (on ? ' armed-off' : ' armed-on') : '';
-      return `<button type="button" class="ia-cell${on ? ' on' : ''}${isLocked ? ' is-locked' : ''}${sens ? ' is-sensitive' : ''}${armCls}"
+      // 행동은 호버 시 뜨는 버튼이 맡는다. 캡션은 **항상 태그 이름**이다 —
+      // 이중 클릭 시절에는 캡션이 상태와 행동을 번갈아 맡아 읽기 어려웠다.
+      const act = isLocked ? '' :
+        `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
+      return `<div class="ia-cell${on ? ' on' : ''}${isLocked ? ' is-locked' : ''}${sens ? ' is-sensitive' : ''}"
         data-ax="thumb" data-ref="${escHtml(axis)}" data-val="${escHtml(t)}"
         aria-pressed="${on}" title="${escHtml(tagTip(t))}${isLocked ? ' (자동 · 해제 불가)' : ''}">
-        <span class="ia-cell-img">${media}${sens ? '<span class="ia-cell-veil">보기</span>' : ''}</span>
-        <span class="ia-cell-cap">${isLocked ? '\u{1F512} ' : ''}${escHtml(cap)}</span></button>`;
+        <span class="ia-cell-img">${media}${sens ? '<span class="ia-cell-veil">보기</span>' : ''}${act}</span>
+        <span class="ia-cell-cap">${isLocked ? '\u{1F512} ' : ''}${escHtml(t)}</span></div>`;
     }).join('');
     // 색 팔레트는 그리드 '위'에 둔다 — 아래에 두면 3줄 그리드에 가려 안 보인다.
     // 피부처럼 주 색상 팔레트 자체가 조건부인 축은 여기서 함께 렌더한다.
@@ -1824,19 +1805,11 @@ export function createInteractivePanel({
         event.stopPropagation();
         const {ax, ref, val} = el.dataset;
         if (ax === 'thumb') {
-          // 1차 = 살펴보기(캡션이 버튼으로 바뀐다), 2차 = 실행.
-          if (armedTag !== val || armedAxis !== ref) {
-            armedTag = val; armedAxis = ref;
-            refreshAxisSections();
-            ensureCellVisible(ref, val);   // '추가' 버튼이 잘려 안 보이면 끌어올린다
-            return;
-          }
-          // 실행 후에도 armed 를 유지한다. 방금 넣은 것 위에 바로 `제외` 가 떠서
-          // 오클릭을 그 자리에서 물릴 수 있다 — 오클릭은 직후에 알아차린다.
-          // 다른 셀을 누르거나 슬롯을 바꾸면 풀린다.
+          // **[선택]/[제거] 버튼을 눌렀을 때만** 실행한다. 셀의 나머지(그림·이름)를
+          // 눌러도 아무 일이 없다 — 한 축이 최대 150칸이라 그리드를 훑다 스치는
+          // 클릭이 잦고, 그걸 막으려고 넣었던 이중 클릭은 오히려 불편했다.
+          if (!event.target.closest('.ia-cell-act')) return;
           pickThumb(ref, val);                                   // 조합 가능(+부모 태그 규칙)
-          // 적용 뒤엔 같은 자리에 `제외` 가 뜬다. 그것도 보여야 되돌릴 수 있다.
-          setTimeout(() => ensureCellVisible(ref, val), 0);
         }
         else if (ax === 'palette') setMainColor(ref, val);       // 주 색상 = 항상 하나
         else if (ax === 'palette_extra') toggleExtraColor(ref, val);  // 추가 색상 = n개

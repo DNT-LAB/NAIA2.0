@@ -20101,6 +20101,43 @@ body.detached-module .mod-grid-3 {
 .ia-aside-chip:hover { color: var(--text-primary); border-color: var(--accent); }
 .ia-aside-chip.on { color: var(--accent-glow); border-color: var(--accent); }
 .ia-aside-chip.bad { color: #ffb4b4; border-color: rgba(255,107,107,0.4); }
+/* 축 목록을 전폭 아코디언에서 상단 탭 그리드로. 접혀 있어도 축 하나가 한 줄을
+   통째로 먹어 19축(자세)이면 목록만으로 팝업이 찼다 — 씬 슬롯과 같은 문제였다.
+   검색창 아래에 줄바꿈되는 탭을 깔고, 고른 축의 그리드만 아래에 펼친다. */
+.ia-axtabs {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 2px 0 8px; margin-bottom: 6px;
+  border-bottom: 1px solid var(--border-dim);
+}
+.ia-axtab {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  background: var(--bg-elev-1); border: 1px solid var(--border-dim);
+  color: var(--text-secondary);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.ia-axtab:hover { border-color: var(--border-glow); color: var(--text-primary); }
+.ia-axtab.is-open {
+  border-color: transparent; color: #fff; font-weight: 700;
+  background: linear-gradient(135deg, #7c6aef, #a892f0);
+}
+.ia-axtab-name {
+  font-family: var(--font-display); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.2px; white-space: nowrap;
+}
+/* 개수는 탭 안에서 부차 정보다 — 선택된 탭에서는 흰 글씨 위라 톤을 낮춘다. */
+.ia-axtab .ia-acc-n {
+  font-family: var(--font-mono); font-size: 9px; opacity: 0.65;
+}
+.ia-axtab.is-open .ia-acc-n { opacity: 0.8; }
+/* 고른 것이 있는 축은 개수 배지로 표시한다 — 탭이 접혀 있어 칩을 못 보여준다. */
+.ia-axtab .ia-acc-sel {
+  min-width: 14px; padding: 0 4px; border-radius: 999px;
+  background: var(--accent); color: #fff;
+  font-family: var(--font-display); font-size: 8.5px; font-weight: 700;
+  line-height: 1.5; text-align: center;
+}
+.ia-axtab.is-open .ia-acc-sel { background: rgba(255,255,255,0.28); }
 /* 씬 슬롯 플로팅 버튼 — 캐릭터 영역 밖으로 뺀다.
    전폭 행 7개가 세로를 다 먹고 있었는데, 캐릭터('누구')와 씬('어디/무엇')은
    성격이 달라 같은 목록에 있을 이유가 없었다.

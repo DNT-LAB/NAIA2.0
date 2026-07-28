@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260728-ax87';
+} from './interactiveAxes.mjs?v=20260728-ax89';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -884,7 +884,10 @@ export function createInteractivePanel({
   function wantsSearch() {
     const secs = panelContext?.sections;
     if (!Array.isArray(secs) || !secs.length) return true;
-    return secs.some(sec => sec.kind === 'browse' || sec.kind === 'scope');
+    // 검색은 이제 **썸네일 그리드도 거른다**. 그래서 browse/scope 가 없는 슬롯
+    // (다인원 자세 등)에도 둔다 — 축이 13개면 탭만으로는 원하는 태그를 못 찾는다.
+    return secs.some(sec => sec.kind === 'browse' || sec.kind === 'scope'
+                            || sec.kind === 'thumb');
   }
 
   /** sections 의 browse/scope 섹션이 지정한 subgroup 을 모아 검색·탐색 스코프로 쓴다. */
@@ -1740,15 +1743,15 @@ export function createInteractivePanel({
     // 검색 중에는 결과가 있는 축을 모두 펼친다 — 아코디언 하나만 열면 다른 축의
     // 일치 항목을 찾을 수 없다.
     const open = thumbFilter ? all.length > 0 : openThumbAxis === axis;
-    if (thumbFilter && !all.length) return '';
-    const head = `<button type="button" class="ia-acc-head${open ? ' is-open' : ''}"
-      data-acc-ax="${escHtml(axis)}" aria-expanded="${open}">
-      <span class="ia-acc-caret">${open ? '&#9662;' : '&#9656;'}</span>
-      <span class="ia-acc-name">${escHtml(sec.label)}</span>
+    if (thumbFilter && !all.length) return {tab: '', pane: ''};
+    // 탭 버튼(상단 그리드에 깔린다). 캐럿은 없앴다 — 접힘/펼침이 아니라 선택이다.
+    const tab = `<button type="button" class="ia-axtab${open ? ' is-open' : ''}"
+      data-acc-ax="${escHtml(axis)}" aria-selected="${open}">
+      <span class="ia-axtab-name">${escHtml(sec.label)}</span>
       <span class="ia-acc-n">${thumbFilter ? `${all.length}/${full.length}` : all.length}</span>
-      ${chosenCount ? `<span class="ia-acc-sel">${chosenCount} 선택</span>` : ''}
+      ${chosenCount ? `<span class="ia-acc-sel">${chosenCount}</span>` : ''}
     </button>`;
-    if (!open) return `<div class="ia-ax-row ia-acc-row">${head}</div>`;
+    if (!open) return {tab, pane: ''};
     const have = thumbHave.get(packAxisOf(axis)) || new Set();
     // 부모 태그(예: multicolored hair)는 하위 패턴이 선택된 동안 자동 배정 + 해제 불가.
     const rule = (AXIS_RULES || {})[axis] || {};
@@ -1780,22 +1783,28 @@ export function createInteractivePanel({
     const extra = sec.extraPalette && extraPaletteVisible(sec.extraPalette)
       ? paletteHtml({ref: sec.extraPalette, label: '추가 색상'}, {extra: true})
       : '';
-    return `<div class="ia-ax-row ia-acc-row is-open">${head}
+    return {tab, pane: `<div class="ia-ax-row is-open">
       <div class="ia-cell-wrap">${mainPal}${extra}
         <div class="ia-cell-grid" data-scroll-ax="${escHtml(axis)}">${cells}</div></div>
-    </div>`;
+    </div>`};
   }
 
   function axisSectionsHtml() {
     const secs = panelContext?.sections;
     if (!Array.isArray(secs) || !secs.length) return '';
-    const body = secs.map(sec => {
+    // 팔레트·슬라이더는 축이 아니라 값 입력기라 탭에 넣지 않고 위에 그대로 둔다.
+    const lead = secs.map(sec => {
       if (sec.kind === 'palette') return paletteHtml(sec);
       // palette_extra 는 독립 섹션이 아니라 패턴 썸네일 섹션 안(그리드 위)에 붙는다(thumbHtml).
       if (sec.kind === 'slider') return sliderHtml(sec);
-      if (sec.kind === 'thumb') return thumbHtml(sec);
       return '';   // browse/scope 는 렌더하지 않는다 (트리는 아래 탐색 섹션이 담당)
     }).filter(Boolean).join('');
+    const thumbs = secs.filter(sec => sec.kind === 'thumb').map(thumbHtml);
+    const tabs = thumbs.map(x => x.tab).filter(Boolean).join('');
+    const panes = thumbs.map(x => x.pane).filter(Boolean).join('');
+    const body = lead
+      + (tabs ? `<div class="ia-axtabs">${tabs}</div>` : '')
+      + panes;
     // 검색 결과가 0건이어도 컨테이너는 남겨야 한다. refreshAxisSections 가 `#iaAxes` 를
     // outerHTML 로 갈아치우므로, 빈 문자열을 돌려주면 호스트가 사라져 검색어를 지워도
     // 되돌아오지 않는다.

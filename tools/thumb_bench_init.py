@@ -110,6 +110,17 @@ WINGV = (f"1girl, {ARTIST}, young female, solo, from behind, upper body, <<VARY>
 FULL = (f"1girl, {ARTIST}, young female, solo, front view, full body, standing, <<VARY>>, "
         f"nude, safe, rating:general, white background, {QUALITY}")
 
+# ── 연령 톤: `young female` 만 빼도 충분한가 (2026-07-28 실측 12장) ──────────
+# 답은 **아니오**다. 파일럿 4종 × 3태그로 쟀다:
+#   V1 현재                                          -> 어린 톤
+#   V2 `young female` 만 제거                        -> **V1 과 사실상 동일**
+#   V3 + 네거티브의 mature female / oldest female 제거 -> V2 와 사실상 동일
+#   V4 포지티브를 `mature female` 로 교체             -> **명확한 성인**
+# 즉 이 아티스트 세트 + `1girl` 의 기본값이 이미 어린 쪽이라, 빼는 것으로는 안 움직인다.
+# 성인으로 옮기려면 **포지티브로 그렇게 말해야** 한다.
+# 결론: 성인 인접 축을 만들 일이 생기면 `mature female` 베이스를 따로 둔다.
+# 기존 SFW 축(9,195장)은 `young female` 로 만들어졌고 전부 rating:general + safe 다.
+
 # ── 배경(location) ──────────────────────────────────────────────────────────
 # 파일럿 25장의 결론: **`scenery` 는 실내를 죽이고 날씨를 살린다.**
 #   classroom + scenery -> 하늘 그림  /  scenery 없이 -> 완벽한 교실 내부
@@ -452,7 +463,8 @@ bench = {
                  "negative": NEGATIVE, "parameters": PARAMETERS},
     # `_male` 배치만 네거티브를 갈아 끼운다(thumb_bench 가 spec.negative 를 먼저 본다).
     "batches": {k: ({"template": t, "weight": w, "framing": f}
-                    | ({"negative": NEGATIVE_MALE} if "_male" in k else {}))
+                    | ({"negative": NEGATIVE_MALE} if "_male" in k else {})
+)
                 for k, (t, w, f) in BATCHES.items()},
 }
 OUT.write_text(json.dumps(bench, ensure_ascii=False, indent=2), encoding="utf-8")

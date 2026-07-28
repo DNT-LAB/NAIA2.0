@@ -412,12 +412,18 @@ for _k3 in _axis_files:
 for _k, _v in _groups.items():
     _thumb_all.update(_v)
 # NSFW 축은 태그를 나열하지 않고 축 전체를 블러한다(항목이 늘어도 자동 적용).
+# 블러 대상 태그의 출처. 축 파일은 이제 `wildcards/nsfw/` 에 있다 —
+# 썸네일 축 폴더에 두면 도구가 생성 대상으로 읽는다(실측 사고 4장).
+SENSITIVE_SRC = Path("wildcards/nsfw")
 SENSITIVE_AXES = ["body_nsfw", "cloth_nsfw"]
 _sensitive = [t for t in SENSITIVE if t in _thumb_all]
 _missing_sensitive = [t for t in SENSITIVE if t not in _thumb_all]
 for _ax in SENSITIVE_AXES:
-    for _t in lines(_ax):
-        if _t not in _sensitive:
+    _f = SENSITIVE_SRC / f"{_ax}.txt"
+    if not _f.exists():
+        continue
+    for _t in (l.strip() for l in _f.read_text(encoding="utf-8").splitlines()):
+        if _t and _t not in _sensitive:
             _sensitive.append(_t)
 out.append("// 민감 태그 — 썸네일을 블러하고 호버 시 해제한다(태그는 유지).")
 out.append("export const SENSITIVE_TAGS = " + js(_sensitive) + ";")

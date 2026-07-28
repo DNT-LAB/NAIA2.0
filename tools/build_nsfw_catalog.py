@@ -21,7 +21,8 @@ import json
 import re
 from pathlib import Path
 
-SRC = Path("wildcards/thumb")
+# 원본 목록도 이제 nsfw 폴더에 있다(생성 축 폴더 밖으로 옮겼다).
+SRC = Path("wildcards/nsfw")
 OUT = Path("wildcards/nsfw")
 SOURCES = ("body_nsfw", "cloth_nsfw", "pose_nsfw", "pose_nsfw_face")
 

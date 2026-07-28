@@ -624,6 +624,14 @@ MALE_ONLY = {
 }
 
 OUT = Path("wildcards/thumb")
+NSFW_OUT = Path("wildcards/nsfw")
+
+def _axis_out(key: str) -> Path:
+    """성인 축은 썸네일 축 폴더에 두지 않는다 — 거기 있으면 도구가 생성 대상으로 읽는다.
+    실제로 문신·피어싱 축을 돌릴 때 성인 태그 4장이 딸려 들어가 팩에 남았다.
+    폴더가 곧 정책이다(사용자 결정: 성인은 와일드카드만)."""
+    return NSFW_OUT if "nsfw" in key else OUT
+
 
 def existing(name):
     p = OUT / f"{name}.txt"
@@ -700,5 +708,6 @@ if male_split:
 
 if not args.dry:
     for k, v in AXES.items():
-        (OUT / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+        _axis_out(k).mkdir(parents=True, exist_ok=True)
+        (_axis_out(k) / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
     print(f"{len(AXES)}개 파일 저장  (미생성 배치 목록은 make_todo.py 가 만든다)")

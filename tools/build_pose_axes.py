@@ -35,6 +35,14 @@ from collections import Counter
 from pathlib import Path
 
 OUT = Path("wildcards/thumb")
+NSFW_OUT = Path("wildcards/nsfw")
+
+def _axis_out(key: str) -> Path:
+    """성인 축은 썸네일 축 폴더에 두지 않는다 — 거기 있으면 도구가 생성 대상으로 읽는다.
+    실제로 문신·피어싱 축을 돌릴 때 성인 태그 4장이 딸려 들어가 팩에 남았다.
+    폴더가 곧 정책이다(사용자 결정: 성인은 와일드카드만)."""
+    return NSFW_OUT if "nsfw" in key else OUT
+
 PRESET = Path("core/event_preset/event_preset_category_translations_ko.json")
 
 # (축 key, 한글 라벨, 프레이밍, 프리셋 subcategory 목록)
@@ -235,7 +243,8 @@ def main() -> int:
     for k, v in sorted(all_axes.items(), key=lambda kv: -len(kv[1])):
         mark = "  ⚠️150 초과" if len(v) > 150 else ""
         print(f"  {k:22s} {len(v):4d}{mark}")
-        (OUT / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+        _axis_out(k).mkdir(parents=True, exist_ok=True)
+        (_axis_out(k) / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
         total_written += len(v)
 
     SUF = ("", "_2", "_3", "_m", "_m_2", "_m_3")

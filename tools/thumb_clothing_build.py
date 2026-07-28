@@ -33,6 +33,14 @@ import core.interactive_browse_index as ib
 # 그림이 유일한 설명 수단이 된다 — 썸네일의 값이 오히려 큰 구간이다.
 CUT = 149
 OUT = Path("wildcards/thumb")
+NSFW_OUT = Path("wildcards/nsfw")
+
+def _axis_out(key: str) -> Path:
+    """성인 축은 썸네일 축 폴더에 두지 않는다 — 거기 있으면 도구가 생성 대상으로 읽는다.
+    실제로 문신·피어싱 축을 돌릴 때 성인 태그 4장이 딸려 들어가 팩에 남았다.
+    폴더가 곧 정책이다(사용자 결정: 성인은 와일드카드만)."""
+    return NSFW_OUT if "nsfw" in key else OUT
+
 
 raw = load_kr_tag_records().raw
 idx = ib.InteractiveBrowseIndex(raw)
@@ -816,7 +824,8 @@ if __name__ == "__main__":
     # (자세 쪽 `_todo` 분리와 같은 유형 — 목록이 두 벌이면 반드시 갈라진다.)
     _written = 0
     for _k, _v in sorted(AXES.items()):
-        (OUT / f"{_k}.txt").write_text("\n".join(_v) + "\n", encoding="utf-8")
+        _axis_out(_k).mkdir(parents=True, exist_ok=True)
+        (_axis_out(_k) / f"{_k}.txt").write_text("\n".join(_v) + "\n", encoding="utf-8")
         _written += len(_v)
     print(f"  축 파일 {len(AXES)}개 저장 / {_written}개")
 

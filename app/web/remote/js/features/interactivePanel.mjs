@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV,
-} from './interactiveAxes.mjs?v=20260728-ax91';
+} from './interactiveAxes.mjs?v=20260728-ax93';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -32,7 +32,13 @@ const COMPOSITION_PRIMARY = ['image_composition', 'composition', 'framing', 'foc
 
 const SCENE_SLOTS = [
   {id: 'composition', name: '구도', icon: '\u{1F5BC}', axis: 'meta', subgroupInclude: COMPOSITION_PRIMARY},
-  {id: 'composition_fx', name: '효과', icon: '✨', axis: 'meta', subgroupExclude: COMPOSITION_PRIMARY},
+  // 썸네일이 없는 meta 태그만 담는 트리. `effects`/`symbols`/`colors` 는 fx 축
+  // 483장이 이미 덮으므로(실측 482/483 중복) 빼야 '효과' 슬롯이 둘로 보이지 않는다.
+  // scan/year_tags/quality/art_style 과 1개짜리 오분류는 그림에 영향이 없다.
+  {id: 'composition_fx', name: '기타·텍스트', icon: '\u{1F524}', axis: 'meta',
+   subgroupExclude: [...COMPOSITION_PRIMARY, 'effects', 'symbols', 'colors',
+                     'scan', 'year_tags', 'quality', 'art_style',
+                     'birds', 'cats', 'hands']},
   // 배경도 썸네일 슬롯이 됐다(295장 8축). 사람이 주인공이 아니라 프레이밍 전제가
   // 다르다 — 실내는 `scenery` 를 빼야 살고 날씨는 있어야 산다(파일럿 25장).
   {id: 'background', name: '배경', icon: '\u{1F3DE}', axis: 'location',
@@ -145,7 +151,11 @@ const CHAR_SUBS = [
   // sections 가 필요하고, 여기 리터럴로 남기면 슬롯이 중복된다.
   // 표정은 CHAR_SLOTS(생성 파일)로 옮겼다 — 썸네일 축(홍조·눈물·땀 27장)과
   // 탐색기를 함께 가지므로 sections 가 필요하다.
-  {key: '사물', icon: '⚙', axis: 'object'},   // 캐릭터가 든 무기/소품 등
+  // 캐릭터가 든 무기/소품 등. 씬 '사물'과 같은 축을 쓰지만 들어가는 자리가 다르다
+  // (캐릭터 프롬프트 vs 베이스 프롬프트). 원래 탐색기 전용이었는데, 그 트리
+  // 3,204개 중 1,955개가 이 썸네일 축들과 정확히 같았다 — 만들어 둔 그림을
+  // 놔두고 같은 태그를 텍스트 트리로 다시 보여주고 있었다.
+  {key: '사물', icon: '⚙', axis: 'object', sections: OBJ_SECTIONS},
 ];
 
 /** 팔레트/슬라이더는 축 안에서 하나만 유효하다 — 그 축의 모든 태그(소문자). */
@@ -879,25 +889,20 @@ export function createInteractivePanel({
   }
 
   /** 검색창을 붙일까. 계층 탐색과 **따로** 판단한다 — 둘은 성격이 다른 도구다.
-   *  자세 슬롯은 트리를 떼고(중복 74% + 남는 514개가 설명 없는 저빈도) 검색만 남긴다.
-   *  `scope` 섹션은 트리 없이 검색 범위만 주는 표시다. */
+   *  검색은 썸네일 그리드를 거르므로 `thumb` 섹션만 있어도 붙는다(다인원 자세 등:
+   *  축이 13개면 탭만으로는 원하는 태그를 못 찾는다). */
   function wantsSearch() {
     const secs = panelContext?.sections;
     if (!Array.isArray(secs) || !secs.length) return true;
-    // 검색은 이제 **썸네일 그리드도 거른다**. 그래서 browse/scope 가 없는 슬롯
-    // (다인원 자세 등)에도 둔다 — 축이 13개면 탭만으로는 원하는 태그를 못 찾는다.
-    return secs.some(sec => sec.kind === 'browse' || sec.kind === 'scope'
-                            || sec.kind === 'thumb');
+    return secs.some(sec => sec.kind === 'browse' || sec.kind === 'thumb');
   }
 
-  /** sections 의 browse/scope 섹션이 지정한 subgroup 을 모아 검색·탐색 스코프로 쓴다. */
+  /** sections 의 browse 섹션이 지정한 subgroup 을 트리 스코프로 쓴다. */
   function browseScopeOf(meta) {
     if (!meta || !Array.isArray(meta.sections)) return null;
     const out = [];
     for (const sec of meta.sections) {
-      if ((sec.kind === 'browse' || sec.kind === 'scope') && Array.isArray(sec.subgroups)) {
-        out.push(...sec.subgroups);
-      }
+      if (sec.kind === 'browse' && Array.isArray(sec.subgroups)) out.push(...sec.subgroups);
     }
     return out.length ? out : null;
   }
@@ -1778,7 +1783,7 @@ export function createInteractivePanel({
       if (sec.kind === 'palette') return paletteHtml(sec);
       // palette_extra 는 독립 섹션이 아니라 패턴 썸네일 섹션 안(그리드 위)에 붙는다(thumbHtml).
       if (sec.kind === 'slider') return sliderHtml(sec);
-      return '';   // browse/scope 는 렌더하지 않는다 (트리는 아래 탐색 섹션이 담당)
+      return '';   // browse 는 렌더하지 않는다 (트리는 아래 탐색 섹션이 담당)
     }).filter(Boolean).join('');
     const thumbs = secs.filter(sec => sec.kind === 'thumb').map(thumbHtml);
     const tabs = thumbs.map(x => x.tab).filter(Boolean).join('');

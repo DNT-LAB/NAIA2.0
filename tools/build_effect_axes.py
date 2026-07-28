@@ -27,6 +27,10 @@ AXIS_SPEC = (
     ("fx_effect", "시각 효과", "subject", ("effects",)),
     ("fx_symbol", "기호·말풍선", "subject", ("symbols",)),
     ("fx_tone",   "색조·화풍",  "subject", ("colors",)),
+    # 조명은 처음에 빠져 있었다 — 위 세 서브그룹만 읽었기 때문이다. 그 결과
+    # `lens flare`(24,719) · `backlighting`(24,669) · `glint`(18,535) 이 어느 축에도
+    # 없어서 씬 '효과' 트리가 유일한 경로였다. 섹션 전수 조사에서 드러났다.
+    ("fx_light",  "조명",      "subject", ("lighting",)),
 )
 # 글자 서브그룹에서 **화면에 그려지는 것**만 남긴다. 서명·워터마크·계정명은
 # 그림의 요소가 아니라 메타데이터다.
@@ -54,6 +58,13 @@ def main() -> int:
         assigned |= {l.strip() for l in p.read_text(encoding="utf-8").splitlines()
                      if l.strip()}
 
+    # `_relational_meta` 는 중간 산출물이 아니라 **이미 처리된 제외 목록**이다.
+    # `_` 규칙으로 건너뛰면 빼 둔 태그가 축으로 되돌아온다(실측 2건).
+    _p = OUT / "_relational_meta.txt"
+    if _p.exists():
+        assigned |= {l.strip() for l in _p.read_text(encoding="utf-8").splitlines()
+                     if l.strip()}
+
     pool: dict[str, str] = {}
     for s in idx.subgroups("meta"):
         for g in ib.SLOT_GROUPS["meta"]:
@@ -66,6 +77,11 @@ def main() -> int:
     sub_axis = {sg: key for key, _l, _f, subs in AXIS_SPEC for sg in subs}
     axes: dict[str, list[str]] = {}
     for tag, sg in pool.items():
+        # 개행이 든 태그는 축 파일을 왕복하지 못하고(빈 줄 + 조각으로 갈라진다)
+        # 파일명도 못 만든다. `\n/` 이모티콘의 손상 판본(freq 727)이 그래서 몇 번을
+        # 돌려도 '미생성 1' 로 남았다 — 정상 판본(백슬래시+n)은 따로 있고 이미 있다.
+        if not tag.strip() or any(c in tag for c in "\r\n\t"):
+            continue
         if F(tag) < CUT or tag in assigned:
             continue
         key = sub_axis.get(sg)
@@ -74,6 +90,14 @@ def main() -> int:
         if key:
             axes.setdefault(key, []).append(tag)
 
+    # `_todo` 는 벤치가 읽는 **생성 대기열**이다. 축 파일 전체를 적으면 이미 만든
+    # 것까지 다시 큐에 올라 예산을 먹고 뒤쪽 축이 통째로 잘린다(실측 1회).
+    # 그래서 팩에 없는 것만 적는다.
+    pack_path = Path("data/interactive_thumbnails.json")
+    done = set()
+    if pack_path.exists():
+        done = set(json.loads(pack_path.read_text(encoding="utf-8")))
+
     total = 0
     (OUT / "_todo").mkdir(exist_ok=True)
     for key, _l, fr, _s in AXIS_SPEC:
@@ -81,9 +105,11 @@ def main() -> int:
         if not v:
             continue
         (OUT / f"{key}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
-        (OUT / "_todo" / f"{key}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+        todo = [t for t in v if f"{key}/{t}" not in done]
+        (OUT / "_todo" / f"{key}.txt").write_text(
+            ("\n".join(todo) + "\n") if todo else "", encoding="utf-8")
         total += len(v)
-        print(f"  {key:12s} {len(v):4d}  ({fr})  {', '.join(v[:8])}")
+        print(f"  {key:12s} {len(v):4d}  (미생성 {len(todo):3d} · {fr})  {', '.join(v[:8])}")
 
     (OUT / "_fx_axes.json").write_text(json.dumps(
         {"framing": {k: f for k, _l, f, _s in AXIS_SPEC},

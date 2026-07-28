@@ -201,6 +201,9 @@ BATCHES = {
     "fx_effect":           (FXTPL, 2.0, "subject"),
     "fx_symbol":           (FXTPL, 2.0, "subject"),
     "fx_tone":             (FXTPL, 2.0, "subject"),
+    # 조명도 주체가 있어야 보인다 — `backlighting` 을 빈 화면에 걸면 역광이 아니라
+    # 그냥 어두운 그림이 된다(색조 축과 같은 이유).
+    "fx_light":            (FXTPL, 2.0, "subject"),
     # 배경 — 파일럿 25장으로 프레이밍이 세 갈래임을 확인했다(build_location_axes.py).
     "loc_backdrop":        (BACKDR, 2.0, "loc_backdrop"),
     "loc_indoor":          (INTERIOR, 2.0, "loc_interior"),

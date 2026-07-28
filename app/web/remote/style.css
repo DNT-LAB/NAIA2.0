@@ -19940,414 +19940,6 @@ body.detached-module .mod-grid-3 {
 .ia-charcard-add:hover { color: var(--accent-glow); border-color: var(--accent); }
 
 /* --- 우측 작업 패널 --- */
-/* 행동 버튼 — 셀에 마우스를 올렸을 때만 뜬다.
-   원래는 한 번 눌러 '살펴보기', 두 번째에 실행하는 이중 클릭이었다. 오클릭을 막으려던
-   것인데 구조적으로 불편했다(사용자 판단): 무엇을 하든 두 번 눌러야 하고, 캡션이
-   상태(태그 이름)와 행동(추가/제외)을 번갈아 맡아 읽기 어려웠다.
-   이제 캡션은 항상 태그 이름이고 `선택됨` 배지가 상태를, 이 버튼이 행동을 맡는다. */
-.ia-cell-act {
-  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
-  padding: 3px 12px; border-radius: 6px; white-space: nowrap;
-  font-family: var(--font-display); font-size: 10.5px; font-weight: 700;
-  color: #fff; letter-spacing: 0.3px; pointer-events: none;
-  opacity: 0; transition: opacity 0.12s;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-}
-.ia-cell-act[data-act="on"]  { background: linear-gradient(135deg, #218a52, #46cf88); }
-.ia-cell-act[data-act="off"] { background: linear-gradient(135deg, #a8486f, #e58ab4); }
-/* 버튼만 클릭을 받는다 — 셀의 나머지를 눌러도 아무 일이 없다. */
-.ia-cell:hover .ia-cell-act,
-.ia-aside-thumb:hover .ia-cell-act { opacity: 1; pointer-events: auto; cursor: pointer; }
-.ia-aside-thumb-img { position: relative; display: block; }
-/* 축 목록을 전폭 아코디언에서 상단 탭 그리드로. 접혀 있어도 축 하나가 한 줄을
-   통째로 먹어 19축(자세)이면 목록만으로 팝업이 찼다 — 씬 슬롯과 같은 문제였다.
-   검색창 아래에 줄바꿈되는 탭을 깔고, 고른 축의 그리드만 아래에 펼친다. */
-.ia-axtabs {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  padding: 2px 0 8px; margin-bottom: 6px;
-  border-bottom: 1px solid var(--border-dim);
-}
-.ia-axtab {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 9px; border-radius: 999px; cursor: pointer;
-  background: var(--bg-elev-1); border: 1px solid var(--border-dim);
-  color: var(--text-secondary);
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
-}
-.ia-axtab:hover { border-color: var(--border-glow); color: var(--text-primary); }
-.ia-axtab.is-open {
-  border-color: transparent; color: #fff; font-weight: 700;
-  background: linear-gradient(135deg, #7c6aef, #a892f0);
-}
-.ia-axtab-name {
-  font-family: var(--font-display); font-size: 11px; font-weight: 600;
-  letter-spacing: 0.2px; white-space: nowrap;
-}
-/* 개수는 탭 안에서 부차 정보다 — 선택된 탭에서는 흰 글씨 위라 톤을 낮춘다. */
-.ia-axtab .ia-acc-n {
-  font-family: var(--font-mono); font-size: 9px; opacity: 0.65;
-}
-.ia-axtab.is-open .ia-acc-n { opacity: 0.8; }
-/* 고른 것이 있는 축은 개수 배지로 표시한다 — 탭이 접혀 있어 칩을 못 보여준다. */
-.ia-axtab .ia-acc-sel {
-  min-width: 14px; padding: 0 4px; border-radius: 999px;
-  background: var(--accent); color: #fff;
-  font-family: var(--font-display); font-size: 8.5px; font-weight: 700;
-  line-height: 1.5; text-align: center;
-}
-.ia-axtab.is-open .ia-acc-sel { background: rgba(255,255,255,0.28); }
-/* 씬 슬롯 플로팅 버튼 — 캐릭터 영역 밖으로 뺀다.
-   전폭 행 7개가 세로를 다 먹고 있었는데, 캐릭터('누구')와 씬('어디/무엇')은
-   성격이 달라 같은 목록에 있을 이유가 없었다.
-   좁은 창(<1180px)에서는 JS 가 인라인 블록으로 되돌린다 — 조언 플로트처럼 숨기면
-   씬 슬롯에 닿을 길이 아예 없어진다(그쪽은 숨겨도 그리드가 남았다). */
-/* 세로로 쌓았더니 결과 영역을 덮었다(실사용 지적) — **가로 한 줄**로 깔고
-   팝업은 그 아래에서 시작한다. 반투명이라 뒤가 비쳐 영역을 뺏지 않는다. */
-.ia-scene-float {
-  position: fixed; z-index: 60; display: none;
-  flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center;
-}
-.ia-scene-float.open { display: flex; }
-.ia-scene-btn {
-  display: flex; align-items: center; gap: 5px;
-  padding: 3px 8px; border-radius: 6px; cursor: pointer;
-  background: rgba(20, 20, 28, 0.55); border: 1px solid rgba(255,255,255,0.10);
-  color: var(--text-secondary); text-align: left;
-  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
-}
-.ia-scene-btn:hover {
-  border-color: var(--border-glow); color: var(--text-primary);
-  background: rgba(30, 30, 42, 0.78);
-}
-.ia-scene-btn.is-open {
-  border-color: var(--accent); color: var(--text-primary);
-  background: rgba(124,106,239,0.30);
-}
-.ia-scene-btn .ia-block-icon {
-  width: 14px; height: 14px; flex: 0 0 14px; font-size: 9px; background: none;
-}
-.ia-scene-btn-name {
-  font-family: var(--font-display); font-size: 10.5px; font-weight: 600;
-  letter-spacing: 0.2px; white-space: nowrap;
-}
-/* 고른 것이 있는 슬롯은 개수를 달아 한눈에 구분한다 — 접힌 버튼이라 칩을 못 보여준다. */
-.ia-scene-btn-n {
-  flex: 0 0 auto; min-width: 15px; padding: 0 4px; border-radius: 999px;
-  background: var(--accent); color: #fff;
-  font-family: var(--font-display); font-size: 9px; font-weight: 700;
-  text-align: center; line-height: 1.5;
-}
-.ia-scene-btn.has-tags { color: var(--text-primary); }
-/* 색 조합 칩 — 마지막에 고른 옷에 색을 붙인다(`shirt` + 흰색 -> `white shirt`).
-   추천 썸네일과 달리 한 번 눌러 적용한다: 3~10개짜리 라벨 버튼이라 오클릭 위험이 없다. */
-.ia-combo-row { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 0 1px; }
-.ia-combo {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 8px 3px 6px; border-radius: 6px; cursor: pointer;
-  border: 1px solid var(--border-dim); background: var(--bg-elev-1);
-  color: var(--text-secondary); font-family: var(--font-display); font-size: 10.5px;
-}
-.ia-combo:hover { border-color: var(--accent); color: var(--text-primary); }
-.ia-combo.on {
-  border-color: transparent; color: #fff; font-weight: 700;
-  background: linear-gradient(135deg, #7c6aef, #a892f0);
-}
-.ia-combo-dot {
-  width: 11px; height: 11px; border-radius: 3px; flex: 0 0 11px;
-  border: 1px solid rgba(255,255,255,0.28);
-}
-/* 색이 아닌 수식어는 무늬로 보여준다 — 스와치 색을 정할 수 없다. */
-.ia-combo-dot.is-striped {
-  background: repeating-linear-gradient(45deg, #e8e8ee 0 3px, #4a4a55 3px 6px);
-}
-.ia-combo-dot.is-multicolored {
-  background: conic-gradient(#e05a5a, #e0c05a, #5ac06a, #5a9ae0, #a45ae0, #e05a5a);
-}
-.ia-axes-empty {
-  padding: 18px 12px; text-align: center;
-  font-family: var(--font-display); font-size: 12px; color: var(--text-dim);
-}
-@media (max-width: 1279px) { .ia-aside { display: none !important; } }
-
-.ia-panel-head {
-  display: flex; align-items: center; gap: 8px;
-  padding: 11px 14px 10px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0;
-}
-.ia-panel-title { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-primary); }
-.ia-panel-sub {
-  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
-  border: 1px solid var(--border-dim); border-radius: 4px; padding: 2px 6px;
-}
-.ia-panel-close {
-  margin-left: auto; width: 26px; height: 26px; border-radius: 7px;
-  border: 1px solid var(--border-dim); background: none; color: var(--text-dim);
-  font-size: 15px; line-height: 1; cursor: pointer;
-}
-.ia-panel-close:hover { color: var(--text-primary); border-color: var(--border-glow); }
-.ia-panel-body { flex: 1; overflow-y: auto; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 14px; }
-.ia-sec-label {
-  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-  letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim);
-  display: flex; align-items: center; gap: 8px; margin-bottom: 7px;
-}
-.ia-sec-label::after { content: ""; flex: 1; height: 1px; background: var(--border-dim); }
-.ia-search {
-  display: flex; align-items: center; gap: 8px;
-  border: 1px solid var(--border-dim); border-radius: 8px;
-  background: var(--bg-deep); padding: 0 10px; height: 34px;
-}
-.ia-search:focus-within { border-color: var(--accent); }
-.ia-search input {
-  flex: 1; background: none; border: 0; outline: none;
-  color: var(--text-primary); font-family: var(--font-editor); font-size: 12px;
-}
-.ia-search input::placeholder { color: var(--text-dim); font-style: italic; }
-.ia-search-scope {
-  font-family: var(--font-mono); font-size: 9px; color: var(--accent-glow);
-  background: rgba(124,106,239,0.14); border-radius: 4px; padding: 2px 6px;
-}
-.ia-selected { display: flex; flex-wrap: wrap; gap: 5px; min-height: 30px; }
-.ia-tag {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--font-mono); font-size: 11px;
-  padding: 5px 6px 5px 9px; border-radius: 6px;
-  background: rgba(255,255,255,0.06); border: 1px solid var(--border-dim);
-  color: var(--text-primary);
-}
-.ia-tag-x { border: 0; background: none; cursor: pointer; padding: 0 2px; color: var(--text-dim); font-size: 13px; line-height: 1; }
-.ia-tag-x:hover { color: var(--accent-secondary); }
-.ia-grid { display: flex; flex-wrap: wrap; gap: 4px; }
-.ia-grid-tag {
-  font-family: var(--font-mono); font-size: 10.5px;
-  padding: 5px 8px; border-radius: 5px; cursor: pointer;
-  border: 1px solid var(--border-dim); background: var(--bg-card); color: var(--text-muted);
-  display: inline-flex; align-items: baseline; gap: 6px;
-}
-.ia-grid-tag:hover { border-color: var(--accent); color: var(--text-primary); background: var(--bg-elevated); }
-.ia-grid-kr { font-size: 9px; color: var(--text-dim); }
-
-/* --- 슬롯 인라인 텍스트 편집 (칩 <-> 텍스트) --- */
-.ia-slot-input {
-  width: 100%; resize: none; overflow-y: auto;
-  min-height: 58px; max-height: 160px; box-sizing: border-box;
-  padding: 5px 8px; border-radius: 6px;
-  border: 1px solid var(--accent); background: var(--bg-deep);
-  color: var(--text-primary); font-family: var(--font-editor); font-size: 11px;
-  line-height: 1.5; cursor: text; outline: none;
-}
-.ia-slot-input::placeholder { color: var(--text-dim); font-style: italic; }
-.ia-block.is-editing, .ia-sub-block.is-editing { cursor: text; }
-/* 편집 중 슬롯은 3줄 입력창을 담으므로 세로 가운데 정렬을 위로 올린다. */
-.ia-block.is-editing, .ia-sub-block.is-editing { align-items: start; }
-.ia-block.is-editing .ia-block-label, .ia-sub-block.is-editing .ia-block-label { padding-top: 4px; }
-
-/* --- 앵커 팝업(검색창 상단 통합 + 분류 탐색) --- */
-/* 행동 버튼 — 셀에 마우스를 올렸을 때만 뜬다.
-   원래는 한 번 눌러 '살펴보기', 두 번째에 실행하는 이중 클릭이었다. 오클릭을 막으려던
-   것인데 구조적으로 불편했다(사용자 판단): 무엇을 하든 두 번 눌러야 하고, 캡션이
-   상태(태그 이름)와 행동(추가/제외)을 번갈아 맡아 읽기 어려웠다.
-   이제 캡션은 항상 태그 이름이고 `선택됨` 배지가 상태를, 이 버튼이 행동을 맡는다. */
-/* 가운데에 두니 그림의 주제(얼굴·상의)를 덮어 무엇을 고르는지 안 보였다 —
-   오른쪽 아래로 몬다. 잘 보이게 조금 키우고 그림자도 세운다. */
-.ia-cell-act {
-  position: absolute; right: 6px; bottom: 6px;
-  padding: 5px 14px; border-radius: 7px; white-space: nowrap;
-  font-family: var(--font-display); font-size: 12px; font-weight: 700;
-  color: #fff; letter-spacing: 0.3px; pointer-events: none;
-  opacity: 0; transition: opacity 0.12s;
-  box-shadow: 0 3px 12px rgba(0,0,0,0.62), 0 0 0 1px rgba(0,0,0,0.28);
-}
-.ia-cell-act[data-act="on"]  { background: linear-gradient(135deg, #218a52, #46cf88); }
-.ia-cell-act[data-act="off"] { background: linear-gradient(135deg, #a8486f, #e58ab4); }
-/* 버튼만 클릭을 받는다 — 셀의 나머지를 눌러도 아무 일이 없다. */
-.ia-cell:hover .ia-cell-act,
-.ia-aside-thumb:hover .ia-cell-act { opacity: 1; pointer-events: auto; cursor: pointer; }
-.ia-aside-thumb-img { position: relative; display: block; }
-/* 축 목록을 전폭 아코디언에서 상단 탭 그리드로. 접혀 있어도 축 하나가 한 줄을
-   통째로 먹어 19축(자세)이면 목록만으로 팝업이 찼다 — 씬 슬롯과 같은 문제였다.
-   검색창 아래에 줄바꿈되는 탭을 깔고, 고른 축의 그리드만 아래에 펼친다. */
-.ia-axtabs {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  padding: 2px 0 8px; margin-bottom: 6px;
-  border-bottom: 1px solid var(--border-dim);
-}
-.ia-axtab {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 9px; border-radius: 999px; cursor: pointer;
-  background: var(--bg-elev-1); border: 1px solid var(--border-dim);
-  color: var(--text-secondary);
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
-}
-.ia-axtab:hover { border-color: var(--border-glow); color: var(--text-primary); }
-.ia-axtab.is-open {
-  border-color: transparent; color: #fff; font-weight: 700;
-  background: linear-gradient(135deg, #7c6aef, #a892f0);
-}
-.ia-axtab-name {
-  font-family: var(--font-display); font-size: 11px; font-weight: 600;
-  letter-spacing: 0.2px; white-space: nowrap;
-}
-/* 개수는 탭 안에서 부차 정보다 — 선택된 탭에서는 흰 글씨 위라 톤을 낮춘다. */
-.ia-axtab .ia-acc-n {
-  font-family: var(--font-mono); font-size: 9px; opacity: 0.65;
-}
-.ia-axtab.is-open .ia-acc-n { opacity: 0.8; }
-/* 고른 것이 있는 축은 개수 배지로 표시한다 — 탭이 접혀 있어 칩을 못 보여준다. */
-.ia-axtab .ia-acc-sel {
-  min-width: 14px; padding: 0 4px; border-radius: 999px;
-  background: var(--accent); color: #fff;
-  font-family: var(--font-display); font-size: 8.5px; font-weight: 700;
-  line-height: 1.5; text-align: center;
-}
-.ia-axtab.is-open .ia-acc-sel { background: rgba(255,255,255,0.28); }
-/* 씬 슬롯 플로팅 버튼 — 캐릭터 영역 밖으로 뺀다.
-   전폭 행 7개가 세로를 다 먹고 있었는데, 캐릭터('누구')와 씬('어디/무엇')은
-   성격이 달라 같은 목록에 있을 이유가 없었다.
-   좁은 창(<1180px)에서는 JS 가 인라인 블록으로 되돌린다 — 조언 플로트처럼 숨기면
-   씬 슬롯에 닿을 길이 아예 없어진다(그쪽은 숨겨도 그리드가 남았다). */
-/* 세로로 쌓았더니 결과 영역을 덮었다(실사용 지적) — **가로 한 줄**로 깔고
-   팝업은 그 아래에서 시작한다. 반투명이라 뒤가 비쳐 영역을 뺏지 않는다. */
-.ia-scene-float {
-  position: fixed; z-index: 60; display: none;
-  flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center;
-}
-.ia-scene-float.open { display: flex; }
-.ia-scene-btn {
-  display: flex; align-items: center; gap: 5px;
-  padding: 3px 8px; border-radius: 6px; cursor: pointer;
-  background: rgba(20, 20, 28, 0.55); border: 1px solid rgba(255,255,255,0.10);
-  color: var(--text-secondary); text-align: left;
-  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
-}
-.ia-scene-btn:hover {
-  border-color: var(--border-glow); color: var(--text-primary);
-  background: rgba(30, 30, 42, 0.78);
-}
-.ia-scene-btn.is-open {
-  border-color: var(--accent); color: var(--text-primary);
-  background: rgba(124,106,239,0.30);
-}
-.ia-scene-btn .ia-block-icon {
-  width: 14px; height: 14px; flex: 0 0 14px; font-size: 9px; background: none;
-}
-.ia-scene-btn-name {
-  font-family: var(--font-display); font-size: 10.5px; font-weight: 600;
-  letter-spacing: 0.2px; white-space: nowrap;
-}
-/* 고른 것이 있는 슬롯은 개수를 달아 한눈에 구분한다 — 접힌 버튼이라 칩을 못 보여준다. */
-.ia-scene-btn-n {
-  flex: 0 0 auto; min-width: 15px; padding: 0 4px; border-radius: 999px;
-  background: var(--accent); color: #fff;
-  font-family: var(--font-display); font-size: 9px; font-weight: 700;
-  text-align: center; line-height: 1.5;
-}
-.ia-scene-btn.has-tags { color: var(--text-primary); }
-/* 색 조합 칩 — 마지막에 고른 옷에 색을 붙인다(`shirt` + 흰색 -> `white shirt`).
-   추천 썸네일과 달리 한 번 눌러 적용한다: 3~10개짜리 라벨 버튼이라 오클릭 위험이 없다. */
-.ia-combo-row { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px 0 1px; }
-.ia-combo {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 8px 3px 6px; border-radius: 6px; cursor: pointer;
-  border: 1px solid var(--border-dim); background: var(--bg-elev-1);
-  color: var(--text-secondary); font-family: var(--font-display); font-size: 10.5px;
-}
-.ia-combo:hover { border-color: var(--accent); color: var(--text-primary); }
-.ia-combo.on {
-  border-color: transparent; color: #fff; font-weight: 700;
-  background: linear-gradient(135deg, #7c6aef, #a892f0);
-}
-.ia-combo-dot {
-  width: 11px; height: 11px; border-radius: 3px; flex: 0 0 11px;
-  border: 1px solid rgba(255,255,255,0.28);
-}
-/* 색이 아닌 수식어는 무늬로 보여준다 — 스와치 색을 정할 수 없다. */
-.ia-combo-dot.is-striped {
-  background: repeating-linear-gradient(45deg, #e8e8ee 0 3px, #4a4a55 3px 6px);
-}
-.ia-combo-dot.is-multicolored {
-  background: conic-gradient(#e05a5a, #e0c05a, #5ac06a, #5a9ae0, #a45ae0, #e05a5a);
-}
-.ia-axes-empty {
-  padding: 18px 12px; text-align: center;
-  font-family: var(--font-display); font-size: 12px; color: var(--text-dim);
-}
-@media (max-width: 1279px) { .ia-aside { display: none !important; } }
-
-.ia-panel-head {
-  display: flex; align-items: center; gap: 8px;
-  padding: 11px 14px 10px; border-bottom: 1px solid var(--border-dim); flex-shrink: 0;
-}
-.ia-panel-title { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-primary); }
-.ia-panel-sub {
-  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
-  border: 1px solid var(--border-dim); border-radius: 4px; padding: 2px 6px;
-}
-.ia-panel-close {
-  margin-left: auto; width: 26px; height: 26px; border-radius: 7px;
-  border: 1px solid var(--border-dim); background: none; color: var(--text-dim);
-  font-size: 15px; line-height: 1; cursor: pointer;
-}
-.ia-panel-close:hover { color: var(--text-primary); border-color: var(--border-glow); }
-.ia-panel-body { flex: 1; overflow-y: auto; padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 14px; }
-.ia-sec-label {
-  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-  letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim);
-  display: flex; align-items: center; gap: 8px; margin-bottom: 7px;
-}
-.ia-sec-label::after { content: ""; flex: 1; height: 1px; background: var(--border-dim); }
-.ia-search {
-  display: flex; align-items: center; gap: 8px;
-  border: 1px solid var(--border-dim); border-radius: 8px;
-  background: var(--bg-deep); padding: 0 10px; height: 34px;
-}
-.ia-search:focus-within { border-color: var(--accent); }
-.ia-search input {
-  flex: 1; background: none; border: 0; outline: none;
-  color: var(--text-primary); font-family: var(--font-editor); font-size: 12px;
-}
-.ia-search input::placeholder { color: var(--text-dim); font-style: italic; }
-.ia-search-scope {
-  font-family: var(--font-mono); font-size: 9px; color: var(--accent-glow);
-  background: rgba(124,106,239,0.14); border-radius: 4px; padding: 2px 6px;
-}
-.ia-selected { display: flex; flex-wrap: wrap; gap: 5px; min-height: 30px; }
-.ia-tag {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-family: var(--font-mono); font-size: 11px;
-  padding: 5px 6px 5px 9px; border-radius: 6px;
-  background: rgba(255,255,255,0.06); border: 1px solid var(--border-dim);
-  color: var(--text-primary);
-}
-.ia-tag-x { border: 0; background: none; cursor: pointer; padding: 0 2px; color: var(--text-dim); font-size: 13px; line-height: 1; }
-.ia-tag-x:hover { color: var(--accent-secondary); }
-.ia-grid { display: flex; flex-wrap: wrap; gap: 4px; }
-.ia-grid-tag {
-  font-family: var(--font-mono); font-size: 10.5px;
-  padding: 5px 8px; border-radius: 5px; cursor: pointer;
-  border: 1px solid var(--border-dim); background: var(--bg-card); color: var(--text-muted);
-  display: inline-flex; align-items: baseline; gap: 6px;
-}
-.ia-grid-tag:hover { border-color: var(--accent); color: var(--text-primary); background: var(--bg-elevated); }
-.ia-grid-kr { font-size: 9px; color: var(--text-dim); }
-
-/* --- 슬롯 인라인 텍스트 편집 (칩 <-> 텍스트) --- */
-.ia-slot-input {
-  width: 100%; resize: none; overflow-y: auto;
-  min-height: 58px; max-height: 160px; box-sizing: border-box;
-  padding: 5px 8px; border-radius: 6px;
-  border: 1px solid var(--accent); background: var(--bg-deep);
-  color: var(--text-primary); font-family: var(--font-editor); font-size: 11px;
-  line-height: 1.5; cursor: text; outline: none;
-}
-.ia-slot-input::placeholder { color: var(--text-dim); font-style: italic; }
-.ia-block.is-editing, .ia-sub-block.is-editing { cursor: text; }
-/* 편집 중 슬롯은 3줄 입력창을 담으므로 세로 가운데 정렬을 위로 올린다. */
-.ia-block.is-editing, .ia-sub-block.is-editing { align-items: start; }
-.ia-block.is-editing .ia-block-label, .ia-sub-block.is-editing .ia-block-label { padding-top: 4px; }
-
-/* --- 앵커 팝업(검색창 상단 통합 + 분류 탐색) --- */
 .ia-panel {
   position: fixed; top: 46px; bottom: 14px; left: 494px;
   width: min(560px, calc(100vw - 520px));
@@ -20407,7 +19999,7 @@ body.detached-module .mod-grid-3 {
    "이런 게 있다"를 알리는 용도라 이 크기로 충분하다. */
 .ia-aside-thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
 .ia-aside-thumb {
-  display: flex; flex-direction: column; gap: 3px; padding: 0; cursor: pointer;
+  display: flex; flex-direction: column; gap: 0; padding: 0; cursor: pointer;
   background: none; border: 1px solid var(--border-dim); border-radius: 7px;
   overflow: hidden; text-align: center;
 }
@@ -20416,6 +20008,9 @@ body.detached-module .mod-grid-3 {
   width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
   background: rgba(255,255,255,0.03);
 }
+/* 이름은 흰색 + 어두운 띠. 처음에 --text-secondary 8.5px 로 뒀더니 밝은 썸네일
+   아래에서 글씨가 묻혀 안 읽혔다. 여기 라벨은 장식이 아니라 '무슨 태그인지'를
+   알려주는 유일한 수단이라 대비를 확실히 준다. */
 .ia-aside-thumb span {
   font-family: var(--font-mono); font-size: 9.5px; line-height: 1.3;
   color: #fff; background: rgba(0,0,0,0.55);
@@ -20425,11 +20020,6 @@ body.detached-module .mod-grid-3 {
 .ia-aside-thumb:hover span { background: rgba(0,0,0,0.75); }
 
 /* 메인 그리드도 두 번 클릭. 캡션 자리가 버튼이 된다(플로트와 같은 규칙). */
-
-/* `.ia-cell` 은 이미지와 캡션 사이에 gap:3px 을 둔다. 평소엔 카드 배경과 캡션이
-   둘 다 어두워 안 보이는데, 캡션이 초록·앰버가 되면 그 틈이 검은 띠로 드러났다.
-   armed 상태에서는 셀 배경도 같은 색으로 칠해 틈을 지운다. */
-
 /* 지금 고른 것들과도 어울리는 추천 — 배경으로 구분한다.
    추천이 마지막 선택 하나를 기준으로 나오므로, 나머지와도 맞는 것은 더 안전한 선택이다. */
 .ia-aside-thumb.match {
@@ -20468,6 +20058,27 @@ body.detached-module .mod-grid-3 {
 .ia-aside-chip:hover { color: var(--text-primary); border-color: var(--accent); }
 .ia-aside-chip.on { color: var(--accent-glow); border-color: var(--accent); }
 .ia-aside-chip.bad { color: #ffb4b4; border-color: rgba(255,107,107,0.4); }
+/* 행동 버튼 — 셀에 마우스를 올렸을 때만 뜬다.
+   원래는 한 번 눌러 '살펴보기', 두 번째에 실행하는 이중 클릭이었다. 오클릭을 막으려던
+   것인데 구조적으로 불편했다(사용자 판단): 무엇을 하든 두 번 눌러야 하고, 캡션이
+   상태(태그 이름)와 행동(추가/제외)을 번갈아 맡아 읽기 어려웠다.
+   이제 캡션은 항상 태그 이름이고 `선택됨` 배지가 상태를, 이 버튼이 행동을 맡는다. */
+/* 가운데에 두니 그림의 주제(얼굴·상의)를 덮어 무엇을 고르는지 안 보였다 —
+   오른쪽 아래로 몬다. 잘 보이게 조금 키우고 그림자도 세운다. */
+.ia-cell-act {
+  position: absolute; right: 6px; bottom: 6px;
+  padding: 5px 14px; border-radius: 7px; white-space: nowrap;
+  font-family: var(--font-display); font-size: 12px; font-weight: 700;
+  color: #fff; letter-spacing: 0.3px; pointer-events: none;
+  opacity: 0; transition: opacity 0.12s;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.62), 0 0 0 1px rgba(0,0,0,0.28);
+}
+.ia-cell-act[data-act="on"]  { background: linear-gradient(135deg, #218a52, #46cf88); }
+.ia-cell-act[data-act="off"] { background: linear-gradient(135deg, #a8486f, #e58ab4); }
+/* 버튼만 클릭을 받는다 — 셀의 나머지를 눌러도 아무 일이 없다. */
+.ia-cell:hover .ia-cell-act,
+.ia-aside-thumb:hover .ia-cell-act { opacity: 1; pointer-events: auto; cursor: pointer; }
+.ia-aside-thumb-img { position: relative; display: block; }
 /* 축 목록을 전폭 아코디언에서 상단 탭 그리드로. 접혀 있어도 축 하나가 한 줄을
    통째로 먹어 19축(자세)이면 목록만으로 팝업이 찼다 — 씬 슬롯과 같은 문제였다.
    검색창 아래에 줄바꿈되는 탭을 깔고, 고른 축의 그리드만 아래에 펼친다. */
@@ -20738,16 +20349,12 @@ body.detached-module .mod-grid-3 {
   display: block; margin-top: 2px;
 }
 .ia-cell {
-  display: flex; flex-direction: column; gap: 3px; padding: 0;
-  border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden;
-  background: var(--bg-card); cursor: pointer; text-align: center;
   /* gap 을 0 으로. 3px 틈에 카드 배경이 드러나 캡션을 색칠하면 검은 띠가 됐다. */
   display: flex; flex-direction: column; gap: 0; padding: 0;
   border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden;
   background: var(--bg-card); cursor: pointer; text-align: center;
 }
 .ia-cell:hover { border-color: var(--accent); }
-.ia-cell.on { border: 2px solid var(--accent); background: rgba(124,106,239,0.14); }
 /* 선택된 셀은 누르지 않아도 캡션까지 강조한다 — 테두리만으로는 150칸 안에서
    찾기 어렵다는 실사용 지적. */
 .ia-cell.on { border: 2px solid var(--accent); background: rgba(124,106,239,0.14); }
@@ -20765,6 +20372,7 @@ body.detached-module .mod-grid-3 {
 /* 선택된 셀을 '제외' 로 무장하면 분홍이 이겨야 한다 — 보라 위에 보라를 덧대면
    무슨 상태인지 알 수 없다(실사용 지적). */
 .ia-cell-img {
+  position: relative;   /* .on 배지의 기준 */
   display: block; aspect-ratio: 1; width: 100%; overflow: hidden;
   background: var(--bg-elevated); display: flex; align-items: center; justify-content: center;
 }

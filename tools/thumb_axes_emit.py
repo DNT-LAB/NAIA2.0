@@ -127,9 +127,8 @@ SLOTS = [
         # 성격·유형. 자세 fallback 이 `pose_display` 로 쓸어넣고 있던 것을 되돌렸다 —
         # 성격은 자세가 아니다. 태그 DB 도 `Expression_Action` 소속으로 본다.
         ("thumb", "성격·유형", "persona"),
-        # 자세 슬롯과 같은 판정. 탐색기가 보여주던 279개 중 258개(92%)가 이미 썸네일에
-        # 있는 중복이고, 전용 21개는 전부 저빈도다. 트리는 떼고 검색 범위만 남긴다.
-        ("scope", "표정 전체", ["expression", "eyes_tags", "mouth"]),
+        # 탐색기 제거: 279개 중 258개(92%)가 이미 썸네일에 있는 중복이고 전용 21개는
+        # 전부 저빈도였다. 검색은 `thumb` 만 있어도 붙으므로 `scope` 도 필요 없다.
     ]),
     ("신체", "\\u{1F9CD}", "characteristic", [
         ("slider", "가슴", "breast_size"),
@@ -145,7 +144,7 @@ SLOTS = [
         # 명시적 노출은 별도 축 + 기본 블러(호버 해제). 태그는 제공하되 눈에 먼저 안 띄게.
         # 부상은 일시적 상태라 영구 특징(신체 특징)과 섞지 않고 별도 섹션으로 둔다.
         ("thumb", "부상·오염", "body_condition"),
-        ("thumb", "노출(성인)", "body_nsfw"),
+        # (`body_nsfw` 는 뺐다 — 44개 전부 '준비 중' 이었다. 도감은 wildcards/nsfw/.)
         # 탐색기 제거: 노출·강조 42 + 신체 특징 68 + 이형 37 이 body_parts/shoulders/
         # ass/hands 를 전부 덮는다. 남겨두면 같은 태그를 두 경로로 보여주게 된다.
     ]),
@@ -183,7 +182,7 @@ SLOTS = [
         ("thumb", "디테일·실루엣", "cloth_detail"),
         ("thumb", "무늬·프린트", "cloth_pattern"),
         ("thumb", "스타일·용도", "cloth_style"),
-        ("thumb", "노출 의상(성인)", "cloth_nsfw"),
+        # (`cloth_nsfw` 는 뺐다 — 97개 전부 '준비 중' 이었다. 도감은 wildcards/nsfw/.)
         # 썸네일이 freq>=2000 만 덮으므로 나머지 3,100개는 탐색기가 담당한다.
         # ⚠️ 목록을 손으로 적었더니 36개 서브그룹 중 19개(259개, 팬티 75·브라 45 포함)가
         #    빠져 탐색기에서 접근 불가가 됐다. 옛 의상 슬롯은 sections 가 없어 전체가
@@ -191,8 +190,7 @@ SLOTS = [
         # 탐색기 전용 1,239개를 분해해 보니 **1,171개(95%)가 의도적 제외분**이었다
         # (저빈도 824 · 작품/캐릭터 한정 293 · 폐기·모호 17 · 근접 중복 …). 나머지도
         # 색 조합 59(팔레트로 접근) + 관계형 메타 7 이다. 즉 탐색기는 분류에서
-        # 일부러 뺀 태그를 사용자에게 다시 권하고 있었다 — 트리는 떼고 검색만 남긴다.
-        ("scope", "의상 전체", _BROWSE_WEAR),
+        # 일부러 뺀 태그를 사용자에게 다시 권하고 있었다 — 트리는 뗐다.
     ]),
     ("소품·장식", "\\u{1F452}", "clothing", [
         ("thumb", "모자", "cloth_headwear"),
@@ -212,10 +210,11 @@ SLOTS = [
         # cowboy 화소로는 보이지 않아 1/3이 빈 썸네일이 된다.
         ("thumb", "작은 장신구", "cloth_small"),
         ("thumb", "갑옷", "cloth_armor"),
-        # 소품은 유지한다. 전용 811개 중 **119개가 의상 풀 밖**이고 그중 30개가
-        # freq>=1000 이다 — `animal`(61,629)·`cat`(39,884)·`rabbit`(14,071) 같은
-        # **동물 동반**은 축이 아예 없어 탐색기가 유일한 경로다. 축이 생기면 뗀다.
-        ("browse", "소품 전체", _BROWSE_GEAR),
+        # 소품 탐색기는 뗐다. 남겨 둔 근거가 "동물은 축이 아예 없어 탐색기가 유일한
+        # 경로다 — 축이 생기면 뗀다" 였고, 축이 생겼다(ani_* 272개). 실측으로 이 트리에
+        # 남은 동물은 8개뿐이다(other_animals 3 · objects 2 · cats 1 · 나머지 2).
+        # 그리고 트리가 있으면 **검색이 트리만 거르고 끝난다**(interactivePanel 1448).
+        # 즉 썸네일이 가장 많은 이 슬롯(13축 1,201칸)이 검색이 안 닿는 유일한 슬롯이었다.
     ]),
     # ── 자세 ────────────────────────────────────────────────────────────────
     # **1명으로 되는 자세만** 여기 둔다. 2명 이상이 필요한 것은 씬의 '다인원 자세'가
@@ -229,11 +228,8 @@ SLOTS = [
         # 원래 계층 탐색기를 붙였다 — "썸네일이 freq>=100 만 덮으니 나머지는 탐색기가
         # 담당한다"는 전제였다. 전제는 맞았다(100 이상은 한 개도 새지 않았다). 그래서
         # 탐색기에만 남는 것이 무엇이냐가 문제였는데, 세어 보니 쓸 수 없는 것들이었다.
-        # 그래서 트리는 떼고 `scope` 로 **검색 범위만** 남긴다 — 아는 태그는 검색으로
-        # 여전히 넣을 수 있고, 19축 썸네일이 볼 만한 것은 전부 덮는다.
-        ("scope", "자세 전체", ["pose", "posture", "gesture", "gestures", "activity",
-                              "verbs_and_gerunds", "hands", "combat_actions",
-                              "clothing_action", "dances"]),
+        # 그래서 트리는 뗐다 — 아는 태그는 검색으로 여전히 넣을 수 있고(검색창은
+        # `thumb` 섹션만 있어도 붙는다), 19축 썸네일이 볼 만한 것은 전부 덮는다.
     ]),
 ]
 
@@ -248,7 +244,8 @@ out.append("// 축 입력 방식 3종:")
 out.append("//   palette : 색 스와치(직사각형). 태그 하나 선택.")
 out.append("//   slider  : 서열 축(길이/가슴). 단계 선택.")
 out.append("//   thumb   : 시각 패턴. 썸네일 그리드(이미지 없으면 텍스트 칩으로 폴백).")
-out.append("//   browse  : 나머지 — 기존 3단 계층 탐색 + 검색.")
+out.append("//   browse  : 3단 계층 탐색 + 검색. 지금은 쓰는 슬롯이 없다 —")
+out.append("//             썸네일이 볼 만한 것을 다 덮어 트리가 중복만 남겼다.")
 out.append("")
 out.append(f"export const PALETTE_SHAPE = {js(palette.get('swatch_shape','rect'))};")
 out.append("")
@@ -294,9 +291,8 @@ _axis_files = sorted(p.stem for p in SRC.glob("*.txt"))
 # 슬롯이 참조하지 않는 축은 내보내지 않는다. 의상 축(cloth_*, 915개)이 분류만 끝나고
 # 아직 배선되지 않았는데, 그대로 등록하면 렌더되지도 않는 태그·설명을 브라우저로 보낸다.
 # 슬롯에 붙이는 순간 자동으로 포함된다.
-# browse/scope 의 sec[2] 는 축 이름이 아니라 subgroup 목록(list)이다 — 섞으면 unhashable.
-_referenced = {sec[2] for _, _, _, secs in SLOTS for sec in secs
-               if sec[0] not in ("browse", "scope")}
+# browse 의 sec[2] 는 축 이름이 아니라 subgroup 목록(list)이다 — 섞으면 unhashable.
+_referenced = {sec[2] for _, _, _, secs in SLOTS for sec in secs if sec[0] != "browse"}
 # face.txt 는 슬롯이 직접 참조하지 않는다 — face_eyes/face_parts/face_mark 로 파생되고
 # PACK_AXIS 가 팩 키로 되돌린다. 빼면 그 223개의 툴팁 설명이 사라진다.
 _referenced.add("face")
@@ -432,11 +428,7 @@ for label, icon, axis, sections in SLOTS:
     out.append(f"  {{key: {js(label)}, icon: '{icon}', axis: {js(axis)}, sections: [")
     for sec in sections:
         kind, secLabel, ref = sec[0], sec[1], sec[2]
-        if kind in ("browse", "scope"):
-            # scope = 계층 탐색은 안 붙이고 **검색 범위만** 준다. 자세 슬롯이 그 경우다:
-            # 탐색기가 보여주는 2,360개 중 1,757개(74%)가 이미 썸네일에 있는 중복이고,
-            # 나머지 514개는 전부 freq<100 에 한글 설명이 0/514 라 무엇인지 알 수 없다.
-            # 그중 9개는 freq 0 비표준 별칭이라 정식 태그(썸네일에 있다)보다 나쁘다.
+        if kind == "browse":
             out.append(f"    {{kind: {js(kind)}, label: {js(secLabel)}, subgroups: {js(ref)}}},")
         elif kind == "thumb_extra":
             # 썸네일 섹션 + 그 안(그리드 위)에 붙는 추가 색상 팔레트

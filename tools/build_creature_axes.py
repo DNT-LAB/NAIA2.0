@@ -56,6 +56,14 @@ def main() -> int:
         assigned |= {l.strip() for l in p.read_text(encoding="utf-8").splitlines()
                      if l.strip()}
 
+    # `_relational_meta` 는 중간 산출물이 아니라 **이미 처리된 제외 목록**이다
+    # (사용자 지시로 캐릭터 쪽에 넘길 `alternate *` 28개). `_` 규칙으로 건너뛰면
+    # 빼 둔 태그가 축으로 되돌아온다 — 실측 2건(fx_tone / obj_weapon).
+    _rm = OUT / "_relational_meta.txt"
+    if _rm.exists():
+        assigned |= {l.strip() for l in _rm.read_text(encoding="utf-8").splitlines()
+                     if l.strip()}
+
     pool: dict[str, str] = {}
     for group, tree in idx._tree.items():
         for sg, tags in tree.items():

@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS,
-} from './interactiveAxes.mjs?v=20260728-ax102';
+} from './interactiveAxes.mjs?v=20260728-ax103';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -1072,10 +1072,11 @@ export function createInteractivePanel({
     const sel = currentLower();
     const chip = t => `<button type="button" class="ia-aside-chip${sel.has(String(t).toLowerCase()) ? ' on' : ''}"` +
       ` data-need-add="${escHtml(t)}">${escHtml(t)}</button>`;
+    // 설명·분류·빈도는 뺐다 — 설명은 셀 툴팁에 이미 나오고, 분류·빈도는 여기서
+    // 결정에 쓰이지 않는다. 관계 두 줄만 남긴다(사용자 지시).
     const rows = [];
-    if (info.desc) rows.push(`<div class="ia-aside-hint soft">${escHtml(info.desc)}</div>`);
     if (info.implications && info.implications.length) {
-      rows.push('<div class="ia-aside-group-label">함께 딸려옵니다</div>' +
+      rows.push('<div class="ia-aside-group-label">함께 딸려오는 것</div>' +
         `<div class="ia-aside-chips">${info.implications.map(chip).join('')}</div>`);
     }
     if (info.related && info.related.length) {
@@ -1083,11 +1084,8 @@ export function createInteractivePanel({
         `<div class="ia-aside-chips">${info.related.slice(0, 10).map(chip).join('')}</div>`);
     }
     if (!rows.length) return '';
-    const meta = [info.group, info.subgroup].filter(Boolean).join(' / ');
     return '<div class="ia-aside-card"><div class="ia-aside-title">태그 사전' +
       `<span class="ia-aside-count">${escHtml(info.tag || '')}</span></div>` +
-      (meta ? `<div class="ia-aside-meta">${escHtml(meta)}` +
-              (info.count ? ` · ${info.count.toLocaleString()}` : '') + '</div>' : '') +
       rows.join('') + '</div>';
   }
 
@@ -1138,6 +1136,15 @@ export function createInteractivePanel({
   // ---- 의상 색 조합 ----
   // `_cloth_combo.json` 이 확정한 조합만 쓴다. 28색을 다 열면 `green shirt` 처럼 실측으로
   // 확인되지 않은 태그를 권하게 된다 — 목록에 없는 색은 슬롯 입력창에 직접 쓰면 된다.
+  // 평범한 색은 칩으로 안 준다 — 사용자가 직접 친다(자동완성이 `black bow` 를 찾는다).
+  // 색 칩 10개가 플로트 절반을 먹어 '함께 쓰는 것' 이 밀렸다(사용자 지적).
+  // 여기 없는 수식어(줄무늬·체크 등)만 남는다 = '특별한 것'.
+  const PLAIN_COLOR = new Set([
+    'black', 'white', 'red', 'blue', 'green', 'yellow', 'pink', 'purple', 'orange',
+    'brown', 'grey', 'gray', 'silver', 'gold', 'beige', 'aqua', 'navy', 'tan',
+    'multicolored', 'two-tone', 'rainbow',
+  ]);
+
   const COMBO_SWATCH = {
     black: '#1b1b20', white: '#f2f2f4', red: '#c0392b', blue: '#2f6fc0', green: '#3a8f4e',
     yellow: '#d8b933', pink: '#e08bb0', purple: '#8158b8', orange: '#d8853a', brown: '#7a5638',
@@ -1162,7 +1169,9 @@ export function createInteractivePanel({
     const st = comboStateOf(seedTag);
     if (!st) return '';
     const mods = (CLOTH_COMBO || {})[st.base] || {};
-    const keys = Object.keys(mods);
+    // 평범한 색은 뺀다. 지금 고른 것이 색이면 그것만은 남겨 뗄 수 있게 한다 —
+    // 안 그러면 `black bow` 를 넣은 뒤 되돌릴 길이 텍스트 편집뿐이다.
+    const keys = Object.keys(mods).filter(m => !PLAIN_COLOR.has(m) || m === st.mod);
     if (!keys.length) return '';
     const cells = keys.map(mod => {
       const on = mod === st.mod;
@@ -1870,9 +1879,14 @@ export function createInteractivePanel({
    *  지우지 않는 이유 — Danbooru 에 `black hat` 이 없어 이것이 "검은 모자"를 말하는
    *  유일한 방법이고, CLOTH_COMBO 에도 모자·신발 베이스가 없다. */
   function axisColorRowHtml(axis) {
-    const list = (AXIS_COLOR_TAGS || {})[axis] || [];
-    if (!list.length) return '';
     const sel = currentLower();
+    // 조언 플로트의 색 칩과 같은 규칙 — 평범한 색은 직접 친다. 고른 것만 예외로
+    // 남겨 뗄 수 있게 한다. 한 화면에 색 UI 두 벌이 규칙이 다르면 안 된다.
+    const list = ((AXIS_COLOR_TAGS || {})[axis] || []).filter(t => {
+      const mod = t.split(' ').slice(0, -1).join(' ');
+      return !PLAIN_COLOR.has(mod) || sel.has(t.toLowerCase());
+    });
+    if (!list.length) return '';
     const have = thumbHave.get(packAxisOf(axis)) || new Set();
     const cells = list.map(t => {
       const mod = t.split(' ').slice(0, -1).join(' ');

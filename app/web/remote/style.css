@@ -20027,10 +20027,6 @@ body.detached-module .mod-grid-3 {
 }
 .ia-axcolor .ia-combo-row { flex: 1; min-width: 0; }
 /* 태그 사전 카드(implies / related) — 조언이 없는 태그의 자리를 대신한다. */
-.ia-aside-meta {
-  font-size: 10px; color: var(--text-dim); font-family: var(--font-mono);
-  margin-bottom: 5px;
-}
 .ia-aside-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0 6px; }
 .ia-aside-warn {
   font-size: 11.5px; line-height: 1.55; color: #ffb4b4;

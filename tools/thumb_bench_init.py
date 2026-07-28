@@ -88,6 +88,35 @@ HEAD = (f"1girl, {ARTIST}, young female, solo, front view, portrait, <<VARY>>, "
 TORSO = (f"1girl, {ARTIST}, young female, solo, front view, cowboy shot, <<VARY>>, "
          f"head out of frame, close-up, rating:general, white background, {QUALITY}")
 
+# ── 성인 축 전용 베이스 ────────────────────────────────────────────────────
+# 사용자 우려는 프롬프트가 아니라 **배포되는 이미지**다 — 어린 외형의 성인 이미지가
+# GitHub 로 나가는 것(한국에서 불법). SFW 축은 rating:general + safe 라 무관하므로
+# 그쪽 `young female` 은 그대로 두고, 성인 경로에만 성인 베이스를 못 박는다.
+#
+#   mature female   연령을 만드는 유일한 태그(실측: 빼거나 가슴으로 대체하면 안 움직인다)
+#   medium breasts  연령이 아니라 **일관성** 담당(축 내 실루엣 고정)
+#   faceless female 신원을 지운다(3/3). `head out of frame` 단독은 불안정해 함께 건다
+_ADULT_ID = "faceless female, head out of frame"
+_ADULT_WHO = "mature female, medium breasts"
+
+
+def adult_base(framing: str) -> str:
+    return (f"1girl, {ARTIST}, {_ADULT_WHO}, solo, front view, {framing}, <<VARY>>, "
+            f"{_ADULT_ID}, close-up, white background, {QUALITY}")
+
+
+# 네거티브에서 `mature female` 을 빼야 한다 — 안 빼면 포지티브와 정면으로 싸운다.
+# `adolescent` 는 남긴다(밀어내는 쪽이라 방향이 맞다).
+NEGATIVE_ADULT = NEGATIVE.replace("{adolescent, mature female}", "{adolescent}")
+
+# 성인 축 -> 프레이밍. 축 성격에 맞춘다.
+ADULT_BATCHES = {
+    "cloth_nsfw":     ("cowboy shot", "cowboy"),   # 옷이 주제 — 얼굴 없이도 읽힌다
+    "body_nsfw":      ("cowboy shot", "cowboy"),
+    "pose_nsfw":      ("cowboy shot", "cowboy"),
+    "pose_nsfw_face": (None, None),                # 얼굴이 있어야 성립 -> 자동화 불가
+}
+
 # ── 연령 신호: 가슴 태그로 대체 가능한가 (2026-07-28 실측 12장) ───────────
 # 사용자 제안: `mature female` 대신 `adult female` + `medium breasts`(최대 large).
 #   `adult female` — **freq 0. 데이터에 없는 태그다.** 써도 아무 일도 안 일어난다.
@@ -244,6 +273,9 @@ BATCHES = {
     #     여성의 `young female` 과 대응하는 태그다.
     #   · 완전 수인은 `-1::` 로 직접 상쇄한다. 맥락 태그로는 안 잡힌다(배경 축 교훈).
     "species_male":      (MALE_SPECIES, 2.0, "upper"),
+    # 성인 축 — 베이스가 고정된다. 목록(`wildcards/nsfw/*.txt`)은 사용자가 큐에 올린다.
+    **{_k: (adult_base(_fr), 2.0, _key)
+       for _k, (_fr, _key) in ADULT_BATCHES.items() if _fr},
     "skin":              (UPPER, 2.0, "upper"),
     "tail":              (TAILV, 2.5, "tail"),
     "wings":             (WINGV, 2.5, "wings"),
@@ -484,9 +516,20 @@ bench = {
     # `_male` 배치만 네거티브를 갈아 끼운다(thumb_bench 가 spec.negative 를 먼저 본다).
     "batches": {k: ({"template": t, "weight": w, "framing": f}
                     | ({"negative": NEGATIVE_MALE} if "_male" in k else {})
-)
+                    | ({"negative": NEGATIVE_ADULT} if k in ADULT_BATCHES else {}))
                 for k, (t, w, f) in BATCHES.items()},
 }
+# 성인 배치가 어린 외형 태그를 갖는 일은 없어야 한다. 손으로 고쳐도 여기서 죽는다.
+# (`young female` 은 태그 DB 의 Danger 그룹 — "미성년 외모의 여성 캐릭터가 묘사됨")
+_DANGER_AGE = ("young female", "young male", "adolescent", "loli", "shota", "toddlercon")
+for _k in ADULT_BATCHES:
+    _spec = bench["batches"].get(_k)
+    if not _spec:
+        continue
+    _bad = [t for t in _DANGER_AGE if t in _spec["template"]]
+    assert not _bad, f"성인 배치 {_k} 에 어린 외형 태그: {_bad}"
+    assert "mature female" in _spec["template"], f"성인 배치 {_k} 에 mature female 이 없다"
+
 OUT.write_text(json.dumps(bench, ensure_ascii=False, indent=2), encoding="utf-8")
 
 todo = sorted(p.stem for p in Path("wildcards/thumb/_todo").glob("*.txt"))

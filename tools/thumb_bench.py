@@ -91,7 +91,31 @@ def build_prompt(bench: dict, batch: str, tag: str) -> tuple[str, str]:
     vary = f"{weight}::{tag} ::"
     positive = spec["template"].replace("<<VARY>>", vary)
     negative = spec.get("negative") or bench["defaults"]["negative"]
+    _guard_adult(batch, positive)
     return positive, negative
+
+
+# 성인 축은 **어린 외형으로 생성될 수 없어야 한다.** 정의 파일을 손으로 고치거나
+# 다른 배치 이름을 붙여도 여기서 막힌다 — 사용자 요구는 "어린 외형의 nsfw 이미지가
+# 배포되는 것"을 막는 것이고, 그 마지막 방어선은 요청 직전이다.
+_DANGER_AGE = ("young female", "young male", "adolescent", "loli", "shota", "toddlercon")
+
+
+def _guard_adult(batch: str, positive: str) -> None:
+    if "nsfw" not in batch:
+        return
+    bad = [t for t in _DANGER_AGE if t in positive]
+    if bad:
+        raise SystemExit(
+            f"거부: 성인 배치 '{batch}' 의 프롬프트에 어린 외형 태그가 있습니다 {bad}.\n"
+            f"       _bench.json 을 고쳤다면 되돌리고, tools/thumb_bench_init.py 를 다시 도세요."
+        )
+    if "mature female" not in positive:
+        raise SystemExit(
+            f"거부: 성인 배치 '{batch}' 에 `mature female` 이 없습니다.\n"
+            f"       연령을 만드는 것은 이 태그 하나뿐입니다(실측). 근거는\n"
+            f"       wildcards/nsfw/_DEFERRED_body_nsfw.md 참조."
+        )
 
 
 def payload_for(bench: dict, positive: str, negative: str, seed: int) -> dict:

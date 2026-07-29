@@ -35,6 +35,9 @@ NSFW = ROOT / "wildcards" / "nsfw"
 TODO = ROOT / "wildcards" / "thumb" / "_todo"
 PACK = ROOT / "data" / "interactive_thumbnails.json"
 OUTDIR = ROOT / "user-data" / "output" / "nsfw"
+# 팩에 넣을 폴더. `q_run` 은 이 스크립트가 생기기 전에 만든 questionable 145장이다 —
+# 같은 시드·같은 베이스라 새 폴더와 섞여도 결과가 같다(뒤에 넣은 쪽이 이긴다).
+PACK_DIRS = [ROOT / "user-data" / "output" / "q_run", OUTDIR]
 
 # 실행 순서 — 등급이 낮은 쪽부터. 중간에 멈춰도 덜 곤란한 순서다.
 ORDER = [
@@ -83,6 +86,24 @@ def run(cmd: list[str]) -> int:
     return subprocess.run(cmd, cwd=ROOT).returncode
 
 
+def do_pack(py: str) -> int:
+    """생성분을 팩에 넣고 프론트 모듈까지 다시 만든다.
+    이 셋을 따로 하면 꼭 하나를 빠뜨린다(실제로 그래서 145장이 팩에 안 들어가 있었다)."""
+    for d in PACK_DIRS:
+        if not d.exists():
+            print(f"  (건너뜀: {d.name} 없음)")
+            continue
+        if run([py, "tools/build_interactive_thumbnails.py", str(d)]) != 0:
+            return 1
+    if run([py, "tools/thumb_axes_emit.py"]) != 0:
+        return 1
+    pack = loaded_pack()
+    left = sum(len(pending(b, pack)[0]) for b in ORDER)
+    tail = f"남은 것 {left}장" if left else "완료"
+    print(f"\n팩 {len(pack)}키 / 성인 축 {tail}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="성인 축 순차 실행기")
     ap.add_argument("batches", nargs="*", help=f"분류 이름 (없으면 --all/--list 사용). {ORDER}")
@@ -98,7 +119,7 @@ def main() -> int:
     py = sys.executable
 
     if args.pack:
-        return run([py, "tools/build_interactive_thumbnails.py", str(OUTDIR)])
+        return do_pack(py)
 
     if args.list or not (args.batches or args.all):
         print(f"{'분류':<16}{'전체':>6}{'완료':>6}{'남음':>6}{'제외':>6}   등급")
@@ -139,9 +160,8 @@ def main() -> int:
             print(f"\n!! [{b}] 중단(코드 {rc}). 여기까지는 팩에 반영된다.")
             break
 
-    if not args.dry_run and not args.no_pack and OUTDIR.exists():
-        run([py, "tools/build_interactive_thumbnails.py", str(OUTDIR)])
-        print("\n프론트 반영: python tools/thumb_axes_emit.py")
+    if not args.dry_run and not args.no_pack:
+        do_pack(py)
     return 0
 
 

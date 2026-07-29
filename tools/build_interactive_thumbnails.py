@@ -32,6 +32,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 WILDCARD_DIR = REPO_ROOT / "wildcards" / "thumb"
+# 성인 축은 생성 대상 폴더 밖(`wildcards/nsfw/`)에 둔다 — 거기 있으면 도구가 축으로
+# 읽어 실수로 생성 대상에 들어간다. 그런데 **팩 빌더는 읽어야 한다**: 안 그러면
+# 사용자가 직접 만든 그림이 분류 실패로 통째로 버려진다(실측 240장).
+# 도감 이름(`nsfw_*`)만 축으로 쓴다 — 벤치 배치 이름과 1:1 이라 키가 어긋나지 않는다.
+# 옛 원본 목록(body_nsfw/cloth_nsfw/pose_nsfw*)은 도감으로 갈라졌으므로 축이 아니다.
+NSFW_DIR = REPO_ROOT / "wildcards" / "nsfw"
 DEFAULT_OUT = REPO_ROOT / "data" / "interactive_thumbnails.json"
 
 # 2::tag :: / 2:: tag :: 모두 허용. 가중치 숫자는 임의(1.5/2/3...).
@@ -58,7 +64,10 @@ def load_axis_tags() -> dict[str, str]:
     table: dict[str, str] = {}
     if not WILDCARD_DIR.exists():
         raise SystemExit(f"와일드카드 폴더가 없습니다: {WILDCARD_DIR}")
-    for path in sorted(WILDCARD_DIR.glob("*.txt")):
+    sources = sorted(WILDCARD_DIR.glob("*.txt"))
+    # 도감 이름만(`nsfw_*`). 옛 원본 목록은 태그가 겹쳐 축을 가로챈다.
+    sources += sorted(p for p in NSFW_DIR.glob("nsfw_*.txt")) if NSFW_DIR.exists() else []
+    for path in sources:
         axis = path.stem
         if axis in NOT_AXES or axis.startswith("_"):
             continue

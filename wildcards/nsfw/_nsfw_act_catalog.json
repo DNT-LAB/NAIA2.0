@@ -1,0 +1,28 @@
+{
+ "note": [
+  "성인 행위 도감. 이미지를 만들지 않는다 — 목록뿐이다.",
+  "NSFW 그룹은 SLOT_GROUPS 에 없어 분류 파이프라인이 읽은 적이 없었다.",
+  "source=KR_tags 만 담는다(e621 계열은 Danbooru 모델이 못 그린다).",
+  "제외분은 _excluded_*.txt 세 파일에 이유별로 남긴다."
+ ],
+ "label": {
+  "nsfw_censor": "검열 처리",
+  "nsfw_group": "다인원",
+  "nsfw_position": "체위",
+  "nsfw_oral": "구강",
+  "nsfw_penetration": "삽입",
+  "nsfw_hand": "손·가슴·기타 부위",
+  "nsfw_toy": "기구·도구",
+  "nsfw_cum": "사정·체액",
+  "nsfw_pairing": "관계·장르",
+  "nsfw_state": "상태·자세",
+  "nsfw_etc": "기타"
+ },
+ "cut": 149,
+ "count": 650,
+ "excluded": {
+  "taboo": 32,
+  "byname": 10,
+  "foreign": 2537
+ }
+}

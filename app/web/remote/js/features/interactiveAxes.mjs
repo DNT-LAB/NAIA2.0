@@ -506,18 +506,18 @@ export const FX_SECTIONS = [
 
 // 씬 슬롯 '다인원 자세' 전용. 2명 이상이 있어야 성립하는 축들이다.
 export const POSE_MULTI_SECTIONS = [
-  {kind: 'thumb', label: "자세(다인원)", ref: "pose_posture_m"},
-  {kind: 'thumb', label: "팔 위치(다인원)", ref: "pose_arm_m"},
-  {kind: 'thumb', label: "다리 위치(다인원)", ref: "pose_leg_m"},
-  {kind: 'thumb', label: "손짓(다인원)", ref: "pose_hand_m"},
-  {kind: 'thumb', label: "얼굴에 손(다인원)", ref: "pose_face_touch_m"},
-  {kind: 'thumb', label: "몸에 손(다인원)", ref: "pose_body_touch_m"},
-  {kind: 'thumb', label: "들고 있는 것(다인원)", ref: "pose_holding_m"},
-  {kind: 'thumb', label: "옷 다루기(다인원)", ref: "pose_clothing_m"},
-  {kind: 'thumb', label: "행동(다인원)", ref: "pose_action_m"},
-  {kind: 'thumb', label: "행동(다인원) 2", ref: "pose_action_m_2"},
-  {kind: 'thumb', label: "입·먹기(다인원)", ref: "pose_mouth_m"},
-  {kind: 'thumb', label: "전투(다인원)", ref: "pose_combat_m"},
-  {kind: 'thumb', label: "몸 보여주기(다인원)", ref: "pose_display_m"},
+  {kind: 'thumb', label: "자세", ref: "pose_posture_m"},
+  {kind: 'thumb', label: "팔 위치", ref: "pose_arm_m"},
+  {kind: 'thumb', label: "다리 위치", ref: "pose_leg_m"},
+  {kind: 'thumb', label: "손짓", ref: "pose_hand_m"},
+  {kind: 'thumb', label: "얼굴에 손", ref: "pose_face_touch_m"},
+  {kind: 'thumb', label: "몸에 손", ref: "pose_body_touch_m"},
+  {kind: 'thumb', label: "들고 있는 것", ref: "pose_holding_m"},
+  {kind: 'thumb', label: "옷 다루기", ref: "pose_clothing_m"},
+  {kind: 'thumb', label: "행동", ref: "pose_action_m"},
+  {kind: 'thumb', label: "행동 2", ref: "pose_action_m_2"},
+  {kind: 'thumb', label: "입·먹기", ref: "pose_mouth_m"},
+  {kind: 'thumb', label: "전투", ref: "pose_combat_m"},
+  {kind: 'thumb', label: "몸 보여주기", ref: "pose_display_m"},
 ];
 

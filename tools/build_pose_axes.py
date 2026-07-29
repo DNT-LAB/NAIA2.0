@@ -249,8 +249,10 @@ def main() -> int:
 
     SUF = ("", "_2", "_3", "_m", "_m_2", "_m_3")
     frames = {k + s: fr for k, _l, fr, _s in AXIS_SPEC for s in SUF}
-    labels = {k + s: lb + ("(다인원)" if "_m" in s else "")
-                    + ("" if s in ("", "_m") else " " + s.rsplit("_", 1)[-1])
+    # `(다인원)` 접미는 뺐다. 이 축들은 **'다인원 자세' 슬롯 안에서만** 쓰이므로
+    # 탭마다 붙이면 슬롯 이름을 13번 반복하는 꼴이다(사용자 지적: 보기 불편).
+    # 접미가 필요해지는 건 솔로 축과 한 화면에 섞일 때인데, 그런 경로는 없다.
+    labels = {k + s: lb + ("" if s in ("", "_m") else " " + s.rsplit("_", 1)[-1])
               for k, lb, _f, _s in AXIS_SPEC for s in SUF}
     (OUT / "_pose_axes.json").write_text(json.dumps(
         {"framing": frames, "label": labels}, ensure_ascii=False, indent=1), encoding="utf-8")

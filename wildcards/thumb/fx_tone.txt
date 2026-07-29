@@ -2,7 +2,6 @@ monochrome
 greyscale
 spot color
 blue theme
-alternate color
 limited palette
 flat color
 sepia

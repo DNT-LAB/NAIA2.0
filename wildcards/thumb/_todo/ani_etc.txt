@@ -1,3 +1,15 @@
+animal
+frog
+crab
+oversized animal
+clothed animal
+coral
+dinosaur
+calico
+boar
+snail
+reindeer
+animal head
 undersized animal
 gorilla
 slug

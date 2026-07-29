@@ -17,7 +17,9 @@ center opening
 hand on headwear
 pulled by self
 adjusting eyewear
+unbuttoned
 adjusting hair
+partially unbuttoned
 open fly
 clothes around waist
 unzipped
@@ -56,6 +58,7 @@ sweater around waist
 skirt tug
 hand on eyewear
 shirt in mouth
+buttoned cuffs
 eyewear hang
 dress tug
 pinching sleeves
@@ -82,6 +85,7 @@ removing jacket
 camisole lift
 hand on glass
 jacket lift
+popped button
 thong aside
 hand on headphones
 buruma pull
@@ -101,4 +105,3 @@ trying on clothes
 bikini tug
 vest lift
 smelling clothes
-glove pull

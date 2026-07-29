@@ -1,3 +1,4 @@
+glove pull
 adjusting leotard
 adjusting buruma
 jacket over shoulder
@@ -71,6 +72,7 @@ shirt on shoulders
 jumpsuit around waist
 pajamas pull
 sarong lift
+unbuttoning
 scarf pull
 eyepatch lift
 shirt down
@@ -94,6 +96,7 @@ adjusting headphones
 dress grab
 skirt around ankles
 sports bra pull
+buttoning
 self wedgie
 loincloth lift
 hand in bikini

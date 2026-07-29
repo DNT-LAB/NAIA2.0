@@ -542,7 +542,10 @@ bench = {
 }
 # 성인 배치가 어린 외형 태그를 갖는 일은 없어야 한다. 손으로 고쳐도 여기서 죽는다.
 # (`young female` 은 태그 DB 의 Danger 그룹 — "미성년 외모의 여성 캐릭터가 묘사됨")
-_DANGER_AGE = ("young female", "young male", "adolescent", "loli", "shota", "toddlercon")
+# `diaper` 도 넣는다 — 성인 기저귀 취향이 따로 있긴 하나, 성적 맥락에서는
+# 유아화로 읽히고 이 프로젝트의 우려(한국 법)와 정면으로 닿는다.
+_DANGER_AGE = ("young female", "young male", "adolescent", "loli", "shota",
+               "toddlercon", "diaper")
 for _k in ADULT_BATCHES:
     _spec = bench["batches"].get(_k)
     if not _spec:

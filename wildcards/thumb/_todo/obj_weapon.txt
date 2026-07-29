@@ -177,7 +177,6 @@ tank shell
 myrtenaster
 h&k g11
 artillery
-alternate weapon
 lance of longinus (evangelion)
 energy weapon
 brass knuckles

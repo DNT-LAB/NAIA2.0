@@ -98,7 +98,10 @@ def build_prompt(bench: dict, batch: str, tag: str) -> tuple[str, str]:
 # 성인 축은 **어린 외형으로 생성될 수 없어야 한다.** 정의 파일을 손으로 고치거나
 # 다른 배치 이름을 붙여도 여기서 막힌다 — 사용자 요구는 "어린 외형의 nsfw 이미지가
 # 배포되는 것"을 막는 것이고, 그 마지막 방어선은 요청 직전이다.
-_DANGER_AGE = ("young female", "young male", "adolescent", "loli", "shota", "toddlercon")
+# `diaper` 도 넣는다 — 성인 기저귀 취향이 따로 있긴 하나, 성적 맥락에서는
+# 유아화로 읽히고 이 프로젝트의 우려(한국 법)와 정면으로 닿는다.
+_DANGER_AGE = ("young female", "young male", "adolescent", "loli", "shota",
+               "toddlercon", "diaper")
 
 
 def _guard_adult(batch: str, positive: str) -> None:

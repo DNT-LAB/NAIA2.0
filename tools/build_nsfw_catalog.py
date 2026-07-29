@@ -32,7 +32,10 @@ CATEGORIES = (
     ("nsfw_fluid",    "체액", re.compile(
         r"\bcum\b|precum|drinking own cum|cumshot|urine|feces|saliva trail")),
     ("nsfw_genital",  "성기", re.compile(
+        # `cock ring`/`chastity belt` 은 구속 기구로 잡히지만 실제로는 성기 기구다 —
+        # questionable 단계에 두면 등급이 어긋난다.
         r"penis|pussy|vagina|clitoris|labia|balls\b|testicl|anus|genital|frenulum"
+        r"|cock ring|chastity"
         r"|\bslit\b|knot\b|sheath\b|flaccid|erection|bulge|crotch|groin")),
     ("nsfw_pubic",    "음모", re.compile(r"pubic|pubes")),
     ("nsfw_nipple",   "유두·유륜", re.compile(r"nipple|areola|montgomery")),

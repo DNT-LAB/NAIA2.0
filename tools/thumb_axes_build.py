@@ -48,7 +48,11 @@ FEATURE = re.compile(r'horn|antler|claw|talon|pawpad|paw\b|fin\b|fins|antenna|sc
                      r'|bird legs|digitigrade|dirty|blood|hickey|slap mark|bump', re.I)
 
 # ── 신체 축 정리 (Codex 리뷰) — 데이터 설명이 뒷받침하는 무손실 이동만 ──────
-BODY_TO_TYPE = ["belly"]          # "다소 통통한 복부" = 체형
+# `oppai loli` 는 `oppai` 정규식에 걸려 성인 축으로 갔지만, 실사용은 **외모 서술**이다
+# (Blue Archive 카에데 류 — safebooru 에 그대로 노출되는 그림에 붙는다). 사용자 판정.
+# 체형 축의 다른 항목(`loli`/`child`/`petite`/`shortstack`)과 같은 성격이다.
+BODY_TO_TYPE = ["belly",          # "다소 통통한 복부" = 체형
+                "oppai loli"]
 BODY_TO_FEATURE = ["covered abs"]  # "옷 위로 윤곽" = 노출이 아니다
 BODY_TO_CONDITION = ["blood on feet"]  # 다른 blood on X 는 모두 부상 축에 있다
 BODY_TO_HAIR = ["bald girl"]      # "대머리 여성" = 머리카락 특징
@@ -294,6 +298,9 @@ _assign = {t: "body_expose" for t in BODY_EXPOSE}
 _assign.update({t: "body_feature" for t in BODY_FEATURE_ADD})
 _assign.update({t: "body_nonhuman" for t in BODY_NONHUMAN})
 _assign.update({t: "body_nsfw" for t in BODY_NSFW_ADD})
+# `oppai loli` 는 `oppai` 정규식에 걸려 성인 축으로 갔지만, 실사용은 **외모 서술**이다
+# (Blue Archive 카에데 류 — safebooru 에 그대로 노출되는 그림에 붙는다). 사용자 판정.
+# 체형 축의 다른 항목(`loli`/`child`/`petite`/`shortstack`)과 같은 성격이라 그쪽으로 보낸다.
 # belly 는 BODY_EXPOSE 에서 빼 체형으로 보냈다 — pool 루프에 명시 배정을 남겨
 # '미분류'로 보고되지 않게 한다(체형 축에는 위에서 이미 넣었다).
 _assign.update({t: None for t in BODY_TO_TYPE})

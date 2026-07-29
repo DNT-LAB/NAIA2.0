@@ -1,3 +1,18 @@
+bird
+chick
+penguin
+crow
+chicken
+duck
+seagull
+owl
+dove
+eagle
+duckling
+pigeon
+crane (animal)
+sparrow
+bald eagle
 rooster
 parrot
 hawk

@@ -65,8 +65,8 @@ moose tail
 hyena tail
 fur-tipped tail
 panda tail
-meerkat tail
 panther tail
+meerkat tail
 very long tail
 tamandua tail
 short tail

@@ -26,29 +26,23 @@ shark girl
 mouse girl
 nekomata
 jiangshi
-cat boy
 tiger girl
 zombie
 arthropod girl
 raccoon girl
 lion girl
-demon boy
 demon
 kyuubi
 alien
 digimon (creature)
 au ra
-dog boy
 sheep girl
 harpy
-fox boy
 lamia
 taur
-wolf boy
 bird girl
 karakasa obake
 fairy (sao)
-tiger boy
 hyur
 slime girl
 orc
@@ -56,7 +50,6 @@ jellyfish
 squirrel girl
 harvin
 slime (creature)
-dragon boy
 fish girl
 cyclops
 bear girl
@@ -65,7 +58,6 @@ viera
 eastern dragon
 spider girl
 tanuki
-rabbit boy
 spirit
 goat girl
 traditional youkai
@@ -75,11 +67,9 @@ bat girl
 elezen
 centaur
 lalafell
-lion boy
 robot girl
 yordle
 deer girl
-fish boy
 werewolf
 unicorn
 zora
@@ -89,55 +79,45 @@ centauroid
 minotaur
 leopard girl
 scylla
-bear boy
 female goblin
 arachne
 frog girl
 reptile girl
 moth girl
-arthropod boy
-bird boy
 mummy
-monkey boy
 pegasus
 saiyan
 blob
-owl girl
 monkey girl
+owl girl
 fallen angel
 pikmin (creature)
 dwarf
-leopard boy
 giant monster
 wyvern
-goat boy
 penguin girl
 floating skull
 valkyrie
-horse boy
 weasel girl
 shinigami
 chipmunk girl
 kappa
 qilin (mythology)
 seraph
-komainu
 phoenix
-dullahan
+komainu
 dolphin girl
+dullahan
 rito
 orca girl
-jackal boy
 shadow (shadows house)
-kneeless mermaid
 female orc
+kneeless mermaid
 chimera
 hedgehog girl
 bee girl
-lizardman
 roegadyn
 panda girl
-reptile boy
 golem
 pig girl
 jaguar girl
@@ -152,64 +132,47 @@ alpaca girl
 ogre
 griffin
 otter girl
-jaguar boy
 tiefling
-octopus boy
-shark boy
 halfling
 mantis girl
 genie
 satyr
-boar boy
-slime boy
 hamster girl
-harpy boy
 unicorn girl
 mushroom girl
-mouse boy
 cerberus
-sheep boy
 cockroach girl
 cheetah girl
 ferret girl
-deer boy
-ghost girl
 whale girl
-zebra girl
+ghost girl
 slug girl
+zebra girl
 snake girl
 sphinx
 dryad
 capybara girl
-raccoon boy
-hyena boy
 scorpion girl
 donkey girl
 centipede girl
 gargoyle
 lich
-dinosaur boy
 ant girl
 giraffe girl
 futakuchi-onna
-stoat girl
 rhinoceros girl
+stoat girl
 chameleon girl
 jellyfish girl
-snail girl
 squid girl
+snail girl
 panther girl
 camel girl
 skunk girl
-chupacabra
 axolotl girl
-frog boy
-lynx girl
+chupacabra
 crab girl
+lynx girl
 moose girl
-pig boy
-snake boy
 gnome
-panther boy
-spider boy
 mindflayer

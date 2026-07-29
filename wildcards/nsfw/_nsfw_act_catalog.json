@@ -15,14 +15,18 @@
   "nsfw_toy": "기구·도구",
   "nsfw_cum": "사정·체액",
   "nsfw_pairing": "관계·장르",
-  "nsfw_state": "상태·자세",
+  "nsfw_anatomy": "해부·부위",
+  "nsfw_peek": "엿보임·노출 사고",
+  "nsfw_fetish": "페티시·상황",
+  "nsfw_state": "상태·표정",
+  "nsfw_act": "행위",
   "nsfw_etc": "기타"
  },
  "cut": 149,
- "count": 650,
+ "count": 642,
  "excluded": {
   "taboo": 32,
-  "byname": 10,
+  "byname": 18,
   "foreign": 2537
  }
 }

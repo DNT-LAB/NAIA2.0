@@ -40,11 +40,14 @@ CUT = 149
 
 # 서브그룹 단위 제외.
 SKIP_SUBGROUP = {"taboo", "gore", "dark_content"}
-# 서브그룹을 빠져나온 것 중 이름으로 거르는 것. 위 분류가 완전하지 않다(실측 11개).
+# 서브그룹을 빠져나온 것 중 이름으로 거르는 것. 서브그룹 분류가 완전하지 않다.
+# 뒤쪽 `\b` 때문에 접미가 붙은 형태를 놓쳤다 — `molest`+`ation`, `bestial`+`ity`.
+# 앞 경계만 두고 뒤는 연다. 이 목록은 정확도보다 누락이 위험하다.
 BLOCK_NAME = re.compile(
-    r"\b(rape|shota|loli|child|kid|toddler|baby|young|teen|incest|cest"
+    r"\b(rape|shota|loli|child|kid|toddler|baby|teen|incest|cest"
     r"|noncon|non-con|forced|molest|unconscious|drugged|guro|ryona|vore"
-    r"|scat|feces|urine|piss|torture|abuse|snuff|bestial|zoo)\b", re.I)
+    r"|scat|feces|urine|piss|torture|abuse|snuff|bestial|zoo|pokephilia"
+    r"|chikan|harassment|mind control|hypnosis|hypnotiz)", re.I)
 
 # 분류. 위에서부터 먼저 맞는 것을 쓴다(순서가 곧 우선순위).
 # 이름 규칙만 쓴다 — 눈으로 검수하지 않으므로 근거가 이름에 있어야 한다.
@@ -82,11 +85,48 @@ CATEGORIES = (
         r"hetero|\byuri\b|\byaoi\b|\bbara\b|futanari|newhalf|otokonoko|monster girl"
         r"|furry|interspecies|tentacle|size difference|age difference|dominant"
         r"|submissive|femdom|maledom|\bpov\b|imminent")),
-    ("nsfw_state", "상태·자세", re.compile(
+    ("nsfw_anatomy", "해부·부위", re.compile(
+        r"\bpenis|\bpussy|\banus\b|testicl|clitor|vulva|urethra|uterus|cervix|ovum"
+        r"|perineum|foreskin|scrotum|hymen|labia|glans|smegma|sperm cell")),
+    ("nsfw_peek", "엿보임·노출 사고", re.compile(
+        r"pantyshot|pantylines|upskirt|upshorts|upshirt|downblouse|slip\b|peek\b"
+        r"|clothing aside|cutout|nippleless|breast pocket|accidental|zenra|flashing"
+        r"|public nudity|see-through")),
+    ("nsfw_fetish", "페티시·상황", re.compile(
+        r"inflation|expansion|enema|human toilet|exhibitionism|indecency|prostitut"
+        r"|instant loss|defloration|impregnat|fertiliz|in heat|virgin|sex ed"
+        r"|contest|pornography|docking|thigh sex|buttjob|pecjob")),
+    ("nsfw_state", "상태·표정", re.compile(
         r"erection|flaccid|aroused|arousal|blush|ahegao|orgasm|climax|trembling"
         r"|spread|presenting|exposed|nude|naked|undress|strip|lifted|raised"
         r"|cameltoe|zettai ryouiki|clothed |partially|after ")),
 )
+
+
+# 정규식이 놓친 것의 행선지. 태그 DB 의 subgroup -> 분류.
+SUBGROUP_TO = {
+    "sex_acts": "nsfw_act", "sex_act": "nsfw_act", "sexual_activity": "nsfw_act",
+    "simulated_sex_acts": "nsfw_act", "activity": "nsfw_act", "implied": "nsfw_act",
+    "sexual_positions": "nsfw_position", "sex_position": "nsfw_position",
+    "pose": "nsfw_position",
+    "genitals": "nsfw_anatomy", "anatomy": "nsfw_anatomy", "body": "nsfw_anatomy",
+    "body_modification": "nsfw_anatomy", "body_writing": "nsfw_anatomy",
+    "nudity": "nsfw_peek", "exposure": "nsfw_peek", "pasties": "nsfw_peek",
+    "sexual_attire": "nsfw_peek",
+    "sex_objects": "nsfw_toy", "toys": "nsfw_toy", "object": "nsfw_toy",
+    "fluids": "nsfw_cum",
+    "groping": "nsfw_hand", "self_touch": "nsfw_hand",
+    "censorship": "nsfw_censor", "symbol": "nsfw_censor",
+    "expression": "nsfw_state", "state": "nsfw_state", "reaction": "nsfw_state",
+    "anticipation": "nsfw_state", "meter": "nsfw_state",
+    "fetish": "nsfw_fetish", "situation": "nsfw_fetish",
+    "sexual_situation": "nsfw_fetish", "genre": "nsfw_fetish",
+    "media": "nsfw_fetish", "meme": "nsfw_fetish",
+    "pov": "nsfw_pairing", "focus": "nsfw_pairing", "visual": "nsfw_pairing",
+    "insertion": "nsfw_penetration",
+}
+# `nsfw_act` 는 폴백 전용 키다 — 이름 규칙으로는 안 잡히는 '행위 일반'(sex 등).
+_FALLBACK_LABEL = {"nsfw_act": "행위"}
 
 
 def main() -> int:
@@ -99,7 +139,10 @@ def main() -> int:
     # 기존 도감(245)과 겹치면 안 된다 — 팩 키가 하나뿐이라 뒤쪽 축이 영영 안 찬다.
     # **자기 출력 파일은 빼야 한다.** 두 번째 실행에서 직전 결과가 전부 `taken` 으로
     # 잡혀 풀이 0이 된다(실측). 이 프로젝트에서 다섯 번째로 겪는 함정이라 규칙으로 막는다.
-    _own = {k for k, _l, _p in CATEGORIES} | {"nsfw_etc"}
+    # **폴백 전용 키도 넣어야 한다.** `nsfw_act` 를 빠뜨렸더니 두 번째 실행에서
+    # 그 101개가 `taken` 으로 잡혀 642 -> 541 이 됐다. 같은 함정 여섯 번째다 —
+    # 목록을 손으로 적지 말고 출력 키 전체에서 파생시킨다.
+    _own = {k for k, _l, _p in CATEGORIES} | set(_FALLBACK_LABEL) | {"nsfw_etc"}
     taken: set[str] = set()
     for p in OUT.glob("*.txt"):
         if p.stem.startswith("_") or p.stem in _own:
@@ -132,11 +175,22 @@ def main() -> int:
                 cat.setdefault(key, []).append(tag)
                 break
         else:
-            unmatched.append(tag)
+            # 정규식이 놓친 것은 **태그 DB 의 서브그룹**으로 떨어뜨린다.
+            # 규칙을 계속 늘리는 대신 이미 분류돼 있는 것을 쓴다 — 안 그러면
+            # 이름 규칙이 데이터를 못 따라가 기타만 커진다(실측 310/650).
+            key = SUBGROUP_TO.get(SG(tag))
+            (cat.setdefault(key, []) if key else unmatched).append(tag)
 
     OUT.mkdir(parents=True, exist_ok=True)
     total = 0
     for key, label, _p in CATEGORIES:
+        v = sorted(cat.get(key, []), key=lambda t: -F(t))
+        if not v:
+            continue
+        (OUT / f"{key}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+        total += len(v)
+        print(f"  {key:18s} {label:14s} {len(v):4d}  {', '.join(v[:5])}")
+    for key, label in _FALLBACK_LABEL.items():
         v = sorted(cat.get(key, []), key=lambda t: -F(t))
         if not v:
             continue
@@ -174,7 +228,7 @@ def main() -> int:
             "source=KR_tags 만 담는다(e621 계열은 Danbooru 모델이 못 그린다).",
             "제외분은 _excluded_*.txt 세 파일에 이유별로 남긴다.",
         ],
-        "label": {k: l for k, l, _p in CATEGORIES} | {"nsfw_etc": "기타"},
+        "label": {k: l for k, l, _p in CATEGORIES} | _FALLBACK_LABEL | {"nsfw_etc": "기타"},
         "cut": CUT,
         "count": total,
         "excluded": {"taboo": len(tabooed), "byname": len(blocked), "foreign": len(foreign)},

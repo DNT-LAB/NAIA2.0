@@ -16,10 +16,26 @@ DST = Path("app/web/remote/js/features/interactiveAxes.mjs")
 palette = json.loads((SRC / "_palette.json").read_text(encoding="utf-8"))
 man = json.loads((SRC / "_manifest.json").read_text(encoding="utf-8"))
 
+# 성인 축은 생성 대상 폴더 밖에 둔다(도구가 축으로 읽어 생성 대상에 넣는 것을 막는다).
+# 여기서는 **읽어야** 한다 — 안 그러면 UI 에 태그가 안 실려 빈 그리드가 된다.
+NSFW_SRC = Path("wildcards/nsfw")
+# 성인 축은 파이프라인이 자동 생성하지 않는다(사용자가 직접 돌린다). 그래서 그림이 없는
+# 태그는 **영구 빈칸**이 된다 — `diaper` 와 재갈 4종이 그렇다(의도적 제외).
+# 제외 목록을 여기 또 적지 않는다. 목록을 두 군데 적으면 갈라진다(이 프로젝트 사고의 대부분).
+# **팩에 그림이 있는가**로 거른다 — 나중에 사용자가 만들면 자동으로 나타난다.
+_PACK_PATH = Path("data/interactive_thumbnails.json")
+_PACK_KEYS = set(json.loads(_PACK_PATH.read_text(encoding="utf-8"))) if _PACK_PATH.exists() else set()
+
+
 def lines(name):
     p = SRC / f"{name}.txt"
+    if not p.exists() and name.startswith("nsfw_"):
+        p = NSFW_SRC / f"{name}.txt"
     if not p.exists(): return []
-    return [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    out = [l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    if name.startswith("nsfw_") and _PACK_KEYS:
+        out = [t for t in out if f"{name}/{t}" in _PACK_KEYS]
+    return out
 
 # ---- 얼굴 축의 '표시용' 하위 그룹 ----
 # 생성은 face.txt(228) 한 파일로 계속 돈다(순차 와일드카드 진행 중). UI 에서만 subgroup 기준으로
@@ -144,6 +160,11 @@ SLOTS = [
         # 명시적 노출은 별도 축 + 기본 블러(호버 해제). 태그는 제공하되 눈에 먼저 안 띄게.
         # 부상은 일시적 상태라 영구 특징(신체 특징)과 섞지 않고 별도 섹션으로 둔다.
         ("thumb", "부상·오염", "body_condition"),
+        # 성인 도감. 기본 블러(호버 해제) — 다른 탭과 나란히 있으므로 그냥 노출되면 안 된다.
+        ("thumb", "유두(성인)", "nsfw_nipple"),
+        ("thumb", "음모(성인)", "nsfw_pubic"),
+        ("thumb", "성기(성인)", "nsfw_genital"),
+        ("thumb", "가슴(성인)", "nsfw_breast"),
         # (`body_nsfw` 는 뺐다 — 44개 전부 '준비 중' 이었다. 도감은 wildcards/nsfw/.)
         # 탐색기 제거: 노출·강조 42 + 신체 특징 68 + 이형 37 이 body_parts/shoulders/
         # ass/hands 를 전부 덮는다. 남겨두면 같은 태그를 두 경로로 보여주게 된다.
@@ -186,6 +207,8 @@ SLOTS = [
         ("thumb", "디테일·실루엣", "cloth_detail"),
         ("thumb", "무늬·프린트", "cloth_pattern"),
         ("thumb", "스타일·용도", "cloth_style"),
+        ("thumb", "노출 의상(성인)", "nsfw_exposure"),
+        ("thumb", "구속·기구(성인)", "nsfw_bondage"),
         # (`cloth_nsfw` 는 뺐다 — 97개 전부 '준비 중' 이었다. 도감은 wildcards/nsfw/.)
         # 썸네일이 freq>=2000 만 덮으므로 나머지 3,100개는 탐색기가 담당한다.
         # ⚠️ 목록을 손으로 적었더니 36개 서브그룹 중 19개(259개, 팬티 75·브라 45 포함)가
@@ -229,6 +252,8 @@ SLOTS = [
     # 신설 `pose_leg`/`pose_body_touch` 는 빠지고 라벨은 옛 이름("얼굴·몸에 손")
     # 그대로였다. _pose_axes.json 이 축과 라벨의 SSOT 다(_POSE_SECTIONS 참조).
     ("자세", "\\u{1F3C3}", "pose_action", _POSE_SECTIONS + [
+        ("thumb", "둔부(성인)", "nsfw_butt"),
+        ("thumb", "체액(성인)", "nsfw_fluid"),
         # 원래 계층 탐색기를 붙였다 — "썸네일이 freq>=100 만 덮으니 나머지는 탐색기가
         # 담당한다"는 전제였다. 전제는 맞았다(100 이상은 한 개도 새지 않았다). 그래서
         # 탐색기에만 남는 것이 무엇이냐가 문제였는데, 세어 보니 쓸 수 없는 것들이었다.
@@ -292,6 +317,8 @@ _FRAMING_DEFAULT = {"tail": "full", "wings": "full", "body_type": "full",
                     "cloth_armor": "cowboy", "cloth_nsfw": "explicit"}
 framings = {a["key"]: a.get("framing", "portrait") for a in man.get("axes", [])}
 _axis_files = sorted(p.stem for p in SRC.glob("*.txt"))
+# 성인 도감(`nsfw_*`)은 폴더가 달라 위 glob 에 안 잡힌다. 배선된 것만 뒤에서 걸러진다.
+_axis_files += sorted(p.stem for p in NSFW_SRC.glob("nsfw_*.txt"))
 # 슬롯이 참조하지 않는 축은 내보내지 않는다. 의상 축(cloth_*, 915개)이 분류만 끝나고
 # 아직 배선되지 않았는데, 그대로 등록하면 렌더되지도 않는 태그·설명을 브라우저로 보낸다.
 # 슬롯에 붙이는 순간 자동으로 포함된다.
@@ -415,7 +442,9 @@ for _k, _v in _groups.items():
 # 블러 대상 태그의 출처. 축 파일은 이제 `wildcards/nsfw/` 에 있다 —
 # 썸네일 축 폴더에 두면 도구가 생성 대상으로 읽는다(실측 사고 4장).
 SENSITIVE_SRC = Path("wildcards/nsfw")
-SENSITIVE_AXES = ["body_nsfw", "cloth_nsfw"]
+# 도감 8축 전부. 캐릭터 슬롯에서 다른 탭과 나란히 있으므로 기본 블러가 필요하다.
+SENSITIVE_AXES = sorted(p.stem for p in SENSITIVE_SRC.glob("nsfw_*.txt")) \
+                 + ["body_nsfw", "cloth_nsfw"]
 _sensitive = [t for t in SENSITIVE if t in _thumb_all]
 _missing_sensitive = [t for t in SENSITIVE if t not in _thumb_all]
 for _ax in SENSITIVE_AXES:
@@ -530,6 +559,17 @@ for _name, _secs, _ko in (("OBJ_SECTIONS", _OBJ_SECTIONS, "사물"),
     out.append("")
 
 out.append("// 씬 슬롯 '다인원 자세' 전용. 2명 이상이 있어야 성립하는 축들이다.")
+_ADULT_ORDER = ["nsfw_exposure", "nsfw_breast", "nsfw_butt", "nsfw_bondage",
+                "nsfw_nipple", "nsfw_pubic", "nsfw_fluid", "nsfw_genital"]
+_nsfw_label = json.loads((NSFW_SRC / "_nsfw_catalog.json").read_text(encoding="utf-8"))["label"]
+out.append("// 성인 도감 8축. 씬 슬롯('성인')이 쓴다 — 여기선 전부 성인이라 `(성인)` 을")
+out.append("// 붙이지 않는다(슬롯 이름을 8번 반복하는 꼴이다).")
+out.append("export const ADULT_SECTIONS = [")
+for _ax in _ADULT_ORDER:
+    if lines(_ax):
+        out.append(f"  {{kind: 'thumb', label: {js(_nsfw_label.get(_ax, _ax))}, ref: {js(_ax)}}},")
+out.append("];")
+out.append("")
 out.append("export const POSE_MULTI_SECTIONS = [")
 for _ax in _POSE_MULTI:
     out.append(f"  {{kind: 'thumb', label: {js(_pose_axes['label'][_ax])}, ref: {js(_ax)}}},")

@@ -17,8 +17,8 @@ import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
-  CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS,
-} from './interactiveAxes.mjs?v=20260728-ax103';
+  CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS, ADULT_SECTIONS,
+} from './interactiveAxes.mjs?v=20260729-ax104';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -52,6 +52,10 @@ const SCENE_SLOTS = [
   {id: 'fx', name: '효과·기호', icon: '✨', axis: 'meta', sections: FX_SECTIONS},
   {id: 'pose_multi', name: '다인원 자세', icon: '\u{1F46F}', axis: 'pose_action',
    sections: POSE_MULTI_SECTIONS},
+  // 성인 도감 8축. 캐릭터 슬롯(신체/의상/자세)에도 성격별로 들어가 있지만, 여기는
+  // **베이스 프롬프트**로 나간다 — 사물 슬롯이 캐릭터/씬 양쪽에 있는 것과 같은 구조다.
+  // 슬롯 이름이 이미 '성인'이라 탭에는 `(성인)` 을 안 붙인다.
+  {id: 'adult', name: '성인', icon: '\u{1F51E}', axis: 'meta', sections: ADULT_SECTIONS},
 ];
 
 // ---------- 구도 3축 콤보 프리셋 (Dev0714 composition_block.py 이식/복원) ----------

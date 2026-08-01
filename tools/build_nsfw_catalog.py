@@ -114,6 +114,11 @@ def main() -> int:
         (OUT / f"{key}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
         total += len(v)
         print(f"  {key:16s} {label:12s} {len(v):4d}  {', '.join(v[:5])}")
+    # 갈 곳 없는 태그가 없으면 지난 실행의 파일을 지운다 — 남겨 두면 이미 해결된
+    # 것을 계속 미해결로 보게 된다(실측: interracial 이 정리된 뒤에도 남아 있었다).
+    _unrouted = OUT / "_nsfw_unrouted.txt"
+    if not unmatched and _unrouted.exists():
+        _unrouted.unlink()
     if unmatched:
         v = sorted(unmatched, key=lambda t: -F(t))
         if "nsfw_etc" not in _OWNED_ELSEWHERE:

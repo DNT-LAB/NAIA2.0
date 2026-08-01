@@ -41,6 +41,11 @@ CUT = 149
 # 서브그룹 단위 제외.
 SKIP_SUBGROUP = {"taboo", "gore", "dark_content"}
 
+# 이 빌더의 풀 밖에 있는데 행위로 분류해야 하는 태그. `interracial`(explicit 89.6%)은
+# 서브그룹이 `focus_tags`(구도)라 여기 안 들어오고, 레거시 빌더의 분류에도 갈 곳이
+# 없어 `_nsfw_unrouted.txt` 에 갇혀 있었다. 행위로 보낸다(사용자 지시 2026-08-01).
+ACT_PULL = ("interracial",)
+
 # 금기와 평상 사이는 `wildcards/nsfw/nsfw_heavy.txt` 가 담당한다 — 사용자가 직접
 # 큐레이션하는 파일이고 도구는 쓰지 않는다. 그 파일이 리포에 있으므로 아래 `taken`
 # 이 읽어 도감에서 자동으로 빠진다.
@@ -62,6 +67,10 @@ BLOCK_NAME = re.compile(
 # "규칙이 놓치는 예외"임을 이름으로 밝힌다(의상 빌더의 `POST_EXPLICIT` 과 같은 자리).
 # 규칙에 이름을 숨기면 `breast pocket` 처럼 왜 거기 있는지 알 수 없게 된다.
 TAG_OVERRIDE = {
+    # 이름 규칙으로는 어느 분류에도 안 맞는다(인종 조합이라 행위 어휘가 없다).
+    # 레거시 빌더의 분류에도 갈 곳이 없어 _nsfw_unrouted.txt 에 갇혀 있었다.
+    # 행위로 보낸다(사용자 지시 2026-08-01). ACT_PULL 로 풀에 끌어온다.
+    "interracial": "nsfw_act",
     # 발바닥을 맞대어 질 입구를 흉내 내는 발. 해부가 아니라 **흉내**다 —
     # `phallic symbol`("무해한 물건이 페니스 모양")이 정확한 짝이고 그쪽에 있다.
     # 사용자 지적 2026-07-30: "자세에 가깝다, sexually suggestive 같은".
@@ -242,7 +251,8 @@ def main() -> int:
     # 나중에 "이건 왜 없지" 를 다시 조사하게 된다.
     pool, blocked, tabooed, foreign = [], [], [], []
     for tag, d in raw.items():
-        if str(d.get("group", "")) != "NSFW":
+        # ACT_PULL 은 그룹이 NSFW 가 아니라 여기서 통과시켜야 한다.
+        if str(d.get("group", "")) != "NSFW" and tag not in ACT_PULL:
             continue
         if F(tag) < CUT:
             continue
@@ -252,7 +262,10 @@ def main() -> int:
         if SG(tag) in SKIP_SUBGROUP:
             tabooed.append(tag)          # taboo / gore / dark_content
             continue
-        if tag in taken:
+        # ACT_PULL 은 `taken` 도 통과한다 — 지금 `meta_nsfw.txt`(다른 빌더의 원본)에
+        # 들어 있어서 taken 으로 잡힌다. 여기가 넣고 나면 그쪽 빌더가 taken 으로
+        # 보고 자기 원본에서 빼므로 한 바퀴 뒤에 정리된다.
+        if tag in taken and tag not in ACT_PULL:
             continue
         (blocked if BLOCK_NAME.search(tag) else pool).append(tag)
 

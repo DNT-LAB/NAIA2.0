@@ -20392,6 +20392,7 @@ body.detached-module .mod-grid-3 {
 }
 /* 아코디언 — 썸네일 섹션은 한 번에 하나만 펼친다(시각 소음 감소). */
 .ia-acc-row { flex-direction: column; align-items: stretch; gap: 6px; }
+
 .ia-acc-head {
   display: flex; align-items: center; gap: 7px; width: 100%;
   padding: 6px 9px; border-radius: 7px; cursor: pointer;
@@ -20420,7 +20421,10 @@ body.detached-module .mod-grid-3 {
      그러면 본문 스크롤과 그리드 스크롤이 중첩되고 마지막 행이 패널 밖에서 잘린다.
      -> 실제 남는 높이로 상한을 건다. 354px = 패널 여백 + 헤드 + 선택칩 + 다른
      아코디언 헤더들의 실측 합계. 200px 바닥을 둬서 아주 짧은 화면에서도 한 행은 보인다. */
-  max-height: clamp(200px, calc(100dvh - 354px), 567px);
+     567px(3줄) 상한을 두고 있었는데, 화면이 길면 그리드가 3줄에서 멈추고 패널
+     아래쪽이 통째로 비었다(사용자 지적 2026-08-01: "여유가 있을 땐 자동으로 꽉"). 
+     상한을 없앤다 — 아래 calc 가 이미 패널 밖으로 넘치지 않게 막고 있다. */
+  max-height: max(200px, calc(100dvh - 354px));
   overflow-y: auto; overscroll-behavior: contain;
   padding-right: 4px;   /* 스크롤바가 셀을 덮지 않게 */
 }
@@ -20984,7 +20988,12 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    빈 타일 대신 글자 칩으로 그린다. */
 
 /* 그림 없는 태그 — 높이가 반으로 줄어 "이건 그림이 없는 것" 이 한눈에 구분된다. */
-.ia-aside-thumb.is-plain { flex-direction: row; align-items: center; min-height: 26px; }
+/* **늘어나지 않게 한다.** 2열 그리드라 옆 칸에 이미지가 있으면 행 높이가 190px 가
+   되고, stretch 기본값 때문에 글자 칩이 그 높이만큼 빈 상자가 된다(사용자 지적
+   2026-08-01 — 없앤 줄 알았던 빈 썸네일이 이렇게 다시 보였다). */
+.ia-aside-thumb.is-plain {
+  flex-direction: row; align-items: center; min-height: 26px; align-self: start;
+}
 .ia-aside-thumb.is-plain span { background: none; text-align: left; padding: 5px 6px; }
 .ia-aside-thumb.is-plain .ia-cell-act {
   position: static; opacity: 0; flex: 0 0 auto; margin-left: auto; padding: 2px 6px;
@@ -21056,3 +21065,45 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   color: #3fc9c9;
 }
 .ia-char-gaze b { font-weight: 700; }
+
+/* ALT 묶음 머리글 — 23개가 한 줄로 늘어서면 무엇을 고르는지 알 수 없다. */
+.ia-alt-group {
+  font-size: 9.5px; color: var(--text-dim); letter-spacing: 0.6px;
+  padding: 7px 6px 3px; margin-top: 3px; border-top: 1px solid var(--border-dim);
+}
+.ia-alt-list > .ia-alt-group:first-child { margin-top: 0; border-top: 0; padding-top: 2px; }
+
+/* ALT 2열 — 15개가 스크롤 없이 한 화면에 들어와야 한다(사용자 지시 2026-08-01).
+   영문 태그와 빈도는 툴팁으로 옮겼다. 묶음 머리글은 두 열을 가로지른다. */
+.ia-alt-popup { width: 400px; }
+.ia-alt-list { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; }
+.ia-alt-group { grid-column: 1 / -1; }
+.ia-alt-row {
+  grid-template-columns: 14px 1fr; grid-auto-rows: auto; gap: 0 7px;
+  padding: 5px 6px;
+}
+.ia-alt-row .ia-alt-box { grid-row: auto; }
+.ia-alt-label { font-size: 11px; line-height: 1.25; }
+
+/* ── 펼쳐진 축이 남는 높이를 채운다 ────────────────────────────────────────
+   처음에 `.ia-panel-body > .ia-ax-row` 로 적었는데 **행은 `.ia-axes` 안에 있어서
+   그 규칙이 아예 안 먹었다.** 그래서 그리드가 `dvh` 기준 높이를 그대로 써서 본문보다
+   커졌고, 스크롤이 그리드가 아니라 패널 본문에 생겼다(사용자 지적 2026-08-01).
+
+   높이를 dvh 로 추정하지 말고 **부모가 정하게** 한다. flex 사슬 전체에 min-height:0
+   이 있어야 자식이 내용 높이 아래로 줄어든다 — 하나라도 빠지면 다시 넘친다.
+
+   검색 중에는 여러 축이 동시에 펼쳐지므로 제외한다. 그때는 본문 하나만 스크롤해야
+   결과가 한 줄기로 이어진다(`.ia-axes.is-search` 규칙이 이미 그렇게 한다). */
+.ia-panel-body > .ia-axes:not(.is-search) { flex: 1 1 auto; min-height: 0; }
+/* **align-items 를 stretch 로 바꿔야 한다.** `.ia-ax-row` 는 가로 flex 에
+   `align-items: center` 라, 가로 방향에서는 `flex` 가 너비만 정하고 높이는
+   자식 내용 그대로가 된다 — 실측으로 그리드가 5,888px 가 되어 넘쳤다(Playwright).
+   자식이 `.ia-cell-wrap` 하나뿐이라 stretch 로 바꿔도 다른 영향이 없다. */
+.ia-axes:not(.is-search) .ia-ax-row.is-open {
+  flex: 1 1 auto; min-height: 0; align-items: stretch;
+}
+.ia-axes:not(.is-search) .ia-ax-row.is-open > .ia-cell-wrap { flex: 1 1 auto; min-height: 0; }
+.ia-axes:not(.is-search) .ia-ax-row.is-open .ia-cell-grid {
+  flex: 1 1 auto; min-height: 0; max-height: none;
+}

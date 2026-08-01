@@ -232,6 +232,57 @@ def _companion_map(context: WebSessionContext) -> dict[str, list[str]]:
     return table
 
 
+def _recommendable(context, raw_tags):
+    """사전 칩으로 **권할 값이 있는 태그인가**를 판정하는 술어를 만든다.
+
+    전수 조사(2026-08-01): 그리드 태그 10,116개의 추천 4줄에서 그림 없는 칩이
+    2,299종 11,380회 나왔다. 그중 상당수는 그림이 없는 게 아니라 **애초에 권할
+    값이 없는 것**이었다.
+
+      · freq < 300      그리드 축의 절단선과 같다. 축에 못 들어갈 태그를 칩으로
+                        권할 이유가 없다(1,351종 2,198회).
+      · 작품명 괄호      `gem uniform (houseki no kuni)` 가 혼자 173회 나왔다.
+                        특정 작품 전용이라 다른 캐릭터에 걸면 안 맞는다.
+                        **괄호를 통째로 막지 않는다** — `orange (fruit)`·
+                        `pokemon (creature)`·`pearl (gemstone)` 은 일반명의
+                        동음이의 표기다. 괄호 안이 작품/캐릭터 태그일 때만 뺀다.
+      · 결함 태그        `bad anatomy`·`bad proportions`. 네거티브에 있는 것을
+                        권하는 꼴이다.
+
+    `manly` 같은 주관 태그는 **빼지 않는다.** 유의미하다는 사용자 지적이 있었고,
+    실제로 `subjective` 서브그룹에는 `hot`·`cold`·`motherly` 처럼 그릴 수 있는
+    것이 섞여 있다 — 서브그룹 단위로 자르면 그것들까지 날아간다.
+    """
+    cache = getattr(context, "_recommendable_cache", None)
+    if cache is None:
+        cache = {}
+        context._recommendable_cache = cache
+
+    def ok(tag: str) -> bool:
+        key = str(tag).strip().lower()
+        hit = cache.get(key)
+        if hit is not None:
+            return hit
+        rec = raw_tags.get(key) or {}
+        verdict = True
+        if int(rec.get("freq", 0) or 0) < 300:
+            verdict = False
+        elif key.startswith("bad "):
+            verdict = False
+        elif "(" in key and key.endswith(")"):
+            inner = key[key.rindex("(") + 1:-1].strip()
+            owner = raw_tags.get(inner) or {}
+            # group 은 `작품 > 만화`·`캐릭터 > 게임` 처럼 계층 표기라 정확히 비교하면
+            # 안 걸린다(실측: houseki no kuni 가 통과했다). 첫 마디로 본다.
+            head = str(owner.get("group", "") or "").split(">")[0].strip().lower()
+            if head in ("copyright", "character", "artist", "작품", "캐릭터", "작가"):
+                verdict = False
+        cache[key] = verdict
+        return verdict
+
+    return ok
+
+
 def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
     raw_tags = getattr(context, "kr_tags_raw", None)
     if not isinstance(raw_tags, dict) or not raw_tags:
@@ -265,12 +316,14 @@ def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
         "subgroup": info.get("subgroup", ""),
         "cat": info.get("_cat", ""),
     }
+    keep = _recommendable(context, raw_tags)
     relations = info.get("relations", {}) if isinstance(info.get("relations"), dict) else {}
     parents = relations.get("parent", [])
     if isinstance(parents, str):
         parents = [parents]
     if ranker is not None:
         parents = ranker.valid_implications(tag_lower, info, limit=8)
+        parents = [x for x in parents if keep(x)]
     if parents:
         result["implications"] = parents[:8]
     if ranker is not None:
@@ -278,9 +331,11 @@ def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
         # 전에는 한 통에 섞였고 children 이 최고점이라 siblings 를 밀어냈다
         # (Codex 전수조사 2026-07-30: children 보유 태그의 99.94%에서 첫 칩이 children).
         specific = ranker.rank_specific(tag_lower, info, limit=8)
+        specific = [x for x in specific if keep(x)]
         if specific:
             result["specific"] = specific
         related = ranker.rank_related(tag_lower, info, limit=8)
+        related = [x for x in related if keep(x)]
     else:
         # 랭커가 없으면 **아무것도 내보내지 않는다.** 전에는 원본 `siblings` +
         # `word_match` 를 필터 없이 이어붙였는데, 그것이 `no panties` 를 `panties` 의
@@ -297,6 +352,8 @@ def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
     # 위 세 줄과 겹치는 후보, 성인/작가/캐릭터/메타 분류, 배경이 너무 흔한 후보는
     # 빌더가 미리 걷었다(tools/build_tag_cooccurrence.py). 근거 없으면 **빈 목록**이다.
     companions = _companion_map(context).get(tag_lower)
+    if companions:
+        companions = [x for x in companions if keep(x)]
     if companions:
         result["companions"] = list(companions)[:8]
     extra_info = {}

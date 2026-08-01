@@ -19,7 +19,7 @@ import {
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV, COLOR_SWATCH, AXIS_COLOR_TAGS, ADULT_SECTIONS, GLOSS_TAGS,
   VIEW_SECTIONS, META_SECTIONS, VIEW_GLOBAL_TAGS, GAZE_TARGETS,
-} from './interactiveAxes.mjs?v=20260801-ax123';
+} from './interactiveAxes.mjs?v=20260801-ax127';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -179,16 +179,25 @@ const CHAR_TAG_SLOT = '캐릭터';
 //
 // 캐릭터 태그 바로 뒤에 들어간다. 어느 캐릭터의 변주인지가 붙어 있어야 의미가 산다.
 const ALT_OPTIONS = [
-  {tag: 'alternate costume', label: '비공식 의상', n: 244073},
-  {tag: 'alternate hairstyle', label: '비공식 헤어스타일', n: 60753},
-  {tag: 'alternate breast size', label: '비공식 가슴크기', n: 26907},
-  {tag: 'alternate hair length', label: '비공식 머리길이', n: 12425},
-  {tag: 'alternate hair color', label: '비공식 머리색', n: 7531},
-  {tag: 'alternate eye color', label: '비공식 눈색', n: 8848},
-  {tag: 'official alternate hairstyle', label: '공식 다른버전 머리스타일', n: 19513},
-  {tag: 'official alternate hair length', label: '공식 다른버전 머리길이', n: 6167},
-  {tag: 'aged down', label: '어리게', n: 31928},
-  {tag: 'aged up', label: '성숙하게', n: 13576},
+  // 의상
+  {g: '의상', tag: 'alternate costume', label: '비공식 의상', n: 244073},
+  {g: '의상', tag: 'official alternate costume', label: '공식 다른버전 의상', n: 194610},
+  {g: '의상', tag: 'cosplay', label: '다른 캐릭터 코스프레', n: 72527},
+  {g: '의상', tag: 'adapted costume', label: '각색 의상', n: 29856},
+  // 머리
+  {g: '머리', tag: 'alternate hairstyle', label: '비공식 헤어스타일', n: 60753},
+  {g: '머리', tag: 'official alternate hairstyle', label: '공식 다른버전 머리스타일', n: 19513},
+  {g: '머리', tag: 'alternate hair length', label: '비공식 머리길이', n: 12425},
+  {g: '머리', tag: 'official alternate hair length', label: '공식 다른버전 머리길이', n: 6167},
+  {g: '머리', tag: 'alternate hair color', label: '비공식 머리색', n: 7531},
+  {g: '머리', tag: 'alternate hair ornament', label: '비공식 머리장식', n: 655},
+  // 색·신체
+  {g: '색·신체', tag: 'alternate breast size', label: '비공식 가슴크기', n: 26907},
+  {g: '색·신체', tag: 'alternate color', label: '비공식 전체 색', n: 11383},
+  {g: '색·신체', tag: 'alternate eye color', label: '비공식 눈색', n: 8848},
+  // 나이
+  {g: '나이', tag: 'aged down', label: '어리게', n: 31928},
+  {g: '나이', tag: 'aged up', label: '성숙하게', n: 13576},
 ];
 const ALT_LABEL = new Map(ALT_OPTIONS.map(o => [o.tag, o.label]));
 const GAZE_LABEL = new Map(GAZE_TARGETS.map(o => [o.tag, o.label]));
@@ -869,12 +878,20 @@ export function createInteractivePanel({
 
   function altPopupHtml(c) {
     const on = new Set(c.alt || []);
-    const rows = ALT_OPTIONS.map(o => `<button type="button"
-      class="ia-alt-row${on.has(o.tag) ? ' is-on' : ''}" data-alt="${escHtml(o.tag)}">
+    let lastG = '';
+    const rows = ALT_OPTIONS.map(o => {
+      // 23개가 한 줄로 늘어서면 무엇을 고르는지 알 수 없다. 묶음 머리글을 넣는다.
+      const head = o.g && o.g !== lastG
+        ? `<div class="ia-alt-group">${escHtml(o.g)}</div>` : '';
+      lastG = o.g || lastG;
+      // 2열이라 영문 태그를 따로 줄 자리가 없다 -> 툴팁으로. 무엇이 프롬프트에
+      // 나가는지는 여전히 확인 가능해야 한다(호버).
+      return head + `<button type="button"
+      class="ia-alt-row${on.has(o.tag) ? ' is-on' : ''}" data-alt="${escHtml(o.tag)}"
+      title="${escHtml(`${o.tag} — ${o.n.toLocaleString()}건`)}">
       <span class="ia-alt-box"></span>
-      <span class="ia-alt-label">${escHtml(o.label)}</span>
-      <span class="ia-alt-tag">${escHtml(o.tag)}</span>
-      <span class="ia-alt-n">${o.n.toLocaleString()}</span></button>`).join('');
+      <span class="ia-alt-label">${escHtml(o.label)}</span></button>`;
+    }).join('');
     return '<div class="ia-alt-head">원작과 다른 버전 (ALT)</div>' +
       `<div class="ia-alt-list">${rows}</div>` +
       '<div class="ia-alt-foot">캐릭터 태그 바로 뒤에 들어갑니다. ' +
@@ -2322,6 +2339,16 @@ export function createInteractivePanel({
    *  같은 것이 더 많이 나온다(실측 226종 1,064회 vs 조합표 83종 2,001회). 그래서 규칙으로
    *  쪼갠다: **앞 낱말이 색 이름이고 나머지가 그리드에 있는 태그일 때만.** 색 이름 목록에
    *  없는 낱말(`holding`·`implied` 등)은 조합이 아니다. */
+  // 색을 입힐 수 있는 **표면 명사**. 이것들은 기준 태그 자체에 그림이 없어도
+  // 색 조합으로 본다 — `striped clothes`·`black background` 처럼 색만 다른 변종이
+  // 사전 칩에 줄줄이 나왔다. 기준 태그 조건을 통째로 풀면 `orange (fruit)`·
+  // `orange slice` 까지 숨는다(`orange` 가 색 이름이라서). 그래서 목록으로 한정한다.
+  const COLOR_SURFACE = new Set([
+    'clothes', 'clothing', 'background', 'skin', 'hair', 'eyes', 'pupils', 'sclera',
+    'nails', 'sleeves', 'footwear', 'headwear', 'legwear', 'handwear', 'neckwear',
+    'trim', 'outline', 'gemstone', 'horns', 'wings', 'tail', 'fur', 'feathers',
+  ]);
+
   function colorComboOf(tag) {
     const parts = String(tag).toLowerCase().split(' ');
     for (const k of [1, 2]) {
@@ -2331,6 +2358,8 @@ export function createInteractivePanel({
       const base = parts.slice(k).join(' ');
       const src = thumbSrcOf(base);
       if (src) return {base, src, color: COLOR_SWATCH[word], word};
+      // 그림이 없어도 표면 명사면 조합이다(그림 없이 숨기기만 한다).
+      if (COLOR_SURFACE.has(base)) return {base, src: '', color: COLOR_SWATCH[word], word};
     }
     return null;
   }
@@ -3329,8 +3358,10 @@ export function createInteractivePanel({
         <span class="ia-gloss-desc">${escHtml(d || '')}</span>
         <span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span></div>`;
     }).join('');
-    return {tab, pane: `<div class="ia-ax-row is-open"><div class="ia-cell-wrap">
-      <p class="ia-gloss-note">${escHtml(sec.note || '썸네일 없이 목록으로만 제공합니다.')}</p>
+    // 안내 문구는 뺐다(사용자 지시 2026-08-01). 목록 모양만 봐도 그림이 없다는 것이
+    // 명백한데 매번 한 줄을 읽히는 값이 없다. 필요하면 sec.note 로 다시 붙는다.
+    const note = sec.note ? `<p class="ia-gloss-note">${escHtml(sec.note)}</p>` : '';
+    return {tab, pane: `<div class="ia-ax-row is-open"><div class="ia-cell-wrap">${note}
       <div class="ia-gloss-list">${rows}</div></div></div>`};
   }
 

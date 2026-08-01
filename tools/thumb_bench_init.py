@@ -12,6 +12,14 @@
   - bare shoulders: 목/어깨선을 열어 머리·귀·뿔이 옷에 묻히지 않게 한다.
   - head out of frame: 부위/체형 축은 얼굴을 버리고 몸통에 화소를 몰아준다.
   - 아티스트 0.38 저가중 + watercolor 0.4: 라인이 얇고 배경이 흰 균일한 톤.
+
+
+## ⚠ import 만 해도 파일을 덮어쓴다
+
+이 모듈은 함수가 아니라 **모듈 최상위에서 실행**된다. `import tools.thumb_bench_init`
+한 줄로 `_bench.json` 이 재생성되고, **손으로 추가한 배치가 조용히 사라진다**
+(2026-08-02 실측: job·job_male·event·mech·view_*·meta_* 등 15개가 날아갔다).
+검증 목적으로 import 하지 마라 — `python -c "import ..."` 도 마찬가지다.
 """
 import json
 import re

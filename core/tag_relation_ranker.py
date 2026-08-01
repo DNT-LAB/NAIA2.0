@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -120,6 +122,27 @@ def _core_tokens(tag: str) -> set[str]:
     }
 
 
+# 존재 <-> 부재 쌍. `no shirt` 를 `shirt` 의 "비슷한 것" 으로 내놓으면, 사용자가 그 칩을
+# 눌러 정반대 태그를 프롬프트에 넣는다(Codex 전수조사 2026-07-30: 명시적 반대쌍만 564간선).
+#
+# `_core_tokens` 로는 못 잡는다 — `without` 은 STOP_TOKENS 라 지워지고, 그러면
+# `without X` 와 `X` 의 토큰이 **같아져서** 오히려 최고점을 받는다. 그래서 정규화된
+# 원문에서 부정 표지를 보고, 표지를 뗀 나머지가 포함 관계인지로 판정한다.
+_NEG_RE = re.compile(r"^(?:no|without|missing)\s+|\s+(?:gone|removed)$")
+
+
+def _is_negation_pair(a: str, b: str) -> bool:
+    """한쪽만 부정 표지를 갖고, 표지를 뗀 대상이 겹치면 반대쌍이다."""
+    na, nb = bool(_NEG_RE.search(a)), bool(_NEG_RE.search(b))
+    if na == nb:                      # 둘 다 부정 / 둘 다 긍정이면 반대쌍이 아니다
+        return False
+    ta = _relation_tokens(_NEG_RE.sub(" ", a))
+    tb = _relation_tokens(_NEG_RE.sub(" ", b))
+    if not ta or not tb:
+        return False
+    return ta <= tb or tb <= ta
+
+
 def _relation_tokens(tag: str) -> set[str]:
     return {token for token in _TOKEN_RE.findall(normalize_tag(tag)) if token}
 
@@ -172,6 +195,44 @@ class RankedRelation:
     source: str
 
 
+# 배타 태그쌍 — `tools/build_exclusive_pairs.py` 가 실제 게시물 동반 lift 로 만든다.
+# `muscular` 의 "비슷한 것" 에 `loli` 가 나오던 것을 여기서 끊는다(사용자 실측 2026-07-30).
+# 사전은 체형 축 태그들을 서로 `siblings` 로 묶어 놓았고 랭커는 "같은 subgroup" 을 유사도
+# 근거로 쓰므로, 규칙만으로는 '갈아 끼우는 대안'과 '전혀 안 붙는 쌍'을 구별할 수 없다.
+#
+# 파일이 없으면 빈 집합이다 — 게이트가 없어도 나머지는 그대로 동작한다(기능 저하만).
+_EXCLUSIVE_PATH_CANDIDATES = (
+    Path(__file__).resolve().parent.parent / "data" / "tag_exclusive_pairs.json",
+)
+_exclusive_pairs: frozenset[tuple[str, str]] | None = None
+
+
+def _load_exclusive_pairs() -> frozenset[tuple[str, str]]:
+    global _exclusive_pairs
+    if _exclusive_pairs is not None:
+        return _exclusive_pairs
+    pairs: set[tuple[str, str]] = set()
+    for path in _EXCLUSIVE_PATH_CANDIDATES:
+        try:
+            if not path.exists():
+                continue
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            for row in payload.get("pairs") or []:
+                a, _, b = str(row).partition("	")
+                if a and b:
+                    pairs.add((a, b) if a < b else (b, a))
+            break
+        except Exception:
+            continue
+    _exclusive_pairs = frozenset(pairs)
+    return _exclusive_pairs
+
+
+def is_exclusive_pair(a: str, b: str) -> bool:
+    key = (a, b) if a < b else (b, a)
+    return key in _load_exclusive_pairs()
+
+
 class TagRelationRanker:
     """Rank tag relations for prompt tooltip insertion.
 
@@ -185,6 +246,14 @@ class TagRelationRanker:
         self._records = tag_records
         self._registry = TagAxisRegistry()
 
+    # "비슷한 것" 은 `siblings` 와 `word_match` 만이다. `children` 은 **더 구체적인 것**
+    # 이라 성격이 다르다(core/interactive_tag_dependency.py 가 그렇게 정의한다).
+    # 전에는 셋을 한 통에 넣고 `children` 에 최고점(320 > siblings 190)을 줬다. 그 결과
+    # children 이 있는 태그의 99.94%에서 첫 칩이 children 이고, 47%는 상위 8칸을 children
+    # 이 채워 siblings 를 밀어냈다(Codex 전수조사 2026-07-30). 목록을 갈라서 낸다.
+    SIMILAR_SOURCES = ("siblings", "word_match")
+    SPECIFIC_SOURCES = ("children",)
+
     def rank_related(
         self,
         tag: str,
@@ -194,12 +263,24 @@ class TagRelationRanker:
     ) -> list[str]:
         return [item.tag for item in self.rank(tag, info, limit=limit)]
 
+    def rank_specific(
+        self,
+        tag: str,
+        info: Mapping[str, Any],
+        *,
+        limit: int = 8,
+    ) -> list[str]:
+        """'더 구체적인 것'(children). '비슷한 것' 과 섞지 않는다."""
+        return [item.tag for item in
+                self.rank(tag, info, limit=limit, sources=self.SPECIFIC_SOURCES)]
+
     def rank(
         self,
         tag: str,
         info: Mapping[str, Any],
         *,
         limit: int = 8,
+        sources: tuple[str, ...] | None = None,
     ) -> list[RankedRelation]:
         normalized = normalize_tag(tag)
         relations = info.get("relations", {}) or {}
@@ -209,15 +290,31 @@ class TagRelationRanker:
         source_axis = _axis_from_info(normalized, info, self._registry)
         source_tokens = _core_tokens(normalized)
 
+        wanted = tuple(sources) if sources is not None else self.SIMILAR_SOURCES
+        # 두 목록은 겹치지 않아야 한다. `muscular male` 은 siblings 와 children 양쪽에
+        # 있어서 '비슷한 것'과 '더 구체적인 것'에 같이 나왔다(실측). 하위 태그는
+        # 구체 목록 소관이므로 유사 목록에서 뺀다.
+        own_children = {normalize_tag(t) for t in _as_list(relations.get("children"))}
+        drop_children = "children" not in wanted
         candidates: list[tuple[str, str]] = []
-        candidates.extend(("children", t) for t in _as_list(relations.get("children")))
-        candidates.extend(("siblings", t) for t in _as_list(relations.get("siblings")))
-        candidates.extend(("word_match", t) for t in _as_list(relations.get("word_match")))
+        for key in ("children", "siblings", "word_match"):
+            if key in wanted:
+                candidates.extend((key, t) for t in _as_list(relations.get(key)))
 
         ranked: dict[str, RankedRelation] = {}
         for source, raw_candidate in candidates:
             candidate = normalize_tag(raw_candidate)
             if not candidate or candidate == normalized or candidate in parents:
+                continue
+            # 존재 <-> 부재는 유사도 방향이 정반대다. 어느 소스로 왔든 막는다.
+            if _is_negation_pair(normalized, candidate):
+                continue
+            # 실제 게시물에서 거의 함께 쓰이지 않는 쌍은 "비슷한 것" 이 아니다.
+            # `children`(더 구체적인 것)에는 적용하지 않는다 — 하위 태그는 상위와
+            # 동반 확률이 낮은 것이 정상이다(`sweater` 와 `naked sweater`).
+            if source != "children" and is_exclusive_pair(normalized, candidate):
+                continue
+            if drop_children and candidate in own_children:
                 continue
 
             candidate_info = self._records.get(candidate, {})

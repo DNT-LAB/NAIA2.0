@@ -208,18 +208,51 @@ def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
     return payload
 
 
+def _companion_map(context: WebSessionContext) -> dict[str, list[str]]:
+    """`data/tag_cooccurrence.json` 의 동반 사전. 한 번 읽어 컨텍스트에 캐시한다.
+
+    605KB / 9,928 태그라 요청마다 읽을 것이 아니다. 파일이 없으면 빈 사전 —
+    아직 빌더를 안 돌린 설치본에서 조회가 죽지 않게 한다.
+    """
+    cached = getattr(context, "_tag_companion_map", None)
+    if cached is not None:
+        return cached
+    table: dict[str, list[str]] = {}
+    try:
+        root = Path(getattr(context, "repo_root", "."))
+        path = root / "data" / "tag_cooccurrence.json"
+        if path.exists():
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            for key, vals in (doc.get("companions") or {}).items():
+                if isinstance(vals, list):
+                    table[str(key).strip().lower()] = [str(v) for v in vals]
+    except Exception:
+        table = {}
+    context._tag_companion_map = table
+    return table
+
+
 def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
     raw_tags = getattr(context, "kr_tags_raw", None)
     if not isinstance(raw_tags, dict) or not raw_tags:
         from core.kr_tag_loader import load_kr_tag_records
-        from core.tag_relation_ranker import TagRelationRanker
 
         load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
         raw_tags = load_result.raw
         context.kr_tags_raw = raw_tags
-        context.tag_relation_ranker = TagRelationRanker(raw_tags) if raw_tags else None
     if not raw_tags:
         return {}
+    # **랭커 생성은 raw 적재와 분리해야 한다.** 전에는 위 `if` 안에서만 만들었는데,
+    # `autocomplete_commands.py` 가 시작 시 `context.kr_tags_raw` 를 먼저 채우면 그 블록을
+    # 건너뛰어 랭커가 영영 None 이었다. 그러면 아래 폴백(원본 siblings+word_match 를
+    # 필터 없이 이어붙이는 경로)이 돌아, `muscular` 의 "비슷한 것" 에 `loli` 가 나왔다.
+    # 즉 랭커의 모든 필터링이 런타임에서 한 번도 동작한 적이 없었다(실측 2026-07-30).
+    ranker = getattr(context, "tag_relation_ranker", None)
+    if ranker is None:
+        from core.tag_relation_ranker import TagRelationRanker
+
+        ranker = TagRelationRanker(raw_tags)
+        context.tag_relation_ranker = ranker
     tag_lower = re.sub(r"\\([()])", r"\1", str(tag or "").strip()).lower()
     info = raw_tags.get(tag_lower)
     if not info:
@@ -236,28 +269,39 @@ def tag_lookup_info(context: WebSessionContext, tag: str) -> dict[str, Any]:
     parents = relations.get("parent", [])
     if isinstance(parents, str):
         parents = [parents]
-    ranker = getattr(context, "tag_relation_ranker", None)
     if ranker is not None:
         parents = ranker.valid_implications(tag_lower, info, limit=8)
     if parents:
         result["implications"] = parents[:8]
     if ranker is not None:
+        # '더 구체적인 것'(children)은 '비슷한 것'과 성격이 달라 목록을 나눠 보낸다 —
+        # 전에는 한 통에 섞였고 children 이 최고점이라 siblings 를 밀어냈다
+        # (Codex 전수조사 2026-07-30: children 보유 태그의 99.94%에서 첫 칩이 children).
+        specific = ranker.rank_specific(tag_lower, info, limit=8)
+        if specific:
+            result["specific"] = specific
         related = ranker.rank_related(tag_lower, info, limit=8)
     else:
+        # 랭커가 없으면 **아무것도 내보내지 않는다.** 전에는 원본 `siblings` +
+        # `word_match` 를 필터 없이 이어붙였는데, 그것이 `no panties` 를 `panties` 의
+        # "비슷한 것" 으로, `loli` 를 `muscular` 의 "비슷한 것" 으로 내놓던 경로다.
+        # 사용자가 그 칩을 눌러 프롬프트에 넣는 자리이므로 빈 목록이 낫다.
         related = []
-        seen = set(parents)
-        for relation_key in ("siblings", "word_match"):
-            values = relations.get(relation_key, [])
-            if isinstance(values, str):
-                values = [values]
-            for value in values:
-                if value not in seen:
-                    seen.add(value)
-                    related.append(value)
     if related:
         result["related"] = related[:8]
+    # ── 함께 쓰이는 것(동반) ────────────────────────────────────────────────
+    # 위 세 줄은 태그 **사전**의 관계다. 랭커를 바로잡은 뒤 freq>=1000 태그의 65.4%가
+    # 셋 다 비었다 — 근거 없는 유사어를 안 내놓기로 한 결과지만, 사용자에게는 "정보창이
+    # 안 뜬다" 로 보인다. 사전에 관계가 없을 뿐 **실제 게시물에는 함께 쓰인 태그가 있다.**
+    # 그래서 이벤트 코퍼스 449만 건에서 오프라인으로 뽑아 둔 것을 네 번째 줄로 낸다.
+    # 위 세 줄과 겹치는 후보, 성인/작가/캐릭터/메타 분류, 배경이 너무 흔한 후보는
+    # 빌더가 미리 걷었다(tools/build_tag_cooccurrence.py). 근거 없으면 **빈 목록**이다.
+    companions = _companion_map(context).get(tag_lower)
+    if companions:
+        result["companions"] = list(companions)[:8]
     extra_info = {}
-    for extra_tag in list(result.get("implications", [])) + list(result.get("related", [])):
+    for extra_tag in (list(result.get("implications", [])) + list(result.get("related", []))
+                      + list(result.get("companions", []))):
         extra = raw_tags.get(str(extra_tag).strip().lower())
         if not extra:
             continue

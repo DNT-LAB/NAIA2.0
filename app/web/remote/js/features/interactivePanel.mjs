@@ -17,8 +17,8 @@ import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
-  CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS, ADULT_SECTIONS,
-} from './interactiveAxes.mjs?v=20260729-ax104';
+  CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS, ADULT_SECTIONS, GLOSS_TAGS,
+} from './interactiveAxes.mjs?v=20260730-ax112';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -919,7 +919,7 @@ export function createInteractivePanel({
   function wantsSearch() {
     const secs = panelContext?.sections;
     if (!Array.isArray(secs) || !secs.length) return true;
-    return secs.some(sec => sec.kind === 'browse' || sec.kind === 'thumb');
+    return secs.some(sec => sec.kind === 'browse' || sec.kind === 'thumb' || sec.kind === 'gloss');
   }
 
   /** sections 의 browse 섹션이 지정한 subgroup 을 트리 스코프로 쓴다. */
@@ -1069,23 +1069,41 @@ export function createInteractivePanel({
     return v;
   }
 
-  /** implies/related 를 칩으로. 조언(전제조건·충돌·추천)이 없는 태그가 대부분이라
-   *  '알려드릴 것이 없습니다' 만 띄우던 자리를 이것이 대신한다. */
+  /** 태그 사전 카드 — 함께 딸려오는 것 / 비슷한 것 / 더 구체적인 것.
+   *  조언(전제조건·충돌·추천)이 없는 태그가 대부분이라 '알려드릴 것이 없습니다' 만
+   *  띄우던 자리를 이것이 대신한다.
+   *
+   *  칩은 `recThumbsHtml` 로 그린다 — 팩에 그림이 있으면 이미지가 붙는다. 전에는 이
+   *  카드만 텍스트 버튼을 써서, 그리드에는 그림이 있는 태그인데도 오른쪽에서는 이름만
+   *  보였다(사용자 지적 2026-07-30). 그리드와 같은 렌더러를 쓰면 블러·선택 규칙도 함께 따라온다. */
   function lookupCardHtml(info) {
     if (!info) return '';
-    const sel = currentLower();
-    const chip = t => `<button type="button" class="ia-aside-chip${sel.has(String(t).toLowerCase()) ? ' on' : ''}"` +
-      ` data-need-add="${escHtml(t)}">${escHtml(t)}</button>`;
     // 설명·분류·빈도는 뺐다 — 설명은 셀 툴팁에 이미 나오고, 분류·빈도는 여기서
     // 결정에 쓰이지 않는다. 관계 두 줄만 남긴다(사용자 지시).
     const rows = [];
     if (info.implications && info.implications.length) {
       rows.push('<div class="ia-aside-group-label">함께 딸려오는 것</div>' +
-        `<div class="ia-aside-chips">${info.implications.map(chip).join('')}</div>`);
+        `<div class="ia-aside-thumbs">${recThumbsHtml(info.implications.slice(0, 8))}</div>`);
     }
     if (info.related && info.related.length) {
       rows.push('<div class="ia-aside-group-label">비슷한 것</div>' +
-        `<div class="ia-aside-chips">${info.related.slice(0, 10).map(chip).join('')}</div>`);
+        `<div class="ia-aside-thumbs">${recThumbsHtml(info.related.slice(0, 8))}</div>`);
+    }
+    // '더 구체적인 것'(children)은 '비슷한 것'과 성격이 다르다 — `sweater` 에 대한
+    // `ribbed sweater` 는 유사어가 아니라 하위 종류다. 전에는 한 통에 섞였고 점수가
+    // 높아 유사어를 밀어냈다(children 보유 태그의 99.94%에서 첫 칩이 children).
+    // 이제 백엔드가 목록을 나눠 보내므로 줄도 나눈다.
+    if (info.specific && info.specific.length) {
+      rows.push('<div class="ia-aside-group-label">더 구체적인 것</div>' +
+        `<div class="ia-aside-thumbs">${recThumbsHtml(info.specific.slice(0, 8))}</div>`);
+    }
+    // '함께 쓰이는 것'은 앞 세 줄과 출처가 다르다 — 사전의 관계가 아니라 실제 게시물
+    // 449만 건의 동반 통계다. 그래서 사전에 관계가 없는 태그(freq>=1000 의 65.4%)에도
+    // 붙는다. 근거가 약하면 백엔드가 아무것도 안 보낸다 — 억지로 채우지 않는 것이 설계다.
+    // 4개인 것은 실측 결과다(8칸으로 늘리면 정밀도 .746 -> .574).
+    if (info.companions && info.companions.length) {
+      rows.push('<div class="ia-aside-group-label">함께 쓰이는 것</div>' +
+        `<div class="ia-aside-thumbs">${recThumbsHtml(info.companions.slice(0, 8))}</div>`);
     }
     if (!rows.length) return '';
     return '<div class="ia-aside-card"><div class="ia-aside-title">태그 사전' +
@@ -1125,7 +1143,11 @@ export function createInteractivePanel({
         : '<span class="ia-aside-thumb-none"></span>';
       const on = typeof o === 'object' && o.on;
       // 그리드와 같은 규칙 — 라벨은 항상 태그 이름이고, 행동은 호버 버튼이 맡는다.
+      // 그리드 셀과 같은 블러 규칙을 적용한다. 전에는 `is-sensitive` 가 여기 안 붙어서
+      // Safe Viewer 가 On 이어도 **추천 칩 쪽은 그대로 노출됐다**(Safe Viewer 를 붙이며
+      // 발견, 2026-07-30). 가리는 곳이 한 군데라도 새면 가리는 의미가 없다.
       const cls = 'ia-aside-thumb' + (match ? ' match' : '') + (on ? ' on' : '')
+        + (isSensitive(t) ? ' is-sensitive' : '')
         + (inspectTag === t ? ' is-inspect' : '');
       const tip = on ? `${t} — 이미 넣었습니다` :
         (match ? `${t} — 지금 고른 것들과도 어울립니다` : t);
@@ -1381,6 +1403,45 @@ export function createInteractivePanel({
   }
 
   /** 팝업 오른쪽에 붙인다. 자리가 안 나오면 숨긴다 — 그리드가 우선이다. */
+  // ── Safe Viewer ────────────────────────────────────────────────────────
+  // 민감 태그 썸네일의 기본 블러를 켜고 끈다. **모든 팝업이 이 하나를 공유한다** —
+  // 슬롯마다 따로 두면 성인 축이 여러 슬롯에 걸쳐 있어(신체·의상·자세·씬) 한쪽만
+  // 꺼진 상태가 생긴다. 블러 해제는 body 클래스 하나로 전역 적용한다.
+  //
+  // 기본은 On(가린다). 끈 상태를 기기에 기억한다 — 매번 다시 끄게 하면 그리드를
+  // 훑는 작업에서 방해만 된다. 계정이 아니라 기기 단위인 이유는 localStorage 라서다.
+  const SAFE_VIEWER_KEY = 'ia.safeViewer';
+  let safeViewer = true;
+  try { safeViewer = localStorage.getItem(SAFE_VIEWER_KEY) !== '0'; } catch { safeViewer = true; }
+
+  function applySafeViewer() {
+    document.body.classList.toggle('ia-safe-off', !safeViewer);
+  }
+
+  function setSafeViewer(on) {
+    safeViewer = !!on;
+    try { localStorage.setItem(SAFE_VIEWER_KEY, safeViewer ? '1' : '0'); } catch {}
+    applySafeViewer();
+    // 열려 있는 팝업들의 버튼 표시를 맞춘다(씬 팝업까지 한 번에).
+    document.querySelectorAll('[data-safe-viewer]').forEach(b => {
+      b.setAttribute('aria-pressed', String(safeViewer));
+      b.classList.toggle('off', !safeViewer);
+      const t = b.querySelector('.ia-safe-state');
+      if (t) t.textContent = safeViewer ? 'On' : 'Off';
+    });
+  }
+
+  function safeViewerBtnHtml() {
+    return `<button type="button" class="ia-safe-btn${safeViewer ? '' : ' off'}"
+      data-safe-viewer="1" aria-pressed="${safeViewer}"
+      title="민감 썸네일의 흐림을 켜고 끕니다. 모든 창에 함께 적용됩니다.">
+      Safe Viewer : <b class="ia-safe-state">${safeViewer ? 'On' : 'Off'}</b></button>`;
+  }
+
+  // 창 폭 맞추기는 세션당 한 번이다. 사용자가 창을 좁혔거나 줌을 올린 것을
+  // 계속 되돌리면 조작을 빼앗는다.
+  let asideFitTried = false;
+
   function positionAside() {
     if (!asideMount) return;
     const vw = window.innerWidth;
@@ -1390,7 +1451,23 @@ export function createInteractivePanel({
     // 떼기만 하고 다시 붙이지 않아서, 한 번 좁아지면 창을 넓혀도 플로트가 돌아오지
     // 않았다(다음 renderAside 까지). 색 조합이 이 플로트에 있으니 옷 색을 고를 길이
     // 아예 막힌다 — 들어갈 자리가 생기면 다시 붙인다.
-    if (vw < 1280 || left + W > vw - 12) { asideMount.classList.remove('open'); return; }
+    if (vw < 1280 || left + W > vw - 12) {
+      asideMount.classList.remove('open');
+      // **한 번만** 창 폭을 맞춰 본다. Electron 셸이 1) 창을 넓히고 2) 그래도 모자라면
+      // 줌을 단계별로 낮춘다. 전에는 그냥 숨겨서, 창이 좁은 것뿐인데 기능이 고장난
+      // 것처럼 보였다(사용자 지적 2026-07-30 — 웹에서는 되고 Electron 에서만 안 됐다).
+      //
+      // 매번 부르지 않는 이유: 사용자가 창을 일부러 좁혔거나 줌을 올렸을 수 있고,
+      // 그걸 계속 되돌리면 조작을 빼앗는 것이 된다. 한 번 시도하고 물러난다.
+      if (!asideFitTried) {
+        asideFitTried = true;
+        const need = Math.ceil(left + W + 12);
+        window.naiaShell?.fitWidth?.(need)
+          .then(r => { if (r && r.ok) positionAside(); })
+          .catch(() => {});
+      }
+      return;
+    }
     asideMount.style.left = left + 'px';
     asideMount.style.top = Math.max(12, box.top) + 'px';
     asideMount.style.bottom = Math.max(12, window.innerHeight - box.bottom) + 'px';
@@ -1573,6 +1650,7 @@ export function createInteractivePanel({
       <div class="ia-panel-head">
         <span class="ia-panel-title">${escHtml(panelContext.title)}</span>
         <span class="ia-panel-sub">${escHtml(panelContext.axis)}</span>
+        ${safeViewerBtnHtml()}
         <button type="button" class="ia-panel-close" data-close="1">&times;</button>
       </div>
       ${wantsSearch() ? `<div class="ia-search ia-search-top">
@@ -1587,6 +1665,8 @@ export function createInteractivePanel({
       </div>`;
 
     panelMount.querySelector('[data-close]')?.addEventListener('click', closePanel);
+    panelMount.querySelector('[data-safe-viewer]')
+      ?.addEventListener('click', () => setSafeViewer(!safeViewer));
     if (panelContext.slotId === 'composition') bindCompPanel();
     bindAxisSections();
     // 계층 브라우저를 이 슬롯 축으로 마운트한다. 없으면 섹션은 비어 있다.
@@ -1976,6 +2056,59 @@ export function createInteractivePanel({
     </div>`};
   }
 
+  // 이미지 없이 `태그 : 설명` 만 나열하는 섹션. `nsfw_heavy` 가 쓴다 —
+  // 금기와 평상 사이의 태그들이라 썸네일을 만들어 배포하지 않기로 했다(사용자 결정
+  // 2026-07-30: "이걸 이미지까지 오픈하는건 아닌거 같다"). 목록으로만 닿게 한다.
+  // 선택 동작은 썸네일 셀과 같다 — `data-ax/data-ref/data-val` 을 그대로 쓴다.
+  function glossHtml(sec) {
+    const axis = sec.ref;
+    const full = GLOSS_TAGS[axis] || [];
+    const all = thumbFilter ? full.filter(([t, d]) => matchesFilter(t) || (d || '').includes(thumbFilter)) : full;
+    const sel = currentLower();
+    const chosenCount = all.filter(([t]) => sel.has(t.toLowerCase())).length;
+    const open = thumbFilter ? all.length > 0 : openThumbAxis === axis;
+    if (thumbFilter && !all.length) return {tab: '', pane: ''};
+    const tab = `<button type="button" class="ia-axtab${open ? ' is-open' : ''}"
+      data-acc-ax="${escHtml(axis)}" aria-selected="${open}">
+      <span class="ia-axtab-name">${escHtml(sec.label)}</span>
+      <span class="ia-acc-n">${thumbFilter ? `${all.length}/${full.length}` : all.length}</span>
+      ${chosenCount ? `<span class="ia-acc-sel">${chosenCount}</span>` : ''}
+    </button>`;
+    if (!open) return {tab, pane: ''};
+    const rows = all.map(([t, d]) => {
+      const on = sel.has(t.toLowerCase());
+      return `<div class="ia-gloss-row${on ? ' on' : ''}"
+        data-ax="thumb" data-ref="${escHtml(axis)}" data-val="${escHtml(t)}"
+        aria-pressed="${on}">
+        <span class="ia-gloss-tag">${escHtml(t)}</span>
+        <span class="ia-gloss-desc">${escHtml(d || '')}</span>
+        <span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span></div>`;
+    }).join('');
+    return {tab, pane: `<div class="ia-ax-row is-open"><div class="ia-cell-wrap">
+      <p class="ia-gloss-note">${escHtml(sec.note || '썸네일 없이 목록으로만 제공합니다.')}</p>
+      <div class="ia-gloss-list">${rows}</div></div></div>`};
+  }
+
+  /** 축 구간으로 스크롤. 검색 중 탭을 누르면 그 결과 묶음으로 이동한다.
+   *  스크롤 컨테이너는 `.ia-panel-body` 다 — 그리드가 아니라 본문이 움직여야 한다. */
+  function scrollToAxis(axis) {
+    const body = panelMount.querySelector('.ia-panel-body');
+    // 축 키는 [a-z_] 뿐이라 CSS 이스케이프가 필요 없다(기존 팔레트 점프와 동일).
+    const grid = panelMount.querySelector(`[data-scroll-ax="${axis}"]`);
+    const row = grid?.closest('.ia-ax-row');
+    if (!body || !row) return;
+    // 탭 줄이 본문 위에 붙어 있으므로 그만큼 위로 더 올린다 — 안 그러면 첫 행이 가린다.
+    const tabs = panelMount.querySelector('.ia-axtabs');
+    const pad = (tabs ? tabs.getBoundingClientRect().height : 0) + 10;
+    body.scrollTo({
+      top: Math.max(0, body.scrollTop + row.getBoundingClientRect().top
+                    - body.getBoundingClientRect().top - pad),
+      behavior: 'smooth',
+    });
+    row.classList.add('is-jumped');
+    setTimeout(() => row.classList.remove('is-jumped'), 900);
+  }
+
   function axisSectionsHtml() {
     const secs = panelContext?.sections;
     if (!Array.isArray(secs) || !secs.length) return '';
@@ -1986,7 +2119,9 @@ export function createInteractivePanel({
       if (sec.kind === 'slider') return sliderHtml(sec);
       return '';   // browse 는 렌더하지 않는다 (트리는 아래 탐색 섹션이 담당)
     }).filter(Boolean).join('');
-    const thumbs = secs.filter(sec => sec.kind === 'thumb').map(thumbHtml);
+    // gloss 는 썸네일과 같은 탭 스트립에 들어간다 — 사용자에게는 같은 축 선택기다.
+    const thumbs = secs.map(sec => sec.kind === 'thumb' ? thumbHtml(sec)
+      : sec.kind === 'gloss' ? glossHtml(sec) : null).filter(Boolean);
     const tabs = thumbs.map(x => x.tab).filter(Boolean).join('');
     const panes = thumbs.map(x => x.pane).filter(Boolean).join('');
     const body = lead
@@ -2000,7 +2135,10 @@ export function createInteractivePanel({
       return `<div class="ia-axes" id="iaAxes"><div class="ia-axes-empty">`
         + `${escHtml(thumbFilter)} — 맞는 태그가 없습니다.</div></div>`;
     }
-    return `<div class="ia-axes" id="iaAxes">${body}</div>`;
+    // 검색 중에는 여러 축이 동시에 펼쳐진다. 축마다 그리드가 자기 스크롤을 가지면
+    // 화면에 스크롤 영역이 겹겹이 쌓여(사용자 표현: "복층") 아래쪽 이미지를 누르기
+    // 어려워진다. 검색 중에는 그리드 상한을 풀고 **본문 하나만** 스크롤하게 한다.
+    return `<div class="ia-axes${thumbFilter ? ' is-search' : ''}" id="iaAxes">${body}</div>`;
   }
 
   function bindAxisSections() {
@@ -2041,6 +2179,12 @@ export function createInteractivePanel({
       el.addEventListener('click', event => {
         event.stopPropagation();
         const axis = el.dataset.accAx;
+        // 검색 중에는 이미 전부 펼쳐져 있다 — 누르면 그 구간으로 **점프**한다.
+        // 접기로 동작하면 결과가 사라져 "왜 없어졌지" 가 된다.
+        if (thumbFilter) {
+          scrollToAxis(axis);
+          return;
+        }
         openThumbAxis = (openThumbAxis === axis) ? null : axis;
         refreshAxisSections();
       });
@@ -2301,6 +2445,10 @@ export function createInteractivePanel({
   panelMount.addEventListener('mousedown', onPanelMouseDown);
 
   blocksMount.hidden = true;
+
+  // 로드 시 저장된 Safe Viewer 상태를 body 에 반영한다. 팝업을 열기 전이라도
+  // 다른 곳(사이드 썸네일 등)의 블러가 일관되게 나온다.
+  applySafeViewer();
 
   return {
     isActive: () => active,

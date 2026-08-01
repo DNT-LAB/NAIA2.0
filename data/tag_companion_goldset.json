@@ -1,0 +1,115 @@
+{
+  "note": [
+    "동반 태그 추천의 골드셋. tools/eval_tag_cooccurrence.py 가 읽는다.",
+    "정책(점수식·게이트·문턱)을 바꿀 때 이 파일로 채점해서 회귀를 잡는다.",
+    "",
+    "출처: Codex 가 data/quick_search/ 52 파티션(449만 이벤트) 실측으로 만든 16태그 표",
+    "(2026-07-30). '나와야' 는 동반수와 lift 가 모두 확인된 후보 중 동반 추천으로",
+    "의미가 있는 것이고, 이미 UI 의 다른 관계 줄(함께 딸려오는 것/비슷한 것/더 구체적인 것)에",
+    "표시되는 후보는 정답에서 제외했다.",
+    "",
+    "**이 골드셋은 16태그짜리다.** 여기서 뽑은 문턱을 일반화된 값으로 착각하지 마라 —",
+    "커버리지가 넓어지면 다시 채점해야 한다. 저빈도(freq<1000) 7개를 일부러 넣었다:",
+    "고빈도만 맞추는 정책은 꼬리에서 무너지고, 어휘 16,625개 중 대부분이 꼬리다.",
+    "",
+    "`beach` 는 버그 수정 전부터 이미 좋았다 — **어떤 정책 변경에서도 나빠지면 안 된다.**",
+    "`blush` 는 반대다: 어떤 점수식으로도 2/8 을 못 넘겼다. 특징적으로 동반하는 것이",
+    "없는 태그라서, '억지로 8개 채우기' 보다 '빈 목록' 이 맞다는 판단의 근거다."
+  ],
+  "bad_is_partial": true,
+  "bad_note": "'나오면 안 됨' 은 전수가 아니라 실제로 상위에 올라온 오답만 적은 것이다. 여기 없는 후보가 자동으로 정답은 아니다 — precision 은 '나와야' 목록 기준으로만 센다.",
+  "cases": [
+    {
+      "tag": "beach", "freq": 57918,
+      "good": ["swimsuit", "bikini", "day", "ocean", "sky", "cloud", "water", "sand"],
+      "bad": ["breasts", "long hair", "solo", "smile", "navel"]
+    },
+    {
+      "tag": "sweater", "freq": 126865,
+      "good": ["long sleeves", "skirt", "pants", "pantyhose", "pleated skirt",
+               "sleeves past wrists"],
+      "bad": ["turtleneck sweater", "ribbed sweater", "sweater lift", "blush", "smile"]
+    },
+    {
+      "tag": "sitting", "freq": 544083,
+      "good": ["indoors", "chair", "barefoot", "crossed legs", "arm support", "feet",
+               "knees up"],
+      "bad": ["shirt", "long sleeves", "holding", "skirt", "wariza", "seiza"]
+    },
+    {
+      "tag": "school uniform", "freq": 364319,
+      "good": ["skirt", "shirt", "pleated skirt", "sailor collar", "neckerchief", "socks",
+               "necktie"],
+      "bad": ["long hair", "blush", "multiple girls", "open mouth", "serafuku"]
+    },
+    {
+      "tag": "cat ears", "freq": 148546,
+      "good": ["tail", "cat tail", "animal ear fluff", "fang", "bell", "paw pose"],
+      "bad": ["blush", "open mouth", "short hair", "cat girl", "nekomata"]
+    },
+    {
+      "tag": "muscular", "freq": 117999,
+      "good": ["male focus", "pectorals", "bara", "large pectorals", "facial hair",
+               "mature male", "biceps"],
+      "bad": ["short hair", "1boy", "muscular male", "muscular female"]
+    },
+    {
+      "tag": "pantyhose", "freq": 292105,
+      "good": ["skirt", "leotard", "rabbit ears", "playboy bunny", "detached collar",
+               "strapless", "wrist cuffs"],
+      "bad": ["long hair", "breasts", "black pantyhose", "white pantyhose",
+              "torn pantyhose", "pantyhose pull"]
+    },
+    {
+      "tag": "twintails", "freq": 447489,
+      "good": ["ribbon", "hair ornament", "hair ribbon", "skirt", "detached sleeves",
+               "sleeveless"],
+      "bad": ["blush", "smile", "open mouth", "low twintails", "short twintails"]
+    },
+    {
+      "tag": "blush", "freq": 1688557,
+      "good": ["embarrassed", "sweat", "wavy mouth", "heart", "heart-shaped pupils"],
+      "bad": ["breasts", "1girl", "open mouth", "large breasts", "navel", "nipples"],
+      "expect_empty": true,
+      "expect_empty_why": "최고 lift 1.784 — 특징적 동반이 없다. 8개를 채우면 전부 배경 태그가 된다."
+    },
+    {
+      "tag": "angora rabbit", "freq": 797, "low_freq": true,
+      "good": ["x hair ornament", "hair ornament", "on head", "animal on head", "vest", "bow"],
+      "bad": ["blush", "long hair", "rabbit house uniform", "waitress"]
+    },
+    {
+      "tag": "brodie helmet", "freq": 439, "low_freq": true,
+      "good": ["gloves", "military uniform", "military", "rifle", "pants", "cape"],
+      "bad": ["short hair", "male focus", "gem", "covered abs"]
+    },
+    {
+      "tag": "silent princess", "freq": 401, "low_freq": true,
+      "good": ["flower", "pointy ears", "grass", "champion's tunic", "master sword",
+               "crown braid"],
+      "bad": ["breasts", "nipples", "spread legs", "no panties"]
+    },
+    {
+      "tag": "snow rabbit", "freq": 421, "low_freq": true,
+      "good": ["snow", "scarf", "winter", "snowman", "snowing", "mittens", "winter clothes",
+               "coat"],
+      "bad": ["smile", "long hair", "open mouth", "holding"]
+    },
+    {
+      "tag": "medallion", "freq": 774, "low_freq": true,
+      "good": ["cape", "chain", "crest", "family crest", "hat", "jewelry", "military hat",
+               "peaked cap"],
+      "bad": ["long hair", "smile", "gloves", "thighhighs", "oda uri"]
+    },
+    {
+      "tag": "peg leg", "freq": 170, "low_freq": true,
+      "good": ["pants", "boots", "belt", "shorts", "weapon", "mechanical arms", "full body"],
+      "bad": ["hair ears", "short hair", "1boy", "holding"]
+    },
+    {
+      "tag": "anemone (flower)", "freq": 495, "low_freq": true,
+      "good": ["rose", "petals", "hair flower", "dress"],
+      "bad": ["time paradox", "dual persona", "aged down", "aged up", "child", "male focus"]
+    }
+  ]
+}

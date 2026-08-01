@@ -108,6 +108,10 @@ _POSE_MULTI = [_ax for _ax in _pose_axes["label"]
 # 배경 축은 build_location_axes 가 정하고 `_loc_axes.json` 에 라벨까지 적는다.
 # 자세와 같은 방식 — 여기서 다시 적으면 갈라진다.
 _loc = json.loads((SRC / "_loc_axes.json").read_text(encoding="utf-8"))
+# 행사·명절은 배경 슬롯이 맡는다(사용자 지시) — `christmas`·`halloween` 은 인물이
+# 아니라 **장면 전체의 분위기**를 정한다. 축 파일이 있을 때만 붙는다.
+_EVENT_SECTION = ([("thumb", "행사·명절", "event")]
+                  if (SRC / "event.txt").exists() else [])
 _LOC_SECTIONS = [("thumb", _loc["label"][_ax], _ax)
                  for _ax in _loc["label"] if (SRC / f"{_ax}.txt").exists()]
 
@@ -200,6 +204,9 @@ SLOTS = [
         # 전부 생성돼 **남성만 완전 수인이거나 수염 난 노년**이 되고 여성만 케모미미가
         # 됐다(사용자 지적). 베이스 인물이 다르면 프레이밍이 아니라 축을 갈라야 한다.
         ("thumb", "종족(남성)", "species_male"),
+        # 로봇·사이보그도 "사람이 아닌 형태"다. 부분 개조(`single mechanical arm`)가
+        # 많아 프레이밍은 몸통 기준으로 찍었다.
+        ("thumb", "기계·사이보그", "mech"),
         ("thumb", "귀", "ears"),
         ("thumb", "꼬리", "tail"),
         ("thumb", "날개", "wings"),
@@ -225,6 +232,9 @@ SLOTS = [
         ("thumb", "원피스·한벌", "cloth_dress"),
         ("thumb", "겉옷", "cloth_outer"),
         ("thumb", "전통 의상", "cloth_traditional"),
+        # 직업·역할은 곧 그 직업의 옷이다(`nun`·`nurse`·`miko`·`race queen`).
+        # 사전 칩이 계속 권하는데 어느 축에도 없어 사용자가 닿을 방법이 없었다.
+        ("thumb", "직업·역할", "job"),
         ("thumb", "제복·코스튬", "cloth_uniform"),
         ("thumb", "수영복", "cloth_swim"),
         ("thumb", "속옷", "cloth_under"),
@@ -357,7 +367,7 @@ _referenced.add("face")
 _referenced.update(p.stem for p in SRC.glob("pose_*_m*.txt"))
 # 배경 축도 SLOTS 가 아니라 프론트의 SCENE_SLOTS(LOC_SECTIONS)가 참조한다.
 # 빼면 THUMB_TAGS 에 태그가 없어 씬 슬롯이 빈 그리드를 그린다 — 다인원과 같은 함정.
-_referenced.update(_rf for _kind, _lb, _rf in _LOC_SECTIONS)
+_referenced.update(_rf for _kind, _lb, _rf in _LOC_SECTIONS + _EVENT_SECTION)
 _referenced.update(_rf for _s in (_OBJ_SECTIONS, _ANI_SECTIONS, _FX_SECTIONS,
                                  _VIEW_SECTIONS, _META_SECTIONS)
                    for _kind, _lb, _rf in _s)
@@ -385,7 +395,7 @@ _nsfw_label |= json.loads(
 # 배선 누락을 조용히 넘기지 않는다 — 이미지가 있는 축이 목록에서 빠지면 죽는다.
 _wired = set(_ADULT_ORDER)
 _have_img = {p.stem for p in NSFW_SRC.glob("nsfw_*.txt")
-             if p.stem not in ("nsfw_heavy",) and any(
+             if p.stem not in ("nsfw_etc_sexual", "nsfw_etc_dark") and any(
                  f"{p.stem}/{t}" in _PACK_KEYS for t in lines(p.stem))}
 assert not (_have_img - _wired), f"성인 축 배선 누락: {sorted(_have_img - _wired)}"
 # 성인 도감 축은 SLOTS 가 아니라 프론트의 ADULT_SECTIONS 가 참조한다.
@@ -715,7 +725,7 @@ for _t, _lb, _n in _GAZE:
 out.append("];")
 out.append("")
 out.append("export const LOC_SECTIONS = [")
-for _k, _lb, _rf in _LOC_SECTIONS:
+for _k, _lb, _rf in _LOC_SECTIONS + _EVENT_SECTION:
     out.append(f"  {{kind: 'thumb', label: {js(_lb)}, ref: {js(_rf)}}},")
 out.append("];")
 out.append("")
@@ -741,16 +751,25 @@ for _ax in _ADULT_ORDER:
 # `nsfw_heavy` 는 **썸네일을 만들지 않는다.** 금기와 평상 사이의 태그라 이미지를
 # 리포로 배포하지 않기로 했다(사용자 결정 2026-07-30). 목록으로만 닿게 하는
 # `kind: 'gloss'` 섹션으로 낸다 — 선택 동작은 썸네일 셀과 같다.
-_HEAVY = [l.strip() for l in (NSFW_SRC / "nsfw_heavy.txt").read_text(encoding="utf-8").splitlines()
-          if l.strip() and not l.startswith("#")]
-if _HEAVY:
-    out.append("  {kind: 'gloss', label: \"수요 태그(이미지 없음)\", ref: \"nsfw_heavy\","
-               " note: \"썸네일을 만들지 않는 분류입니다. 태그와 설명만 제공합니다.\"},")
+# 성격이 다른 두 부류다 — 한 통에 뒀던 것은 취급(썸네일 없음)이 같아서지
+# 내용이 같아서가 아니었다. rating 은 성적 노출만 재므로 폭력·자해는 실측으로
+# 가를 수 없어 목록을 따로 둔다(사용자 방침).
+_GLOSS_SRC = [("nsfw_etc_sexual", "성적 ETC"), ("nsfw_etc_dark", "폭력 및 자해 ETC")]
+_GLOSS = {}
+for _key, _label in _GLOSS_SRC:
+    _f = NSFW_SRC / f"{_key}.txt"
+    if not _f.exists():
+        continue
+    _GLOSS[_key] = [l.strip() for l in _f.read_text(encoding="utf-8").splitlines()
+                    if l.strip() and not l.startswith("#")]
+    if _GLOSS[_key]:
+        out.append(f"  {{kind: 'gloss', label: {js(_label)}, ref: {js(_key)}}},")
 out.append("];")
 out.append("")
 out.append("// 이미지 없이 `태그 : 설명` 으로만 제공하는 축. `kind: 'gloss'` 섹션이 읽는다.")
 out.append("export const GLOSS_TAGS = " + js({
-    "nsfw_heavy": [[t, str((_raw.get(t) or {}).get("description") or "").strip()] for t in _HEAVY],
+    _k: [[t, str((_raw.get(t) or {}).get("description") or "").strip()] for t in _v]
+    for _k, _v in _GLOSS.items()
 }) + ";")
 out.append("")
 out.append("export const POSE_MULTI_SECTIONS = [")

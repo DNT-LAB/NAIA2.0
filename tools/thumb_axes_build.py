@@ -625,10 +625,9 @@ for _ax, _lst in AXES.items():
         EXPLICIT.setdefault(_t, _ax)
 
 # 1girl 베이스로는 렌더되지 않아 남성 베이스 배치로 따로 돌려야 하는 태그.
-MALE_ONLY = {
-    "muscular male", "toned male", "old man", "fat man",
-    "ugly man", "giant male", "miniboy", "strongman waist",
-}
+# 목록은 `tools/thumb_male_tags.py` 가 SSOT 다 — thumb_axes_emit 도 같은 목록으로 UI 를
+# 가르므로, 여기에 손으로 적으면 생성 배치와 화면이 갈라진다(이미 다섯 번 난 사고).
+from tools.thumb_male_tags import MALE_ONLY   # noqa: E402
 
 OUT = Path("wildcards/thumb")
 NSFW_OUT = Path("wildcards/nsfw")
@@ -701,6 +700,47 @@ if _un:
         print(f"     {t} ({F(t)})")
 else:
     print("미분류 없음 (전부 명시 배정)")
+
+# ── 성인 도감에서 들여오는 것 ──────────────────────────────────────────────
+# 태그 DB 가 `NSFW` 그룹으로 분류했지만 그림에는 성적 요소가 없는 것들. 소스의
+# `sex_acts`(209개, 가장 큰 통)와 `nudity` 두 서브그룹에 캐릭터 유형과 근육이
+# 섞여 들어간 게 원인이다 — 의상에서 `attire` 를 4분할해야 했던 것과 같은 구조.
+#
+# 여기 적으면 `build_nsfw_act_catalog.py` 가 자동으로 도감에서 뺀다(그쪽이
+# `wildcards/thumb/*.txt` 를 전부 `taken` 으로 읽는다). 목록은 한 벌이다.
+IMPORTED_FROM_NSFW = {
+    # 인물 유형 — 소스 서브그룹 `sex_acts`. 행위가 아니라 무엇으로 그려지느냐다.
+    "furry": "species", "furry female": "species", "monster girl": "species",
+    "monster": "species",
+    "furry male": "species_male", "monster boy": "species_male",
+    # 여성 거인. 성적 요소가 없고 `monster girl` 과 같은 인외 계열이다(사용자 판단
+    # 2026-07-29). 흰 배경에서 크기가 안 읽힐 우려로 보류했었는데, 종족 축은
+    # 어차피 무엇으로 그려지느냐를 고르는 곳이라 여기가 맞다.
+    "giantess": "species",
+    # 동물귀를 붙이는 것 자체. `fake animal ears` 와 같은 계열이라 귀 축이 맞다.
+    "kemonomimi mode": "ears",
+    # 남성 가슴 근육 — 소스 서브그룹 `nudity`. `abs` · `muscular male` 과 같은 계열인데
+    # 10만 태그가 신체 축에 아예 없었다(오분류인 동시에 커버리지 구멍).
+    "pectorals": "body_type", "large pectorals": "body_type",
+    "huge pectorals": "body_type",
+    # `loli` · `child` · `miniboy` 가 이미 체형 축에 있는데 남성 짝만 성인 목록에
+    # 남아 있었다. `rating:general` 로 뽑으면 그냥 어린 소년이고 성적 대상이 아니다
+    # (사용자 판단 2026-07-30). **성인 배치 가드는 그대로 산다** — `_DANGER_AGE` 가
+    # `shota` 를 계속 막으므로, 이 태그는 SFW 체형 템플릿으로만 그려진다.
+    "shota": "body_type",
+    # 음식 흘린 자국. 형제 태그 `food on face`(12,176)가 이미 이 축에 있다 —
+    # 그쪽은 `Expression_A` 그룹인데 이것만 `NSFW` 로 튀었다.
+    "cream on face": "body_condition",
+}
+for _t, _dest in IMPORTED_FROM_NSFW.items():
+    if _t not in raw:
+        raise SystemExit(f"IMPORTED_FROM_NSFW: 태그 DB 에 없다 -> {_t!r}")
+    # **기존 축에만 넣을 수 있다.** 아래 저장 루프가 `AXES` 의 키마다 파일을 통째로
+    # 덮어쓰므로, 새 키를 만들면 그 축 파일이 이 한 줄로 날아간다.
+    if _dest not in AXES:
+        raise SystemExit(f"IMPORTED_FROM_NSFW: 없는 축 -> {_dest!r} (파일을 덮어쓴다)")
+    if not any(_t in _v for _v in AXES.values()):
+        AXES[_dest].append(_t)
 
 # 남성 베이스 배치는 파일을 나눠 내보낸다(1girl 베이스에서는 렌더되지 않는다).
 male_split = {}

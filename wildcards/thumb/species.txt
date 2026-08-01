@@ -26,6 +26,7 @@ shark girl
 mouse girl
 nekomata
 jiangshi
+giantess
 tiger girl
 zombie
 arthropod girl
@@ -106,8 +107,8 @@ qilin (mythology)
 seraph
 phoenix
 komainu
-dolphin girl
 dullahan
+dolphin girl
 rito
 orca girl
 shadow (shadows house)
@@ -146,8 +147,8 @@ cheetah girl
 ferret girl
 whale girl
 ghost girl
-slug girl
 zebra girl
+slug girl
 snake girl
 sphinx
 dryad
@@ -164,15 +165,19 @@ rhinoceros girl
 stoat girl
 chameleon girl
 jellyfish girl
-squid girl
 snail girl
+squid girl
 panther girl
 camel girl
 skunk girl
-axolotl girl
 chupacabra
+axolotl girl
 crab girl
 lynx girl
 moose girl
 gnome
 mindflayer
+furry
+furry female
+monster girl
+monster

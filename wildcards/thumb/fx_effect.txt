@@ -2,6 +2,7 @@ blurry
 see-through
 wet
 sparkle
+depth of field
 petals
 shadow
 blood
@@ -29,6 +30,7 @@ white outline
 confetti
 falling petals
 electricity
+bouncing breasts
 shade
 silhouette
 magic
@@ -45,6 +47,7 @@ speed lines
 splashing
 floating object
 explosion
+bokeh
 crack
 broken
 planted
@@ -120,6 +123,7 @@ originium arts (arknights)
 vignetting
 hole
 eye reflection
+contrast
 dream soul
 rust
 glitter
@@ -150,6 +154,7 @@ fireball
 yellow outline
 digital dissolve
 oil
+double exposure
 super saiyan 2
 zero gravity
 incoming drink

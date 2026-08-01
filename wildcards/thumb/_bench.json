@@ -766,6 +766,49 @@
       "template": "2girls, multiple girls, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
       "weight": 2.0,
       "framing": "pose_full"
+    },
+    "body_type": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, full body, <<VARY>>, white shirt, pleated skirt, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "full"
+    },
+    "body_type_male": {
+      "template": "1boy, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, male focus, solo, front view, full body, <<VARY>>, white shirt, shorts, rating:general, white background, simple background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "full",
+      "negative": "blurry, lowres, upscaled, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, negative space, blank page, {{{ai-generated,watermarks, text, abs, muscular female, Watermark, artist logo, patreon username, patreon logo }}}, {bad}, error, fewer, extra, missing, watermark, unfinished, displeasing, signature, extra digits, username, scan, [abstract], chromatic, bad anatomy, bad hands, low quality, normal quality, mutation, mutated, extra limb, poorly drawn hands, malformed hands, long neck, long body, extra fingers, mosaic, bad faces, bad face, bad eyes, bad feet, extra toes, western comics (style), anime screencap, anime coloring, [[[[[[bkub, chabo (fuketsudan), fuzukikai, beanis, pixel art, tsuzuri (tu-san house)]]]]]],  limited palette, thick outlines, blender (medium), [[[[hara (harayutaka), naxius noxy,queasy s, ringsel]]]], dorachan r, upscaled, [[[dagasi, agwing86]]], oldest female, simply drawn genitalia, unusual genitalia, text"
+    },
+    "nsfw_pair_f": {
+      "template": "2girls, mature female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, upper body, <<VARY>>, looking at viewer, couple, rating:sensitive, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    },
+    "nsfw_pair_het": {
+      "template": "1girl, 1boy, mature female, mature male, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, upper body, <<VARY>>, looking at viewer, couple, rating:sensitive, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    },
+    "nsfw_pair_m": {
+      "template": "2boys, mature male, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, upper body, <<VARY>>, looking at viewer, couple, rating:sensitive, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    },
+    "nsfw_pair_solo": {
+      "template": "1girl, mature female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, upper body, <<VARY>>, looking at viewer, rating:sensitive, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.5,
+      "framing": "cowboy"
+    },
+    "species_male_furry": {
+      "template": "1boy, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, mature male, male focus, solo, front view, upper body, <<VARY>>, looking at viewer, bare shoulders, nude, safe, -1:: beard, facial hair, old ::, rating:general, white background, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::",
+      "weight": 2.0,
+      "framing": "upper",
+      "negative": "blurry, lowres, upscaled, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, negative space, blank page, {{{ai-generated,watermarks, text, abs, Watermark, artist logo, patreon username, patreon logo }}}, {bad}, error, fewer, extra, missing, watermark, unfinished, displeasing, signature, extra digits, username, scan, [abstract], chromatic, bad anatomy, bad hands, low quality, normal quality, mutation, mutated, extra limb, poorly drawn hands, malformed hands, long neck, long body, extra fingers, mosaic, bad faces, bad face, bad eyes, bad feet, extra toes, western comics (style), anime screencap, anime coloring, [[[[[[bkub, chabo (fuketsudan), fuzukikai, beanis, pixel art, tsuzuri (tu-san house)]]]]]],  limited palette, {adolescent, mature female}, thick outlines, blender (medium), [[[[hara (harayutaka), naxius noxy,queasy s, ringsel]]]], dorachan r, upscaled, [[[dagasi, agwing86]]], oldest female, simply drawn genitalia, unusual genitalia, text"
+    },
+    "fx_effect_blurry": {
+      "template": "1girl, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::, young female, solo, front view, upper body, <<VARY>>, looking at viewer, white shirt, rating:general, 0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen ::",
+      "weight": 2.0,
+      "framing": "subject",
+      "negative": "lowres, upscaled, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, halftone, multiple views, logo, too many watermarks, negative space, blank page, {{{ai-generated,watermarks, text, abs, muscular female, Watermark, artist logo, patreon username, patreon logo }}}, {bad}, error, fewer, extra, missing, watermark, unfinished, displeasing, signature, extra digits, username, scan, [abstract], chromatic, bad anatomy, bad hands, low quality, normal quality, mutation, mutated, extra limb, poorly drawn hands, malformed hands, long neck, long body, extra fingers, mosaic, bad faces, bad face, bad eyes, bad feet, extra toes, western comics (style), anime screencap, anime coloring, [[[[[[bkub, chabo (fuketsudan), fuzukikai, beanis, pixel art, tsuzuri (tu-san house)]]]]]],  limited palette, {adolescent, mature female}, thick outlines, blender (medium), [[[[hara (harayutaka), naxius noxy,queasy s, ringsel]]]], dorachan r, upscaled, [[[dagasi, agwing86]]], oldest female, simply drawn genitalia, unusual genitalia, text"
     }
   }
 }

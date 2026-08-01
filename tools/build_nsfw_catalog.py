@@ -24,6 +24,10 @@ from pathlib import Path
 # 원본 목록도 이제 nsfw 폴더에 있다(생성 축 폴더 밖으로 옮겼다).
 SRC = Path("wildcards/nsfw")
 OUT = Path("wildcards/nsfw")
+
+# 이 빌더가 만들지 않는 축. 한 파일에 writer 가 둘이면 반드시 갈라진다 —
+# 이 프로젝트에서 fx_effect · loc_backdrop 로 이미 겪었다.
+_OWNED_ELSEWHERE = {"nsfw_act", "nsfw_etc"}
 SOURCES = ("body_nsfw", "cloth_nsfw", "pose_nsfw", "pose_nsfw_face")
 
 # 도감 분류. 위에서부터 먼저 맞는 것을 쓴다(순서가 곧 우선순위).
@@ -90,12 +94,19 @@ def main() -> int:
         v = sorted(cat.get(key, []), key=lambda t: -F(t))
         if not v:
             continue
+        # **소유권 검사.** `nsfw_act` · `nsfw_etc` 는 build_nsfw_act_catalog.py 가
+        # 소유한다(행위 도감 640개). 이 레거시 빌더가 같은 파일을 다른 풀에서
+        # 덮어쓰면 그쪽 결과가 조용히 사라진다(Codex 리뷰 2026-07-30 지적).
+        if key in _OWNED_ELSEWHERE:
+            print(f"  (건너뜀: {key} 는 build_nsfw_act_catalog.py 소유)")
+            continue
         (OUT / f"{key}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
         total += len(v)
         print(f"  {key:16s} {label:12s} {len(v):4d}  {', '.join(v[:5])}")
     if unmatched:
         v = sorted(unmatched, key=lambda t: -F(t))
-        (OUT / "nsfw_etc.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+        if "nsfw_etc" not in _OWNED_ELSEWHERE:
+            (OUT / "nsfw_etc.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
         total += len(v)
         print(f"  {'nsfw_etc':16s} {'기타':12s} {len(v):4d}  {', '.join(v[:8])}")
 

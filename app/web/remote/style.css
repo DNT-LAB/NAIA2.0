@@ -19718,22 +19718,28 @@ body.detached-module .mod-grid-3 {
    ========================================================================= */
 
 /* --- Tools & Assistants 행의 토글 --- */
-.ia-mode-toggle {
+/* Ollama 버튼 묶음 바로 왼쪽에 붙는다. `.assistants-label` 이 space-between 이라
+   형제로 두면 제목과 Ollama 사이로 밀려나 혼자 떠 있었다(사용자 지적). */
+.assistants-actions {
+  flex: 0 0 auto;
   display: inline-flex; align-items: center; gap: 6px;
+}
+.ia-mode-toggle {
+  display: inline-flex; align-items: center;
   height: 22px; padding: 0 10px;
   border: 1px solid var(--border-glow); border-radius: 6px;
-  background: rgba(255,255,255,0.04); color: var(--text-muted);
+  /* 옆의 Ollama 버튼과 밝기를 맞춘다 — 꺼져 있어도 읽히는 밝기여야 한다. */
+  background: rgba(96,120,255,0.12); color: var(--text-primary);
   font-family: var(--font-display); font-size: 10.5px; font-weight: 600;
   letter-spacing: 0.3px; cursor: pointer; white-space: nowrap;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.ia-mode-toggle:hover { border-color: var(--accent); color: var(--text-primary); }
+.ia-mode-toggle:hover { background: rgba(96,120,255,0.2); border-color: var(--accent); }
 .ia-mode-toggle.is-on {
-  background: rgba(124,106,239,0.18); border-color: var(--accent);
-  color: var(--accent-glow); box-shadow: 0 0 0 1px rgba(124,106,239,0.18);
+  background: rgba(124,106,239,0.3); border-color: var(--accent);
+  color: var(--accent-glow); box-shadow: 0 0 0 1px rgba(124,106,239,0.28);
 }
-.ia-mode-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); flex: 0 0 6px; }
-.ia-mode-toggle.is-on .ia-mode-dot { background: var(--accent-glow); box-shadow: 0 0 6px var(--accent-glow); }
+/* (`.ia-mode-dot` 는 제거했다 — 켜짐 상태는 배경/테두리로 이미 드러난다.) */
 
 /* --- 좌측 블록 리스트 --- */
 .ia-blocks {
@@ -20120,7 +20126,32 @@ body.detached-module .mod-grid-3 {
 .ia-cell-act[data-act="off"] { background: linear-gradient(135deg, #a8486f, #e58ab4); }
 /* 버튼만 클릭을 받는다 — 셀의 나머지를 눌러도 아무 일이 없다. */
 .ia-cell:hover .ia-cell-act,
+.ia-gloss-row:hover .ia-cell-act,
 .ia-aside-thumb:hover .ia-cell-act { opacity: 1; pointer-events: auto; cursor: pointer; }
+
+/* 이미지 없이 `태그 : 설명` 만 나열하는 섹션(nsfw_heavy). 썸네일을 만들지 않는
+   분류라 그리드가 아니라 목록이다 — 한 줄에 하나씩 읽히게 둔다. */
+.ia-gloss-note {
+  margin: 0 0 8px; padding: 6px 10px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04); border-left: 3px solid #7cc4ff;
+  font-size: 12px; color: var(--text-dim, #9aa4b2); line-height: 1.5;
+}
+.ia-gloss-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.ia-gloss-row {
+  position: relative; display: grid; grid-template-columns: minmax(140px, 30%) 1fr;
+  gap: 10px; align-items: baseline; padding: 6px 74px 6px 10px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02); cursor: default;
+}
+.ia-gloss-row:hover { background: rgba(255, 255, 255, 0.06); }
+.ia-gloss-row.on { background: rgba(124, 196, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(124, 196, 255, 0.45); }
+.ia-gloss-tag { font-family: var(--font-mono); font-size: 12px; color: var(--text, #e6e9ef); word-break: break-word; }
+.ia-gloss-desc { font-size: 12px; color: var(--text-dim, #9aa4b2); line-height: 1.5; }
+/* 버튼은 셀과 같은 위치 규칙을 쓴다 — 행 오른쪽에 고정, 호버 시에만 눌린다. */
+.ia-gloss-row .ia-cell-act { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
+@media (max-width: 640px) {
+  .ia-gloss-row { grid-template-columns: 1fr; gap: 2px; padding-right: 10px; padding-bottom: 26px; }
+  .ia-gloss-row .ia-cell-act { top: auto; bottom: 6px; transform: none; }
+}
 .ia-aside-thumb-img { position: relative; display: block; }
 /* 축 목록을 전폭 아코디언에서 상단 탭 그리드로. 접혀 있어도 축 하나가 한 줄을
    통째로 먹어 19축(자세)이면 목록만으로 팝업이 찼다 — 씬 슬롯과 같은 문제였다.
@@ -20381,6 +20412,18 @@ body.detached-module .mod-grid-3 {
   overflow-y: auto; overscroll-behavior: contain;
   padding-right: 4px;   /* 스크롤바가 셀을 덮지 않게 */
 }
+/* 검색 중에는 축마다 그리드가 자기 스크롤을 갖지 않는다.
+   여러 축이 동시에 펼쳐지면 스크롤 영역이 겹겹이 쌓여(사용자 표현: "복층") 아래쪽
+   이미지를 누르기 어려워진다 — 안쪽 그리드 끝까지 내려야 바깥 본문이 움직이기 때문이다.
+   상한을 풀어 `.ia-panel-body` 하나만 스크롤하게 하면 결과 전체가 한 줄기로 이어진다. */
+.ia-axes.is-search .ia-cell-grid {
+  max-height: none; overflow-y: visible; padding-right: 0;
+}
+/* 탭으로 점프한 구간을 잠깐 표시한다 — 스크롤만 움직이면 어디로 갔는지 모른다. */
+.ia-ax-row.is-jumped .ia-cell-grid {
+  outline: 2px solid var(--accent-blue); outline-offset: 4px; border-radius: 6px;
+  transition: outline-color 0.6s ease;
+}
 /* 스크롤바를 '보이게' 둔다 — 사용자가 스크롤 가능함을 알아야 한다. */
 .ia-cell-grid::-webkit-scrollbar { width: 8px; }
 .ia-cell-grid::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); border-radius: 4px; }
@@ -20455,6 +20498,37 @@ body.detached-module .mod-grid-3 {
 .ia-cell.is-sensitive .ia-cell-img { position: relative; }
 .ia-cell.is-sensitive:hover .ia-cell-veil,
 .ia-cell.is-sensitive.on .ia-cell-veil { opacity: 0; transition: opacity 0.16s; }
+/* Safe Viewer : Off — 민감 썸네일의 블러를 전역으로 끈다.
+   토글은 팝업 헤더에 있고 모든 팝업이 같은 상태를 공유한다(모듈 변수 + localStorage).
+   개별 셀 클래스를 건드리지 않고 body 클래스 하나로 끄는 이유: 성인 축이 신체·의상·
+   자세·씬 네 슬롯에 걸쳐 있어, 셀마다 다시 그리면 한쪽만 꺼진 상태가 생긴다. */
+/* On 상태의 블러 — 추천 칩(aside 썸네일)도 그리드 셀과 같게 가린다. */
+.ia-aside-thumb.is-sensitive .ia-aside-thumb-img img {
+  filter: blur(9px) saturate(0.75); transform: scale(1.06);
+  transition: filter 0.16s ease, transform 0.16s ease;
+}
+.ia-aside-thumb.is-sensitive:hover .ia-aside-thumb-img img,
+.ia-aside-thumb.is-sensitive.on .ia-aside-thumb-img img { filter: none; transform: none; }
+body.ia-safe-off .ia-cell.is-sensitive .ia-cell-img img,
+body.ia-safe-off .ia-aside-thumb.is-sensitive .ia-aside-thumb-img img {
+  filter: none; transform: none;
+}
+body.ia-safe-off .ia-cell.is-sensitive .ia-cell-veil { opacity: 0; }
+
+/* 헤더 토글 버튼. 닫기 버튼 왼쪽에 붙는다. */
+.ia-safe-btn {
+  margin-left: auto; margin-right: 6px; padding: 3px 9px;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.3px;
+  color: var(--text-dim); background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border-glow); border-radius: 999px;
+  cursor: pointer; white-space: nowrap; transition: color 0.14s, border-color 0.14s;
+}
+.ia-safe-btn:hover { color: var(--text-primary); border-color: var(--accent-blue); }
+.ia-safe-btn b { color: var(--success); font-weight: 600; }
+/* Off 는 가리개가 내려간 상태다 — 눈에 띄게 둔다(실수로 켜둔 채 화면 공유하는 것을 막는다). */
+.ia-safe-btn.off { color: var(--text-primary); border-color: #d98a3a; background: rgba(217,138,58,0.12); }
+.ia-safe-btn.off b { color: #f0a95c; }
+
 /* 부모 태그 자동 배정 상태 — 해제 불가임을 시각적으로 알린다. */
 .ia-cell.is-locked { border-color: var(--success); background: rgba(92,184,122,0.10); }
 .ia-cell.is-locked .ia-cell-cap { color: var(--success); }

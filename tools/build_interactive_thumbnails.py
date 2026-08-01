@@ -15,6 +15,29 @@ core/artist_thumbnail_service.py 의 _image_payload_from_encoded 참고.
       [--size 192] [--quality 82] [--out data/interactive_thumbnails.json]
 
 여러 번 돌려도 안전하다 — 기존 팩을 읽어 새로 들어온 값만 갱신한다(증분).
+
+## 폴더를 무엇으로 넘기는가가 결과를 바꾼다
+
+팩은 넘긴 폴더들의 **합병**이다. 그래서 벤치 폴더만 넘기면, 사용자가 나중에 직접 만든
+더 새 그림이 옛 벤치 판으로 되돌아간다(실측 94키). 방지책은 두 겹이다.
+
+1. 같은 태그가 여러 번 나오면 **mtime 최신이 이긴다**(순서 무의존).
+2. `<팩>.sources.json` 원장에 키마다 넣은 파일과 mtime 을 적고, **원장보다 오래된 파일로는
+   바꾸지 않는다.** 어떤 부분집합을 넘겨도 되돌아가지 않는다.
+
+주의: 원장은 이 기능을 붙인 뒤 실제로 넣은 키만 갖고 있다. 그 전에 들어간 레거시 키는
+원장에 없어 첫 실행에서 한 번 채택된다 — 그때 `!! 기존 그림을 갈아치운 키` 보고를 읽어라.
+
+2026-07-30 기준 썸네일용으로 쓴 폴더:
+
+    NAIA-Portable/user-data/output/_thumb_bench       (도구 생성분)
+    NAIA-Portable/user-data/output/20260730_180749    (사용자 생성분)
+    NAIA-Portable/user-data/output/20260730_100105
+    NAIA-Portable/user-data/output/20260729_105818
+    NAIA-Portable/user-data/output/20260725_103742
+
+**일반 생성 폴더를 전부 넘기지 마라.** 사용자의 평소 그림에도 `2::...::` 가 있어 축 태그와
+우연히 맞으면 그 그림이 썸네일로 들어간다.
 """
 
 from __future__ import annotations
@@ -39,9 +62,21 @@ WILDCARD_DIR = REPO_ROOT / "wildcards" / "thumb"
 # 옛 원본 목록(body_nsfw/cloth_nsfw/pose_nsfw*)은 도감으로 갈라졌으므로 축이 아니다.
 NSFW_DIR = REPO_ROOT / "wildcards" / "nsfw"
 DEFAULT_OUT = REPO_ROOT / "data" / "interactive_thumbnails.json"
+# 키마다 "어느 파일의 몇 시 판을 넣었는지" 를 적어 두는 원장.
+# 이게 없으면 팩 결과가 **어느 폴더를 인자로 넘겼는지에 의존한다** — 벤치 폴더만 넘긴
+# 실행이 사용자 폴더의 더 새 그림 94개를 옛 벤치 판으로 조용히 되돌렸다(실측).
+# 원장이 있으면 어떤 부분집합을 넘겨도 "더 오래된 것으로는 바꾸지 않는다" 가 보장된다.
+SOURCES_SUFFIX = ".sources.json"
 
 # 2::tag :: / 2:: tag :: 모두 허용. 가중치 숫자는 임의(1.5/2/3...).
-WEIGHT_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?::\s*(.+?)\s*::")
+#
+# **음수 가중치는 제외한다.** 베이스 프롬프트 끝에 `-1::widescreen, blurry ::` 와
+# `-1:: thick outlines, ai-generated ::` 가 있고, 이건 '빼는' 블록이다. 그런데 예전 정규식은
+# `-` 를 무시해 이것도 후보로 읽었다. 그래서 **VARY 태그가 축 목록에 없는 이미지가 전부
+# `fx_effect/blurry` 로 오분류됐다** — 오늘 재분류로 축을 옮긴 태그들이 그렇게 됐고,
+# `fx_effect/blurry` 썸네일이 기린 사진(`giraffe tail`)이 되어 있었다(실측).
+# 실제 `blurry` 썸네일은 `2.0::blurry ::` 로 들어오므로 이 제외가 그것을 막지는 않는다.
+WEIGHT_RE = re.compile(r"(?<![\d.\-])\d+(?:\.\d+)?::\s*(.+?)\s*::")
 # 베이스에도 가중치 블록이 있다(0.38::아티스트 ::, -1::widescreen ::). 축 값만 골라야 하므로
 # '와일드카드 목록에 있는 태그' 만 채택한다.
 
@@ -153,6 +188,14 @@ def main() -> int:
             print(f"기존 팩 로드: {len(pack)}개")
         except Exception:
             pack = {}
+    src_path = out_path.with_name(out_path.name + SOURCES_SUFFIX)
+    ledger: dict[str, dict] = {}
+    if src_path.exists():
+        try:
+            ledger = json.loads(src_path.read_text(encoding="utf-8"))
+            print(f"소스 원장 로드: {len(ledger)}개")
+        except Exception:
+            ledger = {}
 
     # 재분류(축 이동/태그 제거)를 하면 팩에 '고아 키'가 남는다. 축을 옮긴 태그는
     # 이미지를 버리지 않고 키만 옮긴다 — 다시 생성하는 낭비를 막는다.
@@ -190,9 +233,19 @@ def main() -> int:
         # 축별로 하위 폴더에 나눠 담아도 되게 재귀 탐색한다(예: <출력>/hair styles/*.png).
         # 축 판정은 폴더명이 아니라 PNG 메타데이터의 2::태그 :: 로 하므로 폴더 이름은 자유다.
         files.extend(sorted(root.rglob("*.png")))
-    print(f"PNG {len(files)}장 검사")
+    # **한 태그에 여러 PNG 가 있으면 마지막에 읽힌 것이 이겼다.** 폴더를 어떤 순서로
+    # 넘겼는지에 따라 팩이 달라졌고, 그래서 같은 태그가 실행마다 다른 그림이 될 수 있었다
+    # (실측: 벤치 폴더만 다시 넣었을 때 155키가 '갱신'으로 뒤집혔다).
+    # mtime 오름차순으로 정렬해 **가장 최근에 만든 것이 이기게** 고정한다 — 다시 만든 이유는
+    # 앞의 것이 틀렸기 때문이므로 그게 의도에 맞고, 무엇보다 순서에 의존하지 않는다.
+    files.sort(key=lambda p: (p.stat().st_mtime, str(p)))
+    print(f"PNG {len(files)}장 검사  (같은 태그는 mtime 최신이 이긴다)")
 
     added, updated, skipped, unmatched = 0, 0, 0, []
+    seen_here: dict[str, Path] = {}   # 이번 실행에서 그 키를 만든 파일
+    downgraded = 0                    # 원장보다 오래되어 무시한 파일
+    conflicts: list[tuple[str, str, str]] = []   # 같은 키를 두 파일이 주장
+    replaced: list[str] = []                     # 팩의 기존 그림을 갈아치운 키
     per_axis: dict[str, int] = {}
     for path in files:
         try:
@@ -215,14 +268,29 @@ def main() -> int:
         if args.dry_run:
             continue
         encoded = base64.b64encode(blob).decode("ascii")
+        mtime = path.stat().st_mtime
+        # 이번 실행 안에서 같은 키가 두 번 나오면 그건 '갱신' 이 아니라 **소스 충돌**이다.
+        # 뭉개서 세면 "갱신 155" 처럼 보여서, 팩이 뒤집힌 것인지 그냥 새로 만든 것인지
+        # 구별할 수 없었다. 갈라서 센다.
+        if key in seen_here:
+            conflicts.append((key, seen_here[key].name, path.name))
+        seen_here[key] = path
+        # 원장에 적힌 것보다 오래된 파일로는 바꾸지 않는다.
+        prev = ledger.get(key)
+        if prev and float(prev.get("mtime", 0)) > mtime:
+            downgraded += 1
+            continue
         if key in pack:
             if pack[key] == encoded:
                 skipped += 1
                 continue
             updated += 1
+            replaced.append(key)
         else:
             added += 1
         pack[key] = encoded
+        ledger[key] = {"src": str(path.relative_to(REPO_ROOT)) if REPO_ROOT in path.parents
+                       else path.name, "mtime": mtime}
         per_axis[axis] = per_axis.get(axis, 0) + 1
 
     print("\n=== 축별 분류 ===")
@@ -240,7 +308,15 @@ def main() -> int:
     out_path.write_text(json.dumps(pack, ensure_ascii=False), encoding="utf-8")
     size_mb = out_path.stat().st_size / (1024 * 1024)
     print(f"\n팩 저장: {out_path}  ({len(pack)}키, {size_mb:.2f} MB)")
-    print(f"  신규 {added} / 갱신 {updated} / 동일 {skipped}")
+    src_path.write_text(json.dumps(ledger, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"  신규 {added} / 교체 {updated} / 동일 {skipped} / 더 오래돼 무시 {downgraded}")
+    if replaced:
+        # 교체는 조용히 넘기면 안 된다 — 잘 나온 그림을 덜 나온 것으로 바꿀 수 있다.
+        print(f"  !! 기존 그림을 갈아치운 키 {len(replaced)}개: {replaced[:12]}")
+    if conflicts:
+        print(f"  !! 한 태그를 두 파일이 주장 {len(conflicts)}건 (mtime 최신이 이겼다):")
+        for k, a, b in conflicts[:12]:
+            print(f"       {k}: {a} -> {b}")
     return 0
 
 

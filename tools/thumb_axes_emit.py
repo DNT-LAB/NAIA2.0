@@ -54,17 +54,28 @@ _eye_pattern = [t for t in EYE_PATTERN if t in _raw2]
 _ep = SRC / "eye_pattern.txt"
 _ep.write_text("\n".join(sorted(_eye_pattern, key=lambda t: -_F2(t))) + "\n", encoding="utf-8")
 _eye_pattern = lines("eye_pattern")
-_groups = {"face_eyes": [], "face_parts": [], "face_mark": []}
+# 남성 계열(수염)은 별도 그룹으로 뺀다. 목록은 tools/thumb_male_tags.py 가 SSOT.
+# subgroup 으로 나누면 이것들이 흩어진다 — `beard` 는 face_tags 인데 `full beard` 는
+# hair_styles 라서, 실제로 수염 6개(beard stubble/long beard/full beard/pencil mustache/
+# thick beard/tied beard)가 **어느 표시 그룹에도 못 들어가 화면에서 사라져 있었다.**
+# 남성 그룹을 태그 목록에서 직접 만들면 그 6개도 같이 회수된다.
+from tools.thumb_male_tags import MALE_ONLY, MALE_EXPLICIT   # noqa: E402
+
+_groups = {"face_eyes": [], "face_parts": [], "face_mark": [], "face_male": []}
 _bucket = {"eyes_tags": "face_eyes", "face_tags": "face_parts",
            "face_meta": "face_mark", "face": "face_mark"}
 for _t in _face_all:
     if _t in _eye_pattern:
+        continue
+    if _t in MALE_ONLY:
+        _groups["face_male"].append(_t)
         continue
     _key = _bucket.get(_SG2(_t))
     if _key:
         _groups[_key].append(_t)
 for _k in _groups:
     _groups[_k].sort(key=lambda t: -_F2(t))
+assert _groups["face_male"], "얼굴 축의 남성 그룹이 비었다 — MALE_ONLY 와 face.txt 가 갈라졌다"
 
 # ── 의상 탐색기 스코프 파생 ─────────────────────────────────────────────────
 # 의상 슬롯의 36개 서브그룹을 두 슬롯에 빠짐없이 나눈다. 손으로 나열하면 반드시 샌다
@@ -127,7 +138,10 @@ SLOTS = [
         ("thumb_extra", "눈 색 패턴", "eye_pattern", "eye_color"),
         ("thumb", "눈·눈썹·동공", "face_eyes"),
         ("thumb", "얼굴·입·코", "face_parts"),
-        ("thumb", "표식·수염", "face_mark"),
+        ("thumb", "표식·점", "face_mark"),
+        # 수염 13개는 전부 중년 남성 나체 상반신으로 렌더됐다(실측). 다른 얼굴 요소와
+        # 나란히 두면 점·주름을 고르러 온 사용자가 그걸 보게 된다 — 별도 섹션으로 뺀다.
+        ("thumb", "수염(남성)", "face_male"),
         # 눈·입·눈썹의 형태는 감정이 아니라 구조다(Codex 지적) — 여기가 맞다.
         ("thumb", "눈·입 형태", "face_shape"),
         # 얼굴 썸네일 228장이 face_tags/eyes_tags/face_meta/face 를 전부 덮으므로 탐색기 제거.
@@ -149,6 +163,8 @@ SLOTS = [
     ("신체", "\\u{1F9CD}", "characteristic", [
         ("slider", "가슴", "breast_size"),
         ("thumb", "체형", "body_type"),
+        # 남성 체형·흉근. 섞어 두면 체형을 고르러 온 사용자에게 남성 나체가 먼저 보인다.
+        ("thumb", "체형(남성)", "body_type_male"),
         # colored / multicolored skin 을 고르면 그리드 위에 피부 색 팔레트가 나온다.
         ("thumb_color", "피부", "skin", "skin_color"),
         # 신체 부위는 두 성격으로 나눈다 — '부위가 보인다'(구도성) vs '그 특징이 있다'(특징성).
@@ -335,6 +351,38 @@ _referenced.update(p.stem for p in SRC.glob("pose_*_m*.txt"))
 _referenced.update(_rf for _kind, _lb, _rf in _LOC_SECTIONS)
 _referenced.update(_rf for _s in (_OBJ_SECTIONS, _ANI_SECTIONS, _FX_SECTIONS)
                    for _kind, _lb, _rf in _s)
+# 성인 도감 전체. 앞 8축은 노출·부위(먼저 만든 것), 뒤 16축은 행위 도감이다.
+# **순서가 곧 화면 순서다** — 무엇을 고르러 왔는지에 가까운 순으로 둔다:
+#   노출·부위 -> 행위 -> 체위·인원 -> 도구·장식 -> 상태·연출
+_ADULT_ORDER = [
+    # 노출·부위 (기존 8축)
+    "nsfw_exposure", "nsfw_breast", "nsfw_butt", "nsfw_nipple",
+    "nsfw_pubic", "nsfw_genital", "nsfw_anatomy", "nsfw_fluid",
+    # 행위
+    "nsfw_act", "nsfw_hand", "nsfw_bodyjob", "nsfw_oral",
+    "nsfw_penetration", "nsfw_cum",
+    # 체위·인원·관계
+    "nsfw_position", "nsfw_group", "nsfw_pairing",
+    # 도구·장식·구속
+    "nsfw_toy", "nsfw_bondage", "nsfw_adorn",
+    # 상태·연출
+    "nsfw_state", "nsfw_peek", "nsfw_fetish", "nsfw_censor",
+]
+# 라벨은 두 도감의 JSON 을 합친다. 손으로 적으면 도감 라벨을 바꿀 때 갈라진다.
+_nsfw_label = json.loads((NSFW_SRC / "_nsfw_catalog.json").read_text(encoding="utf-8"))["label"]
+_nsfw_label |= json.loads(
+    (NSFW_SRC / "_nsfw_act_catalog.json").read_text(encoding="utf-8"))["label"]
+# 배선 누락을 조용히 넘기지 않는다 — 이미지가 있는 축이 목록에서 빠지면 죽는다.
+_wired = set(_ADULT_ORDER)
+_have_img = {p.stem for p in NSFW_SRC.glob("nsfw_*.txt")
+             if p.stem not in ("nsfw_heavy",) and any(
+                 f"{p.stem}/{t}" in _PACK_KEYS for t in lines(p.stem))}
+assert not (_have_img - _wired), f"성인 축 배선 누락: {sorted(_have_img - _wired)}"
+# 성인 도감 축은 SLOTS 가 아니라 프론트의 ADULT_SECTIONS 가 참조한다.
+# 빼면 THUMB_TAGS 에 태그가 없어 성인 슬롯이 빈 그리드를 그린다
+# — 다인원 자세·배경에서 이미 두 번 겪은 함정이다(세 번째).
+_referenced.update(_ADULT_ORDER)
+
 _skipped_axes = [k for k in _axis_files if k not in _referenced]
 _axis_files = [k for k in _axis_files if k in _referenced]
 # ── 축 색 지정 태그 분리 ──────────────────────────────────────────────────
@@ -359,6 +407,24 @@ def _is_axis_color(tag: str) -> bool:
     return (len(w) >= 2 and w[-1] in _UMBRELLA
             and " ".join(w[:-1]) in _COLOR_MOD)
 
+# ── 남성 계열 격리 ─────────────────────────────────────────────────────────
+# 여성 위주로 쓰는 사용자가 체형 그리드를 훑다가 중년 남성 나체를 만나는 건 기능이 아니다
+# (사용자 지적). 태그는 지우지 않고 **같은 탭 안의 별도 섹션**으로 뺀다 — `species` /
+# `species_male` 에서 이미 쓴 방식이다. 목록은 tools/thumb_male_tags.py 가 SSOT.
+# 얼굴 축은 파생 그룹(`face_male`)에서 이미 갈랐으므로 여기서는 건드리지 않는다.
+_MALE_SPLIT_SKIP = {"face"}     # 표시용이 아닌 컨테이너 축(툴팁·팩 키 용도)
+_male_axes: dict[str, list[str]] = {}
+
+def _split_male(key: str, tags: list[str]) -> list[str]:
+    """`key` 에서 남성 태그를 빼 `<key>_male` 로 모으고 나머지를 돌려준다."""
+    if key in _MALE_SPLIT_SKIP:
+        return tags
+    picked = [t for t in tags if t in MALE_ONLY]
+    if not picked:
+        return tags
+    _male_axes[f"{key}_male"] = picked
+    return [t for t in tags if t not in MALE_ONLY]
+
 axis_colors: dict[str, list[str]] = {}
 for key in _axis_files:
     tags = lines(key)
@@ -368,13 +434,27 @@ for key in _axis_files:
         if picked:
             axis_colors[key] = picked
             tags = [t for t in tags if t not in set(picked)]
+    tags = _split_male(key, tags)
     out.append(f"  {key}: {js(tags)},")
     framings.setdefault(key, _FRAMING_DEFAULT.get(key, "portrait"))
 # 얼굴 표시 그룹은 파일이 아니라 face.txt 에서 파생된 것이라 따로 등록한다.
 for _k, _v in _groups.items():
     out.append(f"  {_k}: {js(_v)},")
     framings.setdefault(_k, "portrait")
+# 파생된 남성 축. 프레이밍은 원래 축을 따른다(수염은 초상, 체형은 전신).
+for _k, _v in _male_axes.items():
+    out.append(f"  {_k}: {js(_v)},")
+    framings.setdefault(_k, framings.get(_k[: -len("_male")], "portrait"))
 out.append("};")
+# 배선 양방향 검사. 한쪽만 있으면 조용히 새는 것이 이 프로젝트의 상습 결함이다 —
+# 섹션만 있고 태그가 없으면 빈 그리드, 태그만 있고 섹션이 없으면 태그가 화면에서 사라진다.
+_male_secs = {sec[2] for _, _, _, secs in SLOTS for sec in secs
+              if sec[0] != "browse" and sec[2].endswith("_male")}
+_male_secs.discard("species_male")      # 이건 파생이 아니라 실제 축 파일이다.
+_male_have = set(_male_axes) | {_g for _g in _groups if _g.endswith("_male")}
+assert _male_secs == _male_have, (
+    f"남성 축 배선 불일치 — 섹션만: {sorted(_male_secs - _male_have)}, "
+    f"태그만: {sorted(_male_have - _male_secs)}")
 out.append("")
 out.append("// 축 전체에 거는 색·무늬(`black headwear` 류). 그리드가 아니라 그 위 한 줄에")
 out.append("// 나온다 — 옷이 아니라 '그 부위의 색'이라 옷들과 나란히 놓으면 종류를 오해한다.")
@@ -406,32 +486,34 @@ out.append("// 얼굴 축의 표시용 하위 그룹(THUMB_TAGS 에도 같이 �
 out.append("export const FACE_GROUPS = " + js({**{k: len(v) for k, v in _groups.items()}, "eye_pattern": len(_eye_pattern)}) + ";")
 out.append("")
 out.append("// 표시 축 -> 썸네일 팩 축(생성 단위). 없으면 축 이름 그대로.")
-out.append("export const PACK_AXIS = " + js({k: "face" for k in _groups}) + ";")
+_pack_axis = {k: "face" for k in _groups}
+# 파생된 남성 축은 이미지를 원래 축의 팩 키에서 가져온다(`body_type_male/beard` 같은 키는 없다).
+for _k in _male_axes:
+    _base = _k[: -len("_male")]
+    _pack_axis[_k] = _pack_axis.get(_base, _base)
+out.append("export const PACK_AXIS = " + js(_pack_axis) + ";")
 out.append("")
 
-# ---- 민감(혐오감 유발 가능) 태그 ----
-# 신체 결손 / 과다 / 봉합 / 혈흔 / 기괴한 눈. 초보자가 목록을 훑을 때 갑자기 보이면 불편하므로
-# 썸네일을 블러 처리하고 호버 시에만 보여준다(태그 자체는 지우지 않는다 — 필요한 사용자도 있다).
-# 스타일 표현(slit pupils, third eye, scar on face, snout, beak 등)은 일부러 제외했다.
-# 서브에이전트 vision 판정(39장 실측)으로 32개를 해제하고 7개만 남겼다.
-# 태그 이름으로 추정했던 초기 목록은 크게 과했다 — 예: no eyes/no mouth/hidden face 는
-# 실제 이미지가 평범한 초상이고, hollow eyes/compound eyes 는 스타일 표현이었다.
-# 남긴 7개는 화면에 실제로 상처·혈흔·봉합·이빨 과다가 보이는 것들이다.
+# ---- 민감 태그 ----
+# 성인 축은 축 단위로 블러한다(아래 SENSITIVE_AXES). 그 밖의 일반 축에서 블러하는 것은
+# **눈 개수가 사람과 다른 것 하나뿐이다.**
+#
+# 이 목록은 두 번 줄었다. 처음엔 태그 이름으로 추정해 39개였고, 서브에이전트 vision
+# 실측(39장)으로 7개까지 줄었다. 그러고도 과했다 — 2026-07-30 사용자 실측:
+# amputee / no hands / missing limb / emaciated / 봉합·혈흔 / 체모 계열은 실제 이미지가
+# 혐오 컨텐츠가 아니었다. 블러가 오히려 "여기 뭔가 끔찍한 게 있다"는 오신호를 준다.
+# 이름이 자극적인 것과 화면이 자극적인 것은 다르다 — 이름으로 판정하지 말라는 교훈이
+# 같은 목록에서 두 번 나왔다.
+#
+# 남긴 기준: 눈이 한 개거나 두 개보다 많은 것. 얼굴 그리드를 훑을 때 유일하게
+# 실제로 놀라는 지점이다. (`no eyes` 는 0개이고 vision 실측에서 평범한 초상이라 제외.)
 SENSITIVE = [
-    "one-eyed",        # 눈이 하나(사이클롭스)
-    "extra mouth",     # 이빨이 겹쳐 벌어진 입
-    "extra teeth",     # 과도하게 날카로운 이빨
-    "glasgow smile",   # 양 볼까지 찢긴 입 + 봉합
-    "stitched mouth",  # 입을 실로 봉함
-    "stitched face",   # 얼굴 봉합선
-    "blood on teeth",  # 입가 혈흔
-    # 체형 축 — 절단/아사 계열. one-eyed 와 같은 성격이라 같이 블러한다.
-    "amputee", "missing limb", "double amputee", "triple amputee",
-    "quadruple amputee", "no legs", "no hands", "emaciated",
-    # 체모 — 여성 신체에 털이 보이면 불편해하는 사용자가 있다는 실사용 피드백.
-    # 태그는 남기고(필요한 사용자도 있다) 썸네일만 블러 + 호버 해제.
-    "body hair", "chest hair", "arm hair", "leg hair", "armpit hair",
-    "navel hair", "hairy", "colored armpit hair",
+    "one-eyed",           # 눈 1개
+    "cyclops",            # 이마 중앙에 눈 1개
+    "extra eyes",         # 2개보다 많음
+    "third eye",          # 이마에 세 번째 눈
+    "third eye on chest", # 가슴에 세 번째 눈
+    "compound eyes",      # 낱눈 다발(곤충)
 ]
 _thumb_all = set()
 for _k3 in _axis_files:
@@ -447,6 +529,9 @@ SENSITIVE_AXES = sorted(p.stem for p in SENSITIVE_SRC.glob("nsfw_*.txt")) \
                  + ["body_nsfw", "cloth_nsfw"]
 _sensitive = [t for t in SENSITIVE if t in _thumb_all]
 _missing_sensitive = [t for t in SENSITIVE if t not in _thumb_all]
+# 남성 축으로 격리했는데도 남성기가 그려져 있는 것. 격리는 '안 보고 싶으면 안 보게' 이지
+# '열었더니 성기' 를 막지는 못한다. 재생성되면 tools/thumb_male_tags.py 에서 빼라.
+_sensitive += [t for t in sorted(MALE_EXPLICIT) if t in _thumb_all and t not in _sensitive]
 for _ax in SENSITIVE_AXES:
     _f = SENSITIVE_SRC / f"{_ax}.txt"
     if not _f.exists():
@@ -559,16 +644,26 @@ for _name, _secs, _ko in (("OBJ_SECTIONS", _OBJ_SECTIONS, "사물"),
     out.append("")
 
 out.append("// 씬 슬롯 '다인원 자세' 전용. 2명 이상이 있어야 성립하는 축들이다.")
-_ADULT_ORDER = ["nsfw_exposure", "nsfw_breast", "nsfw_butt", "nsfw_bondage",
-                "nsfw_nipple", "nsfw_pubic", "nsfw_fluid", "nsfw_genital"]
-_nsfw_label = json.loads((NSFW_SRC / "_nsfw_catalog.json").read_text(encoding="utf-8"))["label"]
-out.append("// 성인 도감 8축. 씬 슬롯('성인')이 쓴다 — 여기선 전부 성인이라 `(성인)` 을")
-out.append("// 붙이지 않는다(슬롯 이름을 8번 반복하는 꼴이다).")
+out.append(f"// 성인 도감 {len(_ADULT_ORDER)}축. 씬 슬롯('성인')이 쓴다 — 여기선 전부 성인이라")
+out.append("// `(성인)` 을 붙이지 않는다(슬롯 이름을 그만큼 반복하는 꼴이다).")
 out.append("export const ADULT_SECTIONS = [")
 for _ax in _ADULT_ORDER:
     if lines(_ax):
         out.append(f"  {{kind: 'thumb', label: {js(_nsfw_label.get(_ax, _ax))}, ref: {js(_ax)}}},")
+# `nsfw_heavy` 는 **썸네일을 만들지 않는다.** 금기와 평상 사이의 태그라 이미지를
+# 리포로 배포하지 않기로 했다(사용자 결정 2026-07-30). 목록으로만 닿게 하는
+# `kind: 'gloss'` 섹션으로 낸다 — 선택 동작은 썸네일 셀과 같다.
+_HEAVY = [l.strip() for l in (NSFW_SRC / "nsfw_heavy.txt").read_text(encoding="utf-8").splitlines()
+          if l.strip() and not l.startswith("#")]
+if _HEAVY:
+    out.append("  {kind: 'gloss', label: \"수요 태그(이미지 없음)\", ref: \"nsfw_heavy\","
+               " note: \"썸네일을 만들지 않는 분류입니다. 태그와 설명만 제공합니다.\"},")
 out.append("];")
+out.append("")
+out.append("// 이미지 없이 `태그 : 설명` 으로만 제공하는 축. `kind: 'gloss'` 섹션이 읽는다.")
+out.append("export const GLOSS_TAGS = " + js({
+    "nsfw_heavy": [[t, str((_raw.get(t) or {}).get("description") or "").strip()] for t in _HEAVY],
+}) + ";")
 out.append("")
 out.append("export const POSE_MULTI_SECTIONS = [")
 for _ax in _POSE_MULTI:

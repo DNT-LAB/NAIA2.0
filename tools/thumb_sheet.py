@@ -15,8 +15,12 @@ import json
 import re
 from pathlib import Path
 
-WEIGHT_RE = re.compile(r"(?<![\d.])\d+(?:\.\d+)?::\s*(.+?)\s*::")
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in __import__("sys").path:
+    __import__("sys").path.insert(0, str(ROOT))
+# 정규식을 두 벌 적어 두었더니 한쪽만 고쳐질 판이었다 — 팩 빌더가 SSOT 다.
+# (음수 가중치 제외를 빌더에서만 고치면 이 도구는 계속 `-1::...blurry ::` 를 축으로 읽는다.)
+from tools.build_interactive_thumbnails import WEIGHT_RE   # noqa: E402
 WILDCARD_DIR = ROOT / "wildcards" / "thumb"
 
 

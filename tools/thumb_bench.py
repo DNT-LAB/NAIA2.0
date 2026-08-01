@@ -30,6 +30,7 @@ import hashlib
 import io
 import json
 import random
+import re
 import sys
 import time
 import zipfile
@@ -92,6 +93,17 @@ def build_prompt(bench: dict, batch: str, tag: str) -> tuple[str, str]:
     positive = spec["template"].replace("<<VARY>>", vary)
     negative = spec.get("negative") or bench["defaults"]["negative"]
     _guard_adult(batch, positive)
+    # 배치가 **자기 태그를 억제**하고 있으면 돌려도 그 태그가 안 나온다. 실측:
+    # `species_male` 의 네거티브에 `furry male` 이 들어 있어 `furry male` 을 돌렸더니
+    # 수인 요소가 전혀 없는 맨 남성이 나왔다. 조용히 실패하고 팩에 들어가므로 여기서 막는다.
+    # (양쪽 `-1:: ... ::` 블록과 일반 네거티브 모두 대상이다.)
+    _neg_words = {w.strip().lower() for w in re.split(r"[,:]", negative) if w.strip()}
+    if tag.lower() in _neg_words:
+        raise SystemExit(
+            f"배치 '{batch}' 의 네거티브가 태그 '{tag}' 를 억제한다. "
+            f"이 배치로는 그 태그를 만들 수 없다 — 억제 없는 배치로 갈라라"
+            f"(tools/thumb_todo.py 의 FRAMING_SPLIT)."
+        )
     return positive, negative
 
 
@@ -100,25 +112,43 @@ def build_prompt(bench: dict, batch: str, tag: str) -> tuple[str, str]:
 # 배포되는 것"을 막는 것이고, 그 마지막 방어선은 요청 직전이다.
 # `diaper` 도 넣는다 — 성인 기저귀 취향이 따로 있긴 하나, 성적 맥락에서는
 # 유아화로 읽히고 이 프로젝트의 우려(한국 법)와 정면으로 닿는다.
-_DANGER_AGE = ("young female", "young male", "adolescent", "loli", "shota",
-               "toddlercon", "diaper")
+# **목록이 아니라 정규식이다.** 부분 문자열 7개만 보던 탓에 `child` · `baby` ·
+# `teenage` · `muscular child` · 맨 `young` 이 통과했다(Codex 리뷰 2026-07-30 실측).
+# 같은 목록이 세 곳에 복사돼 있었고 셋 다 같은 구멍이었다 — 공용 모듈로 합쳤다.
+from tools.thumb_age_guard import danger_age_hits, DANGER_AGE_EXAMPLES  # noqa: E402
 
 
 def _guard_adult(batch: str, positive: str) -> None:
     if "nsfw" not in batch:
         return
-    bad = [t for t in _DANGER_AGE if t in positive]
+    bad = danger_age_hits(positive)
     if bad:
         raise SystemExit(
             f"거부: 성인 배치 '{batch}' 의 프롬프트에 어린 외형 태그가 있습니다 {bad}.\n"
             f"       _bench.json 을 고쳤다면 되돌리고, tools/thumb_bench_init.py 를 다시 도세요."
         )
-    if "mature female" not in positive:
+    # 남성 커플(sensitive)은 `mature male` 로 연령을 만든다 — 요구는 연령이지 성별이 아니다.
+    if "mature female" not in positive and "mature male" not in positive:
         raise SystemExit(
             f"거부: 성인 배치 '{batch}' 에 `mature female` 이 없습니다.\n"
             f"       연령을 만드는 것은 이 태그 하나뿐입니다(실측). 근거는\n"
             f"       wildcards/nsfw/_DEFERRED_body_nsfw.md 참조."
         )
+    # `rating:sensitive` 는 세 번째 등급이다 — 성적 묘사 없이 관계·종족만 보이는 것.
+    # `yuri` · `bara` · `tentacles` 처럼 정의 자체는 성인 도감에 있으나 그림으로는
+    # 옷 입은 두 사람이면 성립하는 태그를 위해 연다(사용자 요청 2026-07-29).
+    #
+    # 연령 요구는 **그대로 산다**. 등급이 낮아도 어린 외형으로 관계를 그리는 것은
+    # 이 프로젝트가 막으려는 바로 그것이다. 은닉만 뺀다 — 노출이 없으면 가릴 것이
+    # 없고, 오히려 얼굴이 보여야 관계가 읽힌다.
+    if "rating:sensitive" in positive:
+        for bad_tag in ("nude", "naked", "rating:explicit", "rating:questionable"):
+            if bad_tag in positive:
+                raise SystemExit(
+                    f"거부: sensitive 배치 '{batch}' 에 `{bad_tag}` 가 있습니다.\n"
+                    f"       sensitive 는 노출 없는 등급입니다. 섞으면 등급이 무의미해집니다."
+                )
+        return
     if not ("rating:explicit" in positive or "rating:questionable" in positive):
         raise SystemExit(f"거부: 성인 배치 '{batch}' 에 등급 태그가 없습니다.")
     missing = [c for c in ("faceless female", "head out of frame", "close-up")

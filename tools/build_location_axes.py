@@ -92,6 +92,16 @@ def main() -> int:
                     pool[t] = s["id"]
                 break
 
+    # `image_composition` 서브그룹의 `* background` 20개는 이 풀(location 그룹)에
+    # 없다. 배경 처리 축은 여기 하나뿐이므로 이름 규칙으로 끌어온다.
+    # (`thumb_view_build.py` 가 이 파일에 덧붙이고 있었으나, 이 빌더가 통째로
+    #  덮어쓰므로 사라질 자리였다. 축의 writer 는 하나여야 한다.)
+    for _t, _d in raw.items():
+        if str(_d.get("subgroup", "")) not in ("image_composition", "composition"):
+            continue
+        if F(_t) >= CUT and RE_BACKDROP.search(_t):
+            pool.setdefault(_t, "backgrounds")
+
     sub_axis = {sg: key for key, _l, _f, subs in AXIS_SPEC for sg in subs}
     axes: dict[str, list[str]] = {}
     for tag, sg in pool.items():

@@ -46,6 +46,20 @@ ORDER = [
     # explicit
     "nsfw_nipple", "nsfw_pubic", "nsfw_fluid", "nsfw_genital",
 ]
+BENCH = ROOT / "wildcards" / "thumb" / "_bench.json"
+
+
+def tier_of(batch: str) -> str:
+    """등급은 `_bench.json` 에서 읽는다 — 여기 또 적으면 정의와 갈라진다.
+    실제 프롬프트에 무엇이 들어가는지가 유일한 진실이다."""
+    try:
+        spec = json.loads(BENCH.read_text(encoding="utf-8"))["batches"].get(batch) or {}
+    except Exception:
+        return "?"
+    t = spec.get("template", "")
+    if not t:
+        return "(정의 없음)"
+    return "explicit" if "rating:explicit" in t else "questionable"
 
 # 목록에서 빼는 것. `thumb_bench` 가드가 잡는 것과 별개로 여기서 미리 거른다.
 #   oppai loli — 체형 축으로 이관됐다(외모 서술). 성인 도감에는 이제 없다.
@@ -53,6 +67,25 @@ ORDER = [
 #   재갈류     — 얼굴이 있어야 성립해 은닉 사양(faceless)과 모순된다. 만들어도 안 보인다.
 BLOCKED = {"oppai loli", "diaper"}
 BLOCKED_RE = re.compile(r"\bgag\b|gagged")
+
+# 만들어봤는데 그림이 안 나온 것. `_unrendered.txt` 가 유일한 목록이다 —
+# 여기 또 적으면 갈라진다(이 프로젝트에서 반복된 사고 유형).
+UNRENDERED_FILE = NSFW / "_unrendered.txt"
+
+
+def unrendered() -> set[tuple[str, str]]:
+    if not UNRENDERED_FILE.exists():
+        return set()
+    out = set()
+    for line in UNRENDERED_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "\t" not in line:
+            continue
+        # 3번째 칸(사유)이 붙을 수 있다. `split("\t", 1)` 이면 사유가 태그에 들어가
+        # 매칭이 통째로 깨진다 — 앞 두 칸만 본다.
+        cols = [c.strip() for c in line.split("\t")]
+        out.add((cols[0], cols[1]))
+    return out
 
 
 def loaded_pack() -> set[str]:
@@ -71,8 +104,9 @@ def tags_of(batch: str) -> list[str]:
 def pending(batch: str, pack: set[str]) -> tuple[list[str], list[str], list[str]]:
     """(남은 것, 이미 만든 것, 제외한 것)"""
     todo, done, skip = [], [], []
+    dead = unrendered()
     for t in tags_of(batch):
-        if t in BLOCKED or BLOCKED_RE.search(t):
+        if t in BLOCKED or BLOCKED_RE.search(t) or (batch, t) in dead:
             skip.append(t)
         elif f"{batch}/{t}" in pack:
             done.append(t)
@@ -126,8 +160,7 @@ def main() -> int:
         tot = 0
         for b in ORDER:
             t, d, s = pending(b, pack)
-            tier = "explicit" if b in ("nsfw_genital", "nsfw_fluid",
-                                       "nsfw_nipple", "nsfw_pubic") else "questionable"
+            tier = tier_of(b)
             print(f"{b:<16}{len(t)+len(d)+len(s):>6}{len(d):>6}{len(t):>6}{len(s):>6}   {tier}")
             tot += len(t)
         print(f"\n남은 총량 {tot}장")

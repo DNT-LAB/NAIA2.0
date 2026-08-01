@@ -766,6 +766,37 @@ for _t in RELATIONAL_META:
         if _t in _v:
             _v.remove(_t)
 
+# ── 다른 그룹에서 들여오는 것 (MOVED_OUT 의 역방향) ─────────────────────────
+# POOL 은 `clothing` 그룹만 본다. 소스가 다른 그룹에 넣었지만 화면에 보이는 것이
+# 옷의 구성인 태그는 여기로 끌어온다. 지금까지는 반대 방향(의상 -> 다른 슬롯)만
+# 있었다 — 이게 첫 사례라 통로를 만든다.
+#
+# 여기 적으면 `build_nsfw_act_catalog.py` 가 자동으로 성인 도감에서 뺀다
+# (그쪽이 `wildcards/thumb/*.txt` 를 전부 `taken` 으로 읽는다). 목록은 한 벌이다.
+IMPORTED = {
+    # 소스 분류 "성적 > 의상 노출"(142,446). 실제로는 스커트와 사이하이 삭스
+    # 사이에 남는 허벅지 구간을 부르는 이름이다 — 노출 행위가 아니라 착장 구성이라
+    # 다리 축이 맞다(사용자 지적 2026-07-29).
+    "zettai ryouiki": "cloth_legwear",
+    # 소스 서브그룹이 `nudity` 다. 설명은 "셔츠나 상의의 가슴 부분에 달린 주머니" —
+    # 그냥 의류 디테일이다. 성인 도감 규칙에 이름이 박혀 있어서 끌려갔던 것.
+    "breast pocket": "cloth_detail",
+    # 성인 도감 `nsfw_act`(행위) 에 떨어져 있던 것들. 둘 다 행위가 아니라 착장이다.
+    "painted clothes": "cloth_style",        # 옷을 흉내낸 보디페인팅
+    "buruma around one leg": "cloth_state",  # `unworn *` 와 같은 착의 상태
+}
+for _t, _dest in IMPORTED.items():
+    if _t not in raw:
+        raise SystemExit(f"IMPORTED: 태그 DB 에 없다 -> {_t!r}")
+    # **의상 축에만 넣을 수 있다.** 아래 저장 루프가 `AXES` 의 키마다 파일을 통째로
+    # 덮어쓰므로, 여기서 새 키(`body_type` 등)를 만들면 그 축 파일이 이 한 줄로
+    # 날아간다. 의상 밖 축으로 옮길 것은 그 축을 만드는 도구에서 처리한다.
+    if _dest not in AXES:
+        raise SystemExit(f"IMPORTED: 의상 축이 아니다 -> {_dest!r} (파일을 덮어쓴다)")
+    if any(_t in _v for _v in AXES.values()):
+        continue
+    AXES[_dest].append(_t)
+
 for k in AXES:
     AXES[k].sort(key=lambda t: -F(t))
 

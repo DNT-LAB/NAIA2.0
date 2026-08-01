@@ -11,22 +11,24 @@
   "nsfw_position": "체위",
   "nsfw_oral": "구강",
   "nsfw_penetration": "삽입",
-  "nsfw_hand": "손·가슴·기타 부위",
+  "nsfw_bodyjob": "가슴·발·기타 부위",
+  "nsfw_hand": "손·손가락",
   "nsfw_toy": "기구·도구",
-  "nsfw_cum": "사정·체액",
+  "nsfw_cum": "사정",
   "nsfw_pairing": "관계·장르",
-  "nsfw_anatomy": "해부·부위",
   "nsfw_peek": "엿보임·노출 사고",
   "nsfw_fetish": "페티시·상황",
+  "nsfw_adorn": "장신구·문신·가리개",
   "nsfw_state": "상태·표정",
+  "nsfw_anatomy": "해부·부위",
   "nsfw_act": "행위",
   "nsfw_etc": "기타"
  },
  "cut": 149,
- "count": 642,
+ "count": 622,
  "excluded": {
   "taboo": 32,
-  "byname": 18,
+  "byname": 2,
   "foreign": 2537
  }
 }

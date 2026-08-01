@@ -1,20 +1,4 @@
 # 위 서브그룹을 빠져나왔지만 이름 규칙에 걸린 것 (서브그룹 분류가 완전하지 않다)
 # 태그	빈도	서브그룹
-rape	15275	sex_acts
-shota	10680	sex_acts
-onee-shota	7303	sex_acts
-incest	6870	sex_acts
-mind control	5537	simulated_sex_acts
-bestiality	4356	sex_acts
-hypnosis	4125	simulated_sex_acts
-pokephilia	3055	sex_acts
-sleep molestation	1929	sex_acts
-molestation	956	sex_acts
-forced orgasm	607	sex_acts
-chikan	479	groping
-sexual harassment	318	sexual_situation
 urine meter	277	meter
-rape face	218	expression
-implied incest	202	simulated_sex_acts
 reverse ryona	157	sex_acts
-forced	150	sex_acts

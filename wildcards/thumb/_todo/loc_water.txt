@@ -1,7 +1,0 @@
-on water
-canal
-empty pool
-harbor
-riverbank
-flood
-water world

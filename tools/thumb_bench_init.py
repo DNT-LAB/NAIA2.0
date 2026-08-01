@@ -128,10 +128,53 @@ ADULT_BATCHES = {
     "nsfw_nipple":  "explicit",   # 18
     "nsfw_pubic":   "explicit",   # 9
     # 그 외 — 무슨 행위/무슨 옷인지만 보이면 된다
-    "nsfw_exposure": "quest",     # 77
-    "nsfw_breast":   "quest",     # 49
+    "nsfw_exposure": "quest",     # 76
+    "nsfw_breast":   "quest",     # 48
     "nsfw_butt":     "quest",     # 18
-    "nsfw_bondage":  "quest",     # 9
+    "nsfw_bondage":  "quest",     # 3
+}
+
+# ── sensitive 등급 — 관계·종족은 옷 입은 그림으로 성립한다 ──────────────────
+# `nsfw_pairing` 31개는 대부분 **행위가 아니라 라벨**이다. `yuri` 는 여성 커플이고
+# `bara` 는 장르명이며 `tentacles` 는 무척추동물의 기관이다. 정의가 성인 도감에
+# 있다고 해서 그림까지 성적일 이유가 없다(사용자 요청 2026-07-29).
+#
+# 연령 요구는 유지한다 — 등급이 낮아도 어린 외형으로 관계를 그리지 않는다.
+# 은닉(faceless)은 뺀다. 노출이 없어 가릴 것이 없고, 커플은 얼굴이 보여야 읽힌다.
+_RATING_SENSITIVE = "rating:sensitive"
+
+
+def pair_base(who: str, extra: str = "") -> str:
+    return (f"{who}, {ARTIST}, upper body, <<VARY>>, "
+            f"looking at viewer, {extra}{_RATING_SENSITIVE}, white background, {QUALITY}")
+
+
+# **성별을 양쪽 다 박으면 안 된다.** 첫 시도에서 `mature female, mature male` 하나로
+# 묶었더니 `yuri` 에 남자가, `yaoi` 에 여자가 붙어 태그와 정면으로 싸웠다(dry-run 실측).
+# 커플 종류가 곧 배치다.
+#
+# **이 넷은 `nsfw_run.py` 의 ORDER 에 없다.** 축(`nsfw_pairing`) 하나를 커플 종류로
+# 4분할한 것이라 "배치 이름 = 목록 파일 이름" 규칙이 성립하지 않는다(그 규칙이
+# `nsfw_run.pending()` 의 전제다). 그래서 러너를 거치지 않고 `thumb_bench.py` 에
+# 배치 이름을 직접 줘서 돌렸고, `_todo` 는 그때 손으로 만들었다 —
+# 2026-07-29 에 15장을 그렇게 생성해 팩에 반영했다(완료).
+# 다시 돌릴 일이 생기면 같은 방법을 쓴다:
+#     python tools/nsfw_event_anchor.py nsfw_pairing   # 앵커를 보고 커플 종류를 나눈 뒤
+#     (_todo/nsfw_pair_<종류>.txt 에 태그를 적고)
+#     python tools/thumb_bench.py nsfw_pair_het --out <폴더>
+# Codex 리뷰 2026-07-30 이 "러너로 도달 불가"를 지적했는데, 도달 불가가 아니라
+# **의도적으로 러너 밖**이다. 그 사실이 어디에도 안 적혀 있던 것이 결함이었다.
+SENSITIVE_BATCHES = {
+    # 남녀·이종 — 관계 자체가 두 성을 요구한다
+    "nsfw_pair_het": (pair_base("1girl, 1boy, mature female, mature male", "couple, "),
+                      2.5, "cowboy"),
+    # 여성 커플
+    # `yuri` 를 베이스에 넣지 않는다 — `implied yuri`(암시)와 정면으로 싸운다.
+    "nsfw_pair_f":   (pair_base("2girls, mature female", "couple, "), 2.5, "cowboy"),
+    # 남성 커플
+    "nsfw_pair_m":   (pair_base("2boys, mature male", "couple, "), 2.5, "cowboy"),
+    # 촉수·인외 부속 — 1인이면 성립한다
+    "nsfw_pair_solo": (pair_base("1girl, mature female", ""), 2.5, "cowboy"),
 }
 # `pose_nsfw_face`(3)는 얼굴이 있어야 성립하므로 자동화하지 않는다 — 은닉과 모순된다.
 
@@ -519,6 +562,7 @@ _pose_files = {p.stem for p in Path("wildcards/thumb").glob("pose_*.txt")} - _PO
 _uncovered = _pose_files - set(POSE_BATCHES)
 assert not _uncovered, f"배치 정의가 없는 자세 축: {sorted(_uncovered)}"
 BATCHES.update(POSE_BATCHES)
+BATCHES.update(SENSITIVE_BATCHES)
 
 
 bench = {
@@ -544,13 +588,14 @@ bench = {
 # (`young female` 은 태그 DB 의 Danger 그룹 — "미성년 외모의 여성 캐릭터가 묘사됨")
 # `diaper` 도 넣는다 — 성인 기저귀 취향이 따로 있긴 하나, 성적 맥락에서는
 # 유아화로 읽히고 이 프로젝트의 우려(한국 법)와 정면으로 닿는다.
-_DANGER_AGE = ("young female", "young male", "adolescent", "loli", "shota",
-               "toddlercon", "diaper")
+# 런타임 가드와 **같은 출처**를 쓴다. 전에는 이 목록이 thumb_bench.py 에도 복사돼
+# 있었고 둘 다 같은 구멍이었다(Codex 리뷰 2026-07-30).
+from tools.thumb_age_guard import danger_age_hits  # noqa: E402
 for _k in ADULT_BATCHES:
     _spec = bench["batches"].get(_k)
     if not _spec:
         continue
-    _bad = [t for t in _DANGER_AGE if t in _spec["template"]]
+    _bad = danger_age_hits(_spec["template"])
     assert not _bad, f"성인 배치 {_k} 에 어린 외형 태그: {_bad}"
     assert "mature female" in _spec["template"], f"성인 배치 {_k} 에 mature female 이 없다"
     # 등급이 빠지면 NAI 가 안전한 쪽으로 되돌아가 무엇을 만들었는지 알 수 없어진다.
@@ -559,6 +604,20 @@ for _k in ADULT_BATCHES:
     # 은닉 3종은 사용자 사양이다 — 하나라도 빠지면 얼굴이 돌아온다.
     for _c in ("faceless female", "head out of frame", "close-up"):
         assert _c in _spec["template"], f"성인 배치 {_k} 에 은닉 태그 없음: {_c}"
+
+# sensitive 배치도 연령은 같은 기준으로 막는다. 등급이 낮다고 느슨해지지 않는다.
+for _k in SENSITIVE_BATCHES:
+    _spec = bench["batches"][_k]
+    _bad = danger_age_hits(_spec["template"])
+    assert not _bad, f"sensitive 배치 {_k} 에 어린 외형 태그: {_bad}"
+    # 남성 커플 배치에는 `mature female` 이 있으면 안 된다 — 연령 요구지 성별 요구가
+    # 아니다. 둘 중 하나는 반드시 있어야 한다.
+    assert ("mature female" in _spec["template"]
+            or "mature male" in _spec["template"]), f"sensitive 배치 {_k} 에 연령 태그가 없다"
+    assert "rating:sensitive" in _spec["template"], f"sensitive 배치 {_k} 에 등급이 없다"
+    # 노출 태그가 섞이면 등급이 무의미해진다. thumb_bench 가 요청 직전에 또 본다.
+    for _bad_tag in ("nude", "naked", "rating:explicit", "rating:questionable"):
+        assert _bad_tag not in _spec["template"], f"sensitive 배치 {_k} 에 {_bad_tag}"
 
 OUT.write_text(json.dumps(bench, ensure_ascii=False, indent=2), encoding="utf-8")
 

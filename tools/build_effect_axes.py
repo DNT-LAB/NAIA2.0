@@ -40,6 +40,22 @@ TEXT_KEEP = re.compile(
     r"|^japanese text$|^korean text$|^chinese text$|^heart censor|^censored$)")
 
 
+# 다른 그룹에서 fx_effect 로 들여오는 것. 이 축의 풀은 `Composition_Meta` 의
+# `effects` 서브그룹만 보므로 규칙으로는 안 잡힌다.
+#
+# **`thumb_view_build.py` 에서 여기로 옮겼다.** 그쪽이 이 파일에 덧붙이고 있었는데
+# 이 빌더가 통째로 덮어쓰므로 다시 돌리면 사라졌다. 축의 writer 는 하나여야 한다.
+IMPORTED = {
+    # 움직임 묘사. `motion lines` · `motion blur` · `afterimage` · `speed lines` 가
+    # 이미 이 축에 있는 그 계열인데, 형제들은 `Composition_Meta` 인데 이것만
+    # `NSFW` 그룹으로 튀어 성인 도감에 갇혀 있었다(`cream on face` 와 같은 형태).
+    # 여성이 뛸 때 가슴이 출렁이는 묘사다 — 성적 행위가 아니다(사용자 판단 2026-07-30).
+    "bouncing breasts",
+    # 초점·노출 효과. 서브그룹이 `image_composition` 이라 `effects` 풀에 없다.
+    "depth of field", "bokeh", "contrast", "double exposure",
+}
+
+
 def main() -> int:
     import core.interactive_browse_index as ib
     from core.kr_tag_loader import load_kr_tag_records
@@ -89,6 +105,14 @@ def main() -> int:
             key = "fx_symbol"          # 말풍선·효과음은 기호와 같은 성격
         if key:
             axes.setdefault(key, []).append(tag)
+
+    for tag in sorted(IMPORTED):
+        if tag not in raw:
+            raise SystemExit(f"IMPORTED: 태그 DB 에 없다 -> {tag!r}")
+        if tag in assigned:
+            continue                      # 다른 축이 이미 가져갔다
+        if tag not in axes.setdefault("fx_effect", []):
+            axes["fx_effect"].append(tag)
 
     # `_todo` 는 벤치가 읽는 **생성 대기열**이다. 축 파일 전체를 적으면 이미 만든
     # 것까지 다시 큐에 올라 예산을 먹고 뒤쪽 축이 통째로 잘린다(실측 1회).

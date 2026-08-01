@@ -40,6 +40,15 @@ CUT = 149
 
 # 서브그룹 단위 제외.
 SKIP_SUBGROUP = {"taboo", "gore", "dark_content"}
+
+# 금기와 평상 사이는 `wildcards/nsfw/nsfw_heavy.txt` 가 담당한다 — 사용자가 직접
+# 큐레이션하는 파일이고 도구는 쓰지 않는다. 그 파일이 리포에 있으므로 아래 `taken`
+# 이 읽어 도감에서 자동으로 빠진다.
+#
+# 처음엔 여기 `TO_HEAVY = {"inseki"}` 라는 두 번째 목록을 뒀는데, 포터블에만 있던
+# 파일을 리포로 가져오면서 필요가 없어졌다. 목록이 두 벌이면 반드시 갈라진다.
+# (`inseki` = 의붓 친척 간 관계. `incest` 는 이름 규칙이 잡았으나 일본어 표기라
+#  그물을 통과했다 — 같은 계열은 nsfw_heavy.txt 에 한 줄 추가하면 된다.)
 # 서브그룹을 빠져나온 것 중 이름으로 거르는 것. 서브그룹 분류가 완전하지 않다.
 # 뒤쪽 `\b` 때문에 접미가 붙은 형태를 놓쳤다 — `molest`+`ation`, `bestial`+`ity`.
 # 앞 경계만 두고 뒤는 연다. 이 목록은 정확도보다 누락이 위험하다.
@@ -48,6 +57,27 @@ BLOCK_NAME = re.compile(
     r"|noncon|non-con|forced|molest|unconscious|drugged|guro|ryona|vore"
     r"|scat|feces|urine|piss|torture|abuse|snuff|bestial|zoo|pokephilia"
     r"|chikan|harassment|mind control|hypnosis|hypnotiz)", re.I)
+
+# 규칙으로 일반화되지 않는 단건. 규칙에 태그 이름을 박는 것과 다르다 — 여기 있는 것은
+# "규칙이 놓치는 예외"임을 이름으로 밝힌다(의상 빌더의 `POST_EXPLICIT` 과 같은 자리).
+# 규칙에 이름을 숨기면 `breast pocket` 처럼 왜 거기 있는지 알 수 없게 된다.
+TAG_OVERRIDE = {
+    # 발바닥을 맞대어 질 입구를 흉내 내는 발. 해부가 아니라 **흉내**다 —
+    # `phallic symbol`("무해한 물건이 페니스 모양")이 정확한 짝이고 그쪽에 있다.
+    # 사용자 지적 2026-07-30: "자세에 가깝다, sexually suggestive 같은".
+    "foot pussy": "nsfw_fetish",
+    # 보는 쪽의 **반응**이다 — 손으로 하는 것도, 부위 자체도 아니다.
+    # 서브그룹 폴백은 `sexual_activity` -> 행위로 보내는데, 그림에 남는 것은
+    # 표정이라 상태·표정이 맞다(`ahegao` · `torogao` 와 같은 자리).
+    "penis awe": "nsfw_state",
+    "looking at penis": "nsfw_state",
+    # 행위다. 해부 규칙을 맨 뒤로 보냈어도 그것 역시 **이름 규칙**이라 서브그룹
+    # 폴백보다 먼저 돌고, `\bpenis` 가 이 셋을 다시 삼킨다. `nsfw_act` 는 폴백 전용
+    # 키라 정규식이 없으므로 여기서 명시한다.
+    "penis measuring": "nsfw_act",
+    "smelling penis": "nsfw_act",
+    "penises touching": "nsfw_act",
+}
 
 # 분류. 위에서부터 먼저 맞는 것을 쓴다(순서가 곧 우선순위).
 # 이름 규칙만 쓴다 — 눈으로 검수하지 않으므로 근거가 이름에 있어야 한다.
@@ -70,36 +100,80 @@ CATEGORIES = (
     ("nsfw_penetration", "삽입", re.compile(
         r"penetrat|vaginal|\banal\b|insertion|inside\b|\bin (pussy|vagina|ass|anus|mouth)"
         r"|impale|stuck|hilt|deep\b|cervix|womb")),
-    ("nsfw_hand", "손·가슴·기타 부위", re.compile(
-        r"handjob|paizuri|masturbat|fingering|footjob|thighjob|axillajob|hairjob"
-        r"|grinding|frottage|tribadism|scissoring|rubbing|stroking|fingers? in"
-        r"|grabbing|groping|squeez|fondl|pinching|tweaking")),
+    # 손이 아닌 **부위**로 하는 자극. `-job` 접미가 곧 부위다(paizuri=가슴).
+    # 손 규칙보다 앞에 있어야 한다 — 뒤에 두면 `handjob` 계열 패턴이 먼저 먹는다.
+    # `nsfw_fetish` 보다도 앞이다: `docking`(가슴 맞대기) · `thigh sex`(스마타) ·
+    # `buttjob` · `pecjob` 이 페티시로 갔던 것을 여기로 가져온다(전수 조사 2026-07-30).
+    ("nsfw_bodyjob", "가슴·발·기타 부위", re.compile(
+        r"paizuri|footjob|thighjob|axillajob|hairjob|buttjob|pecjob|scissoring"
+        r"|tribadism|frottage|grinding|thigh sex|docking|to breast$"
+        r"|bulge press|breast contest|face to pecs")),
+    ("nsfw_hand", "손·손가락", re.compile(
+        # 손·손가락으로 하는 것만. `paizuri` · `footjob` · `hairjob` · 마찰 계열은
+        # `nsfw_bodyjob` 으로 나갔다(사용자 지적 2026-07-30: "가슴으로 하는 행위이지
+        # 손으로 하는 action 은 아니다"). 그쪽 규칙이 이 위에 있어 먼저 잡는다.
+        r"handjob|masturbat|fingering|rubbing|stroking|fingers? in"
+        r"|grabbing|groping|squeez|fondl|pinching|tweaking"
+        # 부위 이름이 든 **행위**들. 해부 규칙이 이름으로 먼저 삼켜서 여기 못 왔다
+        # (`spread pussy` 15,252 · `clitoral stimulation` 2,163 — 사용자 지적 2026-07-30).
+        # **손·자극만 여기다.** 처음엔 해부에서 꺼낸 것을 전부 여기로 밀어 넣었는데
+        # `looking at penis`(시선) · `penis awe`(반응) · `penis measuring` ·
+        # `smelling penis` · `penises touching` · `presenting pussy` 는 손으로 하는
+        # 자극이 아니다(전수 조사 2026-07-30). 패턴을 좁혀 제 축으로 떨어지게 한다.
+        r"|spread pussy|clitoral stimulation|\bgrab$|caressing|glansjob"
+        r"|foreskin pull")),
     ("nsfw_toy", "기구·도구", re.compile(
         r"sex toy|dildo|vibrator|anal beads|butt plug|onahole|fleshlight|toy\b"
         r"|rope|shibari|bound|bondage|restrain|handcuff|collar|leash|blindfold|spreader"
-        r"|chastity|cock ring|strap-on|strapon|machine")),
-    ("nsfw_cum", "사정·체액", re.compile(
+        # 구속구가 `nsfw_act`(행위 폴백)로 샜다 — `shackles` 6,015 · `chained` 2,440 ·
+        # `suspension` 1,839 · `immobilization` 324. 보이는 것은 행위가 아니라 도구다.
+        r"|chastity|cock ring|strap-on|strapon|machine"
+        r"|shackle|chained|suspension|immobiliz")),
+    ("nsfw_cum", "사정", re.compile(
         r"\bcum\b|cumdrip|cumshot|ejaculat|semen|precum|creampie|bukkake|facial"
         r"|pussy juice|vaginal fluid|saliva|drool|squirt|lactation|milk\b|sweat")),
     ("nsfw_pairing", "관계·장르", re.compile(
-        r"hetero|\byuri\b|\byaoi\b|\bbara\b|futanari|newhalf|otokonoko|monster girl"
+        # `futanari` 만 적었더니 `futa with female`(7,464) 등 6개가 행위 폴백으로 샜다.
+        # `\bfuta` 로 열면 `futa *` · `futasub` · `futanari` 를 한 번에 잡는다.
+        # (`intravaginal futanari` · `futanari masturbation` 은 삽입·손 규칙이 먼저
+        #  잡는다 — 그쪽은 관계가 아니라 행위라 순서가 맞다.)
+        r"hetero|\byuri\b|\byaoi\b|\bbara\b|\bfuta|newhalf|otokonoko|monster girl"
         r"|furry|interspecies|tentacle|size difference|age difference|dominant"
-        r"|submissive|femdom|maledom|\bpov\b|imminent")),
-    ("nsfw_anatomy", "해부·부위", re.compile(
-        r"\bpenis|\bpussy|\banus\b|testicl|clitor|vulva|urethra|uterus|cervix|ovum"
-        r"|perineum|foreskin|scrotum|hymen|labia|glans|smegma|sperm cell")),
+        # `\bpov\b` 는 여기 있으면 안 된다 — 시점이지 관계가 아니다. `pov crotch`(7,340) ·
+        # `futanari pov` 가 관계·장르로 갔다(사용자 지적 2026-07-29). 엿보임으로 옮긴다.
+        r"|submissive|femdom|maledom|imminent")),
+    # 시점 기반 노출. `\bpov\b` 를 관계에서 여기로 가져왔다 — 어디서 보느냐가 축의 성격이다.
+    # **태그 이름을 통째로 박지 말 것.** `breast pocket`(셔츠 가슴 주머니)을 여기 적어놔서
+    # 의류 디테일이 성인 도감에 이름으로 끌려 들어갔다. 규칙은 규칙이어야 한다.
     ("nsfw_peek", "엿보임·노출 사고", re.compile(
         r"pantyshot|pantylines|upskirt|upshorts|upshirt|downblouse|slip\b|peek\b"
-        r"|clothing aside|cutout|nippleless|breast pocket|accidental|zenra|flashing"
-        r"|public nudity|see-through")),
+        r"|clothing aside|cutout|nippleless|accidental|zenra|flashing"
+        # `breast curtain`(단수)만 행위 쪽에 떨어져 복수형 `breast curtains` 와
+        # 갈라져 있었다. `up sleeve` 는 소매 안 엿보기라 정의상 여기다.
+        r"|public nudity|see-through|\bpov\b|breast curtain|up sleeve")),
     ("nsfw_fetish", "페티시·상황", re.compile(
         r"inflation|expansion|enema|human toilet|exhibitionism|indecency|prostitut"
         r"|instant loss|defloration|impregnat|fertiliz|in heat|virgin|sex ed"
         r"|contest|pornography|docking|thigh sex|buttjob|pecjob")),
+    # 성기·유두에 **붙이는 것**. 피어싱·보석·문신·마에바리는 해부가 아니라 장식이다.
+    # SFW `marking` 축이 `tattoo` · `piercing` · `chest tattoo` 를 이미 갖고 있는데,
+    # 성적 부위 쪽만 도감에 남아 해부 규칙에 이름으로 끌려갔다.
+    ("nsfw_adorn", "장신구·문신·가리개", re.compile(
+        r"piercing|jewelry|\brings\b|tattoo|bandaid|ofuda|tape on|\bribbon\b"
+        r"|lipstick mark|body writing")),
     ("nsfw_state", "상태·표정", re.compile(
         r"erection|flaccid|aroused|arousal|blush|ahegao|orgasm|climax|trembling"
         r"|spread|presenting|exposed|nude|naked|undress|strip|lifted|raised"
-        r"|cameltoe|zettai ryouiki|clothed |partially|after ")),
+        # `zettai ryouiki` 를 여기 박아놨었다 — 스커트와 사이하이 사이의 허벅지 구간이라
+        # 성인 태그가 아니다. `cloth_legwear` 로 이관(2026-07-29). 죽은 줄이라 지운다.
+        r"|cameltoe|clothed |partially|after ")),
+    # **해부는 반드시 맨 뒤다.** 이것만 '부위 이름' 규칙이고 나머지는 '무엇을
+    # 하는가' 규칙이다. 앞에 두면 이름이 든 모든 것을 삼킨다 — `spread pussy`(행위) ·
+    # `pussy jewelry`(장신구) · `pussy peek`(엿보임) · `condom on penis`(기구)가
+    # 전부 해부로 갔다. 이름 규칙은 다른 규칙이 전부 놓친 뒤에 마지막으로 본다.
+    ("nsfw_anatomy", "해부·부위", re.compile(
+        r"\bpenis|\bpussy|\banus\b|testicl|clitor|vulva|urethra|uterus|cervix|ovum"
+        r"|perineum|foreskin|scrotum|hymen|labia|glans|smegma|sperm cell")),
 )
 
 
@@ -110,19 +184,27 @@ SUBGROUP_TO = {
     "sexual_positions": "nsfw_position", "sex_position": "nsfw_position",
     "pose": "nsfw_position",
     "genitals": "nsfw_anatomy", "anatomy": "nsfw_anatomy", "body": "nsfw_anatomy",
-    "body_modification": "nsfw_anatomy", "body_writing": "nsfw_anatomy",
-    "nudity": "nsfw_peek", "exposure": "nsfw_peek", "pasties": "nsfw_peek",
+    # 문신·피어싱은 장식이다(`pubic tattoo` · `nipple rings`).
+    "body_modification": "nsfw_adorn", "body_writing": "nsfw_adorn",
+    "piercings": "nsfw_adorn", "pasties": "nsfw_adorn",
+    "nudity": "nsfw_peek", "exposure": "nsfw_peek",
     "sexual_attire": "nsfw_peek",
     "sex_objects": "nsfw_toy", "toys": "nsfw_toy", "object": "nsfw_toy",
     "fluids": "nsfw_cum",
     "groping": "nsfw_hand", "self_touch": "nsfw_hand",
-    "censorship": "nsfw_censor", "symbol": "nsfw_censor",
+    "censorship": "nsfw_censor",
     "expression": "nsfw_state", "state": "nsfw_state", "reaction": "nsfw_state",
     "anticipation": "nsfw_state", "meter": "nsfw_state",
     "fetish": "nsfw_fetish", "situation": "nsfw_fetish",
     "sexual_situation": "nsfw_fetish", "genre": "nsfw_fetish",
     "media": "nsfw_fetish", "meme": "nsfw_fetish",
-    "pov": "nsfw_pairing", "focus": "nsfw_pairing", "visual": "nsfw_pairing",
+    # `symbol` 도 여기다. 기호(`:>=` · `phallic symbol`)는 검열 **방식**이 아니라
+    # 성적 암시의 표현이다 — `censorship` 과 한 통에 두면 모자이크와 이모티콘이 섞인다.
+    "symbol": "nsfw_fetish",
+    # **잡동사니 서랍 금지.** `pov`/`focus`/`visual` 을 전부 `nsfw_pairing` 으로 보내
+    # `bouncing breasts`(10,094)가 관계·장르에 들어갔다(사용자 지적). 관계와 무관한
+    # 서브그룹은 관계로 보내지 않는다 — `pov` 는 이름 규칙이 엿보임으로 가져간다.
+    "visual": "nsfw_anatomy", "focus": "nsfw_anatomy",
     "insertion": "nsfw_penetration",
 }
 # `nsfw_act` 는 폴백 전용 키다 — 이름 규칙으로는 안 잡히는 '행위 일반'(sex 등).
@@ -148,6 +230,13 @@ def main() -> int:
         if p.stem.startswith("_") or p.stem in _own:
             continue
         taken |= {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()}
+    # **SFW 축도 봐야 한다.** 처음엔 nsfw 폴더만 봤더니 `hand in another's panties` 가
+    # `pose_arm_m`(이미 생성됨)과 `nsfw_act` 양쪽에 들어갔다. 팩 키는 `<축>/<태그>`
+    # 하나뿐이라 두 축에 같은 태그가 있으면 뒤쪽이 영영 안 찬다(`bandages` 와 같은 건).
+    for p in Path("wildcards/thumb").glob("*.txt"):
+        if p.stem.startswith("_"):
+            continue
+        taken |= {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()}
 
     # 빠진 것도 따로 남긴다(사용자 지시) — 무엇이 왜 빠졌는지 안 보이면
     # 나중에 "이건 왜 없지" 를 다시 조사하게 된다.
@@ -170,6 +259,9 @@ def main() -> int:
     cat: dict[str, list[str]] = {}
     unmatched: list[str] = []
     for tag in pool:
+        if tag in TAG_OVERRIDE:
+            cat.setdefault(TAG_OVERRIDE[tag], []).append(tag)
+            continue
         for key, _label, pat in CATEGORIES:
             if pat.search(tag):
                 cat.setdefault(key, []).append(tag)
@@ -202,6 +294,14 @@ def main() -> int:
         (OUT / "nsfw_etc.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
         total += len(v)
         print(f"  {'nsfw_etc':18s} {'기타':14s} {len(v):4d}  {', '.join(v[:8])}")
+    else:
+        # **비면 지운다.** 안 지우면 옛 실행이 남긴 파일이 그대로 살아 축으로 읽힌다
+        # (`nsfw_etc` 310개가 그랬다 — 손으로 지웠지만 빌더는 재현하지 못했다.
+        #  Codex 리뷰 2026-07-30 지적). 생성기는 자기 산출물을 완전히 소유해야 한다.
+        _etc = OUT / "nsfw_etc.txt"
+        if _etc.exists():
+            _etc.unlink()
+            print(f"  {'nsfw_etc':18s} (미분류 0 — 낡은 파일 삭제)")
 
     # ── 제외 목록 3종 ────────────────────────────────────────────────────
     # 파일명이 `_` 로 시작하므로 팩 빌더·생성기가 축으로 읽지 않는다.

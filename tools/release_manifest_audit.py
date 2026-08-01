@@ -125,6 +125,18 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     # in runtime_asset_classification.json.
     "data/e621_boost_static.py",
     "data/danbooru_tag_counts_by_rating.json",
+    # Interactive 모드가 런타임에 읽는 것들. 없으면 그리드가 통째로 비거나
+    # 추천 줄이 사라진다 — include 에는 있었는데 이 예외 목록에서 빠져 있었다.
+    #   interactive_tags        태그 그룹/서브그룹/관계 사전 (TagRelationRanker)
+    #   interactive_thumbnails  썸네일 팩 (10,458키)
+    #   tag_cooccurrence        사전 칩 '함께 쓰이는 것' (없으면 그 줄이 빈다)
+    #   character_presets       캐릭터 프리셋 슬롯 배정표
+    #   character_preview_thumbs 캐릭터 뷰어 폴백 썸네일 (사용자 것이 없을 때)
+    "data/interactive_tags.json",
+    "data/interactive_thumbnails.json",
+    "data/tag_cooccurrence.json",
+    "data/character_presets.json",
+    "data/character_preview_thumbs.json",
     # NOTE: Sequence dataset (data/sequence_preset/events_v1.parquet) is NOT shipped —
     # it is downloaded on demand from HuggingFace (core/sequence_download_service.py),
     # mirroring Event Preset. So it is intentionally absent from this allowlist.
@@ -137,6 +149,11 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/tag_bucket_dates.json",
     "*/data/e621_boost_static.py",
     "*/data/danbooru_tag_counts_by_rating.json",
+    "*/data/interactive_tags.json",
+    "*/data/interactive_thumbnails.json",
+    "*/data/tag_cooccurrence.json",
+    "*/data/character_presets.json",
+    "*/data/character_preview_thumbs.json",
     # 캐릭터 생성 벤치 랜덤 슬롯 풀(2.0.33) - 없으면 클린 설치에서 랜덤생성이
     # 404로 죽는다. SOURCE_BOOTSTRAP_PATHS/release_include_exclude_draft/
     # runtime_asset_classification과 함께 4곳 등록 세트.

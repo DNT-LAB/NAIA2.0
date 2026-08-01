@@ -42,6 +42,8 @@
       "data/character_analysis.json",
       "data/character_presets.json",
       "data/interactive_thumbnails.json",
+      "data/tag_cooccurrence.json",
+      "data/character_preview_thumbs.json",
       "data/e621_data",
       "artist_dictionary.py",
       "danbooru_character.py",

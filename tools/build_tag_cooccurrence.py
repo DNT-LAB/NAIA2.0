@@ -91,7 +91,9 @@ OUT = Path("data/tag_cooccurrence.json")
 DATA_ROOTS = [Path("NAIA-Portable/user-data/data"), Path("data")]
 AXIS_DIRS = (Path("wildcards/thumb"), Path("wildcards/nsfw"))
 # 축이 아닌 원본 목록. 이것들을 넣으면 같은 태그가 두 번 들어온다.
-NOT_AXES = {"pose_solo", "pose_multi", "pose_drop", "nsfw_heavy"}
+# 축 판정은 emit 이 내는 인덱스가 SSOT 다. 전에는 여기 목록을 적어 뒀는데
+# 없어진 `nsfw_heavy` 를 계속 참조하고 새로 생긴 축은 몰랐다.
+from tools.thumb_axis_index import is_axis  # noqa: E402
 # 어떤 태그와도 함께 나오는 것들. 동반 후보로 내놓을 값이 없다.
 def _relation_neighbors(raw: dict) -> dict[str, set[str]]:
     """태그 -> 이미 UI 의 다른 줄에 표시되는 관계 태그들.
@@ -287,7 +289,7 @@ def axis_tags() -> list[str]:
     out: set[str] = set()
     for d in AXIS_DIRS:
         for p in d.glob("*.txt"):
-            if p.stem.startswith("_") or p.stem in NOT_AXES:
+            if not is_axis(p.stem):
                 continue
             out |= {l.strip() for l in p.read_text(encoding="utf-8").splitlines() if l.strip()}
     return sorted(out)

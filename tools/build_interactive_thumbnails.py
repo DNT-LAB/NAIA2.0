@@ -91,7 +91,9 @@ PACK_AXIS = {"face_eyes": "face", "face_parts": "face", "face_mark": "face"}
 # 표정으로 넘긴 목록이 여기 해당한다 — 글로브로 조용히 거르지 않고 이름을 적는다.
 # `_` 접두 파일은 축이 아니다(작업 목록·보존 목록). 이름을 하나씩 적다가
 # `_relational_meta` 를 빠뜨려 키 하나가 그 축으로 들어갔다 — 접두로 막는다.
-NOT_AXES = {"pose_solo", "pose_multi", "pose_drop", "expression_from_pose"}
+# 축 판정은 emit 이 내는 인덱스가 SSOT 다. 목록을 여기 적으면 갈라진다 —
+# 실제로 세 도구가 서로 다른 NOT_AXES 를 들고 있었다(tools/thumb_axis_index.py).
+from tools.thumb_axis_index import is_axis  # noqa: E402
 
 
 def load_axis_tags() -> dict[str, str]:
@@ -104,7 +106,7 @@ def load_axis_tags() -> dict[str, str]:
     sources += sorted(p for p in NSFW_DIR.glob("nsfw_*.txt")) if NSFW_DIR.exists() else []
     for path in sources:
         axis = path.stem
-        if axis in NOT_AXES or axis.startswith("_"):
+        if not is_axis(axis):
             continue
         for line in path.read_text(encoding="utf-8").splitlines():
             tag = line.strip()

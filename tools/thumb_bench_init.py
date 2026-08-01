@@ -556,9 +556,13 @@ for _ax, _fr in sorted(_pose_spec["framing"].items()):
 # 렌더 축이 아닌 중간 산출물. 분류 결과(solo/multi/drop)와 보류한 성인 축이
 # 축과 같은 `pose_*` 접두를 쓴다 — 의존성 힌트에서 `pose_solo` 가 축 이름으로
 # 샜던 것과 같은 뿌리다. 글로브로 조용히 거르지 않고 이름을 적어 의도를 남긴다.
-_POSE_NOT_AXES = {"pose_solo", "pose_multi", "pose_drop",       # 인원 분류 결과
-                  "pose_nsfw", "pose_nsfw_face"}               # 사용자가 직접 생성
-_pose_files = {p.stem for p in Path("wildcards/thumb").glob("pose_*.txt")} - _POSE_NOT_AXES
+# 축 판정은 emit 이 내는 인덱스가 SSOT 다(tools/thumb_axis_index.py). 성인 자세는
+# 사용자가 직접 만들므로 배치 정의 대상이 아니라 여기서만 추가로 뺀다.
+from tools.thumb_axis_index import is_axis  # noqa: E402
+
+_POSE_USER_OWNED = {"pose_nsfw", "pose_nsfw_face"}
+_pose_files = {p.stem for p in Path("wildcards/thumb").glob("pose_*.txt")
+               if is_axis(p.stem)} - _POSE_USER_OWNED
 _uncovered = _pose_files - set(POSE_BATCHES)
 assert not _uncovered, f"배치 정의가 없는 자세 축: {sorted(_uncovered)}"
 BATCHES.update(POSE_BATCHES)

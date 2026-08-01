@@ -784,7 +784,24 @@ out.append("];")
 out.append("")
 
 DST.write_text("\n".join(out) + "\n", encoding="utf-8")
+# 축 목록의 단일 출처를 낸다. 도구마다 `NOT_AXES` 를 따로 적어 두던 것을 대체한다 —
+# 세 곳에 적혀 있었고 이미 갈라졌다(없어진 `nsfw_heavy` 를 계속 참조하고 있었다).
+# emit 은 SLOTS 를 조립하면서 어떤 축이 화면에 붙는지 이미 정확히 안다.
+# 사정은 tools/thumb_axis_index.py 문서주석 참조.
+# gloss 섹션(성적 ETC / 폭력 및 자해 ETC)도 화면에 붙는 축이다 — 썸네일이 없을 뿐
+# 목록으로 노출되므로 "미배선"이 아니다. _GLOSS 는 위에서 채워진다.
+_referenced.update(_GLOSS)
+_INDEX = SRC / "_axes_index.json"
+_INDEX.write_text(json.dumps({
+    "note": ["UI 에 배선된 축 목록. tools/thumb_axes_emit.py 가 만든다.",
+             "소비자는 tools/thumb_axis_index.py 의 is_axis() 를 쓴다.",
+             "여기 없는 wildcards/thumb/*.txt 는 중간 산출물이거나 미배선이다."],
+    "count": len(_referenced),
+    "axes": sorted(_referenced),
+}, ensure_ascii=False, indent=1), encoding="utf-8")
+
 print(f"생성: {DST}  ({len(out)} 줄)")
+print(f"  축 인덱스 {len(_referenced)}개 -> {_INDEX}")
 print(f"  팔레트: hair {len(palette['hair_color'])} / eye {len(palette['eye_color'])}")
 print(f"  슬라이더: {list((man.get('sliders') or {}).keys())}")
 tt = {a['key']: len(lines(a['key'])) for a in man.get('axes',[]) if lines(a['key'])}

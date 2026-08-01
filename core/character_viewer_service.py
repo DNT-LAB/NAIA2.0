@@ -27,13 +27,32 @@ class CharacterViewerService:
         *,
         data_root: Path | str | None = None,
         save_root: Path | str | None = None,
+        thumbnail_root: Path | str | None = None,
     ):
         self.root = Path(root)
         self.data_dir = Path(data_root) if data_root is not None else self.root / "data"
         self.save_dir = Path(save_root) if save_root is not None else self.root / "save"
         self.groups_path = self.data_dir / "copyright_groups.json"
         self.analysis_path = self.data_dir / "character_analysis.json"
-        self.thumb_dir = self.data_dir / "character_thumbnails"
+        # **썸네일만 사용자 데이터 루트로 뺀다 — `data_root` 를 통째로 바꾸면 안 된다.**
+        # `data_dir` 은 번들 파일 두 개(`copyright_groups.json` 1.2MB,
+        # `character_analysis.json` 28MB)와 공유되고 그것들은 리소스 트리에 있는 것이 맞다
+        # (계약상 `provisioning: bundled`). 통째로 바꾸면 `data_available()` 이 False 가 되어
+        # 탭이 죽고, `find_by_tag()` 를 쓰는 캐릭터 태그 툴팁까지 전 앱에서 사라진다.
+        #
+        # 썸네일은 사용자가 만든 것이라 설치 트리에 있으면 안 된다:
+        #   · `runtime_write_policy.json` 이 `repository data/**` 를 금지한다
+        #   · 포터블 업데이터는 `user-data` 만 보존하고 `resources/` 를 통째로 교체한다
+        #     (`app/electron/main/main.cjs`) -> 업데이트 1회에 썸네일이 사라지고
+        #     2회째에 백업까지 지워져 영구 소실된다
+        #   · 마이그레이션(`core/data_migration_service.py:67`)은 이미 `user_root/data/
+        #     character_thumbnails` 로 옮겨 놨다. 읽는 쪽만 어긋나 41장이 안 보였다
+        # 선례: `EventPresetService` 의 data_root/thumbnail_root 분할,
+        #       `ArtistThumbnailService` 의 mode_data_root.
+        self.thumb_dir = (Path(thumbnail_root) if thumbnail_root is not None
+                          else self.data_dir / "character_thumbnails")
+        # 예전에 앱 트리로 써 둔 것. 최초 1회만 흡수한다(아래 `_adopt_legacy_thumbs`).
+        self.legacy_thumb_dir = self.root / "data" / "character_thumbnails"
         self.thumb_index_path = self.thumb_dir / "index.json"
         self.tags_path = self.save_dir / "character_viewer_tags.json"
         self._groups: dict[str, Any] | None = None
@@ -95,8 +114,38 @@ class CharacterViewerService:
             self._tag_index = index
         return self._tag_index.get(normalized)
 
+    def _adopt_legacy_thumbs(self) -> None:
+        """앱 트리에 써 둔 옛 썸네일을 사용자 루트로 **한 번만 복사**한다.
+
+        양쪽을 합쳐 읽지 않는 이유: DELETE 와 충돌한다. 레거시에만 있는 키를 지우면
+        런타임 index 에서만 빠지고 다음 실행에서 되살아난다(툼스톤 없이는 못 막는다).
+        한 번 흡수한 뒤에는 사용자 루트가 유일한 출처다.
+
+        레거시는 지우지 않는다 — `core/data_migration_service.py` 의 비파괴 원칙과 같다.
+        런타임 쪽에 index 가 이미 있으면(마이그레이션분 41장) 아무것도 하지 않는다.
+        """
+        try:
+            if self.thumb_dir == self.legacy_thumb_dir:
+                return
+            if self.thumb_index_path.exists():
+                return
+            legacy_index = self.legacy_thumb_dir / "index.json"
+            if not legacy_index.exists():
+                return
+            import shutil
+            self.thumb_dir.mkdir(parents=True, exist_ok=True)
+            for src in self.legacy_thumb_dir.glob("*.webp"):
+                dst = self.thumb_dir / src.name
+                if not dst.exists():
+                    shutil.copy2(src, dst)
+            shutil.copy2(legacy_index, self.thumb_index_path)
+        except Exception:
+            # 흡수 실패가 탭을 죽이면 안 된다 — 빈 index 로 계속 간다.
+            pass
+
     def thumb_index(self) -> dict[str, str]:
         if self._thumb_index is None:
+            self._adopt_legacy_thumbs()
             self._thumb_index = self._load_json(self.thumb_index_path, {})
         return self._thumb_index
 
@@ -573,16 +622,71 @@ class CharacterViewerService:
             merged.append(f"-{tag}")
         return {**common, "input": ", ".join(merged)}
 
+    def _resolve_thumb_file(self, filename: str) -> Path:
+        """Resolve an index filename inside ``thumb_dir``, rejecting traversal."""
+        path = (self.thumb_dir / filename).resolve()
+        root = self.thumb_dir.resolve()
+        if root not in path.parents and path != root:
+            raise ValueError("invalid thumbnail path")
+        return path
+
+    def _write_thumb_index(self, index: dict[str, str]) -> None:
+        self.thumb_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.thumb_index_path.with_name(self.thumb_index_path.name + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(index, handle, ensure_ascii=False, indent=2)
+        tmp_path.replace(self.thumb_index_path)
+        self._thumb_index = index
+
     def thumbnail_path(self, group_key: str, name: str, variant_label: str = "") -> Path:
         filename = self.thumb_index().get(self._thumb_key(group_key, name, variant_label))
         if not filename:
             raise FileNotFoundError("thumbnail not found")
-        path = (self.thumb_dir / filename).resolve()
-        if self.thumb_dir.resolve() not in path.parents and path != self.thumb_dir.resolve():
-            raise ValueError("invalid thumbnail path")
+        path = self._resolve_thumb_file(filename)
         if not path.exists():
             raise FileNotFoundError("thumbnail not found")
         return path
+
+    def delete_thumbnail(self, group_key: str, name: str, variant_label: str = "") -> dict[str, Any]:
+        """Delete ONE image's thumbnail: the .webp file AND its index entry.
+
+        확인 없이 즉시 삭제(사용자 지시). 인덱스 항목을 함께 지우는 것이 핵심이다 —
+        파일만 사라지면 그리드는 계속 ``has_thumbnail=True``로 보고 404 이미지를
+        띄운다(뷰어는 index.json만 신뢰).
+        """
+        group_key = str(group_key or "")
+        name = str(name or "")
+        variant_label = str(variant_label or "")
+        if not group_key or not name:
+            raise ValueError("group and character are required")
+        key = self._thumb_key(group_key, name, variant_label)
+        index = dict(self.thumb_index())
+        filename = str(index.pop(key, "") or "")
+        if not filename:
+            return {
+                "key": key,
+                "filename": "",
+                "removed": False,
+                "removed_file": False,
+                "thumbnail_count": len(index),
+            }
+        # 파일명 살균(``[<>:"/\\|?*]`` -> ``_``)은 서로 다른 키를 같은 파일명으로
+        # 접을 수 있다. 남은 키가 아직 이 파일을 가리키면 인덱스 항목만 지운다.
+        shared = any(str(value) == filename for value in index.values())
+        removed_file = False
+        if not shared:
+            path = self._resolve_thumb_file(filename)
+            if path.exists():
+                path.unlink()
+                removed_file = True
+        self._write_thumb_index(index)
+        return {
+            "key": key,
+            "filename": filename,
+            "removed": True,
+            "removed_file": removed_file,
+            "thumbnail_count": len(index),
+        }
 
     def save_thumbnail(self, pil_image: Any, snapshot: dict[str, Any]) -> dict[str, Any] | None:
         group_key = str(snapshot.get("group_key") or "")
@@ -601,9 +705,7 @@ class CharacterViewerService:
 
         index = dict(self.thumb_index())
         index[key] = safe_name
-        with open(self.thumb_index_path, "w", encoding="utf-8") as handle:
-            json.dump(index, handle, ensure_ascii=False, indent=2)
-        self._thumb_index = index
+        self._write_thumb_index(index)
         return {
             "key": key,
             "filename": safe_name,

@@ -18,8 +18,16 @@ GenerationRunnerStarter = Callable[[WebSessionContext, set[Any]], None]
 def character_viewer_service(context: WebSessionContext) -> CharacterViewerService:
     service = getattr(context, "character_viewer_service", None)
     if service is None:
-        save_root = context.runtime_paths.save_dir if context.runtime_paths is not None else None
-        service = CharacterViewerService(context.repo_root, save_root=save_root)
+        paths = context.runtime_paths
+        save_root = paths.save_dir if paths is not None else None
+        # 썸네일만 사용자 데이터 루트로 뺀다. `data_root` 는 넘기지 않는다 —
+        # 번들 데이터(copyright_groups / character_analysis)가 리소스 트리에 있어야 해서
+        # 통째로 바꾸면 탭이 죽는다(CharacterViewerService.__init__ 주석 참조).
+        # 포터블: <install>/user-data/data/character_thumbnails  (업데이트 때 보존되는 유일한 곳)
+        # 소스   : %APPDATA%/NAIA/data/character_thumbnails
+        thumbnail_root = (paths.data_dir / "character_thumbnails") if paths is not None else None
+        service = CharacterViewerService(context.repo_root, save_root=save_root,
+                                         thumbnail_root=thumbnail_root)
         context.character_viewer_service = service
     return service
 
@@ -206,6 +214,30 @@ def register_character_viewer_routes(
             media_type=media_type,
             headers={"Cache-Control": "public, max-age=3600"},
         )
+
+    @app.post("/api/character-viewer/thumbnail/delete")
+    async def api_character_viewer_thumbnail_delete(req: Request):
+        # 확인 없이 즉시 삭제(사용자 지시). 파일 + index.json 항목을 함께 지운다.
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            result = await run_in_thread(
+                character_viewer_service(session_context).delete_thumbnail,
+                str(payload.get("group") or ""),
+                str(payload.get("character") or ""),
+                str(payload.get("variant") or ""),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse(
+                {"error": f"Character Viewer thumbnail delete failed: {exc}"}, status_code=500
+            )
+        return {"ok": True, **result}
 
     @app.post("/api/character-viewer/generate")
     async def api_character_viewer_generate(req: Request):

@@ -92,6 +92,17 @@
         "Path(\"data\")",
         "Path(\"ui\")"
       ]
+    },
+    {
+      "feature": "character_viewer_thumbnail_root",
+      "source": "core/character_viewer_service.py",
+      "must_contain": [
+        "thumbnail_root: Path | str | None = None",
+        "self.thumb_dir = (Path(thumbnail_root) if thumbnail_root is not None"
+      ],
+      "must_not_contain": [
+        "self.thumb_dir = self.data_dir / \"character_thumbnails\""
+      ]
     }
   ],
   "download_api_scan": {

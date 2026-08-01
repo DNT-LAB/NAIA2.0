@@ -46,6 +46,7 @@ export function createCharacterViewerController({
   const cosplayNameEl = document.getElementById('characterViewerCosplayName');
   const copyBtn = document.getElementById('characterViewerCopyBtn');
   const generateBtn = document.getElementById('characterViewerGenerateBtn');
+  const deleteThumbBtn = document.getElementById('characterViewerDeleteThumbBtn');
   const rootEl = document.querySelector('.character-viewer-tab');
 
   const PAGE_SIZE = 9;
@@ -85,6 +86,7 @@ export function createCharacterViewerController({
   let contextMenuTarget = null;
   let continuousTimer = null;
   let continuousScheduleToken = 0;
+  let deletingThumb = false;
 
   const html = value => escHtml(String(value ?? ''));
 
@@ -118,6 +120,14 @@ export function createCharacterViewerController({
 
   function setSummary(message) {
     if (summaryEl) summaryEl.textContent = message || 'Character data';
+  }
+
+  function renderSummary() {
+    if (!state) return;
+    setSummary(
+      `${formatCount(state.character_count)} characters · ${formatCount(state.group_count)} groups`
+      + ` · ${formatCount(state.thumbnail_count)} thumbnails`,
+    );
   }
 
   function formatCount(value) {
@@ -215,6 +225,7 @@ export function createCharacterViewerController({
     const enabled = Boolean(selected && detail);
     if (copyBtn) copyBtn.disabled = !enabled;
     if (generateBtn) generateBtn.disabled = !enabled || Boolean(pendingResultRequestId);
+    if (deleteThumbBtn) deleteThumbBtn.disabled = deletingThumb || !currentThumbnailTarget();
     subtabEls.forEach(button => {
       if (button.dataset.characterViewerTab === 'detail') {
         button.disabled = !enabled;
@@ -888,6 +899,13 @@ export function createCharacterViewerController({
     if (selected && selected.character !== character && !meta.character_viewer_character_name) return;
     const cacheBusted = `${meta.character_viewer_thumbnail_url}&_=${Date.now()}`;
     const gridUrl = gridThumbnailUrl(cacheBusted);
+    // detail 캐시도 같이 갱신해야 방금 생성한 썸네일을 곧바로 DELETE 할 수 있다
+    // (currentThumbnailTarget 이 detail 의 URL 필드로 대상을 판정한다).
+    const savedVariant = String(meta.character_viewer_variant || '');
+    if (detail && detail.group === group && detail.character === character) {
+      if (!savedVariant) detail.default_thumbnail_url = cacheBusted;
+      if (String(detail.variant || '') === savedVariant) detail.thumbnail_url = cacheBusted;
+    }
     allItems = allItems.map(item => (
       item.group === group && item.character === character
         ? {...item, has_thumbnail: true, thumbnail_url: gridUrl}
@@ -912,6 +930,90 @@ export function createCharacterViewerController({
       card.classList.add('has-thumb');
       card.classList.remove('no-thumb');
     });
+  }
+
+  function currentThumbnailTarget() {
+    if (!selected || !detail) return null;
+    const group = String(detail.group || selected.group || '');
+    const character = String(detail.character || selected.character || '');
+    if (!group || !character) return null;
+    // 화면에 떠 있는 이미지가 이 바리에이션 자신의 썸네일인지, renderDetail 이
+    // default_thumbnail_url 로 떨어뜨린 대표 썸네일인지 구분한다. 폴백을 보고
+    // 있는데 바리에이션 키로 삭제를 보내면 서버에는 지울 것이 없고 이미지는
+    // 그대로 남는다 — "보고 있는 것을 지운다"가 이 버튼의 계약.
+    if (detail.thumbnail_url) {
+      return {group, character, variant: String(detail.variant || '')};
+    }
+    if (detail.default_thumbnail_url) {
+      return {group, character, variant: ''};
+    }
+    return null;
+  }
+
+  function clearThumbnailLocally(group, character, variant) {
+    const variantKey = String(variant || '');
+    if (detail && detail.group === group && detail.character === character) {
+      if (!variantKey) detail.default_thumbnail_url = '';
+      if (String(detail.variant || '') === variantKey) detail.thumbnail_url = '';
+    }
+    if (selectedImage && selected?.group === group && selected?.character === character) {
+      const showing = detail?.thumbnail_url || detail?.default_thumbnail_url || '';
+      if (showing) {
+        selectedImage.src = showing;
+      } else {
+        selectedImage.removeAttribute('src');
+        selectedImage.classList.remove('show');
+        if (selectedEmpty) selectedEmpty.hidden = false;
+      }
+    }
+    // 그리드/리스트의 has_thumbnail 은 대표(variant 없음) 썸네일만 가리킨다.
+    if (variantKey) return;
+    allItems = allItems.map(item => (
+      item.group === group && item.character === character
+        ? {...item, has_thumbnail: false, thumbnail_url: ''}
+        : item
+    ));
+    const listItem = listEl?.querySelector(`.character-viewer-list-item[data-group="${CSS.escape(group)}"][data-character="${CSS.escape(character)}"]`);
+    listItem?.classList.remove('has-thumb');
+    listItem?.classList.add('no-thumb');
+    gridEl?.querySelectorAll(`.character-viewer-card[data-group="${CSS.escape(group)}"][data-character="${CSS.escape(character)}"]`).forEach(card => {
+      const stage = card.querySelector('.character-viewer-card-image');
+      if (stage) {
+        stage.innerHTML = `
+          <span class="character-viewer-card-empty">No Thumb</span>
+          <span class="character-viewer-card-group">[${html(group)}]</span>
+        `;
+      }
+      card.classList.remove('has-thumb');
+      card.classList.add('no-thumb');
+    });
+  }
+
+  async function deleteSelectedThumbnail() {
+    // 확인 없이 즉시 삭제(사용자 지시).
+    const target = currentThumbnailTarget();
+    if (!target || deletingThumb) return;
+    deletingThumb = true;
+    updateActionAvailability();
+    const label = target.variant
+      ? `${target.character} (${target.variant.replace(/_/g, ' ')})`
+      : target.character;
+    try {
+      const data = await postJson('/api/character-viewer/thumbnail/delete', target);
+      clearThumbnailLocally(target.group, target.character, target.variant);
+      if (state && Number.isFinite(Number(data.thumbnail_count))) {
+        state.thumbnail_count = Number(data.thumbnail_count);
+        renderSummary();
+      }
+      if (data.removed) showToast?.(`${label} 썸네일을 삭제했습니다.`, 'success');
+      else showToast?.('삭제할 썸네일이 없습니다.', 'warning');
+    } catch (error) {
+      console.error('Character thumbnail delete failed', error);
+      showToast?.(error.message || '썸네일 삭제에 실패했습니다.', 'error');
+    } finally {
+      deletingThumb = false;
+      updateActionAvailability();
+    }
   }
 
   function handleResultMeta(meta) {
@@ -1136,6 +1238,7 @@ export function createCharacterViewerController({
     });
     copyBtn?.addEventListener('click', copyPrompt);
     generateBtn?.addEventListener('click', generateSelected);
+    deleteThumbBtn?.addEventListener('click', deleteSelectedThumbnail);
     resultExpandBtn?.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
@@ -1152,7 +1255,7 @@ export function createCharacterViewerController({
     try {
       state = await getJson('/api/character-viewer/state');
       applyOptions(state.options || {});
-      setSummary(`${formatCount(state.character_count)} characters · ${formatCount(state.group_count)} groups · ${formatCount(state.thumbnail_count)} thumbnails`);
+      renderSummary();
       if (!state.available) {
         setStatus('Character data is not available', 'error');
         return;

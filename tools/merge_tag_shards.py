@@ -29,7 +29,12 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 SHARD_DIR = Path("data/tags")
-KEEP = ["id", "general", "rating", "score"]
+# `character` 는 후보 어휘로 쓰면 안 되지만(`medallion -> oda uri` 같은 오분류의 출처)
+# **진단 신호로는 필요하다.** 어떤 동반이 한 캐릭터에서만 나오면 그건 태그 사이의 관계가
+# 아니라 그 캐릭터의 디자인이다 — `twintails + horse ears` 가 우마무스메 한 명에서
+# 나오는 식이다. 처음엔 이 열을 버렸고, 그래서 `chara` 오분류 187건을 분류로 잡으려다
+# 실패했다(후보가 `pink hair` 처럼 평범한 태그라 분류에는 신호가 없다).
+KEEP = ["id", "general", "character", "rating", "score"]
 
 
 def main() -> int:

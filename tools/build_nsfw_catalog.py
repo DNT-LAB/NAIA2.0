@@ -7,9 +7,15 @@
 ------------------
 벤치 템플릿이 `1girl, young female` 이고 네거티브에 `adolescent, mature female` 을
 넣어 **의도적으로 어려 보이는 인물**로 고정돼 있다. 그 베이스로 성적인 이미지를
-만드는 것은 태그 빈도와 무관하게 하지 않는다. `body_nsfw` 에 `oppai loli` 가 들어
-있다는 사실 자체가 이 위험이 가정이 아님을 보여준다.
+만드는 것은 태그 빈도와 무관하게 하지 않는다.
 사용자도 같은 이유로 GitHub 게시 불가라고 판단했다(2026-07-28).
+
+**막는 것은 "어린 외형 + 성적 내용"의 조합이지 어린 외형 태그 자체가 아니다.**
+`loli`·`shota`·`child` 는 체형 축에서 `rating:general` 베이스로 정상 생성된다 —
+AI 이미지 생성에서 체형을 조절하는 범용 분류 태그이고, 실제 썸네일도 착의 상태다
+(Vision 확인 2026-08-01). `oppai loli` 도 외모 서술이라 체형 축으로 이관됐고 성인
+도감에는 없다. 연령 게이트의 정확한 적용 범위는 tools/thumb_age_guard.py 를 보라 —
+런타임 가드는 배치 이름에 `nsfw` 가 있을 때만 돈다.
 
 그래서 여기서는 **분류와 와일드카드까지만** 한다. 사용자가 직접 생성하거나,
 와일드카드로만 쓰거나, 그대로 두거나 할 수 있게 목록을 정돈해 둔다.
@@ -28,7 +34,11 @@ OUT = Path("wildcards/nsfw")
 # 이 빌더가 만들지 않는 축. 한 파일에 writer 가 둘이면 반드시 갈라진다 —
 # 이 프로젝트에서 fx_effect · loc_backdrop 로 이미 겪었다.
 _OWNED_ELSEWHERE = {"nsfw_act", "nsfw_etc"}
-SOURCES = ("body_nsfw", "cloth_nsfw", "pose_nsfw", "pose_nsfw_face")
+# `meta_nsfw` 는 태그 DB 의 `Composition_Meta` 그룹에서 온 성인 태그다
+# (`nude`·`hair censor`·`ass focus`). 앞의 넷은 NSFW 그룹만 훑어서 이것들을
+# 통째로 놓치고 있었다 — 도감에도 와일드카드에도 없었다(2026-08-01).
+# tools/thumb_meta_build.py 가 만든다.
+SOURCES = ("body_nsfw", "cloth_nsfw", "pose_nsfw", "pose_nsfw_face", "meta_nsfw")
 
 # 도감 분류. 위에서부터 먼저 맞는 것을 쓴다(순서가 곧 우선순위).
 # 이름 규칙만으로 나눈다 — 이 목록은 눈으로 검수하지 않으므로 근거가 이름에 있어야 한다.
@@ -49,7 +59,8 @@ CATEGORIES = (
     ("nsfw_bondage",  "구속·기구", re.compile(
         r"\bgag\b|gagged|harness|chastity|cock ring|leash|bound|shibari|rope")),
     ("nsfw_exposure", "노출 의상", re.compile(
-        r"^naked |topless|bottomless|no pants|micro |see-through|pasties|maebari"
+        # `nude`/`completely nude` 는 `^naked ` 로 안 잡힌다(실측 explicit 73.1%).
+        r"\bnude\b|^naked |topless|bottomless|no pants|micro |see-through|pasties|maebari"
         r"|crotchless|cupless|breastless|thong|slingshot|revealing|impossible "
         r"|bikini|swimsuit|leotard|bodysuit|bodystocking|lingerie|negligee|chemise"
         r"|babydoll|garter|latex|fishnet|showgirl|bunny|virgin killer|frontless"
@@ -107,8 +118,19 @@ def main() -> int:
         v = sorted(unmatched, key=lambda t: -F(t))
         if "nsfw_etc" not in _OWNED_ELSEWHERE:
             (OUT / "nsfw_etc.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
+        else:
+            # **조용히 사라지면 안 된다.** nsfw_etc 를 다른 빌더가 소유하게 되면서,
+            # 여기로 떨어진 태그는 화면에만 찍히고 파일에는 안 써졌다 — nude 를 포함한
+            # 8개가 그렇게 없어진 것을 2026-08-01 에 발견했다. 갈 곳 없는 것은 남긴다.
+            (OUT / "_nsfw_unrouted.txt").write_text(
+                "# 어느 분류에도 안 맞아 갈 곳이 없는 태그. nsfw_etc 는 다른 빌더 소유라\n"
+                "# 여기서 쓸 수 없다. CATEGORIES 에 규칙을 넣거나 원본에서 빼라.\n"
+                + "\n".join(v) + "\n", encoding="utf-8")
+            print(f"  !! 갈 곳 없음 {len(v)}개 -> {OUT / '_nsfw_unrouted.txt'}"
+                  f"  ({', '.join(v[:8])})")
         total += len(v)
-        print(f"  {'nsfw_etc':16s} {'기타':12s} {len(v):4d}  {', '.join(v[:8])}")
+        if "nsfw_etc" not in _OWNED_ELSEWHERE:
+            print(f"  {'nsfw_etc':16s} {'기타':12s} {len(v):4d}  {', '.join(v[:8])}")
 
     (OUT / "_nsfw_catalog.json").write_text(json.dumps({
         "note": [

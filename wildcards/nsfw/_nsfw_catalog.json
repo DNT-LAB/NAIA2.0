@@ -5,13 +5,13 @@
   "thumb 도구가 축으로 읽지 않도록 wildcards/thumb 밖에 둔다."
  ],
  "label": {
-  "nsfw_fluid": "몸에 묻은 체액",
+  "nsfw_fluid": "체액",
   "nsfw_genital": "성기",
   "nsfw_pubic": "음모",
   "nsfw_nipple": "유두·유륜",
   "nsfw_breast": "가슴 노출·접촉",
   "nsfw_butt": "둔부",
-  "nsfw_bondage": "구속구",
+  "nsfw_bondage": "구속·기구",
   "nsfw_exposure": "노출 의상",
   "nsfw_act": "행위",
   "nsfw_etc": "기타"
@@ -20,7 +20,8 @@
   "body_nsfw",
   "cloth_nsfw",
   "pose_nsfw",
-  "pose_nsfw_face"
+  "pose_nsfw_face",
+  "meta_nsfw"
  ],
- "count": 245
+ "count": 248
 }

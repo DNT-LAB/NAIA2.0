@@ -34,14 +34,11 @@ pilot
 waiter
 wizard
 mechanic
-groom
-stripper
 policeman
 warrior
 monk
 lifeguard
 magician
-magical boy
 travel attendant
 female butler
 sukeban

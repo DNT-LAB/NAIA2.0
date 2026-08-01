@@ -1,1 +1,1 @@
-{"note": ["사전 칩이 드러낸 축 공백. tools/thumb_gap_build.py 가 만든다.", "직업·행사·기계는 의상/상황 개념인데 어느 축에도 없었다."], "label": {"job": "직업·역할", "event": "행사·명절", "mech": "기계·사이보그"}, "framing": {"job": "cloth_outfit", "event": "cloth_outfit", "mech": "cowboy"}}
+{"note": ["사전 칩이 드러낸 축 공백. tools/thumb_gap_build.py 가 만든다.", "직업·행사·기계는 의상/상황 개념인데 어느 축에도 없었다."], "label": {"job": "직업·역할", "job_male": "직업·역할(남성)", "event": "행사·명절", "mech": "기계·사이보그"}, "framing": {"job": "cloth_outfit", "job_male": "cloth_outfit", "event": "cloth_outfit", "mech": "cowboy"}}

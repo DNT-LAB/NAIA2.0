@@ -235,6 +235,9 @@ SLOTS = [
         # 직업·역할은 곧 그 직업의 옷이다(`nun`·`nurse`·`miko`·`race queen`).
         # 사전 칩이 계속 권하는데 어느 축에도 없어 사용자가 닿을 방법이 없었다.
         ("thumb", "직업·역할", "job"),
+        # 남성 역할은 1girl 베이스로 찍으면 여성이 나온다(groom·magical boy 실측).
+        # `1boy` 템플릿의 별도 축이다 — species_male 등과 같은 규약.
+        ("thumb", "직업·역할(남성)", "job_male"),
         ("thumb", "제복·코스튬", "cloth_uniform"),
         ("thumb", "수영복", "cloth_swim"),
         ("thumb", "속옷", "cloth_under"),
@@ -470,7 +473,9 @@ out.append("};")
 # 섹션만 있고 태그가 없으면 빈 그리드, 태그만 있고 섹션이 없으면 태그가 화면에서 사라진다.
 _male_secs = {sec[2] for _, _, _, secs in SLOTS for sec in secs
               if sec[0] != "browse" and sec[2].endswith("_male")}
-_male_secs.discard("species_male")      # 이건 파생이 아니라 실제 축 파일이다.
+# 파생이 아니라 **실제 축 파일**인 남성 축은 이 검사 대상이 아니다.
+#  은 자체 목록이 있고,  도 thumb_gap_build 가 만든다.
+_male_secs -= {"species_male", "job_male"}
 _male_have = set(_male_axes) | {_g for _g in _groups if _g.endswith("_male")}
 assert _male_secs == _male_have, (
     f"남성 축 배선 불일치 — 섹션만: {sorted(_male_secs - _male_have)}, "

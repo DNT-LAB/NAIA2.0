@@ -43,8 +43,10 @@ from core.kr_tag_loader import load_kr_tag_records  # noqa: E402
 OUT = Path("wildcards/thumb")
 CUT = 300
 
-LABEL = {"job": "직업·역할", "event": "행사·명절", "mech": "기계·사이보그"}
-FRAMING = {"job": "cloth_outfit", "event": "cloth_outfit", "mech": "cowboy"}
+LABEL = {"job": "직업·역할", "job_male": "직업·역할(남성)",
+         "event": "행사·명절", "mech": "기계·사이보그"}
+FRAMING = {"job": "cloth_outfit", "job_male": "cloth_outfit",
+           "event": "cloth_outfit", "mech": "cowboy"}
 
 # 신설 축 — 서브그룹에서 파생시킨다(손으로 적지 않는다).
 NEW_FROM_SUBGROUP = {
@@ -57,7 +59,21 @@ NEW_SKIP = {
     "pocky day", "cat day", "bunny day", "maid day", "koishi day",
     "twintails day", "miku day", "anniversary",   # 날짜 기념일 — 그림에 안 나타난다
     "party popper",                                # 소품 축 소관
+    # Vision 검수에서 무지 후드에 영문 글자만 나온 것들(2026-08-01). Danbooru 에서
+    # "고지·기념" 용도라 그림에 시각적 특징이 없다 — 그리드에서 서로 구분이 안 된다.
+    "april fools", "comiket", "countdown", "milestone celebration",
+    "announcement celebration", "yamakasa", "birthday", "graduation",
+    "year of the rat", "year of the rooster",
+    # `rating:general` 이 억제해 평범한 옷이 나왔다. 등급을 올리면 어린 외형
+    # 베이스에서 노출이 샌다(실측) — 성인 도감 기준(explicit>=70)에도 못 미쳐
+    # 어디에도 안 맞는다.
+    "stripper",
 }
+
+# 남성 역할 — 1girl 베이스로는 여성으로 나온다. `1boy` 템플릿의 별도 축으로 뺀다.
+# `knight`·`samurai`·`wizard`·`butler` 등은 **성별 중립 역할**이라 옮기지 않는다
+# (여성으로 나와도 맞고, `female butler` 가 따로 있다).
+MALE_ROLE = {"groom", "magical boy"}
 
 
 def main() -> int:
@@ -79,10 +95,19 @@ def main() -> int:
         picked = [t for t in raw
                   if SG(t) in subs and F(t) >= CUT
                   and t not in taken and t not in NEW_SKIP]
+        if key == "job":
+            picked = [t for t in picked if t not in MALE_ROLE]
         picked.sort(key=lambda x: -F(x))
         axes[key] = picked
         (OUT / f"{key}.txt").write_text("\n".join(picked) + "\n", encoding="utf-8")
         print(f"  {key:8s} {LABEL[key]:10s} {len(picked):4d}개  {', '.join(picked[:6])}")
+
+    # 남성 역할은 같은 서브그룹에서 뽑되 축을 나눈다.
+    male = sorted((t for t in MALE_ROLE if t in raw and F(t) >= CUT), key=lambda x: -F(x))
+    if male:
+        axes["job_male"] = male
+        (OUT / "job_male.txt").write_text("\n".join(male) + "\n", encoding="utf-8")
+        print(f"  {'job_male':8s} {LABEL['job_male']:10s} {len(male):4d}개  {', '.join(male)}")
 
     (OUT / "_gap_axes.json").write_text(json.dumps({
         "note": ["사전 칩이 드러낸 축 공백. tools/thumb_gap_build.py 가 만든다.",

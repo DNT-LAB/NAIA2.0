@@ -2114,5 +2114,13 @@
  "pose_action_2/tired look": {
   "src": "0006_tired_look-71fad2.png",
   "mtime": 1785596162.3159456
+ },
+ "job_male/groom": {
+  "src": "0001_groom-29c03b.png",
+  "mtime": 1785597215.2509155
+ },
+ "job_male/magical boy": {
+  "src": "0002_magical_boy-59880b.png",
+  "mtime": 1785597229.7636025
  }
 }

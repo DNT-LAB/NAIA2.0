@@ -17,8 +17,9 @@ import {
   CHAR_SLOTS, PALETTES, SLIDERS, THUMB_TAGS, THUMB_FRAMING, PALETTE_SHAPE, AXIS_RULES, TAG_DESC,
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
-  CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS, ADULT_SECTIONS, GLOSS_TAGS,
-} from './interactiveAxes.mjs?v=20260730-ax113';
+  CLOTH_COMBO, CLOTH_COMBO_REV, COLOR_SWATCH, AXIS_COLOR_TAGS, ADULT_SECTIONS, GLOSS_TAGS,
+  VIEW_SECTIONS, META_SECTIONS, VIEW_GLOBAL_TAGS, GAZE_TARGETS,
+} from './interactiveAxes.mjs?v=20260801-ax123';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -31,11 +32,19 @@ const COMPOSITION_PRIMARY = ['image_composition', 'composition', 'framing', 'foc
 // 신설 `pose_leg_m`·`pose_body_touch_m` 36개가 빠져 찍어도 안 보이는 상태였다.
 
 const SCENE_SLOTS = [
-  {id: 'composition', name: '구도', icon: '\u{1F5BC}', axis: 'meta', subgroupInclude: COMPOSITION_PRIMARY},
+  // 전에는 `subgroupInclude` 만 준 탐색기(트리)였다 — 그림이 한 장도 없었기 때문이다.
+  // 2026-08-01 에 `view_*` 3축 80장을 만들어 그리드가 섰다. 트리는 그리드가 못 덮는
+  // 나머지를 위해 남긴다(구도 서브그룹 292개 중 그림은 freq>=300 인 80개뿐이다).
+  {id: 'composition', name: '구도', icon: '\u{1F5BC}', axis: 'meta',
+   sections: VIEW_SECTIONS, subgroupInclude: COMPOSITION_PRIMARY},
   // 썸네일이 없는 meta 태그만 담는 트리. `effects`/`symbols`/`colors` 는 fx 축
   // 483장이 이미 덮으므로(실측 482/483 중복) 빼야 '효과' 슬롯이 둘로 보이지 않는다.
   // scan/year_tags/quality/art_style 과 1개짜리 오분류는 그림에 영향이 없다.
+  // 여기도 트리뿐이었다. 사용자가 "의외로 다 구분이 가능하다"고 지적해(2026-08-01)
+  // `meta_*` 4축 154장을 만들었다. 트리는 나머지(고유명·계정·화풍 등 그림으로 구분이
+  // 안 되는 것들)를 위해 남긴다.
   {id: 'composition_fx', name: '기타·텍스트', icon: '\u{1F524}', axis: 'meta',
+   sections: META_SECTIONS,
    subgroupExclude: [...COMPOSITION_PRIMARY, 'effects', 'symbols', 'colors',
                      'scan', 'year_tags', 'quality', 'art_style',
                      'birds', 'cats', 'hands']},
@@ -147,7 +156,45 @@ function compChips(comp) {
 // 특징은 5개 슬롯으로 나뉜다. 각 슬롯은 팝업에서 여러 '축'(팔레트/슬라이더/썸네일/탐색)을
 // 모아 보여준다 — 팝업이 무거운 일을 하므로 좌측 슬롯 수를 늘리지 않는다.
 // 슬롯/축 정의는 interactiveAxes.mjs(와일드카드에서 생성)가 SSOT.
+// 캐릭터 태그(`hatsune miku`)가 들어가는 슬롯. **어느 축에도 속하지 않는다** —
+// 썸네일 축 태그 10,103개에 캐릭터는 0개라 자명한 자리가 없다. 그래서 맨 앞에 전용 슬롯을 둔다:
+//   · `buildCharPrompt` 가 CHAR_SUBS 순서대로 이어 붙이므로 **캐릭터 태그가 맨 앞에 온다.**
+//     NAI 캐릭터 프롬프트가 `girl, hatsune miku, ...` 이길 원하는 자리이고,
+//     캐릭터 뷰어의 `build_prompt` 도 같은 순서로 만든다.
+//   · 칩 표시·개수·요약·프리셋 회수가 다른 슬롯과 똑같이 공짜로 따라온다.
+//     캐릭터 헤더에 따로 두면 그 UI 를 전부 새로 만들어야 한다.
+// 입력은 다른 슬롯과 똑같다 — 인라인 입력창에 직접 치면 되고 자동완성이 캐릭터 태그를
+// 이미 안다. 이름을 아는 캐릭터는 그냥 타이핑하고, 찾아봐야 할 때만 줄 오른쪽
+// `[프리셋 선택]` 으로 검색 팝업을 연다.
+// 다만 **옆 팝업(축 그리드/분류 탐색)은 띄우지 않는다**(`noPanel`) — 캐릭터는 축이 없어
+// 그릴 그리드가 없고, 분류 탐색의 SLOT_GROUPS(core/interactive_browse_index.py)에도
+// `character` 가 없어 빈 트리만 뜬다. 빈 상자를 띄우느니 입력창만 연다.
+const CHAR_TAG_SLOT = '캐릭터';
+
+// ALT — `alternate *` 계열. **그리드에 넣지 않는다.** 이것들은 "원작/공식과 다르다"는
+// 관계형 태그라 그림 한 장으로는 서로 구분이 안 된다(`alternate costume` 을 찍으면
+// 그냥 아무 의상이 나오고 `alternate hairstyle` 칸과 똑같아 보인다). 그런데 **프롬프트
+// 로서는 값이 크다** — 캐릭터 태그와 같이 쓰면 NAI 가 "정규 설정에서 벗어나라"는 신호로
+// 받는다(`alternate costume` 244,073건). 그래서 그림 대신 체크 목록으로 준다.
+//
+// 캐릭터 태그 바로 뒤에 들어간다. 어느 캐릭터의 변주인지가 붙어 있어야 의미가 산다.
+const ALT_OPTIONS = [
+  {tag: 'alternate costume', label: '비공식 의상', n: 244073},
+  {tag: 'alternate hairstyle', label: '비공식 헤어스타일', n: 60753},
+  {tag: 'alternate breast size', label: '비공식 가슴크기', n: 26907},
+  {tag: 'alternate hair length', label: '비공식 머리길이', n: 12425},
+  {tag: 'alternate hair color', label: '비공식 머리색', n: 7531},
+  {tag: 'alternate eye color', label: '비공식 눈색', n: 8848},
+  {tag: 'official alternate hairstyle', label: '공식 다른버전 머리스타일', n: 19513},
+  {tag: 'official alternate hair length', label: '공식 다른버전 머리길이', n: 6167},
+  {tag: 'aged down', label: '어리게', n: 31928},
+  {tag: 'aged up', label: '성숙하게', n: 13576},
+];
+const ALT_LABEL = new Map(ALT_OPTIONS.map(o => [o.tag, o.label]));
+const GAZE_LABEL = new Map(GAZE_TARGETS.map(o => [o.tag, o.label]));
+
 const CHAR_SUBS = [
+  {key: CHAR_TAG_SLOT, icon: '\u{1F3AD}', axis: 'character', noPanel: true},
   ...CHAR_SLOTS,
   // 의상/소품·장식도 CHAR_SLOTS(생성 파일)로 옮겼다 — 썸네일 축 22개 + 탐색기를
   // 함께 가지므로 sections 가 필요하다. 여기에 리터럴로 남기면 슬롯이 중복된다.
@@ -160,6 +207,18 @@ const CHAR_SUBS = [
   // 3,204개 중 1,955개가 이 썸네일 축들과 정확히 같았다 — 만들어 둔 그림을
   // 놔두고 같은 태그를 텍스트 트리로 다시 보여주고 있었다.
   {key: '사물', icon: '⚙', axis: 'object', sections: OBJ_SECTIONS},
+  // 이 캐릭터가 어떻게 잡히나 — 프레이밍·시점·시선. 씬 '구도' 슬롯과 **같은 축을
+  // 쓰지만 들어가는 자리가 다르다**(캐릭터 프롬프트 vs 베이스 프롬프트). '사물'이
+  // 씬과 캐릭터 양쪽에 있는 것과 같은 구조다.
+  //
+  // 여러 명일 때 의미가 산다 — `from behind` 를 char_caption 에 넣으면 그 캐릭터만
+  // 뒤돌아본다. 1명이면 씬 슬롯과 결과가 같다.
+  // Dev0714 는 시선만 캐릭터에 뒀는데(각도·샷은 씬 전용), 여기서는 축을 그대로
+  // 공유하고 어디에 넣을지는 사용자가 고르게 한다.
+  {key: '구도', icon: '\u{1F5BC}', axis: 'meta', sections: VIEW_SECTIONS,
+   // 이미지 전체에만 걸리는 태그는 뺀다(`isometric`·`female pov`·`multiple views` …).
+   // 씬 슬롯에는 그대로 있으니 못 쓰게 되는 것은 없다.
+   excludeTags: VIEW_GLOBAL_TAGS},
 ];
 
 /** 팔레트/슬라이더는 축 안에서 하나만 유효하다 — 그 축의 모든 태그(소문자). */
@@ -197,7 +256,12 @@ export function createInteractivePanel({
   onPromptChange = () => {},
   onActiveChange = () => {},
   queryCorpus = null,          // async ({rating, person, include, exclude, search, limit}) => payload
-  corpusStatus = null,         // async () => payload
+  // (`corpusStatus` 는 더 이상 쓰지 않는다. 이벤트 코퍼스가 없을 때 빨간 토스트를
+  //  띄우는 것이 유일한 용도였는데, 그 상태를 읽는 코드가 하나도 없었고 토스트는
+  //  Interactive 를 켤 때마다 축 탭을 가렸다. 동반 추천의 출처도 이제 코퍼스가
+  //  아니라 게시물 원본이라 경고 자체가 사실과 맞지 않는다. app.js 가 계속 넘기므로
+  //  인자는 남겨 둔다 — 나중에 진짜 상태 표시가 필요해지면 여기서 받으면 된다.)
+  corpusStatus = null,         // async () => payload  (미사용)
   autocomplete = null,         // createInteractiveAutocomplete() 인스턴스 (미사용 — 팝업 검색은 자동완성 없음)
   browse = null,               // createInteractiveBrowse() 인스턴스 (선택)
   bindTagAssist = null,        // (textarea, options) => void : 범용 자동완성을 슬롯 입력창에 바인딩
@@ -211,7 +275,6 @@ export function createInteractivePanel({
 
   let active = false;
   let openId = null;
-  let corpusState = null;      // 최근 status 응답
   let queryToken = 0;
   let charSeq = 0;             // 캐릭터 고유 id 카운터(삭제해도 재사용 안 함 → id 충돌/stale panelContext 방지)
 
@@ -232,6 +295,14 @@ export function createInteractivePanel({
       state: 'active',   // 'active' | 'disabled'
       gender: 'female',  // 'female' | 'male'
       pos: POS_DEFAULT,  // 캔버스 위치(NAI 전용). 'A1'~'E5', 기본 중앙 C3
+      // 이 슬롯에 적용된 캐릭터 프리셋과 **그때 이 프리셋이 넣은 태그**.
+      // 다른 캐릭터로 갈아탈 때 이것만 정확히 회수한다(사용자가 손으로 넣은 것은 남긴다).
+      // 캐릭터 슬롯마다 독립이라 C1/C2 가 서로 다른 캐릭터를 가질 수 있다.
+      preset: null,      // null | {work, name, tags: {슬롯키: [태그...]}}
+      // ALT — 켠 `alternate *` 태그. 캐릭터마다 독립이다(C1 만 aged down 이 가능해야 한다).
+      alt: [],
+      // 대상 시선. 썸네일이 없어 그리드가 아니라 체크 목록으로 고른다.
+      gaze: [],
       // 하위 슬롯 목록에서 파생 — CHAR_SUBS 를 늘릴 때 여기를 같이 고칠 필요가 없다.
       // 슬라이더 기본값(머리 길이=medium)은 미리 채워, 초보자가 비워둬도 합리적 결과가 나온다.
       fields: Object.fromEntries(CHAR_SUBS.map(s => [s.key, defaultFieldsFor(s.key)])),
@@ -266,8 +337,16 @@ export function createInteractivePanel({
 
   /** 캐릭터 프롬프트. NAI 모드면 특징 앞에 girl/boy 주입(이미 명시적 girl/boy 있으면 생략). */
   function buildCharPrompt(c) {
-    const base = CHAR_SUBS.map(s => (c.fields[s.key] || []).join(', '))
-      .filter(Boolean).join(', ');
+    // ALT 는 캐릭터 태그 **바로 뒤**에 넣는다. 맨 뒤로 밀면 어느 캐릭터의 변주인지
+    // 흐려지고, NAI 는 앞쪽 토큰을 더 강하게 받는다.
+    const alt = (c.alt || []).filter(t => ALT_LABEL.has(t));
+    // 대상 시선은 '구도' 슬롯 뒤에 붙인다 — 같은 종류(어떻게 보이나)라 붙어 있어야 한다.
+    const gaze = (c.gaze || []).filter(t => GAZE_LABEL.has(t));
+    const base = CHAR_SUBS.flatMap(s => {
+      const own = (c.fields[s.key] || []).join(', ');
+      const add = s.key === CHAR_TAG_SLOT ? alt : (s.key === '구도' ? gaze : []);
+      return [own, ...add];
+    }).filter(Boolean).join(', ');
     if (String(getMode() || '').toUpperCase() !== 'NAI') return base;
     const tokens = CHAR_SUBS.flatMap(s => c.fields[s.key] || [])
       .map(t => String(t).trim().toLowerCase());
@@ -292,7 +371,16 @@ export function createInteractivePanel({
       if (!prompt) continue;
       // 캐릭터별 네거티브 UI 는 아직 없어 uc 는 빈 문자열. center 는 NAI V4 전용.
       rows.push({prompt, uc: '', center: posCenters(c.pos)});
+      // 1명일 때 center 를 어떻게 둘지는 아래 루프 뒤에서 정한다(UI 와 같은 조건이어야 한다).
       if (rows.length >= MAX_NAI_CHARACTERS) break;
+    }
+    // **1명이면 좌표를 보내지 않는다.** 캔버스 위치는 여러 명을 갈라 놓기 위한 것이라
+    // 혼자일 때는 의미가 없고, 중앙(0.5, 0.5)을 명시하면 NAI 가 그 점에 인물을 맞추려
+    // 들어 구도가 오히려 굳는다. 보내지 않으면 모델이 알아서 잡는다(AI Choice).
+    // UI 에서도 같은 조건으로 Position 버튼을 감춘다 — 두 조건이 갈라지면 안 보이는
+    // 설정이 프롬프트에는 실리는 상태가 된다.
+    if (rows.length <= 1) {
+      for (const row of rows) delete row.center;
     }
     return rows;
   }
@@ -383,6 +471,29 @@ export function createInteractivePanel({
     </button>`;
   }
 
+  /** `[ALT n]` 버튼. 0개면 숫자 없이 `ALT` 만. 툴팁에 켠 것을 전부 적는다 —
+   *  버튼이 좁아 이름을 못 보여주므로 호버가 유일한 확인 수단이다. */
+  function altButtonHtml(c) {
+    const on = (c.alt || []).filter(t => ALT_LABEL.has(t));
+    const tip = on.length
+      ? '적용 중: ' + on.map(t => `${ALT_LABEL.get(t)}(${t})`).join(' · ')
+      : '원작과 다른 버전 — 의상·머리·나이 등을 공식 설정에서 벗어나게 합니다';
+    return `<button type="button" class="ia-char-alt${on.length ? ' is-on' : ''}"
+      data-charalt data-cid="${c.id}" title="${escHtml(tip)}"
+      >ALT${on.length ? ` <b>${on.length}</b>` : ''}</button>`;
+  }
+
+  /** `[시선 n]` 버튼. ALT 와 같은 규칙 — 버튼이 좁아 이름은 툴팁이 맡는다. */
+  function gazeButtonHtml(c) {
+    const on = (c.gaze || []).filter(t => GAZE_LABEL.has(t));
+    const tip = on.length
+      ? '적용 중: ' + on.map(t => `${GAZE_LABEL.get(t)}(${t})`).join(' · ')
+      : '누구를 보는가 — 썸네일로 구분되지 않아 목록에서 고릅니다';
+    return `<button type="button" class="ia-char-gaze${on.length ? ' is-on' : ''}"
+      data-chargaze data-cid="${c.id}" title="${escHtml(tip)}"
+      >시선${on.length ? ` <b>${on.length}</b>` : ''}</button>`;
+  }
+
   function charBlockHtml() {
     // Position(캔버스 좌표)은 NAI V4 char_captions 전용이라 NAI 모드에서만 노출한다.
     const isNai = String(getMode() || '').toUpperCase() === 'NAI';
@@ -391,13 +502,33 @@ export function createInteractivePanel({
       const subs = CHAR_SUBS.map(s => {
         const tags = c.fields[s.key] || [];
         const editing = isEditing('char', c.id, s.key);
+        // 캐릭터 슬롯의 오른쪽 끝(다른 슬롯의 개수 배지 자리)에 프리셋 버튼이 들어간다.
+        // 전폭 바를 따로 두면 캐릭터 카드에 줄이 하나 더 생기고, 그 버튼이 어느 슬롯을
+        // 채우는지도 드러나지 않는다. 줄 높이는 그대로다 — 그리드 3열의 `auto` 칸이다.
+        // '구도' 슬롯은 개수 배지 자리에 시선 버튼을 함께 둔다 — 같은 질문이라
+        // 한 줄에서 끝나야 한다(다른 줄을 만들면 캐릭터 카드가 또 길어진다).
+        const meta = s.key === '구도'
+          ? gazeButtonHtml(c) + `<span class="ia-block-count">${tags.length || ''}</span>`
+          : s.key === CHAR_TAG_SLOT
+          ? `<button type="button" class="ia-char-preset${c.preset ? ' has-preset' : ''}"
+              data-charpreset data-cid="${c.id}"
+              title="${c.preset
+                ? escHtml(`${c.preset.name} · ${c.preset.work} — 눌러서 다른 캐릭터로 바꿉니다`)
+                : '캐릭터 프리셋 검색 — 이름·작품·태그로 찾아 대표 태그까지 한 번에 채웁니다'}"
+              >${c.preset ? escHtml(c.preset.name) : '프리셋 선택'}</button>`
+            + altButtonHtml(c)
+            + (c.preset
+              ? `<button type="button" class="ia-char-preset-x" data-charpresetclear data-cid="${c.id}"
+                  aria-label="프리셋 되돌리기" title="이 프리셋이 넣은 태그만 되돌립니다">&times;</button>`
+              : '')
+          : `<span class="ia-block-count">${tags.length || ''}</span>`;
         return `<div class="ia-sub-block${editing ? ' is-editing' : ''}${tags.length ? '' : ' is-empty'}" data-cid="${c.id}" data-sub="${s.key}">
           <div class="ia-block-label">
             <span class="ia-block-title"><span class="ia-block-icon">${s.icon}</span><span class="ia-block-name">${escHtml(subLabel(s))}</span></span>
             <span class="ia-block-axis">${s.axis}</span>
           </div>
           ${slotBody(editing, tags)}
-          <div class="ia-block-meta"><span class="ia-block-count">${tags.length || ''}</span></div>
+          <div class="ia-block-meta">${meta}</div>
         </div>`;
       }).join('');
       const enabled = c.state === 'active';
@@ -413,17 +544,13 @@ export function createInteractivePanel({
             <button type="button" class="ia-genbtn${g === 'male' ? ' on' : ''}" data-gender="male" data-cid="${cid}">Male</button>
             <button type="button" class="ia-genbtn${g === 'female' ? ' on' : ''}" data-gender="female" data-cid="${cid}">Female</button>
           </div>
-          ${isNai ? `<button type="button" class="ia-char-pos" data-charpos data-cid="${cid}" title="캔버스 위치 (NAI V4 centers)">Position ${escHtml(c.pos || POS_DEFAULT)}</button>` : ''}
+          ${isNai && state.chars.length > 1 ? `<button type="button" class="ia-char-pos" data-charpos data-cid="${cid}" title="캔버스 위치 (NAI V4 centers)">Position ${escHtml(c.pos || POS_DEFAULT)}</button>` : ''}
           ${canDelete ? `<button type="button" class="ia-char-del" data-chardel data-cid="${cid}" aria-label="캐릭터 삭제" title="이 캐릭터 슬롯 삭제">&times;</button>` : ''}
           <span class="ia-char-spring"></span>
           <button type="button" class="ia-char-state ${c.state}" data-charenable data-cid="${cid}" aria-pressed="${enabled}" title="${enabled ? '비활성화 (생성에서 제외)' : '활성화'}">${enabled ? 'ACTIVE' : 'OFF'}</button>
           <span class="ia-char-sum">${escHtml(summary)}</span>
         </div>
         <div class="ia-char-body">
-          <div class="ia-char-preset-row">
-            <button type="button" class="ia-char-preset" data-charpreset data-cid="${cid}"
-              title="캐릭터 프리셋 (준비 중) — 머리/눈/체형을 한 번에 채우는 프리셋">캐릭터 프리셋</button>
-          </div>
           ${subs}
         </div>
       </div>`;
@@ -588,7 +715,25 @@ export function createInteractivePanel({
     blocksMount.querySelectorAll('[data-charpreset]').forEach(el => {
       el.addEventListener('click', event => {
         event.stopPropagation();
-        showToast('캐릭터 프리셋은 준비 중입니다.');
+        openPresetPanel(el.dataset.cid);
+      });
+    });
+    blocksMount.querySelectorAll('[data-chargaze]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        openGazePicker(el, el.dataset.cid);
+      });
+    });
+    blocksMount.querySelectorAll('[data-charalt]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        openAltPicker(el, el.dataset.cid);
+      });
+    });
+    blocksMount.querySelectorAll('[data-charpresetclear]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        clearCharPreset(el.dataset.cid);
       });
     });
     blocksMount.querySelectorAll('[data-charpos]').forEach(el => {
@@ -702,6 +847,193 @@ export function createInteractivePanel({
       </div>`;
   }
 
+  // ── ALT 선택 팝업 ───────────────────────────────────────────────────────
+  let altPopup = null;
+  let altPopupCid = null;
+
+  function ensureAltPopup() {
+    if (altPopup) return altPopup;
+    altPopup = document.createElement('div');
+    altPopup.className = 'ia-alt-popup';
+    altPopup.hidden = true;
+    document.body.appendChild(altPopup);
+    altPopup.addEventListener('mousedown', event => event.preventDefault());
+    altPopup.addEventListener('click', event => {
+      const row = event.target.closest('[data-alt]');
+      if (!row) return;
+      event.stopPropagation();
+      toggleAlt(altPopupCid, row.dataset.alt);
+    });
+    return altPopup;
+  }
+
+  function altPopupHtml(c) {
+    const on = new Set(c.alt || []);
+    const rows = ALT_OPTIONS.map(o => `<button type="button"
+      class="ia-alt-row${on.has(o.tag) ? ' is-on' : ''}" data-alt="${escHtml(o.tag)}">
+      <span class="ia-alt-box"></span>
+      <span class="ia-alt-label">${escHtml(o.label)}</span>
+      <span class="ia-alt-tag">${escHtml(o.tag)}</span>
+      <span class="ia-alt-n">${o.n.toLocaleString()}</span></button>`).join('');
+    return '<div class="ia-alt-head">원작과 다른 버전 (ALT)</div>' +
+      `<div class="ia-alt-list">${rows}</div>` +
+      '<div class="ia-alt-foot">캐릭터 태그 바로 뒤에 들어갑니다. ' +
+      '<b>비공식</b>=팬 창작, <b>공식</b>=원작에 실제로 나온 다른 모습.</div>';
+  }
+
+  function openAltPicker(anchor, cid) {
+    const character = state.chars.find(x => x.id === cid);
+    if (!character) return;
+    if (altPopupCid === cid && altPopup && !altPopup.hidden) { closeAltPicker(); return; }
+    const popup = ensureAltPopup();
+    altPopupCid = cid;
+    popup.innerHTML = altPopupHtml(character);
+    popup.hidden = false;
+    const rect = anchor.getBoundingClientRect();
+    const pr = popup.getBoundingClientRect();
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - pr.width - 8));
+    let top = rect.bottom + 6;
+    if (top + pr.height > window.innerHeight - 8) top = Math.max(8, rect.top - pr.height - 6);
+    popup.style.left = `${Math.round(left)}px`;
+    popup.style.top = `${Math.round(top)}px`;
+    document.addEventListener('mousedown', onAltOutside, true);
+    document.addEventListener('keydown', onAltKeydown, true);
+  }
+
+  function closeAltPicker() {
+    altPopupCid = null;
+    if (altPopup) { altPopup.hidden = true; altPopup.innerHTML = ''; }
+    document.removeEventListener('mousedown', onAltOutside, true);
+    document.removeEventListener('keydown', onAltKeydown, true);
+  }
+
+  function onAltOutside(event) {
+    if (altPopup && altPopup.contains(event.target)) return;
+    if (event.target.closest?.('[data-charalt]')) return;   // 토글은 버튼 핸들러가 처리
+    closeAltPicker();
+  }
+
+  function onAltKeydown(event) {
+    if (event.key === 'Escape') { event.preventDefault(); closeAltPicker(); }
+  }
+
+  /** ALT 토글 — 팝업은 열어 둔 채 버튼 라벨만 제자리에서 고친다.
+   *  전체 렌더를 돌리면 편집 중이던 슬롯의 입력이 날아간다(위치 선택과 같은 이유). */
+  function toggleAlt(cid, tag) {
+    const c = state.chars.find(x => x.id === cid);
+    if (!c || !ALT_LABEL.has(tag)) return;
+    const cur = new Set(c.alt || []);
+    if (cur.has(tag)) cur.delete(tag); else cur.add(tag);
+    // 목록 순서를 유지한다 — 프롬프트가 클릭 순서에 따라 달라지면 재현이 안 된다.
+    c.alt = ALT_OPTIONS.map(o => o.tag).filter(t => cur.has(t));
+    const row = altPopup?.querySelector(`[data-alt="${CSS.escape(tag)}"]`);
+    if (row) row.classList.toggle('is-on', cur.has(tag));
+    const btn = blocksMount?.querySelector(`[data-charalt][data-cid="${CSS.escape(cid)}"]`);
+    if (btn) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = altButtonHtml(c);
+      const fresh = tmp.firstElementChild;
+      btn.className = fresh.className;
+      btn.title = fresh.title;
+      btn.innerHTML = fresh.innerHTML;
+    }
+    emitChange();
+  }
+
+  // ── 시선 선택 팝업 ─────────────────────────────────────────────────────
+  // ALT 팝업과 같은 구조다. 합치지 않은 이유: 목록 출처가 다르고(ALT 는 손으로 고른
+  // 10개, 시선은 빌더 산출), 버튼이 붙는 슬롯도 다르다.
+  let gazePopup = null;
+  let gazePopupCid = null;
+
+  function ensureGazePopup() {
+    if (gazePopup) return gazePopup;
+    gazePopup = document.createElement('div');
+    gazePopup.className = 'ia-alt-popup';
+    gazePopup.hidden = true;
+    document.body.appendChild(gazePopup);
+    gazePopup.addEventListener('mousedown', event => event.preventDefault());
+    gazePopup.addEventListener('click', event => {
+      const row = event.target.closest('[data-gz]');
+      if (!row) return;
+      event.stopPropagation();
+      toggleGaze(gazePopupCid, row.dataset.gz);
+    });
+    return gazePopup;
+  }
+
+  function gazePopupHtml(c) {
+    const on = new Set(c.gaze || []);
+    const rows = GAZE_TARGETS.map(o => `<button type="button"
+      class="ia-alt-row${on.has(o.tag) ? ' is-on' : ''}" data-gz="${escHtml(o.tag)}">
+      <span class="ia-alt-box"></span>
+      <span class="ia-alt-label">${escHtml(o.label)}</span>
+      <span class="ia-alt-tag">${escHtml(o.tag)}</span>
+      <span class="ia-alt-n">${o.n.toLocaleString()}</span></button>`).join('');
+    return '<div class="ia-alt-head">시선 — 누구를 보는가</div>' +
+      `<div class="ia-alt-list">${rows}</div>` +
+      '<div class="ia-alt-foot">캐릭터 프롬프트에 들어갑니다. 그림으로 구분되지 않아 ' +
+      '그리드 대신 목록입니다 — <b>상대가 화면에 있어야</b> 제대로 나옵니다.</div>';
+  }
+
+  function openGazePicker(anchor, cid) {
+    const character = state.chars.find(x => x.id === cid);
+    if (!character) return;
+    if (gazePopupCid === cid && gazePopup && !gazePopup.hidden) { closeGazePicker(); return; }
+    const popup = ensureGazePopup();
+    gazePopupCid = cid;
+    popup.innerHTML = gazePopupHtml(character);
+    popup.hidden = false;
+    const rect = anchor.getBoundingClientRect();
+    const pr = popup.getBoundingClientRect();
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - pr.width - 8));
+    let top = rect.bottom + 6;
+    if (top + pr.height > window.innerHeight - 8) top = Math.max(8, rect.top - pr.height - 6);
+    popup.style.left = `${Math.round(left)}px`;
+    popup.style.top = `${Math.round(top)}px`;
+    document.addEventListener('mousedown', onGazeOutside, true);
+    document.addEventListener('keydown', onGazeKeydown, true);
+  }
+
+  function closeGazePicker() {
+    gazePopupCid = null;
+    if (gazePopup) { gazePopup.hidden = true; gazePopup.innerHTML = ''; }
+    document.removeEventListener('mousedown', onGazeOutside, true);
+    document.removeEventListener('keydown', onGazeKeydown, true);
+  }
+
+  function onGazeOutside(event) {
+    if (gazePopup && gazePopup.contains(event.target)) return;
+    if (event.target.closest?.('[data-chargaze]')) return;
+    closeGazePicker();
+  }
+
+  function onGazeKeydown(event) {
+    if (event.key === 'Escape') { event.preventDefault(); closeGazePicker(); }
+  }
+
+  /** 시선 토글 — 팝업은 열어 둔 채 버튼 라벨만 제자리에서 고친다(ALT 와 같은 이유). */
+  function toggleGaze(cid, tag) {
+    const c = state.chars.find(x => x.id === cid);
+    if (!c || !GAZE_LABEL.has(tag)) return;
+    const cur = new Set(c.gaze || []);
+    if (cur.has(tag)) cur.delete(tag); else cur.add(tag);
+    // 목록 순서를 유지한다 — 클릭 순서로 프롬프트가 달라지면 재현이 안 된다.
+    c.gaze = GAZE_TARGETS.map(o => o.tag).filter(t => cur.has(t));
+    const row = gazePopup?.querySelector(`[data-gz="${CSS.escape(tag)}"]`);
+    if (row) row.classList.toggle('is-on', cur.has(tag));
+    const btn = blocksMount?.querySelector(`[data-chargaze][data-cid="${CSS.escape(cid)}"]`);
+    if (btn) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = gazeButtonHtml(c);
+      const fresh = tmp.firstElementChild;
+      btn.className = fresh.className;
+      btn.title = fresh.title;
+      btn.innerHTML = fresh.innerHTML;
+    }
+    emitChange();
+  }
+
   function openPositionPicker(anchor, cid) {
     const character = state.chars.find(x => x.id === cid);
     if (!character) return;
@@ -761,6 +1093,7 @@ export function createInteractivePanel({
     }
     const idx = state.chars.findIndex(c => c.id === cid);
     if (idx < 0) return;
+    if (presetCid === cid) closePresetPanel();   // 사라진 슬롯을 겨냥한 팝업은 닫는다
     state.chars.splice(idx, 1);
     // 편집 팝업을 닫고(참조 슬롯이 사라졌을 수 있음) 목록을 다시 그린다(라벨 C1..Cn 재계산).
     closePanel();
@@ -790,6 +1123,799 @@ export function createInteractivePanel({
     const badge = blocksMount.querySelector('.ia-cblock-head .ia-block-count');
     if (badge) badge.textContent = `${activeCount} 활성`;
     emitChange();
+  }
+
+  // ---------------------------------------------------------------- 캐릭터 프리셋
+  //
+  // 캐릭터 뷰어(작품 1,644 / 캐릭터 9,738)의 자산을 그대로 재사용해 슬롯을 한 번에 채운다.
+  //
+  //   검색(이름)  : /api/character-viewer/list?query=miku
+  //   검색(작품)  : /api/character-viewer/groups?query=genshin -> list?group=<key>
+  //   검색(태그)  : /api/character-viewer/list?query=*blue hair  (`*` = 태그 정확 일치, 쉼표=AND)
+  //   슬롯 배정   : /api/character-preset?group=&character=
+  //   썸네일      : 목록 응답이 주는 thumbnail_url 그대로(뷰어 탭과 같은 파일·같은 캐시)
+  //
+  // **슬롯 배정을 런타임에 계산하지 않는다.** tools/build_character_presets.mjs 가
+  // interactiveAxes.mjs 의 CHAR_SLOTS + THUMB_TAGS/PALETTES/SLIDERS 를 뒤집어
+  // `data/character_presets.json` 에 미리 계산해 뒀고(커버리지 98.8%), 백엔드가 거기서
+  // 한 건씩 꺼내 준다. 사전이 3.9MB 라 프론트로 통째로 내리지 않는다 —
+  // 이유는 core/character_viewer_service.py `character_presets()` 주석 참조.
+  //
+  // 목록은 **1행 2열 + 무한 스크롤**이다. 9,738명을 한 번에 그리면 무겁다.
+  // 썸네일이 있는 캐릭터는 40명(0.4%)뿐이라 그림 없는 칸은 이니셜 타일로 뜬다.
+  // 작품은 1,644개 중 874개(53%)가 1명짜리라 목록으로 나열하지 않는다 — 검색어에 걸린
+  // 작품만 칩으로 최대 8개 보이고, 누르면 그 작품으로 좁힌다.
+  //
+  // 줄을 누르면 **누른 자리에 앵커된 작은 카드**가 뜬다. 태그 사전 호버 카드와 같은
+  // 마크업(`tag-tooltip-*` / `char-*` 클래스)을 써서 생김새가 저절로 같다.
+
+  // ---- 배타 축(팔레트·슬라이더) ----
+  // **예전의 전체 역인덱스가 아니다.** 태그 5,850개를 훑어 슬롯을 정하던 코드는 사전 파일로
+  // 옮겨 갔다. 여기 남은 것은 팔레트 3개 + 슬라이더 2개(태그 50여 개)뿐이고 쓰임새도 둘이다:
+  //   1) 사전이 다루지 않는 `breast_size_top` 한 개를 제자리에 넣는 것
+  //   2) 프리셋을 넣은 뒤 **사용자가 직접 적어 둔** 같은 축 태그와 부딪히는지 알리는 것
+  let exclusiveTagAxis = null;
+
+  function exclusiveAxisOf(tag) {
+    if (!exclusiveTagAxis) {
+      exclusiveTagAxis = new Map();
+      for (const [ref, rows] of Object.entries(PALETTES || {})) {
+        for (const d of (rows || [])) exclusiveTagAxis.set(String(d.tag).toLowerCase(), ref);
+      }
+      for (const [ref, def] of Object.entries(SLIDERS || {})) {
+        for (const t of ((def || {}).steps || [])) exclusiveTagAxis.set(String(t).toLowerCase(), ref);
+      }
+    }
+    return exclusiveTagAxis.get(String(tag || '').trim().toLowerCase()) || '';
+  }
+
+  /** 축 ref -> 그 축이 붙어 있는 슬롯 이름(CHAR_SUBS 에서 파생). */
+  function slotOfAxis(axis) {
+    if (!axis) return '';
+    for (const slot of CHAR_SUBS) {
+      for (const sec of (slot.sections || [])) {
+        if (sec.ref === axis || sec.mainPalette === axis || sec.extraPalette === axis) return slot.key;
+      }
+    }
+    return '';
+  }
+
+  // ---- 상태 ----
+  const PRESET_PAGE = 40;            // 2열 x 20행. 스크롤이 끝에 닿으면 이어 붙인다.
+  const PRESET_THIN_ROWS = 50;       // 근거 행수 하위 25%(실측 p25=49행)
+
+  let presetPanel = null;      // 지연 생성 후 재사용 (.ia-panel 구조를 그대로 쓴다)
+  let presetCid = null;        // 어느 캐릭터 슬롯에 넣을지
+  let presetMode = 'name';     // 'name' | 'tag'
+  let presetQuery = '';
+  let presetGroup = '';        // 작품으로 좁혔을 때의 그룹 키
+  let presetSentGroup = '';    // 실제로 서버에 보낸 값(이어받기가 같은 조건을 유지한다)
+  let presetSentQuery = '';
+  let presetResults = [];
+  let presetGroups = [];
+  let presetTotal = 0;
+  let presetPage = 0;
+  let presetPages = 1;
+  let presetLoose = false;     // 태그 검색이 부분 일치로 물러섰나
+  let presetBusy = false;
+  let presetMore = false;      // 이어붙이는 중
+  let presetError = '';
+  let presetSeq = 0;
+  let presetTimer = null;
+  let presetObserver = null;   // 무한 스크롤 sentinel 관찰자
+
+  // 앵커 카드
+  let cardEl = null;
+  let cardData = null;         // /api/character-preset 응답
+  let cardRows = [];           // [{key, tag, pct, cls, slot, axis, on, why}]
+  let cardPick = new Set();
+  let cardAnchor = null;       // 마지막 앵커 사각형(칩 토글 후 자리 유지)
+  let cardSeq = 0;
+
+  function presetCharLabel() {
+    const i = state.chars.findIndex(c => c.id === presetCid);
+    return i >= 0 ? 'C' + (i + 1) : '';
+  }
+
+  function fmtCount(n) {
+    const v = Number(n || 0);
+    if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (v >= 1e3) return Math.round(v / 1e3) + 'k';
+    return String(v);
+  }
+
+  async function presetFetch(url) {
+    const res = await fetch(url, {cache: 'no-store'});
+    const data = await res.json();
+    if (!res.ok || (data && data.error)) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    return data;
+  }
+
+  function presetListUrl(group, query, page) {
+    return '/api/character-viewer/list'
+      + `?group=${encodeURIComponent(group || '__ALL__')}`
+      + `&query=${encodeURIComponent(query || '')}`
+      + `&page=${Number(page) || 0}&per_page=${PRESET_PAGE}&thumb_first=true`;
+  }
+
+  /** 새 검색(append=false) 또는 다음 쪽 이어받기(append=true). */
+  async function presetSearch({append = false} = {}) {
+    const seq = ++presetSeq;
+    if (append) {
+      if (presetMore || presetBusy || presetPage + 1 >= presetPages) return;
+      presetMore = true;
+    } else {
+      presetBusy = true;
+      presetError = '';
+      presetLoose = false;
+      presetPage = 0;
+      presetPages = 1;
+      renderPresetBody();
+    }
+    const q = presetQuery.trim();
+    try {
+      let data = null;
+      if (append) {
+        data = await presetFetch(presetListUrl(presetSentGroup, presetSentQuery, presetPage + 1));
+      } else if (presetGroup) {
+        presetSentGroup = presetGroup; presetSentQuery = q;
+        data = await presetFetch(presetListUrl(presetSentGroup, presetSentQuery, 0));
+        presetGroups = [];
+      } else if (presetMode === 'tag') {
+        presetSentGroup = '';
+        if (!q) {
+          presetResults = []; presetTotal = 0; presetGroups = [];
+        } else {
+          // `*` = 태그 정확 일치(쉼표로 여러 개면 AND). 조각을 치면 0건이 나오므로
+          // 그때만 부분 일치로 물러서고, 그 사실을 화면에 알린다.
+          presetSentQuery = '*' + q;
+          data = await presetFetch(presetListUrl('', presetSentQuery, 0));
+          if (seq !== presetSeq) return;
+          if (!(data.total || 0)) {
+            presetSentQuery = q;
+            data = await presetFetch(presetListUrl('', presetSentQuery, 0));
+            presetLoose = true;
+          }
+          presetGroups = [];
+        }
+      } else {
+        // 이름 검색은 캐릭터명(= aliases)을, 작품 검색은 그룹 키를 본다.
+        // ※ aliases 는 실측상 전원 이름과 동일하다(9,738명 중 이름과 다른 별칭 0건,
+        //    data/character_analysis.json · data/copyright_groups.json 양쪽 확인).
+        presetSentGroup = ''; presetSentQuery = q;
+        const [list, groups] = await Promise.all([
+          presetFetch(presetListUrl('', q, 0)),
+          q ? presetFetch('/api/character-viewer/groups?query=' + encodeURIComponent(q))
+            : Promise.resolve({items: []}),
+        ]);
+        if (seq !== presetSeq) return;
+        data = list;
+        presetGroups = (groups.items || [])
+          .filter(g => g && g.key && g.key !== '__ALL__').slice(0, 8);
+      }
+      if (seq !== presetSeq) return;
+      if (data) {
+        presetPages = Math.max(1, Number(data.total_pages || 1));
+        presetTotal = Number(data.total || 0);
+        if (append) {
+          presetPage = Number(data.page || presetPage + 1);
+          const items = data.items || [];
+          presetResults = presetResults.concat(items);
+          presetMore = false;
+          presetAppendRows(items);
+          return;
+        }
+        presetPage = Number(data.page || 0);
+        presetResults = data.items || [];
+      }
+    } catch (error) {
+      if (seq !== presetSeq) return;
+      presetMore = false;
+      if (append) { renderPresetBody(); return; }
+      presetResults = []; presetTotal = 0; presetGroups = [];
+      presetError = '캐릭터 목록을 불러오지 못했습니다. (' + (error?.message || 'error') + ')';
+    }
+    if (seq !== presetSeq) return;
+    presetBusy = false;
+    presetMore = false;
+    renderPresetBody();
+  }
+
+  function presetQueueSearch() {
+    clearTimeout(presetTimer);
+    presetTimer = setTimeout(() => { void presetSearch(); }, 180);
+  }
+
+  // ---- 목록 렌더 ----
+
+  /** 그림 없는 캐릭터(99.6%)의 폴백 타일 — 이름 이니셜. */
+  function presetInitial(name) {
+    // 인라인 onerror 문자열에 그대로 들어가므로 영숫자만 남긴다(따옴표 유입 차단).
+    const words = String(name || '').replace(/\(.*?\)/g, ' ')
+      .replace(/[^0-9A-Za-z\s]/g, ' ').trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return '#';
+    return (words[0][0] + (words[1] ? words[1][0] : '')).toUpperCase();
+  }
+
+  function presetThumbHtml(url, name) {
+    if (url) {
+      // 썸네일이 지워졌거나 인덱스가 어긋나면 조용히 이니셜 타일로 떨어진다.
+      return `<span class="ia-cp-thumb"><img src="${escHtml(url)}" alt="" loading="lazy" decoding="async"
+        onerror="this.parentNode.classList.add('is-none');this.parentNode.innerHTML='${escHtml(presetInitial(name))}';"></span>`;
+    }
+    return `<span class="ia-cp-thumb is-none">${escHtml(presetInitial(name))}</span>`;
+  }
+
+  function presetRowHtml(item) {
+    const count = Number(item.count || 0);
+    const thin = count < PRESET_THIN_ROWS;
+    return `<button type="button" class="ia-cp-row"
+      data-cp-g="${escHtml(item.group)}" data-cp-c="${escHtml(item.character)}"
+      data-cp-t="${escHtml(item.thumbnail_url || '')}"
+      title="${escHtml(item.character + ' · ' + item.group)}">
+      ${presetThumbHtml(item.thumbnail_url, item.character)}
+      <span class="ia-cp-info">
+        <span class="ia-cp-name">${escHtml(item.character)}</span>
+        <span class="ia-cp-meta">${escHtml(item.group)}
+          <span class="ia-cp-rows${thin ? ' is-thin' : ''}">${count.toLocaleString()}</span></span>
+      </span></button>`;
+  }
+
+  function presetSearchBodyHtml() {
+    const parts = [];
+    if (presetGroup) {
+      parts.push(`<div class="ia-cp-scope">작품 <b>${escHtml(presetGroup)}</b>
+        <button type="button" class="ia-cp-clear" data-cp-group="">전체에서 다시 찾기</button></div>`);
+    } else if (presetGroups.length) {
+      parts.push('<div class="ia-cp-groups">' + presetGroups.map(g =>
+        `<button type="button" class="ia-cp-group" data-cp-group="${escHtml(g.key)}"
+          title="이 작품의 캐릭터만 보기">${escHtml(g.name)}<span>${Number(g.count || 0)}</span></button>`
+      ).join('') + '</div>');
+    }
+    if (presetError) {
+      parts.push(`<div class="ia-axes-empty">${escHtml(presetError)}</div>`);
+      return parts.join('');
+    }
+    if (presetLoose) {
+      parts.push('<div class="ia-cp-note">정확히 그 태그를 가진 캐릭터가 없어 <b>부분 일치</b>로 찾았습니다.</div>');
+    }
+    if (presetBusy && !presetResults.length) {
+      parts.push('<div class="ia-axes-empty">불러오는 중…</div>');
+      return parts.join('');
+    }
+    if (!presetResults.length) {
+      parts.push('<div class="ia-axes-empty">' + (presetQuery.trim()
+        ? escHtml(presetQuery.trim()) + ' — 맞는 캐릭터가 없습니다.'
+        : (presetMode === 'tag'
+          ? '태그를 입력하세요. 예: <b>blue hair</b> · <b>twintails, blue eyes</b>'
+          : '캐릭터 이름이나 작품 이름을 입력하세요. 예: <b>miku</b> · <b>genshin</b>')) + '</div>');
+      return parts.join('');
+    }
+    parts.push(`<div class="ia-cp-count">${presetTotal.toLocaleString()}명</div>`);
+    parts.push('<div class="ia-cp-list">' + presetResults.map(presetRowHtml).join('') + '</div>');
+    // sentinel — 이것이 보이면 다음 쪽을 이어 붙인다(IntersectionObserver).
+    if (presetPage + 1 < presetPages) parts.push('<div class="ia-cp-sentinel" id="iaCpSentinel">더 불러오는 중…</div>');
+    return parts.join('');
+  }
+
+  function presetAppendRows(items) {
+    const list = presetPanel && presetPanel.querySelector('.ia-cp-list');
+    if (!list) { renderPresetBody(); return; }
+    list.insertAdjacentHTML('beforeend', items.map(presetRowHtml).join(''));
+    const sentinel = presetPanel.querySelector('#iaCpSentinel');
+    if (sentinel && presetPage + 1 >= presetPages) sentinel.remove();
+    presetBindSentinel();
+  }
+
+  function presetBindSentinel() {
+    if (presetObserver) { presetObserver.disconnect(); presetObserver = null; }
+    if (!presetPanel || typeof IntersectionObserver !== 'function') return;
+    const sentinel = presetPanel.querySelector('#iaCpSentinel');
+    if (!sentinel) return;
+    const root = presetPanel.querySelector('.ia-panel-body');
+    presetObserver = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) void presetSearch({append: true});
+    }, {root: root || null, rootMargin: '160px'});
+    presetObserver.observe(sentinel);
+  }
+
+  // ---- 앵커 카드 (태그 사전 호버 카드와 같은 마크업) ----
+
+  /** 응답 -> 칩 목록. 순서는 **태그 사전이 주는 원래 순서**(머리색·눈색 -> 특징 -> 가슴)다. */
+  function cardRowsFrom(data) {
+    const known = new Map();     // tag(소문자) -> {slot, axis, pct, on, why}
+    for (const [slot, list] of Object.entries(data.slots || {})) {
+      for (const it of (list || [])) {
+        known.set(String(it.tag).toLowerCase(), {slot, axis: it.axis, pct: it.pct, on: true, why: ''});
+      }
+    }
+    for (const it of (data.off || [])) {
+      const key = String(it.tag).toLowerCase();
+      if (known.has(key)) continue;
+      known.set(key, {slot: it.slot, axis: it.axis, pct: it.pct, on: false, why: it.why || ''});
+    }
+    const rows = [];
+    const seen = new Set();
+    const push = (tag, pct, cls) => {
+      const key = String(tag || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      const hit = known.get(key);
+      rows.push({
+        key, cls, tag: String(tag).trim(),
+        pct: hit && hit.pct != null ? Number(hit.pct) : (pct == null ? null : Number(pct)),
+        slot: hit ? hit.slot : '', axis: hit ? hit.axis : '',
+        on: !!(hit && hit.on), why: hit ? hit.why : '',
+      });
+    };
+    const details = (data.info && data.info.details) || {};
+    (details.personal_color || []).forEach(e => push(e.tag, e.pct, 'ct-pc'));
+    (details.characteristics || []).forEach(e => push(e.tag, e.pct, 'ct-ch'));
+    if (details.breast_size_top) push(details.breast_size_top, null, 'ct-body');
+    // 태그 사전에 캐릭터가 없으면(character_details 없음) 사전 쪽 목록으로 채운다.
+    for (const list of Object.values(data.slots || {})) {
+      for (const it of (list || [])) push(it.tag, it.pct, 'ct-ch');
+    }
+    for (const it of (data.off || [])) push(it.tag, it.pct, 'ct-ch');
+    // 가슴 크기는 사전이 다루지 않는다 — build_character_presets.mjs 가
+    // personal_color/characteristics 만 읽고 `breast_size` 분포는 건너뛴다.
+    // 슬라이더(배타) 축이라 배정 규칙이 이미 정해져 있다: 문턱 없이 최빈값 하나.
+    // 그 축이 아직 비어 있을 때만 채운다.
+    for (const row of rows) {
+      if (row.slot) continue;
+      const axis = exclusiveAxisOf(row.tag);
+      const slot = slotOfAxis(axis);
+      if (!axis || !slot) continue;
+      if (rows.some(o => o !== row && o.axis === axis && o.on)) continue;
+      row.slot = slot; row.axis = axis; row.on = true;
+    }
+    return rows;
+  }
+
+  function cardPctHtml(row) {
+    if (row.pct == null) return '';
+    const v = row.pct >= 10 ? Math.round(row.pct) : Number(row.pct).toFixed(1);
+    return ` <small>${v}%</small>`;
+  }
+
+  function cardHtml() {
+    const data = cardData;
+    const info = data.info || {};
+    const chips = cardRows.map(row => {
+      if (!row.slot) {
+        return `<span class="tag-tooltip-extra-tag char-tag is-none"
+          title="Interactive 슬롯에 자리가 없는 태그입니다 — 슬롯 입력창에 직접 쓸 수 있습니다.">${escHtml(row.tag)}${cardPctHtml(row)}</span>`;
+      }
+      const on = cardPick.has(row.key);
+      const why = row.why === 'below' ? ' · 과반 미만이라 꺼 뒀습니다'
+        : row.why === 'exclusive' ? ' · 같은 축에 더 흔한 값이 있습니다' : '';
+      return `<span class="tag-tooltip-extra-tag char-tag ${row.cls}${on ? ' on' : ''}"
+        role="button" tabindex="0" aria-pressed="${on}" data-cp-chip="${escHtml(row.key)}"
+        title="${escHtml(row.slot + ' 슬롯' + why)}">${escHtml(row.tag)}${cardPctHtml(row)}</span>`;
+    }).join('');
+    const picked = cardRows.filter(r => r.slot && cardPick.has(r.key));
+    const allTags = cardRows.map(r => r.tag).join(', ');
+    const rows = Number(data.rows || 0);
+    const charTags = characterTagsOf(data);
+    // 카드 왼쪽에 큰 썸네일을 붙인다(사용자 요청). 목록 칸은 80px 이라 얼굴만 겨우 보이고,
+    // 고를 때는 그림을 크게 봐야 한다. 소스는 목록과 같은 `thumbnail_url`(size=grid, 384px)
+    // 이라 이미 받아 둔 것을 그대로 쓴다 — 새 요청이 아니다.
+    // 썸네일이 없으면(사용자 것도 번들 폴백도 없을 때) 이니셜 타일로 떨어진다.
+    const thumbUrl = String(data.thumbnail_url || info.thumbnail_url || '');
+    const thumbHtml = '<div class="ia-cp-card-thumb">' +
+      (thumbUrl
+        ? `<img src="${escHtml(thumbUrl)}" alt="" decoding="async"
+             onerror="this.parentNode.classList.add('is-none');this.parentNode.innerHTML='${escHtml(presetInitial(data.name || ''))}';">`
+        : escHtml(presetInitial(data.name || ''))) +
+      '</div>';
+    return thumbHtml + '<div class="ia-cp-card-body">' +
+      '<div class="tag-tooltip-main">' +
+      `<span class="tag-tooltip-tag">${escHtml(data.name)}</span>` +
+      (info.count ? `<span class="tag-tooltip-count">${escHtml(fmtCount(info.count))}</span>` : '') +
+      (info.group ? ` <span class="tag-tooltip-group">${escHtml(info.group)}</span>` : '') +
+      (info.desc ? `<span class="tag-tooltip-desc">${escHtml(info.desc)}</span>` : '') +
+      '</div>' +
+      '<div class="tag-tooltip-extra char-details-row">' +
+        `<span class="char-copyright">${escHtml(data.work || '')}</span>${chips}</div>` +
+      // 주 동작(대표 태그 전부) : 보조(캐릭터 태그만) = 2 : 1. 색으로도 갈라 둔다.
+      '<div class="ia-cp-actions">' +
+        `<button type="button" class="ia-cp-act is-primary" data-cp-apply="all"${picked.length ? '' : ' disabled'}
+          title="고른 대표 태그를 ${escHtml(presetCharLabel())} 슬롯들에 넣습니다">전부 적용<small>${picked.length}</small></button>` +
+        `<button type="button" class="ia-cp-act is-secondary" data-cp-apply="char"
+          title="${escHtml(charTags.join(', '))} — 대표 태그로 흩지 않고 캐릭터 태그 자체를 넣습니다">캐릭터만</button>` +
+      '</div>' +
+      // Copy All 은 위 두 버튼에서 뺐다 — 클립보드로 내보내는 것은 성격이 다른 행동이라
+      // 같은 줄에 두면 2:1 강조가 흐려진다. 기능은 남긴다(Interactive 밖으로 태그를
+      // 꺼내는 유일한 통로다). 표본 수는 그대로 오른쪽.
+      '<div class="char-copy-row">' +
+        `<button type="button" class="char-copy-btn" data-cp-copy="${escHtml(allTags)}"
+          title="대표 태그 전부를 클립보드로">\u{1F4CB} 복사</button>` +
+        `<small class="char-sample-count${rows < PRESET_THIN_ROWS ? ' is-thin' : ''}">${rows.toLocaleString()} samples</small>` +
+      '</div>' +
+      '</div>';
+  }
+
+  /** `캐릭터만` 이 넣을 태그 — 캐릭터 태그 + (필요할 때만) 작품 태그.
+   *
+   *  Danbooru 캐릭터 태그는 `ganyu (genshin impact)` 처럼 작품을 괄호로 단 것과
+   *  `hatsune miku` 처럼 안 단 것이 섞여 있다. 뒤엣것만 작품을 따로 줘야 식별된다.
+   *  판정은 tools/build_character_wildcards.py 와 **같은 규칙**이다(`f"({work})" in name`).
+   *
+   *  프론트에서 다시 판정하는 이유: 응답에 `work`/`name` 이 이미 둘 다 들어 있어 서버가
+   *  한 줄 더 계산해 보내도 사본 수는 줄지 않고(빌더 쪽 사본은 그대로 남는다), 라우트를
+   *  고치면 백엔드 재시작이 또 필요하다. **규칙을 바꾸면 두 곳을 같이 고쳐라.**
+   *
+   *  실측(9,738명): 이름이 `(작품)` 을 그대로 단 것 2,882(29.6%) -> 작품 생략.
+   *  괄호는 있지만 작품 문자열이 다른 것 1,774(18.2%)와 괄호가 없는 것 5,082(52.2%)
+   *  -> 작품 추가(예: `fighter (7th dragon)` + `7th dragon (series)`). */
+  function characterTagsOf(data) {
+    const name = String((data && data.name) || '').trim();
+    const work = String((data && data.work) || '').trim();
+    if (!name) return [];
+    return (work && !name.includes(`(${work})`)) ? [name, work] : [name];
+  }
+
+  function ensureCard() {
+    if (cardEl && document.body.contains(cardEl)) return cardEl;
+    cardEl = document.createElement('div');
+    cardEl.className = 'ia-cp-card';
+    cardEl.hidden = true;
+    document.body.appendChild(cardEl);
+    cardEl.addEventListener('click', onCardClick);
+    return cardEl;
+  }
+
+  /** 앵커 팝업 자리잡기 — 좌표 팝업(openPositionPicker)과 같은 규약이다. */
+  function positionPresetCard() {
+    if (!cardEl || cardEl.hidden || !cardAnchor) return;
+    const box = cardEl.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const left = Math.max(8, Math.min(cardAnchor.left, vw - box.width - 8));
+    let top = cardAnchor.bottom + 6;
+    if (top + box.height > vh - 8) top = Math.max(8, cardAnchor.top - box.height - 6);
+    cardEl.style.left = Math.round(left) + 'px';
+    cardEl.style.top = Math.round(top) + 'px';
+  }
+
+  async function openPresetCard(anchor, group, character, thumbUrl = '') {
+    const seq = ++cardSeq;
+    const rect = anchor.getBoundingClientRect();
+    cardAnchor = {left: rect.left, top: rect.top, bottom: rect.bottom};
+    const el = ensureCard();
+    el.hidden = false;
+    el.innerHTML = '<div class="tag-tooltip-desc">불러오는 중…</div>';
+    positionPresetCard();
+    document.addEventListener('mousedown', onCardOutside, true);
+    let data;
+    try {
+      data = await presetFetch('/api/character-preset?group=' + encodeURIComponent(group)
+        + '&character=' + encodeURIComponent(character));
+    } catch (error) {
+      if (seq !== cardSeq) return;
+      cardData = null; cardRows = []; cardPick = new Set();
+      el.innerHTML = `<div class="tag-tooltip-desc">${escHtml(error?.message || '프리셋을 불러오지 못했습니다.')}</div>`;
+      positionPresetCard();
+      return;
+    }
+    if (seq !== cardSeq) return;
+    // `/api/character-preset` 은 슬롯 배정표만 준다. 큰 썸네일은 목록 줄이 이미 들고
+    // 있는 URL 을 그대로 쓴다(같은 파일·같은 캐시라 추가 요청이 아니다).
+    cardData = {...data, thumbnail_url: thumbUrl};
+    cardRows = cardRowsFrom(data);
+    cardPick = new Set(cardRows.filter(r => r.slot && r.on).map(r => r.key));
+    el.innerHTML = cardHtml();
+    positionPresetCard();
+  }
+
+  function closePresetCard() {
+    cardSeq++;
+    cardData = null; cardRows = []; cardPick = new Set(); cardAnchor = null;
+    if (cardEl) { cardEl.hidden = true; cardEl.innerHTML = ''; }
+    document.removeEventListener('mousedown', onCardOutside, true);
+  }
+
+  function onCardOutside(event) {
+    if (cardEl && cardEl.contains(event.target)) return;
+    if (event.target.closest?.('.ia-cp-row')) return;   // 다른 줄은 그 줄로 옮겨 연다
+    closePresetCard();
+  }
+
+  function onCardClick(event) {
+    const chip = event.target.closest('[data-cp-chip]');
+    if (chip) {
+      const key = chip.getAttribute('data-cp-chip');
+      if (cardPick.has(key)) {
+        cardPick.delete(key);
+      } else {
+        cardPick.add(key);
+        // 배타 축은 라디오처럼 — 같은 축의 다른 값은 꺼진다(그리드의 팔레트와 같은 규칙).
+        const row = cardRows.find(r => r.key === key);
+        const axis = row && (exclusiveAxisOf(row.tag) || '');
+        if (axis) cardRows.forEach(r => { if (r !== row && exclusiveAxisOf(r.tag) === axis) cardPick.delete(r.key); });
+      }
+      cardEl.innerHTML = cardHtml();
+      positionPresetCard();
+      return;
+    }
+    const copy = event.target.closest('[data-cp-copy]');
+    if (copy) {
+      const text = copy.getAttribute('data-cp-copy') || '';
+      try {
+        void navigator.clipboard.writeText(text);
+        showToast('태그를 복사했습니다.');
+      } catch (_) { showToast('복사하지 못했습니다.', 'error'); }
+      return;
+    }
+    const apply = event.target.closest('[data-cp-apply]');
+    if (apply) presetApplyCard(apply.getAttribute('data-cp-apply') || 'all');
+  }
+
+  // ---- 적용 / 회수 ----
+
+  /** 고른 태그를 캐릭터 슬롯에 넣는다.
+   *
+   *  **직전에 이 슬롯에 넣었던 프리셋 태그만 정확히 회수한다.** 사용자가 손으로 적은 것은
+   *  건드리지 않는다 — 그래서 '축이 같으면 지운다' 같은 규칙 대신 **넣은 것을 기억**한다
+   *  (`character.preset.tags`, 캐릭터 슬롯마다 독립이다).
+   *  그 사이 사용자가 지운 태그는 못 찾을 뿐이니 조용히 넘어간다. */
+  function presetApplyCard(kind = 'all') {
+    const character = state.chars.find(c => c.id === presetCid);
+    if (!character || !cardData) return;
+    // `캐릭터만` = 대표 태그로 흩지 않고 캐릭터 태그 자체를 넣는다. "그 캐릭터 같은 사람"이
+    // 아니라 **진짜 그 캐릭터**가 나오게 하는 경로다(사용자와 합의된 구분).
+    // 넣는 자리·회수 규약은 `전부 적용` 과 완전히 같다 — 여기서 갈라지면 둘을 오갈 때
+    // 이전 것이 남는다.
+    const chosen = kind === 'char'
+      ? characterTagsOf(cardData).map(tag => ({tag, key: tag.toLowerCase(), slot: CHAR_TAG_SLOT, axis: ''}))
+      : cardRows.filter(r => r.slot && cardPick.has(r.key));
+    if (!chosen.length) {
+      showToast(kind === 'char' ? '캐릭터 태그를 알 수 없습니다.' : '넣을 태그를 하나 이상 고르세요.', 'error');
+      return;
+    }
+
+    const recalled = presetRecall(character);
+
+    const bySlot = new Map();
+    for (const row of chosen) {
+      if (!bySlot.has(row.slot)) bySlot.set(row.slot, []);
+      bySlot.get(row.slot).push(row);
+    }
+    // 배타 축(머리색·눈색·피부색·길이·가슴)은 **값이 하나만 유효하다.** 회수 뒤에도 그 자리에
+    // 뭔가 남아 있으면(슬라이더 기본값 `long hair`·`medium breasts`, 또는 사용자가 직접 고른
+    // 색) 새 값을 그냥 더할 수 없다 — `long hair, short hair` 같은 모순이 프롬프트로 나간다.
+    // 그래서 배타 축에 한해 자리를 비우고 넣는다. 이건 '사용자 태그를 지우는 것'이 아니라
+    // 그리드의 팔레트/슬라이더가 이미 하는 일과 같은 규칙이다(setMainColor / setExclusive).
+    // 더해지는 태그(`twintails` 등)는 절대 건드리지 않는다.
+    const replaced = [];
+    const owned = {};
+    for (const [slotKey, rows] of bySlot) {
+      let kept = (character.fields[slotKey] || []).slice();
+      for (const row of rows) {
+        const axis = exclusiveAxisOf(row.tag);
+        if (!axis) continue;
+        kept = kept.filter(t => {
+          if (String(t).toLowerCase() === row.key) return true;
+          if (exclusiveAxisOf(t) !== axis) return true;
+          replaced.push(t);
+          return false;
+        });
+      }
+      const have = new Set(kept.map(t => String(t).toLowerCase()));
+      const mine = [];
+      for (const row of rows) {
+        const lower = row.key;
+        // 이미 있던 태그는 **내 소유로 적지 않는다.** 사용자가 직접 넣었을 수 있고,
+        // 그러면 다음 프리셋이 남의 것을 회수하게 된다.
+        if (have.has(lower)) continue;
+        have.add(lower);
+        kept.push(row.tag);
+        mine.push(row.tag);
+      }
+      character.fields[slotKey] = kept;
+      if (mine.length) owned[slotKey] = mine;
+    }
+    character.preset = {work: cardData.work, name: cardData.name, tags: owned};
+    character.name = cardData.name;
+
+    closePresetCard();
+    closePresetPanel();
+    state.chars.forEach(c => { c.open = (c.id === character.id); });
+    renderBlocks();
+    emitChange();
+    const back = recalled ? ` · 이전 프리셋 ${recalled}개 회수` : '';
+    showToast(`${character.name} — 태그 ${chosen.length}개를 슬롯 ${bySlot.size}개에 넣었습니다.${back}`);
+    if (replaced.length) {
+      showToast(`한 자리에 하나만 들어가는 축이라 ${replaced.join(', ')} 을(를) 바꿨습니다.`);
+    }
+  }
+
+  /** 이 캐릭터에 프리셋이 넣어 둔 태그를 슬롯에서 뺀다. 지워진 것은 조용히 넘어간다. */
+  function presetRecall(character) {
+    const prev = (character.preset && character.preset.tags) || null;
+    if (!prev) return 0;
+    let removed = 0;
+    for (const [slotKey, tags] of Object.entries(prev)) {
+      const drop = new Set((tags || []).map(t => String(t).toLowerCase()));
+      if (!drop.size) continue;
+      const before = (character.fields[slotKey] || []).length;
+      character.fields[slotKey] = (character.fields[slotKey] || [])
+        .filter(t => !drop.has(String(t).toLowerCase()));
+      removed += before - character.fields[slotKey].length;
+    }
+    character.preset = null;
+    return removed;
+  }
+
+  /** 캐릭터 헤더의 프리셋 이름 옆 [x] — 넣은 것만 되돌린다. */
+  function clearCharPreset(cid) {
+    const character = state.chars.find(c => c.id === cid);
+    if (!character || !character.preset) return;
+    const name = character.preset.name;
+    const removed = presetRecall(character);
+    if (character.name === name) character.name = '';
+    renderBlocks();
+    emitChange();
+    showToast(`${name} 프리셋을 되돌렸습니다 (태그 ${removed}개).`);
+  }
+
+  // ---- 팝업 셸 ----
+
+  function presetPanelHtml() {
+    const placeholder = presetMode === 'tag'
+      ? '태그로 찾기 — blue hair (쉼표로 여러 개면 모두 가진 캐릭터)'
+      : '캐릭터 이름 · 작품 이름 — miku, genshin';
+    return `<div class="ia-panel-head">
+        <span class="ia-panel-title">캐릭터 프리셋</span>
+        <span class="ia-panel-sub">${escHtml(presetCharLabel())}</span>
+        <button type="button" class="ia-panel-close" data-cp-close="1">&times;</button>
+      </div>
+      <div class="ia-axtabs ia-cp-tabs">
+        <button type="button" class="ia-axtab${presetMode === 'name' ? ' is-open' : ''}" data-cp-mode="name">
+          <span class="ia-axtab-name">이름 · 작품</span></button>
+        <button type="button" class="ia-axtab${presetMode === 'tag' ? ' is-open' : ''}" data-cp-mode="tag">
+          <span class="ia-axtab-name">태그</span></button>
+      </div>
+      <div class="ia-search ia-search-top">
+        <input type="text" id="iaCpInput" placeholder="${escHtml(placeholder)}" autocomplete="off"
+          value="${escHtml(presetQuery)}">
+        <span class="ia-search-scope">${presetMode === 'tag' ? 'tag' : 'name'}</span>
+      </div>
+      <div class="ia-panel-body" id="iaCpBody">${presetSearchBodyHtml()}</div>`;
+  }
+
+  /** 본문만 교체 — 검색창을 다시 만들지 않아 포커스/캐럿/IME 조합이 살아남는다. */
+  function renderPresetBody() {
+    if (!presetPanel) return;
+    const host = presetPanel.querySelector('#iaCpBody');
+    if (!host) { renderPresetPanel(); return; }
+    host.innerHTML = presetSearchBodyHtml();
+    presetBindSentinel();
+  }
+
+  function renderPresetPanel() {
+    if (!presetPanel) return;
+    presetPanel.innerHTML = presetPanelHtml();
+    const input = presetPanel.querySelector('#iaCpInput');
+    if (input) {
+      input.addEventListener('input', () => { presetQuery = input.value; presetQueueSearch(); });
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); closePresetPanel(); }
+      });
+      input.focus();
+      try { input.setSelectionRange(input.value.length, input.value.length); } catch (_) {}
+    }
+    // 목록이 스크롤되면 앵커 카드가 원래 줄에서 떨어진다 — 그때는 닫는다(툴팁과 같다).
+    presetPanel.querySelector('.ia-panel-body')
+      ?.addEventListener('scroll', () => { if (cardEl && !cardEl.hidden) closePresetCard(); }, {passive: true});
+    presetBindSentinel();
+    positionPresetPanel();
+  }
+
+  function ensurePresetPanel() {
+    if (presetPanel && document.body.contains(presetPanel)) return presetPanel;
+    presetPanel = document.createElement('div');
+    // `.ia-panel` 을 그대로 입어 슬롯 팝업과 같은 틀·같은 위치를 쓴다.
+    presetPanel.className = 'ia-panel ia-cp-panel';
+    document.body.appendChild(presetPanel);
+    presetPanel.addEventListener('click', onPresetClick);
+    return presetPanel;
+  }
+
+  function onPresetClick(event) {
+    const hit = sel => event.target.closest(sel);
+    if (hit('[data-cp-close]')) { closePresetPanel(); return; }
+    const mode = hit('[data-cp-mode]');
+    if (mode) {
+      const next = mode.dataset.cpMode;
+      if (next === presetMode) return;
+      closePresetCard();
+      presetMode = next;
+      presetGroup = '';
+      presetResults = []; presetGroups = []; presetTotal = 0; presetError = '';
+      renderPresetPanel();
+      void presetSearch();
+      return;
+    }
+    const group = hit('[data-cp-group]');
+    if (group) {
+      closePresetCard();
+      presetGroup = group.getAttribute('data-cp-group') || '';
+      void presetSearch();
+      return;
+    }
+    const row = hit('.ia-cp-row');
+    if (row) {
+      void openPresetCard(row, row.getAttribute('data-cp-g') || '',
+                          row.getAttribute('data-cp-c') || '',
+                          row.getAttribute('data-cp-t') || '');
+    }
+  }
+
+  /** 슬롯 팝업과 같은 가로 앵커. 세로는 CSS(top/bottom)에 맡긴다. */
+  function positionPresetPanel() {
+    if (!presetPanel || !presetPanel.classList.contains('open')) return;
+    const vw = window.innerWidth;
+    if (vw <= 767) {
+      presetPanel.style.top = presetPanel.style.left = presetPanel.style.width = presetPanel.style.bottom = '';
+      return;
+    }
+    const W = Math.min(560, vw - 32);
+    const host = blocksMount.getBoundingClientRect();
+    let left = Math.max(host.right + 12, PANEL_LEFT);
+    if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
+    presetPanel.style.width = W + 'px';
+    presetPanel.style.left = left + 'px';
+    presetPanel.style.top = (sceneFloatFits() && !blocksMount.hidden)
+      ? (PANEL_TOP + SCENE_FLOAT_H + 6) + 'px' : '';
+    presetPanel.style.bottom = '';
+  }
+
+  function openPresetPanel(cid) {
+    if (presetCid === cid && presetPanel && presetPanel.classList.contains('open')) {
+      closePresetPanel();
+      return;
+    }
+    // 슬롯 편집 팝업과 겹치지 않게 한다 — 둘 다 같은 자리에 뜬다.
+    if (panelContext) closePanel();
+    const panel = ensurePresetPanel();
+    presetCid = cid;
+    presetError = '';
+    closePresetCard();
+    panel.classList.add('open');
+    renderPresetPanel();
+    document.addEventListener('mousedown', onPresetOutside, true);
+    document.addEventListener('keydown', onPresetKeydown, true);
+    // 처음 열면 썸네일 있는 캐릭터가 먼저 온다(thumb_first) — 빈 화면을 주지 않는다.
+    if (!presetResults.length) void presetSearch();
+  }
+
+  function closePresetPanel() {
+    presetSeq++;                 // 진행 중인 요청 무효화
+    clearTimeout(presetTimer);
+    closePresetCard();
+    if (presetObserver) { presetObserver.disconnect(); presetObserver = null; }
+    presetCid = null;
+    if (presetPanel) { presetPanel.classList.remove('open'); presetPanel.innerHTML = ''; }
+    document.removeEventListener('mousedown', onPresetOutside, true);
+    document.removeEventListener('keydown', onPresetKeydown, true);
+  }
+
+  function onPresetOutside(event) {
+    if (presetPanel && presetPanel.contains(event.target)) return;
+    if (cardEl && !cardEl.hidden && cardEl.contains(event.target)) return;
+    if (event.target.closest?.('[data-charpreset]')) return;   // 토글은 버튼 핸들러가 처리
+    // 좌측 슬롯 목록 안쪽(빈틈·여백 포함)은 '바깥'이 아니다 — 슬롯 팝업과 같은 규칙이다.
+    // 슬롯을 눌러 편집을 시작하면 `enterEditing` 이 이 팝업을 닫으므로 둘이 겹치지 않는다.
+    if (blocksMount.contains(event.target)) return;
+    closePresetPanel();
+  }
+
+  function onPresetKeydown(event) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    if (cardEl && !cardEl.hidden) { closePresetCard(); return; }   // 카드부터 닫는다
+    closePresetPanel();
   }
 
   // ---------------------------------------------------------------- panel
@@ -900,6 +2026,7 @@ export function createInteractivePanel({
       // 축 섹션을 넘기지 않아 '다인원 자세' 팝업이 통째로 비어 있었다 — 캐릭터
       // 경로(openCharSub)에만 있던 줄이다. 씬 슬롯도 sections 를 가질 수 있다.
       sections: slot.sections || null,
+      excludeTags: slot.excludeTags || null,
       subgroupInclude: slot.subgroupInclude || browseScopeOf(slot) || null,
       subgroupExclude: slot.subgroupExclude || null,
     };
@@ -918,10 +2045,14 @@ export function createInteractivePanel({
       axis: meta.axis,
       // 축 섹션(팔레트/슬라이더/썸네일/탐색). 없으면 기존 검색+탐색 팝업.
       sections: meta.sections || null,
+      // 이 슬롯에서 감출 태그. 캐릭터 '구도' 가 이미지 전체 태그를 뺄 때 쓴다.
+      excludeTags: meta.excludeTags || null,
       // 하위 슬롯이 subgroup 스코프를 가지면 분류 탐색을 그 범위로 좁힌다(구도/효과와 동일 기법).
       // sections 가 있으면 browse 섹션의 subgroups 를 스코프로 쓴다.
       subgroupInclude: meta.subgroups || browseScopeOf(meta) || null,
       subgroupExclude: meta.subgroupsExclude || null,
+      // 옆 팝업 없이 인라인 입력창만 여는 슬롯(캐릭터). CHAR_TAG_SLOT 주석 참조.
+      noPanel: !!meta.noPanel,
     };
     enterEditing();
   }
@@ -956,6 +2087,26 @@ export function createInteractivePanel({
 
   /** 슬롯을 텍스트 입력으로 펼치고, 그 옆에 검색+탐색 팝업을 띄운다. */
   function enterEditing() {
+    // 프리셋 팝업과 슬롯 팝업은 화면의 같은 자리를 쓴다 — 슬롯 편집을 시작하면 닫는다.
+    // (덕분에 `onPresetOutside` 가 좌측 목록을 '바깥'에서 빼도 둘이 겹치지 않는다.)
+    closePresetPanel();
+    // 옆 팝업이 없는 슬롯(캐릭터) — 인라인 입력창만 연다. 축 그리드도 분류 트리도
+    // 그릴 것이 없어서 팝업을 띄우면 빈 상자만 남는다.
+    if (panelContext && panelContext.noPanel) {
+      // 다른 슬롯에서 열려 있던 팝업·조언 플로트는 닫는다. `closePanel()` 은 못 쓴다 —
+      // 그것은 방금 세운 panelContext 까지 비운다.
+      if (autocomplete) autocomplete.unbind();
+      if (browse) browse.detach();
+      panelMount.classList.remove('open');
+      panelMount.innerHTML = '';
+      panelMount.style.top = panelMount.style.left = panelMount.style.width = '';
+      if (asideMount) { asideMount.classList.remove('open'); asideMount.innerHTML = ''; }
+      openId = 'character';
+      renderBlocks();            // 편집 슬롯만 textarea 로
+      document.body.classList.add('interactive-editing');
+      focusEditingInput();       // 자동완성은 bindSlotInput 의 bindTagAssist 가 붙인다
+      return;
+    }
     thumbScroll.clear();       // 슬롯을 바꾸면 썸네일 스크롤을 처음으로
     thumbFilter = '';          // 검색어도 슬롯 단위다 — 남기면 다음 슬롯이 걸러진 채 열린다
     // 아코디언 기본값 = 그 슬롯의 첫 썸네일 섹션(선택된 게 있으면 그 섹션을 우선 펼친다).
@@ -993,7 +2144,10 @@ export function createInteractivePanel({
     // 씬 플로트는 팝업과 무관하게 항상 따라가야 한다 — 창을 좁히면 인라인으로
     // 되돌려야 하므로 renderBlocks 까지 다시 돈다.
     renderBlocks();
-    if (!panelContext) return;
+    positionPresetPanel();   // 프리셋 팝업은 panelContext 와 무관하게 떠 있다
+    // noPanel 슬롯(캐릭터)은 옆 팝업이 없다 — positionAside 가 여기서 돌면 자리가
+    // 안 나온다고 판단해 Electron 창 폭까지 넓히려 든다.
+    if (!panelContext || panelContext.noPanel) return;
     positionPopup();
     positionAside();
   });
@@ -1128,7 +2282,9 @@ export function createInteractivePanel({
         `<div class="ia-aside-thumbs">${recThumbsHtml(info.companions.slice(0, 8))}</div>`);
     }
     if (!rows.length) return '';
-    return '<div class="ia-aside-card"><div class="ia-aside-title">태그 사전' +
+    // `.scroll` 이 있어야 한다 — `.ia-aside-card` 는 overflow:hidden 이라
+    // 이것이 없으면 칩이 넘칠 때 스크롤 없이 잘린다(사용자 지적).
+    return '<div class="ia-aside-card scroll"><div class="ia-aside-title">태그 사전' +
       `<span class="ia-aside-count">${escHtml(info.tag || '')}</span></div>` +
       rows.join('') + '</div>';
   }
@@ -1154,28 +2310,71 @@ export function createInteractivePanel({
   }
 
   /** 추천 칩을 썸네일 셀로 그린다(2열). 팩에 이미지가 없으면 이름만 나온다. */
+  /** 그리드에 그림이 있으면 그 URL. 없으면 ''. */
+  function thumbSrcOf(tag) {
+    const axis = Object.keys(THUMB_TAGS).find(a => THUMB_TAGS[a].includes(tag)) || '';
+    if (!axis) return '';
+    return (thumbHave.get(packAxisOf(axis)) || new Set()).has(tag) ? thumbUrl(axis, tag) : '';
+  }
+
+  /** 색·무늬 조합(`black pants`)을 [기준태그, 색] 으로 쪼갠다. 쪼개지지 않으면 null.
+   *  `CLOTH_COMBO_REV` 만 보면 안 된다 — 사전 칩에는 조합표에 없는 `black hat`·`white dress`
+   *  같은 것이 더 많이 나온다(실측 226종 1,064회 vs 조합표 83종 2,001회). 그래서 규칙으로
+   *  쪼갠다: **앞 낱말이 색 이름이고 나머지가 그리드에 있는 태그일 때만.** 색 이름 목록에
+   *  없는 낱말(`holding`·`implied` 등)은 조합이 아니다. */
+  function colorComboOf(tag) {
+    const parts = String(tag).toLowerCase().split(' ');
+    for (const k of [1, 2]) {
+      if (parts.length <= k) break;
+      const word = parts.slice(0, k).join(' ');
+      if (!COLOR_SWATCH[word]) continue;
+      const base = parts.slice(k).join(' ');
+      const src = thumbSrcOf(base);
+      if (src) return {base, src, color: COLOR_SWATCH[word], word};
+    }
+    return null;
+  }
+
+  /** 색·무늬·크기 태그인가 — 사전 칩에서 **뺄** 것. 팝업 상단에 팔레트와 슬라이더로
+   *  이미 나오는 축이라, 여기 또 내면 같은 것을 두 군데서 고르게 된다.
+   *  (한때 색 스와치·색 점으로 그려 봤지만 기준 의상 그림과 색이 따로 놀았다.) */
+  function isColorOrSizeTag(tag) {
+    for (const list of Object.values(PALETTES || {})) {
+      if ((list || []).some(d => d.tag === tag)) return true;
+    }
+    for (const s of Object.values(SLIDERS || {})) {
+      if ((s.steps || []).some(x => (x.tag || x) === tag)) return true;
+    }
+    return !!colorComboOf(tag);
+  }
+
   function recThumbsHtml(list) {
-    return list.map(o => {
+    return list.filter(o => !isColorOrSizeTag(typeof o === 'string' ? o : o.tag)).map(o => {
       const t = typeof o === 'string' ? o : o.tag;
       const match = typeof o === 'object' && o.match;
-      const axis = Object.keys(THUMB_TAGS).find(a => THUMB_TAGS[a].includes(t)) || '';
-      const has = axis && (thumbHave.get(packAxisOf(axis)) || new Set()).has(t);
-      const img = has
-        ? `<img src="${escHtml(thumbUrl(axis, t))}" alt="" loading="lazy" decoding="async">`
-        : '<span class="ia-aside-thumb-none"></span>';
+      const src = thumbSrcOf(t);
+      // 그림이 없을 때 검은 타일을 그리던 자리다. 사전 칩에 나오는 태그의 상당수는
+      // **애초에 그리드 태그가 아니다**(실측: 빈칸 2,261종 전부가 축 밖. 축에 선언만
+      // 되고 안 만들어진 것은 0종 — 즉 생성 누락이 아니라 표시 문제였다).
+      // 색·무늬·크기는 위에서 걸러 냈고, 남은 것은 그림 자리를 없애고 글자 칩으로 그린다.
+      const plain = !src;
+      const img = src
+        ? `<img src="${escHtml(src)}" alt="" loading="lazy" decoding="async">` : '';
       const on = typeof o === 'object' && o.on;
       // 그리드와 같은 규칙 — 라벨은 항상 태그 이름이고, 행동은 호버 버튼이 맡는다.
       // 그리드 셀과 같은 블러 규칙을 적용한다. 전에는 `is-sensitive` 가 여기 안 붙어서
       // Safe Viewer 가 On 이어도 **추천 칩 쪽은 그대로 노출됐다**(Safe Viewer 를 붙이며
       // 발견, 2026-07-30). 가리는 곳이 한 군데라도 새면 가리는 의미가 없다.
-      const cls = 'ia-aside-thumb' + (match ? ' match' : '') + (on ? ' on' : '')
+      const cls = 'ia-aside-thumb' + (plain ? ' is-plain' : '')
+        + (match ? ' match' : '') + (on ? ' on' : '')
         + (isSensitive(t) ? ' is-sensitive' : '')
         + (inspectTag === t ? ' is-inspect' : '');
       const tip = on ? `${t} — 이미 넣었습니다` :
         (match ? `${t} — 지금 고른 것들과도 어울립니다` : t);
       const act = `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
       return `<div class="${cls}" data-advice-add="${escHtml(t)}"` +
-        ` title="${escHtml(tip)}"><span class="ia-aside-thumb-img">${img}${act}</span>` +
+        ` title="${escHtml(tip)}">` +
+        (plain ? act : `<span class="ia-aside-thumb-img">${img}${act}</span>`) +
         `<span>${escHtml(t)}</span></div>`;
     }).join('');
   }
@@ -1257,7 +2456,9 @@ export function createInteractivePanel({
 
   async function renderAside() {
     const host = ensureAside();
-    if (!panelContext) { host.classList.remove('open'); host.innerHTML = ''; return; }
+    // 옆 팝업이 없는 슬롯(캐릭터)에서는 조언 플로트도 띄우지 않는다 — 좌표를 팝업에
+    // 맞춰 잡는데 그 팝업이 닫혀 있어 자리가 어긋난다.
+    if (!panelContext || panelContext.noPanel) { host.classList.remove('open'); host.innerHTML = ''; return; }
     const tags = currentTags();
     const seq = ++asideSeq;
     // 살펴보는 태그는 **아직 고르지 않은 것**이라 currentTags 에 없다. 조언을 받으려면
@@ -2020,9 +3221,31 @@ export function createInteractivePanel({
     setCurrentTags(had ? kept : kept.concat([tag]));
   }
 
+  // 배열 -> 소문자 Set 캐시. 매 렌더마다 52개를 다시 소문자화하지 않는다.
+  const EXCLUDE_CACHE = new WeakMap();
+
+  /** 지금 열려 있는 슬롯이 빼라고 한 태그(소문자). 없으면 빈 Set. */
+  function slotExcluded() {
+    const list = panelContext?.excludeTags;
+    if (!list || !list.length) return EMPTY_EXCLUDE;
+    let cached = EXCLUDE_CACHE.get(list);
+    if (!cached) {
+      cached = new Set(list.map(x => String(x).toLowerCase()));
+      EXCLUDE_CACHE.set(list, cached);
+    }
+    return cached;
+  }
+  const EMPTY_EXCLUDE = new Set();
+
   function thumbHtml(sec) {
     const axis = sec.ref;
-    const full = THUMB_TAGS[axis] || [];
+    // 슬롯이 지정한 제외 목록을 먼저 뺀다. 캐릭터 '구도' 슬롯이 이미지 전체 태그
+    // (`isometric`·`female pov`·`multiple views` …)를 감추는 데 쓴다 — 캐릭터 한 명에게
+    // 걸 수 없는 것들이다. 씬 슬롯에는 그대로 있으니 못 쓰게 되는 것은 없다.
+    const excluded = slotExcluded();
+    const full = excluded.size
+      ? (THUMB_TAGS[axis] || []).filter(x => !excluded.has(String(x).toLowerCase()))
+      : (THUMB_TAGS[axis] || []);
     // 계층 탐색기가 없는 슬롯(자세)에서는 검색창이 **그리드를 거른다**. 트리를 떼고
     // 검색만 남겼으니 걸러줄 대상이 그리드여야 한다 — 아니면 죽은 입력창이 된다.
     const all = thumbFilter ? full.filter(t => matchesFilter(t)) : full;
@@ -2436,24 +3659,12 @@ export function createInteractivePanel({
     }
     blocksMount.hidden = !active;
     if (!active) {
-      closePositionPicker(); closePanel();
+      closePositionPicker(); closePresetPanel(); closePanel();
       // 모드를 끄면 씬 버튼 줄도 사라져야 한다 — blocksMount 만 숨기면 플로트가 남는다.
       if (sceneMount) { sceneMount.classList.remove('open'); sceneMount.innerHTML = ''; }
-    } else { renderBlocks(); void probeStatus(); }
+    } else { renderBlocks(); }
     onActiveChange(active);
     if (!silent && active) emitChange();
-  }
-
-  async function probeStatus() {
-    if (typeof corpusStatus !== 'function' || corpusState) return;
-    try {
-      corpusState = await corpusStatus();
-      if (corpusState?.state && corpusState.state !== 'ready') {
-        showToast('이벤트 코퍼스 데이터가 없어 추천 태그는 비활성입니다. 직접 입력은 가능합니다.', 'error');
-      }
-    } catch (error) {
-      corpusState = {state: 'missing'};
-    }
   }
 
   // 토글 리스너는 명명 함수로 두어 destroy 시 제거할 수 있게 한다(Codex M7).
@@ -2465,6 +3676,13 @@ export function createInteractivePanel({
   // blur 로 팝업이 닫히던 간헐 버그가 있었다. 조언 플로트·씬 플로트도 같은 것을 쓴다.
   const onPanelMouseDown = keepEditingFocus;
   panelMount.addEventListener('mousedown', onPanelMouseDown);
+  // **좌측 슬롯 목록 안쪽도 같은 보호를 받는다.** 슬롯과 슬롯 사이의 빈틈이나 목록 아래
+  // 여백처럼 포커스를 못 받는 자리를 누르면 activeElement 가 body 로 떨어지고, 그 blur 가
+  // '바깥 클릭'으로 잡혀 작업 중이던 팝업이 통째로 닫혔다(사용자 지적). 팝업·조언·씬
+  // 플로트는 처음부터 이 핸들러를 쓰고 있었고 좌측 목록만 빠져 있었다.
+  // mousedown 기본동작만 막는 것이라 click 은 그대로 뜬다 — 다른 슬롯을 눌러 전환하는
+  // 동작도, 헤더 버튼들도 영향이 없다. 입력창(textarea)은 keepEditingFocus 가 예외로 둔다.
+  blocksMount.addEventListener('mousedown', onPanelMouseDown);
 
   blocksMount.hidden = true;
 
@@ -2491,9 +3709,13 @@ export function createInteractivePanel({
       if (browse) { try { browse.destroy(); } catch (e) {} }
       if (toggleButton) toggleButton.removeEventListener('click', onToggleClick);
       panelMount.removeEventListener('mousedown', onPanelMouseDown);
+      blocksMount.removeEventListener('mousedown', onPanelMouseDown);
       closePositionPicker();
+      closePresetPanel();
       document.body.classList.remove('interactive-editing');
       if (posPopup) { posPopup.remove(); posPopup = null; }
+      if (presetPanel) { presetPanel.remove(); presetPanel = null; }
+      if (cardEl) { cardEl.remove(); cardEl = null; }
       blocksMount.innerHTML = '';
       panelMount.classList.remove('open');
       panelMount.style.top = panelMount.style.left = panelMount.style.width = '';

@@ -34,6 +34,13 @@ class CharacterViewerService:
         self.save_dir = Path(save_root) if save_root is not None else self.root / "save"
         self.groups_path = self.data_dir / "copyright_groups.json"
         self.analysis_path = self.data_dir / "character_analysis.json"
+        # 캐릭터 프리셋 사전(tools/build_character_presets.mjs 산출물).
+        # 캐릭터마다 대표 태그를 Interactive 슬롯으로 미리 갈라 둔 것이라
+        # `character_analysis.json` 과 같은 번들 데이터 루트에 있다.
+        self.presets_path = self.data_dir / "character_presets.json"
+        # 번들 미리보기 팩(폴백). 사용자 썸네일과 같은 성격이 아니라 **배포에 딸려오는**
+        # 것이라 번들 데이터 루트에 둔다 — 업데이트 때 갱신되는 것이 맞다.
+        self.preview_path = self.data_dir / "character_preview_thumbs.json"
         # **썸네일만 사용자 데이터 루트로 뺀다 — `data_root` 를 통째로 바꾸면 안 된다.**
         # `data_dir` 은 번들 파일 두 개(`copyright_groups.json` 1.2MB,
         # `character_analysis.json` 28MB)와 공유되고 그것들은 리소스 트리에 있는 것이 맞다
@@ -59,6 +66,8 @@ class CharacterViewerService:
         self._analysis: dict[str, Any] | None = None
         self._tag_index: dict[str, tuple[str, dict[str, Any]]] | None = None
         self._thumb_index: dict[str, str] | None = None
+        self._presets: dict[str, Any] | None = None
+        self._preview_pack: dict[str, str] | None = None
 
     def data_available(self) -> bool:
         return self.groups_path.exists() and self.analysis_path.exists()
@@ -78,6 +87,52 @@ class CharacterViewerService:
         if self._analysis is None:
             self._analysis = self._load_json(self.analysis_path, {})
         return self._analysis
+
+    def character_presets(self) -> dict[str, Any]:
+        """캐릭터 프리셋 사전을 **한 번만** 읽어 캐시한다.
+
+        파일이 3.9MB(9,738명)라 프론트로 통째로 내려보내지 않는다 — 팝업 한 번에
+        필요한 것은 1KB 남짓이다. 서버에서 한 건씩 꺼내 주는 쪽이 맞는 이유:
+
+          · Remote Web 은 LAN/Cloudflared 로 휴대폰에서도 열린다. 프리셋 팝업을 한 번도
+            안 여는 세션까지 4MB 를 받게 하면 첫 화면이 그만큼 늦어진다.
+          · 이 서비스는 이미 `character_analysis.json`(28MB)을 같은 방식으로 물고 있다.
+            파생 사전 하나가 더 붙는 것은 같은 성격의 비용이고, **처음 요청될 때까지
+            읽지 않는다**(파싱 0.19s / 상주 약 24MB, 실측).
+          · 프론트 캐시(IndexedDB 등)로 내리면 사전이 바뀔 때 무효화 규약을 따로 만들어야
+            한다. 서버가 들고 있으면 파일을 갈아끼우고 재시작하는 것으로 끝난다.
+        """
+        if self._presets is None:
+            data = self._load_json(self.presets_path, {})
+            presets = data.get("presets") if isinstance(data, dict) else None
+            self._presets = presets if isinstance(presets, dict) else {}
+        return self._presets
+
+    def presets_available(self) -> bool:
+        return self.presets_path.exists()
+
+    def character_preset(self, group_key: str, name: str) -> dict[str, Any]:
+        """한 캐릭터의 슬롯 배정표. 사전에 없으면 KeyError."""
+        group_key = str(group_key or "")
+        name = str(name or "")
+        if not group_key or not name:
+            raise ValueError("group and character are required")
+        if not self.presets_available():
+            raise FileNotFoundError(
+                "character_presets.json not installed "
+                "(tools/build_character_presets.mjs 로 생성)"
+            )
+        entry = self.character_presets().get(f"{group_key}::{name}")
+        if not isinstance(entry, dict):
+            raise KeyError(f"Preset not found: {group_key}::{name}")
+        return {
+            "key": f"{group_key}::{name}",
+            "work": str(entry.get("work") or group_key),
+            "name": str(entry.get("name") or name),
+            "rows": int(entry.get("rows", 0) or 0),
+            "slots": entry.get("slots") if isinstance(entry.get("slots"), dict) else {},
+            "off": entry.get("off") if isinstance(entry.get("off"), list) else [],
+        }
 
     def find_by_tag(self, tag: str) -> tuple[str, dict[str, Any]] | None:
         normalized = re.sub(r"\\([()])", r"\1", str(tag or "")).strip().lower()
@@ -281,7 +336,11 @@ class CharacterViewerService:
         return key
 
     def _thumb_url(self, group_key: str, name: str, variant_label: str = "", size: str = "") -> str:
-        if self._thumb_key(group_key, name, variant_label) not in self.thumb_index():
+        # 사용자 인덱스에 없어도 **번들 폴백이 있으면 URL 을 준다.** 라우트가 같은 우선순위로
+        # 응답하기 때문이다. 여기서 사용자 인덱스만 보면 `has_thumbnail=True` 인데
+        # `thumbnail_url` 이 빈 값인 항목이 생겨(실측 40개 중 7개) 프론트가 이니셜을 그린다.
+        # 두 값은 항상 같은 판정을 써야 한다.
+        if not self.has_thumbnail(group_key, name, variant_label):
             return ""
         params = f"group={quote(group_key, safe='')}&character={quote(name, safe='')}"
         if variant_label:
@@ -306,7 +365,10 @@ class CharacterViewerService:
             "group": group_key,
             "character": name,
             "count": int(data.get("total_rows", 0) or 0),
-            "has_thumbnail": self._thumb_key(group_key, name) in thumbs,
+            # 사용자 썸네일이 없어도 번들 폴백이 있으면 True — 그리드가 이니셜 대신
+            # 그림을 청한다. 라우트가 같은 우선순위(사용자 -> 폴백)로 응답한다.
+            "has_thumbnail": (self._thumb_key(group_key, name) in thumbs
+                              or f"{group_key}::{name}" in self.preview_pack()),
         }
         if include_tags:
             item["tags"] = self._tag_search_str(data)
@@ -646,6 +708,46 @@ class CharacterViewerService:
         if not path.exists():
             raise FileNotFoundError("thumbnail not found")
         return path
+
+    def preview_pack(self) -> dict[str, str]:
+        """번들 미리보기 팩(`data/character_preview_thumbs.json`). 처음 쓸 때만 읽는다.
+
+        **사용자 썸네일의 폴백이다 — 덮지 않는다.** 우선순위는 사용자 지정이다:
+
+            1순위  user-data/data/character_thumbnails/  (사용자가 만든 것)
+            2순위  이 팩                                  (번들, 256px webp q72)
+
+        9,738명 전부를 넣으면 92MB 라 릴리즈에 다 담지 않는다. 빈도 상위 N명만 담고
+        (`tools/build_character_preview_pack.py --limit`), 나머지는 지금처럼 이니셜 타일이다.
+        """
+        if self._preview_pack is None:
+            data = self._load_json(self.preview_path, {})
+            thumbs = data.get("thumbs") if isinstance(data, dict) else None
+            self._preview_pack = thumbs if isinstance(thumbs, dict) else {}
+        return self._preview_pack
+
+    def preview_thumb(self, group_key: str, name: str, variant_label: str = "") -> bytes | None:
+        """폴백 미리보기 이미지 바이트. 없으면 None.
+
+        변형(variant)은 담지 않는다 — 팩은 캐릭터 기본형만 뽑은 것이라, 변형을 요청했는데
+        기본형 그림을 돌려주면 사용자가 다른 의상을 본다고 오해한다.
+        """
+        if str(variant_label or ""):
+            return None
+        enc = self.preview_pack().get(f"{group_key}::{name}")
+        if not enc:
+            return None
+        try:
+            import base64
+            return base64.b64decode(enc)
+        except Exception:
+            return None
+
+    def has_thumbnail(self, group_key: str, name: str, variant_label: str = "") -> bool:
+        """사용자 썸네일이 없어도 폴백이 있으면 True — 그리드가 이니셜 대신 그림을 청한다."""
+        if self.thumb_index().get(self._thumb_key(group_key, name, variant_label)):
+            return True
+        return not str(variant_label or "") and f"{group_key}::{name}" in self.preview_pack()
 
     def delete_thumbnail(self, group_key: str, name: str, variant_label: str = "") -> dict[str, Any]:
         """Delete ONE image's thumbnail: the .webp file AND its index entry.

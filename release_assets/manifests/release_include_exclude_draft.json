@@ -40,6 +40,8 @@
       "data/copyright_groups.json",
       "data/tag_bucket_dates.json",
       "data/character_analysis.json",
+      "data/character_presets.json",
+      "data/interactive_thumbnails.json",
       "data/e621_data",
       "artist_dictionary.py",
       "danbooru_character.py",

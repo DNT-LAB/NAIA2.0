@@ -58,7 +58,19 @@ def character_viewer_thumbnail_payload(
     size: str = "",
 ) -> tuple[bytes, str]:
     service = character_viewer_service(context)
-    path = service.thumbnail_path(str(group or ""), str(character or ""), str(variant or ""))
+    group = str(group or "")
+    character = str(character or "")
+    variant = str(variant or "")
+    try:
+        path = service.thumbnail_path(group, character, variant)
+    except FileNotFoundError:
+        # **1순위는 사용자가 만든 썸네일, 2순위가 번들 미리보기 팩이다**(사용자 지정).
+        # 여기까지 왔다는 것은 1순위가 없다는 뜻이라 폴백을 준다. 폴백은 이미 256px webp 라
+        # 다시 줄이지 않는다 — grid 요청(384px)보다 작지만 목록 칸이 80px 이라 충분하다.
+        raw = service.preview_thumb(group, character, variant)
+        if raw is None:
+            raise
+        return raw, "image/webp"
     size_key = str(size or "").strip().lower()
     if size_key == "grid":
         cache = getattr(context, "character_viewer_grid_thumb_cache", None)
@@ -191,6 +203,50 @@ def register_character_viewer_routes(
             return await run_in_thread(character_viewer_service(session_context).save_options, payload)
         except Exception as exc:
             return JSONResponse({"error": f"Character Viewer options failed: {exc}"}, status_code=500)
+
+    @app.get("/api/character-preset")
+    async def api_character_preset(group: str = "", character: str = ""):
+        # Interactive 캐릭터 프리셋 팝업이 여는 **단 한 번의 요청**이다.
+        # 슬롯 배정표(data/character_presets.json)와 태그 사전 카드에 필요한
+        # 설명/분류/빈도(tag_lookup_info)를 여기서 합쳐 준다 — 팝업 하나에 왕복을
+        # 두 번 하지 않기 위해서다. 둘 다 순수 조회라 상태를 바꾸지 않는다.
+        def _payload() -> dict[str, Any]:
+            service = character_viewer_service(session_context)
+            data = service.character_preset(group, character)
+            # 순환 import 를 피하려고 함수 안에서 가져온다(같은 패키지의 다른 라우트 모듈).
+            from app.backend.server.prompt_tools_routes import tag_lookup_info
+
+            info: dict[str, Any] = {}
+            try:
+                looked = tag_lookup_info(session_context, data["name"])
+            except Exception:
+                looked = {}
+            if isinstance(looked, dict) and looked.get("tag"):
+                details = looked.get("character_details")
+                info = {
+                    "tag": looked.get("tag", ""),
+                    "count": looked.get("count", 0),
+                    "desc": looked.get("desc", ""),
+                    "group": " > ".join(
+                        part for part in (looked.get("group"), looked.get("subgroup")) if part
+                    ),
+                    "cat": looked.get("cat", ""),
+                    "details": details if isinstance(details, dict) else {},
+                }
+            data["info"] = info
+            return data
+
+        try:
+            return await run_in_thread(_payload)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            # 사전이 안 깔린 배포. 팝업이 이유를 그대로 보여줄 수 있게 문구를 살린다.
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Character preset failed: {exc}"}, status_code=500)
 
     @app.get("/api/character-viewer/thumbnail")
     async def api_character_viewer_thumbnail(group: str = "", character: str = "", variant: str = "", size: str = ""):

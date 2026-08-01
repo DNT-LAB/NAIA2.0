@@ -109,6 +109,19 @@ def main() -> int:
         p.write_text("\n".join(part) + "\n", encoding="utf-8")
         print(f"  {p}  {len(part):,}줄")
         n += 1
+    # **줄 -> 캐릭터 키 대응표를 같이 낸다.** 생성된 PNG 의 프롬프트에는 이 줄이 그대로
+    # 들어가므로, 그림이 어느 캐릭터의 것인지 역추적할 때 이 표가 필요하다.
+    # 팩 빌더가 같은 규칙을 다시 구현하면 두 곳이 갈라진다(이 리포의 상습 결함).
+    key_of = {line: f"{work}::{name}"
+              for line, (_n, work, name, _rec) in zip(lines, rows)}
+    idx = OUT_DIR / "_lines.json"
+    idx.write_text(json.dumps({
+        "note": ["와일드카드 한 줄 -> '<작품>::<캐릭터>' 대응표.",
+                 "생성된 PNG 의 프롬프트에 이 줄이 그대로 들어간다.",
+                 "tools/build_character_preview_pack.py 가 이것으로 역추적한다."],
+        "count": len(key_of), "lines": key_of,
+    }, ensure_ascii=False), encoding="utf-8")
+    print(f"  {idx}  ({len(key_of):,}줄 대응표)")
     print(f"\n총 {len(lines):,}줄 / 파일 {n}개 (빈도 내림차순 — char_00 이 최상위)")
     return 0
 

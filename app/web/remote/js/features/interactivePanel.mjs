@@ -18,7 +18,7 @@ import {
   PACK_AXIS, SENSITIVE_TAGS, POSE_MULTI_SECTIONS, LOC_SECTIONS,
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV, AXIS_COLOR_TAGS, ADULT_SECTIONS, GLOSS_TAGS,
-} from './interactiveAxes.mjs?v=20260730-ax112';
+} from './interactiveAxes.mjs?v=20260730-ax113';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.
@@ -475,10 +475,31 @@ export function createInteractivePanel({
   const PANEL_TOP = 46;
   const PANEL_LEFT = 494;   // .ia-panel 의 CSS 기본 left
 
+  // 씬 버튼 줄은 `document.body` 에 붙는 플로트라 **오른쪽 탭이 바뀌어도 그대로 남는다.**
+  // Characters / Artists / Studio 탭 위에 구도·배경·성인 버튼이 겹쳐 떠 있었다(사용자 지적).
+  // 이 버튼들이 여는 팝업은 Result 화면의 프롬프트 조립을 전제로 하므로 Result 에서만 뜬다.
+  function resultTabActive() {
+    const pane = document.getElementById('rightTabResult');
+    return !!pane && !pane.hidden && pane.classList.contains('active');
+  }
+
+  // 탭 전환은 pane 의 `class`/`hidden` 만 바꾼다 — 이벤트가 없다. 감시해서 다시 판정한다.
+  let sceneTabWatch = null;
+  function watchResultTab() {
+    if (sceneTabWatch) return;
+    const pane = document.getElementById('rightTabResult');
+    if (!pane) return;
+    sceneTabWatch = new MutationObserver(() => positionSceneFloat());
+    sceneTabWatch.observe(pane, { attributes: true, attributeFilter: ['class', 'hidden'] });
+  }
+
   function positionSceneFloat() {
     const host = ensureSceneMount();
     // Interactive 가 꺼져 있으면 버튼도 없어야 한다 — blocksMount 가 hidden 이면 끈다.
-    if (!sceneFloatFits() || blocksMount.hidden) { host.classList.remove('open'); return; }
+    if (!sceneFloatFits() || blocksMount.hidden || !resultTabActive()) {
+      host.classList.remove('open');
+      return;
+    }
     // 세로로 쌓았더니 결과 영역을 가렸다(실사용 지적). **가로 한 줄**로 깔되,
     // blocksMount.top 에서 위로 빼면 앱 탭바를 덮는다(실측) — 팝업 기준선에 맞춘다.
     // `blocksMount.right`(465)는 좌측 컬럼의 **안쪽** 끝이라 그 기준으로 붙이면
@@ -514,6 +535,7 @@ export function createInteractivePanel({
     blocksMount.innerHTML = charBlockHtml() + inlineScenes.map(sceneBlockHtml).join('');
     const host = ensureSceneMount();
     host.innerHTML = floating ? SCENE_SLOTS.map(sceneButtonHtml).join('') : '';
+    watchResultTab();
     positionSceneFloat();
     // 초기 렌더는 `blocksMount.hidden` 이 아직 true 인 시점에 돌 수 있다(실측: 새로고침
     // 하면 버튼은 생기는데 플로트가 안 열렸다). 레이아웃이 잡힌 다음 프레임에 한 번 더

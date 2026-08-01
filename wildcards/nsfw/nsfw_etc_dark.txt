@@ -1,0 +1,16 @@
+# 폭력 및 자해 ETC — 성적이지 않다. Danbooru rating 은 성적 노출만 재므로
+# 이 목록은 rating 으로 만들 수 없다(사용자 방침: taboo/gore/dark_content).
+# 썸네일을 만들지 않는다. 손으로 큐레이션한다.
+guro
+blood from eyes
+blood in hair
+ryona
+drugs
+self-harm
+blood on breasts
+drugged
+suicide
+torture
+abuse
+ero guro
+imminent suicide

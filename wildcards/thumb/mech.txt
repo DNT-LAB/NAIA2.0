@@ -1,0 +1,11 @@
+robot
+android
+single mechanical arm
+cyborg
+robot joints
+non-humanoid robot
+humanoid robot
+mechanical eye
+robot animal
+single mechanical hand
+clothed robot

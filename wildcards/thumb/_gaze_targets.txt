@@ -1,0 +1,31 @@
+# 대상 시선 — 그리드가 아니라 드롭다운으로 준다(썸네일로 구분되지 않는다).
+# tools/build_pose_axes.py 가 만든다. 열: 태그 / 빈도
+looking at viewer	2166733
+looking at another	152018
+looking at partner	39257
+looking at genitalia	22643
+sideways glance	15049
+looking down at viewer	6229
+looking back at another	5315
+looking at penis	4055
+looking back at partner	3428
+looking down at partner	3225
+looking at butt	3033
+looking up at partner	2512
+looking down at another	2377
+looking down at self	1850
+looking up at another	1655
+looking up at viewer	1495
+looking at porn	1408
+looking at anus	1349
+looking at belly	1303
+looking at own penis	1240
+looking at own butt	1041
+looking at own breasts	935
+looking at breasts	858
+looking down at genitalia	781
+looking down at penis	728
+looking at own belly	646
+looking at another's penis	568
+looking back at self	554
+looking at another's breasts	330

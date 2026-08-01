@@ -1,0 +1,10 @@
+# 생성도 사용도 하지 않는 태그 (사용자 정책: taboo/gore/dark_content 스킵).
+# 자해·자살·학대·약물. **유혈 연출은 여기 없다** — blood in hair(901건 SFW 89.9%)
+# 처럼 흔한 연출은 일반 축으로 푼다(사용자 확정 2026-08-01).
+# Danbooru rating 은 성적 노출만 재므로 이 목록은 rating 으로 만들 수 없다.
+suicide
+imminent suicide
+self-harm
+abuse
+drugs
+you gonna get raped

@@ -1,0 +1,69 @@
+artist name
+signature
+twitter username
+dated
+character name
+watermark
+copyright name
+4koma
+patreon username
+web address
+2koma
+page number
++++
+silent comic
+3koma
+squiggle
+company name
+copyright notice
+body writing
+!!
+romaji text
+text background
+1koma
+??
+character profile
+graffiti
+subtitled
+song name
+5koma
+mixed-language text
+russian text
+multiple 4koma
+simplified chinese text
+title
+left-to-right manga
+circle name
+kanji
+runes
+german text
+dialogue box
+bilingual
+cursive
+segmented comic
+chat log
+french text
+text-only page
+facebook username
+text messaging
+license plate
+traditional chinese text
+furigana
+lyrics
+narration
+stats
+colored text
+alpha signature
+spanish text
+hieroglyphics
+cyrillic
+italian text
+right-to-left comic
+episode number
+wanted
+hashtag
+keep out
+price tag
+number pun
+vertical comic
+acronym

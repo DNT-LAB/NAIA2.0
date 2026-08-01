@@ -1,0 +1,1 @@
+{"note": ["기타·텍스트 축. tools/thumb_meta_build.py 가 만든다.", "meta 그룹에서 '그림으로 구분되는 것'만 직접 골랐다 —", "고유명/계정/화풍/주관판정/관계형메타/성인/결함 태그는 뺐다(_meta_dropped.txt)."], "label": {"meta_text": "글자·컷", "meta_frame": "액자·판형", "meta_peek": "살짝 보임·부분", "meta_screen": "화면·연출"}, "framing": {"meta_text": "free", "meta_frame": "free", "meta_peek": "upper", "meta_screen": "free"}}

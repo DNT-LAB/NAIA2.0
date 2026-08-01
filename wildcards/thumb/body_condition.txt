@@ -40,6 +40,7 @@ pain
 paint splatter on face
 saliva drip
 bandaged wrist
+cream on face
 blood on leg
 rice on face
 bandaid on neck
@@ -80,4 +81,3 @@ bandaged knees
 hangover
 bandage on leg
 bandaged horn
-cream on face

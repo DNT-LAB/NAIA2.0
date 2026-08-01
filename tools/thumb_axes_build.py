@@ -405,6 +405,9 @@ FACE_CONDITION = [
 # 홍조 범위다. 성인 축에 두면 그 축은 보류라 영영 안 나온다.
 FACE_EXPR_MISFILED = [
     'naughty face', 'seductive smile', 'moaning',
+    # 서브그룹이 `image_composition` 이라 구도 축으로 잡혀 있었다. 실제로는 "혐오스러운
+    # 것을 보거나 절망적일 때 당황하는 표정"이다(사용자 확인 2026-08-01).
+    'shaded face',
 ]
 BLUSH_MISFILED = [
     'body blush', 'shoulder blush', 'knee blush', 'full-body blush',

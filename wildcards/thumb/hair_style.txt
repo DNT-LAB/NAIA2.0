@@ -82,8 +82,8 @@ enpera
 hair horns
 mohawk
 hair strand
-quad tails
 loose hair strand
+quad tails
 inverted bob
 front ponytail
 pompadour
@@ -145,8 +145,8 @@ nihongami
 flattop
 wolf cut
 mizura
-balding
 bald girl
+balding
 side up bun
 unkempt
 low braid
@@ -177,8 +177,8 @@ hair around ear
 ribbon hair
 sidelocks tied back
 hair tuft
-hair behind eyewear
 tri drills
+hair behind eyewear
 mechanical hair
 comb over
 flower-shaped hair

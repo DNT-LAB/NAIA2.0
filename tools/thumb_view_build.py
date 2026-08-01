@@ -19,7 +19,14 @@
 e621 태그는 서브그룹이 구도로 안 잡혀 있어 규칙으로 못 뽑는다. 그래서
 `E621_VIEW` 만 손으로 적는다 — 그 외에는 전부 DB 에서 파생시킨다.
 
-## 축을 넷으로 쪼개는 이유
+## 시선은 여기 없다
+
+`view_gaze` 를 한때 여기서 만들었는데, 시선은 `pose_gaze`(자세 빌더)가 이미
+담당하고 있었다. 두 빌더가 서로를 못 봐서 같은 개념이 축 두 개로 쪼개졌다.
+`looking at *` 는 서브그룹이 `image_composition` 이라 여기로 흘러들 뿐이므로,
+자세 빌더가 `POSE_PULL` 로 끌어가게 하고 여기서는 뺐다(2026-08-01).
+
+## 축을 셋으로 쪼개는 이유
 
 한 축에 126개를 넣으면 "몸 어디까지 보이나"(프레이밍)와 "어디서 보나"(각도)와
 "어디를 보나"(시선)가 한 그리드에 섞인다. 사용자가 고를 때 셋은 각각 다른
@@ -89,8 +96,46 @@ RULES = (
 LABEL = {
     "view_shot": "프레이밍",
     "view_angle": "시점·각도",
-    "view_gaze": "시선",
     "view_layout": "화면 구성",
+}
+
+
+# ── 전체 이미지에만 걸리는 태그 ─────────────────────────────────────────────
+#
+# 판정 기준은 하나다: **한 이미지 안에서 두 캐릭터가 서로 다른 값을 가질 수 있는가.**
+#
+#   from behind    가능 — 한 명은 뒤돌고 한 명은 정면일 수 있다  -> 캐릭터별
+#   full body      가능 — 한 명은 전신, 한 명은 상반신이 흔하다  -> 캐릭터별
+#   isometric      불가 — 캔버스가 하나다                       -> 전체
+#   female pov     불가 — 카메라가 하나다                       -> 전체
+#   multiple views 불가 — 화면 배치 자체다                      -> 전체
+#
+# 사용자 지적(2026-08-01): "개별 캐릭터와 이미지의 전체 구성을 구분하는 태그를
+# 나눠야 한다. female pov, isometric, vanishing point, perspective 등은 global 이다."
+#
+# 캐릭터 슬롯은 이 목록을 **빼고** 보여준다. 씬 슬롯은 전부 보여준다 — 캐릭터별
+# 태그도 이미지 전체에 걸 수 있기 때문이다(반대 방향은 성립하지 않는다).
+# 서브그룹이 구도인데 실제로는 성인 행위인 것. 이름만 보면 시점 같지만
+# 설명이 "정면 삽입 체위"다(freq 128,276). rating 표본에는 안 잡혀서
+# 실측 게이트로도 안 걸린다 — 그래서 여기서 명시적으로 뺀다(사용자 지시 2026-08-01).
+VIEW_ADULT = {"from front position"}
+
+VIEW_GLOBAL = {
+    # 카메라·시점 — 카메라는 하나다
+    "pov", "first person view", "male pov", "female pov", "dutch angle",
+    "perspective", "vanishing point", "isometric", "foreshortening",
+    "x-ray view", "from outside", "sideways", "straight-on",
+    # 캔버스·판형 — 그림 전체의 모양이다
+    "letterboxed", "pillarboxed", "round image", "rounded corners", "cropped",
+    "wide shot", "very wide shot", "mugshot", "partially underwater shot",
+    # 화면 배치 — view_layout 은 사실상 전부 전체다
+    "multiple views", "zoom layer", "chibi inset", "cross-section", "viewfinder",
+    "clone", "collage", "lineup", "turnaround", "projected inset", "inset",
+    "photo inset", "symmetry", "column lineup", "split screen",
+    "rotational symmetry", "finger frame", "negative space", "group picture",
+    "sequential", "comparison", "age comparison", "screencap inset",
+    "circle formation", "side-by-side", "tachi-e", "multiple others",
+    "2others", "3others", "harem",
 }
 
 
@@ -118,9 +163,13 @@ def main() -> int:
 
     pool: dict[str, str] = {}          # 태그 -> 강제 배정(없으면 규칙)
     for t, d in raw.items():
+        if t in VIEW_ADULT:
+            continue                    # 성인 도감 소관 — 여기서 축으로 만들지 않는다
         if str(d.get("subgroup", "") or "") in SRC_SUBGROUPS and F(t) >= CUT:
             pool[t] = ""
     for t, dest in E621_VIEW.items():
+        if t in VIEW_ADULT:
+            continue                    # 강제 배정 목록에도 있다 — 여기서도 막아야 한다
         if t not in raw:
             raise SystemExit(f"E621_VIEW: 태그 DB 에 없다 -> {t!r}")
         if F(t) < CUT:
@@ -152,8 +201,18 @@ def main() -> int:
         (OUT / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
     # 남의 축에는 쓰지 않는다 — 그 축의 빌더가 통째로 덮어쓰므로 사라진다.
 
+    # 축과 함께 scope 를 낸다. 프론트가 캐릭터 슬롯에서 전체(global) 태그를 걸러낸다.
+    _all = {t for v in axes.values() for t in v}
+    _global = sorted(_all & VIEW_GLOBAL)
+    _missing = sorted(VIEW_GLOBAL - _all)
+    if _missing:
+        # 목록이 축과 갈라지면 조용히 안 걸러진다(빈도 컷 아래로 내려갔을 수도 있다).
+        print(f"  (VIEW_GLOBAL 중 축에 없는 태그 {len(_missing)}개: {', '.join(_missing[:8])})")
+    print(f"  전체(global) {len(_global)} / 캐릭터별 {len(_all) - len(_global)}")
+
     (OUT / "_view_axes.json").write_text(
-        json.dumps({"label": LABEL, "framing": {k: "subject" for k in LABEL}},
+        json.dumps({"label": LABEL, "framing": {k: "subject" for k in LABEL},
+                    "global": _global},
                    ensure_ascii=False, indent=1), encoding="utf-8")
 
     print(f"구도 풀 {len(pool)}개 (DB 서브그룹 {len(pool)-len(E621_VIEW)} + e621 {len(E621_VIEW)}) / 절단선 freq>={CUT}")

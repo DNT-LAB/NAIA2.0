@@ -124,6 +124,65 @@ RE_LEG_NAME = re.compile(r"\b(leg|legs|knee|knees|feet|foot|thigh|thighs|ankle|t
 RE_TORSO_NAME = re.compile(r"\b(hip|hips|waist|stomach|belly|navel|crotch|privates|butt|groin)\b")
 DEFAULT_AXIS = "pose_action"
 
+# 다른 그룹에 있어 이 빌더의 풀에 안 들어오는 시선 태그를 끌어온다.
+# 시선인데 태그 DB 서브그룹이 `image_composition`(Composition_Meta 그룹)이라
+# `gaze_*` 로 안 잡힌다 — 그래서 구도 빌더가 주워 `view_gaze` 라는 두 번째 시선
+# 축을 만들었었다(2026-08-01 통합).
+#
+# **목록으로 적지 않는다.** 한 번 손으로 옮겼다가 `looking to the side`(116,252건)를
+# 빠뜨렸다. 규칙으로 뽑으면 태그가 늘어도 자동으로 따라온다.
+# 축 배정은 위 FALLBACK 정규식이 그대로 한다 — 여기는 "풀에 넣어라"만 말한다.
+# 그룹으로 좁히지 않는다 — `looking aside`(27,812)는 group=Actions 이고 서브그룹이
+# 비어 있어 구도 그룹 조건에 안 걸렸다. 시선은 이름이 곧 근거다.
+# `look` 뒤에 하이픈/글자가 붙는 것은 뺀다(`look-alike`=닮은꼴, 시선이 아니다).
+POSE_PULL_RE = re.compile(r"\blooking\b|\bgaze\b|\bglance\b|eye contact"
+                          r"|\bfacing\b|\blook\b(?![-\w])")
+POSE_PULL_CUT = 300
+
+
+# **대상 시선은 그리드에서 뺀다.** `looking at another` 와 `looking at partner` 는
+# 혼자 있는 그림에서 똑같아 보이고, 부위 시선은 성인이라 안 만든다. 드롭다운으로 준다
+# (사용자 판단 2026-08-01 — "텍스트가 더 편하다"). Dev0714 의 시선2·3 콤보와 같은 갈래.
+# **`looking at *` 을 통째로 걷으면 안 된다.** `looking at phone`·`looking at mirror`·
+# `looking at food` 는 그림에 그 물건이 나오므로 썸네일로 완벽히 구분된다(이미 만들어
+# 놓은 것도 있었다 — 한 번 통째로 지웠다가 되돌렸다).
+# 드롭다운으로 뺄 것은 **사람·부위 대상**뿐이다. 상대가 프레임에 없으면 서로 똑같아
+# 보이고(`another` vs `partner`), 부위 시선은 성인이라 애초에 안 만든다.
+# `sideways glance` 는 대상 시선이 아니지만 여기로 보낸다 — Danbooru wiki 가
+# "usually looking to the side or looking back" 이라 하듯 **다른 시선에 얹히는
+# 수식어**라 단독으로 그리면 정면 응시와 구분이 안 된다(3회 재생성 실패, 2026-08-01).
+GAZE_EXTRA = {"sideways glance"}
+GAZE_TARGET_RE = re.compile(
+    r"\blooking\s+(back\s+|up\s+|down\s+)?at\s+"
+    r"(own\s+)?(viewer|another|partner|self|each other|camera"
+    r"|breasts?|penis|pussy|genitalia|anus|crotch|butt|ass|belly|stomach"
+    r"|chest|feet|foot|bulge|porn)\b")
+GAZE_TARGETS = Path("wildcards/thumb/_gaze_targets.txt")
+
+
+def _pose_pull(raw: dict) -> list[str]:
+    """이 빌더의 풀 밖에 있는 시선 태그. 이름으로 고른다. 대상 시선은 뺀다."""
+    return sorted(
+        (t for t, d in raw.items()
+         if int(d.get("freq", 0) or 0) >= POSE_PULL_CUT
+         and POSE_PULL_RE.search(t.lower())
+         and not GAZE_TARGET_RE.search(t.lower()) and t not in GAZE_EXTRA),
+        key=lambda x: -int((raw.get(x) or {}).get("freq", 0) or 0))
+
+
+def _write_gaze_targets(raw: dict) -> int:
+    """대상 시선 목록. 축이 아니라 UI 드롭다운용이라 `_` 로 시작한다."""
+    rows = sorted(
+        ((int(d.get("freq", 0) or 0), t) for t, d in raw.items()
+         if int(d.get("freq", 0) or 0) >= POSE_PULL_CUT
+         and (GAZE_TARGET_RE.search(t.lower()) or t in GAZE_EXTRA)),
+        reverse=True)
+    GAZE_TARGETS.write_text(
+        "# 대상 시선 — 그리드가 아니라 드롭다운으로 준다(썸네일로 구분되지 않는다).\n"
+        "# tools/build_pose_axes.py 가 만든다. 열: 태그 / 빈도\n"
+        + "\n".join(f"{t}\t{n}" for n, t in rows) + "\n", encoding="utf-8")
+    return len(rows)
+
 
 def _persona_tags() -> set[str]:
     """thumb_axes_build 가 만든 성격 축. 파일이 없으면 빈 집합(첫 빌드 순서 무관)."""
@@ -178,6 +237,16 @@ def main() -> int:
         if not path.exists():
             continue
         tags = [l.strip() for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        if src == "pose_solo":          # 끌어오는 것은 1인 패스에만 붙인다
+            known = set(tags)
+            tags = [x for x in tags
+                    if not GAZE_TARGET_RE.search(x.lower()) and x not in GAZE_EXTRA]
+            known = set(tags)
+            pulled = [x for x in _pose_pull(_raw) if x not in known]
+            tags.extend(pulled)
+            if pulled:
+                print(f"  시선 {len(pulled)}개 끌어옴: {', '.join(pulled[:6])}"
+                      + (" ..." if len(pulled) > 6 else ""))
         axes: dict[str, list[str]] = {}
         unmatched = []
         for t in tags:
@@ -273,6 +342,9 @@ def main() -> int:
             continue
         (todo / f"{k}.txt").write_text("\n".join(v) + "\n", encoding="utf-8")
         written.add(k)
+    n_target = _write_gaze_targets(_raw)
+    print(f"  대상 시선 {n_target}개 -> {GAZE_TARGETS} (드롭다운용, 생성 안 함)")
+
     stale = [p for p in todo.glob("pose_*.txt") if p.stem not in written]
     for p in stale:
         p.unlink()

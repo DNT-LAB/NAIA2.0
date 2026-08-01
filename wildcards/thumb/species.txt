@@ -2,13 +2,16 @@ horse girl
 cat girl
 fox girl
 demon girl
+furry
 elf
+monster girl
 dragon girl
 wolf girl
 rabbit girl
 oni
 dog girl
 ghost
+monster
 angel
 dragon
 witch
@@ -105,15 +108,15 @@ chipmunk girl
 kappa
 qilin (mythology)
 seraph
-phoenix
 komainu
-dullahan
+phoenix
 dolphin girl
-rito
+dullahan
 orca girl
+rito
 shadow (shadows house)
-female orc
 kneeless mermaid
+female orc
 chimera
 hedgehog girl
 bee girl
@@ -143,12 +146,12 @@ unicorn girl
 mushroom girl
 cerberus
 cockroach girl
-cheetah girl
 ferret girl
+cheetah girl
 whale girl
 ghost girl
-zebra girl
 slug girl
+zebra girl
 snake girl
 sphinx
 dryad
@@ -165,11 +168,11 @@ rhinoceros girl
 stoat girl
 chameleon girl
 jellyfish girl
-snail girl
 squid girl
+snail girl
 panther girl
-camel girl
 skunk girl
+camel girl
 chupacabra
 axolotl girl
 crab girl
@@ -177,7 +180,3 @@ lynx girl
 moose girl
 gnome
 mindflayer
-furry
-furry female
-monster girl
-monster

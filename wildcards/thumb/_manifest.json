@@ -334,5 +334,55 @@
   "palette_shape": "rect",
   "sensitive_axes": [
     "body_nsfw"
-  ]
+  ],
+  "sliders": {
+    "hair_length": {
+      "label": "길이",
+      "steps": [
+        {
+          "tag": "very short hair"
+        },
+        {
+          "tag": "short hair"
+        },
+        {
+          "tag": "medium hair"
+        },
+        {
+          "tag": "long hair"
+        },
+        {
+          "tag": "very long hair"
+        },
+        {
+          "tag": "absurdly long hair"
+        }
+      ],
+      "default": "long hair"
+    },
+    "breast_size": {
+      "label": "가슴",
+      "steps": [
+        {
+          "tag": "flat chest"
+        },
+        {
+          "tag": "small breasts"
+        },
+        {
+          "tag": "medium breasts"
+        },
+        {
+          "tag": "large breasts"
+        },
+        {
+          "tag": "huge breasts"
+        },
+        {
+          "tag": "gigantic breasts"
+        }
+      ],
+      "default": "medium breasts"
+    }
+  }
 }

@@ -6,6 +6,7 @@ embarrassed
 happy
 crying
 light smile
+shaded face
 surprised
 crying with eyes open
 angry

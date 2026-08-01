@@ -128,8 +128,8 @@ mismatched sclera
 huge eyebrows
 clock eyes
 long beard
-hidden face
 long nose
+hidden face
 bulging eyes
 chin piercing
 drop-shaped pupils
@@ -202,18 +202,18 @@ bad face
 hollow mouth
 puffy lips
 extra teeth
-disembodied tongue
 thick beard
+disembodied tongue
 tied beard
 nose shade
 double chin
 mystic eyes of death perception
 persona eyes
 partially shaded face
-too many eyes
 extra tongue
-spiral-only eyes
+too many eyes
 artificial eyes
+spiral-only eyes
 heart cheeks
 shiny lips
 long mustache

@@ -9,6 +9,7 @@ horse ears
 wolf ears
 extra ears
 dog ears
+kemonomimi mode
 cow ears
 mouse ears
 tiger ears
@@ -68,13 +69,13 @@ tamandua ears
 hamster ears
 elephant ears
 eevee ears
-antelope ears
 armadillo ears
+antelope ears
 ferret ears
 komainu ears
 unaligned ears
-lynx ears
 pikachu ears
+lynx ears
 donkey ears
 skunk ears
 rhinoceros ears
@@ -95,4 +96,3 @@ boar ears
 detached ears
 chinchilla ears
 dragon ears
-kemonomimi mode

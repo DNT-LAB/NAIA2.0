@@ -1,5 +1,6 @@
 lifting own clothes
 grabbing
+facing viewer
 sleeping
 wading
 walking
@@ -10,6 +11,7 @@ hugging object
 flying
 adjusting clothes
 running
+facing away
 jumping
 wind lift
 talking
@@ -47,6 +49,7 @@ fingers together
 hair tucking
 swimming
 bird on head
+worried look
 exercise
 hair twirling
 showering
@@ -114,6 +117,7 @@ squinting
 shopping
 laundry
 ruffling hair
+satisfied look
 bunching hair
 toilet use
 struggling

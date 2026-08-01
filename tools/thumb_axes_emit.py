@@ -120,6 +120,15 @@ def _sections(js_name):
 _OBJ_SECTIONS = _sections("_obj_axes.json")
 _ANI_SECTIONS = _sections("_ani_axes.json")
 _FX_SECTIONS = _sections("_fx_axes.json")
+# 구도·기타텍스트. 전에는 두 슬롯 다 탐색기(트리)였다 — 그림이 한 장도 없었기 때문이다.
+# 2026-08-01 에 242장을 만들어 그리드로 바꿨다. `_sections` 가 .txt 존재를 확인하므로
+# 축을 지우면 여기서도 자동으로 빠진다(`view_gaze` 통합 때 그렇게 빠졌다).
+# 시선(`pose_gaze`)은 자세가 아니라 구도다 — "어디를 보는가"는 프레이밍·시점과 같은
+# 질문이다(사용자 판단 2026-08-01). `_pose_axes.json` 에서 오지만 구도 슬롯이 쓴다.
+_GAZE_SECTION = [("thumb", "시선", "pose_gaze")]
+_POSE_SECTIONS = [x for x in _POSE_SECTIONS if x[2] != "pose_gaze"]
+_VIEW_SECTIONS = _sections("_view_axes.json") + _GAZE_SECTION
+_META_SECTIONS = _sections("_meta_axes.json")
 
 # 슬롯 = 사용자가 인지하는 카테고리. 그 안에 축(팔레트/슬라이더/썸네일/탐색)을 배치한다.
 # 팝업이 축을 모아 보여주므로 좌측 슬롯 수를 늘리지 않는다.
@@ -349,7 +358,8 @@ _referenced.update(p.stem for p in SRC.glob("pose_*_m*.txt"))
 # 배경 축도 SLOTS 가 아니라 프론트의 SCENE_SLOTS(LOC_SECTIONS)가 참조한다.
 # 빼면 THUMB_TAGS 에 태그가 없어 씬 슬롯이 빈 그리드를 그린다 — 다인원과 같은 함정.
 _referenced.update(_rf for _kind, _lb, _rf in _LOC_SECTIONS)
-_referenced.update(_rf for _s in (_OBJ_SECTIONS, _ANI_SECTIONS, _FX_SECTIONS)
+_referenced.update(_rf for _s in (_OBJ_SECTIONS, _ANI_SECTIONS, _FX_SECTIONS,
+                                 _VIEW_SECTIONS, _META_SECTIONS)
                    for _kind, _lb, _rf in _s)
 # 성인 도감 전체. 앞 8축은 노출·부위(먼저 만든 것), 뒤 16축은 행위 도감이다.
 # **순서가 곧 화면 순서다** — 무엇을 고르러 왔는지에 가까운 순으로 둔다:
@@ -628,6 +638,82 @@ out.append("};")
 out.append("")
 out.append("// 씬 슬롯 '배경' 전용. 사람이 주인공이 아니라 프레이밍 전제가 다르다 —")
 out.append("// 실내는 `scenery` 를 빼야 살고 날씨는 있어야 산다(파일럿 25장).")
+# 색·무늬 낱말 목록. 사전 칩에서 색 조합(`black pants`·`blue jacket`)을 **가려내
+# 숨기기 위한** 것이다 — 색·무늬는 팝업 상단 팔레트에 이미 있어 두 번 낼 이유가 없다.
+# 값(색)은 지금 쓰지 않지만 낱말과 함께 두면 나중에 스와치가 필요할 때 바로 쓴다.
+# 여기 없는 낱말은 조합으로 보지 않는다(`holding`·`implied` 처럼 색이 아닌 접두 차단).
+COLOR_SWATCH = {
+    "black": "#1b1b1f", "white": "#f2f2f2", "red": "#cf2b2b", "blue": "#2b7fd4",
+    "green": "#3f9d54", "yellow": "#e8c53a", "pink": "#e87fae", "purple": "#8a5cc4",
+    "brown": "#7a4a24", "grey": "#8a8a90", "gray": "#8a8a90", "orange": "#e08a2e",
+    "aqua": "#3fc9c9", "silver": "#c3c7cc", "gold": "#d4af37", "beige": "#d9c49a",
+    "navy": "#26325c", "light blue": "#8ec7ef", "dark blue": "#1e3a6b",
+    "two-tone": "linear-gradient(135deg,#f2f2f2 50%,#1b1b1f 50%)",
+    "multicolored": "linear-gradient(135deg,#cf2b2b,#e8c53a,#3f9d54,#2b7fd4)",
+    "striped": "repeating-linear-gradient(45deg,#f2f2f2 0 3px,#2b7fd4 3px 6px)",
+    "checkered": "repeating-conic-gradient(#f2f2f2 0 25%,#1b1b1f 0 50%) 0/6px 6px",
+    "plaid": "repeating-linear-gradient(0deg,#8a3b3b 0 3px,#d9c49a 3px 6px)",
+    "polka dot": "radial-gradient(#1b1b1f 30%,#f2f2f2 31%) 0/5px 5px",
+}
+out.append("// 색·무늬 낱말 -> 스와치 색. 사전 칩에서 색 조합을 가려내 숨기는 데 쓴다 —")
+out.append("// 색·무늬는 팝업 상단 팔레트에 이미 있어 두 번 낼 이유가 없다.")
+out.append("// 여기 없는 낱말은 조합으로 보지 않는다(`holding`·`implied` 같은 접두 차단).")
+out.append("export const COLOR_SWATCH = {")
+for _w, _c in COLOR_SWATCH.items():
+    out.append(f"  {js(_w)}: {js(_c)},")
+out.append("};")
+out.append("")
+_VIEW_GLOBAL = json.loads((SRC / "_view_axes.json").read_text(encoding="utf-8")).get("global", [])
+out.append("// 이미지 전체에만 걸리는 구도 태그. 판정 기준: **한 이미지 안에서 두 캐릭터가**")
+out.append("// **서로 다른 값을 가질 수 있는가.** `from behind` 는 가능(캐릭터별),")
+out.append("// `isometric`·`female pov`·`multiple views` 는 불가(캔버스·카메라가 하나다).")
+out.append("// 캐릭터 슬롯은 이것을 빼고 보여준다. 씬 슬롯은 전부 보여준다 — 캐릭터별")
+out.append("// 태그도 이미지 전체에 걸 수 있기 때문이다(반대는 성립하지 않는다).")
+out.append("export const VIEW_GLOBAL_TAGS = [")
+for _t in _VIEW_GLOBAL:
+    out.append(f"  {js(_t)},")
+out.append("];")
+out.append("")
+# 대상 시선의 한글 라벨. 목록 자체는 `_gaze_targets.txt` 가 SSOT 다 —
+# 여기에 없는 태그가 그 파일에 있으면 빌드가 실패한다(조용히 빠지면 영영 안 보인다).
+# 성인 시선(`looking at genitalia` 등)은 넣지 않는다 — 성인은 별도 UI 소관이다.
+GAZE_LABEL = {
+    "looking at viewer": "관객(카메라)을 봄",
+    "looking at another": "다른 사람을 봄",
+    "looking at partner": "상대를 봄",
+    "looking down at viewer": "관객을 내려다봄",
+    "looking up at viewer": "관객을 올려다봄",
+    "looking back at another": "뒤돌아 다른 사람을 봄",
+    "looking back at partner": "뒤돌아 상대를 봄",
+    "looking down at another": "다른 사람을 내려다봄",
+    "looking up at another": "다른 사람을 올려다봄",
+    "looking down at partner": "상대를 내려다봄",
+    "looking up at partner": "상대를 올려다봄",
+    "looking down at self": "자기 몸을 내려다봄",
+    "looking back at self": "뒤돌아 자기를 봄",
+    "looking at belly": "배를 봄",
+    "looking at own belly": "자기 배를 봄",
+    "sideways glance": "곁눈질",
+}
+_GAZE_SRC = SRC / "_gaze_targets.txt"
+_GAZE = []
+if _GAZE_SRC.exists():
+    for _line in _GAZE_SRC.read_text(encoding="utf-8").splitlines():
+        if not _line.strip() or _line.startswith("#"):
+            continue
+        _tag, _, _n = _line.partition("\t")
+        _tag = _tag.strip()
+        if _tag in GAZE_LABEL:
+            _GAZE.append((_tag, GAZE_LABEL[_tag], int(_n or 0)))
+out.append("// 대상 시선 — 썸네일로 구분되지 않아 그리드 대신 다중 선택 목록으로 준다.")
+out.append("// `looking at another` 와 `looking at partner` 는 상대가 프레임에 없으면")
+out.append("// 같아 보인다. 캐릭터 프롬프트에 들어간다(누구의 시선인지가 붙어야 산다).")
+out.append("// 성인 시선은 여기 없다 — 별도 UI 소관이다.")
+out.append("export const GAZE_TARGETS = [")
+for _t, _lb, _n in _GAZE:
+    out.append(f"  {{tag: {js(_t)}, label: {js(_lb)}, n: {_n}}},")
+out.append("];")
+out.append("")
 out.append("export const LOC_SECTIONS = [")
 for _k, _lb, _rf in _LOC_SECTIONS:
     out.append(f"  {{kind: 'thumb', label: {js(_lb)}, ref: {js(_rf)}}},")
@@ -635,7 +721,9 @@ out.append("];")
 out.append("")
 for _name, _secs, _ko in (("OBJ_SECTIONS", _OBJ_SECTIONS, "사물"),
                           ("ANI_SECTIONS", _ANI_SECTIONS, "동물"),
-                          ("FX_SECTIONS", _FX_SECTIONS, "효과·기호")):
+                          ("FX_SECTIONS", _FX_SECTIONS, "효과·기호"),
+                          ("VIEW_SECTIONS", _VIEW_SECTIONS, "구도"),
+                          ("META_SECTIONS", _META_SECTIONS, "기타·텍스트")):
     out.append(f"// 씬 슬롯 '{_ko}' 전용.")
     out.append(f"export const {_name} = [")
     for _k, _lb, _rf in _secs:

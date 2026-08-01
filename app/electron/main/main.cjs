@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, WebContentsView, dialog, ipcMain, Menu, session, shell } = require("electron");
+const { app, BrowserWindow, WebContentsView, dialog, ipcMain, Menu, screen, session, shell } = require("electron");
 const { spawn, spawnSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -2576,6 +2576,57 @@ ipcMain.handle("naia:start-bootstrap-migration", async () => {
 ipcMain.handle("naia:open-browser", () => shell.openExternal(`${backendUrl}/?desktop_shell=1`));
 ipcMain.handle("naia:open-data-folder", () => shell.openPath(runtimeDataRoot()));
 ipcMain.handle("naia:open-logs", () => openRuntimeSubfolder("logs"));
+
+// Interactive 의 태그 사전 플로트는 팝업 오른쪽에 258px 가 남아야 뜬다. Electron 창이
+// 그보다 좁으면 아무 표시 없이 사라져 기능이 고장난 것처럼 보였다(2026-07-30).
+// 렌더러가 필요한 CSS 폭을 알려주면 여기서 두 단계로 맞춘다.
+//   1) 창을 넓힌다 — 작업 영역을 넘지 않는 선에서. 대개 여기서 해결된다.
+//   2) 그래도 모자라면 줌을 한 단계씩 낮춘다(ZOOM_MIN 0.8 까지).
+// 줌을 먼저 낮추지 않는 이유: 창을 넓히는 편이 글자 크기를 지켜 준다.
+ipcMain.handle("naia:fit-width", (_event, cssWidth) => {
+  const need = Math.max(320, Math.round(Number(cssWidth) || 0));
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return { ok: false, reason: "no-window" };
+  const cssNow = () => {
+    let zoom = 1.0;
+    try { zoom = win.webContents.getZoomFactor() || 1.0; } catch (_e) { zoom = loadZoomFactor(); }
+    const [w] = win.getContentSize();
+    return { zoom, css: Math.floor(w / zoom) };
+  };
+  const before = cssNow();
+  let resized = false;
+  // 1단계 — 창 넓히기. 최대화 상태에서는 늘릴 수 없으니 건너뛴다.
+  if (before.css < need && !win.isMaximized() && !win.isFullScreen()) {
+    try {
+      const area = screen.getDisplayMatching(win.getBounds()).workArea;
+      const b = win.getBounds();
+      const [cw] = win.getContentSize();
+      const chrome = b.width - cw;                       // 테두리 폭
+      const wantContent = Math.ceil(need * before.zoom);
+      const wantWidth = Math.min(area.width, wantContent + chrome);
+      if (wantWidth > b.width) {
+        let x = b.x;
+        if (x + wantWidth > area.x + area.width) x = Math.max(area.x, area.x + area.width - wantWidth);
+        win.setBounds({ x, y: b.y, width: wantWidth, height: b.height });
+        resized = true;
+      }
+    } catch (_error) {}
+  }
+  // 2단계 — 그래도 모자라면 줌을 단계별로 낮춘다.
+  let zoomed = false;
+  let cur = cssNow();
+  let guard = 0;
+  while (cur.css < need && cur.zoom > ZOOM_MIN + 1e-9 && guard++ < 8) {
+    const next = clampZoom(cur.zoom - ZOOM_STEP);
+    if (next >= cur.zoom) break;
+    try { win.webContents.setZoomFactor(next); } catch (_error) { break; }
+    saveZoomFactor(next);
+    zoomed = true;
+    cur = cssNow();
+  }
+  return { ok: cur.css >= need, need, cssWidth: cur.css, zoom: cur.zoom, resized, zoomed,
+           before: before.css };
+});
 ipcMain.handle("naia:pick-directory", async () => {
   const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null;
   const options = { properties: ["openDirectory"], title: "이전 NAIA2.0 데이터 폴더 선택" };

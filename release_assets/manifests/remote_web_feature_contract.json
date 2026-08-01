@@ -603,6 +603,30 @@
       "routes": [
         {"method": "GET", "path": "/api/prompt-engineering/category-tags", "smoke": "non_destructive"}
       ]
+    },
+    {
+      "id": "interactive_mode",
+      "name": "Interactive prompt composer (slot/axis thumbnail picker)",
+      "source_files": [
+        "app/web/remote/js/features/interactivePanel.mjs",
+        "app/web/remote/js/features/interactiveAxes.mjs",
+        "app/web/remote/js/features/interactiveBrowse.mjs",
+        "app/web/remote/js/features/interactiveAutocomplete.mjs",
+        "app/web/remote/js/features/eventCorpusClient.mjs",
+        "app/backend/server/interactive_thumbnail_routes.py",
+        "app/backend/server/interactive_advice_routes.py",
+        "core/interactive_browse_index.py",
+        "core/interactive_pose_evidence.py",
+        "core/interactive_tag_dependency.py"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/interactive-thumb/index", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/interactive-thumb", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/interactive-advice", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/interactive-advice/batch", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/interactive-advice/conflicts", "smoke": "non_destructive"}
+      ]
     }
   ],
   "data_dependencies": [
@@ -683,6 +707,12 @@
       "paths": ["data/artist_thumbnail_choices.json", "data/character_thumbnails/**"],
       "provisioning": "downloader",
       "provisioned_by": "POST /api/artist-thumb/download"
+    },
+    {
+      "feature": "interactive_mode",
+      "description": "Interactive thumbnail pack (<axis>/<tag> -> base64 webp). Built by tools/build_interactive_thumbnails.py from generated PNGs. The panel renders an empty '\uc900\ubc84 \uc911' cell for any tag missing from the pack, so a stale pack degrades gracefully instead of breaking the UI. The right-hand tag-dictionary aside additionally needs data/interactive_tags.json (declared bundled under prompt_tools): without it TagRelationRanker returns no implications/related, /api/tag/lookup omits those fields, and the aside renders empty with no error. That is exactly how it failed on 2026-07-30 - the file was absent from the portable build.",
+      "paths": ["data/interactive_thumbnails.json"],
+      "provisioning": "bundled"
     }
   ],
   "required_live_smoke": [

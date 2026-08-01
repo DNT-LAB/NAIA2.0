@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld("naiaShell", {
   openBrowser: () => ipcRenderer.invoke("naia:open-browser"),
   openDataFolder: () => ipcRenderer.invoke("naia:open-data-folder"),
   openLogs: () => ipcRenderer.invoke("naia:open-logs"),
+  // 창 폭을 맞춘다 — 1) 창 넓히기 2) 모자라면 줌 단계 축소. Interactive 태그 사전용.
+  fitWidth: (cssWidth) => ipcRenderer.invoke("naia:fit-width", cssWidth),
   pickDirectory: () => ipcRenderer.invoke("naia:pick-directory"),
   pickSaveDirectory: () => ipcRenderer.invoke("naia:pick-save-directory"),
   checkUpdate: () => ipcRenderer.invoke("naia:check-update"),

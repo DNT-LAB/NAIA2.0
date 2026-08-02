@@ -1,2 +1,0 @@
-print dress
-vertical-striped skirt

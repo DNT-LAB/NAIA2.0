@@ -1,3 +1,0 @@
-print shirt
-vertical-striped shirt
-turtleneck shirt

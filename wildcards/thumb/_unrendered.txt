@@ -1,0 +1,18 @@
+# 큐에 올리지 않는 것 — 그림이 안 나온 것, 그리고 안 나올 것.
+#
+# `wildcards/nsfw/_unrendered.txt` 와 같은 형식·같은 목적이다. 목록에 남겨두면 매번
+# "남음 N장" 으로 뜨고 그때마다 왜 안 만들었는지를 다시 조사하게 된다. 축 파일에서는
+# 지우지 않는다 — 태그 자체는 사용자가 손으로 쓸 수 있어야 하고, UI 그리드는 팩 키
+# 유무로 걸러지므로 빈칸이 생기지 않는다.
+#
+# 형식: 축<TAB>태그<TAB>사유
+# 도구(tools/thumb_todo.py)는 앞 두 칸만 본다. 사유는 사람이 읽는 것이다.
+
+# 2026-07-30 현재 비어 있다.
+#
+# 한때 여기 있었으나 해소된 것:
+#   body_type/oppai loli    — 내가 정책상 뺐는데 사용자가 착의 + rating:general 로 직접 생성.
+#   cloth_style/painted clothes — 내 배치로 두 번 실패했으나 사용자가 직접 생성(물감 흘러내림).
+# 축에서 통째로 제거해 대상이 아니게 된 것(사용자 결정):
+#   loc_backdrop/transparent background — NAI 가 흰 배경으로 그려 simple background 와 구별 불가.
+#   species_male/monster boy            — 배치 둘로 두 번 돌려도 수인성이 나오지 않았다.

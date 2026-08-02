@@ -1,0 +1,7 @@
+# 성인 meta 태그. **그림을 만들지 않는다**(사용자 정책) — 도감 분류와
+# 와일드카드까지만이다. 축에 넣지 말 것.
+# 판정: Danbooru rating 실측 explicit >= 70% (data/tag_rating.json). 이름으로 추정하지 않는다.
+# 열: 태그 / 빈도 / explicit%
+nude	269994	73.1
+completely nude	109029	76.2
+interracial	14399	89.6

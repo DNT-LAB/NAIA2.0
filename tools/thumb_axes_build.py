@@ -468,10 +468,11 @@ if _FROM_POSE.exists():
     _extra = [l.strip() for l in _FROM_POSE.read_text(encoding="utf-8").splitlines() if l.strip()]
     _seen = set(AXES["expression"])
     AXES["expression"] += [t for t in _extra if t in raw and t not in _seen]
-# `Expressions` 그룹(영문 복수형)이 통째로 빠져 있었다 — 28개, 최상위가
-# `seductive` 168,242 다. 기호 표정은 별도 축이라 여기서 뺀다.
-_seen_expr = set(AXES["expression"]) | set(EXPRESSION_SYMBOL)
-AXES["expression"] += _pull_by_group(("Expressions",), skip=_seen_expr)
+# `Expressions` 그룹(영문 복수형)을 한 번 끌어왔다가 **되돌렸다**(2026-08-02).
+# 33개 전부가 Danbooru 풀(140만 건)에 없다 — e621 어휘다. `source` 필드는 판별에
+# 못 쓴다(패션 그룹도 비어 있는데 100% Danbooru 다). **Danbooru 풀 존재 여부**가
+# 정확한 판별자다. 사용자 지시로 e621 은 제외한다.
+#   AXES["expression"] += _pull_by_group(("Expressions",), skip=...)
 
 AXES["expression_symbol"] = [t for t in EXPRESSION_SYMBOL if t in raw]
 # 홍조는 `홍조·눈물·땀` 축이 이미 담당한다.

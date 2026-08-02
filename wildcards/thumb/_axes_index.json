@@ -4,7 +4,7 @@
   "소비자는 tools/thumb_axis_index.py 의 is_axis() 를 쓴다.",
   "여기 없는 wildcards/thumb/*.txt 는 중간 산출물이거나 미배선이다."
  ],
- "count": 158,
+ "count": 159,
  "axes": [
   "ani_aqua",
   "ani_bird",
@@ -152,6 +152,7 @@
   "pose_leg_m",
   "pose_mouth",
   "pose_mouth_m",
+  "pose_multi_relation",
   "pose_posture",
   "pose_posture_2",
   "pose_posture_m",

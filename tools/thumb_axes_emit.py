@@ -135,6 +135,9 @@ _FX_SECTIONS = _sections("_fx_axes.json")
 _GAZE_SECTION = [("thumb", "시선", "pose_gaze")]
 _POSE_SECTIONS = [x for x in _POSE_SECTIONS if x[2] != "pose_gaze"]
 _VIEW_SECTIONS = _sections("_view_axes.json") + _GAZE_SECTION
+# 관계(siblings·couple·twins)는 2명 이상이 필요하다 — 다인원 자세 슬롯 소관.
+_RELATION_SECTION = ([("thumb", "관계", "pose_multi_relation")]
+                     if (SRC / "pose_multi_relation.txt").exists() else [])
 _META_SECTIONS = _sections("_meta_axes.json")
 
 # 슬롯 = 사용자가 인지하는 카테고리. 그 안에 축(팔레트/슬라이더/썸네일/탐색)을 배치한다.
@@ -413,6 +416,7 @@ assert not (_have_img - _wired), f"성인 축 배선 누락: {sorted(_have_img -
 # 성인 도감 축은 SLOTS 가 아니라 프론트의 ADULT_SECTIONS 가 참조한다.
 # 빼면 THUMB_TAGS 에 태그가 없어 성인 슬롯이 빈 그리드를 그린다
 # — 다인원 자세·배경에서 이미 두 번 겪은 함정이다(세 번째).
+_referenced.update(_rf for _k,_l,_rf in _RELATION_SECTION)
 _referenced.update(_ADULT_ORDER)
 
 _skipped_axes = [k for k in _axis_files if k not in _referenced]
@@ -795,6 +799,8 @@ out.append("export const GLOSS_TAGS = " + js({
 }) + ";")
 out.append("")
 out.append("export const POSE_MULTI_SECTIONS = [")
+for _kind, _lb, _rf in _RELATION_SECTION:
+    out.append(f"  {{kind: 'thumb', label: {js(_lb)}, ref: {js(_rf)}}},")
 for _ax in _POSE_MULTI:
     out.append(f"  {{kind: 'thumb', label: {js(_pose_axes['label'][_ax])}, ref: {js(_ax)}}},")
 out.append("];")

@@ -27,7 +27,11 @@
 사용: python tools/build_pending_wildcards.py
 """
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tools.thumb_axis_index import is_axis  # noqa: E402
 
 THUMB = Path("wildcards/thumb")
 PACK = Path("data/interactive_thumbnails.json")
@@ -73,18 +77,9 @@ def main() -> int:
         skip = {l.strip() for l in SKIP.read_text(encoding="utf-8").splitlines()
                 if l.strip() and not l.startswith("#")}
 
-    # **선언된 축만 본다.** `wildcards/thumb/*.txt` 에는 축이 아닌 중간 산출물이 섞여
-    # 있다(`pose_solo`·`pose_multi`·`pose_drop` — 실측 2,118개가 축인 척 잡혔다).
-    # 축의 SSOT 는 `_manifest.json` 의 axes 와 `_*_axes.json` 의 label 키다.
-    declared: set[str] = set()
-    man = THUMB / "_manifest.json"
-    if man.exists():
-        declared |= {str(a.get("key")) for a in json.loads(man.read_text(encoding="utf-8")).get("axes", [])}
-    for extra in THUMB.glob("_*_axes.json"):
-        declared |= set(json.loads(extra.read_text(encoding="utf-8")).get("label", {}))
-    declared.discard("")
-    if not declared:
-        raise SystemExit("축 선언을 못 읽었다. _manifest.json / _*_axes.json 확인.")
+    # 축 판정은 emit 이 내는 인덱스가 SSOT 다(tools/thumb_axis_index.py). 전에는
+    # `_manifest.json`+`_*_axes.json` 을 직접 합쳤는데 **cloth_* 26축이 어느 쪽에도
+    # 선언돼 있지 않아** 대기 목록에서 통째로 빠졌다(실측: cloth_pattern 29장 누락).
 
     OUT.mkdir(parents=True, exist_ok=True)
     for old in OUT.glob("*.txt"):
@@ -92,7 +87,7 @@ def main() -> int:
 
     rows, total, dropped_adult, shipped_adult = [], 0, [], []
     for src in sorted(THUMB.glob("*.txt")):
-        if src.stem.startswith("_") or src.stem not in declared:
+        if not is_axis(src.stem):
             continue
         tags = [l.strip() for l in src.read_text(encoding="utf-8").splitlines() if l.strip()]
         made = have.get(src.stem, set())

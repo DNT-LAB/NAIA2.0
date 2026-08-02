@@ -92,8 +92,8 @@ mummy
 pegasus
 saiyan
 blob
-owl girl
 monkey girl
+owl girl
 fallen angel
 pikmin (creature)
 dwarf
@@ -112,11 +112,11 @@ phoenix
 komainu
 dolphin girl
 dullahan
-orca girl
 rito
+orca girl
 shadow (shadows house)
-kneeless mermaid
 female orc
+kneeless mermaid
 chimera
 hedgehog girl
 bee girl
@@ -164,19 +164,19 @@ lich
 ant girl
 giraffe girl
 futakuchi-onna
-stoat girl
 rhinoceros girl
+stoat girl
 chameleon girl
 jellyfish girl
 squid girl
 snail girl
 panther girl
-skunk girl
 camel girl
-chupacabra
+skunk girl
 axolotl girl
-crab girl
+chupacabra
 lynx girl
+crab girl
 moose girl
 gnome
 mindflayer

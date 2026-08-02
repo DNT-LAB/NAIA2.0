@@ -141,3 +141,6 @@ leather vest
 feather coat
 jacket over hoodie
 tan sweater
+print shirt
+vertical-striped shirt
+turtleneck shirt

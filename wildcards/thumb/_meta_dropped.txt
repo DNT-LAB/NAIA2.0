@@ -1,0 +1,324 @@
+# freq>=300 인 meta 태그 중 축에 넣지 않은 것. 되살리려면 PICK 에 옮겨 적는다.
+# 성인은 여기 없다 -> _meta_adult.txt
+1girl	3302760
+solo	2748259
+multiple girls	712811
+1boy	704526
+2girls	480614
+male focus	328122
+virtual youtuber	258303
+alternate costume	244073
+solo focus	204833
+multiple boys	202713
+looking at another	152018
+2boys	131875
+3girls	112176
+chibi	104411
+sketch	73248
+no humans	72110
+alternate hairstyle	60753
+eyes visible through hair	55026
+transparent background	51372
+4girls	49823
+1other	38888
+traditional media	37665
+6+girls	35246
+3boys	32722
+otoko no ko	29812
+alternate breast size	26907
+one-hour drawing challenge	26608
+faceless	26071
+meme	25925
+5girls	25435
+mature male	24774
+eyebrows hidden by hair	20804
+faceless male	19940
+official alternate hairstyle	19513
+age difference	19127
+ass focus	17339
+mature female	16356
+height difference	15923
+borrowed character	15138
+4boys	14165
+foot focus	13764
+logo	13597
+mini person	12907
+alternate hair length	12425
+6+boys	12380
+music	12151
+brother and sister	11393
+alternate color	11383
+dakimakura (medium)	11363
+minigirl	10990
+patreon logo	10910
+hip focus	10827
+realistic	10516
+animal focus	9974
+alternate eye color	8848
+bishounen	8737
+retro artstyle	7647
+vehicle focus	7071
+sample watermark	6793
+painting (medium)	6782
+5boys	6727
+name connection	6620
+other focus	6343
+official alternate hair length	6167
+hair censor	5945
+bad anatomy	5940
+text focus	5838
+hair over breasts	5644
+marker (medium)	5595
+trait connection	5368
+content rating	5313
+manly	5184
+watercolor (medium)	5094
+pixel art	4945
+official style	4811
+3d	4807
+graphite (medium)	4733
+voice actor connection	4578
+2021	4511
+ambiguous gender	4488
+hatching (texture)	4475
+photo (medium)	4372
+food focus	4347
+2022	4314
+artist self-insert	4251
+1990s (style)	4129
+costume switch	3963
+shiny pokemon	3846
+2023	3791
+weibo username	3766
+hot	3611
+everyone	3594
+ranguage	3531
+pun	3475
+company connection	3407
+pervert	3305
+artistic error	3213
+lineart	3209
+clothed pokemon	3115
+thank you	3105
+2020	3061
+brand name imitation	3035
+still life	2987
+colored pencil (medium)	2893
+gap (touhou)	2796
+alternate universe	2773
+2019	2653
+sangvis ferri	2647
+object namesake	2641
+2018	2622
+super saiyan	2599
+scene reference	2568
+weibo logo	2522
+2017	2404
+2016	2391
+profanity	2380
+death	2373
+time paradox	2312
+evolutionary line	2285
+1980s (style)	2208
+fewer digits	2133
+single ear cover	2107
+surreal	2061
+nengajou	2054
+mega pokemon	2052
+extra	1932
+pixiv id	1923
+cold	1903
+cropped shoulders	1886
+alternate legwear	1823
+fanbox username	1785
+corpse	1783
+deviantart username	1779
+typo	1749
+team rocket	1664
+walk-in	1662
+manga (object)	1626
+retrofit (azur lane)	1557
+stuck	1534
+instagram username	1532
+pixiv username	1530
+look-alike	1488
+rainbow order	1464
+eye focus	1457
+cameo	1457
+creature and personification	1454
+6+others	1449
+debt	1441
+trick or treat	1438
+faux traditional media	1415
+alternate headwear	1400
+timestamp	1391
+faux figurine	1387
+creator connection	1374
+age progression	1362
+alternate form	1357
+product placement	1344
+shinsengumi	1333
+petals on liquid	1301
+historical name connection	1264
+k/da (league of legends)	1249
+bad feet	1238
+pokedex number	1215
+yes	1201
+in-franchise crossover	1169
+breast focus	1126
+mixed media	1113
+human scabbard	1097
+painterly	1094
+linear hatching	1067
+what	1066
+bad proportions	1064
+art tools in frame	1057
+instagram logo	1042
+bad perspective	1037
+portrait (object)	1011
+weight conscious	1011
+utaite	1007
+mascot	955
+no lineart	921
+poke ball theme	912
+squidbeak splatoon	898
+rhodes island logo	891
+soap censor	878
+group name	878
+ears visible through hair	878
+hidden eyes	872
+post-apocalypse	871
+alternate muscle size	871
+millipen (medium)	860
+if they mated	854
+akeome	852
+riyo (lyomsnpmp) (style)	842
+borrowed design	841
+tarot (medium)	831
+eldritch abomination	821
+pectoral focus	817
+truth	784
+tumblr username	776
+holomyth	775
+2015	772
+chaldea logo	766
+audience	761
+toon (style)	752
+child's drawing	750
+voice actor	735
+character censor	731
+crisis management form (machimazo)	727
+
+/	727
+possessed	727
+character age	723
+ink (medium)	717
+super saiyan 1	715
+zeon	705
+tag	703
+shiny and normal	691
+gumroad username	681
+motherly	679
+rhine lab logo	675
+acrylic paint (medium)	675
+craft essence (fate)	674
+calendar (medium)	674
+4others	665
+square 4koma	664
+imperial japanese army	657
+alternate hair ornament	655
+team skull	648
+odd one out	643
+headless	638
+like and retweet	621
+prototype design	621
+country connection	608
+mtu virus	608
+meta	605
+mecha focus	597
+super saiyan 4	595
+hair between breasts	579
+height	572
+heart lock (kantai collection)	563
+soviet	553
+bad end	552
+inktober	547
+hair over one breast	545
+hand focus	543
+weapon focus	536
+western comics (style)	535
+ad	533
+ligne claire	523
+wrong foot	516
+pokemon move	512
+elite ii (arknights)	502
+paradeus	497
+araki hirohiko (style)	491
+deviantart logo	490
+404 (girls' frontline)	489
+nib pen (medium)	488
+calligraphy brush (medium)	487
+takeuchi takashi (style)	485
+watercolor pencil (medium)	484
+selfie stick	484
+bkub (style)	483
+depth charge	476
+zun (style)	467
+kotoyoro	466
+pinup (style)	463
+holocouncil	456
+math	446
+bad leg	442
+how to	441
+out of character	437
+toriyama akira (style)	437
+wonderlands x showtime (project sekai)	435
+player 2	429
+nyan	426
+coronavirus pandemic	426
+v4x	413
+bad arm	408
+no hair ornament	407
+deformed	402
+inkling (language)	402
+flower on liquid	400
+dithering	393
+2000s (style)	393
+2014	388
+hairstyle switch	387
+stamp mark	386
+vehicle name	386
+good end	375
+5others	371
+team magma	369
+incoming punch	363
+kansaiben	363
+sailor senshi	362
+salmon run (splatoon)	359
+art nouveau	358
+so moe i'm gonna die!	357
+siren (azur lane)	356
+afterword	354
+spirit blossom (league of legends)	353
+pen (medium)	351
+season connection	350
+hair focus	349
+quintuplets	346
+ballpoint pen (medium)	339
+mundane utility	337
+vanripper (style)	335
+absolutely everyone	334
+alphes (style)	334
+snapchat	331
+nazi	330
+youtube logo	330
+hololive fantasy	330
+text censor	328
+alternate shiny pokemon	326
+reiwa	322
+uncle and niece	319
+vivid bad squad (project sekai)	309
+griffin & kryuger	305
+girly boy	305
+artist self-reference	305
+alternate footwear	301

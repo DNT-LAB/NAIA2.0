@@ -413,6 +413,51 @@ BLUSH_MISFILED = [
     'body blush', 'shoulder blush', 'knee blush', 'full-body blush',
 ]
 FACE_NSFW = []
+
+# ── 그룹 이름이 갈려 빠진 것을 끌어온다 ──────────────────────────────────────
+# 태그 사전 대조에서 `Expressions` 그룹 28개가 통째로 빠진 것을 찾았다(2026-08-02).
+# 축 빌더는 `Expression_Action` 만 훑는데 같은 개념이 다른 이름으로도 있다.
+# 목록을 적지 말고 그룹으로 끌어온다 — 이름이 또 갈려도 규칙만 고치면 된다.
+from tools.nsfw_explicit_vocab import is_explicit_vocab as _is_explicit_vocab
+
+_PULL_CUT = 3000
+
+
+def _other_axis_tags():
+    """다른 빌더가 이미 가져간 태그. 안 빼면 한 태그가 두 축에 들어가고,
+    팩 키가 `<축>/<태그>` 하나뿐이라 뒤쪽 축이 영영 안 찬다(실측: looking pleasured
+    가 pose_gaze 와 expression 양쪽에 들어갔다)."""
+    own = set()
+    for _p in list(Path("wildcards/thumb").glob("*.txt")) + list(Path("wildcards/nsfw").glob("*.txt")):
+        if _p.stem.startswith("_") or _p.stem.startswith("expression"):
+            continue          # 자기 축은 빼면 두 번째 실행에서 비어 버린다
+        for _l in _p.read_text(encoding="utf-8").splitlines():
+            if _l.strip() and not _l.startswith("#"):
+                own.add(_l.strip())
+    return own
+
+
+_OTHER_AXIS = _other_axis_tags()
+
+
+def _pull_by_group(groups, subgroups=None, skip=()):
+    """지정 그룹(과 서브그룹)에서 빈도 컷 이상인 태그. 이미 다른 축이 가진 것은 뺀다."""
+    out = []
+    for _t, _d in raw.items():
+        if int(_d.get("freq", 0) or 0) < _PULL_CUT:
+            continue
+        _g = str(_d.get("group", "") or "")
+        if not any(_g == _x or _g.startswith(_x) for _x in groups):
+            continue
+        if subgroups is not None and str(_d.get("subgroup", "") or "") not in subgroups:
+            continue
+        if _t in skip or _t in _OTHER_AXIS:
+            continue
+        if _is_explicit_vocab(_t):
+            continue          # 성인 어휘는 도감 소관(실측: vulva blush 가 표정으로 샜다)
+        out.append(_t)
+    return sorted(out, key=lambda x: -int((raw.get(x) or {}).get("freq", 0) or 0))
+
 AXES["expression"] = ([t for t in EXPRESSION_EMOTION if t in raw]
                       + [t for t in FACE_EXPR_MISFILED if t in raw])
 # 자세 분류에서 넘어온 눈 태그(rubbing eyes, averting eyes ...). 전신 축으로 갈 뻔한
@@ -423,6 +468,11 @@ if _FROM_POSE.exists():
     _extra = [l.strip() for l in _FROM_POSE.read_text(encoding="utf-8").splitlines() if l.strip()]
     _seen = set(AXES["expression"])
     AXES["expression"] += [t for t in _extra if t in raw and t not in _seen]
+# `Expressions` 그룹(영문 복수형)이 통째로 빠져 있었다 — 28개, 최상위가
+# `seductive` 168,242 다. 기호 표정은 별도 축이라 여기서 뺀다.
+_seen_expr = set(AXES["expression"]) | set(EXPRESSION_SYMBOL)
+AXES["expression"] += _pull_by_group(("Expressions",), skip=_seen_expr)
+
 AXES["expression_symbol"] = [t for t in EXPRESSION_SYMBOL if t in raw]
 # 홍조는 `홍조·눈물·땀` 축이 이미 담당한다.
 AXES["expression_state"] = (AXES.get("expression_state", [])

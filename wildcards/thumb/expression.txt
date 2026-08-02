@@ -1,22 +1,40 @@
 smile
+seductive
+open smile
 grin
+bedroom eyes
+blush lines
+heart eyes
 expressionless
 frown
 embarrassed
+wink
 happy
+surprise
 crying
 light smile
 shaded face
+eye roll
+blep
 surprised
+biting lip
+inviting
 crying with eyes open
+shocked
 angry
+surprised expression
+closed smile
 empty eyes
 serious
 pout
 naughty face
 smirk
 smug
+spiral eyes
+tired
+confusion
 light frown
+yelling
 rolling eyes
 laughing
 scared
@@ -26,14 +44,27 @@ nervous
 blank eyes
 annoyed
 sparkling eyes
+running makeup
 sad
+yawn
 sleepy
 half-closed eye
 wince
+squint
+unimpressed
+smug grin
+smirking at viewer
 moaning
 shy
+blushing profusely
+nervous sweat
 streaming tears
 nervous smile
+running mascara
+bared teeth
+stare
+smiling at partner
+toothy grin
 evil grin
 gloom (expression)
 scowl

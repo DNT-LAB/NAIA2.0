@@ -92,8 +92,8 @@ mummy
 pegasus
 saiyan
 blob
-monkey girl
 owl girl
+monkey girl
 fallen angel
 pikmin (creature)
 dwarf
@@ -108,8 +108,8 @@ chipmunk girl
 kappa
 qilin (mythology)
 seraph
-komainu
 phoenix
+komainu
 dolphin girl
 dullahan
 orca girl
@@ -150,9 +150,9 @@ ferret girl
 cheetah girl
 whale girl
 ghost girl
-slug girl
 zebra girl
 snake girl
+slug girl
 sphinx
 dryad
 capybara girl
@@ -164,8 +164,8 @@ lich
 ant girl
 giraffe girl
 futakuchi-onna
-rhinoceros girl
 stoat girl
+rhinoceros girl
 chameleon girl
 jellyfish girl
 squid girl
@@ -180,3 +180,4 @@ lynx girl
 moose girl
 gnome
 mindflayer
+furry female

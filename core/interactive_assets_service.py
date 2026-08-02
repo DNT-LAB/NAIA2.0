@@ -279,6 +279,14 @@ class InteractiveAssetsService:
             rows = self.load_index()
             if rows and rows[-1].get("prompt_hash") == digest:
                 rows[-1]["created_at"] = _now()
+                rows[-1]["summary"] = snapshot_summary(chars)
+                rows[-1]["origin"] = self.classify_origin(chars)
+                # 본문도 갱신한다. 해시가 안 보는 필드(활성/비활성, 위치, 프리셋 라벨)는
+                # 같은 해시로도 달라질 수 있는데, 썸네일은 같은 id 파일을 덮어쓴다.
+                # 본문을 두면 카드의 그림과 복원 결과가 어긋난다.
+                self._write_atomic(
+                    self._body_path(rows[-1]["id"]),
+                    {"id": rows[-1]["id"], "created_at": rows[-1]["created_at"], "chars": chars})
                 self._save_index(rows)
                 return rows[-1]
             sid = "s" + uuid.uuid4().hex[:16]

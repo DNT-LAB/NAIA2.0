@@ -890,7 +890,8 @@ let eventCorpusHandlers = null;
 let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260801-ia133')
+let interactiveAssetsPanel = null;
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260802-ia135')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -900,6 +901,8 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
     const {createInteractiveBrowse} =
       await import('./js/features/interactiveBrowse.mjs?v=20260724-iab6');
+    const {createInteractiveAssetsPanel} =
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260802-iaas3');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -908,6 +911,10 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     };
     interactiveAutocomplete = createInteractiveAutocomplete({document, window, escHtml, send: wsSend});
     interactiveBrowse = createInteractiveBrowse({document, escHtml, send: wsSend});
+    // 조합 스냅샷 컨트롤(결과 좌하단). 패널을 늦게 참조하는 이유는 아래에서 만들기 때문.
+    interactiveAssetsPanel = createInteractiveAssetsPanel({
+      document, escHtml, showToast, getPanel: () => interactivePanel,
+    });
     interactivePanel = createInteractivePanel({
       document,
       blocksMount: $('iaBlocks'),
@@ -957,6 +964,8 @@ function applyInteractiveModeGate(isActive) {
   // Interactive 에서는 최종 프롬프트를 상시 노출하지 않는다(사용자 결정). 전체 문자열은
   // 나중에 별도 미리보기 팝업으로만 확인한다. 값 자체는 유지되므로 토글을 끄면 그대로 보인다.
   document.body.classList.toggle('interactive-mode', !!isActive);
+  // Assets 바는 Interactive 의 도구다 — 모드를 끄면 같이 사라진다.
+  if (interactiveAssetsPanel) interactiveAssetsPanel.setVisible(!!isActive);
   for (const key of INTERACTIVE_BLOCKED_OPTIONS) {
     const control = optBoxes[key];
     if (!control) continue;
@@ -4739,6 +4748,8 @@ function closeViewerLightbox() { if (resultHistory) resultHistory.closeLightbox(
 function onLightboxClick(event) { if (resultHistory) resultHistory.onLightboxClick(event); }
 function onViewerNewImage(message) {
   if (resultHistory) resultHistory.onNewImage(message);
+  // 방금 생성한 조합에 썸네일이 붙었을 수 있다 — 목록이 열려 있을 때만 다시 읽는다.
+  if (interactiveAssetsPanel) interactiveAssetsPanel.refresh();
   scheduleResultUnsavedActionRefresh(180);
 }
 function onViewerHistoryRemoved(message) {
@@ -5108,11 +5119,15 @@ function onGenerateFromPrompt(prompt) {
   promptEdit.value = prompt;
   onPromptEdit();
   const negative = negEdit ? negEdit.value : '';
-  return requestGenerate({
+  // 이 경로도 buildWebGenerationOverrides 로 Interactive 캐릭터를 싣는다 — 조합을
+  // 남기지 않으면 같은 캐릭터로 만든 그림이 Assets 에서 빠진다.
+  // 위에서 이미 generating/ws 가드를 통과했으므로 true 로 답한다(호출자는 boolean 계약).
+  void generateWithInteractiveSnapshot({
     prompt,
     negative_prompt: negative,
     overrides: buildWebGenerationOverrides(prompt, negative),
   });
+  return true;
 }
 
 function onSession(m) {
@@ -5410,6 +5425,31 @@ function syncPromptTabStateFromDom() {
 }
 
 // ---- Controls ----
+// Interactive 조합을 남기고 생성한다. 스냅샷 id 를 요청에 실으면 백엔드가 결과
+// 이미지로 384px 썸네일을 붙인다(core/headless_result_service.py).
+//
+// 기록은 **생성할 때만** 한다(사용자 결정) — 만들다 만 조합으로 목록이 더러워지지
+// 않게. 기록이 실패해도 생성은 그대로 진행한다.
+async function generateWithInteractiveSnapshot(payload) {
+  // 생성 중이거나 연결이 끊겼으면 기록도 하지 않는다. requestGenerate 가 어차피
+  // 거부하는데 먼저 기록하면, 생성되지 않은 조합이 Assets 에 남는다
+  // ("생성할 때만 기록" 계약 위반). 단축키는 버튼 비활성화를 우회하므로 실제로 닿는다.
+  if (generating) return false;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  const overrides = payload && payload.overrides;
+  if (overrides && interactiveAssetsPanel && interactivePanel?.isActive?.()) {
+    let chars = [];
+    try { chars = interactivePanel.getSnapshotChars?.() || []; } catch (_) { chars = []; }
+    if (chars.length) {
+      const id = await interactiveAssetsPanel.record(chars);
+      if (id) overrides.interactive_snapshot_id = id;
+    }
+  }
+  // 가드(생성 중 / WS 닫힘)는 requestGenerate 가 다시 본다 — await 사이에 상태가
+  // 바뀌었어도 여기서 통과시키지 않는다.
+  return requestGenerate(payload);
+}
+
 function requestGenerate(payload = {}) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   if (generating) return false;
@@ -5550,7 +5590,7 @@ function send(cmd) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const prompt = promptEdit.value;
     const negative = negEdit.value;
-    requestGenerate({
+    void generateWithInteractiveSnapshot({
       prompt,
       negative_prompt: negative,
       overrides: buildWebGenerationOverrides(prompt, negative),

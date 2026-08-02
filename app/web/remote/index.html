@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260802-iacp19">
+<link rel="stylesheet" href="style.css?v=20260802-iaas1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -822,6 +822,8 @@
             <div class="queue-panel-body" data-queue-body></div>
           </section>
           <section class="event-preset-overlay" id="eventPresetOverlay" aria-label="Event Preset context" aria-hidden="true" hidden></section>
+          <!-- Interactive Assets: 조합 스냅샷 컨트롤. Interactive 모드일 때만 보인다. -->
+          <section class="ia-assets" id="interactiveAssets" aria-label="Interactive Assets" hidden></section>
         </div>
         <section class="result-info-panel" id="resultInfoPanel" aria-label="Generation info">
           <div class="result-info-resize" id="resultInfoResize" title="Drag to resize generation info"></div>

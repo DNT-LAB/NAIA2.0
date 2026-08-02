@@ -3680,6 +3680,67 @@ export function createInteractivePanel({
 
   // ---------------------------------------------------------------- toggle
 
+  // ------------------------------------------------------- Assets 스냅샷 입출력
+
+  /** 백엔드에 남길 조합. UI 전용 상태(open)와 표시용 id 는 뺀다 — 같은 조합인지
+   *  판정하는 해시가 프롬프트에 나가는 값만 보기 때문이다(interactive_assets_service). */
+  function snapshotChars() {
+    return state.chars.map(c => ({
+      name: c.name || '',
+      state: c.state,
+      gender: c.gender || 'female',
+      pos: c.pos || POS_DEFAULT,
+      // tags 까지 담는다 — 이게 없으면 복원한 캐릭터에서 프리셋을 빼거나 갈아탈 때
+      // presetRecall() 이 회수할 대상을 몰라 옛 태그가 그대로 남는다.
+      preset: c.preset ? {
+        work: c.preset.work,
+        name: c.preset.name,
+        tags: Object.fromEntries(
+          Object.entries(c.preset.tags || {}).map(([k, v]) => [k, [...(v || [])]])),
+      } : null,
+      alt: [...(c.alt || [])],
+      gaze: [...(c.gaze || [])],
+      fields: Object.fromEntries(
+        Object.entries(c.fields || {}).map(([k, v]) => [k, [...(v || [])]])),
+    }));
+  }
+
+  /** 스냅샷을 캐릭터 슬롯에 되돌린다. 씬 슬롯은 건드리지 않는다 — 스냅샷은
+   *  캐릭터 조합만 담고, 배경/구도는 그대로 두는 것이 사용자 기대다. */
+  function applySnapshotChars(rows) {
+    if (!Array.isArray(rows) || !rows.length) return false;
+    state.chars = rows.slice(0, MAX_NAI_CHARACTERS).map((row, i) => {
+      const base = newCharacter(i === 0);   // id 는 새로 발급(옛 id 를 되살리면 충돌한다)
+      const fields = row && row.fields ? row.fields : {};
+      return {
+        ...base,
+        name: String(row?.name || ''),
+        state: row?.state === 'disabled' ? 'disabled' : 'active',
+        gender: row?.gender === 'male' ? 'male' : 'female',
+        pos: String(row?.pos || POS_DEFAULT),
+        preset: row?.preset ? {
+          work: row.preset.work,
+          name: row.preset.name,
+          tags: (row.preset.tags && typeof row.preset.tags === 'object')
+            ? Object.fromEntries(Object.entries(row.preset.tags)
+                .map(([k, v]) => [k, Array.isArray(v) ? [...v] : []]))
+            : {},
+        } : null,
+        alt: Array.isArray(row?.alt) ? [...row.alt] : [],
+        gaze: Array.isArray(row?.gaze) ? [...row.gaze] : [],
+        // 슬롯 키는 CHAR_SUBS 가 정한다 — 스냅샷에 없는 키는 기본값으로 채우고,
+        // 모르는 키는 버린다(축이 바뀌어도 복원이 깨지지 않게).
+        fields: Object.fromEntries(CHAR_SUBS.map(sub => [
+          sub.key,
+          Array.isArray(fields[sub.key]) ? [...fields[sub.key]] : defaultFieldsFor(sub.key),
+        ])),
+      };
+    });
+    renderBlocks();
+    emitChange();
+    return true;
+  }
+
   function setActive(next, {silent = false} = {}) {
     const value = !!next;
     if (value === active) return;
@@ -3732,6 +3793,9 @@ export function createInteractivePanel({
     // 생성 요청용 캐릭터(활성 + 태그 보유, NAI 상한 5). app.js 가 overrides.characters/uc/
     // character_positions 로 싣는다.
     getGenerationCharacters: generationCharacters,
+    // Assets(조합 스냅샷) 입출력. 생성 시 기록하고, 목록에서 고르면 되돌린다.
+    getSnapshotChars: snapshotChars,
+    applySnapshotChars,
     // 모드 전환 시 호출 — Position 버튼/Reference 는 NAI 전용이라 헤더를 다시 그려야 한다.
     onModeChanged: () => { if (active) { closePositionPicker(); renderBlocks(); } },
     destroy: () => {

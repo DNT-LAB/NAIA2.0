@@ -122,6 +122,9 @@ def _sections(js_name):
             if (SRC / f"{a}.txt").exists()]
 
 _OBJ_SECTIONS = _sections("_obj_axes.json")
+# 구속·기구도 사물이다. 성인 도감에서 옮겨 왔다(tools/nsfw_reclassify.py).
+if (SRC / "obj_restraint.txt").exists():
+    _OBJ_SECTIONS = _OBJ_SECTIONS + [("thumb", "구속·기구", "obj_restraint")]
 _ANI_SECTIONS = _sections("_ani_axes.json")
 _FX_SECTIONS = _sections("_fx_axes.json")
 # 구도·기타텍스트. 전에는 두 슬롯 다 탐색기(트리)였다 — 그림이 한 장도 없었기 때문이다.
@@ -207,6 +210,7 @@ SLOTS = [
         # 로봇·사이보그도 "사람이 아닌 형태"다. 부분 개조(`single mechanical arm`)가
         # 많아 프레이밍은 몸통 기준으로 찍었다.
         ("thumb", "기계·사이보그", "mech"),
+        ("thumb", "신체 연출", "body_suggestive"),
         ("thumb", "귀", "ears"),
         ("thumb", "꼬리", "tail"),
         ("thumb", "날개", "wings"),
@@ -235,6 +239,10 @@ SLOTS = [
         # 직업·역할은 곧 그 직업의 옷이다(`nun`·`nurse`·`miko`·`race queen`).
         # 사전 칩이 계속 권하는데 어느 축에도 없어 사용자가 닿을 방법이 없었다.
         ("thumb", "직업·역할", "job"),
+        # 성인 도감에서 옮겨 온 축(2026-08-02). rating 실측으로 과잉 분류를 걷어냈다 —
+        # `virgin killer outfit`(SFW 96%)·`see-through cleavage`(95%) 같은 것들이다.
+        # 성인 축이 아니므로 블러가 걸리지 않는다(사용자 지시).
+        ("thumb", "노출·엿보임 의상", "cloth_revealing"),
         # 남성 역할은 1girl 베이스로 찍으면 여성이 나온다(groom·magical boy 실측).
         # `1boy` 템플릿의 별도 축이다 — species_male 등과 같은 규약.
         ("thumb", "직업·역할(남성)", "job_male"),
@@ -290,6 +298,7 @@ SLOTS = [
     # 신설 `pose_leg`/`pose_body_touch` 는 빠지고 라벨은 옛 이름("얼굴·몸에 손")
     # 그대로였다. _pose_axes.json 이 축과 라벨의 SSOT 다(_POSE_SECTIONS 참조).
     ("자세", "\\u{1F3C3}", "pose_action", _POSE_SECTIONS + [
+        ("thumb", "밀착·상황", "pose_suggestive"),
         ("thumb", "둔부(성인)", "nsfw_butt"),
         ("thumb", "체액(성인)", "nsfw_fluid"),
         # 원래 계층 탐색기를 붙였다 — "썸네일이 freq>=100 만 덮으니 나머지는 탐색기가
@@ -549,6 +558,14 @@ for _k, _v in _groups.items():
 # 블러 대상 태그의 출처. 축 파일은 이제 `wildcards/nsfw/` 에 있다 —
 # 썸네일 축 폴더에 두면 도구가 생성 대상으로 읽는다(실측 사고 4장).
 SENSITIVE_SRC = Path("wildcards/nsfw")
+# 일반 축으로 옮긴 태그는 블러하지 않는다(사용자 지시 2026-08-02). 축을 옮겨도
+# **원본 소스 파일(cloth_nsfw·body_nsfw)에 이름이 남아 있어** 계속 블러됐다 —
+# SENSITIVE_AXES 가 도감 출력뿐 아니라 원본 소스도 읽기 때문이다.
+_MOVED_SFW = set()
+_moved_f = SENSITIVE_SRC / "_moved_to_sfw.txt"
+if _moved_f.exists():
+    _MOVED_SFW = {l.strip() for l in _moved_f.read_text(encoding="utf-8").splitlines()
+                  if l.strip() and not l.startswith("#")}
 # 도감 8축 전부. 캐릭터 슬롯에서 다른 탭과 나란히 있으므로 기본 블러가 필요하다.
 SENSITIVE_AXES = sorted(p.stem for p in SENSITIVE_SRC.glob("nsfw_*.txt")) \
                  + ["body_nsfw", "cloth_nsfw"]
@@ -562,7 +579,7 @@ for _ax in SENSITIVE_AXES:
     if not _f.exists():
         continue
     for _t in (l.strip() for l in _f.read_text(encoding="utf-8").splitlines()):
-        if _t and _t not in _sensitive:
+        if _t and not _t.startswith("#") and _t not in _sensitive and _t not in _MOVED_SFW:
             _sensitive.append(_t)
 out.append("// 민감 태그 — 썸네일을 블러하고 호버 시 해제한다(태그는 유지).")
 out.append("export const SENSITIVE_TAGS = " + js(_sensitive) + ";")

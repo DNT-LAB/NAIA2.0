@@ -1,0 +1,1 @@
+{"note": ["성인 도감에서 옮겨 온 일반 축. tools/nsfw_reclassify.py 가 만든다.", "성인 축이 아니므로 블러가 걸리지 않는다(사용자 지시)."], "label": {"cloth_revealing": "노출·엿보임 의상", "body_suggestive": "신체 연출", "pose_suggestive": "밀착·상황", "obj_restraint": "구속·기구"}, "framing": {"cloth_revealing": "cloth_outfit", "body_suggestive": "cowboy", "pose_suggestive": "cowboy", "obj_restraint": "cowboy"}}

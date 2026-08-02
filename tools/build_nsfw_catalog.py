@@ -73,6 +73,20 @@ CATEGORIES = (
 )
 
 
+def _moved_to_sfw() -> set[str]:
+    """성인 도감에서 일반 축으로 옮긴 태그. tools/nsfw_reclassify.py 가 만든다.
+
+    **빼기만 하면 안 되고 받을 축이 있어야 한다** — 일반 빌더는 자기 서브그룹에서만
+    태그를 뽑으므로 NSFW 그룹 태그를 주워 가지 않는다. 목적지 축은 그 스크립트가
+    함께 만든다(cloth_revealing / body_suggestive / pose_suggestive / obj_restraint).
+    """
+    p = Path("wildcards/nsfw/_moved_to_sfw.txt")
+    if not p.exists():
+        return set()
+    return {l.strip() for l in p.read_text(encoding="utf-8").splitlines()
+            if l.strip() and not l.startswith("#")}
+
+
 def main() -> int:
     from core.kr_tag_loader import load_kr_tag_records
     raw = load_kr_tag_records().raw
@@ -98,6 +112,15 @@ def main() -> int:
                 break
         else:
             unmatched.append(tag)
+
+    moved = _moved_to_sfw()
+    if moved:
+        before = sum(len(v) for v in cat.values())
+        for key in list(cat):
+            cat[key] = [t for t in cat[key] if t not in moved]
+        unmatched = [t for t in unmatched if t not in moved]
+        after = sum(len(v) for v in cat.values())
+        print(f"  일반 축으로 이동해 제외: {before - after}개")
 
     OUT.mkdir(parents=True, exist_ok=True)
     total = 0

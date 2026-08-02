@@ -220,6 +220,20 @@ SUBGROUP_TO = {
 _FALLBACK_LABEL = {"nsfw_act": "행위"}
 
 
+def _moved_to_sfw() -> set[str]:
+    """성인 도감에서 일반 축으로 옮긴 태그. tools/nsfw_reclassify.py 가 만든다.
+
+    **빼기만 하면 안 되고 받을 축이 있어야 한다** — 일반 빌더는 자기 서브그룹에서만
+    태그를 뽑으므로 NSFW 그룹 태그를 주워 가지 않는다. 목적지 축은 그 스크립트가
+    함께 만든다(cloth_revealing / body_suggestive / pose_suggestive / obj_restraint).
+    """
+    p = Path("wildcards/nsfw/_moved_to_sfw.txt")
+    if not p.exists():
+        return set()
+    return {l.strip() for l in p.read_text(encoding="utf-8").splitlines()
+            if l.strip() and not l.startswith("#")}
+
+
 def main() -> int:
     from core.kr_tag_loader import load_kr_tag_records
     raw = load_kr_tag_records().raw
@@ -249,6 +263,7 @@ def main() -> int:
 
     # 빠진 것도 따로 남긴다(사용자 지시) — 무엇이 왜 빠졌는지 안 보이면
     # 나중에 "이건 왜 없지" 를 다시 조사하게 된다.
+    moved = _moved_to_sfw()
     pool, blocked, tabooed, foreign = [], [], [], []
     for tag, d in raw.items():
         # ACT_PULL 은 그룹이 NSFW 가 아니라 여기서 통과시켜야 한다.
@@ -265,6 +280,8 @@ def main() -> int:
         # ACT_PULL 은 `taken` 도 통과한다 — 지금 `meta_nsfw.txt`(다른 빌더의 원본)에
         # 들어 있어서 taken 으로 잡힌다. 여기가 넣고 나면 그쪽 빌더가 taken 으로
         # 보고 자기 원본에서 빼므로 한 바퀴 뒤에 정리된다.
+        if tag in moved:
+            continue                     # 일반 축으로 옮겼다(tools/nsfw_reclassify.py)
         if tag in taken and tag not in ACT_PULL:
             continue
         (blocked if BLOCK_NAME.search(tag) else pool).append(tag)

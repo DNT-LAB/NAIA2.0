@@ -153,7 +153,12 @@ def main() -> int:
     # **자기 출력을 빼야 한다.** 두 번째 실행에서 직전 결과가 전부 `taken` 으로 잡혀
     # 축이 비어 버린다 — 이 리포에서 여러 번 겪은 함정이다. 축 .txt 뿐 아니라
     # NSFW 원본(`meta_nsfw.txt`)도 이 빌더가 쓰므로 같이 뺀다(실측: 안 빼면 nude 가 사라진다).
-    own = set(LABEL) | {NSFW_SRC.stem}
+    # **자기 출력을 빼야 한다.** 그리고 `meta_nsfw` 는 성인 도감의 *소스*라,
+    # 도감 출력(nsfw_*.txt)까지 taken 으로 보면 순환이 생긴다 — 소스에서 빼면
+    # 출력이 사라지고, 출력이 사라지면 다시 소스에 넣어야 한다. 실측으로
+    # `nude`(269,994)·`completely nude`(109,029)가 이 순환에서 통째로 증발했다.
+    _catalog_out = {p.stem for p in Path("wildcards/nsfw").glob("nsfw_*.txt")}
+    own = set(LABEL) | {NSFW_SRC.stem} | _catalog_out
     taken: dict[str, str] = {}
     for p in list(OUT.glob("*.txt")) + list(Path("wildcards/nsfw").glob("*.txt")):
         if p.stem.startswith("_") or p.stem in own:

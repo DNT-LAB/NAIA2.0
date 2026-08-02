@@ -336,6 +336,49 @@ class InteractiveAssetsService:
             self._save_index(rows)
             return True
 
+    def delete_snapshot(self, snapshot_id: str) -> bool:
+        """스냅샷 하나를 지운다. 없으면 False(예외 아님 — 두 번 눌러도 조용하다).
+
+        인덱스를 먼저 확정하고 파일을 나중에 지운다. 반대로 하면 지우다 죽었을 때
+        인덱스에는 있는데 본문이 없는 항목이 남아 목록이 계속 404 를 부른다.
+        즐겨찾기 참조도 함께 뗀다 — 안 그러면 '즐겨찾기만' 목록이 사라진 것을 센다.
+        """
+        sid = str(snapshot_id or "")
+        if not sid:
+            return False
+        with self._lock:
+            rows = self.load_index()
+            hit = next((r for r in rows if r.get("id") == sid), None)
+            if hit is None:
+                return False
+            rows = [r for r in rows if r.get("id") != sid]
+            self._save_index(rows)
+            thumb = hit.get("thumb")
+            if thumb:
+                (self.snapshot_root / str(thumb)).unlink(missing_ok=True)
+            self._body_path(sid).unlink(missing_ok=True)
+            self._drop_favorite_ref("snapshot", sid)
+            return True
+
+    def _drop_favorite_ref(self, kind: str, ref: str) -> None:
+        """지워진 대상의 즐겨찾기 참조를 뗀다. 실패해도 삭제 자체는 되돌리지 않는다."""
+        try:
+            rows = self.load_favorites()
+            if self._favorites_broken:
+                self._favorites_broken = False
+                return                      # 손상본을 방금 치웠다 — 빈 목록으로 덮지 않는다
+            kept = [f for f in rows if not (f.get("type") == kind and f.get("ref") == ref)]
+            if len(kept) == len(rows):
+                return
+            self._write_atomic(self._favorite_path(), {
+                "note": ["Interactive 즐겨찾기. 실체가 아니라 참조만 담는다 —",
+                         "원본이 지워지면 목록에서 빠질 뿐 반쪽이 남지 않는다.",
+                         f"type: {' | '.join(FAVORITE_TYPES)}"],
+                "count": len(kept), "favorites": kept,
+            })
+        except Exception as exc:            # pragma: no cover - defensive
+            print(f"[interactive-assets] favorite cleanup failed: {exc}")
+
     def _prune(self, rows: list[dict[str, Any]]) -> None:
         """한도를 넘으면 오래된 것부터. **즐겨찾기에 올라간 것은 건너뛴다.**
 

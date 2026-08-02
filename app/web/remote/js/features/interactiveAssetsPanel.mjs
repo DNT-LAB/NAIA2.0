@@ -14,6 +14,7 @@ export function createInteractiveAssetsPanel({
   document,
   escHtml,
   showToast,
+  showAppDialog,     // 삭제 확인용
   getPanel,          // () => interactivePanel (복원 대상)
 }) {
   const root = document.getElementById('interactiveAssets');
@@ -29,6 +30,16 @@ export function createInteractiveAssetsPanel({
   let query = '';
   let searchTimer = null;
   let loadSeq = 0;           // 늦게 도착한 응답이 최신 목록을 덮지 않게
+
+  /** 삭제 확인. 다이얼로그를 못 받았으면 막는다 — 조용히 지우는 것보다 안 지우는 게 낫다. */
+  async function confirmDelete(label) {
+    if (typeof showAppDialog !== 'function') return false;
+    return showAppDialog('', {
+      title: '조합 삭제',
+      messageHtml: `${escHtml(label || '이 조합')}<br>${escHtml('되돌릴 수 없습니다.')}`,
+      okText: '삭제', cancelText: '취소',
+    });
+  }
 
   // ------------------------------------------------------------------ 통신
 
@@ -87,6 +98,31 @@ export function createInteractiveAssetsPanel({
     }
   }
 
+  async function remove(id) {
+    const row = rows.find(x => x.id === id);
+    const label = row ? row.summary : '';
+    // 되돌릴 수 없으니 한 번 묻는다. 조합은 다시 만들 수 있지만 썸네일은 그 그림뿐이다.
+    const ok = await confirmDelete(label);
+    if (!ok) return;
+    try {
+      const r = await fetch('/api/interactive-assets/snapshot/delete', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id}),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || '삭제 실패');
+      rows = rows.filter(x => x.id !== id);
+      renderGrid();                      // 먼저 화면에서 치워 반응을 즉시 보여 주고
+      showToast(d.removed ? '조합 삭제' : '이미 없는 조합입니다', d.removed ? 'success' : 'info');
+      // 다시 읽는다 — 목록은 LIMIT 개만 가져오므로 지운 만큼 뒤에서 채워져야 한다.
+      // removed 여부와 무관하다: 이미 로컬 행을 뺐으므로 어느 쪽이든 서버와 맞춰야 한다
+      // (다른 탭이 먼저 지웠으면 removed=false 인데 화면만 한 칸 줄어든 채 남는다).
+      fetchList();
+    } catch (err) {
+      showToast('삭제 실패: ' + err.message, 'error');
+    }
+  }
+
   async function restore(id) {
     if (busy) return;
     busy = true;
@@ -136,6 +172,8 @@ export function createInteractiveAssetsPanel({
       <button type="button" class="ia-as-star" data-as-fav="${id}"
               title="${row.favorite ? '즐겨찾기 해제' : '즐겨찾기'}"
               aria-label="즐겨찾기">${row.favorite ? '★' : '☆'}</button>
+      <button type="button" class="ia-as-del" data-as-del="${id}"
+              title="이 조합 삭제" aria-label="삭제">✕</button>
     </div>`;
   }
 
@@ -195,7 +233,7 @@ export function createInteractiveAssetsPanel({
   // ------------------------------------------------------------------ 입력
 
   function onClick(event) {
-    const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],[data-as-restore],[data-as-fav]');
+    const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],[data-as-restore],[data-as-fav],[data-as-del]');
     if (!t) return;
     event.preventDefault();
     if (t.dataset.asToggle) {
@@ -214,6 +252,7 @@ export function createInteractiveAssetsPanel({
       fetchList();
       return;
     }
+    if (t.dataset.asDel) { remove(t.dataset.asDel); return; }
     if (t.dataset.asRestore) { restore(t.dataset.asRestore); return; }
     if (t.dataset.asFav) {
       const row = rows.find(x => x.id === t.dataset.asFav);

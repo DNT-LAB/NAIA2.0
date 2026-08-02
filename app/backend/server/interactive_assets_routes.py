@@ -110,6 +110,23 @@ def register_interactive_assets_routes(
             return JSONResponse({"error": f"record failed: {exc}"}, status_code=500)
         return {"ok": True, "snapshot": meta}
 
+    @app.post("/api/interactive-assets/snapshot/delete")
+    async def api_interactive_snapshot_delete(req: Request):
+        """조합 하나를 지운다. 되돌릴 수 없다(본문 + 썸네일 + 즐겨찾기 참조)."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        snapshot_id = str((payload or {}).get("id") or "")
+        if not snapshot_id:
+            return JSONResponse({"error": "id required"}, status_code=400)
+        try:
+            removed = await run_in_thread(
+                interactive_assets_service(session_context).delete_snapshot, snapshot_id)
+        except Exception as exc:
+            return JSONResponse({"error": f"delete failed: {exc}"}, status_code=500)
+        return {"ok": True, "removed": bool(removed)}
+
     @app.post("/api/interactive-assets/favorite")
     async def api_interactive_favorite(req: Request):
         """즐겨찾기 토글. 실체가 아니라 참조만 담는다."""

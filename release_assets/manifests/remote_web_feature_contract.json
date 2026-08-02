@@ -632,6 +632,7 @@
         {"method": "GET", "path": "/api/interactive-assets/snapshot", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/interactive-assets/snapshot/thumb", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/interactive-assets/snapshot", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/interactive-assets/snapshot/delete", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/interactive-assets/favorite", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/interactive-thumb/index", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/interactive-thumb", "smoke": "non_destructive"},

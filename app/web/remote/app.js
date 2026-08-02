@@ -902,7 +902,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveBrowse} =
       await import('./js/features/interactiveBrowse.mjs?v=20260724-iab6');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260802-iaas3');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas6');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -913,7 +913,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     interactiveBrowse = createInteractiveBrowse({document, escHtml, send: wsSend});
     // 조합 스냅샷 컨트롤(결과 좌하단). 패널을 늦게 참조하는 이유는 아래에서 만들기 때문.
     interactiveAssetsPanel = createInteractiveAssetsPanel({
-      document, escHtml, showToast, getPanel: () => interactivePanel,
+      document, escHtml, showToast, showAppDialog, getPanel: () => interactivePanel,
     });
     interactivePanel = createInteractivePanel({
       document,

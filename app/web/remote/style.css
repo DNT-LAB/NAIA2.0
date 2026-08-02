@@ -21293,12 +21293,38 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   line-height: 1;
   cursor: pointer;
   opacity: 0;
+  /* opacity 만으로는 클릭이 막히지 않는다 — 안 보이는 버튼이 카드 탭을 가로챈다. */
+  pointer-events: none;
   transition: opacity 0.12s;
 }
 .ia-as-card:hover .ia-as-star,
-.ia-as-card.is-fav .ia-as-star { opacity: 1; }
+.ia-as-card.is-fav .ia-as-star { opacity: 1; pointer-events: auto; }
+.ia-as-del {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  padding: 1px 5px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  color: rgba(244, 67, 54, 0.85);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, color 0.12s;
+}
+.ia-as-card:hover .ia-as-del { opacity: 1; pointer-events: auto; }
+.ia-as-del:hover { color: rgba(244, 67, 54, 1); background: rgba(244, 67, 54, 0.18); }
 
 @media (max-width: 900px) {
   .ia-assets { left: 8px; bottom: 8px; max-width: calc(100% - 16px); }
   .ia-as-grid { max-height: 180px; grid-template-columns: 1fr; }
+}
+
+/* 터치 기기는 hover 가 없다 — 별/삭제를 늘 보여 주지 않으면 쓸 방법이 없다. */
+@media (hover: none) {
+  .ia-as-star,
+  .ia-as-del { opacity: 0.75; pointer-events: auto; }
 }

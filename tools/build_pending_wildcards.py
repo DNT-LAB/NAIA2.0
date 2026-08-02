@@ -111,8 +111,12 @@ def main() -> int:
         print(f"{axis:22s} {n:5d} {m:5d} {p:6d}")
     print(f"\n미생성 {total:,}개 / 축 {len(rows)}개  -> {OUT}/")
     if dropped_adult:
+        # 80줄을 매번 찍으면 정작 봐야 할 미생성 목록이 묻힌다. 이것들은 이미
+        # 회수 처리(tools/nsfw_recover.py)로 팩 키와 블러가 성인 쪽이라 동작은
+        # 정상이고, 축 .txt 에 이름만 남아 있는 상태다. 개수와 예시만 낸다.
         print(f"성인이라 이 목록에서 뺌 {len(dropped_adult)}개 (explicit>={ADULT_E:.0f}%): "
-              + ", ".join(f'{t}({rating[t]["e"]}%)' for t in dropped_adult))
+              + ", ".join(f'{t}({rating[t]["e"]}%)' for t in dropped_adult[:5])
+              + (" ..." if len(dropped_adult) > 5 else ""))
     if shipped_adult:
         print(f"  !! 일반 축에 있으면서 **이미 그림이 만들어진** 성인 태그 {len(shipped_adult)}개 "
               f"— 팩에 들어가 배포 중이다. 예: "

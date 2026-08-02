@@ -95,6 +95,11 @@ PACK_AXIS = {"face_eyes": "face", "face_parts": "face", "face_mark": "face"}
 # 실제로 세 도구가 서로 다른 NOT_AXES 를 들고 있었다(tools/thumb_axis_index.py).
 from tools.thumb_axis_index import is_axis  # noqa: E402
 
+_RECOVERED_AXIS = "nsfw_recovered"
+_RECOVERED_F = Path("wildcards/nsfw/_recovered_to_nsfw.txt")
+_RECOVERED = ({l.strip() for l in _RECOVERED_F.read_text(encoding="utf-8").splitlines()
+               if l.strip() and not l.startswith("#")} if _RECOVERED_F.exists() else set())
+
 
 def load_axis_tags() -> dict[str, str]:
     """tag(소문자) -> axis. wildcards/thumb/<axis>.txt 가 출처."""
@@ -110,8 +115,11 @@ def load_axis_tags() -> dict[str, str]:
             continue
         for line in path.read_text(encoding="utf-8").splitlines():
             tag = line.strip()
-            if tag:
-                table.setdefault(tag.lower(), axis)
+            if not tag:
+                continue
+            # 일반 축이 이름 규칙으로 주워 갔던 성인 태그는 성인 축 키로 낸다
+            # (tools/nsfw_recover.py). 축 .txt 에는 남아 있어도 팩 키는 성인이다.
+            table[tag.lower()] = _RECOVERED_AXIS if tag in _RECOVERED else                 table.get(tag.lower(), axis)
     return table
 
 

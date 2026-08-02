@@ -565,6 +565,12 @@ SENSITIVE_SRC = Path("wildcards/nsfw")
 # 일반 축으로 옮긴 태그는 블러하지 않는다(사용자 지시 2026-08-02). 축을 옮겨도
 # **원본 소스 파일(cloth_nsfw·body_nsfw)에 이름이 남아 있어** 계속 블러됐다 —
 # SENSITIVE_AXES 가 도감 출력뿐 아니라 원본 소스도 읽기 때문이다.
+_RECOVERED = set()
+_rec_f = SENSITIVE_SRC / "_recovered_to_nsfw.txt"
+if _rec_f.exists():
+    _RECOVERED = {l.strip() for l in _rec_f.read_text(encoding="utf-8").splitlines()
+                  if l.strip() and not l.startswith("#")}
+
 _MOVED_SFW = set()
 _moved_f = SENSITIVE_SRC / "_moved_to_sfw.txt"
 if _moved_f.exists():
@@ -574,6 +580,8 @@ if _moved_f.exists():
 SENSITIVE_AXES = sorted(p.stem for p in SENSITIVE_SRC.glob("nsfw_*.txt")) \
                  + ["body_nsfw", "cloth_nsfw"]
 _sensitive = [t for t in SENSITIVE if t in _thumb_all]
+# 회수분은 일반 축 파일에 이름이 남아 있어 SENSITIVE_AXES 루프로는 안 잡힌다.
+_sensitive += [t for t in sorted(_RECOVERED) if t not in _sensitive]
 _missing_sensitive = [t for t in SENSITIVE if t not in _thumb_all]
 # 남성 축으로 격리했는데도 남성기가 그려져 있는 것. 격리는 '안 보고 싶으면 안 보게' 이지
 # '열었더니 성기' 를 막지는 못한다. 재생성되면 tools/thumb_male_tags.py 에서 빼라.

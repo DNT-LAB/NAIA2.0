@@ -1,0 +1,84 @@
+# 일반 축에서 성인 도감으로 회수한 태그. 일반 축 빌더들이 이 목록을 뺀다.
+# tools/nsfw_recover.py 가 만든다. 되돌리려면 해당 줄을 지우고 빌더를 다시 돌려라.
+# 판정: explicit >= 70% (체형·표정 등 rating:general 베이스 축은 제외).
+# 경계: 자세 자체는 성적이지 않은데 그런 게시물에 많이 붙은 것이 섞여 있다
+#       (leg grab · straddling · hand around waist). 문단은 문서주석 참조.
+ankle grab
+aphrodisiac
+arm held back
+backless panties
+bikini around one leg
+bikini bottom aside
+bouncing breasts
+buruma aside
+captive bead ring
+cheating (relationship)
+crotch cutout
+cum in panties
+cum on floor
+cum pool
+dildo gag
+energy drain
+face in pillow
+flat chest grab
+front-hook bra
+full nelson
+fundoshi aside
+glory hole
+glory wall
+grabbing another's hair
+grabbing another's thighs
+grabbing another's twintails
+hand around waist
+hand in another's panties
+hand in own panties
+hands on another's knees
+hands on another's thighs
+hanging legs
+head pinned down
+holding another's leg
+holding another's legs
+holding another's thighs
+holding legs
+holding sex toy
+horn grab
+leg grab
+legs over head
+leotard aside
+lipstick mark on ass
+lipstick mark on leg
+lipstick mark on stomach
+m legs
+male underwear pull
+multitasking
+no male underwear
+nose hook
+panties around one ankle
+panties around one leg
+panties aside
+pants around one leg
+pelvic curtain aside
+piercing pull
+pillory
+pillow grab
+ring gag
+sheet grab
+shorts around one leg
+shorts aside
+slave
+spanked
+spread legs
+squat toilet
+straddling
+swallowing
+swimsuit aside
+tail pull
+tally
+thigh grab
+thong aside
+torn bike shorts
+torso flash
+torso grab
+twitching
+view between legs
+wide spread legs

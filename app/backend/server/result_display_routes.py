@@ -854,6 +854,44 @@ def register_result_display_routes(
     async def api_history_list(page: int = 0, per_page: int = 30):
         return session_context.result_store.history_list(page=page, per_page=per_page)
 
+    @app.post("/api/result/quicksave")
+    async def api_result_quicksave(req: Request):
+        """Ctrl+S — 보고 있는 이미지를 빠른 저장 경로로 남긴다.
+
+        Auto Save 가 켜져 있어 원본이 디스크에 있으면 **복사하거나 옮긴다**(설정).
+        다시 인코딩하지 않는다 — 메타데이터가 상하고 파일이 커진다.
+        """
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        history_id = str((payload or {}).get("history_id") or "")
+        rel_path = str((payload or {}).get("path") or "")
+        if not history_id and not rel_path:
+            return JSONResponse({"ok": False, "error": "history_id or path required"},
+                                status_code=400)
+
+        def _run():
+            store = session_context.result_store
+            item = store.get_item(history_id) if history_id else None
+            if item is None and rel_path:
+                # 뷰어는 history_id 가 아니라 상대 경로로 돈다. 그쪽에서도 닿아야 한다.
+                target = rel_path.replace("\\", "/").lstrip("/")
+                item = store.find_by_rel_path(target)
+            if item is None:
+                raise KeyError("history item not found")
+            return session_context._save_service().quicksave_item(item)
+
+        try:
+            result = await run_in_thread(_run)
+        except KeyError as exc:
+            # str(KeyError) 는 따옴표까지 붙여 온다 — 토스트에 그대로 노출되므로 벗긴다.
+            return JSONResponse({"ok": False, "error": (exc.args[0] if exc.args else str(exc))},
+                                status_code=404)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return result
+
     @app.post("/api/history/open-folder")
     async def api_history_open_folder():
         def _open_folder():

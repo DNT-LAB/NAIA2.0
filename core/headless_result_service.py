@@ -292,6 +292,20 @@ class HeadlessResultStore:
                 return item
         return None
 
+    def find_by_rel_path(self, rel_path: str) -> HeadlessHistoryItem | None:
+        """상대 경로로 히스토리 항목 조회(없으면 None).
+
+        뷰어/Ctrl+S 는 history_id 가 아니라 상대 경로로 돈다 — 그쪽에서 온
+        요청이 히스토리에 닿을 수 있는 유일한 통로다.
+        """
+        target = str(rel_path or "").replace("\\", "/").strip("/")
+        if not target:
+            return None
+        for item in list(self._items):  # add/evict 동시 변경 대비 스냅샷 순회
+            if str(item.rel_path or "").replace("\\", "/").strip("/") == target:
+                return item
+        return None
+
     def history_total(self) -> int:
         return len(self._items)
 

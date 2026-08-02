@@ -78,7 +78,9 @@ class HeadlessModuleDispatchService:
         clean_id = str(module_id or "").strip()
         clean_key = str(key or "").strip()
         if clean_id == "auto_save":
-            return context._save_service().set_auto_save_param(clean_key, value)
+            # quicksave_dir 이 임의 경로를 받으므로 save_directory 와 같은 경계가 필요하다.
+            return context._save_service().set_auto_save_param(
+                clean_key, value, client_host=client_host)
         if clean_id == "save_directory":
             return context._save_service().set_save_directory_param(clean_key, value, client_host=client_host)
         if clean_id == "prompt_engineering":

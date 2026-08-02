@@ -11706,6 +11706,27 @@ body.detached-metadata .metadata-layout {
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
+/* 모듈 설정 패널의 구획 제목과 설명문 — 필드 몇 개를 한 덩어리로 묶는다. */
+.mod-section-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-dim);
+}
+.mod-policy-text {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin: 0;
+}
+.mod-policy-text.mod-dim {
+  color: var(--text-dim);
+  word-break: break-all;
+}
 .mod-debug-empty,
 .mod-debug-summary {
   font-family: var(--font-mono);

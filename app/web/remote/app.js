@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260531-imgdel3')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260802-quicksave')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -1243,7 +1243,7 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260609-s
   .catch(error => {
     console.error('Failed to initialize Event Preset panel module', error);
   });
-const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260514-unsaved-bulk1')
+const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260802-quicksave')
   .then(({createAutoSavePanel}) => {
     autoSavePanel = createAutoSavePanel({
       document,
@@ -7172,6 +7172,18 @@ function onAutoSaveWebpChange(checked) {
   if (autoSavePanel) autoSavePanel.onWebpChange(checked);
 }
 
+function onQuicksaveModeChange(value) {
+  if (autoSavePanel) autoSavePanel.onQuicksaveModeChange(value);
+}
+
+function onQuicksaveDirChange(value) {
+  if (autoSavePanel) autoSavePanel.onQuicksaveDirChange(value);
+}
+
+function onQuicksaveFolderChange(value) {
+  if (autoSavePanel) autoSavePanel.onQuicksaveFolderChange(value);
+}
+
 function onHistoryLimitToggle(checked) {
   if (autoSavePanel) autoSavePanel.onHistoryLimitToggle(checked);
 }
@@ -8622,6 +8634,27 @@ applyPromptHighlightState();
 updatePromptTokenEstimate();
 
 // ---- Keyboard shortcuts ----
+// Ctrl+S — 보고 있는 이미지를 빠른 저장 경로로. 브라우저의 "페이지 저장"을 막는다.
+document.addEventListener('keydown', async e => {
+  if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+    e.preventDefault();
+    const path = resultHistory ? resultHistory.currentImagePath : '';
+    if (!path) { showToast('저장할 이미지가 없습니다'); return; }
+    try {
+      const r = await fetch('/api/result/quicksave', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || '저장 실패');
+      const how = d.mode === 'move' ? '이동' : (d.mode === 'noop' ? '이미 있음' : '저장');
+      showToast(how + ': ' + String(d.path || '').split(/[\\/]/).pop());
+    } catch (err) {
+      showToast('빠른 저장 실패: ' + err.message);
+    }
+  }
+});
+
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey && !e.altKey) {
     e.preventDefault();

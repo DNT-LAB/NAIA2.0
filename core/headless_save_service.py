@@ -18,7 +18,24 @@ AUTO_SAVE_DEFAULTS = {
     "history_limit_enabled": False,
     "max_history_length": 2000,
     "memory_action": 1,
+    # Ctrl+S 빠른 저장. 보고 있는 이미지를 지정 경로로 따로 남긴다.
+    #   quicksave_mode   Auto Save 가 켜져 있을 때 원본을 어떻게 할지
+    #                    copy = 남긴다(기본) / move = 원본을 지운다
+    #                    Auto Save 가 꺼져 있으면 원본이 없으므로 항상 새로 쓴다.
+    #   quicksave_dir    빈 문자열이면 저장 폴더와 같은 곳을 쓴다
+    #   quicksave_folder date = 세션 시작 일자 폴더 아래 / flat = 지정 경로 바로 아래
+    "quicksave_mode": "copy",
+    "quicksave_dir": "",
+    "quicksave_folder": "date",
 }
+QUICKSAVE_MODE_OPTIONS = [
+    {"value": "copy", "label": "복사 (원본 유지)"},
+    {"value": "move", "label": "이동 (원본 삭제)"},
+]
+QUICKSAVE_FOLDER_OPTIONS = [
+    {"value": "date", "label": "세션 일자 폴더 아래"},
+    {"value": "flat", "label": "지정 경로 바로 아래"},
+]
 AUTO_SAVE_MEMORY_ACTION_OPTIONS = [
     {"value": 1, "label": "[1] 1장씩 자동저장+정리"},
     {"value": 2, "label": "[2] 1장씩 저장없이 삭제"},
@@ -56,7 +73,48 @@ class HeadlessSaveService:
         state["memory_action"] = int(state["memory_action"] or 1)
         state["unsaved_history_count"] = context.result_store.unsaved_history_count()
         state["memory_action_options"] = list(AUTO_SAVE_MEMORY_ACTION_OPTIONS)
+        state["quicksave_mode"] = (str(state.get("quicksave_mode") or "copy")
+                                   if str(state.get("quicksave_mode")) in {"copy", "move"}
+                                   else "copy")
+        state["quicksave_folder"] = (str(state.get("quicksave_folder") or "date")
+                                     if str(state.get("quicksave_folder")) in {"date", "flat"}
+                                     else "date")
+        state["quicksave_dir"] = str(state.get("quicksave_dir") or "")
+        state["quicksave_mode_options"] = list(QUICKSAVE_MODE_OPTIONS)
+        state["quicksave_folder_options"] = list(QUICKSAVE_FOLDER_OPTIONS)
+        # 실제로 어디에 떨어지는지 보여 준다 — 경로를 비워 두면 저장 폴더를 따라간다.
+        state["quicksave_resolved"] = str(self.quicksave_directory())
         return context._module_state_payload("auto_save", state)
+
+    # ── Ctrl+S 빠른 저장 ────────────────────────────────────────────────────
+    def quicksave_directory(self) -> Path:
+        """빠른 저장이 떨어질 폴더. 경로가 비면 저장 폴더를 따라간다."""
+        context = self.context
+        raw = str(context.auto_save_state.get("quicksave_dir") or "").strip()
+        if raw:
+            base = Path(raw).expanduser()
+            if not base.is_absolute():
+                base = context._output_root() / base
+        else:
+            base = self.current_save_directory(use_timestamp_folder=False)
+        folder = str(context.auto_save_state.get("quicksave_folder") or "date")
+        return base / context.session_timestamp if folder == "date" else base
+
+    def quicksave_filename(self, source_name: str) -> str:
+        """`<세션시작시간>_<원래 이름>`. 이름 규칙은 강제다(사용자 지정).
+
+        같은 세션에서 같은 파일을 두 번 저장해도 덮어쓰지 않도록 번호를 붙인다.
+        """
+        stem = Path(str(source_name or "image.png")).stem
+        suffix = Path(str(source_name or "image.png")).suffix or ".png"
+        base = f"{self.context.session_timestamp}_{stem}"
+        directory = self.quicksave_directory()
+        name = f"{base}{suffix}"
+        n = 2
+        while (directory / name).exists():
+            name = f"{base}_{n}{suffix}"
+            n += 1
+        return name
 
     def save_directory_state_payload(self, client_host: str | None = None) -> dict[str, Any]:
         context = self.context
@@ -84,9 +142,30 @@ class HeadlessSaveService:
         }
         return context._module_state_payload("save_directory", state)
 
-    def set_auto_save_param(self, key: str, value: Any) -> dict[str, Any] | None:
+    def set_auto_save_param(
+        self,
+        key: str,
+        value: Any,
+        *,
+        client_host: str | None = None,
+    ) -> dict[str, Any] | None:
         context = self.context
-        if key in {"auto_save", "save_as_webp", "history_limit_enabled"}:
+        if key == "quicksave_dir":
+            # 임의의 절대 경로를 받는 유일한 키다. save_directory 와 같은 경계를
+            # 걸지 않으면 Cloudflare 로 노출된 세션이 서버 파일시스템 아무 곳에나
+            # 쓸 수 있게 된다 — 원격에서는 값을 받지 않고 현재 상태만 돌려준다.
+            if client_host is not None and not is_loopback_host(client_host):
+                return self.auto_save_state_payload()
+            context.auto_save_state[key] = str(value or "")
+        elif key in {"quicksave_mode", "quicksave_folder"}:
+            allowed = ({o["value"] for o in QUICKSAVE_MODE_OPTIONS}
+                       if key == "quicksave_mode"
+                       else {o["value"] for o in QUICKSAVE_FOLDER_OPTIONS})
+            clean = str(value or "")
+            if clean not in allowed:
+                return None
+            context.auto_save_state[key] = clean
+        elif key in {"auto_save", "save_as_webp", "history_limit_enabled"}:
             context.auto_save_state[key] = context._coerce_bool(value)
             if key == "auto_save":
                 context.remote_options["auto_save"] = bool(context.auto_save_state[key])
@@ -176,6 +255,62 @@ class HeadlessSaveService:
             "path": str(target),
             "current_save_directory": str(directory),
         }
+
+    def quicksave_item(self, item: Any) -> dict[str, Any]:
+        """보고 있는 이미지를 빠른 저장 경로로 남긴다(Ctrl+S).
+
+        **원본이 이미 디스크에 있는 경우**(Auto Save 가 켜져 있었다)는 복사하거나
+        옮긴다 — 다시 인코딩하면 메타데이터가 상하고 파일이 커진다.
+        원본이 없으면(Auto Save 꺼짐) 메모리의 바이트를 그대로 쓴다.
+
+        이름은 `<세션시작시간>_<원래 이름>` 으로 강제한다(사용자 지정).
+        """
+        import shutil
+
+        context = self.context
+        mode = str(context.auto_save_state.get("quicksave_mode") or "copy")
+        directory = self.quicksave_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+
+        source = str(getattr(item, "filepath", "") or "")
+        if source and Path(source).is_file():
+            src = Path(source)
+            target = directory / self.quicksave_filename(src.name)
+            if src.resolve() == target.resolve():
+                # 이미 그 자리다. 이동이었어도 지우면 안 된다.
+                return {"ok": True, "path": str(target), "mode": "noop",
+                        "directory": str(directory)}
+            if mode == "move":
+                shutil.move(str(src), str(target))
+                # 히스토리가 옛 경로를 가리키면 뷰어가 깨진다. 새 경로로 돌린다.
+                try:
+                    item.filepath = str(target)
+                except Exception:
+                    pass
+            else:
+                shutil.copy2(str(src), str(target))
+            return {"ok": True, "path": str(target), "mode": mode,
+                    "directory": str(directory)}
+
+        # 원본이 없다(Auto Save 꺼짐) — 메모리에서 새로 쓴다. `move` 는 의미가 없다.
+        #
+        # 일반 저장 헬퍼를 쓰면 안 된다: 그쪽은 filename_format/카운터/분류 하위
+        # 폴더를 적용하고 항목을 saved 로 표시한다. 빠른 저장은 이름 규칙이 강제고
+        # (`<세션시작시간>_<원래 이름>`) Auto Save 와는 별개의 사본이므로, 항목의
+        # 저장 상태를 건드리면 미저장 개수가 어긋난다.
+        save_as_webp = context._coerce_bool(
+            context.auto_save_state.get("save_as_webp"))
+        # item.filename 은 이미 `.png` 로 끝난다 — 그대로 쓰면 확장자가 겹친다.
+        extension = ".webp" if save_as_webp else ".png"
+        stem = Path(str(getattr(item, "filename", "") or "image")).stem or "image"
+        target = directory / self.quicksave_filename(stem + extension)
+        if save_as_webp:
+            target.write_bytes(item.webp_bytes)
+        else:
+            png_bytes, _ = result_images.history_item_png_payload(item, label=item.filename)
+            target.write_bytes(png_bytes)
+        return {"ok": True, "path": str(target), "mode": "write",
+                "directory": str(directory)}
 
     def current_save_directory(
         self,

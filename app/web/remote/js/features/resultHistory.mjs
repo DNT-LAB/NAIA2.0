@@ -623,6 +623,8 @@ export function createResultHistoryController({
 
   function closePopup() {
     viewerPopupOpen = false;
+    // 선택을 놓지 않으면 팝업을 닫은 뒤의 Ctrl+S 가 옛 선택을 저장한다.
+    vpCurrentPath = '';
     const lb = getEl('viewerLightbox');
     if (lb) lb.classList.remove('open');
     lightboxPromptVisible = false;
@@ -738,5 +740,12 @@ export function createResultHistoryController({
     openFolder,
     loadResultInfo,
     get latestImagePath() { return latestImagePath; },
+    // Ctrl+S 빠른 저장이 "지금 보고 있는 것"을 알아야 한다. 히스토리 팝업이
+    // 열려 있으면 그쪽 선택이 이긴다(팝업은 vpCurrentPath 로 따로 돈다).
+    // 뷰어도 팝업도 없으면 최신 이미지가 곧 보고 있는 것이다.
+    get currentImagePath() {
+      if (viewerPopupOpen && vpCurrentPath) return vpCurrentPath;
+      return currentViewerPath || latestImagePath;
+    },
   };
 }

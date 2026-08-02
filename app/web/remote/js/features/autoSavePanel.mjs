@@ -20,6 +20,9 @@ export function createAutoSavePanel({
       auto_save: enabled,
       save_as_webp: false,
       history_limit_enabled: false,
+      quicksave_mode: 'copy',
+      quicksave_dir: '',
+      quicksave_folder: 'date',
       max_history_length: 2000,
       memory_action: 1,
       unsaved_history_count: 0,
@@ -69,6 +72,14 @@ export function createAutoSavePanel({
     const toggleClass = panelState.auto_save ? 'mod-stop' : 'mod-start';
     const unsavedCount = Math.max(0, Number(panelState.unsaved_history_count || 0));
     const bulkDisabled = bulkBusy || unsavedCount <= 0;
+    const modeOptions = (panelState.quicksave_mode_options || []).map(o =>
+      `<option value="${escHtml(String(o.value))}"${
+        String(panelState.quicksave_mode) === String(o.value) ? ' selected' : ''
+      }>${escHtml(String(o.label))}</option>`).join('');
+    const folderOptions = (panelState.quicksave_folder_options || []).map(o =>
+      `<option value="${escHtml(String(o.value))}"${
+        String(panelState.quicksave_folder) === String(o.value) ? ' selected' : ''
+      }>${escHtml(String(o.label))}</option>`).join('');
     const actionOptions = (panelState.memory_action_options || []).map(opt =>
       `<option value="${opt.value}" ${String(opt.value) === String(panelState.memory_action) ? 'selected' : ''}>${escHtml(opt.label)}</option>`
     ).join('');
@@ -126,6 +137,29 @@ export function createAutoSavePanel({
             ${actionOptions}
           </select>
         </label>
+
+        <div class="mod-section-title">Ctrl + S 빠른 저장</div>
+        <p class="mod-policy-text">보고 있는 이미지를 지정한 경로로 따로 남깁니다.
+          파일 이름은 <b>세션시작시간_원래이름</b> 으로 고정됩니다.</p>
+        <label class="mod-field">
+          <span class="mod-field-label">Auto Save 가 켜져 있을 때</span>
+          <select class="mod-select" onchange="onQuicksaveModeChange(this.value)">
+            ${modeOptions}
+          </select>
+        </label>
+        <label class="mod-field">
+          <span class="mod-field-label">저장 경로 (비우면 저장 폴더를 따라감)</span>
+          <input class="mod-input" type="text" placeholder="예: D:/picks"
+                 value="${escHtml(String(panelState.quicksave_dir || ''))}"
+                 onchange="onQuicksaveDirChange(this.value)">
+        </label>
+        <label class="mod-field">
+          <span class="mod-field-label">폴더 배치</span>
+          <select class="mod-select" onchange="onQuicksaveFolderChange(this.value)">
+            ${folderOptions}
+          </select>
+        </label>
+        <p class="mod-policy-text mod-dim">실제 경로: ${escHtml(String(panelState.quicksave_resolved || '-'))}</p>
       </div>
     `;
   }
@@ -145,6 +179,21 @@ export function createAutoSavePanel({
     if (getCurrentModuleId() === 'auto_save' && isModulePopupOpen()) {
       render();
     }
+  }
+
+  function onQuicksaveModeChange(value) {
+    if (lastState) lastState.quicksave_mode = value;
+    setModuleParam('auto_save', 'quicksave_mode', String(value || 'copy'));
+  }
+
+  function onQuicksaveDirChange(value) {
+    if (lastState) lastState.quicksave_dir = value;
+    setModuleParam('auto_save', 'quicksave_dir', String(value || ''));
+  }
+
+  function onQuicksaveFolderChange(value) {
+    if (lastState) lastState.quicksave_folder = value;
+    setModuleParam('auto_save', 'quicksave_folder', String(value || 'date'));
   }
 
   function onWebpChange(checked) {
@@ -247,6 +296,9 @@ export function createAutoSavePanel({
     renderCached,
     updateSaveUi,
     onWebpChange,
+    onQuicksaveModeChange,
+    onQuicksaveDirChange,
+    onQuicksaveFolderChange,
     onHistoryLimitToggle,
     onHistoryLimitLengthChange,
     onHistoryLimitActionChange,

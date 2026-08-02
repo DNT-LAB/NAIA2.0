@@ -67,12 +67,35 @@ class HeadlessStoredResult:
 class HeadlessResultStore:
     """Stores latest result, history entries, and image export payloads."""
 
+    # Interactive 스냅샷 훅이 세션 컨텍스트를 찾을 때 쓴다. 컨텍스트가 자기 필드로
+    # 이 저장소를 들고 있으므로(WebSessionContext.result_store) 생성 뒤 주입한다.
+    # 없으면 훅은 조용히 아무것도 하지 않는다.
+    _context = None
+
     def __init__(self, max_items: int = 200):
         self.max_items = max(1, int(max_items))
         self._items: list[HeadlessHistoryItem] = []
         self.latest_item: HeadlessHistoryItem | None = None
         self.latest_webp: bytes | None = None
         self.latest_metadata_payload: dict[str, Any] | None = None
+
+    def _attach_interactive_snapshot_thumb(self, request, image_bytes: bytes) -> None:
+        """Interactive 조합 스냅샷에 결과 썸네일을 붙인다(있을 때만)."""
+        params = getattr(request, "params", {}) or {}
+        snapshot_id = str(params.get("interactive_snapshot_id") or "")
+        if not snapshot_id or not image_bytes:
+            return
+        context = getattr(self, "_context", None) or getattr(request, "context", None)
+        if context is None:
+            return
+        try:
+            from app.backend.server.interactive_assets_routes import (
+                interactive_assets_service,
+            )
+
+            interactive_assets_service(context).attach_thumb(snapshot_id, image_bytes)
+        except Exception as exc:                     # 썸네일 실패가 생성을 막지 않는다
+            print(f"[interactive-assets] thumb attach skipped: {exc}")
 
     def add_api_result(self, api_result: dict[str, Any], request) -> HeadlessStoredResult:
         image = self._coerce_image(api_result)
@@ -87,6 +110,10 @@ class HeadlessResultStore:
 
             raw_bytes = embed_webui_parameters(raw_bytes, info_text)
         webp_bytes = self._image_to_webp(image)
+        # Interactive 조합 스냅샷에 384px 썸네일을 붙인다. 프론트가 생성 요청에
+        # `interactive_snapshot_id` 를 실었을 때만 돈다 — 그 밖의 경로는 영향 없다.
+        # 실패해도 생성 결과 저장을 막지 않는다(썸네일은 부가 정보다).
+        self._attach_interactive_snapshot_thumb(request, raw_bytes or webp_bytes)
         params = dict(getattr(request, "params", {}) or {})
         params.pop("credential", None)
         # Storyteller Use Vibe: 스트림 발급 vibe는 휘발성 — 히스토리 메타/리플레이에

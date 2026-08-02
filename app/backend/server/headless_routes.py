@@ -16,6 +16,7 @@ from app.backend.server.extension_install_routes import register_extension_insta
 from app.backend.server.font_routes import register_font_routes
 from app.backend.server.interactive_thumbnail_routes import register_interactive_thumbnail_routes
 from app.backend.server.interactive_advice_routes import register_interactive_advice_routes
+from app.backend.server.interactive_assets_routes import register_interactive_assets_routes
 from app.backend.server.generation_commands import register_generation_rest_routes
 from app.backend.server.sequence_preset_routes import register_sequence_preset_routes
 from app.backend.server.generation_runner import ensure_generation_runner
@@ -175,6 +176,7 @@ def register_headless_routes(
     )
     register_interactive_thumbnail_routes(app, context)
     register_interactive_advice_routes(app, context)
+    register_interactive_assets_routes(app, context, run_in_thread=run_in_thread)
     register_character_viewer_routes(
         app,
         context,

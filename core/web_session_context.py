@@ -95,6 +95,10 @@ class WebSessionContext:
     def __post_init__(self) -> None:
         from core.headless_context_bootstrap import initialize_web_session_context
 
+        # Interactive 스냅샷 훅이 세션을 찾을 수 있게 역참조를 심는다. 결과 저장소는
+        # 컨텍스트 필드라 순환이 아니고, 훅은 이것이 없으면 조용히 아무것도 안 한다.
+        self.result_store._context = self
+
         # Authoritative search-pool ownership. A tag-filter search may run in a
         # worker while another websocket replaces the active parquet/search
         # snapshot. The generation token + lock let the result/assign path prove

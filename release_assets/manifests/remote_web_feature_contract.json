@@ -14,6 +14,7 @@
     "app/backend/server/font_routes.py",
     "app/backend/server/install_manager_routes.py",
     "app/backend/server/interactive_advice_routes.py",
+    "app/backend/server/interactive_assets_routes.py",
     "app/backend/server/interactive_thumbnail_routes.py",
     "app/backend/server/module_storage_routes.py",
     "app/backend/server/nai_model_routes.py",
@@ -611,7 +612,7 @@
     {
       "id": "interactive_mode",
       "name": "Interactive prompt composer (slot/axis thumbnail picker)",
-      "source_files": [
+      "source_files": ["app/backend/server/interactive_assets_routes.py", "core/interactive_assets_service.py", 
         "app/web/remote/js/features/interactivePanel.mjs",
         "app/web/remote/js/features/interactiveAxes.mjs",
         "app/web/remote/js/features/interactiveBrowse.mjs",
@@ -625,6 +626,11 @@
       ],
       "legacy_dependency": "none",
       "routes": [
+        {"method": "GET", "path": "/api/interactive-assets/snapshots", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/interactive-assets/snapshot", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/interactive-assets/snapshot/thumb", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/interactive-assets/snapshot", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/interactive-assets/favorite", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/interactive-thumb/index", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/interactive-thumb", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/interactive-advice", "smoke": "non_destructive"},

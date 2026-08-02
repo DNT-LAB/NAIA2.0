@@ -2995,8 +2995,13 @@ export function createInteractivePanel({
   }
 
   /** 팩 인덱스를 한 번 받아, 이미지가 있는 태그만 <img> 로 그린다(없으면 텍스트 셀). */
+  let thumbIndexInFlight = null;
+
   async function loadThumbIndex() {
     if (thumbHave.size) return;
+    // 프리로드와 팝업 열기가 겹칠 수 있다 — 같은 요청을 두 번 보내지 않는다.
+    if (thumbIndexInFlight) return thumbIndexInFlight;
+    thumbIndexInFlight = (async () => {
     try {
       const res = await fetch('/api/interactive-thumb/index', {cache: 'no-store'});
       if (!res.ok) return;
@@ -3005,6 +3010,8 @@ export function createInteractivePanel({
         thumbHave.set(axis, new Set((tags || []).map(t => String(t))));
       }
     } catch (_) { /* 팩이 없으면 전부 텍스트 셀 */ }
+    })();
+    try { await thumbIndexInFlight; } finally { thumbIndexInFlight = null; }
   }
 
   /** 표시 축 -> 팩 축. 얼굴은 생성이 face.txt 한 파일이라 표시 그룹이 달라도 이미지는 face/* 다. */
@@ -3741,6 +3748,21 @@ export function createInteractivePanel({
     return true;
   }
 
+  // 팝업 우측의 사전/조언은 백엔드가 태그 DB(17만 건)를 **첫 요청 때** 읽어 올린다.
+  // 실측 2.7초. 그 대기가 사용자가 팝업을 연 순간에 걸리면 화면이 멈춘 것처럼 보인다.
+  // 모드에 들어온 직후의 유휴 시간으로 옮긴다 — 화면에 아무것도 알리지 않는다.
+  let asidePreloaded = false;
+
+  function preloadAsideData() {
+    if (asidePreloaded) return;
+    asidePreloaded = true;
+    // 빈 tags 로 부른다. 백엔드는 인덱스를 올리지만 돌려줄 항목이 없어
+    // 프론트 조언 캐시가 쓰지도 않을 태그로 채워지지 않는다.
+    void fetch('/api/interactive-advice/batch?tags=').catch(() => {});
+    // 팩 인덱스(161KB)도 미리. 이게 있어야 그리드가 텍스트 셀 대신 그림으로 뜬다.
+    void loadThumbIndex().catch(() => {});
+  }
+
   function setActive(next, {silent = false} = {}) {
     const value = !!next;
     if (value === active) return;
@@ -3754,7 +3776,7 @@ export function createInteractivePanel({
       closePositionPicker(); closePresetPanel(); closePanel();
       // 모드를 끄면 씬 버튼 줄도 사라져야 한다 — blocksMount 만 숨기면 플로트가 남는다.
       if (sceneMount) { sceneMount.classList.remove('open'); sceneMount.innerHTML = ''; }
-    } else { renderBlocks(); }
+    } else { renderBlocks(); preloadAsideData(); }
     onActiveChange(active);
     if (!silent && active) emitChange();
   }

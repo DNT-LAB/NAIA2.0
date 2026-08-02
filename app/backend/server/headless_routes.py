@@ -175,7 +175,7 @@ def register_headless_routes(
         start_generation_runner=ensure_generation_runner,
     )
     register_interactive_thumbnail_routes(app, context)
-    register_interactive_advice_routes(app, context)
+    register_interactive_advice_routes(app, context, run_in_thread=run_in_thread)
     register_interactive_assets_routes(app, context, run_in_thread=run_in_thread)
     register_character_viewer_routes(
         app,

@@ -49,6 +49,7 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
+import threading
 from typing import Iterable
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -430,10 +431,22 @@ class TagDependencyIndex:
         return rows
 
 
+# 첫 호출이 태그 DB 17만 건을 읽는다(실측 2.7초). 그 사이 다른 스레드가 들어오면
+# lru_cache 는 **두 번 계산하는 것을 막지 않는다** — 캐시는 끝난 뒤에 채워진다.
+# 조언 라우트는 요청마다 스레드로 넘어가므로(프리로드 + 팝업이 겹친다) 실제로 닿는다.
+_DEPENDENCY_LOCK = threading.Lock()
+
+
 @lru_cache(maxsize=1)
-def get_dependency_index() -> TagDependencyIndex:
+def _build_dependency_index() -> TagDependencyIndex:
     from core.kr_tag_loader import load_kr_tag_records
     return TagDependencyIndex(load_kr_tag_records().raw)
+
+
+def get_dependency_index() -> TagDependencyIndex:
+    """전제조건 인덱스(프로세스 1개). 동시 첫 호출도 한 번만 만든다."""
+    with _DEPENDENCY_LOCK:
+        return _build_dependency_index()
 
 
 def _main(argv: list[str]) -> int:

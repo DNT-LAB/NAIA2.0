@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260802-quicksave9')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260802-quicksave11')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -4768,6 +4768,9 @@ function onViewerHistoryCleared(message) {
   // 서버의 current asset 이 사라졌으므로 object URL/blob/meta 도 함께 놓는다
   // (삭제 경로와 같은 정리 — 안 하면 지운 결과가 메모리에 남는다).
   releaseLatestResultBuffers();
+  // Enhance 는 자기 currentMeta 를 따로 들고 있다. 안 지우면 빈 화면에서 버튼이
+  // 살아 있고, 누르면 이미 사라진 결과를 조회해 실패한다(단일 삭제 경로와 동일 처리).
+  if (resultEnhance) resultEnhance.clearCurrentMeta();
   renderResultUnsavedActions(null);
 }
 function jumpToLatestViewerImage() { if (resultHistory) resultHistory.jumpToLatest(); }

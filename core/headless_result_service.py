@@ -35,6 +35,9 @@ class HeadlessHistoryItem:
     # 비-PNG(WEBP 등) ComfyUI 결과에서 raw_bytes는 원본을 보존하고, 저장/PNG 합류점이 쓸
     # 메타데이터-임베드 PNG를 여기에 둔다(history_item_png_payload가 우선 사용). None이면 미사용.
     png_payload_override: bytes | None = None
+    # 이 항목을 Ctrl+S 로 남긴 경로(없으면 빈 문자열). 같은 이미지를 다시 저장할 때
+    # 사본을 또 만들거나(복사) 이미 옮긴 파일을 또 옮기는 것(이동)을 막는다.
+    quicksave_path: str = ""
     # 이 항목이 추가된 시점의 히스토리 세대. 브로드캐스트는 락 밖에서 나가므로
     # 알림 시점의 세대를 읽으면 이미 지워진 항목이 살아있는 세대를 달고 나간다.
     epoch: int = 0

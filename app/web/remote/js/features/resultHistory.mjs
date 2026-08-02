@@ -782,7 +782,19 @@ export function createResultHistoryController({
     // 열려 있으면 그쪽 선택이 이긴다(팝업은 vpCurrentPath 로 따로 돈다).
     // 뷰어도 팝업도 없으면 최신 이미지가 곧 보고 있는 것이다.
     get currentImagePath() {
+      // Ctrl+S 는 "보고 있는 것"을 저장한다. 그러므로 화면이 진실이다 —
+      // currentViewerPath(탐색 상태)를 먼저 보면 두 방향으로 어긋난다:
+      //   Esc 로 탐색만 해제하면 화면은 그대로인데 값이 비어 최신으로 폴백하고,
+      //   탐색 중에 새 결과가 도착하면 화면은 새것인데 값은 옛 선택에 머문다.
+      // preview.dataset 이 화면 상태를 정확히 담는다:
+      //   히스토리 선택 -> source='saved', path=<rel_path>
+      //   새 생성 결과 -> source='current', path=''  (곧 latestImagePath 가 채워진다)
       if (viewerPopupOpen && vpCurrentPath) return vpCurrentPath;
+      if (preview && preview.classList.contains('show')) {
+        const shown = String(preview.dataset.path || '');
+        if (shown) return shown;
+        if (preview.dataset.source === 'current') return latestImagePath;
+      }
       return currentViewerPath || latestImagePath;
     },
   };

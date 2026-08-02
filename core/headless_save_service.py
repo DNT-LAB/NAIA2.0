@@ -272,12 +272,21 @@ class HeadlessSaveService:
         directory = self.quicksave_directory()
         directory.mkdir(parents=True, exist_ok=True)
 
+        # 이미 이 항목을 빠른 저장했는가. 이름을 먼저 짓고 비교하면 안 된다 —
+        # quicksave_filename 은 충돌을 피하려 매번 새 이름을 내주므로 제자리 판정이
+        # 영원히 거짓이 되고, 이동 모드에서는 누를 때마다 파일이 다시 옮겨진다.
+        done = str(getattr(item, "quicksave_path", "") or "")
+        if done and Path(done).is_file():
+            return {"ok": True, "path": done, "mode": "noop",
+                    "directory": str(Path(done).parent)}
+
         source = str(getattr(item, "filepath", "") or "")
         if source and Path(source).is_file():
             src = Path(source)
             target = directory / self.quicksave_filename(src.name)
             if src.resolve() == target.resolve():
                 # 이미 그 자리다. 이동이었어도 지우면 안 된다.
+                self._remember_quicksave(item, target)
                 return {"ok": True, "path": str(target), "mode": "noop",
                         "directory": str(directory)}
             if mode == "move":
@@ -289,6 +298,7 @@ class HeadlessSaveService:
                     pass
             else:
                 shutil.copy2(str(src), str(target))
+            self._remember_quicksave(item, target)
             return {"ok": True, "path": str(target), "mode": mode,
                     "directory": str(directory)}
 
@@ -309,8 +319,17 @@ class HeadlessSaveService:
         else:
             png_bytes, _ = result_images.history_item_png_payload(item, label=item.filename)
             target.write_bytes(png_bytes)
+        self._remember_quicksave(item, target)
         return {"ok": True, "path": str(target), "mode": "write",
                 "directory": str(directory)}
+
+    @staticmethod
+    def _remember_quicksave(item: Any, target: Path) -> None:
+        """이 항목을 어디에 빠른 저장했는지 기억한다(중복 저장/재이동 방지)."""
+        try:
+            item.quicksave_path = str(target)
+        except Exception:
+            pass
 
     def current_save_directory(
         self,

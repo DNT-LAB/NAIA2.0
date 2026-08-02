@@ -1,0 +1,1339 @@
+{
+ "note": [
+  "성인 도감 -> 일반 축 이동 후보. **아직 이동하지 않았다.**",
+  "판정: rating 실측으로 후보(explicit<70%)를 뽑고, 어휘 정책으로 남길 것을 걸렀다.",
+  "성인 유지 = tools/nsfw_explicit_vocab.is_explicit_vocab() 또는 questionable+explicit>=90%.",
+  "이동은 블러 해제를 동반한다 — 성인 축은 축 단위로 블러하므로(SENSITIVE_AXES)",
+  "일반 축으로 옮기면 그 썸네일이 Safe Viewer 에서 그대로 보인다.",
+  "후보 대부분은 이미 썸네일이 있어(사용자 직접 생성분) 재생성이 아니라 키 변경이다."
+ ],
+ "count": 221,
+ "candidates": [
+  {
+   "tag": "humiliation",
+   "from": "nsfw_act",
+   "qe": 89.9,
+   "e": 63.0
+  },
+  {
+   "tag": "licking armpit",
+   "from": "nsfw_oral",
+   "qe": 89.3,
+   "e": 59.7
+  },
+  {
+   "tag": "frontless outfit",
+   "from": "nsfw_exposure",
+   "qe": 88.3,
+   "e": 19.8
+  },
+  {
+   "tag": "presenting",
+   "from": "nsfw_state",
+   "qe": 87.9,
+   "e": 66.4
+  },
+  {
+   "tag": "spanking",
+   "from": "nsfw_act",
+   "qe": 87.3,
+   "e": 60.2
+  },
+  {
+   "tag": "suspension",
+   "from": "nsfw_toy",
+   "qe": 86.2,
+   "e": 62.3
+  },
+  {
+   "tag": "out-of-frame censoring",
+   "from": "nsfw_censor",
+   "qe": 86.1,
+   "e": 30.8
+  },
+  {
+   "tag": "implied futanari",
+   "from": "nsfw_pairing",
+   "qe": 85.9,
+   "e": 67.4
+  },
+  {
+   "tag": "guro",
+   "from": "nsfw_etc_dark",
+   "qe": 84.5,
+   "e": 53.8
+  },
+  {
+   "tag": "immobilization",
+   "from": "nsfw_toy",
+   "qe": 84.3,
+   "e": 48.1
+  },
+  {
+   "tag": "wedgie",
+   "from": "nsfw_act",
+   "qe": 84.0,
+   "e": 32.0
+  },
+  {
+   "tag": "pony play",
+   "from": "nsfw_act",
+   "qe": 83.4,
+   "e": 52.8
+  },
+  {
+   "tag": "novelty censor",
+   "from": "nsfw_censor",
+   "qe": 83.4,
+   "e": 46.1
+  },
+  {
+   "tag": "tenga",
+   "from": "nsfw_toy",
+   "qe": 82.6,
+   "e": 34.8
+  },
+  {
+   "tag": "breasts squeezed together",
+   "from": "nsfw_breast",
+   "qe": 82.3,
+   "e": 68.8
+  },
+  {
+   "tag": "torture",
+   "from": "nsfw_etc_dark",
+   "qe": 82.2,
+   "e": 63.9
+  },
+  {
+   "tag": "forced",
+   "from": "nsfw_etc_sexual",
+   "qe": 82.2,
+   "e": 64.3
+  },
+  {
+   "tag": "convenient censoring",
+   "from": "nsfw_censor",
+   "qe": 82.0,
+   "e": 13.2
+  },
+  {
+   "tag": "restrained",
+   "from": "nsfw_toy",
+   "qe": 81.9,
+   "e": 58.0
+  },
+  {
+   "tag": "suggestive fluid",
+   "from": "nsfw_act",
+   "qe": 81.8,
+   "e": 31.4
+  },
+  {
+   "tag": "sagging breasts",
+   "from": "nsfw_breast",
+   "qe": 81.7,
+   "e": 41.7
+  },
+  {
+   "tag": "oral invitation",
+   "from": "nsfw_oral",
+   "qe": 81.5,
+   "e": 44.1
+  },
+  {
+   "tag": "convenient arm",
+   "from": "nsfw_censor",
+   "qe": 81.4,
+   "e": 16.2
+  },
+  {
+   "tag": "covering one breast",
+   "from": "nsfw_breast",
+   "qe": 80.7,
+   "e": 22.6
+  },
+  {
+   "tag": "grabbing own breast",
+   "from": "nsfw_breast",
+   "qe": 80.4,
+   "e": 49.9
+  },
+  {
+   "tag": "micro panties",
+   "from": "nsfw_exposure",
+   "qe": 79.0,
+   "e": 28.7
+  },
+  {
+   "tag": "tail censor",
+   "from": "nsfw_censor",
+   "qe": 78.8,
+   "e": 12.5
+  },
+  {
+   "tag": "in heat",
+   "from": "nsfw_fetish",
+   "qe": 78.7,
+   "e": 53.8
+  },
+  {
+   "tag": "wakamezake",
+   "from": "nsfw_act",
+   "qe": 78.3,
+   "e": 20.3
+  },
+  {
+   "tag": "breastless clothes",
+   "from": "nsfw_breast",
+   "qe": 77.9,
+   "e": 34.8
+  },
+  {
+   "tag": "slingshot swimsuit",
+   "from": "nsfw_exposure",
+   "qe": 77.7,
+   "e": 21.6
+  },
+  {
+   "tag": "bound legs",
+   "from": "nsfw_toy",
+   "qe": 77.3,
+   "e": 42.6
+  },
+  {
+   "tag": "covering breasts",
+   "from": "nsfw_breast",
+   "qe": 76.9,
+   "e": 8.6
+  },
+  {
+   "tag": "pet play",
+   "from": "nsfw_act",
+   "qe": 75.8,
+   "e": 52.5
+  },
+  {
+   "tag": "bulge",
+   "from": "nsfw_genital",
+   "qe": 75.5,
+   "e": 29.6
+  },
+  {
+   "tag": "bound arms",
+   "from": "nsfw_toy",
+   "qe": 75.3,
+   "e": 42.6
+  },
+  {
+   "tag": "thigh straddling",
+   "from": "nsfw_position",
+   "qe": 75.0,
+   "e": 55.8
+  },
+  {
+   "tag": "licking foot",
+   "from": "nsfw_oral",
+   "qe": 74.9,
+   "e": 48.9
+  },
+  {
+   "tag": "grabbing own ass",
+   "from": "nsfw_butt",
+   "qe": 74.6,
+   "e": 43.5
+  },
+  {
+   "tag": "presenting removed panties",
+   "from": "nsfw_state",
+   "qe": 74.6,
+   "e": 37.3
+  },
+  {
+   "tag": "tentacle grab",
+   "from": "nsfw_hand",
+   "qe": 74.3,
+   "e": 48.5
+  },
+  {
+   "tag": "hypnosis",
+   "from": "nsfw_etc_sexual",
+   "qe": 73.8,
+   "e": 57.1
+  },
+  {
+   "tag": "breasts on another's back",
+   "from": "nsfw_breast",
+   "qe": 73.5,
+   "e": 40.8
+  },
+  {
+   "tag": "hand on another's ass",
+   "from": "nsfw_butt",
+   "qe": 73.0,
+   "e": 58.3
+  },
+  {
+   "tag": "ass press",
+   "from": "nsfw_butt",
+   "qe": 72.1,
+   "e": 43.0
+  },
+  {
+   "tag": "bound ankles",
+   "from": "nsfw_toy",
+   "qe": 72.1,
+   "e": 36.8
+  },
+  {
+   "tag": "mind control",
+   "from": "nsfw_etc_sexual",
+   "qe": 72.0,
+   "e": 54.8
+  },
+  {
+   "tag": "implied prostitution",
+   "from": "nsfw_fetish",
+   "qe": 72.0,
+   "e": 52.0
+  },
+  {
+   "tag": "ryona",
+   "from": "nsfw_etc_dark",
+   "qe": 71.1,
+   "e": 37.8
+  },
+  {
+   "tag": "bound torso",
+   "from": "nsfw_toy",
+   "qe": 71.0,
+   "e": 23.3
+  },
+  {
+   "tag": "drugged",
+   "from": "nsfw_etc_dark",
+   "qe": 70.3,
+   "e": 56.0
+  },
+  {
+   "tag": "incest",
+   "from": "nsfw_etc_sexual",
+   "qe": 70.1,
+   "e": 55.6
+  },
+  {
+   "tag": "tentacle clothes",
+   "from": "nsfw_pairing",
+   "qe": 70.0,
+   "e": 55.0
+  },
+  {
+   "tag": "breasts apart",
+   "from": "nsfw_breast",
+   "qe": 69.8,
+   "e": 41.5
+  },
+  {
+   "tag": "hands on own ass",
+   "from": "nsfw_butt",
+   "qe": 69.5,
+   "e": 46.6
+  },
+  {
+   "tag": "assisted exposure",
+   "from": "nsfw_act",
+   "qe": 69.2,
+   "e": 25.3
+  },
+  {
+   "tag": "micro bikini",
+   "from": "nsfw_exposure",
+   "qe": 69.1,
+   "e": 21.8
+  },
+  {
+   "tag": "breasts on glass",
+   "from": "nsfw_breast",
+   "qe": 68.8,
+   "e": 34.9
+  },
+  {
+   "tag": "foreplay",
+   "from": "nsfw_act",
+   "qe": 68.6,
+   "e": 34.0
+  },
+  {
+   "tag": "bound",
+   "from": "nsfw_toy",
+   "qe": 68.6,
+   "e": 40.5
+  },
+  {
+   "tag": "furry with non-furry",
+   "from": "nsfw_pairing",
+   "qe": 67.5,
+   "e": 59.2
+  },
+  {
+   "tag": "untied bikini",
+   "from": "nsfw_exposure",
+   "qe": 67.2,
+   "e": 19.5
+  },
+  {
+   "tag": "hand under skirt",
+   "from": "nsfw_hand",
+   "qe": 66.6,
+   "e": 24.4
+  },
+  {
+   "tag": "breasts on tray",
+   "from": "nsfw_breast",
+   "qe": 66.2,
+   "e": 10.3
+  },
+  {
+   "tag": "bikini bottom only",
+   "from": "nsfw_exposure",
+   "qe": 66.0,
+   "e": 17.2
+  },
+  {
+   "tag": "furry with furry",
+   "from": "nsfw_pairing",
+   "qe": 65.5,
+   "e": 57.8
+  },
+  {
+   "tag": "hand on own ass",
+   "from": "nsfw_butt",
+   "qe": 65.2,
+   "e": 39.4
+  },
+  {
+   "tag": "saliva swap",
+   "from": "nsfw_cum",
+   "qe": 65.2,
+   "e": 41.9
+  },
+  {
+   "tag": "french kiss",
+   "from": "nsfw_oral",
+   "qe": 65.1,
+   "e": 46.9
+  },
+  {
+   "tag": "masochism",
+   "from": "nsfw_act",
+   "qe": 64.9,
+   "e": 42.2
+  },
+  {
+   "tag": "hands on own breasts",
+   "from": "nsfw_breast",
+   "qe": 64.6,
+   "e": 32.2
+  },
+  {
+   "tag": "hand under swimsuit",
+   "from": "nsfw_hand",
+   "qe": 64.5,
+   "e": 25.8
+  },
+  {
+   "tag": "onii-shota",
+   "from": "nsfw_etc_sexual",
+   "qe": 64.1,
+   "e": 52.9
+  },
+  {
+   "tag": "breast lift",
+   "from": "nsfw_act",
+   "qe": 63.7,
+   "e": 19.0
+  },
+  {
+   "tag": "ass smack",
+   "from": "nsfw_butt",
+   "qe": 63.7,
+   "e": 38.2
+  },
+  {
+   "tag": "twincest",
+   "from": "nsfw_etc_sexual",
+   "qe": 63.5,
+   "e": 47.5
+  },
+  {
+   "tag": "breast expansion",
+   "from": "nsfw_fetish",
+   "qe": 63.3,
+   "e": 27.3
+  },
+  {
+   "tag": "head under skirt",
+   "from": "nsfw_act",
+   "qe": 62.8,
+   "e": 30.2
+  },
+  {
+   "tag": "phallic symbol",
+   "from": "nsfw_fetish",
+   "qe": 62.7,
+   "e": 13.7
+  },
+  {
+   "tag": "holding own breasts",
+   "from": "nsfw_breast",
+   "qe": 62.0,
+   "e": 24.9
+  },
+  {
+   "tag": "bound wrists",
+   "from": "nsfw_toy",
+   "qe": 62.0,
+   "e": 39.2
+  },
+  {
+   "tag": "bound together",
+   "from": "nsfw_toy",
+   "qe": 61.7,
+   "e": 33.8
+  },
+  {
+   "tag": "veiny breasts",
+   "from": "nsfw_breast",
+   "qe": 60.6,
+   "e": 25.2
+  },
+  {
+   "tag": "foot worship",
+   "from": "nsfw_act",
+   "qe": 60.5,
+   "e": 34.9
+  },
+  {
+   "tag": "ass shake",
+   "from": "nsfw_butt",
+   "qe": 60.0,
+   "e": 31.7
+  },
+  {
+   "tag": "uncommon stimulation",
+   "from": "nsfw_act",
+   "qe": 59.9,
+   "e": 28.5
+  },
+  {
+   "tag": "bridal lingerie",
+   "from": "nsfw_exposure",
+   "qe": 59.8,
+   "e": 39.0
+  },
+  {
+   "tag": "accidental exposure",
+   "from": "nsfw_peek",
+   "qe": 59.7,
+   "e": 13.1
+  },
+  {
+   "tag": "abuse",
+   "from": "nsfw_etc_dark",
+   "qe": 59.6,
+   "e": 28.4
+  },
+  {
+   "tag": "tentacles under clothes",
+   "from": "nsfw_pairing",
+   "qe": 59.5,
+   "e": 40.0
+  },
+  {
+   "tag": "tentacles on male",
+   "from": "nsfw_pairing",
+   "qe": 59.4,
+   "e": 41.4
+  },
+  {
+   "tag": "breast press",
+   "from": "nsfw_breast",
+   "qe": 58.7,
+   "e": 31.1
+  },
+  {
+   "tag": "onee-loli",
+   "from": "nsfw_etc_sexual",
+   "qe": 58.0,
+   "e": 41.6
+  },
+  {
+   "tag": "chocolate on breasts",
+   "from": "nsfw_fetish",
+   "qe": 57.9,
+   "e": 7.4
+  },
+  {
+   "tag": "implied pregnancy",
+   "from": "nsfw_act",
+   "qe": 57.8,
+   "e": 39.8
+  },
+  {
+   "tag": "chained",
+   "from": "nsfw_toy",
+   "qe": 57.5,
+   "e": 35.1
+  },
+  {
+   "tag": "head on ass",
+   "from": "nsfw_position",
+   "qe": 56.9,
+   "e": 27.5
+  },
+  {
+   "tag": "pornography",
+   "from": "nsfw_fetish",
+   "qe": 56.6,
+   "e": 42.6
+  },
+  {
+   "tag": "breast smother",
+   "from": "nsfw_act",
+   "qe": 56.4,
+   "e": 30.0
+  },
+  {
+   "tag": "extended downblouse",
+   "from": "nsfw_peek",
+   "qe": 56.2,
+   "e": 8.8
+  },
+  {
+   "tag": "chocolate on body",
+   "from": "nsfw_act",
+   "qe": 56.1,
+   "e": 9.3
+  },
+  {
+   "tag": "inseki",
+   "from": "nsfw_etc_sexual",
+   "qe": 55.6,
+   "e": 44.4
+  },
+  {
+   "tag": "under skirt",
+   "from": "nsfw_peek",
+   "qe": 55.5,
+   "e": 19.4
+  },
+  {
+   "tag": "tentacles",
+   "from": "nsfw_pairing",
+   "qe": 54.4,
+   "e": 40.8
+  },
+  {
+   "tag": "symmetrical docking",
+   "from": "nsfw_bodyjob",
+   "qe": 53.8,
+   "e": 22.9
+  },
+  {
+   "tag": "breast poke",
+   "from": "nsfw_act",
+   "qe": 52.4,
+   "e": 4.8
+  },
+  {
+   "tag": "asymmetrical docking",
+   "from": "nsfw_bodyjob",
+   "qe": 52.4,
+   "e": 22.9
+  },
+  {
+   "tag": "thong bikini",
+   "from": "nsfw_exposure",
+   "qe": 52.1,
+   "e": 13.9
+  },
+  {
+   "tag": "accidental pervert",
+   "from": "nsfw_peek",
+   "qe": 51.8,
+   "e": 10.9
+  },
+  {
+   "tag": "food on body",
+   "from": "nsfw_act",
+   "qe": 51.6,
+   "e": 12.2
+  },
+  {
+   "tag": "selfcest",
+   "from": "nsfw_etc_sexual",
+   "qe": 51.6,
+   "e": 35.8
+  },
+  {
+   "tag": "latex bodysuit",
+   "from": "nsfw_exposure",
+   "qe": 51.4,
+   "e": 22.6
+  },
+  {
+   "tag": "rope marks",
+   "from": "nsfw_toy",
+   "qe": 49.5,
+   "e": 25.3
+  },
+  {
+   "tag": "eyepatch bikini",
+   "from": "nsfw_exposure",
+   "qe": 48.8,
+   "e": 17.0
+  },
+  {
+   "tag": "face between breasts",
+   "from": "nsfw_breast",
+   "qe": 48.4,
+   "e": 19.3
+  },
+  {
+   "tag": "upshirt",
+   "from": "nsfw_peek",
+   "qe": 48.4,
+   "e": 12.7
+  },
+  {
+   "tag": "latex leotard",
+   "from": "nsfw_exposure",
+   "qe": 47.8,
+   "e": 19.2
+  },
+  {
+   "tag": "breast curtains",
+   "from": "nsfw_peek",
+   "qe": 47.6,
+   "e": 11.2
+  },
+  {
+   "tag": "garter belt",
+   "from": "nsfw_exposure",
+   "qe": 47.4,
+   "e": 23.4
+  },
+  {
+   "tag": "trefoil",
+   "from": "nsfw_anatomy",
+   "qe": 46.9,
+   "e": 3.0
+  },
+  {
+   "tag": "face to breasts",
+   "from": "nsfw_breast",
+   "qe": 46.8,
+   "e": 23.4
+  },
+  {
+   "tag": "head between breasts",
+   "from": "nsfw_breast",
+   "qe": 46.4,
+   "e": 21.8
+  },
+  {
+   "tag": "pectoral grab",
+   "from": "nsfw_hand",
+   "qe": 45.3,
+   "e": 26.7
+  },
+  {
+   "tag": "fishnet bodysuit",
+   "from": "nsfw_exposure",
+   "qe": 45.0,
+   "e": 21.7
+  },
+  {
+   "tag": "revealing clothes",
+   "from": "nsfw_exposure",
+   "qe": 44.7,
+   "e": 11.5
+  },
+  {
+   "tag": "between pectorals",
+   "from": "nsfw_act",
+   "qe": 44.3,
+   "e": 34.0
+  },
+  {
+   "tag": "breast awe",
+   "from": "nsfw_breast",
+   "qe": 44.3,
+   "e": 4.5
+  },
+  {
+   "tag": "carried breast rest",
+   "from": "nsfw_breast",
+   "qe": 42.7,
+   "e": 3.7
+  },
+  {
+   "tag": "breast cutout",
+   "from": "nsfw_peek",
+   "qe": 42.5,
+   "e": 21.6
+  },
+  {
+   "tag": "bara",
+   "from": "nsfw_pairing",
+   "qe": 42.2,
+   "e": 28.5
+  },
+  {
+   "tag": "neckerchief between breasts",
+   "from": "nsfw_breast",
+   "qe": 41.9,
+   "e": 12.9
+  },
+  {
+   "tag": "mechanical tentacles",
+   "from": "nsfw_pairing",
+   "qe": 41.9,
+   "e": 29.0
+  },
+  {
+   "tag": "lingerie",
+   "from": "nsfw_exposure",
+   "qe": 41.6,
+   "e": 16.3
+  },
+  {
+   "tag": "see-through leotard",
+   "from": "nsfw_exposure",
+   "qe": 41.6,
+   "e": 15.2
+  },
+  {
+   "tag": "human furniture",
+   "from": "nsfw_act",
+   "qe": 41.3,
+   "e": 24.1
+  },
+  {
+   "tag": "food on breasts",
+   "from": "nsfw_fetish",
+   "qe": 40.7,
+   "e": 6.1
+  },
+  {
+   "tag": "food between breasts",
+   "from": "nsfw_breast",
+   "qe": 40.0,
+   "e": 4.0
+  },
+  {
+   "tag": "breasts day",
+   "from": "nsfw_fetish",
+   "qe": 40.0,
+   "e": 8.0
+  },
+  {
+   "tag": "one-piece thong",
+   "from": "nsfw_exposure",
+   "qe": 39.6,
+   "e": 1.9
+  },
+  {
+   "tag": "breast curtain",
+   "from": "nsfw_peek",
+   "qe": 38.5,
+   "e": 11.8
+  },
+  {
+   "tag": "thong leotard",
+   "from": "nsfw_exposure",
+   "qe": 38.3,
+   "e": 15.8
+  },
+  {
+   "tag": "arm between breasts",
+   "from": "nsfw_breast",
+   "qe": 37.8,
+   "e": 18.2
+  },
+  {
+   "tag": "upskirt",
+   "from": "nsfw_peek",
+   "qe": 37.5,
+   "e": 11.8
+  },
+  {
+   "tag": "downblouse",
+   "from": "nsfw_peek",
+   "qe": 37.0,
+   "e": 6.6
+  },
+  {
+   "tag": "between breasts",
+   "from": "nsfw_breast",
+   "qe": 36.8,
+   "e": 16.2
+  },
+  {
+   "tag": "breast tattoo",
+   "from": "nsfw_adorn",
+   "qe": 34.9,
+   "e": 19.6
+  },
+  {
+   "tag": "shackles",
+   "from": "nsfw_toy",
+   "qe": 34.7,
+   "e": 21.1
+  },
+  {
+   "tag": "scissorhold",
+   "from": "nsfw_position",
+   "qe": 34.6,
+   "e": 14.8
+  },
+  {
+   "tag": "impossible bodysuit",
+   "from": "nsfw_exposure",
+   "qe": 34.5,
+   "e": 14.3
+  },
+  {
+   "tag": "object in clothes",
+   "from": "nsfw_toy",
+   "qe": 34.5,
+   "e": 6.9
+  },
+  {
+   "tag": "breast suppress",
+   "from": "nsfw_act",
+   "qe": 34.1,
+   "e": 12.1
+  },
+  {
+   "tag": "covering ass",
+   "from": "nsfw_butt",
+   "qe": 33.8,
+   "e": 7.0
+  },
+  {
+   "tag": "implied incest",
+   "from": "nsfw_etc_sexual",
+   "qe": 33.2,
+   "e": 16.6
+  },
+  {
+   "tag": "yaoi",
+   "from": "nsfw_pairing",
+   "qe": 32.4,
+   "e": 25.4
+  },
+  {
+   "tag": "no pants",
+   "from": "nsfw_exposure",
+   "qe": 32.2,
+   "e": 11.8
+  },
+  {
+   "tag": "upshorts",
+   "from": "nsfw_peek",
+   "qe": 31.7,
+   "e": 9.6
+  },
+  {
+   "tag": "virgin killer sweater",
+   "from": "nsfw_exposure",
+   "qe": 31.6,
+   "e": 8.3
+  },
+  {
+   "tag": "breast rest",
+   "from": "nsfw_act",
+   "qe": 31.5,
+   "e": 12.6
+  },
+  {
+   "tag": "bikini top only",
+   "from": "nsfw_exposure",
+   "qe": 31.1,
+   "e": 16.7
+  },
+  {
+   "tag": "latex dress",
+   "from": "nsfw_exposure",
+   "qe": 30.9,
+   "e": 17.3
+  },
+  {
+   "tag": "looking at breasts",
+   "from": "nsfw_breast",
+   "qe": 30.0,
+   "e": 5.1
+  },
+  {
+   "tag": "you gonna get raped",
+   "from": "nsfw_etc_sexual",
+   "qe": 30.0,
+   "e": 11.7
+  },
+  {
+   "tag": "person between breasts",
+   "from": "nsfw_breast",
+   "qe": 29.6,
+   "e": 3.7
+  },
+  {
+   "tag": "blood on breasts",
+   "from": "nsfw_etc_dark",
+   "qe": 29.4,
+   "e": 5.6
+  },
+  {
+   "tag": "see-through dress",
+   "from": "nsfw_exposure",
+   "qe": 29.2,
+   "e": 10.9
+  },
+  {
+   "tag": "breast contest",
+   "from": "nsfw_bodyjob",
+   "qe": 28.6,
+   "e": 4.8
+  },
+  {
+   "tag": "groping motion",
+   "from": "nsfw_hand",
+   "qe": 28.6,
+   "e": 3.6
+  },
+  {
+   "tag": "aroused nosebleed",
+   "from": "nsfw_state",
+   "qe": 28.5,
+   "e": 8.1
+  },
+  {
+   "tag": "microskirt",
+   "from": "nsfw_exposure",
+   "qe": 28.1,
+   "e": 12.1
+  },
+  {
+   "tag": "see-through shirt",
+   "from": "nsfw_exposure",
+   "qe": 26.1,
+   "e": 7.3
+  },
+  {
+   "tag": "frilled babydoll",
+   "from": "nsfw_exposure",
+   "qe": 26.1,
+   "e": 7.8
+  },
+  {
+   "tag": "girl sandwich",
+   "from": "nsfw_position",
+   "qe": 26.1,
+   "e": 11.7
+  },
+  {
+   "tag": "self-harm",
+   "from": "nsfw_etc_dark",
+   "qe": 25.7,
+   "e": 3.7
+  },
+  {
+   "tag": "yuri",
+   "from": "nsfw_pairing",
+   "qe": 25.6,
+   "e": 12.9
+  },
+  {
+   "tag": "pectoral docking",
+   "from": "nsfw_bodyjob",
+   "qe": 25.5,
+   "e": 6.4
+  },
+  {
+   "tag": "breasts on head",
+   "from": "nsfw_breast",
+   "qe": 25.2,
+   "e": 9.3
+  },
+  {
+   "tag": "breast conscious",
+   "from": "nsfw_breast",
+   "qe": 25.2,
+   "e": 2.3
+  },
+  {
+   "tag": "chain between breasts",
+   "from": "nsfw_breast",
+   "qe": 25.0,
+   "e": 14.3
+  },
+  {
+   "tag": "boy and girl sandwich",
+   "from": "nsfw_position",
+   "qe": 24.7,
+   "e": 16.5
+  },
+  {
+   "tag": "bikini armor",
+   "from": "nsfw_exposure",
+   "qe": 24.5,
+   "e": 7.5
+  },
+  {
+   "tag": "convenient leg",
+   "from": "nsfw_censor",
+   "qe": 24.2,
+   "e": 2.6
+  },
+  {
+   "tag": "suicide",
+   "from": "nsfw_etc_dark",
+   "qe": 24.2,
+   "e": 6.2
+  },
+  {
+   "tag": "rope",
+   "from": "nsfw_toy",
+   "qe": 24.2,
+   "e": 12.8
+  },
+  {
+   "tag": "impossible clothes",
+   "from": "nsfw_exposure",
+   "qe": 23.9,
+   "e": 9.0
+  },
+  {
+   "tag": "negligee",
+   "from": "nsfw_exposure",
+   "qe": 23.9,
+   "e": 11.4
+  },
+  {
+   "tag": "bare pectorals",
+   "from": "nsfw_peek",
+   "qe": 23.2,
+   "e": 12.9
+  },
+  {
+   "tag": "breast envy",
+   "from": "nsfw_act",
+   "qe": 22.9,
+   "e": 3.3
+  },
+  {
+   "tag": "sword between breasts",
+   "from": "nsfw_breast",
+   "qe": 22.9,
+   "e": 14.3
+  },
+  {
+   "tag": "pectoral press",
+   "from": "nsfw_act",
+   "qe": 22.8,
+   "e": 7.6
+  },
+  {
+   "tag": "arm under breasts",
+   "from": "nsfw_breast",
+   "qe": 22.8,
+   "e": 6.2
+  },
+  {
+   "tag": "implied yuri",
+   "from": "nsfw_pairing",
+   "qe": 22.2,
+   "e": 9.6
+  },
+  {
+   "tag": "boy sandwich",
+   "from": "nsfw_position",
+   "qe": 22.2,
+   "e": 15.3
+  },
+  {
+   "tag": "drugs",
+   "from": "nsfw_etc_dark",
+   "qe": 21.8,
+   "e": 14.8
+  },
+  {
+   "tag": "arms under breasts",
+   "from": "nsfw_breast",
+   "qe": 21.4,
+   "e": 6.3
+  },
+  {
+   "tag": "bodystocking",
+   "from": "nsfw_exposure",
+   "qe": 21.4,
+   "e": 10.6
+  },
+  {
+   "tag": "pantyshot",
+   "from": "nsfw_peek",
+   "qe": 20.4,
+   "e": 3.5
+  },
+  {
+   "tag": "micro shorts",
+   "from": "nsfw_exposure",
+   "qe": 20.3,
+   "e": 6.9
+  },
+  {
+   "tag": "breasts on table",
+   "from": "nsfw_breast",
+   "qe": 20.2,
+   "e": 7.4
+  },
+  {
+   "tag": "diaper",
+   "from": "nsfw_exposure",
+   "qe": 20.1,
+   "e": 11.4
+  },
+  {
+   "tag": "playboy bunny",
+   "from": "nsfw_exposure",
+   "qe": 19.8,
+   "e": 8.0
+  },
+  {
+   "tag": "pantylines",
+   "from": "nsfw_peek",
+   "qe": 18.7,
+   "e": 5.4
+  },
+  {
+   "tag": "face to pecs",
+   "from": "nsfw_bodyjob",
+   "qe": 18.4,
+   "e": 2.6
+  },
+  {
+   "tag": "object on breast",
+   "from": "nsfw_breast",
+   "qe": 18.2,
+   "e": 0.9
+  },
+  {
+   "tag": "microdress",
+   "from": "nsfw_exposure",
+   "qe": 18.0,
+   "e": 8.9
+  },
+  {
+   "tag": "cat lingerie",
+   "from": "nsfw_exposure",
+   "qe": 17.8,
+   "e": 5.5
+  },
+  {
+   "tag": "breast pillow",
+   "from": "nsfw_act",
+   "qe": 16.7,
+   "e": 6.1
+  },
+  {
+   "tag": "showgirl skirt",
+   "from": "nsfw_exposure",
+   "qe": 15.8,
+   "e": 6.7
+  },
+  {
+   "tag": "impossible shirt",
+   "from": "nsfw_exposure",
+   "qe": 15.4,
+   "e": 5.9
+  },
+  {
+   "tag": "maid leotard",
+   "from": "nsfw_exposure",
+   "qe": 14.9,
+   "e": 6.4
+  },
+  {
+   "tag": "implied yaoi",
+   "from": "nsfw_pairing",
+   "qe": 14.3,
+   "e": 6.6
+  },
+  {
+   "tag": "card between breasts",
+   "from": "nsfw_breast",
+   "qe": 14.1,
+   "e": 0.0
+  },
+  {
+   "tag": "chemise",
+   "from": "nsfw_exposure",
+   "qe": 13.7,
+   "e": 5.4
+  },
+  {
+   "tag": "underboob cutout",
+   "from": "nsfw_breast",
+   "qe": 13.2,
+   "e": 5.6
+  },
+  {
+   "tag": "blood in hair",
+   "from": "nsfw_etc_dark",
+   "qe": 10.1,
+   "e": 2.6
+  },
+  {
+   "tag": "up sleeve",
+   "from": "nsfw_peek",
+   "qe": 9.7,
+   "e": 0.0
+  },
+  {
+   "tag": "framed breasts",
+   "from": "nsfw_breast",
+   "qe": 9.2,
+   "e": 4.2
+  },
+  {
+   "tag": "blood from eyes",
+   "from": "nsfw_etc_dark",
+   "qe": 8.4,
+   "e": 2.4
+  },
+  {
+   "tag": "imminent suicide",
+   "from": "nsfw_etc_dark",
+   "qe": 8.3,
+   "e": 2.5
+  },
+  {
+   "tag": "see-through cleavage",
+   "from": "nsfw_breast",
+   "qe": 4.6,
+   "e": 1.2
+  },
+  {
+   "tag": "implied pantyshot",
+   "from": "nsfw_peek",
+   "qe": 4.3,
+   "e": 0.0
+  },
+  {
+   "tag": "virgin killer outfit",
+   "from": "nsfw_exposure",
+   "qe": 4.2,
+   "e": 0.0
+  }
+ ]
+}

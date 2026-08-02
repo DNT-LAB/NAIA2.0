@@ -893,13 +893,17 @@ def register_result_display_routes(
         return result
 
     @app.post("/api/history/open-folder")
-    async def api_history_open_folder():
+    async def api_history_open_folder(target: str = "save"):
+        # target=quicksave 면 Ctrl+S 빠른 저장 폴더를 연다(비어 있으면 저장 폴더와 같다).
+        want_quicksave = str(target or "save").strip().lower() == "quicksave"
+
         def _open_folder():
             import os
             import subprocess
             import sys
 
-            folder = _viewer_save_dir(session_context)
+            folder = (session_context._save_service().quicksave_directory()
+                      if want_quicksave else _viewer_save_dir(session_context))
             folder.mkdir(parents=True, exist_ok=True)
             if sys.platform.startswith("darwin"):
                 subprocess.Popen(["open", str(folder)])
@@ -918,6 +922,32 @@ def register_result_display_routes(
     @app.post("/api/viewer/open-folder")
     async def api_viewer_open_folder():
         return await api_history_open_folder()
+
+    @app.post("/api/history/clear")
+    async def api_history_clear():
+        """메모리 히스토리를 통째로 비운다.
+
+        디스크에 저장된 파일은 그대로다 — 사라지는 것은 아직 저장되지 않은
+        이미지뿐이다. 되돌릴 수 없으므로 프론트에서 확인 팝업을 띄운다.
+
+        생성 중에는 거부한다: 결과 스토어에 락이 없어 생성 워커의 결과 추가와
+        교차하면 _items 와 latest 가 어긋나고, 방금 지운 항목이 완료 브로드캐스트로
+        되살아난다.
+        """
+        if bool(getattr(session_context, "is_generating", False)
+                or getattr(session_context, "headless_generation_runner_active", False)):
+            return JSONResponse(
+                {"ok": False, "error": "생성 중에는 히스토리를 비울 수 없습니다."},
+                status_code=409)
+        try:
+            stats = await run_in_thread(session_context.result_store.clear_history)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        await broadcast_json(
+            clients,
+            session_context.result_store.viewer_cleared_payload(stats.get("epoch")))
+        await broadcast_json(clients, session_context.auto_save_state_payload())
+        return {"ok": True, **stats}
 
     @app.get("/api/viewer/list")
     async def api_viewer_list(page: int = 0, per_page: int = 30, scope: str = "memory"):

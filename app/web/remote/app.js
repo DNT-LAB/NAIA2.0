@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260802-quicksave')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260802-quicksave9')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -1243,7 +1243,7 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260609-s
   .catch(error => {
     console.error('Failed to initialize Event Preset panel module', error);
   });
-const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260802-quicksave')
+const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260802-quicksave2')
   .then(({createAutoSavePanel}) => {
     autoSavePanel = createAutoSavePanel({
       document,
@@ -1255,6 +1255,7 @@ const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260802-qu
       openModule,
       setModuleParam,
       showToast,
+      showAppDialog,
     });
   })
   .catch(error => {
@@ -4761,7 +4762,12 @@ function onViewerHistoryRemoved(message) {
   scheduleResultUnsavedActionRefresh(80);
 }
 function onViewerHistoryCleared(message) {
-  if (resultHistory) resultHistory.onCleared(message);
+  // 낡은 세대의 알림이면 컨트롤러가 false 를 준다 — 그때는 현재 결과를 건드리면 안 된다
+  // (이미 그 뒤에 도착한 정상 이미지의 blob/메타를 날려 버린다).
+  if (!resultHistory || !resultHistory.onCleared(message)) return;
+  // 서버의 current asset 이 사라졌으므로 object URL/blob/meta 도 함께 놓는다
+  // (삭제 경로와 같은 정리 — 안 하면 지운 결과가 메모리에 남는다).
+  releaseLatestResultBuffers();
   renderResultUnsavedActions(null);
 }
 function jumpToLatestViewerImage() { if (resultHistory) resultHistory.jumpToLatest(); }
@@ -6073,7 +6079,8 @@ function showToast(msg, type, showConfigure) {
   } else {
     toastEl.textContent = msg;
   }
-  toastEl.className = `toast ${type}`;
+  // 배경/테두리는 타입 클래스에만 있다 — 타입 없이 부르면 투명한 토스트가 된다.
+  toastEl.className = `toast ${type || 'info'}`;
   // 표시를 requestAnimationFrame 대신 강제 reflow 후 동기 적용한다. Electron 백그라운드
   // 스로틀링(창 최소화/가림/hidden) 시 rAF 콜백이 보류되는 동안 제거용 setTimeout 만 발화해
   // 'show' 가 나중에 영구히 붙는 stuck-toast 버그를 차단. (수 초 대기 후 도착하는 토스트에서 발생)
@@ -7182,6 +7189,18 @@ function onQuicksaveDirChange(value) {
 
 function onQuicksaveFolderChange(value) {
   if (autoSavePanel) autoSavePanel.onQuicksaveFolderChange(value);
+}
+
+function pickQuicksaveDirectory() {
+  if (autoSavePanel) autoSavePanel.pickQuicksaveDirectory();
+}
+
+function openQuicksaveFolder() {
+  if (autoSavePanel) autoSavePanel.openQuicksaveFolder();
+}
+
+function clearResultHistory() {
+  if (autoSavePanel) autoSavePanel.clearHistory();
 }
 
 function onHistoryLimitToggle(checked) {
@@ -8639,7 +8658,7 @@ document.addEventListener('keydown', async e => {
   if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
     e.preventDefault();
     const path = resultHistory ? resultHistory.currentImagePath : '';
-    if (!path) { showToast('저장할 이미지가 없습니다'); return; }
+    if (!path) { showToast('저장할 이미지가 없습니다', 'info'); return; }
     try {
       const r = await fetch('/api/result/quicksave', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -8648,9 +8667,9 @@ document.addEventListener('keydown', async e => {
       const d = await r.json();
       if (!r.ok || d.ok === false) throw new Error(d.error || '저장 실패');
       const how = d.mode === 'move' ? '이동' : (d.mode === 'noop' ? '이미 있음' : '저장');
-      showToast(how + ': ' + String(d.path || '').split(/[\\/]/).pop());
+      showToast(how + ': ' + String(d.path || '').split(/[\\/]/).pop(), 'success');
     } catch (err) {
-      showToast('빠른 저장 실패: ' + err.message);
+      showToast('빠른 저장 실패: ' + err.message, 'error');
     }
   }
 });

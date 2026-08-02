@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import io
 from pathlib import Path
+import threading
 import uuid
 import zipfile
 from typing import Any, Optional
@@ -34,6 +35,9 @@ class HeadlessHistoryItem:
     # 비-PNG(WEBP 등) ComfyUI 결과에서 raw_bytes는 원본을 보존하고, 저장/PNG 합류점이 쓸
     # 메타데이터-임베드 PNG를 여기에 둔다(history_item_png_payload가 우선 사용). None이면 미사용.
     png_payload_override: bytes | None = None
+    # 이 항목이 추가된 시점의 히스토리 세대. 브로드캐스트는 락 밖에서 나가므로
+    # 알림 시점의 세대를 읽으면 이미 지워진 항목이 살아있는 세대를 달고 나간다.
+    epoch: int = 0
 
     @property
     def rel_path(self) -> str:
@@ -75,6 +79,16 @@ class HeadlessResultStore:
     def __init__(self, max_items: int = 200):
         self.max_items = max(1, int(max_items))
         self._items: list[HeadlessHistoryItem] = []
+        # _items 와 latest_* 는 항상 같은 것을 가리켜야 한다. 생성 워커(add_api_result),
+        # 외부 이미지 삽입, 삭제, 히스토리 초기화가 서로 다른 스레드에서 들어오므로
+        # **목록을 바꾸는 구간만** 직렬화한다(이미지 인코딩 같은 무거운 작업은 락 밖).
+        # 재진입 가능해야 한다 — 변형 메서드가 서로를 부른다.
+        self._mutation_lock = threading.RLock()
+        # 히스토리를 비울 때마다 올라간다. 항목 추가와 브로드캐스트 사이에는 락이
+        # 없으므로(브로드캐스트는 async I/O), 그 틈에 초기화가 끼면 방금 지운 항목이
+        # 새-이미지 알림으로 되살아난다. 알림에 세대를 실어 보내면 프론트가 낡은
+        # 알림을 버릴 수 있다.
+        self._epoch = 0
         self.latest_item: HeadlessHistoryItem | None = None
         self.latest_webp: bytes | None = None
         self.latest_metadata_payload: dict[str, Any] | None = None
@@ -258,13 +272,15 @@ class HeadlessResultStore:
             api_metadata=dict(api_result.get("api_metadata", {}) or {}),
             png_payload_override=comfyui_png_override,
         )
-        self._items.insert(0, item)
-        evicted = self._items[self.max_items:]
-        del self._items[self.max_items:]
-        image_meta = self._set_latest_item(item) or {}
-        metadata_payload = self.latest_metadata_payload or {}
-        # Build removal payloads AFTER eviction so their `total` reflects the capped count.
-        evicted_payloads = [self.viewer_removed_payload(ev) for ev in evicted]
+        with self._mutation_lock:
+            item.epoch = self._epoch
+            self._items.insert(0, item)
+            evicted = self._items[self.max_items:]
+            del self._items[self.max_items:]
+            image_meta = self._set_latest_item(item) or {}
+            metadata_payload = self.latest_metadata_payload or {}
+            # Build removal payloads AFTER eviction so their `total` reflects the capped count.
+            evicted_payloads = [self.viewer_removed_payload(ev) for ev in evicted]
         return HeadlessStoredResult(
             item=item,
             image_meta=image_meta,
@@ -324,14 +340,33 @@ class HeadlessResultStore:
             if isinstance(item_or_history_id, HeadlessHistoryItem)
             else str(item_or_history_id or "")
         )
-        for index, item in enumerate(self._items):
-            if item.history_id != history_id:
-                continue
-            removed = self._items.pop(index)
-            if self.latest_item and self.latest_item.history_id == history_id:
-                self._set_latest_item(self._items[0] if self._items else None)
-            return removed
+        with self._mutation_lock:
+            for index, item in enumerate(self._items):
+                if item.history_id != history_id:
+                    continue
+                removed = self._items.pop(index)
+                if self.latest_item and self.latest_item.history_id == history_id:
+                    self._set_latest_item(self._items[0] if self._items else None)
+                return removed
         return None
+
+    def clear_history(self) -> dict[str, int]:
+        """메모리 히스토리를 통째로 비운다(Ctrl+S/자동저장으로 이미 디스크에
+        내려간 파일은 건드리지 않는다 — 사라지는 것은 미저장분뿐이다)."""
+        with self._mutation_lock:
+            total = len(self._items)
+            unsaved = self.unsaved_history_count()
+            self._items.clear()
+            self._set_latest_item(None)
+            self._epoch += 1
+            epoch = self._epoch
+        # 동시에 두 번 비우면 알림 payload 를 각각 만들 때 둘 다 최종 세대를 읽어
+        # 같은 값이 나간다. 자기가 만든 세대를 돌려줘 호출부가 그 값으로 알리게 한다.
+        return {"removed": total, "discarded_unsaved": unsaved, "epoch": epoch}
+
+    def viewer_cleared_payload(self, epoch: int | None = None) -> dict[str, Any]:
+        return {"type": "viewer_history_cleared", "total": len(self._items),
+                "epoch": int(self._epoch if epoch is None else epoch)}
 
     def viewer_removed_payload(self, item: HeadlessHistoryItem) -> dict[str, Any]:
         return {
@@ -375,13 +410,15 @@ class HeadlessResultStore:
         page = max(0, int(page or 0))
         per_page = min(100, max(1, int(per_page or 30)))
         start = page * per_page
-        selected = self._items[start:start + per_page]
+        with self._mutation_lock:   # 페이지와 total 이 서로 다른 시점을 가리키지 않게
+            selected = self._items[start:start + per_page]
+            total = len(self._items)   # 목록과 같은 스냅샷이어야 한다
         return {
             "images": [
                 self.history_summary(item, index=start + offset)
                 for offset, item in enumerate(selected)
             ],
-            "total": len(self._items),
+            "total": total,
             "page": page,
             "per_page": per_page,
         }
@@ -426,7 +463,8 @@ class HeadlessResultStore:
 
     def viewer_new_image_payload(self, item: HeadlessHistoryItem) -> dict[str, Any]:
         payload = self.history_summary(item, index=0)
-        payload.update({"type": "viewer_new_image", "total": len(self._items)})
+        payload.update({"type": "viewer_new_image", "total": len(self._items),
+                        "epoch": int(getattr(item, "epoch", 0))})
         return payload
 
     def _set_latest_item(self, item: HeadlessHistoryItem | None) -> dict[str, Any] | None:

@@ -8,6 +8,7 @@ export function createAutoSavePanel({
   openModule,
   setModuleParam,
   showToast,
+  showAppDialog,
 }) {
   const statsSave = document.getElementById('statsSave');
   const moduleBody = document.getElementById('modulePopupBody');
@@ -72,6 +73,9 @@ export function createAutoSavePanel({
     const toggleClass = panelState.auto_save ? 'mod-stop' : 'mod-start';
     const unsavedCount = Math.max(0, Number(panelState.unsaved_history_count || 0));
     const bulkDisabled = bulkBusy || unsavedCount <= 0;
+    // 네이티브 폴더 선택은 Electron 쉘에서만(원격 브라우저는 텍스트 입력 폴백).
+    // 쉘이 있다는 것은 곧 이 PC에서 돌고 있다는 뜻이라 백엔드의 loopback 경계와 일치한다.
+    const canPickFolder = !!(globalThis.naiaShell && globalThis.naiaShell.pickSaveDirectory);
     const modeOptions = (panelState.quicksave_mode_options || []).map(o =>
       `<option value="${escHtml(String(o.value))}"${
         String(panelState.quicksave_mode) === String(o.value) ? ' selected' : ''
@@ -99,6 +103,10 @@ export function createAutoSavePanel({
           <button class="mod-btn-secondary mod-btn-compact" type="button"
                   onclick="downloadUnsavedHistory()" ${bulkDisabled ? 'disabled' : ''}>
             ${bulkBusy ? '처리 중...' : '일괄 다운로드'}
+          </button>
+          <button class="mod-btn-danger mod-btn-compact" type="button"
+                  onclick="clearResultHistory()" ${bulkBusy ? 'disabled' : ''}>
+            히스토리 초기화
           </button>
         </div>
         <div class="mod-field">
@@ -149,10 +157,18 @@ export function createAutoSavePanel({
         </label>
         <label class="mod-field">
           <span class="mod-field-label">저장 경로 (비우면 저장 폴더를 따라감)</span>
-          <input class="mod-input" type="text" placeholder="예: D:/picks"
+          <input class="mod-input" id="quicksaveDirInput" type="text" placeholder="예: D:/picks"
                  value="${escHtml(String(panelState.quicksave_dir || ''))}"
                  onchange="onQuicksaveDirChange(this.value)">
         </label>
+        <div class="mod-inline-row">
+          ${canPickFolder
+            ? `<button class="mod-btn-secondary mod-btn-compact" type="button"
+                       onclick="pickQuicksaveDirectory()">폴더 선택…</button>`
+            : ''}
+          <button class="mod-btn-secondary mod-btn-compact" type="button"
+                  onclick="openQuicksaveFolder()">폴더 열기</button>
+        </div>
         <label class="mod-field">
           <span class="mod-field-label">폴더 배치</span>
           <select class="mod-select" onchange="onQuicksaveFolderChange(this.value)">
@@ -194,6 +210,60 @@ export function createAutoSavePanel({
   function onQuicksaveFolderChange(value) {
     if (lastState) lastState.quicksave_folder = value;
     setModuleParam('auto_save', 'quicksave_folder', String(value || 'date'));
+  }
+
+  async function pickQuicksaveDirectory() {
+    const shell = globalThis.naiaShell;
+    if (!shell || typeof shell.pickSaveDirectory !== 'function') {
+      showToast('폴더 선택은 데스크톱 앱에서만 지원됩니다. 경로를 직접 입력해 주세요.', 'info');
+      return;
+    }
+    let folder = null;
+    try { folder = await shell.pickSaveDirectory(); } catch (_) { folder = null; }
+    if (!folder) return;   // 사용자 취소
+    const input = document.getElementById('quicksaveDirInput');
+    if (input) input.value = folder;
+    onQuicksaveDirChange(folder);
+  }
+
+  async function openQuicksaveFolder() {
+    try {
+      const r = await fetch('/api/history/open-folder?target=quicksave', {method: 'POST'});
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || '폴더를 열지 못했습니다');
+    } catch (err) {
+      showToast('폴더 열기 실패: ' + err.message, 'error');
+    }
+  }
+
+  async function clearHistory() {
+    const unsaved = Math.max(0, Number((lastState || {}).unsaved_history_count || 0));
+    const warning = unsaved > 0
+      ? `아직 저장되지 않은 이미지 ${unsaved}장이 함께 사라집니다. 되돌릴 수 없습니다.`
+      : '저장된 파일은 그대로 남고 목록만 비워집니다.';
+    // .app-confirm-message 는 개행을 접으므로 <br> 로 직접 넘긴다(양쪽 다 escHtml 통과분).
+    const ok = await showAppDialog('', {
+      title: '히스토리 초기화',
+      messageHtml: `${escHtml('Remote Web 히스토리를 통째로 비웁니다.')}<br>${escHtml(warning)}`,
+      okText: '비우기',
+      cancelText: '취소',
+    });
+    if (!ok) return;
+    bulkBusy = true;
+    render();
+    try {
+      const r = await fetch('/api/history/clear', {method: 'POST'});
+      const d = await r.json();
+      if (!r.ok || d.ok === false) throw new Error(d.error || '초기화 실패');
+      const lost = Number(d.discarded_unsaved || 0);
+      showToast(lost > 0 ? `히스토리 ${d.removed}장 정리 (미저장 ${lost}장 삭제)`
+                         : `히스토리 ${d.removed}장 정리`, 'success');
+    } catch (err) {
+      showToast('히스토리 초기화 실패: ' + err.message, 'error');
+    } finally {
+      bulkBusy = false;
+      render();
+    }
   }
 
   function onWebpChange(checked) {
@@ -299,6 +369,9 @@ export function createAutoSavePanel({
     onQuicksaveModeChange,
     onQuicksaveDirChange,
     onQuicksaveFolderChange,
+    pickQuicksaveDirectory,
+    openQuicksaveFolder,
+    clearHistory,
     onHistoryLimitToggle,
     onHistoryLimitLengthChange,
     onHistoryLimitActionChange,

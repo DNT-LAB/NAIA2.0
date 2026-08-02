@@ -75,6 +75,9 @@ export function createResultHistoryController({
   let viewerNavPaths = [];
   let viewerNavIdx = -1;
   let currentViewerPath = '';
+  // 마지막으로 본 초기화 세대. 이보다 낡은 새-이미지 알림은 이미 비워진 히스토리의
+  // 것이므로 그리면 유령이 된다. 진행 중이던 목록 요청의 응답을 버리는 데도 쓴다.
+  let clearedEpoch = 0;
   let lightboxPromptVisible = false;
   let viewerPendingNewCount = 0;
   let latestImagePath = '';
@@ -166,9 +169,13 @@ export function createResultHistoryController({
     if (viewerLoadingMore || !viewerGrid) return;
     viewerLoadingMore = true;
     if (viewerLoading) viewerLoading.style.display = '';
+    // 요청을 보낸 시점의 세대. 응답을 기다리는 사이 히스토리가 비워졌다면 이 응답은
+    // 이미 사라진 항목들이므로 그리면 안 된다.
+    const epochAtRequest = clearedEpoch;
     try {
       const resp = await fetchHistoryList(page, 30);
       const data = await resp.json();
+      if (clearedEpoch !== epochAtRequest) return;
       viewerTotal = data.total;
       if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
       if (viewerTab) viewerTab.classList.toggle('visible', viewerTotal > 0);
@@ -179,9 +186,10 @@ export function createResultHistoryController({
       viewerPage = page + 1;
     } catch (error) {
       console.error('Viewer load failed:', error);
+    } finally {
+      viewerLoadingMore = false;
+      if (viewerLoading) viewerLoading.style.display = 'none';
     }
-    viewerLoadingMore = false;
-    if (viewerLoading) viewerLoading.style.display = 'none';
   }
 
   function initViewer() {
@@ -192,8 +200,14 @@ export function createResultHistoryController({
     loadPage(0);
   }
 
+  // 재조회는 비동기다. 응답을 기다리는 사이에 새 이미지 알림이 오면 그쪽이 최신이므로
+  // 늦게 도착한 응답으로 총계를 되돌리면 안 된다(썸네일은 있는데 카운트만 0이 된다).
+  let historySyncSeq = 0;
+
   function prepareInitialHistory() {
+    const seq = ++historySyncSeq;
     fetchHistoryList(0, 1).then(resp => resp.json()).then(data => {
+      if (seq !== historySyncSeq) return;   // 그 사이 더 새로운 사실이 도착했다
       viewerTotal = data.total;
       if (viewerCountEl) viewerCountEl.textContent = data.total;
       if (data.total > 0 && viewerGrid && viewerGrid.children.length === 0) initViewer();
@@ -424,6 +438,8 @@ export function createResultHistoryController({
 
   function onNewImage(message) {
     if (!message.rel_path) return;
+    if (Number.isFinite(Number(message.epoch)) && Number(message.epoch) < clearedEpoch) return false;
+    historySyncSeq += 1;   // 진행 중인 재조회보다 이 알림이 최신이다
     latestImagePath = message.rel_path;
     const alreadyInGrid = hasThumb(message.rel_path);
     if (Number.isFinite(Number(message.total))) {
@@ -505,12 +521,23 @@ export function createResultHistoryController({
   }
 
   function onCleared(message = {}) {
+    // 이미 지나간 세대의 초기화 알림은 실행하지 않는다. 동시 초기화의 브로드캐스트가
+    // 2 -> 1 순서로 도착하면, 늦게 온 1이 그 뒤에 정상 표시된 이미지를 지워 버린다.
+    if (Number.isFinite(Number(message.epoch)) && Number(message.epoch) < clearedEpoch) return;
+    // 서버 세대를 그대로 따른다. 임의로 앞서가면 이후 정상 새-이미지 알림의 세대가
+    // 항상 작아져 히스토리에 아무것도 안 뜨게 된다.
+    // 세대가 없는 알림(구버전 백엔드)일 때만 진행 중인 목록 요청을 무효화하려고 +1.
+    clearedEpoch = Number.isFinite(Number(message.epoch))
+      ? Math.max(clearedEpoch, Number(message.epoch))
+      : clearedEpoch + 1;
     viewerPage = 0;
     viewerTotal = 0;
     viewerNavPaths = [];
     viewerNavIdx = -1;
     currentViewerPath = '';
     latestImagePath = '';
+    // 팝업 선택도 놓는다 — 안 그러면 빈 팝업에서 Ctrl+S 가 삭제된 경로를 보낸다.
+    vpCurrentPath = '';
     viewerPendingNewCount = 0;
     promptFloatCache = {};
     promptFloatCacheKeys = [];
@@ -519,15 +546,22 @@ export function createResultHistoryController({
     if (vpGrid) vpGrid.innerHTML = '';
     const vpPreview = getEl('vpPreview');
     if (vpPreview) vpPreview.removeAttribute('src');
-    if (preview?.dataset?.source === 'saved') {
+    // 히스토리를 비우면 서버의 current asset 도 사라진다. 생성 결과 프리뷰
+    // (source='current')까지 지워야 화면과 서버가 어긋나지 않는다.
+    if (preview) {
       preview.removeAttribute('src');
       preview.classList.remove('show');
       preview.dataset.path = '';
-      emptyMsg.style.display = '';
+      preview.dataset.source = '';
+      if (emptyMsg) emptyMsg.style.display = '';
     }
     if (resultInfoContent) resultInfoContent.innerHTML = '<span class="result-info-empty">No history item selected</span>';
     setViewerTotal(message.total ?? 0);
     hideLatestBadge();
+    // 초기화와 새 이미지 알림이 엇갈리면 화면이 서버보다 앞서거나 뒤처질 수 있다.
+    // 초기화는 드문 동작이니 여기서 한 번 다시 맞춰 최종 상태를 서버에 수렴시킨다.
+    prepareInitialHistory();
+    return true;   // 호출부가 자기 쪽 정리를 할지 판단한다
   }
 
   function openPopup() {
@@ -566,9 +600,11 @@ export function createResultHistoryController({
     vpLoading = true;
     const loading = getEl('vpLoading');
     if (loading) loading.style.display = '';
+    const epochAtRequest = clearedEpoch;   // loadPage 와 같은 이유 — 초기화가 끼면 버린다
     try {
       const resp = await fetchHistoryList(page, 30);
       const data = await resp.json();
+      if (clearedEpoch !== epochAtRequest) return;
       const grid = getEl('vpGrid');
       if (grid) {
         for (const entry of data.images) {
@@ -586,9 +622,11 @@ export function createResultHistoryController({
       viewerTotal = data.total;
       const count = getEl('vpCount');
       if (count) count.textContent = data.total;
-    } catch (_) {}
-    vpLoading = false;
-    if (loading) loading.style.display = 'none';
+    } catch (_) {
+    } finally {
+      vpLoading = false;
+      if (loading) loading.style.display = 'none';
+    }
   }
 
   function selectPopupImage(relPath, thumbEl) {

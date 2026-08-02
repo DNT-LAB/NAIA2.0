@@ -138,6 +138,25 @@ async def handle_module_command(
     # ⚠️ 다운스트림 dispatch가 module_id/key를 .strip() 하므로(headless_module_dispatch_service),
     # 여기서도 반드시 strip 후 비교 — 안 하면 "delete_storage "(공백) 등으로 게이트 우회 가능
     # (Codex CRITICAL: 정규화 불일치 우회).
+    # 빠른 저장 경로도 서버 머신의 임의 위치를 가리키므로 같은 경계를 쓴다.
+    # (set_auto_save_param 에도 방어가 있지만 그쪽은 조용히 무시하므로,
+    #  여기서 먼저 잡아 사용자에게 이유를 알린다.)
+    if (
+        str(command.get("module_id") or "").strip() == "auto_save"
+        and str(command.get("key") or "").strip() == "quicksave_dir"
+        and not is_loopback_host(client_host)
+    ):
+        await _send_json(ws, {
+            "type": "toast",
+            "level": "error",
+            "message": "빠른 저장 경로는 로컬(이 PC)에서만 바꿀 수 있습니다.",
+            "runtime": "web",
+        })
+        # 패널은 전송 전에 값을 낙관적으로 반영한다 — 거부했으면 서버 값을 돌려줘
+        # 입력란이 적용되지 않은 경로를 계속 보여주지 않게 한다.
+        await _send_json(ws, context.auto_save_state_payload())
+        return True
+
     if (
         str(command.get("module_id") or "").strip() == "vibe_transfer"
         and str(command.get("key") or "").strip() in {"open_location", "delete_storage"}

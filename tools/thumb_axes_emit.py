@@ -182,6 +182,9 @@ SLOTS = [
         # 게다가 `chestnut mouth` 는 문자 그대로 `:3` 이라 `expression_symbol` 과 같은 것을
         # 두 슬롯에 갈라 두고 있었다.
         ("thumb", "눈·입 형태", "face_shape"),
+        # `ahegao`·`torogao`·`afterglow` — 한 명의 얼굴에 나타나는 것이다. 두 사람의
+        # 구성(`clothed female nude male`)과 행위는 성인 축으로 빼고 9개만 남겼다.
+        ("thumb", "상태·표정(성인)", "nsfw_state"),
         # 탐색기 제거: 279개 중 258개(92%)가 이미 썸네일에 있는 중복이고 전용 21개는
         # 전부 저빈도였다. 검색은 `thumb` 만 있어도 붙으므로 `scope` 도 필요 없다.
     ]),
@@ -206,6 +209,10 @@ SLOTS = [
         ("thumb", "음모(성인)", "nsfw_pubic"),
         ("thumb", "성기(성인)", "nsfw_genital"),
         ("thumb", "가슴(성인)", "nsfw_breast"),
+        # 성인 도감에만 있어 캐릭터를 만들 때 닿을 수 없던 것들. 전부 캐릭터 한 명으로
+        # 성립한다 — 남의 몸도 카메라도 필요 없다(다인원·행위분은 성인 축으로 뺐다).
+        ("thumb", "해부·부위(성인)", "nsfw_anatomy"),
+        ("thumb", "장신구·문신(성인)", "nsfw_adorn"),   # `pubic tattoo` 가 여기 있었다
         # (`body_nsfw` 는 뺐다 — 44개 전부 '준비 중' 이었다. 도감은 wildcards/nsfw/.)
         # 탐색기 제거: 노출·강조 42 + 신체 특징 68 + 이형 37 이 body_parts/shoulders/
         # ass/hands 를 전부 덮는다. 남겨두면 같은 태그를 두 경로로 보여주게 된다.

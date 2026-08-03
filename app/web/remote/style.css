@@ -21147,10 +21147,11 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-assets[hidden] { display: none; }
 .ia-as-bar { display: flex; align-items: center; gap: 6px; }
 
-/* 스택과 그 옆 조작 버튼을 한 줄로. 버튼은 아래(C1)에 맞춰 붙는다. */
-.ia-as-stackrow {
+/* 캐릭터 한 명이 한 줄. 조작 버튼은 **그 줄 안**에 들어간다 — 스택 옆에 하나만
+   두면 늘 맨 아래 줄에 걸려 엉뚱한 캐릭터의 상태처럼 보인다. */
+.ia-as-stackline {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 6px;
 }
 .ia-as-slotctl { display: flex; gap: 4px; }
@@ -21190,6 +21191,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   align-items: flex-start;
   gap: 4px;
 }
+.ia-as-slot { flex: 0 0 auto; }
 .ia-as-slot {
   min-width: 46px;
   padding: 5px 10px;

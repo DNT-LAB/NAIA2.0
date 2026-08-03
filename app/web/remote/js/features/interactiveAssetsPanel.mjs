@@ -169,18 +169,18 @@ export function createInteractiveAssetsPanel({
     renderGrid();
   }
 
-  /** 열린 캐릭터의 활성/비활성을 뒤집는다. 좌측 헤더 ACTIVE 버튼과 같은 동작. */
+  /** 대상 슬롯의 활성/비활성을 뒤집는다. 좌측 헤더 ACTIVE 버튼과 같은 동작. */
   function toggleOpenChar() {
-    const cur = roster.find(c => c.open);
+    const cur = roster[targetSlot];
     const panel = getPanel && getPanel();
     if (!cur || !panel || typeof panel.toggleCharacterEnabled !== 'function') return;
     panel.toggleCharacterEnabled(cur.id);
   }
 
-  /** 열린 캐릭터 슬롯을 지운다. 라벨(C1..Cn)은 index 로 계산되므로 지운 뒤
-   *  뒤 슬롯이 자동으로 당겨진다 — C1 을 지우면 C2 가 C1 이 된다. */
+  /** 대상 슬롯을 지운다. 라벨(C1..Cn)은 index 로 계산되므로 지운 뒤 뒤 슬롯이
+   *  자동으로 당겨진다 — C1 을 지우면 C2 가 C1 이 된다. */
   function deleteOpenChar() {
-    const cur = roster.find(c => c.open);
+    const cur = roster[targetSlot];
     const panel = getPanel && getPanel();
     if (!cur || !panel || typeof panel.deleteCharacterById !== 'function') return;
     panel.deleteCharacterById(cur.id);
@@ -277,33 +277,38 @@ export function createInteractiveAssetsPanel({
   function stackHtml() {
     if (!roster.length) return '';
     // 아래에서 위로 쌓이므로 뒤집는다. C1 이 바 바로 위에 붙어야 손이 짧다.
-    const col = '<div class="ia-as-stack">' + [...roster].reverse().map(c =>
+    // 각 캐릭터가 한 줄이다. 조작 버튼은 **그 줄 옆**에 붙는다 —
+    // 스택 전체 옆에 하나만 두면 늘 맨 아래(C1) 옆에 걸려, C2 를 OFF 해도
+    // C1 이 OFF 인 것처럼 읽힌다(사용자 지적).
+    return '<div class="ia-as-stack">' + [...roster].reverse().map(c =>
+      '<div class="ia-as-stackline">' +
       `<button type="button" class="ia-as-slot${c.open ? ' is-open' : ''}` +
       `${c.enabled ? '' : ' is-off'}" data-as-open="${c.index}"` +
       ` title="${escHtml(c.name || c.label)}${c.enabled ? '' : ' (비활성)'}">` +
-      `${escHtml(c.label)}</button>`).join('') + '</div>';
-    return '<div class="ia-as-stackrow">' + col + slotCtlHtml() + '</div>';
+      `${escHtml(c.label)}</button>` +
+      (c.index === targetSlot ? slotCtlHtml() : '') +
+      '</div>').join('') + '</div>';
   }
 
   /** 열린 캐릭터에 거는 조작 — 활성/비활성 토글과 삭제.
    *  **슬롯이 2개 이상이고 목록을 펼쳤을 때만** 낸다(사용자 지정): 하나뿐이면 지울 수
    *  없고, 접힌 바에서는 스택만 있으면 충분하다. */
+  /** 선택된 줄에만 붙는다(stackHtml 이 호출 위치를 정한다). */
   function slotCtlHtml() {
     if (!open || roster.length < 2) return '';
-    const cur = roster.find(c => c.open) || null;
-    const label = cur ? cur.label : 'C?';
-    const enabled = cur ? cur.enabled : true;
-    const dis = cur ? '' : ' disabled';
-    const enTip = cur
-      ? `${label} ${enabled ? '비활성화 (생성에서 제외)' : '활성화'}`
-      : '캐릭터를 먼저 여세요';
-    const delTip = cur ? `${label} 슬롯 삭제` : '캐릭터를 먼저 여세요';
+    // 대상은 **대상 슬롯**이다(스택 클릭도 이 값을 옮긴다). 예전에는 '열린 캐릭터'를
+    // 따로 봤는데, 아코디언은 사용자가 다시 눌러 닫을 수 있어 열린 것이 없는 순간이
+    // 생기고 그때 'C? 제거' 같은 표시가 떴다. 또 대상 칸은 [1] 인데 버튼은 C2 를
+    // 가리키는 불일치가 났다 — 두 개념을 하나로 합쳤다.
+    const cur = roster[targetSlot];
+    if (!cur) return '';
+    const enTip = `${cur.label} ${cur.enabled ? '비활성화 (생성에서 제외)' : '활성화'}`;
     return '<div class="ia-as-slotctl">' +
-      `<button type="button" class="ia-as-slotbtn${enabled ? ' is-on' : ''}"` +
-      ` data-as-enable="1"${dis} title="${escHtml(enTip)}">` +
-      `${enabled ? 'ACTIVE' : 'OFF'}</button>` +
-      `<button type="button" class="ia-as-slotbtn is-del" data-as-delchar="1"${dis}` +
-      ` title="${escHtml(delTip)}">${escHtml(label)} 제거</button>` +
+      `<button type="button" class="ia-as-slotbtn${cur.enabled ? ' is-on' : ''}"` +
+      ` data-as-enable="1" title="${escHtml(enTip)}">` +
+      `${cur.enabled ? 'ACTIVE' : 'OFF'}</button>` +
+      `<button type="button" class="ia-as-slotbtn is-del" data-as-delchar="1"` +
+      ` title="${escHtml(cur.label)} 슬롯 삭제">${escHtml(cur.label)} 제거</button>` +
       '</div>';
   }
 
@@ -475,15 +480,21 @@ export function createInteractiveAssetsPanel({
       return;
     }
     if (t.dataset.asOpen !== undefined) {
+      // 스택은 '지금 다루는 캐릭터'를 고르는 것이다 — 좌측을 열고 대상도 그리로 옮긴다.
+      // 둘을 갈라 두면 대상 칸은 [1] 인데 조작 버튼은 C2 를 가리키는 상태가 된다.
+      const i = Number(t.dataset.asOpen);
       const panel = getPanel && getPanel();
-      if (panel && typeof panel.openCharacterAt === 'function') {
-        panel.openCharacterAt(Number(t.dataset.asOpen));
-      }
+      if (panel && typeof panel.openCharacterAt === 'function') panel.openCharacterAt(i);
+      if (i < roster.length) { targetSlot = i; render(); }
       return;
     }
     if (t.dataset.asTarget !== undefined) {
-      targetSlot = Number(t.dataset.asTarget);
-      render();   // [적용] 라벨이 대상 번호를 담는다
+      const i = Number(t.dataset.asTarget);
+      targetSlot = i;
+      // 대상 칸도 같은 뜻이다 — 그 캐릭터를 좌측에서 열어 준다.
+      const panel = getPanel && getPanel();
+      if (panel && typeof panel.openCharacterAt === 'function') panel.openCharacterAt(i);
+      render();   // [적용] 라벨과 조작 버튼이 대상 번호를 담는다
       return;
     }
     if (t.dataset.asEnable) { toggleOpenChar(); return; }
@@ -525,6 +536,11 @@ export function createInteractiveAssetsPanel({
     /** 패널이 캐릭터 목록 변화를 알려 준다. 스택과 대상 칸이 이걸로 그려진다. */
     setRoster(next) {
       roster = Array.isArray(next) ? next : [];
+      // 좌측 아코디언에서 캐릭터를 열어도 '지금 다루는 캐릭터'가 바뀐 것이다 —
+      // 대상을 그리로 옮긴다. 이쪽을 빼면 스택은 C2 를 가리키는데 조작·적용은
+      // C1 에 걸리는 상태가 된다(방향이 한쪽뿐이었다).
+      const opened = roster.findIndex(c => c.open);
+      if (opened >= 0) targetSlot = opened;
       // 대상은 **있는 슬롯**만이다. 그 다음 자리는 [+] 버튼이 차지하므로 겨눌 수 없다.
       // 캐릭터가 줄면 마지막 슬롯으로 당긴다 — 안 그러면 [+] 자리를 겨눈 채 적용해
       // 누르지도 않은 슬롯이 생긴다.

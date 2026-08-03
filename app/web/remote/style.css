@@ -21147,6 +21147,32 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-assets[hidden] { display: none; }
 .ia-as-bar { display: flex; align-items: center; gap: 6px; }
 
+/* 캐릭터 한 명이 한 줄 — 슬롯 버튼과 그 캐릭터의 위치 버튼이 나란히. */
+.ia-as-stackline {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ia-as-pos {
+  padding: 5px 9px;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: rgba(14, 16, 22, 0.86);
+  backdrop-filter: blur(6px);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ia-as-pos:hover {
+  color: var(--text-primary);
+  border-color: var(--border-glow);
+  background: rgba(120, 140, 255, 0.14);
+}
+
 /* 조작 버튼 줄 — 스택 아래, ASSETS 바 위. 어느 캐릭터 줄과도 나란하지 않아
    귀속을 오해할 일이 없고, 선택을 바꿔도 자리가 움직이지 않는다. */
 .ia-as-slotctl { display: flex; gap: 4px; }

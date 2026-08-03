@@ -282,11 +282,23 @@ export function createInteractiveAssetsPanel({
     //   - 스택 전체 옆에 하나만 두면 늘 맨 아래(C1) 옆에 걸려, C2 를 껐는데
     //     C1 이 꺼진 것처럼 읽힌다.
     // 어느 줄과도 나란하지 않은 자리에 두고 라벨에 번호를 실어 대상을 밝힌다.
+    // 위치는 **캐릭터마다 다르고 서로 비교해야** 하므로 각 줄에 둔다(조작 버튼과 반대).
+    // NAI 가 아니거나 1명이면 좌표를 안 보내므로 버튼도 내지 않는다.
+    const panel = getPanel && getPanel();
+    const posOn = !!(panel && typeof panel.positionAvailable === 'function'
+                     && panel.positionAvailable());
     return '<div class="ia-as-stack">' + [...roster].reverse().map(c =>
+      '<div class="ia-as-stackline">' +
       `<button type="button" class="ia-as-slot${c.open ? ' is-open' : ''}` +
       `${c.enabled ? '' : ' is-off'}" data-as-open="${c.index}"` +
       ` title="${escHtml(c.name || c.label)}${c.enabled ? '' : ' (비활성)'}">` +
-      `${escHtml(c.label)}</button>`).join('') + '</div>' + slotCtlHtml();
+      `${escHtml(c.label)}</button>` +
+      (posOn
+        ? `<button type="button" class="ia-as-pos" data-as-pos="${escHtml(c.id)}"` +
+          ` title="${escHtml(c.label)} 캔버스 위치 (NAI V4 centers)">` +
+          `POS ${escHtml(c.pos || 'C3')}</button>`
+        : '') +
+      '</div>').join('') + '</div>' + slotCtlHtml();
   }
 
   /** 열린 캐릭터에 거는 조작 — 활성/비활성 토글과 삭제.
@@ -459,7 +471,7 @@ export function createInteractiveAssetsPanel({
     const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],' +
       '[data-as-restore],[data-as-fav],[data-as-del],[data-as-open],[data-as-target],' +
       '[data-as-expand],[data-as-pick],[data-as-apply],[data-as-addslot],' +
-      '[data-as-enable],[data-as-delchar]');
+      '[data-as-enable],[data-as-delchar],[data-as-pos]');
     if (!t) return;
     event.preventDefault();
     if (t.dataset.asToggle) {
@@ -494,6 +506,13 @@ export function createInteractiveAssetsPanel({
       const panel = getPanel && getPanel();
       if (panel && typeof panel.openCharacterAt === 'function') panel.openCharacterAt(i);
       render();   // [적용] 라벨과 조작 버튼이 대상 번호를 담는다
+      return;
+    }
+    if (t.dataset.asPos) {
+      const panel = getPanel && getPanel();
+      if (panel && typeof panel.openPositionPickerFor === 'function') {
+        panel.openPositionPickerFor(t, t.dataset.asPos);
+      }
       return;
     }
     if (t.dataset.asEnable) { toggleOpenChar(); return; }

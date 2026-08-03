@@ -793,6 +793,7 @@ export function createInteractivePanel({
       open: !!c.open,
       enabled: c.state === 'active',
       gender: c.gender || 'female',
+      pos: c.pos || POS_DEFAULT,
       name: (c.fields?.['캐릭터'] || [])[0] || c.name || '',
     }));
   }
@@ -1162,7 +1163,9 @@ export function createInteractivePanel({
 
   function onPosOutside(event) {
     if (posPopup && posPopup.contains(event.target)) return;
-    if (event.target.closest?.('[data-charpos]')) return;   // 토글은 버튼 핸들러가 처리
+    // 토글은 버튼 핸들러가 처리한다. Assets 스택의 POS 버튼도 같은 취급 —
+    // 빠지면 mousedown 이 먼저 닫아 버려 눌러도 열리지 않는다.
+    if (event.target.closest?.('[data-charpos],[data-as-pos]')) return;
     closePositionPicker();
   }
 
@@ -1180,6 +1183,7 @@ export function createInteractivePanel({
     if (btn) btn.textContent = `Position ${next}`;
     if (posPopup && !posPopup.hidden) posPopup.innerHTML = posPopupHtml(next);
     emitChange();
+    notifyRoster();   // Assets 스택의 [POS C3] 라벨도 이 값을 쓴다
   }
 
   /** 마지막 하나가 아니면 캐릭터 슬롯 삭제. */
@@ -3909,10 +3913,29 @@ export function createInteractivePanel({
     // 마지막 하나는 못 지우는 규칙과 토스트가 그대로 적용된다.
     toggleCharacterEnabled: toggleCharEnabled,
     deleteCharacterById: deleteCharacter,
+    /** 위치 팝업을 주어진 앵커에 연다(Assets 스택의 [POS] 버튼용).
+     *  NAI 가 아니거나 1명이면 좌표 자체를 안 보내므로 열지 않는다. */
+    openPositionPickerFor(anchor, cid) {
+      if (!anchor || !cid) return false;
+      if (String(getMode() || 'NAI').toUpperCase() !== 'NAI') return false;
+      if (state.chars.length <= 1) return false;
+      openPositionPicker(anchor, cid);
+      return true;
+    },
+    /** 위치를 쓸 수 있는 상태인가(스택이 POS 버튼을 낼지 판단). */
+    positionAvailable: () =>
+      String(getMode() || 'NAI').toUpperCase() === 'NAI' && state.chars.length > 1,
     openCharacterAt,
     applySnapshotCharAt,
     // 모드 전환 시 호출 — Position 버튼/Reference 는 NAI 전용이라 헤더를 다시 그려야 한다.
-    onModeChanged: () => { if (active) { closePositionPicker(); renderBlocks(); } },
+    onModeChanged: () => {
+      if (!active) return;
+      closePositionPicker();
+      renderBlocks();
+      // Assets 스택의 [POS] 는 NAI 일 때만 낸다 — 모드가 바뀌면 그쪽도 다시 그려야
+      // 한다. 안 그러면 WEBUI 로 옮겨도 버튼이 남아 눌러도 반응이 없다.
+      notifyRoster();
+    },
     destroy: () => {
       // 하위 모듈의 리스너/타이머/팝업/툴팁까지 정리한다.
       if (autocomplete) { try { autocomplete.unbind(); } catch (e) {} }

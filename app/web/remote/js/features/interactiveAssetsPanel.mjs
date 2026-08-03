@@ -277,23 +277,22 @@ export function createInteractiveAssetsPanel({
   function stackHtml() {
     if (!roster.length) return '';
     // 아래에서 위로 쌓이므로 뒤집는다. C1 이 바 바로 위에 붙어야 손이 짧다.
-    // 각 캐릭터가 한 줄이다. 조작 버튼은 **그 줄 옆**에 붙는다 —
-    // 스택 전체 옆에 하나만 두면 늘 맨 아래(C1) 옆에 걸려, C2 를 OFF 해도
-    // C1 이 OFF 인 것처럼 읽힌다(사용자 지적).
+    // 조작 버튼은 **스택 아래 고정 줄**에 둔다.
+    //   - 캐릭터 줄 옆에 붙이면 선택을 옮길 때마다 버튼이 따라 움직여 불편하다.
+    //   - 스택 전체 옆에 하나만 두면 늘 맨 아래(C1) 옆에 걸려, C2 를 껐는데
+    //     C1 이 꺼진 것처럼 읽힌다.
+    // 어느 줄과도 나란하지 않은 자리에 두고 라벨에 번호를 실어 대상을 밝힌다.
     return '<div class="ia-as-stack">' + [...roster].reverse().map(c =>
-      '<div class="ia-as-stackline">' +
       `<button type="button" class="ia-as-slot${c.open ? ' is-open' : ''}` +
       `${c.enabled ? '' : ' is-off'}" data-as-open="${c.index}"` +
       ` title="${escHtml(c.name || c.label)}${c.enabled ? '' : ' (비활성)'}">` +
-      `${escHtml(c.label)}</button>` +
-      (c.index === targetSlot ? slotCtlHtml() : '') +
-      '</div>').join('') + '</div>';
+      `${escHtml(c.label)}</button>`).join('') + '</div>' + slotCtlHtml();
   }
 
   /** 열린 캐릭터에 거는 조작 — 활성/비활성 토글과 삭제.
    *  **슬롯이 2개 이상이고 목록을 펼쳤을 때만** 낸다(사용자 지정): 하나뿐이면 지울 수
    *  없고, 접힌 바에서는 스택만 있으면 충분하다. */
-  /** 선택된 줄에만 붙는다(stackHtml 이 호출 위치를 정한다). */
+  /** 스택 아래 고정 줄. 대상은 라벨의 번호로 밝힌다. */
   function slotCtlHtml() {
     if (!open || roster.length < 2) return '';
     // 대상은 **대상 슬롯**이다(스택 클릭도 이 값을 옮긴다). 예전에는 '열린 캐릭터'를
@@ -306,7 +305,7 @@ export function createInteractiveAssetsPanel({
     return '<div class="ia-as-slotctl">' +
       `<button type="button" class="ia-as-slotbtn${cur.enabled ? ' is-on' : ''}"` +
       ` data-as-enable="1" title="${escHtml(enTip)}">` +
-      `${cur.enabled ? 'ACTIVE' : 'OFF'}</button>` +
+      `${escHtml(cur.label)} ${cur.enabled ? 'ACTIVE' : 'OFF'}</button>` +
       `<button type="button" class="ia-as-slotbtn is-del" data-as-delchar="1"` +
       ` title="${escHtml(cur.label)} 슬롯 삭제">${escHtml(cur.label)} 제거</button>` +
       '</div>';

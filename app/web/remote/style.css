@@ -21147,13 +21147,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-assets[hidden] { display: none; }
 .ia-as-bar { display: flex; align-items: center; gap: 6px; }
 
-/* 캐릭터 한 명이 한 줄. 조작 버튼은 **그 줄 안**에 들어간다 — 스택 옆에 하나만
-   두면 늘 맨 아래 줄에 걸려 엉뚱한 캐릭터의 상태처럼 보인다. */
-.ia-as-stackline {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+/* 조작 버튼 줄 — 스택 아래, ASSETS 바 위. 어느 캐릭터 줄과도 나란하지 않아
+   귀속을 오해할 일이 없고, 선택을 바꿔도 자리가 움직이지 않는다. */
 .ia-as-slotctl { display: flex; gap: 4px; }
 .ia-as-slotbtn {
   padding: 5px 10px;

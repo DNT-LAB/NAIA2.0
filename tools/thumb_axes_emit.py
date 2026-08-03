@@ -213,7 +213,6 @@ SLOTS = [
         # 로봇·사이보그도 "사람이 아닌 형태"다. 부분 개조(`single mechanical arm`)가
         # 많아 프레이밍은 몸통 기준으로 찍었다.
         ("thumb", "기계·사이보그", "mech"),
-        ("thumb", "신체 연출", "body_suggestive"),
         ("thumb", "귀", "ears"),
         ("thumb", "꼬리", "tail"),
         ("thumb", "날개", "wings"),
@@ -301,6 +300,10 @@ SLOTS = [
     # 신설 `pose_leg`/`pose_body_touch` 는 빠지고 라벨은 옛 이름("얼굴·몸에 손")
     # 그대로였다. _pose_axes.json 이 축과 라벨의 SSOT 다(_POSE_SECTIONS 참조).
     ("자세", "\\u{1F3C3}", "pose_action", _POSE_SECTIONS + [
+        # `arm between breasts`·`arms under breasts` — 부위 이름이 들어갔을 뿐 **동작**이다.
+        # 종족·수인에 있었다(사용자 지적 2026-08-03). 같은 NSFW 재분류에서 나온 짝
+        # `pose_suggestive` 가 이미 여기 있으므로 나란히 둔다.
+        ("thumb", "신체 연출", "body_suggestive"),
         ("thumb", "밀착·상황", "pose_suggestive"),
         ("thumb", "둔부(성인)", "nsfw_butt"),
         ("thumb", "체액(성인)", "nsfw_fluid"),

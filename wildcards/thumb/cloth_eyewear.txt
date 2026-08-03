@@ -11,8 +11,6 @@ mouth mask
 blindfold
 mask on head
 tinted eyewear
-gag
-gagged
 fox mask
 rimless eyewear
 monocle
@@ -35,7 +33,6 @@ assault visor
 eyewear on headwear
 sticker on face
 no eyewear
-tape gag
 sleep mask
 diving mask
 respirator
@@ -44,7 +41,6 @@ bird mask
 no blindfold
 ninja mask
 aviator sunglasses
-cloth gag
 bandaid on forehead
 runny makeup
 half mask
@@ -56,15 +52,12 @@ star-shaped eyewear
 no mask
 noh mask
 masked
-ring gag
-gag harness
 safety glasses
 plague doctor mask
 colored eyepatch
 tengu mask
 horned mask
 broken eyewear
-cleave gag
 wrestling mask
 mask over one eye
 broken mask
@@ -89,6 +82,5 @@ metal eyepatch
 kamina shades
 flower eyepatch
 masquerade mask
-dildo gag
 partially opaque glasses
 hyottoko mask

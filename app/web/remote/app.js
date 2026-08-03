@@ -891,7 +891,7 @@ let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
 let interactiveAssetsPanel = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260803-ia149')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260803-ia150')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,

@@ -3905,6 +3905,10 @@ export function createInteractivePanel({
     getCharacterRoster: characterRoster,
     // Assets 바의 [+] 가 쓴다. 좌측 [+캐릭터 슬롯] 과 같은 동작이라 상한/토스트를 공유한다.
     addCharacterSlot: addCharacter,
+    // Assets 스택 옆 컨트롤이 쓴다. 좌측 헤더의 ACTIVE/[x] 와 **같은 함수**라
+    // 마지막 하나는 못 지우는 규칙과 토스트가 그대로 적용된다.
+    toggleCharacterEnabled: toggleCharEnabled,
+    deleteCharacterById: deleteCharacter,
     openCharacterAt,
     applySnapshotCharAt,
     // 모드 전환 시 호출 — Position 버튼/Reference 는 NAI 전용이라 헤더를 다시 그려야 한다.

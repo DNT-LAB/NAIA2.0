@@ -169,6 +169,23 @@ export function createInteractiveAssetsPanel({
     renderGrid();
   }
 
+  /** 열린 캐릭터의 활성/비활성을 뒤집는다. 좌측 헤더 ACTIVE 버튼과 같은 동작. */
+  function toggleOpenChar() {
+    const cur = roster.find(c => c.open);
+    const panel = getPanel && getPanel();
+    if (!cur || !panel || typeof panel.toggleCharacterEnabled !== 'function') return;
+    panel.toggleCharacterEnabled(cur.id);
+  }
+
+  /** 열린 캐릭터 슬롯을 지운다. 라벨(C1..Cn)은 index 로 계산되므로 지운 뒤
+   *  뒤 슬롯이 자동으로 당겨진다 — C1 을 지우면 C2 가 C1 이 된다. */
+  function deleteOpenChar() {
+    const cur = roster.find(c => c.open);
+    const panel = getPanel && getPanel();
+    if (!cur || !panel || typeof panel.deleteCharacterById !== 'function') return;
+    panel.deleteCharacterById(cur.id);
+  }
+
   /** 캐릭터 슬롯을 하나 늘린다. 좌측 [+캐릭터 슬롯] 과 같은 동작(상한·토스트 공유).
    *  새로 생긴 칸을 곧바로 대상으로 잡는다 — 늘린 이유가 거기 꽂으려는 것이다. */
   function addSlot() {
@@ -260,11 +277,34 @@ export function createInteractiveAssetsPanel({
   function stackHtml() {
     if (!roster.length) return '';
     // 아래에서 위로 쌓이므로 뒤집는다. C1 이 바 바로 위에 붙어야 손이 짧다.
-    return '<div class="ia-as-stack">' + [...roster].reverse().map(c =>
+    const col = '<div class="ia-as-stack">' + [...roster].reverse().map(c =>
       `<button type="button" class="ia-as-slot${c.open ? ' is-open' : ''}` +
       `${c.enabled ? '' : ' is-off'}" data-as-open="${c.index}"` +
       ` title="${escHtml(c.name || c.label)}${c.enabled ? '' : ' (비활성)'}">` +
       `${escHtml(c.label)}</button>`).join('') + '</div>';
+    return '<div class="ia-as-stackrow">' + col + slotCtlHtml() + '</div>';
+  }
+
+  /** 열린 캐릭터에 거는 조작 — 활성/비활성 토글과 삭제.
+   *  **슬롯이 2개 이상이고 목록을 펼쳤을 때만** 낸다(사용자 지정): 하나뿐이면 지울 수
+   *  없고, 접힌 바에서는 스택만 있으면 충분하다. */
+  function slotCtlHtml() {
+    if (!open || roster.length < 2) return '';
+    const cur = roster.find(c => c.open) || null;
+    const label = cur ? cur.label : 'C?';
+    const enabled = cur ? cur.enabled : true;
+    const dis = cur ? '' : ' disabled';
+    const enTip = cur
+      ? `${label} ${enabled ? '비활성화 (생성에서 제외)' : '활성화'}`
+      : '캐릭터를 먼저 여세요';
+    const delTip = cur ? `${label} 슬롯 삭제` : '캐릭터를 먼저 여세요';
+    return '<div class="ia-as-slotctl">' +
+      `<button type="button" class="ia-as-slotbtn${enabled ? ' is-on' : ''}"` +
+      ` data-as-enable="1"${dis} title="${escHtml(enTip)}">` +
+      `${enabled ? 'ACTIVE' : 'OFF'}</button>` +
+      `<button type="button" class="ia-as-slotbtn is-del" data-as-delchar="1"${dis}` +
+      ` title="${escHtml(delTip)}">${escHtml(label)} 제거</button>` +
+      '</div>';
   }
 
   /** 대상 슬롯 선택 — ASSETS 라벨 옆 가로 칸. 조합을 어디에 꽂을지 정한다.
@@ -414,7 +454,8 @@ export function createInteractiveAssetsPanel({
   function onClick(event) {
     const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],' +
       '[data-as-restore],[data-as-fav],[data-as-del],[data-as-open],[data-as-target],' +
-      '[data-as-expand],[data-as-pick],[data-as-apply],[data-as-addslot]');
+      '[data-as-expand],[data-as-pick],[data-as-apply],[data-as-addslot],' +
+      '[data-as-enable],[data-as-delchar]');
     if (!t) return;
     event.preventDefault();
     if (t.dataset.asToggle) {
@@ -445,6 +486,8 @@ export function createInteractiveAssetsPanel({
       render();   // [적용] 라벨이 대상 번호를 담는다
       return;
     }
+    if (t.dataset.asEnable) { toggleOpenChar(); return; }
+    if (t.dataset.asDelchar) { deleteOpenChar(); return; }
     if (t.dataset.asAddslot) { addSlot(); return; }
     if (t.dataset.asApply) { applyPicked(); return; }
     if (t.dataset.asExpand) { expandCard(t.dataset.asExpand); return; }

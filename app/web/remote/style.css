@@ -21147,6 +21147,42 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-assets[hidden] { display: none; }
 .ia-as-bar { display: flex; align-items: center; gap: 6px; }
 
+/* 스택과 그 옆 조작 버튼을 한 줄로. 버튼은 아래(C1)에 맞춰 붙는다. */
+.ia-as-stackrow {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.ia-as-slotctl { display: flex; gap: 4px; }
+.ia-as-slotbtn {
+  padding: 5px 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: rgba(14, 16, 22, 0.86);
+  backdrop-filter: blur(6px);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ia-as-slotbtn:hover { color: var(--text-primary); border-color: var(--border); }
+.ia-as-slotbtn:disabled { opacity: 0.35; cursor: not-allowed; }
+/* 활성 상태를 색으로 — 좌측 헤더 ACTIVE 배지와 같은 뜻이다. */
+.ia-as-slotbtn.is-on {
+  border-color: rgba(92, 184, 122, 0.45);
+  background: rgba(92, 184, 122, 0.16);
+  color: #a8e0bd;
+}
+.ia-as-slotbtn.is-del { color: rgba(244, 67, 54, 0.75); }
+.ia-as-slotbtn.is-del:hover:not(:disabled) {
+  color: rgba(244, 67, 54, 1);
+  border-color: rgba(244, 67, 54, 0.5);
+  background: rgba(244, 67, 54, 0.14);
+}
+
 /* 캐릭터 스택 — 바 위에 세로로. 아래(C1)가 바에 붙어 손이 짧다. */
 .ia-as-stack {
   display: flex;

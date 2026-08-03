@@ -1720,6 +1720,37 @@ export function createInteractivePanel({
     positionPresetCard();
   }
 
+  /** 카드를 열지 않고 프리셋을 슬롯에 바로 넣는다(Assets 바의 캐릭터 검색용).
+   *  좌측 경로(슬롯 열기 -> 프리셋 -> 검색 -> 카드 -> 적용)와 **같은 함수**를 태운다 —
+   *  여기서 갈라지면 이전 프리셋 회수·배타 축 교체 규약이 두 벌이 된다.
+   *  kind: 'char' = 캐릭터 태그만 / 'all' = 카드가 기본으로 고르는 태그 전부. */
+  async function applyCharacterPresetTo(cid, {group, character, thumb = '', kind = 'char'} = {}) {
+    if (!cid || !group || !character) return false;
+    if (!state.chars.some(c => c.id === cid)) return false;
+    const seq = ++cardSeq;
+    let data;
+    try {
+      data = await presetFetch('/api/character-preset?group=' + encodeURIComponent(group)
+        + '&character=' + encodeURIComponent(character));
+    } catch (error) {
+      showToast('프리셋을 불러오지 못했습니다. (' + (error?.message || 'error') + ')', 'error');
+      return false;
+    }
+    // 그 사이 다른 카드가 열렸으면(cardSeq 가 올랐으면) 이 응답은 남의 것을 덮어쓴다.
+    if (seq !== cardSeq) return false;
+    // 읽는 동안 슬롯이 지워졌을 수 있다 — 번호가 아니라 id 로 다시 확인한다.
+    if (!state.chars.some(c => c.id === cid)) {
+      showToast('그 캐릭터 슬롯이 없습니다.', 'error');
+      return false;
+    }
+    presetCid = cid;
+    cardData = {...data, thumbnail_url: thumb};
+    cardRows = cardRowsFrom(data);
+    cardPick = new Set(cardRows.filter(r => r.slot && r.on).map(r => r.key));
+    presetApplyCard(kind === 'all' ? 'all' : 'char');
+    return true;
+  }
+
   function closePresetCard() {
     cardSeq++;
     cardData = null; cardRows = []; cardPick = new Set(); cardAnchor = null;
@@ -1835,6 +1866,7 @@ export function createInteractivePanel({
     state.chars.forEach(c => { c.open = (c.id === character.id); });
     renderBlocks();
     emitChange();
+    notifyRoster();   // 이름과 열린 슬롯이 바뀌었다 — Assets 스택이 이 값을 쓴다
     const back = recalled ? ` · 이전 프리셋 ${recalled}개 회수` : '';
     showToast(`${character.name} — 태그 ${chosen.length}개를 슬롯 ${bySlot.size}개에 넣었습니다.${back}`);
     if (replaced.length) {
@@ -3917,6 +3949,7 @@ export function createInteractivePanel({
     // 빠른 스왑: 캐릭터 스택(열기 전환) + 슬롯 하나에만 꽂기
     getCharacterRoster: characterRoster,
     applySnapshotCharById,
+    applyCharacterPresetTo,
     // Assets 바의 [+] 가 쓴다. 좌측 [+캐릭터 슬롯] 과 같은 동작이라 상한/토스트를 공유한다.
     addCharacterSlot: addCharacter,
     // Assets 스택 옆 컨트롤이 쓴다. 좌측 헤더의 ACTIVE/[x] 와 **같은 함수**라

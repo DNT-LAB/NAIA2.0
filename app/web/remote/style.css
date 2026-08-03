@@ -21405,6 +21405,140 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   font-size: 11px;
 }
 .ia-as-search:focus { outline: none; border-color: var(--border-glow); }
+
+/* 캐릭터 검색 — 조합 검색 줄과 카드 그리드 사이. 조합(전에 만든 것)과 달리
+   도감에서 새 캐릭터를 골라 대상 슬롯에 바로 꽂는다. */
+.ia-as-charrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px 7px;
+  border: 1px solid var(--border-dim);
+  border-top: none;
+  border-bottom: none;
+  background: rgba(14, 16, 22, 0.92);
+  backdrop-filter: blur(6px);
+}
+.ia-as-charq {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+}
+.ia-as-charq:focus { outline: none; border-color: var(--border-glow); }
+.ia-as-charkind {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ia-as-charkind:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.ia-as-charkind.is-all {
+  border-color: var(--border);
+  background: rgba(120, 140, 255, 0.14);
+  color: var(--text-primary);
+}
+.ia-as-charhits {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px 7px;
+  border: 1px solid var(--border-dim);
+  border-top: none;
+  border-bottom: none;
+  background: rgba(14, 16, 22, 0.92);
+  backdrop-filter: blur(6px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* scrollbar-width 를 주면 Chromium 이 ::-webkit-scrollbar 를 무시하고 10px 짜리
+     화살표 달린 막대를 그린다 — 좁은 바에서는 그것만으로도 한 줄을 잡아먹는다. */
+}
+.ia-as-charhits::-webkit-scrollbar { height: 5px; }
+.ia-as-charhits::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(120, 140, 255, 0.28);
+}
+.ia-as-charhits::-webkit-scrollbar-track { background: transparent; }
+.ia-as-charhits.is-stale { opacity: 0.4; }
+.ia-as-charnote { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+/* 작품 칩 — 이름 검색이 못 잡는 작품 전체를 여기서 연다. */
+.ia-as-chargroup {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  max-width: 160px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(120, 140, 255, 0.14);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ia-as-chargroup:hover:not(:disabled) { border-color: var(--border-glow); }
+.ia-as-chargroup:disabled { cursor: default; }
+.ia-as-chargroup > span { color: var(--text-dim); font-size: 9px; }
+.ia-as-chargroup.is-scope { background: rgba(255, 140, 120, 0.14); }
+.ia-as-charhit {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  max-width: 190px;
+  padding: 3px 7px 3px 3px;
+  border: 1px solid var(--border-dim);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ia-as-charhit:hover:not(:disabled) {
+  border-color: var(--border-glow);
+  background: rgba(120, 140, 255, 0.14);
+}
+.ia-as-charhit:disabled { opacity: 0.45; cursor: default; }
+.ia-as-charthumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: rgba(120, 140, 255, 0.16);
+  color: var(--text-dim);
+  font-size: 8px;
+  letter-spacing: 0.3px;
+}
+.ia-as-charname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-as-charwork {
+  flex: 0 0 auto;
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 9px;
+}
+
 .ia-as-tabs { display: flex; gap: 3px; flex: 0 0 auto; }
 .ia-as-tab {
   padding: 4px 8px;

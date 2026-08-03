@@ -813,6 +813,15 @@ export function createInteractivePanel({
     return true;
   }
 
+  /** 슬롯 **id** 로 꽂는다. 인덱스는 안정적이지 않다 — 앞 슬롯이 지워지면 뒤가
+   *  당겨져 같은 번호가 다른 캐릭터를 가리킨다(비동기 적용 중에 실제로 일어난다).
+   *  id 는 슬롯이 살아 있는 동안 바뀌지 않으므로 이쪽이 정확하다. */
+  function applySnapshotCharById(cid, row) {
+    const i = state.chars.findIndex(c => c.id === cid);
+    if (i < 0) return false;
+    return applySnapshotCharAt(i, row);
+  }
+
   /** 스냅샷의 **캐릭터 한 명**을 지정한 슬롯에 꽂는다(빠른 스왑).
    *  슬롯이 아직 없으면 최대치까지 만들어 채운다. 다른 슬롯은 건드리지 않는다. */
   function applySnapshotCharAt(index, row) {
@@ -3907,6 +3916,7 @@ export function createInteractivePanel({
     applySnapshotChars,
     // 빠른 스왑: 캐릭터 스택(열기 전환) + 슬롯 하나에만 꽂기
     getCharacterRoster: characterRoster,
+    applySnapshotCharById,
     // Assets 바의 [+] 가 쓴다. 좌측 [+캐릭터 슬롯] 과 같은 동작이라 상한/토스트를 공유한다.
     addCharacterSlot: addCharacter,
     // Assets 스택 옆 컨트롤이 쓴다. 좌측 헤더의 ACTIVE/[x] 와 **같은 함수**라

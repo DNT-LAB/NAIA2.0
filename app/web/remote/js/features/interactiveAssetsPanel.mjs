@@ -137,7 +137,11 @@ export function createInteractiveAssetsPanel({
     const {id, charIndex} = picked;
     // 대상도 **누른 시점에 고정**한다. 본문을 읽는 동안 대상 칸을 바꾸면
     // 사용자가 확정한 슬롯이 아니라 나중 슬롯에 들어간다.
+    // 번호가 아니라 **슬롯 id** 로 잡는다 — 그 사이 앞 슬롯이 지워지면 뒤가 당겨져
+    // 같은 번호가 다른 캐릭터를 가리킨다(엉뚱한 슬롯을 덮어쓴다).
     const slot = targetSlot;
+    const slotId = roster[slot] ? roster[slot].id : '';
+    const slotLabel = roster[slot] ? roster[slot].label : `C${slot + 1}`;
     busy = true;
     renderGrid();
     try {
@@ -147,13 +151,16 @@ export function createInteractiveAssetsPanel({
       const row = Array.isArray(d.chars) ? d.chars[Number(charIndex)] : null;
       if (!row) throw new Error('그 캐릭터가 없습니다');
       const panel = getPanel && getPanel();
-      if (!panel || typeof panel.applySnapshotCharAt !== 'function') {
+      if (!panel || typeof panel.applySnapshotCharById !== 'function') {
         throw new Error('Interactive 패널이 준비되지 않았습니다');
       }
-      // 본문을 읽는 사이에 슬롯이 줄었을 수 있다.
-      if (slot >= roster.length) throw new Error('C' + (slot + 1) + ' 슬롯이 없습니다');
-      if (!panel.applySnapshotCharAt(slot, row)) throw new Error('슬롯에 꽂을 수 없습니다');
-      showToast(`C${slot + 1} <- ${charLabel(row)}`, 'success');
+      // 그 슬롯이 아직 살아 있는지 id 로 확인한다(지워졌으면 조용히 남의 자리에
+      // 꽂지 않고 실패로 알린다).
+      if (!slotId || !roster.some(c => c.id === slotId)) {
+        throw new Error(`${slotLabel} 슬롯이 없습니다`);
+      }
+      if (!panel.applySnapshotCharById(slotId, row)) throw new Error('슬롯에 꽂을 수 없습니다');
+      showToast(`${slotLabel} <- ${charLabel(row)}`, 'success');
     } catch (err) {
       showToast('적용 실패: ' + err.message, 'error');
     } finally {
@@ -418,6 +425,10 @@ export function createInteractiveAssetsPanel({
       if (busy) btn.disabled = true;
       else if (!btn.classList.contains('is-locked')) btn.disabled = false;
     });
+    // 슬롯 구성을 바꾸는 것들도 함께 잠근다 — 적용 중 삭제하면 뒤 슬롯이 당겨져
+    // 사용자가 고르지 않은 캐릭터가 덮어써진다.
+    root.querySelectorAll('[data-as-enable],[data-as-delchar],[data-as-pos]')
+      .forEach(btn => { btn.disabled = busy; });
     const apply = root.querySelector('[data-as-apply]');
     if (apply) {
       apply.disabled = !picked || busy;
@@ -508,6 +519,9 @@ export function createInteractiveAssetsPanel({
       render();   // [적용] 라벨과 조작 버튼이 대상 번호를 담는다
       return;
     }
+    // 적용이 도는 중에는 슬롯 구성을 못 바꾼다(disabled 를 우회한 클릭 방어).
+    if (busy && (t.dataset.asEnable || t.dataset.asDelchar || t.dataset.asPos
+                 || t.dataset.asTarget !== undefined || t.dataset.asAddslot)) return;
     if (t.dataset.asPos) {
       const panel = getPanel && getPanel();
       if (panel && typeof panel.openPositionPickerFor === 'function') {

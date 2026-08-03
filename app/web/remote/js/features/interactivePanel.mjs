@@ -2358,13 +2358,12 @@ export function createInteractivePanel({
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
       const tag = b.getAttribute('data-advice-add');
-      // 그리드와 같은 규칙 — 본문은 살펴보기, 버튼이 실행이다.
-      if (!ev.target.closest('.ia-cell-act')) {
-        inspectTag = inspectTag === tag ? '' : tag;
-        markInspect();
-        void renderAside();
-        return;
-      }
+      // **본문 클릭은 아무것도 하지 않는다.** 그리드에서는 본문=살펴보기가 맞다 —
+      // 왼쪽에서 누르면 오른쪽이 그 태그를 설명한다. 그런데 여기서 같은 규칙을 쓰면
+      // 살펴보기가 곧 이 플로트의 기준을 바꾸는 것이라, 태그 사전이 방금 누른 칩
+      // 기준으로 다시 그려진다 — 자기 자신을 갈아치우는 재귀다(사용자 지적).
+      // 넣고 빼는 것은 칩 위의 [선택]/[제거] 버튼뿐이다.
+      if (!ev.target.closest('.ia-cell-act')) return;
       inspectTag = '';
       toggleTag(tag, { fromAside: true });
       // 그리드가 안 따라와서 플로트에서 넣은 태그는 그리드에서 선택 안 된 것처럼

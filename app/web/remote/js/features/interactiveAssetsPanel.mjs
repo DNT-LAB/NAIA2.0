@@ -236,7 +236,8 @@ export function createInteractiveAssetsPanel({
   }
 
   /** 대상 슬롯 선택 — ASSETS 라벨 옆 가로 칸. 조합을 어디에 꽂을지 정한다.
-   *  칸은 최대치(5)만큼 그리되 **없는 슬롯은 비워 둔다** — 몇 명까지 되는지 보인다. */
+   *  칸은 최대치(5)만큼 그리되 **없는 슬롯은 비워 둔다** — 몇 명까지 되는지 보인다.
+   *  **목록이 펼쳐졌을 때만** 낸다 — 접혀 있으면 꽂을 카드가 없어 쓸 데가 없다. */
   function targetHtml() {
     const max = 5;
     const out = [];
@@ -339,7 +340,7 @@ export function createInteractiveAssetsPanel({
           <span class="ia-as-title">Assets</span>
           <span class="ia-as-count">${rows.length || ''}</span>
         </button>
-        ${targetHtml()}
+        ${open ? targetHtml() : ''}
       </div>
       ${list}`;
   }

@@ -902,7 +902,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveBrowse} =
       await import('./js/features/interactiveBrowse.mjs?v=20260724-iab6');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas8');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas9');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {

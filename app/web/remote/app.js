@@ -891,7 +891,7 @@ let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
 let interactiveAssetsPanel = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260803-ia139')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260803-ia141')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -902,7 +902,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveBrowse} =
       await import('./js/features/interactiveBrowse.mjs?v=20260724-iab6');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas9');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas13');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {

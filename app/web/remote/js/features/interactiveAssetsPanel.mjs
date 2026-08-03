@@ -34,6 +34,9 @@ export function createInteractiveAssetsPanel({
   // 조합을 꽂을 대상 슬롯. **기본 0(C1)** — 항상 대상이 있어야 칩 클릭이 바로 먹는다.
   let targetSlot = 0;
   let expandedId = '';       // 캐릭터 칩을 펼친 카드
+  // 무엇을 꽂을지. 카드를 누르면 여기 담기고, [적용] 을 눌러야 슬롯에 들어간다 —
+  // 클릭 즉시 반영은 "무엇이 어디로 갔는지" 보이지 않아 직관적이지 않았다.
+  let picked = null;         // {id, charIndex, label}
 
   /** 삭제 확인. 다이얼로그를 못 받았으면 막는다 — 조용히 지우는 것보다 안 지우는 게 낫다. */
   async function confirmDelete(label) {
@@ -127,10 +130,14 @@ export function createInteractiveAssetsPanel({
     }
   }
 
-  /** 카드 안의 캐릭터 칩 하나를 대상 슬롯에 꽂는다(빠른 스왑).
-   *  본문은 목록에 없으므로 그때 읽는다 — 캐시하지 않는다(조합은 갱신될 수 있다). */
-  async function swapInto(id, charIndex) {
-    if (busy) return;
+  /** 고른 것을 대상 슬롯에 꽂는다. [적용] 버튼만 이걸 부른다 —
+   *  본문은 목록에 없으므로 그때 읽는다(조합은 갱신될 수 있어 캐시하지 않는다). */
+  async function applyPicked() {
+    if (busy || !picked) return;
+    const {id, charIndex} = picked;
+    // 대상도 **누른 시점에 고정**한다. 본문을 읽는 동안 대상 칸을 바꾸면
+    // 사용자가 확정한 슬롯이 아니라 나중 슬롯에 들어간다.
+    const slot = targetSlot;
     busy = true;
     renderGrid();
     try {
@@ -143,13 +150,37 @@ export function createInteractiveAssetsPanel({
       if (!panel || typeof panel.applySnapshotCharAt !== 'function') {
         throw new Error('Interactive 패널이 준비되지 않았습니다');
       }
-      if (!panel.applySnapshotCharAt(targetSlot, row)) throw new Error('슬롯에 꽂을 수 없습니다');
-      showToast(`C${targetSlot + 1} <- ${charLabel(row)}`, 'success');
+      // 본문을 읽는 사이에 슬롯이 줄었을 수 있다.
+      if (slot >= roster.length) throw new Error('C' + (slot + 1) + ' 슬롯이 없습니다');
+      if (!panel.applySnapshotCharAt(slot, row)) throw new Error('슬롯에 꽂을 수 없습니다');
+      showToast(`C${slot + 1} <- ${charLabel(row)}`, 'success');
     } catch (err) {
-      showToast('스왑 실패: ' + err.message, 'error');
+      showToast('적용 실패: ' + err.message, 'error');
     } finally {
       busy = false;
       renderGrid();
+    }
+  }
+
+  /** 카드/칩을 고른다(아직 적용하지 않는다). 같은 것을 다시 누르면 해제. */
+  function pick(id, charIndex, label) {
+    const same = picked && picked.id === id && picked.charIndex === Number(charIndex);
+    picked = same ? null : {id, charIndex: Number(charIndex), label: label || ''};
+    renderGrid();
+  }
+
+  /** 캐릭터 슬롯을 하나 늘린다. 좌측 [+캐릭터 슬롯] 과 같은 동작(상한·토스트 공유).
+   *  새로 생긴 칸을 곧바로 대상으로 잡는다 — 늘린 이유가 거기 꽂으려는 것이다. */
+  function addSlot() {
+    const panel = getPanel && getPanel();
+    if (!panel || typeof panel.addCharacterSlot !== 'function') return;
+    const before = roster.length;
+    panel.addCharacterSlot();
+    // addCharacterSlot 이 notifyRoster -> setRoster -> render 까지 이미 돌린 뒤다.
+    // 대상만 바꾸면 화면에 안 실리므로 다시 그린다.
+    if (before < 5 && roster.length > before) {
+      targetSlot = before;
+      render();
     }
   }
 
@@ -158,7 +189,8 @@ export function createInteractiveAssetsPanel({
   async function expandCard(id) {
     if (busy) return;
     const row = rows.find(x => x.id === id);
-    if (row && Number(row.char_count) === 1) { swapInto(id, 0); return; }
+    // 1명짜리는 펼칠 것이 없다 — 카드 자체가 그 캐릭터다. 고르기만 하고 적용은 [적용] 이.
+    if (row && Number(row.char_count) === 1) { pick(id, 0, row.summary); return; }
     if (expandedId === id) { expandedId = ''; renderGrid(); return; }
     busy = true;
     renderGrid();
@@ -167,7 +199,7 @@ export function createInteractiveAssetsPanel({
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || '조합을 불러오지 못했습니다');
       const chars = Array.isArray(d.chars) ? d.chars : [];
-      if (chars.length === 1) { busy = false; swapInto(id, 0); return; }
+      if (chars.length === 1) { busy = false; pick(id, 0, charLabel(chars[0])); return; }
       const hit = rows.find(x => x.id === id);
       if (hit) hit._chars = chars.map(charLabel);
       expandedId = id;
@@ -248,15 +280,25 @@ export function createInteractiveAssetsPanel({
       const canMake = i === roster.length && roster.length < max;
       const locked = !exists && !canMake;
       const on = i === targetSlot;
-      const tip = exists ? `C${i + 1} 에 꽂기`
-        : (canMake ? `C${i + 1} 슬롯을 만들어 꽂기`
-                   : `C${roster.length + 1} 부터 채워야 합니다`);
+      if (canMake) {
+        // 다음 칸은 **[+] 슬롯 추가**다. 여기서 인원을 늘리고 바로 그 칸을 겨눈다.
+        out.push('<button type="button" class="ia-as-target is-add" data-as-addslot="1"' +
+          (busy ? ' disabled' : '') +
+          ` title="캐릭터 슬롯 추가 (C${i + 1})">+</button>`);
+        continue;
+      }
+      const tip = exists ? `C${i + 1} 에 꽂기` : `C${roster.length + 1} 부터 채워야 합니다`;
       out.push(`<button type="button" class="ia-as-target${on ? ' is-on' : ''}` +
         `${exists ? '' : ' is-empty'}${locked ? ' is-locked' : ''}"` +
-        ` data-as-target="${i}"${locked ? ' disabled' : ''}` +
+        ` data-as-target="${i}"${locked || busy ? ' disabled' : ''}` +
         ` title="${escHtml(tip)}">${exists ? i + 1 : ''}</button>`);
     }
-    return '<div class="ia-as-targets">' + out.join('') + '</div>';
+    const label = picked
+      ? `C${targetSlot + 1} 에 적용`
+      : '카드를 먼저 고르세요';
+    return '<div class="ia-as-targets">' + out.join('') + '</div>' +
+      `<button type="button" class="ia-as-apply${picked ? ' is-ready' : ''}"` +
+      ` data-as-apply="1"${picked ? '' : ' disabled'} title="${escHtml(label)}">적용</button>`;
   }
 
   function card(row) {
@@ -267,13 +309,17 @@ export function createInteractiveAssetsPanel({
               src="/api/interactive-assets/snapshot/thumb?id=${encodeURIComponent(row.id)}">`
       // 썸네일은 그 조합으로 생성해야 붙는다 — 아직이면 자리를 비워 둔다.
       : `<span class="ia-as-thumb is-empty" aria-hidden="true">…</span>`;
+    const pickedHere = picked && picked.id === row.id;
     const chips = (expandedId === row.id && Array.isArray(row._chars))
       ? '<div class="ia-as-chips">' + row._chars.map((nm, i) =>
-          `<button type="button" class="ia-as-chip" data-as-swap="${id}" data-as-ci="${i}"` +
-          ` title="C${targetSlot + 1} 에 꽂기">${escHtml(nm)}</button>`).join('') + '</div>'
+          `<button type="button" class="ia-as-chip` +
+          `${pickedHere && picked.charIndex === i ? ' is-picked' : ''}"` +
+          ` data-as-pick="${id}" data-as-ci="${i}" data-as-label="${escHtml(nm)}"` +
+          ` title="고르기">${escHtml(nm)}</button>`).join('') + '</div>'
       : '';
     return `<div class="ia-as-card${row.favorite ? ' is-fav' : ''}` +
-      `${expandedId === row.id ? ' is-expanded' : ''}" data-as-id="${id}"
+      `${expandedId === row.id ? ' is-expanded' : ''}` +
+      `${pickedHere ? ' is-picked' : ''}" data-as-id="${id}"
               title="${escHtml(summary)}">
       <button type="button" class="ia-as-pick" data-as-expand="${id}">
         ${thumb}
@@ -293,6 +339,9 @@ export function createInteractiveAssetsPanel({
   /** 목록만 다시 그린다. 전체 render() 는 검색창 노드를 갈아치워 입력 중 포커스와
    *  캐럿이 날아간다 — 응답이 220ms 뒤에 오므로 타이핑 도중에 정확히 걸린다. */
   function renderGrid() {
+    // 고른 카드가 목록에서 빠졌으면(즐겨찾기 해제·삭제·필터) 선택을 놓는다 —
+    // 화면에 없는 것이 적용되면 무엇이 들어갔는지 알 수 없다.
+    if (picked && !rows.some(x => x.id === picked.id)) picked = null;
     const grid = root.querySelector('.ia-as-grid');
     if (!grid) { render(); return; }
     grid.innerHTML = busy
@@ -308,6 +357,21 @@ export function createInteractiveAssetsPanel({
     });
     const favBtn = root.querySelector('[data-as-favonly]');
     if (favBtn) favBtn.classList.toggle('is-on', favoriteOnly);
+    root.querySelectorAll('[data-as-target],[data-as-addslot]').forEach(btn => {
+      // 적용 중에는 대상을 못 바꾼다 — 어차피 시작 시점으로 고정되므로 UI 도 맞춘다.
+      if (busy) btn.disabled = true;
+      else if (!btn.classList.contains('is-locked')) btn.disabled = false;
+    });
+    const apply = root.querySelector('[data-as-apply]');
+    if (apply) {
+      apply.disabled = !picked || busy;
+      apply.classList.toggle('is-ready', !!picked);
+      // 앱이 title 을 data-naia-title 로 흡수해 자체 툴팁을 띄운다(app.js).
+      // title 만 고치면 흡수가 끝난 뒤라 아무 데도 안 보인다.
+      const tip = picked ? `C${targetSlot + 1} 에 적용` : '카드를 먼저 고르세요';
+      apply.setAttribute('data-naia-title', tip);
+      apply.setAttribute('aria-label', tip);
+    }
   }
 
   function render() {
@@ -350,7 +414,7 @@ export function createInteractiveAssetsPanel({
   function onClick(event) {
     const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],' +
       '[data-as-restore],[data-as-fav],[data-as-del],[data-as-open],[data-as-target],' +
-      '[data-as-expand],[data-as-swap]');
+      '[data-as-expand],[data-as-pick],[data-as-apply],[data-as-addslot]');
     if (!t) return;
     event.preventDefault();
     if (t.dataset.asToggle) {
@@ -378,11 +442,13 @@ export function createInteractiveAssetsPanel({
     }
     if (t.dataset.asTarget !== undefined) {
       targetSlot = Number(t.dataset.asTarget);
-      render();
+      render();   // [적용] 라벨이 대상 번호를 담는다
       return;
     }
+    if (t.dataset.asAddslot) { addSlot(); return; }
+    if (t.dataset.asApply) { applyPicked(); return; }
     if (t.dataset.asExpand) { expandCard(t.dataset.asExpand); return; }
-    if (t.dataset.asSwap) { swapInto(t.dataset.asSwap, t.dataset.asCi); return; }
+    if (t.dataset.asPick) { pick(t.dataset.asPick, t.dataset.asCi, t.dataset.asLabel); return; }
     if (t.dataset.asDel) { remove(t.dataset.asDel); return; }
     if (t.dataset.asRestore) { restore(t.dataset.asRestore); return; }
     if (t.dataset.asFav) {
@@ -416,10 +482,10 @@ export function createInteractiveAssetsPanel({
     /** 패널이 캐릭터 목록 변화를 알려 준다. 스택과 대상 칸이 이걸로 그려진다. */
     setRoster(next) {
       roster = Array.isArray(next) ? next : [];
-      // 캐릭터가 줄면 대상이 '만들 수 없는 칸'을 겨눌 수 있다 — 다음 칸까지로 당긴다.
-      if (targetSlot > roster.length || targetSlot >= 5) {
-        targetSlot = Math.min(roster.length, 4);
-      }
+      // 대상은 **있는 슬롯**만이다. 그 다음 자리는 [+] 버튼이 차지하므로 겨눌 수 없다.
+      // 캐릭터가 줄면 마지막 슬롯으로 당긴다 — 안 그러면 [+] 자리를 겨눈 채 적용해
+      // 누르지도 않은 슬롯이 생긴다.
+      if (targetSlot >= roster.length) targetSlot = Math.max(0, roster.length - 1);
       if (visible) render();
     },
     record,

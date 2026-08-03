@@ -21211,6 +21211,51 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 건너뛴 칸 — 중간 슬롯을 비운 채 만들 수 없다. 다음 하나만 열린다. */
 .ia-as-target.is-locked { opacity: 0.2; cursor: not-allowed; }
 .ia-as-target.is-locked:hover { color: var(--text-dim); border-color: var(--border-dim); }
+/* 다음 칸은 [+] — 여기서 인원을 늘린다. 대상 칸과 구분되게 점선. */
+.ia-as-target.is-add {
+  border-style: dashed;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.ia-as-target.is-add:hover {
+  border-style: solid;
+  border-color: var(--border-glow);
+  background: rgba(120, 140, 255, 0.14);
+  color: var(--text-primary);
+}
+
+/* 적용 — 고른 카드를 대상 슬롯에 넣는다. 고르기 전에는 눌리지 않는다. */
+.ia-as-apply {
+  padding: 5px 11px;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: rgba(14, 16, 22, 0.86);
+  backdrop-filter: blur(6px);
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ia-as-apply:disabled { opacity: 0.35; cursor: not-allowed; }
+.ia-as-apply.is-ready {
+  border-color: var(--border-glow);
+  background: rgba(120, 140, 255, 0.22);
+  color: var(--text-primary);
+}
+.ia-as-apply.is-ready:hover { background: rgba(120, 140, 255, 0.34); }
+
+/* 고른 카드/칩 — 무엇이 적용될지 한눈에 보여야 한다. */
+.ia-as-card.is-picked {
+  border-color: var(--border-glow);
+  box-shadow: inset 0 0 0 1px rgba(120, 140, 255, 0.35);
+}
+.ia-as-chip.is-picked {
+  background: rgba(120, 140, 255, 0.34);
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
 
 /* 카드 안의 캐릭터 칩 — 여러 명 조합을 펼쳤을 때만 나온다. */
 .ia-as-chips {

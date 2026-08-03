@@ -819,15 +819,10 @@ export function createInteractivePanel({
     let i = Number(index);
     if (!Number.isInteger(i) || i < 0) return false;
     if (i >= MAX_NAI_CHARACTERS) return false;
-    // **바로 다음 칸까지만** 만든다. C1 만 있는데 C3 을 겨누면 C2 가 빈 채로 활성
-    // 생성되어 인원수와 프롬프트에 끼어든다(기본 슬라이더 태그까지 실린다).
-    // 대상 칸 UI 도 같은 규칙으로 다음 하나만 열어 두지만, 두 조건이 갈라지면
-    // 조용히 유령 캐릭터가 생기므로 여기서도 막는다.
-    if (i > state.chars.length) return false;
-    if (i === state.chars.length) {
-      if (state.chars.length >= MAX_NAI_CHARACTERS) return false;
-      state.chars.push(newCharacter(false));
-    }
+    // **있는 슬롯에만** 꽂는다. 슬롯을 늘리는 것은 [+](addCharacterSlot)의 일이다 —
+    // 여기서 암묵적으로 만들면 사용자가 [+] 를 누르지 않았는데 인원이 늘고 그 캐릭터가
+    // 생성 프롬프트에 끼어든다(대상이 삭제된 슬롯을 겨눈 채 적용하면 실제로 닿는다).
+    if (i >= state.chars.length) return false;
     // 슬롯의 정체성(위치)은 유지한다 — 스왑은 '누구인가'를 바꾸는 것이지
     // '어디에 서는가'를 바꾸는 것이 아니다. 다인원 배치를 다시 잡게 만들면 안 된다.
     const keepPos = state.chars[i].pos || POS_DEFAULT;
@@ -3908,6 +3903,8 @@ export function createInteractivePanel({
     applySnapshotChars,
     // 빠른 스왑: 캐릭터 스택(열기 전환) + 슬롯 하나에만 꽂기
     getCharacterRoster: characterRoster,
+    // Assets 바의 [+] 가 쓴다. 좌측 [+캐릭터 슬롯] 과 같은 동작이라 상한/토스트를 공유한다.
+    addCharacterSlot: addCharacter,
     openCharacterAt,
     applySnapshotCharAt,
     // 모드 전환 시 호출 — Position 버튼/Reference 는 NAI 전용이라 헤더를 다시 그려야 한다.

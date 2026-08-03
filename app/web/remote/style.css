@@ -21450,36 +21450,119 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   color: var(--text-primary);
 }
 .ia-as-charhits {
-  display: flex;
-  align-items: center;
-  gap: 5px;
   padding: 0 9px 7px;
   border: 1px solid var(--border-dim);
   border-top: none;
   border-bottom: none;
   background: rgba(14, 16, 22, 0.92);
   backdrop-filter: blur(6px);
-  overflow-x: auto;
-  overflow-y: hidden;
-  /* scrollbar-width 를 주면 Chromium 이 ::-webkit-scrollbar 를 무시하고 10px 짜리
-     화살표 달린 막대를 그린다 — 좁은 바에서는 그것만으로도 한 줄을 잡아먹는다. */
 }
-.ia-as-charhits::-webkit-scrollbar { height: 5px; }
-.ia-as-charhits::-webkit-scrollbar-thumb {
+.ia-as-charhits.is-stale { opacity: 0.4; }
+.ia-as-charnote { display: block; color: var(--text-dim); font-size: 10px; padding: 2px 0; }
+.ia-as-charcount {
+  padding: 1px 0 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+}
+/* 좌측 프리셋 목록의 축소판 — 같은 2열 그리드, 썸네일만 80px -> 40px.
+   좁은 창에서는 1열로 접힌다. 목록이 길어져도 카드 그리드를 밀지 않게 높이를 묶는다. */
+.ia-as-charlist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 3px;
+  max-height: 168px;
+  overflow-y: auto;
+  /* scrollbar-width 를 쓰면 Chromium 이 ::-webkit-scrollbar 를 무시하고 화살표 달린
+     굵은 막대를 그린다 — 좁은 목록에서는 그것만으로 한 칸을 잡아먹는다. */
+}
+.ia-as-charlist::-webkit-scrollbar { width: 5px; }
+.ia-as-charlist::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(120, 140, 255, 0.28);
 }
-.ia-as-charhits::-webkit-scrollbar-track { background: transparent; }
-.ia-as-charhits.is-stale { opacity: 0.4; }
-.ia-as-charnote { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+.ia-as-charlist::-webkit-scrollbar-track { background: transparent; }
+.ia-as-charlist > * { min-width: 0; }
+.ia-as-charitem {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ia-as-charitem:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(124, 106, 239, 0.10);
+}
+.ia-as-charitem:disabled { cursor: default; }
+.ia-as-charthumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: var(--bg-deep);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+/* 원본은 세로형이라 정사각 칸에서 잘린다 — 위로 치우쳐 얼굴을 살린다(좌측과 같은 값). */
+.ia-as-charthumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center 33%;
+}
+.ia-as-charinfo {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+/* 이름은 자른다가 아니라 **접는다** — 작품명이 문장인 캐릭터가 흔해 잘리면
+   누구인지 안 보인다(좌측 목록에서 이미 겪은 것). */
+.ia-as-charname {
+  font-family: var(--font-display);
+  font-size: 11px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.ia-as-charmeta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.3;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.ia-as-charnum { flex: 0 0 auto; opacity: 0.8; }
+.ia-as-charnum.is-thin { color: var(--warning, #d8a13a); opacity: 1; }
 /* 작품 칩 — 이름 검색이 못 잡는 작품 전체를 여기서 연다. */
+.ia-as-charhead { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 5px; }
 .ia-as-chargroup {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 0 0 auto;
-  max-width: 160px;
-  padding: 4px 8px;
+  max-width: 200px;
+  padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: rgba(120, 140, 255, 0.14);
@@ -21493,51 +21576,6 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-as-chargroup:disabled { cursor: default; }
 .ia-as-chargroup > span { color: var(--text-dim); font-size: 9px; }
 .ia-as-chargroup.is-scope { background: rgba(255, 140, 120, 0.14); }
-.ia-as-charhit {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  max-width: 190px;
-  padding: 3px 7px 3px 3px;
-  border: 1px solid var(--border-dim);
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.28);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: 10px;
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-.ia-as-charhit:hover:not(:disabled) {
-  border-color: var(--border-glow);
-  background: rgba(120, 140, 255, 0.14);
-}
-.ia-as-charhit:disabled { opacity: 0.45; cursor: default; }
-.ia-as-charthumb {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  object-fit: cover;
-  background: rgba(120, 140, 255, 0.16);
-  color: var(--text-dim);
-  font-size: 8px;
-  letter-spacing: 0.3px;
-}
-.ia-as-charname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ia-as-charwork {
-  flex: 0 0 auto;
-  max-width: 70px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-dim);
-  font-size: 9px;
-}
 
 .ia-as-tabs { display: flex; gap: 3px; flex: 0 0 auto; }
 .ia-as-tab {

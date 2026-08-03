@@ -48,6 +48,9 @@ export function createInteractiveAssetsPanel({
   let charGroup = '';        // 작품으로 좁혔을 때의 그룹 키
   let charGroups = [];       // 검색어에 걸린 작품들
   let charShown = null;      // 지금 화면의 결과를 만든 조건 — 낡았는지 판단한다
+  let charTotal = 0;         // 조건에 걸린 전체 인원(보여 주는 것은 CHAR_PAGE 명뿐)
+  const CHAR_PAGE = 16;
+  const CHAR_THIN = 50;      // 근거 행수 하위 25%(좌측 패널 PRESET_THIN_ROWS 와 같은 값)
 
   /** 삭제 확인. 다이얼로그를 못 받았으면 막는다 — 조용히 지우는 것보다 안 지우는 게 낫다. */
   async function confirmDelete(label) {
@@ -88,7 +91,7 @@ export function createInteractiveAssetsPanel({
     const seq = ++charSeq;
     const want = q + '\u0000' + charGroup;
     if (!q && !charGroup) {
-      charRows = []; charGroups = []; charBusy = false; charShown = want;
+      charRows = []; charGroups = []; charTotal = 0; charBusy = false; charShown = want;
       renderCharHits();
       return;
     }
@@ -97,7 +100,7 @@ export function createInteractiveAssetsPanel({
     const listUrl = (group, query) => '/api/character-viewer/list'
       + '?group=' + encodeURIComponent(group || '__ALL__')
       + '&query=' + encodeURIComponent(query || '')
-      + '&page=0&per_page=12&thumb_first=true';
+      + '&page=0&per_page=' + CHAR_PAGE + '&thumb_first=true';
     try {
       // 이름 검색만으로는 **작품이 통째로 샌다** — 서버 필터가 캐릭터명과 태그만 보고
       // 작품 키는 안 보기 때문이다(실측: touhou 이름검색 32명 / 작품 실제 182명).
@@ -112,11 +115,12 @@ export function createInteractiveAssetsPanel({
       if (seq !== charSeq) return;                 // 더 새로운 요청이 있다
       if (list.error) throw new Error(list.error);
       charRows = Array.isArray(list.items) ? list.items : [];
+      charTotal = Number(list.total || 0);
       charGroups = (groups.items || [])
         .filter(g => g && g.key && g.key !== '__ALL__').slice(0, 4);
     } catch (err) {
       if (seq !== charSeq) return;
-      charRows = []; charGroups = [];
+      charRows = []; charGroups = []; charTotal = 0;
       showToast('캐릭터 검색 실패: ' + err.message, 'error');
     }
     charBusy = false;
@@ -463,43 +467,56 @@ export function createInteractiveAssetsPanel({
   }
 
   function charGroupsHtml() {
-    if (charGroup) {
-      return `<button type="button" class="ia-as-chargroup is-scope" data-as-chargroup=""` +
-        ` title="전체에서 다시 찾기">✕ ${escHtml(charGroup)}</button>`;
-    }
-    return charGroups.map(g =>
-      `<button type="button" class="ia-as-chargroup" data-as-chargroup="${escHtml(g.key)}"` +
-      ` title="이 작품의 캐릭터만 보기">${escHtml(g.name || g.key)}` +
-      `<span>${Number(g.count || 0)}</span></button>`).join('');
+    const inner = charGroup
+      ? `<button type="button" class="ia-as-chargroup is-scope" data-as-chargroup=""` +
+        ` title="전체에서 다시 찾기">✕ ${escHtml(charGroup)}</button>`
+      : charGroups.map(g =>
+          `<button type="button" class="ia-as-chargroup" data-as-chargroup="${escHtml(g.key)}"` +
+          ` title="이 작품의 캐릭터만 보기">${escHtml(g.name || g.key)}` +
+          `<span>${Number(g.count || 0)}</span></button>`).join('');
+    return inner ? `<div class="ia-as-charhead">${inner}</div>` : '';
   }
 
+  /** 좌측 프리셋 목록의 **축소판**이다 — 썸네일 + 이름 + 작품·근거건수, 2열 그리드.
+   *  가로 칩 한 줄로 냈더니 "작동은 하는데 쓰기 불편하다"(사용자)였다: 이름이 잘리고,
+   *  가로 스크롤은 훑기 어렵고, 좌측에서 익힌 읽는 법이 여기서 안 통했다. */
   function charHitsHtml() {
-    if (charBusy) return '<span class="ia-as-charnote">찾는 중…</span>';
+    if (charBusy) return '<div class="ia-as-charnote">찾는 중…</div>';
     if (!charQuery.trim() && !charGroup) {
-      return '<span class="ia-as-charnote">이름이나 작품을 입력하세요. 예: miku · genshin</span>';
+      return '<div class="ia-as-charnote">이름이나 작품을 입력하세요. 예: miku · genshin</div>';
     }
-    const groups = charGroupsHtml();
+    const head = charGroupsHtml();
     if (!charRows.length) {
-      return groups +
-        `<span class="ia-as-charnote">${escHtml(charQuery.trim() || charGroup)} — 맞는 캐릭터가 없습니다.</span>`;
+      return head +
+        `<div class="ia-as-charnote">${escHtml(charQuery.trim() || charGroup)} — 맞는 캐릭터가 없습니다.</div>`;
     }
-    return groups + charRows.map((item, i) => {
+    const more = charTotal > charRows.length
+      ? `<span class="ia-as-charmore">${charTotal.toLocaleString()}명 중 ${charRows.length}</span>`
+      : `<span class="ia-as-charmore">${charTotal.toLocaleString()}명</span>`;
+    const list = charRows.map((item, i) => {
       const name = String(item.character || '');
-      // 이름이 이미 `(작품)` 을 달고 있으면 작품 라벨은 같은 말을 두 번 하는 것이다
-      // (실측 9,738명 중 2,882명). 그만큼 이름이 잘려 정작 누구인지 안 보인다.
-      // 태그를 만들 때도 같은 판정을 쓴다(interactivePanel.characterTagsOf).
+      // 이름이 이미 `(작품)` 을 달고 있으면 작품 줄은 같은 말을 두 번 하는 것이다
+      // (실측 9,738명 중 2,882명). 태그를 만들 때도 같은 판정을 쓴다
+      // (interactivePanel.characterTagsOf).
       const raw = String(item.group || '');
       const work = (raw && !name.includes(`(${raw})`)) ? raw : '';
+      const count = Number(item.count || 0);
       const thumb = item.thumbnail_url
-        ? `<img class="ia-as-charthumb" src="${escHtml(item.thumbnail_url)}" alt=""
-                loading="lazy" decoding="async">`
+        ? `<span class="ia-as-charthumb"><img src="${escHtml(item.thumbnail_url)}" alt=""
+             loading="lazy" decoding="async"></span>`
         : `<span class="ia-as-charthumb is-none">${escHtml(charInitial(name))}</span>`;
-      return `<button type="button" class="ia-as-charhit" data-as-charhit="${i}"` +
-        ` title="${escHtml(name + (raw ? ' · ' + raw : ''))}"` +
+      return `<button type="button" class="ia-as-charitem" data-as-charhit="${i}"` +
         `${busy || charStale() ? ' disabled' : ''}>` +
-        `${thumb}<span class="ia-as-charname">${escHtml(name)}</span>` +
-        (work ? `<span class="ia-as-charwork">${escHtml(work)}</span>` : '') + '</button>';
+        thumb +
+        '<span class="ia-as-charinfo">' +
+        `<span class="ia-as-charname">${escHtml(name)}</span>` +
+        '<span class="ia-as-charmeta">' + (work ? escHtml(work) : '') +
+        // 근거가 적은 캐릭터는 프리셋이 부실하다 — 좌측 목록과 같은 경고 색.
+        `<span class="ia-as-charnum${count < CHAR_THIN ? ' is-thin' : ''}">` +
+        `${count.toLocaleString()}</span></span></span></button>`;
     }).join('');
+    return head + `<div class="ia-as-charcount">${more}</div>` +
+      `<div class="ia-as-charlist">${list}</div>`;
   }
 
   /** 조합 검색 줄 아래. 대상 슬롯이 어디인지 라벨로 밝힌다 — 클릭 한 번에

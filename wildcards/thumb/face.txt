@@ -48,7 +48,6 @@ whisker markings
 scar on cheek
 fang out
 no nose
-animal nose
 split mouth
 constricted pupils
 no pupils
@@ -61,25 +60,20 @@ lower teeth only
 extra eyes
 mismatched pupils
 cross-shaped pupils
-snout
 solid oval eyes
 faceless female
 no eyes
 forked eyebrows
 heart in eye
 long eyelashes
-whiskers
 long tongue
 scar on nose
-beak
 solid circle eyes
 horizontal pupils
 colored tongue
 uneven eyes
 diamond-shaped pupils
 skin fangs
-tusks
-tongue piercing
 scar on forehead
 hikimayu
 eyebrow cut
@@ -87,13 +81,11 @@ fangs out
 beard stubble
 stitched face
 buck teeth
-fake facial hair
 artificial eye
 x-shaped pupils
 rabbit-shaped pupils
 teardrop facial mark
 button eyes
-forked tongue
 thick lips
 mustache stubble
 mole above mouth
@@ -131,7 +123,6 @@ long beard
 long nose
 hidden face
 bulging eyes
-chin piercing
 drop-shaped pupils
 compound eyes
 wide oval eyes
@@ -175,7 +166,6 @@ googly eyes
 crosshair pupils
 full beard
 braided beard
-prehensile tongue
 cleft chin
 dot pupils
 tooth gap
@@ -185,7 +175,6 @@ unibrow
 watery eyes
 eyes of grima
 rinnegan
-pig nose
 chinstrap beard
 creepy eyes
 heart on cheek
@@ -217,7 +206,6 @@ spiral-only eyes
 heart cheeks
 shiny lips
 long mustache
-blood on teeth
 paw-shaped pupils
 money-shaped pupils
 broken tooth

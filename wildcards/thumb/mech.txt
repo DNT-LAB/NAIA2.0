@@ -9,3 +9,5 @@ mechanical eye
 robot animal
 single mechanical hand
 clothed robot
+doll joints
+subdermal port

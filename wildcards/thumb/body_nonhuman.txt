@@ -52,3 +52,11 @@ fake antennae
 automail
 hollow body
 cat feet
+beak
+snout
+animal nose
+pig nose
+tusks
+whiskers
+forked tongue
+prehensile tongue

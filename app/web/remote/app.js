@@ -891,7 +891,7 @@ let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
 let interactiveAssetsPanel = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260803-ia136')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260803-ia139')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -902,7 +902,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveBrowse} =
       await import('./js/features/interactiveBrowse.mjs?v=20260724-iab6');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas6');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas8');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -945,6 +945,10 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
         }
       },
       onActiveChange: applyInteractiveModeGate,
+      // 캐릭터 스택(Assets 바)이 현재 슬롯 목록을 따라간다.
+      onRosterChange: rosterRows => {
+        if (interactiveAssetsPanel) interactiveAssetsPanel.setRoster(rosterRows);
+      },
     });
   })
   .catch(error => {
@@ -965,7 +969,13 @@ function applyInteractiveModeGate(isActive) {
   // 나중에 별도 미리보기 팝업으로만 확인한다. 값 자체는 유지되므로 토글을 끄면 그대로 보인다.
   document.body.classList.toggle('interactive-mode', !!isActive);
   // Assets 바는 Interactive 의 도구다 — 모드를 끄면 같이 사라진다.
-  if (interactiveAssetsPanel) interactiveAssetsPanel.setVisible(!!isActive);
+  if (interactiveAssetsPanel) {
+    interactiveAssetsPanel.setVisible(!!isActive);
+    // 켜는 순간의 캐릭터 목록을 한 번 밀어 넣는다 — onRosterChange 는 '변할 때'만 온다.
+    if (isActive && interactivePanel?.getCharacterRoster) {
+      try { interactiveAssetsPanel.setRoster(interactivePanel.getCharacterRoster()); } catch (_) {}
+    }
+  }
   for (const key of INTERACTIVE_BLOCKED_OPTIONS) {
     const control = optBoxes[key];
     if (!control) continue;

@@ -244,6 +244,7 @@ class InteractiveAssetsService:
                 "origin": self.classify_origin(chars),
                 "prompt_hash": snapshot_hash(chars),
                 "summary": snapshot_summary(chars),
+                "char_count": len(chars),
                 "thumb": thumb if (self.snapshot_root / thumb).exists() else None,
             })
         rows.sort(key=lambda r: r.get("created_at") or 0)
@@ -281,6 +282,7 @@ class InteractiveAssetsService:
                 rows[-1]["created_at"] = _now()
                 rows[-1]["summary"] = snapshot_summary(chars)
                 rows[-1]["origin"] = self.classify_origin(chars)
+                rows[-1]["char_count"] = len(chars)
                 # 본문도 갱신한다. 해시가 안 보는 필드(활성/비활성, 위치, 프리셋 라벨)는
                 # 같은 해시로도 달라질 수 있는데, 썸네일은 같은 id 파일을 덮어쓴다.
                 # 본문을 두면 카드의 그림과 복원 결과가 어긋난다.
@@ -294,6 +296,9 @@ class InteractiveAssetsService:
                 "id": sid, "created_at": _now(),
                 "origin": self.classify_origin(chars), "thumb": None,
                 "prompt_hash": digest, "summary": snapshot_summary(chars),
+                # 프론트가 본문을 읽지 않고도 "한 명짜리 조합"을 알아야 한다 —
+                # 그래야 카드를 펼치지 않고 바로 슬롯에 꽂을 수 있다.
+                "char_count": len(chars),
             }
             # 본문을 먼저 쓴다 — 인덱스에만 있고 본문이 없는 상태를 만들지 않는다.
             self._write_atomic(self._body_path(sid),

@@ -30,6 +30,10 @@ export function createInteractiveAssetsPanel({
   let query = '';
   let searchTimer = null;
   let loadSeq = 0;           // 늦게 도착한 응답이 최신 목록을 덮지 않게
+  let roster = [];           // 캐릭터 스택(패널이 알려 준다)
+  // 조합을 꽂을 대상 슬롯. **기본 0(C1)** — 항상 대상이 있어야 칩 클릭이 바로 먹는다.
+  let targetSlot = 0;
+  let expandedId = '';       // 캐릭터 칩을 펼친 카드
 
   /** 삭제 확인. 다이얼로그를 못 받았으면 막는다 — 조용히 지우는 것보다 안 지우는 게 낫다. */
   async function confirmDelete(label) {
@@ -123,6 +127,70 @@ export function createInteractiveAssetsPanel({
     }
   }
 
+  /** 카드 안의 캐릭터 칩 하나를 대상 슬롯에 꽂는다(빠른 스왑).
+   *  본문은 목록에 없으므로 그때 읽는다 — 캐시하지 않는다(조합은 갱신될 수 있다). */
+  async function swapInto(id, charIndex) {
+    if (busy) return;
+    busy = true;
+    renderGrid();
+    try {
+      const r = await fetch('/api/interactive-assets/snapshot?id=' + encodeURIComponent(id));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || '조합을 불러오지 못했습니다');
+      const row = Array.isArray(d.chars) ? d.chars[Number(charIndex)] : null;
+      if (!row) throw new Error('그 캐릭터가 없습니다');
+      const panel = getPanel && getPanel();
+      if (!panel || typeof panel.applySnapshotCharAt !== 'function') {
+        throw new Error('Interactive 패널이 준비되지 않았습니다');
+      }
+      if (!panel.applySnapshotCharAt(targetSlot, row)) throw new Error('슬롯에 꽂을 수 없습니다');
+      showToast(`C${targetSlot + 1} <- ${charLabel(row)}`, 'success');
+    } catch (err) {
+      showToast('스왑 실패: ' + err.message, 'error');
+    } finally {
+      busy = false;
+      renderGrid();
+    }
+  }
+
+  /** 카드를 펼쳐 그 조합의 캐릭터 칩을 띄운다. 본문을 읽어야 하므로 비동기다.
+   *  **1명짜리 조합은 펼치지 않고 바로 꽂는다** — 칩 하나를 또 누르게 하면 헛수고다. */
+  async function expandCard(id) {
+    if (busy) return;
+    const row = rows.find(x => x.id === id);
+    if (row && Number(row.char_count) === 1) { swapInto(id, 0); return; }
+    if (expandedId === id) { expandedId = ''; renderGrid(); return; }
+    busy = true;
+    renderGrid();
+    try {
+      const r = await fetch('/api/interactive-assets/snapshot?id=' + encodeURIComponent(id));
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || '조합을 불러오지 못했습니다');
+      const chars = Array.isArray(d.chars) ? d.chars : [];
+      if (chars.length === 1) { busy = false; swapInto(id, 0); return; }
+      const hit = rows.find(x => x.id === id);
+      if (hit) hit._chars = chars.map(charLabel);
+      expandedId = id;
+    } catch (err) {
+      showToast('불러오기 실패: ' + err.message, 'error');
+    } finally {
+      busy = false;
+      renderGrid();
+    }
+  }
+
+  /** 칩에 쓸 이름. 캐릭터명이 없으면 첫 태그로 대신한다(빈 칩을 만들지 않는다). */
+  function charLabel(row) {
+    const f = (row && row.fields) || {};
+    const name = (f['캐릭터'] || [])[0];
+    if (name) return String(name);
+    for (const k of Object.keys(f)) {
+      const v = (f[k] || [])[0];
+      if (v) return String(v);
+    }
+    return row && row.gender === 'male' ? '남성' : '여성';
+  }
+
   async function restore(id) {
     if (busy) return;
     busy = true;
@@ -155,6 +223,41 @@ export function createInteractiveAssetsPanel({
              data-as-origin="${escHtml(value)}">${escHtml(label)}</button>`;
   }
 
+  /** 캐릭터 스택 — Assets 바 **위**에 세로로 쌓인다(아래가 C1). 누르면 좌측
+   *  아코디언이 그 슬롯으로 열린다. 여는 것만 한다 — 추가/삭제는 좌측이 소유. */
+  function stackHtml() {
+    if (!roster.length) return '';
+    // 아래에서 위로 쌓이므로 뒤집는다. C1 이 바 바로 위에 붙어야 손이 짧다.
+    return '<div class="ia-as-stack">' + [...roster].reverse().map(c =>
+      `<button type="button" class="ia-as-slot${c.open ? ' is-open' : ''}` +
+      `${c.enabled ? '' : ' is-off'}" data-as-open="${c.index}"` +
+      ` title="${escHtml(c.name || c.label)}${c.enabled ? '' : ' (비활성)'}">` +
+      `${escHtml(c.label)}</button>`).join('') + '</div>';
+  }
+
+  /** 대상 슬롯 선택 — ASSETS 라벨 옆 가로 칸. 조합을 어디에 꽂을지 정한다.
+   *  칸은 최대치(5)만큼 그리되 **없는 슬롯은 비워 둔다** — 몇 명까지 되는지 보인다. */
+  function targetHtml() {
+    const max = 5;
+    const out = [];
+    for (let i = 0; i < max; i++) {
+      const exists = i < roster.length;
+      // 만들 수 있는 것은 **바로 다음 칸 하나뿐**이다. 건너뛰어 고르게 하면 중간
+      // 슬롯이 빈 채로 활성 생성되어 인원수와 프롬프트에 끼어든다.
+      const canMake = i === roster.length && roster.length < max;
+      const locked = !exists && !canMake;
+      const on = i === targetSlot;
+      const tip = exists ? `C${i + 1} 에 꽂기`
+        : (canMake ? `C${i + 1} 슬롯을 만들어 꽂기`
+                   : `C${roster.length + 1} 부터 채워야 합니다`);
+      out.push(`<button type="button" class="ia-as-target${on ? ' is-on' : ''}` +
+        `${exists ? '' : ' is-empty'}${locked ? ' is-locked' : ''}"` +
+        ` data-as-target="${i}"${locked ? ' disabled' : ''}` +
+        ` title="${escHtml(tip)}">${exists ? i + 1 : ''}</button>`);
+    }
+    return '<div class="ia-as-targets">' + out.join('') + '</div>';
+  }
+
   function card(row) {
     const id = escHtml(String(row.id || ''));
     const summary = String(row.summary || '(빈 조합)');
@@ -163,12 +266,21 @@ export function createInteractiveAssetsPanel({
               src="/api/interactive-assets/snapshot/thumb?id=${encodeURIComponent(row.id)}">`
       // 썸네일은 그 조합으로 생성해야 붙는다 — 아직이면 자리를 비워 둔다.
       : `<span class="ia-as-thumb is-empty" aria-hidden="true">…</span>`;
-    return `<div class="ia-as-card${row.favorite ? ' is-fav' : ''}" data-as-id="${id}"
+    const chips = (expandedId === row.id && Array.isArray(row._chars))
+      ? '<div class="ia-as-chips">' + row._chars.map((nm, i) =>
+          `<button type="button" class="ia-as-chip" data-as-swap="${id}" data-as-ci="${i}"` +
+          ` title="C${targetSlot + 1} 에 꽂기">${escHtml(nm)}</button>`).join('') + '</div>'
+      : '';
+    return `<div class="ia-as-card${row.favorite ? ' is-fav' : ''}` +
+      `${expandedId === row.id ? ' is-expanded' : ''}" data-as-id="${id}"
               title="${escHtml(summary)}">
-      <button type="button" class="ia-as-pick" data-as-restore="${id}">
+      <button type="button" class="ia-as-pick" data-as-expand="${id}">
         ${thumb}
         <span class="ia-as-summary">${escHtml(summary)}</span>
       </button>
+      ${chips}
+      <button type="button" class="ia-as-restore" data-as-restore="${id}"
+              title="조합 전체를 복원 (모든 캐릭터 슬롯을 덮어씀)" aria-label="전체 복원">&#8635;</button>
       <button type="button" class="ia-as-star" data-as-fav="${id}"
               title="${row.favorite ? '즐겨찾기 해제' : '즐겨찾기'}"
               aria-label="즐겨찾기">${row.favorite ? '★' : '☆'}</button>
@@ -219,6 +331,7 @@ export function createInteractiveAssetsPanel({
       </div>`;
 
     root.innerHTML = `
+      ${stackHtml()}
       <div class="ia-as-bar">
         <button type="button" class="ia-as-toggle" data-as-toggle="1"
                 aria-expanded="${open ? 'true' : 'false'}">
@@ -226,6 +339,7 @@ export function createInteractiveAssetsPanel({
           <span class="ia-as-title">Assets</span>
           <span class="ia-as-count">${rows.length || ''}</span>
         </button>
+        ${targetHtml()}
       </div>
       ${list}`;
   }
@@ -233,7 +347,9 @@ export function createInteractiveAssetsPanel({
   // ------------------------------------------------------------------ 입력
 
   function onClick(event) {
-    const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],[data-as-restore],[data-as-fav],[data-as-del]');
+    const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],' +
+      '[data-as-restore],[data-as-fav],[data-as-del],[data-as-open],[data-as-target],' +
+      '[data-as-expand],[data-as-swap]');
     if (!t) return;
     event.preventDefault();
     if (t.dataset.asToggle) {
@@ -252,6 +368,20 @@ export function createInteractiveAssetsPanel({
       fetchList();
       return;
     }
+    if (t.dataset.asOpen !== undefined) {
+      const panel = getPanel && getPanel();
+      if (panel && typeof panel.openCharacterAt === 'function') {
+        panel.openCharacterAt(Number(t.dataset.asOpen));
+      }
+      return;
+    }
+    if (t.dataset.asTarget !== undefined) {
+      targetSlot = Number(t.dataset.asTarget);
+      render();
+      return;
+    }
+    if (t.dataset.asExpand) { expandCard(t.dataset.asExpand); return; }
+    if (t.dataset.asSwap) { swapInto(t.dataset.asSwap, t.dataset.asCi); return; }
     if (t.dataset.asDel) { remove(t.dataset.asDel); return; }
     if (t.dataset.asRestore) { restore(t.dataset.asRestore); return; }
     if (t.dataset.asFav) {
@@ -281,6 +411,15 @@ export function createInteractiveAssetsPanel({
       visible = next;
       if (!visible) open = false;
       render();
+    },
+    /** 패널이 캐릭터 목록 변화를 알려 준다. 스택과 대상 칸이 이걸로 그려진다. */
+    setRoster(next) {
+      roster = Array.isArray(next) ? next : [];
+      // 캐릭터가 줄면 대상이 '만들 수 없는 칸'을 겨눌 수 있다 — 다음 칸까지로 당긴다.
+      if (targetSlot > roster.length || targetSlot >= 5) {
+        targetSlot = Math.min(roster.length, 4);
+      }
+      if (visible) render();
     },
     record,
     /** 생성이 끝난 뒤 썸네일이 붙었을 수 있다 — 열려 있을 때만 다시 읽는다. */

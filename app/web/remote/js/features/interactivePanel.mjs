@@ -264,6 +264,8 @@ export function createInteractivePanel({
   escHtml = value => String(value == null ? '' : value),
   onPromptChange = () => {},
   onActiveChange = () => {},
+  // 캐릭터 목록이 바뀌면 알린다(Assets 바의 캐릭터 스택이 구독).
+  onRosterChange = () => {},
   queryCorpus = null,          // async ({rating, person, include, exclude, search, limit}) => payload
   // (`corpusStatus` 는 더 이상 쓰지 않는다. 이벤트 코퍼스가 없을 때 빨간 토스트를
   //  띄우는 것이 유일한 용도였는데, 그 상태를 읽는 코드가 하나도 없었고 토스트는
@@ -778,6 +780,87 @@ export function createInteractivePanel({
     const willOpen = !state.chars[index].open;
     state.chars.forEach((c, i) => { c.open = (i === index) && willOpen; });
     renderBlocks();
+    notifyRoster();
+  }
+
+  /** 캐릭터 스택(Assets 바 위 세로 버튼)이 읽는 요약. 태그 전체가 아니라
+   *  버튼에 그릴 것만 넘긴다 — 스택은 열기 전환용이지 편집용이 아니다. */
+  function characterRoster() {
+    return state.chars.map((c, i) => ({
+      index: i,
+      id: c.id,
+      label: 'C' + (i + 1),
+      open: !!c.open,
+      enabled: c.state === 'active',
+      gender: c.gender || 'female',
+      name: (c.fields?.['캐릭터'] || [])[0] || c.name || '',
+    }));
+  }
+
+  function notifyRoster() {
+    try { onRosterChange(characterRoster()); } catch (_) { /* 스택은 부가 UI */ }
+  }
+
+  /** 스택 버튼이 부른다. 토글이 아니라 **항상 연다** — 사용자가 그 슬롯을 보려고
+   *  누른 것이므로, 이미 열려 있으면 닫는 동작은 의도와 어긋난다. */
+  function openCharacterAt(index) {
+    const i = Number(index);
+    if (!Number.isInteger(i) || i < 0 || i >= state.chars.length) return false;
+    state.chars.forEach((c, n) => { c.open = (n === i); });
+    renderBlocks();
+    notifyRoster();
+    return true;
+  }
+
+  /** 스냅샷의 **캐릭터 한 명**을 지정한 슬롯에 꽂는다(빠른 스왑).
+   *  슬롯이 아직 없으면 최대치까지 만들어 채운다. 다른 슬롯은 건드리지 않는다. */
+  function applySnapshotCharAt(index, row) {
+    if (!row || typeof row !== 'object') return false;
+    let i = Number(index);
+    if (!Number.isInteger(i) || i < 0) return false;
+    if (i >= MAX_NAI_CHARACTERS) return false;
+    // **바로 다음 칸까지만** 만든다. C1 만 있는데 C3 을 겨누면 C2 가 빈 채로 활성
+    // 생성되어 인원수와 프롬프트에 끼어든다(기본 슬라이더 태그까지 실린다).
+    // 대상 칸 UI 도 같은 규칙으로 다음 하나만 열어 두지만, 두 조건이 갈라지면
+    // 조용히 유령 캐릭터가 생기므로 여기서도 막는다.
+    if (i > state.chars.length) return false;
+    if (i === state.chars.length) {
+      if (state.chars.length >= MAX_NAI_CHARACTERS) return false;
+      state.chars.push(newCharacter(false));
+    }
+    // 슬롯의 정체성(위치)은 유지한다 — 스왑은 '누구인가'를 바꾸는 것이지
+    // '어디에 서는가'를 바꾸는 것이 아니다. 다인원 배치를 다시 잡게 만들면 안 된다.
+    const keepPos = state.chars[i].pos || POS_DEFAULT;
+    const base = newCharacter(false);
+    const fields = row.fields || {};
+    state.chars[i] = {
+      ...base,
+      id: state.chars[i].id,          // id 는 그대로 — 생성 배선이 슬롯을 uuid 로 잡는다
+      open: true,
+      pos: keepPos,
+      name: String(row.name || ''),
+      state: row.state === 'disabled' ? 'disabled' : 'active',
+      gender: row.gender === 'male' ? 'male' : 'female',
+      preset: row.preset ? {
+        work: row.preset.work,
+        name: row.preset.name,
+        tags: (row.preset.tags && typeof row.preset.tags === 'object')
+          ? Object.fromEntries(Object.entries(row.preset.tags)
+              .map(([k, v]) => [k, Array.isArray(v) ? [...v] : []]))
+          : {},
+      } : null,
+      alt: Array.isArray(row.alt) ? [...row.alt] : [],
+      gaze: Array.isArray(row.gaze) ? [...row.gaze] : [],
+      fields: Object.fromEntries(CHAR_SUBS.map(sub => [
+        sub.key,
+        Array.isArray(fields[sub.key]) ? [...fields[sub.key]] : defaultFieldsFor(sub.key),
+      ])),
+    };
+    state.chars.forEach((c, n) => { c.open = (n === i); });
+    renderBlocks();
+    emitChange();
+    notifyRoster();
+    return true;
   }
 
   function addCharacter() {
@@ -790,6 +873,7 @@ export function createInteractivePanel({
     state.chars.push(next);
     renderBlocks();
     emitChange();
+    notifyRoster();
   }
 
   /** 성별 세그먼트 토글(female/male). 카드 하나만 in-place 갱신 — 편집 중 슬롯을 안 건드린다. */
@@ -798,6 +882,7 @@ export function createInteractivePanel({
     const next = gender === 'male' ? 'male' : 'female';
     if (!c || c.gender === next) return;
     c.gender = next;
+    notifyRoster();   // 스택 항목이 성별을 들고 있다
     const card = blocksMount.querySelector(`.ia-char[data-cid="${cid}"]`);
     if (card) {
       card.querySelectorAll('[data-gender]').forEach(b => b.classList.toggle('on', b.dataset.gender === next));
@@ -1115,6 +1200,7 @@ export function createInteractivePanel({
     // 편집 팝업을 닫고(참조 슬롯이 사라졌을 수 있음) 목록을 다시 그린다(라벨 C1..Cn 재계산).
     closePanel();
     emitChange();
+    notifyRoster();   // 스택에 유령 버튼이 남으면 눌러도 아무 일이 없다
   }
 
   /** ACTIVE <-> OFF. 카드 하나만 in-place 갱신 — 편집 중 슬롯을 안 건드린다. */
@@ -1140,6 +1226,7 @@ export function createInteractivePanel({
     const badge = blocksMount.querySelector('.ia-cblock-head .ia-block-count');
     if (badge) badge.textContent = `${activeCount} 활성`;
     emitChange();
+    notifyRoster();   // 스택이 OFF 를 흐리게 표시한다 — 안 알리면 켜진 것처럼 보인다
   }
 
   // ---------------------------------------------------------------- 캐릭터 프리셋
@@ -3745,6 +3832,7 @@ export function createInteractivePanel({
     });
     renderBlocks();
     emitChange();
+    notifyRoster();   // 전체 복원은 캐릭터 수를 통째로 바꾼다 — 스택도 따라가야 한다
     return true;
   }
 
@@ -3818,6 +3906,10 @@ export function createInteractivePanel({
     // Assets(조합 스냅샷) 입출력. 생성 시 기록하고, 목록에서 고르면 되돌린다.
     getSnapshotChars: snapshotChars,
     applySnapshotChars,
+    // 빠른 스왑: 캐릭터 스택(열기 전환) + 슬롯 하나에만 꽂기
+    getCharacterRoster: characterRoster,
+    openCharacterAt,
+    applySnapshotCharAt,
     // 모드 전환 시 호출 — Position 버튼/Reference 는 NAI 전용이라 헤더를 다시 그려야 한다.
     onModeChanged: () => { if (active) { closePositionPicker(); renderBlocks(); } },
     destroy: () => {

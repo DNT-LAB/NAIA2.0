@@ -21145,7 +21145,113 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   font-family: var(--font-mono);
 }
 .ia-assets[hidden] { display: none; }
-.ia-as-bar { display: flex; }
+.ia-as-bar { display: flex; align-items: center; gap: 6px; }
+
+/* 캐릭터 스택 — 바 위에 세로로. 아래(C1)가 바에 붙어 손이 짧다. */
+.ia-as-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.ia-as-slot {
+  min-width: 46px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: rgba(14, 16, 22, 0.86);
+  backdrop-filter: blur(6px);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ia-as-slot:hover { color: var(--text-primary); border-color: var(--border); }
+.ia-as-slot.is-open {
+  border-color: var(--border-glow);
+  background: rgba(120, 140, 255, 0.18);
+  color: var(--text-primary);
+}
+/* 비활성(OFF) 슬롯도 열어 볼 수는 있어야 한다 — 흐리게만 둔다. */
+.ia-as-slot.is-off { opacity: 0.45; }
+
+/* 대상 슬롯 — 조합을 어디에 꽂을지. ASSETS 라벨 오른쪽 가로 칸. */
+.ia-as-targets {
+  display: flex;
+  gap: 3px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: 8px;
+  background: rgba(14, 16, 22, 0.86);
+  backdrop-filter: blur(6px);
+}
+.ia-as-target {
+  width: 22px;
+  height: 20px;
+  border: 1px solid var(--border-dim);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.ia-as-target:hover { color: var(--text-primary); border-color: var(--border); }
+.ia-as-target.is-on {
+  border-color: var(--border-glow);
+  background: rgba(120, 140, 255, 0.22);
+  color: var(--text-primary);
+}
+/* 아직 없는 슬롯 — 누르면 만들어서 꽂는다. 빈칸으로 두어 몇 명까지인지 보인다. */
+.ia-as-target.is-empty { border-style: dashed; opacity: 0.5; }
+/* 건너뛴 칸 — 중간 슬롯을 비운 채 만들 수 없다. 다음 하나만 열린다. */
+.ia-as-target.is-locked { opacity: 0.2; cursor: not-allowed; }
+.ia-as-target.is-locked:hover { color: var(--text-dim); border-color: var(--border-dim); }
+
+/* 카드 안의 캐릭터 칩 — 여러 명 조합을 펼쳤을 때만 나온다. */
+.ia-as-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 0 5px 5px;
+}
+.ia-as-chip {
+  padding: 3px 7px;
+  border: 1px solid var(--border-dim);
+  border-radius: 999px;
+  background: rgba(120, 140, 255, 0.10);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.ia-as-chip:hover { background: rgba(120, 140, 255, 0.26); border-color: var(--border-glow); }
+.ia-as-card.is-expanded { border-color: var(--border); }
+
+/* 조합 전체 복원 — 칩과 구분되게 카드 왼쪽 아래 구석에. */
+.ia-as-restore {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  padding: 1px 5px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s, color 0.12s;
+}
+.ia-as-card:hover .ia-as-restore { opacity: 1; pointer-events: auto; }
+.ia-as-restore:hover { color: var(--text-primary); }
 .ia-as-toggle {
   display: inline-flex;
   align-items: center;
@@ -21326,5 +21432,6 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 터치 기기는 hover 가 없다 — 별/삭제를 늘 보여 주지 않으면 쓸 방법이 없다. */
 @media (hover: none) {
   .ia-as-star,
-  .ia-as-del { opacity: 0.75; pointer-events: auto; }
+  .ia-as-del,
+  .ia-as-restore { opacity: 0.75; pointer-events: auto; }
 }

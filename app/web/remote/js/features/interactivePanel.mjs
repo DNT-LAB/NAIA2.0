@@ -279,6 +279,8 @@ export function createInteractivePanel({
   getAutocompleteTarget = () => null,  // () => 현재 자동완성이 열린 textarea | null
   getMode = () => 'NAI',       // () => 'NAI' | 'WEBUI' | 'COMFYUI' — 캐릭터 성별 주입 분기
   showToast = () => {},
+  onCharReference = null,      // () => void — 세션 CR 모듈 열기(없으면 버튼을 안 낸다)
+  getCharacterReferenceState = () => null,   // () => {frames:[{is_enabled}], is_naid45} | null
 } = {}) {
   if (!blocksMount || !panelMount) {
     return {isActive: () => false, setActive: () => {}, destroy: () => {}};
@@ -573,7 +575,7 @@ export function createInteractivePanel({
         <span class="ia-block-icon">\u{1F464}</span>
         <span class="ia-block-name">캐릭터</span>
         <span style="flex:1"></span>
-        ${isNai ? '<button type="button" class="ia-char-ref" data-charref title="레퍼런스 이미지 (준비 중) — NAI 는 캐릭터별이 아니라 세트 단위로 받는다">Reference</button>' : ''}
+        ${isNai ? charRefButtonHtml() : ''}
         <span class="ia-block-count">${activeCount} 활성</span>
       </div>
       ${rows}
@@ -720,7 +722,7 @@ export function createInteractivePanel({
     blocksMount.querySelectorAll('[data-charref]').forEach(el => {
       el.addEventListener('click', event => {
         event.stopPropagation();
-        onCharReference();
+        openCharReference();
       });
     });
     blocksMount.querySelectorAll('[data-charpreset]').forEach(el => {
@@ -897,10 +899,34 @@ export function createInteractivePanel({
     emitChange();
   }
 
-  /** Reference — 목업 버튼(추후 레퍼런스 이미지 연결). NAI 는 캐릭터별이 아니라 세트 단위라
+  /** 붙어 있는(켜 둔) 레퍼런스 수. 없으면 0. */
+  function charRefCount() {
+    const st = getCharacterReferenceState && getCharacterReferenceState();
+    const frames = (st && Array.isArray(st.frames)) ? st.frames : [];
+    return frames.filter(f => f && f.is_enabled).length;
+  }
+
+  /** 캐릭터 헤더의 [Reference]. 붙은 것이 있으면 개수를 달고 강조한다 —
+   *  예전엔 늘 같은 회색이라 켜 둔 채로 생성하는 사고가 보이지 않았다.
+   *  **NAI 는 레퍼런스를 캐릭터별이 아니라 세트 단위로 받는다.** 버튼이 캐릭터
+   *  헤더에 있어도 여는 것은 생성 전체에 걸리는 하나의 세트다 — 툴팁에 적어 둔다. */
+  function charRefButtonHtml() {
+    const n = charRefCount();
+    const tip = n
+      ? `캐릭터 레퍼런스 ${n}장 적용 중 — 생성 전체에 걸린다(캐릭터별이 아니다)`
+      : '캐릭터 레퍼런스 — 이미지를 붙인다. 생성 전체에 걸린다(캐릭터별이 아니다)';
+    return `<button type="button" class="ia-char-ref${n ? ' is-on' : ''}" data-charref` +
+      ` title="${escHtml(tip)}">Reference${n ? `<span class="ia-char-ref-n">${n}</span>` : ''}</button>`;
+  }
+
+  /** Reference — 세션 CR 모듈을 연다. NAI 는 캐릭터별이 아니라 세트 단위라
    *  캐릭터 블록 헤더에 하나만 둔다. */
-  function onCharReference() {
-    showToast('Reference 기능은 준비 중입니다.');
+  function openCharReference() {
+    if (typeof onCharReference !== 'function') {
+      showToast('Reference 기능을 열 수 없습니다.', 'error');
+      return;
+    }
+    onCharReference();
   }
 
   // ---- 캔버스 위치(Position) 팝업 — 5x5 그리드 ----
@@ -3947,6 +3973,19 @@ export function createInteractivePanel({
     applySnapshotChars,
     // 빠른 스왑: 캐릭터 스택(열기 전환) + 슬롯 하나에만 꽂기
     getCharacterRoster: characterRoster,
+    /** CR 모듈 상태가 바뀌면 app.js 가 부른다 — 헤더의 [Reference] 배지만 갱신한다.
+     *  블록 전체를 다시 그리면 편집 중이던 슬롯의 포커스·캐럿이 날아간다. */
+    refreshCharReference() {
+      if (!active) return;
+      blocksMount.querySelectorAll('[data-charref]').forEach(btn => {
+        const n = charRefCount();
+        btn.classList.toggle('is-on', n > 0);
+        const badge = btn.querySelector('.ia-char-ref-n');
+        if (n && badge) badge.textContent = String(n);
+        else if (n && !badge) btn.insertAdjacentHTML('beforeend', `<span class="ia-char-ref-n">${n}</span>`);
+        else if (!n && badge) badge.remove();
+      });
+    },
     applySnapshotCharById,
     applyCharacterPresetTo,
     // Assets 바의 [+] 가 쓴다. 좌측 [+캐릭터 슬롯] 과 같은 동작이라 상한/토스트를 공유한다.

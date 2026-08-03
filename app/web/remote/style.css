@@ -20141,6 +20141,21 @@ body.detached-module .mod-grid-3 {
 /* 한 번 누르면 라벨 자리가 버튼이 된다. 한 번 더 눌러야 실행된다. */
 /* 제외는 분홍 — 그리드와 같은 규칙. */
 
+/* 캐릭터 헤더의 [Reference]. 평소엔 조용하지만 **붙어 있으면 확실히 보인다** —
+   레퍼런스를 켜 둔 채로 생성하면 그림이 통째로 달라지는데, 예전 목업 버튼은 늘 같은
+   회색이라 켜 둔 사실이 화면 어디에도 안 남았다. */
+.ia-char-ref.is-on {
+  border-color: var(--accent);
+  background: rgba(124, 106, 239, 0.18);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px rgba(124, 106, 239, 0.35);
+}
+.ia-char-ref-n {
+  display: inline-block; margin-left: 5px; padding: 0 5px;
+  border-radius: 999px; background: var(--accent); color: #fff;
+  font-family: var(--font-mono); font-size: 9px; line-height: 1.5; font-weight: 700;
+}
+
 .ia-aside-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .ia-aside-chip {
   font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);

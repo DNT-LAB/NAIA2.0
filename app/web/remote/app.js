@@ -891,7 +891,7 @@ let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
 let interactiveAssetsPanel = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260803-ia154')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260803-ia155')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -927,6 +927,11 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       // 슬롯 입력창(textarea)에 범용 자동완성을 붙인다. 팝업 검색창에는 붙이지 않는다.
       bindTagAssist,
       getMode: () => currentMode || modeSelect?.value || 'NAI',
+      // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
+      // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
+      onCharReference: () => openModule('character_reference', {forceOpen: true}),
+      // 버튼에 붙일 개수 배지의 근거. 켜 둔 프레임만 센다.
+      getCharacterReferenceState: () => moduleStateCache.get('character_reference') || null,
       // 자동완성 '대상'이 아니라 '실제로 열려 있는지'를 넘긴다 — tagAssist 는 드롭다운을 닫아도
       // acTarget 을 비우지 않으므로, 대상만 보면 Enter/Escape 를 영원히 양보해 슬롯 편집이
       // 닫히지 않는다(실측 확인).
@@ -988,11 +993,13 @@ function applyInteractiveModeGate(isActive) {
   updateInteractiveNaiToolBlock();
 }
 
-// Interactive 모드에서는 NAI 전용 Character / Character Reference 도구를 차단한다 —
-// 캐릭터는 Interactive 블록이 직접 관리하므로 별도 도구와 소스가 다투면 안 된다.
-// Vibe Transfer 만 사용 가능. 버튼을 비활성화하고, 열려 있으면 닫는다.
+// Interactive 모드에서는 NAI 전용 **Character** 도구만 차단한다 —
+// 캐릭터 프롬프트는 Interactive 블록이 소유하므로 두 소스가 다투면 안 된다.
+// Character Reference 는 다투지 않는다: 프롬프트가 아니라 **이미지**다. 예전엔 한 줄로
+// 묶어 같이 막았고, 그래서 캐릭터 헤더의 [Reference] 가 목업으로 남아 있었다.
+// 이제 그 버튼이 이 모듈을 연다(interactivePanel 의 onCharReference).
 // (백엔드 스트립은 캐릭터->생성 배선 Phase 2 와 함께 처리한다.)
-const INTERACTIVE_BLOCKED_NAI_TOOLS = ['character', 'character_reference'];
+const INTERACTIVE_BLOCKED_NAI_TOOLS = ['character'];
 function updateInteractiveNaiToolBlock() {
   const blocked = document.body.classList.contains('interactive-mode');
   INTERACTIVE_BLOCKED_NAI_TOOLS.forEach(mid => {
@@ -7147,6 +7154,10 @@ function onModuleState(m) {
   else if (m.module_id === 'character_reference') {
     updateCharRefBadge(m);
     syncReferenceInsetWithCharRef(m);
+    // Interactive 캐릭터 헤더의 [Reference] 배지도 이 상태를 쓴다.
+    if (interactivePanel && typeof interactivePanel.refreshCharReference === 'function') {
+      interactivePanel.refreshCharReference();
+    }
   }
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
   else if (m.module_id === 'save_directory' && saveDirectoryPanel) saveDirectoryPanel.setState(m);

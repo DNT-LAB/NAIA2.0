@@ -102,3 +102,4 @@ holding cane
 holding vegetable
 holding stylus
 holding fishing rod
+holding headphones

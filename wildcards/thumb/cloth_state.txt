@@ -204,3 +204,62 @@ single half glove
 buruma around one leg
 no dickey
 hat loss
+unbuttoned
+partially unbuttoned
+unzipped
+partially unzipped
+unfastened
+untied
+popped button
+shirt tucked in
+panties aside
+leotard aside
+swimsuit aside
+thong aside
+shorts aside
+male underwear aside
+fundoshi aside
+bikini top aside
+dress aside
+strap slip
+bra slip
+shirt slip
+blindfold slip
+strap break
+clothes around waist
+jacket around waist
+sweater around waist
+cardigan around waist
+shirt around waist
+jumpsuit around waist
+sweater around neck
+panties around ankles
+skirt around ankles
+suspenders hanging
+jacket on shoulders
+jacket over shoulder
+shirt on shoulders
+shirt behind neck
+partially undressed
+jacket partially removed
+coat partially removed
+shirt partially removed
+headphones removed
+open fly
+open bikini
+center opening
+hood down
+clothes down
+shirt down
+skirt rolled up
+shoe loss
+shoe dangle
+eyewear hang
+buttoned cuffs
+single arm warmer
+undone bikini
+undone sarashi
+dissolving clothes
+wardrobe malfunction
+panties on head
+skirt caught on object

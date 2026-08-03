@@ -44,11 +44,18 @@ export function createInteractiveAssetsPanel({
   let charBusy = false;
   let charSeq = 0;
   let charTimer = null;
-  let charKind = 'char';     // 'char' = 캐릭터 태그만 / 'all' = 프리셋 전부
   let charGroup = '';        // 작품으로 좁혔을 때의 그룹 키
   let charGroups = [];       // 검색어에 걸린 작품들
   let charShown = null;      // 지금 화면의 결과를 만든 조건 — 낡았는지 판단한다
-  let charTotal = 0;         // 조건에 걸린 전체 인원(보여 주는 것은 CHAR_PAGE 명뿐)
+  let charTotal = 0;         // 조건에 걸린 전체 인원
+  let charPage = 0;
+  let charPages = 1;
+  let charMore = false;      // 다음 쪽을 이어붙이는 중
+  let charObserver = null;   // 무한 스크롤 sentinel 관찰자
+  // 고른 캐릭터를 **어떻게** 넣을지 묻는 팝업. 누르자마자 넣으면 되돌릴 수 없는
+  // 프리셋 교체가 실수 한 번으로 일어난다.
+  let ask = null;            // {index, slotId, slotLabel, name}
+  let askEl = null;
   const CHAR_PAGE = 16;
   const CHAR_THIN = 50;      // 근거 행수 하위 25%(좌측 패널 PRESET_THIN_ROWS 와 같은 값)
 
@@ -84,6 +91,13 @@ export function createInteractiveAssetsPanel({
     renderGrid();
   }
 
+  function charListUrl(group, query, page) {
+    return '/api/character-viewer/list'
+      + '?group=' + encodeURIComponent(group || '__ALL__')
+      + '&query=' + encodeURIComponent(query || '')
+      + '&page=' + (Number(page) || 0) + '&per_page=' + CHAR_PAGE + '&thumb_first=true';
+  }
+
   /** 캐릭터 도감 검색. 좌측 프리셋 패널과 **같은 라우트**를 쓴다 —
    *  결과가 갈라지면 "패널에선 나오는데 여기선 안 나온다"가 된다. */
   async function fetchChars() {
@@ -96,17 +110,14 @@ export function createInteractiveAssetsPanel({
       return;
     }
     charBusy = true;
+    charMore = false;
     renderCharHits();
-    const listUrl = (group, query) => '/api/character-viewer/list'
-      + '?group=' + encodeURIComponent(group || '__ALL__')
-      + '&query=' + encodeURIComponent(query || '')
-      + '&page=0&per_page=' + CHAR_PAGE + '&thumb_first=true';
     try {
       // 이름 검색만으로는 **작품이 통째로 샌다** — 서버 필터가 캐릭터명과 태그만 보고
       // 작품 키는 안 보기 때문이다(실측: touhou 이름검색 32명 / 작품 실제 182명).
       // 그래서 좌측 프리셋 패널과 똑같이 작품 목록도 같이 물어 칩으로 낸다.
       const [list, groups] = await Promise.all([
-        fetch(listUrl(charGroup, q), {cache: 'no-store'}).then(r => r.json()),
+        fetch(charListUrl(charGroup, q, 0), {cache: 'no-store'}).then(r => r.json()),
         (!charGroup && q)
           ? fetch('/api/character-viewer/groups?query=' + encodeURIComponent(q),
                   {cache: 'no-store'}).then(r => r.json())
@@ -116,11 +127,13 @@ export function createInteractiveAssetsPanel({
       if (list.error) throw new Error(list.error);
       charRows = Array.isArray(list.items) ? list.items : [];
       charTotal = Number(list.total || 0);
+      charPage = Number(list.page || 0);
+      charPages = Math.max(1, Number(list.total_pages || 1));
       charGroups = (groups.items || [])
         .filter(g => g && g.key && g.key !== '__ALL__').slice(0, 4);
     } catch (err) {
       if (seq !== charSeq) return;
-      charRows = []; charGroups = []; charTotal = 0;
+      charRows = []; charGroups = []; charTotal = 0; charPage = 0; charPages = 1;
       showToast('캐릭터 검색 실패: ' + err.message, 'error');
     }
     charBusy = false;
@@ -128,15 +141,36 @@ export function createInteractiveAssetsPanel({
     renderCharHits();
   }
 
+  /** 목록 끝이 보이면 다음 쪽을 이어붙인다. 검색 조건이 바뀌면(`charSeq`) 버린다 —
+   *  이전 조건의 뒷쪽이 새 목록에 섞이면 화면과 다른 캐릭터가 눌린다. */
+  async function fetchCharsMore() {
+    if (charBusy || charMore || charStale()) return;
+    if (charPage + 1 >= charPages) return;
+    const seq = charSeq;
+    charMore = true;
+    try {
+      const d = await fetch(charListUrl(charGroup, charQuery.trim(), charPage + 1),
+                            {cache: 'no-store'}).then(r => r.json());
+      if (seq !== charSeq) return;
+      if (d.error) throw new Error(d.error);
+      charPage = Number(d.page || charPage + 1);
+      charPages = Math.max(1, Number(d.total_pages || charPages));
+      const items = Array.isArray(d.items) ? d.items : [];
+      const base = charRows.length;
+      charRows = charRows.concat(items);
+      appendCharRows(items, base);
+    } catch (err) {
+      if (seq !== charSeq) return;
+      showToast('더 불러오지 못했습니다: ' + err.message, 'error');
+    } finally {
+      if (seq === charSeq) charMore = false;
+    }
+  }
+
   /** 찾은 캐릭터를 대상 슬롯에 꽂는다. 슬롯은 **id** 로 잡는다 —
    *  프리셋을 읽는 동안 앞 슬롯이 지워지면 번호가 다른 캐릭터를 가리킨다. */
-  async function applyCharHit(index) {
-    if (busy || charBusy || charStale()) return;
-    const item = charRows[Number(index)];
-    const cur = roster[targetSlot];
-    if (!item || !cur) return;
-    const slotId = cur.id;
-    const slotLabel = cur.label;
+  async function applyCharHit(item, kind, slotId, slotLabel) {
+    if (busy || !item || !slotId) return;
     const panel = getPanel && getPanel();
     if (!panel || typeof panel.applyCharacterPresetTo !== 'function') {
       showToast('Interactive 패널이 준비되지 않았습니다', 'error');
@@ -148,7 +182,7 @@ export function createInteractiveAssetsPanel({
       // 성공 토스트는 패널이 띄운다(넣은 태그 수·회수한 프리셋까지 알려 준다).
       const ok = await panel.applyCharacterPresetTo(slotId, {
         group: item.group, character: item.character,
-        thumb: item.thumbnail_url || '', kind: charKind,
+        thumb: item.thumbnail_url || '', kind,
       });
       if (!ok) showToast(`${slotLabel} 에 넣지 못했습니다`, 'error');
     } finally {
@@ -451,6 +485,87 @@ export function createInteractiveAssetsPanel({
       ` data-as-apply="1"${picked ? '' : ' disabled'} title="${escHtml(label)}">적용</button>`;
   }
 
+  // -------------------------------------------------------------- 확인 팝업
+
+  function ensureAsk() {
+    if (askEl && document.body.contains(askEl)) return askEl;
+    askEl = document.createElement('div');
+    askEl.className = 'ia-as-ask';
+    askEl.hidden = true;
+    document.body.appendChild(askEl);
+    askEl.addEventListener('click', onAskClick);
+    return askEl;
+  }
+
+  /** 목록의 그 줄에 붙여 연다. 아래로 펼치되 화면 밖이면 위로 뒤집는다
+   *  (좌표 팝업·프리셋 카드와 같은 규약). */
+  function openAsk(index, anchor) {
+    const item = charRows[Number(index)];
+    const cur = roster[targetSlot];
+    if (!item || !cur || !anchor) return;
+    // 슬롯도 캐릭터도 **연 시점에 고정**한다. 번호로 들고 있으면 그 사이 목록이
+    // 갈리면 다른 줄을 가리킨다 — 고른 것 자체를 잡아 둔다.
+    ask = {
+      item, slotId: cur.id, slotLabel: cur.label,
+      name: String(item.character || ''),
+    };
+    const el = ensureAsk();
+    el.hidden = false;
+    el.innerHTML = askHtml();
+    const r = anchor.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - box.width - 8));
+    let top = r.bottom + 6;
+    if (top + box.height > window.innerHeight - 8) {
+      top = Math.max(8, r.top - box.height - 6);
+    }
+    el.style.left = Math.round(left) + 'px';
+    el.style.top = Math.round(top) + 'px';
+    document.addEventListener('mousedown', onAskOutside, true);
+    document.addEventListener('keydown', onAskKey, true);
+  }
+
+  function closeAsk() {
+    ask = null;
+    if (askEl) { askEl.hidden = true; askEl.innerHTML = ''; }
+    document.removeEventListener('mousedown', onAskOutside, true);
+    document.removeEventListener('keydown', onAskKey, true);
+  }
+
+  function askHtml() {
+    if (!ask) return '';
+    return '<button type="button" class="ia-as-askclose" data-as-askclose="1"' +
+      ' title="닫기" aria-label="닫기">✕</button>' +
+      `<div class="ia-as-askname">${escHtml(ask.name)}</div>` +
+      `<div class="ia-as-asksub">${escHtml(ask.slotLabel)} 에 넣습니다</div>` +
+      '<div class="ia-as-askbtns">' +
+      '<button type="button" class="ia-as-askbtn" data-as-askkind="char"' +
+      ' title="캐릭터 태그만 바꿉니다">캐릭터만</button>' +
+      '<button type="button" class="ia-as-askbtn is-all" data-as-askkind="all"' +
+      ' title="외형 태그까지 슬롯에 나눠 넣습니다">전부</button>' +
+      '</div>';
+  }
+
+  function onAskClick(event) {
+    const t = event.target.closest('[data-as-askclose],[data-as-askkind]');
+    if (!t) return;
+    event.preventDefault();
+    if (t.dataset.asAskclose || !ask) { closeAsk(); return; }
+    const {item, slotId, slotLabel} = ask;
+    const kind = t.dataset.asAskkind === 'all' ? 'all' : 'char';
+    closeAsk();
+    applyCharHit(item, kind, slotId, slotLabel);
+  }
+
+  function onAskOutside(event) {
+    if (askEl && askEl.contains(event.target)) return;
+    closeAsk();
+  }
+
+  function onAskKey(event) {
+    if (event.key === 'Escape') { event.stopPropagation(); closeAsk(); }
+  }
+
   /** 그림 없는 캐릭터가 대부분이다 — 이름 이니셜로 채운다(좌측 프리셋과 같은 규칙). */
   function charInitial(name) {
     const words = String(name || '').replace(/\(.*?\)/g, ' ')
@@ -493,8 +608,19 @@ export function createInteractiveAssetsPanel({
     const more = charTotal > charRows.length
       ? `<span class="ia-as-charmore">${charTotal.toLocaleString()}명 중 ${charRows.length}</span>`
       : `<span class="ia-as-charmore">${charTotal.toLocaleString()}명</span>`;
-    const list = charRows.map((item, i) => {
-      const name = String(item.character || '');
+    const list = charRows.map(charItemHtml).join('') + charSentinelHtml();
+    return head + `<div class="ia-as-charcount">${more}</div>` +
+      `<div class="ia-as-charlist">${list}</div>`;
+  }
+
+  function charSentinelHtml() {
+    // 이것이 보이면 다음 쪽을 이어붙인다(IntersectionObserver).
+    return charPage + 1 < charPages
+      ? '<div class="ia-as-charsentinel">더 불러오는 중…</div>' : '';
+  }
+
+  function charItemHtml(item, i) {
+    const name = String(item.character || '');
       // 이름이 이미 `(작품)` 을 달고 있으면 작품 줄은 같은 말을 두 번 하는 것이다
       // (실측 9,738명 중 2,882명). 태그를 만들 때도 같은 판정을 쓴다
       // (interactivePanel.characterTagsOf).
@@ -514,9 +640,6 @@ export function createInteractiveAssetsPanel({
         // 근거가 적은 캐릭터는 프리셋이 부실하다 — 좌측 목록과 같은 경고 색.
         `<span class="ia-as-charnum${count < CHAR_THIN ? ' is-thin' : ''}">` +
         `${count.toLocaleString()}</span></span></span></button>`;
-    }).join('');
-    return head + `<div class="ia-as-charcount">${more}</div>` +
-      `<div class="ia-as-charlist">${list}</div>`;
   }
 
   /** 조합 검색 줄 아래. 대상 슬롯이 어디인지 라벨로 밝힌다 — 클릭 한 번에
@@ -524,18 +647,13 @@ export function createInteractiveAssetsPanel({
   function charRowHtml() {
     const cur = roster[targetSlot];
     const to = cur ? cur.label : 'C1';
-    const kindLabel = charKind === 'all' ? '프리셋 전부' : '캐릭터만';
-    const kindTip = charKind === 'all'
-      ? '외형 태그까지 슬롯에 나눠 넣습니다 (누르면 캐릭터 태그만)'
-      : '캐릭터 태그만 바꿉니다 (누르면 외형 태그까지)';
+    // 어떻게 넣을지는 고른 **뒤에** 팝업이 묻는다 — 미리 정해 두는 토글은 지금 어느
+    // 모드인지 늘 확인해야 해서 오히려 손이 갔다.
     return `
       <div class="ia-as-charrow">
         <input class="ia-as-charq" type="search" data-as-charq="1"
-               placeholder="캐릭터 검색 — 누르면 ${escHtml(to)} 에 바로 적용"
+               placeholder="캐릭터 검색 — ${escHtml(to)} 에 넣을 캐릭터"
                value="${escHtml(charQuery)}">
-        <button type="button" class="ia-as-charkind${charKind === 'all' ? ' is-all' : ''}"
-                data-as-charkind="1"${busy ? ' disabled' : ''}
-                title="${escHtml(kindTip)}">${escHtml(kindLabel)}</button>
       </div>
       <div class="ia-as-charhits">${charHitsHtml()}</div>`;
   }
@@ -546,6 +664,37 @@ export function createInteractiveAssetsPanel({
     if (!host) { if (visible && open) render(); return; }
     host.innerHTML = charHitsHtml();
     host.classList.toggle('is-stale', charStale());
+    charObserve();
+  }
+
+  /** 목록을 통째로 다시 그리지 않고 뒤에 붙인다 — 다시 그리면 스크롤이 맨 위로 튄다. */
+  function appendCharRows(items, base) {
+    const list = root.querySelector('.ia-as-charlist');
+    if (!list) { renderCharHits(); return; }
+    const sentinel = list.querySelector('.ia-as-charsentinel');
+    const html = items.map((item, k) => charItemHtml(item, base + k)).join('');
+    if (sentinel) sentinel.insertAdjacentHTML('beforebegin', html);
+    else list.insertAdjacentHTML('beforeend', html);
+    if (sentinel && charPage + 1 >= charPages) sentinel.remove();
+    const count = root.querySelector('.ia-as-charcount');
+    if (count) {
+      count.innerHTML = charTotal > charRows.length
+        ? `<span class="ia-as-charmore">${charTotal.toLocaleString()}명 중 ${charRows.length}</span>`
+        : `<span class="ia-as-charmore">${charTotal.toLocaleString()}명</span>`;
+    }
+    charObserve();
+  }
+
+  function charObserve() {
+    if (charObserver) { charObserver.disconnect(); charObserver = null; }
+    if (typeof IntersectionObserver !== 'function') return;
+    const list = root.querySelector('.ia-as-charlist');
+    const sentinel = list && list.querySelector('.ia-as-charsentinel');
+    if (!list || !sentinel) return;
+    charObserver = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) void fetchCharsMore();
+    }, {root: list, rootMargin: '80px'});
+    charObserver.observe(sentinel);
   }
 
   function card(row) {
@@ -611,7 +760,7 @@ export function createInteractiveAssetsPanel({
     });
     // 슬롯 구성을 바꾸는 것들도 함께 잠근다 — 적용 중 삭제하면 뒤 슬롯이 당겨져
     // 사용자가 고르지 않은 캐릭터가 덮어써진다.
-    root.querySelectorAll('[data-as-enable],[data-as-delchar],[data-as-pos],[data-as-charkind]')
+    root.querySelectorAll('[data-as-enable],[data-as-delchar],[data-as-pos]')
       .forEach(btn => { btn.disabled = busy; });
     // 결과 칩은 적용 중 말고 **낡았을 때도** 못 누른다(charStale 주석 참조).
     root.querySelectorAll('[data-as-charhit],[data-as-chargroup]')
@@ -671,7 +820,7 @@ export function createInteractiveAssetsPanel({
       '[data-as-restore],[data-as-fav],[data-as-del],[data-as-open],[data-as-target],' +
       '[data-as-expand],[data-as-pick],[data-as-apply],[data-as-addslot],' +
       '[data-as-enable],[data-as-delchar],[data-as-pos],' +
-      '[data-as-charhit],[data-as-charkind],[data-as-chargroup]');
+      '[data-as-charhit],[data-as-chargroup]');
     if (!t) return;
     event.preventDefault();
     if (t.dataset.asToggle) {
@@ -694,6 +843,7 @@ export function createInteractiveAssetsPanel({
       // 스택은 '지금 다루는 캐릭터'를 고르는 것이다 — 좌측을 열고 대상도 그리로 옮긴다.
       // 둘을 갈라 두면 대상 칸은 [1] 인데 조작 버튼은 C2 를 가리키는 상태가 된다.
       const i = Number(t.dataset.asOpen);
+      if (ask) closeAsk();
       const panel = getPanel && getPanel();
       if (panel && typeof panel.openCharacterAt === 'function') panel.openCharacterAt(i);
       if (i < roster.length) { targetSlot = i; render(); }
@@ -701,6 +851,8 @@ export function createInteractiveAssetsPanel({
     }
     if (t.dataset.asTarget !== undefined) {
       const i = Number(t.dataset.asTarget);
+      // 팝업은 열릴 때의 슬롯을 들고 있다 — 대상이 바뀌면 화면과 어긋나므로 닫는다.
+      if (ask) closeAsk();
       targetSlot = i;
       // 대상 칸도 같은 뜻이다 — 그 캐릭터를 좌측에서 열어 준다.
       const panel = getPanel && getPanel();
@@ -713,20 +865,22 @@ export function createInteractiveAssetsPanel({
                  || t.dataset.asTarget !== undefined || t.dataset.asAddslot
                  || t.dataset.asCharhit !== undefined
                  || t.dataset.asChargroup !== undefined)) return;
-    if (t.dataset.asCharkind) {
-      if (busy) return;   // 진행 중인 적용은 시작 시점 모드로 간다 — 표시만 바뀌면 거짓말이다
-      charKind = charKind === 'all' ? 'char' : 'all';
-      render();
-      return;
-    }
     if (t.dataset.asChargroup !== undefined) {
       if (busy || charStale()) return;
+      if (ask) closeAsk();
       charGroup = t.dataset.asChargroup || '';
+      // 검색어는 그대로 두고 **작품과 AND 로 교차**한다(사용자 지정) — 작품을 좁힌 뒤
+      // 그 안에서 다시 이름으로 찾는 것이 이어지는 동작이다. 입력창의 글자와 `✕ 작품`
+      // 칩이 나란히 보이므로 두 조건이 함께 걸린 것이 화면에 드러난다.
       if (charTimer) clearTimeout(charTimer);
       void fetchChars();
       return;
     }
-    if (t.dataset.asCharhit !== undefined) { applyCharHit(t.dataset.asCharhit); return; }
+    if (t.dataset.asCharhit !== undefined) {
+      if (charStale()) return;
+      openAsk(t.dataset.asCharhit, t);
+      return;
+    }
     if (t.dataset.asPos) {
       const panel = getPanel && getPanel();
       if (panel && typeof panel.openPositionPickerFor === 'function') {
@@ -752,6 +906,7 @@ export function createInteractiveAssetsPanel({
     const charInput = event.target.closest('[data-as-charq]');
     if (charInput) {
       charQuery = String(charInput.value || '');
+      if (ask) closeAsk();   // 고른 줄이 곧 사라진다
       // 검색어가 바뀌는 순간 화면의 결과는 낡은 것이 된다. 디바운스가 끝나기 전에
       // 눌리면 화면과 다른 캐릭터가 슬롯에 들어가므로 바로 흐리게 잠근다.
       renderCharHits();
@@ -777,7 +932,7 @@ export function createInteractiveAssetsPanel({
       const next = !!on;
       if (next === visible) return;
       visible = next;
-      if (!visible) open = false;
+      if (!visible) { open = false; closeAsk(); }
       render();
     },
     /** 패널이 캐릭터 목록 변화를 알려 준다. 스택과 대상 칸이 이걸로 그려진다. */
@@ -802,6 +957,9 @@ export function createInteractiveAssetsPanel({
       root.removeEventListener('input', onInput);
       if (searchTimer) clearTimeout(searchTimer);
       if (charTimer) clearTimeout(charTimer);
+      if (charObserver) { charObserver.disconnect(); charObserver = null; }
+      closeAsk();
+      if (askEl) { askEl.remove(); askEl = null; }
       root.innerHTML = '';
       root.hidden = true;
     },

@@ -781,6 +781,7 @@ export function createInteractiveAssetsPanel({
     root.hidden = !visible;
     if (!visible) { root.innerHTML = ''; return; }
     root.classList.toggle('is-open', open);
+    const keepScroll = root.querySelector('.ia-as-charlist')?.scrollTop || 0;
 
     const list = !open ? '' : `
       <div class="ia-as-controls">
@@ -811,6 +812,13 @@ export function createInteractiveAssetsPanel({
         ${open ? targetHtml() : ''}
       </div>
       ${list}`;
+
+    // 캐릭터를 꽂을 때마다 roster 가 바뀌어 여기까지 전체 렌더가 돈다. 목록 노드가
+    // 통째로 갈리므로 훑던 자리를 잃고 맨 위로 튄다 — 스크롤을 넘겨받는다.
+    // 관찰자도 사라진 sentinel 을 보고 있으니 다시 붙인다(안 그러면 이어받기가 죽는다).
+    const nextList = root.querySelector('.ia-as-charlist');
+    if (nextList && keepScroll) nextList.scrollTop = keepScroll;
+    charObserve();
   }
 
   // ------------------------------------------------------------------ 입력

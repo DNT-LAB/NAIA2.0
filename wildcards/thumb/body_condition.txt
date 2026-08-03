@@ -6,7 +6,6 @@ injury
 food on face
 blood on clothes
 bandaged leg
-drunk
 stitches
 bandaid on leg
 dirty
@@ -17,8 +16,6 @@ nosebleed
 bruise
 bandaid on knee
 bandaged hand
-mouth drool
-turn pale
 blood from mouth
 bandaid on cheek
 bandage over one eye
@@ -26,19 +23,15 @@ bleeding
 cuts
 bandaged head
 dirty face
-snot
 bite mark
 scratches
 bandaid on arm
-nose bubble
 bandaged neck
 slap mark
 bruise on face
 hickey
 blood on arm
-pain
 paint splatter on face
-saliva drip
 bandaged wrist
 cream on face
 blood on leg
@@ -48,24 +41,17 @@ dirty feet
 bandaid on head
 wet face
 bandaged chest
-runny nose
 bandaged foot
 chocolate on face
 bandaid on shoulder
 full mouth
 whip marks
 bruised eye
-fever
 blood on chest
-foaming at the mouth
 bandages over eyes
-snot trail
 broken arm
-dizzy
-dazed
 blood on feet
 bleeding from forehead
-steam from mouth
 slap mark on face
 bandaged ear
 dirty hands
@@ -73,11 +59,13 @@ bandaged tail
 bandaged ankle
 veiny face
 blood on mouth
-tipsy
 broken leg
-headache
 mouth submerged
 bandaged knees
-hangover
 bandage on leg
 bandaged horn
+sick
+sunburn
+oiled
+impaled
+bloody wings

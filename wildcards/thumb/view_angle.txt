@@ -21,3 +21,5 @@ sideways
 from outside
 vanishing point
 isometric
+pov across table
+pov across bed

@@ -19,7 +19,7 @@ import {
   OBJ_SECTIONS, ANI_SECTIONS, FX_SECTIONS,
   CLOTH_COMBO, CLOTH_COMBO_REV, COLOR_SWATCH, AXIS_COLOR_TAGS, ADULT_SECTIONS, GLOSS_TAGS,
   VIEW_SECTIONS, META_SECTIONS, VIEW_GLOBAL_TAGS, GAZE_TARGETS,
-} from './interactiveAxes.mjs?v=20260803-ax128';
+} from './interactiveAxes.mjs?v=20260803-ax129';
 
 // 구도(meta)는 실제 구도 태그와 보조 효과가 섞여 있어(Codex 조사) 두 섹션으로 나눈다.
 // '구도'=PRIMARY subgroup 만, '효과'=나머지. 두 슬롯 모두 meta 축이라 프롬프트엔 함께 나간다.

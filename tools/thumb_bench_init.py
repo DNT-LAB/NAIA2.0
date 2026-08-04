@@ -398,6 +398,10 @@ BATCHES = {
     "expression":        (HEAD, 2.5, "portrait"),    # 감정 표정
     "expression_symbol": (HEAD, 2.5, "portrait"),    # 만화 기호 표정
     "face_shape":        (HEAD, 2.5, "portrait"),    # 눈·입·눈썹 형태
+    # face.txt 는 face_eyes/face_parts/face_mark 로 갈라지는 컨테이너지만,
+    # _todo 는 컨테이너 이름으로 나온다 — 배치가 없으면 그 축은 영영 못 찍는다.
+    "face":              (HEAD, 2.5, "portrait"),
+    "hair_pattern":      (HEAD, 2.5, "portrait"),    # 머리 무늬(그라데이션·메시)
     "expression_state":  (HEAD, 2.5, "portrait"),    # 홍조·눈물·침·땀 (상태 축 해체분)
     "body_condition":    (TORSO, 2.5, "cowboy"),     # 부상·붕대·오염 (상태 축 해체분)
     # 다리·발 부상(붕대 발목/무릎/발)은 cowboy shot 에서 프레임 밖이다.

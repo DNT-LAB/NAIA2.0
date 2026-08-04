@@ -160,6 +160,16 @@ for old in TODO.glob("*.txt"):
         continue        # _redo_* 같은 손으로 만든 재검수 배치는 보존한다
     old.unlink()
 
+# 화면에 뜨는 축만 골라낸다. `pose_solo`(1,592)·`pose_multi`(439) 같은 **분류기의
+# 중간 산출물**은 표시 축이 아닌데도 합계에 들어가, "생성 대기 2,045장" 처럼
+# 실제보다 훨씬 큰 숫자를 보고했다(2026-08-04 사용자 지적). 실제로는 그 태그들이
+# 표시 축에 한 벌 더 있고 그림도 거기 있다 — 화면 빈칸은 0이었다.
+_AXJS = Path("app/web/remote/js/features/interactiveAxes.mjs")
+WIRED = set(re.findall(r'ref: "([a-z0-9_]+)"', _AXJS.read_text(encoding="utf-8")))
+WIRED.add("face")        # face_eyes/face_parts 로 갈라지는 컨테이너
+# 표시 축 키로 이미 그림이 있는 태그. 중간 산출물의 '대기'가 진짜인지 가른다.
+COVERED = {t for ax in WIRED for t in have.get(PACK_AXIS.get(ax, ax), set())}
+
 rows, total = [], 0
 for wc in sorted(OUT.glob("*.txt")):
     ax = wc.stem
@@ -217,5 +227,20 @@ for wc in sorted(OUT.glob("*.txt")):
 print(f"{'축':<14}{'목록':>5}{'보유':>5}{'남을것(여)':>10}{'남성':>6}")
 for ax, n, hv, f_, m_ in rows:
     flag = "" if (f_ or m_) else "  DONE"
+    if ax not in WIRED:
+        flag += "  (미표시 축)"
     print(f"{ax:<14}{n:>5}{hv:>5}{f_:>10}{m_:>6}{flag}")
-print(f"\n생성 대기 총 {total}장 -> {TODO}")
+
+_shown = sum(f_ + m_ for ax, _n, _h, f_, m_ in rows if ax in WIRED)
+_mirror = _other = 0
+for ax, _n, _h, _f, _m in rows:
+    if ax in WIRED:
+        continue
+    _pend = [t for t in ((TODO / f"{ax}.txt").read_text(encoding="utf-8").splitlines()
+                         if (TODO / f"{ax}.txt").exists() else []) if t.strip()]
+    _mirror += sum(1 for t in _pend if t in COVERED)
+    _other += sum(1 for t in _pend if t not in COVERED)
+print(f"\n화면에 빈칸으로 뜨는 것: {_shown}장  <- 이것만 생성 대상이다")
+print(f"미표시 축 {_mirror + _other}장 = 표시 축에 이미 그림이 있는 사본 {_mirror}"
+      f" + 표시 축에 없는 것 {_other}")
+print(f"생성 대기 총 {total}장 -> {TODO}")

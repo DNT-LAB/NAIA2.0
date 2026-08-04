@@ -1,7 +1,7 @@
 {
- "commit": "047f73990bcd8a09938caf24ac08bbd4e13292b7",
+ "commit": "9a17beead0b746c8a80f8611ecea246d6c4e246e",
  "axis_count": 159,
- "tag_count": 12981,
+ "tag_count": 13013,
  "wired_axis_count": 158,
  "overlaps": {
   "facing another": [
@@ -346,7 +346,7 @@
   },
   "body_condition": {
    "dir": "thumb",
-   "count": 72,
+   "count": 81,
    "tags": [
     "bandages",
     "bandaged arm",
@@ -419,7 +419,16 @@
     "bandaged knees",
     "bandage on leg",
     "bandaged horn",
-    "blood on teeth"
+    "blood on teeth",
+    "bandaged fingers",
+    "paint on body",
+    "paint on fingers",
+    "bandaid on ass",
+    "torn skin",
+    "surgical scar",
+    "taped fingers",
+    "stomach growling",
+    "full stomach"
    ]
   },
   "body_expose": {
@@ -547,7 +556,7 @@
   },
   "body_nonhuman": {
    "dir": "thumb",
-   "count": 62,
+   "count": 67,
    "tags": [
     "claws",
     "animal hands",
@@ -610,12 +619,17 @@
     "tusks",
     "whiskers",
     "forked tongue",
-    "prehensile tongue"
+    "prehensile tongue",
+    "giant hand",
+    "glowing hands",
+    "ghost hands",
+    "stretched limb",
+    "goat legs"
    ]
   },
   "body_suggestive": {
    "dir": "thumb",
-   "count": 44,
+   "count": 46,
    "tags": [
     "arm between breasts",
     "arm under breasts",
@@ -660,7 +674,9 @@
     "pectoral docking",
     "person between breasts",
     "sword between breasts",
-    "symmetrical docking"
+    "symmetrical docking",
+    "hanging breasts",
+    "bursting breasts"
    ]
   },
   "body_type": {
@@ -1097,7 +1113,7 @@
   },
   "cloth_detail": {
    "dir": "thumb",
-   "count": 134,
+   "count": 135,
    "tags": [
     "frills",
     "sailor collar",
@@ -1232,7 +1248,8 @@
     "breastless clothes",
     "see-through cleavage",
     "underboob cutout",
-    "framed breasts"
+    "framed breasts",
+    "back bow"
    ]
   },
   "cloth_dress": {
@@ -4837,7 +4854,7 @@
   },
   "horns": {
    "dir": "thumb",
-   "count": 33,
+   "count": 36,
    "tags": [
     "horns",
     "demon horns",
@@ -4871,7 +4888,10 @@
     "gazelle horns",
     "crystal horn",
     "ice horns",
-    "low horns"
+    "low horns",
+    "holographic horns",
+    "drawn horns",
+    "transparent horns"
    ]
   },
   "job": {
@@ -5518,7 +5538,7 @@
   },
   "marking": {
    "dir": "thumb",
-   "count": 96,
+   "count": 99,
    "tags": [
     "nail polish",
     "tattoo",
@@ -5615,7 +5635,10 @@
     "collarbone piercing",
     "lip ring",
     "chin piercing",
-    "tongue piercing"
+    "tongue piercing",
+    "glowing lines",
+    "tramp stamp",
+    "cutie mark"
    ]
   },
   "mech": {
@@ -8640,7 +8663,7 @@
   },
   "pose_body_touch": {
    "dir": "thumb",
-   "count": 28,
+   "count": 33,
    "tags": [
     "hand on own hip",
     "crossed arms",
@@ -8669,7 +8692,12 @@
     "fist on own hip",
     "hand on own throat",
     "holding stomach",
-    "grabbing own pectoral"
+    "grabbing own pectoral",
+    "hands on ass",
+    "hands on thighs",
+    "hands on legs",
+    "hands on shoulders",
+    "hands on stomach"
    ]
   },
   "pose_body_touch_m": {
@@ -8990,7 +9018,7 @@
   },
   "pose_drop": {
    "dir": "thumb",
-   "count": 87,
+   "count": 82,
    "tags": [
     "spoken ellipsis",
     "crossdressing",
@@ -9028,16 +9056,13 @@
     "remembering",
     "crazy",
     ":s",
-    "stomach growling",
     "sitting on car",
     "charisma break",
     "hand on hand",
     "cream on body",
-    "hands on thighs",
     "eye symbol",
     "troll face",
     "evil",
-    "hands on legs",
     "holding recorder",
     "holding dress",
     "concentrating",
@@ -9064,7 +9089,6 @@
     "3;",
     "spicy",
     "upset",
-    "hands on shoulders",
     "leaning over",
     "mutsuki face",
     "playing with hair",
@@ -9073,7 +9097,6 @@
     "face",
     "gasp",
     "ruined for marriage",
-    "hands on stomach",
     "holding up",
     "mouth",
     ";/",
@@ -9083,7 +9106,7 @@
   },
   "pose_face_touch": {
    "dir": "thumb",
-   "count": 61,
+   "count": 63,
    "tags": [
     "head tilt",
     "hand on own face",
@@ -9145,7 +9168,9 @@
     "hand over heart",
     "thumb biting",
     "hand mouth",
-    "biting hair"
+    "biting hair",
+    "face in hands",
+    "fingers to cheek"
    ]
   },
   "pose_face_touch_m": {
@@ -9211,7 +9236,7 @@
   },
   "pose_hand": {
    "dir": "thumb",
-   "count": 101,
+   "count": 105,
    "tags": [
     "hand up",
     "arm up",
@@ -9313,7 +9338,11 @@
     "sign language",
     "fig sign",
     "v over head",
-    "hand on glass"
+    "hand on glass",
+    "between fingers",
+    "twiddling fingers",
+    "card between fingers",
+    "clipping nails"
    ]
   },
   "pose_hand_m": {
@@ -12632,7 +12661,7 @@
   },
   "view_angle": {
    "dir": "thumb",
-   "count": 25,
+   "count": 26,
    "tags": [
     "front view",
     "from behind",
@@ -12658,12 +12687,13 @@
     "vanishing point",
     "isometric",
     "pov across table",
-    "pov across bed"
+    "pov across bed",
+    "pov hands"
    ]
   },
   "view_layout": {
    "dir": "thumb",
-   "count": 39,
+   "count": 41,
    "tags": [
     "multiple views",
     "convenient censoring",
@@ -12703,7 +12733,9 @@
     "age comparison",
     "surrounded",
     "screencap inset",
-    "circle formation"
+    "circle formation",
+    "inconvenient breasts",
+    "convenient breasts"
    ]
   },
   "view_shot": {

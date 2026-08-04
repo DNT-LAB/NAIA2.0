@@ -31,3 +31,6 @@ gazelle horns
 crystal horn
 ice horns
 low horns
+holographic horns
+drawn horns
+transparent horns

@@ -38,8 +38,12 @@ EYE_PATTERN = {"multicolored eyes", "heterochromia", "two-tone eyes", "gradient 
 BANGS = re.compile(r'bangs|hair between eyes|curtained hair', re.I)
 NSFW = re.compile(r'nipple|areola|pubic|anus|penis|vagina|clitoris|labia|crotch|groin'
                   r'|bulge|flaccid|erection|cum\b|censor|breasts out|breasts apart'
-                  r'|spread (ass|anus)|oppai|hanging breasts|sagging breasts|naked'
-                  r'|veiny breasts|bursting breasts|breast slip|nude', re.I)
+                  # `hanging`·`bursting`·`sagging`·`veiny breasts` 를 뺐다 —
+                  # safebooru 에 그대로 노출되는 SFW 태그다(사용자 확인). 이름만 보고
+                  # 성인으로 몰면 `body_nsfw` 로 가는데 그 축은 UI 에서 통째로 빠져
+                  # 있어 그림을 만들 기회조차 사라진다. 배정은 RECLASSIFIED 가 한다.
+                  r'|spread (ass|anus)|oppai|naked'
+                  r'|breast slip|nude', re.I)
 FEATURE = re.compile(r'horn|antler|claw|talon|pawpad|paw\b|fin\b|fins|antenna|scale'
                      r'|scar|cut\b|cuts\b|burn|bite mark|wound|bruise|injury|stitch'
                      r'|mole|freckle|birthmark|marking|tattoo|nail|fang|tusk|hoof|hooves'
@@ -590,8 +594,11 @@ EXCLUDE = {
     "hands on own crotch",             # 데이터: "손을 올리는 자세"
     "cum on hands", "pussy juice on fingers",   # 행위의 결과
     "stomach bulge",                   # "내부에서 무언가가 밀어내어" — 행위 의존
-    "hanging breasts",                 # "몸을 앞으로 숙였을 때" — 자세 의존
-    "bursting breasts",                # "옷이 터질 듯한" — 의상 맞음새
+    # (`hanging breasts`·`bursting breasts` 는 EXCLUDE 에서 뺐다. 판정은 옳았다 —
+    #  각각 자세 의존·의상 맞음새 의존이다. 그런데 그건 '버릴 것'이 아니라 '신체
+    #  특징이 아닌 것'이라는 뜻이었다. `breasts apart`·`breast press` 가 있는
+    #  `body_suggestive` 로 보낸다. 추천에서 글자 칩으로만 뜨던 원인이 이 이중
+    #  제외였다 — 이름 규칙과 EXCLUDE 양쪽에 걸려 어느 축에도 못 들어갔다.)
     "areolae",                         # 데이터: "폐기된 태그"
     "no nipples", "no anus",            # 원작 대비 비교가 필요한 부정 태그
     "stray pubic hair",                # 떨어진 털 한 가닥 — 썸네일 판별 불가
@@ -807,6 +814,27 @@ RECLASSIFIED = {
     # `veiny arms`·`perky breasts` 와 같은 줄에 있어야 한다.
     "sagging breasts": "body_feature",
     "veiny breasts": "body_feature",
+    # 2026-08-04 — 추천에서 글자 칩으로만 뜨던 것들(사용자 지적 전수조사분).
+    "bandaged fingers": "body_condition",
+    "paint on body": "body_condition",
+    "paint on fingers": "body_condition",
+    "bandaid on ass": "body_condition",
+    "torn skin": "body_condition",
+    "surgical scar": "body_condition",
+    "taped fingers": "body_condition",
+    "stomach growling": "body_condition",
+    "full stomach": "body_condition",
+    "glowing lines": "marking",
+    "tramp stamp": "marking",
+    "cutie mark": "marking",
+    "holographic horns": "horns",
+    "drawn horns": "horns",
+    "transparent horns": "horns",
+    "giant hand": "body_nonhuman",
+    "glowing hands": "body_nonhuman",
+    "ghost hands": "body_nonhuman",
+    "stretched limb": "body_nonhuman",
+    "goat legs": "body_nonhuman",
     # 사람이 아닌 얼굴 부위. 얼굴 축에 있었지만 `head fins`·`gills`·`hooves` 쪽이 맞다.
     "beak": "body_nonhuman",
     "snout": "body_nonhuman",
@@ -848,6 +876,16 @@ MOVED_TO_FOREIGN_AXIS = {
     "doll joints",        # -> mech (기계·사이보그)
     "subdermal port",     # -> mech
     "fake facial hair",   # -> cloth_accessory (`fake mustache`·`fake beard` 옆)
+    # 2026-08-04 — 신체 pool 에 있었지만 자세·구도·의상이다.
+    "hanging breasts", "bursting breasts",           # -> body_suggestive (자세)
+    "pov hands",                                     # -> view_angle
+    "inconvenient breasts", "convenient breasts",    # -> view_layout
+    "back bow",                                      # -> cloth_detail
+    "between fingers", "twiddling fingers",
+    "card between fingers", "clipping nails",        # -> pose_hand
+    "face in hands", "fingers to cheek",             # -> pose_face_touch
+    "hands on ass", "hands on thighs", "hands on legs",
+    "hands on shoulders", "hands on stomach",        # -> pose_body_touch
 }
 
 

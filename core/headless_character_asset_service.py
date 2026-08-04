@@ -859,6 +859,27 @@ class HeadlessCharacterAssetService:
         context._disable_all_vibe_frames()
         service._persist()
 
+    def attach_reference_only(self, character_id: str, variation: str = "") -> dict[str, Any]:
+        """에셋 이미지를 **레퍼런스로만** 붙인다. 슬롯 프롬프트는 건드리지 않는다.
+
+        `apply_to_slot(with_reference=True)` 는 캐릭터 프롬프트까지 슬롯에 적용한다.
+        Interactive 는 캐릭터 블록이 프롬프트를 소유하므로 그 경로를 쓰면 두 소스가
+        다툰다(`character` 도구를 Interactive 에서 막아 둔 것과 같은 이유). 레퍼런스만
+        원하는 자리에는 이 함수를 쓴다.
+
+        회수·상호배제 규약은 `_attach_character_reference` 가 그대로 맡는다 —
+        고른 것이 **유일하게 켜진** 레퍼런스가 되고 Vibe 프레임은 전부 꺼진다.
+        """
+        self._bootstrap()
+        context = self.context
+        if str(context.get_api_mode() or "").upper() != "NAI":
+            raise ValueError("character reference requires NAI mode")
+        character_id = self._validate_id(character_id)
+        variation = self._validate_hash(variation) if str(variation or "").strip() else ""
+        path = self.resolve_image_path(character_id, variation)
+        self._attach_character_reference(path)
+        return {"ok": True, "id": character_id, "variation": variation}
+
     def _disable_all_character_reference_frames(self) -> bool:
         """C1 단독 적용의 계약 = CR 없는 깨끗한 상태(사용자 지시 2026-07-17).
 

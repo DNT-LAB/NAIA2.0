@@ -406,6 +406,11 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/reference/attach",
+          "smoke": "asset_runtime"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/bench/save",
           "smoke": "asset_runtime"
         }

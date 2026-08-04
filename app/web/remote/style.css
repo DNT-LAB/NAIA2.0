@@ -20156,6 +20156,15 @@ body.detached-module .mod-grid-3 {
   font-family: var(--font-mono); font-size: 9px; line-height: 1.5; font-weight: 700;
 }
 
+/* CR Storage 의 소스 탭. 어느 쪽을 보고 있는지가 안 보이면 빈 목록이 '없음'인지
+   '다른 탭'인지 구분되지 않는다. */
+.mod-storage-tabs { display: flex; gap: 4px; margin: 0 0 8px; }
+.mod-storage-tabs .mod-btn-sm.is-on {
+  border-color: var(--accent);
+  background: rgba(124, 106, 239, 0.18);
+  color: var(--text-primary);
+}
+
 .ia-aside-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .ia-aside-chip {
   font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);

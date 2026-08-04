@@ -538,6 +538,33 @@ def register_character_asset_routes(
         except Exception as exc:
             return JSONResponse({"error": f"reference storage list failed: {exc}"}, status_code=500)
 
+    @app.post("/api/character-asset/reference/attach")
+    async def api_character_asset_reference_attach(req: Request):
+        # 에셋 라이브러리의 이미지를 **레퍼런스로만** 붙인다. `/apply` 와 달리 캐릭터
+        # 프롬프트를 슬롯에 적용하지 않는다 — Interactive 는 캐릭터 블록이 프롬프트를
+        # 소유하므로 여기서 슬롯을 건드리면 소스가 다툰다.
+        payload = await _read_json(req)
+        try:
+            result = await run_in_thread(
+                _asset_service(session_context).attach_reference_only,
+                str(payload.get("id") or ""),
+                str(payload.get("variation") or ""),
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"reference attach failed: {exc}"}, status_code=500)
+        # 열려 있는 CR 패널과 런처 배지가 바로 따라오게 한다. Vibe 는 상호배제로
+        # 꺼지므로 함께 알린다(apply 경로와 같은 규약).
+        try:
+            await broadcast_json(clients, session_context.module_state_payload("character_reference"))
+            await broadcast_json(clients, session_context.module_state_payload("vibe_transfer"))
+        except Exception as exc:
+            print(f"[CharacterAsset] reference attach broadcast failed: {exc}")
+        return result
+
     @app.post("/api/character-asset/reference/upload")
     async def api_character_asset_reference_upload(req: Request):
         # 계약: raw 이미지 bytes 본문 하나만 받는다(data URL 병행 금지 - Codex).

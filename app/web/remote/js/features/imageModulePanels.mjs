@@ -905,24 +905,104 @@ export function createImageModulePanels({
     else if (message.module_id === 'vibe_cluster') onVibeClusterList(message);
   }
 
+  // 레퍼런스를 고르는 소스는 둘이다. 예전엔 보관함 하나뿐이라, 사용자가 Assets 탭에
+  // 쌓아 둔 **캐릭터 에셋**을 레퍼런스로 쓰려면 한 번 슬롯에 적용(= 프롬프트까지 덮어씀)
+  // 하는 길밖에 없었다. Interactive 에서는 그 길이 아예 막혀 있다(캐릭터 블록이 프롬프트를
+  // 소유한다). 탭으로 갈라 에셋에서 바로 집게 한다.
+  let charRefSource = 'storage';        // 'storage' | 'asset'
+  let charRefStorageMessage = null;     // 마지막 보관함 응답(탭을 오갈 때 다시 안 묻는다)
+
+  function charRefSourceTabs() {
+    const tab = (id, label) =>
+      `<button class="mod-btn-sm${charRefSource === id ? ' is-on' : ''}"` +
+      ` onclick="setCharRefSource('${id}')">${escHtml(label)}</button>`;
+    return `<div class="mod-storage-tabs">${tab('storage', '레퍼런스 보관함')}${tab('asset', '캐릭터 에셋')}</div>`;
+  }
+
+  function charRefStorageShell(inner, refresh) {
+    return `
+    <div class="mod-upload-bar">
+      <button class="mod-btn-upload" onclick="${refresh}">Refresh</button>
+      <button class="mod-btn-sm" onclick="openModule('character_reference',{forceOpen:true})">Back</button>
+    </div>
+    ${charRefSourceTabs()}
+    ${inner}`;
+  }
+
   function renderCharRefStorage(message) {
     if (getCurrentModuleId() !== 'character_reference') return;
-    const items = (message.items || []).map(item => `
+    if (message) charRefStorageMessage = message;
+    if (charRefSource === 'asset') { void renderCharRefAssetSource(); return; }
+    const items = ((charRefStorageMessage || {}).items || []).map(item => `
     <div class="mod-storage-item" onclick="applyCharRefStorage('${escHtml(item.file_hash)}')" title="${escHtml(item.file_name)}">
       ${storageThumbMarkup(item)}
       <span class="mod-storage-name">${escHtml(item.character_name || item.file_name)}</span>
     </div>
   `).join('');
+    moduleBody.innerHTML = charRefStorageShell(
+      items.length
+        ? '<div class="mod-storage-grid">' + items + '</div>'
+        : '<div class="mod-empty">No saved references</div>',
+      "setModuleParam('character_reference','get_storage','')");
+  }
 
-    moduleBody.innerHTML = `
-    <div class="mod-upload-bar">
-      <button class="mod-btn-upload" onclick="setModuleParam('character_reference','get_storage','');/* refresh */">Refresh</button>
-      <button class="mod-btn-sm" onclick="openModule('character_reference',{forceOpen:true})">Back</button>
-    </div>
-    ${items.length
-      ? '<div class="mod-storage-grid">' + items + '</div>'
-      : '<div class="mod-empty">No saved references</div>'}
-  `;
+  function setCharRefSource(source) {
+    charRefSource = source === 'asset' ? 'asset' : 'storage';
+    if (charRefSource === 'asset') void renderCharRefAssetSource();
+    else renderCharRefStorage(null);
+  }
+
+  /** 캐릭터 에셋 라이브러리를 레퍼런스 소스로 그린다. 목록은 Assets 탭과 같은 라우트다 —
+   *  따로 만들면 한쪽만 낡는다. */
+  async function renderCharRefAssetSource() {
+    if (getCurrentModuleId() !== 'character_reference') return;
+    moduleBody.innerHTML = charRefStorageShell(
+      '<div class="mod-empty">불러오는 중…</div>', "setCharRefSource('asset')");
+    let list = [];
+    try {
+      const response = await fetchFn('/api/character-asset/list', {cache: 'no-store'});
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      list = Array.isArray(data.characters) ? data.characters : [];
+    } catch (error) {
+      if (getCurrentModuleId() !== 'character_reference' || charRefSource !== 'asset') return;
+      moduleBody.innerHTML = charRefStorageShell(
+        `<div class="mod-empty">에셋 목록을 불러오지 못했습니다 (${escHtml(error.message)})</div>`,
+        "setCharRefSource('asset')");
+      return;
+    }
+    if (getCurrentModuleId() !== 'character_reference' || charRefSource !== 'asset') return;
+    const items = list.map(entry => {
+      const id = String(entry.id || '');
+      const name = String(entry.display_name || id);
+      const src = `/api/character-asset/thumb?id=${encodeURIComponent(id)}&size=grid&v=${entry.revision || 0}`;
+      return `<div class="mod-storage-item" onclick="applyCharRefAsset('${escHtml(id)}')"` +
+        ` title="${escHtml(name)}">` +
+        `<img class="mod-storage-thumb" src="${escHtml(src)}" alt="" loading="lazy" decoding="async">` +
+        `<span class="mod-storage-name">${escHtml(name)}</span></div>`;
+    }).join('');
+    moduleBody.innerHTML = charRefStorageShell(
+      items ? '<div class="mod-storage-grid">' + items + '</div>'
+            : '<div class="mod-empty">저장된 캐릭터 에셋이 없습니다.</div>',
+      "setCharRefSource('asset')");
+  }
+
+  /** 에셋을 **레퍼런스로만** 붙인다. `/apply` 가 아니라 전용 라우트다 — 그쪽은 캐릭터
+   *  프롬프트까지 슬롯에 적용해 Interactive 의 캐릭터 블록과 다툰다. */
+  async function applyCharRefAsset(id) {
+    if (!_storageApplyGuard('asset:' + id)) return;
+    try {
+      const response = await fetchFn('/api/character-asset/reference/attach', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id, variation: ''}),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      showToast('레퍼런스로 붙였습니다', 'success');
+      openModule('character_reference', {forceOpen: true});
+    } catch (error) {
+      showToast(`레퍼런스 적용 실패: ${error.message}`, 'error');
+    }
   }
 
   // Storage 항목 클릭 적용은 ~500ms 지연돼 반영되므로, 같은 항목을 빠르게 다시
@@ -1036,6 +1116,8 @@ export function createImageModulePanels({
     onStorageList,
     renderCharRefStorage,
     applyCharRefStorage,
+    setCharRefSource,
+    applyCharRefAsset,
     renderVibeStorage,
     showVibeStorageTab,
     applyVibeStorage,

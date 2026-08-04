@@ -1465,7 +1465,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20260603-
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260717-crclear1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260803-crsrc1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -8302,6 +8302,15 @@ function renderCharRefStorage(m) {
 
 function applyCharRefStorage(fileHash) {
   if (imageModulePanels) imageModulePanels.applyCharRefStorage(fileHash);
+}
+
+// CR Storage 화면의 소스 탭 — 레퍼런스 보관함 / 캐릭터 에셋.
+function setCharRefSource(source) {
+  if (imageModulePanels) imageModulePanels.setCharRefSource(source);
+}
+
+function applyCharRefAsset(id) {
+  if (imageModulePanels) imageModulePanels.applyCharRefAsset(id);
 }
 
 function renderVibeStorage(m) {

@@ -15,9 +15,10 @@
 
 이 스크립트를 남겨 두는 이유는 하나다 — 태그 사전에 새로 생긴 태그를 축으로
 끌어오는 일은 아직 이것만 할 수 있다. 그때도 위 절차를 거쳐라.
-"""
 
-"""배경(location) 슬롯의 축 분배 — wildcards/thumb/loc_*.txt + _loc_axes.json.
+---
+
+배경(location) 슬롯의 축 분배 — wildcards/thumb/loc_*.txt + _loc_axes.json.
 
 파일럿 25장으로 확인한 것(이게 이 파일의 존재 이유다):
 

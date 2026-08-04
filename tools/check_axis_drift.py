@@ -85,6 +85,20 @@ def dirty() -> list[str]:
     return [l for l in out.splitlines() if l.strip()]
 
 
+RETIRED_MARK = "이 빌더는 **그냥 돌리면 안 된다.**"
+
+
+def is_retired(script: str) -> bool:
+    """은퇴 배너가 박힌 빌더인가.
+
+    은퇴 빌더의 소실은 **이미 알려진 상태**다 — 그래서 배너를 박았다. 실패로 세면
+    이 검사가 항상 빨간불이라 게이트로 못 쓴다. 목록을 따로 두지 않고 파일에서
+    읽는다(두 군데 적으면 갈라진다).
+    """
+    p = ROOT / "tools" / script
+    return p.exists() and RETIRED_MARK in p.read_text(encoding="utf-8")
+
+
 def run_builder(script: str) -> tuple[bool, str]:
     env = dict(os.environ, PYTHONPATH=str(ROOT), PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     r = subprocess.run([sys.executable, f"tools/{script}"], cwd=ROOT,
@@ -130,6 +144,7 @@ def main() -> int:
             report.append({
                 "builder": script, "label": label,
                 "status": "ok" if ok else "실행 실패",
+                "retired": is_retired(script),
                 "error": "" if ok else tail,
                 "lost": lost,
             })
@@ -140,13 +155,16 @@ def main() -> int:
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=1))
     else:
-        bad = 0
+        bad = 0        # 은퇴하지 않은 빌더의 소실만 센다
         for r in report:
             n = sum(len(v) for v in r["lost"].values())
-            bad += n
-            mark = "  " if (r["status"] == "ok" and not n) else "!!"
+            if not r.get("retired"):
+                bad += n
+            clean = r["status"] == "ok" and not n
+            mark = "  " if clean else ("··" if r.get("retired") else "!!")
+            note = " · 은퇴(예상됨)" if (r.get("retired") and n) else ""
             print(f"{mark} {r['builder']:<26}{r['label']:<22}{r['status']}"
-                  + (f" · 소실 {n}" if n else ""))
+                  + (f" · 소실 {n}" if n else "") + note)
             if r["status"] == "실행 실패":
                 for line in (r.get("error") or "").splitlines():
                     print(f"      {line}")
@@ -154,9 +172,20 @@ def main() -> int:
                 head = ", ".join(tags[:8]) + (" …" if len(tags) > 8 else "")
                 print(f"      {axis}: {len(tags)}개 — {head}")
         print()
-        print(f"합계 소실 {bad}개" if bad else "소실 없음 — 모든 빌더가 커밋된 분류를 재현한다")
+        retired_n = sum(sum(len(v) for v in r["lost"].values())
+                        for r in report if r.get("retired"))
+        if bad:
+            print(f"!! 살아 있는 빌더의 소실 {bad}개 — 명시 배정으로 옮겨라")
+        else:
+            print("살아 있는 빌더는 전부 커밋된 분류를 재현한다")
+        if retired_n:
+            print(f"   (은퇴 빌더 소실 {retired_n}개는 예상된 상태 — 각 파일 첫머리 참조)")
 
-    fail = any(r["lost"] or r["status"] == "실행 실패" for r in report)
+    # 은퇴 빌더의 소실은 실패가 아니다. **실행 실패는 은퇴 여부와 무관하게 실패다** —
+    # 은퇴 배너를 넣다가 `from __future__` 앞에 docstring 을 끼워 파일을 깨뜨린 적이
+    # 있고, 그것을 이 검사가 잡았다.
+    fail = any((r["lost"] and not r.get("retired")) or r["status"] == "실행 실패"
+               for r in report)
     if dirty():
         print("경고: 검사 뒤에도 `wildcards/` 가 깨끗하지 않다. git status 를 확인하라.",
               file=sys.stderr)

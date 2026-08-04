@@ -12,6 +12,7 @@ NAI 캐릭터 레퍼런스 모듈(`/api/module/...` 의 `character_reference`)�
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
@@ -63,11 +64,20 @@ def register_interactive_reference_routes(
                 path = svc.resolve_image_path(ref, str(payload.get("variation") or ""))
                 return _svc().attach_bytes(path.read_bytes(), label or ref)
             if source == "storage":
-                path = session_context._save_path(
-                    "character_reference", "images", f"{ref}.png")
-                if not path.exists():
-                    raise FileNotFoundError(f"storage image not found: {ref}")
-                return _svc().attach_bytes(path.read_bytes(), label or ref)
+                # **파일명만 쓴다.** 클라이언트 값을 그대로 경로에 넣으면
+                # `../..` 로 저장 트리 밖의 PNG 를 읽어 썸네일로 노출할 수 있다
+                # (2026-08-05 Codex 지적). 기존 CR 라우트도 `Path(...).name` 을 쓴다.
+                safe = Path(str(ref)).name
+                if not safe or safe != str(ref) or safe.startswith("."):
+                    raise ValueError(f"invalid storage ref: {ref!r}")
+                # 목록은 레거시 저장 루트까지 훑는다(`_existing_save_dirs`) — 여기서
+                # 기본 루트만 보면 목록에는 뜨는데 누르면 404 가 난다.
+                for folder in session_context._existing_save_dirs(
+                        "character_reference", "images"):
+                    path = folder / f"{safe}.png"
+                    if path.exists():
+                        return _svc().attach_bytes(path.read_bytes(), label or safe)
+                raise FileNotFoundError(f"storage image not found: {safe}")
             raise ValueError(f"unknown source: {source!r}")
 
         try:

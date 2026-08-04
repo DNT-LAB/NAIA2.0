@@ -1187,6 +1187,9 @@ def _auto_generation_overrides(params: dict[str, Any]) -> dict[str, Any]:
             # Interactive 세션에서는 characters 키 자체가 없어 이 플래그가 유일한 방어선이다.
             "_skip_character_late_binding",
             "_skip_character_reference_late_binding",
+            # Interactive 전용 레퍼런스 바인딩 마커. 유실되면 continuation
+            # 2회차부터 레퍼런스가 통째로 빠진다.
+            "_interactive_reference_binding",
             # 인셋 마커가 유실되면 continuation의 인셋 키 pop 가드가 영영 발동하지
             # 않아 baked 캔버스(type/image_bytes)가 다음 반복에 박제된다.
             REFERENCE_INSET_PIN_MARKER,

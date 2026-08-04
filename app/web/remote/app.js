@@ -893,7 +893,7 @@ let interactiveBrowse = null;
 let interactiveAssetsPanel = null;
 // Interactive 전용 캐릭터 레퍼런스. NAI 모듈과 상태가 독립이다.
 let interactiveReferencePanel = null;
-import('./js/features/interactiveReferencePanel.mjs?v=20260804-iref1')
+const interactiveReferenceReady = import('./js/features/interactiveReferencePanel.mjs?v=20260805-iref2')
   .then(({createInteractiveReferencePanel}) => {
     interactiveReferencePanel = createInteractiveReferencePanel({
       document, escHtml, showToast,
@@ -941,7 +941,14 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       getMode: () => currentMode || modeSelect?.value || 'NAI',
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
-      onCharReference: () => { if (interactiveReferencePanel) interactiveReferencePanel.toggle(); },
+      onCharReference: () => {
+        // 모듈 로딩이 아직이면 **끝난 뒤에 연다.** 예전에는 조용히 아무 일도
+        // 안 일어나서 버튼이 고장 난 것처럼 보였다(2026-08-05 Codex 지적).
+        if (interactiveReferencePanel) { interactiveReferencePanel.toggle(); return; }
+        interactiveReferenceReady
+          .then(() => interactiveReferencePanel && interactiveReferencePanel.toggle())
+          .catch(() => showToast('레퍼런스 패널을 불러오지 못했습니다', 'error'));
+      },
       // 버튼에 붙일 개수 배지의 근거. 켜 둔 프레임만 센다.
       // 배지는 **Interactive 전용 패널**의 개수를 센다. NAI 모듈 상태를 세면
       // 남의 상태를 표시하게 된다(2026-08-04 분리).
@@ -2526,6 +2533,9 @@ function applyInteractiveCharacterOverrides(overrides) {
   if (mode !== 'NAI') return;
   overrides._skip_character_late_binding = true;
   overrides._skip_character_reference_late_binding = true;
+  // Interactive 전용 레퍼런스를 실어 달라는 표시. 위 skip 플래그는 '붙이지 마라'는
+  // 뜻이고 캐릭터 에셋 생성도 쓰므로, 그것에 의미를 얹으면 안 된다.
+  overrides._interactive_reference_binding = true;
   let rows = [];
   try { rows = interactivePanel.getGenerationCharacters?.() || []; } catch (_) { rows = []; }
   if (!rows.length) return;

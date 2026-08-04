@@ -218,13 +218,32 @@ export function createInteractiveReferencePanel({
     }
   }
 
+  // 슬라이더는 드래그 한 번에 이벤트가 수십 개 난다. 그때마다 POST 하면 응답이
+  // 뒤섞여 **먼저 보낸 값이 나중에 도착해 덮어쓴다**(2026-08-05 Codex 지적).
+  // 마지막 값만 보내고, 보내는 동안 목록을 다시 그리지 않는다(잡고 있는 손잡이가 튄다).
+  const paramTimers = new Map();
   function onInput(ev) {
     const el = ev.target.closest('[data-ref-param]');
     if (!el) return;
     const span = el.parentElement.querySelector('span');
     if (span) span.textContent = Number(el.value).toFixed(2);
-    void post(API.param, {file_hash: el.dataset.refHash, key: el.dataset.refParam,
-                          value: Number(el.value)});
+    const key = el.dataset.refHash + ':' + el.dataset.refParam;
+    if (paramTimers.has(key)) clearTimeout(paramTimers.get(key));
+    const body = {file_hash: el.dataset.refHash, key: el.dataset.refParam,
+                  value: Number(el.value)};
+    paramTimers.set(key, setTimeout(async () => {
+      paramTimers.delete(key);
+      try {
+        await json(API.param, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                               body: JSON.stringify(body)});
+        // 로컬 값도 맞춰 둔다 — 다시 그릴 때 서버를 또 부르지 않기 위해서다.
+        const f = frames.find(x => x.file_hash === body.file_hash);
+        if (f) f[body.key] = body.value;
+      } catch (err) {
+        showToast('값을 저장하지 못했습니다: ' + err.message, 'error');
+        void refresh();
+      }
+    }, 220));
   }
 
   function onKey(ev) { if (ev.key === 'Escape' && open) { ev.stopPropagation(); close(); } }

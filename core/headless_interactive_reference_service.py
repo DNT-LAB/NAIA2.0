@@ -31,6 +31,7 @@ from typing import Any
 
 _STORE = "InteractiveReferenceModule"
 MAX_FRAMES = 4          # NAI 스펙 상한과 같다. 넘겨 보내면 API 가 거부한다.
+REFERENCE_TYPES = ("character&style", "character", "style")
 
 
 def _as_float(value: Any, fallback: float) -> float:
@@ -81,7 +82,10 @@ class HeadlessInteractiveReferenceService:
                 "label": str(item.get("label") or ""),
                 "image_data": str(item.get("image_data") or ""),
                 "thumbnail": str(item.get("thumbnail") or ""),
-                "reference_type": str(item.get("reference_type") or "character&style"),
+                "reference_type": (
+                    str(item.get("reference_type"))
+                    if str(item.get("reference_type") or "") in REFERENCE_TYPES
+                    else "character&style"),
                 "strength": _as_float(item.get("strength"), 1.0),
                 "fidelity": _as_float(item.get("fidelity"), 0.8),
             })
@@ -162,7 +166,12 @@ class HeadlessInteractiveReferenceService:
             if row.get("file_hash") != str(file_hash or ""):
                 continue
             if key == "reference_type":
-                row[key] = str(value or "character&style")
+                # NAI 가 받는 값은 셋뿐이다. 아무 문자열이나 넣으면 base_caption 으로
+                # 그대로 나가 API 가 거부한다(기존 CR 서비스도 같은 목록을 쓴다).
+                v = str(value or "character&style")
+                if v not in REFERENCE_TYPES:
+                    raise ValueError(f"unknown reference_type: {v!r}")
+                row[key] = v
             else:
                 row[key] = max(0.0, min(1.0, _as_float(value, row.get(key, 1.0))))
             self._persist()

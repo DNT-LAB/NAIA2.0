@@ -60,6 +60,10 @@ REFERENCE_INSET_LIVE_REFETCH_KEYS = (
 )
 
 
+# Interactive 가 자기 레퍼런스를 실어 달라고 표시하는 마커. skip 플래그와 **별개**다.
+INTERACTIVE_REFERENCE_MARKER = "_interactive_reference_binding"
+
+
 class HeadlessImageModuleParamService:
     def __init__(self, context: Any):
         self.context = context
@@ -84,12 +88,13 @@ class HeadlessImageModuleParamService:
         if str(api_mode or "").upper() != "NAI":
             return
         if not params.get("director_reference_descriptions"):
-            if params.get("_skip_character_reference_late_binding"):
-                # Interactive 가 운전 중이다. 세션 CR 은 건너뛰되 **Interactive 자신의**
-                # 레퍼런스를 실는다 — 둘은 상태가 독립이다(2026-08-04 사용자 지시).
-                # 이 분기가 없으면 Interactive 에서 붙인 레퍼런스가 생성에 아예 안 실린다.
+            # **전용 마커로 가른다.** `_skip_character_reference_late_binding` 은
+            # '레퍼런스를 붙이지 마라'는 뜻이고 캐릭터 에셋 생성 4곳이 격리 목적으로
+            # 쓴다 — 그것을 '대신 Interactive 것을 실어라'로 해석하면 에셋 벤치·변형
+            # 생성에 Interactive 레퍼런스가 새어 들어간다(2026-08-05 Codex 지적).
+            if params.get(INTERACTIVE_REFERENCE_MARKER):
                 params.update(self.active_interactive_reference_params())
-            else:
+            elif not params.get("_skip_character_reference_late_binding"):
                 params.update(self.active_character_reference_params())
         if not params.get("_skip_vibe_transfer_late_binding"):
             if not params.get("reference_image_multiple"):

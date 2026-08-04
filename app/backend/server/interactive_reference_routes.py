@@ -31,6 +31,34 @@ async def _read_json(req: Request) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def safe_storage_name(ref):
+    """보관함 해시를 **파일명 조각으로만** 받는다.
+
+    클라이언트 값을 그대로 경로에 넣으면 `../..` 로 저장 트리 밖의 PNG 를 읽어
+    썸네일로 노출할 수 있다(2026-08-05 Codex 지적). 기존 CR 라우트도 같은 규약이다.
+    """
+    text = str(ref or "")
+    safe = Path(text).name
+    # 공백만 있는 이름도 막는다 — 파일로 성립하지 않는데 검사만 통과한다.
+    if not safe.strip() or safe != text or safe.startswith("."):
+        raise ValueError(f"invalid storage ref: {text!r}")
+    return safe
+
+
+def resolve_storage_image(session_context, ref):
+    """보관함 이미지 경로 -> (경로, 안전한 이름).
+
+    **레거시 저장 루트까지 훑는다.** 목록(`_existing_save_dirs`)과 조회 범위가
+    어긋나면 목록에는 뜨는데 누르면 404 가 난다.
+    """
+    safe = safe_storage_name(ref)
+    for folder in session_context._existing_save_dirs("character_reference", "images"):
+        path = folder / f"{safe}.png"
+        if path.exists():
+            return path, safe
+    raise FileNotFoundError(f"storage image not found: {safe}")
+
+
 def register_interactive_reference_routes(
     app: FastAPI,
     session_context: WebSessionContext,
@@ -64,20 +92,8 @@ def register_interactive_reference_routes(
                 path = svc.resolve_image_path(ref, str(payload.get("variation") or ""))
                 return _svc().attach_bytes(path.read_bytes(), label or ref)
             if source == "storage":
-                # **파일명만 쓴다.** 클라이언트 값을 그대로 경로에 넣으면
-                # `../..` 로 저장 트리 밖의 PNG 를 읽어 썸네일로 노출할 수 있다
-                # (2026-08-05 Codex 지적). 기존 CR 라우트도 `Path(...).name` 을 쓴다.
-                safe = Path(str(ref)).name
-                if not safe or safe != str(ref) or safe.startswith("."):
-                    raise ValueError(f"invalid storage ref: {ref!r}")
-                # 목록은 레거시 저장 루트까지 훑는다(`_existing_save_dirs`) — 여기서
-                # 기본 루트만 보면 목록에는 뜨는데 누르면 404 가 난다.
-                for folder in session_context._existing_save_dirs(
-                        "character_reference", "images"):
-                    path = folder / f"{safe}.png"
-                    if path.exists():
-                        return _svc().attach_bytes(path.read_bytes(), label or safe)
-                raise FileNotFoundError(f"storage image not found: {safe}")
+                path, safe = resolve_storage_image(session_context, ref)
+                return _svc().attach_bytes(path.read_bytes(), label or safe)
             raise ValueError(f"unknown source: {source!r}")
 
         try:

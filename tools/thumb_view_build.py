@@ -63,6 +63,21 @@ E621_VIEW = {
     "looking at partner": "view_gaze",   # 39,257
     "cropped": "view_shot",              # 9,785
     "eyes out of frame": "view_shot",    # 1,648
+    # ── 2026-08-03 재분류 (사용자 지시) ────────────────────────────────────
+    # 이 빌더도 축 .txt 를 통째로 덮어쓴다. 아래가 없으면 다음 실행에 8개가 사라진다
+    # (실측 확인). 손으로 옮긴 배치는 여기 남긴다.
+    #
+    # 검열은 성인 축으로 되돌릴 것이 아니라 **구도**다 — 무엇을 입었는가도 성인
+    # 여부도 아니고 화면이 어떻게 가려졌는가다. 의상 축(`cloth_revealing`)에 있었다.
+    "out-of-frame censoring": "view_shot",   # `out of frame` 계열 옆
+    "convenient censoring": "view_layout",   # 무언가가 마침 가려 주는 연출
+    "convenient arm": "view_layout",
+    "convenient leg": "view_layout",
+    "novelty censor": "view_layout",
+    "tail censor": "view_layout",
+    # 카메라 위치다. 자세(`pose_display`)에 있었다.
+    "pov across table": "view_angle",
+    "pov across bed": "view_angle",
 }
 
 # 규칙 — 위에서부터 먼저 맞는 것이 이긴다.

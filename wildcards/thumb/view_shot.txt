@@ -12,6 +12,7 @@ foot out of frame
 head out of frame
 cropped
 wide shot
+out-of-frame censoring
 lower body
 pillarboxed
 eyes out of frame
@@ -21,4 +22,3 @@ very wide shot
 rounded corners
 knees out of frame
 mugshot
-out-of-frame censoring

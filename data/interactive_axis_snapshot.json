@@ -1,14 +1,9 @@
 {
- "commit": "9a17beead0b746c8a80f8611ecea246d6c4e246e",
+ "commit": "539c9d7bd250dfe12bf96dd78843d7093cdbb5b5",
  "axis_count": 159,
- "tag_count": 13013,
+ "tag_count": 13012,
  "wired_axis_count": 158,
- "overlaps": {
-  "facing another": [
-   "pose_posture",
-   "pose_posture_m"
-  ]
- },
+ "overlaps": {},
  "axes": {
   "ani_aqua": {
    "dir": "thumb",
@@ -10387,7 +10382,7 @@
   },
   "pose_posture": {
    "dir": "thumb",
-   "count": 96,
+   "count": 95,
    "tags": [
     "standing",
     "sitting",
@@ -10424,7 +10419,6 @@
     "on one knee",
     "split",
     "leaning to the side",
-    "facing another",
     "pigeon-toed",
     "standing split",
     "in container",

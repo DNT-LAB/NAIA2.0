@@ -21647,9 +21647,6 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
 }
 .ia-as-ask[hidden] { display: none; }
-/* 모듈 팝업(z 2200) 위에서 열리는 경우 — 캐릭터 에셋의 '무엇까지 가져올까요'.
-   공용 z(1200)를 올리지 않는 이유는 Assets 바 팝업의 쌓임 순서를 안 건드리려는 것이다. */
-.ia-as-ask.is-over-module { z-index: 2400; }
 .ia-as-askclose {
   position: absolute;
   top: 4px;
@@ -21696,10 +21693,6 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-as-askbtn:hover { border-color: var(--border-glow); background: rgba(120, 140, 255, 0.16); }
 .ia-as-askbtn.is-all { border-color: var(--border); background: rgba(120, 140, 255, 0.14); }
-/* 캐릭터 에셋은 선택지가 3개고 문구가 길다("이미지 + 캐릭터 + 의상") — 가로로 넣으면
-   글자가 줄바꿈돼 읽기 어렵다. 세로로 쌓고 왼쪽 정렬한다. */
-.ia-as-askbtns.is-col { flex-direction: column; gap: 4px; min-width: 176px; }
-.ia-as-askbtns.is-col .ia-as-askbtn { flex: 0 0 auto; text-align: left; }
 
 .ia-as-tabs { display: flex; gap: 3px; flex: 0 0 auto; }
 .ia-as-tab {

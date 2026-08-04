@@ -911,15 +911,8 @@ export function createImageModulePanels({
   // 쌓아 둔 **캐릭터 에셋**을 레퍼런스로 쓰려면 한 번 슬롯에 적용(= 프롬프트까지 덮어씀)
   // 하는 길밖에 없었다. Interactive 에서는 그 길이 아예 막혀 있다(캐릭터 블록이 프롬프트를
   // 소유한다). 탭으로 갈라 에셋에서 바로 집게 한다.
-  let charRefSource = 'storage';        // 'storage' | 'asset'
   let charRefStorageMessage = null;     // 마지막 보관함 응답(탭을 오갈 때 다시 안 묻는다)
 
-  function charRefSourceTabs() {
-    const tab = (id, label) =>
-      `<button class="mod-btn-sm${charRefSource === id ? ' is-on' : ''}"` +
-      ` onclick="setCharRefSource('${id}')">${escHtml(label)}</button>`;
-    return `<div class="mod-storage-tabs">${tab('storage', '레퍼런스 보관함')}${tab('asset', '캐릭터 에셋')}</div>`;
-  }
 
   function charRefStorageShell(inner, refresh) {
     return `
@@ -927,14 +920,12 @@ export function createImageModulePanels({
       <button class="mod-btn-upload" onclick="${refresh}">Refresh</button>
       <button class="mod-btn-sm" onclick="openModule('character_reference',{forceOpen:true})">Back</button>
     </div>
-    ${charRefSourceTabs()}
     ${inner}`;
   }
 
   function renderCharRefStorage(message) {
     if (getCurrentModuleId() !== 'character_reference') return;
     if (message) charRefStorageMessage = message;
-    if (charRefSource === 'asset') { void renderCharRefAssetSource(); return; }
     const items = ((charRefStorageMessage || {}).items || []).map(item => `
     <div class="mod-storage-item" onclick="applyCharRefStorage('${escHtml(item.file_hash)}')" title="${escHtml(item.file_name)}">
       ${storageThumbMarkup(item)}
@@ -948,142 +939,15 @@ export function createImageModulePanels({
       "setModuleParam('character_reference','get_storage','')");
   }
 
-  function setCharRefSource(source) {
-    charRefSource = source === 'asset' ? 'asset' : 'storage';
-    if (charRefSource === 'asset') void renderCharRefAssetSource();
-    else renderCharRefStorage(null);
-  }
 
-  /** 캐릭터 에셋 라이브러리를 레퍼런스 소스로 그린다. 목록은 Assets 탭과 같은 라우트다 —
-   *  따로 만들면 한쪽만 낡는다. */
-  async function renderCharRefAssetSource() {
-    if (getCurrentModuleId() !== 'character_reference') return;
-    moduleBody.innerHTML = charRefStorageShell(
-      '<div class="mod-empty">불러오는 중…</div>', "setCharRefSource('asset')");
-    let list = [];
-    try {
-      const response = await fetchFn('/api/character-asset/list', {cache: 'no-store'});
-      const data = await response.json();
-      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-      list = Array.isArray(data.characters) ? data.characters : [];
-    } catch (error) {
-      if (getCurrentModuleId() !== 'character_reference' || charRefSource !== 'asset') return;
-      moduleBody.innerHTML = charRefStorageShell(
-        `<div class="mod-empty">에셋 목록을 불러오지 못했습니다 (${escHtml(error.message)})</div>`,
-        "setCharRefSource('asset')");
-      return;
-    }
-    if (getCurrentModuleId() !== 'character_reference' || charRefSource !== 'asset') return;
-    const items = list.map(entry => {
-      const id = String(entry.id || '');
-      const name = String(entry.display_name || id);
-      const src = `/api/character-asset/thumb?id=${encodeURIComponent(id)}&size=grid&v=${entry.revision || 0}`;
-      // 바로 적용하지 않고 **무엇까지 가져올지 먼저 묻는다**(사용자 지시).
-      return `<div class="mod-storage-item" onclick="openCharRefAssetAsk('${escHtml(id)}',` +
-        ` '${escHtml(name).replace(/'/g, "&#39;")}', this)"` +
-        ` title="${escHtml(name)}">` +
-        `<img class="mod-storage-thumb" src="${escHtml(src)}" alt="" loading="lazy" decoding="async">` +
-        `<span class="mod-storage-name">${escHtml(name)}</span></div>`;
-    }).join('');
-    moduleBody.innerHTML = charRefStorageShell(
-      items ? '<div class="mod-storage-grid">' + items + '</div>'
-            : '<div class="mod-empty">저장된 캐릭터 에셋이 없습니다.</div>',
-      "setCharRefSource('asset')");
-  }
 
   // ---- 에셋을 가져올 때 프롬프트도 함께 가져올지 묻는다 --------------------
   // 에셋은 NAI 캐릭터 프롬프트를 통째로 들고 있다. 이미지만 필요할 때도 있고
   // 외형까지 통째로 가져오고 싶을 때도 있어서 **누를 때 고르게** 한다.
   // 버튼 방식은 Assets 바의 캐릭터 검색 팝업과 같은 규약이다.
-  let _assetAsk = null;
 
-  function closeAssetAsk() {
-    if (_assetAsk) { _assetAsk.remove(); _assetAsk = null; }
-    document.removeEventListener('mousedown', _assetAskOutside, true);
-    document.removeEventListener('keydown', _assetAskKey, true);
-  }
-  function _assetAskOutside(event) {
-    if (_assetAsk && _assetAsk.contains(event.target)) return;
-    closeAssetAsk();
-  }
-  function _assetAskKey(event) {
-    if (event.key === 'Escape') { event.stopPropagation(); closeAssetAsk(); }
-  }
 
-  /** 그 카드에 붙여 연다. 아래로 펼치되 화면 밖이면 위로 뒤집는다(팝업 공통 규약). */
-  function openAssetAsk(id, name, anchor) {
-    closeAssetAsk();
-    const el = document.createElement('div');
-    el.className = 'ia-as-ask is-over-module';
-    el.innerHTML =
-      '<button type="button" class="ia-as-askclose" data-ask-close="1"' +
-      ' title="닫기" aria-label="닫기">✕</button>' +
-      `<div class="ia-as-askname">${escHtml(name)}</div>` +
-      '<div class="ia-as-asksub">무엇까지 가져올까요</div>' +
-      '<div class="ia-as-askbtns is-col">' +
-      '<button type="button" class="ia-as-askbtn" data-ask-kind="image"' +
-      ' title="레퍼런스 이미지만 붙입니다">이미지만</button>' +
-      '<button type="button" class="ia-as-askbtn" data-ask-kind="char"' +
-      ' title="머리·눈·표정·신체·종족 슬롯을 채웁니다">이미지 + 캐릭터 특징</button>' +
-      '<button type="button" class="ia-as-askbtn is-all" data-ask-kind="all"' +
-      ' title="특징에 의상·소품까지 함께 채웁니다">이미지 + 캐릭터 + 의상</button>' +
-      '</div>';
-    document.body.appendChild(el);
-    _assetAsk = el;
-    const r = anchor.getBoundingClientRect();
-    const box = el.getBoundingClientRect();
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - box.width - 8));
-    let top = r.bottom + 6;
-    if (top + box.height > window.innerHeight - 8) top = Math.max(8, r.top - box.height - 6);
-    el.style.left = Math.round(left) + 'px';
-    el.style.top = Math.round(top) + 'px';
-    el.addEventListener('click', event => {
-      const t = event.target.closest('[data-ask-close],[data-ask-kind]');
-      if (!t) return;
-      event.preventDefault();
-      const kind = t.dataset.askKind;
-      closeAssetAsk();
-      if (kind) void applyCharRefAsset(id, kind);
-    });
-    document.addEventListener('mousedown', _assetAskOutside, true);
-    document.addEventListener('keydown', _assetAskKey, true);
-  }
 
-  /** 에셋을 레퍼런스로 붙이고, 고른 범위만큼 프롬프트를 Interactive 슬롯에 나눠 넣는다.
-   *  `/apply` 가 아니라 전용 라우트를 쓴다 — 그쪽은 NAI 캐릭터 블록에 통째로 적용해
-   *  Interactive 의 캐릭터 블록과 다툰다. */
-  async function applyCharRefAsset(id, kind = 'image') {
-    if (!_storageApplyGuard('asset:' + id + ':' + kind)) return;
-    try {
-      const response = await fetchFn('/api/character-asset/reference/attach', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id, variation: ''}),
-      });
-      const data = await response.json();
-      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-      showToast('레퍼런스로 붙였습니다', 'success');
-      openModule('character_reference', {forceOpen: true});
-      if (kind === 'image') return;
-      // 프롬프트는 목록 응답에 없다 — 고른 경우에만 상세를 한 번 더 부른다.
-      const panel = getInteractivePanel && getInteractivePanel();
-      if (!panel || typeof panel.applyAssetPrompt !== 'function') {
-        showToast('Interactive 패널이 없어 프롬프트는 넣지 못했습니다', 'warning');
-        return;
-      }
-      const detail = await fetchFn(
-        '/api/character-asset/detail?id=' + encodeURIComponent(id), {cache: 'no-store'});
-      const d = await detail.json();
-      if (!detail.ok || d.error) throw new Error(d.error || `HTTP ${detail.status}`);
-      const prompt = String(d.character_prompt || (d.character || {}).character_prompt || '');
-      if (!prompt.trim()) {
-        showToast('이 에셋에는 캐릭터 프롬프트가 없습니다', 'warning');
-        return;
-      }
-      panel.applyAssetPrompt(prompt, kind === 'char' ? 'char' : 'all');
-    } catch (error) {
-      showToast(`레퍼런스 적용 실패: ${error.message}`, 'error');
-    }
-  }
 
   // Storage 항목 클릭 적용은 ~500ms 지연돼 반영되므로, 같은 항목을 빠르게 다시
   // 누르면(더블클릭) 중복 프레임이 올라온다. 같은 키의 재적용을 짧게 디바운스한다.
@@ -1196,11 +1060,6 @@ export function createImageModulePanels({
     onStorageList,
     renderCharRefStorage,
     applyCharRefStorage,
-    setCharRefSource,
-    applyCharRefAsset,
-    // 내부 이름은 `openAssetAsk` 다. 축약형(`openCharRefAssetAsk,`)으로 두면
-    // 같은 이름의 **전역 함수**가 잡혀 자기 자신을 무한히 부른다(실측: 스택 초과).
-    openCharRefAssetAsk: openAssetAsk,
     renderVibeStorage,
     showVibeStorageTab,
     applyVibeStorage,

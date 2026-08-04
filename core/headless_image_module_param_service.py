@@ -67,16 +67,30 @@ class HeadlessImageModuleParamService:
     def active_character_reference_params(self) -> dict[str, Any]:
         return self.context._character_reference_service().active_params()
 
+    def active_interactive_reference_params(self) -> dict[str, Any]:
+        """Interactive 전용 레퍼런스. 서비스가 없는 구버전 컨텍스트에서도 죽지 않는다."""
+        getter = getattr(self.context, "_interactive_reference_service", None)
+        if not callable(getter):
+            return {}
+        try:
+            return getter().active_params()
+        except Exception:      # noqa: BLE001 — 레퍼런스 때문에 생성이 막히면 안 된다
+            return {}
+
     def active_vibe_transfer_params(self) -> dict[str, Any]:
         return self.context._vibe_transfer_service().active_params()
 
     def apply(self, params: dict[str, Any], api_mode: str) -> None:
         if str(api_mode or "").upper() != "NAI":
             return
-        if not params.get("director_reference_descriptions") and not params.get(
-            "_skip_character_reference_late_binding"
-        ):
-            params.update(self.active_character_reference_params())
+        if not params.get("director_reference_descriptions"):
+            if params.get("_skip_character_reference_late_binding"):
+                # Interactive 가 운전 중이다. 세션 CR 은 건너뛰되 **Interactive 자신의**
+                # 레퍼런스를 실는다 — 둘은 상태가 독립이다(2026-08-04 사용자 지시).
+                # 이 분기가 없으면 Interactive 에서 붙인 레퍼런스가 생성에 아예 안 실린다.
+                params.update(self.active_interactive_reference_params())
+            else:
+                params.update(self.active_character_reference_params())
         if not params.get("_skip_vibe_transfer_late_binding"):
             if not params.get("reference_image_multiple"):
                 params.update(self.active_vibe_transfer_params())

@@ -81,6 +81,9 @@ class WebSessionContext:
     save_directory_state: dict[str, Any] = field(default_factory=dict)
     webui_hiresfix_assist_state: dict[str, Any] = field(default_factory=dict)
     character_reference_frames: list[dict[str, Any]] = field(default_factory=list)
+    # Interactive 전용. 위 목록과 **섞이지 않는다** — 상태를 공유하면 NAI 쪽에서
+    # 켜 둔 프레임이 Interactive 생성에 몰래 섞인다(2026-08-04 사용자 지적).
+    interactive_reference_frames: list[dict[str, Any]] = field(default_factory=list)
     vibe_transfer_frames: list[dict[str, Any]] = field(default_factory=list)
     vibe_transfer_normalize: bool = False
     img2img_session: dict[str, Any] = field(default_factory=dict)
@@ -137,6 +140,9 @@ class WebSessionContext:
 
     def _character_reference_service(self):
         return self._lazy_service("character_reference")
+
+    def _interactive_reference_service(self):
+        return self._lazy_service("interactive_reference")
 
     def _character_asset_service(self):
         return self._lazy_service("character_asset")

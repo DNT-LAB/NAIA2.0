@@ -23,6 +23,11 @@ HEADLESS_SERVICE_SPECS = {
         "core.headless_character_reference_service",
         "HeadlessCharacterReferenceService",
     ),
+    # Interactive 전용 레퍼런스. 위 CR 과 **상태가 독립**이다(인코딩 유틸만 빌린다).
+    "interactive_reference": HeadlessServiceSpec(
+        "core.headless_interactive_reference_service",
+        "HeadlessInteractiveReferenceService",
+    ),
     "vibe_transfer": HeadlessServiceSpec("core.headless_vibe_transfer_service", "HeadlessVibeTransferService"),
     "image_module_param": HeadlessServiceSpec(
         "core.headless_image_module_param_service",

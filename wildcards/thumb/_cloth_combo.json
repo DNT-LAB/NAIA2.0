@@ -398,5 +398,713 @@
  "yellow ribbon": {
   "mod": "yellow",
   "base": "ribbon"
+ },
+ "white dress": {
+  "base": "dress",
+  "mod": "white"
+ },
+ "black pantyhose": {
+  "base": "pantyhose",
+  "mod": "black"
+ },
+ "white panties": {
+  "base": "panties",
+  "mod": "white"
+ },
+ "blue skirt": {
+  "base": "skirt",
+  "mod": "blue"
+ },
+ "black shoes": {
+  "base": "shoes",
+  "mod": "black"
+ },
+ "black pants": {
+  "base": "pants",
+  "mod": "black"
+ },
+ "white socks": {
+  "base": "socks",
+  "mod": "white"
+ },
+ "black hat": {
+  "base": "hat",
+  "mod": "black"
+ },
+ "black shorts": {
+  "base": "shorts",
+  "mod": "black"
+ },
+ "black boots": {
+  "base": "boots",
+  "mod": "black"
+ },
+ "white jacket": {
+  "base": "jacket",
+  "mod": "white"
+ },
+ "black socks": {
+  "base": "socks",
+  "mod": "black"
+ },
+ "blue shirt": {
+  "base": "shirt",
+  "mod": "blue"
+ },
+ "black hairband": {
+  "base": "hairband",
+  "mod": "black"
+ },
+ "white bow": {
+  "base": "bow",
+  "mod": "white"
+ },
+ "white skirt": {
+  "base": "skirt",
+  "mod": "white"
+ },
+ "white hat": {
+  "base": "hat",
+  "mod": "white"
+ },
+ "red shirt": {
+  "base": "shirt",
+  "mod": "red"
+ },
+ "grey shirt": {
+  "base": "shirt",
+  "mod": "grey"
+ },
+ "black belt": {
+  "base": "belt",
+  "mod": "black"
+ },
+ "blue sailor collar": {
+  "base": "sailor collar",
+  "mod": "blue"
+ },
+ "white pantyhose": {
+  "base": "pantyhose",
+  "mod": "white"
+ },
+ "black bra": {
+  "base": "bra",
+  "mod": "black"
+ },
+ "green skirt": {
+  "base": "skirt",
+  "mod": "green"
+ },
+ "white sailor collar": {
+  "base": "sailor collar",
+  "mod": "white"
+ },
+ "grey skirt": {
+  "base": "skirt",
+  "mod": "grey"
+ },
+ "purple dress": {
+  "base": "dress",
+  "mod": "purple"
+ },
+ "pink panties": {
+  "base": "panties",
+  "mod": "pink"
+ },
+ "black vest": {
+  "base": "vest",
+  "mod": "black"
+ },
+ "red gloves": {
+  "base": "gloves",
+  "mod": "red"
+ },
+ "pink shirt": {
+  "base": "shirt",
+  "mod": "pink"
+ },
+ "blue shorts": {
+  "base": "shorts",
+  "mod": "blue"
+ },
+ "red hat": {
+  "base": "hat",
+  "mod": "red"
+ },
+ "pink skirt": {
+  "base": "skirt",
+  "mod": "pink"
+ },
+ "black sailor collar": {
+  "base": "sailor collar",
+  "mod": "black"
+ },
+ "green jacket": {
+  "base": "jacket",
+  "mod": "green"
+ },
+ "yellow shirt": {
+  "base": "shirt",
+  "mod": "yellow"
+ },
+ "grey jacket": {
+  "base": "jacket",
+  "mod": "grey"
+ },
+ "blue hat": {
+  "base": "hat",
+  "mod": "blue"
+ },
+ "white wings": {
+  "base": "wings",
+  "mod": "white"
+ },
+ "white hairband": {
+  "base": "hairband",
+  "mod": "white"
+ },
+ "blue pants": {
+  "base": "pants",
+  "mod": "blue"
+ },
+ "green shirt": {
+  "base": "shirt",
+  "mod": "green"
+ },
+ "white shorts": {
+  "base": "shorts",
+  "mod": "white"
+ },
+ "white kimono": {
+  "base": "kimono",
+  "mod": "white"
+ },
+ "brown skirt": {
+  "base": "skirt",
+  "mod": "brown"
+ },
+ "blue halo": {
+  "base": "halo",
+  "mod": "blue"
+ },
+ "red scarf": {
+  "base": "scarf",
+  "mod": "red"
+ },
+ "purple shirt": {
+  "base": "shirt",
+  "mod": "purple"
+ },
+ "black horns": {
+  "base": "horns",
+  "mod": "black"
+ },
+ "pink lips": {
+  "base": "lips",
+  "mod": "pink"
+ },
+ "blue one-piece swimsuit": {
+  "base": "one-piece swimsuit",
+  "mod": "blue"
+ },
+ "pink jacket": {
+  "base": "jacket",
+  "mod": "pink"
+ },
+ "brown belt": {
+  "base": "belt",
+  "mod": "brown"
+ },
+ "pink halo": {
+  "base": "halo",
+  "mod": "pink"
+ },
+ "black collar": {
+  "base": "collar",
+  "mod": "black"
+ },
+ "red cape": {
+  "base": "cape",
+  "mod": "red"
+ },
+ "brown dress": {
+  "base": "dress",
+  "mod": "brown"
+ },
+ "red hairband": {
+  "base": "hairband",
+  "mod": "red"
+ },
+ "black cape": {
+  "base": "cape",
+  "mod": "black"
+ },
+ "grey pants": {
+  "base": "pants",
+  "mod": "grey"
+ },
+ "white sweater": {
+  "base": "sweater",
+  "mod": "white"
+ },
+ "brown shirt": {
+  "base": "shirt",
+  "mod": "brown"
+ },
+ "yellow jacket": {
+  "base": "jacket",
+  "mod": "yellow"
+ },
+ "black one-piece swimsuit": {
+  "base": "one-piece swimsuit",
+  "mod": "black"
+ },
+ "black sweater": {
+  "base": "sweater",
+  "mod": "black"
+ },
+ "white fur": {
+  "base": "fur",
+  "mod": "white"
+ },
+ "white one-piece swimsuit": {
+  "base": "one-piece swimsuit",
+  "mod": "white"
+ },
+ "two-tone dress": {
+  "base": "dress",
+  "mod": "two-tone"
+ },
+ "grey dress": {
+  "base": "dress",
+  "mod": "grey"
+ },
+ "black wings": {
+  "base": "wings",
+  "mod": "black"
+ },
+ "brown hat": {
+  "base": "hat",
+  "mod": "brown"
+ },
+ "black kimono": {
+  "base": "kimono",
+  "mod": "black"
+ },
+ "green hat": {
+  "base": "hat",
+  "mod": "green"
+ },
+ "blue hairband": {
+  "base": "hairband",
+  "mod": "blue"
+ },
+ "red halo": {
+  "base": "halo",
+  "mod": "red"
+ },
+ "purple gloves": {
+  "base": "gloves",
+  "mod": "purple"
+ },
+ "black hoodie": {
+  "base": "hoodie",
+  "mod": "black"
+ },
+ "yellow halo": {
+  "base": "halo",
+  "mod": "yellow"
+ },
+ "yellow neckerchief": {
+  "base": "neckerchief",
+  "mod": "yellow"
+ },
+ "white cape": {
+  "base": "cape",
+  "mod": "white"
+ },
+ "red kimono": {
+  "base": "kimono",
+  "mod": "red"
+ },
+ "blue cape": {
+  "base": "cape",
+  "mod": "blue"
+ },
+ "red horns": {
+  "base": "horns",
+  "mod": "red"
+ },
+ "black tank top": {
+  "base": "tank top",
+  "mod": "black"
+ },
+ "white tank top": {
+  "base": "tank top",
+  "mod": "white"
+ },
+ "red coat": {
+  "base": "coat",
+  "mod": "red"
+ },
+ "pink bowtie": {
+  "base": "bowtie",
+  "mod": "pink"
+ },
+ "pink kimono": {
+  "base": "kimono",
+  "mod": "pink"
+ },
+ "green necktie": {
+  "base": "necktie",
+  "mod": "green"
+ },
+ "blue scarf": {
+  "base": "scarf",
+  "mod": "blue"
+ },
+ "red pants": {
+  "base": "pants",
+  "mod": "red"
+ },
+ "red eyeshadow": {
+  "base": "eyeshadow",
+  "mod": "red"
+ },
+ "red hakama": {
+  "base": "hakama",
+  "mod": "red"
+ },
+ "black cat": {
+  "base": "cat",
+  "mod": "black"
+ },
+ "orange shirt": {
+  "base": "shirt",
+  "mod": "orange"
+ },
+ "yellow skirt": {
+  "base": "skirt",
+  "mod": "yellow"
+ },
+ "brown shorts": {
+  "base": "shorts",
+  "mod": "brown"
+ },
+ "aqua necktie": {
+  "base": "necktie",
+  "mod": "aqua"
+ },
+ "white bodysuit": {
+  "base": "bodysuit",
+  "mod": "white"
+ },
+ "black suit": {
+  "base": "suit",
+  "mod": "black"
+ },
+ "blue sweater": {
+  "base": "sweater",
+  "mod": "blue"
+ },
+ "black sports bra": {
+  "base": "sports bra",
+  "mod": "black"
+ },
+ "green pants": {
+  "base": "pants",
+  "mod": "green"
+ },
+ "grey gloves": {
+  "base": "gloves",
+  "mod": "grey"
+ },
+ "red collar": {
+  "base": "collar",
+  "mod": "red"
+ },
+ "blue hoodie": {
+  "base": "hoodie",
+  "mod": "blue"
+ },
+ "yellow hairband": {
+  "base": "hairband",
+  "mod": "yellow"
+ },
+ "pink gloves": {
+  "base": "gloves",
+  "mod": "pink"
+ },
+ "red bodysuit": {
+  "base": "bodysuit",
+  "mod": "red"
+ },
+ "white camisole": {
+  "base": "camisole",
+  "mod": "white"
+ },
+ "orange skirt": {
+  "base": "skirt",
+  "mod": "orange"
+ },
+ "aqua bow": {
+  "base": "bow",
+  "mod": "aqua"
+ },
+ "pink hairband": {
+  "base": "hairband",
+  "mod": "pink"
+ },
+ "brown fur": {
+  "base": "fur",
+  "mod": "brown"
+ },
+ "purple necktie": {
+  "base": "necktie",
+  "mod": "purple"
+ },
+ "white neckerchief": {
+  "base": "neckerchief",
+  "mod": "white"
+ },
+ "two-tone jacket": {
+  "base": "jacket",
+  "mod": "two-tone"
+ },
+ "blue bodysuit": {
+  "base": "bodysuit",
+  "mod": "blue"
+ },
+ "white robe": {
+  "base": "robe",
+  "mod": "white"
+ },
+ "two-tone fur": {
+  "base": "fur",
+  "mod": "two-tone"
+ },
+ "black fur": {
+  "base": "fur",
+  "mod": "black"
+ },
+ "black blindfold": {
+  "base": "blindfold",
+  "mod": "black"
+ },
+ "green halo": {
+  "base": "halo",
+  "mod": "green"
+ },
+ "white bloomers": {
+  "base": "bloomers",
+  "mod": "white"
+ },
+ "pink cardigan": {
+  "base": "cardigan",
+  "mod": "pink"
+ },
+ "black mask": {
+  "base": "mask",
+  "mod": "black"
+ },
+ "grey cardigan": {
+  "base": "cardigan",
+  "mod": "grey"
+ },
+ "blue buruma": {
+  "base": "buruma",
+  "mod": "blue"
+ },
+ "black robe": {
+  "base": "robe",
+  "mod": "black"
+ },
+ "grey sailor collar": {
+  "base": "sailor collar",
+  "mod": "grey"
+ },
+ "red headband": {
+  "base": "headband",
+  "mod": "red"
+ },
+ "green sweater": {
+  "base": "sweater",
+  "mod": "green"
+ },
+ "red sailor collar": {
+  "base": "sailor collar",
+  "mod": "red"
+ },
+ "blue overalls": {
+  "base": "overalls",
+  "mod": "blue"
+ },
+ "orange necktie": {
+  "base": "necktie",
+  "mod": "orange"
+ },
+ "green scarf": {
+  "base": "scarf",
+  "mod": "green"
+ },
+ "yellow hat": {
+  "base": "hat",
+  "mod": "yellow"
+ },
+ "aqua bowtie": {
+  "base": "bowtie",
+  "mod": "aqua"
+ },
+ "green coat": {
+  "base": "coat",
+  "mod": "green"
+ },
+ "white cat": {
+  "base": "cat",
+  "mod": "white"
+ },
+ "black headband": {
+  "base": "headband",
+  "mod": "black"
+ },
+ "black leggings": {
+  "base": "leggings",
+  "mod": "black"
+ },
+ "brown horns": {
+  "base": "horns",
+  "mod": "brown"
+ },
+ "brown sweater vest": {
+  "base": "sweater vest",
+  "mod": "brown"
+ },
+ "grey fur": {
+  "base": "fur",
+  "mod": "grey"
+ },
+ "blue butterfly": {
+  "base": "butterfly",
+  "mod": "blue"
+ },
+ "gold chain": {
+  "base": "chain",
+  "mod": "gold"
+ },
+ "grey panties": {
+  "base": "panties",
+  "mod": "grey"
+ },
+ "blue lips": {
+  "base": "lips",
+  "mod": "blue"
+ },
+ "pink apron": {
+  "base": "apron",
+  "mod": "pink"
+ },
+ "pink pants": {
+  "base": "pants",
+  "mod": "pink"
+ },
+ "black apron": {
+  "base": "apron",
+  "mod": "black"
+ },
+ "red bag": {
+  "base": "bag",
+  "mod": "red"
+ },
+ "orange shorts": {
+  "base": "shorts",
+  "mod": "orange"
+ },
+ "blue apron": {
+  "base": "apron",
+  "mod": "blue"
+ },
+ "brown sailor collar": {
+  "base": "sailor collar",
+  "mod": "brown"
+ },
+ "red fur": {
+  "base": "fur",
+  "mod": "red"
+ },
+ "orange hat": {
+  "base": "hat",
+  "mod": "orange"
+ },
+ "pink fur": {
+  "base": "fur",
+  "mod": "pink"
+ },
+ "brown tail": {
+  "base": "tail",
+  "mod": "brown"
+ },
+ "gold choker": {
+  "base": "choker",
+  "mod": "gold"
+ },
+ "green lips": {
+  "base": "lips",
+  "mod": "green"
+ },
+ "yellow bag": {
+  "base": "bag",
+  "mod": "yellow"
+ },
+ "pink blood": {
+  "base": "blood",
+  "mod": "pink"
+ },
+ "gold hairband": {
+  "base": "hairband",
+  "mod": "gold"
+ },
+ "grey tank top": {
+  "base": "tank top",
+  "mod": "grey"
+ },
+ "yellow raincoat": {
+  "base": "raincoat",
+  "mod": "yellow"
+ },
+ "red feathers": {
+  "base": "feathers",
+  "mod": "red"
+ },
+ "gold coin": {
+  "base": "coin",
+  "mod": "gold"
+ },
+ "green bandana": {
+  "base": "bandana",
+  "mod": "green"
+ },
+ "yellow butterfly": {
+  "base": "butterfly",
+  "mod": "yellow"
+ },
+ "purple butterfly": {
+  "base": "butterfly",
+  "mod": "purple"
+ },
+ "multicolored bowtie": {
+  "base": "bowtie",
+  "mod": "multicolored"
+ },
+ "red butterfly": {
+  "base": "butterfly",
+  "mod": "red"
+ },
+ "multicolored hoodie": {
+  "base": "hoodie",
+  "mod": "multicolored"
+ },
+ "multicolored capelet": {
+  "base": "capelet",
+  "mod": "multicolored"
  }
 }

@@ -891,7 +891,19 @@ let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
 let interactiveAssetsPanel = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260804-ia163')
+// Interactive 전용 캐릭터 레퍼런스. NAI 모듈과 상태가 독립이다.
+let interactiveReferencePanel = null;
+import('./js/features/interactiveReferencePanel.mjs?v=20260804-iref1')
+  .then(({createInteractiveReferencePanel}) => {
+    interactiveReferencePanel = createInteractiveReferencePanel({
+      document, escHtml, showToast,
+      getInteractivePanel: () => interactivePanel,
+      // 붙이거나 뗄 때마다 캐릭터 헤더의 [Reference] 배지를 맞춘다.
+      onChange: () => { if (interactivePanel) interactivePanel.refreshCharReference(); },
+    });
+  })
+  .catch(error => console.error('Failed to init interactive reference panel', error));
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260804-ia164')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -929,9 +941,12 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       getMode: () => currentMode || modeSelect?.value || 'NAI',
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
-      onCharReference: () => openModule('character_reference', {forceOpen: true}),
+      onCharReference: () => { if (interactiveReferencePanel) interactiveReferencePanel.toggle(); },
       // 버튼에 붙일 개수 배지의 근거. 켜 둔 프레임만 센다.
-      getCharacterReferenceState: () => moduleStateCache.get('character_reference') || null,
+      // 배지는 **Interactive 전용 패널**의 개수를 센다. NAI 모듈 상태를 세면
+      // 남의 상태를 표시하게 된다(2026-08-04 분리).
+      getCharacterReferenceState: () =>
+        (interactiveReferencePanel ? {count: interactiveReferencePanel.count()} : null),
       // 자동완성 '대상'이 아니라 '실제로 열려 있는지'를 넘긴다 — tagAssist 는 드롭다운을 닫아도
       // acTarget 을 비우지 않으므로, 대상만 보면 Enter/Escape 를 영원히 양보해 슬롯 편집이
       // 닫히지 않는다(실측 확인).
@@ -999,7 +1014,9 @@ function applyInteractiveModeGate(isActive) {
 // 묶어 같이 막았고, 그래서 캐릭터 헤더의 [Reference] 가 목업으로 남아 있었다.
 // 이제 그 버튼이 이 모듈을 연다(interactivePanel 의 onCharReference).
 // (백엔드 스트립은 캐릭터->생성 배선 Phase 2 와 함께 처리한다.)
-const INTERACTIVE_BLOCKED_NAI_TOOLS = ['character'];
+// Interactive 는 캐릭터 블록이 프롬프트의 소유자이고, 레퍼런스도 전용 패널이
+// 따로 있다(상태 독립). 둘 다 NAI 모듈을 열면 상태가 갈라진다.
+const INTERACTIVE_BLOCKED_NAI_TOOLS = ['character', 'character_reference'];
 function updateInteractiveNaiToolBlock() {
   const blocked = document.body.classList.contains('interactive-mode');
   INTERACTIVE_BLOCKED_NAI_TOOLS.forEach(mid => {

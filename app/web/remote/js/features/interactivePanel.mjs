@@ -901,9 +901,12 @@ export function createInteractivePanel({
 
   /** 붙어 있는(켜 둔) 레퍼런스 수. 없으면 0. */
   function charRefCount() {
+    // Interactive 전용 패널의 개수다. 여기 켜진 것만 Interactive 생성에 실린다 —
+    // NAI 모듈의 프레임 수를 세면 배지가 남의 상태를 말한다.
     const st = getCharacterReferenceState && getCharacterReferenceState();
+    if (st && typeof st.count === 'number') return st.count;
     const frames = (st && Array.isArray(st.frames)) ? st.frames : [];
-    return frames.filter(f => f && f.is_enabled).length;
+    return frames.length;
   }
 
   /** 캐릭터 헤더의 [Reference]. 붙은 것이 있으면 개수를 달고 강조한다 —
@@ -919,8 +922,9 @@ export function createInteractivePanel({
       ` title="${escHtml(tip)}">Reference${n ? `<span class="ia-char-ref-n">${n}</span>` : ''}</button>`;
   }
 
-  /** Reference — 세션 CR 모듈을 연다. NAI 는 캐릭터별이 아니라 세트 단위라
-   *  캐릭터 블록 헤더에 하나만 둔다. */
+  /** Reference — **Interactive 전용** 레퍼런스 패널을 연다. NAI 캐릭터 레퍼런스
+   *  모듈이 아니다(상태가 독립이다 — core/headless_interactive_reference_service.py).
+   *  NAI 는 레퍼런스를 캐릭터별이 아니라 세트 단위로 받으므로 헤더에 하나만 둔다. */
   function openCharReference() {
     if (typeof onCharReference !== 'function') {
       showToast('Reference 기능을 열 수 없습니다.', 'error');

@@ -21835,3 +21835,84 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   .ia-as-del,
   .ia-as-restore { opacity: 0.75; pointer-events: auto; }
 }
+
+/* ---- Interactive 전용 캐릭터 레퍼런스 패널 ----
+   NAI 캐릭터 레퍼런스 모듈과 **상태가 독립**이다
+   (core/headless_interactive_reference_service.py 첫머리 참조). */
+.ia-ref-panel {
+  position: fixed; top: 46px; right: 14px; width: 330px; max-height: calc(100vh - 60px);
+  z-index: var(--z-floating-module);
+  display: flex; flex-direction: column; gap: 8px; overflow-y: auto;
+  padding: 10px 11px 12px;
+  border: 1px solid var(--border-glow); border-radius: 12px;
+  background: var(--bg-surface); box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+}
+.ia-ref-panel[hidden] { display: none; }
+.ia-ref-head { display: flex; align-items: baseline; gap: 6px; }
+.ia-ref-head b { font-family: var(--font-display); font-size: 12px; }
+.ia-ref-note { flex: 1 1 auto; font-size: 9.5px; color: var(--text-dim); }
+.ia-ref-close, .ia-ref-del {
+  flex: 0 0 auto; width: 20px; height: 20px; padding: 0;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: transparent; color: var(--text-dim); cursor: pointer; font-size: 10px;
+}
+.ia-ref-close:hover, .ia-ref-del:hover { border-color: var(--border-glow); color: var(--text-primary); }
+.ia-ref-frames { display: flex; flex-direction: column; gap: 6px; }
+.ia-ref-frame {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 6px; border: 1px solid var(--border-dim); border-radius: 9px;
+}
+.ia-ref-thumb { width: 52px; height: 52px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; }
+.ia-ref-thumb.is-empty { background: rgba(255, 255, 255, 0.05); }
+.ia-ref-fmeta { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ia-ref-fname {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-ref-slider {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 9.5px; color: var(--text-dim);
+}
+.ia-ref-slider input { flex: 1 1 auto; min-width: 0; }
+.ia-ref-slider span { font-family: var(--font-mono); width: 26px; text-align: right; }
+.ia-ref-clear {
+  padding: 4px; border: 1px solid var(--border-dim); border-radius: 7px;
+  background: transparent; color: var(--text-dim); font-size: 10px; cursor: pointer;
+}
+.ia-ref-clear:hover { border-color: var(--border-glow); color: var(--text-primary); }
+.ia-ref-tabs { display: flex; gap: 4px; }
+.ia-ref-tab {
+  flex: 1 1 0; padding: 5px; border: 1px solid var(--border-dim); border-radius: 7px;
+  background: transparent; color: var(--text-dim); font-size: 10px; cursor: pointer;
+}
+.ia-ref-tab.is-on {
+  border-color: var(--border-glow); color: var(--text-primary);
+  background: rgba(120, 140, 255, 0.14);
+}
+.ia-ref-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ia-ref-item {
+  display: flex; flex-direction: column; gap: 3px; cursor: pointer;
+  border: 1px solid transparent; border-radius: 8px; padding: 3px;
+}
+.ia-ref-item:hover { border-color: var(--border-glow); background: rgba(120, 140, 255, 0.1); }
+.ia-ref-item img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+.ia-ref-item span {
+  font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-ref-empty { font-size: 10px; color: var(--text-dim); text-align: center; padding: 10px 0; }
+.ia-ref-ask {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px; border: 1px solid var(--border-glow); border-radius: 9px;
+  background: rgba(120, 140, 255, 0.1);
+}
+.ia-ref-askname { font-family: var(--font-mono); font-size: 10.5px; font-weight: 700; }
+.ia-ref-asksub { font-size: 9.5px; color: var(--text-dim); margin-bottom: 2px; }
+.ia-ref-askbtn, .ia-ref-askcancel {
+  padding: 5px 8px; border: 1px solid var(--border-dim); border-radius: 7px;
+  background: rgba(0, 0, 0, 0.28); color: var(--text-primary);
+  font-size: 10px; text-align: left; cursor: pointer;
+}
+.ia-ref-askbtn:hover { border-color: var(--border-glow); background: rgba(120, 140, 255, 0.16); }
+.ia-ref-askbtn.is-all { border-color: var(--border); background: rgba(120, 140, 255, 0.14); }
+.ia-ref-askcancel { text-align: center; color: var(--text-dim); }

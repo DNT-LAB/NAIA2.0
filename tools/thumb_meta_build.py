@@ -60,6 +60,10 @@
 
 사용: python tools/thumb_meta_build.py
 """
+
+from tools._retired_guard import retired_guard
+
+retired_guard("thumb_meta_build.py", "태그 9개")
 import json
 import sys
 from pathlib import Path

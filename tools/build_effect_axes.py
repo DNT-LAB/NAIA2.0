@@ -33,6 +33,10 @@
 프레이밍: 효과·기호·색조는 **주체가 있어야 보인다**(배경 처리 축과 같은 성격).
 `monochrome` 을 빈 화면에 걸면 흑백 아무것도 아닌 그림이 된다.
 """
+
+from tools._retired_guard import retired_guard
+
+retired_guard("build_effect_axes.py", "태그 7개")
 import json
 import re
 from pathlib import Path

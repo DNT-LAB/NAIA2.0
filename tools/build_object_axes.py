@@ -31,6 +31,10 @@
 `holding X` 와 200쌍이 겹치지만(자세 슬롯) 사물 축은 **물건 자체**를 보여준다 —
 손이 없는 그림이라 용도가 다르다. 사용자 지시로 전량 생성한다.
 """
+
+from tools._retired_guard import retired_guard
+
+retired_guard("build_object_axes.py", "태그 16개")
 import json
 from pathlib import Path
 

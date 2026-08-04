@@ -48,6 +48,9 @@
 """
 from __future__ import annotations
 
+from tools._retired_guard import retired_guard
+
+retired_guard("build_pose_axes.py", "태그 37개")
 import json
 import re
 from collections import Counter

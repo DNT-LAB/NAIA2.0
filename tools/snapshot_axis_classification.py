@@ -95,6 +95,14 @@ def main() -> int:
         old = json.loads(OUT.read_text(encoding="utf-8"))
         diff = 0
         for name in sorted(set(old["axes"]) | set(snap["axes"])):
+            # **디렉터리도 본다.** 블러 정책은 축이 `wildcards/nsfw` 에 있느냐로
+            # 정해지므로, 태그가 그대로여도 축 파일이 thumb <-> nsfw 를 넘어가면
+            # 내용 등급이 통째로 바뀐다. 태그만 비교하면 그게 통과했다.
+            da = old["axes"].get(name, {}).get("dir")
+            db = snap["axes"].get(name, {}).get("dir")
+            if da and db and da != db:
+                diff += 1
+                print(f"  {name}: 디렉터리 {da} -> {db} (블러 정책이 바뀐다)")
             a = set(old["axes"].get(name, {}).get("tags", []))
             b = set(snap["axes"].get(name, {}).get("tags", []))
             if a != b:
@@ -110,6 +118,13 @@ def main() -> int:
         if diff:
             print(f"\n스냅샷과 다른 축 {diff}개 — 분류를 바꿨다면 스냅샷도 갱신하라.")
             return 1
+        # 배선 축 겹침은 **영구 빈칸**이다(팩 키가 하나뿐이라 뒤쪽 축은 영영 안 찬다).
+        # 경고만 하면 그 상태가 그대로 커밋되고 --check 도 통과해 버린다.
+        if snap["overlaps"]:
+            print(f"\n배선 축 둘에 걸친 태그 {len(snap['overlaps'])}개 — 뒤쪽은 빈칸이 된다:")
+            for t, where in list(snap["overlaps"].items())[:10]:
+                print(f"   {t}  ->  {', '.join(where)}")
+            return 1
         print(f"스냅샷과 일치 (축 {snap['axis_count']} · 태그 {snap['tag_count']})")
         return 0
 
@@ -119,10 +134,14 @@ def main() -> int:
     print(f"저장: {OUT.relative_to(ROOT)}  ({kb:.0f} KB)")
     print(f"  축 {snap['axis_count']}개 · 태그 {snap['tag_count']}개 · commit {snap['commit'][:8]}")
     if snap["overlaps"]:
-        print(f"  ⚠ 두 축에 걸친 태그 {len(snap['overlaps'])}개 "
+        # 저장은 한다 — 겹침이 있는 상태도 기록으로는 남아야 한다. 다만 **성공으로
+        # 끝내지 않는다.** 여기서 0을 돌려주면 영구 빈칸이 그대로 커밋되고,
+        # 그 스냅샷을 기준으로 --check 도 통과해 버린다.
+        print(f"  ! 두 축에 걸친 태그 {len(snap['overlaps'])}개 "
               f"(팩 키가 하나뿐이라 뒤쪽은 빈칸이 된다):")
         for t, where in list(snap["overlaps"].items())[:10]:
             print(f"      {t}  ->  {', '.join(where)}")
+        return 1
     return 0
 
 

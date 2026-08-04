@@ -31,6 +31,10 @@ freq>=60 까지 열면 3,774개로 2.5배가 되어 하루 단위 작업이 불�
 body_expose 에서 '나머지 전부' 버킷을 만들었다가 176개 중 131개가 오분류였다.
 여기서는 모든 태그를 명시 배정하거나 명시 제외하고, 남는 것은 '미분류'로 보고한다.
 """
+
+from tools._retired_guard import retired_guard
+
+retired_guard("thumb_clothing_build.py", "태그 182개")
 import json
 import re
 from collections import Counter

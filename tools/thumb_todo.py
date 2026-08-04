@@ -240,7 +240,11 @@ for ax, _n, _h, _f, _m in rows:
                          if (TODO / f"{ax}.txt").exists() else []) if t.strip()]
     _mirror += sum(1 for t in _pend if t in COVERED)
     _other += sum(1 for t in _pend if t not in COVERED)
-print(f"\n화면에 빈칸으로 뜨는 것: {_shown}장  <- 이것만 생성 대상이다")
-print(f"미표시 축 {_mirror + _other}장 = 표시 축에 이미 그림이 있는 사본 {_mirror}"
-      f" + 표시 축에 없는 것 {_other}")
-print(f"생성 대기 총 {total}장 -> {TODO}")
+# 마지막 줄이 사람이 읽는 줄이다. 예전에는 여기에 미표시 축까지 더한 합계를 찍어
+# "생성 대기 2,045장" 으로 읽혔는데 실제 화면 빈칸은 0이었다. 실행할 숫자를 마지막에
+# 둔다.
+print(f"\n미표시 축 {_mirror + _other}장 = 표시 축에 이미 그림이 있는 사본 {_mirror}"
+      f" + 표시 축에 없는 것 {_other}   (분류기 중간 산출물 — 생성 대상 아님)")
+print(f"목록 파일 {total}장 -> {TODO}   (위 미표시 축을 포함한 수)")
+print(f"\n생성할 것 = 화면 빈칸 {_shown}장"
+      + ("" if _shown else "  — 표시되는 축은 전부 채워져 있다"))

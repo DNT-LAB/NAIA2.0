@@ -33,6 +33,10 @@
 
 그래서 프레이밍이 세 갈래다: interior(scenery 없음) / scenery / backdrop(1girl).
 """
+
+from tools._retired_guard import retired_guard
+
+retired_guard("build_location_axes.py", "태그 4개")
 import json
 import re
 from pathlib import Path

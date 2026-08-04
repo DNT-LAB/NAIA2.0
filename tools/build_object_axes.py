@@ -32,9 +32,8 @@
 손이 없는 그림이라 용도가 다르다. 사용자 지시로 전량 생성한다.
 """
 
-from tools._retired_guard import retired_guard
 
-retired_guard("build_object_axes.py", "태그 16개")
+from tools._retired_guard import retired_guard
 import json
 from pathlib import Path
 
@@ -133,4 +132,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    retired_guard("build_object_axes.py", "태그 16개")
     raise SystemExit(main())

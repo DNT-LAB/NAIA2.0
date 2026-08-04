@@ -61,9 +61,8 @@
 사용: python tools/thumb_meta_build.py
 """
 
-from tools._retired_guard import retired_guard
 
-retired_guard("thumb_meta_build.py", "태그 9개")
+from tools._retired_guard import retired_guard
 import json
 import sys
 from pathlib import Path
@@ -279,4 +278,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    retired_guard("thumb_meta_build.py", "태그 9개")
     raise SystemExit(main())

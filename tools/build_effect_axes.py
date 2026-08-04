@@ -34,9 +34,8 @@
 `monochrome` 을 빈 화면에 걸면 흑백 아무것도 아닌 그림이 된다.
 """
 
-from tools._retired_guard import retired_guard
 
-retired_guard("build_effect_axes.py", "태그 7개")
+from tools._retired_guard import retired_guard
 import json
 import re
 from pathlib import Path
@@ -167,4 +166,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    retired_guard("build_effect_axes.py", "태그 7개")
     raise SystemExit(main())

@@ -79,19 +79,24 @@ for wc in sorted(OUT.glob("*.txt")):
     if ax.startswith('_'):
         continue
     tags = [l.strip() for l in wc.read_text(encoding="utf-8").splitlines() if l.strip()]
-    fr = FRAMING.get(ax, "portrait")
+    # **모르면 적지 않는다.** 예전에는 모르는 축까지 "portrait" 로 단언해서,
+    # emit 의 `_FRAMING_DEFAULT`(cowboy/lower/upper/full)를 가려 의상 21축이
+    # 전부 portrait 로 렌더될 뻔했다(2026-08-04 실측). 없으면 emit 이 채운다.
+    fr = FRAMING.get(ax)
+    fr_use = fr or "portrait"      # 벤치 문구·출력용 기본값(저장하지는 않는다)
     todo_f = OUT / "_todo" / f"{ax}.txt"
     todo_m = OUT / "_todo" / f"{ax}_male.txt"
     n_f = len([l for l in todo_f.read_text(encoding="utf-8").splitlines() if l.strip()]) if todo_f.exists() else 0
     n_m = len([l for l in todo_m.read_text(encoding="utf-8").splitlines() if l.strip()]) if todo_m.exists() else 0
     entry = {
-        "key": ax, "label": LABEL.get(ax, ax), "framing": fr,
+        "key": ax, "label": LABEL.get(ax, ax),
+        **({"framing": fr} if fr else {}),
         "count": len(tags), "done": len(have.get(PACK_AXIS.get(ax, ax), set())),
         "todo_female": n_f, "todo_male": n_m,
-        "bench": bench(fr, ax),
+        "bench": bench(fr_use, ax),
     }
     if n_m:
-        entry["bench_male"] = bench(fr, ax, male=True)
+        entry["bench_male"] = bench(fr_use, ax, male=True)
     axes.append(entry)
 
 man = {
@@ -110,11 +115,43 @@ man = {
     "palette_shape": "rect",
     "sensitive_axes": ["body_nsfw"],
 }
-(OUT / "_manifest.json").write_text(json.dumps(man, ensure_ascii=False, indent=2), encoding="utf-8")
+# ⚠ `_manifest.json` 은 **순수한 생성물이 아니다.** `sliders`(길이·가슴 슬라이더)와
+# 축별 프레이밍은 손으로 큐레이션한 것인데 이 스크립트는 그 둘을 만들지 못한다.
+# 그냥 덮어쓰면:
+#   - `sliders` 가 사라져 `interactiveAxes.mjs` 의 SLIDERS 가 통째로 빈다
+#   - 이 스크립트가 아는 축(22개) 밖의 축까지 `framing: "portrait"` 로 써 버려,
+#     emit 의 `_FRAMING_DEFAULT`(cowboy/lower/upper/full)를 가려 전 축이 portrait 이 된다
+# 2026-08-04 에 실제로 두 번 덮어썼고, emit 을 안 돌려서 잠복해 있다가 나중에 터졌다.
+#
+# 그래서 **모르는 키는 보존하고, 큐레이션된 프레이밍은 지우지 않는다.**
+_dst = OUT / "_manifest.json"
+if _dst.exists():
+    _old = json.loads(_dst.read_text(encoding="utf-8"))
+    for _k, _v in _old.items():                    # 이 스크립트가 안 만드는 키
+        man.setdefault(_k, _v)
+    _old_fr = {a["key"]: a.get("framing") for a in _old.get("axes", [])
+               if a.get("framing") and a.get("framing") != "portrait"}
+    _lost = [a["key"] for a in man["axes"]
+             if a["key"] in _old_fr and a.get("framing") != _old_fr[a["key"]]]
+    for _a in man["axes"]:                         # 큐레이션된 프레이밍을 되살린다
+        if _a["key"] in _old_fr:
+            _a["framing"] = _old_fr[_a["key"]]
+    # 이 스크립트가 더 이상 만들지 않는 축도 남긴다. `body_nsfw` 는 축 파일이
+    # `wildcards/nsfw/` 에 있어 여기 목록에 안 잡히는데, 지우면 emit 이
+    # `explicit` 프레이밍을 잃는다(실측: mjs 1줄 회귀).
+    _have = {a["key"] for a in man["axes"]}
+    _kept = [a for a in _old.get("axes", []) if a["key"] not in _have]
+    if _kept:
+        man["axes"].extend(_kept)
+        print(f"  이 도구가 안 만드는 축 보존 {len(_kept)}개: "
+              f"{', '.join(a['key'] for a in _kept[:8])}")
+    if _lost:
+        print(f"  큐레이션 프레이밍 보존 {len(_lost)}개: {', '.join(_lost[:8])}")
+_dst.write_text(json.dumps(man, ensure_ascii=False, indent=2), encoding="utf-8")
 tf = sum(a["todo_female"] for a in axes)
 tm = sum(a["todo_male"] for a in axes)
 print(f"_manifest.json 재작성: 축 {len(axes)}개 / 총 {sum(a['count'] for a in axes)}장")
 print(f"  완료 {sum(a['done'] for a in axes)}  대기 여성 {tf} + 남성 {tm} = {tf+tm}")
 for a in axes:
     if a["todo_female"] or a["todo_male"]:
-        print(f"  {a['key']:<14} {a['framing']:<9} 여{a['todo_female']:>4} 남{a['todo_male']:>3}")
+        print(f"  {a['key']:<14} {a.get('framing','-'):<9} 여{a['todo_female']:>4} 남{a['todo_male']:>3}")

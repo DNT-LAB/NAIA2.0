@@ -48,9 +48,8 @@
 """
 from __future__ import annotations
 
-from tools._retired_guard import retired_guard
 
-retired_guard("build_pose_axes.py", "태그 37개")
+from tools._retired_guard import retired_guard
 import json
 import re
 from collections import Counter
@@ -376,4 +375,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    retired_guard("build_pose_axes.py", "태그 37개")
     raise SystemExit(main())

@@ -36,6 +36,8 @@
       "data/KR_tags.parquet",
       "data/e621_KR_tags.parquet",
       "data/interactive_tags.json",
+      "data/interactive_axis_tags.json",
+      "data/interactive_preset_facts.json",
       "data/tag_index/**",
       "data/copyright_groups.json",
       "data/tag_bucket_dates.json",

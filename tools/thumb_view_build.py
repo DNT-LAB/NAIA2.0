@@ -54,9 +54,8 @@ e621 태그는 서브그룹이 구도로 안 잡혀 있어 규칙으로 못 뽑�
 배경은 여기 두지 않는다 — `loc_backdrop` 이 이미 그 축이다.
 """
 
-from tools._retired_guard import retired_guard
 
-retired_guard("thumb_view_build.py", "태그 7개")
+from tools._retired_guard import retired_guard
 import json
 import re
 from pathlib import Path
@@ -267,4 +266,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    retired_guard("thumb_view_build.py", "태그 7개")
     raise SystemExit(main())

@@ -388,7 +388,9 @@ _FRAMING_DEFAULT = {"tail": "full", "wings": "full", "body_type": "full",
                     "cloth_outer": "cowboy", "cloth_traditional": "cowboy",
                     "cloth_uniform": "cowboy", "cloth_style": "cowboy",
                     "cloth_armor": "cowboy", "cloth_nsfw": "explicit"}
-framings = {a["key"]: a.get("framing", "portrait") for a in man.get("axes", [])}
+# 매니페스트에 **적혀 있는 것만** 쓴다. 없는 것은 아래 `_FRAMING_DEFAULT` 가 채운다 —
+# 예전처럼 기본값 "portrait" 로 채우면 매니페스트가 모르는 축까지 portrait 로 굳는다.
+framings = {a["key"]: a["framing"] for a in man.get("axes", []) if a.get("framing")}
 _axis_files = sorted(p.stem for p in SRC.glob("*.txt"))
 # 성인 도감(`nsfw_*`)은 폴더가 달라 위 glob 에 안 잡힌다. 배선된 것만 뒤에서 걸러진다.
 _axis_files += sorted(p.stem for p in NSFW_SRC.glob("nsfw_*.txt"))
@@ -854,7 +856,34 @@ _INDEX.write_text(json.dumps({
     "axes": sorted(_referenced),
 }, ensure_ascii=False, indent=1), encoding="utf-8")
 
+# ── 런타임용 축 소속표 (배포판이 읽는다) ──────────────────────────────────
+# `wildcards/**` 는 릴리즈 페이로드 **금지 패턴**이다(빌드 입력물이므로 옳다).
+# 그런데 `core/interactive_tag_dependency.py` 가 런타임에 그 폴더를 읽어
+# '필요한 것'(전제조건)을 만든다 — 배포판에는 폴더가 없으니 그 기능이 조용히
+# 빈 채로 돌고 있었다(2026-08-04 실측: 전제조건 [] ).
+#
+# 배포판은 아무것도 빌드하지 않는다. **파생물은 여기서 미리 해소해 data/ 로 굽는다.**
+_AXIS_TAGS = Path("data/interactive_axis_tags.json")
+_axis_tags: dict[str, list[str]] = {}
+for _p in sorted(SRC.glob("*.txt")):
+    if _p.stem.startswith("_"):
+        continue
+    _v = [l.strip() for l in _p.read_text(encoding="utf-8").splitlines() if l.strip()]
+    if _v:
+        _axis_tags[_p.stem] = _v
+_AXIS_TAGS.write_text(json.dumps({
+    "note": ["축 -> 태그 목록. tools/thumb_axes_emit.py 가 wildcards/thumb 에서 굽는다.",
+             "런타임(core/interactive_tag_dependency.py)이 이걸 읽는다 —",
+             "wildcards/ 는 릴리즈에 안 실리므로 .txt 를 직접 읽으면 배포판에서 죽는다.",
+             "손으로 고치지 말 것. 축 .txt 를 고치고 emit 을 다시 돌려라."],
+    "axis_count": len(_axis_tags),
+    "tag_count": sum(len(v) for v in _axis_tags.values()),
+    "axes": _axis_tags,
+}, ensure_ascii=False, indent=1), encoding="utf-8")
+
 print(f"생성: {DST}  ({len(out)} 줄)")
+print(f"  축 소속표 {len(_axis_tags)}축 / {sum(len(v) for v in _axis_tags.values())}태그"
+      f" -> {_AXIS_TAGS}")
 print(f"  축 인덱스 {len(_referenced)}개 -> {_INDEX}")
 print(f"  팔레트: hair {len(palette['hair_color'])} / eye {len(palette['eye_color'])}")
 print(f"  슬라이더: {list((man.get('sliders') or {}).keys())}")

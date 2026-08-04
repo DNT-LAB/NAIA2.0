@@ -32,9 +32,8 @@ body_expose 에서 '나머지 전부' 버킷을 만들었다가 176개 중 131�
 여기서는 모든 태그를 명시 배정하거나 명시 제외하고, 남는 것은 '미분류'로 보고한다.
 """
 
-from tools._retired_guard import retired_guard
 
-retired_guard("thumb_clothing_build.py", "태그 182개")
+from tools._retired_guard import retired_guard
 import json
 import re
 from collections import Counter
@@ -857,6 +856,7 @@ def apply_moved_out() -> dict:
 
 
 if __name__ == "__main__":
+    retired_guard("thumb_clothing_build.py", "태그 182개")
     print(f"의상 풀 {len(POOL)}개 / 절단선 freq>={CUT}")
     print(f"  다른 슬롯으로: {len(MOVED_OUT)}개 "
           f"{dict(Counter(MOVED_OUT.values()))}")

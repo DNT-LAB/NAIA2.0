@@ -20,7 +20,6 @@
     {
       "key": "ani_aqua",
       "label": "ani_aqua",
-      "framing": "portrait",
       "count": 33,
       "done": 33,
       "todo_female": 0,
@@ -34,7 +33,6 @@
     {
       "key": "ani_bird",
       "label": "ani_bird",
-      "framing": "portrait",
       "count": 30,
       "done": 30,
       "todo_female": 0,
@@ -48,7 +46,6 @@
     {
       "key": "ani_bug",
       "label": "ani_bug",
-      "framing": "portrait",
       "count": 26,
       "done": 26,
       "todo_female": 0,
@@ -62,7 +59,6 @@
     {
       "key": "ani_etc",
       "label": "ani_etc",
-      "framing": "portrait",
       "count": 38,
       "done": 38,
       "todo_female": 0,
@@ -76,7 +72,6 @@
     {
       "key": "ani_mammal",
       "label": "ani_mammal",
-      "framing": "portrait",
       "count": 47,
       "done": 47,
       "todo_female": 0,
@@ -90,7 +85,6 @@
     {
       "key": "ani_plant",
       "label": "ani_plant",
-      "framing": "portrait",
       "count": 119,
       "done": 119,
       "todo_female": 0,
@@ -118,7 +112,6 @@
     {
       "key": "body_condition",
       "label": "body_condition",
-      "framing": "portrait",
       "count": 82,
       "done": 82,
       "todo_female": 0,
@@ -174,7 +167,6 @@
     {
       "key": "body_suggestive",
       "label": "body_suggestive",
-      "framing": "portrait",
       "count": 46,
       "done": 46,
       "todo_female": 0,
@@ -202,7 +194,6 @@
     {
       "key": "cloth_accessory",
       "label": "cloth_accessory",
-      "framing": "portrait",
       "count": 171,
       "done": 171,
       "todo_female": 0,
@@ -216,7 +207,6 @@
     {
       "key": "cloth_armor",
       "label": "cloth_armor",
-      "framing": "portrait",
       "count": 75,
       "done": 75,
       "todo_female": 0,
@@ -230,7 +220,6 @@
     {
       "key": "cloth_bottom",
       "label": "cloth_bottom",
-      "framing": "portrait",
       "count": 78,
       "done": 78,
       "todo_female": 0,
@@ -244,7 +233,6 @@
     {
       "key": "cloth_carried",
       "label": "cloth_carried",
-      "framing": "portrait",
       "count": 23,
       "done": 23,
       "todo_female": 0,
@@ -258,7 +246,6 @@
     {
       "key": "cloth_detail",
       "label": "cloth_detail",
-      "framing": "portrait",
       "count": 137,
       "done": 137,
       "todo_female": 0,
@@ -272,7 +259,6 @@
     {
       "key": "cloth_dress",
       "label": "cloth_dress",
-      "framing": "portrait",
       "count": 92,
       "done": 92,
       "todo_female": 0,
@@ -286,7 +272,6 @@
     {
       "key": "cloth_eyewear",
       "label": "cloth_eyewear",
-      "framing": "portrait",
       "count": 90,
       "done": 90,
       "todo_female": 0,
@@ -300,7 +285,6 @@
     {
       "key": "cloth_footwear",
       "label": "cloth_footwear",
-      "framing": "portrait",
       "count": 87,
       "done": 87,
       "todo_female": 0,
@@ -314,7 +298,6 @@
     {
       "key": "cloth_hairacc",
       "label": "cloth_hairacc",
-      "framing": "portrait",
       "count": 185,
       "done": 185,
       "todo_female": 0,
@@ -328,7 +311,6 @@
     {
       "key": "cloth_handwear",
       "label": "cloth_handwear",
-      "framing": "portrait",
       "count": 57,
       "done": 57,
       "todo_female": 0,
@@ -342,7 +324,6 @@
     {
       "key": "cloth_headwear",
       "label": "cloth_headwear",
-      "framing": "portrait",
       "count": 222,
       "done": 222,
       "todo_female": 0,
@@ -356,7 +337,6 @@
     {
       "key": "cloth_legwear",
       "label": "cloth_legwear",
-      "framing": "portrait",
       "count": 99,
       "done": 99,
       "todo_female": 0,
@@ -370,7 +350,6 @@
     {
       "key": "cloth_neck",
       "label": "cloth_neck",
-      "framing": "portrait",
       "count": 110,
       "done": 110,
       "todo_female": 0,
@@ -384,7 +363,6 @@
     {
       "key": "cloth_outer",
       "label": "cloth_outer",
-      "framing": "portrait",
       "count": 30,
       "done": 30,
       "todo_female": 0,
@@ -398,7 +376,6 @@
     {
       "key": "cloth_pattern",
       "label": "cloth_pattern",
-      "framing": "portrait",
       "count": 57,
       "done": 57,
       "todo_female": 0,
@@ -412,7 +389,6 @@
     {
       "key": "cloth_revealing",
       "label": "cloth_revealing",
-      "framing": "portrait",
       "count": 46,
       "done": 46,
       "todo_female": 0,
@@ -426,7 +402,6 @@
     {
       "key": "cloth_sleeve",
       "label": "cloth_sleeve",
-      "framing": "portrait",
       "count": 42,
       "done": 42,
       "todo_female": 0,
@@ -440,7 +415,6 @@
     {
       "key": "cloth_small",
       "label": "cloth_small",
-      "framing": "portrait",
       "count": 32,
       "done": 32,
       "todo_female": 0,
@@ -454,7 +428,6 @@
     {
       "key": "cloth_state",
       "label": "cloth_state",
-      "framing": "portrait",
       "count": 266,
       "done": 266,
       "todo_female": 0,
@@ -468,7 +441,6 @@
     {
       "key": "cloth_style",
       "label": "cloth_style",
-      "framing": "portrait",
       "count": 45,
       "done": 45,
       "todo_female": 0,
@@ -482,7 +454,6 @@
     {
       "key": "cloth_swim",
       "label": "cloth_swim",
-      "framing": "portrait",
       "count": 76,
       "done": 76,
       "todo_female": 0,
@@ -496,7 +467,6 @@
     {
       "key": "cloth_top",
       "label": "cloth_top",
-      "framing": "portrait",
       "count": 147,
       "done": 147,
       "todo_female": 0,
@@ -510,7 +480,6 @@
     {
       "key": "cloth_traditional",
       "label": "cloth_traditional",
-      "framing": "portrait",
       "count": 61,
       "done": 61,
       "todo_female": 0,
@@ -524,7 +493,6 @@
     {
       "key": "cloth_under",
       "label": "cloth_under",
-      "framing": "portrait",
       "count": 93,
       "done": 93,
       "todo_female": 0,
@@ -538,7 +506,6 @@
     {
       "key": "cloth_uniform",
       "label": "cloth_uniform",
-      "framing": "portrait",
       "count": 257,
       "done": 257,
       "todo_female": 0,
@@ -552,7 +519,6 @@
     {
       "key": "cloth_waist",
       "label": "cloth_waist",
-      "framing": "portrait",
       "count": 46,
       "done": 46,
       "todo_female": 0,
@@ -580,7 +546,6 @@
     {
       "key": "event",
       "label": "event",
-      "framing": "portrait",
       "count": 29,
       "done": 29,
       "todo_female": 0,
@@ -594,7 +559,6 @@
     {
       "key": "expression",
       "label": "expression",
-      "framing": "portrait",
       "count": 121,
       "done": 121,
       "todo_female": 0,
@@ -608,7 +572,6 @@
     {
       "key": "expression_from_pose",
       "label": "expression_from_pose",
-      "framing": "portrait",
       "count": 14,
       "done": 0,
       "todo_female": 14,
@@ -622,7 +585,6 @@
     {
       "key": "expression_state",
       "label": "expression_state",
-      "framing": "portrait",
       "count": 49,
       "done": 49,
       "todo_female": 0,
@@ -636,7 +598,6 @@
     {
       "key": "expression_symbol",
       "label": "expression_symbol",
-      "framing": "portrait",
       "count": 78,
       "done": 78,
       "todo_female": 0,
@@ -678,7 +639,6 @@
     {
       "key": "face_shape",
       "label": "face_shape",
-      "framing": "portrait",
       "count": 21,
       "done": 21,
       "todo_female": 0,
@@ -692,7 +652,6 @@
     {
       "key": "fx_effect",
       "label": "fx_effect",
-      "framing": "portrait",
       "count": 215,
       "done": 215,
       "todo_female": 0,
@@ -706,7 +665,6 @@
     {
       "key": "fx_light",
       "label": "fx_light",
-      "framing": "portrait",
       "count": 16,
       "done": 16,
       "todo_female": 0,
@@ -720,7 +678,6 @@
     {
       "key": "fx_symbol",
       "label": "fx_symbol",
-      "framing": "portrait",
       "count": 243,
       "done": 243,
       "todo_female": 0,
@@ -734,7 +691,6 @@
     {
       "key": "fx_tone",
       "label": "fx_tone",
-      "framing": "portrait",
       "count": 34,
       "done": 34,
       "todo_female": 0,
@@ -790,7 +746,6 @@
     {
       "key": "job",
       "label": "job",
-      "framing": "portrait",
       "count": 47,
       "done": 47,
       "todo_female": 0,
@@ -804,7 +759,6 @@
     {
       "key": "job_male",
       "label": "job_male",
-      "framing": "portrait",
       "count": 2,
       "done": 2,
       "todo_female": 0,
@@ -818,7 +772,6 @@
     {
       "key": "loc_backdrop",
       "label": "loc_backdrop",
-      "framing": "portrait",
       "count": 40,
       "done": 40,
       "todo_female": 0,
@@ -832,7 +785,6 @@
     {
       "key": "loc_indoor",
       "label": "loc_indoor",
-      "framing": "portrait",
       "count": 75,
       "done": 75,
       "todo_female": 0,
@@ -846,7 +798,6 @@
     {
       "key": "loc_nature",
       "label": "loc_nature",
-      "framing": "portrait",
       "count": 60,
       "done": 60,
       "todo_female": 0,
@@ -860,7 +811,6 @@
     {
       "key": "loc_object",
       "label": "loc_object",
-      "framing": "portrait",
       "count": 54,
       "done": 54,
       "todo_female": 0,
@@ -874,7 +824,6 @@
     {
       "key": "loc_place",
       "label": "loc_place",
-      "framing": "portrait",
       "count": 151,
       "done": 151,
       "todo_female": 0,
@@ -888,7 +837,6 @@
     {
       "key": "loc_sky",
       "label": "loc_sky",
-      "framing": "portrait",
       "count": 46,
       "done": 46,
       "todo_female": 0,
@@ -902,7 +850,6 @@
     {
       "key": "loc_time",
       "label": "loc_time",
-      "framing": "portrait",
       "count": 30,
       "done": 30,
       "todo_female": 0,
@@ -916,7 +863,6 @@
     {
       "key": "loc_water",
       "label": "loc_water",
-      "framing": "portrait",
       "count": 26,
       "done": 26,
       "todo_female": 0,
@@ -930,7 +876,6 @@
     {
       "key": "loc_weather",
       "label": "loc_weather",
-      "framing": "portrait",
       "count": 46,
       "done": 46,
       "todo_female": 0,
@@ -958,7 +903,6 @@
     {
       "key": "mech",
       "label": "mech",
-      "framing": "portrait",
       "count": 14,
       "done": 14,
       "todo_female": 0,
@@ -972,7 +916,6 @@
     {
       "key": "meta_frame",
       "label": "meta_frame",
-      "framing": "portrait",
       "count": 43,
       "done": 43,
       "todo_female": 0,
@@ -986,7 +929,6 @@
     {
       "key": "meta_peek",
       "label": "meta_peek",
-      "framing": "portrait",
       "count": 21,
       "done": 21,
       "todo_female": 0,
@@ -1000,7 +942,6 @@
     {
       "key": "meta_screen",
       "label": "meta_screen",
-      "framing": "portrait",
       "count": 30,
       "done": 30,
       "todo_female": 0,
@@ -1014,7 +955,6 @@
     {
       "key": "meta_text",
       "label": "meta_text",
-      "framing": "portrait",
       "count": 69,
       "done": 69,
       "todo_female": 0,
@@ -1028,7 +968,6 @@
     {
       "key": "obj_container",
       "label": "obj_container",
-      "framing": "portrait",
       "count": 179,
       "done": 179,
       "todo_female": 0,
@@ -1042,7 +981,6 @@
     {
       "key": "obj_etc",
       "label": "obj_etc",
-      "framing": "portrait",
       "count": 292,
       "done": 292,
       "todo_female": 0,
@@ -1056,7 +994,6 @@
     {
       "key": "obj_food",
       "label": "obj_food",
-      "framing": "portrait",
       "count": 341,
       "done": 341,
       "todo_female": 0,
@@ -1070,7 +1007,6 @@
     {
       "key": "obj_furniture",
       "label": "obj_furniture",
-      "framing": "portrait",
       "count": 128,
       "done": 128,
       "todo_female": 0,
@@ -1084,7 +1020,6 @@
     {
       "key": "obj_play",
       "label": "obj_play",
-      "framing": "portrait",
       "count": 92,
       "done": 92,
       "todo_female": 0,
@@ -1098,7 +1033,6 @@
     {
       "key": "obj_restraint",
       "label": "obj_restraint",
-      "framing": "portrait",
       "count": 16,
       "done": 16,
       "todo_female": 0,
@@ -1112,7 +1046,6 @@
     {
       "key": "obj_tech",
       "label": "obj_tech",
-      "framing": "portrait",
       "count": 150,
       "done": 150,
       "todo_female": 0,
@@ -1126,7 +1059,6 @@
     {
       "key": "obj_tool",
       "label": "obj_tool",
-      "framing": "portrait",
       "count": 346,
       "done": 346,
       "todo_female": 0,
@@ -1140,7 +1072,6 @@
     {
       "key": "obj_vehicle",
       "label": "obj_vehicle",
-      "framing": "portrait",
       "count": 98,
       "done": 98,
       "todo_female": 0,
@@ -1154,7 +1085,6 @@
     {
       "key": "obj_weapon",
       "label": "obj_weapon",
-      "framing": "portrait",
       "count": 344,
       "done": 344,
       "todo_female": 0,
@@ -1168,7 +1098,6 @@
     {
       "key": "persona",
       "label": "persona",
-      "framing": "portrait",
       "count": 13,
       "done": 13,
       "todo_female": 0,
@@ -1182,7 +1111,6 @@
     {
       "key": "pose_action",
       "label": "pose_action",
-      "framing": "portrait",
       "count": 125,
       "done": 125,
       "todo_female": 0,
@@ -1196,7 +1124,6 @@
     {
       "key": "pose_action_2",
       "label": "pose_action_2",
-      "framing": "portrait",
       "count": 120,
       "done": 120,
       "todo_female": 0,
@@ -1210,7 +1137,6 @@
     {
       "key": "pose_action_3",
       "label": "pose_action_3",
-      "framing": "portrait",
       "count": 122,
       "done": 122,
       "todo_female": 0,
@@ -1224,7 +1150,6 @@
     {
       "key": "pose_action_m",
       "label": "pose_action_m",
-      "framing": "portrait",
       "count": 98,
       "done": 98,
       "todo_female": 0,
@@ -1238,7 +1163,6 @@
     {
       "key": "pose_action_m_2",
       "label": "pose_action_m_2",
-      "framing": "portrait",
       "count": 97,
       "done": 97,
       "todo_female": 0,
@@ -1252,7 +1176,6 @@
     {
       "key": "pose_arm",
       "label": "pose_arm",
-      "framing": "portrait",
       "count": 100,
       "done": 100,
       "todo_female": 0,
@@ -1266,7 +1189,6 @@
     {
       "key": "pose_arm_m",
       "label": "pose_arm_m",
-      "framing": "portrait",
       "count": 60,
       "done": 60,
       "todo_female": 0,
@@ -1280,7 +1202,6 @@
     {
       "key": "pose_body_touch",
       "label": "pose_body_touch",
-      "framing": "portrait",
       "count": 37,
       "done": 37,
       "todo_female": 0,
@@ -1294,7 +1215,6 @@
     {
       "key": "pose_body_touch_m",
       "label": "pose_body_touch_m",
-      "framing": "portrait",
       "count": 10,
       "done": 10,
       "todo_female": 0,
@@ -1308,7 +1228,6 @@
     {
       "key": "pose_clothing",
       "label": "pose_clothing",
-      "framing": "portrait",
       "count": 74,
       "done": 74,
       "todo_female": 0,
@@ -1322,7 +1241,6 @@
     {
       "key": "pose_clothing_2",
       "label": "pose_clothing_2",
-      "framing": "portrait",
       "count": 74,
       "done": 74,
       "todo_female": 0,
@@ -1336,7 +1254,6 @@
     {
       "key": "pose_clothing_m",
       "label": "pose_clothing_m",
-      "framing": "portrait",
       "count": 9,
       "done": 9,
       "todo_female": 0,
@@ -1350,7 +1267,6 @@
     {
       "key": "pose_combat",
       "label": "pose_combat",
-      "framing": "portrait",
       "count": 28,
       "done": 28,
       "todo_female": 0,
@@ -1364,7 +1280,6 @@
     {
       "key": "pose_combat_m",
       "label": "pose_combat_m",
-      "framing": "portrait",
       "count": 16,
       "done": 16,
       "todo_female": 0,
@@ -1378,7 +1293,6 @@
     {
       "key": "pose_display",
       "label": "pose_display",
-      "framing": "portrait",
       "count": 40,
       "done": 40,
       "todo_female": 0,
@@ -1392,7 +1306,6 @@
     {
       "key": "pose_display_m",
       "label": "pose_display_m",
-      "framing": "portrait",
       "count": 17,
       "done": 17,
       "todo_female": 0,
@@ -1406,7 +1319,6 @@
     {
       "key": "pose_drop",
       "label": "pose_drop",
-      "framing": "portrait",
       "count": 0,
       "done": 0,
       "todo_female": 0,
@@ -1420,7 +1332,6 @@
     {
       "key": "pose_face_touch",
       "label": "pose_face_touch",
-      "framing": "portrait",
       "count": 64,
       "done": 64,
       "todo_female": 0,
@@ -1434,7 +1345,6 @@
     {
       "key": "pose_face_touch_m",
       "label": "pose_face_touch_m",
-      "framing": "portrait",
       "count": 13,
       "done": 13,
       "todo_female": 0,
@@ -1448,7 +1358,6 @@
     {
       "key": "pose_gaze",
       "label": "pose_gaze",
-      "framing": "portrait",
       "count": 36,
       "done": 36,
       "todo_female": 0,
@@ -1462,7 +1371,6 @@
     {
       "key": "pose_hand",
       "label": "pose_hand",
-      "framing": "portrait",
       "count": 111,
       "done": 111,
       "todo_female": 0,
@@ -1476,7 +1384,6 @@
     {
       "key": "pose_hand_m",
       "label": "pose_hand_m",
-      "framing": "portrait",
       "count": 23,
       "done": 23,
       "todo_female": 0,
@@ -1490,7 +1397,6 @@
     {
       "key": "pose_holding",
       "label": "pose_holding",
-      "framing": "portrait",
       "count": 108,
       "done": 108,
       "todo_female": 0,
@@ -1504,7 +1410,6 @@
     {
       "key": "pose_holding_2",
       "label": "pose_holding_2",
-      "framing": "portrait",
       "count": 104,
       "done": 104,
       "todo_female": 0,
@@ -1518,7 +1423,6 @@
     {
       "key": "pose_holding_3",
       "label": "pose_holding_3",
-      "framing": "portrait",
       "count": 102,
       "done": 102,
       "todo_female": 0,
@@ -1532,7 +1436,6 @@
     {
       "key": "pose_holding_m",
       "label": "pose_holding_m",
-      "framing": "portrait",
       "count": 19,
       "done": 19,
       "todo_female": 0,
@@ -1546,7 +1449,6 @@
     {
       "key": "pose_leg",
       "label": "pose_leg",
-      "framing": "portrait",
       "count": 75,
       "done": 75,
       "todo_female": 0,
@@ -1560,7 +1462,6 @@
     {
       "key": "pose_leg_m",
       "label": "pose_leg_m",
-      "framing": "portrait",
       "count": 26,
       "done": 26,
       "todo_female": 0,
@@ -1574,7 +1475,6 @@
     {
       "key": "pose_mouth",
       "label": "pose_mouth",
-      "framing": "portrait",
       "count": 54,
       "done": 54,
       "todo_female": 0,
@@ -1588,7 +1488,6 @@
     {
       "key": "pose_mouth_m",
       "label": "pose_mouth_m",
-      "framing": "portrait",
       "count": 20,
       "done": 20,
       "todo_female": 0,
@@ -1602,7 +1501,6 @@
     {
       "key": "pose_multi",
       "label": "pose_multi",
-      "framing": "portrait",
       "count": 439,
       "done": 0,
       "todo_female": 439,
@@ -1616,7 +1514,6 @@
     {
       "key": "pose_multi_relation",
       "label": "pose_multi_relation",
-      "framing": "portrait",
       "count": 9,
       "done": 9,
       "todo_female": 0,
@@ -1630,7 +1527,6 @@
     {
       "key": "pose_posture",
       "label": "pose_posture",
-      "framing": "portrait",
       "count": 99,
       "done": 100,
       "todo_female": 0,
@@ -1644,7 +1540,6 @@
     {
       "key": "pose_posture_2",
       "label": "pose_posture_2",
-      "framing": "portrait",
       "count": 94,
       "done": 94,
       "todo_female": 0,
@@ -1658,7 +1553,6 @@
     {
       "key": "pose_posture_m",
       "label": "pose_posture_m",
-      "framing": "portrait",
       "count": 31,
       "done": 31,
       "todo_female": 0,
@@ -1672,7 +1566,6 @@
     {
       "key": "pose_solo",
       "label": "pose_solo",
-      "framing": "portrait",
       "count": 1592,
       "done": 0,
       "todo_female": 1592,
@@ -1686,7 +1579,6 @@
     {
       "key": "pose_suggestive",
       "label": "pose_suggestive",
-      "framing": "portrait",
       "count": 68,
       "done": 68,
       "todo_female": 0,
@@ -1728,7 +1620,6 @@
     {
       "key": "species_male",
       "label": "species_male",
-      "framing": "portrait",
       "count": 39,
       "done": 39,
       "todo_female": 0,
@@ -1756,7 +1647,6 @@
     {
       "key": "view_angle",
       "label": "view_angle",
-      "framing": "portrait",
       "count": 26,
       "done": 26,
       "todo_female": 0,
@@ -1770,7 +1660,6 @@
     {
       "key": "view_layout",
       "label": "view_layout",
-      "framing": "portrait",
       "count": 42,
       "done": 42,
       "todo_female": 0,
@@ -1784,7 +1673,6 @@
     {
       "key": "view_shot",
       "label": "view_shot",
-      "framing": "portrait",
       "count": 25,
       "done": 25,
       "todo_female": 0,
@@ -1808,10 +1696,79 @@
         "main": "full body, standing, front view, looking at viewer, 2::__*thumb/_todo/wings__ ::, rating:general, simple background, white background",
         "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
       }
+    },
+    {
+      "key": "body_nsfw",
+      "label": "노출(성인)",
+      "framing": "explicit",
+      "count": 44,
+      "done": 4,
+      "todo_female": 38,
+      "todo_male": 2,
+      "bench": {
+        "prefix": "1girl, solo, young female, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_nsfw__ ::, simple background, white background, nsfw, rating:explicit",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      },
+      "bench_male": {
+        "prefix": "1boy, solo, mature male, 0.38::kanzarin, nns (sobchan), torino aqua, ixy, epi zero ::",
+        "main": "cowboy shot, head out of frame, close-up, front view, 2::__*thumb/_todo/body_nsfw_male__ ::, simple background, white background, nsfw, rating:explicit",
+        "postfix": "0.4:: watercolor (medium), no lineart ::, -1:: thick outlines, ai-generated ::, best quality, masterpiece, very absurdres, year 2024, year 2025, -1::widescreen, blurry ::"
+      }
     }
   ],
   "palette_shape": "rect",
   "sensitive_axes": [
     "body_nsfw"
-  ]
+  ],
+  "sliders": {
+    "hair_length": {
+      "label": "길이",
+      "steps": [
+        {
+          "tag": "very short hair"
+        },
+        {
+          "tag": "short hair"
+        },
+        {
+          "tag": "medium hair"
+        },
+        {
+          "tag": "long hair"
+        },
+        {
+          "tag": "very long hair"
+        },
+        {
+          "tag": "absurdly long hair"
+        }
+      ],
+      "default": "long hair"
+    },
+    "breast_size": {
+      "label": "가슴",
+      "steps": [
+        {
+          "tag": "flat chest"
+        },
+        {
+          "tag": "small breasts"
+        },
+        {
+          "tag": "medium breasts"
+        },
+        {
+          "tag": "large breasts"
+        },
+        {
+          "tag": "huge breasts"
+        },
+        {
+          "tag": "gigantic breasts"
+        }
+      ],
+      "default": "medium breasts"
+    }
+  }
 }

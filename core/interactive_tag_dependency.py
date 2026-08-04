@@ -54,6 +54,28 @@ from typing import Iterable
 
 _ROOT = Path(__file__).resolve().parent.parent
 AXIS_DIR = _ROOT / "wildcards" / "thumb"
+# 배포판에는 `wildcards/` 가 없다 — 릴리즈 페이로드의 금지 패턴이다(빌드 입력물이니 옳다).
+# 그래서 축 소속을 .txt 에서 직접 읽으면 **배포판에서 전제조건이 통째로 빈다**
+# (2026-08-04 실측: 개발 [dress, sweater] vs 배포판 [] ). 릴리즈는 아무것도 빌드하지
+# 않으므로 파생물은 미리 구워 둔다 — `tools/thumb_axes_emit.py` 가 만든다.
+AXIS_TAGS_JSON = _ROOT / "data" / "interactive_axis_tags.json"
+
+
+def _axis_tags(axis_dir: Path | None = None) -> dict[str, list[str]]:
+    """축 -> 태그 목록. 구운 JSON 이 먼저고, 없으면 .txt 를 훑는다(개발 폴백)."""
+    if axis_dir is None and AXIS_TAGS_JSON.exists():
+        try:
+            payload = json.loads(AXIS_TAGS_JSON.read_text(encoding="utf-8"))
+            axes = payload.get("axes")
+            if isinstance(axes, dict) and axes:
+                return {k: list(v) for k, v in axes.items()}
+        except (OSError, ValueError):
+            pass
+    out: dict[str, list[str]] = {}
+    for p in (axis_dir or AXIS_DIR).glob("*.txt"):
+        out[p.stem] = [l.strip() for l in p.read_text(encoding="utf-8").splitlines()
+                       if l.strip()]
+    return out
 
 # 누구나 갖고 있어서 전제조건이 될 수 없는 축.
 UNIVERSAL_AXES = {
@@ -320,15 +342,14 @@ class TagDependencyIndex:
         self._raw = raw
         self.strict = strict
         self._axis_of: dict[str, str] = {}
-        for p in (axis_dir or AXIS_DIR).glob("*.txt"):
+        for axis, tags in _axis_tags(axis_dir).items():
             # 자세 목록(pose_solo/pose_multi/...)은 축이 아니다. 넣으면 전제조건
             # 라벨에 `pose_solo` 같은 내부 이름이 그대로 새어나온다(실측 확인).
-            if p.stem.startswith("pose_") or p.stem.startswith("_"):
+            if axis.startswith("pose_") or axis.startswith("_"):
                 continue
-            for line in p.read_text(encoding="utf-8").splitlines():
-                t = line.strip()
+            for t in tags:
                 if t:
-                    self._axis_of.setdefault(t, p.stem)
+                    self._axis_of.setdefault(t, axis)
         self._trig = {ax: re.compile(pat) for ax, (_, pat) in AXIS_TRIGGERS.items()}
 
     # ── 내부 ────────────────────────────────────────────────────────────

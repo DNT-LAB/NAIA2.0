@@ -1,23 +1,30 @@
 animal
+snake
 frog
 crab
+white snake
 oversized animal
 clothed animal
 coral
+turtle
 dinosaur
 calico
 boar
 snail
 reindeer
+crocodilian
 animal head
+lizard
 undersized animal
 gorilla
 slug
 bull
 tyrannosaurus rex
+crocodile
 too many cats
 tapir
 weasel
+cobra (animal)
 multiple cats
 piglet
 mole (animal)
@@ -29,8 +36,3 @@ cub
 dead animal
 serval
 ape
-snake
-white snake
-turtle
-crocodilian
-lizard

@@ -886,6 +886,37 @@ RECLASSIFIED = {
     "blood on teeth": "body_condition",
     # 빌더가 species_male 로 보내지만 실사용은 여성 수인 서술이다.
     "furry female": "species",
+
+    # 2026-08-04 — UI 8개 경로 어디에도 안 닿아 추천에 글자로만 뜨던 340종 중
+    # 이 빌더 소관으로 판정된 것. 빌더 pool 에 애초에 없던 태그들이라
+    # RECLASSIFIED 가 유일한 진입로다.
+    **{_t: "marking" for _t in [
+        "purple nails", "multicolored nails",          # `nail polish` 옆
+        "nose piercing", "face piercing", "navel piercing",
+        "body markings", "lipstick mark",
+        # 얼굴 밖의 점·흉터. 얼굴 것(`mole under eye`)은 face.txt 소관이다.
+        "mole on neck", "mole on stomach", "mole on body", "mole on arm",
+        "mole on armpit", "mole on collarbone", "mole on shoulder",
+        "scar on neck", "scar on stomach", "scar on leg", "stitched neck",
+    ]},
+    **{_t: "body_nonhuman" for _t in [
+        "material growth", "personification", "monsterification",
+        "turtle shell", "rayman limbs", "wolf paws",
+    ]},
+    **{_t: "skin" for _t in ["pale skin", "very dark skin", "deep skin", "two-tone skin"]},
+    **{_t: "expression_state" for _t in ["body blush", "shoulder blush", "nervous sweating"]},
+    **{_t: "expression_symbol" for _t in ["^ ^", "> <", "@ @", "puff of air"]},
+    **{_t: "hair_pattern" for _t in ["rainbow hair", "striped hair"]},
+    **{_t: "hair_style" for _t in ["bald", "kishimen hair"]},
+    **{_t: "body_type" for _t in ["chibi", "flexible"]},
+    # face.txt 는 subgroup 으로 face_eyes/face_parts 에 갈라진다(emit 소관).
+    **{_t: "face" for _t in [
+        "white pupils", "red pupils", "yellow pupils",
+        "eyes visible through hair", "eyebrows hidden by hair", "puckered lips",
+    ]},
+    "multiple expressions": "expression",
+    "dark persona": "persona",
+    "skin-covered horns": "horns",
 }
 # 이 빌더가 소유하지 않는 축으로 옮긴 것. 여기 두면 두 축에 겹쳐 나온다.
 MOVED_TO_FOREIGN_AXIS = {

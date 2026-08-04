@@ -17,6 +17,7 @@ merman
 angelfish
 school of fish
 eel
+butterflyfish
 manta ray
 sacabambaspis
 conch
@@ -30,4 +31,3 @@ surgeonfish
 whale shark
 puffer fish
 hermit crab
-butterflyfish

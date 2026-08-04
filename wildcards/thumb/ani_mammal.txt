@@ -1,8 +1,11 @@
 cat
+dog
 rabbit
 bat (animal)
 horse
+fox
 mouse
+wolf
 cat paws
 rabbit pose
 bear
@@ -24,18 +27,21 @@ otter
 snow rabbit
 raccoon
 goat
+puppy
 elephant
 seal (animal)
+ferret
 kitten
+welsh corgi
+fennec fox
+great pyrenees
 guinea pig
 koala
 tiger cub
 flying whale
+husky
+samoyed (dog)
 giraffe
+doberman
 alpaca
 siamese cat
-dog
-fox
-wolf
-ferret
-fennec fox

@@ -16,7 +16,19 @@ OUT = Path("wildcards/thumb")
 # 절단선 500 -> 149 (사용자 지시 2026-07-27). 이 아래는 한글 설명이 거의 없어
 # 그림이 유일한 설명 수단이 된다 — 썸네일의 값이 오히려 큰 구간이다.
 CUT = 149
-SUBGROUPS = ("other_animals", "cats", "birds", "insects", "fish", "plants")
+# `dogs`·`reptiles` 가 빠져 있었다 — 그래서 `dog`(14,935)·`wolf`·`lizard` 가
+# 동물 축 어디에도 없이 추천 글자 칩으로만 떴다(2026-08-04 전수조사).
+SUBGROUPS = ("other_animals", "cats", "birds", "insects", "fish", "plants",
+             "dogs", "reptiles")
+
+# 서브그룹 밖에 있지만 이 축이 맞는 것. DB 가 엉뚱한 서브그룹에 넣어 둔 것들이다
+# (`butterflyfish`·`glowing butterfly` 는 food_tags, `petals on liquid` 는 구도).
+EXTRA = {
+    "butterflyfish": "ani_aqua",
+    "glowing butterfly": "ani_bug",
+    "petals on liquid": "ani_plant",
+    "white snake": "ani_etc",       # `snake` 는 reptiles 인데 이쪽은 서브그룹이 없다
+}
 
 AXIS_SPEC = (
     ("ani_mammal", "포유류",   "animal", ()),
@@ -34,7 +46,8 @@ RE_MAMMAL = re.compile(
     r"\b(cat|dog|rabbit|mouse|rat|horse|bear|sheep|goat|cow|pig|fox|wolf|deer|tiger"
     r"|lion|panda|monkey|squirrel|hamster|ferret|bat|whale|dolphin|seal|otter"
     r"|raccoon|hedgehog|koala|kangaroo|elephant|giraffe|zebra|camel|llama|alpaca"
-    r"|donkey|pony|puppy|kitten|corgi|shiba)\b")
+    r"|donkey|pony|puppy|kitten|corgi|shiba|husky|doberman|pyrenees|samoyed"
+    r"|retriever|shepherd|poodle|dachshund|chihuahua)\b")
 
 
 def main() -> int:
@@ -72,14 +85,18 @@ def main() -> int:
                     pool.setdefault(t, sg)
 
     sub_axis = {sg: key for key, _l, _f, subs in AXIS_SPEC for sg in subs}
+    sub_axis["reptiles"] = "ani_etc"          # 파충류는 포유류 정규식에 안 걸린다
     axes: dict[str, list[str]] = {}
     for tag, sg in pool.items():
         if F(tag) < CUT or tag in assigned:
             continue
         key = sub_axis.get(sg)
-        if key is None:                       # other_animals / cats
+        if key is None:                       # other_animals / cats / dogs
             key = "ani_mammal" if RE_MAMMAL.search(tag) else "ani_etc"
         axes.setdefault(key, []).append(tag)
+    for tag, key in EXTRA.items():
+        if tag in raw and tag not in assigned and tag not in axes.get(key, []):
+            axes.setdefault(key, []).append(tag)
 
     total = 0
     (OUT / "_todo").mkdir(exist_ok=True)

@@ -1,13 +1,13 @@
 {
- "commit": "223adecd5c505e08e73c080c57ff0b431895e38b",
+ "commit": "5768b20d1b298849589b15f45a308f7f5c2f3ee1",
  "axis_count": 159,
- "tag_count": 12987,
+ "tag_count": 13123,
  "wired_axis_count": 158,
  "overlaps": {},
  "axes": {
   "ani_aqua": {
    "dir": "thumb",
-   "count": 32,
+   "count": 33,
    "tags": [
     "fish",
     "starfish",
@@ -28,6 +28,7 @@
     "angelfish",
     "school of fish",
     "eel",
+    "butterflyfish",
     "manta ray",
     "sacabambaspis",
     "conch",
@@ -81,11 +82,12 @@
   },
   "ani_bug": {
    "dir": "thumb",
-   "count": 25,
+   "count": 26,
    "tags": [
     "bug",
     "butterfly",
     "spider",
+    "glowing butterfly",
     "white butterfly",
     "moth",
     "beetle",
@@ -112,28 +114,35 @@
   },
   "ani_etc": {
    "dir": "thumb",
-   "count": 31,
+   "count": 38,
    "tags": [
     "animal",
+    "snake",
     "frog",
     "crab",
+    "white snake",
     "oversized animal",
     "clothed animal",
     "coral",
+    "turtle",
     "dinosaur",
     "calico",
     "boar",
     "snail",
     "reindeer",
+    "crocodilian",
     "animal head",
+    "lizard",
     "undersized animal",
     "gorilla",
     "slug",
     "bull",
     "tyrannosaurus rex",
+    "crocodile",
     "too many cats",
     "tapir",
     "weasel",
+    "cobra (animal)",
     "multiple cats",
     "piglet",
     "mole (animal)",
@@ -149,13 +158,16 @@
   },
   "ani_mammal": {
    "dir": "thumb",
-   "count": 36,
+   "count": 47,
    "tags": [
     "cat",
+    "dog",
     "rabbit",
     "bat (animal)",
     "horse",
+    "fox",
     "mouse",
+    "wolf",
     "cat paws",
     "rabbit pose",
     "bear",
@@ -177,21 +189,29 @@
     "snow rabbit",
     "raccoon",
     "goat",
+    "puppy",
     "elephant",
     "seal (animal)",
+    "ferret",
     "kitten",
+    "welsh corgi",
+    "fennec fox",
+    "great pyrenees",
     "guinea pig",
     "koala",
     "tiger cub",
     "flying whale",
+    "husky",
+    "samoyed (dog)",
     "giraffe",
+    "doberman",
     "alpaca",
     "siamese cat"
    ]
   },
   "ani_plant": {
    "dir": "thumb",
-   "count": 118,
+   "count": 119,
    "tags": [
     "flower",
     "tree",
@@ -240,6 +260,7 @@
     "ginkgo leaf",
     "green flower",
     "tulip",
+    "petals on liquid",
     "holly",
     "camellia",
     "cactus",
@@ -552,7 +573,7 @@
   },
   "body_nonhuman": {
    "dir": "thumb",
-   "count": 67,
+   "count": 73,
    "tags": [
     "claws",
     "animal hands",
@@ -620,7 +641,13 @@
     "glowing hands",
     "ghost hands",
     "stretched limb",
-    "goat legs"
+    "goat legs",
+    "material growth",
+    "personification",
+    "monsterification",
+    "turtle shell",
+    "rayman limbs",
+    "wolf paws"
    ]
   },
   "body_suggestive": {
@@ -677,7 +704,7 @@
   },
   "body_type": {
    "dir": "thumb",
-   "count": 59,
+   "count": 61,
    "tags": [
     "muscular",
     "loli",
@@ -737,12 +764,14 @@
     "triple amputee",
     "three sizes",
     "long torso",
-    "bloated"
+    "bloated",
+    "chibi",
+    "flexible"
    ]
   },
   "cloth_accessory": {
    "dir": "thumb",
-   "count": 169,
+   "count": 171,
    "tags": [
     "bow",
     "ribbon",
@@ -912,12 +941,14 @@
     "cow print gloves",
     "print bowtie",
     "holstered",
-    "fake facial hair"
+    "fake facial hair",
+    "crossed bandaids",
+    "chain leash"
    ]
   },
   "cloth_armor": {
    "dir": "thumb",
-   "count": 73,
+   "count": 75,
    "tags": [
     "armor",
     "shoulder armor",
@@ -991,7 +1022,9 @@
     "praetor suit",
     "cuisses",
     "deva battle suit",
-    "berserker armor"
+    "berserker armor",
+    "pauldrons",
+    "arm guards"
    ]
   },
   "cloth_bottom": {
@@ -1109,7 +1142,7 @@
   },
   "cloth_detail": {
    "dir": "thumb",
-   "count": 135,
+   "count": 137,
    "tags": [
     "frills",
     "sailor collar",
@@ -1245,7 +1278,9 @@
     "see-through cleavage",
     "underboob cutout",
     "framed breasts",
-    "back bow"
+    "back bow",
+    "see-through clothes",
+    "gold trim"
    ]
   },
   "cloth_dress": {
@@ -1348,7 +1383,7 @@
   },
   "cloth_eyewear": {
    "dir": "thumb",
-   "count": 86,
+   "count": 90,
    "tags": [
     "glasses",
     "mask",
@@ -1435,12 +1470,16 @@
     "flower eyepatch",
     "masquerade mask",
     "partially opaque glasses",
-    "hyottoko mask"
+    "hyottoko mask",
+    "black-framed eyewear",
+    "red-framed eyewear",
+    "semi-rimless eyewear",
+    "bespectacled"
    ]
   },
   "cloth_footwear": {
    "dir": "thumb",
-   "count": 86,
+   "count": 87,
    "tags": [
     "boots",
     "shoes",
@@ -1527,12 +1566,13 @@
     "cross-laced sandals",
     "zipper footwear",
     "snow boots",
-    "platform sandals"
+    "platform sandals",
+    "shoe soles"
    ]
   },
   "cloth_hairacc": {
    "dir": "thumb",
-   "count": 183,
+   "count": 185,
    "tags": [
     "hair ornament",
     "hair ribbon",
@@ -1716,7 +1756,9 @@
     "fan hair ornament",
     "mistletoe hair ornament",
     "rabbit ear hairband",
-    "print bow"
+    "print bow",
+    "hair rings",
+    "character hair ornament"
    ]
   },
   "cloth_handwear": {
@@ -1784,7 +1826,7 @@
   },
   "cloth_headwear": {
    "dir": "thumb",
-   "count": 218,
+   "count": 222,
    "tags": [
     "hat",
     "hood",
@@ -2003,12 +2045,16 @@
     "humagear headphones",
     "fire helmet",
     "antler ornament",
-    "newsboy cap"
+    "newsboy cap",
+    "traditional halo",
+    "interface headset",
+    "super crown",
+    "v-fin"
    ]
   },
   "cloth_legwear": {
    "dir": "thumb",
-   "count": 97,
+   "count": 99,
    "tags": [
     "thighhighs",
     "pantyhose",
@@ -2106,7 +2152,9 @@
     "american flag legwear",
     "horizontal-striped thighhighs",
     "vertical-striped pantyhose",
-    "argyle pantyhose"
+    "argyle pantyhose",
+    "ribbon-trimmed legwear",
+    "bridal garter"
    ]
   },
   "cloth_neck": {
@@ -2227,7 +2275,7 @@
   },
   "cloth_outer": {
    "dir": "thumb",
-   "count": 29,
+   "count": 30,
    "tags": [
     "apron",
     "cape",
@@ -2257,12 +2305,13 @@
     "sleeveless duster",
     "gingham apron",
     "lace-trimmed apron",
-    "ribbon-trimmed apron"
+    "ribbon-trimmed apron",
+    "collared jacket"
    ]
   },
   "cloth_pattern": {
    "dir": "thumb",
-   "count": 54,
+   "count": 57,
    "tags": [
     "striped",
     "floral print",
@@ -2317,7 +2366,10 @@
     "cherry blossom print",
     "flame print",
     "cloud print",
-    "constellation print"
+    "constellation print",
+    "striped clothes",
+    "plaid clothes",
+    "polka dot"
    ]
   },
   "cloth_revealing": {
@@ -2374,7 +2426,7 @@
   },
   "cloth_sleeve": {
    "dir": "thumb",
-   "count": 40,
+   "count": 42,
    "tags": [
     "long sleeves",
     "short sleeves",
@@ -2415,12 +2467,14 @@
     "multicolored sleeves",
     "pleated sleeves",
     "arm out of sleeve",
-    "compression sleeve"
+    "compression sleeve",
+    "very long sleeves",
+    "sleeves pushed up"
    ]
   },
   "cloth_small": {
    "dir": "thumb",
-   "count": 28,
+   "count": 32,
    "tags": [
     "jewelry",
     "bracelet",
@@ -2449,12 +2503,16 @@
     "mismatched earrings",
     "symphogear pendant",
     "star bracelet",
-    "fur bracelet"
+    "fur bracelet",
+    "wristwatch",
+    "blue gemstone",
+    "purple gemstone",
+    "dynamax band"
    ]
   },
   "cloth_state": {
    "dir": "thumb",
-   "count": 265,
+   "count": 266,
    "tags": [
     "open clothes",
     "open jacket",
@@ -2720,12 +2778,13 @@
     "dissolving clothes",
     "wardrobe malfunction",
     "panties on head",
-    "skirt caught on object"
+    "skirt caught on object",
+    "unbuttoned shirt"
    ]
   },
   "cloth_style": {
    "dir": "thumb",
-   "count": 40,
+   "count": 45,
    "tags": [
     "formal",
     "magical girl",
@@ -2766,12 +2825,17 @@
     "ancient egyptian clothes",
     "ouji fashion",
     "crossdressing",
-    "reverse trap"
+    "reverse trap",
+    "casual",
+    "enmaided",
+    "reverse outfit",
+    "victorian",
+    "living clothes"
    ]
   },
   "cloth_swim": {
    "dir": "thumb",
-   "count": 75,
+   "count": 76,
    "tags": [
     "swimsuit",
     "bikini",
@@ -2847,12 +2911,13 @@
     "highleg one-piece swimsuit",
     "cow print bikini",
     "flag print bikini",
-    "american flag bikini"
+    "american flag bikini",
+    "casual one-piece swimsuit"
    ]
   },
   "cloth_top": {
    "dir": "thumb",
-   "count": 146,
+   "count": 147,
    "tags": [
     "shirt",
     "jacket",
@@ -2999,7 +3064,8 @@
     "tan sweater",
     "print shirt",
     "vertical-striped shirt",
-    "turtleneck shirt"
+    "turtleneck shirt",
+    "sleeveless sweater"
    ]
   },
   "cloth_traditional": {
@@ -3170,7 +3236,7 @@
   },
   "cloth_uniform": {
    "dir": "thumb",
-   "count": 256,
+   "count": 257,
    "tags": [
     "school uniform",
     "serafuku",
@@ -3427,7 +3493,8 @@
     "mizuna girls' academy school uniform",
     "tsab air military uniform",
     "plugsuit (evangelion)",
-    "nijigasaki school uniform"
+    "nijigasaki school uniform",
+    "zero suit"
    ]
   },
   "cloth_waist": {
@@ -3623,7 +3690,7 @@
   },
   "expression": {
    "dir": "thumb",
-   "count": 120,
+   "count": 121,
    "tags": [
     "smile",
     "grin",
@@ -3744,7 +3811,8 @@
     "ruined for marriage",
     "narcissism",
     "troll face",
-    "gao"
+    "gao",
+    "multiple expressions"
    ]
   },
   "expression_from_pose": {
@@ -3769,7 +3837,7 @@
   },
   "expression_state": {
    "dir": "thumb",
-   "count": 46,
+   "count": 49,
    "tags": [
     "blush",
     "sweat",
@@ -3816,12 +3884,15 @@
     "nose bubble",
     "foaming at the mouth",
     "flying teardrops",
-    "hand blush"
+    "hand blush",
+    "body blush",
+    "shoulder blush",
+    "nervous sweating"
    ]
   },
   "expression_symbol": {
    "dir": "thumb",
-   "count": 74,
+   "count": 78,
    "tags": [
     ":d",
     ":o",
@@ -3896,7 +3967,11 @@
     ";/",
     "mg mg",
     "eye symbol",
-    "eye pop"
+    "eye pop",
+    "^ ^",
+    "> <",
+    "@ @",
+    "puff of air"
    ]
   },
   "eye_pattern": {
@@ -3911,7 +3986,7 @@
   },
   "face": {
    "dir": "thumb",
-   "count": 211,
+   "count": 217,
    "tags": [
     "parted lips",
     "teeth",
@@ -4123,7 +4198,13 @@
     "long mustache",
     "paw-shaped pupils",
     "money-shaped pupils",
-    "broken tooth"
+    "broken tooth",
+    "white pupils",
+    "red pupils",
+    "yellow pupils",
+    "eyes visible through hair",
+    "eyebrows hidden by hair",
+    "puckered lips"
    ]
   },
   "face_shape": {
@@ -4376,7 +4457,7 @@
   },
   "fx_light": {
    "dir": "thumb",
-   "count": 15,
+   "count": 16,
    "tags": [
     "lens flare",
     "backlighting",
@@ -4392,12 +4473,13 @@
     "underlighting",
     "crack of light",
     "bioluminescence",
-    "outer glow"
+    "outer glow",
+    "dark"
    ]
   },
   "fx_symbol": {
    "dir": "thumb",
-   "count": 242,
+   "count": 243,
    "tags": [
     "heart",
     "speech bubble",
@@ -4640,12 +4722,13 @@
     "soviet flag",
     "orion (constellation)",
     "trefoil",
-    "spoken ellipsis"
+    "spoken ellipsis",
+    "musical staff"
    ]
   },
   "fx_tone": {
    "dir": "thumb",
-   "count": 31,
+   "count": 34,
    "tags": [
     "monochrome",
     "greyscale",
@@ -4677,12 +4760,15 @@
     "monochrome background",
     "neon palette",
     "color coordination",
-    "sepia background"
+    "sepia background",
+    "partially colored",
+    "faux retro artstyle",
+    "faux figurine"
    ]
   },
   "hair_pattern": {
    "dir": "thumb",
-   "count": 12,
+   "count": 14,
    "tags": [
     "multicolored hair",
     "streaked hair",
@@ -4695,12 +4781,14 @@
     "roots (hair)",
     "dyed ahoge",
     "patterned hair",
-    "hair blush"
+    "hair blush",
+    "rainbow hair",
+    "striped hair"
    ]
   },
   "hair_style": {
    "dir": "thumb",
-   "count": 184,
+   "count": 186,
    "tags": [
     "twintails",
     "sidelocks",
@@ -4885,12 +4973,14 @@
     "tri drills",
     "mechanical hair",
     "comb over",
-    "flower-shaped hair"
+    "flower-shaped hair",
+    "bald",
+    "kishimen hair"
    ]
   },
   "horns": {
    "dir": "thumb",
-   "count": 36,
+   "count": 37,
    "tags": [
     "horns",
     "demon horns",
@@ -4927,12 +5017,13 @@
     "low horns",
     "holographic horns",
     "drawn horns",
-    "transparent horns"
+    "transparent horns",
+    "skin-covered horns"
    ]
   },
   "job": {
    "dir": "thumb",
-   "count": 46,
+   "count": 47,
    "tags": [
     "nun",
     "office lady",
@@ -4979,7 +5070,8 @@
     "female butler",
     "sukeban",
     "firefighter",
-    "military operator"
+    "military operator",
+    "clown"
    ]
   },
   "job_male": {
@@ -5574,7 +5666,7 @@
   },
   "marking": {
    "dir": "thumb",
-   "count": 99,
+   "count": 117,
    "tags": [
     "nail polish",
     "tattoo",
@@ -5674,12 +5766,30 @@
     "tongue piercing",
     "glowing lines",
     "tramp stamp",
-    "cutie mark"
+    "cutie mark",
+    "purple nails",
+    "multicolored nails",
+    "nose piercing",
+    "face piercing",
+    "navel piercing",
+    "body markings",
+    "lipstick mark",
+    "mole on neck",
+    "mole on stomach",
+    "mole on body",
+    "mole on arm",
+    "mole on armpit",
+    "mole on collarbone",
+    "mole on shoulder",
+    "scar on neck",
+    "scar on stomach",
+    "scar on leg",
+    "stitched neck"
    ]
   },
   "mech": {
    "dir": "thumb",
-   "count": 13,
+   "count": 14,
    "tags": [
     "robot",
     "android",
@@ -5693,7 +5803,8 @@
     "single mechanical hand",
     "clothed robot",
     "doll joints",
-    "subdermal port"
+    "subdermal port",
+    "mechabare"
    ]
   },
   "meta_frame": {
@@ -5885,7 +5996,7 @@
   },
   "obj_container": {
    "dir": "thumb",
-   "count": 178,
+   "count": 179,
    "tags": [
     "cup",
     "bottle",
@@ -6064,7 +6175,8 @@
     "planter",
     "lid",
     "washbowl",
-    "dvd case"
+    "dvd case",
+    "drink can"
    ]
   },
   "obj_etc": {
@@ -6367,7 +6479,7 @@
   },
   "obj_food": {
    "dir": "thumb",
-   "count": 338,
+   "count": 341,
    "tags": [
     "food",
     "fruit",
@@ -6706,7 +6818,10 @@
     "shiruko (food)",
     "watermelon seeds",
     "maxim tomato",
-    "mooncake"
+    "mooncake",
+    "donut",
+    "mandarin orange",
+    "orange slice"
    ]
   },
   "obj_furniture": {
@@ -6845,7 +6960,7 @@
   },
   "obj_play": {
    "dir": "thumb",
-   "count": 88,
+   "count": 92,
    "tags": [
     "bell",
     "jingle bell",
@@ -6934,7 +7049,11 @@
     "fender telecaster",
     "music stand",
     "erhu",
-    "servant card (fate/grand order)"
+    "servant card (fate/grand order)",
+    "swim ring",
+    "volleyball",
+    "basketball",
+    "baseball"
    ]
   },
   "obj_restraint": {
@@ -6961,7 +7080,7 @@
   },
   "obj_tech": {
    "dir": "thumb",
-   "count": 148,
+   "count": 150,
    "tags": [
     "phone",
     "cellphone",
@@ -7110,12 +7229,14 @@
     "airpods",
     "jet engine",
     "treadmill",
-    "circuit board"
+    "circuit board",
+    "computer keyboard",
+    "computer mouse"
    ]
   },
   "obj_tool": {
    "dir": "thumb",
-   "count": 345,
+   "count": 346,
    "tags": [
     "book",
     "umbrella",
@@ -7461,7 +7582,8 @@
     "ink stamp",
     "skis",
     "hashitsuki nata",
-    "mosquito coil"
+    "mosquito coil",
+    "selfie stick"
    ]
   },
   "obj_vehicle": {
@@ -7570,7 +7692,7 @@
   },
   "obj_weapon": {
    "dir": "thumb",
-   "count": 343,
+   "count": 344,
    "tags": [
     "weapon",
     "sword",
@@ -7914,12 +8036,13 @@
     "splat charger (splatoon)",
     "x buster",
     "war hammer",
-    "sheathed"
+    "sheathed",
+    "ship turret"
    ]
   },
   "persona": {
    "dir": "thumb",
-   "count": 12,
+   "count": 13,
    "tags": [
     "assertive female",
     "tomboy",
@@ -7932,12 +8055,13 @@
     "clumsy",
     "hikikomori",
     "glutton",
-    "kuudere"
+    "kuudere",
+    "dark persona"
    ]
   },
   "pose_action": {
    "dir": "thumb",
-   "count": 124,
+   "count": 125,
    "tags": [
     "lifting own clothes",
     "grabbing",
@@ -8062,7 +8186,8 @@
     "bunching hair",
     "toilet use",
     "struggling",
-    "hugging tail"
+    "hugging tail",
+    "exercising"
    ]
   },
   "pose_action_2": {
@@ -9195,7 +9320,7 @@
   },
   "pose_hand": {
    "dir": "thumb",
-   "count": 110,
+   "count": 111,
    "tags": [
     "hand up",
     "arm up",
@@ -9306,7 +9431,8 @@
     "drying hair",
     "cutting hair",
     "playing with hair",
-    "applying makeup"
+    "applying makeup",
+    "very long fingernails"
    ]
   },
   "pose_hand_m": {
@@ -9340,7 +9466,7 @@
   },
   "pose_holding": {
    "dir": "thumb",
-   "count": 106,
+   "count": 108,
    "tags": [
     "holding",
     "holding weapon",
@@ -9447,7 +9573,9 @@
     "holding stylus",
     "holding fishing rod",
     "holding headphones",
-    "holding sheath"
+    "holding sheath",
+    "holding unworn clothes",
+    "holding flute"
    ]
   },
   "pose_holding_2": {
@@ -9808,7 +9936,7 @@
   },
   "pose_mouth": {
    "dir": "thumb",
-   "count": 53,
+   "count": 54,
    "tags": [
     "eating",
     "mouth hold",
@@ -9862,7 +9990,8 @@
     "knife in mouth",
     "drinking fountain",
     "licking blade",
-    "licking finger"
+    "licking finger",
+    "blowing bubbles"
    ]
   },
   "pose_mouth_m": {
@@ -10353,7 +10482,7 @@
   },
   "pose_posture": {
    "dir": "thumb",
-   "count": 98,
+   "count": 99,
    "tags": [
     "standing",
     "sitting",
@@ -10452,7 +10581,8 @@
     "sitting on branch",
     "sitting on desk",
     "on vehicle",
-    "sitting on tree stump"
+    "sitting on tree stump",
+    "stuck"
    ]
   },
   "pose_posture_2": {
@@ -12266,7 +12396,7 @@
   },
   "skin": {
    "dir": "thumb",
-   "count": 26,
+   "count": 30,
    "tags": [
     "dark skin",
     "dark-skinned female",
@@ -12293,7 +12423,11 @@
     "tanline peek",
     "shirt tan",
     "revealing tanlines",
-    "accessory tan"
+    "accessory tan",
+    "pale skin",
+    "very dark skin",
+    "deep skin",
+    "two-tone skin"
    ]
   },
   "species": {
@@ -12661,7 +12795,7 @@
   },
   "view_layout": {
    "dir": "thumb",
-   "count": 41,
+   "count": 42,
    "tags": [
     "multiple views",
     "convenient censoring",
@@ -12703,12 +12837,13 @@
     "screencap inset",
     "circle formation",
     "inconvenient breasts",
-    "convenient breasts"
+    "convenient breasts",
+    "mirror selfie"
    ]
   },
   "view_shot": {
    "dir": "thumb",
-   "count": 24,
+   "count": 25,
    "tags": [
     "full body",
     "upper body",
@@ -12733,7 +12868,8 @@
     "very wide shot",
     "rounded corners",
     "knees out of frame",
-    "mugshot"
+    "mugshot",
+    "cropped shoulders"
    ]
   },
   "wings": {

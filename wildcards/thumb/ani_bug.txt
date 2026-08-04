@@ -1,6 +1,7 @@
 bug
 butterfly
 spider
+glowing butterfly
 white butterfly
 moth
 beetle
@@ -23,4 +24,3 @@ grasshopper
 firefly
 mandibles
 scorpion
-glowing butterfly

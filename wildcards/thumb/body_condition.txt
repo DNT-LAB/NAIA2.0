@@ -30,8 +30,10 @@ bandaged neck
 slap mark
 bruise on face
 hickey
+impaled
 blood on arm
 paint splatter on face
+sick
 bandaged wrist
 cream on face
 blood on leg
@@ -48,12 +50,15 @@ full mouth
 whip marks
 bruised eye
 blood on chest
+oiled
 bandages over eyes
 broken arm
 blood on feet
 bleeding from forehead
 slap mark on face
+bloody wings
 bandaged ear
+sunburn
 dirty hands
 bandaged tail
 bandaged ankle
@@ -64,9 +69,4 @@ mouth submerged
 bandaged knees
 bandage on leg
 bandaged horn
-sick
-sunburn
-oiled
-impaled
-bloody wings
 blood on teeth

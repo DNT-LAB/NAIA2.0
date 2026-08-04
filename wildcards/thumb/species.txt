@@ -108,10 +108,10 @@ chipmunk girl
 kappa
 qilin (mythology)
 seraph
-phoenix
 komainu
-dolphin girl
+phoenix
 dullahan
+dolphin girl
 rito
 orca girl
 shadow (shadows house)
@@ -146,13 +146,13 @@ unicorn girl
 mushroom girl
 cerberus
 cockroach girl
-ferret girl
 cheetah girl
+ferret girl
 whale girl
 ghost girl
-zebra girl
-snake girl
 slug girl
+snake girl
+zebra girl
 sphinx
 dryad
 capybara girl
@@ -175,8 +175,8 @@ camel girl
 skunk girl
 axolotl girl
 chupacabra
-lynx girl
 crab girl
+lynx girl
 moose girl
 gnome
 mindflayer

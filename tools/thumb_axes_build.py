@@ -796,6 +796,77 @@ for _t, _dest in IMPORTED_FROM_NSFW.items():
     if not any(_t in _v for _v in AXES.values()):
         AXES[_dest].append(_t)
 
+# ── 2026-08-03 재분류 (사용자 지시) ────────────────────────────────────────
+# 손으로 옮긴 배치를 **여기 남긴다**. 이 스크립트는 아래 저장 루프에서 축 .txt 를
+# 통째로 덮어쓰므로, 여기 없으면 다음 실행에 원래 자리로 돌아간다 —
+# 실측으로 30개가 소실되는 것을 확인하고 박아 넣었다.
+#
+# 기준은 하나다: **그 태그가 캐릭터의 무엇을 정하는가.**
+RECLASSIFIED = {
+    # 이름에 breasts 가 있을 뿐 가슴 '크기'가 아니라 몸의 생김새다.
+    # `veiny arms`·`perky breasts` 와 같은 줄에 있어야 한다.
+    "sagging breasts": "body_feature",
+    "veiny breasts": "body_feature",
+    # 사람이 아닌 얼굴 부위. 얼굴 축에 있었지만 `head fins`·`gills`·`hooves` 쪽이 맞다.
+    "beak": "body_nonhuman",
+    "snout": "body_nonhuman",
+    "animal nose": "body_nonhuman",
+    "pig nose": "body_nonhuman",
+    "tusks": "body_nonhuman",
+    "whiskers": "body_nonhuman",
+    "forked tongue": "body_nonhuman",
+    "prehensile tongue": "body_nonhuman",
+    # 부상·오염에 섞여 있던 표정·생리 상태. 근접 중복이 슬롯을 넘어 갈려 있었다 —
+    # `mouth drool` <-> `drooling`, `steam from mouth` <-> `steaming body`.
+    "mouth drool": "expression_state",
+    "saliva drip": "expression_state",
+    "steam from mouth": "expression_state",
+    "drunk": "expression_state",
+    "tipsy": "expression_state",
+    "hangover": "expression_state",
+    "dizzy": "expression_state",
+    "dazed": "expression_state",
+    "turn pale": "expression_state",
+    "pain": "expression_state",
+    "headache": "expression_state",
+    "fever": "expression_state",
+    "snot": "expression_state",
+    "snot trail": "expression_state",
+    "runny nose": "expression_state",
+    "nose bubble": "expression_state",
+    "foaming at the mouth": "expression_state",
+    # 피어싱은 얼굴 '부위'가 아니라 표식이다.
+    "chin piercing": "marking",
+    "tongue piercing": "marking",
+    # 얼굴에 있던 것 — 다른 `blood on *` 는 전부 부상 축이다.
+    "blood on teeth": "body_condition",
+    # 빌더가 species_male 로 보내지만 실사용은 여성 수인 서술이다.
+    "furry female": "species",
+}
+# 이 빌더가 소유하지 않는 축으로 옮긴 것. 여기 두면 두 축에 겹쳐 나온다.
+MOVED_TO_FOREIGN_AXIS = {
+    "doll joints",        # -> mech (기계·사이보그)
+    "subdermal port",     # -> mech
+    "fake facial hair",   # -> cloth_accessory (`fake mustache`·`fake beard` 옆)
+}
+
+
+def _strip_from_axes(tag: str) -> None:
+    for _v in AXES.values():
+        while tag in _v:
+            _v.remove(tag)
+
+
+for _t, _dest in RECLASSIFIED.items():
+    if _t not in raw:
+        raise SystemExit(f"RECLASSIFIED: 태그 DB 에 없다 -> {_t!r}")
+    if _dest not in AXES:
+        raise SystemExit(f"RECLASSIFIED: 없는 축 -> {_dest!r} (파일을 덮어쓴다)")
+    _strip_from_axes(_t)
+    AXES[_dest].append(_t)
+for _t in MOVED_TO_FOREIGN_AXIS:
+    _strip_from_axes(_t)
+
 # 남성 베이스 배치는 파일을 나눠 내보낸다(1girl 베이스에서는 렌더되지 않는다).
 male_split = {}
 for k, v in AXES.items():

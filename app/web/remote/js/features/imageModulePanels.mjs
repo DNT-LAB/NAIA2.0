@@ -18,6 +18,8 @@ export function createImageModulePanels({
   positionFloatingPanel = null,
   confirmDialog = async () => false,
   promptDialog = async () => null,
+  // Interactive 패널 접근자. 캐릭터 에셋의 프롬프트를 슬롯으로 나눠 넣을 때만 쓴다.
+  getInteractivePanel = () => null,
 }) {
   const sliderDebounce = {};
   // 미커밋 IE draft 보존: 사용자가 IE 슬라이더를 드래그했지만 아직 인코딩(2 Anlas)하지 않은 값을
@@ -976,7 +978,9 @@ export function createImageModulePanels({
       const id = String(entry.id || '');
       const name = String(entry.display_name || id);
       const src = `/api/character-asset/thumb?id=${encodeURIComponent(id)}&size=grid&v=${entry.revision || 0}`;
-      return `<div class="mod-storage-item" onclick="applyCharRefAsset('${escHtml(id)}')"` +
+      // 바로 적용하지 않고 **무엇까지 가져올지 먼저 묻는다**(사용자 지시).
+      return `<div class="mod-storage-item" onclick="openCharRefAssetAsk('${escHtml(id)}',` +
+        ` '${escHtml(name).replace(/'/g, "&#39;")}', this)"` +
         ` title="${escHtml(name)}">` +
         `<img class="mod-storage-thumb" src="${escHtml(src)}" alt="" loading="lazy" decoding="async">` +
         `<span class="mod-storage-name">${escHtml(name)}</span></div>`;
@@ -987,10 +991,69 @@ export function createImageModulePanels({
       "setCharRefSource('asset')");
   }
 
-  /** 에셋을 **레퍼런스로만** 붙인다. `/apply` 가 아니라 전용 라우트다 — 그쪽은 캐릭터
-   *  프롬프트까지 슬롯에 적용해 Interactive 의 캐릭터 블록과 다툰다. */
-  async function applyCharRefAsset(id) {
-    if (!_storageApplyGuard('asset:' + id)) return;
+  // ---- 에셋을 가져올 때 프롬프트도 함께 가져올지 묻는다 --------------------
+  // 에셋은 NAI 캐릭터 프롬프트를 통째로 들고 있다. 이미지만 필요할 때도 있고
+  // 외형까지 통째로 가져오고 싶을 때도 있어서 **누를 때 고르게** 한다.
+  // 버튼 방식은 Assets 바의 캐릭터 검색 팝업과 같은 규약이다.
+  let _assetAsk = null;
+
+  function closeAssetAsk() {
+    if (_assetAsk) { _assetAsk.remove(); _assetAsk = null; }
+    document.removeEventListener('mousedown', _assetAskOutside, true);
+    document.removeEventListener('keydown', _assetAskKey, true);
+  }
+  function _assetAskOutside(event) {
+    if (_assetAsk && _assetAsk.contains(event.target)) return;
+    closeAssetAsk();
+  }
+  function _assetAskKey(event) {
+    if (event.key === 'Escape') { event.stopPropagation(); closeAssetAsk(); }
+  }
+
+  /** 그 카드에 붙여 연다. 아래로 펼치되 화면 밖이면 위로 뒤집는다(팝업 공통 규약). */
+  function openAssetAsk(id, name, anchor) {
+    closeAssetAsk();
+    const el = document.createElement('div');
+    el.className = 'ia-as-ask is-over-module';
+    el.innerHTML =
+      '<button type="button" class="ia-as-askclose" data-ask-close="1"' +
+      ' title="닫기" aria-label="닫기">✕</button>' +
+      `<div class="ia-as-askname">${escHtml(name)}</div>` +
+      '<div class="ia-as-asksub">무엇까지 가져올까요</div>' +
+      '<div class="ia-as-askbtns is-col">' +
+      '<button type="button" class="ia-as-askbtn" data-ask-kind="image"' +
+      ' title="레퍼런스 이미지만 붙입니다">이미지만</button>' +
+      '<button type="button" class="ia-as-askbtn" data-ask-kind="char"' +
+      ' title="머리·눈·표정·신체·종족 슬롯을 채웁니다">이미지 + 캐릭터 특징</button>' +
+      '<button type="button" class="ia-as-askbtn is-all" data-ask-kind="all"' +
+      ' title="특징에 의상·소품까지 함께 채웁니다">이미지 + 캐릭터 + 의상</button>' +
+      '</div>';
+    document.body.appendChild(el);
+    _assetAsk = el;
+    const r = anchor.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - box.width - 8));
+    let top = r.bottom + 6;
+    if (top + box.height > window.innerHeight - 8) top = Math.max(8, r.top - box.height - 6);
+    el.style.left = Math.round(left) + 'px';
+    el.style.top = Math.round(top) + 'px';
+    el.addEventListener('click', event => {
+      const t = event.target.closest('[data-ask-close],[data-ask-kind]');
+      if (!t) return;
+      event.preventDefault();
+      const kind = t.dataset.askKind;
+      closeAssetAsk();
+      if (kind) void applyCharRefAsset(id, kind);
+    });
+    document.addEventListener('mousedown', _assetAskOutside, true);
+    document.addEventListener('keydown', _assetAskKey, true);
+  }
+
+  /** 에셋을 레퍼런스로 붙이고, 고른 범위만큼 프롬프트를 Interactive 슬롯에 나눠 넣는다.
+   *  `/apply` 가 아니라 전용 라우트를 쓴다 — 그쪽은 NAI 캐릭터 블록에 통째로 적용해
+   *  Interactive 의 캐릭터 블록과 다툰다. */
+  async function applyCharRefAsset(id, kind = 'image') {
+    if (!_storageApplyGuard('asset:' + id + ':' + kind)) return;
     try {
       const response = await fetchFn('/api/character-asset/reference/attach', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -1000,6 +1063,23 @@ export function createImageModulePanels({
       if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
       showToast('레퍼런스로 붙였습니다', 'success');
       openModule('character_reference', {forceOpen: true});
+      if (kind === 'image') return;
+      // 프롬프트는 목록 응답에 없다 — 고른 경우에만 상세를 한 번 더 부른다.
+      const panel = getInteractivePanel && getInteractivePanel();
+      if (!panel || typeof panel.applyAssetPrompt !== 'function') {
+        showToast('Interactive 패널이 없어 프롬프트는 넣지 못했습니다', 'warning');
+        return;
+      }
+      const detail = await fetchFn(
+        '/api/character-asset/detail?id=' + encodeURIComponent(id), {cache: 'no-store'});
+      const d = await detail.json();
+      if (!detail.ok || d.error) throw new Error(d.error || `HTTP ${detail.status}`);
+      const prompt = String(d.character_prompt || (d.character || {}).character_prompt || '');
+      if (!prompt.trim()) {
+        showToast('이 에셋에는 캐릭터 프롬프트가 없습니다', 'warning');
+        return;
+      }
+      panel.applyAssetPrompt(prompt, kind === 'char' ? 'char' : 'all');
     } catch (error) {
       showToast(`레퍼런스 적용 실패: ${error.message}`, 'error');
     }
@@ -1118,6 +1198,9 @@ export function createImageModulePanels({
     applyCharRefStorage,
     setCharRefSource,
     applyCharRefAsset,
+    // 내부 이름은 `openAssetAsk` 다. 축약형(`openCharRefAssetAsk,`)으로 두면
+    // 같은 이름의 **전역 함수**가 잡혀 자기 자신을 무한히 부른다(실측: 스택 초과).
+    openCharRefAssetAsk: openAssetAsk,
     renderVibeStorage,
     showVibeStorageTab,
     applyVibeStorage,

@@ -891,7 +891,7 @@ let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveBrowse = null;
 let interactiveAssetsPanel = null;
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260804-ia161')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260804-ia163')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -1465,7 +1465,7 @@ const e621EventPanelReady = import('./js/features/e621EventPanel.mjs?v=20260603-
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260803-crsrc1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260804-cra4')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -1481,6 +1481,9 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
       positionFloatingPanel,
       confirmDialog: showConfirmDialog,
       promptDialog: showPromptDialog,
+      // 캐릭터 에셋의 프롬프트를 Interactive 슬롯으로 나눠 넣을 때만 쓴다.
+      // 게터로 넘기는 이유는 이 패널이 Interactive 패널보다 먼저 만들어지기 때문이다.
+      getInteractivePanel: () => interactivePanel,
     });
   })
   .catch(error => {
@@ -8309,8 +8312,11 @@ function setCharRefSource(source) {
   if (imageModulePanels) imageModulePanels.setCharRefSource(source);
 }
 
-function applyCharRefAsset(id) {
-  if (imageModulePanels) imageModulePanels.applyCharRefAsset(id);
+function openCharRefAssetAsk(id, name, anchor) {
+  if (imageModulePanels) imageModulePanels.openCharRefAssetAsk(id, name, anchor);
+}
+function applyCharRefAsset(id, kind) {
+  if (imageModulePanels) imageModulePanels.applyCharRefAsset(id, kind);
 }
 
 function renderVibeStorage(m) {

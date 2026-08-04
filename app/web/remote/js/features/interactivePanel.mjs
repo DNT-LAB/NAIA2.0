@@ -3288,6 +3288,124 @@ export function createInteractivePanel({
     if (rule.multiPalette && !multiRuleOn(axisRef, rule)) clearExtraColors(rule.multiPalette);
   }
 
+  // ---- 캐릭터 에셋 프롬프트를 슬롯으로 나눠 담기 ---------------------------
+  // 에셋은 NAI 캐릭터 프롬프트를 통째로 들고 있다(`girl, blue eyes, elf, bikini …`).
+  // 그대로 한 칸에 부으면 Interactive 가 못 다루므로 축 정의로 갈라 넣는다.
+
+  /** 특징 = 사람 자체. 의상 = 걸친 것. 사용자가 고른 범위를 이걸로 가른다. */
+  const ASSET_FEATURE_SLOTS = ['머리', '눈·얼굴', '표정', '신체', '종족·수인'];
+  const ASSET_OUTFIT_SLOTS = ['의상', '소품·장식'];
+  // 성별은 슬롯 태그가 아니라 캐릭터의 성별 토글이 만든다(`renderPrompt` 가 붙인다).
+  // 여기 두면 `girl, 1girl, girl` 처럼 겹친다 — 토글로 흡수하고 태그는 버린다.
+  const ASSET_GENDER = new Map([
+    ['girl', 'female'], ['1girl', 'female'], ['female', 'female'], ['woman', 'female'],
+    ['boy', 'male'], ['1boy', 'male'], ['male', 'male'], ['man', 'male'],
+  ]);
+
+  /** 태그(소문자) -> {slot, excl}. **축 정의에서 만든다** — 별도 사전을 두면 갈라진다.
+   *  `excl` 은 그 태그가 배타 축(팔레트·슬라이더) 소속일 때 같은 축의 태그 전부다 —
+   *  넣을 때 나머지를 걷어내지 않으면 `long hair, short hair` 처럼 모순이 남는다. */
+  let _assetSlotOf = null;
+  function assetSlotOf() {
+    if (_assetSlotOf) return _assetSlotOf;
+    const m = new Map();
+    for (const sub of CHAR_SUBS) {
+      for (const sec of (sub.sections || [])) {
+        let tags = [];
+        let excl = null;
+        if (sec.kind === 'palette') {
+          tags = (PALETTES[sec.ref] || []).map(d => d.tag);
+          excl = tags.map(t => String(t).toLowerCase());
+        } else if (sec.kind === 'slider') {
+          tags = (SLIDERS[sec.ref] || {}).steps || [];
+          excl = tags.map(t => String(t).toLowerCase());
+        } else {
+          tags = THUMB_TAGS[sec.ref] || [];         // thumb / thumb_extra
+        }
+        for (const t of tags) {
+          const k = String(t || '').trim().toLowerCase();
+          if (k && !m.has(k)) m.set(k, {slot: sub.key, excl});
+        }
+      }
+    }
+    return (_assetSlotOf = m);
+  }
+
+  /** 프롬프트 문자열 -> 태그. NAI 가중치(`1.2::tag ::`)와 괄호를 벗긴다. */
+  function assetTags(text) {
+    return String(text || '')
+      .split(',')
+      .map(s => s.replace(/^\s*-?\d*\.?\d*\s*::/, '').replace(/::\s*$/, '')
+                 .replace(/[{}\[\]]/g, '').trim())
+      .filter(Boolean);
+  }
+
+  /**
+   * 캐릭터 에셋의 프롬프트를 활성 캐릭터 슬롯에 나눠 넣는다.
+   *
+   * @param kind  'char' = 특징만 · 'all' = 특징 + 의상
+   * 축에서 못 찾은 태그는 **버리지 않고** 캐릭터 슬롯에 묶음으로 보낸다(사용자 지시) —
+   * 에셋 프롬프트에는 작품 고유 태그가 섞여 있어 버리면 캐릭터가 달라진다.
+   */
+  function applyAssetPrompt(promptText, kind = 'all') {
+    // 펼쳐 둔 캐릭터가 대상이다. 없으면 첫 칸 — 슬롯이 하나뿐인 경우가 대부분이다.
+    const c = state.chars.find(x => x.open) || state.chars[0];
+    if (!c) { showToast('캐릭터 슬롯이 없습니다.', 'error'); return false; }
+    const want = new Set(kind === 'char'
+      ? ASSET_FEATURE_SLOTS
+      : [...ASSET_FEATURE_SLOTS, ...ASSET_OUTFIT_SLOTS]);
+    const map = assetSlotOf();
+    const add = new Map();          // slot key -> [태그]
+    const bundle = [];              // 축에 없는 것
+    let outOfScope = 0, gender = '';
+    const seen = new Set();
+    for (const tag of assetTags(promptText)) {
+      const k = tag.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const g = ASSET_GENDER.get(k);
+      if (g) { gender = g; continue; }            // 성별 토글이 흡수한다
+      const hit = map.get(k);
+      if (!hit) { bundle.push(tag); continue; }
+      if (!want.has(hit.slot)) { outOfScope++; continue; }
+      if (!add.has(hit.slot)) add.set(hit.slot, []);
+      add.get(hit.slot).push({tag, excl: hit.excl});
+    }
+    if (gender) c.gender = gender;
+    let n = 0;
+    for (const [slot, items] of add) {
+      let cur = (c.fields[slot] || []).slice();
+      for (const {tag, excl} of items) {
+        // 배타 축(머리 길이·가슴 크기·머리색 등)은 **갈아끼운다.** 그냥 더하면
+        // 기본값이 남아 `long hair, short hair` 처럼 모순된 프롬프트가 된다.
+        if (excl) {
+          const drop = new Set(excl);
+          cur = cur.filter(t => !drop.has(t.toLowerCase()));
+        }
+        if (cur.some(t => t.toLowerCase() === tag.toLowerCase())) continue;
+        cur.push(tag); n++;
+      }
+      c.fields[slot] = cur;
+    }
+    if (bundle.length) {
+      const cur = (c.fields[CHAR_TAG_SLOT] || []).slice();
+      const low = new Set(cur.map(t => t.toLowerCase()));
+      for (const t of bundle) {
+        if (low.has(t.toLowerCase())) continue;
+        cur.push(t); low.add(t.toLowerCase());
+      }
+      c.fields[CHAR_TAG_SLOT] = cur;
+    }
+    renderBlocks();
+    emitChange();
+    notifyRoster();
+    const parts = [`${n + bundle.length}개 넣음`];
+    if (bundle.length) parts.push(`축 밖 ${bundle.length}개는 캐릭터 슬롯으로`);
+    if (outOfScope) parts.push(`범위 밖 ${outOfScope}개 제외`);
+    showToast(parts.join(' · '), 'success');
+    return true;
+  }
+
   /** 팔레트 소속 색을 전부 제거한다(조건부 팔레트가 닫힐 때). */
   function clearAllColors(paletteRef) {
     const chosen = paletteChosen(paletteRef);
@@ -4042,6 +4160,7 @@ export function createInteractivePanel({
     },
     applySnapshotCharById,
     applyCharacterPresetTo,
+    applyAssetPrompt,
     // Assets 바의 [+] 가 쓴다. 좌측 [+캐릭터 슬롯] 과 같은 동작이라 상한/토스트를 공유한다.
     addCharacterSlot: addCharacter,
     // Assets 스택 옆 컨트롤이 쓴다. 좌측 헤더의 ACTIVE/[x] 와 **같은 함수**라

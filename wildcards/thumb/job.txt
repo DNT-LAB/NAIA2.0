@@ -44,3 +44,4 @@ female butler
 sukeban
 firefighter
 military operator
+clown

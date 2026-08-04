@@ -71,3 +71,5 @@ praetor suit
 cuisses
 deva battle suit
 berserker armor
+pauldrons
+arm guards

@@ -209,3 +209,9 @@ long mustache
 paw-shaped pupils
 money-shaped pupils
 broken tooth
+white pupils
+red pupils
+yellow pupils
+eyes visible through hair
+eyebrows hidden by hair
+puckered lips

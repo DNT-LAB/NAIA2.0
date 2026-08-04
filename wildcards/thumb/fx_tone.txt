@@ -29,3 +29,6 @@ monochrome background
 neon palette
 color coordination
 sepia background
+partially colored
+faux retro artstyle
+faux figurine

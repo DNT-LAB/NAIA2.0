@@ -336,3 +336,6 @@ shiruko (food)
 watermelon seeds
 maxim tomato
 mooncake
+donut
+mandarin orange
+orange slice

@@ -341,3 +341,4 @@ splat charger (splatoon)
 x buster
 war hammer
 sheathed
+ship turret

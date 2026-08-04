@@ -84,3 +84,7 @@ flower eyepatch
 masquerade mask
 partially opaque glasses
 hyottoko mask
+black-framed eyewear
+red-framed eyewear
+semi-rimless eyewear
+bespectacled

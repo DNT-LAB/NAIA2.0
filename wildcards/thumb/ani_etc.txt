@@ -29,3 +29,8 @@ cub
 dead animal
 serval
 ape
+snake
+white snake
+turtle
+crocodilian
+lizard

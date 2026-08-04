@@ -30,3 +30,4 @@ surgeonfish
 whale shark
 puffer fish
 hermit crab
+butterflyfish

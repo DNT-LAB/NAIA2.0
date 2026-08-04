@@ -176,3 +176,4 @@ planter
 lid
 washbowl
 dvd case
+drink can

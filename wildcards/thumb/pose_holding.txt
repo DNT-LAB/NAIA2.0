@@ -104,3 +104,5 @@ holding stylus
 holding fishing rod
 holding headphones
 holding sheath
+holding unworn clothes
+holding flute

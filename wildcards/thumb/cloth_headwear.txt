@@ -216,3 +216,7 @@ humagear headphones
 fire helmet
 antler ornament
 newsboy cap
+traditional halo
+interface headset
+super crown
+v-fin

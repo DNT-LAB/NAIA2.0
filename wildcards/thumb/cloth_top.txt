@@ -144,3 +144,4 @@ tan sweater
 print shirt
 vertical-striped shirt
 turtleneck shirt
+sleeveless sweater

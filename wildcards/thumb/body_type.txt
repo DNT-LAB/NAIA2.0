@@ -57,3 +57,5 @@ triple amputee
 three sizes
 long torso
 bloated
+chibi
+flexible

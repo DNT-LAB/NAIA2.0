@@ -167,3 +167,5 @@ cow print gloves
 print bowtie
 holstered
 fake facial hair
+crossed bandaids
+chain leash

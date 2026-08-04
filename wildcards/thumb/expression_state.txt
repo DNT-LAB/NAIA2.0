@@ -44,3 +44,6 @@ nose bubble
 foaming at the mouth
 flying teardrops
 hand blush
+body blush
+shoulder blush
+nervous sweating

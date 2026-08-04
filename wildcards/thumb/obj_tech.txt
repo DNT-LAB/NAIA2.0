@@ -146,3 +146,5 @@ airpods
 jet engine
 treadmill
 circuit board
+computer keyboard
+computer mouse

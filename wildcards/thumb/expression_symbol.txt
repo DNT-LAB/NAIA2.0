@@ -72,3 +72,7 @@ xo
 mg mg
 eye symbol
 eye pop
+^ ^
+> <
+@ @
+puff of air

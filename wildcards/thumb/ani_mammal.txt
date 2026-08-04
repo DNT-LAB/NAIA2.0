@@ -34,3 +34,8 @@ flying whale
 giraffe
 alpaca
 siamese cat
+dog
+fox
+wolf
+ferret
+fennec fox

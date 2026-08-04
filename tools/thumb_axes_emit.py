@@ -70,12 +70,19 @@ for _t in _face_all:
     if _t in MALE_ONLY:
         _groups["face_male"].append(_t)
         continue
+    # subgroup 이 _bucket 에 없으면 **말 없이 사라졌다.** face.txt 에 넣은 태그가
+    # 화면에 안 뜨는 원인이었다(`white pupils` 등 subgroup 이 빈 태그들). 라우팅에
+    # 실패하면 버리지 말고 이름으로 갈라 넣는다 — 아래 assert 가 유실을 막는다.
     _key = _bucket.get(_SG2(_t))
-    if _key:
-        _groups[_key].append(_t)
+    if not _key:
+        _key = "face_eyes" if re.search(r"eye|pupil|eyebrow|eyelash|sclera|iris", _t) \
+            else "face_parts"
+    _groups[_key].append(_t)
 for _k in _groups:
     _groups[_k].sort(key=lambda t: -_F2(t))
 assert _groups["face_male"], "얼굴 축의 남성 그룹이 비었다 — MALE_ONLY 와 face.txt 가 갈라졌다"
+assert sum(len(v) for v in _groups.values()) == len(_face_all) - len(
+    [t for t in _face_all if t in _eye_pattern]), "face.txt 태그가 표시 그룹에서 유실됐다"
 
 # ── 의상 탐색기 스코프 파생 ─────────────────────────────────────────────────
 # 의상 슬롯의 36개 서브그룹을 두 슬롯에 빠짐없이 나눈다. 손으로 나열하면 반드시 샌다

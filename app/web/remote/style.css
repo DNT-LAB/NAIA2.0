@@ -19991,6 +19991,32 @@ body.detached-module .mod-grid-3 {
 @media (max-width: 767px) {
   .ia-panel { top: auto; bottom: 60px; left: 4vw; right: 4vw; width: auto; max-height: 55dvh; }
 }
+/* --- 넣고 뺀 것을 알리는 토스트 ---
+   **팝업 안 축 칩 행 위**에 뜬다(`top` 은 JS 가 본문 위치를 재서 넣는다). 화면 아래
+   가운데에 뒀더니 시선이 그리드에 있을 때 잘 안 보였다(사용자 지적). 1.4초만 있다
+   사라지므로 축 행을 잠깐 가리는 편이 낫다는 판단이다.
+   클릭을 막지 않도록 pointer-events 는 끈다. */
+.ia-pick-toast {
+  position: absolute; left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  z-index: var(--z-toast);
+  padding: 8px 18px; border-radius: 9px;
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700;
+  letter-spacing: 0.4px;
+  background: rgba(46,138,70,0.96); color: #e6fced;
+  border: 1px solid rgba(120,214,150,0.55);
+  box-shadow: 0 6px 22px rgba(0,0,0,0.55);
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.14s, transform 0.14s;
+}
+/* 팝업이 없을 때(그리드를 안 연 상태)의 폴백 — 화면 기준으로 띄운다. */
+.ia-pick-toast.loose { position: fixed; top: 96px; }
+.ia-pick-toast.off {
+  background: rgba(64,68,80,0.96); color: #cfd4e0;
+  border-color: rgba(150,158,176,0.45);
+}
+.ia-pick-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
 /* --- 조언 플로트 (팝업 오른쪽) ---
    그리드가 팝업 폭을 다 쓰고 오른쪽이 비어 있어, 전제조건·충돌·추천을 여기 띄운다.
    팝업 안에 넣으면 그리드를 밀어내고, 아래에 붙이면 스크롤해야 보인다.

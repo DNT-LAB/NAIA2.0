@@ -3773,8 +3773,61 @@ export function createInteractivePanel({
     setCurrentTags(merged);
   }
 
+  // ---- 넣고 뺀 것을 알리는 토스트 ------------------------------------------
+  // 전역 showToast 는 화면 최상단 중앙이라 이 팝업 밖에서 뜬다 — 시선이 그리드에
+  // 있을 때 잘 안 보인다(사용자 지적). 그래서 **팝업 안 축 칩 행 위**에 띄운다.
+  // 예전에 "토스트가 축 탭을 가린다"고 지적받은 것은 Interactive 를 켤 때마다 뜨던
+  // 상주성 경고였다. 이건 1.4초짜리 행동 확인이라 성격이 다르다(사용자 판단).
+  let pickToastEl = null;
+  let pickToastTimer = null;
+
+  function flashPick(tag, added) {
+    const panel = document.querySelector('.ia-panel');
+    if (!pickToastEl) {
+      pickToastEl = document.createElement('div');
+      pickToastEl.className = 'ia-pick-toast';
+    }
+    // 팝업 안에 두면 팝업이 어디로 움직이든 따라간다. 팝업이 없으면(그리드를 안 연
+    // 상태) 화면 기준으로 떨어뜨린다 — `loose` 가 그 폴백이다.
+    const host = panel || document.body;
+    if (pickToastEl.parentElement !== host) host.appendChild(pickToastEl);
+    pickToastEl.classList.toggle('loose', !panel);
+    if (panel) {
+      // 헤더 줄(Safe Viewer 가 있는 줄)에 얹는다 — 팝업에서 가장 위이면서 눈이
+      // 먼저 가는 자리다(사용자 지시). 헤더가 없으면 본문 최상단(축 칩 행)으로
+      // 내려간다. 높이를 재서 세로 가운데에 맞춘다.
+      const head = panel.querySelector('.ia-panel-head');
+      if (head) {
+        const h = pickToastEl.offsetHeight || 34;
+        pickToastEl.style.top =
+          `${head.offsetTop + Math.max(0, Math.round((head.offsetHeight - h) / 2))}px`;
+      } else {
+        const body = panel.querySelector('.ia-panel-body');
+        pickToastEl.style.top = `${(body ? body.offsetTop : 96) + 10}px`;
+      }
+    } else {
+      pickToastEl.style.top = '';
+    }
+    // 글자는 최소로. 부호 하나와 태그면 무엇이 일어났는지 다 말한다.
+    pickToastEl.textContent = `${added ? '+' : '−'} ${tag}`;
+    pickToastEl.classList.toggle('off', !added);
+    // 연달아 누를 때 애니메이션이 안 먹는 것을 막는 강제 reflow(전역 토스트와 같은 이유).
+    pickToastEl.classList.remove('show');
+    void pickToastEl.offsetWidth;
+    pickToastEl.classList.add('show');
+    if (pickToastTimer) clearTimeout(pickToastTimer);
+    pickToastTimer = setTimeout(() => {
+      pickToastEl.classList.remove('show');
+      pickToastTimer = null;
+    }, 1400);
+  }
+
   /** 브라우저/추천에서의 클릭 = 토글. 있으면 제거, 없으면 추가.
-   *  브라우저의 ✓(dupe) 판정이 대소문자 무시라, 제거 비교도 대소문자 무시로 맞춘다. */
+   *  브라우저의 ✓(dupe) 판정이 대소문자 무시라, 제거 비교도 대소문자 무시로 맞춘다.
+   *
+   *  토스트는 **여기 한 곳**에 붙인다. 그리드 셀·조언 플로트의 [선택]/[제거]·
+   *  '필요한 것' 버튼·탐색기가 전부 이 함수를 지나므로, 호출처마다 붙이다 하나를
+   *  빠뜨리는 일이 없다. 프로그램이 부르는 경로가 생기면 `silent` 로 끈다. */
   function toggleTag(tag, opts = {}) {
     const normalized = String(tag || '').trim();
     if (!normalized) return;
@@ -3790,6 +3843,7 @@ export function createInteractivePanel({
     } else {
       setCurrentTags(current.concat([normalized]));
     }
+    if (!opts.silent) flashPick(normalized, !existing);
   }
 
   // ---------------------------------------------------------------- corpus

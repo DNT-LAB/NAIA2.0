@@ -1,4 +1,22 @@
 # -*- coding: utf-8 -*-
+"""⚠ 이 빌더는 **그냥 돌리면 안 된다.**
+
+축 .txt 는 더 이상 이 스크립트의 출력이 아니다. 오분류를 손으로 고쳐 온 결과가
+쌓여 있어 **.txt 가 SSOT** 다. 지금 이대로 실행하면 커밋된 분류에서 태그 9개가
+사라진다(2026-08-03 실측, `tools/check_axis_drift.py`).
+
+돌려야 한다면:
+
+    python tools/check_axis_drift.py --only thumb_meta_build   # 무엇이 사라지는지 먼저 본다
+    # 사라질 태그를 이 파일의 명시 배정에 옮긴 뒤에 실행하고,
+    python tools/snapshot_axis_classification.py --check   # 분류가 안 어긋났는지 확인
+
+되돌릴 근거는 `data/interactive_axis_snapshot.json` 에 있다.
+
+이 스크립트를 남겨 두는 이유는 하나다 — 태그 사전에 새로 생긴 태그를 축으로
+끌어오는 일은 아직 이것만 할 수 있다. 그때도 위 절차를 거쳐라.
+"""
+
 """기타·텍스트 축 빌더 — meta 그룹에서 **그림으로 구분되는 것**만 골라 축으로 세운다.
 
 ## 왜 신설하는가

@@ -1,7 +1,7 @@
 {
- "commit": "539c9d7bd250dfe12bf96dd78843d7093cdbb5b5",
+ "commit": "223adecd5c505e08e73c080c57ff0b431895e38b",
  "axis_count": 159,
- "tag_count": 13012,
+ "tag_count": 12987,
  "wired_axis_count": 158,
  "overlaps": {},
  "axes": {
@@ -341,7 +341,7 @@
   },
   "body_condition": {
    "dir": "thumb",
-   "count": 81,
+   "count": 82,
    "tags": [
     "bandages",
     "bandaged arm",
@@ -423,7 +423,8 @@
     "surgical scar",
     "taped fingers",
     "stomach growling",
-    "full stomach"
+    "full stomach",
+    "cream on body"
    ]
   },
   "body_expose": {
@@ -2724,7 +2725,7 @@
   },
   "cloth_style": {
    "dir": "thumb",
-   "count": 38,
+   "count": 40,
    "tags": [
     "formal",
     "magical girl",
@@ -2763,7 +2764,9 @@
     "superhero costume",
     "goth fashion",
     "ancient egyptian clothes",
-    "ouji fashion"
+    "ouji fashion",
+    "crossdressing",
+    "reverse trap"
    ]
   },
   "cloth_swim": {
@@ -3620,7 +3623,7 @@
   },
   "expression": {
    "dir": "thumb",
-   "count": 92,
+   "count": 120,
    "tags": [
     "smile",
     "grin",
@@ -3713,7 +3716,35 @@
     "mourning",
     "peaceful",
     "envy",
-    "deadpan"
+    "deadpan",
+    "glaring",
+    "defeat",
+    "staring",
+    "flustered",
+    "failure",
+    "remembering",
+    "crazy",
+    "charisma break",
+    "concentrating",
+    "frustrated",
+    "lovestruck",
+    "brain freeze",
+    "awkward",
+    "roaring",
+    "jaw drop",
+    "ara ara",
+    "burp",
+    "humming",
+    "stifled laugh",
+    "snort",
+    "spicy",
+    "mutsuki face",
+    "sulking",
+    "gasp",
+    "ruined for marriage",
+    "narcissism",
+    "troll face",
+    "gao"
    ]
   },
   "expression_from_pose": {
@@ -3738,7 +3769,7 @@
   },
   "expression_state": {
    "dir": "thumb",
-   "count": 44,
+   "count": 46,
    "tags": [
     "blush",
     "sweat",
@@ -3783,12 +3814,14 @@
     "snot trail",
     "runny nose",
     "nose bubble",
-    "foaming at the mouth"
+    "foaming at the mouth",
+    "flying teardrops",
+    "hand blush"
    ]
   },
   "expression_symbol": {
    "dir": "thumb",
-   "count": 67,
+   "count": 74,
    "tags": [
     ":d",
     ":o",
@@ -3856,7 +3889,14 @@
     "3_3",
     ">3<",
     "+_-",
-    "6_9"
+    "6_9",
+    ":s",
+    "xo",
+    "3;",
+    ";/",
+    "mg mg",
+    "eye symbol",
+    "eye pop"
    ]
   },
   "eye_pattern": {
@@ -4357,7 +4397,7 @@
   },
   "fx_symbol": {
    "dir": "thumb",
-   "count": 241,
+   "count": 242,
    "tags": [
     "heart",
     "speech bubble",
@@ -4599,7 +4639,8 @@
     "saigyouji yuyuko's fan design",
     "soviet flag",
     "orion (constellation)",
-    "trefoil"
+    "trefoil",
+    "spoken ellipsis"
    ]
   },
   "fx_tone": {
@@ -7896,7 +7937,7 @@
   },
   "pose_action": {
    "dir": "thumb",
-   "count": 123,
+   "count": 124,
    "tags": [
     "lifting own clothes",
     "grabbing",
@@ -8020,7 +8061,8 @@
     "satisfied look",
     "bunching hair",
     "toilet use",
-    "struggling"
+    "struggling",
+    "hugging tail"
    ]
   },
   "pose_action_2": {
@@ -8658,7 +8700,7 @@
   },
   "pose_body_touch": {
    "dir": "thumb",
-   "count": 33,
+   "count": 37,
    "tags": [
     "hand on own hip",
     "crossed arms",
@@ -8692,7 +8734,11 @@
     "hands on thighs",
     "hands on legs",
     "hands on shoulders",
-    "hands on stomach"
+    "hands on stomach",
+    "hand on leg",
+    "hand on thigh",
+    "hand on shoulder",
+    "belly poke"
    ]
   },
   "pose_body_touch_m": {
@@ -9013,95 +9059,12 @@
   },
   "pose_drop": {
    "dir": "thumb",
-   "count": 82,
-   "tags": [
-    "spoken ellipsis",
-    "crossdressing",
-    "covering mouth",
-    "holding hair",
-    "nervous sweating",
-    "glaring",
-    "defeat",
-    "lifted by another",
-    "holding sheath",
-    "sitting on desk",
-    "licking finger",
-    "staring",
-    "reverse trap",
-    "pulled by another",
-    "flustered",
-    "brushing hair",
-    "aroused",
-    "failure",
-    "sitting on bench",
-    "applying makeup",
-    "on vehicle",
-    "drying hair",
-    "holding head",
-    "hand on leg",
-    "hand on thigh",
-    "cutting hair",
-    "gao",
-    "sitting on rock",
-    "hugging tail",
-    "male hand",
-    "focused",
-    "hand on head",
-    "flying teardrops",
-    "remembering",
-    "crazy",
-    ":s",
-    "sitting on car",
-    "charisma break",
-    "hand on hand",
-    "cream on body",
-    "eye symbol",
-    "troll face",
-    "evil",
-    "holding recorder",
-    "holding dress",
-    "concentrating",
-    "frustrated",
-    "lovestruck",
-    "brain freeze",
-    "awkward",
-    "open arms",
-    "eye pop",
-    "hand on shoulder",
-    "xo",
-    "muscular uke",
-    "roaring",
-    "jaw drop",
-    "sitting on tree stump",
-    "ara ara",
-    "mg mg",
-    "hand blush",
-    "burp",
-    "tail biting",
-    "humming",
-    "stifled laugh",
-    "snort",
-    "3;",
-    "spicy",
-    "upset",
-    "leaning over",
-    "mutsuki face",
-    "playing with hair",
-    "spreading",
-    "sulking",
-    "face",
-    "gasp",
-    "ruined for marriage",
-    "holding up",
-    "mouth",
-    ";/",
-    "belly poke",
-    "narcissism"
-   ]
+   "count": 0,
+   "tags": []
   },
   "pose_face_touch": {
    "dir": "thumb",
-   "count": 63,
+   "count": 64,
    "tags": [
     "head tilt",
     "hand on own face",
@@ -9165,7 +9128,8 @@
     "hand mouth",
     "biting hair",
     "face in hands",
-    "fingers to cheek"
+    "fingers to cheek",
+    "holding head"
    ]
   },
   "pose_face_touch_m": {
@@ -9231,7 +9195,7 @@
   },
   "pose_hand": {
    "dir": "thumb",
-   "count": 105,
+   "count": 110,
    "tags": [
     "hand up",
     "arm up",
@@ -9337,7 +9301,12 @@
     "between fingers",
     "twiddling fingers",
     "card between fingers",
-    "clipping nails"
+    "clipping nails",
+    "brushing hair",
+    "drying hair",
+    "cutting hair",
+    "playing with hair",
+    "applying makeup"
    ]
   },
   "pose_hand_m": {
@@ -9371,7 +9340,7 @@
   },
   "pose_holding": {
    "dir": "thumb",
-   "count": 105,
+   "count": 106,
    "tags": [
     "holding",
     "holding weapon",
@@ -9477,7 +9446,8 @@
     "holding vegetable",
     "holding stylus",
     "holding fishing rod",
-    "holding headphones"
+    "holding headphones",
+    "holding sheath"
    ]
   },
   "pose_holding_2": {
@@ -9838,7 +9808,7 @@
   },
   "pose_mouth": {
    "dir": "thumb",
-   "count": 52,
+   "count": 53,
    "tags": [
     "eating",
     "mouth hold",
@@ -9891,7 +9861,8 @@
     "eating flower",
     "knife in mouth",
     "drinking fountain",
-    "licking blade"
+    "licking blade",
+    "licking finger"
    ]
   },
   "pose_mouth_m": {
@@ -10382,7 +10353,7 @@
   },
   "pose_posture": {
    "dir": "thumb",
-   "count": 95,
+   "count": 98,
    "tags": [
     "standing",
     "sitting",
@@ -10478,7 +10449,10 @@
     "facing up",
     "facing down",
     "against fourth wall",
-    "sitting on branch"
+    "sitting on branch",
+    "sitting on desk",
+    "on vehicle",
+    "sitting on tree stump"
    ]
   },
   "pose_posture_2": {

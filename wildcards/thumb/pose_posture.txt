@@ -93,3 +93,6 @@ facing up
 facing down
 against fourth wall
 sitting on branch
+sitting on desk
+on vehicle
+sitting on tree stump

@@ -835,6 +835,22 @@ RECLASSIFIED = {
     "ghost hands": "body_nonhuman",
     "stretched limb": "body_nonhuman",
     "goat legs": "body_nonhuman",
+
+    # 2026-08-04 — `pose_drop`(자세 분류기의 잔여 버킷 82개) 해체분.
+    # 자세 빌더가 "자세가 아니다"라고 버렸는데 버린 곳이 화면에 안 나오는 축이라
+    # 그대로 사라져 있었다. 실제로는 표정이 대부분이었다.
+    "cream on body": "body_condition",   # `cream on face` 옆
+    **{_t: "expression" for _t in [
+        "glaring", "defeat", "staring", "flustered", "failure", "remembering",
+        "crazy", "charisma break", "concentrating", "frustrated", "lovestruck",
+        "brain freeze", "awkward", "roaring", "jaw drop", "ara ara", "burp",
+        "humming", "stifled laugh", "snort", "spicy", "mutsuki face", "sulking",
+        "gasp", "ruined for marriage", "narcissism", "troll face", "gao",
+    ]},
+    **{_t: "expression_symbol" for _t in [
+        ":s", "xo", "3;", ";/", "mg mg", "eye symbol", "eye pop",
+    ]},
+    **{_t: "expression_state" for _t in ["flying teardrops", "hand blush"]},
     # 사람이 아닌 얼굴 부위. 얼굴 축에 있었지만 `head fins`·`gills`·`hooves` 쪽이 맞다.
     "beak": "body_nonhuman",
     "snout": "body_nonhuman",
@@ -886,6 +902,15 @@ MOVED_TO_FOREIGN_AXIS = {
     "face in hands", "fingers to cheek",             # -> pose_face_touch
     "hands on ass", "hands on thighs", "hands on legs",
     "hands on shoulders", "hands on stomach",        # -> pose_body_touch
+    # 2026-08-04 — pose_drop 해체분 중 이 빌더 밖으로 간 것.
+    "spoken ellipsis",                               # -> fx_symbol (말풍선)
+    "crossdressing", "reverse trap",                 # -> cloth_style
+    "sitting on desk", "on vehicle", "sitting on tree stump",   # -> pose_posture
+    "holding head",                                  # -> pose_face_touch
+    "hand on leg", "hand on thigh", "hand on shoulder", "belly poke",
+    "brushing hair", "drying hair", "cutting hair", "playing with hair",
+    "applying makeup",                               # -> pose_hand
+    "licking finger", "holding sheath", "hugging tail",
 }
 
 

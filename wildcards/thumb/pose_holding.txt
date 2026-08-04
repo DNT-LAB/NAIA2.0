@@ -103,3 +103,4 @@ holding vegetable
 holding stylus
 holding fishing rod
 holding headphones
+holding sheath

@@ -89,8 +89,12 @@ def main() -> int:
         store._items = [first, second]
         store._set_latest_item(first)
 
-        client, _context = build_client(store, save_dir)
+        client, context = build_client(store, save_dir)
         with client:
+            # 형식은 **Auto Save 설정을 따른다.** 예전에는 라우트가 WebP 를 강제했는데,
+            # 같은 버튼이 상황에 따라 다른 형식으로 저장하면 나중에 파일을 못 찾는다.
+            # 스텁은 save_as_webp=False 이므로 PNG 가 나와야 한다.
+            assert context.auto_save_state["save_as_webp"] is False
             saved = client.post(
                 "/api/history/selected/save",
                 json={"paths": [first.rel_path, second.rel_path]},
@@ -99,17 +103,49 @@ def main() -> int:
             saved_payload = saved.json()
             assert saved_payload["ok"] is True, saved_payload
             assert saved_payload["saved"] == 2, saved_payload
-            assert saved_payload["format"] == "webp", saved_payload
-            assert saved_payload["same_directory"] is True, saved_payload
+            assert saved_payload["format"] == "png", saved_payload
             saved_paths = [Path(value) for value in saved_payload["paths"]]
             assert len(saved_paths) == 2
             assert {path.parent for path in saved_paths} == {save_dir}
-            assert all(path.suffix.lower() == ".webp" for path in saved_paths)
+            assert all(path.suffix.lower() == ".png" for path in saved_paths)
             for path in saved_paths:
                 with Image.open(path) as opened:
-                    assert opened.format == "WEBP"
-            evidence["webp_saved"] = len(saved_paths)
+                    assert opened.format == "PNG"
+            evidence["format_follows_setting"] = saved_payload["format"]
             evidence["same_folder"] = str(save_dir)
+
+            # **이미 저장된 것은 다시 쓰지 않는다.** 가드가 없으면 두 번 누를 때마다
+            # 파일이 늘고 원본이 고아로 남는다(병합 전 필수 #1).
+            again = client.post(
+                "/api/history/selected/save",
+                json={"paths": [first.rel_path, second.rel_path]},
+            )
+            assert again.status_code == 200, again.text
+            again_payload = again.json()
+            assert again_payload["saved"] == 0, again_payload
+            assert again_payload["skipped"] == 2, again_payload
+            # 건너뜀은 실패가 아니다 — ok 는 참이어야 한다.
+            assert again_payload["ok"] is True, again_payload
+            assert not again_payload["failed"], again_payload
+            evidence["skip_already_saved"] = again_payload["skipped"]
+
+            # 설정을 WebP 로 바꾸면 그때는 WebP 로 나간다(강제가 아니라 반영).
+            third = make_item((0, 0, 255))
+            store._items.append(third)
+            context.auto_save_state["save_as_webp"] = True
+            webp = client.post(
+                "/api/history/selected/save",
+                json={"paths": [third.rel_path]},
+            )
+            assert webp.status_code == 200, webp.text
+            webp_payload = webp.json()
+            assert webp_payload["format"] == "webp", webp_payload
+            webp_path = Path(webp_payload["paths"][0])
+            assert webp_path.suffix.lower() == ".webp"
+            with Image.open(webp_path) as opened:
+                assert opened.format == "WEBP"
+            context.auto_save_state["save_as_webp"] = False
+            evidence["webp_when_setting_on"] = str(webp_path.name)
 
             traversal = client.post(
                 "/api/history/selected/save",

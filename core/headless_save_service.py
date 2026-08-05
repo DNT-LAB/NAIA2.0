@@ -352,8 +352,11 @@ class HeadlessSaveService:
         """
         context = self.context
         if save_as_webp is None:
-            save_as_webp = context._coerce_bool(
-                self.auto_save_state_payload().get("save_as_webp"))
+            # 플래그 하나만 필요하다 — `auto_save_state_payload()` 는 모듈 상태 전체를
+            # 만들면서 `context._module_state_payload` 까지 부른다. 기본값 처리는 같게
+            # 두되 그 의존은 끌고 오지 않는다.
+            save_as_webp = context._coerce_bool(context.auto_save_state.get(
+                "save_as_webp", AUTO_SAVE_DEFAULTS.get("save_as_webp")))
         directory = self.current_save_directory()
         directory.mkdir(parents=True, exist_ok=True)
         saved_paths: list[str] = []

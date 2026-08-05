@@ -19829,13 +19829,37 @@ body.detached-module .mod-grid-3 {
   background: rgba(255,255,255,0.055); border: 1px solid transparent;
   color: var(--text-muted); white-space: nowrap;
 }
+
+/* 칩 안쪽 구조. 텍스트를 래퍼로 감싸 [x] 와 나란히 둔다 — 예전에는 칩이 텍스트
+   노드 하나였다. 기존 폰트/색은 .ia-chip 이 그대로 물려준다. */
+.ia-chip { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; }
+/* 잘라내기는 **텍스트에만** 건다. 칩 전체에 overflow:hidden 을 걸면 flex 자식인
+   [x] 가 같이 잘려 긴 태그(작품명 등)에서 지울 길이 사라진다(사용자 지적). */
+.ia-chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 태그 하나만 빼는 [x]. 평소엔 흐리게 두고 칩에 올렸을 때 또렷해진다 —
+   항상 진하면 칩 6개가 붙은 줄이 x 로 시끄러워진다. */
+.ia-chip-x {
+  flex: 0 0 auto; width: 12px; height: 12px; padding: 0; margin-right: -2px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 50%; background: rgba(255,255,255,0.10);
+  color: var(--text-dim); font-size: 10px; line-height: 1; cursor: pointer;
+  opacity: 0.35; transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.ia-chip:hover .ia-chip-x { opacity: 0.85; }
+.ia-chip-x:hover { opacity: 1; background: rgba(255,107,107,0.30); color: #ffb4b4; }
+/* 캐릭터 슬롯의 **이름** 태그. 프리셋은 이름과 작품을 같이 넣는데(`gotoh hitori`,
+   `bocchi the rock!`) 모양이 같아 어느 쪽이 캐릭터인지 알 수 없었다. */
+.ia-chip.is-name {
+  border-color: var(--accent); background: rgba(124,106,239,0.22);
+  color: var(--text-primary); font-weight: 700;
+}
 .ia-chip.is-more { background: none; color: var(--text-dim); padding-left: 2px; }
 /* 통합 칩: 자연어 '문장 칩'은 태그 칩과 시각 구분(이탤릭·다른 색·말줄임, 전체는 호버 title). */
 .ia-chip.is-prose {
   font-family: var(--font-editor); font-style: italic;
   background: rgba(124,106,239,0.13); border-color: rgba(124,106,239,0.30);
   color: var(--text-primary);
-  max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+  max-width: 240px;   /* 잘라내기는 .ia-chip-t 가 맡는다 — 여기서 하면 [x] 가 잘린다 */
 }
 .ia-chip-empty { font-family: var(--font-display); font-size: 10px; color: var(--text-dim); font-style: italic; }
 
@@ -19885,22 +19909,52 @@ body.detached-module .mod-grid-3 {
 }
 .ia-char-ref:hover { color: var(--accent-glow); border-color: var(--accent); }
 
-/* 캐릭터 프리셋 (목업) */
-.ia-char-preset-row { display: flex; }
-.ia-char-preset {
-  flex: 1; font-family: var(--font-mono); font-size: 9.5px; padding: 5px 8px;
-  border: 1px dashed var(--border-dim); border-radius: 7px; background: none;
-  color: var(--text-dim); cursor: pointer;
-}
-.ia-char-preset:hover { color: var(--accent-glow); border-color: var(--accent); }
-
-/* 캔버스 위치(Position) 버튼 — NAI 전용 */
+/* 캔버스 위치 — 헤더는 **표시만** 한다(배치는 공유 캔버스가 맡는다).
+   예전 `Position C3` 텍스트는 90px 을 먹었다. 미니맵 점 + 코드로 40px 대로 줄여
+   그 자리에 프리셋·복제 버튼을 넣었다. 누르면 5x5 팝업(폴백)이 열린다. */
 .ia-char-pos {
-  flex: 0 0 auto; font-family: var(--font-mono); font-size: 8.5px; padding: 2px 8px;
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono); font-size: 8.5px; padding: 2px 5px;
   border: 1px solid var(--border-dim); border-radius: 5px; background: none;
   color: var(--text-dim); cursor: pointer; white-space: nowrap;
 }
 .ia-char-pos:hover { color: var(--accent-glow); border-color: var(--accent); }
+.ia-char-posmap {
+  position: relative; width: 13px; height: 13px; border-radius: 2px;
+  border: 1px solid var(--border-dim); background: var(--bg-deep); flex: 0 0 auto;
+}
+.ia-char-pos:hover .ia-char-posmap { border-color: var(--accent); }
+.ia-char-posdot {
+  position: absolute; width: 4px; height: 4px; border-radius: 50%;
+  background: var(--accent-glow); transform: translate(-50%, -50%);
+}
+.ia-char-poscode { line-height: 1; }
+
+/* 헤더 캐릭터 프리셋 버튼 — 슬롯 안에 있던 것을 옮겼다. 라벨은 `캐릭터` 로 고정한다:
+   이름을 여기 적으면 슬롯의 칩과 겹쳐 같은 이름이 두 번 보인다(그게 옮긴 이유다). */
+.ia-char-hpreset {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-display); font-size: 9.5px; line-height: 1; padding: 3px 8px;
+  border: 1px dashed var(--border-dim); border-radius: 5px; background: none;
+  color: var(--text-dim); cursor: pointer; white-space: nowrap;
+}
+.ia-char-hpreset-i { font-size: 10px; filter: grayscale(1); opacity: 0.8; }
+.ia-char-hpreset:hover { color: var(--accent-glow); border-color: var(--accent); }
+.ia-char-hpreset:hover .ia-char-hpreset-i { filter: none; opacity: 1; }
+/* 프리셋이 걸린 슬롯은 실선 + 강조. 어느 캐릭터인지는 툴팁이 말한다. */
+.ia-char-hpreset.has-preset {
+  border-style: solid; border-color: var(--accent); color: var(--text-primary);
+  background: rgba(124,106,239,0.16);
+}
+.ia-char-hpreset.has-preset .ia-char-hpreset-i { filter: none; opacity: 1; }
+
+/* 캐릭터 복제 */
+.ia-char-dup {
+  flex: 0 0 auto; font-size: 11px; line-height: 1; padding: 2px 5px;
+  border: 1px solid var(--border-dim); border-radius: 5px; background: none;
+  color: var(--text-dim); cursor: pointer;
+}
+.ia-char-dup:hover { color: var(--accent-glow); border-color: var(--accent); }
 
 /* 좌표 팝업 (5x5 그리드) */
 .ia-pos-popup {
@@ -19929,6 +19983,25 @@ body.detached-module .mod-grid-3 {
 .ia-pos-cell.is-on {
   border-color: var(--accent); background: rgba(124,106,239,0.30); color: var(--text-primary);
 }
+/* 다른 캐릭터가 선 칸. 위치는 여러 명의 **상대** 배치라, 남이 어디 있는지 안 보이면
+   팝업을 여닫으며 대조해야 한다. 라벨(C2)을 흐리게 깔아 둔다 — 막지는 않는다
+   (NAI 는 같은 칸을 허용하고, 일부러 겹치는 구도도 있다). */
+.ia-pos-cell.has-other {
+  border-style: dashed; border-color: rgba(255,255,255,0.26);
+  background: rgba(255,255,255,0.07); color: var(--text-dim);
+  font-size: 7.5px; letter-spacing: -0.2px;
+}
+.ia-pos-cell.has-other:hover { border-color: var(--accent); color: var(--text-muted); }
+/* 내 자리와 겹치면 **내 자리 표시가 이긴다** — 지금 고르는 것이 무엇인지가 먼저다. */
+.ia-pos-cell.has-other.is-on {
+  border-style: solid; border-color: var(--accent);
+  background: rgba(124,106,239,0.30); color: var(--text-primary);
+}
+.ia-pos-others {
+  display: flex; flex-direction: column; gap: 2px;
+  font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); line-height: 1.5;
+}
+.ia-pos-others b { color: var(--text-muted); font-weight: 700; }
 .ia-pos-info { display: flex; flex-direction: column; gap: 7px; padding-top: 18px; }
 .ia-pos-cur {
   font-family: var(--font-mono); font-size: 15px; font-weight: 700; color: var(--accent-glow);
@@ -20291,11 +20364,13 @@ body.detached-module .mod-grid-3 {
 /* 세로로 쌓았더니 결과 영역을 덮었다(실사용 지적) — **가로 한 줄**로 깔고
    팝업은 그 아래에서 시작한다. 반투명이라 뒤가 비쳐 영역을 뺏지 않는다. */
 .ia-scene-float {
-  /* 팝업은 `.viewer-wrapper`(z-index:0) **안**에 있어 그 2200 이 바깥에서는
-     0 층으로 접힌다. 이 플로트는 body 직계라 60 이면 팝업을 뚫고 올라온다
-     (2026-08-05 실측). 음수로 내려 뒤로 보낸다 — 프롬프트 엔지니어링 모듈
-     팝업이 정상적으로 뒤에 두는 것과 같은 관계가 된다. */
-  position: fixed; z-index: -1; display: none;
+  /* 이 플로트는 **`.viewer-wrapper` 안**에 붙는다(ensureSceneMount). 슬롯 팝업
+     (`.ia-panel`, z 2200)도 거기 있어서, 같은 컨텍스트 안에서는 z 로 정직하게
+     줄이 선다: 결과 뷰어 위 · 팝업 아래.
+     body 직계로 두면 만족시킬 값이 없다 — wrapper 가 z-index:0 + isolation:isolate +
+     불투명 배경이라 1 이상이면 팝업을 뚫고, 0 이하면 배경에 먹힌다. 실제로 -1 로
+     내렸다가 씬 버튼 8개와 반응형 토글이 통째로 결과 패널 뒤로 사라졌다. */
+  position: fixed; z-index: 1; display: none;
   flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center;
 }
 .ia-scene-float.open { display: flex; }
@@ -20902,24 +20977,6 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-cp-card .char-copy-row { padding-top: 5px; }
 .ia-cp-card .char-copy-btn { font-size: 8.5px; padding: 2px 7px; }
 
-/* 프리셋 버튼이 `캐릭터` 슬롯 줄 오른쪽 끝(다른 슬롯의 개수 배지 자리)으로 들어왔다.
-   `.ia-sub-block` 은 `104px | minmax(0,1fr) | auto` 3열 그리드라 이 칸은 내용만큼만
-   차지한다 — 줄 높이는 다른 슬롯과 같게 유지하려고 높이를 20px 로 고정하고,
-   적용된 캐릭터 이름이 길어도(`ganyu (genshin impact)`) 칩 영역을 밀지 않게
-   최대 폭을 잘라 말줄임한다. 전체 이름은 title 로 보인다. */
-.ia-char-preset {
-  flex: 0 0 auto; max-width: 132px; height: 20px; padding: 0 8px;
-  display: inline-flex; align-items: center;
-  border: 1px dashed var(--border-dim); border-radius: 6px; background: none;
-  color: var(--text-dim); cursor: pointer;
-  font-family: var(--font-mono); font-size: 9px; line-height: 1;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.ia-char-preset:hover { color: var(--accent-glow); border-color: var(--accent); }
-.ia-char-preset.has-preset {
-  border-style: solid; border-color: var(--accent);
-  background: rgba(124,106,239,0.16); color: var(--accent-glow);
-}
 .ia-char-preset-x {
   flex: 0 0 auto; width: 20px; height: 20px; padding: 0; border-radius: 6px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -21133,6 +21190,137 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   font-family: var(--font-mono);
 }
 .ia-assets[hidden] { display: none; }
+/* 펼치면 **판 하나**가 된다. 예전에는 이 컨테이너가 투명이고 조각마다 0.92 배경을
+   따로 들고 있어서, 조각 사이 6px flex gap 과 배경 없는 윗줄(스택·컨트롤·바)로
+   생성 이미지가 그대로 비쳐 글자를 읽을 수 없었다(사용자 지적 2026-08-05).
+   접힌 상태는 그대로 둔다 — 칩 몇 개가 결과 위에 떠 있는 편이 낫다. */
+.ia-assets.is-open {
+  padding: 8px;
+  border: 1px solid var(--border-glow);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+}
+/* 판이 생겼으니 조각들은 자기 배경·블러를 버린다(겹쳐 칠하면 색이 탁해진다).
+   이어 붙이는 테두리는 남긴다 — 그게 한 덩어리로 보이게 하는 장치다. */
+.ia-assets.is-open .ia-as-controls,
+.ia-assets.is-open .ia-as-charrow,
+.ia-assets.is-open .ia-as-charhits,
+.ia-assets.is-open .ia-as-grid {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* 이어 붙는 네 조각은 사이 간격이 0 이어야 테두리가 이어진다. */
+.ia-as-list { display: flex; flex-direction: column; min-width: 0; }
+
+/* ---- Assets 하단 줄 -------------------------------------------------
+   예전에는 한 번 펼치면 Assets 버튼을 다시 찾아 누르는 것 말고 닫을 길이 없었다
+   (사용자 지적 2026-08-05). 바깥 클릭으로도 접히지만, 그건 눈에 보이지 않으므로
+   버튼을 함께 둔다. */
+.ia-as-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-dim); border-top: none;
+  border-radius: 0 0 8px 8px;
+}
+.ia-as-foothint { flex: 1; font-size: 9.5px; color: var(--text-dim); min-width: 0; }
+.ia-as-fold {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 10px; padding: 3px 10px;
+  border: 1px solid var(--border-dim); border-radius: 6px; background: none;
+  color: var(--text-muted); cursor: pointer;
+}
+.ia-as-fold:hover { color: var(--text-primary); border-color: var(--border-glow); }
+/* 그리드가 더 이상 마지막 조각이 아니다 — 아래 모서리는 하단 줄이 맡는다. */
+.ia-as-list .ia-as-grid { border-radius: 0; }
+
+/* ---- 조합 미리보기 팝업 ---------------------------------------------
+   카드를 누르면 패널 **왼쪽**에 뜬다. 예전에는 카드 안에서 이름 칩을 펼쳤는데,
+   그때마다 목록 전체를 다시 그려 팝업이 통째로 깜빡였고 내용도 이름뿐이었다.
+   위에서부터 그림 · 캐릭터별 내용 · 글로벌 순으로 쌓고, 관리 버튼은 아래 줄에 둔다. */
+.ia-as-preview {
+  position: fixed; z-index: var(--z-floating-module);
+  width: 300px; max-height: 76vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-glow); border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.62);
+  font-family: var(--font-mono);
+}
+.ia-as-preview[hidden] { display: none; }
+.ia-as-pv-head {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px; border-bottom: 1px solid var(--border-dim);
+}
+.ia-as-pv-title {
+  font-size: 9px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ia-as-pv-meta { flex: 1; font-size: 9px; color: var(--text-muted); }
+.ia-as-pv-x {
+  flex: 0 0 auto; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px;
+  background: none; color: var(--text-dim); font-size: 14px; line-height: 1; cursor: pointer;
+}
+.ia-as-pv-x:hover { color: var(--text-primary); background: rgba(255,255,255,0.10); }
+.ia-as-pv-body { flex: 1; overflow-y: auto; padding: 9px 10px; min-height: 0; }
+.ia-as-pv-shot { margin-bottom: 9px; border-radius: 8px; overflow: hidden; }
+.ia-as-pv-shot img { display: block; width: 100%; height: auto; }
+.ia-as-pv-shot.is-empty {
+  padding: 16px 10px; text-align: center; font-size: 9.5px; color: var(--text-dim);
+  border: 1px dashed var(--border-dim);
+}
+/* 캐릭터 한 명 */
+.ia-as-pv-char {
+  padding: 7px 8px; border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-deep);
+}
+.ia-as-pv-char + .ia-as-pv-char { margin-top: 6px; }
+.ia-as-pv-char.is-off { opacity: 0.5; }
+.ia-as-pv-charhead { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; }
+.ia-as-pv-cn { font-size: 10.5px; font-weight: 700; color: var(--accent-glow); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-as-pv-off, .ia-as-pv-pos {
+  flex: 0 0 auto; font-size: 8px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(255,255,255,0.10); color: var(--text-dim);
+}
+.ia-as-pv-spring { flex: 1 1 auto; }
+.ia-as-pv-line { display: flex; gap: 6px; align-items: flex-start; padding: 2px 0; }
+.ia-as-pv-key {
+  flex: 0 0 58px; font-size: 8.5px; color: var(--text-dim); padding-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-as-pv-tags { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.ia-as-pv-tag {
+  font-size: 9px; line-height: 1; padding: 3px 5px; border-radius: 4px;
+  background: rgba(255,255,255,0.06); color: var(--text-muted);
+}
+.ia-as-pv-none { padding: 8px 2px; font-size: 9.5px; color: var(--text-dim); }
+/* 글로벌 — 캐릭터에 속하지 않는 값. 옛 조합에는 없어서 줄 자체가 안 나온다. */
+.ia-as-pv-globals {
+  margin-top: 8px; padding: 7px 8px; border-radius: 8px;
+  border: 1px dashed var(--border-dim); background: rgba(255,255,255,0.02);
+}
+.ia-as-pv-sect {
+  font-size: 8.5px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase;
+  color: var(--text-dim); margin-bottom: 4px;
+}
+.ia-as-pv-foot {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px; border-top: 1px solid var(--border-dim);
+}
+.ia-as-pv-btn {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 9.5px; padding: 4px 9px;
+  border: 1px solid var(--border-dim); border-radius: 6px; background: none;
+  color: var(--text-muted); cursor: pointer;
+}
+.ia-as-pv-btn:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.ia-as-pv-btn.is-fav { color: var(--accent-glow); border-color: var(--accent); }
+.ia-as-pv-btn.is-del { color: rgba(244, 67, 54, 0.8); }
+.ia-as-pv-btn.is-del:hover { color: #ffb4b4; border-color: rgba(255,107,107,0.5); }
+/* 지금 보고 있는 카드 */
+.ia-as-card.is-preview { border-color: var(--accent); background: rgba(124,106,239,0.14); }
+.ia-as-star.is-mark { position: absolute; top: 3px; right: 4px; font-size: 10px;
+  color: var(--accent-glow); pointer-events: none; }
 .ia-as-bar { display: flex; align-items: center; gap: 6px; }
 
 /* 캐릭터 한 명이 한 줄 — 슬롯 버튼과 그 캐릭터의 위치 버튼이 나란히. */
@@ -21216,11 +21404,18 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 .ia-as-slot:hover { color: var(--text-primary); border-color: var(--border); }
+/* 지금 열어 둔 캐릭터. **불투명 연보라 + 검은 글씨**다 — 예전에는 0.18 알파라
+   밝은 생성 이미지 위에서 흰 상자처럼 보였고, 그 위의 밝은 글씨는 아예 안 읽혔다.
+   옆의 [POS C4] 를 읽을 때 어느 캐릭터 것인지 여기서 바로 짚을 수 있어야 한다. */
 .ia-as-slot.is-open {
-  border-color: var(--border-glow);
-  background: rgba(120, 140, 255, 0.18);
-  color: var(--text-primary);
+  border-color: var(--accent);
+  background: #c2b7f8;
+  color: #14141c;
+  font-weight: 700;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
+.ia-as-slot.is-open:hover { background: #d0c7fa; color: #14141c; }
 /* 비활성(OFF) 슬롯도 열어 볼 수는 있어야 한다 — 흐리게만 둔다. */
 .ia-as-slot.is-off { opacity: 0.45; }
 
@@ -21796,6 +21991,28 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   background: transparent; color: var(--text-dim); font-size: 10px; cursor: pointer;
 }
 .ia-ref-clear:hover { border-color: var(--border-glow); color: var(--text-primary); }
+/* 레퍼런스 사용 스위치. 붙여 둔 그림을 **실을지** 정한다 — 백엔드가 이 값을 저장하지
+   않아서 프로그램을 다시 켜면 항상 OFF 다(지난 세션 것이 조용히 실리는 사고 방지).
+   꺼진 상태를 눈에 띄게 둔다: 붙인 그림은 보이는데 안 실리는 상태라 헷갈리기 쉽다. */
+.ia-ref-switch {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 6px 9px; border-radius: 7px; cursor: pointer;
+  border: 1px dashed rgba(255, 200, 80, 0.45);
+  background: rgba(255, 200, 80, 0.10);
+  color: #ffd88a; font-family: var(--font-mono); font-size: 10px;
+}
+.ia-ref-switch b { margin-left: auto; letter-spacing: 0.6px; }
+.ia-ref-switch-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+  background: rgba(255, 200, 80, 0.5);
+}
+.ia-ref-switch.is-on {
+  border-style: solid; border-color: var(--accent);
+  background: rgba(124, 106, 239, 0.18); color: var(--accent-glow);
+}
+.ia-ref-switch.is-on .ia-ref-switch-dot {
+  background: var(--accent-glow); box-shadow: 0 0 6px var(--accent-glow);
+}
 .ia-ref-tabs { display: flex; gap: 4px; }
 .ia-ref-tab {
   flex: 1 1 0; padding: 5px; border: 1px solid var(--border-dim); border-radius: 7px;

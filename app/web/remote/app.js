@@ -892,7 +892,7 @@ let interactiveAutocomplete = null;
 let interactiveAssetsPanel = null;
 // Interactive 전용 캐릭터 레퍼런스. NAI 모듈과 상태가 독립이다.
 let interactiveReferencePanel = null;
-const interactiveReferenceReady = import('./js/features/interactiveReferencePanel.mjs?v=20260805-iref2')
+const interactiveReferenceReady = import('./js/features/interactiveReferencePanel.mjs?v=20260805-iref4')
   .then(({createInteractiveReferencePanel}) => {
     interactiveReferencePanel = createInteractiveReferencePanel({
       document, escHtml, showToast,
@@ -900,9 +900,14 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
       // 붙이거나 뗄 때마다 캐릭터 헤더의 [Reference] 배지를 맞춘다.
       onChange: () => { if (interactivePanel) interactivePanel.refreshCharReference(); },
     });
+    // **만들자마자 서버 상태를 한 번 읽는다.** 백엔드는 그대로 두고 브라우저만
+    // 새로고침하면 패널은 기본값(OFF·배지 0)으로 시작하는데 백엔드는 켜진 채라,
+    // 화면은 꺼졌다고 하면서 레퍼런스가 유료 생성에 실린다(Codex 지적 2026-08-05).
+    // 이 기능 자체가 그 어긋남을 막으려고 만든 것이라 여기서 반드시 맞춘다.
+    return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia175')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia191')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -911,7 +916,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveAutocomplete} =
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas28');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260805-iaas34');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -2627,10 +2632,17 @@ function applyInteractiveCharacterOverrides(overrides) {
   // NAICharacterData 가 거부하고 캐릭터가 조용히 사라진다(generation_request.py __post_init__).
   overrides.characters = rows.map(row => String(row.prompt || ''));
   overrides.uc = rows.map(row => String(row.uc || ''));
-  overrides.character_positions = rows.map(row => ({
-    x: Number(row.center?.x ?? 0.5),
-    y: Number(row.center?.y ?? 0.5),
-  }));
+  // 패널이 center 를 안 준 경우(혼자일 때)는 **여기서 지어내지 않는다.** 예전에는
+  // 0.5/0.5 로 채워서, 사용자가 정한 적 없는 좌표를 정한 것처럼 실어 보냈다.
+  // 다만 이것만으로 'AI Choice' 가 되지는 않는다 — 백엔드(api_service.py `default_center`)가
+  // char_captions 의 centers 를 빈 자리에서 0.5/0.5 로 다시 채운다. 그 폴백을 걷어낼지는
+  // 캐릭터 모듈 등 다른 경로까지 함께 볼 문제라 여기서 건드리지 않는다.
+  const positioned = rows.filter(row => row.center);
+  if (positioned.length === rows.length && rows.length) {
+    overrides.character_positions = rows.map(row => ({
+      x: Number(row.center.x), y: Number(row.center.y),
+    }));
+  }
 }
 
 const $ = id => document.getElementById(id);
@@ -5588,8 +5600,12 @@ async function generateWithInteractiveSnapshot(payload) {
   if (overrides && interactiveAssetsPanel && interactivePanel?.isActive?.()) {
     let chars = [];
     try { chars = interactivePanel.getSnapshotChars?.() || []; } catch (_) { chars = []; }
+    // 씬 슬롯·구도도 함께 남긴다 — Assets 미리보기가 '이 그림이 어떤 설정에서
+    // 나왔는가' 를 보여 주려면 캐릭터만으로는 모자란다.
+    let globals = {};
+    try { globals = interactivePanel.getSnapshotGlobals?.() || {}; } catch (_) { globals = {}; }
     if (chars.length) {
-      const id = await interactiveAssetsPanel.record(chars);
+      const id = await interactiveAssetsPanel.record(chars, globals);
       if (id) overrides.interactive_snapshot_id = id;
     }
   }
@@ -8881,24 +8897,69 @@ applyPromptHighlightState();
 updatePromptTokenEstimate();
 
 // ---- Keyboard shortcuts ----
-// Ctrl+S — 보고 있는 이미지를 빠른 저장 경로로. 브라우저의 "페이지 저장"을 막는다.
+
+/** 지금 글자를 치고 있나. 여기서는 Ctrl+S 를 가로채지 않는다 —
+ *  프롬프트를 쓰다 무심코 눌렀을 때 이미지가 저장되면 안 된다. */
+function isTypingTarget(el) {
+  if (!el || !el.tagName) return false;
+  if (el.isContentEditable) return true;
+  return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
+}
+
+/** 결과(Result) 화면을 보고 있나. 분리 창에는 탭이 없으므로 그때는 항상 참이다. */
+function isResultViewActive() {
+  const pane = document.querySelector('.right-tab-pane[data-right-pane="result"]');
+  if (!pane) return true;                       // 분리 창 — 결과가 곧 화면 전부다
+  return pane.classList.contains('active') && !pane.hidden;
+}
+
+/** 히스토리 팝업(라이트박스)이 열려 있나. */
+function isHistoryPopupOpen() {
+  const lb = document.getElementById('viewerLightbox');
+  return !!(lb && lb.classList.contains('open'));
+}
+
+// Ctrl+S — **판정은 여기 한 곳에서만** 한다. 무엇을 저장할지는 문맥이 정한다:
+//
+//   글자 입력 중        -> 넘긴다(가로채지 않는다)
+//   Result 화면이 아님   -> 넘긴다. 예전에는 어느 탭에 있든 발화했고, 처리하지 않을
+//                          때조차 preventDefault 를 걸어 브라우저 기본까지 막았다
+//                          (사용자 지적 2026-08-05).
+//   히스토리 팝업 열림   -> 팝업이 맡는다(고른 것 일괄 저장). 없으면 아래로 내려간다.
+//   그 외               -> 지금 보고 있는 이미지 하나를 빠른 저장
+//
+// 리스너를 하나로 묶어 두는 이유: document 리스너를 둘로 나누면 `preventDefault()` 가
+// 서로를 막지 못해 **둘 다 실행된다**(파일 2개·토스트 2개). 히스토리 다중선택(PR #32)이
+// 정확히 그 형태였다 — 새 동작은 리스너를 늘리지 말고 아래 분기를 채운다.
 document.addEventListener('keydown', async e => {
-  if ((e.key === 's' || e.key === 'S') && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
-    e.preventDefault();
-    const path = resultHistory ? resultHistory.currentImagePath : '';
-    if (!path) { showToast('저장할 이미지가 없습니다', 'info'); return; }
-    try {
-      const r = await fetch('/api/result/quicksave', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
-      const d = await r.json();
-      if (!r.ok || d.ok === false) throw new Error(d.error || '저장 실패');
-      const how = d.mode === 'move' ? '이동' : (d.mode === 'noop' ? '이미 있음' : '저장');
-      showToast(how + ': ' + String(d.path || '').split(/[\\/]/).pop(), 'success');
-    } catch (err) {
-      showToast('빠른 저장 실패: ' + err.message, 'error');
-    }
+  const isSave = (e.key === 's' || e.key === 'S')
+    && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
+  if (!isSave) return;
+  if (isTypingTarget(e.target)) return;
+  if (!isResultViewActive()) return;
+
+  // 히스토리 팝업이 자기 규칙(선택분 일괄 저장)을 가지고 있으면 그쪽이 우선이다.
+  // 아직 없으면(현재) 그냥 아래 단건 저장으로 내려간다.
+  if (isHistoryPopupOpen() && typeof resultHistory?.handleSaveShortcut === 'function') {
+    const handled = resultHistory.handleSaveShortcut();
+    if (handled) { e.preventDefault(); return; }
+  }
+
+  const path = resultHistory ? resultHistory.currentImagePath : '';
+  // 여기서부터는 우리가 처리한다 — 그때만 브라우저의 "페이지 저장"을 막는다.
+  e.preventDefault();
+  if (!path) { showToast('저장할 이미지가 없습니다', 'info'); return; }
+  try {
+    const r = await fetch('/api/result/quicksave', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const d = await r.json();
+    if (!r.ok || d.ok === false) throw new Error(d.error || '저장 실패');
+    const how = d.mode === 'move' ? '이동' : (d.mode === 'noop' ? '이미 있음' : '저장');
+    showToast(how + ': ' + String(d.path || '').split(/[\\/]/).pop(), 'success');
+  } catch (err) {
+    showToast('빠른 저장 실패: ' + err.message, 'error');
   }
 });
 

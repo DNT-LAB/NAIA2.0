@@ -615,6 +615,7 @@ export function createInteractivePanel({
   let reactive = false;
   let reactivePending = false;      // 생성 중에 바뀐 것이 있나(개수는 세지 않는다)
   let reactiveLastPrompt = '';
+  let reactiveTypingSlot = null;   // 지금 타이핑 중인 슬롯 입력창
 
   // 툴팁은 여러 줄이다. 이 앱은 native `title` 을 `data-naia-title` 로 걷어가
   // 자체 툴팁으로 그린다(app.js `adoptTitle`) — 그래서 렌더 뒤 title 을 넣어도
@@ -669,6 +670,10 @@ export function createInteractivePanel({
   /** 슬롯이 바뀔 때마다 불린다. 실제 발화는 호스트(app.js)가 맡는다. */
   function reactiveOnChange() {
     if (!reactive || !active) return;
+    // 슬롯에 **직접 타이핑하는 동안은 발화하지 않는다.** `1girl` 을 치면 여섯 번
+    // 나가서 Anlas 만 태운다(사용자 합의). 지문도 갱신하지 않는다 — 그래야 blur/
+    // Enter 시점에 '그동안 쌓인 변화'가 통째로 잡힌다.
+    if (reactiveTypingSlot) return;
     const now = reactiveSignature();
     if (now === reactiveLastPrompt) return;   // 순서만 바뀐 재렌더는 흘린다
     reactiveLastPrompt = now;
@@ -3065,9 +3070,18 @@ export function createInteractivePanel({
   function bindSlotInput(ta) {
     ta.addEventListener('input', () => {
       autoGrow(ta);
+      // 반응형 생성: 타이핑 중에는 발화를 멈춘다(blur/Enter 에 한 번 낸다).
+      reactiveTypingSlot = ta;
       // 직접 타이핑 → 상태만 갱신, textarea 는 그대로(커서/IME 유지)
       setCurrentTags(parseSlotInput(ta.value), {fromInput: true});
     });
+    // 다 썼다는 신호 = 포커스를 잃거나 Enter. 여기서 한 번만 낸다.
+    const flushTyping = () => {
+      if (reactiveTypingSlot !== ta) return;
+      reactiveTypingSlot = null;
+      reactiveOnChange();
+    };
+    ta.addEventListener('blur', flushTyping);
     ta.addEventListener('keydown', event => {
       // 자동완성 드롭다운이 열려 있으면 Enter/Escape 는 tagAssist(확정/닫기)에 양보한다.
       const acOpen = getAutocompleteTarget && getAutocompleteTarget() === ta;
@@ -3077,7 +3091,9 @@ export function createInteractivePanel({
       }
       if (event.key === 'Enter' && !event.shiftKey) {
         if (acOpen) return;
-        event.preventDefault(); closePanel();
+        event.preventDefault();
+        flushTyping();          // 닫기 전에 한 번 낸다 — 닫으면 blur 가 늦다
+        closePanel();
       }
     });
     ta.addEventListener('blur', () => {

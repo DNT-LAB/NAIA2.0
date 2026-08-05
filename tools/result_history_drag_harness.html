@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>NAIA result history drag harness</title>
+  <link rel="stylesheet" href="../app/web/remote/style.css">
+  <style>
+    body { margin: 0; padding: 24px; background: #11141b; color: #fff; }
+    #viewerPanel { width: 420px; height: 420px; display: flex; flex-direction: column; }
+    #viewerGrid { position: relative; grid-template-columns: repeat(3, 110px); gap: 12px; }
+    .viewer-thumb { width: 110px; height: 110px; aspect-ratio: auto; background: #2b3342; }
+  </style>
+</head>
+<body>
+  <button id="openPopupHarness" type="button">Open popup</button>
+  <aside id="viewerPanel">
+    <div class="viewer-panel-header">History drag regression harness</div>
+    <div id="viewerGrid" class="viewer-panel-grid">
+      <img class="viewer-thumb" data-path="__history_item__/one" alt="one">
+      <img class="viewer-thumb" data-path="__history_item__/two" alt="two">
+      <img class="viewer-thumb" data-path="__history_item__/three" alt="three">
+      <img class="viewer-thumb" data-path="__history_item__/four" alt="four">
+      <img class="viewer-thumb" data-path="__history_item__/five" alt="five">
+      <img class="viewer-thumb" data-path="__history_item__/six" alt="six">
+    </div>
+  </aside>
+  <div id="viewerLightbox"></div>
+  <script type="module">
+    import {createResultHistoryController} from '../app/web/remote/js/features/resultHistory.mjs';
+
+    const controller = createResultHistoryController({
+      document,
+      window,
+      localStorage,
+      fetch: async url => ({
+        ok: true,
+        json: async () => String(url).includes('/api/history/list')
+          ? ({images: [
+              {rel_path: '__history_item__/one'},
+              {rel_path: '__history_item__/two'},
+            ], total: 2})
+          : ({}),
+      }),
+      preview: document.createElement('img'),
+      emptyMsg: document.createElement('div'),
+      resultInfoContent: document.createElement('div'),
+      escHtml: value => String(value),
+      showToast: () => {},
+    });
+    controller.init();
+    document.getElementById('openPopupHarness').addEventListener('click', () => controller.openPopup());
+    window.historyHarnessController = controller;
+    document.documentElement.dataset.harnessReady = '1';
+  </script>
+</body>
+</html>

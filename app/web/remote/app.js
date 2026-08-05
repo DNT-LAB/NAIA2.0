@@ -645,6 +645,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260802-qu
       resultInfoContent,
       escHtml,
       showToast,
+      confirmDialog: showConfirmDialog,
       renderPromptInfoHtml,
       onPromptInfoTagLookup: lookupPromptInfoTag,
       onDiskImageSelected: onResultHistorySelectionChanged,

@@ -478,6 +478,8 @@
         {"method": "GET", "path": "/api/history/meta/{history_id}", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/history/unsaved/save-all", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/history/unsaved/download", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/history/selected/save", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/history/selected/delete", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/history/{kind}/{history_id}", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/result/open-location", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/result/action/reroll", "smoke": "external_live"},

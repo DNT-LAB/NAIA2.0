@@ -562,6 +562,19 @@ class WebSessionContext:
     def save_history_item(self, item: Any) -> dict[str, Any]:
         return self._save_service().save_history_item(item)
 
+    def save_history_items(
+        self,
+        items: list[Any],
+        *,
+        save_as_webp: bool = True,
+        same_directory: bool = True,
+    ) -> dict[str, Any]:
+        return self._save_service().save_history_items(
+            items,
+            save_as_webp=save_as_webp,
+            same_directory=same_directory,
+        )
+
     def _prompt_engineering_module_state(self) -> dict[str, Any]:
         return self._prompt_engineering_service().state()
 

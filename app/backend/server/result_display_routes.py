@@ -22,6 +22,7 @@ from core.web_session_context import WebSessionContext
 
 
 IMAGE_VIEWER_EXTENSIONS = {".png", ".webp", ".jpg", ".jpeg"}
+SELECTED_HISTORY_MAX_ITEMS = 200
 PROMPT_SOURCE_KEYS = ("general", "character", "copyright", "artist", "meta", "prompt", "input", "tags")
 AsyncRunner = Callable[..., Awaitable[Any]]
 JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
@@ -60,6 +61,41 @@ def history_item_from_action_payload(context: WebSessionContext, payload: dict[s
     if not rel_path:
         return None
     return history_item_from_viewer_path(context, rel_path)
+
+
+def _selected_history_items(
+    context: WebSessionContext,
+    paths: Any,
+) -> tuple[list[tuple[str, Any]], list[dict[str, str]], int | None]:
+    """Resolve a bounded, de-duplicated list of in-memory history paths."""
+    if not isinstance(paths, list) or not paths:
+        return [], [{"path": "", "error": "Select at least one history item"}], 400
+    if len(paths) > SELECTED_HISTORY_MAX_ITEMS:
+        return [], [{
+            "path": "",
+            "error": f"At most {SELECTED_HISTORY_MAX_ITEMS} history items can be changed at once",
+        }], 413
+
+    requested: list[tuple[str, Any]] = []
+    failures: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    for raw_path in paths:
+        rel_path = str(raw_path or "").replace("\\", "/").strip()
+        if rel_path in seen_paths:
+            continue
+        seen_paths.add(rel_path)
+        normalized = rel_path.strip("/")
+        prefix = "__history_item__/"
+        history_id = normalized[len(prefix):] if normalized.startswith(prefix) else ""
+        if not history_id or "/" in history_id or history_id in {".", ".."}:
+            failures.append({"path": rel_path, "error": "invalid history path"})
+            continue
+        item = history_item_from_viewer_path(context, normalized)
+        if item is None:
+            failures.append({"path": normalized, "error": "history item not found"})
+            continue
+        requested.append((normalized, item))
+    return requested, failures, None
 
 
 def _request_host(value: str) -> str:
@@ -1081,6 +1117,98 @@ def register_result_display_routes(
             media_type="application/zip",
             headers={"Content-Disposition": result_images.download_content_disposition(filename)},
         )
+
+    @app.post("/api/history/selected/save")
+    async def api_history_selected_save(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        paths = payload.get("paths") if isinstance(payload, dict) else None
+        requested, failures, status_code = _selected_history_items(session_context, paths)
+        if status_code is not None:
+            return JSONResponse({"ok": False, "error": failures[0]["error"], "failed": failures}, status_code=status_code)
+        if not requested:
+            return JSONResponse({
+                "ok": False,
+                "error": failures[0]["error"] if failures else "History item not found",
+                "failed": failures,
+            }, status_code=404)
+        try:
+            result = await run_in_thread(
+                session_context.save_history_items,
+                [item for _, item in requested],
+                save_as_webp=True,
+                same_directory=True,
+            )
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        service_failures = list(result.get("failed") or [])
+        all_failures = [*failures, *service_failures]
+        await broadcast_json(clients, session_context.auto_save_state_payload())
+        return {
+            "ok": bool(result.get("saved")),
+            **result,
+            "failed": all_failures,
+            "requested": len(requested),
+        }
+
+    @app.post("/api/history/selected/delete")
+    async def api_history_selected_delete(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        paths = payload.get("paths") if isinstance(payload, dict) else None
+        requested, failures, status_code = _selected_history_items(session_context, paths)
+        if status_code is not None:
+            return JSONResponse({"ok": False, "error": failures[0]["error"], "failed": failures}, status_code=status_code)
+        if not requested:
+            return JSONResponse({
+                "ok": False,
+                "error": failures[0]["error"] if failures else "History item not found",
+                "failed": failures,
+            }, status_code=404)
+        keep_file = bool(payload.get("keep_file")) if isinstance(payload, dict) else False
+
+        def _delete_items():
+            removed_payloads: list[dict[str, Any]] = []
+            delete_failures = list(failures)
+            for rel_path, item in requested:
+                file_path = str(getattr(item, "filepath", "") or "")
+                deleted_file = False
+                try:
+                    if file_path and not keep_file:
+                        target = Path(file_path)
+                        if target.is_file():
+                            if not _move_to_trash(target):
+                                raise OSError(f"Could not move file to recycle bin: {target}")
+                            deleted_file = True
+                    removed = session_context.result_store.remove_item(item)
+                    if removed is None:
+                        raise FileNotFoundError("History item not found")
+                    removed_payloads.append({
+                        **session_context.result_store.viewer_removed_payload(removed),
+                        "file_path": file_path,
+                        "deleted_file": deleted_file,
+                        "trashed": deleted_file,
+                    })
+                except Exception as exc:
+                    delete_failures.append({"path": rel_path, "error": str(exc)})
+            return removed_payloads, delete_failures
+
+        removed_payloads, delete_failures = await run_in_thread(_delete_items)
+        for removed_payload in removed_payloads:
+            await broadcast_json(clients, removed_payload)
+        await broadcast_json(clients, session_context.auto_save_state_payload())
+        return {
+            "ok": bool(removed_payloads),
+            "deleted": len(removed_payloads),
+            "failed": delete_failures,
+            "removed": removed_payloads,
+            "total": session_context.result_store.history_total(),
+            "remaining": session_context.result_store.unsaved_history_count(),
+        }
 
     @app.get("/api/history/{kind}/{history_id}")
     async def api_history_dynamic_kind(kind: str, history_id: str, size: int = 0, full: bool = False):

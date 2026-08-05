@@ -8913,12 +8913,6 @@ function isResultViewActive() {
   return pane.classList.contains('active') && !pane.hidden;
 }
 
-/** 히스토리 팝업(라이트박스)이 열려 있나. */
-function isHistoryPopupOpen() {
-  const lb = document.getElementById('viewerLightbox');
-  return !!(lb && lb.classList.contains('open'));
-}
-
 // Ctrl+S — **판정은 여기 한 곳에서만** 한다. 무엇을 저장할지는 문맥이 정한다:
 //
 //   글자 입력 중        -> 넘긴다(가로채지 않는다)
@@ -8938,11 +8932,14 @@ document.addEventListener('keydown', async e => {
   if (isTypingTarget(e.target)) return;
   if (!isResultViewActive()) return;
 
-  // 히스토리 팝업이 자기 규칙(선택분 일괄 저장)을 가지고 있으면 그쪽이 우선이다.
-  // 아직 없으면(현재) 그냥 아래 단건 저장으로 내려간다.
-  if (isHistoryPopupOpen() && typeof resultHistory?.handleSaveShortcut === 'function') {
-    const handled = resultHistory.handleSaveShortcut();
-    if (handled) { e.preventDefault(); return; }
+  // 히스토리가 자기 규칙(고른 것 일괄 저장)을 가지고 있으면 그쪽이 우선이다.
+  // **팝업 여부로 가르지 않는다** — 선택은 레일에서도 만들어진다(실측: 레일에서
+  // Ctrl+클릭으로 3개를 골라 두고 Ctrl+S 를 눌렀는데 단건 저장이 나갔다).
+  // 고른 것이 없으면 `handleSaveShortcut` 이 false 를 내므로 아래 단건으로 내려간다.
+  if (typeof resultHistory?.handleSaveShortcut === 'function'
+      && resultHistory.handleSaveShortcut()) {
+    e.preventDefault();
+    return;
   }
 
   const path = resultHistory ? resultHistory.currentImagePath : '';

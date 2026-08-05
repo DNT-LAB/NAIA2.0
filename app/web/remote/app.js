@@ -3523,7 +3523,12 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     _localPromptDirty = false;
     deferredPromptSync = null;
     syncingPrompt = true;
-    promptEdit.value = prompt;
+    // Interactive 가 켜져 있으면 입력창의 주인은 블록이다. 서버 에코를 그대로 쓰면
+    // 우리가 저장용으로 보낸 **원본**이 표시값을 덮어써 조립 결과가 사라진다.
+    // 저장은 원본으로, 표시는 블록 조립값으로 — 둘을 갈라 둔다.
+    if (!(interactivePanel?.isActive?.() && promptBeforeInteractive !== null)) {
+      promptEdit.value = prompt;
+    }
     syncingPrompt = false;
     applyGeneratedResolutionUpdate(message);
     updatePromptHighlight();
@@ -4311,7 +4316,13 @@ function _isPromptEditingActive() {
 
 function _applyPromptSync(m) {
   syncingPrompt = true;
-  if ('prompt' in m && m.prompt !== promptEdit.value) promptEdit.value = m.prompt;
+  // Interactive 가 켜져 있으면 입력창의 주인은 블록이다. 우리가 저장용으로 보낸
+  // **원본**이 이 경로로 돌아와 조립값을 덮어쓰던 것을 막는다(실측: 조립값이 쓰인
+  // 직후 원본이 다시 쓰였다). 네거티브는 Interactive 소관이 아니라 그대로 둔다.
+  const interactiveOwnsPrompt = interactivePanel?.isActive?.() && promptBeforeInteractive !== null;
+  if (!interactiveOwnsPrompt && 'prompt' in m && m.prompt !== promptEdit.value) {
+    promptEdit.value = m.prompt;
+  }
   if ('negative_prompt' in m && m.negative_prompt !== negEdit.value) negEdit.value = m.negative_prompt;
   syncingPrompt = false;
   updateMetaChips(m);
@@ -4355,7 +4366,12 @@ function onPromptEdit() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'set_prompt',
-        prompt: promptEdit.value,
+        // Interactive 가 켜져 있으면 입력창은 **블록이 조립한 표시값**이다. 그것을
+        // 저장하면 켠 채로 종료했을 때 다음 실행에 그 값이 메인 프롬프트로 굳고
+        // 사용자 원본이 사라진다(실측). 저장은 항상 원본으로 한다 — 생성은
+        // 요청에 프롬프트를 직접 실어 보내므로 이 값에 의존하지 않는다.
+        prompt: (interactivePanel?.isActive?.() && promptBeforeInteractive !== null)
+          ? promptBeforeInteractive : promptEdit.value,
         negative_prompt: negEdit.value,
       }));
     }
@@ -6132,6 +6148,13 @@ function syncMode(mode) {
     const btn = document.querySelector(`.module-btn[data-module="${mid}"]`);
     if (btn) btn.classList.toggle('nai-only-disabled', !isNai);
   });
+  // **마지막 방어선.** setMode 가 막지만 백엔드 브로드캐스트·세션 복원처럼 프론트를
+  // 거치지 않는 경로가 있다. NAI 가 아닌데 Interactive 가 살아 있으면 강제로 끈다 —
+  // 끄는 경로가 프롬프트 원본 복원까지 함께 처리한다.
+  if (!isNai && interactivePanel?.isActive?.()) {
+    interactivePanel.setActive(false);
+    showToast('Interactive 모드를 껐습니다 — NAI 전용입니다', 'info');
+  }
   updateInteractiveNaiToolBlock();   // Interactive 활성 시 Character/CharRef 차단 유지
   // Interactive 헤더의 Position/Reference 는 NAI 전용 — 모드가 바뀌면 다시 그린다.
   if (interactivePanel?.onModeChanged) interactivePanel.onModeChanged();
@@ -6150,6 +6173,13 @@ function syncMode(mode) {
 function setMode(mode) {
   if (syncingMode) return;
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // Interactive 는 NAI 전용이다(캐릭터를 char_captions 로 싣는 배선이 NAI 스펙이다).
+  // 켜진 채로 다른 모드로 넘어가면 조립한 프롬프트가 갈 곳이 없다 — 먼저 끄게 한다.
+  if (mode !== 'NAI' && interactivePanel?.isActive?.()) {
+    syncMode(prevMode);
+    showToast('Interactive 모드를 먼저 끄세요 — NAI 전용입니다', 'error');
+    return;
+  }
   if (!isModeConnected(mode)) {
     syncMode(prevMode);
     showToast(`${mode} API is not connected`, 'error', true);

@@ -642,7 +642,7 @@ export function createInteractivePanel({
   function setReactive(next) {
     reactive = !!next;
     reactivePending = false;
-    reactiveLastPrompt = renderPrompt();
+    reactiveLastPrompt = reactiveSignature();
     const btn = sceneMount && sceneMount.querySelector('[data-ia-reactive]');
     if (btn) {
       btn.classList.toggle('is-on', reactive);
@@ -653,10 +653,23 @@ export function createInteractivePanel({
     showToast(reactive ? '반응형 생성 켜짐' : '반응형 생성 꺼짐', 'info');
   }
 
+  /** 무엇이 바뀌었는지 판정하는 지문.
+   *
+   *  **베이스 프롬프트만 보면 안 된다.** 캐릭터 태그는 `char_captions` 로 따로
+   *  나가므로 `renderPrompt()` 값이 그대로다 — 캐릭터 슬롯을 아무리 만져도 변화를
+   *  못 잡는다(2026-08-05 사용자 지적: 씬 슬롯으로만 시험해서 놓쳤다).
+   *  성별·활성 상태도 프롬프트에 나가므로 함께 센다. */
+  function reactiveSignature() {
+    const chars = state.chars
+      .map(c => [c.state, c.gender, buildCharPrompt(c)].join(''))
+      .join('');
+    return renderPrompt() + '' + chars;
+  }
+
   /** 슬롯이 바뀔 때마다 불린다. 실제 발화는 호스트(app.js)가 맡는다. */
   function reactiveOnChange() {
     if (!reactive || !active) return;
-    const now = renderPrompt();
+    const now = reactiveSignature();
     if (now === reactiveLastPrompt) return;   // 순서만 바뀐 재렌더는 흘린다
     reactiveLastPrompt = now;
     if (typeof isGenerating === 'function' && isGenerating()) {
@@ -670,7 +683,7 @@ export function createInteractivePanel({
   function reactiveOnGenerationDone() {
     if (!reactive || !active || !reactivePending) return;
     reactivePending = false;
-    reactiveLastPrompt = renderPrompt();
+    reactiveLastPrompt = reactiveSignature();
     requestGeneration();
   }
 

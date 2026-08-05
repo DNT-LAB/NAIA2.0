@@ -1138,8 +1138,6 @@ def register_result_display_routes(
             result = await run_in_thread(
                 session_context.save_history_items,
                 [item for _, item in requested],
-                save_as_webp=True,
-                same_directory=True,
             )
         except Exception as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)

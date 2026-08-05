@@ -335,20 +335,29 @@ class HeadlessSaveService:
         self,
         items: list[Any],
         *,
-        save_as_webp: bool = True,
-        same_directory: bool = True,
+        save_as_webp: bool | None = None,
+        same_directory: bool = False,
     ) -> dict[str, Any]:
-        """Save selected history items together in the current result folder.
+        """고른 히스토리 항목을 한 번에 저장한다.
 
-        Bulk selection is an explicit export action, so it can force WebP without
-        changing the user's Auto Save preference.  ``same_directory`` deliberately
-        bypasses classification subfolders so every selected image lands beside the
-        others in the one folder shown by the Save Directory module.
+        **단건 저장과 같은 규칙을 따른다.** 형식은 Auto Save 설정을 그대로 쓰고
+        (`save_as_webp=None`), 분류 폴더도 그대로 적용한다. 예전에는 WebP 를
+        강제하고 분류를 건너뛰었는데, 같은 버튼이 상황에 따라 다른 곳에 다른
+        형식으로 저장하면 나중에 파일을 못 찾는다(사용자 결정 2026-08-05).
+        호출자가 명시하면 그때만 다르게 간다.
+
+        **이미 저장된 항목은 건너뛴다.** 단건에는 있던 가드가 여기에는 없어서,
+        두 번 누르면 파일이 두 배가 되고 `mark_saved` 가 `filepath` 를 새 파일로
+        재지정해 **원본이 고아로 남았다**(병합 전 필수 #1).
         """
         context = self.context
+        if save_as_webp is None:
+            save_as_webp = context._coerce_bool(
+                self.auto_save_state_payload().get("save_as_webp"))
         directory = self.current_save_directory()
         directory.mkdir(parents=True, exist_ok=True)
         saved_paths: list[str] = []
+        skipped: list[str] = []
         failed: list[dict[str, str]] = []
         seen_ids: set[str] = set()
 
@@ -357,6 +366,11 @@ class HeadlessSaveService:
             if not history_id or history_id in seen_ids:
                 continue
             seen_ids.add(history_id)
+            # 이미 디스크에 있는 것은 다시 쓰지 않는다(단건 save_history_item 과 같은 판정).
+            existing = str(getattr(item, "filepath", "") or "")
+            if existing and Path(existing).is_file():
+                skipped.append(existing)
+                continue
             try:
                 target = self._save_history_item_to_directory(
                     item,
@@ -373,6 +387,8 @@ class HeadlessSaveService:
 
         return {
             "saved": len(saved_paths),
+            "skipped": len(skipped),
+            "skipped_paths": skipped,
             "failed": failed,
             "paths": saved_paths,
             "format": "webp" if save_as_webp else "png",

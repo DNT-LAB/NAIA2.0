@@ -622,7 +622,6 @@
       "source_files": ["app/backend/server/interactive_assets_routes.py", "core/interactive_assets_service.py", 
         "app/web/remote/js/features/interactivePanel.mjs",
         "app/web/remote/js/features/interactiveAxes.mjs",
-        "app/web/remote/js/features/interactiveBrowse.mjs",
         "app/web/remote/js/features/interactiveAutocomplete.mjs",
         "app/web/remote/js/features/eventCorpusClient.mjs",
         "app/backend/server/interactive_thumbnail_routes.py",

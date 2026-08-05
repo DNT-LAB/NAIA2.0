@@ -281,6 +281,9 @@ export function createInteractivePanel({
   // 프롬프트 엔지니어링 모듈 상태(`pre_prompt`/`post_prompt`). 베이스 프롬프트의
   // 선행·후행이 여기서 온다 — 없으면 인원 + 글로벌만 나간다.
   getPromptEngineering = () => null,
+  // 반응형 생성. `isGenerating()` 이 true 면 변화를 모았다가 끝난 뒤 한 번 낸다.
+  isGenerating = () => false,
+  requestGeneration = () => {},
   showToast = () => {},
   onCharReference = null,      // () => void — 세션 CR 모듈 열기(없으면 버튼을 안 낸다)
   getCharacterReferenceState = () => null,   // () => {frames:[{is_enabled}], is_naid45} | null
@@ -414,6 +417,7 @@ export function createInteractivePanel({
   }
 
   function emitChange() {
+    reactiveOnChange();
     onPromptChange(renderPrompt(), {
       characters: state.chars.map((c, i) => ({
         id: c.id,
@@ -602,13 +606,91 @@ export function createInteractivePanel({
   let sceneMount = null;
   const SCENE_FLOAT_MIN = 1180;   // 이 아래는 옆에 자리가 없다
 
+  // ---- 반응형 생성 -------------------------------------------------------
+  // 슬롯을 만질 때마다 알아서 다시 그린다. 태그를 **뺐을 때도** 반응한다 —
+  // 무엇을 지웠을 때 그림이 어떻게 달라지는지 보는 것이 이 기능의 절반이다.
+  //
+  // 생성 중에 여러 개를 바꾸면 **큐에 쌓지 않고 하나로 모은다.** 쌓으면 손이 멈춘 뒤에도
+  // 남은 만큼 계속 돌아 Anlas 를 태운다 — 마지막 상태 한 장만 필요하다.
+  let reactive = false;
+  let reactivePending = false;      // 생성 중에 바뀐 것이 있나(개수는 세지 않는다)
+  let reactiveLastPrompt = '';
+
+  // 툴팁은 여러 줄이다. 이 앱은 native `title` 을 `data-naia-title` 로 걷어가
+  // 자체 툴팁으로 그린다(app.js `adoptTitle`) — 그래서 렌더 뒤 title 을 넣어도
+  // 곧 지워진다(실측). 처음부터 그 시스템의 규약대로 넣는다.
+  const REACTIVE_TIP = [
+    '슬롯을 바꿀 때마다 자동으로 생성합니다.',
+    '태그를 뺐을 때도 반응합니다.',
+    '생성 중에 여러 개를 바꾸면 큐에 쌓지 않고 마지막 상태 한 번만 생성합니다.',
+  ].join(String.fromCharCode(10));
+
+  function reactiveToggleHtml() {
+    return '<button type="button" class="ia-reactive' + (reactive ? ' is-on' : '') + '"' +
+      ' data-ia-reactive="1" role="switch" aria-checked="' + (reactive ? 'true' : 'false') + '">' +
+      '<span class="ia-reactive-box">' + (reactive ? '✓' : '') + '</span> 반응형 생성</button>';
+  }
+
+  /** 렌더 직후 툴팁을 붙인다. */
+  function applyReactiveTip() {
+    const btn = sceneMount && sceneMount.querySelector('[data-ia-reactive]');
+    if (!btn) return;
+    btn.dataset.naiaTitle = REACTIVE_TIP;
+    btn.setAttribute('aria-label', REACTIVE_TIP);
+  }
+
+  function setReactive(next) {
+    reactive = !!next;
+    reactivePending = false;
+    reactiveLastPrompt = renderPrompt();
+    const btn = sceneMount && sceneMount.querySelector('[data-ia-reactive]');
+    if (btn) {
+      btn.classList.toggle('is-on', reactive);
+      btn.setAttribute('aria-checked', reactive ? 'true' : 'false');
+      const box = btn.querySelector('.ia-reactive-box');
+      if (box) box.textContent = reactive ? '\u2713' : '';
+    }
+    showToast(reactive ? '반응형 생성 켜짐' : '반응형 생성 꺼짐', 'info');
+  }
+
+  /** 슬롯이 바뀔 때마다 불린다. 실제 발화는 호스트(app.js)가 맡는다. */
+  function reactiveOnChange() {
+    if (!reactive || !active) return;
+    const now = renderPrompt();
+    if (now === reactiveLastPrompt) return;   // 순서만 바뀐 재렌더는 흘린다
+    reactiveLastPrompt = now;
+    if (typeof isGenerating === 'function' && isGenerating()) {
+      reactivePending = true;                 // **모은다.** 개수와 무관하게 한 번이다
+      return;
+    }
+    requestGeneration();
+  }
+
+  /** 생성이 끝나면 app.js 가 부른다. 모아 둔 변화가 있으면 그때 한 번 낸다. */
+  function reactiveOnGenerationDone() {
+    if (!reactive || !active || !reactivePending) return;
+    reactivePending = false;
+    reactiveLastPrompt = renderPrompt();
+    requestGeneration();
+  }
+
   function ensureSceneMount() {
     if (sceneMount && document.body.contains(sceneMount)) return sceneMount;
     sceneMount = document.createElement('div');
     sceneMount.className = 'ia-scene-float';
     document.body.appendChild(sceneMount);
     sceneMount.addEventListener('mousedown', keepEditingFocus);   // 왼쪽 팝업과 동일
+    // 슬롯 위에서 우클릭하면 그 슬롯의 팝업을 닫는다(사용자 편의). 브라우저 메뉴는 막는다.
+    sceneMount.addEventListener('contextmenu', event => {
+      const b = event.target.closest('[data-slot]');
+      if (!b || !panelContext || panelContext.kind !== 'scene') return;
+      if (panelContext.slotId !== b.dataset.slot) return;
+      event.preventDefault();
+      closePanel();
+    });
     sceneMount.addEventListener('click', event => {
+      const rx = event.target.closest('[data-ia-reactive]');
+      if (rx) { event.preventDefault(); setReactive(!reactive); return; }
       const b = event.target.closest('[data-slot]');
       if (!b) return;
       if (isEditing('scene', b.dataset.slot)) { focusEditingInput(); return; }
@@ -689,7 +771,10 @@ export function createInteractivePanel({
       : SCENE_SLOTS;
     blocksMount.innerHTML = charBlockHtml() + inlineScenes.map(sceneBlockHtml).join('');
     const host = ensureSceneMount();
-    host.innerHTML = floating ? SCENE_SLOTS.map(sceneButtonHtml).join('') : '';
+    host.innerHTML = floating
+      ? SCENE_SLOTS.map(sceneButtonHtml).join('') + reactiveToggleHtml()
+      : '';
+    applyReactiveTip();
     watchResultTab();
     positionSceneFloat();
     // 초기 렌더는 `blocksMount.hidden` 이 아직 true 인 시점에 돌 수 있다(실측: 새로고침
@@ -724,6 +809,14 @@ export function createInteractivePanel({
         if (event.target.closest('.ia-slot-input')) return;
         if (isEditing('char', el.dataset.cid, el.dataset.sub)) { focusEditingInput(); return; }
         openCharSub(el.dataset.cid, el.dataset.sub);
+      });
+      // 그 슬롯의 팝업이 열려 있을 때 우클릭하면 닫는다(사용자 편의).
+      el.addEventListener('contextmenu', event => {
+        if (!panelContext || panelContext.kind !== 'char') return;
+        if (panelContext.cid !== el.dataset.cid || panelContext.sub !== el.dataset.sub) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closePanel();
       });
     });
     blocksMount.querySelectorAll('.ia-slot-input').forEach(bindSlotInput);
@@ -4227,6 +4320,9 @@ export function createInteractivePanel({
     applySnapshotCharById,
     applyCharacterPresetTo,
     applyAssetPrompt,
+    /** 생성이 끝났다 — 모아 둔 변화가 있으면 그때 한 번 낸다. */
+    notifyGenerationDone: reactiveOnGenerationDone,
+    isReactive: () => reactive,
     // Assets 바의 [+] 가 쓴다. 좌측 [+캐릭터 슬롯] 과 같은 동작이라 상한/토스트를 공유한다.
     addCharacterSlot: addCharacter,
     // Assets 스택 옆 컨트롤이 쓴다. 좌측 헤더의 ACTIVE/[x] 와 **같은 함수**라

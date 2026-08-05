@@ -903,7 +903,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     });
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia167')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia171')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -942,6 +942,9 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       // 베이스 프롬프트의 선행·후행. 모듈 상태는 접속 직후 일괄 캐시되므로
       // PE 패널을 연 적이 없어도 최신 값을 읽는다.
       getPromptEngineering: () => moduleStateCache.get('prompt_engineering') || null,
+      // 반응형 생성. 생성 중이면 패널이 변화를 모았다가 끝난 뒤 한 번만 낸다.
+      isGenerating: () => generating,
+      requestGeneration: () => requestGenerate(),
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
       onCharReference: () => {
@@ -5783,7 +5786,12 @@ function setGen(v) {
     if (resultEnhance) resultEnhance.update();
     return;
   }
+  const wasGenerating = generating;
   generating = next;
+  // 반응형 생성: 생성 중에 쌓인 변화를 **여기서 한 번만** 낸다(큐잉 아님).
+  if (wasGenerating && !next && interactivePanel?.notifyGenerationDone) {
+    setTimeout(() => interactivePanel.notifyGenerationDone(), 0);
+  }
   if (studioTabControl) studioTabControl.handleGenerationStatus(next);
   if (eventPresetPanel?.setGeneratingStatus) eventPresetPanel.setGeneratingStatus(next);
   btnGen.disabled = next;

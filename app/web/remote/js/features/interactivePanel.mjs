@@ -2411,6 +2411,7 @@ export function createInteractivePanel({
     openId = panelContext.kind === 'scene' ? panelContext.slotId : 'character';
     renderBlocks();            // 편집 슬롯만 textarea 로, 나머지는 칩으로
     renderPanel();             // 검색창 + 분류 탐색
+    bindPanelContextClose();
     panelMount.classList.add('open');
     // 편집 중 표시 — tagAssist 의 태그 정보 툴팁을 억제한다(팝업 위에 겹쳐 가림).
     document.body.classList.add('interactive-editing');
@@ -3001,6 +3002,20 @@ export function createInteractivePanel({
     asideMount.style.top = Math.max(12, box.top) + 'px';
     asideMount.style.bottom = Math.max(12, window.innerHeight - box.bottom) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
+  }
+
+  // 팝업 **안**에서 우클릭해도 닫는다. 슬롯 줄에만 걸어 뒀더니 팝업이 그 줄을
+  // 덮고 있어 우클릭이 팝업에 먼저 닿아 아무 일도 안 일어났다(사용자 지적).
+  // 검색창·입력창에서는 브라우저 메뉴(붙여넣기 등)를 살려 둔다.
+  let panelContextMenuBound = false;
+  function bindPanelContextClose() {
+    if (panelContextMenuBound || !panelMount) return;
+    panelContextMenuBound = true;
+    panelMount.addEventListener('contextmenu', event => {
+      if (event.target.closest('input, textarea, [contenteditable="true"]')) return;
+      event.preventDefault();
+      closePanel();
+    });
   }
 
   function closePanel() {

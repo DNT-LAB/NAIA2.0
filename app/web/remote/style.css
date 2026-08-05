@@ -20291,7 +20291,11 @@ body.detached-module .mod-grid-3 {
 /* 세로로 쌓았더니 결과 영역을 덮었다(실사용 지적) — **가로 한 줄**로 깔고
    팝업은 그 아래에서 시작한다. 반투명이라 뒤가 비쳐 영역을 뺏지 않는다. */
 .ia-scene-float {
-  position: fixed; z-index: 60; display: none;
+  /* 팝업은 `.viewer-wrapper`(z-index:0) **안**에 있어 그 2200 이 바깥에서는
+     0 층으로 접힌다. 이 플로트는 body 직계라 60 이면 팝업을 뚫고 올라온다
+     (2026-08-05 실측). 음수로 내려 뒤로 보낸다 — 프롬프트 엔지니어링 모듈
+     팝업이 정상적으로 뒤에 두는 것과 같은 관계가 된다. */
+  position: fixed; z-index: -1; display: none;
   flex-direction: row; flex-wrap: wrap; gap: 4px; align-items: center;
 }
 .ia-scene-float.open { display: flex; }
@@ -21919,6 +21923,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   border: 1px solid transparent; border-radius: 7px;
   background: transparent; color: var(--text-dim);
   font-family: var(--font-display); font-size: 10.5px; cursor: pointer;
+  /* 결과 이미지가 흰 배경이면 글자가 사라진다 — 아래쪽에 그림자를 깐다. */
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.7);
   /* **항상 다음 줄 왼쪽**에 온다. order 만 주면 여유가 있을 때 같은 줄 끝에 붙어
      씬 칩처럼 보인다(실측). 줄바꿈은 아래 `::after` 스페이서가 만들고, 버튼 자신은
      글자 폭만 차지한다 — flex-basis 100% 를 버튼에 주면 호버 테두리가 줄 전체로

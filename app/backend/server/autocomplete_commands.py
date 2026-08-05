@@ -32,7 +32,6 @@ AUTOCOMPLETE_COMMAND_TYPES = {
     "translate_text",
     "interactive_autocomplete",
     "interactive_related",
-    "interactive_browse",
 }
 
 # Interactive 슬롯 <-> group 매핑.
@@ -630,33 +629,6 @@ async def handle_autocomplete_command(
             "axis": axis,
             "requestId": request_id,
             "results": results,
-        })
-        return True
-
-    if command_type == "interactive_browse":
-        axis = str(command.get("axis") or "")
-        subgroup = str(command.get("subgroup") or "")
-        parent = str(command.get("parent") or "")
-        request_id = str(command.get("requestId") or command.get("request_id") or "")
-        try:
-            offset = max(0, int(command.get("offset") or 0))
-            limit = max(1, min(int(command.get("limit") or 60), 200))
-        except (TypeError, ValueError):
-            offset, limit = 0, 60
-        include = command.get("subgroupInclude")
-        exclude = command.get("subgroupExclude")
-        include = include if isinstance(include, list) else None
-        exclude = exclude if isinstance(exclude, list) else None
-        payload = await run_in_thread(
-            browse_interactive, context, axis, subgroup, parent, offset, limit, include, exclude
-        )
-        await _send_json(ws, {
-            "type": "interactive_browse_result",
-            "axis": axis,
-            "subgroup": subgroup,
-            "parent": parent,
-            "requestId": request_id,
-            **payload,
         })
         return True
 

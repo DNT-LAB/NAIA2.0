@@ -889,7 +889,6 @@ let interactivePanel = null;
 let eventCorpusHandlers = null;
 let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
-let interactiveBrowse = null;
 let interactiveAssetsPanel = null;
 // Interactive 전용 캐릭터 레퍼런스. NAI 모듈과 상태가 독립이다.
 let interactiveReferencePanel = null;
@@ -903,7 +902,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     });
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia174')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia175')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -911,8 +910,6 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     } = await import('./js/features/eventCorpusClient.mjs?v=20260723-ia1');
     const {createInteractiveAutocomplete} =
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
-    const {createInteractiveBrowse} =
-      await import('./js/features/interactiveBrowse.mjs?v=20260724-iab6');
     const {createInteractiveAssetsPanel} =
       await import('./js/features/interactiveAssetsPanel.mjs?v=20260803-iaas28');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
@@ -922,7 +919,6 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       ws.send(JSON.stringify(payload));
     };
     interactiveAutocomplete = createInteractiveAutocomplete({document, window, escHtml, send: wsSend});
-    interactiveBrowse = createInteractiveBrowse({document, escHtml, send: wsSend});
     // 조합 스냅샷 컨트롤(결과 좌하단). 패널을 늦게 참조하는 이유는 아래에서 만들기 때문.
     interactiveAssetsPanel = createInteractiveAssetsPanel({
       document, escHtml, showToast, showAppDialog, getPanel: () => interactivePanel,
@@ -935,7 +931,6 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       escHtml,
       showToast,
       autocomplete: interactiveAutocomplete,
-      browse: interactiveBrowse,
       // 슬롯 입력창(textarea)에 범용 자동완성을 붙인다. 팝업 검색창에는 붙이지 않는다.
       bindTagAssist,
       getMode: () => currentMode || modeSelect?.value || 'NAI',
@@ -3026,7 +3021,6 @@ const wsMessageHandlers = {
   event_corpus_query_result: m => eventCorpusHandlers?.onQuery(m),
   interactive_autocomplete_result: m => interactiveAutocomplete?.onResult(m),
   interactive_related_result: m => interactiveAutocomplete?.onResult(m),
-  interactive_browse_result: m => interactiveBrowse?.onResult(m),
   storage_list: onStorageList,
   wildcard_manager: onWildcardManager,
   filter_reset: onFilterReset,

@@ -274,7 +274,6 @@ export function createInteractivePanel({
   //  인자는 남겨 둔다 — 나중에 진짜 상태 표시가 필요해지면 여기서 받으면 된다.)
   corpusStatus = null,         // async () => payload  (미사용)
   autocomplete = null,         // createInteractiveAutocomplete() 인스턴스 (미사용 — 팝업 검색은 자동완성 없음)
-  browse = null,               // createInteractiveBrowse() 인스턴스 (선택)
   bindTagAssist = null,        // (textarea, options) => void : 범용 자동완성을 슬롯 입력창에 바인딩
   getAutocompleteTarget = () => null,  // () => 현재 자동완성이 열린 textarea | null
   getMode = () => 'NAI',       // () => 'NAI' | 'WEBUI' | 'COMFYUI' — 캐릭터 성별 주입 분기
@@ -2242,7 +2241,6 @@ export function createInteractivePanel({
     // — 커서/IME 조합이 끊기기 때문이다.
     if (!opts.fromInput) syncEditingInput();
     updateEditingMeta();
-    if (browse) browse.refreshDupes();   // 브라우저의 '있음' 표시 갱신(재요청 없음)
     // 직접 타이핑으로 축 값이 바뀐 경우에도 팔레트/슬라이더 선택 표시를 맞춘다.
     if (opts.fromInput) refreshAxisSections();
     void renderAside();   // 오른쪽 조언 플로트 — 선택이 바뀔 때마다 다시 계산
@@ -2327,8 +2325,6 @@ export function createInteractivePanel({
       // 경로(openCharSub)에만 있던 줄이다. 씬 슬롯도 sections 를 가질 수 있다.
       sections: slot.sections || null,
       excludeTags: slot.excludeTags || null,
-      subgroupInclude: slot.subgroupInclude || browseScopeOf(slot) || null,
-      subgroupExclude: slot.subgroupExclude || null,
     };
     enterEditing();
   }
@@ -2347,23 +2343,10 @@ export function createInteractivePanel({
       sections: meta.sections || null,
       // 이 슬롯에서 감출 태그. 캐릭터 '구도' 가 이미지 전체 태그를 뺄 때 쓴다.
       excludeTags: meta.excludeTags || null,
-      // 하위 슬롯이 subgroup 스코프를 가지면 분류 탐색을 그 범위로 좁힌다(구도/효과와 동일 기법).
-      // sections 가 있으면 browse 섹션의 subgroups 를 스코프로 쓴다.
-      subgroupInclude: meta.subgroups || browseScopeOf(meta) || null,
-      subgroupExclude: meta.subgroupsExclude || null,
       // 옆 팝업 없이 인라인 입력창만 여는 슬롯(캐릭터). CHAR_TAG_SLOT 주석 참조.
       noPanel: !!meta.noPanel,
     };
     enterEditing();
-  }
-
-  /** 이 슬롯에 전체 태그 탐색기(3단 계층 + 검색)를 붙일까.
-   *  축 섹션(팔레트/슬라이더/썸네일)만으로 충분한 슬롯(예: 머리)에서는 숨긴다 —
-   *  sections 가 없는 기존 슬롯(의상/액션/표정/사물)과 browse 섹션을 가진 슬롯만 붙인다. */
-  function wantsBrowse() {
-    const secs = panelContext?.sections;
-    if (!Array.isArray(secs) || !secs.length) return true;          // 기존 슬롯 = 탐색기 전용
-    return secs.some(sec => sec.kind === 'browse');
   }
 
   /** 검색창을 붙일까. 계층 탐색과 **따로** 판단한다 — 둘은 성격이 다른 도구다.
@@ -2375,15 +2358,6 @@ export function createInteractivePanel({
     return secs.some(sec => sec.kind === 'browse' || sec.kind === 'thumb' || sec.kind === 'gloss');
   }
 
-  /** sections 의 browse 섹션이 지정한 subgroup 을 트리 스코프로 쓴다. */
-  function browseScopeOf(meta) {
-    if (!meta || !Array.isArray(meta.sections)) return null;
-    const out = [];
-    for (const sec of meta.sections) {
-      if (sec.kind === 'browse' && Array.isArray(sec.subgroups)) out.push(...sec.subgroups);
-    }
-    return out.length ? out : null;
-  }
 
   /** 슬롯을 텍스트 입력으로 펼치고, 그 옆에 검색+탐색 팝업을 띄운다. */
   function enterEditing() {
@@ -2396,7 +2370,6 @@ export function createInteractivePanel({
       // 다른 슬롯에서 열려 있던 팝업·조언 플로트는 닫는다. `closePanel()` 은 못 쓴다 —
       // 그것은 방금 세운 panelContext 까지 비운다.
       if (autocomplete) autocomplete.unbind();
-      if (browse) browse.detach();
       panelMount.classList.remove('open');
       panelMount.innerHTML = '';
       panelMount.style.top = panelMount.style.left = panelMount.style.width = '';
@@ -3026,7 +2999,6 @@ export function createInteractivePanel({
   function closePanel() {
     document.body.classList.remove('interactive-editing');
     if (autocomplete) autocomplete.unbind();
-    if (browse) browse.detach();
     openId = null;
     panelContext = null;
     inspectTag = '';
@@ -3201,7 +3173,6 @@ export function createInteractivePanel({
     // 이전 input 의 리스너를 떼어낸다. innerHTML 교체로 노드는 사라지지만, 모듈이 잡고 있는
     // IME 타이머와 팝업 상태는 명시적으로 정리해야 한다.
     if (autocomplete) autocomplete.unbind();
-    if (browse) browse.detach();
     if (!panelContext) { panelMount.innerHTML = ''; return; }
 
     // 슬롯 자체가 텍스트 입력창이 되었으므로 팝업에는 '선택됨'을 두지 않는다.
@@ -3214,14 +3185,13 @@ export function createInteractivePanel({
         <button type="button" class="ia-panel-close" data-close="1">&times;</button>
       </div>
       ${wantsSearch() ? `<div class="ia-search ia-search-top">
-        <input type="text" id="iaTagInput" placeholder="${wantsBrowse()
-          ? '분류·태그 검색 (아래 목록 필터)' : '태그 검색 — 아는 태그를 바로 넣습니다'}" autocomplete="off">
+        <input type="text" id="iaTagInput"
+          placeholder="태그 검색 — 아는 태그를 바로 넣습니다" autocomplete="off">
         <span class="ia-search-scope">${escHtml(panelContext.axis)}</span>
       </div>` : ''}
       <div class="ia-panel-body">
         ${panelContext.slotId === 'composition' ? compPanelHtml() : ''}
         ${axisSectionsHtml()}
-        ${wantsBrowse() ? '<div class="ia-browse-mount" id="iaBrowseMount"></div>' : ''}
       </div>`;
 
     panelMount.querySelector('[data-close]')?.addEventListener('click', closePanel);
@@ -3230,28 +3200,12 @@ export function createInteractivePanel({
     if (panelContext.slotId === 'composition') bindCompPanel();
     bindAxisSections();
     // 계층 브라우저를 이 슬롯 축으로 마운트한다. 없으면 섹션은 비어 있다.
-    if (browse) {
-      const browseMount = panelMount.querySelector('#iaBrowseMount');
-      if (browseMount) {
-        browse.attach(browseMount, {
-          axis: panelContext.axis,
-          // 섹션 스코프(구도 vs 효과) — Depth1 subgroup 목록을 필터한다.
-          subgroupInclude: panelContext.subgroupInclude,
-          subgroupExclude: panelContext.subgroupExclude,
-          // 브라우저 항목 클릭은 토글이다 — 이미 슬롯에 있으면(✓ 표시) 제거, 없으면 추가.
-          // 탐색기 안에서 넣은 걸 탐색기 안에서 뺄 수 있어야 한다.
-          onPick: tag => toggleTag(tag),
-          getExisting: () => currentTags(),
-        });
-      }
-    }
     const input = panelMount.querySelector('#iaTagInput');
     if (input) {
       // 팝업 검색창은 자동완성이 아니라 목록을 걸러내는 필터다. 계층 탐색기가 있으면
       // 그 트리를, 없으면(자세) 썸네일 그리드를 거른다.
       // (태그 입력용 자동완성은 슬롯 입력창 쪽에 붙어 있다.)
       const applyFilter = () => {
-        if (wantsBrowse()) { if (browse) browse.setFilter(input.value); return; }
         const next = String(input.value || '').trim().toLowerCase();
         if (next === thumbFilter) return;
         thumbFilter = next;
@@ -4399,7 +4353,6 @@ export function createInteractivePanel({
     destroy: () => {
       // 하위 모듈의 리스너/타이머/팝업/툴팁까지 정리한다.
       if (autocomplete) { try { autocomplete.unbind(); } catch (e) {} }
-      if (browse) { try { browse.destroy(); } catch (e) {} }
       if (toggleButton) toggleButton.removeEventListener('click', onToggleClick);
       panelMount.removeEventListener('mousedown', onPanelMouseDown);
       blocksMount.removeEventListener('mousedown', onPanelMouseDown);

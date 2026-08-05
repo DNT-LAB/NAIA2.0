@@ -7109,6 +7109,23 @@ body.resizing-result-info {
   color: #a8f2cf;
   overflow-wrap: anywhere;
 }
+/* 레일의 선택 바는 **고른 것이 있을 때만** 펼친다. 아무것도 안 골랐을 때는 힌트
+   한 줄만 남긴다 — 통째로 숨기면 이 기능을 발견할 길이 없어지고(기여자의 원래
+   의도), 통째로 펼쳐 두면 레일 세로를 90~100px 영구히 먹는다(사용자 결정). */
+.viewer-panel:not(.has-history-selection) .viewer-panel-selection .history-selection-actions,
+.viewer-panel:not(.has-history-selection) .viewer-panel-selection .history-selection-clear,
+.viewer-panel:not(.has-history-selection) .viewer-panel-selection .history-selection-count {
+  display: none;
+}
+.viewer-panel:not(.has-history-selection) .viewer-panel-selection {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  opacity: 0.55;
+}
+.viewer-panel:not(.has-history-selection) .viewer-panel-selection .history-selection-scope {
+  font-size: 8.5px;
+}
+
 .history-selection-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

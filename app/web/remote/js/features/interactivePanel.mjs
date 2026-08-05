@@ -278,6 +278,9 @@ export function createInteractivePanel({
   bindTagAssist = null,        // (textarea, options) => void : 범용 자동완성을 슬롯 입력창에 바인딩
   getAutocompleteTarget = () => null,  // () => 현재 자동완성이 열린 textarea | null
   getMode = () => 'NAI',       // () => 'NAI' | 'WEBUI' | 'COMFYUI' — 캐릭터 성별 주입 분기
+  // 프롬프트 엔지니어링 모듈 상태(`pre_prompt`/`post_prompt`). 베이스 프롬프트의
+  // 선행·후행이 여기서 온다 — 없으면 인원 + 글로벌만 나간다.
+  getPromptEngineering = () => null,
   showToast = () => {},
   onCharReference = null,      // () => void — 세션 CR 모듈 열기(없으면 버튼을 안 낸다)
   getCharacterReferenceState = () => null,   // () => {frames:[{is_enabled}], is_naid45} | null
@@ -338,6 +341,14 @@ export function createInteractivePanel({
   }
 
   /** 블록 -> 메인 프롬프트 문자열. 맨 앞에 성별 카운트 프리픽스(공통). 캐릭터는 별도. */
+  /** 베이스 프롬프트 = **인원 + 선행 + 글로벌 + 후행**(사용자 지정 순서).
+   *
+   *  선행·후행은 프롬프트 엔지니어링 모듈의 값이다. 백엔드에서 붙일 수 없는 이유는
+   *  PE 가 `post_processing` 파이프라인 훅이고 그 파이프라인은 Random 경로에서만
+   *  돌기 때문이다 — Interactive 는 렌더한 프롬프트를 곧장 보내므로 훅을 못 탄다.
+   *  여기서 조립하면 **입력창에 보이는 것과 실제로 나가는 것이 같아진다**(생성 정보에
+   *  `1girl` 만 찍히던 이유가 그 어긋남이었다).
+   *  네거티브는 기존 값을 그대로 쓴다 — 여기서 손대지 않는다. */
   function renderPrompt() {
     const parts = [];
     for (const slot of SCENE_SLOTS) {
@@ -345,7 +356,11 @@ export function createInteractivePanel({
       if (slot.id === 'composition') parts.push(...compTags(state.composition));
       parts.push(...(state.slots[slot.id] || []));
     }
-    return [genderCountPrefix(), parts.join(', ')].filter(Boolean).join(', ');
+    const pe = (typeof getPromptEngineering === 'function' && getPromptEngineering()) || {};
+    return [genderCountPrefix(), String(pe.pre_prompt || '').trim(),
+            parts.join(', '), String(pe.post_prompt || '').trim()]
+      .map(v => v.replace(/^\s*,|,\s*$/g, '').trim())
+      .filter(Boolean).join(', ');
   }
 
   /** 캐릭터 프롬프트. NAI 모드면 특징 앞에 girl/boy 주입(이미 명시적 girl/boy 있으면 생략). */
@@ -4141,6 +4156,9 @@ export function createInteractivePanel({
       if (person) state.person = person;
     },
     getPrompt: renderPrompt,
+    /** 선행·후행(프롬프트 엔지니어링)이 바뀌면 app.js 가 부른다. 슬롯은 그대로고
+     *  베이스 프롬프트만 다시 조립하면 되므로 블록을 다시 그리지 않는다. */
+    refreshPrompt() { if (active) emitChange(); },
     // 생성 요청용 캐릭터(활성 + 태그 보유, NAI 상한 5). app.js 가 overrides.characters/uc/
     // character_positions 로 싣는다.
     getGenerationCharacters: generationCharacters,

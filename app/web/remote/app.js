@@ -903,7 +903,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     });
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260804-ia164')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia165')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -939,6 +939,9 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       // 슬롯 입력창(textarea)에 범용 자동완성을 붙인다. 팝업 검색창에는 붙이지 않는다.
       bindTagAssist,
       getMode: () => currentMode || modeSelect?.value || 'NAI',
+      // 베이스 프롬프트의 선행·후행. 모듈 상태는 접속 직후 일괄 캐시되므로
+      // PE 패널을 연 적이 없어도 최신 값을 읽는다.
+      getPromptEngineering: () => moduleStateCache.get('prompt_engineering') || null,
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
       onCharReference: () => {
@@ -995,6 +998,12 @@ function applyInteractiveModeGate(isActive) {
   // Interactive 에서는 최종 프롬프트를 상시 노출하지 않는다(사용자 결정). 전체 문자열은
   // 나중에 별도 미리보기 팝업으로만 확인한다. 값 자체는 유지되므로 토글을 끄면 그대로 보인다.
   document.body.classList.toggle('interactive-mode', !!isActive);
+  // 베이스 프롬프트에 선행·후행을 넣으려면 PE 상태가 있어야 한다. 부팅 시 일괄
+  // 캐시되는 모듈이 아니라(실측) 여기서 한 번 당겨 온다 — 도착하면 onPromptEngineeringState
+  // 가 캐시에 넣고 refreshPrompt() 를 불러 프롬프트가 다시 조립된다.
+  if (isActive && !moduleStateCache.get('prompt_engineering')) {
+    requestModuleState('prompt_engineering');
+  }
   // Assets 바는 Interactive 의 도구다 — 모드를 끄면 같이 사라진다.
   if (interactiveAssetsPanel) {
     interactiveAssetsPanel.setVisible(!!isActive);
@@ -7188,6 +7197,10 @@ function onModuleState(m) {
     if (interactivePanel && typeof interactivePanel.refreshCharReference === 'function') {
       interactivePanel.refreshCharReference();
     }
+  }
+  else if (m.module_id === 'prompt_engineering') {
+    // Interactive 의 베이스 프롬프트가 선행·후행을 품는다 — PE 가 바뀌면 즉시 다시 조립한다.
+    if (interactivePanel && interactivePanel.isActive?.()) interactivePanel.refreshPrompt();
   }
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
   else if (m.module_id === 'save_directory' && saveDirectoryPanel) saveDirectoryPanel.setState(m);

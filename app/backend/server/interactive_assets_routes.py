@@ -103,9 +103,12 @@ def register_interactive_assets_routes(
         chars = payload.get("chars") if isinstance(payload, dict) else None
         if not isinstance(chars, list) or not chars:
             return JSONResponse({"error": "chars required"}, status_code=400)
+        # 씬 슬롯·구도 등 캐릭터에 속하지 않는 값. 없으면 빈 dict — 옛 프론트도 그대로 돈다.
+        raw_globals = payload.get("globals") if isinstance(payload, dict) else None
+        body_globals = raw_globals if isinstance(raw_globals, dict) else {}
         try:
             meta = await run_in_thread(
-                interactive_assets_service(session_context).record, chars)
+                interactive_assets_service(session_context).record, chars, body_globals)
         except Exception as exc:
             return JSONResponse({"error": f"record failed: {exc}"}, status_code=500)
         return {"ok": True, "snapshot": meta}

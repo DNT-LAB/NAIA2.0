@@ -33,7 +33,14 @@ export function createInteractiveAssetsPanel({
   let roster = [];           // 캐릭터 스택(패널이 알려 준다)
   // 조합을 꽂을 대상 슬롯. **기본 0(C1)** — 항상 대상이 있어야 칩 클릭이 바로 먹는다.
   let targetSlot = 0;
-  let expandedId = '';       // 캐릭터 칩을 펼친 카드
+  // 카드를 누르면 **왼쪽에 미리보기 팝업**이 뜬다. 예전에는 카드 안에서 캐릭터 칩을
+  // 펼쳤는데, 그때마다 목록 전체를 다시 그려 팝업이 통째로 깜빡였고(busy -> 렌더,
+  // 응답 -> 렌더) 펼친 내용도 이름 칩 몇 개뿐이었다(사용자 지적 2026-08-05).
+  // 이제 목록은 건드리지 않고 팝업만 갱신한다.
+  let previewId = '';        // 미리보기를 연 조합
+  let previewBody = null;    // 그 본문 {chars, globals}
+  let previewBusy = false;
+  let previewSeq = 0;        // 늦게 온 응답이 다른 카드의 미리보기를 덮지 않게
   // 무엇을 꽂을지. 카드를 누르면 여기 담기고, [적용] 을 눌러야 슬롯에 들어간다 —
   // 클릭 즉시 반영은 "무엇이 어디로 갔는지" 보이지 않아 직관적이지 않았다.
   let picked = null;         // {id, charIndex, label}
@@ -193,12 +200,13 @@ export function createInteractiveAssetsPanel({
 
   /** 생성 직전에 부른다. 스냅샷 id 를 돌려주면 app.js 가 생성 요청에 실어,
    *  백엔드가 결과 이미지로 384px 썸네일을 붙인다. 실패해도 생성은 진행한다. */
-  async function record(chars) {
+  async function record(chars, globals) {
     if (!Array.isArray(chars) || !chars.length) return '';
     try {
       const r = await fetch('/api/interactive-assets/snapshot', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({chars}),
+        // globals = 씬 슬롯·구도. 미리보기 하단이 이걸 보여 준다.
+        body: JSON.stringify({chars, globals: globals || {}}),
       });
       const d = await r.json();
       if (!r.ok || !d.snapshot) return '';
@@ -329,31 +337,175 @@ export function createInteractiveAssetsPanel({
     }
   }
 
-  /** 카드를 펼쳐 그 조합의 캐릭터 칩을 띄운다. 본문을 읽어야 하므로 비동기다.
-   *  **1명짜리 조합은 펼치지 않고 바로 꽂는다** — 칩 하나를 또 누르게 하면 헛수고다. */
-  async function expandCard(id) {
-    if (busy) return;
-    const row = rows.find(x => x.id === id);
-    // 1명짜리는 펼칠 것이 없다 — 카드 자체가 그 캐릭터다. 고르기만 하고 적용은 [적용] 이.
-    if (row && Number(row.char_count) === 1) { pick(id, 0, row.summary); return; }
-    if (expandedId === id) { expandedId = ''; renderGrid(); return; }
-    busy = true;
-    renderGrid();
+  /** 카드를 눌렀을 때 여는 미리보기. **목록은 다시 그리지 않는다** — 그리면
+   *  팝업 전체가 깜빡인다(예전 동작). 팝업 노드 하나만 갈아 끼운다. */
+  async function openPreview(id) {
+    if (previewId === id) { closePreview(); return; }
+    previewId = id;
+    previewBody = null;
+    previewBusy = true;
+    const seq = ++previewSeq;
+    markPreviewCard();
+    renderPreview();
     try {
       const r = await fetch('/api/interactive-assets/snapshot?id=' + encodeURIComponent(id));
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || '조합을 불러오지 못했습니다');
-      const chars = Array.isArray(d.chars) ? d.chars : [];
-      if (chars.length === 1) { busy = false; pick(id, 0, charLabel(chars[0])); return; }
-      const hit = rows.find(x => x.id === id);
-      if (hit) hit._chars = chars.map(charLabel);
-      expandedId = id;
+      if (seq !== previewSeq) return;        // 그 사이 다른 카드를 눌렀다
+      previewBody = d;
     } catch (err) {
-      showToast('불러오기 실패: ' + err.message, 'error');
+      if (seq === previewSeq) showToast('불러오기 실패: ' + err.message, 'error');
     } finally {
-      busy = false;
-      renderGrid();
+      if (seq === previewSeq) { previewBusy = false; renderPreview(); }
     }
+  }
+
+  function closePreview() {
+    previewId = '';
+    previewBody = null;
+    previewBusy = false;
+    previewSeq++;                            // 진행 중인 응답을 버린다
+    markPreviewCard();
+    renderPreview();
+  }
+
+  /** 어느 카드를 보고 있는지 표시만 옮긴다 — 목록을 다시 그리지 않는다. */
+  function markPreviewCard() {
+    root.querySelectorAll('.ia-as-card').forEach(el => {
+      el.classList.toggle('is-preview', !!previewId && el.dataset.asId === previewId);
+    });
+  }
+
+  // ---- 미리보기 팝업 ------------------------------------------------------
+
+  let previewEl = null;
+
+  function ensurePreviewEl() {
+    if (previewEl && document.body.contains(previewEl)) return previewEl;
+    previewEl = document.createElement('div');
+    previewEl.className = 'ia-as-preview';
+    previewEl.hidden = true;
+    // **body 직계**로 둔다. `.ia-assets` 안에 넣었더니 `.viewer-wrapper`
+    // (z-index:0 + isolation:isolate) 안에 갇혀, 이 팝업이 결과 패널 왼쪽으로 나가는
+    // 순간 좌측 컬럼의 컨트롤이 그 위를 덮었다(실측: 프롬프트 도구 줄이 뚫고 올라옴).
+    // 바깥 클릭 판정은 root 와 이 노드를 **둘 다** 본다(onOutside).
+    document.body.appendChild(previewEl);
+    // 위임 리스너는 root 에 걸려 있는데 이 노드는 root 밖이다 — 따로 걸어 준다.
+    // (안 걸면 팝업 안의 [적용]·[삭제] 가 아무 반응이 없다. 실측으로 걸렸다.)
+    previewEl.addEventListener('click', onClick);
+    return previewEl;
+  }
+
+  function tagChips(list) {
+    const arr = (Array.isArray(list) ? list : []).map(t => String(t || '').trim()).filter(Boolean);
+    if (!arr.length) return '';
+    return arr.map(t => `<span class="ia-as-pv-tag">${escHtml(t)}</span>`).join('');
+  }
+
+  /** 캐릭터 한 명 — 이름 + 슬롯별 태그 + [적용]. */
+  function previewCharHtml(row, i) {
+    const label = charLabel(row);
+    const fields = (row && row.fields) || {};
+    const lines = Object.entries(fields)
+      .map(([k, v]) => [k, (Array.isArray(v) ? v : []).filter(Boolean)])
+      .filter(([, v]) => v.length)
+      .map(([k, v]) => `<div class="ia-as-pv-line">
+        <span class="ia-as-pv-key">${escHtml(k)}</span>
+        <span class="ia-as-pv-tags">${tagChips(v)}</span></div>`).join('');
+    const target = roster[targetSlot];
+    const tLabel = target ? target.label : `C${targetSlot + 1}`;
+    const off = row && row.state === 'disabled';
+    return `<div class="ia-as-pv-char${off ? ' is-off' : ''}">
+      <div class="ia-as-pv-charhead">
+        <span class="ia-as-pv-cn">${escHtml(label)}</span>
+        ${off ? '<span class="ia-as-pv-off">OFF</span>' : ''}
+        ${row && row.pos ? `<span class="ia-as-pv-pos">${escHtml(row.pos)}</span>` : ''}
+        <span class="ia-as-pv-spring"></span>
+        <button type="button" class="ia-as-pv-btn" data-as-pvapply="${i}"
+          title="이 캐릭터를 ${escHtml(tLabel)} 슬롯에 꽂습니다">${escHtml(tLabel)}에 적용</button>
+      </div>
+      ${lines || '<div class="ia-as-pv-none">태그 없음</div>'}
+    </div>`;
+  }
+
+  /** 캐릭터에 속하지 않는 값(씬 슬롯 + 구도). 옛 조합에는 없다 — 그때는 줄을 내지 않는다. */
+  function previewGlobalsHtml(g) {
+    if (!g || typeof g !== 'object') return '';
+    const slots = (g.slots && typeof g.slots === 'object') ? g.slots : {};
+    const lines = Object.entries(slots)
+      .map(([k, v]) => [k, (Array.isArray(v) ? v : []).filter(Boolean)])
+      .filter(([, v]) => v.length)
+      .map(([k, v]) => `<div class="ia-as-pv-line">
+        <span class="ia-as-pv-key">${escHtml(k)}</span>
+        <span class="ia-as-pv-tags">${tagChips(v)}</span></div>`);
+    const comp = Array.isArray(g.composition_tags) ? g.composition_tags.filter(Boolean) : [];
+    if (comp.length) {
+      lines.unshift(`<div class="ia-as-pv-line">
+        <span class="ia-as-pv-key">구도</span>
+        <span class="ia-as-pv-tags">${tagChips(comp)}</span></div>`);
+    }
+    if (!lines.length) return '';
+    return `<div class="ia-as-pv-globals">
+      <div class="ia-as-pv-sect">글로벌</div>${lines.join('')}</div>`;
+  }
+
+  function renderPreview() {
+    const el = ensurePreviewEl();
+    if (!previewId || !open) { el.hidden = true; el.innerHTML = ''; return; }
+    // 즐겨찾기를 누르면 목록이 다시 오고 여기까지 다시 그린다 — 훑던 자리를 잃지 않게.
+    const keep = el.querySelector('.ia-as-pv-body')?.scrollTop || 0;
+    const meta = rows.find(x => x.id === previewId);
+    const chars = (previewBody && Array.isArray(previewBody.chars)) ? previewBody.chars : [];
+    const body = previewBusy
+      ? '<div class="ia-as-pv-none">불러오는 중…</div>'
+      : (chars.length
+          ? chars.map(previewCharHtml).join('') +
+            previewGlobalsHtml(previewBody && previewBody.globals)
+          : '<div class="ia-as-pv-none">빈 조합입니다</div>');
+    const fav = !!(meta && meta.favorite);
+    el.innerHTML = `
+      <div class="ia-as-pv-head">
+        <span class="ia-as-pv-title">조합 미리보기</span>
+        <span class="ia-as-pv-meta">${chars.length ? `캐릭터 ${chars.length}` : ''}</span>
+        <button type="button" class="ia-as-pv-x" data-as-pvclose="1" aria-label="닫기">&times;</button>
+      </div>
+      <div class="ia-as-pv-body">
+        ${meta && meta.thumb
+          ? `<div class="ia-as-pv-shot"><img alt="" loading="lazy"
+               src="/api/interactive-assets/snapshot/thumb?id=${encodeURIComponent(previewId)}"></div>`
+          : '<div class="ia-as-pv-shot is-empty">이 조합으로 생성해야 그림이 붙습니다</div>'}
+        ${body}
+      </div>
+      <div class="ia-as-pv-foot">
+        <button type="button" class="ia-as-pv-btn" data-as-pvrestore="1"
+          title="모든 캐릭터 슬롯을 이 조합으로 덮어씁니다">전체 복원</button>
+        <span class="ia-as-pv-spring"></span>
+        <button type="button" class="ia-as-pv-btn${fav ? ' is-fav' : ''}" data-as-pvfav="1"
+          title="${fav ? '즐겨찾기 해제' : '즐겨찾기'}">${fav ? '★' : '☆'}</button>
+        <button type="button" class="ia-as-pv-btn is-del" data-as-pvdel="1"
+          title="이 조합을 지웁니다 (되돌릴 수 없습니다)">삭제</button>
+      </div>`;
+    el.hidden = false;
+    const bodyEl = el.querySelector('.ia-as-pv-body');
+    if (bodyEl && keep) bodyEl.scrollTop = keep;
+    positionPreview();
+  }
+
+  /** Assets 패널 **왼쪽**에 붙인다. 자리가 모자라면 오른쪽으로 넘긴다.
+   *  `position: fixed` 라 패널이 뷰어 안에 있어도 그 밖으로 나갈 수 있다. */
+  function positionPreview() {
+    if (!previewEl || previewEl.hidden) return;
+    const anchor = root.getBoundingClientRect();
+    const box = previewEl.getBoundingClientRect();
+    const gap = 10;
+    let left = anchor.left - box.width - gap;
+    if (left < 8) {
+      const right = anchor.right + gap;
+      left = (right + box.width <= window.innerWidth - 8) ? right : Math.max(8, anchor.left);
+    }
+    let top = Math.min(anchor.bottom - box.height, window.innerHeight - box.height - 8);
+    previewEl.style.left = Math.round(left) + 'px';
+    previewEl.style.top = Math.round(Math.max(8, top)) + 'px';
   }
 
   /** 칩에 쓸 이름. 캐릭터명이 없으면 첫 태그로 대신한다(빈 칩을 만들지 않는다). */
@@ -421,7 +573,7 @@ export function createInteractiveAssetsPanel({
       `${c.enabled ? '' : ' is-off'}" data-as-open="${c.index}"` +
       ` title="${escHtml(c.name || c.label)}${c.enabled ? '' : ' (비활성)'}">` +
       `${escHtml(c.label)}</button>` +
-      (posOn
+      (posOn && c.positioned !== false
         ? `<button type="button" class="ia-as-pos" data-as-pos="${escHtml(c.id)}"` +
           ` title="${escHtml(c.label)} 캔버스 위치 (NAI V4 centers)">` +
           `POS ${escHtml(c.pos || 'C3')}</button>`
@@ -705,30 +857,17 @@ export function createInteractiveAssetsPanel({
               src="/api/interactive-assets/snapshot/thumb?id=${encodeURIComponent(row.id)}">`
       // 썸네일은 그 조합으로 생성해야 붙는다 — 아직이면 자리를 비워 둔다.
       : `<span class="ia-as-thumb is-empty" aria-hidden="true">…</span>`;
-    const pickedHere = picked && picked.id === row.id;
-    const chips = (expandedId === row.id && Array.isArray(row._chars))
-      ? '<div class="ia-as-chips">' + row._chars.map((nm, i) =>
-          `<button type="button" class="ia-as-chip` +
-          `${pickedHere && picked.charIndex === i ? ' is-picked' : ''}"` +
-          ` data-as-pick="${id}" data-as-ci="${i}" data-as-label="${escHtml(nm)}"` +
-          ` title="고르기">${escHtml(nm)}</button>`).join('') + '</div>'
-      : '';
+    // 카드는 **여는 것만** 한다. 적용·즐겨찾기·삭제는 미리보기 팝업이 맡는다 —
+    // 작은 카드에 버튼 셋을 얹으니 오조작이 잦고, 펼침 칩은 목록을 재배치해 깜빡였다.
+    // 즐겨찾기는 별 표시로만 남긴다(누르는 것은 팝업에서).
     return `<div class="ia-as-card${row.favorite ? ' is-fav' : ''}` +
-      `${expandedId === row.id ? ' is-expanded' : ''}` +
-      `${pickedHere ? ' is-picked' : ''}" data-as-id="${id}"
+      `${previewId === row.id ? ' is-preview' : ''}" data-as-id="${id}"
               title="${escHtml(summary)}">
-      <button type="button" class="ia-as-pick" data-as-expand="${id}">
+      <button type="button" class="ia-as-pick" data-as-preview="${id}">
         ${thumb}
         <span class="ia-as-summary">${escHtml(summary)}</span>
       </button>
-      ${chips}
-      <button type="button" class="ia-as-restore" data-as-restore="${id}"
-              title="조합 전체를 복원 (모든 캐릭터 슬롯을 덮어씀)" aria-label="전체 복원">&#8635;</button>
-      <button type="button" class="ia-as-star" data-as-fav="${id}"
-              title="${row.favorite ? '즐겨찾기 해제' : '즐겨찾기'}"
-              aria-label="즐겨찾기">${row.favorite ? '★' : '☆'}</button>
-      <button type="button" class="ia-as-del" data-as-del="${id}"
-              title="이 조합 삭제" aria-label="삭제">✕</button>
+      ${row.favorite ? '<span class="ia-as-star is-mark" aria-label="즐겨찾기">★</span>' : ''}
     </div>`;
   }
 
@@ -738,6 +877,9 @@ export function createInteractiveAssetsPanel({
     // 고른 카드가 목록에서 빠졌으면(즐겨찾기 해제·삭제·필터) 선택을 놓는다 —
     // 화면에 없는 것이 적용되면 무엇이 들어갔는지 알 수 없다.
     if (picked && !rows.some(x => x.id === picked.id)) picked = null;
+    // 미리보기로 보던 조합이 목록에서 사라졌으면(삭제·필터) 팝업도 닫는다 —
+    // 없는 것을 보여 주면서 [적용]/[삭제] 를 내놓을 수는 없다.
+    if (previewId && !rows.some(x => x.id === previewId)) closePreview();
     const grid = root.querySelector('.ia-as-grid');
     if (!grid) { render(); return; }
     grid.innerHTML = busy
@@ -753,6 +895,9 @@ export function createInteractiveAssetsPanel({
     });
     const favBtn = root.querySelector('[data-as-favonly]');
     if (favBtn) favBtn.classList.toggle('is-on', favoriteOnly);
+    // 미리보기 발치의 ★ 도 목록에서 읽는다 — 여기서 안 맞추면 카드만 별이 켜지고
+    // 팝업은 ☆ 인 채로 남는다(실측).
+    renderPreview();
     root.querySelectorAll('[data-as-target],[data-as-addslot]').forEach(btn => {
       // 적용 중에는 대상을 못 바꾼다 — 어차피 시작 시점으로 고정되므로 UI 도 맞춘다.
       if (busy) btn.disabled = true;
@@ -783,21 +928,31 @@ export function createInteractiveAssetsPanel({
     root.classList.toggle('is-open', open);
     const keepScroll = root.querySelector('.ia-as-charlist')?.scrollTop || 0;
 
+    // 검색줄·캐릭터줄·그리드는 테두리를 이어 붙여 **한 덩어리**로 보이게 만든 것이라
+    // 사이가 벌어지면 안 된다. 예전에는 셋 다 `.ia-assets` 직계여서 그 flex gap(6px)이
+    // 사이사이를 갈라 놨고, 그 틈으로 생성 이미지가 그대로 비쳤다(사용자 지적).
     const list = !open ? '' : `
-      <div class="ia-as-controls">
-        <input class="ia-as-search" type="search" placeholder="조합 검색"
-               value="${escHtml(query)}" data-as-search="1">
-        <div class="ia-as-tabs">
-          ${tabBtn('', '전체')}${tabBtn('original', '오리지널')}${tabBtn('known', '기존 캐릭터')}
-          <button type="button" class="ia-as-tab is-star${favoriteOnly ? ' is-on' : ''}"
-                  data-as-favonly="1" title="즐겨찾기만">★</button>
+      <div class="ia-as-list">
+        <div class="ia-as-controls">
+          <input class="ia-as-search" type="search" placeholder="조합 검색"
+                 value="${escHtml(query)}" data-as-search="1">
+          <div class="ia-as-tabs">
+            ${tabBtn('', '전체')}${tabBtn('original', '오리지널')}${tabBtn('known', '기존 캐릭터')}
+            <button type="button" class="ia-as-tab is-star${favoriteOnly ? ' is-on' : ''}"
+                    data-as-favonly="1" title="즐겨찾기만">★</button>
+          </div>
         </div>
-      </div>
-      ${charRowHtml()}
-      <div class="ia-as-grid">
-        ${busy ? '<div class="ia-as-empty">불러오는 중…</div>'
-               : (rows.length ? rows.map(card).join('')
-                              : '<div class="ia-as-empty">저장된 조합이 없습니다. 생성하면 남습니다.</div>')}
+        ${charRowHtml()}
+        <div class="ia-as-grid">
+          ${busy ? '<div class="ia-as-empty">불러오는 중…</div>'
+                 : (rows.length ? rows.map(card).join('')
+                                : '<div class="ia-as-empty">저장된 조합이 없습니다. 생성하면 남습니다.</div>')}
+        </div>
+        <div class="ia-as-foot">
+          <span class="ia-as-foothint">카드를 누르면 왼쪽에 미리보기가 열립니다</span>
+          <button type="button" class="ia-as-fold" data-as-fold="1"
+                  title="Assets 목록을 접습니다 (바깥을 눌러도 접힙니다)">접기</button>
+        </div>
       </div>`;
 
     root.innerHTML = `
@@ -819,6 +974,7 @@ export function createInteractiveAssetsPanel({
     const nextList = root.querySelector('.ia-as-charlist');
     if (nextList && keepScroll) nextList.scrollTop = keepScroll;
     charObserve();
+    renderPreview();   // 위치·내용을 패널 재렌더에 맞춘다(노드는 body 직계라 살아 있다)
   }
 
   // ------------------------------------------------------------------ 입력
@@ -826,17 +982,14 @@ export function createInteractiveAssetsPanel({
   function onClick(event) {
     const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],' +
       '[data-as-restore],[data-as-fav],[data-as-del],[data-as-open],[data-as-target],' +
-      '[data-as-expand],[data-as-pick],[data-as-apply],[data-as-addslot],' +
+      '[data-as-preview],[data-as-pick],[data-as-apply],[data-as-addslot],' +
+      '[data-as-fold],[data-as-pvclose],[data-as-pvapply],[data-as-pvrestore],' +
+      '[data-as-pvfav],[data-as-pvdel],' +
       '[data-as-enable],[data-as-delchar],[data-as-pos],' +
       '[data-as-charhit],[data-as-chargroup]');
     if (!t) return;
     event.preventDefault();
-    if (t.dataset.asToggle) {
-      open = !open;
-      render();
-      if (open) fetchList();
-      return;
-    }
+    if (t.dataset.asToggle) { setOpen(!open); return; }
     if (t.dataset.asOrigin !== undefined) {
       origin = t.dataset.asOrigin || '';
       fetchList();
@@ -900,7 +1053,18 @@ export function createInteractiveAssetsPanel({
     if (t.dataset.asDelchar) { deleteOpenChar(); return; }
     if (t.dataset.asAddslot) { addSlot(); return; }
     if (t.dataset.asApply) { applyPicked(); return; }
-    if (t.dataset.asExpand) { expandCard(t.dataset.asExpand); return; }
+    if (t.dataset.asFold) { setOpen(false); return; }
+    if (t.dataset.asPreview) { openPreview(t.dataset.asPreview); return; }
+    if (t.dataset.asPvclose) { closePreview(); return; }
+    if (t.dataset.asPvapply !== undefined) { applyPreviewChar(Number(t.dataset.asPvapply)); return; }
+    if (t.dataset.asPvrestore) { if (previewId) restore(previewId); return; }
+    if (t.dataset.asPvdel) { if (previewId) remove(previewId); return; }
+    if (t.dataset.asPvfav) {
+      if (!previewId) return;
+      const row = rows.find(x => x.id === previewId);
+      toggleFavorite(previewId, row ? row.summary : '');
+      return;
+    }
     if (t.dataset.asPick) { pick(t.dataset.asPick, t.dataset.asCi, t.dataset.asLabel); return; }
     if (t.dataset.asDel) { remove(t.dataset.asDel); return; }
     if (t.dataset.asRestore) { restore(t.dataset.asRestore); return; }
@@ -908,6 +1072,47 @@ export function createInteractiveAssetsPanel({
       const row = rows.find(x => x.id === t.dataset.asFav);
       toggleFavorite(t.dataset.asFav, row ? row.summary : '');
     }
+  }
+
+  /** 펼침/접힘을 한 곳에서 바꾼다 — 바깥 클릭·[접기]·토글 버튼이 모두 이걸 쓴다. */
+  function setOpen(next) {
+    if (open === next) return;
+    open = next;
+    if (!open) closePreview();     // 접으면 미리보기도 같이 닫는다
+    render();
+    if (open) fetchList();
+  }
+
+  /** 미리보기에서 캐릭터 하나를 대상 슬롯에 꽂는다. 본문은 이미 읽어 뒀다 —
+   *  `applyPicked` 와 달리 다시 받아오지 않으므로 눌렀을 때 바로 들어간다. */
+  function applyPreviewChar(index) {
+    const chars = (previewBody && Array.isArray(previewBody.chars)) ? previewBody.chars : [];
+    const row = chars[index];
+    if (!row) { showToast('그 캐릭터가 없습니다.', 'error'); return; }
+    // 대상은 **누른 시점의 슬롯 id** 로 잡는다 — 번호는 앞 슬롯이 지워지면 밀린다.
+    const target = roster[targetSlot];
+    if (!target) { showToast(`C${targetSlot + 1} 슬롯이 없습니다.`, 'error'); return; }
+    const panel = getPanel && getPanel();
+    if (!panel || typeof panel.applySnapshotCharById !== 'function') {
+      showToast('Interactive 패널이 준비되지 않았습니다.', 'error');
+      return;
+    }
+    if (!panel.applySnapshotCharById(target.id, row)) {
+      showToast('슬롯에 꽂을 수 없습니다.', 'error');
+      return;
+    }
+    showToast(`${target.label} <- ${charLabel(row)}`, 'success');
+  }
+
+  /** 바깥(주로 결과 이미지)을 누르면 접는다. 예전에는 Assets 버튼을 다시 찾아
+   *  누르는 것 말고는 닫을 길이 없었다(사용자 지적). */
+  function onOutside(event) {
+    if (!open) return;
+    if (root.contains(event.target)) return;
+    if (previewEl && previewEl.contains(event.target)) return;   // body 직계라 따로 본다
+    // 이 패널이 띄운 바깥 팝업들(좌표 픽커·캐릭터 확인)은 닫지 않는다.
+    if (event.target.closest?.('.ia-pos-popup, .ia-as-ask')) return;
+    setOpen(false);
   }
 
   function onInput(event) {
@@ -931,6 +1136,11 @@ export function createInteractiveAssetsPanel({
 
   root.addEventListener('click', onClick);
   root.addEventListener('input', onInput);
+  // 바깥 클릭으로 접기. 캡처 단계로 잡아, 눌린 곳이 자기 핸들러에서 노드를 지워도
+  // (그러면 root.contains 가 false 가 되어 엉뚱하게 접힌다) 판정이 먼저 끝나게 한다.
+  document.addEventListener('mousedown', onOutside, true);
+  // 패널이 뷰어 안에 붙어 있어 스크롤·리사이즈로 위치가 밀린다 — 미리보기를 따라 붙인다.
+  window.addEventListener('resize', positionPreview);
 
   // ------------------------------------------------------------------ 공개
 
@@ -940,7 +1150,7 @@ export function createInteractiveAssetsPanel({
       const next = !!on;
       if (next === visible) return;
       visible = next;
-      if (!visible) { open = false; closeAsk(); }
+      if (!visible) { open = false; closeAsk(); closePreview(); }
       render();
     },
     /** 패널이 캐릭터 목록 변화를 알려 준다. 스택과 대상 칸이 이걸로 그려진다. */

@@ -271,10 +271,19 @@ class InteractiveAssetsService:
             return None
 
     # ── 스냅샷 ──────────────────────────────────────────────────────────────
-    def record(self, chars: list[dict[str, Any]]) -> dict[str, Any] | None:
-        """조합을 기록한다. 직전과 같으면 시각만 올리고 새로 쌓지 않는다."""
+    def record(self, chars: list[dict[str, Any]],
+               globals_: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """조합을 기록한다. 직전과 같으면 시각만 올리고 새로 쌓지 않는다.
+
+        `globals_` 는 씬 슬롯·구도처럼 캐릭터에 속하지 않는 값이다. 미리보기가
+        '이 그림이 어떤 설정에서 나왔는가'를 보여 주려면 본문에 함께 있어야 한다.
+        **해시에는 넣지 않는다** — 같은 캐릭터 조합인데 배경만 바꿨다고 카드가
+        새로 쌓이면 목록이 금방 같은 얼굴로 가득 찬다. 대신 아래 갱신 경로가
+        본문을 덮어쓰므로 마지막 값이 남는다.
+        """
         if not chars:
             return None
+        body_globals = globals_ if isinstance(globals_, dict) else {}
         with self._lock:
             digest = snapshot_hash(chars)
             rows = self.load_index()
@@ -288,7 +297,8 @@ class InteractiveAssetsService:
                 # 본문을 두면 카드의 그림과 복원 결과가 어긋난다.
                 self._write_atomic(
                     self._body_path(rows[-1]["id"]),
-                    {"id": rows[-1]["id"], "created_at": rows[-1]["created_at"], "chars": chars})
+                    {"id": rows[-1]["id"], "created_at": rows[-1]["created_at"],
+                     "chars": chars, "globals": body_globals})
                 self._save_index(rows)
                 return rows[-1]
             sid = "s" + uuid.uuid4().hex[:16]
@@ -302,7 +312,8 @@ class InteractiveAssetsService:
             }
             # 본문을 먼저 쓴다 — 인덱스에만 있고 본문이 없는 상태를 만들지 않는다.
             self._write_atomic(self._body_path(sid),
-                               {"id": sid, "created_at": meta["created_at"], "chars": chars})
+                               {"id": sid, "created_at": meta["created_at"],
+                                "chars": chars, "globals": body_globals})
             rows.append(meta)
             self._pending_delete = []
             self._prune(rows)

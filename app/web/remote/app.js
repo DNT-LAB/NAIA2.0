@@ -994,9 +994,28 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
 // 다른 탭의 설정과 저장값을 꺼버리면 안 된다. 실제 강제는 백엔드가 생성 요청 단위로 한다
 // (app/backend/server/event_corpus_commands.py: apply_interactive_generation_gate).
 const INTERACTIVE_BLOCKED_OPTIONS = ['prompt_fixed', 'wildcard_standalone'];
+// Interactive 를 켜기 **직전**의 메인 프롬프트. 모드를 끄면 이걸로 되돌린다.
+// Interactive 는 입력창을 자기 렌더값으로 덮어쓰는데, 예전에는 끌 때도 그 값이 남아
+// **사용자가 쓰던 메인 프롬프트가 증발했다**(2026-08-05 사용자 지적).
+// 블록 상태는 그대로 살아 있으니 다시 켜면 Interactive 프롬프트가 재조립된다 —
+// 되돌린다고 잃는 것은 없다.
+let promptBeforeInteractive = null;
+
 function applyInteractiveModeGate(isActive) {
   // Interactive 에서는 최종 프롬프트를 상시 노출하지 않는다(사용자 결정). 전체 문자열은
-  // 나중에 별도 미리보기 팝업으로만 확인한다. 값 자체는 유지되므로 토글을 끄면 그대로 보인다.
+  // 나중에 별도 미리보기 팝업으로만 확인한다.
+  if (isActive) {
+    // `onActiveChange` 는 첫 `emitChange()` 보다 먼저 온다 — 지금 값이 사용자 원본이다.
+    if (promptBeforeInteractive === null && promptEdit) {
+      promptBeforeInteractive = String(promptEdit.value || '');
+    }
+  } else if (promptBeforeInteractive !== null) {
+    if (promptEdit && promptEdit.value !== promptBeforeInteractive) {
+      promptEdit.value = promptBeforeInteractive;
+      onPromptEdit();          // 하이라이트·토큰 수·백엔드 동기화를 함께 되돌린다
+    }
+    promptBeforeInteractive = null;
+  }
   document.body.classList.toggle('interactive-mode', !!isActive);
   // 베이스 프롬프트에 선행·후행을 넣으려면 PE 상태가 있어야 한다. 부팅 시 일괄
   // 캐시되는 모듈이 아니라(실측) 여기서 한 번 당겨 온다 — 도착하면 onPromptEngineeringState

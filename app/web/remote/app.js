@@ -903,7 +903,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     });
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia166')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia167')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -1017,6 +1017,22 @@ function scheduleInteractiveStateSave() {
   }, 400);
 }
 
+/** 디바운스 안에 닫으면 마지막 변경이 사라진다 — 언로드 시 즉시 쓴다. */
+function flushInteractiveStateSave() {
+  if (!interactiveStateSaveTimer) return;
+  clearTimeout(interactiveStateSaveTimer);
+  interactiveStateSaveTimer = null;
+  try {
+    localStorage.setItem(INTERACTIVE_STATE_KEY,
+                         JSON.stringify(interactivePanel.exportState()));
+  } catch (_) { /* 기억 못 하는 것이 종료를 막지는 않는다 */ }
+}
+window.addEventListener('pagehide', flushInteractiveStateSave);
+// Electron 은 창을 숨기고 죽는 경우가 있어 pagehide 가 늦는다 — 숨김도 함께 본다.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushInteractiveStateSave();
+});
+
 function restoreInteractiveState() {
   if (!interactivePanel?.importState) return;
   try {
@@ -1036,12 +1052,15 @@ function applyInteractiveModeGate(isActive) {
   // Interactive 에서는 최종 프롬프트를 상시 노출하지 않는다(사용자 결정). 전체 문자열은
   // 나중에 별도 미리보기 팝업으로만 확인한다.
   if (isActive) {
-    // 지난 작업 결과를 되돌린다. 켤 때 한 번만 — 이후에는 살아 있는 상태가 진실이다.
-    if (!interactiveStateRestored) { interactiveStateRestored = true; restoreInteractiveState(); }
-    // `onActiveChange` 는 첫 `emitChange()` 보다 먼저 온다 — 지금 값이 사용자 원본이다.
+    // **원본을 먼저 잡는다.** `restoreInteractiveState()` 는 살아 있는 패널에
+    // emitChange 를 일으켜 입력창을 조립값으로 덮는다 — 복원을 먼저 하면 그 조립값을
+    // '사용자 원본'으로 잡아 두게 되고, 모드를 꺼도 원본이 안 돌아온다
+    // (2026-08-05 Codex 지적: 저장된 작업 결과가 있을 때만 재현되는 순서 버그).
     if (promptBeforeInteractive === null && promptEdit) {
       promptBeforeInteractive = String(promptEdit.value || '');
     }
+    // 지난 작업 결과를 되돌린다. 켤 때 한 번만 — 이후에는 살아 있는 상태가 진실이다.
+    if (!interactiveStateRestored) { interactiveStateRestored = true; restoreInteractiveState(); }
   } else if (promptBeforeInteractive !== null) {
     if (promptEdit && promptEdit.value !== promptBeforeInteractive) {
       promptEdit.value = promptBeforeInteractive;
@@ -5636,6 +5655,13 @@ function requestRandomPrompt({force = false, bootstrap = false} = {}) {
   }
   if (!force && getOptionChecked('prompt_fixed')) {
     updateGenerateButtonMode();
+    return false;
+  }
+  // Interactive 는 블록이 프롬프트를 조립한다 — Random 이 넣을 자리가 없다.
+  // 버튼 비활성화만으로는 Alt+Enter 단축키가 이 함수를 직접 불러 새어 나간다
+  // (2026-08-05 Codex 지적). **여기가 진짜 길목이다.** `force` 도 통과시키지 않는다.
+  if (interactivePanel?.isActive?.()) {
+    showToast('Interactive 모드에서는 Random 을 쓰지 않습니다', 'info');
     return false;
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;

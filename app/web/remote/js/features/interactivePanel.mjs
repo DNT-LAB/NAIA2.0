@@ -4180,6 +4180,14 @@ export function createInteractivePanel({
      *  형식이 바뀐 옛 저장분 때문에 모드가 안 켜지면 안 된다. */
     importState(saved) {
       if (!saved || typeof saved !== 'object') return false;
+      // 반쯤 넣다 실패하면 **되돌린다.** 예전에는 망가진 상태가 그대로 남아 다음
+      // 렌더에서 또 터졌다 — '깨진 저장분은 무시한다'는 약속이 지켜지지 않았다
+      // (2026-08-05 Codex 지적).
+      const rollback = {
+        chars: state.chars, composition: state.composition,
+        slots: Object.fromEntries(
+          Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
+      };
       try {
         if (Array.isArray(saved.chars) && saved.chars.length) applySnapshotChars(saved.chars);
         if (saved.slots && typeof saved.slots === 'object') {
@@ -4194,6 +4202,10 @@ export function createInteractivePanel({
         if (active) { renderBlocks(); emitChange(); }
         return true;
       } catch (_) {
+        state.chars = rollback.chars;
+        state.slots = rollback.slots;
+        state.composition = rollback.composition;
+        if (active) { try { renderBlocks(); } catch (__) {} }
         return false;
       }
     },

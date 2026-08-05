@@ -105,9 +105,23 @@ class HeadlessInteractiveReferenceService:
         self._ensure_loaded()
         return list(self.context.interactive_reference_frames)
 
+    # ------------------------------------------------------------------ 사용 여부
+    # **프로세스가 새로 뜰 때마다 꺼진 채로 시작한다 — 저장하지 않는다.**
+    # 붙여 둔 그림은 남기되(다시 붙이는 것이 번거롭다) 켜진 상태는 물려주지 않는다:
+    # 지난 세션에 붙여 둔 레퍼런스가 조용히 실려 나가면 사용자가 의도하지 않은
+    # 그림이 유료로 생성된다(사용자 지정 2026-08-05). 파일에 안 쓰므로 손편집이나
+    # 옛 저장분으로도 켜진 채 시작할 수 없다.
+    def enabled(self) -> bool:
+        return bool(getattr(self.context, "interactive_reference_enabled", False))
+
+    def set_enabled(self, on: bool) -> dict[str, Any]:
+        self.context.interactive_reference_enabled = bool(on)
+        return {"ok": True, "enabled": self.enabled()}
+
     def state(self) -> dict[str, Any]:
         """프론트가 그리는 목록. 무거운 `image_data` 는 빼고 썸네일만 준다."""
         return {
+            "enabled": self.enabled(),
             "frames": [{
                 "file_hash": f.get("file_hash", ""),
                 "label": f.get("label", ""),
@@ -128,7 +142,11 @@ class HeadlessInteractiveReferenceService:
         rows = self.context.interactive_reference_frames
         # 같은 그림을 두 번 붙이면 강도만 두 배가 된다 — 해시로 막는다.
         if any(r.get("file_hash") == frame["file_hash"] for r in rows):
-            return {"ok": True, "duplicate": True, "count": len(rows)}
+            # 중복이라도 **켜 준다.** 재시작 뒤(=꺼진 상태) 같은 그림을 다시 붙이는 것은
+            # "이걸 쓰겠다"는 뜻인데, 여기서 그냥 돌아가면 눌러도 아무 일이 없었다
+            # (새로 붙이는 경로와 동작이 갈렸다 — Codex 지적 2026-08-05).
+            self.set_enabled(True)
+            return {"ok": True, "duplicate": True, "count": len(rows), "enabled": True}
         if len(rows) >= MAX_FRAMES:
             raise ValueError(f"레퍼런스는 최대 {MAX_FRAMES}장입니다")
         rows.append({
@@ -141,7 +159,10 @@ class HeadlessInteractiveReferenceService:
             "fidelity": frame["fidelity"],
         })
         self._persist()
-        return {"ok": True, "count": len(rows)}
+        # 방금 붙인 것은 쓰겠다는 뜻이다 — 여기서 켠다. 안 켜면 붙여도 아무 일이
+        # 없어 고장으로 보인다. '재시작하면 꺼짐' 은 **지난 세션의 것**을 막는 규칙이다.
+        self.set_enabled(True)
+        return {"ok": True, "count": len(rows), "enabled": True}
 
     def remove(self, file_hash: str) -> dict[str, Any]:
         self._ensure_loaded()
@@ -183,6 +204,9 @@ class HeadlessInteractiveReferenceService:
         """생성 요청에 실을 파라미터. CR 서비스의 같은 이름 함수와 **모양이 같다**
         (NAI 스펙이라 형태를 바꿀 수 없다). 다른 것은 읽는 목록뿐이다."""
         if not self.context._is_naid45_model():
+            return {}
+        # 꺼져 있으면 붙어 있어도 싣지 않는다. 재시작 직후가 늘 이 상태다.
+        if not self.enabled():
             return {}
         rows = [f for f in self.frames() if f.get("image_data")]
         if not rows:

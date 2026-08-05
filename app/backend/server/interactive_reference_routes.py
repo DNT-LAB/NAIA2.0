@@ -134,3 +134,16 @@ def register_interactive_reference_routes(
             return await run_in_thread(lambda: _svc().clear())
         except Exception as exc:
             return JSONResponse({"error": f"clear failed: {exc}"}, status_code=500)
+
+    @app.post("/api/interactive-reference/enabled")
+    async def api_interactive_reference_enabled(req: Request):
+        """레퍼런스 사용 여부. **저장하지 않는다** — 재시작하면 항상 꺼진 채로 시작한다."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        on = bool(payload.get("enabled")) if isinstance(payload, dict) else False
+        try:
+            return await run_in_thread(lambda: _svc().set_enabled(on))
+        except Exception as exc:
+            return JSONResponse({"error": f"enabled failed: {exc}"}, status_code=500)

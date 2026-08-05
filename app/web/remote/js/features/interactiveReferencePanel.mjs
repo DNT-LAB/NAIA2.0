@@ -16,6 +16,7 @@ const API = {
   param: '/api/interactive-reference/param',
   remove: '/api/interactive-reference/remove',
   clear: '/api/interactive-reference/clear',
+  enabled: '/api/interactive-reference/enabled',
   assetList: '/api/character-asset/list',
   assetDetail: id => '/api/character-asset/detail?id=' + encodeURIComponent(id),
   assetThumb: (id, rev) =>
@@ -39,6 +40,9 @@ export function createInteractiveReferencePanel({
   let items = [];
   let busy = false;
   let ask = null;                // {id, name}
+  // 레퍼런스를 실제로 실을지. **백엔드가 저장하지 않는다** — 재시작하면 항상 꺼져
+  // 있다. 지난 세션에 붙여 둔 그림이 조용히 유료 생성에 실리는 것을 막는 규칙이다.
+  let enabled = false;
 
   // ---------------------------------------------------------------- 데이터
   async function json(url, init) {
@@ -52,13 +56,19 @@ export function createInteractiveReferencePanel({
     try {
       const d = await json(API.state, {cache: 'no-store'});
       frames = Array.isArray(d.frames) ? d.frames : [];
+      enabled = !!d.enabled;
     } catch (err) {
       frames = [];
+      enabled = false;
       showToast('레퍼런스 목록을 불러오지 못했습니다: ' + err.message, 'error');
     }
     render();
-    onChange(frames.length);
+    onChange(activeCount());
   }
+
+  /** 생성에 **실제로 실리는** 개수. 꺼져 있으면 0 이다 —
+   *  붙어 있다고 배지를 켜면 헤더가 거짓말을 한다. */
+  function activeCount() { return enabled ? frames.length : 0; }
 
   async function loadSource() {
     items = [];
@@ -178,7 +188,12 @@ export function createInteractiveReferencePanel({
       '<span class="ia-ref-note">Interactive 전용 — NAI 모듈과 별개입니다</span>' +
       '<button type="button" class="ia-ref-close" data-ref-close="1" aria-label="닫기">✕</button></div>' +
       (frames.length
-        ? '<div class="ia-ref-frames">' + frames.map(frameHtml).join('') +
+        ? `<button type="button" class="ia-ref-switch${enabled ? ' is-on' : ''}"`
+          + ` data-ref-enable="1" aria-pressed="${enabled}"`
+          + ` title="끄면 붙여 둔 그림이 생성에 실리지 않습니다. 프로그램을 다시 켜면 항상 꺼진 채로 시작합니다.">`
+          + `<span class="ia-ref-switch-dot"></span>`
+          + `레퍼런스 사용 <b>${enabled ? 'ON' : 'OFF'}</b></button>`
+          + '<div class="ia-ref-frames">' + frames.map(frameHtml).join('') +
           `<button type="button" class="ia-ref-clear" data-ref-clear="1">전부 비우기</button></div>`
         : '<div class="ia-ref-empty">붙인 레퍼런스가 없습니다.</div>') +
       `<div class="ia-ref-tabs">${tab('asset', '캐릭터 에셋')}${tab('storage', '보관함')}</div>` +
@@ -197,13 +212,17 @@ export function createInteractiveReferencePanel({
 
   function onClick(ev) {
     const t = ev.target.closest('[data-ref-close],[data-ref-src],[data-ref-pick],[data-ref-del],' +
-                                '[data-ref-clear],[data-ref-kind]');
+                                '[data-ref-clear],[data-ref-kind],[data-ref-enable]');
     if (!t) return;
     ev.preventDefault();
     if (t.dataset.refClose != null) { close(); return; }
     if (t.dataset.refSrc) { source = t.dataset.refSrc; ask = null; void loadSource(); return; }
     if (t.dataset.refDel) { void post(API.remove, {file_hash: t.dataset.refDel}, '뺐습니다'); return; }
     if (t.dataset.refClear != null) { void post(API.clear, {}, '비웠습니다'); return; }
+    if (t.dataset.refEnable != null) {
+      void post(API.enabled, {enabled: !enabled}, enabled ? '레퍼런스 끔' : '레퍼런스 켬');
+      return;
+    }
     if (t.dataset.refKind != null) {
       const kind = t.dataset.refKind;
       const cur = ask; ask = null; render();
@@ -272,6 +291,9 @@ export function createInteractiveReferencePanel({
     toggle,
     isOpen: () => open,
     refresh,
-    count: () => frames.length,
+    // 헤더 배지의 근거. **꺼져 있으면 0** 이다 — 생성에 안 실리는데 배지가 켜져
+    // 있으면 헤더가 거짓말을 한다(그 배지를 만든 이유가 "켜 둔 채 생성" 방지였다).
+    count: activeCount,
+    isEnabled: () => enabled,
   };
 }

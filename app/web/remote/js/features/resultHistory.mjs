@@ -129,7 +129,7 @@ export function createResultHistoryController({
     return `
       <div class="history-selection-count" data-history-selection-count>다중 선택 · 0개 선택됨</div>
       <div class="history-selection-actions">
-        <button type="button" class="history-selection-btn save" data-history-selection-action="save">WebP 저장 (0)</button>
+        <button type="button" class="history-selection-btn save" data-history-selection-action="save">저장 (0)</button>
         <button type="button" class="history-selection-btn delete" data-history-selection-action="delete">선택 삭제 (0)</button>
       </div>
       <button type="button" class="history-selection-clear" data-history-selection-action="clear" aria-label="선택 해제" title="선택 해제">×</button>
@@ -179,7 +179,7 @@ export function createResultHistoryController({
       const remove = bar.querySelector('[data-history-selection-action="delete"]');
       const clear = bar.querySelector('[data-history-selection-action="clear"]');
       if (save) {
-        save.textContent = `WebP 저장 (${count})`;
+        save.textContent = `저장 (${count})`;
         save.disabled = selectionBusy || count === 0;
       }
       if (remove) {
@@ -314,6 +314,9 @@ export function createResultHistoryController({
         active: false,
         marquee: null,
         lastPath: '',
+        cells: [],
+        scrollTop: 0,
+        scrollLeft: 0,
       };
       // 썸네일의 일반 클릭은 원래 상세 미리보기 이벤트까지 전달되어야 한다.
       // 빈 공간은 브라우저 기본 선택만 막고, 포인터 캡처는 실제 드래그가 시작될 때 건다.
@@ -335,6 +338,20 @@ export function createResultHistoryController({
         document.body.appendChild(dragSelection.marquee);
         grid.classList.add('is-selecting');
         if (!dragSelection.additive) selectedPaths.clear();
+        // **목록과 좌표는 여기서 한 번만 잰다.** 예전에는 pointermove 마다
+        // querySelectorAll + 썸네일마다 getBoundingClientRect 를 돌려서,
+        // 1,000장이면 프레임당 2,000회가 됐다(병합 전 필수 #3).
+        // 드래그 중에 격자가 스크롤될 수 있으므로 그때의 scrollTop 도 같이 적어 두고,
+        // 이동 판정에서 그 차이만큼 밀어 준다.
+        dragSelection.cells = Array.from(grid.querySelectorAll('.viewer-thumb[data-path]'))
+          .map(thumb => {
+            const r = thumb.getBoundingClientRect();
+            return {path: thumb.dataset.path || '',
+                    left: r.left, right: r.right, top: r.top, bottom: r.bottom};
+          })
+          .filter(cell => cell.path);
+        dragSelection.scrollTop = grid.scrollTop;
+        dragSelection.scrollLeft = grid.scrollLeft;
       }
       const bounds = clampMarqueeToGrid(marqueeBounds(
         dragSelection.startX,
@@ -351,15 +368,17 @@ export function createResultHistoryController({
       selectedPaths.clear();
       dragSelection.basePaths.forEach(path => selectedPaths.add(path));
       let lastPath = '';
-      grid.querySelectorAll('.viewer-thumb[data-path]').forEach(thumb => {
-        if (rectsIntersect(bounds, thumb.getBoundingClientRect())) {
-          const path = thumb.dataset.path || '';
-          if (path) {
-            selectedPaths.add(path);
-            lastPath = path;
-          }
+      // 캐시한 좌표 + 스크롤 보정. DOM 을 다시 훑지 않는다.
+      const dy = dragSelection.scrollTop - grid.scrollTop;
+      const dx = dragSelection.scrollLeft - grid.scrollLeft;
+      for (const cell of dragSelection.cells) {
+        const box = {left: cell.left + dx, right: cell.right + dx,
+                     top: cell.top + dy, bottom: cell.bottom + dy};
+        if (rectsIntersect(bounds, box)) {
+          selectedPaths.add(cell.path);
+          lastPath = cell.path;
         }
-      });
+      }
       dragSelection.lastPath = lastPath;
       updateSelectionUi();
       event.preventDefault();
@@ -856,6 +875,20 @@ export function createResultHistoryController({
   function onRemoved(message) {
     const relPath = message?.rel_path || '';
     if (!relPath) return;
+    // 같은 삭제가 **두 번** 온다 — 지운 쪽에서 즉시 한 번(반응을 바로 보여 준다),
+    // 서버 브로드캐스트로 또 한 번. 두 번째는 치울 것이 없으므로 서버가 알려 준
+    // 총계만 반영하고 빠진다. 지금은 대체로 무해하지만 구독자가 늘면 중복 처리로
+    // 번진다(병합 전 필수 #6).
+    const known = selectedPaths.has(relPath)
+      || viewerNavPaths.includes(relPath)
+      || Boolean(viewerGrid?.querySelector(`.viewer-thumb[data-path="${CSS.escape(relPath)}"]`));
+    if (!known) {
+      if (Number.isFinite(Number(message.total))) setViewerTotal(message.total);
+      const dup = getEl('vpCount');
+      if (dup) dup.textContent = viewerTotal;
+      if (viewerTotal <= 0) hideLatestBadge();
+      return;
+    }
     selectedPaths.delete(relPath);
     if (selectionAnchorPath === relPath) selectionAnchorPath = '';
     // 삭제된 항목의 캐시 잔여까지 제거 (지워지면 남은 데이터가 없어야 한다).
@@ -1101,17 +1134,15 @@ export function createResultHistoryController({
         selectAllLoaded();
         return;
       }
-      if (commandKey && key === 's' && selectedPaths.size) {
-        event.preventDefault();
-        saveSelected();
-        return;
-      }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedPaths.size) {
         event.preventDefault();
         deleteSelected();
         return;
       }
-      if (event.key === 'Escape' && selectedPaths.size) {
+      // Esc — 팝업이 열려 있으면 **닫기가 먼저**다. 예전에는 선택이 있으면
+      // 무조건 선택 해제로 먹혀 팝업을 닫으려면 두 번 눌러야 했다(클릭만으로
+      // 선택이 생기므로 사실상 늘 그랬다). 팝업이 없을 때만 선택을 비운다.
+      if (event.key === 'Escape' && selectedPaths.size && !viewerPopupOpen) {
         event.preventDefault();
         clearSelection();
         return;
@@ -1181,6 +1212,15 @@ export function createResultHistoryController({
     onCleared,
     jumpToLatest,
     openPopup,
+    /** Ctrl+S 를 히스토리가 맡을 것인가. app.js 의 **단일 판정**이 부른다.
+     *  document 리스너를 여기서 또 달면 `preventDefault()` 가 서로를 막지 못해
+     *  둘 다 실행된다(파일 2개·토스트 2개). 고른 것이 있을 때만 참을 낸다.
+     *  @returns {boolean} 우리가 처리했으면 true — 호출자가 기본동작을 막는다. */
+    handleSaveShortcut() {
+      if (!selectedPaths.size) return false;
+      saveSelected();
+      return true;
+    },
     closePopup,
     navPopup,
     toggleLightboxPrompt,

@@ -127,10 +127,10 @@ export function createResultHistoryController({
 
   function selectionBarMarkup(scope) {
     return `
-      <div class="history-selection-count" data-history-selection-count>다중 선택 · 0개 선택됨</div>
+      <div class="history-selection-count" data-history-selection-count>0개 선택</div>
       <div class="history-selection-actions">
-        <button type="button" class="history-selection-btn save" data-history-selection-action="save">저장 (0)</button>
-        <button type="button" class="history-selection-btn delete" data-history-selection-action="delete">선택 삭제 (0)</button>
+        <button type="button" class="history-selection-btn save" data-history-selection-action="save">저장 0</button>
+        <button type="button" class="history-selection-btn delete" data-history-selection-action="delete">삭제 0</button>
       </div>
       <button type="button" class="history-selection-clear" data-history-selection-action="clear" aria-label="선택 해제" title="선택 해제">×</button>
       <span class="history-selection-scope">${scope}</span>`;
@@ -174,16 +174,16 @@ export function createResultHistoryController({
     });
     document.querySelectorAll('.history-selection-bar').forEach(bar => {
       const countEl = bar.querySelector('[data-history-selection-count]');
-      if (countEl) countEl.textContent = `다중 선택 · ${count}개 선택됨`;
+      if (countEl) countEl.textContent = `${count}개 선택`;
       const save = bar.querySelector('[data-history-selection-action="save"]');
       const remove = bar.querySelector('[data-history-selection-action="delete"]');
       const clear = bar.querySelector('[data-history-selection-action="clear"]');
       if (save) {
-        save.textContent = `저장 (${count})`;
+        save.textContent = `저장 ${count}`;
         save.disabled = selectionBusy || count === 0;
       }
       if (remove) {
-        remove.textContent = `선택 삭제 (${count})`;
+        remove.textContent = `삭제 ${count}`;
         remove.disabled = selectionBusy || count === 0;
       }
       if (clear) clear.disabled = selectionBusy || count === 0;

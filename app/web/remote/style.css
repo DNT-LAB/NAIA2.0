@@ -1,5 +1,11 @@
 :root {
   --bg-deep: #0a0a0f;
+  /* **정의가 없는 채로 8곳에서 쓰이고 있었다.** 그래서 그 배경들이 전부 투명으로
+     떨어졌다 — 히스토리 팝업이 뒤의 프롬프트창·도구 패널·Generate 버튼을 그대로
+     비친 것이 이것 때문이다(실측). 쓰이는 자리가 모두 컨테이너/입력의 바닥이라
+     가장 깊은 바닥색으로 못박는다. 이름을 지우지 않는 이유는 8곳을 다 고치는 것보다
+     한 줄로 끝나고, 의도(=바닥)가 이름에 남아 있기 때문이다. */
+  --bg-primary: #0a0a0f;
   --bg-surface: #12121a;
   --bg-card: #1a1a26;
   --bg-elevated: #222233;
@@ -7063,16 +7069,19 @@ body.resizing-result-info {
 }
 .viewer-thumb:hover { opacity: 1; }
 .viewer-thumb.active { opacity: 1; border: 2px solid var(--accent); box-shadow: 0 0 8px rgba(124,106,239,0.3); }
+/* 다중 선택. 팔레트 밖의 형광 초록(#7ee7b8)이었는데 앱 전체가 보라 계열이라
+   혼자 튀었다. `--accent-secondary`(분홍)를 쓴다 — 팔레트 안이면서 `active`(보라)와
+   확실히 갈린다. 두 상태는 겹칠 수 있으므로(고른 것을 보고 있는 중) 테두리와
+   외곽선으로 층을 나눈다. */
 .viewer-thumb.selected {
   opacity: 1;
-  outline: 3px solid #7ee7b8;
+  outline: 3px solid var(--accent-secondary);
   outline-offset: -3px;
-  box-shadow: 0 0 0 1px rgba(8,18,15,0.95), 0 0 12px rgba(126,231,184,0.58);
-  filter: saturate(1.08) brightness(1.08);
+  box-shadow: 0 0 0 1px rgba(10,10,15,0.95), 0 0 10px rgba(199,125,186,0.45);
 }
 .viewer-thumb.active.selected {
   border-color: var(--accent);
-  outline-color: #7ee7b8;
+  outline-color: var(--accent-secondary);
 }
 .viewer-panel-grid.is-selecting,
 .viewer-popup-left.is-selecting {
@@ -7084,9 +7093,9 @@ body.resizing-result-info {
   position: fixed;
   z-index: 10050;
   pointer-events: none;
-  border: 1px solid rgba(126,231,184,0.95);
-  background: rgba(126,231,184,0.16);
-  box-shadow: inset 0 0 0 1px rgba(8,18,15,0.36);
+  border: 1px solid rgba(199,125,186,0.95);
+  background: rgba(199,125,186,0.16);
+  box-shadow: inset 0 0 0 1px rgba(10,10,15,0.36);
   border-radius: 2px;
 }
 
@@ -7098,7 +7107,7 @@ body.resizing-result-info {
   padding: 8px;
   flex-shrink: 0;
   background: rgba(45,78,67,0.2);
-  border-bottom: 1px solid rgba(126,231,184,0.3);
+  border-bottom: 1px solid rgba(199,125,186,0.30);
 }
 .history-selection-count {
   min-width: 0;
@@ -7126,6 +7135,43 @@ body.resizing-result-info {
   font-size: 8.5px;
 }
 
+/* 레일은 136px 다. 가로로 늘어놓으면 한국어가 단어 중간에서 접힌다
+   ("2개 선 / 택됨", "선택 삭제 / (2)" — 실측). 세로로 쌓고 라벨을 줄인다.
+   단축키 안내 줄은 레일에서 감춘다 — 두 줄을 먹으면서 정작 읽히지 않는다.
+   대신 바 전체에 툴팁으로 붙인다(JS 가 채운다). 팝업은 폭이 넉넉하므로 그대로 둔다. */
+.viewer-panel-selection {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px 8px;
+}
+.viewer-panel-selection .history-selection-count {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.viewer-panel-selection .history-selection-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.viewer-panel-selection .history-selection-btn {
+  width: 100%;
+  white-space: nowrap;
+  font-size: 10px;
+  padding: 4px 6px;
+}
+.viewer-panel-selection .history-selection-scope { display: none; }
+.viewer-panel-selection .history-selection-clear {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+}
+.viewer-panel-selection { position: relative; }
+
 .history-selection-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7135,10 +7181,10 @@ body.resizing-result-info {
   min-width: 0;
   min-height: 34px;
   padding: 5px 4px;
-  border: 1px solid rgba(126,231,184,0.34);
+  border: 1px solid rgba(199,125,186,0.34);
   border-radius: 6px;
-  background: rgba(126,231,184,0.09);
-  color: #baf6da;
+  background: rgba(199,125,186,0.10);
+  color: #f0cfe6;
   font-family: var(--font-mono);
   font-size: 9px;
   line-height: 1.25;
@@ -7146,7 +7192,7 @@ body.resizing-result-info {
   overflow-wrap: anywhere;
   cursor: pointer;
 }
-.history-selection-btn:hover:not(:disabled) { background: rgba(126,231,184,0.18); }
+.history-selection-btn:hover:not(:disabled) { background: rgba(199,125,186,0.18); }
 .history-selection-btn.delete {
   border-color: rgba(255,112,112,0.34);
   background: rgba(255,94,94,0.09);

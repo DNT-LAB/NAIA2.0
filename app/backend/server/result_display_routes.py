@@ -1144,8 +1144,10 @@ def register_result_display_routes(
         service_failures = list(result.get("failed") or [])
         all_failures = [*failures, *service_failures]
         await broadcast_json(clients, session_context.auto_save_state_payload())
+        # 건너뜀(이미 저장됨)은 **실패가 아니다.** `saved` 만 보면 전부 이미
+        # 저장된 선택에서 saved=0 이 되어 "실패" 로 뜬다(실측).
         return {
-            "ok": bool(result.get("saved")),
+            "ok": not all_failures,
             **result,
             "failed": all_failures,
             "requested": len(requested),

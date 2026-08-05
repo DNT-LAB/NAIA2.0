@@ -418,9 +418,13 @@ export function createResultHistoryController({
         throw new Error(data.error || `선택 저장 실패 (${response.status})`);
       }
       const saved = Number(data.saved || 0);
+      const skipped = Number(data.skipped || 0);
       const failed = Array.isArray(data.failed) ? data.failed.length : 0;
       const folder = String(data.current_save_directory || '현재 결과 폴더');
-      showToast(`WebP 저장 완료: ${saved}개${failed ? `, 실패 ${failed}개` : ''} · ${folder}`, failed ? 'warning' : 'success');
+      const parts = [`저장 ${saved}개`];
+      if (skipped) parts.push(`이미 있음 ${skipped}개`);
+      if (failed) parts.push(`실패 ${failed}개`);
+      showToast(`${parts.join(' · ')} · ${folder}`, failed ? 'warning' : 'success');
     } catch (error) {
       showToast(error.message || '선택 WebP 저장 실패', 'error');
     } finally {

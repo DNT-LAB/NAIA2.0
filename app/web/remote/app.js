@@ -944,7 +944,11 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       getPromptEngineering: () => moduleStateCache.get('prompt_engineering') || null,
       // 반응형 생성. 생성 중이면 패널이 변화를 모았다가 끝난 뒤 한 번만 낸다.
       isGenerating: () => generating,
-      requestGeneration: () => requestGenerate(),
+      // **정식 경로로 보낸다.** `requestGenerate()` 를 직접 부르면 빈 페이로드가 나가
+      // 프롬프트도 Interactive 캐릭터 오버라이드도 실리지 않는다(실측: 요청은 가는데
+      // 아무 일도 안 일어났다). `send('generate')` 가 프롬프트·네거티브·오버라이드·
+      // Assets 스냅샷까지 조립한다.
+      requestGeneration: () => send('generate'),
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
       onCharReference: () => {

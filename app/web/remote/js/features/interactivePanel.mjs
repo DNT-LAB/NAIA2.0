@@ -115,7 +115,11 @@ function posCenters(pos) {
   const raw = String(pos || POS_DEFAULT);
   const cx = POS_COLS.indexOf(raw[0]);
   const cy = Number(raw[1]) - 1;
-  const f = i => (i < 0 || Number.isNaN(i) ? 0.5 : 0.1 + i * 0.2);
+  // 행은 **위쪽도 막는다.** 예전에는 아래만 봐서 `Z9` 같은 값이 들어오면 y=1.7 이
+  // 그대로 NAI 로 나갔다(옛 저장분·손편집에서 실제로 만들 수 있다).
+  // 0.1 단위로 반올림하는 것은 core/api_service.py 의 표(0.1~0.9)와 정확히 맞추기
+  // 위해서다 — 부동소수 그대로면 0.30000000000000004 가 생성 정보에 찍힌다.
+  const f = i => (!Number.isInteger(i) || i < 0 || i > 4 ? 0.5 : Math.round((0.1 + i * 0.2) * 10) / 10);
   return {x: f(cx), y: f(cy)};
 }
 
@@ -393,26 +397,34 @@ export function createInteractivePanel({
   /** 생성 요청에 실을 캐릭터. 활성 + 태그가 있는 것만, NAI 상한(5)까지.
    *  비어 있는 활성 슬롯까지 보내면 내용 없는 char_caption("girl")이 생기므로 제외한다.
    *  메인 프롬프트의 1girl/1boy 카운트는 별도로 계산되므로 여기서 빠져도 인원수는 유지된다. */
-  function generationCharacters() {
-    const rows = [];
+  /** 생성에 **실제로 나가는** 캐릭터들. 공유 캔버스의 칩도, 좌표 전송도 이 하나를 본다.
+   *  전에는 UI 조건이 `state.chars.length > 1` 이라 슬롯이 2개면 Position 버튼이 떴는데
+   *  그중 하나가 OFF/빈 칸이면 여기서 center 가 통째로 빠졌다 — 보이는데 안 실리는 상태.
+   *  목록을 하나로 합쳐 두 조건이 갈라질 수 없게 한다. */
+  function positionedChars() {
+    const out = [];
     for (const c of state.chars) {
       if (c.state !== 'active' || !charHasTags(c)) continue;
-      const prompt = buildCharPrompt(c);
-      if (!prompt) continue;
-      // 캐릭터별 네거티브 UI 는 아직 없어 uc 는 빈 문자열. center 는 NAI V4 전용.
-      rows.push({prompt, uc: '', center: posCenters(c.pos)});
-      // 1명일 때 center 를 어떻게 둘지는 아래 루프 뒤에서 정한다(UI 와 같은 조건이어야 한다).
-      if (rows.length >= MAX_NAI_CHARACTERS) break;
+      if (!buildCharPrompt(c)) continue;
+      out.push(c);
+      if (out.length >= MAX_NAI_CHARACTERS) break;
     }
+    return out;
+  }
+
+  function generationCharacters() {
+    const members = positionedChars();
     // **1명이면 좌표를 보내지 않는다.** 캔버스 위치는 여러 명을 갈라 놓기 위한 것이라
-    // 혼자일 때는 의미가 없고, 중앙(0.5, 0.5)을 명시하면 NAI 가 그 점에 인물을 맞추려
-    // 들어 구도가 오히려 굳는다. 보내지 않으면 모델이 알아서 잡는다(AI Choice).
-    // UI 에서도 같은 조건으로 Position 버튼을 감춘다 — 두 조건이 갈라지면 안 보이는
-    // 설정이 프롬프트에는 실리는 상태가 된다.
-    if (rows.length <= 1) {
-      for (const row of rows) delete row.center;
-    }
-    return rows;
+    // 혼자일 때는 의미가 없다. 캔버스도 같은 조건으로 감춘다 — 같은 목록을 쓰므로
+    // 갈라질 수 없다.
+    // 주의: 이것이 곧 'AI Choice' 는 **아니다.** 백엔드가 char_captions 의 centers 를
+    // 빈 자리에서 0.5/0.5 로 채운다(api_service.py `default_center`) — 그래서 혼자여도
+    // 중앙 좌표는 결국 나간다. 여기서 정하는 것은 '사용자가 좌표를 정했는가'까지다.
+    const withCenter = members.length > 1;
+    // 캐릭터별 네거티브 UI 는 아직 없어 uc 는 빈 문자열. center 는 NAI V4 전용.
+    return members.map(c => withCenter
+      ? {prompt: buildCharPrompt(c), uc: '', center: posCenters(c.pos)}
+      : {prompt: buildCharPrompt(c), uc: ''});
   }
 
   function emitChange() {
@@ -440,15 +452,34 @@ export function createInteractivePanel({
     return s.length >= 18 && s.split(/\s+/).length >= 3;
   }
 
-  function chip(text, cls, title) {
+  /** `del` 이 있으면 칩 오른쪽에 작은 [×] 를 붙인다 — 그 태그 하나만 빼는 길이다.
+   *  예전에는 슬롯을 열어 텍스트를 고치거나 그리드에서 같은 칸을 다시 눌러야 했다. */
+  function chip(text, cls, title, del) {
     const titleAttr = title ? ` title="${escHtml(title)}"` : '';
-    return `<span class="ia-chip${cls ? ' ' + cls : ''}"${titleAttr}>${escHtml(text)}</span>`;
+    const x = del
+      ? `<button type="button" class="ia-chip-x" data-chip-del="${escHtml(text)}"
+           tabindex="-1" aria-label="${escHtml(text)} 제거" title="빼기">&times;</button>`
+      : '';
+    return `<span class="ia-chip${cls ? ' ' + cls : ''}"${titleAttr}>` +
+      `<span class="ia-chip-t">${escHtml(text)}</span>${x}</span>`;
   }
 
-  function chipRow(tags) {
+  /** opts.del      — 칩마다 [×] 를 단다(실제 태그 배열을 가진 슬롯에서만).
+   *  opts.delFrom  — 이 인덱스부터만 [×] 를 단다. 구도 슬롯은 앞쪽에 3축 콤보에서
+   *                  파생된 **표시용 라벨**이 붙고 그 뒤에 자유 태그가 온다 —
+   *                  파생 칩은 지울 대상이 없으므로(콤보를 되돌려야 한다) 건너뛴다.
+   *  opts.emphasis — 여기 든 태그는 한 단계 더 강조한다(캐릭터 슬롯의 **이름** 태그). */
+  function chipRow(tags, opts = {}) {
     if (!tags || !tags.length) return '<span class="ia-chip-empty">비어 있음</span>';
-    const shown = tags.slice(0, MAX_CHIPS).map(t =>
-      isProseChip(t) ? chip(t, 'is-prose', t) : chip(t));   // 문장 칩은 전체 텍스트를 title 로(호버 확인)
+    const emph = opts.emphasis;
+    const from = opts.delFrom || 0;
+    const shown = tags.slice(0, MAX_CHIPS).map((t, i) => {
+      // 문장 칩은 전체 텍스트를 title 로(호버 확인)
+      let cls = isProseChip(t) ? 'is-prose' : '';
+      if (emph && emph.has(String(t).toLowerCase())) cls += (cls ? ' ' : '') + 'is-name';
+      return chip(t, cls, isProseChip(t) ? t : '', opts.del && i >= from);
+    });
+    // `+n` 은 실제 태그가 아니라 접힘 표시다 — 지울 대상이 없으므로 [×] 를 달지 않는다.
     if (tags.length > MAX_CHIPS) shown.push(chip(`+${tags.length - MAX_CHIPS}`, 'is-more'));
     return shown.join('');
   }
@@ -461,23 +492,25 @@ export function createInteractivePanel({
   }
 
   /** 편집 중이면 텍스트 입력창, 아니면 칩. 슬롯 몸통(chips 자리)만 만든다. */
-  function slotBody(editing, tags) {
+  function slotBody(editing, tags, opts) {
     if (editing) {
       // 전체 태그를 쉼표 문자열로 직접 편집. 숙련자 직접 입력용.
       return `<textarea class="ia-slot-input" data-slot-input="1" rows="1" spellcheck="false" placeholder="태그 입력 (쉼표로 여러 개)">${escHtml(tags.join(', '))}</textarea>`;
     }
-    return `<div class="ia-block-chips">${chipRow(tags)}</div>`;
+    return `<div class="ia-block-chips">${chipRow(tags, opts)}</div>`;
   }
 
   function sceneBlockHtml(slot) {
     const tags = state.slots[slot.id] || [];
     const editing = isEditing('scene', slot.id);
     // 구도 블록 미리보기(비편집)엔 3축 콤보 칩을 자유 태그 앞에 함께 보인다.
-    const chipTags = slot.id === 'composition' ? [...compChips(state.composition), ...tags] : tags;
+    const derived = slot.id === 'composition' ? compChips(state.composition) : [];
+    const chipTags = derived.length ? [...derived, ...tags] : tags;
     const countN = editing ? tags.length : chipTags.length;
+    // 파생 칩(구도 콤보)은 앞쪽에 오고 뒤가 자유 태그다 — 뒤쪽부터만 [×] 를 단다.
     const body = editing
       ? slotBody(true, tags)
-      : `<div class="ia-block-chips">${chipRow(chipTags)}</div>`;
+      : `<div class="ia-block-chips">${chipRow(chipTags, {del: true, delFrom: derived.length})}</div>`;
     return `<div class="ia-block${editing ? ' is-open is-editing' : ''}${chipTags.length ? '' : ' is-empty'}" data-slot="${slot.id}">
       <div class="ia-block-label">
         <span class="ia-block-title"><span class="ia-block-icon">${slot.icon}</span><span class="ia-block-name">${slot.name}</span></span>
@@ -525,32 +558,112 @@ export function createInteractivePanel({
       >시선${on.length ? ` <b>${on.length}</b>` : ''}</button>`;
   }
 
+  /** 캐릭터 슬롯에서 **진짜 이름**인 태그. 프리셋은 이름과 작품을 같이 넣는데
+   *  (`gotoh hitori`, `bocchi the rock!`) 둘이 같은 모양이라 어느 쪽이 캐릭터인지
+   *  구분이 안 됐다. 이름 쪽만 한 단계 더 강조한다. */
+  function nameEmphasis(c) {
+    const out = new Set();
+    const add = v => { const s = String(v || '').trim().toLowerCase(); if (s) out.add(s); };
+    add(c.preset?.name);
+    add(c.name);
+    return out.size ? out : null;
+  }
+
+  /** 헤더의 좌표 표시. 예전엔 `Position C3` 텍스트라 90px 을 먹었는데, 배치는 이제
+   *  공유 캔버스가 맡으므로 여기서는 **어디 있는지만** 보이면 된다. 미니맵 점 + 코드로
+   *  줄여 자리를 벌고, 눌러서 여는 5x5 팝업은 폴백으로 남긴다. */
+  function posDotHtml(c) {
+    const pos = c.pos || POS_DEFAULT;
+    const ci = Math.max(0, POS_COLS.indexOf(pos[0]));
+    const ri = Math.max(0, Number(pos[1]) - 1);
+    return `<button type="button" class="ia-char-pos" data-charpos data-cid="${escHtml(c.id)}"
+      title="캔버스 위치 ${pos} · ${posText(pos)} — 눌러서 좌표 팝업">
+      <span class="ia-char-posmap"><span class="ia-char-posdot"
+        style="left:${(ci + 0.5) * 20}%;top:${(ri + 0.5) * 20}%"></span></span>
+      <span class="ia-char-poscode">${pos}</span></button>`;
+  }
+
+  /** 헤더의 캐릭터 프리셋 버튼. **슬롯 안에 있던 것을 여기로 옮긴 것**이다 —
+   *  캐릭터 슬롯 줄은 `[칩들] [프리셋 이름] [ALT] [×]` 로 비좁았고, 게다가 이름이
+   *  칩과 버튼에 **두 번** 나왔다(`akemi homura` 가 나란히 둘, 사용자 지적).
+   *  여기서는 라벨을 `캐릭터` 로 고정한다 — 이름을 다시 적으면 중복이 되살아난다.
+   *  적용된 프리셋은 강조 테두리와 툴팁이 알린다. 접힌 카드에서도 바로 눌린다. */
+  function headPresetHtml(c) {
+    const tip = c.preset
+      ? `${c.preset.name} · ${c.preset.work} — 눌러서 다른 캐릭터로 바꿉니다`
+      : '캐릭터 프리셋 검색 — 이름·작품·태그로 찾아 대표 태그까지 한 번에 채웁니다';
+    return `<button type="button" class="ia-char-hpreset${c.preset ? ' has-preset' : ''}"
+      data-charpreset data-cid="${escHtml(c.id)}"
+      title="${escHtml(tip)}"><span class="ia-char-hpreset-i">\u{1F464}</span>캐릭터</button>`;
+  }
+
+  /** 이 앱은 native `title` 을 `data-naia-title`(+ aria-label)로 걷어간다(app.js `adoptTitle`).
+   *  두 번째부터는 이미 있는 aria-label 을 덮지 않으므로, 갱신할 때는 셋 다 직접 맞춘다. */
+  function setTip(el, text) {
+    if (!el) return;
+    el.dataset.naiaTitle = text;
+    el.setAttribute('aria-label', text);
+    el.removeAttribute('title');
+  }
+
+  /** 헤더 미니맵의 점과 코드를 제자리에서 옮긴다. renderBlocks 를 부르면
+   *  편집 중 textarea 가 통째로 다시 만들어져 포커스와 팝업이 날아간다. */
+  function refreshPosDot(cid) {
+    const card = blocksMount.querySelector(`.ia-char[data-cid="${CSS.escape(cid)}"]`);
+    const btn = card && card.querySelector('[data-charpos]');
+    const c = state.chars.find(x => x.id === cid);
+    if (!btn || !c) return;
+    const pos = c.pos || POS_DEFAULT;
+    const dot = btn.querySelector('.ia-char-posdot');
+    const code = btn.querySelector('.ia-char-poscode');
+    if (dot) {
+      dot.style.left = (Math.max(0, POS_COLS.indexOf(pos[0])) + 0.5) * 20 + '%';
+      dot.style.top = (Math.max(0, Number(pos[1]) - 1) + 0.5) * 20 + '%';
+    }
+    if (code) code.textContent = pos;
+    setTip(btn, `캔버스 위치 ${pos} · ${posText(pos)} — 눌러서 좌표 팝업`);
+  }
+
+  /** 좌표 UI 를 받는 구성원 지문. ON/OFF 나 태그 추가는 카드 하나만 제자리로 고치는데,
+   *  대상이 늘거나 줄면 그것만으로는 모자라 헤더의 좌표 점이 거짓말을 한다(껐는데 점이 남는다).
+   *  구성이 실제로 바뀐 경우에만 블록을 다시 그린다 — 매번 그리면 편집 중 슬롯이 흔들린다. */
+  function posSignature() {
+    const isNai = String(getMode() || '').toUpperCase() === 'NAI';
+    const members = isNai ? positionedChars() : [];
+    return members.length > 1 ? members.map(c => c.id).join(',') : '';
+  }
+  let lastPosSig = null;
+
+  function syncPosMembership() {
+    if (posSignature() === lastPosSig) return false;
+    renderBlocks();   // renderBlocks 가 지문을 다시 찍는다
+    return true;
+  }
+
   function charBlockHtml() {
     // Position(캔버스 좌표)은 NAI V4 char_captions 전용이라 NAI 모드에서만 노출한다.
     const isNai = String(getMode() || '').toUpperCase() === 'NAI';
+    // 좌표 UI 는 **좌표가 실제로 나갈 때만** 보인다(positionedChars 참조).
+    const members = isNai ? positionedChars() : [];
+    const showPos = members.length > 1;
+    const posIds = new Set(members.map(c => c.id));
     const rows = state.chars.map((c, i) => {
       const summary = CHAR_SUBS.flatMap(s => c.fields[s.key] || []).join(', ') || '(비어 있음)';
       const subs = CHAR_SUBS.map(s => {
         const tags = c.fields[s.key] || [];
         const editing = isEditing('char', c.id, s.key);
-        // 캐릭터 슬롯의 오른쪽 끝(다른 슬롯의 개수 배지 자리)에 프리셋 버튼이 들어간다.
-        // 전폭 바를 따로 두면 캐릭터 카드에 줄이 하나 더 생기고, 그 버튼이 어느 슬롯을
-        // 채우는지도 드러나지 않는다. 줄 높이는 그대로다 — 그리드 3열의 `auto` 칸이다.
+        // 프리셋 **선택** 버튼은 헤더로 옮겼다(headPresetHtml) — 여기 두면 칩과 이름이
+        // 겹쳐 보이고 칩 자리를 좁힌다. 슬롯에는 이 슬롯을 되돌리는 [×] 와 ALT 만 남긴다.
         // '구도' 슬롯은 개수 배지 자리에 시선 버튼을 함께 둔다 — 같은 질문이라
         // 한 줄에서 끝나야 한다(다른 줄을 만들면 캐릭터 카드가 또 길어진다).
         const meta = s.key === '구도'
           ? gazeButtonHtml(c) + `<span class="ia-block-count">${tags.length || ''}</span>`
           : s.key === CHAR_TAG_SLOT
-          ? `<button type="button" class="ia-char-preset${c.preset ? ' has-preset' : ''}"
-              data-charpreset data-cid="${c.id}"
-              title="${c.preset
-                ? escHtml(`${c.preset.name} · ${c.preset.work} — 눌러서 다른 캐릭터로 바꿉니다`)
-                : '캐릭터 프리셋 검색 — 이름·작품·태그로 찾아 대표 태그까지 한 번에 채웁니다'}"
-              >${c.preset ? escHtml(c.preset.name) : '프리셋 선택'}</button>`
-            + altButtonHtml(c)
+          ? altButtonHtml(c)
             + (c.preset
               ? `<button type="button" class="ia-char-preset-x" data-charpresetclear data-cid="${c.id}"
-                  aria-label="프리셋 되돌리기" title="이 프리셋이 넣은 태그만 되돌립니다">&times;</button>`
+                  aria-label="프리셋 되돌리기"
+                  title="${escHtml(`${c.preset.name} 프리셋이 넣은 태그만 되돌립니다`)}">&times;</button>`
               : '')
           : `<span class="ia-block-count">${tags.length || ''}</span>`;
         return `<div class="ia-sub-block${editing ? ' is-editing' : ''}${tags.length ? '' : ' is-empty'}" data-cid="${c.id}" data-sub="${s.key}">
@@ -558,7 +671,7 @@ export function createInteractivePanel({
             <span class="ia-block-title"><span class="ia-block-icon">${s.icon}</span><span class="ia-block-name">${escHtml(subLabel(s))}</span></span>
             <span class="ia-block-axis">${s.axis}</span>
           </div>
-          ${slotBody(editing, tags)}
+          ${slotBody(editing, tags, {del: true, emphasis: s.key === CHAR_TAG_SLOT ? nameEmphasis(c) : null})}
           <div class="ia-block-meta">${meta}</div>
         </div>`;
       }).join('');
@@ -575,7 +688,10 @@ export function createInteractivePanel({
             <button type="button" class="ia-genbtn${g === 'male' ? ' on' : ''}" data-gender="male" data-cid="${cid}">Male</button>
             <button type="button" class="ia-genbtn${g === 'female' ? ' on' : ''}" data-gender="female" data-cid="${cid}">Female</button>
           </div>
-          ${isNai && state.chars.length > 1 ? `<button type="button" class="ia-char-pos" data-charpos data-cid="${cid}" title="캔버스 위치 (NAI V4 centers)">Position ${escHtml(c.pos || POS_DEFAULT)}</button>` : ''}
+          ${headPresetHtml(c)}
+          ${showPos && posIds.has(c.id) ? posDotHtml(c) : ''}
+          <button type="button" class="ia-char-dup" data-chardup data-cid="${cid}"
+            aria-label="캐릭터 복제" title="이 캐릭터를 그대로 복제합니다 (위치는 빈 칸으로)">&#10697;</button>
           ${canDelete ? `<button type="button" class="ia-char-del" data-chardel data-cid="${cid}" aria-label="캐릭터 삭제" title="이 캐릭터 슬롯 삭제">&times;</button>` : ''}
           <span class="ia-char-spring"></span>
           <button type="button" class="ia-char-state ${c.state}" data-charenable data-cid="${cid}" aria-pressed="${enabled}" title="${enabled ? '비활성화 (생성에서 제외)' : '활성화'}">${enabled ? 'ACTIVE' : 'OFF'}</button>
@@ -592,9 +708,11 @@ export function createInteractivePanel({
       <div class="ia-cblock-head">
         <span class="ia-block-icon">\u{1F464}</span>
         <span class="ia-block-name">캐릭터</span>
+        <!-- '2 활성' 은 제목 **바로 옆**이다. 오른쪽 끝에 Reference 와 나란히 뒀더니
+             그 버튼의 부제처럼 보여, 무엇이 2개인지 헷갈렸다(사용자 지적). -->
+        <span class="ia-block-count">${activeCount} 활성</span>
         <span style="flex:1"></span>
         ${isNai ? charRefButtonHtml() : ''}
-        <span class="ia-block-count">${activeCount} 활성</span>
       </div>
       ${rows}
       <div class="ia-char-foot"><button type="button" class="ia-charcard-add" data-add-char="1">+ 캐릭터 슬롯</button></div>
@@ -695,7 +813,14 @@ export function createInteractivePanel({
     if (sceneMount && document.body.contains(sceneMount)) return sceneMount;
     sceneMount = document.createElement('div');
     sceneMount.className = 'ia-scene-float';
-    document.body.appendChild(sceneMount);
+    // **슬롯 팝업과 같은 stacking context 안에 둔다.** 팝업(`.ia-panel`)은
+    // `.viewer-wrapper`(z-index:0 + isolation:isolate) **안**에 있어서 그 z 2200 이
+    // 바깥에서는 0 층으로 접힌다. 이 플로트를 body 직계로 두면 둘을 동시에 만족시킬
+    // 값이 없다 — 1 이상이면 팝업을 뚫고, 0 이하면 wrapper 의 불투명 배경에 먹힌다.
+    // 실제로 음수로 내렸다가 씬 버튼 8개와 반응형 토글이 통째로 결과 패널 뒤로
+    // 사라졌다(사용자 지적). 같은 컨텍스트에 넣으면 z 로 정직하게 줄을 세울 수 있다.
+    // `position: fixed` 는 그대로 뷰포트 기준이다(wrapper 에 transform 이 없다).
+    (document.querySelector('.viewer-wrapper') || document.body).appendChild(sceneMount);
     sceneMount.addEventListener('mousedown', keepEditingFocus);   // 왼쪽 팝업과 동일
     // 슬롯 위에서 우클릭하면 그 슬롯의 팝업을 닫는다(사용자 편의). 브라우저 메뉴는 막는다.
     sceneMount.addEventListener('contextmenu', event => {
@@ -787,6 +912,7 @@ export function createInteractivePanel({
       ? SCENE_SLOTS.filter(sl => isEditing('scene', sl.id))
       : SCENE_SLOTS;
     blocksMount.innerHTML = charBlockHtml() + inlineScenes.map(sceneBlockHtml).join('');
+    lastPosSig = posSignature();   // 방금 그린 구성이 기준선이다
     const host = ensureSceneMount();
     host.innerHTML = floating
       ? SCENE_SLOTS.map(sceneButtonHtml).join('') + reactiveToggleHtml()
@@ -880,6 +1006,13 @@ export function createInteractivePanel({
         openPositionPicker(el, el.dataset.cid);
       });
     });
+    bindChipDeletes(blocksMount);   // 칩의 [×] — 슬롯을 열지 않고 그 태그 하나만 뺀다
+    blocksMount.querySelectorAll('[data-chardup]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        duplicateCharacter(el.dataset.cid);
+      });
+    });
     blocksMount.querySelectorAll('[data-chardel]').forEach(el => {
       el.addEventListener('click', event => {
         event.stopPropagation();
@@ -913,6 +1046,9 @@ export function createInteractivePanel({
   /** 캐릭터 스택(Assets 바 위 세로 버튼)이 읽는 요약. 태그 전체가 아니라
    *  버튼에 그릴 것만 넘긴다 — 스택은 열기 전환용이지 편집용이 아니다. */
   function characterRoster() {
+    // 좌표가 실제로 나가는 슬롯만 스택에서 POS 버튼을 받는다 — 안 그러면 OFF/빈 슬롯에도
+    // 버튼이 붙어 눌러 놓은 값이 조용히 버려진다.
+    const posIds = new Set(positionedChars().map(c => c.id));
     return state.chars.map((c, i) => ({
       index: i,
       id: c.id,
@@ -921,6 +1057,7 @@ export function createInteractivePanel({
       enabled: c.state === 'active',
       gender: c.gender || 'female',
       pos: c.pos || POS_DEFAULT,
+      positioned: posIds.has(c.id),
       name: (c.fields?.['캐릭터'] || [])[0] || c.name || '',
     }));
   }
@@ -1080,22 +1217,48 @@ export function createInteractivePanel({
     return posPopup;
   }
 
-  function posPopupHtml(cur) {
+  /** 다른 캐릭터가 선 칸 -> 그 라벨들. 위치는 본질적으로 **여러 명의 상대 배치**인데
+   *  팝업은 한 명만 보여 줘서, C1 이 어디 있는지 모르고 C2 를 놓아야 했다.
+   *  남들을 음영으로 깔아 두면 팝업을 여닫으며 대조할 일이 없다(사용자 제안). */
+  function otherPositions(cid) {
+    const map = new Map();
+    positionedChars().forEach(c => {
+      if (c.id === cid) return;
+      const p = c.pos || POS_DEFAULT;
+      if (!map.has(p)) map.set(p, []);
+      map.get(p).push('C' + (state.chars.indexOf(c) + 1));
+    });
+    return map;
+  }
+
+  function posPopupHtml(cur, cid) {
+    const others = otherPositions(cid);
     let cells = '<div class="ia-pos-hdr"></div>' +
       POS_COLS.map(col => `<div class="ia-pos-hdr">${col}</div>`).join('');
     for (let row = 1; row <= 5; row++) {
       cells += `<div class="ia-pos-hdr">${row}</div>`;
       cells += POS_COLS.map(col => {
         const p = col + row;
-        return `<button type="button" class="ia-pos-cell${p === cur ? ' is-on' : ''}" data-pos="${p}">${p}</button>`;
+        const who = others.get(p);
+        // 남이 선 칸에도 그대로 놓을 수 있다 — 막지 않고 보여만 준다(NAI 는 겹침을 허용한다).
+        const cls = 'ia-pos-cell' + (p === cur ? ' is-on' : '') + (who ? ' has-other' : '');
+        const label = who ? who.join('·') : p;
+        const tip = who ? `${p} — ${who.join(', ')} 가 여기 있습니다` : p;
+        return `<button type="button" class="${cls}" data-pos="${p}"
+          title="${escHtml(tip)}">${escHtml(label)}</button>`;
       }).join('');
     }
+    const otherLine = others.size
+      ? `<div class="ia-pos-others">${[...others].map(([p, w]) =>
+          `<span><b>${escHtml(w.join('·'))}</b> ${escHtml(p)}</span>`).join('')}</div>`
+      : '';
     return `<div class="ia-pos-head">캔버스 위치 · NAI V4</div>
       <div class="ia-pos-wrap">
         <div class="ia-pos-grid">${cells}</div>
         <div class="ia-pos-info">
           <div class="ia-pos-cur">${escHtml(cur)}</div>
           <div class="ia-pos-map">centers<br>${escHtml(posText(cur))}</div>
+          ${otherLine}
           <button type="button" class="ia-pos-reset" data-pos="${POS_DEFAULT}">중앙으로</button>
         </div>
       </div>`;
@@ -1302,16 +1465,20 @@ export function createInteractivePanel({
     if (posPopupCid === cid && posPopup && !posPopup.hidden) { closePositionPicker(); return; }
     const popup = ensurePosPopup();
     posPopupCid = cid;
-    popup.innerHTML = posPopupHtml(character.pos || POS_DEFAULT);
+    popup.innerHTML = posPopupHtml(character.pos || POS_DEFAULT, cid);
     popup.hidden = false;
-    // 버튼 아래에 앵커. 화면 밖으로 넘치면 안쪽으로 clamp(위로 뒤집기 포함).
+    // **버튼 오른쪽**에 붙인다. 예전에는 아래로 폈는데, 이 버튼들이 화면 아래쪽
+    // (Assets 스택·캐릭터 헤더)에 있어서 팝업이 결과 이미지를 가렸다(사용자 지적).
+    // 오른쪽에 자리가 없으면 왼쪽으로 뒤집는다. 세로는 버튼 가운데에 맞추고 화면 안으로 clamp.
     const rect = anchor.getBoundingClientRect();
     const pr = popup.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    let left = Math.max(8, Math.min(rect.left, vw - pr.width - 8));
-    let top = rect.bottom + 6;
-    if (top + pr.height > vh - 8) top = Math.max(8, rect.top - pr.height - 6);
+    let left = rect.right + 8;
+    if (left + pr.width > vw - 8) left = rect.left - pr.width - 8;
+    left = Math.max(8, Math.min(left, vw - pr.width - 8));
+    let top = rect.top + rect.height / 2 - pr.height / 2;
+    top = Math.max(8, Math.min(top, vh - pr.height - 8));
     popup.style.left = `${Math.round(left)}px`;
     popup.style.top = `${Math.round(top)}px`;
     document.addEventListener('mousedown', onPosOutside, true);
@@ -1337,17 +1504,106 @@ export function createInteractivePanel({
     if (event.key === 'Escape') { event.preventDefault(); closePositionPicker(); }
   }
 
-  /** 위치 선택 → 버튼 라벨만 in-place 갱신(편집 중 슬롯을 건드리지 않는다). */
+  /** 위치 선택 → 캔버스 칩과 헤더 점만 in-place 갱신(편집 중 슬롯을 건드리지 않는다). */
   function setCharPosition(cid, pos) {
     const character = state.chars.find(x => x.id === cid);
     if (!character) return;
     const next = /^[A-E][1-5]$/.test(String(pos || '')) ? String(pos) : POS_DEFAULT;
+    if (character.pos === next) return;
     character.pos = next;
-    const btn = blocksMount.querySelector(`.ia-char[data-cid="${cid}"] [data-charpos]`);
-    if (btn) btn.textContent = `Position ${next}`;
-    if (posPopup && !posPopup.hidden) posPopup.innerHTML = posPopupHtml(next);
+    refreshPosDot(cid);
+    if (posPopup && !posPopup.hidden) posPopup.innerHTML = posPopupHtml(next, posPopupCid);
     emitChange();
     notifyRoster();   // Assets 스택의 [POS C3] 라벨도 이 값을 쓴다
+  }
+
+  /** 칩의 [×] — 그 태그 하나만 뺀다. 태그 **문자열**로 지운다(대소문자 무시):
+   *  슬롯 태그는 이미 중복 제거되어 있어 문자열이 곧 고유 키이고, 인덱스로 하면
+   *  구도 슬롯처럼 앞에 파생 칩이 끼는 곳에서 어긋난다. */
+  function removeChipTag(host, tag) {
+    if (!host || !tag) return;
+    const key = String(tag).toLowerCase();
+    let list, put, character = null;
+    if (host.dataset.slot) {
+      const id = host.dataset.slot;
+      if (!Array.isArray(state.slots[id])) return;
+      list = state.slots[id];
+      put = next => { state.slots[id] = next; };
+    } else {
+      character = state.chars.find(x => x.id === host.dataset.cid);
+      const sub = host.dataset.sub;
+      if (!character || !Array.isArray(character.fields[sub])) return;
+      list = character.fields[sub];
+      put = next => { character.fields[sub] = next; };
+    }
+    const next = list.filter(t => String(t).toLowerCase() !== key);
+    if (next.length === list.length) return;   // 파생 칩(구도 콤보 등) — 지울 것이 없다
+    put(next);
+    // 프리셋이 넣었던 태그를 사용자가 뺐다면 소유 기록에서도 지운다. 안 지워도
+    // 회수는 조용히 지나가지만, 기록이 사실과 달라지면 다음 사람이 헷갈린다.
+    if (character?.preset?.tags) {
+      for (const [slotKey, owned] of Object.entries(character.preset.tags)) {
+        character.preset.tags[slotKey] = (owned || []).filter(t => String(t).toLowerCase() !== key);
+      }
+    }
+    renderBlocks();   // 좌표 점 노출 조건(태그 유무)도 여기서 다시 잡힌다
+    emitChange();
+    notifyRoster();
+  }
+
+  /** 복제본을 놓을 빈 칸. 같은 줄에서 가까운 칸부터 본다 — 원본과 같은 칸에 놓으면
+   *  둘이 정확히 겹쳐서 복제한 줄도 모르게 된다. */
+  function freePositionCell(from) {
+    const used = new Set(state.chars.map(c => c.pos || POS_DEFAULT));
+    const src = String(from || POS_DEFAULT);
+    const ci = Math.max(0, POS_COLS.indexOf(src[0]));
+    const ri = Math.max(0, Number(src[1]) - 1);
+    for (let d = 1; d < 5; d++) {
+      for (const col of [ci + d, ci - d]) {
+        if (col < 0 || col > 4) continue;
+        const p = POS_COLS[col] + (ri + 1);
+        if (!used.has(p)) return p;
+      }
+    }
+    for (let r = 1; r <= 5; r++) {
+      for (const col of POS_COLS) {
+        if (!used.has(col + r)) return col + r;
+      }
+    }
+    return POS_DEFAULT;
+  }
+
+  /** 캐릭터 복제. 다인원은 비슷한 캐릭터를 여럿 두는 경우가 많아, 처음부터 다시
+   *  채우는 대신 복제하고 위치만 바꾸는 쪽이 훨씬 짧다. */
+  function duplicateCharacter(cid) {
+    if (state.chars.length >= MAX_NAI_CHARACTERS) {
+      showToast(`캐릭터 슬롯은 최대 ${MAX_NAI_CHARACTERS}개입니다 (NAI 제한).`, 'error');
+      return;
+    }
+    const at = state.chars.findIndex(c => c.id === cid);
+    if (at < 0) return;
+    const s = state.chars[at];
+    const copy = {
+      ...s,
+      id: 'c' + (++charSeq),
+      open: false,
+      pos: freePositionCell(s.pos),
+      // 배열·객체는 **전부 새로 만든다.** 얕은 복사로 두면 복제본에서 태그를 지울 때
+      // 같은 배열을 공유하는 원본에서도 사라진다.
+      alt: [...(s.alt || [])],
+      gaze: [...(s.gaze || [])],
+      preset: s.preset
+        ? {...s.preset, tags: Object.fromEntries(
+            Object.entries(s.preset.tags || {}).map(([k, v]) => [k, [...(v || [])]]))}
+        : null,
+      fields: Object.fromEntries(
+        Object.entries(s.fields || {}).map(([k, v]) => [k, [...(v || [])]])),
+    };
+    state.chars.splice(at + 1, 0, copy);
+    renderBlocks();
+    emitChange();
+    notifyRoster();
+    showToast(`C${at + 1} 을 복제했습니다 · 위치 ${copy.pos}`);
   }
 
   /** 마지막 하나가 아니면 캐릭터 슬롯 삭제. */
@@ -1372,6 +1628,12 @@ export function createInteractivePanel({
     if (!c) return;
     c.state = c.state === 'active' ? 'disabled' : 'active';
     const enabled = c.state === 'active';
+    // 껐다 켜면 좌표 UI 대상이 바뀐다 — 바뀌었으면 통째로 다시 그리고 제자리 갱신은 건너뛴다.
+    if (syncPosMembership()) {
+      emitChange();
+      notifyRoster();
+      return;
+    }
     const card = blocksMount.querySelector(`.ia-char[data-cid="${cid}"]`);
     if (card) {
       card.classList.toggle('is-disabled', !enabled);
@@ -1784,12 +2046,13 @@ export function createInteractivePanel({
       '</div>' +
       '<div class="tag-tooltip-extra char-details-row">' +
         `<span class="char-copyright">${escHtml(data.work || '')}</span>${chips}</div>` +
-      // 주 동작(대표 태그 전부) : 보조(캐릭터 태그만) = 2 : 1. 색으로도 갈라 둔다.
+      // 주 동작(캐릭터 태그 + 대표 태그) : 보조(캐릭터 태그만) = 2 : 1. 색으로도 갈라 둔다.
+      // 숫자 배지는 **목록에서 고른 개수**다 — 캐릭터 태그는 항상 따라가므로 세지 않는다.
       '<div class="ia-cp-actions">' +
         `<button type="button" class="ia-cp-act is-primary" data-cp-apply="all"${picked.length ? '' : ' disabled'}
-          title="고른 대표 태그를 ${escHtml(presetCharLabel())} 슬롯들에 넣습니다">전부 적용<small>${picked.length}</small></button>` +
+          title="${escHtml(charTags.join(', '))} + 고른 대표 태그를 ${escHtml(presetCharLabel())} 슬롯들에 넣습니다">전부 적용<small>${picked.length}</small></button>` +
         `<button type="button" class="ia-cp-act is-secondary" data-cp-apply="char"
-          title="${escHtml(charTags.join(', '))} — 대표 태그로 흩지 않고 캐릭터 태그 자체를 넣습니다">캐릭터만</button>` +
+          title="${escHtml(charTags.join(', '))} — 대표 태그 없이 캐릭터 태그만 넣습니다">캐릭터만</button>` +
       '</div>' +
       // Copy All 은 위 두 버튼에서 뺐다 — 클립보드로 내보내는 것은 성격이 다른 행동이라
       // 같은 줄에 두면 2:1 강조가 흐려진다. 기능은 남긴다(Interactive 밖으로 태그를
@@ -1960,14 +2223,21 @@ export function createInteractivePanel({
   function presetApplyCard(kind = 'all') {
     const character = state.chars.find(c => c.id === presetCid);
     if (!character || !cardData) return;
-    // `캐릭터만` = 대표 태그로 흩지 않고 캐릭터 태그 자체를 넣는다. "그 캐릭터 같은 사람"이
-    // 아니라 **진짜 그 캐릭터**가 나오게 하는 경로다(사용자와 합의된 구분).
-    // 넣는 자리·회수 규약은 `전부 적용` 과 완전히 같다 — 여기서 갈라지면 둘을 오갈 때
+    // `캐릭터만` = 대표 태그로 흩지 않고 캐릭터 태그 자체만 넣는다.
+    // `전부 적용` = 캐릭터 태그 **+** 고른 대표 태그.
+    //
+    // 예전에는 `전부 적용` 이 대표 태그만 넣고 캐릭터 태그를 뺐다. 그래서 프리셋 버튼에는
+    // `akemi homura` 가 떠 있는데 정작 생성 프롬프트는 `girl, long hair, black hair, ...`
+    // 로 나가, 이름이 어디에도 없었다(사용자 지적 2026-08-05). 캐릭터를 골랐으면 그
+    // 캐릭터가 나와야 한다 — '전부'라는 말도 그쪽이다.
+    // 넣는 자리·회수 규약은 두 경로가 완전히 같다 — 여기서 갈라지면 둘을 오갈 때
     // 이전 것이 남는다.
-    const chosen = kind === 'char'
-      ? characterTagsOf(cardData).map(tag => ({tag, key: tag.toLowerCase(), slot: CHAR_TAG_SLOT, axis: ''}))
-      : cardRows.filter(r => r.slot && cardPick.has(r.key));
-    if (!chosen.length) {
+    const charRows = characterTagsOf(cardData)
+      .map(tag => ({tag, key: tag.toLowerCase(), slot: CHAR_TAG_SLOT, axis: ''}));
+    const picked = kind === 'char' ? [] : cardRows.filter(r => r.slot && cardPick.has(r.key));
+    // 캐릭터 태그가 먼저다 — buildCharPrompt 가 슬롯 순서대로 잇고 캐릭터 슬롯이 맨 앞이다.
+    const chosen = kind === 'char' ? charRows : [...charRows, ...picked];
+    if (kind === 'char' ? !charRows.length : !picked.length) {
       showToast(kind === 'char' ? '캐릭터 태그를 알 수 없습니다.' : '넣을 태그를 하나 이상 고르세요.', 'error');
       return;
     }
@@ -2018,7 +2288,10 @@ export function createInteractivePanel({
 
     closePresetCard();
     closePresetPanel();
-    state.chars.forEach(c => { c.open = (c.id === character.id); });
+    // **펼침 상태는 건드리지 않는다.** 예전에는 적용한 슬롯을 강제로 펼쳤는데, 그때는
+    // 프리셋 버튼이 펼친 슬롯 안에만 있어서 이미 열려 있었다. 지금은 헤더에서도 눌리므로
+    // 접어 둔 카드가 제멋대로 열린다(사용자 지적). 접힌 카드도 헤더 요약줄에 새 태그가
+    // 그대로 보이고 토스트도 뜨므로, 열어 주지 않아도 결과는 확인된다.
     renderBlocks();
     emitChange();
     notifyRoster();   // 이름과 열린 슬롯이 바뀌었다 — Assets 스택이 이 값을 쓴다
@@ -2240,6 +2513,10 @@ export function createInteractivePanel({
     // textarea 값을 갱신하지만, 사용자가 직접 타이핑한 경우(fromInput)는 건드리지 않는다
     // — 커서/IME 조합이 끊기기 때문이다.
     if (!opts.fromInput) syncEditingInput();
+    // 첫 태그가 들어오거나 마지막 태그가 빠지면 좌표 UI 대상이 달라진다.
+    // **직접 타이핑 중에는 미룬다** — 그 순간 블록을 다시 그리면 IME 조합이 끊긴다.
+    // 그 경우는 팝업을 닫을 때(closePanel -> renderBlocks) 따라잡는다.
+    if (!opts.fromInput) syncPosMembership();
     updateEditingMeta();
     // 직접 타이핑으로 축 값이 바뀐 경우에도 팔레트/슬라이더 선택 표시를 맞춘다.
     if (opts.fromInput) refreshAxisSections();
@@ -2308,12 +2585,37 @@ export function createInteractivePanel({
     }
   }
 
+  /** 블록 하나의 칩 줄을 다시 만든다. **renderBlocks 와 같은 옵션을 써야 한다** —
+   *  예전에는 여기서 옵션 없이 그려서, 이 경로를 탄 슬롯만 [×] 와 이름 강조를 잃었다.
+   *  구도 슬롯의 파생 칩도 여기서 다시 앞에 붙인다(빼면 콤보 표시가 사라진다). */
   function applyChipView(el, tags) {
     const chips = el.querySelector('.ia-block-chips');
     const count = el.querySelector('.ia-block-count');
-    if (chips) chips.innerHTML = chipRow(tags);
-    if (count) count.textContent = tags.length || '';
-    el.classList.toggle('is-empty', !tags.length);
+    const derived = el.dataset.slot === 'composition' ? compChips(state.composition) : [];
+    const character = el.dataset.cid ? state.chars.find(x => x.id === el.dataset.cid) : null;
+    const opts = {
+      del: true,
+      delFrom: derived.length,
+      emphasis: (character && el.dataset.sub === CHAR_TAG_SLOT) ? nameEmphasis(character) : null,
+    };
+    const shown = derived.length ? [...derived, ...tags] : tags;
+    if (chips) {
+      chips.innerHTML = chipRow(shown, opts);
+      bindChipDeletes(chips);   // 새로 만든 [×] 에는 리스너가 없다
+    }
+    if (count) count.textContent = shown.length || '';
+    el.classList.toggle('is-empty', !shown.length);
+  }
+
+  /** 칩의 [×] 배선. 슬롯 클릭(팝업 열기)보다 먼저 잡아야 하므로 stopPropagation 이 필수다. */
+  function bindChipDeletes(root) {
+    root.querySelectorAll('[data-chip-del]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        event.preventDefault();
+        removeChipTag(el.closest('[data-sub],[data-slot]'), el.dataset.chipDel);
+      });
+    });
   }
 
   function openSlot(slotId) {
@@ -3464,6 +3766,11 @@ export function createInteractivePanel({
     const want = new Set(kind === 'char'
       ? ASSET_FEATURE_SLOTS
       : [...ASSET_FEATURE_SLOTS, ...ASSET_OUTFIT_SLOTS]);
+    // 이건 '더하기'가 아니라 '이 슬롯의 캐릭터를 갈아치우기'다 — 앞 캐릭터의
+    // 이름(`akemi homura`)이 새 캐릭터(`kisaki (blue archive)`) 와 나란히 남으면 안 된다.
+    // **다만 지우는 것은 넣을 것이 확정된 뒤다.** 먼저 비웠더니, 빈 프롬프트나
+    // 성별 태그뿐인 프롬프트가 오면 앞 캐릭터만 사라졌다(Codex 지적 2026-08-05).
+    // 아래 파싱은 `c` 를 건드리지 않는다.
     const map = assetSlotOf();
     const add = new Map();          // slot key -> [태그]
     const bundle = [];              // 축에 없는 것
@@ -3481,6 +3788,32 @@ export function createInteractivePanel({
       if (!add.has(hit.slot)) add.set(hit.slot, []);
       add.get(hit.slot).push({tag, excl: hit.excl});
     }
+    // 넣을 것이 하나도 없으면 **아무것도 건드리지 않는다.** 성별만 있으면 그것만 바꾼다.
+    if (!add.size && !bundle.length) {
+      if (gender && c.gender !== gender) {
+        c.gender = gender;
+        renderBlocks(); emitChange(); notifyRoster();
+        showToast('성별만 반영했습니다 (넣을 태그가 없습니다).', 'info');
+        return true;
+      }
+      showToast('넣을 태그가 없습니다. 이전 캐릭터를 그대로 둡니다.', 'error');
+      return false;
+    }
+
+    // 여기서부터 커밋. 채울 슬롯(want)과 **이름 슬롯**을 비우고, 이름의 출처인
+    // 프리셋 꼬리표와 ALT(그 캐릭터의 변형 태그)도 함께 걷는다.
+    // 범위 밖 슬롯은 건드리지 않는다 — '캐릭터 특징만' 을 고른 사용자가 직접 정한
+    // 의상까지 지우면 고른 의미가 없어진다.
+    const wipedTags = [];
+    for (const key of [...want, CHAR_TAG_SLOT]) {
+      const had = c.fields[key] || [];
+      if (had.length) wipedTags.push(...had);
+      c.fields[key] = [];
+    }
+    const wipedName = c.preset ? c.preset.name : (c.name || '');
+    c.preset = null;
+    c.name = '';
+    c.alt = [];
     if (gender) c.gender = gender;
     let n = 0;
     for (const [slot, items] of add) {
@@ -3512,6 +3845,12 @@ export function createInteractivePanel({
     const parts = [`${n + bundle.length}개 넣음`];
     if (bundle.length) parts.push(`축 밖 ${bundle.length}개는 캐릭터 슬롯으로`);
     if (outOfScope) parts.push(`범위 밖 ${outOfScope}개 제외`);
+    // 무엇이 걷혔는지 알려 준다 — 조용히 지우면 사용자가 넣어 둔 것이 사라진 줄 모른다.
+    if (wipedTags.length) {
+      parts.push(wipedName
+        ? `이전 캐릭터 ${wipedName} · 태그 ${wipedTags.length}개 회수`
+        : `이전 태그 ${wipedTags.length}개 회수`);
+    }
     showToast(parts.join(' · '), 'success');
     return true;
   }
@@ -4158,7 +4497,9 @@ export function createInteractivePanel({
         name: String(row?.name || ''),
         state: row?.state === 'disabled' ? 'disabled' : 'active',
         gender: row?.gender === 'male' ? 'male' : 'female',
-        pos: String(row?.pos || POS_DEFAULT),
+        // 형식을 여기서 못박는다. 예전에는 문자열이면 뭐든 통과해서 옛 저장분의
+        // 이상한 값이 그대로 상태에 앉았다 — 캔버스에서는 칩이 격자 밖으로 나간다.
+        pos: /^[A-E][1-5]$/.test(String(row?.pos || '')) ? String(row.pos) : POS_DEFAULT,
         preset: row?.preset ? {
           work: row.preset.work,
           name: row.preset.name,
@@ -4255,6 +4596,15 @@ export function createInteractivePanel({
     getGenerationCharacters: generationCharacters,
     // Assets(조합 스냅샷) 입출력. 생성 시 기록하고, 목록에서 고르면 되돌린다.
     getSnapshotChars: snapshotChars,
+    /** 캐릭터에 속하지 않는 값(씬 슬롯 + 구도 콤보). Assets 미리보기 하단이 쓴다.
+     *  캐릭터와 따로 두는 이유: 조합 카드는 캐릭터 단위로 슬롯에 꽂히는데,
+     *  이건 슬롯이 아니라 그림 전체에 걸리는 설정이다. */
+    getSnapshotGlobals: () => ({
+      slots: Object.fromEntries(
+        Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
+      composition: {...(state.composition || {})},
+      composition_tags: compTags(state.composition),
+    }),
     applySnapshotChars,
     /** 작업 결과를 통째로 담는다(캐릭터 + 씬 슬롯 + 구도 콤보). Assets 스냅샷은
      *  캐릭터만 담으므로 그것만으로는 씬 태그가 사라진다. */
@@ -4338,7 +4688,7 @@ export function createInteractivePanel({
     },
     /** 위치를 쓸 수 있는 상태인가(스택이 POS 버튼을 낼지 판단). */
     positionAvailable: () =>
-      String(getMode() || 'NAI').toUpperCase() === 'NAI' && state.chars.length > 1,
+      String(getMode() || 'NAI').toUpperCase() === 'NAI' && positionedChars().length > 1,
     openCharacterAt,
     applySnapshotCharAt,
     // 모드 전환 시 호출 — Position 버튼/Reference 는 NAI 전용이라 헤더를 다시 그려야 한다.

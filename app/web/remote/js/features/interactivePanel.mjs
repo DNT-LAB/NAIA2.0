@@ -4165,6 +4165,38 @@ export function createInteractivePanel({
     // Assets(조합 스냅샷) 입출력. 생성 시 기록하고, 목록에서 고르면 되돌린다.
     getSnapshotChars: snapshotChars,
     applySnapshotChars,
+    /** 작업 결과를 통째로 담는다(캐릭터 + 씬 슬롯 + 구도 콤보). Assets 스냅샷은
+     *  캐릭터만 담으므로 그것만으로는 씬 태그가 사라진다. */
+    exportState() {
+      return {
+        v: 1,
+        chars: snapshotChars(),
+        slots: Object.fromEntries(
+          Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
+        composition: {...(state.composition || {})},
+      };
+    },
+    /** 저장해 둔 작업 결과를 되돌린다. 실패해도 조용히 지나간다 —
+     *  형식이 바뀐 옛 저장분 때문에 모드가 안 켜지면 안 된다. */
+    importState(saved) {
+      if (!saved || typeof saved !== 'object') return false;
+      try {
+        if (Array.isArray(saved.chars) && saved.chars.length) applySnapshotChars(saved.chars);
+        if (saved.slots && typeof saved.slots === 'object') {
+          for (const key of Object.keys(state.slots)) {
+            const v = saved.slots[key];
+            state.slots[key] = Array.isArray(v) ? v.map(String) : [];
+          }
+        }
+        if (saved.composition && typeof saved.composition === 'object') {
+          state.composition = {...newComposition(), ...saved.composition};
+        }
+        if (active) { renderBlocks(); emitChange(); }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
     // 빠른 스왑: 캐릭터 스택(열기 전환) + 슬롯 하나에만 꽂기
     getCharacterRoster: characterRoster,
     /** CR 모듈 상태가 바뀌면 app.js 가 부른다 — 헤더의 [Reference] 배지만 갱신한다.

@@ -903,7 +903,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     });
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia165')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260805-ia166')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -964,6 +964,8 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       queryCorpus: params => requestEventCorpusQuery(wsSend, params),
       corpusStatus: () => requestEventCorpusStatus(wsSend),
       onPromptChange: promptText => {
+        // 작업 결과를 기억한다 — 블록을 만질 때마다 여기로 온다.
+        scheduleInteractiveStateSave();
         // 블록 -> 프롬프트 문자열. Interactive 가 켜져 있는 동안 프롬프트의 소유자는 블록이다.
         //
         // 'input' 이벤트를 dispatch 하면 안 된다 — 프롬프트 자동완성이 그 경로에 붙어 있어서
@@ -994,17 +996,48 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
 // 다른 탭의 설정과 저장값을 꺼버리면 안 된다. 실제 강제는 백엔드가 생성 요청 단위로 한다
 // (app/backend/server/event_corpus_commands.py: apply_interactive_generation_gate).
 const INTERACTIVE_BLOCKED_OPTIONS = ['prompt_fixed', 'wildcard_standalone'];
+
+// ---- Interactive 작업 결과 보존 ----
+// 브라우저 저장소에 둔다. 이건 순수 UI 조립 상태라 서버 세션 스키마
+// (`app_settings.json` 의 remote_ui_state)를 넓힐 일이 아니고, Electron 은 프로필이
+// 하나라 재시작해도 같은 값을 읽는다.
+const INTERACTIVE_STATE_KEY = 'naia.interactive.state.v1';
+let interactiveStateSaveTimer = null;
+
+function scheduleInteractiveStateSave() {
+  if (!interactivePanel?.exportState) return;
+  if (interactiveStateSaveTimer) clearTimeout(interactiveStateSaveTimer);
+  // 슬롯을 연타할 때마다 직렬화하지 않는다.
+  interactiveStateSaveTimer = setTimeout(() => {
+    interactiveStateSaveTimer = null;
+    try {
+      localStorage.setItem(INTERACTIVE_STATE_KEY,
+                           JSON.stringify(interactivePanel.exportState()));
+    } catch (_) { /* 용량 초과·프라이빗 모드 — 기억 못 하는 것이 기능을 막지는 않는다 */ }
+  }, 400);
+}
+
+function restoreInteractiveState() {
+  if (!interactivePanel?.importState) return;
+  try {
+    const raw = localStorage.getItem(INTERACTIVE_STATE_KEY);
+    if (raw) interactivePanel.importState(JSON.parse(raw));
+  } catch (_) { /* 깨진 저장분은 무시하고 빈 상태로 시작한다 */ }
+}
 // Interactive 를 켜기 **직전**의 메인 프롬프트. 모드를 끄면 이걸로 되돌린다.
 // Interactive 는 입력창을 자기 렌더값으로 덮어쓰는데, 예전에는 끌 때도 그 값이 남아
 // **사용자가 쓰던 메인 프롬프트가 증발했다**(2026-08-05 사용자 지적).
 // 블록 상태는 그대로 살아 있으니 다시 켜면 Interactive 프롬프트가 재조립된다 —
 // 되돌린다고 잃는 것은 없다.
 let promptBeforeInteractive = null;
+let interactiveStateRestored = false;
 
 function applyInteractiveModeGate(isActive) {
   // Interactive 에서는 최종 프롬프트를 상시 노출하지 않는다(사용자 결정). 전체 문자열은
   // 나중에 별도 미리보기 팝업으로만 확인한다.
   if (isActive) {
+    // 지난 작업 결과를 되돌린다. 켤 때 한 번만 — 이후에는 살아 있는 상태가 진실이다.
+    if (!interactiveStateRestored) { interactiveStateRestored = true; restoreInteractiveState(); }
     // `onActiveChange` 는 첫 `emitChange()` 보다 먼저 온다 — 지금 값이 사용자 원본이다.
     if (promptBeforeInteractive === null && promptEdit) {
       promptBeforeInteractive = String(promptEdit.value || '');
@@ -1040,6 +1073,8 @@ function applyInteractiveModeGate(isActive) {
       ? 'Interactive 모드에서는 사용할 수 없습니다 (블록이 프롬프트를 직접 조립합니다).'
       : '';
   }
+  // Random 잠금 상태도 여기서 맞춘다 — 토글 직후 버튼이 남아 있으면 눌린다.
+  if (typeof unlockRandomButton === 'function') unlockRandomButton({clearRequest: false});
   updateInteractiveNaiToolBlock();
 }
 
@@ -3409,9 +3444,11 @@ function unlockRandomButton({clearRequest = true} = {}) {
     window._randomTimeout = null;
   }
   stopRndTimer();  // boost 경과 타이머 정지 + 'Random' 라벨 복원
-  const fixed = getOptionChecked('prompt_fixed');
-  btnRnd.disabled = fixed;
-  btnRnd.style.opacity = fixed ? '0.4' : '';
+  // Interactive 는 블록이 프롬프트를 조립한다 — Random 이 넣을 자리가 없다.
+  // Prompt Fixed 와 같은 취급으로 잠근다(사용자 지시).
+  const locked = getOptionChecked('prompt_fixed') || !!interactivePanel?.isActive?.();
+  btnRnd.disabled = locked;
+  btnRnd.style.opacity = locked ? '0.4' : '';
 }
 
 function onRandomFailed(m) {

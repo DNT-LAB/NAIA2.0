@@ -358,6 +358,9 @@ export function createAutoSavePanel({
   }
 
   return {
+    // 미저장 개수를 삭제 흐름이 읽는다. 미저장 이미지는 지우면 휴지통에도 안
+    // 남으므로, 확인 창을 건너뛸지 말지가 이 값에 걸린다.
+    getState: () => lastState,
     open,
     setEnabled,
     syncEnabled,

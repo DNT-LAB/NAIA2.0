@@ -1,4 +1,4 @@
-import {createViewerBindings} from './viewerBindings.mjs?v=20260806-share1';
+import {createViewerBindings} from './viewerBindings.mjs?v=20260806-rev2b';
 
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const HISTORY_DELETE_MODE_KEY = 'naia_result_delete_mode';
@@ -64,6 +64,8 @@ export function createResultHistoryController({
   getSaveDirectory = () => '',
   requestSaveDirectory = () => {},
   openQuicksaveSettings = null,
+  // 아직 저장 안 된 장수. 모르면 -1 — 모를 때는 묻는 쪽으로 간다.
+  getUnsavedCount = () => -1,
 }) {
   const getEl = id => document.getElementById(id);
   const viewerTab = getEl('viewerTab');
@@ -504,10 +506,22 @@ export function createResultHistoryController({
     const modeText = deleteMode === 'disk'
       ? '연결된 저장 파일은 영구 삭제하지 않고 휴지통으로 이동합니다.'
       : '히스토리에서만 제거하며 저장 파일은 유지합니다.';
-    // '묻지 않음'을 켜 두었으면 곧장 지운다. 되돌릴 길은 남아 있다 — 디스크
-    // 삭제도 휴지통으로만 가고, 히스토리 삭제는 파일을 건드리지 않는다.
-    if (!viewerBindings.skipDeleteConfirm()) {
-      const message = `${paths.length}개 선택 항목을 삭제할까요?\n${modeText}`;
+    // **저장 안 된 이미지는 지우면 끝이다.** 파일이 없으니 휴지통에도 안 남고
+    // (`selected/delete` 는 `file_path` 가 있을 때만 휴지통으로 보낸다) 그림은
+    // 서버 메모리에만 있었다. '묻지 않음'이 그 마지막 관문까지 걷어내고 있었다
+    // — 되돌릴 수 있는 삭제에만 적용한다(Codex 리뷰 P1).
+    //
+    // 어느 항목이 미저장인지 화면은 정확히 알 수 없다(방금 생성한 것은 저장이
+    // 아직 안 끝났을 수 있고, 알림은 저장 전에 온다). 그래서 전체 미저장 개수로
+    // 판단한다 — 0 이면 고른 것도 전부 저장돼 있다. 모르면(-1) 묻는다.
+    const unsaved = Number(getUnsavedCount());
+    const recoverable = unsaved === 0;
+    if (!viewerBindings.skipDeleteConfirm() || !recoverable) {
+      const warn = recoverable ? ''
+        : (unsaved > 0
+            ? `\n\u26a0 아직 저장되지 않은 이미지가 ${unsaved}장 있습니다. 지우면 되돌릴 수 없습니다.`
+            : '\n\u26a0 저장 여부를 알 수 없습니다.');
+      const message = `${paths.length}개 선택 항목을 삭제할까요?\n${modeText}${warn}`;
       const confirmed = typeof confirmDialog === 'function'
         ? await confirmDialog(message, {title: '선택 항목 삭제', okText: `삭제 (${paths.length})`, cancelText: '취소'})
         : window.confirm(message);
@@ -1394,8 +1408,9 @@ export function createResultHistoryController({
     if (!btn) return;
     // 예전에는 앱에서만 띄웠다. 이제 이 판에는 폴더와 무관한 손버릇 토글도 있어
     // 브라우저에서도 열려야 한다 — 숏컷 구역만 앱에서 그린다(패널 쪽 판단).
+    // 읽기는 판을 열 때 안에서 한다 — 여기서 따로 부르면 캐시로 먼저 그린
+    // 화면과 경합한다(Codex 리뷰 P2).
     btn.addEventListener('click', () => viewerBindings.togglePanel(btn));
-    if (viewerBindings.isAppMode()) viewerBindings.load();
   }
 
   // 레일에도 같은 판을 연다. 팝업을 열지 않고도 삭제 방식·저장 경로를 만질 수
@@ -1403,10 +1418,7 @@ export function createResultHistoryController({
   function bindRailSettings() {
     const btn = getEl('viewerRailSettings');
     if (!btn) return;
-    btn.addEventListener('click', () => {
-      viewerBindings.togglePanel(btn);
-      if (viewerBindings.isAppMode()) viewerBindings.load();
-    });
+    btn.addEventListener('click', () => viewerBindings.togglePanel(btn));
   }
 
   // 마우스 보조 버튼(뒤로/앞으로/휠클릭). `auxclick` 은 좌클릭을 주지 않아

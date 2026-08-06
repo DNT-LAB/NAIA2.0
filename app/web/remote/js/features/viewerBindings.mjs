@@ -63,7 +63,7 @@ export function createViewerBindings({
   openQuicksaveSettings = null,
 }) {
   let settings = {bindings: [], quicksave_dir: '', quicksave_resolved: ''};
-  let loaded = false;
+  let loading = null;      // 첫 읽기가 끝나기 전에는 숏컷을 건드리지 못하게 한다
   let capturing = null;      // 지금 입력을 받고 있는 행 (index)
   let panelOpen = false;
   let anchorEl = null;       // 판을 띄운 버튼 — 그 아래에 붙인다
@@ -121,15 +121,25 @@ export function createViewerBindings({
    * 계속 먹거나 새로 만든 것이 안 먹는 것은 그 자체로 고장이다. 팝업 한 번에
    * GET 한 번이면 이 부류가 통째로 사라진다.
    */
-  async function load(force = true) {
-    try {
-      const resp = await fetch('/api/viewer/bindings');
-      if (resp.ok) settings = await resp.json();
-      loaded = true;
-    } catch (_) {
-      // 못 읽어도 뷰어는 열려야 한다 — 들고 있던 것으로 간다.
-    }
-    return settings;
+  function load() {
+    // 이미 읽고 있으면 그 약속을 같이 쓴다 — 두 버튼이 동시에 눌려도 한 번만 간다.
+    if (loading) return loading;
+    loading = (async () => {
+      try {
+        const resp = await fetch('/api/viewer/bindings');
+        if (resp.ok) settings = await resp.json();
+      } catch (_) {
+        // 못 읽어도 뷰어는 열려야 한다 — 들고 있던 것으로 간다.
+      } finally {
+        loading = null;
+      }
+      // 캐시로 먼저 그려 둔 화면을 서버 값으로 덮는다. 이걸 안 하면 첫 클릭에
+      // '숏컷 없음'이 뜨고, 그 상태에서 하나를 더하면 서버에 있던 목록이
+      // 통째로 지워진다(Codex 리뷰 P2).
+      if (panelOpen) render();
+      return settings;
+    })();
+    return loading;
   }
 
   async function persist() {
@@ -271,9 +281,10 @@ export function createViewerBindings({
       <div class="vb-sec">숏컷</div>
       <div class="vb-body">
         ${settings.bindings.map(rowHtml).join('')
-          || '<div class="vb-empty">아직 없습니다. 아래에서 하나 더하세요.</div>'}
+          || `<div class="vb-empty">${loading ? '불러오는 중…' : '아직 없습니다. 아래에서 하나 더하세요.'}</div>`}
         <button type="button" class="vb-add" id="vbAdd"
-                ${settings.bindings.length >= MAX_BINDINGS ? 'disabled' : ''}>+ 숏컷 더하기</button>
+                ${loading || settings.bindings.length >= MAX_BINDINGS ? 'disabled' : ''}>${
+                  loading ? '불러오는 중…' : '+ 숏컷 더하기'}</button>
       </div>
       <button type="button" class="vb-link" id="vbQuicksaveDir"
               title="${esc(settings.quicksave_resolved || '')}">
@@ -295,7 +306,7 @@ export function createViewerBindings({
                        ? '파일은 휴지통으로 갑니다'
                        : '지금은 히스토리에서만 지웁니다 — 파일은 그대로 남습니다')}
         ${toggleHtml('vbNoConfirm', '삭제할 때 묻지 않음', prefs.noConfirm,
-                     '되돌리려면 휴지통에서 꺼내야 합니다')}
+                     '저장 안 된 이미지가 있으면 그때는 물어봅니다')}
         ${toggleHtml('vbDeleteKeyD', 'Ctrl+D 로 삭제', prefs.deleteKeyD,
                      'Ctrl+S 가 저장인 것과 짝을 맞춥니다')}
       </div>
@@ -344,7 +355,7 @@ export function createViewerBindings({
       else showToast('빠른 저장 설정을 열 수 없습니다.', 'error');
     });
     on('vbAdd', 'click', async () => {
-      if (settings.bindings.length >= MAX_BINDINGS) return;
+      if (loading || settings.bindings.length >= MAX_BINDINGS) return;
       settings.bindings.push({input_id: '', action: 'copy', dest_path: ''});
       render();
       startCapture(settings.bindings.length - 1);
@@ -411,6 +422,11 @@ export function createViewerBindings({
     document.querySelectorAll('[data-viewer-settings-btn]').forEach(b =>
       b.classList.toggle('is-on', panelOpen && b === anchorEl));
     if (panelOpen) {
+      // **읽기를 먼저 건다.** `load()` 는 첫 await 전까지 동기로 돌아 `loading`
+      // 플래그를 세우고 돌아온다. 순서를 뒤집으면 첫 그림에 플래그가 없어서
+      // '아직 없습니다 / + 숏컷 더하기'가 눌리는 상태로 뜬다 — 눌러도 아무 일이
+      // 없으니(클릭 가드) 고장으로 읽힌다(실측).
+      if (isAppMode()) load();
       render();
       // 저장 경로 상태는 그 모듈을 한 번도 안 열었으면 아직 안 와 있다.
       // 그때만 달라고 한다 — 도착하면 refresh() 가 다시 그린다.

@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806s-share1')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806t-rev2b')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -655,6 +655,12 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806s-s
       getSaveDirectory: () => saveDirectoryPanel?.getState()?.current_save_directory || '',
       requestSaveDirectory: () => requestModuleState('save_directory'),
       openQuicksaveSettings: () => openModule('auto_save'),
+      // 미저장 이미지는 지우면 휴지통에도 안 남는다 — 확인 창을 건너뛸지
+      // 말지가 이 값에 걸린다. 상태가 아직 없으면 -1(모름)로 넘긴다.
+      getUnsavedCount: () => {
+        const n = autoSavePanel?.getState()?.unsaved_history_count;
+        return Number.isFinite(Number(n)) ? Number(n) : -1;
+      },
     });
   })
   .catch(error => {
@@ -1389,7 +1395,7 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260609-s
   .catch(error => {
     console.error('Failed to initialize Event Preset panel module', error);
   });
-const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260802-quicksave2')
+const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260806-getstate1')
   .then(({createAutoSavePanel}) => {
     autoSavePanel = createAutoSavePanel({
       document,

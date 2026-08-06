@@ -7106,7 +7106,9 @@ body.resizing-result-info {
   gap: 6px;
   padding: 8px;
   flex-shrink: 0;
-  background: rgba(45,78,67,0.2);
+  /* 프로토타입의 초록 계열(#a8f2cf 글씨 · rgba(45,78,67) 바닥)이 남아 있었다.
+     앱은 보라/분홍 한 벌이라 이 바만 다른 팔레트로 떠 있었다 — 강조색으로 맞춘다. */
+  background: rgba(199,125,186,0.07);
   border-bottom: 1px solid rgba(199,125,186,0.30);
 }
 .history-selection-count {
@@ -7115,7 +7117,7 @@ body.resizing-result-info {
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 700;
-  color: #a8f2cf;
+  color: var(--accent-secondary);
   overflow-wrap: anywhere;
 }
 /* 레일의 선택 바는 **고른 것이 있을 때만** 펼친다. 아무것도 안 골랐을 때는 힌트
@@ -7355,24 +7357,79 @@ body.resizing-result-info {
   cursor: default;
   background: var(--bg-primary);
 }
+/* 팝업 헤더는 앱의 다른 패널과 **같은 한 줄**이다(.ia-as-pv-head / .ia-cblock-head 참조).
+   예전에는 헤더·선택바·힌트로 세 줄을 쓰면서 가운데 1,400px 이 비어 있었고, 그 탓에
+   혼자 다른 앱처럼 보였다(사용자 지적). 한 줄에 다 들어간다:
+     [🖼] HISTORY [n] · [선택 n개 · 저장 · 삭제 · ×] ──── [📁] [×] */
 .viewer-popup-header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-dim);
   flex-shrink: 0;
 }
-.viewer-popup-header .viewer-panel-title { flex: 1; }
-.viewer-popup-selection {
-  grid-template-columns: minmax(120px, 1fr) minmax(220px, auto);
-  align-items: center;
-  padding: 8px 16px;
+.viewer-popup-header .viewer-panel-title {
+  flex: 0 0 auto;
+  font-size: 9px; font-weight: 600; letter-spacing: 1px;
+  color: var(--text-dim);
 }
-.viewer-popup-selection .history-selection-count { grid-column: 1; }
-.viewer-popup-selection .history-selection-actions { grid-column: 2; min-width: 220px; }
-.viewer-popup-selection .history-selection-scope { grid-column: 1 / -1; }
+.viewer-block-icon { font-size: 12px; line-height: 1; flex: 0 0 auto; filter: grayscale(0.4); }
+.viewer-popup-header .viewer-panel-count {
+  flex: 0 0 auto;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  color: var(--accent-glow);
+}
+.viewer-head-spring { flex: 1 1 auto; }
+/* 닫기는 앱 공통 `.history-close`(28px 붉은 톤)를 그대로 쓴다. 그 옆 보조 버튼은
+   같은 크기·모서리로 맞추되 색만 중립으로 둔다 — 닫기가 유일한 붉은 것이어야 한다. */
+.viewer-head-btn {
+  flex: 0 0 auto; width: 28px; height: 28px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(255,255,255,0.04); color: var(--text-dim); cursor: pointer;
+  font-size: 13px; line-height: 1;
+  transition: all 0.2s;
+}
+.viewer-head-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-glow);
+  background: rgba(255,255,255,0.09);
+}
+.viewer-popup-header .history-close { flex: 0 0 auto; }
+
+/* 헤더 안으로 들어온 선택 바 — 자기 테두리·배경을 버리고 한 줄에 녹는다.
+   고른 것이 없으면 아예 자리를 차지하지 않는다. */
+.viewer-popup-header .viewer-popup-selection {
+  display: flex; align-items: center; gap: 7px;
+  flex: 0 0 auto;
+  padding: 0 0 0 9px; background: none; grid-template-columns: none;
+  /* 총 개수 배지와 붙어 "HISTORY 2 2개 선택"으로 읽히던 것을 세로 괘선으로 끊는다. */
+  border: 0; border-left: 1px solid var(--border-dim);
+}
+.viewer-popup-header .viewer-popup-selection .history-selection-scope { display: none; }
+.viewer-popup-header .viewer-popup-selection .history-selection-count {
+  font-size: 10px; white-space: nowrap;
+  padding-right: 0;   /* 레일에서 절대배치 × 를 피하려던 여백 — 여기선 필요 없다 */
+}
+/* 레일에서는 바 우상단에 떠 있지만, 헤더에서는 한 줄의 마지막 항목이다.
+   절대배치를 그대로 두면 '삭제 N' 버튼 위에 겹쳐 찍힌다(실측). */
+.viewer-popup-header .viewer-popup-selection .history-selection-clear {
+  position: static;
+  width: 18px; height: 18px;
+  font-size: 15px;
+}
+.viewer-popup-header .viewer-popup-selection .history-selection-actions {
+  display: flex; gap: 5px; min-width: 0;
+}
+.viewer-popup-header .viewer-popup-selection .history-selection-btn {
+  min-height: 22px; padding: 3px 9px; font-size: 10px; white-space: nowrap;
+}
+/* 고른 것이 없으면 자리를 아예 비운다 — 비활성 버튼 두 개가 헤더에 상주하면
+   눈에 걸리기만 한다. `is-empty` 는 updateSelectionUi() 가 바 자신에게 붙인다
+   (레일의 `has-history-selection` 은 .viewer-panel 에만 붙어서 팝업엔 안 닿는다). */
+.viewer-popup-header .viewer-popup-selection.is-empty { display: none; }
 .viewer-popup-body {
   flex: 1;
   display: flex;
@@ -7380,19 +7437,32 @@ body.resizing-result-info {
   min-height: 0;
 }
 /* Left: thumbnail grid */
+/* 두 칸을 50:50 으로 갈라 두면, 썸네일 몇 장뿐일 때 왼쪽 절반이 통째로 검은
+   허공이 되고 정작 보고 있는 그림은 좁아진다(실측). 목록은 필요한 만큼만 갖고
+   나머지는 미리보기에 준다. 바닥색도 갈라서 '목록 판 / 그림 무대'로 층을 만든다 —
+   앱의 다른 화면이 전부 그렇게 쌓여 있다. */
 .viewer-popup-left {
-  flex: 1;
+  flex: 0 0 clamp(300px, 34%, 620px);
   overflow-y: auto;
-  padding: 8px;
+  padding: 10px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
   align-content: start;
   border-right: 1px solid var(--border-dim);
+  background: var(--bg-surface);
 }
 .viewer-popup-left::-webkit-scrollbar { width: 4px; }
 .viewer-popup-left::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
-.viewer-popup-left .viewer-thumb { aspect-ratio: auto; }
+/* 원본 비율 그대로 두면 세로 긴 그림 옆에 회색 여백이 생겨 격자가 들쭉날쭉해진다.
+   목록은 훑는 용도이므로 정사각으로 잘라 균일한 판으로 만든다 — 전체 그림은
+   오른쪽 무대에서 어차피 온전히 보인다. */
+.viewer-popup-left .viewer-thumb {
+  aspect-ratio: 1;
+  object-fit: cover;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+}
 /* Right: preview + prompt */
 .viewer-popup-right {
   flex: 1;
@@ -7410,6 +7480,8 @@ body.resizing-result-info {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+  /* 그림이 칸 경계에 딱 붙어 잘린 것처럼 보이던 것 — 무대에 여백을 준다. */
+  padding: 14px;
 }
 .viewer-popup-right .prompt-float {
   position: absolute;

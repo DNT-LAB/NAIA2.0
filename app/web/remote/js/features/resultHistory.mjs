@@ -187,6 +187,9 @@ export function createResultHistoryController({
         remove.disabled = selectionBusy || count === 0;
       }
       if (clear) clear.disabled = selectionBusy || count === 0;
+      // 팝업 헤더의 선택 바는 고른 것이 없으면 통째로 접힌다(CSS). 레일은 힌트
+      // 한 줄을 남겨야 해서 자기 규칙을 따로 쓴다 — 그래서 클래스는 바에 붙인다.
+      bar.classList.toggle('is-empty', count === 0);
     });
     if (viewerPanel) viewerPanel.classList.toggle('has-history-selection', count > 0);
   }
@@ -1002,11 +1005,17 @@ export function createResultHistoryController({
     lb.innerHTML = `
     <div class="viewer-popup-inner" onclick="event.stopPropagation()">
       <div class="viewer-popup-header">
-        <span class="viewer-panel-title">History <span id="vpCount">${viewerTotal}</span></span>
-        <button class="history-close" onclick="closeViewerPopup()">&times;</button>
-      </div>
-      <div class="history-selection-bar viewer-popup-selection" id="vpSelectionBar">
-        ${selectionBarMarkup('Cmd/Ctrl · Shift · 드래그 · Cmd/Ctrl+A · Esc')}
+        <span class="viewer-block-icon">\u{1F5BC}</span>
+        <span class="viewer-panel-title">History</span>
+        <span class="viewer-panel-count" id="vpCount">${viewerTotal}</span>
+        <div class="history-selection-bar viewer-popup-selection" id="vpSelectionBar">
+          ${selectionBarMarkup('')}
+        </div>
+        <span class="viewer-head-spring"></span>
+        <button type="button" class="viewer-head-btn" onclick="openResultFolder()"
+                title="결과 폴더 열기">\u{1F4C1}</button>
+        <button type="button" class="history-close"
+                onclick="closeViewerPopup()" title="닫기" aria-label="닫기">&times;</button>
       </div>
       <div class="viewer-popup-body">
         <div class="viewer-popup-left" id="vpGrid"></div>
@@ -1015,9 +1024,7 @@ export function createResultHistoryController({
           <div class="prompt-float" id="vpPromptFloat">
             <div class="prompt-float-content" id="vpPromptContent"></div>
           </div>
-          <div class="viewer-bottom-controls" style="display:flex">
-            <button class="viewer-folder-btn" onclick="openResultFolder()">Open Folder</button>
-          </div>
+
         </div>
       </div>
       <div class="viewer-panel-loading" id="vpLoading" style="display:none">Loading...</div>

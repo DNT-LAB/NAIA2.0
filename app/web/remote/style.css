@@ -7606,11 +7606,14 @@ body.resizing-result-info {
 
 /* ── 숏컷 설정 (앱 전용) ──────────────────────────────────────────────────
    머리의 ⌨ 버튼에서 내려오는 작은 판. 팝업 안에 떠 있으므로 조작 바보다 위다. */
+/* 판은 팝업 밖(document.body)에 산다 — 레일에서도 같은 것을 열기 때문이다.
+   `fixed` 라 `.viewer-wrapper` 의 z 우물(z-index:0 + isolation:isolate)에도
+   갇히지 않는다. 자리는 JS 가 누른 버튼 아래로 잡아 준다. */
 .vb-panel {
   display: none;
-  position: absolute;
-  top: 46px; right: 10px;
-  z-index: 40;
+  position: fixed;
+  top: 46px; left: 10px;
+  z-index: 10100;
   width: 380px;
   max-width: calc(100vw - 20px);
   max-height: calc(100vh - 80px);
@@ -7731,6 +7734,48 @@ body.resizing-result-info {
   border-top: 1px solid var(--border-dim);
 }
 .vb-dest.is-global { flex: 1; height: 26px; }
+
+/* 저장 경로 줄. 여기서 값을 그리지 않고 원래 판을 열어 준다 — 한 벌만 둔다. */
+.vb-link {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 6px;
+  border: 0; border-radius: 7px;
+  background: none; color: var(--text-muted);
+  font-size: 11px; text-align: left; cursor: pointer;
+}
+.vb-link:hover { background: rgba(255,255,255,0.04); color: var(--text-primary); }
+.vb-link-label { flex: 0 0 auto; }
+.vb-link-value {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+  text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vb-link::after { content: '›'; flex: 0 0 auto; color: var(--text-dim); }
+
+/* 레일 발치의 설정 버튼. Open Folder 옆에 붙는다 — 머리는 이미 좁다. */
+.viewer-panel-bottom { gap: 6px; }
+.viewer-panel-bottom .viewer-folder-btn { width: auto; flex: 1 1 auto; min-width: 0; }
+.viewer-rail-settings {
+  flex: 0 0 auto;
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-dim);
+  font-size: 14px; line-height: 1; cursor: pointer;
+  transition: all 0.15s;
+}
+.viewer-rail-settings:hover {
+  background: rgba(255,255,255,0.09);
+  border-color: var(--border-glow);
+  color: var(--text-primary);
+}
+.viewer-rail-settings.is-on {
+  border-color: rgba(124,106,239,0.55);
+  color: var(--accent-glow);
+  background: rgba(124,106,239,0.14);
+}
 .vb-check {
   display: flex; align-items: center; gap: 4px;
   font-size: 10px; color: var(--text-dim);

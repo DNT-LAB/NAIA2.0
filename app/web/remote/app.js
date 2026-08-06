@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806n-prefs2')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806q-panel2')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -649,6 +649,11 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806n-p
       renderPromptInfoHtml,
       onPromptInfoTagLookup: lookupPromptInfoTag,
       onDiskImageSelected: onResultHistorySelectionChanged,
+      // 뷰어 설정 판의 '저장 경로' 줄. 값을 복제하지 않고 원래 판의 것을 읽어
+      // 보여 주기만 하고, 누르면 그 판을 연다 — 두 벌이 되면 반드시 어긋난다.
+      openSaveDirectory: () => openSaveDirectoryPanel(),
+      getSaveDirectory: () => saveDirectoryPanel?.getState()?.current_save_directory || '',
+      requestSaveDirectory: () => requestModuleState('save_directory'),
     });
   })
   .catch(error => {
@@ -1401,7 +1406,7 @@ const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260802-qu
   .catch(error => {
     console.error('Failed to initialize auto save panel module', error);
   });
-const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20260622-savedir-picker2')
+const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20260806-getstate1')
   .then(({createSaveDirectoryPanel}) => {
     saveDirectoryPanel = createSaveDirectoryPanel({
       document,
@@ -7338,7 +7343,12 @@ function onModuleState(m) {
     if (interactivePanel && interactivePanel.isActive?.()) interactivePanel.refreshPrompt();
   }
   else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
-  else if (m.module_id === 'save_directory' && saveDirectoryPanel) saveDirectoryPanel.setState(m);
+  else if (m.module_id === 'save_directory') {
+    if (saveDirectoryPanel) saveDirectoryPanel.setState(m);
+    // 뷰어 설정 판의 '저장 경로' 한 줄도 이 값을 쓴다. renderModuleState 쪽에
+    // 걸면 안 된다 — 그쪽은 저장 경로 판을 실제로 띄울 때만 돈다.
+    if (resultHistory) resultHistory.onSaveDirectoryState?.();
+  }
   else if (m.module_id === 'img2img') updateImg2ImgResumeButton(m);
   // 위 배지 갱신이 leaf 버튼의 상태 클래스(char-active/charref-active/vibe-active/auto-active)를
   // 바꾸므로, 카테고리 버튼의 category-status 를 그 클래스에서 파생하는 런처를 명시적으로 재계산한다.

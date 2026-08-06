@@ -151,6 +151,9 @@ export function createSaveDirectoryPanel({
   }
 
   return {
+    // 뷰어 설정 판이 "지금 어디에 저장되는지"를 한 줄로 보여 주려고 읽는다.
+    // 값을 복제하지 않고 여기 것을 그대로 쓴다 — 두 벌이 되면 반드시 어긋난다.
+    getState: () => lastState,
     setState,
     open,
     render,

@@ -53,11 +53,19 @@ function esc(value) {
     .replace(/'/g, '&#39;');
 }
 
-export function createViewerBindings({getEl, showToast, onItemRemoved}) {
+export function createViewerBindings({
+  getEl,
+  showToast,
+  onItemRemoved,
+  openSaveDirectory = null,
+  getSaveDirectory = () => '',
+  requestSaveDirectory = () => {},
+}) {
   let settings = {bindings: [], dest_path: '', use_session_folder: true};
   let loaded = false;
   let capturing = null;      // 지금 입력을 받고 있는 행 (index)
   let panelOpen = false;
+  let anchorEl = null;       // 판을 띄운 버튼 — 그 아래에 붙인다
   let busy = false;
   const prefs = {
     noConfirm: readPref(PREF_NO_CONFIRM),
@@ -213,8 +221,51 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
       </button>`;
   }
 
+  /**
+   * 판은 **팝업 밖**, `document.body` 에 산다.
+   *
+   * 처음에는 히스토리 팝업 안에 넣었는데, 그러면 팝업이 열려 있을 때만 쓸 수 있다.
+   * 레일(136px)에서도 같은 설정을 열어야 하는데 그 폭 안에서는 아무것도 못 그린다.
+   * body 로 빼면 한 벌로 둘 다 된다 — 누른 버튼 아래에 붙여 띄운다.
+   */
+  function ensureHost() {
+    let host = document.getElementById('vbPanel');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'vbPanel';
+      host.className = 'vb-panel';
+      document.body.appendChild(host);
+      // 판 바깥을 누르면 닫는다. 판을 연 버튼을 다시 누르는 경우는 토글이
+      // 처리하므로 여기서 빼 준다 — 안 그러면 닫고 곧바로 다시 연다.
+      document.addEventListener('pointerdown', event => {
+        if (!panelOpen) return;
+        if (host.contains(event.target)) return;
+        if (anchorEl && anchorEl.contains(event.target)) return;
+        setPanelOpen(false);
+      }, true);
+    }
+    return host;
+  }
+
+  function positionPanel(host) {
+    if (!anchorEl) return;
+    const box = anchorEl.getBoundingClientRect();
+    const width = host.offsetWidth || 380;
+    // 오른쪽 모서리를 버튼에 맞추되 화면 밖으로 나가지 않게 민다.
+    let left = Math.min(box.right - width, window.innerWidth - width - 10);
+    left = Math.max(10, left);
+    const below = box.bottom + 6;
+    const height = host.offsetHeight || 240;
+    // 아래에 자리가 없으면 위로 뒤집는다(레일 발치 버튼이 그렇다).
+    const top = below + height > window.innerHeight - 10
+      ? Math.max(10, box.top - height - 6)
+      : below;
+    host.style.left = `${Math.round(left)}px`;
+    host.style.top = `${Math.round(top)}px`;
+  }
+
   function render() {
-    const host = getEl('vbPanel');
+    const host = ensureHost();
     if (!host) return;
     // 숏컷 구역은 앱에서만 그린다 — 폴더를 고르려면 시스템 선택 창이 필요하다.
     // 위의 손버릇 토글은 폴더와 무관하므로 브라우저에서도 뜬다.
@@ -252,13 +303,28 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
         ${toggleHtml('vbDeleteKeyD', 'Ctrl+D 로 삭제', prefs.deleteKeyD,
                      'Ctrl+S 가 저장인 것과 짝을 맞춥니다')}
       </div>
+      <div class="vb-sec">저장</div>
+      <div class="vb-body">
+        <button type="button" class="vb-link" id="vbSaveDir">
+          <span class="vb-link-label">저장 경로</span>
+          <span class="vb-link-value">${esc(shortPath(getSaveDirectory() || '아직 모름'))}</span>
+        </button>
+      </div>
       ${shortcutSection}`;
     bind(host);
+    positionPanel(host);
   }
 
   function bind(host) {
     const on = (id, event, fn) => { const el = getEl(id); if (el) el.addEventListener(event, fn); };
     on('vbClose', 'click', () => setPanelOpen(false));
+    on('vbSaveDir', 'click', () => {
+      // 저장 경로는 이미 자기 판이 있다(기본 경로·세션 폴더·파일명 규칙·분류).
+      // 여기에 한 벌 더 그리면 반드시 어긋나므로 그쪽을 열어 준다.
+      setPanelOpen(false);
+      if (typeof openSaveDirectory === 'function') openSaveDirectory();
+      else showToast('저장 경로 설정을 열 수 없습니다.', 'error');
+    });
     on('vbDeleteToDisk', 'click', () => {
       prefs.deleteToDisk = !prefs.deleteToDisk;
       writeDeleteToDisk(prefs.deleteToDisk);
@@ -338,14 +404,20 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
     render();
   }
 
-  function setPanelOpen(open) {
+  function setPanelOpen(open, anchor = null) {
     panelOpen = Boolean(open);
-    const host = getEl('vbPanel');
-    if (host) host.classList.toggle('open', panelOpen);
-    const btn = getEl('vpShortcutBtn');
-    if (btn) btn.classList.toggle('is-on', panelOpen);
-    if (panelOpen) render();
-    else capturing = null;
+    if (anchor) anchorEl = anchor;
+    const host = ensureHost();
+    host.classList.toggle('open', panelOpen);
+    // 판을 연 버튼만 눌린 티를 낸다(레일과 팝업에 각각 하나씩 있다).
+    document.querySelectorAll('[data-viewer-settings-btn]').forEach(b =>
+      b.classList.toggle('is-on', panelOpen && b === anchorEl));
+    if (panelOpen) {
+      render();
+      // 저장 경로 상태는 그 모듈을 한 번도 안 열었으면 아직 안 와 있다.
+      // 그때만 달라고 한다 — 도착하면 refresh() 가 다시 그린다.
+      if (!getSaveDirectory()) requestSaveDirectory();
+    } else capturing = null;
   }
 
   return {
@@ -357,7 +429,10 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
     hasBinding,
     dispatch,
     setPanelOpen,
-    togglePanel: () => setPanelOpen(!panelOpen),
+    // 저장 경로 상태가 뒤늦게 도착했을 때 판을 다시 그린다(열려 있을 때만).
+    refresh: () => { if (panelOpen) render(); },
+    // 다른 버튼에서 누르면 그쪽으로 옮겨 붙는다(닫히지 않는다).
+    togglePanel: anchor => setPanelOpen(!(panelOpen && anchorEl === anchor), anchor),
     isPanelOpen: () => panelOpen,
     isCapturing: () => capturing !== null,
     finishCapture,

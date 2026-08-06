@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260806n-hist1">
+<link rel="stylesheet" href="style.css?v=20260806q-hist1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -855,6 +855,8 @@
         <div class="viewer-panel-loading" id="viewerLoading" style="display:none">Loading...</div>
         <div class="viewer-panel-bottom">
           <button class="viewer-folder-btn" onclick="openResultFolder()">Open Folder</button>
+          <button type="button" class="viewer-rail-settings" id="viewerRailSettings"
+                  data-viewer-settings-btn title="뷰어 설정" aria-label="뷰어 설정">&#9881;</button>
         </div>
       </aside>
     </div>
@@ -1242,6 +1244,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260806n-ia183"></script>
+<script src="app.js?v=20260806r-ia183"></script>
 </body>
 </html>

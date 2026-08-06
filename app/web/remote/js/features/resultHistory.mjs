@@ -1,4 +1,4 @@
-import {createViewerBindings} from './viewerBindings.mjs?v=20260806-prefs2';
+import {createViewerBindings} from './viewerBindings.mjs?v=20260806-panel2';
 
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const HISTORY_DELETE_MODE_KEY = 'naia_result_delete_mode';
@@ -60,6 +60,9 @@ export function createResultHistoryController({
   renderPromptInfoHtml = null,
   onPromptInfoTagLookup = null,
   onDiskImageSelected = () => {},
+  openSaveDirectory = null,
+  getSaveDirectory = () => '',
+  requestSaveDirectory = () => {},
 }) {
   const getEl = id => document.getElementById(id);
   const viewerTab = getEl('viewerTab');
@@ -100,6 +103,9 @@ export function createResultHistoryController({
     getEl,
     showToast,
     onItemRemoved: payload => onRemoved(payload),
+    openSaveDirectory,
+    getSaveDirectory,
+    requestSaveDirectory,
   });
   // '얼마나 봤는지'. 이번 세션에 실제로 펼쳐 본 것만 센다 — 목록에 썸네일이
   // 떴다는 것과 봤다는 것은 다르다. 새로고침하면 리셋되는 것이 맞다.
@@ -1059,7 +1065,7 @@ export function createResultHistoryController({
         <button type="button" class="viewer-head-btn" id="vpFsBtn"
                 title="전체 화면 (F)">\u{2921}</button>
         <button type="button" class="viewer-head-btn" id="vpShortcutBtn"
-                title="뷰어 설정">\u{2699}</button>
+                data-viewer-settings-btn title="뷰어 설정">\u{2699}</button>
         <button type="button" class="viewer-head-btn" onclick="openResultFolder()"
                 title="결과 폴더 열기">\u{1F4C1}</button>
         <button type="button" class="history-close"
@@ -1090,7 +1096,6 @@ export function createResultHistoryController({
         </div>
       </div>
       <div class="viewer-panel-loading" id="vpLoading" style="display:none">Loading...</div>
-      <div class="vb-panel" id="vbPanel"></div>
     </div>`;
     lb.classList.add('open');
     vpPage = 0;
@@ -1387,8 +1392,19 @@ export function createResultHistoryController({
     if (!btn) return;
     // 예전에는 앱에서만 띄웠다. 이제 이 판에는 폴더와 무관한 손버릇 토글도 있어
     // 브라우저에서도 열려야 한다 — 숏컷 구역만 앱에서 그린다(패널 쪽 판단).
-    btn.addEventListener('click', () => viewerBindings.togglePanel());
+    btn.addEventListener('click', () => viewerBindings.togglePanel(btn));
     if (viewerBindings.isAppMode()) viewerBindings.load();
+  }
+
+  // 레일에도 같은 판을 연다. 팝업을 열지 않고도 삭제 방식·저장 경로를 만질 수
+  // 있어야 한다 — 그게 늘 보이는 쪽이다.
+  function bindRailSettings() {
+    const btn = getEl('viewerRailSettings');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      viewerBindings.togglePanel(btn);
+      if (viewerBindings.isAppMode()) viewerBindings.load();
+    });
   }
 
   // 마우스 보조 버튼(뒤로/앞으로/휠클릭). `auxclick` 은 좌클릭을 주지 않아
@@ -1669,6 +1685,7 @@ export function createResultHistoryController({
     bindDragSelection(viewerGrid);
     bindKeyboard();
     bindShortcutInputs();
+    bindRailSettings();
     updateSelectionUi();
   }
 
@@ -1702,6 +1719,8 @@ export function createResultHistoryController({
     navViewer,
     hideNav,
     openFolder,
+    // 저장 경로 상태가 도착하면 뷰어 설정 판의 한 줄을 갱신한다.
+    onSaveDirectoryState: () => viewerBindings.refresh(),
     loadResultInfo,
     get latestImagePath() { return latestImagePath; },
     // Ctrl+S 빠른 저장이 "지금 보고 있는 것"을 알아야 한다. 히스토리 팝업이

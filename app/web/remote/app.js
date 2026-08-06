@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806i-vb1')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806j-vb2')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,

@@ -131,6 +131,40 @@ def main() -> int:
         out4 = svc.copy_or_move(mem_item, svc.find_binding("mouse:forward"))
         check("메모리에서 새로 쓴다", out4["mode"] == "write" and Path(out4["path"]).read_bytes() == png)
 
+        # ── Codex 리뷰에서 나온 회귀 ────────────────────────────────────────
+        print("\n[대상이 원본 폴더와 같을 때]")
+        same_dir = root / "inplace"
+        same_dir.mkdir()
+        inplace = same_dir / "here.png"
+        inplace.write_bytes(b"\x89PNG\r\n\x1a\n" + b"z" * 24)
+        svc.save({"bindings": [
+            {"input_id": "key:F1", "action": "move", "dest_path": str(same_dir)},
+            {"input_id": "key:F2", "action": "copy", "dest_path": str(same_dir)},
+        ], "dest_path": "", "use_session_folder": False})
+        r = svc.copy_or_move(FakeItem(filepath=str(inplace)), svc.find_binding("key:F1"))
+        # 예전에는 _unique 가 먼저 돌아 here_2.png 를 내주고 원본 이름이 바뀌었다.
+        check("제자리 이동은 아무 일도 하지 않는다",
+              r["mode"] == "noop" and inplace.is_file()
+              and not (same_dir / "here_2.png").exists(), str(r))
+        r2 = svc.copy_or_move(FakeItem(filepath=str(inplace)), svc.find_binding("key:F2"))
+        check("제자리 복사도 사본을 만들지 않는다",
+              r2["mode"] == "noop" and len(list(same_dir.iterdir())) == 1,
+              str(sorted(p.name for p in same_dir.iterdir())))
+
+        print("\n[메모리 전용 항목의 이동]")
+        svc.save({"bindings": [
+            {"input_id": "key:F6", "action": "move", "dest_path": str(dest)},
+            {"input_id": "key:F7", "action": "copy", "dest_path": str(dest)},
+        ], "dest_path": "", "use_session_folder": False})
+        m_item = FakeItem(filepath="", filename="mem.png", raw=png)
+        m_out = svc.copy_or_move(m_item, svc.find_binding("key:F6"))
+        # 안 가리키면 이 항목은 계속 '미저장'(filepath 없음)이라 Save All 이 한 벌 더 쓴다.
+        check("이동한 뒤에는 항목이 새 파일을 가리킨다", m_item.filepath == m_out["path"],
+              repr(m_item.filepath))
+        c_item = FakeItem(filepath="", filename="mem.png", raw=png)
+        svc.copy_or_move(c_item, svc.find_binding("key:F7"))
+        check("복사는 항목을 건드리지 않는다", c_item.filepath == "", repr(c_item.filepath))
+
         print("\n[상한]")
         many = [{"input_id": f"key:F{i}", "action": "copy"} for i in range(30)]
         check("바인딩 개수에 상한이 있다", len(svc.save({"bindings": many})["bindings"]) == 12)

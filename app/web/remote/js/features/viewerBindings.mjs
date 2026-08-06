@@ -12,6 +12,23 @@
 
 const MAX_BINDINGS = 12;
 
+/**
+ * innerHTML 에 넣기 전에 반드시 통과시킨다.
+ *
+ * 남이 심어 놓은 값이라서가 아니라 **내가 만든 값이 이미 위험하기 때문**이다:
+ * `inputIdFromKey` 는 `KeyboardEvent.key` 를 그대로 쓰는데, `<` 키를 숏컷으로
+ * 잡으면 `key:<` 가 되어 그 자리에서 태그가 열린다. 폴더 이름에도 `&` 나 `"`
+ * 는 얼마든지 들어간다. (Codex 리뷰 P1)
+ */
+function esc(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function createViewerBindings({getEl, showToast, onItemRemoved}) {
   let settings = {bindings: [], dest_path: '', use_session_folder: true};
   let loaded = false;
@@ -130,15 +147,15 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
     const actions = ['copy', 'move', 'trash'];
     const labels = settings.action_labels || {copy: '복사', move: '이동', trash: '삭제 (휴지통)'};
     const options = actions.map(a =>
-      `<option value="${a}"${binding.action === a ? ' selected' : ''}>${labels[a]}</option>`).join('');
+      `<option value="${a}"${binding.action === a ? ' selected' : ''}>${esc(labels[a])}</option>`).join('');
     const dest = binding.dest_path || '';
     return `
       <div class="vb-row" data-vb-row="${index}">
         <button type="button" class="vb-capture" data-vb-capture="${index}"
-                title="누르면 다음에 누르는 키나 마우스 버튼을 받습니다">${inputLabel(binding.input_id)}</button>
+                title="누르면 다음에 누르는 키나 마우스 버튼을 받습니다">${esc(inputLabel(binding.input_id))}</button>
         <select class="vb-action" data-vb-action="${index}">${options}</select>
         <button type="button" class="vb-dest" data-vb-dest="${index}"
-                title="${dest || '공용 폴더를 씁니다'}">${dest ? shortPath(dest) : '공용 폴더'}</button>
+                title="${esc(dest || '공용 폴더를 씁니다')}">${esc(dest ? shortPath(dest) : '공용 폴더')}</button>
         <button type="button" class="vb-del" data-vb-del="${index}" aria-label="삭제">&times;</button>
       </div>`;
   }
@@ -165,8 +182,8 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
       </div>
       <div class="vb-foot">
         <button type="button" class="vb-dest is-global" id="vbGlobalDest"
-                title="${settings.dest_path || '아직 정하지 않았습니다'}">공용 폴더 · ${
-                  settings.dest_path ? shortPath(settings.dest_path) : '정하기'}</button>
+                title="${esc(settings.dest_path || '아직 정하지 않았습니다')}">공용 폴더 · ${
+                  esc(settings.dest_path ? shortPath(settings.dest_path) : '정하기')}</button>
         <label class="vb-check">
           <input type="checkbox" id="vbSessionFolder"${settings.use_session_folder ? ' checked' : ''}>
           세션 하위 폴더

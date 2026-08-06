@@ -153,17 +153,20 @@ class HeadlessViewerBindingService:
         src = Path(source) if source else None
 
         if src is not None and src.is_file():
-            target = self._unique(dest_dir / src.name)
-            if src.resolve() == target.resolve():
-                return {"ok": True, "path": str(target), "mode": "noop"}
+            # **제자리 판정이 이름 짓기보다 먼저다.** 순서를 뒤집으면 `_unique` 가
+            # "이미 있다"는 이유로 `shot_2.png` 를 내주고, 그 새 이름은 원본과
+            # 절대 같아지지 않아 제자리 판정이 영원히 거짓이 된다 — 저장 폴더를
+            # 그대로 대상으로 지정하면 누를 때마다 원본이 `_2`, `_3` 으로
+            # 이름만 바뀐다(Codex 리뷰 P2).
+            plain = dest_dir / src.name
+            if plain.exists() and src.resolve() == plain.resolve():
+                return {"ok": True, "path": str(plain), "mode": "noop"}
+            target = self._unique(plain)
             if action == ACTION_MOVE:
                 shutil.move(str(src), str(target))
                 # 히스토리가 옛 경로를 가리키면 이후의 저장/삭제가 헛돈다.
                 # 그림 자체는 메모리에서 나오므로 화면은 그대로다.
-                try:
-                    item.filepath = str(target)
-                except Exception:
-                    pass
+                self._point_at(item, target)
             else:
                 shutil.copy2(str(src), str(target))
             return {"ok": True, "path": str(target), "mode": action}
@@ -177,7 +180,21 @@ class HeadlessViewerBindingService:
         suffix = ".webp" if "webp" in str(media_type) else ".png"
         target = self._unique(dest_dir / f"{stem}{suffix}")
         target.write_bytes(image_bytes)
+        if action == ACTION_MOVE:
+            # 여기서도 항목이 새 파일을 가리켜야 디스크에 원본이 있던 경우와 같아진다.
+            # 안 가리키면 이 항목은 계속 '미저장'으로 남아(미저장 판정 = filepath 없음)
+            # Save All 이 같은 그림을 한 벌 더 쓰고, 나중에 휴지통 숏컷을 눌러도
+            # 방금 만든 파일은 남는다(Codex 리뷰 P2). `copy` 는 그대로 둔다 —
+            # 사본을 하나 떠 놓은 것이지 저장한 것이 아니다.
+            self._point_at(item, target)
         return {"ok": True, "path": str(target), "mode": "write"}
+
+    @staticmethod
+    def _point_at(item: Any, target: Path) -> None:
+        try:
+            item.filepath = str(target)
+        except Exception:
+            pass
 
     @staticmethod
     def _unique(path: Path) -> Path:

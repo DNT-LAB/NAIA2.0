@@ -1215,12 +1215,31 @@ def register_result_display_routes(
     # 경로를 담지 않는다 — 어디에 쓸지는 서버가 저장된 설정에서 찾는다. 그러지
     # 않으면 '아무 경로에나 파일을 쓰는 라우트'가 열리고, LAN 으로 붙은 다른
     # 사람도 그걸 부를 수 있다.
+    # 셋 다 **로컬 요청만** 받는다. 같은 파일의 `/api/result/open-location` 은
+    # 폴더를 여는 것뿐인데도 이 검사를 하는데, 이쪽은 파일을 옮기고 휴지통에
+    # 보낸다 — 더 위험한 쪽을 열어 두면 앞의 검사가 무의미하다. 프런트에서
+    # 앱 전용으로 숨긴 것은 HTTP 접근을 막지 못한다(Codex 리뷰 P1).
+    def _binding_guard(req: Request):
+        if _is_local_request(req):
+            return None
+        return JSONResponse({
+            "ok": False,
+            "error": "Viewer shortcuts are available from the local app only.",
+            "runtime": "web",
+        }, status_code=403)
+
     @app.get("/api/viewer/bindings")
-    async def api_viewer_bindings_get():
+    async def api_viewer_bindings_get(req: Request):
+        denied = _binding_guard(req)
+        if denied is not None:
+            return denied
         return session_context._viewer_binding_service().load()
 
     @app.post("/api/viewer/bindings")
     async def api_viewer_bindings_set(req: Request):
+        denied = _binding_guard(req)
+        if denied is not None:
+            return denied
         try:
             payload = await req.json()
         except Exception:
@@ -1234,6 +1253,9 @@ def register_result_display_routes(
 
     @app.post("/api/viewer/bindings/dispatch")
     async def api_viewer_bindings_dispatch(req: Request):
+        denied = _binding_guard(req)
+        if denied is not None:
+            return denied
         try:
             payload = await req.json()
         except Exception:

@@ -1168,9 +1168,33 @@ export function createResultHistoryController({
   }
 
   // ── 줌 / 팬 ─────────────────────────────────────────────────────────────
+  /**
+   * 지금 그림이 무대 밖으로 얼마나 나가 있나. 축마다 **한쪽으로 밀 수 있는 최대치**다.
+   *
+   * 그림이 무대보다 작으면 0 이다 — 밀 데가 없으니 가운데 고정이고, 잡아끌 수도 없다.
+   * `scale()` 은 가운데를 기준으로 커지므로 넘치는 양의 절반씩 양옆으로 나간다.
+   */
+  function vpPanRange() {
+    const stage = getEl('vpStage');
+    if (!stage || !vpNatW || !vpNatH) return {x: 0, y: 0};
+    const box = stage.getBoundingClientRect();
+    return {
+      x: Math.max(0, (vpNatW * vpZoom - box.width) / 2),
+      y: Math.max(0, (vpNatH * vpZoom - box.height) / 2),
+    };
+  }
+
+  const vpCanPan = () => { const r = vpPanRange(); return r.x > 0.5 || r.y > 0.5; };
+
   function vpApplyTransform() {
     const img = getEl('vpPreview');
     if (!img) return;
+    // **그림 끝을 무대 안으로 들이지 않는다.** 예전에는 한없이 끌려가 빈 화면만
+    // 남길 수 있었다(사용자 지적). 여기서 한 번 묶으면 팬이든 휠 줌이든 창 크기
+    // 변화든 모든 경로가 같이 묶인다.
+    const range = vpPanRange();
+    vpTx = Math.min(range.x, Math.max(-range.x, vpTx));
+    vpTy = Math.min(range.y, Math.max(-range.y, vpTy));
     img.style.transform = `translate(${Math.round(vpTx)}px, ${Math.round(vpTy)}px) scale(${vpZoom})`;
     const label = getEl('vpZoom');
     if (label) label.textContent = `${Math.round(vpZoom * 100)}%`;
@@ -1184,7 +1208,9 @@ export function createResultHistoryController({
       fit.classList.toggle('is-on', vpFitMode);
     }
     const stage = getEl('vpStage');
-    if (stage) stage.classList.toggle('is-pannable', !vpFitMode || vpZoom > vpFitZoom + 0.001);
+    // 손 모양은 **실제로 끌 수 있을 때만** 뜬다. 예전에는 '맞춤이 아니면'으로
+    // 판단해서, 그림이 무대보다 작아 밀 데가 없는데도 잡을 것처럼 보였다.
+    if (stage) stage.classList.toggle('is-pannable', range.x > 0.5 || range.y > 0.5);
   }
 
   function vpComputeFit() {
@@ -1325,8 +1351,9 @@ export function createResultHistoryController({
       btn.title = hidden ? '목록 펼치기 (H)' : '목록 접기 (H)';
       btn.classList.toggle('is-on', hidden);
     }
-    // 무대 폭이 바뀌었으니 맞춤 배율을 다시 잡는다.
-    if (vpFitMode) requestAnimationFrame(vpFitToStage);
+    // 무대 폭이 바뀌었으니 맞춤 배율을 다시 잡는다. 맞춤이 아니어도 위치는
+    // 다시 묶어야 한다(넓어진 쪽으로 그림이 딸려 들어오면 안 된다).
+    requestAnimationFrame(() => { if (vpFitMode) vpFitToStage(); else vpApplyTransform(); });
   }
 
   function vpToggleFullscreen() {
@@ -1358,6 +1385,9 @@ export function createResultHistoryController({
       stage.addEventListener('dblclick', vpToggleFit);
       stage.addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
+        // 확대해서 그림이 무대 밖으로 나가 있을 때만 잡힌다. 다 보이는 그림을
+        // 끌어 봐야 갈 데가 없는데 손에 붙어 따라다니면 그게 불편하다(사용자 지적).
+        if (!vpCanPan()) return;
         vpPan = {x: event.clientX, y: event.clientY, tx: vpTx, ty: vpTy};
         stage.setPointerCapture?.(event.pointerId);
         stage.classList.add('is-panning');
@@ -1399,7 +1429,13 @@ export function createResultHistoryController({
       slider.addEventListener('change', () => vpSeek(Number(slider.value) - 1));
     }
 
-    window.addEventListener('resize', () => { if (viewerPopupOpen && vpFitMode) vpFitToStage(); });
+    // 창이 커지면 무대도 커진다 — 맞춤이면 배율을 다시 잡고, 아니면 최소한
+    // 위치를 다시 묶어야 한다. 안 그러면 넓어진 무대에 빈 여백이 생긴다.
+    window.addEventListener('resize', () => {
+      if (!viewerPopupOpen) return;
+      if (vpFitMode) vpFitToStage();
+      else vpApplyTransform();
+    });
   }
 
   // ── 숫컷 바인딩 배선 ──

@@ -12,6 +12,19 @@
 
 const MAX_BINDINGS = 12;
 
+// 뷰어 손버릇 설정. 숏컷 바인딩과 달리 파일시스템을 건드리지 않고 **이 기기에서만**
+// 뜻이 있으므로 서버가 아니라 localStorage 에 둔다(레일 접힘·삭제 방식과 같은 자리).
+const PREF_NO_CONFIRM = 'naia_history_delete_no_confirm';
+const PREF_DELETE_KEY_D = 'naia_history_delete_key_d';
+
+function readPref(key) {
+  try { return localStorage.getItem(key) === '1'; } catch (_) { return false; }
+}
+
+function writePref(key, on) {
+  try { localStorage.setItem(key, on ? '1' : '0'); } catch (_) {}
+}
+
 /**
  * innerHTML 에 넣기 전에 반드시 통과시킨다.
  *
@@ -35,6 +48,10 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
   let capturing = null;      // 지금 입력을 받고 있는 행 (index)
   let panelOpen = false;
   let busy = false;
+  const prefs = {
+    noConfirm: readPref(PREF_NO_CONFIRM),
+    deleteKeyD: readPref(PREF_DELETE_KEY_D),
+  };
 
   const isAppMode = () => Boolean(globalThis.naiaShell?.pickDirectory);
 
@@ -174,18 +191,26 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
     return parts.length <= 2 ? path : `…/${parts.slice(-2).join('/')}`;
   }
 
+  function toggleHtml(id, label, on, hint) {
+    return `
+      <button type="button" class="vb-toggle${on ? ' is-on' : ''}" id="${id}"
+              role="switch" aria-checked="${on ? 'true' : 'false'}">
+        <span class="vb-toggle-track"><span class="vb-toggle-knob"></span></span>
+        <span class="vb-toggle-label">${esc(label)}${
+          hint ? `<em>${esc(hint)}</em>` : ''}</span>
+      </button>`;
+  }
+
   function render() {
     const host = getEl('vbPanel');
     if (!host) return;
-    const rows = settings.bindings.map(rowHtml).join('');
-    host.innerHTML = `
-      <div class="vb-head">
-        <span class="vb-title">숏컷</span>
-        <span class="vb-spring"></span>
-        <button type="button" class="vb-close" id="vbClose" aria-label="닫기">&times;</button>
-      </div>
+    // 숏컷 구역은 앱에서만 그린다 — 폴더를 고르려면 시스템 선택 창이 필요하다.
+    // 위의 손버릇 토글은 폴더와 무관하므로 브라우저에서도 뜬다.
+    const shortcutSection = isAppMode() ? `
+      <div class="vb-sec">숏컷</div>
       <div class="vb-body">
-        ${rows || '<div class="vb-empty">아직 없습니다. 아래에서 하나 더하세요.</div>'}
+        ${settings.bindings.map(rowHtml).join('')
+          || '<div class="vb-empty">아직 없습니다. 아래에서 하나 더하세요.</div>'}
         <button type="button" class="vb-add" id="vbAdd"
                 ${settings.bindings.length >= MAX_BINDINGS ? 'disabled' : ''}>+ 숏컷 더하기</button>
       </div>
@@ -197,13 +222,37 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
           <input type="checkbox" id="vbSessionFolder"${settings.use_session_folder ? ' checked' : ''}>
           세션 하위 폴더
         </label>
-      </div>`;
+      </div>` : '';
+
+    host.innerHTML = `
+      <div class="vb-head">
+        <span class="vb-title">뷰어 설정</span>
+        <span class="vb-spring"></span>
+        <button type="button" class="vb-close" id="vbClose" aria-label="닫기">&times;</button>
+      </div>
+      <div class="vb-body vb-prefs">
+        ${toggleHtml('vbNoConfirm', '삭제할 때 묻지 않음', prefs.noConfirm,
+                     '되돌리려면 휴지통에서 꺼내야 합니다')}
+        ${toggleHtml('vbDeleteKeyD', 'D 키로 삭제', prefs.deleteKeyD,
+                     'Del 은 켜지 않아도 늘 됩니다')}
+      </div>
+      ${shortcutSection}`;
     bind(host);
   }
 
   function bind(host) {
     const on = (id, event, fn) => { const el = getEl(id); if (el) el.addEventListener(event, fn); };
     on('vbClose', 'click', () => setPanelOpen(false));
+    on('vbNoConfirm', 'click', () => {
+      prefs.noConfirm = !prefs.noConfirm;
+      writePref(PREF_NO_CONFIRM, prefs.noConfirm);
+      render();
+    });
+    on('vbDeleteKeyD', 'click', () => {
+      prefs.deleteKeyD = !prefs.deleteKeyD;
+      writePref(PREF_DELETE_KEY_D, prefs.deleteKeyD);
+      render();
+    });
     on('vbAdd', 'click', async () => {
       if (settings.bindings.length >= MAX_BINDINGS) return;
       settings.bindings.push({input_id: '', action: 'copy', dest_path: ''});
@@ -269,7 +318,7 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
   }
 
   function setPanelOpen(open) {
-    panelOpen = open && isAppMode();
+    panelOpen = Boolean(open);
     const host = getEl('vbPanel');
     if (host) host.classList.toggle('open', panelOpen);
     const btn = getEl('vpShortcutBtn');
@@ -280,6 +329,9 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
 
   return {
     isAppMode,
+    // 삭제 흐름이 물어볼 값 — 패널에서 켜고 끈 그대로 읽는다.
+    skipDeleteConfirm: () => prefs.noConfirm,
+    deleteKeyDEnabled: () => prefs.deleteKeyD,
     load,
     hasBinding,
     dispatch,

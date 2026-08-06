@@ -1,4 +1,4 @@
-import {createViewerBindings} from './viewerBindings.mjs?v=20260806-vb3';
+import {createViewerBindings} from './viewerBindings.mjs?v=20260806-prefs1';
 
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const HISTORY_DELETE_MODE_KEY = 'naia_result_delete_mode';
@@ -495,11 +495,15 @@ export function createResultHistoryController({
     const modeText = deleteMode === 'disk'
       ? '연결된 저장 파일은 영구 삭제하지 않고 휴지통으로 이동합니다.'
       : '히스토리에서만 제거하며 저장 파일은 유지합니다.';
-    const message = `${paths.length}개 선택 항목을 삭제할까요?\n${modeText}`;
-    const confirmed = typeof confirmDialog === 'function'
-      ? await confirmDialog(message, {title: '선택 항목 삭제', okText: `삭제 (${paths.length})`, cancelText: '취소'})
-      : window.confirm(message);
-    if (!confirmed) return;
+    // '묻지 않음'을 켜 두었으면 곧장 지운다. 되돌릴 길은 남아 있다 \u2014 디스크
+    // 삭제도 휴지통으로만 가고, 히스토리 삭제는 파일을 건드리지 않는다.
+    if (!viewerBindings.skipDeleteConfirm()) {
+      const message = `${paths.length}개 선택 항목을 삭제할까요?\n${modeText}`;
+      const confirmed = typeof confirmDialog === 'function'
+        ? await confirmDialog(message, {title: '선택 항목 삭제', okText: `삭제 (${paths.length})`, cancelText: '취소'})
+        : window.confirm(message);
+      if (!confirmed) return;
+    }
 
     setSelectionBusy(true);
     let succeeded = 0;
@@ -1044,7 +1048,8 @@ export function createResultHistoryController({
         </div>
         <span class="viewer-head-spring"></span>
         <span class="vp-guide" aria-hidden="true">
-          <b>휠</b> 장 넘김 <i>·</i> <b>Ctrl+휠</b> 확대 <i>·</i> <b>H</b> 목록 <i>·</i> <b>F</b> 전체 화면
+          <b>휠</b> 장 넘김 <i>·</i> <b>Ctrl+휠</b> 확대 <i>·</i> <b>Del</b> 삭제
+          <i>·</i> <b>H</b> 목록 <i>·</i> <b>F</b> 전체 화면
         </span>
         <span class="viewer-head-spring"></span>
         <span class="vp-seen" id="vpSeen" title="이번에 펼쳐 본 장수"></span>
@@ -1053,8 +1058,7 @@ export function createResultHistoryController({
         <button type="button" class="viewer-head-btn" id="vpFsBtn"
                 title="전체 화면 (F)">\u{2921}</button>
         <button type="button" class="viewer-head-btn" id="vpShortcutBtn"
-                title="숏컷 설정 \u2014 버튼 하나로 정해 둔 폴더에 넘기기"
-                style="display:none">\u{2328}</button>
+                title="뷰어 설정">\u{2699}</button>
         <button type="button" class="viewer-head-btn" onclick="openResultFolder()"
                 title="결과 폴더 열기">\u{1F4C1}</button>
         <button type="button" class="history-close"
@@ -1380,10 +1384,10 @@ export function createResultHistoryController({
   function bindShortcutUi() {
     const btn = getEl('vpShortcutBtn');
     if (!btn) return;
-    if (!viewerBindings.isAppMode()) return;   // 브라우저에는 폴더 선택 창이 없다
-    btn.style.display = '';
+    // 예전에는 앱에서만 띄웠다. 이제 이 판에는 폴더와 무관한 손버릇 토글도 있어
+    // 브라우저에서도 열려야 한다 \u2014 숏컷 구역만 앱에서 그린다(패널 쪽 판단).
     btn.addEventListener('click', () => viewerBindings.togglePanel());
-    viewerBindings.load();
+    if (viewerBindings.isAppMode()) viewerBindings.load();
   }
 
   // 마우스 보조 버튼(뒤로/앞으로/휠클릭). `auxclick` 은 좌클릭을 주지 않아
@@ -1532,7 +1536,16 @@ export function createResultHistoryController({
         selectAllLoaded();
         return;
       }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedPaths.size) {
+      // D 는 켜 둔 사람만 쓴다. 켜져 있으면 Del 과 **똑같이** 동작한다 \u2014
+      // 삭제 방식(히스토리만 / 휴지통)도, 물어볼지 말지도 한 곳에서 갈린다.
+      // 숏컷 설정에서 입력을 받는 중이면 그 키는 설정 몫이므로 여기서 비켜난다.
+      const deleteKey = event.key === 'Delete'
+        || event.key === 'Backspace'
+        || (viewerBindings.deleteKeyDEnabled()
+            && String(event.key).toLowerCase() === 'd'
+            && !event.ctrlKey && !event.metaKey && !event.altKey
+            && !viewerBindings.isCapturing());
+      if (deleteKey && selectedPaths.size) {
         event.preventDefault();
         deleteSelected();
         return;

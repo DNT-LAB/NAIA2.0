@@ -7638,6 +7638,50 @@ body.resizing-result-info {
 }
 .vb-close:hover { color: #ffb4b4; }
 .vb-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+/* 구역 이름. 다른 패널의 작은 라벨과 같은 문법(9px 600 uppercase text-dim). */
+.vb-sec {
+  padding: 8px 10px 0;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
+  border-top: 1px solid var(--border-dim);
+  margin-top: 2px;
+}
+.vb-prefs { gap: 2px; }
+
+/* 손버릇 토글. 체크박스 대신 스위치로 둔 이유 — 이 둘은 "지금 켜져 있나"가
+   한눈에 보여야 한다(하나는 확인 창을 없애고, 하나는 글자 키에 삭제를 얹는다). */
+.vb-toggle {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; padding: 7px 6px;
+  border: 0; border-radius: 7px;
+  background: none; color: var(--text-muted);
+  font-size: 11px; text-align: left; cursor: pointer;
+}
+.vb-toggle:hover { background: rgba(255,255,255,0.04); }
+.vb-toggle-track {
+  flex: 0 0 auto;
+  position: relative;
+  width: 30px; height: 17px;
+  border-radius: 9px;
+  background: var(--border-dim);
+  transition: background 0.15s;
+}
+.vb-toggle-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 13px; height: 13px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: transform 0.15s, background 0.15s;
+}
+.vb-toggle.is-on .vb-toggle-track { background: rgba(124,106,239,0.55); }
+.vb-toggle.is-on .vb-toggle-knob { transform: translateX(13px); background: #fff; }
+.vb-toggle.is-on { color: var(--text-primary); }
+.vb-toggle-label { min-width: 0; line-height: 1.35; }
+/* 딸림말은 켰을 때 무엇이 달라지는지 한 줄로만. */
+.vb-toggle-label em {
+  display: block;
+  font-style: normal; font-size: 9px; color: var(--text-dim);
+}
 .vb-empty {
   padding: 10px 2px;
   font-size: 10px; color: var(--text-dim); text-align: center;

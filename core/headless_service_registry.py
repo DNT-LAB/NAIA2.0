@@ -29,6 +29,11 @@ HEADLESS_SERVICE_SPECS = {
         "HeadlessInteractiveReferenceService",
     ),
     "vibe_transfer": HeadlessServiceSpec("core.headless_vibe_transfer_service", "HeadlessVibeTransferService"),
+    # 뷰어 숏컷 바인딩 — 버튼 하나로 보고 있는 그림을 정해 둔 폴더로 넘긴다.
+    "viewer_binding": HeadlessServiceSpec(
+        "core.headless_viewer_binding_service",
+        "HeadlessViewerBindingService",
+    ),
     "image_module_param": HeadlessServiceSpec(
         "core.headless_image_module_param_service",
         "HeadlessImageModuleParamService",

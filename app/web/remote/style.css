@@ -7604,6 +7604,95 @@ body.resizing-result-info {
 /* ── 목록 접기 = 그림 최대화 ─────────────────────────────────────────────── */
 .viewer-popup-inner.list-hidden .viewer-popup-left { display: none; }
 
+/* ── 숏컷 설정 (앱 전용) ──────────────────────────────────────────────────
+   머리의 ⌨ 버튼에서 내려오는 작은 판. 팝업 안에 떠 있으므로 조작 바보다 위다. */
+.vb-panel {
+  display: none;
+  position: absolute;
+  top: 46px; right: 10px;
+  z-index: 40;
+  width: 380px;
+  max-width: calc(100vw - 20px);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  border: 1px solid var(--border-glow);
+  border-radius: 10px;
+  background: var(--bg-card);
+  box-shadow: 0 14px 40px rgba(0,0,0,0.6);
+}
+.vb-panel.open { display: block; }
+.vb-head {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-dim);
+}
+.vb-title {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
+}
+.vb-spring { flex: 1; }
+.vb-close {
+  width: 20px; height: 20px; padding: 0;
+  border: 0; background: none; color: var(--text-dim);
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+.vb-close:hover { color: #ffb4b4; }
+.vb-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.vb-empty {
+  padding: 10px 2px;
+  font-size: 10px; color: var(--text-dim); text-align: center;
+}
+/* 한 줄 = 입력 · 무엇을 · 어디로 · 지우기. 경로는 남는 폭을 다 갖는다. */
+.vb-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 1.1fr) minmax(80px, 0.9fr) minmax(70px, 1fr) 20px;
+  align-items: center;
+  gap: 5px;
+}
+.vb-capture, .vb-dest, .vb-action {
+  min-width: 0;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer;
+}
+.vb-capture:hover, .vb-dest:hover { border-color: var(--border-glow); color: var(--text-primary); }
+.vb-capture.is-capturing {
+  border-color: var(--accent);
+  background: rgba(124,106,239,0.18);
+  color: var(--accent-glow);
+}
+.vb-del {
+  width: 20px; height: 20px; padding: 0;
+  border: 0; background: none; color: var(--text-dim);
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.vb-del:hover { color: #ffb4b4; }
+.vb-add {
+  height: 26px;
+  border: 1px dashed var(--border-glow); border-radius: 6px;
+  background: none; color: var(--text-dim);
+  font-size: 10px; cursor: pointer;
+}
+.vb-add:hover:not(:disabled) { color: var(--accent-glow); border-color: var(--accent); }
+.vb-add:disabled { opacity: 0.4; cursor: not-allowed; }
+.vb-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-dim);
+}
+.vb-dest.is-global { flex: 1; height: 26px; }
+.vb-check {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--text-dim);
+  white-space: nowrap; cursor: pointer;
+}
+
 /* ── 본 것 표시 ──────────────────────────────────────────────────────────
    펼쳐 본 것은 가라앉히고 아직 안 본 것을 또렷하게 둔다 — '어디까지 봤는지'가
    격자에서 바로 읽힌다(읽음/안읽음과 같은 손버릇). 썸네일이 벌거벗은 <img> 라

@@ -1,3 +1,5 @@
+import {createViewerBindings} from './viewerBindings.mjs?v=20260806-vb1';
+
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const HISTORY_DELETE_MODE_KEY = 'naia_result_delete_mode';
 const HISTORY_SELECTION_MAX_ITEMS = 200;
@@ -92,6 +94,13 @@ export function createResultHistoryController({
   let vpListHidden = false;
   // 끝에서 한 번 막아 두는 자리(옛 뷰어의 `_edge_pending`). '' | 'first' | 'last'.
   let vpEdgePending = '';
+
+  // 숏컷 바인딩(앱 전용). 여기서 만들지만 화면에 붙는 것은 팝업이 열릴 때다.
+  const viewerBindings = createViewerBindings({
+    getEl,
+    showToast,
+    onItemRemoved: payload => onRemoved(payload),
+  });
   // '얼마나 봤는지'. 이번 세션에 실제로 펼쳐 본 것만 센다 — 목록에 썸네일이
   // 떴다는 것과 봤다는 것은 다르다. 새로고침하면 리셋되는 것이 맞다.
   const vpSeen = new Set();
@@ -1043,6 +1052,9 @@ export function createResultHistoryController({
                 title="목록 접기 (H)">\u{21E4}</button>
         <button type="button" class="viewer-head-btn" id="vpFsBtn"
                 title="전체 화면 (F)">\u{2921}</button>
+        <button type="button" class="viewer-head-btn" id="vpShortcutBtn"
+                title="숏컷 설정 \u2014 버튼 하나로 정해 둔 폴더에 넘기기"
+                style="display:none">\u{2328}</button>
         <button type="button" class="viewer-head-btn" onclick="openResultFolder()"
                 title="결과 폴더 열기">\u{1F4C1}</button>
         <button type="button" class="history-close"
@@ -1073,6 +1085,7 @@ export function createResultHistoryController({
         </div>
       </div>
       <div class="viewer-panel-loading" id="vpLoading" style="display:none">Loading...</div>
+      <div class="vb-panel" id="vbPanel"></div>
     </div>`;
     lb.classList.add('open');
     vpPage = 0;
@@ -1084,6 +1097,7 @@ export function createResultHistoryController({
     }
     bindSelectionBar(getEl('vpSelectionBar'));
     bindPopupViewer();
+    bindShortcutUi();
     vpEdgePending = '';
     vpWheelAccum = 0;
     vpSetListHidden(false);
@@ -1362,6 +1376,43 @@ export function createResultHistoryController({
     window.addEventListener('resize', () => { if (viewerPopupOpen && vpFitMode) vpFitToStage(); });
   }
 
+  // ── 숫컷 바인딩 배선 ──
+  function bindShortcutUi() {
+    const btn = getEl('vpShortcutBtn');
+    if (!btn) return;
+    if (!viewerBindings.isAppMode()) return;   // 브라우저에는 폴더 선택 창이 없다
+    btn.style.display = '';
+    btn.addEventListener('click', () => viewerBindings.togglePanel());
+    viewerBindings.load();
+  }
+
+  // 마우스 보조 버튼(뒤로/앞으로/휠클릭). `auxclick` 은 좌클릭을 주지 않아
+  // 팬/선택과 부딪히지 않는다. 뒤로/앞으로는 브라우저가 방문 기록을 넘기려 하므로
+  // `mousedown` 에서 미리 막는다 — auxclick 만 막으면 이미 늦다.
+  function bindShortcutInputs() {
+    const AUX = new Set([1, 3, 4]);
+    document.addEventListener('mousedown', event => {
+      if (!viewerPopupOpen || !AUX.has(event.button)) return;
+      const inputId = viewerBindings.inputIdFromMouse(event.button);
+      if (viewerBindings.isCapturing() || viewerBindings.hasBinding(inputId)) {
+        event.preventDefault();
+      }
+    });
+    document.addEventListener('auxclick', event => {
+      if (!viewerPopupOpen || !AUX.has(event.button)) return;
+      const inputId = viewerBindings.inputIdFromMouse(event.button);
+      if (viewerBindings.isCapturing()) {
+        event.preventDefault();
+        viewerBindings.finishCapture(inputId);
+        return;
+      }
+      if (viewerBindings.hasBinding(inputId)) {
+        event.preventDefault();
+        viewerBindings.dispatch(inputId, vpCurrentPath);
+      }
+    });
+  }
+
   function selectPopupImage(relPath, thumbEl) {
     // 실제로 한 장이 열렸으면 끝에서 막아 둔 자리를 푼다 — 클릭이든 슬라이더든
     // 화살표든, 어디로든 움직였으면 '끝에 서 있다'는 상태는 이미 지났다.
@@ -1400,6 +1451,7 @@ export function createResultHistoryController({
 
   function closePopup() {
     viewerPopupOpen = false;
+    viewerBindings.setPanelOpen(false);
     if (document.fullscreenElement) document.exitFullscreen?.();
     vpPan = null;
     // 선택을 놓지 않으면 팝업을 닫은 뒤의 Ctrl+S 가 옛 선택을 저장한다.
@@ -1501,6 +1553,23 @@ export function createResultHistoryController({
       }
 
       if (viewerPopupOpen) {
+        // 숏컷 설정에서 입력을 받고 있는 중이면 그 키는 설정으로 간다.
+        // Esc 는 예외 — 그것까지 먹으면 설정 창을 닫을 길이 없어진다.
+        if (viewerBindings.isCapturing()) {
+          if (event.key !== 'Escape') {
+            event.preventDefault();
+            viewerBindings.finishCapture(viewerBindings.inputIdFromKey(event));
+          } else {
+            viewerBindings.setPanelOpen(false);
+          }
+          return;
+        }
+        const boundId = viewerBindings.inputIdFromKey(event);
+        if (viewerBindings.hasBinding(boundId)) {
+          event.preventDefault();
+          viewerBindings.dispatch(boundId, vpCurrentPath);
+          return;
+        }
         // 옛 NAIA Viewer 와 같은 손버릇: 0=맞춤 1=원본 F=전체화면 Home/End=처음/끝.
         // H(목록 접기)와 Space(다음)는 웹 쪽에서 더한 것이다.
         if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
@@ -1582,6 +1651,7 @@ export function createResultHistoryController({
     bindInfiniteScroll();
     bindDragSelection(viewerGrid);
     bindKeyboard();
+    bindShortcutInputs();
     updateSelectionUi();
   }
 

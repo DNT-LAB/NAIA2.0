@@ -1210,6 +1210,81 @@ def register_result_display_routes(
             "remaining": session_context.result_store.unsaved_history_count(),
         }
 
+    # ── 뷰어 숏컷 바인딩 ────────────────────────────────────────────────────
+    # Dev0714 데스크톱 뷰어의 '버튼 하나로 정해 둔 폴더에 넘기기'. 실행 요청은
+    # 경로를 담지 않는다 — 어디에 쓸지는 서버가 저장된 설정에서 찾는다. 그러지
+    # 않으면 '아무 경로에나 파일을 쓰는 라우트'가 열리고, LAN 으로 붙은 다른
+    # 사람도 그걸 부를 수 있다.
+    @app.get("/api/viewer/bindings")
+    async def api_viewer_bindings_get():
+        return session_context._viewer_binding_service().load()
+
+    @app.post("/api/viewer/bindings")
+    async def api_viewer_bindings_set(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        service = session_context._viewer_binding_service()
+        try:
+            saved = await run_in_thread(lambda: service.save(payload))
+        except OSError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return {"ok": True, **saved}
+
+    @app.post("/api/viewer/bindings/dispatch")
+    async def api_viewer_bindings_dispatch(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        service = session_context._viewer_binding_service()
+        binding = service.find_binding(payload.get("input_id"))
+        if binding is None:
+            return JSONResponse({"ok": False, "error": "binding not found"}, status_code=404)
+        item = history_item_from_action_payload(session_context, payload)
+        if item is None:
+            return JSONResponse({"ok": False, "error": "history item not found"}, status_code=404)
+
+        action = binding["action"]
+        if action == "trash":
+            file_path = str(getattr(item, "filepath", "") or "")
+
+            def _trash():
+                trashed = False
+                if file_path:
+                    target = Path(file_path)
+                    if target.is_file():
+                        if not _move_to_trash(target):
+                            raise OSError(f"Could not move file to recycle bin: {target}")
+                        trashed = True
+                removed = session_context.result_store.remove_item(item)
+                if removed is None:
+                    raise FileNotFoundError("History item not found")
+                return {
+                    **session_context.result_store.viewer_removed_payload(removed),
+                    "file_path": file_path,
+                    "deleted_file": trashed,
+                    "trashed": trashed,
+                }
+
+            try:
+                removed_payload = await run_in_thread(_trash)
+            except Exception as exc:
+                return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            await broadcast_json(clients, removed_payload)
+            await broadcast_json(clients, session_context.auto_save_state_payload())
+            return {"ok": True, "action": action, "removed": removed_payload,
+                    "total": session_context.result_store.history_total()}
+
+        try:
+            result = await run_in_thread(lambda: service.copy_or_move(item, binding))
+        except (OSError, ValueError) as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return {"ok": True, "action": action, **result}
+
     @app.get("/api/history/{kind}/{history_id}")
     async def api_history_dynamic_kind(kind: str, history_id: str, size: int = 0, full: bool = False):
         normalized_kind = str(kind or "").strip().lower()

@@ -150,6 +150,9 @@ class WebSessionContext:
     def _vibe_transfer_service(self):
         return self._lazy_service("vibe_transfer")
 
+    def _viewer_binding_service(self):
+        return self._lazy_service("viewer_binding")
+
     def _nai_model_registry(self):
         return self._lazy_service("nai_model_registry")
 

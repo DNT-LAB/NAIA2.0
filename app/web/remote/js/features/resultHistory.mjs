@@ -298,6 +298,11 @@ export function createResultHistoryController({
     grid.dataset.historyDragBound = '1';
     if (!grid.hasAttribute('tabindex')) grid.tabIndex = 0;
     grid.addEventListener('pointerdown', event => {
+      // 어떤 경로로든 살아남은 마퀴가 있으면 여기서 걷는다. 위의 여섯 갈래로
+      // 대부분 잡히지만, 남으면 화면을 영구히 가리므로 마지막 방어선을 둔다.
+      if (!dragSelection) {
+        document.querySelectorAll('.history-selection-marquee').forEach(el => el.remove());
+      }
       if (event.button !== 0) return;
       const thumb = event.target?.closest?.('.viewer-thumb[data-path]');
       if (event.target !== grid && (!thumb || !grid.contains(thumb))) return;
@@ -383,8 +388,24 @@ export function createResultHistoryController({
       updateSelectionUi();
       event.preventDefault();
     });
+    // **끝내는 길을 grid 에만 두면 안 된다.** 드래그 중에 Win+Shift+S(캡처 도구)를
+    // 누르면 포인터를 빼앗기는데, 그때 grid 로는 pointerup 도 pointercancel 도
+    // 오지 않아 마퀴 사각형이 화면에 그대로 남는다(사용자 지적 2026-08-06 · 실측).
+    // `position: fixed; z-index: 10050` 이라 결과 이미지 위에 계속 떠 있는다.
+    //
+    // 그래서 창 단위로 받고, 포인터가 아니라 **맥락이 끊기는 모든 경우**를 끝으로 친다:
+    //   포인터를 뗌 / 취소됨 / 캡처를 잃음 / 창이 포커스를 잃음 / 탭이 숨겨짐 / Esc
+    // 선택 자체는 드래그 중에 이미 반영돼 있으므로, 끝낼 때 되돌리지 않는다 —
+    // 캡처하고 돌아왔을 때 고른 것이 사라져 있으면 그게 더 놀랍다.
     grid.addEventListener('pointerup', endDragSelection);
     grid.addEventListener('pointercancel', endDragSelection);
+    grid.addEventListener('lostpointercapture', endDragSelection);
+    window.addEventListener('pointerup', endDragSelection, true);
+    window.addEventListener('pointercancel', endDragSelection, true);
+    window.addEventListener('blur', () => endDragSelection());
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) endDragSelection();
+    });
   }
 
   function selectAllLoaded() {
@@ -1141,6 +1162,12 @@ export function createResultHistoryController({
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedPaths.size) {
         event.preventDefault();
         deleteSelected();
+        return;
+      }
+      // 드래그 중 Esc 는 드래그부터 끊는다 — 손이 묶인 상태를 먼저 푼다.
+      if (event.key === 'Escape' && dragSelection) {
+        event.preventDefault();
+        endDragSelection();
         return;
       }
       // Esc — 팝업이 열려 있으면 **닫기가 먼저**다. 예전에는 선택이 있으면

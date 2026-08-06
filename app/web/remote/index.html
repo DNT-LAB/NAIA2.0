@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260806g-hist1">
+<link rel="stylesheet" href="style.css?v=20260806h-hist1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -849,7 +849,8 @@
           <span class="viewer-panel-title">History <span class="viewer-panel-count" id="viewerCount"></span></span>
           <button class="viewer-pop-btn" id="viewerPopBtn" onclick="openViewerPopup()" title="Open history browser">&#8599;</button>
         </div>
-        <div class="viewer-panel-collapsed-label">History</div>
+        <button type="button" class="viewer-panel-collapsed-label" onclick="toggleHistoryRail()"
+                title="히스토리 펼치기" aria-label="히스토리 펼치기">History</button>
         <div class="viewer-panel-grid" id="viewerGrid"></div>
         <div class="viewer-panel-loading" id="viewerLoading" style="display:none">Loading...</div>
         <div class="viewer-panel-bottom">
@@ -1241,6 +1242,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260806g-ia183"></script>
+<script src="app.js?v=20260806h-ia183"></script>
 </body>
 </html>

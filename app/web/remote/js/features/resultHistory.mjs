@@ -1034,6 +1034,10 @@ export function createResultHistoryController({
           ${selectionBarMarkup('')}
         </div>
         <span class="viewer-head-spring"></span>
+        <span class="vp-guide" aria-hidden="true">
+          <b>휠</b> 장 넘김 <i>·</i> <b>Ctrl+휠</b> 확대 <i>·</i> <b>H</b> 목록 <i>·</i> <b>F</b> 전체 화면
+        </span>
+        <span class="viewer-head-spring"></span>
         <span class="vp-seen" id="vpSeen" title="이번에 펼쳐 본 장수"></span>
         <button type="button" class="viewer-head-btn" id="vpListBtn"
                 title="목록 접기 (H)">\u{21E4}</button>

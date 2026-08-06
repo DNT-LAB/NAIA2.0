@@ -6991,24 +6991,28 @@ body.resizing-result-info {
   border-bottom: 1px solid var(--border-dim);
   flex-shrink: 0;
 }
+/* 접기/펼치기는 22px 홑화살표 하나뿐이라 있는 줄도 몰랐다(사용자 지적).
+   크기를 키우고 강조색 테두리를 줘 '누르는 것'으로 읽히게 한다. */
 .viewer-rail-toggle {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid var(--border-dim);
-  border-radius: 5px;
-  color: var(--text-dim);
+  background: rgba(124,106,239,0.12);
+  border: 1px solid rgba(124,106,239,0.42);
+  border-radius: 6px;
+  color: var(--accent-glow);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
   cursor: pointer;
   flex-shrink: 0;
+  transition: all 0.15s;
 }
 .viewer-rail-toggle:hover {
-  background: rgba(255,255,255,0.09);
+  background: rgba(124,106,239,0.26);
+  border-color: var(--accent);
   color: var(--text-primary);
 }
 .viewer-panel-title {
@@ -7547,6 +7551,27 @@ body.resizing-result-info {
   font-family: var(--font-mono); font-size: 10px;
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* 머리 한가운데의 조작 안내. 휠이 장을 넘기게 되면서 확대가 Ctrl+휠 로 옮겨갔는데,
+   그건 눌러 보기 전에는 알 길이 없다. 글자를 읽기 싫어하는 것을 아니까 최소한으로 —
+   키 이름만 밝게 하고 나머지는 가라앉힌다. 좁으면 통째로 사라진다(자리를 다투지 않는다). */
+.vp-guide {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.2px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.75;
+}
+.vp-guide b { font-weight: 700; color: var(--text-muted); }
+.vp-guide i { font-style: normal; color: var(--border-glow); margin: 0 2px; }
+@media (max-width: 900px) {
+  .vp-guide { display: none; }
 }
 
 /* 위치 슬라이더. 지나온 만큼 강조색으로 차는 것(옛 뷰어의 sub-page)은 CSS 만으로는
@@ -17054,14 +17079,21 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
     border-bottom: none;
   }
   .viewer-panel.collapsed .viewer-rail-toggle {
-    width: 24px;
-    height: 24px;
+    width: 26px;
+    height: 26px;
   }
+  /* 접힌 띠는 34px 폭 전체가 '펼치기' 버튼이다. 예전에는 `pointer-events: none`
+     이라 24px 짜리 화살표만 눌렸고, 세로로 쓴 HISTORY 글자를 눌러도 아무 일이
+     없었다 — 그게 버튼처럼 생겼는데도. */
   .viewer-panel.collapsed .viewer-panel-collapsed-label {
     display: flex;
     align-items: center;
     justify-content: center;
     flex: 1;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
     writing-mode: vertical-rl;
     transform: rotate(180deg);
     font-family: var(--font-mono);
@@ -17070,7 +17102,12 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
     letter-spacing: 1.5px;
     text-transform: uppercase;
     color: var(--text-dim);
-    pointer-events: none;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+  }
+  .viewer-panel.collapsed .viewer-panel-collapsed-label:hover {
+    color: var(--accent-glow);
+    background: rgba(124,106,239,0.10);
   }
   /* PC: bottom controls 활성화 */
   .viewer-bottom-controls { display: flex; }

@@ -73,14 +73,23 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
   }
 
   // ── 저장소 ───────────────────────────────────────────────────────────────
-  async function load(force = false) {
-    if (loaded && !force) return settings;
+  /**
+   * 뷰어를 열 때마다 다시 읽는다.
+   *
+   * 한 번만 읽고 캐시했더니, 창을 둘 열어 둔 상태에서 한쪽이 설정을 바꾸면 다른
+   * 쪽은 옛 목록을 들고 있었다(실측). 파일이 엉뚱한 데로 가지는 **않는다** —
+   * 무엇을 어디에 할지는 서버가 매번 자기 설정을 다시 읽어 정하고, 여기 있는
+   * 값은 '이 키가 발화하는가'와 토스트 문구에만 쓰인다. 그래도 방금 지운 숏컷이
+   * 계속 먹거나 새로 만든 것이 안 먹는 것은 그 자체로 고장이다. 팝업 한 번에
+   * GET 한 번이면 이 부류가 통째로 사라진다.
+   */
+  async function load(force = true) {
     try {
       const resp = await fetch('/api/viewer/bindings');
       if (resp.ok) settings = await resp.json();
       loaded = true;
     } catch (_) {
-      // 못 읽어도 뷰어는 열려야 한다 — 바인딩이 없는 것으로 친다.
+      // 못 읽어도 뷰어는 열려야 한다 — 들고 있던 것으로 간다.
     }
     return settings;
   }

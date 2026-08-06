@@ -1,4 +1,4 @@
-import {createViewerBindings} from './viewerBindings.mjs?v=20260806-vb2';
+import {createViewerBindings} from './viewerBindings.mjs?v=20260806-vb3';
 
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const HISTORY_DELETE_MODE_KEY = 'naia_result_delete_mode';

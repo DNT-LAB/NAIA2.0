@@ -60,8 +60,9 @@ export function createViewerBindings({
   openSaveDirectory = null,
   getSaveDirectory = () => '',
   requestSaveDirectory = () => {},
+  openQuicksaveSettings = null,
 }) {
-  let settings = {bindings: [], dest_path: '', use_session_folder: true};
+  let settings = {bindings: [], quicksave_dir: '', quicksave_resolved: ''};
   let loaded = false;
   let capturing = null;      // 지금 입력을 받고 있는 행 (index)
   let panelOpen = false;
@@ -136,11 +137,7 @@ export function createViewerBindings({
       const resp = await fetch('/api/viewer/bindings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          bindings: settings.bindings,
-          dest_path: settings.dest_path,
-          use_session_folder: settings.use_session_folder,
-        }),
+        body: JSON.stringify({bindings: settings.bindings}),
       });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
@@ -201,7 +198,8 @@ export function createViewerBindings({
                 title="누르면 다음에 누르는 키나 마우스 버튼을 받습니다">${esc(inputLabel(binding.input_id))}</button>
         <select class="vb-action" data-vb-action="${index}">${options}</select>
         <button type="button" class="vb-dest" data-vb-dest="${index}"
-                title="${esc(dest || '공용 폴더를 씁니다')}">${esc(dest ? shortPath(dest) : '공용 폴더')}</button>
+                title="${esc(dest || '따로 안 정하면 Ctrl+S 빠른 저장 경로로 갑니다')}">${
+                  esc(dest ? shortPath(dest) : '빠른 저장 경로')}</button>
         <button type="button" class="vb-del" data-vb-del="${index}" aria-label="삭제">&times;</button>
       </div>`;
   }
@@ -277,15 +275,13 @@ export function createViewerBindings({
         <button type="button" class="vb-add" id="vbAdd"
                 ${settings.bindings.length >= MAX_BINDINGS ? 'disabled' : ''}>+ 숏컷 더하기</button>
       </div>
-      <div class="vb-foot">
-        <button type="button" class="vb-dest is-global" id="vbGlobalDest"
-                title="${esc(settings.dest_path || '아직 정하지 않았습니다')}">공용 폴더 · ${
-                  esc(settings.dest_path ? shortPath(settings.dest_path) : '정하기')}</button>
-        <label class="vb-check">
-          <input type="checkbox" id="vbSessionFolder"${settings.use_session_folder ? ' checked' : ''}>
-          세션 하위 폴더
-        </label>
-      </div>` : '';
+      <button type="button" class="vb-link" id="vbQuicksaveDir"
+              title="${esc(settings.quicksave_resolved || '')}">
+        <span class="vb-link-label">기본 대상</span>
+        <span class="vb-link-value">${
+          esc(settings.quicksave_resolved ? shortPath(settings.quicksave_resolved) : '빠른 저장 경로')}</span>
+      </button>
+      <div class="vb-note">경로를 안 정한 숏컷은 <b>Ctrl+S 빠른 저장</b>과 같은 곳으로 갑니다.</div>` : '';
 
     host.innerHTML = `
       <div class="vb-head">
@@ -340,17 +336,19 @@ export function createViewerBindings({
       writePref(PREF_DELETE_KEY_D, prefs.deleteKeyD);
       render();
     });
+    on('vbQuicksaveDir', 'click', () => {
+      // 빠른 저장 경로는 Auto Save 판이 주인이다. 여기서 한 벌 더 그리면
+      // 사용자가 두 곳을 맞춰 놓고 살아야 한다 — 그쪽을 열어 준다.
+      setPanelOpen(false);
+      if (typeof openQuicksaveSettings === 'function') openQuicksaveSettings();
+      else showToast('빠른 저장 설정을 열 수 없습니다.', 'error');
+    });
     on('vbAdd', 'click', async () => {
       if (settings.bindings.length >= MAX_BINDINGS) return;
       settings.bindings.push({input_id: '', action: 'copy', dest_path: ''});
       render();
       startCapture(settings.bindings.length - 1);
     });
-    on('vbSessionFolder', 'change', async event => {
-      settings.use_session_folder = event.target.checked;
-      await persist();
-    });
-    on('vbGlobalDest', 'click', () => pickDest(null));
 
     host.querySelectorAll('[data-vb-capture]').forEach(btn =>
       btn.addEventListener('click', () => startCapture(Number(btn.dataset.vbCapture))));
@@ -371,13 +369,13 @@ export function createViewerBindings({
       }));
   }
 
+  // 바인딩별 경로 고르기. 공용 폴더는 없어졌다(빠른 저장 경로를 쓴다).
   async function pickDest(index) {
     const picked = await globalThis.naiaShell?.pickDirectory?.().catch(() => null);
     // 선택 창을 그냥 닫으면 빈 값이 온다 — 그때 경로를 지우면 안 된다.
     const path = typeof picked === 'string' ? picked : (picked?.path || picked?.directory || '');
     if (!path) return;
-    if (index === null) settings.dest_path = path;
-    else settings.bindings[index].dest_path = path;
+    settings.bindings[index].dest_path = path;
     await persist();
     render();
   }

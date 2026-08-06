@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806q-panel2')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806s-share1')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -654,6 +654,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806q-p
       openSaveDirectory: () => openSaveDirectoryPanel(),
       getSaveDirectory: () => saveDirectoryPanel?.getState()?.current_save_directory || '',
       requestSaveDirectory: () => requestModuleState('save_directory'),
+      openQuicksaveSettings: () => openModule('auto_save'),
     });
   })
   .catch(error => {
@@ -1406,7 +1407,7 @@ const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260802-qu
   .catch(error => {
     console.error('Failed to initialize auto save panel module', error);
   });
-const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20260806-getstate1')
+const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20260806-pickfirst1')
   .then(({createSaveDirectoryPanel}) => {
     saveDirectoryPanel = createSaveDirectoryPanel({
       document,

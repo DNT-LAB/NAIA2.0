@@ -70,6 +70,16 @@ class HeadlessViewerBindingService:
         return normalized
 
     # ── 정규화 ──────────────────────────────────────────────────────────────
+    def quicksave_dir_info(self) -> dict[str, str]:
+        """Ctrl+S 빠른 저장이 쓰는 폴더. 숏컷의 기본 대상이 바로 이것이다."""
+        service = self.context._save_service()
+        raw = str(self.context.auto_save_state.get("quicksave_dir") or "").strip()
+        try:
+            resolved = str(service.quicksave_directory())
+        except Exception:
+            resolved = ""
+        return {"quicksave_dir": raw, "quicksave_resolved": resolved}
+
     def _normalize(self, raw: dict[str, Any]) -> dict[str, Any]:
         bindings: list[dict[str, str]] = []
         seen: set[str] = set()
@@ -91,12 +101,16 @@ class HeadlessViewerBindingService:
             })
             if len(bindings) >= MAX_BINDINGS:
                 break
+        # 공용 대상 폴더를 따로 두지 않는다. 이 앱에는 이미 **Ctrl+S 빠른 저장
+        # 경로**가 있고 하는 일이 똑같다("보고 있는 이미지를 지정한 경로로 따로
+        # 남긴다"). 한 벌 더 두면 사용자가 두 곳을 맞춰 놓고 살아야 하고, 어느
+        # 쪽이 이겼는지도 화면만 봐서는 알 수 없다(사용자 지적).
+        # 바인딩별 경로는 그대로 둔다 — "이 버튼은 이 폴더로"가 요청이었다.
         return {
             "bindings": bindings,
-            "dest_path": self._clean_dest(raw.get("dest_path")),
-            "use_session_folder": bool(raw.get("use_session_folder", True)),
             "actions": list(VIEWER_ACTIONS),
             "action_labels": dict(ACTION_LABELS),
+            **self.quicksave_dir_info(),
         }
 
     @staticmethod
@@ -127,13 +141,21 @@ class HeadlessViewerBindingService:
         return None
 
     def resolve_dest_dir(self, binding: dict[str, str]) -> Path:
-        """이 바인딩이 쓸 폴더. 없으면 만든다."""
-        settings = self.load()
-        raw = binding.get("dest_path") or settings["dest_path"]
+        """이 바인딩이 쓸 폴더. 없으면 만든다.
+
+        경로를 따로 안 정했으면 **Ctrl+S 빠른 저장이 쓰는 그 폴더**로 간다.
+        세션 하위 폴더를 붙일지도 그쪽 설정(`quicksave_folder`)을 그대로 따른다 —
+        같은 일을 하는 설정이 둘이면 반드시 어긋난다.
+        """
+        raw = str(binding.get("dest_path") or "").strip()
         if not raw:
-            raise ValueError("대상 폴더가 정해져 있지 않습니다")
+            base = self.context._save_service().quicksave_directory()
+            base.mkdir(parents=True, exist_ok=True)
+            return base
+
         base = Path(raw).expanduser()
-        if settings["use_session_folder"]:
+        folder = str(self.context.auto_save_state.get("quicksave_folder") or "date")
+        if folder == "date":
             stamp = str(getattr(self.context, "session_timestamp", "") or "")
             if stamp:
                 base = base / stamp

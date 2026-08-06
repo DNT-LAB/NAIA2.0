@@ -1,4 +1,4 @@
-import {createViewerBindings} from './viewerBindings.mjs?v=20260806-panel2';
+import {createViewerBindings} from './viewerBindings.mjs?v=20260806-share1';
 
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const HISTORY_DELETE_MODE_KEY = 'naia_result_delete_mode';
@@ -63,6 +63,7 @@ export function createResultHistoryController({
   openSaveDirectory = null,
   getSaveDirectory = () => '',
   requestSaveDirectory = () => {},
+  openQuicksaveSettings = null,
 }) {
   const getEl = id => document.getElementById(id);
   const viewerTab = getEl('viewerTab');
@@ -106,6 +107,7 @@ export function createResultHistoryController({
     openSaveDirectory,
     getSaveDirectory,
     requestSaveDirectory,
+    openQuicksaveSettings,
   });
   // '얼마나 봤는지'. 이번 세션에 실제로 펼쳐 본 것만 센다 — 목록에 썸네일이
   // 떴다는 것과 봤다는 것은 다르다. 새로고침하면 리셋되는 것이 맞다.

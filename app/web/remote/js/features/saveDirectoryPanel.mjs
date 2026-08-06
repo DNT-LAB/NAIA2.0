@@ -56,9 +56,16 @@ export function createSaveDirectoryPanel({
                  ${controlAllowed ? '' : 'readonly disabled'}
                  autocomplete="off" spellcheck="false"
                  onkeydown="if(event.key==='Enter') browseSaveDirectory()">
+          <!-- 고를 수 있으면 **고르는 쪽이 먼저**다. 경로를 손으로 적게 하는 것은
+               오타 하나로 엉뚱한 데에 그림이 쌓이는 길이고, 위의 칸은 그때도
+               남아 있으니 직접 적고 싶은 사람이 못 하게 되는 것도 아니다. -->
           <div class="mod-inline-row">
-            <button class="mod-btn-secondary" ${browseAllowed ? '' : 'disabled'} onclick="browseSaveDirectory()">Apply Path</button>
-            ${canPick ? `<button class="mod-btn-secondary" id="saveDirPickBtn" onclick="pickSaveDirectory()">📁 폴더 선택…</button>` : ''}
+            ${canPick
+              ? `<button class="mod-btn-secondary mod-btn-secondary--accent" id="saveDirPickBtn"
+                         onclick="pickSaveDirectory()">📁 폴더 선택…</button>` : ''}
+            <button class="mod-btn-secondary"
+                    ${browseAllowed ? '' : 'disabled'}
+                    onclick="browseSaveDirectory()">${canPick ? '적은 경로 적용' : 'Apply Path'}</button>
           </div>
           ${browseNotice}
         </label>

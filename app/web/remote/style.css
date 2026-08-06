@@ -7752,6 +7752,12 @@ body.resizing-result-info {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .vb-link::after { content: '›'; flex: 0 0 auto; color: var(--text-dim); }
+/* 어디로 가는지 한 줄로만. 켜고 끄는 것이 아니라 알려 주는 것이라 토글이 아니다. */
+.vb-note {
+  padding: 0 6px 8px;
+  font-size: 9px; line-height: 1.5; color: var(--text-dim);
+}
+.vb-note b { color: var(--text-muted); font-weight: 600; }
 
 /* 레일 발치의 설정 버튼. Open Folder 옆에 붙는다 — 머리는 이미 좁다. */
 .viewer-panel-bottom { gap: 6px; }

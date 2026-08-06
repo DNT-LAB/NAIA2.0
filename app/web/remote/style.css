@@ -7474,18 +7474,129 @@ body.resizing-result-info {
   min-width: 0;
   background: var(--bg-deep);
 }
+/* ── 그림 무대 (옛 NAIA Viewer 의 QGraphicsView 자리) ──────────────────────
+   `object-fit: contain` 은 실제 배율을 알려주지 않아 "100%"를 정직하게 띄울 수
+   없다. 그래서 원본 픽셀 크기로 두고 transform 으로 직접 확대/이동한다. */
+.vp-stage {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  bottom: 44px;            /* 조작 바 자리. 겹쳐 띄우면 그림 아랫부분을 가린다 */
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+.vp-stage.is-pannable { cursor: grab; }
+.vp-stage.is-panning { cursor: grabbing; }
 .viewer-popup-right img.vp-preview {
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  /* 그림이 칸 경계에 딱 붙어 잘린 것처럼 보이던 것 — 무대에 여백을 준다. */
-  padding: 14px;
+  max-width: none;
+  max-height: none;
+  width: auto;
+  height: auto;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* ── 하단 조작 바 ────────────────────────────────────────────────────────── */
+/* 머리와 같은 문법의 한 줄 — 다만 발치에 앉는다. 그림 위에 떠 있지 않으므로
+   아랫부분이 가려지지 않는다. */
+.vp-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 44px;
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border-dim);
+  background: var(--bg-surface);
+}
+.vp-bar-btn {
+  flex: 0 0 auto;
+  min-width: 26px; height: 26px; padding: 0 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.vp-bar-btn:hover { color: var(--text-primary); border-color: var(--border-glow); background: rgba(255,255,255,0.09); }
+.vp-bar-btn.is-wide { min-width: 44px; }
+.vp-bar-btn.is-on { border-color: rgba(124,106,239,0.55); color: var(--accent-glow); }
+.vp-bar-sep {
+  flex: 0 0 auto; width: 1px; height: 16px; margin: 0 2px;
+  background: var(--border-dim);
+}
+.vp-pos, .vp-zoom {
+  flex: 0 0 auto;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vp-pos { min-width: 64px; text-align: center; }
+.vp-zoom { min-width: 42px; text-align: center; }
+.vp-seen {
+  flex: 0 0 auto;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 위치 슬라이더. 지나온 만큼 강조색으로 차는 것(옛 뷰어의 sub-page)은 CSS 만으로는
+   안 된다 — 크로뮴에 track 의 앞부분만 칠하는 표준 방법이 없다. 그래서 JS 가
+   `background` 에 그라디언트를 직접 그린다. 아래 값은 그 전의 바탕이다. */
+.vp-slider {
+  flex: 1 1 auto;
+  min-width: 60px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 2px;
+  background: var(--border-dim);
+  cursor: pointer;
+}
+.vp-slider:disabled { opacity: 0.4; cursor: default; }
+.vp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--accent-glow);
+  border: 0;
+  cursor: pointer;
+}
+.vp-slider::-moz-range-thumb {
+  width: 12px; height: 12px; border: 0; border-radius: 50%;
+  background: var(--accent-glow); cursor: pointer;
+}
+
+/* ── 목록 접기 = 그림 최대화 ─────────────────────────────────────────────── */
+.viewer-popup-inner.list-hidden .viewer-popup-left { display: none; }
+
+/* ── 본 것 표시 ──────────────────────────────────────────────────────────
+   펼쳐 본 것은 가라앉히고 아직 안 본 것을 또렷하게 둔다 — '어디까지 봤는지'가
+   격자에서 바로 읽힌다(읽음/안읽음과 같은 손버릇). 썸네일이 벌거벗은 <img> 라
+   가상 요소를 못 붙이므로 밝기와 테두리로만 가른다. */
+.viewer-popup-left .viewer-thumb { opacity: 0.95; }
+.viewer-popup-left .viewer-thumb[data-seen="1"] {
+  opacity: 0.42;
+  border-color: rgba(42,42,61,0.5);
+}
+.viewer-popup-left .viewer-thumb[data-seen="1"]:hover { opacity: 0.85; }
+.viewer-popup-left .viewer-thumb[data-seen="1"].active,
+.viewer-popup-left .viewer-thumb[data-seen="1"].selected {
+  opacity: 1;
+  border-color: var(--accent);
 }
 .viewer-popup-right .prompt-float {
   position: absolute;
-  bottom: 42px; left: 8px; right: 8px;
+  bottom: 54px; left: 12px; right: 12px;   /* 하단 조작 바(44px) 바로 위에 앉는다 */
   max-width: none;
 }
 @media (max-width: 600px) {

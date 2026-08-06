@@ -73,6 +73,26 @@ export function createResultHistoryController({
   let viewerLoadingMore = false;
   let viewerPopupOpen = false;
   let vpPage = 0;
+
+  // ── 옛 NAIA Viewer 에서 가져온 뷰어 상태 ────────────────────────────────
+  // 데스크톱 뷰어는 QGraphicsView 가 줌/팬을 맡았다. 웹에는 그런 것이 없어
+  // 원본 픽셀 크기를 기준으로 직접 계산한다 — `object-fit: contain` 은
+  // 배율을 알려주지 않아서 "100%"를 정직하게 띄울 수가 없다.
+  const VP_ZOOM_MIN = 0.05;
+  const VP_ZOOM_MAX = 16;
+  const VP_ZOOM_STEP = 1.25;          // 데스크톱 뷰어와 같은 비율
+  let vpZoom = 1;
+  let vpFitZoom = 1;                  // '맞춤' 배율 — 원본 토글의 기준점
+  let vpFitMode = true;
+  let vpTx = 0;
+  let vpTy = 0;
+  let vpNatW = 0;
+  let vpNatH = 0;
+  let vpPan = null;
+  let vpListHidden = false;
+  // '얼마나 봤는지'. 이번 세션에 실제로 펼쳐 본 것만 센다 — 목록에 썸네일이
+  // 떴다는 것과 봤다는 것은 다르다. 새로고침하면 리셋되는 것이 맞다.
+  const vpSeen = new Set();
   let vpLoading = false;
   let vpCurrentPath = '';
   let viewerNavPaths = [];
@@ -1012,6 +1032,11 @@ export function createResultHistoryController({
           ${selectionBarMarkup('')}
         </div>
         <span class="viewer-head-spring"></span>
+        <span class="vp-seen" id="vpSeen" title="이번에 펼쳐 본 장수"></span>
+        <button type="button" class="viewer-head-btn" id="vpListBtn"
+                title="목록 접기 (H)">\u{21E4}</button>
+        <button type="button" class="viewer-head-btn" id="vpFsBtn"
+                title="전체 화면 (F)">\u{2921}</button>
         <button type="button" class="viewer-head-btn" onclick="openResultFolder()"
                 title="결과 폴더 열기">\u{1F4C1}</button>
         <button type="button" class="history-close"
@@ -1020,11 +1045,25 @@ export function createResultHistoryController({
       <div class="viewer-popup-body">
         <div class="viewer-popup-left" id="vpGrid"></div>
         <div class="viewer-popup-right" id="vpRight">
-          <img class="vp-preview" id="vpPreview" alt="">
+          <div class="vp-stage" id="vpStage">
+            <img class="vp-preview" id="vpPreview" alt="" draggable="false">
+          </div>
           <div class="prompt-float" id="vpPromptFloat">
             <div class="prompt-float-content" id="vpPromptContent"></div>
           </div>
-
+          <div class="vp-bar" id="vpBar">
+            <button type="button" class="vp-bar-btn" id="vpPrev" title="이전 (\u2190)">\u25C0</button>
+            <input type="range" class="vp-slider" id="vpSlider" min="1" max="1" value="1"
+                   aria-label="위치">
+            <span class="vp-pos" id="vpPos">0 / 0</span>
+            <button type="button" class="vp-bar-btn" id="vpNext" title="다음 (\u2192)">\u25B6</button>
+            <span class="vp-bar-sep"></span>
+            <button type="button" class="vp-bar-btn" id="vpZoomOut" title="축소 (\u2212)">\u2212</button>
+            <span class="vp-zoom" id="vpZoom">100%</span>
+            <button type="button" class="vp-bar-btn" id="vpZoomIn" title="확대 (+)">+</button>
+            <button type="button" class="vp-bar-btn is-wide" id="vpFit"
+                    title="맞춤 0 / 원본 1">맞춤</button>
+          </div>
         </div>
       </div>
       <div class="viewer-panel-loading" id="vpLoading" style="display:none">Loading...</div>
@@ -1038,6 +1077,9 @@ export function createResultHistoryController({
       bindDragSelection(grid);
     }
     bindSelectionBar(getEl('vpSelectionBar'));
+    bindPopupViewer();
+    vpSetListHidden(false);
+    vpUpdatePosition();
     updateSelectionUi();
   }
 
@@ -1060,6 +1102,7 @@ export function createResultHistoryController({
           img.loading = 'lazy';
           img.dataset.path = entry.rel_path;
           img.src = historyAssetUrl(entry.rel_path, 'thumb');
+          if (vpSeen.has(entry.rel_path)) img.dataset.seen = '1';
           configureThumb(img, entry.rel_path, grid, () => selectPopupImage(entry.rel_path, img), {selectOnOpen: true});
           grid.appendChild(img);
         }
@@ -1068,11 +1111,225 @@ export function createResultHistoryController({
       viewerTotal = data.total;
       const count = getEl('vpCount');
       if (count) count.textContent = data.total;
+      vpUpdatePosition();
     } catch (_) {
     } finally {
       vpLoading = false;
       if (loading) loading.style.display = 'none';
     }
+  }
+
+  // ── 줌 / 팬 ─────────────────────────────────────────────────────────────
+  function vpApplyTransform() {
+    const img = getEl('vpPreview');
+    if (!img) return;
+    img.style.transform = `translate(${Math.round(vpTx)}px, ${Math.round(vpTy)}px) scale(${vpZoom})`;
+    const label = getEl('vpZoom');
+    if (label) label.textContent = `${Math.round(vpZoom * 100)}%`;
+    const fit = getEl('vpFit');
+    if (fit) {
+      // 옛 뷰어는 '지금 무슨 모드인가'를 적었는데, 휠로 107% 쯤에 가 있으면
+      // 맞춤도 원본도 아니면서 "원본"이라고 적혀 거짓말이 된다. 여기서는
+      // **누르면 무엇이 되는지**를 적는다.
+      fit.textContent = vpFitMode ? '원본' : '맞춤';
+      fit.title = vpFitMode ? '원본 크기로 (1)' : '화면에 맞추기 (0)';
+      fit.classList.toggle('is-on', vpFitMode);
+    }
+    const stage = getEl('vpStage');
+    if (stage) stage.classList.toggle('is-pannable', !vpFitMode || vpZoom > vpFitZoom + 0.001);
+  }
+
+  function vpComputeFit() {
+    const stage = getEl('vpStage');
+    if (!stage || !vpNatW || !vpNatH) return 1;
+    const box = stage.getBoundingClientRect();
+    const pad = 28;   // 무대 여백 — 그림이 경계에 붙어 잘린 것처럼 보이지 않게
+    const w = Math.max(1, box.width - pad);
+    const h = Math.max(1, box.height - pad);
+    // 원본보다 크게 늘리지 않는다. 작은 그림을 억지로 키우면 뭉개져 보인다.
+    return Math.min(w / vpNatW, h / vpNatH, 1);
+  }
+
+  function vpFitToStage() {
+    vpFitZoom = vpComputeFit();
+    vpZoom = vpFitZoom;
+    vpFitMode = true;
+    vpTx = 0;
+    vpTy = 0;
+    vpApplyTransform();
+  }
+
+  function vpSetZoom(next, anchor) {
+    const z = Math.min(VP_ZOOM_MAX, Math.max(VP_ZOOM_MIN, next));
+    if (Math.abs(z - vpZoom) < 1e-6) return;
+    const stage = getEl('vpStage');
+    if (stage && anchor) {
+      // 커서 아래의 점을 붙잡아 둔다 — 붙잡지 않으면 확대할수록 보던 곳이 달아난다.
+      const box = stage.getBoundingClientRect();
+      const cx = anchor.x - box.left - box.width / 2;
+      const cy = anchor.y - box.top - box.height / 2;
+      const k = z / vpZoom;
+      vpTx = cx - (cx - vpTx) * k;
+      vpTy = cy - (cy - vpTy) * k;
+    }
+    vpZoom = z;
+    vpFitMode = Math.abs(vpZoom - vpFitZoom) < 1e-6 && vpTx === 0 && vpTy === 0;
+    vpApplyTransform();
+  }
+
+  function vpZoomStep(direction, anchor) {
+    vpSetZoom(direction > 0 ? vpZoom * VP_ZOOM_STEP : vpZoom / VP_ZOOM_STEP, anchor);
+  }
+
+  function vpToggleFit() {
+    if (vpFitMode) {
+      vpZoom = 1;               // 원본 1:1
+      vpFitMode = false;
+      vpTx = 0;
+      vpTy = 0;
+      vpApplyTransform();
+    } else {
+      vpFitToStage();
+    }
+  }
+
+  function vpOnImageLoad() {
+    const img = getEl('vpPreview');
+    if (!img) return;
+    vpNatW = img.naturalWidth || 0;
+    vpNatH = img.naturalHeight || 0;
+    vpFitToStage();
+  }
+
+  // ── 위치 / 본 것 ────────────────────────────────────────────────────────
+  function vpThumbs() {
+    const grid = getEl('vpGrid');
+    return grid ? [...grid.querySelectorAll('.viewer-thumb')] : [];
+  }
+
+  function vpPaintSlider(value, total) {
+    const slider = getEl('vpSlider');
+    if (!slider) return;
+    const pct = total > 1 ? ((value - 1) / (total - 1)) * 100 : 0;
+    slider.style.background =
+      `linear-gradient(to right, var(--accent) ${pct}%, var(--border-dim) ${pct}%)`;
+  }
+
+  function vpUpdatePosition() {
+    const thumbs = vpThumbs();
+    const index = thumbs.findIndex(t => t.classList.contains('active'));
+    const slider = getEl('vpSlider');
+    const pos = getEl('vpPos');
+    const total = Math.max(viewerTotal, thumbs.length);
+    if (slider) {
+      slider.max = String(Math.max(1, total));
+      slider.value = String(index >= 0 ? index + 1 : 1);
+      slider.disabled = total <= 1;
+      vpPaintSlider(Number(slider.value), total);
+    }
+    if (pos) pos.textContent = `${index >= 0 ? index + 1 : 0} / ${total}`;
+    const seen = getEl('vpSeen');
+    if (seen) {
+      seen.textContent = vpSeen.size ? `\u{1F441} ${vpSeen.size}` : '';
+      seen.title = `이번에 펼쳐 본 장수 — 전체 ${total}장 중 ${vpSeen.size}장`;
+    }
+  }
+
+  // 슬라이더를 아직 안 불러온 구간으로 던지면, 거기까지 순서대로 채운 뒤 간다.
+  // 무한 스크롤이 하던 일과 같다 — 다만 사용자가 요청했을 때만 몰아서 한다.
+  async function vpSeek(index) {
+    let thumbs = vpThumbs();
+    let guard = 0;
+    while (index >= thumbs.length && thumbs.length < viewerTotal && guard++ < 80) {
+      await loadPopupPage(vpPage);
+      const grown = vpThumbs();
+      if (grown.length === thumbs.length) break;   // 더 안 늘면 그만
+      thumbs = grown;
+    }
+    const target = thumbs[Math.min(Math.max(0, index), thumbs.length - 1)];
+    if (target) {
+      selectPopupImage(target.dataset.path, target);
+      target.scrollIntoView({block: 'nearest'});
+    }
+  }
+
+  // ── 목록 접기 / 전체 화면 ───────────────────────────────────────────────
+  function vpSetListHidden(hidden) {
+    vpListHidden = hidden;
+    const inner = getEl('viewerLightbox')?.querySelector('.viewer-popup-inner');
+    if (inner) inner.classList.toggle('list-hidden', hidden);
+    const btn = getEl('vpListBtn');
+    if (btn) {
+      btn.textContent = hidden ? '\u21E5' : '\u21E4';
+      btn.title = hidden ? '목록 펼치기 (H)' : '목록 접기 (H)';
+      btn.classList.toggle('is-on', hidden);
+    }
+    // 무대 폭이 바뀌었으니 맞춤 배율을 다시 잡는다.
+    if (vpFitMode) requestAnimationFrame(vpFitToStage);
+  }
+
+  function vpToggleFullscreen() {
+    const lb = getEl('viewerLightbox');
+    if (!lb) return;
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else lb.requestFullscreen?.().catch(() => showToast('전체 화면을 열 수 없습니다.', 'error'));
+  }
+
+  function bindPopupViewer() {
+    const img = getEl('vpPreview');
+    if (img) img.addEventListener('load', vpOnImageLoad);
+
+    const stage = getEl('vpStage');
+    if (stage) {
+      stage.addEventListener('wheel', event => {
+        event.preventDefault();
+        vpZoomStep(event.deltaY < 0 ? 1 : -1, {x: event.clientX, y: event.clientY});
+      }, {passive: false});
+      stage.addEventListener('dblclick', vpToggleFit);
+      stage.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
+        vpPan = {x: event.clientX, y: event.clientY, tx: vpTx, ty: vpTy};
+        stage.setPointerCapture?.(event.pointerId);
+        stage.classList.add('is-panning');
+      });
+      stage.addEventListener('pointermove', event => {
+        if (!vpPan) return;
+        vpTx = vpPan.tx + (event.clientX - vpPan.x);
+        vpTy = vpPan.ty + (event.clientY - vpPan.y);
+        if (vpTx !== 0 || vpTy !== 0) vpFitMode = false;
+        vpApplyTransform();
+      });
+      // 마퀴 잔상 때와 같은 이유로 끝내는 길을 넓게 둔다 — 창을 뺏겨도 풀린다.
+      const endPan = () => { vpPan = null; stage.classList.remove('is-panning'); };
+      stage.addEventListener('pointerup', endPan);
+      stage.addEventListener('pointercancel', endPan);
+      stage.addEventListener('lostpointercapture', endPan);
+      window.addEventListener('blur', endPan);
+    }
+
+    const on = (id, fn) => { const el = getEl(id); if (el) el.addEventListener('click', fn); };
+    on('vpPrev', () => navPopup(-1));
+    on('vpNext', () => navPopup(1));
+    on('vpZoomIn', () => vpZoomStep(1));
+    on('vpZoomOut', () => vpZoomStep(-1));
+    on('vpFit', vpToggleFit);
+    on('vpListBtn', () => vpSetListHidden(!vpListHidden));
+    on('vpFsBtn', vpToggleFullscreen);
+
+    const slider = getEl('vpSlider');
+    if (slider) {
+      // 끌고 있는 동안은 숫자만 따라간다. 손을 뗄 때 한 번만 실제로 옮긴다 —
+      // 매 픽셀마다 옮기면 아직 안 받은 구간에서 요청이 쏟아진다.
+      slider.addEventListener('input', () => {
+        const pos = getEl('vpPos');
+        const total = Math.max(viewerTotal, vpThumbs().length);
+        if (pos) pos.textContent = `${slider.value} / ${total}`;
+        vpPaintSlider(Number(slider.value), total);
+      });
+      slider.addEventListener('change', () => vpSeek(Number(slider.value) - 1));
+    }
+
+    window.addEventListener('resize', () => { if (viewerPopupOpen && vpFitMode) vpFitToStage(); });
   }
 
   function selectPopupImage(relPath, thumbEl) {
@@ -1089,6 +1346,9 @@ export function createResultHistoryController({
     if (thumbEl) thumbEl.classList.add('active');
     const cb = getEl('vpPromptCb');
     if (cb && cb.checked) loadPromptForFloat(relPath, 'vpPromptFloat', 'vpPromptContent');
+    if (relPath) vpSeen.add(relPath);
+    if (thumbEl) thumbEl.dataset.seen = '1';
+    vpUpdatePosition();
   }
 
   function togglePopupPrompt(checked) {
@@ -1107,6 +1367,8 @@ export function createResultHistoryController({
 
   function closePopup() {
     viewerPopupOpen = false;
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    vpPan = null;
     // 선택을 놓지 않으면 팝업을 닫은 뒤의 Ctrl+S 가 옛 선택을 저장한다.
     vpCurrentPath = '';
     const lb = getEl('viewerLightbox');
@@ -1125,6 +1387,8 @@ export function createResultHistoryController({
     if (next >= 0 && next < thumbs.length) {
       selectPopupImage(thumbs[next].dataset.path, thumbs[next]);
       thumbs[next].scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    } else if (direction > 0 && thumbs.length < viewerTotal) {
+      vpSeek(thumbs.length);   // 목록 끝 — 다음 쪽을 받아 이어서 본다
     }
   }
 
@@ -1187,14 +1451,48 @@ export function createResultHistoryController({
       }
 
       if (viewerPopupOpen) {
+        // 옛 NAIA Viewer 와 같은 손버릇: 0=맞춤 1=원본 F=전체화면 Home/End=처음/끝.
+        // H(목록 접기)와 Space(다음)는 웹 쪽에서 더한 것이다.
         if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
           event.preventDefault();
           navPopup(-1);
-        } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowRight'
+                   || event.key === ' ' || event.key === 'Spacebar') {
           event.preventDefault();
           navPopup(1);
+        } else if (event.key === 'Home') {
+          event.preventDefault();
+          vpSeek(0);
+        } else if (event.key === 'End') {
+          event.preventDefault();
+          vpSeek(Math.max(0, viewerTotal - 1));
+        } else if (key === '0') {
+          event.preventDefault();
+          vpFitToStage();
+        } else if (key === '1') {
+          // 어디에 가 있든 1 은 항상 원본 1:1 로 되돌린다 — 휠로 107% 쯤에
+          // 떠 있을 때 아무 반응이 없으면 고장으로 읽힌다.
+          event.preventDefault();
+          vpZoom = 1;
+          vpFitMode = Math.abs(vpFitZoom - 1) < 1e-6;
+          vpTx = 0;
+          vpTy = 0;
+          vpApplyTransform();
+        } else if (key === '+' || key === '=') {
+          event.preventDefault();
+          vpZoomStep(1);
+        } else if (key === '-' || key === '_') {
+          event.preventDefault();
+          vpZoomStep(-1);
+        } else if (key === 'f' || event.key === 'F11') {
+          event.preventDefault();
+          vpToggleFullscreen();
+        } else if (key === 'h') {
+          event.preventDefault();
+          vpSetListHidden(!vpListHidden);
         } else if (event.key === 'Escape') {
-          closePopup();
+          if (document.fullscreenElement) document.exitFullscreen?.();
+          else closePopup();
         }
         return;
       }

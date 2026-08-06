@@ -16,6 +16,9 @@ const MAX_BINDINGS = 12;
 // 뜻이 있으므로 서버가 아니라 localStorage 에 둔다(레일 접힘·삭제 방식과 같은 자리).
 const PREF_NO_CONFIRM = 'naia_history_delete_no_confirm';
 const PREF_DELETE_KEY_D = 'naia_history_delete_key_d';
+// 삭제 방식은 우클릭 메뉴가 쓰던 것과 **같은 키**다. 새 키를 파면 두 곳이
+// 서로 다른 값을 보게 된다 — 한 벌만 둔다.
+const PREF_DELETE_MODE = 'naia_result_delete_mode';
 
 function readPref(key) {
   try { return localStorage.getItem(key) === '1'; } catch (_) { return false; }
@@ -23,6 +26,14 @@ function readPref(key) {
 
 function writePref(key, on) {
   try { localStorage.setItem(key, on ? '1' : '0'); } catch (_) {}
+}
+
+function readDeleteToDisk() {
+  try { return localStorage.getItem(PREF_DELETE_MODE) === 'disk'; } catch (_) { return false; }
+}
+
+function writeDeleteToDisk(on) {
+  try { localStorage.setItem(PREF_DELETE_MODE, on ? 'disk' : 'history'); } catch (_) {}
 }
 
 /**
@@ -51,6 +62,7 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
   const prefs = {
     noConfirm: readPref(PREF_NO_CONFIRM),
     deleteKeyD: readPref(PREF_DELETE_KEY_D),
+    deleteToDisk: readDeleteToDisk(),
   };
 
   const isAppMode = () => Boolean(globalThis.naiaShell?.pickDirectory);
@@ -231,10 +243,14 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
         <button type="button" class="vb-close" id="vbClose" aria-label="닫기">&times;</button>
       </div>
       <div class="vb-body vb-prefs">
+        ${toggleHtml('vbDeleteToDisk', '저장 파일도 함께 삭제', prefs.deleteToDisk,
+                     prefs.deleteToDisk
+                       ? '파일은 휴지통으로 갑니다'
+                       : '지금은 히스토리에서만 지웁니다 — 파일은 그대로 남습니다')}
         ${toggleHtml('vbNoConfirm', '삭제할 때 묻지 않음', prefs.noConfirm,
                      '되돌리려면 휴지통에서 꺼내야 합니다')}
-        ${toggleHtml('vbDeleteKeyD', 'D 키로 삭제', prefs.deleteKeyD,
-                     'Del 은 켜지 않아도 늘 됩니다')}
+        ${toggleHtml('vbDeleteKeyD', 'Ctrl+D 로 삭제', prefs.deleteKeyD,
+                     'Ctrl+S 가 저장인 것과 짝을 맞춥니다')}
       </div>
       ${shortcutSection}`;
     bind(host);
@@ -243,6 +259,11 @@ export function createViewerBindings({getEl, showToast, onItemRemoved}) {
   function bind(host) {
     const on = (id, event, fn) => { const el = getEl(id); if (el) el.addEventListener(event, fn); };
     on('vbClose', 'click', () => setPanelOpen(false));
+    on('vbDeleteToDisk', 'click', () => {
+      prefs.deleteToDisk = !prefs.deleteToDisk;
+      writeDeleteToDisk(prefs.deleteToDisk);
+      render();
+    });
     on('vbNoConfirm', 'click', () => {
       prefs.noConfirm = !prefs.noConfirm;
       writePref(PREF_NO_CONFIRM, prefs.noConfirm);

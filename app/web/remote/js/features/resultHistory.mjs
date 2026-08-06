@@ -1,4 +1,4 @@
-import {createViewerBindings} from './viewerBindings.mjs?v=20260806-prefs1';
+import {createViewerBindings} from './viewerBindings.mjs?v=20260806-prefs2';
 
 const HISTORY_RAIL_COLLAPSED_KEY = 'naia_history_rail_collapsed';
 const HISTORY_DELETE_MODE_KEY = 'naia_result_delete_mode';
@@ -490,12 +490,13 @@ export function createResultHistoryController({
   async function deleteSelected() {
     const paths = orderedSelectedPaths();
     if (!paths.length || selectionBusy) return;
+    // 뷰어 설정 판과 우클릭 메뉴가 쓰는 것과 **같은 키**다. 세 곳이 한 값을 본다.
     let deleteMode = 'history';
     try { deleteMode = localStorage.getItem(HISTORY_DELETE_MODE_KEY) === 'disk' ? 'disk' : 'history'; } catch (_) {}
     const modeText = deleteMode === 'disk'
       ? '연결된 저장 파일은 영구 삭제하지 않고 휴지통으로 이동합니다.'
       : '히스토리에서만 제거하며 저장 파일은 유지합니다.';
-    // '묻지 않음'을 켜 두었으면 곧장 지운다. 되돌릴 길은 남아 있다 \u2014 디스크
+    // '묻지 않음'을 켜 두었으면 곧장 지운다. 되돌릴 길은 남아 있다 — 디스크
     // 삭제도 휴지통으로만 가고, 히스토리 삭제는 파일을 건드리지 않는다.
     if (!viewerBindings.skipDeleteConfirm()) {
       const message = `${paths.length}개 선택 항목을 삭제할까요?\n${modeText}`;
@@ -1385,7 +1386,7 @@ export function createResultHistoryController({
     const btn = getEl('vpShortcutBtn');
     if (!btn) return;
     // 예전에는 앱에서만 띄웠다. 이제 이 판에는 폴더와 무관한 손버릇 토글도 있어
-    // 브라우저에서도 열려야 한다 \u2014 숏컷 구역만 앱에서 그린다(패널 쪽 판단).
+    // 브라우저에서도 열려야 한다 — 숏컷 구역만 앱에서 그린다(패널 쪽 판단).
     btn.addEventListener('click', () => viewerBindings.togglePanel());
     if (viewerBindings.isAppMode()) viewerBindings.load();
   }
@@ -1536,14 +1537,17 @@ export function createResultHistoryController({
         selectAllLoaded();
         return;
       }
-      // D 는 켜 둔 사람만 쓴다. 켜져 있으면 Del 과 **똑같이** 동작한다 \u2014
+      // Ctrl+D 는 켜 둔 사람만 쓴다. 켜져 있으면 Del 과 **똑같이** 동작한다 —
       // 삭제 방식(히스토리만 / 휴지통)도, 물어볼지 말지도 한 곳에서 갈린다.
+      // Ctrl 을 붙인 이유는 **Ctrl+S 가 저장이기 때문**이다(사용자 지적). 맨 D 는
+      // 저장과 짝이 안 맞고, 글자 키 하나에 파일 삭제가 얹히는 것도 무겁다.
+      // 브라우저 즐겨찾기가 Ctrl+D 지만 preventDefault 로 눌린다.
       // 숏컷 설정에서 입력을 받는 중이면 그 키는 설정 몫이므로 여기서 비켜난다.
       const deleteKey = event.key === 'Delete'
         || event.key === 'Backspace'
         || (viewerBindings.deleteKeyDEnabled()
             && String(event.key).toLowerCase() === 'd'
-            && !event.ctrlKey && !event.metaKey && !event.altKey
+            && commandKey && !event.altKey && !event.shiftKey
             && !viewerBindings.isCapturing());
       if (deleteKey && selectedPaths.size) {
         event.preventDefault();

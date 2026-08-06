@@ -722,6 +722,9 @@ export function createResultContextMenu({
   }
 
   function open(kind, x, y, context = {}) {
+    // 삭제 방식은 이 메뉴 말고 뷰어 설정 판에서도 바꾼다. 만들 때 한 번 읽고 마는
+    // 값이라 그쪽에서 바꾸면 여기 ✓ 가 어긋난 채로 남았다 — 열 때마다 다시 읽는다.
+    deleteMode = readDeleteMode();
     close();
     const version = ++menuVersion;
     menu = document.createElement('div');

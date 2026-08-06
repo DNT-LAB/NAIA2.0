@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806m-prefs1')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260806n-prefs2')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -803,7 +803,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-l
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260717-charasset1')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20260806-delmode1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,

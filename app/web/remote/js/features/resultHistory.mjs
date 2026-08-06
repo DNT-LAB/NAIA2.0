@@ -1052,15 +1052,15 @@ export function createResultHistoryController({
             <div class="prompt-float-content" id="vpPromptContent"></div>
           </div>
           <div class="vp-bar" id="vpBar">
-            <button type="button" class="vp-bar-btn" id="vpPrev" title="이전 (\u2190)">\u25C0</button>
+            <button type="button" class="vp-bar-btn" id="vpPrev" title="이전 (\u2190 / 휠 위)">\u25C0</button>
             <input type="range" class="vp-slider" id="vpSlider" min="1" max="1" value="1"
                    aria-label="위치">
             <span class="vp-pos" id="vpPos">0 / 0</span>
-            <button type="button" class="vp-bar-btn" id="vpNext" title="다음 (\u2192)">\u25B6</button>
+            <button type="button" class="vp-bar-btn" id="vpNext" title="다음 (\u2192 / 휠 아래)">\u25B6</button>
             <span class="vp-bar-sep"></span>
-            <button type="button" class="vp-bar-btn" id="vpZoomOut" title="축소 (\u2212)">\u2212</button>
+            <button type="button" class="vp-bar-btn" id="vpZoomOut" title="축소 (\u2212 / Ctrl+휠)">\u2212</button>
             <span class="vp-zoom" id="vpZoom">100%</span>
-            <button type="button" class="vp-bar-btn" id="vpZoomIn" title="확대 (+)">+</button>
+            <button type="button" class="vp-bar-btn" id="vpZoomIn" title="확대 (+ / Ctrl+휠)">+</button>
             <button type="button" class="vp-bar-btn is-wide" id="vpFit"
                     title="맞춤 0 / 원본 1">맞춤</button>
           </div>
@@ -1177,6 +1177,19 @@ export function createResultHistoryController({
     vpApplyTransform();
   }
 
+  // 휠 한 번에 한 장. 트랙패드는 손가락 한 번에도 델타를 수십 번 흘리므로
+  // 그대로 받으면 열 장이 우르르 지나간다 — 문턱을 넘을 때만 한 칸 옮긴다.
+  const VP_WHEEL_THRESHOLD = 60;
+  let vpWheelAccum = 0;
+  function vpWheelNavigate(deltaY) {
+    if (Math.sign(deltaY) !== Math.sign(vpWheelAccum)) vpWheelAccum = 0;
+    vpWheelAccum += deltaY;
+    if (Math.abs(vpWheelAccum) < VP_WHEEL_THRESHOLD) return;
+    const direction = vpWheelAccum < 0 ? -1 : 1;
+    vpWheelAccum = 0;
+    navPopup(direction);
+  }
+
   function vpZoomStep(direction, anchor) {
     vpSetZoom(direction > 0 ? vpZoom * VP_ZOOM_STEP : vpZoom / VP_ZOOM_STEP, anchor);
   }
@@ -1281,9 +1294,18 @@ export function createResultHistoryController({
 
     const stage = getEl('vpStage');
     if (stage) {
+      // 옛 뷰어와 같다: 맨 휠은 **장 넘김**, 좌클릭을 누른 채 휠이면 줌.
+      // 웹에서는 좌클릭을 누르면 곧바로 팬이 시작되므로 Ctrl/Cmd + 휠도
+      // 같이 받는다 — 브라우저에서 확대는 원래 그 손가락이다.
       stage.addEventListener('wheel', event => {
+        if (!event.deltaY) return;
         event.preventDefault();
-        vpZoomStep(event.deltaY < 0 ? 1 : -1, {x: event.clientX, y: event.clientY});
+        const zoomIntent = event.ctrlKey || event.metaKey || vpPan;
+        if (zoomIntent) {
+          vpZoomStep(event.deltaY < 0 ? 1 : -1, {x: event.clientX, y: event.clientY});
+        } else {
+          vpWheelNavigate(event.deltaY);
+        }
       }, {passive: false});
       stage.addEventListener('dblclick', vpToggleFit);
       stage.addEventListener('pointerdown', event => {

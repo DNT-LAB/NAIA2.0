@@ -90,6 +90,8 @@ export function createResultHistoryController({
   let vpNatH = 0;
   let vpPan = null;
   let vpListHidden = false;
+  // 끝에서 한 번 막아 두는 자리(옛 뷰어의 `_edge_pending`). '' | 'first' | 'last'.
+  let vpEdgePending = '';
   // '얼마나 봤는지'. 이번 세션에 실제로 펼쳐 본 것만 센다 — 목록에 썸네일이
   // 떴다는 것과 봤다는 것은 다르다. 새로고침하면 리셋되는 것이 맞다.
   const vpSeen = new Set();
@@ -1078,6 +1080,8 @@ export function createResultHistoryController({
     }
     bindSelectionBar(getEl('vpSelectionBar'));
     bindPopupViewer();
+    vpEdgePending = '';
+    vpWheelAccum = 0;
     vpSetListHidden(false);
     vpUpdatePosition();
     updateSelectionUi();
@@ -1355,6 +1359,9 @@ export function createResultHistoryController({
   }
 
   function selectPopupImage(relPath, thumbEl) {
+    // 실제로 한 장이 열렸으면 끝에서 막아 둔 자리를 푼다 — 클릭이든 슬라이더든
+    // 화살표든, 어디로든 움직였으면 '끝에 서 있다'는 상태는 이미 지났다.
+    vpEdgePending = '';
     vpCurrentPath = relPath;
     onDiskImageSelected(relPath);
     const previewEl = getEl('vpPreview');
@@ -1409,9 +1416,26 @@ export function createResultHistoryController({
     if (next >= 0 && next < thumbs.length) {
       selectPopupImage(thumbs[next].dataset.path, thumbs[next]);
       thumbs[next].scrollIntoView({block: 'nearest', behavior: 'smooth'});
-    } else if (direction > 0 && thumbs.length < viewerTotal) {
-      vpSeek(thumbs.length);   // 목록 끝 — 다음 쪽을 받아 이어서 본다
+      return;
     }
+    // 아직 안 받은 뒷장이 남아 있으면 여기는 끝이 아니다 — 이어서 받는다.
+    // (데스크톱 뷰어는 폴더 전체를 한 번에 들고 있어 이 경우가 없었다.)
+    if (direction > 0 && thumbs.length < viewerTotal) {
+      vpSeek(thumbs.length);
+      return;
+    }
+    // 진짜 끝. 옛 뷰어의 `_edge_pending` 그대로 — **한 번은 막고 알린다.**
+    // 훑어 내려가다 관성으로 처음으로 튀어버리면 어디였는지를 잃는다.
+    const edge = direction > 0 ? 'last' : 'first';
+    if (vpEdgePending !== edge) {
+      vpEdgePending = edge;
+      showToast(edge === 'last'
+        ? '마지막 이미지입니다. 한 번 더 누르면 처음으로.'
+        : '첫 번째 이미지입니다. 한 번 더 누르면 마지막으로.');
+      return;
+    }
+    vpEdgePending = '';
+    vpSeek(edge === 'last' ? 0 : Math.max(0, Math.max(viewerTotal, thumbs.length) - 1));
   }
 
   function toggleLightboxPrompt(forceVisible) {

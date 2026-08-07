@@ -3172,8 +3172,14 @@ export function createInteractivePanel({
     const box = panelMount.getBoundingClientRect();
     const w = zoomEl.offsetWidth || 260;
     const h = zoomEl.offsetHeight || 300;
-    // 팝업 오른쪽. 자리가 없으면 왼쪽으로 뒤집는다(그래도 없으면 화면 안으로 민다).
-    let left = box.right + 10;
+    // **사전이 팝업 오른쪽에 서므로 그 끝을 넘어가야 한다.** 팝업만 재면 확대창이
+    // 사전 위에 겹쳐 앉는다(실측). 이미지를 가리는 것은 감수한 설계다.
+    const asideOpen = asideMount && asideMount.classList.contains('open');
+    const anchorRight = asideOpen
+      ? Math.max(box.right, asideMount.getBoundingClientRect().right)
+      : box.right;
+    // 자리가 없으면 왼쪽으로 뒤집는다(그래도 없으면 화면 안으로 민다).
+    let left = anchorRight + 10;
     if (left + w > window.innerWidth - 8) left = Math.max(8, box.left - w - 10);
     zoomEl.style.left = Math.round(left) + 'px';
     // 누른 칸의 세로 가운데와 확대창의 가운데를 맞춘다.
@@ -3698,29 +3704,35 @@ export function createInteractivePanel({
       Safe Viewer : <b class="ia-safe-state">${safeViewer ? 'On' : 'Off'}</b></button>`;
   }
 
-  /** 태그 사전 플로트를 **팝업 아래**에 붙인다.
+  const ASIDE_W = 258;   // 사전 열 가로. syncPopupShift 도 이 값을 쓴다.
+
+  /** 태그 사전 플로트를 **팝업 오른쪽**에 세로로 세운다(사용자 지시 2026-08-07).
    *
-   *  예전에는 팝업 오른쪽에 세로로 세웠다. 팝업(560) + 플로트(258) 가 가로로
-   *  이어져 결과 영역을 통째로 덮었고, 자리가 안 나오면 창을 넓히거나(naiaShell.
-   *  fitWidth) 아예 숨겼다. 팝업을 2/3 로 줄이면서 아래 공간이 생겼으니 그리로
-   *  옮긴다 — 가로는 팝업 폭만 쓰므로 '자리가 없어 숨긴다'도, 창을 넓히는
-   *  우회도 필요 없어졌다(테스터 지적 2026-08-07). */
+   *  잠깐 팝업 아래로 내렸었다. 팝업이 화면을 세로로 다 채우던 시절의 문제를
+   *  피하려던 것인데, 팝업을 2/3 로 줄인 지금은 오른쪽에 세워도 결과 영역이
+   *  남는다 — 아래로 내리면 팝업+사전이 세로로 길어져 그림 자리가 더 줄었다.
+   *  대신 이미지를 우하단에 붙여(.viewer) 겹치지 않게 한다. */
   function positionAside() {
     if (!asideMount) return;
     const box = panelMount.getBoundingClientRect();
     const GAP = 10;
-    const top = box.bottom + GAP;
-    const room = window.innerHeight - top - 12;
-    if (room < 90) {            // 아래가 정말 없으면 접는다 — 그리드가 우선이다
+    let left = box.right + GAP;
+    // 오른쪽에 자리가 없으면 접는다. 예전에는 창을 넓히거나(naiaShell.fitWidth)
+    // 줌을 낮추는 우회가 있었는데, 팝업이 작아진 뒤로는 걸릴 일이 거의 없다.
+    if (left + ASIDE_W > window.innerWidth - 8) {
       asideMount.classList.remove('open');
       return;
     }
-    asideMount.style.left = Math.round(box.left) + 'px';
-    asideMount.style.width = Math.round(box.width) + 'px';
-    asideMount.style.top = Math.round(top) + 'px';
+    asideMount.style.left = Math.round(left) + 'px';
+    asideMount.style.width = ASIDE_W + 'px';
+    asideMount.style.top = Math.round(Math.max(8, box.top)) + 'px';
     asideMount.style.bottom = 'auto';
-    asideMount.style.maxHeight = Math.round(room) + 'px';
+    // 팝업과 키를 맞춘다. 내용이 짧으면 그만큼만 차지한다(max-height 라서).
+    asideMount.style.maxHeight = Math.round(
+      Math.min(box.height, window.innerHeight - box.top - 12)) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
+    // 사전이 열리고 닫힐 때마다 이미지가 비켜설 폭이 달라진다.
+    syncPopupShift();
   }
 
   // 팝업 **안**에서 우클릭해도 닫는다. 슬롯 줄에만 걸어 뒀더니 팝업이 그 줄을
@@ -3886,9 +3898,15 @@ export function createInteractivePanel({
     const box = panelMount.getBoundingClientRect();
     const v = viewer.getBoundingClientRect();
     if (!box.width || !v.width) { viewer.style.removeProperty('--ia-shift'); return; }
-    // 팝업 오른쪽 끝까지 비운다. 이미지가 너무 좁아지면(뷰어의 3/4 초과) 포기한다 —
-    // 밀어 봐야 볼 수 없을 만큼 작아지면 가려지는 편이 차라리 낫다.
-    const shift = Math.round(box.right + 12 - v.left);
+    // **사전이 팝업 오른쪽에 서므로 그 끝까지** 비운다. 팝업만 재면 사전 밑으로
+    // 이미지가 깔린다.
+    const asideOpen = asideMount && asideMount.classList.contains('open');
+    const right = asideOpen
+      ? Math.max(box.right, asideMount.getBoundingClientRect().right)
+      : box.right;
+    // 이미지가 너무 좁아지면(뷰어의 3/4 초과) 포기한다 — 밀어 봐야 볼 수 없을
+    // 만큼 작아지면 가려지는 편이 차라리 낫다.
+    const shift = Math.round(right + 12 - v.left);
     viewer.style.setProperty('--ia-shift',
       (shift > 0 && shift < v.width * 0.75) ? shift + 'px' : '0px');
   }

@@ -17299,6 +17299,10 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
        를 써 두면 여기 `padding: 2px` 가 그걸 덮는다(실측: 계산값이 2px 그대로). */
     padding-left: calc(2px + var(--ia-shift, 0px));
   }
+  /* 팝업이 열린 동안 이미지를 **우하단**에 붙인다(사용자 지시 2026-08-07).
+     가운데 정렬이면 남은 폭의 한가운데로 가서 팝업 쪽으로 붙는데, 오른쪽 아래로
+     보내면 도구 묶음(팝업+사전)과 그림이 확실히 갈린다. */
+  body.ia-popup-shift .viewer { align-items: flex-end; justify-content: flex-end; }
   /* PC: Result history rail is always visible, matching the desktop NAIA result layout. */
   .viewer-panel,
   .viewer-panel.open {

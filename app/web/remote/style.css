@@ -20772,15 +20772,14 @@ body.detached-module .mod-grid-3 {
    + 플로트(258) 가 가로로 이어져 결과 영역을 통째로 덮었다(테스터 지적). 팝업을
    줄여 생긴 아래 공간으로 옮긴다 — 가로는 팝업과 같은 폭만 쓴다.
    자리(left/width/top/max-height)는 JS(positionAside)가 팝업을 재서 넣는다. */
-/* 카드가 **가로로** 늘어선다. 세로 열이던 시절의 column 방향을 그대로 두면
-   띠가 넓은데도 카드가 한 줄씩 쌓여 세로로만 길어진다. */
+/* 카드를 **세로로** 쌓는다. 폭이 팝업에 묶여 있으므로 가로로 늘어놓을 자리가
+   없다 — 가로로 뻗으면 좁은 배율에서 잘린다는 것이 이 배치의 이유다. */
 .ia-aside {
   position: fixed;
-  display: none; flex-direction: row; align-items: flex-start; gap: 8px;
+  display: none; flex-direction: column; gap: 8px;
   z-index: var(--z-floating-module); pointer-events: none;
-  overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain;
+  overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
 }
-.ia-aside > .ia-aside-card { flex: 0 1 auto; min-width: 0; max-width: 460px; }
 .ia-aside.open { display: flex; }
 .ia-aside-card {
   background: var(--bg-surface); border: 1px solid var(--border-glow);

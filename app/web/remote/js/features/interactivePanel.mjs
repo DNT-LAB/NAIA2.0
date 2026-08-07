@@ -3707,35 +3707,31 @@ export function createInteractivePanel({
       Safe Viewer : <b class="ia-safe-state">${safeViewer ? 'On' : 'Off'}</b></button>`;
   }
 
-  const ASIDE_W = 570;   // 사전 띠 가로(고정). 4열이 알맞게 들어가는 폭이다.
-
-  /** 태그 사전을 팝업 오른쪽 **상단 띠**로 편다(사용자 타협안
-   *  2026-08-07). 세로 열(258px)로 세우면 그만큼 그림 폭을 영구히 먹는데, 위에
-   *  가로로 눕히면 그림은 아래로만 밀린다 — 세로는 그림이 남아돌던 쪽이다.
-   *  칩은 4열로 깔린다(.ia-aside-thumbs). */
+  /** 태그 사전을 **팝업 바로 아래, 같은 폭**으로 세운다(사용자 결정 2026-08-07).
+   *
+   *  오른쪽으로 펴 보기도 했다(세로 열 258px, 상단 띠 570px). 둘 다 같은 병으로
+   *  죽는다 — **가로로 뻗으면 화면 배율이 좁은 환경에서 결국 잘린다.** 실제로
+   *  카드와 썸네일이 오른쪽에서 잘려 나왔다(사용자 실측). 폭을 팝업에 묶으면
+   *  잘릴 일이 없고, 팝업이 이미 비켜 둔 자리 안에 들어가므로 그림도 더 밀지
+   *  않는다. 세로가 모자라는 만큼은 반투명으로 감당한다(다음 단계).
+   */
   function positionAside() {
     if (!asideMount) return;
     const box = panelMount.getBoundingClientRect();
-    const GAP = 10;
-    const left = box.right + GAP;
-    const room = window.innerWidth - left - 12;
-    if (room < 220) {           // 정말 좁으면 접는다 — 그리드가 우선이다
+    const GAP = 8;
+    const top = box.bottom + GAP;
+    const room = window.innerHeight - top - 12;
+    if (room < 80) {            // 아래가 정말 없으면 접는다 — 그리드가 우선이다
       asideMount.classList.remove('open');
       syncPopupShift();
       return;
     }
-    // **고정폭.** 남은 폭을 다 쓰게 했더니 띠가 화면 끝까지 뻗어 4열 칩이 칸당
-    // 170px 로 부풀었다(사용자 지정 폭: 약 570px). 4열이 알맞게 들어가는 크기다.
-    const width = Math.min(ASIDE_W, room);
-    asideMount.style.left = Math.round(left) + 'px';
-    asideMount.style.width = Math.round(width) + 'px';
-    asideMount.style.top = Math.round(Math.max(8, box.top)) + 'px';
+    asideMount.style.left = Math.round(box.left) + 'px';
+    asideMount.style.width = Math.round(box.width) + 'px';
+    asideMount.style.top = Math.round(top) + 'px';
     asideMount.style.bottom = 'auto';
-    // 띠는 화면의 1/3 을 넘지 않는다. 내용이 짧으면 그만큼만 차지한다.
-    asideMount.style.maxHeight = Math.round(
-      Math.min(window.innerHeight * 0.34, window.innerHeight - box.top - 12)) + 'px';
+    asideMount.style.maxHeight = Math.round(room) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
-    // 사전이 열리고 닫힐 때마다 이미지가 비켜설 자리가 달라진다.
     syncPopupShift();
   }
 

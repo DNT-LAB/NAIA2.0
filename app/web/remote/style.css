@@ -20731,7 +20731,10 @@ body.detached-module .mod-grid-3 {
 .ia-panel {
   position: fixed; top: 46px; left: 494px;
   width: min(380px, calc(100vw - 520px));
-  max-height: min(62dvh, calc(100dvh - 60px));
+  /* 세로 상한은 JS(positionPopup)가 **실제 top 과 씬 태그 판 위치에서 재서** 넣는다.
+     여기 62dvh 로 묶어 뒀더니 화면 아래 267px 를 비워 두고 그리드가 2.6줄만
+     보였다(실측). top 은 씬 버튼 줄 유무로 36px 달라지고 씬 태그 판은 사용자가
+     끌어 바뀌므로 CSS 만으로는 못 맞춘다. */
   background: var(--bg-surface); border: 1px solid var(--border-glow);
   border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   display: none; flex-direction: column; overflow: hidden;
@@ -20781,8 +20784,13 @@ body.detached-module .mod-grid-3 {
   overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
 }
 .ia-aside.open { display: flex; }
+/* **반투명.** 그림 위에 겹치므로 뒤가 비쳐야 한다(사용자 제안 2026-08-07).
+   `backdrop-filter: blur()` 는 **쓰지 않는다** — 그쪽이 비싼 물건이다(뒤 배경을
+   매 프레임 복사해 블러를 다시 굽는다. 이 앱은 예전에 그것 때문에 창이 가려져도
+   GPU 를 점유하는 문제를 겪었고 anims-paused 로 막아 뒀다). 단순 알파는 컴포지터
+   블렌드 한 번이라 사실상 공짜다 — 프레임이 흔들릴 이유가 없다. */
 .ia-aside-card {
-  background: var(--bg-surface); border: 1px solid var(--border-glow);
+  background: rgba(18, 18, 26, 0.62); border: 1px solid var(--border-glow);
   border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   padding: 11px 12px 12px; pointer-events: auto;
   display: flex; flex-direction: column; gap: 8px; overflow: hidden;

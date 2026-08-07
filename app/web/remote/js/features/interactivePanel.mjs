@@ -918,6 +918,25 @@ export function createInteractivePanel({
     // 여기서 바로 재도 현재 값이 나온다.
     sceneRailWatch = new ResizeObserver(() => positionSceneFloat());
     sceneRailWatch.observe(rail);
+    watchInfoPanel();
+  }
+
+  // 하단 씬 태그 판은 사용자가 끌어 높이를 바꾸고, Interactive 에서는 씬 태그
+  // 편집기가 들어가 내용에 따라도 달라진다. **창 크기는 그대로**라 resize 로는
+  // 안 잡힌다 — 판을 직접 지켜본다(사용자 제약 2026-08-07: 팝업이 그 판을
+  // 침범하면 안 되고, 그리드가 동적으로 따라가야 한다).
+  let infoPanelWatch = null;
+  function watchInfoPanel() {
+    if (infoPanelWatch || typeof ResizeObserver === 'undefined') return;
+    const info = document.getElementById('resultInfoPanel');
+    if (!info) return;
+    infoPanelWatch = new ResizeObserver(() => {
+      if (!panelContext) return;
+      positionPopup();
+      positionAside();
+      positionZoom();
+    });
+    infoPanelWatch.observe(info);
   }
 
   // ── 하단 글로벌 편집기 ─────────────────────────────────────────────────
@@ -3707,32 +3726,37 @@ export function createInteractivePanel({
       Safe Viewer : <b class="ia-safe-state">${safeViewer ? 'On' : 'Off'}</b></button>`;
   }
 
-  /** 태그 사전을 **팝업 바로 아래, 같은 폭**으로 세운다(사용자 결정 2026-08-07).
+  /** 태그 사전을 **팝업 오른쪽 위, 이미지 위에 반투명으로** 띄운다(사용자 모형
+   *  2026-08-07).
    *
-   *  오른쪽으로 펴 보기도 했다(세로 열 258px, 상단 띠 570px). 둘 다 같은 병으로
-   *  죽는다 — **가로로 뻗으면 화면 배율이 좁은 환경에서 결국 잘린다.** 실제로
-   *  카드와 썸네일이 오른쪽에서 잘려 나왔다(사용자 실측). 폭을 팝업에 묶으면
-   *  잘릴 일이 없고, 팝업이 이미 비켜 둔 자리 안에 들어가므로 그림도 더 밀지
-   *  않는다. 세로가 모자라는 만큼은 반투명으로 감당한다(다음 단계).
+   *  아래로 내리면 그리드의 세로를 뺏고, 넓게 펴면 좁은 배율에서 잘린다. 둘 다
+   *  겪었다. 그림 위에 겹치면 둘 다 안 생긴다 — 대신 그림이 가려지므로 배경을
+   *  반투명으로 둔다(.ia-aside-card).
+   *
+   *  **폭은 팝업과 같게 묶는다.** 남은 폭을 다 쓰게 했더니 좁은 환경에서 카드와
+   *  썸네일이 오른쪽에서 잘렸다(사용자 실측). 이미지 자리는 그보다 넓으므로
+   *  이 폭이면 잘릴 일이 없다.
    */
   function positionAside() {
     if (!asideMount) return;
     const box = panelMount.getBoundingClientRect();
-    const GAP = 8;
-    const top = box.bottom + GAP;
-    const room = window.innerHeight - top - 12;
-    if (room < 80) {            // 아래가 정말 없으면 접는다 — 그리드가 우선이다
+    const GAP = 10;
+    const left = box.right + GAP;
+    const room = window.innerWidth - left - 12;
+    if (room < 200) {           // 오른쪽이 정말 없으면 접는다 — 그리드가 우선이다
       asideMount.classList.remove('open');
-      syncPopupShift();
       return;
     }
-    asideMount.style.left = Math.round(box.left) + 'px';
-    asideMount.style.width = Math.round(box.width) + 'px';
+    const top = Math.max(8, box.top);
+    asideMount.style.left = Math.round(left) + 'px';
+    asideMount.style.width = Math.round(Math.min(box.width, room)) + 'px';
     asideMount.style.top = Math.round(top) + 'px';
     asideMount.style.bottom = 'auto';
-    asideMount.style.maxHeight = Math.round(room) + 'px';
+    // 화면의 절반까지. 팝업과 같은 바닥선을 지킨다 — 씬 태그 판 위를 덮으면
+    // 방금 넣은 태그가 안 보인다.
+    asideMount.style.maxHeight = Math.round(
+      Math.max(80, Math.min(window.innerHeight * 0.5, popupFloor() - top))) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
-    syncPopupShift();
   }
 
   // 팝업 **안**에서 우클릭해도 닫는다. 슬롯 줄에만 걸어 뒀더니 팝업이 그 줄을
@@ -3902,8 +3926,8 @@ export function createInteractivePanel({
       viewer.style.removeProperty('--ia-shift-top');
       return;
     }
-    // 가로는 **팝업까지만** 비운다. 사전은 이제 그 오른쪽에 가로로 눕는 띠라
-    // 가로를 더 먹지 않는다 — 대신 세로로 비켜 준다.
+    // 가로는 **팝업까지만** 비운다. 사전은 그 오른쪽 그림 위에 반투명으로
+    // 겹치므로 자리를 요구하지 않는다.
     // 이미지가 너무 좁아지면(뷰어의 3/4 초과) 포기한다: 밀어 봐야 볼 수 없을
     // 만큼 작아지면 가려지는 편이 차라리 낫다.
     const shift = Math.round(box.right + 12 - v.left);
@@ -3913,6 +3937,21 @@ export function createInteractivePanel({
     // 정렬이 이상해졌다 — 평면은 팝업 오른쪽 전체를 쓰고, 사전이 그 위쪽을
     // 덮는 것은 감수한다(사용자 지시 2026-08-07: "그림이 좀 덮여도 됩니다").
     viewer.style.setProperty('--ia-shift-top', '0px');
+  }
+
+  /** 팝업·사전이 내려갈 수 있는 **바닥선**.
+   *
+   *  하단 씬 태그 판(#resultInfoPanel)을 침범하면 안 된다(사용자 제약
+   *  2026-08-07). 그 판은 사용자가 끌어 높이를 바꾸고 Interactive 에서는 씬 태그
+   *  편집기가 들어가 내용에 따라도 달라진다 — 상수로 박지 않고 매번 잰다.
+   *  판이 없거나 접혀 있으면 화면 바닥을 쓴다. */
+  function popupFloor() {
+    const info = document.getElementById('resultInfoPanel');
+    if (info && info.offsetParent !== null) {
+      const b = info.getBoundingClientRect();
+      if (b.height > 0) return b.top - 8;
+    }
+    return window.innerHeight - 12;
   }
 
   function positionPopup() {
@@ -3931,9 +3970,15 @@ export function createInteractivePanel({
     panelMount.style.width = W + 'px';
     panelMount.style.left = left + 'px';
     // 씬 버튼 줄이 떠 있으면 그 아래에서 시작한다 — 안 그러면 서로 가린다.
-    panelMount.style.top = (sceneFloatFits() && !blocksMount.hidden)
-      ? (PANEL_TOP + SCENE_FLOAT_H + 6) + 'px' : '';
+    const top = (sceneFloatFits() && !blocksMount.hidden)
+      ? (PANEL_TOP + SCENE_FLOAT_H + 6) : PANEL_TOP;
+    panelMount.style.top = top + 'px';
     panelMount.style.bottom = '';
+    // **바닥선까지 다 쓴다.** CSS 의 62dvh 상한에 묶여 화면 아래 267px 를 비워
+    // 두고 있었고(실측), 그래서 썸네일 그리드가 2.6줄밖에 안 보였다 — 사전이
+    // 자리를 뺏은 것이 아니라 팝업이 자기 자리를 안 쓴 것이었다(사용자 지적).
+    // 실제 top 에서 재야 정확하다: 씬 버튼 줄이 뜨면 top 이 36px 내려간다.
+    panelMount.style.maxHeight = Math.max(240, popupFloor() - top) + 'px';
     syncPopupShift();   // 팝업이 움직였으면 이미지가 비켜 준 폭도 다시 잰다
   }
 

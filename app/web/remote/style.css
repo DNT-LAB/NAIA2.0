@@ -21296,12 +21296,19 @@ body.detached-module .mod-grid-3 {
   display: flex; flex-wrap: wrap; gap: 4px;
   margin-top: 4px;
 }
+/* 칩은 버튼이다 — 눌러서 바로 바꾼다(X/Y/Z 는 다음 값으로, 스페셜·POV 는 끄기). */
 .ia-comp-ap {
   padding: 2px 8px; border-radius: 20px;
   border: 1px solid var(--border-dim);
   background: rgba(14, 16, 22, 0.86);
   color: var(--text-muted);
   font-family: var(--font-mono); font-size: 9.5px; white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.ia-comp-ap:hover {
+  color: var(--text-primary); border-color: var(--border-glow);
+  background: rgba(30, 32, 44, 0.92);
 }
 /* 랜덤 축은 값이 아직 없다 — 생성할 때 정해진다. */
 .ia-comp-ap.is-rand { color: var(--accent-glow); border-color: var(--accent); }

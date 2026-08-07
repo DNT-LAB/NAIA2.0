@@ -792,20 +792,30 @@ export function createInteractivePanel({
     const comp = state.composition || {};
     const rand = comp.rand || [];
     const items = [];
-    if (comp.pov) items.push({t: 'POV', r: false});
+    if (comp.pov) items.push({t: 'POV', d: 'data-ap-pov="1"', tip: 'POV 끄기'});
     COMP_AXES.forEach(ax => {
       const on = rand.includes(ax.key);
       const i = comp[ax.key] || 0;
-      if (on) items.push({t: ax.key.toUpperCase() + ' 🎲', r: true});
-      else if (i > 0) items.push({t: ax.key.toUpperCase() + ' ' + ax.items[i][1], r: false});
+      if (on) {
+        items.push({t: ax.key.toUpperCase() + ' 🎲', r: true,
+                    d: `data-ap-rand="${ax.key}"`,
+                    tip: `${ax.label} 랜덤 끄기 (마지막에 뽑힌 값이 남습니다)`});
+      } else if (i > 0) {
+        items.push({t: ax.key.toUpperCase() + ' ' + ax.items[i][1],
+                    d: `data-ap-axis="${ax.key}"`,
+                    tip: `${ax.label} — 눌러서 다음 값으로 (마지막에서 한 번 더 누르면 꺼집니다)`});
+      }
     });
     (comp.specials || []).forEach(tag => {
       const hit = COMP_SPECIALS.find(sp => sp[1] === tag);
-      items.push({t: hit ? hit[0] : tag, r: false});
+      items.push({t: hit ? hit[0] : tag, d: `data-ap-special="${escHtml(tag)}"`,
+                  tip: '눌러서 끄기'});
     });
     if (!items.length) return '';
+    // 칩은 **버튼**이다 — 눌러서 바로 바꾼다(사용자 지정 2026-08-07).
     return '<div class="ia-comp-applied">' + items.map(o =>
-      `<span class="ia-comp-ap${o.r ? ' is-rand' : ''}">${escHtml(o.t)}</span>`).join('') + '</div>';
+      `<button type="button" class="ia-comp-ap${o.r ? ' is-rand' : ''}" ${o.d}`
+      + ` title="${escHtml(o.tip)}">${escHtml(o.t)}</button>`).join('') + '</div>';
   }
 
   function reactiveToggleHtml() {
@@ -902,6 +912,25 @@ export function createInteractivePanel({
       if (cp) {
         event.preventDefault();
         if (compPopupOpen) closeCompPopup(); else openCompPopup(cp);
+        return;
+      }
+      // 버튼 아래 칩 — 눌러서 바로 바꾼다. 팝업을 열지 않아도 손이 닿는다.
+      const ap = event.target.closest('.ia-comp-ap');
+      if (ap) {
+        event.preventDefault();
+        const comp = state.composition;
+        if (ap.dataset.apPov !== undefined) comp.pov = false;
+        else if (ap.dataset.apSpecial !== undefined) {
+          comp.specials = (comp.specials || []).filter(t => t !== ap.dataset.apSpecial);
+        } else if (ap.dataset.apRand !== undefined) {
+          // 랜덤을 끈다. **마지막에 뽑힌 값은 남긴다** — 방금 나온 그림이 마음에
+          // 들어 고정하려는 것이 이 동작의 쓸모다.
+          comp.rand = (comp.rand || []).filter(k => k !== ap.dataset.apRand);
+        } else if (ap.dataset.apAxis !== undefined) {
+          const ax = COMP_AXES.find(a => a.key === ap.dataset.apAxis);
+          if (ax) comp[ax.key] = ((comp[ax.key] || 0) + 1) % ax.items.length;
+        }
+        onCompChange();
         return;
       }
       const b = event.target.closest('[data-slot]');

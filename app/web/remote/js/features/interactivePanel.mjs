@@ -879,6 +879,11 @@ export function createInteractivePanel({
   // 팝업의 CSS 기본 top. 버튼 줄은 여기에 깔고 팝업을 그 아래로 내린다.
   const PANEL_TOP = 46;
   const PANEL_LEFT = 494;   // .ia-panel 의 CSS 기본 left
+  // 팝업 가로. **CSS 가 아니라 여기가 실제로 정한다** — positionPopup/
+  // positionPresetPanel 이 인라인 width 를 넣으므로 style.css 의 width 는 초기값일
+  // 뿐이다(CSS 만 380 으로 줄였더니 화면은 560 그대로였다).
+  // 560 -> 380: 팝업이 커서 생성 이미지가 안 보인다는 지적(테스터 2026-08-07).
+  const PANEL_W = 380;
 
   // 씬 버튼 줄은 `document.body` 에 붙는 플로트라 **오른쪽 탭이 바뀌어도 그대로 남는다.**
   // Characters / Artists / Studio 탭 위에 구도·배경·성인 버튼이 겹쳐 떠 있었다(사용자 지적).
@@ -1089,10 +1094,14 @@ export function createInteractivePanel({
    *  줄이 있는데 편집기가 자기 제목을 또 달아 두 번 나왔다(사용자 지적). */
   function syncGlobalCountBadge(n) {
     const badge = document.getElementById('iaGlobalCount');
-    if (!badge) return;
     const on = !document.getElementById('interactiveGlobalEditor')?.hidden;
+    // 제목도 같이 바꾼다. 이 자리가 씬 태그 편집기가 됐는데 머리는 'GENERATION
+    // INFO' 인 채라 편집기를 보면서 엉뚱한 제목을 읽게 된다(사용자 지적).
+    const title = document.getElementById('resultInfoTitle');
+    if (title) title.textContent = on ? '씬 태그' : 'Generation Info';
+    if (!badge) return;
     badge.hidden = !on;
-    badge.textContent = on ? `글로벌 태그 ${n}` : '';
+    badge.textContent = on ? `${n}개` : '';
   }
 
   let globalTextMode = false;   // 칩(false) — 텍스트(true)
@@ -2796,7 +2805,7 @@ export function createInteractivePanel({
       presetPanel.style.top = presetPanel.style.left = presetPanel.style.width = presetPanel.style.bottom = '';
       return;
     }
-    const W = Math.min(560, vw - 32);
+    const W = Math.min(PANEL_W, vw - 32);
     const host = blocksMount.getBoundingClientRect();
     let left = Math.max(host.right + 12, PANEL_LEFT);
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
@@ -3612,39 +3621,28 @@ export function createInteractivePanel({
       Safe Viewer : <b class="ia-safe-state">${safeViewer ? 'On' : 'Off'}</b></button>`;
   }
 
-  // 창 폭 맞추기는 세션당 한 번이다. 사용자가 창을 좁혔거나 줌을 올린 것을
-  // 계속 되돌리면 조작을 빼앗는다.
-  let asideFitTried = false;
-
+  /** 태그 사전 플로트를 **팝업 아래**에 붙인다.
+   *
+   *  예전에는 팝업 오른쪽에 세로로 세웠다. 팝업(560) + 플로트(258) 가 가로로
+   *  이어져 결과 영역을 통째로 덮었고, 자리가 안 나오면 창을 넓히거나(naiaShell.
+   *  fitWidth) 아예 숨겼다. 팝업을 2/3 로 줄이면서 아래 공간이 생겼으니 그리로
+   *  옮긴다 — 가로는 팝업 폭만 쓰므로 '자리가 없어 숨긴다'도, 창을 넓히는
+   *  우회도 필요 없어졌다(테스터 지적 2026-08-07). */
   function positionAside() {
     if (!asideMount) return;
-    const vw = window.innerWidth;
     const box = panelMount.getBoundingClientRect();
-    const W = 258, GAP = 12;
-    const left = box.right + GAP;
-    // 떼기만 하고 다시 붙이지 않아서, 한 번 좁아지면 창을 넓혀도 플로트가 돌아오지
-    // 않았다(다음 renderAside 까지). 색 조합이 이 플로트에 있으니 옷 색을 고를 길이
-    // 아예 막힌다 — 들어갈 자리가 생기면 다시 붙인다.
-    if (vw < 1280 || left + W > vw - 12) {
+    const GAP = 10;
+    const top = box.bottom + GAP;
+    const room = window.innerHeight - top - 12;
+    if (room < 90) {            // 아래가 정말 없으면 접는다 — 그리드가 우선이다
       asideMount.classList.remove('open');
-      // **한 번만** 창 폭을 맞춰 본다. Electron 셸이 1) 창을 넓히고 2) 그래도 모자라면
-      // 줌을 단계별로 낮춘다. 전에는 그냥 숨겨서, 창이 좁은 것뿐인데 기능이 고장난
-      // 것처럼 보였다(사용자 지적 2026-07-30 — 웹에서는 되고 Electron 에서만 안 됐다).
-      //
-      // 매번 부르지 않는 이유: 사용자가 창을 일부러 좁혔거나 줌을 올렸을 수 있고,
-      // 그걸 계속 되돌리면 조작을 빼앗는 것이 된다. 한 번 시도하고 물러난다.
-      if (!asideFitTried) {
-        asideFitTried = true;
-        const need = Math.ceil(left + W + 12);
-        window.naiaShell?.fitWidth?.(need)
-          .then(r => { if (r && r.ok) positionAside(); })
-          .catch(() => {});
-      }
       return;
     }
-    asideMount.style.left = left + 'px';
-    asideMount.style.top = Math.max(12, box.top) + 'px';
-    asideMount.style.bottom = Math.max(12, window.innerHeight - box.bottom) + 'px';
+    asideMount.style.left = Math.round(box.left) + 'px';
+    asideMount.style.width = Math.round(box.width) + 'px';
+    asideMount.style.top = Math.round(top) + 'px';
+    asideMount.style.bottom = 'auto';
+    asideMount.style.maxHeight = Math.round(room) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
   }
 
@@ -3775,7 +3773,7 @@ export function createInteractivePanel({
       panelMount.style.top = panelMount.style.left = panelMount.style.width = panelMount.style.bottom = '';
       return;
     }
-    const W = Math.min(560, vw - 32);
+    const W = Math.min(PANEL_W, vw - 32);
     const host = blocksMount.getBoundingClientRect();
     let left = Math.max(host.right + 12, PANEL_LEFT);
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);

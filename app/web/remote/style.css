@@ -20701,9 +20701,13 @@ body.detached-module .mod-grid-3 {
 .ia-charcard-add:hover { color: var(--accent-glow); border-color: var(--accent); }
 
 /* --- 우측 작업 패널 --- */
+/* 2/3 로 줄였다(테스터 지적: 팝업이 커서 생성 이미지가 안 보인다).
+   폭 560 -> 380, 그리고 **화면 아래까지 늘이지 않는다** — 남는 아래 공간은
+   태그 사전 플로트가 쓴다(예전에는 팝업 오른쪽에 세로로 서서 결과를 또 가렸다). */
 .ia-panel {
-  position: fixed; top: 46px; bottom: 14px; left: 494px;
-  width: min(560px, calc(100vw - 520px));
+  position: fixed; top: 46px; left: 494px;
+  width: min(380px, calc(100vw - 520px));
+  max-height: min(62dvh, calc(100dvh - 60px));
   background: var(--bg-surface); border: 1px solid var(--border-glow);
   border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   display: none; flex-direction: column; overflow: hidden;
@@ -20739,14 +20743,16 @@ body.detached-module .mod-grid-3 {
 }
 .ia-pick-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-/* --- 조언 플로트 (팝업 오른쪽) ---
-   그리드가 팝업 폭을 다 쓰고 오른쪽이 비어 있어, 전제조건·충돌·추천을 여기 띄운다.
-   팝업 안에 넣으면 그리드를 밀어내고, 아래에 붙이면 스크롤해야 보인다.
-   화면이 좁으면(플로트 자리가 안 나오면) 아예 표시하지 않는다 — 그리드가 우선이다. */
+/* --- 조언 플로트 (팝업 **아래**) ---
+   전제조건·충돌·추천을 띄운다. 예전에는 팝업 오른쪽에 세로로 세웠는데, 팝업(560)
+   + 플로트(258) 가 가로로 이어져 결과 영역을 통째로 덮었다(테스터 지적). 팝업을
+   줄여 생긴 아래 공간으로 옮긴다 — 가로는 팝업과 같은 폭만 쓴다.
+   자리(left/width/top/max-height)는 JS(positionAside)가 팝업을 재서 넣는다. */
 .ia-aside {
-  position: fixed; top: 46px; bottom: 14px;
-  width: 258px; display: none; flex-direction: column; gap: 10px;
+  position: fixed;
+  display: none; flex-direction: column; gap: 8px;
   z-index: var(--z-floating-module); pointer-events: none;
+  overflow-y: auto; overscroll-behavior: contain;
 }
 .ia-aside.open { display: flex; }
 .ia-aside-card {
@@ -20827,7 +20833,12 @@ body.detached-module .mod-grid-3 {
 }
 /* 2열 — 플로트 폭 258px 에서 한 칸 약 112px. 그리드 썸네일(192px)보다 작지만
    "이런 게 있다"를 알리는 용도라 이 크기로 충분하다. */
-.ia-aside-thumbs { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+/* 2열 고정이었다. 플로트가 오른쪽 258px 세로 열이던 시절의 값이라, 팝업 아래
+   380px 가로로 옮기자 칸이 180px 로 부풀어 썸네일 하나가 화면을 먹었다(실측).
+   폭에 맞춰 채운다 — 380px 에서 4열, 좁아지면 알아서 준다. */
+.ia-aside-thumbs {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 5px;
+}
 .ia-aside-thumb {
   display: flex; flex-direction: column; gap: 0; padding: 0; cursor: help;
   background: none; border: 1px solid var(--border-dim); border-radius: 7px;
@@ -21158,7 +21169,9 @@ body.detached-module .mod-grid-3 {
 .ia-block.is-editing .ia-block-label, .ia-sub-block.is-editing .ia-block-label { padding-top: 4px; }
 
 /* --- 앵커 팝업(검색창 상단 통합 + 분류 탐색) --- */
-.ia-panel { max-height: calc(100vh - 24px); }
+/* 여기서 화면 높이만큼 늘리던 것을 뗐다 — 위의 `.ia-panel` 이 62dvh 로 상한을
+   두는데 이 줄이 나중에 나와 그걸 덮었다(실측: 계산된 max-height 가 926px).
+   팝업이 화면을 세로로 다 채우면 아래에 태그 사전을 놓을 자리가 없다. */
 .ia-search.ia-search-top { margin: 10px 14px 2px; flex-shrink: 0; }
 .ia-search.ia-search-top input { font-size: 11px; }
 .ia-panel-body { padding-top: 6px; }
@@ -21225,15 +21238,15 @@ body.detached-module .mod-grid-3 {
   /* 행 높이를 내용 기준으로 고정한다. 안 하면 max-height 안에 전 행을 밀어넣으려고
      행이 압축돼 셀이 납작해진다(22행 x 12px). align-content:start 로 분배도 막는다. */
   grid-auto-rows: max-content; align-content: start;
-  /* 3열 실측: 셀 185px(이미지 162 + 캡션) -> 3줄 = 3*185 + 2*6 = 567.
-     단 567 고정은 화면이 짧거나 확대된 상태에서 패널 본문보다 그리드가 커진다.
-     그러면 본문 스크롤과 그리드 스크롤이 중첩되고 마지막 행이 패널 밖에서 잘린다.
-     -> 실제 남는 높이로 상한을 건다. 354px = 패널 여백 + 헤드 + 선택칩 + 다른
-     아코디언 헤더들의 실측 합계. 200px 바닥을 둬서 아주 짧은 화면에서도 한 행은 보인다. */
-     567px(3줄) 상한을 두고 있었는데, 화면이 길면 그리드가 3줄에서 멈추고 패널
-     아래쪽이 통째로 비었다(사용자 지적 2026-08-01: "여유가 있을 땐 자동으로 꽉"). 
-     상한을 없앤다 — 아래 calc 가 이미 패널 밖으로 넘치지 않게 막고 있다. */
-  max-height: max(200px, calc(100dvh - 354px));
+  /* **주의**: 이 주석이 `*/` 로 닫힌 뒤 글이 더 이어지다 다시 `*/` 가 나왔던 적이
+     있다. 그 사이 글이 CSS 선언으로 읽혀 **뒤따르는 max-height 가 통째로 버려졌다**
+     (실측: 파싱된 규칙에 max-height 가 없었다). 그래서 그리드가 상한 없이 늘어나
+     팝업이 화면을 다 덮었다 — 테스터가 "팝업 때문에 이미지가 안 보인다"고 한 것의
+     한 원인이다. 주석을 손볼 때 닫는 짝을 반드시 확인할 것.
+
+     고정값(567px = 3줄)이 아니라 남는 높이로 상한을 건다. 고정이면 화면이 길 때
+     그리드가 3줄에서 멈추고 패널 아래가 빈다(사용자 지적 2026-08-01). */
+  max-height: max(180px, calc(100dvh - 354px));
   overflow-y: auto; overscroll-behavior: contain;
   padding-right: 4px;   /* 스크롤바가 셀을 덮지 않게 */
 }
@@ -22876,4 +22889,6 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 /* 글로벌 편집기가 떠 있는 동안의 최소 높이. 머리 + 칩 두 줄 + 자유 입력이 들어갈
    만큼. 사용자가 더 늘려 뒀으면 그 값이 이긴다(min-height 라서). */
-.result-info-panel.has-ia-editor { min-height: 176px; }
+/* 판 최소 높이를 여기서 올리면 **사용자가 판을 아래로 못 줄인다**(사용자 지적).
+   .result-info-panel 의 min-height: 38px 가 유일한 바닥이어야 한다. 편집기는
+   좁아지면 스스로 스크롤한다 - 칩 모드에는 입력칸이 없어 잘릴 것도 없다. */

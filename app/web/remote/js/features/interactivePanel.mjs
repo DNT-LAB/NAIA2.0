@@ -815,7 +815,7 @@ export function createInteractivePanel({
   function compPresetBtnHtml() {
     const n = compTags(state.composition).length;
     return '<button type="button" class="ia-scene-btn ia-comp-btn'
-      + (compPopupOpen ? ' is-open' : '') + (n ? ' has-tags' : '') + '"'
+      + (miniOpen === 'comp' ? ' is-open' : '') + (n ? ' has-tags' : '') + '"'
       + ' data-comp-preset="1" title="축 프리셋 (X/Y/Z 시점 · 스페셜)">'
       + '<span class="ia-block-icon">\u{1F39B}</span>'
       + '<span class="ia-scene-btn-name">축 프리셋</span>'
@@ -968,16 +968,16 @@ export function createInteractivePanel({
       const cp = event.target.closest('[data-comp-preset]');
       if (cp) {
         event.preventDefault();
-        if (compPopupOpen) closeCompPopup(); else openCompPopup(cp);
+        if (miniOpen === 'comp') closeCompPopup(); else openMiniPopup('comp', cp);
         return;
       }
       // 버튼 아래 칩 — 눌러서 바로 바꾼다. 팝업을 열지 않아도 손이 닿는다.
       const ap = event.target.closest('.ia-comp-ap');
       if (ap) {
         event.preventDefault();
-        // Rating 은 고를 것이 9개라 순환이 아니라 팝업을 연다.
+        // Rating 은 고를 것이 10개라 순환이 아니라 **자기 팝업**을 연다.
         if (ap.dataset.apRating !== undefined) {
-          if (!compPopupOpen) openCompPopup(sceneMount.querySelector('[data-comp-preset]'));
+          if (miniOpen === 'rating') closeCompPopup(); else openMiniPopup('rating', ap);
           return;
         }
         const comp = state.composition;
@@ -5033,51 +5033,69 @@ export function createInteractivePanel({
 
   // ---- 구도 3축 콤보 프리셋 패널 (Dev0714 복원) ----
 
-  // 축 프리셋 팝업. 슬롯 팝업(.ia-panel)과 겹치지 않게 버튼 아래에 따로 띄운다.
-  let compPopup = null;
-  let compPopupOpen = false;
+  // 버튼 아래에 붙는 미니 팝업. 축 프리셋과 Rating 이 **같은 뼈대**를 쓴다 —
+  // 둘은 성격이 달라 한 팝업에 두면 불편하다는 지적이라 갈랐는데(사용자
+  // 2026-08-07), 껍데기는 똑같아서 내용만 갈아 끼운다.
+  //
+  // 열림 상태는 하나뿐이다: 둘이 동시에 열리면 서로를 덮는다.
+  let miniPopup = null;
+  let miniOpen = '';            // '' | 'comp' | 'rating'
+  let miniAnchor = null;
 
-  function ensureCompPopup() {
-    if (compPopup && document.body.contains(compPopup)) return compPopup;
-    compPopup = document.createElement('div');
-    compPopup.className = 'ia-comp-popup';
-    compPopup.hidden = true;
+  const MINI = {
+    comp:   {title: '축 프리셋', body: () => compPanelHtml(),
+             bind: () => bindCompPanel(), anchorSel: '[data-comp-preset]'},
+    rating: {title: 'Rating',    body: () => ratingSectionHtml(),
+             bind: () => bindRatingSection(), anchorSel: '[data-ap-rating]'},
+  };
+
+  function ensureMiniPopup() {
+    if (miniPopup && document.body.contains(miniPopup)) return miniPopup;
+    miniPopup = document.createElement('div');
+    miniPopup.className = 'ia-comp-popup';
+    miniPopup.hidden = true;
     // 씬 버튼 줄과 **같은 컨텍스트**에 둔다 — body 직계로 두면 `.viewer-wrapper`
     // (z-index:0 + isolation:isolate) 때문에 z 로 줄을 세울 수 없다(씬 플로트 주석).
-    (document.querySelector('.viewer-wrapper') || document.body).appendChild(compPopup);
-    compPopup.addEventListener('mousedown', keepEditingFocus);
-    compPopup.addEventListener('click', event => {
-      if (event.target.closest('[data-comp-close]')) { closeCompPopup(); return; }
+    (document.querySelector('.viewer-wrapper') || document.body).appendChild(miniPopup);
+    miniPopup.addEventListener('mousedown', keepEditingFocus);
+    miniPopup.addEventListener('click', event => {
+      if (event.target.closest('[data-comp-close]')) closeCompPopup();
     });
-    return compPopup;
+    return miniPopup;
   }
 
-  function openCompPopup(anchor) {
-    const el = ensureCompPopup();
-    el.innerHTML = '<div class="ia-comp-popup-head"><span>축 프리셋</span>'
+  function openMiniPopup(kind, anchor) {
+    const def = MINI[kind];
+    if (!def) return;
+    const el = ensureMiniPopup();
+    el.innerHTML = `<div class="ia-comp-popup-head"><span>${escHtml(def.title)}</span>`
       + '<button type="button" class="ia-panel-close" data-comp-close="1">\u00d7</button></div>'
-      + compPanelHtml();
+      + def.body();
     el.hidden = false;
-    compPopupOpen = true;
-    bindCompPanel();
+    miniOpen = kind;
+    miniAnchor = anchor || null;
+    def.bind();
     positionCompPopup(anchor);
     document.addEventListener('mousedown', onCompOutside, true);
-    renderBlocks();               // 버튼에 열림 표시
+    renderBlocks();               // 버튼·칩에 열림 표시
   }
 
+  // 이름은 그대로 둔다 — 부르는 곳이 여럿이고 뜻도 그대로다(미니 팝업 닫기).
   function closeCompPopup() {
-    if (!compPopupOpen) return;
-    compPopupOpen = false;
-    if (compPopup) { compPopup.hidden = true; compPopup.innerHTML = ''; }
+    if (!miniOpen) return;
+    miniOpen = '';
+    miniAnchor = null;
+    if (miniPopup) { miniPopup.hidden = true; miniPopup.innerHTML = ''; }
     document.removeEventListener('mousedown', onCompOutside, true);
     renderBlocks();
   }
 
   function onCompOutside(event) {
-    if (!compPopupOpen) return;
-    if (compPopup && compPopup.contains(event.target)) return;
+    if (!miniOpen) return;
+    if (miniPopup && miniPopup.contains(event.target)) return;
     const t = event.target.closest ? event.target : event.target.parentElement;
-    if (t && t.closest('[data-comp-preset]')) return;
+    // 여는 버튼 위 클릭은 그 버튼의 토글이 처리한다.
+    if (t && t.closest('[data-comp-preset], [data-ap-rating]')) return;
     // **드롭다운 목록은 팝업 밖에 산다.** 앱이 네이티브 select 를 숨기고
     // (`native-select-hidden`) 커스텀 위젯으로 바꾸는데, 그 목록(`custom-select-menu`)
     // 은 `document.body` 직계다(customSelects.mjs). 그래서 항목을 고르는 순간
@@ -5088,18 +5106,20 @@ export function createInteractivePanel({
 
   /** 버튼 아래에 붙인다. 오른쪽으로 넘치면 화면 안으로 민다. */
   function positionCompPopup(anchor) {
-    if (!compPopup || compPopup.hidden) return;
-    const btn = anchor || sceneMount?.querySelector('[data-comp-preset]');
+    if (!miniPopup || miniPopup.hidden) return;
+    const def = MINI[miniOpen];
+    const btn = anchor || miniAnchor
+      || (def && sceneMount?.querySelector(def.anchorSel));
     if (!btn) return;
     const b = btn.getBoundingClientRect();
-    const w = compPopup.offsetWidth || 340;
-    const h = compPopup.offsetHeight || 260;
+    const w = miniPopup.offsetWidth || 340;
+    const h = miniPopup.offsetHeight || 260;
     let left = b.left;
     if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
     let top = b.bottom + 6;
     if (top + h > window.innerHeight - 8) top = Math.max(8, b.top - h - 6);
-    compPopup.style.left = Math.round(left) + 'px';
-    compPopup.style.top = Math.round(top) + 'px';
+    miniPopup.style.left = Math.round(left) + 'px';
+    miniPopup.style.top = Math.round(top) + 'px';
   }
 
   const randOn = (comp, key) => (comp && comp.rand || []).includes(key);
@@ -5113,7 +5133,7 @@ export function createInteractivePanel({
     const opts = RATING_OPTIONS.map(([key, label, , tone]) =>
       `<button type="button" class="ia-rt-opt${picks.includes(key) ? ' is-on' : ''}"`
       + ` data-rt-pick="${key}" data-r="${tone}">${escHtml(label)}</button>`).join('');
-    return `<div class="ia-rt">
+    return `<div class="ia-rt" id="iaRating">
       <div class="ia-rt-head"><span class="ia-comp-lbl">Rating</span>
         <div class="ia-rt-modes">${mode('single')}${mode('random')}</div></div>
       <div class="ia-rt-opts">${opts}</div>
@@ -5149,9 +5169,51 @@ export function createInteractivePanel({
         <span class="ia-comp-lbl">스페셜</span>
         <div class="ia-comp-cats">${specials}</div>
       </div>
-      ${ratingSectionHtml()}
       <div class="ia-comp-out">${emitted.length ? escHtml(emitted.join(', ')) : '축 미설정 — 태그 없음'}</div>
     </div>`;
+  }
+
+  /** Rating 구획 배선. **자기 팝업 안에서 찾는다** — bindCompPanel 은
+   *  `#iaCompPanel` 을 찾으므로 Rating 을 떼어낸 뒤로는 그쪽에 걸 수 없다.
+   *
+   *  `onCompChange()` 를 그대로 쓴다: 하는 일이 '패널을 다시 그리고 칩·프롬프트를
+   *  맞추는 것' 이라 Rating 에도 그대로 맞는다. 다만 그 함수는 `#iaCompPanel` 만
+   *  다시 그리므로, Rating 팝업이 열려 있으면 여기서 따로 다시 그린다. */
+  function bindRatingSection() {
+    const host = document.getElementById('iaRating');
+    if (!host) return;
+    host.querySelectorAll('[data-rt-mode]').forEach(el => {
+      el.addEventListener('click', () => {
+        const r = state.ratingPick || (state.ratingPick = newRating());
+        r.mode = el.dataset.rtMode;
+        // Single 로 돌아오면 **첫 번째만 남긴다** — 여러 개인 채로 Single 이면
+        // 무엇이 나갈지 알 수 없다.
+        if (r.mode === 'single' && (r.picks || []).length > 1) r.picks = [r.picks[0]];
+        onRatingChange();
+      });
+    });
+    host.querySelectorAll('[data-rt-pick]').forEach(el => {
+      el.addEventListener('click', () => {
+        const r = state.ratingPick || (state.ratingPick = newRating());
+        const key = el.dataset.rtPick;
+        const picks = r.picks || [];
+        if (r.mode === 'single') {
+          // 같은 것을 다시 누르면 끈다(= 미설정과 같아진다).
+          r.picks = picks[0] === key ? [] : [key];
+        } else {
+          r.picks = picks.includes(key) ? picks.filter(k => k !== key) : [...picks, key];
+        }
+        onRatingChange();
+      });
+    });
+  }
+
+  /** Rating 이 바뀌었다 — 팝업 내용·칩·프롬프트를 맞춘다. */
+  function onRatingChange() {
+    const host = document.getElementById('iaRating');
+    if (host) { host.outerHTML = ratingSectionHtml(); bindRatingSection(); }
+    renderBlocks();     // 버튼 아래 칩
+    emitChange();       // 프롬프트
   }
 
   function bindCompPanel() {
@@ -5162,30 +5224,6 @@ export function createInteractivePanel({
     host.querySelectorAll('.ia-comp-select').forEach(el => {
       el.addEventListener('change', () => {
         state.composition[el.dataset.axis] = Number(el.value) || 0;
-        onCompChange();
-      });
-    });
-    host.querySelectorAll('[data-rt-mode]').forEach(el => {
-      el.addEventListener('click', () => {
-        const r = state.ratingPick || (state.ratingPick = newRating());
-        r.mode = el.dataset.rtMode;
-        // Single 로 돌아오면 **첫 번째만 남긴다** — 여러 개인 채로 Single 이면
-        // 무엇이 나갈지 알 수 없다.
-        if (r.mode === 'single' && (r.picks || []).length > 1) r.picks = [r.picks[0]];
-        onCompChange();
-      });
-    });
-    host.querySelectorAll('[data-rt-pick]').forEach(el => {
-      el.addEventListener('click', () => {
-        const r = state.ratingPick || (state.ratingPick = newRating());
-        const key = el.dataset.rtPick;
-        const picks = r.picks || [];
-        if (r.mode === 'single') {
-          // 같은 것을 다시 누르면 끈다(태그 없음).
-          r.picks = picks[0] === key ? [] : [key];
-        } else {
-          r.picks = picks.includes(key) ? picks.filter(k => k !== key) : [...picks, key];
-        }
         onCompChange();
       });
     });

@@ -844,10 +844,22 @@ export function createInteractivePanel({
   // 버튼 줄 높이. 팝업이 이만큼 아래에서 시작해 서로 가리지 않는다.
   const SCENE_FLOAT_H = 30;
 
+  /** 플로트가 뻗을 수 있는 오른쪽 한계. 히스토리 레일이 떠 있으면 그 앞에서 멈춘다. */
+  function sceneRightEdge() {
+    const rail = document.getElementById('viewerPanel');
+    // `offsetParent` 가 null 이면 숨겨진 것이다(레일은 static 이라 이 판정이 통한다).
+    if (rail && rail.offsetParent) {
+      const box = rail.getBoundingClientRect();
+      if (box.width > 0) return box.left;
+    }
+    return window.innerWidth;
+  }
+
   function sceneFloatFits() {
     if (window.innerWidth < SCENE_FLOAT_MIN) return false;
     const box = blocksMount.getBoundingClientRect();
-    return box.right + 12 + 360 <= window.innerWidth - 12;   // 가로 한 줄이 들어갈 폭
+    // 들어갈 폭도 같은 한계로 잰다 — 레일을 뺀 자리에 한 줄이 들어가야 한다.
+    return box.right + 12 + 360 <= sceneRightEdge() - 12;
   }
 
   // 팝업의 CSS 기본 top. 버튼 줄은 여기에 깔고 팝업을 그 아래로 내린다.
@@ -870,6 +882,22 @@ export function createInteractivePanel({
     if (!pane) return;
     sceneTabWatch = new MutationObserver(() => positionSceneFloat());
     sceneTabWatch.observe(pane, { attributes: true, attributeFilter: ['class', 'hidden'] });
+    watchHistoryRail();
+  }
+
+  // 히스토리 레일을 접거나 펼치면 **창 크기는 그대로**라 resize 가 오지 않는다.
+  // 그런데 플로트의 오른쪽 한계는 레일 위치로 정해지므로, 폭을 직접 지켜본다 —
+  // 안 그러면 접힌 채로 잰 폭이 남아 펼친 레일을 다시 덮는다.
+  let sceneRailWatch = null;
+  function watchHistoryRail() {
+    if (sceneRailWatch || typeof ResizeObserver === 'undefined') return;
+    const rail = document.getElementById('viewerPanel');
+    if (!rail) return;
+    // rAF 로 미루지 않는다 — 배경 탭에서는 rAF 가 스로틀돼 창을 다시 볼 때까지
+    // 플로트가 옛 폭으로 남는다. ResizeObserver 콜백은 레이아웃이 끝난 뒤에 돌므로
+    // 여기서 바로 재도 현재 값이 나온다.
+    sceneRailWatch = new ResizeObserver(() => positionSceneFloat());
+    sceneRailWatch.observe(rail);
   }
 
   function positionSceneFloat() {
@@ -888,7 +916,11 @@ export function createInteractivePanel({
     const left = Math.max(Math.round(box.right + 12), PANEL_LEFT);
     host.style.left = left + 'px';
     host.style.top = PANEL_TOP + 'px';
-    host.style.width = Math.round(window.innerWidth - left - 12) + 'px';
+    // 오른쪽 끝은 **히스토리 레일 앞**까지다. 예전에는 `window.innerWidth` 에서
+    // 빼서 레일 위까지 깔렸는데, 이 플로트는 `position: fixed` 라 자리 잡지 않은
+    // 레일보다 위에 그려진다 — 레일의 팝업 버튼(↗)이 그 밑에 깔려 눌리지 않았고,
+    // Interactive 에서 히스토리로 들어갈 길이 통째로 막혔다(사용자 지적).
+    host.style.width = Math.max(0, Math.round(sceneRightEdge() - left - 12)) + 'px';
     if (host.innerHTML) host.classList.add('open');
   }
 

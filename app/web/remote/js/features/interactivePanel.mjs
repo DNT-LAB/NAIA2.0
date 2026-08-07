@@ -5515,6 +5515,12 @@ export function createInteractivePanel({
         slots: Object.fromEntries(
           Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
         composition: {...(state.composition || {})},
+        // 구도는 저장되는데 Rating 만 빠져 새로고침하면 미설정으로 돌아갔다.
+        // `picks` 는 배열이라 얕은 복사로는 원본을 공유한다 — 따로 뜬다.
+        rating: {
+          mode: (state.ratingPick && state.ratingPick.mode) || 'single',
+          picks: [...((state.ratingPick && state.ratingPick.picks) || [])],
+        },
       };
     },
     /** 저장해 둔 작업 결과를 되돌린다. 실패해도 조용히 지나간다 —
@@ -5526,6 +5532,7 @@ export function createInteractivePanel({
       // (2026-08-05 Codex 지적).
       const rollback = {
         chars: state.chars, composition: state.composition, freeText: state.freeText,
+        ratingPick: state.ratingPick,
         slots: Object.fromEntries(
           Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
       };
@@ -5546,6 +5553,19 @@ export function createInteractivePanel({
         if (saved.composition && typeof saved.composition === 'object') {
           state.composition = {...newComposition(), ...saved.composition};
         }
+        // 옛 저장분에는 rating 이 없다 — 그때는 기본값(미설정)으로 시작한다.
+        // **모르는 키는 버린다.** 선택지 목록이 바뀌었을 때 없는 키가 남으면
+        // RATING_BY_KEY 조회가 비어 태그가 조용히 사라진다.
+        if (saved.rating && typeof saved.rating === 'object') {
+          const picks = Array.isArray(saved.rating.picks)
+            ? saved.rating.picks.map(String).filter(k => RATING_BY_KEY.has(k)) : [];
+          state.ratingPick = {
+            mode: saved.rating.mode === 'random' ? 'random' : 'single',
+            picks: picks.length ? picks : ['none'],
+          };
+        } else {
+          state.ratingPick = newRating();
+        }
         // v1 저장분에는 없다 — 그때는 빈 문자열로 시작한다.
         state.freeText = typeof saved.freeText === 'string' ? saved.freeText : '';
         if (active) { renderBlocks(); emitChange(); }
@@ -5554,6 +5574,7 @@ export function createInteractivePanel({
         state.chars = rollback.chars;
         state.slots = rollback.slots;
         state.composition = rollback.composition;
+        state.ratingPick = rollback.ratingPick;
         state.freeText = rollback.freeText;
         if (active) { try { renderBlocks(); } catch (__) {} }
         return false;

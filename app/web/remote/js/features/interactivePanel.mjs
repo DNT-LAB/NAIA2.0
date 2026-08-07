@@ -948,6 +948,78 @@ export function createInteractivePanel({
     return out;
   }
 
+  /** 텍스트 모드의 내용. **잠긴 칩(구도 콤보 파생)은 넣지 않는다** — 콤보에서
+   *  나온 값이라 여기서 고쳐도 다시 만들어진다. 씬 슬롯이 편집 중에 파생 칩을
+   *  빼는 것과 같은 규칙이다(slotBody). */
+  function globalTextValue() {
+    const parts = globalChipList().filter(i => !i.locked).map(i => i.raw);
+    const free = String(state.freeText || '').trim();
+    if (free) parts.push(free);
+    return parts.join(', ');
+  }
+
+  /** 쉼표로 나누되 **NAI 가중치 묶음 안의 쉼표는 건드리지 않는다.**
+   *  `parseSlotInput` 은 `/[,\n]/` 로 그냥 쪼개서 `2::hug, grabbing from behind ::`
+   *  를 두 동강 낸다 — 이 자리는 가중치 묶음을 보여 주는 것이 목적이라 그대로
+   *  쓸 수 없다. 여는 `::` 인지 닫는 `::` 인지는 **앞에 숫자가 붙었는지**로 가른다.
+   *  닫는 짝이 없으면 남은 부분을 통째로 하나로 둔다(찢는 것보다 낫다). */
+  function parseGlobalInput(value) {
+    const out = [];
+    const seen = new Set();
+    const src = String(value || '');
+    let buf = '';
+    let inWeight = false;
+    const push = () => {
+      const t = buf.trim();
+      buf = '';
+      if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); out.push(t); }
+    };
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i];
+      if (ch === ':' && src[i + 1] === ':') {
+        inWeight = inWeight ? false : /-?\d+(?:\.\d+)?\s*$/.test(buf);
+        buf += '::';
+        i++;
+        continue;
+      }
+      if (!inWeight && (ch === ',' || ch === '\n')) { push(); continue; }
+      buf += ch;
+    }
+    push();
+    return out;
+  }
+
+  /** 텍스트를 다시 축별 칩으로 되돌린다.
+   *
+   *  **원래 있던 축을 기억해서 제자리로 보낸다.** 태그 사전을 다시 뒤져 축을
+   *  정하면, 여러 축에 걸친 태그가 사용자가 넣어 둔 자리에서 멋대로 옮겨간다.
+   *  처음 보는 태그만 자유 입력으로 간다 — 축을 정하는 것은 위 버튼의 몫이다.
+   *  텍스트에서 사라진 태그는 그대로 사라진다(그게 지우는 방법이다). */
+  function commitGlobalText(value) {
+    const home = new Map();
+    for (const item of globalChipList()) {
+      if (item.locked) continue;
+      const k = item.raw.trim().toLowerCase();
+      if (!home.has(k)) home.set(k, []);
+      home.get(k).push(item.slot);          // 같은 글자가 두 축에 있으면 순서대로
+    }
+    const next = emptySceneSlots();
+    const leftover = [];
+    for (const tag of parseGlobalInput(value)) {
+      const queue = home.get(tag.trim().toLowerCase());
+      if (queue && queue.length) next[queue.shift()].push(tag);
+      else leftover.push(tag);
+    }
+    state.slots = next;
+    state.freeText = leftover.join(', ');
+  }
+
+  /** 직접 적은 것을 태그 단위로 본다. 저장은 문자열 하나지만(프롬프트에 그대로
+   *  붙는 값이라 원문을 지켜야 한다) 화면과 개수는 태그 단위여야 한다. */
+  function freeTagList() {
+    return parseGlobalInput(state.freeText || '');
+  }
+
   function globalEditorHtml() {
     const list = globalChipList();
     const chips = list.map(item => {
@@ -965,12 +1037,31 @@ export function createInteractivePanel({
              aria-label="제거">\u00d7</button>`}
       </span>`;
     }).join('');
+    if (globalTextMode) {
+      // 텍스트 모드는 **통째로 전환**된다(사용자 지정). 칩을 같이 두면 같은 태그가
+      // 두 군데 보여 어느 쪽을 고치는 건지 알 수 없다. 빠져나오면 다시 칩이 된다.
+      return `
+        <div class="ia-ge-box is-text" id="iaGlobalBox">
+          <textarea class="ia-ge-text" id="iaGlobalText" spellcheck="false"
+            placeholder="태그를 쉼표로 구분해 적습니다"
+          >${escHtml(globalTextValue())}</textarea>
+        </div>`;
+    }
+    // 직접 적은 것도 **태그마다 칩 하나**다. 한 덩어리로 두면 지울 때 통째로만
+    // 지워지고, 축 칩과 같은 것을 다루면서 모양이 달라 눈에 걸린다.
+    const freeChips = freeTagList().map((t, i) => {
+      const {weight, text} = weightedChip(t);
+      return `<span class="ia-gchip is-free" title="직접 적은 것">
+        ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}×</b>` : ''}
+        <span class="ia-gchip-t">${escHtml(text)}</span>
+        <button type="button" class="ia-gchip-x" data-gfree="${i}" aria-label="제거">×</button>
+      </span>`;
+    }).join('');
+    const total = list.length + freeTagList().length;
     return `
-      <div class="ia-ge-box" id="iaGlobalBox">
-        <div class="ia-ge-chips">${chips}</div>
-        <textarea class="ia-ge-free" id="iaGlobalFree" rows="1" spellcheck="false"
-          placeholder="${list.length ? '태그를 더 적습니다' : '태그를 적거나 위 버튼으로 넣습니다'}"
-        >${escHtml(state.freeText || '')}</textarea>
+      <div class="ia-ge-box" id="iaGlobalBox" title="눌러서 텍스트로 고칩니다">
+        <div class="ia-ge-chips">${chips}${freeChips}</div>
+        ${total ? '' : '<span class="ia-ge-empty">눌러서 적거나, 위 버튼으로 넣습니다</span>'}
       </div>`;
   }
 
@@ -1004,13 +1095,17 @@ export function createInteractivePanel({
     badge.textContent = on ? `글로벌 태그 ${n}` : '';
   }
 
+  let globalTextMode = false;   // 칩(false) — 텍스트(true)
+
   function renderGlobalEditor() {
     const host = document.getElementById('interactiveGlobalEditor');
     if (!host || host.hidden) return;
     // 타이핑 중에는 다시 그리지 않는다 — 커서와 IME 조합이 날아간다.
-    if (document.activeElement && document.activeElement.id === 'iaGlobalFree') return;
+    if (document.activeElement && document.activeElement.id === 'iaGlobalText') return;
     host.innerHTML = globalEditorHtml();
-    syncGlobalCountBadge(globalChipList().length);
+    // 배지는 **보이는 칩 전부**를 센다 — 직접 적은 것을 빼면 3개가 보이는데 0 이라
+    // 적혀 서로 어긋난다(실측).
+    syncGlobalCountBadge(globalChipList().length + freeTagList().length);
     bindGlobalEditor(host);
   }
 
@@ -1026,40 +1121,61 @@ export function createInteractivePanel({
         emitChange();
       });
     });
-    // 상자 아무 데나 누르면 입력으로 들어간다. [x] 와 입력 자신은 뺀다 —
-    // [x] 를 빼지 않으면 지우면서 동시에 포커스가 옮겨가 화면이 튄다.
+    // 직접 적은 칩의 [×]. 저장은 문자열 하나라 지운 뒤 다시 잇는다.
+    host.querySelectorAll('[data-gfree]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.gfree);
+        const tags = freeTagList();
+        if (!(idx >= 0) || idx >= tags.length) return;
+        tags.splice(idx, 1);
+        state.freeText = tags.join(', ');
+        renderGlobalEditor();
+        emitChange();
+      });
+    });
     const box = host.querySelector('#iaGlobalBox');
-    const free = host.querySelector('#iaGlobalFree');
-    if (box && free) {
+    const text = host.querySelector('#iaGlobalText');
+    // 칩 모드: 상자 아무 데나 누르면 텍스트 모드로 통째로 바뀐다. [x] 는 뺀다 —
+    // 지우면서 동시에 모드가 바뀌면 방금 무엇을 지웠는지 보이지 않는다.
+    if (box && !text) {
       box.addEventListener('pointerdown', event => {
         if (event.target.closest('.ia-gchip-x')) return;
-        if (event.target === free) return;
-        event.preventDefault();                  // 텍스트 선택 대신 포커스
-        free.focus();
-        // 캐럿을 끝으로 — 칩을 눌러 들어왔으면 이어 적는 것이 자연스럽다.
-        free.setSelectionRange(free.value.length, free.value.length);
+        event.preventDefault();
+        globalTextMode = true;
+        renderGlobalEditor();
+        const ta = document.getElementById('iaGlobalText');
+        if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
       });
+      return;
     }
-    if (!free) return;
+    if (!text) return;
     // 표준 자동완성. e621 은 켜 두고 **캐릭터·아티스트만** 뺀다 — 여기는 그림
     // 전체에 걸리는 자리라 인물·작가는 캐릭터 슬롯이 맡는다(사용자 지정).
     if (typeof bindTagAssist === 'function') {
-      try { bindTagAssist(free, {excludeCats: ['character', 'artist']}); } catch (_) {}
+      try { bindTagAssist(text, {excludeCats: ['character', 'artist']}); } catch (_) {}
     }
-    free.addEventListener('input', () => {
-      // 반응형 생성은 타이핑 중에 멈춘다 — 글자마다 유료 생성이 나가면 안 된다.
-      reactiveTypingSlot = free;
-      state.freeText = free.value;
-      emitChange();   // reactiveOnChange 는 reactiveTypingSlot 을 보고 스스로 멈춘다
-    });
-    const flush = () => {
-      if (reactiveTypingSlot !== free) return;
-      reactiveTypingSlot = null;
-      reactiveOnChange();
+    // 다 썼다는 신호 = 포커스를 잃거나 Esc. Enter 는 **줄바꿈으로 둔다** — 여기는
+    // 슬롯 하나가 아니라 전체 목록이라 여러 줄로 정리하는 편이 읽기 쉽다.
+    // 반응형 생성은 타이핑 중에 멈춘다 — 글자마다 유료 생성이 나가면 안 된다.
+    // 빠져나올 때 한 번만 낸다(씬 슬롯의 flushTyping 과 같은 규칙).
+    text.addEventListener('input', () => { reactiveTypingSlot = text; });
+    const leave = () => {
+      if (!globalTextMode) return;
+      globalTextMode = false;
+      commitGlobalText(text.value);
+      renderBlocks();            // 씬 버튼의 개수 배지도 같이 맞춘다
+      renderGlobalEditor();
+      emitChange();
+      if (reactiveTypingSlot === text) { reactiveTypingSlot = null; reactiveOnChange(); }
     };
-    free.addEventListener('blur', flush);
-    free.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); free.blur(); }
+    text.addEventListener('blur', leave);
+    text.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      // 자동완성 목록이 떠 있으면 그쪽이 먼저 닫혀야 한다 — 한 번에 둘 다 닫으면
+      // 목록만 지우려던 사용자가 편집기 밖으로 튕겨 나간다.
+      if (document.querySelector('#tagTooltip:not([hidden])')) return;
+      event.preventDefault();
+      text.blur();
     });
   }
 

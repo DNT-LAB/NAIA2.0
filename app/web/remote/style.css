@@ -22813,16 +22813,23 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-gchip-x:hover { color: #ffb4b4; }
 
-.ia-ge-free {
+/* 직접 적은 것도 칩으로 보인다. 축이 없으니 띠는 점선으로 구분한다. */
+.ia-gchip.is-free { border-left-style: dashed; --axis: var(--text-dim); }
+
+/* 텍스트 모드 — 칩을 걷어내고 상자 전체가 입력이 된다. 칩을 같이 두면 같은
+   태그가 두 군데 보여 어느 쪽을 고치는 건지 알 수 없다(사용자 지정). */
+.ia-ge-box.is-text { padding: 4px 5px; cursor: default; }
+.ia-ge-text {
   flex: 1 1 auto; min-height: 34px;
   width: 100%; resize: none;
-  padding: 2px 1px;
+  padding: 3px 4px;
   border: 0; border-radius: 0;
   background: none; color: var(--text-primary);
-  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
 }
-.ia-ge-free:focus { outline: none; }
-.ia-ge-free::placeholder { color: var(--text-dim); font-style: italic; }
+.ia-ge-text:focus { outline: none; }
+.ia-ge-text::placeholder { color: var(--text-dim); font-style: italic; }
+.ia-ge-empty { font-size: 10px; color: var(--text-dim); font-style: italic; }
 
 /* 글로벌 편집기가 떠 있는 동안의 최소 높이. 머리 + 칩 두 줄 + 자유 입력이 들어갈
    만큼. 사용자가 더 늘려 뒀으면 그 값이 이긴다(min-height 라서). */

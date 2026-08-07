@@ -3175,18 +3175,20 @@ export function createInteractivePanel({
     const box = panelMount.getBoundingClientRect();
     const w = zoomEl.offsetWidth || 260;
     const h = zoomEl.offsetHeight || 300;
-    // 팝업 바로 오른쪽. 사전은 그 위에 가로로 눕는 띠라 세로로 피하면 된다.
-    // 자리가 없으면 왼쪽으로 뒤집는다(그래도 없으면 화면 안으로 민다).
-    let left = box.right + 10;
-    if (left + w > window.innerWidth - 8) left = Math.max(8, box.left - w - 10);
-    zoomEl.style.left = Math.round(left) + 'px';
-    // 세로는 **사전 띠 바로 아래에 붙인다.** 누른 칸의 눈높이에 맞추면 이미지
-    // 한가운데를 덮는다(실측) — 띠 아래 왼쪽 귀퉁이는 이미지가 우하단 정렬이라
-    // 가장 덜 아까운 자리다. 화면 밖으로는 안 나가게 가둔다.
-    const aside = asideMount && asideMount.classList.contains('open')
-      ? asideMount.getBoundingClientRect() : null;
-    const floor = aside ? aside.bottom + 10 : Math.max(8, box.top);
-    const top = Math.min(floor, window.innerHeight - h - 8);
+    // **팝업 왼쪽(프롬프트 쪽).** 오른쪽은 이제 사전 띠와 이미지가 쓴다 —
+    // 거기 두면 무엇을 두든 그림을 덮는다(사용자 지시 2026-08-07).
+    let left = box.left - w - 10;
+    if (left < 8) left = Math.min(box.right + 10, window.innerWidth - w - 8);
+    zoomEl.style.left = Math.round(Math.max(8, left)) + 'px';
+    // 세로는 **썸네일 그리드의 윗변**에 맞춘다. 그 위에는 검색줄·축 탭이 늘었다
+    // 줄었다 하는 구간(stretch)이 있어서 팝업 위쪽을 기준으로 잡으면 축을 바꿀
+    // 때마다 높이가 흔들린다. 그리드를 직접 재면 축이 바뀌어도 그리드와 나란히
+    // 선다 — 값 자체는 재서 넣지만(동적) 칸마다 뛰지는 않는다(고정).
+    // 접힌 축의 그리드도 DOM 에는 남아 있다 — **보이는 것**만 고른다.
+    const grid = [...panelMount.querySelectorAll('.ia-cell-grid')]
+      .find(g => g.offsetParent !== null && g.getBoundingClientRect().height > 0);
+    const anchor = grid ? grid.getBoundingClientRect().top : box.top;
+    const top = Math.min(Math.max(8, anchor), window.innerHeight - h - 8);
     zoomEl.style.top = Math.round(Math.max(8, top)) + 'px';
   }
 

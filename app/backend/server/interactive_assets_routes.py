@@ -95,7 +95,7 @@ def register_interactive_assets_routes(
 
     @app.post("/api/interactive-assets/snapshot")
     async def api_interactive_snapshot_record(req: Request):
-        """조합을 기록한다. 직전과 같으면 새로 쌓지 않고 시각만 올린다."""
+        """캐릭터 한 명당 에셋 하나를 남긴다. 같은 캐릭터는 새로 쌓지 않고 갱신한다."""
         try:
             payload = await req.json()
         except Exception:
@@ -107,11 +107,15 @@ def register_interactive_assets_routes(
         raw_globals = payload.get("globals") if isinstance(payload, dict) else None
         body_globals = raw_globals if isinstance(raw_globals, dict) else {}
         try:
-            meta = await run_in_thread(
+            metas = await run_in_thread(
                 interactive_assets_service(session_context).record, chars, body_globals)
         except Exception as exc:
             return JSONResponse({"error": f"record failed: {exc}"}, status_code=500)
-        return {"ok": True, "snapshot": meta}
+        # 캐릭터 수만큼 나온다. `snapshot` 은 남겨 두되 **첫 장만** 가리킨다 —
+        # 이 키만 보는 호출부가 두 번째 캐릭터를 조용히 잃지 않도록 `snapshots` 를
+        # 쓰게 하고, 옛 키는 깨지지 않을 정도로만 남긴다.
+        return {"ok": True, "snapshots": metas,
+                "snapshot": metas[0] if metas else None}
 
     @app.post("/api/interactive-assets/snapshot/delete")
     async def api_interactive_snapshot_delete(req: Request):

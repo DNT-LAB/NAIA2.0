@@ -198,10 +198,11 @@ export function createInteractiveAssetsPanel({
     }
   }
 
-  /** 생성 직전에 부른다. 스냅샷 id 를 돌려주면 app.js 가 생성 요청에 실어,
-   *  백엔드가 결과 이미지로 384px 썸네일을 붙인다. 실패해도 생성은 진행한다. */
+  /** 생성 직전에 부른다. **캐릭터 한 명이 에셋 하나**라 id 가 여럿 나온다.
+   *  app.js 가 이걸 생성 요청에 실으면 백엔드가 결과 이미지로 384px 썸네일을
+   *  전부에 붙인다(그림은 한 장뿐이다). 실패해도 생성은 진행한다. */
   async function record(chars, globals) {
-    if (!Array.isArray(chars) || !chars.length) return '';
+    if (!Array.isArray(chars) || !chars.length) return [];
     try {
       const r = await fetch('/api/interactive-assets/snapshot', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -209,10 +210,12 @@ export function createInteractiveAssetsPanel({
         body: JSON.stringify({chars, globals: globals || {}}),
       });
       const d = await r.json();
-      if (!r.ok || !d.snapshot) return '';
-      return String(d.snapshot.id || '');
+      if (!r.ok) return [];
+      const list = Array.isArray(d.snapshots) ? d.snapshots
+        : (d.snapshot ? [d.snapshot] : []);       // 옛 응답도 받는다
+      return list.map(s => String((s && s.id) || '')).filter(Boolean);
     } catch (_) {
-      return '';   // 조합 기록 실패가 생성을 막으면 안 된다
+      return [];   // 조합 기록 실패가 생성을 막으면 안 된다
     }
   }
 

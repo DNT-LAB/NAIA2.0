@@ -272,54 +272,71 @@ class InteractiveAssetsService:
 
     # ── 스냅샷 ──────────────────────────────────────────────────────────────
     def record(self, chars: list[dict[str, Any]],
-               globals_: dict[str, Any] | None = None) -> dict[str, Any] | None:
-        """조합을 기록한다. 직전과 같으면 시각만 올리고 새로 쌓지 않는다.
+               globals_: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """**캐릭터 한 명이 에셋 하나다**(사용자 결정 2026-08-07). 목록을 돌려준다.
+
+        예전에는 한 번 생성한 조합 전체가 카드 하나였다. 그러면 두 명을 그린
+        순간 그 둘이 영영 한 덩어리라, 나중에 한 명만 꺼내 쓰려면 카드를 펼쳐야
+        했다. 슬롯마다 따로 쌓으면 캐릭터가 곧 에셋이 된다.
+
+        같은 캐릭터는 **목록 어디에 있든** 한 장으로 모은다. 옛 방식은 맨 뒷줄
+        하나만 비교했는데, 여러 명을 한 번에 기록하면 마지막 한 명 말고는 전부
+        새로 쌓인다.
 
         `globals_` 는 씬 슬롯·구도처럼 캐릭터에 속하지 않는 값이다. 미리보기가
         '이 그림이 어떤 설정에서 나왔는가'를 보여 주려면 본문에 함께 있어야 한다.
-        **해시에는 넣지 않는다** — 같은 캐릭터 조합인데 배경만 바꿨다고 카드가
-        새로 쌓이면 목록이 금방 같은 얼굴로 가득 찬다. 대신 아래 갱신 경로가
-        본문을 덮어쓰므로 마지막 값이 남는다.
+        **해시에는 넣지 않는다** — 같은 캐릭터인데 배경만 바꿨다고 카드가 새로
+        쌓이면 목록이 금방 같은 얼굴로 가득 찬다.
         """
         if not chars:
-            return None
+            return []
         body_globals = globals_ if isinstance(globals_, dict) else {}
+        out: list[dict[str, Any]] = []
         with self._lock:
-            digest = snapshot_hash(chars)
             rows = self.load_index()
-            if rows and rows[-1].get("prompt_hash") == digest:
-                rows[-1]["created_at"] = _now()
-                rows[-1]["summary"] = snapshot_summary(chars)
-                rows[-1]["origin"] = self.classify_origin(chars)
-                rows[-1]["char_count"] = len(chars)
-                # 본문도 갱신한다. 해시가 안 보는 필드(활성/비활성, 위치, 프리셋 라벨)는
-                # 같은 해시로도 달라질 수 있는데, 썸네일은 같은 id 파일을 덮어쓴다.
-                # 본문을 두면 카드의 그림과 복원 결과가 어긋난다.
-                self._write_atomic(
-                    self._body_path(rows[-1]["id"]),
-                    {"id": rows[-1]["id"], "created_at": rows[-1]["created_at"],
-                     "chars": chars, "globals": body_globals})
-                self._save_index(rows)
-                return rows[-1]
-            sid = "s" + uuid.uuid4().hex[:16]
-            meta = {
-                "id": sid, "created_at": _now(),
-                "origin": self.classify_origin(chars), "thumb": None,
-                "prompt_hash": digest, "summary": snapshot_summary(chars),
-                # 프론트가 본문을 읽지 않고도 "한 명짜리 조합"을 알아야 한다 —
-                # 그래야 카드를 펼치지 않고 바로 슬롯에 꽂을 수 있다.
-                "char_count": len(chars),
-            }
-            # 본문을 먼저 쓴다 — 인덱스에만 있고 본문이 없는 상태를 만들지 않는다.
-            self._write_atomic(self._body_path(sid),
-                               {"id": sid, "created_at": meta["created_at"],
-                                "chars": chars, "globals": body_globals})
-            rows.append(meta)
+            for char in chars:
+                one = [char]
+                digest = snapshot_hash(one)
+                hit = next((r for r in rows if r.get("prompt_hash") == digest), None)
+                if hit is not None:
+                    hit["created_at"] = _now()
+                    hit["summary"] = snapshot_summary(one)
+                    hit["origin"] = self.classify_origin(one)
+                    hit["char_count"] = 1
+                    # 본문도 갱신한다. 해시가 안 보는 필드(활성/비활성, 위치, 프리셋
+                    # 라벨)는 같은 해시로도 달라질 수 있는데 썸네일은 같은 id 파일을
+                    # 덮어쓴다. 본문을 두면 카드의 그림과 복원 결과가 어긋난다.
+                    self._write_atomic(
+                        self._body_path(hit["id"]),
+                        {"id": hit["id"], "created_at": hit["created_at"],
+                         "chars": one, "globals": body_globals})
+                    # **끝으로 옮긴다.** 이 목록은 자리가 곧 최신순이다 — 화면은
+                    # reversed() 로 읽고 _prune 은 앞쪽을 오래된 것으로 보고 지운다.
+                    # 제자리에 두면 방금 쓴 에셋이 낡은 것으로 취급돼 먼저 사라진다.
+                    rows.remove(hit)
+                    rows.append(hit)
+                    out.append(hit)
+                    continue
+                sid = "s" + uuid.uuid4().hex[:16]
+                meta = {
+                    "id": sid, "created_at": _now(),
+                    "origin": self.classify_origin(one), "thumb": None,
+                    "prompt_hash": digest, "summary": snapshot_summary(one),
+                    # 한 명짜리가 되었지만 키는 남긴다 — 프론트가 이 값으로
+                    # '펼치지 않고 바로 꽂을 수 있는가'를 판단한다.
+                    "char_count": 1,
+                }
+                # 본문을 먼저 쓴다 — 인덱스에만 있고 본문이 없는 상태를 만들지 않는다.
+                self._write_atomic(self._body_path(sid),
+                                   {"id": sid, "created_at": meta["created_at"],
+                                    "chars": one, "globals": body_globals})
+                rows.append(meta)
+                out.append(meta)
             self._pending_delete = []
             self._prune(rows)
             self._save_index(rows)
             self._flush_deletes()            # 인덱스가 확정된 뒤에만 지운다
-            return meta
+        return out
 
     def attach_thumb(self, snapshot_id: str, image_bytes: bytes) -> bool:
         """생성 결과를 384px WEBP 로 줄여 붙인다. 생성 훅이 호출한다."""

@@ -5619,8 +5619,10 @@ async function generateWithInteractiveSnapshot(payload) {
     let globals = {};
     try { globals = interactivePanel.getSnapshotGlobals?.() || {}; } catch (_) { globals = {}; }
     if (chars.length) {
-      const id = await interactiveAssetsPanel.record(chars, globals);
-      if (id) overrides.interactive_snapshot_id = id;
+      // 캐릭터 한 명이 에셋 하나 — id 가 여럿 온다. 그림은 한 장이라 백엔드가
+      // 같은 썸네일을 전부에 붙인다(사용자 결정).
+      const ids = await interactiveAssetsPanel.record(chars, globals);
+      if (ids && ids.length) overrides.interactive_snapshot_id = ids;
     }
   }
   // 가드(생성 중 / WS 닫힘)는 requestGenerate 가 다시 본다 — await 사이에 상태가

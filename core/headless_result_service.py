@@ -97,10 +97,17 @@ class HeadlessResultStore:
         self.latest_metadata_payload: dict[str, Any] | None = None
 
     def _attach_interactive_snapshot_thumb(self, request, image_bytes: bytes) -> None:
-        """Interactive 조합 스냅샷에 결과 썸네일을 붙인다(있을 때만)."""
+        """Interactive 에셋에 결과 썸네일을 붙인다(있을 때만).
+
+        캐릭터 한 명이 에셋 하나라 id 가 여럿 온다. 그림은 한 장뿐이므로 **같은
+        그림을 전부에 붙인다**(사용자 결정 2026-08-07). 옛 형태(문자열 하나)도
+        그대로 받는다.
+        """
         params = getattr(request, "params", {}) or {}
-        snapshot_id = str(params.get("interactive_snapshot_id") or "")
-        if not snapshot_id or not image_bytes:
+        raw = params.get("interactive_snapshot_id")
+        ids = [str(x).strip() for x in (raw if isinstance(raw, (list, tuple)) else [raw])]
+        ids = [x for x in ids if x and x != "None"]
+        if not ids or not image_bytes:
             return
         context = getattr(self, "_context", None) or getattr(request, "context", None)
         if context is None:
@@ -110,7 +117,9 @@ class HeadlessResultStore:
                 interactive_assets_service,
             )
 
-            interactive_assets_service(context).attach_thumb(snapshot_id, image_bytes)
+            service = interactive_assets_service(context)
+            for snapshot_id in ids:
+                service.attach_thumb(snapshot_id, image_bytes)
         except Exception as exc:                     # 썸네일 실패가 생성을 막지 않는다
             print(f"[interactive-assets] thumb attach skipped: {exc}")
 

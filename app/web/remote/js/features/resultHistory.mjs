@@ -66,6 +66,9 @@ export function createResultHistoryController({
   openQuicksaveSettings = null,
   // 아직 저장 안 된 장수. 모르면 -1 — 모를 때는 묻는 쪽으로 간다.
   getUnsavedCount = () => -1,
+  // 히스토리 통째로 비우기. Auto Save 판이 갖고 있던 흐름을 그대로 부른다 —
+  // 미저장 장수를 세어 경고하는 확인 창이 거기 붙어 있다.
+  clearAllHistory = null,
 }) {
   const getEl = id => document.getElementById(id);
   const viewerTab = getEl('viewerTab');
@@ -601,6 +604,12 @@ export function createResultHistoryController({
     }
     if (viewerCountEl) viewerCountEl.textContent = viewerTotal;
     if (viewerTab) viewerTab.classList.toggle('visible', viewerTotal > 0);
+    // 팝업의 숫자도 여기서 같이 맞춘다. 예전에는 세 군데(쪽 불러오기·새 이미지·
+    // 삭제)에서 각자 `#vpCount` 를 손봤는데, 그러면 그 셋을 안 지나는 길에서
+    // 숫자가 남는다 — 히스토리를 비워도 머리에 '2' 가 그대로였다(실측).
+    const popupCount = getEl('vpCount');
+    if (popupCount) popupCount.textContent = viewerTotal;
+    if (viewerPopupOpen) vpUpdatePosition();
   }
 
   function removeThumb(grid, relPath) {
@@ -1095,7 +1104,16 @@ export function createResultHistoryController({
                 onclick="closeViewerPopup()" title="닫기" aria-label="닫기">&times;</button>
       </div>
       <div class="viewer-popup-body">
-        <div class="viewer-popup-left" id="vpGrid"></div>
+        <div class="viewer-popup-left-col">
+          <div class="viewer-popup-left" id="vpGrid"></div>
+          <div class="vp-left-bar">
+            <button type="button" class="vp-bar-btn is-danger" id="vpClearAll"
+                    title="히스토리를 통째로 비웁니다 — 저장된 파일은 그대로 남습니다">
+              \u{1F5D1} 일괄정리</button>
+            <span class="vp-bar-sep"></span>
+            <span class="vp-left-note" id="vpLeftNote"></span>
+          </div>
+        </div>
         <div class="viewer-popup-right" id="vpRight">
           <div class="vp-stage" id="vpStage">
             <img class="vp-preview" id="vpPreview" alt="" draggable="false">
@@ -1323,6 +1341,10 @@ export function createResultHistoryController({
       vpPaintSlider(Number(slider.value), total);
     }
     if (pos) pos.textContent = `${index >= 0 ? index + 1 : 0} / ${total}`;
+    const note = getEl('vpLeftNote');
+    if (note) {
+      note.textContent = total ? `${total}장` : '';
+    }
     const seen = getEl('vpSeen');
     if (seen) {
       seen.textContent = vpSeen.size ? `\u{1F441} ${vpSeen.size}` : '';
@@ -1427,6 +1449,10 @@ export function createResultHistoryController({
     on('vpFit', vpToggleFit);
     on('vpListBtn', () => vpSetListHidden(!vpListHidden));
     on('vpFsBtn', vpToggleFullscreen);
+    on('vpClearAll', () => {
+      if (typeof clearAllHistory === 'function') clearAllHistory();
+      else showToast('히스토리 초기화를 열 수 없습니다.', 'error');
+    });
 
     const slider = getEl('vpSlider');
     if (slider) {

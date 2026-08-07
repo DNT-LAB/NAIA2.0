@@ -7445,16 +7445,55 @@ body.resizing-result-info {
    허공이 되고 정작 보고 있는 그림은 좁아진다(실측). 목록은 필요한 만큼만 갖고
    나머지는 미리보기에 준다. 바닥색도 갈라서 '목록 판 / 그림 무대'로 층을 만든다 —
    앱의 다른 화면이 전부 그렇게 쌓여 있다. */
-.viewer-popup-left {
+/* 목록 칸은 이제 **세로 두 칸**이다 — 위는 스크롤되는 격자, 아래는 발치 바.
+   폭과 오른쪽 경계선은 바깥 칸이 갖는다(격자만 스크롤하고 바는 붙박이여야
+   하므로 폭을 안쪽에 두면 바가 같이 흐른다). */
+.viewer-popup-left-col {
   flex: 0 0 clamp(300px, 34%, 620px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  border-right: 1px solid var(--border-dim);
+  background: var(--bg-surface);
+}
+.viewer-popup-left {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding: 10px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 8px;
   align-content: start;
-  border-right: 1px solid var(--border-dim);
   background: var(--bg-surface);
+}
+/* 오른쪽 조작 바와 같은 높이·문법. 두 발치가 한 줄로 이어져 보인다. */
+.vp-left-bar {
+  flex: 0 0 auto;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border-dim);
+  background: var(--bg-surface);
+}
+.vp-left-note {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+/* 되돌릴 수 없는 것 하나뿐이라 붉은 톤을 아낀다. */
+.vp-bar-btn.is-danger {
+  border-color: rgba(255,112,112,0.32);
+  background: rgba(255,94,94,0.08);
+  color: #ffb1b1;
+}
+.vp-bar-btn.is-danger:hover {
+  border-color: rgba(255,112,112,0.6);
+  background: rgba(255,94,94,0.18);
+  color: #fff;
 }
 .viewer-popup-left::-webkit-scrollbar { width: 4px; }
 .viewer-popup-left::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
@@ -7602,7 +7641,7 @@ body.resizing-result-info {
 }
 
 /* ── 목록 접기 = 그림 최대화 ─────────────────────────────────────────────── */
-.viewer-popup-inner.list-hidden .viewer-popup-left { display: none; }
+.viewer-popup-inner.list-hidden .viewer-popup-left-col { display: none; }
 
 /* ── 숏컷 설정 (앱 전용) ──────────────────────────────────────────────────
    머리의 ⌨ 버튼에서 내려오는 작은 판. 팝업 안에 떠 있으므로 조작 바보다 위다. */

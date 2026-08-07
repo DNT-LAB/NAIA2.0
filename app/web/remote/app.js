@@ -633,7 +633,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs')
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260807-rev3')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260807-leftbar2')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -657,6 +657,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20260807-re
       openQuicksaveSettings: () => openModule('auto_save'),
       // 미저장 이미지는 지우면 휴지통에도 안 남는다 — 확인 창을 건너뛸지
       // 말지가 이 값에 걸린다. 상태가 아직 없으면 -1(모름)로 넘긴다.
+      clearAllHistory: () => clearResultHistory(),
       getUnsavedCount: () => {
         const n = autoSavePanel?.getState()?.unsaved_history_count;
         return Number.isFinite(Number(n)) ? Number(n) : -1;

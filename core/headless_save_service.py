@@ -256,7 +256,7 @@ class HeadlessSaveService:
             "current_save_directory": str(directory),
         }
 
-    def quicksave_item(self, item: Any) -> dict[str, Any]:
+    def quicksave_item(self, item: Any, *, allow_move: bool = True) -> dict[str, Any]:
         """보고 있는 이미지를 빠른 저장 경로로 남긴다(Ctrl+S).
 
         **원본이 이미 디스크에 있는 경우**(Auto Save 가 켜져 있었다)는 복사하거나
@@ -264,11 +264,18 @@ class HeadlessSaveService:
         원본이 없으면(Auto Save 꺼짐) 메모리의 바이트를 그대로 쓴다.
 
         이름은 `<세션시작시간>_<원래 이름>` 으로 강제한다(사용자 지정).
+
+        `allow_move=False` 면 설정이 '이동'이어도 복사한다. 원격(LAN)에서 부른
+        경우가 그렇다 — 복사는 파일을 하나 더 만드는 것뿐이지만 이동은 **주인이
+        놔둔 자리에서 원본을 치우는** 일이라, 남의 기기에서 시킬 수 있으면 안 된다.
+        대상 폴더(`quicksave_dir`)는 이미 로컬에서만 바꿀 수 있다(set_auto_save_param).
         """
         import shutil
 
         context = self.context
         mode = str(context.auto_save_state.get("quicksave_mode") or "copy")
+        if not allow_move and mode == "move":
+            mode = "copy"
         directory = self.quicksave_directory()
         directory.mkdir(parents=True, exist_ok=True)
 

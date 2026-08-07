@@ -100,6 +100,9 @@ export function createResultHistoryController({
   let vpListHidden = false;
   // 끝에서 한 번 막아 두는 자리(옛 뷰어의 `_edge_pending`). '' | 'first' | 'last'.
   let vpEdgePending = '';
+  // 팝업을 열 때의 선택. 닫을 때 여기까지만 남긴다 — 레일에서 미리 골라 둔 것을
+  // 팝업에 들렀다는 이유로 잃으면 안 된다.
+  let vpSelectionOnOpen = null;
 
   // 숏컷 바인딩(앱 전용). 여기서 만들지만 화면에 붙는 것은 팝업이 열릴 때다.
   const viewerBindings = createViewerBindings({
@@ -1126,6 +1129,7 @@ export function createResultHistoryController({
       bindDragSelection(grid);
     }
     bindSelectionBar(getEl('vpSelectionBar'));
+    vpSelectionOnOpen = new Set(selectedPaths);
     bindPopupViewer();
     bindShortcutUi();
     vpEdgePending = '';
@@ -1530,10 +1534,18 @@ export function createResultHistoryController({
 
   function closePopup() {
     viewerPopupOpen = false;
-    // 팝업 안에서 고른 것이 밖으로 새면 안 된다. 예전에는 팝업을 닫고 나와도
-    // 레일에 '1개 선택 / 저장 1 / 삭제 1' 이 남아 있었다 — 메인 화면에서
-    // 고른 적이 없는데 삭제 버튼이 켜져 있는 셈이라 위험하다(사용자 지적).
-    clearSelection();
+    // 팝업 안에서 고른 것이 밖으로 새면 안 된다 — 메인 화면에서 고른 적이 없는데
+    // 삭제 버튼이 켜져 있는 셈이라 위험하다(사용자 지적). 그렇다고 통째로 비우면
+    // 레일에서 미리 골라 둔 것까지 잃는다(Codex 리뷰 P2). **열 때 있던 것만**
+    // 남긴다. 팝업에서 일부러 뺀 것은 뺀 채로 둔다 — 되살리는 편이 더 놀랍다.
+    if (vpSelectionOnOpen) {
+      const keep = [...selectedPaths].filter(path => vpSelectionOnOpen.has(path));
+      selectedPaths.clear();
+      keep.forEach(path => selectedPaths.add(path));
+      if (!selectedPaths.size) selectionAnchorPath = '';
+      updateSelectionUi();
+    }
+    vpSelectionOnOpen = null;
     viewerBindings.setPanelOpen(false);
     if (document.fullscreenElement) document.exitFullscreen?.();
     vpPan = null;

@@ -907,6 +907,10 @@ def register_result_display_routes(
             return JSONResponse({"ok": False, "error": "history_id or path required"},
                                 status_code=400)
 
+        # 원격에서 부르면 '이동'을 허용하지 않는다(복사로 내린다). 복사는 파일을
+        # 하나 더 만들 뿐이지만, 이동은 주인이 놔둔 자리에서 원본을 치운다.
+        allow_move = _is_local_request(req)
+
         def _run():
             store = session_context.result_store
             item = store.get_item(history_id) if history_id else None
@@ -916,7 +920,7 @@ def register_result_display_routes(
                 item = store.find_by_rel_path(target)
             if item is None:
                 raise KeyError("history item not found")
-            return session_context._save_service().quicksave_item(item)
+            return session_context._save_service().quicksave_item(item, allow_move=allow_move)
 
         try:
             result = await run_in_thread(_run)
@@ -953,6 +957,10 @@ def register_result_display_routes(
                 "failed": failures,
             }, status_code=404)
 
+        # 단건 Ctrl+S 와 같은 규칙 — 원격에서는 이동을 복사로 내린다. 이쪽은 한
+        # 번에 여러 장이라 같은 실수의 대가가 그만큼 크다(Codex 리뷰 P1).
+        allow_move = _is_local_request(req)
+
         def _run():
             service = session_context._save_service()
             saved = 0
@@ -961,7 +969,7 @@ def register_result_display_routes(
             directory = str(service.quicksave_directory())
             for rel_path, item in requested:
                 try:
-                    result = service.quicksave_item(item)
+                    result = service.quicksave_item(item, allow_move=allow_move)
                     directory = str(result.get("directory") or directory)
                     # 같은 세션에서 이미 빠른 저장한 것은 다시 쓰지 않는다
                     # (quicksave_item 이 `noop` 으로 알려 준다).

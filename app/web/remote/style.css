@@ -21289,6 +21289,40 @@ body.detached-module .mod-grid-3 {
 .ia-block.is-editing, .ia-sub-block.is-editing { align-items: start; }
 .ia-block.is-editing .ia-block-label, .ia-sub-block.is-editing .ia-block-label { padding-top: 4px; }
 
+/* 적용 중인 축 프리셋 — 축 프리셋 버튼 **아래로** 늘어선다(사용자 지정).
+   씬 버튼 줄은 가로 flex 라, 이 묶음만 폭을 통째로 차지해 다음 줄로 내려간다. */
+.ia-comp-applied {
+  flex: 1 0 100%;
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-top: 4px;
+}
+.ia-comp-ap {
+  padding: 2px 8px; border-radius: 20px;
+  border: 1px solid var(--border-dim);
+  background: rgba(14, 16, 22, 0.86);
+  color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 9.5px; white-space: nowrap;
+}
+/* 랜덤 축은 값이 아직 없다 — 생성할 때 정해진다. */
+.ia-comp-ap.is-rand { color: var(--accent-glow); border-color: var(--accent); }
+
+/* 축마다 붙는 랜덤 버튼. 켜면 그 축의 콤보는 잠긴다. */
+.ia-comp-rand {
+  flex: 0 0 auto; margin-left: 4px;
+  width: 24px; height: 22px; padding: 0;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: none; color: var(--text-dim);
+  font-size: 11px; line-height: 1; cursor: pointer;
+}
+.ia-comp-rand:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.ia-comp-rand.is-on {
+  color: var(--accent-glow); border-color: var(--accent);
+  background: rgba(124,106,239,0.16);
+}
+/* 잠긴 콤보는 흐리게 — 값이 있어도 안 쓰인다는 표시다. */
+.ia-comp-select:disabled { opacity: 0.45; pointer-events: none; }
+.ia-comp-row .custom-select:has(+ .ia-comp-rand.is-on) { opacity: 0.45; }
+
 /* --- 축 프리셋 팝업 ---
    구도 팝업 본문에 얹혀 있던 축 설정(X/Y/Z + 스페셜)을 자체 팝업으로 뗐다
    (사용자 결정 2026-08-07). 그래야 구도도 다른 팝업과 같은 배치를 쓴다. */

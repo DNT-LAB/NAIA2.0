@@ -104,7 +104,9 @@ const COMP_POV = 'pov, first person view';
 /** 하위 슬롯 표시명. key 는 상태 필드명(짧고 셀렉터 안전), label 은 화면 표기. */
 function subLabel(meta) { return (meta && (meta.label || meta.key)) || ''; }
 
-function newComposition() { return {x: 0, y: 0, z: 0, pov: false, specials: []}; }
+// `rand` = 생성할 때마다 값을 새로 뽑을 축들(['x','z'] 처럼). 옛 저장분에는
+// 없으므로 읽는 쪽에서 항상 `|| []` 로 받는다.
+function newComposition() { return {x: 0, y: 0, z: 0, pov: false, specials: [], rand: []}; }
 
 // ---------- 캐릭터 캔버스 위치 (NAI V4 char_captions[].centers) ----------
 // core/api_service.py 매핑을 따른다: A-E -> x 0.1~0.9, 1-5 -> y 0.1~0.9. 미지정 fallback = 중앙.
@@ -129,12 +131,23 @@ function posText(pos) {
 }
 
 /** 축 선택 -> 실제 프롬프트에 나가는 태그들. */
-function compTags(comp) {
+/** 구도 태그. `pick` 이 true 면 **랜덤으로 켠 축은 그때그때 하나를 뽑는다** —
+ *  생성 시점에만 그렇게 부르고, 화면 표시는 뽑지 않는다(누를 때마다 칩이
+ *  바뀌면 무엇이 나갈지 알 수 없다). 사용자 결정 2026-08-07.
+ *
+ *  '정의하지 않음'(0번)은 뽑기에서 뺀다 — 랜덤을 켠 뜻이 '아무것도 안 나올 수도
+ *  있다' 는 아니다. */
+function compTags(comp, pick) {
   if (!comp) return [];
+  const rand = comp.rand || [];
   const out = [];
   if (comp.pov) out.push(COMP_POV);
   COMP_AXES.forEach(ax => {
-    const item = ax.items[comp[ax.key] || 0];
+    let idx = comp[ax.key] || 0;
+    if (pick && rand.includes(ax.key) && ax.items.length > 1) {
+      idx = 1 + Math.floor(Math.random() * (ax.items.length - 1));
+    }
+    const item = ax.items[idx];
     if (item && item[2]) out.push(item[2]);
   });
   (comp.specials || []).forEach(t => out.push(t));
@@ -772,6 +785,29 @@ export function createInteractivePanel({
       + '<span class="ia-comp-btn-caret">\u25BE</span></button>';
   }
 
+  /** 적용 중인 축 프리셋을 **버튼 아래로** 늘어놓는다(사용자 지정 2026-08-07).
+   *  팝업을 안 열어도 무엇이 걸렸는지 보인다. 랜덤 축은 값 대신 🎲 로 적는다 —
+   *  생성할 때 정해지므로 지금 값을 적으면 거짓이 된다. */
+  function compAppliedHtml() {
+    const comp = state.composition || {};
+    const rand = comp.rand || [];
+    const items = [];
+    if (comp.pov) items.push({t: 'POV', r: false});
+    COMP_AXES.forEach(ax => {
+      const on = rand.includes(ax.key);
+      const i = comp[ax.key] || 0;
+      if (on) items.push({t: ax.key.toUpperCase() + ' 🎲', r: true});
+      else if (i > 0) items.push({t: ax.key.toUpperCase() + ' ' + ax.items[i][1], r: false});
+    });
+    (comp.specials || []).forEach(tag => {
+      const hit = COMP_SPECIALS.find(sp => sp[1] === tag);
+      items.push({t: hit ? hit[0] : tag, r: false});
+    });
+    if (!items.length) return '';
+    return '<div class="ia-comp-applied">' + items.map(o =>
+      `<span class="ia-comp-ap${o.r ? ' is-rand' : ''}">${escHtml(o.t)}</span>`).join('') + '</div>';
+  }
+
   function reactiveToggleHtml() {
     return '<button type="button" class="ia-reactive' + (reactive ? ' is-on' : '') + '"' +
       ' data-ia-reactive="1" role="switch" aria-checked="' + (reactive ? 'true' : 'false') + '">' +
@@ -1278,7 +1314,7 @@ export function createInteractivePanel({
     const host = ensureSceneMount();
     host.innerHTML = floating
       ? SCENE_SLOTS.map(sceneButtonHtml).join('') + compPresetBtnHtml()
-        + reactiveToggleHtml()
+        + reactiveToggleHtml() + compAppliedHtml()
       : '';
     applyReactiveTip();
     watchResultTab();
@@ -4975,15 +5011,20 @@ export function createInteractivePanel({
     compPopup.style.top = Math.round(top) + 'px';
   }
 
+  const randOn = (comp, key) => (comp && comp.rand || []).includes(key);
+
   function compPanelHtml() {
     const comp = state.composition;
     const selects = COMP_AXES.map(ax =>
       `<div class="ia-comp-row">
         <span class="ia-comp-lbl">${ax.label}</span>
-        <select class="ia-comp-select" data-axis="${ax.key}">
+        <select class="ia-comp-select" data-axis="${ax.key}"${randOn(comp, ax.key) ? ' disabled' : ''}>
           ${ax.items.map((it, i) =>
             `<option value="${i}"${i === (comp[ax.key] || 0) ? ' selected' : ''}>${escHtml(it[0])}</option>`).join('')}
         </select>
+        <button type="button" class="ia-comp-rand${randOn(comp, ax.key) ? ' is-on' : ''}"
+          data-rand="${ax.key}" aria-pressed="${randOn(comp, ax.key)}"
+          title="${randOn(comp, ax.key) ? '랜덤 끄기' : '생성할 때마다 이 축에서 하나를 뽑습니다'}">🎲</button>
       </div>`).join('');
     const specials = COMP_SPECIALS.map(([label, tag]) =>
       `<button type="button" class="ia-comp-cat${comp.specials.includes(tag) ? ' is-on' : ''}" data-special="${escHtml(tag)}">${escHtml(label)}</button>`).join('');
@@ -5011,6 +5052,16 @@ export function createInteractivePanel({
     host.querySelectorAll('.ia-comp-select').forEach(el => {
       el.addEventListener('change', () => {
         state.composition[el.dataset.axis] = Number(el.value) || 0;
+        onCompChange();
+      });
+    });
+    host.querySelectorAll('[data-rand]').forEach(el => {
+      el.addEventListener('click', () => {
+        const key = el.dataset.rand;
+        const cur = state.composition.rand || [];
+        // 켜면 그 축의 콤보는 잠근다 — 값이 정해져 있는데 랜덤이라고 하면 거짓말이다.
+        state.composition.rand = cur.includes(key)
+          ? cur.filter(k => k !== key) : [...cur, key];
         onCompChange();
       });
     });
@@ -5388,6 +5439,30 @@ export function createInteractivePanel({
         else if (n && !badge) btn.insertAdjacentHTML('beforeend', `<span class="ia-char-ref-n">${n}</span>`);
         else if (!n && badge) badge.remove();
       });
+    },
+    /** 생성 직전에 부른다. 랜덤으로 켠 축이 있으면 값을 새로 뽑아 상태에 쓰고
+     *  프롬프트를 다시 낸다. 뽑은 것이 있으면 true — 호출부는 그때만 프롬프트를
+     *  다시 읽으면 된다(app.js).
+     *
+     *  **상태에 쓴다**(임시로 계산만 하지 않는다). 그래야 방금 무엇이 나갔는지
+     *  메타데이터·히스토리에 그대로 남는다. `rand` 플래그는 그대로라 다음 생성에
+     *  또 뽑는다. */
+    rollComposition() {
+      const comp = state.composition || {};
+      const rand = comp.rand || [];
+      if (!rand.length) return false;
+      let hit = false;
+      COMP_AXES.forEach(ax => {
+        if (!rand.includes(ax.key) || ax.items.length < 2) return;
+        // 0번('정의하지 않음')은 뽑지 않는다 — 랜덤을 켠 뜻이 '아무것도 안 나올
+        // 수도 있다' 는 아니다.
+        comp[ax.key] = 1 + Math.floor(Math.random() * (ax.items.length - 1));
+        hit = true;
+      });
+      if (!hit) return false;
+      emitChange();          // promptEdit 까지 동기로 흘러간다
+      renderBlocks();        // 버튼 아래 칩·팝업 표시도 맞춘다
+      return true;
     },
     applySnapshotCharById,
     // Assets 패널의 복원 선택 UI 가 쓴다. 묶음·항목 정의는 여기가 원본이다 —

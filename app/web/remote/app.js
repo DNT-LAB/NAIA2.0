@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260808-comppop2')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260808-comprand1')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -5610,6 +5610,18 @@ async function generateWithInteractiveSnapshot(payload) {
   // ("생성할 때만 기록" 계약 위반). 단축키는 버튼 비활성화를 우회하므로 실제로 닿는다.
   if (generating) return false;
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  // 축 프리셋의 랜덤은 **여기서** 굴린다. renderPrompt 안에서 뽑으면 화면을 다시
+  // 그릴 때마다 값이 바뀌어 무엇이 나갈지 알 수 없다 — 계약은 "생성 시 적용"이다.
+  // 굴린 뒤에는 프롬프트가 달라졌으므로 overrides 까지 다시 만든다(안 그러면
+  // 요청에 옛 프롬프트가 실린다).
+  if (interactivePanel?.isActive?.() && interactivePanel.rollComposition?.()) {
+    const rolled = promptEdit.value;
+    payload = {
+      ...payload,
+      prompt: rolled,
+      overrides: buildWebGenerationOverrides(rolled, payload?.negative_prompt || ''),
+    };
+  }
   const overrides = payload && payload.overrides;
   if (overrides && interactiveAssetsPanel && interactivePanel?.isActive?.()) {
     let chars = [];

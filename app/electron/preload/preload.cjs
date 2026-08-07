@@ -75,6 +75,14 @@ window.addEventListener(
   "wheel",
   (event) => {
     if (!event.ctrlKey) return;
+    // 이미지 뷰어의 무대에서는 비켜난다. 거기서 Ctrl+휠은 **그림**을 확대하는
+    // 손버릇이고, 창 전체가 그 그림으로 덮여 있으니 UI 배율을 바꿔 봐야 볼 것도
+    // 없다. 이 리스너는 window 에 capture 로 붙어 stopPropagation 까지 하므로,
+    // 여기서 빠져 주지 않으면 페이지 쪽 리스너는 이벤트를 구경도 못 한다.
+    if (event.target && typeof event.target.closest === "function"
+        && event.target.closest(".vp-stage")) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     ipcRenderer.send("naia:zoom-by", event.deltaY < 0 ? 1 : -1);

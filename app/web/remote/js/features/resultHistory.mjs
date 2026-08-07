@@ -1071,7 +1071,7 @@ export function createResultHistoryController({
         </div>
         <span class="viewer-head-spring"></span>
         <span class="vp-guide" aria-hidden="true">
-          <b>휠</b> 장 넘김 <i>·</i> <b>Ctrl+휠</b> 확대 <i>·</i> <b>Del</b> 삭제
+          <b>휠</b> 장 넘김 <i>·</i> <b>Alt+휠</b> 확대 <i>·</i> <b>Del</b> 삭제
           <i>·</i> <b>H</b> 목록 <i>·</i> <b>F</b> 전체 화면
         </span>
         <span class="viewer-head-spring"></span>
@@ -1103,9 +1103,9 @@ export function createResultHistoryController({
             <span class="vp-pos" id="vpPos">0 / 0</span>
             <button type="button" class="vp-bar-btn" id="vpNext" title="다음 (\u2192 / 휠 아래)">\u25B6</button>
             <span class="vp-bar-sep"></span>
-            <button type="button" class="vp-bar-btn" id="vpZoomOut" title="축소 (\u2212 / Ctrl+휠)">\u2212</button>
+            <button type="button" class="vp-bar-btn" id="vpZoomOut" title="축소 (\u2212 / Alt+휠)">\u2212</button>
             <span class="vp-zoom" id="vpZoom">100%</span>
-            <button type="button" class="vp-bar-btn" id="vpZoomIn" title="확대 (+ / Ctrl+휠)">+</button>
+            <button type="button" class="vp-bar-btn" id="vpZoomIn" title="확대 (+ / Alt+휠)">+</button>
             <button type="button" class="vp-bar-btn is-wide" id="vpFit"
                     title="맞춤 0 / 원본 1">맞춤</button>
           </div>
@@ -1375,7 +1375,10 @@ export function createResultHistoryController({
       stage.addEventListener('wheel', event => {
         if (!event.deltaY) return;
         event.preventDefault();
-        const zoomIntent = event.ctrlKey || event.metaKey || vpPan;
+        // Alt 도 받는다. 앱(Electron)의 preload 가 Ctrl+휠을 창 배율로 먼저
+        // 가로채기 때문이다 — 그쪽도 무대 안에서는 비켜나게 고쳤지만 그건 다시
+        // 빌드해야 나간다. Alt 는 어느 쪽에서도 가로채는 사람이 없다.
+        const zoomIntent = event.ctrlKey || event.metaKey || event.altKey || vpPan;
         if (zoomIntent) {
           vpZoomStep(event.deltaY < 0 ? 1 : -1, {x: event.clientX, y: event.clientY});
         } else {

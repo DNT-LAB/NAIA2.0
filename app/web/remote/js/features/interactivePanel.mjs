@@ -1002,7 +1002,11 @@ export function createInteractivePanel({
       }
       const b = event.target.closest('[data-slot]');
       if (!b) return;
-      if (isEditing('scene', b.dataset.slot)) { focusEditingInput(); return; }
+      // **누른 버튼을 다시 누르면 닫는다.** 축 프리셋·Rating 은 그렇게 도는데
+      // 씬 버튼만 안 닫혀 손이 어긋났다(사용자 2026-08-07). 패널 안 슬롯 행은
+      // 몸통에 입력창을 품고 있어 '다시 포커스' 가 맞지만, 이 줄은 순수 버튼이라
+      // 토글이 맞다.
+      if (isEditing('scene', b.dataset.slot)) { closePanel(); return; }
       openSlot(b.dataset.slot);
     });
     return sceneMount;
@@ -3593,8 +3597,11 @@ export function createInteractivePanel({
         + (match ? ' match' : '') + (on ? ' on' : '')
         + (isSensitive(t) ? ' is-sensitive' : '')
         + (inspectTag === t ? ' is-inspect' : '');
-      const tip = on ? `${t} — 이미 넣었습니다` :
-        (match ? `${t} — 지금 고른 것들과도 어울립니다` : t);
+      // 설명까지 띄운다 — 그리드 셀은 `tagTip()` 으로 설명을 붙이는데 사전 칩만
+      // 태그 이름뿐이라, 같은 그림을 봐도 여기서는 그게 뭔지 알 수 없었다.
+      const base = tagTip(t);
+      const tip = on ? `${base}\n— 이미 넣었습니다` :
+        (match ? `${base}\n— 지금 고른 것들과도 어울립니다` : base);
       const act = `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
       return `<div class="${cls}" data-advice-add="${escHtml(t)}"` +
         ` title="${escHtml(tip)}">` +

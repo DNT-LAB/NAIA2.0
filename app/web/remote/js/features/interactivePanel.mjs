@@ -3918,10 +3918,12 @@ export function createInteractivePanel({
     asideMount.style.width = Math.round(Math.min(box.width, room)) + 'px';
     asideMount.style.top = Math.round(top) + 'px';
     asideMount.style.bottom = 'auto';
-    // 화면의 절반까지. 팝업과 같은 바닥선을 지킨다 — 씬 태그 판 위를 덮으면
-    // 방금 넣은 태그가 안 보인다.
-    asideMount.style.maxHeight = Math.round(
-      Math.max(80, Math.min(window.innerHeight * 0.5, popupFloor() - top))) + 'px';
+    // 씬 태그 판 바로 위까지 **다 쓴다**. 예전에는 화면 절반(innerHeight*0.5)에서
+    // 한 번 더 잘랐는데, 그 탓에 950px 화면에서 772px 이 비어 있는데도 475px 만
+    // 쓰고 내용을 잘라 먹었다(실측: 카드 셋이 71+812+490 필요한데 475 만 배분).
+    // 그림을 통째로 덮어도 좋으니 제대로 보이는 쪽이 낫다(사용자 2026-08-07).
+    // 바닥선만은 지킨다 — 씬 태그 판을 덮으면 방금 넣은 태그가 안 보인다.
+    asideMount.style.maxHeight = Math.round(Math.max(80, popupFloor() - top)) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
   }
 

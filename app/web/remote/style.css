@@ -20794,8 +20794,16 @@ body.detached-module .mod-grid-3 {
   border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   padding: 11px 12px 12px; pointer-events: auto;
   display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+  /* **줄어들지 않는다.** flex 기본값(shrink:1)이라 자리가 모자라면 카드가 눌렸고,
+     `overflow:hidden` 과 만나 내용이 소리 없이 잘렸다 — 스크롤바도 안 나오니
+     사용자는 거기 뭐가 더 있는지 알 방법이 없다(실측: '필요한 것' 카드가 71px
+     필요한데 38px 로 눌림). 넘치는 몫은 바깥 `.ia-aside` 가 스크롤로 받는다. */
+  flex-shrink: 0;
 }
-.ia-aside-card.scroll { flex: 1; overflow-y: auto; }
+/* 예전에는 카드마다 따로 스크롤했다(`flex:1; overflow-y:auto`). 카드가 셋이면
+   스크롤 영역도 셋이라 저마다 내용의 3분의 1만 보였다. 스크롤은 바깥 한 곳에
+   모은다 — 카드는 늘 제 높이대로 그린다. */
+.ia-aside-card.scroll { flex: 0 0 auto; overflow: hidden; }
 .ia-aside-title {
   font-family: var(--font-mono); font-size: 9px; font-weight: 600;
   letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim);

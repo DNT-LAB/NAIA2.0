@@ -38,7 +38,7 @@ export function createInteractiveAssetsPanel({
   // 응답 -> 렌더) 펼친 내용도 이름 칩 몇 개뿐이었다(사용자 지적 2026-08-05).
   // 이제 목록은 건드리지 않고 팝업만 갱신한다.
   let previewId = '';        // 미리보기를 연 조합
-  let previewBody = null;    // 그 본문 {chars, globals}
+  let previewBody = null;    // 그 본문 {chars}
   let previewBusy = false;
   let previewSeq = 0;        // 늦게 온 응답이 다른 카드의 미리보기를 덮지 않게
   // 무엇을 꽂을지. 카드를 누르면 여기 담기고, [적용] 을 눌러야 슬롯에 들어간다 —
@@ -201,13 +201,14 @@ export function createInteractiveAssetsPanel({
   /** 생성 직전에 부른다. **캐릭터 한 명이 에셋 하나**라 id 가 여럿 나온다.
    *  app.js 가 이걸 생성 요청에 실으면 백엔드가 결과 이미지로 384px 썸네일을
    *  전부에 붙인다(그림은 한 장뿐이다). 실패해도 생성은 진행한다. */
-  async function record(chars, globals) {
+  async function record(chars) {
     if (!Array.isArray(chars) || !chars.length) return [];
     try {
       const r = await fetch('/api/interactive-assets/snapshot', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        // globals = 씬 슬롯·구도. 미리보기 하단이 이걸 보여 준다.
-        body: JSON.stringify({chars, globals: globals || {}}),
+        // 씬 값은 싣지 않는다 — 씬은 따로 관리하고 그쪽에서 캐릭터 슬롯
+        // 캡처를 기록한다(사용자 결정). 여기 두면 캐릭터 수만큼 복제된다.
+        body: JSON.stringify({chars}),
       });
       const d = await r.json();
       if (!r.ok) return [];
@@ -291,8 +292,16 @@ export function createInteractiveAssetsPanel({
       if (!slotId || !roster.some(c => c.id === slotId)) {
         throw new Error(`${slotLabel} 슬롯이 없습니다`);
       }
-      if (!panel.applySnapshotCharById(slotId, row)) throw new Error('슬롯에 꽂을 수 없습니다');
-      showToast(`${slotLabel} <- ${charLabel(row)}`, 'success');
+      // 복원 범위. **전부 켜져 있으면 아무것도 넘기지 않는다** — 그러면 예전의
+      // 통째 갈아끼우기 경로를 그대로 탄다(검증된 동작을 기본값에서 바꾸지 않는다).
+      const scope = restoreScope();
+      if (scope.sel && !scope.sel.size) throw new Error('복원할 부분을 하나는 골라야 합니다');
+      if (!panel.applySnapshotCharById(slotId, row, scope.picks)) {
+        throw new Error('슬롯에 꽂을 수 없습니다');
+      }
+      showToast(scope.partial
+        ? `${slotLabel} <- ${charLabel(row)} (${scope.sel.size}/${scope.items.length}칸)`
+        : `${slotLabel} <- ${charLabel(row)}`, 'success');
     } catch (err) {
       showToast('적용 실패: ' + err.message, 'error');
     } finally {
@@ -463,7 +472,7 @@ export function createInteractiveAssetsPanel({
       ? '<div class="ia-as-pv-none">불러오는 중…</div>'
       : (chars.length
           ? chars.map(previewCharHtml).join('') +
-            previewGlobalsHtml(previewBody && previewBody.globals)
+            ''
           : '<div class="ia-as-pv-none">빈 조합입니다</div>');
     const fav = !!(meta && meta.favorite);
     el.innerHTML = `
@@ -480,8 +489,9 @@ export function createInteractiveAssetsPanel({
         ${body}
       </div>
       <div class="ia-as-pv-foot">
-        <button type="button" class="ia-as-pv-btn" data-as-pvrestore="1"
-          title="모든 캐릭터 슬롯을 이 조합으로 덮어씁니다">전체 복원</button>
+        <!-- [전체 복원] 을 뗐다. 카드 하나가 캐릭터 한 명이 된 뒤로는 '모든 슬롯을
+             이 조합으로' 가 곧 '다른 슬롯을 다 날리고 한 명만 남기기' 였다.
+             캐릭터를 꽂는 것은 위의 [C? 에 적용] 이 한다. -->
         <span class="ia-as-pv-spring"></span>
         <button type="button" class="ia-as-pv-btn${fav ? ' is-fav' : ''}" data-as-pvfav="1"
           title="${fav ? '즐겨찾기 해제' : '즐겨찾기'}">${fav ? '★' : '☆'}</button>
@@ -521,30 +531,6 @@ export function createInteractiveAssetsPanel({
       if (v) return String(v);
     }
     return row && row.gender === 'male' ? '남성' : '여성';
-  }
-
-  async function restore(id) {
-    if (busy) return;
-    busy = true;
-    renderGrid();
-    try {
-      const r = await fetch('/api/interactive-assets/snapshot?id=' + encodeURIComponent(id));
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error || '조합을 불러오지 못했습니다');
-      const chars = Array.isArray(d.chars) ? d.chars : null;
-      if (!chars || !chars.length) throw new Error('빈 조합입니다');
-      const panel = getPanel && getPanel();
-      if (!panel || typeof panel.applySnapshotChars !== 'function') {
-        throw new Error('Interactive 패널이 준비되지 않았습니다');
-      }
-      if (!panel.applySnapshotChars(chars)) throw new Error('복원할 수 없는 조합입니다');
-      showToast(`조합 복원 (캐릭터 ${chars.length}명)`, 'success');
-    } catch (err) {
-      showToast('복원 실패: ' + err.message, 'error');
-    } finally {
-      busy = false;
-      renderGrid();
-    }
   }
 
   // ------------------------------------------------------------------ 렌더
@@ -638,6 +624,97 @@ export function createInteractiveAssetsPanel({
     return '<div class="ia-as-targets">' + out.join('') + '</div>' +
       `<button type="button" class="ia-as-apply${picked ? ' is-ready' : ''}"` +
       ` data-as-apply="1"${picked ? '' : ' disabled'} title="${escHtml(label)}">적용</button>`;
+  }
+
+  // ---------------------------------------------------- 복원 범위 (부분 복원)
+  //
+  // 캡처는 전체를 하고 **원하는 부분만 복원**한다(사용자 지정 2026-08-07).
+  // 묶음·항목의 정의는 Interactive 패널이 갖는다 — 슬롯이 늘면 자동으로 따라와야
+  // 하므로 여기에 베껴 두지 않는다.
+
+  let restorePicks = null;      // null = 아직 안 정함(= 전부)
+  let restoreOpen = false;      // 슬롯별 토글을 펼쳤나
+
+  function restoreItems() {
+    const panel = getPanel && getPanel();
+    if (!panel || typeof panel.getRestoreItems !== 'function') return [];
+    try { return panel.getRestoreItems() || []; } catch (_) { return []; }
+  }
+
+  function restoreGroups() {
+    const panel = getPanel && getPanel();
+    if (!panel || typeof panel.getRestoreGroups !== 'function') return [];
+    try { return panel.getRestoreGroups() || []; } catch (_) { return []; }
+  }
+
+  /** 지금 켜져 있는 항목. 한 번도 안 건드렸으면 전부. */
+  function restoreSelection() {
+    const items = restoreItems();
+    if (!items.length) return null;
+    if (!restorePicks) return new Set(items.map(i => i.key));
+    // 모르는 키는 버린다. 이 목록은 빌드 시점에 고정이고 새로고침하면 기본값으로
+    // 돌아가므로, 실제로는 걸릴 일이 없는 방어선이다.
+    const known = new Set(items.map(i => i.key));
+    return new Set([...restorePicks].filter(k => known.has(k)));
+  }
+
+  function restoreHtml() {
+    if (!open) return '';
+    const items = restoreItems();
+    if (!items.length) return '';
+    const sel = restoreSelection();
+    const all = sel.size === items.length;
+    const groups = restoreGroups().map(g => {
+      const mine = items.filter(i => i.group === g.key);
+      const on = mine.length && mine.every(i => sel.has(i.key));
+      const some = mine.some(i => sel.has(i.key));
+      return `<button type="button" class="ia-as-rgrp${on ? ' is-on' : (some ? ' is-part' : '')}"` +
+        ` data-as-rgroup="${escHtml(g.key)}"` +
+        ` title="${escHtml(g.label)} ${on ? '끄기' : '켜기'} (${mine.length}칸)">` +
+        `${escHtml(g.label)}</button>`;
+    }).join('');
+    const chips = restoreOpen ? items.map(i =>
+      `<button type="button" class="ia-as-rslot${sel.has(i.key) ? ' is-on' : ''}"` +
+      ` data-as-rslot="${escHtml(i.key)}" title="${escHtml(i.label)}">` +
+      `${escHtml(i.label)}</button>`).join('') : '';
+    return '<div class="ia-as-scope">' +
+      '<div class="ia-as-rrow">' +
+        `<span class="ia-as-rlabel" title="적용할 때 가져올 부분입니다">복원</span>${groups}` +
+        `<button type="button" class="ia-as-rmore${restoreOpen ? ' is-on' : ''}"` +
+        ` data-as-rmore="1" title="슬롯별로 켜고 끕니다">${restoreOpen ? '접기' : '칸별'}</button>` +
+        `<span class="ia-as-rn${all ? '' : ' is-part'}">${sel.size}/${items.length}</span>` +
+      '</div>' +
+      (restoreOpen ? `<div class="ia-as-rslots">${chips}</div>` : '') +
+    '</div>';
+  }
+
+  /** 지금 복원 범위. `partial` 이 false 면 전부 켜진 것이라 예전의 통째
+   *  갈아끼우기 경로를 그대로 탄다(검증된 기본 동작을 바꾸지 않는다). */
+  function restoreScope() {
+    const items = restoreItems();
+    const sel = restoreSelection();
+    const partial = !!(sel && items.length && sel.size < items.length);
+    return {items, sel, partial, picks: partial ? sel : undefined};
+  }
+
+  /** 묶음 하나를 통째로 켜거나 끈다. 다 켜져 있으면 끄고, 아니면 다 켠다. */
+  function toggleRestoreGroup(key) {
+    const items = restoreItems();
+    const sel = restoreSelection();
+    if (!sel) return;
+    const mine = items.filter(i => i.group === key);
+    const on = mine.length && mine.every(i => sel.has(i.key));
+    mine.forEach(i => { if (on) sel.delete(i.key); else sel.add(i.key); });
+    restorePicks = sel;
+    renderGrid();
+  }
+
+  function toggleRestoreSlot(key) {
+    const sel = restoreSelection();
+    if (!sel) return;
+    if (sel.has(key)) sel.delete(key); else sel.add(key);
+    restorePicks = sel;
+    renderGrid();
   }
 
   // -------------------------------------------------------------- 확인 팝업
@@ -913,6 +990,15 @@ export function createInteractiveAssetsPanel({
     // 결과 칩은 적용 중 말고 **낡았을 때도** 못 누른다(charStale 주석 참조).
     root.querySelectorAll('[data-as-charhit],[data-as-chargroup]')
       .forEach(btn => { btn.disabled = busy || charStale(); });
+    // 복원 범위 줄. 토글은 renderGrid() 로만 도므로 여기서 다시 그려야 한다 —
+    // 안 그리면 상태는 바뀌었는데 화면이 그대로라 안 눌린 것처럼 보인다(실측).
+    const foot = root.querySelector('.ia-as-foot');
+    const restoreEl = root.querySelector('.ia-as-scope');
+    if (foot) {
+      const html = restoreHtml();
+      if (restoreEl) restoreEl.outerHTML = html;
+      else if (html) foot.insertAdjacentHTML('afterbegin', html);
+    }
     const apply = root.querySelector('[data-as-apply]');
     if (apply) {
       apply.disabled = !picked || busy;
@@ -952,6 +1038,7 @@ export function createInteractiveAssetsPanel({
                                 : '<div class="ia-as-empty">저장된 조합이 없습니다. 생성하면 남습니다.</div>')}
         </div>
         <div class="ia-as-foot">
+          ${restoreHtml()}
           <span class="ia-as-foothint">카드를 누르면 왼쪽에 미리보기가 열립니다</span>
           <button type="button" class="ia-as-fold" data-as-fold="1"
                   title="Assets 목록을 접습니다 (바깥을 눌러도 접힙니다)">접기</button>
@@ -986,10 +1073,11 @@ export function createInteractiveAssetsPanel({
     const t = event.target.closest('[data-as-toggle],[data-as-origin],[data-as-favonly],' +
       '[data-as-restore],[data-as-fav],[data-as-del],[data-as-open],[data-as-target],' +
       '[data-as-preview],[data-as-pick],[data-as-apply],[data-as-addslot],' +
-      '[data-as-fold],[data-as-pvclose],[data-as-pvapply],[data-as-pvrestore],' +
+      '[data-as-fold],[data-as-pvclose],[data-as-pvapply],' +
       '[data-as-pvfav],[data-as-pvdel],' +
       '[data-as-enable],[data-as-delchar],[data-as-pos],' +
-      '[data-as-charhit],[data-as-chargroup]');
+      '[data-as-charhit],[data-as-chargroup],' +
+      '[data-as-rgroup],[data-as-rslot],[data-as-rmore]');
     if (!t) return;
     event.preventDefault();
     if (t.dataset.asToggle) { setOpen(!open); return; }
@@ -998,6 +1086,9 @@ export function createInteractiveAssetsPanel({
       fetchList();
       return;
     }
+    if (t.dataset.asRgroup !== undefined) { toggleRestoreGroup(t.dataset.asRgroup); return; }
+    if (t.dataset.asRslot !== undefined) { toggleRestoreSlot(t.dataset.asRslot); return; }
+    if (t.dataset.asRmore) { restoreOpen = !restoreOpen; renderGrid(); return; }
     if (t.dataset.asFavonly) {
       favoriteOnly = !favoriteOnly;
       fetchList();
@@ -1060,7 +1151,6 @@ export function createInteractiveAssetsPanel({
     if (t.dataset.asPreview) { openPreview(t.dataset.asPreview); return; }
     if (t.dataset.asPvclose) { closePreview(); return; }
     if (t.dataset.asPvapply !== undefined) { applyPreviewChar(Number(t.dataset.asPvapply)); return; }
-    if (t.dataset.asPvrestore) { if (previewId) restore(previewId); return; }
     if (t.dataset.asPvdel) { if (previewId) remove(previewId); return; }
     if (t.dataset.asPvfav) {
       if (!previewId) return;
@@ -1100,11 +1190,20 @@ export function createInteractiveAssetsPanel({
       showToast('Interactive 패널이 준비되지 않았습니다.', 'error');
       return;
     }
-    if (!panel.applySnapshotCharById(target.id, row)) {
+    // 복원 범위는 [적용] 과 **같은 것을 본다**. 경로가 셋인데 하나만 배선해서
+    // 이쪽으로 누르면 범위를 무시하고 통째로 덮어썼다.
+    const scope = restoreScope();
+    if (scope.sel && !scope.sel.size) {
+      showToast('복원할 부분을 하나는 골라야 합니다.', 'error');
+      return;
+    }
+    if (!panel.applySnapshotCharById(target.id, row, scope.picks)) {
       showToast('슬롯에 꽂을 수 없습니다.', 'error');
       return;
     }
-    showToast(`${target.label} <- ${charLabel(row)}`, 'success');
+    showToast(scope.partial
+      ? `${target.label} <- ${charLabel(row)} (${scope.sel.size}/${scope.items.length}칸)`
+      : `${target.label} <- ${charLabel(row)}`, 'success');
   }
 
   /** 바깥(주로 결과 이미지)을 누르면 접는다. 예전에는 Assets 버튼을 다시 찾아

@@ -271,8 +271,7 @@ class InteractiveAssetsService:
             return None
 
     # ── 스냅샷 ──────────────────────────────────────────────────────────────
-    def record(self, chars: list[dict[str, Any]],
-               globals_: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def record(self, chars: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """**캐릭터 한 명이 에셋 하나다**(사용자 결정 2026-08-07). 목록을 돌려준다.
 
         예전에는 한 번 생성한 조합 전체가 카드 하나였다. 그러면 두 명을 그린
@@ -283,14 +282,12 @@ class InteractiveAssetsService:
         하나만 비교했는데, 여러 명을 한 번에 기록하면 마지막 한 명 말고는 전부
         새로 쌓인다.
 
-        `globals_` 는 씬 슬롯·구도처럼 캐릭터에 속하지 않는 값이다. 미리보기가
-        '이 그림이 어떤 설정에서 나왔는가'를 보여 주려면 본문에 함께 있어야 한다.
-        **해시에는 넣지 않는다** — 같은 캐릭터인데 배경만 바꿨다고 카드가 새로
-        쌓이면 목록이 금방 같은 얼굴로 가득 찬다.
+        **씬 값(글로벌 태그·구도)은 담지 않는다**(사용자 결정 2026-08-07). 씬은
+        따로 관리하고 그쪽에서 캐릭터 슬롯 캡처를 기록한다 — 여기에 사본을 두면
+        캐릭터 수만큼 같은 씬이 복제되고, 나중에 어느 쪽이 진짜인지 알 수 없다.
         """
         if not chars:
             return []
-        body_globals = globals_ if isinstance(globals_, dict) else {}
         out: list[dict[str, Any]] = []
         with self._lock:
             rows = self.load_index()
@@ -309,7 +306,7 @@ class InteractiveAssetsService:
                     self._write_atomic(
                         self._body_path(hit["id"]),
                         {"id": hit["id"], "created_at": hit["created_at"],
-                         "chars": one, "globals": body_globals})
+                         "chars": one})
                     # **끝으로 옮긴다.** 이 목록은 자리가 곧 최신순이다 — 화면은
                     # reversed() 로 읽고 _prune 은 앞쪽을 오래된 것으로 보고 지운다.
                     # 제자리에 두면 방금 쓴 에셋이 낡은 것으로 취급돼 먼저 사라진다.
@@ -329,7 +326,7 @@ class InteractiveAssetsService:
                 # 본문을 먼저 쓴다 — 인덱스에만 있고 본문이 없는 상태를 만들지 않는다.
                 self._write_atomic(self._body_path(sid),
                                    {"id": sid, "created_at": meta["created_at"],
-                                    "chars": one, "globals": body_globals})
+                                    "chars": one})
                 rows.append(meta)
                 out.append(meta)
             self._pending_delete = []

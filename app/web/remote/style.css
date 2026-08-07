@@ -21868,7 +21868,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    (사용자 지적 2026-08-05). 바깥 클릭으로도 접히지만, 그건 눈에 보이지 않으므로
    버튼을 함께 둔다. */
 .ia-as-foot {
-  display: flex; align-items: center; gap: 8px;
+  /* 복원 범위 줄이 첫 줄을 통째로 쓰고, 안내와 [접기] 가 다음 줄로 간다. */
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   padding: 6px 9px;
   border: 1px solid var(--border-dim); border-top: none;
   border-radius: 0 0 8px 8px;
@@ -22000,6 +22001,48 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 /* 조작 버튼 줄 — 스택 아래, ASSETS 바 위. 어느 캐릭터 줄과도 나란하지 않아
    귀속을 오해할 일이 없고, 선택을 바꿔도 자리가 움직이지 않는다. */
+/* 복원 범위 — 캡처는 전체, 복원은 골라서. 묶음 3개(정체성·의상·상황)로 한 번에
+   켜고, [칸별] 을 펼치면 슬롯 하나씩 손댈 수 있다. */
+/* **이름 주의**: `.ia-as-restore` 는 카드의 [복원] 버튼이 이미 쓰고 있고 그쪽은
+   `position: absolute` 다. 같은 이름을 쓰는 순간 이 줄이 흐름에서 빠져 바닥
+   아래로 깔리고 클릭이 아예 닿지 않았다(실측). 그래서 `scope` 로 부른다. */
+.ia-as-scope {
+  /* 목록 바닥의 첫 줄을 통째로 쓴다. */
+  flex: 1 0 100%;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 4px 5px;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.ia-as-rrow { display: flex; align-items: center; gap: 4px; }
+.ia-as-rlabel {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 0.6px; color: var(--text-dim); margin-right: 2px;
+}
+.ia-as-rgrp, .ia-as-rslot, .ia-as-rmore {
+  padding: 3px 7px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: none; color: var(--text-dim);
+  font-family: inherit; font-size: 10px; white-space: nowrap; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ia-as-rgrp:hover, .ia-as-rslot:hover, .ia-as-rmore:hover {
+  color: var(--text-primary); border-color: var(--border);
+}
+.ia-as-rgrp.is-on, .ia-as-rslot.is-on, .ia-as-rmore.is-on {
+  color: var(--accent-glow); border-color: var(--accent);
+  background: rgba(124, 106, 239, 0.14);
+}
+/* 묶음 안에서 일부만 켜진 상태 — 켜짐과 꺼짐 중간임을 점선으로 알린다. */
+.ia-as-rgrp.is-part { color: var(--text-muted); border-style: dashed; border-color: var(--accent); }
+.ia-as-rslots { display: flex; flex-wrap: wrap; gap: 3px; }
+.ia-as-rn {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ia-as-rn.is-part { color: var(--accent-glow); font-weight: 700; }
+
 .ia-as-slotctl { display: flex; gap: 4px; }
 .ia-as-slotbtn {
   padding: 5px 10px;

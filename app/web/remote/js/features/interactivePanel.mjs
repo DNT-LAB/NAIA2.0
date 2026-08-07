@@ -1392,15 +1392,48 @@ export function createInteractivePanel({
   /** 슬롯 **id** 로 꽂는다. 인덱스는 안정적이지 않다 — 앞 슬롯이 지워지면 뒤가
    *  당겨져 같은 번호가 다른 캐릭터를 가리킨다(비동기 적용 중에 실제로 일어난다).
    *  id 는 슬롯이 살아 있는 동안 바뀌지 않으므로 이쪽이 정확하다. */
-  function applySnapshotCharById(cid, row) {
+  function applySnapshotCharById(cid, row, picks) {
     const i = state.chars.findIndex(c => c.id === cid);
     if (i < 0) return false;
-    return applySnapshotCharAt(i, row);
+    return applySnapshotCharAt(i, row, picks);
+  }
+
+  /** 부분 복원의 묶음. 화면의 회색 소제목(`axis`)을 그대로 쓴다 — 슬롯이 늘어도
+   *  여기를 고칠 필요가 없다. `alt`(대체 의상)와 `gaze`(시선)는 슬롯이 아니라
+   *  캐릭터에 직접 달린 값이라 손으로 붙인다. */
+  const RESTORE_GROUPS = [
+    {key: 'identity', label: '정체성', axes: ['character', 'characteristic'], extras: []},
+    {key: 'clothing', label: '의상', axes: ['clothing'], extras: ['alt']},
+    {key: 'situation', label: '상황',
+     axes: ['expression', 'pose_action', 'object', 'meta'], extras: ['gaze']},
+  ];
+
+  /** 복원에서 고를 수 있는 항목. 슬롯 11개 + alt/gaze. */
+  function restoreItems() {
+    const out = [];
+    for (const g of RESTORE_GROUPS) {
+      for (const sub of CHAR_SUBS) {
+        if (g.axes.includes(sub.axis)) {
+          out.push({key: sub.key, label: sub.key, icon: sub.icon || '', group: g.key});
+        }
+      }
+      if (g.extras.includes('alt')) {
+        out.push({key: '@alt', label: 'ALT', icon: '', group: g.key});
+      }
+      if (g.extras.includes('gaze')) {
+        out.push({key: '@gaze', label: '시선', icon: '', group: g.key});
+      }
+    }
+    return out;
   }
 
   /** 스냅샷의 **캐릭터 한 명**을 지정한 슬롯에 꽂는다(빠른 스왑).
-   *  슬롯이 아직 없으면 최대치까지 만들어 채운다. 다른 슬롯은 건드리지 않는다. */
-  function applySnapshotCharAt(index, row) {
+   *  슬롯이 아직 없으면 최대치까지 만들어 채운다. 다른 슬롯은 건드리지 않는다.
+   *
+   *  `picks` 를 주면 **그 항목만** 덮어쓴다(캡처는 전체, 복원은 골라서 —
+   *  사용자 지정 2026-08-07). 고르지 않은 항목은 대상 슬롯의 값을 그대로 둔다.
+   *  `picks` 가 없으면 예전처럼 통째로 갈아끼운다. */
+  function applySnapshotCharAt(index, row, picks) {
     if (!row || typeof row !== 'object') return false;
     let i = Number(index);
     if (!Number.isInteger(i) || i < 0) return false;
@@ -1412,30 +1445,49 @@ export function createInteractivePanel({
     // 슬롯의 정체성(위치)은 유지한다 — 스왑은 '누구인가'를 바꾸는 것이지
     // '어디에 서는가'를 바꾸는 것이 아니다. 다인원 배치를 다시 잡게 만들면 안 된다.
     const keepPos = state.chars[i].pos || POS_DEFAULT;
-    const base = newCharacter(false);
+    const cur = state.chars[i];
     const fields = row.fields || {};
+    // 고르지 않은 항목은 **대상 슬롯의 값을 그대로** 둔다. 그래서 바탕이 다르다:
+    // 전부 복원이면 새 캐릭터에서, 부분 복원이면 지금 있는 캐릭터에서 출발한다.
+    // 부분인데 새 캐릭터에서 출발하면 안 고른 슬롯이 조용히 비워진다.
+    const partial = picks instanceof Set;
+    const take = key => !partial || picks.has(key);
+    const base = partial ? cur : newCharacter(false);
     state.chars[i] = {
       ...base,
-      id: state.chars[i].id,          // id 는 그대로 — 생성 배선이 슬롯을 uuid 로 잡는다
+      id: cur.id,                     // id 는 그대로 — 생성 배선이 슬롯을 uuid 로 잡는다
       open: true,
       pos: keepPos,
-      name: String(row.name || ''),
-      state: row.state === 'disabled' ? 'disabled' : 'active',
-      gender: row.gender === 'male' ? 'male' : 'female',
-      preset: row.preset ? {
-        work: row.preset.work,
-        name: row.preset.name,
-        tags: (row.preset.tags && typeof row.preset.tags === 'object')
-          ? Object.fromEntries(Object.entries(row.preset.tags)
-              .map(([k, v]) => [k, Array.isArray(v) ? [...v] : []]))
-          : {},
-      } : null,
-      alt: Array.isArray(row.alt) ? [...row.alt] : [],
-      gaze: Array.isArray(row.gaze) ? [...row.gaze] : [],
-      fields: Object.fromEntries(CHAR_SUBS.map(sub => [
-        sub.key,
-        Array.isArray(fields[sub.key]) ? [...fields[sub.key]] : defaultFieldsFor(sub.key),
-      ])),
+      // 이름·프리셋·성별은 '캐릭터' 슬롯에 딸린 값이다 — 그 슬롯을 고를 때만 온다.
+      name: take(CHAR_TAG_SLOT) ? String(row.name || '') : base.name,
+      state: take(CHAR_TAG_SLOT)
+        ? (row.state === 'disabled' ? 'disabled' : 'active') : base.state,
+      gender: take(CHAR_TAG_SLOT)
+        ? (row.gender === 'male' ? 'male' : 'female') : base.gender,
+      preset: take(CHAR_TAG_SLOT)
+        ? (row.preset ? {
+            work: row.preset.work,
+            name: row.preset.name,
+            tags: (row.preset.tags && typeof row.preset.tags === 'object')
+              ? Object.fromEntries(Object.entries(row.preset.tags)
+                  .map(([k, v]) => [k, Array.isArray(v) ? [...v] : []]))
+              : {},
+          } : null)
+        : base.preset,
+      alt: take('@alt')
+        ? (Array.isArray(row.alt) ? [...row.alt] : [])
+        : (Array.isArray(base.alt) ? [...base.alt] : []),
+      gaze: take('@gaze')
+        ? (Array.isArray(row.gaze) ? [...row.gaze] : [])
+        : (Array.isArray(base.gaze) ? [...base.gaze] : []),
+      fields: Object.fromEntries(CHAR_SUBS.map(sub => {
+        if (!take(sub.key)) {
+          const kept = base.fields && base.fields[sub.key];
+          return [sub.key, Array.isArray(kept) ? [...kept] : defaultFieldsFor(sub.key)];
+        }
+        return [sub.key,
+          Array.isArray(fields[sub.key]) ? [...fields[sub.key]] : defaultFieldsFor(sub.key)];
+      })),
     };
     state.chars.forEach((c, n) => { c.open = (n === i); });
     renderBlocks();
@@ -4990,6 +5042,10 @@ export function createInteractivePanel({
       });
     },
     applySnapshotCharById,
+    // Assets 패널의 복원 선택 UI 가 쓴다. 묶음·항목 정의는 여기가 원본이다 —
+    // 슬롯이 늘면 자동으로 따라가야 하므로 저쪽에 베껴 두지 않는다.
+    getRestoreGroups: () => RESTORE_GROUPS.map(g => ({key: g.key, label: g.label})),
+    getRestoreItems: restoreItems,
     applyCharacterPresetTo,
     applyAssetPrompt,
     /** 생성이 끝났다 — 모아 둔 변화가 있으면 그때 한 번 낸다. */

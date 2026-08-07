@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260807-getext3')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260807-restore1')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -930,7 +930,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveAutocomplete} =
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260805-iaas34');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260807-restore4');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -5614,14 +5614,13 @@ async function generateWithInteractiveSnapshot(payload) {
   if (overrides && interactiveAssetsPanel && interactivePanel?.isActive?.()) {
     let chars = [];
     try { chars = interactivePanel.getSnapshotChars?.() || []; } catch (_) { chars = []; }
-    // 씬 슬롯·구도도 함께 남긴다 — Assets 미리보기가 '이 그림이 어떤 설정에서
-    // 나왔는가' 를 보여 주려면 캐릭터만으로는 모자란다.
-    let globals = {};
-    try { globals = interactivePanel.getSnapshotGlobals?.() || {}; } catch (_) { globals = {}; }
+    // 씬 값은 캐릭터 에셋에 싣지 않는다(사용자 결정 2026-08-07). 씬은 따로
+    // 관리하고 그쪽에서 캐릭터 슬롯 캡처를 기록한다 — `getSnapshotGlobals()` 는
+    // 그때 쓰려고 패널에 남겨 두었다.
     if (chars.length) {
       // 캐릭터 한 명이 에셋 하나 — id 가 여럿 온다. 그림은 한 장이라 백엔드가
       // 같은 썸네일을 전부에 붙인다(사용자 결정).
-      const ids = await interactiveAssetsPanel.record(chars, globals);
+      const ids = await interactiveAssetsPanel.record(chars);
       if (ids && ids.length) overrides.interactive_snapshot_id = ids;
     }
   }

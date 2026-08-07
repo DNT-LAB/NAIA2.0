@@ -47,7 +47,7 @@ def main() -> int:
         svc = InteractiveAssetsService(FakeContext(Path(tmp)))
 
         # 1. 두 명 -> 카드 두 장
-        metas = svc.record([char("alice"), char("bob")], {"slots": {"background": ["classroom"]}})
+        metas = svc.record([char("alice"), char("bob")])
         check("두 명이면 카드 두 장", len(metas), 2)
         check("각 카드의 char_count 는 1", [m["char_count"] for m in metas], [1, 1])
         check("요약이 캐릭터별로 갈린다",
@@ -58,10 +58,11 @@ def main() -> int:
         # 본문에 캐릭터가 한 명씩만 들어간다
         body = svc.load_body(metas[0]["id"])
         check("본문에 캐릭터 한 명", len(body["chars"]), 1)
-        check("씬 값은 그대로 실린다", body["globals"]["slots"]["background"], ["classroom"])
+        # 씬 값은 캐릭터 에셋에 담지 않는다(사용자 결정) — 씬은 따로 관리한다.
+        check("씬 값은 담기지 않는다", "globals" in body, False)
 
         # 2. 같은 조합을 다시 -> 새로 쌓이지 않는다
-        again = svc.record([char("alice"), char("bob")], {})
+        again = svc.record([char("alice"), char("bob")])
         check("같은 캐릭터는 새로 쌓지 않는다", len(svc.load_index()), 2)
         check("같은 id 를 돌려준다",
               sorted(m["id"] for m in again), sorted(m["id"] for m in metas))
@@ -70,20 +71,20 @@ def main() -> int:
         alice_id = next(m["id"] for m in metas if m["summary"] == "alice")
         bob_id = next(m["id"] for m in metas if m["summary"] == "bob")
         check("갱신 전 마지막은 bob", svc.load_index()[-1]["id"], bob_id)
-        svc.record([char("alice")], {})
+        svc.record([char("alice")])
         check("alice 를 다시 쓰면 끝으로 온다", svc.load_index()[-1]["id"], alice_id)
         check("그래도 두 장뿐", len(svc.load_index()), 2)
 
         # 4. 다른 캐릭터를 더하면 늘어난다
-        svc.record([char("carol")], {})
+        svc.record([char("carol")])
         check("새 캐릭터는 새 카드", len(svc.load_index()), 3)
 
         # 5. 같은 캐릭터가 한 요청에 두 번 -> 한 장
-        svc.record([char("dave"), char("dave")], {})
+        svc.record([char("dave"), char("dave")])
         check("한 요청 안의 중복도 한 장", len(svc.load_index()), 4)
 
         # 6. 옷만 바뀌면 다른 캐릭터로 본다(해시가 fields 를 본다)
-        svc.record([char("alice", ["dress"])], {})
+        svc.record([char("alice", ["dress"])])
         check("필드가 다르면 새 카드", len(svc.load_index()), 5)
 
         # 7. 그림은 한 장뿐이다 -- **같은 그림을 캐릭터 카드 전부에 붙인다**
@@ -107,7 +108,7 @@ def main() -> int:
         check("없는 id 는 False(예외 아님)", svc.attach_thumb("s-nope", shot), False)
 
         # 8. 빈 입력
-        check("빈 목록이면 빈 결과", svc.record([], {}), [])
+        check("빈 목록이면 빈 결과", svc.record([]), [])
 
         # 인덱스가 온전한 JSON 인가
         idx = json.loads((Path(tmp) / "interactive_snapshot" / "index.json").read_text("utf-8"))

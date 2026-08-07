@@ -103,12 +103,11 @@ def register_interactive_assets_routes(
         chars = payload.get("chars") if isinstance(payload, dict) else None
         if not isinstance(chars, list) or not chars:
             return JSONResponse({"error": "chars required"}, status_code=400)
-        # 씬 슬롯·구도 등 캐릭터에 속하지 않는 값. 없으면 빈 dict — 옛 프론트도 그대로 돈다.
-        raw_globals = payload.get("globals") if isinstance(payload, dict) else None
-        body_globals = raw_globals if isinstance(raw_globals, dict) else {}
+        # 씬 값은 받지 않는다 — 캐릭터 에셋에 씬 사본을 두지 않기로 했다.
+        # 옛 프론트가 `globals` 를 보내도 그냥 무시된다(오류 아님).
         try:
             metas = await run_in_thread(
-                interactive_assets_service(session_context).record, chars, body_globals)
+                interactive_assets_service(session_context).record, chars)
         except Exception as exc:
             return JSONResponse({"error": f"record failed: {exc}"}, status_code=500)
         # 캐릭터 수만큼 나온다. `snapshot` 은 남겨 두되 **첫 장만** 가리킨다 —

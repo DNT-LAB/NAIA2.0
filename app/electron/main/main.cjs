@@ -1743,6 +1743,36 @@ function configurePopupHandling(browserWindow) {
   });
 }
 
+/**
+ * 뒤로 갈 수 있는 가장 먼 곳은 **메인 생성 화면**이다.
+ *
+ * 창은 `maintenance.html`(준비 화면)을 먼저 띄우고 백엔드가 뜨면 앱 주소로
+ * 넘어간다. 그래서 그 준비 화면이 히스토리에 남고, 마우스 뒤로가기 버튼을 누르면
+ * 멀쩡히 쓰던 앱이 "NAIA data ready" 화면으로 되돌아간다(사용자 지적).
+ *
+ * 입력을 가로채는 대신 **갈 곳 자체를 없앤다.** 앱 주소로 넘어온 뒤 히스토리를
+ * 비우면 뒤로가기는 아무 일도 하지 않는다. 이 방식이 좋은 이유가 하나 더 있다 —
+ * 창 단위로 입력을 막으면 안에 붙는 Danbooru 뷰의 자기 뒤로가기까지 죽는다.
+ * 그쪽은 자기 히스토리를 그대로 갖는다.
+ *
+ * 앱은 `pushState` 를 쓰지 않으므로(확인함) 지울 것은 준비 화면 항목뿐이다.
+ * 재시작하면 준비 화면 -> 앱 순서가 다시 생기는데, 그때도 여기서 다시 비운다.
+ */
+function preventBackNavigation(browserWindow) {
+  if (!browserWindow) return;
+  const wc = browserWindow.webContents;
+  wc.on("did-finish-load", () => {
+    // 준비 화면(file://) 에서는 비우지 않는다 — 거기서는 아직 갈 곳이 없고,
+    // 비워 봐야 뒤이어 앱으로 넘어가며 다시 쌓인다.
+    if (!/^https?:/i.test(wc.getURL() || "")) return;
+    try {
+      if (typeof wc.clearHistory === "function") wc.clearHistory();
+    } catch (_error) {
+      /* 히스토리를 못 비워도 앱은 떠야 한다 */
+    }
+  });
+}
+
 function hideWindowMenu(browserWindow) {
   if (!shouldHideApplicationMenu() || !browserWindow) {
     return;
@@ -1971,6 +2001,7 @@ function createMainWindow() {
   // (v2.0.18 regression). Deferring lets the first frame paint + show before we zoom.
   mainWindow.webContents.on("did-finish-load", () => setTimeout(() => applyMainWindowZoom(), 0));
   attachZoomKeyboard(mainWindow);
+  preventBackNavigation(mainWindow);
 
   loadMaintenance("loading", "Starting NAIA backend...");
 
@@ -2945,6 +2976,7 @@ module.exports.__test = {
   backendEnvironment,
   backendLaunchConfig,
   backendRoot,
+  preventBackNavigation,
   buildRemoteUrl,
   appIconPath,
   compareVersions,

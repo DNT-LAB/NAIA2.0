@@ -21289,6 +21289,27 @@ body.detached-module .mod-grid-3 {
 .ia-block.is-editing, .ia-sub-block.is-editing { align-items: start; }
 .ia-block.is-editing .ia-block-label, .ia-sub-block.is-editing .ia-block-label { padding-top: 4px; }
 
+/* --- 축 프리셋 팝업 ---
+   구도 팝업 본문에 얹혀 있던 축 설정(X/Y/Z + 스페셜)을 자체 팝업으로 뗐다
+   (사용자 결정 2026-08-07). 그래야 구도도 다른 팝업과 같은 배치를 쓴다. */
+.ia-comp-popup {
+  position: fixed; z-index: var(--z-floating-module);
+  width: 340px; max-height: 70dvh; overflow-y: auto;
+  padding: 10px 12px 12px;
+  background: var(--bg-surface); border: 1px solid var(--accent);
+  border-radius: 12px; box-shadow: 0 10px 38px rgba(0,0,0,0.62);
+}
+.ia-comp-popup[hidden] { display: none; }
+.ia-comp-popup-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  font-family: var(--font-display); font-size: 12.5px; font-weight: 700;
+  color: var(--text-primary);
+}
+.ia-comp-popup-head .ia-panel-close { margin-left: auto; }
+/* 팝업 안에서는 제목 줄이 겹치므로 본문의 제목을 숨긴다. */
+.ia-comp-popup .ia-sec-label { display: none; }
+.ia-comp-btn-caret { font-size: 8px; opacity: 0.7; margin-left: 1px; }
+
 /* --- 앵커 팝업(검색창 상단 통합 + 분류 탐색) --- */
 /* 여기서 화면 높이만큼 늘리던 것을 뗐다 — 위의 `.ia-panel` 이 62dvh 로 상한을
    두는데 이 줄이 나중에 나와 그걸 덮었다(실측: 계산된 max-height 가 926px).

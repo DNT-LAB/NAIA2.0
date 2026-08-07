@@ -758,6 +758,20 @@ export function createInteractivePanel({
     '생성 중에 여러 개를 바꾸면 큐에 쌓지 않고 마지막 상태 한 번만 생성합니다.',
   ].join(String.fromCharCode(10));
 
+  /** 성인 탭 옆의 [축 프리셋] 버튼. 구도 팝업 본문에 얹혀 있던 축 설정을 여기서
+   *  연다 — 거기 두면 구도만 다른 팝업과 모양이 달랐다(사용자 결정 2026-08-07).
+   *  고른 축이 있으면 개수를 배지로 보여 준다(버튼만 보고도 설정 여부를 안다). */
+  function compPresetBtnHtml() {
+    const n = compTags(state.composition).length;
+    return '<button type="button" class="ia-scene-btn ia-comp-btn'
+      + (compPopupOpen ? ' is-open' : '') + (n ? ' has-tags' : '') + '"'
+      + ' data-comp-preset="1" title="축 프리셋 (X/Y/Z 시점 · 스페셜)">'
+      + '<span class="ia-block-icon">\u{1F39B}</span>'
+      + '<span class="ia-scene-btn-name">축 프리셋</span>'
+      + (n ? `<span class="ia-scene-btn-n">${n}</span>` : '')
+      + '<span class="ia-comp-btn-caret">\u25BE</span></button>';
+  }
+
   function reactiveToggleHtml() {
     return '<button type="button" class="ia-reactive' + (reactive ? ' is-on' : '') + '"' +
       ' data-ia-reactive="1" role="switch" aria-checked="' + (reactive ? 'true' : 'false') + '">' +
@@ -848,6 +862,12 @@ export function createInteractivePanel({
     sceneMount.addEventListener('click', event => {
       const rx = event.target.closest('[data-ia-reactive]');
       if (rx) { event.preventDefault(); setReactive(!reactive); return; }
+      const cp = event.target.closest('[data-comp-preset]');
+      if (cp) {
+        event.preventDefault();
+        if (compPopupOpen) closeCompPopup(); else openCompPopup(cp);
+        return;
+      }
       const b = event.target.closest('[data-slot]');
       if (!b) return;
       if (isEditing('scene', b.dataset.slot)) { focusEditingInput(); return; }
@@ -1257,7 +1277,8 @@ export function createInteractivePanel({
     lastPosSig = posSignature();   // 방금 그린 구성이 기준선이다
     const host = ensureSceneMount();
     host.innerHTML = floating
-      ? SCENE_SLOTS.map(sceneButtonHtml).join('') + reactiveToggleHtml()
+      ? SCENE_SLOTS.map(sceneButtonHtml).join('') + compPresetBtnHtml()
+        + reactiveToggleHtml()
       : '';
     applyReactiveTip();
     watchResultTab();
@@ -4055,14 +4076,12 @@ export function createInteractivePanel({
         <span class="ia-search-scope">${escHtml(panelContext.axis)}</span>
       </div>` : ''}
       <div class="ia-panel-body">
-        ${panelContext.slotId === 'composition' ? compPanelHtml() : ''}
         ${axisSectionsHtml()}
       </div>`;
 
     panelMount.querySelector('[data-close]')?.addEventListener('click', closePanel);
     panelMount.querySelector('[data-safe-viewer]')
       ?.addEventListener('click', () => setSafeViewer(!safeViewer));
-    if (panelContext.slotId === 'composition') bindCompPanel();
     bindAxisSections();
     // 계층 브라우저를 이 슬롯 축으로 마운트한다. 없으면 섹션은 비어 있다.
     const input = panelMount.querySelector('#iaTagInput');
@@ -4696,11 +4715,9 @@ export function createInteractivePanel({
     // **검색 중에는 나누지 않는다.** 그때는 여러 축이 동시에 펼쳐지고 탭 대신
     // 결과가 죽 이어지므로, 왼쪽 열을 두면 빈 칸만 생긴다.
     //
-    // **구도 슬롯도 나누지 않는다.** 거기는 그리드가 아니라 축 설정(X/Y/Z 콤보 +
-    // 스페셜 버튼)이 본문이라 왼쪽 열을 붙이면 짝이 안 맞는다. 사용자가 이 팝업을
-    // 따로 빼기로 했으므로(2026-08-07) 그때까지 옛 배치를 그대로 쓴다.
-    const splitOk = !thumbFilter && tabs
-      && !(panelContext && panelContext.slotId === 'composition');
+    // 구도도 이제 같다 — 축 설정(X/Y/Z)을 자체 팝업으로 떼어냈으므로 본문이
+    // 다른 축과 똑같이 그리드뿐이다(사용자 결정 2026-08-07).
+    const splitOk = !thumbFilter && tabs;
     const body = lead + (splitOk
       ? `<div class="ia-axsplit"><div class="ia-axtabs">${tabs}</div>`
         + `<div class="ia-axpanes">${panes}</div></div>`
@@ -4889,6 +4906,69 @@ export function createInteractivePanel({
 
   // ---- 구도 3축 콤보 프리셋 패널 (Dev0714 복원) ----
 
+  // 축 프리셋 팝업. 슬롯 팝업(.ia-panel)과 겹치지 않게 버튼 아래에 따로 띄운다.
+  let compPopup = null;
+  let compPopupOpen = false;
+
+  function ensureCompPopup() {
+    if (compPopup && document.body.contains(compPopup)) return compPopup;
+    compPopup = document.createElement('div');
+    compPopup.className = 'ia-comp-popup';
+    compPopup.hidden = true;
+    // 씬 버튼 줄과 **같은 컨텍스트**에 둔다 — body 직계로 두면 `.viewer-wrapper`
+    // (z-index:0 + isolation:isolate) 때문에 z 로 줄을 세울 수 없다(씬 플로트 주석).
+    (document.querySelector('.viewer-wrapper') || document.body).appendChild(compPopup);
+    compPopup.addEventListener('mousedown', keepEditingFocus);
+    compPopup.addEventListener('click', event => {
+      if (event.target.closest('[data-comp-close]')) { closeCompPopup(); return; }
+    });
+    return compPopup;
+  }
+
+  function openCompPopup(anchor) {
+    const el = ensureCompPopup();
+    el.innerHTML = '<div class="ia-comp-popup-head"><span>축 프리셋</span>'
+      + '<button type="button" class="ia-panel-close" data-comp-close="1">\u00d7</button></div>'
+      + compPanelHtml();
+    el.hidden = false;
+    compPopupOpen = true;
+    bindCompPanel();
+    positionCompPopup(anchor);
+    document.addEventListener('mousedown', onCompOutside, true);
+    renderBlocks();               // 버튼에 열림 표시
+  }
+
+  function closeCompPopup() {
+    if (!compPopupOpen) return;
+    compPopupOpen = false;
+    if (compPopup) { compPopup.hidden = true; compPopup.innerHTML = ''; }
+    document.removeEventListener('mousedown', onCompOutside, true);
+    renderBlocks();
+  }
+
+  function onCompOutside(event) {
+    if (!compPopupOpen) return;
+    if (compPopup && compPopup.contains(event.target)) return;
+    if (event.target.closest && event.target.closest('[data-comp-preset]')) return;
+    closeCompPopup();
+  }
+
+  /** 버튼 아래에 붙인다. 오른쪽으로 넘치면 화면 안으로 민다. */
+  function positionCompPopup(anchor) {
+    if (!compPopup || compPopup.hidden) return;
+    const btn = anchor || sceneMount?.querySelector('[data-comp-preset]');
+    if (!btn) return;
+    const b = btn.getBoundingClientRect();
+    const w = compPopup.offsetWidth || 340;
+    const h = compPopup.offsetHeight || 260;
+    let left = b.left;
+    if (left + w > window.innerWidth - 8) left = Math.max(8, window.innerWidth - w - 8);
+    let top = b.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, b.top - h - 6);
+    compPopup.style.left = Math.round(left) + 'px';
+    compPopup.style.top = Math.round(top) + 'px';
+  }
+
   function compPanelHtml() {
     const comp = state.composition;
     const selects = COMP_AXES.map(ax =>
@@ -4918,7 +4998,9 @@ export function createInteractivePanel({
   }
 
   function bindCompPanel() {
-    const host = panelMount.querySelector('#iaCompPanel');
+    // 축 설정은 이제 **자체 팝업** 안에 있다. panelMount 에서 찾던 것을 그대로
+    // 두면 못 찾아 콤보가 아무 반응도 안 한다(슬롯 팝업에서 떼어낸 뒷정리).
+    const host = document.getElementById('iaCompPanel');
     if (!host) return;
     host.querySelectorAll('.ia-comp-select').forEach(el => {
       el.addEventListener('change', () => {
@@ -4941,8 +5023,10 @@ export function createInteractivePanel({
 
   /** 콤보 변경 → 콤보 패널만 다시 그리고(검색/브라우저 유지) 프롬프트 반영. */
   function onCompChange() {
-    const host = panelMount.querySelector('#iaCompPanel');
+    const host = document.getElementById('iaCompPanel');
     if (host) { host.outerHTML = compPanelHtml(); bindCompPanel(); }
+    // 버튼의 개수 배지도 따라가야 한다 — 팝업을 닫아도 몇 개를 걸었는지 보인다.
+    renderBlocks();
     emitChange();
   }
 
@@ -5346,6 +5430,7 @@ export function createInteractivePanel({
       blocksMount.removeEventListener('mousedown', onPanelMouseDown);
       closePositionPicker();
       closePresetPanel();
+      closeCompPopup();
       document.body.classList.remove('interactive-editing');
       shiftResultForPopup(false);
       if (posPopup) { posPopup.remove(); posPopup = null; }

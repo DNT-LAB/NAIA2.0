@@ -4949,7 +4949,13 @@ export function createInteractivePanel({
   function onCompOutside(event) {
     if (!compPopupOpen) return;
     if (compPopup && compPopup.contains(event.target)) return;
-    if (event.target.closest && event.target.closest('[data-comp-preset]')) return;
+    const t = event.target.closest ? event.target : event.target.parentElement;
+    if (t && t.closest('[data-comp-preset]')) return;
+    // **드롭다운 목록은 팝업 밖에 산다.** 앱이 네이티브 select 를 숨기고
+    // (`native-select-hidden`) 커스텀 위젯으로 바꾸는데, 그 목록(`custom-select-menu`)
+    // 은 `document.body` 직계다(customSelects.mjs). 그래서 항목을 고르는 순간
+    // '바깥 클릭' 으로 잡혀 팝업이 닫혔다 — 값은 안 바뀌고 창만 사라졌다.
+    if (t && t.closest('.custom-select-menu, .custom-select')) return;
     closeCompPopup();
   }
 

@@ -709,7 +709,8 @@ export function createInteractivePanel({
           ${canDelete ? `<button type="button" class="ia-char-del" data-chardel data-cid="${cid}" aria-label="캐릭터 삭제" title="이 캐릭터 슬롯 삭제">&times;</button>` : ''}
           <span class="ia-char-spring"></span>
           <button type="button" class="ia-char-state ${c.state}" data-charenable data-cid="${cid}" aria-pressed="${enabled}" title="${enabled ? '비활성화 (생성에서 제외)' : '활성화'}">${enabled ? 'ACTIVE' : 'OFF'}</button>
-          <span class="ia-char-sum">${escHtml(summary)}</span>
+          <!-- 한 줄로 잘린다(CSS) — 전체는 title 로 본다. -->
+          <span class="ia-char-sum" title="${escHtml(summary)}">${escHtml(summary)}</span>
         </div>
         <div class="ia-char-body">
           ${subs}
@@ -3052,6 +3053,7 @@ export function createInteractivePanel({
       openId = 'character';
       renderBlocks();            // 편집 슬롯만 textarea 로
       document.body.classList.add('interactive-editing');
+      shiftResultForPopup(true);
       focusEditingInput();       // 자동완성은 bindSlotInput 의 bindTagAssist 가 붙인다
       return;
     }
@@ -3068,6 +3070,7 @@ export function createInteractivePanel({
     panelMount.classList.add('open');
     // 편집 중 표시 — tagAssist 의 태그 정보 툴팁을 억제한다(팝업 위에 겹쳐 가림).
     document.body.classList.add('interactive-editing');
+    shiftResultForPopup(true);
     focusEditingInput();       // 슬롯 textarea 포커스(끝으로)
     positionPopup();           // 편집 슬롯 옆에 앵커
     void renderAside();        // 오른쪽 조언 플로트
@@ -3662,6 +3665,7 @@ export function createInteractivePanel({
 
   function closePanel() {
     document.body.classList.remove('interactive-editing');
+    shiftResultForPopup(false);
     if (autocomplete) autocomplete.unbind();
     openId = null;
     panelContext = null;
@@ -3764,6 +3768,53 @@ export function createInteractivePanel({
    *  높이를 최대로 쓰는 것이 그리드에 이득이라 세로는 CSS 기본값(top:46px/bottom:14px)에
    *  맡기고, 여기서는 가로만 잡는다.
    */
+  // 팝업이 열려 있는 동안 히스토리 레일이 접혀 있었나. 열려 있던 것만 되돌린다 —
+  // 사용자가 스스로 접어 둔 것을 팝업이 닫혔다고 펴 주면 조작을 빼앗는 것이 된다.
+  let railFoldedByPopup = false;
+
+  /** 팝업이 열리고 닫힐 때 결과 영역을 비켜 준다.
+   *
+   *  팝업은 화면 왼쪽(494px)부터 380px 를 차지하는데 이미지는 그 뒤에 가운데
+   *  정렬로 깔린다 — 결국 아무것도 안 보였다(테스터 지적 2026-08-07).
+   *  1) 히스토리 레일을 접어 오른쪽 자리를 벌고
+   *  2) 이미지 영역 왼쪽에 팝업 폭만큼 여백을 줘 오른쪽으로 민다.
+   *
+   *  **저장은 하지 않는다**(persist=false). 팝업 때문에 잠깐 접은 것을 사용자
+   *  설정으로 굳히면, 다음에 켤 때 히스토리가 사라진 채로 시작한다. */
+  function shiftResultForPopup(on) {
+    const rail = document.getElementById('viewerPanel');
+    if (on) {
+      if (!railFoldedByPopup && rail && !rail.classList.contains('collapsed')) {
+        railFoldedByPopup = true;
+        window.setHistoryRailCollapsed?.(true, false);
+      }
+    } else if (railFoldedByPopup) {
+      railFoldedByPopup = false;
+      window.setHistoryRailCollapsed?.(false, false);
+    }
+    document.body.classList.toggle('ia-popup-shift', !!on);
+    syncPopupShift();
+  }
+
+  /** 이미지에 줄 왼쪽 여백을 팝업 실측으로 넣는다. 팝업 폭·위치는 화면 크기에
+   *  따라 달라지므로 상수로 박지 않는다. */
+  function syncPopupShift() {
+    const viewer = document.getElementById('resultViewer');
+    if (!viewer) return;
+    if (!document.body.classList.contains('ia-popup-shift')) {
+      viewer.style.removeProperty('--ia-shift');
+      return;
+    }
+    const box = panelMount.getBoundingClientRect();
+    const v = viewer.getBoundingClientRect();
+    if (!box.width || !v.width) { viewer.style.removeProperty('--ia-shift'); return; }
+    // 팝업 오른쪽 끝까지 비운다. 이미지가 너무 좁아지면(뷰어의 3/4 초과) 포기한다 —
+    // 밀어 봐야 볼 수 없을 만큼 작아지면 가려지는 편이 차라리 낫다.
+    const shift = Math.round(box.right + 12 - v.left);
+    viewer.style.setProperty('--ia-shift',
+      (shift > 0 && shift < v.width * 0.75) ? shift + 'px' : '0px');
+  }
+
   function positionPopup() {
     const el = editingEl();
     if (!el) return;
@@ -3783,6 +3834,7 @@ export function createInteractivePanel({
     panelMount.style.top = (sceneFloatFits() && !blocksMount.hidden)
       ? (PANEL_TOP + SCENE_FLOAT_H + 6) + 'px' : '';
     panelMount.style.bottom = '';
+    syncPopupShift();   // 팝업이 움직였으면 이미지가 비켜 준 폭도 다시 잰다
   }
 
   let recommendations = [];
@@ -5087,6 +5139,7 @@ export function createInteractivePanel({
       closePositionPicker();
       closePresetPanel();
       document.body.classList.remove('interactive-editing');
+      shiftResultForPopup(false);
       if (posPopup) { posPopup.remove(); posPopup = null; }
       if (presetPanel) { presetPanel.remove(); presetPanel = null; }
       if (cardEl) { cardEl.remove(); cardEl = null; }

@@ -4741,6 +4741,11 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  /* Interactive 팝업이 열리면 그 폭만큼 왼쪽을 비워 이미지를 오른쪽으로 민다.
+     값은 JS(syncPopupShift)가 팝업을 재서 넣고, 실제 padding 은 아래
+     @media (min-width: 768px) 쪽에서 더한다(거기가 padding 의 주인이다).
+     팝업 뒤에 가려 아무것도 안 보이던 것이 테스터의 가장 치명적인 지적이었다. */
+  transition: padding-left 0.16s ease;
 }
 .viewer:focus,
 .viewer:focus-visible {
@@ -17286,6 +17291,10 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   }
   .viewer {
     padding: 2px;
+    /* Interactive 팝업이 열리면 그 폭만큼 왼쪽을 더 비운다(--ia-shift 는 JS 가 넣는다).
+       **이 미디어쿼리가 padding 의 실제 주인이다** — 바깥 `.viewer` 에만 padding-left
+       를 써 두면 여기 `padding: 2px` 가 그걸 덮는다(실측: 계산값이 2px 그대로). */
+    padding-left: calc(2px + var(--ia-shift, 0px));
   }
   /* PC: Result history rail is always visible, matching the desktop NAIA result layout. */
   .viewer-panel,
@@ -20531,11 +20540,18 @@ body.detached-module .mod-grid-3 {
 .ia-char-spring { flex: 1 1 auto; }
 .ia-char.is-disabled { opacity: 0.5; }
 /* 요약(특징~표정 미리보기)은 컨트롤 아래 줄 전체로. 펼쳤을 때는 본문이 있으니 숨긴다. */
+/* 접힌 캐릭터의 태그 줄. **한 줄로 자른다** — 예전엔 word-break: break-word 라
+   태그가 많으면 4~5줄로 흘러 캐릭터 하나가 80px 씩 먹었다. 슬롯이 여럿이면 그것만
+   으로 목록이 화면을 넘어간다(테스터 지적 2026-08-07). 전체는 hover 로 본다. */
 .ia-char-sum {
   font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);
-  line-height: 1.55; word-break: break-word; flex-basis: 100%; min-width: 0;
+  line-height: 1.55; flex-basis: 100%; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .ia-char.is-open .ia-char-sum { display: none; }
+/* 비활성 캐릭터는 생성에 들어가지 않는다 — 프롬프트를 보여줄 이유가 없다.
+   OFF 배지만으로 충분하고, 그만큼 높이가 준다(테스터 지적). */
+.ia-char.is-disabled .ia-char-sum { display: none; }
 
 /* 성별 세그먼트 토글 [ Male | Female ] */
 .ia-char-gender {

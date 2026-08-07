@@ -3779,6 +3779,8 @@ export function createInteractivePanel({
     document.body.classList.remove('interactive-editing');
     shiftResultForPopup(false);
     closeZoom();
+    // 다음에 열 팝업은 카테고리 목록이 다르다 — 남겨 두면 엉뚱한 자리에서 시작한다.
+    axTabScroll = 0;
     if (autocomplete) autocomplete.unbind();
     openId = null;
     panelContext = null;
@@ -4717,9 +4719,39 @@ export function createInteractivePanel({
     return `<div class="ia-axes${thumbFilter ? ' is-search' : ''}" id="iaAxes">${body}</div>`;
   }
 
+  /** 카테고리 열의 휠 스크롤을 60% 로 늦춘다(사용자 지정 2026-08-07).
+   *
+   *  칩이 38~53px 로 작아 기본 속도로는 한 번 굴릴 때마다 여러 개가 지나간다.
+   *  CSS 로는 못 바꾸므로 휠을 받아 직접 굴린다.
+   *
+   *  **끝에 닿았을 때는 넘겨준다.** 무조건 preventDefault 하면 열 위에 커서가
+   *  있는 동안 바깥(팝업 본문)이 아예 안 굴러간다.
+   */
+  function slowWheel(el, rate) {
+    el.addEventListener('wheel', event => {
+      if (event.ctrlKey || event.metaKey) return;      // 확대는 건드리지 않는다
+      // deltaMode: 0=픽셀, 1=줄, 2=페이지. 마우스 휠은 보통 0 이지만 장치에 따라
+      // 줄 단위로 오므로 픽셀로 맞춘다(안 하면 1~2px 씩만 움직인다).
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? el.clientHeight : 1;
+      const dy = event.deltaY * unit;
+      const room = dy > 0
+        ? el.scrollHeight - el.clientHeight - el.scrollTop
+        : el.scrollTop;
+      if (room <= 0.5) return;                          // 끝 — 바깥에 넘긴다
+      event.preventDefault();
+      el.scrollTop += dy * rate;
+    }, {passive: false});
+  }
+
   function bindAxisSections() {
     const host = panelMount.querySelector('#iaAxes');
     if (!host) return;
+    const tabCol = host.querySelector('.ia-axsplit > .ia-axtabs');
+    if (tabCol) {
+      slowWheel(tabCol, 0.6);
+      // 훑던 자리를 넘겨받는다. 새 노드라 0 에서 시작하기 때문이다.
+      if (axTabScroll) tabCol.scrollTop = axTabScroll;
+    }
     host.querySelectorAll('[data-axcolor]').forEach(el => {
       el.addEventListener('click', event => {
         event.stopPropagation();
@@ -4837,12 +4869,20 @@ export function createInteractivePanel({
 
   /** 축 영역만 다시 그린다 — 검색창/브라우저는 건드리지 않는다.
    *  outerHTML 교체는 스크롤 박스를 새로 만들므로 위치를 먼저 저장한다. */
+  // 카테고리 열이 훑던 자리. 축을 고르면 `#iaAxes` 를 outerHTML 로 통째 갈아치우는데,
+  // 새 노드는 scrollTop 0 으로 태어난다 — 아래쪽 카테고리를 고를 때마다 목록이
+  // 맨 위로 튀어 올랐다(사용자 지적: "늘 있는 버그"). 그리드는 thumbScroll 로
+  // 이미 지켜지고 있었는데 탭 쪽만 빠져 있었다.
+  let axTabScroll = 0;
+
   function refreshAxisSections() {
     const host = panelMount.querySelector('#iaAxes');
     if (!host) return;
     host.querySelectorAll('[data-scroll-ax]').forEach(box => {
       thumbScroll.set(box.dataset.scrollAx, box.scrollTop);
     });
+    const tabCol = host.querySelector('.ia-axsplit > .ia-axtabs');
+    if (tabCol) axTabScroll = tabCol.scrollTop;
     host.outerHTML = axisSectionsHtml();
     bindAxisSections();
   }

@@ -473,7 +473,11 @@ export function createResultHistoryController({
     }
     setSelectionBusy(true);
     try {
-      const response = await fetch('/api/history/selected/save', {
+      // **빠른 저장(Ctrl+S)과 같은 곳으로 간다.** 예전에는
+      // `selected/save` 로 갔는데 그건 *미저장 항목을 저장 폴더에 구제*하는
+      // 기능이라, 이미 자동 저장된 그림에는 "이미 있음"만 내고 아무 데도
+      // 남기지 않았다 — 골라 둔 것만 따로 모으려던 손이 헛돌았다(사용자 지적).
+      const response = await fetch('/api/history/selected/quicksave', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({paths}),
@@ -485,7 +489,7 @@ export function createResultHistoryController({
       const saved = Number(data.saved || 0);
       const skipped = Number(data.skipped || 0);
       const failed = Array.isArray(data.failed) ? data.failed.length : 0;
-      const folder = String(data.current_save_directory || '현재 결과 폴더');
+      const folder = String(data.directory || '빠른 저장 폴더');
       const parts = [`저장 ${saved}개`];
       if (skipped) parts.push(`이미 있음 ${skipped}개`);
       if (failed) parts.push(`실패 ${failed}개`);
@@ -1526,6 +1530,10 @@ export function createResultHistoryController({
 
   function closePopup() {
     viewerPopupOpen = false;
+    // 팝업 안에서 고른 것이 밖으로 새면 안 된다. 예전에는 팝업을 닫고 나와도
+    // 레일에 '1개 선택 / 저장 1 / 삭제 1' 이 남아 있었다 — 메인 화면에서
+    // 고른 적이 없는데 삭제 버튼이 켜져 있는 셈이라 위험하다(사용자 지적).
+    clearSelection();
     viewerBindings.setPanelOpen(false);
     if (document.fullscreenElement) document.exitFullscreen?.();
     vpPan = null;

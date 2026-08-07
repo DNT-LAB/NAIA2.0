@@ -928,6 +928,65 @@ def register_result_display_routes(
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
         return result
 
+    @app.post("/api/history/selected/quicksave")
+    async def api_history_selected_quicksave(req: Request):
+        """고른 여러 장을 Ctrl+S 빠른 저장 경로로 남긴다 — **단건 Ctrl+S 를 여러 장에**.
+
+        `selected/save` 와 헷갈리면 안 된다. 그쪽은 *미저장 항목을 저장 폴더에
+        구제*하는 일이라 이미 자동 저장된 그림에는 "이미 있음"만 내고 끝난다.
+        이쪽은 이미 저장돼 있어도 **골라 둔 폴더에 한 벌 더** 남긴다 —
+        마음에 든 것만 따로 모으는 손버릇이 이것이다(사용자 지적으로 갈라냄).
+        """
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        paths = payload.get("paths") if isinstance(payload, dict) else None
+        requested, failures, status_code = _selected_history_items(session_context, paths)
+        if status_code is not None:
+            return JSONResponse({"ok": False, "error": failures[0]["error"], "failed": failures},
+                                status_code=status_code)
+        if not requested:
+            return JSONResponse({
+                "ok": False,
+                "error": failures[0]["error"] if failures else "History item not found",
+                "failed": failures,
+            }, status_code=404)
+
+        def _run():
+            service = session_context._save_service()
+            saved = 0
+            skipped = 0
+            errors = list(failures)
+            directory = str(service.quicksave_directory())
+            for rel_path, item in requested:
+                try:
+                    result = service.quicksave_item(item)
+                    directory = str(result.get("directory") or directory)
+                    # 같은 세션에서 이미 빠른 저장한 것은 다시 쓰지 않는다
+                    # (quicksave_item 이 `noop` 으로 알려 준다).
+                    if str(result.get("mode")) == "noop":
+                        skipped += 1
+                    else:
+                        saved += 1
+                except Exception as exc:
+                    errors.append({"path": rel_path, "error": str(exc)})
+            return saved, skipped, errors, directory
+
+        try:
+            saved, skipped, errors, directory = await run_in_thread(_run)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        # 이동 모드면 원본이 옮겨가 미저장 개수가 달라질 수 있다 — 상태를 다시 뿌린다.
+        await broadcast_json(clients, session_context.auto_save_state_payload())
+        return {
+            "ok": bool(saved or skipped),
+            "saved": saved,
+            "skipped": skipped,
+            "failed": errors,
+            "directory": directory,
+        }
+
     @app.post("/api/history/open-folder")
     async def api_history_open_folder(target: str = "save"):
         # target=quicksave 면 Ctrl+S 빠른 저장 폴더를 연다(비어 있으면 저장 폴더와 같다).

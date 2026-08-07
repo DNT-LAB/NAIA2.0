@@ -1,4 +1,17 @@
 :root {
+  /* Interactive 글로벌 편집기의 축 표시색. **칩 배경이 아니라 왼쪽 3px 띠에만** 쓴다 —
+     9개 칩이 서로 다른 배경을 가지면 성인의 적색이 오류로, 배경의 녹색이 성공으로
+     읽히고 작은 영역에서 소음이 크다(Codex 설계 검토). 색만으로 뜻을 전하지 않도록
+     칩에 축 이름 툴팁도 함께 단다. */
+  --ia-axis-composition: #7c6aef;
+  --ia-axis-composition_fx: #4aa3df;
+  --ia-axis-background: #3fa66a;
+  --ia-axis-etc: #c9a227;
+  --ia-axis-animal: #d2803a;
+  --ia-axis-fx: #c77dba;
+  --ia-axis-pose_multi: #56b6c2;
+  --ia-axis-adult: #e05561;
+
   --bg-deep: #0a0a0f;
   /* **정의가 없는 채로 8곳에서 쓰이고 있었다.** 그래서 그 배경들이 전부 투명으로
      떨어졌다 — 히스토리 팝업이 뒤의 프롬프트창·도구 패널·Generate 버튼을 그대로
@@ -22718,3 +22731,87 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    높이 0 짜리 전폭 스페이서로 줄을 끊는다(토글 자신은 글자 폭만 쓴다). */
 .ia-scene-float { flex-wrap: wrap; }
 .ia-scene-float::after { content: ''; flex: 0 0 100%; height: 0; order: 98; }
+
+
+/* ── Interactive: 하단 글로벌 태그 편집기 ─────────────────────────────────
+   Generation Info 칸의 **형제**로 앉는다. 저 칸(#resultInfoContent)은 히스토리가
+   비동기로 채우는 주인이 따로 있어서, 가로채면 늦게 끝난 fetch 가 편집기를 덮는다. */
+.ia-global-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  min-height: 0;
+  /* 판이 낮아도 자유 입력칸은 보여야 한다 — 칩 쪽만 스크롤하고 입력은 발치에
+     붙박는다. 통째로 스크롤하면 새로 넣은 이 칸이 화면 밖으로 밀린다(실측: 62px
+     높이에서 입력칸이 통째로 잘렸다). */
+  overflow: hidden;
+}
+.ia-global-editor[hidden] { display: none; }
+
+.ia-ge-head { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.ia-ge-title {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
+}
+.ia-ge-n {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  color: var(--accent-glow); font-variant-numeric: tabular-nums;
+}
+.ia-ge-spring { flex: 1; }
+.ia-ge-hint { font-size: 9px; color: var(--text-dim); }
+.ia-ge-empty { font-size: 10px; color: var(--text-dim); font-style: italic; }
+
+.ia-ge-chips {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+}
+
+/* 칩은 중립색이다. 축은 **왼쪽 띠**로만 알린다 — 9개가 서로 다른 배경을 가지면
+   성인의 적색이 오류로, 배경의 녹색이 성공으로 읽힌다. */
+.ia-gchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 100%;
+  padding: 3px 7px 3px 9px;
+  border: 1px solid var(--border-dim);
+  border-left: 3px solid var(--axis, var(--border-glow));
+  border-radius: 5px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.4;
+}
+.ia-gchip[data-slot="composition"]    { --axis: var(--ia-axis-composition); }
+.ia-gchip[data-slot="composition_fx"] { --axis: var(--ia-axis-composition_fx); }
+.ia-gchip[data-slot="background"]     { --axis: var(--ia-axis-background); }
+.ia-gchip[data-slot="etc"]            { --axis: var(--ia-axis-etc); }
+.ia-gchip[data-slot="animal"]         { --axis: var(--ia-axis-animal); }
+.ia-gchip[data-slot="fx"]             { --axis: var(--ia-axis-fx); }
+.ia-gchip[data-slot="pose_multi"]     { --axis: var(--ia-axis-pose_multi); }
+.ia-gchip[data-slot="adult"]          { --axis: var(--ia-axis-adult); }
+
+/* 구도 콤보에서 나온 파생 칩 — 여기서는 못 지운다(콤보를 바꿔야 한다). */
+.ia-gchip.is-locked { opacity: 0.72; font-style: italic; }
+/* 가중치 배지. 이 묶음은 통째로만 지워진다(되쓰기 금지). */
+.ia-gchip-w { flex: 0 0 auto; font-weight: 700; color: var(--accent-glow); font-size: 9px; }
+.ia-gchip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ia-gchip-x {
+  flex: 0 0 auto; width: 13px; height: 13px; padding: 0;
+  border: 0; background: none; color: var(--text-dim);
+  font-size: 12px; line-height: 1; cursor: pointer;
+}
+.ia-gchip-x:hover { color: #ffb4b4; }
+
+.ia-ge-free {
+  flex: 0 0 auto;
+  width: 100%; resize: vertical; min-height: 38px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: var(--bg-deep); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+}
+.ia-ge-free:focus { outline: none; border-color: var(--accent); }
+.ia-ge-free::placeholder { color: var(--text-dim); font-style: italic; }
+
+/* 글로벌 편집기가 떠 있는 동안의 최소 높이. 머리 + 칩 두 줄 + 자유 입력이 들어갈
+   만큼. 사용자가 더 늘려 뒀으면 그 값이 이긴다(min-height 라서). */
+.result-info-panel.has-ia-editor { min-height: 176px; }

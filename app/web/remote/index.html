@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260807e-hist1">
+<link rel="stylesheet" href="style.css?v=20260807i-hist1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -838,6 +838,10 @@
           <div class="result-info-content" id="resultInfoContent">
             <span class="result-info-empty">select a history item...</span>
           </div>
+          <!-- Interactive 모드의 글로벌 태그 편집기. 위 칸을 **가로채지 않고** 형제로
+               둔다 — 저쪽은 히스토리 메타데이터를 비동기로 채우는 주인이 따로 있어서,
+               같은 노드를 쓰면 늦게 끝난 fetch 가 편집기를 덮는다(Codex 설계 검토). -->
+          <div class="ia-global-editor" id="interactiveGlobalEditor" hidden></div>
         </section>
       </div>
       <aside class="viewer-panel open" id="viewerPanel" aria-label="Result history">
@@ -1244,6 +1248,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260807j-ia183"></script>
+<script src="app.js?v=20260807k-ia183"></script>
 </body>
 </html>

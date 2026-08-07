@@ -314,6 +314,9 @@ export function createInteractivePanel({
     person: '1girl_solo',
     chars: [newCharacter(true)],
     slots: emptySceneSlots(),
+    // 어느 축에도 속하지 않는 자유 입력. **문자열 그대로** 둔다 — 태그로 쪼갰다가
+    // 다시 이으면 사용자가 적은 공백·가중치·쉼표가 손상된다.
+    freeText: '',
     composition: newComposition(),   // 구도 3축 콤보 상태(자유 태그와 별도, 프롬프트에선 합쳐짐)
   };
 
@@ -372,8 +375,10 @@ export function createInteractivePanel({
       parts.push(...(state.slots[slot.id] || []));
     }
     const pe = (typeof getPromptEngineering === 'function' && getPromptEngineering()) || {};
+    // 자유 입력은 글로벌 뒤·후행 앞. 파싱해서 다시 잇지 않고 원문을 그대로 넣는다.
     return [genderCountPrefix(), String(pe.pre_prompt || '').trim(),
-            parts.join(', '), String(pe.post_prompt || '').trim()]
+            parts.join(', '), String(state.freeText || '').trim(),
+            String(pe.post_prompt || '').trim()]
       .map(v => v.replace(/^\s*,|,\s*$/g, '').trim())
       .filter(Boolean).join(', ');
   }
@@ -889,7 +894,7 @@ export function createInteractivePanel({
     if (sceneTabWatch) return;
     const pane = document.getElementById('rightTabResult');
     if (!pane) return;
-    sceneTabWatch = new MutationObserver(() => positionSceneFloat());
+    sceneTabWatch = new MutationObserver(() => { positionSceneFloat(); syncGlobalEditor(); });
     sceneTabWatch.observe(pane, { attributes: true, attributeFilter: ['class', 'hidden'] });
     watchHistoryRail();
   }
@@ -907,6 +912,129 @@ export function createInteractivePanel({
     // 여기서 바로 재도 현재 값이 나온다.
     sceneRailWatch = new ResizeObserver(() => positionSceneFloat());
     sceneRailWatch.observe(rail);
+  }
+
+  // ── 하단 글로벌 편집기 ─────────────────────────────────────────────────
+  //
+  // 축별 배열이 SSOT 다. 여기서는 **보기만 하나로** 모은다 — 칩을 지우면 원래 축의
+  // 배열에서 빠지고, 새로 적는 것은 자유 입력으로만 들어간다. 전체를 텍스트로 열어
+  // 축으로 되돌리는 방식은 폐기했다: 같은 태그가 두 축에 있으면 소유를 정할 수 없고,
+  // 이 모듈은 애초에 '블록 -> 문자열' 단방향 계약이다.
+
+  /** 축 id -> 사람이 읽는 이름. 목록에서 파생한다(손으로 적으면 축을 더할 때 어긋난다). */
+  const SCENE_LABEL = new Map(SCENE_SLOTS.map(slot => [slot.id, slot.name]));
+
+  /** 저장 원소 하나를 칩 하나로 본다. `2::a, b ::` 는 **쪼개지 않는다** —
+   *  쪼개서 되쓰면 공백·중첩·이스케이프에서 원문이 상한다. 무게만 배지로 뗀다. */
+  function weightedChip(raw) {
+    const m = /^\s*(-?\d+(?:\.\d+)?)\s*::\s*([\s\S]*?)\s*::\s*$/.exec(String(raw));
+    return m ? {weight: m[1], text: m[2]} : {weight: null, text: String(raw)};
+  }
+
+  /** 화면에 뿌릴 평면 목록. 순서는 renderPrompt() 와 같다(= 실제 프롬프트 순서). */
+  function globalChipList() {
+    const out = [];
+    for (const slot of SCENE_SLOTS) {
+      if (slot.id === 'composition') {
+        for (const t of compTags(state.composition)) {
+          // 구도 3축 콤보는 파생값이다 — 여기서 지울 수 없다(콤보를 바꿔야 한다).
+          out.push({raw: t, slot: 'composition', locked: true, index: -1});
+        }
+      }
+      (state.slots[slot.id] || []).forEach((t, i) => {
+        out.push({raw: t, slot: slot.id, locked: false, index: i});
+      });
+    }
+    return out;
+  }
+
+  function globalEditorHtml() {
+    const list = globalChipList();
+    const chips = list.map(item => {
+      const {weight, text} = weightedChip(item.raw);
+      const label = SCENE_LABEL.get(item.slot) || item.slot;
+      const tip = weight
+        ? `${label} \u00b7 가중치 ${weight} \u00b7 이 묶음은 통째로만 지울 수 있습니다`
+        : (item.locked ? `${label} \u00b7 구도 콤보에서 나온 값입니다` : label);
+      return `<span class="ia-gchip${item.locked ? ' is-locked' : ''}" data-slot="${item.slot}"
+        title="${escHtml(tip)}">
+        ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}\u00d7</b>` : ''}
+        <span class="ia-gchip-t">${escHtml(text)}</span>
+        ${item.locked ? '' :
+          `<button type="button" class="ia-gchip-x" data-gslot="${item.slot}" data-gidx="${item.index}"
+             aria-label="제거">\u00d7</button>`}
+      </span>`;
+    }).join('');
+    return `
+      <div class="ia-ge-head">
+        <span class="ia-ge-title">글로벌 태그</span>
+        <span class="ia-ge-n">${list.length || ''}</span>
+        <span class="ia-ge-spring"></span>
+        <span class="ia-ge-hint">위 버튼으로 넣고, 아래 칸에 자유롭게 적습니다</span>
+      </div>
+      <div class="ia-ge-chips">${chips || '<span class="ia-ge-empty">아직 없습니다</span>'}</div>
+      <textarea class="ia-ge-free" id="iaGlobalFree" rows="2" spellcheck="false"
+        placeholder="자유 입력 — 여기 적은 것은 그대로 프롬프트에 붙습니다"
+      >${escHtml(state.freeText || '')}</textarea>`;
+  }
+
+  /** 편집기를 보일지 말지. Interactive 가 켜져 있고 결과 탭일 때만 자리를 바꾼다. */
+  function syncGlobalEditor() {
+    const host = document.getElementById('interactiveGlobalEditor');
+    const info = document.getElementById('resultInfoContent');
+    if (!host || !info) return;
+    const on = active && !blocksMount.hidden && resultTabActive() && !globalEditorPeek;
+    host.hidden = !on;
+    // 판이 낮으면 자유 입력칸이 통째로 잘린다(실측: 판 96px → 편집기 62px 인데
+    // 머리+입력만 73px 이 필요했다). 편집기가 떠 있는 동안만 바닥을 깔아 준다 —
+    // 사용자가 늘려 둔 높이는 그대로 존중된다(min-height 라 더 크면 그 값이 이긴다).
+    const panel = document.getElementById('resultInfoPanel');
+    if (panel) panel.classList.toggle('has-ia-editor', on);
+    // 저 칸의 주인은 히스토리다 — 내용은 건드리지 않고 보이기만 바꾼다.
+    info.style.display = on ? 'none' : '';
+    if (on) renderGlobalEditor();
+  }
+
+  let globalEditorPeek = false;   // '생성 정보 보기'로 잠시 넘겨 둔 상태
+
+  function renderGlobalEditor() {
+    const host = document.getElementById('interactiveGlobalEditor');
+    if (!host || host.hidden) return;
+    // 타이핑 중에는 다시 그리지 않는다 — 커서와 IME 조합이 날아간다.
+    if (document.activeElement && document.activeElement.id === 'iaGlobalFree') return;
+    host.innerHTML = globalEditorHtml();
+    bindGlobalEditor(host);
+  }
+
+  function bindGlobalEditor(host) {
+    host.querySelectorAll('[data-gslot]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.gslot;
+        const idx = Number(btn.dataset.gidx);
+        const list = state.slots[id];
+        if (!Array.isArray(list) || !(idx >= 0) || idx >= list.length) return;
+        list.splice(idx, 1);
+        renderBlocks();          // 씬 버튼의 개수 배지도 같이 줄어야 한다
+        emitChange();
+      });
+    });
+    const free = host.querySelector('#iaGlobalFree');
+    if (!free) return;
+    free.addEventListener('input', () => {
+      // 반응형 생성은 타이핑 중에 멈춘다 — 글자마다 유료 생성이 나가면 안 된다.
+      reactiveTypingSlot = free;
+      state.freeText = free.value;
+      emitChange();   // reactiveOnChange 는 reactiveTypingSlot 을 보고 스스로 멈춘다
+    });
+    const flush = () => {
+      if (reactiveTypingSlot !== free) return;
+      reactiveTypingSlot = null;
+      reactiveOnChange();
+    };
+    free.addEventListener('blur', flush);
+    free.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); free.blur(); }
+    });
   }
 
   function positionSceneFloat() {
@@ -961,6 +1089,7 @@ export function createInteractivePanel({
     applyReactiveTip();
     watchResultTab();
     positionSceneFloat();
+    syncGlobalEditor();
     // 초기 렌더는 `blocksMount.hidden` 이 아직 true 인 시점에 돌 수 있다(실측: 새로고침
     // 하면 버튼은 생기는데 플로트가 안 열렸다). 레이아웃이 잡힌 다음 프레임에 한 번 더
     // 판정해 순서 의존을 없앤다.
@@ -4651,7 +4780,10 @@ export function createInteractivePanel({
      *  캐릭터만 담으므로 그것만으로는 씬 태그가 사라진다. */
     exportState() {
       return {
-        v: 1,
+        // v2 = freeText 가 생겼다. **키는 그대로 v1 을 쓴다**(app.js) — 키를 바꾸면
+        // 기존 작업 상태가 통째로 안 보인다. 옛 저장분은 freeText 가 없어 ''.
+        v: 2,
+        freeText: String(state.freeText || ''),
         chars: snapshotChars(),
         slots: Object.fromEntries(
           Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
@@ -4666,7 +4798,7 @@ export function createInteractivePanel({
       // 렌더에서 또 터졌다 — '깨진 저장분은 무시한다'는 약속이 지켜지지 않았다
       // (2026-08-05 Codex 지적).
       const rollback = {
-        chars: state.chars, composition: state.composition,
+        chars: state.chars, composition: state.composition, freeText: state.freeText,
         slots: Object.fromEntries(
           Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
       };
@@ -4687,12 +4819,15 @@ export function createInteractivePanel({
         if (saved.composition && typeof saved.composition === 'object') {
           state.composition = {...newComposition(), ...saved.composition};
         }
+        // v1 저장분에는 없다 — 그때는 빈 문자열로 시작한다.
+        state.freeText = typeof saved.freeText === 'string' ? saved.freeText : '';
         if (active) { renderBlocks(); emitChange(); }
         return true;
       } catch (_) {
         state.chars = rollback.chars;
         state.slots = rollback.slots;
         state.composition = rollback.composition;
+        state.freeText = rollback.freeText;
         if (active) { try { renderBlocks(); } catch (__) {} }
         return false;
       }

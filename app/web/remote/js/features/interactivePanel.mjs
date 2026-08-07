@@ -3196,7 +3196,7 @@ export function createInteractivePanel({
     return v;
   }
 
-  /** 태그 사전 카드 — 함께 딸려오는 것 / 비슷한 것 / 더 구체적인 것.
+  /** 태그 사전 카드 — 함께 딸려오는 것 / 더 구체적인 것 / 함께 쓰이는 것.
    *  조언(전제조건·충돌·추천)이 없는 태그가 대부분이라 '알려드릴 것이 없습니다' 만
    *  띄우던 자리를 이것이 대신한다.
    *
@@ -3212,10 +3212,10 @@ export function createInteractivePanel({
       rows.push('<div class="ia-aside-group-label">함께 딸려오는 것</div>' +
         `<div class="ia-aside-thumbs">${recThumbsHtml(info.implications.slice(0, 8))}</div>`);
     }
-    if (info.related && info.related.length) {
-      rows.push('<div class="ia-aside-group-label">비슷한 것</div>' +
-        `<div class="ia-aside-thumbs">${recThumbsHtml(info.related.slice(0, 8))}</div>`);
-    }
+    // '비슷한 것'(related = siblings + word_match)은 **내지 않는다**. 고르는 데
+    // 도움이 안 된다는 판단이다(사용자 2026-08-07). 백엔드는 그대로 계산해서
+    // 보내므로(`info.related`) 되살리려면 이 줄만 되돌리면 된다 — 랭커의 튜닝
+    // (존재↔부재 쌍 차단 등)을 다시 만들 필요가 없다.
     // '더 구체적인 것'(children)은 '비슷한 것'과 성격이 다르다 — `sweater` 에 대한
     // `ribbed sweater` 는 유사어가 아니라 하위 종류다. 전에는 한 통에 섞였고 점수가
     // 높아 유사어를 밀어냈다(children 보유 태그의 99.94%에서 첫 칩이 children).

@@ -20965,7 +20965,9 @@ body.detached-module .mod-grid-3 {
    (사용자 지시 2026-08-07). **이미지를 가리는 것은 감수한 설계다** — 대신 팝업
    오른쪽에 세워 그리드는 가리지 않는다(고른 것과 원본을 나란히 보라고). */
 .ia-zoom {
-  position: fixed; z-index: var(--z-toast);
+  /* 미니 팝업과 같은 층. --z-toast 를 쓰면 전역 토스트 층까지 올라간다
+     (Codex 리뷰 2026-08-07). */
+  position: fixed; z-index: var(--z-floating-module);
   width: 260px;
   display: flex; flex-direction: column; gap: 8px;
   padding: 10px;

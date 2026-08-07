@@ -917,8 +917,13 @@ export function createInteractivePanel({
   }
 
   /** 슬롯이 바뀔 때마다 불린다. 실제 발화는 호스트(app.js)가 맡는다. */
+  // 생성 직전 랜덤을 굴리는 동안만 true. 그동안 반응형 발화를 막는다
+  // (rollComposition 주석 참조 - 안 막으면 유료 생성이 연쇄로 나간다).
+  let rollingForGeneration = false;
+
   function reactiveOnChange() {
     if (!reactive || !active) return;
+    if (rollingForGeneration) return;
     // 슬롯에 **직접 타이핑하는 동안은 발화하지 않는다.** `1girl` 을 치면 여섯 번
     // 나가서 Anlas 만 태운다(사용자 합의). 지문도 갱신하지 않는다 — 그래야 blur/
     // Enter 시점에 '그동안 쌓인 변화'가 통째로 잡힌다.
@@ -3300,7 +3305,11 @@ export function createInteractivePanel({
     zoomEl = document.createElement('div');
     zoomEl.className = 'ia-zoom';
     zoomEl.hidden = true;
-    document.body.appendChild(zoomEl);
+    // 씬 플로트·미니 팝업과 **같은 컨텍스트**에 둔다. body 직계로 두면
+    // `.viewer-wrapper`(z-index:0 + isolation:isolate) 때문에 이 안의 팝업들과
+    // 같은 층에서 줄을 세울 수 없고, 전역 토스트 층까지 침범한다
+    // (Codex 리뷰 2026-08-07).
+    (document.querySelector('.viewer-wrapper') || document.body).appendChild(zoomEl);
     // 닫기만 받는다. **넣고 빼는 것은 칸의 [선택]/[제거] 가 한다** — 여기에도
     // 버튼을 두면 같은 일을 하는 버튼이 화면에 둘이 된다(사용자 지적 2026-08-07).
     zoomEl.addEventListener('click', event => {
@@ -4130,7 +4139,15 @@ export function createInteractivePanel({
     // 두고 있었고(실측), 그래서 썸네일 그리드가 2.6줄밖에 안 보였다 — 사전이
     // 자리를 뺏은 것이 아니라 팝업이 자기 자리를 안 쓴 것이었다(사용자 지적).
     // 실제 top 에서 재야 정확하다: 씬 버튼 줄이 뜨면 top 이 36px 내려간다.
-    panelMount.style.maxHeight = Math.max(240, popupFloor() - top) + 'px';
+    // **바닥선을 실제로 지킨다.** 예전에는 Math.max(240, ...) 라, 씬 태그 판을
+    // 크게 끌어 남는 높이가 240 보다 작아지면 최소 240 을 강제해 그 판 위를
+    // 덮었다 - 'floor = resultInfoPanel 위' 계약과 반대였다(Codex 리뷰 2026-08-07).
+    // 자리가 모자라면 팝업을 **위로 올려** 벌고, 그래도 모자라면 그만큼만 쓴다.
+    // 본문은 어차피 스스로 스크롤한다.
+    let floor = popupFloor();
+    if (floor - top < 240) top = Math.max(PANEL_TOP, floor - 240);
+    panelMount.style.top = top + 'px';
+    panelMount.style.maxHeight = Math.max(120, floor - top) + 'px';
     syncPopupShift();   // 팝업이 움직였으면 이미지가 비켜 준 폭도 다시 잰다
   }
 
@@ -5660,8 +5677,18 @@ export function createInteractivePanel({
         hit = true;
       });
       if (!hit) return false;
-      emitChange();          // promptEdit 까지 동기로 흘러간다
-      renderBlocks();        // 버튼 아래 칩·팝업 표시도 맞춘다
+      // **반응형 발화를 막고 낸다.** emitChange() 는 reactiveOnChange() 를 먼저
+      // 부르는데, 이 시점의 requestGenerate 는 ws.send 만 했을 뿐 `generating` 을
+      // 세우지 않았다(서버 응답이 세운다). 그래서 isGenerating() 이 false 인 채로
+      // 발화 조건을 통과해 또 생성을 요청하고, 그 요청이 다시 굴리고... 유료 생성이
+      // 연쇄로 나간다(Codex 리뷰 2026-08-07 확인).
+      rollingForGeneration = true;
+      try {
+        emitChange();        // promptEdit 까지 동기로 흘러간다
+        renderBlocks();      // 버튼 아래 칩·팝업 표시도 맞춘다
+      } finally {
+        rollingForGeneration = false;
+      }
       return true;
     },
     applySnapshotCharById,

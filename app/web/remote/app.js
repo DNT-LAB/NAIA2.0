@@ -1090,12 +1090,19 @@ function applyInteractiveModeGate(isActive) {
     promptBeforeInteractive = null;
   }
   document.body.classList.toggle('interactive-mode', !!isActive);
+  // 모드를 끄면 예약된 Auto Gen 반복도 접는다 — 딜레이 중에 나가면 Interactive
+  // 프롬프트가 아닌 것으로 한 장이 더 나간다.
+  if (!isActive) cancelInteractiveAutoGen();
   // 베이스 프롬프트에 선행·후행을 넣으려면 PE 상태가 있어야 한다. 부팅 시 일괄
   // 캐시되는 모듈이 아니라(실측) 여기서 한 번 당겨 온다 — 도착하면 onPromptEngineeringState
   // 가 캐시에 넣고 refreshPrompt() 를 불러 프롬프트가 다시 조립된다.
   if (isActive && !moduleStateCache.get('prompt_engineering')) {
     requestModuleState('prompt_engineering');
   }
+  // Auto Gen 반복 딜레이는 자동화 모듈이 들고 있는데, 그 상태는 패널을 한 번
+  // 열기 전까지 비어 있다(실측: automationRuntime === null). Interactive 는 자기
+  // 반복을 직접 몰므로 여기서 한 번 당겨 온다 — 없으면 딜레이가 늘 0 이 된다.
+  if (isActive && !automationRuntime) requestModuleState('automation');
   // Assets 바는 Interactive 의 도구다 — 모드를 끄면 같이 사라진다.
   if (interactiveAssetsPanel) {
     interactiveAssetsPanel.setVisible(!!isActive);
@@ -5622,6 +5629,21 @@ async function generateWithInteractiveSnapshot(payload) {
       overrides: buildWebGenerationOverrides(rolled, payload?.negative_prompt || ''),
     };
   }
+  // **백엔드 Auto Gen 루프를 끈다.** 이 마커는 core/auto_generation_flags.py 의
+  // AUTO_GENERATE_SUPPRESSED_FLAGS 에 이미 등록돼 있어, 붙기만 하면 서버 쪽
+  // 연쇄(_should_continue_auto_generation)가 멈춘다.
+  //
+  // 안 붙이면 서버가 Interactive 완료를 '일반 생성' 으로 보고 루프를 이어받는데,
+  // 그 루프는 random_service.generate() 로 **완전히 새 랜덤 프롬프트**를 뽑는다 —
+  // 블록으로 짠 구도가 두 번째 장부터 통째로 사라진다(실측 2026-08-07: 한 번
+  // 누르고 200초 동안 26회 발화, 프롬프트 상자가 랜덤 프롬프트로 덮임).
+  //
+  // 백엔드에 apply_interactive_generation_gate() 가 있었지만 **아무도 부르지
+  // 않았다** — 단위 테스트만 통과하고 있었다. 마커는 Studio(`studio_request`)와
+  // 같은 방식으로 프론트가 붙인다.
+  if (payload?.overrides && interactivePanel?.isActive?.()) {
+    payload.overrides.interactive_mode_request = true;
+  }
   const overrides = payload && payload.overrides;
   if (overrides && interactiveAssetsPanel && interactivePanel?.isActive?.()) {
     let chars = [];
@@ -5830,8 +5852,14 @@ function setGen(v) {
   const wasGenerating = generating;
   generating = next;
   // 반응형 생성: 생성 중에 쌓인 변화를 **여기서 한 번만** 낸다(큐잉 아님).
+  // 반응형이 냈으면 Auto Gen 반복은 건너뛴다 — 둘 다 내면 두 장이 나간다.
   if (wasGenerating && !next && interactivePanel?.notifyGenerationDone) {
-    setTimeout(() => interactivePanel.notifyGenerationDone(), 0);
+    setTimeout(() => {
+      const fired = interactivePanel.notifyGenerationDone();
+      if (!fired) scheduleInteractiveAutoGen();
+    }, 0);
+  } else if (wasGenerating && !next) {
+    setTimeout(scheduleInteractiveAutoGen, 0);
   }
   if (studioTabControl) studioTabControl.handleGenerationStatus(next);
   if (eventPresetPanel?.setGeneratingStatus) eventPresetPanel.setGeneratingStatus(next);
@@ -6026,7 +6054,10 @@ function applyOptionState(key, value, options = {}) {
   }
   control.setAttribute('aria-pressed', next ? 'true' : 'false');
 
-  if (key === 'auto_generate' && !next) clearPresetAutoGenTimer();
+  if (key === 'auto_generate' && !next) {
+    clearPresetAutoGenTimer();
+    cancelInteractiveAutoGen();   // 딜레이 대기 중이었으면 그것도 접는다
+  }
   if (key === 'prompt_fixed') {
     btnRnd.disabled = next;
     btnRnd.style.opacity = next ? '0.4' : '';
@@ -7833,6 +7864,55 @@ function liveAutomationRemainingSeconds() {
   if (!Number.isFinite(base)) return null;
   const elapsed = Math.floor((Date.now() - automationRuntimeAnchorMs) / 1000);
   return Math.max(0, base - elapsed);
+}
+
+// ---- Interactive 전용 Auto Gen 반복 ----
+// Interactive 생성은 `interactive_mode_request` 마커를 달고 나가므로 백엔드
+// Auto Gen 루프가 이어받지 않는다(generateWithInteractiveSnapshot 주석 참조).
+// 그래서 반복은 **프론트가 몬다**(사용자 결정 2026-08-07). 그래야 매 장마다
+// generateWithInteractiveSnapshot 을 다시 타고, 축 프리셋/Rating 랜덤이 새로
+// 굴려진다 — 서버 루프는 직전 params 를 복사하므로 첫 굴림에 고정됐다.
+let interactiveAutoGenTimer = null;
+
+function cancelInteractiveAutoGen() {
+  if (interactiveAutoGenTimer) {
+    clearTimeout(interactiveAutoGenTimer);
+    interactiveAutoGenTimer = null;
+  }
+}
+
+/** 자동화 패널의 딜레이(초). '무작위 ±50%' 를 켜면 50~150% 로 흔든다. */
+function interactiveAutoGenDelayMs() {
+  const m = automationRuntime || {};
+  let sec = Number(m.delay);
+  if (!Number.isFinite(sec) || sec < 0) sec = 0;
+  if (m.random_delay && sec > 0) sec = sec * (0.5 + Math.random());
+  return Math.round(sec * 1000);
+}
+
+function scheduleInteractiveAutoGen() {
+  cancelInteractiveAutoGen();
+  if (!interactivePanel?.isActive?.()) return;
+  if (!getOptionChecked('auto_generate')) return;
+  if (generating) return;
+  interactiveAutoGenTimer = setTimeout(() => {
+    interactiveAutoGenTimer = null;
+    // 딜레이 사이에 Auto Gen 을 껐거나 모드를 빠져나갔으면 내지 않는다 —
+    // 사용자가 멈추라고 한 뒤에 한 장 더 나가면 그게 제일 놀랍다.
+    if (!interactivePanel?.isActive?.()) return;
+    if (!getOptionChecked('auto_generate')) return;
+    if (generating) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // 수동 Generate 와 **같은 방식**으로 조립한다(app.js 의 cmd === 'generate' 분기).
+    // rollComposition() 이 프롬프트를 다시 쓰면 그 안에서 overrides 를 다시 만든다.
+    const prompt = promptEdit.value;
+    const negative = negEdit ? negEdit.value : '';
+    void generateWithInteractiveSnapshot({
+      prompt,
+      negative_prompt: negative,
+      overrides: buildWebGenerationOverrides(prompt, negative),
+    });
+  }, interactiveAutoGenDelayMs());
 }
 
 function automationLiveState() {

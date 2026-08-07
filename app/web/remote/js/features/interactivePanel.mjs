@@ -938,12 +938,16 @@ export function createInteractivePanel({
     requestGeneration();
   }
 
-  /** 생성이 끝나면 app.js 가 부른다. 모아 둔 변화가 있으면 그때 한 번 낸다. */
+  /** 생성이 끝나면 app.js 가 부른다. 모아 둔 변화가 있으면 그때 한 번 낸다.
+   *
+   *  **발화했는지 돌려준다.** Auto Gen 반복도 같은 시점에 걸려 있어서, 여기서
+   *  이미 한 장 냈는데 그쪽이 또 내면 한 번 누르고 두 장이 나간다. */
   function reactiveOnGenerationDone() {
-    if (!reactive || !active || !reactivePending) return;
+    if (!reactive || !active || !reactivePending) return false;
     reactivePending = false;
     reactiveLastPrompt = reactiveSignature();
     requestGeneration();
+    return true;
   }
 
   function ensureSceneMount() {

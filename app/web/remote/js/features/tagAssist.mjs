@@ -1619,12 +1619,28 @@ export function createTagAssistController({
     const matchesPreset = q && q.toLowerCase().startsWith('preset:') && m.query === q;
     if (!matchesWc && !matchesChunk && !matchesVibeCluster && !matchesPreset && m.query !== q) return false;
     const target = acTarget || promptEdit;
-    let results = (m.results || []).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
+    const dropRow = r => {
+      if (!target) return false;
+      if (target._excludeE621Autocomplete && r.cat === 'e621') return true;
+      const cats = target._excludeAutocompleteCats;
+      if (!cats || !cats.length) return false;
+      const cat = String(r.cat || '').toLowerCase();
+      if (cat) return cats.includes(cat);
+      // **`cat` 이 비어 있는 항목이 있다.** 사전이 고르지 않아서 `hakurei reimu` 는
+      // `cat='character'` 인데 `sendai hakurei no miko (m.u.g.e.n)` 은 `cat=''` 에
+      // `group='캐릭터 > 동방 프로젝트'` 다(실측). 빈 경우에만 그룹으로 보완한다 —
+      // `cat` 이 있으면 그쪽을 믿는다(그래야 `저작권 > 캐릭터` 같은 그룹을 오인하지 않는다).
+      const group = String(r.group || '');
+      if (cats.includes('character') && /^캐릭터/.test(group)) return true;
+      if (cats.includes('artist') && /^작가/.test(group)) return true;
+      return false;
+    };
+    let results = (m.results || []).filter(r => !dropRow(r));
     const secondaryResults = (
       Array.isArray(m.secondaryResults) ? m.secondaryResults :
       (Array.isArray(m?.preset?.secondaryResults) ? m.preset.secondaryResults :
       (Array.isArray(m.secondarySuggestions) ? m.secondarySuggestions : []))
-    ).filter(r => !(target && target._excludeE621Autocomplete && r.cat === 'e621'));
+    ).filter(r => !dropRow(r));
     // 빈 쿼리(`__` 전체 나열 등)는 기본값('')과 우연히 일치하므로 가드에서 제외.
     if (!isTranslatedResponse && m.query && m.query === visibleTranslatedAutocompleteQuery) {
       return true;
@@ -2683,6 +2699,11 @@ export function createTagAssistController({
   function bindTagAssist(textarea, options = {}) {
     if (!textarea) return;
     textarea._excludeE621Autocomplete = !!options.excludeE621;
+    // 카테고리 통째로 빼기. Interactive 의 글로벌 태그 칸이 캐릭터·아티스트를
+    // 뺀다 — 그 자리는 그림 전체에 걸리는 태그용이고, 인물과 작가는 캐릭터
+    // 슬롯이 맡는다. 값은 백엔드의 `_cat`(artist/character/copyright/e621…).
+    textarea._excludeAutocompleteCats = Array.isArray(options.excludeCats)
+      ? options.excludeCats.map(c => String(c).toLowerCase()) : null;
     const imeState = {
       composing: false,
       active: false,

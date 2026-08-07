@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260807i-hist1">
+<link rel="stylesheet" href="style.css?v=20260807j-hist1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -829,6 +829,9 @@
           <div class="result-info-resize" id="resultInfoResize" title="Drag to resize generation info"></div>
           <div class="result-info-header">
             <span>Generation Info</span>
+            <!-- Interactive 글로벌 편집기의 개수. 편집기가 자기 제목 줄을 갖고 있었는데
+                 바로 위가 이 줄이라 제목이 두 번 나왔다(사용자 지적). -->
+            <span class="ia-ge-badge" id="iaGlobalCount" hidden></span>
             <div class="result-enhance-controls">
               <button class="result-enhance-btn nai-director-btn" id="naiDirectorBtn" onclick="openNaiDirector()" title="NAI Director Tools (현재 결과 변형)" disabled>Director</button>
               <button class="result-enhance-btn" id="resultEnhanceBtn" onclick="requestResultEnhance()" disabled>Enhance</button>
@@ -1248,6 +1251,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260807k-ia183"></script>
+<script src="app.js?v=20260807m-ia183"></script>
 </body>
 </html>

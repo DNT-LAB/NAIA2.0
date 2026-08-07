@@ -22749,23 +22749,35 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-global-editor[hidden] { display: none; }
 
-.ia-ge-head { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
-.ia-ge-title {
+/* 개수 배지는 편집기 밖(GENERATION INFO 줄)에 산다. 편집기가 자기 제목 줄을
+   갖고 있었는데 바로 위가 그 줄이라 제목이 두 번 나왔다. */
+.ia-ge-badge {
   font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-  letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim);
+  letter-spacing: 0.5px; color: var(--accent-glow);
+  padding: 1px 6px; border-radius: 8px;
+  background: rgba(124,106,239,0.14);
+  border: 1px solid rgba(124,106,239,0.3);
 }
-.ia-ge-n {
-  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
-  color: var(--accent-glow); font-variant-numeric: tabular-nums;
+.ia-ge-badge[hidden] { display: none; }
+
+/* 칩과 자유 입력은 **한 상자**다. 테두리가 둘이면 같은 것을 다루는데 남남처럼
+   보인다(사용자 지적). 상자 아무 데나 누르면 입력으로 들어간다. */
+.ia-ge-box {
+  flex: 1 1 auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 6px 7px;
+  border: 1px solid var(--border-dim); border-radius: 7px;
+  background: var(--bg-deep);
+  cursor: text;
+  overflow: hidden;
 }
-.ia-ge-spring { flex: 1; }
-.ia-ge-hint { font-size: 9px; color: var(--text-dim); }
-.ia-ge-empty { font-size: 10px; color: var(--text-dim); font-style: italic; }
+.ia-ge-box:focus-within { border-color: var(--accent); }
 
 .ia-ge-chips {
   display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start;
-  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  flex: 0 1 auto; min-height: 0; overflow-y: auto;
 }
+.ia-ge-chips:empty { display: none; }
 
 /* 칩은 중립색이다. 축은 **왼쪽 띠**로만 알린다 — 9개가 서로 다른 배경을 가지면
    성인의 적색이 오류로, 배경의 녹색이 성공으로 읽힌다. */
@@ -22802,14 +22814,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-gchip-x:hover { color: #ffb4b4; }
 
 .ia-ge-free {
-  flex: 0 0 auto;
-  width: 100%; resize: vertical; min-height: 38px;
-  padding: 6px 8px;
-  border: 1px solid var(--border-dim); border-radius: 6px;
-  background: var(--bg-deep); color: var(--text-primary);
+  flex: 1 1 auto; min-height: 34px;
+  width: 100%; resize: none;
+  padding: 2px 1px;
+  border: 0; border-radius: 0;
+  background: none; color: var(--text-primary);
   font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
 }
-.ia-ge-free:focus { outline: none; border-color: var(--accent); }
+.ia-ge-free:focus { outline: none; }
 .ia-ge-free::placeholder { color: var(--text-dim); font-style: italic; }
 
 /* 글로벌 편집기가 떠 있는 동안의 최소 높이. 머리 + 칩 두 줄 + 자유 입력이 들어갈

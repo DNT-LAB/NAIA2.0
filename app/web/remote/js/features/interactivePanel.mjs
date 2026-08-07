@@ -966,16 +966,12 @@ export function createInteractivePanel({
       </span>`;
     }).join('');
     return `
-      <div class="ia-ge-head">
-        <span class="ia-ge-title">글로벌 태그</span>
-        <span class="ia-ge-n">${list.length || ''}</span>
-        <span class="ia-ge-spring"></span>
-        <span class="ia-ge-hint">위 버튼으로 넣고, 아래 칸에 자유롭게 적습니다</span>
-      </div>
-      <div class="ia-ge-chips">${chips || '<span class="ia-ge-empty">아직 없습니다</span>'}</div>
-      <textarea class="ia-ge-free" id="iaGlobalFree" rows="2" spellcheck="false"
-        placeholder="자유 입력 — 여기 적은 것은 그대로 프롬프트에 붙습니다"
-      >${escHtml(state.freeText || '')}</textarea>`;
+      <div class="ia-ge-box" id="iaGlobalBox">
+        <div class="ia-ge-chips">${chips}</div>
+        <textarea class="ia-ge-free" id="iaGlobalFree" rows="1" spellcheck="false"
+          placeholder="${list.length ? '태그를 더 적습니다' : '태그를 적거나 위 버튼으로 넣습니다'}"
+        >${escHtml(state.freeText || '')}</textarea>
+      </div>`;
   }
 
   /** 편집기를 보일지 말지. Interactive 가 켜져 있고 결과 탭일 때만 자리를 바꾼다. */
@@ -990,6 +986,7 @@ export function createInteractivePanel({
     // 사용자가 늘려 둔 높이는 그대로 존중된다(min-height 라 더 크면 그 값이 이긴다).
     const panel = document.getElementById('resultInfoPanel');
     if (panel) panel.classList.toggle('has-ia-editor', on);
+    if (!on) syncGlobalCountBadge(0);
     // 저 칸의 주인은 히스토리다 — 내용은 건드리지 않고 보이기만 바꾼다.
     info.style.display = on ? 'none' : '';
     if (on) renderGlobalEditor();
@@ -997,12 +994,23 @@ export function createInteractivePanel({
 
   let globalEditorPeek = false;   // '생성 정보 보기'로 잠시 넘겨 둔 상태
 
+  /** 개수는 편집기 밖(GENERATION INFO 줄)의 배지가 받는다 — 바로 위에 제목
+   *  줄이 있는데 편집기가 자기 제목을 또 달아 두 번 나왔다(사용자 지적). */
+  function syncGlobalCountBadge(n) {
+    const badge = document.getElementById('iaGlobalCount');
+    if (!badge) return;
+    const on = !document.getElementById('interactiveGlobalEditor')?.hidden;
+    badge.hidden = !on;
+    badge.textContent = on ? `글로벌 태그 ${n}` : '';
+  }
+
   function renderGlobalEditor() {
     const host = document.getElementById('interactiveGlobalEditor');
     if (!host || host.hidden) return;
     // 타이핑 중에는 다시 그리지 않는다 — 커서와 IME 조합이 날아간다.
     if (document.activeElement && document.activeElement.id === 'iaGlobalFree') return;
     host.innerHTML = globalEditorHtml();
+    syncGlobalCountBadge(globalChipList().length);
     bindGlobalEditor(host);
   }
 
@@ -1018,8 +1026,26 @@ export function createInteractivePanel({
         emitChange();
       });
     });
+    // 상자 아무 데나 누르면 입력으로 들어간다. [x] 와 입력 자신은 뺀다 —
+    // [x] 를 빼지 않으면 지우면서 동시에 포커스가 옮겨가 화면이 튄다.
+    const box = host.querySelector('#iaGlobalBox');
     const free = host.querySelector('#iaGlobalFree');
+    if (box && free) {
+      box.addEventListener('pointerdown', event => {
+        if (event.target.closest('.ia-gchip-x')) return;
+        if (event.target === free) return;
+        event.preventDefault();                  // 텍스트 선택 대신 포커스
+        free.focus();
+        // 캐럿을 끝으로 — 칩을 눌러 들어왔으면 이어 적는 것이 자연스럽다.
+        free.setSelectionRange(free.value.length, free.value.length);
+      });
+    }
     if (!free) return;
+    // 표준 자동완성. e621 은 켜 두고 **캐릭터·아티스트만** 뺀다 — 여기는 그림
+    // 전체에 걸리는 자리라 인물·작가는 캐릭터 슬롯이 맡는다(사용자 지정).
+    if (typeof bindTagAssist === 'function') {
+      try { bindTagAssist(free, {excludeCats: ['character', 'artist']}); } catch (_) {}
+    }
     free.addEventListener('input', () => {
       // 반응형 생성은 타이핑 중에 멈춘다 — 글자마다 유료 생성이 나가면 안 된다.
       reactiveTypingSlot = free;

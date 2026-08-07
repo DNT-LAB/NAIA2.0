@@ -4573,7 +4573,10 @@ body.character-viewer-result-spotlight:not(:has(#rightTabCharacters.active))::be
 .frozen-wc-bar {
   position: absolute;
   top: 10px;
-  left: 10px;
+  /* .ia-assets 와 같은 이유로 팝업만큼 비켜선다 — 왼쪽에 붙는 오버레이는 전부
+     팝업 뒤에 숨는다. 절대배치라 .viewer 의 padding 으로는 안 밀린다. */
+  left: calc(10px + var(--ia-shift, 0px));
+  transition: left 0.16s ease;
   z-index: 16;
   width: min(320px, calc(100% - 96px));
   max-height: min(46%, 420px);
@@ -20940,6 +20943,53 @@ body.detached-module .mod-grid-3 {
   color: var(--text-primary);
 }
 
+/* --- 확대 미니 팝업 ---
+   썸네일을 2/3 로 줄이면서 작아서 안 보이는 칸이 생겼다. 누르면 크게 보여 준다
+   (사용자 지시 2026-08-07). **이미지를 가리는 것은 감수한 설계다** — 대신 팝업
+   오른쪽에 세워 그리드는 가리지 않는다(고른 것과 원본을 나란히 보라고). */
+.ia-zoom {
+  position: fixed; z-index: var(--z-toast);
+  width: 260px;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px;
+  background: var(--bg-surface); border: 1px solid var(--accent);
+  border-radius: 12px; box-shadow: 0 10px 38px rgba(0,0,0,0.62);
+}
+.ia-zoom[hidden] { display: none; }
+.ia-zoom-head { display: flex; align-items: center; gap: 6px; }
+.ia-zoom-tag {
+  flex: 1; min-width: 0;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-zoom-x {
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
+  border: 0; background: none; color: var(--text-dim);
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+.ia-zoom-x:hover { color: var(--text-primary); }
+.ia-zoom-img {
+  width: 100%; aspect-ratio: 1; object-fit: cover;
+  border-radius: 8px; background: rgba(255,255,255,0.03); display: block;
+}
+.ia-zoom-none {
+  padding: 40px 0; text-align: center;
+  font-size: 11px; color: var(--text-dim); font-style: italic;
+}
+.ia-zoom-desc {
+  font-size: 10.5px; line-height: 1.5; color: var(--text-muted);
+  max-height: 66px; overflow-y: auto;
+}
+.ia-zoom-act {
+  padding: 8px 0; border: 0; border-radius: 8px;
+  font-family: var(--font-display); font-size: 13px; font-weight: 700;
+  color: #fff; letter-spacing: 0.3px; cursor: pointer;
+}
+.ia-zoom-act[data-act="on"]  { background: linear-gradient(135deg, #218a52, #46cf88); }
+.ia-zoom-act[data-act="off"] { background: linear-gradient(135deg, #a8486f, #e58ab4); }
+.ia-zoom-act:hover { filter: brightness(1.12); }
+
 .ia-aside-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .ia-aside-chip {
   font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
@@ -20954,11 +21004,16 @@ body.detached-module .mod-grid-3 {
    것인데 구조적으로 불편했다(사용자 판단): 무엇을 하든 두 번 눌러야 하고, 캡션이
    상태(태그 이름)와 행동(추가/제외)을 번갈아 맡아 읽기 어려웠다.
    이제 캡션은 항상 태그 이름이고 `선택됨` 배지가 상태를, 이 버튼이 행동을 맡는다. */
-/* 가운데에 두니 그림의 주제(얼굴·상의)를 덮어 무엇을 고르는지 안 보였다 —
-   오른쪽 아래로 몬다. 잘 보이게 조금 키우고 그림자도 세운다. */
+/* **가로 가운데, 아래쪽**에 둔다(사용자 지시 2026-08-07: "가운데 정렬하고 너비를
+   조금 늘립시다"). 세로까지 가운데로 올리지는 않는다 — 예전에 그렇게 뒀더니
+   그림의 주제(얼굴·상의)를 덮어 무엇을 고르는지 안 보였다. 아래에 붙이면 가운데
+   정렬이면서 주제는 살아 있다. 썸네일이 작아진 뒤로 오른쪽 아래 구석은 너무
+   좁아 눌리지도 않았다. */
 .ia-cell-act {
-  position: absolute; right: 6px; bottom: 6px;
-  padding: 5px 14px; border-radius: 7px; white-space: nowrap;
+  position: absolute; left: 50%; right: auto; bottom: 6px;
+  transform: translateX(-50%);
+  min-width: 74px; text-align: center;
+  padding: 5px 18px; border-radius: 7px; white-space: nowrap;
   font-family: var(--font-display); font-size: 12px; font-weight: 700;
   color: #fff; letter-spacing: 0.3px; pointer-events: none;
   opacity: 0; transition: opacity 0.12s;
@@ -20989,10 +21044,15 @@ body.detached-module .mod-grid-3 {
 .ia-gloss-tag { font-family: var(--font-mono); font-size: 12px; color: var(--text, #e6e9ef); word-break: break-word; }
 .ia-gloss-desc { font-size: 12px; color: var(--text-dim, #9aa4b2); line-height: 1.5; }
 /* 버튼은 셀과 같은 위치 규칙을 쓴다 — 행 오른쪽에 고정, 호버 시에만 눌린다. */
-.ia-gloss-row .ia-cell-act { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); }
+/* 가로로 긴 행이라 여기서는 오른쪽 고정이 맞다. 셀 규칙이 left:50% 로 바뀌었으니
+   되돌려 준다 — 안 그러면 두 규칙이 겹쳐 버튼이 행 한가운데로 튄다. */
+.ia-gloss-row .ia-cell-act {
+  position: absolute; left: auto; right: 8px; top: 50%; bottom: auto;
+  transform: translateY(-50%);
+}
 @media (max-width: 640px) {
   .ia-gloss-row { grid-template-columns: 1fr; gap: 2px; padding-right: 10px; padding-bottom: 26px; }
-  .ia-gloss-row .ia-cell-act { top: auto; bottom: 6px; transform: none; }
+  .ia-gloss-row .ia-cell-act { top: auto; bottom: 6px; left: auto; right: 8px; transform: none; }
 }
 .ia-aside-thumb-img { position: relative; display: block; }
 /* 축 목록을 전폭 아코디언에서 상단 탭 그리드로. 접혀 있어도 축 하나가 한 줄을
@@ -21858,7 +21918,13 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    펼쳐도 스테이지 높이의 절반을 넘지 않는다. */
 .ia-assets {
   position: absolute;
-  left: 12px;
+  /* 팝업이 열리면 이미지와 **같이** 오른쪽으로 비켜선다. 이미지는 .viewer 의
+     padding-left 로 밀리는데, 절대배치는 padding 이 아니라 **패딩 상자 모서리**를
+     기준으로 잡히므로 그것만으로는 안 움직이고 팝업 뒤에 숨었다(사용자 지적
+     2026-08-07: "C1, ASSETS 와 같은 버튼이 팝업 윈도우에 숨습니다").
+     `--ia-shift` 는 #resultViewer 에 붙으므로 여기로 상속된다. */
+  left: calc(12px + var(--ia-shift, 0px));
+  transition: left 0.16s ease;
   bottom: 12px;
   z-index: 6;
   max-width: min(560px, calc(100% - 24px));

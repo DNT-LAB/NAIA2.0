@@ -21784,19 +21784,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* **늘어나지 않게 한다.** 2열 그리드라 옆 칸에 이미지가 있으면 행 높이가 190px 가
    되고, stretch 기본값 때문에 글자 칩이 그 높이만큼 빈 상자가 된다(사용자 지적
    2026-08-01 — 없앤 줄 알았던 빈 썸네일이 이렇게 다시 보였다). */
-.ia-aside-thumb.is-plain {
-  flex-direction: row; align-items: center; min-height: 26px; align-self: start;
-}
-/* 여기도 라벨만이다. `.ia-aside-thumb.is-plain span`(0,2,1)은
-   `.ia-cell-act[data-act]`(0,2,0)보다 세서 **버튼의 초록/분홍 배경까지 지웠다** —
-   글자 칩에서는 [선택]이 배경 없는 흰 글씨로 떠 있었다. */
-.ia-aside-thumb.is-plain > span:not(.ia-cell-act) {
-  background: none; text-align: left; padding: 5px 6px;
-}
-.ia-aside-thumb.is-plain .ia-cell-act {
-  position: static; opacity: 0; flex: 0 0 auto; margin-left: auto; padding: 2px 6px;
-}
-.ia-aside-thumb.is-plain:hover .ia-cell-act { opacity: 1; }
+/* `.is-plain`(그림 없는 글자 칩) 규칙을 뗐다. 그림 없는 항목은 아예 내지 않기로
+   했다(사용자 지시 2026-08-07) — 옆에 그림 칩이 나란히 서면 빈칸처럼 보였다.
+   되살릴 일이 있으면 recThumbsHtml 의 필터와 함께 되돌린다. */
 
 /* ── ALT (원작과 다른 버전) ────────────────────────────────────────────────
    캐릭터 슬롯 오른쪽, [프리셋 선택] 왼쪽에 붙는다. `alternate *` 는 그림으로

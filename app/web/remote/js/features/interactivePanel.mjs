@@ -3160,21 +3160,27 @@ export function createInteractivePanel({
             : '<div class="ia-zoom-none">그림이 아직 없습니다</div>'}
       ${tip && tip !== tag ? `<div class="ia-zoom-desc">${escHtml(tip)}</div>` : ''}`;
     el.hidden = false;
-    positionZoom();
+    // 높이를 알아야 가운데를 맞출 수 있다 — 내용이 붙은 뒤에 잰다.
+    positionZoom(cell);
   }
 
-  /** 자리는 **고정**이다(사용자 지시 2026-08-07). 예전에는 누른 칸에 눈높이를
-   *  맞췄는데, 칸마다 위아래로 뛰어 시선이 따라다녀야 했다. 팝업 오른쪽 위에
-   *  못박아 두면 어디를 눌러도 같은 자리에 나온다. */
-  function positionZoom() {
+  /** 가로는 팝업 오른쪽에 고정, **세로는 누른 칸의 눈높이**에 맞춘다.
+   *  팝업 맨 위에 못박아 뒀더니 아래쪽 칸을 누를 때 시선이 화면을 가로질러
+   *  올라가야 했다(사용자 지적 2026-08-07). 화면 밖으로는 나가지 않게 가둔다. */
+  function positionZoom(cell) {
     if (!zoomEl || zoomEl.hidden) return;
     const box = panelMount.getBoundingClientRect();
     const w = zoomEl.offsetWidth || 260;
+    const h = zoomEl.offsetHeight || 300;
     // 팝업 오른쪽. 자리가 없으면 왼쪽으로 뒤집는다(그래도 없으면 화면 안으로 민다).
     let left = box.right + 10;
     if (left + w > window.innerWidth - 8) left = Math.max(8, box.left - w - 10);
     zoomEl.style.left = Math.round(left) + 'px';
-    zoomEl.style.top = Math.round(Math.max(8, box.top)) + 'px';
+    // 누른 칸의 세로 가운데와 확대창의 가운데를 맞춘다.
+    const c = cell && cell.getBoundingClientRect();
+    const mid = c ? (c.top + c.height / 2) : (box.top + h / 2);
+    const top = Math.min(Math.max(8, mid - h / 2), window.innerHeight - h - 8);
+    zoomEl.style.top = Math.round(Math.max(8, top)) + 'px';
   }
 
   function markInspect() {
@@ -3376,23 +3382,27 @@ export function createInteractivePanel({
   }
 
   function recThumbsHtml(list) {
-    return list.filter(o => !isColorOrSizeTag(typeof o === 'string' ? o : o.tag)).map(o => {
+    return list.filter(o => {
+      const t = typeof o === 'string' ? o : o.tag;
+      if (isColorOrSizeTag(t)) return false;
+      // **그림이 없는 것은 아예 내지 않는다**(사용자 지시 2026-08-07: "숨김처리
+      // 하거나 제거해주세요"). 사전 칩에 나오는 태그의 상당수는 애초에 그리드
+      // 태그가 아니라 그림이 없다(실측: 빈칸 2,261종 전부가 축 밖 — 생성 누락이
+      // 아니라 표시 문제였다). 예전에는 글자만 있는 칩으로 그렸는데, 옆에 그림
+      // 칩이 나란히 서면 빈칸처럼 보였다.
+      // 되살리려면 이 한 줄을 빼고 아래 `plain` 분기를 되돌리면 된다.
+      return !!thumbSrcOf(t);
+    }).map(o => {
       const t = typeof o === 'string' ? o : o.tag;
       const match = typeof o === 'object' && o.match;
       const src = thumbSrcOf(t);
-      // 그림이 없을 때 검은 타일을 그리던 자리다. 사전 칩에 나오는 태그의 상당수는
-      // **애초에 그리드 태그가 아니다**(실측: 빈칸 2,261종 전부가 축 밖. 축에 선언만
-      // 되고 안 만들어진 것은 0종 — 즉 생성 누락이 아니라 표시 문제였다).
-      // 색·무늬·크기는 위에서 걸러 냈고, 남은 것은 그림 자리를 없애고 글자 칩으로 그린다.
-      const plain = !src;
-      const img = src
-        ? `<img src="${escHtml(src)}" alt="" loading="lazy" decoding="async">` : '';
+      const img = `<img src="${escHtml(src)}" alt="" loading="lazy" decoding="async">`;
       const on = typeof o === 'object' && o.on;
       // 그리드와 같은 규칙 — 라벨은 항상 태그 이름이고, 행동은 호버 버튼이 맡는다.
       // 그리드 셀과 같은 블러 규칙을 적용한다. 전에는 `is-sensitive` 가 여기 안 붙어서
       // Safe Viewer 가 On 이어도 **추천 칩 쪽은 그대로 노출됐다**(Safe Viewer 를 붙이며
       // 발견, 2026-07-30). 가리는 곳이 한 군데라도 새면 가리는 의미가 없다.
-      const cls = 'ia-aside-thumb' + (plain ? ' is-plain' : '')
+      const cls = 'ia-aside-thumb'
         + (match ? ' match' : '') + (on ? ' on' : '')
         + (isSensitive(t) ? ' is-sensitive' : '')
         + (inspectTag === t ? ' is-inspect' : '');
@@ -3401,7 +3411,7 @@ export function createInteractivePanel({
       const act = `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
       return `<div class="${cls}" data-advice-add="${escHtml(t)}"` +
         ` title="${escHtml(tip)}">` +
-        (plain ? act : `<span class="ia-aside-thumb-img">${img}${act}</span>`) +
+        `<span class="ia-aside-thumb-img">${img}${act}</span>` +
         `<span>${escHtml(t)}</span></div>`;
     }).join('');
   }

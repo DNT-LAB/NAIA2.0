@@ -297,6 +297,15 @@ export function createInteractivePanel({
 
   let active = false;
   let openId = null;
+  /** 씬 슬롯의 빈 상태. **손으로 적지 않는다** — 예전에는 4축만 적혀 있었고
+   *  나머지 4축(동물·효과기호·다인원 자세·성인)은 키가 아예 없었다. 그 탓에
+   *  `importState` 가 초기 키만 훑어 저장해 둔 태그를 못 살렸고, 곧이어 빈 값으로
+   *  다시 저장해 **원본까지 지웠다**(실측: 심어 둔 cat/sparkle/hug 가 새로고침
+   *  한 번에 사라지고 저장값이 비었다). 목록에서 파생하면 축을 더해도 안 샌다. */
+  function emptySceneSlots() {
+    return Object.fromEntries(SCENE_SLOTS.map(slot => [slot.id, []]));
+  }
+
   let queryToken = 0;
   let charSeq = 0;             // 캐릭터 고유 id 카운터(삭제해도 재사용 안 함 → id 충돌/stale panelContext 방지)
 
@@ -304,7 +313,7 @@ export function createInteractivePanel({
     rating: 's',
     person: '1girl_solo',
     chars: [newCharacter(true)],
-    slots: {composition: [], composition_fx: [], background: [], etc: []},
+    slots: emptySceneSlots(),
     composition: newComposition(),   // 구도 3축 콤보 상태(자유 태그와 별도, 프롬프트에선 합쳐짐)
   };
 
@@ -4664,10 +4673,16 @@ export function createInteractivePanel({
       try {
         if (Array.isArray(saved.chars) && saved.chars.length) applySnapshotChars(saved.chars);
         if (saved.slots && typeof saved.slots === 'object') {
-          for (const key of Object.keys(state.slots)) {
-            const v = saved.slots[key];
-            state.slots[key] = Array.isArray(v) ? v.map(String) : [];
+          // **아는 축 + 저장분에 있는 키**를 모두 훑는다. 아는 축만 훑으면 나중에
+          // 축이 늘었을 때 옛 저장분이 조용히 잘리고, 저장분 키만 훑으면 지금
+          // 있는 축이 빈 배열로 초기화되지 않아 이전 값이 남는다.
+          const next = emptySceneSlots();
+          for (const [key, v] of Object.entries(saved.slots)) {
+            // 모르는 키도 배열이면 그대로 안고 간다 — 옛 버전으로 잠깐 돌아갔다
+            // 오는 것만으로 태그가 증발하면 안 된다.
+            if (Array.isArray(v)) next[key] = v.map(String);
           }
+          state.slots = next;
         }
         if (saved.composition && typeof saved.composition === 'object') {
           state.composition = {...newComposition(), ...saved.composition};

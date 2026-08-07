@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Interactive 팝업 — 좌측 카테고리 배치안 비교</title>
+<!--
+  목업 전용. 앱에 적용하지 않았다(사용자 요청).
+
+  썸네일은 돌고 있는 백엔드(127.0.0.1:7244)에서 그대로 가져온다.
+  데이터는 자세(pose_action) 축 실측: 카테고리 22개.
+
+  A/B/C 는 "카테고리를 왼쪽에 세운다"는 같은 아이디어의 세 가지 해석이다.
+  적어주신 표가 어느 쪽인지 짚어 주시면 그것으로 만든다.
+-->
+<style>
+  :root {
+    --bg-deep: #0a0a10; --bg-surface: #12121a; --bg-panel: #16161f;
+    --border-dim: #24242e; --border: #2e2e3a; --border-glow: #3a3a4a;
+    --text-primary: #e8e8f0; --text-secondary: #b8b8c8; --text-muted: #8a8a9a;
+    --text-dim: #63636f; --accent: #7c6aef; --accent-glow: #a394ff;
+    --font-mono: 'JetBrains Mono', Consolas, monospace;
+    --font-display: 'Outfit', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px; background: #07070c; color: var(--text-primary);
+    font-family: var(--font-display);
+  }
+  .row { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+  .col { display: flex; flex-direction: column; gap: 8px; }
+  .cap { font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); }
+  .cap b { color: var(--accent-glow); }
+  .tagline { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+  .tagline small { display: block; font-weight: 400; font-size: 11.5px;
+                   color: var(--text-muted); margin-top: 2px; }
+
+  .panel {
+    background: var(--bg-surface); border: 1px solid var(--border-glow);
+    border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    display: flex; flex-direction: column; overflow: hidden;
+    height: 700px; width: 468px;
+  }
+  .panel.now { width: 380px; }
+
+  .head { display: flex; align-items: center; gap: 8px; padding: 10px 13px 9px;
+          border-bottom: 1px solid var(--border-dim); flex-shrink: 0; }
+  .title { font-size: 13.5px; font-weight: 700; }
+  .sub { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
+         border: 1px solid var(--border-dim); border-radius: 4px; padding: 2px 6px; }
+  .x { margin-left: auto; width: 24px; height: 24px; border-radius: 7px;
+       border: 1px solid var(--border-dim); background: none; color: var(--text-dim);
+       font-size: 14px; cursor: pointer; }
+  .search { margin: 9px 13px 2px; flex-shrink: 0; display: flex; align-items: center;
+            border: 1px solid var(--border-dim); border-radius: 8px; padding: 7px 10px;
+            background: var(--bg-deep); }
+  .search span { flex: 1; font-family: var(--font-mono); font-size: 10.5px;
+                 color: var(--text-dim); font-style: italic; }
+
+  /* 지금 — 가로 띠 */
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 13px 0; flex-shrink: 0; }
+  .tab { display: inline-flex; align-items: center; gap: 5px;
+         padding: 3px 10px; border: 1px solid var(--border-dim); border-radius: 20px;
+         background: none; color: var(--text-secondary);
+         font-family: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
+  .tab .n { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
+  .tab.on { background: rgba(124,106,239,.22); border-color: var(--accent); color: #fff; }
+
+  /* 공통 셀 */
+  .cell { border: 1px solid var(--border-dim); border-radius: 7px; overflow: hidden;
+          background: var(--bg-panel); }
+  .cell img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+              background: rgba(255,255,255,.03); }
+  /* 백엔드가 안 닿는 환경 — 빗금으로 자리만 표시한다. 배치를 판단하는 목업이라
+     그림이 없다고 칸까지 사라지면 볼 것이 없다. */
+  .cell img.miss {
+    background: repeating-linear-gradient(45deg,
+      rgba(255,255,255,.05) 0 8px, rgba(255,255,255,.015) 8px 16px);
+  }
+  .cell .cp { display: block; padding: 4px 5px; font-family: var(--font-mono);
+              font-size: 9px; color: var(--text-muted); text-align: center;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cell.on { border: 2px solid var(--accent); background: rgba(124,106,239,.14); }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+           grid-auto-rows: max-content; align-content: start;
+           min-height: 0; overflow-y: auto; padding-right: 4px; }
+
+  /* ── A: 왼쪽이 **따로 스크롤되는** 좁은 열 ─────────────────── */
+  .bodyA { flex: 1; min-height: 0; display: grid; grid-template-columns: 96px 1fr;
+           gap: 8px; padding: 9px 12px 12px; }
+  .vtabs { min-height: 0; overflow-y: auto; display: flex; flex-direction: column;
+           gap: 3px; padding-right: 4px; border-right: 1px solid var(--border-dim); }
+  /* **칩 하나가 두 줄이다**(사용자 지정): 이름이 위(조금 큰 글씨), 개수가 아래
+     (조금 작은 글씨). 한 줄에 이름과 개수를 나란히 두면 좁은 열에서 이름이
+     밀려 잘린다 — 세로로 쌓으면 이름이 열 폭을 다 쓰므로 잘릴 일이 없다. */
+  .vtab { display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+          text-align: left;
+          padding: 5px 8px; border: 1px solid transparent; border-radius: 6px;
+          background: none; color: var(--text-secondary);
+          font-family: inherit; cursor: pointer; }
+  .vtab .nm { font-size: 11.5px; line-height: 1.3;
+              white-space: normal; word-break: keep-all; }
+  .vtab .n { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+             line-height: 1.2; }
+  .vtab.on { background: rgba(124,106,239,.2); border-color: var(--accent); color: #fff; }
+
+  /* ── B: **한 격자 4열.** 1열=카테고리, 2~4열=썸네일. 같이 스크롤 ── */
+  .bodyB { flex: 1; min-height: 0; overflow-y: auto; padding: 9px 12px 12px; }
+  .gridB { display: grid; grid-template-columns: 108px repeat(3, 1fr); gap: 6px;
+           align-items: start; }
+  /* **글자를 자르지 않는다**(사용자 지시). 말줄임 대신 줄을 넘긴다 — `들고 있는 것 2`
+     같은 이름이 `들고 있는 ...` 으로 죽으면 무엇인지 알 수가 없다. 칩이 두 줄이
+     되어도 같은 행의 썸네일(약 140px)보다 낮아 행 높이는 안 늘어난다. */
+  .btab { display: flex; align-items: flex-start; gap: 5px; text-align: left;
+          padding: 6px 8px; border: 1px solid var(--border-dim); border-radius: 6px;
+          background: rgba(255,255,255,.02); color: var(--text-secondary);
+          font-family: inherit; font-size: 11px; line-height: 1.35; cursor: pointer;
+          grid-column: 1; }
+  .btab .nm { flex: 1; white-space: normal; word-break: keep-all; }
+  .btab .n { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+             flex: 0 0 auto; padding-top: 1px; }
+  .btab.on { background: rgba(124,106,239,.2); border-color: var(--accent); color: #fff; }
+
+  /* ── C: B 와 같되 **카테고리가 끝나면 썸네일이 1열까지 회수** ── */
+  .gridC { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+           align-items: start; }
+  .gridC .btab { grid-column: auto; }
+
+  .note { max-width: 620px; margin-top: 26px; font-size: 12.5px; line-height: 1.75;
+          color: var(--text-secondary); }
+  .note h3 { font-size: 13px; margin: 16px 0 6px; color: var(--text-primary); }
+  .note table { border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+  .note td, .note th { border: 1px solid var(--border-dim); padding: 5px 10px; text-align: left; }
+  .note th { color: var(--text-muted); font-weight: 600; }
+  .note code { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent-glow); }
+  .good { color: #8fe0b0; } .bad { color: #ffb4b4; }
+  pre { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted);
+        background: var(--bg-deep); border: 1px solid var(--border-dim);
+        border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<div class="row">
+
+  <!-- 지금 -->
+  <div class="col">
+    <div class="tagline">지금<small>탭이 가로 띠 · 폭 380</small></div>
+    <div class="panel now">
+      <div class="head"><span class="title">C1 · 자세</span><span class="sub">pose_action</span><button class="x">&times;</button></div>
+      <div class="search"><span>태그 검색</span></div>
+      <div class="tabs" id="tabsNow"></div>
+      <div style="flex:1;min-height:0;padding:9px 13px 13px;display:flex">
+        <div class="grid3" id="gridNow"></div>
+      </div>
+    </div>
+    <div class="cap" id="capNow"></div>
+  </div>
+
+  <!-- A -->
+  <div class="col">
+    <div class="tagline">A — 따로 스크롤되는 열<small>카테고리 열과 그리드가 각자 스크롤</small></div>
+    <div class="panel">
+      <div class="head"><span class="title">C1 · 자세</span><span class="sub">pose_action</span><button class="x">&times;</button></div>
+      <div class="search"><span>태그 검색</span></div>
+      <div class="bodyA">
+        <div class="vtabs" id="tabsA"></div>
+        <div class="grid3" id="gridA"></div>
+      </div>
+    </div>
+    <div class="cap" id="capA"></div>
+  </div>
+
+  <!-- B -->
+  <div class="col">
+    <div class="tagline">B — 한 격자, 행 공유<small>1열=카테고리, 2~4열=썸네일. <b>같이</b> 스크롤</small></div>
+    <div class="panel">
+      <div class="head"><span class="title">C1 · 자세</span><span class="sub">pose_action</span><button class="x">&times;</button></div>
+      <div class="search"><span>태그 검색</span></div>
+      <div class="bodyB"><div class="gridB" id="gridB"></div></div>
+    </div>
+    <div class="cap" id="capB"></div>
+  </div>
+
+  <!-- C -->
+  <div class="col">
+    <div class="tagline">C — B + 빈 자리 회수<small>카테고리가 끝나면 썸네일이 1열까지 흘러든다</small></div>
+    <div class="panel">
+      <div class="head"><span class="title">C1 · 자세</span><span class="sub">pose_action</span><button class="x">&times;</button></div>
+      <div class="search"><span>태그 검색</span></div>
+      <div class="bodyB"><div class="gridC" id="gridC"></div></div>
+    </div>
+    <div class="cap" id="capC"></div>
+  </div>
+
+</div>
+
+<div class="note">
+  <h3>적어주신 구조</h3>
+<pre>카테고리1 (선택됨) | 썸네일1 | 썸네일2 | 썸네일 3
+카테고리2          | 썸네일4 | 썸네일5 | 썸네일 6
+카테고리3          | 썸네일7 | 썸네일8 | 썸네일 9
+카테고리4          | 썸네일10| 썸네일11| 썸네일 12
+                     썸네일13| 썸네일14 ...</pre>
+  마지막 줄에서 카테고리 자리가 <b>비어 있으면 B</b>, 그 자리까지 썸네일이
+  흘러들면 <b>C</b> 입니다. 제가 먼저 만든 것은 A 였는데, 카테고리 열이 따로
+  스크롤되고 행 높이도 썸네일과 안 맞습니다 — 그래서 "그대로"로 보이셨을 겁니다.
+
+  <h3>셋의 차이</h3>
+  <table>
+    <tr><th></th><th>A</th><th>B</th><th>C</th></tr>
+    <tr><td>스크롤</td><td>둘로 나뉨</td><td class="good">하나</td><td class="good">하나</td></tr>
+    <tr><td>카테고리 22개를 한눈에</td><td class="good">O (자체 스크롤)</td><td>썸네일과 같이 내려야</td><td>같음</td></tr>
+    <tr><td>카테고리 끝난 뒤 왼쪽</td><td>빈칸</td><td>빈칸</td><td class="good">썸네일이 채움</td></tr>
+    <tr><td>카테고리가 4개뿐인 축</td><td>왼쪽이 텅 빔</td><td>왼쪽이 텅 빔</td><td class="good">낭비 없음</td></tr>
+    <tr><td>카테고리 위치</td><td class="good">항상 같은 자리</td><td>스크롤하면 사라짐</td><td class="bad">뒤섞임</td></tr>
+  </table>
+
+  <h3>제가 보는 함정</h3>
+  <ul style="padding-left:18px;margin:6px 0">
+    <li><b>B·C 는 스크롤하면 카테고리가 화면 밖으로 나갑니다.</b> 썸네일을 훑다
+        카테고리를 바꾸려면 맨 위로 되돌아와야 합니다. A 는 그 문제가 없습니다.</li>
+    <li><b>C 는 카테고리와 썸네일이 뒤섞입니다.</b> 첫 화면에서는 왼쪽 = 카테고리
+        지만, 내려가면 같은 열에 썸네일이 옵니다.</li>
+    <li>세 안 모두 팝업이 <code>380 → 468px</code> 로 넓어집니다(3열 유지 기준).</li>
+  </ul>
+  <b>절충안</b>: B/C 로 하되 카테고리 열만 <code>position: sticky</code> 로 붙여
+  두면 스크롤해도 왼쪽에 남습니다. 원하시면 그것도 만들어 보겠습니다.
+</div>
+
+<script>
+const API = 'http://127.0.0.1:7244';
+const TABS = [
+  ["자세",99,1],["자세 2",94],["팔 위치",100],["다리 위치",75],["손짓",111],
+  ["얼굴에 손",64],["몸에 손",37],["들고 있는 것",108],["들고 있는 것 2",104],
+  ["들고 있는 것 3",102],["옷 다루기",74],["옷 다루기 2",74],["행동",125],
+  ["행동 2",120],["행동 3",122],["입·먹기",54],["전투",28],["몸 보여주기",40],
+  ["신체 연출",46],["밀착·상황",68],["둔부(성인)",10],["체액(성인)",23],
+];
+const CELLS = ["standing","sitting","lying","on back","leaning forward","on bed",
+  "kneeling","on side","standing on one leg","squatting","wariza","on stomach",
+  "all fours","bent over","floating","seiza","partially submerged","contrapposto",
+  "head rest","on floor","leaning back","claw pose","yokozuwari","upside-down",
+  "arms up","hands on hips","crossed arms","hand on own face","spread arms",
+  "outstretched hand","arms behind back","carrying","salute","waving"];
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const cell = t => `<div class="cell${t === 'bent over' ? ' on' : ''}">` +
+  `<img src="${API}/api/interactive-thumb?axis=pose_posture&tag=${encodeURIComponent(t)}" alt="" loading="lazy" onerror="this.classList.add('miss')">` +
+  `<span class="cp">${esc(t)}</span></div>`;
+
+document.getElementById('tabsNow').innerHTML = TABS.map(([n, c, on]) =>
+  `<button class="tab${on ? ' on' : ''}">${esc(n)}<span class="n">${c}</span></button>`).join('');
+document.getElementById('tabsA').innerHTML = TABS.map(([n, c, on]) =>
+  `<button class="vtab${on ? ' on' : ''}" title="${esc(n)}"><span class="nm">${esc(n)}</span><span class="n">${c}</span></button>`).join('');
+document.getElementById('gridNow').innerHTML = CELLS.map(cell).join('');
+document.getElementById('gridA').innerHTML = CELLS.map(cell).join('');
+
+const btab = ([n, c, on]) =>
+  `<button class="btab${on ? ' on' : ''}" title="${esc(n)}"><span class="nm">${esc(n)}</span><span class="n">${c}</span></button>`;
+
+// **행마다 번갈아 놓는다.** 카테고리를 먼저 다 넣고 썸네일을 이어 붙이면 격자가
+// 1열을 22행까지 채운 뒤에야 썸네일을 놓아 오른쪽이 통째로 빈다(목업 실측).
+// 한 행 = [카테고리][썸][썸][썸] 순서로 엮어야 적어주신 표대로 나온다.
+function interleave(reclaim) {
+  const out = [];
+  const rows = Math.ceil(CELLS.length / 3);
+  const n = Math.max(rows, TABS.length);
+  for (let r = 0; r < n; r++) {
+    const t = TABS[r];
+    const three = CELLS.slice(r * 3, r * 3 + 3);
+    if (t) out.push(btab(t));
+    else if (!reclaim) out.push('<span></span>');   // B: 빈칸으로 남긴다
+    out.push(...three.map(cell));
+  }
+  out.push(...CELLS.slice(n * 3).map(cell));
+  return out.join('');
+}
+document.getElementById('gridB').innerHTML = interleave(false);
+document.getElementById('gridC').innerHTML = interleave(true);
+
+addEventListener('load', () => setTimeout(() => {
+  const shot = (id, capId, sel) => {
+    const g = document.getElementById(id);
+    const c = g.querySelector(sel || '.cell');
+    if (!g || !c) return;
+    const box = g.closest('.bodyB') || g;
+    const h = box.clientHeight;
+    const cols = getComputedStyle(g).gridTemplateColumns.split(' ').length;
+    const rows = h / (c.getBoundingClientRect().height + 6);
+    document.getElementById(capId).innerHTML =
+      `보이는 높이 <b>${Math.round(h)}px</b> · ${cols}열 &times; <b>${rows.toFixed(1)}줄</b>`;
+  };
+  shot('gridNow', 'capNow'); shot('gridA', 'capA');
+  shot('gridB', 'capB'); shot('gridC', 'capC');
+}, 500));
+</script>
+</body>
+</html>

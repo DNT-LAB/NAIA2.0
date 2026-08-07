@@ -21069,17 +21069,45 @@ body.detached-module .mod-grid-3 {
 /* 축 목록을 전폭 아코디언에서 상단 탭 그리드로. 접혀 있어도 축 하나가 한 줄을
    통째로 먹어 19축(자세)이면 목록만으로 팝업이 찼다 — 씬 슬롯과 같은 문제였다.
    검색창 아래에 줄바꿈되는 탭을 깔고, 고른 축의 그리드만 아래에 펼친다. */
-.ia-axtabs {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  padding: 2px 0 8px; margin-bottom: 6px;
-  border-bottom: 1px solid var(--border-dim);
+/* 축 탭을 **왼쪽 세로 열**로. 가로 띠는 축마다 3~7줄로 달라져 그리드 세로를
+   먹었다(성인축 실측 192px = 7줄) — 왼쪽에 세우면 카테고리가 몇 개든 그리드
+   높이가 그대로다(사용자 결정 2026-08-07). 열 폭(96)만큼 팝업을 넓혀(380 -> 484)
+   그리드 크기는 지킨다.
+
+   **`.ia-axsplit` 안에서만 세로다.** 기본 규칙을 갈아치웠더니 나누지 않는 팝업
+   (구도, 검색 중)의 탭까지 전폭 막대가 됐다(실측: 구도의 '프레이밍'). 기본은
+   옛 가로 알약 그대로 둔다. */
+.ia-axsplit {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px;
 }
+.ia-axsplit > .ia-axtabs {
+  display: flex; flex-direction: column; flex-wrap: nowrap; gap: 3px;
+  min-height: 0; overflow-y: auto; padding: 0 4px 0 0; margin-bottom: 0;
+  border-right: 1px solid var(--border-dim); border-bottom: 0;
+}
+.ia-axpanes { min-height: 0; display: flex; flex-direction: column; }
+/* 그리드가 오른쪽 칸을 세로로 꽉 채운다. 상한(100dvh - 354px)은 탭이 위에 있던
+   시절의 값이라, 나눈 뒤에는 남는 높이를 못 쓰고 아래가 빈다. 흐름을 이어 준다:
+   .ia-axpanes -> .ia-ax-row -> .ia-cell-wrap -> .ia-cell-grid 가 전부 flex:1. */
+.ia-axsplit .ia-ax-row { flex: 1; min-height: 0; align-items: stretch; }
+.ia-axsplit .ia-cell-wrap { min-height: 0; }
+.ia-axsplit .ia-cell-grid { max-height: none; flex: 1; min-height: 0; }
+
+
 .ia-axtab {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 9px; border-radius: 999px; cursor: pointer;
   background: var(--bg-elev-1); border: 1px solid var(--border-dim);
   color: var(--text-secondary);
   transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+/* 세로 열에서는 **칩 하나가 두 줄**이다: 이름이 위(조금 큰 글씨), 개수가 아래.
+   한 줄에 나란히 두면 96px 열에서 이름이 밀려 잘린다 — 세로로 쌓으면 이름이
+   열 폭을 다 쓰므로 잘릴 일이 없다(사용자 지정). */
+.ia-axsplit .ia-axtab {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 5px 8px; border-radius: 7px; text-align: left;
 }
 .ia-axtab:hover { border-color: var(--border-glow); color: var(--text-primary); }
 .ia-axtab.is-open {
@@ -21090,9 +21118,15 @@ body.detached-module .mod-grid-3 {
   font-family: var(--font-display); font-size: 11px; font-weight: 600;
   letter-spacing: 0.2px; white-space: nowrap;
 }
+/* 세로 열에서는 자르지 않고 넘긴다. `들고 있는 것 2` 가 `들고 있는 ...` 이 되면
+   무엇인지 모른다. `word-break: keep-all` 로 한글 낱말은 통째로 넘어간다. */
+.ia-axsplit .ia-axtab-name {
+  font-size: 11.5px; line-height: 1.3;
+  white-space: normal; word-break: keep-all;
+}
 /* 개수는 탭 안에서 부차 정보다 — 선택된 탭에서는 흰 글씨 위라 톤을 낮춘다. */
 .ia-axtab .ia-acc-n {
-  font-family: var(--font-mono); font-size: 9px; opacity: 0.65;
+  font-family: var(--font-mono); font-size: 9px; opacity: 0.65; line-height: 1.2;
 }
 .ia-axtab.is-open .ia-acc-n { opacity: 0.8; }
 /* 고른 것이 있는 축은 개수 배지로 표시한다 — 탭이 접혀 있어 칩을 못 보여준다. */

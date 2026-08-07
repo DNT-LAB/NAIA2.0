@@ -884,7 +884,9 @@ export function createInteractivePanel({
   // positionPresetPanel 이 인라인 width 를 넣으므로 style.css 의 width 는 초기값일
   // 뿐이다(CSS 만 380 으로 줄였더니 화면은 560 그대로였다).
   // 560 -> 380: 팝업이 커서 생성 이미지가 안 보인다는 지적(테스터 2026-08-07).
-  const PANEL_W = 380;
+  // 380 -> 484: 축 탭이 왼쪽 세로 열(96)로 내려오면서 그만큼 넓힌다 — 안 넓히면
+  // 그리드가 3열에서 2열로 준다(사용자 결정: 열 폭 유지 + 팝업을 넓혀 그리드 보존).
+  const PANEL_W = 484;
 
   // 씬 버튼 줄은 `document.body` 에 붙는 플로트라 **오른쪽 탭이 바뀌어도 그대로 남는다.**
   // Characters / Artists / Studio 탭 위에 구도·배경·성인 버튼이 겹쳐 떠 있었다(사용자 지적).
@@ -4685,9 +4687,22 @@ export function createInteractivePanel({
       : sec.kind === 'gloss' ? glossHtml(sec) : null).filter(Boolean);
     const tabs = thumbs.map(x => x.tab).filter(Boolean).join('');
     const panes = thumbs.map(x => x.pane).filter(Boolean).join('');
-    const body = lead
-      + (tabs ? `<div class="ia-axtabs">${tabs}</div>` : '')
-      + panes;
+    // 탭을 **왼쪽 세로 열**로, 판을 오른쪽으로 나눈다. 가로 띠는 축마다 3~7줄로
+    // 달라져 그리드 세로를 먹었다(성인축 실측 192px = 7줄). 왼쪽에 세우면
+    // 카테고리가 몇 개든 그리드 높이가 그대로다(사용자 결정 2026-08-07).
+    //
+    // **검색 중에는 나누지 않는다.** 그때는 여러 축이 동시에 펼쳐지고 탭 대신
+    // 결과가 죽 이어지므로, 왼쪽 열을 두면 빈 칸만 생긴다.
+    //
+    // **구도 슬롯도 나누지 않는다.** 거기는 그리드가 아니라 축 설정(X/Y/Z 콤보 +
+    // 스페셜 버튼)이 본문이라 왼쪽 열을 붙이면 짝이 안 맞는다. 사용자가 이 팝업을
+    // 따로 빼기로 했으므로(2026-08-07) 그때까지 옛 배치를 그대로 쓴다.
+    const splitOk = !thumbFilter && tabs
+      && !(panelContext && panelContext.slotId === 'composition');
+    const body = lead + (splitOk
+      ? `<div class="ia-axsplit"><div class="ia-axtabs">${tabs}</div>`
+        + `<div class="ia-axpanes">${panes}</div></div>`
+      : (tabs ? `<div class="ia-axtabs">${tabs}</div>` : '') + panes);
     // 검색 결과가 0건이어도 컨테이너는 남겨야 한다. refreshAxisSections 가 `#iaAxes` 를
     // outerHTML 로 갈아치우므로, 빈 문자열을 돌려주면 호스트가 사라져 검색어를 지워도
     // 되돌아오지 않는다.

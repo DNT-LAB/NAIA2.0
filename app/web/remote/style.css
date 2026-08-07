@@ -17301,10 +17301,9 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
     /* 사전이 위에 가로로 눕는 띠라 **세로로도** 비켜 준다(--ia-shift-top). */
     padding-top: calc(2px + var(--ia-shift-top, 0px));
   }
-  /* 팝업이 열린 동안 이미지를 **우하단**에 붙인다(사용자 지시 2026-08-07).
-     가운데 정렬이면 남은 폭의 한가운데로 가서 팝업 쪽으로 붙는데, 오른쪽 아래로
-     보내면 도구 묶음(팝업+사전)과 그림이 확실히 갈린다. */
-  body.ia-popup-shift .viewer { align-items: flex-end; justify-content: flex-end; }
+  /* 우하단 강제 정렬을 뗐다. 평면이 팝업 오른쪽 전체를 쓰는 지금은 가운데
+     정렬(기본)이 맞다 — 억지로 구석에 붙이니 정렬이 이상해 보였다(사용자 지적).
+     사전 띠가 왼쪽 위를 조금 덮는 것은 감수한다. */
   /* PC: Result history rail is always visible, matching the desktop NAIA result layout. */
   .viewer-panel,
   .viewer-panel.open {

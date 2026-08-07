@@ -3705,7 +3705,9 @@ export function createInteractivePanel({
       Safe Viewer : <b class="ia-safe-state">${safeViewer ? 'On' : 'Off'}</b></button>`;
   }
 
-  /** 태그 사전을 팝업 오른쪽 **남은 폭 전체를 쓰는 상단 띠**로 편다(사용자 타협안
+  const ASIDE_W = 570;   // 사전 띠 가로(고정). 4열이 알맞게 들어가는 폭이다.
+
+  /** 태그 사전을 팝업 오른쪽 **상단 띠**로 편다(사용자 타협안
    *  2026-08-07). 세로 열(258px)로 세우면 그만큼 그림 폭을 영구히 먹는데, 위에
    *  가로로 눕히면 그림은 아래로만 밀린다 — 세로는 그림이 남아돌던 쪽이다.
    *  칩은 4열로 깔린다(.ia-aside-thumbs). */
@@ -3714,12 +3716,15 @@ export function createInteractivePanel({
     const box = panelMount.getBoundingClientRect();
     const GAP = 10;
     const left = box.right + GAP;
-    const width = window.innerWidth - left - 12;
-    if (width < 220) {          // 정말 좁으면 접는다 — 그리드가 우선이다
+    const room = window.innerWidth - left - 12;
+    if (room < 220) {           // 정말 좁으면 접는다 — 그리드가 우선이다
       asideMount.classList.remove('open');
       syncPopupShift();
       return;
     }
+    // **고정폭.** 남은 폭을 다 쓰게 했더니 띠가 화면 끝까지 뻗어 4열 칩이 칸당
+    // 170px 로 부풀었다(사용자 지정 폭: 약 570px). 4열이 알맞게 들어가는 크기다.
+    const width = Math.min(ASIDE_W, room);
     asideMount.style.left = Math.round(left) + 'px';
     asideMount.style.width = Math.round(width) + 'px';
     asideMount.style.top = Math.round(Math.max(8, box.top)) + 'px';
@@ -3906,12 +3911,10 @@ export function createInteractivePanel({
     const shift = Math.round(box.right + 12 - v.left);
     viewer.style.setProperty('--ia-shift',
       (shift > 0 && shift < v.width * 0.75) ? shift + 'px' : '0px');
-    // 세로는 사전 띠 아래까지. 띠가 닫혀 있으면 0.
-    const aside = asideMount && asideMount.classList.contains('open')
-      ? asideMount.getBoundingClientRect() : null;
-    const top = aside ? Math.round(aside.bottom + 10 - v.top) : 0;
-    viewer.style.setProperty('--ia-shift-top',
-      (top > 0 && top < v.height * 0.6) ? top + 'px' : '0px');
+    // **세로로는 밀지 않는다.** 띠 아래로 내렸더니 이미지 평면이 그만큼 잘려
+    // 정렬이 이상해졌다 — 평면은 팝업 오른쪽 전체를 쓰고, 사전이 그 위쪽을
+    // 덮는 것은 감수한다(사용자 지시 2026-08-07: "그림이 좀 덮여도 됩니다").
+    viewer.style.setProperty('--ia-shift-top', '0px');
   }
 
   function positionPopup() {

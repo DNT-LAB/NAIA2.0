@@ -106,6 +106,39 @@ function subLabel(meta) { return (meta && (meta.label || meta.key)) || ''; }
 
 // `rand` = 생성할 때마다 값을 새로 뽑을 축들(['x','z'] 처럼). 옛 저장분에는
 // 없으므로 읽는 쪽에서 항상 `|| []` 로 받는다.
+/** Rating 선택지. `[키, 라벨, 태그들, 색키]`.
+ *  색키는 NAIA 설정의 G/S/Q/E 버튼과 같은 색을 쓴다(style.css `.rating-btn`). */
+const RATING_OPTIONS = [
+  // 태그가 0개인 정식 선택지. Random 에 섞으면 '가끔 rating 없음' 도 된다.
+  ['none',   '미설정',              [],                              ''],
+  ['e_nsfw', 'Explicit + nsfw',     ['rating:explicit', 'nsfw'],     'e'],
+  ['e',      'Explicit',            ['rating:explicit'],             'e'],
+  ['q_nsfw', 'Questionable + nsfw', ['rating:questionable', 'nsfw'], 'q'],
+  ['q',      'Questionable',        ['rating:questionable'],         'q'],
+  ['s_nsfw', 'Sensitive + nsfw',    ['rating:sensitive', 'nsfw'],    's'],
+  ['s',      'Sensitive',           ['rating:sensitive'],            's'],
+  ['s_safe', 'Sensitive + safe',    ['rating:sensitive', 'safe'],    's'],
+  ['g',      'General',             ['rating:general'],              'g'],
+  ['g_safe', 'General + safe',      ['rating:general', 'safe'],      'g'],
+];
+const RATING_BY_KEY = new Map(RATING_OPTIONS.map(o => [o[0], o]));
+
+/** 기본은 **미설정**(사용자 지정 2026-08-07). `picks` 는 Random 일 때만 여러 개가 된다. */
+function newRating() { return {mode: 'single', picks: ['none']}; }
+
+/** 프롬프트에 나갈 태그. `pick` 이 true 고 Random 이면 고른 것 중 하나를 뽑는다. */
+function ratingTags(r) {
+  const picks = (r && r.picks) || [];
+  if (!picks.length) return [];
+  // Random 이면 **생성 직전에 뽑아 둔 값**(`rolled`)을 쓴다. 여기서 즉석에서 뽑으면
+  // 화면을 다시 그릴 때마다 값이 바뀌어 무엇이 나갈지 알 수 없다 — 구도 랜덤과
+  // 같은 규칙이다(rollComposition 이 뽑는다). 아직 안 뽑았으면 첫 번째.
+  const key = (r.mode === 'random' && r.rolled && picks.includes(r.rolled))
+    ? r.rolled : picks[0];
+  const opt = RATING_BY_KEY.get(key);
+  return opt ? [...opt[2]] : [];
+}
+
 function newComposition() { return {x: 0, y: 0, z: 0, pov: false, specials: [], rand: []}; }
 
 // ---------- 캐릭터 캔버스 위치 (NAI V4 char_captions[].centers) ----------
@@ -331,6 +364,9 @@ export function createInteractivePanel({
     // 다시 이으면 사용자가 적은 공백·가중치·쉼표가 손상된다.
     freeText: '',
     composition: newComposition(),   // 구도 3축 콤보 상태(자유 태그와 별도, 프롬프트에선 합쳐짐)
+    // **`rating` 과 다른 것이다.** 위의 `rating: 's'` 는 코퍼스 추천 질의에 쓰는
+    // 값이고, 이것은 프롬프트에 나가는 rating 태그다(사용자 지정 2026-08-07).
+    ratingPick: newRating(),
   };
 
   function newCharacter(open) {
@@ -381,7 +417,9 @@ export function createInteractivePanel({
    *  `1girl` 만 찍히던 이유가 그 어긋남이었다).
    *  네거티브는 기존 값을 그대로 쓴다 — 여기서 손대지 않는다. */
   function renderPrompt() {
-    const parts = [];
+    // rating 은 그림 전체의 성격이라 맨 앞에 둔다 — NAI 는 앞쪽 토큰을 더
+    // 강하게 받는다. Random 이어도 여기서는 뽑지 않는다(생성 때 뽑는다).
+    const parts = [...ratingTags(state.ratingPick)];
     for (const slot of SCENE_SLOTS) {
       // 구도는 3축 콤보 태그를 자유 태그 앞에 붙인다.
       if (slot.id === 'composition') parts.push(...compTags(state.composition));
@@ -788,6 +826,24 @@ export function createInteractivePanel({
   /** 적용 중인 축 프리셋을 **버튼 아래로** 늘어놓는다(사용자 지정 2026-08-07).
    *  팝업을 안 열어도 무엇이 걸렸는지 보인다. 랜덤 축은 값 대신 🎲 로 적는다 —
    *  생성할 때 정해지므로 지금 값을 적으면 거짓이 된다. */
+  /** Rating 고정 칩. 색은 NAIA 설정의 G/S/Q/E 와 같다(style.css `.rating-btn`). */
+  function ratingChipHtml() {
+    const r = state.ratingPick || newRating();
+    const picks = r.picks || [];
+    const many = r.mode === 'random' && picks.length > 1;
+    const first = RATING_BY_KEY.get(picks[0]);
+    // '미설정'은 한글 그대로 둔다 — 나머지는 NAI 태그 이름이라 소문자로 적는다.
+    const one = first ? (first[0] === 'none' ? first[1] : first[1].toLowerCase()) : '미설정';
+    const label = !picks.length ? 'Rating : 미설정'
+      : many ? `Rating 🎲 ${picks.length}`
+      : 'Rating : ' + one;
+    // 색은 고른 것(Random 이면 첫 번째)의 등급을 따른다.
+    const tone = first ? first[3] : '';
+    return `<button type="button" class="ia-comp-ap ia-rating-ap${many ? ' is-rand' : ''}"`
+      + ` data-ap-rating="1"${tone ? ` data-r="${tone}"` : ''}`
+      + ` title="눌러서 축 프리셋에서 고릅니다">${escHtml(label)}</button>`;
+  }
+
   function compAppliedHtml() {
     const comp = state.composition || {};
     const rand = comp.rand || [];
@@ -811,11 +867,12 @@ export function createInteractivePanel({
       items.push({t: hit ? hit[0] : tag, d: `data-ap-special="${escHtml(tag)}"`,
                   tip: '눌러서 끄기'});
     });
-    if (!items.length) return '';
     // 칩은 **버튼**이다 — 눌러서 바로 바꾼다(사용자 지정 2026-08-07).
-    return '<div class="ia-comp-applied">' + items.map(o =>
+    const rest = items.map(o =>
       `<button type="button" class="ia-comp-ap${o.r ? ' is-rand' : ''}" ${o.d}`
-      + ` title="${escHtml(o.tip)}">${escHtml(o.t)}</button>`).join('') + '</div>';
+      + ` title="${escHtml(o.tip)}">${escHtml(o.t)}</button>`).join('');
+    // Rating 은 **고정**이다 — 아무것도 안 골라도 자리를 지킨다(사용자 지정).
+    return '<div class="ia-comp-applied">' + ratingChipHtml() + rest + '</div>';
   }
 
   function reactiveToggleHtml() {
@@ -918,6 +975,11 @@ export function createInteractivePanel({
       const ap = event.target.closest('.ia-comp-ap');
       if (ap) {
         event.preventDefault();
+        // Rating 은 고를 것이 9개라 순환이 아니라 팝업을 연다.
+        if (ap.dataset.apRating !== undefined) {
+          if (!compPopupOpen) openCompPopup(sceneMount.querySelector('[data-comp-preset]'));
+          return;
+        }
         const comp = state.composition;
         if (ap.dataset.apPov !== undefined) comp.pov = false;
         else if (ap.dataset.apSpecial !== undefined) {
@@ -5042,6 +5104,24 @@ export function createInteractivePanel({
 
   const randOn = (comp, key) => (comp && comp.rand || []).includes(key);
 
+  /** 팝업 안 Rating 구획. Single 은 하나만, Random 은 여럿 골라 생성 때 하나를 뽑는다. */
+  function ratingSectionHtml() {
+    const r = state.ratingPick || newRating();
+    const picks = r.picks || [];
+    const mode = m => `<button type="button" class="ia-rt-mode${r.mode === m ? ' is-on' : ''}"`
+      + ` data-rt-mode="${m}">${m === 'single' ? 'Single' : 'Random'}</button>`;
+    const opts = RATING_OPTIONS.map(([key, label, , tone]) =>
+      `<button type="button" class="ia-rt-opt${picks.includes(key) ? ' is-on' : ''}"`
+      + ` data-rt-pick="${key}" data-r="${tone}">${escHtml(label)}</button>`).join('');
+    return `<div class="ia-rt">
+      <div class="ia-rt-head"><span class="ia-comp-lbl">Rating</span>
+        <div class="ia-rt-modes">${mode('single')}${mode('random')}</div></div>
+      <div class="ia-rt-opts">${opts}</div>
+      ${r.mode === 'random'
+        ? '<div class="ia-rt-hint">고른 것 중 하나를 생성할 때마다 뽑습니다</div>' : ''}
+    </div>`;
+  }
+
   function compPanelHtml() {
     const comp = state.composition;
     const selects = COMP_AXES.map(ax =>
@@ -5069,6 +5149,7 @@ export function createInteractivePanel({
         <span class="ia-comp-lbl">스페셜</span>
         <div class="ia-comp-cats">${specials}</div>
       </div>
+      ${ratingSectionHtml()}
       <div class="ia-comp-out">${emitted.length ? escHtml(emitted.join(', ')) : '축 미설정 — 태그 없음'}</div>
     </div>`;
   }
@@ -5081,6 +5162,30 @@ export function createInteractivePanel({
     host.querySelectorAll('.ia-comp-select').forEach(el => {
       el.addEventListener('change', () => {
         state.composition[el.dataset.axis] = Number(el.value) || 0;
+        onCompChange();
+      });
+    });
+    host.querySelectorAll('[data-rt-mode]').forEach(el => {
+      el.addEventListener('click', () => {
+        const r = state.ratingPick || (state.ratingPick = newRating());
+        r.mode = el.dataset.rtMode;
+        // Single 로 돌아오면 **첫 번째만 남긴다** — 여러 개인 채로 Single 이면
+        // 무엇이 나갈지 알 수 없다.
+        if (r.mode === 'single' && (r.picks || []).length > 1) r.picks = [r.picks[0]];
+        onCompChange();
+      });
+    });
+    host.querySelectorAll('[data-rt-pick]').forEach(el => {
+      el.addEventListener('click', () => {
+        const r = state.ratingPick || (state.ratingPick = newRating());
+        const key = el.dataset.rtPick;
+        const picks = r.picks || [];
+        if (r.mode === 'single') {
+          // 같은 것을 다시 누르면 끈다(태그 없음).
+          r.picks = picks[0] === key ? [] : [key];
+        } else {
+          r.picks = picks.includes(key) ? picks.filter(k => k !== key) : [...picks, key];
+        }
         onCompChange();
       });
     });
@@ -5479,8 +5584,15 @@ export function createInteractivePanel({
     rollComposition() {
       const comp = state.composition || {};
       const rand = comp.rand || [];
-      if (!rand.length) return false;
       let hit = false;
+      // Rating 이 Random 이면 고른 것 중 하나를 뽑아 `rolled` 에 둔다. **picks 는
+      // 그대로다** — 덮어쓰면 여러 개 골라 둔 것이 한 번 생성하고 하나로 굳는다.
+      const r = state.ratingPick;
+      if (r && r.mode === 'random' && (r.picks || []).length > 1) {
+        r.rolled = r.picks[Math.floor(Math.random() * r.picks.length)];
+        hit = true;
+      }
+      if (!rand.length && !hit) return false;
       COMP_AXES.forEach(ax => {
         if (!rand.includes(ax.key) || ax.items.length < 2) return;
         // 0번('정의하지 않음')은 뽑지 않는다 — 랜덤을 켠 뜻이 '아무것도 안 나올

@@ -21330,6 +21330,44 @@ body.detached-module .mod-grid-3 {
 .ia-comp-select:disabled { opacity: 0.45; pointer-events: none; }
 .ia-comp-row .custom-select:has(+ .ia-comp-rand.is-on) { opacity: 0.45; }
 
+/* Rating 고정 칩 — 등급 색은 NAIA 설정의 G/S/Q/E 버튼과 같다(.rating-btn). */
+.ia-rating-ap { font-weight: 700; }
+.ia-rating-ap[data-r="g"] { color: #7fd18a; border-color: #2e7d32; }
+.ia-rating-ap[data-r="s"] { color: #8ab8f0; border-color: #1565C0; }
+.ia-rating-ap[data-r="q"] { color: #f0b070; border-color: #e65100; }
+.ia-rating-ap[data-r="e"] { color: #f09090; border-color: #c62828; }
+
+/* 팝업 안 Rating 구획 */
+.ia-rt {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 8px;
+  padding-top: 8px; border-top: 1px solid var(--border-dim);
+}
+.ia-rt-head { display: flex; align-items: center; gap: 8px; }
+.ia-rt-modes {
+  margin-left: auto; display: inline-flex;
+  border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden;
+}
+.ia-rt-mode {
+  padding: 3px 10px; border: 0; background: none;
+  color: var(--text-dim); font-family: inherit; font-size: 10px; cursor: pointer;
+}
+.ia-rt-mode.is-on { background: rgba(124,106,239,0.22); color: #fff; font-weight: 700; }
+.ia-rt-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.ia-rt-opt {
+  padding: 4px 8px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: none; color: var(--text-secondary); text-align: left;
+  font-family: inherit; font-size: 10.5px; cursor: pointer; white-space: nowrap;
+}
+.ia-rt-opt:hover { border-color: var(--border-glow); color: var(--text-primary); }
+/* 미설정은 등급색이 없다 - 고른 상태만 알린다. */
+.ia-rt-opt.is-on[data-r=""] { background: rgba(124,106,239,0.22);
+  border-color: var(--accent); color: #fff; }
+.ia-rt-opt.is-on[data-r="g"] { background: #2e7d32; border-color: #4CAF50; color: #fff; }
+.ia-rt-opt.is-on[data-r="s"] { background: #1565C0; border-color: #2196F3; color: #fff; }
+.ia-rt-opt.is-on[data-r="q"] { background: #e65100; border-color: #FF9800; color: #fff; }
+.ia-rt-opt.is-on[data-r="e"] { background: #c62828; border-color: #F44336; color: #fff; }
+.ia-rt-hint { font-size: 9.5px; color: var(--text-dim); font-style: italic; }
+
 /* --- 축 프리셋 팝업 ---
    구도 팝업 본문에 얹혀 있던 축 설정(X/Y/Z + 스페셜)을 자체 팝업으로 뗐다
    (사용자 결정 2026-08-07). 그래야 구도도 다른 팝업과 같은 배치를 쓴다. */

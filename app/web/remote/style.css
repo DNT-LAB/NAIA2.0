@@ -17298,6 +17298,8 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
        **이 미디어쿼리가 padding 의 실제 주인이다** — 바깥 `.viewer` 에만 padding-left
        를 써 두면 여기 `padding: 2px` 가 그걸 덮는다(실측: 계산값이 2px 그대로). */
     padding-left: calc(2px + var(--ia-shift, 0px));
+    /* 사전이 위에 가로로 눕는 띠라 **세로로도** 비켜 준다(--ia-shift-top). */
+    padding-top: calc(2px + var(--ia-shift-top, 0px));
   }
   /* 팝업이 열린 동안 이미지를 **우하단**에 붙인다(사용자 지시 2026-08-07).
      가운데 정렬이면 남은 폭의 한가운데로 가서 팝업 쪽으로 붙는데, 오른쪽 아래로
@@ -20771,12 +20773,15 @@ body.detached-module .mod-grid-3 {
    + 플로트(258) 가 가로로 이어져 결과 영역을 통째로 덮었다(테스터 지적). 팝업을
    줄여 생긴 아래 공간으로 옮긴다 — 가로는 팝업과 같은 폭만 쓴다.
    자리(left/width/top/max-height)는 JS(positionAside)가 팝업을 재서 넣는다. */
+/* 카드가 **가로로** 늘어선다. 세로 열이던 시절의 column 방향을 그대로 두면
+   띠가 넓은데도 카드가 한 줄씩 쌓여 세로로만 길어진다. */
 .ia-aside {
   position: fixed;
-  display: none; flex-direction: column; gap: 8px;
+  display: none; flex-direction: row; align-items: flex-start; gap: 8px;
   z-index: var(--z-floating-module); pointer-events: none;
-  overflow-y: auto; overscroll-behavior: contain;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior: contain;
 }
+.ia-aside > .ia-aside-card { flex: 0 1 auto; min-width: 0; max-width: 460px; }
 .ia-aside.open { display: flex; }
 .ia-aside-card {
   background: var(--bg-surface); border: 1px solid var(--border-glow);
@@ -20859,8 +20864,10 @@ body.detached-module .mod-grid-3 {
 /* 2열 고정이었다. 플로트가 오른쪽 258px 세로 열이던 시절의 값이라, 팝업 아래
    380px 가로로 옮기자 칸이 180px 로 부풀어 썸네일 하나가 화면을 먹었다(실측).
    폭에 맞춰 채운다 — 380px 에서 4열, 좁아지면 알아서 준다. */
+/* **4열 고정.** auto-fill 이면 띠가 넓어질수록 열이 늘어 칩이 잘게 흩어진다
+   (사용자 지정: "4xn 배열로 넙적하게"). */
 .ia-aside-thumbs {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 5px;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px;
 }
 .ia-aside-thumb {
   display: flex; flex-direction: column; gap: 0; padding: 0; cursor: help;

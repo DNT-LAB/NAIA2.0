@@ -3132,25 +3132,10 @@ export function createInteractivePanel({
     zoomEl.className = 'ia-zoom';
     zoomEl.hidden = true;
     document.body.appendChild(zoomEl);
+    // 닫기만 받는다. **넣고 빼는 것은 칸의 [선택]/[제거] 가 한다** — 여기에도
+    // 버튼을 두면 같은 일을 하는 버튼이 화면에 둘이 된다(사용자 지적 2026-08-07).
     zoomEl.addEventListener('click', event => {
-      if (event.target.closest('[data-zoom-close]')) { closeZoom(); return; }
-      const act = event.target.closest('[data-zoom-act]');
-      if (!act) return;
-      // **출처에 맞는 경로를 탄다.** 그리드는 축 규칙(부모 자동 배정, 배타)이 붙은
-      // pickThumb, 사전 칩은 toggleTag 다. 하나로 뭉치면 사전에서 고른 태그가
-      // 엉뚱한 축으로 들어간다 — 썸네일 URL 의 axis 는 **팩 축**이라 슬롯 축과
-      // 같지 않기 때문이다.
-      inspectTag = '';
-      if (act.dataset.zoomFrom === 'aside') toggleTag(act.dataset.zoomVal, {fromAside: true});
-      else pickThumb(act.dataset.zoomRef, act.dataset.zoomVal);
-      refreshAxisSections();
-      closeZoom();
-      // **포커스를 슬롯 입력으로 돌려준다.** closeZoom() 이 innerHTML 을 비우면서
-      // 방금 누른 버튼이 사라지면 activeElement 가 <body> 가 되고, 슬롯 입력의
-      // blur 검사(130ms)가 "팝업 밖으로 나갔다"고 보고 팝업을 통째로 닫았다
-      // (실측: 태그는 들어가는데 계속 고를 수가 없었다).
-      focusEditingInput();
-      void renderAside();   // **실제 선택**이니 이때는 사전을 갱신한다
+      if (event.target.closest('[data-zoom-close]')) closeZoom();
     });
     return zoomEl;
   }
@@ -3161,11 +3146,10 @@ export function createInteractivePanel({
 
   /** 누른 칸을 크게 보여 준다. 팝업 오른쪽에 세워 그리드를 가리지 않는다 —
    *  고른 것과 원본을 나란히 보게 하려는 것이다. */
-  function openZoom(cell, ref, tag, from) {
+  function openZoom(cell, tag) {
     const el = ensureZoom();
     const img = cell.querySelector('.ia-cell-img img, .ia-aside-thumb-img img');
     const src = img ? img.getAttribute('src') : '';
-    const on = currentTags().some(x => x.toLowerCase() === String(tag).toLowerCase());
     const tip = tagTip(tag) || '';
     el.innerHTML = `
       <div class="ia-zoom-head">
@@ -3174,28 +3158,23 @@ export function createInteractivePanel({
       </div>
       ${src ? `<img class="ia-zoom-img" src="${escHtml(src)}" alt="">`
             : '<div class="ia-zoom-none">그림이 아직 없습니다</div>'}
-      ${tip && tip !== tag ? `<div class="ia-zoom-desc">${escHtml(tip)}</div>` : ''}
-      <button type="button" class="ia-zoom-act" data-zoom-act
-        data-zoom-ref="${escHtml(ref || '')}" data-zoom-val="${escHtml(tag)}"
-        data-zoom-from="${from === 'aside' ? 'aside' : 'grid'}"
-        data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</button>`;
+      ${tip && tip !== tag ? `<div class="ia-zoom-desc">${escHtml(tip)}</div>` : ''}`;
     el.hidden = false;
-    positionZoom(cell);
+    positionZoom();
   }
 
-  function positionZoom(cell) {
+  /** 자리는 **고정**이다(사용자 지시 2026-08-07). 예전에는 누른 칸에 눈높이를
+   *  맞췄는데, 칸마다 위아래로 뛰어 시선이 따라다녀야 했다. 팝업 오른쪽 위에
+   *  못박아 두면 어디를 눌러도 같은 자리에 나온다. */
+  function positionZoom() {
     if (!zoomEl || zoomEl.hidden) return;
     const box = panelMount.getBoundingClientRect();
-    const c = cell.getBoundingClientRect();
-    const w = zoomEl.offsetWidth || 240;
-    const h = zoomEl.offsetHeight || 300;
+    const w = zoomEl.offsetWidth || 260;
     // 팝업 오른쪽. 자리가 없으면 왼쪽으로 뒤집는다(그래도 없으면 화면 안으로 민다).
     let left = box.right + 10;
     if (left + w > window.innerWidth - 8) left = Math.max(8, box.left - w - 10);
-    // 누른 칸과 눈높이를 맞추되 화면 밖으로 나가지 않게 한다.
-    const top = Math.min(Math.max(8, c.top - 20), window.innerHeight - h - 8);
     zoomEl.style.left = Math.round(left) + 'px';
-    zoomEl.style.top = Math.round(Math.max(8, top)) + 'px';
+    zoomEl.style.top = Math.round(Math.max(8, box.top)) + 'px';
   }
 
   function markInspect() {
@@ -3252,7 +3231,9 @@ export function createInteractivePanel({
         inspectTag = same ? '' : tag;
         markInspect();
         if (same) closeZoom();
-        else openZoom(b, '', tag, 'aside');
+        else openZoom(b, tag);
+        // **여기서는 renderAside 를 부르지 않는다.** 이 플로트의 기준을 자기 칩으로
+        // 바꾸는 것이라 자기 자신을 갈아치우는 재귀가 된다.
         return;
       }
       inspectTag = '';
@@ -4663,15 +4644,16 @@ export function createInteractivePanel({
           // 한 축이 최대 150칸이라 그리드를 훑다 스치는 클릭이 잦기 때문이다 —
           // 스쳐도 프롬프트는 안 변하고 오른쪽 설명만 바뀐다.
           if (!event.target.closest('.ia-cell-act')) {
-            // 본문 클릭 = **살펴보기**. 포커스만 주고 확대해서 보여 준다.
-            // **사전은 갱신하지 않는다**(사용자 지시 2026-08-07) — 스치는 클릭마다
-            // 아래 사전이 통째로 바뀌면 방금 읽던 설명을 잃는다. 사전은 실제로
-            // [선택]/[제거] 를 눌렀을 때만 따라온다.
+            // 본문 클릭 = **살펴보기**. 포커스 + 확대 + **사전 갱신**이다.
+            // 사전을 안 바꾸는 것은 사전 자기 칩을 눌렀을 때뿐이다(자기를
+            // 갈아치우는 재귀). 여기까지 껐더니 그리드에서 눌러도 아래 설명이
+            // 안 따라왔다(사용자 지적 2026-08-07).
             const same = inspectTag === val;
             inspectTag = same ? '' : val;
             markInspect();
             if (same) closeZoom();
-            else openZoom(el, ref, val, 'grid');
+            else openZoom(el, val);
+            void renderAside();
             return;
           }
           inspectTag = '';                 // 넣었으면 그 태그가 기준이 된다

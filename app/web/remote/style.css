@@ -20981,14 +20981,8 @@ body.detached-module .mod-grid-3 {
   font-size: 10.5px; line-height: 1.5; color: var(--text-muted);
   max-height: 66px; overflow-y: auto;
 }
-.ia-zoom-act {
-  padding: 8px 0; border: 0; border-radius: 8px;
-  font-family: var(--font-display); font-size: 13px; font-weight: 700;
-  color: #fff; letter-spacing: 0.3px; cursor: pointer;
-}
-.ia-zoom-act[data-act="on"]  { background: linear-gradient(135deg, #218a52, #46cf88); }
-.ia-zoom-act[data-act="off"] { background: linear-gradient(135deg, #a8486f, #e58ab4); }
-.ia-zoom-act:hover { filter: brightness(1.12); }
+/* 여기에는 행동 버튼을 두지 않는다 — 넣고 빼는 것은 칸의 [선택]/[제거] 가
+   한다. 둘 다 두면 같은 일을 하는 버튼이 화면에 둘이 된다(사용자 지적). */
 
 .ia-aside-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .ia-aside-chip {

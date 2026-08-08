@@ -309,9 +309,10 @@ export function createPromptEngineeringPanel({
     presetAllOptions = null;
     (m.preset_summaries || []).forEach(s => {
       if (!s || !s.name) return;
+      // auto-hide 는 **넣지 않는다.** 대개 프리셋끼리 같은 값을 공유해서, 넣으면
+      // 거기 있는 태그로 검색할 때 전부가 걸려 필터가 무뎌진다(사용자 지적).
       presetHaystack.set(String(s.name), [
-        s.name, s.description, s.pre_prompt_preview,
-        s.post_prompt_preview, s.auto_hide_preview,
+        s.name, s.description, s.pre_prompt_preview, s.post_prompt_preview,
       ].map(v => String(v || '')).join('\n').toLowerCase());
     });
 

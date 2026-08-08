@@ -91,7 +91,6 @@ class HeadlessPromptEngineeringService:
                     "description": "Randomized preset pool",
                     "pre_prompt_preview": "",
                     "post_prompt_preview": "",
-                    "auto_hide_preview": "",
                     "thumbnail_url": "",
                 }
             data = store.read_preset_data(name, mode or context.get_api_mode())
@@ -103,11 +102,12 @@ class HeadlessPromptEngineeringService:
                 "api_mode": api_mode,
                 "description": str(data.get("description") or ""),
                 "pre_prompt_preview": str(module_settings.get("pre_prompt") or ""),
-                # 프리셋 검색이 볼 나머지 본문. prefix 만 실으면 postfix 나 auto-hide
-                # 에만 있는 태그로 찾을 수 없어 "포함하는 프리셋 검색"이 반만 맞는다.
+                # 프리셋 검색이 볼 나머지 본문. prefix 만 실으면 postfix 에만 있는
+                # 태그로 찾을 수 없어 "포함하는 프리셋 검색"이 반만 맞는다.
                 # read_preset_data 는 이미 읽어 둔 것이라 추가 IO 는 없다.
+                # auto_hide 는 **싣지 않는다** — 대개 프리셋끼리 공유하는 값이라
+                # 검색에 넣으면 전부가 걸려 필터가 무뎌진다(사용자 지적).
                 "post_prompt_preview": str(module_settings.get("post_prompt") or ""),
-                "auto_hide_preview": str(module_settings.get("auto_hide_prompt") or ""),
                 # 썸네일 SSOT는 previews 디렉터리의 파일 — 프리셋 JSON에는
                 # thumbnail_url이 기록된 적이 없어 항상 "No image"가 나오던 버그.
                 # 목록 단위 벌크 맵으로 조회(프리셋별 stat 프로브 방지).

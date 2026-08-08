@@ -21399,6 +21399,86 @@ body.detached-module .mod-grid-3 {
 .ia-comp-popup .ia-sec-label { display: none; }
 .ia-comp-btn-caret { font-size: 8px; opacity: 0.7; margin-left: 1px; }
 
+/* 빠른 입력(C1 Fast / Neg Fast). 씬 플로트 바로 밑에 세로로 쌓인다.
+   씬 플로트와 **다른 마운트**다 — 그쪽은 renderBlocks 가 innerHTML 을 통째로
+   갈아 끼우는 자리라, 입력창을 두면 아무 렌더에나 치던 글자가 날아간다. */
+.ia-fast-float {
+  position: fixed; z-index: 1; display: none;
+  flex-direction: column; gap: 5px; width: 232px;
+}
+.ia-fast-float.open { display: flex; }
+.ia-fast-box {
+  border-radius: 8px; overflow: hidden;
+  background: rgba(20, 20, 28, 0.62); border: 1px solid rgba(255,255,255,0.10);
+}
+.ia-fast-box.is-open { border-color: var(--accent); }
+.ia-fast-head {
+  display: flex; align-items: center; gap: 5px; width: 100%;
+  padding: 4px 8px; cursor: pointer; background: none; border: 0;
+  color: var(--text-secondary); text-align: left;
+}
+.ia-fast-head:hover { color: var(--text-primary); }
+.ia-fast-caret { flex: none; font-size: 8px; opacity: 0.75; }
+/* 라벨은 **한 줄**이다(사용자 지정) — 길면 말줄임. */
+.ia-fast-title {
+  flex: 1; min-width: 0; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis;
+  font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.2px;
+}
+.ia-fast-box.is-open .ia-fast-title { color: var(--text-primary); font-weight: 600; }
+.ia-fast-body:not(:empty) { padding: 2px 8px 8px; }
+.ia-fast-sub {
+  margin: 4px 0 3px; font-family: var(--font-mono); font-size: 8.5px;
+  font-weight: 600; letter-spacing: 0.9px; text-transform: uppercase;
+  color: var(--text-dim);
+}
+.ia-fast-input {
+  width: 100%; resize: vertical; min-height: 34px;
+  padding: 5px 6px; border-radius: 6px;
+  background: rgba(0,0,0,0.34); border: 1px solid var(--border-dim);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
+  line-height: 1.4;
+}
+.ia-fast-input:focus { outline: none; border-color: var(--accent); }
+.ia-fast-gen {
+  width: 100%; margin-top: 7px; padding: 5px 8px; cursor: pointer;
+  border-radius: 6px; border: 1px solid var(--accent);
+  background: rgba(124,106,239,0.22); color: var(--text-primary);
+  font-family: var(--font-display); font-size: 11px; font-weight: 700;
+}
+.ia-fast-gen:hover { background: rgba(124,106,239,0.34); }
+
+/* 축 칩 드롭다운. 값 목록 + 랜덤 토글. */
+.ia-axmenu { display: flex; flex-direction: column; gap: 8px; }
+.ia-axmenu-list { display: flex; flex-direction: column; gap: 3px; }
+.ia-axmenu-row, .ia-axmenu-rand {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 7px 9px; text-align: left; cursor: pointer;
+  font-family: var(--font-body); font-size: 12px; line-height: 1.35;
+  color: var(--text-secondary); background: rgba(255,255,255,0.03);
+  border: 1px solid transparent; border-radius: 7px;
+}
+.ia-axmenu-row:hover, .ia-axmenu-rand:hover {
+  background: rgba(255,255,255,0.08); color: var(--text-primary);
+}
+.ia-axmenu-row.is-on {
+  color: var(--text-primary); font-weight: 600;
+  background: rgba(124,106,239,0.20); border-color: var(--accent);
+}
+.ia-axmenu-rand { border-color: var(--border-dim); }
+.ia-axmenu-rand.is-on {
+  color: var(--text-primary);
+  background: rgba(124,106,239,0.16); border-color: var(--accent);
+}
+.ia-axmenu-box {
+  flex: none; width: 13px; height: 13px; border-radius: 3px;
+  border: 1px solid var(--border-glow); display: flex;
+  align-items: center; justify-content: center; font-size: 9px;
+}
+/* 랜덤이 켜져 있으면 값은 생성할 때 정해진다 — 목록을 흐리게 두어 알린다.
+   누를 수는 있다(그러면 랜덤이 꺼지고 그 값으로 고정된다). */
+.ia-axmenu.is-rand .ia-axmenu-list { opacity: 0.55; }
+
 /* --- 앵커 팝업(검색창 상단 통합 + 분류 탐색) --- */
 /* 여기서 화면 높이만큼 늘리던 것을 뗐다 — 위의 `.ia-panel` 이 62dvh 로 상한을
    두는데 이 줄이 나중에 나와 그걸 덮었다(실측: 계산된 max-height 가 926px).

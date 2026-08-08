@@ -367,7 +367,19 @@ export function createInteractivePanel({
     // **`rating` 과 다른 것이다.** 위의 `rating: 's'` 는 코퍼스 추천 질의에 쓰는
     // 값이고, 이것은 프롬프트에 나가는 rating 태그다(사용자 지정 2026-08-07).
     ratingPick: newRating(),
+    // 빠른 입력(Fast). 팝업을 열지 않고 프롬프트를 덧붙이는 자리다.
+    //   chars[cid] = {p, n, open}  캐릭터별 추가 프롬프트 / 추가 네거티브
+    //   neg / negOpen             전역 추가 네거티브
+    // **문자열 그대로** 둔다 — 태그로 쪼개지 않는다(freeText 와 같은 이유).
+    fast: {chars: {}, neg: '', negOpen: false},
   };
+
+  /** 이 캐릭터의 Fast 칸(없으면 만든다). */
+  function fastOf(cid) {
+    const box = state.fast || (state.fast = {chars: {}, neg: '', negOpen: false});
+    const map = box.chars || (box.chars = {});
+    return map[cid] || (map[cid] = {p: '', n: '', open: false});
+  }
 
   function newCharacter(open) {
     // id 는 안정적 고유값(표시 라벨 C1..Cn 은 렌더 시 index 로 계산). gender 기본 female.
@@ -486,10 +498,29 @@ export function createInteractivePanel({
     // 빈 자리에서 0.5/0.5 로 채운다(api_service.py `default_center`) — 그래서 혼자여도
     // 중앙 좌표는 결국 나간다. 여기서 정하는 것은 '사용자가 좌표를 정했는가'까지다.
     const withCenter = members.length > 1;
-    // 캐릭터별 네거티브 UI 는 아직 없어 uc 는 빈 문자열. center 는 NAI V4 전용.
-    return members.map(c => withCenter
-      ? {prompt: buildCharPrompt(c), uc: '', center: posCenters(c.pos)}
-      : {prompt: buildCharPrompt(c), uc: ''});
+    // 캐릭터별 추가 프롬프트·추가 네거티브는 Fast 상자(C1 Fast)가 준다.
+    // uc 는 예전에 늘 빈 문자열이었다 — 이제 그 자리가 채워진다.
+    return members.map(c => {
+      const f = fastOf(c.id);
+      const row = {prompt: joinTags(buildCharPrompt(c), f.p), uc: cleanTags(f.n)};
+      if (withCenter) row.center = posCenters(c.pos);
+      return row;
+    });
+  }
+
+  /** 쉼표로 잇되 빈 쪽은 흘린다. 앞뒤 공백·중복 쉼표를 남기지 않는다. */
+  function joinTags(a, b) {
+    const parts = [a, b].map(cleanTags).filter(Boolean);
+    return parts.join(', ');
+  }
+
+  function cleanTags(v) {
+    return String(v || '').replace(/\s+/g, ' ').replace(/^[\s,]+|[\s,]+$/g, '').trim();
+  }
+
+  /** Neg Fast — 생성할 때 네거티브 뒤에 붙는다(호스트가 가져간다). */
+  function fastNegative() {
+    return cleanTags(state.fast?.neg);
   }
 
   function emitChange() {
@@ -855,11 +886,11 @@ export function createInteractivePanel({
       if (on) {
         items.push({t: ax.key.toUpperCase() + ' 🎲', r: true,
                     d: `data-ap-rand="${ax.key}"`,
-                    tip: `${ax.label} 랜덤 끄기 (마지막에 뽑힌 값이 남습니다)`});
+                    tip: `${ax.label} — 눌러서 값을 고르거나 랜덤을 끕니다`});
       } else if (i > 0) {
         items.push({t: ax.key.toUpperCase() + ' ' + ax.items[i][1],
                     d: `data-ap-axis="${ax.key}"`,
-                    tip: `${ax.label} — 눌러서 다음 값으로 (마지막에서 한 번 더 누르면 꺼집니다)`});
+                    tip: `${ax.label} — 눌러서 값을 고릅니다 ('정의하지 않음'을 고르면 사라집니다)`});
       }
     });
     (comp.specials || []).forEach(tag => {
@@ -990,16 +1021,20 @@ export function createInteractivePanel({
           return;
         }
         const comp = state.composition;
+        // 축 칩은 **목록을 띄운다.** 순환은 무엇이 있는지 안 보여서 원하는 값에
+        // 닿으려면 눈 감고 여러 번 눌러야 했다(사용자 지적 2026-08-08).
+        // 랜덤 칩도 같은 목록을 연다 — 거기서 랜덤을 끄거나 값을 직접 고른다.
+        const axKey = ap.dataset.apAxis ?? ap.dataset.apRand;
+        if (axKey !== undefined) {
+          if (miniOpen === 'axis' && miniAxisKey === axKey) { closeCompPopup(); return; }
+          miniAxisKey = axKey;
+          openMiniPopup('axis', ap);
+          return;
+        }
+        // POV·스페셜은 켜고 끄는 것뿐이라 고를 게 없다 — 그대로 눌러서 끈다.
         if (ap.dataset.apPov !== undefined) comp.pov = false;
         else if (ap.dataset.apSpecial !== undefined) {
           comp.specials = (comp.specials || []).filter(t => t !== ap.dataset.apSpecial);
-        } else if (ap.dataset.apRand !== undefined) {
-          // 랜덤을 끈다. **마지막에 뽑힌 값은 남긴다** — 방금 나온 그림이 마음에
-          // 들어 고정하려는 것이 이 동작의 쓸모다.
-          comp.rand = (comp.rand || []).filter(k => k !== ap.dataset.apRand);
-        } else if (ap.dataset.apAxis !== undefined) {
-          const ax = COMP_AXES.find(a => a.key === ap.dataset.apAxis);
-          if (ax) comp[ax.key] = ((comp[ax.key] || 0) + 1) % ax.items.length;
         }
         onCompChange();
         return;
@@ -1392,6 +1427,166 @@ export function createInteractivePanel({
     // Interactive 에서 히스토리로 들어갈 길이 통째로 막혔다(사용자 지적).
     host.style.width = Math.max(0, Math.round(sceneRightEdge() - left - 12)) + 'px';
     if (host.innerHTML) host.classList.add('open');
+    positionFastFloat();        // 씬 플로트가 움직이면 그 밑도 따라간다
+  }
+
+  // ---- 빠른 입력 플로트(C1 Fast / Neg Fast) ----
+  // **씬 플로트 안에 두지 않는다.** 그쪽은 renderBlocks 가 매번 innerHTML 을 통째로
+  // 갈아 끼우는 자리라, 텍스트 상자를 넣으면 아무 렌더에나 입력 중인 글자가 날아간다
+  // (슬롯 입력창이 겪은 그 문제다 — renderBlocks 의 keepFocus 주석 참조).
+  // 별도 마운트로 두고 위치만 씬 플로트 밑에 맞춘다.
+  let fastMount = null;
+  let fastSig = '';           // 이 서명이 그대로면 다시 그리지 않는다(입력 보존)
+
+  function ensureFastMount() {
+    if (fastMount && document.body.contains(fastMount)) return fastMount;
+    fastMount = document.createElement('div');
+    fastMount.className = 'ia-fast-float';
+    (document.querySelector('.viewer-wrapper') || document.body).appendChild(fastMount);
+    fastMount.addEventListener('mousedown', keepEditingFocus);
+    bindFastMount();
+    return fastMount;
+  }
+
+  /** 라벨 한 줄. 이름이 있으면 이름, 없으면 특징 앞부분. */
+  function fastLabel(c, index) {
+    const tag = 'C' + (index + 1);
+    const name = String(c.name || '').trim();
+    if (name) return `${tag} · ${name}`;
+    const hint = buildCharPrompt(c).split(',')[0].trim();
+    return hint ? `${tag} · ${hint}` : tag;
+  }
+
+  /** 상자 하나. `fields` 는 [칸이름, 라벨, 안내문] 목록.
+   *  값은 마크업에 넣지 않는다 — syncFastValues() 가 `.value` 로 채운다.
+   *  사용자가 적은 `<`·따옴표·줄바꿈이 마크업으로 새지 않게 하려는 것이다. */
+  function fastBoxHtml(key, title, open, fields) {
+    const body = open
+      ? fields.map(([f, label, hint]) =>
+          `<div class="ia-fast-sub">${escHtml(label)}</div>`
+          + `<textarea class="ia-fast-input" data-fast="${key}:${f}" rows="2"`
+          + ` placeholder="${escHtml(hint)}"></textarea>`).join('')
+        + '<button type="button" class="ia-fast-gen" data-fast-gen="1">⚡ Generate</button>'
+      : '';
+    return `<div class="ia-fast-box${open ? ' is-open' : ''}">`
+      + `<button type="button" class="ia-fast-head" data-fast-toggle="${key}">`
+      + `<span class="ia-fast-caret">${open ? '▾' : '▸'}</span>`
+      + `<span class="ia-fast-title">${escHtml(title)}</span></button>`
+      + `<div class="ia-fast-body">${body}</div></div>`;
+  }
+
+  const FAST_CHAR_FIELDS = [
+    ['p', 'Additional Prompt', '생성할 때 이 캐릭터에 덧붙일 태그'],
+    ['n', 'Additional Negative', '생성할 때 이 캐릭터에 덧붙일 네거티브'],
+  ];
+  const FAST_NEG_FIELDS = [
+    ['n', 'Additional Negative', '생성할 때 덧붙일 네거티브'],
+  ];
+
+  function fastFloatHtml() {
+    const boxes = [];
+    state.chars.forEach((c, i) => {
+      if (c.state !== 'active') return;          // 꺼 둔 캐릭터는 자리도 차지하지 않는다
+      boxes.push(fastBoxHtml('c:' + c.id, fastLabel(c, i) + ' Fast',
+                             !!fastOf(c.id).open, FAST_CHAR_FIELDS));
+    });
+    boxes.push(fastBoxHtml('neg', 'Neg Fast', !!state.fast?.negOpen, FAST_NEG_FIELDS));
+    return boxes.join('');
+  }
+
+  /** 다시 그릴지 판단하는 서명. **입력 내용은 넣지 않는다** — 넣으면 한 글자마다
+   *  다시 그려서 캐럿이 튄다. 상자 구성(누가 있고 무엇이 펼쳐졌나)만 본다. */
+  function fastSignature() {
+    const chars = state.chars
+      .filter(c => c.state === 'active')
+      .map((c, i) => [c.id, fastOf(c.id).open ? 1 : 0, fastLabel(c, i)].join('~'))
+      .join('|');
+    return chars + '#' + (state.fast?.negOpen ? 1 : 0);
+  }
+
+  /** `data-fast` 한 칸을 푼다. 'c:<cid>:p' | 'c:<cid>:n' | 'neg:n' */
+  function fastRef(raw) {
+    const parts = String(raw || '').split(':');
+    if (parts[0] === 'neg') return {kind: 'neg'};
+    if (parts[0] === 'c' && parts.length === 3) {
+      return {kind: 'char', cid: parts[1], field: parts[2]};
+    }
+    return null;
+  }
+
+  function fastRead(ref) {
+    if (!ref) return '';
+    return ref.kind === 'neg'
+      ? String(state.fast?.neg || '')
+      : String(fastOf(ref.cid)[ref.field] || '');
+  }
+
+  /** textarea 값을 상태에서 채운다(포커스가 있는 칸은 건드리지 않는다 — 캐럿이 튄다). */
+  function syncFastValues() {
+    if (!fastMount) return;
+    fastMount.querySelectorAll('.ia-fast-input').forEach(ta => {
+      if (ta === document.activeElement) return;
+      const next = fastRead(fastRef(ta.dataset.fast));
+      if (ta.value !== next) ta.value = next;
+    });
+  }
+
+  function renderFast() {
+    const host = ensureFastMount();
+    const sig = fastSignature();
+    if (sig !== fastSig) {
+      fastSig = sig;
+      host.innerHTML = fastFloatHtml();
+    }
+    syncFastValues();
+    positionFastFloat();
+  }
+
+  /** 이벤트는 마운트에 **한 번만** 건다(내용이 바뀌어도 다시 걸 필요가 없다). */
+  function bindFastMount() {
+    fastMount.addEventListener('click', event => {
+      const t = event.target.closest('[data-fast-toggle]');
+      if (t) {
+        const ref = fastRef(t.dataset.fastToggle + ':x');   // 'c:<cid>:x' | 'neg:x'
+        if (!ref) return;
+        if (ref.kind === 'neg') state.fast.negOpen = !state.fast.negOpen;
+        else { const f = fastOf(ref.cid); f.open = !f.open; }
+        renderFast();
+        return;
+      }
+      if (event.target.closest('[data-fast-gen]')) {
+        event.preventDefault();
+        // 메인 Generate 의 거울이다 — 같은 경로를 그대로 쓴다.
+        requestGeneration();
+      }
+    });
+    fastMount.addEventListener('input', event => {
+      const ta = event.target.closest('.ia-fast-input');
+      if (!ta) return;
+      const ref = fastRef(ta.dataset.fast);
+      if (!ref) return;
+      if (ref.kind === 'neg') state.fast.neg = ta.value;
+      else fastOf(ref.cid)[ref.field] = ta.value;
+      // 저장만 시킨다(호스트의 onPromptChange 가 곧 '작업 결과 기억'이다).
+      // **반응형 생성은 타지 않는다** — emitChange() 를 부르면 한 글자마다 유료
+      // 생성이 나간다(슬롯 입력이 겪은 그 문제, reactiveTypingSlot 주석 참조).
+      // 캐릭터 추가 프롬프트는 char_captions 로 따로 나가고 추가 네거티브는
+      // 네거티브라, 베이스 프롬프트 문자열은 어차피 달라지지 않는다.
+      onPromptChange(renderPrompt(), null);
+    });
+  }
+
+  function positionFastFloat() {
+    if (!fastMount) return;
+    const host = sceneMount;
+    if (!host || !host.classList.contains('open')) {
+      fastMount.classList.remove('open');
+      return;
+    }
+    const b = host.getBoundingClientRect();
+    fastMount.style.left = Math.round(b.left) + 'px';
+    fastMount.style.top = Math.round(b.bottom + 6) + 'px';
+    fastMount.classList.add('open');
   }
 
   function renderBlocks() {
@@ -1423,6 +1618,7 @@ export function createInteractivePanel({
     applyReactiveTip();
     watchResultTab();
     positionSceneFloat();
+    renderFast();               // 씬 플로트 밑에 붙는 빠른 입력 상자
     syncGlobalEditor();
     // 초기 렌더는 `blocksMount.hidden` 이 아직 true 인 시점에 돌 수 있다(실측: 새로고침
     // 하면 버튼은 생기는데 플로트가 안 열렸다). 레이아웃이 잡힌 다음 프레임에 한 번 더
@@ -5069,15 +5265,71 @@ export function createInteractivePanel({
   //
   // 열림 상태는 하나뿐이다: 둘이 동시에 열리면 서로를 덮는다.
   let miniPopup = null;
-  let miniOpen = '';            // '' | 'comp' | 'rating'
+  let miniOpen = '';            // '' | 'comp' | 'rating' | 'axis'
   let miniAnchor = null;
+  let miniAxisKey = '';         // 'axis' 일 때 어느 축인지
 
   const MINI = {
     comp:   {title: '축 프리셋', body: () => compPanelHtml(),
              bind: () => bindCompPanel(), anchorSel: '[data-comp-preset]'},
     rating: {title: 'Rating',    body: () => ratingSectionHtml(),
              bind: () => bindRatingSection(), anchorSel: '[data-ap-rating]'},
+    // 칩을 눌렀을 때 뜨는 값 고르기. 예전에는 누를 때마다 값이 **순환**했는데,
+    // 무엇이 있는지 보이지 않아 원하는 값에 닿으려면 눈 감고 여러 번 눌러야 했다
+    // (사용자 지적 2026-08-08). 목록으로 보여주고 랜덤도 여기서 켜고 끈다.
+    axis:   {title: () => axisOf(miniAxisKey)?.label || '축',
+             body: () => axisMenuHtml(), bind: () => bindAxisMenu(),
+             anchorSel: null},
   };
+
+  function axisOf(key) { return COMP_AXES.find(a => a.key === key) || null; }
+
+  /** 축 하나의 값 목록 + 랜덤 토글. */
+  function axisMenuHtml() {
+    const ax = axisOf(miniAxisKey);
+    if (!ax) return '';
+    const comp = state.composition || {};
+    const cur = comp[ax.key] || 0;
+    const rnd = (comp.rand || []).includes(ax.key);
+    const rows = ax.items.map(([full, short], i) =>
+      `<button type="button" class="ia-axmenu-row${i === cur ? ' is-on' : ''}"`
+      + ` data-axpick="${i}">${escHtml(full)}</button>`).join('');
+    // 랜덤이 켜져 있으면 값 선택은 생성 때 정해진다 — 목록을 흐리게 두어 알린다.
+    return `<div class="ia-axmenu${rnd ? ' is-rand' : ''}">`
+      + `<button type="button" class="ia-axmenu-rand${rnd ? ' is-on' : ''}" data-axrand="1">`
+      + `<span class="ia-axmenu-box">${rnd ? '✓' : ''}</span> 🎲 랜덤 — 생성할 때 뽑습니다`
+      + '</button>'
+      + `<div class="ia-axmenu-list">${rows}</div></div>`;
+  }
+
+  function bindAxisMenu() {
+    const host = miniPopup && miniPopup.querySelector('.ia-axmenu');
+    if (!host) return;
+    const ax = axisOf(miniAxisKey);
+    if (!ax) return;
+    const comp = state.composition || (state.composition = {});
+    host.querySelector('[data-axrand]')?.addEventListener('click', () => {
+      const list = comp.rand || (comp.rand = []);
+      const i = list.indexOf(ax.key);
+      if (i >= 0) list.splice(i, 1); else list.push(ax.key);
+      onCompChange();
+      // 팝업 내용도 새로 그린다 — 체크 표시가 그대로면 눌린 줄 모른다.
+      const el = miniPopup?.querySelector('.ia-axmenu');
+      if (el) { el.outerHTML = axisMenuHtml(); bindAxisMenu(); }
+    });
+    host.querySelectorAll('[data-axpick]').forEach(el => {
+      el.addEventListener('click', () => {
+        const i = Number(el.dataset.axpick) || 0;
+        comp[ax.key] = i;
+        // 값을 직접 골랐다는 것은 "이걸로 하겠다"는 뜻이다 — 랜덤은 끈다.
+        // 안 그러면 칩은 🎲 인 채로 남고 방금 고른 값은 생성 때 덮여 사라진다.
+        // '정의하지 않음'(i === 0)이면 그 김에 칩 자체가 사라진다(사용자 지정).
+        comp.rand = (comp.rand || []).filter(k => k !== ax.key);
+        onCompChange();
+        closeCompPopup();
+      });
+    });
+  }
 
   function ensureMiniPopup() {
     if (miniPopup && document.body.contains(miniPopup)) return miniPopup;
@@ -5098,7 +5350,9 @@ export function createInteractivePanel({
     const def = MINI[kind];
     if (!def) return;
     const el = ensureMiniPopup();
-    el.innerHTML = `<div class="ia-comp-popup-head"><span>${escHtml(def.title)}</span>`
+    // \uc81c\ubaa9\uc740 \ud568\uc218\uc5ec\ub3c4 \ub41c\ub2e4 \u2014 \ucd95 \ub4dc\ub86d\ub2e4\uc6b4\uc740 \uc5b4\ub290 \ucd95\uc774\ub0d0\uc5d0 \ub530\ub77c \uc81c\ubaa9\uc774 \ub2ec\ub77c\uc9c4\ub2e4.
+    const title = typeof def.title === 'function' ? def.title() : def.title;
+    el.innerHTML = `<div class="ia-comp-popup-head"><span>${escHtml(title)}</span>`
       + '<button type="button" class="ia-panel-close" data-comp-close="1">\u00d7</button></div>'
       + def.body();
     el.hidden = false;
@@ -5125,7 +5379,7 @@ export function createInteractivePanel({
     if (miniPopup && miniPopup.contains(event.target)) return;
     const t = event.target.closest ? event.target : event.target.parentElement;
     // 여는 버튼 위 클릭은 그 버튼의 토글이 처리한다.
-    if (t && t.closest('[data-comp-preset], [data-ap-rating]')) return;
+    if (t && t.closest('[data-comp-preset], [data-ap-rating], [data-ap-axis], [data-ap-rand]')) return;
     // **드롭다운 목록은 팝업 밖에 산다.** 앱이 네이티브 select 를 숨기고
     // (`native-select-hidden`) 커스텀 위젯으로 바꾸는데, 그 목록(`custom-select-menu`)
     // 은 `document.body` 직계다(customSelects.mjs). 그래서 항목을 고르는 순간
@@ -5517,6 +5771,9 @@ export function createInteractivePanel({
       closePositionPicker(); closePresetPanel(); closePanel();
       // 모드를 끄면 씬 버튼 줄도 사라져야 한다 — blocksMount 만 숨기면 플로트가 남는다.
       if (sceneMount) { sceneMount.classList.remove('open'); sceneMount.innerHTML = ''; }
+      // 빠른 입력 상자도 같이 접는다. **내용은 지우지 않는다** — 모드를 껐다 켰다
+      // 하는 것만으로 적어 둔 것이 사라지면 안 된다(값은 state.fast 에 있다).
+      if (fastMount) fastMount.classList.remove('open');
     } else { renderBlocks(); preloadAsideData(); }
     onActiveChange(active);
     if (!silent && active) emitChange();
@@ -5559,6 +5816,8 @@ export function createInteractivePanel({
     // 생성 요청용 캐릭터(활성 + 태그 보유, NAI 상한 5). app.js 가 overrides.characters/uc/
     // character_positions 로 싣는다.
     getGenerationCharacters: generationCharacters,
+    // Neg Fast — 생성할 때 네거티브 뒤에 붙일 문자열(없으면 '').
+    getFastNegative: fastNegative,
     // Assets(조합 스냅샷) 입출력. 생성 시 기록하고, 목록에서 고르면 되돌린다.
     getSnapshotChars: snapshotChars,
     /** 캐릭터에 속하지 않는 값(씬 슬롯 + 구도 콤보). Assets 미리보기 하단이 쓴다.
@@ -5588,6 +5847,16 @@ export function createInteractivePanel({
         rating: {
           mode: (state.ratingPick && state.ratingPick.mode) || 'single',
           picks: [...((state.ratingPick && state.ratingPick.picks) || [])],
+        },
+        // 빠른 입력. 캐릭터 키는 세션마다 새로 매겨지는 id 라(charSeq), 저장/복원은
+        // **캐릭터 순서**에 맞춘다 — id 로 저장하면 다음 세션에서 아무것도 안 붙는다.
+        fast: {
+          neg: String(state.fast?.neg || ''),
+          negOpen: !!state.fast?.negOpen,
+          chars: state.chars.map(c => {
+            const f = fastOf(c.id);
+            return {p: String(f.p || ''), n: String(f.n || ''), open: !!f.open};
+          }),
         },
       };
     },
@@ -5636,6 +5905,24 @@ export function createInteractivePanel({
         }
         // v1 저장분에는 없다 — 그때는 빈 문자열로 시작한다.
         state.freeText = typeof saved.freeText === 'string' ? saved.freeText : '';
+        // 빠른 입력. 캐릭터는 **순서**로 맞춘다(id 는 세션마다 새로 매겨진다).
+        // applySnapshotChars 가 이미 돌아 state.chars 가 최종 목록이다.
+        const fs = saved.fast;
+        state.fast = {chars: {}, neg: '', negOpen: false};
+        if (fs && typeof fs === 'object') {
+          state.fast.neg = typeof fs.neg === 'string' ? fs.neg : '';
+          state.fast.negOpen = !!fs.negOpen;
+          if (Array.isArray(fs.chars)) {
+            state.chars.forEach((c, i) => {
+              const row = fs.chars[i];
+              if (!row || typeof row !== 'object') return;
+              fastOf(c.id).p = typeof row.p === 'string' ? row.p : '';
+              fastOf(c.id).n = typeof row.n === 'string' ? row.n : '';
+              fastOf(c.id).open = !!row.open;
+            });
+          }
+        }
+        fastSig = '';            // 구성이 바뀌었을 수 있다 — 다음 렌더에서 새로 그린다
         if (active) { renderBlocks(); emitChange(); }
         return true;
       } catch (_) {

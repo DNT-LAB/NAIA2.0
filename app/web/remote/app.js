@@ -5629,6 +5629,18 @@ async function generateWithInteractiveSnapshot(payload) {
       overrides: buildWebGenerationOverrides(rolled, payload?.negative_prompt || ''),
     };
   }
+  // Neg Fast — Negative 패널을 열지 않고 적어 둔 추가 네거티브를 뒤에 붙인다.
+  // 프롬프트 상자를 건드리지 않고 **이 요청에만** 싣는다: 네거티브 박스에 써 넣으면
+  // Interactive 를 끈 뒤에도 남아 다음 생성까지 따라간다.
+  if (interactivePanel?.isActive?.()) {
+    const extraNeg = interactivePanel.getFastNegative?.() || '';
+    if (extraNeg) {
+      const base = String(payload?.negative_prompt || '');
+      const merged = base ? `${base}, ${extraNeg}` : extraNeg;
+      payload = {...payload, negative_prompt: merged};
+      if (payload.overrides) payload.overrides.negative_prompt = merged;
+    }
+  }
   // **백엔드 Auto Gen 루프를 끈다.** 이 마커는 core/auto_generation_flags.py 의
   // AUTO_GENERATE_SUPPRESSED_FLAGS 에 이미 등록돼 있어, 붙기만 하면 서버 쪽
   // 연쇄(_should_continue_auto_generation)가 멈춘다.

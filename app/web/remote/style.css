@@ -10355,6 +10355,14 @@ body.resizing-result-info {
   align-items: center;
   gap: 6px;
 }
+/* Quick Preset 검색창. 제목 줄 오른쪽, [ⓘ 가이드] 앞에 앉는다. */
+.pe-preset-search {
+  width: 140px; padding: 3px 7px; border-radius: 6px;
+  background: rgba(0,0,0,0.30); border: 1px solid var(--border-dim);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px;
+}
+.pe-preset-search::placeholder { color: var(--text-dim); }
+.pe-preset-search:focus { outline: none; border-color: var(--accent); }
 .module-badge {
   display: inline-block;
   margin-left: 4px;

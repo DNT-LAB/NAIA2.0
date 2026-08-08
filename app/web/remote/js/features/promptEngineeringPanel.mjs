@@ -56,7 +56,12 @@ const PE_QUICK_PRESET_GUIDE = [
   '[Add] 현재 설정을 새 프리셋으로 저장 · [Manage] 이름 변경·삭제·썸네일 관리. 프리셋은 API 모드(NAI/WEBUI/COMFYUI)별로 구분되어 저장됩니다.',
 ].join('\\n\\n');
 
-const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
+// 프리셋 검색창도 여기 넣는다. render() 는 이 목록 중 하나가 포커스를 쥐고 있으면
+// 통째로 다시 그리기를 건너뛴다 — 안 넣으면 한 글자 칠 때마다 오는 module_state
+// 브로드캐스트가 입력창을 새 노드로 갈아 끼워 포커스가 날아간다.
+const PE_EDITABLE_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide', 'modPresetSearch'];
+// 그중 태그 자동완성을 붙일 칸(검색창은 제외).
+const PE_TAG_ASSIST_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
 
 // Ollama Auto Boost — readiness gating. 대상 모델은 백엔드(연결 설정)가 SSOT —
 // status 쿼리에 model을 보내지 않아 커스텀 엔드포인트/모델에서도 구성된 모델 기준으로
@@ -187,6 +192,59 @@ export function createPromptEngineeringPanel({
     }
   }
 
+  // ---- Quick Preset 검색 ----
+  // 현재 API 모드의 프리셋 중, 입력한 문자열을 **본문에 포함하는** 것만 남긴다.
+  // 쉼표로 여러 개를 주면 **모두** 포함해야 남는다(좁혀 가는 필터). 매칭은 단순
+  // 부분 문자열(대소문자 무시) — 토큰 경계나 와일드카드는 보지 않는다.
+  let presetQuery = '';
+  let presetHaystack = new Map();     // 프리셋 이름 -> 검색 대상 문자열(소문자)
+  let presetAllOptions = null;        // 필터 전 원본 <option> 들
+
+  function presetTerms(raw) {
+    return String(raw || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+  }
+
+  /** `<option>` 을 **지웠다 되돌린다.** `hidden` 은 듣지 않는다 — 네이티브 select 는
+   *  커스텀 위젯으로 대체되는데(customSelects.mjs) 그 메뉴는 `select.options` 를
+   *  통째로 훑고 `hidden` 을 보지 않는다. 대신 select 를 MutationObserver 로
+   *  지켜보고 있어서, 자식을 갈아 끼우면 메뉴가 알아서 다시 그려진다. */
+  function applyPresetFilter() {
+    const select = document.getElementById('modPreset');
+    if (!select) return;
+    if (!presetAllOptions) presetAllOptions = Array.from(select.options);
+    const terms = presetTerms(presetQuery);
+    const current = select.value;
+    const keep = presetAllOptions.filter(opt => {
+      // 지금 고른 프리셋은 **항상 남긴다.** 지워 버리면 select 의 값이 조용히
+      // 다른 프리셋으로 바뀌고, 검색만 했는데 적용된 프리셋이 갈린다.
+      if (opt.value === current) return true;
+      if (!terms.length) return true;
+      const hay = presetHaystack.get(opt.value);
+      if (hay === undefined) return false;
+      return terms.every(t => hay.includes(t));
+    });
+    const same = keep.length === select.options.length
+      && keep.every((opt, i) => select.options[i] === opt);
+    if (same) return;                 // 바뀐 게 없으면 건드리지 않는다(메뉴 재생성 방지)
+    select.replaceChildren(...keep);
+    if (select.value !== current) select.value = current;
+  }
+
+  function bindPresetSearch() {
+    const input = document.getElementById('modPresetSearch');
+    if (!input || input.dataset.bound === '1') return;
+    input.dataset.bound = '1';
+    input.addEventListener('input', () => {
+      presetQuery = input.value;
+      applyPresetFilter();
+    });
+    // 검색어를 지우는 것은 '전체로 되돌리기'다 — search 입력의 ✕ 도 여기로 온다.
+    input.addEventListener('search', () => {
+      presetQuery = input.value;
+      applyPresetFilter();
+    });
+  }
+
   function captureFocus() {
     const active = document.activeElement;
     if (!active || !PE_EDITABLE_IDS.includes(active.id)) return null;
@@ -243,6 +301,20 @@ export function createPromptEngineeringPanel({
       if (summary && summary.name) summaryMap.set(String(summary.name), summary);
     });
 
+    // 프리셋 검색 색인. 현재 API 모드의 프리셋만 담긴다 — `preset_options` 자체가
+    // `store.preset_options()`(현재 모드) 이라 여기서 따로 거를 것이 없다.
+    presetHaystack = new Map();
+    // 이 렌더가 select 를 새로 만든다 — 원본 option 캐시는 여기서 버린다.
+    // 안 버리면 옛 노드를 붙잡고 있어, 프리셋을 추가·삭제해도 목록이 낡은 채로 남는다.
+    presetAllOptions = null;
+    (m.preset_summaries || []).forEach(s => {
+      if (!s || !s.name) return;
+      presetHaystack.set(String(s.name), [
+        s.name, s.description, s.pre_prompt_preview,
+        s.post_prompt_preview, s.auto_hide_preview,
+      ].map(v => String(v || '')).join('\n').toLowerCase());
+    });
+
     const presetOpts = (m.preset_options || [])
       .map(preset => {
         const summary = summaryMap.get(String(preset));
@@ -285,7 +357,7 @@ export function createPromptEngineeringPanel({
 
     const presetControlHtml = `
     <div>
-      <div class="mod-section-label has-actions"><span>Quick Preset</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
+      <div class="mod-section-label has-actions"><span>Quick Preset</span><span class="mod-head-actions"><input type="search" class="pe-preset-search" id="modPresetSearch" placeholder="검색 — 쉼표로 여러 개" value="${escHtml(presetQuery)}" autocomplete="off" spellcheck="false"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
       <div class="mod-preset-toolbar">
         <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>
@@ -329,10 +401,14 @@ export function createPromptEngineeringPanel({
     ${advancedHtml}
   `;
 
-    PE_EDITABLE_IDS.forEach(id => {
+    // 태그 자동완성은 **프롬프트 칸에만** 건다. 프리셋 검색창은 태그를 치는 자리가
+    // 아니라 프리셋 본문을 훑는 자리라, 붙이면 엉뚱한 태그 목록이 뜬다.
+    PE_TAG_ASSIST_IDS.forEach(id => {
       const el = document.getElementById(id);
       if (el) bindTagAssist(el);
     });
+    bindPresetSearch();
+    applyPresetFilter();
     restoreTextareaHeights(textareaHeights);
     restoreFocus(focusSnap);
     // Reflect last-known readiness immediately on the freshly rendered checkbox,

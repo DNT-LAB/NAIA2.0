@@ -510,6 +510,12 @@ header {
   letter-spacing: 0.9px; text-transform: uppercase; color: var(--text-dim);
 }
 .custom-select-preview-cap:first-child { margin-top: 0; }
+/* 검색어 형광펜. 어두운 판 위라 연노랑 바탕에 글자는 어둡게 둔다 — 바탕만
+   칠하고 글자색을 그대로 두면 밝은 글자가 밝은 바탕에 묻힌다. */
+.custom-select-hit {
+  background: #ffe98a; color: #241f00;
+  border-radius: 2px; padding: 0 1px;
+}
 /* 둘로 나뉘었으니 한 칸이 화면을 다 먹지 않게 줄인다(예전엔 prefix 하나뿐이라 200). */
 .custom-select-preview-prefix {
   max-height: 132px;

@@ -239,11 +239,22 @@ export function createPromptEngineeringPanel({
       badge.classList.toggle('is-none', terms.length > 0 && matched === 0);
     }
 
+    // 미리보기에서 형광펜으로 칠할 말들. 줄바꿈으로 넘긴다(검색어에 쉼표가
+    // 들어갈 수 있어 쉼표로는 못 가른다).
+    select.dataset.previewHighlight = terms.join('\n');
+
     const same = keep.length === select.options.length
       && keep.every((opt, i) => select.options[i] === opt);
-    if (same) return;                 // 바뀐 게 없으면 건드리지 않는다(메뉴 재생성 방지)
-    select.replaceChildren(...keep);
-    if (select.value !== current) select.value = current;
+    if (!same) {
+      select.replaceChildren(...keep);
+      if (select.value !== current) select.value = current;
+    }
+
+    // **검색하면 목록이 저절로 열린다.** 따로 눌러야 결과가 보이면 걸렀는지조차
+    // 알 수 없다(사용자 지정 2026-08-08). 여는 쪽은 포커스를 옮기지 않으므로
+    // 검색창에서 계속 칠 수 있다. 검색어를 지우면 닫는다.
+    select.dispatchEvent(new CustomEvent(
+      terms.length ? 'naia:select-open' : 'naia:select-close'));
   }
 
   function bindPresetSearch() {

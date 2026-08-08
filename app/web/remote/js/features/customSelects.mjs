@@ -106,7 +106,24 @@ export function createCustomSelectController({
     menu.addEventListener('pointerenter', onPreviewBoundaryEnter);
     menu.addEventListener('pointerleave', onPreviewBoundaryLeave);
     select.addEventListener('change', onSelectChange);
+    // 바깥에서 목록을 여는 길. 프리셋 검색이 한 글자마다 이걸 쏜다 — 검색해 놓고
+    // 드롭다운을 따로 눌러야 결과가 보이면, 걸렀는지조차 알 수 없다(사용자 지정).
+    // `openSelect` 는 포커스를 옮기지 않으므로 검색창에서 계속 칠 수 있다.
+    // 이미 열려 있어도 **다시 연다.** 한 글자 더 치면 목록이 바뀌는데, 그때
+    // 호버가 옛 항목에 남아 있으면 미리보기가 사라지거나 엉뚱한 것을 가리킨다.
+    // openSelect 는 앞에서 closeOpen 을 부르므로 다시 부르는 것이 안전하다.
+    const onOpenRequest = () => {
+      openSelect(state);
+      // 마우스가 메뉴 밖에 있어도 미리보기를 지킨다(schedulePreviewHide 주석).
+      state.searchOpen = true;
+      cancelPreviewHide(state);
+    };
+    const onCloseRequest = () => { if (openState === state) closeOpen(); };
+    select.addEventListener('naia:select-open', onOpenRequest);
+    select.addEventListener('naia:select-close', onCloseRequest);
     state.cleanup.push(
+      () => select.removeEventListener('naia:select-open', onOpenRequest),
+      () => select.removeEventListener('naia:select-close', onCloseRequest),
       () => button.removeEventListener('click', onButtonClick),
       () => button.removeEventListener('keydown', onButtonKeydown),
       () => wrapper.removeEventListener('pointerenter', onPreviewBoundaryEnter),
@@ -139,6 +156,11 @@ export function createCustomSelectController({
     if (openState?.select === select && refreshMenu) {
       renderMenu(state);
       positionMenu(state);
+      // **호버를 되살린다.** renderMenu 는 항목을 통째로 다시 만들고 미리보기를
+      // 걷는다. 프리셋 검색은 옵션을 갈아 끼우므로 여기로 오는데, 되살리지 않으면
+      // 목록만 남고 미리보기가 사라진다 — 검색어를 칠해 보여줄 자리가 없어진다
+      // (실측: 한 글자씩 치면 되고 한 번에 붙여넣으면 안 되던 차이가 이것이었다).
+      focusPreviewTarget(state);
     } else if (openState?.select === select) {
       positionMenu(state);
     }
@@ -202,6 +224,10 @@ export function createCustomSelectController({
   }
 
   function schedulePreviewHide(state) {
+    // 검색으로 연 동안은 미리보기를 걷지 않는다. 그 경로에서는 마우스가 메뉴
+    // 밖(검색창 근처)에 있어서, 목록이 뜨는 순간 pointerleave 가 걸려 220ms 뒤
+    // 미리보기가 사라진다 — 검색어를 칠하려고 띄운 것이 바로 없어졌다(실측).
+    if (state.searchOpen) return;
     cancelPreviewHide(state);
     state.previewHideTimer = window.setTimeout(() => {
       state.previewHideTimer = null;
@@ -211,6 +237,7 @@ export function createCustomSelectController({
 
   function openSelect(state) {
     closeOpen();
+    state.searchOpen = false;     // 검색 경로면 부른 쪽이 다시 켠다
     openState = state;
     state.wrapper.classList.add('is-open');
     state.button.setAttribute('aria-expanded', 'true');
@@ -218,10 +245,21 @@ export function createCustomSelectController({
     positionMenu(state);
     state.menu.hidden = false;
 
+    focusPreviewTarget(state);
+  }
+
+  /** 목록을 (다시) 그린 뒤 어디를 짚어 미리보기를 띄울지 정한다.
+   *
+   *  검색 중이면 **첫 결과**다. 고른 것은 검색에 안 걸려도 목록에 남아 있어서
+   *  (프리셋 검색 규칙) 그쪽을 띄우면 정작 찾은 것은 안 보인다. */
+  function focusPreviewTarget(state) {
+    const searching = !!(state.select.dataset.previewHighlight || '').trim();
+    const first = state.menu.querySelector('.custom-select-option');
     const selected = state.menu.querySelector('.custom-select-option.is-selected');
-    if (selected) {
-      setHoveredItem(state, selected);
-      selected.scrollIntoView({ block: 'nearest' });
+    const target = (searching && first) || selected;
+    if (target) {
+      setHoveredItem(state, target);
+      target.scrollIntoView({ block: 'nearest' });
     } else {
       hidePreview(state);
     }
@@ -231,6 +269,7 @@ export function createCustomSelectController({
     if (!openState) return;
     const state = openState;
     openState = null;
+    state.searchOpen = false;     // 닫히면 미리보기 고정도 푼다
     state.wrapper.classList.remove('is-open');
     state.button.setAttribute('aria-expanded', 'false');
     state.menu.hidden = true;
@@ -268,6 +307,49 @@ export function createCustomSelectController({
   function optionForItem(state, item) {
     const index = Number(item?.dataset?.index ?? -1);
     return Number.isInteger(index) && index >= 0 ? state.select.options[index] : null;
+  }
+
+  /** `data-preview-highlight` 에 담긴 검색어들. 줄바꿈으로 구분한다 —
+   *  검색어에 쉼표가 들어갈 수 있어 쉼표로는 못 가른다. */
+  function highlightTerms(select) {
+    return String(select?.dataset.previewHighlight || '')
+      .split('\n').map(t => t.trim()).filter(Boolean);
+  }
+
+  /** 본문에 검색어가 나온 자리를 형광펜으로 칠한다.
+   *
+   *  **innerHTML 을 쓰지 않는다.** 프리셋 본문은 사용자가 적은 것이고 `<` 나
+   *  따옴표가 얼마든지 들어간다 — 문자열로 이어 붙이면 그대로 마크업이 된다.
+   *  텍스트 노드와 `<mark>` 를 직접 만들어 붙인다. */
+  function paintTerms(host, text, terms) {
+    host.textContent = '';
+    if (!terms.length) { host.textContent = text; return; }
+    const hay = text.toLowerCase();
+    // 어느 자리가 칠해지는지 먼저 모은다(검색어끼리 겹칠 수 있다 → 병합).
+    const spans = [];
+    terms.forEach(term => {
+      const t = term.toLowerCase();
+      let i = hay.indexOf(t);
+      while (i >= 0) { spans.push([i, i + t.length]); i = hay.indexOf(t, i + t.length); }
+    });
+    if (!spans.length) { host.textContent = text; return; }
+    spans.sort((a, b) => a[0] - b[0]);
+    const merged = [spans[0]];
+    for (const [s, e] of spans.slice(1)) {
+      const last = merged[merged.length - 1];
+      if (s <= last[1]) last[1] = Math.max(last[1], e);
+      else merged.push([s, e]);
+    }
+    let at = 0;
+    for (const [s, e] of merged) {
+      if (s > at) host.append(document.createTextNode(text.slice(at, s)));
+      const mark = document.createElement('mark');
+      mark.className = 'custom-select-hit';
+      mark.textContent = text.slice(s, e);
+      host.append(mark);
+      at = e;
+    }
+    if (at < text.length) host.append(document.createTextNode(text.slice(at)));
   }
 
   function renderPreview(state, item) {
@@ -335,6 +417,7 @@ export function createCustomSelectController({
       ['Prefix', option.dataset.previewPrefix || '', 'No prefix prompt'],
       ['Postfix', option.dataset.previewPostfix, null],
     ];
+    const terms = highlightTerms(state.select);
     body.forEach(([label, text, fallback]) => {
       if (text === undefined) return;                 // 이 select 는 그 칸을 안 쓴다
       const value = String(text || '');
@@ -344,7 +427,8 @@ export function createCustomSelectController({
       cap.textContent = label;
       const pre = document.createElement('pre');
       pre.className = 'custom-select-preview-prefix';
-      pre.textContent = value || fallback;
+      if (value) paintTerms(pre, value, terms);
+      else pre.textContent = fallback;
       copy.append(cap, pre);
     });
 

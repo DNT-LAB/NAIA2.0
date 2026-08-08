@@ -502,8 +502,17 @@ header {
   font-size: 11px;
   line-height: 1.4;
 }
+/* Prefix / Postfix 를 가르는 작은 라벨. 둘이 나란히 오면 어디까지가 무엇인지
+   경계가 필요하다(Quick Preset 판과 같은 순서·같은 이름). */
+.custom-select-preview-cap {
+  margin: 6px 0 3px;
+  font-family: var(--font-mono); font-size: 8.5px; font-weight: 600;
+  letter-spacing: 0.9px; text-transform: uppercase; color: var(--text-dim);
+}
+.custom-select-preview-cap:first-child { margin-top: 0; }
+/* 둘로 나뉘었으니 한 칸이 화면을 다 먹지 않게 줄인다(예전엔 prefix 하나뿐이라 200). */
 .custom-select-preview-prefix {
-  max-height: 200px;
+  max-height: 132px;
   margin: 0;
   overflow: auto;
   white-space: pre-wrap;
@@ -10355,8 +10364,10 @@ body.resizing-result-info {
   align-items: center;
   gap: 6px;
 }
-/* Quick Preset 검색창. 제목 줄 오른쪽, [ⓘ 가이드] 앞에 앉는다. */
+/* Quick Preset 검색창. **제목 바로 옆**(왼쪽 정렬)에 앉는다 — 오른쪽 끝으로
+   밀어 두면 제목과 멀어져 무엇을 검색하는 칸인지 읽히지 않는다(사용자 지정). */
 .pe-preset-search {
+  margin-left: 10px; vertical-align: middle;
   width: 140px; padding: 3px 7px; border-radius: 6px;
   background: rgba(0,0,0,0.30); border: 1px solid var(--border-dim);
   color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px;

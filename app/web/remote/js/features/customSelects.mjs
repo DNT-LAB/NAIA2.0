@@ -327,10 +327,26 @@ export function createCustomSelectController({
       copy.append(desc);
     }
 
-    const prefix = document.createElement('pre');
-    prefix.className = 'custom-select-preview-prefix';
-    prefix.textContent = option.dataset.previewPrefix || 'No prefix prompt';
-    copy.append(prefix);
+    // Quick Preset 판과 **같은 구조**로 보여준다: Prefix 다음 Postfix.
+    // 예전에는 prefix 만 떠서, 검색이 postfix 까지 훑는데도 무엇이 걸렸는지
+    // 여기서 확인할 방법이 없었다(사용자 지적 2026-08-08).
+    // postfix 를 실어 주지 않는 select 는 그 칸 자체가 나오지 않는다.
+    const body = [
+      ['Prefix', option.dataset.previewPrefix || '', 'No prefix prompt'],
+      ['Postfix', option.dataset.previewPostfix, null],
+    ];
+    body.forEach(([label, text, fallback]) => {
+      if (text === undefined) return;                 // 이 select 는 그 칸을 안 쓴다
+      const value = String(text || '');
+      if (!value && fallback === null) return;        // 비어 있으면 굳이 자리를 만들지 않는다
+      const cap = document.createElement('div');
+      cap.className = 'custom-select-preview-cap';
+      cap.textContent = label;
+      const pre = document.createElement('pre');
+      pre.className = 'custom-select-preview-prefix';
+      pre.textContent = value || fallback;
+      copy.append(cap, pre);
+    });
 
     preview.append(thumb, copy);
     if (state.select.dataset.previewActions !== 'none') {

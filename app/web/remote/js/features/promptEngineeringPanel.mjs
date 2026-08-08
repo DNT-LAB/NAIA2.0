@@ -324,6 +324,9 @@ export function createPromptEngineeringPanel({
           `data-preview-name="${escHtml(summary.name || preset)}"`,
           `data-preview-mode="${escHtml(summary.api_mode || '')}"`,
           `data-preview-prefix="${escHtml(compactPreviewText(summary.pre_prompt_preview, 1200))}"`,
+          // Postfix 도 실어 준다 — 검색이 postfix 까지 훑으므로, 무엇이 걸렸는지
+          // 미리보기에서 확인할 수 있어야 한다(사용자 지적 2026-08-08).
+          `data-preview-postfix="${escHtml(compactPreviewText(summary.post_prompt_preview, 1200))}"`,
           `data-preview-description="${escHtml(compactPreviewText(summary.description, 300))}"`,
           `data-preview-thumbnail="${escHtml(summary.thumbnail_url || '')}"`,
         ].join(' ') : '';
@@ -358,7 +361,7 @@ export function createPromptEngineeringPanel({
 
     const presetControlHtml = `
     <div>
-      <div class="mod-section-label has-actions"><span>Quick Preset</span><span class="mod-head-actions"><input type="search" class="pe-preset-search" id="modPresetSearch" placeholder="검색 — 쉼표로 여러 개" value="${escHtml(presetQuery)}" autocomplete="off" spellcheck="false"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
+      <div class="mod-section-label has-actions"><span>Quick Preset<input type="search" class="pe-preset-search" id="modPresetSearch" placeholder="검색 — 쉼표로 여러 개" value="${escHtml(presetQuery)}" autocomplete="off" spellcheck="false"></span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
       <div class="mod-preset-toolbar">
         <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>

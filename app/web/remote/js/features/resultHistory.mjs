@@ -1782,7 +1782,16 @@ export function createResultHistoryController({
     ensureRailSelectionBar();
     initRail();
     bindInfiniteScroll();
-    bindDragSelection(viewerGrid);
+    // **레일 격자에는 드래그 선택을 걸지 않는다.** 히스토리로 들어가지 않은
+    // 메인 화면에서 마퀴가 도는 것은 의도한 사양이 아니다(사용자 지적
+    // 2026-08-08) — 좁은 레일에서 스크롤하려다 여러 장이 선택된다.
+    // 여기서는 **개별 클릭만** 지원한다. 드래그는 팝업(`#vpGrid`)에서만
+    // 걸린다(openPopup 안의 bindDragSelection).
+    //
+    // tabIndex 는 그 배선이 세우고 있었다 — 빼면 `configureThumb` 의
+    // `grid.focus()` 가 조용히 no-op 이 되어 키보드 판정(`viewerPanel.contains
+    // (activeElement)`)이 어긋난다. 포커스만 따로 남긴다.
+    if (viewerGrid && !viewerGrid.hasAttribute('tabindex')) viewerGrid.tabIndex = 0;
     bindKeyboard();
     bindShortcutInputs();
     bindRailSettings();

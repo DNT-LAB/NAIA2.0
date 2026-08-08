@@ -608,7 +608,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260602-director7')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260808n-fast')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260808-fix1')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260808n-fast')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -6929,7 +6929,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260724-catfilter9')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260808n-fast')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

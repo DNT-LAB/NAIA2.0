@@ -1877,6 +1877,17 @@ export function createInteractivePanel({
           Array.isArray(fields[sub.key]) ? [...fields[sub.key]] : defaultFieldsFor(sub.key)];
       })),
     };
+    // Fast 값(추가 프롬프트·추가 네거티브)은 어느 축에도 속하지 않는 자유 입력이라
+    // 복원 묶음(정체성/의상/상황) 어디에도 넣을 수 없다. **전부 복원일 때만** 따라온다 —
+    // '의상만 되돌린다'고 했는데 남이 적어 둔 문장이 딸려오면 그게 더 놀랍다.
+    // 부분 복원에서는 지금 슬롯의 값을 그대로 둔다(base 와 같은 규칙).
+    if (!partial) {
+      const box = fastOf(cur.id);
+      const f = row.fast;
+      box.p = f && typeof f.p === 'string' ? f.p : '';
+      box.n = f && typeof f.n === 'string' ? f.n : '';
+      fastSig = '';
+    }
     state.chars.forEach((c, n) => { c.open = (n === i); });
     renderBlocks();
     emitChange();
@@ -2368,6 +2379,10 @@ export function createInteractivePanel({
     if (idx < 0) return;
     if (presetCid === cid) closePresetPanel();   // 사라진 슬롯을 겨냥한 팝업은 닫는다
     state.chars.splice(idx, 1);
+    // 이 슬롯의 Fast 값도 함께 버린다. 안 버리면 지운 캐릭터의 문장이 상태에
+    // 계속 남아 exportState 로 저장되고, 나중에 슬롯 수가 같아지면 순서 복원에
+    // 얹혀 엉뚱한 캐릭터에 붙는다(Codex 리뷰 2026-08-08).
+    if (state.fast && state.fast.chars) delete state.fast.chars[cid];
     // 편집 팝업을 닫고(참조 슬롯이 사라졌을 수 있음) 목록을 다시 그린다(라벨 C1..Cn 재계산).
     closePanel();
     emitChange();
@@ -5699,6 +5714,10 @@ export function createInteractivePanel({
       } : null,
       alt: [...(c.alt || [])],
       gaze: [...(c.gaze || [])],
+      // C1 Fast 의 추가 프롬프트·추가 네거티브도 담는다(사용자 지정 2026-08-08).
+      // 이것들도 그 그림을 만든 값이라, 빠지면 Assets 에서 되돌렸을 때 조용히
+      // 사라지고 Fast 만 다른 생성들이 같은 조합으로 보인다(Codex 리뷰).
+      fast: (() => { const f = fastOf(c.id); return {p: String(f.p || ''), n: String(f.n || '')}; })(),
       fields: Object.fromEntries(
         Object.entries(c.fields || {}).map(([k, v]) => [k, [...(v || [])]])),
     }));
@@ -5737,6 +5756,17 @@ export function createInteractivePanel({
         ])),
       };
     });
+    // Fast 값은 캐릭터 id 로 따로 산다(state.fast.chars) — 위에서 id 를 새로 발급했으므로
+    // 여기서 새 id 에 다시 매단다. **비어 있어도 덮어쓴다**: 안 그러면 앞서 쓰던
+    // 캐릭터의 Fast 가 남아, 되돌린 조합에 없던 태그가 따라붙는다.
+    if (state.fast) state.fast.chars = {};
+    state.chars.forEach((c, i) => {
+      const f = rows[i] && rows[i].fast;
+      const box = fastOf(c.id);
+      box.p = f && typeof f.p === 'string' ? f.p : '';
+      box.n = f && typeof f.n === 'string' ? f.n : '';
+    });
+    fastSig = '';     // 구성이 통째로 바뀌었다 — 다음 렌더에서 새로 그린다
     renderBlocks();
     emitChange();
     notifyRoster();   // 전체 복원은 캐릭터 수를 통째로 바꾼다 — 스택도 따라가야 한다

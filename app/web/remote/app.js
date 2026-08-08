@@ -608,7 +608,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260808s-hl3')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260808t-fix')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -2828,6 +2828,9 @@ function handleWsBlob(data) {
     presetGenerationPending = null;
     maybeContinuePresetAutoGen();
   }
+  // 그림이 실제로 도착했다 — 이건 성공이다. status 메시지가 순서상 먼저 올지
+  // 나중일지 보장이 없어 양쪽에서 표시한다.
+  lastGenerationOk = true;
   setGen(false);
   // Stats update — init_complete 이후의 blob만 카운트
   if (_initDone) {
@@ -2996,7 +2999,20 @@ function onGenerationDispatched(m) {
 const wsMessageHandlers = {
   image_meta: updateMeta,
   nai_preview_meta: () => { nextBlobIsPreview = true; },
-  status: m => setGen(m.is_generating),
+  // **완료인지 실패인지 여기서 가른다.** `is_generating:false` 는 성공·실패·큐잉이
+  // 모두 같은 모양으로 온다(generation_runner: "completed" / "error" / "queued").
+  // Interactive Auto Gen 반복이 이 신호로 다음 장을 예약하므로, 구분하지 않으면
+  // 인증 오류·크레딧 부족 같은 실패에서 같은 요청을 딜레이마다 무한 재시도한다
+  // (Codex 리뷰 2026-08-08).
+  status: m => {
+    if (!m.is_generating) lastGenerationOk = (String(m.message || '') === 'completed');
+    setGen(m.is_generating);
+  },
+  generation_error: m => {
+    lastGenerationOk = false;
+    cancelInteractiveAutoGen();
+    if (m && m.message) showToast(m.message, 'error', true);
+  },
   prompt_generated: updatePromptOnly,
   random_failed: onRandomFailed,
   prompt_sync: syncPrompts,
@@ -5863,6 +5879,9 @@ function setGen(v) {
   }
   const wasGenerating = generating;
   generating = next;
+  // 새 생성이 시작됐다 — 직전 성공 표시를 내린다. 안 내리면 실패로 끝나도
+  // 옛 true 가 남아 다음 장을 예약한다.
+  if (next) lastGenerationOk = false;
   // 반응형 생성: 생성 중에 쌓인 변화를 **여기서 한 번만** 낸다(큐잉 아님).
   // 반응형이 냈으면 Auto Gen 반복은 건너뛴다 — 둘 다 내면 두 장이 나간다.
   if (wasGenerating && !next && interactivePanel?.notifyGenerationDone) {
@@ -6929,7 +6948,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260808q-hl')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260808t-fix')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -7885,6 +7904,11 @@ function liveAutomationRemainingSeconds() {
 // generateWithInteractiveSnapshot 을 다시 타고, 축 프리셋/Rating 랜덤이 새로
 // 굴려진다 — 서버 루프는 직전 params 를 복사하므로 첫 굴림에 고정됐다.
 let interactiveAutoGenTimer = null;
+// 직전 생성이 **성공으로** 끝났는가. 실패/큐잉에서 다음 장을 예약하지 않으려는 것이다
+// (wsMessageHandlers.status 주석 참조). 생성이 시작되면 다시 false 로 내린다.
+let lastGenerationOk = false;
+// Automation 미지원 안내는 한 번만 띄운다.
+let interactiveAutomationWarned = false;
 
 function cancelInteractiveAutoGen() {
   if (interactiveAutoGenTimer) {
@@ -7907,6 +7931,20 @@ function scheduleInteractiveAutoGen() {
   if (!interactivePanel?.isActive?.()) return;
   if (!getOptionChecked('auto_generate')) return;
   if (generating) return;
+  // **성공한 생성 뒤에만 잇는다.** 실패·큐잉도 `is_generating:false` 로 오므로,
+  // 가르지 않으면 실패한 요청을 딜레이마다 영원히 다시 보낸다(Codex 리뷰).
+  if (!lastGenerationOk) return;
+  // **Automation 이 돌면 프론트가 몰지 않는다.** Interactive 요청은
+  // `interactive_mode_request` 때문에 `_automation_should_bind` 에서 빠져 완료가
+  // 집계되지 않는다 — 횟수/타이머 제한이 영영 줄지 않아 무한 생성이 된다.
+  // 지금은 안 도는 쪽이 맞다(Interactive 의 Automation 지원은 별도 과제).
+  if (automationRuntime && automationRuntime.is_running) {
+    if (!interactiveAutomationWarned) {
+      interactiveAutomationWarned = true;
+      showToast('Interactive 에서는 자동화(횟수·타이머)가 아직 지원되지 않습니다 — 반복하지 않습니다.', 'error', true);
+    }
+    return;
+  }
   interactiveAutoGenTimer = setTimeout(() => {
     interactiveAutoGenTimer = null;
     // 딜레이 사이에 Auto Gen 을 껐거나 모드를 빠져나갔으면 내지 않는다 —

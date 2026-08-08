@@ -214,14 +214,22 @@ export function createPromptEngineeringPanel({
     if (!presetAllOptions) presetAllOptions = Array.from(select.options);
     const terms = presetTerms(presetQuery);
     const current = select.value;
+    const hits = opt => {
+      if (!terms.length) return false;
+      const hay = presetHaystack.get(opt.value);
+      return hay !== undefined && terms.every(t => hay.includes(t));
+    };
     const keep = presetAllOptions.filter(opt => {
+      const hit = hits(opt);
+      // 실제로 걸린 것에만 표시를 남긴다 — 미리보기가 **매치**를 짚게 하려는 것이다.
+      // 이게 없으면 '늘 남기는 현재 프리셋' 이 목록 앞에 있을 때 그쪽이 열려,
+      // 검색해 놓고 검색어가 안 칠해진 화면을 본다(Codex 리뷰 2026-08-08).
+      if (hit) opt.dataset.searchHit = '1'; else delete opt.dataset.searchHit;
       // 지금 고른 프리셋은 **항상 남긴다.** 지워 버리면 select 의 값이 조용히
       // 다른 프리셋으로 바뀌고, 검색만 했는데 적용된 프리셋이 갈린다.
       if (opt.value === current) return true;
       if (!terms.length) return true;
-      const hay = presetHaystack.get(opt.value);
-      if (hay === undefined) return false;
-      return terms.every(t => hay.includes(t));
+      return hit;
     });
     // **몇 개 걸렸는지 적는다.** 접힌 select 는 검색을 해도 계속 고른 프리셋을
     // 보여주므로(늘 남기는 규칙), 드롭다운을 열기 전에는 걸렸는지조차 알 수 없다 —

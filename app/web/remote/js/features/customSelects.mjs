@@ -180,6 +180,8 @@ export function createCustomSelectController({
       item.setAttribute('aria-selected', option.selected ? 'true' : 'false');
       item.disabled = option.disabled;
       item.classList.toggle('is-selected', option.selected);
+      // 검색에 실제로 걸린 항목 표시(프리셋 검색이 붙인다). 미리보기를 여기로 짚는다.
+      if (option.dataset.searchHit) item.dataset.searchHit = '1';
 
       item.addEventListener('mouseenter', () => setHoveredItem(state, item));
       item.addEventListener('focus', () => setHoveredItem(state, item));
@@ -254,9 +256,13 @@ export function createCustomSelectController({
    *  (프리셋 검색 규칙) 그쪽을 띄우면 정작 찾은 것은 안 보인다. */
   function focusPreviewTarget(state) {
     const searching = !!(state.select.dataset.previewHighlight || '').trim();
+    // **첫 항목이 아니라 첫 '매치'다.** 프리셋 검색은 지금 고른 것을 검색에 안
+    // 걸려도 원래 순서 그대로 남기므로, 그것이 매치보다 앞이면 검색 결과 대신
+    // 그쪽이 열리고 형광펜도 안 보인다(Codex 리뷰 2026-08-08).
+    const firstHit = state.menu.querySelector('.custom-select-option[data-search-hit]');
     const first = state.menu.querySelector('.custom-select-option');
     const selected = state.menu.querySelector('.custom-select-option.is-selected');
-    const target = (searching && first) || selected;
+    const target = (searching && (firstHit || first)) || selected;
     if (target) {
       setHoveredItem(state, target);
       target.scrollIntoView({ block: 'nearest' });

@@ -223,6 +223,22 @@ export function createPromptEngineeringPanel({
       if (hay === undefined) return false;
       return terms.every(t => hay.includes(t));
     });
+    // **몇 개 걸렸는지 적는다.** 접힌 select 는 검색을 해도 계속 고른 프리셋을
+    // 보여주므로(늘 남기는 규칙), 드롭다운을 열기 전에는 걸렸는지조차 알 수 없다 —
+    // 아무 일도 안 일어난 것처럼 보인다(사용자 지적 2026-08-08).
+    // 세는 것은 **실제로 걸린 것**이다: 늘 남기는 현재 프리셋은 안 맞으면 빼고 센다.
+    const matched = terms.length
+      ? presetAllOptions.filter(opt => {
+          const hay = presetHaystack.get(opt.value);
+          return hay !== undefined && terms.every(t => hay.includes(t));
+        }).length
+      : presetAllOptions.length;
+    const badge = document.getElementById('modPresetCount');
+    if (badge) {
+      badge.textContent = terms.length ? `${matched} / ${presetAllOptions.length}` : '';
+      badge.classList.toggle('is-none', terms.length > 0 && matched === 0);
+    }
+
     const same = keep.length === select.options.length
       && keep.every((opt, i) => select.options[i] === opt);
     if (same) return;                 // 바뀐 게 없으면 건드리지 않는다(메뉴 재생성 방지)
@@ -361,7 +377,7 @@ export function createPromptEngineeringPanel({
 
     const presetControlHtml = `
     <div>
-      <div class="mod-section-label has-actions"><span>Quick Preset<input type="search" class="pe-preset-search" id="modPresetSearch" placeholder="검색 — 쉼표로 여러 개" value="${escHtml(presetQuery)}" autocomplete="off" spellcheck="false"></span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
+      <div class="mod-section-label has-actions"><span>Quick Preset<input type="search" class="pe-preset-search" id="modPresetSearch" placeholder="검색 — 쉼표로 여러 개" value="${escHtml(presetQuery)}" autocomplete="off" spellcheck="false"><span class="pe-preset-count" id="modPresetCount"></span></span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
       <div class="mod-preset-toolbar">
         <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>

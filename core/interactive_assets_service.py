@@ -106,6 +106,21 @@ def snapshot_hash(chars: list[dict[str, Any]]) -> str:
         flat.append("gender=" + str(c.get("gender") or ""))
         flat.append("alt=" + ",".join(sorted(str(x).lower() for x in (c.get("alt") or []))))
         flat.append("gaze=" + ",".join(sorted(str(x).lower() for x in (c.get("gaze") or []))))
+        # Fast(캐릭터별 추가 프롬프트·네거티브)도 프롬프트에 나가는 값이다.
+        # 빼면 Fast 만 다른 두 조합이 같은 해시가 되고, record() 가 같은 행을
+        # 찾아 본문·썸네일을 덮어써 먼저 만든 조합이 조용히 사라진다(Codex 리뷰).
+        #
+        # **비어 있으면 아무것도 더하지 않는다.** 그래야 Fast 를 쓰지 않은 기존
+        # 기록의 해시가 그대로 유지된다 — 무조건 넣으면 옛 행이 전부 새 해시와
+        # 어긋나 중복 판정이 풀리고 같은 조합이 두 벌로 쌓인다.
+        fast = c.get("fast") or {}
+        if isinstance(fast, dict):
+            fp = str(fast.get("p") or "").strip().lower()
+            fn = str(fast.get("n") or "").strip().lower()
+            if fp:
+                flat.append("fastp=" + fp)
+            if fn:
+                flat.append("fastn=" + fn)
         parts.append("|".join(flat))
     return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 

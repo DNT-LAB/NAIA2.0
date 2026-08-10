@@ -203,7 +203,9 @@ export function createResultHistoryController({
       bar = document.createElement('div');
       bar.id = 'viewerSelectionBar';
       bar.className = 'history-selection-bar viewer-panel-selection';
-      bar.innerHTML = selectionBarMarkup('Cmd/Ctrl · Shift · 드래그 · Cmd/Ctrl+A · Esc');
+      // 레일 안내에서 **드래그를 뺀다** — 드래그 선택은 팝업 격자에만 있다
+      // (init 의 bindDragSelection 주석). 안내대로 끌어 봐도 아무 일이 없었다.
+      bar.innerHTML = selectionBarMarkup('Cmd/Ctrl · Shift · Cmd/Ctrl+A · Esc');
       const header = viewerPanel.querySelector('.viewer-panel-header');
       if (header) header.insertAdjacentElement('afterend', bar);
       else viewerPanel.prepend(bar);

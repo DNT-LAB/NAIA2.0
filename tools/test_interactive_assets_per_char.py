@@ -110,9 +110,28 @@ def main() -> int:
         # 8. 빈 입력
         check("빈 목록이면 빈 결과", svc.record([]), [])
 
+        # 9. Fast(추가 프롬프트/네거티브)만 다른 조합은 **다른 카드**여야 한다.
+        # 예전에는 snapshot_hash 가 fast 를 안 봐서 같은 해시가 나왔고,
+        # record() 가 기존 행을 찾아 본문을 덮어써 먼저 만든 조합이 사라졌다.
+        base_fast = {"name": "carol", "state": "active", "gender": "female",
+                     "fields": {"머리": ["twintails"]}, "alt": [], "gaze": []}
+        red = svc.record([dict(base_fast, fast={"p": "holding red umbrella", "n": ""})])
+        blue = svc.record([dict(base_fast, fast={"p": "holding blue umbrella", "n": ""})])
+        neg = svc.record([dict(base_fast, fast={"p": "", "n": "bad hands"})])
+        check("Fast 프롬프트가 다르면 다른 카드", red[0] != blue[0], True)
+        check("Fast 네거티브만 달라도 다른 카드", red[0] != neg[0], True)
+        same = svc.record([dict(base_fast, fast={"p": "holding red umbrella", "n": ""})])
+        check("같은 Fast 면 같은 카드", same[0], red[0])
+        # 하위호환: Fast 가 비었거나 아예 없으면 옛 해시와 같아야 한다
+        # (안 그러면 이미 쌓인 기록이 전부 중복 판정에서 풀린다).
+        no_key = svc.record([dict(base_fast)])
+        empty = svc.record([dict(base_fast, fast={"p": "", "n": ""})])
+        check("Fast 없음 == 빈 Fast", no_key[0], empty[0])
+        check("빈 Fast 는 Fast 있는 것과 다른 카드", no_key[0] != red[0], True)
+
         # 인덱스가 온전한 JSON 인가
         idx = json.loads((Path(tmp) / "interactive_snapshot" / "index.json").read_text("utf-8"))
-        check("인덱스 행 수가 맞는다", len(idx["snapshots"]), 5)
+        check("인덱스 행 수가 맞는다", len(idx["snapshots"]), 9)
 
     print()
     if FAILED:

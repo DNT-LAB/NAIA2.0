@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810i-sprout')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810j-adopt')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -965,6 +965,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       requestGeneration: () => send('generate'),
       // 시드 고정 버튼이 보여 줄 값. 잡힌 것이 없으면 null 이라 버튼은 숫자 없이 뜬다.
       getLockedSeed: () => interactiveLastSeed,
+      onSeedLockChange: on => { if (on) adoptSeedForLock(); },
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
       onCharReference: () => {
@@ -3009,6 +3010,23 @@ function onGenerationDispatched(m) {
 
 // Interactive 로 나간 마지막 디스패치의 실제 시드. '시드 고정' 이 이걸 다시 쓴다.
 let interactiveLastSeed = null;
+
+/** 시드 고정을 **켜는 순간** 직전 생성의 시드를 집는다.
+ *
+ *  이 세션에서 Interactive 로 한 장이라도 만들었으면 그 값이 이미 있다. 없을
+ *  때(새로고침 직후 등)는 시드 박스를 본다 — 앱이 디스패치마다 거기에 실제
+ *  시드를 적어 두고 remote_params 로 영속하므로, 그것이 '직전 생성' 에 가장
+ *  가까운 값이다.
+ *
+ *  **한 번만 집는다.** 이후로는 Interactive 디스패치만 이 값을 바꾼다 —
+ *  계속 박스를 따라가게 두면 캐릭터 뷰어·프리셋이 중간에 끼는 순간 남의
+ *  시드로 조용히 갈아탄다. */
+function adoptSeedForLock() {
+  if (interactiveLastSeed != null) return;
+  const raw = Number(paramEls?.seed?.value);
+  if (!Number.isFinite(raw) || raw < 0) return;
+  interactiveLastSeed = Math.trunc(raw);
+}
 
 const wsMessageHandlers = {
   image_meta: updateMeta,

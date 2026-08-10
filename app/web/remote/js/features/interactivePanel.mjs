@@ -334,6 +334,8 @@ export function createInteractivePanel({
   // 시드 고정이 쓰는 값 — Interactive 로 나간 **마지막 디스패치의 실제 시드**.
   // 서버가 다시 뽑을 수 있어 요청 시점의 값과 다를 수 있으므로 호스트가 잡는다.
   getLockedSeed = () => null,
+  // 시드 고정을 켜고 끌 때. 호스트가 켜는 순간 직전 시드를 집는다.
+  onSeedLockChange = () => {},
   queryCorpus = null,          // async ({rating, person, include, exclude, search, limit}) => payload
   // (`corpusStatus` 는 더 이상 쓰지 않는다. 이벤트 코퍼스가 없을 때 빨간 토스트를
   //  띄우는 것이 유일한 용도였는데, 그 상태를 읽는 코드가 하나도 없었고 토스트는
@@ -997,8 +999,16 @@ export function createInteractivePanel({
 
   function setSeedLock(next) {
     seedLock = !!next;
+    // 켜는 순간 호스트가 **직전 생성의 시드**를 집어 준다 — 구도는 그대로 두고
+    // 프롬프트만 고쳐 보려는 사람에게는 '다음 장부터'가 한 장 늦다(사용자 지적).
+    onSeedLockChange(seedLock);
     renderBlocks();
-    showToast(seedLock ? '시드 고정 켜짐' : '시드 고정 꺼짐', 'info');
+    const seed = getLockedSeed();
+    showToast(
+      seedLock
+        ? (seed != null ? `시드 고정 — ${seed}` : '시드 고정 켜짐 (아직 잡을 시드가 없습니다)')
+        : '시드 고정 꺼짐',
+      'info');
   }
 
   /** 렌더 직후 툴팁을 붙인다. */

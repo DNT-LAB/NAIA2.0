@@ -1514,7 +1514,7 @@ export function createInteractivePanel({
     return `
       <div class="ia-ge-box" id="iaGlobalBox" title="${escHtml(pin
         ? `눌러서 적으면 '${pinLabel}' 로 들어갑니다`
-        : '눌러서 텍스트로 고칩니다')}"
+        : '눌러서 텍스트로 고칩니다')}">
         <div class="ia-ge-chips">${chips}${freeChips}</div>
         ${total ? '' : empty}
       </div>`;

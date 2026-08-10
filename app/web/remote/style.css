@@ -23237,7 +23237,13 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 칩과 자유 입력은 **한 상자**다. 테두리가 둘이면 같은 것을 다루는데 남남처럼
    보인다(사용자 지적). 상자 아무 데나 누르면 입력으로 들어간다. */
 .ia-ge-box {
-  flex: 1 1 auto; min-height: 0;
+  /* 칩 모드와 텍스트 모드의 **크기가 같아야 한다**(사용자 지정 2026-08-10).
+     비었을 때 상자가 27px 로 쪼그라들어, 누르면 51px 로 튀어 올랐다 — 같은
+     자리인데 눌러 보기 전에는 크기를 알 수 없었다. 텍스트 모드의 최소치
+     (기본 2줄 41 + 여백 12 + 테두리 2 = 55)를 바닥으로 깐다. 여백도 맞춘다.
+     min-height 34 가 아니라 41 인 것은 textarea 가 rows 기본값 2 로 그려지기
+     때문이다 - 실측값을 쓴다(34 로 두면 7px 이 남아 여전히 튀었다). */
+  flex: 1 1 auto; min-height: 55px;
   display: flex; flex-direction: column; gap: 5px;
   padding: 6px 7px;
   border: 1px solid var(--border-dim); border-radius: 7px;
@@ -23347,7 +23353,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 /* 텍스트 모드 — 칩을 걷어내고 상자 전체가 입력이 된다. 칩을 같이 두면 같은
    태그가 두 군데 보여 어느 쪽을 고치는 건지 알 수 없다(사용자 지정). */
-.ia-ge-box.is-text { padding: 4px 5px; cursor: default; }
+/* 여백은 칩 모드와 같다 — 다르면 모드를 바꿀 때마다 상자가 미세하게 뛴다. */
+.ia-ge-box.is-text { cursor: default; }
 .ia-ge-text {
   flex: 1 1 auto; min-height: 34px;
   width: 100%; resize: none;

@@ -981,11 +981,17 @@ export function createInteractivePanel({
           ? `시드 ${seed} 로 고정 중 — 다시 누르면 매번 새로 뽑습니다`
           : '고정 켬 — 다음 생성의 시드를 잡아 이후에 씁니다')
       : 'Interactive 의 마지막 생성 시드를 다음에도 씁니다';
+    // 켜면 **숫자 자체가 라벨**이 된다(사용자 지정 2026-08-10) — 무엇으로 묶여
+    // 있는지가 이 버튼의 유일한 정보다. 아직 못 잡았으면 이름을 그대로 둔다.
+    // 앞의 새싹은 '이 씨앗에서 자란다' 는 표시다.
+    const label = seedLock
+      ? (seed != null ? `\u{1F331} ${seed}` : '\u{1F331} 시드 고정')
+      : '시드 고정';
     return '<button type="button" class="ia-reactive ia-seedlock' + (seedLock ? ' is-on' : '') + '"'
       + ' data-ia-seedlock="1" role="switch" aria-checked="' + (seedLock ? 'true' : 'false') + '"'
       + ` data-naia-title="${escHtml(tip)}" aria-label="${escHtml(tip)}">`
-      + '<span class="ia-reactive-box">' + (seedLock ? '✓' : '') + '</span> 시드 고정'
-      + (seedLock && seed != null ? `<b class="ia-seedlock-n">${escHtml(String(seed))}</b>` : '')
+      + '<span class="ia-reactive-box">' + (seedLock ? '✓' : '') + '</span>'
+      + `<span class="ia-seedlock-t">${escHtml(label)}</span>`
       + '</button>';
   }
 

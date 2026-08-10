@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810f-header')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810h-seedui')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -963,6 +963,8 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       // 아무 일도 안 일어났다). `send('generate')` 가 프롬프트·네거티브·오버라이드·
       // Assets 스냅샷까지 조립한다.
       requestGeneration: () => send('generate'),
+      // 시드 고정 버튼이 보여 줄 값. 잡힌 것이 없으면 null 이라 버튼은 숫자 없이 뜬다.
+      getLockedSeed: () => interactiveLastSeed,
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
       onCharReference: () => {
@@ -2994,7 +2996,19 @@ function onGenerationDispatched(m) {
   // 등)도 같은 "마지막 실사용 시드"에 고정되게 한다(Codex High). Seed Fix OFF인
   // 동안의 영속은 무해 — 서버 리셋 가드(534fa55)가 매 요청 재추첨한다.
   setParam('seed', seedText);
+  // Interactive '시드 고정' 이 쓸 값 — **그 모드로 나간 것만** 잡는다.
+  // 캐릭터 뷰어·프리셋이 중간에 끼어도 남의 시드를 물지 않게, 백엔드가
+  // 이 디스패치가 Interactive 것인지 함께 실어 준다(headless_generation_service).
+  if (m.params?.interactive_mode_request) {
+    interactiveLastSeed = Math.trunc(seed);
+    // 버튼에 적힌 숫자를 그때 바로 고친다 — 렌더가 걸릴 일이 따로 없어서,
+    // 안 부르면 생성이 끝나도 '(숫자 없음)' 인 채로 남는다(실측).
+    interactivePanel?.refreshSeedLock?.();
+  }
 }
+
+// Interactive 로 나간 마지막 디스패치의 실제 시드. '시드 고정' 이 이걸 다시 쓴다.
+let interactiveLastSeed = null;
 
 const wsMessageHandlers = {
   image_meta: updateMeta,
@@ -5671,6 +5685,14 @@ async function generateWithInteractiveSnapshot(payload) {
   // 같은 방식으로 프론트가 붙인다.
   if (payload?.overrides && interactivePanel?.isActive?.()) {
     payload.overrides.interactive_mode_request = true;
+    // 시드 고정 — Interactive 의 마지막 생성 시드를 그대로 다시 쓴다.
+    // `seed_fixed` 도 함께 실어야 한다: 이 값이 없으면 서버 쪽 재추첨 가드가
+    // 시드를 -1 로 되돌린다(generation_runner). 아직 한 장도 안 만들었으면
+    // 잡아 둔 값이 없으니 평소대로 두고, 그 생성의 시드를 잡아 다음부터 쓴다.
+    if (interactivePanel.isSeedLocked?.() && interactiveLastSeed != null) {
+      payload.overrides.seed = interactiveLastSeed;
+      payload.overrides.seed_fixed = true;
+    }
   }
   const overrides = payload && payload.overrides;
   if (overrides && interactiveAssetsPanel && interactivePanel?.isActive?.()) {

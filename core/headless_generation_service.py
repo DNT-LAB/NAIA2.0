@@ -153,6 +153,10 @@ class HeadlessGenerationDispatch:
                 "steps": params.get("steps"),
                 "cfg_scale": params.get("cfg_scale"),
                 "seed": params.get("seed"),
+                # 이 디스패치가 Interactive 것인지. 프론트의 '시드 고정' 이 **그 모드의**
+                # 마지막 시드만 잡아야 하는데, 이 payload 는 화이트리스트라 구분할
+                # 단서가 없었다 — 캐릭터 뷰어·프리셋이 중간에 끼면 남의 시드를 문다.
+                "interactive_mode_request": bool(params.get("interactive_mode_request")),
                 "has_prompt": bool(params.get("input")),
                 "has_negative_prompt": bool(params.get("negative_prompt")),
                 "credential_configured": bool(params.get("credential")),

@@ -331,6 +331,9 @@ export function createInteractivePanel({
   onActiveChange = () => {},
   // 캐릭터 목록이 바뀌면 알린다(Assets 바의 캐릭터 스택이 구독).
   onRosterChange = () => {},
+  // 시드 고정이 쓰는 값 — Interactive 로 나간 **마지막 디스패치의 실제 시드**.
+  // 서버가 다시 뽑을 수 있어 요청 시점의 값과 다를 수 있으므로 호스트가 잡는다.
+  getLockedSeed = () => null,
   queryCorpus = null,          // async ({rating, person, include, exclude, search, limit}) => payload
   // (`corpusStatus` 는 더 이상 쓰지 않는다. 이벤트 코퍼스가 없을 때 빨간 토스트를
   //  띄우는 것이 유일한 용도였는데, 그 상태를 읽는 코드가 하나도 없었고 토스트는
@@ -844,6 +847,8 @@ export function createInteractivePanel({
   // 생성 중에 여러 개를 바꾸면 **큐에 쌓지 않고 하나로 모은다.** 쌓으면 손이 멈춘 뒤에도
   // 남은 만큼 계속 돌아 Anlas 를 태운다 — 마지막 상태 한 장만 필요하다.
   let reactive = false;
+  // 시드 고정. 잡아 둔 시드 값 자체는 호스트가 들고 있다(getLockedSeed).
+  let seedLock = false;
   let reactivePending = false;      // 생성 중에 바뀐 것이 있나(개수는 세지 않는다)
   let reactiveLastPrompt = '';
   let reactiveTypingSlot = null;   // 지금 타이핑 중인 슬롯 입력창
@@ -961,7 +966,33 @@ export function createInteractivePanel({
   function reactiveToggleHtml() {
     return '<button type="button" class="ia-reactive' + (reactive ? ' is-on' : '') + '"' +
       ' data-ia-reactive="1" role="switch" aria-checked="' + (reactive ? 'true' : 'false') + '">' +
-      '<span class="ia-reactive-box">' + (reactive ? '✓' : '') + '</span> 반응형 생성</button>';
+      '<span class="ia-reactive-box">' + (reactive ? '✓' : '') + '</span> 반응형 생성</button>'
+      + seedLockToggleHtml();
+  }
+
+  /** 시드 고정 — Interactive 의 **마지막 생성 시드**를 다음 생성에도 쓴다.
+   *  같은 구도로 태그만 바꿔 볼 때 그림이 통째로 달라지지 않게 하려는 것이다.
+   *  잡아 둔 시드는 호스트(app.js)가 들고 있다 — 실제 디스패치된 값을 알 수
+   *  있는 곳이 거기뿐이다(서버가 다시 뽑을 수 있다). */
+  function seedLockToggleHtml() {
+    const seed = (typeof getLockedSeed === 'function' ? getLockedSeed() : null);
+    const tip = seedLock
+      ? (seed != null
+          ? `시드 ${seed} 로 고정 중 — 다시 누르면 매번 새로 뽑습니다`
+          : '고정 켬 — 다음 생성의 시드를 잡아 이후에 씁니다')
+      : 'Interactive 의 마지막 생성 시드를 다음에도 씁니다';
+    return '<button type="button" class="ia-reactive ia-seedlock' + (seedLock ? ' is-on' : '') + '"'
+      + ' data-ia-seedlock="1" role="switch" aria-checked="' + (seedLock ? 'true' : 'false') + '"'
+      + ` data-naia-title="${escHtml(tip)}" aria-label="${escHtml(tip)}">`
+      + '<span class="ia-reactive-box">' + (seedLock ? '✓' : '') + '</span> 시드 고정'
+      + (seedLock && seed != null ? `<b class="ia-seedlock-n">${escHtml(String(seed))}</b>` : '')
+      + '</button>';
+  }
+
+  function setSeedLock(next) {
+    seedLock = !!next;
+    renderBlocks();
+    showToast(seedLock ? '시드 고정 켜짐' : '시드 고정 꺼짐', 'info');
   }
 
   /** 렌더 직후 툴팁을 붙인다. */
@@ -1055,6 +1086,8 @@ export function createInteractivePanel({
       closePanel();
     });
     sceneMount.addEventListener('click', event => {
+      const sl = event.target.closest('[data-ia-seedlock]');
+      if (sl) { event.preventDefault(); setSeedLock(!seedLock); return; }
       const rx = event.target.closest('[data-ia-reactive]');
       if (rx) { event.preventDefault(); setReactive(!reactive); return; }
       const cp = event.target.closest('[data-comp-preset]');
@@ -6044,6 +6077,15 @@ export function createInteractivePanel({
     getGenerationCharacters: generationCharacters,
     // Neg Fast — 생성할 때 네거티브 뒤에 붙일 문자열(없으면 '').
     getFastNegative: fastNegative,
+    // 시드 고정이 켜져 있는가. 잡아 둔 시드는 호스트가 들고 있다.
+    isSeedLocked: () => seedLock,
+    /** 호스트가 새 시드를 잡았을 때 부른다 — 버튼의 숫자만 바꾼다.
+     *  renderBlocks 를 부르면 편집 중인 슬롯 입력창까지 다시 만들어진다. */
+    refreshSeedLock() {
+      const btn = sceneMount && sceneMount.querySelector('[data-ia-seedlock]');
+      if (!btn) return;
+      btn.outerHTML = seedLockToggleHtml();
+    },
     // Assets(조합 스냅샷) 입출력. 생성 시 기록하고, 목록에서 고르면 되돌린다.
     getSnapshotChars: snapshotChars,
     /** 캐릭터에 속하지 않는 값(씬 슬롯 + 구도 콤보). Assets 미리보기 하단이 쓴다.
@@ -6074,6 +6116,10 @@ export function createInteractivePanel({
           mode: (state.ratingPick && state.ratingPick.mode) || 'single',
           picks: [...((state.ratingPick && state.ratingPick.picks) || [])],
         },
+        // 시드 고정은 켬/끔만 저장한다. **시드 값은 저장하지 않는다** — 지난
+        // 세션의 시드를 되살리면 사용자가 켠 적 없는 값에 그림이 묶인다.
+        // 다시 켜면 그 세션의 첫 생성 시드를 새로 잡는다.
+        seedLock: !!seedLock,
         // 빠른 입력. 캐릭터 키는 세션마다 새로 매겨지는 id 라(charSeq), 저장/복원은
         // **캐릭터 순서**에 맞춘다 — id 로 저장하면 다음 세션에서 아무것도 안 붙는다.
         fast: {
@@ -6131,6 +6177,7 @@ export function createInteractivePanel({
         }
         // v1 저장분에는 없다 — 그때는 빈 문자열로 시작한다.
         state.freeText = typeof saved.freeText === 'string' ? saved.freeText : '';
+        seedLock = !!saved.seedLock;
         // 빠른 입력. 캐릭터는 **순서**로 맞춘다(id 는 세션마다 새로 매겨진다).
         // applySnapshotChars 가 이미 돌아 state.chars 가 최종 목록이다.
         const fs = saved.fast;

@@ -23152,6 +23152,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-reactive.is-on .ia-reactive-box {
   background: rgba(120, 140, 255, 0.22); border-color: var(--accent-glow);
 }
+/* 시드 고정 — 반응형 생성과 같은 줄, 바로 옆(둘 다 order 99, DOM 순서대로).
+   잡아 둔 시드가 있으면 숫자를 뒤에 적는다: 무엇으로 고정됐는지 호버 없이 보인다. */
+.ia-seedlock-n {
+  margin-left: 2px; padding: 1px 5px; border-radius: 999px;
+  background: rgba(120, 140, 255, 0.20); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.2px;
+}
 /* 씬 줄은 한 줄짜리였다 — 토글이 다음 줄로 내려가도록 wrap 을 열고,
    높이 0 짜리 전폭 스페이서로 줄을 끊는다(토글 자신은 글자 폭만 쓴다). */
 .ia-scene-float { flex-wrap: wrap; }

@@ -20518,6 +20518,12 @@ body.detached-module .mod-grid-3 {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ia-block-count { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); min-width: 14px; text-align: right; }
+/* 캐릭터 '구도' 가 씬 구도와 같은 태그를 들고 있을 때. 개수 배지 옆에 앉는다 —
+   같은 줄에서 끝내야 캐릭터 카드가 또 길어지지 않는다(gazeButtonHtml 과 같은 이유). */
+.ia-block-warn {
+  font-size: 10px; line-height: 1; cursor: help;
+  color: #ffcf5a; opacity: 0.95;
+}
 .ia-block-chips { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
 
 .ia-chip {

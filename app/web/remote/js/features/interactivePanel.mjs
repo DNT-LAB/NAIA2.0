@@ -187,6 +187,21 @@ function compTags(comp, pick) {
   return out;
 }
 
+/** NAI 가중치 구문(`0.5::from side ::`)에서 알맹이 태그만 꺼낸다.
+ *  씬 축 프리셋은 값을 이 꼴로 내보내므로, 그대로 비교하면 캐릭터 슬롯의
+ *  맨 태그(`from side`)와 절대 안 겹친다 — 경고가 영영 안 뜬다. */
+function bareTags(list) {
+  const out = [];
+  (list || []).forEach(raw => {
+    String(raw || '').split(',').forEach(part => {
+      const t = part.replace(/-?\d+(?:\.\d+)?\s*::/g, ' ').replace(/::/g, ' ')
+        .replace(/\s+/g, ' ').trim().toLowerCase();
+      if (t) out.push(t);
+    });
+  });
+  return out;
+}
+
 /** 좌측 블록에 보일 짧은 칩 라벨(표시 전용). */
 function compChips(comp) {
   if (!comp) return [];
@@ -753,7 +768,8 @@ export function createInteractivePanel({
         // '구도' 슬롯은 개수 배지 자리에 시선 버튼을 함께 둔다 — 같은 질문이라
         // 한 줄에서 끝나야 한다(다른 줄을 만들면 캐릭터 카드가 또 길어진다).
         const meta = s.key === '구도'
-          ? gazeButtonHtml(c) + `<span class="ia-block-count">${tags.length || ''}</span>`
+          ? gazeButtonHtml(c) + viewClashHtml(tags)
+            + `<span class="ia-block-count">${tags.length || ''}</span>`
           : s.key === CHAR_TAG_SLOT
           ? altButtonHtml(c)
             + (c.preset
@@ -904,6 +920,41 @@ export function createInteractivePanel({
       + ` title="${escHtml(o.tip)}">${escHtml(o.t)}</button>`).join('');
     // Rating 은 **고정**이다 — 아무것도 안 골라도 자리를 지킨다(사용자 지정).
     return '<div class="ia-comp-applied">' + ratingChipHtml() + rest + '</div>';
+  }
+
+  /** 씬이 이미 내보내는 구도 태그 — 씬 '구도' 슬롯 + 축 프리셋(랜덤은 지금 값).
+   *  캐릭터 '구도' 와 씬 '구도' 는 **같은 meta 축을 공유한다**(CHAR_SUBS 주석).
+   *  같은 태그를 양쪽에 넣으면 프롬프트에 두 번 나가고, 각도가 서로 다르면
+   *  모델이 둘 사이에서 흔들린다. */
+  function sceneViewTagSet() {
+    const scene = bareTags(state.slots?.composition);
+    // pick=false — 랜덤 축은 지금 걸린 값으로 본다. 생성 때 다시 굴리므로
+    // 여기서 굴리면 화면이 볼 때마다 달라진다.
+    const axes = bareTags(compTags(state.composition, false));
+    return new Set([...scene, ...axes]);
+  }
+
+  /** 이 캐릭터 구도 슬롯이 씬과 겹치는 태그들. */
+  function viewClashTags(tags) {
+    if (!tags || !tags.length) return [];
+    const scene = sceneViewTagSet();
+    if (!scene.size) return [];
+    const seen = new Set();
+    return (tags || []).filter(t => {
+      const k = String(t || '').trim().toLowerCase();
+      if (!k || seen.has(k) || !scene.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+
+  function viewClashHtml(tags) {
+    const dup = viewClashTags(tags);
+    if (!dup.length) return '';
+    const tip = `씬 구도에도 같은 태그가 있습니다 — ${dup.join(', ')}\n`
+      + '프롬프트에 두 번 나갑니다. 한쪽에서 빼는 편이 낫습니다.';
+    return `<span class="ia-block-warn" data-naia-title="${escHtml(tip)}"`
+      + ` aria-label="${escHtml(tip)}">⚠</span>`;
   }
 
   function reactiveToggleHtml() {

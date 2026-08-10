@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810j-adopt')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810k-seedres')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -965,7 +965,14 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       requestGeneration: () => send('generate'),
       // 시드 고정 버튼이 보여 줄 값. 잡힌 것이 없으면 null 이라 버튼은 숫자 없이 뜬다.
       getLockedSeed: () => interactiveLastSeed,
+      getLockedRes: () => interactiveLastRes,
       onSeedLockChange: on => { if (on) adoptSeedForLock(); },
+      // 우클릭 팝업으로 직접 넣은 시드. 해상도는 지금 화면 값으로 함께 묶는다 —
+      // 시드만 갈아 끼우고 크기를 옛것으로 두면 무엇이 나올지 알 수 없다.
+      onSeedEntered: n => {
+        interactiveLastSeed = n;
+        interactiveLastRes = currentResolutionWH() || interactiveLastRes;
+      },
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
       onCharReference: () => {
@@ -3002,6 +3009,11 @@ function onGenerationDispatched(m) {
   // 이 디스패치가 Interactive 것인지 함께 실어 준다(headless_generation_service).
   if (m.params?.interactive_mode_request) {
     interactiveLastSeed = Math.trunc(seed);
+    // 해상도도 함께 잡는다 — 시드만 같고 크기가 달라지면 구도가 그대로일 수 없다.
+    const w = Number(m.params?.width), h = Number(m.params?.height);
+    if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+      interactiveLastRes = {w: Math.trunc(w), h: Math.trunc(h)};
+    }
     // 버튼에 적힌 숫자를 그때 바로 고친다 — 렌더가 걸릴 일이 따로 없어서,
     // 안 부르면 생성이 끝나도 '(숫자 없음)' 인 채로 남는다(실측).
     interactivePanel?.refreshSeedLock?.();
@@ -3010,6 +3022,8 @@ function onGenerationDispatched(m) {
 
 // Interactive 로 나간 마지막 디스패치의 실제 시드. '시드 고정' 이 이걸 다시 쓴다.
 let interactiveLastSeed = null;
+// 그 생성의 해상도 {w, h}. 시드와 한 벌로 묶인다.
+let interactiveLastRes = null;
 
 /** 시드 고정을 **켜는 순간** 직전 생성의 시드를 집는다.
  *
@@ -3022,10 +3036,27 @@ let interactiveLastSeed = null;
  *  계속 박스를 따라가게 두면 캐릭터 뷰어·프리셋이 중간에 끼는 순간 남의
  *  시드로 조용히 갈아탄다. */
 function adoptSeedForLock() {
+  // 해상도는 시드와 따로 본다 — 시드는 이미 잡혔는데 해상도만 비어 있을 수 있다
+  // (옛 세션 상태를 되살린 경우). 각자 비어 있을 때만 채운다.
+  if (interactiveLastRes == null) {
+    const cur = currentResolutionWH();
+    if (cur) interactiveLastRes = cur;
+  }
   if (interactiveLastSeed != null) return;
   const raw = Number(paramEls?.seed?.value);
   if (!Number.isFinite(raw) || raw < 0) return;
   interactiveLastSeed = Math.trunc(raw);
+}
+
+/** 지금 화면에 걸린 해상도 {w, h}. 못 읽으면 null.
+ *  `getCurrentResolution` 은 전역 함수가 아니라 다른 모듈에 넘기는 콜백이라
+ *  여기서 부를 수 없다(실측: 그대로 두면 ReferenceError). 같은 소스를 직접 읽는다. */
+function currentResolutionWH() {
+  const label = String(paramEls?.resolution?.value || qResolution?.value || '');
+  const m = label.replace(/×/g, 'x').match(/(\d{2,5})\s*x\s*(\d{2,5})/);
+  if (!m) return null;
+  const w = Number(m[1]), h = Number(m[2]);
+  return (w > 0 && h > 0) ? {w, h} : null;
 }
 
 const wsMessageHandlers = {
@@ -5710,6 +5741,15 @@ async function generateWithInteractiveSnapshot(payload) {
     if (interactivePanel.isSeedLocked?.() && interactiveLastSeed != null) {
       payload.overrides.seed = interactiveLastSeed;
       payload.overrides.seed_fixed = true;
+      // 해상도도 같이 묶는다. `random_resolution` 을 끄지 않으면 Rnd Res 가
+      // 켜져 있을 때 서버가 다시 뽑아, 시드만 같고 크기가 달라진다 —
+      // 그러면 구도가 그대로일 수 없다(사용자 지정).
+      if (interactiveLastRes) {
+        payload.overrides.width = interactiveLastRes.w;
+        payload.overrides.height = interactiveLastRes.h;
+        payload.overrides.resolution = `${interactiveLastRes.w} x ${interactiveLastRes.h}`;
+        payload.overrides.random_resolution = false;
+      }
     }
   }
   const overrides = payload && payload.overrides;

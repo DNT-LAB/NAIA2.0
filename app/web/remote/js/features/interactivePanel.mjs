@@ -334,8 +334,12 @@ export function createInteractivePanel({
   // 시드 고정이 쓰는 값 — Interactive 로 나간 **마지막 디스패치의 실제 시드**.
   // 서버가 다시 뽑을 수 있어 요청 시점의 값과 다를 수 있으므로 호스트가 잡는다.
   getLockedSeed = () => null,
+  // 함께 묶인 해상도 {w, h}. 없으면 null.
+  getLockedRes = () => null,
   // 시드 고정을 켜고 끌 때. 호스트가 켜는 순간 직전 시드를 집는다.
   onSeedLockChange = () => {},
+  // 우클릭으로 직접 넣은 시드. 호스트가 받아 잠금 값으로 세운다.
+  onSeedEntered = () => {},
   queryCorpus = null,          // async ({rating, person, include, exclude, search, limit}) => payload
   // (`corpusStatus` 는 더 이상 쓰지 않는다. 이벤트 코퍼스가 없을 때 빨간 토스트를
   //  띄우는 것이 유일한 용도였는데, 그 상태를 읽는 코드가 하나도 없었고 토스트는
@@ -986,8 +990,12 @@ export function createInteractivePanel({
     // 켜면 **숫자 자체가 라벨**이 된다(사용자 지정 2026-08-10) — 무엇으로 묶여
     // 있는지가 이 버튼의 유일한 정보다. 아직 못 잡았으면 이름을 그대로 둔다.
     // 앞의 새싹은 '이 씨앗에서 자란다' 는 표시다.
+    // 해상도도 함께 고정하므로 같이 적는다 — 시드만 같고 크기가 달라지면
+    // 구도가 그대로일 수 없다(사용자 지정).
+    const res = (typeof getLockedRes === 'function' ? getLockedRes() : null);
+    const resText = res && res.w && res.h ? ` · ${res.w}×${res.h}` : '';
     const label = seedLock
-      ? (seed != null ? `\u{1F331} ${seed}` : '\u{1F331} 시드 고정')
+      ? (seed != null ? `\u{1F331} ${seed}${resText}` : '\u{1F331} 시드 고정')
       : '시드 고정';
     return '<button type="button" class="ia-reactive ia-seedlock' + (seedLock ? ' is-on' : '') + '"'
       + ' data-ia-seedlock="1" role="switch" aria-checked="' + (seedLock ? 'true' : 'false') + '"'
@@ -1095,6 +1103,13 @@ export function createInteractivePanel({
     sceneMount.addEventListener('mousedown', keepEditingFocus);   // 왼쪽 팝업과 동일
     // 슬롯 위에서 우클릭하면 그 슬롯의 팝업을 닫는다(사용자 편의). 브라우저 메뉴는 막는다.
     sceneMount.addEventListener('contextmenu', event => {
+      // 시드 고정 버튼 우클릭 = 시드 직접 입력(왼클릭은 켜고 끄기라 자리가 없다).
+      const sl = event.target.closest('[data-ia-seedlock]');
+      if (sl) {
+        event.preventDefault();
+        if (miniOpen === 'seed') closeCompPopup(); else openMiniPopup('seed', sl);
+        return;
+      }
       const b = event.target.closest('[data-slot]');
       if (!b || !panelContext || panelContext.kind !== 'scene') return;
       if (panelContext.slotId !== b.dataset.slot) return;
@@ -5540,7 +5555,46 @@ export function createInteractivePanel({
     axis:   {title: () => axisOf(miniAxisKey)?.label || '축',
              body: () => axisMenuHtml(), bind: () => bindAxisMenu(),
              anchorSel: null},
+    // 시드 직접 입력. 버튼 우클릭으로 연다(왼클릭은 켜고 끄기라 자리가 없다).
+    seed:   {title: '시드 직접 입력', body: () => seedInputHtml(),
+             bind: () => bindSeedInput(), anchorSel: '[data-ia-seedlock]'},
   };
+
+  function seedInputHtml() {
+    const cur = getLockedSeed();
+    return '<div class="ia-seedin">'
+      + `<input type="text" inputmode="numeric" class="ia-seedin-i" id="iaSeedInput"`
+      + ` value="${escHtml(cur == null ? '' : String(cur))}"`
+      + ' placeholder="시드 숫자" autocomplete="off" spellcheck="false">'
+      + '<button type="button" class="ia-seedin-ok" data-seedok="1">확인</button>'
+      + '</div>';
+  }
+
+  function bindSeedInput() {
+    const input = document.getElementById('iaSeedInput');
+    const ok = miniPopup && miniPopup.querySelector('[data-seedok]');
+    if (!input) return;
+    // 열자마자 바로 칠 수 있어야 한다. 값이 있으면 통째로 골라 둔다 —
+    // 대개 다른 시드로 갈아타려고 여는 자리다.
+    setTimeout(() => { try { input.focus(); input.select(); } catch (_) {} }, 0);
+    const commit = () => {
+      const raw = String(input.value || '').replace(/[^\d]/g, '');
+      if (!raw) { closeCompPopup(); return; }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) { closeCompPopup(); return; }
+      onSeedEntered(Math.trunc(n));
+      // 직접 넣었다는 것은 그 시드로 묶겠다는 뜻이다 — 꺼져 있었으면 켠다.
+      if (!seedLock) { seedLock = true; onSeedLockChange(true); }
+      closeCompPopup();
+      renderBlocks();
+      showToast(`시드 고정 — ${Math.trunc(n)}`, 'info');
+    };
+    ok?.addEventListener('click', commit);
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); commit(); }
+      else if (event.key === 'Escape') { event.preventDefault(); closeCompPopup(); }
+    });
+  }
 
   function axisOf(key) { return COMP_AXES.find(a => a.key === key) || null; }
 
@@ -5639,7 +5693,7 @@ export function createInteractivePanel({
     if (miniPopup && miniPopup.contains(event.target)) return;
     const t = event.target.closest ? event.target : event.target.parentElement;
     // 여는 버튼 위 클릭은 그 버튼의 토글이 처리한다.
-    if (t && t.closest('[data-comp-preset], [data-ap-rating], [data-ap-axis], [data-ap-rand]')) return;
+    if (t && t.closest('[data-comp-preset], [data-ap-rating], [data-ap-axis], [data-ap-rand], [data-ia-seedlock]')) return;
     // **드롭다운 목록은 팝업 밖에 산다.** 앱이 네이티브 select 를 숨기고
     // (`native-select-hidden`) 커스텀 위젯으로 바꾸는데, 그 목록(`custom-select-menu`)
     // 은 `document.body` 직계다(customSelects.mjs). 그래서 항목을 고르는 순간

@@ -23158,6 +23158,23 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-seedlock.is-on .ia-seedlock-t {
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2px;
 }
+/* 우클릭으로 여는 시드 직접 입력. 미니 팝업 안에 산다(버튼 아래에 붙는다). */
+.ia-seedin { display: flex; gap: 6px; align-items: center; }
+.ia-seedin-i {
+  flex: 1; min-width: 0; padding: 5px 7px; border-radius: 6px;
+  background: rgba(0,0,0,0.34); border: 1px solid var(--border-dim);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 12px;
+}
+.ia-seedin-i:focus { outline: none; border-color: rgba(124,106,239,0.55); }
+.ia-seedin-ok {
+  flex: none; padding: 5px 12px; cursor: pointer; border-radius: 6px;
+  border: 1px solid rgba(124,106,239,0.35);
+  background: rgba(124,106,239,0.18); color: var(--text-primary);
+  font-family: var(--font-display); font-size: 11px; font-weight: 700;
+}
+.ia-seedin-ok:hover { background: rgba(124,106,239,0.32); }
+/* 이 팝업은 입력 한 칸이라 340px 은 과하다. */
+.ia-comp-popup:has(.ia-seedin) { width: 246px; }
 /* 씬 줄은 한 줄짜리였다 — 토글이 다음 줄로 내려가도록 wrap 을 열고,
    높이 0 짜리 전폭 스페이서로 줄을 끊는다(토글 자신은 글자 폭만 쓴다). */
 .ia-scene-float { flex-wrap: wrap; }

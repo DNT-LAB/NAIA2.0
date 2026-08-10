@@ -5507,7 +5507,10 @@ body.resizing-result-info {
   min-height: 30px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* space-between 이었다. 자식이 둘일 때는 같은 결과지만, 씬 태그 모드에서는
+     개수 배지와 그룹 줄이 끼어 **가운데로 밀려난다**(사용자 지적: "4개가 중간에
+     나타난다"). 왼쪽으로 붙이고 오른쪽 버튼 묶음만 밀어 보낸다. */
+  justify-content: flex-start;
   gap: 8px;
   padding: 0 12px;
   border-bottom: 1px solid rgba(255,255,255,0.06);
@@ -5523,6 +5526,7 @@ body.resizing-result-info {
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
+  margin-left: auto;   /* 헤더가 flex-start 라 여기서 오른쪽 끝으로 민다 */
 }
 .result-enhance-btn {
   height: 22px;
@@ -23227,10 +23231,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 /* 그룹 줄 — 무엇이 몇 개인지 한눈에, 눌러서 그 그룹만 본다.
    칩과 **같은 색**을 쓴다(왼쪽 띠 ↔ 점). 색이 다르면 둘을 잇지 못한다. */
+/* 제목 줄('씬 태그' + 개수 배지) 안에 산다. 따로 한 줄을 쓰면 낮은 판에서
+   칩 자리를 그만큼 잡아먹는다(사용자 지적 2026-08-10).
+   버튼 묶음(Director/Enhance)은 오른쪽 끝에 붙어 있으므로 그 사이를 채운다. */
 .ia-ge-groups {
   display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
-  margin-bottom: 5px; flex: none;
+  min-width: 0; margin-left: 4px;
 }
+.ia-ge-groups[hidden] { display: none; }
 .ia-ggrp {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 7px 2px 6px; cursor: pointer;

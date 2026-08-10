@@ -1422,8 +1422,10 @@ export function createInteractivePanel({
     const empty = list.length + freeTagList().length
       ? '<span class="ia-ge-empty">이 그룹에는 없습니다 — [전체] 로 돌아갑니다</span>'
       : '<span class="ia-ge-empty">눌러서 적거나, 위 버튼으로 넣습니다</span>';
+    // 그룹 줄은 여기서 그리지 않는다 — 제목 줄(`#iaGlobalGroups`)로 나간다.
+    // renderGlobalEditor 가 거기에 넣는다.
+    pendingGroupBar = bar;
     return `
-      ${bar}
       <div class="ia-ge-box" id="iaGlobalBox" title="눌러서 텍스트로 고칩니다">
         <div class="ia-ge-chips">${chips}${freeChips}</div>
         ${total ? '' : empty}
@@ -1432,6 +1434,8 @@ export function createInteractivePanel({
 
   // 씬 태그를 어느 그룹만 볼지. '' = 전부.
   let globalGroupFilter = '';
+  // globalEditorHtml 이 만든 그룹 줄 HTML. 제목 줄에 따로 꽂는다.
+  let pendingGroupBar = '';
 
   /** 그룹별 개수 줄. 눌러서 그 그룹만 본다(다시 누르면 전부).
    *  칩이 섞여 있으면 무엇이 몇 개인지 세어 봐야 알 수 있었다(사용자 지정). */
@@ -1454,7 +1458,8 @@ export function createInteractivePanel({
     if (globalGroupFilter) {
       parts.unshift('<button type="button" class="ia-ggrp is-all" data-ggrp="">전체</button>');
     }
-    return `<div class="ia-ge-groups">${parts.join('')}</div>`;
+    // 버튼만 돌려준다 — 담는 그릇은 제목 줄의 `#iaGlobalGroups`(.ia-ge-groups)다.
+    return parts.join('');
   }
 
   /** 편집기를 보일지 말지. Interactive 가 켜져 있고 결과 탭일 때만 자리를 바꾼다. */
@@ -1469,6 +1474,10 @@ export function createInteractivePanel({
     // 사용자가 늘려 둔 높이는 그대로 존중된다(min-height 라 더 크면 그 값이 이긴다).
     const panel = document.getElementById('resultInfoPanel');
     if (panel) panel.classList.toggle('has-ia-editor', on);
+    // 그룹 줄은 제목 줄에 살아서 편집기와 별개 노드다 — 같이 숨기지 않으면
+    // Interactive 를 꺼도 버튼이 남는다.
+    const groups = document.getElementById('iaGlobalGroups');
+    if (groups && !on) { groups.hidden = true; groups.innerHTML = ''; }
     if (!on) syncGlobalCountBadge(0);
     // 저 칸의 주인은 히스토리다 — 내용은 건드리지 않고 보이기만 바꾼다.
     info.style.display = on ? 'none' : '';
@@ -1502,6 +1511,14 @@ export function createInteractivePanel({
     // 배지는 **보이는 칩 전부**를 센다 — 직접 적은 것을 빼면 3개가 보이는데 0 이라
     // 적혀 서로 어긋난다(실측).
     syncGlobalCountBadge(globalChipList().length + freeTagList().length);
+    // 그룹 줄은 제목 줄에 산다(index.html `#iaGlobalGroups`). 편집기 안에 두면
+    // 한 줄을 더 써서 낮은 판에서 칩 자리를 잡아먹는다.
+    const groups = document.getElementById('iaGlobalGroups');
+    if (groups) {
+      groups.innerHTML = pendingGroupBar;
+      groups.hidden = !pendingGroupBar;
+      bindGlobalEditor(groups);      // 그룹 버튼 배선은 이쪽에도 걸어야 한다
+    }
     bindGlobalEditor(host);
   }
 

@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260810b-groups">
+<link rel="stylesheet" href="style.css?v=20260810f-header">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -832,6 +832,9 @@
                  그대로 두면 편집기를 보면서 'GENERATION INFO' 를 읽게 된다(사용자 지적). -->
             <span id="resultInfoTitle">Generation Info</span>
             <span class="ia-ge-badge" id="iaGlobalCount" hidden></span>
+            <!-- 씬 태그 그룹 줄. 편집기 안이 아니라 **이 줄**에 산다 - 따로 한 줄을
+                 쓰면 낮은 판에서 칩 자리를 그만큼 잡아먹는다(사용자 지적). -->
+            <div class="ia-ge-groups" id="iaGlobalGroups" hidden></div>
             <div class="result-enhance-controls">
               <button class="result-enhance-btn nai-director-btn" id="naiDirectorBtn" onclick="openNaiDirector()" title="NAI Director Tools (현재 결과 변형)" disabled>Director</button>
               <button class="result-enhance-btn" id="resultEnhanceBtn" onclick="requestResultEnhance()" disabled>Enhance</button>
@@ -1251,6 +1254,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260810e-homeless"></script>
+<script src="app.js?v=20260810f-header"></script>
 </body>
 </html>

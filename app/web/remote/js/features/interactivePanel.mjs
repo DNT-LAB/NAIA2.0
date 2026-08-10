@@ -6470,7 +6470,16 @@ export function createInteractivePanel({
   }
 
   // 토글 리스너는 명명 함수로 두어 destroy 시 제거할 수 있게 한다(Codex M7).
-  const onToggleClick = () => setActive(!active);
+  const onToggleClick = () => {
+    // **NAI 전용이다.** setMode 는 켜진 채로 나가는 것만 막고, 이미 다른 모드에
+    // 있을 때 켜는 것은 아무도 안 막았다(실측: COMFYUI 에서 그대로 켜졌다).
+    // 켜 두면 조립한 프롬프트가 갈 곳이 없다 — 같은 규칙을 여기에도 건다.
+    if (!active && String(getMode() || 'NAI') !== 'NAI') {
+      showToast('Interactive 는 NAI 전용입니다 — 먼저 NAI 로 바꾸세요', 'error');
+      return;
+    }
+    setActive(!active);
+  };
   if (toggleButton) toggleButton.addEventListener('click', onToggleClick);
 
   // 팝업 내부(검색창 제외)를 mousedown 할 때 기본동작을 막아 슬롯 입력창의 포커스를 지킨다.

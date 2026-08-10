@@ -1229,12 +1229,33 @@ export function createInteractivePanel({
     return out;
   }
 
-  /** 텍스트 모드의 내용. **잠긴 칩(구도 콤보 파생)은 넣지 않는다** — 콤보에서
-   *  나온 값이라 여기서 고쳐도 다시 만들어진다. 씬 슬롯이 편집 중에 파생 칩을
-   *  빼는 것과 같은 규칙이다(slotBody). */
+  /** 지금 화면에 보이는 칩들(그룹 필터 반영). 칩 렌더와 텍스트 모드가 같은
+   *  목록을 봐야 둘이 어긋나지 않는다. */
+  /** `list` 를 주면 **그 배열의 원소를 그대로** 걸러 돌려준다.
+   *  안 주면 새로 만든다. 부르는 쪽이 원소 동일성(`Set.has(item)`)으로
+   *  판단할 수 있어야 하므로, 같은 배열을 넘겨 쓰는 것이 기본이다 —
+   *  두 번 만들면 내용이 같아도 다른 객체라 동일성이 늘 어긋난다(실측:
+   *  '안 보이던 것 유지' 로직이 전부를 유지로 판정해 태그가 중복됐다). */
+  function visibleChipList(list) {
+    const src = list || globalChipList();
+    if (!globalGroupFilter) return src;
+    if (globalGroupFilter === '@free') return [];
+    return src.filter(i => i.slot === globalGroupFilter);
+  }
+
+  function freeVisibleNow() {
+    return !globalGroupFilter || globalGroupFilter === '@free';
+  }
+
+  /** 텍스트 모드의 내용 — **보이는 것과 똑같이** 적는다.
+   *
+   *  예전에는 잠긴 칩(축 프리셋 파생)을 뺐다. 그랬더니 칩으로는 4개가 보이는데
+   *  텍스트로 바꾸면 1개만 남아, 나머지가 사라진 것처럼 보였다(사용자 지적
+   *  2026-08-10: "칩과 텍스트 분리된 환경은 UX 불일치"). 파생 값도 적고,
+   *  commitGlobalText 가 그것을 되돌려 놓는다(거기 주석 참조). */
   function globalTextValue() {
-    const parts = globalChipList().filter(i => !i.locked).map(i => i.raw);
-    const free = String(state.freeText || '').trim();
+    const parts = visibleChipList().map(i => i.raw);
+    const free = freeVisibleNow() ? String(state.freeText || '').trim() : '';
     if (free) parts.push(free);
     return parts.join(', ');
   }
@@ -1277,22 +1298,75 @@ export function createInteractivePanel({
    *  처음 보는 태그만 자유 입력으로 간다 — 축을 정하는 것은 위 버튼의 몫이다.
    *  텍스트에서 사라진 태그는 그대로 사라진다(그게 지우는 방법이다). */
   function commitGlobalText(value) {
+    const all = globalChipList();
+    const shown = visibleChipList(all);     // **같은 배열**에서 걸러야 동일성이 맞는다
+    // 어느 태그가 어느 슬롯에서 왔는지. 파생(locked)은 슬롯에 못 넣으므로 뺀다.
     const home = new Map();
-    for (const item of globalChipList()) {
+    for (const item of shown) {
       if (item.locked) continue;
       const k = item.raw.trim().toLowerCase();
       if (!home.has(k)) home.set(k, []);
       home.get(k).push(item.slot);          // 같은 글자가 두 축에 있으면 순서대로
     }
+
+    // **안 보이던 것은 손대지 않는다.** 그룹 필터가 걸린 채 편집하면 텍스트에는
+    // 그 그룹만 있다 — 통째로 덮어쓰면 안 보이던 다른 그룹이 전부 지워진다.
     const next = emptySceneSlots();
+    const shownSet = new Set(shown);
+    for (const item of all) {
+      if (item.locked) continue;
+      if (shownSet.has(item)) continue;   // 보이던 것은 아래에서 텍스트가 결정한다
+      next[item.slot].push(item.raw);
+    }
+
+    // 파생 값은 텍스트에서 **지울 수 있어야 한다** — 보이는 대로 고치는 것이
+    // 이 모드의 약속이다. 지워졌으면 그 축을 끈다(칩에서 [정의하지 않음]을
+    // 고른 것과 같다). 남아 있으면 축은 그대로 두고 텍스트에서만 흘린다.
+    const derived = shown.filter(i => i.locked).map(i => i.raw.trim().toLowerCase());
+    const typed = parseGlobalInput(value);
+    const typedKeys = new Set(typed.map(t => t.trim().toLowerCase()));
+    const goneDerived = derived.filter(k => !typedKeys.has(k));
+    if (goneDerived.length) clearCompTags(goneDerived);
+
+    // 어디에도 못 붙은 태그가 갈 곳. 평소엔 자유 입력이지만, **그룹 필터를 걸고
+    // 편집 중이면 그 그룹이 명백한 주인**이다 — 배경만 띄워 놓고 `classroom` 을
+    // `library` 로 고쳤는데 자유 입력으로 새면 그룹을 고른 뜻이 사라진다(실측).
+    // 축 프리셋(파생)과 '직접' 은 슬롯이 아니므로 그대로 자유 입력으로 간다.
+    const homeless = (globalGroupFilter && globalGroupFilter !== '@free'
+                      && globalGroupFilter !== COMP_GROUP
+                      && Object.prototype.hasOwnProperty.call(next, globalGroupFilter))
+      ? globalGroupFilter : null;
     const leftover = [];
-    for (const tag of parseGlobalInput(value)) {
-      const queue = home.get(tag.trim().toLowerCase());
+    for (const tag of typed) {
+      const k = tag.trim().toLowerCase();
+      if (derived.includes(k)) continue;    // 파생은 축이 다시 만든다
+      const queue = home.get(k);
       if (queue && queue.length) next[queue.shift()].push(tag);
+      else if (homeless) next[homeless].push(tag);
       else leftover.push(tag);
     }
     state.slots = next;
-    state.freeText = leftover.join(', ');
+    // 안 보이던 자유 입력은 그대로 둔다(위 '손대지 않는다'와 같은 이유).
+    state.freeText = freeVisibleNow()
+      ? leftover.join(', ')
+      : [String(state.freeText || '').trim(), leftover.join(', ')].filter(Boolean).join(', ');
+  }
+
+  /** 텍스트에서 지워진 파생 값에 해당하는 축을 끈다. */
+  function clearCompTags(goneKeys) {
+    const comp = state.composition || (state.composition = newComposition());
+    const gone = new Set(goneKeys);
+    if (comp.pov && gone.has(String(COMP_POV).trim().toLowerCase())) comp.pov = false;
+    COMP_AXES.forEach(ax => {
+      const idx = comp[ax.key] || 0;
+      const item = ax.items[idx];
+      if (item && item[2] && gone.has(String(item[2]).trim().toLowerCase())) {
+        comp[ax.key] = 0;
+        comp.rand = (comp.rand || []).filter(k => k !== ax.key);
+      }
+    });
+    comp.specials = (comp.specials || [])
+      .filter(t => !gone.has(String(t).trim().toLowerCase()));
   }
 
   /** 직접 적은 것을 태그 단위로 본다. 저장은 문자열 하나지만(프롬프트에 그대로
@@ -1306,9 +1380,7 @@ export function createInteractivePanel({
     // 그룹 줄의 개수는 **거르기 전** 전체로 센다 — 거른 뒤로 세면 고른 그룹만
     // 남고 나머지가 0 이 되어 다시 돌아갈 길이 사라진다.
     const bar = groupBarHtml(list);
-    const shown = globalGroupFilter && globalGroupFilter !== '@free'
-      ? list.filter(i => i.slot === globalGroupFilter) : list;
-    const chips = (globalGroupFilter === '@free' ? [] : shown).map(item => {
+    const chips = visibleChipList(list).map(item => {
       const {weight, text} = weightedChip(item.raw);
       const label = SCENE_LABEL.get(item.slot) || item.slot;
       const tip = weight

@@ -1304,16 +1304,16 @@ export function createInteractivePanel({
    *  판단할 수 있어야 하므로, 같은 배열을 넘겨 쓰는 것이 기본이다 —
    *  두 번 만들면 내용이 같아도 다른 객체라 동일성이 늘 어긋난다(실측:
    *  '안 보이던 것 유지' 로직이 전부를 유지로 판정해 태그가 중복됐다). */
-  function visibleChipList(list) {
+  function visibleChipList(list, group) {
     const src = list || globalChipList();
-    const g = activeGroup();
+    const g = group === undefined ? activeGroup() : group;
     if (!g) return src;
     if (g === '@free') return [];
     return src.filter(i => i.slot === g);
   }
 
-  function freeVisibleNow() {
-    const g = activeGroup();
+  function freeVisibleNow(group) {
+    const g = group === undefined ? activeGroup() : group;
     return !g || g === '@free';
   }
 
@@ -1369,7 +1369,9 @@ export function createInteractivePanel({
    *  텍스트에서 사라진 태그는 그대로 사라진다(그게 지우는 방법이다). */
   function commitGlobalText(value) {
     const all = globalChipList();
-    const shown = visibleChipList(all);     // **같은 배열**에서 걸러야 동일성이 맞는다
+    // 지금 걸린 필터가 아니라 **이 텍스트를 만든 그룹**으로 거른다(textModeGroup 주석).
+    const g = textModeGroup;
+    const shown = visibleChipList(all, g);  // **같은 배열**에서 걸러야 동일성이 맞는다
     // 어느 태그가 어느 슬롯에서 왔는지. 파생(locked)은 슬롯에 못 넣으므로 뺀다.
     const home = new Map();
     for (const item of shown) {
@@ -1402,7 +1404,6 @@ export function createInteractivePanel({
     // 편집 중이면 그 그룹이 명백한 주인**이다 — 배경만 띄워 놓고 `classroom` 을
     // `library` 로 고쳤는데 자유 입력으로 새면 그룹을 고른 뜻이 사라진다(실측).
     // 축 프리셋(파생)과 '직접' 은 슬롯이 아니므로 그대로 자유 입력으로 간다.
-    const g = activeGroup();
     const homeless = (g && g !== '@free' && g !== COMP_GROUP
                       && Object.prototype.hasOwnProperty.call(next, g))
       ? g : null;
@@ -1417,7 +1418,7 @@ export function createInteractivePanel({
     }
     state.slots = next;
     // 안 보이던 자유 입력은 그대로 둔다(위 '손대지 않는다'와 같은 이유).
-    state.freeText = freeVisibleNow()
+    state.freeText = freeVisibleNow(g)
       ? leftover.join(', ')
       : [String(state.freeText || '').trim(), leftover.join(', ')].filter(Boolean).join(', ');
   }
@@ -1472,6 +1473,8 @@ export function createInteractivePanel({
       </span>`;
     }).join('');
     if (globalTextMode) {
+      // 지금 화면에 적히는 내용이 어느 그룹의 것인지 여기서 못박는다.
+      textModeGroup = activeGroup();
       // 텍스트 모드는 **통째로 전환**된다(사용자 지정). 칩을 같이 두면 같은 태그가
       // 두 군데 보여 어느 쪽을 고치는 건지 알 수 없다. 빠져나오면 다시 칩이 된다.
       return `
@@ -1607,6 +1610,12 @@ export function createInteractivePanel({
   }
 
   let globalTextMode = false;   // 칩(false) — 텍스트(true)
+  // **그 텍스트를 만든 그룹.** 확정은 이 값으로 한다 — 지금 걸린 필터로 하면
+  // 안 된다. 그룹 줄은 필터를 먼저 세우고 blur 에 확정을 맡기므로(그래야 첫
+  // 클릭이 먹는다), 확정 시점에는 이미 새 그룹이다. 그 상태로 옛 그룹의 텍스트를
+  // 덮으면 **안 보이던 그룹이 전부 지워진다**(실측: 동물만 보이는 채로 [전체] 를
+  // 누르자 background/etc/자유입력이 통째로 증발했다 — 사용자 제보 2026-08-10).
+  let textModeGroup = '';
 
   function renderGlobalEditor() {
     const host = document.getElementById('interactiveGlobalEditor');

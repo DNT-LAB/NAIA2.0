@@ -982,18 +982,22 @@ export function createInteractivePanel({
    *  있는 곳이 거기뿐이다(서버가 다시 뽑을 수 있다). */
   function seedLockToggleHtml() {
     const seed = (typeof getLockedSeed === 'function' ? getLockedSeed() : null);
+    // 해상도도 함께 고정하므로 같이 적는다 — 시드만 같고 크기가 달라지면
+    // 구도가 그대로일 수 없다(사용자 지정). **툴팁보다 먼저 읽는다** — 아래에서
+    // 선언하면 툴팁이 TDZ 로 던진다(실측: 버튼이 통째로 안 그려졌다).
+    const res = (typeof getLockedRes === 'function' ? getLockedRes() : null);
+    const resText = res && res.w && res.h ? ` · ${res.w}×${res.h}` : '';
     const tip = seedLock
       ? (seed != null
-          ? `시드 ${seed} 로 고정 중 — 다시 누르면 매번 새로 뽑습니다`
-          : '고정 켬 — 다음 생성의 시드를 잡아 이후에 씁니다')
-      : 'Interactive 의 마지막 생성 시드를 다음에도 씁니다';
+          ? `시드 ${seed}${res && res.w ? ` · ${res.w}×${res.h}` : ''} 로 고정 중\n`
+            + '다시 누르면 풀립니다 · 우클릭하면 시드를 직접 넣습니다'
+          : '고정 켬 — 아직 잡을 시드가 없습니다\n'
+            + '한 장 만들면 그 시드를 물고, 우클릭하면 직접 넣을 수 있습니다')
+      : '직전 생성의 시드와 해상도를 그대로 다시 씁니다\n'
+        + '구도는 두고 프롬프트만 고쳐 볼 때 씁니다 · 우클릭하면 직접 넣습니다';
     // 켜면 **숫자 자체가 라벨**이 된다(사용자 지정 2026-08-10) — 무엇으로 묶여
     // 있는지가 이 버튼의 유일한 정보다. 아직 못 잡았으면 이름을 그대로 둔다.
     // 앞의 새싹은 '이 씨앗에서 자란다' 는 표시다.
-    // 해상도도 함께 고정하므로 같이 적는다 — 시드만 같고 크기가 달라지면
-    // 구도가 그대로일 수 없다(사용자 지정).
-    const res = (typeof getLockedRes === 'function' ? getLockedRes() : null);
-    const resText = res && res.w && res.h ? ` · ${res.w}×${res.h}` : '';
     const label = seedLock
       ? (seed != null ? `\u{1F331} ${seed}${resText}` : '\u{1F331} 시드 고정')
       : '시드 고정';
@@ -1447,10 +1451,15 @@ export function createInteractivePanel({
     const chips = visibleChipList(list).map(item => {
       const {weight, text} = weightedChip(item.raw);
       const label = SCENE_LABEL.get(item.slot) || item.slot;
-      const tip = weight
-        ? `${label} \u00b7 가중치 ${weight} \u00b7 이 묶음은 통째로만 지울 수 있습니다`
-        : (item.locked ? `${label} \u00b7 구도 콤보에서 나온 값입니다` : label);
+      const tip = item.locked
+        ? `${label} \u00b7 축 프리셋에서 나온 값입니다\n축 버튼에서 바꾸면 따라 바뀝니다`
+        : (weight
+            ? `${label} \u00b7 가중치 ${weight}\n`
+              + '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)\n'
+              + '이 묶음은 통째로 지워집니다 \u00b7 쪼개려면 판을 눌러 텍스트로 고칩니다'
+            : `${label}\n우클릭 \u2014 가중치를 겁니다(휠로도 됩니다)`);
       return `<span class="ia-gchip${item.locked ? ' is-locked' : ''}" data-slot="${item.slot}"
+        ${item.locked ? '' : `data-gw-slot="${item.slot}" data-gw-idx="${item.index}"`}
         title="${escHtml(tip)}">
         ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}\u00d7</b>` : ''}
         <span class="ia-gchip-t">${escHtml(text)}</span>
@@ -1474,7 +1483,9 @@ export function createInteractivePanel({
     const freeVisible = !globalGroupFilter || globalGroupFilter === '@free';
     const freeChips = (freeVisible ? freeTagList() : []).map((t, i) => {
       const {weight, text} = weightedChip(t);
-      return `<span class="ia-gchip is-free" title="직접 적은 것">
+      return `<span class="ia-gchip is-free" data-gw-free="${i}"
+        title="${escHtml('직접 적은 것' + (weight ? ` \u00b7 가중치 ${weight}` : '')
+          + '\n우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)')}">
         ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}×</b>` : ''}
         <span class="ia-gchip-t">${escHtml(text)}</span>
         <button type="button" class="ia-gchip-x" data-gfree="${i}" aria-label="제거">×</button>
@@ -1587,6 +1598,31 @@ export function createInteractivePanel({
   }
 
   function bindGlobalEditor(host) {
+    // 칩 우클릭 -> 가중치 편집. 왼클릭은 텍스트 모드 전환이라 자리가 없다.
+    //
+    // 리스너는 **칩이 아니라 상자**에 건다. 칩 줄은 `overflow-y: auto` 라 창이
+    // 낮으면 칩이 통째로 잘려 이벤트가 상자에 떨어진다 — 칩마다 걸면 그 때 아무
+    // 일도 일어나지 않는다.
+    host.querySelectorAll('.ia-ge-box').forEach(box => {
+      box.addEventListener('contextmenu', event => {
+        const chip = event.target.closest
+          ? event.target.closest('[data-gw-slot], [data-gw-free]') : null;
+        if (!chip) return;                 // 빈 곳 우클릭은 브라우저 메뉴 그대로
+        event.preventDefault();
+        event.stopPropagation();
+        const free = chip.dataset.gwFree !== undefined;
+        const slot = free ? '' : chip.dataset.gwSlot;
+        const index = Number(free ? chip.dataset.gwFree : chip.dataset.gwIdx);
+        if (!(index >= 0) || (!free && !slot)) return;
+        if (miniOpen === 'weight' && weightTarget && weightTarget.free === free
+            && weightTarget.slot === slot && weightTarget.index === index) {
+          closeCompPopup();
+          return;
+        }
+        weightTarget = {slot, index, free};
+        openMiniPopup('weight', chip);
+      });
+    });
     // 그룹 줄 — 눌러서 그 그룹만 본다. 같은 것을 다시 누르면 전부로 돌아간다.
     //
     // **click 이 아니라 pointerdown 이다.** 텍스트 모드로 편집하다가 그룹을 누르면
@@ -1641,6 +1677,9 @@ export function createInteractivePanel({
     // 지우면서 동시에 모드가 바뀌면 방금 무엇을 지웠는지 보이지 않는다.
     if (box && !text) {
       box.addEventListener('pointerdown', event => {
+        // 오른쪽 버튼은 가중치 편집이다. 여기서 모드를 바꿔 버리면 칩이 사라져
+        // 뒤이어 오는 contextmenu 가 텍스트칸에 떨어진다 — 우클릭이 통째로 샌다.
+        if (event.button !== 0) return;
         if (event.target.closest('.ia-gchip-x')) return;
         event.preventDefault();
         globalTextMode = true;
@@ -5574,7 +5613,117 @@ export function createInteractivePanel({
     // 시드 직접 입력. 버튼 우클릭으로 연다(왼클릭은 켜고 끄기라 자리가 없다).
     seed:   {title: '시드 직접 입력', body: () => seedInputHtml(),
              bind: () => bindSeedInput(), anchorSel: '[data-ia-seedlock]'},
+    // 씬 태그 칩의 가중치. 칩 우클릭으로 연다(왼클릭은 텍스트 모드 전환이다).
+    weight: {title: () => '가중치 \u00b7 ' + (weightTargetText() || '태그'),
+             body: () => weightInputHtml(), bind: () => bindWeightInput(),
+             anchorSel: null},
   };
+
+  // 가중치를 고치는 중인 칩. {slot, index}
+  let weightTarget = null;
+
+  function weightTargetRaw() {
+    if (!weightTarget) return '';
+    if (weightTarget.free) {
+      const tags = freeTagList();
+      return String(tags[weightTarget.index] || '');
+    }
+    const list = state.slots[weightTarget.slot];
+    if (!Array.isArray(list)) return '';
+    return String(list[weightTarget.index] || '');
+  }
+
+  function weightTargetText() {
+    return weightedChip(weightTargetRaw()).text;
+  }
+
+  /** 가중치 없는 태그의 기본값. 1 은 '거는 의미가 없는' 값이라 한 칸 위에서 시작한다. */
+  const WEIGHT_STEP = 0.05;
+  const WEIGHT_MIN = -2;
+  const WEIGHT_MAX = 3;
+
+  function weightInputHtml() {
+    const {weight} = weightedChip(weightTargetRaw());
+    const cur = weight == null ? '1' : String(weight);
+    return '<div class="ia-wgt">'
+      + `<input type="text" inputmode="decimal" class="ia-wgt-i" id="iaWeightInput"`
+      + ` value="${escHtml(cur)}" autocomplete="off" spellcheck="false">`
+      + '<button type="button" class="ia-wgt-ok" data-wgtok="1">확인</button>'
+      + '<div class="ia-wgt-hint">휠로 0.05씩 \u00b7 1 이면 가중치를 뗍니다</div>'
+      + '</div>';
+  }
+
+  /** 가중치를 붙여 저장 형식으로 만든다. 1(또는 빈 값)이면 맨 태그로 되돌린다 —
+   *  `1::tag ::` 는 아무 일도 하지 않으면서 글자만 늘린다. */
+  function applyWeight(n) {
+    if (!weightTarget) return;
+    const text = weightTargetText();
+    if (!text) return;
+    const w = Math.round(n * 100) / 100;
+    // `1::tag ::` 는 아무 일도 하지 않으면서 글자만 늘린다 — 맨 태그로 되돌린다.
+    const next = (w === 1) ? text : `${w}::${text} ::`;
+    if (weightTarget.free) {
+      // 자유 입력은 문자열 하나다(원문을 지켜야 해서). 태그 단위로 갈랐다가
+      // 그 자리만 갈아 끼우고 다시 잇는다.
+      const tags = freeTagList();
+      if (!(weightTarget.index >= 0) || weightTarget.index >= tags.length) return;
+      tags[weightTarget.index] = next;
+      state.freeText = tags.join(', ');
+    } else {
+      const list = state.slots[weightTarget.slot];
+      if (!Array.isArray(list)) return;
+      list[weightTarget.index] = next;
+    }
+    renderBlocks();
+    renderGlobalEditor();
+    emitChange();
+  }
+
+  function bindWeightInput() {
+    const input = document.getElementById('iaWeightInput');
+    const ok = miniPopup && miniPopup.querySelector('[data-wgtok]');
+    if (!input) return;
+    setTimeout(() => { try { input.focus(); input.select(); } catch (_) {} }, 0);
+
+    const read = () => {
+      const raw = String(input.value || '').trim();
+      if (!/^-?\d+(?:\.\d+)?$/.test(raw)) return null;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < WEIGHT_MIN || n > WEIGHT_MAX) return null;
+      return n;
+    };
+    const commit = () => {
+      const n = read();
+      if (n == null) {
+        input.classList.add('is-bad');
+        showToast(`가중치는 ${WEIGHT_MIN} ~ ${WEIGHT_MAX} 사이의 수만 됩니다`, 'error');
+        try { input.focus(); input.select(); } catch (_) {}
+        return;
+      }
+      applyWeight(n);
+      closeCompPopup();
+    };
+    input.addEventListener('input', () => input.classList.remove('is-bad'));
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); commit(); }
+      else if (event.key === 'Escape') { event.preventDefault(); closeCompPopup(); }
+    });
+    ok?.addEventListener('click', commit);
+
+    // 휠로 0.05씩. **팝업 어디에서나** 먹는다 — 입력칸이 좁아 정확히 얹기 어렵다.
+    const wheel = event => {
+      event.preventDefault();
+      const cur = read();
+      const base = cur == null ? 1 : cur;
+      const next = Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN,
+        Math.round((base + (event.deltaY < 0 ? WEIGHT_STEP : -WEIGHT_STEP)) * 100) / 100));
+      input.value = String(next);
+      input.classList.remove('is-bad');
+      // 굴리는 대로 바로 반영한다 — 값을 보며 맞추는 것이 이 조작의 쓸모다.
+      applyWeight(next);
+    };
+    miniPopup?.addEventListener('wheel', wheel, {passive: false});
+  }
 
   function seedInputHtml() {
     const cur = getLockedSeed();
@@ -5718,7 +5867,7 @@ export function createInteractivePanel({
     if (miniPopup && miniPopup.contains(event.target)) return;
     const t = event.target.closest ? event.target : event.target.parentElement;
     // 여는 버튼 위 클릭은 그 버튼의 토글이 처리한다.
-    if (t && t.closest('[data-comp-preset], [data-ap-rating], [data-ap-axis], [data-ap-rand], [data-ia-seedlock]')) return;
+    if (t && t.closest('[data-comp-preset], [data-ap-rating], [data-ap-axis], [data-ap-rand], [data-ia-seedlock], [data-gw-slot], [data-gw-free]')) return;
     // **드롭다운 목록은 팝업 밖에 산다.** 앱이 네이티브 select 를 숨기고
     // (`native-select-hidden`) 커스텀 위젯으로 바꾸는데, 그 목록(`custom-select-menu`)
     // 은 `document.body` 직계다(customSelects.mjs). 그래서 항목을 고르는 순간

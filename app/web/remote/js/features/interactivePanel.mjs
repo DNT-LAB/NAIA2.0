@@ -1306,13 +1306,15 @@ export function createInteractivePanel({
    *  '안 보이던 것 유지' 로직이 전부를 유지로 판정해 태그가 중복됐다). */
   function visibleChipList(list) {
     const src = list || globalChipList();
-    if (!globalGroupFilter) return src;
-    if (globalGroupFilter === '@free') return [];
-    return src.filter(i => i.slot === globalGroupFilter);
+    const g = activeGroup();
+    if (!g) return src;
+    if (g === '@free') return [];
+    return src.filter(i => i.slot === g);
   }
 
   function freeVisibleNow() {
-    return !globalGroupFilter || globalGroupFilter === '@free';
+    const g = activeGroup();
+    return !g || g === '@free';
   }
 
   /** 텍스트 모드의 내용 — **보이는 것과 똑같이** 적는다.
@@ -1400,10 +1402,10 @@ export function createInteractivePanel({
     // 편집 중이면 그 그룹이 명백한 주인**이다 — 배경만 띄워 놓고 `classroom` 을
     // `library` 로 고쳤는데 자유 입력으로 새면 그룹을 고른 뜻이 사라진다(실측).
     // 축 프리셋(파생)과 '직접' 은 슬롯이 아니므로 그대로 자유 입력으로 간다.
-    const homeless = (globalGroupFilter && globalGroupFilter !== '@free'
-                      && globalGroupFilter !== COMP_GROUP
-                      && Object.prototype.hasOwnProperty.call(next, globalGroupFilter))
-      ? globalGroupFilter : null;
+    const g = activeGroup();
+    const homeless = (g && g !== '@free' && g !== COMP_GROUP
+                      && Object.prototype.hasOwnProperty.call(next, g))
+      ? g : null;
     const leftover = [];
     for (const tag of typed) {
       const k = tag.trim().toLowerCase();
@@ -1445,6 +1447,7 @@ export function createInteractivePanel({
 
   function globalEditorHtml() {
     const list = globalChipList();
+    const pin = pinnedGroup();   // 슬롯 팝업이 걸어 둔 임시 고정
     // 그룹 줄의 개수는 **거르기 전** 전체로 센다 — 거른 뒤로 세면 고른 그룹만
     // 남고 나머지가 0 이 되어 다시 돌아갈 길이 사라진다.
     const bar = groupBarHtml(list);
@@ -1480,7 +1483,7 @@ export function createInteractivePanel({
     }
     // 직접 적은 것도 **태그마다 칩 하나**다. 한 덩어리로 두면 지울 때 통째로만
     // 지워지고, 축 칩과 같은 것을 다루면서 모양이 달라 눈에 걸린다.
-    const freeVisible = !globalGroupFilter || globalGroupFilter === '@free';
+    const freeVisible = freeVisibleNow();
     const freeChips = (freeVisible ? freeTagList() : []).map((t, i) => {
       const {weight, text} = weightedChip(t);
       return `<span class="ia-gchip is-free" data-gw-free="${i}"
@@ -1494,14 +1497,21 @@ export function createInteractivePanel({
     // 비었다는 안내는 **거른 뒤 화면 기준**이다 — 필터로 아무것도 안 남았을 때도
     // 같은 안내가 뜨면 태그가 사라진 줄 안다. 그때는 다른 말을 한다.
     const total = chips.length + freeChips.length;
-    const empty = list.length + freeTagList().length
-      ? '<span class="ia-ge-empty">이 그룹에는 없습니다 — [전체] 로 돌아갑니다</span>'
-      : '<span class="ia-ge-empty">눌러서 적거나, 위 버튼으로 넣습니다</span>';
+    // 슬롯을 열어 고정된 상태면 '없다' 가 아니라 '여기로 들어온다' 가 맞다 —
+    // 방금 연 슬롯이 비어 있는 것은 정상이고, [전체] 로 돌아가라고 하면 안 된다.
+    const pinLabel = pin ? (SCENE_LABEL.get(pin) || pin) : '';
+    const empty = pin
+      ? `<span class="ia-ge-empty">'${escHtml(pinLabel)}' 은 아직 비어 있습니다 — 팝업에서 고르거나 눌러서 적습니다</span>`
+      : (list.length + freeTagList().length
+          ? '<span class="ia-ge-empty">이 그룹에는 없습니다 — [전체] 로 돌아갑니다</span>'
+          : '<span class="ia-ge-empty">눌러서 적거나, 위 버튼으로 넣습니다</span>');
     // 그룹 줄은 여기서 그리지 않는다 — 제목 줄(`#iaGlobalGroups`)로 나간다.
     // renderGlobalEditor 가 거기에 넣는다.
     pendingGroupBar = bar;
     return `
-      <div class="ia-ge-box" id="iaGlobalBox" title="눌러서 텍스트로 고칩니다">
+      <div class="ia-ge-box" id="iaGlobalBox" title="${escHtml(pin
+        ? `눌러서 적으면 '${pinLabel}' 로 들어갑니다`
+        : '눌러서 텍스트로 고칩니다')}"
         <div class="ia-ge-chips">${chips}${freeChips}</div>
         ${total ? '' : empty}
       </div>`;
@@ -1509,6 +1519,21 @@ export function createInteractivePanel({
 
   // 씬 태그를 어느 그룹만 볼지. '' = 전부.
   let globalGroupFilter = '';
+  // 슬롯 팝업이 열려 있는 동안 하단 씬 태그를 그 슬롯으로 **잠시** 고정한다.
+  // 좌측에 인라인 입력칸이 없어졌으므로(사용자 지정 2026-08-10), 지금 무엇을
+  // 넣고 있는지 보여 줄 곳은 하단뿐이다. 사용자가 그룹 줄을 직접 누르면 푼다.
+  let scenePinOff = false;
+
+  function pinnedGroup() {
+    if (scenePinOff) return '';
+    if (!panelContext || panelContext.kind !== 'scene') return '';
+    return panelContext.slotId || '';
+  }
+
+  /** 지금 실제로 걸린 그룹. 고정이 사용자 필터를 이긴다. */
+  function activeGroup() {
+    return pinnedGroup() || globalGroupFilter;
+  }
   // globalEditorHtml 이 만든 그룹 줄 HTML. 제목 줄에 따로 꽂는다.
   let pendingGroupBar = '';
 
@@ -1518,19 +1543,25 @@ export function createInteractivePanel({
     const counts = new Map();
     list.forEach(i => counts.set(i.slot, (counts.get(i.slot) || 0) + 1));
     const free = freeTagList().length;
+    const pin = pinnedGroup();
+    const on = activeGroup();
     // 순서는 씬 슬롯 순서를 따르고, 축 프리셋과 직접 입력은 끝에 둔다.
     const order = [...SCENE_SLOTS.map(s => s.id), COMP_GROUP];
-    const parts = order.filter(id => counts.get(id)).map(id =>
-      `<button type="button" class="ia-ggrp${globalGroupFilter === id ? ' is-on' : ''}"`
-      + ` data-ggrp="${escHtml(id)}" data-g="${escHtml(id)}">`
-      + `${escHtml(SCENE_LABEL.get(id) || id)}<b>${counts.get(id)}</b></button>`);
+    // 고정된 그룹은 **비어 있어도 보인다** — 지금 넣는 것이 어디로 가는지가
+    // 개수보다 중요하다. 아니면 빈 슬롯을 열었을 때 줄에서 사라져 버린다.
+    const parts = order.filter(id => counts.get(id) || id === pin).map(id =>
+      `<button type="button" class="ia-ggrp${on === id ? ' is-on' : ''}`
+      + `${pin === id ? ' is-pin' : ''}"`
+      + ` data-ggrp="${escHtml(id)}" data-g="${escHtml(id)}"`
+      + `${pin === id ? ' title="이 슬롯을 여는 동안 고정됩니다 — 눌러서 풉니다"' : ''}>`
+      + `${escHtml(SCENE_LABEL.get(id) || id)}<b>${counts.get(id) || 0}</b></button>`);
     if (free) {
-      parts.push(`<button type="button" class="ia-ggrp${globalGroupFilter === '@free' ? ' is-on' : ''}"`
+      parts.push(`<button type="button" class="ia-ggrp${on === '@free' ? ' is-on' : ''}"`
         + ' data-ggrp="@free" data-g="@free">직접<b>' + free + '</b></button>');
     }
     if (!parts.length) return '';
     // 필터가 걸려 있을 때만 [전체] 를 보인다 — 평소엔 줄만 길어진다.
-    if (globalGroupFilter) {
+    if (on) {
       parts.unshift('<button type="button" class="ia-ggrp is-all" data-ggrp="">전체</button>');
     }
     // 버튼만 돌려준다 — 담는 그릇은 제목 줄의 `#iaGlobalGroups`(.ia-ge-groups)다.
@@ -1634,9 +1665,13 @@ export function createInteractivePanel({
       btn.addEventListener('pointerdown', event => {
         event.stopPropagation();     // 칩 판 클릭(텍스트 모드 전환)까지 가면 안 된다
         const next = btn.dataset.ggrp;
+        // 슬롯 팝업이 걸어 둔 고정은 여기서 푼다 — 사용자가 직접 고른 쪽이 이긴다.
+        // 안 풀면 눌러도 화면이 그대로라 버튼이 죽은 것처럼 보인다.
+        const wasPinned = !!pinnedGroup();
+        if (wasPinned) scenePinOff = true;
         // 필터를 **먼저** 세운다 — 아래 blur 가 부르는 renderGlobalEditor 가
         // 이 값을 보고 그린다. 순서를 뒤집으면 한 박자 늦게 반영된다.
-        globalGroupFilter = (next && next === globalGroupFilter) ? '' : next;
+        globalGroupFilter = (!wasPinned && next && next === globalGroupFilter) ? '' : next;
         const ta = document.getElementById('iaGlobalText');
         if (ta && globalTextMode) {
           // 편집 중이면 blur 에 맡긴다: leave() 가 내용을 확정하고 다시 그린다.
@@ -1714,10 +1749,20 @@ export function createInteractivePanel({
       if (event.key !== 'Escape') return;
       // 자동완성 목록이 떠 있으면 그쪽이 먼저 닫혀야 한다 — 한 번에 둘 다 닫으면
       // 목록만 지우려던 사용자가 편집기 밖으로 튕겨 나간다.
-      if (document.querySelector('#tagTooltip:not([hidden])')) return;
+      if (tagAssistOpen()) return;
       event.preventDefault();
       text.blur();
     });
+  }
+
+  /** 자동완성 목록이 **정말로** 떠 있는가.
+   *
+   *  `#tagTooltip:not([hidden])` 로 보던 것을 고친다. 그 노드는 `hidden` 속성
+   *  없이 `display: none` 으로 숨는다 - 늘 참이라 Esc 를 통째로 삼켰다(실측:
+   *  씬 팝업이 Esc 로 안 닫혔고, 하단 편집기도 Esc 로 안 빠져나왔다). */
+  function tagAssistOpen() {
+    const tt = document.getElementById('tagTooltip');
+    return !!(tt && !tt.hidden && tt.offsetParent !== null);
   }
 
   function positionSceneFloat() {
@@ -1918,11 +1963,12 @@ export function createInteractivePanel({
       try { caret = [prevEl.selectionStart, prevEl.selectionEnd]; } catch (_) { caret = null; }
     }
     const floating = sceneFloatFits();
-    // 편집 중인 씬 슬롯은 **인라인으로 남긴다.** 태그를 직접 치는 textarea 가 그
-    // 블록 안에 있어서, 전부 버튼으로 빼면 입력창이 사라진다(실측).
-    const inlineScenes = floating
-      ? SCENE_SLOTS.filter(sl => isEditing('scene', sl.id))
-      : SCENE_SLOTS;
+    // 씬 슬롯은 좌측에 아무것도 남기지 않는다(사용자 지정 2026-08-10). 예전에는
+    // 편집 중인 하나만 인라인으로 남겨 거기 textarea 를 뒀는데, 그 탓에 고른
+    // 태그가 좌측 상자와 하단 씬 태그 두 군데에 나뉘어 보였다. 이제 직접 입력도
+    // 하단 상자가 맡는다 — 슬롯을 열면 그 그룹으로 고정되므로 거기 친 태그가
+    // 그 슬롯으로 들어간다(pinnedGroup / commitGlobalText 의 homeless 참조).
+    const inlineScenes = floating ? [] : SCENE_SLOTS;
     blocksMount.innerHTML = charBlockHtml() + inlineScenes.map(sceneBlockHtml).join('');
     lastPosSig = posSignature();   // 방금 그린 구성이 기준선이다
     const host = ensureSceneMount();
@@ -3629,7 +3675,16 @@ export function createInteractivePanel({
   /** 카운트/비어있음/캐릭터 요약만 갱신 — textarea 는 건드리지 않는다. */
   function updateEditingMeta() {
     const el = editingEl();
-    if (!el) return;
+    if (!el) {
+      // 씬 슬롯은 좌측에 노드가 없다(사용자 지정 2026-08-10) — 개수는 플로트
+      // 버튼이, 내용은 하단 씬 태그가 받는다. 여기서 안 하면 팝업에서 고른
+      // 태그가 상태에는 들어가는데 화면 어디에도 안 나타난다(실측).
+      if (panelContext && panelContext.kind === 'scene') {
+        syncSceneButtonCount(panelContext.slotId);
+        renderGlobalEditor();
+      }
+      return;
+    }
     const tags = currentTags();
     const count = el.querySelector('.ia-block-count');
     if (count) count.textContent = tags.length || '';
@@ -3649,7 +3704,13 @@ export function createInteractivePanel({
     if (!context) return;
     if (context.kind === 'scene') {
       const el = blocksMount.querySelector(`.ia-block[data-slot="${context.slotId}"]`);
-      if (!el) { renderBlocks(); return; }
+      if (!el) {
+        // 좌측에 블록이 없는 것이 정상이다(씬 슬롯). 통째로 다시 그리면 팝업
+        // 아래 플로트까지 새로 만들어 스크롤과 포커스가 튄다 — 바뀐 두 곳만.
+        syncSceneButtonCount(context.slotId);
+        renderGlobalEditor();
+        return;
+      }
       applyChipView(el, state.slots[context.slotId] || []);
       return;
     }
@@ -3665,6 +3726,23 @@ export function createInteractivePanel({
       summary.textContent =
         CHAR_SUBS.flatMap(s => character.fields[s.key] || []).join(', ') || '(비어 있음)';
     }
+  }
+
+  /** 씬 버튼(플로트)의 개수 배지만 고친다. 버튼은 개수만 달라지므로 통째로
+   *  다시 그릴 필요가 없다. */
+  function syncSceneButtonCount(slotId) {
+    const btn = sceneMount && sceneMount.querySelector(`.ia-scene-btn[data-slot="${slotId}"]`);
+    if (!btn) return;
+    const n = (state.slots[slotId] || []).length;
+    btn.classList.toggle('has-tags', !!n);
+    let badge = btn.querySelector('.ia-scene-btn-n');
+    if (!n) { if (badge) badge.remove(); return; }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'ia-scene-btn-n';
+      btn.appendChild(badge);
+    }
+    badge.textContent = n;
   }
 
   /** 블록 하나의 칩 줄을 다시 만든다. **renderBlocks 와 같은 옵션을 써야 한다** —
@@ -3703,6 +3781,7 @@ export function createInteractivePanel({
   function openSlot(slotId) {
     const slot = SCENE_SLOTS.find(s => s.id === slotId);
     if (!slot) return;
+    scenePinOff = false;        // 이전 슬롯에서 풀어 뒀어도 새로 여는 것은 다시 고정
     panelContext = {
       kind: 'scene', slotId, title: slot.name, axis: slot.axis,
       // 축 섹션을 넘기지 않아 '다인원 자세' 팝업이 통째로 비어 있었다 — 캐릭터
@@ -3775,6 +3854,7 @@ export function createInteractivePanel({
     renderBlocks();            // 편집 슬롯만 textarea 로, 나머지는 칩으로
     renderPanel();             // 검색창 + 분류 탐색
     bindPanelContextClose();
+    bindSceneClose(panelContext.kind === 'scene');
     panelMount.classList.add('open');
     // 편집 중 표시 — tagAssist 의 태그 정보 툴팁을 억제한다(팝업 위에 겹쳐 가림).
     document.body.classList.add('interactive-editing');
@@ -4457,6 +4537,58 @@ export function createInteractivePanel({
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
   }
 
+  // 씬 슬롯 팝업을 닫는 두 길 — Esc 와 바깥 클릭.
+  //
+  // 예전에는 둘 다 좌측 인라인 textarea 의 keydown/blur 가 맡았다. 그 칸을
+  // 없애면서(사용자 지정 2026-08-10: 입력은 하단 씬 태그로) 닫는 길이 통째로
+  // 사라져, 한 번 연 팝업이 다른 슬롯을 누를 때까지 남았다(실측). 문서 수준으로
+  // 옮긴다. 캐릭터 슬롯은 여전히 자기 textarea 가 맡으므로 씬일 때만 건다.
+  //
+  // '바깥' 에서 빼는 것들: 팝업 셋(본체·조언·확대), 씬 버튼 줄과 Fast 상자,
+  // 하단 씬 태그 판(여기가 지금 입력칸이다 — 누르면 닫히면 안 된다), 자동완성
+  // 목록, 미니 팝업, 그리고 좌측 목록(캐릭터 슬롯 전환은 스스로 문맥을 바꾼다).
+  const SCENE_KEEP_OPEN = [
+    '.ia-panel', '.ia-aside', '.ia-zoom', '.ia-scene-float', '.ia-fast-float',
+    '.ia-comp-popup', '.ia-pos-popup', '.ia-alt-popup', '.ia-cp-card',
+    '#resultInfoPanel', '#tagTooltip',
+  ].join(', ');
+
+  function onSceneOutside(event) {
+    if (!panelContext || panelContext.kind !== 'scene') return;
+    const t = event.target;
+    if (!t || !t.closest) return;
+    // **이미 문서에서 떨어져 나간 노드는 '바깥' 이 아니다.** 씬 버튼을 누르면
+    // 그 핸들러가 renderBlocks() 로 버튼 줄을 통째로 갈아 끼우고, 그 뒤에야
+    // 클릭이 문서까지 올라온다 — 그때 target 의 조상은 이미 없어서 아래 예외
+    // 검사가 전부 빗나가고, 방금 연 팝업을 자기가 닫았다(실측).
+    if (!document.contains(t)) return;
+    if (t.closest(SCENE_KEEP_OPEN)) return;
+    if (blocksMount && blocksMount.contains(t)) return;
+    closePanel();
+  }
+
+  function onSceneKeydown(event) {
+    if (event.key !== 'Escape') return;
+    if (!panelContext || panelContext.kind !== 'scene') return;
+    // 자동완성 목록이 떠 있으면 그쪽부터 닫힌다 — 한 번에 둘 다 닫으면 목록만
+    // 지우려던 사용자가 팝업 밖으로 튕겨 나간다(하단 편집기와 같은 규칙).
+    if (tagAssistOpen()) return;
+    if (document.getElementById('iaWeightInput')) return;   // 가중치 입력이 먼저
+    event.preventDefault();
+    closePanel();
+  }
+
+  let sceneCloseBound = false;
+  function bindSceneClose(on) {
+    if (on === sceneCloseBound) return;
+    sceneCloseBound = on;
+    const fn = on ? 'addEventListener' : 'removeEventListener';
+    // click(버블)이다 — pointerdown 으로 걸면 좌측/버튼의 열기 핸들러보다 먼저 돌아
+    // 방금 연 팝업을 자기가 닫는다.
+    document[fn]('click', onSceneOutside);
+    document[fn]('keydown', onSceneKeydown);
+  }
+
   // 팝업 **안**에서 우클릭해도 닫는다. 슬롯 줄에만 걸어 뒀더니 팝업이 그 줄을
   // 덮고 있어 우클릭이 팝업에 먼저 닿아 아무 일도 안 일어났다(사용자 지적).
   // 검색창·입력창에서는 브라우저 메뉴(붙여넣기 등)를 살려 둔다.
@@ -4472,6 +4604,7 @@ export function createInteractivePanel({
   }
 
   function closePanel() {
+    bindSceneClose(false);
     document.body.classList.remove('interactive-editing');
     shiftResultForPopup(false);
     closeZoom();
@@ -4655,8 +4788,9 @@ export function createInteractivePanel({
   }
 
   function positionPopup() {
-    const el = editingEl();
-    if (!el) return;
+    // 씬 슬롯은 좌측에 노드가 없다 — 앵커는 `blocksMount` 통째다. 예전처럼
+    // `editingEl()` 이 없다고 돌아가면 팝업이 좌표를 못 받아 화면 구석에 붙는다.
+    if (!panelContext) return;
     const vw = window.innerWidth;
     if (vw <= 767) {
       // 모바일: 하단 시트(CSS 미디어쿼리)에 맡긴다. 인라인 앵커 좌표를 비운다.

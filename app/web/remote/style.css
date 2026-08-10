@@ -23309,6 +23309,16 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   color: var(--text-primary);
 }
 .ia-ggrp.is-on b { color: var(--text-primary); }
+/* 슬롯 팝업이 열려 있는 동안의 임시 고정. 사용자가 직접 고른 필터(is-on)와
+   구분되어야 한다 — 손대지 않았는데 걸려 있는 것이라, 왜 걸렸는지가 보여야
+   누르면 풀린다는 것도 짐작이 간다. 점선 테두리 + 옆에 압정. */
+.ia-ggrp.is-pin {
+  border-style: dashed; border-color: var(--accent-glow);
+  background: rgba(124,106,239,0.1);
+}
+.ia-ggrp.is-pin::after {
+  content: '\1F4CC'; font-size: 8px; opacity: 0.8; margin-left: 1px;
+}
 .ia-ggrp[data-g="composition"]    { --axis: var(--ia-axis-composition); }
 .ia-ggrp[data-g="composition_fx"] { --axis: var(--ia-axis-composition_fx); }
 .ia-ggrp[data-g="background"]     { --axis: var(--ia-axis-background); }

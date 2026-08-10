@@ -21441,14 +21441,29 @@ body.detached-module .mod-grid-3 {
    갈아 끼우는 자리라, 입력창을 두면 아무 렌더에나 치던 글자가 날아간다. */
 .ia-fast-float {
   position: fixed; z-index: 1; display: none;
-  flex-direction: column; gap: 5px; width: 232px;
+  /* 접힌 상자는 절반 폭이라 왼쪽에 붙어야 한다 — stretch 면 폭 지정이 먹지 않는다. */
+  flex-direction: column; align-items: flex-start; gap: 5px; width: 232px;
 }
 .ia-fast-float.open { display: flex; }
+/* 접힘 = **비활성**. 절반 폭으로 줄이고 반투명하게 물러난다(사용자 지정 2026-08-09) —
+   안 쓰는 동안 그림 위에서 자리와 시선을 덜 차지한다. */
 .ia-fast-box {
+  width: 55%; opacity: 0.5;
   border-radius: 8px; overflow: hidden;
-  background: rgba(20, 20, 28, 0.62); border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(20, 20, 28, 0.5); border: 1px solid rgba(255,255,255,0.10);
+  transition: width 0.16s ease, opacity 0.16s ease,
+              background 0.16s ease, border-color 0.16s ease;
 }
-.ia-fast-box.is-open { border-color: var(--accent); }
+.ia-fast-box:hover { opacity: 0.8; }
+/* 펼침 = **활성**. 폭을 다 쓰고 또렷해지되 배경은 반투명으로 둔다 — 그림 위에
+   얹히는 판이라 뒤가 비쳐야 한다(태그 사전 카드와 같은 규칙). */
+.ia-fast-box.is-open {
+  width: 100%; opacity: 1;
+  background: rgba(18, 18, 26, 0.62);
+  /* 강조는 낮춘다 — 순색 var(--accent) 테두리는 이 크기에서 너무 세게 튄다
+     (사용자 지적). 같은 색을 알파로 눌러 윤곽만 남긴다. */
+  border-color: rgba(124, 106, 239, 0.45);
+}
 .ia-fast-head {
   display: flex; align-items: center; gap: 5px; width: 100%;
   padding: 4px 8px; cursor: pointer; background: none; border: 0;
@@ -21476,14 +21491,20 @@ body.detached-module .mod-grid-3 {
   color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
   line-height: 1.4;
 }
-.ia-fast-input:focus { outline: none; border-color: var(--accent); }
+.ia-fast-input:focus { outline: none; border-color: rgba(124,106,239,0.55); }
+/* 버튼도 같은 톤으로 낮춘다. 여기서 순색을 쓰면 좁은 판 안에서 테두리가 두 겹
+   (상자 + 버튼)으로 겹쳐 보여 지저분하다 — 테두리는 거의 지우고 바탕으로 알린다. */
 .ia-fast-gen {
   width: 100%; margin-top: 7px; padding: 5px 8px; cursor: pointer;
-  border-radius: 6px; border: 1px solid var(--accent);
-  background: rgba(124,106,239,0.22); color: var(--text-primary);
+  border-radius: 6px; border: 1px solid rgba(124,106,239,0.30);
+  background: rgba(124,106,239,0.16); color: var(--text-secondary);
   font-family: var(--font-display); font-size: 11px; font-weight: 700;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
 }
-.ia-fast-gen:hover { background: rgba(124,106,239,0.34); }
+.ia-fast-gen:hover {
+  background: rgba(124,106,239,0.30); border-color: rgba(124,106,239,0.55);
+  color: var(--text-primary);
+}
 
 /* 축 칩 드롭다운. 값 목록 + 랜덤 토글. */
 .ia-axmenu { display: flex; flex-direction: column; gap: 8px; }

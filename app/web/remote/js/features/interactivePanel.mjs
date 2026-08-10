@@ -634,9 +634,10 @@ export function createInteractivePanel({
 
   /** 씬 슬롯의 플로팅 버튼 마크업. 전폭 행이 아니라 아이콘+이름+개수의 압축형이다. */
   function sceneButtonHtml(slot) {
-    const tags = state.slots[slot.id] || [];
-    const chipTags = slot.id === 'composition'
-      ? [...compChips(state.composition), ...tags] : tags;
+    // **축 프리셋은 세지 않는다.** 예전에는 구도 슬롯 안에 살아서 합산했는데,
+    // 지금은 자기 버튼과 자기 배지를 가진다(96577efc) — 그대로 두면 같은 값이
+    // 두 버튼에서 두 번 세어져 구도에 넣은 적 없는 개수가 뜬다(사용자 지적).
+    const chipTags = state.slots[slot.id] || [];
     const on = isEditing('scene', slot.id);
     return `<button type="button" class="ia-scene-btn${on ? ' is-open' : ''}${chipTags.length ? ' has-tags' : ''}"
       data-slot="${slot.id}" title="${escHtml(slot.name)}">
@@ -1195,7 +1196,12 @@ export function createInteractivePanel({
   // 이 모듈은 애초에 '블록 -> 문자열' 단방향 계약이다.
 
   /** 축 id -> 사람이 읽는 이름. 목록에서 파생한다(손으로 적으면 축을 더할 때 어긋난다). */
-  const SCENE_LABEL = new Map(SCENE_SLOTS.map(slot => [slot.id, slot.name]));
+  // 축 프리셋 파생 칩이 쓰는 가짜 슬롯 id. 씬 슬롯 어디에도 속하지 않는다.
+  const COMP_GROUP = 'comp';
+  const SCENE_LABEL = new Map([
+    ...SCENE_SLOTS.map(slot => [slot.id, slot.name]),
+    [COMP_GROUP, '축 프리셋'],
+  ]);
 
   /** 저장 원소 하나를 칩 하나로 본다. `2::a, b ::` 는 **쪼개지 않는다** —
    *  쪼개서 되쓰면 공백·중첩·이스케이프에서 원문이 상한다. 무게만 배지로 뗀다. */
@@ -1211,7 +1217,9 @@ export function createInteractivePanel({
       if (slot.id === 'composition') {
         for (const t of compTags(state.composition)) {
           // 구도 3축 콤보는 파생값이다 — 여기서 지울 수 없다(콤보를 바꿔야 한다).
-          out.push({raw: t, slot: 'composition', locked: true, index: -1});
+          // 슬롯은 **`comp`** 다. 'composition' 으로 두면 씬 태그에서 구도 슬롯이
+          // 넣은 것처럼 세어져, 구도에 아무것도 안 넣었는데 개수가 뜬다.
+          out.push({raw: t, slot: COMP_GROUP, locked: true, index: -1});
         }
       }
       (state.slots[slot.id] || []).forEach((t, i) => {
@@ -1295,7 +1303,12 @@ export function createInteractivePanel({
 
   function globalEditorHtml() {
     const list = globalChipList();
-    const chips = list.map(item => {
+    // 그룹 줄의 개수는 **거르기 전** 전체로 센다 — 거른 뒤로 세면 고른 그룹만
+    // 남고 나머지가 0 이 되어 다시 돌아갈 길이 사라진다.
+    const bar = groupBarHtml(list);
+    const shown = globalGroupFilter && globalGroupFilter !== '@free'
+      ? list.filter(i => i.slot === globalGroupFilter) : list;
+    const chips = (globalGroupFilter === '@free' ? [] : shown).map(item => {
       const {weight, text} = weightedChip(item.raw);
       const label = SCENE_LABEL.get(item.slot) || item.slot;
       const tip = weight
@@ -1322,7 +1335,8 @@ export function createInteractivePanel({
     }
     // 직접 적은 것도 **태그마다 칩 하나**다. 한 덩어리로 두면 지울 때 통째로만
     // 지워지고, 축 칩과 같은 것을 다루면서 모양이 달라 눈에 걸린다.
-    const freeChips = freeTagList().map((t, i) => {
+    const freeVisible = !globalGroupFilter || globalGroupFilter === '@free';
+    const freeChips = (freeVisible ? freeTagList() : []).map((t, i) => {
       const {weight, text} = weightedChip(t);
       return `<span class="ia-gchip is-free" title="직접 적은 것">
         ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}×</b>` : ''}
@@ -1330,12 +1344,45 @@ export function createInteractivePanel({
         <button type="button" class="ia-gchip-x" data-gfree="${i}" aria-label="제거">×</button>
       </span>`;
     }).join('');
-    const total = list.length + freeTagList().length;
+    // 비었다는 안내는 **거른 뒤 화면 기준**이다 — 필터로 아무것도 안 남았을 때도
+    // 같은 안내가 뜨면 태그가 사라진 줄 안다. 그때는 다른 말을 한다.
+    const total = chips.length + freeChips.length;
+    const empty = list.length + freeTagList().length
+      ? '<span class="ia-ge-empty">이 그룹에는 없습니다 — [전체] 로 돌아갑니다</span>'
+      : '<span class="ia-ge-empty">눌러서 적거나, 위 버튼으로 넣습니다</span>';
     return `
+      ${bar}
       <div class="ia-ge-box" id="iaGlobalBox" title="눌러서 텍스트로 고칩니다">
         <div class="ia-ge-chips">${chips}${freeChips}</div>
-        ${total ? '' : '<span class="ia-ge-empty">눌러서 적거나, 위 버튼으로 넣습니다</span>'}
+        ${total ? '' : empty}
       </div>`;
+  }
+
+  // 씬 태그를 어느 그룹만 볼지. '' = 전부.
+  let globalGroupFilter = '';
+
+  /** 그룹별 개수 줄. 눌러서 그 그룹만 본다(다시 누르면 전부).
+   *  칩이 섞여 있으면 무엇이 몇 개인지 세어 봐야 알 수 있었다(사용자 지정). */
+  function groupBarHtml(list) {
+    const counts = new Map();
+    list.forEach(i => counts.set(i.slot, (counts.get(i.slot) || 0) + 1));
+    const free = freeTagList().length;
+    // 순서는 씬 슬롯 순서를 따르고, 축 프리셋과 직접 입력은 끝에 둔다.
+    const order = [...SCENE_SLOTS.map(s => s.id), COMP_GROUP];
+    const parts = order.filter(id => counts.get(id)).map(id =>
+      `<button type="button" class="ia-ggrp${globalGroupFilter === id ? ' is-on' : ''}"`
+      + ` data-ggrp="${escHtml(id)}" data-g="${escHtml(id)}">`
+      + `${escHtml(SCENE_LABEL.get(id) || id)}<b>${counts.get(id)}</b></button>`);
+    if (free) {
+      parts.push(`<button type="button" class="ia-ggrp${globalGroupFilter === '@free' ? ' is-on' : ''}"`
+        + ' data-ggrp="@free" data-g="@free">직접<b>' + free + '</b></button>');
+    }
+    if (!parts.length) return '';
+    // 필터가 걸려 있을 때만 [전체] 를 보인다 — 평소엔 줄만 길어진다.
+    if (globalGroupFilter) {
+      parts.unshift('<button type="button" class="ia-ggrp is-all" data-ggrp="">전체</button>');
+    }
+    return `<div class="ia-ge-groups">${parts.join('')}</div>`;
   }
 
   /** 편집기를 보일지 말지. Interactive 가 켜져 있고 결과 탭일 때만 자리를 바꾼다. */
@@ -1387,6 +1434,15 @@ export function createInteractivePanel({
   }
 
   function bindGlobalEditor(host) {
+    // 그룹 줄 — 눌러서 그 그룹만 본다. 같은 것을 다시 누르면 전부로 돌아간다.
+    host.querySelectorAll('[data-ggrp]').forEach(btn => {
+      btn.addEventListener('click', event => {
+        event.stopPropagation();     // 칩 판 클릭(텍스트 모드 전환)까지 가면 안 된다
+        const next = btn.dataset.ggrp;
+        globalGroupFilter = (next && next === globalGroupFilter) ? '' : next;
+        renderGlobalEditor();
+      });
+    });
     host.querySelectorAll('[data-gslot]').forEach(btn => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.gslot;

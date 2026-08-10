@@ -23221,6 +23221,47 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-gchip[data-slot="fx"]             { --axis: var(--ia-axis-fx); }
 .ia-gchip[data-slot="pose_multi"]     { --axis: var(--ia-axis-pose_multi); }
 .ia-gchip[data-slot="adult"]          { --axis: var(--ia-axis-adult); }
+/* 축 프리셋 파생 칩. 씬 슬롯이 아니므로 자기 색을 따로 준다 — 구도 색을 쓰면
+   구도 슬롯이 넣은 것과 구분이 안 된다(그것이 애초의 문제였다). */
+.ia-gchip[data-slot="comp"]           { --axis: #8ea0ff; }
+
+/* 그룹 줄 — 무엇이 몇 개인지 한눈에, 눌러서 그 그룹만 본다.
+   칩과 **같은 색**을 쓴다(왼쪽 띠 ↔ 점). 색이 다르면 둘을 잇지 못한다. */
+.ia-ge-groups {
+  display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+  margin-bottom: 5px; flex: none;
+}
+.ia-ggrp {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px 2px 6px; cursor: pointer;
+  border: 1px solid var(--border-dim); border-radius: 999px;
+  background: rgba(255,255,255,0.03); color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 9.5px; line-height: 1.6;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+/* 점이 그 그룹의 색이다. 칩의 왼쪽 띠와 같은 값을 쓴다. */
+.ia-ggrp::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--axis, var(--border-glow)); flex: none;
+}
+.ia-ggrp.is-all::before { display: none; }
+.ia-ggrp b { font-weight: 700; color: var(--text-secondary); }
+.ia-ggrp:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.ia-ggrp.is-on {
+  background: rgba(124,106,239,0.18); border-color: rgba(124,106,239,0.5);
+  color: var(--text-primary);
+}
+.ia-ggrp.is-on b { color: var(--text-primary); }
+.ia-ggrp[data-g="composition"]    { --axis: var(--ia-axis-composition); }
+.ia-ggrp[data-g="composition_fx"] { --axis: var(--ia-axis-composition_fx); }
+.ia-ggrp[data-g="background"]     { --axis: var(--ia-axis-background); }
+.ia-ggrp[data-g="etc"]            { --axis: var(--ia-axis-etc); }
+.ia-ggrp[data-g="animal"]         { --axis: var(--ia-axis-animal); }
+.ia-ggrp[data-g="fx"]             { --axis: var(--ia-axis-fx); }
+.ia-ggrp[data-g="pose_multi"]     { --axis: var(--ia-axis-pose_multi); }
+.ia-ggrp[data-g="adult"]          { --axis: var(--ia-axis-adult); }
+.ia-ggrp[data-g="comp"]           { --axis: #8ea0ff; }
+.ia-ggrp[data-g="@free"]          { --axis: var(--text-dim); }
 
 /* 구도 콤보에서 나온 파생 칩 — 여기서는 못 지운다(콤보를 바꿔야 한다). */
 .ia-gchip.is-locked { opacity: 0.72; font-style: italic; }

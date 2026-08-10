@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260809a-clash')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810b-groups')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,

@@ -23166,6 +23166,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   color: var(--text-primary); font-family: var(--font-mono); font-size: 12px;
 }
 .ia-seedin-i:focus { outline: none; border-color: rgba(124,106,239,0.55); }
+.ia-seedin-i.is-bad { border-color: #e5736b; }
 .ia-seedin-ok {
   flex: none; padding: 5px 12px; cursor: pointer; border-radius: 6px;
   border: 1px solid rgba(124,106,239,0.35);

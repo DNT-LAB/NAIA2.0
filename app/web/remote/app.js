@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810k-seedres')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810p-grpblur')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -2995,6 +2995,11 @@ function onGenerationDispatched(m) {
   if (!m || m.ok !== true) return;
   const seed = Number(m.params?.seed);
   if (!Number.isFinite(seed) || seed < 0) return;
+  // **Interactive 캡처를 먼저 한다.** 아래 두 가드는 '시드 박스를 건드리지
+  // 않는다' 는 뜻이지 '이 생성을 없던 일로 한다' 는 뜻이 아니다. 뒤에 두었더니
+  // 시드 입력란에 포커스를 둔 채 Ctrl+Enter 로 생성하면 잠금이 그 생성을 놓쳤다
+  // (Codex 리뷰 2026-08-10).
+  captureInteractiveSeed(m, seed);
   if (!paramEls?.seed || document.activeElement === paramEls.seed) return;
   if (isComfyUiFreeWorkflowActive()) return;
   const seedText = String(Math.trunc(seed));
@@ -3004,26 +3009,59 @@ function onGenerationDispatched(m) {
   // 등)도 같은 "마지막 실사용 시드"에 고정되게 한다(Codex High). Seed Fix OFF인
   // 동안의 영속은 무해 — 서버 리셋 가드(534fa55)가 매 요청 재추첨한다.
   setParam('seed', seedText);
-  // Interactive '시드 고정' 이 쓸 값 — **그 모드로 나간 것만** 잡는다.
-  // 캐릭터 뷰어·프리셋이 중간에 끼어도 남의 시드를 물지 않게, 백엔드가
-  // 이 디스패치가 Interactive 것인지 함께 실어 준다(headless_generation_service).
-  if (m.params?.interactive_mode_request) {
-    interactiveLastSeed = Math.trunc(seed);
-    // 해상도도 함께 잡는다 — 시드만 같고 크기가 달라지면 구도가 그대로일 수 없다.
-    const w = Number(m.params?.width), h = Number(m.params?.height);
+}
+
+/** Interactive '시드 고정' 이 쓸 값 — **그 모드로 나간 것만** 잡는다.
+ *  캐릭터 뷰어·프리셋이 중간에 끼어도 남의 시드를 물지 않게, 백엔드가
+ *  이 디스패치가 Interactive 것인지 함께 실어 준다(headless_generation_service). */
+function captureInteractiveSeed(m, seed) {
+  if (!m.params?.interactive_mode_request) return;
+  interactiveLastSeed = Math.trunc(seed);
+  // 해상도도 함께 잡는다 — 시드만 같고 크기가 달라지면 구도가 그대로일 수 없다.
+  const w = Number(m.params?.width), h = Number(m.params?.height);
+  if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+    interactiveLastRes = {w: Math.trunc(w), h: Math.trunc(h)};
+  }
+  saveInteractiveSeedMemo();
+  // 버튼에 적힌 숫자를 그때 바로 고친다 — 렌더가 걸릴 일이 따로 없어서,
+  // 안 부르면 생성이 끝나도 '(숫자 없음)' 인 채로 남는다(실측).
+  interactivePanel?.refreshSeedLock?.();
+}
+
+// 마지막 Interactive 생성의 시드·해상도를 브라우저에 남긴다.
+// 이것은 '잠금 값' 이 아니라 **사실의 기록**이다 — 새로고침 뒤에 고정을 켜면
+// 출처를 아는 값을 집을 수 있어야 한다. 예전에는 시드 박스로 폴백했는데,
+// 그 값은 캐릭터 뷰어·프리셋 것일 수 있어 출처 모를 시드가 잠겼다(Codex 리뷰).
+const INTERACTIVE_SEED_KEY = 'naia.interactive.lastseed.v1';
+
+function saveInteractiveSeedMemo() {
+  try {
+    localStorage.setItem(INTERACTIVE_SEED_KEY,
+      JSON.stringify({seed: interactiveLastSeed, res: interactiveLastRes}));
+  } catch (_) { /* 용량 초과·프라이빗 모드 — 기억 못 하는 것이 기능을 막지는 않는다 */ }
+}
+
+function loadInteractiveSeedMemo() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(INTERACTIVE_SEED_KEY) || 'null');
+    if (!raw || typeof raw !== 'object') return;
+    const s = Number(raw.seed);
+    if (Number.isFinite(s) && s >= 0) interactiveLastSeed = Math.trunc(s);
+    const w = Number(raw.res?.w), h = Number(raw.res?.h);
     if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
       interactiveLastRes = {w: Math.trunc(w), h: Math.trunc(h)};
     }
-    // 버튼에 적힌 숫자를 그때 바로 고친다 — 렌더가 걸릴 일이 따로 없어서,
-    // 안 부르면 생성이 끝나도 '(숫자 없음)' 인 채로 남는다(실측).
-    interactivePanel?.refreshSeedLock?.();
-  }
+  } catch (_) {}
 }
+// 호출은 **`let` 선언 뒤**다(아래 참조). 여기서 부르면 TDZ ReferenceError 가
+// 나는데 위 try/catch 가 그걸 삼켜서, 복원이 조용히 실패했다(실측).
 
 // Interactive 로 나간 마지막 디스패치의 실제 시드. '시드 고정' 이 이걸 다시 쓴다.
 let interactiveLastSeed = null;
 // 그 생성의 해상도 {w, h}. 시드와 한 벌로 묶인다.
 let interactiveLastRes = null;
+// 지난 세션이 남긴 값을 여기서 되살린다 — **선언 뒤여야 한다**(TDZ).
+loadInteractiveSeedMemo();
 
 /** 시드 고정을 **켜는 순간** 직전 생성의 시드를 집는다.
  *
@@ -3036,16 +3074,15 @@ let interactiveLastRes = null;
  *  계속 박스를 따라가게 두면 캐릭터 뷰어·프리셋이 중간에 끼는 순간 남의
  *  시드로 조용히 갈아탄다. */
 function adoptSeedForLock() {
-  // 해상도는 시드와 따로 본다 — 시드는 이미 잡혔는데 해상도만 비어 있을 수 있다
-  // (옛 세션 상태를 되살린 경우). 각자 비어 있을 때만 채운다.
+  // 해상도는 시드와 따로 본다 — 시드는 있는데 해상도만 비어 있을 수 있다.
   if (interactiveLastRes == null) {
     const cur = currentResolutionWH();
     if (cur) interactiveLastRes = cur;
   }
-  if (interactiveLastSeed != null) return;
-  const raw = Number(paramEls?.seed?.value);
-  if (!Number.isFinite(raw) || raw < 0) return;
-  interactiveLastSeed = Math.trunc(raw);
+  // **시드 박스로 폴백하지 않는다.** 그 값은 캐릭터 뷰어·프리셋 것일 수 있어,
+  // 출처 모를 시드와 지금 해상도의 임의 조합이 잠긴다(Codex 리뷰 2026-08-10).
+  // 새로고침 뒤에도 잡을 값이 있도록 마지막 Interactive 시드를 따로 기억해 둔다
+  // (loadInteractiveSeedMemo). 그것마저 없으면 다음 Interactive 생성을 기다린다.
 }
 
 /** 지금 화면에 걸린 해상도 {w, h}. 못 읽으면 null.

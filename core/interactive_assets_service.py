@@ -113,14 +113,17 @@ def snapshot_hash(chars: list[dict[str, Any]]) -> str:
         # **비어 있으면 아무것도 더하지 않는다.** 그래야 Fast 를 쓰지 않은 기존
         # 기록의 해시가 그대로 유지된다 — 무조건 넣으면 옛 행이 전부 새 해시와
         # 어긋나 중복 판정이 풀리고 같은 조합이 두 벌로 쌓인다.
+        #
+        # **경계를 살려 직렬화한다.** `"fastp=" + 값` 을 `|` 로 이으면 사용자가
+        # 적은 문자열이 구분자를 흉내 낼 수 있다 — `{p: "foo|fastn=bar", n: ""}`
+        # 와 `{p: "foo", n: "bar"}` 가 같은 줄이 되어 서로를 덮어쓴다(Codex 리뷰
+        # 2026-08-10). json.dumps 는 따옴표를 이스케이프하므로 섞이지 않는다.
         fast = c.get("fast") or {}
         if isinstance(fast, dict):
             fp = str(fast.get("p") or "").strip().lower()
             fn = str(fast.get("n") or "").strip().lower()
-            if fp:
-                flat.append("fastp=" + fp)
-            if fn:
-                flat.append("fastn=" + fn)
+            if fp or fn:
+                flat.append("fast=" + json.dumps([fp, fn], ensure_ascii=False, sort_keys=True))
         parts.append("|".join(flat))
     return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 

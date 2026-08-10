@@ -115,23 +115,32 @@ def main() -> int:
         # record() 가 기존 행을 찾아 본문을 덮어써 먼저 만든 조합이 사라졌다.
         base_fast = {"name": "carol", "state": "active", "gender": "female",
                      "fields": {"머리": ["twintails"]}, "alt": [], "gaze": []}
-        red = svc.record([dict(base_fast, fast={"p": "holding red umbrella", "n": ""})])
-        blue = svc.record([dict(base_fast, fast={"p": "holding blue umbrella", "n": ""})])
-        neg = svc.record([dict(base_fast, fast={"p": "", "n": "bad hands"})])
-        check("Fast 프롬프트가 다르면 다른 카드", red[0] != blue[0], True)
-        check("Fast 네거티브만 달라도 다른 카드", red[0] != neg[0], True)
-        same = svc.record([dict(base_fast, fast={"p": "holding red umbrella", "n": ""})])
-        check("같은 Fast 면 같은 카드", same[0], red[0])
+        # **id 문자열로 견준다.** record() 는 인덱스의 행 객체를 그대로 돌려주므로,
+        # 같은 카드면 두 호출이 **같은 객체**를 준다 — dict 끼리 비교하면 무엇을
+        # 넣든 통과하는 공허한 검사가 된다(Codex 리뷰가 짚어 준 자리. 원인은
+        # created_at 흔들림이 아니라 객체 동일성이었다).
+        rid = lambda rows: rows[0]["id"]
+        red = rid(svc.record([dict(base_fast, fast={"p": "holding red umbrella", "n": ""})]))
+        blue = rid(svc.record([dict(base_fast, fast={"p": "holding blue umbrella", "n": ""})]))
+        neg = rid(svc.record([dict(base_fast, fast={"p": "", "n": "bad hands"})]))
+        check("Fast 프롬프트가 다르면 다른 카드", red != blue, True)
+        check("Fast 네거티브만 달라도 다른 카드", red != neg, True)
+        same = rid(svc.record([dict(base_fast, fast={"p": "holding red umbrella", "n": ""})]))
+        check("같은 Fast 면 같은 카드", same, red)
+        # 구분자 흉내: 이어 붙이기로 직렬화하면 아래 둘이 같은 해시가 된다.
+        trick_a = rid(svc.record([dict(base_fast, fast={"p": "foo|fastn=bar", "n": ""})]))
+        trick_b = rid(svc.record([dict(base_fast, fast={"p": "foo", "n": "bar"})]))
+        check("구분자를 흉내 내도 섞이지 않는다", trick_a != trick_b, True)
         # 하위호환: Fast 가 비었거나 아예 없으면 옛 해시와 같아야 한다
         # (안 그러면 이미 쌓인 기록이 전부 중복 판정에서 풀린다).
-        no_key = svc.record([dict(base_fast)])
-        empty = svc.record([dict(base_fast, fast={"p": "", "n": ""})])
-        check("Fast 없음 == 빈 Fast", no_key[0], empty[0])
-        check("빈 Fast 는 Fast 있는 것과 다른 카드", no_key[0] != red[0], True)
+        no_key = rid(svc.record([dict(base_fast)]))
+        empty = rid(svc.record([dict(base_fast, fast={"p": "", "n": ""})]))
+        check("Fast 없음 == 빈 Fast", no_key, empty)
+        check("빈 Fast 는 Fast 있는 것과 다른 카드", no_key != red, True)
 
         # 인덱스가 온전한 JSON 인가
         idx = json.loads((Path(tmp) / "interactive_snapshot" / "index.json").read_text("utf-8"))
-        check("인덱스 행 수가 맞는다", len(idx["snapshots"]), 9)
+        check("인덱스 행 수가 맞는다", len(idx["snapshots"]), 11)
 
     print()
     if FAILED:

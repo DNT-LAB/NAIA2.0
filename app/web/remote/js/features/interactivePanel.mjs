@@ -1588,11 +1588,27 @@ export function createInteractivePanel({
 
   function bindGlobalEditor(host) {
     // 그룹 줄 — 눌러서 그 그룹만 본다. 같은 것을 다시 누르면 전부로 돌아간다.
+    //
+    // **click 이 아니라 pointerdown 이다.** 텍스트 모드로 편집하다가 그룹을 누르면
+    // textarea 의 blur 가 먼저 돌아 편집을 확정하고 줄을 다시 그린다 — 그 순간
+    // 눌린 노드가 사라져 click 이 오지 않는다. 첫 클릭은 내용만 저장되고 필터는
+    // 안 걸렸다(Codex 리뷰 2026-08-10 · 실측 재현). pointerdown 은 blur 보다
+    // 앞서므로 두 가지가 한 번에 이뤄진다.
     host.querySelectorAll('[data-ggrp]').forEach(btn => {
-      btn.addEventListener('click', event => {
+      btn.addEventListener('pointerdown', event => {
         event.stopPropagation();     // 칩 판 클릭(텍스트 모드 전환)까지 가면 안 된다
         const next = btn.dataset.ggrp;
+        // 필터를 **먼저** 세운다 — 아래 blur 가 부르는 renderGlobalEditor 가
+        // 이 값을 보고 그린다. 순서를 뒤집으면 한 박자 늦게 반영된다.
         globalGroupFilter = (next && next === globalGroupFilter) ? '' : next;
+        const ta = document.getElementById('iaGlobalText');
+        if (ta && globalTextMode) {
+          // 편집 중이면 blur 에 맡긴다: leave() 가 내용을 확정하고 다시 그린다.
+          // preventDefault 로 포커스를 붙잡으면 renderGlobalEditor 가
+          // '타이핑 중' 으로 보고 조기 반환해 아무것도 안 바뀐다(실측).
+          ta.blur();
+          return;
+        }
         renderGlobalEditor();
       });
     });
@@ -5578,10 +5594,18 @@ export function createInteractivePanel({
     // 대개 다른 시드로 갈아타려고 여는 자리다.
     setTimeout(() => { try { input.focus(); input.select(); } catch (_) {} }, 0);
     const commit = () => {
-      const raw = String(input.value || '').replace(/[^\d]/g, '');
+      // **숫자만 골라내지 않는다.** `replace(/[^\d]/g,'')` 는 `-1` 을 `1` 로,
+      // `1e6` 을 `16` 으로, `12.34` 를 `1234` 로 조용히 바꿔 엉뚱한 시드가
+      // 잠긴다(Codex 리뷰 2026-08-10). 통째로 검사하고 아니면 되돌린다.
+      const raw = String(input.value || '').trim();
       if (!raw) { closeCompPopup(); return; }
+      if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+        input.classList.add('is-bad');
+        showToast('시드는 0 이상의 정수만 됩니다', 'error');
+        try { input.focus(); input.select(); } catch (_) {}
+        return;                      // 팝업을 닫지 않는다 — 고칠 기회를 준다
+      }
       const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0) { closeCompPopup(); return; }
       onSeedEntered(Math.trunc(n));
       // 직접 넣었다는 것은 그 시드로 묶겠다는 뜻이다 — 꺼져 있었으면 켠다.
       if (!seedLock) { seedLock = true; onSeedLockChange(true); }
@@ -5590,6 +5614,7 @@ export function createInteractivePanel({
       showToast(`시드 고정 — ${Math.trunc(n)}`, 'info');
     };
     ok?.addEventListener('click', commit);
+    input.addEventListener('input', () => input.classList.remove('is-bad'));
     input.addEventListener('keydown', event => {
       if (event.key === 'Enter') { event.preventDefault(); commit(); }
       else if (event.key === 'Escape') { event.preventDefault(); closeCompPopup(); }

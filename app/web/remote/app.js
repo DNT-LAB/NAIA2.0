@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810ac-box55')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810ae-seedmode')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -966,12 +966,18 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       // 시드 고정 버튼이 보여 줄 값. 잡힌 것이 없으면 null 이라 버튼은 숫자 없이 뜬다.
       getLockedSeed: () => interactiveLastSeed,
       getLockedRes: () => interactiveLastRes,
-      onSeedLockChange: on => { if (on) adoptSeedForLock(); },
+      // 켜고 끈 것은 **바로 남긴다.** 이 토글은 프롬프트를 안 바꾸므로 다른
+      // 저장 계기가 없다 — 켜 놓고 새로고침하면 꺼진 채로 돌아왔다(Codex P2).
+      onSeedLockChange: on => { if (on) adoptSeedForLock(); scheduleInteractiveStateSave(); },
       // 우클릭 팝업으로 직접 넣은 시드. 해상도는 지금 화면 값으로 함께 묶는다 —
       // 시드만 갈아 끼우고 크기를 옛것으로 두면 무엇이 나올지 알 수 없다.
       onSeedEntered: n => {
         interactiveLastSeed = n;
         interactiveLastRes = currentResolutionWH() || interactiveLastRes;
+        // 손으로 넣은 값도 기록이다 — 안 남기면 새로고침 뒤에 **더 오래된**
+        // 캡처 값이 되살아나 엉뚱한 시드가 잠긴다(Codex P2).
+        saveInteractiveSeedMemo();
+        scheduleInteractiveStateSave();
       },
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
@@ -3034,10 +3040,16 @@ function captureInteractiveSeed(m, seed) {
 // 그 값은 캐릭터 뷰어·프리셋 것일 수 있어 출처 모를 시드가 잠겼다(Codex 리뷰).
 const INTERACTIVE_SEED_KEY = 'naia.interactive.lastseed.v1';
 
+/** 이 기록이 어느 백엔드의 것인가. NAI 의 시드를 COMFYUI 에서 다시 쓰면
+ *  숫자만 같고 그림은 전혀 다르다 — 모드가 다르면 안 쓴다(Codex P2). */
+function seedMemoMode() {
+  return String(currentMode || modeSelect?.value || 'NAI');
+}
+
 function saveInteractiveSeedMemo() {
   try {
     localStorage.setItem(INTERACTIVE_SEED_KEY,
-      JSON.stringify({seed: interactiveLastSeed, res: interactiveLastRes}));
+      JSON.stringify({mode: seedMemoMode(), seed: interactiveLastSeed, res: interactiveLastRes}));
   } catch (_) { /* 용량 초과·프라이빗 모드 — 기억 못 하는 것이 기능을 막지는 않는다 */ }
 }
 
@@ -3045,6 +3057,9 @@ function loadInteractiveSeedMemo() {
   try {
     const raw = JSON.parse(localStorage.getItem(INTERACTIVE_SEED_KEY) || 'null');
     if (!raw || typeof raw !== 'object') return;
+    // 모드가 적혀 있고 지금과 다르면 남의 시드다 — 안 되살린다. 모드가 없는
+    // 옛 기록은 NAI 로 본다(그때는 NAI 만 캡처됐다).
+    if (String(raw.mode || 'NAI') !== seedMemoMode()) return;
     const s = Number(raw.seed);
     if (Number.isFinite(s) && s >= 0) interactiveLastSeed = Math.trunc(s);
     const w = Number(raw.res?.w), h = Number(raw.res?.h);
@@ -3083,6 +3098,17 @@ function adoptSeedForLock() {
   // 출처 모를 시드와 지금 해상도의 임의 조합이 잠긴다(Codex 리뷰 2026-08-10).
   // 새로고침 뒤에도 잡을 값이 있도록 마지막 Interactive 시드를 따로 기억해 둔다
   // (loadInteractiveSeedMemo). 그것마저 없으면 다음 Interactive 생성을 기다린다.
+}
+
+/** 백엔드를 바꾸면 앞 모드에서 잡아 둔 시드는 버린다. 메모(localStorage)는
+ *  모드가 적혀 있어 스스로 걸러지지만, **메모리 값은 그대로 남아** 모드를 바꾼
+ *  직후 고정을 켜면 남의 시드가 잠겼다(Codex P2). 새 모드의 기록이 있으면
+ *  그것으로 갈아 끼우고, 없으면 비운다. */
+function resetInteractiveSeedForMode() {
+  interactiveLastSeed = null;
+  interactiveLastRes = null;
+  loadInteractiveSeedMemo();
+  interactivePanel?.refreshSeedLock?.();
 }
 
 /** 지금 화면에 걸린 해상도 {w, h}. 못 읽으면 null.
@@ -6428,6 +6454,8 @@ function syncMode(mode) {
   syncingMode = false;
   currentMode = mode;
   setNaiHighlightMode(mode);
+  // 백엔드가 바뀌었으니 앞 모드에서 잡아 둔 Interactive 시드는 버린다.
+  resetInteractiveSeedForMode();
   updatePromptTokenEstimate();
   updateRandomPromptWeightRow(mode);
   applyComfyUiFreeParamLock(mode);

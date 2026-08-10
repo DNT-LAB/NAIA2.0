@@ -1475,6 +1475,7 @@ export function createInteractivePanel({
     if (globalTextMode) {
       // 지금 화면에 적히는 내용이 어느 그룹의 것인지 여기서 못박는다.
       textModeGroup = activeGroup();
+      textModeBase = globalTextValue();
       // 텍스트 모드는 **통째로 전환**된다(사용자 지정). 칩을 같이 두면 같은 태그가
       // 두 군데 보여 어느 쪽을 고치는 건지 알 수 없다. 빠져나오면 다시 칩이 된다.
       return `
@@ -1616,6 +1617,9 @@ export function createInteractivePanel({
   // 덮으면 **안 보이던 그룹이 전부 지워진다**(실측: 동물만 보이는 채로 [전체] 를
   // 누르자 background/etc/자유입력이 통째로 증발했다 — 사용자 제보 2026-08-10).
   let textModeGroup = '';
+  // 그 텍스트칸을 마지막으로 채운 **권위 있는 내용**. 사용자가 그 뒤로 친 것과
+  // 구분하는 기준선이다 — 없으면 팝업에서 지운 태그를 되살려 버린다.
+  let textModeBase = '';
 
   function renderGlobalEditor() {
     const host = document.getElementById('interactiveGlobalEditor');
@@ -3690,7 +3694,9 @@ export function createInteractivePanel({
       // 태그가 상태에는 들어가는데 화면 어디에도 안 나타난다(실측).
       if (panelContext && panelContext.kind === 'scene') {
         syncSceneButtonCount(panelContext.slotId);
-        renderGlobalEditor();
+        // 텍스트칸이 열려 있으면 renderGlobalEditor 는 '타이핑 중' 으로 보고 그냥
+        // 돌아간다 — 그 경우엔 칸 자체를 갱신해야 픽이 살아남는다.
+        if (!syncGlobalTextInput()) renderGlobalEditor();
       }
       return;
     }
@@ -5822,6 +5828,34 @@ export function createInteractivePanel({
     emitChange();
   }
 
+  /** 팝업에서 고른 결과를 **열려 있는 텍스트칸에 밀어 넣는다.**
+   *
+   *  슬롯 인라인 칸이 하던 일(syncEditingInput)의 하단판이다. 안 하면 텍스트칸이
+   *  낡은 채로 남고, blur 의 commitGlobalText 가 그것을 진실로 삼아 방금 고른
+   *  태그를 지운다(Codex P1).
+   *
+   *  사용자가 치던 글자는 지킨다: 기준선(textModeBase)에 없던 것 = 사용자가 새로
+   *  친 것이므로 뒤에 붙인다. 팝업에서 **지운** 태그는 기준선에 있으므로 되살아
+   *  나지 않는다. */
+  function syncGlobalTextInput() {
+    const ta = document.getElementById('iaGlobalText');
+    if (!globalTextMode || !ta) return false;
+    const base = globalTextValue();
+    const baseKeys = new Set(parseGlobalInput(base).map(t => t.trim().toLowerCase()));
+    const prevKeys = new Set(parseGlobalInput(textModeBase).map(t => t.trim().toLowerCase()));
+    const keep = parseGlobalInput(ta.value).filter(t => {
+      const k = t.trim().toLowerCase();
+      return !baseKeys.has(k) && !prevKeys.has(k);
+    });
+    const next = [base, keep.join(', ')].filter(Boolean).join(', ');
+    if (ta.value !== next) {
+      ta.value = next;
+      try { ta.setSelectionRange(next.length, next.length); } catch (_) {}
+    }
+    textModeBase = base;
+    return true;
+  }
+
   function bindWeightInput() {
     const input = document.getElementById('iaWeightInput');
     const ok = miniPopup && miniPopup.querySelector('[data-wgtok]');
@@ -5862,7 +5896,10 @@ export function createInteractivePanel({
         Math.round((base + (event.deltaY < 0 ? WEIGHT_STEP : -WEIGHT_STEP)) * 100) / 100));
       input.value = String(next);
       input.classList.remove('is-bad');
-      // 굴리는 대로 바로 반영한다 — 값을 보며 맞추는 것이 이 조작의 쓸모다.
+      // **굴리는 동안은 반응형 생성을 막는다.** 직접 타이핑과 같은 규칙이다 —
+      // 안 막으면 한 틱에 한 장씩 나간다(실측: 4틱 = 유료 생성 4회, Codex P1).
+      // 화면 반영은 그대로 즉시 한다 — 값을 보며 맞추는 것이 이 조작의 쓸모다.
+      reactiveTypingSlot = input;
       applyWeight(next);
     };
     miniPopup?.addEventListener('wheel', wheel, {passive: false});
@@ -5998,6 +6035,13 @@ export function createInteractivePanel({
   // 이름은 그대로 둔다 — 부르는 곳이 여럿이고 뜻도 그대로다(미니 팝업 닫기).
   function closeCompPopup() {
     if (!miniOpen) return;
+    // 가중치 휠이 걸어 둔 발화 차단을 여기서 푼다. 닫는 길이 여럿(확인·Esc·바깥
+    // 클릭)이라 한 곳에서 처리해야 한다 — 하나라도 새면 반응형 생성이 통째로
+    // 막힌 채 남는다. 그동안 쌓인 변화는 여기서 한 번에 낸다.
+    if (reactiveTypingSlot && reactiveTypingSlot.id === 'iaWeightInput') {
+      reactiveTypingSlot = null;
+      reactiveOnChange();
+    }
     miniOpen = '';
     miniAnchor = null;
     if (miniPopup) { miniPopup.hidden = true; miniPopup.innerHTML = ''; }

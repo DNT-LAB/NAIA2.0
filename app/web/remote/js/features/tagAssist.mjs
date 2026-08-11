@@ -395,8 +395,33 @@ export function createTagAssistController({
     const safeTop = tabRect
       ? tabRect.bottom + safeGap
       : viewportTop + 44;
-    const top = Math.max(viewportTop + safeGap, safeTop);
-    const maxHeight = Math.max(180, viewportHeight - (top - viewportTop) - safeGap);
+    let top = Math.max(viewportTop + safeGap, safeTop);
+    let maxHeight = Math.max(180, viewportHeight - (top - viewportTop) - safeGap);
+
+    // **Interactive 에서는 씬 태그 판 바로 위에 붙인다**(사용자 지정 2026-08-11).
+    // 기본 자리는 화면 맨 위인데, Interactive 는 태그를 다루는 손이 아래쪽 씬 태그
+    // 판에 있다 - 아래에서 만지는데 설명은 위에서 뜨니 눈이 화면을 세로로 왕복했다.
+    // 바닥을 판 위에 맞추고 **위로 자란다**. 자리가 모자라면 위 여백까지만 쓰고
+    // 스스로 스크롤한다(카드에 overflow-y: auto 가 걸려 있다).
+    const scenePanel = document.getElementById('resultInfoPanel');
+    const sceneRect = (document.body.classList.contains('interactive-mode') && scenePanel)
+      ? scenePanel.getBoundingClientRect() : null;
+    if (sceneRect && sceneRect.height > 0) {
+      const floor = sceneRect.top - safeGap;
+      const ceil = Math.max(viewportTop + safeGap, safeTop);
+      // 지금 그려진 높이를 쓴다. 아직 안 그려졌으면(0) 기본값으로 자리만 잡고,
+      // 다음 호출에서 실제 높이로 맞춰진다 - 이 함수는 내용이 바뀔 때마다 돈다.
+      const room = floor - ceil;
+      if (room > 120) {
+        // **재기 전에 자리를 다 열어 둔다.** 지난번 max-height 가 남아 있으면 그
+        // 높이 안에서 재게 되어, 카드가 한 번 작아지면 다음 태그의 설명이 길어도
+        // 계속 그 높이에 갇힌다 - 잴 때마다 상한이 스스로를 깎는다.
+        tagTooltip.style.setProperty('--tag-tooltip-max-height', Math.round(room) + 'px');
+        const measured = tagTooltip.getBoundingClientRect().height || 220;
+        top = Math.max(ceil, floor - Math.min(measured, room));
+        maxHeight = room;      // 위 여백까지는 쓸 수 있다 - 넘치면 스스로 스크롤
+      }
+    }
 
     tagTooltip.style.setProperty('--tag-tooltip-top', `${Math.round(top)}px`);
     tagTooltip.style.setProperty('--tag-tooltip-max-height', `${Math.round(maxHeight)}px`);

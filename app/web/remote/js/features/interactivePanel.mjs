@@ -1747,6 +1747,8 @@ export function createInteractivePanel({
         // 뒤이어 오는 contextmenu 가 텍스트칸에 떨어진다 — 우클릭이 통째로 샌다.
         if (event.button !== 0) return;
         if (event.target.closest('.ia-gchip-x')) return;
+        // 칩이 통째로 사라진다 - 그 칩을 가리키던 가중치 창은 같이 닫는다.
+        closeCompPopup();
         event.preventDefault();
         globalTextMode = true;
         renderGlobalEditor();
@@ -3881,6 +3883,10 @@ export function createInteractivePanel({
 
   /** 슬롯을 텍스트 입력으로 펼치고, 그 옆에 검색+탐색 팝업을 띄운다. */
   function enterEditing() {
+    // 가중치·시드 같은 작은 창도 함께 닫는다. 슬롯을 편집하기 시작하면 그 창이
+    // 가리키던 대상(칩·버튼)이 다시 그려지므로, 남겨 두면 엉뚱한 것을 가리킨다
+    // (사용자 지적 2026-08-11: 캐릭터 슬롯에서도 같은 일이 난다).
+    closeCompPopup();
     // 프리셋 팝업과 슬롯 팝업은 화면의 같은 자리를 쓴다 — 슬롯 편집을 시작하면 닫는다.
     // (덕분에 `onPresetOutside` 가 좌측 목록을 '바깥'에서 빼도 둘이 겹치지 않는다.)
     closePresetPanel();
@@ -6112,7 +6118,11 @@ export function createInteractivePanel({
     if (miniPopup && miniPopup.contains(event.target)) return;
     const t = event.target.closest ? event.target : event.target.parentElement;
     // 여는 버튼 위 클릭은 그 버튼의 토글이 처리한다.
-    if (t && t.closest('[data-comp-preset], [data-ap-rating], [data-ap-axis], [data-ap-rand], [data-ia-seedlock], [data-gw-slot], [data-gw-free]')) return;
+    if (t && t.closest('[data-comp-preset], [data-ap-rating], [data-ap-axis], [data-ap-rand], [data-ia-seedlock]')) return;
+    // 칩은 **우클릭일 때만** 예외다. 가중치 팝업을 여닫는 것은 우클릭뿐이고,
+    // 왼클릭은 텍스트 모드로 들어가는 길이다 - 예외가 버튼을 안 가리는 바람에
+    // 칩을 눌러 편집을 시작해도 가중치 창이 남아 있었다(사용자 지적 2026-08-11).
+    if (t && event.button === 2 && t.closest('[data-gw-slot], [data-gw-free]')) return;
     // **드롭다운 목록은 팝업 밖에 산다.** 앱이 네이티브 select 를 숨기고
     // (`native-select-hidden`) 커스텀 위젯으로 바꾸는데, 그 목록(`custom-select-menu`)
     // 은 `document.body` 직계다(customSelects.mjs). 그래서 항목을 고르는 순간

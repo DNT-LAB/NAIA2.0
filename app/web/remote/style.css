@@ -23207,28 +23207,34 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 이 팝업은 입력 한 칸이라 340px 은 과하다. */
 .ia-comp-popup:has(.ia-seedin) { width: 246px; }
 
-/* 칩 우클릭 -> 가중치. 휠로 굴리는 동안 값이 바로 반영되므로 좁아도 된다. */
-.ia-wgt { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+/* 칩 우클릭 -> 가중치. **한 줄이다**(사용자 지정 2026-08-11): 라벨 · 입력 · 확인.
+   머리 줄과 안내 줄을 빼서 세로로 셋이던 것을 하나로 줄였다. */
+.ia-wgt { display: flex; gap: 6px; align-items: center; }
+.ia-wgt-lab {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 10px;
+  color: var(--text-muted); white-space: nowrap;
+}
 .ia-wgt-i {
-  padding: 5px 7px; border-radius: 6px; min-width: 0;
+  flex: 0 0 62px; padding: 4px 6px; border-radius: 6px; min-width: 0;
   background: rgba(0,0,0,0.34); border: 1px solid var(--border-dim);
-  color: var(--text-primary); font-family: var(--font-mono); font-size: 13px;
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 12px;
   text-align: center;
 }
 .ia-wgt-i:focus { outline: none; border-color: rgba(124,106,239,0.55); }
 .ia-wgt-i.is-bad { border-color: #e5736b; }
 .ia-wgt-ok {
-  padding: 5px 12px; cursor: pointer; border-radius: 6px;
+  flex: 0 0 auto; padding: 4px 10px; cursor: pointer; border-radius: 6px;
   border: 1px solid rgba(124,106,239,0.35);
   background: rgba(124,106,239,0.18); color: var(--text-primary);
   font-family: var(--font-display); font-size: 11px; font-weight: 700;
 }
 .ia-wgt-ok:hover { background: rgba(124,106,239,0.32); }
-.ia-wgt-hint {
-  grid-column: 1 / -1; margin-top: 1px;
-  font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
+/* 내용만큼만 쓰고, **뒤가 비치지 않는다.** 반투명이라 밑에 깔린 '비어 있음'
+   플레이스홀더가 글자 위로 겹쳐 보였다(사용자 지적). */
+.ia-comp-popup:has(.ia-wgt) {
+  width: auto; padding: 7px 9px;
+  background: #16161f;
 }
-.ia-comp-popup:has(.ia-wgt) { width: 224px; }
 /* 칩에 우클릭할 것이 있다는 표시 — 커서로만 알린다(테두리를 더하면 시끄럽다). */
 .ia-gchip[data-gw-slot], .ia-gchip[data-gw-free] { cursor: context-menu; }
 /* 씬 줄은 한 줄짜리였다 — 토글이 다음 줄로 내려가도록 wrap 을 열고,

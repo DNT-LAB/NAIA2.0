@@ -5852,7 +5852,7 @@ export function createInteractivePanel({
     // 씬 태그 칩의 가중치. 칩 우클릭으로 연다(왼클릭은 텍스트 모드 전환이다).
     weight: {title: () => '가중치 \u00b7 ' + (weightTargetText() || '태그'),
              body: () => weightInputHtml(), bind: () => bindWeightInput(),
-             anchorSel: null},
+             bare: true, anchorSel: null},
   };
 
   // 가중치를 고치는 중인 칩. {slot, index}
@@ -5885,11 +5885,12 @@ export function createInteractivePanel({
   function weightInputHtml() {
     const {weight} = weightedChip(weightTargetRaw());
     const cur = weight == null ? '1' : String(weight);
+    const tip = escHtml('휠로 0.05씩 \u00b7 1 이면 가중치를 뗍니다');
     return '<div class="ia-wgt">'
+      + '<span class="ia-wgt-lab">가중치(휠)</span>'
       + `<input type="text" inputmode="decimal" class="ia-wgt-i" id="iaWeightInput"`
-      + ` value="${escHtml(cur)}" autocomplete="off" spellcheck="false">`
+      + ` value="${escHtml(cur)}" autocomplete="off" spellcheck="false" title="${tip}">`
       + '<button type="button" class="ia-wgt-ok" data-wgtok="1">확인</button>'
-      + '<div class="ia-wgt-hint">휠로 0.05씩 \u00b7 1 이면 가중치를 뗍니다</div>'
       + '</div>';
   }
 
@@ -6135,8 +6136,11 @@ export function createInteractivePanel({
     const el = ensureMiniPopup();
     // \uc81c\ubaa9\uc740 \ud568\uc218\uc5ec\ub3c4 \ub41c\ub2e4 \u2014 \ucd95 \ub4dc\ub86d\ub2e4\uc6b4\uc740 \uc5b4\ub290 \ucd95\uc774\ub0d0\uc5d0 \ub530\ub77c \uc81c\ubaa9\uc774 \ub2ec\ub77c\uc9c4\ub2e4.
     const title = typeof def.title === 'function' ? def.title() : def.title;
-    el.innerHTML = `<div class="ia-comp-popup-head"><span>${escHtml(title)}</span>`
-      + '<button type="button" class="ia-panel-close" data-comp-close="1">\u00d7</button></div>'
+    // `bare` 는 머리 줄(제목 + 닫기)을 뺀다. 입력 한 칸짜리 창에서는 머리가
+    // 본문보다 커서 자리만 먹는다(사용자 지적) - Esc·바깥 클릭으로 닫는다.
+    el.innerHTML = (def.bare ? '' :
+      `<div class="ia-comp-popup-head"><span>${escHtml(title)}</span>`
+      + '<button type="button" class="ia-panel-close" data-comp-close="1">\u00d7</button></div>')
       + def.body();
     el.hidden = false;
     miniOpen = kind;

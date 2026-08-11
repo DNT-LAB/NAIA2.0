@@ -168,6 +168,9 @@ def main() -> int:
               "neg": "깨진값", "alt": None, "fast": "깨진값"}])
         b4 = svc4.load_scene_body(m4["id"])
         check("빈/숫자 태그 정리", b4["globals"]["slots"]["background"], ["forest", "7"])
+        # JSON null 은 태그가 되면 안 된다 - str(None) == "None" 은 공백이 아니라
+        # 필터를 통과해 프롬프트에 `None` 을 실어 보낸다(Codex 7차).
+        check("null 은 태그가 아니다", b4["chars"][0]["fields"]["자세"], ["sitting"])
         check("깨진 composition 은 빈 dict", b4["globals"]["composition"], {})
         check("모르는 키는 버린다", "모르는키" in b4["globals"], False)
         check("rating 은 single 로 접힌다", b4["globals"]["rating"],
@@ -187,6 +190,30 @@ def main() -> int:
         check("손상본을 옆으로 치운다",
               any(p.suffix == ".bak" or ".bak" in p.name
                   for p in (root / "interactive_scene").iterdir()), True)
+        # **복구본을 저장했는지까지 본다.** 한 번만 읽는 검사는 이 결함을 놓친다 -
+        # 저장하지 않으면 이번 호출만 복구된 것처럼 보이고, 손상본은 이미 치웠으므로
+        # 다음 호출은 빈 목록이다. 그 상태에서 기록하면 옛 카드가 통째로 사라진다
+        # (Codex 7차 · 실측: 1회차 3 -> 2회차 0 -> 기록 후 1).
+        check("복구본이 두 번째 읽기에도 남는다", len(svc.load_scene_index()), len(rebuilt))
+        svc.record_scene(globals_for("복구 후 새 씬"), situation("sitting"))
+        check("복구 후 기록해도 옛 카드가 안 사라진다",
+              len(svc.load_scene_index()) >= len(rebuilt), True)
+
+        # 14. 본문 하나가 깨져도 나머지는 살린다
+        with tempfile.TemporaryDirectory() as tmp2:
+            root2 = Path(tmp2)
+            svc5 = InteractiveAssetsService(FakeContext(root2))
+            for i in range(3):
+                svc5.record_scene(globals_for("ok-%d" % i), situation("sitting"))
+            sroot = root2 / "interactive_scene"
+            # 파싱은 되지만 모양이 깨진 본문 - int()/len() 이 터지던 자리
+            (sroot / "ebroken0000000001.json").write_text(
+                json.dumps({"id": "ebroken0000000001", "created_at": "어제",
+                            "globals": {"slots": {"background": "문자열"}},
+                            "chars": "리스트가 아님"}), encoding="utf-8")
+            (sroot / "index.json").write_text("{ broken", encoding="utf-8")
+            got = svc5.load_scene_index()
+            check("깨진 본문이 있어도 멀쩡한 것은 복구", len(got) >= 3, True)
 
     print()
     if FAILED:

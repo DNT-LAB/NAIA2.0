@@ -255,10 +255,22 @@ def scene_hash(globals_: dict[str, Any], chars: list[dict[str, Any]]) -> str:
 
 
 def _str_list(value: Any) -> list[str]:
-    """리스트가 아니면 버린다. 문자열로 못박고 빈 값을 뺀다."""
+    """리스트가 아니면 버린다. 문자열로 못박고 빈 값을 뺀다.
+
+    **`None` 은 먼저 버린다.** `str(None)` 은 `"None"` 이고 그건 공백이 아니라
+    필터를 통과한다 - 손상되거나 옛 형식의 기록이 프롬프트에 `None` 이라는 태그를
+    실어 보낸다(Codex 7차 · 실측). dict/list 처럼 태그일 수 없는 값도 버린다.
+    """
     if not isinstance(value, (list, tuple)):
         return []
-    return [str(x) for x in value if str(x).strip()]
+    out: list[str] = []
+    for x in value:
+        if x is None or isinstance(x, (dict, list, tuple, set)):
+            continue
+        text = str(x).strip()
+        if text:
+            out.append(str(x))
+    return out
 
 
 def normalize_scene_globals(value: Any) -> dict[str, Any]:
@@ -473,28 +485,52 @@ class InteractiveAssetsService:
             # **여기서 `[]` 를 돌려주면 다음 `record()` 가 새 인덱스를 써서 기존 본문
             # 500개가 통째로 고아가 된다**(Codex 지적). 본문 파일이 살아 있으므로
             # 거기서 인덱스를 되짚는다.
+            #
+            # **되짚은 것을 바로 저장한다.** 안 그러면 이 호출만 복구된 것처럼 보이고,
+            # 손상본은 이미 .bak 으로 치웠으므로 **다음 호출은 빈 목록**이다 - 그
+            # 상태에서 record() 가 한 줄짜리 인덱스를 써서 옛 카드가 전부 인덱스에서
+            # 사라진다(Codex 7차 · 실측: 1회차 3 -> 2회차 0 -> 기록 후 1).
             self._quarantine(p)
-            return self._rebuild_index_from_bodies()
+            rows = self._rebuild_index_from_bodies()
+            if rows:
+                try:
+                    self._save_index(rows)
+                except Exception as exc:            # 저장 실패해도 이번 목록은 준다
+                    print(f"[interactive-assets] rebuilt index save failed: {exc}")
+            return rows
 
     def _rebuild_index_from_bodies(self) -> list[dict[str, Any]]:
         """본문(`s<id>.json`)에서 인덱스를 복원한다. 인덱스가 깨져도 조합은 남는다."""
         rows: list[dict[str, Any]] = []
         for body in sorted(self.snapshot_root.glob("s*.json")):
+            # **행 조립까지 전부 이 안에서** 한다. 파싱만 감싸면 손편집된 본문 하나의
+            # `created_at` 이 숫자가 아니거나 `chars` 가 리스트가 아닐 때 int()/len()
+            # 이 터져 **복구가 통째로 죽는다**. 인덱스는 이미 .bak 으로 치운 뒤라
+            # 여기서 죽으면 목록이 영영 빈다(Codex 7차 · 씬 쪽에서 실측).
             try:
                 doc = json.loads(body.read_text(encoding="utf-8"))
-                chars = doc.get("chars") or []
+                if not isinstance(doc, dict):
+                    raise ValueError("body is not an object")
+                chars = doc.get("chars")
+                if not isinstance(chars, list):
+                    chars = []
                 sid = str(doc.get("id") or body.stem)
-            except Exception:
+                try:
+                    created = int(doc.get("created_at") or 0)
+                except (TypeError, ValueError):
+                    created = 0
+                thumb = f"{sid}.webp"
+                rows.append({
+                    "id": sid, "created_at": created,
+                    "origin": self.classify_origin(chars),
+                    "prompt_hash": snapshot_hash(chars),
+                    "summary": snapshot_summary(chars),
+                    "char_count": len(chars),
+                    "thumb": thumb if (self.snapshot_root / thumb).exists() else None,
+                })
+            except Exception as exc:
+                print(f"[interactive-assets] skipped broken body {body.name}: {exc}")
                 continue
-            thumb = f"{sid}.webp"
-            rows.append({
-                "id": sid, "created_at": int(doc.get("created_at") or 0),
-                "origin": self.classify_origin(chars),
-                "prompt_hash": snapshot_hash(chars),
-                "summary": snapshot_summary(chars),
-                "char_count": len(chars),
-                "thumb": thumb if (self.snapshot_root / thumb).exists() else None,
-            })
         rows.sort(key=lambda r: r.get("created_at") or 0)
         if rows:
             print(f"[interactive-assets] index rebuilt from {len(rows)} body files")
@@ -721,27 +757,46 @@ class InteractiveAssetsService:
                 raise ValueError("scenes is not a list")
             return rows
         except Exception:
+            # 되짚은 것을 **바로 저장한다** — 캐릭터 쪽 load_index 의 주석 참조.
             self._quarantine(p)
-            return self._rebuild_scene_index_from_bodies()
+            rows = self._rebuild_scene_index_from_bodies()
+            if rows:
+                try:
+                    self._save_scene_index(rows)
+                except Exception as exc:
+                    print(f"[interactive-scene] rebuilt index save failed: {exc}")
+            return rows
 
     def _rebuild_scene_index_from_bodies(self) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for body in sorted(self.scene_root.glob("e*.json")):
+            # **행 조립까지 전부 이 안에서** 한다. 예전에는 파싱만 감쌌는데,
+            # 손편집된 본문 하나의 `created_at` 이 숫자가 아니거나 `chars` 가
+            # 리스트가 아니면 int()/len() 이 터져 **복구가 통째로 죽었다**
+            # (Codex 7차 · 실측: ValueError 로 멀쩡한 3개까지 못 살렸다).
+            # 인덱스는 이미 .bak 으로 치운 뒤라, 여기서 죽으면 목록이 영영 빈다.
             try:
                 doc = json.loads(body.read_text(encoding="utf-8"))
-                g = doc.get("globals") or {}
-                chars = doc.get("chars") or []
+                if not isinstance(doc, dict):
+                    raise ValueError("body is not an object")
                 sid = str(doc.get("id") or body.stem)
-            except Exception:
+                g = normalize_scene_globals(doc.get("globals"))
+                chars = normalize_scene_chars(doc.get("chars"))
+                try:
+                    created = int(doc.get("created_at") or 0)
+                except (TypeError, ValueError):
+                    created = 0
+                thumb = f"{sid}.webp"
+                rows.append({
+                    "id": sid, "created_at": created,
+                    "prompt_hash": scene_hash(g, chars),
+                    "summary": scene_summary(g, chars),
+                    "char_count": len(chars),
+                    "thumb": thumb if (self.scene_root / thumb).exists() else None,
+                })
+            except Exception as exc:
+                print(f"[interactive-scene] skipped broken body {body.name}: {exc}")
                 continue
-            thumb = f"{sid}.webp"
-            rows.append({
-                "id": sid, "created_at": int(doc.get("created_at") or 0),
-                "prompt_hash": scene_hash(g, chars),
-                "summary": scene_summary(g, chars),
-                "char_count": len(chars),
-                "thumb": thumb if (self.scene_root / thumb).exists() else None,
-            })
         rows.sort(key=lambda r: r.get("created_at") or 0)
         if rows:
             print(f"[interactive-scene] index rebuilt from {len(rows)} body files")

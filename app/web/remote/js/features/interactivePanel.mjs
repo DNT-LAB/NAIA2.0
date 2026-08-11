@@ -1263,10 +1263,16 @@ export function createInteractivePanel({
   // 생성 직전 랜덤을 굴리는 동안만 true. 그동안 반응형 발화를 막는다
   // (rollComposition 주석 참조 - 안 막으면 유료 생성이 연쇄로 나간다).
   let rollingForGeneration = false;
+  // 씬(이벤트) 복원이 도는 동안. **반드시 막아야 한다** — 복원은 슬롯을 늘리고
+  // 행마다 적용하므로 emitChange 가 연쇄로 돌고, 그때마다 유료 생성이 나간다
+  // (실측 2026-08-11: 한 번의 복원에 슬롯 추가 1회 + 행 적용 4회 = 5회).
+  // rollingForGeneration 을 빌려 쓰지 않는다 — 그쪽은 '생성 직전 랜덤 굴리기'라는
+  // 다른 뜻이고, 겹치면 어느 쪽이 켰는지 알 수 없어 한쪽이 먼저 끄면 새어 나간다.
+  let restoringScene = false;
 
   function reactiveOnChange() {
     if (!reactive || !active) return;
-    if (rollingForGeneration) return;
+    if (rollingForGeneration || restoringScene) return;
     // 슬롯에 **직접 타이핑하는 동안은 발화하지 않는다.** `1girl` 을 치면 여섯 번
     // 나가서 Anlas 만 태운다(사용자 합의). 지문도 갱신하지 않는다 — 그래야 blur/
     // Enter 시점에 '그동안 쌓인 변화'가 통째로 잡힌다.
@@ -2480,8 +2486,19 @@ export function createInteractivePanel({
    *
    *  `picks` 를 주면 **그 항목만** 덮어쓴다(캡처는 전체, 복원은 골라서 —
    *  사용자 지정 2026-08-07). 고르지 않은 항목은 대상 슬롯의 값을 그대로 둔다.
-   *  `picks` 가 없으면 예전처럼 통째로 갈아끼운다. */
-  function applySnapshotCharAt(index, row, picks) {
+   *  `picks` 가 없으면 예전처럼 통째로 갈아끼운다.
+   *
+   *  `opts` — 씬(이벤트) 복원이 쓴다:
+   *    `forceGender` 성별을 `picks` 와 무관하게 가져온다. 성별은 '캐릭터' 슬롯에
+   *                  묶여 있어 정체성을 빼면 안 오는데, 씬은 "캐릭터가 없으면
+   *                  boy/girl 여부만 복원"이 규칙이다(사용자 지정 2026-08-11).
+   *    `forcePos`    배치도 가져온다. 스왑에서는 자리를 지키는 것이 맞지만, 씬에서는
+   *                  **다인원 배치가 곧 그 이벤트**다.
+   *    `silent`      렌더·발행·스택 알림을 하지 않는다. 여러 슬롯에 연달아 꽂을 때
+   *                  매번 부르면 화면이 그만큼 다시 그려지고, emitChange 가
+   *                  reactiveOnChange 를 통해 **유료 생성**을 낸다(실측 5회).
+   *                  호출자가 끝에 한 번만 정리한다. */
+  function applySnapshotCharAt(index, row, picks, opts = {}) {
     if (!row || typeof row !== 'object') return false;
     let i = Number(index);
     if (!Number.isInteger(i) || i < 0) return false;
@@ -2506,12 +2523,13 @@ export function createInteractivePanel({
       ...base,
       id: cur.id,                     // id 는 그대로 — 생성 배선이 슬롯을 uuid 로 잡는다
       open: true,
-      pos: keepPos,
+      pos: (opts.forcePos && /^[A-E][1-5]$/.test(String(row.pos || '')))
+        ? String(row.pos) : keepPos,
       // 이름·프리셋·성별은 '캐릭터' 슬롯에 딸린 값이다 — 그 슬롯을 고를 때만 온다.
       name: take(CHAR_TAG_SLOT) ? String(row.name || '') : base.name,
       state: take(CHAR_TAG_SLOT)
         ? (row.state === 'disabled' ? 'disabled' : 'active') : base.state,
-      gender: take(CHAR_TAG_SLOT)
+      gender: (take(CHAR_TAG_SLOT) || opts.forceGender)
         ? (row.gender === 'male' ? 'male' : 'female') : base.gender,
       preset: take(CHAR_TAG_SLOT)
         ? (row.preset ? {
@@ -2560,6 +2578,8 @@ export function createInteractivePanel({
       fastSig = '';
     }
     state.chars.forEach((c, n) => { c.open = (n === i); });
+    // silent 면 호출자가 끝에 한 번만 정리한다(위 opts 주석 참조).
+    if (opts.silent) return true;
     renderBlocks();
     emitChange();
     notifyRoster();
@@ -6791,6 +6811,171 @@ export function createInteractivePanel({
     }));
   }
 
+  // ------------------------------------------------------- 씬(이벤트) 투영
+  //
+  // `getSnapshotGlobals()` 와 **다르다.** 그쪽은 '지금 상태'를 그대로 보여주는
+  // 미리보기용이고, 이쪽은 기록용이라 **랜덤을 뽑힌 값으로 접는다**(사용자 지정
+  // 2026-08-11: 카드는 그 그림 그대로). 접지 않으면 같은 Random 풀에서 나온 서로
+  // 다른 그림들이 같은 해시가 되어 record() 가 먼저 만든 것을 덮어쓴다.
+  //
+  // 접는 곳이 두 군데다:
+  //   - 구도: `rand`(랜덤으로 돌릴 축 목록)를 비운다. 값 자체(x/y/z)는 이미
+  //     rollComposition 이 뽑아 넣어 둔 실제 값이다.
+  //   - Rating: `rolled` 가 있으면 그것 하나로 접고 mode 는 single 로 둔다.
+  function sceneGlobals() {
+    const comp = {...(state.composition || {}), rand: []};
+    const r = state.ratingPick || newRating();
+    const picks = Array.isArray(r.picks) ? r.picks : [];
+    const resolved = (r.mode === 'random' && r.rolled && picks.includes(r.rolled))
+      ? [r.rolled] : [...picks];
+    return {
+      slots: Object.fromEntries(
+        Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
+      composition: comp,
+      composition_tags: compTags(comp),
+      free_text: String(state.freeText || ''),
+      rating: {mode: 'single', picks: resolved},
+      fast_negative: String((state.fast && state.fast.neg) || ''),
+    };
+  }
+
+  /** 씬이 담는 캐릭터의 '상황'. **정체성은 걷어낸다**(사용자 지정 2026-08-11:
+   *  씬 + 캐릭터 슬롯이되 캐릭터와 특징 설명류는 빼고 구도/이벤트를 재사용).
+   *
+   *  무엇이 정체성인가는 **부분 복원의 묶음(RESTORE_GROUPS)을 그대로 쓴다** —
+   *  새 목록을 만들면 축이 늘어날 때 두 곳이 갈라진다. `identity` 묶음(캐릭터·
+   *  머리·눈얼굴·신체·종족)만 빠지고 나머지 8항목이 담긴다.
+   *
+   *  성별과 배치는 담는다 — 사용자가 성별은 복원하라고 했고, 다인원 배치는 곧
+   *  그 이벤트다. 이름·프리셋은 담지 않는다(정체성).
+   *
+   *  캐릭터별 Fast 는 **담되 지금은 복원하지 않는다**(사용자 지정: 비싸지 않으니
+   *  기록해 두고 나중에 복원 기능을 붙인다). 백엔드도 같은 이유로 해시에서 뺀다.
+   *
+   *  기준 목록은 생성에 실제로 나간 캐릭터다 — 안 나간 슬롯을 담으면 그림에 없는
+   *  사람이 씬의 일부가 된다. */
+  function sceneChars() {
+    const keep = new Set(restoreItems()
+      .filter(i => i.group !== 'identity').map(i => i.key));
+    const sent = new Set(positionedChars().map(c => c.id));
+    return state.chars.filter(c => sent.has(c.id)).map(c => {
+      const f = fastOf(c.id);
+      return {
+        gender: c.gender === 'male' ? 'male' : 'female',
+        pos: c.pos || POS_DEFAULT,
+        fields: Object.fromEntries(CHAR_SUBS
+          .filter(s => keep.has(s.key))
+          .map(s => [s.key, [...(c.fields[s.key] || [])]])),
+        neg: Object.fromEntries(CHAR_SUBS
+          .filter(s => keep.has(s.key))
+          .map(s => [s.key, [...((c.neg || {})[s.key] || [])]])),
+        alt: keep.has('@alt') ? [...(c.alt || [])] : [],
+        gaze: keep.has('@gaze') ? [...(c.gaze || [])] : [],
+        fast: {p: String(f.p || ''), n: String(f.n || '')},
+      };
+    });
+  }
+
+  /** 씬 값만 되돌린다(캐릭터는 건드리지 않는다).
+   *
+   *  **`importState` 를 재사용하지 않는다.** 씬 값 적용은 거기 다 있고 롤백까지
+   *  있지만, 그 함수는 `state.fast` 를 조건 없이 초기화하고 `seedLock` 을
+   *  `!!saved.seedLock` 으로 덮는다. 씬 본문에는 그 둘이 없으므로 재사용하면
+   *  **캐릭터별 Fast 가 통째로 지워지고 시드 고정이 조용히 풀린다**(실측 2026-08-11).
+   *  전역 추가 네거티브만 씬의 것이고, 캐릭터별 Fast 는 씬이 건드리지 않는다. */
+  function applySceneGlobals(g) {
+    const next = emptySceneSlots();
+    const slots = (g && g.slots) || {};
+    for (const [key, v] of Object.entries(slots)) {
+      // 모르는 키도 배열이면 안고 간다 — 축이 늘었다 줄었다 해도 태그가 증발하지 않게
+      // (importState 와 같은 규칙).
+      if (Array.isArray(v)) next[key] = v.map(String);
+    }
+    state.slots = next;
+    // 기록은 랜덤을 접어서 남긴다(sceneGlobals) — 되돌릴 때도 접힌 채여야 카드의
+    // 그림이 재현된다. `rand` 가 살아 오면 다음 생성에서 다시 굴려 다른 그림이 된다.
+    state.composition = {...newComposition(),
+                         ...((g && g.composition) || {}), rand: []};
+    const picks = Array.isArray(g && g.rating && g.rating.picks)
+      ? g.rating.picks.map(String).filter(k => RATING_BY_KEY.has(k)) : [];
+    state.ratingPick = {mode: 'single', picks: picks.length ? picks : ['none']};
+    state.freeText = typeof (g && g.free_text) === 'string' ? g.free_text : '';
+    state.fast = state.fast || {chars: {}, neg: '', negOpen: false};
+    state.fast.neg = typeof (g && g.fast_negative) === 'string' ? g.fast_negative : '';
+    fastSig = '';
+  }
+
+  /** 씬(이벤트) 카드 하나를 통째로 되돌린다.
+   *
+   *  씬 값 + 캐릭터의 '상황'을 적용하되 **정체성(캐릭터·머리·눈얼굴·신체·종족)은
+   *  건드리지 않는다** — 지금 만들고 있는 캐릭터에게 그 상황을 입히는 것이 목적이다
+   *  (사용자 지정 2026-08-11).
+   *
+   *  전 구간이 **한 트랜잭션**이다. 중간에 렌더하거나 emitChange 를 부르면
+   *  reactiveOnChange 가 유료 생성을 낸다(실측: 감싸지 않으면 5회). */
+  function applySceneSnapshot(body) {
+    if (!body || typeof body !== 'object') return false;
+    const g = body.globals;
+    if (!g || typeof g !== 'object') return false;
+    const rows = Array.isArray(body.chars) ? body.chars.filter(
+      r => r && typeof r === 'object') : [];
+
+    const keep = new Set(restoreItems()
+      .filter(i => i.group !== 'identity').map(i => i.key));
+    const need = Math.min(rows.length, MAX_NAI_CHARACTERS);
+    const over = rows.length - need;
+
+    restoringScene = true;
+    try {
+      applySceneGlobals(g);
+      // 슬롯을 늘린다. **addCharacter() 를 부르지 않는다** — 그쪽은 호출마다
+      // renderBlocks/emitChange/notifyRoster 를 한다(사용자 지정: 자동 확장).
+      while (state.chars.length < need) state.chars.push(newCharacter(false));
+      for (let i = 0; i < need; i++) {
+        applySnapshotCharAt(i, rows[i], keep,
+                            {silent: true, forceGender: true, forcePos: true});
+      }
+      // 씬보다 캐릭터가 많으면 남는 슬롯을 **끈다**(사용자 지정 2026-08-11).
+      // 지우지 않는다 — 사용자가 만든 캐릭터를 복원이 삭제하면 되돌릴 수 없다.
+      // 그냥 두면 남는 캐릭터가 1girl/2girls 카운트와 캐릭터 캡션에 계속 들어가
+      // '씬 전체 복원'이 성립하지 않는다(Codex 6차 지적).
+      //
+      // **캐릭터가 0명인 씬은 예외다.** 배경만 찍은 생성(캐릭터를 안 보낸 회차)의
+      // 기록이라 '이 씬에는 아무도 없다'는 뜻이 아니다 — 그걸로 사용자의 캐릭터를
+      // 통째로 끄면 배경 카드 한 번 눌렀다가 작업하던 인물이 전부 사라진다
+      // (실측 2026-08-11: 1명짜리 작업판이 disabled 가 됐다).
+      let turnedOff = 0;
+      if (rows.length) {
+        for (let i = need; i < state.chars.length; i++) {
+          if (state.chars[i].state === 'active') turnedOff++;
+          state.chars[i].state = 'disabled';
+        }
+        state.chars.forEach((c, n) => { c.open = (n === 0); });
+      }
+
+      if (over > 0) {
+        showToast(`씬은 ${rows.length}명 기준입니다 — 슬롯 상한(${MAX_NAI_CHARACTERS})까지만 적용했습니다.`, 'info');
+      } else if (turnedOff) {
+        showToast(`씬은 ${need}명 기준입니다 — 남는 캐릭터 ${turnedOff}명을 껐습니다.`, 'info');
+      }
+    } finally {
+      restoringScene = false;
+    }
+    // **렌더를 먼저 한다.** 지문은 그 다음에 찍는다 — 렌더가 도는 동안에도 상태가
+    // 더 다듬어져서(Fast 상자 동기화·하단 편집기), 렌더 전에 찍으면 그 차이만큼
+    // 어긋나 **복원이 끝난 뒤 비동기로 한 번 발화한다**(실측: 복원 직후 1회).
+    renderBlocks();
+    // 진행 중 생성이 끝난 뒤 새는 것도 막는다 — 모아 둔 변화가 있으면
+    // reactiveOnGenerationDone 이 그때 한 번 낸다.
+    reactivePending = false;
+    // 다음 **진짜** 편집은 정상 발화해야 한다. 지문을 복원 결과로 맞춰 두면
+    // 복원 자체는 안 내고 그 뒤의 한 글자부터 잡힌다.
+    reactiveLastPrompt = reactiveSignature();
+    emitChange();          // onPromptChange -> scheduleInteractiveStateSave 도 여기서
+    notifyRoster();
+    return true;
+  }
+
   /** 스냅샷을 캐릭터 슬롯에 되돌린다. 씬 슬롯은 건드리지 않는다 — 스냅샷은
    *  캐릭터 조합만 담고, 배경/구도는 그대로 두는 것이 사용자 기대다. */
   function applySnapshotChars(rows) {
@@ -6966,6 +7151,9 @@ export function createInteractivePanel({
       },
       fast_negative: String((state.fast && state.fast.neg) || ''),
     }),
+    getSceneGlobals: sceneGlobals,
+    getSceneChars: sceneChars,
+    applySceneSnapshot,
     applySnapshotChars,
     /** 작업 결과를 통째로 담는다(캐릭터 + 씬 슬롯 + 구도 콤보). Assets 스냅샷은
      *  캐릭터만 담으므로 그것만으로는 씬 태그가 사라진다. */

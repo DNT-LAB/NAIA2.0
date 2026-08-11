@@ -106,13 +106,18 @@ def snapshot_hash(chars: list[dict[str, Any]]) -> str:
         # 슬롯별 네거티브도 프롬프트에 나가는 값이다. 빼면 네거티브만 다른 두
         # 조합이 같은 해시가 되어 record() 가 먼저 만든 조합을 덮어쓴다
         # (Fast 에서 이미 한 번 겪은 함정 - 같은 실수를 반복하지 않는다).
+        # **경계를 지키는 직렬화**여야 한다. `;`/`=`/`,` 를 날것으로 이으면 태그
+        # 안의 쉼표(가중치 묶음 `0.5::a, b ::`)나 특수문자가 구분자를 흉내 내
+        # 서로 다른 조합이 같은 해시가 된다(Codex 4차 · 실측: {'a':['x;b=y']} 와
+        # {'a':['x'],'b':['y']} 가 충돌). 바로 아래 fast 가 json 을 쓰는 이유와 같다.
         neg = c.get("neg") or {}
         if isinstance(neg, dict):
-            neg_flat = ";".join(
-                f"{k}={','.join(sorted(str(x).strip().lower() for x in (neg.get(k) or [])))}"
-                for k in sorted(neg) if neg.get(k))
-            if neg_flat:
-                flat.append("neg=" + neg_flat)
+            neg_norm = {
+                str(k): sorted(str(x).strip().lower() for x in (neg.get(k) or []))
+                for k in sorted(neg) if neg.get(k)
+            }
+            if neg_norm:
+                flat.append("neg=" + json.dumps(neg_norm, ensure_ascii=False, sort_keys=True))
         flat.append("gender=" + str(c.get("gender") or ""))
         flat.append("alt=" + ",".join(sorted(str(x).lower() for x in (c.get("alt") or []))))
         flat.append("gaze=" + ",".join(sorted(str(x).lower() for x in (c.get("gaze") or []))))

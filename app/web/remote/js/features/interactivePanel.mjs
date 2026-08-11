@@ -1234,7 +1234,8 @@ export function createInteractivePanel({
    *  성별·활성 상태도 프롬프트에 나가므로 함께 센다. */
   function reactiveSignature() {
     const chars = state.chars
-      .map(c => [c.state, c.gender, buildCharPrompt(c)].join(''))
+      // 네거티브도 그림을 바꾼다 - 빼면 네거티브만 고쳤을 때 반응형이 안 돈다.
+      .map(c => [c.state, c.gender, buildCharPrompt(c), buildCharNegative(c)].join(''))
       .join('');
     return renderPrompt() + '' + chars;
   }
@@ -2195,7 +2196,8 @@ export function createInteractivePanel({
     // 색만 고르면 팝업이 닫혔다(사용자 지적). 캐럿 위치까지 그대로 되돌린다.
     const prevEl = document.activeElement;
     const keepFocus = !!(prevEl && prevEl.classList
-                         && prevEl.classList.contains('ia-slot-input')
+                         && (prevEl.classList.contains('ia-slot-input')
+                             || prevEl.classList.contains('ia-neg-input'))
                          && blocksMount.contains(prevEl));
     let caret = null;
     if (keepFocus) {
@@ -2230,7 +2232,8 @@ export function createInteractivePanel({
     requestAnimationFrame(positionSceneFloat);
 
     if (keepFocus) {
-      const ta = editingEl()?.querySelector('.ia-slot-input');
+      const ta = editingEl()?.querySelector(
+        panelContext && panelContext.neg ? '.ia-neg-input' : '.ia-slot-input');
       if (ta) {
         ta.focus();
         if (caret) { try { ta.setSelectionRange(caret[0], caret[1]); } catch (_) {} }
@@ -2473,6 +2476,7 @@ export function createInteractivePanel({
     const keepPos = state.chars[i].pos || POS_DEFAULT;
     const cur = state.chars[i];
     const fields = row.fields || {};
+    const neg = row.neg || {};
     // 고르지 않은 항목은 **대상 슬롯의 값을 그대로** 둔다. 그래서 바탕이 다르다:
     // 전부 복원이면 새 캐릭터에서, 부분 복원이면 지금 있는 캐릭터에서 출발한다.
     // 부분인데 새 캐릭터에서 출발하면 안 고른 슬롯이 조용히 비워진다.
@@ -2513,6 +2517,16 @@ export function createInteractivePanel({
         }
         return [sub.key,
           Array.isArray(fields[sub.key]) ? [...fields[sub.key]] : defaultFieldsFor(sub.key)];
+      })),
+      // 네거티브는 **포지티브와 같은 선택을 따른다** - 고른 슬롯이면 스냅샷 값,
+      // 안 고른 슬롯이면 바탕의 값. 여기를 빼먹어 전부 복원이 저장된 네거티브를
+      // 빈 배열로 덮고, 부분 복원은 아예 적용하지 않았다(Codex 4차).
+      neg: Object.fromEntries(CHAR_SUBS.map(sub => {
+        if (!take(sub.key)) {
+          const kept = base.neg && base.neg[sub.key];
+          return [sub.key, Array.isArray(kept) ? [...kept] : []];
+        }
+        return [sub.key, Array.isArray(neg[sub.key]) ? [...neg[sub.key]] : []];
       })),
     };
     // Fast 값(추가 프롬프트·추가 네거티브)은 어느 축에도 속하지 않는 자유 입력이라
@@ -3008,6 +3022,8 @@ export function createInteractivePanel({
         : null,
       fields: Object.fromEntries(
         Object.entries(s.fields || {}).map(([k, v]) => [k, [...(v || [])]])),
+      neg: Object.fromEntries(
+        Object.entries(s.neg || {}).map(([k, v]) => [k, [...(v || [])]])),
     };
     state.chars.splice(at + 1, 0, copy);
     renderBlocks();
@@ -5001,7 +5017,8 @@ export function createInteractivePanel({
         // 태그는 들어가는데 그 순간 팝업이 통째로 닫혀 계속 고를 수가 없었다(실측).
         if (a && (panelMount.contains(a) || asideMount?.contains(a)
                   || zoomEl?.contains(a)
-                  || a.classList?.contains('ia-slot-input'))) return;
+                  || a.classList?.contains('ia-slot-input')
+                  || a.classList?.contains('ia-neg-input'))) return;
         // 자동완성 드롭다운(외부 #tagTooltip)과 상호작용 중이면 닫지 않는다.
         if (getAutocompleteTarget && getAutocompleteTarget() === ta) return;
         closePanel();

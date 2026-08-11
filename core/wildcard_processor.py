@@ -194,6 +194,19 @@ class WildcardProcessor:
         if tag.startswith('$'):
             instant_key = tag[1:].strip()
 
+            # 📌 고정은 여기서도 본다. 위(expand_tags)에만 걸어 뒀더니 `__outer__`
+            # 안에 든 $instant 는 여전히 매번 굴렀다(Codex 4차). 롤도 함께 남긴다 -
+            # 기록이 없으면 UI 에 뜨지 않아 애초에 고정할 수가 없다.
+            frozen = self._consume_override(instant_key, context)
+            if frozen is not None and str(frozen).strip():
+                value = str(frozen)
+                try:
+                    context.wildcard_history.setdefault(instant_key, []).append(value)
+                except Exception:
+                    pass
+                self._record_roll(context, instant_key, value)
+                return [t.strip() for t in value.split(',') if t.strip()]
+
             # ":" 포함 여부 확인하여 필터링 적용
             if ":" in instant_key:
                 parts = instant_key.split(":", 1)

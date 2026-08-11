@@ -23215,6 +23215,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
+  /* **판을 끌어 늘린 만큼 다 쓴다.** `0 1 auto` 였을 때는 판을 260px 로 늘려도
+     편집기가 71px 에 멈춰, 남는 자리가 통째로 죽어 있었다(사용자 지적: 상자가
+     꽉 차지 않는다). 태그가 늘면 여기가 넓어야 한 눈에 들어온다. */
+  flex: 1 1 auto;
   min-height: 0;
   /* 판이 낮아도 자유 입력칸은 보여야 한다 — 칩 쪽만 스크롤하고 입력은 발치에
      붙박는다. 통째로 스크롤하면 새로 넣은 이 칸이 화면 밖으로 밀린다(실측: 62px
@@ -23255,7 +23259,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 .ia-ge-chips {
   display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start;
-  flex: 0 1 auto; min-height: 0; overflow-y: auto;
+  /* 상자를 꽉 채운다 — 텍스트 모드의 입력칸(flex: 1 1 auto)과 같은 규칙이라
+     모드를 바꿔도 쓸 수 있는 넓이가 그대로다. 넘치면 여기서 스크롤한다. */
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
 }
 .ia-ge-chips:empty { display: none; }
 

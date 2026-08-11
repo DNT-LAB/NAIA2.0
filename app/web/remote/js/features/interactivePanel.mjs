@@ -1775,7 +1775,11 @@ export function createInteractivePanel({
    *  씬 팝업이 Esc 로 안 닫혔고, 하단 편집기도 Esc 로 안 빠져나왔다). */
   function tagAssistOpen() {
     const tt = document.getElementById('tagTooltip');
-    return !!(tt && !tt.hidden && tt.offsetParent !== null);
+    if (!tt || tt.hidden) return false;
+    // **offsetParent 로 보면 안 된다.** 이 노드는 `position: fixed` 라 떠 있어도
+    // offsetParent 가 늘 null 이다 - 그렇게 재면 '늘 닫힘' 이 되어, 목록을
+    // 띄운 채 Esc 를 누르면 목록만 닫으려던 사용자가 팝업 밖으로 튕긴다(실측).
+    return tt.getBoundingClientRect().height > 0;
   }
 
   function positionSceneFloat() {
@@ -1904,6 +1908,20 @@ export function createInteractivePanel({
     });
   }
 
+  /** Fast 칸에도 자동완성을 붙인다 - **씬 태그와 같은 사양**이다(사용자 지정).
+   *
+   *  마운트는 서명이 바뀔 때만 innerHTML 을 새로 만드는데, 그때 예전 노드는
+   *  통째로 사라지고 리스너도 함께 사라진다. 새 노드에만 걸도록 표시를 남긴다 -
+   *  안 그러면 같은 칸에 두 번 걸려 후보가 두 벌로 뜬다. */
+  function bindFastAssist() {
+    if (typeof bindTagAssist !== 'function' || !fastMount) return;
+    fastMount.querySelectorAll('.ia-fast-input').forEach(ta => {
+      if (ta.dataset.assist === '1') return;
+      ta.dataset.assist = '1';
+      try { bindTagAssist(ta, {excludeCats: ['character', 'artist']}); } catch (_) {}
+    });
+  }
+
   function renderFast() {
     const host = ensureFastMount();
     const sig = fastSignature();
@@ -1912,6 +1930,7 @@ export function createInteractivePanel({
       host.innerHTML = fastFloatHtml();
     }
     syncFastValues();
+    bindFastAssist();
     positionFastFloat();
   }
 

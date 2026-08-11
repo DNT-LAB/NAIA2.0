@@ -515,7 +515,16 @@ export function createInteractivePanel({
 
   /** 캐릭터에 실제 태그가 하나라도 있나(성별 주입은 태그로 세지 않는다). */
   function charHasTags(c) {
-    return CHAR_SUBS.some(s => (c.fields[s.key] || []).length > 0);
+    if (CHAR_SUBS.some(s => (c.fields[s.key] || []).length > 0)) return true;
+    // **네거티브와 Fast 도 센다**(사용자 지정 2026-08-11). 포지티브만 보던 시절에는
+    // 네거티브 칸만 채운 캐릭터가 생성에서 통째로 빠졌다 - 아무 일도 안 일어나고
+    // 경고도 없었다(실측: 생성 0명 / Assets 기록 1장). 사용자가 적었으면 의도다.
+    // 빈 포지티브는 buildCharPrompt 가 기본 `girl`/`boy` 로 채우므로 uc 만 실려 나간다.
+    // `negOf` 를 쓰지 않는다 - 그쪽은 배열을 만들어 넣는다(판정 함수가 상태를 바꾸면 안 된다).
+    const neg = c.neg || {};
+    if (CHAR_SUBS.some(s => (neg[s.key] || []).length > 0)) return true;
+    const f = fastOf(c.id);
+    return !!(String(f.p || '').trim() || String(f.n || '').trim());
   }
 
   /** 생성 요청에 실을 캐릭터. 활성 + 태그가 있는 것만, NAI 상한(5)까지.
@@ -6742,9 +6751,19 @@ export function createInteractivePanel({
   // ------------------------------------------------------- Assets 스냅샷 입출력
 
   /** 백엔드에 남길 조합. UI 전용 상태(open)와 표시용 id 는 뺀다 — 같은 조합인지
-   *  판정하는 해시가 프롬프트에 나가는 값만 보기 때문이다(interactive_assets_service). */
-  function snapshotChars() {
-    return state.chars.map(c => ({
+   *  판정하는 해시가 프롬프트에 나가는 값만 보기 때문이다(interactive_assets_service).
+   *
+   *  `onlySent` 를 주면 **이번 생성에 실제로 나간 캐릭터만** 담는다(사용자 지정
+   *  2026-08-11). Assets 기록이 이걸 쓴다 — 예전에는 거르지 않아 빈 슬롯과 OFF 인
+   *  슬롯까지 카드가 됐다. 자기가 없는 그림의 썸네일을 달고 에셋으로 쌓였다
+   *  (실측: C1 정상 + C2 빈 칸 -> 생성 1명인데 카드 2장).
+   *
+   *  **작업 상태 저장(exportState)은 거르지 않는다.** 그쪽은 사용자가 만들던 것을
+   *  그대로 돌려놔야 하므로 비어 있는 슬롯도 남아야 한다. */
+  function snapshotChars(onlySent = false) {
+    const sent = onlySent ? new Set(positionedChars().map(c => c.id)) : null;
+    const rows = sent ? state.chars.filter(c => sent.has(c.id)) : state.chars;
+    return rows.map(c => ({
       name: c.name || '',
       state: c.state,
       gender: c.gender || 'female',
@@ -6927,7 +6946,8 @@ export function createInteractivePanel({
       btn.outerHTML = seedLockToggleHtml();
     },
     // Assets(조합 스냅샷) 입출력. 생성 시 기록하고, 목록에서 고르면 되돌린다.
-    getSnapshotChars: snapshotChars,
+    /** `{onlySent: true}` 면 이번 생성에 나간 캐릭터만. Assets 기록이 그렇게 부른다. */
+    getSnapshotChars: (opts) => snapshotChars(!!(opts && opts.onlySent)),
     /** 캐릭터에 속하지 않는 값(씬 슬롯 + 구도 콤보). Assets 미리보기 하단이 쓴다.
      *  캐릭터와 따로 두는 이유: 조합 카드는 캐릭터 단위로 슬롯에 꽂히는데,
      *  이건 슬롯이 아니라 그림 전체에 걸리는 설정이다. */
@@ -6936,6 +6956,15 @@ export function createInteractivePanel({
         Object.entries(state.slots || {}).map(([k, v]) => [k, [...(v || [])]])),
       composition: {...(state.composition || {})},
       composition_tags: compTags(state.composition),
+      // 아래 셋도 캐릭터에 속하지 않으면서 **그림에 실제로 나가는** 값이다.
+      // 빠져 있어서 미리보기가 실제보다 적게 보여줬다(실측 2026-08-11:
+      // freeText 가 프롬프트에는 들어가는데 여기에는 없었다).
+      free_text: String(state.freeText || ''),
+      rating: {
+        mode: (state.ratingPick && state.ratingPick.mode) || 'single',
+        picks: [...((state.ratingPick && state.ratingPick.picks) || [])],
+      },
+      fast_negative: String((state.fast && state.fast.neg) || ''),
     }),
     applySnapshotChars,
     /** 작업 결과를 통째로 담는다(캐릭터 + 씬 슬롯 + 구도 콤보). Assets 스냅샷은

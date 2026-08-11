@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811ad-negrow')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811ae-sentonly')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -5822,7 +5822,12 @@ async function generateWithInteractiveSnapshot(payload) {
   const overrides = payload && payload.overrides;
   if (overrides && interactiveAssetsPanel && interactivePanel?.isActive?.()) {
     let chars = [];
-    try { chars = interactivePanel.getSnapshotChars?.() || []; } catch (_) { chars = []; }
+    // **이번 생성에 실제로 나간 캐릭터만** 기록한다(사용자 지정 2026-08-11).
+    // 거르지 않았더니 빈 슬롯과 OFF 인 슬롯까지 카드가 됐다 — 자기가 없는 그림의
+    // 썸네일을 달고 쌓인다(실측: C1 정상 + C2 빈 칸 -> 생성 1명인데 카드 2장).
+    try {
+      chars = interactivePanel.getSnapshotChars?.({onlySent: true}) || [];
+    } catch (_) { chars = []; }
     // 씬 값은 캐릭터 에셋에 싣지 않는다(사용자 결정 2026-08-07). 씬은 따로
     // 관리하고 그쪽에서 캐릭터 슬롯 캡처를 기록한다 — `getSnapshotGlobals()` 는
     // 그때 쓰려고 패널에 남겨 두었다.
@@ -9156,7 +9161,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260811ad-negrow')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260811ae-sentonly')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

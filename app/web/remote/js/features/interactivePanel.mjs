@@ -1629,7 +1629,13 @@ export function createInteractivePanel({
     const host = document.getElementById('interactiveGlobalEditor');
     if (!host || host.hidden) return;
     // 타이핑 중에는 다시 그리지 않는다 — 커서와 IME 조합이 날아간다.
-    if (document.activeElement && document.activeElement.id === 'iaGlobalText') return;
+    // 대신 **칸의 내용은 맞춘다.** 여기서 그냥 돌아가면 팝업에서 고른 값이
+    // 칸에 안 들어가고, blur 가 낡은 칸을 진실로 삼아 그것을 지운다.
+    // 픽 경로에만 걸었더니 축 프리셋 변경이 샜다(Codex 2차) — 여기로 모은다.
+    if (document.activeElement && document.activeElement.id === 'iaGlobalText') {
+      syncGlobalTextInput();
+      return;
+    }
     host.innerHTML = globalEditorHtml();
     // 배지는 **보이는 칩 전부**를 센다 — 직접 적은 것을 빼면 3개가 보이는데 0 이라
     // 적혀 서로 어긋난다(실측).
@@ -1780,6 +1786,10 @@ export function createInteractivePanel({
   function tagAssistOpen() {
     const tt = document.getElementById('tagTooltip');
     if (!tt || tt.hidden) return false;
+    // **자동완성 목록일 때만이다.** 이 노드는 태그 사전 카드와 공용이라, 캐럿이
+    // 태그 위에 있기만 해도 떠 있다 - 그것까지 '열림' 으로 보면 Esc 가 늘 삼켜져
+    // 편집기에서 빠져나올 수 없다(Codex 2차 · 실측 재현). 목록은 ac-mode 다.
+    if (!tt.classList.contains('ac-mode')) return false;
     // **offsetParent 로 보면 안 된다.** 이 노드는 `position: fixed` 라 떠 있어도
     // offsetParent 가 늘 null 이다 - 그렇게 재면 '늘 닫힘' 이 되어, 목록을
     // 띄운 채 Esc 를 누르면 목록만 닫으려던 사용자가 팝업 밖으로 튕긴다(실측).
@@ -3719,9 +3729,8 @@ export function createInteractivePanel({
       // 태그가 상태에는 들어가는데 화면 어디에도 안 나타난다(실측).
       if (panelContext && panelContext.kind === 'scene') {
         syncSceneButtonCount(panelContext.slotId);
-        // 텍스트칸이 열려 있으면 renderGlobalEditor 는 '타이핑 중' 으로 보고 그냥
-        // 돌아간다 — 그 경우엔 칸 자체를 갱신해야 픽이 살아남는다.
-        if (!syncGlobalTextInput()) renderGlobalEditor();
+        // 텍스트칸이 떠 있는 경우는 renderGlobalEditor 가 알아서 칸을 맞춘다.
+        renderGlobalEditor();
       }
       return;
     }
@@ -5865,19 +5874,27 @@ export function createInteractivePanel({
   function syncGlobalTextInput() {
     const ta = document.getElementById('iaGlobalText');
     if (!globalTextMode || !ta) return false;
-    const base = globalTextValue();
-    const baseKeys = new Set(parseGlobalInput(base).map(t => t.trim().toLowerCase()));
-    const prevKeys = new Set(parseGlobalInput(textModeBase).map(t => t.trim().toLowerCase()));
-    const keep = parseGlobalInput(ta.value).filter(t => {
-      const k = t.trim().toLowerCase();
-      return !baseKeys.has(k) && !prevKeys.has(k);
-    });
-    const next = [base, keep.join(', ')].filter(Boolean).join(', ');
+    const key = t => String(t).trim().toLowerCase();
+    // 세 갈래를 견준다: 기준선(마지막으로 맞춘 내용) / 지금 칸 / 지금 상태.
+    // 예전에는 상태를 통째로 깔고 '새로 친 것' 만 얹었다 — 그래서 칸에서 지운
+    // 태그가 상태에 남아 있으면 매번 되살아났다(Codex 2차 · 실측 재현:
+    // rabbit 을 지우고 팝업에서 cat 을 고르면 `rabbit, cat` 이 됐다).
+    const prev = parseGlobalInput(textModeBase);
+    const typed = parseGlobalInput(ta.value);
+    const stateNow = parseGlobalInput(globalTextValue());
+    const typedKeys = new Set(typed.map(key));
+    const prevKeys = new Set(prev.map(key));
+    // 기준선에 있었는데 칸에서 사라졌다 = 사용자가 지운 것. 상태에 남아 있어도 뺀다.
+    const removed = new Set(prev.filter(t => !typedKeys.has(key(t))).map(key));
+    // 기준선에 없었는데 칸에 있다 = 사용자가 새로 친 것. 아직 상태에 없으니 지킨다.
+    const added = typed.filter(t => !prevKeys.has(key(t)));
+    const next = stateNow.filter(t => !removed.has(key(t))).concat(added).join(', ');
     if (ta.value !== next) {
       ta.value = next;
       try { ta.setSelectionRange(next.length, next.length); } catch (_) {}
     }
-    textModeBase = base;
+    // 기준선은 **상태** 로 둔다 - 사용자가 지운 것은 확정 전까지 매번 다시 걸러진다.
+    textModeBase = stateNow.join(', ');
     return true;
   }
 

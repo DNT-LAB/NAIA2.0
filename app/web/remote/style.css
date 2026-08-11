@@ -20548,6 +20548,9 @@ body.detached-module .mod-grid-3 {
 .ia-chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 태그 하나만 빼는 [x]. 평소엔 흐리게 두고 칩에 올렸을 때 또렷해진다 —
    항상 진하면 칩 6개가 붙은 줄이 x 로 시끄러워진다. */
+/* 캐릭터 슬롯 칩의 가중치 배지. 씬 태그 칩(.ia-gchip-w)과 같은 규칙이다. */
+.ia-chip-w { flex: 0 0 auto; font-weight: 700; color: var(--accent-glow); font-size: 9px; }
+.ia-chip[data-gwc-cid] { cursor: context-menu; }
 .ia-chip-x {
   flex: 0 0 auto; width: 12px; height: 12px; padding: 0; margin-right: -2px;
   display: inline-flex; align-items: center; justify-content: center;

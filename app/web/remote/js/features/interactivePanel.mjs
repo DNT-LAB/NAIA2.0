@@ -574,14 +574,26 @@ export function createInteractivePanel({
 
   /** `del` 이 있으면 칩 오른쪽에 작은 [×] 를 붙인다 — 그 태그 하나만 빼는 길이다.
    *  예전에는 슬롯을 열어 텍스트를 고치거나 그리드에서 같은 칸을 다시 눌러야 했다. */
-  function chip(text, cls, title, del) {
-    const titleAttr = title ? ` title="${escHtml(title)}"` : '';
+  function chip(text, cls, title, del, target) {
+    // 씬 태그 칩과 같은 규칙 - `0.5::tag ::` 는 배지로 떼어 보인다. 안 그러면
+    // 캐릭터 슬롯에서만 저장 형식이 날것으로 보여 같은 것이 달라 보인다.
+    const {weight, text: bare} = weightedChip(text);
+    const tip = title || (weight
+      ? `가중치 ${weight}\n우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)`
+      : '우클릭 \u2014 가중치를 겁니다(휠로도 됩니다)');
+    const titleAttr = tip ? ` title="${escHtml(tip)}"` : '';
+    // 우클릭이 집을 좌표. 파생 칩(구도 콤보)과 `+n` 접힘 표시에는 안 붙인다.
+    const tAttr = target
+      ? ` data-gwc-cid="${escHtml(target.cid)}" data-gwc-sub="${escHtml(target.sub)}"`
+        + ` data-gwc-idx="${target.index}"`
+      : '';
     const x = del
       ? `<button type="button" class="ia-chip-x" data-chip-del="${escHtml(text)}"
-           tabindex="-1" aria-label="${escHtml(text)} 제거" title="빼기">&times;</button>`
+           tabindex="-1" aria-label="${escHtml(bare)} 제거" title="빼기">&times;</button>`
       : '';
-    return `<span class="ia-chip${cls ? ' ' + cls : ''}"${titleAttr}>` +
-      `<span class="ia-chip-t">${escHtml(text)}</span>${x}</span>`;
+    return `<span class="ia-chip${cls ? ' ' + cls : ''}"${titleAttr}${tAttr}>`
+      + (weight ? `<b class="ia-chip-w">${escHtml(weight)}\u00d7</b>` : '')
+      + `<span class="ia-chip-t">${escHtml(bare)}</span>${x}</span>`;
   }
 
   /** opts.del      — 칩마다 [×] 를 단다(실제 태그 배열을 가진 슬롯에서만).
@@ -597,7 +609,9 @@ export function createInteractivePanel({
       // 문장 칩은 전체 텍스트를 title 로(호버 확인)
       let cls = isProseChip(t) ? 'is-prose' : '';
       if (emph && emph.has(String(t).toLowerCase())) cls += (cls ? ' ' : '') + 'is-name';
-      return chip(t, cls, isProseChip(t) ? t : '', opts.del && i >= from);
+      const target = (opts.owner && i >= from)
+        ? {cid: opts.owner.cid, sub: opts.owner.sub, index: i - from} : null;
+      return chip(t, cls, isProseChip(t) ? t : '', opts.del && i >= from, target);
     });
     // `+n` 은 실제 태그가 아니라 접힘 표시다 — 지울 대상이 없으므로 [×] 를 달지 않는다.
     if (tags.length > MAX_CHIPS) shown.push(chip(`+${tags.length - MAX_CHIPS}`, 'is-more'));
@@ -793,7 +807,8 @@ export function createInteractivePanel({
             <span class="ia-block-title"><span class="ia-block-icon">${s.icon}</span><span class="ia-block-name">${escHtml(subLabel(s))}</span></span>
             <span class="ia-block-axis">${s.axis}</span>
           </div>
-          ${slotBody(editing, tags, {del: true, emphasis: s.key === CHAR_TAG_SLOT ? nameEmphasis(c) : null})}
+          ${slotBody(editing, tags, {del: true, owner: {cid: c.id, sub: s.key},
+            emphasis: s.key === CHAR_TAG_SLOT ? nameEmphasis(c) : null})}
           <div class="ia-block-meta">${meta}</div>
         </div>`;
       }).join('');
@@ -2079,6 +2094,27 @@ export function createInteractivePanel({
         event.preventDefault();
         event.stopPropagation();
         closePanel();
+      });
+    });
+    // 캐릭터 슬롯 칩 우클릭 -> 가중치(씬 태그와 같은 사양, 사용자 지적 2026-08-11).
+    // 위임이다 - 칩은 renderBlocks 마다 새로 만들어지므로 칩마다 걸면 새는다.
+    blocksMount.querySelectorAll('.ia-block-chips').forEach(row => {
+      row.addEventListener('contextmenu', event => {
+        const el = event.target.closest ? event.target.closest('[data-gwc-cid]') : null;
+        if (!el) return;                     // 빈 곳은 브라우저 메뉴 그대로
+        event.preventDefault();
+        event.stopPropagation();
+        const cid = el.dataset.gwcCid, sub = el.dataset.gwcSub;
+        const index = Number(el.dataset.gwcIdx);
+        if (!cid || !sub || !(index >= 0)) return;
+        if (miniOpen === 'weight' && weightTarget && weightTarget.char
+            && weightTarget.char.cid === cid && weightTarget.char.sub === sub
+            && weightTarget.index === index) {
+          closeCompPopup();
+          return;
+        }
+        weightTarget = {char: {cid, sub}, index};
+        openMiniPopup('weight', el);
       });
     });
     blocksMount.querySelectorAll('.ia-slot-input').forEach(bindSlotInput);
@@ -3815,6 +3851,9 @@ export function createInteractivePanel({
     const opts = {
       del: true,
       delFrom: derived.length,
+      // 이 경로로 다시 그려도 우클릭 좌표가 남아야 한다 - 빠지면 그 슬롯만
+      // 가중치 편집을 잃는다(예전에 [×] 와 이름 강조가 그렇게 샜다).
+      owner: (character && el.dataset.sub) ? {cid: el.dataset.cid, sub: el.dataset.sub} : null,
       emphasis: (character && el.dataset.sub === CHAR_TAG_SLOT) ? nameEmphasis(character) : null,
     };
     const shown = derived.length ? [...derived, ...tags] : tags;
@@ -5821,6 +5860,10 @@ export function createInteractivePanel({
 
   function weightTargetRaw() {
     if (!weightTarget) return '';
+    if (weightTarget.char) {
+      const list = charFieldList(weightTarget.char);
+      return String(list[weightTarget.index] || '');
+    }
     if (weightTarget.free) {
       const tags = freeTagList();
       return String(tags[weightTarget.index] || '');
@@ -5852,6 +5895,13 @@ export function createInteractivePanel({
 
   /** 가중치를 붙여 저장 형식으로 만든다. 1(또는 빈 값)이면 맨 태그로 되돌린다 —
    *  `1::tag ::` 는 아무 일도 하지 않으면서 글자만 늘린다. */
+  /** 캐릭터 슬롯의 태그 배열. 없으면 null(캐릭터가 지워졌을 수 있다). */
+  function charFieldList(ref) {
+    const c = state.chars.find(x => x.id === ref.cid);
+    const list = c && c.fields ? c.fields[ref.sub] : null;
+    return Array.isArray(list) ? list : [];
+  }
+
   function applyWeight(n) {
     if (!weightTarget) return;
     const text = weightTargetText();
@@ -5859,6 +5909,15 @@ export function createInteractivePanel({
     const w = Math.round(n * 100) / 100;
     // `1::tag ::` 는 아무 일도 하지 않으면서 글자만 늘린다 — 맨 태그로 되돌린다.
     const next = (w === 1) ? text : `${w}::${text} ::`;
+    if (weightTarget.char) {
+      const list = charFieldList(weightTarget.char);
+      if (!(weightTarget.index >= 0) || weightTarget.index >= list.length) return;
+      list[weightTarget.index] = next;
+      renderBlocks();
+      renderGlobalEditor();
+      emitChange();
+      return;
+    }
     if (weightTarget.free) {
       // 자유 입력은 문자열 하나다(원문을 지켜야 해서). 태그 단위로 갈랐다가
       // 그 자리만 갈아 끼우고 다시 잇는다.
@@ -6122,7 +6181,7 @@ export function createInteractivePanel({
     // 칩은 **우클릭일 때만** 예외다. 가중치 팝업을 여닫는 것은 우클릭뿐이고,
     // 왼클릭은 텍스트 모드로 들어가는 길이다 - 예외가 버튼을 안 가리는 바람에
     // 칩을 눌러 편집을 시작해도 가중치 창이 남아 있었다(사용자 지적 2026-08-11).
-    if (t && event.button === 2 && t.closest('[data-gw-slot], [data-gw-free]')) return;
+    if (t && event.button === 2 && t.closest('[data-gw-slot], [data-gw-free], [data-gwc-cid]')) return;
     // **드롭다운 목록은 팝업 밖에 산다.** 앱이 네이티브 select 를 숨기고
     // (`native-select-hidden`) 커스텀 위젯으로 바꾸는데, 그 목록(`custom-select-menu`)
     // 은 `document.body` 직계다(customSelects.mjs). 그래서 항목을 고르는 순간

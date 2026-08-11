@@ -23283,6 +23283,11 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 
 .ia-ge-chips {
   display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start;
+  /* **줄을 위로 몰아 붙인다.** 상자를 꽉 채우게 만든 뒤(flex: 1 1 auto) 기본값인
+     align-content: stretch 가 남는 높이를 줄 사이에 나눠, 칩 두 줄이 위아래로
+     벌어져 떠 있었다(사용자 지적). align-items 는 줄 **안**을 맞추는 것이라
+     이것과 별개다 - 둘 다 필요하다. */
+  align-content: flex-start;
   /* 상자를 꽉 채운다 — 텍스트 모드의 입력칸(flex: 1 1 auto)과 같은 규칙이라
      모드를 바꿔도 쓸 수 있는 넓이가 그대로다. 넘치면 여기서 스크롤한다. */
   flex: 1 1 auto; min-height: 0; overflow-y: auto;

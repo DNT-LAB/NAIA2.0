@@ -427,7 +427,19 @@ export function createInteractivePanel({
       // 하위 슬롯 목록에서 파생 — CHAR_SUBS 를 늘릴 때 여기를 같이 고칠 필요가 없다.
       // 슬라이더 기본값(머리 길이=medium)은 미리 채워, 초보자가 비워둬도 합리적 결과가 나온다.
       fields: Object.fromEntries(CHAR_SUBS.map(s => [s.key, defaultFieldsFor(s.key)])),
+      // 슬롯별 네거티브. `fields` 와 **같은 키 집합**이고 기본값은 항상 빈 배열이다
+      // (네거티브에 기본값을 미리 넣으면 사용자가 넣은 적 없는 값이 프롬프트에 나간다).
+      neg: Object.fromEntries(CHAR_SUBS.map(s => [s.key, []])),
     };
+  }
+
+  /** 캐릭터의 슬롯 네거티브 배열. 옛 저장분에는 `neg` 가 없으므로 여기서 만든다 —
+   *  읽는 쪽마다 `|| []` 를 흩뿌리면 한 곳만 빠져도 조용히 안 저장된다. */
+  function negOf(character, subKey) {
+    if (!character) return [];
+    if (!character.neg || typeof character.neg !== 'object') character.neg = {};
+    if (!Array.isArray(character.neg[subKey])) character.neg[subKey] = [];
+    return character.neg[subKey];
   }
 
   // ---------------------------------------------------------------- prompt
@@ -492,6 +504,15 @@ export function createInteractivePanel({
     return base ? `${g}, ${base}` : g;
   }
 
+  /** 이 캐릭터의 네거티브. 슬롯 순서대로 잇고 Fast 의 추가 네거티브를 뒤에 붙인다
+   *  (슬롯 = 상시, Fast = 이번 생성용 - 사용자 지정 2026-08-11). NAI 는 캐릭터당
+   *  `uc` 문자열 하나만 받으므로(NAICharacterData) 여기서 합쳐 보낸다. */
+  function buildCharNegative(c) {
+    const slots = CHAR_SUBS.map(s => (negOf(c, s.key) || []).join(', '))
+      .filter(Boolean).join(', ');
+    return joinTags(slots, fastOf(c.id).n);
+  }
+
   /** 캐릭터에 실제 태그가 하나라도 있나(성별 주입은 태그로 세지 않는다). */
   function charHasTags(c) {
     return CHAR_SUBS.some(s => (c.fields[s.key] || []).length > 0);
@@ -528,7 +549,7 @@ export function createInteractivePanel({
     // uc 는 예전에 늘 빈 문자열이었다 — 이제 그 자리가 채워진다.
     return members.map(c => {
       const f = fastOf(c.id);
-      const row = {prompt: joinTags(buildCharPrompt(c), f.p), uc: cleanTags(f.n)};
+      const row = {prompt: joinTags(buildCharPrompt(c), f.p), uc: buildCharNegative(c)};
       if (withCenter) row.center = posCenters(c.pos);
       return row;
     });
@@ -704,13 +725,15 @@ export function createInteractivePanel({
     // 우클릭이 집을 좌표. 파생 칩(구도 콤보)과 `+n` 접힘 표시에는 안 붙인다.
     const tAttr = target
       ? ` data-gwc-cid="${escHtml(target.cid)}" data-gwc-sub="${escHtml(target.sub)}"`
-        + ` data-gwc-idx="${target.index}"`
+        + ` data-gwc-idx="${target.index}"${target.neg ? ' data-gwc-neg="1"' : ''}`
       : '';
     const x = del
       ? `<button type="button" class="ia-chip-x" data-chip-del="${escHtml(text)}"
            tabindex="-1" aria-label="${escHtml(bare)} 제거" title="빼기">&times;</button>`
       : '';
-    return `<span class="ia-chip${cls ? ' ' + cls : ''}"${titleAttr}${tAttr}>`
+    const negw = weight != null && Number(weight) < 0;
+    const cls2 = (cls ? cls + ' ' : '') + (negw ? 'is-negw' : '');
+    return `<span class="ia-chip${cls2 ? ' ' + cls2.trim() : ''}"${titleAttr}${tAttr}>`
       + (weight ? `<b class="ia-chip-w">${escHtml(weight)}\u00d7</b>` : '')
       + `<span class="ia-chip-t">${escHtml(bare)}</span>${x}</span>`;
   }
@@ -726,22 +749,45 @@ export function createInteractivePanel({
     const from = opts.delFrom || 0;
     const shown = tags.slice(0, MAX_CHIPS).map((t, i) => {
       // 문장 칩은 전체 텍스트를 title 로(호버 확인)
-      let cls = isProseChip(t) ? 'is-prose' : '';
+      const bare = weightedChip(t).text;
+      let cls = isProseChip(bare) ? 'is-prose' : '';
       if (emph && emph.has(String(t).toLowerCase())) cls += (cls ? ' ' : '') + 'is-name';
       const target = (opts.owner && i >= from)
-        ? {cid: opts.owner.cid, sub: opts.owner.sub, index: i - from} : null;
-      return chip(t, cls, isProseChip(t) ? t : '', opts.del && i >= from, target);
+        ? {cid: opts.owner.cid, sub: opts.owner.sub, index: i - from,
+           neg: !!opts.owner.neg} : null;
+      return chip(t, cls, isProseChip(bare) ? bare : '', opts.del && i >= from, target);
     });
     // `+n` 은 실제 태그가 아니라 접힘 표시다 — 지울 대상이 없으므로 [×] 를 달지 않는다.
     if (tags.length > MAX_CHIPS) shown.push(chip(`+${tags.length - MAX_CHIPS}`, 'is-more'));
     return shown.join('');
   }
 
+  /** 슬롯 아래 붙는 네거티브 칸.
+   *
+   *  **비어 있으면 평소엔 안 보인다**(사용자 지정 2026-08-11) - 슬롯 12칸에 빈 상자가
+   *  하나씩 더 붙으면 목록이 두 배로 길어진다. 슬롯에 마우스를 올리면 얇게 나타나고,
+   *  값이 하나라도 있으면 전폭으로 늘어나 붉게 남는다. */
+  function negRowHtml(c, meta) {
+    const tags = negOf(c, meta.key);
+    const editing = isEditing('char', c.id, meta.key, true);
+    const cls = 'ia-neg' + (tags.length ? ' has-neg' : '') + (editing ? ' is-editing' : '');
+    const body = editing
+      ? `<textarea class="ia-neg-input" data-neg-input="1" rows="1" spellcheck="false"
+           placeholder="이 슬롯에서 뺄 태그">${escHtml(tags.join(', '))}</textarea>`
+      : (tags.length
+          ? `<div class="ia-neg-chips">${chipRow(tags, {del: true, neg: true,
+               owner: {cid: c.id, sub: meta.key, neg: true}})}</div>`
+          : '<span class="ia-neg-hint">네거티브</span>');
+    return `<div class="${cls}" data-neg data-cid="${c.id}" data-sub="${escHtml(meta.key)}">`
+      + `<span class="ia-neg-mark">\u2296</span>${body}</div>`;
+  }
+
   /** 이 슬롯이 지금 편집(텍스트 입력) 중인가. */
-  function isEditing(kind, id, sub) {
+  function isEditing(kind, id, sub, neg) {
     if (!panelContext || panelContext.kind !== kind) return false;
     if (kind === 'scene') return panelContext.slotId === id;
-    return panelContext.cid === id && panelContext.sub === sub;
+    return panelContext.cid === id && panelContext.sub === sub
+      && !!panelContext.neg === !!neg;
   }
 
   /** 편집 중이면 텍스트 입력창, 아니면 칩. 슬롯 몸통(chips 자리)만 만든다. */
@@ -928,6 +974,7 @@ export function createInteractivePanel({
           </div>
           ${slotBody(editing, tags, {del: true, owner: {cid: c.id, sub: s.key},
             emphasis: s.key === CHAR_TAG_SLOT ? nameEmphasis(c) : null})}
+          ${negRowHtml(c, s)}
           <div class="ia-block-meta">${meta}</div>
         </div>`;
       }).join('');
@@ -2221,7 +2268,7 @@ export function createInteractivePanel({
     });
     // 캐릭터 슬롯 칩 우클릭 -> 가중치(씬 태그와 같은 사양, 사용자 지적 2026-08-11).
     // 위임이다 - 칩은 renderBlocks 마다 새로 만들어지므로 칩마다 걸면 새는다.
-    blocksMount.querySelectorAll('.ia-block-chips').forEach(row => {
+    blocksMount.querySelectorAll('.ia-block-chips, .ia-neg-chips').forEach(row => {
       bindChipTips(row);
       row.addEventListener('contextmenu', event => {
         const el = event.target.closest ? event.target.closest('[data-gwc-cid]') : null;
@@ -2229,18 +2276,30 @@ export function createInteractivePanel({
         event.preventDefault();
         event.stopPropagation();
         const cid = el.dataset.gwcCid, sub = el.dataset.gwcSub;
+        const neg = el.dataset.gwcNeg === '1';
         const index = Number(el.dataset.gwcIdx);
         if (!cid || !sub || !(index >= 0)) return;
         if (miniOpen === 'weight' && weightTarget && weightTarget.char
             && weightTarget.char.cid === cid && weightTarget.char.sub === sub
-            && weightTarget.index === index) {
+            && !!weightTarget.char.neg === neg && weightTarget.index === index) {
           closeCompPopup();
           return;
         }
-        weightTarget = {char: {cid, sub}, index};
+        weightTarget = {char: {cid, sub, neg}, index};
         openMiniPopup('weight', el);
       });
     });
+    blocksMount.querySelectorAll('[data-neg]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();          // 슬롯(포지티브) 열기로 번지면 안 된다
+        if (event.target.closest('.ia-chip-x')) return;
+        if (event.target.closest('.ia-neg-input')) return;
+        if (isEditing('char', el.dataset.cid, el.dataset.sub, true)) { focusEditingInput(); return; }
+        openCharSub(el.dataset.cid, el.dataset.sub, true);
+      });
+    });
+    // 네거티브 입력칸도 슬롯 입력칸과 같은 규칙(자동완성·Enter/Esc·반응형 억제).
+    blocksMount.querySelectorAll('.ia-neg-input').forEach(bindSlotInput);
     blocksMount.querySelectorAll('.ia-slot-input').forEach(bindSlotInput);
     // 캐릭터 헤더 버튼들 — 헤더 클릭(펼치기/접기)로 전파되지 않게 stopPropagation.
     blocksMount.querySelectorAll('[data-gender]').forEach(el => {
@@ -2874,16 +2933,25 @@ export function createInteractivePanel({
     } else {
       character = state.chars.find(x => x.id === host.dataset.cid);
       const sub = host.dataset.sub;
-      if (!character || !Array.isArray(character.fields[sub])) return;
-      list = character.fields[sub];
-      put = next => { character.fields[sub] = next; };
+      if (!character) return;
+      // **네거티브 행도 `data-cid`/`data-sub` 를 갖는다.** closest 가 그 행을 먼저
+      // 집으므로, 여기서 갈라 주지 않으면 네거티브 칩의 [x] 가 같은 이름의
+      // 포지티브 태그를 지운다.
+      if (host.dataset.neg !== undefined) {
+        list = negOf(character, sub);
+        put = next => { character.neg[sub] = next; };
+      } else {
+        if (!Array.isArray(character.fields[sub])) return;
+        list = character.fields[sub];
+        put = next => { character.fields[sub] = next; };
+      }
     }
     const next = list.filter(t => String(t).toLowerCase() !== key);
     if (next.length === list.length) return;   // 파생 칩(구도 콤보 등) — 지울 것이 없다
     put(next);
     // 프리셋이 넣었던 태그를 사용자가 뺐다면 소유 기록에서도 지운다. 안 지워도
     // 회수는 조용히 지나가지만, 기록이 사실과 달라지면 다음 사람이 헷갈린다.
-    if (character?.preset?.tags) {
+    if (character?.preset?.tags && host.dataset.neg === undefined) {
       for (const [slotKey, owned] of Object.entries(character.preset.tags)) {
         character.preset.tags[slotKey] = (owned || []).filter(t => String(t).toLowerCase() !== key);
       }
@@ -3844,7 +3912,9 @@ export function createInteractivePanel({
     if (!panelContext) return [];
     if (panelContext.kind === 'scene') return state.slots[panelContext.slotId] || [];
     const c = state.chars.find(x => x.id === panelContext.cid);
-    return (c && c.fields[panelContext.sub]) || [];
+    if (!c) return [];
+    if (panelContext.neg) return negOf(c, panelContext.sub);
+    return c.fields[panelContext.sub] || [];
   }
 
   function setCurrentTags(tags, opts = {}) {
@@ -3853,7 +3923,8 @@ export function createInteractivePanel({
       state.slots[panelContext.slotId] = tags;
     } else {
       const c = state.chars.find(x => x.id === panelContext.cid);
-      if (c) c.fields[panelContext.sub] = tags;
+      if (c && panelContext.neg) { negOf(c, panelContext.sub); c.neg[panelContext.sub] = tags; }
+      else if (c) c.fields[panelContext.sub] = tags;
     }
     // 편집 슬롯은 textarea 가 진실의 원천이다. 브라우저/자동완성 픽(fromInput 아님)은
     // textarea 값을 갱신하지만, 사용자가 직접 타이핑한 경우(fromInput)는 건드리지 않는다
@@ -3876,15 +3947,18 @@ export function createInteractivePanel({
     if (panelContext.kind === 'scene') {
       return blocksMount.querySelector(`.ia-block[data-slot="${panelContext.slotId}"]`);
     }
-    return blocksMount.querySelector(
+    const block = blocksMount.querySelector(
       `.ia-sub-block[data-cid="${panelContext.cid}"][data-sub="${panelContext.sub}"]`
     );
+    if (!block) return null;
+    return panelContext.neg ? block.querySelector('[data-neg]') || block : block;
   }
 
   /** 픽 결과를 편집 중 textarea 에 반영(직접 타이핑 중이면 호출하지 않는다). */
   function syncEditingInput() {
     const el = editingEl();
-    const ta = el && el.querySelector('.ia-slot-input');
+    const ta = el && el.querySelector(
+      panelContext && panelContext.neg ? '.ia-neg-input' : '.ia-slot-input');
     if (!ta) return;
     const v = currentTags().join(', ');
     if (ta.value !== v) { ta.value = v; autoGrow(ta); }
@@ -4014,7 +4088,7 @@ export function createInteractivePanel({
     enterEditing();
   }
 
-  function openCharSub(cid, sub) {
+  function openCharSub(cid, sub, neg) {
     const meta = CHAR_SUBS.find(s => s.key === sub);
     if (!meta) return;
     // 표시 라벨은 C1..Cn (내부 id 는 c1/c2.. 안정 고유값이라 사용자에게 보여주지 않는다).
@@ -4022,7 +4096,10 @@ export function createInteractivePanel({
     const label = index >= 0 ? 'C' + (index + 1) : cid;
     panelContext = {
       kind: 'char', cid, sub,
-      title: `${label} · ${subLabel(meta)}`,
+      // 네거티브 칸을 열었나. 팝업이 붉게 물들고, 고른 태그가 네거티브로 간다
+      // (사용자 지정 2026-08-11).
+      neg: !!neg,
+      title: `${label} · ${subLabel(meta)}${neg ? ' · 네거티브' : ''}`,
       axis: meta.axis,
       // 축 섹션(팔레트/슬라이더/썸네일/탐색). 없으면 기존 검색+탐색 팝업.
       sections: meta.sections || null,
@@ -4081,6 +4158,7 @@ export function createInteractivePanel({
     renderPanel();             // 검색창 + 분류 탐색
     bindPanelContextClose();
     bindSceneClose(panelContext.kind === 'scene');
+    panelMount.classList.toggle('is-neg', !!(panelContext && panelContext.neg));
     panelMount.classList.add('open');
     // 편집 중 표시 — tagAssist 의 태그 정보 툴팁을 억제한다(팝업 위에 겹쳐 가림).
     document.body.classList.add('interactive-editing');
@@ -4840,7 +4918,7 @@ export function createInteractivePanel({
     openId = null;
     panelContext = null;
     inspectTag = '';
-    panelMount.classList.remove('open');
+    panelMount.classList.remove('open', 'is-neg');
     panelMount.innerHTML = '';
     if (asideMount) { asideMount.classList.remove('open'); asideMount.innerHTML = ''; }
     panelMount.style.top = panelMount.style.left = panelMount.style.width = '';
@@ -4872,7 +4950,8 @@ export function createInteractivePanel({
 
   function focusEditingInput() {
     const el = editingEl();
-    const ta = el && el.querySelector('.ia-slot-input');
+    const ta = el && el.querySelector(
+      panelContext && panelContext.neg ? '.ia-neg-input' : '.ia-slot-input');
     if (!ta) return null;
     autoGrow(ta);
     ta.focus();
@@ -6010,6 +6089,13 @@ export function createInteractivePanel({
   const WEIGHT_MIN = -2;
   const WEIGHT_MAX = 3;
 
+  /** 이 대상이 쓸 수 있는 가중치 하한. 네거티브 칸은 **0 아래로 못 간다** -
+   *  이미 빼는 자리인데 음수를 걸면 '빼는 것을 뺀다' 가 되어 뜻이 뒤집힌다
+   *  (사용자 지정 2026-08-11). 포지티브 칸은 음수를 허용한다. */
+  function weightMin() {
+    return (weightTarget && weightTarget.char && weightTarget.char.neg) ? 0 : WEIGHT_MIN;
+  }
+
   function weightInputHtml() {
     const {weight} = weightedChip(weightTargetRaw());
     const cur = weight == null ? '1' : String(weight);
@@ -6027,7 +6113,9 @@ export function createInteractivePanel({
   /** 캐릭터 슬롯의 태그 배열. 없으면 null(캐릭터가 지워졌을 수 있다). */
   function charFieldList(ref) {
     const c = state.chars.find(x => x.id === ref.cid);
-    const list = c && c.fields ? c.fields[ref.sub] : null;
+    if (!c) return [];
+    if (ref.neg) return negOf(c, ref.sub);
+    const list = c.fields ? c.fields[ref.sub] : null;
     return Array.isArray(list) ? list : [];
   }
 
@@ -6110,14 +6198,15 @@ export function createInteractivePanel({
       const raw = String(input.value || '').trim();
       if (!/^-?\d+(?:\.\d+)?$/.test(raw)) return null;
       const n = Number(raw);
-      if (!Number.isFinite(n) || n < WEIGHT_MIN || n > WEIGHT_MAX) return null;
+      if (!Number.isFinite(n) || n < weightMin() || n > WEIGHT_MAX) return null;
       return n;
     };
     const commit = () => {
       const n = read();
       if (n == null) {
         input.classList.add('is-bad');
-        showToast(`가중치는 ${WEIGHT_MIN} ~ ${WEIGHT_MAX} 사이의 수만 됩니다`, 'error');
+        showToast(`가중치는 ${weightMin()} ~ ${WEIGHT_MAX} 사이의 수만 됩니다`
+          + (weightMin() === 0 ? ' (네거티브 칸에는 음수를 넣을 수 없습니다)' : ''), 'error');
         try { input.focus(); input.select(); } catch (_) {}
         return;
       }
@@ -6136,7 +6225,7 @@ export function createInteractivePanel({
       event.preventDefault();
       const cur = read();
       const base = cur == null ? 1 : cur;
-      const next = Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN,
+      const next = Math.min(WEIGHT_MAX, Math.max(weightMin(),
         Math.round((base + (event.deltaY < 0 ? WEIGHT_STEP : -WEIGHT_STEP)) * 100) / 100));
       input.value = String(next);
       input.classList.remove('is-bad');
@@ -6649,6 +6738,10 @@ export function createInteractivePanel({
       fast: (() => { const f = fastOf(c.id); return {p: String(f.p || ''), n: String(f.n || '')}; })(),
       fields: Object.fromEntries(
         Object.entries(c.fields || {}).map(([k, v]) => [k, [...(v || [])]])),
+      // 슬롯별 네거티브도 그 그림을 만든 값이다 — 빠지면 Assets 에서 되돌렸을 때
+      // 조용히 사라진다(Fast 에서 겪은 것과 같은 함정).
+      neg: Object.fromEntries(
+        Object.entries(c.neg || {}).map(([k, v]) => [k, [...(v || [])]])),
     }));
   }
 
@@ -6659,6 +6752,7 @@ export function createInteractivePanel({
     state.chars = rows.slice(0, MAX_NAI_CHARACTERS).map((row, i) => {
       const base = newCharacter(i === 0);   // id 는 새로 발급(옛 id 를 되살리면 충돌한다)
       const fields = row && row.fields ? row.fields : {};
+      const neg = row && row.neg ? row.neg : {};
       return {
         ...base,
         name: String(row?.name || ''),
@@ -6682,6 +6776,11 @@ export function createInteractivePanel({
         fields: Object.fromEntries(CHAR_SUBS.map(sub => [
           sub.key,
           Array.isArray(fields[sub.key]) ? [...fields[sub.key]] : defaultFieldsFor(sub.key),
+        ])),
+        // 네거티브는 **기본값이 없다** - 스냅샷에 없으면 빈 배열이다.
+        neg: Object.fromEntries(CHAR_SUBS.map(sub => [
+          sub.key,
+          Array.isArray(neg[sub.key]) ? [...neg[sub.key]] : [],
         ])),
       };
     });

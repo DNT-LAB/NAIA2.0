@@ -20548,6 +20548,63 @@ body.detached-module .mod-grid-3 {
 .ia-chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 태그 하나만 빼는 [x]. 평소엔 흐리게 두고 칩에 올렸을 때 또렷해진다 —
    항상 진하면 칩 6개가 붙은 줄이 x 로 시끄러워진다. */
+/* ── 슬롯별 네거티브 칸 ──────────────────────────────────────────────
+   비어 있으면 **평소엔 보이지 않는다**(사용자 지정 2026-08-11). 슬롯 12칸에 빈
+   상자가 하나씩 더 붙으면 목록이 두 배로 길어진다. 슬롯에 마우스를 올리면 얇게
+   나타나고, 값이 하나라도 들어가면 전폭으로 늘어나 붉게 남는다. */
+.ia-neg {
+  /* 부모(.ia-sub-block)는 3열 grid 다 - 그냥 두면 세 번째 칸에 끼어 오른쪽에
+     붙는다(실측). **줄 전체를 차지**하게 못박는다(사용자 지정: 스트레치). */
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 5px;
+  margin: 0; padding: 0 6px;
+  max-height: 0; opacity: 0; overflow: hidden;
+  border: 1px solid transparent; border-radius: 5px;
+  transition: max-height 0.14s ease, opacity 0.14s ease,
+              background 0.14s ease, border-color 0.14s ease;
+}
+/* 호버 = 넣을 수 있다는 신호. 얇게만 연다. */
+.ia-sub-block:hover > .ia-neg {
+  max-height: 26px; opacity: 0.75; margin-bottom: 5px;
+  background: rgba(229,115,107,0.06); border-color: rgba(229,115,107,0.22);
+}
+/* 값이 있으면 항상 보인다 — 전폭·붉은 띠. */
+.ia-neg.has-neg, .ia-neg.is-editing {
+  max-height: 200px; opacity: 1; margin-bottom: 5px;
+  background: rgba(229,115,107,0.10); border-color: rgba(229,115,107,0.38);
+}
+.ia-sub-block:hover > .ia-neg.has-neg { opacity: 1; }
+.ia-neg-mark {
+  flex: 0 0 auto; font-size: 9px; line-height: 1;
+  color: #e5736b; opacity: 0.85;
+}
+.ia-neg-hint {
+  font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.4px;
+  color: var(--text-dim);
+}
+.ia-neg-chips {
+  display: flex; flex-wrap: wrap; align-content: flex-start; gap: 4px;
+  padding: 3px 0; min-width: 0;
+}
+.ia-neg-input {
+  flex: 1 1 auto; min-width: 0; resize: vertical; min-height: 20px;
+  padding: 2px 4px; border: 0; border-radius: 4px;
+  background: rgba(0,0,0,0.28); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.4;
+}
+.ia-neg-input:focus { outline: 1px solid rgba(229,115,107,0.55); outline-offset: -1px; }
+/* 네거티브 칸의 칩은 붉은 테를 두른다 — 같은 모양이면 어느 쪽인지 안 보인다. */
+.ia-neg .ia-chip {
+  background: rgba(229,115,107,0.12); border-color: rgba(229,115,107,0.30);
+  color: #f0c9c5;
+}
+
+
+/* 네거티브를 겨냥한 슬롯 팝업은 붉게 물든다 — 지금 고르는 태그가 어디로 가는지
+   팝업만 보고도 알아야 한다(사용자 지정). */
+.ia-panel.is-neg { border-color: rgba(229,115,107,0.55); }
+.ia-panel.is-neg .ia-panel-head { background: rgba(229,115,107,0.14); }
+
 /* 캐릭터 슬롯 칩의 가중치 배지. 씬 태그 칩(.ia-gchip-w)과 같은 규칙이다. */
 .ia-chip-w { flex: 0 0 auto; font-weight: 700; color: var(--accent-glow); font-size: 9px; }
 .ia-chip[data-gwc-cid] { cursor: context-menu; }
@@ -20568,6 +20625,15 @@ body.detached-module .mod-grid-3 {
 }
 .ia-chip.is-more { background: none; color: var(--text-dim); padding-left: 2px; }
 /* 통합 칩: 자연어 '문장 칩'은 태그 칩과 시각 구분(이탤릭·다른 색·말줄임, 전체는 호버 title). */
+/* 음수 가중치가 걸린 **포지티브** 칩. 네거티브 칸보다 **더 붉다**(사용자 지정) -
+   같은 붉기면 '빼는 태그' 와 '음수로 누른 태그' 가 구분되지 않는다.
+   `is-prose`/`is-name` 보다 **뒤에** 둔다 - 같은 특이도라 순서가 이긴다. */
+.ia-chip.is-negw, .ia-neg .ia-chip.is-negw {
+  background: rgba(229,90,80,0.28); border-color: rgba(229,90,80,0.75);
+  color: #ffdedb;
+}
+.ia-chip.is-negw .ia-chip-w { color: #ff9c92; }
+
 .ia-chip.is-prose {
   font-family: var(--font-editor); font-style: italic;
   background: rgba(124,106,239,0.13); border-color: rgba(124,106,239,0.30);

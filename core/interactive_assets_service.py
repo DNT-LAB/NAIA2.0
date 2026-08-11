@@ -103,6 +103,16 @@ def snapshot_hash(chars: list[dict[str, Any]]) -> str:
         fields = c.get("fields") or {}
         flat = [f"{k}={','.join(sorted(str(x).strip().lower() for x in (fields.get(k) or [])))}"
                 for k in sorted(fields)]
+        # 슬롯별 네거티브도 프롬프트에 나가는 값이다. 빼면 네거티브만 다른 두
+        # 조합이 같은 해시가 되어 record() 가 먼저 만든 조합을 덮어쓴다
+        # (Fast 에서 이미 한 번 겪은 함정 - 같은 실수를 반복하지 않는다).
+        neg = c.get("neg") or {}
+        if isinstance(neg, dict):
+            neg_flat = ";".join(
+                f"{k}={','.join(sorted(str(x).strip().lower() for x in (neg.get(k) or [])))}"
+                for k in sorted(neg) if neg.get(k))
+            if neg_flat:
+                flat.append("neg=" + neg_flat)
         flat.append("gender=" + str(c.get("gender") or ""))
         flat.append("alt=" + ",".join(sorted(str(x).lower() for x in (c.get("alt") or []))))
         flat.append("gaze=" + ",".join(sorted(str(x).lower() for x in (c.get("gaze") or []))))

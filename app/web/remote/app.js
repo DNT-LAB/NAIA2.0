@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811q-tipz')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811t-tipunify')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -953,6 +953,9 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
       // 슬롯 입력창(textarea)에 범용 자동완성을 붙인다. 팝업 검색창에는 붙이지 않는다.
       bindTagAssist,
       getMode: () => currentMode || modeSelect?.value || 'NAI',
+      // 칩 툴팁에 넣을 태그 설명. tagAssist 와 같은 조회를 쓰되, 그쪽은 자기가
+      // 보낸 것(lastLookupTag)만 처리하므로 사전 카드가 뜨지는 않는다.
+      requestTagInfo: tag => wsSend({type: 'tag_lookup', tag}),
       // 베이스 프롬프트의 선행·후행. 모듈 상태는 접속 직후 일괄 캐시되므로
       // PE 패널을 연 적이 없어도 최신 값을 읽는다.
       getPromptEngineering: () => moduleStateCache.get('prompt_engineering') || null,
@@ -3184,7 +3187,8 @@ const wsMessageHandlers = {
   depth_state: onDepthState,
   depth_sample: onDepthSample,
   tag_search_result: onTagSearchResult,
-  tag_lookup_result: onTagLookupResult,
+  // 사전 카드(tagAssist)와 Interactive 칩 툴팁이 같은 응답을 나눠 쓴다.
+  tag_lookup_result: m => { onTagLookupResult(m); interactivePanel?.onTagInfo?.(m); },
   autocomplete_result: onAutocompleteResult,
   translation_result: onTranslationResult,
   tag_filter_result: onTagFilterResult,
@@ -9152,7 +9156,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260811q-tipz')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260811t-tipunify')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

@@ -351,6 +351,8 @@ export function createInteractivePanel({
   bindTagAssist = null,        // (textarea, options) => void : 범용 자동완성을 슬롯 입력창에 바인딩
   getAutocompleteTarget = () => null,  // () => 현재 자동완성이 열린 textarea | null
   getMode = () => 'NAI',       // () => 'NAI' | 'WEBUI' | 'COMFYUI' — 캐릭터 성별 주입 분기
+  // 태그 설명 조회. 칩에 마우스를 올리면 보내고, 결과는 호스트가 onTagInfo 로 돌려준다.
+  requestTagInfo = () => {},
   // 프롬프트 엔지니어링 모듈 상태(`pre_prompt`/`post_prompt`). 베이스 프롬프트의
   // 선행·후행이 여기서 온다 — 없으면 인원 + 글로벌만 나간다.
   getPromptEngineering = () => null,
@@ -574,6 +576,50 @@ export function createInteractivePanel({
 
   /** `del` 이 있으면 칩 오른쪽에 작은 [×] 를 붙인다 — 그 태그 하나만 빼는 길이다.
    *  예전에는 슬롯을 열어 텍스트를 고치거나 그리드에서 같은 칸을 다시 눌러야 했다. */
+  // 태그 -> 설명. 조회는 한 번만 하고 세션 동안 재사용한다(설명은 안 바뀐다).
+  const tagDescCache = new Map();
+  const tagDescAsked = new Set();
+
+  /** 칩 툴팁 글 = 머리 / (설명) / 꼬리. 설명은 조회가 돌아오면 가운데에 낀다.
+   *  칩 종류마다 머리·꼬리만 다르므로 조립은 여기 하나로 모은다 - 나눠 두면
+   *  한쪽만 고쳐져 첫 줄이 통째로 비는 일이 난다(실측). */
+  function tipText(key, head, tail) {
+    const desc = tagDescCache.get(String(key || '').trim().toLowerCase());
+    return [head, desc || '', tail].filter(Boolean).join('\n');
+  }
+
+  /** 설명이 나중에 도착해도 다시 조립할 수 있게 조각을 칩에 심는다. */
+  function tipAttrs(key, head, tail) {
+    const k = String(key || '').trim().toLowerCase();
+    return ` data-tipkey="${escHtml(k)}" data-tiphead="${escHtml(head)}"`
+      + ` data-tiptail="${escHtml(tail)}"`
+      + ` data-naia-guide="${escHtml(tipText(k, head, tail))}"`;
+  }
+
+  /** 마우스가 칩에 올라오면 설명을 받아 둔다. 이미 알거나 이미 물어본 것은 건너뛴다. */
+  function askTagDesc(bare) {
+    const key = String(bare || '').trim().toLowerCase();
+    if (!key || tagDescCache.has(key) || tagDescAsked.has(key)) return;
+    tagDescAsked.add(key);
+    try { requestTagInfo(key); } catch (_) {}
+  }
+
+  /** 설명이 도착했다. 그 태그를 쓰는 칩의 툴팁을 갈아 끼우고, 지금 떠 있는
+   *  툴팁이 그 칩의 것이면 다시 띄워 새 글이 보이게 한다. */
+  function applyTagDesc(tag, desc) {
+    const key = String(tag || '').trim().toLowerCase();
+    if (!key) return;
+    tagDescCache.set(key, String(desc || ''));
+    document.querySelectorAll('[data-tipkey]').forEach(el => {
+      if (el.dataset.tipkey !== key) return;
+      el.dataset.naiaGuide = tipText(key, el.dataset.tiphead || '', el.dataset.tiptail || '');
+      // 커서가 이미 이 칩 위에 있으면 툴팁은 옛 글로 떠 있다 - 다시 알린다.
+      if (el.matches(':hover')) {
+        el.dispatchEvent(new PointerEvent('pointerover', {bubbles: true}));
+      }
+    });
+  }
+
   function chip(text, cls, title, del, target) {
     // 씬 태그 칩과 같은 규칙 - `0.5::tag ::` 는 배지로 떼어 보인다. 안 그러면
     // 캐릭터 슬롯에서만 저장 형식이 날것으로 보여 같은 것이 달라 보인다.
@@ -581,14 +627,10 @@ export function createInteractivePanel({
     // 툴팁은 **태그가 주인공**이다. 우클릭 안내는 아래 줄에 덧붙일 뿐인데,
     // 안내만 넣었더니 모든 칩이 같은 말만 하게 됐다(사용자 지적 2026-08-11).
     // 여러 줄이 필요해서 guide 툴팁을 쓴다(pre-line 으로 줄이 살아난다).
-    const head = title || bare;
-    const tip = target
-      ? `${head}${weight ? ` \u00b7 가중치 ${weight}` : ''}`
-        + '\n우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)'
-      : head;
-    const titleAttr = tip
-      ? (target ? ` data-naia-guide="${escHtml(tip)}"` : ` title="${escHtml(tip)}"`)
-      : '';
+    const head = (title || bare) + (weight ? ` \u00b7 가중치 ${weight}` : '');
+    const titleAttr = target
+      ? tipAttrs(bare, head, '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)')
+      : (title ? ` title="${escHtml(title)}"` : '');
     // 우클릭이 집을 좌표. 파생 칩(구도 콤보)과 `+n` 접힘 표시에는 안 붙인다.
     const tAttr = target
       ? ` data-gwc-cid="${escHtml(target.cid)}" data-gwc-sub="${escHtml(target.sub)}"`
@@ -1485,16 +1527,15 @@ export function createInteractivePanel({
     const chips = visibleChipList(list).map(item => {
       const {weight, text} = weightedChip(item.raw);
       const label = SCENE_LABEL.get(item.slot) || item.slot;
-      const tip = item.locked
-        ? `${label} \u00b7 축 프리셋에서 나온 값입니다\n축 버튼에서 바꾸면 따라 바뀝니다`
-        : (weight
-            ? `${label} \u00b7 가중치 ${weight}\n`
-              + '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)\n'
-              + '이 묶음은 통째로 지워집니다 \u00b7 쪼개려면 판을 눌러 텍스트로 고칩니다'
-            : `${label}\n우클릭 \u2014 가중치를 겁니다(휠로도 됩니다)`);
+      // 캐릭터 칩과 같은 규칙이다 - 머리(태그·가중치·축) / 설명 / 안내.
+      const head = `${text}${weight ? ` \u00b7 가중치 ${weight}` : ''} \u00b7 ${label}`;
+      const tail = item.locked
+        ? '축 프리셋에서 나온 값입니다 \u00b7 축 버튼에서 바꾸면 따라 바뀝니다'
+        : '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)'
+          + (weight ? '\n이 묶음은 통째로 지워집니다 \u00b7 쪼개려면 판을 눌러 텍스트로 고칩니다' : '');
       return `<span class="ia-gchip${item.locked ? ' is-locked' : ''}" data-slot="${item.slot}"
         ${item.locked ? '' : `data-gw-slot="${item.slot}" data-gw-idx="${item.index}"`}
-        title="${escHtml(tip)}">
+        ${tipAttrs(text, head, tail)}>
         ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}\u00d7</b>` : ''}
         <span class="ia-gchip-t">${escHtml(text)}</span>
         ${item.locked ? '' :
@@ -1520,9 +1561,9 @@ export function createInteractivePanel({
     const freeVisible = freeVisibleNow();
     const freeChips = (freeVisible ? freeTagList() : []).map((t, i) => {
       const {weight, text} = weightedChip(t);
+      const fhead = `${text}${weight ? ` \u00b7 가중치 ${weight}` : ''} \u00b7 직접 적은 것`;
       return `<span class="ia-gchip is-free" data-gw-free="${i}"
-        title="${escHtml('직접 적은 것' + (weight ? ` \u00b7 가중치 ${weight}` : '')
-          + '\n우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)')}">
+        ${tipAttrs(text, fhead, '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)')}>
         ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}×</b>` : ''}
         <span class="ia-gchip-t">${escHtml(text)}</span>
         <button type="button" class="ia-gchip-x" data-gfree="${i}" aria-label="제거">×</button>
@@ -1682,6 +1723,11 @@ export function createInteractivePanel({
   }
 
   function bindGlobalEditor(host) {
+    // 칩에 마우스를 올리면 설명을 받아 둔다(캐릭터 칩과 같은 경로).
+    host.addEventListener('pointerover', event => {
+      const el = event.target.closest ? event.target.closest('[data-tipkey]') : null;
+      if (el) askTagDesc(el.dataset.tipkey);
+    });
     // 칩 우클릭 -> 가중치 편집. 왼클릭은 텍스트 모드 전환이라 자리가 없다.
     //
     // 리스너는 **칩이 아니라 상자**에 건다. 칩 줄은 `overflow-y: auto` 라 창이
@@ -2106,6 +2152,10 @@ export function createInteractivePanel({
     // 캐릭터 슬롯 칩 우클릭 -> 가중치(씬 태그와 같은 사양, 사용자 지적 2026-08-11).
     // 위임이다 - 칩은 renderBlocks 마다 새로 만들어지므로 칩마다 걸면 새는다.
     blocksMount.querySelectorAll('.ia-block-chips').forEach(row => {
+      row.addEventListener('pointerover', event => {
+        const el = event.target.closest ? event.target.closest('[data-tipkey]') : null;
+        if (el) askTagDesc(el.dataset.tipkey);
+      });
       row.addEventListener('contextmenu', event => {
         const el = event.target.closest ? event.target.closest('[data-gwc-cid]') : null;
         if (!el) return;                     // 빈 곳은 브라우저 메뉴 그대로
@@ -6660,6 +6710,11 @@ export function createInteractivePanel({
     // Neg Fast — 생성할 때 네거티브 뒤에 붙일 문자열(없으면 '').
     getFastNegative: fastNegative,
     // 시드 고정이 켜져 있는가. 잡아 둔 시드는 호스트가 들고 있다.
+    /** 태그 설명이 도착했다(호스트가 tag_lookup_result 를 넘긴다). */
+    onTagInfo(m) {
+      if (!m || !m.tag) return;
+      applyTagDesc(m.tag, m.desc || '');
+    },
     isSeedLocked: () => seedLock,
     /** 호스트가 새 시드를 잡았을 때 부른다 — 버튼의 숫자만 바꾼다.
      *  renderBlocks 를 부르면 편집 중인 슬롯 입력창까지 다시 만들어진다. */

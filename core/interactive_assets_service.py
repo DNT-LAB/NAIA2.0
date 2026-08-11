@@ -93,16 +93,46 @@ def _now() -> int:
     return int(time.time())
 
 
+# 해시 직렬화의 구분자. 값 안에 이 글자가 있으면 경계를 흉내 낼 수 있다.
+_HASH_DELIMS = ("\\", "|", "=", ",")
+# 역슬래시가 **먼저**여야 한다 - 나중에 하면 앞서 넣은 이스케이프를 다시 이스케이프한다.
+_HASH_ESCAPES = (("\\", "\\\\"), ("|", "\\p"), ("=", "\\e"), (",", "\\c"))
+
+
+def _hash_esc(text: Any) -> str:
+    """해시 조각 하나를 구분자와 섞이지 않게 만든다.
+
+    **구분자가 없으면 글자 그대로 돌려준다.** 그래야 기존 기록의 해시가 바뀌지 않는다 -
+    바뀌면 중복 판정이 풀려 같은 캐릭터를 다시 그렸을 때 갱신 대신 새 카드가 쌓인다
+    (실측 2026-08-11: 사용자 기록 11건 · 태그 183개 중 구분자를 품은 태그 0개).
+    """
+    out = str(text)
+    if not any(ch in out for ch in _HASH_DELIMS):
+        return out
+    for ch, rep in _HASH_ESCAPES:
+        out = out.replace(ch, rep)
+    return out
+
+
 def snapshot_hash(chars: list[dict[str, Any]]) -> str:
     """같은 조합인지 판정하는 키. 순서와 대소문자를 정규화한다.
 
     프롬프트에 나가는 값만 본다 — `preset` 라벨과 `pos`(캔버스 위치)는 넣지 않는다.
+
+    조각은 전부 `_hash_esc` 를 지난다. json.dumps 로 안쪽 경계를 지켜도 **바깥 join**
+    이 날것이면 소용없다 - `flat` 은 `|` 로, 필드 값은 `,` 로 잇기 때문에 태그 하나가
+    `x|neg={"b": ["y"]}` 이면 다른 조합과 같은 줄이 된다(Codex 5차 · 실측). 가중치
+    묶음 `0.5::x,y ::` 도 두 태그 `["0.5::x", "y ::"]` 와 충돌했다 - 이건 우클릭
+    가중치로 사용자가 실제로 만드는 값이다.
     """
     parts: list[str] = []
     for c in chars or []:
         fields = c.get("fields") or {}
-        flat = [f"{k}={','.join(sorted(str(x).strip().lower() for x in (fields.get(k) or [])))}"
-                for k in sorted(fields)]
+        flat = [
+            _hash_esc(k) + "="
+            + ",".join(sorted(_hash_esc(str(x).strip().lower()) for x in (fields.get(k) or [])))
+            for k in sorted(fields)
+        ]
         # 슬롯별 네거티브도 프롬프트에 나가는 값이다. 빼면 네거티브만 다른 두
         # 조합이 같은 해시가 되어 record() 가 먼저 만든 조합을 덮어쓴다
         # (Fast 에서 이미 한 번 겪은 함정 - 같은 실수를 반복하지 않는다).
@@ -117,10 +147,11 @@ def snapshot_hash(chars: list[dict[str, Any]]) -> str:
                 for k in sorted(neg) if neg.get(k)
             }
             if neg_norm:
-                flat.append("neg=" + json.dumps(neg_norm, ensure_ascii=False, sort_keys=True))
-        flat.append("gender=" + str(c.get("gender") or ""))
-        flat.append("alt=" + ",".join(sorted(str(x).lower() for x in (c.get("alt") or []))))
-        flat.append("gaze=" + ",".join(sorted(str(x).lower() for x in (c.get("gaze") or []))))
+                flat.append("neg=" + _hash_esc(
+                    json.dumps(neg_norm, ensure_ascii=False, sort_keys=True)))
+        flat.append("gender=" + _hash_esc(c.get("gender") or ""))
+        flat.append("alt=" + ",".join(sorted(_hash_esc(str(x).lower()) for x in (c.get("alt") or []))))
+        flat.append("gaze=" + ",".join(sorted(_hash_esc(str(x).lower()) for x in (c.get("gaze") or []))))
         # Fast(캐릭터별 추가 프롬프트·네거티브)도 프롬프트에 나가는 값이다.
         # 빼면 Fast 만 다른 두 조합이 같은 해시가 되고, record() 가 같은 행을
         # 찾아 본문·썸네일을 덮어써 먼저 만든 조합이 조용히 사라진다(Codex 리뷰).
@@ -138,7 +169,8 @@ def snapshot_hash(chars: list[dict[str, Any]]) -> str:
             fp = str(fast.get("p") or "").strip().lower()
             fn = str(fast.get("n") or "").strip().lower()
             if fp or fn:
-                flat.append("fast=" + json.dumps([fp, fn], ensure_ascii=False, sort_keys=True))
+                flat.append("fast=" + _hash_esc(
+                    json.dumps([fp, fn], ensure_ascii=False, sort_keys=True)))
         parts.append("|".join(flat))
     return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 

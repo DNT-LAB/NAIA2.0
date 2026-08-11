@@ -199,13 +199,7 @@ class WildcardProcessor:
             # 기록이 없으면 UI 에 뜨지 않아 애초에 고정할 수가 없다.
             frozen = self._consume_override(instant_key, context)
             if frozen is not None and str(frozen).strip():
-                value = str(frozen)
-                try:
-                    context.wildcard_history.setdefault(instant_key, []).append(value)
-                except Exception:
-                    pass
-                self._record_roll(context, instant_key, value)
-                return [t.strip() for t in value.split(',') if t.strip()]
+                return self._instant_result(context, instant_key, frozen)
 
             # ":" 포함 여부 확인하여 필터링 적용
             if ":" in instant_key:
@@ -237,9 +231,7 @@ class WildcardProcessor:
                         # 그룹이 비어있으면 원본 유지
                         return [tag]
 
-                    # 값을 콤마로 분리하여 개별 태그로 추가
-                    instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
-                    return instant_tags
+                    return self._instant_result(context, instant_key, random_value)
                 return [tag]
 
             # ":" 없이 단순 그룹명인 경우
@@ -250,15 +242,12 @@ class WildcardProcessor:
                     # 무작위로 key-value 쌍 선택
                     random_key = random.choice(list(group_dict.keys()))
                     random_value = group_dict[random_key]
-                    # 값을 콤마로 분리하여 개별 태그로 추가
-                    instant_tags = [t.strip() for t in random_value.split(',') if t.strip()]
-                    return instant_tags
+                    return self._instant_result(context, instant_key, random_value)
                 return [tag]
             # tree에 없으면 기존 instant_wildcard_dict에서 검색
             elif instant_key in self.wildcard_manager.instant_wildcard_dict:
                 instant_value = self.wildcard_manager.instant_wildcard_dict[instant_key]
-                instant_tags = [t.strip() for t in instant_value.split(',') if t.strip()]
-                return instant_tags
+                return self._instant_result(context, instant_key, instant_value)
             return [tag]
 
         if tag.startswith('<') and tag.endswith('>'):
@@ -330,6 +319,23 @@ class WildcardProcessor:
             return [''.join(result_parts)]
 
         return [tag]
+
+    def _instant_result(self, context: PromptContext, instant_key: str, value: str) -> List[str]:
+        """중첩 $instant 하나를 확정한다 - 값을 태그로 쪼개고 **롤을 남긴다**.
+
+        기록이 핵심이다. 전에는 재귀 분기가 롤을 안 남겨 `__outer__` 안의 $instant 가
+        Wildcard Watch 에 뜨지 않았다 - 뜨지 않으면 사용자가 고정(핀)을 걸 수 없고,
+        그러면 바로 위에 넣은 고정 조회 분기에 영영 닿지 못한다. 고정 기능이 있는데
+        켤 방법이 없는 상태였다(Codex 5차 · 실측: 롤 기록 키가 top-level 은 ['mood'],
+        중첩은 ['outer'] 뿐). top-level(expand_tags)과 같은 모양으로 맞춘다.
+        """
+        text = str(value)
+        try:
+            context.wildcard_history.setdefault(instant_key, []).append(text)
+        except Exception:
+            pass
+        self._record_roll(context, instant_key, text)
+        return [t.strip() for t in text.split(',') if t.strip()]
 
     def _consume_override(self, actual_wildcard_key: str, context: PromptContext):
         ctx_ref = getattr(self.wildcard_manager, '_app_context_ref', None)

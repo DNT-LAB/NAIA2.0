@@ -58,8 +58,8 @@ const SCENE_SLOTS = [
   // 동물은 축이 아예 없어 소품 탐색기가 유일한 경로였다(animal 61,629).
   {id: 'animal', name: '동물', icon: '\u{1F43E}', axis: 'object', sections: ANI_SECTIONS},
   // 효과·기호·색조. 구도(콤보 프리셋)와 인원(캐릭터 헤더)은 여기 넣지 않는다.
-  {id: 'fx', name: '효과·기호', icon: '✨', axis: 'meta', sections: FX_SECTIONS},
-  {id: 'pose_multi', name: '다인원 자세', icon: '\u{1F46F}', axis: 'pose_action',
+  {id: 'fx', name: '효과', icon: '✨', axis: 'meta', sections: FX_SECTIONS},
+  {id: 'pose_multi', name: '다인', icon: '\u{1F46F}', axis: 'pose_action',
    sections: POSE_MULTI_SECTIONS},
   // 성인 도감 8축. 캐릭터 슬롯(신체/의상/자세)에도 성격별로 들어가 있지만, 여기는
   // **베이스 프롬프트**로 나간다 — 사물 슬롯이 캐릭터/씬 양쪽에 있는 것과 같은 구조다.
@@ -1564,10 +1564,12 @@ export function createInteractivePanel({
         + ' data-ggrp="@free" data-g="@free">직접<b>' + free + '</b></button>');
     }
     if (!parts.length) return '';
-    // 필터가 걸려 있을 때만 [전체] 를 보인다 — 평소엔 줄만 길어진다.
-    if (on) {
-      parts.unshift('<button type="button" class="ia-ggrp is-all" data-ggrp="">전체</button>');
-    }
+    // [전체] 는 **늘 자리에 있는다.** 필터가 걸렸을 때만 보이게 했더니 누르는
+    // 순간 그 버튼이 사라지면서 뒤 버튼이 통째로 왼쪽으로 밀렸다 - 방금 누른
+    // 자리에 다른 버튼이 와서, 연달아 누르면 엉뚱한 그룹이 걸린다(사용자 지적).
+    // 필터가 없을 때는 그것이 곧 현재 상태이므로 켜진 것으로 보인다.
+    parts.unshift('<button type="button" class="ia-ggrp is-all'
+      + (on ? '' : ' is-on') + '" data-ggrp="">전체</button>');
     // 버튼만 돌려준다 — 담는 그릇은 제목 줄의 `#iaGlobalGroups`(.ia-ge-groups)다.
     return parts.join('');
   }

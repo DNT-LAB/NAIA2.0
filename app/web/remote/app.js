@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811i-ttpanel')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811j-groupbar')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -9152,7 +9152,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260811i-ttpanel')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260811j-groupbar')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

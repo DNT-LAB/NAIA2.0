@@ -583,9 +583,12 @@ export function createInteractivePanel({
   /** 칩에 심는 조각. 전용 툴팁이 이걸 읽어 조립한다 - 공용 `data-naia-title`
    *  툴팁은 줄마다 크기를 달리할 수 없어서 따로 만들었다(사용자 지정 2026-08-11). */
   function tipAttrs(key, tag, src, hint) {
+    // `data-naia-title=""` 는 **빈 값이라 아무것도 안 띄우는 마개**다. 이게 없으면
+    // 공용 툴팁의 closest() 가 칩을 지나쳐 상자(`눌러서 텍스트로 고칩니다`)까지
+    // 올라가, 칩 툴팁 위에 그 안내가 겹쳐 떴다(사용자 지적 2026-08-11).
     return ` data-tipkey="${escHtml(String(key || '').trim().toLowerCase())}"`
       + ` data-tiptag="${escHtml(tag)}" data-tipsrc="${escHtml(src || '')}"`
-      + ` data-tiphint="${escHtml(hint || '')}"`;
+      + ` data-tiphint="${escHtml(hint || '')}" data-naia-title=""`;
   }
 
   // ---- 칩 전용 툴팁 -------------------------------------------------------
@@ -631,6 +634,8 @@ export function createInteractivePanel({
   function showChipTip(el) {
     if (!el || !el.dataset.tipkey) return;
     const tip = ensureChipTip();
+    // 이미 떠 있던 공용 툴팁은 내린다 - 칩으로 들어오기 전에 상자에서 열렸을 수 있다.
+    document.querySelector('.naia-title-tooltip')?.classList.remove('open');
     chipTipOwner = el;
     tip.innerHTML = chipTipHtml(el);
     tip.classList.add('open');

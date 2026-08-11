@@ -21468,13 +21468,37 @@ body.detached-module .mod-grid-3 {
      (사용자 지적). 같은 색을 알파로 눌러 윤곽만 남긴다. */
   border-color: rgba(124, 106, 239, 0.45);
 }
+/* 머리는 **누를 자리**로 보여야 한다(사용자 지적: 어디를 눌러야 접히는지
+   모르겠다). 버튼이긴 했지만 배경도 테두리도 없어 그냥 글자로 읽혔다.
+   띠 배경 + 호버 반응 + 화살표 상자로 셋을 다 준다. */
 .ia-fast-head {
-  display: flex; align-items: center; gap: 5px; width: 100%;
-  padding: 4px 8px; cursor: pointer; background: none; border: 0;
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 5px 8px; cursor: pointer; border: 0;
+  background: rgba(255,255,255,0.04);
   color: var(--text-secondary); text-align: left;
+  transition: background 0.14s ease, color 0.14s ease;
 }
-.ia-fast-head:hover { color: var(--text-primary); }
-.ia-fast-caret { flex: none; font-size: 8px; opacity: 0.75; }
+.ia-fast-head:hover { color: var(--text-primary); background: rgba(255,255,255,0.09); }
+.ia-fast-head:active { background: rgba(255,255,255,0.13); }
+/* 키보드 초점도 보여야 한다 - 마우스만 쓰는 자리가 아니다. */
+.ia-fast-head:focus-visible { outline: 1px solid var(--accent-glow); outline-offset: -2px; }
+/* 펼쳤을 때는 머리와 몸을 선으로 가른다 - 어디까지가 머리인지 보인다. */
+.ia-fast-box.is-open .ia-fast-head {
+  background: rgba(124,106,239,0.12);
+  border-bottom: 1px solid rgba(255,255,255,0.09);
+}
+/* 화살표는 **하나를 돌린다**. 상자를 씌워 그 자체가 작은 버튼으로 읽히게 한다. */
+.ia-fast-caret {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  font-size: 8px; line-height: 1;
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+.ia-fast-head:hover .ia-fast-caret { background: rgba(255,255,255,0.16); }
+.ia-fast-box.is-open .ia-fast-caret {
+  transform: rotate(90deg); background: rgba(124,106,239,0.3);
+}
 /* 라벨은 **한 줄**이다(사용자 지정) — 길면 말줄임. */
 .ia-fast-title {
   flex: 1; min-width: 0; overflow: hidden;

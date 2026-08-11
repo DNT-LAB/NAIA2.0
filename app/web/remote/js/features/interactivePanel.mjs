@@ -1846,8 +1846,10 @@ export function createInteractivePanel({
         + '<button type="button" class="ia-fast-gen" data-fast-gen="1">⚡ Generate</button>'
       : '';
     return `<div class="ia-fast-box${open ? ' is-open' : ''}">`
-      + `<button type="button" class="ia-fast-head" data-fast-toggle="${key}">`
-      + `<span class="ia-fast-caret">${open ? '▾' : '▸'}</span>`
+      + `<button type="button" class="ia-fast-head" data-fast-toggle="${key}"`
+      + ` aria-expanded="${open ? 'true' : 'false'}"`
+      + ` title="${escHtml(open ? '눌러서 접습니다' : '눌러서 펼칩니다')}">`
+      + '<span class="ia-fast-caret" aria-hidden="true">\u25B8</span>'
       + `<span class="ia-fast-title">${escHtml(title)}</span></button>`
       + `<div class="ia-fast-body">${body}</div></div>`;
   }

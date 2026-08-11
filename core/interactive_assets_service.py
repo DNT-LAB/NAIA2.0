@@ -79,6 +79,7 @@ SNAPSHOT_DIR_NAME = "interactive_snapshot"
 # (생성 1회 = 캐릭터 N장 / 씬 1장). 같은 트리에 섞으면 목록·프루닝·복구가 전부
 # 두 종류를 구분해야 한다.
 SCENE_DIR_NAME = "interactive_scene"
+SCENE_FOLDERS_NAME = "folders.json"
 FAVORITE_DIR_NAME = "interactive_favorite"
 INDEX_NAME = "index.json"
 FAVORITE_NAME = "favorites.json"
@@ -87,6 +88,8 @@ SNAPSHOT_LIMIT = 500
 THUMB_SIZE = 384
 THUMB_QUALITY = 72
 SUMMARY_MAX = 120
+MAX_SCENE_NAME_LEN = 60
+MAX_SCENE_FOLDERS = 40
 
 # 즐겨찾기가 가리킬 수 있는 것. 실체를 복사하지 않고 참조만 담는다 —
 # 원본이 지워지면 목록에서 빠질 뿐 반쪽이 남지 않는다.
@@ -787,8 +790,14 @@ class InteractiveAssetsService:
                 except (TypeError, ValueError):
                     created = 0
                 thumb = f"{sid}.webp"
+                # 저장 상태는 본문에도 남겨 두었다 - 인덱스를 잃어도 사용자가
+                # 이름 붙인 것이 자동 기록으로 강등되어 프루닝되지 않게.
                 rows.append({
                     "id": sid, "created_at": created,
+                    "saved": bool(doc.get("saved")),
+                    "saved_at": int(doc.get("saved_at") or 0),
+                    "name": str(doc.get("name") or ""),
+                    "folder": str(doc.get("folder") or ""),
                     "prompt_hash": scene_hash(g, chars),
                     "summary": scene_summary(g, chars),
                     "char_count": len(chars),
@@ -929,24 +938,209 @@ class InteractiveAssetsService:
             return True
 
     def _prune_scenes(self, rows: list[dict[str, Any]]) -> None:
-        """캐릭터 쪽과 같은 규칙 — 즐겨찾기는 건너뛰고, 못 읽으면 아무것도 안 지운다."""
-        if len(rows) <= SNAPSHOT_LIMIT:
+        """캐릭터 쪽과 같은 규칙 — 즐겨찾기는 건너뛰고, 못 읽으면 아무것도 안 지운다.
+
+        **저장한 씬(`saved`)도 건너뛴다**(사용자 지정 2026-08-11). 자동 기록은
+        히스토리라 오래된 것부터 사라져도 되지만, 사용자가 이름을 붙여 남긴 것은
+        지우기 전엔 사라지면 안 된다. 한도(500)는 자동 기록에만 건다 - 저장한 것을
+        세면 많이 저장할수록 최근 기록이 짧아진다.
+        """
+        auto = [r for r in rows if not r.get("saved")]
+        if len(auto) <= SNAPSHOT_LIMIT:
             return
         pinned, ok = self._pinned_ids("scene")
         if not ok:
             print("[interactive-scene] favorites unreadable; pruning skipped")
             return
-        drop = len(rows) - SNAPSHOT_LIMIT
+        drop = len(auto) - SNAPSHOT_LIMIT
         kept: list[dict[str, Any]] = []
         doomed: list[dict[str, Any]] = []
         for row in rows:
-            if drop > 0 and row.get("id") not in pinned:
+            protected = bool(row.get("saved")) or row.get("id") in pinned
+            if drop > 0 and not protected:
                 doomed.append(row)
                 drop -= 1
                 continue
             kept.append(row)
         rows[:] = kept
         self._pending_delete = doomed
+
+    # ── 저장한 씬 (수집) ────────────────────────────────────────────────────
+    #
+    # 자동 기록 위에 얹는 층이다(사용자 지정 2026-08-11). **본문을 복사하지 않는다** -
+    # 같은 트리에 `saved` 표시와 이름·폴더만 더한다. 썸네일도 이미 붙어 있으므로
+    # 승격은 표시만 바꾸는 일이고, 되돌리기(unsave)도 값을 잃지 않는다.
+    def _scene_folders_path(self) -> Path:
+        return self.scene_root / SCENE_FOLDERS_NAME
+
+    def load_scene_folders(self) -> list[dict[str, Any]]:
+        p = self._scene_folders_path()
+        if not p.exists():
+            return []
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            rows = doc.get("folders") if isinstance(doc, dict) else doc
+            if not isinstance(rows, list):
+                raise ValueError("folders is not a list")
+        except Exception:
+            # 폴더 목록을 잃어도 씬은 살아 있다(각 행이 folder id 를 들고 있다).
+            # 빈 목록으로 덮지 않고 옆으로 치운다 - 손으로 되살릴 기회를 준다.
+            self._quarantine(p)
+            return []
+        out = []
+        for r in rows:
+            if isinstance(r, dict) and str(r.get("id") or "").strip():
+                out.append({"id": str(r["id"]), "name": str(r.get("name") or "")[:MAX_SCENE_NAME_LEN]})
+        return out
+
+    def _save_scene_folders(self, rows: list[dict[str, Any]]) -> None:
+        self._write_atomic(self._scene_folders_path(), {
+            "note": ["저장한 씬의 폴더(1단계). core/interactive_assets_service.py 가 만든다.",
+                     "씬 자체는 index.json 의 각 행이 folder id 를 들고 있다 —",
+                     "이 파일을 잃어도 씬은 남는다(폴더 이름만 사라진다)."],
+            "count": len(rows), "folders": rows,
+        })
+
+    def create_scene_folder(self, name: str) -> dict[str, Any] | None:
+        label = str(name or "").strip()[:MAX_SCENE_NAME_LEN]
+        if not label:
+            return None
+        with self._lock:
+            rows = self.load_scene_folders()
+            if len(rows) >= MAX_SCENE_FOLDERS:
+                raise ValueError(f"folder limit reached ({MAX_SCENE_FOLDERS})")
+            hit = next((r for r in rows if r["name"] == label), None)
+            if hit is not None:
+                return hit                       # 같은 이름은 새로 만들지 않는다
+            row = {"id": "f" + uuid.uuid4().hex[:12], "name": label}
+            rows.append(row)
+            self._save_scene_folders(rows)
+            return row
+
+    def rename_scene_folder(self, folder_id: str, name: str) -> bool:
+        label = str(name or "").strip()[:MAX_SCENE_NAME_LEN]
+        fid = str(folder_id or "")
+        if not fid or not label:
+            return False
+        with self._lock:
+            rows = self.load_scene_folders()
+            hit = next((r for r in rows if r["id"] == fid), None)
+            if hit is None:
+                return False
+            hit["name"] = label
+            self._save_scene_folders(rows)
+            return True
+
+    def delete_scene_folder(self, folder_id: str) -> bool:
+        """폴더만 지운다. **안에 든 씬은 지우지 않는다** — 폴더 없음으로 옮긴다.
+        폴더를 정리하다 저장해 둔 씬을 잃으면 되돌릴 수 없다."""
+        fid = str(folder_id or "")
+        if not fid:
+            return False
+        with self._lock:
+            rows = self.load_scene_folders()
+            kept = [r for r in rows if r["id"] != fid]
+            if len(kept) == len(rows):
+                return False
+            self._save_scene_folders(kept)
+            scenes = self.load_scene_index()
+            touched = False
+            for row in scenes:
+                if row.get("folder") == fid:
+                    row["folder"] = ""
+                    touched = True
+            if touched:
+                self._save_scene_index(scenes)
+            return True
+
+    def _patch_scene_body_meta(self, scene_id: str, meta: dict[str, Any]) -> None:
+        """저장 상태(saved/name/folder)를 **본문에도** 남긴다.
+
+        인덱스에만 두면 인덱스가 깨졌을 때 되짚기가 그걸 못 살린다 - 사용자가
+        이름 붙여 남긴 것이 자동 기록으로 강등되고 언젠가 프루닝된다.
+        본문은 복구의 원본이므로 여기에 있어야 살아난다(Codex 7차와 같은 계열).
+        """
+        p = self._scene_body_path(scene_id)
+        if not p.exists():
+            return
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(doc, dict):
+                return
+            doc.update(meta)
+            self._write_atomic(p, doc)
+        except Exception as exc:                 # 본문 갱신 실패가 저장을 막지 않는다
+            print(f"[interactive-scene] body meta patch failed for {scene_id}: {exc}")
+
+    def save_scene(self, scene_id: str, name: str = "",
+                   folder: str = "") -> dict[str, Any] | None:
+        """자동 기록 하나를 수집으로 올린다(이름·폴더). 이미 저장된 것이면 갱신한다."""
+        sid = str(scene_id or "")
+        if not sid:
+            return None
+        with self._lock:
+            rows = self.load_scene_index()
+            hit = next((r for r in rows if r.get("id") == sid), None)
+            if hit is None:
+                return None
+            label = str(name or "").strip()[:MAX_SCENE_NAME_LEN]
+            hit["saved"] = True
+            hit["saved_at"] = _now()
+            # 이름을 안 주면 자동 요약을 그대로 쓴다 - 이름 없는 카드도 성립한다.
+            hit["name"] = label or str(hit.get("name") or "")
+            fid = str(folder or "")
+            if fid:
+                known = {f["id"] for f in self.load_scene_folders()}
+                hit["folder"] = fid if fid in known else ""
+            elif "folder" not in hit:
+                hit["folder"] = ""
+            self._save_scene_index(rows)
+            self._patch_scene_body_meta(sid, {
+                "saved": True, "saved_at": hit["saved_at"],
+                "name": hit["name"], "folder": hit.get("folder", "")})
+            return hit
+
+    def update_scene(self, scene_id: str, name: Any = None,
+                     folder: Any = None) -> dict[str, Any] | None:
+        """저장한 씬의 이름/폴더만 고친다. 본문은 건드리지 않는다."""
+        sid = str(scene_id or "")
+        if not sid:
+            return None
+        with self._lock:
+            rows = self.load_scene_index()
+            hit = next((r for r in rows if r.get("id") == sid), None)
+            if hit is None:
+                return None
+            if name is not None:
+                hit["name"] = str(name).strip()[:MAX_SCENE_NAME_LEN]
+            if folder is not None:
+                fid = str(folder or "")
+                known = {f["id"] for f in self.load_scene_folders()}
+                hit["folder"] = fid if fid in known else ""
+            self._save_scene_index(rows)
+            self._patch_scene_body_meta(sid, {
+                "name": hit.get("name", ""),
+                "folder": hit.get("folder", "")})
+            return hit
+
+    def unsave_scene(self, scene_id: str) -> bool:
+        """수집에서 내린다. 자동 기록으로 돌아가므로 **언젠가 프루닝 대상**이 된다 -
+        지우는 것과는 다르다(본문·썸네일은 그대로)."""
+        sid = str(scene_id or "")
+        if not sid:
+            return False
+        with self._lock:
+            rows = self.load_scene_index()
+            hit = next((r for r in rows if r.get("id") == sid), None)
+            if hit is None or not hit.get("saved"):
+                return False
+            hit["saved"] = False
+            hit.pop("saved_at", None)
+            hit["folder"] = ""
+            self._save_scene_index(rows)
+            self._patch_scene_body_meta(sid, {
+                "saved": False, "saved_at": 0, "folder": ""})
+            return True
 
     def _flush_scene_deletes(self) -> None:
         for row in self._pending_delete:

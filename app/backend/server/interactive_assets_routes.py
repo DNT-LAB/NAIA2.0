@@ -144,15 +144,29 @@ def register_interactive_assets_routes(
     # `origin`(known/original) 은 캐릭터 태그 판정이라 씬에는 없다.
     @app.get("/api/interactive-assets/scenes")
     async def api_interactive_scenes(query: str = "", favorite: bool = False,
-                                     limit: int = 200):
+                                     limit: int = 200, tier: str = "",
+                                     folder: str = ""):
+        """`tier` = auto(자동 기록) | saved(저장한 씬) | 빈값(전부).
+        `folder` 는 저장한 씬에만 의미가 있다(빈 문자열 = 폴더 없음)."""
         def _payload() -> dict[str, Any]:
             svc = interactive_assets_service(session_context)
             rows = list(reversed(svc.load_scene_index()))
             pinned = {f.get("ref") for f in svc.load_favorites()
                       if f.get("type") == "scene"}
+            if tier == "saved":
+                rows = [r for r in rows if r.get("saved")]
+                # 저장한 씬은 **저장한 시각** 순이다 - created_at 은 그림을 만든
+                # 때라, 옛 그림을 나중에 저장하면 목록 아래로 파묻힌다.
+                rows.sort(key=lambda r: int(r.get("saved_at") or 0), reverse=True)
+            elif tier == "auto":
+                rows = [r for r in rows if not r.get("saved")]
             q = str(query or "").strip().lower()
             if q:
-                rows = [r for r in rows if q in str(r.get("summary", "")).lower()]
+                rows = [r for r in rows
+                        if q in str(r.get("summary", "")).lower()
+                        or q in str(r.get("name", "")).lower()]
+            if folder:
+                rows = [r for r in rows if str(r.get("folder") or "") == folder]
             if favorite:
                 rows = [r for r in rows if r.get("id") in pinned]
             rows = rows[: max(1, min(int(limit or 200), 500))]
@@ -164,6 +178,99 @@ def register_interactive_assets_routes(
             return await run_in_thread(_payload)
         except Exception as exc:
             return JSONResponse({"error": f"scenes failed: {exc}"}, status_code=500)
+
+    @app.post("/api/interactive-assets/scene/save")
+    async def api_interactive_scene_save(req: Request):
+        """자동 기록 하나를 수집으로 올린다(이름·폴더). 본문은 복사하지 않는다."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        scene_id = str(payload.get("id") or "")
+        if not scene_id:
+            return JSONResponse({"error": "id required"}, status_code=400)
+        svc = interactive_assets_service(session_context)
+        try:
+            if payload.get("on") is False:
+                ok = await run_in_thread(svc.unsave_scene, scene_id)
+                return {"ok": True, "saved": False, "changed": bool(ok)}
+            meta = await run_in_thread(svc.save_scene, scene_id,
+                                       str(payload.get("name") or ""),
+                                       str(payload.get("folder") or ""))
+        except Exception as exc:
+            return JSONResponse({"error": f"save failed: {exc}"}, status_code=500)
+        if meta is None:
+            return JSONResponse({"error": "scene not found"}, status_code=404)
+        return {"ok": True, "saved": True, "scene": meta}
+
+    @app.post("/api/interactive-assets/scene/update")
+    async def api_interactive_scene_update(req: Request):
+        """저장한 씬의 이름/폴더만 고친다. 준 항목만 바뀐다."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        scene_id = str(payload.get("id") or "")
+        if not scene_id:
+            return JSONResponse({"error": "id required"}, status_code=400)
+        try:
+            meta = await run_in_thread(
+                interactive_assets_service(session_context).update_scene, scene_id,
+                payload.get("name"), payload.get("folder"))
+        except Exception as exc:
+            return JSONResponse({"error": f"update failed: {exc}"}, status_code=500)
+        if meta is None:
+            return JSONResponse({"error": "scene not found"}, status_code=404)
+        return {"ok": True, "scene": meta}
+
+    @app.get("/api/interactive-assets/scene/folders")
+    async def api_interactive_scene_folders():
+        try:
+            rows = await run_in_thread(
+                interactive_assets_service(session_context).load_scene_folders)
+        except Exception as exc:
+            return JSONResponse({"error": f"folders failed: {exc}"}, status_code=500)
+        return {"count": len(rows), "folders": rows}
+
+    @app.post("/api/interactive-assets/scene/folders")
+    async def api_interactive_scene_folder_op(req: Request):
+        """`op` = create | rename | delete. 삭제는 **폴더만** 지우고 안의 씬은
+        폴더 없음으로 옮긴다 - 정리하다 저장해 둔 씬을 잃으면 되돌릴 수 없다."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        svc = interactive_assets_service(session_context)
+        op = str(payload.get("op") or "")
+        name = str(payload.get("name") or "")
+        fid = str(payload.get("id") or "")
+        try:
+            if op == "create":
+                row = await run_in_thread(svc.create_scene_folder, name)
+                if row is None:
+                    return JSONResponse({"error": "name required"}, status_code=400)
+                return {"ok": True, "folder": row}
+            if op == "rename":
+                ok = await run_in_thread(svc.rename_scene_folder, fid, name)
+                if not ok:
+                    return JSONResponse({"error": "folder not found"}, status_code=404)
+                return {"ok": True}
+            if op == "delete":
+                ok = await run_in_thread(svc.delete_scene_folder, fid)
+                if not ok:
+                    return JSONResponse({"error": "folder not found"}, status_code=404)
+                return {"ok": True}
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"folder op failed: {exc}"}, status_code=500)
+        return JSONResponse({"error": "unknown op"}, status_code=400)
 
     @app.get("/api/interactive-assets/scene")
     async def api_interactive_scene(id: str = ""):

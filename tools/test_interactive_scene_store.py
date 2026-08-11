@@ -182,6 +182,69 @@ def main() -> int:
         check("깨진 neg 는 빈 dict", b4["chars"][0]["neg"], {})
         check("깨진 fast 는 빈 값", b4["chars"][0]["fast"], {"p": "", "n": ""})
 
+        # 12b. 저장한 씬(수집) — 자동 기록 위에 얹는 층
+        with tempfile.TemporaryDirectory() as tmp5:
+            root5 = Path(tmp5)
+            s5 = InteractiveAssetsService(FakeContext(root5))
+            a = s5.record_scene(globals_for("교실"), situation("sitting"))
+            b = s5.record_scene(globals_for("해변"), situation("standing"))
+
+            f = s5.create_scene_folder("학교")
+            check("폴더 생성", bool(f and f["id"]), True)
+            check("같은 이름은 새로 안 만든다",
+                  s5.create_scene_folder("학교")["id"], f["id"])
+            check("빈 이름 거부", s5.create_scene_folder("   "), None)
+
+            saved = s5.save_scene(a["id"], "창가 역광", f["id"])
+            check("저장됨", saved["saved"], True)
+            check("이름", saved["name"], "창가 역광")
+            check("폴더", saved["folder"], f["id"])
+            check("없는 폴더는 빈값으로",
+                  s5.save_scene(b["id"], "해변", "없는폴더")["folder"], "")
+            check("없는 씬 저장은 None", s5.save_scene("eNOPE", "x"), None)
+
+            # 본문에도 남는다 — 인덱스를 잃어도 살아나야 한다
+            body = json.loads((root5 / "interactive_scene" / f"{a['id']}.json")
+                              .read_text(encoding="utf-8"))
+            check("본문에 저장 표시", body.get("saved"), True)
+            check("본문에 이름", body.get("name"), "창가 역광")
+
+            # 이름·폴더만 고친다
+            s5.update_scene(a["id"], name="새 이름")
+            rows5 = s5.load_scene_index()
+            hit5 = next(r for r in rows5 if r["id"] == a["id"])
+            check("이름 변경", hit5["name"], "새 이름")
+            check("폴더는 그대로", hit5["folder"], f["id"])
+
+            # 폴더를 지워도 씬은 남는다
+            check("폴더 삭제", s5.delete_scene_folder(f["id"]), True)
+            hit5 = next(r for r in s5.load_scene_index() if r["id"] == a["id"])
+            check("씬은 살아남는다", hit5["saved"], True)
+            check("폴더 없음으로 옮겨진다", hit5["folder"], "")
+
+            # 저장한 것은 프루닝에서 살아남는다
+            for i in range(SNAPSHOT_LIMIT + 5):
+                s5.record_scene(globals_for("bulk2-%d" % i), situation("sitting"))
+            rows5 = s5.load_scene_index()
+            check("저장한 씬은 프루닝 생존",
+                  any(r["id"] == a["id"] for r in rows5), True)
+            check("한도는 자동 기록에만",
+                  len([r for r in rows5 if not r.get("saved")]) <= SNAPSHOT_LIMIT, True)
+
+            # 인덱스를 잃어도 저장 상태가 살아난다
+            (root5 / "interactive_scene" / "index.json").write_text("{ broken",
+                                                                    encoding="utf-8")
+            rebuilt5 = s5.load_scene_index()
+            hit5 = next((r for r in rebuilt5 if r["id"] == a["id"]), None)
+            check("복구해도 저장 상태 유지", bool(hit5 and hit5.get("saved")), True)
+            check("복구해도 이름 유지", hit5.get("name") if hit5 else None, "새 이름")
+
+            # 수집에서 내리면 자동 기록으로 돌아간다(본문은 그대로)
+            check("내리기", s5.unsave_scene(a["id"]), True)
+            hit5 = next(r for r in s5.load_scene_index() if r["id"] == a["id"])
+            check("자동 기록으로", hit5["saved"], False)
+            check("본문은 살아 있다", s5.load_scene_body(a["id"]) is not None, True)
+
         # 13. 인덱스가 깨져도 본문에서 되짚는다
         idx = root / "interactive_scene" / "index.json"
         idx.write_text("{ broken", encoding="utf-8")

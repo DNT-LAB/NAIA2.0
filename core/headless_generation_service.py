@@ -15,6 +15,7 @@ from typing import Any
 
 import pandas as pd
 
+from core.auto_generation_flags import apply_interactive_generation_gate
 from core.event_stream_vibe import (
     EVENT_STREAM_VIBE_MARKER_KEY,
     strip_event_stream_vibe_params,
@@ -585,6 +586,16 @@ class HeadlessGenerationService:
 
         overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else {}
         params.update(overrides)
+
+        # Interactive 요청이면 충돌 플래그를 **요청 단위로** 끈다. 바로 위
+        # `params.update(self.context.get_options())` 가 저장 옵션을 통째로 실어서,
+        # Interactive 를 켜기 전에 Prompt Fixed / WC Solo 를 켜 뒀다면 그대로 새 들어온다
+        # (프론트의 비활성화는 표시 전용 - 저장값을 끄면 다른 탭까지 꺼지고 영속된다).
+        # 실측 2026-08-11: `wildcard_standalone` 이 살아 `_source_row` 가 사용자의 실제
+        # 행 대신 빈 행을 돌려줬다. 마커가 붙은 요청에만 건다 - 무조건 걸면 모든 생성이
+        # Interactive 로 둔갑한다.
+        if self._to_bool(params.get("interactive_mode_request")):
+            apply_interactive_generation_gate(params)
 
         # 확장 lineage 키의 신뢰된 발급자는 ExtensionContext.enqueue_generation뿐이다.
         # 다른 ingress(프론트/외부 브릿지)가 보낸 _ext_* 값은 여기서 안전 형태로

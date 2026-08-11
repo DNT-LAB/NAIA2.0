@@ -163,28 +163,10 @@ async def handle_event_corpus_command(
 # Interactive 생성 게이트
 # ----------------------------------------------------------------------
 
-# Interactive 모드는 프롬프트를 블록에서 결정론적으로 조립한다. prompt_fixed(랜덤 생성 잠금)와
-# wildcard_standalone(DB 태그 없이 빈 source_row 시작)은 그 전제와 충돌한다 — 무해한 no-op 이
-# 아니라 서로 다른 소스를 다투게 된다.
-#
-# 세션 옵션(set_option)으로 끄면 안 된다: set_option 은 전 클라이언트에 broadcast 되고
-# (session_commands.py) remote_options 로 영속된다(headless_remote_ui_state_service.py).
-# 한 탭이 Interactive 를 켜면 다른 탭의 설정이 꺼지고 그 값이 저장돼 버린다.
-# 따라서 **요청 단위로만** 강제한다.
-INTERACTIVE_FORCED_PARAMS = {
-    "interactive_mode_request": True,   # core/auto_generation_flags.py 의 기존 마커 재사용
-    "prompt_fixed": False,
-    "wildcard_standalone": False,
-}
-
-
-def apply_interactive_generation_gate(params: dict[str, Any]) -> dict[str, Any]:
-    """Interactive 생성 요청에 플래그를 강제한다. 저장된 사용자 옵션은 건드리지 않는다.
-
-    ``interactive_mode_request`` 는 AUTO_GENERATE_SUPPRESSED_FLAGS 에 이미 등록돼 있어
-    Auto Generate 연쇄와 Automation 카운트에서 자동 제외된다.
-    """
-    if not isinstance(params, dict):
-        return dict(INTERACTIVE_FORCED_PARAMS)
-    params.update(INTERACTIVE_FORCED_PARAMS)
-    return params
+# 실체는 core/auto_generation_flags.py 로 옮겼다 - 실제로 거는 곳이
+# core/headless_generation_service.py 인데, import 방향은 app/backend -> core 만
+# 허용된다(auto_generation_flags 상단 주석). 기존 참조를 위해 여기서 재수출한다.
+from core.auto_generation_flags import (  # noqa: E402,F401  (설명을 붙이려 아래에 둔다)
+    INTERACTIVE_FORCED_PARAMS,
+    apply_interactive_generation_gate,
+)

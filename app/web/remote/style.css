@@ -5528,6 +5528,9 @@ body.resizing-result-info {
   flex: 0 0 auto;
   margin-left: auto;   /* 헤더가 flex-start 라 여기서 오른쪽 끝으로 민다 */
 }
+/* 제목은 **줄바꿈하지 않는다.** 창이 좁아 그룹 줄이 여러 줄로 접히면 제목까지
+   눌려 '씬 태 그' 처럼 한 글자씩 세로로 쌓였다(사용자 지적 2026-08-11). */
+#resultInfoTitle { flex: 0 0 auto; white-space: nowrap; }
 .result-enhance-btn {
   height: 22px;
   min-width: 118px;

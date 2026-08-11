@@ -43,7 +43,7 @@ const SCENE_SLOTS = [
   // 여기도 트리뿐이었다. 사용자가 "의외로 다 구분이 가능하다"고 지적해(2026-08-01)
   // `meta_*` 4축 154장을 만들었다. 트리는 나머지(고유명·계정·화풍 등 그림으로 구분이
   // 안 되는 것들)를 위해 남긴다.
-  {id: 'composition_fx', name: '기타·텍스트', icon: '\u{1F524}', axis: 'meta',
+  {id: 'composition_fx', name: '기타', icon: '\u{1F524}', axis: 'meta',
    sections: META_SECTIONS,
    subgroupExclude: [...COMPOSITION_PRIMARY, 'effects', 'symbols', 'colors',
                      'scan', 'year_tags', 'quality', 'art_style',
@@ -877,7 +877,7 @@ export function createInteractivePanel({
       + (miniOpen === 'comp' ? ' is-open' : '') + (n ? ' has-tags' : '') + '"'
       + ' data-comp-preset="1" title="축 프리셋 (X/Y/Z 시점 · 스페셜)">'
       + '<span class="ia-block-icon">\u{1F39B}</span>'
-      + '<span class="ia-scene-btn-name">축 프리셋</span>'
+      + '<span class="ia-scene-btn-name">축</span>'
       + (n ? `<span class="ia-scene-btn-n">${n}</span>` : '')
       + '<span class="ia-comp-btn-caret">\u25BE</span></button>';
   }
@@ -1268,7 +1268,7 @@ export function createInteractivePanel({
   const COMP_GROUP = 'comp';
   const SCENE_LABEL = new Map([
     ...SCENE_SLOTS.map(slot => [slot.id, slot.name]),
-    [COMP_GROUP, '축 프리셋'],
+    [COMP_GROUP, '축'],
   ]);
 
   /** 저장 원소 하나를 칩 하나로 본다. `2::a, b ::` 는 **쪼개지 않는다** —
@@ -1606,10 +1606,12 @@ export function createInteractivePanel({
     // 제목도 같이 바꾼다. 이 자리가 씬 태그 편집기가 됐는데 머리는 'GENERATION
     // INFO' 인 채라 편집기를 보면서 엉뚱한 제목을 읽게 된다(사용자 지적).
     const title = document.getElementById('resultInfoTitle');
-    if (title) title.textContent = on ? '씬 태그' : 'Generation Info';
+    // 제목과 개수는 **한 덩이**다. 배지를 따로 두면 좁은 창에서 그것만 다음
+    // 줄로 넘어가 숫자와 단위가 갈라졌다(사용자 지정 2026-08-11).
+    if (title) title.textContent = on ? `씬태그 ${n}` : 'Generation Info';
     if (!badge) return;
-    badge.hidden = !on;
-    badge.textContent = on ? `${n}개` : '';
+    badge.hidden = true;
+    badge.textContent = '';
   }
 
   let globalTextMode = false;   // 칩(false) — 텍스트(true)

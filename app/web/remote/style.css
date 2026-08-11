@@ -23511,3 +23511,122 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 판 최소 높이를 여기서 올리면 **사용자가 판을 아래로 못 줄인다**(사용자 지적).
    .result-info-panel 의 min-height: 38px 가 유일한 바닥이어야 한다. 편집기는
    좁아지면 스스로 스크롤한다 - 칩 모드에는 입력칸이 없어 잘릴 것도 없다. */
+
+/* ── Interactive Scene (씬 기록) ──────────────────────────────────────────
+   Assets 바(좌하단)와 **대칭**으로 우하단에 선다(사용자 지정 2026-08-11).
+   Assets 쪽은 팝업이 열리면 `--ia-shift` 로 오른쪽으로 비켜서는데, 이쪽은
+   원래 오른쪽 끝이라 비켜설 곳이 없다 — shift 를 쓰지 않는다. */
+.ia-scene {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  max-width: min(560px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  font-family: var(--font-mono);
+}
+.ia-scene[hidden] { display: none; }
+
+.ia-sc-head { display: flex; gap: 6px; }
+.ia-sc-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; font-size: 11px; font-family: inherit;
+  color: #cfd3dc; background: rgba(24,26,32,0.92);
+  border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; cursor: pointer;
+}
+.ia-sc-toggle:hover { background: rgba(40,44,54,0.96); border-color: rgba(255,255,255,0.26); }
+.ia-sc-caret { font-size: 10px; opacity: 0.8; }
+.ia-sc-count {
+  font-size: 10px; padding: 0 5px; border-radius: 8px;
+  background: rgba(255,255,255,0.12); color: #e6e8ee;
+}
+
+/* 펼치면 판 하나가 된다 — 조각마다 배경을 주면 카드 사이로 그림이 비쳐 어지럽다
+   (Assets 바에서 같은 이유로 판을 하나로 합쳤다). */
+.ia-sc-list {
+  display: flex; gap: 6px; overflow-x: auto; max-width: 100%;
+  padding: 6px; border-radius: 8px;
+  background: rgba(18,20,25,0.94); border: 1px solid rgba(255,255,255,0.12);
+}
+.ia-sc-empty { font-size: 11px; color: #8a8f9a; padding: 10px 12px; white-space: nowrap; }
+
+.ia-sc-card {
+  flex: 0 0 auto; width: 104px;
+  border: 1px solid rgba(255,255,255,0.10); border-radius: 6px; overflow: hidden;
+  background: rgba(30,33,40,0.9);
+}
+.ia-sc-thumb {
+  height: 64px; background: rgba(255,255,255,0.05);
+  display: flex; align-items: center; justify-content: center;
+}
+.ia-sc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ia-sc-body { padding: 4px 6px; }
+.ia-sc-name {
+  font-size: 10px; color: #dfe2e8; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-sc-meta { display: flex; gap: 4px; margin-top: 2px; }
+.ia-sc-n { font-size: 9px; color: #9aa0ab; }
+.ia-sc-acts { display: flex; gap: 3px; padding: 0 5px 5px; }
+.ia-sc-btn {
+  flex: 1; font-size: 10px; font-family: inherit; padding: 3px 0;
+  color: #d6d9e0; background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 4px; cursor: pointer;
+}
+.ia-sc-btn:hover { background: rgba(255,255,255,0.14); }
+.ia-sc-btn.is-main { background: rgba(90,130,220,0.26); border-color: rgba(90,130,220,0.5); }
+.ia-sc-btn.is-danger { color: #e9a6a2; border-color: rgba(229,115,107,0.35); }
+
+/* ── 저장한 씬 팝업 ──────────────────────────────────────────────────────
+   **body 직계**다. `.viewer-wrapper`(z-index:0 + isolation:isolate) 안에 넣으면
+   이 팝업의 z 가 0 층으로 접혀 좌측 컨트롤이 위를 덮는다(세 번 겪었다). */
+.ia-sc-pop {
+  position: fixed; inset: 0; z-index: 4200;
+  background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono);
+}
+.ia-sc-pop[hidden] { display: none; }
+.ia-sc-pop-box {
+  width: min(860px, 92vw); max-height: 82vh; overflow: auto;
+  background: #15171c; border: 1px solid rgba(255,255,255,0.16);
+  border-radius: 10px; padding: 12px 14px;
+}
+.ia-sc-pop-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ia-sc-pop-title { font-size: 13px; color: #e6e8ee; margin-right: auto; }
+/* 머리줄의 버튼은 늘리지 않는다 - `.ia-sc-btn` 의 `flex:1` 은 카드 안에서
+   폭을 나눠 갖기 위한 것인데, 여기서는 [닫기] 하나가 줄 전체를 먹었다. */
+.ia-sc-pop-head .ia-sc-btn { flex: 0 0 auto; padding: 4px 12px; }
+.ia-sc-search {
+  width: 200px; font-size: 11px; font-family: inherit; padding: 4px 8px;
+  color: #e6e8ee; background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 5px;
+}
+.ia-sc-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+.ia-sc-chip {
+  font-size: 11px; font-family: inherit; padding: 3px 10px; cursor: pointer;
+  color: #c6cad3; background: transparent;
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 10px;
+}
+.ia-sc-chip:hover { background: rgba(255,255,255,0.08); }
+.ia-sc-chip.is-on { background: rgba(90,130,220,0.28); border-color: rgba(90,130,220,0.5); color: #eef1f6; }
+.ia-sc-chip.is-add { border-style: dashed; color: #8a8f9a; }
+
+.ia-sc-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px;
+}
+.ia-sc-scard {
+  border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; overflow: hidden;
+  background: rgba(30,33,40,0.9);
+}
+.ia-sc-sthumb { height: 96px; background: rgba(255,255,255,0.05); }
+.ia-sc-sthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ia-sc-sname {
+  font-size: 12px; color: #e6e8ee; padding: 6px 8px 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-sc-smeta { font-size: 10px; color: #8a8f9a; padding: 2px 8px 0; }
+.ia-sc-sacts { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; }

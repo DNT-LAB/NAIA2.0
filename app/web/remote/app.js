@@ -904,6 +904,7 @@ let eventCorpusHandlers = null;
 let resetEventCorpus = () => {};
 let interactiveAutocomplete = null;
 let interactiveAssetsPanel = null;
+let interactiveScenePanel = null;
 // Interactive 전용 캐릭터 레퍼런스. NAI 모듈과 상태가 독립이다.
 let interactiveReferencePanel = null;
 const interactiveReferenceReady = import('./js/features/interactiveReferencePanel.mjs?v=20260805-iref4')
@@ -921,7 +922,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811ai-scene4')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811ak-scene')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -940,6 +941,12 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     interactiveAutocomplete = createInteractiveAutocomplete({document, window, escHtml, send: wsSend});
     // 조합 스냅샷 컨트롤(결과 좌하단). 패널을 늦게 참조하는 이유는 아래에서 만들기 때문.
     interactiveAssetsPanel = createInteractiveAssetsPanel({
+      document, escHtml, showToast, showAppDialog, getPanel: () => interactivePanel,
+    });
+    // 씬(이벤트) 기록. Assets 바의 **반대쪽**(우하단)에 선다(사용자 지정).
+    const {createInteractiveScenePanel} =
+      await import('./js/features/interactiveScenePanel.mjs?v=20260811ak-scene');
+    interactiveScenePanel = createInteractiveScenePanel({
       document, escHtml, showToast, showAppDialog, getPanel: () => interactivePanel,
     });
     interactivePanel = createInteractivePanel({
@@ -1123,6 +1130,7 @@ function applyInteractiveModeGate(isActive) {
   // 반복을 직접 몰므로 여기서 한 번 당겨 온다 — 없으면 딜레이가 늘 0 이 된다.
   if (isActive && !automationRuntime) requestModuleState('automation');
   // Assets 바는 Interactive 의 도구다 — 모드를 끄면 같이 사라진다.
+  if (interactiveScenePanel) interactiveScenePanel.setVisible(!!isActive);
   if (interactiveAssetsPanel) {
     interactiveAssetsPanel.setVisible(!!isActive);
     // 켜는 순간의 캐릭터 목록을 한 번 밀어 넣는다 — onRosterChange 는 '변할 때'만 온다.
@@ -5077,6 +5085,8 @@ function onViewerNewImage(message) {
   if (resultHistory) resultHistory.onNewImage(message);
   // 방금 생성한 조합에 썸네일이 붙었을 수 있다 — 목록이 열려 있을 때만 다시 읽는다.
   if (interactiveAssetsPanel) interactiveAssetsPanel.refresh();
+  // 씬 카드도 방금 썸네일이 붙었을 수 있다 - 열려 있을 때만 다시 읽는다.
+  if (interactiveScenePanel) interactiveScenePanel.refresh();
   scheduleResultUnsavedActionRefresh(180);
 }
 function onViewerHistoryRemoved(message) {
@@ -5836,6 +5846,17 @@ async function generateWithInteractiveSnapshot(payload) {
       // 같은 썸네일을 전부에 붙인다(사용자 결정).
       const ids = await interactiveAssetsPanel.record(chars);
       if (ids && ids.length) overrides.interactive_snapshot_id = ids;
+    }
+    // 씬은 **생성 1회 = 1장**이다. 캐릭터가 0명이어도(배경만) 기록한다 —
+    // 값어치가 없으면 백엔드가 건너뛰고 null 을 준다(구도 축만 든 카드 방지).
+    if (interactiveScenePanel && interactivePanel?.getSceneGlobals) {
+      try {
+        const meta = await interactiveScenePanel.record(
+          interactivePanel.getSceneGlobals(), interactivePanel.getSceneChars());
+        // 라우트가 `{scene: null}` 을 주면 안 쌓은 것이다 — 붙일 카드가 없으므로
+        // id 를 싣지 않는다(실으면 백엔드가 없는 카드에 썸네일을 붙이려 한다).
+        if (meta && meta.id) overrides.interactive_scene_id = [meta.id];
+      } catch (_) { /* 기록 실패가 생성을 막지 않는다 */ }
     }
   }
   // 가드(생성 중 / WS 닫힘)는 requestGenerate 가 다시 본다 — await 사이에 상태가
@@ -9161,7 +9182,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260811ai-scene4')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260811ak-scene')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

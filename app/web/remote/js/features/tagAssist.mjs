@@ -409,17 +409,34 @@ export function createTagAssistController({
     if (sceneRect && sceneRect.height > 0) {
       const floor = sceneRect.top - safeGap;
       const ceil = Math.max(viewportTop + safeGap, safeTop);
-      // 지금 그려진 높이를 쓴다. 아직 안 그려졌으면(0) 기본값으로 자리만 잡고,
-      // 다음 호출에서 실제 높이로 맞춰진다 - 이 함수는 내용이 바뀔 때마다 돈다.
       const room = floor - ceil;
       if (room > 120) {
-        // **재기 전에 자리를 다 열어 둔다.** 지난번 max-height 가 남아 있으면 그
-        // 높이 안에서 재게 되어, 카드가 한 번 작아지면 다음 태그의 설명이 길어도
-        // 계속 그 높이에 갇힌다 - 잴 때마다 상한이 스스로를 깎는다.
+        // **재기 전에 자리를 다 열어 둔다.** 지난번 상한이 남아 있으면 그 안에서
+        // 재게 되어, 카드가 한 번 작아지면 다음 태그의 설명이 길어도 계속 그
+        // 크기에 갇힌다 - 잴 때마다 상한이 스스로를 깎는다. 폭도 같은 함정이다.
+        const wCeil = Math.max(320, Math.min(680, viewerRect
+          ? viewerRect.width - sideGap * 2 : viewportWidth - safeGap * 2));
         tagTooltip.style.setProperty('--tag-tooltip-max-height', Math.round(room) + 'px');
-        const measured = tagTooltip.getBoundingClientRect().height || 220;
-        top = Math.max(ceil, floor - Math.min(measured, room));
+        tagTooltip.style.setProperty('--tag-tooltip-max-width', Math.round(wCeil) + 'px');
+        const measured = tagTooltip.getBoundingClientRect();
+
+        // 세로: 바닥을 씬 태그 판 위에 맞추고 위로 자란다.
+        top = Math.max(ceil, floor - Math.min(measured.height || 220, room));
         maxHeight = room;      // 위 여백까지는 쓸 수 있다 - 넘치면 스스로 스크롤
+
+        // 가로: **가운데로 몬다**(사용자 지정 2026-08-11). 왼쪽 끝에 두면 에셋
+        // 버튼(C1/ASSETS)을 덮고, 오른쪽 끝은 앞으로 씬 버튼이 쓸 자리다.
+        const w = Math.min(measured.width || wCeil, wCeil);
+        const mid = viewerRect
+          ? viewerRect.left + viewerRect.width / 2 : viewportWidth / 2;
+        const maxLeft = (viewerRect ? viewerRect.right : viewportWidth) - w - safeGap;
+        const minLeft = (viewerRect ? viewerRect.left : 0) + safeGap;
+        const left = Math.max(minLeft, Math.min(mid - w / 2, maxLeft));
+        tagTooltip.style.setProperty('--tag-tooltip-top', Math.round(top) + 'px');
+        tagTooltip.style.setProperty('--tag-tooltip-max-height', Math.round(maxHeight) + 'px');
+        tagTooltip.style.setProperty('--tag-tooltip-left', Math.round(left) + 'px');
+        tagTooltip.style.setProperty('--tag-tooltip-max-width', Math.round(wCeil) + 'px');
+        return;
       }
     }
 

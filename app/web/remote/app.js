@@ -921,7 +921,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260810af-ianai')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260811a-toast')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -6472,7 +6472,7 @@ function syncMode(mode) {
   // 끄는 경로가 프롬프트 원본 복원까지 함께 처리한다.
   if (!isNai && interactivePanel?.isActive?.()) {
     interactivePanel.setActive(false);
-    showToast('Interactive 모드를 껐습니다 — NAI 전용입니다', 'info');
+    showToast('Interactive 모드는 현재 NAI에서만 지원됩니다 — 껐습니다', 'info');
   }
   updateInteractiveNaiToolBlock();   // Interactive 활성 시 Character/CharRef 차단 유지
   // Interactive 헤더의 Position/Reference 는 NAI 전용 — 모드가 바뀌면 다시 그린다.
@@ -6496,7 +6496,7 @@ function setMode(mode) {
   // 켜진 채로 다른 모드로 넘어가면 조립한 프롬프트가 갈 곳이 없다 — 먼저 끄게 한다.
   if (mode !== 'NAI' && interactivePanel?.isActive?.()) {
     syncMode(prevMode);
-    showToast('Interactive 모드를 먼저 끄세요 — NAI 전용입니다', 'error');
+    showToast('Interactive 모드는 현재 NAI에서만 지원됩니다.', 'error');
     return;
   }
   if (!isModeConnected(mode)) {

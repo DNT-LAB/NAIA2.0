@@ -6475,7 +6475,7 @@ export function createInteractivePanel({
     // 있을 때 켜는 것은 아무도 안 막았다(실측: COMFYUI 에서 그대로 켜졌다).
     // 켜 두면 조립한 프롬프트가 갈 곳이 없다 — 같은 규칙을 여기에도 건다.
     if (!active && String(getMode() || 'NAI') !== 'NAI') {
-      showToast('Interactive 는 NAI 전용입니다 — 먼저 NAI 로 바꾸세요', 'error');
+      showToast('Interactive 모드는 현재 NAI에서만 지원됩니다.', 'error');
       return;
     }
     setActive(!active);

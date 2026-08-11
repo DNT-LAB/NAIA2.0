@@ -578,10 +578,17 @@ export function createInteractivePanel({
     // 씬 태그 칩과 같은 규칙 - `0.5::tag ::` 는 배지로 떼어 보인다. 안 그러면
     // 캐릭터 슬롯에서만 저장 형식이 날것으로 보여 같은 것이 달라 보인다.
     const {weight, text: bare} = weightedChip(text);
-    const tip = title || (weight
-      ? `가중치 ${weight}\n우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)`
-      : '우클릭 \u2014 가중치를 겁니다(휠로도 됩니다)');
-    const titleAttr = tip ? ` title="${escHtml(tip)}"` : '';
+    // 툴팁은 **태그가 주인공**이다. 우클릭 안내는 아래 줄에 덧붙일 뿐인데,
+    // 안내만 넣었더니 모든 칩이 같은 말만 하게 됐다(사용자 지적 2026-08-11).
+    // 여러 줄이 필요해서 guide 툴팁을 쓴다(pre-line 으로 줄이 살아난다).
+    const head = title || bare;
+    const tip = target
+      ? `${head}${weight ? ` \u00b7 가중치 ${weight}` : ''}`
+        + '\n우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)'
+      : head;
+    const titleAttr = tip
+      ? (target ? ` data-naia-guide="${escHtml(tip)}"` : ` title="${escHtml(tip)}"`)
+      : '';
     // 우클릭이 집을 좌표. 파생 칩(구도 콤보)과 `+n` 접힘 표시에는 안 붙인다.
     const tAttr = target
       ? ` data-gwc-cid="${escHtml(target.cid)}" data-gwc-sub="${escHtml(target.sub)}"`
@@ -6120,9 +6127,13 @@ export function createInteractivePanel({
     miniPopup = document.createElement('div');
     miniPopup.className = 'ia-comp-popup';
     miniPopup.hidden = true;
-    // 씬 버튼 줄과 **같은 컨텍스트**에 둔다 — body 직계로 두면 `.viewer-wrapper`
-    // (z-index:0 + isolation:isolate) 때문에 z 로 줄을 세울 수 없다(씬 플로트 주석).
-    (document.querySelector('.viewer-wrapper') || document.body).appendChild(miniPopup);
+    // **body 직계다.** 예전에는 씬 버튼 줄과 같은 컨텍스트(.viewer-wrapper)에
+    // 뒀는데, 그 wrapper 가 `z-index:0 + isolation:isolate` 라 이 창의 z 2200 이
+    // 통째로 0 층으로 접힌다 - 좌측 슬롯의 '비어 있음' 플레이스홀더가 창 위로
+    // 그려졌다(사용자 지적 2026-08-11). 캐릭터 칩에서도 열리게 되면서 이 창은
+    // wrapper 안팎을 모두 덮어야 한다. body 로 올리면 wrapper 통째(0층)보다
+    // 위이므로 씬 플로트보다도 위다 - 씬 플로트와 달리 이 창은 '맨 위' 가 맞다.
+    document.body.appendChild(miniPopup);
     miniPopup.addEventListener('mousedown', keepEditingFocus);
     miniPopup.addEventListener('click', event => {
       if (event.target.closest('[data-comp-close]')) closeCompPopup();

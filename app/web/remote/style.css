@@ -23207,6 +23207,38 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 이 팝업은 입력 한 칸이라 340px 은 과하다. */
 .ia-comp-popup:has(.ia-seedin) { width: 246px; }
 
+/* 칩 전용 툴팁. 공용 툴팁은 줄마다 크기를 달리할 수 없어 따로 만들었다
+   (사용자 지정 2026-08-11): 태그 + 우상단 출처(작게) / 설명 / 선 + 안내(작게). */
+.ia-tip {
+  display: none; position: fixed; z-index: 2400;
+  max-width: min(340px, calc(100vw - 16px));
+  padding: 7px 9px;
+  background: #16161f;
+  border: 1px solid rgba(157,139,255,0.42); border-radius: 7px;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.5);
+  pointer-events: none;
+}
+.ia-tip.open { display: block; }
+.ia-tip-head { display: flex; align-items: baseline; gap: 10px; }
+.ia-tip-tag {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  color: #f7f6ff; overflow-wrap: anywhere;
+}
+.ia-tip-src {
+  flex: 0 0 auto; font-family: var(--font-mono); font-size: 8.5px;
+  color: var(--text-dim); white-space: nowrap;
+}
+.ia-tip-desc {
+  margin-top: 3px; font-size: 10px; line-height: 1.45;
+  color: var(--text-secondary); overflow-wrap: anywhere;
+}
+.ia-tip-hint {
+  margin-top: 5px; padding-top: 4px;
+  border-top: 1px solid rgba(255,255,255,0.10);
+  font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim);
+}
+
 /* 칩 우클릭 -> 가중치. **한 줄이다**(사용자 지정 2026-08-11): 라벨 · 입력 · 확인.
    머리 줄과 안내 줄을 빼서 세로로 셋이던 것을 하나로 줄였다. */
 .ia-wgt { display: flex; gap: 6px; align-items: center; }

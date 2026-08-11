@@ -580,20 +580,90 @@ export function createInteractivePanel({
   const tagDescCache = new Map();
   const tagDescAsked = new Set();
 
-  /** 칩 툴팁 글 = 머리 / (설명) / 꼬리. 설명은 조회가 돌아오면 가운데에 낀다.
-   *  칩 종류마다 머리·꼬리만 다르므로 조립은 여기 하나로 모은다 - 나눠 두면
-   *  한쪽만 고쳐져 첫 줄이 통째로 비는 일이 난다(실측). */
-  function tipText(key, head, tail) {
-    const desc = tagDescCache.get(String(key || '').trim().toLowerCase());
-    return [head, desc || '', tail].filter(Boolean).join('\n');
+  /** 칩에 심는 조각. 전용 툴팁이 이걸 읽어 조립한다 - 공용 `data-naia-title`
+   *  툴팁은 줄마다 크기를 달리할 수 없어서 따로 만들었다(사용자 지정 2026-08-11). */
+  function tipAttrs(key, tag, src, hint) {
+    return ` data-tipkey="${escHtml(String(key || '').trim().toLowerCase())}"`
+      + ` data-tiptag="${escHtml(tag)}" data-tipsrc="${escHtml(src || '')}"`
+      + ` data-tiphint="${escHtml(hint || '')}"`;
   }
 
-  /** 설명이 나중에 도착해도 다시 조립할 수 있게 조각을 칩에 심는다. */
-  function tipAttrs(key, head, tail) {
-    const k = String(key || '').trim().toLowerCase();
-    return ` data-tipkey="${escHtml(k)}" data-tiphead="${escHtml(head)}"`
-      + ` data-tiptail="${escHtml(tail)}"`
-      + ` data-naia-guide="${escHtml(tipText(k, head, tail))}"`;
+  // ---- 칩 전용 툴팁 -------------------------------------------------------
+  // 태그(큼) + 출처(우상단 작게) / 설명 / 구분선 + 우클릭 안내(작게).
+  let chipTipEl = null;
+  let chipTipOwner = null;
+
+  function ensureChipTip() {
+    if (chipTipEl && document.body.contains(chipTipEl)) return chipTipEl;
+    chipTipEl = document.createElement('div');
+    chipTipEl.className = 'ia-tip';
+    // **body 직계다.** `.viewer-wrapper` 안에 두면 z 가 0 층으로 접혀 좌측
+    // 슬롯 글자가 위로 올라온다(가중치 창에서 겪은 그 함정).
+    document.body.appendChild(chipTipEl);
+    return chipTipEl;
+  }
+
+  function chipTipHtml(el) {
+    const desc = tagDescCache.get(el.dataset.tipkey || '');
+    const src = el.dataset.tipsrc || '';
+    const hint = el.dataset.tiphint || '';
+    return '<div class="ia-tip-head">'
+      + `<span class="ia-tip-tag">${escHtml(el.dataset.tiptag || '')}</span>`
+      + (src ? `<span class="ia-tip-src">${escHtml(src)}</span>` : '')
+      + '</div>'
+      + (desc ? `<div class="ia-tip-desc">${escHtml(desc)}</div>` : '')
+      + (hint ? `<div class="ia-tip-hint">${escHtml(hint)}</div>` : '');
+  }
+
+  function placeChipTip(el) {
+    const tip = ensureChipTip();
+    const a = el.getBoundingClientRect();
+    const b = tip.getBoundingClientRect();
+    const gap = 6, margin = 8;
+    // 위를 먼저 쓴다 - 칩 아래에는 대개 다음 칩 줄이 있어 시야를 가린다.
+    let top = a.top - b.height - gap;
+    if (top < margin) top = Math.min(a.bottom + gap, window.innerHeight - b.height - margin);
+    const left = Math.max(margin, Math.min(a.left, window.innerWidth - b.width - margin));
+    tip.style.top = Math.round(Math.max(margin, top)) + 'px';
+    tip.style.left = Math.round(left) + 'px';
+  }
+
+  function showChipTip(el) {
+    if (!el || !el.dataset.tipkey) return;
+    const tip = ensureChipTip();
+    chipTipOwner = el;
+    tip.innerHTML = chipTipHtml(el);
+    tip.classList.add('open');
+    placeChipTip(el);
+  }
+
+  function hideChipTip(el) {
+    if (el && chipTipOwner && el !== chipTipOwner) return;
+    chipTipOwner = null;
+    if (chipTipEl) chipTipEl.classList.remove('open');
+  }
+
+  /** 칩이 다시 그려지면 주인이 사라진다 - 유령 툴팁을 닫는다. */
+  function syncChipTip() {
+    if (chipTipOwner && !chipTipOwner.isConnected) hideChipTip();
+  }
+
+  /** 칩 줄에 호버/이탈을 위임으로 건다. 칩은 계속 새로 만들어진다. */
+  function bindChipTips(root) {
+    if (!root || root.dataset.tipbound === '1') return;
+    root.dataset.tipbound = '1';
+    root.addEventListener('pointerover', event => {
+      const el = event.target.closest ? event.target.closest('[data-tipkey]') : null;
+      if (!el || el === chipTipOwner) return;
+      askTagDesc(el.dataset.tipkey);
+      showChipTip(el);
+    });
+    root.addEventListener('pointerout', event => {
+      const el = event.target.closest ? event.target.closest('[data-tipkey]') : null;
+      if (!el) return;
+      if (event.relatedTarget && el.contains(event.relatedTarget)) return;
+      hideChipTip(el);
+    });
   }
 
   /** 마우스가 칩에 올라오면 설명을 받아 둔다. 이미 알거나 이미 물어본 것은 건너뛴다. */
@@ -610,14 +680,8 @@ export function createInteractivePanel({
     const key = String(tag || '').trim().toLowerCase();
     if (!key) return;
     tagDescCache.set(key, String(desc || ''));
-    document.querySelectorAll('[data-tipkey]').forEach(el => {
-      if (el.dataset.tipkey !== key) return;
-      el.dataset.naiaGuide = tipText(key, el.dataset.tiphead || '', el.dataset.tiptail || '');
-      // 커서가 이미 이 칩 위에 있으면 툴팁은 옛 글로 떠 있다 - 다시 알린다.
-      if (el.matches(':hover')) {
-        el.dispatchEvent(new PointerEvent('pointerover', {bubbles: true}));
-      }
-    });
+    // 떠 있는 툴팁이 이 태그의 것이면 그 자리에서 설명을 채운다.
+    if (chipTipOwner && chipTipOwner.dataset.tipkey === key) showChipTip(chipTipOwner);
   }
 
   function chip(text, cls, title, del, target) {
@@ -627,9 +691,10 @@ export function createInteractivePanel({
     // 툴팁은 **태그가 주인공**이다. 우클릭 안내는 아래 줄에 덧붙일 뿐인데,
     // 안내만 넣었더니 모든 칩이 같은 말만 하게 됐다(사용자 지적 2026-08-11).
     // 여러 줄이 필요해서 guide 툴팁을 쓴다(pre-line 으로 줄이 살아난다).
-    const head = (title || bare) + (weight ? ` \u00b7 가중치 ${weight}` : '');
     const titleAttr = target
-      ? tipAttrs(bare, head, '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)')
+      ? tipAttrs(bare, bare,
+                 [target.sub, weight ? `가중치 ${weight}` : ''].filter(Boolean).join(' · '),
+                 '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)')
       : (title ? ` title="${escHtml(title)}"` : '');
     // 우클릭이 집을 좌표. 파생 칩(구도 콤보)과 `+n` 접힘 표시에는 안 붙인다.
     const tAttr = target
@@ -1528,14 +1593,14 @@ export function createInteractivePanel({
       const {weight, text} = weightedChip(item.raw);
       const label = SCENE_LABEL.get(item.slot) || item.slot;
       // 캐릭터 칩과 같은 규칙이다 - 머리(태그·가중치·축) / 설명 / 안내.
-      const head = `${text}${weight ? ` \u00b7 가중치 ${weight}` : ''} \u00b7 ${label}`;
-      const tail = item.locked
+      const src = `${label}${weight ? ` \u00b7 가중치 ${weight}` : ''}`;
+      const hint = item.locked
         ? '축 프리셋에서 나온 값입니다 \u00b7 축 버튼에서 바꾸면 따라 바뀝니다'
         : '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)'
-          + (weight ? '\n이 묶음은 통째로 지워집니다 \u00b7 쪼개려면 판을 눌러 텍스트로 고칩니다' : '');
+          + (weight ? ' \u00b7 묶음은 통째로 지워집니다' : '');
       return `<span class="ia-gchip${item.locked ? ' is-locked' : ''}" data-slot="${item.slot}"
         ${item.locked ? '' : `data-gw-slot="${item.slot}" data-gw-idx="${item.index}"`}
-        ${tipAttrs(text, head, tail)}>
+        ${tipAttrs(text, text, src, hint)}>
         ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}\u00d7</b>` : ''}
         <span class="ia-gchip-t">${escHtml(text)}</span>
         ${item.locked ? '' :
@@ -1561,9 +1626,9 @@ export function createInteractivePanel({
     const freeVisible = freeVisibleNow();
     const freeChips = (freeVisible ? freeTagList() : []).map((t, i) => {
       const {weight, text} = weightedChip(t);
-      const fhead = `${text}${weight ? ` \u00b7 가중치 ${weight}` : ''} \u00b7 직접 적은 것`;
+      const fsrc = `직접 적은 것${weight ? ` \u00b7 가중치 ${weight}` : ''}`;
       return `<span class="ia-gchip is-free" data-gw-free="${i}"
-        ${tipAttrs(text, fhead, '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)')}>
+        ${tipAttrs(text, text, fsrc, '우클릭 \u2014 가중치를 바꿉니다(휠로도 됩니다)')}>
         ${weight ? `<b class="ia-gchip-w">${escHtml(weight)}×</b>` : ''}
         <span class="ia-gchip-t">${escHtml(text)}</span>
         <button type="button" class="ia-gchip-x" data-gfree="${i}" aria-label="제거">×</button>
@@ -1723,11 +1788,7 @@ export function createInteractivePanel({
   }
 
   function bindGlobalEditor(host) {
-    // 칩에 마우스를 올리면 설명을 받아 둔다(캐릭터 칩과 같은 경로).
-    host.addEventListener('pointerover', event => {
-      const el = event.target.closest ? event.target.closest('[data-tipkey]') : null;
-      if (el) askTagDesc(el.dataset.tipkey);
-    });
+    bindChipTips(host);
     // 칩 우클릭 -> 가중치 편집. 왼클릭은 텍스트 모드 전환이라 자리가 없다.
     //
     // 리스너는 **칩이 아니라 상자**에 건다. 칩 줄은 `overflow-y: auto` 라 창이
@@ -2102,6 +2163,7 @@ export function createInteractivePanel({
       ? SCENE_SLOTS.map(sceneButtonHtml).join('') + compPresetBtnHtml()
         + reactiveToggleHtml() + compAppliedHtml()
       : '';
+    syncChipTip();              // 다시 그려 사라진 칩의 툴팁을 닫는다
     applyReactiveTip();
     watchResultTab();
     positionSceneFloat();
@@ -2152,10 +2214,7 @@ export function createInteractivePanel({
     // 캐릭터 슬롯 칩 우클릭 -> 가중치(씬 태그와 같은 사양, 사용자 지적 2026-08-11).
     // 위임이다 - 칩은 renderBlocks 마다 새로 만들어지므로 칩마다 걸면 새는다.
     blocksMount.querySelectorAll('.ia-block-chips').forEach(row => {
-      row.addEventListener('pointerover', event => {
-        const el = event.target.closest ? event.target.closest('[data-tipkey]') : null;
-        if (el) askTagDesc(el.dataset.tipkey);
-      });
+      bindChipTips(row);
       row.addEventListener('contextmenu', event => {
         const el = event.target.closest ? event.target.closest('[data-gwc-cid]') : null;
         if (!el) return;                     // 빈 곳은 브라우저 메뉴 그대로

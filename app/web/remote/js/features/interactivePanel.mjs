@@ -1128,7 +1128,15 @@ export function createInteractivePanel({
       const cp = event.target.closest('[data-comp-preset]');
       if (cp) {
         event.preventDefault();
-        if (miniOpen === 'comp') closeCompPopup(); else openMiniPopup('comp', cp);
+        if (miniOpen === 'comp') { closeCompPopup(); return; }
+        // **축은 혼자 쓴다**(사용자 지정 2026-08-11). 축을 바꾸면 파생 태그가
+        // 씬 태그 판을 통째로 바꾸는데, 텍스트 칸이 열린 채로 그러면 확정 순서가
+        // 꼬여 방금 켠 축이 도로 꺼졌다(Codex 2차). 슬롯 팝업과 나란히 떠서
+        // 화면도 겹쳤다. 어차피 포커스는 이 팝업으로 넘어오니 여기서 정리한다.
+        leaveEditingForComp();
+        // 위에서 renderBlocks 가 돌아 방금 누른 버튼은 이미 없어졌다 - 새로 찾는다.
+        const anchor = (sceneMount && sceneMount.querySelector('[data-comp-preset]')) || cp;
+        openMiniPopup('comp', anchor);
         return;
       }
       // 버튼 아래 칩 — 눌러서 바로 바꾼다. 팝업을 열지 않아도 손이 닿는다.
@@ -6075,6 +6083,14 @@ export function createInteractivePanel({
   }
 
   // 이름은 그대로 둔다 — 부르는 곳이 여럿이고 뜻도 그대로다(미니 팝업 닫기).
+  /** 축 프리셋을 열기 전에 하던 편집을 **끝낸다.** 텍스트 칸은 blur 로 확정하고
+   *  (leave() 가 commitGlobalText 까지 한다), 슬롯 팝업은 닫는다. */
+  function leaveEditingForComp() {
+    const ta = document.getElementById('iaGlobalText');
+    if (ta) ta.blur();
+    if (panelContext) closePanel();
+  }
+
   function closeCompPopup() {
     if (!miniOpen) return;
     // 가중치 휠이 걸어 둔 발화 차단을 여기서 푼다. 닫는 길이 여럿(확인·Esc·바깥

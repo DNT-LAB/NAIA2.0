@@ -119,8 +119,16 @@ class WildcardProcessor:
             if tag.startswith('$'):
                 instant_key = tag[1:].strip()  # $ 제거
                 instant_choice = None  # Wildcard Watch 기록용: 선택된 인스턴트 값
+                # 📌 고정(freeze)이 걸려 있으면 굴리지 않고 그 값을 쓴다.
+                # 예전에는 이 분기가 override 를 아예 안 봐서, $instant 는 고정을
+                # 걸어도 매번 다시 굴려졌다(백로그 C5). 파일 와일드카드는
+                # `_get_wildcard_line` 이 같은 일을 한다 - 규칙을 맞춘다.
+                frozen = self._consume_override(instant_key, context)
+                if frozen is not None and str(frozen).strip():
+                    instant_choice = str(frozen)
+                    produced = [t.strip() for t in instant_choice.split(',') if t.strip()]
                 # ":" 포함 여부 확인하여 필터링 적용
-                if ":" in instant_key:
+                elif ":" in instant_key:
                     parts = instant_key.split(":", 1)
                     group_name = parts[0]
                     filter_text = parts[1].lower() if len(parts) > 1 else ""

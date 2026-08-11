@@ -225,19 +225,128 @@ def scene_hash(globals_: dict[str, Any], chars: list[dict[str, Any]]) -> str:
 
     rating = g.get("rating") or {}
     if isinstance(rating, dict):
+        # 프론트가 **뽑힌 값으로 접어서** 보낸다(사용자 지정: 카드는 그 그림 그대로).
+        # 후보 목록을 그대로 세면 같은 Random 풀에서 나온 서로 다른 그림들이 한
+        # 해시가 되어 덮어쓴다(Codex 6차). mode 는 세지 않는다 - 접힌 뒤엔 항상
+        # single 이고, 세면 옛 기록과 갈라지기만 한다.
         picks = sorted(str(x).strip().lower() for x in (rating.get("picks") or []))
         # 'none'/빈 값은 아무것도 더하지 않는다 - Rating 을 안 쓴 기록의 해시를 지킨다.
         picks = [p for p in picks if p and p != "none"]
         if picks:
             flat.append("rating=" + _hash_esc(
-                json.dumps([str(rating.get("mode") or "single"), picks],
-                           ensure_ascii=False)))
+                json.dumps(picks, ensure_ascii=False)))
 
     # 캐릭터의 '상황' 부분. 사람 수와 순서도 그림을 바꾸므로 그대로 센다.
     if chars:
-        flat.append("chars=" + _hash_esc(snapshot_hash(chars)))
+        # **캐릭터별 Fast 는 빼고 센다.** 본문에는 담지만(사용자 지정 2026-08-11:
+        # 비싸지 않으니 기록은 해 두고 나중에 복원 기능을 붙일 수 있게) 지금은
+        # 복원하지 않는다. 해시는 '복원되는 것'만 봐야 한다 - 넣으면 Fast 한 글자에
+        # 같은 씬이 여러 장으로 갈린다.
+        no_fast = [{k: v for k, v in (c or {}).items() if k != "fast"} for c in chars]
+        flat.append("chars=" + _hash_esc(snapshot_hash(no_fast)))
+        # **배치는 여기서 따로 센다.** `snapshot_hash` 는 pos 를 일부러 뺀다(캐릭터
+        # 에셋에서는 같은 캐릭터가 어디 서 있든 한 장이어야 한다). 하지만 씬에서는
+        # 다인원 배치가 곧 그 이벤트다 - 위임만 하면 배치만 다른 두 씬이 한 장으로
+        # 뭉개져 서로를 덮어쓴다(Codex 6차 설계 인스펙션).
+        flat.append("pos=" + ",".join(
+            _hash_esc(str(c.get("pos") or "")) for c in chars))
 
     return hashlib.sha1("|".join(flat).encode("utf-8")).hexdigest()[:16]
+
+
+def _str_list(value: Any) -> list[str]:
+    """리스트가 아니면 버린다. 문자열로 못박고 빈 값을 뺀다."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(x) for x in value if str(x).strip()]
+
+
+def normalize_scene_globals(value: Any) -> dict[str, Any]:
+    """씬 값의 모양을 못박는다.
+
+    본문은 파싱만 되면 무엇이든 돌아온다(스키마 검증이 없다). 복원 직전에
+    임시 상태로 정규화해 두지 않으면, 옛 기록이나 손편집이 반쯤 적용된 작업판을
+    남긴다(Codex 6차 설계 인스펙션). 쓰기와 읽기 양쪽에서 같은 함수를 지난다.
+
+    **모르는 키는 버린다.** 씬은 이 여섯 조각이 전부다.
+    """
+    g = value if isinstance(value, dict) else {}
+    slots = g.get("slots")
+    comp = g.get("composition")
+    rating = g.get("rating")
+    picks = _str_list((rating or {}).get("picks")) if isinstance(rating, dict) else []
+    return {
+        "slots": ({str(k): _str_list(v) for k, v in slots.items()}
+                  if isinstance(slots, dict) else {}),
+        # 구도 콤보는 축 이름과 값이 프론트 소관이라 값 종류를 못박지 않는다.
+        # 다만 dict 가 아니면 버린다 - 그래야 복원이 spread 로 안전하게 합쳐진다.
+        "composition": dict(comp) if isinstance(comp, dict) else {},
+        "composition_tags": _str_list(g.get("composition_tags")),
+        "free_text": str(g.get("free_text") or ""),
+        # 프론트가 뽑힌 값으로 접어서 보낸다 - mode 는 항상 single 로 둔다.
+        "rating": {"mode": "single", "picks": picks},
+        "fast_negative": str(g.get("fast_negative") or ""),
+    }
+
+
+def normalize_scene_chars(value: Any) -> list[dict[str, Any]]:
+    """씬이 담는 캐릭터 '상황'의 모양을 못박는다.
+
+    정체성(이름·프리셋)은 프론트가 이미 걷어내고 보내지만, 여기서도 **담지 않는다** -
+    옛 기록이나 손편집으로 들어와도 씬이 캐릭터를 바꾸는 일이 없게 한다.
+    `fast` 는 담는다(사용자 지정: 기록만 해 두고 복원은 나중에).
+    """
+    rows = value if isinstance(value, (list, tuple)) else []
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        c = row if isinstance(row, dict) else {}
+        fields = c.get("fields")
+        neg = c.get("neg")
+        fast = c.get("fast")
+        out.append({
+            "gender": "male" if str(c.get("gender") or "") == "male" else "female",
+            "pos": str(c.get("pos") or ""),
+            "fields": ({str(k): _str_list(v) for k, v in fields.items()}
+                       if isinstance(fields, dict) else {}),
+            "neg": ({str(k): _str_list(v) for k, v in neg.items()}
+                    if isinstance(neg, dict) else {}),
+            "alt": _str_list(c.get("alt")),
+            "gaze": _str_list(c.get("gaze")),
+            "fast": {"p": str((fast or {}).get("p") or ""),
+                     "n": str((fast or {}).get("n") or "")} if isinstance(fast, dict)
+                    else {"p": "", "n": ""},
+        })
+    return out
+
+
+def scene_is_meaningful(globals_: dict[str, Any], chars: list[dict[str, Any]]) -> bool:
+    """기록할 값어치가 있는 씬인가(사용자 지정 2026-08-11).
+
+    **구도 축과 Rating 만으로는 값어치가 없다.** 사용자 표현: "축만 들어있는
+    데이터 같은건 쓸모가 없을 가능성이 높습니다". 구도는 슬라이더 기본값이나
+    한 번의 클릭으로도 채워지므로, 그것만 든 카드가 쌓이면 목록이 잡음이 된다.
+
+    값어치의 근거는 **사용자가 실제로 넣은 태그·글**이다:
+      - 씬 슬롯에 태그가 하나라도 있거나
+      - 자유 입력이나 전역 추가 네거티브에 글이 있거나
+      - 캐릭터의 '상황'(의상/자세/표정/사물/구도/ALT/시선/네거티브)에 값이 있거나
+      - 캐릭터별 Fast 에 글이 있다
+    """
+    g = normalize_scene_globals(globals_)
+    if any(v for v in g["slots"].values()):
+        return True
+    if g["free_text"].strip() or g["fast_negative"].strip():
+        return True
+    for c in normalize_scene_chars(chars):
+        if any(v for v in c["fields"].values()):
+            return True
+        if any(v for v in c["neg"].values()):
+            return True
+        if c["alt"] or c["gaze"]:
+            return True
+        if c["fast"]["p"].strip() or c["fast"]["n"].strip():
+            return True
+    return False
 
 
 def scene_summary(globals_: dict[str, Any], chars: list[dict[str, Any]]) -> str:
@@ -647,24 +756,40 @@ class InteractiveAssetsService:
         })
 
     def load_scene_body(self, scene_id: str) -> dict[str, Any] | None:
+        """씬 본문. **읽을 때도 정규화한다** — 옛 기록이나 손편집이 반쯤 적용된
+        작업판을 남기지 않도록, 프론트에 나가기 전에 모양을 못박는다."""
         p = self._scene_body_path(scene_id)
         if not p.exists():
             return None
         try:
-            return json.loads(p.read_text(encoding="utf-8"))
+            doc = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             self._quarantine(p)
             return None
+        if not isinstance(doc, dict):
+            self._quarantine(p)
+            return None
+        return {
+            "id": str(doc.get("id") or scene_id),
+            "created_at": int(doc.get("created_at") or 0),
+            "globals": normalize_scene_globals(doc.get("globals")),
+            "chars": normalize_scene_chars(doc.get("chars")),
+        }
 
     def record_scene(self, globals_: dict[str, Any],
                      chars: list[dict[str, Any]]) -> dict[str, Any] | None:
         """씬 하나를 기록한다. 같은 씬이면 새로 쌓지 않고 시각만 올린다.
 
-        `chars` 는 **프론트가 정체성을 걷어낸 뒤** 준 것이다 - 여기서 다시 거르지
-        않는다(무엇을 복원하는가의 정의는 프론트 한 곳).
+        무엇을 복원하는가의 정의는 프론트에 있다 - `chars` 는 이미 정체성이
+        걷어내진 채 온다. 여기서는 **모양만** 못박는다(정규화).
+
+        **값어치가 없으면 아무것도 하지 않고 None 을 준다**(사용자 지정
+        2026-08-11). 구도 축만 든 카드가 쌓이면 목록이 잡음이 된다.
         """
-        g = globals_ if isinstance(globals_, dict) else {}
-        rows_in = list(chars or [])
+        g = normalize_scene_globals(globals_)
+        rows_in = normalize_scene_chars(chars)
+        if not scene_is_meaningful(g, rows_in):
+            return None
         digest = scene_hash(g, rows_in)
         with self._lock:
             rows = self.load_scene_index()

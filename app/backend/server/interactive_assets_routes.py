@@ -220,6 +220,10 @@ def register_interactive_assets_routes(
                 globals_, chars)
         except Exception as exc:
             return JSONResponse({"error": f"record failed: {exc}"}, status_code=500)
+        # 값어치가 없으면 `scene: null` 이다(오류가 아니다). 프론트는 이때
+        # `interactive_scene_id` 를 싣지 않는다 - 붙일 카드가 없으므로 썸네일도 없다.
+        if meta is None:
+            return {"ok": True, "scene": None, "skipped": "empty"}
         return {"ok": True, "scene": meta}
 
     @app.post("/api/interactive-assets/scene/delete")

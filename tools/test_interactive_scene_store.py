@@ -117,7 +117,69 @@ def main() -> int:
         check("한도를 넘지 않는다", len(rows) <= SNAPSHOT_LIMIT, True)
         check("즐겨찾기는 살아남는다", any(r["id"] == keep for r in rows), True)
 
-        # 10. 인덱스가 깨져도 본문에서 되짚는다
+        # 10. 값어치 없는 씬은 기록하지 않는다 (사용자 지정)
+        svc2 = InteractiveAssetsService(FakeContext(Path(tempfile.mkdtemp())))
+        empty_g = {"slots": {"background": [], "fx": []},
+                   "composition": {}, "composition_tags": [],
+                   "free_text": "", "rating": {"mode": "single", "picks": ["none"]},
+                   "fast_negative": ""}
+        check("아무것도 없으면 기록 안 함", svc2.record_scene(empty_g, []), None)
+        # 구도 축만 든 것도 값어치가 없다 - 사용자 표현: "축만 들어있는 데이터"
+        axis_only = dict(empty_g, composition={"x": 3, "y": 1, "z": 0},
+                         composition_tags=["from above", "wide shot"])
+        check("구도 축만 있으면 기록 안 함", svc2.record_scene(axis_only, []), None)
+        check("Rating 만 있어도 기록 안 함",
+              svc2.record_scene(dict(empty_g, rating={"mode": "single",
+                                                      "picks": ["explicit"]}), []), None)
+        check("빈 씬은 목록에 안 남는다", len(svc2.load_scene_index()), 0)
+        # 태그가 하나라도 있으면 기록한다
+        check("씬 태그가 있으면 기록",
+              svc2.record_scene(dict(empty_g, slots={"background": ["forest"]}), [])
+              is not None, True)
+        check("자유 입력만 있어도 기록",
+              svc2.record_scene(dict(empty_g, free_text="masterpiece"), []) is not None, True)
+        check("캐릭터 상황만 있어도 기록",
+              svc2.record_scene(empty_g, situation("sitting")) is not None, True)
+        check("캐릭터별 Fast 만 있어도 기록",
+              svc2.record_scene(empty_g, [{"fields": {}, "neg": {}, "gender": "female",
+                                           "alt": [], "gaze": [],
+                                           "fast": {"p": "extra tag", "n": ""}}])
+              is not None, True)
+
+        # 11. Fast 는 담되 해시에는 넣지 않는다 (복원하지 않으므로)
+        svc3 = InteractiveAssetsService(FakeContext(Path(tempfile.mkdtemp())))
+        base = situation("sitting")
+        with_fast = [dict(base[0], fast={"p": "extra", "n": "no extra"})]
+        m1 = svc3.record_scene(globals_for("forest"), base)
+        m2 = svc3.record_scene(globals_for("forest"), with_fast)
+        check("Fast 만 다르면 같은 카드", m2["id"], m1["id"])
+        body3 = svc3.load_scene_body(m1["id"])
+        check("그래도 Fast 는 본문에 남는다",
+              body3["chars"][0]["fast"], {"p": "extra", "n": "no extra"})
+
+        # 12. 본문 정규화 — 손편집/옛 기록이 반쯤 적용되지 않게
+        svc4 = InteractiveAssetsService(FakeContext(Path(tempfile.mkdtemp())))
+        m4 = svc4.record_scene(
+            {"slots": {"background": ["forest", "", 7]}, "composition": "깨진값",
+             "free_text": None, "rating": {"mode": "random", "picks": ["safe", ""]},
+             "fast_negative": 12, "모르는키": "버려야 한다"},
+            [{"fields": {"자세": ["sitting", None]}, "gender": "정체불명",
+              "name": "따라오면 안 된다", "preset": {"work": "x"},
+              "neg": "깨진값", "alt": None, "fast": "깨진값"}])
+        b4 = svc4.load_scene_body(m4["id"])
+        check("빈/숫자 태그 정리", b4["globals"]["slots"]["background"], ["forest", "7"])
+        check("깨진 composition 은 빈 dict", b4["globals"]["composition"], {})
+        check("모르는 키는 버린다", "모르는키" in b4["globals"], False)
+        check("rating 은 single 로 접힌다", b4["globals"]["rating"],
+              {"mode": "single", "picks": ["safe"]})
+        check("fast_negative 는 문자열", b4["globals"]["fast_negative"], "12")
+        check("성별은 두 값 중 하나", b4["chars"][0]["gender"], "female")
+        check("이름은 본문에 안 담긴다", "name" in b4["chars"][0], False)
+        check("프리셋도 안 담긴다", "preset" in b4["chars"][0], False)
+        check("깨진 neg 는 빈 dict", b4["chars"][0]["neg"], {})
+        check("깨진 fast 는 빈 값", b4["chars"][0]["fast"], {"p": "", "n": ""})
+
+        # 13. 인덱스가 깨져도 본문에서 되짚는다
         idx = root / "interactive_scene" / "index.json"
         idx.write_text("{ broken", encoding="utf-8")
         rebuilt = svc.load_scene_index()

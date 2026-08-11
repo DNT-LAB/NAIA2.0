@@ -20549,31 +20549,25 @@ body.detached-module .mod-grid-3 {
 /* 태그 하나만 빼는 [x]. 평소엔 흐리게 두고 칩에 올렸을 때 또렷해진다 —
    항상 진하면 칩 6개가 붙은 줄이 x 로 시끄러워진다. */
 /* ── 슬롯별 네거티브 칸 ──────────────────────────────────────────────
-   비어 있으면 **평소엔 보이지 않는다**(사용자 지정 2026-08-11). 슬롯 12칸에 빈
-   상자가 하나씩 더 붙으면 목록이 두 배로 길어진다. 슬롯에 마우스를 올리면 얇게
-   나타나고, 값이 하나라도 들어가면 전폭으로 늘어나 붉게 남는다. */
+   **값이 있거나, 그 슬롯을 눌렀을 때만** 보인다(사용자 지정 2026-08-11).
+   처음에는 호버로 열었는데, 목록을 훑기만 해도 빈 칸이 튀어나와 줄이 밀렸다.
+
+   숨길 때는 `display: none` 이다. `max-height: 0` 으로 접으면 grid 행 자리는
+   그대로 남아 슬롯 사이가 벌어지고, 안쪽 글자가 삐져나온다(사용자 지적). */
 .ia-neg {
   /* 부모(.ia-sub-block)는 3열 grid 다 - 그냥 두면 세 번째 칸에 끼어 오른쪽에
      붙는다(실측). **줄 전체를 차지**하게 못박는다(사용자 지정: 스트레치). */
   grid-column: 1 / -1;
-  display: flex; align-items: center; gap: 5px;
-  margin: 0; padding: 0 6px;
-  max-height: 0; opacity: 0; overflow: hidden;
-  border: 1px solid transparent; border-radius: 5px;
-  transition: max-height 0.14s ease, opacity 0.14s ease,
-              background 0.14s ease, border-color 0.14s ease;
+  display: none; align-items: center; gap: 5px;
+  margin: 5px 0 0; padding: 3px 6px; min-width: 0;
+  border: 1px solid rgba(229,115,107,0.38); border-radius: 5px;
+  background: rgba(229,115,107,0.10);
 }
-/* 호버 = 넣을 수 있다는 신호. 얇게만 연다. */
-.ia-sub-block:hover > .ia-neg {
-  max-height: 26px; opacity: 0.75; margin-bottom: 5px;
-  background: rgba(229,115,107,0.06); border-color: rgba(229,115,107,0.22);
+.ia-neg.has-neg, .ia-neg.is-open, .ia-neg.is-editing { display: flex; }
+/* 눌러서 열렸을 뿐 아직 값이 없으면 옅게 — '여기 넣을 수 있다' 까지만 알린다. */
+.ia-neg.is-open:not(.has-neg):not(.is-editing) {
+  background: rgba(229,115,107,0.05); border-color: rgba(229,115,107,0.22);
 }
-/* 값이 있으면 항상 보인다 — 전폭·붉은 띠. */
-.ia-neg.has-neg, .ia-neg.is-editing {
-  max-height: 200px; opacity: 1; margin-bottom: 5px;
-  background: rgba(229,115,107,0.10); border-color: rgba(229,115,107,0.38);
-}
-.ia-sub-block:hover > .ia-neg.has-neg { opacity: 1; }
 .ia-neg-mark {
   flex: 0 0 auto; font-size: 9px; line-height: 1;
   color: #e5736b; opacity: 0.85;

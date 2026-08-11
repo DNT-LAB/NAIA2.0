@@ -767,10 +767,20 @@ export function createInteractivePanel({
    *  **비어 있으면 평소엔 안 보인다**(사용자 지정 2026-08-11) - 슬롯 12칸에 빈 상자가
    *  하나씩 더 붙으면 목록이 두 배로 길어진다. 슬롯에 마우스를 올리면 얇게 나타나고,
    *  값이 하나라도 있으면 전폭으로 늘어나 붉게 남는다. */
+  /** 슬롯 한 칸의 네거티브 행.
+   *
+   *  **개수 배지(.ia-block-meta) 뒤에 놓아야 한다.** 앞에 두면 이 행의
+   *  `grid-column: 1/-1` 이 줄을 통째로 먹어 배지가 다음 줄 왼쪽으로 떨어진다
+   *  (사용자 지적 2026-08-11: 줄 넘김에 신경써야 할 것 같아요). */
   function negRowHtml(c, meta) {
     const tags = negOf(c, meta.key);
     const editing = isEditing('char', c.id, meta.key, true);
-    const cls = 'ia-neg' + (tags.length ? ' has-neg' : '') + (editing ? ' is-editing' : '');
+    // **그 슬롯을 누르고 있는 동안**에만 빈 칸이 보인다(사용자 지적 2026-08-11).
+    // 호버로 열었더니 목록을 훑기만 해도 칸이 튀어나와 줄이 밀렸다.
+    const slotOpen = !!(panelContext && panelContext.kind === 'char'
+                        && panelContext.cid === c.id && panelContext.sub === meta.key);
+    const cls = 'ia-neg' + (tags.length ? ' has-neg' : '')
+      + (slotOpen ? ' is-open' : '') + (editing ? ' is-editing' : '');
     const body = editing
       ? `<textarea class="ia-neg-input" data-neg-input="1" rows="1" spellcheck="false"
            placeholder="이 슬롯에서 뺄 태그">${escHtml(tags.join(', '))}</textarea>`
@@ -974,8 +984,8 @@ export function createInteractivePanel({
           </div>
           ${slotBody(editing, tags, {del: true, owner: {cid: c.id, sub: s.key},
             emphasis: s.key === CHAR_TAG_SLOT ? nameEmphasis(c) : null})}
-          ${negRowHtml(c, s)}
           <div class="ia-block-meta">${meta}</div>
+          ${negRowHtml(c, s)}
         </div>`;
       }).join('');
       const enabled = c.state === 'active';

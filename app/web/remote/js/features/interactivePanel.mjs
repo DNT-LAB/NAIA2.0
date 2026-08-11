@@ -2168,12 +2168,15 @@ export function createInteractivePanel({
       ? SCENE_SLOTS.map(sceneButtonHtml).join('') + compPresetBtnHtml()
         + reactiveToggleHtml() + compAppliedHtml()
       : '';
-    syncChipTip();              // 다시 그려 사라진 칩의 툴팁을 닫는다
     applyReactiveTip();
     watchResultTab();
     positionSceneFloat();
     renderFast();               // 씬 플로트 밑에 붙는 빠른 입력 상자
     syncGlobalEditor();
+    // **하단 편집기까지 그린 뒤에** 유령 툴팁을 정리한다. 먼저 부르면 씬 태그
+    // 칩은 아직 살아 있어 통과했다가, 바로 다음 줄에서 판이 갈려 주인만 떨어져
+    // 나간다(Codex 3차 지적 - 실측으로는 다음 렌더가 곧 치웠지만 순서를 맞춘다).
+    syncChipTip();
     // 초기 렌더는 `blocksMount.hidden` 이 아직 true 인 시점에 돌 수 있다(실측: 새로고침
     // 하면 버튼은 생기는데 플로트가 안 열렸다). 레이아웃이 잡힌 다음 프레임에 한 번 더
     // 판정해 순서 의존을 없앤다.
@@ -4850,8 +4853,12 @@ export function createInteractivePanel({
   function parseSlotInput(value) {
     const out = [];
     const seen = new Set();
-    for (const part of String(value || '').split(/[,\n]/)) {
-      const t = part.trim();
+    // **쉼표로 그냥 자르지 않는다.** `0.5::a, b ::` 는 묶음 하나인데 쉼표마다
+    // 자르면 `0.5::a` 와 `b ::` 로 부서진다(Codex 3차 · 실측 재현). 캐릭터
+    // 슬롯에도 가중치를 걸 수 있게 되면서 이 칸에 묶음이 들어온다 - 씬 태그 판이
+    // 쓰는 파서와 같은 규칙을 쓴다.
+    for (const part of parseGlobalInput(value)) {
+      const t = String(part).trim();
       if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); out.push(t); }
     }
     return out;
@@ -6285,7 +6292,7 @@ export function createInteractivePanel({
     if (panelContext) closePanel();
   }
 
-  function closeCompPopup() {
+  function closeCompPopup(opts = {}) {
     if (!miniOpen) return;
     // 가중치 휠이 걸어 둔 발화 차단을 여기서 푼다. 닫는 길이 여럿(확인·Esc·바깥
     // 클릭)이라 한 곳에서 처리해야 한다 — 하나라도 새면 반응형 생성이 통째로
@@ -6298,7 +6305,12 @@ export function createInteractivePanel({
     miniAnchor = null;
     if (miniPopup) { miniPopup.hidden = true; miniPopup.innerHTML = ''; }
     document.removeEventListener('mousedown', onCompOutside, true);
-    renderBlocks();
+    // **바깥 클릭으로 닫을 때는 한 박자 미룬다.** 이 경로는 capture 단계
+    // mousedown 이라, 여기서 바로 다시 그리면 뒤이어 올 click 의 대상(칩·[x])이
+    // 이미 사라져 첫 클릭이 통째로 먹힌다(Codex 3차 · 실측: [x] 를 눌러도
+    // 태그가 안 지워지고 창만 닫혔다).
+    if (opts.defer) setTimeout(renderBlocks, 0);
+    else renderBlocks();
   }
 
   function onCompOutside(event) {
@@ -6311,12 +6323,13 @@ export function createInteractivePanel({
     // 왼클릭은 텍스트 모드로 들어가는 길이다 - 예외가 버튼을 안 가리는 바람에
     // 칩을 눌러 편집을 시작해도 가중치 창이 남아 있었다(사용자 지적 2026-08-11).
     if (t && event.button === 2 && t.closest('[data-gw-slot], [data-gw-free], [data-gwc-cid]')) return;
+    // 아래 closeCompPopup 은 **미뤄서** 다시 그린다 - 지금 그리면 이 클릭이 죽는다.
     // **드롭다운 목록은 팝업 밖에 산다.** 앱이 네이티브 select 를 숨기고
     // (`native-select-hidden`) 커스텀 위젯으로 바꾸는데, 그 목록(`custom-select-menu`)
     // 은 `document.body` 직계다(customSelects.mjs). 그래서 항목을 고르는 순간
     // '바깥 클릭' 으로 잡혀 팝업이 닫혔다 — 값은 안 바뀌고 창만 사라졌다.
     if (t && t.closest('.custom-select-menu, .custom-select')) return;
-    closeCompPopup();
+    closeCompPopup({defer: true});
   }
 
   /** 버튼 아래에 붙인다. 오른쪽으로 넘치면 화면 안으로 민다. */

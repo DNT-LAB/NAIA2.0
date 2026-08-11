@@ -426,11 +426,14 @@ export function createTagAssistController({
 
         // 가로: **가운데로 몬다**(사용자 지정 2026-08-11). 왼쪽 끝에 두면 에셋
         // 버튼(C1/ASSETS)을 덮고, 오른쪽 끝은 앞으로 씬 버튼이 쓸 자리다.
+        //
+        // 기준은 **씬 태그 판**이다. 뷰어(.viewer-wrapper)로 재면 오른쪽 히스토리
+        // 레일까지 폭에 들어가 그만큼 오른쪽으로 쏠린다(사용자 지적) - 카드가
+        // 딸린 곳이 이 판이니 눈도 이 판과 견준다.
         const w = Math.min(measured.width || wCeil, wCeil);
-        const mid = viewerRect
-          ? viewerRect.left + viewerRect.width / 2 : viewportWidth / 2;
-        const maxLeft = (viewerRect ? viewerRect.right : viewportWidth) - w - safeGap;
-        const minLeft = (viewerRect ? viewerRect.left : 0) + safeGap;
+        const mid = sceneRect.left + sceneRect.width / 2;
+        const maxLeft = sceneRect.right - w - safeGap;
+        const minLeft = sceneRect.left + safeGap;
         const left = Math.max(minLeft, Math.min(mid - w / 2, maxLeft));
         tagTooltip.style.setProperty('--tag-tooltip-top', Math.round(top) + 'px');
         tagTooltip.style.setProperty('--tag-tooltip-max-height', Math.round(maxHeight) + 'px');

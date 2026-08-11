@@ -5,6 +5,12 @@
     GET  /api/interactive-assets/snapshot         조합 본문(복구용)
     GET  /api/interactive-assets/snapshot/thumb   384px WEBP
     POST /api/interactive-assets/snapshot         조합 기록(프론트가 조합 변경 시 호출)
+    POST /api/interactive-assets/snapshot/delete  조합 삭제
+    GET  /api/interactive-assets/scenes           씬(이벤트) 목록
+    GET  /api/interactive-assets/scene            씬 본문(복구용)
+    GET  /api/interactive-assets/scene/thumb      384px WEBP
+    POST /api/interactive-assets/scene            씬 기록
+    POST /api/interactive-assets/scene/delete     씬 삭제
     POST /api/interactive-assets/favorite         즐겨찾기 토글
 
 목록은 **본문을 읽지 않는다** — 인덱스의 `summary` 로 검색이 되도록 만들었다.
@@ -129,6 +135,105 @@ def register_interactive_assets_routes(
         try:
             removed = await run_in_thread(
                 interactive_assets_service(session_context).delete_snapshot, snapshot_id)
+        except Exception as exc:
+            return JSONResponse({"error": f"delete failed: {exc}"}, status_code=500)
+        return {"ok": True, "removed": bool(removed)}
+
+    # ── 씬(이벤트) ─────────────────────────────────────────────────────────
+    # 캐릭터 쪽과 같은 모양이되 **단위가 하나**다: 생성 1회 = 씬 1장.
+    # `origin`(known/original) 은 캐릭터 태그 판정이라 씬에는 없다.
+    @app.get("/api/interactive-assets/scenes")
+    async def api_interactive_scenes(query: str = "", favorite: bool = False,
+                                     limit: int = 200):
+        def _payload() -> dict[str, Any]:
+            svc = interactive_assets_service(session_context)
+            rows = list(reversed(svc.load_scene_index()))
+            pinned = {f.get("ref") for f in svc.load_favorites()
+                      if f.get("type") == "scene"}
+            q = str(query or "").strip().lower()
+            if q:
+                rows = [r for r in rows if q in str(r.get("summary", "")).lower()]
+            if favorite:
+                rows = [r for r in rows if r.get("id") in pinned]
+            rows = rows[: max(1, min(int(limit or 200), 500))]
+            for r in rows:
+                r["favorite"] = r.get("id") in pinned
+            return {"count": len(rows), "scenes": rows}
+
+        try:
+            return await run_in_thread(_payload)
+        except Exception as exc:
+            return JSONResponse({"error": f"scenes failed: {exc}"}, status_code=500)
+
+    @app.get("/api/interactive-assets/scene")
+    async def api_interactive_scene(id: str = ""):
+        """씬 본문 — 씬 값 + 캐릭터의 '상황'(정체성은 프론트가 이미 걷어냈다)."""
+        try:
+            body = await run_in_thread(
+                interactive_assets_service(session_context).load_scene_body,
+                str(id or ""))
+        except Exception as exc:
+            return JSONResponse({"error": f"scene failed: {exc}"}, status_code=500)
+        if body is None:
+            return JSONResponse({"error": "scene not found"}, status_code=404)
+        return body
+
+    @app.get("/api/interactive-assets/scene/thumb")
+    async def api_interactive_scene_thumb(id: str = ""):
+        def _read() -> bytes | None:
+            svc = interactive_assets_service(session_context)
+            path = svc.scene_root / f"{str(id or '')}.webp"
+            return path.read_bytes() if path.exists() else None
+
+        try:
+            raw = await run_in_thread(_read)
+        except Exception as exc:
+            return JSONResponse({"error": f"thumb failed: {exc}"}, status_code=500)
+        if raw is None:
+            return JSONResponse({"error": "thumb not found"}, status_code=404)
+        return Response(content=raw, media_type="image/webp",
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.post("/api/interactive-assets/scene")
+    async def api_interactive_scene_record(req: Request):
+        """씬 하나를 남긴다. 같은 씬이면 새로 쌓지 않고 갱신한다.
+
+        `chars` 는 **정체성을 걷어낸 뒤** 온다 — 무엇을 복원하는가의 정의는
+        프론트 한 곳에 둔다(백엔드가 슬롯 이름을 또 알면 축이 바뀔 때 갈라진다).
+        캐릭터가 없는 씬(배경만)도 유효하므로 빈 목록을 거부하지 않는다.
+        """
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        globals_ = payload.get("globals")
+        if not isinstance(globals_, dict):
+            return JSONResponse({"error": "globals required"}, status_code=400)
+        chars = payload.get("chars")
+        if not isinstance(chars, list):
+            chars = []
+        try:
+            meta = await run_in_thread(
+                interactive_assets_service(session_context).record_scene,
+                globals_, chars)
+        except Exception as exc:
+            return JSONResponse({"error": f"record failed: {exc}"}, status_code=500)
+        return {"ok": True, "scene": meta}
+
+    @app.post("/api/interactive-assets/scene/delete")
+    async def api_interactive_scene_delete(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        scene_id = str((payload or {}).get("id") or "")
+        if not scene_id:
+            return JSONResponse({"error": "id required"}, status_code=400)
+        try:
+            removed = await run_in_thread(
+                interactive_assets_service(session_context).delete_scene, scene_id)
         except Exception as exc:
             return JSONResponse({"error": f"delete failed: {exc}"}, status_code=500)
         return {"ok": True, "removed": bool(removed)}

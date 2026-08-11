@@ -75,6 +75,10 @@ from pathlib import Path
 from typing import Any
 
 SNAPSHOT_DIR_NAME = "interactive_snapshot"
+# 씬(=이벤트) 기록. 캐릭터 스냅샷과 **다른 트리**에 둔다 - 단위가 다르다
+# (생성 1회 = 캐릭터 N장 / 씬 1장). 같은 트리에 섞으면 목록·프루닝·복구가 전부
+# 두 종류를 구분해야 한다.
+SCENE_DIR_NAME = "interactive_scene"
 FAVORITE_DIR_NAME = "interactive_favorite"
 INDEX_NAME = "index.json"
 FAVORITE_NAME = "favorites.json"
@@ -86,7 +90,7 @@ SUMMARY_MAX = 120
 
 # 즐겨찾기가 가리킬 수 있는 것. 실체를 복사하지 않고 참조만 담는다 —
 # 원본이 지워지면 목록에서 빠질 뿐 반쪽이 남지 않는다.
-FAVORITE_TYPES = ("snapshot", "asset", "character")
+FAVORITE_TYPES = ("snapshot", "asset", "character", "scene")
 
 
 def _now() -> int:
@@ -185,6 +189,76 @@ def snapshot_summary(chars: list[dict[str, Any]]) -> str:
         bits.append(", ".join([b for b in [name] if b] + rest[:4]))
     text = " / ".join(b for b in bits if b)
     return text[:SUMMARY_MAX]
+
+
+def scene_hash(globals_: dict[str, Any], chars: list[dict[str, Any]]) -> str:
+    """씬(=이벤트) 하나의 중복 판정 키.
+
+    **복원이 실제로 적용하는 것만 본다.** 그래야 "되돌리면 똑같아지는" 두 기록이
+    한 장으로 모인다. 캐릭터 쪽은 프론트가 이미 정체성(캐릭터·머리·눈얼굴·신체·
+    종족)을 걷어낸 뒤 보낸다 - 무엇을 복원할지의 정의는 프론트 한 곳에만 둔다
+    (백엔드가 슬롯 이름을 또 알면 축이 바뀔 때 조용히 갈라진다).
+
+    씬 값은 `getSnapshotGlobals()` 가 준다: 씬 슬롯 8칸 · 구도 콤보 · 자유 입력 ·
+    Rating · 전역 추가 네거티브. 전부 그림에 나가는 값이라 전부 센다.
+    구분자 이스케이프는 `snapshot_hash` 와 같은 이유다.
+    """
+    g = globals_ if isinstance(globals_, dict) else {}
+    flat: list[str] = []
+
+    slots = g.get("slots") or {}
+    if isinstance(slots, dict):
+        for k in sorted(slots):
+            vals = sorted(_hash_esc(str(x).strip().lower()) for x in (slots.get(k) or []))
+            flat.append(_hash_esc(k) + "=" + ",".join(vals))
+
+    comp = g.get("composition") or {}
+    if isinstance(comp, dict):
+        flat.append("comp=" + _hash_esc(
+            json.dumps({str(k): comp.get(k) for k in sorted(comp)},
+                       ensure_ascii=False, sort_keys=True, default=str)))
+
+    for key in ("free_text", "fast_negative"):
+        text = str(g.get(key) or "").strip().lower()
+        if text:
+            flat.append(key + "=" + _hash_esc(text))
+
+    rating = g.get("rating") or {}
+    if isinstance(rating, dict):
+        picks = sorted(str(x).strip().lower() for x in (rating.get("picks") or []))
+        # 'none'/빈 값은 아무것도 더하지 않는다 - Rating 을 안 쓴 기록의 해시를 지킨다.
+        picks = [p for p in picks if p and p != "none"]
+        if picks:
+            flat.append("rating=" + _hash_esc(
+                json.dumps([str(rating.get("mode") or "single"), picks],
+                           ensure_ascii=False)))
+
+    # 캐릭터의 '상황' 부분. 사람 수와 순서도 그림을 바꾸므로 그대로 센다.
+    if chars:
+        flat.append("chars=" + _hash_esc(snapshot_hash(chars)))
+
+    return hashlib.sha1("|".join(flat).encode("utf-8")).hexdigest()[:16]
+
+
+def scene_summary(globals_: dict[str, Any], chars: list[dict[str, Any]]) -> str:
+    """씬 카드의 한 줄. 씬 태그를 앞에 두고 모자라면 캐릭터 상황으로 채운다."""
+    g = globals_ if isinstance(globals_, dict) else {}
+    bits: list[str] = []
+    slots = g.get("slots") or {}
+    if isinstance(slots, dict):
+        for k in slots:
+            bits.extend(str(x) for x in (slots.get(k) or []) if str(x).strip())
+    for tag in (g.get("composition_tags") or []):
+        if str(tag).strip():
+            bits.append(str(tag))
+    if len(bits) < 4:
+        for c in chars or []:
+            fields = c.get("fields") or {}
+            bits.extend(x for v in fields.values() for x in (v or []))
+    free = str(g.get("free_text") or "").strip()
+    if free:
+        bits.append(free)
+    return ", ".join(bits)[:SUMMARY_MAX]
 
 
 class InteractiveAssetsService:
@@ -510,9 +584,203 @@ class InteractiveAssetsService:
             self._body_path(sid).unlink(missing_ok=True)
         self._pending_delete = []
 
+    # ── 씬(=이벤트) ─────────────────────────────────────────────────────────
+    #
+    # 캐릭터 스냅샷과 **단위가 다르다**: 생성 1회 = 캐릭터 N장이지만 씬은 1장이다.
+    # 본문은 자기 완결이다 - 캐릭터 쪽 id 를 참조만 하면 그쪽이 프루닝될 때
+    # 씬 카드가 반쪽이 된다(참조 무결성을 지킬 방법이 없다). 대신 프론트가
+    # 정체성을 걷어낸 뒤 보내므로 캐릭터가 통째로 복제되지는 않는다.
+    @property
+    def scene_root(self) -> Path:
+        return self._context._save_path(SCENE_DIR_NAME)
+
+    def _scene_index_path(self) -> Path:
+        return self.scene_root / INDEX_NAME
+
+    def _scene_body_path(self, scene_id: str) -> Path:
+        return self.scene_root / f"{scene_id}.json"
+
+    def load_scene_index(self) -> list[dict[str, Any]]:
+        """씬 메타 목록. 손상 처리는 캐릭터 쪽과 같은 규약이다."""
+        p = self._scene_index_path()
+        if not p.exists():
+            return []
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            rows = doc.get("scenes") if isinstance(doc, dict) else doc
+            if not isinstance(rows, list):
+                raise ValueError("scenes is not a list")
+            return rows
+        except Exception:
+            self._quarantine(p)
+            return self._rebuild_scene_index_from_bodies()
+
+    def _rebuild_scene_index_from_bodies(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for body in sorted(self.scene_root.glob("e*.json")):
+            try:
+                doc = json.loads(body.read_text(encoding="utf-8"))
+                g = doc.get("globals") or {}
+                chars = doc.get("chars") or []
+                sid = str(doc.get("id") or body.stem)
+            except Exception:
+                continue
+            thumb = f"{sid}.webp"
+            rows.append({
+                "id": sid, "created_at": int(doc.get("created_at") or 0),
+                "prompt_hash": scene_hash(g, chars),
+                "summary": scene_summary(g, chars),
+                "char_count": len(chars),
+                "thumb": thumb if (self.scene_root / thumb).exists() else None,
+            })
+        rows.sort(key=lambda r: r.get("created_at") or 0)
+        if rows:
+            print(f"[interactive-scene] index rebuilt from {len(rows)} body files")
+        return rows
+
+    def _save_scene_index(self, rows: list[dict[str, Any]]) -> None:
+        self._write_atomic(self._scene_index_path(), {
+            "note": ["Interactive 씬(이벤트) 기록의 메타. 본문은 e<id>.json 이다.",
+                     "core/interactive_assets_service.py 가 만든다.",
+                     f"{SNAPSHOT_LIMIT}개를 넘으면 오래된 것부터 지운다(즐겨찾기는 건너뛴다)."],
+            "limit": SNAPSHOT_LIMIT, "count": len(rows), "scenes": rows,
+        })
+
+    def load_scene_body(self, scene_id: str) -> dict[str, Any] | None:
+        p = self._scene_body_path(scene_id)
+        if not p.exists():
+            return None
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            self._quarantine(p)
+            return None
+
+    def record_scene(self, globals_: dict[str, Any],
+                     chars: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """씬 하나를 기록한다. 같은 씬이면 새로 쌓지 않고 시각만 올린다.
+
+        `chars` 는 **프론트가 정체성을 걷어낸 뒤** 준 것이다 - 여기서 다시 거르지
+        않는다(무엇을 복원하는가의 정의는 프론트 한 곳).
+        """
+        g = globals_ if isinstance(globals_, dict) else {}
+        rows_in = list(chars or [])
+        digest = scene_hash(g, rows_in)
+        with self._lock:
+            rows = self.load_scene_index()
+            hit = next((r for r in rows if r.get("prompt_hash") == digest), None)
+            if hit is not None:
+                hit["created_at"] = _now()
+                hit["summary"] = scene_summary(g, rows_in)
+                hit["char_count"] = len(rows_in)
+                self._write_atomic(
+                    self._scene_body_path(hit["id"]),
+                    {"id": hit["id"], "created_at": hit["created_at"],
+                     "globals": g, "chars": rows_in})
+                # 끝으로 옮긴다 — 자리가 곧 최신순이다(캐릭터 쪽과 같은 규약).
+                rows.remove(hit)
+                rows.append(hit)
+                out = hit
+            else:
+                sid = "e" + uuid.uuid4().hex[:16]
+                out = {
+                    "id": sid, "created_at": _now(), "thumb": None,
+                    "prompt_hash": digest, "summary": scene_summary(g, rows_in),
+                    "char_count": len(rows_in),
+                }
+                # 본문을 먼저 쓴다 — 인덱스에만 있고 본문이 없는 상태를 만들지 않는다.
+                self._write_atomic(self._scene_body_path(sid),
+                                   {"id": sid, "created_at": out["created_at"],
+                                    "globals": g, "chars": rows_in})
+                rows.append(out)
+            self._pending_delete = []
+            self._prune_scenes(rows)
+            self._save_scene_index(rows)
+            self._flush_scene_deletes()
+        return out
+
+    def attach_scene_thumb(self, scene_id: str, image_bytes: bytes) -> bool:
+        """생성 결과를 384px WEBP 로 붙인다. 캐릭터 쪽과 같은 크롭 규칙."""
+        if not scene_id or not image_bytes:
+            return False
+        try:
+            from PIL import Image
+        except ImportError:
+            return False
+        with self._lock:
+            rows = self.load_scene_index()
+            row = next((r for r in rows if r.get("id") == scene_id), None)
+            if row is None:
+                return False
+            with Image.open(io.BytesIO(image_bytes)) as im:
+                im.load()
+                img = im.convert("RGB")
+                w, h = img.size
+                if w != h:
+                    side = min(w, h)
+                    img = img.crop(((w - side) // 2, (h - side) // 3,
+                                    (w - side) // 2 + side, (h - side) // 3 + side))
+                img = img.resize((THUMB_SIZE, THUMB_SIZE), Image.LANCZOS)
+                buf = io.BytesIO()
+                img.save(buf, "WEBP", quality=THUMB_QUALITY, method=6)
+            self.scene_root.mkdir(parents=True, exist_ok=True)
+            name = f"{scene_id}.webp"
+            (self.scene_root / name).write_bytes(buf.getvalue())
+            row["thumb"] = name
+            self._save_scene_index(rows)
+            return True
+
+    def delete_scene(self, scene_id: str) -> bool:
+        sid = str(scene_id or "")
+        if not sid:
+            return False
+        with self._lock:
+            rows = self.load_scene_index()
+            hit = next((r for r in rows if r.get("id") == sid), None)
+            if hit is None:
+                return False
+            rows = [r for r in rows if r.get("id") != sid]
+            self._save_scene_index(rows)
+            thumb = hit.get("thumb")
+            if thumb:
+                (self.scene_root / str(thumb)).unlink(missing_ok=True)
+            self._scene_body_path(sid).unlink(missing_ok=True)
+            self._drop_favorite_ref("scene", sid)
+            return True
+
+    def _prune_scenes(self, rows: list[dict[str, Any]]) -> None:
+        """캐릭터 쪽과 같은 규칙 — 즐겨찾기는 건너뛰고, 못 읽으면 아무것도 안 지운다."""
+        if len(rows) <= SNAPSHOT_LIMIT:
+            return
+        pinned, ok = self._pinned_ids("scene")
+        if not ok:
+            print("[interactive-scene] favorites unreadable; pruning skipped")
+            return
+        drop = len(rows) - SNAPSHOT_LIMIT
+        kept: list[dict[str, Any]] = []
+        doomed: list[dict[str, Any]] = []
+        for row in rows:
+            if drop > 0 and row.get("id") not in pinned:
+                doomed.append(row)
+                drop -= 1
+                continue
+            kept.append(row)
+        rows[:] = kept
+        self._pending_delete = doomed
+
+    def _flush_scene_deletes(self) -> None:
+        for row in self._pending_delete:
+            sid = str(row.get("id"))
+            thumb = row.get("thumb")
+            if thumb:
+                (self.scene_root / str(thumb)).unlink(missing_ok=True)
+            self._scene_body_path(sid).unlink(missing_ok=True)
+        self._pending_delete = []
+
     # ── 즐겨찾기 ────────────────────────────────────────────────────────────
-    def _pinned_snapshot_ids(self) -> tuple[set[str], bool]:
-        """(보호 대상, 읽기 성공 여부). 실패를 빈 집합과 구분해야 한다."""
+    def _pinned_ids(self, kind: str) -> tuple[set[str], bool]:
+        """(보호 대상, 읽기 성공 여부). 실패를 빈 집합과 구분해야 한다 —
+        구분하지 않으면 보호 대상을 모르는 채로 프루닝이 돈다."""
         p = self._favorite_path()
         if not p.exists():
             return set(), True
@@ -523,7 +791,10 @@ class InteractiveAssetsService:
                 raise ValueError("favorites is not a list")
         except Exception:
             return set(), False
-        return {str(f.get("ref")) for f in rows if f.get("type") == "snapshot"}, True
+        return {str(f.get("ref")) for f in rows if f.get("type") == kind}, True
+
+    def _pinned_snapshot_ids(self) -> tuple[set[str], bool]:
+        return self._pinned_ids("snapshot")
 
     def load_favorites(self) -> list[dict[str, Any]]:
         p = self._favorite_path()

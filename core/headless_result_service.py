@@ -104,10 +104,17 @@ class HeadlessResultStore:
         그대로 받는다.
         """
         params = getattr(request, "params", {}) or {}
-        raw = params.get("interactive_snapshot_id")
-        ids = [str(x).strip() for x in (raw if isinstance(raw, (list, tuple)) else [raw])]
-        ids = [x for x in ids if x and x != "None"]
-        if not ids or not image_bytes:
+
+        def _ids(key: str) -> list[str]:
+            raw = params.get(key)
+            got = [str(x).strip() for x in (raw if isinstance(raw, (list, tuple)) else [raw])]
+            return [x for x in got if x and x != "None"]
+
+        char_ids = _ids("interactive_snapshot_id")
+        # 씬(이벤트)도 같은 그림을 쓴다. 생성 1회 = 씬 1장이라 보통 하나지만,
+        # 형태는 캐릭터 쪽과 맞춰 목록으로 받는다(프론트가 무엇을 실든 깨지지 않게).
+        scene_ids = _ids("interactive_scene_id")
+        if (not char_ids and not scene_ids) or not image_bytes:
             return
         context = getattr(self, "_context", None) or getattr(request, "context", None)
         if context is None:
@@ -118,8 +125,10 @@ class HeadlessResultStore:
             )
 
             service = interactive_assets_service(context)
-            for snapshot_id in ids:
+            for snapshot_id in char_ids:
                 service.attach_thumb(snapshot_id, image_bytes)
+            for scene_id in scene_ids:
+                service.attach_scene_thumb(scene_id, image_bytes)
         except Exception as exc:                     # 썸네일 실패가 생성을 막지 않는다
             print(f"[interactive-assets] thumb attach skipped: {exc}")
 

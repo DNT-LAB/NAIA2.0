@@ -23666,6 +23666,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   color: #c6cad3; background: transparent;
   border: 1px solid transparent; border-radius: 5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* 세로 flex 안이라 줄 수가 많아지면 **눌려서** 다 들어간다 - 스크롤이 아니라
+     글자가 찌그러졌다(폴더 36개에서 실측). 줄어들지 않게 못박는다. */
+  flex: 0 0 auto;
 }
 .ia-sc-item:hover { background: rgba(255,255,255,0.08); }
 .ia-sc-item.is-on {
@@ -23771,14 +23774,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-sc-mi:hover { background: rgba(255,255,255,0.09); }
 .ia-sc-mi.is-main { color: #cfe0ff; font-weight: 600; }
 .ia-sc-mi.is-danger { color: #e88f8f; }
-.ia-sc-mi.is-move { position: relative; padding-left: 22px; }
-/* 지금 들어 있는 폴더에는 표식을 단다 - 어디 있는지 모르고 고르면 헛돈다. */
-.ia-sc-mi.is-move.is-on { color: #cfe0ff; }
-.ia-sc-mi.is-move.is-on::before {
-  content: '\2713'; position: absolute; left: 7px; top: 50%; transform: translateY(-50%);
-}
 .ia-sc-mhint { font-size: 10px; color: #7b808a; }
 .ia-sc-msep {
   margin: 4px 2px; border-top: 1px solid rgba(255,255,255,0.10);
   font-size: 10px; color: #7b808a; padding: 4px 6px 0;
+}
+
+/* 카드를 끌고 있을 때 - 떨어뜨릴 수 있는 칸이라는 걸 칸 전체로 알린다.
+   폴더가 많아 스크롤될 때는 가장자리에서 자동으로 굴러간다(JS). */
+.ia-sc-col1.is-dropzone, .ia-sc-col2.is-dropzone {
+  border-color: rgba(90,130,220,0.45); background: rgba(90,130,220,0.06);
 }

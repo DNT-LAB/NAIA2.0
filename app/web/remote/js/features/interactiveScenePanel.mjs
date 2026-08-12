@@ -346,6 +346,7 @@ export function createInteractiveScenePanel({
     closeMenu();
     // 끌던 원본이 이 렌더로 사라지면 `dragend` 가 오지 않는다 - 여기서 버린다.
     dragId = '';
+    stopEdge();
     const el = ensurePop();
     if (!popOpen) { el.hidden = true; el.innerHTML = ''; return; }
     el.hidden = false;
@@ -451,33 +452,16 @@ export function createInteractiveScenePanel({
     return menuEl;
   }
 
-  /** 화면 순서 그대로 [폴더 없음] -> 대카테고리 -> 그 소카테고리. 평면으로 늘어놓으면
-   *  남의 카테고리 밑을 헤매게 된다(순환 [폴더] 버튼과 같은 규약). */
-  function folderOptions() {
-    const out = [{id: '', name: '폴더 없음'}];
-    for (const t of folders.filter(f => !f.parent)) {
-      out.push({id: t.id, name: t.name});
-      for (const sf of folders.filter(f => f.parent === t.id)) {
-        out.push({id: sf.id, name: `${t.name} / ${sf.name}`});
-      }
-    }
-    return out;
-  }
-
   function menuHtml(id) {
     const row = savedRows.find(r => r.id === id) || {};
-    const cur = String(row.folder || '');
     const sid = escHtml(id);
     const item = (act, label, cls, hint) =>
       `<button type="button" class="ia-sc-mi${cls || ''}" data-scact="${act}"
          data-scid="${sid}">${escHtml(label)}${
            hint ? `<span class="ia-sc-mhint">${escHtml(hint)}</span>` : ''}</button>`;
-    // 폴더 목록을 여기 그대로 펼친다 - 끌기가 안 되는 환경(터치·키보드)에서
-    // 분류할 길이 이것뿐이 되므로 하위 메뉴로 한 겹 더 숨기지 않는다.
-    const moves = folderOptions().map(o =>
-      `<button type="button" class="ia-sc-mi is-move${o.id === cur ? ' is-on' : ''}"
-         data-scact="move-to" data-scid="${sid}" data-fid="${escHtml(o.id)}"
-         >${escHtml(o.name)}</button>`).join('');
+    // **폴더는 여기 담지 않는다**(사용자 결정 2026-08-12). 폴더 목록을 펼쳐 두면
+    // 몇 개 안 될 때만 편하고, 스무 개쯤 되면 메뉴가 스크롤 덩어리가 된다.
+    // 분류는 끌기 하나로 통일한다 - 지금 폴더는 카드 밑에 이미 적혀 있다.
     return `<div class="ia-sc-mname">${escHtml(
               String(row.name || '') || String(row.summary || '') || '이름 없음')}</div>
       ${item('gen-now', '즉시 생성', '', '작업판 그대로')}
@@ -485,9 +469,6 @@ export function createInteractiveScenePanel({
       ${item('apply-gen', '적용 + 생성')}
       <div class="ia-sc-msep"></div>
       ${item('rename', '이름 바꾸기…')}
-      <div class="ia-sc-msep">폴더</div>
-      ${moves}
-      <div class="ia-sc-msep"></div>
       ${item('unsave', '수집에서 내리기', ' is-danger', '지우지 않습니다')}`;
   }
 
@@ -547,6 +528,7 @@ export function createInteractiveScenePanel({
     if (!card || !card.dataset.scid) return;
     dragId = card.dataset.scid;
     closeMenu();
+    markZones(true);
     try {
       event.dataTransfer.setData(DND_MIME, dragId);
       // 일부 브라우저는 표준 자료형이 하나도 없으면 끌기를 취소한다.
@@ -556,8 +538,16 @@ export function createInteractiveScenePanel({
     card.classList.add('is-dragging');
   }
 
+  function markZones(on) {
+    if (!popEl) return;
+    popEl.querySelectorAll('.ia-sc-col1, .ia-sc-col2')
+      .forEach(el => el.classList.toggle('is-dropzone', !!on));
+  }
+
   function onDragEnd() {
     dragId = '';
+    stopEdge();
+    markZones(false);
     if (!popEl) return;
     popEl.querySelectorAll('.is-dragging').forEach(el => el.classList.remove('is-dragging'));
     popEl.querySelectorAll('.is-drop').forEach(el => el.classList.remove('is-drop'));
@@ -580,8 +570,30 @@ export function createInteractiveScenePanel({
     return mine ? el : null;
   }
 
+  // 가장자리 자동 스크롤. `dragover` 는 멈춰 있어도 계속 오지만 간격이 들쭉날쭉해
+  // 이벤트마다 조금씩 미는 방식은 끊긴다 - 타이머로 일정하게 굴린다.
+  let edgeTimer = 0;
+
+  function stopEdge() {
+    if (edgeTimer) { clearInterval(edgeTimer); edgeTimer = 0; }
+  }
+
+  function edgeScroll(event) {
+    const col = event.target && event.target.closest
+      ? event.target.closest('.ia-sc-col1, .ia-sc-col2') : null;
+    stopEdge();
+    if (!col || col.scrollHeight <= col.clientHeight) return;
+    const r = col.getBoundingClientRect();
+    const EDGE = 34;
+    const dir = event.clientY < r.top + EDGE ? -1
+      : (event.clientY > r.bottom - EDGE ? 1 : 0);
+    if (!dir) return;
+    edgeTimer = setInterval(() => { col.scrollTop += dir * 12; }, 30);
+  }
+
   function onDragOver(event) {
     const el = dropTarget(event);
+    if (el || dragId) edgeScroll(event);     // 목적지 사이 빈틈에서도 굴러가야 한다
     if (!el) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -598,6 +610,8 @@ export function createInteractiveScenePanel({
     const el = dropTarget(event);
     if (!el) return;
     event.preventDefault();
+    stopEdge();
+    markZones(false);
     el.classList.remove('is-drop');
     let id = dragId;
     try { id = event.dataTransfer.getData(DND_MIME) || id; } catch (_) { /* dragId 로 */ }
@@ -707,6 +721,7 @@ export function createInteractiveScenePanel({
     popOpen = false;
     closeMenu();
     dragId = '';
+    stopEdge();
     clearPreview();
     document.removeEventListener('keydown', onKey, true);
     renderPop();
@@ -825,13 +840,6 @@ export function createInteractiveScenePanel({
           showToast(movedMsg(next), 'info');
           await loadSaved();
         }
-      } else if (act === 'move-to') {
-        const to = btn.dataset.fid || '';
-        const row = savedRows.find(r => r.id === id);
-        if (row && String(row.folder || '') === to) return;   // 제자리
-        await api('/scene/update', {id, folder: to});
-        showToast(movedMsg(to), 'info');
-        await loadSaved();
       } else if (act === 'unsave') {
         await api('/scene/save', {id, on: false});
         showToast('수집에서 내렸습니다. 최근 씬에는 남아 있습니다.', 'info');

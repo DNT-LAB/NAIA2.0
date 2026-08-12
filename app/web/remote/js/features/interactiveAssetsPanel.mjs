@@ -1167,13 +1167,32 @@ export function createInteractiveAssetsPanel({
     }
   }
 
+  // 결과 무대 아래에는 바가 둘이다 — 왼쪽 Assets, 오른쪽 Scene. 좁은 화면에서
+  // 둘 다 펴면 그대로 겹친다(실측: 무대 766px 에 523 + 557 -> 338x173 겹침).
+  // 서로를 모른 채 양보하도록 문서 이벤트 하나만 주고받는다(사용자 지적).
+  const IA_BAR_OPEN = 'naia:ia-bar-open';
+
+  function announceOpen() {
+    try {
+      document.dispatchEvent(new CustomEvent(IA_BAR_OPEN, {detail: {who: 'assets'}}));
+    } catch (_) { /* 무시 - 못 알려도 겹칠 뿐이다 */ }
+  }
+
+  function onOtherBarOpen(event) {
+    const who = event && event.detail ? event.detail.who : '';
+    if (!who || who === 'assets') return;
+    if (open) setOpen(false);      // 접기만 한다 - 되받아 알리지 않는다
+  }
+
+  document.addEventListener(IA_BAR_OPEN, onOtherBarOpen);
+
   /** 펼침/접힘을 한 곳에서 바꾼다 — 바깥 클릭·[접기]·토글 버튼이 모두 이걸 쓴다. */
   function setOpen(next) {
     if (open === next) return;
     open = next;
     if (!open) closePreview();     // 접으면 미리보기도 같이 닫는다
     render();
-    if (open) fetchList();
+    if (open) { announceOpen(); fetchList(); }
   }
 
   /** 미리보기에서 캐릭터 하나를 대상 슬롯에 꽂는다. 본문은 이미 읽어 뒀다 —

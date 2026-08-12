@@ -22304,7 +22304,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   transition: left 0.16s ease;
   bottom: 12px;
   z-index: 6;
-  max-width: min(560px, calc(100% - 24px));
+  /* **무대의 절반까지만.** 예전엔 둘 다 560px 까지 커져 좁은 화면에서 그대로
+     겹쳤다(실측: 무대 766px 에 523 + 557). 반씩 나누면 접힌 상태끼리는 절대
+     안 부딪히고, 펴는 쪽은 서로 양보한다(JS `naia:ia-bar-open`). */
+  max-width: min(560px, calc(50% - 18px));
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -23521,7 +23524,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   right: 12px;
   bottom: 12px;
   z-index: 6;
-  max-width: min(560px, calc(100% - 24px));
+  max-width: min(560px, calc(50% - 18px));   /* Assets 쪽과 같은 규약 */
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -23555,7 +23558,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   --ia-sc-cardh: 127px;
   --ia-sc-gap: 6px;
   display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--ia-sc-gap);
-  width: max-content; max-width: min(620px, 46vw);
+  /* 상한은 **바깥 바가 잡는다**(무대의 절반). 여기서 따로 vw 로 잡으면 좁은
+     화면에서 바 밖으로 삐져나온다(사용자 지적 2026-08-12). */
+  width: max-content; max-width: 100%;
   /* **2.5줄에서 자른다**(사용자 지정 2026-08-12). 화면 비율(vh)로 두면 큰 창에서
      바가 화면을 다 먹고 작은 창에서는 한 줄도 안 나온다 - 줄 수로 잡는다.
      반 줄이 걸쳐 보여야 '아래에 더 있다'가 읽힌다(딱 끊으면 끝인 줄 안다).

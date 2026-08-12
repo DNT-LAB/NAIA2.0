@@ -45,6 +45,7 @@ FRONTEND = [
     "app/web/remote/js/features/interactiveAxes.mjs",
     "app/web/remote/js/features/interactivePanel.mjs",
     "app/web/remote/js/features/interactiveScenePanel.mjs",
+    "app/web/remote/js/features/interactiveAssetsPanel.mjs",
     "app/web/remote/js/features/interactiveBrowse.mjs",
     "app/web/remote/js/features/interactiveAutocomplete.mjs",
     "app/web/remote/js/features/tagAssist.mjs",

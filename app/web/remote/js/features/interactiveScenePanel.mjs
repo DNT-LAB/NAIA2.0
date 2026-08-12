@@ -440,6 +440,26 @@ export function createInteractiveScenePanel({
   // '바깥'에서 빼는 것: 이 바 전체(토글·카드·버튼), Scene 팝업과 그 메뉴.
   const BAR_KEEP_OPEN = '.ia-sc-pop, .ia-sc-menu, .ia-sc-hover';
 
+  // 결과 무대 아래 바는 둘뿐이다(왼쪽 Assets · 오른쪽 Scene). 좁은 화면에서 둘 다
+  // 펴면 겹치므로(실측: 무대 766px 에 523 + 557 -> 338x173) 하나가 펴지면 다른
+  // 하나는 접는다. 서로를 모른 채 문서 이벤트 하나만 주고받는다(사용자 지적).
+  const IA_BAR_OPEN = 'naia:ia-bar-open';
+
+  function announceOpen() {
+    try {
+      document.dispatchEvent(new CustomEvent(IA_BAR_OPEN, {detail: {who: 'scene'}}));
+    } catch (_) { /* 무시 */ }
+  }
+
+  function onOtherBarOpen(event) {
+    const who = event && event.detail ? event.detail.who : '';
+    if (!who || who === 'scene') return;
+    if (!open) return;
+    open = false;                  // 접기만 한다 - 되받아 알리지 않는다
+    hideHover();
+    render();
+  }
+
   function onBarOutside(event) {
     if (!open) return;
     const t = event.target;
@@ -971,7 +991,11 @@ export function createInteractiveScenePanel({
     const id = btn.dataset.scid || '';
     busy = true;
     try {
-      if (act === 'toggle') { open = !open; render(); if (open) await fetchRecent(); }
+      if (act === 'toggle') {
+        open = !open;
+        render();
+        if (open) { announceOpen(); await fetchRecent(); }
+      }
       else if (act === 'open-saved') openSaved();
       else if (act === 'close-saved') closeSaved();
       else if (act === 'preview') await openPreview(id);
@@ -1077,6 +1101,7 @@ export function createInteractiveScenePanel({
   window.addEventListener('scroll', hideHover, true);
   window.addEventListener('resize', hideHover);
   document.addEventListener('click', onBarOutside);
+  document.addEventListener(IA_BAR_OPEN, onOtherBarOpen);
 
   return {
     /** Interactive 모드 on/off 를 그대로 따른다 — 이 패널은 그 모드의 도구다. */
@@ -1115,6 +1140,7 @@ export function createInteractiveScenePanel({
       window.removeEventListener('scroll', hideHover, true);
       window.removeEventListener('resize', hideHover);
       document.removeEventListener('click', onBarOutside);
+      document.removeEventListener(IA_BAR_OPEN, onOtherBarOpen);
       root.removeEventListener('mouseover', onOver);
       root.removeEventListener('mouseout', onOut);
       if (menuEl && menuEl.parentNode) menuEl.parentNode.removeChild(menuEl);

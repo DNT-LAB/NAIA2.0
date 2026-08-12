@@ -5,13 +5,13 @@
 //
 // 2단이다(사용자 지정):
 //   최근 씬   생성할 때마다 자동으로 쌓인다. 500 한도, 오래된 것부터 사라진다.
-//   저장한 씬 [저장]을 누른 것만. 이름·폴더를 갖고 지우기 전엔 사라지지 않는다.
+//   Scene     [저장]을 누른 것만. 이름·폴더를 갖고 지우기 전엔 사라지지 않는다.
 //
 // 좋은 씬은 만들 때 알아보지 못한다 — 열 장 뽑고 나서 세 번째가 제일 좋았다는 걸
 // 안다. 자동 기록은 그 안전망이고, 저장은 그중에서 골라 남기는 행위다.
 //
-// 바에는 최근 씬만 둔다. 저장한 씬은 폴더 줄 + 카드 그리드가 필요해서 바에 넣으면
-// 둘 다 좁아진다 — [저장한 씬] 버튼이 전용 팝업을 연다(캐릭터 쪽 Assets 바 vs
+// 바에는 Recent(자동 기록)만 둔다. Scene 은 폴더 줄 + 카드 그리드가 필요해서 바에
+// 넣으면 둘 다 좁아진다 — [Scene] 버튼이 전용 팝업을 연다(캐릭터 쪽 Assets 바 vs
 // Assets 탭과 같은 갈래).
 //
 // 백엔드 계약(app/backend/server/interactive_assets_routes.py):
@@ -50,7 +50,7 @@ export function createInteractiveScenePanel({
   let busy = false;
   let loadSeq = 0;              // 늦게 온 응답이 최신 목록을 덮지 않게
 
-  // ---- 팝업(저장한 씬) 상태 ----
+  // ---- 팝업(Scene) 상태 ----
   let popEl = null;
   let popOpen = false;
   let folders = [];
@@ -119,7 +119,8 @@ export function createInteractiveScenePanel({
         <button type="button" class="ia-sc-btn" data-scact="apply" data-scid="${escHtml(row.id)}"
           data-naia-title="이 씬을 지금 캐릭터에게 입힙니다">적용</button>
         <button type="button" class="ia-sc-btn" data-scact="save" data-scid="${escHtml(row.id)}"
-          data-naia-title="저장한 씬으로 올립니다 (이름은 나중에 붙여도 됩니다)">저장</button>
+          data-naia-title="Scene 으로 올립니다 — 올리지 않으면 다음에 열 때 사라질 수 있습니다"
+          >저장</button>
       </div>
     </div>`;
   }
@@ -130,12 +131,12 @@ export function createInteractiveScenePanel({
     root.classList.toggle('is-open', open);
     const head = `<div class="ia-sc-head">
       <button type="button" class="ia-sc-toggle" data-scact="toggle"
-        data-naia-title="최근에 그린 씬을 펼칩니다">
+        data-naia-title="방금 그린 씬입니다. 저장하지 않은 것은 다음에 열 때 마지막 몇 개만 남습니다">
         <span class="ia-sc-caret">${open ? '▾' : '▸'}</span>
-        <span>Scene</span>${recent.length ? `<span class="ia-sc-count">${recent.length}</span>` : ''}
+        <span>Recent</span>${recent.length ? `<span class="ia-sc-count">${recent.length}</span>` : ''}
       </button>
-      <button type="button" class="ia-sc-toggle" data-scact="open-saved"
-        data-naia-title="이름과 폴더로 정리한 씬을 엽니다">저장한 씬</button>
+      <button type="button" class="ia-sc-toggle is-main" data-scact="open-saved"
+        data-naia-title="이름과 폴더로 정리한 씬을 엽니다">Scene</button>
     </div>`;
     const list = open
       ? `<div class="ia-sc-list">${
@@ -186,7 +187,7 @@ export function createInteractiveScenePanel({
     } catch (exc) {
       if (seq !== savedSeq) return;
       folders = []; savedRows = [];
-      showToast(`저장한 씬을 읽지 못했습니다: ${exc.message}`, 'error');
+      showToast(`Scene 을 읽지 못했습니다: ${exc.message}`, 'error');
     }
     renderPop();
   }
@@ -274,7 +275,7 @@ export function createInteractiveScenePanel({
       <button type="button" class="ia-sc-btn" data-scact="move" data-scid="${sid}"
         data-naia-title="다음 폴더로 옮깁니다">폴더</button>
       <button type="button" class="ia-sc-btn is-danger" data-scact="unsave" data-scid="${sid}"
-        data-naia-title="수집에서 내립니다 (지우지 않습니다)">내리기</button>
+        data-naia-title="Scene 에서 내립니다 (지우지 않습니다)">내리기</button>
     </div>`;
 
     return `<div class="ia-sc-pv-img">${row.thumb
@@ -377,7 +378,7 @@ export function createInteractiveScenePanel({
     ].join('');
 
     // **소카테고리 칸은 쓰기 전엔 안 보인다**(사용자 지정 2026-08-12).
-    // 저장한 씬은 현실적으로 수십 장 규모라, 항상 세 칸을 띄우면 쓰지도 않는 층이
+    // Scene 은 현실적으로 수십 장 규모라, 항상 세 칸을 띄우면 쓰지도 않는 층이
     // 썸네일 자리를 300px 먹는다. 하나라도 만들면 그때 칸이 생긴다 - 데이터는
     // 그대로이므로 나중에 많아져도 되돌릴 일이 없다.
     const showSub = !!curTop && subs.length > 0;
@@ -403,7 +404,7 @@ export function createInteractiveScenePanel({
 
     el.innerHTML = `<div class="ia-sc-pop-box">
       <div class="ia-sc-pop-head">
-        <span class="ia-sc-pop-title">저장한 씬</span>
+        <span class="ia-sc-pop-title">Scene</span>
         <input type="text" class="ia-sc-search" data-scsearch placeholder="이름·태그로 찾기"
           value="${escHtml(query)}">
         ${tools}
@@ -417,7 +418,7 @@ export function createInteractiveScenePanel({
             savedRows.length ? savedRows.map(savedCardHtml).join('')
               : `<div class="ia-sc-empty">${query || curTop || curNone
                   ? '조건에 맞는 씬이 없습니다.'
-                  : '아직 저장한 씬이 없습니다. 최근 씬에서 [저장]을 누르세요.'}</div>`}</div>
+                  : '아직 모아 둔 씬이 없습니다. Recent 에서 [저장]을 누르세요.'}</div>`}</div>
         </div>
         <div class="ia-sc-col ia-sc-preview">${previewHtml()}</div>
       </div>
@@ -469,7 +470,7 @@ export function createInteractiveScenePanel({
       ${item('apply-gen', '적용 + 생성')}
       <div class="ia-sc-msep"></div>
       ${item('rename', '이름 바꾸기…')}
-      ${item('unsave', '수집에서 내리기', ' is-danger', '지우지 않습니다')}`;
+      ${item('unsave', 'Scene 에서 내리기', ' is-danger', '지우지 않습니다')}`;
   }
 
   function openMenu(id, px, py) {
@@ -686,7 +687,7 @@ export function createInteractiveScenePanel({
   async function saveScene(id) {
     try {
       await api('/scene/save', {id});
-      showToast('저장한 씬으로 올렸습니다. 이름은 [저장한 씬]에서 붙일 수 있습니다.', 'info');
+      showToast('Scene 으로 올렸습니다. 이름은 [Scene]에서 붙일 수 있습니다.', 'info');
       fetchRecent();
       if (popOpen) loadSaved();
     } catch (exc) {
@@ -842,7 +843,7 @@ export function createInteractiveScenePanel({
         }
       } else if (act === 'unsave') {
         await api('/scene/save', {id, on: false});
-        showToast('수집에서 내렸습니다. 최근 씬에는 남아 있습니다.', 'info');
+        showToast('Scene 에서 내렸습니다. Recent 에는 남아 있습니다.', 'info');
         await loadSaved();
         fetchRecent();
       }

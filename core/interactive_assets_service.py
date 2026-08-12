@@ -85,6 +85,10 @@ INDEX_NAME = "index.json"
 FAVORITE_NAME = "favorites.json"
 
 SNAPSHOT_LIMIT = 500
+# 세션이 바뀔 때 남길 '저장하지 않은' 기록 수(사용자 지정 2026-08-12).
+# 한도(500)는 한 세션 안에서 되짚어 쓰라고 넉넉히 둔 것이지 쌓아 두라는 뜻이
+# 아니었다 - 이름을 붙이지 않은 것은 다음 세션에서 죽은 데이터가 된다.
+BOOT_KEEP_UNSAVED = 5
 THUMB_SIZE = 384
 THUMB_QUALITY = 72
 SUMMARY_MAX = 120
@@ -1193,6 +1197,51 @@ class InteractiveAssetsService:
         self._pending_delete = []
 
     # ── 즐겨찾기 ────────────────────────────────────────────────────────────
+    # ── 세션 청소 ──────────────────────────────────────────────────────────
+    def sweep_unsaved(self, keep: int = BOOT_KEEP_UNSAVED) -> dict[str, int]:
+        """저장하지 않은 기록을 최신 `keep` 개만 남기고 버린다.
+
+        **지키는 것**: 씬은 `saved`(이름을 붙여 수집한 것), 캐릭터·씬 모두
+        즐겨찾기. 프루닝과 같은 규약으로, 즐겨찾기를 못 읽으면 **아무것도
+        지우지 않는다** - 보호 대상을 모르는 채로 지우면 사용자가 명시적으로
+        지킨 것이 사라진다.
+
+        부팅에서 부른다. 종료 훅에 걸면 강제 종료된 세션은 그대로 남아
+        '다음에 열면 깨끗하다'가 안 지켜진다.
+        """
+        n = max(0, int(keep))
+        out = {"snapshots": 0, "scenes": 0}
+
+        rows = self.load_index()                       # 오래된 것이 앞
+        pinned, ok = self._pinned_snapshot_ids()
+        if ok:
+            loose = [r for r in rows if r.get("id") not in pinned]
+            doomed_ids = {r.get("id") for r in (loose[:-n] if n else loose)}
+            if doomed_ids:
+                kept = [r for r in rows if r.get("id") not in doomed_ids]
+                self._pending_delete = [r for r in rows if r.get("id") in doomed_ids]
+                self._save_index(kept)                 # 인덱스를 먼저 확정한다
+                self._flush_deletes()
+                out["snapshots"] = len(doomed_ids)
+        else:
+            print("[interactive-assets] favorites unreadable; boot sweep skipped")
+
+        rows = self.load_scene_index()
+        pinned, ok = self._pinned_ids("scene")
+        if ok:
+            loose = [r for r in rows
+                     if not r.get("saved") and r.get("id") not in pinned]
+            doomed_ids = {r.get("id") for r in (loose[:-n] if n else loose)}
+            if doomed_ids:
+                kept = [r for r in rows if r.get("id") not in doomed_ids]
+                self._pending_delete = [r for r in rows if r.get("id") in doomed_ids]
+                self._save_scene_index(kept)
+                self._flush_scene_deletes()
+                out["scenes"] = len(doomed_ids)
+        else:
+            print("[interactive-scene] favorites unreadable; boot sweep skipped")
+        return out
+
     def _pinned_ids(self, kind: str) -> tuple[set[str], bool]:
         """(보호 대상, 읽기 성공 여부). 실패를 빈 집합과 구분해야 한다 —
         구분하지 않으면 보호 대상을 모르는 채로 프루닝이 돈다."""

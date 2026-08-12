@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.backend.server.autocomplete_commands import ensure_tag_search_index
 from app.backend.server.generation_commands import random_service
+from app.backend.server.interactive_assets_routes import interactive_assets_service
 from app.backend.server.search_runtime import save_runner_parquet
 from core.extension_runtime import load_extensions
 from core.web_session_context import WebSessionContext
@@ -29,6 +30,20 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
             load_extensions(context)
         except Exception as exc:
             print(f"Headless Remote: extension load skipped - {exc}", flush=True)
+        # 저장하지 않은 Interactive 기록은 지난 세션의 죽은 데이터다 - 마지막 몇
+        # 개만 남기고 쓸어낸다(사용자 지정 2026-08-12). **종료가 아니라 부팅에서**
+        # 한다: 강제 종료된 세션은 종료 훅이 안 돌아 '다음에 열면 깨끗하다'가
+        # 안 지켜진다. 실패해도 부팅을 막지 않는다.
+        try:
+            swept = interactive_assets_service(context).sweep_unsaved()
+            if swept.get("snapshots") or swept.get("scenes"):
+                print(
+                    "Headless Remote: interactive sweep removed "
+                    f"{swept.get('snapshots', 0)} assets / {swept.get('scenes', 0)} scenes",
+                    flush=True,
+                )
+        except Exception as exc:
+            print(f"Headless Remote: interactive sweep skipped - {exc}", flush=True)
         task = getattr(context, "headless_random_warmup_task", None)
         if task is None or task.done():
             context.headless_random_warmup_task = asyncio.create_task(_run_random_warmup(context, run_in_thread))

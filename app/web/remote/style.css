@@ -23537,6 +23537,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   color: #cfd3dc; background: rgba(24,26,32,0.92);
   border: 1px solid rgba(255,255,255,0.14); border-radius: 6px; cursor: pointer;
 }
+/* Scene 이 사용자가 정리해 쓰는 쪽이다 - Recent 보다 앞으로 읽히게 한다. */
+.ia-sc-toggle.is-main { color: #dfe6f5; border-color: rgba(90,130,220,0.45); }
+.ia-sc-toggle.is-main:hover { background: rgba(90,130,220,0.16); }
 .ia-sc-toggle:hover { background: rgba(40,44,54,0.96); border-color: rgba(255,255,255,0.26); }
 .ia-sc-caret { font-size: 10px; opacity: 0.8; }
 .ia-sc-count {
@@ -23580,7 +23583,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-sc-btn.is-main { background: rgba(90,130,220,0.26); border-color: rgba(90,130,220,0.5); }
 .ia-sc-btn.is-danger { color: #e9a6a2; border-color: rgba(229,115,107,0.35); }
 
-/* ── 저장한 씬 팝업 ──────────────────────────────────────────────────────
+/* ── Scene 팝업 ──────────────────────────────────────────────────────
    **body 직계**다. `.viewer-wrapper`(z-index:0 + isolation:isolate) 안에 넣으면
    이 팝업의 z 가 0 층으로 접혀 좌측 컨트롤이 위를 덮는다(세 번 겪었다). */
 .ia-sc-pop {
@@ -23633,7 +23636,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-sc-smeta { font-size: 10px; color: #8a8f9a; padding: 2px 8px 8px; }
 
-/* ── 저장한 씬: Finder 3열 ────────────────────────────────────────────────
+/* ── Scene: Finder 3열 ────────────────────────────────────────────────
    [대카테고리][소카테고리][컨텐츠] (사용자 지정 2026-08-12).
    두 칸은 폭을 고정한다 - 내용에 따라 늘어나면 카테고리 이름 길이에 따라
    컨텐츠 폭이 들쭉날쭉해진다. */
@@ -23677,7 +23680,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-sc-item.is-add { border-style: dashed; border-color: rgba(255,255,255,0.16); color: #8a8f9a; }
 .ia-sc-hint { font-size: 11px; color: #6f747e; padding: 8px; line-height: 1.5; }
 
-/* ── 저장한 씬: 미리보기 칸 ───────────────────────────────────────────────
+/* ── Scene: 미리보기 칸 ───────────────────────────────────────────────
    카테고리 칸을 뺀 나머지를 3(목록) : 2(미리보기) 로 나눈다(사용자 지정
    2026-08-12). 위는 확대 그림, 아래는 씬과 캐릭터별 프롬프트다. */
 .ia-sc-preview {

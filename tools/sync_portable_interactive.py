@@ -33,6 +33,8 @@ BACKEND = [
     # 씬 기록/저장 계층. 프론트만 옮기면 저장·폴더 라우트가 없어 404 가 난다.
     "core/interactive_assets_service.py",
     "app/backend/server/interactive_assets_routes.py",
+    # 부팅 청소(저장 안 한 기록 쓸어내기)를 거는 곳 - 서비스만 옮기면 안 돈다.
+    "app/backend/server/headless_lifespan.py",
     "core/api_service.py",
     "data/interactive_thumbnails.json",
 ]

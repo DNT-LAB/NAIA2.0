@@ -414,16 +414,29 @@ export function createInteractiveAssetsPanel({
     return arr.map(t => `<span class="ia-as-pv-tag">${escHtml(t)}</span>`).join('');
   }
 
-  /** 캐릭터 한 명 — 이름 + 슬롯별 태그 + [적용]. */
+  /** 캐릭터 한 명 — 이름 + 슬롯별 태그 + [적용].
+   *
+   *  **복원 범위 밖 줄은 흐리게 칠한다**(사용자 지정 2026-08-12). 위의 [복원]
+   *  칩으로 일부만 켜 두면 [적용] 이 그것만 가져오는데, 미리보기는 늘 전부를
+   *  보여 줘서 무엇이 실제로 들어올지 알 수 없었다. 화면에 보이는 것과 들어오는
+   *  것이 다르면 미리보기가 아니다.
+   */
   function previewCharHtml(row, i) {
     const label = charLabel(row);
     const fields = (row && row.fields) || {};
+    // 항목 정의를 못 읽으면(패널이 아직 없다) 구분하지 않는다 — 전부 들어온다고
+    // 거짓말하는 것보다 아무 말도 안 하는 편이 낫다.
+    const sel = restoreSelection();
     const lines = Object.entries(fields)
       .map(([k, v]) => [k, (Array.isArray(v) ? v : []).filter(Boolean)])
       .filter(([, v]) => v.length)
-      .map(([k, v]) => `<div class="ia-as-pv-line">
+      .map(([k, v]) => {
+        const skip = !!sel && !sel.has(k);
+        return `<div class="ia-as-pv-line${skip ? ' is-skip' : ''}">
         <span class="ia-as-pv-key">${escHtml(k)}</span>
-        <span class="ia-as-pv-tags">${tagChips(v)}</span></div>`).join('');
+        <span class="ia-as-pv-tags">${tagChips(v)}</span>${
+          skip ? '<span class="ia-as-pv-skip">제외</span>' : ''}</div>`;
+      }).join('');
     const target = roster[targetSlot];
     const tLabel = target ? target.label : `C${targetSlot + 1}`;
     const off = row && row.state === 'disabled';
@@ -468,11 +481,21 @@ export function createInteractiveAssetsPanel({
     const keep = el.querySelector('.ia-as-pv-body')?.scrollTop || 0;
     const meta = rows.find(x => x.id === previewId);
     const chars = (previewBody && Array.isArray(previewBody.chars)) ? previewBody.chars : [];
+    // 지금 범위에서 빠진 칸이 하나라도 있으면 그 사실을 말해 준다. 음영만
+    // 두면 '왜 흐린가'를 알 수 없다.
+    const sel0 = restoreSelection();
+    const skipped = !sel0 ? [] : [...new Set(chars.flatMap(c =>
+      Object.entries((c && c.fields) || {})
+        .filter(([k, v]) => Array.isArray(v) && v.filter(Boolean).length && !sel0.has(k))
+        .map(([k]) => k)))];
+    const note = skipped.length
+      ? `<div class="ia-as-pv-scopenote">흐린 줄은 지금 <b>복원</b> 범위 밖입니다 —
+         적용해도 안 들어옵니다 (${escHtml(skipped.join(', '))})</div>`
+      : '';
     const body = previewBusy
       ? '<div class="ia-as-pv-none">불러오는 중…</div>'
       : (chars.length
-          ? chars.map(previewCharHtml).join('') +
-            ''
+          ? note + chars.map(previewCharHtml).join('')
           : '<div class="ia-as-pv-none">빈 조합입니다</div>');
     const fav = !!(meta && meta.favorite);
     el.innerHTML = `

@@ -23893,3 +23893,21 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   font-size: 10px; color: #d8f0e0; margin-left: 6px;
   padding: 0 4px; border-radius: 3px; background: rgba(90,180,120,0.22);
 }
+
+/* 복원 범위 밖 줄 — 흐리게 칠하고 [제외] 를 단다(사용자 지정 2026-08-12).
+   [적용] 은 켜 둔 칸만 가져오는데 미리보기는 늘 전부를 보여 줘서, 무엇이 실제로
+   들어올지 알 수 없었다. */
+.ia-as-pv-line.is-skip { opacity: 0.38; }
+.ia-as-pv-line.is-skip .ia-as-pv-tag { text-decoration: line-through; }
+.ia-as-pv-skip {
+  margin-left: 6px; padding: 0 4px; border-radius: 3px;
+  font-size: 9px; color: #c8c2d8; background: rgba(255,255,255,0.10);
+  align-self: center; white-space: nowrap;
+}
+.ia-as-pv-scopenote {
+  margin: 0 0 6px; padding: 5px 7px; border-radius: 6px;
+  font-size: 10px; line-height: 1.45; color: var(--text-muted);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border-dim);
+}
+.ia-as-pv-scopenote b { color: var(--text-primary); font-weight: 700; }

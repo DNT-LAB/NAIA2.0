@@ -147,7 +147,11 @@ def register_interactive_assets_routes(
                                      limit: int = 200, tier: str = "",
                                      folder: str = ""):
         """`tier` = auto(자동 기록) | saved(저장한 씬) | 빈값(전부).
-        `folder` 는 저장한 씬에만 의미가 있다(빈 문자열 = 폴더 없음)."""
+
+        `folder` 는 저장한 씬에만 의미가 있다. **대카테고리를 주면 그 아래
+        소카테고리에 든 것까지 함께** 나온다(사용자 지정 2026-08-12: 대카테고리를
+        고르면 그 안의 모든 아이템을 나열). `folder=none` 이면 폴더가 없는 것만.
+        """
         def _payload() -> dict[str, Any]:
             svc = interactive_assets_service(session_context)
             rows = list(reversed(svc.load_scene_index()))
@@ -165,8 +169,11 @@ def register_interactive_assets_routes(
                 rows = [r for r in rows
                         if q in str(r.get("summary", "")).lower()
                         or q in str(r.get("name", "")).lower()]
-            if folder:
-                rows = [r for r in rows if str(r.get("folder") or "") == folder]
+            if folder == "none":
+                rows = [r for r in rows if not str(r.get("folder") or "")]
+            elif folder:
+                want = svc._folder_and_children(folder)
+                rows = [r for r in rows if str(r.get("folder") or "") in want]
             if favorite:
                 rows = [r for r in rows if r.get("id") in pinned]
             rows = rows[: max(1, min(int(limit or 200), 500))]
@@ -252,7 +259,10 @@ def register_interactive_assets_routes(
         fid = str(payload.get("id") or "")
         try:
             if op == "create":
-                row = await run_in_thread(svc.create_scene_folder, name)
+                # `parent` 를 주면 소카테고리다. 2단까지만 — 소카테고리를 부모로
+                # 주면 서비스가 그 대카테고리 밑으로 붙인다.
+                row = await run_in_thread(svc.create_scene_folder, name,
+                                          str(payload.get("parent") or ""))
                 if row is None:
                     return JSONResponse({"error": "name required"}, status_code=400)
                 return {"ok": True, "folder": row}

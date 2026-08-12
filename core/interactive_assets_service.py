@@ -990,8 +990,22 @@ class InteractiveAssetsService:
         out = []
         for r in rows:
             if isinstance(r, dict) and str(r.get("id") or "").strip():
-                out.append({"id": str(r["id"]), "name": str(r.get("name") or "")[:MAX_SCENE_NAME_LEN]})
+                # `parent` 가 빈 값이면 대카테고리, 있으면 그 아래 소카테고리다
+                # (Finder 형 2단 — 사용자 지정 2026-08-12). 옛 저장분에는 이 키가
+                # 없으므로 전부 대카테고리로 읽힌다(정보를 잃지 않는다).
+                out.append({"id": str(r["id"]),
+                            "name": str(r.get("name") or "")[:MAX_SCENE_NAME_LEN],
+                            "parent": str(r.get("parent") or "")})
         return out
+
+    def _folder_and_children(self, folder_id: str) -> set[str]:
+        """그 폴더와 **그 아래 소카테고리 전부**. 대카테고리를 고르면 그 안의 모든
+        아이템을 보여야 한다(사용자 지정) - 소카테고리에 든 것까지 포함이다."""
+        fid = str(folder_id or "")
+        if not fid:
+            return set()
+        rows = self.load_scene_folders()
+        return {fid} | {r["id"] for r in rows if r.get("parent") == fid}
 
     def _save_scene_folders(self, rows: list[dict[str, Any]]) -> None:
         self._write_atomic(self._scene_folders_path(), {
@@ -1001,7 +1015,12 @@ class InteractiveAssetsService:
             "count": len(rows), "folders": rows,
         })
 
-    def create_scene_folder(self, name: str) -> dict[str, Any] | None:
+    def create_scene_folder(self, name: str, parent: str = "") -> dict[str, Any] | None:
+        """`parent` 를 주면 그 대카테고리의 소카테고리로 만든다.
+
+        **2단까지만이다.** 소카테고리를 부모로 주면 그 부모의 대카테고리 밑으로
+        붙인다 - 더 깊어지면 Finder 3열이 표현할 수 없다.
+        """
         label = str(name or "").strip()[:MAX_SCENE_NAME_LEN]
         if not label:
             return None
@@ -1009,10 +1028,20 @@ class InteractiveAssetsService:
             rows = self.load_scene_folders()
             if len(rows) >= MAX_SCENE_FOLDERS:
                 raise ValueError(f"folder limit reached ({MAX_SCENE_FOLDERS})")
-            hit = next((r for r in rows if r["name"] == label), None)
+            pid = str(parent or "")
+            if pid:
+                up = next((r for r in rows if r["id"] == pid), None)
+                if up is None:
+                    pid = ""                     # 없는 부모면 대카테고리로
+                elif up.get("parent"):
+                    pid = up["parent"]           # 3단 방지 - 한 칸 위로 붙인다
+            # 같은 이름은 **같은 부모 안에서만** 합친다. 다른 대카테고리에 같은
+            # 이름의 소카테고리를 두는 것은 자연스럽다("학교/실내", "집/실내").
+            hit = next((r for r in rows
+                        if r["name"] == label and r.get("parent", "") == pid), None)
             if hit is not None:
-                return hit                       # 같은 이름은 새로 만들지 않는다
-            row = {"id": "f" + uuid.uuid4().hex[:12], "name": label}
+                return hit
+            row = {"id": "f" + uuid.uuid4().hex[:12], "name": label, "parent": pid}
             rows.append(row)
             self._save_scene_folders(rows)
             return row
@@ -1033,22 +1062,28 @@ class InteractiveAssetsService:
 
     def delete_scene_folder(self, folder_id: str) -> bool:
         """폴더만 지운다. **안에 든 씬은 지우지 않는다** — 폴더 없음으로 옮긴다.
-        폴더를 정리하다 저장해 둔 씬을 잃으면 되돌릴 수 없다."""
+        폴더를 정리하다 저장해 둔 씬을 잃으면 되돌릴 수 없다.
+
+        대카테고리를 지우면 그 아래 소카테고리도 함께 사라진다 - 부모 없는
+        소카테고리는 Finder 3열의 어느 칸에도 설 자리가 없다. 그 안의 씬도
+        마찬가지로 **지우지 않고** 폴더 없음으로 옮긴다.
+        """
         fid = str(folder_id or "")
         if not fid:
             return False
         with self._lock:
             rows = self.load_scene_folders()
-            kept = [r for r in rows if r["id"] != fid]
-            if len(kept) == len(rows):
+            if not any(r["id"] == fid for r in rows):
                 return False
-            self._save_scene_folders(kept)
+            doomed = {fid} | {r["id"] for r in rows if r.get("parent") == fid}
+            self._save_scene_folders([r for r in rows if r["id"] not in doomed])
             scenes = self.load_scene_index()
             touched = False
             for row in scenes:
-                if row.get("folder") == fid:
+                if row.get("folder") in doomed:
                     row["folder"] = ""
                     touched = True
+                    self._patch_scene_body_meta(str(row.get("id") or ""), {"folder": ""})
             if touched:
                 self._save_scene_index(scenes)
             return True

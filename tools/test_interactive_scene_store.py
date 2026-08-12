@@ -222,6 +222,30 @@ def main() -> int:
             check("씬은 살아남는다", hit5["saved"], True)
             check("폴더 없음으로 옮겨진다", hit5["folder"], "")
 
+            # 2단 폴더(Finder 형) — 대 -> 소, 그 이상은 안 판다
+            big = s5.create_scene_folder("장소")
+            sub = s5.create_scene_folder("교실", big["id"])
+            check("소카테고리의 부모", sub["parent"], big["id"])
+            deep = s5.create_scene_folder("창가", sub["id"])
+            check("3단은 안 만든다(한 칸 위로)", deep["parent"], big["id"])
+            check("같은 이름도 부모가 다르면 별개",
+                  s5.create_scene_folder("교실", "")["id"] != sub["id"], True)
+            check("대카테고리 + 소카테고리 묶음",
+                  s5._folder_and_children(big["id"]) >= {big["id"], sub["id"], deep["id"]}, True)
+            check("소카테고리는 자기만", s5._folder_and_children(sub["id"]), {sub["id"]})
+
+            # 대카테고리를 지우면 소카테고리도 함께, 단 **씬은 남는다**
+            s5.save_scene(b["id"], "교실 씬", sub["id"])
+            check("소카테고리에 담김",
+                  next(r for r in s5.load_scene_index() if r["id"] == b["id"])["folder"],
+                  sub["id"])
+            check("대카테고리 삭제", s5.delete_scene_folder(big["id"]), True)
+            ids5 = {f["id"] for f in s5.load_scene_folders()}
+            check("소카테고리도 사라진다", sub["id"] in ids5, False)
+            hitb = next(r for r in s5.load_scene_index() if r["id"] == b["id"])
+            check("그 안의 씬은 남는다", hitb["saved"], True)
+            check("폴더 없음으로 옮겨진다", hitb["folder"], "")
+
             # 저장한 것은 프루닝에서 살아남는다
             for i in range(SNAPSHOT_LIMIT + 5):
                 s5.record_scene(globals_for("bulk2-%d" % i), situation("sitting"))

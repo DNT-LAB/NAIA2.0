@@ -23591,7 +23591,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-sc-pop[hidden] { display: none; }
 .ia-sc-pop-box {
-  width: min(860px, 92vw); max-height: 82vh; overflow: auto;
+  width: min(1080px, 94vw); max-height: 86vh; overflow: auto;
   background: #15171c; border: 1px solid rgba(255,255,255,0.16);
   border-radius: 10px; padding: 12px 14px;
 }
@@ -23630,3 +23630,37 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-sc-smeta { font-size: 10px; color: #8a8f9a; padding: 2px 8px 0; }
 .ia-sc-sacts { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; }
+
+/* ── 저장한 씬: Finder 3열 ────────────────────────────────────────────────
+   [대카테고리][소카테고리][컨텐츠] (사용자 지정 2026-08-12).
+   두 칸은 폭을 고정한다 - 내용에 따라 늘어나면 카테고리 이름 길이에 따라
+   컨텐츠 폭이 들쭉날쭉해진다. */
+.ia-sc-finder {
+  display: grid;
+  grid-template-columns: 148px 148px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  min-height: 320px;
+}
+.ia-sc-col { min-width: 0; }
+.ia-sc-col1, .ia-sc-col2 {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 6px; overflow-y: auto; max-height: 62vh;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.10); border-radius: 8px;
+}
+.ia-sc-content { overflow-y: auto; max-height: 62vh; }
+
+.ia-sc-item {
+  text-align: left; font-size: 11px; font-family: inherit;
+  padding: 5px 8px; cursor: pointer;
+  color: #c6cad3; background: transparent;
+  border: 1px solid transparent; border-radius: 5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-sc-item:hover { background: rgba(255,255,255,0.08); }
+.ia-sc-item.is-on {
+  background: rgba(90,130,220,0.28); border-color: rgba(90,130,220,0.5); color: #eef1f6;
+}
+.ia-sc-item.is-add { border-style: dashed; border-color: rgba(255,255,255,0.16); color: #8a8f9a; }
+.ia-sc-hint { font-size: 11px; color: #6f747e; padding: 8px; line-height: 1.5; }

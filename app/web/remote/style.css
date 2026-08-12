@@ -20637,11 +20637,40 @@ body.detached-module .mod-grid-3 {
 .ia-chip-empty { font-family: var(--font-display); font-size: 10px; color: var(--text-dim); font-style: italic; }
 
 /* --- 캐릭터 블록: 헤더 + 접이식 카드(아코디언) --- */
-.ia-block.is-character { display: block; padding: 0; overflow: hidden; cursor: default; }
+/* `overflow: hidden` 은 뺐다 — 그 안에서는 머리줄이 sticky 로 붙을 데가 없다
+   (스크롤 조상은 바깥의 `.ia-blocks` 다). 모서리는 머리줄이 직접 둥글린다. */
+.ia-block.is-character { display: block; padding: 0; cursor: default; }
 .ia-cblock-head {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   padding: 7px 9px; border-bottom: 1px solid var(--border-dim);
+  /* **머리줄을 고정한다**(사용자 지정 2026-08-12). 캐릭터가 둘 이상이면 카드가
+     길어져 아래쪽을 보는 동안 C 버튼과 Reference 가 화면 밖으로 나갔다. */
+  position: sticky; top: 0; z-index: 3;
+  background: var(--bg-surface);
+  border-top-left-radius: inherit; border-top-right-radius: inherit;
 }
+/* 고정된 머리줄이 카드 위를 덮으므로, 건너뛰기로 올린 카드가 그 밑에 숨지 않게
+   여백을 준다. */
+.ia-char { scroll-margin-top: 42px; }
+
+/* 머리줄의 [C1][C2][+] — Assets 의 인원 칸과 같은 모양으로 맞춘다. */
+.ia-cjumps { display: flex; gap: 3px; flex: 0 0 auto; }
+.ia-cjump {
+  min-width: 26px; padding: 3px 6px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: rgba(14, 16, 22, 0.86);
+  color: var(--text-muted); font-family: inherit; font-size: 10px;
+  letter-spacing: 0.6px; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ia-cjump:hover { color: var(--text-primary); border-color: var(--border); }
+/* 지금 펼쳐 둔 슬롯 — Assets 와 같은 불투명 연보라. */
+.ia-cjump.is-open {
+  border-color: var(--accent); background: #c2b7f8; color: #14141c; font-weight: 700;
+}
+.ia-cjump.is-open:hover { background: #d0c7fa; color: #14141c; }
+.ia-cjump.is-off { opacity: 0.45; }
+.ia-cjump.is-add { border-style: dashed; }
 .ia-char { border-bottom: 1px solid var(--border-dim); }
 .ia-char:last-of-type { border-bottom: 0; }
 .ia-char-head {

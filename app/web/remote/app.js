@@ -922,7 +922,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260812z-fit')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260813a-chead')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -931,7 +931,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveAutocomplete} =
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260812z-fit');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260813a-chead');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -945,7 +945,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     });
     // 씬(이벤트) 기록. Assets 바의 **반대쪽**(우하단)에 선다(사용자 지정).
     const {createInteractiveScenePanel} =
-      await import('./js/features/interactiveScenePanel.mjs?v=20260812z-fit');
+      await import('./js/features/interactiveScenePanel.mjs?v=20260813a-chead');
     interactiveScenePanel = createInteractiveScenePanel({
       document, escHtml, showToast, showAppDialog,
       getPanel: () => interactivePanel,
@@ -993,6 +993,8 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
         saveInteractiveSeedMemo();
         scheduleInteractiveStateSave();
       },
+      // 캐릭터 슬롯 삭제 확인에 쓴다.
+      showAppDialog,
       // 캐릭터 헤더의 [Reference] — 세션 CR 모듈을 연다. 패널을 복제하지 않는 이유는
       // 같은 상태를 두 곳에서 그리면 한쪽만 낡기 때문이다(이 저장소의 단골 사고).
       onCharReference: () => {
@@ -9246,7 +9248,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260812z-fit')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260813a-chead')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

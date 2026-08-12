@@ -360,6 +360,9 @@ export function createInteractivePanel({
   isGenerating = () => false,
   requestGeneration = () => {},
   showToast = () => {},
+  // 되돌릴 수 없는 것(캐릭터 슬롯 삭제)에 확인을 받는다. 없으면 그냥 지운다 —
+  // 호스트가 안 넘겨도 기능이 멈추지는 않게 한다.
+  showAppDialog = null,
   onCharReference = null,      // () => void — 세션 CR 모듈 열기(없으면 버튼을 안 낸다)
   getCharacterReferenceState = () => null,   // () => {frames:[{is_enabled}], is_naid45} | null
 } = {}) {
@@ -1027,6 +1030,23 @@ export function createInteractivePanel({
     }).join('');
 
     const activeCount = state.chars.filter(c => c.state === 'active').length;
+    // 캐릭터가 둘 이상이면 카드가 길어져 **아래쪽 슬롯이 화면 밖으로 나간다** —
+    // 머리줄을 고정하고(CSS sticky) 여기서 바로 건너뛴다(사용자 지정 2026-08-12).
+    // 모양은 Assets 의 인원 칸과 같게 맞춘다 — 같은 일을 하는 두 곳이 달라 보이면
+    // 하나를 배우고 다른 하나를 다시 배워야 한다.
+    const jump = state.chars.map((c, i) => {
+      const on = !!c.open;
+      const off = c.state !== 'active';
+      return `<button type="button" class="ia-cjump${on ? ' is-open' : ''}${
+        off ? ' is-off' : ''}" data-charjump="${i}" data-cid="${escHtml(c.id)}"
+        data-naia-title="${escHtml(`C${i + 1} 로 이동${off ? ' (지금 OFF)' : ''}`)}"
+        >C${i + 1}</button>`;
+    }).join('');
+    const canAdd = state.chars.length < MAX_NAI_CHARACTERS;
+    const jumpBar = `<span class="ia-cjumps">${jump}${canAdd
+      ? `<button type="button" class="ia-cjump is-add" data-charadd="1"
+          data-naia-title="캐릭터 슬롯을 하나 더 만듭니다">+</button>`
+      : ''}</span>`;
     return `<div class="ia-block is-character" data-slot="character">
       <div class="ia-cblock-head">
         <span class="ia-block-icon">\u{1F464}</span>
@@ -1034,6 +1054,7 @@ export function createInteractivePanel({
         <!-- '2 활성' 은 제목 **바로 옆**이다. 오른쪽 끝에 Reference 와 나란히 뒀더니
              그 버튼의 부제처럼 보여, 무엇이 2개인지 헷갈렸다(사용자 지적). -->
         <span class="ia-block-count">${activeCount} 활성</span>
+        ${jumpBar}
         <span style="flex:1"></span>
         ${isNai ? charRefButtonHtml() : ''}
       </div>
@@ -2402,6 +2423,19 @@ export function createInteractivePanel({
         toggleCharEnabled(el.dataset.cid);
       });
     });
+    blocksMount.querySelectorAll('[data-charjump]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        jumpToChar(Number(el.dataset.charjump));
+      });
+    });
+    const addTop = blocksMount.querySelector('[data-charadd]');
+    if (addTop) {
+      addTop.addEventListener('click', event => {
+        event.stopPropagation();
+        addCharacter();
+      });
+    }
     const addBtn = blocksMount.querySelector('[data-add-char]');
     if (addBtn) {
       addBtn.addEventListener('click', event => {
@@ -2595,6 +2629,23 @@ export function createInteractivePanel({
     emitChange();
     notifyRoster();
     return true;
+  }
+
+  /** 머리줄의 [C n]. **이미 열려 있으면 닫지 않는다** — 이 버튼은 여닫이가
+   *  아니라 '거기로 간다'이다. 접어 버리면 눌러서 갔는데 아무것도 안 보인다. */
+  function jumpToChar(index) {
+    const c = state.chars[index];
+    if (!c) return;
+    if (!c.open) {
+      state.chars.forEach((x, i) => { x.open = (i === index); });
+      renderBlocks();
+      notifyRoster();
+    }
+    // 렌더 뒤에 잡는다 — 위에서 다시 그렸으면 옛 노드는 이미 떨어져 나갔다.
+    const card = blocksMount.querySelector(`.ia-char[data-cid="${c.id}"]`);
+    if (card && card.scrollIntoView) {
+      card.scrollIntoView({block: 'start', behavior: 'smooth'});
+    }
   }
 
   function addCharacter() {
@@ -3083,15 +3134,29 @@ export function createInteractivePanel({
   }
 
   /** 마지막 하나가 아니면 캐릭터 슬롯 삭제. */
-  function deleteCharacter(cid) {
+  async function deleteCharacter(cid) {
     if (state.chars.length <= 1) {
       showToast('마지막 캐릭터 슬롯은 삭제할 수 없습니다.', 'error');
       return;
     }
     const idx = state.chars.findIndex(c => c.id === cid);
     if (idx < 0) return;
+    // **묻고 지운다**(사용자 지정 2026-08-12). [×] 가 복제 버튼 바로 옆이라
+    // 손이 미끄러지면 그대로 사라졌고, 되돌릴 길이 없었다.
+    if (typeof showAppDialog === 'function') {
+      const c = state.chars[idx];
+      const what = CHAR_SUBS.flatMap(x => c.fields[x.key] || []).join(', ') || '(빈 슬롯)';
+      const ok = await showAppDialog(
+        `C${idx + 1} — ${what}` + String.fromCharCode(10)
+        + '이 슬롯의 태그와 Fast 문장이 함께 사라집니다. 되돌릴 수 없습니다.',
+        {type: 'confirm', title: '캐릭터 슬롯을 지울까요?',
+         okText: '지우기', cancelText: '취소'});
+      if (!ok) return;
+      // 기다리는 사이에 슬롯이 바뀌었을 수 있다 — id 로 다시 찾는다.
+      if (state.chars.findIndex(x => x.id === cid) < 0) return;
+    }
     if (presetCid === cid) closePresetPanel();   // 사라진 슬롯을 겨냥한 팝업은 닫는다
-    state.chars.splice(idx, 1);
+    state.chars.splice(state.chars.findIndex(x => x.id === cid), 1);
     // 이 슬롯의 Fast 값도 함께 버린다. 안 버리면 지운 캐릭터의 문장이 상태에
     // 계속 남아 exportState 로 저장되고, 나중에 슬롯 수가 같아지면 순서 복원에
     // 얹혀 엉뚱한 캐릭터에 붙는다(Codex 리뷰 2026-08-08).

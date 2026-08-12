@@ -112,7 +112,7 @@ export function createInteractiveScenePanel({
       <div class="ia-sc-thumb">${row.thumb
         ? `<img src="${escHtml(thumbUrl(row))}" alt="" loading="lazy">` : ''}</div>
       <div class="ia-sc-body">
-        <div class="ia-sc-name" title="${escHtml(name)}">${escHtml(name || '이름 없음')}</div>
+        <div class="ia-sc-name">${escHtml(name || '이름 없음')}</div>
         <div class="ia-sc-meta">${n ? `<span class="ia-sc-n">${n}인</span>` : ''}</div>
       </div>
       <div class="ia-sc-acts">
@@ -144,6 +144,7 @@ export function createInteractiveScenePanel({
                         : '<div class="ia-sc-empty">아직 기록된 씬이 없습니다.</div>'}</div>`
       : '';
     root.innerHTML = head + list;
+    hideHover();          // 목록이 갈리면 가리키던 카드가 사라질 수 있다
   }
 
   // ---------------------------------------------------------------- 팝업
@@ -432,6 +433,168 @@ export function createInteractiveScenePanel({
     }
   }
 
+  // ---------------------------------------------------------------- 호버 상세
+  //
+  // 바의 카드는 이름 한 줄이 전부라 **무엇이 든 씬인지 알 수가 없었다**(사용자
+  // 지적). 납작한 프롬프트 한 줄을 툴팁으로 띄우던 것으로는 지금 판과 무엇이
+  // 다른지가 안 보인다. 올리면 **지금 장전된 씬과의 차이**를 보여준다:
+  // 이 카드에만 있는 태그는 강조하고, 지금 판에 있는데 이 카드엔 없는 것은
+  // 줄 뒤에 `제거됨:` 으로 단다. 즉 "이걸 적용하면 무엇이 달라지는가"다.
+  //
+  // Scene 팝업 카드에는 안 단다 - 거기는 누르면 오른쪽에 전체 미리보기가 열린다.
+  const HOVER_DELAY = 220;      // 지나가다 스치는 것으로는 안 뜬다
+  const bodyCache = new Map();  // id -> 본문(카드는 안 바뀌므로 한 번만 읽는다)
+  let hoverEl = null;
+  let hoverTimer = 0;
+  let hoverId = '';
+  let hoverSeq = 0;
+
+  function ensureHover() {
+    if (hoverEl && document.body.contains(hoverEl)) return hoverEl;
+    hoverEl = document.createElement('div');
+    hoverEl.className = 'ia-sc-hover';
+    hoverEl.hidden = true;
+    document.body.appendChild(hoverEl);   // 팝업과 같은 이유로 body 직계
+    return hoverEl;
+  }
+
+  function hideHover() {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = 0; }
+    hoverId = '';
+    hoverSeq += 1;                        // 늦게 온 본문이 다시 띄우지 못하게
+    if (hoverEl && !hoverEl.hidden) { hoverEl.hidden = true; hoverEl.innerHTML = ''; }
+  }
+
+  const flat = obj => Object.keys(obj || {}).flatMap(k => (obj || {})[k] || []);
+
+  /** 지금 장전된 씬. 패널이 없거나 아직 준비 전이면 비교를 접는다(전부 '같음'
+   *  으로 두면 차이가 없다고 거짓말을 하게 된다 - 아예 표시를 안 한다). */
+  function currentScene() {
+    const panel = typeof getPanel === 'function' ? getPanel() : null;
+    if (!panel || typeof panel.getSceneGlobals !== 'function') return null;
+    try {
+      return {globals: panel.getSceneGlobals() || {},
+              chars: panel.getSceneChars() || []};
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function tagRow(label, mine, cur, cmp) {
+    const list = (Array.isArray(mine) ? mine : []).filter(Boolean);
+    const now = new Set((Array.isArray(cur) ? cur : []).filter(Boolean));
+    const gone = cmp ? (Array.isArray(cur) ? cur : []).filter(
+      t => t && !list.includes(t)) : [];
+    if (!list.length && !gone.length) return '';
+    const chips = list.map(t =>
+      `<span class="ia-sc-hchip${cmp && !now.has(t) ? ' is-add' : ''}"
+        >${escHtml(t)}</span>`).join('');
+    const del = gone.length
+      ? `<span class="ia-sc-hgone">제거됨:</span>` + gone.map(t =>
+          `<span class="ia-sc-hchip is-del">${escHtml(t)}</span>`).join('')
+      : '';
+    return `<div class="ia-sc-hrow"><span class="ia-sc-hlabel">${escHtml(label)}</span>
+      <span class="ia-sc-hval">${chips}${del}</span></div>`;
+  }
+
+  function hoverHtml(row, body) {
+    const cur = currentScene();
+    const cmp = !!cur;
+    const g = (body && body.globals) || {};
+    const cg = (cur && cur.globals) || {};
+    const chars = Array.isArray(body && body.chars) ? body.chars : [];
+    const cchars = (cur && Array.isArray(cur.chars)) ? cur.chars : [];
+    const pick = o => (((o || {}).rating || {}).picks || []).filter(p => p && p !== 'none');
+    const name = String(row.name || '') || String(row.summary || '') || '이름 없음';
+
+    const head = `<div class="ia-sc-htitle">${escHtml(name)}</div>${
+      cmp ? '' : '<div class="ia-sc-hnote">지금 씬을 읽을 수 없어 차이를 못 냅니다</div>'}`;
+    const globalRows = [
+      tagRow('씬 태그', flat(g.slots), flat(cg.slots), cmp),
+      tagRow('구도', g.composition_tags, cg.composition_tags, cmp),
+      tagRow('Rating', pick(g), pick(cg), cmp),
+      tagRow('자유 입력', g.free_text ? [g.free_text] : [],
+             cg.free_text ? [cg.free_text] : [], cmp),
+      tagRow('전역 네거티브', g.fast_negative ? [g.fast_negative] : [],
+             cg.fast_negative ? [cg.fast_negative] : [], cmp),
+    ].join('');
+
+    const charRows = chars.map((c, i) => {
+      const o = cchars[i] || {};
+      const isNew = cmp && i >= cchars.length;
+      const rows = [
+        tagRow('프롬프트', flat(c.fields), flat(o.fields), cmp && !isNew),
+        tagRow('ALT·시선', [...(c.alt || []), ...(c.gaze || [])],
+               [...(o.alt || []), ...(o.gaze || [])], cmp && !isNew),
+        tagRow('네거티브', flat(c.neg), flat(o.neg), cmp && !isNew),
+      ].join('');
+      return `<div class="ia-sc-hchar"><div class="ia-sc-hchead">C${i + 1}
+        <span class="ia-sc-hsub">${escHtml(
+          (c.gender === 'male' ? 'boy' : 'girl') + ' · ' + (c.pos || 'C3'))}</span>${
+        isNew ? '<span class="ia-sc-hnew">새 캐릭터</span>' : ''}</div>
+        ${rows || '<div class="ia-sc-hempty">상황 태그 없음</div>'}</div>`;
+    }).join('');
+
+    // 지금 판에만 있는 캐릭터 - 적용하면 사라진다.
+    const dropped = cmp && cchars.length > chars.length
+      ? `<div class="ia-sc-hchar is-drop">C${chars.length + 1}${
+          cchars.length > chars.length + 1 ? `~C${cchars.length}` : ''} 제거됨</div>`
+      : '';
+    return head + globalRows + charRows + dropped;
+  }
+
+  function placeHover(card) {
+    const el = ensureHover();
+    const r = card.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    // 카드 위쪽에 띄운다(바가 화면 아래에 붙어 있다). 자리가 없으면 아래로.
+    let y = r.top - b.height - 8;
+    if (y < 6) y = Math.min(r.bottom + 8, window.innerHeight - b.height - 6);
+    const x = Math.max(6, Math.min(r.left, window.innerWidth - b.width - 6));
+    el.style.left = `${x}px`;
+    el.style.top = `${Math.max(6, y)}px`;
+  }
+
+  async function showHover(card) {
+    const id = card.dataset.scid;
+    const row = recent.find(r => r.id === id);
+    if (!id || !row) return;
+    const seq = ++hoverSeq;
+    hoverId = id;
+    let body = bodyCache.get(id);
+    if (body === undefined) {
+      try {
+        body = await api(`/scene?id=${encodeURIComponent(id)}`);
+        bodyCache.set(id, body);
+      } catch (_) {
+        body = null;                      // 못 읽어도 이름만은 띄운다
+      }
+    }
+    if (seq !== hoverSeq || hoverId !== id) return;   // 그새 다른 데로 갔다
+    const el = ensureHover();
+    el.innerHTML = hoverHtml(row, body);
+    el.hidden = false;
+    placeHover(card);
+  }
+
+  function onOver(event) {
+    const card = event.target && event.target.closest
+      ? event.target.closest('.ia-sc-card') : null;
+    if (!card || !card.dataset.scid) return;
+    if (card.dataset.scid === hoverId) return;        // 같은 카드 안에서 움직인 것
+    hideHover();
+    hoverTimer = setTimeout(() => { hoverTimer = 0; showHover(card); }, HOVER_DELAY);
+  }
+
+  function onOut(event) {
+    const card = event.target && event.target.closest
+      ? event.target.closest('.ia-sc-card') : null;
+    if (!card) return;
+    const to = event.relatedTarget;
+    if (to && card.contains(to)) return;              // 카드 안에서 옮겨 다닌 것
+    hideHover();
+  }
+
   // ---------------------------------------------------------------- 우클릭 메뉴
   //
   // 카드에서 버튼을 걷어낸 대가로 여기가 **유일한 손잡이**가 된다. 미리보기를 열고
@@ -529,6 +692,7 @@ export function createInteractiveScenePanel({
     if (!card || !card.dataset.scid) return;
     dragId = card.dataset.scid;
     closeMenu();
+    hideHover();
     markZones(true);
     try {
       event.dataTransfer.setData(DND_MIME, dragId);
@@ -856,6 +1020,11 @@ export function createInteractiveScenePanel({
 
   root.addEventListener('click', onClick);
   root.addEventListener('input', onInput);
+  root.addEventListener('mouseover', onOver);
+  root.addEventListener('mouseout', onOut);
+  // 스크롤·창 크기 변경이면 카드가 마우스 밑에서 빠져나간다 - 따라다니지 않고 닫는다.
+  window.addEventListener('scroll', hideHover, true);
+  window.addEventListener('resize', hideHover);
 
   return {
     /** Interactive 모드 on/off 를 그대로 따른다 — 이 패널은 그 모드의 도구다. */
@@ -886,6 +1055,13 @@ export function createInteractiveScenePanel({
     },
     destroy() {
       closeMenu();
+      hideHover();
+      if (hoverEl && hoverEl.parentNode) hoverEl.parentNode.removeChild(hoverEl);
+      hoverEl = null;
+      window.removeEventListener('scroll', hideHover, true);
+      window.removeEventListener('resize', hideHover);
+      root.removeEventListener('mouseover', onOver);
+      root.removeEventListener('mouseout', onOut);
       if (menuEl && menuEl.parentNode) menuEl.parentNode.removeChild(menuEl);
       menuEl = null;
       root.removeEventListener('click', onClick);

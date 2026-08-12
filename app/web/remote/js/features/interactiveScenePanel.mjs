@@ -472,14 +472,20 @@ export function createInteractiveScenePanel({
     }
   }
 
+  /** 한 줄 입력. **`showAppDialog(message, options)` 다** — 첫 인자가 문자열이고
+   *  옵션은 `{type, title, okText, cancelText, defaultValue}` 다. 객체를 첫 인자로
+   *  넘겼더니 안에서 `escHtml(message)` 가 `s.replace is not a function` 으로 터져
+   *  이름·폴더 버튼이 전부 죽었다(사용자 지적 2026-08-12 · 계약을 안 보고 지어냈다).
+   *  prompt 는 문자열(취소면 null)을, confirm 은 true/false 를 준다. */
   async function askText(title, initial) {
     if (typeof showAppDialog !== 'function') return null;
-    const got = await showAppDialog({
-      title, prompt: true, value: initial || '',
-      confirmLabel: '확인', cancelLabel: '취소',
+    const got = await showAppDialog('', {
+      type: 'prompt', title,
+      defaultValue: String(initial || ''),
+      okText: '확인', cancelText: '취소',
     });
     if (got === null || got === undefined || got === false) return null;
-    return String(typeof got === 'string' ? got : (got.value || '')).trim();
+    return String(got).trim();
   }
 
   function openSaved() {
@@ -571,11 +577,11 @@ export function createInteractiveScenePanel({
           // 사라지므로 그 사실까지 문구로 못박는다.
           const deep = !curSub && folders.some(f => f.parent === curTop);
           const ok = typeof showAppDialog === 'function'
-            ? await showAppDialog({
-                title: '폴더를 지울까요?',
-                message: (deep ? '하위 카테고리도 함께 사라집니다. ' : '')
-                  + '폴더만 지웁니다 — 안에 든 씬은 사라지지 않고 폴더 없음으로 옮겨집니다.',
-                confirmLabel: '지우기', cancelLabel: '취소', danger: true})
+            ? await showAppDialog(
+                (deep ? '하위 카테고리도 함께 사라집니다. ' : '')
+                + '폴더만 지웁니다 — 안에 든 씬은 사라지지 않고 폴더 없음으로 옮겨집니다.',
+                {type: 'confirm', title: '폴더를 지울까요?',
+                 okText: '지우기', cancelText: '취소'})
             : true;
           if (ok) {
             await api('/scene/folders', {op: 'delete', id: target});

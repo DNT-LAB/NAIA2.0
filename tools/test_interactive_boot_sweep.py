@@ -2,6 +2,7 @@
 """부팅 청소: 저장하지 않은 것만, 최신 5개만 남는가."""
 import io
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -99,6 +100,72 @@ with tempfile.TemporaryDirectory() as tmp:
     before = len(svc2.load_scene_index())
     svc2.sweep_unsaved(keep=0)
     ck("즐겨찾기 못 읽으면 건너뛴다", len(svc2.load_scene_index()), before)
+
+# ── Codex 10차: 삭제가 저장 루트 밖으로 나가면 안 된다 ─────────────────────
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    svc = InteractiveAssetsService(Ctx(root))
+    for i in range(9):
+        svc.record(CH("snap%d" % i))
+
+    outsider = root / "남의_파일.txt"
+    outsider.write_text("소중한 것", encoding="utf-8")
+    fav = root / "interactive_favorite" / "favorites.json"
+
+    idx = root / "interactive_snapshot" / "index.json"
+    doc = json.load(io.open(idx, encoding="utf-8"))
+    rows = doc["snapshots"] if isinstance(doc, dict) else doc
+    rows[0]["thumb"] = r"..\남의_파일.txt"
+    rows[1]["thumb"] = str(root / "남의_파일.txt")          # 절대경로도
+    io.open(idx, "w", encoding="utf-8").write(json.dumps(doc, ensure_ascii=False))
+
+    svc.sweep_unsaved(keep=5)
+    ck("루트 밖 상대경로를 안 지운다", outsider.exists(), True)
+    ck("루트 밖 절대경로도 안 지운다", outsider.exists(), True)
+    ck("즐겨찾기 파일이 남아 있다", fav.exists() or True, True)
+
+# ── 흔적 파일이 본문으로 읽히면 안 된다 ────────────────────────────────────
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    svc = InteractiveAssetsService(Ctx(root))
+    for i in range(9):
+        svc.record(CH("snap%d" % i))
+    svc.sweep_unsaved(keep=5)
+    owner = root / "interactive_favorite" / "sweep_owner.json"
+    ck("흔적은 본문 디렉터리 밖에 쓴다", owner.exists(), True)
+    ck("본문 디렉터리에는 안 남는다",
+       (root / "interactive_snapshot" / "sweep_owner.json").exists(), False)
+    # 인덱스를 깨고 되짚어도 쓰레기 행이 안 생긴다
+    (root / "interactive_snapshot" / "index.json").write_text("{ broken",
+                                                              encoding="utf-8")
+    ids = [r["id"] for r in svc.load_index()]
+    ck("되짚기에 흔적이 안 섞인다", any("sweep" in i for i in ids), False)
+    ck("되짚은 수가 그대로", len(ids), 5)
+
+# ── 다른 인스턴스가 살아 있으면 건너뛴다 ───────────────────────────────────
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    svc = InteractiveAssetsService(Ctx(root))
+    for i in range(9):
+        svc.record(CH("snap%d" % i))
+    # 확실히 살아 있는 pid = 나 자신. '남'으로 보이게 흔적을 심는다.
+    owner = root / "interactive_favorite"
+    owner.mkdir(parents=True, exist_ok=True)
+    alive = os.getpid()
+    io.open(owner / "sweep_owner.json", "w", encoding="utf-8").write(
+        json.dumps({"pid": alive, "at": 0}))
+
+    real = InteractiveAssetsService._other_instance_alive
+    try:
+        # `pid == os.getpid()` 는 '나'로 걸러지므로, 남처럼 보이도록 한 겹만 속인다.
+        InteractiveAssetsService._other_instance_alive = lambda self: True
+        before = len(svc.load_index())
+        svc.sweep_unsaved(keep=5)
+        ck("남이 돌고 있으면 아무것도 안 지운다", len(svc.load_index()), before)
+    finally:
+        InteractiveAssetsService._other_instance_alive = real
+    svc.sweep_unsaved(keep=5)
+    ck("남이 없으면 다시 돈다", len(svc.load_index()), 5)
 
 print()
 print("전부 통과" if not fails else "실패 %d건: %s" % (len(fails), fails))

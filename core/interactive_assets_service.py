@@ -80,6 +80,9 @@ SNAPSHOT_DIR_NAME = "interactive_snapshot"
 # 두 종류를 구분해야 한다.
 SCENE_DIR_NAME = "interactive_scene"
 SCENE_FOLDERS_NAME = "folders.json"
+# 부팅 청소를 한 인스턴스의 흔적. 같은 user-data 를 두 인스턴스가 볼 때,
+# 뒤에 뜬 쪽이 앞선 세션의 기록을 지우는 것을 막는 데 쓴다.
+SWEEP_OWNER_NAME = "sweep_owner.json"
 FAVORITE_DIR_NAME = "interactive_favorite"
 INDEX_NAME = "index.json"
 FAVORITE_NAME = "favorites.json"
@@ -414,6 +417,7 @@ class InteractiveAssetsService:
         return self.snapshot_root / INDEX_NAME
 
     def _body_path(self, snapshot_id: str) -> Path:
+        # id 는 우리가 만든 hex 지만, 인덱스를 통해 들어오면 남의 글이다.
         return self.snapshot_root / f"{snapshot_id}.json"
 
     def _favorite_path(self) -> Path:
@@ -427,6 +431,30 @@ class InteractiveAssetsService:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, path)
+
+    @staticmethod
+    def _inside(root: Path, name: Any) -> Path | None:
+        """`root` 안의 파일이면 그 경로를, 아니면 None.
+
+        인덱스는 **디스크에 있는 남의 글**이다. 손상되거나 손으로 고쳐져
+        `thumb` 이 `..\\favorites.json` 이나 절대경로를 담고 있으면, 지우기가
+        저장 루트 밖으로 나간다 — 실증했다(Codex 10차: 즐겨찾기 파일을 지워
+        보호 목록을 비우고, 이어지는 씬 청소가 원래 지켜야 할 것까지 지웠다).
+        여기서 한 번 가둔다. 이름에 구분자가 없어도 `resolve()` 로 확인한다.
+        """
+        text = str(name or "").strip()
+        if not text:
+            return None
+        try:
+            base = root.resolve()
+            target = (root / text).resolve()
+            target.relative_to(base)          # 밖이면 ValueError
+        except (ValueError, OSError):
+            print(f"[interactive-assets] refused to delete outside root: {text!r}")
+            return None
+        if target == base:
+            return None
+        return target
 
     @staticmethod
     def _quarantine(path: Path) -> None:
@@ -728,12 +756,23 @@ class InteractiveAssetsService:
 
     def _flush_deletes(self) -> None:
         """프루닝이 정한 삭제를 인덱스 확정 뒤에 실행한다."""
+        self._unlink_rows(self.snapshot_root, self._body_path)
+
+    def _unlink_rows(self, root: Path, body_of) -> None:
+        """본문과 썸네일을 지운다 — **루트 안으로 가둔 뒤에**.
+
+        한 건이 실패해도 나머지를 계속 지운다. 중간에 멈추면 인덱스에는 없는
+        고아 본문이 남고, 나중에 인덱스가 깨져 되짚을 때 되살아난다.
+        """
         for row in self._pending_delete:
-            sid = str(row.get("id"))
-            thumb = row.get("thumb")
-            if thumb:
-                (self.snapshot_root / str(thumb)).unlink(missing_ok=True)
-            self._body_path(sid).unlink(missing_ok=True)
+            for path in (self._inside(root, row.get("thumb")),
+                         body_of(str(row.get("id")))):
+                if path is None:
+                    continue
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as exc:
+                    print(f"[interactive-assets] delete failed: {path.name} - {exc}")
         self._pending_delete = []
 
     # ── 씬(=이벤트) ─────────────────────────────────────────────────────────
@@ -1188,15 +1227,44 @@ class InteractiveAssetsService:
             return True
 
     def _flush_scene_deletes(self) -> None:
-        for row in self._pending_delete:
-            sid = str(row.get("id"))
-            thumb = row.get("thumb")
-            if thumb:
-                (self.scene_root / str(thumb)).unlink(missing_ok=True)
-            self._scene_body_path(sid).unlink(missing_ok=True)
-        self._pending_delete = []
+        self._unlink_rows(self.scene_root, self._scene_body_path)
 
     # ── 즐겨찾기 ────────────────────────────────────────────────────────────
+    def _sweep_owner_path(self) -> Path:
+        # **본문 디렉터리에 두지 않는다.** 되짚기가 `s*.json` 을 훑으므로
+        # `sweep_owner.json` 이 본문으로 읽혀 쓰레기 행이 생긴다(자체 감사).
+        return self.favorite_root / SWEEP_OWNER_NAME
+
+    def _other_instance_alive(self) -> bool:
+        """같은 user-data 를 보는 다른 인스턴스가 아직 살아 있는가.
+
+        살아 있으면 청소를 건너뛴다 — 그쪽은 **지금 세션 중**이라, 아직 이름을
+        안 붙였을 뿐인 기록을 뒤에 뜬 쪽이 지워 버린다(Codex 10차 P1).
+
+        `os.kill(pid, 0)` 은 **쓰지 않는다** — Windows 의 CPython 은 그것을
+        TerminateProcess 로 옮기므로 살아 있는지 물어보려다 남의 앱을 죽인다.
+        psutil 이 없으면 알 수 없다고 본다(청소는 진행한다 — 같은 폴더를 두
+        인스턴스가 보는 것은 원래 지원하지 않는 구성이다).
+        """
+        p = self._sweep_owner_path()
+        if not p.exists():
+            return False
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+            pid = int(doc.get("pid") or 0)
+        except Exception:
+            return False
+        if pid <= 0 or pid == os.getpid():
+            return False
+        try:
+            import psutil                      # 선언된 의존이 아니다 - 있으면 쓴다
+        except Exception:
+            return False
+        try:
+            return bool(psutil.pid_exists(pid))
+        except Exception:
+            return False
+
     # ── 세션 청소 ──────────────────────────────────────────────────────────
     def sweep_unsaved(self, keep: int = BOOT_KEEP_UNSAVED) -> dict[str, int]:
         """저장하지 않은 기록을 최신 `keep` 개만 남기고 버린다.
@@ -1211,36 +1279,57 @@ class InteractiveAssetsService:
         """
         n = max(0, int(keep))
         out = {"snapshots": 0, "scenes": 0}
-
-        rows = self.load_index()                       # 오래된 것이 앞
-        pinned, ok = self._pinned_snapshot_ids()
-        if ok:
-            loose = [r for r in rows if r.get("id") not in pinned]
-            doomed_ids = {r.get("id") for r in (loose[:-n] if n else loose)}
-            if doomed_ids:
-                kept = [r for r in rows if r.get("id") not in doomed_ids]
-                self._pending_delete = [r for r in rows if r.get("id") in doomed_ids]
-                self._save_index(kept)                 # 인덱스를 먼저 확정한다
-                self._flush_deletes()
-                out["snapshots"] = len(doomed_ids)
-        else:
-            print("[interactive-assets] favorites unreadable; boot sweep skipped")
-
-        rows = self.load_scene_index()
-        pinned, ok = self._pinned_ids("scene")
-        if ok:
-            loose = [r for r in rows
-                     if not r.get("saved") and r.get("id") not in pinned]
-            doomed_ids = {r.get("id") for r in (loose[:-n] if n else loose)}
-            if doomed_ids:
-                kept = [r for r in rows if r.get("id") not in doomed_ids]
-                self._pending_delete = [r for r in rows if r.get("id") in doomed_ids]
-                self._save_scene_index(kept)
-                self._flush_scene_deletes()
-                out["scenes"] = len(doomed_ids)
-        else:
-            print("[interactive-scene] favorites unreadable; boot sweep skipped")
+        if self._other_instance_alive():
+            print("[interactive-assets] another instance is running; boot sweep skipped")
+            return out
+        with self._lock:
+            out["snapshots"] = self._sweep_one(
+                n, self.load_index, self._save_index, self._flush_deletes,
+                self._pinned_snapshot_ids, lambda r: False, "interactive-assets")
+            out["scenes"] = self._sweep_one(
+                n, self.load_scene_index, self._save_scene_index,
+                self._flush_scene_deletes, lambda: self._pinned_ids("scene"),
+                lambda r: bool(r.get("saved")), "interactive-scene")
+        try:
+            self._write_atomic(self._sweep_owner_path(), {
+                "note": ["부팅 청소를 한 인스턴스. 같은 user-data 를 보는 다른",
+                         "인스턴스가 살아 있으면 청소를 건너뛴다."],
+                "pid": os.getpid(), "at": _now(),
+            })
+        except Exception as exc:               # 흔적을 못 남겨도 청소는 유효하다
+            print(f"[interactive-assets] sweep owner note failed: {exc}")
         return out
+
+    def _sweep_one(self, keep, load, save, flush, pinned_of, protected_of,
+                   tag: str) -> int:
+        """한 계층을 쓸어낸다. 지운 수를 돌려준다."""
+        rows = load()                          # 오래된 것이 앞
+        pinned, ok = pinned_of()
+        if not ok:
+            print(f"[{tag}] favorites unreadable; boot sweep skipped")
+            return 0
+        keeps = lambda r: protected_of(r) or r.get("id") in pinned
+        loose = [r for r in rows if not keeps(r)]
+        doomed_ids = {r.get("id") for r in (loose[:-keep] if keep else loose)}
+        if not doomed_ids:
+            return 0
+        # **쓰기 직전에 다시 읽는다.** 계산과 저장 사이에 다른 인스턴스가 이름을
+        # 붙였거나 즐겨찾기에 올렸을 수 있다 - 낡은 판단으로 덮으면 그것이
+        # 영구 삭제된다(Codex 10차 P1). 창을 밀리초로 좁힌다.
+        rows = load()
+        pinned, ok = pinned_of()
+        if not ok:
+            print(f"[{tag}] favorites unreadable on recheck; boot sweep skipped")
+            return 0
+        doomed_ids = {r.get("id") for r in rows
+                      if r.get("id") in doomed_ids and not keeps(r)}
+        if not doomed_ids:
+            return 0
+        kept = [r for r in rows if r.get("id") not in doomed_ids]
+        self._pending_delete = [r for r in rows if r.get("id") in doomed_ids]
+        save(kept)                             # 인덱스를 먼저 확정한다
+        flush()
+        return len(doomed_ids)
 
     def _pinned_ids(self, kind: str) -> tuple[set[str], bool]:
         """(보호 대상, 읽기 성공 여부). 실패를 빈 집합과 구분해야 한다 —

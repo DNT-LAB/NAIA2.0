@@ -466,7 +466,11 @@ export function createInteractiveScenePanel({
   //
   // Scene 팝업 카드에는 안 단다 - 거기는 누르면 오른쪽에 전체 미리보기가 열린다.
   const HOVER_DELAY = 220;      // 지나가다 스치는 것으로는 안 뜬다
-  const bodyCache = new Map();  // id -> 본문(카드는 안 바뀌므로 한 번만 읽는다)
+  // id -> 본문. 같은 id 의 본문은 내용이 안 바뀌므로(해시가 곧 id 다) 한 번만
+  // 읽는다. 다만 긴 세션에서 무한히 자라지 않게 오래된 것부터 버린다 - Map 은
+  // 넣은 순서를 지키므로 첫 키가 가장 오래된 것이다(Codex 10차 P3).
+  const BODY_CACHE_MAX = 60;
+  const bodyCache = new Map();
   let hoverEl = null;
   let hoverTimer = 0;
   let hoverId = '';
@@ -505,12 +509,23 @@ export function createInteractiveScenePanel({
 
   function tagRow(label, mine, cur, cmp) {
     const list = (Array.isArray(mine) ? mine : []).filter(Boolean);
-    const now = new Set((Array.isArray(cur) ? cur : []).filter(Boolean));
-    const gone = cmp ? (Array.isArray(cur) ? cur : []).filter(
-      t => t && !list.includes(t)) : [];
+    const now = (Array.isArray(cur) ? cur : []).filter(Boolean);
+    // **개수로 센다.** 집합으로 보면 같은 태그가 지금 판의 두 슬롯에 있고 카드엔
+    // 하나뿐일 때 '하나 빠진다'를 놓친다(Codex 10차 P3). 남은 개수를 깎아 가며
+    // 짝을 맞추고, 못 맞춘 것만 추가/제거로 센다.
+    const left = new Map();
+    for (const t of now) left.set(t, (left.get(t) || 0) + 1);
+    const isAdd = [];
+    for (const t of list) {
+      const n = left.get(t) || 0;
+      isAdd.push(cmp && n <= 0);
+      if (n > 0) left.set(t, n - 1);
+    }
+    const gone = [];
+    if (cmp) for (const [t, n] of left) for (let i = 0; i < n; i++) gone.push(t);
     if (!list.length && !gone.length) return '';
-    const chips = list.map(t =>
-      `<span class="ia-sc-hchip${cmp && !now.has(t) ? ' is-add' : ''}"
+    const chips = list.map((t, i) =>
+      `<span class="ia-sc-hchip${isAdd[i] ? ' is-add' : ''}"
         >${escHtml(t)}</span>`).join('');
     const del = gone.length
       ? `<span class="ia-sc-hgone">제거됨:</span>` + gone.map(t =>
@@ -521,6 +536,14 @@ export function createInteractiveScenePanel({
   }
 
   function hoverHtml(row, body) {
+    const name0 = String(row.name || '') || String(row.summary || '') || '이름 없음';
+    // **본문을 못 읽었으면 비교하지 않는다.** 빈 본문과 견주면 지금 판의 것이
+    // 전부 '제거됨'으로 뜬다 - 정작 [복원]은 본문이 없어 동작도 못 하므로
+    // 화면이 거짓말을 한다(Codex 10차 P2 · 재현).
+    if (!body) {
+      return `<div class="ia-sc-htitle">${escHtml(name0)}</div>
+        <div class="ia-sc-hnote">이 씬의 내용을 읽지 못했습니다 — 차이를 낼 수 없습니다</div>`;
+    }
     const cur = currentScene();
     const cmp = !!cur;
     const g = (body && body.globals) || {};
@@ -528,9 +551,7 @@ export function createInteractiveScenePanel({
     const chars = Array.isArray(body && body.chars) ? body.chars : [];
     const cchars = (cur && Array.isArray(cur.chars)) ? cur.chars : [];
     const pick = o => (((o || {}).rating || {}).picks || []).filter(p => p && p !== 'none');
-    const name = String(row.name || '') || String(row.summary || '') || '이름 없음';
-
-    const head = `<div class="ia-sc-htitle">${escHtml(name)}</div>${
+    const head = `<div class="ia-sc-htitle">${escHtml(name0)}</div>${
       cmp ? '' : '<div class="ia-sc-hnote">지금 씬을 읽을 수 없어 차이를 못 냅니다</div>'}`;
     const globalRows = [
       tagRow('씬 태그', flat(g.slots), flat(cg.slots), cmp),
@@ -589,8 +610,11 @@ export function createInteractiveScenePanel({
       try {
         body = await api(`/scene?id=${encodeURIComponent(id)}`);
         bodyCache.set(id, body);
+        while (bodyCache.size > BODY_CACHE_MAX) {
+          bodyCache.delete(bodyCache.keys().next().value);
+        }
       } catch (_) {
-        body = null;                      // 못 읽어도 이름만은 띄운다
+        body = null;      // 캐시하지 않는다 - 다음에 올리면 다시 읽어 본다
       }
     }
     if (seq !== hoverSeq || hoverId !== id) return;   // 그새 다른 데로 갔다
@@ -792,6 +816,10 @@ export function createInteractiveScenePanel({
     const el = event.target && event.target.closest
       ? event.target.closest('[data-scdrop]') : null;
     if (el) el.classList.remove('is-drop');
+    // 칸을 벗어나면 굴리기를 멈춘다. `dragover` 는 창 밖으로 나가면 더 오지
+    // 않으므로, 여기서 안 끄면 계속 굴러간다(Codex 10차 P3).
+    if (event.target && event.target.closest
+        && event.target.closest('.ia-sc-col1, .ia-sc-col2')) stopEdge();
   }
 
   async function onDrop(event) {
@@ -1080,6 +1108,8 @@ export function createInteractiveScenePanel({
     destroy() {
       closeMenu();
       hideHover();
+      stopEdge();
+      markZones(false);
       if (hoverEl && hoverEl.parentNode) hoverEl.parentNode.removeChild(hoverEl);
       hoverEl = null;
       window.removeEventListener('scroll', hideHover, true);

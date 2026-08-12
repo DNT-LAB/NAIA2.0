@@ -293,6 +293,14 @@ const CHAR_SUBS = [
    // 이미지 전체에만 걸리는 태그는 뺀다(`isometric`·`female pov`·`multiple views` …).
    // 씬 슬롯에는 그대로 있으니 못 쓰게 되는 것은 없다.
    excludeTags: VIEW_GLOBAL_TAGS},
+  // 어느 칸에도 안 맞는 것을 적는 자리(사용자 지정 2026-08-12). 축이 없으므로
+  // **옆 팝업을 띄우지 않는다**(`noPanel`) — 캐릭터 슬롯과 같은 인라인 입력이다.
+  // 순서상 맨 뒤라 `buildCharPrompt` 가 이 태그를 캐릭터 프롬프트 **끝**에 붙인다.
+  //
+  // 이 한 줄만으로는 부족하다: 아래 `RESTORE_GROUPS` 에 `extra` 축을 등록해야
+  // 복원 범위에 나타나고, 그래야 Assets 복원과 씬 기록이 이 칸을 함께 나른다.
+  // 등록을 빠뜨리면 화면에는 있는데 **어디에도 안 실려 조용히 증발한다**.
+  {key: '기타', icon: '\u{1F4DD}', axis: 'extra', noPanel: true},
 ];
 
 /** 팔레트/슬라이더는 축 안에서 하나만 유효하다 — 그 축의 모든 태그(소문자). */
@@ -2505,6 +2513,10 @@ export function createInteractivePanel({
     {key: 'clothing', label: '의상', axes: ['clothing'], extras: ['alt']},
     {key: 'situation', label: '상황',
      axes: ['expression', 'pose_action', 'object', 'meta'], extras: ['gaze']},
+    // '기타'는 자유 입력이라 정체성인지 상황인지 우리가 정할 수 없다 —
+    // **따로 묶어 사용자가 고르게 한다**. 남의 묶음에 얹으면 의상만 가져오려던
+    // 사람이 자유 입력까지 함께 받는다.
+    {key: 'extra', label: '기타', axes: ['extra'], extras: []},
   ];
 
   /** 복원에서 고를 수 있는 항목. 슬롯 11개 + alt/gaze. */

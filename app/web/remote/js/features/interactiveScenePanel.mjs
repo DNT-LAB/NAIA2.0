@@ -117,7 +117,7 @@ export function createInteractiveScenePanel({
       </div>
       <div class="ia-sc-acts">
         <button type="button" class="ia-sc-btn" data-scact="apply" data-scid="${escHtml(row.id)}"
-          data-naia-title="이 씬을 지금 캐릭터에게 입힙니다">적용</button>
+          data-naia-title="그릴 때의 상태로 되돌립니다">복원</button>
         <button type="button" class="ia-sc-btn" data-scact="save" data-scid="${escHtml(row.id)}"
           data-naia-title="Scene 으로 올립니다 — 올리지 않으면 다음에 열 때 사라질 수 있습니다"
           >저장</button>
@@ -431,6 +431,29 @@ export function createInteractiveScenePanel({
         try { next.setSelectionRange(caret[0], caret[1]); } catch (_) { /* 무시 */ }
       }
     }
+  }
+
+  // 바깥을 누르면 접는다 — 캐릭터 쪽 Assets 와 같은 규약(사용자 지정 2026-08-12).
+  //
+  // **click(버블)이다.** `pointerdown` 으로 걸면 카드/버튼의 제 핸들러보다 먼저
+  // 돌아 방금 연 것을 자기가 닫는다(패널 쪽에서 겪은 함정).
+  // '바깥'에서 빼는 것: 이 바 전체(토글·카드·버튼), Scene 팝업과 그 메뉴.
+  const BAR_KEEP_OPEN = '.ia-sc-pop, .ia-sc-menu, .ia-sc-hover';
+
+  function onBarOutside(event) {
+    if (!open) return;
+    const t = event.target;
+    if (!t || !t.closest) return;
+    // **문서에서 떨어져 나간 노드는 '바깥'이 아니다.** [Recent]를 누르면 그
+    // 핸들러가 render() 로 바를 통째로 갈아 끼우고 그 뒤에야 클릭이 문서까지
+    // 올라온다 - 그때 target 의 조상은 이미 없어서 아래 검사가 전부 빗나가고
+    // 방금 편 것을 자기가 닫는다.
+    if (!document.contains(t)) return;
+    if (root.contains(t)) return;
+    if (t.closest(BAR_KEEP_OPEN)) return;
+    open = false;
+    hideHover();
+    render();
   }
 
   // ---------------------------------------------------------------- 호버 상세
@@ -1025,6 +1048,7 @@ export function createInteractiveScenePanel({
   // 스크롤·창 크기 변경이면 카드가 마우스 밑에서 빠져나간다 - 따라다니지 않고 닫는다.
   window.addEventListener('scroll', hideHover, true);
   window.addEventListener('resize', hideHover);
+  document.addEventListener('click', onBarOutside);
 
   return {
     /** Interactive 모드 on/off 를 그대로 따른다 — 이 패널은 그 모드의 도구다. */
@@ -1060,6 +1084,7 @@ export function createInteractiveScenePanel({
       hoverEl = null;
       window.removeEventListener('scroll', hideHover, true);
       window.removeEventListener('resize', hideHover);
+      document.removeEventListener('click', onBarOutside);
       root.removeEventListener('mouseover', onOver);
       root.removeEventListener('mouseout', onOut);
       if (menuEl && menuEl.parentNode) menuEl.parentNode.removeChild(menuEl);

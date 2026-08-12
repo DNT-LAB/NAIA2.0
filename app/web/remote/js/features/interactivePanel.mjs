@@ -2604,8 +2604,14 @@ export function createInteractivePanel({
       gaze: take('@gaze')
         ? (Array.isArray(row.gaze) ? [...row.gaze] : [])
         : (Array.isArray(base.gaze) ? [...base.gaze] : []),
+      // **기록에 그 칸이 아예 없으면 지금 값을 그대로 둔다**(Codex 12차 · 실증).
+      // 슬롯을 새로 만들면 그 이전 기록에는 키 자체가 없다 — 그것을 '빈 값'으로
+      // 읽어 덮으면, 옛 씬을 하나 복원했을 뿐인데 사용자가 방금 적은 '기타'가
+      // 사라진다(실측: 기타 2개 -> 0개). 키가 **있는데 비어 있는** 것은 그대로
+      // 존중한다 — 그건 기록이 '이 칸은 비었다'고 말한 것이다.
       fields: Object.fromEntries(CHAR_SUBS.map(sub => {
-        if (!take(sub.key)) {
+        const known = fields && Object.prototype.hasOwnProperty.call(fields, sub.key);
+        if (!take(sub.key) || !known) {
           const kept = base.fields && base.fields[sub.key];
           return [sub.key, Array.isArray(kept) ? [...kept] : defaultFieldsFor(sub.key)];
         }
@@ -2616,7 +2622,8 @@ export function createInteractivePanel({
       // 안 고른 슬롯이면 바탕의 값. 여기를 빼먹어 전부 복원이 저장된 네거티브를
       // 빈 배열로 덮고, 부분 복원은 아예 적용하지 않았다(Codex 4차).
       neg: Object.fromEntries(CHAR_SUBS.map(sub => {
-        if (!take(sub.key)) {
+        const known = neg && Object.prototype.hasOwnProperty.call(neg, sub.key);
+        if (!take(sub.key) || !known) {          // 위 fields 와 같은 규약
           const kept = base.neg && base.neg[sub.key];
           return [sub.key, Array.isArray(kept) ? [...kept] : []];
         }

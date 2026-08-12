@@ -192,14 +192,25 @@ def snapshot_hash(chars: list[dict[str, Any]]) -> str:
     return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
+# 요약에 **앞세우는** 칸. 목록 검색이 본문이 아니라 이 한 줄만 보므로, 여기서
+# 잘리면 그 태그로는 영영 못 찾는다(Codex 12차 · 실측).
+#
+# 축에서 고른 태그는 기록마다 비슷하게 겹치지만, 이 둘은 **사람이 직접 적은 것**
+# 이라 그 기록을 특정한다. `캐릭터` 는 원래부터 앞세우고 있었고, `기타`(자유 입력)를
+# 같은 이유로 나란히 둔다. 슬롯 이름을 파이썬이 아는 곳은 여기 하나뿐이다.
+SUMMARY_LEAD_SLOTS = ("캐릭터", "기타")
+
+
 def snapshot_summary(chars: list[dict[str, Any]]) -> str:
     """목록에 보여줄 한 줄. 본문을 안 읽고도 무엇인지 알아야 검색이 된다."""
     bits: list[str] = []
     for c in chars or []:
         fields = c.get("fields") or {}
         name = (fields.get("캐릭터") or [""])[0] or str(c.get("name") or "")
-        rest = [x for k in fields if k != "캐릭터" for x in (fields.get(k) or [])]
-        bits.append(", ".join([b for b in [name] if b] + rest[:4]))
+        extra = [str(x) for x in (fields.get("기타") or []) if str(x).strip()]
+        rest = [x for k in fields if k not in SUMMARY_LEAD_SLOTS
+                for x in (fields.get(k) or [])]
+        bits.append(", ".join([b for b in [name] if b] + extra[:3] + rest[:4]))
     text = " / ".join(b for b in bits if b)
     return text[:SUMMARY_MAX]
 
@@ -385,10 +396,16 @@ def scene_summary(globals_: dict[str, Any], chars: list[dict[str, Any]]) -> str:
     for tag in (g.get("composition_tags") or []):
         if str(tag).strip():
             bits.append(str(tag))
+    # 자유 입력('기타')은 **개수와 무관하게** 넣는다. 씬 태그가 이미 4개면 캐릭터
+    # 필드를 통째로 건너뛰었는데, 그러면 사람이 직접 적은 글이 요약에서 빠져
+    # 검색으로 못 찾는다(Codex 12차 · 실측).
+    for c in chars or []:
+        fields = c.get("fields") or {}
+        bits.extend(str(x) for x in (fields.get("기타") or []) if str(x).strip())
     if len(bits) < 4:
         for c in chars or []:
             fields = c.get("fields") or {}
-            bits.extend(x for v in fields.values() for x in (v or []))
+            bits.extend(x for k, v in fields.items() if k != "기타" for x in (v or []))
     free = str(g.get("free_text") or "").strip()
     if free:
         bits.append(free)

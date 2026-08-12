@@ -222,20 +222,27 @@ export function createInteractiveScenePanel({
          data-fid="" data-naia-title="대카테고리를 만듭니다">+ 카테고리</button>`,
     ].join('');
 
-    // 소카테고리 칸은 대카테고리를 골랐을 때만 쓸모가 있다. 안 골랐으면 안내만 둔다 —
-    // 빈 칸을 그냥 두면 '여기 뭔가 있어야 하는데 없다'로 읽힌다.
-    const col2 = curTop
+    // **소카테고리 칸은 쓰기 전엔 안 보인다**(사용자 지정 2026-08-12).
+    // 저장한 씬은 현실적으로 수십 장 규모라, 항상 세 칸을 띄우면 쓰지도 않는 층이
+    // 썸네일 자리를 300px 먹는다. 하나라도 만들면 그때 칸이 생긴다 - 데이터는
+    // 그대로이므로 나중에 많아져도 되돌릴 일이 없다.
+    const showSub = !!curTop && subs.length > 0;
+    const col2 = showSub
       ? [
           row(!curSub, 'sub', '', '전체보기'),
           ...subs.map(f => row(curSub === f.id, 'sub', f.id, f.name)),
           `<button type="button" class="ia-sc-item is-add" data-scact="folder-new"
              data-fid="${escHtml(curTop)}" data-naia-title="이 카테고리 안에 만듭니다">+ 하위</button>`,
         ].join('')
-      : '<div class="ia-sc-hint">대카테고리를 고르세요</div>';
+      : '';
 
     const target = curSub || curTop;
     const tools = target
-      ? `<button type="button" class="ia-sc-btn" data-scact="folder-rename">이름</button>
+      ? // 칸이 접혀 있으면 [+ 하위]를 여기 둔다 - 없으면 첫 소카테고리를 만들 길이 없다.
+        (showSub ? '' : `<button type="button" class="ia-sc-btn" data-scact="folder-new"
+           data-fid="${escHtml(curTop)}"
+           data-naia-title="이 카테고리 안에 하위를 만듭니다">+ 하위</button>`)
+        + `<button type="button" class="ia-sc-btn" data-scact="folder-rename">이름</button>
          <button type="button" class="ia-sc-btn is-danger" data-scact="folder-del"
            data-naia-title="폴더만 지웁니다 — 안의 씬은 남습니다">삭제</button>`
       : '';
@@ -248,9 +255,9 @@ export function createInteractiveScenePanel({
         ${tools}
         <button type="button" class="ia-sc-btn" data-scact="close-saved">닫기</button>
       </div>
-      <div class="ia-sc-finder">
+      <div class="ia-sc-finder${showSub ? '' : ' is-2col'}">
         <div class="ia-sc-col ia-sc-col1">${col1}</div>
-        <div class="ia-sc-col ia-sc-col2">${col2}</div>
+        ${showSub ? `<div class="ia-sc-col ia-sc-col2">${col2}</div>` : ''}
         <div class="ia-sc-col ia-sc-content">
           <div class="ia-sc-grid">${
             savedRows.length ? savedRows.map(savedCardHtml).join('')

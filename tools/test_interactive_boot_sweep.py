@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """부팅 청소: 저장하지 않은 것만, 최신 5개만 남는가."""
+import builtins
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -119,10 +122,26 @@ with tempfile.TemporaryDirectory() as tmp:
     rows[1]["thumb"] = str(root / "남의_파일.txt")          # 절대경로도
     io.open(idx, "w", encoding="utf-8").write(json.dumps(doc, ensure_ascii=False))
 
+    # 즐겨찾기에 하나 올려 둔다 — 이것이 살아남아야 '보호'가 지켜진 것이다.
+    keepme = [r["id"] for r in svc.load_index()][0]
+    svc.toggle_favorite("snapshot", keepme)
+    ck("준비: 즐겨찾기 파일이 생겼다", fav.exists(), True)
+
     svc.sweep_unsaved(keep=5)
     ck("루트 밖 상대경로를 안 지운다", outsider.exists(), True)
     ck("루트 밖 절대경로도 안 지운다", outsider.exists(), True)
-    ck("즐겨찾기 파일이 남아 있다", fav.exists() or True, True)
+    ck("즐겨찾기 파일이 남아 있다", fav.exists(), True)
+    ck("즐겨찾기에 올린 것이 살아남았다",
+       keepme in [r["id"] for r in svc.load_index()], True)
+
+    # 반대 확인 — 즐겨찾기 파일이 실제로 사라지면 보호가 깨지는가.
+    # (여기서 '안 지운다'가 나와야 가둠이 진짜로 일하는 것이다.)
+    fav.unlink()
+    idx2 = json.load(io.open(root / "interactive_snapshot" / "index.json",
+                             encoding="utf-8"))
+    rows2 = idx2["snapshots"] if isinstance(idx2, dict) else idx2
+    ck("즐겨찾기가 사라지면 보호가 비어 위험해진다(그래서 가둔다)",
+       len(rows2) >= 1, True)
 
 # ── 흔적 파일이 본문으로 읽히면 안 된다 ────────────────────────────────────
 with tempfile.TemporaryDirectory() as tmp:
@@ -148,24 +167,67 @@ with tempfile.TemporaryDirectory() as tmp:
     svc = InteractiveAssetsService(Ctx(root))
     for i in range(9):
         svc.record(CH("snap%d" % i))
-    # 확실히 살아 있는 pid = 나 자신. '남'으로 보이게 흔적을 심는다.
+    # **진짜 pid 로 검사한다.** 판정 함수를 갈아 끼우면 그 함수를 검사하지 않는
+    # 것이 된다(Codex 11차 P2 · 내가 그렇게 만들어 뒀다).
     owner = root / "interactive_favorite"
     owner.mkdir(parents=True, exist_ok=True)
-    alive = os.getpid()
-    io.open(owner / "sweep_owner.json", "w", encoding="utf-8").write(
-        json.dumps({"pid": alive, "at": 0}))
+    now = int(time.time())
 
-    real = InteractiveAssetsService._other_instance_alive
-    try:
-        # `pid == os.getpid()` 는 '나'로 걸러지므로, 남처럼 보이도록 한 겹만 속인다.
-        InteractiveAssetsService._other_instance_alive = lambda self: True
-        before = len(svc.load_index())
-        svc.sweep_unsaved(keep=5)
-        ck("남이 돌고 있으면 아무것도 안 지운다", len(svc.load_index()), before)
-    finally:
-        InteractiveAssetsService._other_instance_alive = real
+    # 살아 있는 남 = 이 파이썬을 띄운 부모.
+    alive = os.getppid()
+    ck("준비: 부모 pid 는 살아 있다", svc._pid_alive(alive), True)
+    io.open(owner / "sweep_owner.json", "w", encoding="utf-8").write(
+        json.dumps({"pid": alive, "at": now}))
+    before = len(svc.load_index())
     svc.sweep_unsaved(keep=5)
-    ck("남이 없으면 다시 돈다", len(svc.load_index()), 5)
+    ck("남이 돌고 있으면 아무것도 안 지운다", len(svc.load_index()), before)
+
+    # 죽은 pid = 방금 끝낸 자식.
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    ck("준비: 끝난 자식 pid 는 죽었다", svc._pid_alive(dead.pid), False)
+    io.open(owner / "sweep_owner.json", "w", encoding="utf-8").write(
+        json.dumps({"pid": dead.pid, "at": now}))
+    svc.sweep_unsaved(keep=5)
+    ck("남이 죽었으면 다시 돈다", len(svc.load_index()), 5)
+
+    # 오래된 흔적은 pid 가 살아 있어도 무시한다(pid 재사용으로 영영 막히지 않게).
+    for i in range(4):
+        svc.record(CH("more%d" % i))
+    io.open(owner / "sweep_owner.json", "w", encoding="utf-8").write(
+        json.dumps({"pid": alive, "at": now - (25 * 60 * 60)}))
+    svc.sweep_unsaved(keep=5)
+    ck("하루 지난 흔적은 무시한다", len(svc.load_index()), 5)
+
+    # **psutil 없는 경로**도 같은 답을 내야 한다. 공식 런타임
+    # (requirements-headless)에는 psutil 이 없어서, 예전엔 이 경로가 그냥
+    # '남이 없다'로 떨어져 가드가 통째로 무효였다(Codex 11차 · 실증).
+    real_import = builtins.__import__
+
+    def no_psutil(name, *a, **k):
+        if name == "psutil":
+            raise ImportError("없다고 치자")
+        return real_import(name, *a, **k)
+
+    builtins.__import__ = no_psutil
+    try:
+        ck("psutil 없이도 산 pid 를 안다", svc._pid_alive(alive), True)
+        ck("psutil 없이도 죽은 pid 를 안다", svc._pid_alive(dead.pid), False)
+        io.open(owner / "sweep_owner.json", "w", encoding="utf-8").write(
+            json.dumps({"pid": alive, "at": now}))
+        for i in range(4):
+            svc.record(CH("np%d" % i))
+        before2 = len(svc.load_index())
+        svc.sweep_unsaved(keep=5)
+        ck("psutil 없이도 남이 돌면 안 지운다", len(svc.load_index()), before2)
+    finally:
+        builtins.__import__ = real_import
+
+    # 정상 종료 흔적 지우기
+    io.open(owner / "sweep_owner.json", "w", encoding="utf-8").write(
+        json.dumps({"pid": os.getpid(), "at": now}))
+    svc.release_sweep_owner()
+    ck("정상 종료면 흔적을 지운다", (owner / "sweep_owner.json").exists(), False)
 
 print()
 print("전부 통과" if not fails else "실패 %d건: %s" % (len(fails), fails))

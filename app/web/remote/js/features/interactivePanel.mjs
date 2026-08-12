@@ -5126,6 +5126,7 @@ export function createInteractivePanel({
     if (!viewer) return;
     if (!document.body.classList.contains('ia-popup-shift')) {
       viewer.style.removeProperty('--ia-shift');
+      viewer.classList.remove('is-ia-noroom');
       return;
     }
     const box = panelMount.getBoundingClientRect();
@@ -5133,6 +5134,7 @@ export function createInteractivePanel({
     if (!box.width || !v.width) {
       viewer.style.removeProperty('--ia-shift');
       viewer.style.removeProperty('--ia-shift-top');
+      viewer.classList.remove('is-ia-noroom');
       return;
     }
     // 가로는 **팝업까지만** 비운다. 사전은 그 오른쪽 그림 위에 반투명으로
@@ -5140,8 +5142,12 @@ export function createInteractivePanel({
     // 이미지가 너무 좁아지면(뷰어의 3/4 초과) 포기한다: 밀어 봐야 볼 수 없을
     // 만큼 작아지면 가려지는 편이 차라리 낫다.
     const shift = Math.round(box.right + 12 - v.left);
-    viewer.style.setProperty('--ia-shift',
-      (shift > 0 && shift < v.width * 0.75) ? shift + 'px' : '0px');
+    const used = (shift > 0 && shift < v.width * 0.75) ? shift : 0;
+    viewer.style.setProperty('--ia-shift', used + 'px');
+    // 밀고 남은 폭이 이만큼도 안 되면 좌하단 Assets 바는 **쓸 수 없다** — 조각으로
+    // 남아 우하단 Scene 머리와 겹치기만 한다(실측: 창 880 · shift 260 -> 17px).
+    // 그럴 땐 숨긴다. 팝업을 닫으면 그대로 돌아온다(Codex 11차).
+    viewer.classList.toggle('is-ia-noroom', used > 0 && (v.width - used - 12) < 150);
     // **세로로는 밀지 않는다.** 띠 아래로 내렸더니 이미지 평면이 그만큼 잘려
     // 정렬이 이상해졌다 — 평면은 팝업 오른쪽 전체를 쓰고, 사전이 그 위쪽을
     // 덮는 것은 감수한다(사용자 지시 2026-08-07: "그림이 좀 덮여도 됩니다").

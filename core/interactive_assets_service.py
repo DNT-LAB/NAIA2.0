@@ -88,6 +88,9 @@ INDEX_NAME = "index.json"
 FAVORITE_NAME = "favorites.json"
 
 SNAPSHOT_LIMIT = 500
+# 흔적이 이보다 오래됐으면 무시한다. pid 가 재사용되면 '남이 돌고 있다'로
+# 잘못 읽혀 청소가 영영 안 도는데(Codex 11차 P2), 그 상태를 하루로 묶는다.
+SWEEP_OWNER_MAX_AGE = 24 * 60 * 60
 # 세션이 바뀔 때 남길 '저장하지 않은' 기록 수(사용자 지정 2026-08-12).
 # 한도(500)는 한 세션 안에서 되짚어 쓰라고 넉넉히 둔 것이지 쌓아 두라는 뜻이
 # 아니었다 - 이름을 붙이지 않은 것은 다음 세션에서 죽은 데이터가 된다.
@@ -417,8 +420,14 @@ class InteractiveAssetsService:
         return self.snapshot_root / INDEX_NAME
 
     def _body_path(self, snapshot_id: str) -> Path:
-        # id 는 우리가 만든 hex 지만, 인덱스를 통해 들어오면 남의 글이다.
         return self.snapshot_root / f"{snapshot_id}.json"
+
+    def _safe_body(self, snapshot_id: str) -> Path | None:
+        """지우거나 덮어쓸 때 쓰는 본문 경로. **루트 밖이면 None.**"""
+        return self._inside(self.snapshot_root, f"{snapshot_id}.json")
+
+    def _safe_scene_body(self, scene_id: str) -> Path | None:
+        return self._inside(self.scene_root, f"{scene_id}.json")
 
     def _favorite_path(self) -> Path:
         return self.favorite_root / FAVORITE_NAME
@@ -703,9 +712,8 @@ class InteractiveAssetsService:
             rows = [r for r in rows if r.get("id") != sid]
             self._save_index(rows)
             thumb = hit.get("thumb")
-            if thumb:
-                (self.snapshot_root / str(thumb)).unlink(missing_ok=True)
-            self._body_path(sid).unlink(missing_ok=True)
+            self._unlink_one(self._inside(self.snapshot_root, thumb))
+            self._unlink_one(self._safe_body(sid))
             self._drop_favorite_ref("snapshot", sid)
             return True
 
@@ -756,7 +764,17 @@ class InteractiveAssetsService:
 
     def _flush_deletes(self) -> None:
         """프루닝이 정한 삭제를 인덱스 확정 뒤에 실행한다."""
-        self._unlink_rows(self.snapshot_root, self._body_path)
+        self._unlink_rows(self.snapshot_root, self._safe_body)
+
+    @staticmethod
+    def _unlink_one(path: Path | None) -> None:
+        """가둠을 통과한 경로만 지운다. 실패해도 흐름을 끊지 않는다."""
+        if path is None:
+            return
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"[interactive-assets] delete failed: {path.name} - {exc}")
 
     def _unlink_rows(self, root: Path, body_of) -> None:
         """본문과 썸네일을 지운다 — **루트 안으로 가둔 뒤에**.
@@ -765,14 +783,8 @@ class InteractiveAssetsService:
         고아 본문이 남고, 나중에 인덱스가 깨져 되짚을 때 되살아난다.
         """
         for row in self._pending_delete:
-            for path in (self._inside(root, row.get("thumb")),
-                         body_of(str(row.get("id")))):
-                if path is None:
-                    continue
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError as exc:
-                    print(f"[interactive-assets] delete failed: {path.name} - {exc}")
+            self._unlink_one(self._inside(root, row.get("thumb")))
+            self._unlink_one(body_of(str(row.get("id"))))
         self._pending_delete = []
 
     # ── 씬(=이벤트) ─────────────────────────────────────────────────────────
@@ -980,9 +992,8 @@ class InteractiveAssetsService:
             rows = [r for r in rows if r.get("id") != sid]
             self._save_scene_index(rows)
             thumb = hit.get("thumb")
-            if thumb:
-                (self.scene_root / str(thumb)).unlink(missing_ok=True)
-            self._scene_body_path(sid).unlink(missing_ok=True)
+            self._unlink_one(self._inside(self.scene_root, thumb))
+            self._unlink_one(self._safe_scene_body(sid))
             self._drop_favorite_ref("scene", sid)
             return True
 
@@ -1144,8 +1155,10 @@ class InteractiveAssetsService:
         이름 붙여 남긴 것이 자동 기록으로 강등되고 언젠가 프루닝된다.
         본문은 복구의 원본이므로 여기에 있어야 살아난다(Codex 7차와 같은 계열).
         """
-        p = self._scene_body_path(scene_id)
-        if not p.exists():
+        # 지우기와 같은 규약으로 가둔다 — 인덱스가 시키는 대로 루트 밖 JSON 을
+        # 덮어쓰면 안 된다(Codex 11차).
+        p = self._safe_scene_body(scene_id)
+        if p is None or not p.exists():
             return
         try:
             doc = json.loads(p.read_text(encoding="utf-8"))
@@ -1227,7 +1240,7 @@ class InteractiveAssetsService:
             return True
 
     def _flush_scene_deletes(self) -> None:
-        self._unlink_rows(self.scene_root, self._scene_body_path)
+        self._unlink_rows(self.scene_root, self._safe_scene_body)
 
     # ── 즐겨찾기 ────────────────────────────────────────────────────────────
     def _sweep_owner_path(self) -> Path:
@@ -1235,16 +1248,61 @@ class InteractiveAssetsService:
         # `sweep_owner.json` 이 본문으로 읽혀 쓰레기 행이 생긴다(자체 감사).
         return self.favorite_root / SWEEP_OWNER_NAME
 
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        """그 pid 가 살아 있는가. **의존 없이** 판정한다.
+
+        `os.kill(pid, 0)` 은 Windows 에서 쓰면 안 된다 — CPython 이 그것을
+        TerminateProcess 로 옮기므로 살아 있는지 물어보려다 남의 앱을 죽인다.
+        Windows 에서는 `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` 로 열고
+        종료 코드가 STILL_ACTIVE 인지 본다. 그 밖에서는 신호 0 이 안전하다.
+
+        psutil 은 **선언된 의존이 아니다**(requirements-headless 에 없다) —
+        예전에 그것만 믿었더니 공식 런타임에서 가드가 통째로 무효였다
+        (Codex 11차 P1 · 실증). 있으면 쓰되, 없어도 판정한다.
+        """
+        if pid <= 0:
+            return False
+        try:
+            import psutil                      # 있으면 가장 정확하다
+            return bool(psutil.pid_exists(pid))
+        except Exception:
+            pass
+        if os.name == "nt":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                STILL_ACTIVE = 259
+                k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                k32.OpenProcess.restype = wintypes.HANDLE
+                h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+                if not h:
+                    return False               # 없거나 접근 불가 - 살아 있다고 보지 않는다
+                try:
+                    code = wintypes.DWORD()
+                    if not k32.GetExitCodeProcess(h, ctypes.byref(code)):
+                        return True           # 열렸는데 못 물어보면 살아 있다고 본다
+                    return code.value == STILL_ACTIVE
+                finally:
+                    k32.CloseHandle(h)
+            except Exception:
+                return False
+        try:
+            os.kill(pid, 0)                    # POSIX 에서만 안전하다
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True                        # 남의 것이지만 살아 있다
+        except OSError:
+            return False
+
     def _other_instance_alive(self) -> bool:
         """같은 user-data 를 보는 다른 인스턴스가 아직 살아 있는가.
 
         살아 있으면 청소를 건너뛴다 — 그쪽은 **지금 세션 중**이라, 아직 이름을
         안 붙였을 뿐인 기록을 뒤에 뜬 쪽이 지워 버린다(Codex 10차 P1).
-
-        `os.kill(pid, 0)` 은 **쓰지 않는다** — Windows 의 CPython 은 그것을
-        TerminateProcess 로 옮기므로 살아 있는지 물어보려다 남의 앱을 죽인다.
-        psutil 이 없으면 알 수 없다고 본다(청소는 진행한다 — 같은 폴더를 두
-        인스턴스가 보는 것은 원래 지원하지 않는 구성이다).
         """
         p = self._sweep_owner_path()
         if not p.exists():
@@ -1252,18 +1310,26 @@ class InteractiveAssetsService:
         try:
             doc = json.loads(p.read_text(encoding="utf-8"))
             pid = int(doc.get("pid") or 0)
+            at = int(doc.get("at") or 0)
         except Exception:
             return False
         if pid <= 0 or pid == os.getpid():
             return False
-        try:
-            import psutil                      # 선언된 의존이 아니다 - 있으면 쓴다
-        except Exception:
+        # 오래된 흔적은 믿지 않는다 - pid 가 재사용되면 청소가 영영 안 돈다.
+        if at and _now() - at > SWEEP_OWNER_MAX_AGE:
             return False
+        return self._pid_alive(pid)
+
+    def release_sweep_owner(self) -> None:
+        """정상 종료에서 흔적을 지운다. 다음 부팅이 살아 있는 남을 찾느라 헤매지
+        않게 한다 — 강제 종료면 남지만, 그때는 pid 생존 확인이 걸러 준다."""
         try:
-            return bool(psutil.pid_exists(pid))
+            p = self._sweep_owner_path()
+            doc = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+            if int(doc.get("pid") or 0) == os.getpid():
+                p.unlink(missing_ok=True)
         except Exception:
-            return False
+            pass                               # 못 지워도 다음 부팅이 pid 로 거른다
 
     # ── 세션 청소 ──────────────────────────────────────────────────────────
     def sweep_unsaved(self, keep: int = BOOT_KEEP_UNSAVED) -> dict[str, int]:

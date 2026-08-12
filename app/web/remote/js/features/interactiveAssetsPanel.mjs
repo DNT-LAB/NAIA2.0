@@ -1292,6 +1292,7 @@ export function createInteractiveAssetsPanel({
     /** 생성이 끝난 뒤 썸네일이 붙었을 수 있다 — 열려 있을 때만 다시 읽는다. */
     refresh() { if (visible && open) fetchList(); },
     destroy() {
+      document.removeEventListener(IA_BAR_OPEN, onOtherBarOpen);
       root.removeEventListener('click', onClick);
       root.removeEventListener('input', onInput);
       if (searchTimer) clearTimeout(searchTimer);

@@ -61,6 +61,13 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
                 await run_in_thread(save_runner_parquet, context)
             except Exception as exc:
                 print(f"Headless Remote: runner parquet shutdown save failed - {exc}", flush=True)
+            # 정상 종료면 청소 흔적을 지운다 - 다음 부팅이 죽은 pid 를 붙들고
+            # 청소를 건너뛰지 않게. 강제 종료면 남지만 그때는 pid 생존 확인이
+            # 걸러 준다(Codex 11차).
+            try:
+                await run_in_thread(interactive_assets_service(context).release_sweep_owner)
+            except Exception as exc:
+                print(f"Headless Remote: interactive sweep owner release failed - {exc}", flush=True)
 
     return lifespan
 

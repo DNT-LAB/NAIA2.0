@@ -22306,8 +22306,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   z-index: 6;
   /* **무대의 절반까지만.** 예전엔 둘 다 560px 까지 커져 좁은 화면에서 그대로
      겹쳤다(실측: 무대 766px 에 523 + 557). 반씩 나누면 접힌 상태끼리는 절대
-     안 부딪히고, 펴는 쪽은 서로 양보한다(JS `naia:ia-bar-open`). */
-  max-width: min(560px, calc(50% - 18px));
+     안 부딪히고, 펴는 쪽은 서로 양보한다(JS `naia:ia-bar-open`).
+     `--ia-shift` 로 오른쪽으로 밀리므로 **그만큼을 폭에서 뺀다** — 안 빼면
+     밀린 채 절반을 유지해 가운데를 넘는다(Codex 11차). */
+  max-width: min(560px, calc(50% - 18px - var(--ia-shift, 0px)));
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -23102,8 +23104,18 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-as-card:hover .ia-as-del { opacity: 1; pointer-events: auto; }
 .ia-as-del:hover { color: rgba(244, 67, 54, 1); background: rgba(244, 67, 54, 0.18); }
 
+/* 팝업이 밀어낸 나머지가 너무 좁을 때. JS 가 붙인다 — CSS 로는 '남은 폭'을
+   조건으로 쓸 수 없다. */
+.is-ia-noroom .ia-assets { display: none; }
+
 @media (max-width: 900px) {
-  .ia-assets { left: 8px; bottom: 8px; max-width: calc(100% - 16px); }
+  /* **절반 제한을 되돌리지 않는다.** 예전엔 여기서 `100% - 16px` 로 덮어 좁은
+     화면일수록 오히려 무대를 다 먹었고, 우하단 Scene 머리와 겹쳤다
+     (Codex 11차). 여백만 줄인다. */
+  .ia-assets {
+    left: calc(8px + var(--ia-shift, 0px)); bottom: 8px;
+    max-width: min(560px, calc(50% - 12px - var(--ia-shift, 0px)));
+  }
   .ia-as-grid { max-height: 180px; grid-template-columns: 1fr; }
 }
 

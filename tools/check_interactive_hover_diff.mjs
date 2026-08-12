@@ -1,8 +1,20 @@
-// 배포된 파일에서 tagRow 의 diff 계산 부분을 **그대로 떼어** 돌린다.
-// (DOM 없이 로직만 본다 — 문자열이 실제 소스와 같은지도 함께 확인한다.)
+// 호버 diff 의 개수 비교(multiset)를 검사한다.
+//
+// **범위**: 배포 파일에서 계산 부분을 그대로 떼어 DOM 없이 돌린다. 계산 자체는
+// 진짜로 검사하지만, `tagRow()` 가 그 계산에 인자를 옳게 넘기는지(mine/cur 를
+// 바꿔 넣지 않았는지)와 HTML 조립·`currentScene()` 연동까지는 보지 못한다 —
+// 그쪽은 라이브 확인이 필요하다(Codex 11차 지적).
+//
+// 소스를 못 찾거나 떼어 온 조각이 안 돌면 **큰 소리로 실패한다**.
 import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 
-const SRC = 'C:/VNR/DEV/NAIA2.0/app/web/remote/js/features/interactiveScenePanel.mjs';
+// 경로는 **이 파일 기준**이다. 절대경로로 박아 두면 다른 clone 에서 못 돌거나,
+// 더 나쁘게는 그 자리에 남은 옛 checkout 을 검사한다(Codex 11차).
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const SRC = path.join(HERE, '..', 'app', 'web', 'remote', 'js', 'features',
+                      'interactiveScenePanel.mjs');
 const src = fs.readFileSync(SRC, 'utf8');
 
 const START = 'const left = new Map();';

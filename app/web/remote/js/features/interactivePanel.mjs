@@ -6987,6 +6987,72 @@ export function createInteractivePanel({
     return true;
   }
 
+  /** 씬을 **얹은 결과만 계산**한다 — 작업판은 그대로 둔다(사용자 지정 2026-08-12:
+   *  "설정값을 오버라이드 하여 프롬프트 창을 훼손하지 않고 즉시 생성").
+   *
+   *  씬 카드에는 정체성이 없으므로, 나오는 그림은 **지금 캐릭터 + 저장한 상황**이다.
+   *  적용을 누른 것과 같은 그림이 나오되 상태는 손대지 않는다.
+   *
+   *  구현은 '상태를 잠시 바꿔 계산하고 되돌리기'다. `renderPrompt`/`generationCharacters`
+   *  가 모듈 상태를 직접 읽기 때문에 가상 상태로 부를 방법이 없다. **동기 구간이고
+   *  중간에 렌더도 발행도 하지 않으므로** 밖에서는 아무것도 바뀌지 않는다 -
+   *  `finally` 로 반드시 되돌린다(중간에 던져도 작업판이 씬 상태로 남으면 안 된다).
+   *
+   *  Fast(캐릭터별 추가 프롬프트)는 **지금 것이 그대로 쓰인다** - 사본이 id 를
+   *  물려받고 Fast 는 id 로 붙어 있다. 씬은 Fast 를 복원하지 않으므로 이게 맞다. */
+  function sceneGenerationPlan(body) {
+    if (!body || typeof body !== 'object') return null;
+    const g = body.globals;
+    if (!g || typeof g !== 'object') return null;
+    const rows = Array.isArray(body.chars)
+      ? body.chars.filter(r => r && typeof r === 'object') : [];
+    const keep = new Set(restoreItems()
+      .filter(i => i.group !== 'identity').map(i => i.key));
+    const need = Math.min(rows.length, MAX_NAI_CHARACTERS);
+
+    const back = {
+      chars: state.chars,
+      slots: state.slots,
+      composition: state.composition,
+      freeText: state.freeText,
+      ratingPick: state.ratingPick,
+      fastNeg: (state.fast && state.fast.neg) || '',
+    };
+    try {
+      // **사본 위에서** 만진다. applySnapshotCharAt 은 배열을 새로 만들어 넣지만
+      // 그 안의 fields 배열은 얕게 물릴 수 있어, 원본을 지키려면 여기서 뜬다.
+      state.chars = state.chars.map(c => ({
+        ...c,
+        fields: Object.fromEntries(
+          Object.entries(c.fields || {}).map(([k, v]) => [k, [...(v || [])]])),
+        neg: Object.fromEntries(
+          Object.entries(c.neg || {}).map(([k, v]) => [k, [...(v || [])]])),
+        alt: [...(c.alt || [])], gaze: [...(c.gaze || [])],
+      }));
+      applySceneGlobals(g);
+      while (state.chars.length < need) state.chars.push(newCharacter(false));
+      for (let i = 0; i < need; i++) {
+        applySnapshotCharAt(i, rows[i], keep,
+                            {silent: true, forceGender: true, forcePos: true});
+      }
+      if (rows.length) {
+        for (let i = need; i < state.chars.length; i++) state.chars[i].state = 'disabled';
+      }
+      return {
+        prompt: renderPrompt(),
+        characters: generationCharacters(),
+        fastNegative: String((state.fast && state.fast.neg) || ''),
+      };
+    } finally {
+      state.chars = back.chars;
+      state.slots = back.slots;
+      state.composition = back.composition;
+      state.freeText = back.freeText;
+      state.ratingPick = back.ratingPick;
+      if (state.fast) state.fast.neg = back.fastNeg;
+    }
+  }
+
   /** 스냅샷을 캐릭터 슬롯에 되돌린다. 씬 슬롯은 건드리지 않는다 — 스냅샷은
    *  캐릭터 조합만 담고, 배경/구도는 그대로 두는 것이 사용자 기대다. */
   function applySnapshotChars(rows) {
@@ -7163,6 +7229,8 @@ export function createInteractivePanel({
       fast_negative: String((state.fast && state.fast.neg) || ''),
     }),
     getSceneGlobals: sceneGlobals,
+    /** 씬을 얹은 결과만 계산한다 - 작업판은 그대로 둔다(즉시 생성). */
+    getSceneGenerationPlan: sceneGenerationPlan,
     getSceneChars: sceneChars,
     applySceneSnapshot,
     applySnapshotChars,

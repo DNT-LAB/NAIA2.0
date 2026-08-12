@@ -922,7 +922,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260812e-applybar')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260812f-gen3')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -945,9 +945,13 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     });
     // 씬(이벤트) 기록. Assets 바의 **반대쪽**(우하단)에 선다(사용자 지정).
     const {createInteractiveScenePanel} =
-      await import('./js/features/interactiveScenePanel.mjs?v=20260812e-applybar');
+      await import('./js/features/interactiveScenePanel.mjs?v=20260812f-gen3');
     interactiveScenePanel = createInteractiveScenePanel({
-      document, escHtml, showToast, showAppDialog, getPanel: () => interactivePanel,
+      document, escHtml, showToast, showAppDialog,
+      getPanel: () => interactivePanel,
+      // 즉시 생성 / 적용+생성. 패널은 '무엇을' 만 정하고 '어떻게' 는 여기 있다.
+      generateScene: body => generateSceneImmediate(body),
+      generateNow: () => send('generate'),
     });
     interactivePanel = createInteractivePanel({
       document,
@@ -5767,6 +5771,46 @@ function syncPromptTabStateFromDom() {
 //
 // 기록은 **생성할 때만** 한다(사용자 결정) — 만들다 만 조합으로 목록이 더러워지지
 // 않게. 기록이 실패해도 생성은 그대로 진행한다.
+// 씬 카드에서 **작업판을 건드리지 않고** 한 장 뽑는다(사용자 지정 2026-08-12).
+//
+// 정식 경로(generateWithInteractiveSnapshot)를 그대로 탄다 - 그래야 Interactive
+// 마커·시드 고정·Neg Fast·기록 배선이 전부 살아 있다. 다만 프롬프트와 캐릭터만
+// **씬을 얹은 계산값**으로 덮는다. 프롬프트 상자(promptEdit)는 손대지 않는다 -
+// 거기 쓰면 Interactive 를 끈 뒤에도 남아 다음 생성까지 따라간다.
+async function generateSceneImmediate(body) {
+  if (!interactivePanel?.getSceneGenerationPlan) return false;
+  let plan = null;
+  try { plan = interactivePanel.getSceneGenerationPlan(body); } catch (_) { plan = null; }
+  if (!plan || !plan.prompt) return false;
+  const negative = negEdit ? negEdit.value : '';
+  const overrides = buildWebGenerationOverrides(plan.prompt, negative);
+  // buildWebGenerationOverrides 는 **지금** 캐릭터로 채운다 - 씬 것으로 갈아끼운다.
+  // 길이가 어긋나면 NAICharacterData 가 거부해 캐릭터가 조용히 사라지므로
+  // 셋(characters/uc/positions)을 한 번에 다시 세운다.
+  const rows = Array.isArray(plan.characters) ? plan.characters : [];
+  if (rows.length) {
+    overrides.characters = rows.map(r => String(r.prompt || ''));
+    overrides.uc = rows.map(r => String(r.uc || ''));
+    const positioned = rows.filter(r => r.center);
+    if (positioned.length === rows.length) {
+      overrides.character_positions = rows.map(r => ({
+        x: Number(r.center.x), y: Number(r.center.y),
+      }));
+    } else {
+      delete overrides.character_positions;
+    }
+  } else {
+    delete overrides.characters;
+    delete overrides.uc;
+    delete overrides.character_positions;
+  }
+  return generateWithInteractiveSnapshot({
+    prompt: plan.prompt,
+    negative_prompt: negative,
+    overrides,
+  });
+}
+
 async function generateWithInteractiveSnapshot(payload) {
   // 생성 중이거나 연결이 끊겼으면 기록도 하지 않는다. requestGenerate 가 어차피
   // 거부하는데 먼저 기록하면, 생성되지 않은 조합이 Assets 에 남는다
@@ -9182,7 +9226,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260812e-applybar')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260812f-gen3')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

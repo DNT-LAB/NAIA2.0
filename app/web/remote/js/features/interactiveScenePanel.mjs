@@ -29,6 +29,8 @@ export function createInteractiveScenePanel({
   showToast,
   showAppDialog,     // 이름 입력 · 삭제 확인
   getPanel,          // () => interactivePanel (복원 대상)
+  generateScene,     // (body) => 작업판을 건드리지 않고 이 씬으로 한 장
+  generateNow,       // () => 지금 작업판 그대로 생성(적용 + 생성)
 }) {
   const root = document.getElementById('interactiveScene');
   if (!root) return null;
@@ -236,9 +238,17 @@ export function createInteractiveScenePanel({
     // 적용 바는 **본문 밖**에 둔다 - 안에 두면 태그가 많은 씬에서 스크롤을 끝까지
     // 내려야 나온다. 미리보기를 보다가 곧바로 누르는 자리다(사용자 지정 2026-08-12).
     const sid = escHtml(previewId);
+    // 셋의 차이는 '작업판을 바꾸는가'와 '지금 뽑는가' 두 축이다(사용자 지정 2026-08-12).
+    //   즉시 생성   작업판 그대로 · 지금 뽑는다   (지금 캐릭터 + 저장한 상황)
+    //   적용        작업판을 바꾼다 · 안 뽑는다
+    //   적용 + 생성 작업판을 바꾸고 · 뽑는다
     const foot = `<div class="ia-sc-pv-foot">
+      <button type="button" class="ia-sc-btn is-wide" data-scact="gen-now" data-scid="${sid}"
+        data-naia-title="작업판을 그대로 두고 이 씬으로 한 장 뽑습니다">즉시 생성</button>
       <button type="button" class="ia-sc-btn is-main is-wide" data-scact="apply"
         data-scid="${sid}" data-naia-title="이 씬을 지금 캐릭터에게 입힙니다">적용</button>
+      <button type="button" class="ia-sc-btn is-wide" data-scact="apply-gen" data-scid="${sid}"
+        data-naia-title="입힌 다음 바로 생성합니다">적용 + 생성</button>
       <button type="button" class="ia-sc-btn" data-scact="rename" data-scid="${sid}">이름</button>
       <button type="button" class="ia-sc-btn" data-scact="move" data-scid="${sid}"
         data-naia-title="다음 폴더로 옮깁니다">폴더</button>
@@ -384,17 +394,49 @@ export function createInteractiveScenePanel({
   }
 
   // ---------------------------------------------------------------- 동작
-  async function applyScene(id) {
+  /** 본문을 읽는다. 미리보기로 이미 읽어 뒀으면 그것을 쓴다(같은 것을 두 번 부르지 않게). */
+  async function sceneBody(id) {
+    if (previewId === id && previewBody) return previewBody;
+    return api(`/scene?id=${encodeURIComponent(id)}`);
+  }
+
+  async function applyScene(id, andGenerate) {
     const panel = getPanel && getPanel();
     if (!panel || !panel.applySceneSnapshot) return;
     try {
-      const body = await api(`/scene?id=${encodeURIComponent(id)}`);
+      const body = await sceneBody(id);
       const ok = panel.applySceneSnapshot(body);
       if (!ok) { showToast('씬을 되돌리지 못했습니다.', 'error'); return; }
-      showToast('씬을 적용했습니다.', 'info');
       closeSaved();
+      if (andGenerate && typeof generateNow === 'function') {
+        showToast('씬을 적용하고 생성합니다.', 'info');
+        generateNow();
+      } else {
+        showToast('씬을 적용했습니다.', 'info');
+      }
     } catch (exc) {
       showToast(`씬을 읽지 못했습니다: ${exc.message}`, 'error');
+    }
+  }
+
+  /** 작업판을 건드리지 않고 이 씬으로 한 장 뽑는다. 계산은 패널이, 발화는 app.js 가 한다. */
+  async function generateSceneOnly(id) {
+    if (typeof generateScene !== 'function') {
+      showToast('이 화면에서는 즉시 생성을 쓸 수 없습니다.', 'error');
+      return;
+    }
+    try {
+      const body = await sceneBody(id);
+      const sent = await generateScene(body);
+      if (sent === false) {
+        // 생성 중이거나 연결이 끊겼을 때다 - 팝업은 닫지 않는다(다시 누를 수 있게).
+        showToast('지금은 생성할 수 없습니다.', 'error');
+        return;
+      }
+      showToast('작업판은 그대로 두고 이 씬으로 생성합니다.', 'info');
+      closeSaved();
+    } catch (exc) {
+      showToast(`생성하지 못했습니다: ${exc.message}`, 'error');
     }
   }
 
@@ -462,7 +504,9 @@ export function createInteractiveScenePanel({
       else if (act === 'open-saved') openSaved();
       else if (act === 'close-saved') closeSaved();
       else if (act === 'preview') await openPreview(id);
-      else if (act === 'apply') await applyScene(id);
+      else if (act === 'apply') await applyScene(id, false);
+      else if (act === 'apply-gen') await applyScene(id, true);
+      else if (act === 'gen-now') await generateSceneOnly(id);
       else if (act === 'save') await saveScene(id);
       else if (act === 'top') {
         const fid = btn.dataset.fid || '';

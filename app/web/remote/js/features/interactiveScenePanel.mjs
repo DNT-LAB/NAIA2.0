@@ -233,6 +233,19 @@ export function createInteractiveScenePanel({
       </div>`;
     }).join('');
 
+    // 적용 바는 **본문 밖**에 둔다 - 안에 두면 태그가 많은 씬에서 스크롤을 끝까지
+    // 내려야 나온다. 미리보기를 보다가 곧바로 누르는 자리다(사용자 지정 2026-08-12).
+    const sid = escHtml(previewId);
+    const foot = `<div class="ia-sc-pv-foot">
+      <button type="button" class="ia-sc-btn is-main is-wide" data-scact="apply"
+        data-scid="${sid}" data-naia-title="이 씬을 지금 캐릭터에게 입힙니다">적용</button>
+      <button type="button" class="ia-sc-btn" data-scact="rename" data-scid="${sid}">이름</button>
+      <button type="button" class="ia-sc-btn" data-scact="move" data-scid="${sid}"
+        data-naia-title="다음 폴더로 옮깁니다">폴더</button>
+      <button type="button" class="ia-sc-btn is-danger" data-scact="unsave" data-scid="${sid}"
+        data-naia-title="수집에서 내립니다 (지우지 않습니다)">내리기</button>
+    </div>`;
+
     return `<div class="ia-sc-pv-img">${row.thumb
       ? `<img src="${escHtml(thumbUrl(row))}" alt="">`
       : '<span class="ia-sc-pv-noimg">생성하면 그림이 붙습니다</span>'}</div>
@@ -247,7 +260,8 @@ export function createInteractiveScenePanel({
         ${chars.length ? `<div class="ia-sc-pv-sec">캐릭터 ${chars.length}명
           <span class="ia-sc-pv-note">특징(이름·머리·눈얼굴·신체·종족)은 씬에 담기지 않습니다</span>
           </div>${charBlocks}` : ''}
-      </div>`;
+      </div>
+      ${foot}`;
   }
 
   /** 목록이 갈리면 미리보기를 비운다 - 목록에 없는 카드를 계속 펼쳐 두면

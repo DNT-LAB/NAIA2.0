@@ -23680,7 +23680,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    2026-08-12). 위는 확대 그림, 아래는 씬과 캐릭터별 프롬프트다. */
 .ia-sc-preview {
   display: flex; flex-direction: column; gap: 8px;
-  padding: 8px; overflow-y: auto;
+  /* 칸 전체를 스크롤시키면 적용 바가 같이 밀려 내려간다 - 본문만 스크롤한다. */
+  padding: 8px; overflow: hidden; min-height: 0;
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.10); border-radius: 8px;
 }
@@ -23694,7 +23695,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-sc-pv-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .ia-sc-pv-noimg { font-size: 11px; color: #6f747e; }
-.ia-sc-pv-body { display: flex; flex-direction: column; gap: 6px; }
+.ia-sc-pv-body {
+  display: flex; flex-direction: column; gap: 6px;
+  flex: 1 1 auto; overflow-y: auto; min-height: 0;
+}
 .ia-sc-pv-title { font-size: 13px; color: #e6e8ee; }
 .ia-sc-pv-sec {
   font-size: 11px; color: #9aa0ab; margin-top: 4px;
@@ -23722,3 +23726,13 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    알 수 없으면 카드를 옮겨 다닐 때마다 헷갈린다. */
 .ia-sc-scard.is-preview { border-color: rgba(90,130,220,0.7); }
 .ia-sc-scard { cursor: pointer; }
+
+/* 미리보기 아래 고정 바 — 여기서 바로 적용한다(사용자 지정 2026-08-12).
+   본문 안에 두면 태그가 많은 씬에서 끝까지 스크롤해야 나온다. */
+.ia-sc-pv-foot {
+  flex: 0 0 auto; display: flex; gap: 5px;
+  padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.12);
+}
+.ia-sc-pv-foot .ia-sc-btn { flex: 0 0 auto; padding: 6px 12px; font-size: 11px; }
+/* 주 동작은 넓게 — 나머지는 곁가지다. */
+.ia-sc-pv-foot .ia-sc-btn.is-wide { flex: 1 1 auto; }

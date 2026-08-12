@@ -145,6 +145,43 @@ export function createInteractiveScenePanel({
       : '';
     root.innerHTML = head + list;
     hideHover();          // 목록이 갈리면 가리키던 카드가 사라질 수 있다
+    fitStrip();
+  }
+
+  /** 스트립 상자를 **실제로 들어가는 열 수**에 맞춘다.
+   *
+   *  `width: max-content` 는 '한 줄에 전부'를 재고, `max-width` 가 그걸 무대의
+   *  절반으로 자른다. 그런데 줄바꿈은 그 폭 안에서 일어나므로 **상자는 늘 절반
+   *  폭인데 카드는 그보다 적게 들어간다** — 왼쪽에 34~100px 이 빈 채로 남았다
+   *  (실측: 창 1200 에서 100px · 1600 에서 84px). 사용자 지적 2026-08-12.
+   *
+   *  CSS 로는 '몇 열이 들어갔는가'를 되먹일 수 없어 여기서 잰다. 줄이기만 하므로
+   *  다시 접히는 일은 없다(폭을 줄여도 같은 열 수가 유지된다).
+   */
+  function fitStrip() {
+    if (!open) return;
+    const list = root.querySelector('.ia-sc-list');
+    const card = list && list.querySelector('.ia-sc-card');
+    if (!list || !card) return;
+    list.style.width = '';                     // 먼저 원래 한도로 되돌려 다시 잰다
+    const cs = getComputedStyle(list);
+    const gap = parseFloat(cs.columnGap) || 0;
+    const border = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+    const frame = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + border;
+    const cw = card.getBoundingClientRect().width;
+    if (!cw) return;
+    // **세로 스크롤바 폭을 셈에 넣는다.** 줄이 2.5줄을 넘으면 스크롤바가 생겨
+    // 안쪽이 그만큼 좁아지고, 그러면 열이 하나 더 떨어져 나가 줄이 더 늘고 -
+    // 되먹이가 돌아 결국 한 줄에 한 장이 됐다(실측: 창 1100~1200).
+    // `clientWidth` 는 스크롤바를 뺀 값이라 둘의 차이가 곧 스크롤바 폭이다.
+    const sbw = Math.max(0, list.offsetWidth - list.clientWidth - border);
+    const inner = list.clientWidth - (frame - border);
+    const n = list.querySelectorAll('.ia-sc-card').length;
+    const cols = Math.max(1, Math.min(n, Math.floor((inner + gap + 0.5) / (cw + gap))));
+    // **올림 + 1px.** 카드 폭·간격이 소수라 딱 맞게 주면 마지막 열이
+    // 1px 모자라 떨어져 나간다(실측: 창 1100 에서 2열 -> 1열).
+    list.style.width =
+      `${Math.ceil(cols * cw + (cols - 1) * gap + frame + sbw) + 1}px`;
   }
 
   // ---------------------------------------------------------------- 팝업
@@ -1100,6 +1137,7 @@ export function createInteractiveScenePanel({
   // 스크롤·창 크기 변경이면 카드가 마우스 밑에서 빠져나간다 - 따라다니지 않고 닫는다.
   window.addEventListener('scroll', hideHover, true);
   window.addEventListener('resize', hideHover);
+  window.addEventListener('resize', fitStrip);
   document.addEventListener('click', onBarOutside);
   document.addEventListener(IA_BAR_OPEN, onOtherBarOpen);
 
@@ -1139,6 +1177,7 @@ export function createInteractiveScenePanel({
       hoverEl = null;
       window.removeEventListener('scroll', hideHover, true);
       window.removeEventListener('resize', hideHover);
+      window.removeEventListener('resize', fitStrip);
       document.removeEventListener('click', onBarOutside);
       document.removeEventListener(IA_BAR_OPEN, onOtherBarOpen);
       root.removeEventListener('mouseover', onOver);

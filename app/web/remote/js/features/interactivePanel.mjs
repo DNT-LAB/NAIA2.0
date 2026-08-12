@@ -1954,8 +1954,19 @@ export function createInteractivePanel({
         // 뒤이어 오는 contextmenu 가 텍스트칸에 떨어진다 — 우클릭이 통째로 샌다.
         if (event.button !== 0) return;
         if (event.target.closest('.ia-gchip-x')) return;
-        // 칩이 통째로 사라진다 - 그 칩을 가리키던 가중치 창은 같이 닫는다.
-        closeCompPopup();
+        // **창이 떠 있으면 닫기만 한다**(사용자 지정 2026-08-12). 가중치 창을
+        // 보면서 상자를 누른 것은 '창을 치우자'는 뜻이지 '전부 텍스트로 고치자'가
+        // 아니다 - 그대로 두면 창을 닫으려던 한 번의 클릭에 칩이 통째로 사라지고
+        // 텍스트칸이 열려, 무엇을 만지던 중이었는지 잃는다.
+        //
+        // 이 핸들러는 `pointerdown` 이라 바깥 클릭 감시자(`onCompOutside`, capture
+        // 단계 `mousedown`)보다 **먼저** 돈다 - 그래서 여기서 `miniOpen` 이 아직
+        // 살아 있다. 순서가 뒤집히면 이 조건이 영영 안 걸린다.
+        if (miniOpen) {
+          event.preventDefault();
+          closeCompPopup();
+          return;
+        }
         event.preventDefault();
         globalTextMode = true;
         renderGlobalEditor();

@@ -699,6 +699,43 @@ export function createInteractiveScenePanel({
     hideHover();
   }
 
+  /** Recent [복원] 이 **지금 작업판을 덮기 전에** 한 번 묻는다.
+   *
+   *  이 바는 늘 떠 있어서 스치는 클릭 하나로 복원이 돈다 — 저장 안 한 작업이
+   *  거기서 사라진다(사용자 지적 2026-08-13). 판정은 백엔드가 `record_scene` 과
+   *  **같은 해시**로 한다: 다른 잣대를 쓰면 "저장했는데 저장 안 됐다고 한다".
+   *
+   *  묻지 않는 경우:
+   *   - 지금 상태가 기록할 값어치가 없을 때(빈 판 등) — 잃을 것이 없다
+   *   - 이미 Scene 으로 저장돼 있을 때 — 되찾을 수 있다
+   *
+   *  **확인 못 하면 묻는다.** 놓친 경고는 작업을 잃지만 헛경고는 클릭 한 번이다
+   *  (백엔드가 옛 버전이라 이 경로가 없을 때가 그렇다).
+   */
+  async function confirmOverwrite() {
+    if (typeof showAppDialog !== 'function') return true;
+    const panel = typeof getPanel === 'function' ? getPanel() : null;
+    let info = null;
+    if (panel && typeof panel.getSceneGlobals === 'function') {
+      try {
+        info = await api('/scene/lookup', {globals: panel.getSceneGlobals(),
+                                           chars: panel.getSceneChars()});
+      } catch (_) {
+        info = null;                       // 못 물어봤다 - 아래에서 묻는다
+      }
+    }
+    if (info && (!info.meaningful || info.saved)) return true;
+    const why = info
+      ? '지금 작업판은 Scene 에 저장되어 있지 않습니다.'
+      : '지금 작업판이 저장돼 있는지 확인하지 못했습니다.';
+    const ok = await showAppDialog(
+      why + String.fromCharCode(10)
+      + '복원하면 지금 값이 이 씬으로 덮이고 되돌릴 수 없습니다.',
+      {type: 'confirm', title: '저장하지 않고 복원할까요?',
+       okText: '복원', cancelText: '취소'});
+    return !!ok;
+  }
+
   // ---------------------------------------------------------------- 우클릭 메뉴
   //
   // 카드에서 버튼을 걷어낸 대가로 여기가 **유일한 손잡이**가 된다. 미리보기를 열고
@@ -1036,7 +1073,13 @@ export function createInteractiveScenePanel({
       else if (act === 'open-saved') openSaved();
       else if (act === 'close-saved') closeSaved();
       else if (act === 'preview') await openPreview(id);
-      else if (act === 'apply') await applyScene(id, false);
+      else if (act === 'apply') {
+        // 바의 카드에서 누른 것만 묻는다 — Scene 팝업의 [적용]은 팝업을 열고
+        // 골라서 누르는 의도적인 길이다.
+        const fromBar = !!(btn.closest && btn.closest('.ia-sc-card'));
+        if (fromBar && !(await confirmOverwrite())) return;
+        await applyScene(id, false);
+      }
       else if (act === 'apply-gen') await applyScene(id, true);
       else if (act === 'gen-now') await generateSceneOnly(id);
       else if (act === 'save') await saveScene(id);

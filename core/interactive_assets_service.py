@@ -966,6 +966,37 @@ class InteractiveAssetsService:
             self._flush_scene_deletes()
         return out
 
+    def lookup_scene(self, globals_: dict[str, Any],
+                     chars: list[dict[str, Any]]) -> dict[str, Any]:
+        """이 상태가 이미 기록/저장된 씬인가. **아무것도 바꾸지 않는다.**
+
+        복원 버튼이 지금 작업판을 덮기 전에 묻는 데 쓴다(사용자 지정 2026-08-13).
+        판정은 `record_scene` 과 **같은 해시**로 한다 - 다른 잣대를 쓰면 '저장했는데
+        저장 안 됐다고 한다'가 된다.
+
+        `meaningful` 이 거짓이면 기록할 값어치가 없는 상태다(축만 든 것 등).
+        그때는 잃을 것이 없으므로 부르는 쪽이 경고를 접어도 된다.
+        """
+        g = normalize_scene_globals(globals_)
+        rows_in = normalize_scene_chars(chars)
+        out = {
+            "meaningful": scene_is_meaningful(g, rows_in),
+            "found": False, "saved": False, "id": "", "name": "",
+        }
+        if not out["meaningful"]:
+            return out
+        digest = scene_hash(g, rows_in)
+        with self._lock:
+            hit = next((r for r in self.load_scene_index()
+                        if r.get("prompt_hash") == digest), None)
+        if hit is None:
+            return out
+        out["found"] = True
+        out["saved"] = bool(hit.get("saved"))
+        out["id"] = str(hit.get("id") or "")
+        out["name"] = str(hit.get("name") or "")
+        return out
+
     def attach_scene_thumb(self, scene_id: str, image_bytes: bytes) -> bool:
         """생성 결과를 384px WEBP 로 붙인다. 캐릭터 쪽과 같은 크롭 규칙."""
         if not scene_id or not image_bytes:

@@ -212,6 +212,23 @@ def register_interactive_assets_routes(
             return JSONResponse({"error": "scene not found"}, status_code=404)
         return {"ok": True, "saved": True, "scene": meta}
 
+    @app.post("/api/interactive-assets/scene/lookup")
+    async def api_interactive_scene_lookup(req: Request):
+        """지금 상태가 이미 기록/저장된 씬인지만 알려준다. 기록하지 않는다."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            info = await run_in_thread(
+                interactive_assets_service(session_context).lookup_scene,
+                payload.get("globals") or {}, payload.get("chars") or [])
+        except Exception as exc:
+            return JSONResponse({"error": f"lookup failed: {exc}"}, status_code=500)
+        return {"ok": True, **info}
+
     @app.post("/api/interactive-assets/scene/update")
     async def api_interactive_scene_update(req: Request):
         """저장한 씬의 이름/폴더만 고친다. 준 항목만 바뀐다."""

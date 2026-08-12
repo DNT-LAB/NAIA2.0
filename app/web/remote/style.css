@@ -23736,3 +23736,15 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-sc-pv-foot .ia-sc-btn { flex: 0 0 auto; padding: 6px 12px; font-size: 11px; }
 /* 주 동작은 넓게 — 나머지는 곁가지다. */
 .ia-sc-pv-foot .ia-sc-btn.is-wide { flex: 1 1 auto; }
+
+/* 끌어 옮기기 — 받는 자리를 눈에 띄게 한다(사용자 지정 2026-08-12).
+   '전체'는 보기지 담는 곳이 아니라 대상이 아니다. */
+.ia-sc-item.is-drop {
+  background: rgba(90,130,220,0.36);
+  border-color: rgba(120,170,255,0.85); color: #eef1f6;
+}
+.ia-sc-scard.is-dragging { opacity: 0.45; }
+/* 끄는 동안 카드 안의 버튼이 끌기를 가로채지 않게 - 버튼 위에서 끌기 시작하면
+   브라우저가 텍스트 선택으로 처리해 dragstart 가 안 온다. */
+.ia-sc-scard[draggable="true"] .ia-sc-sthumb,
+.ia-sc-scard[draggable="true"] .ia-sc-sname { user-select: none; }

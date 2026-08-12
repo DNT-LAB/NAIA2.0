@@ -35,6 +35,10 @@ export function createInteractiveScenePanel({
   const root = document.getElementById('interactiveScene');
   if (!root) return null;
 
+  // 끌어 옮길 때 싣는 자료형. **우리 것만 받는다** - 파일이나 다른 앱의 글을
+  // 떨어뜨렸을 때 폴더가 반응하면 안 된다(사용자 지정 2026-08-12).
+  const DND_MIME = 'application/x-naia-scene';
+
   const RECENT_LIMIT = 12;      // 바에 거는 최근 카드 수
   // 저장소 한도(500)와 같게 둔다 - 그보다 많을 수 없으므로 잘려서 안 보이는 일이
   // 없다. 페이지 나눔은 두지 않는다(수십 장 규모라 아직 값을 못 한다).
@@ -154,6 +158,11 @@ export function createInteractiveScenePanel({
     // 위임 리스너는 root 에 걸려 있는데 이 노드는 root 밖이다 — 따로 건다.
     popEl.addEventListener('click', onClick);
     popEl.addEventListener('input', onInput);
+    popEl.addEventListener('dragstart', onDragStart);
+    popEl.addEventListener('dragend', onDragEnd);
+    popEl.addEventListener('dragover', onDragOver);
+    popEl.addEventListener('dragleave', onDragLeave);
+    popEl.addEventListener('drop', onDrop);
     return popEl;
   }
 
@@ -189,6 +198,10 @@ export function createInteractiveScenePanel({
     const up = f.parent ? folders.find(x => x.id === f.parent) : null;
     return up ? `${up.name} / ${f.name}` : f.name;
   }
+
+  /** '장소 으로' 처럼 조사가 어긋나지 않게, 받침을 따지지 않아도 되는 문구로. */
+  const movedMsg = fid =>
+    (fid ? `${folderLabel(fid)} 폴더로 옮겼습니다.` : '폴더 분류를 풀었습니다.');
 
   /** 태그 몇 개를 칩 줄로. 빈 목록이면 아무것도 그리지 않는다(빈 제목만 남으면
    *  '여기 뭔가 있어야 하는데 없다'로 읽힌다). */
@@ -310,7 +323,7 @@ export function createInteractiveScenePanel({
     const n = Number(row.char_count || 0);
     const bits = [row.folder ? folderLabel(row.folder) : '', n ? `${n}인` : ''].filter(Boolean);
     return `<div class="ia-sc-scard${previewId === row.id ? ' is-preview' : ''}"
-      data-scact="preview" data-scid="${escHtml(row.id)}">
+      draggable="true" data-scact="preview" data-scid="${escHtml(row.id)}">
       <div class="ia-sc-sthumb">${row.thumb
         ? `<img src="${escHtml(thumbUrl(row))}" alt="" loading="lazy">` : ''}</div>
       <div class="ia-sc-sname" title="${escHtml(name)}">${escHtml(name || '이름 없음')}</div>
@@ -347,14 +360,18 @@ export function createInteractiveScenePanel({
 
     const tops = folders.filter(f => !f.parent);
     const subs = curTop ? folders.filter(f => f.parent === curTop) : [];
-    const row = (on, act, id, label, extra) =>
+    // `drop` 을 붙이면 그 자리에 카드를 떨어뜨려 옮길 수 있다. '전체'는 담는 곳이
+    // 아니라 **보기**라서 뺀다 - 거기 떨어뜨렸을 때 어디로 가야 할지가 없다.
+    // '폴더 없음'은 진짜 목적지다(분류를 푸는 자리).
+    const row = (on, act, id, label, extra, drop) =>
       `<button type="button" class="ia-sc-item${on ? ' is-on' : ''}${extra || ''}"
-         data-scact="${act}" data-fid="${escHtml(id)}">${escHtml(label)}</button>`;
+         data-scact="${act}" data-fid="${escHtml(id)}"${
+           drop ? ` data-scdrop="${escHtml(drop)}"` : ''}>${escHtml(label)}</button>`;
 
     const col1 = [
       row(!curTop && !curNone, 'top', '', '전체'),
-      ...tops.map(f => row(curTop === f.id, 'top', f.id, f.name)),
-      row(curNone, 'top', 'none', '폴더 없음'),
+      ...tops.map(f => row(curTop === f.id, 'top', f.id, f.name, '', f.id)),
+      row(curNone, 'top', 'none', '폴더 없음', '', 'none'),
       `<button type="button" class="ia-sc-item is-add" data-scact="folder-new"
          data-fid="" data-naia-title="대카테고리를 만듭니다">+ 카테고리</button>`,
     ].join('');
@@ -367,7 +384,7 @@ export function createInteractiveScenePanel({
     const col2 = showSub
       ? [
           row(!curSub, 'sub', '', '전체보기'),
-          ...subs.map(f => row(curSub === f.id, 'sub', f.id, f.name)),
+          ...subs.map(f => row(curSub === f.id, 'sub', f.id, f.name, '', f.id)),
           `<button type="button" class="ia-sc-item is-add" data-scact="folder-new"
              data-fid="${escHtml(curTop)}" data-naia-title="이 카테고리 안에 만듭니다">+ 하위</button>`,
         ].join('')
@@ -411,6 +428,79 @@ export function createInteractiveScenePanel({
         next.focus();
         try { next.setSelectionRange(caret[0], caret[1]); } catch (_) { /* 무시 */ }
       }
+    }
+  }
+
+  // ---------------------------------------------------------------- 끌어 옮기기
+  //
+  // 카드를 카테고리 칸에 떨어뜨리면 그 폴더로 옮긴다. `renderPop()` 이 팝업을
+  // 통째로 다시 그리므로 **위임**으로 건다 - 노드마다 걸면 다음 렌더에서 사라진다.
+  let dragId = '';
+
+  function onDragStart(event) {
+    const card = event.target && event.target.closest
+      ? event.target.closest('.ia-sc-scard') : null;
+    if (!card || !card.dataset.scid) return;
+    dragId = card.dataset.scid;
+    try {
+      event.dataTransfer.setData(DND_MIME, dragId);
+      // 일부 브라우저는 표준 자료형이 하나도 없으면 끌기를 취소한다.
+      event.dataTransfer.setData('text/plain', dragId);
+      event.dataTransfer.effectAllowed = 'move';
+    } catch (_) { /* 무시 - dragId 로도 동작한다 */ }
+    card.classList.add('is-dragging');
+  }
+
+  function onDragEnd() {
+    dragId = '';
+    if (!popEl) return;
+    popEl.querySelectorAll('.is-dragging').forEach(el => el.classList.remove('is-dragging'));
+    popEl.querySelectorAll('.is-drop').forEach(el => el.classList.remove('is-drop'));
+  }
+
+  function dropTarget(event) {
+    const el = event.target && event.target.closest
+      ? event.target.closest('[data-scdrop]') : null;
+    if (!el) return null;
+    // **우리 것만 받는다.** 파일이나 다른 앱의 글을 떨어뜨렸을 때 폴더가 반응하면
+    // 안 된다. 끌기 중에는 `types` 만 볼 수 있고 값은 drop 에서야 읽힌다.
+    const types = (event.dataTransfer && event.dataTransfer.types) || [];
+    const mine = dragId || (types.includes ? types.includes(DND_MIME) : false);
+    return mine ? el : null;
+  }
+
+  function onDragOver(event) {
+    const el = dropTarget(event);
+    if (!el) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    el.classList.add('is-drop');
+  }
+
+  function onDragLeave(event) {
+    const el = event.target && event.target.closest
+      ? event.target.closest('[data-scdrop]') : null;
+    if (el) el.classList.remove('is-drop');
+  }
+
+  async function onDrop(event) {
+    const el = dropTarget(event);
+    if (!el) return;
+    event.preventDefault();
+    el.classList.remove('is-drop');
+    let id = dragId;
+    try { id = event.dataTransfer.getData(DND_MIME) || id; } catch (_) { /* dragId 로 */ }
+    const target = el.dataset.scdrop === 'none' ? '' : el.dataset.scdrop;
+    dragId = '';
+    if (!id) return;
+    const row = savedRows.find(r => r.id === id);
+    if (row && String(row.folder || '') === target) return;   // 제자리면 아무것도 안 한다
+    try {
+      await api('/scene/update', {id, folder: target});
+      showToast(movedMsg(target), 'info');
+      await loadSaved();
+    } catch (exc) {
+      showToast(`옮기지 못했습니다: ${exc.message}`, 'error');
     }
   }
 
@@ -609,7 +699,7 @@ export function createInteractiveScenePanel({
           const at = order.indexOf(String((row && row.folder) || ''));
           const next = order[(at + 1) % order.length];
           await api('/scene/update', {id, folder: next});
-          showToast(`${folderLabel(next)} 으로 옮겼습니다.`, 'info');
+          showToast(movedMsg(next), 'info');
           await loadSaved();
         }
       } else if (act === 'unsave') {

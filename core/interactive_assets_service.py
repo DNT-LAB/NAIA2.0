@@ -862,10 +862,16 @@ class InteractiveAssetsService:
                 hit["created_at"] = _now()
                 hit["summary"] = scene_summary(g, rows_in)
                 hit["char_count"] = len(rows_in)
-                self._write_atomic(
-                    self._scene_body_path(hit["id"]),
-                    {"id": hit["id"], "created_at": hit["created_at"],
-                     "globals": g, "chars": rows_in})
+                # **저장 메타를 지우지 않는다.** 같은 씬을 다시 그리면 본문을
+                # 새로 쓰는데, 여기서 saved/name/folder 를 빼면 인덱스가 깨졌을 때
+                # 되짚기가 그것을 못 살려 '저장한 씬'이 자동 기록으로 강등되고
+                # 언젠가 프루닝된다(Codex 8차 - 본문이 복구의 원본이라는 계약 위반).
+                body = {"id": hit["id"], "created_at": hit["created_at"],
+                        "globals": g, "chars": rows_in}
+                for key in ("saved", "saved_at", "name", "folder"):
+                    if hit.get(key) is not None:
+                        body[key] = hit[key]
+                self._write_atomic(self._scene_body_path(hit["id"]), body)
                 # 끝으로 옮긴다 — 자리가 곧 최신순이다(캐릭터 쪽과 같은 규약).
                 rows.remove(hit)
                 rows.append(hit)

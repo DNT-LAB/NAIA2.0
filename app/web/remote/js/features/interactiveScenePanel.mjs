@@ -36,7 +36,9 @@ export function createInteractiveScenePanel({
   if (!root) return null;
 
   const RECENT_LIMIT = 12;      // 바에 거는 최근 카드 수
-  const SAVED_LIMIT = 200;
+  // 저장소 한도(500)와 같게 둔다 - 그보다 많을 수 없으므로 잘려서 안 보이는 일이
+  // 없다. 페이지 나눔은 두지 않는다(수십 장 규모라 아직 값을 못 한다).
+  const SAVED_LIMIT = 500;
 
   let visible = false;
   let open = false;             // 최근 스트립 펼침
@@ -155,7 +157,10 @@ export function createInteractiveScenePanel({
     return popEl;
   }
 
+  let savedSeq = 0;              // 늦게 온 응답이 최신 목록을 덮지 않게
+
   async function loadSaved() {
+    const seq = ++savedSeq;
     const q = query ? `&query=${encodeURIComponent(query)}` : '';
     // 소카테고리를 골랐으면 그것만, 아니면 대카테고리 전체(백엔드가 아래까지 푼다).
     const want = curNone ? 'none' : (curSub || curTop);
@@ -165,9 +170,11 @@ export function createInteractiveScenePanel({
         api('/scene/folders'),
         api(`/scenes?tier=saved&limit=${SAVED_LIMIT}${q}${f}`),
       ]);
+      if (seq !== savedSeq) return;      // 더 새 질의가 이미 떠났다
       folders = Array.isArray(fr.folders) ? fr.folders : [];
       savedRows = Array.isArray(sr.scenes) ? sr.scenes : [];
     } catch (exc) {
+      if (seq !== savedSeq) return;
       folders = []; savedRows = [];
       showToast(`저장한 씬을 읽지 못했습니다: ${exc.message}`, 'error');
     }
@@ -330,6 +337,13 @@ export function createInteractiveScenePanel({
     const el = ensurePop();
     if (!popOpen) { el.hidden = true; el.innerHTML = ''; return; }
     el.hidden = false;
+    // 이 함수는 팝업을 통째로 다시 그린다 - **치던 검색칸이 사라진다**.
+    // 디바운스가 끝나는 순간 포커스가 날아가 한 글자 치고 다시 클릭해야 했다
+    // (Codex 8차). 캐럿 자리까지 되살린다.
+    const prev = document.activeElement;
+    const keepSearch = !!(prev && prev.hasAttribute
+                          && prev.hasAttribute('data-scsearch') && el.contains(prev));
+    const caret = keepSearch ? [prev.selectionStart, prev.selectionEnd] : null;
 
     const tops = folders.filter(f => !f.parent);
     const subs = curTop ? folders.filter(f => f.parent === curTop) : [];
@@ -391,6 +405,13 @@ export function createInteractiveScenePanel({
         <div class="ia-sc-col ia-sc-preview">${previewHtml()}</div>
       </div>
     </div>`;
+    if (keepSearch) {
+      const next = el.querySelector('[data-scsearch]');
+      if (next) {
+        next.focus();
+        try { next.setSelectionRange(caret[0], caret[1]); } catch (_) { /* 무시 */ }
+      }
+    }
   }
 
   // ---------------------------------------------------------------- 동작

@@ -922,7 +922,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260812f-gen3')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260812h-codex8')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -945,7 +945,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     });
     // 씬(이벤트) 기록. Assets 바의 **반대쪽**(우하단)에 선다(사용자 지정).
     const {createInteractiveScenePanel} =
-      await import('./js/features/interactiveScenePanel.mjs?v=20260812f-gen3');
+      await import('./js/features/interactiveScenePanel.mjs?v=20260812h-codex8');
     interactiveScenePanel = createInteractiveScenePanel({
       document, escHtml, showToast, showAppDialog,
       getPanel: () => interactivePanel,
@@ -5804,14 +5804,25 @@ async function generateSceneImmediate(body) {
     delete overrides.uc;
     delete overrides.character_positions;
   }
+  // 기록도 **나간 그림 그대로** 남긴다 - 작업판을 읽으면 그 그림의 썸네일이
+  // 엉뚱한 카드에 붙는다(Codex 8차 · 실측). 씬은 해시가 같아 그 카드가 갱신된다.
   return generateWithInteractiveSnapshot({
     prompt: plan.prompt,
     negative_prompt: negative,
     overrides,
+  }, {
+    fastNegative: plan.fastNegative,
+    snapshotChars: plan.snapshotChars,
+    sceneGlobals: plan.sceneGlobals,
+    sceneChars: plan.sceneChars,
   });
 }
 
-async function generateWithInteractiveSnapshot(payload) {
+async function generateWithInteractiveSnapshot(payload, resolved = null) {
+  // `resolved` 가 오면 **이 요청은 이미 확정돼 있다**(씬 카드의 즉시 생성).
+  // 아래 세 가지가 전부 '지금 작업판'을 읽으므로, 그대로 두면 고른 씬이 아니라
+  // 작업판이 나가고 기록도 작업판으로 남는다(Codex 8차 · 실측: 구도 랜덤을 켜면
+  // 씬 배경이 사라지고 내 배경이 나갔다).
   // 생성 중이거나 연결이 끊겼으면 기록도 하지 않는다. requestGenerate 가 어차피
   // 거부하는데 먼저 기록하면, 생성되지 않은 조합이 Assets 에 남는다
   // ("생성할 때만 기록" 계약 위반). 단축키는 버튼 비활성화를 우회하므로 실제로 닿는다.
@@ -5821,7 +5832,9 @@ async function generateWithInteractiveSnapshot(payload) {
   // 그릴 때마다 값이 바뀌어 무엇이 나갈지 알 수 없다 — 계약은 "생성 시 적용"이다.
   // 굴린 뒤에는 프롬프트가 달라졌으므로 overrides 까지 다시 만든다(안 그러면
   // 요청에 옛 프롬프트가 실린다).
-  if (interactivePanel?.isActive?.() && interactivePanel.rollComposition?.()) {
+  // **확정된 요청은 굴리지 않는다.** rollComposition() 은 작업판의 구도를 실제로
+  // 바꾸고, 그 뒤 프롬프트를 promptEdit 값으로 통째로 갈아끼운다 - 씬이 통째로 날아간다.
+  if (!resolved && interactivePanel?.isActive?.() && interactivePanel.rollComposition?.()) {
     const rolled = promptEdit.value;
     payload = {
       ...payload,
@@ -5833,7 +5846,10 @@ async function generateWithInteractiveSnapshot(payload) {
   // 프롬프트 상자를 건드리지 않고 **이 요청에만** 싣는다: 네거티브 박스에 써 넣으면
   // Interactive 를 끈 뒤에도 남아 다음 생성까지 따라간다.
   if (interactivePanel?.isActive?.()) {
-    const extraNeg = interactivePanel.getFastNegative?.() || '';
+    // 확정된 요청은 **그 씬의** 전역 네거티브를 쓴다(작업판 것이 아니다).
+    const extraNeg = resolved
+      ? String(resolved.fastNegative || '')
+      : (interactivePanel.getFastNegative?.() || '');
     if (extraNeg) {
       const base = String(payload?.negative_prompt || '');
       const merged = base ? `${base}, ${extraNeg}` : extraNeg;
@@ -5880,7 +5896,9 @@ async function generateWithInteractiveSnapshot(payload) {
     // 거르지 않았더니 빈 슬롯과 OFF 인 슬롯까지 카드가 됐다 — 자기가 없는 그림의
     // 썸네일을 달고 쌓인다(실측: C1 정상 + C2 빈 칸 -> 생성 1명인데 카드 2장).
     try {
-      chars = interactivePanel.getSnapshotChars?.({onlySent: true}) || [];
+      chars = resolved
+        ? (resolved.snapshotChars || [])
+        : (interactivePanel.getSnapshotChars?.({onlySent: true}) || []);
     } catch (_) { chars = []; }
     // 씬 값은 캐릭터 에셋에 싣지 않는다(사용자 결정 2026-08-07). 씬은 따로
     // 관리하고 그쪽에서 캐릭터 슬롯 캡처를 기록한다 — `getSnapshotGlobals()` 는
@@ -5895,8 +5913,10 @@ async function generateWithInteractiveSnapshot(payload) {
     // 값어치가 없으면 백엔드가 건너뛰고 null 을 준다(구도 축만 든 카드 방지).
     if (interactiveScenePanel && interactivePanel?.getSceneGlobals) {
       try {
-        const meta = await interactiveScenePanel.record(
-          interactivePanel.getSceneGlobals(), interactivePanel.getSceneChars());
+        const meta = resolved
+          ? await interactiveScenePanel.record(resolved.sceneGlobals, resolved.sceneChars)
+          : await interactiveScenePanel.record(
+              interactivePanel.getSceneGlobals(), interactivePanel.getSceneChars());
         // 라우트가 `{scene: null}` 을 주면 안 쌓은 것이다 — 붙일 카드가 없으므로
         // id 를 싣지 않는다(실으면 백엔드가 없는 카드에 썸네일을 붙이려 한다).
         if (meta && meta.id) overrides.interactive_scene_id = [meta.id];
@@ -9226,7 +9246,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260812f-gen3')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260812h-codex8')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

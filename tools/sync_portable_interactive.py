@@ -30,6 +30,9 @@ BACKEND = [
     "app/backend/server/autocomplete_commands.py",
     "app/backend/server/generation_runner.py",
     "core/interactive_browse_index.py",
+    # 씬 기록/저장 계층. 프론트만 옮기면 저장·폴더 라우트가 없어 404 가 난다.
+    "core/interactive_assets_service.py",
+    "app/backend/server/interactive_assets_routes.py",
     "core/api_service.py",
     "data/interactive_thumbnails.json",
 ]

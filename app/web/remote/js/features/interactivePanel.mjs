@@ -7017,6 +7017,10 @@ export function createInteractivePanel({
       freeText: state.freeText,
       ratingPick: state.ratingPick,
       fastNeg: (state.fast && state.fast.neg) || '',
+      // `fastOf()` 는 **없으면 만들어 넣는다**. 슬롯을 늘리며 새 id 가 생기면 그
+      // id 로 빈 Fast 항목이 남는다 - 저장분에는 안 새지만(exportState 는
+      // state.chars 순서로만 쓴다) '밖에서는 아무것도 안 바뀐다'가 깨진다.
+      fastKeys: new Set(Object.keys((state.fast && state.fast.chars) || {})),
     };
     try {
       // **사본 위에서** 만진다. applySnapshotCharAt 은 배열을 새로 만들어 넣지만
@@ -7042,6 +7046,11 @@ export function createInteractivePanel({
         prompt: renderPrompt(),
         characters: generationCharacters(),
         fastNegative: String((state.fast && state.fast.neg) || ''),
+        // 기록도 **나간 그림 그대로** 남겨야 한다 - 호출부가 작업판을 읽으면
+        // 그 그림의 썸네일이 엉뚱한 카드에 붙는다(Codex 8차).
+        snapshotChars: snapshotChars(true),
+        sceneGlobals: sceneGlobals(),
+        sceneChars: sceneChars(),
       };
     } finally {
       state.chars = back.chars;
@@ -7049,7 +7058,13 @@ export function createInteractivePanel({
       state.composition = back.composition;
       state.freeText = back.freeText;
       state.ratingPick = back.ratingPick;
-      if (state.fast) state.fast.neg = back.fastNeg;
+      if (state.fast) {
+        state.fast.neg = back.fastNeg;
+        const map = state.fast.chars || {};
+        for (const key of Object.keys(map)) {
+          if (!back.fastKeys.has(key)) delete map[key];
+        }
+      }
     }
   }
 

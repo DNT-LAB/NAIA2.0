@@ -54,6 +54,11 @@ export function createInteractiveScenePanel({
   let curSub = '';
   let curNone = false;
   let query = '';
+  // 오른쪽 미리보기. 카드를 누르면 그 씬의 본문을 읽어 여기 편다(사용자 지정
+  // 2026-08-12). 목록은 건드리지 않는다 - 다시 그리면 카드가 깜빡인다.
+  let previewId = '';
+  let previewBody = null;
+  let previewBusy = false;
   let searchTimer = null;
 
   // ---------------------------------------------------------------- 통신
@@ -176,11 +181,105 @@ export function createInteractiveScenePanel({
     return up ? `${up.name} / ${f.name}` : f.name;
   }
 
+  /** 태그 몇 개를 칩 줄로. 빈 목록이면 아무것도 그리지 않는다(빈 제목만 남으면
+   *  '여기 뭔가 있어야 하는데 없다'로 읽힌다). */
+  function pvRow(label, list) {
+    const arr = (Array.isArray(list) ? list : [])
+      .map(t => String(t || '').trim()).filter(Boolean);
+    if (!arr.length) return '';
+    return `<div class="ia-sc-pv-row">
+      <span class="ia-sc-pv-lab">${escHtml(label)}</span>
+      <span class="ia-sc-pv-tags">${
+        arr.map(t => `<span class="ia-sc-pv-tag">${escHtml(t)}</span>`).join('')}</span>
+    </div>`;
+  }
+
+  /** 미리보기 — 위는 확대 그림, 아래는 씬 프롬프트와 캐릭터별 프롬프트.
+   *
+   *  **캐릭터 특징은 애초에 없다.** 씬 본문은 정체성(캐릭터·머리·눈얼굴·신체·
+   *  종족)을 걷어낸 뒤 저장되므로, 여기 나열되는 것은 상황(의상·자세·표정·사물·
+   *  구도·ALT·시선)뿐이다 - 따로 거를 필요가 없다. */
+  function previewHtml() {
+    if (!previewId) {
+      return '<div class="ia-sc-hint">카드를 누르면 여기에서 자세히 볼 수 있습니다.</div>';
+    }
+    if (previewBusy || !previewBody) {
+      return '<div class="ia-sc-hint">읽는 중…</div>';
+    }
+    const row = savedRows.find(r => r.id === previewId) || {};
+    const g = previewBody.globals || {};
+    const slots = g.slots || {};
+    const sceneTags = Object.keys(slots).flatMap(k => slots[k] || []);
+    const rating = ((g.rating || {}).picks || []).filter(p => p && p !== 'none');
+    const chars = Array.isArray(previewBody.chars) ? previewBody.chars : [];
+    const name = String(row.name || '') || String(row.summary || '') || '이름 없음';
+
+    const charBlocks = chars.map((c, i) => {
+      const fields = c.fields || {};
+      const neg = c.neg || {};
+      const pos = Object.keys(fields).flatMap(k => fields[k] || []);
+      const ng = Object.keys(neg).flatMap(k => neg[k] || []);
+      const extra = [...(c.alt || []), ...(c.gaze || [])];
+      const body = [
+        pvRow('프롬프트', pos),
+        pvRow('ALT·시선', extra),
+        pvRow('네거티브', ng),
+      ].join('');
+      return `<div class="ia-sc-pv-char">
+        <div class="ia-sc-pv-chead">C${i + 1}
+          <span class="ia-sc-pv-sub">${escHtml(
+            (c.gender === 'male' ? 'boy' : 'girl') + ' · ' + (c.pos || 'C3'))}</span></div>
+        ${body || '<div class="ia-sc-pv-empty">상황 태그 없음</div>'}
+      </div>`;
+    }).join('');
+
+    return `<div class="ia-sc-pv-img">${row.thumb
+      ? `<img src="${escHtml(thumbUrl(row))}" alt="">`
+      : '<span class="ia-sc-pv-noimg">생성하면 그림이 붙습니다</span>'}</div>
+      <div class="ia-sc-pv-body">
+        <div class="ia-sc-pv-title">${escHtml(name)}</div>
+        <div class="ia-sc-pv-sec">씬</div>
+        ${pvRow('씬 태그', sceneTags)}
+        ${pvRow('구도', g.composition_tags)}
+        ${pvRow('Rating', rating)}
+        ${g.free_text ? pvRow('자유 입력', [g.free_text]) : ''}
+        ${g.fast_negative ? pvRow('전역 네거티브', [g.fast_negative]) : ''}
+        ${chars.length ? `<div class="ia-sc-pv-sec">캐릭터 ${chars.length}명
+          <span class="ia-sc-pv-note">특징(이름·머리·눈얼굴·신체·종족)은 씬에 담기지 않습니다</span>
+          </div>${charBlocks}` : ''}
+      </div>`;
+  }
+
+  /** 목록이 갈리면 미리보기를 비운다 - 목록에 없는 카드를 계속 펼쳐 두면
+   *  이름·썸네일을 못 찾아 반쪽으로 보인다. */
+  function clearPreview() {
+    previewId = '';
+    previewBody = null;
+    previewBusy = false;
+  }
+
+  async function openPreview(id) {
+    if (previewId === id) { previewId = ''; previewBody = null; renderPop(); return; }
+    previewId = id;
+    previewBody = null;
+    previewBusy = true;
+    renderPop();
+    try {
+      previewBody = await api(`/scene?id=${encodeURIComponent(id)}`);
+    } catch (exc) {
+      previewBody = null;
+      showToast(`씬을 읽지 못했습니다: ${exc.message}`, 'error');
+    }
+    previewBusy = false;
+    if (popOpen) renderPop();
+  }
+
   function savedCardHtml(row) {
     const name = String(row.name || '') || String(row.summary || '');
     const n = Number(row.char_count || 0);
     const bits = [row.folder ? folderLabel(row.folder) : '', n ? `${n}인` : ''].filter(Boolean);
-    return `<div class="ia-sc-scard" data-scid="${escHtml(row.id)}">
+    return `<div class="ia-sc-scard${previewId === row.id ? ' is-preview' : ''}"
+      data-scact="preview" data-scid="${escHtml(row.id)}">
       <div class="ia-sc-sthumb">${row.thumb
         ? `<img src="${escHtml(thumbUrl(row))}" alt="" loading="lazy">` : ''}</div>
       <div class="ia-sc-sname" title="${escHtml(name)}">${escHtml(name || '이름 없음')}</div>
@@ -265,6 +364,7 @@ export function createInteractiveScenePanel({
                   ? '조건에 맞는 씬이 없습니다.'
                   : '아직 저장한 씬이 없습니다. 최근 씬에서 [저장]을 누르세요.'}</div>`}</div>
         </div>
+        <div class="ia-sc-col ia-sc-preview">${previewHtml()}</div>
       </div>
     </div>`;
   }
@@ -314,6 +414,7 @@ export function createInteractiveScenePanel({
   function closeSaved() {
     if (!popOpen) return;
     popOpen = false;
+    clearPreview();
     document.removeEventListener('keydown', onKey, true);
     renderPop();
   }
@@ -328,7 +429,9 @@ export function createInteractiveScenePanel({
     query = String(el.value || '');
     if (searchTimer) clearTimeout(searchTimer);
     // 한 글자마다 부르면 목록이 깜빡인다 — 캐릭터 패널과 같은 간격.
-    searchTimer = setTimeout(() => { if (popOpen) loadSaved(); }, 220);
+    searchTimer = setTimeout(() => {
+      if (popOpen) { clearPreview(); loadSaved(); }
+    }, 220);
   }
 
   async function onClick(e) {
@@ -344,6 +447,7 @@ export function createInteractiveScenePanel({
       if (act === 'toggle') { open = !open; render(); if (open) await fetchRecent(); }
       else if (act === 'open-saved') openSaved();
       else if (act === 'close-saved') closeSaved();
+      else if (act === 'preview') await openPreview(id);
       else if (act === 'apply') await applyScene(id);
       else if (act === 'save') await saveScene(id);
       else if (act === 'top') {
@@ -351,9 +455,11 @@ export function createInteractiveScenePanel({
         curNone = fid === 'none';
         curTop = curNone ? '' : fid;
         curSub = '';               // 대카테고리를 바꾸면 소카테고리 선택은 버린다
+        clearPreview();
         await loadSaved();
       } else if (act === 'sub') {
         curSub = btn.dataset.fid || '';
+        clearPreview();
         await loadSaved();
       } else if (act === 'folder-new') {
         // 1열의 [+ 카테고리]는 부모 없이, 2열의 [+ 하위]는 지금 대카테고리 밑으로.

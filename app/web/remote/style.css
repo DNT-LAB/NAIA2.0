@@ -23591,7 +23591,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-sc-pop[hidden] { display: none; }
 .ia-sc-pop-box {
-  width: min(1080px, 94vw); max-height: 86vh; overflow: auto;
+  /* 여백만 두고 화면을 채운다(사용자 지정 2026-08-12) - 미리보기까지 들어가려면
+     폭이 필요하다. 안쪽 칸이 각자 스크롤하므로 상자 자체는 넘치지 않는다. */
+  width: calc(100vw - 48px); height: calc(100vh - 48px);
+  display: flex; flex-direction: column; overflow: hidden;
   background: #15171c; border: 1px solid rgba(255,255,255,0.16);
   border-radius: 10px; padding: 12px 14px;
 }
@@ -23637,24 +23640,26 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    컨텐츠 폭이 들쭉날쭉해진다. */
 .ia-sc-finder {
   display: grid;
-  grid-template-columns: 148px 148px minmax(0, 1fr);
-}
-/* 소카테고리를 안 쓰는 동안은 두 칸이다 - 쓰지도 않는 층이 썸네일 자리를
-   먹지 않게(사용자 지정 2026-08-12). 하나라도 만들면 세 칸이 된다. */
-.ia-sc-finder.is-2col {
-  grid-template-columns: 148px minmax(0, 1fr);
+  /* 카테고리 칸을 뺀 나머지를 3(목록) : 2(미리보기) 로 나눈다(사용자 지정). */
+  grid-template-columns: 148px 148px minmax(0, 3fr) minmax(0, 2fr);
   gap: 10px;
   align-items: stretch;
-  min-height: 320px;
+  flex: 1 1 auto;
+  min-height: 0;                 /* grid 자식이 상자를 넘기지 않게 */
+}
+/* 소카테고리를 안 쓰는 동안은 한 칸 줄인다 - 쓰지도 않는 층이 썸네일 자리를
+   먹지 않게(사용자 지정 2026-08-12). 하나라도 만들면 그 칸이 생긴다. */
+.ia-sc-finder.is-2col {
+  grid-template-columns: 148px minmax(0, 3fr) minmax(0, 2fr);
 }
 .ia-sc-col { min-width: 0; }
 .ia-sc-col1, .ia-sc-col2 {
   display: flex; flex-direction: column; gap: 3px;
-  padding: 6px; overflow-y: auto; max-height: 62vh;
+  padding: 6px; overflow-y: auto; min-height: 0;
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.10); border-radius: 8px;
 }
-.ia-sc-content { overflow-y: auto; max-height: 62vh; }
+.ia-sc-content { overflow-y: auto; min-height: 0; }
 
 .ia-sc-item {
   text-align: left; font-size: 11px; font-family: inherit;
@@ -23669,3 +23674,51 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-sc-item.is-add { border-style: dashed; border-color: rgba(255,255,255,0.16); color: #8a8f9a; }
 .ia-sc-hint { font-size: 11px; color: #6f747e; padding: 8px; line-height: 1.5; }
+
+/* ── 저장한 씬: 미리보기 칸 ───────────────────────────────────────────────
+   카테고리 칸을 뺀 나머지를 3(목록) : 2(미리보기) 로 나눈다(사용자 지정
+   2026-08-12). 위는 확대 그림, 아래는 씬과 캐릭터별 프롬프트다. */
+.ia-sc-preview {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 8px; overflow-y: auto;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.10); border-radius: 8px;
+}
+.ia-sc-pv-img {
+  /* 썸네일은 정사각(384px)이지만, 이 칸을 정사각으로 잡으면 폭이 넓을 때
+     세로로 커져 아래 프롬프트를 화면 밖으로 민다. 높이를 칸의 40%로 묶고
+     그림은 contain 으로 넣는다 - 프롬프트가 늘 보이는 편이 낫다. */
+  flex: 0 0 auto; height: 40%; min-height: 160px; width: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.05); border-radius: 6px; overflow: hidden;
+}
+.ia-sc-pv-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.ia-sc-pv-noimg { font-size: 11px; color: #6f747e; }
+.ia-sc-pv-body { display: flex; flex-direction: column; gap: 6px; }
+.ia-sc-pv-title { font-size: 13px; color: #e6e8ee; }
+.ia-sc-pv-sec {
+  font-size: 11px; color: #9aa0ab; margin-top: 4px;
+  padding-bottom: 3px; border-bottom: 1px solid rgba(255,255,255,0.10);
+}
+.ia-sc-pv-note { font-size: 10px; color: #6f747e; margin-left: 6px; }
+.ia-sc-pv-row { display: flex; gap: 6px; align-items: flex-start; }
+.ia-sc-pv-lab { flex: 0 0 62px; font-size: 10px; color: #8a8f9a; padding-top: 2px; }
+.ia-sc-pv-tags { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.ia-sc-pv-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  color: #cfd3dc; background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.10);
+}
+.ia-sc-pv-char {
+  padding: 6px; border-radius: 6px;
+  background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ia-sc-pv-chead { font-size: 11px; color: #dfe2e8; }
+.ia-sc-pv-sub { font-size: 10px; color: #8a8f9a; margin-left: 6px; }
+.ia-sc-pv-empty { font-size: 10px; color: #6f747e; }
+
+/* 미리보기를 연 카드는 테두리로 표시한다 — 오른쪽 내용이 어느 카드의 것인지
+   알 수 없으면 카드를 옮겨 다닐 때마다 헷갈린다. */
+.ia-sc-scard.is-preview { border-color: rgba(90,130,220,0.7); }
+.ia-sc-scard { cursor: pointer; }

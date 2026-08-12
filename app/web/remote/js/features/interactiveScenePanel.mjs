@@ -158,6 +158,7 @@ export function createInteractiveScenePanel({
     // 위임 리스너는 root 에 걸려 있는데 이 노드는 root 밖이다 — 따로 건다.
     popEl.addEventListener('click', onClick);
     popEl.addEventListener('input', onInput);
+    popEl.addEventListener('contextmenu', onContextMenu);
     popEl.addEventListener('dragstart', onDragStart);
     popEl.addEventListener('dragend', onDragEnd);
     popEl.addEventListener('dragover', onDragOver);
@@ -322,22 +323,16 @@ export function createInteractiveScenePanel({
     const name = String(row.name || '') || String(row.summary || '');
     const n = Number(row.char_count || 0);
     const bits = [row.folder ? folderLabel(row.folder) : '', n ? `${n}인` : ''].filter(Boolean);
+    // 카드에는 **버튼을 두지 않는다**(사용자 지정 2026-08-12). 넷을 붙였더니
+    // 미리보기 아래 버튼 바와 그대로 겹쳤고, 카드가 좁아져 썸네일이 죽었다.
+    // 대신 오른쪽 클릭 - 카드를 보고 그 자리에서 바로 부르는 게 목적이다.
     return `<div class="ia-sc-scard${previewId === row.id ? ' is-preview' : ''}"
-      draggable="true" data-scact="preview" data-scid="${escHtml(row.id)}">
+      draggable="true" data-scact="preview" data-scid="${escHtml(row.id)}"
+      data-naia-title="왼쪽: 미리보기 · 오른쪽: 메뉴 · 끌어서 카테고리로">
       <div class="ia-sc-sthumb">${row.thumb
         ? `<img src="${escHtml(thumbUrl(row))}" alt="" loading="lazy">` : ''}</div>
       <div class="ia-sc-sname" title="${escHtml(name)}">${escHtml(name || '이름 없음')}</div>
       <div class="ia-sc-smeta">${escHtml(bits.join(' · '))}</div>
-      <div class="ia-sc-sacts">
-        <button type="button" class="ia-sc-btn is-main" data-scact="apply"
-          data-scid="${escHtml(row.id)}">적용</button>
-        <button type="button" class="ia-sc-btn" data-scact="rename"
-          data-scid="${escHtml(row.id)}" data-naia-title="이름 바꾸기">이름</button>
-        <button type="button" class="ia-sc-btn" data-scact="move"
-          data-scid="${escHtml(row.id)}" data-naia-title="폴더 옮기기">폴더</button>
-        <button type="button" class="ia-sc-btn is-danger" data-scact="unsave"
-          data-scid="${escHtml(row.id)}" data-naia-title="수집에서 내립니다 (지우지 않습니다)">내리기</button>
-      </div>
     </div>`;
   }
 
@@ -347,6 +342,10 @@ export function createInteractiveScenePanel({
    *  든 것까지 포함이다(백엔드가 `folder=대` 를 그 아래까지로 푼다). 소카테고리
    *  칸에는 **[전체보기]가 항상 있다** — 그게 곧 '대카테고리 전부' 상태다. */
   function renderPop() {
+    // 목록이 갈리면 메뉴가 가리키던 카드가 사라질 수 있다 - 먼저 닫는다.
+    closeMenu();
+    // 끌던 원본이 이 렌더로 사라지면 `dragend` 가 오지 않는다 - 여기서 버린다.
+    dragId = '';
     const el = ensurePop();
     if (!popOpen) { el.hidden = true; el.innerHTML = ''; return; }
     el.hidden = false;
@@ -431,6 +430,111 @@ export function createInteractiveScenePanel({
     }
   }
 
+  // ---------------------------------------------------------------- 우클릭 메뉴
+  //
+  // 카드에서 버튼을 걷어낸 대가로 여기가 **유일한 손잡이**가 된다. 미리보기를 열고
+  // 아래 버튼 바까지 마우스를 내리는 것과, 카드를 보고 그 자리에서 뽑는 것은 다른
+  // 동작이다(사용자 지정 2026-08-12).
+  //
+  // 팝업과 마찬가지로 **body 직계**다 - `.viewer-wrapper` 안에 넣으면 z 가 접힌다.
+  let menuEl = null;
+
+  function ensureMenu() {
+    if (menuEl && document.body.contains(menuEl)) return menuEl;
+    menuEl = document.createElement('div');
+    menuEl.className = 'ia-sc-menu';
+    menuEl.hidden = true;
+    document.body.appendChild(menuEl);
+    // 메뉴 항목도 `data-scact` 를 달고 있으므로 같은 처리기로 보낸다.
+    menuEl.addEventListener('click', onMenuClick);
+    menuEl.addEventListener('contextmenu', e => e.preventDefault());
+    return menuEl;
+  }
+
+  /** 화면 순서 그대로 [폴더 없음] -> 대카테고리 -> 그 소카테고리. 평면으로 늘어놓으면
+   *  남의 카테고리 밑을 헤매게 된다(순환 [폴더] 버튼과 같은 규약). */
+  function folderOptions() {
+    const out = [{id: '', name: '폴더 없음'}];
+    for (const t of folders.filter(f => !f.parent)) {
+      out.push({id: t.id, name: t.name});
+      for (const sf of folders.filter(f => f.parent === t.id)) {
+        out.push({id: sf.id, name: `${t.name} / ${sf.name}`});
+      }
+    }
+    return out;
+  }
+
+  function menuHtml(id) {
+    const row = savedRows.find(r => r.id === id) || {};
+    const cur = String(row.folder || '');
+    const sid = escHtml(id);
+    const item = (act, label, cls, hint) =>
+      `<button type="button" class="ia-sc-mi${cls || ''}" data-scact="${act}"
+         data-scid="${sid}">${escHtml(label)}${
+           hint ? `<span class="ia-sc-mhint">${escHtml(hint)}</span>` : ''}</button>`;
+    // 폴더 목록을 여기 그대로 펼친다 - 끌기가 안 되는 환경(터치·키보드)에서
+    // 분류할 길이 이것뿐이 되므로 하위 메뉴로 한 겹 더 숨기지 않는다.
+    const moves = folderOptions().map(o =>
+      `<button type="button" class="ia-sc-mi is-move${o.id === cur ? ' is-on' : ''}"
+         data-scact="move-to" data-scid="${sid}" data-fid="${escHtml(o.id)}"
+         >${escHtml(o.name)}</button>`).join('');
+    return `<div class="ia-sc-mname">${escHtml(
+              String(row.name || '') || String(row.summary || '') || '이름 없음')}</div>
+      ${item('gen-now', '즉시 생성', '', '작업판 그대로')}
+      ${item('apply', '적용', ' is-main')}
+      ${item('apply-gen', '적용 + 생성')}
+      <div class="ia-sc-msep"></div>
+      ${item('rename', '이름 바꾸기…')}
+      <div class="ia-sc-msep">폴더</div>
+      ${moves}
+      <div class="ia-sc-msep"></div>
+      ${item('unsave', '수집에서 내리기', ' is-danger', '지우지 않습니다')}`;
+  }
+
+  function openMenu(id, px, py) {
+    const el = ensureMenu();
+    el.innerHTML = menuHtml(id);
+    el.hidden = false;
+    // 그린 뒤에야 크기를 알 수 있다 - 화면 밖으로 나가면 안쪽으로 당긴다.
+    const r = el.getBoundingClientRect();
+    const x = Math.max(6, Math.min(px, window.innerWidth - r.width - 6));
+    const y = Math.max(6, Math.min(py, window.innerHeight - r.height - 6));
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    document.addEventListener('pointerdown', onDocDown, true);
+    window.addEventListener('resize', closeMenu);
+    // 목록을 굴리면 메뉴만 제자리에 떠 있게 된다 - 그때는 닫는다.
+    window.addEventListener('scroll', closeMenu, true);
+  }
+
+  function closeMenu() {
+    if (!menuEl || menuEl.hidden) return;
+    menuEl.hidden = true;
+    menuEl.innerHTML = '';
+    document.removeEventListener('pointerdown', onDocDown, true);
+    window.removeEventListener('resize', closeMenu);
+    window.removeEventListener('scroll', closeMenu, true);
+  }
+
+  function onDocDown(e) {
+    if (menuEl && menuEl.contains(e.target)) return;
+    closeMenu();
+  }
+
+  function onMenuClick(e) {
+    const btn = e.target && e.target.closest ? e.target.closest('[data-scact]') : null;
+    closeMenu();                 // 무엇을 눌렀든 메뉴는 닫는다
+    if (btn) onClick(e);
+  }
+
+  function onContextMenu(e) {
+    const card = e.target && e.target.closest ? e.target.closest('.ia-sc-scard') : null;
+    if (!card || !card.dataset.scid) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openMenu(card.dataset.scid, e.clientX, e.clientY);
+  }
+
   // ---------------------------------------------------------------- 끌어 옮기기
   //
   // 카드를 카테고리 칸에 떨어뜨리면 그 폴더로 옮긴다. `renderPop()` 이 팝업을
@@ -442,6 +546,7 @@ export function createInteractiveScenePanel({
       ? event.target.closest('.ia-sc-scard') : null;
     if (!card || !card.dataset.scid) return;
     dragId = card.dataset.scid;
+    closeMenu();
     try {
       event.dataTransfer.setData(DND_MIME, dragId);
       // 일부 브라우저는 표준 자료형이 하나도 없으면 끌기를 취소한다.
@@ -464,8 +569,14 @@ export function createInteractiveScenePanel({
     if (!el) return null;
     // **우리 것만 받는다.** 파일이나 다른 앱의 글을 떨어뜨렸을 때 폴더가 반응하면
     // 안 된다. 끌기 중에는 `types` 만 볼 수 있고 값은 drop 에서야 읽힌다.
+    //
+    // 판별은 **자료형만으로** 한다. `dragId` 를 통행증으로 쓰면, 끌기 도중 목록이
+    // 다시 그려져 원본 카드가 사라졌을 때 `dragend` 가 오지 않아 값이 남고, 그
+    // 뒤 남의 파일/글이 이 검사를 통과해 **이전에 끌던 씬이 옮겨진다**
+    // (Codex 9차, 실측 재현). `dragId` 는 값을 못 읽었을 때의 보루로만 쓴다.
     const types = (event.dataTransfer && event.dataTransfer.types) || [];
-    const mine = dragId || (types.includes ? types.includes(DND_MIME) : false);
+    const mine = types.includes ? types.includes(DND_MIME)
+      : Array.prototype.indexOf.call(types, DND_MIME) >= 0;
     return mine ? el : null;
   }
 
@@ -495,12 +606,19 @@ export function createInteractiveScenePanel({
     if (!id) return;
     const row = savedRows.find(r => r.id === id);
     if (row && String(row.folder || '') === target) return;   // 제자리면 아무것도 안 한다
+    // 앞선 이동이 아직 돌아오지 않았는데 또 떨어뜨리면, 두 요청의 끝나는 순서에
+    // 따라 최종 폴더와 토스트 순서가 뒤집힌다 - 버튼 경로와 같은 빗장을 건다
+    // (Codex 9차). 카드가 여전히 화면에 남아 있어 실제로 두 번 떨어뜨릴 수 있다.
+    if (busy) return;
+    busy = true;
     try {
       await api('/scene/update', {id, folder: target});
       showToast(movedMsg(target), 'info');
       await loadSaved();
     } catch (exc) {
       showToast(`옮기지 못했습니다: ${exc.message}`, 'error');
+    } finally {
+      busy = false;
     }
   }
 
@@ -587,13 +705,18 @@ export function createInteractiveScenePanel({
   function closeSaved() {
     if (!popOpen) return;
     popOpen = false;
+    closeMenu();
+    dragId = '';
     clearPreview();
     document.removeEventListener('keydown', onKey, true);
     renderPop();
   }
 
   function onKey(e) {
-    if (e.key === 'Escape' && popOpen) { e.stopPropagation(); closeSaved(); }
+    if (e.key !== 'Escape') return;
+    // 메뉴가 떠 있으면 **그것만** 닫는다 - 한 번에 둘이 닫히면 되돌릴 길이 없다.
+    if (menuEl && !menuEl.hidden) { e.stopPropagation(); closeMenu(); return; }
+    if (popOpen) { e.stopPropagation(); closeSaved(); }
   }
 
   function onInput(e) {
@@ -702,6 +825,13 @@ export function createInteractiveScenePanel({
           showToast(movedMsg(next), 'info');
           await loadSaved();
         }
+      } else if (act === 'move-to') {
+        const to = btn.dataset.fid || '';
+        const row = savedRows.find(r => r.id === id);
+        if (row && String(row.folder || '') === to) return;   // 제자리
+        await api('/scene/update', {id, folder: to});
+        showToast(movedMsg(to), 'info');
+        await loadSaved();
       } else if (act === 'unsave') {
         await api('/scene/save', {id, on: false});
         showToast('수집에서 내렸습니다. 최근 씬에는 남아 있습니다.', 'info');
@@ -746,6 +876,9 @@ export function createInteractiveScenePanel({
       if (popOpen) loadSaved();
     },
     destroy() {
+      closeMenu();
+      if (menuEl && menuEl.parentNode) menuEl.parentNode.removeChild(menuEl);
+      menuEl = null;
       root.removeEventListener('click', onClick);
       root.removeEventListener('input', onInput);
       document.removeEventListener('keydown', onKey, true);

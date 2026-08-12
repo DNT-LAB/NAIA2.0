@@ -23625,14 +23625,13 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; overflow: hidden;
   background: rgba(30,33,40,0.9);
 }
-.ia-sc-sthumb { height: 96px; background: rgba(255,255,255,0.05); }
+.ia-sc-sthumb { height: 128px; background: rgba(255,255,255,0.05); }
 .ia-sc-sthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ia-sc-sname {
   font-size: 12px; color: #e6e8ee; padding: 6px 8px 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ia-sc-smeta { font-size: 10px; color: #8a8f9a; padding: 2px 8px 0; }
-.ia-sc-sacts { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; }
+.ia-sc-smeta { font-size: 10px; color: #8a8f9a; padding: 2px 8px 8px; }
 
 /* ── 저장한 씬: Finder 3열 ────────────────────────────────────────────────
    [대카테고리][소카테고리][컨텐츠] (사용자 지정 2026-08-12).
@@ -23748,3 +23747,38 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    브라우저가 텍스트 선택으로 처리해 dragstart 가 안 온다. */
 .ia-sc-scard[draggable="true"] .ia-sc-sthumb,
 .ia-sc-scard[draggable="true"] .ia-sc-sname { user-select: none; }
+
+/* ── 카드 우클릭 메뉴 (사용자 지정 2026-08-12) ────────────────────────────
+   카드에서 버튼을 걷어낸 대신 여기가 유일한 손잡이다. body 직계로 띄우므로
+   z 는 씬 팝업(4200)보다 위여야 한다. */
+.ia-sc-menu {
+  position: fixed; z-index: 4300; min-width: 176px; max-width: 260px;
+  max-height: 70vh; overflow-y: auto;
+  padding: 4px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.16); background: rgba(24,27,33,0.98);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.55);
+}
+.ia-sc-menu[hidden] { display: none; }
+.ia-sc-mname {
+  font-size: 11px; color: #8a8f9a; padding: 4px 8px 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ia-sc-mi {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; text-align: left; padding: 6px 8px; border: 0; border-radius: 5px;
+  background: transparent; color: #e6e8ee; font-size: 12px; cursor: pointer;
+}
+.ia-sc-mi:hover { background: rgba(255,255,255,0.09); }
+.ia-sc-mi.is-main { color: #cfe0ff; font-weight: 600; }
+.ia-sc-mi.is-danger { color: #e88f8f; }
+.ia-sc-mi.is-move { position: relative; padding-left: 22px; }
+/* 지금 들어 있는 폴더에는 표식을 단다 - 어디 있는지 모르고 고르면 헛돈다. */
+.ia-sc-mi.is-move.is-on { color: #cfe0ff; }
+.ia-sc-mi.is-move.is-on::before {
+  content: '\2713'; position: absolute; left: 7px; top: 50%; transform: translateY(-50%);
+}
+.ia-sc-mhint { font-size: 10px; color: #7b808a; }
+.ia-sc-msep {
+  margin: 4px 2px; border-top: 1px solid rgba(255,255,255,0.10);
+  font-size: 10px; color: #7b808a; padding: 4px 6px 0;
+}

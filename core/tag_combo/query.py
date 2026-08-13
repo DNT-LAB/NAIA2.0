@@ -170,6 +170,21 @@ class ComboQuery:
     # ---- 질의 ----------------------------------------------------------
     def recommend(self, prompt: Iterable[str]) -> Result:
         pr = {str(t).strip() for t in prompt if str(t).strip()}
+        # 단일 헤드 태그는 사전계산으로 답한다. 전량 계산 결과를 그대로 담으므로
+        # 손실이 정의상 0이고, 실측 5.6초짜리 질의가 조회 한 번이 된다.
+        if len(pr) == 1:
+            hit = self.m.head_combos(next(iter(pr)))
+            if hit is not None:
+                combos = [Combo(tags=t, support=n,
+                                surprisal=float(sum(self.surp[self.m.tag_to_id[x]]
+                                                    for x in t)),
+                                score=n * math.log2(1.0 + sum(
+                                    self.surp[self.m.tag_to_id[x]] for x in t)))
+                          for t, n in hit[:self.p.top_k]]
+                if combos:
+                    return Result(combos=combos, used_prompt=sorted(pr),
+                                  matched=self.m.head_matched(next(iter(pr))),
+                                  bundle_size=len(combos[0].tags))
         matched, used = self._backoff(sorted(pr))
         if matched is None or not len(matched):
             return Result(used_prompt=used)

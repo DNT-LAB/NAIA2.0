@@ -104,6 +104,11 @@ class ComboModel:
 
         self._inv_posts: np.ndarray | None = None
         self._bounds: np.ndarray | None = None
+        # 헤드 컨텍스트 캐시. 매칭이 큰 단독 태그(실측 경계 5,000건)는 질의 시점
+        # 계산이 초 단위가 된다 - `looking at viewer` 494,399건에 5.6초. 그런 태그는
+        # freq>=5000 기준 662개뿐이라 전량 계산 결과를 통째로 담아도 작다.
+        # 표본추출로 때우면 답이 망가진다(query.Policy.scan_cap 주석 참조).
+        self._head: dict[str, dict] = self.meta.get("head") or {}
 
     # ---- 역인덱스 ------------------------------------------------------
     def ensure_inverted(self) -> None:
@@ -134,6 +139,18 @@ class ComboModel:
     def row(self, post: int) -> np.ndarray:
         return self.indices[self.indptr[post]:self.indptr[post + 1]]
 
+    # ---- 헤드 컨텍스트 --------------------------------------------------
+    def head_combos(self, tag: str) -> list[tuple[list[str], int]] | None:
+        """사전계산된 조합. 없으면 None(질의 시점 계산으로 넘어간다)."""
+        rec = self._head.get(tag)
+        if not rec:
+            return None
+        return [(list(t), int(n)) for t, n in rec.get("combos", ())]
+
+    def head_matched(self, tag: str) -> int:
+        rec = self._head.get(tag)
+        return int(rec.get("matched", 0)) if rec else 0
+
     @property
     def nbytes(self) -> int:
         base = self.indptr.nbytes + self.indices.nbytes + \
@@ -146,7 +163,7 @@ class ComboModel:
 def write_model(path: Path, *, group: str, rows: list[list[int]], tags: list[str],
                 freq: list[int], post_rating: list[int], post_char: list[int],
                 tag_rating: np.ndarray, sampled_from: int,
-                source_hash: str = "") -> dict:
+                source_hash: str = "", head: dict | None = None) -> dict:
     """모델 한 벌을 쓴다. 반환값은 메타(호출부가 로그로 쓴다)."""
     if len(tags) > MAX_LOCAL_VOCAB:
         raise ValueError(f"어휘 {len(tags)} 가 uint16 상한 {MAX_LOCAL_VOCAB} 을 넘는다")
@@ -178,7 +195,7 @@ def write_model(path: Path, *, group: str, rows: list[list[int]], tags: list[str
         "version": 1, "group": group, "posts": n, "vocab": len(tags),
         "nnz": int(len(indices)), "sampledFrom": sampled_from,
         "ratings": ratings, "sourceHash": source_hash,
-        "tags": tags, "freq": freq,
+        "tags": tags, "freq": freq, "head": head or {},
     }
     path.with_suffix(".json").write_text(
         json.dumps(meta, ensure_ascii=False), encoding="utf-8")

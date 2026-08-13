@@ -1064,6 +1064,9 @@ export function createInteractivePanel({
         <span class="ia-block-count">${activeCount} 활성</span>
         ${jumpBar}
         <span style="flex:1"></span>
+        <button type="button" class="ia-cclear" data-charclear="1"
+          data-naia-title="모든 캐릭터 슬롯을 비우고 C1 하나만 남깁니다"
+          >Clear</button>
         ${isNai ? charRefButtonHtml() : ''}
       </div>
       ${rows}
@@ -2437,6 +2440,13 @@ export function createInteractivePanel({
         jumpToChar(Number(el.dataset.charjump));
       });
     });
+    const clearBtn = blocksMount.querySelector('[data-charclear]');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', event => {
+        event.stopPropagation();
+        clearCharacters();
+      });
+    }
     const addTop = blocksMount.querySelector('[data-charadd]');
     if (addTop) {
       addTop.addEventListener('click', event => {
@@ -2665,6 +2675,53 @@ export function createInteractivePanel({
     if (card && card.scrollIntoView) {
       card.scrollIntoView({block: 'start', behavior: 'smooth'});
     }
+  }
+
+  /** 캐릭터 슬롯을 통째로 비우고 C1 하나만 남긴다(사용자 지정 2026-08-13).
+   *
+   *  **묻고 지운다.** 여러 슬롯을 한 번에 날리는 유일한 버튼이고 되돌릴 수 없다.
+   *  지금 무엇을 잃는지(슬롯 수·태그 요약)를 문구에 넣는다 — '정말?' 만 물으면
+   *  무엇이 사라지는지 모른 채 누른다.
+   *
+   *  이미 빈 슬롯 하나뿐이면 **묻지 않고 아무것도 하지 않는다** — 잃을 것이 없는데
+   *  확인창을 띄우면 다음부터 읽지 않고 누르게 된다.
+   */
+  async function clearCharacters() {
+    // **기본값은 세지 않는다.** 새 슬롯도 슬라이더 기본값(머리 길이 등)을 갖고
+    // 태어나므로, 그냥 세면 아무것도 안 넣은 판에서도 '태그 6개'라고 말한다 —
+    // 잃는 양을 부풀리면 다음부터 문구를 안 읽는다(실측: 빈 슬롯 3개에 11개).
+    const addedOf = c => CHAR_SUBS.reduce((m, s) => {
+      const def = new Set(defaultFieldsFor(s.key));
+      return m + (c.fields[s.key] || []).filter(t => !def.has(t)).length;
+    }, 0);
+    const tagCount = state.chars.reduce((n, c) => n + addedOf(c), 0);
+    const fastCount = Object.values((state.fast && state.fast.chars) || {})
+      .filter(f => String(f.p || '').trim() || String(f.n || '').trim()).length;
+    if (state.chars.length <= 1 && !tagCount && !fastCount) {
+      showToast('이미 비어 있습니다.', 'info');
+      return;
+    }
+    if (typeof showAppDialog === 'function') {
+      const ok = await showAppDialog(
+        `슬롯 ${state.chars.length}개 · 태그 ${tagCount}개`
+        + (fastCount ? ` · Fast ${fastCount}개` : '') + String.fromCharCode(10)
+        + '모두 사라지고 새 C1 하나만 남습니다. 되돌릴 수 없습니다.',
+        {type: 'confirm', title: '캐릭터 슬롯을 전부 비울까요?',
+         okText: '전부 비우기', cancelText: '취소'});
+      if (!ok) return;
+    }
+    // 슬롯을 겨냥해 열려 있던 팝업부터 닫는다 — 가리키던 슬롯이 사라진다.
+    closePresetPanel();
+    closePanel();
+    state.chars = [newCharacter(true)];
+    // **Fast 도 함께 버린다.** 남겨 두면 지운 캐릭터의 문장이 상태에 남아
+    // exportState 로 저장되고, 나중에 슬롯 수가 같아지면 순서 복원에 얹혀
+    // 엉뚱한 캐릭터에 붙는다(deleteCharacter 와 같은 이유).
+    if (state.fast) state.fast.chars = {};
+    renderBlocks();
+    emitChange();
+    notifyRoster();
+    showToast('캐릭터 슬롯을 비웠습니다.', 'success');
   }
 
   function addCharacter() {

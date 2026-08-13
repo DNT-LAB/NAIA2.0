@@ -20766,6 +20766,21 @@ body.detached-module .mod-grid-3 {
 .ia-cjump.is-open:hover { background: #d0c7fa; color: #14141c; }
 .ia-cjump.is-off { opacity: 0.45; }
 .ia-cjump.is-add { border-style: dashed; }
+
+/* 머리줄의 [Clear] — 슬롯을 통째로 비운다. 되돌릴 수 없으므로 **평소에는 조용히**
+   두고(테두리만) 올렸을 때만 붉게 든다. C 버튼과 반대쪽 끝에 둔 것도 같은 이유다 —
+   오가려다 누르면 안 된다. */
+.ia-cclear {
+  flex: 0 0 auto; padding: 3px 8px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: transparent; color: var(--text-dim);
+  font-family: inherit; font-size: 10px; letter-spacing: 0.6px; cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ia-cclear:hover {
+  color: #e9a6a2; border-color: rgba(229,115,107,0.45);
+  background: rgba(229,115,107,0.10);
+}
 .ia-char { border-bottom: 1px solid var(--border-dim); }
 .ia-char:last-of-type { border-bottom: 0; }
 .ia-char-head {

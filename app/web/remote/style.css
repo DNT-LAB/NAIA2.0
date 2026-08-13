@@ -24061,3 +24061,34 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    그때 문제는 상자가 편집기보다 **작아서** 눌렀을 때 튀어 오른 것이었고 지금은
    반대로 쉬는 쪽을 줄이는 것이다(사용자 지정 2026-08-13). */
 .interactive-mode .ia-ge-box.is-text { min-height: 55px; }
+
+/* ── 인기 조합 카드 ────────────────────────────────────────────────────────
+   '함께 쓰는 것' 은 태그를 하나씩 권하고, 이건 **묶음으로** 권한다.
+   한 줄이 곧 하나의 조합이라 줄바꿈으로 끊지 않고 가로로 이어 붙인다. */
+.ia-combo-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  padding: 5px 6px; border-radius: 6px;
+  border: 1px solid rgba(255,255,255,.06);
+  background: rgba(255,255,255,.025);
+  margin-bottom: 5px;
+}
+.ia-combo-tag {
+  font: inherit; font-size: 11px; line-height: 1.5;
+  padding: 2px 7px; border-radius: 999px; cursor: pointer;
+  color: var(--ia-fg, #e8e8ee);
+  background: rgba(120,140,255,.16);
+  border: 1px solid rgba(120,140,255,.32);
+}
+.ia-combo-tag:hover { background: rgba(120,140,255,.30); }
+.ia-combo-n {
+  margin-left: auto; font-size: 10px; opacity: .5;
+  font-variant-numeric: tabular-nums;
+}
+.ia-combo-all {
+  font: inherit; font-size: 11px; width: 100%; margin-top: 2px;
+  padding: 4px 0; border-radius: 6px; cursor: pointer;
+  color: var(--ia-fg, #e8e8ee);
+  background: rgba(120,140,255,.12);
+  border: 1px solid rgba(120,140,255,.26);
+}
+.ia-combo-all:hover { background: rgba(120,140,255,.24); }

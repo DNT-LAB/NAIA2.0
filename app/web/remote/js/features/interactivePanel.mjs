@@ -4547,9 +4547,30 @@ export function createInteractivePanel({
         refreshAxisSections();     // 그리드의 '선택됨' 표시도 맞춘다
         return;
       }
+      // '전부 넣기' — 인기 조합 카드의 첫 줄을 통째로 넣는다. 조합 추천의 요지가
+      // 묶음이므로 하나씩 누르게 하면 의미가 반감된다.
+      const all = ev.target.closest('[data-combo-all]');
+      if (all) {
+        const row = all.parentElement?.querySelector('.ia-combo-row');
+        const tags = [...(row?.querySelectorAll('[data-advice-add]') || [])]
+          .map(x => x.getAttribute('data-advice-add')).filter(Boolean);
+        const cur = new Set(currentTags().map(t => String(t).toLowerCase()));
+        for (const t of tags) {
+          if (!cur.has(String(t).toLowerCase())) toggleTag(t, { fromAside: true });
+        }
+        refreshAxisSections();
+        return;
+      }
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
       const tag = b.getAttribute('data-advice-add');
+      // 조합 카드의 칩은 **누르면 넣는다.** 그리드 셀과 규약이 다른 이유는,
+      // 여기 있는 것은 이미 "이 조합을 쓰라"는 제안이라 살펴볼 대상이 아니다.
+      if (b.classList.contains('ia-combo-tag')) {
+        toggleTag(tag, { fromAside: true });
+        refreshAxisSections();
+        return;
+      }
       if (!ev.target.closest('.ia-cell-act')) {
         // 예전에는 여기서 **아무것도 하지 않았다.** 본문 클릭이 곧 이 플로트의
         // 기준을 바꾸는 것이라 사전이 방금 누른 칩 기준으로 다시 그려졌기
@@ -4631,6 +4652,30 @@ export function createInteractivePanel({
     return '<div class="ia-aside-card scroll"><div class="ia-aside-title">태그 사전' +
       `<span class="ia-aside-count">${escHtml(info.tag || '')}</span></div>` +
       rows.join('') + '</div>';
+  }
+
+  // 인기 조합. 실패는 캐시하지 않는다 — 한 번의 일시 오류가 페이지 수명 내내
+  // 카드를 지우면 안 된다(조언 배치에서 같은 사고가 있었다).
+  const comboCache = new Map();
+  let comboLast = null;
+
+  async function fetchCombos(tags) {
+    const list = (tags || []).map(t => String(t).trim()).filter(Boolean);
+    if (!list.length) return null;
+    const key = list.slice().sort().join(',');
+    if (comboCache.has(key)) return comboCache.get(key);
+    try {
+      const r = await fetch('/api/tag-combo?tags=' +
+        encodeURIComponent(list.slice(0, 24).join(',')));
+      const j = await r.json();
+      // 모델이 안 구워진 설치에서는 조용히 없는 셈 친다 - 안내는 로그가 한다.
+      const out = (j && !j.error) ? j : null;
+      comboCache.set(key, out);
+      comboLast = out;
+      return out;
+    } catch {
+      return null;
+    }
   }
 
   async function fetchAdvice(tags) {
@@ -4990,6 +5035,26 @@ export function createInteractivePanel({
         recGroups.map(g =>
           `<div class="ia-aside-group"><div class="ia-aside-group-label">${escHtml(g.label)}</div>` +
           `<div class="ia-aside-thumbs">${g.html}</div></div>`).join('') +
+        '</div>');
+    }
+    // ── 인기 조합 ────────────────────────────────────────────────────────
+    // '함께 쓰는 것' 은 태그를 **하나씩** 권한다. 이건 묶음으로 권한다 —
+    // "이 구도에는 이 세트가 흔하다". 근거는 인원 그룹별 모델이고, 사용자가
+    // 인원 수를 바꾸면 다른 모델이 붙는다(core/tag_combo).
+    const combo = await fetchCombos(currentTags());
+    if (seq !== asideSeq || !panelContext) return;
+    if (combo && combo.combos && combo.combos.length) {
+      const note = combo.weak ? ' 대략' : '';
+      parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">인기 조합' +
+        `<span class="ia-aside-count">${escHtml(combo.group || '')}${note}</span></div>` +
+        combo.combos.slice(0, 4).map(c => {
+          const chips = c.tags.map(t =>
+            `<button type="button" class="ia-combo-tag" data-advice-add="${escHtml(t)}"` +
+            ` title="${escHtml(tagTip(t))}">${escHtml(t)}</button>`).join('');
+          return `<div class="ia-combo-row">${chips}` +
+            `<span class="ia-combo-n">${c.support.toLocaleString()}</span></div>`;
+        }).join('') +
+        `<button type="button" class="ia-combo-all" data-combo-all="1">전부 넣기</button>` +
         '</div>');
     }
     // 조언(전제조건·충돌·추천)은 태그 대부분에 없다. 그 자리에 '알려드릴 것이

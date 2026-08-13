@@ -109,6 +109,11 @@ class ComboModel:
         # freq>=5000 기준 662개뿐이라 전량 계산 결과를 통째로 담아도 작다.
         # 표본추출로 때우면 답이 망가진다(query.Policy.scan_cap 주석 참조).
         self._head: dict[str, dict] = self.meta.get("head") or {}
+        # 함의 인접표. 질의 시점에 계산하면 실측 10~20배가 된다
+        # (`sword` 19ms -> 1,440ms). tools/build_tag_combo_implications.py 가 굽는다.
+        self.implies: dict[str, frozenset[str]] = {
+            k: frozenset(v) for k, v in (self.meta.get("implies") or {}).items()
+        }
 
     # ---- 역인덱스 ------------------------------------------------------
     def ensure_inverted(self) -> None:

@@ -307,19 +307,26 @@ class ComboQuery:
         `sword` 가 `holding + weapon + holding weapon + holding sword` 를 내던 것을
         막는다 - 넷이 서로 함의라 한 칸을 네 번 쓴 셈이었다.
 
-        **함의표는 빌드 시점에 구워 와야 한다.** 질의 시점에 후보쌍을 다 계산하면
-        실측 10~20배(19ms -> 1,440ms)가 된다. 지금은 동족(머리 명사 동일)만
-        걸고, 함의표 연동은 빌더 쪽 후속 작업이다.
+        **함의표는 빌드 시점에 구워 온다.** 질의 시점에 후보쌍을 다 계산하면
+        실측 10~20배(19ms -> 1,440ms)가 된다. 여기서는 조회만 한다
+        (`tools/build_tag_combo_implications.py`). 동족(머리 명사 동일)은
+        문자열 규칙이라 표가 없어도 공짜로 걸린다.
         """
         picked: list[int] = []
+        picked_names: list[str] = []
         heads: set[str] = set()
+        implies = self.m.implies
         for c in sel:
             name = self.m.tags[c]
             words = name.split()
             head = words[-1] if len(words) > 1 else ""
             if head and head in heads:
                 continue
+            rel = implies.get(name)
+            if rel and any(q in rel for q in picked_names):
+                continue
             picked.append(c)
+            picked_names.append(name)
             if head:
                 heads.add(head)
             if len(picked) >= size:

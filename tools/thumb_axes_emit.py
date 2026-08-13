@@ -881,9 +881,85 @@ _AXIS_TAGS.write_text(json.dumps({
     "axes": _axis_tags,
 }, ensure_ascii=False, indent=1), encoding="utf-8")
 
+# ── 축 한글 라벨 (배포판 백엔드가 읽는다) ────────────────────────────────
+# 조언 카드의 '함께 쓰는 것' 은 후보를 묶어서 보여준다. 의상 후보는 부위(region6)로
+# 묶이지만 그 밖의 어휘(직업·표정·자세·사물…)에는 부위가 없다 — 축 이름이 그
+# 자리를 대신한다. 라벨의 SSOT 는 이 파일의 SLOTS/*_SECTIONS 다. 백엔드가
+# interactiveAxes.mjs 를 파싱하는 일은 없어야 하므로 여기서 data/ 로 굽는다.
+_AXIS_LABELS = Path("data/interactive_axis_labels.json")
+_axis_label: dict[str, str] = {}
+_axis_slot: dict[str, str] = {}
+
+# 화면 섹션이 없는 컨테이너 축. subgroup(FACE_GROUPS) 이나 씬 슬롯이 대신 참조해서
+# `(kind, label, ref)` 삼각형이 없다 — 축 이름이 그대로 남으면 그룹 머리말에
+# `pose_solo` 가 찍힌다. 큰 축(자세 1592·다인원 439·얼굴 217)이라 반드시 채운다.
+_AXIS_LABEL_FALLBACK = {
+    "pose_solo": ("자세", ""),
+    "pose_multi": ("다인원 자세", ""),
+    "face": ("눈·얼굴", ""),
+    "expression_from_pose": ("표정", ""),
+}
+
+
+def _put(ref, label: str, slot: str = "") -> None:
+    # ref 가 목록이면 축이 아니라 subgroup 묶음이다(CHAR_SLOTS 의 subgroups 분기).
+    if isinstance(ref, str) and ref and label and ref not in _axis_label:
+        _axis_label[ref] = label
+        if slot:
+            _axis_slot[ref] = slot
+
+
+for _slot_label, _icon, _slot_axis, _secs in SLOTS:
+    for _sec in _secs:
+        _put(_sec[2], _sec[1], _slot_label)
+for _secs, _slot_label in ((_LOC_SECTIONS, "배경"), (_EVENT_SECTION, "배경"),
+                           (_OBJ_SECTIONS, "사물"), (_ANI_SECTIONS, "동물"),
+                           (_FX_SECTIONS, "효과·기호"), (_VIEW_SECTIONS, "구도"),
+                           (_META_SECTIONS, "연출"), (_RELATION_SECTION, "다인원"),
+                           (_POSE_SECTIONS, "자세"), (_GAZE_SECTION, "구도")):
+    for _sec in _secs:
+        _put(_sec[2], _sec[1], _slot_label)
+for _ax in _POSE_MULTI:
+    _put(_ax, _pose_axes["label"].get(_ax, _ax), "다인원")
+for _ax in _ADULT_ORDER:
+    _put(_ax, _nsfw_label.get(_ax, _ax), "성인")
+for _key, _label in _GLOSS_SRC:
+    _put(_key, _label, "성인")
+for _ax, (_lb, _sl) in _AXIS_LABEL_FALLBACK.items():
+    _put(_ax, _lb, _sl)
+_unlabeled = sorted(set(_axis_tags) - set(_axis_label))
+for _ax in _unlabeled:
+    _axis_label[_ax] = _ax
+
+
+def _display(ax: str) -> str:
+    """그룹 머리말. 섹션 라벨 단독이면 모호한 것들이 있다 — `모양`(머리 모양)·
+    `목`(목장식)·`손`(장갑)·`다리`(양말). 슬롯 안에서는 안 헷갈리지만 조언 카드는
+    슬롯 밖에서 뜨므로 슬롯 이름을 앞에 붙인다. 이미 포함돼 있으면 붙이지 않는다."""
+    lb = _axis_label.get(ax, ax)
+    sl = _axis_slot.get(ax, "")
+    if not sl or sl in lb or lb in sl:
+        return lb
+    return f"{sl} {lb}"
+
+
+_AXIS_LABELS.write_text(json.dumps({
+    "note": ["축 -> 한글 라벨. tools/thumb_axes_emit.py 가 SLOTS/*_SECTIONS 에서 굽는다.",
+             "조언 카드가 의상이 아닌 후보를 묶을 때 그룹 머리말로 쓴다(display).",
+             "labels=섹션 라벨 · slots=소속 슬롯 · display=머리말용 합성.",
+             "손으로 고치지 말 것. 섹션 라벨을 고치고 emit 을 다시 돌려라."],
+    "count": len(_axis_label),
+    "unlabeled": _unlabeled,
+    "labels": dict(sorted(_axis_label.items())),
+    "slots": dict(sorted(_axis_slot.items())),
+    "display": {a: _display(a) for a in sorted(_axis_label)},
+}, ensure_ascii=False, indent=1), encoding="utf-8")
+
 print(f"생성: {DST}  ({len(out)} 줄)")
 print(f"  축 소속표 {len(_axis_tags)}축 / {sum(len(v) for v in _axis_tags.values())}태그"
       f" -> {_AXIS_TAGS}")
+print(f"  축 라벨 {len(_axis_label)}개 (섹션 없는 축 {len(_unlabeled)}개는 축 이름 그대로)"
+      f" -> {_AXIS_LABELS}")
 print(f"  축 인덱스 {len(_referenced)}개 -> {_INDEX}")
 print(f"  팔레트: hair {len(palette['hair_color'])} / eye {len(palette['eye_color'])}")
 print(f"  슬라이더: {list((man.get('sliders') or {}).keys())}")

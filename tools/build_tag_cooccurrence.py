@@ -352,8 +352,54 @@ def main() -> int:
                     help="한 줄 한 태그 파일. 그 태그들의 상위 후보를 점수와 함께 덤프한다")
     ap.add_argument("--dump-out", default="data/_companion_review/candidates.json")
     ap.add_argument("--dump-top", type=int, default=20)
+    # ── 조언 카드('함께 쓰는 것')용 두 번째 산출물 ────────────────────────────
+    # 사전 카드는 한 줄에 4개다. 조언 카드는 후보를 **축별로 묶어** 보여주므로 같은
+    # 4개로는 그룹이 하나밖에 안 나온다. 같은 통계·같은 게이트에서 더 깊이 뽑되,
+    # 화면에 몇 개를 띄울지는 프론트가 정한다(현재 3그룹 x 6개).
+    # 정책을 둘로 갈라 두지 않으려고 별도 빌더를 만들지 않았다 — 게이트가 갈라지면
+    # 두 카드가 서로 다른 말을 하게 된다.
+    # 사전은 사람 손이 얹힌 이력이 있다(Codex 전수 검수 -> STOP/BAD_* 반영,
+    # filter_character_bias 후처리). 조언용만 새로 뽑고 싶을 때 덮어쓰지 않도록
+    # 출력 경로를 열어 둔다.
+    ap.add_argument("--out", default=str(OUT), help="동반 사전 출력 경로")
+    ap.add_argument("--harmony-out", default="data/interactive_tag_harmony.json")
+    ap.add_argument("--harmony-top", type=int, default=16,
+                    help="조언 카드용 태그당 후보 수. 축별로 묶이므로 사전(4)보다 깊다")
+    ap.add_argument("--no-harmony", action="store_true", help="조언 카드용 산출물을 만들지 않는다")
+    ap.add_argument("--axis-labels", default="data/interactive_axis_labels.json")
+    ap.add_argument("--axis-tags", default="data/interactive_axis_tags.json")
     ap.add_argument("--dry-run", action="store_true", help="쓰지 않고 통계만")
     args = ap.parse_args()
+    # 사전 목록은 항상 상위 `--top` 개다. 아래 루프는 조언용/덤프용으로 더 깊이
+    # 도는데, 그때 `picked` 를 그대로 쓰면 사전 목록까지 같이 길어진다.
+    #
+    # 조언 카드는 사전 카드와 달리 **축 어휘만** 받는다. 이유가 둘이다:
+    #   1. 카드가 후보를 축(그룹)별로 묶는다 — 축이 없으면 묶을 데가 없어 전부
+    #      '기타' 한 덩어리가 된다. 실측 879종이 거기 쌓였고 `2024` · `+ +` 같은
+    #      메타 잡음의 온상이었다.
+    #   2. 성인 어휘 인접 태그가 SFW 씨앗에 붙는 경로였다(실측 43건:
+    #      `bathtub -> mixed-sex bathing` · `biting -> nipple stimulation`).
+    #      성인 어휘 목록(wildcards/nsfw)에 없는 것들이라 기존 필터가 못 걸렀다.
+    # 대가는 간선 19.2% 손실인데 빈 목록이 되는 씨앗은 61개(0.6%)뿐이고 그 대부분이
+    # 후보가 전부 성인 어휘였던 성인 씨앗이다(실측).
+    axis_vocab: set[str] = set()
+    if not args.no_harmony:
+        _ax_path = Path(args.axis_tags)
+        if _ax_path.exists():
+            axis_vocab = {t for v in json.loads(
+                _ax_path.read_text(encoding="utf-8"))["axes"].values() for t in v}
+        else:
+            print(f"!! 축 소속표가 없습니다: {_ax_path} — 조언용 산출물을 만들지 않습니다")
+            args.no_harmony = True
+    # 축 밖 후보를 건너뛰며 더 깊이 파야 조언 목록이 채워진다.
+    #
+    # **사전은 그 깊이에 딸려가면 안 된다.** 깊이만 늘렸더니 9개 태그의 사전 목록이
+    # 길어졌는데(실측), 늘어난 자리는 전부 꼬리다 — `ahoge -> pink halo`(우마무스메
+    # 캐릭터 장식) · `ponytail -> one-piece swimsuit`. 골드셋이 말하는 그대로다
+    # (top-4 .746 / top-8 .574). 그래서 사전이 원래 훑던 깊이를 상수로 못 박고
+    # 조언용 수집만 더 내려간다.
+    dict_cap = max(30, args.dump_top)
+    scan_cap = dict_cap if args.no_harmony else max(dict_cap, args.harmony_top * 3)
 
     raw = load_kr_tag_records().raw
     if args.source == "pool":
@@ -453,6 +499,7 @@ def main() -> int:
     print(f"관계 사전 {len(neighbors)}태그 / 성인 어휘 {len(adult)}개 (동반에서 제외)")
     _era_on = args.source == "pool"
     result: dict[str, list[str]] = {}
+    harmony_rec: dict[str, list[str]] = {}
     dropped = {"support": 0, "lift": 0, "exclusive": 0, "negation": 0, "danger": 0,
                "stop": 0, "too_common": 0, "weak_lift": 0,
                "relation": 0, "adult": 0, "bad_class": 0,
@@ -519,6 +566,8 @@ def main() -> int:
         score = conf * np.minimum(np.log2(np.maximum(lift, 1.0)), 3.0)
         order = np.argsort(-score)
         picked: list[str] = []
+        picked_axis: list[str] = []      # 조언 카드용 — 축 어휘만
+        dict_closed = False              # 사전 몫이 원래 끝났을 자리를 지난 뒤
         ranked: list[tuple[str, float, float]] = []
         for j in order:
             b = id_to_tag.get(int(cand[j]))
@@ -562,11 +611,22 @@ def main() -> int:
             if lift[j] < args.strict_lift:
                 dropped["weak_lift"] += 1
                 continue
-            picked.append(b)
+            # **사전의 경계를 글자 그대로 재현한다.** 약한 후보는 위에서 `continue`
+            # 하므로 상한 검사를 아예 건너뛴다 — 즉 `ranked` 가 30 을 넘긴 뒤에도
+            # 강한 후보가 처음 나오면 그건 담긴다. 이걸 `len(ranked) <= 30` 으로
+            # 바꿔 적었더니 커밋본에 있던 16개 태그의 목록이 짧아졌다(실측).
+            if not dict_closed:
+                picked.append(b)
+            if b in axis_vocab and len(picked_axis) < args.harmony_top:
+                picked_axis.append(b)
             keep_going = (gold is not None and a in gold) or a in dump_want
-            if len(picked) >= args.top and not keep_going:
+            if not dict_closed and ((len(picked) >= args.top and not keep_going)
+                                    or len(ranked) >= dict_cap):
+                dict_closed = True      # 여기가 원래 `break` 가 걸리던 자리다
+            if dict_closed and (args.no_harmony
+                                or len(picked_axis) >= args.harmony_top):
                 break
-            if len(ranked) >= max(30, args.dump_top):
+            if len(ranked) >= scan_cap:
                 break
         if gold is not None and a in gold:
             ranked_gold[a] = ranked
@@ -574,7 +634,11 @@ def main() -> int:
             dumped[a] = [{"tag": b, "lift": round(lf, 2), "score": round(sc, 4)}
                          for b, lf, sc in ranked[:args.dump_top]]
         if picked:
-            result[a] = picked
+            # **자르는 것을 잊지 마라.** 루프는 조언용/덤프용으로 더 깊이 도는데
+            # 사전 목록은 상위 `--top` 개라는 계약이다(골드셋 실측: top-4 .746 / top-8 .574).
+            result[a] = picked[:args.top]
+        if picked_axis:
+            harmony_rec[a] = picked_axis
 
     print(f"동반 사전 {len(result)}개 태그 / 간선 {sum(len(v) for v in result.values()):,}")
     n_targets = int((freq > 0).sum())
@@ -657,11 +721,15 @@ def main() -> int:
         print("\n--dry-run: 쓰지 않았습니다.")
         return 0
 
-    OUT.write_text(json.dumps({
+    _src_desc = (f"게시물 풀 {total:,}건 ({args.pool})" if args.source == "pool"
+                 else f"이벤트 코퍼스 {total:,}건")
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps({
         "note": [
             "함께 쓰이는 태그. tools/build_tag_cooccurrence.py 가 만든다.",
             "'비슷한 것'이 아니라 '동반'이다 — UI 에서도 다른 줄로 나간다.",
-            "근거는 이벤트 코퍼스 449만 건. 순위=confidence x min(log2 lift, 3).",
+            f"근거는 {_src_desc}. 순위=confidence x min(log2 lift, 3).",
             "후보 P(B)<=0.30 · 개별 lift>=2.0 · 상위 4개만. 못 넘으면 빈 목록이다.",
             "배타쌍·부정쌍·연령 어휘, UI 의 다른 관계 줄과 겹치는 후보,",
             "성인/작가/캐릭터/메타태그 분류 후보는 미리 제외했다.",
@@ -672,7 +740,67 @@ def main() -> int:
         "totalEvents": total, "count": len(result),
         "companions": result,
     }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"저장: {OUT}  ({OUT.stat().st_size / 1024:.0f} KB)")
+    print(f"저장: {out_path}  ({out_path.stat().st_size / 1024:.0f} KB)")
+
+    if not args.no_harmony:
+        # 후보를 어느 그룹 머리말 아래 묶을지. 한 태그가 여러 축에 속하므로
+        # **가장 작은 축**을 고른다 — 큰 컨테이너 축(pose_solo 1592)이 이기면
+        # 머리말이 죄다 '자세' 하나로 뭉개진다. 동률은 이름순으로 고정한다.
+        axis_of: dict[str, str] = {}
+        axes = json.loads(Path(args.axis_tags).read_text(encoding="utf-8"))["axes"]
+        size = {k: len(v) for k, v in axes.items()}
+        for ax in sorted(axes, key=lambda k: (size[k], k)):
+            for t in axes[ax]:
+                axis_of.setdefault(t, ax)
+        # 묶는 단위는 축이 아니라 **슬롯**이다. 축은 114개나 되는데 카드는 3그룹만
+        # 띄우므로, 축으로 묶으면 한 칸짜리 그룹이 12개 생기고 정작 특징적인 후보가
+        # 가린다(실측: `office lady` 가 12그룹 -> id card·high heels·glasses 가 밀려남).
+        # 슬롯(의상·배경·자세·소품·장식…)으로 묶으면 3~4그룹에 4~6개씩 들어온다.
+        disp: dict[str, str] = {}
+        slot_of: dict[str, str] = {}
+        lb_path = Path(args.axis_labels)
+        if lb_path.exists():
+            _lb = json.loads(lb_path.read_text(encoding="utf-8"))
+            disp = _lb.get("display") or {}
+            slot_of = _lb.get("slots") or {}
+        else:
+            print(f"  !! 축 라벨이 없습니다: {lb_path} — tools/thumb_axes_emit.py 를 돌려라")
+        cands = {t for v in harmony_rec.values() for t in v}
+        # 후보를 축 어휘로 이미 걸렀으므로 축 없는 후보는 있을 수 없다.
+        assert not (cands - set(axis_of)), sorted(cands - set(axis_of))[:8]
+        # 슬롯이 없는 축(컨테이너 축 등)은 축 표시 라벨을 그대로 그룹으로 쓴다.
+        group_of = {t: (slot_of.get(axis_of[t]) or disp.get(axis_of[t]) or axis_of[t])
+                    for t in cands}
+        used = set(group_of.values())
+        hp = Path(args.harmony_out)
+        hp.parent.mkdir(parents=True, exist_ok=True)
+        hp.write_text(json.dumps({
+            "note": [
+                "조언 카드 '함께 쓰는 것' 의 일반 어휘 층.",
+                "tools/build_tag_cooccurrence.py 가 사전과 **같은 통계·같은 게이트**로 만든다.",
+                "다른 점은 깊이뿐이다 — 사전은 4개, 여기는 축별로 묶으므로 더 깊다.",
+                f"근거는 {_src_desc}.",
+                "의상 어휘는 data/interactive_clothing_harmony.json 이 우선한다(부위별 큐레이션).",
+                "후보는 축 어휘로 제한한다 — 묶을 그룹이 있어야 하고, 축 밖에는",
+                "메타 잡음(2024 · + +)과 성인 어휘 인접 태그가 섞인다(실측).",
+                "group=슬롯(카드가 3그룹만 띄우므로 축은 너무 잘다) · axis=원래 축.",
+                "손으로 고치지 말 것.",
+            ],
+            "source": args.pool if args.source == "pool" else "data/quick_search",
+            "totalEvents": total,
+            "thresholds": {"top": args.harmony_top, "minPair": args.min_pair,
+                           "minLift": args.min_lift, "strictLift": args.strict_lift,
+                           "maxCandProb": args.max_cand_prob,
+                           "implicationConf": args.implication_conf},
+            "count": len(harmony_rec),
+            "groupLabels": {g: g for g in sorted(used)},
+            "group": {t: group_of[t] for t in sorted(cands)},
+            "axis": {t: axis_of[t] for t in sorted(cands)},
+            "recommend": harmony_rec,
+        }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        edges = sum(len(v) for v in harmony_rec.values())
+        print(f"저장: {hp}  ({hp.stat().st_size / 1024:.0f} KB) — "
+              f"{len(harmony_rec)}태그 / 간선 {edges:,} / 후보 어휘 {len(cands)}종 / 그룹 {len(used)}개")
     return 0
 
 

@@ -4638,7 +4638,12 @@ export function createInteractivePanel({
           encodeURIComponent(want.slice(0, 40).join(',')));
         const j = await r.json();
         (j.items || []).forEach(it => adviceCache.set(it.tag, it));
-      } catch { want.forEach(t => adviceCache.set(t, null)); }
+      } catch {
+        // **실패를 캐시하지 않는다.** 예전에는 여기서 `null` 을 넣었는데, 캐시를
+        // 비우는 곳이 없어서 한 번의 일시적 오류가 그 태그의 조언을 페이지 수명
+        // 내내 지웠다(아래 `.filter(Boolean)` 이 걸러 낸다). 다음 호출에서 다시
+        // 물어보는 편이 낫다 — 배치 한 번이다.
+      }
     }
     return tags.map(t => adviceCache.get(t)).filter(Boolean);
   }
@@ -4923,11 +4928,16 @@ export function createInteractivePanel({
       }
       byRegion.set(g.label, cur);
     }
+    // **칩 HTML 을 먼저 만들고 그걸로 판정한다.** `recThumbsHtml` 이 그림 없는
+    // 태그와 색·크기 태그를 버리므로, 태그 개수로 판정하면 머리말만 있고 속이 빈
+    // 카드가 뜬다. 지금 데이터에서는 후보 2,414종이 전부 그림을 갖고 있어 실제로는
+    // 안 나지만(실측), 후보 어휘가 넓어질 때 조용히 되살아나는 종류의 결함이다.
     const recGroups = [...byRegion.entries()]
       .filter(([, v]) => v.length)
       .sort((a, b) => b[1].length - a[1].length)
       .slice(0, 3)                       // 화면에는 3개 부위까지
-      .map(([label, tags]) => ({ label, tags: tags.slice(0, 6) }));
+      .map(([label, tags]) => ({ label, html: recThumbsHtml(tags.slice(0, 6)) }))
+      .filter(g => g.html);
     const seedLabel = seed ? seed.tag : '';
 
     const parts = [];
@@ -4973,7 +4983,7 @@ export function createInteractivePanel({
         `<span class="ia-aside-count">${escHtml(seedLabel)} 기준</span></div>` +
         recGroups.map(g =>
           `<div class="ia-aside-group"><div class="ia-aside-group-label">${escHtml(g.label)}</div>` +
-          `<div class="ia-aside-thumbs">${recThumbsHtml(g.tags)}</div></div>`).join('') +
+          `<div class="ia-aside-thumbs">${g.html}</div></div>`).join('') +
         '</div>');
     }
     // 조언(전제조건·충돌·추천)은 태그 대부분에 없다. 그 자리에 '알려드릴 것이

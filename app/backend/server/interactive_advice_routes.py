@@ -28,14 +28,18 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 HARMONY_RELATIVE = Path("data") / "interactive_clothing_harmony.json"
+# 의상 밖 어휘(직업·표정·자세·사물·배경…)의 추천. 의상 통계표가 옷만 담고 있어서
+# 축 태그 12,149개 중 88% 가 '함께 쓰는 것' 카드를 못 띄우고 있었다(2026-08-13 실측).
+# 같은 게시물 통계·같은 게이트로 뽑되 축별로 묶는다(tools/build_tag_cooccurrence.py).
+GENERAL_RELATIVE = Path("data") / "interactive_tag_harmony.json"
 MAX_BATCH = 40
 
 
 class _HarmonyPack:
     """조합 규칙 캐시. mtime 이 바뀌면 다시 읽는다(빌더 재실행 반영)."""
 
-    def __init__(self, repo_root: Path):
-        self._path = Path(repo_root) / HARMONY_RELATIVE
+    def __init__(self, repo_root: Path, relative: Path = HARMONY_RELATIVE):
+        self._path = Path(repo_root) / relative
         self._lock = threading.Lock()
         self._data: dict[str, Any] = {}
         self._mtime: float | None = None
@@ -83,10 +87,45 @@ def _dependency_index():
         return None
 
 
-def _advise_one(tag: str, harmony: dict[str, Any], dep) -> dict[str, Any]:
+def _recommend_groups(tag: str, harmony: dict[str, Any],
+                      general: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
+    """'함께 쓰는 것' 후보를 그룹으로 묶는다. 두 층이다.
+
+    의상 층(`interactive_clothing_harmony.json`)이 **우선**한다 — 부위(region6)
+    큐레이션이 얹혀 있어 그룹이 몸의 부위로 떨어진다. 그 층에 없는 씨앗만 일반
+    층(`interactive_tag_harmony.json`)이 받는다. 층을 섞지 않는 이유는 두 층의
+    점수 척도가 달라서다 — 섞으면 순위가 무슨 뜻인지 말할 수 없게 된다.
+
+    일반 층의 그룹 키는 부위가 아니라 **축**이다(직업·표정·자세·사물…).
+    """
+    rec = list(harmony.get("recommend", {}).get(tag, ()))
+    if rec:
+        region_of = harmony.get("region", {})
+        weak_of = harmony.get("region_weak", {})
+        labels = harmony.get("region_labels", {})
+        key_of = lambda c: region_of.get(c) or weak_of.get(c) or ""   # noqa: E731
+    else:
+        rec = list(general.get("recommend", {}).get(tag, ()))
+        if not rec:
+            return [], []
+        group_of = general.get("group", {})
+        labels = general.get("groupLabels", {})
+        key_of = lambda c: group_of.get(c) or ""                      # noqa: E731
+    groups: dict[str, list[str]] = {}
+    for cand in rec:
+        groups.setdefault(key_of(cand), []).append(cand)
+    return rec, [{"region": r, "label": labels.get(r, "기타"), "tags": v[:8]}
+                 for r, v in sorted(groups.items(), key=lambda kv: -len(kv[1]))]
+
+
+def _advise_one(tag: str, harmony: dict[str, Any], dep,
+                general: dict[str, Any] | None = None) -> dict[str, Any]:
     t = str(tag or "").strip()
+    # `recommendGroups` 는 빈 태그로 들어와도 있어야 한다 — 없으면 프론트가
+    # `seed.recommendGroups` 에서 undefined 를 만난다(키 자체가 없던 자리다).
     out: dict[str, Any] = {"tag": t, "requires": [], "hint": "",
                            "conflict": [], "recommend": [], "avoid": [],
+                           "recommendGroups": [],
                            "region": "", "regionLabel": ""}
     if not t:
         return out
@@ -105,19 +144,8 @@ def _advise_one(tag: str, harmony: dict[str, Any], dep) -> dict[str, Any]:
     # 추천은 점수 순 상위만 주면 같은 부위 변형이 줄줄이 나온다
     # (`sweater` -> ribbed sweater / turtleneck sweater / off-shoulder sweater ...).
     # 부위별로 묶어 보내서 화면이 서로 다른 부위를 고루 보여줄 수 있게 한다.
-    rec = list(harmony.get("recommend", {}).get(t, ()))
-    region_of = harmony.get("region", {})
-    weak_of = harmony.get("region_weak", {})
-    labels = harmony.get("region_labels", {})
-    groups: dict[str, list[str]] = {}
-    for cand in rec:
-        r = region_of.get(cand) or weak_of.get(cand) or ""
-        groups.setdefault(r, []).append(cand)
+    rec, out["recommendGroups"] = _recommend_groups(t, harmony, general or {})
     out["recommend"] = rec[:12]                 # 하위 호환(평면 목록)
-    out["recommendGroups"] = [
-        {"region": r, "label": labels.get(r, "기타"), "tags": v[:8]}
-        for r, v in sorted(groups.items(), key=lambda kv: -len(kv[1]))
-    ]
     out["avoid"] = list(harmony.get("avoid", {}).get(t, ()))[:5]
     region = harmony.get("region", {}).get(t, "")
     out["region"] = region
@@ -136,6 +164,7 @@ def register_interactive_advice_routes(app: FastAPI, context: Any, *,
     """
     repo_root = Path(getattr(context, "repo_root", ".") or ".")
     pack = _HarmonyPack(repo_root)
+    general_pack = _HarmonyPack(repo_root, GENERAL_RELATIVE)
 
     async def _offload(fn):
         """동기 작업을 스레드에서 돌린다. 주입이 없으면(구 호출부) 그대로 실행."""
@@ -145,8 +174,8 @@ def register_interactive_advice_routes(app: FastAPI, context: Any, *,
 
     @app.get("/api/interactive-advice")
     async def interactive_advice(tag: str = ""):   # noqa: ANN202
-        return JSONResponse(
-            await _offload(lambda: _advise_one(tag, pack.get(), _dependency_index())))
+        return JSONResponse(await _offload(
+            lambda: _advise_one(tag, pack.get(), _dependency_index(), general_pack.get())))
 
     @app.get("/api/interactive-advice/batch")
     async def interactive_advice_batch(tags: str = ""):   # noqa: ANN202
@@ -154,8 +183,8 @@ def register_interactive_advice_routes(app: FastAPI, context: Any, *,
 
         def _run() -> dict[str, Any]:
             # 인덱스 로딩 자체가 목적인 워밍업 요청(빈 tags)도 여기를 지난다.
-            harmony, dep = pack.get(), _dependency_index()
-            return {"items": [_advise_one(n, harmony, dep) for n in names]}
+            harmony, dep, general = pack.get(), _dependency_index(), general_pack.get()
+            return {"items": [_advise_one(n, harmony, dep, general) for n in names]}
 
         return JSONResponse(await _offload(_run))
 

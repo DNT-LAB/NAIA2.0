@@ -41,6 +41,8 @@ BACKEND = [
     # 매니페스트에서 빠져 있어 배포판에는 아예 없었다(2026-08-13).
     "app/backend/server/interactive_advice_routes.py",
     "data/interactive_clothing_harmony.json",
+    # 의상 밖 어휘의 추천. 이게 없으면 축 태그의 88% 가 조언 카드를 못 띄운다.
+    "data/interactive_tag_harmony.json",
 ]
 FRONTEND = [
     "app/web/remote/app.js",

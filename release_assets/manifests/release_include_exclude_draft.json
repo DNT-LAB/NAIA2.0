@@ -46,6 +46,7 @@
       "data/interactive_thumbnails.json",
       "data/tag_cooccurrence.json",
       "data/interactive_clothing_harmony.json",
+      "data/interactive_tag_harmony.json",
       "data/character_preview_thumbs.json",
       "data/e621_data",
       "artist_dictionary.py",

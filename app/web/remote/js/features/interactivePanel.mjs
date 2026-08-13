@@ -4659,14 +4659,42 @@ export function createInteractivePanel({
   const comboCache = new Map();
   let comboLast = null;
 
+  /** 활성 캐릭터 수 -> 인원 그룹.
+   *
+   * 서버는 태그에서 그룹을 유도할 수 있지만, 슬롯 팝업의 태그에는 인원 태그가
+   * 없어서 `other` 로 떨어진다(실측: `office lady` 하나만 있으면 other 모델이
+   * 붙는다). Interactive 는 활성 캐릭터 수를 이미 알고 있으므로 그걸 넘긴다.
+   *
+   * 성별은 UI 가 슬롯마다 Male/Female 로 들고 있다. 없으면 여성으로 본다 —
+   * 코퍼스가 그쪽으로 크게 기울어 있어(1girl_solo 393만 vs 1boy_solo 40만)
+   * 표본이 두꺼운 쪽이 기본값으로 안전하다. */
+  function personGroupFromChars() {
+    const act = (state.chars || []).filter(c => c.state === 'active');
+    const g = act.filter(c => (c.gender || 'female') !== 'male').length;
+    const b = act.length - g;
+    if (g >= 2 && b >= 2) return 'multiple_girls_multiple_boys';
+    if (g === 1 && b >= 2) return '1girl_multiple_boys';
+    if (b === 1 && g >= 2) return '1boy_multiple_girls';
+    if (g === 1 && b === 1) return '1girl_1boy';
+    if (g === 2 && !b) return '2girls';
+    if (b === 2 && !g) return '2boys';
+    if (g >= 3 && !b) return 'multiple_girls';
+    if (b >= 3 && !g) return 'multiple_boys';
+    if (g === 1 && !b) return '1girl_solo';
+    if (b === 1 && !g) return '1boy_solo';
+    return '';                       // 못 정하면 서버가 태그로 유도한다
+  }
+
   async function fetchCombos(tags) {
     const list = (tags || []).map(t => String(t).trim()).filter(Boolean);
     if (!list.length) return null;
-    const key = list.slice().sort().join(',');
+    const grp = personGroupFromChars();
+    const key = grp + '|' + list.slice().sort().join(',');
     if (comboCache.has(key)) return comboCache.get(key);
     try {
       const r = await fetch('/api/tag-combo?tags=' +
-        encodeURIComponent(list.slice(0, 24).join(',')));
+        encodeURIComponent(list.slice(0, 24).join(',')) +
+        (grp ? '&group=' + encodeURIComponent(grp) : ''));
       const j = await r.json();
       // 모델이 안 구워진 설치에서는 조용히 없는 셈 친다 - 안내는 로그가 한다.
       const out = (j && !j.error) ? j : null;

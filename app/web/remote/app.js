@@ -201,6 +201,24 @@ function openUrlInSystemBrowser(target) {
   return true;
 }
 
+// 데스크톱 셸(Electron)에서는 `<a target="_blank">` 가 시스템 브라우저가 아니라 **앱 내부
+// 팝업 창**으로 열린다(main.cjs 의 setWindowOpenHandler → openInternalPopup). 같은 출처를
+// 가리키는 평범한 `<a href>` 는 아예 앱 화면을 그 문서로 갈아치운다.
+// 가이드·외부 사이트처럼 진짜 브라우저에서 열려야 하는 링크는 `data-open-external` 를 달고
+// 여기서 가로채 openUrlInSystemBrowser 로 넘긴다(일반 브라우저에서는 새 탭).
+document.addEventListener('click', (event) => {
+  const link = event.target?.closest?.('a[data-open-external]');
+  if (!link) return;
+  const href = link.getAttribute('href');
+  if (!href) return;
+  event.preventDefault();
+  try {
+    openUrlInSystemBrowser(href);
+  } catch (error) {
+    console.warn('external open failed', error);
+  }
+});
+
 function initNaiaTitleTooltips() {
   if (document.body.dataset.naiaTitleTooltips === '1') return;
   document.body.dataset.naiaTitleTooltips = '1';

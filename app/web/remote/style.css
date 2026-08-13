@@ -15464,6 +15464,26 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   justify-content: space-between;
   gap: 8px;
 }
+/* 모드 바의 가이드 링크 — /guides/conditional-prompt.html 을 새 창으로 연다.
+   같은 탭으로 열면 편집 중이던 규칙 화면을 떠나게 되므로 target=_blank 를 쓴다. */
+.cond-guide-link {
+  flex: 0 0 auto;
+  border: 1px solid rgba(154, 139, 255, 0.34);
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: rgba(143, 92, 255, 0.12);
+  color: #d5c9ff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.cond-guide-link:hover {
+  border-color: rgba(169, 145, 255, 0.6);
+  background: rgba(143, 92, 255, 0.24);
+  color: #f5f1ff;
+}
 .cond-status-chip {
   max-width: 50%;
   overflow: hidden;

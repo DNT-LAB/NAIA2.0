@@ -691,6 +691,7 @@ export function createConditionalPromptPanel({
         </div>
         <div class="cond-status-row">
           ${presetControl}
+          <a class="cond-guide-link" href="/guides/conditional-prompt.html" data-open-external="1" target="_blank" rel="noopener noreferrer" title="조건부 프롬프트 문법 가이드를 브라우저에서 엽니다">📖 가이드</a>
           <span class="cond-status-chip" id="condDirtyChip">${dirty ? '미적용 변경' : '적용됨'}</span>
         </div>
       </div>`;
@@ -747,7 +748,10 @@ export function createConditionalPromptPanel({
     const caret = start + fix.length;
     textarea.value = value.slice(0, start) + fix + value.slice(end);
     textarea.setSelectionRange(caret, caret);
-    textarea.focus();
+    // 여기서 textarea 에 focus 를 주면 안 된다 — 서버 echo 가 돌아올 때 render() 의
+    // "편집 중이면 재구축 생략" 가드에 걸리고, lint 는 구조 시그니처에서 제외돼 있어
+    // **고쳐진 뒤에도 경고 배지가 그대로 남는다**(라이브 확인). 포커스를 두지 않으면
+    // 다음 echo 에서 정상적으로 다시 그려지며 배지가 사라진다.
     onRulesInput(textarea);
     notify('그룹 부정을 지원되는 형태로 바꿨습니다', 'success');
   }
@@ -797,7 +801,8 @@ export function createConditionalPromptPanel({
           <span style="color:var(--text-dim)">※ <code>!tag</code> 는 <code>*tag</code> 의 별칭입니다. <code>~*</code> 나 <code>~(…)</code> 는 문법이 아니라 <b>항상 참</b>이 됩니다 — 그룹 부정 대신 <code>(~!a &amp; ~!b)</code> 로 쓰세요.</span><br>
           <b>Logic:</b> &amp; (AND), | (OR), () grouping — <code>&amp;</code> 가 <code>|</code> 보다 먼저 묶입니다(<code>a|b&amp;c</code> = <code>a|(b&amp;c)</code>). 섞어 쓸 땐 괄호를 권장합니다.<br>
           <b>Actions:</b> main+=tag, prefix+=tag, postfix+=tag, old=new<br>
-          <b>Character:</b> char_set(N, enabled), char:N+=tag, uc:N=value
+          <b>Character:</b> char_set(N, enabled), char:N+=tag, uc:N=value<br>
+          <a href="/guides/conditional-prompt.html" data-open-external="1" target="_blank" rel="noopener noreferrer" style="color:#d5c9ff;font-weight:700">전체 가이드 열기 →</a>
         </div>
       </div>`;
   }

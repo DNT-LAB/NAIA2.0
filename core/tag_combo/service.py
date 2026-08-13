@@ -49,14 +49,24 @@ class ComboService:
             path = self.dir / f"{group}.ncsr"
             if not path.exists():
                 return None
-            # **적재 전에** 예산을 비운다. 역인덱스를 만든 뒤에 버리면 두 모델이
-            # 잠깐 겹쳐 올라간다.
-            while self._lru and self._resident_bytes() > self.budget * 0.6:
+            # **들어올 모델의 크기를 알고 자리를 비운다.**
+            #
+            # 처음엔 `resident > budget * 0.6` 으로 썼는데, 161MB 모델 하나는
+            # 400MB 예산의 60%(240MB)를 못 넘어서 두 번째가 그대로 얹혔다 —
+            # 실측 상주 324MB / RSS 544MB 로, 막겠다던 겹침을 정확히 허용했다
+            # (Codex 게이트). 사이드카만 읽어 들어올 크기를 먼저 재고, 그만큼
+            # 자리가 날 때까지 비운다.
+            try:
+                incoming = ComboModel.peek_bytes(path)
+            except (OSError, ValueError, KeyError):
+                incoming = 0
+            while self._lru and self._resident_bytes() + incoming > self.budget:
                 self._lru.popitem(last=False)
             model = ComboModel(path)
             model.ensure_inverted()
             entry = (model, ComboQuery(model, self.policy))
             self._lru[group] = entry
+            # 추정이 빗나갔을 때의 최후 정리. 방금 넣은 것은 남긴다.
             while len(self._lru) > 1 and self._resident_bytes() > self.budget:
                 self._lru.popitem(last=False)
             return entry

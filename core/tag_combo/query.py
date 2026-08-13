@@ -66,6 +66,12 @@ class Policy:
     scan_cap: int = 0
     max_char_share: float = 0.5  # 한 캐릭터가 이 비율을 넘으면 그 캐릭터 디자인
     char_min_pair: int = 8       # 이보다 적으면 집중도를 못 믿는다
+    # 부분집합 전수 열거를 허용하는 프롬프트 크기 상한. 넘으면 사슬 백오프로
+    # 바꾼다 - 2^24 = 16,777,215 개를 열거하면 워커가 분 단위로 묶인다.
+    exact_subset_max: int = 10
+    # 캐릭터 집중도 계산 대상 상한. 실측 `hetero` 질의가 후보 964개 x 39만 게시물로
+    # RSS 60MB 를 더 썼다. 상위 후보만 보면 충분하다 - 아래쪽은 어차피 안 나간다.
+    char_check_top: int = 300
 
 
 @dataclass
@@ -116,19 +122,39 @@ class ComboQuery:
         if not known:
             return None, []
         info = {t: float(self.surp[self.m.tag_to_id[t]]) for t in known}
-        for size in range(len(known), 0, -1):
+        # **부분집합 전수 열거는 지수다.** 라우트가 24태그까지 받는데 그러면
+        # 16,777,215 개다 - 실측 20태그에 15.2초로 워커가 통째로 묶인다
+        # (Codex 게이트). 정보량 순으로 정렬해 두고 **뒤에서부터 하나씩** 떨구는
+        # 사슬만 본다: 크기 k 마다 후보 1개, 총 k 개. 전수 열거와 같은 답을 내지는
+        # 않지만, 남는 정보량을 최대로 유지한다는 성질은 지킨다.
+        if len(known) > self.p.exact_subset_max:
+            order = sorted(known, key=lambda t: info[t])   # 정보량 적은 것부터
+            use = list(known)
             first: tuple[np.ndarray, list[str]] | None = None
+            for drop in [None] + order[:-1]:
+                if drop is not None:
+                    use.remove(drop)
+                cur = self._intersect(use)
+                if cur is None:
+                    continue
+                if first is None:
+                    first = (cur, list(use))
+                if len(cur) >= self.p.floor:
+                    return cur, list(use)
+            return (first if first is not None else (None, list(known)))
+        for size in range(len(known), 0, -1):
+            first_s: tuple[np.ndarray, list[str]] | None = None
             for sub in sorted(combinations(known, size),
                               key=lambda c: -sum(info[t] for t in c)):
                 cur = self._intersect(sub)
                 if cur is None:
                     continue
-                if first is None:
-                    first = (cur, list(sub))
+                if first_s is None:
+                    first_s = (cur, list(sub))
                 if len(cur) >= self.p.floor:
                     return cur, list(sub)
-            if size == 1 and first is not None:
-                return first
+            if size == 1 and first_s is not None:
+                return first_s
         return None, list(known)
 
     # ---- 후보 ----------------------------------------------------------
@@ -217,8 +243,12 @@ class ComboQuery:
             if not cand:
                 continue
 
-            share = self._char_share(matched, np.asarray(cand), cnt)
-            cand = [c for c in cand if share.get(c, 0.0) <= self.p.max_char_share]
+            # 집중도는 상위 후보만 본다 - 아래쪽은 어차피 튜플에 안 들어간다.
+            # 전량을 보면 실측 RSS +60MB(후보 964개 x 39만 게시물).
+            cand.sort(key=lambda c: -((cnt[c] / m) / max(float(self.prob[c]), 1e-12)))
+            head = cand[:self.p.char_check_top]
+            share = self._char_share(matched, np.asarray(head), cnt)
+            cand = [c for c in head if share.get(c, 0.0) <= self.p.max_char_share]
             if not cand:
                 continue
 
@@ -254,18 +284,22 @@ class ComboQuery:
             picked = self._dedupe(sel, size)
             if len(picked) == size:
                 tally[tuple(sorted(picked))] += 1
-        out: list[Combo] = []
-        for combo, n in tally.most_common(60):
+        # **점수 정렬을 먼저, 자르기를 나중에.**
+        #
+        # 처음엔 지지도 상위 top_k 개를 뽑아 놓고 그 안에서 점수 정렬을 했다.
+        # 그러면 top_k 값에 따라 답이 달라진다 - 헤드 캐시는 top_k=20 으로 캐고
+        # 일반 질의는 5로 캐서 **같은 태그가 다른 답을 냈다**(실측 41개 중 15개
+        # 불일치, Codex 게이트). 점수 순위는 top_k 와 무관해야 한다.
+        pool: list[Combo] = []
+        for combo, n in tally.most_common(200):
             if n < self.p.min_pair:
                 break
             names = [self.m.tags[c] for c in combo]
             surp = float(sum(self.surp[c] for c in combo))
-            out.append(Combo(tags=names, support=n, surprisal=surp,
-                             score=n * math.log2(1.0 + surp)))
-            if len(out) >= self.p.top_k:
-                break
-        out.sort(key=lambda x: -x.score)
-        return out
+            pool.append(Combo(tags=names, support=n, surprisal=surp,
+                              score=n * math.log2(1.0 + surp)))
+        pool.sort(key=lambda x: (-x.score, x.tags))
+        return pool[:self.p.top_k]
 
     def _dedupe(self, sel: list[int], size: int) -> list[int]:
         """튜플 안의 함의/동족 중복을 뺀다.

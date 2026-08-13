@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 # `core/event_preset/engines.py:44-49` 와 같은 순서.
@@ -29,13 +30,30 @@ PERSON_GROUPS: tuple[str, ...] = (
 )
 
 
+_WS = re.compile(r"\s+")
+
+
+def normalize_tag(tag: str) -> str:
+    """브릿지와 **같은 정규화**. 소문자화하고 `_` 를 공백으로 바꾸고 공백을 접는다.
+
+    `core/preset_input_bridge.py:291-296` 이 하는 것과 같다. 처음에 이걸 빼먹었더니
+    `1girl,multiple_boys` 가 프리셋에서는 `1girl_multiple_boys` 로, 조합에서는
+    `1girl` 로 갔다 - 같은 인원 설정에서 두 기능이 **다른 모델**을 본다.
+    실측(Codex 게이트): 밑줄 형태 254개 중 200개 불일치, 대문자 형태는 254/254.
+    """
+    return _WS.sub(" ", str(tag).strip().lower().replace("_", " "))
+
+
 def person_group_of(tags: Iterable[str]) -> str:
     """태그 집합 -> 인원 그룹. 우선순위 사슬은 preset_input_bridge 와 동일하다.
 
     혼성이 동성보다 먼저 걸리고, `1girl`/`1boy` 는 잔여 버킷이다. 아무것도 안
     걸리면 `other` 다(원본은 `""` 를 반환한다 - 모듈 독스트링 참조).
+
+    입력은 danbooru 원문(`multiple_boys`)이든 화면 표기(`multiple boys`)든
+    대소문자가 섞였든 같은 답을 내야 한다.
     """
-    s = tags if isinstance(tags, (set, frozenset)) else set(tags)
+    s = {normalize_tag(t) for t in tags}
     if "multiple girls multiple boys" in s or {"multiple girls", "multiple boys"} <= s:
         return "multiple_girls_multiple_boys"
     if {"1girl", "multiple boys"} <= s:

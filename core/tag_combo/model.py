@@ -153,11 +153,40 @@ class ComboModel:
 
     @property
     def nbytes(self) -> int:
-        base = self.indptr.nbytes + self.indices.nbytes + \
-            self.post_rating.nbytes + self.tag_rating.nbytes
+        """상주 바이트. **모든 섹션을 센다.**
+
+        처음에 `post_char` 를 빼먹어 실측 두 모델에서 6,074,200 바이트를 과소
+        계상했다(Codex 게이트). LRU 가 이 값으로 예산을 재므로 빠지면 그만큼
+        더 얹힌다.
+        """
+        base = (self.indptr.nbytes + self.indices.nbytes
+                + self.post_rating.nbytes + self.post_char.nbytes
+                + self.tag_rating.nbytes)
         if self._inv_posts is not None and self._bounds is not None:
             base += self._inv_posts.nbytes + self._bounds.nbytes
         return base
+
+    @property
+    def projected_bytes(self) -> int:
+        """역인덱스까지 만들었을 때의 상주 추정. LRU 가 **적재 전에** 쓴다.
+
+        `nbytes` 는 아직 안 만든 역인덱스를 안 센다. 그걸로 예산을 재면 새 모델이
+        얼마나 커질지 모른 채 자리를 비우게 된다 - 실측으로 161MB 모델 두 개가
+        같이 올라가 RSS 544MB 를 찍었다.
+        역인덱스는 posts(int32 nnz) + bounds(int64 vocab+1) 이다.
+        """
+        inv = self.header.nnz * 4 + (self.header.vocab + 1) * 8
+        if self._inv_posts is not None:
+            return self.nbytes
+        return self.nbytes + inv
+
+    @staticmethod
+    def peek_bytes(path: Path) -> int:
+        """파일을 열지 않고 사이드카만 읽어 상주 크기를 추정한다."""
+        meta = json.loads(Path(path).with_suffix(".json").read_text(encoding="utf-8"))
+        n, v, nnz = int(meta["posts"]), int(meta["vocab"]), int(meta["nnz"])
+        return ((n + 1) * 8 + nnz * 2 + n * 1 + n * 4 + v * 16
+                + nnz * 4 + (v + 1) * 8)
 
 
 def write_model(path: Path, *, group: str, rows: list[list[int]], tags: list[str],

@@ -23537,15 +23537,18 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 }
 .ia-ge-chips:empty { display: none; }
 
-/* 칩은 중립색이다. 축은 **왼쪽 띠**로만 알린다 — 9개가 서로 다른 배경을 가지면
-   성인의 적색이 오류로, 배경의 녹색이 성공으로 읽힌다. */
+/* 칩은 중립색이다. 축은 **위쪽 띠**로만 알린다 — 9개가 서로 다른 배경을 가지면
+   성인의 적색이 오류로, 배경의 녹색이 성공으로 읽힌다.
+   왼쪽 3px 였던 것을 위로 옮겼다(사용자 지정 2026-08-13): 왼쪽은 글자 시작점과
+   붙어 가늘게 보였고, 위는 칩 **폭 전체**를 쓰므로 같은 3px 이라도 훨씬 잘 띈다.
+   위 모서리는 각지게 둔다 — 둥글리면 띠가 양끝에서 가늘어져 일자로 안 보인다. */
 .ia-gchip {
   display: inline-flex; align-items: center; gap: 5px;
   max-width: 100%;
-  padding: 3px 7px 3px 9px;
+  padding: 3px 7px;
   border: 1px solid var(--border-dim);
-  border-left: 3px solid var(--axis, var(--border-glow));
-  border-radius: 5px;
+  border-top: 3px solid var(--axis, var(--border-glow));
+  border-radius: 0 0 5px 5px;
   background: rgba(255,255,255,0.04);
   color: var(--text-muted);
   font-family: var(--font-mono); font-size: 10px; line-height: 1.4;
@@ -23563,7 +23566,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-gchip[data-slot="comp"]           { --axis: #8ea0ff; }
 
 /* 그룹 줄 — 무엇이 몇 개인지 한눈에, 눌러서 그 그룹만 본다.
-   칩과 **같은 색**을 쓴다(왼쪽 띠 ↔ 점). 색이 다르면 둘을 잇지 못한다. */
+   칩과 **같은 색**을 쓴다(위쪽 띠 ↔ 점). 색이 다르면 둘을 잇지 못한다. */
 /* 제목 줄('씬 태그' + 개수 배지) 안에 산다. 따로 한 줄을 쓰면 낮은 판에서
    칩 자리를 그만큼 잡아먹는다(사용자 지적 2026-08-10).
    버튼 묶음(Director/Enhance)은 오른쪽 끝에 붙어 있으므로 그 사이를 채운다. */
@@ -23580,7 +23583,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   font-family: var(--font-mono); font-size: 9.5px; line-height: 1.6;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
-/* 점이 그 그룹의 색이다. 칩의 왼쪽 띠와 같은 값을 쓴다. */
+/* 점이 그 그룹의 색이다. 칩의 위쪽 띠와 같은 값을 쓴다. */
 .ia-ggrp::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
   background: var(--axis, var(--border-glow)); flex: none;
@@ -24006,3 +24009,26 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   border: 1px solid var(--border-dim);
 }
 .ia-as-pv-scopenote b { color: var(--text-primary); font-weight: 700; }
+
+/* ── 씬 태그 상자: Interactive 에서는 한 줄만 (사용자 지정 2026-08-13) ─────
+   `.ia-ge-box` 는 `flex: 1 1 auto` 로 남는 세로를 통째로 먹는다. 그림이 큰
+   Interactive 화면에서는 칩 한 줄 아래로 빈 판이 넓게 남았다.
+
+   **최소치는 그대로 한 줄**이고, 칩이 늘면 그만큼만 자란다(30vh 까지, 넘으면
+   안에서 스크롤). 다른 모드는 건드리지 않는다 — 거기서는 이 상자가 주 입력칸이다.
+
+   칩 모드와 텍스트 모드의 높이는 **여전히 같아야 한다**(2026-08-10 사용자 지적:
+   눌러 보기 전에는 크기를 알 수 없었다). 그래서 텍스트칸의 최소치도 한 줄로
+   같이 내린다. */
+.interactive-mode .ia-ge-box {
+  flex: 0 0 auto;
+  /* 칩 한 줄에 정확히 맞춘다 — 칩 23 + 안여백 12 + 테두리 2 = 37(실측). */
+  min-height: 37px;
+  max-height: 30vh;
+}
+/* **텍스트 모드는 자라게 둔다.** 여기서 한 줄로 묶으면 태그를 이어 적을 때
+   상자 안에서 스크롤이 나 무엇을 쓰는지 안 보인다. 즉 쉬는 상태(칩)는 한 줄,
+   고치는 동안만 두 줄이다 — 2026-08-10 의 '두 모드 같은 크기' 규약과 다르지만,
+   그때 문제는 상자가 편집기보다 **작아서** 눌렀을 때 튀어 오른 것이었고 지금은
+   반대로 쉬는 쪽을 줄이는 것이다(사용자 지정 2026-08-13). */
+.interactive-mode .ia-ge-box.is-text { min-height: 55px; }

@@ -4059,9 +4059,17 @@ export function createInteractivePanel({
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
     presetPanel.style.width = W + 'px';
     presetPanel.style.left = left + 'px';
-    presetPanel.style.top = (sceneFloatFits() && !blocksMount.hidden)
-      ? (PANEL_TOP + SCENE_FLOAT_H + 6) + 'px' : '';
     presetPanel.style.bottom = '';
+    // **세로 상한도 여기서 넣어야 한다.** `.ia-panel` 은 CSS 에 높이 상한이 없다
+    // (주석대로 JS 소관이다). 슬롯 팝업은 positionPopup 이 넣는데 이쪽은 빠져 있어서
+    // 9,738명이 그대로 늘어나 화면 밖으로 흘렀고 `.ia-panel-body` 의 overflow-y 는
+    // 부모가 안 잘리니 스크롤할 것이 없었다(사용자 제보 2026-08-13).
+    let top = (sceneFloatFits() && !blocksMount.hidden)
+      ? (PANEL_TOP + SCENE_FLOAT_H + 6) : PANEL_TOP;
+    const floor = popupFloor();
+    if (floor - top < 240) top = Math.max(PANEL_TOP, floor - 240);
+    presetPanel.style.top = top + 'px';
+    presetPanel.style.maxHeight = Math.max(120, floor - top) + 'px';
   }
 
   function openPresetPanel(cid) {

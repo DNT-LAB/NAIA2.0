@@ -4723,11 +4723,15 @@ export function createInteractivePanel({
       const base = tagTip(t);
       const tip = on ? `${base}\n— 이미 넣었습니다` :
         (match ? `${base}\n— 지금 고른 것들과도 어울립니다` : base);
-      const act = `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
+      // 그리드 셀과 **같은 규약** — 그림 밖, 이름줄 오른쪽 끝, 항상 보인다.
+      const act = `<button type="button" class="ia-cell-act" data-act="${on ? 'off' : 'on'}"` +
+        ` title="${escHtml(on ? '이 태그를 뺍니다' : '이 태그를 넣습니다')}"` +
+        ` aria-label="${escHtml(on ? `${t} 빼기` : `${t} 넣기`)}"` +
+        `>${on ? '−' : '+'}</button>`;
       return `<div class="${cls}" data-advice-add="${escHtml(t)}"` +
         ` title="${escHtml(tip)}">` +
-        `<span class="ia-aside-thumb-img">${img}${act}</span>` +
-        `<span>${escHtml(t)}</span></div>`;
+        `<span class="ia-aside-thumb-img">${img}</span>` +
+        `<span><span class="ia-cell-name">${escHtml(t)}</span>${act}</span></div>`;
     }).join('');
   }
 
@@ -5951,18 +5955,24 @@ export function createInteractivePanel({
         ? `<img src="${escHtml(thumbUrl(axis, t))}" alt="" loading="lazy" decoding="async">`
         : '<span class="ia-cell-none">준비 중</span>';
       const sens = isSensitive(t);
-      // 조언 플로트와 같은 두 번 클릭. 한 번 누르면 캡션이 `{태그} 추가/제외` 버튼이
-      // 되고 한 번 더 눌러야 실행된다. 한 축이 최대 150칸이라 오클릭이 잦다.
-      // 잠긴 셀(부모 자동 배정)은 어차피 해제가 안 되므로 예외로 둔다.
-      // 행동은 호버 시 뜨는 버튼이 맡는다. 캡션은 **항상 태그 이름**이다 —
-      // 이중 클릭 시절에는 캡션이 상태와 행동을 번갈아 맡아 읽기 어려웠다.
+      // 셀 본문 = 살펴보기, 이 버튼 = 실행. 가르는 이유는 한 축이 최대 150칸이라
+      // 그리드를 훑다 스치는 클릭이 잦기 때문이다 — 스쳐도 프롬프트는 안 변한다.
+      // 잠긴 셀(부모 자동 배정)은 어차피 해제가 안 되므로 버튼을 안 낸다.
+      //
+      // **버튼은 그림 밖, 이름줄 오른쪽 끝이고 항상 보인다**(사용자 지정 2026-08-13).
+      // 전에는 호버해야 뜨는 알약이 그림 아래쪽 한가운데 얹혔는데, 하필 옷·노출처럼
+      // **판단 근거가 되는 부분을 가렸고** 호버 전에는 어디를 눌러야 할지도 몰랐다.
+      // 글자 대신 +/− 인 것은 150칸에 '선택'을 도배하면 이름이 안 읽히기 때문이다.
       const act = isLocked ? '' :
-        `<span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span>`;
+        `<button type="button" class="ia-cell-act" data-act="${on ? 'off' : 'on'}"
+          title="${escHtml(on ? '이 태그를 뺍니다' : '이 태그를 넣습니다')}"
+          aria-label="${escHtml(on ? `${t} 빼기` : `${t} 넣기`)}"
+          >${on ? '−' : '+'}</button>`;
       return `<div class="ia-cell${on ? ' on' : ''}${isLocked ? ' is-locked' : ''}${sens ? ' is-sensitive' : ''}${inspectTag === t ? ' is-inspect' : ''}"
         data-ax="thumb" data-ref="${escHtml(axis)}" data-val="${escHtml(t)}"
         aria-pressed="${on}" title="${escHtml(tagTip(t))}${isLocked ? ' (자동 · 해제 불가)' : ''}">
-        <span class="ia-cell-img">${media}${sens ? '<span class="ia-cell-veil">보기</span>' : ''}${act}</span>
-        <span class="ia-cell-cap">${isLocked ? '\u{1F512} ' : ''}${escHtml(t)}</span></div>`;
+        <span class="ia-cell-img">${media}${sens ? '<span class="ia-cell-veil">보기</span>' : ''}</span>
+        <span class="ia-cell-cap"><span class="ia-cell-name">${isLocked ? '\u{1F512} ' : ''}${escHtml(t)}</span>${act}</span></div>`;
     }).join('');
     // 색 팔레트는 그리드 '위'에 둔다 — 아래에 두면 3줄 그리드에 가려 안 보인다.
     // 피부처럼 주 색상 팔레트 자체가 조건부인 축은 여기서 함께 렌더한다.
@@ -6004,7 +6014,10 @@ export function createInteractivePanel({
         aria-pressed="${on}">
         <span class="ia-gloss-tag">${escHtml(t)}</span>
         <span class="ia-gloss-desc">${escHtml(d || '')}</span>
-        <span class="ia-cell-act" data-act="${on ? 'off' : 'on'}">${on ? '제거' : '선택'}</span></div>`;
+        <button type="button" class="ia-cell-act" data-act="${on ? 'off' : 'on'}"
+          title="${escHtml(on ? '이 태그를 뺍니다' : '이 태그를 넣습니다')}"
+          aria-label="${escHtml(on ? `${t} 빼기` : `${t} 넣기`)}"
+          >${on ? '−' : '+'}</button></div>`;
     }).join('');
     // 안내 문구는 뺐다(사용자 지시 2026-08-01). 목록 모양만 봐도 그림이 없다는 것이
     // 명백한데 매번 한 줄을 읽히는 값이 없다. 필요하면 sec.note 로 다시 붙는다.

@@ -72,6 +72,24 @@ class Policy:
     # 캐릭터 집중도 계산 대상 상한. 실측 `hetero` 질의가 후보 964개 x 39만 게시물로
     # RSS 60MB 를 더 썼다. 상위 후보만 보면 충분하다 - 아래쪽은 어차피 안 나간다.
     char_check_top: int = 300
+    # 함의 중복 제거를 켤지. **지표와 판단이 엇갈리는 자리라 스위치로 둔다.**
+    #
+    # 실측(1girl_solo, 800건):
+    #     끄면  Hit_i@5 0.115 · 정보튜플율 0.635 · 빈답 61
+    #     켜면  Hit_i@5 0.089 · 정보튜플율 0.692 · 빈답 87
+    #
+    # held-out 지표는 '동시출현하는 태그를 맞히면' 점수를 준다. 그런데 함의는
+    # **정의상 동시출현**한다 - `holding weapon` 과 `holding sword` 는 같이 나올
+    # 수밖에 없어서 그걸 예측하는 것은 공짜 점수다. 빼면 그 점수를 포기하고 더
+    # 깊은(=희귀한) 태그를 찾게 되어 지지도가 떨어진다.
+    #
+    # 그런데 출력은 분명히 더 낫다:
+    #     끄면  weapon + holding weapon + holding sword   <- 한 칸을 세 번 쓴다
+    #     켜면  holding sword + katana + sheath
+    # 지표로 결판낼 수 없는 문제라 기본값은 켜 두고(사용자 목표는 '빠르게 원하는
+    # 구도' 이지 held-out 재현율이 아니다) 끌 수 있게 남긴다. 최종 판정은
+    # SPEC 8.3 블라인드 감사 몫이다.
+    use_implications: bool = True
 
 
 @dataclass
@@ -315,7 +333,7 @@ class ComboQuery:
         picked: list[int] = []
         picked_names: list[str] = []
         heads: set[str] = set()
-        implies = self.m.implies
+        implies = self.m.implies if self.p.use_implications else {}
         for c in sel:
             name = self.m.tags[c]
             words = name.split()

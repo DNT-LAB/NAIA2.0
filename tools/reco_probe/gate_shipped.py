@@ -70,6 +70,9 @@ def main() -> int:
     ap.add_argument("--prompt", type=int, default=3)
     ap.add_argument("--top", type=int, default=5)
     ap.add_argument("--seed", type=int, default=20260814)
+    ap.add_argument("--no-implications", action="store_true",
+                    help="함의 중복 제거를 끄고 잰다. 지표와 판단이 엇갈리는 자리다 - "
+                         "끄면 점수가 오르고 출력은 나빠진다(Policy 주석 참조)")
     args = ap.parse_args()
 
     mp = ROOT / "data" / "tag_combo" / f"{args.group}.ncsr"
@@ -99,7 +102,10 @@ def main() -> int:
     print(f"홀드아웃 {len(hold):,} -> 평가 {len(prepared)}건 "
           f"(샤드 {HOLD_SHARDS}, 학습과 다른 시기)")
 
-    q = ComboQuery(model, Policy(top_k=args.top))
+    q = ComboQuery(model, Policy(top_k=args.top,
+                                 use_implications=not args.no_implications))
+    print(f"함의 중복 제거: {'끔' if args.no_implications else '켬'} "
+          f"(표 {len(model.implies):,}태그)")
 
     # 베이스라인 A - 무조건 헤드 튜플(코퍼스 최빈 태그 조합)
     head = [model.tags[i] for i in np.argsort(-model.freq)[:40]]

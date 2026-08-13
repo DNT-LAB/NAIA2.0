@@ -32,6 +32,10 @@ HARMONY_RELATIVE = Path("data") / "interactive_clothing_harmony.json"
 # 축 태그 12,149개 중 88% 가 '함께 쓰는 것' 카드를 못 띄우고 있었다(2026-08-13 실측).
 # 같은 게시물 통계·같은 게이트로 뽑되 축별로 묶는다(tools/build_tag_cooccurrence.py).
 GENERAL_RELATIVE = Path("data") / "interactive_tag_harmony.json"
+# 성인 도감 어휘. 일반 태그를 고른 사용자에게 성인 후보를 권하지 않기 위한 판정표다.
+# 동반 통계 빌더는 `wildcards/nsfw/*.txt` 로 같은 판정을 하지만 그 폴더는 릴리즈에
+# 없다 - 그래서 tools/thumb_axes_emit.py 가 data/ 로 구워 준다.
+ADULT_RELATIVE = Path("data") / "interactive_adult_tags.json"
 MAX_BATCH = 40
 
 
@@ -52,7 +56,11 @@ class _HarmonyPack:
         if self._warned:
             return
         self._warned = True
-        print(f"[interactive-advice] harmony unavailable ({why}): {self._path}")
+        # 경로에 non-ASCII 가 섞이면 cp949 콘솔에서 UnicodeEncodeError 로 죽는다
+        # (한글 사용자명이면 흔하다). 문구는 ASCII 지만 값은 보장이 안 되므로
+        # 여기서 강제로 ASCII 로 접는다 - 조언이 없다고 앱이 멈출 일은 아니다.
+        safe = str(self._path).encode("ascii", "backslashreplace").decode("ascii")
+        print(f"[interactive-advice] harmony unavailable ({why}): {safe}")
 
     def _load_locked(self) -> None:
         try:
@@ -87,8 +95,9 @@ def _dependency_index():
         return None
 
 
-def _recommend_groups(tag: str, harmony: dict[str, Any],
-                      general: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
+def _recommend_groups(tag: str, harmony: dict[str, Any], general: dict[str, Any],
+                      adult: frozenset[str] = frozenset()
+                      ) -> tuple[list[str], list[dict[str, Any]]]:
     """'함께 쓰는 것' 후보를 그룹으로 묶는다. 두 층이다.
 
     의상 층(`interactive_clothing_harmony.json`)이 **우선**한다 — 부위(region6)
@@ -97,15 +106,31 @@ def _recommend_groups(tag: str, harmony: dict[str, Any],
     점수 척도가 달라서다 — 섞으면 순위가 무슨 뜻인지 말할 수 없게 된다.
 
     일반 층의 그룹 키는 부위가 아니라 **축**이다(직업·표정·자세·사물…).
+
+    ## 성인 후보는 여기서 거른다
+
+    일반 층은 빌더가 이미 걸러서 내려오지만 의상 층은 **안 걸러진 채**였다. 같은
+    카드에 정책이 둘 있었던 셈이고, 실측하면 일반 seed 122개에서 성인 후보가
+    172건 노출됐다(`open hoodie -> naked hoodie`, `bikini -> covered nipples`).
+    판정을 데이터가 아니라 **표시 경로**에 두면 어느 층이 이기든 한 가지 규칙이다.
+    성인 태그를 고른 사용자에게는 성인 후보를 그대로 준다 — 막는 것은
+    '고르지 않은 사람에게 들이미는 것' 뿐이다.
     """
-    rec = list(harmony.get("recommend", {}).get(tag, ()))
+    seed_is_adult = tag in adult
+
+    def _drop(cands: list[str]) -> list[str]:
+        if seed_is_adult or not adult:
+            return cands
+        return [c for c in cands if c not in adult]
+
+    rec = _drop(list(harmony.get("recommend", {}).get(tag, ())))
     if rec:
         region_of = harmony.get("region", {})
         weak_of = harmony.get("region_weak", {})
         labels = harmony.get("region_labels", {})
         key_of = lambda c: region_of.get(c) or weak_of.get(c) or ""   # noqa: E731
     else:
-        rec = list(general.get("recommend", {}).get(tag, ()))
+        rec = _drop(list(general.get("recommend", {}).get(tag, ())))
         if not rec:
             return [], []
         group_of = general.get("group", {})
@@ -119,7 +144,8 @@ def _recommend_groups(tag: str, harmony: dict[str, Any],
 
 
 def _advise_one(tag: str, harmony: dict[str, Any], dep,
-                general: dict[str, Any] | None = None) -> dict[str, Any]:
+                general: dict[str, Any] | None = None,
+                adult: frozenset[str] = frozenset()) -> dict[str, Any]:
     t = str(tag or "").strip()
     # `recommendGroups` 는 빈 태그로 들어와도 있어야 한다 — 없으면 프론트가
     # `seed.recommendGroups` 에서 undefined 를 만난다(키 자체가 없던 자리다).
@@ -144,7 +170,7 @@ def _advise_one(tag: str, harmony: dict[str, Any], dep,
     # 추천은 점수 순 상위만 주면 같은 부위 변형이 줄줄이 나온다
     # (`sweater` -> ribbed sweater / turtleneck sweater / off-shoulder sweater ...).
     # 부위별로 묶어 보내서 화면이 서로 다른 부위를 고루 보여줄 수 있게 한다.
-    rec, out["recommendGroups"] = _recommend_groups(t, harmony, general or {})
+    rec, out["recommendGroups"] = _recommend_groups(t, harmony, general or {}, adult)
     out["recommend"] = rec[:12]                 # 하위 호환(평면 목록)
     out["avoid"] = list(harmony.get("avoid", {}).get(t, ()))[:5]
     region = harmony.get("region", {}).get(t, "")
@@ -165,6 +191,10 @@ def register_interactive_advice_routes(app: FastAPI, context: Any, *,
     repo_root = Path(getattr(context, "repo_root", ".") or ".")
     pack = _HarmonyPack(repo_root)
     general_pack = _HarmonyPack(repo_root, GENERAL_RELATIVE)
+    adult_pack = _HarmonyPack(repo_root, ADULT_RELATIVE)
+
+    def _adult() -> frozenset[str]:
+        return frozenset(adult_pack.get().get("tags") or ())
 
     async def _offload(fn):
         """동기 작업을 스레드에서 돌린다. 주입이 없으면(구 호출부) 그대로 실행."""
@@ -175,7 +205,8 @@ def register_interactive_advice_routes(app: FastAPI, context: Any, *,
     @app.get("/api/interactive-advice")
     async def interactive_advice(tag: str = ""):   # noqa: ANN202
         return JSONResponse(await _offload(
-            lambda: _advise_one(tag, pack.get(), _dependency_index(), general_pack.get())))
+            lambda: _advise_one(tag, pack.get(), _dependency_index(),
+                                general_pack.get(), _adult())))
 
     @app.get("/api/interactive-advice/batch")
     async def interactive_advice_batch(tags: str = ""):   # noqa: ANN202
@@ -184,7 +215,8 @@ def register_interactive_advice_routes(app: FastAPI, context: Any, *,
         def _run() -> dict[str, Any]:
             # 인덱스 로딩 자체가 목적인 워밍업 요청(빈 tags)도 여기를 지난다.
             harmony, dep, general = pack.get(), _dependency_index(), general_pack.get()
-            return {"items": [_advise_one(n, harmony, dep, general) for n in names]}
+            adult = _adult()
+            return {"items": [_advise_one(n, harmony, dep, general, adult) for n in names]}
 
         return JSONResponse(await _offload(_run))
 

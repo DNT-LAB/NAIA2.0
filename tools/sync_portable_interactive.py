@@ -43,6 +43,8 @@ BACKEND = [
     "data/interactive_clothing_harmony.json",
     # 의상 밖 어휘의 추천. 이게 없으면 축 태그의 88% 가 조언 카드를 못 띄운다.
     "data/interactive_tag_harmony.json",
+    # 일반 seed 에 성인 후보를 붙이지 않는 판정표. 없으면 의상 층이 걸러지지 않는다.
+    "data/interactive_adult_tags.json",
 ]
 FRONTEND = [
     "app/web/remote/app.js",

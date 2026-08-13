@@ -57,12 +57,13 @@ def main() -> int:
 
     for p in (GENERAL, CLOTHING, AXES):
         if not p.exists():
-            bad.append(f"파일이 없다: {p.relative_to(ROOT).as_posix()}")
+            bad.append(f"파일이 없다: {p}")
     if bad:
         print("\n".join("  !! " + b for b in bad))
         return 1
 
     g = _load(GENERAL)
+    c = _load(CLOTHING)
     rec = g.get("recommend") or {}
     grp = g.get("group") or {}
     labels = g.get("groupLabels") or {}
@@ -104,20 +105,54 @@ def main() -> int:
         bad.append(f"라벨 없는 그룹 {len(unknown_group)}개: {unknown_group[:6]}")
 
     # 성인 후보는 성인 씨앗에만. 일반 태그를 고른 사용자에게 성인 태그를 권하지 않는다.
+    #
+    # **일반 층만 보면 안 된다.** 처음에 그렇게 적었더니 가드는 0건이라고 했는데
+    # 사용자가 실제로 받는 병합 경로에서는 172건이 새고 있었다(Codex 지적, 실측).
+    # 이기는 층은 의상 층이고 그건 걸러지지 않은 데이터다. 그래서 여기서는
+    # **엔드포인트가 내는 것과 같은 함수**로 판정한다.
+    # **판정표는 data/ 에 있어야 한다.** 백엔드는 릴리즈에 없는 wildcards/ 를 못 읽는다.
+    # 이 파일이 빠지면 필터가 조용히 no-op 이 되고 의상 층이 그대로 새어 나간다
+    # — 정확히 그 상태가 실측 172건이었다. wildcards 폴백으로 봐주면 개발 기계에서만
+    # 통과하는 가드가 된다.
     adult: set[str] = set()
-    if NSFW_DIR.exists():
-        for f in NSFW_DIR.glob("nsfw_*.txt"):
-            adult |= {l.strip() for l in f.read_text(encoding="utf-8").splitlines()
-                      if l.strip()}
-    leak = [(a, b) for a, v in rec.items() if a not in adult
-            for b in v if b in adult]
+    adult_file = ROOT / "data" / "interactive_adult_tags.json"
+    if not adult_file.exists():
+        bad.append(f"성인 판정표가 없다: {adult_file} — 이게 없으면 조언 카드의 "
+                   "성인 필터가 통째로 무력화된다 (tools/thumb_axes_emit.py 를 돌려라)")
+    else:
+        adult = set(_load(adult_file).get("tags") or ())
+        if len(adult) < 300:
+            bad.append(f"성인 판정표가 {len(adult)}개뿐이다 — 어휘가 깨졌다")
+    stats["adultVocab"] = len(adult)
+
+    try:
+        sys.path.insert(0, str(ROOT))
+        from app.backend.server.interactive_advice_routes import _recommend_groups
+    except Exception as exc:      # noqa: BLE001
+        bad.append(f"병합 경로를 불러오지 못했다({exc!r}) — 노출 검사를 못 한다")
+        _recommend_groups = None
+    leak: list[tuple[str, str]] = []
+    if _recommend_groups is not None and adult:
+        frozen = frozenset(adult)
+        for seed in sorted(set(rec) | set(c.get("recommend") or {})):
+            if seed in adult:
+                continue
+            _, groups = _recommend_groups(seed, c, g, frozen)
+            # 프론트가 실제로 그리는 범위와 같게 본다(상위 3그룹 x 6개).
+            for grp in groups[:3]:
+                leak.extend((seed, t) for t in grp["tags"][:6] if t in adult)
     stats["adultLeak"] = len(leak)
     if leak:
-        bad.append(f"성인 후보가 일반 씨앗에 붙었다 {len(leak)}건: {leak[:4]}")
+        bad.append(f"성인 후보가 일반 씨앗에 노출된다 {len(leak)}건: {leak[:4]}")
 
     # 그림 없는 후보는 카드에서 조용히 사라진다(recThumbsHtml). 머리말만 남는
-    # 빈 카드의 원인이므로 여기서 센다.
-    if THUMBS.exists():
+    # 빈 카드의 원인이므로 여기서 센다. **파일이 없으면 통과시키지 않는다** —
+    # 검사를 못 했는데 exit 0 을 내면 그건 안전하다는 거짓말이다(Codex 지적).
+    if not THUMBS.exists():
+        # relative_to 를 쓰면 저장소 밖 경로(테스트 대체본)에서 ValueError 로 죽는다.
+        bad.append(f"썸네일 팩이 없다: {THUMBS} — 그림 없는 후보를 셀 수 없다")
+        stats["noThumb"] = None
+    else:
         keys = set(_load(THUMBS))
         have = {k.split("/", 1)[1] if "/" in k else k for k in keys}
         nothumb = sorted(cands - have)
@@ -126,7 +161,6 @@ def main() -> int:
             bad.append(f"썸네일 없는 후보 {len(nothumb)}개: {nothumb[:6]}")
 
     # 의상 층이 우선이라는 계약. 의상 씨앗의 추천은 의상 층이 낸다.
-    c = _load(CLOTHING)
     stats["clothingSeeds"] = len(c.get("recommend") or {})
 
     if args.json:

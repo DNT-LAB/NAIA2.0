@@ -943,6 +943,26 @@ def _display(ax: str) -> str:
     return f"{sl} {lb}"
 
 
+# ── 성인 어휘 (배포판 백엔드가 읽는다) ────────────────────────────────────
+# 조언 카드는 일반 태그를 고른 사용자에게 성인 태그를 권하지 않는다. 동반 통계
+# 빌더는 `wildcards/nsfw/nsfw_*.txt` 로 그 판정을 하는데, **런타임에는 그 폴더가
+# 없다**(빌드 입력물이라 릴리즈에서 제외된다). 그래서 판정이 백엔드에서 통째로
+# 빠져 있었고, 의상 층은 걸러지지 않은 채 성인 후보를 내보내고 있었다
+# (실측 2026-08-14: 일반 seed 122개에서 172건 노출). 어휘를 여기서 구워 낸다.
+_ADULT_TAGS = Path("data/interactive_adult_tags.json")
+_adult_vocab: set[str] = set()
+for _p in sorted(NSFW_SRC.glob("nsfw_*.txt")):
+    _adult_vocab |= {l.strip() for l in _p.read_text(encoding="utf-8").splitlines()
+                     if l.strip() and not l.startswith("#")}
+_ADULT_TAGS.write_text(json.dumps({
+    "note": ["성인 도감 어휘. tools/thumb_axes_emit.py 가 wildcards/nsfw 에서 굽는다.",
+             "조언 카드가 '일반 seed 에는 성인 후보를 붙이지 않는다' 를 판정할 때 쓴다.",
+             "wildcards/ 는 릴리즈에 안 실리므로 .txt 를 직접 읽으면 배포판에서 죽는다.",
+             "손으로 고치지 말 것."],
+    "count": len(_adult_vocab),
+    "tags": sorted(_adult_vocab),
+}, ensure_ascii=False, indent=1), encoding="utf-8")
+
 _AXIS_LABELS.write_text(json.dumps({
     "note": ["축 -> 한글 라벨. tools/thumb_axes_emit.py 가 SLOTS/*_SECTIONS 에서 굽는다.",
              "조언 카드가 의상이 아닌 후보를 묶을 때 그룹 머리말로 쓴다(display).",
@@ -960,6 +980,7 @@ print(f"  축 소속표 {len(_axis_tags)}축 / {sum(len(v) for v in _axis_tags.v
       f" -> {_AXIS_TAGS}")
 print(f"  축 라벨 {len(_axis_label)}개 (섹션 없는 축 {len(_unlabeled)}개는 축 이름 그대로)"
       f" -> {_AXIS_LABELS}")
+print(f"  성인 어휘 {len(_adult_vocab)}개 -> {_ADULT_TAGS}")
 print(f"  축 인덱스 {len(_referenced)}개 -> {_INDEX}")
 print(f"  팔레트: hair {len(palette['hair_color'])} / eye {len(palette['eye_color'])}")
 print(f"  슬라이더: {list((man.get('sliders') or {}).keys())}")

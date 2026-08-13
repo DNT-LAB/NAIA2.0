@@ -4050,7 +4050,10 @@ export function createInteractivePanel({
     if (!presetPanel || !presetPanel.classList.contains('open')) return;
     const vw = window.innerWidth;
     if (vw <= 767) {
-      presetPanel.style.top = presetPanel.style.left = presetPanel.style.width = presetPanel.style.bottom = '';
+      // maxHeight 도 반드시 같이 비운다 — 데스크톱에서 넣어 둔 인라인 값(예: 814px)이
+      // 남으면 모바일 시트의 `max-height:55dvh` 를 이겨서 판이 화면 위로 삐져나간다.
+      presetPanel.style.top = presetPanel.style.left = presetPanel.style.width
+        = presetPanel.style.bottom = presetPanel.style.maxHeight = '';
       return;
     }
     const W = Math.min(PANEL_W, vw - 32);
@@ -4932,12 +4935,15 @@ export function createInteractivePanel({
     // 태그와 색·크기 태그를 버리므로, 태그 개수로 판정하면 머리말만 있고 속이 빈
     // 카드가 뜬다. 지금 데이터에서는 후보 2,414종이 전부 그림을 갖고 있어 실제로는
     // 안 나지만(실측), 후보 어휘가 넓어질 때 조용히 되살아나는 종류의 결함이다.
+    // **자르기 전에 걸러야 한다.** 큰 그룹 셋이 전부 필터에 걸려 비면, 뒤에 있던
+    // 멀쩡한 그룹이 자리를 물려받아야 카드가 산다. slice 를 먼저 하면 그 그룹이
+    // 버려진 뒤에 빈 것만 남아 카드가 통째로 사라진다.
     const recGroups = [...byRegion.entries()]
       .filter(([, v]) => v.length)
       .sort((a, b) => b[1].length - a[1].length)
-      .slice(0, 3)                       // 화면에는 3개 부위까지
       .map(([label, tags]) => ({ label, html: recThumbsHtml(tags.slice(0, 6)) }))
-      .filter(g => g.html);
+      .filter(g => g.html)
+      .slice(0, 3);                      // 화면에는 3개 부위까지
     const seedLabel = seed ? seed.tag : '';
 
     const parts = [];

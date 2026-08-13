@@ -20,12 +20,15 @@ from typing import Any
 
 from core.conditional.expr_utils import (
     CHAR_IN_RE,
+    CHAR_ON_RE,
+    RATING_FUNC_RE,
     has_operator_shape_defect,
     iter_condition_spans,
     matching_paren,
     split_by_operator,
     strip_redundant_outer_parens,
     top_level_operators,
+    utf16_offset,
 )
 
 # 부정 뒤에 와도 되는 것들 — `~char_in(...)`, `~rating(...)`, `~char_on(...)` 은 정상 문법이라
@@ -39,6 +42,7 @@ _ALWAYS_FALSE_PREFIXES = {
     "*~": ("cond.star_not", "`*~` 는 문법이 아닙니다 — 물결까지 태그 이름으로 찾아서 항상 거짓이 됩니다."),
 }
 _EMPTY_OPERANDS = {"~", "~!", "!", "*"}
+_RATING_CHARS = {"e", "q", "s", "g"}
 
 
 def _iter_leaves(expression: str):
@@ -141,8 +145,23 @@ def lint_condition(condition: str) -> list[dict[str, str]]:
 
 
 def lint_rules_text(rules_text: str) -> list[dict[str, Any]]:
-    """규칙 텍스트 전체 → [{'condition', 'line', 'warnings'}]. 경고가 있는 규칙만 담는다."""
-    text = str(rules_text or "")
+    """규칙 텍스트 전체 → 경고가 있는 규칙 목록.
+
+    각 항목: condition(표시용) / raw(원문 그대로) / start,end(조건 본문 구간) / line /
+    warnings / fix(De Morgan 치환식, 없으면 None).
+
+    `start`·`end`·`raw` 는 UI가 **원클릭 적용 전에 텍스트가 그새 바뀌지 않았는지**
+    검증하는 용도다(offset 만 믿고 갈아끼우면 편집 중인 내용을 훼손한다).
+
+    ⚠️ `start`/`end` 는 **UTF-16 code unit** 기준이다 — 유일한 소비자가 JS 이고
+    `String.prototype.slice` 가 UTF-16 단위로 자르기 때문. Python 의 code point 인덱스를
+    그대로 보내면 이모지 같은 non-BMP 문자가 하나만 있어도 어긋나 정상 규칙까지
+    "그새 바뀌었다"며 적용이 거부된다.
+
+    같은 이유로 줄바꿈을 `\\n` 으로 정규화한 좌표를 쓴다 — 브라우저는 textarea 의 value 를
+    항상 `\\n` 으로 정규화하므로, 원본에 `\\r\\n` 이 있으면 둘째 줄부터 구간이 밀린다.
+    """
+    text = str(rules_text or "").replace("\r\n", "\n").replace("\r", "\n")
     findings: list[dict[str, Any]] = []
     for open_index, close_index in iter_condition_spans(text):
         condition = text[open_index + 1:close_index]
@@ -150,10 +169,194 @@ def lint_rules_text(rules_text: str) -> list[dict[str, Any]]:
         if warnings:
             findings.append({
                 "condition": condition.strip(),
+                "raw": condition,
+                "start": utf16_offset(text, open_index + 1),
+                "end": utf16_offset(text, close_index),
                 "line": text.count("\n", 0, open_index) + 1,
                 "warnings": warnings,
+                "fix": demorgan_rewrite(condition),
             })
     return findings
+
+
+# ============================================================================
+# De Morgan 치환 — `~(...)` 를 지원되는 문법으로 펼친 동등식
+# ============================================================================
+
+def _wrap_for(operator: str, expression: str) -> str:
+    """`operator` 로 이어붙일 때 이 조각을 괄호로 묶어야 하는가.
+
+    **반대 연산자가 섞일 때만** 묶는다.
+    - `&` 로 이을 때 `|` 를 품은 조각: 안 묶으면 `&` 가 먼저 붙어 의미가 깨진다 (필수).
+    - `|` 로 이을 때 `&` 를 품은 조각: 의미상 불필요하지만 **명시한다** — 우선순위 혼동이
+      이 기능의 발단이었으므로 제안문은 읽는 대로 읽히는 편이 낫다.
+    - 같은 연산자끼리는 묶지 않는다 (`~a | (b | c)` 같은 잉여 괄호 방지).
+    """
+    expression = expression.strip()
+    opposite = "&" if operator == "|" else "|"
+    if opposite in top_level_operators(strip_redundant_outer_parens(expression)):
+        return f"({expression})"
+    return expression
+
+
+def _is_plain_contains_leaf(text: str) -> bool:
+    """런타임이 이 문자열을 **접두사 없는 contains 태그**로 분류하는가.
+
+    `~BODY` 에서 `~` 를 떼는 방향이 안전하려면 BODY 가 그대로 contains 잎이어야 한다.
+    아니면 needle 이 다른 범주로 재해석된다 — `~ e` 는 리터럴 "e" 를 찾지만 `e` 는
+    **rating 조건**이고, `~ !a` 의 `!a` 는 **exact modifier** 가 된다.
+    """
+    body = text.strip()
+    if not body:
+        return False
+    if body[0] in "*!~\"'(":
+        return False
+    if body in _RATING_CHARS:
+        return False
+    if RATING_FUNC_RE.match(body) or CHAR_IN_RE.match(body) or CHAR_ON_RE.match(body):
+        return False
+    return True
+
+
+def _negate_leaf(leaf: str) -> str:
+    """단일 조건의 부정형.
+
+    **런타임 `_evaluate_single_condition` 의 분류 순서를 그대로 따라간다.** 접두사만 기계적으로
+    뒤집으면 결과가 다른 범주로 재분류되어 의미가 조용히 바뀐다(rating / 함수 / modifier).
+    안전하게 뒤집을 수 없는 입력은 ValueError → 제안 자체를 하지 않는다.
+    """
+    text = leaf.strip()
+    if not text:
+        raise ValueError("빈 잎은 부정형을 만들 수 없습니다")
+
+    # 이미 잘못된 토큰(`~*a` 등)은 De Morgan 동치가 성립하지 않는다.
+    if lint_condition(text):
+        raise ValueError(f"잘못된 토큰은 부정형을 만들 수 없습니다: {text!r}")
+
+    # 0) 따옴표 — 런타임이 잎 평가 전에 `_remove_outer_quotes` 를 돌리므로 **안쪽**을 부정한다.
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ('"', "'"):
+        quote = text[0]
+        return f"{quote}{_negate_leaf(text[1:-1])}{quote}"
+
+    # 1~3) 함수형 — 선두 `~` 토글이 곧 부정이다(정규식이 양쪽 모두 매칭).
+    for regex in (RATING_FUNC_RE, CHAR_IN_RE, CHAR_ON_RE):
+        match = regex.match(text)
+        if match:
+            return text[1:].strip() if match.group(1) == "~" else f"~{text}"
+
+    # 4~5) 레거시 rating — 런타임은 `e`/`~e` **정확히 그 문자열**만 rating 으로 본다.
+    if text in _RATING_CHARS:
+        return f"~{text}"
+    if text.startswith("~") and text[1:] in _RATING_CHARS:
+        return text[1:]
+
+    # 6) `~!X` -> `*X` — 양쪽 다 needle 이 X 인 원소 멤버십. 재분류 위험 없음.
+    if text.startswith("~!"):
+        body = text[2:].strip()
+        if not body:
+            raise ValueError("피연산자가 없는 조건은 부정형을 만들 수 없습니다")
+        return f"*{body}"
+
+    # 7) `~X` -> `X` — **유일하게 위험한 방향**. X 가 contains 잎으로 남아야 한다.
+    if text.startswith("~"):
+        body = text[1:].strip()
+        if not _is_plain_contains_leaf(body):
+            raise ValueError(f"다른 범주로 재해석되는 부정은 만들 수 없습니다: {text!r}")
+        return body
+
+    # 8~9) `!X` / `*X` -> `~!X` — needle 이 X 로 보존된다.
+    if text[0] in "!*":
+        body = text[1:].strip()
+        if not body:
+            raise ValueError("피연산자가 없는 조건은 부정형을 만들 수 없습니다")
+        return f"~!{body}"
+
+    # 10) 접두사 없는 contains -> `~X`
+    return f"~{text}"
+
+
+def _negate_expression(expression: str) -> str:
+    """식 전체의 부정형을 De Morgan 으로 밀어 내린다."""
+    expression = strip_redundant_outer_parens(expression)
+    if not expression:
+        # 빈 조건은 "항상 참" 이라 부정은 "항상 거짓" — 표현할 문법이 없다.
+        raise ValueError("빈 조건은 부정형을 만들 수 없습니다")
+
+    # `~(...)` 의 부정은 괄호 안 그대로 (이중 부정)
+    if expression.startswith("~("):
+        close = matching_paren(expression, 1)
+        if close == len(expression) - 1:
+            return strip_redundant_outer_parens(expression[2:-1])
+
+    or_parts = split_by_operator(expression, "|")
+    if len(or_parts) > 1:
+        return " & ".join(_wrap_for("&", _negate_expression(part)) for part in or_parts)
+
+    and_parts = split_by_operator(expression, "&")
+    if len(and_parts) > 1:
+        return " | ".join(_wrap_for("|", _negate_expression(part)) for part in and_parts)
+
+    return _negate_leaf(expression)
+
+
+def _rewrite_groups(expression: str) -> str:
+    """식 안의 `~(...)` 를 전부 펼친다. 바뀔 게 없으면 입력 그대로."""
+    original = expression
+    stripped = expression.strip()
+    if not stripped:
+        return original
+
+    if stripped.startswith("~("):
+        close = matching_paren(stripped, 1)
+        if close == len(stripped) - 1:
+            # 안쪽에 또 `~(...)` 가 있을 수 있으니 먼저 펼친 뒤 부정한다.
+            return _negate_expression(_rewrite_groups(stripped[2:-1]))
+
+    inner = _peel_one_paren(stripped)
+    if inner is not None:
+        rewritten = _rewrite_groups(inner)
+        return original if rewritten == inner else f"({rewritten})"
+
+    if not top_level_operators(stripped):
+        call = CHAR_IN_RE.match(stripped)
+        if call:
+            rewritten = _rewrite_groups(call.group(3))
+            if rewritten != call.group(3):
+                return f"{call.group(1)}char_in({call.group(2)}, {rewritten.strip()})"
+        return original
+
+    for operator, joiner in (("|", " | "), ("&", " & ")):
+        parts = split_by_operator(stripped, operator)
+        if len(parts) > 1:
+            rebuilt = [_rewrite_groups(part) for part in parts]
+            if all(new == old for new, old in zip(rebuilt, parts)):
+                return original
+            # 펼친 조각이 최상위 연산자를 갖게 되면 반드시 괄호로 묶는다. `&` 가 `|` 보다
+            # 강하게 묶이므로, 안 씌우면 `x & ~(a & b)` 가 `(x & ~a) | ~b` 로 읽힌다.
+            return joiner.join(_wrap_for(operator, part) for part in rebuilt)
+    return original
+
+
+def demorgan_rewrite(condition: str) -> str | None:
+    """`~(...)` 를 지원 문법으로 펼친 **동등한** 조건식. 대상이 없거나 만들 수 없으면 None.
+
+    그룹 부정은 런타임이 지원하지 않아 조용히 항상 참이 된다. 문법을 늘리는 대신
+    사용자가 그대로 쓸 수 있는 치환식을 돌려주는 쪽을 택했다(De Morgan).
+    모양이 깨진 식(`a|&b`)이 섞여 있으면 치환 결과의 의미를 보장할 수 없어 포기한다.
+    """
+    text = str(condition or "")
+    if "~(" not in text or has_operator_shape_defect(text):
+        return None
+    try:
+        rewritten = _rewrite_groups(text).strip()
+    except ValueError:
+        return None
+    if not rewritten or rewritten == text.strip() or "~(" in rewritten:
+        return None
+    # 최종 안전망 — 제안식이 또 경고를 부르면(= 잘못된 토큰이 섞여 나왔으면) 내놓지 않는다.
+    if lint_condition(rewritten):
+        return None
+    return rewritten
 
 
 def _peel_one_paren(expression: str) -> str | None:

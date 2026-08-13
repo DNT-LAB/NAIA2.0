@@ -15638,6 +15638,37 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   margin-top: 5px;
   color: var(--text-dim);
 }
+.cond-lint-fix {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 0 16px;
+}
+.cond-lint-fix-label {
+  color: var(--text-dim);
+}
+.cond-lint-fix code {
+  font-family: var(--font-mono, monospace);
+  background: rgba(0, 0, 0, 0.32);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #f0d9a8;
+  word-break: break-all;
+}
+.cond-lint-fix-btn {
+  border: 1px solid rgba(210, 150, 60, 0.55);
+  border-radius: 4px;
+  background: rgba(210, 150, 60, 0.18);
+  color: #e8b567;
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.cond-lint-fix-btn:hover {
+  background: rgba(210, 150, 60, 0.32);
+  color: #f5deb3;
+}
 .cond-lint-head {
   font-weight: 700;
   color: #e8b567;

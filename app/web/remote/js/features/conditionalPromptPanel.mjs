@@ -726,6 +726,32 @@ export function createConditionalPromptPanel({
 
   // 백엔드 lint 결과를 배지로 그린다. 규칙을 막지는 않는다 — 이미 그런 규칙을 돌리고 있는
   // 사용자의 출력을 바꾸지 않으려고 차단 대신 알림만 하는 설계(core/conditional/lint.py).
+  // 린트가 준 De Morgan 치환식을 규칙 텍스트에 갈아끼운다.
+  // 서버가 준 offset 만 믿고 자르면 그 사이 사용자가 타이핑한 내용을 훼손한다 → 해당 구간이
+  // 아직 원문 그대로인지 확인한 뒤에만 적용하고, 아니면 거절하고 다시 불러오라고 알린다.
+  function applyLintFix(index) {
+    const findings = Array.isArray(currentState?.lint) ? currentState.lint : [];
+    const finding = findings[index];
+    const textarea = document.getElementById('condRulesInput');
+    const notify = (message, level) => {
+      if (typeof globalThis.showToast === 'function') globalThis.showToast(message, level);
+    };
+    if (!finding || typeof finding.fix !== 'string' || !textarea) return;
+    const {start, end, raw, fix} = finding;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || typeof raw !== 'string') return;
+    const value = textarea.value;
+    if (value.slice(start, end) !== raw) {
+      notify('규칙이 그새 바뀌어 적용할 수 없습니다. 다시 불러온 뒤 시도하세요.', 'error');
+      return;
+    }
+    const caret = start + fix.length;
+    textarea.value = value.slice(0, start) + fix + value.slice(end);
+    textarea.setSelectionRange(caret, caret);
+    textarea.focus();
+    onRulesInput(textarea);
+    notify('그룹 부정을 지원되는 형태로 바꿨습니다', 'success');
+  }
+
   function renderLint(m) {
     const findings = Array.isArray(m && m.lint) ? m.lint : [];
     if (!findings.length) return '';
@@ -734,11 +760,23 @@ export function createConditionalPromptPanel({
     const MAX_SHOWN = 5;
     const shown = findings.slice(0, MAX_SHOWN);
     const hidden = findings.length - shown.length;
-    const items = shown.map(f => {
+    // 원클릭 적용은 원문 텍스트를 직접 편집하는 Legacy DSL 뷰에서만. v2 는 블록 모델이
+    // 원본이라 텍스트를 갈아끼우면 편집 중인 트리와 어긋난다 → 치환식만 보여준다.
+    const canApply = m.editor_mode !== 'v2';
+    const items = shown.map((f, index) => {
       const warns = (f.warnings || []).map(w => `<li>${escHtml(w.message || '')}</li>`).join('');
+      const fix = typeof f.fix === 'string' && f.fix ? f.fix : '';
+      const fixBlock = fix
+        ? `<div class="cond-lint-fix">
+             <span class="cond-lint-fix-label">이렇게 쓰면 됩니다</span>
+             <code>(${escHtml(fix)})</code>
+             ${canApply ? `<button type="button" class="cond-lint-fix-btn" data-cond-action="apply-lint-fix" data-lint-index="${index}">적용</button>` : ''}
+           </div>`
+        : '';
       return `<div class="cond-lint-item">
           <div class="cond-lint-cond">(${escHtml(f.condition || '')})<span class="cond-lint-line">line ${escHtml(String(f.line || ''))}</span></div>
           <ul class="cond-lint-msgs">${warns}</ul>
+          ${fixBlock}
         </div>`;
     }).join('');
     const more = hidden > 0 ? `<div class="cond-lint-more">…외 ${hidden}건</div>` : '';
@@ -1377,7 +1415,9 @@ export function createConditionalPromptPanel({
     const actionEl = event.target.closest('[data-cond-action]');
     if (!actionEl) return;
     const action = actionEl.dataset.condAction;
-    if (action === 'toggle-syntax') {
+    if (action === 'apply-lint-fix') {
+      applyLintFix(Number(actionEl.dataset.lintIndex));
+    } else if (action === 'toggle-syntax') {
       actionEl.classList.toggle('open');
       actionEl.nextElementSibling?.classList.toggle('collapsed');
     } else if (action === 'toggle-preset-popover') {

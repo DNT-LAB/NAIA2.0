@@ -33,6 +33,15 @@ def has_operator_shape_defect(expression: str) -> bool:
     return bool(_OPERATOR_SHAPE_DEFECT_RE.search(text))
 
 
+def utf16_offset(text: str, index: int) -> int:
+    """Python code point 인덱스 → **UTF-16 code unit** 인덱스.
+
+    브라우저의 `String.prototype.slice` 는 UTF-16 단위로 자른다. Python 인덱스를 그대로
+    넘기면 이모지 같은 non-BMP 문자가 하나만 앞에 있어도 구간이 밀린다.
+    """
+    return len(str(text or "")[:index].encode("utf-16-le")) // 2
+
+
 def matching_paren(text: str, start: int) -> int:
     """`text[start]` 가 '(' 일 때 짝이 되는 ')' 의 인덱스. 없으면 -1."""
     depth = 1

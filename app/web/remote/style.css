@@ -15617,6 +15617,50 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   background: rgba(255, 183, 77, 0.12);
   color: #ffcc80;
 }
+/* 조건 린트 경고 — 규칙을 막지 않는 알림용 배지 (core/conditional/lint.py) */
+.cond-lint-box {
+  flex: 0 0 auto;
+  border: 1px solid rgba(210, 150, 60, 0.42);
+  border-radius: 6px;
+  background: rgba(60, 44, 20, 0.55);
+  padding: 8px 10px;
+  margin: 6px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  /* 부모가 고정 높이 + overflow:hidden 이라 경고가 많으면 편집기와 하단 버튼을 밀어낸다.
+     박스 자체를 스크롤시켜 레이아웃을 잠식하지 않게 한다. */
+  max-height: 116px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.cond-lint-more {
+  margin-top: 5px;
+  color: var(--text-dim);
+}
+.cond-lint-head {
+  font-weight: 700;
+  color: #e8b567;
+  margin-bottom: 5px;
+}
+.cond-lint-item + .cond-lint-item {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(210, 150, 60, 0.2);
+}
+.cond-lint-cond {
+  font-family: var(--font-mono, monospace);
+  color: var(--text-dim);
+  word-break: break-all;
+}
+.cond-lint-line {
+  margin-left: 6px;
+  opacity: 0.7;
+}
+.cond-lint-msgs {
+  margin: 3px 0 0;
+  padding-left: 16px;
+}
 .cond-summary-box {
   min-height: 50px;
   max-height: 50px;

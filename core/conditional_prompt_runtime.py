@@ -3,6 +3,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from core.conditional.expr_utils import (
+    CHAR_IN_RE as _EXPR_CHAR_IN_RE,
+    CHAR_ON_RE as _EXPR_CHAR_ON_RE,
+    RATING_FUNC_RE as _EXPR_RATING_FUNC_RE,
+    has_operator_shape_defect,
+    matching_paren as _expr_matching_paren,
+    split_by_operator as _expr_split_by_operator,
+    strip_redundant_outer_parens,
+)
 from core.conditional_prompt_settings import (
     get_conditional_prompt_store,
     normalize_conditional_engine_options,
@@ -12,9 +21,11 @@ from core.conditional_tag_split import split_tags_bracket_aware
 
 _WEIGHT_NAI_RE = re.compile(r"^\s*[+-]?\d+(?:\.\d+)?::(.*?)\s*::\s*$")
 _WEIGHT_WEBUI_RE = re.compile(r"^\((.*):[+-]?\d+(?:\.\d+)?\)$")
-_RATING_FUNC_RE = re.compile(r"^(~)?rating\(\s*([eqsg])(?:\s*,\s*source\s*=\s*([^)]+))?\s*\)$", re.IGNORECASE)
-_CHAR_IN_RE = re.compile(r"^(~)?char_in\(\s*(\d+)\s*,\s*(.*?)\s*\)$", re.IGNORECASE)
-_CHAR_ON_RE = re.compile(r"^(~)?char_on\(\s*(\d+)\s*\)$", re.IGNORECASE)
+# 조건 함수 정규식은 expr_utils 의 단일 정의를 쓴다(편집기 파서와 같은 것). 예전엔 여기만
+# 함수명 뒤 공백을 막아서 `rating (g)` 가 편집기에선 함수, 실행에선 일반 태그로 갈렸다.
+_RATING_FUNC_RE = _EXPR_RATING_FUNC_RE
+_CHAR_IN_RE = _EXPR_CHAR_IN_RE
+_CHAR_ON_RE = _EXPR_CHAR_ON_RE
 _CHAR_UC_TARGET_RE = re.compile(r"^(char|uc):(\d+|\*)$", re.IGNORECASE)
 _FUNC_ACTION_RE = re.compile(r"^([A-Za-z_]\w*)\((.*)\)$")
 
@@ -453,55 +464,50 @@ class HeadlessConditionalRuleEngine:
         slots[char_index]["prompt"] = ", ".join(tag for tag in tags if tag)
         self._store_character_overrides(context, slots)
 
-    @staticmethod
-    def _matching_paren(text: str, start: int) -> int:
-        depth = 1
-        for index in range(start + 1, len(text)):
-            if text[index] == "(":
-                depth += 1
-            elif text[index] == ")":
-                depth -= 1
-                if depth == 0:
-                    return index
-        return -1
+    # 괄호 스캐너는 core/conditional/expr_utils 의 단일 구현에 위임한다. 린터·마이그레이션이
+    # 같은 함수를 쓰게 해서 "조건 파서가 둘"인 상태가 다시 생기지 않게 한다.
+    _matching_paren = staticmethod(_expr_matching_paren)
+    _split_by_operator = staticmethod(_expr_split_by_operator)
 
-    @staticmethod
-    def _split_by_operator(expression: str, operator: str) -> list[str]:
-        parts: list[str] = []
-        current: list[str] = []
-        depth = 0
-        for char in expression:
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth = max(0, depth - 1)
-            if char == operator and depth == 0:
-                part = "".join(current).strip()
-                if part:
-                    parts.append(part)
-                current = []
-            else:
-                current.append(char)
-        part = "".join(current).strip()
-        if part:
-            parts.append(part)
-        return parts if len(parts) > 1 else [expression]
+    def _evaluate_logical_expression(self, expression: str, tags: list[str], context,
+                                     legacy_order: bool | None = None) -> bool:
+        """논리식 평가. 기본은 표준 우선순위(`&` 가 `|` 보다 강함).
 
-    def _evaluate_logical_expression(self, expression: str, tags: list[str], context) -> bool:
-        expression = str(expression or "").strip()
+        이전 구현은 `&` 를 먼저 최상위 분할해 `a|b&c` 를 `(a|b)&c` 로 계산했다(표준과 반대).
+        New Editor 의 v2 파서는 표준대로 그려서 화면과 실행이 갈렸다. 잘 형성된 식은 저장
+        스키마 마이그레이션(`migrate_rules_text`)이 명시적 괄호를 넣어 구 의미를 보존한다.
+
+        ``legacy_order`` — **모양이 깨진 식**(`a|&b`)은 구 순서로 평가한다. 구 런타임은 그런
+        식에서 `a|` 같은 *연산자를 품은 리터럴 잎*을 남겼는데, 표준 순서는 최상위 `|` 를 반드시
+        쪼개므로 그 잎을 표현할 문법이 없다 → 괄호 삽입으로는 의미를 보존할 수 없다. 그래서
+        텍스트가 아니라 여기서 옛 순서로 되돌려 기존 출력을 지킨다. 린터가 `cond.operator_shape`
+        경고로 사용자에게 고치라고 알린다.
+        """
+        expression = strip_redundant_outer_parens(expression)
         if not expression:
             return True
-        while expression.startswith("(") and expression.endswith(")"):
-            end = self._matching_paren(expression, 0)
-            if end != len(expression) - 1:
-                break
-            expression = expression[1:-1].strip()
-        and_parts = self._split_by_operator(expression, "&")
-        if len(and_parts) > 1:
-            return all(self._evaluate_logical_expression(part, tags, context) for part in and_parts)
+        if legacy_order is None:
+            legacy_order = has_operator_shape_defect(expression)
+
+        if legacy_order:
+            and_parts = self._split_by_operator(expression, "&")
+            if len(and_parts) > 1:
+                return all(self._evaluate_logical_expression(part, tags, context, True)
+                           for part in and_parts)
+            or_parts = self._split_by_operator(expression, "|")
+            if len(or_parts) > 1:
+                return any(self._evaluate_logical_expression(part, tags, context, True)
+                           for part in or_parts)
+            return self._evaluate_single_condition(expression, tags, context)
+
         or_parts = self._split_by_operator(expression, "|")
         if len(or_parts) > 1:
-            return any(self._evaluate_logical_expression(part, tags, context) for part in or_parts)
+            return any(self._evaluate_logical_expression(part, tags, context, False)
+                       for part in or_parts)
+        and_parts = self._split_by_operator(expression, "&")
+        if len(and_parts) > 1:
+            return all(self._evaluate_logical_expression(part, tags, context, False)
+                       for part in and_parts)
         return self._evaluate_single_condition(expression, tags, context)
 
     def _evaluate_single_condition(self, condition: str, tags: list[str], context) -> bool:

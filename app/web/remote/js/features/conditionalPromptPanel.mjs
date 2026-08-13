@@ -712,6 +712,7 @@ export function createConditionalPromptPanel({
             <textarea class="mod-textarea cond-rules-input" id="condRulesInput" data-cond-rule-key="${activeRuleKey}" placeholder="(condition):action&#10;# comment lines ignored" oninput="onCondRulesInput(this)" onscroll="syncCondScroll(this)">${escHtml(activeRules)}</textarea>
           </div>
         </div>
+        ${renderLint(m)}
         ${renderSyntaxGuide()}
         ${m.can_test_rules ? `<div>
           <button class="mod-action-btn mod-start" data-cond-action="test-rules">Test Rules</button>
@@ -723,6 +724,30 @@ export function createConditionalPromptPanel({
       </div>`;
   }
 
+  // 백엔드 lint 결과를 배지로 그린다. 규칙을 막지는 않는다 — 이미 그런 규칙을 돌리고 있는
+  // 사용자의 출력을 바꾸지 않으려고 차단 대신 알림만 하는 설계(core/conditional/lint.py).
+  function renderLint(m) {
+    const findings = Array.isArray(m && m.lint) ? m.lint : [];
+    if (!findings.length) return '';
+    // 부모가 고정 높이 + overflow:hidden 이라 목록이 길면 편집기와 하단 버튼을 밀어낸다.
+    // 표시는 앞쪽 몇 건만, 나머지는 개수로 요약한다(박스 자체도 CSS에서 스크롤).
+    const MAX_SHOWN = 5;
+    const shown = findings.slice(0, MAX_SHOWN);
+    const hidden = findings.length - shown.length;
+    const items = shown.map(f => {
+      const warns = (f.warnings || []).map(w => `<li>${escHtml(w.message || '')}</li>`).join('');
+      return `<div class="cond-lint-item">
+          <div class="cond-lint-cond">(${escHtml(f.condition || '')})<span class="cond-lint-line">line ${escHtml(String(f.line || ''))}</span></div>
+          <ul class="cond-lint-msgs">${warns}</ul>
+        </div>`;
+    }).join('');
+    const more = hidden > 0 ? `<div class="cond-lint-more">…외 ${hidden}건</div>` : '';
+    return `<div class="cond-lint-box">
+        <div class="cond-lint-head">⚠ 항상 참/거짓이 되는 조건 ${findings.length}건 — 규칙은 그대로 실행됩니다</div>
+        ${items}${more}
+      </div>`;
+  }
+
   function renderSyntaxGuide() {
     return `
       <div>
@@ -730,8 +755,9 @@ export function createConditionalPromptPanel({
           Syntax Guide <span class="mod-collapse-arrow">▶</span>
         </div>
         <div class="collapsed" style="font-size:10px;color:var(--text-dim);line-height:1.5;padding:6px 0">
-          <b>Condition:</b> tag, ~tag (NOT), *tag (exact), e|q|s|g (rating)<br>
-          <b>Logic:</b> &amp; (AND), | (OR), () grouping<br>
+          <b>Condition:</b> tag (포함), *tag (정확히 일치), ~tag (포함 안 함), <b>~!tag (정확히 일치 안 함)</b>, e|q|s|g (rating)<br>
+          <span style="color:var(--text-dim)">※ <code>!tag</code> 는 <code>*tag</code> 의 별칭입니다. <code>~*</code> 나 <code>~(…)</code> 는 문법이 아니라 <b>항상 참</b>이 됩니다 — 그룹 부정 대신 <code>(~!a &amp; ~!b)</code> 로 쓰세요.</span><br>
+          <b>Logic:</b> &amp; (AND), | (OR), () grouping — <code>&amp;</code> 가 <code>|</code> 보다 먼저 묶입니다(<code>a|b&amp;c</code> = <code>a|(b&amp;c)</code>). 섞어 쓸 땐 괄호를 권장합니다.<br>
           <b>Actions:</b> main+=tag, prefix+=tag, postfix+=tag, old=new<br>
           <b>Character:</b> char_set(N, enabled), char:N+=tag, uc:N=value
         </div>
@@ -748,6 +774,7 @@ export function createConditionalPromptPanel({
         ${renderModeBar(m)}
         <input type="hidden" id="condEditorMode" value="${escapeAttr(m.editor_mode)}">
         <div class="cond-summary-box" id="condSelectedSummary">${escHtml(selected ? `${describeCondition(selected.condition)} → ${describeAction(selected.action)}` : '선택한 규칙 요약이 여기에 표시됩니다.')}</div>
+        ${renderLint(m)}
         <div class="cond-v2-grid">
           ${m.can_manage_presets ? renderPresetPane(m) : ''}
           ${renderRuleListPane(book)}
@@ -1605,6 +1632,9 @@ export function createConditionalPromptPanel({
     delete rest.rules_v2;
     delete rest.rules_v2_book;
     delete rest.raw_dsl;
+    // lint 도 규칙 텍스트에서 파생된다 — 타이핑 중 경고가 하나 늘고 줄 때마다 시그니처가
+    // 바뀌면 위 가드가 무력해져 포커스/캐럿이 날아간다(같은 회귀 계열).
+    delete rest.lint;
     // module_state_payload nests a FULL copy of the state under `state` (in addition to
     // flattening it at top level). Deleting only top-level rule fields above leaves the
     // churning rules_v2_book (fresh uuids) inside rest.state — which alone destabilises the

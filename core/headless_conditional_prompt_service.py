@@ -87,6 +87,18 @@ class HeadlessConditionalPromptService:
                 "rules": [],
             }
 
+    @staticmethod
+    def _lint(rules_text: str) -> list[dict[str, Any]]:
+        """죽은 조건(`~*tag`, `~(...)`, 빈 피연산자 …) 경고. **규칙을 막지 않는다** —
+        이미 그런 규칙이 돌고 있는 설치본의 출력을 바꾸지 않으려고 차단 대신 알림만 한다."""
+        try:
+            from core.conditional.lint import lint_rules_text
+
+            return lint_rules_text(rules_text or "")
+        except Exception as exc:
+            print(f"Remote: conditional lint failed - {exc}")
+            return []
+
     # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
@@ -113,6 +125,7 @@ class HeadlessConditionalPromptService:
             "rules_legacy": rules_legacy,
             "rules_v2": rules_v2,
             "rules_v2_book": self._rulebook_dict_from_dsl(rules_v2, engine_options),
+            "lint": self._lint(active_rules),
             "engine_options": engine_options,
             "active_preset": str(settings.get("active_preset") or ""),
             "presets": self._preset_infos(),

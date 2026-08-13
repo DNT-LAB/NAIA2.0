@@ -10,6 +10,12 @@ DEFAULT_CONDITIONAL_ENGINE_OPTIONS = {
     "stop_on_match": False,
 }
 
+# 조건식 연산자 우선순위 스키마. 0 = 우선순위 수정 이전(구 런타임이 `&` 를 먼저 분할하던 시절)
+# 저장분. 1 = 표준 우선순위 기준으로 해석해도 되는 텍스트. **로드 시점에 0 인 파일에만** 괄호
+# 마이그레이션을 태운다 — 저장 때마다 태우면 사용자가 새로 입력한 `a|b&c`(표준 의미)까지
+# 옛 의미로 되돌려버린다.
+PRECEDENCE_SCHEMA = 1
+
 DEFAULT_CONDITIONAL_SETTINGS = {
     "enabled": False,
     "rules": "",
@@ -17,6 +23,7 @@ DEFAULT_CONDITIONAL_SETTINGS = {
     "editor_mode": "legacy",
     "engine_options": dict(DEFAULT_CONDITIONAL_ENGINE_OPTIONS),
     "active_preset": None,
+    "precedence_schema": PRECEDENCE_SCHEMA,
 }
 
 
@@ -70,12 +77,56 @@ def normalize_conditional_engine_options(raw: Any = None) -> dict[str, Any]:
     }
 
 
+def migrate_precedence_payload(payload: Any) -> Any:
+    """저장 파일이 우선순위 수정 **이전** 스키마일 때만 1회 괄호 마이그레이션.
+
+    구 런타임은 최상위 `&` 를 먼저 분할해 `a|b&c` 를 `(a|b)&c` 로 계산했다. 표준 우선순위로
+    고친 뒤에도 기존 규칙의 결과가 바뀌지 않도록 명시적 괄호를 넣는다.
+
+    **로드 경로에서만** 호출해야 한다. 저장 경로에서도 돌리면 사용자가 새 규칙으로 입력한
+    `a|b&c`(안내대로라면 `a|(b&c)`)까지 구 의미로 되돌아간다.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    try:
+        schema = int(payload.get("precedence_schema", 0))
+    except Exception:
+        schema = 0
+    if schema >= PRECEDENCE_SCHEMA:
+        return payload
+    try:
+        from core.conditional.lint import migrate_rules_text
+
+        migrated = dict(payload)
+        rewritten = False
+        for key in ("rules", "rules_v2"):
+            text = str(migrated.get(key, "") or "")
+            if not text:
+                continue
+            updated = migrate_rules_text(text)
+            if updated != text:
+                rewritten = True
+            migrated[key] = updated
+        migrated["precedence_schema"] = PRECEDENCE_SCHEMA
+    except Exception as exc:  # 마이그레이션 실패가 설정 로드를 막으면 안 된다
+        print(f"Conditional Prompt precedence migration skipped: {exc}")
+        return payload
+    if rewritten:
+        print("Conditional Prompt: mixed &/| rules rewritten with explicit parentheses (behavior preserved)")
+    return migrated
+
+
 def normalize_conditional_settings(raw: Any = None) -> dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
     settings = copy.deepcopy(DEFAULT_CONDITIONAL_SETTINGS)
     settings["enabled"] = bool(source.get("enabled", settings["enabled"]))
     settings["rules"] = str(source.get("rules", "") or "")
     settings["rules_v2"] = str(source.get("rules_v2", "") or "")
+    try:
+        schema = int(source.get("precedence_schema", PRECEDENCE_SCHEMA))
+    except Exception:
+        schema = PRECEDENCE_SCHEMA
+    settings["precedence_schema"] = max(0, min(PRECEDENCE_SCHEMA, schema))
     editor_mode = str(source.get("editor_mode", settings["editor_mode"]) or "legacy")
     settings["editor_mode"] = editor_mode if editor_mode in {"legacy", "v2"} else "legacy"
     settings["engine_options"] = normalize_conditional_engine_options(source.get("engine_options"))
@@ -95,7 +146,8 @@ def load_conditional_settings(mode: Any = None, *, save_root: Path | str | None 
         print(f"Conditional Prompt settings load failed: {exc}")
         return normalize_conditional_settings()
     payload = data.get(mode_key, {}) if isinstance(data, dict) else {}
-    return normalize_conditional_settings(payload)
+    # 구 스키마 파일에만 1회 적용 — 저장 경로(normalize/save)에서는 절대 돌리지 않는다.
+    return normalize_conditional_settings(migrate_precedence_payload(payload))
 
 
 def save_conditional_settings(

@@ -30,12 +30,15 @@ from core.conditional.block_model import (
 # 정규식 — `conditional_prompt_module.py` 와 호환 유지
 # ============================================================================
 
-_RATING_FUNC_RE = re.compile(
-    r'^(~?)rating\s*\(\s*([eqsg])\s*'
-    r'(?:,\s*source\s*=\s*(auto|row|override|bayes)\s*)?\)$'
+# 조건 함수 정규식은 런타임과 **같은 객체**를 쓴다(core/conditional/expr_utils). 예전엔 여기만
+# 함수명 뒤 공백을 허용하고 대소문자를 구분했고 source 를 4종으로 제한해서, `rating (g)` /
+# `RATING(G)` / `source=bogus` 가 편집기와 실행에서 서로 다르게 해석됐다.
+from core.conditional.expr_utils import (  # noqa: E402
+    CHAR_IN_RE as _CHAR_IN_RE,
+    CHAR_ON_RE as _CHAR_ON_RE,
+    KNOWN_RATING_SOURCES as _KNOWN_RATING_SOURCES,
+    RATING_FUNC_RE as _RATING_FUNC_RE,
 )
-_CHAR_IN_RE = re.compile(r'^(~?)char_in\s*\(\s*(\d+)\s*,\s*(.+?)\s*\)$')
-_CHAR_ON_RE = re.compile(r'^(~?)char_on\s*\(\s*(\d+)\s*\)$')
 _FUNC_ACTION_RE = re.compile(r'^([a-z_]+)\s*\(\s*(.*)\s*\)$', re.DOTALL)
 _CHAR_UC_TARGET_RE = re.compile(r'^(char|uc):(\d+|\*)$')
 
@@ -189,12 +192,14 @@ def _parse_leaf(text: str) -> ConditionNode:
     m = _RATING_FUNC_RE.match(text)
     if m:
         negated = m.group(1) == "~"
-        source: RatingSource = m.group(3) or "auto"  # type: ignore[assignment]
+        # 런타임 `_rating_from_context` 가 모르는 source 를 auto 로 취급하므로 여기서도 같게 접는다.
+        raw_source = (m.group(3) or "auto").strip().lower()
+        source: RatingSource = raw_source if raw_source in _KNOWN_RATING_SOURCES else "auto"  # type: ignore[assignment]
         return ConditionNode(
             kind="leaf",
             leaf_kind="rating",
             negated=negated,
-            rating_value=m.group(2),
+            rating_value=m.group(2).lower(),
             rating_source=source,
         )
 
@@ -251,13 +256,20 @@ def _parse_leaf(text: str) -> ConditionNode:
 
 
 def _parse_tag_modifier(text: str) -> Tuple[TagModifier, str]:
-    """'~!foo' / '~foo' / '*foo' / 'foo' 접두사 해석 → (modifier, tag)."""
+    """'~!foo' / '~foo' / '*foo' / '!foo' / 'foo' 접두사 해석 → (modifier, tag).
+
+    `!foo` 는 런타임(`_evaluate_single_condition`)이 예전부터 정확 일치로 실행해 온 별칭인데
+    여기에 분기가 없어서 편집기만 `'!foo'` 라는 이름의 태그를 contains 로 그렸다. 직렬화는
+    exact 를 `*` 로 쓰므로 왕복하면 `*foo` 로 정규화된다.
+    """
     t = text.strip()
     if t.startswith("~!"):
         return "not_exact", t[2:].strip()
     if t.startswith("~"):
         return "not_contains", t[1:].strip()
     if t.startswith("*"):
+        return "exact", t[1:].strip()
+    if t.startswith("!"):
         return "exact", t[1:].strip()
     return "contains", t
 

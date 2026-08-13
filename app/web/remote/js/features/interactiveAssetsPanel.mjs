@@ -1246,6 +1246,11 @@ export function createInteractiveAssetsPanel({
     showToast(scope.partial
       ? `${target.label} <- ${charLabel(row)} (${scope.sel.size}/${scope.items.length}칸)`
       : `${target.label} <- ${charLabel(row)}`, 'success');
+    // **꽂았으면 닫는다**(사용자 지정 2026-08-13). 이 팝업은 '무엇을 꽂을지 고르는'
+    // 자리라 고르고 나면 할 일이 없는데, 왼쪽 슬롯을 그대로 덮고 있어 방금 넣은
+    // 결과를 보려면 손으로 닫아야 했다. 실패 경로는 위에서 이미 return 했으므로
+    // 여기 닿았다는 것은 성공했다는 뜻이다 - 실패하면 열어 둔 채로 다시 누를 수 있다.
+    closePreview();
   }
 
   /** 바깥(주로 결과 이미지)을 누르면 접는다. 예전에는 Assets 버튼을 다시 찾아

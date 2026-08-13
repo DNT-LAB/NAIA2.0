@@ -37,6 +37,10 @@ BACKEND = [
     "app/backend/server/headless_lifespan.py",
     "core/api_service.py",
     "data/interactive_thumbnails.json",
+    # 조언 카드(함께 쓰는 것 / 같이 쓰지 않습니다)의 유일한 근거. 릴리즈
+    # 매니페스트에서 빠져 있어 배포판에는 아예 없었다(2026-08-13).
+    "app/backend/server/interactive_advice_routes.py",
+    "data/interactive_clothing_harmony.json",
 ]
 FRONTEND = [
     "app/web/remote/app.js",
@@ -46,7 +50,6 @@ FRONTEND = [
     "app/web/remote/js/features/interactivePanel.mjs",
     "app/web/remote/js/features/interactiveScenePanel.mjs",
     "app/web/remote/js/features/interactiveAssetsPanel.mjs",
-    "app/web/remote/js/features/interactiveBrowse.mjs",
     "app/web/remote/js/features/interactiveAutocomplete.mjs",
     "app/web/remote/js/features/tagAssist.mjs",
 ]

@@ -40,6 +40,13 @@ SCAN_DIRS = ("core", "app/backend")
 _PAT = re.compile(r'(?:repo_root|_ROOT|REPO_ROOT|ROOT)\s*/\s*"([^"]+)"'
                   r'(?:\s*/\s*"([^"]+)")?')
 
+# 위 패턴은 루트 식별자 **바로 뒤**에 리터럴이 붙은 형태만 잡는다. 상대 경로를
+# 모듈 상수로 빼고 `Path(repo_root) / CONST` 로 조립하면 통째로 샌다 — 실제로
+# `data/interactive_clothing_harmony.json` 이 그렇게 새서 배포판에서 조언이
+# 통째로 죽어 있었다(2026-08-13). 그래서 `Path("a") / "b" / ...` 형태도 잡는다.
+_PAT_CONST = re.compile(r'Path\(\s*"([^"]+)"\s*\)((?:\s*/\s*"[^"]+")*)')
+_SEG = re.compile(r'"([^"]+)"')
+
 # 배포판에 없어도 되는 것 — 이유를 반드시 적는다.
 ALLOWED_MISSING = {
     "artist_thumb": "런타임 경로로 덮어쓴다(legacy_* 는 폴백)",
@@ -54,6 +61,10 @@ ALLOWED_MISSING = {
     "path": "문자열 파싱 오탐",
     "core": "코드 디렉터리",
     "data": "디렉터리 자체",
+    ".": "문자열 파싱 오탐 — 로그 경로 최후 폴백(cwd)",
+    "data/tags": "런타임 다운로드 (매니페스트 exclude: local_downloaded_assets)",
+    "output": "사용자 출력 폴더 — 런타임 생성",
+    "save": "사용자 저장 폴더 — 런타임 생성",
 }
 
 
@@ -91,10 +102,13 @@ def main() -> int:
                                      .splitlines(), 1):
                 if line.lstrip().startswith("#"):
                     continue
+                where = f"{p.relative_to(ROOT).as_posix()}:{i}"
                 for m in _PAT.finditer(line):
                     rel = m.group(1) + ("/" + m.group(2) if m.group(2) else "")
-                    found.setdefault(rel, []).append(
-                        f"{p.relative_to(ROOT).as_posix()}:{i}")
+                    found.setdefault(rel, []).append(where)
+                for m in _PAT_CONST.finditer(line):
+                    segs = [m.group(1), *_SEG.findall(m.group(2) or "")]
+                    found.setdefault("/".join(segs), []).append(where)
 
     bad = []
     for rel in sorted(found):

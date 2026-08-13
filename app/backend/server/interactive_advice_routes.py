@@ -39,6 +39,16 @@ class _HarmonyPack:
         self._lock = threading.Lock()
         self._data: dict[str, Any] = {}
         self._mtime: float | None = None
+        self._warned = False
+
+    def _warn_once(self, why: str) -> None:
+        # 조용히 {} 로 삼키면 조언 카드가 통째로 사라지고도 에러가 안 난다.
+        # 실제로 이 파일이 릴리즈 매니페스트에서 빠져 배포판에서 조언이 죽어
+        # 있었는데 아무 신호도 없었다(2026-08-13). 한 번은 소리를 내야 한다.
+        if self._warned:
+            return
+        self._warned = True
+        print(f"[interactive-advice] harmony unavailable ({why}): {self._path}")
 
     def _load_locked(self) -> None:
         try:
@@ -46,15 +56,17 @@ class _HarmonyPack:
         except OSError:
             self._data = {}
             self._mtime = None
+            self._warn_once("missing")
             return
         if self._mtime == stat.st_mtime and self._data:
             return
         try:
             self._data = json.loads(self._path.read_text(encoding="utf-8"))
             self._mtime = stat.st_mtime
-        except (OSError, ValueError):
+        except (OSError, ValueError) as exc:
             self._data = {}
             self._mtime = None
+            self._warn_once(type(exc).__name__)
 
     def get(self) -> dict[str, Any]:
         with self._lock:

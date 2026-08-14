@@ -24092,3 +24092,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   border: 1px solid rgba(120,140,255,.26);
 }
 .ia-combo-all:hover { background: rgba(120,140,255,.24); }
+
+/* 조합 모델 번들(179MB)을 배경으로 받는 동안의 안내. 카드 자리를 미리 잡아
+   두어야 나중에 카드가 갑자기 끼어들며 사용자가 누른 것을 밀지 않는다. */
+.ia-combo-wait {
+  font-size: 11px; line-height: 1.6; opacity: .72;
+  padding: 8px 6px; text-align: center;
+}

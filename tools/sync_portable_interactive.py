@@ -45,6 +45,16 @@ BACKEND = [
     "data/interactive_tag_harmony.json",
     # 일반 seed 에 성인 후보를 붙이지 않는 판정표. 없으면 의상 층이 걸러지지 않는다.
     "data/interactive_adult_tags.json",
+    # 태그 조합 추천. 모델 번들(179MB)은 런타임 다운로드라 여기 없다 -
+    # core/tag_combo/download.py 가 받는다.
+    "core/tag_combo/__init__.py",
+    "core/tag_combo/person.py",
+    "core/tag_combo/model.py",
+    "core/tag_combo/query.py",
+    "core/tag_combo/bundle.py",
+    "core/tag_combo/download.py",
+    "core/tag_combo/service.py",
+    "app/backend/server/tag_combo_routes.py",
 ]
 FRONTEND = [
     "app/web/remote/app.js",

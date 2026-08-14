@@ -4659,6 +4659,59 @@ export function createInteractivePanel({
   const comboCache = new Map();
   let comboLast = null;
 
+  // ── 모델 번들 배경 다운로드 ────────────────────────────────────────────
+  // 179MB 라 첫 진입을 막으면 안 된다. 배경으로 받고 추천 영역에 진행을 적는다.
+  // 조합 카드가 없어도 나머지 기능은 전부 돈다.
+  let comboDl = null;          // 마지막 상태(null = 아직 안 물어봄)
+  let comboDlTimer = 0;
+
+  function comboDlText() {
+    if (!comboDl) return '';
+    const s = comboDl.state;
+    if (s === 'ready' || (comboDl.groups || []).length) return '';
+    if (!comboDl.configured) return '';        // 배포 전 - 아무 말도 하지 않는다
+    if (s === 'downloading') {
+      const pct = comboDl.percent || 0;
+      const mb = Math.round((comboDl.received || 0) / 1e6);
+      const tot = Math.round((comboDl.total || 0) / 1e6);
+      const eta = comboDl.etaSec;
+      const when = eta > 90 ? ` · 약 ${Math.round(eta / 60)}분 남음`
+        : (eta ? ` · 약 ${eta}초 남음` : '');
+      return `추천 데이터를 내려받는 중입니다 ${pct}% (${mb}/${tot}MB)${when}`;
+    }
+    if (s === 'verifying') return '내려받은 데이터를 확인하는 중입니다';
+    if (s === 'error') return '추천 데이터를 받지 못했습니다. 잠시 후 다시 시도합니다';
+    return '';
+  }
+
+  async function comboDlPoll() {
+    try {
+      const r = await fetch('/api/tag-combo/download/status');
+      comboDl = await r.json();
+    } catch { return; }
+    const busy = comboDl && (comboDl.state === 'downloading'
+      || comboDl.state === 'verifying');
+    if (busy) {
+      // 받는 동안만 폴링한다. 끝나면 멈춘다 — 유휴 상태에서 계속 두드리지 않는다.
+      clearTimeout(comboDlTimer);
+      comboDlTimer = setTimeout(() => { comboDlPoll(); renderAside(); }, 2000);
+    } else if (comboDl && comboDl.state === 'ready') {
+      comboCache.clear();      // 이제 답이 나온다 — 빈 답 캐시를 버린다
+    }
+  }
+
+  /** Interactive 를 열 때 한 번. 이미 있거나 받는 중이면 서버가 무시한다. */
+  async function comboDlEnsure() {
+    if (comboDl) return;
+    try {
+      const r = await fetch('/api/tag-combo/download', { method: 'POST' });
+      comboDl = await r.json();
+    } catch { return; }
+    if (comboDl && (comboDl.state === 'downloading' || comboDl.state === 'verifying')) {
+      comboDlPoll();
+    }
+  }
+
   /** 활성 캐릭터 수 -> 인원 그룹.
    *
    * 서버는 태그에서 그룹을 유도할 수 있지만, 슬롯 팝업의 태그에는 인원 태그가
@@ -5071,7 +5124,14 @@ export function createInteractivePanel({
     // 인원 수를 바꾸면 다른 모델이 붙는다(core/tag_combo).
     const combo = await fetchCombos(currentTags());
     if (seq !== asideSeq || !panelContext) return;
-    if (combo && combo.combos && combo.combos.length) {
+    const dlMsg = comboDlText();
+    if (dlMsg) {
+      // 받는 동안에도 자리를 잡아 둔다 — 나중에 카드가 갑자기 끼어들면
+      // 사용자가 방금 누른 것이 밀린다.
+      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">인기 조합' +
+        '<span class="ia-aside-count">준비 중</span></div>' +
+        `<div class="ia-combo-wait">${escHtml(dlMsg)}</div></div>`);
+    } else if (combo && combo.combos && combo.combos.length) {
       const note = combo.weak ? ' 대략' : '';
       parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">인기 조합' +
         `<span class="ia-aside-count">${escHtml(combo.group || '')}${note}</span></div>` +
@@ -7414,6 +7474,10 @@ export function createInteractivePanel({
     void fetch('/api/interactive-advice/batch?tags=').catch(() => {});
     // 팩 인덱스(161KB)도 미리. 이게 있어야 그리드가 텍스트 셀 대신 그림으로 뜬다.
     void loadThumbIndex().catch(() => {});
+    // 조합 모델 번들(179MB)은 **배경으로** 받는다. 여기서 기다리지 않는다 —
+    // 조합 카드가 없어도 나머지 기능은 전부 돈다. 받는 동안 추천 영역이
+    // 진행 상황을 적는다(comboDlText).
+    void comboDlEnsure();
   }
 
   function setActive(next, {silent = false} = {}) {

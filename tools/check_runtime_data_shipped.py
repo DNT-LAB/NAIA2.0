@@ -63,6 +63,9 @@ ALLOWED_MISSING = {
     "data": "디렉터리 자체",
     ".": "문자열 파싱 오탐 — 로그 경로 최후 폴백(cwd)",
     "data/tags": "런타임 다운로드 (매니페스트 exclude: local_downloaded_assets)",
+    "data/tag_combo": "런타임 다운로드 — 조합 모델 번들 179MB. Interactive 를 열 때 "
+                      "core/tag_combo/download.py 가 배경으로 받는다. 릴리즈 zip 에 "
+                      "넣으면 289MB 가 468MB 가 된다",
     "output": "사용자 출력 폴더 — 런타임 생성",
     "save": "사용자 저장 폴더 — 런타임 생성",
 }

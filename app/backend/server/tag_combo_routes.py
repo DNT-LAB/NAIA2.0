@@ -92,3 +92,29 @@ def register_tag_combo_routes(app: FastAPI, context: Any, *,
                 return {"available": [], "error": type(exc).__name__}
 
         return JSONResponse(await _offload(_run))
+
+    @app.post("/api/tag-combo/download")
+    async def tag_combo_download():   # noqa: ANN202
+        """Interactive 를 열 때 프론트가 한 번 부른다.
+
+        이미 있거나 받는 중이면 아무것도 하지 않는다 - 재진입/여러 탭에서 반복
+        호출해도 안전하다. 179MB 라 **배경으로** 받고 상태만 돌려준다.
+        """
+        def _run() -> dict[str, Any]:
+            try:
+                return _service().ensure_bundle()
+            except Exception as exc:      # noqa: BLE001
+                _log_once(f"download start failed: {type(exc).__name__}: {exc}")
+                return {"state": "error", "error": type(exc).__name__}
+
+        return JSONResponse(await _offload(_run))
+
+    @app.get("/api/tag-combo/download/status")
+    async def tag_combo_download_status():   # noqa: ANN202
+        def _run() -> dict[str, Any]:
+            try:
+                return _service().download_status()
+            except Exception as exc:      # noqa: BLE001
+                return {"state": "error", "error": type(exc).__name__}
+
+        return JSONResponse(await _offload(_run))

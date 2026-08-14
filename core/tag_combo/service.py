@@ -18,12 +18,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .bundle import ComboBundle
+from .download import BUNDLE_NAME, BundleDownloader
 from .model import ComboModel
 from .person import PERSON_GROUPS, person_group_of
 from .query import ComboQuery, Policy
 
 DEFAULT_BUDGET = 400 * 1024 * 1024      # 상주 모델 합계 상한
-BUNDLE_NAME = "tag_combo.ncsb"          # 배포판이 내려받는 단일 파일
 
 
 class ComboService:
@@ -36,6 +36,23 @@ class ComboService:
         self._lock = threading.Lock()
         self._bundle: ComboBundle | None = None
         self._bundle_bad = ""
+        self.downloader = BundleDownloader(self.dir)
+
+    # ---- 다운로드 ----------------------------------------------------
+    def ensure_bundle(self) -> dict:
+        """Interactive 를 열 때 부른다. 이미 있으면 아무것도 안 한다."""
+        st = self.downloader.start()
+        if st.get("state") == "ready" and self._bundle is None:
+            self._bundle_bad = ""      # 방금 받았으면 옛 실패 기록을 지운다
+        return st
+
+    def download_status(self) -> dict:
+        st = self.downloader.status()
+        st["loose"] = [g for g in PERSON_GROUPS if (self.dir / f"{g}.ncsr").exists()]
+        st["groups"] = self.available()
+        if self._bundle_bad:
+            st["bundleError"] = self._bundle_bad
+        return st
 
     # ---- 모델 --------------------------------------------------------
     def bundle(self) -> ComboBundle | None:

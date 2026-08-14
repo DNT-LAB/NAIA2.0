@@ -471,3 +471,82 @@ MAIN/AUX 라벨을 예외 없이 일관되게 판정할 수 없으면 멈춘다.
   `clothing_normalizer.py`(색·무늬 접두 제거, Region 커버리지 62%→85.8%).
 - Event Preset 의 메인/보조 인코딩 4종 — `is_event` 플래그, 0.9 승격 문턱,
   의존성 대괄호, 프롬프트 조립 순서.
+
+---
+
+## 9. 의상-신체-액션 — 조사했고, 지금은 만들지 않기로 했다 (2026-08-14)
+
+사용자 지적: **"사용자들은 의상-신체-액션 등을 어려워한다. 기존 연구에서 상태
+조사를 했던 게 그런 이유다."** state_system 이 상태 분류를 시도한 동기가 이것이다.
+
+### 9.1 내가 문제라고 봤던 것
+
+`see-through -> nipples` 가 lift 1.82 로 게이트(2.0)에 탈락하는데,
+`turtleneck leotard -> large breasts` 도 lift 1.82 다. 통계적으로 같은데 하나는
+인과이고 하나는 배경이니 문턱으로는 못 가른다고 봤다.
+
+### 9.2 그 논증은 대체로 틀렸다 (Codex 라운드, 전문 codex_clothing_body_action.md)
+
+**런타임은 이미 잡고 있다.** 실제 출력:
+
+    crop top       563x  navel + stomach + midriff
+    thighhighs     898x  black thighhighs + miniskirt + zettai ryouiki
+    garter belt     34x  black bra + underwear only + lingerie
+    see-through    170x  wet + wet shirt + bra visible through clothes
+                   121x  covered nipples + wet + wet clothes
+
+내가 "신체 0/15" 로 읽은 것은 `zettai ryouiki` 가 `cloth_legwear`,
+`lingerie` 가 `cloth_revealing` 축이라 내 신체 분류기가 안 센 것이었다.
+
+오류 넷:
+
+1. `see-through -> nipples` 는 **내 기준으로도 함의가 아니다** - conf 0.118,
+   see-through 게시물의 88.2% 에 nipples 가 없다. 런타임이 내는
+   `bra visible through clothes` / `covered nipples` 가 더 정확하다.
+2. `sleeveless shirt -> collarbone` 은 **사실이 아니다** - RR 0.94.
+   실제 결과는 `bare shoulders`(2.66) · `bare arms`(3.28) 이고 이미 통과한다.
+3. `see-through` 는 `fx_effect` 축이라 내 의상->신체 스캔 4,388쌍에 **애초에
+   없었다.** 대표 예시가 집계 밖이었다.
+4. **프로브를 런타임이라고 착각했다** - 게이트 하나만 걸고 튜플 조립도 헤드
+   캐시도 안 태웠다. 이 세션에서 같은 실수를 두 번째로 했다(Codex 게이트에서
+   24/120 불일치로 한 번 잡혔다).
+
+### 9.3 남는 것 - 인과와 배경을 가르는 방법
+
+**같은 범주의 형제와 비교한다**(전체 코퍼스가 아니라):
+
+| 대조 | 결과 | 처치 | 대조 | RR |
+|---|---|---:|---:|---:|
+| see-through shirt vs 다른 shirt | nipples | 0.081 | 0.029 | **2.76** |
+| see-through dress vs 다른 dress | nipples | 0.095 | 0.018 | **5.43** |
+| turtleneck shirt vs 다른 shirt | large breasts | 0.175 | 0.180 | **0.97** |
+| crop top vs 다른 상의 | midriff | | | **16.4** |
+| sleeveless shirt vs 다른 shirt | collarbone | | | **0.94** |
+
+lift 로 1.82 대 1.82 이던 것이 2.76 대 0.97 로 갈린다. 다만 관찰 자료라
+역인과(작가가 속옷을 그려서 `see-through` 가 붙는다)를 배제하지 못하므로
+**후보 채굴용**이지 물리 증명이 아니다.
+
+### 9.4 방향 - 지금은 온톨로지를 만들지 않는다
+
+- 통계가 이미 대부분 잡는다. 내가 든 반례 셋 중 둘이 틀렸다.
+- 큐레이션 자산은 노출 방향을 안 담는다: `clothing_event.json` 316건은
+  `tag`/`garment_noun`/`region` 뿐이고 신체 출력 필드가 **0개**,
+  `exposing` 카테고리는 **3개**(bra peek / leotard peek / leotard peel),
+  `navel`·`midriff`·`bare shoulders`·`zettai ryouiki` 는 미등록이다.
+  즉 "기존 파일의 곱" 으로는 안 되고 **새 온톨로지**가 필요한데, 그게
+  state_system 이 실패한 지점이다.
+- 관계는 하나가 아니라 셋이고 화살표가 다르다(실측):
+  의상->가시성 1,326쌍 / 의상->액션 **0쌍**(conf>=0.30) / 자세->가시성 212쌍.
+  액션은 의상을 **함의하는 쪽**이다(`bra pull -> bra`, 큐레이션 55건).
+
+**다음 관문은 코드가 아니라 오라클 테스트다.** 사람이 완벽한 답을 줘도
+사용자가 빨라지지 않으면 어떤 엔진도 소용없다. 정지 조건:
+최종 프롬프트까지 시간 개선 20% 미만 · 의도한 노출 상태 정확도 개선 15%p 미만 ·
+오라클 제안 거부율 10% 초과 · 재사용 과제에서 이득 없음.
+
+### 9.5 문서 오류 정정
+
+SPEC 7 이 `.experimental/2025/state_system` 을 로컬 자산처럼 참조하는데,
+**이 체크아웃(C:\VNR\DEV\NAIA2.0)에는 없다.** 원본은 `C:\VNR\NAIA2.0` 에 있다.
+재사용할 것이 있으면 추적되는 생성물로 승격해야 한다.

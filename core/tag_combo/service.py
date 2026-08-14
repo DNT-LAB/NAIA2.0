@@ -17,11 +17,13 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Iterable
 
+from .bundle import ComboBundle
 from .model import ComboModel
 from .person import PERSON_GROUPS, person_group_of
 from .query import ComboQuery, Policy
 
 DEFAULT_BUDGET = 400 * 1024 * 1024      # 상주 모델 합계 상한
+BUNDLE_NAME = "tag_combo.ncsb"          # 배포판이 내려받는 단일 파일
 
 
 class ComboService:
@@ -32,10 +34,35 @@ class ComboService:
         self.policy = policy or Policy()
         self._lru: "OrderedDict[str, tuple[ComboModel, ComboQuery]]" = OrderedDict()
         self._lock = threading.Lock()
+        self._bundle: ComboBundle | None = None
+        self._bundle_bad = ""
 
     # ---- 모델 --------------------------------------------------------
+    def bundle(self) -> ComboBundle | None:
+        """배포판이 내려받은 단일 파일. 없거나 깨졌으면 None.
+
+        느슨한 `.ncsr` 이 있으면 그쪽이 우선이다 - 개발 중에 방금 구운 모델을
+        두고 옛 번들을 읽으면 뭘 고쳤는지 알 수 없다.
+        """
+        if self._bundle is not None or self._bundle_bad:
+            return self._bundle
+        p = self.dir / BUNDLE_NAME
+        if not p.exists():
+            return None
+        try:
+            self._bundle = ComboBundle(p)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            self._bundle_bad = f"{type(exc).__name__}: {exc}"
+        return self._bundle
+
     def available(self) -> list[str]:
-        return [g for g in PERSON_GROUPS if (self.dir / f"{g}.ncsr").exists()]
+        loose = [g for g in PERSON_GROUPS if (self.dir / f"{g}.ncsr").exists()]
+        b = self.bundle()
+        if b is None:
+            return loose
+        seen = set(loose)
+        return loose + [g for g in PERSON_GROUPS
+                        if g in b.entries and g not in seen]
 
     def _resident_bytes(self) -> int:
         return sum(m.nbytes for m, _ in self._lru.values())
@@ -47,8 +74,16 @@ class ComboService:
                 self._lru.move_to_end(group)
                 return hit
             path = self.dir / f"{group}.ncsr"
+            meta = body = None
             if not path.exists():
-                return None
+                b = self.bundle()
+                if b is None or group not in b.entries:
+                    return None
+                try:
+                    meta, body = b.read(group)
+                except (OSError, ValueError, KeyError) as exc:
+                    self._bundle_bad = f"{type(exc).__name__}: {exc}"
+                    return None
             # **들어올 모델의 크기를 알고 자리를 비운다.**
             #
             # 처음엔 `resident > budget * 0.6` 으로 썼는데, 161MB 모델 하나는
@@ -57,12 +92,13 @@ class ComboService:
             # (Codex 게이트). 사이드카만 읽어 들어올 크기를 먼저 재고, 그만큼
             # 자리가 날 때까지 비운다.
             try:
-                incoming = ComboModel.peek_bytes(path)
+                incoming = (ComboModel.peek_bytes(path) if meta is None
+                            else ComboModel.size_from_meta(meta))
             except (OSError, ValueError, KeyError):
                 incoming = 0
             while self._lru and self._resident_bytes() + incoming > self.budget:
                 self._lru.popitem(last=False)
-            model = ComboModel(path)
+            model = ComboModel(path, meta=meta, blob=body)
             model.ensure_inverted()
             entry = (model, ComboQuery(model, self.policy))
             self._lru[group] = entry

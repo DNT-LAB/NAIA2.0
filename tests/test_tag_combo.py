@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -296,6 +297,61 @@ class TestQuery:
             "필터를 꺼도 안 나온다 - 집중도 때문에 빠진 것이 아니다"
 
 
+class TestBundle:
+    """배포판은 이 경로로만 돈다 - 느슨한 파일이 없다."""
+
+    def _bundle(self, tmp_path):
+        from core.tag_combo.bundle import ComboBundle, write_bundle
+        _toy(tmp_path)                      # toy.ncsr + toy.json 생성
+        out = tmp_path / "b.ncsb"
+        write_bundle(out, [tmp_path / "toy.ncsr"], source="test")
+        return ComboBundle(out), out
+
+    def test_roundtrip_is_byte_identical(self, tmp_path):
+        b, _ = self._bundle(tmp_path)
+        meta, body = b.read("toy")
+        assert body == (tmp_path / "toy.ncsr").read_bytes()
+        assert meta == json.loads((tmp_path / "toy.json").read_text(encoding="utf-8"))
+
+    def test_model_opens_from_bundle(self, tmp_path):
+        b, _ = self._bundle(tmp_path)
+        meta, body = b.read("toy")
+        loose = ComboModel(tmp_path / "toy.ncsr")
+        fromb = ComboModel(tmp_path / "toy.ncsr", meta=meta, blob=body)
+        assert fromb.header.posts == loose.header.posts
+        assert fromb.tags == loose.tags
+        assert np.array_equal(fromb.indices, loose.indices)
+        assert np.array_equal(fromb.post_char, loose.post_char)
+        # 질의 결과까지 같아야 한다 - 포맷이 아니라 동작이 계약이다.
+        pol = Policy(floor=10, min_pair=5)
+        assert ([c.tags for c in ComboQuery(fromb, pol).recommend(["maid"]).combos]
+                == [c.tags for c in ComboQuery(loose, pol).recommend(["maid"]).combos])
+
+    def test_corruption_is_caught(self, tmp_path):
+        """다운로드 산물이다. 조용히 틀린 답을 내느니 죽어야 한다."""
+        b, out = self._bundle(tmp_path)
+        e = b.entries["toy"]
+        raw = bytearray(out.read_bytes())
+        raw[e.body_off + 8] ^= 0xFF
+        bad = tmp_path / "bad.ncsb"
+        bad.write_bytes(raw)
+        from core.tag_combo.bundle import ComboBundle
+        assert ComboBundle(bad).verify_all() == ["toy"]
+
+    def test_verify_all_scans_every_group(self, tmp_path):
+        """read() 는 읽는 그룹만 본다. 설치 단계는 전부 봐야 한다."""
+        b, _ = self._bundle(tmp_path)
+        assert b.verify_all() == []
+        assert set(b.groups()) == {"toy"}
+
+    def test_rejects_foreign_file(self, tmp_path):
+        p = tmp_path / "nope.ncsb"
+        p.write_bytes(b"not a bundle at all")
+        from core.tag_combo.bundle import ComboBundle
+        with pytest.raises(ValueError, match="매직"):
+            ComboBundle(p)
+
+
 class TestContracts:
     """Codex 게이트가 '없다' 고 지적한 계약들."""
 
@@ -377,3 +433,4 @@ class TestContracts:
         m.ensure_inverted()
         peek = ComboModel.peek_bytes(tmp_path / "toy.ncsr")
         assert peek >= m.nbytes, f"peek {peek} < 실제 {m.nbytes}"
+

@@ -57,10 +57,19 @@ class ModelHeader:
 class ComboModel:
     """한 인원 그룹의 조합 모델. mmap 으로 열고 역인덱스만 만든다."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, meta: dict | None = None,
+                 blob: bytes | None = None):
+        """느슨한 파일과 번들 양쪽을 연다.
+
+        개발 중에는 `data/tag_combo/*.ncsr` 을 그대로 쓴다 - 번들을 만들어야만
+        돌아가면 빌드-검증 순환이 느려진다. 배포판은 번들에서 꺼낸 (meta, blob)
+        을 그대로 넘긴다(`core/tag_combo/bundle.py`).
+        """
         self.path = Path(path)
-        meta_path = self.path.with_suffix(".json")
-        self.meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta is None:
+            meta_path = self.path.with_suffix(".json")
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        self.meta = meta
         self.header = ModelHeader(
             version=int(self.meta["version"]),
             posts=int(self.meta["posts"]),
@@ -78,7 +87,9 @@ class ComboModel:
         v = self.header.vocab
         nnz = self.header.nnz
 
-        blob = np.memmap(self.path, dtype=np.uint8, mode="r")
+        # 번들에서 왔으면 이미 메모리에 있다. 느슨한 파일이면 mmap 한다.
+        blob = (np.frombuffer(blob, dtype=np.uint8) if blob is not None
+                else np.memmap(self.path, dtype=np.uint8, mode="r"))
         off = 0
 
         def take(count: int, dtype) -> np.ndarray:
@@ -186,12 +197,16 @@ class ComboModel:
         return self.nbytes + inv
 
     @staticmethod
-    def peek_bytes(path: Path) -> int:
-        """파일을 열지 않고 사이드카만 읽어 상주 크기를 추정한다."""
-        meta = json.loads(Path(path).with_suffix(".json").read_text(encoding="utf-8"))
+    def size_from_meta(meta: dict) -> int:
         n, v, nnz = int(meta["posts"]), int(meta["vocab"]), int(meta["nnz"])
         return ((n + 1) * 8 + nnz * 2 + n * 1 + n * 4 + v * 16
                 + nnz * 4 + (v + 1) * 8)
+
+    @staticmethod
+    def peek_bytes(path: Path) -> int:
+        """파일을 열지 않고 사이드카만 읽어 상주 크기를 추정한다."""
+        return ComboModel.size_from_meta(
+            json.loads(Path(path).with_suffix(".json").read_text(encoding="utf-8")))
 
 
 def write_model(path: Path, *, group: str, rows: list[list[int]], tags: list[str],

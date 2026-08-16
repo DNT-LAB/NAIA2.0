@@ -94,6 +94,19 @@
       ]
     },
     {
+      "feature": "tag_combo_bundle_download",
+      "source": "core/tag_combo/download.py",
+      "must_contain": [
+        "part = self.path.with_suffix(self.path.suffix + \".part\")",
+        "bad = ComboBundle(part).verify_all()",
+        "shutil.move(str(part), str(self.path))"
+      ],
+      "must_not_contain": [
+        "repo_root",
+        "Path(\"data\")"
+      ]
+    },
+    {
       "feature": "character_viewer_thumbnail_root",
       "source": "core/character_viewer_service.py",
       "must_contain": [

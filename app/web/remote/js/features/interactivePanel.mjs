@@ -1450,6 +1450,16 @@ export function createInteractivePanel({
   // 그리드가 3열에서 2열로 준다(사용자 결정: 열 폭 유지 + 팝업을 넓혀 그리드 보존).
   const PANEL_W = 484;
 
+  // 추천 패널(.ia-aside)이 온전히 들어가는 최소 CSS 폭.
+  //
+  //   팝업 left 494 + 팝업 484 + 간격 10 + 패널 380 + 여백 12 = 1380
+  //
+  // 380 은 썸네일 4열이 한 칸 85px 이 되는 폭이다. 실측 표(2026-08-14):
+  //   1366 -> 366px(칸 82) 쓸 만함 · 1280 -> 280(칸 60) 빠듯 ·
+  //   1200 -> 200(칸 40) 글자가 깨짐 · 1100 이하 -> room<200 이라 접힘
+  // 그래서 목표는 1380 이고, 1366 정도까지는 사실상 같다.
+  const ASIDE_NEED_W = 1380;
+
   // 씬 버튼 줄은 `document.body` 에 붙는 플로트라 **오른쪽 탭이 바뀌어도 그대로 남는다.**
   // Characters / Artists / Studio 탭 위에 구도·배경·성인 버튼이 겹쳐 떠 있었다(사용자 지적).
   // 이 버튼들이 여는 팝업은 Result 화면의 프롬프트 조립을 전제로 하므로 Result 에서만 뜬다.
@@ -4383,7 +4393,46 @@ export function createInteractivePanel({
     shiftResultForPopup(true);
     focusEditingInput();       // 슬롯 textarea 포커스(끝으로)
     positionPopup();           // 편집 슬롯 옆에 앵커
+    void fitForAside();        // 창이 좁으면 넓히거나 줌을 낮춘다(Electron 셸)
     void renderAside();        // 오른쪽 조언 플로트
+  }
+
+  // 추천 패널이 들어갈 폭을 셸에 요청한다. **팝업을 열 때 한 번만** 부른다.
+  //
+  // 이 기능은 `naia:fit-width` 로 오래전에 구현돼 있었는데 **호출부가 하나도 없어
+  // 한 번도 돈 적이 없었다**(2026-08-14 확인). 그래서 "자동 조정을 해봤는데
+  // 효과가 없다"는 인상이 남았다 — 실제로는 아무 일도 일어나지 않았다.
+  //
+  // 셸이 하는 일(main.cjs `naia:fit-width`): 1) 작업 영역 안에서 창 넓히기,
+  // 2) 그래도 모자라면 줌을 0.8 까지 단계 축소. 창 넓히기를 먼저 하는 이유는
+  // 글자 크기를 지키기 위해서다.
+  //
+  // 리사이즈 핸들러에서는 **부르지 않는다.** 사용자가 창을 좁힐 때마다 되밀면
+  // 창을 붙잡고 싸우는 꼴이 된다.
+  let fitTried = false;
+  async function fitForAside() {
+    const shell = globalThis.naiaShell;
+    if (!shell || typeof shell.fitWidth !== 'function') return;   // 브라우저 탭
+    if (fitTried) return;
+    if (window.innerWidth >= ASIDE_NEED_W) return;                // 이미 충분하다
+    fitTried = true;
+    try {
+      const r = await shell.fitWidth(ASIDE_NEED_W);
+      // 창/줌이 바뀌면 팝업과 패널의 인라인 좌표가 낡는다. resize 이벤트가
+      // 오기는 하지만 순서를 보장할 수 없어 여기서도 한 번 맞춘다.
+      if (panelContext && !panelContext.noPanel) { positionPopup(); positionAside(); }
+      // **줌을 내렸으면 반드시 말한다.** 창 넓히기(1단계)는 눈에 보이지만 줌
+      // 축소(2단계)는 앱 글자가 통째로 작아지는 변화이고, 게다가 셸이 설정
+      // 파일에 저장해서 다음 실행에도 남는다(main.cjs saveZoomFactor).
+      // 말없이 그러면 사용자는 원인도 되돌리는 법도 모른다.
+      // 되돌리는 길은 실재한다 — Ctrl +/-/0 (main.cjs attachZoomKeyboard) 과
+      // Ctrl + 휠 (preload.cjs wheel 리스너). 둘 다 확인했다.
+      if (r && r.zoomed) {
+        showToast('화면이 좁아 크기가 자동으로 조정되었습니다 · '
+          + 'Ctrl +/- 또는 Ctrl + 마우스 휠로 바꿀 수 있습니다 (Ctrl+0 원래대로)', 'info');
+      }
+      return r;
+    } catch (_e) { /* 셸이 거절해도 패널은 좁은 대로 뜬다 */ }
   }
 
 
@@ -4433,7 +4482,15 @@ export function createInteractivePanel({
   /** 살펴보기 표시만 옮긴다. 그리드를 다시 그리면 345칸 축에서 34ms 가 드는데,
    *  바뀌는 것은 테두리 하나뿐이라 그만한 값이 없다(사용자 성능 기준). */
   // 확대 미니 팝업. 썸네일을 2/3 로 줄이면서 작아서 안 보이는 칸이 생겼다 —
-  // 누르면 크게 보여 준다(사용자 지시 2026-08-07). **이미지를 가리는 것은 감수한다.**
+  // 누르면 크게 보여 준다(사용자 지시 2026-08-07).
+  //
+  // ❌ **비활성**(사용자 지시 2026-08-14). "이미지를 가리는 것은 감수한다"고 두었는데
+  // 실제로는 슬롯 편집기 위에 떠서 방금 치고 있던 프롬프트 입력칸을 덮었다. 칸이
+  // 무엇인지는 셀 툴팁(`tagTip`)이 이미 알려 주므로 확대는 값보다 방해가 컸다.
+  //
+  // 코드는 남긴다 — 되살리려면 이 상수만 true 로 돌리면 된다. 살펴보기 표시
+  // (`inspectTag`: 테두리 + 조언 플로트 기준 이동)는 **별개 기능이라 그대로 둔다.**
+  const ZOOM_ENABLED = false;
   let zoomEl = null;
 
   function ensureZoom() {
@@ -4461,6 +4518,7 @@ export function createInteractivePanel({
   /** 누른 칸을 크게 보여 준다. 팝업 오른쪽에 세워 그리드를 가리지 않는다 —
    *  고른 것과 원본을 나란히 보게 하려는 것이다. */
   function openZoom(cell, tag) {
+    if (!ZOOM_ENABLED) return;
     const el = ensureZoom();
     const img = cell.querySelector('.ia-cell-img img, .ia-aside-thumb-img img');
     const src = img ? img.getAttribute('src') : '';
@@ -4549,11 +4607,18 @@ export function createInteractivePanel({
       }
       // '전부 넣기' — 인기 조합 카드의 첫 줄을 통째로 넣는다. 조합 추천의 요지가
       // 묶음이므로 하나씩 누르게 하면 의미가 반감된다.
-      const all = ev.target.closest('[data-combo-all]');
+      // 줄 단위 넣기. 예전에는 카드 하단의 [전부 넣기] 하나였는데,
+      // `parentElement.querySelector('.ia-combo-row')` 라 **첫 줄만** 넣었다 —
+      // 버튼 이름과 하는 일이 달랐다(Codex 지적, 실측 확인).
+      // ⚠️ **칩 판정을 줄 판정보다 먼저 한다.** 줄 전체를 버튼으로 만들면서
+      // 칩이 그 안에 들어갔는데, 줄을 먼저 보면 칩을 눌러도 줄 전체가 들어간다.
+      // 칩 = 그 태그 하나, 줄의 빈 곳/퍼센트 = 줄 전체.
+      const all = ev.target.closest('[data-advice-add]')
+        ? null : ev.target.closest('[data-combo-row]');
       if (all) {
-        const row = all.parentElement?.querySelector('.ia-combo-row');
-        const tags = [...(row?.querySelectorAll('[data-advice-add]') || [])]
-          .map(x => x.getAttribute('data-advice-add')).filter(Boolean);
+        const row = all.closest('.ia-combo-row');
+        const tags = String(row?.getAttribute('data-combo-tags') || '')
+          .split(',').map(s => s.trim()).filter(Boolean);
         const cur = new Set(currentTags().map(t => String(t).toLowerCase()));
         for (const t of tags) {
           if (!cur.has(String(t).toLowerCase())) toggleTag(t, { fromAside: true });
@@ -4664,12 +4729,20 @@ export function createInteractivePanel({
   // 조합 카드가 없어도 나머지 기능은 전부 돈다.
   let comboDl = null;          // 마지막 상태(null = 아직 안 물어봄)
   let comboDlTimer = 0;
+  let comboDlFails = 0;        // 연속 폴링 실패 - 백오프에 쓴다
+  let comboDlRetried = false;  // 자동 재시도는 딱 한 번 (179MB 를 반복해 긁지 않는다)
 
   function comboDlText() {
     if (!comboDl) return '';
     const s = comboDl.state;
-    if (s === 'ready' || (comboDl.groups || []).length) return '';
+    // ⚠️ `groups` 가 비지 않았다고 끝난 게 아니다. 13그룹을 다 못 채우면
+    // 사용자가 인원 수를 바꾸는 순간 빈 화면이 된다 - 그때까지는 안내를 남긴다.
+    const missing = (comboDl.missing || []).length;
+    if (s === 'ready' && !missing) return '';
     if (!comboDl.configured) return '';        // 배포 전 - 아무 말도 하지 않는다
+    if (s === 'incomplete') {
+      return `추천 데이터가 일부만 있습니다 (${missing}개 부족). 다시 받는 중입니다`;
+    }
     if (s === 'downloading') {
       const pct = comboDl.percent || 0;
       const mb = Math.round((comboDl.received || 0) / 1e6);
@@ -4680,36 +4753,82 @@ export function createInteractivePanel({
       return `추천 데이터를 내려받는 중입니다 ${pct}% (${mb}/${tot}MB)${when}`;
     }
     if (s === 'verifying') return '내려받은 데이터를 확인하는 중입니다';
-    if (s === 'error') return '추천 데이터를 받지 못했습니다. 잠시 후 다시 시도합니다';
+    if (s === 'error') {
+      return comboDlRetried
+        ? '추천 데이터를 받지 못했습니다. 다시 열면 재시도합니다'
+        : '추천 데이터를 받지 못했습니다. 잠시 후 다시 시도합니다';
+    }
     return '';
   }
 
   async function comboDlPoll() {
+    // ⚠️ 실패했다고 **폴링을 멈추면 안 된다.** 예전엔 `catch { return; }` 이라
+    // 일시적인 fetch 실패 한 번에 타이머가 끊겼고, 화면에는 마지막 "받는 중
+    // 37%" 가 페이지 수명 내내 얼어붙었다. 실패는 백오프해서 계속 두드린다.
+    let ok = true;
     try {
       const r = await fetch('/api/tag-combo/download/status');
       comboDl = await r.json();
-    } catch { return; }
-    const busy = comboDl && (comboDl.state === 'downloading'
-      || comboDl.state === 'verifying');
+      comboDlFails = 0;
+    } catch { ok = false; comboDlFails += 1; }
+
+    const s = comboDl && comboDl.state;
+    const busy = s === 'downloading' || s === 'verifying' || s === 'incomplete';
+    clearTimeout(comboDlTimer);
+    if (!ok) {
+      if (comboDlFails <= 5) {          // 5회까지만 - 백엔드가 죽었으면 포기한다
+        comboDlTimer = setTimeout(() => { comboDlPoll(); renderAside(); },
+          Math.min(30000, 2000 * comboDlFails));
+      }
+      return;
+    }
     if (busy) {
-      // 받는 동안만 폴링한다. 끝나면 멈춘다 — 유휴 상태에서 계속 두드리지 않는다.
-      clearTimeout(comboDlTimer);
       comboDlTimer = setTimeout(() => { comboDlPoll(); renderAside(); }, 2000);
-    } else if (comboDl && comboDl.state === 'ready') {
+    } else if (s === 'ready') {
       comboCache.clear();      // 이제 답이 나온다 — 빈 답 캐시를 버린다
+      renderAside();           // 캐시만 비우면 다음 입력 전까지 안내가 남는다
+    } else if (s === 'error' && !comboDlRetried) {
+      // 자동 재시도는 **한 번뿐**이다. 179MB 를 반복해 긁으면 안 된다.
+      comboDlRetried = true;
+      comboDlTimer = setTimeout(() => { void comboDlEnsure(true); }, 30000);
     }
   }
 
   /** Interactive 를 열 때 한 번. 이미 있거나 받는 중이면 서버가 무시한다. */
-  async function comboDlEnsure() {
-    if (comboDl) return;
+  async function comboDlEnsure(retry = false) {
+    // 실패 상태에 갇히지 않는다: 예전엔 `if (comboDl) return` 이라 한 번
+    // 실패하면 패널을 다시 열어도 영영 재시도가 없었다.
+    if (comboDl && !retry && comboDl.state !== 'error') return;
     try {
-      const r = await fetch('/api/tag-combo/download', { method: 'POST' });
+      // 서버는 error 에서 저절로 다시 받지 않는다 - retry 를 붙여야 풀린다.
+      const q = (retry || (comboDl && comboDl.state === 'error')) ? '?retry=true' : '';
+      const r = await fetch(`/api/tag-combo/download${q}`, { method: 'POST' });
       comboDl = await r.json();
     } catch { return; }
-    if (comboDl && (comboDl.state === 'downloading' || comboDl.state === 'verifying')) {
-      comboDlPoll();
-    }
+    const s = comboDl && comboDl.state;
+    if (s === 'downloading' || s === 'verifying' || s === 'incomplete') comboDlPoll();
+    renderAside();
+  }
+
+  /** 인기 조합을 **태그 + % 나열**로 그린다.
+   *
+   *  묶음(3태그 x 4줄)으로 그리던 것을 바꿨다(사용자 결정 2026-08-16). 묶음은
+   *  같은 태그가 여러 줄에 나와 반복으로 읽혔고(`curvy` 2회 · `ass` 2회), 줄마다
+   *  테두리·별도 버튼이 있어 가로 공간도 크게 남았다. 평면 나열이면 한 태그가
+   *  두 번 나오는 것이 **구조적으로 불가능**하고 같은 자리에 더 많이 들어간다.
+   *
+   *  % 는 `P(태그|앵커)` 다 - 묶음 커버리지가 아니다. 묶음 확률을 태그별로 쓰면
+   *  `embarrassed`+`blush` 가 19% 로 보이는데 실제 조건부는 88% 라 거짓말이 된다.
+   */
+  function comboFlatHtml(combo) {
+    const list = (combo && combo.tags) || [];
+    if (!list.length) return '';
+    return '<div class="ia-combo-flat">' + list.map(x => {
+      const p = Math.round((x.p || 0) * 100);
+      return `<button type="button" class="ia-combo-tag" data-advice-add="${escHtml(x.tag)}"`
+        + ` title="${escHtml(tagTip(x.tag))}">${escHtml(x.tag)}`
+        + `<span class="ia-combo-p">${p}%</span></button>`;
+    }).join('') + '</div>';
   }
 
   /** 활성 캐릭터 수 -> 인원 그룹.
@@ -5110,14 +5229,18 @@ export function createInteractivePanel({
     }
     // '잘 안 어울립니다'(비권장)는 뺐다 — 초보자에게 하지 말라는 목록은 부담만 주고,
     // 실제로 고를 것을 보여주는 쪽이 값이 크다. 데이터는 그대로 있으니 되살리기 쉽다.
-    if (recGroups.length) {
-      parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">함께 쓰는 것' +
-        `<span class="ia-aside-count">${escHtml(seedLabel)} 기준</span></div>` +
-        recGroups.map(g =>
-          `<div class="ia-aside-group"><div class="ia-aside-group-label">${escHtml(g.label)}</div>` +
-          `<div class="ia-aside-thumbs">${g.html}</div></div>`).join('') +
-        '</div>');
-    }
+    // ⚠️ **'함께 쓰는 것' 보다 '인기 조합' 을 먼저 놓는다.** 전자는 썸네일 격자라
+    // 세로를 많이 먹어서, 뒤에 두면 조합 카드가 화면 밖으로 밀린다(사용자 지적
+    // 2026-08-16: "위치가 좋지 않음"). 정정(같이 쓰지 않습니다·필요한 것)은
+    // 위에 그대로 둔다 - 그건 고쳐야 할 것이라 먼저 보여야 한다.
+    const recCard = recGroups.length
+      ? ('<div class="ia-aside-card scroll"><div class="ia-aside-title">함께 쓰는 것' +
+         `<span class="ia-aside-count">${escHtml(seedLabel)} 기준</span></div>` +
+         recGroups.map(g =>
+           `<div class="ia-aside-group"><div class="ia-aside-group-label">${escHtml(g.label)}</div>` +
+           `<div class="ia-aside-thumbs">${g.html}</div></div>`).join('') +
+         '</div>')
+      : '';
     // ── 인기 조합 ────────────────────────────────────────────────────────
     // '함께 쓰는 것' 은 태그를 **하나씩** 권한다. 이건 묶음으로 권한다 —
     // "이 구도에는 이 세트가 흔하다". 근거는 인원 그룹별 모델이고, 사용자가
@@ -5131,20 +5254,19 @@ export function createInteractivePanel({
       parts.push('<div class="ia-aside-card"><div class="ia-aside-title">인기 조합' +
         '<span class="ia-aside-count">준비 중</span></div>' +
         `<div class="ia-combo-wait">${escHtml(dlMsg)}</div></div>`);
-    } else if (combo && combo.combos && combo.combos.length) {
+    } else if (combo && ((combo.tags && combo.tags.length)
+                         || (combo.combos && combo.combos.length))) {
+      // **무엇을 기준으로 권하는지 적는다.** 오프라인 뱅크는 프롬프트 태그 중
+      // 하나를 앵커로 골라 답한다 — 그게 사용자가 방금 누른 칩이 아닐 수 있어서,
+      // 안 적으면 "왜 이게 뜨지?" 가 된다(Codex: 조용히 앵커를 바꾸면 부정직하다).
+      const label = combo.anchor || combo.group || '';
       const note = combo.weak ? ' 대략' : '';
       parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">인기 조합' +
-        `<span class="ia-aside-count">${escHtml(combo.group || '')}${note}</span></div>` +
-        combo.combos.slice(0, 4).map(c => {
-          const chips = c.tags.map(t =>
-            `<button type="button" class="ia-combo-tag" data-advice-add="${escHtml(t)}"` +
-            ` title="${escHtml(tagTip(t))}">${escHtml(t)}</button>`).join('');
-          return `<div class="ia-combo-row">${chips}` +
-            `<span class="ia-combo-n">${c.support.toLocaleString()}</span></div>`;
-        }).join('') +
-        `<button type="button" class="ia-combo-all" data-combo-all="1">전부 넣기</button>` +
+        `<span class="ia-aside-count">${escHtml(label)}${note}</span></div>` +
+        comboFlatHtml(combo) +
         '</div>');
     }
+    if (recCard) parts.push(recCard);      // 조합 카드 뒤로 밀어 둔 썸네일 격자
     // 조언(전제조건·충돌·추천)은 태그 대부분에 없다. 그 자리에 '알려드릴 것이
     // 없습니다' 를 띄우면 상자만 남는다 — 대신 태그 사전(implies/related)을 보여준다.
     const info = await fetchLookup(seedTag);
@@ -7798,6 +7920,12 @@ export function createInteractivePanel({
     destroy: () => {
       // 하위 모듈의 리스너/타이머/팝업/툴팁까지 정리한다.
       if (autocomplete) { try { autocomplete.unbind(); } catch (e) {} }
+      // 다운로드 폴링 타이머는 renderAside() 를 다시 부르므로, 정리하지 않으면
+      // 파괴된 패널에 대고 2초마다 그리려 든다.
+      clearTimeout(comboDlTimer); comboDlTimer = 0;
+      // 폭 맞추기는 **Interactive 한 번에 한 번**이다. 여기서 풀어 두면 다음에
+      // 들어올 때 다시 맞추고, 안 풀면 창을 좁혀도 영영 안 맞춘다.
+      fitTried = false;
       if (toggleButton) toggleButton.removeEventListener('click', onToggleClick);
       panelMount.removeEventListener('mousedown', onPanelMouseDown);
       blocksMount.removeEventListener('mousedown', onPanelMouseDown);

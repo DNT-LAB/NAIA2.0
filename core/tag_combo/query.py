@@ -30,6 +30,7 @@ from typing import Iterable, Sequence
 import numpy as np
 
 from .model import ComboModel
+from .noise import is_color_tag
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,20 @@ class Policy:
     gate_backoff: tuple[tuple[float, float], ...] = (
         (2.0, 0.30), (1.5, 0.50), (1.2, 0.80),
     )
+    # **색/무늬 후보를 버린다.** `maid` 에 `black dress` 를 권하는 것은 정보가
+    # 아니다 - 알고 싶은 것은 `dress` 가 따라온다는 사실이고, 색은 사용자가
+    # 정한다. 실측으로 출력 칩의 21.7% 가 색상이었고 `blue eyes` seed 는
+    # 13/15 였다. 근거는 core/tag_combo/noise.py. seed 에는 적용하지 않는다.
+    drop_color_candidates: bool = True
+    # **커버리지 바닥.** 이보다 낮으면 레시피 뱅크가 기권한다.
+    #
+    # 넓은 seed 에는 흔한 조합이 존재하지 않는다(실측: `smile` 30만장에서 어떤
+    # 3태그 묶음도 0.1% 를 못 넘는다). 그때 뭔가를 내놓으면 반드시 니치가 나온다 -
+    # 예전 `smile -> grin, evil smile, evil grin`(0.10%) 이 그 결과였다.
+    # Event Preset 도 항목의 28.7% 는 그냥 빈 답을 낸다. 그게 정직하다.
+    min_coverage: float = 0.02
+    # 화면에 뿌릴 평면 태그 개수. 카드 폭 ~330px 에 칩 12개가 들어간다.
+    flat_top: int = 12
     # **매칭 집합 표본추출은 기본적으로 끈다(0 = 무제한).**
     #
     # 넓은 질의가 느린 것은 사실이다 - `looking at viewer` 494,399건에 5.6초.
@@ -118,6 +133,12 @@ class ComboQuery:
         self.prob = model.freq / n
         with np.errstate(divide="ignore"):
             self.surp = -np.log2(np.maximum(self.prob, 1e-12))
+        # 색/무늬 후보 마스크. 어휘당 한 번만 계산한다(13,201개에 실측 6ms).
+        self._is_color = (
+            np.fromiter((is_color_tag(t) for t in model.tags),
+                        dtype=bool, count=len(model.tags))
+            if self.p.drop_color_candidates
+            else np.zeros(len(model.tags), dtype=bool))
 
     # ---- 백오프 --------------------------------------------------------
     def _intersect(self, tags: Sequence[str]) -> np.ndarray | None:
@@ -251,6 +272,8 @@ class ComboQuery:
                 t = self.m.tags[int(c)]
                 if t in pr or cnt[c] < self.p.min_pair:
                     continue
+                if self._is_color[c]:
+                    continue        # 색/무늬는 조합의 근거가 아니다(noise.py)
                 pb = float(self.prob[c])
                 if pb > max_pb:
                     continue

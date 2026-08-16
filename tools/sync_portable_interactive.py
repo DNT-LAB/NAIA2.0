@@ -51,6 +51,10 @@ BACKEND = [
     "core/tag_combo/person.py",
     "core/tag_combo/model.py",
     "core/tag_combo/query.py",
+    # query.py 가 import 한다 - 빠뜨리면 포터블이 ImportError 로 죽는다(Codex 지적).
+    "core/tag_combo/noise.py",
+    # v2 오프라인 레시피 뱅크 조회. service.py 가 import 한다.
+    "core/tag_combo/bank.py",
     "core/tag_combo/bundle.py",
     "core/tag_combo/download.py",
     "core/tag_combo/service.py",

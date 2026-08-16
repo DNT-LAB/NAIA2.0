@@ -46,6 +46,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 MAGIC = b"NCSB1\0\0\0"
+# 부속 자산(레시피 뱅크·의미 그래프)이 붙으면 index 의 version 이 2 가 된다.
+# 매직은 바꾸지 않는다 - 바꾸면 옛 판독기가 "형식이 다르다" 로 죽는데, 실제로는
+# groups 만 읽으면 그대로 동작한다. 앞으로 나올 판독기를 위해 목록으로 둔다.
+ACCEPT_MAGIC = (MAGIC,)
 LEVEL = 6      # 실측 deflate-6 이 56% / 2초, 9는 55% / 11초 - 6이 맞다
 
 
@@ -70,13 +74,34 @@ class ComboBundle:
         self.path = Path(path)
         with self.path.open("rb") as fh:
             magic = fh.read(len(MAGIC))
-            if magic != MAGIC:
+            if magic not in ACCEPT_MAGIC:
                 raise ValueError(f"번들 매직이 다르다: {magic!r} - {self.path}")
             (ilen,) = struct.unpack("<I", fh.read(4))
             self.index = json.loads(fh.read(ilen).decode("utf-8"))
         self.entries: dict[str, BundleEntry] = {
             g["name"]: BundleEntry(**g) for g in self.index["groups"]
         }
+        # 부속 자산(레시피 뱅크·의미 그래프 등). NCSB1 에는 없다.
+        self.aux_index: dict[str, dict] = {a["name"]: a
+                                           for a in (self.index.get("aux") or [])}
+
+    def aux(self, name: str, *, verify: bool = True) -> bytes | None:
+        """부속 자산 원본 바이트. 없으면 None.
+
+        **모델과 같은 파일에 넣는다.** 따로 배포하면 버전이 갈리고, 사용자는
+        "레시피는 새 것인데 모델은 옛 것" 인 조합을 만나게 된다.
+        """
+        e = self.aux_index.get(name)
+        if e is None:
+            return None
+        with self.path.open("rb") as fh:
+            fh.seek(e["off"])
+            blob = zlib.decompress(fh.read(e["len"]))
+        if len(blob) != e["raw"]:
+            raise ValueError(f"aux {name}: 길이가 다르다")
+        if verify and hashlib.sha256(blob).hexdigest() != e["sha256"]:
+            raise ValueError(f"aux {name}: sha256 불일치")
+        return blob
 
     def groups(self) -> list[str]:
         return [g["name"] for g in self.index["groups"]]
@@ -118,10 +143,27 @@ class ComboBundle:
         return meta, body
 
 
-def write_bundle(out: Path, models: list[Path], *, source: str = "") -> dict:
-    """느슨한 `.ncsr` + `.json` 들을 번들 하나로 묶는다."""
+def write_bundle(out: Path, models: list[Path], *, source: str = "",
+                 aux: dict[str, Path] | None = None,
+                 built: str = "") -> dict:
+    """느슨한 `.ncsr` + `.json` 들을 번들 하나로 묶는다.
+
+    `aux` 는 이름 -> 파일 경로. 레시피 뱅크·의미 그래프처럼 모델과 **같은 버전이어야
+    하는** 부속 자산을 같은 파일에 넣는다. 따로 배포하면 "레시피는 새 것인데 모델은
+    옛 것" 인 조합이 생긴다.
+
+    `built` 를 주면 그 값을 인덱스에 넣는다. 비우면 현재 시각이 들어가는데,
+    그러면 **같은 입력으로 다시 구워도 sha256 이 달라진다**(Codex 지적). 재현
+    가능한 빌드가 필요하면 고정 문자열을 넘겨라.
+    """
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    aux_items: list[tuple[str, bytes, dict]] = []
+    for name, p in sorted((aux or {}).items()):
+        raw = Path(p).read_bytes()
+        aux_items.append((name, zlib.compress(raw, LEVEL),
+                          {"raw": len(raw),
+                           "sha256": hashlib.sha256(raw).hexdigest()}))
     payloads: list[tuple[str, bytes, bytes, dict]] = []
     for p in models:
         p = Path(p)
@@ -136,7 +178,9 @@ def write_bundle(out: Path, models: list[Path], *, source: str = "") -> dict:
 
     # 인덱스 길이가 오프셋에 영향을 주므로 두 번 만든다. 자리표시자를 실제와
     # 같은 자릿수로 채우면 한 번에 되지만, 그런 요령은 나중에 조용히 깨진다.
-    def build(offsets: list[tuple[int, int]]) -> bytes:
+    stamp = built or time.strftime("%Y-%m-%dT%H:%M:%S")
+
+    def build(offsets: list[tuple[int, int]], aoff: list[int]) -> bytes:
         groups = []
         for (name, mz, bz, info), (moff, boff) in zip(payloads, offsets):
             m = info["meta"]
@@ -146,25 +190,34 @@ def write_bundle(out: Path, models: list[Path], *, source: str = "") -> dict:
                 "sha256": info["sha"], "posts": int(m["posts"]),
                 "vocab": int(m["vocab"]), "nnz": int(m["nnz"]),
             })
-        return json.dumps({"version": 1, "source": source,
-                           "built": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                           "groups": groups}, ensure_ascii=False).encode("utf-8")
+        aux_idx = [{"name": nm, "off": off, "len": len(bz), **info}
+                   for (nm, bz, info), off in zip(aux_items, aoff)]
+        d = {"version": 2 if aux_idx else 1, "source": source,
+             "built": stamp, "groups": groups}
+        if aux_idx:
+            d["aux"] = aux_idx
+        return json.dumps(d, ensure_ascii=False).encode("utf-8")
 
-    zero = [(0, 0)] * len(payloads)
-    head = len(MAGIC) + 4 + len(build(zero))
-    offsets, cur = [], head
-    for _, mz, bz, _ in payloads:
-        offsets.append((cur, cur + len(mz)))
-        cur += len(mz) + len(bz)
-    index = build(offsets)
-    # 인덱스 길이가 바뀌면 오프셋이 밀린다. 같아질 때까지 다시 잡는다.
-    while len(MAGIC) + 4 + len(index) != head:
-        head = len(MAGIC) + 4 + len(index)
+    def layout(head: int):
         offsets, cur = [], head
         for _, mz, bz, _ in payloads:
             offsets.append((cur, cur + len(mz)))
             cur += len(mz) + len(bz)
-        index = build(offsets)
+        aoff = []
+        for _, bz, _ in aux_items:
+            aoff.append(cur)
+            cur += len(bz)
+        return offsets, aoff
+
+    zero_o, zero_a = layout(0)
+    head = len(MAGIC) + 4 + len(build(zero_o, zero_a))
+    offsets, aoff = layout(head)
+    index = build(offsets, aoff)
+    # 인덱스 길이가 바뀌면 오프셋이 밀린다. 같아질 때까지 다시 잡는다.
+    while len(MAGIC) + 4 + len(index) != head:
+        head = len(MAGIC) + 4 + len(index)
+        offsets, aoff = layout(head)
+        index = build(offsets, aoff)
 
     with out.open("wb") as fh:
         fh.write(MAGIC)
@@ -172,6 +225,8 @@ def write_bundle(out: Path, models: list[Path], *, source: str = "") -> dict:
         fh.write(index)
         for _, mz, bz, _ in payloads:
             fh.write(mz)
+            fh.write(bz)
+        for _, bz, _ in aux_items:
             fh.write(bz)
     raw = sum(i["raw"] for _, _, _, i in payloads)
     return {"path": str(out), "groups": len(payloads), "bytes": out.stat().st_size,

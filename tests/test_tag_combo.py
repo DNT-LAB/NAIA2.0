@@ -241,27 +241,27 @@ class TestQuery:
         # 후보가 배경 상한(P(B)<=0.30)에 걸리지 않도록 **전체를 크게** 잡는다.
         # 처음엔 40건짜리 코퍼스로 짰는데 모든 후보가 P=1.0 이라 집중도 필터에
         # 닿기도 전에 잘려서, 조합이 비고 테스트가 아무것도 검증하지 않았다.
-        tags = ["swimsuit", "bikini", "ocean", "pink halo", "indoors", "smile"]
+        tags = ["swimsuit", "bikini", "ocean", "winged halo", "indoors", "smile"]
         tid = {t: i for i, t in enumerate(tags)}
         rows, ratings, chars = [], [], []
-        # 수영복 100건. 40건은 **한 캐릭터(7번)** 이고 그 캐릭터만 pink halo 를
+        # 수영복 100건. 40건은 **한 캐릭터(7번)** 이고 그 캐릭터만 winged halo 를
         # 쓴다. 나머지 60건은 캐릭터가 전부 다르다 - 그래야 bikini/ocean 이
         # 집중도에 안 걸린다(둘 다 걸리면 후보가 통째로 비어 필터를 검증 못 한다).
-        #   pink halo 집중도 40/40 = 1.00 -> 걸린다
+        #   winged halo 집중도 40/40 = 1.00 -> 걸린다
         #   bikini     집중도 40/100 = 0.40 -> 통과
         for i in range(100):
             r = ["swimsuit", "bikini", "ocean"]
             if i < 40:
-                r.append("pink halo")
+                r.append("winged halo")
                 ch = 7
             else:
                 ch = 100 + i        # 전부 다른 캐릭터
             rows.append(sorted(tid[t] for t in r))
             ratings.append(1); chars.append(ch)
         # 배경 400건. 그중 25건에 bikini/ocean 을 섞어 **lift 를 갈라 놓는다** -
-        # 셋 다 lift 5.0 이면 pink halo 가 상위 2에 못 들어 필터 유무가 결과에
+        # 셋 다 lift 5.0 이면 winged halo 가 상위 2에 못 들어 필터 유무가 결과에
         # 안 나타난다.
-        #   pink halo  conf 0.40 / P 0.08 -> lift 5.0  (가장 높다)
+        #   winged halo  conf 0.40 / P 0.08 -> lift 5.0  (가장 높다)
         #   bikini     conf 1.00 / P 0.25 -> lift 4.0
         for i in range(400):
             r = ["indoors", "smile"]
@@ -282,18 +282,18 @@ class TestQuery:
         mdl = ComboModel(p)
         r = ComboQuery(mdl, pol).recommend(["swimsuit"])
         # **먼저 필터가 실제로 탔는지 확인한다.** 처음엔 이 확인 없이 바로
-        # `pink halo not in c.tags` 만 봤는데, combos 가 비어 있어서 루프가
+        # `winged halo not in c.tags` 만 봤는데, combos 가 비어 있어서 루프가
         # 한 번도 안 돌고 통과했다 - 아무것도 검증하지 않는 테스트였다
         # (Codex 게이트가 잡았다).
         assert r.combos, "조합이 비어 필터를 검증하지 못한다 - 테스트가 무의미하다"
         for c in r.combos:
-            assert "pink halo" not in c.tags, \
+            assert "winged halo" not in c.tags, \
                 "한 캐릭터에 몰린 태그가 조합으로 나왔다"
         # 그리고 필터를 끄면 나와야 한다 - 안 그러면 다른 이유로 빠진 것이다.
         loose = Policy(floor=5, min_pair=3, bundle=2, min_bundle=2,
                        max_char_share=1.0)
         r2 = ComboQuery(ComboModel(p), loose).recommend(["swimsuit"])
-        assert any("pink halo" in c.tags for c in r2.combos), \
+        assert any("winged halo" in c.tags for c in r2.combos), \
             "필터를 꺼도 안 나온다 - 집중도 때문에 빠진 것이 아니다"
 
 
@@ -434,3 +434,211 @@ class TestContracts:
         peek = ComboModel.peek_bytes(tmp_path / "toy.ncsr")
         assert peek >= m.nbytes, f"peek {peek} < 실제 {m.nbytes}"
 
+
+
+class TestDataRoot:
+    """받는 곳 / 찾는 곳. 이걸 틀리면 두 런타임이 다 틀린다.
+
+    소스 실행은 179MB 를 git 트리에 받고, 포터블은 업데이트가 지우는 자리
+    (`resources/naia-backend/data/`)에 받는다. 저장소 관례는
+    `runtime_paths.data_dir` -> `repo_root/data` 다.
+    """
+
+    def test_downloads_into_runtime_data_dir_not_the_repo(self, tmp_path):
+        from core.runtime_paths import resolve_runtime_paths
+        from core.tag_combo.service import resolve_dirs
+        target, search = resolve_dirs(tmp_path)
+        want = Path(resolve_runtime_paths(tmp_path).data_dir) / "tag_combo"
+        assert target == want, f"{target} 에 받으려 한다"
+        assert target != tmp_path / "data" / "tag_combo", "저장소 안에 받는다"
+
+    def test_repo_is_still_searched_first(self, tmp_path):
+        """개발 중에 방금 구운 모델이 내려받은 것보다 우선이어야 한다."""
+        from core.tag_combo.service import resolve_dirs
+        _, search = resolve_dirs(tmp_path)
+        assert search[0] == tmp_path / "data" / "tag_combo"
+        assert len(search) == 2
+
+    @staticmethod
+    def _group(d: Path, name: str) -> None:
+        """`_toy` 를 그룹 이름의 모델 파일로 만든다(사이드카 포함)."""
+        d.mkdir(parents=True, exist_ok=True)
+        _toy(d)
+        for f in list(d.glob("toy.*")):
+            f.rename(d / f.name.replace("toy.", f"{name}.", 1))
+
+    def test_finds_models_outside_the_download_dir(self, tmp_path):
+        """받는 곳과 찾는 곳이 다르므로, 저장소에 있는 모델도 보여야 한다."""
+        from core.tag_combo.service import ComboService
+        repo, dl = tmp_path / "repo", tmp_path / "userdata"
+        self._group(repo, "1girl_solo")
+        svc = ComboService(dl, search_dirs=[repo, dl])
+        assert "1girl_solo" in svc.available(), "저장소의 모델이 안 보인다"
+
+    def test_one_group_does_not_stand_in_for_thirteen(self, tmp_path):
+        """**부분 모델을 완성으로 치면 안 된다.**
+
+        처음엔 `.ncsr` 하나만 있어도 `_have_models()` 가 참이었다. 그러면
+        `1girl_solo` 만 가진 사람이 인원 수를 바꾸는 순간 빈 화면을 보는데
+        다운로드는 영영 시작되지 않는다(Codex 게이트 지적, 내 테스트가 이
+        결함을 오히려 정상 계약으로 못 박고 있었다).
+        """
+        from core.tag_combo.service import ComboService
+        d = tmp_path / "partial"
+        self._group(d, "1girl_solo")
+        svc = ComboService(d, search_dirs=[d])
+        assert not svc._have_models(), "1그룹으로 13그룹을 갈음한다"
+        st = svc.download_status()
+        assert st["state"] != "ready"
+        assert len(st["missing"]) == len(PERSON_GROUPS) - 1
+
+    def test_complete_loose_set_needs_no_download(self, tmp_path):
+        """반대 방향: 13그룹이 다 있으면 179MB 를 다시 받지 않는다."""
+        from core.tag_combo.service import ComboService
+        d = tmp_path / "full"
+        for g in PERSON_GROUPS:
+            self._group(d, g)
+        svc = ComboService(d, search_dirs=[d])
+        assert svc._have_models()
+        assert svc.ensure_bundle()["state"] == "ready"
+
+    def test_downloads_when_nothing_is_present(self, tmp_path):
+        from core.tag_combo.service import ComboService
+        svc = ComboService(tmp_path / "dl", search_dirs=[tmp_path / "dl"])
+        assert not svc._have_models()
+        assert svc.download_status()["state"] != "ready"
+
+
+class TestRecovery:
+    """깨진 데이터에서 **빠져나올 수 있는가.** 못 빠져나오면 그 설치는 끝이다."""
+
+    def test_corrupt_group_does_not_escape_as_an_exception(self, tmp_path, monkeypatch):
+        """본문이 깨진 그룹은 `zlib.error` 를 낸다 - 좁은 except 로는 못 잡는다.
+
+        예전엔 `(OSError, ValueError, KeyError)` 만 잡아서 `recommend()` 가
+        그대로 터졌다(실측: 1girl_solo 본문에 0 을 2KB 쓰면 재현).
+        """
+        import zlib
+        from core.tag_combo.service import ComboService
+
+        class BoomBundle:
+            path = tmp_path / "x.ncsb"
+            entries = {"1girl_solo": object()}
+
+            def read(self, group):
+                raise zlib.error("incorrect data check")
+
+        svc = ComboService(tmp_path)
+        monkeypatch.setattr(svc, "bundle", lambda: BoomBundle())
+        out = svc.recommend(["maid"], group="1girl_solo")     # 터지면 실패다
+        assert out["combos"] == []
+        assert "1girl_solo" in svc._bad_groups
+        assert not svc._have_models(), "깨진 그룹을 세고 있어 복구가 안 걸린다"
+
+    def test_failed_bundle_is_retried_when_the_file_changes(self, tmp_path):
+        """실패를 영구 캐시하면 다시 받아도 안 읽는다.
+
+        조언 카드에서 실패를 `null` 로 영구 캐시해 같은 사고를 낸 전례가 있다.
+        """
+        from core.tag_combo.download import BUNDLE_NAME
+        from core.tag_combo.service import ComboService
+        p = tmp_path / BUNDLE_NAME
+        p.write_bytes(b"NOTABUNDLE" * 8)
+        svc = ComboService(tmp_path, search_dirs=[tmp_path])
+        assert svc.bundle() is None and svc._bundle_bad
+        sig = svc._bad_sig
+        p.write_bytes(b"NOTABUNDLE" * 9)      # 파일이 바뀌었다 = 다시 받았다
+        assert svc._bundle_sig() != sig, "지문이 안 바뀌면 재시도 판정이 불가능하다"
+        svc.bundle()
+        assert svc._bad_sig == svc._bundle_sig(), "새 파일로 다시 시도하지 않았다"
+
+    def test_error_state_does_not_auto_restart_the_download(self, tmp_path):
+        """179MB 다.
+
+        `start()` 는 스레드가 죽었으면 그냥 다시 받는데, 실패 상태에서는 그게
+        폴링/재진입마다 전체 재다운로드가 된다. retry() 로만 풀려야 한다.
+        """
+        from core.tag_combo.download import BundleDownloader
+        d = BundleDownloader(tmp_path, url="http://example.invalid/x", sha256="")
+        d.state.state = "error"
+        d.state.error = "boom"
+        assert d.start()["state"] == "error", "실패에서 저절로 다시 받는다"
+        assert d._thread is None
+
+
+class TestRecipeBank:
+    """오프라인 레시피 뱅크 — 온라인 지명 병목을 대체한다."""
+
+    @staticmethod
+    def _bank(tmp_path, groups):
+        # NRB3 는 `앵커 -> {rows, tags}` 다. 테스트는 묶음만 쓰므로 여기서 감싼다.
+        groups = {g: {a: (v if isinstance(v, dict) else {"rows": v, "tags": []})
+                      for a, v in tab.items()} for g, tab in groups.items()}
+        import json
+        from core.tag_combo.bank import RecipeBank
+        p = tmp_path / "recipe_bank.json"
+        p.write_text(json.dumps({"format": "NRB3", "policy": {}, "groups": groups}),
+                     encoding="utf-8")
+        return RecipeBank(p)
+
+    def test_rejects_unknown_format(self, tmp_path):
+        """형식이 바뀌면 조용히 오해하지 말고 즉시 죽어야 한다."""
+        import json
+        from core.tag_combo.bank import RecipeBank
+        p = tmp_path / "recipe_bank.json"
+        p.write_text(json.dumps({"format": "NRB2", "groups": {}}), encoding="utf-8")
+        with pytest.raises(ValueError, match="형식"):
+            RecipeBank(p)
+
+    def test_picks_the_anchor_with_the_best_coverage(self, tmp_path):
+        """앵커는 빈도가 아니라 **잘 맞는 것**으로 고른다.
+
+        결합빈도 1위 조합이 최악의 추천을 낸 실측이 있다
+        (long hair+blue eyes+large breasts -> flag print, 0.22%).
+        """
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "long hair": [{"tags": ["a", "b"], "support": 9, "coverage": 0.02}],
+            "maid": [{"tags": ["apron", "maid headdress"], "support": 99,
+                      "coverage": 0.49}],
+        }})
+        r = b.lookup(["long hair", "maid"], "1girl_solo")
+        assert r["anchor"] == "maid"
+        assert r["combos"][0]["tags"] == ["apron", "maid headdress"]
+
+    def test_abstains_when_nothing_passes(self, tmp_path):
+        """**넓은 seed 에는 흔한 조합이 없다.** 억지로 채우면 니치가 나온다."""
+        b = self._bank(tmp_path, {"1girl_solo": {}})
+        r = b.lookup(["smile"], "1girl_solo")
+        assert r["combos"] == [] and r["abstained"]
+
+    def test_never_recommends_tags_already_in_the_prompt(self, tmp_path):
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "maid": [{"tags": ["apron", "frills"], "support": 50, "coverage": 0.4},
+                     {"tags": ["dress", "ribbon"], "support": 40, "coverage": 0.3}],
+        }})
+        r = b.lookup(["maid", "apron", "frills"], "1girl_solo")
+        assert all(set(c["tags"]) - {"maid", "apron", "frills"} for c in r["combos"])
+
+    def test_rows_do_not_repeat_each_other(self, tmp_path):
+        """행 사이 중복이 5행을 2행어치로 만들던 결함(칩 15개 중 고유 9개)."""
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "x": [{"tags": ["a", "b"], "support": 50, "coverage": 0.4},
+                  {"tags": ["a", "b", "c"], "support": 40, "coverage": 0.3},
+                  {"tags": ["d", "e"], "support": 30, "coverage": 0.2}],
+        }})
+        r = b.lookup(["x"], "1girl_solo", top_k=5)
+        got = [c["tags"] for c in r["combos"]]
+        assert ["a", "b", "c"] not in got, "앞 행과 2개 겹치는 행이 남았다"
+        assert ["d", "e"] in got
+
+    def test_missing_group_is_a_fallback_not_an_abstention(self, tmp_path):
+        """부분 빌드에서 안 구운 그룹이 통째로 죽으면 안 된다.
+
+        데이터가 없는 것과 '권할 것이 없다' 는 판단은 다르다.
+        """
+        from core.tag_combo.service import ComboService
+        b = self._bank(tmp_path, {"1girl_solo": {"maid": [
+            {"tags": ["apron"], "support": 9, "coverage": 0.4}]}})
+        svc = ComboService(tmp_path, search_dirs=[tmp_path])
+        assert svc.bank() is not None
+        assert not svc.bank().anchors("2girls"), "빈 그룹이 앵커를 들고 있다"

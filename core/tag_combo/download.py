@@ -28,11 +28,27 @@ from pathlib import Path
 
 # 다른 런타임 자산과 같은 호스팅을 쓴다(`core/runtime_install_manager.py` 참조).
 # URL 이 비어 있으면 다운로드 기능 자체가 꺼진 것으로 본다.
+# ⚠️ **번들을 다시 구우면 반드시 파일 이름을 바꿔라.**
+#
+# `present()` 는 이름만 보고 sha 를 확인하지 않는다. 같은 이름으로 덮어쓰면 이미
+# 받은 설치는 `start()` 에서 곧장 ready 로 빠져 **옛 번들을 영영 쓴다**(Codex
+# 지적, 코드 확인). 상수만 고치면 신규 설치는 179MB 를 받아 sha 불일치로 버리고,
+# 기존 설치는 옛 것을 쓰는 최악의 조합이 된다.
+#
+# v2 = 레시피 뱅크 + 의미 그래프 + 앵커 주변분포를 부속 자산으로 품은 NCSB2.
+# v3 = 같은 NCSB2 이되 뱅크가 NRB3(앵커 -> {rows, tags})다. 뱅크 형식이 바뀌면
+#      옛 뱅크는 `RecipeBank` 가 명시적으로 거부하고 서비스는 조용히 온라인
+#      경로로 떨어진다 - 추천이 다시 니치해지는데 아무도 모른다. 그래서 위
+#      규약대로 **이름을 바꿔** 옛 설치가 새 파일을 받게 한다.
 BUNDLE_URL = ("https://huggingface.co/baqu2213/PoemForSmallFThings/"
-              "resolve/main/NAIA/naia_tag_combo_v1.ncsb")
-BUNDLE_NAME = "naia_tag_combo_v1.ncsb"
-BUNDLE_SHA256 = "2ae34aa9c5abae0187b517b5ce78a232a405e1818cb9393eff4c22253f2f8bc0"
-BUNDLE_BYTES = 187_801_727
+              "resolve/main/NAIA/naia_tag_combo_v3.ncsb")
+BUNDLE_NAME = "naia_tag_combo_v3.ncsb"
+# 지난 이름들. 새 번들이 자리를 잡으면 지운다 - 200MB 짜리가 나란히 쌓인다.
+STALE_NAMES = ("naia_tag_combo.ncsb", "naia_tag_combo_v2.ncsb")
+# 아래 둘은 `tools/build_tag_combo_bundle.py` 가 빌드 끝에 출력한다. 업로드할
+# **그 파일**의 값이어야 한다 - 검증한 뒤 다시 구우면 sha 가 달라진다.
+BUNDLE_SHA256 = "7dd410b61cfba2e52d4f92cf0cd72d2d8fea33e3d0b1c3c53a3a262b81f6dec2"
+BUNDLE_BYTES = 203_110_395
 
 _CHUNK = 1 << 20
 _UA = "NAIA TagCombo Downloader"
@@ -82,6 +98,36 @@ class BundleDownloader:
     def present(self) -> bool:
         return self.path.exists()
 
+    def sweep_stale(self) -> list[str]:
+        """지난 이름의 번들을 치운다. **현재 번들이 있을 때만** 부른다.
+
+        이름을 바꿔 새로 받게 만들면 옛 파일이 그대로 남는다(각 200MB). 지우는
+        건 내려받은 캐시뿐이고 사용자 데이터가 아니다 - 그래도 지금 쓰는 이름과
+        같으면 절대 건드리지 않는다.
+        """
+        gone = []
+        for nm in STALE_NAMES:
+            if nm == self.name:
+                continue
+            p = self.dir / nm
+            try:
+                if p.is_file():
+                    p.unlink()
+                    gone.append(nm)
+            except OSError:
+                pass
+        if gone:
+            print(f"[tag-combo] removed stale bundle(s): {', '.join(gone)}")
+        return gone
+
+    def retry(self) -> dict:
+        """error 에서 빠져나오는 유일한 길. 프론트의 [다시 시도] 가 부른다."""
+        with self._lock:
+            if self.state.state == "error":
+                self.state = DownloadState()
+                self._warned = False
+        return self.start()
+
     def status(self) -> dict:
         d = self.state.as_dict()
         if self.present() and d["state"] in ("idle", "ready"):
@@ -96,12 +142,19 @@ class BundleDownloader:
         with self._lock:
             if self.present():
                 self.state.state = "ready"
+                self.sweep_stale()
                 return self.status()
             if not self.configured():
                 self.state.state = "error"
                 self.state.error = "download url is not configured"
                 return self.status()
             if self._thread is not None and self._thread.is_alive():
+                return self.status()
+            if self.state.state == "error":
+                # **실패에서 저절로 다시 받지 않는다.** 스레드가 죽어 있으므로
+                # 위 검사를 통과해 버리는데, 그러면 상태 폴링이나 재진입 POST 가
+                # 들어올 때마다 179MB 를 새로 긁는다. 빠져나오는 길은 retry() 뿐,
+                # 즉 사용자가 명시적으로 다시 시도할 때뿐이다.
                 return self.status()
             self.state = DownloadState(state="downloading", started=time.time())
             self._thread = threading.Thread(target=self._run, daemon=True,
@@ -146,13 +199,31 @@ class BundleDownloader:
                 raise ValueError(f"corrupt groups: {bad[:3]}")
 
             shutil.move(str(part), str(self.path))
+            # 받은 **그 자리에서** 옛 이름을 치운다. `start()` 의 sweep 은 이미
+            # 있을 때만 도니까, 이게 없으면 새로 받은 회차에는 200MB 짜리 둘이
+            # 나란히 남고 다음 실행까지 그대로다(실측 확인).
+            self.sweep_stale()
             self.state.state = "ready"
             self.state.finished = time.time()
-        except (OSError, ValueError, urllib.error.URLError) as exc:
+        except BaseException as exc:      # noqa: BLE001 - 아래 주석 참조
+            # ⚠️ **여기서 예외를 좁히면 안 된다.**
+            #
+            # 원래 `(OSError, ValueError, URLError)` 만 받았다. 그런데 다운로드
+            # 중 연결이 끊기면 `http.client.IncompleteRead` 가 나는데 이건
+            # OSError 가 아니다. 잘린 번들을 파싱하면 `struct.error` 가 난다.
+            # 둘 다 안 잡혀서 스레드는 죽고 **상태는 `downloading` 에 영원히
+            # 남았다** - 프론트는 "받는 중"을 무한 폴링하고, `.part` 가 쌓이고,
+            # 재시도할 방법이 없다. (Codex 게이트 실증: state=downloading,
+            # part_exists=true, final_exists=false)
+            #
+            # 무엇이 터지든 상태는 반드시 error 로 착지해야 한다. 부분 파일도
+            # 반드시 치운다 - 정식 이름은 검증을 통과해야만 받는다.
             self.state.state = "error"
-            self.state.error = f"{type(exc).__name__}: {exc}"
+            self.state.error = f"{type(exc).__name__}: {exc}"[:300]
             self._log_once(f"bundle download failed: {self.state.error}")
             try:
                 part.unlink(missing_ok=True)
             except OSError:
                 pass
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise

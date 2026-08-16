@@ -83,6 +83,7 @@ class ComboService:
         # 오프라인 레시피 뱅크. 없으면 None 이고, 그러면 옛 온라인 경로로 떨어진다.
         self._bank_loaded = False
         self._bank = None
+        self._bank_error = ""       # 조용한 성능 저하를 드러내는 자리
 
     # ---- 다운로드 ----------------------------------------------------
     def _have_models(self) -> bool:
@@ -279,9 +280,22 @@ class ComboService:
             try:
                 from .bank import load as _load
                 self._bank = _load(self.search_dirs, self.bundle())
-            except Exception:      # noqa: BLE001 - 뱅크가 없어도 기능은 돌아야 한다
+            except Exception as exc:   # noqa: BLE001 - 뱅크가 없어도 기능은 돌아야 한다
+                # ⚠️ **삼키되 말은 해라.** 예전엔 조용히 None 이 됐는데, 그러면
+                # 옛 형식 번들을 만났을 때 기능이 죽는 대신 **온라인 폴백으로
+                # 조용히 내려앉는다** - 추천이 다시 니치해지는데 아무도 모른다
+                # (Codex 지적, 실증: 형식 NRB2 번들에 반환 None, stdout 빈 문자열).
+                # 상태에도 남겨서 `/api/tag-combo/groups` 로 보인다.
                 self._bank = None
+                self._bank_error = f"{type(exc).__name__}: {exc}"[:200]
+                safe = self._bank_error.encode("ascii", "replace").decode("ascii")
+                print(f"[tag-combo] recipe bank unavailable: {safe}")
         return self._bank
+
+    def bank_error(self) -> str:
+        """뱅크를 못 읽은 이유. 읽기 전이면 먼저 읽어 본다."""
+        self.bank()
+        return self._bank_error
 
     # ---- 질의 --------------------------------------------------------
     def recommend(self, tags: Iterable[str], *, group: str = "") -> dict[str, Any]:
@@ -303,7 +317,8 @@ class ComboService:
             probe = [t for t in want if t.lower() not in _PERSON_TAGS] or want
             r = bk.lookup(probe, grp, top_k=self.policy.top_k,
                           min_coverage=self.policy.min_coverage,
-                          flat_top=self.policy.flat_top)
+                          flat_top=self.policy.flat_top,
+                          flat_min_p=self.policy.flat_min_p)
             # ⚠️ **`tags`(평면 나열)를 반드시 함께 흘린다.** 화면은 묶음이 아니라
             # 이걸 쓴다. 처음엔 `combos` 만 담아 보내서 뱅크는 멀쩡한데 화면이
             # 통째로 기권했다 - 조회는 되는데 전달이 안 된 것이라 원인을 찾는 데

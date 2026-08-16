@@ -98,9 +98,14 @@ def register_tag_combo_routes(app: FastAPI, context: Any, *,
                     # 깨끗한 체크아웃에는 모델이 없다 - 생성물이라 커밋하지 않는다.
                     # 무엇을 해야 하는지 응답과 로그 양쪽에 남긴다.
                     _log_once("no models built; run tools/build_tag_combo_models.py")
+                # 뱅크 상태를 함께 낸다. 뱅크가 없으면 기능이 죽는 게 아니라
+                # **조용히 옛 온라인 경로로 내려앉는다** - 그건 눈에 보여야 한다.
+                bank_ok = svc.bank() is not None
                 return {"available": got, "dir": str(svc.dir),
                         "searchDirs": [str(d) for d in svc.search_dirs],
                         "built": bool(got),
+                        "bank": bank_ok,
+                        "bankError": "" if bank_ok else svc.bank_error(),
                         "howToBuild": "python tools/build_tag_combo_models.py"
                                       if not got else ""}
             except Exception as exc:      # noqa: BLE001

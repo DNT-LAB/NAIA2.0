@@ -251,9 +251,14 @@ def main() -> int:
     ap.add_argument("--out", default=str(ROOT / "data/tag_combo/recipe_bank.json"))
     ap.add_argument("--group", default="", help="한 그룹만 (비면 13개 전부)")
     ap.add_argument("--limit", type=int, default=0, help="앵커 수 상한(시험용)")
-    ap.add_argument("--min-anchor", type=int, default=200, help="앵커 최소 게시물")
+    # ⚠️ **기본값은 실제로 구운 값이어야 한다.** 배포한 v3 는 `80 / 2.0` 으로
+    # 구웠는데 기본값은 한동안 `200 / 1.3` 이었다 - 인자 없이 다시 돌리면 다른
+    # 뱅크가 나온다(Codex 지적). 재현 불가능한 산출물은 산출물이 아니다.
+    #   min_anchor 200 -> 80: 축 답변율 중앙 36.8% -> 50.0%
+    #   min_lift  1.3 -> 2.0: 공통 배경을 먼저 거른다(표시 칩 lift 중앙 4.0)
+    ap.add_argument("--min-anchor", type=int, default=80, help="앵커 최소 게시물")
     ap.add_argument("--min-pair", type=int, default=30)
-    ap.add_argument("--min-lift", type=float, default=1.3,
+    ap.add_argument("--min-lift", type=float, default=2.0,
                     help="배경 태그 컷. long hair 1.05 / looking at viewer 1.15 는 죽고 "
                          "blush 2.25 는 산다")
     ap.add_argument("--role-quota", type=int, default=8)
@@ -300,8 +305,10 @@ def main() -> int:
     flats = sum(len(r.get("tags") or []) for v in bank.values() for r in v.values())
     print(f"평면 태그 {flats:,}개 (앵커당 평균 {flats/max(1,tot):.1f})")
     blob = json.dumps({"format": "NRB3", "policy": {
+        # `flat_top` 도 남긴다 - 평면 목록 길이를 결정하는데 기록이 없으면
+        # 산출물만 보고 어떤 설정으로 구웠는지 알 수 없다.
         k: getattr(args, k) for k in ("min_anchor", "min_pair", "min_lift",
-                                      "role_quota", "per_anchor")},
+                                      "role_quota", "per_anchor", "flat_top")},
         "groups": bank}, ensure_ascii=False, separators=(",", ":"))
     import zlib
     print(f"\n앵커 {tot:,} · 레시피 {rows:,} · {time.time()-t0:.0f}s")

@@ -587,8 +587,64 @@ class TestRecipeBank:
         from core.tag_combo.bank import RecipeBank
         p = tmp_path / "recipe_bank.json"
         p.write_text(json.dumps({"format": "NRB2", "groups": {}}), encoding="utf-8")
-        with pytest.raises(ValueError, match="형식"):
+        with pytest.raises(ValueError, match="unknown bank format"):
             RecipeBank(p)
+
+    def test_tags_only_anchor_is_not_abandoned(self, tmp_path):
+        """묶음이 없어도 **평면 태그가 있으면 답이다.**
+
+        앵커 선택이 `rows` 만 보던 시절, `rows=[]` 인데 `tags` 는 16개인 앵커가
+        4,999개(9.01%) 있었고 전부 기권했다 - `dark background` 가 그 예다.
+        `blush` 를 놓쳤던 지명 병목과 같은 모양이다(Codex 지적 2026-08-16).
+        """
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "dark background": {"rows": [],
+                                "tags": [{"tag": "glowing", "p": 0.10, "lift": 3.0},
+                                         {"tag": "light particles", "p": 0.06, "lift": 4.0}]},
+        }})
+        r = b.lookup(["dark background"], "1girl_solo")
+        assert not r["abstained"], f"평면 태그를 갖고도 기권했다: {r}"
+        assert [x["tag"] for x in r["tags"]] == ["glowing", "light particles"]
+
+    def test_rows_anchor_still_wins_over_tags_only(self, tmp_path):
+        """묶음이 있는 앵커가 여전히 우선이다 - 기존 출력이 안 바뀌어야 한다."""
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "dark background": {"rows": [],
+                                "tags": [{"tag": "glowing", "p": 0.99, "lift": 3.0}]},
+            "maid": {"rows": [{"tags": ["apron"], "support": 99, "coverage": 0.49}],
+                     "tags": [{"tag": "apron", "p": 0.66, "lift": 5.0}]},
+        }})
+        r = b.lookup(["dark background", "maid"], "1girl_solo")
+        assert r["anchor"] == "maid", f"평면뿐인 앵커가 묶음 앵커를 이겼다: {r}"
+
+    def test_zero_percent_chips_are_cut(self, tmp_path):
+        """`0%` 라고 적힌 칩은 사용자에게 아무 말도 하지 않는다."""
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "maid": {"rows": [{"tags": ["apron"], "support": 99, "coverage": 0.49}],
+                     "tags": [{"tag": "apron", "p": 0.66, "lift": 5.0},
+                              {"tag": "dust", "p": 0.004, "lift": 9.0}]},
+        }})
+        r = b.lookup(["maid"], "1girl_solo")
+        assert [x["tag"] for x in r["tags"]] == ["apron"], r["tags"]
+
+    def test_broken_bank_is_loud_but_missing_bank_is_quiet(self, tmp_path):
+        """**없는 것**과 **있는데 못 읽는 것**은 다르다.
+
+        둘 다 조용히 None 이면, 형식이 안 맞는 번들을 만나도 아무 말 없이 옛
+        온라인 경로로 내려앉는다 - 추천이 니치해지는데 로그 한 줄이 없다.
+        """
+        import json
+        from core.tag_combo.bank import load
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert load([empty]) is None, "없는 것에 예외를 올리면 기능이 죽는다"
+
+        broken = tmp_path / "broken"
+        broken.mkdir()
+        (broken / "recipe_bank.json").write_text(
+            json.dumps({"format": "NRB2", "groups": {}}), encoding="utf-8")
+        with pytest.raises(ValueError, match="unknown bank format"):
+            load([broken])
 
     def test_picks_the_anchor_with_the_best_coverage(self, tmp_path):
         """앵커는 빈도가 아니라 **잘 맞는 것**으로 고른다.

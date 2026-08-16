@@ -4857,16 +4857,23 @@ export function createInteractivePanel({
     return '';                       // 못 정하면 서버가 태그로 유도한다
   }
 
-  async function fetchCombos(tags) {
+  // `anchor` = 화면이 지금 보고 있는 태그. 옆 카드('함께 쓰는 것')는
+  // `inspecting || lastPicked` 를 기준으로 삼는데 여기는 서버가 커버리지로
+  // 골라서, 팝업에서 다른 그림을 눌러도 조합 카드만 안 따라왔다(사용자 지적).
+  // **캐시 키에도 넣어야 한다** - 안 넣으면 같은 슬롯 태그로 앵커만 바꾼 요청이
+  // 옛 답을 그대로 돌려받아 고친 것이 화면에 안 나온다.
+  async function fetchCombos(tags, anchor) {
     const list = (tags || []).map(t => String(t).trim()).filter(Boolean);
     if (!list.length) return null;
     const grp = personGroupFromChars();
-    const key = grp + '|' + list.slice().sort().join(',');
+    const anc = String(anchor || '').trim();
+    const key = grp + '|' + anc.toLowerCase() + '|' + list.slice().sort().join(',');
     if (comboCache.has(key)) return comboCache.get(key);
     try {
       const r = await fetch('/api/tag-combo?tags=' +
         encodeURIComponent(list.slice(0, 24).join(',')) +
-        (grp ? '&group=' + encodeURIComponent(grp) : ''));
+        (grp ? '&group=' + encodeURIComponent(grp) : '') +
+        (anc ? '&anchor=' + encodeURIComponent(anc) : ''));
       const j = await r.json();
       // 모델이 안 구워진 설치에서는 조용히 없는 셈 친다 - 안내는 로그가 한다.
       const out = (j && !j.error) ? j : null;
@@ -5245,7 +5252,10 @@ export function createInteractivePanel({
     // '함께 쓰는 것' 은 태그를 **하나씩** 권한다. 이건 묶음으로 권한다 —
     // "이 구도에는 이 세트가 흔하다". 근거는 인원 그룹별 모델이고, 사용자가
     // 인원 수를 바꾸면 다른 모델이 붙는다(core/tag_combo).
-    const combo = await fetchCombos(currentTags());
+    // 기준은 옆 카드와 **같은 것**을 쓴다(`seedTag`). 살펴보는 태그는 아직 고른
+    // 것이 아니라 `currentTags()` 에 없으므로 조회 목록에도 함께 넣는다.
+    const combo = await fetchCombos(
+      inspecting ? [inspecting, ...currentTags()] : currentTags(), seedTag);
     if (seq !== asideSeq || !panelContext) return;
     const dlMsg = comboDlText();
     if (dlMsg) {

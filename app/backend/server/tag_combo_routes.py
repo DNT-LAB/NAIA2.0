@@ -70,14 +70,23 @@ def register_tag_combo_routes(app: FastAPI, context: Any, *,
         return await run_in_thread(fn)
 
     @app.get("/api/tag-combo")
-    async def tag_combo(tags: str = "", group: str = ""):   # noqa: ANN202
+    async def tag_combo(tags: str = "", group: str = "",
+                        anchor: str = ""):   # noqa: ANN202
+        """`anchor` 는 **화면이 지금 보고 있는 태그**다.
+
+        옆의 '함께 쓰는 것' 카드는 살펴보는 태그를 기준으로 삼는데(팝업 셀을
+        누르면 그것으로 바뀐다) 조합 카드는 커버리지로 골라서, 나란히 놓인 두
+        카드가 서로 다른 태그를 말했다(사용자 지적 2026-08-16). 앵커가 아니면
+        서버가 조용히 자동 선택으로 돌아간다.
+        """
         names = [x.strip() for x in str(tags or "").split(",") if x.strip()][:MAX_TAGS]
         if not names:
             return JSONResponse({"group": "", "combos": [], "matched": 0})
 
         def _run() -> dict[str, Any]:
             try:
-                return _service().recommend(names, group=group)
+                return _service().recommend(names, group=group,
+                                            anchor=str(anchor or "").strip())
             except Exception as exc:      # noqa: BLE001
                 # 추천이 없어도 앱은 돌아야 한다 - 그래서 200 으로 내보낸다.
                 # 다만 **조용히** 삼키면 안 된다. 예전에 조언 라우트가 그렇게

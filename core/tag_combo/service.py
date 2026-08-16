@@ -298,7 +298,8 @@ class ComboService:
         return self._bank_error
 
     # ---- 질의 --------------------------------------------------------
-    def recommend(self, tags: Iterable[str], *, group: str = "") -> dict[str, Any]:
+    def recommend(self, tags: Iterable[str], *, group: str = "",
+                  anchor: str = "") -> dict[str, Any]:
         want = [str(t).strip() for t in tags if str(t).strip()]
         grp = group or person_group_of(set(want))
         if grp not in PERSON_GROUPS:
@@ -318,7 +319,8 @@ class ComboService:
             r = bk.lookup(probe, grp, top_k=self.policy.top_k,
                           min_coverage=self.policy.min_coverage,
                           flat_top=self.policy.flat_top,
-                          flat_min_p=self.policy.flat_min_p)
+                          flat_min_p=self.policy.flat_min_p,
+                          prefer=anchor)
             # ⚠️ **`tags`(평면 나열)를 반드시 함께 흘린다.** 화면은 묶음이 아니라
             # 이걸 쓴다. 처음엔 `combos` 만 담아 보내서 뱅크는 멀쩡한데 화면이
             # 통째로 기권했다 - 조회는 되는데 전달이 안 된 것이라 원인을 찾는 데

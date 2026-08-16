@@ -65,7 +65,7 @@ class RecipeBank:
     def lookup(self, tags: Iterable[str], group: str, *,
                top_k: int = 5, min_coverage: float = 0.0,
                max_tag_repeat: int = 2, flat_top: int = 12,
-               flat_min_p: float = 0.01) -> dict[str, Any]:
+               flat_min_p: float = 0.01, prefer: str = "") -> dict[str, Any]:
         """프롬프트 태그로 레시피를 찾는다. 없으면 기권(빈 combos)."""
         table = self.anchors(group)
         if not table:
@@ -88,8 +88,19 @@ class RecipeBank:
         # 묶음이 있는 앵커를 여전히 우선한다 - 그게 더 강한 신호다. 아무도 없을
         # 때만 평면 신호(1위 태그의 P)로 고른다. 그래서 기존 출력은 한 글자도
         # 안 바뀐다.
+        #
+        # **화면이 보고 있는 태그가 있으면 그게 기준이다.** 커버리지로 고르면 옆
+        # 카드('함께 쓰는 것', `seedTag = inspecting || lastPicked`)와 기준이 갈려
+        # 나란히 놓인 두 카드가 서로 다른 태그를 말한다 - 사용자 지적 2026-08-16:
+        # 팝업에서 `wide hips` 를 눌렀는데 조합 카드는 `thick thighs` 에 눌러앉았다.
+        # 지정한 것이 앵커가 아니면 조용히 아래 자동 선택으로 돌아간다.
         best, best_cov = "", -1.0
-        for t in have:
+        pref = str(prefer or "").strip().lower()
+        if pref and pref in table:
+            e = table[pref] or {}
+            if (e.get("rows") or e.get("tags")):
+                best = pref
+        for t in (have if not best else []):
             rows = (table[t] or {}).get("rows") or []
             if rows and rows[0].get("coverage", 0) > best_cov:
                 best, best_cov = t, rows[0]["coverage"]

@@ -4704,11 +4704,14 @@ export function createInteractivePanel({
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
       const tag = b.getAttribute('data-advice-add');
-      // 조합 카드의 칩은 **누르면 넣는다.** 그리드 셀과 규약이 다른 이유는,
-      // 여기 있는 것은 이미 "이 조합을 쓰라"는 제안이라 살펴볼 대상이 아니다.
-      if (b.classList.contains('ia-combo-tag')) {
+      // 조합 카드의 칩과 **검색 결과 칩**(`.ia-hit`)은 누르면 넣는다. 그리드 셀과
+      // 규약이 다른 이유는, 여기 있는 것은 이미 "이걸 쓰라/이걸 찾는다" 는 의사
+      // 표시라 살펴볼 대상이 아니다.
+      if (b.classList.contains('ia-combo-tag') || b.classList.contains('ia-hit')) {
         toggleTag(tag, { fromAside: true });
         refreshAxisSections();
+        // 검색 결과는 넣은 뒤에도 남는다(연달아 고를 수 있게). `on` 표시만 바뀐다 -
+        // `toggleTag` -> `setCurrentTags` 가 renderAside 를 다시 부른다.
         return;
       }
       if (!ev.target.closest('.ia-cell-act')) {
@@ -5193,6 +5196,94 @@ export function createInteractivePanel({
     lastPicked = next;
   }
 
+  /** 지금 치고 있는 질의. 팝업 검색창이 우선이고, 없으면 슬롯 캐럿이 놓인 토큰이다.
+   *
+   *  `fromSearch` 를 같이 돌려주는 이유: 검색창은 "찾아 달라"는 명시적 요청이라
+   *  질의가 태그와 정확히 같아도 목록을 내야 하지만, 슬롯 타이핑은 다 치고 나면
+   *  그 태그를 기준으로 조언 카드가 답하므로 목록을 접어야 한다. */
+  function liveQuery() {
+    if (thumbFilter) return { q: thumbFilter, fromSearch: true };
+    const el = editingEl();
+    const ta = el && el.querySelector(
+      panelContext && panelContext.neg ? '.ia-neg-input' : '.ia-slot-input');
+    if (!ta || document.activeElement !== ta) return { q: '', fromSearch: false };
+    const tok = caretToken(ta).toLowerCase();
+    // 한 글자는 수백 개가 걸려 목록이 의미를 잃는다.
+    return { q: tok.length >= 2 ? tok : '', fromSearch: false };
+  }
+
+  /** 검색·타이핑 중에 **맞는 태그를 오른쪽 패널에 나열한다**(사용자 결정 2026-08-17).
+   *
+   *  팝업을 접힌 띠로 만든 뒤 남은 구멍이었다. 카테고리를 고르지 않은 상태에서
+   *  검색을 하면 탭의 개수 표시(`3/49`)만 바뀌고 **맞는 태그를 볼 곳이 없었다** -
+   *  그리드를 펼치려면 카테고리를 눌러야 하고, 그러면 이미지가 밀린다.
+   *
+   *  그래서 접힌 상태의 검색 결과는 오른쪽 반투명 패널이 받는다. 카테고리를
+   *  펼쳤으면 그리드가 이미 답이라 내지 않는다(같은 목록을 두 번 그릴 이유가 없다).
+   *  `thumbHtml`/`glossHtml` 이 "검색만으로는 펼치지 않는다" 고 적어 둔 상대가 여기다. */
+  function searchHitsHtml() {
+    if (openThumbAxis) return '';
+    const { q, fromSearch } = liveQuery();
+    if (!q) return '';
+    const secs = panelContext?.sections;
+    if (!Array.isArray(secs) || !secs.length) return '';
+    const excluded = slotExcluded();
+    const groups = [];
+    let total = 0;
+    let exact = false;
+    for (const sec of secs) {
+      let pool = null;
+      if (sec.kind === 'thumb') pool = THUMB_TAGS[sec.ref] || [];
+      // gloss 는 `[태그, 설명]` 쌍이다. 설명으로도 찾히게 matchesQuery 에 태그만 넘긴다
+      // (설명 검색은 TAG_DESC 쪽에서 이미 본다).
+      else if (sec.kind === 'gloss') pool = (GLOSS_TAGS[sec.ref] || []).map(x => x[0]);
+      if (!pool || !pool.length) continue;
+      const hit = [];
+      for (const t of pool) {
+        const low = String(t).toLowerCase();
+        if (excluded.has(low)) continue;
+        if (low === q) exact = true;
+        if (matchesQuery(t, q)) hit.push(t);
+      }
+      if (!hit.length) continue;
+      total += hit.length;
+      groups.push({ label: sec.label || sec.ref, hit });
+    }
+    if (exact && !fromSearch) return '';
+    if (!groups.length) return '';
+    const HIT_MAX = 48, PER_AXIS = 12;
+    let left = HIT_MAX;
+    const cur = currentLower();
+    // `.ia-hit` 은 **누르면 바로 넣는다**(살펴보기를 거치지 않는다). 검색 결과는
+    // 이미 "이걸 찾는다" 는 의사 표시라, 그리드처럼 오클릭을 걱정할 대상이 아니다.
+    const chip = (t, label) => {
+      const on = cur.has(String(t).toLowerCase());
+      const tip = `${tagTip(t)}${label ? ` · ${label}` : ''}`;
+      return `<button type="button" class="ia-aside-chip ia-hit${on ? ' on' : ''}"`
+        + ` data-advice-add="${escHtml(t)}" data-naia-title="${escHtml(tip)}"`
+        + ` aria-label="${escHtml(tip)}">${escHtml(t)}</button>`;
+    };
+    // **축별로 나누지 않는다.** 처음엔 `.ia-aside-group` 으로 축마다 머리말을
+    // 붙였는데, 축 하나에 결과가 한 개뿐인 경우가 흔해서 칩 6개가 **465px** 를
+    // 먹었다(한 그룹당 47px + 간격 8px). 이 리팩터가 없애려던 바로 그 낭비다.
+    // 이제 한 흐름으로 잇고, 어느 분류인지는 툴팁이 말한다(칩 6개 = 두 줄).
+    const flat = [];
+    for (const g of groups) {
+      if (left <= 0) break;
+      const take = g.hit.slice(0, Math.min(PER_AXIS, left));
+      left -= take.length;
+      for (const t of take) flat.push(chip(t, g.label));
+    }
+    const body = `<div class="ia-aside-chips">${flat.join('')}</div>`;
+    // **자른 것은 자른다고 말한다.** 안 적으면 48개가 전부인 줄 알고 더 좁은 말로
+    // 다시 치게 된다 - 실제로는 좁힐 필요가 없는데도.
+    const cut = total > HIT_MAX
+      ? `<div class="ia-aside-hint soft">상위 ${HIT_MAX}개만 보입니다 — 더 좁혀 보세요.</div>` : '';
+    return '<div class="ia-aside-card scroll"><div class="ia-aside-title">검색 결과' +
+      `<span class="ia-aside-count">${escHtml(q)} · ${total}</span></div>` +
+      body + cut + '</div>';
+  }
+
   async function renderAside() {
     const host = ensureAside();
     // 옆 팝업이 없는 슬롯(캐릭터)에서는 조언 플로트도 띄우지 않는다 — 좌표를 팝업에
@@ -5209,12 +5300,20 @@ export function createInteractivePanel({
     // 붙였으므로 사용자는 "다음 것을 고르려는" 상태다. 그때 마지막 태그의 추천을
     // 남겨 두면 원하지 않는 것이 계속 보인다(사용자 지적). 살펴보는 태그가 있으면
     // 그건 명시적 의사라 예외다.
+    // 검색/타이핑 결과는 **조언보다 먼저** 그린다. 지금 찾고 있는 것이 답이고,
+    // 아래 카드들은 이미 고른 것에 대한 이야기다.
+    const hits = searchHitsHtml();
     if (awaitingNewTag && !inspecting) {
+      if (hits) { host.classList.add('open'); host.innerHTML = hits; positionAside(); return; }
       host.classList.remove('open');
       host.innerHTML = '';
       return;
     }
+    // **먼저 칠한다.** 아래 조언·조합·사전은 네트워크를 기다리는데, 검색 결과는
+    // 이미 손에 있다. 기다리게 하면 "즉각" 이 아니게 된다(사용자 요구).
+    if (hits) { host.classList.add('open'); host.innerHTML = hits; positionAside(); }
     if (!askTags.length) {
+      if (hits) return;
       // **도움말 카드를 띄우지 않는다**(사용자 지시 2026-08-17). 고른 것이 없을 때
       // 조작법을 적어 두는 카드였는데, 팝업을 접힌 띠로 만든 뒤로는 아무것도 안
       // 고른 상태가 곧 **첫 화면**이라 그 카드가 늘 떠 있게 됐다 - 빈 패널이
@@ -5325,6 +5424,7 @@ export function createInteractivePanel({
     const seedLabel = seed ? seed.tag : '';
 
     const parts = [];
+    if (hits) parts.push(hits);
     // '살펴보는 중' 상자는 뒀다가 뺐다 — 무엇을 보고 있는지는 셀의 파란 테두리와
     // 아래 '함께 쓰는 것 <태그> 기준' 머리말이 이미 말한다. 같은 말을 세 번 하게 된다.
     // 색 조합. `white shirt`(541,974) 처럼 `<색> <옷>` 은 분해해 뒀는데 색을 고를 곳이
@@ -5951,6 +6051,9 @@ export function createInteractivePanel({
         if (next === thumbFilter) return;
         thumbFilter = next;
         refreshAxisSections();
+        // 접힌 상태의 검색 결과는 **오른쪽 패널이 받는다**(사용자 결정 2026-08-17).
+        // 이 줄이 없으면 탭의 개수 표시(`3/49`)만 바뀌고 맞는 태그를 볼 곳이 없다.
+        void renderAside();
       };
       input.addEventListener('input', applyFilter);
       input.addEventListener('keydown', event => {
@@ -5971,12 +6074,15 @@ export function createInteractivePanel({
   let thumbFilter = '';              // 검색창이 그리드를 거를 때의 질의(트리 없는 슬롯)
 
   /** 태그명과 한글 설명 양쪽을 본다 — 사용자가 `앉` 으로 `sitting` 을 찾을 수 있어야 한다. */
-  function matchesFilter(tag) {
-    const q = thumbFilter;
+  function matchesQuery(tag, q) {
     if (!q) return true;
     if (String(tag).toLowerCase().includes(q)) return true;
     const desc = (TAG_DESC || {})[tag];
     return !!desc && String(desc).toLowerCase().includes(q);
+  }
+
+  function matchesFilter(tag) {
+    return matchesQuery(tag, thumbFilter);
   }
 
   // 민감 태그(신체 결손/봉합/혈흔 등)는 썸네일을 블러하고 호버 시에만 보여준다.
@@ -6734,14 +6840,20 @@ export function createInteractivePanel({
       el.addEventListener('click', event => {
         event.stopPropagation();
         const axis = el.dataset.accAx;
-        // 검색 중에는 이미 전부 펼쳐져 있다 — 누르면 그 구간으로 **점프**한다.
-        // 접기로 동작하면 결과가 사라져 "왜 없어졌지" 가 된다.
-        if (thumbFilter) {
-          scrollToAxis(axis);
-          return;
-        }
+        // ⚠️ 여기 **검색 중이면 `scrollToAxis` 만 하고 돌아가는** 분기가 있었다.
+        // "검색 중에는 이미 전부 펼쳐져 있으니 점프만 하면 된다" 는 뜻이었는데,
+        // 팝업을 접힌 띠로 바꾼 뒤 그 전제가 깨졌다 - 검색만으로는 아무 축도
+        // 펼치지 않으므로 **그리는 판이 없는데 그 판으로 스크롤**했다. 결과는
+        // 검색어를 지우기 전까지 카테고리를 아예 열 수 없는 막다른 길이었다.
         openThumbAxis = (openThumbAxis === axis) ? null : axis;
         refreshAxisSections();
+        // 펼치면 그리드가 답이므로 오른쪽의 '검색 결과' 카드는 물러난다(접으면
+        // 되돌아온다). `refreshAxisSections` 는 팝업만 다시 그려서, 이 줄이
+        // 없으면 카드가 그리드와 **같은 목록을 두 번** 보여 준 채로 남는다.
+        if (thumbFilter) void renderAside();
+        // 검색 중에 펼치면 결과가 있는 축이 전부 열린다(thumbHtml 의 `open`) -
+        // 그때는 누른 축으로 데려다 준다.
+        if (thumbFilter && openThumbAxis) scrollToAxis(axis);
       });
     });
     // '메인 색상 : [ ]' 클릭 -> 주 색상 팔레트로 스크롤(팝업 본문이 스크롤 컨테이너).

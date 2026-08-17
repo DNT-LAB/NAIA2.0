@@ -1381,3 +1381,78 @@ class TestGate5Findings:
         # 앵커 8개 x 그룹 13개 x 호출 모양 2개
         assert len(seen) == 8 * len(PERSON_GROUPS) * 2, len(seen)
         assert len({a for _, a in seen}) == 8, "앵커 일부만 돌았다"
+
+
+class TestGate6Findings:
+    """Codex 6차 게이트(2026-08-18). P1 이 처음으로 안 나온 라운드 - P2 하나.
+
+    검증기 **자신이** 예외로 탈출하는 문제였다. "불량 입력은 ValueError" 가
+    이 게이트의 계약인데, 큰 정수에서 OverflowError 가 나면 verify_all 은 불량
+    목록 대신 예외를 던지고 번들 빌더의 (OSError, ValueError) 처리도 우회한다.
+    """
+
+    @staticmethod
+    def _bank(entry):
+        return json.dumps({"format": "NRB3",
+                           "groups": {g: dict(entry) for g in PERSON_GROUPS}}
+                          ).encode("utf-8")
+
+    @staticmethod
+    def _row(**kw):
+        r = {"tags": ["a", "b"], "coverage": 0.3, "support": 9}
+        r.update(kw)
+        return r
+
+    def test_huge_int_is_rejected_not_raised(self):
+        """`10**1000` 은 **ValueError** 로 거부돼야 한다 - OverflowError 가 아니다."""
+        from core.tag_combo.bundle import check_bank_blob
+        blob = self._bank({"a0": {"rows": [self._row(support=10 ** 1000)],
+                                  "tags": [{"tag": "x", "p": 0.5}]}})
+        with pytest.raises(ValueError):
+            check_bank_blob(blob)
+
+    def test_verify_all_keeps_its_contract_on_a_huge_int(self, tmp_path):
+        """`verify_all` 은 **목록**을 돌려준다 - 예외로 탈출하지 않는다."""
+        from core.tag_combo.bundle import write_bundle, ComboBundle
+        aux = {}
+        for name in ("recipe_bank", "semantic_graph", "anchor_feature_marginals"):
+            p = tmp_path / f"{name}.json"
+            p.write_bytes(self._bank({"a0": {"rows": [self._row(support=10 ** 1000)],
+                                             "tags": [{"tag": "x", "p": 0.5}]}})
+                          if name == "recipe_bank" else b'{"format": "NSG1"}')
+            aux[name] = p
+        out = tmp_path / "t.ncsb"
+        write_bundle(out, [], source="test", aux=aux, built="x")
+        bad = ComboBundle(out).verify_all()
+        assert isinstance(bad, list) and bad, bad
+
+    @pytest.mark.parametrize("field,value", [
+        ("coverage", 1.5), ("coverage", -0.1), ("support", -1),
+    ])
+    def test_out_of_range_row_numbers_are_rejected(self, field, value):
+        """확률이 1 을 넘으면 화면에 `500%` 가 뜬다 - 크래시보다 나쁘다(조용히 틀림)."""
+        from core.tag_combo.bundle import check_bank_blob
+        blob = self._bank({"a0": {"rows": [self._row(**{field: value})],
+                                  "tags": [{"tag": "x", "p": 0.5}]}})
+        with pytest.raises(ValueError):
+            check_bank_blob(blob)
+
+    @pytest.mark.parametrize("p", [1.5, -0.01])
+    def test_out_of_range_flat_p_is_rejected(self, p):
+        from core.tag_combo.bundle import check_bank_blob
+        blob = self._bank({"a0": {"rows": [self._row()],
+                                  "tags": [{"tag": "x", "p": p}]}})
+        with pytest.raises(ValueError):
+            check_bank_blob(blob)
+
+    def test_real_ranges_stay_inside_the_gate(self):
+        """실측 범위를 못박는다 - 이 문이 **배포물을 거부하면** 여기서 걸린다.
+
+        실측(2026-08-18): rows 581,930 coverage [0.0001, 1.0] support [30, 119,776]
+                          flat  964,243 p [0.0001, 1.0]
+        """
+        from core.tag_combo.bundle import _entry_wellformed
+        assert _entry_wellformed({"rows": [self._row(coverage=1.0, support=119776),
+                                          self._row(coverage=0.0001, support=30)],
+                                  "tags": [{"tag": "x", "p": 1.0},
+                                           {"tag": "y", "p": 0.0001}]}) == []

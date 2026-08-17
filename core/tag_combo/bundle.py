@@ -99,10 +99,25 @@ def _entry_wellformed(e) -> list[str]:
     통과하고 조회는 죽는다(Codex 4차 실증: `valid_sibling_masks_bad_first GATE
     PASS CRASH TypeError`). 그래서 배포 게이트는 전수로 본다.
     """
-    def _num(v) -> bool:
-        # NaN/inf 도 거른다 - JSON 왕복은 통과하는데 화면에서 `NaN%` 가 된다.
-        return (isinstance(v, (int, float)) and not isinstance(v, bool)
-                and math.isfinite(v))
+    def _num(v, lo=None, hi=None) -> bool:
+        """유한한 수인가(선택적으로 범위까지).
+
+        ⚠️ **`int` 를 `math.isfinite` 에 넘기지 마라.** JSON 정수는 임의 정밀도라
+        `10**1000` 이 들어오면 float 변환에서 `OverflowError` 가 난다 - 그러면
+        "불량 입력은 ValueError" 라는 이 게이트의 계약이 깨지고, `verify_all` 은
+        목록 대신 예외를 던지며 번들 빌더의 `(OSError, ValueError)` 처리도
+        우회한다(Codex 6차 실증 2026-08-18). 정수는 늘 유한하다 - 크기만 본다.
+        """
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return False
+        if isinstance(v, int):
+            if abs(v) > 10 ** 15:      # 코퍼스가 7.5M 이라 support 는 그 아래다
+                return False
+        elif not math.isfinite(v):     # NaN/inf 는 화면에서 `NaN%` 가 된다
+            return False
+        if lo is not None and v < lo:
+            return False
+        return not (hi is not None and v > hi)
 
     def _strs(v) -> bool:
         """`lookup` 이 `set(r["tags"])` 로 쓰므로 **원소가 해시 가능한 문자열**이어야
@@ -126,16 +141,22 @@ def _entry_wellformed(e) -> list[str]:
             bad.append("row without tags")
         elif not _strs(r["tags"]):
             bad.append("row tags contain a non-string")
-        elif not _num(r.get("coverage")) or not _num(r.get("support")):
+        elif not _num(r.get("coverage"), 0.0, 1.0) or not _num(r.get("support"), 0):
             # `coverage` 는 앵커 선택이, `support` 는 라우트 응답이 읽는다.
-            bad.append("row without coverage/support numbers")
+            #
+            # 범위까지 보는 이유: 확률이 1 을 넘으면 화면에 `500%` 가 뜬다 -
+            # 크래시가 아니라 **조용히 틀린 것**이라 더 나쁘다. 실제 뱅크 실측
+            # (581,930줄)은 coverage [0.0001, 1.0] · support [30, 119,776] 이라
+            # 이 문이 배포물을 거부하지 않는다.
+            bad.append("row coverage/support out of range")
     for x in (flat or []):
         if not isinstance(x, dict):
             bad.append("flat entry is not a dict")
         elif not str(x.get("tag") or "").strip():
             bad.append("flat entry without tag")
-        elif not _num(x.get("p")):
-            bad.append("flat entry without p")
+        elif not _num(x.get("p"), 0.0, 1.0):
+            # 실측 p 는 [0.0001, 1.0] 이다(964,243칩). 화면이 `p*100` 을 쓴다.
+            bad.append("flat entry p out of range")
     return bad
 
 

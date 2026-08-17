@@ -212,6 +212,11 @@ class ComboService:
         self._bundle_bad = ""
         self._bad_sig = ()
         self._bank_loaded = False      # 다음 조회가 다시 읽는다
+        # **치웠으면 막힘도 끝났다.** 지난 회차에 잠금으로 실패해 `_blocked` 를
+        # 세웠는데, 잠금이 풀려 이번에 성공했는데도 그 값이 남아 있어서 같은
+        # `ensure_bundle(retry=True)` 호출이 error 로 끝났다 - 재시도 한 번을
+        # 그냥 태웠다(Codex 4차 실증: `ensure_after_lock_release error`).
+        self._blocked = ""
         safe = f"quarantined unusable bundle ({bad[:2]}); will re-download"
         print(f"[tag-combo] {safe.encode('ascii', 'replace').decode('ascii')}")
         return dst.name
@@ -530,9 +535,14 @@ class ComboService:
                     "matched": 0, "bundleSize": 0, "usedPrompt": [r["anchor"]],
                     "backedOff": False, "weak": False,
                     "tags": r.get("tags") or [],
-                    "combos": [{"tags": c["tags"], "support": c["support"],
+                    # ⚠️ 직접 인덱스하지 않는다. `c["support"]` 였는데 그 필드가
+                    # 없는 줄을 만나면 **추천 요청 전체가 KeyError** 로 죽었다 -
+                    # 게이트가 막아 주지만 손으로 넣는 파일은 늘 남는다
+                    # (Codex 4차 실증 2026-08-17: `missing_support ... CRASH`).
+                    "combos": [{"tags": c.get("tags") or [],
+                                "support": c.get("support", 0),
                                 "coverage": c.get("coverage", 0.0),
-                                "bits": 0.0} for c in r["combos"]],
+                                "bits": 0.0} for c in (r.get("combos") or [])],
                 }
             # 뱅크가 기권했으면 **기권이 답이다.** 온라인으로 흘려보내면 예전의
             # 니치 추천이 그대로 돌아온다(`smile` -> evil grin 0.10%).

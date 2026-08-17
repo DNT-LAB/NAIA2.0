@@ -1020,7 +1020,10 @@ class TestGate2Findings:
 
     @staticmethod
     def _real():
-        return {"x": {"rows": [{"tags": ["a", "b"], "coverage": 0.3}],
+        # `support` 를 빼면 안 된다 - 실제 NRB3 줄에는 있고(빌더가 쓴다) 라우트
+        # 응답이 그걸 읽는다. 처음엔 빼 뒀는데, 게이트가 전수 검사로 강해지면서
+        # **픽스처가 비현실적이라는 것**이 드러났다(Codex 4차 이후).
+        return {"x": {"rows": [{"tags": ["a", "b"], "coverage": 0.3, "support": 9}],
                       "tags": [{"tag": "a", "p": 0.5}]}}
 
     def test_answerless_loose_bank_is_not_readmitted_by_fallback(self, tmp_path):
@@ -1074,7 +1077,7 @@ class TestGate2Findings:
         assert check_bank_blob(blob) and check_bank_partial(blob)
         assert len(bank_answerable_groups(json.loads(blob))) == len(PERSON_GROUPS)
 
-    def test_unquarantinable_bad_bundle_lands_on_error(self, tmp_path):
+    def test_unquarantinable_bad_bundle_lands_on_error(self, tmp_path, monkeypatch):
         """치울 수 **없는** 자리의 불량 번들은 `error` 로 앉아야 한다.
 
         저장소 `data/tag_combo` 가 받는 곳이 되면 검역을 안 한다(개발자가 방금
@@ -1089,7 +1092,13 @@ class TestGate2Findings:
         # 사라지면 막힘을 푼다" 는 뒤이은 고침이 이 테스트를 정확히 깨뜨렸다.
         (tmp_path / BUNDLE_NAME).write_bytes(b"NOT A BUNDLE")
         svc = ComboService(tmp_path, search_dirs=[tmp_path])
-        svc._blocked = "bundle in repo data dir is unusable"
+        # 검역이 **실제로 실패**하게 만든다. 예전엔 `_blocked` 를 손으로 세웠는데
+        # 그건 분기를 타지 않는 가짜였고(Codex 3차 지적), "검역이 성공하면 막힘을
+        # 푼다" 는 4차 고침과 정면으로 부딪혔다 - 가짜 전제가 깨진 것이 맞다.
+        def boom(self, dst):                    # noqa: ANN001
+            raise OSError("locked")
+        monkeypatch.setattr(Path, "replace", boom)
+        svc.quarantine_bad_bundle()
         st = svc.download_status()
         assert st["state"] == "error" and st["error"], st
         en = svc.ensure_bundle()
@@ -1209,3 +1218,93 @@ class TestGate3Findings:
         target.unlink()                         # 사람이 손으로 지웠다
         assert svc.download_status()["state"] != "error", "막힘이 풀리지 않았다"
         assert svc._blocked == ""
+
+
+class TestGate4Findings:
+    """Codex 4차 게이트(2026-08-17). 3차 고침이 또 낳은 결함 2건.
+
+    **이 클래스의 마지막 테스트가 이 영역의 구조적 교정을 지킨다.** 필드 목록을
+    손으로 관리하는 방식은 4라운드 연속 뚫렸다(tags -> coverage/p -> support).
+    이제 게이트가 `lookup` 을 실제로 돌리므로, 목록이 낡아도 소비자가 죽는 것은
+    잡힌다.
+    """
+
+    @staticmethod
+    def _blob(entry, groups=None):
+        gs = groups or PERSON_GROUPS
+        return json.dumps({"format": "NRB3",
+                           "groups": {g: dict(entry) for g in gs}}).encode("utf-8")
+
+    @staticmethod
+    def _row(tags=("a", "b"), **kw):
+        r = {"tags": list(tags), "coverage": 0.3, "support": 9}
+        r.update(kw)
+        return r
+
+    def test_valid_first_row_does_not_mask_a_broken_sibling(self):
+        """멀쩡한 첫 줄이 망가진 **형제 줄**을 가려 주면 안 된다.
+
+        런타임은 목록을 전부 소비한다. "하나라도 쓸 수 있으면 통과" 규칙은
+        게이트를 지나 조회에서 죽는다(Codex 4차: valid_sibling_masks_bad_first).
+        """
+        from core.tag_combo.bundle import check_bank_blob
+        entry = {"x": {"rows": [self._row(), {"tags": None, "coverage": 0.1}],
+                       "tags": [{"tag": "a", "p": 0.5}]}}
+        with pytest.raises(ValueError):
+            check_bank_blob(self._blob(entry))
+
+    def test_row_without_support_is_rejected(self):
+        """`support` 는 라우트 응답이 직접 읽는다 - 없으면 배포 불가다."""
+        from core.tag_combo.bundle import check_bank_blob
+        bad = dict(self._row()); bad.pop("support")
+        entry = {"x": {"rows": [bad], "tags": [{"tag": "a", "p": 0.5}]}}
+        with pytest.raises(ValueError):
+            check_bank_blob(self._blob(entry))
+
+    def test_recommend_does_not_crash_on_a_support_less_row(self, tmp_path):
+        """게이트를 우회해 들어온 파일에도 **추천 요청이 죽지 않는다.**"""
+        from core.tag_combo.service import ComboService
+        bad = dict(self._row()); bad.pop("support")
+        (tmp_path / "recipe_bank.json").write_bytes(self._blob(
+            {"maid": {"rows": [bad], "tags": [{"tag": "apron", "p": 0.5}]}}))
+        svc = ComboService(tmp_path, search_dirs=[tmp_path])
+        r = svc.recommend(["maid"], group="1girl_solo", anchor="maid")
+        assert isinstance(r, dict) and not r.get("error"), r
+        assert r["combos"][0]["support"] == 0, r["combos"][:1]
+
+    def test_smoke_lookup_catches_what_the_field_list_cannot(self):
+        """**구조적 교정의 증거.** 필드 목록은 통과하지만 조회는 죽는 입력.
+
+        `tags: ["a", ["b"]]` 는 리스트이고 비어 있지도 않아 체크리스트를 지난다.
+        그런데 `lookup` 의 `set(r["tags"])` 는 unhashable 로 죽는다. 게이트가
+        실제 조회를 돌리기 때문에 잡힌다 - 목록만 있었다면 배포됐다.
+        """
+        from core.tag_combo.bundle import _entry_wellformed, check_bank_blob
+        entry = {"x": {"rows": [self._row(tags=("a", ["b"]))],
+                       "tags": [{"tag": "a", "p": 0.5}]}}
+        assert _entry_wellformed(entry["x"]) == [], "체크리스트는 통과해야 한다(전제)"
+        with pytest.raises(ValueError, match="lookup crashed"):
+            check_bank_blob(self._blob(entry))
+
+    def test_blocked_clears_when_quarantine_later_succeeds(self, tmp_path,
+                                                           monkeypatch):
+        """잠금이 풀려 검역이 **성공**하면 막힘도 끝난다.
+
+        안 지우면 그 회차의 재시도가 error 로 끝나 그냥 태워진다(Codex 4차:
+        `ensure_after_lock_release error`).
+        """
+        from core.tag_combo.download import BUNDLE_NAME
+        from core.tag_combo.service import ComboService
+        target = tmp_path / BUNDLE_NAME
+        target.write_bytes(b"NOT A BUNDLE")
+        svc = ComboService(tmp_path, search_dirs=[tmp_path])
+
+        def boom(self, dst):                    # noqa: ANN001
+            raise OSError("locked")
+        monkeypatch.setattr(Path, "replace", boom)
+        svc.quarantine_bad_bundle()
+        assert svc._blocked, "잠금 실패는 막힘이어야 한다"
+        monkeypatch.undo()                      # 잠금이 풀렸다
+        assert svc.quarantine_bad_bundle().endswith(".bad")
+        assert svc._blocked == "", "성공했는데 막힘이 남았다"
+        assert svc.download_status()["state"] != "error"

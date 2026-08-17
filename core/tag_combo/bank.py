@@ -58,6 +58,23 @@ class RecipeBank:
         self.policy: dict = d.get("policy") or {}
         self.groups: dict[str, dict[str, list]] = d.get("groups") or {}
 
+    @classmethod
+    def from_parsed(cls, d: dict, *, path: Path | None = None) -> "RecipeBank":
+        """이미 파싱된 dict 로 만든다.
+
+        검증 게이트(`bundle.check_bank_blob`)가 **같은 dict 로 실제 조회를 돌려
+        보려고** 쓴다 - 91MB JSON 을 두 번 파싱하지 않기 위해서다. 형식 검사는
+        `__init__` 과 **같은 문구**를 쓴다(두 문구가 갈리면 그걸 잡는 테스트가
+        경로에 따라 통과/실패한다).
+        """
+        obj = cls.__new__(cls)
+        obj.path = Path(path or "<memory>")
+        if d.get("format") != "NRB3":
+            raise ValueError(f"unknown bank format: {d.get('format')!r}, want NRB3")
+        obj.policy = d.get("policy") or {}
+        obj.groups = d.get("groups") or {}
+        return obj
+
     # ---- 조회 --------------------------------------------------------
     def anchors(self, group: str) -> dict[str, list]:
         return self.groups.get(group) or {}

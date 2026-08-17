@@ -90,6 +90,76 @@ def _entry_answerable(e) -> bool:
     return False
 
 
+def _entry_wellformed(e) -> list[str]:
+    """엔트리의 **모든** 항목이 런타임이 읽는 모양인가. 아니면 어긴 이유들.
+
+    ⚠️ `_entry_answerable` 은 "하나라도 쓸 수 있으면" 통과다. 그런데 런타임은
+    목록을 **전부** 소비한다 - 멀쩡한 첫 줄 뒤에 망가진 형제 줄이 있으면 게이트는
+    통과하고 조회는 죽는다(Codex 4차 실증: `valid_sibling_masks_bad_first GATE
+    PASS CRASH TypeError`). 그래서 배포 게이트는 전수로 본다.
+    """
+    def _num(v) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    bad = []
+    if not isinstance(e, dict):
+        return ["entry is not a dict"]
+    rows, flat = e.get("rows"), e.get("tags")
+    if rows is not None and not isinstance(rows, list):
+        bad.append("rows is not a list")
+        rows = []
+    if flat is not None and not isinstance(flat, list):
+        bad.append("tags is not a list")
+        flat = []
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            bad.append("row is not a dict")
+        elif not isinstance(r.get("tags"), list) or not r.get("tags"):
+            bad.append("row without tags")
+        elif not _num(r.get("coverage")) or not _num(r.get("support")):
+            # `coverage` 는 앵커 선택이, `support` 는 라우트 응답이 읽는다.
+            bad.append("row without coverage/support numbers")
+    for x in (flat or []):
+        if not isinstance(x, dict):
+            bad.append("flat entry is not a dict")
+        elif not str(x.get("tag") or "").strip():
+            bad.append("flat entry without tag")
+        elif not _num(x.get("p")):
+            bad.append("flat entry without p")
+    return bad
+
+
+def _smoke_lookup(d: dict, groups, *, per_group: int = 3) -> None:
+    """게이트가 **런타임 소비자를 직접 돌린다.** 예외가 나면 배포 불가다.
+
+    ⚠️ 이것이 이 영역의 구조적 교정이다. 필드 목록을 손으로 관리하면 계속 샌다 -
+    같은 게이트가 **4라운드 연속** 뚫렸고 매번 "그 필드도 런타임이 읽더라" 였다
+    (`tags` -> `coverage`/`p` -> `support`). 목록은 소비자가 바뀌면 낡는다.
+    실제로 `lookup` 을 돌려 보면 런타임이 인덱스하는 것은 정의상 전부 덮인다.
+    """
+    from .bank import RecipeBank
+    bk = RecipeBank.from_parsed(d)
+    for g in groups:
+        tab = bk.anchors(g)
+        if not tab:
+            continue
+        answered = 0
+        for i, anchor in enumerate(tab):
+            if i >= per_group:
+                break
+            for kw in ({"prefer": anchor}, {}):
+                try:
+                    r = bk.lookup([anchor], g, **kw)
+                except Exception as exc:     # noqa: BLE001 - 무엇이든 배포 불가다
+                    raise ValueError(
+                        f"lookup crashed: group={g!r} anchor={anchor!r} "
+                        f"{type(exc).__name__}: {exc}") from None
+                if kw and not r.get("abstained"):
+                    answered += 1
+        if not answered:
+            raise ValueError(f"group {g!r}: sampled anchors all abstained")
+
+
 def bank_answerable_groups(d: dict) -> list[str]:
     """뱅크 dict 에서 **답할 수 있는 엔트리를 가진** 그룹 이름들.
 
@@ -158,6 +228,17 @@ def check_bank_blob(blob: bytes) -> dict:
     thin = [g for g in PERSON_GROUPS if g not in ok]
     if thin:
         raise ValueError(f"답할 수 있는 엔트리가 없는 그룹 {len(thin)}개: {thin[:4]}")
+    # **배포 게이트는 전수로 본다.** `_entry_answerable` 의 "하나라도" 규칙은
+    # 멀쩡한 첫 줄이 망가진 형제 줄을 가려 준다 - 런타임은 목록을 전부 소비하므로
+    # 그건 통과 후 크래시다(Codex 4차). 여기서만 무겁게 본다: 런타임 적재 경로
+    # (`check_bank_partial`)는 가볍게 두고 소비자가 `.get` 으로 방어한다.
+    for g in PERSON_GROUPS:
+        for anchor, e in (groups.get(g) or {}).items():
+            bad = _entry_wellformed(e)
+            if bad:
+                raise ValueError(f"망가진 엔트리 {g}/{anchor}: {sorted(set(bad))[:3]}")
+    # 마지막으로 **실제 조회를 돌린다** - 위 목록이 낡아도 이것이 잡는다.
+    _smoke_lookup(d, PERSON_GROUPS)
     return d
 
 

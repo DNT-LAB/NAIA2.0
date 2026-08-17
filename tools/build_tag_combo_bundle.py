@@ -60,11 +60,19 @@ def main() -> int:
                          "입력으로 다시 구워도 sha 가 달라진다**. 배포용은 고정값을 줘라")
     ap.add_argument("--allow-partial", action="store_true",
                     help="13그룹이 안 차도 진행한다(디버깅용, 배포 금지)")
-    ap.add_argument("--aux-only", action="store_true",
-                    help="그룹 모델을 넣지 않고 부속 자산만 굽는다. **배포 기본값**이다 "
-                         "- 화면 추천은 전적으로 레시피 뱅크에서 나오고, 모델은 "
-                         "개발 머신에서 뱅크를 캐는 데만 쓴다. 실측 203MB -> 15MB")
+    # ⚠️ **부속만 담는 것이 진짜 기본값이다.**
+    #
+    # 예전엔 `--aux-only` 플래그였고 도움말만 "배포 기본값" 이라고 적었다. 그래서
+    # 인자 없이 돌리면 **203MB 모델 번들이 배포 경로에 쓰이고**, 검증도 안 돌았다
+    # (검증은 aux-only 일 때만 강제였다). 사람이 한 번 잊으면 그대로 올라가는
+    # 발판이다(Codex 지적 2026-08-17). 모델까지 담아야 할 때만 명시하게 뒤집었다.
+    ap.add_argument("--with-models", action="store_true",
+                    help="그룹 모델까지 담는다(203MB). **배포에는 쓰지 않는다** - "
+                         "화면 추천은 전적으로 레시피 뱅크에서 나오고 모델은 개발 "
+                         "머신에서 뱅크를 캐는 데만 쓴다. 기본은 부속만(18.6MB)")
     args = ap.parse_args()
+    # 이후 코드는 `aux_only` 를 본다 - 의미를 뒤집어 한 곳에서 정한다.
+    args.aux_only = not args.with_models
 
     models = [D / f"{g}.ncsr" for g in PERSON_GROUPS if (D / f"{g}.ncsr").exists()]
     if args.aux_only:

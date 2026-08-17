@@ -439,6 +439,18 @@ class TestBundle:
         b, _ = self._aux_bundle(tmp_path, groups=())
         assert b.verify_all() == ["aux:recipe_bank"]
 
+    def test_validator_rejects_answerless_entries(self, tmp_path):
+        """"앵커가 있다" 로는 부족하다 - **답할 수 있어야** 한다.
+
+        각 그룹에 `{"x": {}}` 만 있어도 통과했다(Codex 실증). 답할 수 없는 뱅크가
+        검증을 지나 설치된다.
+        """
+        from core.tag_combo.bundle import check_bank_blob
+        blob = json.dumps({"format": "NRB3", "policy": {},
+                           "groups": {g: {"x": {}} for g in PERSON_GROUPS}}).encode()
+        with pytest.raises(ValueError, match="답할 수 있는"):
+            check_bank_blob(blob)
+
     def test_old_bundle_without_aux_is_not_called_corrupt(self, tmp_path):
         """NCSB1 은 부속이 없다. 그건 손상이 아니라 옛 형식이다."""
         b, _ = self._bundle(tmp_path)          # 그룹만, aux 없음

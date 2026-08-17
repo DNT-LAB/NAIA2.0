@@ -127,9 +127,27 @@ class ComboService:
         p = self.downloader.path
         if not p.is_file():
             return ""
+        # ⚠️ **저장소 번들은 절대 건드리지 않는다.** 보통은 받는 곳이 런타임
+        # data_dir 이라 문제가 없는데, 런타임 경로 해석이 실패하면 `resolve_dirs`
+        # 가 저장소 `data/tag_combo` 를 받는 곳으로 돌려준다(Codex 지적). 그러면
+        # 개발자가 방금 구운 산출물을 말없이 `.bad` 로 바꾸게 된다.
+        try:
+            if p.resolve().parent == (Path(__file__).resolve().parents[2]
+                                      / "data" / "tag_combo"):
+                return ""
+        except OSError:
+            return ""
         try:
             from .bundle import ComboBundle
-            bad = ComboBundle(p).verify_all()
+            b = ComboBundle(p)
+            bad = b.verify_all()
+            # **`verify_all` 만으로는 부족하다.** version 1(NCSB1)은 부속이 없는
+            # 것이 정상이라 통과한다 - 그런데 배포 이름을 단 그 파일에는 뱅크가
+            # 없으니 서비스는 영원히 `incomplete` 다(Codex 실증:
+            # `legacy_v1_empty_verify_all []` / `ensure_state ready`).
+            # 받는 곳의 현재 이름은 **부속을 담은 version 2** 여야 한다.
+            if not bad and int(b.index.get("version") or 1) < 2:
+                bad = ["legacy:v1-without-aux"]
             if not bad:
                 return ""              # 멀쩡하다 - 준비 안 된 이유가 다른 데 있다
         except Exception:              # noqa: BLE001 - 열지도 못하면 그것도 불량이다
@@ -166,8 +184,14 @@ class ComboService:
         groups = self.available()
         bgroups = self.bank_groups()
         ok = set(bgroups) >= set(PERSON_GROUPS)
-        if st.get("state") in ("idle", "ready") and ok:
+        # **뱅크가 13그룹을 답할 수 있으면 그것이 ready 다 - 상태를 무엇이었든.**
+        # 예전엔 `idle/ready` 에서만 승격해서, 지난 회차의 `error` 가 남아 있으면
+        # 추천은 정상인데 API 는 error 였다(Codex 실증: `ready() True` /
+        # `download_status error missing 0 bankGroups 13`). 프론트는 그 error 를 보고
+        # "받지 못했습니다" 를 띄운다 - 실제로는 다 되어 있는데.
+        if ok:
             st["state"] = "ready"
+            st["error"] = ""
         elif st.get("state") == "ready":
             # 파일은 있는데 뱅크가 13그룹을 못 채운다 - 깨졌거나 일부만 있다.
             # 여기서 ready 라고 하면 프론트가 안내를 지우고 사용자는 빈 화면만 본다.

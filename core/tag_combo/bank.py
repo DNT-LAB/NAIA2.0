@@ -184,15 +184,28 @@ def load(dirs: Iterable[Path], bundle=None) -> RecipeBank | None:
     뿐), 있는데 못 읽으면 **올린다**. 예전엔 둘 다 조용히 `None` 이라, 형식이
     안 맞는 번들을 만나도 아무 말 없이 옛 온라인 경로로 내려앉았다 - 추천이 다시
     니치해지는데 로그 한 줄 없었다(Codex 실증: 반환 None, stdout 빈 문자열).
+
+    ⚠️ **부분 뱅크가 성한 번들을 가리면 안 된다.** 예전엔 파싱되는 첫 느슨한
+    파일을 그대로 돌려줬다. 그러면 13그룹이 안 찬 개발용 뱅크 하나가 정상적으로
+    받아 둔 번들을 **영구히 덮는다** - `ready()` 는 거짓인데 번들은 멀쩡해서
+    검역도 안 되고, 다운로더는 파일이 있다고 ready 를 내니 또 무한 `incomplete`
+    다(Codex 지적 2026-08-17). 그래서 느슨한 것도 **같은 검사**를 통과해야 쓰고,
+    못 통과하면 번들로 내려간다.
     """
+    from .bundle import check_bank_blob
     errs = []
+    partial = []
     for d in dirs:
         p = Path(d) / BANK_NAME
         if p.exists():
             try:
+                blob = p.read_bytes()
+                check_bank_blob(blob)          # 13그룹 · 답할 수 있는 엔트리
                 return RecipeBank(p)
             except (OSError, ValueError, KeyError) as exc:
-                errs.append(f"{p.name}@{Path(d).name}: {type(exc).__name__}: {exc}")
+                # 부분 뱅크는 **오류가 아니다.** 개발 중에는 흔한 상태이고, 이때는
+                # 번들 쪽에 성한 것이 있을 수 있으므로 조용히 다음 후보로 넘어간다.
+                partial.append(f"{p.name}@{Path(d).name}: {type(exc).__name__}: {exc}")
     if bundle is not None:
         try:
             blob = bundle.aux("recipe_bank")
@@ -200,6 +213,17 @@ def load(dirs: Iterable[Path], bundle=None) -> RecipeBank | None:
                 return RecipeBank(Path(bundle.path), blob=blob)
         except Exception as exc:      # noqa: BLE001
             errs.append(f"bundle aux: {type(exc).__name__}: {exc}")
+    # 번들에도 없으면, 그때는 부분 뱅크라도 쓰는 것이 낫다 - 개발 머신에서
+    # 한 그룹만 구워 놓고 시험하는 흐름을 막지 않는다.
+    for d in dirs:
+        p = Path(d) / BANK_NAME
+        if p.exists():
+            try:
+                return RecipeBank(p)
+            except (OSError, ValueError, KeyError) as exc:
+                errs.append(f"{p.name}@{Path(d).name}: {type(exc).__name__}: {exc}")
     if errs:
         raise ValueError("; ".join(errs)[:300])
+    if partial:
+        raise ValueError("; ".join(partial)[:300])
     return None

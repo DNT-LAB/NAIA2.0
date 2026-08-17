@@ -4649,6 +4649,35 @@ export function createInteractivePanel({
     return asideMount;
   }
 
+  /** 오른쪽 패널의 태그 목록을 **텍스트 칩**으로 그린다.
+   *
+   *  ⚠️ **여기에 썸네일을 되살리지 마라.** 실측(1664x876, 신체 슬롯 seed `maid`):
+   *
+   *      카드            높이     항목수
+   *      고빈도 태그     118px     12   (텍스트)
+   *      함께 쓰는 것    836px     14   (썸네일)   <- 7.1배에 항목은 2개 더
+   *      태그 사전       505px     11   (썸네일)
+   *      합계          1,459px    패널 뷰포트 690px -> 2.1배 넘침
+   *
+   *  썸네일이 텍스트보다 7.1배 비싸면서 정보량은 같다. 패널이 결과 영역의 81.4%
+   *  를 덮던 주범이고, 테스터가 두 번 지적했다(2026-08-17). 그림은 그리드(팝업)
+   *  에서 본다 - 오른쪽 패널의 일은 **이름을 빨리 훑는 것**이다.
+   *
+   *  `data-advice-add` 는 유지한다 - 클릭 처리(넣기/살펴보기)가 그걸로 걸린다. */
+  function textChipsHtml(list, cls) {
+    const items = (list || []).map(x => (typeof x === 'string' ? { tag: x } : x))
+      .filter(x => x && x.tag);
+    if (!items.length) return '';
+    return `<div class="ia-aside-chips">${items.map(x => {
+      const t = String(x.tag);
+      const tip = x.desc ? `${t} · ${x.desc}` : t;
+      const meta = (x.p != null) ? `<span class="ia-combo-p">${Math.round(x.p * 100)}%</span>` : '';
+      return `<button type="button" class="ia-aside-chip${cls ? ' ' + cls : ''}"`
+        + ` data-advice-add="${escHtml(t)}" data-naia-title="${escHtml(tip)}"`
+        + ` aria-label="${escHtml(tip)}">${escHtml(t)}${meta}</button>`;
+    }).join('')}</div>`;
+  }
+
   // 태그 사전(자동완성 툴팁이 쓰는 그 데이터). 조언이 없는 태그에도 보여줄 것이 있다.
   const lookupCache = new Map();
   async function fetchLookup(tag) {
@@ -4678,7 +4707,7 @@ export function createInteractivePanel({
     const rows = [];
     if (info.implications && info.implications.length) {
       rows.push('<div class="ia-aside-group-label">함께 딸려오는 것</div>' +
-        `<div class="ia-aside-thumbs">${recThumbsHtml(info.implications.slice(0, 8))}</div>`);
+        `${textChipsHtml(info.implications.slice(0, 10))}`);
     }
     // '비슷한 것'(related = siblings + word_match)은 **내지 않는다**. 고르는 데
     // 도움이 안 된다는 판단이다(사용자 2026-08-07). 백엔드는 그대로 계산해서
@@ -4690,7 +4719,7 @@ export function createInteractivePanel({
     // 이제 백엔드가 목록을 나눠 보내므로 줄도 나눈다.
     if (info.specific && info.specific.length) {
       rows.push('<div class="ia-aside-group-label">더 구체적인 것</div>' +
-        `<div class="ia-aside-thumbs">${recThumbsHtml(info.specific.slice(0, 8))}</div>`);
+        `${textChipsHtml(info.specific.slice(0, 10))}`);
     }
     // '함께 쓰이는 것'은 앞 세 줄과 출처가 다르다 — 사전의 관계가 아니라 실제 게시물
     // 449만 건의 동반 통계다. 그래서 사전에 관계가 없는 태그(freq>=1000 의 65.4%)에도
@@ -4698,7 +4727,7 @@ export function createInteractivePanel({
     // 4개인 것은 실측 결과다(8칸으로 늘리면 정밀도 .746 -> .574).
     if (info.companions && info.companions.length) {
       rows.push('<div class="ia-aside-group-label">함께 쓰이는 것</div>' +
-        `<div class="ia-aside-thumbs">${recThumbsHtml(info.companions.slice(0, 8))}</div>`);
+        `${textChipsHtml(info.companions.slice(0, 10))}`);
     }
     if (!rows.length) return '';
     // `.scroll` 이 있어야 한다 — `.ia-aside-card` 는 overflow:hidden 이라
@@ -5174,19 +5203,20 @@ export function createInteractivePanel({
       }
       byRegion.set(g.label, cur);
     }
-    // **칩 HTML 을 먼저 만들고 그걸로 판정한다.** `recThumbsHtml` 이 그림 없는
-    // 태그와 색·크기 태그를 버리므로, 태그 개수로 판정하면 머리말만 있고 속이 빈
-    // 카드가 뜬다. 지금 데이터에서는 후보 2,414종이 전부 그림을 갖고 있어 실제로는
-    // 안 나지만(실측), 후보 어휘가 넓어질 때 조용히 되살아나는 종류의 결함이다.
-    // **자르기 전에 걸러야 한다.** 큰 그룹 셋이 전부 필터에 걸려 비면, 뒤에 있던
-    // 멀쩡한 그룹이 자리를 물려받아야 카드가 산다. slice 를 먼저 하면 그 그룹이
-    // 버려진 뒤에 빈 것만 남아 카드가 통째로 사라진다.
+    // **칩 HTML 을 먼저 만들고 그걸로 판정한다.** 렌더러가 항목을 버릴 수 있으면
+    // 태그 개수로 판정하면 머리말만 있고 속이 빈 카드가 뜬다.
+    // **자르기 전에 걸러야 한다.** 큰 그룹 셋이 전부 비면, 뒤에 있던 멀쩡한 그룹이
+    // 자리를 물려받아야 카드가 산다. slice 를 먼저 하면 카드가 통째로 사라진다.
+    //
+    // 썸네일에서 **텍스트 칩**으로 바꿨다(사용자 결정 2026-08-17). 이 카드 하나가
+    // 836px 를 썼는데 항목은 14개였다 - 텍스트로는 같은 자리에 훨씬 많이 들어간다.
+    // 그림은 팝업 그리드에서 본다. 부위도 3개 -> 5개, 부위당 6 -> 10개로 늘린다.
     const recGroups = [...byRegion.entries()]
       .filter(([, v]) => v.length)
       .sort((a, b) => b[1].length - a[1].length)
-      .map(([label, tags]) => ({ label, html: recThumbsHtml(tags.slice(0, 6)) }))
+      .map(([label, tags]) => ({ label, html: textChipsHtml(tags.slice(0, 10)) }))
       .filter(g => g.html)
-      .slice(0, 3);                      // 화면에는 3개 부위까지
+      .slice(0, 5);
     const seedLabel = seed ? seed.tag : '';
 
     const parts = [];
@@ -5234,9 +5264,12 @@ export function createInteractivePanel({
     const recCard = recGroups.length
       ? ('<div class="ia-aside-card scroll"><div class="ia-aside-title">함께 쓰는 것' +
          `<span class="ia-aside-count">${escHtml(seedLabel)} 기준</span></div>` +
+         // ⚠️ `.ia-aside-thumbs` 래퍼를 다시 씌우지 마라. 그건 썸네일 격자라
+         // 행 높이가 고정돼, 안에 텍스트 칩을 넣으면 8칩이 200px 로 늘어난다
+         // (실측: 그룹 하나 227px). `textChipsHtml` 이 자기 컨테이너를 갖는다.
          recGroups.map(g =>
            `<div class="ia-aside-group"><div class="ia-aside-group-label">${escHtml(g.label)}</div>` +
-           `<div class="ia-aside-thumbs">${g.html}</div></div>`).join('') +
+           g.html + '</div>').join('') +
          '</div>')
       : '';
     // ── 고빈도 태그 ──────────────────────────────────────────────────────

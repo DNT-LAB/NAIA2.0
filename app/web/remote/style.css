@@ -24099,6 +24099,29 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .ia-combo-p {
   font-size: 9.5px; opacity: .55; font-variant-numeric: tabular-nums;
 }
+/* ── 오른쪽 패널의 텍스트 칩 ───────────────────────────────────────────────
+   ⚠️ **여기에 썸네일을 되살리지 마라.** 실측(1664x876, 신체 슬롯 seed `maid`):
+   함께 쓰는 것 836px/14항목(썸네일) vs 고빈도 태그 118px/12항목(텍스트) =
+   **7.1배** 인데 정보량은 같다. 세 카드 합이 1,459px 로 패널 뷰포트(690px)를
+   2.1배 넘겨 스크롤을 강제했고, 팝업과 합쳐 결과 영역의 81.4% 를 덮었다.
+   그림은 팝업 그리드에서 본다 - 이 패널의 일은 **이름을 빨리 훑는 것**이다.
+   (테스터 2회 지적 + 사용자 결정 2026-08-17) */
+.ia-aside-chips { display: flex; flex-wrap: wrap; gap: 3px; padding: 1px 0 3px; }
+.ia-aside-chip {
+  font: inherit; font-size: 11px; line-height: 1.35;
+  display: inline-flex; align-items: baseline; gap: 4px;
+  padding: 1px 6px; border-radius: 999px; cursor: pointer;
+  color: var(--ia-fg, #e8e8ee);
+  background: rgba(120,140,255,.13);
+  border: 1px solid rgba(120,140,255,.26);
+}
+.ia-aside-chip:hover { background: rgba(120,140,255,.30); }
+.ia-aside-chip.is-on {
+  background: rgba(120,255,170,.20); border-color: rgba(120,255,170,.40);
+}
+.ia-aside-chip:focus-visible {
+  outline: 1px solid var(--accent, #7c6aef); outline-offset: 1px;
+}
 /* 줄 단위 넣기. 카드 하단의 [전부 넣기] 를 대체한다 — 그 버튼은 이름과 달리
    첫 줄만 넣었고(`querySelector` 가 첫 매치만 준다), 줄이 각각 하나의 완성된
    조합이라 적용 단위도 줄이 맞다. */

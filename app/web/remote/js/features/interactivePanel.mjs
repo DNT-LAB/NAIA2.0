@@ -6553,12 +6553,28 @@ export function createInteractivePanel({
     const secs = panelContext?.sections;
     if (!Array.isArray(secs) || !secs.length) return '';
     // 팔레트·슬라이더는 축이 아니라 값 입력기라 탭에 넣지 않고 위에 그대로 둔다.
-    const lead = secs.map(sec => {
-      if (sec.kind === 'palette') return paletteHtml(sec);
-      // palette_extra 는 독립 섹션이 아니라 패턴 썸네일 섹션 안(그리드 위)에 붙는다(thumbHtml).
-      if (sec.kind === 'slider') return sliderHtml(sec);
-      return '';   // browse 는 렌더하지 않는다 (트리는 아래 탐색 섹션이 담당)
-    }).filter(Boolean).join('');
+    // **값 입력기(색 팔레트 · 숫자 슬라이더)도 카테고리로 만든다.**
+    //
+    // 예전엔 탭 위에 늘 펼쳐 뒀다. 팝업이 484px 일 때는 들어갔지만 접힌 띠(168px)
+    // 에서는 팔레트가 두 줄을 먹고 `길이 1 2 3 4` 의 4가 잘렸다(사용자 화면
+    // 2026-08-17). 이 섬의 규약은 "카테고리를 누르면 옆 섬에 내용이 뜬다" 이므로
+    // 값 입력기도 같은 규약을 따르는 것이 맞다 - 예외를 두면 좁은 띠에 늘 무언가
+    // 얹혀 있게 된다. 축 이름과 부딪히지 않게 `#` 접두사로 키를 만든다.
+    const leadSecs = secs
+      .map((sec, i) => ({sec, key: `#lead${i}`}))
+      .filter(({sec}) => sec.kind === 'palette' || sec.kind === 'slider');
+    const leadTabs = leadSecs.map(({sec, key}) => {
+      const open = openThumbAxis === key;
+      return `<button type="button" class="ia-axtab${open ? ' is-open' : ''}"
+        data-acc-ax="${escHtml(key)}" aria-selected="${open}">
+        <span class="ia-axtab-name">${escHtml(sec.label || (sec.kind === 'palette' ? '색' : '값'))}</span>
+      </button>`;
+    }).join('');
+    const leadPanes = leadSecs.filter(({key}) => openThumbAxis === key)
+      .map(({sec}) => (sec.kind === 'palette' ? paletteHtml(sec) : sliderHtml(sec)))
+      .join('');
+    // `browse` 는 렌더하지 않는다(트리는 아래 탐색 섹션이 담당).
+    const lead = '';
     // gloss 는 썸네일과 같은 탭 스트립에 들어간다 — 사용자에게는 같은 축 선택기다.
     const thumbs = secs.map(sec => sec.kind === 'thumb' ? thumbHtml(sec)
       : sec.kind === 'gloss' ? glossHtml(sec) : null).filter(Boolean);
@@ -6573,11 +6589,16 @@ export function createInteractivePanel({
     //
     // 구도도 이제 같다 — 축 설정(X/Y/Z)을 자체 팝업으로 떼어냈으므로 본문이
     // 다른 축과 똑같이 그리드뿐이다(사용자 결정 2026-08-07).
-    const splitOk = !thumbFilter && tabs;
+    // 값 입력기 탭을 **앞**에 붙인다 - 색·길이는 그 축의 기본 성질이라 목록
+    // 위쪽에 있는 것이 자연스럽다. 검색 중에는 값 입력기를 내지 않는다(검색은
+    // 태그를 찾는 것이고 팔레트는 검색 대상이 아니다).
+    const allTabs = (thumbFilter ? '' : leadTabs) + tabs;
+    const allPanes = (thumbFilter ? '' : leadPanes) + panes;
+    const splitOk = !thumbFilter && allTabs;
     const body = lead + (splitOk
-      ? `<div class="ia-axsplit"><div class="ia-axtabs">${tabs}</div>`
-        + `<div class="ia-axpanes">${panes}</div></div>`
-      : (tabs ? `<div class="ia-axtabs">${tabs}</div>` : '') + panes);
+      ? `<div class="ia-axsplit"><div class="ia-axtabs">${allTabs}</div>`
+        + `<div class="ia-axpanes">${allPanes}</div></div>`
+      : (allTabs ? `<div class="ia-axtabs">${allTabs}</div>` : '') + allPanes);
     // 검색 결과가 0건이어도 컨테이너는 남겨야 한다. refreshAxisSections 가 `#iaAxes` 를
     // outerHTML 로 갈아치우므로, 빈 문자열을 돌려주면 호스트가 사라져 검색어를 지워도
     // 되돌아오지 않는다.
@@ -6598,6 +6619,8 @@ export function createInteractivePanel({
     // 검색 중이면서 카테고리를 고르지 않았으면 팝업은 접힌 채로 둔다 - 결과는
     // 오른쪽 반투명 패널이 받는다(`searchCardHtml`). 카테고리를 고른 상태에서
     // 검색하면 그건 그 축 안에서 좁히는 것이므로 그리드를 펼친 채 거른다.
+    // 값 입력기 탭(`#lead*`)도 "펼친" 상태다 - 안 그러면 CSS 가 판을 숨겨서
+    // 색 팔레트를 눌렀는데 아무것도 안 뜬다.
     const state = openThumbAxis ? (thumbFilter ? ' is-open is-search' : ' is-open')
       : ' is-idle';
     return `<div class="ia-axes${state}" id="iaAxes">${body}</div>`;

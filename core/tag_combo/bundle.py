@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import struct
 import time
 import zlib
@@ -99,7 +100,14 @@ def _entry_wellformed(e) -> list[str]:
     PASS CRASH TypeError`). 그래서 배포 게이트는 전수로 본다.
     """
     def _num(v) -> bool:
-        return isinstance(v, (int, float)) and not isinstance(v, bool)
+        # NaN/inf 도 거른다 - JSON 왕복은 통과하는데 화면에서 `NaN%` 가 된다.
+        return (isinstance(v, (int, float)) and not isinstance(v, bool)
+                and math.isfinite(v))
+
+    def _strs(v) -> bool:
+        """`lookup` 이 `set(r["tags"])` 로 쓰므로 **원소가 해시 가능한 문자열**이어야
+        한다. 원소 타입을 안 보던 시절 `["a", ["bad"]]` 가 통과했다(Codex 5차)."""
+        return all(isinstance(t, str) and t.strip() for t in v)
 
     bad = []
     if not isinstance(e, dict):
@@ -116,6 +124,8 @@ def _entry_wellformed(e) -> list[str]:
             bad.append("row is not a dict")
         elif not isinstance(r.get("tags"), list) or not r.get("tags"):
             bad.append("row without tags")
+        elif not _strs(r["tags"]):
+            bad.append("row tags contain a non-string")
         elif not _num(r.get("coverage")) or not _num(r.get("support")):
             # `coverage` 는 앵커 선택이, `support` 는 라우트 응답이 읽는다.
             bad.append("row without coverage/support numbers")
@@ -129,13 +139,19 @@ def _entry_wellformed(e) -> list[str]:
     return bad
 
 
-def _smoke_lookup(d: dict, groups, *, per_group: int = 3) -> None:
-    """게이트가 **런타임 소비자를 직접 돌린다.** 예외가 나면 배포 불가다.
+def _smoke_lookup(d: dict, groups) -> None:
+    """게이트가 **런타임 소비자를 앵커 전수로 돌린다.** 예외가 나면 배포 불가다.
 
     ⚠️ 이것이 이 영역의 구조적 교정이다. 필드 목록을 손으로 관리하면 계속 샌다 -
     같은 게이트가 **4라운드 연속** 뚫렸고 매번 "그 필드도 런타임이 읽더라" 였다
     (`tags` -> `coverage`/`p` -> `support`). 목록은 소비자가 바뀌면 낡는다.
-    실제로 `lookup` 을 돌려 보면 런타임이 인덱스하는 것은 정의상 전부 덮인다.
+
+    ⚠️ **표본으로는 그 보장이 성립하지 않는다.** 처음엔 그룹당 앵커 3개만 돌렸는데,
+    Codex 5차가 정확히 그 틈을 찔렀다: 4번째 앵커에 `tags: ["a", ["bad"]]` 를 넣으면
+    게이트를 통과하고 그 앵커 요청만 `TypeError` 로 죽는다. "정의상 전부 덮는다" 는
+    말은 **전수**일 때만 참이다.
+    실측(실제 뱅크 63,468앵커): prefer 경로 0.56s + 자동선택 경로 0.53s = **1.09s**.
+    표본을 아낄 이유가 없었다 - 조회가 앵커당 9us 다.
     """
     from .bank import RecipeBank
     bk = RecipeBank.from_parsed(d)
@@ -144,9 +160,9 @@ def _smoke_lookup(d: dict, groups, *, per_group: int = 3) -> None:
         if not tab:
             continue
         answered = 0
-        for i, anchor in enumerate(tab):
-            if i >= per_group:
-                break
+        for anchor in tab:
+            # 두 호출 모양을 다 돌린다 - 화면 경로(prefer)와 자동 선택 경로가
+            # 서로 다른 코드를 탄다(후자에 옛 직접 인덱스가 있었다).
             for kw in ({"prefer": anchor}, {}):
                 try:
                     r = bk.lookup([anchor], g, **kw)
@@ -157,7 +173,7 @@ def _smoke_lookup(d: dict, groups, *, per_group: int = 3) -> None:
                 if kw and not r.get("abstained"):
                     answered += 1
         if not answered:
-            raise ValueError(f"group {g!r}: sampled anchors all abstained")
+            raise ValueError(f"group {g!r}: every anchor abstained")
 
 
 def bank_answerable_groups(d: dict) -> list[str]:

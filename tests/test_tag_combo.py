@@ -1272,19 +1272,21 @@ class TestGate4Findings:
         assert isinstance(r, dict) and not r.get("error"), r
         assert r["combos"][0]["support"] == 0, r["combos"][:1]
 
-    def test_smoke_lookup_catches_what_the_field_list_cannot(self):
-        """**구조적 교정의 증거.** 필드 목록은 통과하지만 조회는 죽는 입력.
+    def test_gate_holds_even_if_the_field_list_goes_stale(self, monkeypatch):
+        """**구조적 교정의 증거 - 체크리스트가 낡아도 게이트는 버틴다.**
 
-        `tags: ["a", ["b"]]` 는 리스트이고 비어 있지도 않아 체크리스트를 지난다.
-        그런데 `lookup` 의 `set(r["tags"])` 는 unhashable 로 죽는다. 게이트가
-        실제 조회를 돌리기 때문에 잡힌다 - 목록만 있었다면 배포됐다.
+        처음엔 "목록은 통과하는데 조회는 죽는 입력"(`tags: ["a", ["b"]]`)으로 이걸
+        증명했다. 그런데 5차 지적을 고치면서 목록이 그 케이스를 따라잡아 **전제가
+        거짓**이 됐다(테스트가 그렇게 깨졌다). 지금 지켜야 할 성질은 특정 입력이
+        아니라 **"목록이 낡아도 소비자 실행이 잡는다"** 다. 그래서 목록을 일부러
+        낡게(항상 통과) 만들고 게이트가 여전히 떨어뜨리는지 본다.
         """
-        from core.tag_combo.bundle import _entry_wellformed, check_bank_blob
+        import core.tag_combo.bundle as B
         entry = {"x": {"rows": [self._row(tags=("a", ["b"]))],
                        "tags": [{"tag": "a", "p": 0.5}]}}
-        assert _entry_wellformed(entry["x"]) == [], "체크리스트는 통과해야 한다(전제)"
+        monkeypatch.setattr(B, "_entry_wellformed", lambda e: [])   # 낡은 목록
         with pytest.raises(ValueError, match="lookup crashed"):
-            check_bank_blob(self._blob(entry))
+            B.check_bank_blob(self._blob(entry))
 
     def test_blocked_clears_when_quarantine_later_succeeds(self, tmp_path,
                                                            monkeypatch):
@@ -1308,3 +1310,74 @@ class TestGate4Findings:
         assert svc.quarantine_bad_bundle().endswith(".bad")
         assert svc._blocked == "", "성공했는데 막힘이 남았다"
         assert svc.download_status()["state"] != "error"
+
+
+class TestGate5Findings:
+    """Codex 5차 게이트(2026-08-18). 구조적 교정의 **표본 크기**를 찔렀다.
+
+    4차에서 "게이트가 소비자를 직접 돌리므로 런타임 필드는 정의상 전부 덮인다" 고
+    적었는데, 그때 스모크 조회는 그룹당 앵커 3개만 돌렸다. 그 말은 **전수**일 때만
+    참이다 - 4번째 앵커에 넣은 비문자열 원소가 게이트를 통과했다.
+    """
+
+    @staticmethod
+    def _row(tags=("a", "b")):
+        return {"tags": list(tags), "coverage": 0.3, "support": 9}
+
+    def _bank(self, per_group_anchors):
+        groups = {g: dict(per_group_anchors) for g in PERSON_GROUPS}
+        return json.dumps({"format": "NRB3", "groups": groups}).encode("utf-8")
+
+    def test_bad_element_beyond_the_old_sample_is_caught(self):
+        """표본(3개) **뒤에** 숨은 크래시 입력도 잡는다.
+
+        Codex 5차 실증 그대로: a0~a2 정상, a3 의 rows[0].tags 에 리스트 원소.
+        옛 게이트는 GATE_PASS 였고 그 앵커 요청만 TypeError 로 죽었다.
+        """
+        from core.tag_combo.bundle import check_bank_blob
+        tab = {f"a{i}": {"rows": [self._row()], "tags": [{"tag": "x", "p": 0.5}]}
+               for i in range(4)}
+        tab["a3"] = {"rows": [self._row(tags=("a", ["bad"]))],
+                     "tags": [{"tag": "x", "p": 0.5}]}
+        with pytest.raises(ValueError):
+            check_bank_blob(self._bank(tab))
+
+    def test_lookup_on_that_anchor_is_what_would_have_broken(self):
+        """게이트를 우회했을 때 실제로 무엇이 깨지는지 못박는다(회귀 근거)."""
+        from core.tag_combo.bank import RecipeBank
+        bk = RecipeBank.from_parsed(json.loads(self._bank(
+            {"a3": {"rows": [self._row(tags=("a", ["bad"]))],
+                    "tags": [{"tag": "x", "p": 0.5}]}}).decode("utf-8")))
+        with pytest.raises(TypeError):
+            bk.lookup(["a3"], "1girl_solo", prefer="a3")
+
+    @pytest.mark.parametrize("bad_num", [float("nan"), float("inf")])
+    def test_non_finite_numbers_are_rejected(self, bad_num):
+        """NaN/inf 는 JSON 왕복을 통과하는데 화면에서 `NaN%` 가 된다."""
+        from core.tag_combo.bundle import check_bank_blob
+        tab = {"a0": {"rows": [self._row()], "tags": [{"tag": "x", "p": bad_num}]}}
+        with pytest.raises(ValueError):
+            check_bank_blob(self._bank(tab))
+
+    def test_smoke_lookup_runs_every_anchor(self):
+        """전수라는 것을 **개수로** 못박는다 - 표본으로 되돌리면 실패한다."""
+        from core.tag_combo.bank import RecipeBank
+        from core.tag_combo.bundle import _smoke_lookup
+        seen = []
+        real = RecipeBank.lookup
+
+        def spy(self, tags, group, **kw):
+            seen.append((group, list(tags)[0]))
+            return real(self, tags, group, **kw)
+
+        tab = {f"a{i}": {"rows": [self._row()], "tags": [{"tag": "x", "p": 0.5}]}
+               for i in range(8)}
+        d = json.loads(self._bank(tab).decode("utf-8"))
+        try:
+            RecipeBank.lookup = spy
+            _smoke_lookup(d, PERSON_GROUPS)
+        finally:
+            RecipeBank.lookup = real
+        # 앵커 8개 x 그룹 13개 x 호출 모양 2개
+        assert len(seen) == 8 * len(PERSON_GROUPS) * 2, len(seen)
+        assert len({a for _, a in seen}) == 8, "앵커 일부만 돌았다"

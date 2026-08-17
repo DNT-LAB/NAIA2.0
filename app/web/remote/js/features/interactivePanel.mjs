@@ -6345,14 +6345,18 @@ export function createInteractivePanel({
     const steps = def.steps || [];
     const sel = currentLower();
     const at = steps.findIndex(t => sel.has(t.toLowerCase()));
+    // **숫자 대신 프롬프트를 적는다**(테스터 지적 + 사용자 결정 2026-08-17).
+    //
+    // `1 2 3 4 5 6` 은 무엇을 고르는지 자체를 감췄다 - 고른 뒤 오른쪽에 붙는 작은
+    // 글씨(`medium breasts`)를 읽어야 알 수 있었고, 고르기 전에는 3이 무엇인지 알
+    // 방법이 없었다. 여섯 칸이 좁은 띠에서 잘리던 문제도 여기서 함께 사라진다.
+    // 색은 예외다 - 스와치가 이름보다 빠르다(사용자 지시).
     const cells = steps.map((t, i) =>
-      `<button type="button" class="ia-step${i === at ? ' on' : ''}"
+      `<button type="button" class="ia-step is-text${i === at ? ' on' : ''}"
         data-ax="slider" data-ref="${escHtml(sec.ref)}" data-val="${escHtml(t)}"
-        title="${escHtml(tagTip(t))}" aria-pressed="${i === at}">${i + 1}</button>`).join('');
-    const cur = at >= 0 ? steps[at] : '미지정';
-    return `<div class="ia-ax-row"><span class="ia-ax-lbl">${escHtml(sec.label)}</span>
-      <div class="ia-step-wrap"><div class="ia-steps">${cells}</div>
-      <span class="ia-step-cur">${escHtml(cur)}</span></div></div>`;
+        title="${escHtml(tagTip(t))}" aria-pressed="${i === at}">${escHtml(t)}</button>`).join('');
+    return `<div class="ia-ax-row ia-ax-row-top"><span class="ia-ax-lbl">${escHtml(sec.label)}</span>
+      <div class="ia-step-wrap"><div class="ia-steps is-text">${cells}</div></div></div>`;
   }
 
   /** 3열 그리드 박스 + 아코디언. 한 번에 하나의 썸네일 섹션만 펼친다(시각 소음 감소).
@@ -6560,19 +6564,25 @@ export function createInteractivePanel({
     // 2026-08-17). 이 섬의 규약은 "카테고리를 누르면 옆 섬에 내용이 뜬다" 이므로
     // 값 입력기도 같은 규약을 따르는 것이 맞다 - 예외를 두면 좁은 띠에 늘 무언가
     // 얹혀 있게 된다. 축 이름과 부딪히지 않게 `#` 접두사로 키를 만든다.
-    const leadSecs = secs
-      .map((sec, i) => ({sec, key: `#lead${i}`}))
-      .filter(({sec}) => sec.kind === 'palette' || sec.kind === 'slider');
-    const leadTabs = leadSecs.map(({sec, key}) => {
-      const open = openThumbAxis === key;
-      return `<button type="button" class="ia-axtab${open ? ' is-open' : ''}"
-        data-acc-ax="${escHtml(key)}" aria-selected="${open}">
-        <span class="ia-axtab-name">${escHtml(sec.label || (sec.kind === 'palette' ? '색' : '값'))}</span>
-      </button>`;
-    }).join('');
-    const leadPanes = leadSecs.filter(({key}) => openThumbAxis === key)
-      .map(({sec}) => (sec.kind === 'palette' ? paletteHtml(sec) : sliderHtml(sec)))
-      .join('');
+    // **값 입력기는 한 카테고리로 묶는다**(사용자 지시 2026-08-17). 처음엔 섹션마다
+    // 탭을 냈는데(`색` / `길이`) 성격이 같은 것이 둘로 갈려 목록이 길어졌다.
+    // 이름은 있는 것들을 `/` 로 이어 만든다 - `색/길이` 처럼 무엇이 들었는지
+    // 그대로 보인다.
+    const leadSecs = secs.filter(s => s.kind === 'palette' || s.kind === 'slider');
+    const LEAD_KEY = '#lead';
+    const leadOpen = openThumbAxis === LEAD_KEY;
+    const leadTabs = leadSecs.length
+      ? `<button type="button" class="ia-axtab${leadOpen ? ' is-open' : ''}"
+          data-acc-ax="${LEAD_KEY}" aria-selected="${leadOpen}">
+          <span class="ia-axtab-name">${escHtml(
+            leadSecs.map(s => s.label || (s.kind === 'palette' ? '색' : '값')).join('/'))}</span>
+        </button>`
+      : '';
+    const leadPanes = leadOpen
+      ? `<div class="ia-ax-row is-open"><div class="ia-cell-wrap ia-lead-pane">`
+        + leadSecs.map(s => (s.kind === 'palette' ? paletteHtml(s) : sliderHtml(s))).join('')
+        + '</div></div>'
+      : '';
     // `browse` 는 렌더하지 않는다(트리는 아래 탐색 섹션이 담당).
     const lead = '';
     // gloss 는 썸네일과 같은 탭 스트립에 들어간다 — 사용자에게는 같은 축 선택기다.

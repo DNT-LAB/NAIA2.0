@@ -21435,6 +21435,16 @@ body.detached-module .mod-grid-3 {
 /* 검색창이 없는 슬롯(구도 등)에서는 칩만 담는 얇은 줄이 된다. */
 .interactive-mode .ia-island-bar { display: flex; justify-content: flex-end; }
 
+/* ── 팝업이 떠 있으면 하단 UI 를 감춘다 ────────────────────────────────────
+   사용자 결정 2026-08-17. 자리를 비키게 하는 시도를 두 번 했고 둘 다 나빴다:
+   팝업 오른쪽으로 옮기니 조언 패널과 겹쳤고(패널도 같은 자리다), 세로로 쌓으니
+   팝업이 그만큼 내려가 세로를 잃었다. 태그를 고르는 동안 쓰지 않는 것이라
+   감추는 편이 맞다 - 팝업을 닫으면 돌아온다.
+
+   ⚠️ **상단 버튼 줄(`.ia-scene-float`: 구도~Safe Viewer + Rating + 반응형/시드)은
+   감추지 않는다**(사용자 지시). 축·Rating·Safe Viewer 는 고르는 중에도 쓴다. */
+body.ia-panel-open .ia-assets { display: none !important; }
+
 
 .ia-axtab {
   display: inline-flex; align-items: center; gap: 5px;

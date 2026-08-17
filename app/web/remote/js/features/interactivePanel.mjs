@@ -2290,12 +2290,16 @@ export function createInteractivePanel({
     // 자리에서 시작하므로 둘이 겹쳤다(실측 56px - 사용자 화면 2026-08-17에서
     // 카테고리 섬이 `C1 Fast`/`Neg Fast` 를 덮었다). 팝업이 떠 있을 때만 비킨다 -
     // 닫혀 있으면 원래 자리가 가장 눈에 가깝다.
-    // **버튼 줄 바로 아래, 같은 왼쪽 끝.** 세로로 쌓는다.
+    // ⚠️ **팝업이 떠 있으면 숨긴다**(사용자 결정 2026-08-17).
     //
-    // 한때 팝업 오른쪽으로 비켜 세워 봤는데(겹침을 피하려고) 조언 패널도 같은
-    // 자리라 이번엔 그것과 겹쳤고, 패널이 없을 때는 빈 공간에 홀로 떠서 흩어져
-    // 보였다(사용자 화면 2026-08-17 두 장). 옆으로 피하는 대신 **팝업이 이 줄
-    // 아래에서 시작**하게 했다(`positionPopup`) - 그러면 겹침도 흩어짐도 없다.
+    // 자리를 비키게 하는 시도를 두 번 했고 둘 다 나빴다: 팝업 오른쪽으로 옮기니
+    // 조언 패널과 겹쳤고(패널도 같은 자리다), 세로로 쌓으니 팝업이 그만큼 아래로
+    // 내려가 세로를 잃었다. 애초에 이 상자는 팝업으로 태그를 고르는 동안 쓰지
+    // 않는 것이다 - 자리를 다투게 하지 말고 감춘다. 팝업을 닫으면 돌아온다.
+    if (panelContext && panelMount.classList.contains('open')) {
+      fastMount.classList.remove('open');
+      return;
+    }
     fastMount.style.left = Math.round(b.left) + 'px';
     fastMount.style.top = Math.round(b.bottom + 6) + 'px';
     fastMount.classList.add('open');
@@ -4410,6 +4414,7 @@ export function createInteractivePanel({
       // 그것은 방금 세운 panelContext 까지 비운다.
       if (autocomplete) autocomplete.unbind();
       panelMount.classList.remove('open');
+      document.body.classList.remove('ia-panel-open');
       panelMount.innerHTML = '';
       panelMount.style.top = panelMount.style.left = panelMount.style.width = '';
       if (asideMount) { asideMount.classList.remove('open'); asideMount.innerHTML = ''; }
@@ -4442,6 +4447,11 @@ export function createInteractivePanel({
     bindSceneClose(panelContext.kind === 'scene');
     panelMount.classList.toggle('is-neg', !!(panelContext && panelContext.neg));
     panelMount.classList.add('open');
+    // 팝업이 떠 있는 동안 하단 UI(ASSETS 바)를 감춘다(사용자 결정 2026-08-17).
+    // 자리를 비키게 하면 조언 패널과 다투거나 세로를 잃는다 - 태그를 고르는 동안
+    // 쓰지 않는 것이라 감추는 편이 맞다. **상단 버튼 줄(구도~Safe Viewer)은 그대로
+    // 둔다** - 축/Rating/Safe Viewer 는 고르는 중에도 쓴다(사용자 지시).
+    document.body.classList.add('ia-panel-open');
     // 편집 중 표시 — tagAssist 의 태그 정보 툴팁을 억제한다(팝업 위에 겹쳐 가림).
     document.body.classList.add('interactive-editing');
     shiftResultForPopup(true);
@@ -5529,6 +5539,8 @@ export function createInteractivePanel({
   function closePanel() {
     bindSceneClose(false);
     document.body.classList.remove('interactive-editing');
+    // 감춰 뒀던 하단 UI 를 되돌린다.
+    document.body.classList.remove('ia-panel-open');
     shiftResultForPopup(false);
     closeZoom();
     // 다음에 열 팝업은 카테고리 목록이 다르다 — 남겨 두면 엉뚱한 자리에서 시작한다.
@@ -8113,6 +8125,7 @@ export function createInteractivePanel({
       if (cardEl) { cardEl.remove(); cardEl = null; }
       blocksMount.innerHTML = '';
       panelMount.classList.remove('open');
+      document.body.classList.remove('ia-panel-open');
       panelMount.style.top = panelMount.style.left = panelMount.style.width = '';
       panelMount.innerHTML = '';
     },

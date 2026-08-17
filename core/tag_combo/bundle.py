@@ -81,6 +81,18 @@ def check_bank_blob(blob: bytes) -> dict:
     gone = [g for g in PERSON_GROUPS if not (groups.get(g) or {})]
     if gone:
         raise ValueError(f"앵커가 없는 그룹 {len(gone)}개: {gone[:4]}")
+    # ⚠️ **"앵커가 있다" 로는 부족하다.** 각 그룹에 `{"x": {}}` 하나만 있어도
+    # 통과했다(Codex 실증: `empty_anchor_entries_validator PASS groups 13`).
+    # 그건 답할 수 없는 뱅크인데 검증을 통과하니 그대로 설치된다.
+    # **실제로 답할 수 있는 엔트리**가 그룹마다 하나는 있어야 한다.
+    thin = []
+    for g in PERSON_GROUPS:
+        tab = groups.get(g) or {}
+        if not any((e or {}).get("rows") or (e or {}).get("tags")
+                   for e in tab.values()):
+            thin.append(g)
+    if thin:
+        raise ValueError(f"답할 수 있는 엔트리가 없는 그룹 {len(thin)}개: {thin[:4]}")
     return d
 
 

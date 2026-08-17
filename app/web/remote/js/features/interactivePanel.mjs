@@ -4605,27 +4605,16 @@ export function createInteractivePanel({
         refreshAxisSections();     // 그리드의 '선택됨' 표시도 맞춘다
         return;
       }
-      // '전부 넣기' — 인기 조합 카드의 첫 줄을 통째로 넣는다. 조합 추천의 요지가
-      // 묶음이므로 하나씩 누르게 하면 의미가 반감된다.
-      // 줄 단위 넣기. 예전에는 카드 하단의 [전부 넣기] 하나였는데,
-      // `parentElement.querySelector('.ia-combo-row')` 라 **첫 줄만** 넣었다 —
-      // 버튼 이름과 하는 일이 달랐다(Codex 지적, 실측 확인).
-      // ⚠️ **칩 판정을 줄 판정보다 먼저 한다.** 줄 전체를 버튼으로 만들면서
-      // 칩이 그 안에 들어갔는데, 줄을 먼저 보면 칩을 눌러도 줄 전체가 들어간다.
-      // 칩 = 그 태그 하나, 줄의 빈 곳/퍼센트 = 줄 전체.
-      const all = ev.target.closest('[data-advice-add]')
-        ? null : ev.target.closest('[data-combo-row]');
-      if (all) {
-        const row = all.closest('.ia-combo-row');
-        const tags = String(row?.getAttribute('data-combo-tags') || '')
-          .split(',').map(s => s.trim()).filter(Boolean);
-        const cur = new Set(currentTags().map(t => String(t).toLowerCase()));
-        for (const t of tags) {
-          if (!cur.has(String(t).toLowerCase())) toggleTag(t, { fromAside: true });
-        }
-        refreshAxisSections();
-        return;
-      }
+      // 여기 있던 '줄 통째로 넣기'(`[data-combo-row]`)는 지웠다. 카드가 묶음을
+      // 줄로 그리던 시절의 것인데 지금은 태그를 하나씩 나열하므로 그 속성을
+      // 만드는 곳이 없다 - 절대 안 걸리는 분기였다.
+      //
+      // 되살리지 마라. 상위 N개를 한꺼번에 넣는 동작은 **데이터가 뒷받침하지
+      // 않는다**: 상위 5개가 실제로 같이 나오는 비율은 중앙 3.90%, 12.76% 는
+      // 동시출현 0건이다(Codex 전수 실측 50,436 앵커). 각 % 는 태그 하나하나의
+      // P(태그|앵커)이지 "이 세트가 흔하다" 가 아니다.
+      //
+      // `.ia-combo-row` 클래스 자체는 색·무늬 카드가 계속 쓴다(5059·6205).
       const b = ev.target.closest('[data-advice-add]');
       if (!b) return;
       const tag = b.getAttribute('data-advice-add');
@@ -4719,7 +4708,7 @@ export function createInteractivePanel({
       rows.join('') + '</div>';
   }
 
-  // 인기 조합. 실패는 캐시하지 않는다 — 한 번의 일시 오류가 페이지 수명 내내
+  // 고빈도 태그. 실패는 캐시하지 않는다 — 한 번의 일시 오류가 페이지 수명 내내
   // 카드를 지우면 안 된다(조언 배치에서 같은 사고가 있었다).
   const comboCache = new Map();
   let comboLast = null;
@@ -4810,7 +4799,7 @@ export function createInteractivePanel({
     renderAside();
   }
 
-  /** 인기 조합을 **태그 + % 나열**로 그린다.
+  /** 고빈도 태그를 **태그 + % 나열**로 그린다.
    *
    *  묶음(3태그 x 4줄)으로 그리던 것을 바꿨다(사용자 결정 2026-08-16). 묶음은
    *  같은 태그가 여러 줄에 나와 반복으로 읽혔고(`curvy` 2회 · `ass` 2회), 줄마다
@@ -5236,7 +5225,7 @@ export function createInteractivePanel({
     }
     // '잘 안 어울립니다'(비권장)는 뺐다 — 초보자에게 하지 말라는 목록은 부담만 주고,
     // 실제로 고를 것을 보여주는 쪽이 값이 크다. 데이터는 그대로 있으니 되살리기 쉽다.
-    // ⚠️ **'함께 쓰는 것' 보다 '인기 조합' 을 먼저 놓는다.** 전자는 썸네일 격자라
+    // ⚠️ **'함께 쓰는 것' 보다 '고빈도 태그' 를 먼저 놓는다.** 전자는 썸네일 격자라
     // 세로를 많이 먹어서, 뒤에 두면 조합 카드가 화면 밖으로 밀린다(사용자 지적
     // 2026-08-16: "위치가 좋지 않음"). 정정(같이 쓰지 않습니다·필요한 것)은
     // 위에 그대로 둔다 - 그건 고쳐야 할 것이라 먼저 보여야 한다.
@@ -5248,10 +5237,13 @@ export function createInteractivePanel({
            `<div class="ia-aside-thumbs">${g.html}</div></div>`).join('') +
          '</div>')
       : '';
-    // ── 인기 조합 ────────────────────────────────────────────────────────
-    // '함께 쓰는 것' 은 태그를 **하나씩** 권한다. 이건 묶음으로 권한다 —
-    // "이 구도에는 이 세트가 흔하다". 근거는 인원 그룹별 모델이고, 사용자가
-    // 인원 수를 바꾸면 다른 모델이 붙는다(core/tag_combo).
+    // ── 고빈도 태그 ──────────────────────────────────────────────────────
+    // 제목이 '인기 조합' 이었는데 **거짓말이었다.** 화면은 태그를 하나씩 나열
+    // 하는데 '조합' 은 그것들이 같이 나온다는 뜻이다. 실측(Codex, 50,436 앵커
+    // 전수)으로 상위 5개가 실제로 같이 나오는 비율은 중앙 3.90%, 12.76% 는
+    // 동시출현 0건이다. 여기 숫자는 각 태그의 P(태그|앵커)일 뿐이다.
+    // 근거는 인원 그룹별 모델이고, 사용자가 인원 수를 바꾸면 다른 모델이
+    // 붙는다(core/tag_combo).
     // 기준은 옆 카드와 **같은 것**을 쓴다(`seedTag`). 살펴보는 태그는 아직 고른
     // 것이 아니라 `currentTags()` 에 없으므로 조회 목록에도 함께 넣는다.
     const combo = await fetchCombos(
@@ -5261,7 +5253,7 @@ export function createInteractivePanel({
     if (dlMsg) {
       // 받는 동안에도 자리를 잡아 둔다 — 나중에 카드가 갑자기 끼어들면
       // 사용자가 방금 누른 것이 밀린다.
-      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">인기 조합' +
+      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">고빈도 태그' +
         '<span class="ia-aside-count">준비 중</span></div>' +
         `<div class="ia-combo-wait">${escHtml(dlMsg)}</div></div>`);
     } else if (combo && ((combo.tags && combo.tags.length)
@@ -5271,7 +5263,7 @@ export function createInteractivePanel({
       // 안 적으면 "왜 이게 뜨지?" 가 된다(Codex: 조용히 앵커를 바꾸면 부정직하다).
       const label = combo.anchor || combo.group || '';
       const note = combo.weak ? ' 대략' : '';
-      parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">인기 조합' +
+      parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">고빈도 태그' +
         `<span class="ia-aside-count">${escHtml(label)}${note}</span></div>` +
         comboFlatHtml(combo) +
         '</div>');

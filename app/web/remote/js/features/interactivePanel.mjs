@@ -2290,18 +2290,21 @@ export function createInteractivePanel({
     // 자리에서 시작하므로 둘이 겹쳤다(실측 56px - 사용자 화면 2026-08-17에서
     // 카테고리 섬이 `C1 Fast`/`Neg Fast` 를 덮었다). 팝업이 떠 있을 때만 비킨다 -
     // 닫혀 있으면 원래 자리가 가장 눈에 가깝다.
-    const pop = (panelContext && panelMount.classList.contains('open'))
-      ? panelMount.getBoundingClientRect() : null;
-    let left = Math.round(b.left);
-    if (pop && pop.width) {
-      left = Math.round(pop.right + 12);
-      // 오른쪽 끝을 넘기면 되돌린다 - 화면 밖으로 밀어내는 것이 겹침보다 나쁘다.
-      const room = sceneRightEdge() - left - 12;
-      if (room < 200) left = Math.round(b.left);
-    }
-    fastMount.style.left = left + 'px';
+    // **버튼 줄 바로 아래, 같은 왼쪽 끝.** 세로로 쌓는다.
+    //
+    // 한때 팝업 오른쪽으로 비켜 세워 봤는데(겹침을 피하려고) 조언 패널도 같은
+    // 자리라 이번엔 그것과 겹쳤고, 패널이 없을 때는 빈 공간에 홀로 떠서 흩어져
+    // 보였다(사용자 화면 2026-08-17 두 장). 옆으로 피하는 대신 **팝업이 이 줄
+    // 아래에서 시작**하게 했다(`positionPopup`) - 그러면 겹침도 흩어짐도 없다.
+    fastMount.style.left = Math.round(b.left) + 'px';
     fastMount.style.top = Math.round(b.bottom + 6) + 'px';
     fastMount.classList.add('open');
+  }
+
+  /** `C1 Fast`/`Neg Fast` 줄이 실제로 차지한 높이. 접혀 있으면 칩 두 개 높이다. */
+  function fastFloatH() {
+    if (!fastMount || !fastMount.classList.contains('open')) return 0;
+    return Math.round(fastMount.getBoundingClientRect().height);
   }
 
   function renderBlocks() {
@@ -4119,7 +4122,8 @@ export function createInteractivePanel({
     // 9,738명이 그대로 늘어나 화면 밖으로 흘렀고 `.ia-panel-body` 의 overflow-y 는
     // 부모가 안 잘리니 스크롤할 것이 없었다(사용자 제보 2026-08-13).
     let top = (sceneFloatFits() && !blocksMount.hidden)
-      ? (PANEL_TOP + Math.max(SCENE_FLOAT_H, sceneFloatH()) + 6) : PANEL_TOP;
+      ? (PANEL_TOP + Math.max(SCENE_FLOAT_H, sceneFloatH()) + 6
+         + (fastFloatH() ? fastFloatH() + 6 : 0)) : PANEL_TOP;
     const floor = popupFloor();
     if (floor - top < 240) top = Math.max(PANEL_TOP, floor - 240);
     presetPanel.style.top = top + 'px';
@@ -5451,6 +5455,9 @@ export function createInteractivePanel({
     // 바닥선만은 지킨다 — 씬 태그 판을 덮으면 방금 넣은 태그가 안 보인다.
     asideMount.style.maxHeight = Math.round(Math.max(80, popupFloor() - top)) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
+    // `C1 Fast` 는 **떠 있는 것들의 가장 오른쪽 끝** 기준으로 비켜서므로, 이 패널이
+    // 열리거나 닫힐 때마다 다시 재야 한다(안 하면 카드 뒤에 깔린다).
+    positionFastFloat();
   }
 
   // 씬 슬롯 팝업을 닫는 두 길 — Esc 와 바깥 클릭.
@@ -5565,6 +5572,18 @@ export function createInteractivePanel({
     const ta = el && el.querySelector(
       panelContext && panelContext.neg ? '.ia-neg-input' : '.ia-slot-input');
     if (!ta) return null;
+    // **끝에 `, ` 를 붙여 새 태그 자리를 열어 준다**(사용자 지시 2026-08-17).
+    //
+    // 안 붙이면 캐럿이 마지막 태그 **안**에 놓인다. 그러면 자동완성과 오른쪽
+    // 패널이 그 태그를 "지금 쓰는 중" 으로 보고, 사용자는 `thick thighs` 를
+    // 원하지 않는데도 그것만 계속 보게 된다. 이어서 치면 마지막 태그가 망가지는
+    // 위험도 같이 사라진다.
+    //
+    // 이미 쉼표로 끝나면 두 번 붙이지 않는다. `parseSlotInput` 은 빈 조각을
+    // 걸러내므로(`if (t && ...)`) 꼬리 쉼표가 상태에 유령 태그를 만들지 않는다.
+    if (ta.value.trim() && !/,\s*$/.test(ta.value)) {
+      ta.value = ta.value.replace(/\s+$/, '') + ', ';
+    }
     autoGrow(ta);
     ta.focus();
     const n = ta.value.length;
@@ -5737,7 +5756,8 @@ export function createInteractivePanel({
     panelMount.style.left = left + 'px';
     // 씬 버튼 줄이 떠 있으면 그 아래에서 시작한다 — 안 그러면 서로 가린다.
     const top = (sceneFloatFits() && !blocksMount.hidden)
-      ? (PANEL_TOP + Math.max(SCENE_FLOAT_H, sceneFloatH()) + 6) : PANEL_TOP;
+      ? (PANEL_TOP + Math.max(SCENE_FLOAT_H, sceneFloatH()) + 6
+         + (fastFloatH() ? fastFloatH() + 6 : 0)) : PANEL_TOP;
     panelMount.style.top = top + 'px';
     panelMount.style.bottom = '';
     // **바닥선까지 다 쓴다.** CSS 의 62dvh 상한에 묶여 화면 아래 267px 를 비워

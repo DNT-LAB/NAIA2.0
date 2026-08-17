@@ -21357,6 +21357,30 @@ body.detached-module .mod-grid-3 {
 .ia-axsplit .ia-cell-wrap { min-height: 0; }
 .ia-axsplit .ia-cell-grid { max-height: none; flex: 1; min-height: 0; }
 
+/* ── 팝업 3단 상태 ─────────────────────────────────────────────────────────
+   테스터가 두 번 지적한 것: "패널이 이미지를 가리지 않도록 하기로 했는데 여전히
+   그렇다." 실측(1664x876) 팝업 455px + 조언 패널 484px = 결과 영역 1,184px 의
+   **81.4%**. 슬롯을 누르는 순간 150칸 그리드가 떠서 그렇다.
+
+   그래서 상태를 셋으로 나눈다(사용자 결정 2026-08-17):
+
+     is-idle    카테고리 열 + 검색창만 = **좁은 띠**. 그리드를 안 그린다
+     is-search  입력·검색 중. 결과는 오른쪽 반투명 패널이 받는다
+     is-open    카테고리를 골랐다. 기존대로 그리드를 펼치고 이미지를 밀어낸다
+
+   JS 는 상태만 말하고(`axisSectionsHtml`) 폭은 여기서 정한다. 밀어내기는
+   팝업 **실측 폭**으로 계산되므로(`syncPopupShift`) 좁아지면 자동으로 덜 민다 -
+   상수를 따로 둘 필요가 없고, 둘이 어긋날 일도 없다. */
+.ia-axes.is-idle .ia-axsplit { grid-template-columns: minmax(0, 1fr); }
+.ia-axes.is-idle .ia-axpanes { display: none; }
+/* 접힌 상태에서는 카테고리 열이 유일한 내용이라 세로 스크롤만 남기고 폭을 준다. */
+.ia-axes.is-idle .ia-axsplit > .ia-axtabs {
+  border-right: 0; padding-right: 0;
+}
+/* 마진을 타이트하게. 리뷰어 권고 - 팝업이 좁아지는 만큼 이미지가 살아난다. */
+.interactive-mode .ia-panel:has(.ia-axes.is-idle) { padding: 8px 8px 8px; }
+.interactive-mode .ia-panel:has(.ia-axes.is-open) { padding: 8px 10px 10px; }
+
 
 .ia-axtab {
   display: inline-flex; align-items: center; gap: 5px;
@@ -21970,6 +21994,11 @@ body.ia-safe-off .ia-aside-thumb.is-sensitive .ia-aside-thumb-img img {
 body.ia-safe-off .ia-cell.is-sensitive .ia-cell-veil { opacity: 0; }
 
 /* 헤더 토글 버튼. 닫기 버튼 왼쪽에 붙는다. */
+/* 팝업 헤더에 있던 것을 `[축]` 옆(씬 플로트 줄)로 옮겼다 - 접힌 팝업(168px)에는
+   자리가 없고, 흐림은 팝업이 아니라 화면 전체에 걸리는 전역 스위치다.
+   `margin-left:auto` 는 헤더에서 오른쪽 끝으로 밀던 규칙이라 여기서는 뺀다 -
+   그대로 두면 버튼 줄 오른쪽 끝으로 튀어 [축] 옆이 아니게 된다. */
+.ia-scene-float .ia-safe-btn { margin-left: 0; }
 .ia-safe-btn {
   margin-left: auto; margin-right: 6px; padding: 3px 9px;
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.3px;

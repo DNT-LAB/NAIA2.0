@@ -1449,6 +1449,12 @@ export function createInteractivePanel({
   // 380 -> 484: 축 탭이 왼쪽 세로 열(96)로 내려오면서 그만큼 넓힌다 — 안 넓히면
   // 그리드가 3열에서 2열로 준다(사용자 결정: 열 폭 유지 + 팝업을 넓혀 그리드 보존).
   const PANEL_W = 484;
+  // 카테고리를 고르기 전(그리드를 안 그릴 때)의 폭. 카테고리 열(96) + 검색창만
+  // 담는 좁은 띠다. 484 -> 168 이면 결과 영역에서 316px 를 돌려준다.
+  //
+  // 테스터가 두 번 지적한 것: 슬롯을 누르는 순간 그리드가 떠서 팝업 455px +
+  // 조언 패널 484px 가 결과 영역 1,184px 의 **81.4%** 를 덮었다.
+  const PANEL_W_IDLE = 168;
 
   // 추천 패널(.ia-aside)이 온전히 들어가는 최소 CSS 폭.
   //
@@ -2292,7 +2298,11 @@ export function createInteractivePanel({
     lastPosSig = posSignature();   // 방금 그린 구성이 기준선이다
     const host = ensureSceneMount();
     host.innerHTML = floating
+      // Safe Viewer 를 `[축]` 옆에 둔다(테스터 지시 2026-08-17). 팝업 헤더에 있던
+      // 것을 옮긴 것이다 - 접힌 팝업(168px)에서는 헤더에 자리가 없었고, 애초에
+      // 흐림 설정은 팝업이 아니라 화면 전체에 걸리는 전역 스위치다.
       ? SCENE_SLOTS.map(sceneButtonHtml).join('') + compPresetBtnHtml()
+        + safeViewerBtnHtml()
         + reactiveToggleHtml() + compAppliedHtml()
       : '';
     applyReactiveTip();
@@ -4377,8 +4387,17 @@ export function createInteractivePanel({
     }
     thumbScroll.clear();       // 슬롯을 바꾸면 썸네일 스크롤을 처음으로
     thumbFilter = '';          // 검색어도 슬롯 단위다 — 남기면 다음 슬롯이 걸러진 채 열린다
-    // 아코디언 기본값 = 그 슬롯의 첫 썸네일 섹션(선택된 게 있으면 그 섹션을 우선 펼친다).
-    openThumbAxis = firstThumbAxis();
+    // **아무 축도 펼치지 않고 연다.**
+    //
+    // 예전엔 `firstThumbAxis()` 로 첫 축을 곧바로 펼쳤다. 그래서 슬롯을 누르는
+    // 순간 150칸 그리드가 떠 결과 영역의 81.4% 를 덮었다(실측 팝업 455px +
+    // 조언 패널 484px / 결과 1,184px). 테스터가 두 번 지적한 것이 이것이다.
+    //
+    // 이제 처음에는 **카테고리 열 + 검색창만** 보인다(좁은 띠). 사용자가
+    // 카테고리를 고르거나 검색을 하면 그때 그리드가 펼쳐진다(사용자 결정
+    // 2026-08-17). 선택 상태는 `openThumbAxis` 하나로 표현된다 - null 이면
+    // 접힌 상태다.
+    openThumbAxis = null;
     // 팩 인덱스는 한 번만 받고, 도착하면 축 영역만 다시 그린다(이미지 셀로 승격).
     void loadThumbIndex().then(() => { if (panelContext) refreshAxisSections(); });
     openId = panelContext.kind === 'scene' ? panelContext.slotId : 'character';
@@ -5665,7 +5684,11 @@ export function createInteractivePanel({
       panelMount.style.top = panelMount.style.left = panelMount.style.width = panelMount.style.bottom = '';
       return;
     }
-    const W = Math.min(PANEL_W, vw - 32);
+    // **그리드를 안 그리는 상태에서는 좁은 띠다.** 카테고리 미선택이면 카테고리
+    // 열 + 검색창밖에 없으므로 484px 를 쥐고 있을 이유가 없다. 검색 중에는 결과를
+    // 오른쪽 반투명 패널이 받으므로 역시 좁다(사용자 결정 2026-08-17).
+    const wide = !!openThumbAxis;
+    const W = Math.min(wide ? PANEL_W : PANEL_W_IDLE, vw - 32);
     const host = blocksMount.getBoundingClientRect();
     let left = Math.max(host.right + 12, PANEL_LEFT);
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
@@ -5748,11 +5771,14 @@ export function createInteractivePanel({
 
     // 슬롯 자체가 텍스트 입력창이 되었으므로 팝업에는 '선택됨'을 두지 않는다.
     // 팝업 = 검색창(상단 통합) + 분류 탐색. 검색은 태그를 '찾아서 넣는' 보조 도구다.
+    // **헤더를 얇게.** 팝업이 접힌 상태(168px)에서는 제목·축이름·Safe Viewer·닫기가
+    // 한 줄에 안 들어가 제목이 세로로 접혔다(실측: `C1 / · / 신 / 체`). 테스터
+    // 지시대로 헤더 군더더기와 Safe Viewer 를 걷어내고, Safe Viewer 는 상단 `[축]`
+    // 줄로 옮겼다(`sceneFloatHtml`) - 백엔드는 이미 전역이라 어디서 눌러도 같다.
+    // 축 이름은 검색창의 `ia-search-scope` 가 이미 말하므로 중복이었다.
     panelMount.innerHTML = `
       <div class="ia-panel-head">
         <span class="ia-panel-title">${escHtml(panelContext.title)}</span>
-        <span class="ia-panel-sub">${escHtml(panelContext.axis)}</span>
-        ${safeViewerBtnHtml()}
         <button type="button" class="ia-panel-close" data-close="1">&times;</button>
       </div>
       ${wantsSearch() ? `<div class="ia-search ia-search-top">
@@ -6275,7 +6301,11 @@ export function createInteractivePanel({
     const chosenCount = all.filter(t => sel.has(t.toLowerCase())).length;
     // 검색 중에는 결과가 있는 축을 모두 펼친다 — 아코디언 하나만 열면 다른 축의
     // 일치 항목을 찾을 수 없다.
-    const open = thumbFilter ? all.length > 0 : openThumbAxis === axis;
+    // **검색만으로는 펼치지 않는다.** 카테고리를 고르지 않았으면 결과는 오른쪽
+    // 반투명 패널이 받으므로(사용자 결정 2026-08-17), 여기서 150칸 판을 만들면
+    // CSS 로 숨기는 데도 렌더 비용만 든다. 탭의 개수 표시(`3/49`)는 그대로다.
+    const open = openThumbAxis ? (thumbFilter ? all.length > 0 : openThumbAxis === axis)
+      : false;
     if (thumbFilter && !all.length) return {tab: '', pane: ''};
     // 탭 버튼(상단 그리드에 깔린다). 캐럿은 없앴다 — 접힘/펼침이 아니라 선택이다.
     const tab = `<button type="button" class="ia-axtab${open ? ' is-open' : ''}"
@@ -6339,7 +6369,11 @@ export function createInteractivePanel({
     const all = thumbFilter ? full.filter(([t, d]) => matchesFilter(t) || (d || '').includes(thumbFilter)) : full;
     const sel = currentLower();
     const chosenCount = all.filter(([t]) => sel.has(t.toLowerCase())).length;
-    const open = thumbFilter ? all.length > 0 : openThumbAxis === axis;
+    // **검색만으로는 펼치지 않는다.** 카테고리를 고르지 않았으면 결과는 오른쪽
+    // 반투명 패널이 받으므로(사용자 결정 2026-08-17), 여기서 150칸 판을 만들면
+    // CSS 로 숨기는 데도 렌더 비용만 든다. 탭의 개수 표시(`3/49`)는 그대로다.
+    const open = openThumbAxis ? (thumbFilter ? all.length > 0 : openThumbAxis === axis)
+      : false;
     if (thumbFilter && !all.length) return {tab: '', pane: ''};
     const tab = `<button type="button" class="ia-axtab${open ? ' is-open' : ''}"
       data-acc-ax="${escHtml(axis)}" aria-selected="${open}">
@@ -6427,7 +6461,18 @@ export function createInteractivePanel({
     // 검색 중에는 여러 축이 동시에 펼쳐진다. 축마다 그리드가 자기 스크롤을 가지면
     // 화면에 스크롤 영역이 겹겹이 쌓여(사용자 표현: "복층") 아래쪽 이미지를 누르기
     // 어려워진다. 검색 중에는 그리드 상한을 풀고 **본문 하나만** 스크롤하게 한다.
-    return `<div class="ia-axes${thumbFilter ? ' is-search' : ''}" id="iaAxes">${body}</div>`;
+    //
+    // **세 상태를 클래스로 구분한다**(사용자 결정 2026-08-17):
+    //   (기본)      카테고리 열 + 검색창만 = 좁은 띠. 이미지를 밀지 않는다
+    //   is-search   입력·검색 중. 결과를 오버레이로 띄운다(이미지를 밀지 않는다)
+    //   is-open     카테고리를 골랐다. 기존대로 이미지를 밀어낸다
+    // CSS 가 이 셋을 보고 폭과 밀어내기를 정한다. JS 는 상태만 말한다.
+    // 검색 중이면서 카테고리를 고르지 않았으면 팝업은 접힌 채로 둔다 - 결과는
+    // 오른쪽 반투명 패널이 받는다(`searchCardHtml`). 카테고리를 고른 상태에서
+    // 검색하면 그건 그 축 안에서 좁히는 것이므로 그리드를 펼친 채 거른다.
+    const state = openThumbAxis ? (thumbFilter ? ' is-open is-search' : ' is-open')
+      : ' is-idle';
+    return `<div class="ia-axes${state}" id="iaAxes">${body}</div>`;
   }
 
   /** 카테고리 열의 휠 스크롤을 60% 로 늦춘다(사용자 지정 2026-08-07).
@@ -6596,6 +6641,11 @@ export function createInteractivePanel({
     if (tabCol) axTabScroll = tabCol.scrollTop;
     host.outerHTML = axisSectionsHtml();
     bindAxisSections();
+    // **팝업 폭이 상태에 따라 달라진다**(접힘=좁은 띠 / 펼침=그리드). 밀어내기는
+    // 팝업 실측 폭으로 계산하므로, 여기서 다시 재지 않으면 접었는데도 옛 폭만큼
+    // 이미지가 밀려 있다(사용자 지적의 "이미지를 가린다" 가 그 상태다).
+    syncPopupShift();
+    positionPopup();
   }
 
   // ---- 구도 3축 콤보 프리셋 패널 (Dev0714 복원) ----

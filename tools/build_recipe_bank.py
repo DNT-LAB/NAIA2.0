@@ -295,10 +295,25 @@ def main() -> int:
     bank: dict[str, dict] = {}
     t0 = time.time()
 
+    # ⚠️ **13그룹 완전성을 빌드에서 강제한다.**
+    #
+    # 예전엔 모델이 없는 그룹을 조용히 건너뛰었다. 그건 런타임에 "뱅크에 이
+    # 그룹이 없으면 온라인 폴백" 계약과 짝이었는데, 이제 배포에는 모델이 안
+    # 가므로 폴백이 없다 - 부분 뱅크를 올리면 그 인원 그룹은 **통째로 죽는다**.
+    # 조용한 부분 산출물보다 여기서 죽는 것이 낫다(Codex 지적 2026-08-17).
+    # 한 그룹만 시험할 때는 `--group` 을 명시하라.
+    if not args.group:
+        gone = [g for g in groups if not (Path(args.models) / f"{g}.ncsr").exists()]
+        if gone:
+            print(f"!! 모델이 없는 그룹 {len(gone)}개: {gone}")
+            print("   전량 배포 뱅크는 13그룹이 다 있어야 한다. "
+                  "python tools/build_tag_combo_models.py")
+            return 2
+
     for g in groups:
         p = Path(args.models) / f"{g}.ncsr"
         if not p.exists():
-            print(f"   {g:<30} 모델 없음")
+            print(f"   {g:<30} 모델 없음 (--group 지정이므로 건너뜀)")
             continue
         m = ComboModel(p)
         m.ensure_inverted()
@@ -318,6 +333,14 @@ def main() -> int:
         print(f"   {g:<30} 앵커 {len(anchors):>6,} -> 레시피 있는 앵커 {len(done):>6,} "
               f"· {el:>6.0f}s")
         del m
+
+    # 모델이 있어도 앵커가 0개면 결과는 같다 - 그 그룹은 통째로 죽는다.
+    if not args.group:
+        empty = sorted(g for g in groups if not bank.get(g))
+        if empty:
+            print(f"!! 앵커가 하나도 안 나온 그룹 {len(empty)}개: {empty}")
+            print("   게이트가 너무 빡빡하거나 모델이 비었다. 쓰지 않고 멈춘다.")
+            return 2
 
     tot = sum(len(v) for v in bank.values())
     rows = sum(len(r.get("rows") or []) for v in bank.values() for r in v.values())

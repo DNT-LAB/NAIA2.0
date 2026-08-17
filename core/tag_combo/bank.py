@@ -215,10 +215,21 @@ def load(dirs: Iterable[Path], bundle=None) -> RecipeBank | None:
             errs.append(f"bundle aux: {type(exc).__name__}: {exc}")
     # 번들에도 없으면, 그때는 부분 뱅크라도 쓰는 것이 낫다 - 개발 머신에서
     # 한 그룹만 구워 놓고 시험하는 흐름을 막지 않는다.
+    #
+    # ⚠️ **여기서 검사를 빼면 1차에서 떨어뜨린 것을 그대로 다시 받는다.**
+    # `RecipeBank` 는 형식(NRB3)만 보므로, 13그룹이 전부 `{"x": {}}` 인 뱅크가
+    # 통과했다 - `ready()` 는 True 이고 `bankGroups` 는 13인데 모든 조회가
+    # `anchor not in bank` 로 기권했다(Codex 실증 2026-08-17 2차). 답할 수 없는
+    # 뱅크가 정상으로 세어지면 다운로드도 시작되지 않는다.
+    #
+    # 그래서 완화하는 것은 **13그룹 완전성 하나뿐**이다. "답할 수 있는 그룹이
+    # 하나는 있다" 는 여전히 요구한다(`check_bank_partial`).
+    from .bundle import check_bank_partial
     for d in dirs:
         p = Path(d) / BANK_NAME
         if p.exists():
             try:
+                check_bank_partial(p.read_bytes())
                 return RecipeBank(p)
             except (OSError, ValueError, KeyError) as exc:
                 errs.append(f"{p.name}@{Path(d).name}: {type(exc).__name__}: {exc}")

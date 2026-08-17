@@ -1003,3 +1003,113 @@ class TestRecipeBank:
         # 있는 그룹은 정상으로 답한다.
         ok = svc.recommend(["maid"], group="1girl_solo", anchor="maid")
         assert ok.get("source") == "bank" and not ok.get("error"), ok
+
+
+class TestGate2Findings:
+    """Codex 2차 게이트(2026-08-17)가 잡은 4건. 전부 "고친 것이 낳은 결함" 이다.
+
+    1차 게이트의 권고를 닫는 커밋(`f5608066`+`f2bf3a21`)에서 나왔다 - 그래서
+    이 클래스는 **고침이 고침을 깨뜨리는 자리**를 지킨다.
+    """
+
+    @staticmethod
+    def _blob(entry, groups=None):
+        gs = groups or PERSON_GROUPS
+        return json.dumps({"format": "NRB3",
+                           "groups": {g: dict(entry) for g in gs}}).encode("utf-8")
+
+    @staticmethod
+    def _real():
+        return {"x": {"rows": [{"tags": ["a", "b"], "coverage": 0.3}],
+                      "tags": [{"tag": "a", "p": 0.5}]}}
+
+    def test_answerless_loose_bank_is_not_readmitted_by_fallback(self, tmp_path):
+        """검증에서 떨어뜨린 느슨한 뱅크를 **폴백이 다시 받으면 안 된다.**
+
+        `load()` 는 3단이다: 검사 통과한 느슨한 것 -> 번들 -> (없으면) 부분 뱅크.
+        마지막 단이 `RecipeBank(p)` 만 불렀는데 그건 형식(NRB3)만 본다. 그래서
+        13그룹이 전부 `{"x": {}}` 인 뱅크가 통과했고, `ready()` 는 True 이고
+        `bankGroups` 는 13인데 **모든 조회가 기권**했다 - 다운로드도 시작되지
+        않는다(Codex 실증). 완화하는 것은 13그룹 완전성 **하나뿐**이어야 한다.
+        """
+        from core.tag_combo.bank import load
+        from core.tag_combo.service import ComboService
+        (tmp_path / "recipe_bank.json").write_bytes(self._blob({"x": {}}))
+        with pytest.raises(ValueError):
+            load([tmp_path])
+        svc = ComboService(tmp_path, search_dirs=[tmp_path])
+        assert not svc.ready(), "답할 수 없는 뱅크로 ready 가 되면 복구가 영영 없다"
+        assert svc.bank_groups() == []
+
+    def test_partial_but_real_loose_bank_still_usable(self, tmp_path):
+        """한 그룹만 구워 시험하는 개발 흐름은 계속 살아 있어야 한다."""
+        from core.tag_combo.bank import load
+        (tmp_path / "recipe_bank.json").write_bytes(
+            self._blob(self._real(), groups=["2boys"]))
+        bk = load([tmp_path])
+        assert bk is not None and bk.anchors("2boys")
+
+    @pytest.mark.parametrize("entry", [
+        {"x": {"rows": [{}]}},                     # 줄은 있는데 태그가 없다
+        {"x": {"tags": [{}]}},                     # 칩은 있는데 이름이 없다
+        {"x": {"tags": [{"tag": "  "}]}},          # 이름이 공백뿐
+    ])
+    def test_validator_rejects_shells(self, entry):
+        """컨테이너 truthiness 로 판정하면 **빈 껍데기가 통과한다.**
+
+        `bank.lookup` 은 줄에서 `r["tags"]` 를 직접 읽고 화면 칩은 `x["tag"]` 로
+        그린다 - 그 필드가 없으면 답이 아니다(Codex 실증 2026-08-17 2차).
+        """
+        from core.tag_combo.bundle import check_bank_blob, check_bank_partial
+        with pytest.raises(ValueError):
+            check_bank_blob(self._blob(entry))
+        with pytest.raises(ValueError):
+            check_bank_partial(self._blob(entry))
+
+    def test_real_bank_still_passes_both_validators(self):
+        """회귀 - 내용이 진짜면 두 문 모두 통과해야 한다."""
+        from core.tag_combo.bundle import (bank_answerable_groups, check_bank_blob,
+                                           check_bank_partial)
+        blob = self._blob(self._real())
+        assert check_bank_blob(blob) and check_bank_partial(blob)
+        assert len(bank_answerable_groups(json.loads(blob))) == len(PERSON_GROUPS)
+
+    def test_unquarantinable_bad_bundle_lands_on_error(self, tmp_path):
+        """치울 수 **없는** 자리의 불량 번들은 `error` 로 앉아야 한다.
+
+        저장소 `data/tag_combo` 가 받는 곳이 되면 검역을 안 한다(개발자가 방금
+        구운 산출물을 지우면 안 되니까). 그런데 그냥 넘어가면 `start()` 는 파일이
+        있다고 ready 를 내고 `download_status()` 는 다시 incomplete 로 내려 -
+        프론트가 2초 폴링을 영원히 돈다. `error` 는 폴링을 멈추는 착지점이다.
+        """
+        from core.tag_combo.service import ComboService
+        svc = ComboService(tmp_path, search_dirs=[tmp_path])
+        svc._blocked = "bundle in repo data dir is unusable"
+        st = svc.download_status()
+        assert st["state"] == "error" and st["error"], st
+        en = svc.ensure_bundle()
+        assert en["state"] == "error", "두 엔드포인트가 다른 말을 하면 프론트가 갈린다"
+
+    def test_old_aux_only_flag_still_parses(self):
+        """옛 배포 명령(`--aux-only`)을 깨뜨리지 않는다.
+
+        의미를 `--with-models` 로 뒤집으면서 플래그를 지웠더니 기존 자동화가
+        `unrecognized arguments` 로 죽었다(Codex 2차 지적). 지금은 아무 일도
+        하지 않는 별칭이고, `--with-models` 와 함께 주면 거부한다.
+        """
+        import subprocess
+        repo = Path(__file__).resolve().parent.parent
+        tool = str(repo / "tools" / "build_tag_combo_bundle.py")
+        # `--help` 만으로는 판별이 안 된다: argparse 는 `-h` 를 만나면 미지의 인자
+        # 검사 **전에** 종료해서, 플래그가 없던 옛 코드에서도 통과한다. 그래서
+        # 도움말 **본문에 별칭 설명이 있는지**를 본다.
+        r = subprocess.run([sys.executable, tool, "--aux-only", "--help"],
+                           capture_output=True, text=True)
+        assert "unrecognized arguments" not in (r.stderr or ""), r.stderr[:200]
+        assert "옛 이름" in (r.stdout or ""), (r.stdout or "")[:300]
+        # 둘을 함께 주면 거부한다. 반환코드는 옛 코드의 argparse 오류와 같은 2 라서
+        # **우리 메시지**로 판별한다.
+        r2 = subprocess.run([sys.executable, tool, "--aux-only", "--with-models"],
+                            capture_output=True, text=True)
+        assert r2.returncode == 2, (r2.returncode, r2.stdout[-200:])
+        assert "함께 줄 수 없다" in (r2.stdout or ""), (r2.stdout or "")[:300]

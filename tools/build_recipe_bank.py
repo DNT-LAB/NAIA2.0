@@ -292,8 +292,9 @@ def main() -> int:
     # `--group` / `--limit` 은 디버그 옵션인데 기본 `--out` 이 배포용
     # `data/tag_combo/recipe_bank.json` 이다. 그래서 `--group 2boys` 는 2boys 만
     # 든 뱅크를 배포 경로에 쓰고 **exit 0** 이었다. 그 뱅크로 번들을 구우면 나머지
-    # 12그룹이 통째로 죽는다 - `--aux-only` 의 13그룹 검사가 잡아 주지만, 그걸
-    # 잊으면 조용히 나간다(Codex 지적 2026-08-17). 애초에 못 쓰게 막는다.
+    # 12그룹이 통째로 죽는다 - 번들 빌더(`build_tag_combo_bundle.py`, 부속만 담기가
+    # 기본)의 13그룹 검사가 잡아 주지만, 그걸 잊으면 조용히 나간다(Codex 지적
+    # 2026-08-17). 애초에 못 쓰게 막는다.
     default_out = str(ROOT / "data/tag_combo/recipe_bank.json")
     partial = bool(args.group) or bool(args.limit)
     if partial and not args.dry_run and str(Path(args.out)) == str(Path(default_out)):

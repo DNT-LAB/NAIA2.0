@@ -84,16 +84,29 @@ class ComboService:
         self._bank_loaded = False
         self._bank = None
         self._bank_error = ""       # 조용한 성능 저하를 드러내는 자리
+        # 검역을 **할 수 없는** 자리에서 불량 번들을 만났다는 기록(저장소 경로).
+        # 비어 있지 않으면 상태가 `error` 로 앉는다 - 안 그러면 ready/incomplete
+        # 를 오가며 프론트가 2초 폴링을 영원히 돈다(Codex 2차 지적 2026-08-17).
+        self._blocked = ""
         self._bank_sig: tuple = ()  # 뱅크를 읽은 시점의 파일 지문
         self._bank_lock = threading.Lock()   # 적재 중 반쪽 상태를 남에게 안 보인다
 
     # ---- 다운로드 ----------------------------------------------------
     def bank_groups(self) -> list[str]:
-        """뱅크가 실제로 답할 수 있는 인원 그룹. 화면 추천의 유일한 출처다."""
+        """뱅크가 실제로 답할 수 있는 인원 그룹. 화면 추천의 유일한 출처다.
+
+        ⚠️ **"앵커 표가 비어 있지 않다" 로 세면 안 된다.** 앵커마다 `{}` 만 들어
+        있어도 13그룹으로 세어져 `ready()` 가 참이 됐다 - 조회는 전부
+        `anchor not in bank` 로 기권하는데 다운로드도 시작되지 않았다(Codex 2차
+        지적 2026-08-17). 검증(`bundle.bank_answerable_groups`)과 **같은 눈**을
+        쓴다. 갈리면 "검증은 떨어뜨렸는데 서비스는 13이라고 센다" 가 된다.
+        """
         bk = self.bank()
         if bk is None:
             return []
-        return [g for g in PERSON_GROUPS if bk.anchors(g)]
+        from .bundle import bank_answerable_groups
+        ok = set(bank_answerable_groups({"groups": getattr(bk, "groups", None) or {}}))
+        return [g for g in PERSON_GROUPS if g in ok]
 
     def ready(self) -> bool:
         """받을 필요가 **없는지**.
@@ -115,6 +128,31 @@ class ComboService:
     def _have_models(self) -> bool:
         return self.ready()
 
+    def _bundle_verdict(self) -> list[str]:
+        """받는 곳의 번들이 **쓸 수 있는가.** 못 쓰면 이유들, 쓸 수 있으면 빈 목록.
+
+        판정과 처분(검역)을 나눠 둔다 - 저장소 경로에서는 처분을 못 하는데 판정은
+        해야 하기 때문이다. 한 함수에 섞어 뒀더니 저장소 경로에서 판정 자체를
+        건너뛰어 상태가 `ready ↔ incomplete` 를 오갔다(Codex 2차 지적).
+        """
+        p = self.downloader.path
+        if not p.is_file():
+            return []
+        try:
+            from .bundle import ComboBundle
+            b = ComboBundle(p)
+            bad = b.verify_all()
+            # **`verify_all` 만으로는 부족하다.** version 1(NCSB1)은 부속이 없는
+            # 것이 정상이라 통과한다 - 그런데 배포 이름을 단 그 파일에는 뱅크가
+            # 없으니 서비스는 영원히 `incomplete` 다(Codex 실증:
+            # `legacy_v1_empty_verify_all []` / `ensure_state ready`).
+            # 받는 곳의 현재 이름은 **부속을 담은 version 2** 여야 한다.
+            if not bad and int(b.index.get("version") or 1) < 2:
+                bad = ["legacy:v1-without-aux"]
+            return list(bad)
+        except Exception:              # noqa: BLE001 - 열지도 못하면 그것도 불량이다
+            return ["unreadable"]
+
     def quarantine_bad_bundle(self) -> str:
         """받는 곳에 **있는데 쓸 수 없는** 번들을 치운다. 이름을 돌려준다.
 
@@ -131,27 +169,27 @@ class ComboService:
         # data_dir 이라 문제가 없는데, 런타임 경로 해석이 실패하면 `resolve_dirs`
         # 가 저장소 `data/tag_combo` 를 받는 곳으로 돌려준다(Codex 지적). 그러면
         # 개발자가 방금 구운 산출물을 말없이 `.bad` 로 바꾸게 된다.
+        #
+        # ⚠️ 그런데 **그냥 `return ""` 하면 아까 고친 무한 루프가 되돌아온다.**
+        # 파일은 그대로 남고 -> `start()` 는 있다고 ready 를 내고 ->
+        # `download_status()` 는 다시 incomplete 로 내린다. 재다운로드도 안 되고
+        # 안정적인 오류 착지도 없다(Codex 2차 실증 2026-08-17). 치우지 않는 것은
+        # 맞지만, **막혔다는 사실을 남겨** 상태가 `error` 로 앉게 한다 - 프론트는
+        # error 에서 2초 폴링을 멈춘다.
+        in_repo = False
         try:
-            if p.resolve().parent == (Path(__file__).resolve().parents[2]
-                                      / "data" / "tag_combo"):
-                return ""
+            in_repo = p.resolve().parent == (Path(__file__).resolve().parents[2]
+                                            / "data" / "tag_combo")
         except OSError:
             return ""
-        try:
-            from .bundle import ComboBundle
-            b = ComboBundle(p)
-            bad = b.verify_all()
-            # **`verify_all` 만으로는 부족하다.** version 1(NCSB1)은 부속이 없는
-            # 것이 정상이라 통과한다 - 그런데 배포 이름을 단 그 파일에는 뱅크가
-            # 없으니 서비스는 영원히 `incomplete` 다(Codex 실증:
-            # `legacy_v1_empty_verify_all []` / `ensure_state ready`).
-            # 받는 곳의 현재 이름은 **부속을 담은 version 2** 여야 한다.
-            if not bad and int(b.index.get("version") or 1) < 2:
-                bad = ["legacy:v1-without-aux"]
-            if not bad:
-                return ""              # 멀쩡하다 - 준비 안 된 이유가 다른 데 있다
-        except Exception:              # noqa: BLE001 - 열지도 못하면 그것도 불량이다
-            bad = ["unreadable"]
+        if in_repo:
+            if self._bundle_verdict():
+                self._blocked = ("bundle in repo data dir is unusable; "
+                                 "rebuild it or fix the runtime data path")
+            return ""
+        bad = self._bundle_verdict()
+        if not bad:
+            return ""                  # 멀쩡하다 - 준비 안 된 이유가 다른 데 있다
         try:
             dst = p.with_suffix(p.suffix + ".bad")
             dst.unlink(missing_ok=True)
@@ -175,6 +213,14 @@ class ComboService:
         # 준비가 안 됐는데 파일은 있다 -> 그 파일이 불량인지 보고, 불량이면 치운다.
         # 치우지 않으면 아래 `start()` 가 "이미 있다" 며 ready 를 내고 끝난다.
         self.quarantine_bad_bundle()
+        # 치울 수 **없는** 자리였다면(저장소 경로) `start()` 는 파일이 있다고
+        # `ready` 를 내는데 그건 거짓이다 - 프론트는 그 말을 믿고 폴링도 안 하고
+        # 안내도 안 띄운다(추천만 조용히 없다). 두 엔드포인트가 같은 말을 하게 한다.
+        if self._blocked:
+            st = self.downloader.status()
+            st["state"] = "error"
+            st["error"] = self._blocked
+            return st
         return self.downloader.retry() if retry else self.downloader.start()
 
     def download_status(self) -> dict:
@@ -192,6 +238,14 @@ class ComboService:
         if ok:
             st["state"] = "ready"
             st["error"] = ""
+            self._blocked = ""         # 답이 나오면 막힘도 끝났다
+        elif self._blocked:
+            # **검역할 수 없는 자리의 불량 번들.** 파일을 치울 수 없으니 다시 받을
+            # 수도 없다 - 그러면 `incomplete` 로 두면 안 된다(프론트가 2초마다
+            # 영원히 폴링한다). `error` 는 프론트가 폴링을 멈추고 30초 뒤 한 번만
+            # 재시도하는 상태다 - 사람이 손댈 수 있는 착지점이다.
+            st["state"] = "error"
+            st["error"] = self._blocked
         elif st.get("state") == "ready":
             # 파일은 있는데 뱅크가 13그룹을 못 채운다 - 깨졌거나 일부만 있다.
             # 여기서 ready 라고 하면 프론트가 안내를 지우고 사용자는 빈 화면만 본다.
@@ -435,7 +489,8 @@ class ComboService:
         # **그룹이 뱅크에 없으면 데이터 오류다.** 예전에는 온라인 모델로 폴백했다.
         # 그건 "부분 빌드 상태에서 안 구운 그룹이 통째로 죽는 것을 막는다" 는
         # 뜻이었는데, 배포에는 이제 모델이 안 가므로 폴백할 대상이 없다. 완전한
-        # 13그룹 뱅크는 **빌드 게이트**가 보장한다(build_recipe_bank / --aux-only).
+        # 13그룹 뱅크는 **빌드 게이트**가 보장한다(build_recipe_bank ->
+        # build_tag_combo_bundle, 부속만 담기가 기본이고 그때 13그룹을 강제한다).
         # 그래도 없다면 그건 손상이지 "권할 것이 없다" 는 판단이 아니므로, 조용한
         # 니치 추천 대신 오류로 드러낸다(Codex 지적 2026-08-17).
         if bk is not None and not bk.anchors(grp):

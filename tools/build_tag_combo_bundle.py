@@ -70,7 +70,18 @@ def main() -> int:
                     help="그룹 모델까지 담는다(203MB). **배포에는 쓰지 않는다** - "
                          "화면 추천은 전적으로 레시피 뱅크에서 나오고 모델은 개발 "
                          "머신에서 뱅크를 캐는 데만 쓴다. 기본은 부속만(18.6MB)")
+    # 옛 이름을 **깨뜨리지 않는다.** 의미를 뒤집으면서 플래그를 지웠더니 예전
+    # 배포 명령(`--aux-only`)이 `unrecognized arguments` 로 죽었다 - 자동화와
+    # 지난 감사 절차가 그대로는 안 돌아간다(Codex 2차 지적 2026-08-17).
+    # 이제는 아무 일도 하지 않는 별칭이다(기본이 곧 그 동작이므로).
+    ap.add_argument("--aux-only", action="store_true",
+                    help="(옛 이름 · 아무 것도 하지 않는다) 부속만 담기는 이제 기본값이다")
     args = ap.parse_args()
+    if args.aux_only and args.with_models:
+        print("!! --aux-only 와 --with-models 를 함께 줄 수 없다")
+        return 2
+    if args.aux_only:
+        print("   (--aux-only 는 이제 기본값이다 - 무시한다)")
     # 이후 코드는 `aux_only` 를 본다 - 의미를 뒤집어 한 곳에서 정한다.
     args.aux_only = not args.with_models
 

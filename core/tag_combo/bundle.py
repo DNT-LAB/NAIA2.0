@@ -62,6 +62,65 @@ REQUIRED_AUX = ("recipe_bank", "semantic_graph", "anchor_feature_marginals")
 BANK_FORMAT = "NRB3"
 
 
+def _entry_answerable(e) -> bool:
+    """이 앵커 엔트리로 **실제로 답할 수 있는가.**
+
+    ⚠️ 컨테이너의 truthiness 로는 부족하다 - `rows: [{}]` 와 `tags: [{}]` 가
+    통과했다(Codex 2차 지적 2026-08-17). `bank.lookup` 은 줄에서 `r["tags"]` 를
+    직접 읽고 화면 칩은 `x["tag"]` 로 그린다. 그 필드가 있어야 답이 나온다.
+    """
+    if not isinstance(e, dict):
+        return False
+    for r in (e.get("rows") or []):
+        if isinstance(r, dict) and (r.get("tags") or []):
+            return True
+    for x in (e.get("tags") or []):
+        if isinstance(x, dict) and str(x.get("tag") or "").strip():
+            return True
+    return False
+
+
+def bank_answerable_groups(d: dict) -> list[str]:
+    """뱅크 dict 에서 **답할 수 있는 엔트리를 가진** 그룹 이름들.
+
+    `service.bank_groups()` 와 검증이 같은 눈을 쓰게 하려고 여기 둔다 - 갈리면
+    "검증은 떨어뜨렸는데 서비스는 13그룹이라고 세는" 상태가 생긴다(그게 정확히
+    Codex 가 잡은 P1 이었다).
+    """
+    groups = d.get("groups") or {}
+    if not isinstance(groups, dict):
+        return []
+    return [g for g, tab in groups.items()
+            if isinstance(tab, dict) and any(_entry_answerable(e) for e in tab.values())]
+
+
+def _parse_bank(blob: bytes) -> dict:
+    """바이트 -> 뱅크 dict. 형식만 본다.
+
+    문구는 `RecipeBank` 와 **같은 것**을 쓴다(`unknown bank format: …`). 같은
+    조건에 두 문구가 있으면 그걸 잡으려고 쓴 테스트가 경로에 따라 갈린다. ASCII
+    인 이유는 이 문구가 `service.bank()` 의 `print` 로 흘러가기 때문이다 -
+    콘솔이 cp949 라 한글은 `??` 로 깨져 정보가 남지 않는다.
+    """
+    d = json.loads(blob.decode("utf-8"))
+    if d.get("format") != BANK_FORMAT:
+        raise ValueError(f"unknown bank format: {d.get('format')!r}, "
+                         f"want {BANK_FORMAT}")
+    return d
+
+
+def check_bank_partial(blob: bytes) -> dict:
+    """형식이 맞고 **답할 수 있는 그룹이 하나라도** 있는지. 13그룹은 안 본다.
+
+    개발 머신에서 한 그룹만 구워 시험하는 흐름을 위한 문이다. 배포 판정에는
+    `check_bank_blob`(13그룹)을 쓴다 - 이 함수를 배포 게이트로 쓰지 마라.
+    """
+    d = _parse_bank(blob)
+    if not bank_answerable_groups(d):
+        raise ValueError("no answerable group in bank")
+    return d
+
+
 def check_bank_blob(blob: bytes) -> dict:
     """레시피 뱅크 바이트가 **배포에 쓸 수 있는지**. 아니면 ValueError.
 
@@ -74,9 +133,9 @@ def check_bank_blob(blob: bytes) -> dict:
     그래서 "13그룹이 각각 비어 있지 않다" 가 계약이다.
     """
     from .person import PERSON_GROUPS
-    d = json.loads(blob.decode("utf-8"))
-    if d.get("format") != BANK_FORMAT:
-        raise ValueError(f"뱅크 형식 {d.get('format')!r} (기대 {BANK_FORMAT})")
+    # `check_bank_partial` 을 부르지 않는다 - 그쪽의 "하나라도" 검사는 아래
+    # 그룹별 검사에 포함되고, 먼저 걸리면 **어느 그룹이 빈지** 못 알린다.
+    d = _parse_bank(blob)
     groups = d.get("groups") or {}
     gone = [g for g in PERSON_GROUPS if not (groups.get(g) or {})]
     if gone:
@@ -85,12 +144,8 @@ def check_bank_blob(blob: bytes) -> dict:
     # 통과했다(Codex 실증: `empty_anchor_entries_validator PASS groups 13`).
     # 그건 답할 수 없는 뱅크인데 검증을 통과하니 그대로 설치된다.
     # **실제로 답할 수 있는 엔트리**가 그룹마다 하나는 있어야 한다.
-    thin = []
-    for g in PERSON_GROUPS:
-        tab = groups.get(g) or {}
-        if not any((e or {}).get("rows") or (e or {}).get("tags")
-                   for e in tab.values()):
-            thin.append(g)
+    ok = set(bank_answerable_groups(d))
+    thin = [g for g in PERSON_GROUPS if g not in ok]
     if thin:
         raise ValueError(f"답할 수 있는 엔트리가 없는 그룹 {len(thin)}개: {thin[:4]}")
     return d

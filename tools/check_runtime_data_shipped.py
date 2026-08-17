@@ -63,9 +63,11 @@ ALLOWED_MISSING = {
     "data": "디렉터리 자체",
     ".": "문자열 파싱 오탐 — 로그 경로 최후 폴백(cwd)",
     "data/tags": "런타임 다운로드 (매니페스트 exclude: local_downloaded_assets)",
-    "data/tag_combo": "런타임 다운로드 — 조합 모델 번들 179MB. Interactive 를 열 때 "
-                      "core/tag_combo/download.py 가 배경으로 받는다. 릴리즈 zip 에 "
-                      "넣으면 289MB 가 468MB 가 된다",
+    "data/tag_combo": "런타임 다운로드 — 조합 추천 번들(레시피 뱅크 + 부속, 실측 "
+                      "15MB). Interactive 를 열 때 core/tag_combo/download.py 가 "
+                      "배경으로 받는다. **그룹 모델(.ncsr)은 배포하지 않는다** - "
+                      "화면 추천은 전적으로 뱅크에서 나오고, 모델은 개발 머신에서 "
+                      "뱅크를 캐는 데만 쓴다(모델까지 담으면 203MB)",
     "output": "사용자 출력 폴더 — 런타임 생성",
     "save": "사용자 저장 폴더 — 런타임 생성",
 }

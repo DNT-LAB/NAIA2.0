@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """조합 모델 번들 배경 다운로드.
 
-Interactive 를 열면 시작하고, 받는 동안 추천 영역이 안내 문구를 띄운다. 179MB 라
-첫 진입을 막으면 안 된다 - 조합 카드가 없어도 나머지 기능은 전부 돈다.
+Interactive 를 열면 시작하고, 받는 동안 추천 영역이 안내 문구를 띄운다. 번들이라 첫 진입을 막으면 안 된다 - 조합 카드가 없어도 나머지 기능은 전부 돈다.
 
 ## 규약
 
@@ -32,7 +31,7 @@ from pathlib import Path
 #
 # `present()` 는 이름만 보고 sha 를 확인하지 않는다. 같은 이름으로 덮어쓰면 이미
 # 받은 설치는 `start()` 에서 곧장 ready 로 빠져 **옛 번들을 영영 쓴다**(Codex
-# 지적, 코드 확인). 상수만 고치면 신규 설치는 179MB 를 받아 sha 불일치로 버리고,
+# 지적, 코드 확인). 상수만 고치면 신규 설치는 번들을 받아 sha 불일치로 버리고,
 # 기존 설치는 옛 것을 쓰는 최악의 조합이 된다.
 #
 # v2 = 레시피 뱅크 + 의미 그래프 + 앵커 주변분포를 부속 자산으로 품은 NCSB2.
@@ -40,11 +39,16 @@ from pathlib import Path
 #      옛 뱅크는 `RecipeBank` 가 명시적으로 거부하고 서비스는 조용히 온라인
 #      경로로 떨어진다 - 추천이 다시 니치해지는데 아무도 모른다. 그래서 위
 #      규약대로 **이름을 바꿔** 옛 설치가 새 파일을 받게 한다.
+# v4 = **그룹 모델을 뺀다.** 부속(레시피 뱅크 + 의미 그래프 + 앵커 주변분포)만
+#      담아 203MB -> 15MB. 화면 추천은 전적으로 뱅크에서 나오고, 모델은 개발
+#      머신에서 뱅크를 캐는 데만 쓴다. 뱅크는 전 코퍼스(3.9M)로 다시 캤다 -
+#      80만 표본에서는 축 어휘 중 앵커가 51.7% 뿐이었다(전량 81.2%).
 BUNDLE_URL = ("https://huggingface.co/baqu2213/PoemForSmallFThings/"
-              "resolve/main/NAIA/naia_tag_combo_v3.ncsb")
-BUNDLE_NAME = "naia_tag_combo_v3.ncsb"
+              "resolve/main/NAIA/naia_tag_combo_v4.ncsb")
+BUNDLE_NAME = "naia_tag_combo_v4.ncsb"
 # 지난 이름들. 새 번들이 자리를 잡으면 지운다 - 200MB 짜리가 나란히 쌓인다.
-STALE_NAMES = ("naia_tag_combo.ncsb", "naia_tag_combo_v2.ncsb")
+STALE_NAMES = ("naia_tag_combo.ncsb", "naia_tag_combo_v2.ncsb",
+               "naia_tag_combo_v3.ncsb")
 # 아래 둘은 `tools/build_tag_combo_bundle.py` 가 빌드 끝에 출력한다. 업로드할
 # **그 파일**의 값이어야 한다 - 검증한 뒤 다시 구우면 sha 가 달라진다.
 BUNDLE_SHA256 = "7dd410b61cfba2e52d4f92cf0cd72d2d8fea33e3d0b1c3c53a3a262b81f6dec2"
@@ -153,7 +157,7 @@ class BundleDownloader:
             if self.state.state == "error":
                 # **실패에서 저절로 다시 받지 않는다.** 스레드가 죽어 있으므로
                 # 위 검사를 통과해 버리는데, 그러면 상태 폴링이나 재진입 POST 가
-                # 들어올 때마다 179MB 를 새로 긁는다. 빠져나오는 길은 retry() 뿐,
+                # 들어올 때마다 번들을 새로 긁는다. 빠져나오는 길은 retry() 뿐,
                 # 즉 사용자가 명시적으로 다시 시도할 때뿐이다.
                 return self.status()
             self.state = DownloadState(state="downloading", started=time.time())

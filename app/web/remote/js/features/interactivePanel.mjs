@@ -4779,7 +4779,7 @@ export function createInteractivePanel({
       comboCache.clear();      // 이제 답이 나온다 — 빈 답 캐시를 버린다
       renderAside();           // 캐시만 비우면 다음 입력 전까지 안내가 남는다
     } else if (s === 'error' && !comboDlRetried) {
-      // 자동 재시도는 **한 번뿐**이다. 179MB 를 반복해 긁으면 안 된다.
+      // 자동 재시도는 **한 번뿐**이다. 번들을 반복해 긁으면 안 된다.
       comboDlRetried = true;
       comboDlTimer = setTimeout(() => { void comboDlEnsure(true); }, 30000);
     }
@@ -7600,7 +7600,7 @@ export function createInteractivePanel({
     void fetch('/api/interactive-advice/batch?tags=').catch(() => {});
     // 팩 인덱스(161KB)도 미리. 이게 있어야 그리드가 텍스트 셀 대신 그림으로 뜬다.
     void loadThumbIndex().catch(() => {});
-    // 조합 모델 번들(179MB)은 **배경으로** 받는다. 여기서 기다리지 않는다 —
+    // 조합 모델 번들은 **배경으로** 받는다. 여기서 기다리지 않는다 —
     // 조합 카드가 없어도 나머지 기능은 전부 돈다. 받는 동안 추천 영역이
     // 진행 상황을 적는다(comboDlText).
     void comboDlEnsure();

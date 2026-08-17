@@ -168,6 +168,10 @@ class ComboModel:
         청크로 나눠 누적하면 총 연산량은 같고 피크만 묶인다. 같은 문제를
         `core/event_corpus_search_service.py:179` 가 이미 이렇게 풀었다.
         """
+        # 0 이면 range 가 죽고, 음수면 루프를 한 번도 안 돌아 **조용히 0 을**
+        # 돌려준다. 잘못된 청크 크기로 틀린 답을 내는 것보다 크기를 바로잡는
+        # 편이 낫다(Codex 경계 시험).
+        chunk = max(1, int(chunk))
         out = np.zeros(self.header.vocab, dtype=np.int64)
         p = np.asarray(posts)
         if p.size == 0:

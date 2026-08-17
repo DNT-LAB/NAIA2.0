@@ -68,6 +68,11 @@ def main() -> int:
         print(f"!! 모르는 그룹: {sorted(bad)}")
         return 2
 
+    if args.cap < 0:
+        # 도움말은 `0 = 무제한` 인데 음수도 무제한으로 처리하고 있었다 - 오타가
+        # 조용히 전 코퍼스 빌드가 된다(Codex 지적).
+        print(f"!! --cap 은 0(무제한) 이상이어야 한다: {args.cap}")
+        return 2
     cap = args.cap if args.cap > 0 else None
     print(f"샤드 {len(shards)}개 / 대상 그룹 {len(want)}개 / "
           f"상한 {'무제한' if cap is None else f'{cap:,}'}")

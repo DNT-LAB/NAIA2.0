@@ -187,8 +187,18 @@ class ComboModel:
             # 게시물별 시작점을 펼쳐 한 번의 fancy-index 로 모은다.
             offs = np.repeat(starts - np.concatenate(([0], np.cumsum(lens)[:-1])), lens)
             gathered = ix[offs + np.arange(total, dtype=np.int64)]
-            # `minlength` 는 하한이라, tag id 가 조밀하지 않으면 결과가 더 길어진다.
-            out += np.bincount(gathered, minlength=self.header.vocab)[:self.header.vocab]
+            # ⚠️ **잘라 버리지 말고 검증한다.** 정상 모델의 tag id 는
+            # `enumerate(tags)` 로 만들어 `0..vocab-1` 안에 있다 - `minlength` 결과가
+            # 더 길어지는 것은 조밀성 문제가 아니라 **id 가 vocab 을 넘는 손상**뿐이다.
+            # 예전엔 `[:vocab]` 로 잘라서 그 손상을 조용히 숨겼다(Codex 실증:
+            # id `[0,5]` · vocab 3 이 `[1,0,0]` 으로 통과). 조용히 틀린 답보다
+            # 즉시 죽는 것이 낫다 - 이건 다운로드 산물이다.
+            hist = np.bincount(gathered, minlength=self.header.vocab)
+            if hist.size > self.header.vocab:
+                raise ValueError(
+                    f"tag id 가 어휘 밖이다: max={int(gathered.max())} "
+                    f">= vocab={self.header.vocab} ({self.path.name})")
+            out += hist
         return out.astype(np.int32)
 
     # ---- 헤드 컨텍스트 --------------------------------------------------

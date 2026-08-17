@@ -141,6 +141,40 @@ class TestModelFormat:
             assert p is not None
             assert np.all(np.diff(p) > 0), f"{t} 의 postings 가 정렬/유일하지 않다"
 
+    def test_tag_counts_rejects_out_of_range_ids(self, tmp_path):
+        """어휘를 넘는 tag id 는 **조용히 잘라 버리지 않는다.**
+
+        예전엔 `np.bincount(...)[:vocab]` 로 잘라서 손상을 숨겼다 - Codex 실증:
+        id `[0,5]` · vocab 3 이 `[1,0,0]` 으로 통과했다. 번들은 다운로드 산물이라
+        조용히 틀린 답보다 즉시 죽는 것이 맞다.
+        """
+        m = _toy(tmp_path)
+        # `indices` 는 mmap 뷰라 읽기 전용이다 - 사본을 만들어 손상시킨다.
+        # (실제 손상은 파일 쪽에서 오지만, 검사 대상은 `tag_counts` 의 판정이다.)
+        bad = np.array(m.indices, dtype=m.indices.dtype)
+        bad[0] = m.header.vocab + 2
+        object.__setattr__(m, "indices", bad) if hasattr(m, "__slots__") \
+            else setattr(m, "indices", bad)
+        with pytest.raises(ValueError, match="어휘 밖"):
+            m.tag_counts(np.array([0], dtype=np.int64))
+
+    def test_tag_counts_matches_naive_sum(self, tmp_path):
+        """청크 누적이 단순 합과 같은가 - 경계(빈 입력·1건·청크 크기)까지."""
+        m = _toy(tmp_path)
+        m.ensure_inverted()
+        for posts, chunk in (([], 5), ([0], 5), ([0, 1, 2], 1), (list(range(7)), 3),
+                             (list(range(m.header.posts)), 4)):
+            p = np.array(posts, dtype=np.int64)
+            want = np.zeros(m.header.vocab, dtype=np.int64)
+            for x in posts:
+                for i in m.row(int(x)):
+                    want[int(i)] += 1
+            got = m.tag_counts(p, chunk=chunk)
+            assert np.array_equal(got, want.astype(np.int32)), (posts, chunk)
+        # 잘못된 청크 크기로 조용히 0 을 내지 않는다(음수는 1로 바로잡는다).
+        p = np.array([0, 1], dtype=np.int64)
+        assert np.array_equal(m.tag_counts(p, chunk=-1), m.tag_counts(p, chunk=1))
+
     def test_postings_match_rows(self, tmp_path):
         m = _toy(tmp_path)
         for t in m.tags:

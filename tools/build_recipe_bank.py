@@ -124,15 +124,29 @@ def mine_anchor(m: ComboModel, anchor: str, *, folds, roles, p, keep_side=None) 
     # ---- 1. 전수 pair -------------------------------------------------
     # **파이썬 루프로 원소마다 증가시키면 안 된다.** 처음엔 게시물마다
     # `cnt[row] += 1` 을 돌렸는데 앵커 40개에 39초였다(13그룹 환산 20시간+).
-    # 행을 한 번에 이어 붙여 bincount 로 세면 같은 값을 훨씬 싸게 얻는다.
-    ip, ix = m.indptr, m.indices
-    starts, ends = ip[posts], ip[posts + 1]
-    idx = np.concatenate([ix[s:e] for s, e in zip(starts, ends)]) if n else np.empty(0, np.int64)
-    cnt = np.bincount(idx.astype(np.int64), minlength=m.header.vocab).astype(np.int32)
+    # bincount 로 세면 같은 값을 훨씬 싸게 얻는다. 한 번에 이어 붙이지 않는
+    # 이유는 `ComboModel.tag_counts` 주석에 있다(전 코퍼스에서 앵커 하나가
+    # 1.1GB 를 먹었다).
+    cnt = m.tag_counts(posts)
     prob = m.freq / max(1, m.header.posts)
     with np.errstate(divide="ignore", invalid="ignore"):
         lift = np.where(prob > 0, (cnt / n) / np.maximum(prob, 1e-12), 0.0)
-    ok = np.where((cnt >= p.min_pair) & (lift >= p.min_lift))[0]
+    # **후보 문턱과 묶음 지지도를 분리한다.**
+    #
+    # `min_pair=30` 은 튜플 지지도를 위한 **절대 개수**다. 그걸 후보 문턱에도
+    # 쓰면 작은 앵커가 통째로 죽는다 - n=80 인 앵커는 후보가 37.5% 이상 겹쳐야
+    # 통과한다. 평면 목록은 itemset 지지도가 필요 없는데 itemset 용 문턱에
+    # 갇혀 있었다(Codex 지적 2026-08-17).
+    #
+    # `min(min_pair, max(floor, ceil(ratio*n)))` 은 **내리기만 한다**: 큰 앵커는
+    # 30 그대로, 작은 앵커만 완화된다. 순수 비율(0.10*n)을 전체에 적용하면 큰
+    # 앵커의 바가 올라가 기존 뱅크에서 93,934칩·250앵커가 날아간다(Codex 실측).
+    # 회복 밴드 2,986종 기준 절대 30 은 2,937개, 비율은 2,986개를 살린다.
+    #
+    # 절대 개수는 **증거량**, 비율은 **앵커 관련성**이다. 하나로 둘을 표현하면
+    # 안 된다. 묶음 지지도(아래 tally)는 절대 `min_pair` 를 그대로 쓴다.
+    cand_thr = min(p.min_pair, max(p.cand_floor, math.ceil(p.cand_ratio * n)))
+    ok = np.where((cnt >= cand_thr) & (lift >= p.min_lift))[0]
 
     cands = []
     for c in ok:
@@ -257,7 +271,12 @@ def main() -> int:
     #   min_anchor 200 -> 80: 축 답변율 중앙 36.8% -> 50.0%
     #   min_lift  1.3 -> 2.0: 공통 배경을 먼저 거른다(표시 칩 lift 중앙 4.0)
     ap.add_argument("--min-anchor", type=int, default=80, help="앵커 최소 게시물")
-    ap.add_argument("--min-pair", type=int, default=30)
+    ap.add_argument("--min-pair", type=int, default=30,
+                    help="2/3-itemset 지지도 하한(절대 개수). 후보 문턱과 별개다")
+    ap.add_argument("--cand-ratio", type=float, default=0.10,
+                    help="후보 문턱의 앵커 대비 비율. 작은 앵커만 완화된다")
+    ap.add_argument("--cand-floor", type=int, default=10,
+                    help="후보 문턱의 절대 하한. 이보다 낮게는 안 내려간다")
     ap.add_argument("--min-lift", type=float, default=2.0,
                     help="배경 태그 컷. long hair 1.05 / looking at viewer 1.15 는 죽고 "
                          "blush 2.25 는 산다")
@@ -308,7 +327,8 @@ def main() -> int:
         # `flat_top` 도 남긴다 - 평면 목록 길이를 결정하는데 기록이 없으면
         # 산출물만 보고 어떤 설정으로 구웠는지 알 수 없다.
         k: getattr(args, k) for k in ("min_anchor", "min_pair", "min_lift",
-                                      "role_quota", "per_anchor", "flat_top")},
+                                      "role_quota", "per_anchor", "flat_top",
+                                      "cand_ratio", "cand_floor")},
         "groups": bank}, ensure_ascii=False, separators=(",", ":"))
     import zlib
     print(f"\n앵커 {tot:,} · 레시피 {rows:,} · {time.time()-t0:.0f}s")

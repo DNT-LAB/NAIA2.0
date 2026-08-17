@@ -298,14 +298,13 @@ def main() -> int:
                 cand.add(tuple(sorted((t, other))))
     n_rel = len(cand)
 
-    ip, ix = m.indptr, m.indices
     for i, t in enumerate(m.tags):
         if m.freq[i] < args.neighbor_min:
             continue
         p = m._inv_posts[m._bounds[i]:m._bounds[i + 1]]
-        cnt = np.bincount(
-            np.concatenate([ix[ip[x]:ip[x + 1]] for x in p]).astype(np.int64),
-            minlength=m.header.vocab)
+        # 청크 누적. 전 코퍼스에서 한 번에 이어 붙이면 태그 하나가 1.1GB 를
+        # 먹는다 - 근거는 `ComboModel.tag_counts` 주석.
+        cnt = m.tag_counts(p)
         # 자기 자신 제외, 교집합 상위 K
         cnt[i] = 0
         for j in np.argpartition(-cnt, min(args.neighbors, len(cnt) - 1))[:args.neighbors]:

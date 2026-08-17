@@ -155,6 +155,38 @@ class ComboModel:
     def row(self, post: int) -> np.ndarray:
         return self.indices[self.indptr[post]:self.indptr[post + 1]]
 
+    def tag_counts(self, posts: np.ndarray, *, chunk: int = 50_000) -> np.ndarray:
+        """주어진 게시물들에서 각 태그가 몇 번 나오는지. 길이 = vocab.
+
+        ⚠️ **한 번에 이어 붙이지 않는다.** 원래 두 빌더가 똑같이
+        `np.bincount(np.concatenate([ix[s:e] for s, e in ...]).astype(np.int64))`
+        를 썼다. 80만 표본에서는 견뎠지만 전 코퍼스에서는 앵커 하나가 통째로
+        메모리를 먹는다 - `looking at viewer` 는 게시물 2,431,879개에 태그 ID
+        81,415,731개라, view 헤더 272MB + uint16 163MB + **int64 사본 651MB**
+        로 일시 피크가 약 1.1GB 다(Codex 실측 2026-08-17).
+
+        청크로 나눠 누적하면 총 연산량은 같고 피크만 묶인다. 같은 문제를
+        `core/event_corpus_search_service.py:179` 가 이미 이렇게 풀었다.
+        """
+        out = np.zeros(self.header.vocab, dtype=np.int64)
+        p = np.asarray(posts)
+        if p.size == 0:
+            return out.astype(np.int32)
+        ip, ix = self.indptr, self.indices
+        for beg in range(0, int(p.size), chunk):
+            part = p[beg:beg + chunk]
+            starts = ip[part].astype(np.int64)
+            lens = (ip[part + 1] - ip[part]).astype(np.int64)
+            total = int(lens.sum())
+            if total == 0:
+                continue
+            # 게시물별 시작점을 펼쳐 한 번의 fancy-index 로 모은다.
+            offs = np.repeat(starts - np.concatenate(([0], np.cumsum(lens)[:-1])), lens)
+            gathered = ix[offs + np.arange(total, dtype=np.int64)]
+            # `minlength` 는 하한이라, tag id 가 조밀하지 않으면 결과가 더 길어진다.
+            out += np.bincount(gathered, minlength=self.header.vocab)[:self.header.vocab]
+        return out.astype(np.int32)
+
     # ---- 헤드 컨텍스트 --------------------------------------------------
     def head_combos(self, tag: str) -> list[tuple[list[str], int]] | None:
         """사전계산된 조합. 없으면 None(질의 시점 계산으로 넘어간다)."""

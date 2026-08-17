@@ -46,7 +46,10 @@ RATING_ID = {"g": 0, "s": 1, "q": 2, "e": 3}
 def main() -> int:
     ap = argparse.ArgumentParser(description="인원 그룹별 조합 모델 빌드")
     ap.add_argument("--cap", type=int, default=800_000,
-                    help="그룹당 게시물 상한. 실측 포화점이 약 80만이다")
+                    help="그룹당 게시물 상한. 0 = 무제한(전 코퍼스). "
+                         "80만 표본은 흔한 태그에는 충분하지만 희귀 태그를 "
+                         "구조적으로 잘라낸다 - 실측으로 축 어휘 중 앵커가 되는 "
+                         "비율이 51.7%%(표본) vs 81.2%%(전량)다")
     ap.add_argument("--min-freq", type=int, default=20,
                     help="그룹 안에서 이만큼은 나와야 어휘에 넣는다")
     ap.add_argument("--only", default="", help="이 그룹만 만든다")
@@ -65,12 +68,18 @@ def main() -> int:
         print(f"!! 모르는 그룹: {sorted(bad)}")
         return 2
 
-    print(f"샤드 {len(shards)}개 / 대상 그룹 {len(want)}개 / 상한 {args.cap:,}")
+    cap = args.cap if args.cap > 0 else None
+    print(f"샤드 {len(shards)}개 / 대상 그룹 {len(want)}개 / "
+          f"상한 {'무제한' if cap is None else f'{cap:,}'}")
     t0 = time.time()
     # 저장통. 상한을 넘으면 reservoir 로 바꿔 담아 메모리를 묶는다.
     docs: dict[str, list[tuple[frozenset, int, str]]] = {g: [] for g in want}
     seen: Counter = Counter()
     rng = random.Random(args.seed)
+    # **태그 문자열을 공유한다.** `g.split()` 은 행마다 새 str 을 만든다. 전
+    # 코퍼스(750만 행 x 태그 22개)면 같은 문자열 1억 6천만 개가 따로 살아 있어
+    # 수 GB 를 날린다 - 어휘는 1만 5천 종뿐이므로 재사용하면 그만이다.
+    pool: dict[str, str] = {}
     for n, p in enumerate(shards, 1):
         tb = pq.read_table(p, columns=["general", "rating", "character"])
         gs = tb.column("general").to_pylist()
@@ -79,19 +88,19 @@ def main() -> int:
         for g, r, c in zip(gs, rs, cs):
             if not g:
                 continue
-            s = frozenset(g.split(", "))
+            s = frozenset(pool.setdefault(x, x) for x in g.split(", "))
             grp = person_group_of(s)
             if grp not in want:
                 continue
             seen[grp] += 1
             rec = (s, RATING_ID.get(r or "", 1), (c or "").split(", ")[0])
             bucket = docs[grp]
-            if len(bucket) < args.cap:
+            if cap is None or len(bucket) < cap:
                 bucket.append(rec)
             else:
                 # reservoir - 시대 편향 없이 균일 표본
                 j = rng.randrange(seen[grp])
-                if j < args.cap:
+                if j < cap:
                     bucket[j] = rec
         if n % 30 == 0:
             print(f"  {n}/{len(shards)}  {time.time()-t0:.0f}s", flush=True)

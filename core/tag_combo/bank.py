@@ -93,13 +93,23 @@ class RecipeBank:
         # 카드('함께 쓰는 것', `seedTag = inspecting || lastPicked`)와 기준이 갈려
         # 나란히 놓인 두 카드가 서로 다른 태그를 말한다 - 사용자 지적 2026-08-16:
         # 팝업에서 `wide hips` 를 눌렀는데 조합 카드는 `thick thighs` 에 눌러앉았다.
-        # 지정한 것이 앵커가 아니면 조용히 아래 자동 선택으로 돌아간다.
+        #
+        # ⚠️ **지정한 것이 앵커가 아니면 기권한다. 다른 태그로 갈아타지 않는다.**
+        # 처음엔 조용히 자동 선택으로 돌아가게 했는데, 그게 더 나빴다(사용자 지적
+        # 2026-08-17): `triple amputee` 를 살펴보는데 카드는 `thick thighs` 를
+        # 말하고 있었다. 모르는 것에 대해 **남의 답을 내놓는 것**이라, 사용자는
+        # 그 숫자가 지금 보는 태그의 것이라고 읽는다. 모르면 비우는 것이 맞다.
+        #
+        # `prefer` 를 안 준 호출(API 직접 사용 등)은 예전대로 자동 선택이다.
         best, best_cov = "", -1.0
         pref = str(prefer or "").strip().lower()
-        if pref and pref in table:
-            e = table[pref] or {}
-            if (e.get("rows") or e.get("tags")):
+        if pref:
+            e = table.get(pref) or {}
+            if e.get("rows") or e.get("tags"):
                 best = pref
+            else:
+                return {"combos": [], "tags": [], "anchor": "", "abstained": True,
+                        "reason": "anchor not in bank"}
         for t in (have if not best else []):
             rows = (table[t] or {}).get("rows") or []
             if rows and rows[0].get("coverage", 0) > best_cov:

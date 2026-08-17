@@ -617,6 +617,45 @@ class TestRecipeBank:
         r = b.lookup(["dark background", "maid"], "1girl_solo")
         assert r["anchor"] == "maid", f"평면뿐인 앵커가 묶음 앵커를 이겼다: {r}"
 
+    def test_named_anchor_wins(self, tmp_path):
+        """화면이 보고 있는 태그가 기준이다 - 커버리지 자동 선택을 이긴다."""
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "thick thighs": {"rows": [{"tags": ["thighhighs"], "support": 99,
+                                       "coverage": 0.49}],
+                             "tags": [{"tag": "thighhighs", "p": 0.32, "lift": 3.0}]},
+            "wide hips": {"rows": [], "tags": [{"tag": "thighs", "p": 0.56, "lift": 4.0}]},
+        }})
+        r = b.lookup(["wide hips", "thick thighs"], "1girl_solo", prefer="wide hips")
+        assert r["anchor"] == "wide hips", r
+
+    def test_unknown_named_anchor_abstains_instead_of_answering_about_another_tag(
+            self, tmp_path):
+        """**모르면 비운다.** 남의 답을 내놓지 않는다.
+
+        예전에는 지정한 앵커가 없으면 조용히 자동 선택으로 돌아갔다. 그러면
+        `triple amputee` 를 살펴보는데 카드는 `thick thighs` 를 말한다 - 사용자는
+        그 숫자가 지금 보는 태그의 것이라고 읽는다(사용자 지적 2026-08-17).
+        """
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "thick thighs": {"rows": [{"tags": ["thighhighs"], "support": 99,
+                                       "coverage": 0.49}],
+                             "tags": [{"tag": "thighhighs", "p": 0.32, "lift": 3.0}]},
+        }})
+        r = b.lookup(["triple amputee", "thick thighs"], "1girl_solo",
+                     prefer="triple amputee")
+        assert r["abstained"] and not r["tags"] and not r["combos"], r
+        assert r["anchor"] == ""
+
+    def test_no_named_anchor_still_auto_selects(self, tmp_path):
+        """`prefer` 를 안 준 호출(API 직접 사용)은 예전 그대로다."""
+        b = self._bank(tmp_path, {"1girl_solo": {
+            "thick thighs": {"rows": [{"tags": ["thighhighs"], "support": 99,
+                                       "coverage": 0.49}],
+                             "tags": [{"tag": "thighhighs", "p": 0.32, "lift": 3.0}]},
+        }})
+        r = b.lookup(["triple amputee", "thick thighs"], "1girl_solo")
+        assert r["anchor"] == "thick thighs" and not r["abstained"], r
+
     def test_zero_percent_chips_are_cut(self, tmp_path):
         """`0%` 라고 적힌 칩은 사용자에게 아무 말도 하지 않는다."""
         b = self._bank(tmp_path, {"1girl_solo": {

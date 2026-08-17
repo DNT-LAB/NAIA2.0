@@ -21118,7 +21118,7 @@ body.detached-module .mod-grid-3 {
 .ia-aside-group { display: flex; flex-direction: column; gap: 5px; }
 .ia-aside-group + .ia-aside-group { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border-dim); }
 .ia-aside-group-label {
-  font-size: 10px; color: var(--text-dim); letter-spacing: 0.4px;
+  font-size: 9.5px; color: var(--text-dim); letter-spacing: 0.4px;
 }
 /* 2열 — 플로트 폭 258px 에서 한 칸 약 112px. 그리드 썸네일(192px)보다 작지만
    "이런 게 있다"를 알리는 용도라 이 크기로 충분하다. */
@@ -21262,7 +21262,9 @@ body.detached-module .mod-grid-3 {
 
 .ia-aside-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .ia-aside-chip {
-  font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary);
+  /* 폰트를 한 단계 낮춘다(사용자 지정 2026-08-17). 패널을 400px 로 넓히는 대신
+     글자를 줄여 타협한 것이다 - 둘 다 안 하면 태그 이름이 글자 단위로 접힌다. */
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-secondary);
   border: 1px solid var(--border-dim); border-radius: 5px;
   padding: 3px 7px; cursor: pointer; background: none; text-align: left;
 }
@@ -24108,7 +24110,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   outline: 1px solid var(--accent, #7c6aef); outline-offset: 1px;
 }
 .ia-combo-tag {
-  font: inherit; font-size: 11px; line-height: 1.4;
+  font: inherit; font-size: 10px; line-height: 1.4;
   padding: 1px 6px; border-radius: 999px; cursor: pointer;
   color: var(--ia-fg, #e8e8ee);
   background: rgba(120,140,255,.16);
@@ -24126,7 +24128,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   display: inline-flex; align-items: baseline; gap: 5px;
 }
 .ia-combo-p {
-  font-size: 9.5px; opacity: .55; font-variant-numeric: tabular-nums;
+  font-size: 9px; opacity: .55; font-variant-numeric: tabular-nums;
 }
 /* ── 오른쪽 패널의 텍스트 칩 ───────────────────────────────────────────────
    ⚠️ **여기에 썸네일을 되살리지 마라.** 실측(1664x876, 신체 슬롯 seed `maid`):
@@ -24135,22 +24137,11 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    2.1배 넘겨 스크롤을 강제했고, 팝업과 합쳐 결과 영역의 81.4% 를 덮었다.
    그림은 팝업 그리드에서 본다 - 이 패널의 일은 **이름을 빨리 훑는 것**이다.
    (테스터 2회 지적 + 사용자 결정 2026-08-17) */
-.ia-aside-chips { display: flex; flex-wrap: wrap; gap: 3px; padding: 1px 0 3px; }
-.ia-aside-chip {
-  font: inherit; font-size: 11px; line-height: 1.35;
-  display: inline-flex; align-items: baseline; gap: 4px;
-  padding: 1px 6px; border-radius: 999px; cursor: pointer;
-  color: var(--ia-fg, #e8e8ee);
-  background: rgba(120,140,255,.13);
-  border: 1px solid rgba(120,140,255,.26);
-}
-.ia-aside-chip:hover { background: rgba(120,140,255,.30); }
-.ia-aside-chip.is-on {
-  background: rgba(120,255,170,.20); border-color: rgba(120,255,170,.40);
-}
-.ia-aside-chip:focus-visible {
-  outline: 1px solid var(--accent, #7c6aef); outline-offset: 1px;
-}
+/* ⚠️ `.ia-aside-chip` 은 **이미 있던 클래스**다(21264). 여기서 같은 이름으로
+   규칙을 또 만들었다가 두 벌이 겹쳤다 - 칩 모양이 두 곳에서 정해지면 어느 쪽을
+   고쳐야 하는지 알 수 없다. 기본 모양은 원래 규칙에 두고, 여기서는 **평면
+   나열에만 필요한 것**(퍼센트 배지 정렬)만 얹는다. */
+.ia-aside-chip:has(.ia-combo-p) { display: inline-flex; align-items: baseline; gap: 4px; }
 /* 줄 단위 넣기. 카드 하단의 [전부 넣기] 를 대체한다 — 그 버튼은 이름과 달리
    첫 줄만 넣었고(`querySelector` 가 첫 매치만 준다), 줄이 각각 하나의 완성된
    조합이라 적용 단위도 줄이 맞다. */

@@ -1455,6 +1455,11 @@ export function createInteractivePanel({
   // 테스터가 두 번 지적한 것: 슬롯을 누르는 순간 그리드가 떠서 팝업 455px +
   // 조언 패널 484px 가 결과 영역 1,184px 의 **81.4%** 를 덮었다.
   const PANEL_W_IDLE = 168;
+  // 조언 패널(`.ia-aside`)의 가로. **팝업과 따로 잡는다** - 팝업은 그리드 열 수가
+  // 정하고 이쪽은 태그 이름이 안 접히는 폭이 기준이다. 484 였을 때 팝업 폭을
+  // 따라가게 뒀더니 팝업을 접자 168px 이 되어 칩이 글자 단위로 접혔다.
+  // 썸네일을 걷어내 세로가 절반이 됐으니(1,459 -> 724px) 가로를 조금 준다.
+  const ASIDE_W = 400;
 
   // 추천 패널(.ia-aside)이 온전히 들어가는 최소 CSS 폭.
   //
@@ -4687,11 +4692,15 @@ export function createInteractivePanel({
     const items = (list || []).map(x => (typeof x === 'string' ? { tag: x } : x))
       .filter(x => x && x.tag);
     if (!items.length) return '';
+    // 이미 고른 태그는 `on` 으로 표시한다 — `chipsHtml` 이 쓰던 규약 그대로다.
+    // 안 맞추면 같은 클래스인데 어떤 칩은 선택 표시가 되고 어떤 칩은 안 된다.
+    const cur = new Set(currentTags().map(x => String(x).toLowerCase()));
     return `<div class="ia-aside-chips">${items.map(x => {
       const t = String(x.tag);
       const tip = x.desc ? `${t} · ${x.desc}` : t;
       const meta = (x.p != null) ? `<span class="ia-combo-p">${Math.round(x.p * 100)}%</span>` : '';
-      return `<button type="button" class="ia-aside-chip${cls ? ' ' + cls : ''}"`
+      const mark = cur.has(t.toLowerCase()) ? ' on' : (cls ? ' ' + cls : '');
+      return `<button type="button" class="ia-aside-chip${mark}"`
         + ` data-advice-add="${escHtml(t)}" data-naia-title="${escHtml(tip)}"`
         + ` aria-label="${escHtml(tip)}">${escHtml(t)}${meta}</button>`;
     }).join('')}</div>`;
@@ -5400,7 +5409,12 @@ export function createInteractivePanel({
     }
     const top = Math.max(8, box.top);
     asideMount.style.left = Math.round(left) + 'px';
-    asideMount.style.width = Math.round(Math.min(box.width, room)) + 'px';
+    // ⚠️ **팝업 폭을 따라가지 않는다.** 예전엔 `min(box.width, room)` 이라 팝업이
+    // 접히면(168px) 패널도 168px 로 쪼그라들어 칩이 글자 단위로 접혔다(실측:
+    // `고빈도 태 / 그`, `THICK / THIGHS`). 팝업 폭은 그리드 열 수가 정하는
+    // 값이고, 이쪽은 **태그 이름이 안 접히는 폭**이 기준이라 서로 상관이 없다.
+    // 자리가 없으면 그때만 줄인다.
+    asideMount.style.width = Math.round(Math.min(ASIDE_W, room)) + 'px';
     asideMount.style.top = Math.round(top) + 'px';
     asideMount.style.bottom = 'auto';
     // 씬 태그 판 바로 위까지 **다 쓴다**. 예전에는 화면 절반(innerHeight*0.5)에서

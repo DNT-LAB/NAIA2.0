@@ -164,6 +164,11 @@ class ComboService:
         """
         p = self.downloader.path
         if not p.is_file():
+            # **원인 파일이 사라지면 막힘도 끝난다.** 안 풀어 주면 저장소 경로에서
+            # 한 번 막힌 뒤 그 파일을 지워도 `ensure_bundle(retry=True)` 가
+            # 다운로더에 닿지 못하고 계속 error 였다 - 프로세스 재시작 전까지
+            # 복구 불가(Codex 3차 실증 2026-08-17).
+            self._blocked = ""
             return ""
         # ⚠️ **저장소 번들은 절대 건드리지 않는다.** 보통은 받는 곳이 런타임
         # data_dir 이라 문제가 없는데, 런타임 경로 해석이 실패하면 `resolve_dirs`
@@ -194,7 +199,14 @@ class ComboService:
             dst = p.with_suffix(p.suffix + ".bad")
             dst.unlink(missing_ok=True)
             p.replace(dst)
-        except OSError:
+        except OSError as exc:
+            # **치우려다 실패한 것도 막힘이다.** 그냥 돌아가면 파일이 남아
+            # `start()` 가 ready 를 내고 status 는 incomplete 로 내려 - 저장소
+            # 경로에서 고친 그 무한 루프가 파일 잠금/권한으로 되살아난다
+            # (Codex 3차 실증: Windows 파일 잠금). 착지점을 만들어 준다.
+            self._blocked = (f"cannot quarantine unusable bundle: "
+                             f"{type(exc).__name__}; close other apps using it "
+                             f"or delete it by hand")
             return ""
         self._bundle = None
         self._bundle_bad = ""
@@ -224,6 +236,10 @@ class ComboService:
         return self.downloader.retry() if retry else self.downloader.start()
 
     def download_status(self) -> dict:
+        # 막힘의 원인 파일이 이미 없으면 막힘도 없다. `quarantine_bad_bundle` 이
+        # 같은 판정을 하지만, 상태만 폴링하는 프론트는 그것을 부르지 않는다.
+        if self._blocked and not self.downloader.path.is_file():
+            self._blocked = ""
         st = self.downloader.status()
         # `available()` 을 먼저 불러 `_bundle_bad` 를 갱신한다(모델 목록은 이제
         # 준비 판정이 아니라 개발 정보다).

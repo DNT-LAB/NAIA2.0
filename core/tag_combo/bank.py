@@ -110,15 +110,21 @@ class RecipeBank:
             else:
                 return {"combos": [], "tags": [], "anchor": "", "abstained": True,
                         "reason": "anchor not in bank"}
+        # ⚠️ 숫자를 **직접 인덱스하지 않는다.** `rows[0]["coverage"]` 였는데,
+        # 그 필드가 없는 엔트리를 만나면 `KeyError` 로 500 이 났다 - 검증이
+        # 막아 주기는 하지만(bundle._entry_answerable), 조회는 **못 믿을 파일을
+        # 만나도 기권으로 내려앉아야** 한다(Codex 3차 지적 2026-08-17).
         for t in (have if not best else []):
             rows = (table[t] or {}).get("rows") or []
-            if rows and rows[0].get("coverage", 0) > best_cov:
-                best, best_cov = t, rows[0]["coverage"]
+            cov = rows[0].get("coverage", 0) if rows else 0
+            if rows and cov > best_cov:
+                best, best_cov = t, cov
         if not best:
             for t in have:
                 flat = (table[t] or {}).get("tags") or []
-                if flat and flat[0].get("p", 0) > best_cov:
-                    best, best_cov = t, flat[0]["p"]
+                p0 = flat[0].get("p", 0) if flat else 0
+                if flat and p0 > best_cov:
+                    best, best_cov = t, p0
         if not best:
             return {"combos": [], "anchor": "", "abstained": True,
                     "reason": "empty anchor rows"}
@@ -128,7 +134,9 @@ class RecipeBank:
                   if r.get("coverage", 0) >= min_coverage]
         # 이미 프롬프트에 있는 태그만으로 된 줄은 쓸모가 없다.
         cur = set(want)
-        picked = [r for r in picked if not set(r["tags"]) <= cur]
+        # `r["tags"]` 도 방어한다 - 위와 같은 이유로 못 믿을 파일에서 죽지 않는다.
+        picked = [r for r in picked
+                  if (r.get("tags") or []) and not set(r.get("tags") or []) <= cur]
         # ---- 줄 사이 중복 억제 ----------------------------------------
         #
         # ⚠️ **"공유 태그 2개 이상" 만으로는 부족하다.** 그 규칙은 3태그 시절에
@@ -146,7 +154,7 @@ class RecipeBank:
         # 서로 다른 조합인데 한 태그를 공유하는 정당한 줄까지 죽는다.
         out, seen, used = [], set(), Counter()
         for r in picked:
-            s = set(r["tags"])
+            s = set(r.get("tags") or [])
             if len(s & seen) >= 2:
                 continue
             if any(used[t] >= max_tag_repeat for t in s):

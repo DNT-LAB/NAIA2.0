@@ -1082,7 +1082,12 @@ class TestGate2Findings:
         있다고 ready 를 내고 `download_status()` 는 다시 incomplete 로 내려 -
         프론트가 2초 폴링을 영원히 돈다. `error` 는 폴링을 멈추는 착지점이다.
         """
+        from core.tag_combo.download import BUNDLE_NAME
         from core.tag_combo.service import ComboService
+        # **원인 파일이 실제로 있어야 한다.** 처음엔 파일 없이 `_blocked` 만 세웠는데
+        # 그건 실제 분기를 타지 않는 가짜였다(Codex 3차 지적) - 그리고 "파일이
+        # 사라지면 막힘을 푼다" 는 뒤이은 고침이 이 테스트를 정확히 깨뜨렸다.
+        (tmp_path / BUNDLE_NAME).write_bytes(b"NOT A BUNDLE")
         svc = ComboService(tmp_path, search_dirs=[tmp_path])
         svc._blocked = "bundle in repo data dir is unusable"
         st = svc.download_status()
@@ -1113,3 +1118,94 @@ class TestGate2Findings:
                             capture_output=True, text=True)
         assert r2.returncode == 2, (r2.returncode, r2.stdout[-200:])
         assert "함께 줄 수 없다" in (r2.stdout or ""), (r2.stdout or "")[:300]
+
+
+class TestGate3Findings:
+    """Codex 3차 게이트(2026-08-17). 2차 고침이 또 낳은 결함 3건(P1x2, P2).
+
+    같은 자리를 세 번 고쳤다 - 검증이 "이름이 있다" 까지만 보고 **숫자**를 안
+    봤고, 검역 실패 경로가 두 갈래인데 하나만 막았고, 막힘을 풀 길이 없었다.
+    """
+
+    @staticmethod
+    def _blob(entry, groups=None):
+        gs = groups or PERSON_GROUPS
+        return json.dumps({"format": "NRB3",
+                           "groups": {g: dict(entry) for g in gs}}).encode("utf-8")
+
+    @pytest.mark.parametrize("entry", [
+        {"x": {"rows": [{"tags": ["a"]}]}},           # coverage 가 없다
+        {"x": {"tags": [{"tag": "a"}]}},              # p 가 없다
+        {"x": {"rows": [{"tags": ["a"], "coverage": "0.3"}]}},   # 숫자가 아니다
+        {"x": {"tags": [{"tag": "a", "p": True}]}},   # bool 은 숫자가 아니다
+    ])
+    def test_validator_requires_the_numbers_lookup_indexes(self, entry):
+        """`lookup` 이 직접 인덱스하는 숫자(coverage/p)가 없으면 답이 아니다.
+
+        이름만 보던 시절엔 검증을 통과하고 `ready()` 도 참인데 조회가 KeyError 로
+        죽었다(Codex 3차 실증). 화면에 숫자를 띄울 수 있어야 답이다.
+        """
+        from core.tag_combo.bundle import check_bank_blob
+        with pytest.raises(ValueError):
+            check_bank_blob(self._blob(entry))
+
+    def test_lookup_abstains_instead_of_crashing_on_a_bad_bank(self, tmp_path):
+        """검증을 우회해 들어온 파일에도 **조회는 죽지 않는다.**
+
+        검증이 막아 주지만, 못 믿을 파일을 손으로 넣는 경로(개발/사고)는 남는다.
+        그때 500 을 내면 Interactive 전체가 멈춘다 - 기권으로 내려앉아야 한다.
+        """
+        from core.tag_combo.bank import RecipeBank
+        p = tmp_path / "recipe_bank.json"
+        p.write_bytes(self._blob({"maid": {"rows": [{"tags": ["apron"]}],
+                                           "tags": [{"tag": "apron"}]}}))
+        bk = RecipeBank(p)                      # 형식만 맞으면 열린다
+        # **`prefer` 없이** 부른다 - 직접 인덱스가 있던 곳은 자동 앵커 선택
+        # 경로다(`rows[0]["coverage"]`). prefer 를 주면 그 루프를 건너뛰어
+        # 아무것도 검증하지 못한다.
+        r = bk.lookup(["maid"], "1girl_solo")
+        assert isinstance(r, dict), r           # KeyError 로 죽지 않는다
+        r2 = bk.lookup(["maid"], "1girl_solo", prefer="maid")
+        assert isinstance(r2, dict), r2
+
+    def test_quarantine_failure_also_lands_on_error(self, tmp_path, monkeypatch):
+        """치우려다 **실패**한 것도 막힘이다(파일 잠금/권한).
+
+        그냥 돌아가면 파일이 남아 start() 는 ready, status 는 incomplete -
+        저장소 경로에서 고친 무한 루프가 다른 원인으로 되살아난다.
+        """
+        from core.tag_combo.download import BUNDLE_NAME
+        from core.tag_combo.service import ComboService
+        (tmp_path / BUNDLE_NAME).write_bytes(b"NOT A BUNDLE")
+        svc = ComboService(tmp_path, search_dirs=[tmp_path])
+
+        def boom(self, target):                 # noqa: ANN001
+            raise OSError("locked")
+        monkeypatch.setattr(Path, "replace", boom)
+        assert svc.quarantine_bad_bundle() == ""
+        st = svc.download_status()
+        assert st["state"] == "error" and "quarantine" in st["error"], st
+        assert svc.ensure_bundle()["state"] == "error"
+
+    def test_blocked_clears_when_the_offending_file_is_gone(self, tmp_path,
+                                                           monkeypatch):
+        """막힘은 **풀려야** 한다 - 원인 파일을 지우면 다시 받을 수 있어야 한다.
+
+        안 풀어 주면 프로세스 재시작 전까지 error 에 갇혔다(Codex 3차 실증:
+        `after_removed_retry error`).
+        """
+        from core.tag_combo.download import BUNDLE_NAME
+        from core.tag_combo.service import ComboService
+        target = tmp_path / BUNDLE_NAME
+        target.write_bytes(b"NOT A BUNDLE")
+        svc = ComboService(tmp_path, search_dirs=[tmp_path])
+
+        def boom(self, dst):                    # noqa: ANN001
+            raise OSError("locked")
+        monkeypatch.setattr(Path, "replace", boom)
+        svc.quarantine_bad_bundle()
+        assert svc.download_status()["state"] == "error"
+        monkeypatch.undo()
+        target.unlink()                         # 사람이 손으로 지웠다
+        assert svc.download_status()["state"] != "error", "막힘이 풀리지 않았다"
+        assert svc._blocked == ""

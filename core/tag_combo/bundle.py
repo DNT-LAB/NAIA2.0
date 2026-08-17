@@ -68,14 +68,24 @@ def _entry_answerable(e) -> bool:
     ⚠️ 컨테이너의 truthiness 로는 부족하다 - `rows: [{}]` 와 `tags: [{}]` 가
     통과했다(Codex 2차 지적 2026-08-17). `bank.lookup` 은 줄에서 `r["tags"]` 를
     직접 읽고 화면 칩은 `x["tag"]` 로 그린다. 그 필드가 있어야 답이 나온다.
+
+    ⚠️ **이름만 보면 또 샌다.** 처음엔 `rows[].tags` 와 `tags[].tag` 만 봤는데,
+    `lookup` 은 앵커를 고를 때 `rows[0]["coverage"]` / `tags[0]["p"]` 를 **직접
+    인덱스**한다 - 그래서 숫자 없는 엔트리는 검증을 통과하고 `ready()` 도 참인데
+    조회가 `KeyError` 로 죽었다(Codex 3차 실증 2026-08-17). 답할 수 있다는 말은
+    **화면에 숫자를 띄울 수 있다**는 뜻까지 포함한다.
     """
     if not isinstance(e, dict):
         return False
+
+    def _num(v) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
     for r in (e.get("rows") or []):
-        if isinstance(r, dict) and (r.get("tags") or []):
+        if isinstance(r, dict) and (r.get("tags") or []) and _num(r.get("coverage")):
             return True
     for x in (e.get("tags") or []):
-        if isinstance(x, dict) and str(x.get("tag") or "").strip():
+        if isinstance(x, dict) and str(x.get("tag") or "").strip() and _num(x.get("p")):
             return True
     return False
 

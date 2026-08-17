@@ -21444,6 +21444,13 @@ body.detached-module .mod-grid-3 {
    ⚠️ **상단 버튼 줄(`.ia-scene-float`: 구도~Safe Viewer + Rating + 반응형/시드)은
    감추지 않는다**(사용자 지시). 축·Rating·Safe Viewer 는 고르는 중에도 쓴다. */
 body.ia-panel-open .ia-assets { display: none !important; }
+/* 같은 이유로 `Rating`·`반응형 생성`·`시드 고정` 도 감춘다(사용자 지적 2026-08-17:
+   "여전히 일부 UI 가 숨겨지지 않습니다"). 이것들은 버튼 줄과 같은 mount 안에
+   있지만 **성격이 다르다** - 축/Safe Viewer 는 태그를 고르는 중에도 쓰는 반면,
+   이 셋은 생성 설정이라 고르는 동안 건드릴 일이 없다.
+   `.ia-comp-applied` 는 Rating 칩과 적용 중인 축 프리셋을 담는 줄이다. */
+body.ia-panel-open .ia-scene-float .ia-comp-applied,
+body.ia-panel-open .ia-scene-float .ia-reactive { display: none !important; }
 
 
 .ia-axtab {

@@ -5183,6 +5183,15 @@ export function createInteractivePanel({
     const inspecting = inspectTag &&
       !tags.some(x => x.toLowerCase() === inspectTag.toLowerCase()) ? inspectTag : '';
     const askTags = inspecting ? [inspecting, ...tags] : tags;
+    // **새 태그를 기다리는 중이면 아무것도 안 띄운다.** 슬롯을 열 때 끝에 `, ` 를
+    // 붙였으므로 사용자는 "다음 것을 고르려는" 상태다. 그때 마지막 태그의 추천을
+    // 남겨 두면 원하지 않는 것이 계속 보인다(사용자 지적). 살펴보는 태그가 있으면
+    // 그건 명시적 의사라 예외다.
+    if (awaitingNewTag && !inspecting) {
+      host.classList.remove('open');
+      host.innerHTML = '';
+      return;
+    }
     if (!askTags.length) {
       // **도움말 카드를 띄우지 않는다**(사용자 지시 2026-08-17). 고른 것이 없을 때
       // 조작법을 적어 두는 카드였는데, 팝업을 접힌 띠로 만든 뒤로는 아무것도 안
@@ -5596,6 +5605,11 @@ export function createInteractivePanel({
     if (ta.value.trim() && !/,\s*$/.test(ta.value)) {
       ta.value = ta.value.replace(/\s+$/, '') + ', ';
     }
+    // **기준도 비운다.** `, ` 만 붙이면 캐럿은 새 자리로 가는데 조언 패널의 기준
+    // (`seedTag = inspecting || lastPicked`)은 여전히 마지막 태그다 - 그래서
+    // `thick thighs` 를 원하지 않는데도 그 추천이 계속 떴다(사용자 지적).
+    // 새 태그를 기다리는 상태로 표시하고, 치거나 고르는 순간 풀린다.
+    if (/,\s*$/.test(ta.value)) awaitingNewTag = true;
     autoGrow(ta);
     ta.focus();
     const n = ta.value.length;
@@ -5603,8 +5617,31 @@ export function createInteractivePanel({
     return ta;
   }
 
+  /** 캐럿이 놓인 토큰(쉼표 사이). 비어 있으면 빈 문자열.
+   *
+   *  조언 패널의 기준을 "지금 손대는 태그" 로 맞추는 데 쓴다. 가중치 묶음
+   *  (`0.5::a, b ::`)은 쉼표로 잘리면 부서지지만, 여기서 쓰는 값은 **표시 기준**
+   *  이라 부정확해도 조회가 못 찾으면 조용히 기권한다 - 상태를 바꾸지 않는다. */
+  function caretToken(ta) {
+    try {
+      const v = String(ta.value || '');
+      const at = ta.selectionStart ?? v.length;
+      const s = v.lastIndexOf(',', Math.max(0, at - 1)) + 1;
+      let e = v.indexOf(',', at);
+      if (e < 0) e = v.length;
+      return v.slice(s, e).trim();
+    } catch (_) { return ''; }
+  }
+
   function bindSlotInput(ta) {
     ta.addEventListener('input', () => {
+      // 치기 시작했으면 기다림은 끝났다 - 아래 renderAside 가 다시 기준을 잡는다.
+      awaitingNewTag = false;
+      // **치고 있는 토큰을 기준으로 삼는다.** 예전엔 타이핑이 `lastPicked` 를
+      // 건드리지 않아, `, ` 뒤에 `maid` 를 쳐도 조언 패널은 계속 `thick thighs` 를
+      // 말했다(사용자 지적 2026-08-17). 기준은 **지금 손대는 것**이어야 한다.
+      const cur = caretToken(ta);
+      if (cur) lastPicked = cur;
       autoGrow(ta);
       // 반응형 생성: 타이핑 중에는 발화를 멈춘다(blur/Enter 에 한 번 낸다).
       reactiveTypingSlot = ta;
@@ -5905,6 +5942,10 @@ export function createInteractivePanel({
   const thumbHave = new Map();       // axisKey -> Set(썸네일 이미지가 있는 태그)
   const thumbScroll = new Map();     // axisKey -> scrollTop (재렌더 시 복원)
   let openThumbAxis = null;          // 아코디언 — 썸네일 섹션은 한 번에 하나만 펼친다
+  // **새 태그를 기다리는 중**(슬롯을 열 때 끝에 `, ` 를 붙인 직후). 이때는 조언
+  // 패널의 기준을 잡지 않는다 - 마지막 태그를 계속 기준으로 삼으면 원하지 않는
+  // 추천이 남는다(사용자 지적 2026-08-17). 치거나 고르는 순간 풀린다.
+  let awaitingNewTag = false;
   let thumbFilter = '';              // 검색창이 그리드를 거를 때의 질의(트리 없는 슬롯)
 
   /** 태그명과 한글 설명 양쪽을 본다 — 사용자가 `앉` 으로 `sitting` 을 찾을 수 있어야 한다. */
@@ -7362,6 +7403,10 @@ export function createInteractivePanel({
   function toggleTag(tag, opts = {}) {
     const normalized = String(tag || '').trim();
     if (!normalized) return;
+    // 태그를 넣거나 빼는 **모든 길**이 여기를 지난다(그리드 셀의 [선택]/[제거],
+    // 조언 칩, '필요한 것', 색 조합). 그러니 "새 태그를 기다리는 중" 은 여기서
+    // 푼다 - 호출처마다 붙이다 하나를 빠뜨리는 일이 없다.
+    awaitingNewTag = false;
     // 조언 플로트의 추천 기준. **플로트에서 고를 때는 바꾸지 않는다** —
     // 기준이 따라 움직이면 목록이 통째로 갈려서 방금 넣은 것을 되돌릴 수 없다.
     // 기준은 그리드·탐색기에서 고른 것으로만 바뀐다.

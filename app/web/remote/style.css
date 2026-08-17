@@ -21379,9 +21379,61 @@ body.detached-module .mod-grid-3 {
 .ia-axes.is-idle .ia-axsplit > .ia-axtabs {
   border-right: 0; padding-right: 0;
 }
-/* 마진을 타이트하게. 리뷰어 권고 - 팝업이 좁아지는 만큼 이미지가 살아난다. */
-.interactive-mode .ia-panel:has(.ia-axes.is-idle) { padding: 8px 8px 8px; }
-.interactive-mode .ia-panel:has(.ia-axes.is-open) { padding: 8px 10px 10px; }
+/* ── 창 해체: 떠 있는 섬 둘 ─────────────────────────────────────────────────
+   사용자 결정 2026-08-17: "아예 팝업창을 해체하고, 카테고리 버튼과 검색 버튼만
+   먼저 끄집어내라. 카테고리 버튼이 부유섬에 떠 있고, 눌렀을 때만 그 옆에 새로운
+   island 에서 컨텐츠가 나타나는 식."
+
+     섬 A  검색 + 카테고리 버튼  (항상, 좁다)
+     섬 B  고른 카테고리의 내용  (누를 때만, A 옆)
+
+   그래서 **`.ia-panel` 자체는 껍데기를 잃는다** - 배경·테두리·그림자·패딩이
+   없어지고 자리만 잡는 투명한 틀이 된다. 카드 모양은 그 안의 두 조각이 각자
+   가진다. `.ia-axsplit` 의 grid + gap 이 이미 둘을 나란히 놓으므로 위치 계산을
+   새로 만들 필요가 없다. */
+/* ⚠️ `overflow` 를 풀지 마라. `visible` 로 바꿨다가 섬 높이가 2,433px 로 터져
+   화면 밖으로 흘렀다(실측) - 그리드 높이를 억제하던 것이 이 클리핑이었다.
+   그림자가 틀 경계에서 살짝 잘리지만, 틀 자체가 투명해져 눈에 띄지 않는다. */
+.interactive-mode .ia-panel {
+  background: none; border: 0; box-shadow: none; padding: 0;
+  gap: 6px;
+}
+/* 섬 A — 검색 + 카테고리. 둘을 한 덩어리로 보이게 배경을 각각 준다. */
+.interactive-mode .ia-panel .ia-search.ia-search-top {
+  margin: 0; padding: 6px; border-radius: 10px;
+  background: rgba(18,18,26,0.78); border: 1px solid var(--border-glow);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+}
+/* 본문도 `overflow` 를 건드리지 않는다 - 여기가 세로 스크롤을 맡는다. */
+.interactive-mode .ia-panel .ia-panel-body { padding: 0; gap: 6px; }
+.interactive-mode .ia-axes {
+  padding: 0; margin: 0; border-bottom: 0; gap: 6px;
+}
+.interactive-mode .ia-axsplit > .ia-axtabs {
+  padding: 6px; border-radius: 10px; border-right: 0;
+  background: rgba(18,18,26,0.78); border: 1px solid var(--border-glow);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+}
+/* 섬 B — 고른 카테고리의 내용. 접힌 상태에서는 아예 없다(위 `is-idle` 규칙). */
+.interactive-mode .ia-axpanes {
+  padding: 6px; border-radius: 10px;
+  background: rgba(18,18,26,0.82); border: 1px solid var(--border-glow);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+}
+.interactive-mode .ia-axes.is-idle .ia-axpanes { display: none; }
+/* 닫기 칩. 제목줄은 없앴지만 이건 남긴다 - 캐릭터 슬롯에서 닫는 길이 우클릭뿐이
+   되면(왼쪽 클릭은 입력창 포커스다) 발견할 수 없다. */
+.interactive-mode .ia-island-close {
+  flex: 0 0 auto; width: 20px; height: 20px; padding: 0; cursor: pointer;
+  display: grid; place-items: center; border-radius: 6px;
+  font-size: 14px; line-height: 1; color: var(--text-dim);
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border-dim);
+}
+.interactive-mode .ia-island-close:hover {
+  color: var(--text-primary); border-color: var(--border-glow);
+}
+/* 검색창이 없는 슬롯(구도 등)에서는 칩만 담는 얇은 줄이 된다. */
+.interactive-mode .ia-island-bar { display: flex; justify-content: flex-end; }
 
 
 .ia-axtab {

@@ -5789,24 +5789,38 @@ export function createInteractivePanel({
     // 한 줄에 안 들어가 제목이 세로로 접혔다(실측: `C1 / · / 신 / 체`). 테스터
     // 지시대로 헤더 군더더기와 Safe Viewer 를 걷어내고, Safe Viewer 는 상단 `[축]`
     // 줄로 옮겼다(`sceneFloatHtml`) - 백엔드는 이미 전역이라 어디서 눌러도 같다.
-    // 축 이름은 검색창의 `ia-search-scope` 가 이미 말하므로 중복이었다.
+    // 축 이름도 뺐다 - 어느 슬롯을 고치는 중인지는 왼쪽 슬롯이 말한다.
+    // **팝업 창을 해체한다**(사용자 결정 2026-08-17).
+    //
+    // 창 껍데기(제목줄 + 테두리 + 그림자)를 걷어내고 **떠 있는 섬** 둘로 만든다:
+    //
+    //   섬 A  검색 + 카테고리 버튼. 항상 떠 있다(좁다)
+    //   섬 B  고른 카테고리의 내용. 카테고리를 눌렀을 때만 A 옆에 나타난다
+    //
+    // 예전엔 하나의 창이 484px 를 늘 쥐고 있었다 - 카테고리를 고르기 전에도
+    // 그리드 자리를 비워 두는 셈이라, 팝업 455px + 조언 패널 484px 가 결과
+    // 영역의 81.4% 를 덮었다(테스터 2회 지적).
+    //
+    // 제목줄은 없앤다. 무엇을 고치는 중인지는 **왼쪽 슬롯이 파랗게 열려 있는
+    // 것**이 이미 말하고, 닫기는 Esc·바깥 클릭·슬롯 다시 누르기로 이미 셋이다.
+    // 168px 짜리 띠에서 제목이 `C1 / · / 신 / 체` 로 접히던 것도 이 때문이었다.
+    // 닫기는 **작은 칩 하나로 남긴다.** 제목줄은 없애도 이건 못 없앤다 - 캐릭터
+    // 슬롯에서 닫는 길이 우클릭뿐이 되는데(왼쪽 클릭은 입력창 포커스다) 그건
+    // 발견할 수 없다. Esc·바깥 클릭도 보이지 않는 길이다.
+    const closeChip = '<button type="button" class="ia-island-close" data-close="1"'
+      + ' title="닫습니다 (Esc · 바깥을 눌러도 닫힙니다)">&times;</button>';
     panelMount.innerHTML = `
-      <div class="ia-panel-head">
-        <span class="ia-panel-title">${escHtml(panelContext.title)}</span>
-        <button type="button" class="ia-panel-close" data-close="1">&times;</button>
-      </div>
       ${wantsSearch() ? `<div class="ia-search ia-search-top">
         <input type="text" id="iaTagInput"
-          placeholder="태그 검색 — 아는 태그를 바로 넣습니다" autocomplete="off">
-        <span class="ia-search-scope">${escHtml(panelContext.axis)}</span>
-      </div>` : ''}
+          placeholder="태그 검색" autocomplete="off">
+        ${closeChip}
+      </div>` : `<div class="ia-island-bar">${closeChip}</div>`}
       <div class="ia-panel-body">
         ${axisSectionsHtml()}
       </div>`;
 
+    // Safe Viewer 는 상단 `[축]` 줄로 옮겼으므로 여기서 안 찾는다.
     panelMount.querySelector('[data-close]')?.addEventListener('click', closePanel);
-    panelMount.querySelector('[data-safe-viewer]')
-      ?.addEventListener('click', () => setSafeViewer(!safeViewer));
     bindAxisSections();
     // 계층 브라우저를 이 슬롯 축으로 마운트한다. 없으면 섹션은 비어 있다.
     const input = panelMount.querySelector('#iaTagInput');
@@ -6660,6 +6674,11 @@ export function createInteractivePanel({
     // 이미지가 밀려 있다(사용자 지적의 "이미지를 가린다" 가 그 상태다).
     syncPopupShift();
     positionPopup();
+    // **조언 패널도 옮긴다.** 패널은 팝업 오른쪽에 붙는데(`panel.right + 10`),
+    // 카테고리를 고르면 팝업이 168 -> 484px 로 넓어진다. 여기서 다시 배치하지
+    // 않으면 패널이 옛 자리에 남아 내용 섬을 덮는다(실측: 패널 x=672 인데 팝업
+    // 오른쪽 끝이 978).
+    positionAside();
   }
 
   // ---- 구도 3축 콤보 프리셋 패널 (Dev0714 복원) ----

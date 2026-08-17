@@ -20659,6 +20659,21 @@ body.detached-module .mod-grid-3 {
   background: rgba(229,115,107,0.10);
 }
 .ia-neg.has-neg, .ia-neg.is-open, .ia-neg.is-editing { display: flex; }
+/* 슬롯 이름 옆의 `[n]` — 접힌 네거티브의 개수만 알린다(테스터 지적 2026-08-17).
+   붉은 계열이라 이름과 섞이지 않고, 세로를 한 픽셀도 더 쓰지 않는다(이름 줄에
+   얹힌다). 값이 없으면 마크업 자체가 없다. */
+.ia-neg-badge {
+  flex: 0 0 auto; margin-left: 1px; padding: 0 4px;
+  font-family: var(--font-mono); font-size: 8.5px; line-height: 13px;
+  border: 1px solid rgba(229,115,107,0.42); border-radius: 4px;
+  background: rgba(229,115,107,0.12); color: #f0c9c5;
+  cursor: pointer;
+}
+.ia-neg-badge:hover { background: rgba(229,115,107,0.22); }
+.ia-neg-badge.is-on {
+  background: rgba(229,115,107,0.30); border-color: rgba(229,115,107,0.62);
+  color: #ffe3df;
+}
 /* 눌러서 열렸을 뿐 아직 값이 없으면 옅게 — '여기 넣을 수 있다' 까지만 알린다. */
 .ia-neg.is-open:not(.has-neg):not(.is-editing) {
   background: rgba(229,115,107,0.05); border-color: rgba(229,115,107,0.22);

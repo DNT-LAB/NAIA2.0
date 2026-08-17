@@ -792,6 +792,31 @@ export function createInteractivePanel({
    *  **개수 배지(.ia-block-meta) 뒤에 놓아야 한다.** 앞에 두면 이 행의
    *  `grid-column: 1/-1` 이 줄을 통째로 먹어 배지가 다음 줄 왼쪽으로 떨어진다
    *  (사용자 지적 2026-08-11: 줄 넘김에 신경써야 할 것 같아요). */
+  // 펼쳐 둔 네거티브 행. `cid + sub` 하나가 열림 단위다.
+  //
+  // 값이 있으면 늘 전폭으로 붉게 남아 있었다 - 슬롯 12칸에 그런 줄이 섞이면
+  // 좌측 목록이 한눈에 안 들어온다(테스터 지적 2026-08-17). 이제 기본은 접힘이고
+  // 슬롯 왼쪽의 `[n]` 배지가 개수만 알린다. 누르면 그 줄만 펼쳐진다.
+  const negOpen = new Set();
+  // ⚠️ 구분자에 **NUL 을 쓰지 마라.** 처음엔 진짜 NUL(U+0000) 바이트를 넣었는데,
+  // 그 한 바이트 때문에 git 이 이 파일을 **바이너리로 판정**해 개행 정규화를
+  // 건너뛰었다 - 커밋 하나가 8,384줄 전체 재작성으로 기록됐다(blob 450,946 ->
+  // 461,571B). `cid` 는 `c1` 꼴이고 `sub` 는 고정 라벨이라 `|` 로 충분하다.
+  const negKey = (cid, sub) => `${cid}|${sub}`;
+
+  /** 슬롯 왼쪽에 붙는 네거티브 개수 배지. 값이 없으면 아무것도 없다. */
+  function negBadgeHtml(c, meta) {
+    const n = negOf(c, meta.key).length;
+    if (!n) return '';
+    const on = negOpen.has(negKey(c.id, meta.key));
+    const tip = on ? `네거티브 ${n}개 - 누르면 접습니다`
+                   : `네거티브 ${n}개 - 누르면 펼칩니다`;
+    return `<button type="button" class="ia-neg-badge${on ? ' is-on' : ''}"`
+      + ` data-negtoggle data-cid="${escHtml(c.id)}" data-sub="${escHtml(meta.key)}"`
+      + ` aria-pressed="${on}" aria-label="${escHtml(tip)}" title="${escHtml(tip)}">`
+      + `${n}</button>`;
+  }
+
   function negRowHtml(c, meta) {
     const tags = negOf(c, meta.key);
     const editing = isEditing('char', c.id, meta.key, true);
@@ -799,6 +824,13 @@ export function createInteractivePanel({
     // 호버로 열었더니 목록을 훑기만 해도 칸이 튀어나와 줄이 밀렸다.
     const slotOpen = !!(panelContext && panelContext.kind === 'char'
                         && panelContext.cid === c.id && panelContext.sub === meta.key);
+    // **값이 있어도 접혀 있으면 줄을 만들지 않는다.** 개수는 왼쪽 배지가 말한다
+    // (테스터 지적 2026-08-17: "기본적으로 눈에 안 보이되 [1] 로 개수를 알리고
+    // 클릭했을 때만 펼쳐지는 것"). 편집 중이거나 그 슬롯을 열어 둔 동안은 예외 -
+    // 그때는 네거티브를 손대는 맥락이라 감추면 오히려 찾을 수 없다.
+    if (tags.length && !editing && !slotOpen && !negOpen.has(negKey(c.id, meta.key))) {
+      return '';
+    }
     const cls = 'ia-neg' + (tags.length ? ' has-neg' : '')
       + (slotOpen ? ' is-open' : '') + (editing ? ' is-editing' : '');
     const body = editing
@@ -999,7 +1031,7 @@ export function createInteractivePanel({
           : `<span class="ia-block-count">${tags.length || ''}</span>`;
         return `<div class="ia-sub-block${editing ? ' is-editing' : ''}${tags.length ? '' : ' is-empty'}" data-cid="${c.id}" data-sub="${s.key}">
           <div class="ia-block-label">
-            <span class="ia-block-title"><span class="ia-block-icon">${s.icon}</span><span class="ia-block-name">${escHtml(subLabel(s))}</span></span>
+            <span class="ia-block-title"><span class="ia-block-icon">${s.icon}</span><span class="ia-block-name">${escHtml(subLabel(s))}</span>${negBadgeHtml(c, s)}</span>
             <span class="ia-block-axis">${s.axis}</span>
           </div>
           ${slotBody(editing, tags, {del: true, owner: {cid: c.id, sub: s.key},
@@ -2428,6 +2460,17 @@ export function createInteractivePanel({
         }
         weightTarget = {char: {cid, sub, neg}, index};
         openMiniPopup('weight', el);
+      });
+    });
+    // `[n]` 배지 — 그 슬롯의 네거티브 줄만 펼치거나 접는다. 슬롯 열기로 번지면
+    // 팝업이 뜨면서 목록이 다시 그려져 무엇을 눌렀는지 알 수 없게 된다.
+    blocksMount.querySelectorAll('[data-negtoggle]').forEach(el => {
+      el.addEventListener('click', event => {
+        event.stopPropagation();
+        event.preventDefault();
+        const k = negKey(el.dataset.cid, el.dataset.sub);
+        if (negOpen.has(k)) negOpen.delete(k); else negOpen.add(k);
+        renderBlocks();
       });
     });
     blocksMount.querySelectorAll('[data-neg]').forEach(el => {

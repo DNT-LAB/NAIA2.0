@@ -102,21 +102,24 @@ def register_tag_combo_routes(app: FastAPI, context: Any, *,
         def _run() -> dict[str, Any]:
             try:
                 svc = _service()
-                got = svc.available()
-                if not got:
-                    # 깨끗한 체크아웃에는 모델이 없다 - 생성물이라 커밋하지 않는다.
+                got = svc.available()          # 모델(개발 머신에만 있다)
+                # **준비 판정은 뱅크 기준이다.** 배포 번들에는 그룹 모델이 들어가지
+                # 않는다(203MB -> 15MB) - 모델 목록으로 판정하면 정상 설치가
+                # 영원히 "안 구워졌다" 로 보인다.
+                bgroups = svc.bank_groups()
+                ready = svc.ready()
+                if not ready:
+                    # 깨끗한 체크아웃에는 뱅크가 없다 - 생성물이라 커밋하지 않는다.
                     # 무엇을 해야 하는지 응답과 로그 양쪽에 남긴다.
-                    _log_once("no models built; run tools/build_tag_combo_models.py")
-                # 뱅크 상태를 함께 낸다. 뱅크가 없으면 기능이 죽는 게 아니라
-                # **조용히 옛 온라인 경로로 내려앉는다** - 그건 눈에 보여야 한다.
-                bank_ok = svc.bank() is not None
+                    _log_once("recipe bank not ready; it ships in the tag-combo bundle")
                 return {"available": got, "dir": str(svc.dir),
                         "searchDirs": [str(d) for d in svc.search_dirs],
-                        "built": bool(got),
-                        "bank": bank_ok,
-                        "bankError": "" if bank_ok else svc.bank_error(),
-                        "howToBuild": "python tools/build_tag_combo_models.py"
-                                      if not got else ""}
+                        "built": ready,
+                        "bank": bool(bgroups),
+                        "bankGroups": bgroups,
+                        "bankError": svc.bank_error(),
+                        "howToBuild": "python tools/build_recipe_bank.py"
+                                      if not ready else ""}
             except Exception as exc:      # noqa: BLE001
                 _log_once(f"groups failed: {type(exc).__name__}: {exc}")
                 return {"available": [], "error": type(exc).__name__}

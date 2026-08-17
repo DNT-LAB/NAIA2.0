@@ -344,6 +344,72 @@ class TestBundle:
         assert b.verify_all() == []
         assert set(b.groups()) == {"toy"}
 
+    # ---- aux-only 번들 (배포 형태) --------------------------------------
+    @staticmethod
+    def _aux_files(d: Path, *, bank_format: str = "NRB3", groups=("1girl_solo",)):
+        from core.tag_combo.person import PERSON_GROUPS as _PG
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "recipe_bank.json").write_text(json.dumps({
+            "format": bank_format, "policy": {},
+            "groups": {g: {"maid": {"rows": [], "tags": [
+                {"tag": "apron", "p": 0.66, "lift": 5.0}]}} for g in groups},
+        }), encoding="utf-8")
+        (d / "semantic_graph.json").write_text(
+            json.dumps({"edges": []}), encoding="utf-8")
+        (d / "anchor_feature_marginals.json").write_text(
+            json.dumps({"anchors": {}}), encoding="utf-8")
+        return {n: d / f"{n}.json" for n in
+                ("recipe_bank", "semantic_graph", "anchor_feature_marginals")}
+
+    def _aux_bundle(self, tmp_path, **kw):
+        from core.tag_combo.bundle import ComboBundle, write_bundle
+        aux = self._aux_files(tmp_path / "src", **kw)
+        out = tmp_path / "auxonly.ncsb"
+        write_bundle(out, [], source="test", aux=aux, built="t")
+        return ComboBundle(out), out
+
+    def test_aux_only_bundle_roundtrips(self, tmp_path):
+        """배포 번들에는 그룹 모델이 없다(203MB -> 15MB)."""
+        b, out = self._aux_bundle(tmp_path)
+        assert b.groups() == [], "aux-only 인데 그룹이 있다"
+        assert set(b.aux_index) == {"recipe_bank", "semantic_graph",
+                                    "anchor_feature_marginals"}
+        assert b.verify_all() == []
+        d = json.loads(b.aux("recipe_bank").decode("utf-8"))
+        assert d["format"] == "NRB3"
+
+    @pytest.mark.parametrize("name", ["recipe_bank", "semantic_graph",
+                                      "anchor_feature_marginals"])
+    def test_aux_corruption_is_caught(self, tmp_path, name):
+        """**그룹만 보던 검증은 aux-only 번들에서 아무것도 안 봤다.**
+
+        모델 없이 부속만 담으면 `verify_all` 이 빈 루프를 돌고 "성공" 을 냈다 -
+        레시피 뱅크가 깨진 번들이 그대로 설치된다(Codex 지적 2026-08-17).
+        """
+        from core.tag_combo.bundle import ComboBundle
+        b, out = self._aux_bundle(tmp_path)
+        e = b.aux_index[name]
+        raw = bytearray(out.read_bytes())
+        raw[e["off"] + max(0, e["len"] // 2)] ^= 0xFF
+        bad = tmp_path / f"bad_{name}.ncsb"
+        bad.write_bytes(raw)
+        assert ComboBundle(bad).verify_all() == [f"aux:{name}"]
+
+    def test_aux_only_rejects_old_bank_format(self, tmp_path):
+        """sha 가 맞아도 형식이 옛것이면 설치 단계에서 걸러야 한다."""
+        b, _ = self._aux_bundle(tmp_path, bank_format="NRB2")
+        assert b.verify_all() == ["aux:recipe_bank"]
+
+    def test_aux_only_rejects_empty_bank(self, tmp_path):
+        b, _ = self._aux_bundle(tmp_path, groups=())
+        assert b.verify_all() == ["aux:recipe_bank"]
+
+    def test_old_bundle_without_aux_is_not_called_corrupt(self, tmp_path):
+        """NCSB1 은 부속이 없다. 그건 손상이 아니라 옛 형식이다."""
+        b, _ = self._bundle(tmp_path)          # 그룹만, aux 없음
+        assert b.aux_index == {}
+        assert b.verify_all() == []
+
     def test_rejects_foreign_file(self, tmp_path):
         p = tmp_path / "nope.ncsb"
         p.write_bytes(b"not a bundle at all")
@@ -475,38 +541,98 @@ class TestDataRoot:
         svc = ComboService(dl, search_dirs=[repo, dl])
         assert "1girl_solo" in svc.available(), "저장소의 모델이 안 보인다"
 
-    def test_one_group_does_not_stand_in_for_thirteen(self, tmp_path):
-        """**부분 모델을 완성으로 치면 안 된다.**
+    @staticmethod
+    def _bank_file(d: Path, groups) -> None:
+        """느슨한 `recipe_bank.json`. 그룹마다 앵커 하나씩."""
+        import json
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "recipe_bank.json").write_text(json.dumps({
+            "format": "NRB3", "policy": {},
+            "groups": {g: {"maid": {
+                "rows": [{"tags": ["apron"], "support": 99, "coverage": 0.49}],
+                "tags": [{"tag": "apron", "p": 0.66, "lift": 5.0}]}}
+                for g in groups},
+        }), encoding="utf-8")
 
-        처음엔 `.ncsr` 하나만 있어도 `_have_models()` 가 참이었다. 그러면
-        `1girl_solo` 만 가진 사람이 인원 수를 바꾸는 순간 빈 화면을 보는데
-        다운로드는 영영 시작되지 않는다(Codex 게이트 지적, 내 테스트가 이
-        결함을 오히려 정상 계약으로 못 박고 있었다).
+    def test_models_do_not_make_it_ready(self, tmp_path):
+        """**준비 판정은 모델이 아니라 뱅크다.**
+
+        배포 번들에는 그룹 모델이 들어가지 않는다(203MB -> 15MB). 모델 목록으로
+        판정하던 시절의 계약을 그대로 두면 정상 설치가 영원히 `incomplete` 가
+        된다(Codex 지적 2026-08-17). 반대로 모델이 13개 다 있어도 뱅크가 없으면
+        화면에는 추천이 없다 - 그것도 ready 가 아니다.
         """
         from core.tag_combo.service import ComboService
-        d = tmp_path / "partial"
-        self._group(d, "1girl_solo")
+        d = tmp_path / "models_only"
+        for g in PERSON_GROUPS:
+            self._group(d, g)
         svc = ComboService(d, search_dirs=[d])
-        assert not svc._have_models(), "1그룹으로 13그룹을 갈음한다"
+        assert len(svc.available()) == len(PERSON_GROUPS), "모델은 다 있다"
+        assert not svc.ready(), "모델만으로 ready 라고 하면 화면은 빈다"
+        assert svc.download_status()["state"] != "ready"
+
+    def test_bank_alone_is_ready_without_any_model(self, tmp_path):
+        """모델 0개 + 뱅크 13그룹 = 준비 완료. 이게 배포 형태다."""
+        from core.tag_combo.service import ComboService
+        d = tmp_path / "bank_only"
+        self._bank_file(d, PERSON_GROUPS)
+        svc = ComboService(d, search_dirs=[d])
+        assert svc.available() == [], "모델이 없어야 하는 상황이다"
+        assert svc.ready(), "뱅크 13그룹인데 ready 가 아니다"
+        st = svc.download_status()
+        assert st["state"] == "ready" and st["missing"] == []
+        assert len(st["bankGroups"]) == len(PERSON_GROUPS)
+        r = svc.recommend(["maid"], group="2boys", anchor="maid")
+        assert [x["tag"] for x in r["tags"]] == ["apron"], r
+
+    def test_partial_bank_does_not_stand_in_for_thirteen(self, tmp_path):
+        """**부분 뱅크를 완성으로 치면 안 된다.**
+
+        빠진 인원 그룹은 사용자가 인원 수를 바꾸는 순간에야 드러난다. 그때까지
+        다운로드는 시작되지 않는다.
+        """
+        from core.tag_combo.service import ComboService
+        d = tmp_path / "partial_bank"
+        self._bank_file(d, ["1girl_solo"])
+        svc = ComboService(d, search_dirs=[d])
+        assert not svc.ready()
         st = svc.download_status()
         assert st["state"] != "ready"
         assert len(st["missing"]) == len(PERSON_GROUPS) - 1
 
-    def test_complete_loose_set_needs_no_download(self, tmp_path):
-        """반대 방향: 13그룹이 다 있으면 179MB 를 다시 받지 않는다."""
+    def test_missing_bank_group_is_a_data_error_not_a_fallback(self, tmp_path):
+        """뱅크에 없는 그룹은 **오류로 드러낸다.**
+
+        예전에는 온라인 모델로 폴백했다. 배포에 모델이 없으므로 폴백 대상이
+        없고, 조용한 니치 추천보다 오류가 정직하다.
+        """
         from core.tag_combo.service import ComboService
-        d = tmp_path / "full"
-        for g in PERSON_GROUPS:
-            self._group(d, g)
+        d = tmp_path / "one_group"
+        self._bank_file(d, ["1girl_solo"])
         svc = ComboService(d, search_dirs=[d])
-        assert svc._have_models()
-        assert svc.ensure_bundle()["state"] == "ready"
+        r = svc.recommend(["maid"], group="2boys", anchor="maid")
+        assert r.get("error") == "bank group missing", r
+        assert not r.get("tags") and not r.get("combos")
 
     def test_downloads_when_nothing_is_present(self, tmp_path):
         from core.tag_combo.service import ComboService
         svc = ComboService(tmp_path / "dl", search_dirs=[tmp_path / "dl"])
-        assert not svc._have_models()
+        assert not svc.ready()
         assert svc.download_status()["state"] != "ready"
+
+    def test_bank_attaches_after_the_file_arrives(self, tmp_path):
+        """받기 전에 한 번 열어 본 설치가 **재시작 없이** 붙어야 한다.
+
+        예전에는 첫 조회의 `None` 을 프로세스 수명 동안 물고 있었다.
+        """
+        from core.tag_combo.service import ComboService
+        d = tmp_path / "late"
+        d.mkdir()
+        svc = ComboService(d, search_dirs=[d])
+        assert svc.bank() is None and not svc.ready()
+        self._bank_file(d, PERSON_GROUPS)
+        assert svc.bank() is not None, "파일이 왔는데도 옛 None 을 물고 있다"
+        assert svc.ready()
 
 
 class TestRecovery:
@@ -726,14 +852,25 @@ class TestRecipeBank:
         assert ["a", "b", "c"] not in got, "앞 행과 2개 겹치는 행이 남았다"
         assert ["d", "e"] in got
 
-    def test_missing_group_is_a_fallback_not_an_abstention(self, tmp_path):
-        """부분 빌드에서 안 구운 그룹이 통째로 죽으면 안 된다.
+    def test_missing_group_is_reported_not_silently_answered(self, tmp_path):
+        """뱅크에 없는 그룹은 **오류로 드러낸다.**
 
-        데이터가 없는 것과 '권할 것이 없다' 는 판단은 다르다.
+        옛 계약은 "부분 빌드에서 안 구운 그룹은 온라인 폴백" 이었다. 그런데 그
+        테스트는 `recommend()` 를 **호출조차 하지 않고** 뱅크 내부만 봤다 - 계약을
+        건 척했을 뿐이다(Codex 지적 2026-08-17). 지금은 배포에 모델이 안 가므로
+        폴백 대상도 없다.
         """
         from core.tag_combo.service import ComboService
-        b = self._bank(tmp_path, {"1girl_solo": {"maid": [
+        self._bank(tmp_path, {"1girl_solo": {"maid": [
             {"tags": ["apron"], "support": 9, "coverage": 0.4}]}})
         svc = ComboService(tmp_path, search_dirs=[tmp_path])
         assert svc.bank() is not None
         assert not svc.bank().anchors("2girls"), "빈 그룹이 앵커를 들고 있다"
+        # **여기까지가 예전 테스트였다.** 실제 호출을 걸어야 계약이다.
+        r = svc.recommend(["maid"], group="2girls", anchor="maid")
+        assert r.get("error") == "bank group missing", r
+        assert not r.get("tags") and not r.get("combos")
+        assert r.get("bankGroups") == ["1girl_solo"], r
+        # 있는 그룹은 정상으로 답한다.
+        ok = svc.recommend(["maid"], group="1girl_solo", anchor="maid")
+        assert ok.get("source") == "bank" and not ok.get("error"), ok

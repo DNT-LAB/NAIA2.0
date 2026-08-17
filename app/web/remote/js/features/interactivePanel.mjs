@@ -4713,19 +4713,21 @@ export function createInteractivePanel({
   const comboCache = new Map();
   let comboLast = null;
 
-  // ── 모델 번들 배경 다운로드 ────────────────────────────────────────────
-  // 179MB 라 첫 진입을 막으면 안 된다. 배경으로 받고 추천 영역에 진행을 적는다.
-  // 조합 카드가 없어도 나머지 기능은 전부 돈다.
+  // ── 추천 데이터 번들 배경 다운로드 ─────────────────────────────────────
+  // 배경으로 받고 추천 영역에 진행을 적는다. 카드가 없어도 나머지는 전부 돈다.
+  // 번들에는 그룹 모델이 들어가지 않는다(레시피 뱅크 + 부속만, 실측 15MB) -
+  // 화면 추천은 전적으로 뱅크에서 나오고 모델은 개발 머신에서 캐는 데만 쓴다.
   let comboDl = null;          // 마지막 상태(null = 아직 안 물어봄)
   let comboDlTimer = 0;
   let comboDlFails = 0;        // 연속 폴링 실패 - 백오프에 쓴다
-  let comboDlRetried = false;  // 자동 재시도는 딱 한 번 (179MB 를 반복해 긁지 않는다)
+  let comboDlRetried = false;  // 자동 재시도는 딱 한 번 (같은 파일을 반복해 긁지 않는다)
 
   function comboDlText() {
     if (!comboDl) return '';
     const s = comboDl.state;
-    // ⚠️ `groups` 가 비지 않았다고 끝난 게 아니다. 13그룹을 다 못 채우면
-    // 사용자가 인원 수를 바꾸는 순간 빈 화면이 된다 - 그때까지는 안내를 남긴다.
+    // ⚠️ 파일이 있다고 끝난 게 아니다. **뱅크가** 13그룹을 다 못 채우면 사용자가
+    // 인원 수를 바꾸는 순간 빈 화면이 된다 - 그때까지는 안내를 남긴다.
+    // `missing` 은 서버가 뱅크 기준으로 센다(`download_status`).
     const missing = (comboDl.missing || []).length;
     if (s === 'ready' && !missing) return '';
     if (!comboDl.configured) return '';        // 배포 전 - 아무 말도 하지 않는다

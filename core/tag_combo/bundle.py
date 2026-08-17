@@ -52,6 +52,15 @@ MAGIC = b"NCSB1\0\0\0"
 ACCEPT_MAGIC = (MAGIC,)
 LEVEL = 6      # 실측 deflate-6 이 56% / 2초, 9는 55% / 11초 - 6이 맞다
 
+# **배포 번들의 내용 그 자체.** 모델을 빼고 부속만 배포하므로(203MB -> 15MB),
+# 이 셋 중 하나라도 깨지면 기능이 통째로 죽는다. `verify_all` 과 번들 빌더가
+# 같은 목록을 본다 - 둘이 갈리면 빌더가 통과시킨 것을 런타임이 거부한다.
+REQUIRED_AUX = ("recipe_bank", "semantic_graph", "anchor_feature_marginals")
+# 뱅크 형식. `core/tag_combo/bank.py` 와 같은 값이어야 한다. 여기서 한 번 더
+# 보는 이유는 **다운로드 직후** 걸러내야 하기 때문이다 - 그때 못 잡으면 옛
+# 형식 번들이 정식 이름을 달고 설치되고, 서비스는 조용히 뱅크 없이 돈다.
+BANK_FORMAT = "NRB3"
+
 
 @dataclass(frozen=True)
 class BundleEntry:
@@ -110,11 +119,16 @@ class ComboBundle:
         return self.path.stat().st_size
 
     def verify_all(self) -> list[str]:
-        """전 그룹의 sha256 을 대조하고 깨진 그룹 이름을 돌려준다.
+        """전 그룹 **과 필수 부속**의 sha256 을 대조하고 깨진 이름을 돌려준다.
 
         `read()` 는 **읽는 그룹만** 검증한다. 그건 평소엔 맞지만 다운로드 직후엔
         부족하다 - 안 쓰는 그룹이 깨진 채 남아 있다가 인원 수를 바꾸는 순간
         터진다. 설치 단계에서 한 번 이걸 돌린다(실측 13그룹 2초).
+
+        ⚠️ **부속도 반드시 본다.** 예전에는 그룹만 순회했다. 그런데 배포 번들은
+        이제 모델 없이 부속만 담으므로, 그 상태에서는 검증이 **아무것도 보지
+        않고 통과**했다 - 레시피 뱅크가 깨진 번들이 "검증 성공" 으로 설치된다
+        (Codex 지적 2026-08-17). 뱅크는 sha 뿐 아니라 형식까지 파싱해서 본다.
         """
         bad: list[str] = []
         for g in self.groups():
@@ -122,6 +136,27 @@ class ComboBundle:
                 self.read(g, verify=True)
             except (OSError, ValueError, KeyError, zlib.error):
                 bad.append(g)
+        for name in REQUIRED_AUX:
+            if name not in self.aux_index:
+                # NCSB1 은 부속이 없다. 그건 손상이 아니라 옛 형식이다 -
+                # 그룹이 하나라도 있으면 옛 번들로 보고 넘긴다.
+                if self.groups():
+                    continue
+                bad.append(f"aux:{name}")
+                continue
+            try:
+                blob = self.aux(name, verify=True)
+                if not blob:
+                    raise ValueError("빈 부속")
+                if name == "recipe_bank":
+                    d = json.loads(blob.decode("utf-8"))
+                    if d.get("format") != BANK_FORMAT:
+                        raise ValueError(f"뱅크 형식 {d.get('format')!r}")
+                    if not (d.get("groups") or {}):
+                        raise ValueError("뱅크에 그룹이 없다")
+            except (OSError, ValueError, KeyError, zlib.error,
+                    UnicodeDecodeError):
+                bad.append(f"aux:{name}")
         return bad
 
     def read(self, group: str, *, verify: bool = True) -> tuple[dict, bytes]:

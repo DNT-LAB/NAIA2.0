@@ -17,13 +17,40 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.tag_combo.bundle import ComboBundle, write_bundle   # noqa: E402
+from core.tag_combo.bundle import (                           # noqa: E402
+    BANK_FORMAT, REQUIRED_AUX, ComboBundle, write_bundle)
 from core.tag_combo.download import (                         # noqa: E402
     BUNDLE_BYTES, BUNDLE_NAME, BUNDLE_SHA256)
 from core.tag_combo.person import PERSON_GROUPS               # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 D = ROOT / "data" / "tag_combo"
+
+
+def _check_bank_groups(bank_path: Path) -> int:
+    """aux-only 번들은 뱅크가 유일한 답이다 - 13그룹을 여기서 강제한다.
+
+    배포에 모델이 없으면 온라인 폴백도 없다. 뱅크에 없는 인원 그룹은 통째로
+    죽는데, 사용자는 인원 수를 바꾸는 순간에야 안다. 그때는 이미 배포된 뒤다.
+    """
+    import json as _json
+    try:
+        d = _json.loads(bank_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"!! 뱅크를 읽을 수 없다: {type(exc).__name__}: {exc}")
+        return 2
+    if d.get("format") != BANK_FORMAT:
+        print(f"!! 뱅크 형식이 {d.get('format')!r} 다 (기대 {BANK_FORMAT})")
+        return 2
+    groups = d.get("groups") or {}
+    gone = [g for g in PERSON_GROUPS if not (groups.get(g) or {})]
+    if gone:
+        print(f"!! 뱅크에 앵커가 없는 그룹 {len(gone)}개: {gone}")
+        print("   python tools/build_recipe_bank.py 를 13그룹으로 다시 돌려라")
+        return 2
+    tot = sum(len(v or {}) for v in groups.values())
+    print(f"   뱅크 {len(groups)}그룹 · 앵커 {tot:,}")
+    return 0
 
 
 def main() -> int:
@@ -38,13 +65,23 @@ def main() -> int:
                          "입력으로 다시 구워도 sha 가 달라진다**. 배포용은 고정값을 줘라")
     ap.add_argument("--allow-partial", action="store_true",
                     help="13그룹이 안 차도 진행한다(디버깅용, 배포 금지)")
+    ap.add_argument("--aux-only", action="store_true",
+                    help="그룹 모델을 넣지 않고 부속 자산만 굽는다. **배포 기본값**이다 "
+                         "- 화면 추천은 전적으로 레시피 뱅크에서 나오고, 모델은 "
+                         "개발 머신에서 뱅크를 캐는 데만 쓴다. 실측 203MB -> 15MB")
     args = ap.parse_args()
 
     models = [D / f"{g}.ncsr" for g in PERSON_GROUPS if (D / f"{g}.ncsr").exists()]
-    if not models:
+    if args.aux_only:
+        # 모델을 넣지 않는다. 대신 **뱅크가 13그룹을 다 갖췄는지**를 여기서 본다 -
+        # 배포에 모델이 없으면 온라인 폴백도 없으므로, 빠진 인원 그룹은 통째로
+        # 죽는다. 그 검사가 아래 `_check_bank_groups` 다.
+        models = []
+    elif not models:
         print(f"!! 모델이 없다: {D} - tools/build_tag_combo_models.py 먼저")
         return 2
-    missing = [g for g in PERSON_GROUPS if not (D / f"{g}.ncsr").exists()]
+    missing = [] if args.aux_only else [
+        g for g in PERSON_GROUPS if not (D / f"{g}.ncsr").exists()]
     if missing and not args.allow_partial:
         # **부분 번들을 조용히 만들면 안 된다.** 런타임은 인덱스에 이름이 있는
         # 그룹만 열 수 있어서, 빠진 그룹은 사용자가 인원 수를 바꾸는 순간에야
@@ -58,7 +95,7 @@ def main() -> int:
     # 부속 자산은 **모델과 같은 파일**에 넣는다. 따로 배포하면 "레시피는 새 것인데
     # 모델은 옛 것" 인 조합이 생기고, 그건 사용자가 알아챌 방법이 없다.
     aux = {}
-    for name in ("recipe_bank", "semantic_graph", "anchor_feature_marginals"):
+    for name in REQUIRED_AUX:
         p = D / f"{name}.json"
         if p.exists():
             aux[name] = p
@@ -66,14 +103,25 @@ def main() -> int:
             print(f"   (부속 없음: {name}.json)")
     if aux:
         print(f"   부속 자산 {len(aux)}개: {', '.join(sorted(aux))}")
+    # aux-only 번들은 부속이 곧 내용이다. 하나라도 없으면 굽지 않는다.
+    if args.aux_only:
+        gone = [n for n in REQUIRED_AUX if n not in aux]
+        if gone:
+            print(f"!! 필수 부속이 없다: {gone}")
+            return 2
+        rc = _check_bank_groups(aux["recipe_bank"])
+        if rc:
+            return rc
 
     t0 = time.time()
     info = write_bundle(Path(args.out), models, source="data/tags/*.parquet",
                         aux=aux, built=args.built)
     el = time.time() - t0
     raw, out = info["rawBytes"], info["bytes"]
-    print(f"번들 {info['groups']}그룹 · 원본 {raw/1e6:.0f}MB -> {out/1e6:.0f}MB "
-          f"({out/raw:.0%}) · {el:.0f}s")
+    # aux-only 는 `rawBytes` 가 0 이다(그룹이 없다) - 압축률을 못 낸다.
+    ratio = f"{out/raw:.0%}" if raw else "n/a"
+    print(f"번들 {info['groups']}그룹 · 원본 {raw/1e6:.0f}MB -> {out/1e6:.1f}MB "
+          f"({ratio}) · {el:.0f}s")
     print(f"저장: {info['path']}")
 
     if args.verify:
@@ -82,7 +130,14 @@ def main() -> int:
         for g in b.groups():
             meta, body = b.read(g)          # sha256 대조가 read 안에 있다
             assert int(meta["nnz"]) > 0 and len(body) > 0
-        print(f"검증 {len(b.groups())}그룹 전부 통과 ({time.time()-t0:.0f}s)")
+        # **부속까지 본다.** aux-only 번들은 그룹이 0개라, 그룹만 돌면 검증이
+        # 아무것도 보지 않고 통과한다.
+        bad = b.verify_all()
+        if bad:
+            print(f"!! 검증 실패: {bad}")
+            return 2
+        print(f"검증 {len(b.groups())}그룹 + 부속 {len(REQUIRED_AUX)}종 전부 통과 "
+              f"({time.time()-t0:.0f}s)")
 
     # 배포 상수를 **여기서 뱉는다.** 안 고치면 신규 설치는 179MB 를 받아놓고
     # sha256 불일치로 통째로 버리고, 기존 설치는 파일이 있다는 이유로 옛 번들을

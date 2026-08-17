@@ -84,26 +84,39 @@ class ComboService:
         self._bank_loaded = False
         self._bank = None
         self._bank_error = ""       # 조용한 성능 저하를 드러내는 자리
+        self._bank_sig: tuple = ()  # 뱅크를 읽은 시점의 파일 지문
 
     # ---- 다운로드 ----------------------------------------------------
-    def _have_models(self) -> bool:
-        """받을 필요가 **없는지**. 기준은 '파일이 있다'가 아니라 '13그룹을 다 쓸 수 있다'.
+    def bank_groups(self) -> list[str]:
+        """뱅크가 실제로 답할 수 있는 인원 그룹. 화면 추천의 유일한 출처다."""
+        bk = self.bank()
+        if bk is None:
+            return []
+        return [g for g in PERSON_GROUPS if bk.anchors(g)]
 
-        처음엔 파일 존재만 봤다가 Codex 게이트에서 두 구멍이 드러났다:
+    def ready(self) -> bool:
+        """받을 필요가 **없는지**.
 
-        1. **깨진 번들도 존재는 한다.** 그러면 영원히 `ready` 인데 그룹은 0개고,
-           다시 받을 길이 없다(프론트는 `bundleError` 를 안 읽는다).
-        2. **느슨한 `.ncsr` 하나로 전체를 갈음했다.** `1girl_solo` 만 있는 사람은
-           인원 수를 바꾸는 순간 빈 화면을 보는데 다운로드는 시작되지 않는다.
+        기준은 **뱅크가 13그룹을 답할 수 있는가** 다. 배포 번들에는 그룹 모델이
+        들어가지 않는다(203MB -> 15MB) - 화면 추천은 전적으로 레시피 뱅크에서
+        나오고, 모델은 개발 머신에서 뱅크를 캐는 데만 쓴다.
 
-        그래서 `available()` 로 실제 열리는 그룹을 세고, 13개를 다 덮을 때만 참이다.
-        `available()` 은 번들 인덱스만 읽으므로 179MB 를 적재하지 않는다.
+        예전 기준은 '13그룹 모델을 다 쓸 수 있다' 였는데, 그대로 두면 부속만 담은
+        번들을 받은 설치가 **영원히 `incomplete`** 가 된다(Codex 지적 2026-08-17).
+
+        모델 기준으로 판정하던 시절의 두 구멍은 뱅크 기준에도 그대로 적용된다:
+        깨진 파일도 존재는 하므로 파일 존재로 보면 안 되고, 일부만 있는 것으로
+        전체를 갈음해서도 안 된다. 그래서 '13그룹을 다 덮을 때만 참' 이다.
         """
-        return set(self.available()) >= set(PERSON_GROUPS)
+        return set(self.bank_groups()) >= set(PERSON_GROUPS)
+
+    # 옛 이름. 호출부가 아직 남아 있을 수 있어 남겨 둔다 - 의미는 새 기준이다.
+    def _have_models(self) -> bool:
+        return self.ready()
 
     def ensure_bundle(self, *, retry: bool = False) -> dict:
         """Interactive 를 열 때 부른다. 이미 있으면 아무것도 안 한다."""
-        if self._have_models():
+        if self.ready():
             st = self.downloader.status()
             st["state"] = "ready"
             return st
@@ -111,16 +124,24 @@ class ComboService:
 
     def download_status(self) -> dict:
         st = self.downloader.status()
-        groups = self.available()          # bundle() 을 거치므로 _bundle_bad 가 갱신된다
-        if st.get("state") in ("idle", "ready") and set(groups) >= set(PERSON_GROUPS):
+        # `available()` 을 먼저 불러 `_bundle_bad` 를 갱신한다(모델 목록은 이제
+        # 준비 판정이 아니라 개발 정보다).
+        groups = self.available()
+        bgroups = self.bank_groups()
+        ok = set(bgroups) >= set(PERSON_GROUPS)
+        if st.get("state") in ("idle", "ready") and ok:
             st["state"] = "ready"
         elif st.get("state") == "ready":
-            # 파일은 있는데 13그룹을 못 채운다 - 깨졌거나 일부만 있다.
+            # 파일은 있는데 뱅크가 13그룹을 못 채운다 - 깨졌거나 일부만 있다.
             # 여기서 ready 라고 하면 프론트가 안내를 지우고 사용자는 빈 화면만 본다.
             st["state"] = "incomplete"
         st["loose"] = [g for g in PERSON_GROUPS if self._loose(g) is not None]
-        st["groups"] = groups
-        st["missing"] = [g for g in PERSON_GROUPS if g not in set(groups)]
+        st["groups"] = groups                 # 모델(개발 머신에만 있다)
+        st["bankGroups"] = bgroups            # 실제 답할 수 있는 그룹
+        st["missing"] = [g for g in PERSON_GROUPS if g not in set(bgroups)]
+        st["bank"] = bool(bgroups)
+        if self._bank_error:
+            st["bankError"] = self._bank_error
         b = self._bundle
         st["activeBundle"] = str(b.path) if b is not None else ""
         if self._bundle_bad:
@@ -205,6 +226,25 @@ class ComboService:
                 out.append((str(p), -1, 0))
         return tuple(out)
 
+    def _bank_sig_now(self) -> tuple:
+        """뱅크가 올 수 있는 **모든 경로**의 지문.
+
+        `_bundle_sig()` 만 쓰면 안 된다 - 개발 머신에서는 느슨한
+        `recipe_bank.json` 이 정상 경로이고(`bank.load` 가 그걸 먼저 본다),
+        그 파일이 새로 생겨도 지문이 안 바뀌어 옛 `None` 을 계속 물었다
+        (내 회귀 테스트가 잡았다).
+        """
+        from .bank import BANK_NAME
+        out = list(self._bundle_sig())
+        for d in self.search_dirs:
+            p = d / BANK_NAME
+            try:
+                s = p.stat()
+                out.append((str(p), s.st_size, s.st_mtime_ns))
+            except OSError:
+                out.append((str(p), -1, 0))
+        return tuple(out)
+
     def _loose(self, group: str) -> Path | None:
         return next((d / f"{group}.ncsr" for d in self.search_dirs
                      if (d / f"{group}.ncsr").exists()), None)
@@ -274,8 +314,21 @@ class ComboService:
 
     # ---- 레시피 뱅크 --------------------------------------------------
     def bank(self):
-        """오프라인 레시피 뱅크. 한 번만 읽고 캐시한다."""
+        """오프라인 레시피 뱅크. 한 번만 읽고 캐시한다.
+
+        ⚠️ **파일이 바뀌면 다시 읽는다.** 예전에는 첫 조회가 `None` 이면 그걸
+        프로세스 수명 동안 물고 있었다. 그러면 **다운로드가 끝나도 뱅크가 안
+        붙는다** - 사용자는 받기 전에 Interactive 를 한 번 열었을 뿐인데 재시작
+        전까지 추천이 없다(Codex 지적 2026-08-17). 번들 지문으로 판정한다.
+        """
+        sig = self._bank_sig_now()
+        if self._bank_loaded and sig != self._bank_sig:
+            self._bank_loaded = False
+            self._bank = None
+            self._bank_error = ""
+            self._bundle = None        # 번들 핸들도 옛 파일을 가리킬 수 있다
         if not self._bank_loaded:
+            self._bank_sig = sig
             self._bank_loaded = True
             try:
                 from .bank import load as _load
@@ -311,9 +364,16 @@ class ComboService:
         # 87.5% 인 `blush` 가 한 번도 지명되지 않는다). 뱅크는 그걸 오프라인
         # 전수로 캔 것이고, 조회는 사전 접근 한 번이다.
         bk = self.bank()
-        # **그룹이 뱅크에 아예 없으면 기권이 아니라 폴백이다.** 부분 빌드 상태에서
-        # 기권으로 처리하면 안 구운 그룹이 통째로 죽는다 - 그건 데이터가 없는
-        # 것이지 "권할 것이 없다" 는 판단이 아니다.
+        # **그룹이 뱅크에 없으면 데이터 오류다.** 예전에는 온라인 모델로 폴백했다.
+        # 그건 "부분 빌드 상태에서 안 구운 그룹이 통째로 죽는 것을 막는다" 는
+        # 뜻이었는데, 배포에는 이제 모델이 안 가므로 폴백할 대상이 없다. 완전한
+        # 13그룹 뱅크는 **빌드 게이트**가 보장한다(build_recipe_bank / --aux-only).
+        # 그래도 없다면 그건 손상이지 "권할 것이 없다" 는 판단이 아니므로, 조용한
+        # 니치 추천 대신 오류로 드러낸다(Codex 지적 2026-08-17).
+        if bk is not None and not bk.anchors(grp):
+            return {"error": "bank group missing", "group": grp, "combos": [],
+                    "tags": [], "bankGroups": self.bank_groups(),
+                    "detail": self._bank_error}
         if bk is not None and bk.anchors(grp):
             probe = [t for t in want if t.lower() not in _PERSON_TAGS] or want
             r = bk.lookup(probe, grp, top_k=self.policy.top_k,

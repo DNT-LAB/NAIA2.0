@@ -287,6 +287,27 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
+    # ⚠️ **축소 산출물이 canonical 뱅크를 덮으면 안 된다.**
+    #
+    # `--group` / `--limit` 은 디버그 옵션인데 기본 `--out` 이 배포용
+    # `data/tag_combo/recipe_bank.json` 이다. 그래서 `--group 2boys` 는 2boys 만
+    # 든 뱅크를 배포 경로에 쓰고 **exit 0** 이었다. 그 뱅크로 번들을 구우면 나머지
+    # 12그룹이 통째로 죽는다 - `--aux-only` 의 13그룹 검사가 잡아 주지만, 그걸
+    # 잊으면 조용히 나간다(Codex 지적 2026-08-17). 애초에 못 쓰게 막는다.
+    default_out = str(ROOT / "data/tag_combo/recipe_bank.json")
+    partial = bool(args.group) or bool(args.limit)
+    if partial and not args.dry_run and str(Path(args.out)) == str(Path(default_out)):
+        print("!! --group / --limit 은 축소 산출물이다. 배포 경로에 쓸 수 없다:")
+        print(f"   {default_out}")
+        print("   --out 으로 다른 경로를 주거나 --dry-run 을 써라.")
+        return 2
+    # 그룹 이름 오타도 막는다 - 예전엔 모르는 이름이면 모델을 건너뛰고 **빈 뱅크**를
+    # 쓰고 exit 0 이었다.
+    if args.group and args.group not in PERSON_GROUPS:
+        print(f"!! 모르는 인원 그룹: {args.group!r}")
+        print(f"   {list(PERSON_GROUPS)}")
+        return 2
+
     folds, keep_side = load_folds(Path(args.graph))
     roles = load_roles()
     print(f"접기 간선 {len(folds):,} (방향 있는 것 {len(keep_side):,}) "
@@ -359,7 +380,14 @@ def main() -> int:
           f"deflate {len(zlib.compress(blob.encode('utf-8'), 6))/1e6:.1f}MB")
     if args.dry_run:
         return 0
-    Path(args.out).write_text(blob, encoding="utf-8")
+    # **원자적으로 쓴다.** 91.6MB 를 직접 쓰다 중단되면 canonical 파일이 잘린
+    # 채로 남고, 다음 실행은 그걸 정상이라고 믿는다(Codex 지적).
+    out = Path(args.out)
+    tmp = out.with_suffix(out.suffix + ".part")
+    tmp.write_text(blob, encoding="utf-8")
+    # 쓴 것을 다시 읽어 파싱되는지 확인한 뒤에야 정식 이름을 준다.
+    json.loads(tmp.read_text(encoding="utf-8"))
+    tmp.replace(out)
     print(f"저장: {args.out}")
     return 0
 

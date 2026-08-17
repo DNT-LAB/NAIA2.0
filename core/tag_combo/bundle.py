@@ -62,6 +62,28 @@ REQUIRED_AUX = ("recipe_bank", "semantic_graph", "anchor_feature_marginals")
 BANK_FORMAT = "NRB3"
 
 
+def check_bank_blob(blob: bytes) -> dict:
+    """레시피 뱅크 바이트가 **배포에 쓸 수 있는지**. 아니면 ValueError.
+
+    ⚠️ **빌더와 런타임이 이 하나를 쓴다.** 예전엔 번들 빌더와 `verify_all` 이
+    각자 검사해서 강도가 갈렸다 - 런타임은 "그룹이 하나라도 있으면 통과" 였고
+    빌더만 13그룹을 봤다(Codex 지적 2026-08-17). 갈리면 빌더가 통과시킨 것을
+    런타임이 거부하거나, 더 나쁘게는 그 반대가 된다.
+
+    배포에는 모델이 안 가므로 뱅크에 없는 인원 그룹은 폴백 없이 통째로 죽는다.
+    그래서 "13그룹이 각각 비어 있지 않다" 가 계약이다.
+    """
+    from .person import PERSON_GROUPS
+    d = json.loads(blob.decode("utf-8"))
+    if d.get("format") != BANK_FORMAT:
+        raise ValueError(f"뱅크 형식 {d.get('format')!r} (기대 {BANK_FORMAT})")
+    groups = d.get("groups") or {}
+    gone = [g for g in PERSON_GROUPS if not (groups.get(g) or {})]
+    if gone:
+        raise ValueError(f"앵커가 없는 그룹 {len(gone)}개: {gone[:4]}")
+    return d
+
+
 @dataclass(frozen=True)
 class BundleEntry:
     name: str
@@ -136,12 +158,13 @@ class ComboBundle:
                 self.read(g, verify=True)
             except (OSError, ValueError, KeyError, zlib.error):
                 bad.append(g)
+        # **옛 형식 판정은 `version` 으로 한다.** 예전엔 "그룹이 하나라도 있으면
+        # 옛 번들" 로 봤는데, 그러면 version 2 번들이 부속을 잃어도 그룹이 있다는
+        # 이유로 전부 통과했다(Codex 지적 2026-08-17).
+        if int(self.index.get("version") or 1) < 2:
+            return bad                     # NCSB1 = 부속이 없는 것이 정상이다
         for name in REQUIRED_AUX:
             if name not in self.aux_index:
-                # NCSB1 은 부속이 없다. 그건 손상이 아니라 옛 형식이다 -
-                # 그룹이 하나라도 있으면 옛 번들로 보고 넘긴다.
-                if self.groups():
-                    continue
                 bad.append(f"aux:{name}")
                 continue
             try:
@@ -149,11 +172,11 @@ class ComboBundle:
                 if not blob:
                     raise ValueError("빈 부속")
                 if name == "recipe_bank":
-                    d = json.loads(blob.decode("utf-8"))
-                    if d.get("format") != BANK_FORMAT:
-                        raise ValueError(f"뱅크 형식 {d.get('format')!r}")
-                    if not (d.get("groups") or {}):
-                        raise ValueError("뱅크에 그룹이 없다")
+                    check_bank_blob(blob)
+                else:
+                    # 나머지도 최소한 JSON 으로 파싱은 돼야 한다 - 지금까지는
+                    # "빈 바이트가 아니면 통과" 였다.
+                    json.loads(blob.decode("utf-8"))
             except (OSError, ValueError, KeyError, zlib.error,
                     UnicodeDecodeError):
                 bad.append(f"aux:{name}")
@@ -263,6 +286,10 @@ def write_bundle(out: Path, models: list[Path], *, source: str = "",
             fh.write(bz)
         for _, bz, _ in aux_items:
             fh.write(bz)
-    raw = sum(i["raw"] for _, _, _, i in payloads)
+    # **부속 원본도 센다.** 예전엔 그룹 본문만 합산해서, 부속만 담은 번들의
+    # `rawBytes` 가 0 이 됐다 - 압축률이 0 나눗셈으로 죽고, 그걸 `n/a` 로 가려도
+    # 크기 회계는 여전히 틀린다(Codex 지적 2026-08-17).
+    raw = (sum(i["raw"] for _, _, _, i in payloads)
+           + sum(a["raw"] for _, _, a in aux_items))
     return {"path": str(out), "groups": len(payloads), "bytes": out.stat().st_size,
-            "rawBytes": raw}
+            "rawBytes": raw, "auxBytes": sum(a["raw"] for _, _, a in aux_items)}

@@ -85,6 +85,7 @@ class ComboService:
         self._bank = None
         self._bank_error = ""       # 조용한 성능 저하를 드러내는 자리
         self._bank_sig: tuple = ()  # 뱅크를 읽은 시점의 파일 지문
+        self._bank_lock = threading.Lock()   # 적재 중 반쪽 상태를 남에게 안 보인다
 
     # ---- 다운로드 ----------------------------------------------------
     def bank_groups(self) -> list[str]:
@@ -114,12 +115,48 @@ class ComboService:
     def _have_models(self) -> bool:
         return self.ready()
 
+    def quarantine_bad_bundle(self) -> str:
+        """받는 곳에 **있는데 쓸 수 없는** 번들을 치운다. 이름을 돌려준다.
+
+        ⚠️ **이게 없으면 무한 폴링에 갇힌다.** `downloader.start()` 는 파일
+        존재만 보고 곧장 ready 를 낸다. 그런데 그 파일이 부분/손상/옛 형식이면
+        서비스가 다시 `incomplete` 로 바꾸고, 프론트는 "다시 받는 중" 을 2초마다
+        영원히 폴링한다 - 복구 경로가 없다(Codex 지적 2026-08-17). v4 이름 변경은
+        옛 v3 설치만 구제하고, 잘못 올린 v4 에는 아무 도움이 안 된다.
+        """
+        p = self.downloader.path
+        if not p.is_file():
+            return ""
+        try:
+            from .bundle import ComboBundle
+            bad = ComboBundle(p).verify_all()
+            if not bad:
+                return ""              # 멀쩡하다 - 준비 안 된 이유가 다른 데 있다
+        except Exception:              # noqa: BLE001 - 열지도 못하면 그것도 불량이다
+            bad = ["unreadable"]
+        try:
+            dst = p.with_suffix(p.suffix + ".bad")
+            dst.unlink(missing_ok=True)
+            p.replace(dst)
+        except OSError:
+            return ""
+        self._bundle = None
+        self._bundle_bad = ""
+        self._bad_sig = ()
+        self._bank_loaded = False      # 다음 조회가 다시 읽는다
+        safe = f"quarantined unusable bundle ({bad[:2]}); will re-download"
+        print(f"[tag-combo] {safe.encode('ascii', 'replace').decode('ascii')}")
+        return dst.name
+
     def ensure_bundle(self, *, retry: bool = False) -> dict:
         """Interactive 를 열 때 부른다. 이미 있으면 아무것도 안 한다."""
         if self.ready():
             st = self.downloader.status()
             st["state"] = "ready"
             return st
+        # 준비가 안 됐는데 파일은 있다 -> 그 파일이 불량인지 보고, 불량이면 치운다.
+        # 치우지 않으면 아래 `start()` 가 "이미 있다" 며 ready 를 내고 끝난다.
+        self.quarantine_bad_bundle()
         return self.downloader.retry() if retry else self.downloader.start()
 
     def download_status(self) -> dict:
@@ -320,30 +357,37 @@ class ComboService:
         프로세스 수명 동안 물고 있었다. 그러면 **다운로드가 끝나도 뱅크가 안
         붙는다** - 사용자는 받기 전에 Interactive 를 한 번 열었을 뿐인데 재시작
         전까지 추천이 없다(Codex 지적 2026-08-17). 번들 지문으로 판정한다.
+
+        ⚠️ **적재를 락 안에서 하고 끝난 것만 publish 한다.** 예전에는
+        `_bank_loaded = True` 를 실제 load **앞에** 세우고 락이 없었다. 그러면
+        동시에 들어온 status/recommend 요청이 중간의 `_bank=None` 을 본다
+        (Codex 지적 2026-08-17) - 라우트는 스레드로 넘기므로 실제로 동시다.
         """
         sig = self._bank_sig_now()
-        if self._bank_loaded and sig != self._bank_sig:
-            self._bank_loaded = False
-            self._bank = None
-            self._bank_error = ""
-            self._bundle = None        # 번들 핸들도 옛 파일을 가리킬 수 있다
-        if not self._bank_loaded:
-            self._bank_sig = sig
-            self._bank_loaded = True
+        if self._bank_loaded and sig == self._bank_sig:
+            return self._bank                      # 흔한 길: 락 없이 읽는다
+        with self._bank_lock:
+            # 락을 잡는 동안 남이 이미 같은 지문으로 채웠을 수 있다.
+            if self._bank_loaded and sig == self._bank_sig:
+                return self._bank
+            got, err = None, ""
             try:
                 from .bank import load as _load
-                self._bank = _load(self.search_dirs, self.bundle())
+                self._bundle = None    # 번들 핸들도 옛 파일을 가리킬 수 있다
+                got = _load(self.search_dirs, self.bundle())
             except Exception as exc:   # noqa: BLE001 - 뱅크가 없어도 기능은 돌아야 한다
                 # ⚠️ **삼키되 말은 해라.** 예전엔 조용히 None 이 됐는데, 그러면
-                # 옛 형식 번들을 만났을 때 기능이 죽는 대신 **온라인 폴백으로
-                # 조용히 내려앉는다** - 추천이 다시 니치해지는데 아무도 모른다
-                # (Codex 지적, 실증: 형식 NRB2 번들에 반환 None, stdout 빈 문자열).
+                # 옛 형식 번들을 만났을 때 기능이 죽는 대신 조용히 성능이
+                # 떨어졌다(실증: 형식 NRB2 번들에 반환 None, stdout 빈 문자열).
                 # 상태에도 남겨서 `/api/tag-combo/groups` 로 보인다.
-                self._bank = None
-                self._bank_error = f"{type(exc).__name__}: {exc}"[:200]
-                safe = self._bank_error.encode("ascii", "replace").decode("ascii")
+                err = f"{type(exc).__name__}: {exc}"[:200]
+                safe = err.encode("ascii", "replace").decode("ascii")
                 print(f"[tag-combo] recipe bank unavailable: {safe}")
-        return self._bank
+            # 완성된 결과만 한 번에 내놓는다.
+            self._bank, self._bank_error = got, err
+            self._bank_sig = sig
+            self._bank_loaded = True
+            return self._bank
 
     def bank_error(self) -> str:
         """뱅크를 못 읽은 이유. 읽기 전이면 먼저 읽어 본다."""
@@ -402,25 +446,20 @@ class ComboService:
                     "matched": 0, "bundleSize": 0, "usedPrompt": [],
                     "backedOff": False, "weak": False}
 
-        entry = self._get(grp)
-        if entry is None:
-            return {"error": "model not built", "group": grp, "combos": [],
-                    "available": self.available()}
-        model, q = entry
-        # 인원 태그는 그룹을 정의하므로 그룹 안에서 확률이 1.0 이다 - 조건부 정보가
-        # 없다. 질의에서 빼야 나머지 태그로 좁혀진다.
-        person_tags = {"1girl", "1boy", "solo", "2girls", "2boys",
-                       "multiple girls", "multiple boys"}
-        probe = [t for t in want if t not in person_tags] or want
-        r = q.recommend(probe)
-        return {
-            "group": grp,
-            "matched": r.matched,
-            "bundleSize": r.bundle_size,
-            "usedPrompt": r.used_prompt,
-            "backedOff": r.backed_off,
-            "weak": r.weak,
-            "combos": [{"tags": c.tags, "support": c.support,
-                        "bits": round(c.surprisal, 1)} for c in r.combos],
-            "modelPosts": model.header.posts,
-        }
+        # ⚠️ **제품 경로는 뱅크 전용이다. 온라인 모델로 떨어지지 않는다.**
+        #
+        # 여기 예전에 `self._get(grp)` -> `ComboQuery` 폴백이 있었다. 그러면 같은
+        # 상태에서 **개발 머신과 배포가 다른 답을 낸다**(Codex 지적 2026-08-17):
+        #
+        #   느슨한 모델 있는 개발 머신: 뱅크가 없거나 깨져도 온라인이 답한다
+        #   뱅크만 있는 배포:           같은 상태에서 오류
+        #   다운로드 중 개발 머신:      옛 온라인 추천이 화면에 캐시된다
+        #   다운로드 중 배포:           빈 카드
+        #
+        # 그러면 개발 중에는 절대 재현되지 않는 배포 전용 결함이 생긴다. 게다가
+        # 온라인 경로는 게시물당 한 묶음만 지명해 `blush`(87.5%) 를 구조적으로
+        # 놓치는 그 경로다 - 조용히 그쪽으로 내려앉는 것은 성능 저하다.
+        #
+        # `ComboQuery` 와 느슨한 모델은 오프라인 빌더와 감사 도구에만 남긴다.
+        return {"error": "bank not ready", "group": grp, "combos": [], "tags": [],
+                "bankGroups": self.bank_groups(), "detail": self._bank_error}

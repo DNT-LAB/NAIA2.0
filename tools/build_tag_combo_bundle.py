@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.tag_combo.bundle import (                           # noqa: E402
-    BANK_FORMAT, REQUIRED_AUX, ComboBundle, write_bundle)
+    REQUIRED_AUX, ComboBundle, check_bank_blob, write_bundle)
 from core.tag_combo.download import (                         # noqa: E402
     BUNDLE_BYTES, BUNDLE_NAME, BUNDLE_SHA256)
 from core.tag_combo.person import PERSON_GROUPS               # noqa: E402
@@ -32,22 +32,17 @@ def _check_bank_groups(bank_path: Path) -> int:
 
     배포에 모델이 없으면 온라인 폴백도 없다. 뱅크에 없는 인원 그룹은 통째로
     죽는데, 사용자는 인원 수를 바꾸는 순간에야 안다. 그때는 이미 배포된 뒤다.
+
+    ⚠️ 판정은 `core.tag_combo.bundle.check_bank_blob` **하나**로 한다. 여기서
+    따로 검사하면 런타임과 강도가 갈린다(Codex 지적 2026-08-17).
     """
-    import json as _json
     try:
-        d = _json.loads(bank_path.read_text(encoding="utf-8"))
+        d = check_bank_blob(bank_path.read_bytes())
     except (OSError, ValueError) as exc:
-        print(f"!! 뱅크를 읽을 수 없다: {type(exc).__name__}: {exc}")
-        return 2
-    if d.get("format") != BANK_FORMAT:
-        print(f"!! 뱅크 형식이 {d.get('format')!r} 다 (기대 {BANK_FORMAT})")
-        return 2
-    groups = d.get("groups") or {}
-    gone = [g for g in PERSON_GROUPS if not (groups.get(g) or {})]
-    if gone:
-        print(f"!! 뱅크에 앵커가 없는 그룹 {len(gone)}개: {gone}")
+        print(f"!! 뱅크를 쓸 수 없다: {exc}")
         print("   python tools/build_recipe_bank.py 를 13그룹으로 다시 돌려라")
         return 2
+    groups = d.get("groups") or {}
     tot = sum(len(v or {}) for v in groups.values())
     print(f"   뱅크 {len(groups)}그룹 · 앵커 {tot:,}")
     return 0
@@ -124,7 +119,9 @@ def main() -> int:
           f"({ratio}) · {el:.0f}s")
     print(f"저장: {info['path']}")
 
-    if args.verify:
+    # aux-only 는 **항상** 검증한다. 선택 옵션으로 두면 재독해 없이 sha 상수를
+    # 뱉을 수 있고, 그 sha 로 올린 파일이 깨져 있을 수 있다(Codex 지적).
+    if args.verify or args.aux_only:
         t0 = time.time()
         b = ComboBundle(Path(args.out))
         for g in b.groups():

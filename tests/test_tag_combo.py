@@ -345,9 +345,10 @@ class TestBundle:
         assert set(b.groups()) == {"toy"}
 
     # ---- aux-only 번들 (배포 형태) --------------------------------------
+    # 기본 그룹은 **13개 전부**다. `check_bank_blob` 이 13그룹을 요구하므로
+    # 한 그룹만 넣으면 정상 케이스 테스트가 실패한다 - 그게 계약이다.
     @staticmethod
-    def _aux_files(d: Path, *, bank_format: str = "NRB3", groups=("1girl_solo",)):
-        from core.tag_combo.person import PERSON_GROUPS as _PG
+    def _aux_files(d: Path, *, bank_format: str = "NRB3", groups=PERSON_GROUPS):
         d.mkdir(parents=True, exist_ok=True)
         (d / "recipe_bank.json").write_text(json.dumps({
             "format": bank_format, "policy": {},
@@ -408,7 +409,45 @@ class TestBundle:
         """NCSB1 은 부속이 없다. 그건 손상이 아니라 옛 형식이다."""
         b, _ = self._bundle(tmp_path)          # 그룹만, aux 없음
         assert b.aux_index == {}
+        assert int(b.index.get("version") or 1) == 1
         assert b.verify_all() == []
+
+    def test_v2_bundle_with_groups_still_needs_its_aux(self, tmp_path):
+        """**"그룹이 있으면 옛 번들" 판정은 틀렸다.**
+
+        version 2 인데 부속을 잃은 번들이, 그룹이 있다는 이유로 전부 통과했다
+        (Codex 지적 2026-08-17). 판정은 index `version` 으로 해야 한다.
+        """
+        from core.tag_combo.bundle import ComboBundle, write_bundle
+        _toy(tmp_path)
+        out = tmp_path / "v2_no_aux.ncsb"
+        # aux 를 하나만 넣으면 version 2 가 되고 나머지 둘이 빠진다.
+        aux = self._aux_files(tmp_path / "src2", groups=PERSON_GROUPS)
+        write_bundle(out, [tmp_path / "toy.ncsr"], source="t", built="t",
+                     aux={"semantic_graph": aux["semantic_graph"]})
+        b = ComboBundle(out)
+        assert int(b.index.get("version") or 1) == 2 and b.groups() == ["toy"]
+        assert set(b.verify_all()) == {"aux:recipe_bank",
+                                       "aux:anchor_feature_marginals"}
+
+    def test_bank_needs_all_thirteen_groups(self, tmp_path):
+        """뱅크에 한 그룹만 있으면 배포에 쓸 수 없다 - 폴백이 없다.
+
+        예전 런타임 검사는 "groups 가 하나라도 있으면 통과" 였고 빌더만 13그룹을
+        봤다. 강도가 갈리면 빌더가 통과시킨 것을 런타임이 거부하거나 그 반대다.
+        """
+        b, _ = self._aux_bundle(tmp_path, groups=("1girl_solo",))
+        assert b.verify_all() == ["aux:recipe_bank"]
+        full, _ = self._aux_bundle(tmp_path / "full", groups=PERSON_GROUPS)
+        assert full.verify_all() == []
+
+    def test_aux_raw_bytes_are_counted(self, tmp_path):
+        """부속만 담은 번들의 `rawBytes` 가 0 이면 크기 회계가 틀린 것이다."""
+        from core.tag_combo.bundle import write_bundle
+        aux = self._aux_files(tmp_path / "src3", groups=PERSON_GROUPS)
+        info = write_bundle(tmp_path / "r.ncsb", [], source="t", built="t", aux=aux)
+        assert info["groups"] == 0
+        assert info["rawBytes"] > 0 and info["auxBytes"] == info["rawBytes"]
 
     def test_rejects_foreign_file(self, tmp_path):
         p = tmp_path / "nope.ncsb"
@@ -620,6 +659,41 @@ class TestDataRoot:
         assert not svc.ready()
         assert svc.download_status()["state"] != "ready"
 
+    def test_models_never_answer_when_the_bank_is_missing(self, tmp_path):
+        """**제품 경로는 뱅크 전용이다.** 개발 머신과 배포가 갈리면 안 된다.
+
+        예전엔 뱅크가 없으면 `ComboQuery`(온라인 모델)로 떨어졌다. 그러면 느슨한
+        모델이 있는 개발 머신은 답하고, 뱅크만 있는 배포는 오류다 - 개발 중에는
+        절대 재현되지 않는 배포 전용 결함이 생긴다(Codex 지적 2026-08-17).
+        """
+        from core.tag_combo.service import ComboService
+        d = tmp_path / "models_no_bank"
+        for g in PERSON_GROUPS:
+            self._group(d, g)
+        svc = ComboService(d, search_dirs=[d])
+        assert len(svc.available()) == len(PERSON_GROUPS), "모델은 13개 다 있다"
+        assert svc.bank() is None
+        r = svc.recommend(["maid"], group="1girl_solo", anchor="maid")
+        assert r.get("error") == "bank not ready", r
+        assert not r.get("tags") and not r.get("combos")
+
+    def test_unusable_present_bundle_is_quarantined(self, tmp_path):
+        """있는데 못 쓰는 번들은 치운다 - 안 치우면 무한 폴링에 갇힌다.
+
+        `downloader.start()` 는 파일 존재만 보고 ready 를 내므로, 불량 파일이
+        정식 이름을 달고 있으면 재다운로드가 시작되지 않는다.
+        """
+        from core.tag_combo.download import BUNDLE_NAME
+        from core.tag_combo.service import ComboService
+        d = tmp_path / "badfile"
+        d.mkdir()
+        (d / BUNDLE_NAME).write_bytes(b"NCSB1\0\0\0" + b"\x00" * 64)
+        svc = ComboService(d, search_dirs=[d])
+        assert not svc.ready()
+        svc.ensure_bundle()
+        assert not (d / BUNDLE_NAME).exists(), "불량 파일이 정식 이름을 유지한다"
+        assert (d / (BUNDLE_NAME + ".bad")).exists()
+
     def test_bank_attaches_after_the_file_arrives(self, tmp_path):
         """받기 전에 한 번 열어 본 설치가 **재시작 없이** 붙어야 한다.
 
@@ -641,8 +715,13 @@ class TestRecovery:
     def test_corrupt_group_does_not_escape_as_an_exception(self, tmp_path, monkeypatch):
         """본문이 깨진 그룹은 `zlib.error` 를 낸다 - 좁은 except 로는 못 잡는다.
 
-        예전엔 `(OSError, ValueError, KeyError)` 만 잡아서 `recommend()` 가
-        그대로 터졌다(실측: 1girl_solo 본문에 0 을 2KB 쓰면 재현).
+        예전엔 `(OSError, ValueError, KeyError)` 만 잡아서 호출부로 새어나갔다
+        (실측: 1girl_solo 본문에 0 을 2KB 쓰면 재현).
+
+        **호출 지점이 옮겨졌다.** 예전엔 `recommend()` 가 뱅크 없을 때 이 경로로
+        떨어졌지만, 제품 경로는 이제 뱅크 전용이다(개발/배포가 갈리면 안 된다).
+        모델 적재는 오프라인 도구와 감사용으로 남아 있으므로, 보호도 그 단위에서
+        걸어야 한다 - `recommend()` 로 걸면 이제 도달하지 않는 코드를 시험한다.
         """
         import zlib
         from core.tag_combo.service import ComboService
@@ -654,12 +733,16 @@ class TestRecovery:
             def read(self, group):
                 raise zlib.error("incorrect data check")
 
+            def aux(self, name, **kw):
+                return None
+
         svc = ComboService(tmp_path)
         monkeypatch.setattr(svc, "bundle", lambda: BoomBundle())
-        out = svc.recommend(["maid"], group="1girl_solo")     # 터지면 실패다
-        assert out["combos"] == []
+        assert svc._get("1girl_solo") is None, "터지면 실패다"
         assert "1girl_solo" in svc._bad_groups
-        assert not svc._have_models(), "깨진 그룹을 세고 있어 복구가 안 걸린다"
+        # 제품 경로는 뱅크가 없으므로 오류를 낸다 - 조용히 온라인으로 안 간다.
+        out = svc.recommend(["maid"], group="1girl_solo")
+        assert out.get("error") == "bank not ready" and out["combos"] == []
 
     def test_failed_bundle_is_retried_when_the_file_changes(self, tmp_path):
         """실패를 영구 캐시하면 다시 받아도 안 읽는다.

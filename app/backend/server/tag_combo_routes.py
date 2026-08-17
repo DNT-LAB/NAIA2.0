@@ -112,14 +112,19 @@ def register_tag_combo_routes(app: FastAPI, context: Any, *,
                     # 깨끗한 체크아웃에는 뱅크가 없다 - 생성물이라 커밋하지 않는다.
                     # 무엇을 해야 하는지 응답과 로그 양쪽에 남긴다.
                     _log_once("recipe bank not ready; it ships in the tag-combo bundle")
-                return {"available": got, "dir": str(svc.dir),
+                # `available` 은 옛 이름이라 남기되(호출부 호환) 의미가 모델임을
+                # `modelGroups` 로 분명히 한다. `howToBuild` 는 **개발 진단**이다 -
+                # 배포 사용자에게 로컬 빌드를 안내하면 안 된다(그쪽 복구 경로는
+                # 다운로드 재시도다). 느슨한 모델이 있을 때만 낸다.
+                return {"available": got, "modelGroups": got,
+                        "dir": str(svc.dir),
                         "searchDirs": [str(d) for d in svc.search_dirs],
                         "built": ready,
                         "bank": bool(bgroups),
                         "bankGroups": bgroups,
                         "bankError": svc.bank_error(),
-                        "howToBuild": "python tools/build_recipe_bank.py"
-                                      if not ready else ""}
+                        "howToBuild": ("python tools/build_recipe_bank.py"
+                                       if (not ready and got) else "")}
             except Exception as exc:      # noqa: BLE001
                 _log_once(f"groups failed: {type(exc).__name__}: {exc}")
                 return {"available": [], "error": type(exc).__name__}

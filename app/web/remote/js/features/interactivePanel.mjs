@@ -4895,13 +4895,18 @@ export function createInteractivePanel({
         (grp ? '&group=' + encodeURIComponent(grp) : '') +
         (anc ? '&anchor=' + encodeURIComponent(anc) : ''));
       const j = await r.json();
-      // 모델이 안 구워진 설치에서는 조용히 없는 셈 친다 - 안내는 로그가 한다.
-      const out = (j && !j.error) ? j : null;
+      // ⚠️ **오류는 캐시하지 않는다.** 주석은 그렇다고 적혀 있었지만 실제로는
+      // `j.error` 를 `null` 로 만들어 캐시에 넣었다(Codex 지적 2026-08-17).
+      // 뱅크가 아직 안 붙었거나 일시 오류인 상태를 캐시하면, 뱅크가 붙은 뒤에도
+      // 그 태그는 페이지 수명 내내 빈 답이다. **의도적 기권은 답이므로 캐시한다** -
+      // 그건 "권할 것이 없다" 는 판단이고 파일이 바뀌기 전까지 안 바뀐다.
+      if (j && j.error) { comboLast = null; return null; }
+      const out = j || null;
       comboCache.set(key, out);
       comboLast = out;
       return out;
     } catch {
-      return null;
+      return null;      // 네트워크 실패도 캐시하지 않는다
     }
   }
 

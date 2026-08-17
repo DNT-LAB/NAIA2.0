@@ -1418,8 +1418,21 @@ export function createInteractivePanel({
     return sceneMount;
   }
 
-  // 버튼 줄 높이. 팝업이 이만큼 아래에서 시작해 서로 가리지 않는다.
+  // 버튼 줄 높이의 **하한**. 아직 안 그렸을 때 쓰는 값이다.
   const SCENE_FLOAT_H = 30;
+
+  /** 버튼 줄이 실제로 차지한 높이. **상수로 쓰면 안 된다.**
+   *
+   *  팝업은 이 줄 아래에서 시작하는데, 예전엔 상수 30px 만 내려갔다. 그 줄에
+   *  Safe Viewer 를 옮겨 담으면서 줄이 늘어(줄넘김) 팝업이 그 밑을 파고들어
+   *  카테고리 섬이 `Rating`·`반응형 생성`·`시드 고정`·`C1 Fast` 를 덮었다
+   *  (사용자 화면 2026-08-17). 늘어난 만큼 내려가야 한다 - 그러면 나중에 버튼을
+   *  더 넣어도 같은 사고가 안 난다. */
+  function sceneFloatH() {
+    if (!sceneMount || !sceneMount.classList.contains('open')) return 0;
+    const h = Math.round(sceneMount.getBoundingClientRect().height);
+    return h > 0 ? h : SCENE_FLOAT_H;
+  }
 
   /** 플로트가 뻗을 수 있는 오른쪽 한계. 히스토리 레일이 떠 있으면 그 앞에서 멈춘다. */
   function sceneRightEdge() {
@@ -2273,7 +2286,20 @@ export function createInteractivePanel({
       return;
     }
     const b = host.getBoundingClientRect();
-    fastMount.style.left = Math.round(b.left) + 'px';
+    // **팝업 오른쪽으로 비켜선다.** 버튼 줄 바로 아래에 붙는데 슬롯 팝업도 같은
+    // 자리에서 시작하므로 둘이 겹쳤다(실측 56px - 사용자 화면 2026-08-17에서
+    // 카테고리 섬이 `C1 Fast`/`Neg Fast` 를 덮었다). 팝업이 떠 있을 때만 비킨다 -
+    // 닫혀 있으면 원래 자리가 가장 눈에 가깝다.
+    const pop = (panelContext && panelMount.classList.contains('open'))
+      ? panelMount.getBoundingClientRect() : null;
+    let left = Math.round(b.left);
+    if (pop && pop.width) {
+      left = Math.round(pop.right + 12);
+      // 오른쪽 끝을 넘기면 되돌린다 - 화면 밖으로 밀어내는 것이 겹침보다 나쁘다.
+      const room = sceneRightEdge() - left - 12;
+      if (room < 200) left = Math.round(b.left);
+    }
+    fastMount.style.left = left + 'px';
     fastMount.style.top = Math.round(b.bottom + 6) + 'px';
     fastMount.classList.add('open');
   }
@@ -4093,7 +4119,7 @@ export function createInteractivePanel({
     // 9,738명이 그대로 늘어나 화면 밖으로 흘렀고 `.ia-panel-body` 의 overflow-y 는
     // 부모가 안 잘리니 스크롤할 것이 없었다(사용자 제보 2026-08-13).
     let top = (sceneFloatFits() && !blocksMount.hidden)
-      ? (PANEL_TOP + SCENE_FLOAT_H + 6) : PANEL_TOP;
+      ? (PANEL_TOP + Math.max(SCENE_FLOAT_H, sceneFloatH()) + 6) : PANEL_TOP;
     const floor = popupFloor();
     if (floor - top < 240) top = Math.max(PANEL_TOP, floor - 240);
     presetPanel.style.top = top + 'px';
@@ -5144,11 +5170,12 @@ export function createInteractivePanel({
       !tags.some(x => x.toLowerCase() === inspectTag.toLowerCase()) ? inspectTag : '';
     const askTags = inspecting ? [inspecting, ...tags] : tags;
     if (!askTags.length) {
-      host.classList.add('open');
-      host.innerHTML = '<div class="ia-aside-card"><div class="ia-aside-title">도움말</div>' +
-        '<div class="ia-aside-empty">그림을 누르면 그 태그의 설명과 어울리는 조합을 여기에 보여줍니다. ' +
-        '넣는 것은 그림 위의 <b>선택</b> 버튼입니다.</div></div>';
-      positionAside();
+      // **도움말 카드를 띄우지 않는다**(사용자 지시 2026-08-17). 고른 것이 없을 때
+      // 조작법을 적어 두는 카드였는데, 팝업을 접힌 띠로 만든 뒤로는 아무것도 안
+      // 고른 상태가 곧 **첫 화면**이라 그 카드가 늘 떠 있게 됐다 - 빈 패널이
+      // 낫다. 조작법은 셀의 [선택] 버튼이 스스로 말한다.
+      host.classList.remove('open');
+      host.innerHTML = '';
       return;
     }
     const items = await fetchAdvice(askTags);
@@ -5710,7 +5737,7 @@ export function createInteractivePanel({
     panelMount.style.left = left + 'px';
     // 씬 버튼 줄이 떠 있으면 그 아래에서 시작한다 — 안 그러면 서로 가린다.
     const top = (sceneFloatFits() && !blocksMount.hidden)
-      ? (PANEL_TOP + SCENE_FLOAT_H + 6) : PANEL_TOP;
+      ? (PANEL_TOP + Math.max(SCENE_FLOAT_H, sceneFloatH()) + 6) : PANEL_TOP;
     panelMount.style.top = top + 'px';
     panelMount.style.bottom = '';
     // **바닥선까지 다 쓴다.** CSS 의 62dvh 상한에 묶여 화면 아래 267px 를 비워
@@ -6679,6 +6706,8 @@ export function createInteractivePanel({
     // 않으면 패널이 옛 자리에 남아 내용 섬을 덮는다(실측: 패널 x=672 인데 팝업
     // 오른쪽 끝이 978).
     positionAside();
+    // `C1 Fast` 도 팝업 오른쪽에 붙으므로 같이 옮긴다.
+    positionFastFloat();
   }
 
   // ---- 구도 3축 콤보 프리셋 패널 (Dev0714 복원) ----

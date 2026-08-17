@@ -51,8 +51,8 @@ STALE_NAMES = ("naia_tag_combo.ncsb", "naia_tag_combo_v2.ncsb",
                "naia_tag_combo_v3.ncsb")
 # 아래 둘은 `tools/build_tag_combo_bundle.py` 가 빌드 끝에 출력한다. 업로드할
 # **그 파일**의 값이어야 한다 - 검증한 뒤 다시 구우면 sha 가 달라진다.
-BUNDLE_SHA256 = "7dd410b61cfba2e52d4f92cf0cd72d2d8fea33e3d0b1c3c53a3a262b81f6dec2"
-BUNDLE_BYTES = 203_110_395
+BUNDLE_SHA256 = "9bed78f7bf7aca6dddd3f52f00f8e40213d14fae1044543839272d56677a7ef5"
+BUNDLE_BYTES = 18_614_800
 
 _CHUNK = 1 << 20
 _UA = "NAIA TagCombo Downloader"

@@ -2343,7 +2343,9 @@ export function createInteractivePanel({
    *  캐릭터 슬롯을 거쳐야 재현되는 이유는 그 슬롯에서만 이 줄이 열리기 때문이다
    *  (사용자 화면 2026-08-18). 같은 술어를 둘이 나눠 쓰면 이런 어긋남이 또 난다. */
   function fastFloatHidden() {
-    return !!(panelContext && panelMount.classList.contains('open'));
+    if (panelContext && panelMount.classList.contains('open')) return true;
+    // 캐릭터 프리셋 패널도 같은 자리를 쓴다 - 그 위에 Fast 상자가 얹히면 목록을 가린다.
+    return !!(presetPanel && presetPanel.classList.contains('open'));
   }
 
   function positionFastFloat() {
@@ -4228,7 +4230,11 @@ export function createInteractivePanel({
     presetError = '';
     closePresetCard();
     panel.classList.add('open');
+    // 슬롯 팝업과 **같은 자리**에 뜨므로 가리는 것도 같아야 한다(사용자 지시
+    // 2026-08-18). 이 패널은 목록이 길어 아래 UI 와 그대로 겹쳤다.
+    document.body.classList.add('ia-preset-open');
     renderPresetPanel();
+    positionFastFloat();          // `C1 Fast` 상자를 감춘다(아래 fastFloatHidden)
     document.addEventListener('mousedown', onPresetOutside, true);
     document.addEventListener('keydown', onPresetKeydown, true);
     // 처음 열면 썸네일 있는 캐릭터가 먼저 온다(thumb_first) — 빈 화면을 주지 않는다.
@@ -4242,6 +4248,8 @@ export function createInteractivePanel({
     if (presetObserver) { presetObserver.disconnect(); presetObserver = null; }
     presetCid = null;
     if (presetPanel) { presetPanel.classList.remove('open'); presetPanel.innerHTML = ''; }
+    document.body.classList.remove('ia-preset-open');
+    positionFastFloat();          // 감춰 뒀던 Fast 상자를 되돌린다
     document.removeEventListener('mousedown', onPresetOutside, true);
     document.removeEventListener('keydown', onPresetKeydown, true);
   }

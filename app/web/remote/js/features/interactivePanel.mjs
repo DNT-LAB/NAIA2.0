@@ -5052,11 +5052,15 @@ export function createInteractivePanel({
   function comboFlatHtml(combo) {
     const list = (combo && combo.tags) || [];
     if (!list.length) return '';
-    return '<div class="ia-combo-flat">' + list.map(x => {
+    // **칩은 한 가지 모양이다**(사용자 지시 2026-08-18). 예전엔 이 카드만
+    // `.ia-combo-tag` 라 테두리·글자·간격이 옆 카드와 미묘하게 달랐다 - 한 패널로
+    // 합치고 나면 그 차이가 그대로 보인다. 다른 것은 `%` 배지 하나뿐이다.
+    const cur = currentLower();
+    return '<div class="ia-aside-chips is-flow">' + list.map(x => {
       const p = Math.round((x.p || 0) * 100);
-      // `title` 이 아니라 `tipAttrs` 다 - 그림이 있으면 툴팁이 썸네일까지 낸다.
-      // (`title` 도 공용 툴팁이 흡수하지만 그건 글자뿐이다.)
-      return `<button type="button" class="ia-combo-tag" data-advice-add="${escHtml(x.tag)}"`
+      const on = cur.has(String(x.tag).toLowerCase()) ? ' on' : '';
+      // `title` 이 아니라 `adviceTipAttrs` 다 - 그림이 있으면 툴팁이 썸네일까지 낸다.
+      return `<button type="button" class="ia-aside-chip${on}" data-advice-add="${escHtml(x.tag)}"`
         + `${adviceTipAttrs(x.tag)}>${escHtml(x.tag)}`
         + `<span class="ia-combo-p">${p}%</span></button>`;
     }).join('') + '</div>';
@@ -5532,12 +5536,13 @@ export function createInteractivePanel({
     // 썸네일에서 **텍스트 칩**으로 바꿨다(사용자 결정 2026-08-17). 이 카드 하나가
     // 836px 를 썼는데 항목은 14개였다 - 텍스트로는 같은 자리에 훨씬 많이 들어간다.
     // 그림은 팝업 그리드에서 본다. 부위도 3개 -> 5개, 부위당 6 -> 10개로 늘린다.
-    const recGroups = [...byRegion.entries()]
+    // ⚠️ HTML 은 **여기서 만들지 않는다**. 한 카드로 합친 뒤로는 고빈도에 이미 뜬
+    // 태그를 여기서 또 내면 같은 상자 안에 같은 칩이 두 번 있게 된다(실측:
+    // `horns` 가 고빈도 91% · 함께사용 · 사전 세 곳에 나왔다). 중복 제거는 고빈도
+    // 목록을 받은 뒤에야 할 수 있어서, 아래 조회가 끝난 자리에서 만든다.
+    const recSrc = [...byRegion.entries()]
       .filter(([, v]) => v.length)
-      .sort((a, b) => b[1].length - a[1].length)
-      .map(([label, tags]) => ({ label, html: textChipsInner(tags.slice(0, 10)) }))
-      .filter(g => g.html)
-      .slice(0, 5);
+      .sort((a, b) => b[1].length - a[1].length);
     const seedLabel = seed ? seed.tag : '';
 
     const parts = [];
@@ -5583,24 +5588,7 @@ export function createInteractivePanel({
     // 세로를 많이 먹어서, 뒤에 두면 조합 카드가 화면 밖으로 밀린다(사용자 지적
     // 2026-08-16: "위치가 좋지 않음"). 정정(같이 쓰지 않습니다·필요한 것)은
     // 위에 그대로 둔다 - 그건 고쳐야 할 것이라 먼저 보여야 한다.
-    const recCard = recGroups.length
-      ? ('<div class="ia-aside-card scroll"><div class="ia-aside-title">함께 쓰는 것' +
-         `<span class="ia-aside-count">${escHtml(seedLabel)} 기준</span></div>` +
-         // ⚠️ `.ia-aside-thumbs` 래퍼를 다시 씌우지 마라. 그건 썸네일 격자라
-         // 행 높이가 고정돼, 안에 텍스트 칩을 넣으면 8칩이 200px 로 늘어난다
-         // (실측: 그룹 하나 227px).
-         //
-         // **그룹마다 줄을 새로 시작하지 않는다.** 예전에는 그룹 하나가 라벨 줄 +
-         // 칩 줄이라, 그룹당 칩이 평균 3.2개인 이 카드에서 **줄 끝 평균 104px**
-         // (내용폭 280px 의 37%)이 비었다. 카드 304x417 에 정보는 30.5%뿐
-         // (실측 2026-08-18, 사용자 지적 "정보가 차지하는 비율 20% 미만").
-         // 라벨을 칩과 같은 흐름에 인라인으로 두면 칩이 줄을 끝까지 채운다.
-         '<div class="ia-aside-chips is-flow">' +
-         recGroups.map(g =>
-           `<span class="ia-aside-gtag">${escHtml(g.label)}</span>` + g.html).join('') +
-         '</div>' +
-         '</div>')
-      : '';
+    // (추천 본문은 고빈도 목록을 받은 뒤에 만든다 - 중복 제거 때문이다.)
     // ── 고빈도 태그 ──────────────────────────────────────────────────────
     // 제목이 '인기 조합' 이었는데 **거짓말이었다.** 화면은 태그를 하나씩 나열
     // 하는데 '조합' 은 그것들이 같이 나온다는 뜻이다. 실측(Codex, 50,436 앵커
@@ -5613,32 +5601,60 @@ export function createInteractivePanel({
     const combo = await fetchCombos(
       inspecting ? [inspecting, ...currentTags()] : currentTags(), seedTag);
     if (seq !== asideSeq || !panelContext) return;
+    const info = await fetchLookup(seedTag);
+    if (seq !== asideSeq || !panelContext) return;
     const dlMsg = comboDlText();
+
+    // ── 추천 한 카드 ─────────────────────────────────────────────────────
+    // 셋을 하나로 묶는다(사용자 결정 2026-08-18): **고빈도 / 함께사용** 두 머리말만
+    // 남기고, 태그 사전의 줄들은 '함께사용' 흐름에 라벨을 달아 합류시킨다.
+    // 상자가 셋이면 테두리·여백만 세 벌이고, 세로 절반 안에 못 들어간다.
+    const head = (name, note) => `<div class="ia-aside-title">${name}` +
+      (note ? `<span class="ia-aside-count">${escHtml(note)}</span>` : '') + '</div>';
+    const reco = [];
+    // **한 카드 안에서 같은 태그를 두 번 내지 않는다.** 상자가 셋일 때는 출처가
+    // 다르다는 변명이 됐지만, 한 상자에 나란히 놓이면 그냥 중복이다(실측: `horns`
+    // 가 고빈도 91% · 함께사용 종족·수인 · 사전 세 곳). 먼저 나온 쪽을 남긴다 -
+    // 고빈도는 %(P(태그|앵커))를 달고 있어 정보가 더 많다.
+    const shown = new Set();
+    const takeNew = list => (list || []).filter(x => {
+      const k = String(typeof x === 'string' ? x : x.tag).toLowerCase();
+      if (!k || shown.has(k)) return false;
+      shown.add(k);
+      return true;
+    });
+    for (const x of ((combo && combo.tags) || [])) shown.add(String(x.tag).toLowerCase());
     if (dlMsg) {
       // 받는 동안에도 자리를 잡아 둔다 — 나중에 카드가 갑자기 끼어들면
       // 사용자가 방금 누른 것이 밀린다.
-      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">고빈도 태그' +
-        '<span class="ia-aside-count">준비 중</span></div>' +
-        `<div class="ia-combo-wait">${escHtml(dlMsg)}</div></div>`);
+      reco.push(head('고빈도', '준비 중') +
+        `<div class="ia-combo-wait">${escHtml(dlMsg)}</div>`);
     } else if (combo && ((combo.tags && combo.tags.length)
                          || (combo.combos && combo.combos.length))) {
       // **무엇을 기준으로 권하는지 적는다.** 오프라인 뱅크는 프롬프트 태그 중
       // 하나를 앵커로 골라 답한다 — 그게 사용자가 방금 누른 칩이 아닐 수 있어서,
       // 안 적으면 "왜 이게 뜨지?" 가 된다(Codex: 조용히 앵커를 바꾸면 부정직하다).
-      const label = combo.anchor || combo.group || '';
-      const note = combo.weak ? ' 대략' : '';
-      parts.push('<div class="ia-aside-card scroll"><div class="ia-aside-title">고빈도 태그' +
-        `<span class="ia-aside-count">${escHtml(label)}${note}</span></div>` +
-        comboFlatHtml(combo) +
-        '</div>');
+      reco.push(head('고빈도', (combo.anchor || combo.group || '') + (combo.weak ? ' 대략' : '')) +
+        comboFlatHtml(combo));
     }
-    if (recCard) parts.push(recCard);      // 조합 카드 뒤로 밀어 둔 썸네일 격자
-    // 조언(전제조건·충돌·추천)은 태그 대부분에 없다. 그 자리에 '알려드릴 것이
-    // 없습니다' 를 띄우면 상자만 남는다 — 대신 태그 사전(implies/related)을 보여준다.
-    const info = await fetchLookup(seedTag);
-    if (seq !== asideSeq || !panelContext) return;
-    const dict = lookupCardHtml(info);
-    if (dict) parts.push(dict);
+    // 부위 그룹과 사전 줄을 **한 흐름**에 잇는다. 라벨은 유지한다(사용자 지시) -
+    // 어느 축 소속인지, 그리고 '딸려옴'(implication)과 '사전'(동반 통계)이 근거가
+    // 다르다는 것이 라벨 없이는 안 보인다.
+    //
+    // ⚠️ `.ia-aside-thumbs` 래퍼를 다시 씌우지 마라. 그건 썸네일 격자라 행 높이가
+    // 고정돼, 안에 텍스트 칩을 넣으면 8칩이 200px 로 늘어난다(실측 227px).
+    const flow = [
+      ...recSrc.slice(0, 5).map(([label, tags]) => [label, tags.slice(0, 10)]),
+      ['딸려옴', info?.implications], ['구체화', info?.specific], ['사전', info?.companions],
+    ].map(([label, list]) => {
+      const inner = textChipsInner(takeNew((list || []).slice(0, 10)));
+      return inner ? `<span class="ia-aside-gtag">${escHtml(label)}</span>${inner}` : '';
+    }).join('');
+    if (flow) {
+      reco.push(head('함께사용', seedLabel ? `${seedLabel} 기준` : '') +
+        `<div class="ia-aside-chips is-flow">${flow}</div>`);
+    }
+    if (reco.length) parts.push('<div class="ia-aside-card scroll">' + reco.join('') + '</div>');
     // 그래도 아무것도 없으면 아예 닫는다. 빈 상자는 자리만 먹는다(사용자 지적).
     if (!parts.length) { host.classList.remove('open'); host.innerHTML = ''; return; }
     host.classList.add('open');
@@ -5713,12 +5729,18 @@ export function createInteractivePanel({
     asideMount.style.width = Math.round(Math.min(ASIDE_W, room)) + 'px';
     asideMount.style.top = Math.round(top) + 'px';
     asideMount.style.bottom = 'auto';
-    // 씬 태그 판 바로 위까지 **다 쓴다**. 예전에는 화면 절반(innerHeight*0.5)에서
-    // 한 번 더 잘랐는데, 그 탓에 950px 화면에서 772px 이 비어 있는데도 475px 만
-    // 쓰고 내용을 잘라 먹었다(실측: 카드 셋이 71+812+490 필요한데 475 만 배분).
-    // 그림을 통째로 덮어도 좋으니 제대로 보이는 쪽이 낫다(사용자 2026-08-07).
-    // 바닥선만은 지킨다 — 씬 태그 판을 덮으면 방금 넣은 태그가 안 보인다.
-    asideMount.style.maxHeight = Math.round(Math.max(80, popupFloor() - top)) + 'px';
+    // **위 절반만 쓴다**(사용자 결정 2026-08-18). 이 패널은 이미지가 밀려난 자리
+    // 바로 위에 서기 때문에, 세로를 다 쓰면 그림이 통째로 사라진다 - 테스터가 두 번
+    // 지적한 그것이다. 가로로는 물러설 자리가 없어서(뷰어 790 = 팝업 484 + 패널 304,
+    // 실측 1304px 창) **세로를 반으로 나눈다**: 위 절반은 추천, 아래 절반은 늘 그림.
+    //
+    // 2026-08-07 에 정반대 결정을 했었다("그림을 통째로 덮어도 좋으니 제대로
+    // 보이는 쪽이 낫다"). 그때는 카드 셋이 71+812+490px 을 요구했다 - 지금은 셋을
+    // 한 카드로 묶고 줄을 채워 **368px** 이라 절반 안에 들어간다. 넘치면 내부
+    // 스크롤이 받는다.
+    const floor = popupFloor();
+    const half = Math.round((floor - top) * 0.5);
+    asideMount.style.maxHeight = Math.round(Math.max(80, half)) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
     // `C1 Fast` 는 **떠 있는 것들의 가장 오른쪽 끝** 기준으로 비켜서므로, 이 패널이
     // 열리거나 닫힐 때마다 다시 재야 한다(안 하면 카드 뒤에 깔린다).

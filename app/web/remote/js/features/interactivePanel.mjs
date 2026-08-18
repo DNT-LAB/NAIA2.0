@@ -2322,6 +2322,19 @@ export function createInteractivePanel({
     });
   }
 
+  /** 이 줄을 **감출 상황인가.** 팝업이 떠 있으면 감춘다(아래 `positionFastFloat`).
+   *
+   *  ⚠️ **판정을 한 곳에서 한다.** 예전엔 `positionFastFloat` 안에만 있었고
+   *  `fastFloatH` 는 `open` 클래스만 봤다. 그래서 팝업을 여는 순간 순서가 갈렸다:
+   *  `openPanel` 이 `positionPopup()` 을 먼저 부르는데 그때는 아직 이 줄에 `open`
+   *  이 남아 있어 **높이를 자리로 예약**하고, 그 뒤에 `positionFastFloat` 가
+   *  줄을 감춘다 - 예약만 남아 팝업 위에 62px(줄 56 + 간격 6) 빈 칸이 생겼다.
+   *  캐릭터 슬롯을 거쳐야 재현되는 이유는 그 슬롯에서만 이 줄이 열리기 때문이다
+   *  (사용자 화면 2026-08-18). 같은 술어를 둘이 나눠 쓰면 이런 어긋남이 또 난다. */
+  function fastFloatHidden() {
+    return !!(panelContext && panelMount.classList.contains('open'));
+  }
+
   function positionFastFloat() {
     if (!fastMount) return;
     const host = sceneMount;
@@ -2340,7 +2353,7 @@ export function createInteractivePanel({
     // 조언 패널과 겹쳤고(패널도 같은 자리다), 세로로 쌓으니 팝업이 그만큼 아래로
     // 내려가 세로를 잃었다. 애초에 이 상자는 팝업으로 태그를 고르는 동안 쓰지
     // 않는 것이다 - 자리를 다투게 하지 말고 감춘다. 팝업을 닫으면 돌아온다.
-    if (panelContext && panelMount.classList.contains('open')) {
+    if (fastFloatHidden()) {
       fastMount.classList.remove('open');
       return;
     }
@@ -2349,8 +2362,11 @@ export function createInteractivePanel({
     fastMount.classList.add('open');
   }
 
-  /** `C1 Fast`/`Neg Fast` 줄이 실제로 차지한 높이. 접혀 있으면 칩 두 개 높이다. */
+  /** `C1 Fast`/`Neg Fast` 줄이 실제로 차지한 높이. 접혀 있으면 칩 두 개 높이다.
+   *  **감출 상황이면 0 이다** - 아직 `open` 클래스가 남아 있어도 자리를 잡아
+   *  주면 안 된다(위 `fastFloatHidden` 의 설명). */
   function fastFloatH() {
+    if (fastFloatHidden()) return 0;
     if (!fastMount || !fastMount.classList.contains('open')) return 0;
     return Math.round(fastMount.getBoundingClientRect().height);
   }

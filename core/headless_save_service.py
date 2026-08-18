@@ -209,6 +209,16 @@ class HeadlessSaveService:
                 context.save_directory_state[key] = str(value)
         elif key == "classification_rules":
             context.save_directory_state[key] = str(value or "")
+        elif key == "save_counter":
+            # 재시작하면 1 로 돌아가지만(RUNTIME_SAVE_DIRECTORY_KEYS), 세션 도중에도 다시
+            # 1 부터 세고 싶을 때가 있다. 번호가 겹쳐도 unique_output_path 가
+            # `00001 (1).png` 로 비키므로 기존 파일을 덮어쓰지는 않는다.
+            context.save_directory_state[key] = context._coerce_int(
+                value,
+                default=1,
+                minimum=1,
+                maximum=999999,
+            )
         else:
             return None
         context.save_remote_ui_state()

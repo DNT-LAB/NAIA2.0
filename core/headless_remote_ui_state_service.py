@@ -18,6 +18,9 @@ from core.headless_remote_state_service import (
 REMOTE_WEB_STATE_KEY = "remote_web"
 STATE_VERSION = 2
 
+# 세션마다 새로 시작하는 save_directory 키. 영속화 대상에서 제외한다.
+RUNTIME_SAVE_DIRECTORY_KEYS = frozenset({"save_counter"})
+
 
 def _settings_path(context: Any) -> Path:
     return context._save_path("app_settings.json")
@@ -64,6 +67,31 @@ def _normalize_options(raw: Any) -> dict[str, bool]:
 
 def _normalize_mapping(raw: Any) -> dict[str, Any]:
     return copy.deepcopy(raw) if isinstance(raw, dict) else {}
+
+
+def _normalize_save_directory_state(raw: Any) -> dict[str, Any]:
+    """save_directory_state 에서 세션 한정 값을 걷어낸다.
+
+    ``save_counter`` 는 **런타임 값**이다. 데스크톱 시절 계약은
+    ``ImageCrudController._load_counter_from_settings`` 가 못 박은 대로
+    "앱을 다시 켜면 1부터" 였는데, 헤드리스는 save_directory_state 를 통째로
+    저장/복원하면서 카운터까지 딸려 와 재시작해도 번호가 이어졌다.
+    저장 쪽과 복원 쪽이 같은 정규화를 지나므로 여기 한 곳에서 끊는다.
+    """
+    state = _normalize_mapping(raw)
+    for key in RUNTIME_SAVE_DIRECTORY_KEYS:
+        state.pop(key, None)
+    return state
+
+
+def _has_stale_runtime_keys(stored: Any) -> bool:
+    """이미 저장된 blob 에 런타임 전용 키가 남아 있는가(옛 빌드가 쓴 파일)."""
+    if not isinstance(stored, dict):
+        return False
+    save_directory_state = stored.get("save_directory_state")
+    if not isinstance(save_directory_state, dict):
+        return False
+    return bool(RUNTIME_SAVE_DIRECTORY_KEYS & set(save_directory_state))
 
 
 def _strip_runtime_keys(params: dict[str, Any]) -> dict[str, Any]:
@@ -144,7 +172,7 @@ def _normalize_state(raw: Any) -> dict[str, Any]:
         "remote_param_planes": planes,
         "prompt_planes": prompt_planes,
         "auto_save_state": _normalize_mapping(state.get("auto_save_state")),
-        "save_directory_state": _normalize_mapping(state.get("save_directory_state")),
+        "save_directory_state": _normalize_save_directory_state(state.get("save_directory_state")),
     }
 
 
@@ -239,12 +267,12 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
         "save_directory_state": _json_safe(dict(context.save_directory_state or {})),
     }
     normalized = _normalize_state(state)
-    previous = (
-        _normalize_state(settings.get(REMOTE_WEB_STATE_KEY))
-        if REMOTE_WEB_STATE_KEY in settings
-        else None
-    )
-    if previous == normalized:
+    stored = settings.get(REMOTE_WEB_STATE_KEY)
+    previous = _normalize_state(stored) if REMOTE_WEB_STATE_KEY in settings else None
+    # 정규화끼리 비교하는 이유: 저장은 이미지 한 장마다 불린다. 왕복이 조금이라도
+    # 어긋나면 매번 파일을 다시 쓰게 된다. 대신 옛 빌드가 박아 둔 런타임 키는
+    # 이 비교에서 지워져 영영 파일에 남으므로, 그 경우만 따로 한 번 걷어낸다.
+    if previous == normalized and not _has_stale_runtime_keys(stored):
         return normalized
     settings[REMOTE_WEB_STATE_KEY] = normalized
     _write_app_settings(context, settings)

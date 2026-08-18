@@ -75,7 +75,15 @@ export function createSaveDirectoryPanel({
         </label>
         <div class="mod-field">
           <span class="mod-field-label">Current Counter</span>
-          <div class="mod-status" style="text-align:left;min-height:0">${escHtml(String(m.save_counter ?? 1))}</div>
+          <!-- 카운터는 앱을 다시 켜면 1 로 돌아간다. 그 사이에도 다시 1 부터 세고
+               싶을 때가 있어서 초기화를 손 닿는 곳에 둔다(번호가 겹쳐도 백엔드가
+               "00001 (1).png" 로 비키므로 기존 파일은 그대로다). -->
+          <div class="mod-inline-row">
+            <div class="mod-status" style="text-align:left;min-height:0;flex:1">${escHtml(String(m.save_counter ?? 1))}</div>
+            <button class="mod-btn-secondary mod-btn-compact" type="button"
+                    ${controlAllowed ? '' : 'disabled'}
+                    onclick="resetSaveDirectoryCounter()">1로 초기화</button>
+          </div>
         </div>
         <label class="mod-field">
           <span class="mod-field-label">Filename Format</span>
@@ -157,6 +165,21 @@ export function createSaveDirectoryPanel({
     setModuleParam('save_directory', 'classification_method', value);
   }
 
+  // 화면의 숫자는 팝업을 연 시점의 값이다(생성이 올릴 때 방송은 없다). 그러니
+  // "이미 1이면 건너뛴다" 같은 판단을 여기서 하면 안 된다 — 눌렀으면 보낸다.
+  function resetCounter() {
+    if (!setModuleParam('save_directory', 'save_counter', 1)) {
+      if (showToast) showToast('연결이 끊겨 카운터를 초기화하지 못했습니다.', 'error');
+      return;
+    }
+    // 백엔드가 새 상태를 되쏘면 render 가 한 번 더 돈다(값 확정은 그쪽이다).
+    if (lastState) {
+      lastState.save_counter = 1;
+      render(lastState);
+    }
+    if (showToast) showToast('저장 카운터를 1로 초기화했습니다.', 'success');
+  }
+
   return {
     // 뷰어 설정 판이 "지금 어디에 저장되는지"를 한 줄로 보여 주려고 읽는다.
     // 값을 복제하지 않고 여기 것을 그대로 쓴다 — 두 벌이 되면 반드시 어긋난다.
@@ -169,5 +192,6 @@ export function createSaveDirectoryPanel({
     onTimestampToggle,
     onFilenameFormatChange,
     onClassificationChange,
+    resetCounter,
   };
 }

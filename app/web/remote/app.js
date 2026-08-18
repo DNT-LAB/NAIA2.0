@@ -1472,7 +1472,7 @@ const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260806-ge
   .catch(error => {
     console.error('Failed to initialize auto save panel module', error);
   });
-const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20260806-pickfirst1')
+const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20260818-counterreset1')
   .then(({createSaveDirectoryPanel}) => {
     saveDirectoryPanel = createSaveDirectoryPanel({
       document,
@@ -7835,6 +7835,10 @@ function onSaveDirectoryFilenameFormatChange(value) {
 
 function onSaveDirectoryClassificationChange(value) {
   if (saveDirectoryPanel) saveDirectoryPanel.onClassificationChange(value);
+}
+
+function resetSaveDirectoryCounter() {
+  if (saveDirectoryPanel) saveDirectoryPanel.resetCounter();
 }
 
 function renderSaveDirectory(m) {

@@ -5416,7 +5416,20 @@ export function createInteractivePanel({
     // 검색/타이핑 결과는 **조언보다 먼저** 그린다. 지금 찾고 있는 것이 답이고,
     // 아래 카드들은 이미 고른 것에 대한 이야기다.
     const hits = searchHitsHtml();
-    if (awaitingNewTag && !inspecting) {
+    // **기준은 캐럿이 놓인 토큰이다.** 편집칸에 포커스가 있는 동안에는 그것만 본다:
+    // 빈 토큰(`..., ` 뒤)이면 아무것도 안 띄운다. 낯선 문자열이면 뱅크·조언·사전이
+    // 모두 기권하므로 자연히 빈다.
+    //
+    // 예전에는 `awaitingNewTag`(슬롯을 열 때 우리가 `, ` 를 붙였는가) 하나로만 막았다.
+    // 그런데 **사용자가 직접 콤마를 치면** input 핸들러가 그 플래그를 지워서 옛 기준이
+    // 되살아났다 - 사용자 화면: 신체 슬롯이 `bandaged leg, ` 로 끝나는데 오른쪽에는
+    // `long fingernails` 추천이 떠 있었다(그 태그는 슬롯에 있지도 않다).
+    // 플래그가 아니라 **캐럿 위치**를 보면 두 경우가 한 규칙으로 덮인다.
+    const edEl = editingEl();
+    const edTa = edEl && (edEl.matches?.('textarea') ? edEl : edEl.querySelector?.('textarea'));
+    const typing = !!edTa && document.activeElement === edTa;
+    const caretTag = typing ? caretToken(edTa) : '';
+    if (typing && !caretTag && !inspecting) {
       if (hits) { host.classList.add('open'); host.innerHTML = hits; positionAside(); return; }
       host.classList.remove('open');
       host.innerHTML = '';
@@ -5473,8 +5486,10 @@ export function createInteractivePanel({
     if (!lastPicked || !lower.has(lastPicked.toLowerCase())) {
       lastPicked = tags[tags.length - 1] || '';
     }
-    // 살펴보는 중이면 그것이 기준이다 — 사용자가 방금 "이건 뭔가요" 하고 누른 것이다.
-    const seedTag = inspecting || lastPicked;
+    // 우선순위: 살펴보는 중(명시적 의사) > **캐럿이 놓인 태그** > 마지막에 고른 것.
+    // 캐럿을 중간에 두면 그 태그의 추천이 나온다 - "지금 손대고 있는 것" 이 기준이라는
+    // 규칙이 화면 전체에서 하나로 유지된다.
+    const seedTag = inspecting || (typing && caretTag ? caretTag : lastPicked);
     const seed = items.find(it => it.tag === seedTag) || items[items.length - 1];
     // 나머지 선택분도 추천하는 것 = 옷 전체와 어울리는 것 -> 강조한다.
     const others = new Set();
@@ -5763,6 +5778,22 @@ export function createInteractivePanel({
     });
   }
 
+  /** 편집만 끝내고 **카테고리 띠는 남긴다.** 팝업의 3단 상태 중 `is-idle` 로 되돌리는
+   *  것과 같다(168px). 슬롯(panelContext)은 그대로라 이어서 고를 수 있다.
+   *
+   *  완전히 닫는 것과 다르다 - 닫기는 Esc·Enter·우클릭·같은 슬롯 다시 누르기·
+   *  닫기 칩이 맡는다. */
+  function collapsePanelToCategories() {
+    if (!panelContext) return;
+    openThumbAxis = null;                  // 그리드를 접는다 -> 좁은 띠
+    thumbFilter = '';
+    inspectTag = '';
+    document.body.classList.remove('interactive-editing');
+    renderBlocks();                        // 편집칸을 칩으로 되돌린다
+    refreshAxisSections();                 // 띠 폭·위치를 다시 잡는다(팝업/패널/이미지)
+    void renderAside();                    // 기준이 사라졌으니 추천도 정리한다
+  }
+
   function closePanel() {
     bindSceneClose(false);
     document.body.classList.remove('interactive-editing');
@@ -5887,11 +5918,22 @@ export function createInteractivePanel({
         closePanel();
       }
     });
+    // ⚠️ **이 칸의 주인은 바인딩 시점에 정한다.** 예전에는 blur 가 터진 순간의
+    // `panelContext` 를 기준으로 삼았는데, 상단 씬 버튼(구도·배경·사물…)을 누르면
+    // 순서가 이렇게 흐른다:
+    //
+    //   click -> openSlot() 이 새 팝업을 연다(panelContext 교체) -> **그 다음에**
+    //   옛 칸의 focusout 이 뜬다 -> 거기서 panelContext 를 읽으면 이미 새 것이라
+    //   "슬롯이 바뀌었나" 가드가 아무것도 못 걸러내고 -> 130ms 뒤 새 팝업을 닫는다
+    //
+    // 그래서 사용자에게는 "슬롯 편집 중에 상단 버튼을 누르면 팝업이 닫히고 요청한
+    // 팝업은 안 뜬다" 로 보였다(사용자 제보 2026-08-18, 이벤트 순서 실측으로 확인).
+    // 주인을 미리 잡아 두면 그 착각이 없다.
+    const ownCtx = panelContext;
     ta.addEventListener('blur', () => {
-      const ctx = panelContext;
       // 팝업(검색/탐색)이나 다른 슬롯으로 포커스가 옮겨간 경우는 닫지 않는다.
       setTimeout(() => {
-        if (panelContext !== ctx) return;                 // 슬롯 전환됨 — 새 편집이 관리
+        if (panelContext !== ownCtx) return;              // 슬롯 전환됨 — 새 편집이 관리
         const a = document.activeElement;
         // 조언 플로트는 팝업 DOM 밖에 있어서(fixed 별도 마운트) 여기서 빼면
         // 추천 칩을 누르는 순간 팝업이 닫힌다.
@@ -5903,7 +5945,13 @@ export function createInteractivePanel({
                   || a.classList?.contains('ia-neg-input'))) return;
         // 자동완성 드롭다운(외부 #tagTooltip)과 상호작용 중이면 닫지 않는다.
         if (getAutocompleteTarget && getAutocompleteTarget() === ta) return;
-        closePanel();
+        // **통째로 닫지 않고 카테고리 띠만 남긴다**(사용자 제안 2026-08-18).
+        // 이 경로가 Generate 를 누를 때 타는 길이다 - 포커스가 버튼으로 가면서
+        // 팝업이 통째로 사라져, 이어서 고치려면 슬롯을 처음부터 다시 열어야 했다.
+        // 마지막 슬롯을 기억한 채 좁은 띠(168px)로 접으면 그림도 안 가리고
+        // 이어서 고를 수도 있다. 완전히 닫는 길은 그대로다: Esc·Enter·우클릭·
+        // 같은 슬롯 다시 누르기·닫기 칩.
+        collapsePanelToCategories();
       }, 130);
     });
     // 범용 자동완성(토큰 인식 + IME)을 슬롯 입력창에 붙인다. 커밋 시 tagAssist 가

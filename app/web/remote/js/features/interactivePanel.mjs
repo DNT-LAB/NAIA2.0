@@ -4768,7 +4768,16 @@ export function createInteractivePanel({
       // 조합 카드의 칩과 **검색 결과 칩**(`.ia-hit`)은 누르면 넣는다. 그리드 셀과
       // 규약이 다른 이유는, 여기 있는 것은 이미 "이걸 쓰라/이걸 찾는다" 는 의사
       // 표시라 살펴볼 대상이 아니다.
-      if (b.classList.contains('ia-combo-tag') || b.classList.contains('ia-hit')) {
+      // ⚠️ **클래스 이름으로 동작을 가르지 마라.** 예전엔 `.ia-combo-tag`(고빈도)와
+      // `.ia-hit`(검색)만 즉시 넣었는데, 칩 모양을 하나로 통일하면서 고빈도 칩이
+      // `.ia-aside-chip` 이 되자 이 분기를 못 타 **누르면 살펴보기만 켜지고 태그가
+      // 안 들어갔다**(Codex 리뷰 2026-08-18 · 실측 재현: `breasts apart` 클릭 후
+      // 슬롯 그대로). 모양이 같은데 동작이 다르면 그 자체가 결함이다.
+      //
+      // 이 플로트의 칩은 **전부 누르면 넣는다.** 여기 있는 것은 이미 "이걸 쓰라/
+      // 이걸 찾는다" 는 의사 표시라 살펴볼 대상이 아니다(150칸 그리드와 다르다).
+      if (b.classList.contains('ia-aside-chip') || b.classList.contains('ia-combo-tag')
+          || b.classList.contains('ia-hit')) {
         toggleTag(tag, { fromAside: true });
         refreshAxisSections();
         // 검색 결과는 넣은 뒤에도 남는다(연달아 고를 수 있게). `on` 표시만 바뀐다 -
@@ -5397,11 +5406,20 @@ export function createInteractivePanel({
       body + cut + '</div>';
   }
 
+  /** 조언 플로트를 감춘다. **그림에 준 세로 여백도 같이 되돌린다** - 안 그러면
+   *  `--ia-shift-top` 이 옛 패널 높이로 남아, 추천은 사라졌는데 이미지는 계속
+   *  아래로 밀린 채다(Codex 리뷰 2026-08-18). 감추는 곳이 네 군데라 한 곳으로 모은다. */
+  function hideAside(host) {
+    host.classList.remove('open');
+    host.innerHTML = '';
+    syncPopupShift();
+  }
+
   async function renderAside() {
     const host = ensureAside();
     // 옆 팝업이 없는 슬롯(캐릭터)에서는 조언 플로트도 띄우지 않는다 — 좌표를 팝업에
     // 맞춰 잡는데 그 팝업이 닫혀 있어 자리가 어긋난다.
-    if (!panelContext || panelContext.noPanel) { host.classList.remove('open'); host.innerHTML = ''; return; }
+    if (!panelContext || panelContext.noPanel) { hideAside(host); return; }
     const tags = currentTags();
     const seq = ++asideSeq;
     // 살펴보는 태그는 **아직 고르지 않은 것**이라 currentTags 에 없다. 조언을 받으려면
@@ -5431,8 +5449,7 @@ export function createInteractivePanel({
     const caretTag = typing ? caretToken(edTa) : '';
     if (typing && !caretTag && !inspecting) {
       if (hits) { host.classList.add('open'); host.innerHTML = hits; positionAside(); return; }
-      host.classList.remove('open');
-      host.innerHTML = '';
+      hideAside(host);
       return;
     }
     // **먼저 칠한다.** 아래 조언·조합·사전은 네트워크를 기다리는데, 검색 결과는
@@ -5444,8 +5461,7 @@ export function createInteractivePanel({
       // 조작법을 적어 두는 카드였는데, 팝업을 접힌 띠로 만든 뒤로는 아무것도 안
       // 고른 상태가 곧 **첫 화면**이라 그 카드가 늘 떠 있게 됐다 - 빈 패널이
       // 낫다. 조작법은 셀의 [선택] 버튼이 스스로 말한다.
-      host.classList.remove('open');
-      host.innerHTML = '';
+      hideAside(host);
       return;
     }
     const items = await fetchAdvice(askTags);
@@ -5605,20 +5621,36 @@ export function createInteractivePanel({
     //
     // ⚠️ `.ia-aside-thumbs` 래퍼를 다시 씌우지 마라. 그건 썸네일 격자라 행 높이가
     // 고정돼, 안에 텍스트 칩을 넣으면 8칩이 200px 로 늘어난다(실측 227px).
-    const flow = [
-      ...recSrc.slice(0, 5).map(([label, tags]) => [label, tags.slice(0, 10)]),
-      ['딸려옴', info?.implications], ['구체화', info?.specific], ['사전', info?.companions],
-    ].map(([label, list]) => {
-      const inner = textChipsInner(takeNew((list || []).slice(0, 10)));
-      return inner ? `<span class="ia-aside-gtag">${escHtml(label)}</span>${inner}` : '';
-    }).join('');
+    // ⚠️ **자르기 전에 중복을 걸러야 한다.** 예전엔 `recSrc.slice(0, 5)` 로 먼저
+    // 다섯 그룹만 남기고 그 다음에 중복을 뺐다 - 앞 다섯이 전부 고빈도와 겹치면
+    // 뒤에 멀쩡한 그룹이 있는데도 '함께사용' 이 통째로 비었다. Codex 가 실제 API 로
+    // 재현했다(2026-08-18): `diving` 은 goggles·ponytail·cleavage 가, `knitting` 은
+    // closed eyes 가 그렇게 사라졌다. 걸러낸 **뒤** 남은 것에서 다섯을 센다.
+    const recPicked = [];
+    for (const [label, tags] of recSrc) {
+      if (recPicked.length >= 5) break;
+      const fresh = takeNew(tags.slice(0, 10));
+      if (fresh.length) recPicked.push([label, fresh]);
+    }
+    // 사전 줄도 같은 규칙으로 거른다. ⚠️ `takeNew` 는 `shown` 을 **바꾼다** -
+    // 이미 거른 목록에 두 번 부르면 전부 사라진다. 그래서 거르는 것은 한 번씩만.
+    for (const [label, list] of [['딸려옴', info?.implications],
+                                 ['구체화', info?.specific],
+                                 ['사전', info?.companions]]) {
+      const fresh = takeNew((list || []).slice(0, 10));
+      if (fresh.length) recPicked.push([label, fresh]);
+    }
+    const flow = recPicked
+      .map(([label, list]) => `<span class="ia-aside-gtag">${escHtml(label)}</span>`
+        + textChipsInner(list))
+      .join('');
     if (flow) {
       reco.push(head('함께사용', seedLabel ? `${seedLabel} 기준` : '') +
         `<div class="ia-aside-chips is-flow">${flow}</div>`);
     }
     if (reco.length) parts.push('<div class="ia-aside-card scroll">' + reco.join('') + '</div>');
     // 그래도 아무것도 없으면 아예 닫는다. 빈 상자는 자리만 먹는다(사용자 지적).
-    if (!parts.length) { host.classList.remove('open'); host.innerHTML = ''; return; }
+    if (!parts.length) { hideAside(host); return; }
     host.classList.add('open');
     host.innerHTML = parts.join('');
     positionAside();
@@ -5729,7 +5761,9 @@ export function createInteractivePanel({
   ].join(', ');
 
   function onSceneOutside(event) {
-    if (!panelContext || panelContext.kind !== 'scene') return;
+    if (!panelContext) return;
+    // 접힌 상태(캐릭터 슬롯 포함)도 바깥 클릭으로 닫는다.
+    if (panelContext.kind !== 'scene' && !panelCollapsed) return;
     const t = event.target;
     if (!t || !t.closest) return;
     // **이미 문서에서 떨어져 나간 노드는 '바깥' 이 아니다.** 씬 버튼을 누르면
@@ -5744,7 +5778,8 @@ export function createInteractivePanel({
 
   function onSceneKeydown(event) {
     if (event.key !== 'Escape') return;
-    if (!panelContext || panelContext.kind !== 'scene') return;
+    if (!panelContext) return;
+    if (panelContext.kind !== 'scene' && !panelCollapsed) return;
     // 자동완성 목록이 떠 있으면 그쪽부터 닫힌다 — 한 번에 둘 다 닫으면 목록만
     // 지우려던 사용자가 팝업 밖으로 튕겨 나간다(하단 편집기와 같은 규칙).
     if (tagAssistOpen()) return;
@@ -5778,6 +5813,10 @@ export function createInteractivePanel({
     });
   }
 
+  // 접힌 상태인가(카테고리 띠만 남고 편집은 끝난 상태). 바깥 클릭/Esc 핸들러가
+  // 이 값을 봐야 캐릭터 슬롯에서도 닫힌다 - 그쪽 핸들러는 원래 씬 전용이었다.
+  let panelCollapsed = false;
+
   /** 편집만 끝내고 **카테고리 띠는 남긴다.** 팝업의 3단 상태 중 `is-idle` 로 되돌리는
    *  것과 같다(168px). 슬롯(panelContext)은 그대로라 이어서 고를 수 있다.
    *
@@ -5789,12 +5828,21 @@ export function createInteractivePanel({
     thumbFilter = '';
     inspectTag = '';
     document.body.classList.remove('interactive-editing');
+    // ⚠️ **닫는 길을 같이 걸어 준다.** 접기는 `panelContext` 를 남기므로 편집칸이
+    // 다시 그려지는데, 그 칸은 **포커스를 받은 적이 없어 blur 가 안 난다** - 즉
+    // 지금까지 팝업을 닫아 주던 두 길(바깥 클릭 = blur 경로, Esc = 칸의 keydown)이
+    // 통째로 사라진다. 그러면 닫기 칩과 우클릭만 남아 팝업이 끈질기게 붙어 있다
+    // (Codex 리뷰 2026-08-18). 씬 슬롯이 쓰던 문서 수준 닫기를 그대로 빌린다 -
+    // 바깥 클릭과 Esc 를 둘 다 받는다.
+    panelCollapsed = true;
+    bindSceneClose(true);
     renderBlocks();                        // 편집칸을 칩으로 되돌린다
     refreshAxisSections();                 // 띠 폭·위치를 다시 잡는다(팝업/패널/이미지)
     void renderAside();                    // 기준이 사라졌으니 추천도 정리한다
   }
 
   function closePanel() {
+    panelCollapsed = false;
     bindSceneClose(false);
     document.body.classList.remove('interactive-editing');
     // 감춰 뒀던 하단 UI 를 되돌린다.
@@ -5859,6 +5907,11 @@ export function createInteractivePanel({
     // `thick thighs` 를 원하지 않는데도 그 추천이 계속 떴다(사용자 지적).
     // 새 태그를 기다리는 상태로 표시하고, 치거나 고르는 순간 풀린다.
     if (/,\s*$/.test(ta.value)) awaitingNewTag = true;
+    // **다시 편집으로 들어왔다.** 접힌 상태에서 같은 슬롯을 다시 누르면 여기로만
+    // 오는데, 예전에는 표시(interactive-editing)와 접힘 플래그가 안 돌아와
+    // 반쪽 상태가 됐다(Codex 리뷰 2026-08-18).
+    panelCollapsed = false;
+    document.body.classList.add('interactive-editing');
     autoGrow(ta);
     ta.focus();
     const n = ta.value.length;
@@ -5897,6 +5950,25 @@ export function createInteractivePanel({
       // 직접 타이핑 → 상태만 갱신, textarea 는 그대로(커서/IME 유지)
       setCurrentTags(parseSlotInput(ta.value), {fromInput: true});
     });
+    // **캐럿이 움직이는 것도 구독한다.** 기준을 "캐럿이 놓인 토큰" 으로 바꿨는데
+    // `input` 만 듣고 있었다 - 마우스로 다른 태그를 클릭하거나 방향키·Home/End 로
+    // 옮기면 기준이 그대로라 옛 추천이 남았다(Codex 리뷰 2026-08-18).
+    // `selectionchange` 는 문서 단위 이벤트라 이 칸이 대상일 때만 처리하고,
+    // 토큰이 **바뀐 순간에만** 다시 그린다(캐럿이 같은 태그 안에서 움직이는 동안
+    // 네트워크 조회를 반복하지 않는다).
+    let lastCaretTok = caretToken(ta);
+    const onCaretMove = () => {
+      // 칸은 재렌더마다 새로 만들어진다. **스스로 걷힌다** - 떨어져 나간 칸의
+      // 구독을 남겨 두면 편집할 때마다 문서 리스너가 하나씩 쌓인다.
+      if (!ta.isConnected) { document.removeEventListener('selectionchange', onCaretMove); return; }
+      if (document.activeElement !== ta) return;
+      const tok = caretToken(ta);
+      if (tok === lastCaretTok) return;
+      lastCaretTok = tok;
+      void renderAside();
+    };
+    document.addEventListener('selectionchange', onCaretMove);
+
     // 다 썼다는 신호 = 포커스를 잃거나 Enter. 여기서 한 번만 낸다.
     const flushTyping = () => {
       if (reactiveTypingSlot !== ta) return;

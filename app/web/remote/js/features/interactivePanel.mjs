@@ -1515,6 +1515,12 @@ export function createInteractivePanel({
   // 더 좁히면 안 되는 이유: 칩의 `white-space` 는 `normal` 이라, 폭이 가장 긴 칩
   // (`detached sleeves 26%`)보다 좁아지는 순간 **글자 단위로 접힌다** - 168px 이던
   // 시절의 `고빈도 태 / 그` 가 그 증상이었다.
+  // **304 를 유지한다.** 압축 뒤 폭별로 재 봤다(함께 쓰는 것, 칩 16개 · 카드 높이):
+  //   304 -> 162px · 272 -> 186 · 248 -> 210 · 224 -> 258 · 176 -> 294
+  // 좁힐수록 세로를 잃는다. 그리고 **좁혀도 가로 충돌은 안 풀린다** - 패널은
+  // 팝업 오른쪽에 서고 이미지가 밀려난 자리가 바로 거기라, 248 로 줄여도
+  // 이미지 띠 280px 중 246px 을 덮었다(실측 1304px 창). 56px 을 벌자고 세로
+  // 94px 을 내주는 거래다. 가로 문제는 폭이 아니라 **배치**로 풀어야 한다.
   const ASIDE_W = 304;
 
   // 추천 패널(.ia-aside)이 온전히 들어가는 최소 CSS 폭.
@@ -4852,14 +4858,16 @@ export function createInteractivePanel({
       + (src ? ` data-naia-thumb="${escHtml(src)}"` : '');
   }
 
-  function textChipsHtml(list, cls) {
+  /** 칩만 만든다(컨테이너 없이). 여러 그룹을 **한 흐름**에 잇기 위한 것이다 -
+   *  `textChipsHtml` 은 이걸 감싸기만 한다. */
+  function textChipsInner(list, cls) {
     const items = (list || []).map(x => (typeof x === 'string' ? { tag: x } : x))
       .filter(x => x && x.tag);
     if (!items.length) return '';
     // 이미 고른 태그는 `on` 으로 표시한다 — `chipsHtml` 이 쓰던 규약 그대로다.
     // 안 맞추면 같은 클래스인데 어떤 칩은 선택 표시가 되고 어떤 칩은 안 된다.
     const cur = new Set(currentTags().map(x => String(x).toLowerCase()));
-    return `<div class="ia-aside-chips">${items.map(x => {
+    return items.map(x => {
       const t = String(x.tag);
       // ⚠️ **설명이 없으면 사전으로 내려간다.** 예전엔 `x.desc` 가 없으면 태그
       // 이름만 남겼는데, 조언 API 는 desc 를 거의 안 실어 보낸다 - 그래서 이 카드의
@@ -4871,7 +4879,12 @@ export function createInteractivePanel({
       const mark = cur.has(t.toLowerCase()) ? ' on' : (cls ? ' ' + cls : '');
       return `<button type="button" class="ia-aside-chip${mark}"`
         + ` data-advice-add="${escHtml(t)}"${adviceTipAttrs(t, tip)}>${escHtml(t)}${meta}</button>`;
-    }).join('')}</div>`;
+    }).join('');
+  }
+
+  function textChipsHtml(list, cls) {
+    const inner = textChipsInner(list, cls);
+    return inner ? `<div class="ia-aside-chips">${inner}</div>` : '';
   }
 
   // 태그 사전(자동완성 툴팁이 쓰는 그 데이터). 조언이 없는 태그에도 보여줄 것이 있다.
@@ -5522,7 +5535,7 @@ export function createInteractivePanel({
     const recGroups = [...byRegion.entries()]
       .filter(([, v]) => v.length)
       .sort((a, b) => b[1].length - a[1].length)
-      .map(([label, tags]) => ({ label, html: textChipsHtml(tags.slice(0, 10)) }))
+      .map(([label, tags]) => ({ label, html: textChipsInner(tags.slice(0, 10)) }))
       .filter(g => g.html)
       .slice(0, 5);
     const seedLabel = seed ? seed.tag : '';
@@ -5575,10 +5588,17 @@ export function createInteractivePanel({
          `<span class="ia-aside-count">${escHtml(seedLabel)} 기준</span></div>` +
          // ⚠️ `.ia-aside-thumbs` 래퍼를 다시 씌우지 마라. 그건 썸네일 격자라
          // 행 높이가 고정돼, 안에 텍스트 칩을 넣으면 8칩이 200px 로 늘어난다
-         // (실측: 그룹 하나 227px). `textChipsHtml` 이 자기 컨테이너를 갖는다.
+         // (실측: 그룹 하나 227px).
+         //
+         // **그룹마다 줄을 새로 시작하지 않는다.** 예전에는 그룹 하나가 라벨 줄 +
+         // 칩 줄이라, 그룹당 칩이 평균 3.2개인 이 카드에서 **줄 끝 평균 104px**
+         // (내용폭 280px 의 37%)이 비었다. 카드 304x417 에 정보는 30.5%뿐
+         // (실측 2026-08-18, 사용자 지적 "정보가 차지하는 비율 20% 미만").
+         // 라벨을 칩과 같은 흐름에 인라인으로 두면 칩이 줄을 끝까지 채운다.
+         '<div class="ia-aside-chips is-flow">' +
          recGroups.map(g =>
-           `<div class="ia-aside-group"><div class="ia-aside-group-label">${escHtml(g.label)}</div>` +
-           g.html + '</div>').join('') +
+           `<span class="ia-aside-gtag">${escHtml(g.label)}</span>` + g.html).join('') +
+         '</div>' +
          '</div>')
       : '';
     // ── 고빈도 태그 ──────────────────────────────────────────────────────

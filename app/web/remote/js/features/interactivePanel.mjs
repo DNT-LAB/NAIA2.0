@@ -4006,6 +4006,30 @@ export function createInteractivePanel({
     }
 
     const recalled = presetRecall(character);
+    // **색 축은 소유를 따지지 않고 회수한다**(사용자 지시 2026-08-18).
+    //
+    // `presetRecall` 은 **이전 프리셋이 넣은 것**만 뺀다 - 사용자가 직접 친 태그는
+    // 남의 것이라 안 건드리는 규약이다. 그런데 머리색·눈색은 **캐릭터의 정체성**이라,
+    // 다른 캐릭터로 갈아타는데 옛 색이 남으면 그 캐릭터가 아니게 된다(사용자 화면:
+    // `gawr gura` 로 바꿨는데 `blue eyes`·`multicolored hair` 가 그대로 남았다).
+    // 그래서 '전부 적용' 에서는 색 축을 통째로 비운다 - 새 카드가 색을 주면 아래에서
+    // 채워지고, 안 주면 비어 있는 것이 맞다(옛 캐릭터의 색을 물려받는 것보다 낫다).
+    //
+    // '캐릭터만' 은 손대지 않는다 - 그건 "이름만 바꾸고 나머지는 내가 정한 대로" 다.
+    const wipedColor = [];
+    if (kind !== 'char') {
+      const colorTags = colorAxisTagSet();
+      for (const slotKey of Object.keys(character.fields || {})) {
+        const before = character.fields[slotKey] || [];
+        if (!before.length) continue;
+        const keep = [];
+        for (const t of before) {
+          if (colorTags.has(String(t).trim().toLowerCase())) wipedColor.push(t);
+          else keep.push(t);
+        }
+        if (keep.length !== before.length) character.fields[slotKey] = keep;
+      }
+    }
 
     const bySlot = new Map();
     for (const row of chosen) {
@@ -4063,6 +4087,34 @@ export function createInteractivePanel({
     if (replaced.length) {
       showToast(`한 자리에 하나만 들어가는 축이라 ${replaced.join(', ')} 을(를) 바꿨습니다.`);
     }
+    // 직접 친 색까지 걷었으면 **말해 준다.** 조용히 지우면 "내가 넣은 게 왜 없지" 가 된다.
+    if (wipedColor.length) {
+      showToast(`캐릭터가 바뀌어 색 태그 ${wipedColor.join(', ')} 을(를) 걷었습니다.`);
+    }
+  }
+
+  /** 색 축에 속한 태그 전부(소문자). '전부 적용' 이 소유를 안 따지고 비우는 대상이다.
+   *
+   *  두 갈래를 합친다:
+   *    팔레트 - hair_color · eye_color · skin_color (`blue hair`, `blue eyes` …)
+   *    색 패턴 - eye_pattern(4) · hair_pattern(14) (`heterochromia`,
+   *              `multicolored hair`, `gradient hair` …) 팔레트에는 없지만
+   *              **색을 말하는 태그**라 같이 회수해야 캐릭터가 갈린다.
+   *  길이·크기 슬라이더(hair_length·breast_size)는 뺀다 - 색이 아니고, 새 카드가
+   *  값을 주면 아래 배타 축 규칙이 알아서 갈아끼운다. */
+  let colorAxisTags = null;
+  function colorAxisTagSet() {
+    if (colorAxisTags) return colorAxisTags;
+    colorAxisTags = new Set();
+    for (const rows of Object.values(PALETTES || {})) {
+      for (const d of (rows || [])) colorAxisTags.add(String(d.tag).trim().toLowerCase());
+    }
+    for (const ref of ['eye_pattern', 'hair_pattern']) {
+      for (const t of ((THUMB_TAGS || {})[ref] || [])) {
+        colorAxisTags.add(String(t).trim().toLowerCase());
+      }
+    }
+    return colorAxisTags;
   }
 
   /** 이 캐릭터에 프리셋이 넣어 둔 태그를 슬롯에서 뺀다. 지워진 것은 조용히 넘어간다. */

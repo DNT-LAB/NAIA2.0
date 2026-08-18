@@ -21373,6 +21373,12 @@ body.detached-module .mod-grid-3 {
 .ia-axsplit .ia-ax-row { flex: 1; min-height: 0; align-items: stretch; }
 .ia-axsplit .ia-cell-wrap { min-height: 0; }
 .ia-axsplit .ia-cell-grid { max-height: none; flex: 1; min-height: 0; }
+/* ⚠️ **판 안의 줄까지 늘리면 안 된다.** 팔레트도 마크업이 `.ia-ax-row` 라 위
+   규칙(`flex: 1` = basis 0)을 그대로 물려받았다. basis 0 은 내용 높이를 무시하므로
+   스와치 줄이 제 상자를 넘쳐 흐르고, 뒤에 오는 그리드가 그 위에 그려진다 -
+   heterochromia 처럼 **추가 색상 팔레트가 뜨는 축에서 카드가 스와치를 덮었다**
+   (사용자 화면 2026-08-18). 남는 높이는 그리드만 먹는다. */
+.ia-axsplit .ia-cell-wrap > .ia-ax-row { flex: 0 0 auto; align-items: flex-start; }
 
 /* ── 팝업 3단 상태 ─────────────────────────────────────────────────────────
    테스터가 두 번 지적한 것: "패널이 이미지를 가리지 않도록 하기로 했는데 여전히
@@ -21412,15 +21418,28 @@ body.detached-module .mod-grid-3 {
 .interactive-mode .ia-panel {
   background: none; border: 0; box-shadow: none; padding: 0;
   gap: 6px;
+  /* ⚠️ **반경도 0 이어야 한다.** 이 틀은 투명한데 `overflow: hidden` + `radius: 12px`
+     를 그대로 물려받고 있었다. 섬들이 틀과 **같은 사각형**을 쓰므로(둘 다 x=494
+     w=484, 실측) 틀의 12px 호가 섬의 8px 모서리를 통째로 잘라냈다 - 사용자가
+     본 "모서리에서 선이 끊긴다" 가 이것이다.
+
+     안티에일리어싱이 아니었다. 디바이스 픽셀 실측(DPR 1.5, 좌상단 12x12):
+       고치기 전  호 자리가 전부 19~21 (배경 19) - **호가 아예 없다**
+       고친 뒤    대각선을 따라 62~63 - 직선과 같은 밝기
+     `overflow: hidden` 은 남긴다 - 그게 섬들의 세로를 잡아 준다(걷어냈더니
+     높이가 2,433px 로 튀었다). */
+  border-radius: 0;
 }
 /* ── 섬의 테두리는 **inset 링**으로 그린다 ────────────────────────────────
-   `border: 1px` 의 계산값이 이 앱에서 **0.667px**(=1/1.5, 실측)다. 직선은 브라우저가
-   1 디바이스 픽셀로 스냅해 멀쩡한데 **모서리 호에서만 안티에일리어싱으로 흐려져**
-   선이 얇아진 것처럼 보인다(사용자 지적 2026-08-17).
+   `border: 1px` 의 계산값이 이 앱에서 **0.667px**(=1/1.5, 실측)라, 두 선이 겹치면
+   오히려 두꺼워 보인다. 그래서 `border` 는 지우고 페인트인 inset 링만 남긴다.
 
-   `box-shadow: inset 0 0 0 1px` 는 레이아웃 박스가 아니라 페인트라 서브픽셀에서도
-   호를 따라 균일하게 그려진다. 반경도 10 -> 8 로 줄여 호를 짧게 만든다.
-   `border` 를 남기면 두 선이 겹쳐 오히려 두꺼워 보이므로 지운다. */
+   ⚠️ **모서리가 끊겨 보인 원인은 여기가 아니었다.** 처음엔 안티에일리어싱으로
+   진단하고 이 링으로 바꿨는데, 사용자가 확대해 보니 그대로였다. 디바이스 픽셀을
+   직접 떠 보니(DPR 1.5) 호 자리가 **배경값 그대로**였다 - 흐린 게 아니라 아예
+   안 그려졌다. 범인은 부모 `.ia-panel` 의 `overflow: hidden` + `radius: 12px`
+   였다(바로 위 규칙에 적었다). **"흐리다" 와 "없다" 는 눈으로 못 가른다 - 픽셀을
+   떠서 봐라.** */
 .interactive-mode .ia-panel .ia-search.ia-search-top {
   margin: 0; padding: 6px; border-radius: 8px;
   background: rgba(18,18,26,0.78); border: 0;

@@ -6915,17 +6915,35 @@ export function createInteractivePanel({
         if (thumbFilter && openThumbAxis) scrollToAxis(axis);
       });
     });
-    // '메인 색상 : [ ]' 클릭 -> 주 색상 팔레트로 스크롤(팝업 본문이 스크롤 컨테이너).
+    // '메인 색상 : [ ]' 클릭 -> 주 색상 팔레트로 데려간다.
+    //
+    // ⚠️ **스크롤만으로는 못 간다.** 예전에는 섹션이 한 판에 죽 쌓여 있어서
+    // `scrollIntoView` 로 닿았는데, 카테고리를 섬/탭으로 가른 뒤로 주 색상 팔레트는
+    // **다른 탭**(값 입력기 판)에 있다. DOM 에 없으니 `row` 가 null 이라 그냥
+    // 돌아왔다 - 버튼이 죽어 있었다(실측: 눌러도 탭·스크롤·팔레트 전부 그대로).
+    // heterochromia 처럼 추가 색상을 쓰는 축에서 주 색상을 정하러 갈 길이 이
+    // 버튼뿐이라, 죽으면 "메인 색상 : 미지정" 을 보고도 손쓸 데가 없다.
+    //
+    // 그래서 없으면 **그 판을 먼저 연다**. 값 입력기(팔레트/슬라이더)는 `#lead`
+    // 하나로 묶여 있으므로 그 키로 연다.
     host.querySelectorAll('[data-goto-main]').forEach(el => {
       el.addEventListener('click', event => {
         event.stopPropagation();
         const ref = el.dataset.gotoMain;
-        const target = host.querySelector(`[data-ax="palette"][data-ref="${ref}"]`);
-        const row = target?.closest('.ia-ax-row');
-        if (!row) return;
-        row.scrollIntoView({behavior: 'smooth', block: 'center'});
-        row.classList.add('is-flash');
-        setTimeout(() => row.classList.remove('is-flash'), 900);
+        const flash = () => {
+          const target = document.querySelector(`[data-ax="palette"][data-ref="${ref}"]`);
+          const row = target?.closest('.ia-ax-row');
+          if (!row) return false;
+          row.scrollIntoView({behavior: 'smooth', block: 'center'});
+          row.classList.add('is-flash');
+          setTimeout(() => row.classList.remove('is-flash'), 900);
+          return true;
+        };
+        if (flash()) return;
+        openThumbAxis = '#lead';
+        refreshAxisSections();
+        // 다시 그린 뒤에 잡아야 한다 - 위 노드는 버려졌다.
+        requestAnimationFrame(() => { flash(); });
       });
     });
     // 스크롤 박스: 위치를 계속 기억해 재렌더(선택 토글) 때 위로 튀지 않게 한다.

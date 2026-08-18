@@ -21109,31 +21109,9 @@ body.detached-module .mod-grid-3 {
    축 이름은 우리 분류지 사용자가 넣을 수 있는 것이 아니라, 읽어도 무엇을 골라야
    하는지 알 수 없었다(사용자 지적). 썸네일은 안 쓴다 — 여기는 '고르는 자리'가
    아니라 '빠진 것을 메우는 자리'라 한 번에 다 보이는 편이 낫다. */
-.ia-aside-need {
-  border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0;
-  background: rgba(255,255,255,0.03); padding: 7px 9px;
-}
-.ia-aside-need + .ia-aside-need { margin-top: 5px; }
-.ia-aside-need.soft { border-left-color: var(--border-glow); }
-.ia-aside-need-btn {
-  display: block; width: 100%; text-align: left; cursor: pointer;
-  font-family: var(--font-mono); font-size: 12px; font-weight: 700;
-  color: var(--text-primary); background: rgba(124,106,239,0.18);
-  border: 1px solid var(--accent); border-radius: 6px; padding: 5px 9px;
-}
-.ia-aside-need-btn:hover { background: rgba(124,106,239,0.34); }
-.ia-aside-need.soft .ia-aside-need-btn {
-  background: rgba(255,255,255,0.05); border-color: var(--border-glow);
-}
-.ia-aside-need.soft .ia-aside-need-btn:hover { background: rgba(255,255,255,0.11); }
-/* 태그를 못 찾은 경우(백엔드가 축만 준 경우)의 폴백 — 누를 수 없다는 걸 보여준다. */
-.ia-aside-need-btn.is-off {
-  color: var(--text-dim); background: none; border-style: dashed; cursor: default;
-}
-.ia-aside-need-why {
-  margin-top: 4px; font-size: 10.5px; line-height: 1.45; color: var(--text-dim);
-}
-.ia-aside-need-why code { font-family: var(--font-mono); color: var(--text-secondary); }
+/* .ia-aside-need* 규칙은 '필요한 것' 카드와 함께 지웠다(2026-08-18).
+   그 카드는 최신 모델에서 불필요한 전제조건을 요구했다 - 자세한 사유는
+   interactivePanel.mjs 의 renderAside 주석에 있다. */
 /* 축 색 지정 줄 — 그리드 '위'에 둔다(팔레트와 같은 이유: 아래면 그리드에 가린다). */
 .ia-axcolor {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

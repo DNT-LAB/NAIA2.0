@@ -4750,16 +4750,8 @@ export function createInteractivePanel({
         void renderAside();
         return;
       }
-      // '필요한 것' 버튼은 한 번에 넣는다. 그리드처럼 살펴보기를 거칠 이유가 없다 —
-      // 답이 하나로 정해져 있고, 오클릭이 잦은 150칸 그리드도 아니다(색 조합과 같다).
-      const nd = ev.target.closest('[data-need-add]');
-      if (nd) {
-        // `fromAside` — 플로트에서 넣은 것은 추천 기준(seed)을 옮기지 않는다.
-        // 기준이 따라 움직이면 목록이 갈려서 방금 넣은 것을 되돌릴 수 없다.
-        toggleTag(nd.getAttribute('data-need-add'), { fromAside: true });
-        refreshAxisSections();     // 그리드의 '선택됨' 표시도 맞춘다
-        return;
-      }
+      // 여기 있던 `[data-need-add]`('필요한 것' 카드의 + 버튼) 처리는 카드를
+      // 없애면서 같이 지웠다(2026-08-18) - 그 속성을 만드는 곳이 없다.
       // 여기 있던 '줄 통째로 넣기'(`[data-combo-row]`)는 지웠다. 카드가 묶음을
       // 줄로 그리던 시절의 것인데 지금은 태그를 하나씩 나열하므로 그 속성을
       // 만드는 곳이 없다 - 절대 안 걸리는 분기였다.
@@ -5446,42 +5438,16 @@ export function createInteractivePanel({
     const items = await fetchAdvice(askTags);
     if (seq !== asideSeq || !panelContext) return;   // 그 사이 슬롯이 바뀌었다
 
-    // 전제조건 — 아직 안 고른 축만 알린다. 이미 골랐으면 안내할 이유가 없다.
-    const chosenAxes = new Set();
-    for (const t of tags) {
-      for (const [ax, list] of Object.entries(THUMB_TAGS)) {
-        if (list.includes(t)) chosenAxes.add(ax);
-      }
-    }
-    // `...r` 를 뒤에 펼치면 r.tag(부모 태그)가 it.tag(고른 태그)를 덮어써서
-    // "skirt lift 가 필요합니다" 대신 "skirt 가 필요합니다" 로 나온다. source 로 분리한다.
-    // **필요한 태그 기준으로 합친다.** 출처별로 나누면 `blazer` + `hooded jacket` 을
-    // 고른 순간 `+ jacket` 이 두 줄로 겹쳐 나온다 — 넣을 것은 하나인데 두 번 권한다.
-    const needMap = new Map();
-    const chosenLower = new Set(tags.map(x => x.toLowerCase()));
-    for (const it of items) {
-      for (const r of (it.requires || [])) {
-        // 판정은 **태그** 로 한다. 축으로만 보면 `blazer`(상의)를 골랐을 때
-        // `military jacket` 이 요구하는 `jacket` 이 충족된 것으로 처리됐다 —
-        // implication 은 문자 그대로라 다른 상의가 대신하지 못한다.
-        // 태그를 모르는 경우(백엔드가 축만 준 경우)에만 예전 축 판정으로 돌아간다.
-        if (r.tag ? chosenLower.has(String(r.tag).toLowerCase())
-                  : chosenAxes.has(r.axis)) continue;
-        // `r.tag` 가 실제로 넣어야 할 태그다(예: military jacket -> jacket).
-        // 예전엔 `r.label`(축 이름 '상의')만 썼는데 그건 우리 분류지 사용자가 넣을
-        // 수 있는 것이 아니다 — 무엇을 골라야 하는지 알 수 없었다.
-        const key = (r.tag || '#' + r.axis).toLowerCase();
-        const cur = needMap.get(key);
-        if (cur) {
-          if (!cur.sources.includes(it.tag)) cur.sources.push(it.tag);
-          cur.strong = cur.strong || !!r.strong;   // 하나라도 필수면 필수다
-          continue;
-        }
-        needMap.set(key, { axis: r.axis, label: r.label, tag: r.tag || '',
-                           strong: !!r.strong, sources: [it.tag] });
-      }
-    }
-    const needs = [...needMap.values()];
+    // ── '필요한 것' 카드는 없앴다(사용자 결정 2026-08-18) ────────────────────
+    //
+    // 전제조건(implication)을 "이것도 넣어야 합니다" 로 안내하던 카드다. 근거는
+    // 사전의 implication 이었는데, **최신 모델에서는 필요 없다**: `energy wings`
+    // 처럼 태그가 이미 그 낱말을 품고 있으면 모델이 알아서 날개를 그린다.
+    // 그런데도 카드는 `+ wings` 를 요구해 사용자를 헷갈리게 했다(사용자 화면:
+    // `multiple wings` 를 골랐는데 "wings 에 필요합니다").
+    //
+    // 백엔드의 `requires` 는 그대로 둔다 - 데이터가 죽은 것이 아니라 **이 화면의
+    // 안내가 낡은 것**이다. 되살리려면 이 자리에서 다시 만들면 된다.
     // 충돌 — 전용 엔드포인트로 묻는다.
     // 태그별 conflict 목록은 화면용으로 12개까지만 잘라 보내므로, 그걸로 교집합을
     // 구하면 잘린 뒤쪽 쌍을 놓친다(실측: china dress + skirt set 이 안 잡혔다).
@@ -5562,26 +5528,7 @@ export function createInteractivePanel({
           `<div class="ia-aside-warn">${escHtml(a)} + ${escHtml(b)}<br>실제 이미지에서 함께 쓰인 적이 없습니다.</div>`).join('') +
         '</div>');
     }
-    if (needs.length) {
-      // 강한 것(없으면 제대로 안 나온다)을 위로. 각 줄은 **누를 수 있는 태그**다.
-      const row = n => {
-        const t = n.tag || n.label;          // tag 가 없으면 축 이름으로라도 알린다
-        const can = !!n.tag;
-        const btn = can
-          ? `<button type="button" class="ia-aside-need-btn" data-need-add="${escHtml(t)}"` +
-            `${adviceTipAttrs(t)}>+ ${escHtml(t)}</button>`
-          : `<span class="ia-aside-need-btn is-off">${escHtml(t)}</span>`;
-        return `<div class="ia-aside-need${n.strong ? '' : ' soft'}">${btn}` +
-          '<div class="ia-aside-need-why">' +
-          n.sources.map(x => `<code>${escHtml(x)}</code>`).join(', ') +
-          `${n.strong ? ' 에 필요합니다' : ' 에 있으면 더 좋습니다'}</div></div>`;
-      };
-      parts.push('<div class="ia-aside-card"><div class="ia-aside-title">필요한 것' +
-        `<span class="ia-aside-count">${needs.length}</span></div>` +
-        needs.filter(n => n.strong).map(row).join('') +
-        needs.filter(n => !n.strong).map(row).join('') +
-        '</div>');
-    }
+    // ('필요한 것' 카드는 위 설명대로 없앴다.)
     // '잘 안 어울립니다'(비권장)는 뺐다 — 초보자에게 하지 말라는 목록은 부담만 주고,
     // 실제로 고를 것을 보여주는 쪽이 값이 크다. 데이터는 그대로 있으니 되살리기 쉽다.
     // ⚠️ **'함께 쓰는 것' 보다 '고빈도 태그' 를 먼저 놓는다.** 전자는 썸네일 격자라

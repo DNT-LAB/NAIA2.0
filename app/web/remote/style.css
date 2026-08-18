@@ -21482,10 +21482,14 @@ body.detached-module .mod-grid-3 {
   background: var(--bg-deep); border: 1px solid var(--border-dim);
   box-shadow: none;
 }
-/* 결과 수(`9,738명`)도 같은 세로선에 맞춘다 - 판 왼쪽 끝에 붙어 있었다. */
-.interactive-mode .ia-cp-panel .ia-cp-count { padding: 0 14px 4px; }
-/* 본문도 `overflow` 를 건드리지 않는다 - 여기가 세로 스크롤을 맡는다. */
-.interactive-mode .ia-panel .ia-panel-body { padding: 0; gap: 6px; }
+/* 결과 수(`9,738명`)는 본문 안에 있다 - 본문이 이미 14px 을 주므로 자기 여백은
+   세로만 준다(둘 다 주면 28px 로 혼자 더 들어가 보인다). */
+.interactive-mode .ia-cp-panel .ia-cp-count { padding: 0 0 4px; }
+/* 본문도 `overflow` 를 건드리지 않는다 - 여기가 세로 스크롤을 맡는다.
+   ⚠️ 프리셋 패널은 뺀다 - 검색줄·결과 수만 14px 안쪽으로 들이고 본문(작품 그룹·
+   결과 목록)은 이 규칙 때문에 가장자리에 붙어, 같은 판 안에서 두 기준선이 생겼다
+   (Codex 리뷰 2026-08-18: "공용 이름 사고가 완전히 제거되지 않았다"). */
+.interactive-mode .ia-panel:not(.ia-cp-panel) .ia-panel-body { padding: 0; gap: 6px; }
 .interactive-mode .ia-axes {
   padding: 0; margin: 0; border-bottom: 0; gap: 6px;
 }
@@ -22335,7 +22339,9 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    썸네일이 있는 캐릭터가 0.4% 뿐이라 그리드가 아니라 목록으로 그린다.
    그림이 없는 줄은 이니셜 타일(.is-none)로 떨어진다. */
 .ia-cp-tabs { margin: 10px 14px 0; }
-.ia-cp-panel .ia-panel-body { gap: 10px; }
+/* 본문도 검색줄과 같은 세로선에 맞춘다(좌우 14px). 위 공용 규칙이 `padding: 0` 을
+   먹여 목록만 가장자리에 붙어 있었다. */
+.ia-cp-panel .ia-panel-body { gap: 10px; padding: 0 14px 10px; }
 
 .ia-cp-groups { display: flex; flex-wrap: wrap; gap: 5px; }
 .ia-cp-group {

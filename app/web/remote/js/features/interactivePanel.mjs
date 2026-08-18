@@ -596,7 +596,7 @@ export function createInteractivePanel({
       characters: state.chars.map((c, i) => ({
         id: c.id,
         label: 'C' + (i + 1),
-        name: c.name,
+        name: charDisplayName(c),   // 슬롯 파생 - 아래 charDisplayName 주석 참고
         state: c.state,
         enabled: c.state === 'active',
         gender: c.gender || 'female',
@@ -927,7 +927,7 @@ export function createInteractivePanel({
     const out = new Set();
     const add = v => { const s = String(v || '').trim().toLowerCase(); if (s) out.add(s); };
     add(c.preset?.name);
-    add(c.name);
+    add(charDisplayName(c));      // 슬롯 파생 - `c.name` 은 갈릴 수 있다
     return out.size ? out : null;
   }
 
@@ -2614,6 +2614,32 @@ export function createInteractivePanel({
     notifyRoster();
   }
 
+  /** 이 캐릭터의 이름. **슬롯에서 파생한다 - 저장하지 않는다.**
+   *
+   *  ⚠️ 예전에는 `c.name` 이라는 별도 필드가 있었고, 그걸 비우는 곳을 하나씩 손으로
+   *  늘려 갔다(프리셋 [x], `setCurrentTags` 의 빈 배열…). 그 방식은 계속 샜다 -
+   *  칩의 `[x]` 삭제는 `setCurrentTags` 를 거치지 않고 배열을 직접 갈아 끼우고,
+   *  이름을 **다른 이름으로 바꾸는** 경우는 "비었을 때만" 규칙에 안 걸린다. 그래서
+   *  Fast 라벨은 슬롯을, roster·내보내기는 옛 `c.name` 을 보는 상태가 됐다
+   *  (Codex 리뷰 2026-08-18). 백엔드 Assets 분류도 그 이름을 다시 보므로
+   *  빈 슬롯이 옛 known character 로 잘못 분류될 수 있었다.
+   *
+   *  읽는 곳을 전부 이 함수로 모은다 - 파생값이면 갈릴 수가 없다. */
+  function charDisplayName(c) {
+    const slot = (c && c.fields && c.fields[CHAR_TAG_SLOT]) || [];
+    if (!slot.length) return '';
+    // 프리셋을 적용했으면 **그 캐릭터**가 이름이다. 슬롯 첫 칸이 아닐 수 있다 -
+    // 사용자가 직접 친 옛 캐릭터 태그를 우리가 지우지 않기 때문이다(그건 의도한
+    // 조합일 수 있어 손대지 않는다). 첫 태그만 보면 `kisaki, gawr gura` 에서
+    // 방금 적용한 gawr gura 를 두고 옛 이름이 뜬다(실측 2026-08-18).
+    const want = String((c.preset && c.preset.name) || '').trim().toLowerCase();
+    if (want) {
+      const hit = slot.find(t => String(t).trim().toLowerCase() === want);
+      if (hit) return String(hit).trim();
+    }
+    return String(slot[0] || '').trim();
+  }
+
   /** 캐릭터 스택(Assets 바 위 세로 버튼)이 읽는 요약. 태그 전체가 아니라
    *  버튼에 그릴 것만 넘긴다 — 스택은 열기 전환용이지 편집용이 아니다. */
   function characterRoster() {
@@ -2629,7 +2655,7 @@ export function createInteractivePanel({
       gender: c.gender || 'female',
       pos: c.pos || POS_DEFAULT,
       positioned: posIds.has(c.id),
-      name: (c.fields?.['캐릭터'] || [])[0] || c.name || '',
+      name: charDisplayName(c),
     }));
   }
 
@@ -4017,6 +4043,11 @@ export function createInteractivePanel({
     //
     // '캐릭터만' 은 손대지 않는다 - 그건 "이름만 바꾸고 나머지는 내가 정한 대로" 다.
     const wipedColor = [];
+    // 걷은 것을 **슬롯째 적어 둔다.** 프리셋 [x]('되돌리기')는 지금까지 "프리셋이
+    // 넣은 것만 뺀다" 였는데, 색 회수가 붙으면서 그 규약만으로는 **사용자가 직접 친
+    // 색이 영영 사라진다**(Codex 리뷰 2026-08-18: 되돌려도 안 돌아온다). 되돌리기가
+    // 진짜 되돌리기가 되려면 걷어낸 것도 함께 기억해야 한다.
+    const wipedBySlot = {};
     if (kind !== 'char') {
       const colorTags = colorAxisTagSet();
       for (const slotKey of Object.keys(character.fields || {})) {
@@ -4024,8 +4055,10 @@ export function createInteractivePanel({
         if (!before.length) continue;
         const keep = [];
         for (const t of before) {
-          if (colorTags.has(String(t).trim().toLowerCase())) wipedColor.push(t);
-          else keep.push(t);
+          if (colorTags.has(String(t).trim().toLowerCase())) {
+            wipedColor.push(t);
+            (wipedBySlot[slotKey] = wipedBySlot[slotKey] || []).push(t);
+          } else keep.push(t);
         }
         if (keep.length !== before.length) character.fields[slotKey] = keep;
       }
@@ -4070,7 +4103,9 @@ export function createInteractivePanel({
       character.fields[slotKey] = kept;
       if (mine.length) owned[slotKey] = mine;
     }
-    character.preset = {work: cardData.work, name: cardData.name, tags: owned};
+    // `wiped` = 이 적용이 **걷어낸 사용자 색**. [x] 가 그대로 되돌려 놓는다.
+    character.preset = {work: cardData.work, name: cardData.name, tags: owned,
+                        wiped: wipedBySlot};
     character.name = cardData.name;
 
     closePresetCard();
@@ -4117,10 +4152,31 @@ export function createInteractivePanel({
     return colorAxisTags;
   }
 
-  /** 이 캐릭터에 프리셋이 넣어 둔 태그를 슬롯에서 뺀다. 지워진 것은 조용히 넘어간다. */
-  function presetRecall(character) {
+  /** 이 캐릭터에 프리셋이 넣어 둔 태그를 슬롯에서 뺀다. 지워진 것은 조용히 넘어간다.
+   *
+   *  `restoreWiped` 를 주면 그 프리셋이 **걷어낸 사용자 색**도 도로 넣는다. 진짜
+   *  '되돌리기'([x])에서만 쓴다 - 다른 캐릭터로 **갈아탈 때**는 부르지 않는다(그때
+   *  옛 색을 되살리면 방금 지운 이유가 없어진다). */
+  function presetRecall(character, {restoreWiped = false} = {}) {
     const prev = (character.preset && character.preset.tags) || null;
-    if (!prev) return 0;
+    const wiped = (restoreWiped && character.preset && character.preset.wiped) || null;
+    // ⚠️ **복구는 회수 뒤에 한다.** 걷어낸 사용자 색과 프리셋이 넣은 색이 **같은
+    // 태그**일 수 있다(사용자가 `blue eyes` 를 쳤는데 새 캐릭터도 blue eyes).
+    // 먼저 복구하면 "이미 있다" 로 건너뛰고, 이어지는 회수가 그걸 지워 결국
+    // 사라진다(실측 2026-08-18: 토스트는 '색 1개 복구' 인데 슬롯은 비었다).
+    const restore = () => {
+      if (!wiped) return;
+      for (const [slotKey, tags] of Object.entries(wiped)) {
+        if (!(tags || []).length) continue;
+        const cur = character.fields[slotKey] || [];
+        const have = new Set(cur.map(t => String(t).toLowerCase()));
+        for (const t of tags) {
+          if (!have.has(String(t).toLowerCase())) cur.push(t);
+        }
+        character.fields[slotKey] = cur;
+      }
+    };
+    if (!prev) { restore(); character.preset = null; return 0; }
     let removed = 0;
     for (const [slotKey, tags] of Object.entries(prev)) {
       const drop = new Set((tags || []).map(t => String(t).toLowerCase()));
@@ -4130,6 +4186,7 @@ export function createInteractivePanel({
         .filter(t => !drop.has(String(t).toLowerCase()));
       removed += before - character.fields[slotKey].length;
     }
+    restore();            // 회수가 끝난 **뒤에** 사용자 색을 되돌린다(위 설명)
     character.preset = null;
     return removed;
   }
@@ -4139,11 +4196,16 @@ export function createInteractivePanel({
     const character = state.chars.find(c => c.id === cid);
     if (!character || !character.preset) return;
     const name = character.preset.name;
-    const removed = presetRecall(character);
+    const backCount = Object.values(character.preset.wiped || {})
+      .reduce((n, v) => n + (v || []).length, 0);
+    // **진짜 되돌리기다** - 이 프리셋이 걷어낸 사용자 색까지 도로 넣는다.
+    const removed = presetRecall(character, {restoreWiped: true});
     if (character.name === name) character.name = '';
     renderBlocks();
     emitChange();
-    showToast(`${name} 프리셋을 되돌렸습니다 (태그 ${removed}개).`);
+    notifyRoster();   // 이름이 바뀌었다 - Assets 스택이 옛 이름을 들고 있으면 안 된다
+    showToast(`${name} 프리셋을 되돌렸습니다 (태그 ${removed}개`
+      + (backCount ? ` · 색 ${backCount}개 복구` : '') + ').');
   }
 
   // ---- 팝업 셸 ----
@@ -7984,7 +8046,8 @@ export function createInteractivePanel({
     const sent = onlySent ? new Set(positionedChars().map(c => c.id)) : null;
     const rows = sent ? state.chars.filter(c => sent.has(c.id)) : state.chars;
     return rows.map(c => ({
-      name: c.name || '',
+      // **파생값이다**(charDisplayName) - 옛 c.name 을 그대로 담으면 슬롯과 갈린다.
+      name: charDisplayName(c),
       state: c.state,
       gender: c.gender || 'female',
       pos: c.pos || POS_DEFAULT,

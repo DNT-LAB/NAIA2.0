@@ -21312,16 +21312,29 @@ body.detached-module .mod-grid-3 {
 .ia-aside-gtag:not(:first-child) {
   margin-left: 4px; padding-left: 7px; border-left: 1px solid var(--border-dim);
 }
+/* **고빈도 카드의 알약 칩이 표준이다**(사용자 지시 2026-08-18: "기존 고빈도의
+   이쁜 칩 스타일로 전파"). 처음엔 반대로 통일해서 - 테두리만 있는 수수한 쪽으로 -
+   전부 밋밋해졌다. 채움이 있는 알약이 훑기에도 낫다: 글자가 아니라 덩어리가 먼저
+   보여서 몇 개인지 한눈에 든다.
+   폰트는 9.5 -> 10px 로 되돌린다(알약 안에서는 9.5 가 눌려 보인다). */
 .ia-aside-chip {
-  /* 폰트를 한 단계 낮춘다(사용자 지정 2026-08-17). 패널을 400px 로 넓히는 대신
-     글자를 줄여 타협한 것이다 - 둘 다 안 하면 태그 이름이 글자 단위로 접힌다. */
-  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-secondary);
-  border: 1px solid var(--border-dim); border-radius: 5px;
-  padding: 3px 7px; cursor: pointer; background: none; text-align: left;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.4;
+  display: inline-flex; align-items: baseline; gap: 5px;
+  padding: 1px 7px; border-radius: 999px; cursor: pointer; text-align: left;
+  color: var(--ia-fg, #e8e8ee);
+  background: rgba(120,140,255,.16);
+  border: 1px solid rgba(120,140,255,.32);
 }
-.ia-aside-chip:hover { color: var(--text-primary); border-color: var(--accent); }
-.ia-aside-chip.on { color: var(--accent-glow); border-color: var(--accent); }
-.ia-aside-chip.bad { color: #ffb4b4; border-color: rgba(255,107,107,0.4); }
+.ia-aside-chip:hover { background: rgba(120,140,255,.34); color: var(--text-primary); }
+/* 이미 고른 것 - 채움을 강조색으로 바꾼다(테두리만 바꾸면 알약에서는 잘 안 보인다). */
+.ia-aside-chip.on {
+  color: var(--accent-glow); background: rgba(124,106,239,.30);
+  border-color: var(--accent);
+}
+.ia-aside-chip.bad {
+  color: #ffb4b4; background: rgba(255,107,107,.14);
+  border-color: rgba(255,107,107,0.4);
+}
 /* 행동 버튼 — 셀에 마우스를 올렸을 때만 뜬다.
    원래는 한 번 눌러 '살펴보기', 두 번째에 실행하는 이중 클릭이었다. 오클릭을 막으려던
    것인데 구조적으로 불편했다(사용자 판단): 무엇을 하든 두 번 눌러야 하고, 캡션이

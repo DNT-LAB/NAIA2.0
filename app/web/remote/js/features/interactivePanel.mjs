@@ -5742,6 +5742,9 @@ export function createInteractivePanel({
     const half = Math.round((floor - top) * 0.5);
     asideMount.style.maxHeight = Math.round(Math.max(80, half)) + 'px';
     if (panelContext && asideMount.innerHTML) asideMount.classList.add('open');
+    // 그림을 패널 **아래로** 내리는 몫은 이 패널의 실측 높이에서 나온다 - 여기서
+    // 크기가 정해졌으니 지금 다시 재야 한다(안 하면 옛 높이로 민다).
+    syncPopupShift();
     // `C1 Fast` 는 **떠 있는 것들의 가장 오른쪽 끝** 기준으로 비켜서므로, 이 패널이
     // 열리거나 닫힐 때마다 다시 재야 한다(안 하면 카드 뒤에 깔린다).
     positionFastFloat();
@@ -6008,6 +6011,7 @@ export function createInteractivePanel({
     if (!viewer) return;
     if (!document.body.classList.contains('ia-popup-shift')) {
       viewer.style.removeProperty('--ia-shift');
+      viewer.style.removeProperty('--ia-shift-top');
       viewer.classList.remove('is-ia-noroom');
       return;
     }
@@ -6030,10 +6034,23 @@ export function createInteractivePanel({
     // 남아 우하단 Scene 머리와 겹치기만 한다(실측: 창 880 · shift 260 -> 17px).
     // 그럴 땐 숨긴다. 팝업을 닫으면 그대로 돌아온다(Codex 11차).
     viewer.classList.toggle('is-ia-noroom', used > 0 && (v.width - used - 12) < 150);
-    // **세로로는 밀지 않는다.** 띠 아래로 내렸더니 이미지 평면이 그만큼 잘려
-    // 정렬이 이상해졌다 — 평면은 팝업 오른쪽 전체를 쓰고, 사전이 그 위쪽을
-    // 덮는 것은 감수한다(사용자 지시 2026-08-07: "그림이 좀 덮여도 됩니다").
-    viewer.style.setProperty('--ia-shift-top', '0px');
+    // **세로로도 민다**(사용자 지시 2026-08-18: "이미지는 사이즈가 작아지더라도
+    // 하단으로 자연스럽게 밀어주는게 좋을듯"). 추천 패널은 밀려난 이미지 자리
+    // **바로 위**에 서므로, 안 밀면 그림이 패널 뒤에 숨는다 - 테스터가 두 번 지적한
+    // 그것이다. 패널이 위 절반만 쓰도록 묶어 뒀으니(positionAside) 아래 절반은
+    // 온전히 그림이다.
+    //
+    // 2026-08-07 에는 반대로 정했었다("평면이 그만큼 잘려 정렬이 이상해졌다").
+    // 그때는 패널이 세로를 다 썼고 반투명이라 뒤가 비쳤다. 지금은 절반 + 불투명
+    // (0.92)이라 안 밀면 통째로 안 보인다.
+    const ab = (asideMount && asideMount.classList.contains('open'))
+      ? asideMount.getBoundingClientRect() : null;
+    // 패널이 그림 자리와 가로로 겹칠 때만 민다 - 겹치지 않으면 내릴 이유가 없다.
+    const overlaps = ab && ab.width > 0 && ab.right > v.left + used && ab.left < v.right;
+    const topShift = overlaps ? Math.max(0, Math.round(ab.bottom - v.top + 8)) : 0;
+    // 바닥까지 밀어 그림을 없애지는 않는다 - 뷰어의 60% 를 넘으면 포기한다.
+    viewer.style.setProperty(
+      '--ia-shift-top', (topShift < v.height * 0.6 ? topShift : 0) + 'px');
   }
 
   /** 팝업·사전이 내려갈 수 있는 **바닥선**.

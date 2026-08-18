@@ -269,16 +269,42 @@ function initNaiaTitleTooltips() {
   const GUIDE_SHOW_DELAY = 700;
   let showTimer = null;
 
+  // 썸네일 툴팁(data-naia-thumb): 그림 + 설명. Interactive 오른쪽 카드가 글자 칩으로
+  // 바뀌면서 "이게 무슨 태그인지" 를 그림으로 볼 길이 없어져 그걸 여기서 갚는다.
+  // 지연을 두는 이유: 칩이 수십 개라 마우스가 스쳐 지나가는 일이 잦고, 즉시 띄우면
+  // 이미지가 연달아 깜빡인다. 글자만 있는 툴팁은 예전처럼 즉시다.
+  const THUMB_SHOW_DELAY = 160;
+
   const showTooltip = target => {
     const guideText = target?.dataset?.naiaGuide || '';
     const text = guideText || target?.dataset?.naiaTitle || '';
-    if (!text) return;
+    const thumb = guideText ? '' : (target?.dataset?.naiaThumb || '');
+    if (!text && !thumb) return;
     const isGuide = !!guideText;
     const open = () => {
       owner = target;
-      // 가이드 툴팁은 줄바꿈(\n 토큰 또는 실제 개행)을 단락으로 렌더 (CSS white-space: pre-line)
-      tooltip.textContent = isGuide ? text.replace(/\\n/g, '\n') : text;
       tooltip.classList.toggle('guide', isGuide);
+      tooltip.classList.toggle('has-thumb', !!thumb);
+      if (thumb) {
+        // **문자열이 아니라 노드로 만든다.** 태그 이름이 그대로 들어오는 자리라
+        // innerHTML 을 쓰면 주입 경로가 된다.
+        tooltip.textContent = '';
+        const img = document.createElement('img');
+        img.className = 'naia-tip-thumb';
+        img.src = thumb;
+        img.alt = '';
+        img.decoding = 'async';
+        // 그림이 도착하면 크기가 바뀐다 - 그때 다시 앉힌다(안 하면 화면 밖으로 샌다).
+        img.addEventListener('load', () => { if (owner === target) positionTooltip(target); });
+        img.addEventListener('error', () => { img.remove(); if (owner === target) positionTooltip(target); });
+        const cap = document.createElement('div');
+        cap.className = 'naia-tip-text';
+        cap.textContent = text;
+        tooltip.append(img, cap);
+      } else {
+        // 가이드 툴팁은 줄바꿈(\n 토큰 또는 실제 개행)을 단락으로 렌더 (CSS white-space: pre-line)
+        tooltip.textContent = isGuide ? text.replace(/\\n/g, '\n') : text;
+      }
       tooltip.classList.add('open');
       requestAnimationFrame(() => {
         if (owner === target) positionTooltip(target);
@@ -289,6 +315,8 @@ function initNaiaTitleTooltips() {
     const isGuideButton = !!(target.classList && target.classList.contains('header-guide-btn'));
     if (isGuide && !isGuideButton) {
       showTimer = setTimeout(open, GUIDE_SHOW_DELAY);
+    } else if (thumb) {
+      showTimer = setTimeout(open, THUMB_SHOW_DELAY);
     } else {
       open();
     }
@@ -316,19 +344,19 @@ function initNaiaTitleTooltips() {
   }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['title']});
 
   document.addEventListener('pointerover', event => {
-    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide]');
+    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');
     if (target) showTooltip(target);
   });
   document.addEventListener('pointerout', event => {
-    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide]');
+    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');
     if (target && !target.contains(event.relatedTarget)) hideTooltip(target);
   });
   document.addEventListener('focusin', event => {
-    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide]');
+    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');
     if (target) showTooltip(target);
   });
   document.addEventListener('focusout', event => {
-    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide]');
+    const target = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');
     if (target) hideTooltip(target);
   });
   window.addEventListener('resize', () => hideTooltip());

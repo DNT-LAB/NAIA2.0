@@ -4812,6 +4812,31 @@ export function createInteractivePanel({
    *  에서 본다 - 오른쪽 패널의 일은 **이름을 빨리 훑는 것**이다.
    *
    *  `data-advice-add` 는 유지한다 - 클릭 처리(넣기/살펴보기)가 그걸로 걸린다. */
+  /** 칩 하나의 툴팁 속성. **글자 칩은 그림을 잃었으므로 툴팁이 그걸 갚는다.**
+   *
+   *  오른쪽 카드에서 썸네일을 걷어내 세로를 절반으로 줄였는데(2026-08-17), 그
+   *  대가로 "이게 무슨 태그인지" 를 그림으로 확인할 길이 사라졌다. 그래서 칩에
+   *  마우스를 올리면 **그림 + 설명**이 뜬다(사용자 결정 2026-08-18).
+   *
+   *  `data-naia-thumb` 는 app.js 의 공용 툴팁이 읽는다 - 그쪽은 URL 만 받고
+   *  <img> 를 그린다. URL 조립(축 -> 팩 축 -> 쿼리)은 여기서만 안다.
+   *  그림이 없는 태그(뱅크에서 온 고빈도 태그 대부분)는 속성이 안 붙어 예전처럼
+   *  글자 툴팁만 뜬다. */
+  const tipThumbCache = new Map();
+  function tipAttrs(tag, tipText) {
+    const t = String(tag);
+    const tip = tipText || tagTip(t);
+    // `thumbSrcOf` 는 전 축을 훑는다(12,149 태그). 카드 하나에 칩이 40개 넘게
+    // 들어가고 편집마다 다시 그리므로 결과를 기억한다.
+    let src = tipThumbCache.get(t);
+    if (src === undefined) {
+      src = thumbSrcOf(t) || '';
+      tipThumbCache.set(t, src);
+    }
+    return ` data-naia-title="${escHtml(tip)}" aria-label="${escHtml(tip)}"`
+      + (src ? ` data-naia-thumb="${escHtml(src)}"` : '');
+  }
+
   function textChipsHtml(list, cls) {
     const items = (list || []).map(x => (typeof x === 'string' ? { tag: x } : x))
       .filter(x => x && x.tag);
@@ -4825,8 +4850,7 @@ export function createInteractivePanel({
       const meta = (x.p != null) ? `<span class="ia-combo-p">${Math.round(x.p * 100)}%</span>` : '';
       const mark = cur.has(t.toLowerCase()) ? ' on' : (cls ? ' ' + cls : '');
       return `<button type="button" class="ia-aside-chip${mark}"`
-        + ` data-advice-add="${escHtml(t)}" data-naia-title="${escHtml(tip)}"`
-        + ` aria-label="${escHtml(tip)}">${escHtml(t)}${meta}</button>`;
+        + ` data-advice-add="${escHtml(t)}"${tipAttrs(t, tip)}>${escHtml(t)}${meta}</button>`;
     }).join('')}</div>`;
   }
 
@@ -4997,8 +5021,10 @@ export function createInteractivePanel({
     if (!list.length) return '';
     return '<div class="ia-combo-flat">' + list.map(x => {
       const p = Math.round((x.p || 0) * 100);
+      // `title` 이 아니라 `tipAttrs` 다 - 그림이 있으면 툴팁이 썸네일까지 낸다.
+      // (`title` 도 공용 툴팁이 흡수하지만 그건 글자뿐이다.)
       return `<button type="button" class="ia-combo-tag" data-advice-add="${escHtml(x.tag)}"`
-        + ` title="${escHtml(tagTip(x.tag))}">${escHtml(x.tag)}`
+        + `${tipAttrs(x.tag)}>${escHtml(x.tag)}`
         + `<span class="ia-combo-p">${p}%</span></button>`;
     }).join('') + '</div>';
   }
@@ -5319,8 +5345,7 @@ export function createInteractivePanel({
       const on = cur.has(String(t).toLowerCase());
       const tip = `${tagTip(t)}${label ? ` · ${label}` : ''}`;
       return `<button type="button" class="ia-aside-chip ia-hit${on ? ' on' : ''}"`
-        + ` data-advice-add="${escHtml(t)}" data-naia-title="${escHtml(tip)}"`
-        + ` aria-label="${escHtml(tip)}">${escHtml(t)}</button>`;
+        + ` data-advice-add="${escHtml(t)}"${tipAttrs(t, tip)}>${escHtml(t)}</button>`;
     };
     // **축별로 나누지 않는다.** 처음엔 `.ia-aside-group` 으로 축마다 머리말을
     // 붙였는데, 축 하나에 결과가 한 개뿐인 경우가 흔해서 칩 6개가 **465px** 를
@@ -5506,7 +5531,7 @@ export function createInteractivePanel({
         const can = !!n.tag;
         const btn = can
           ? `<button type="button" class="ia-aside-need-btn" data-need-add="${escHtml(t)}"` +
-            ` title="${escHtml(tagTip(t))}">+ ${escHtml(t)}</button>`
+            `${tipAttrs(t)}>+ ${escHtml(t)}</button>`
           : `<span class="ia-aside-need-btn is-off">${escHtml(t)}</span>`;
         return `<div class="ia-aside-need${n.strong ? '' : ' soft'}">${btn}` +
           '<div class="ia-aside-need-why">' +

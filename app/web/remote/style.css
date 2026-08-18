@@ -10293,6 +10293,22 @@ body.resizing-result-info {
 .naia-title-tooltip.open {
   display: block;
 }
+/* 썸네일 툴팁 — 글자 칩이 잃은 그림을 여기서 갚는다(Interactive 오른쪽 카드).
+   폭을 고정하는 이유: 태그 이름 길이에 따라 상자가 들쭉날쭉하면 연달아 훑을 때
+   그림 위치가 매번 튄다. 그림이 늦게 와도 자리는 미리 잡혀 있다(aspect-ratio). */
+.naia-title-tooltip.has-thumb {
+  width: 172px; max-width: 172px; padding: 6px;
+  background: rgba(12,12,20,0.985);
+}
+.naia-title-tooltip .naia-tip-thumb {
+  display: block; width: 100%; aspect-ratio: 1 / 1;
+  object-fit: cover; border-radius: 5px;
+  background: rgba(255,255,255,0.05);
+}
+.naia-title-tooltip .naia-tip-text {
+  margin-top: 6px; font-size: 10px; line-height: 1.35;
+  word-break: break-word;
+}
 /* 가이드 툴팁: 남색 배경, 밝은 흰색 폰트, 둥근 모서리, 읽기 좋은 본문 폰트 */
 .naia-title-tooltip.guide {
   max-width: min(340px, calc(100vw - 16px));
@@ -21052,7 +21068,12 @@ body.detached-module .mod-grid-3 {
    GPU 를 점유하는 문제를 겪었고 anims-paused 로 막아 뒀다). 단순 알파는 컴포지터
    블렌드 한 번이라 사실상 공짜다 — 프레임이 흔들릴 이유가 없다. */
 .ia-aside-card {
-  background: rgba(18, 18, 26, 0.62); border: 1px solid var(--border-glow);
+  /* 0.62 -> 0.92. **읽는 것이 먼저다**(사용자 지시 2026-08-18). 뒤가 비치는 것은
+     "패널이 그림을 덜 가린다" 는 인상을 주지만, 실제로는 그림의 밝은 부분 위에서
+     글자 대비가 무너져 태그를 못 읽는다(사용자 화면: 인물 얼굴 위의 칩들).
+     완전 불투명으로는 안 간다 - 뒤에 무엇이 있는지는 여전히 보여야 자리를 옮길
+     판단이 선다. */
+  background: rgba(18, 18, 26, 0.92); border: 1px solid var(--border-glow);
   border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   padding: 11px 12px 12px; pointer-events: auto;
   display: flex; flex-direction: column; gap: 8px; overflow: hidden;
@@ -21442,7 +21463,7 @@ body.detached-module .mod-grid-3 {
    떠서 봐라.** */
 .interactive-mode .ia-panel .ia-search.ia-search-top {
   margin: 0; padding: 6px; border-radius: 8px;
-  background: rgba(18,18,26,0.78); border: 0;
+  background: rgba(18,18,26,0.92); border: 0;
   box-shadow: inset 0 0 0 1px var(--border-glow), 0 6px 24px rgba(0,0,0,0.45);
 }
 /* 본문도 `overflow` 를 건드리지 않는다 - 여기가 세로 스크롤을 맡는다. */
@@ -21452,13 +21473,13 @@ body.detached-module .mod-grid-3 {
 }
 .interactive-mode .ia-axsplit > .ia-axtabs {
   padding: 6px; border-radius: 8px; border: 0;
-  background: rgba(18,18,26,0.78);
+  background: rgba(18,18,26,0.92);
   box-shadow: inset 0 0 0 1px var(--border-glow), 0 6px 24px rgba(0,0,0,0.45);
 }
 /* 섬 B — 고른 카테고리의 내용. 접힌 상태에서는 아예 없다(위 `is-idle` 규칙). */
 .interactive-mode .ia-axpanes {
   padding: 6px; border-radius: 8px; border: 0;
-  background: rgba(18,18,26,0.82);
+  background: rgba(18,18,26,0.92);
   box-shadow: inset 0 0 0 1px var(--border-glow), 0 6px 24px rgba(0,0,0,0.45);
 }
 /* 섬 안쪽의 격자 상자도 같은 이유로 링으로 바꾼다 - 섬 테두리와 나란히 놓여

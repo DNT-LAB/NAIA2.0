@@ -2183,10 +2183,15 @@ export function createInteractivePanel({
     return fastMount;
   }
 
-  /** 라벨 한 줄. 이름이 있으면 이름, 없으면 특징 앞부분. */
+  /** 라벨 한 줄. 이름이 있으면 이름, 없으면 특징 앞부분.
+   *
+   *  ⚠️ **이름의 출처는 캐릭터 슬롯이다.** 예전엔 `c.name` 만 봤는데 그건 프리셋을
+   *  적용할 때만 세워지는 값이라, 슬롯을 비워도 남아 **빈 슬롯에 옛 이름**이 떴다
+   *  (사용자 제보 2026-08-18). 슬롯을 먼저 보고, 슬롯이 비었으면 이름도 없는 것이다.
+   *  내보내기 쪽도 같은 순서를 쓴다(`(c.fields['캐릭터'] || [])[0] || c.name`). */
   function fastLabel(c, index) {
     const tag = 'C' + (index + 1);
-    const name = String(c.name || '').trim();
+    const name = String((c.fields?.[CHAR_TAG_SLOT] || [])[0] || '').trim();
     if (name) return `${tag} · ${name}`;
     const hint = buildCharPrompt(c).split(',')[0].trim();
     return hint ? `${tag} · ${hint}` : tag;
@@ -4278,7 +4283,15 @@ export function createInteractivePanel({
     } else {
       const c = state.chars.find(x => x.id === panelContext.cid);
       if (c && panelContext.neg) { negOf(c, panelContext.sub); c.neg[panelContext.sub] = tags; }
-      else if (c) c.fields[panelContext.sub] = tags;
+      else if (c) {
+        c.fields[panelContext.sub] = tags;
+        // ⚠️ **이름은 캐릭터 슬롯을 따라간다.** `c.name` 은 프리셋을 적용할 때만
+        // 세워지고 슬롯 편집과는 따로 놀았다 - 슬롯의 칩을 지워도 남아서, 빈
+        // 슬롯인데 오른쪽 Fast 상자에는 옛 이름이 떴다(사용자 제보 2026-08-18:
+        // "비어있는 경우 이전 캐릭터이름 출력"). 슬롯을 비우면 이름도 비운다.
+        // 프리셋 꼬리표(`c.preset`)는 남긴다 - 되돌리기([x])가 그걸 본다.
+        if (panelContext.sub === CHAR_TAG_SLOT && !tags.length) c.name = '';
+      }
     }
     // 편집 슬롯은 textarea 가 진실의 원천이다. 브라우저/자동완성 픽(fromInput 아님)은
     // textarea 값을 갱신하지만, 사용자가 직접 타이핑한 경우(fromInput)는 건드리지 않는다

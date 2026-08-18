@@ -21467,11 +21467,23 @@ body.detached-module .mod-grid-3 {
    안 그려졌다. 범인은 부모 `.ia-panel` 의 `overflow: hidden` + `radius: 12px`
    였다(바로 위 규칙에 적었다). **"흐리다" 와 "없다" 는 눈으로 못 가른다 - 픽셀을
    떠서 봐라.** */
-.interactive-mode .ia-panel .ia-search.ia-search-top {
+/* ⚠️ **캐릭터 프리셋 패널은 뺀다**(`:not(.ia-cp-panel)`). 그 패널도 `.ia-panel` 을
+   입고 검색줄에 같은 클래스를 쓰는데, 거기는 섬이 아니라 **불투명 판 안**이다.
+   빼지 않았더니 판 안에 둥근 모서리 + 링 + 그림자를 두른 띠가 가장자리까지 꽉 차게
+   박혀 상단이 어색했다(사용자 지적 2026-08-18). */
+.interactive-mode .ia-panel:not(.ia-cp-panel) .ia-search.ia-search-top {
   margin: 0; padding: 6px; border-radius: 8px;
   background: rgba(18,18,26,0.92); border: 0;
   box-shadow: inset 0 0 0 1px var(--border-glow), 0 6px 24px rgba(0,0,0,0.45);
 }
+/* 프리셋 패널의 검색줄은 판 안의 한 줄이다 - 좌우 여백을 주고 테두리만 남긴다. */
+.interactive-mode .ia-cp-panel .ia-search.ia-search-top {
+  margin: 0 14px 10px; padding: 5px 8px; border-radius: 7px;
+  background: var(--bg-deep); border: 1px solid var(--border-dim);
+  box-shadow: none;
+}
+/* 결과 수(`9,738명`)도 같은 세로선에 맞춘다 - 판 왼쪽 끝에 붙어 있었다. */
+.interactive-mode .ia-cp-panel .ia-cp-count { padding: 0 14px 4px; }
 /* 본문도 `overflow` 를 건드리지 않는다 - 여기가 세로 스크롤을 맡는다. */
 .interactive-mode .ia-panel .ia-panel-body { padding: 0; gap: 6px; }
 .interactive-mode .ia-axes {

@@ -286,6 +286,18 @@ function initNaiaTitleTooltips() {
   // 기존 터스(terse)한 title 흡수 툴팁(data-naia-title)은 그대로 즉시 표시.
   const GUIDE_SHOW_DELAY = 700;
   let showTimer = null;
+  // 지연 표시를 기다리는 대상. **`owner` 로는 이걸 못 잡는다** - `owner` 는 타이머가
+  // 실제로 열릴 때에야 세워지므로, 그 전에 재렌더로 노드가 사라지면 아래
+  // MutationObserver 의 `owner && !owner.isConnected` 검사가 null 을 보고 지나친다.
+  // 그러면 끊어진 노드 기준으로 툴팁이 열려 화면 구석에 유령이 남는다
+  // (Codex 리뷰 2026-08-18). 인터랙티브 칩은 편집마다 통째로 다시 그려진다.
+  let pendingTarget = null;
+
+  const cancelPending = () => {
+    clearTimeout(showTimer);
+    showTimer = null;
+    pendingTarget = null;
+  };
 
   // 썸네일 툴팁(data-naia-thumb): 그림 + 설명. Interactive 오른쪽 카드가 글자 칩으로
   // 바뀌면서 "이게 무슨 태그인지" 를 그림으로 볼 길이 없어져 그걸 여기서 갚는다.
@@ -300,6 +312,9 @@ function initNaiaTitleTooltips() {
     if (!text && !thumb) return;
     const isGuide = !!guideText;
     const open = () => {
+      pendingTarget = null;
+      // 지연 사이에 재렌더로 사라진 노드면 열지 않는다(위 `pendingTarget` 설명).
+      if (!target.isConnected) return;
       owner = target;
       tooltip.classList.toggle('guide', isGuide);
       tooltip.classList.toggle('has-thumb', !!thumb);
@@ -328,13 +343,13 @@ function initNaiaTitleTooltips() {
         if (owner === target) positionTooltip(target);
       });
     };
-    clearTimeout(showTimer);
+    cancelPending();
     // 명시적 [ⓘ 가이드] 버튼은 즉시 표시(의도적으로 올린 것). 기능 컨트롤의 가이드는 700ms 지연.
     const isGuideButton = !!(target.classList && target.classList.contains('header-guide-btn'));
-    if (isGuide && !isGuideButton) {
-      showTimer = setTimeout(open, GUIDE_SHOW_DELAY);
-    } else if (thumb) {
-      showTimer = setTimeout(open, THUMB_SHOW_DELAY);
+    const delay = (isGuide && !isGuideButton) ? GUIDE_SHOW_DELAY : (thumb ? THUMB_SHOW_DELAY : 0);
+    if (delay) {
+      pendingTarget = target;
+      showTimer = setTimeout(open, delay);
     } else {
       open();
     }
@@ -342,7 +357,7 @@ function initNaiaTitleTooltips() {
 
   const hideTooltip = target => {
     if (target && owner && target !== owner) return;
-    clearTimeout(showTimer);
+    cancelPending();
     owner = null;
     tooltip.classList.remove('open');
   };
@@ -359,6 +374,9 @@ function initNaiaTitleTooltips() {
     // hover 중이던 owner 가 재렌더로 DOM 에서 사라지면 pointerout 이 오지 않아 툴팁이 남는다
     // (인터랙티브 칩은 편집마다 재렌더됨). 고아 툴팁을 닫는다.
     if (owner && !owner.isConnected) hideTooltip();
+    // **아직 안 열린 것도 취소한다.** 지연 중에 사라진 노드는 `owner` 가 아니라
+    // `pendingTarget` 이라 위 검사에 안 걸린다(Codex 리뷰 2026-08-18).
+    if (pendingTarget && !pendingTarget.isConnected) cancelPending();
   }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['title']});
 
   document.addEventListener('pointerover', event => {

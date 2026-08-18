@@ -4826,16 +4826,27 @@ export function createInteractivePanel({
    *  <img> 를 그린다. URL 조립(축 -> 팩 축 -> 쿼리)은 여기서만 안다.
    *  그림이 없는 태그(뱅크에서 온 고빈도 태그 대부분)는 속성이 안 붙어 예전처럼
    *  글자 툴팁만 뜬다. */
+  // ⚠️ **이름을 `tipAttrs` 로 지으면 안 된다.** 이 모듈에는 이미 같은 이름의 함수가
+  // 있고(`:626`, 슬롯 칩 전용 `.ia-tip` 툴팁의 data-tipkey/출처/우클릭 안내를 만든다),
+  // 같은 스코프의 함수 선언은 **뒤에 온 것이 앞을 덮는다.** 실제로 그렇게 덮어써서
+  // 슬롯 칩 툴팁이 통째로 죽었다(Codex 리뷰 2026-08-18). 조언 패널 전용임을 이름에
+  // 박아 둔다.
   const tipThumbCache = new Map();
-  function tipAttrs(tag, tipText) {
+  function adviceTipAttrs(tag, tipText) {
     const t = String(tag);
     const tip = tipText || tagTip(t);
     // `thumbSrcOf` 는 전 축을 훑는다(12,149 태그). 카드 하나에 칩이 40개 넘게
     // 들어가고 편집마다 다시 그리므로 결과를 기억한다.
+    //
+    // ⚠️ **팩 인덱스가 오기 전의 "없음" 은 기억하면 안 된다.** `thumbSrcOf` 는
+    // `thumbHave` 를 보는데 그건 비동기로 채워진다(`loadThumbIndex`). 팝업은
+    // 인덱스를 기다리지 않고 바로 그리므로, 초기 렌더에서 전부 '' 로 캐시되면
+    // 인덱스가 도착해도 그 페이지 수명 내내 썸네일이 안 뜬다(Codex 리뷰
+    // 2026-08-18). 인덱스가 아직이면 캐시에 넣지 않는다.
     let src = tipThumbCache.get(t);
     if (src === undefined) {
       src = thumbSrcOf(t) || '';
-      tipThumbCache.set(t, src);
+      if (src || thumbIndexReady) tipThumbCache.set(t, src);
     }
     return ` data-naia-title="${escHtml(tip)}" aria-label="${escHtml(tip)}"`
       + (src ? ` data-naia-thumb="${escHtml(src)}"` : '');
@@ -4859,7 +4870,7 @@ export function createInteractivePanel({
       const meta = (x.p != null) ? `<span class="ia-combo-p">${Math.round(x.p * 100)}%</span>` : '';
       const mark = cur.has(t.toLowerCase()) ? ' on' : (cls ? ' ' + cls : '');
       return `<button type="button" class="ia-aside-chip${mark}"`
-        + ` data-advice-add="${escHtml(t)}"${tipAttrs(t, tip)}>${escHtml(t)}${meta}</button>`;
+        + ` data-advice-add="${escHtml(t)}"${adviceTipAttrs(t, tip)}>${escHtml(t)}${meta}</button>`;
     }).join('')}</div>`;
   }
 
@@ -5033,7 +5044,7 @@ export function createInteractivePanel({
       // `title` 이 아니라 `tipAttrs` 다 - 그림이 있으면 툴팁이 썸네일까지 낸다.
       // (`title` 도 공용 툴팁이 흡수하지만 그건 글자뿐이다.)
       return `<button type="button" class="ia-combo-tag" data-advice-add="${escHtml(x.tag)}"`
-        + `${tipAttrs(x.tag)}>${escHtml(x.tag)}`
+        + `${adviceTipAttrs(x.tag)}>${escHtml(x.tag)}`
         + `<span class="ia-combo-p">${p}%</span></button>`;
     }).join('') + '</div>';
   }
@@ -5354,7 +5365,7 @@ export function createInteractivePanel({
       const on = cur.has(String(t).toLowerCase());
       const tip = `${tagTip(t)}${label ? ` · ${label}` : ''}`;
       return `<button type="button" class="ia-aside-chip ia-hit${on ? ' on' : ''}"`
-        + ` data-advice-add="${escHtml(t)}"${tipAttrs(t, tip)}>${escHtml(t)}</button>`;
+        + ` data-advice-add="${escHtml(t)}"${adviceTipAttrs(t, tip)}>${escHtml(t)}</button>`;
     };
     // **축별로 나누지 않는다.** 처음엔 `.ia-aside-group` 으로 축마다 머리말을
     // 붙였는데, 축 하나에 결과가 한 개뿐인 경우가 흔해서 칩 6개가 **465px** 를
@@ -5540,7 +5551,7 @@ export function createInteractivePanel({
         const can = !!n.tag;
         const btn = can
           ? `<button type="button" class="ia-aside-need-btn" data-need-add="${escHtml(t)}"` +
-            `${tipAttrs(t)}>+ ${escHtml(t)}</button>`
+            `${adviceTipAttrs(t)}>+ ${escHtml(t)}</button>`
           : `<span class="ia-aside-need-btn is-off">${escHtml(t)}</span>`;
         return `<div class="ia-aside-need${n.strong ? '' : ' soft'}">${btn}` +
           '<div class="ia-aside-need-why">' +
@@ -6202,6 +6213,9 @@ export function createInteractivePanel({
 
   /** 팩 인덱스를 한 번 받아, 이미지가 있는 태그만 <img> 로 그린다(없으면 텍스트 셀). */
   let thumbIndexInFlight = null;
+  /** 인덱스가 도착했는가. **"이미지 없음" 판정을 기억해도 되는 시점**을 가른다 -
+   *  도착 전의 '없음' 은 아직 모른다는 뜻이지 없다는 뜻이 아니다. */
+  let thumbIndexReady = false;
 
   async function loadThumbIndex() {
     if (thumbHave.size) return;
@@ -6217,7 +6231,15 @@ export function createInteractivePanel({
       }
     } catch (_) { /* 팩이 없으면 전부 텍스트 셀 */ }
     })();
-    try { await thumbIndexInFlight; } finally { thumbIndexInFlight = null; }
+    try {
+      await thumbIndexInFlight;
+    } finally {
+      thumbIndexInFlight = null;
+      // 인덱스가 왔으니 이제부터의 '없음' 은 진짜 없음이다. 그 전에 '' 로 굳었을
+      // 수 있는 판정은 버린다(빈 값만 버리면 되지만 맵이 작아 통째로 비운다).
+      thumbIndexReady = true;
+      tipThumbCache.clear();
+    }
   }
 
   /** 표시 축 -> 팩 축. 얼굴은 생성이 face.txt 한 파일이라 표시 그룹이 달라도 이미지는 face/* 다. */

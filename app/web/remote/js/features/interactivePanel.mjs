@@ -4725,6 +4725,10 @@ export function createInteractivePanel({
     if (asideMount && document.body.contains(asideMount)) return asideMount;
     asideMount = document.createElement('div');
     asideMount.className = 'ia-aside';
+    // 썸네일 툴팁은 **이 패널 바깥**에 선다. 칩 옆에 붙이면 172px 상자가 같은
+    // 패널의 다른 칩들을 덮어서, 방금 훑던 목록이 사라진다(그걸 피하려고 옆으로
+    // 옮긴 것이다). app.js 의 공용 툴팁이 이 표시를 보고 기준을 잡는다.
+    asideMount.dataset.naiaTipAnchor = '1';
     document.body.appendChild(asideMount);
     asideMount.addEventListener('mousedown', keepEditingFocus);   // 왼쪽 팝업과 동일
     // 한 번 누르면 '살펴보기'(강조만), 한 번 더 누르면 적용한다.
@@ -4846,7 +4850,12 @@ export function createInteractivePanel({
     const cur = new Set(currentTags().map(x => String(x).toLowerCase()));
     return `<div class="ia-aside-chips">${items.map(x => {
       const t = String(x.tag);
-      const tip = x.desc ? `${t} · ${x.desc}` : t;
+      // ⚠️ **설명이 없으면 사전으로 내려간다.** 예전엔 `x.desc` 가 없으면 태그
+      // 이름만 남겼는데, 조언 API 는 desc 를 거의 안 실어 보낸다 - 그래서 이 카드의
+      // 툴팁은 태그 이름만 되풀이했다(썸네일 툴팁을 붙이고 나서야 드러났다:
+      // `horns` 는 설명이 뜨는데 `tassel` 은 안 떴다. 전자는 고빈도 카드라
+      // `tagTip` 을 쓰고 후자는 여기라서). TAG_DESC 에는 둘 다 있다.
+      const tip = x.desc ? `${t} · ${x.desc}` : tagTip(t);
       const meta = (x.p != null) ? `<span class="ia-combo-p">${Math.round(x.p * 100)}%</span>` : '';
       const mark = cur.has(t.toLowerCase()) ? ' on' : (cls ? ' ' + cls : '');
       return `<button type="button" class="ia-aside-chip${mark}"`

@@ -255,11 +255,29 @@ function initNaiaTitleTooltips() {
     const gap = 8;
     const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
     const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-    let left = rect.left + (rect.width - tipRect.width) / 2;
-    left = Math.max(gap, Math.min(left, viewportWidth - tipRect.width - gap));
-    let top = rect.bottom + gap;
-    if (top + tipRect.height > viewportHeight - gap) top = rect.top - tipRect.height - gap;
-    top = Math.max(gap, Math.min(top, viewportHeight - tipRect.height - gap));
+    let left;
+    let top;
+    if (tooltip.classList.contains('has-thumb')) {
+      // **썸네일 툴팁은 옆으로 선다**(사용자 지시 2026-08-18). 아래로 깔면 172x205
+      // 짜리 상자가 바로 밑의 칩 두세 줄을 덮어서, 방금 훑던 목록이 사라진다.
+      //
+      // 기준은 칩이 아니라 **칩이 든 패널**이다(`data-naia-tip-anchor`). 칩 옆에
+      // 붙이면 같은 패널의 오른쪽 칩들을 덮어 문제가 그대로 남는다 - 패널을 통째로
+      // 비켜서야 목록이 살아 있다. 표시가 없으면 예전처럼 칩 기준이다.
+      const anchor = target.closest('[data-naia-tip-anchor]') || target;
+      const aRect = anchor.getBoundingClientRect();
+      left = aRect.right + gap;
+      if (left + tipRect.width > viewportWidth - gap) left = aRect.left - tipRect.width - gap;
+      left = Math.max(gap, Math.min(left, viewportWidth - tipRect.width - gap));
+      top = rect.top + (rect.height - tipRect.height) / 2;   // 칩 높이의 가운데
+      top = Math.max(gap, Math.min(top, viewportHeight - tipRect.height - gap));
+    } else {
+      left = rect.left + (rect.width - tipRect.width) / 2;
+      left = Math.max(gap, Math.min(left, viewportWidth - tipRect.width - gap));
+      top = rect.bottom + gap;
+      if (top + tipRect.height > viewportHeight - gap) top = rect.top - tipRect.height - gap;
+      top = Math.max(gap, Math.min(top, viewportHeight - tipRect.height - gap));
+    }
     tooltip.style.left = `${Math.round(left)}px`;
     tooltip.style.top = `${Math.round(top)}px`;
   };

@@ -1516,7 +1516,11 @@ export function createInteractivePanel({
   // 정한다 - 테두리 상자가 아니다.
   const GRID_OVERHEAD = 134;
   // 열 상한. 더 늘리면 눈이 가로로 멀리 이동해 훑기가 오히려 느려진다.
-  const GRID_COLS_MAX = 7;
+  // **`PANEL_W_MAX` 와 같은 곳을 가리켜야 한다** - 7 이면 926 에서 멈추는데 폭
+  // 상한은 1040 이라, 그림이 없어 자리가 남을 때 114px 이 아무도 안 쓰는 띠로
+  // 남았다(사용자가 붉게 표시한 구역의 잔여분). 1040 = 134 + 8x108 + 7x6 이므로
+  // 8 이 두 한계가 만나는 값이다.
+  const GRID_COLS_MAX = 8;
   // 카테고리를 고르기 전(그리드를 안 그릴 때)의 폭. 카테고리 열(96) + 검색창만
   // 담는 좁은 띠다. 484 -> 168 이면 결과 영역에서 316px 를 돌려준다.
   //
@@ -1590,6 +1594,7 @@ export function createInteractivePanel({
     sceneRailWatch = new ResizeObserver(() => positionSceneFloat());
     sceneRailWatch.observe(rail);
     watchInfoPanel();
+    watchViewerShot();
   }
 
   // 하단 씬 태그 판은 사용자가 끌어 높이를 바꾸고, Interactive 에서는 씬 태그
@@ -1608,6 +1613,50 @@ export function createInteractivePanel({
       positionZoom();
     });
     infoPanelWatch.observe(info);
+  }
+
+  /** 뷰어에 **실제로 그려진 그림**이 있는가.
+   *
+   *  `src` 유무로 보면 안 된다 — 비운 뒤에도 빈 문자열 속성이 남고, 로드에 실패한
+   *  것도 `src` 는 갖고 있다. 그려진 픽셀(`naturalWidth`)과 실제 상자를 본다. */
+  function viewerHasShot() {
+    const img = document.querySelector('#resultViewer > img');
+    if (!img || !img.naturalWidth) return false;
+    const r = img.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }
+
+  // 그림 몫 예약을 **조건부**로 바꾼 대가로, 그림이 오가는 순간을 직접 지켜봐야
+  // 한다. 안 걸면 그림이 도착해도 팝업이 그 자리를 계속 물고 앉아 그림을 가린다.
+  let shotWatch = null;
+  function watchViewerShot() {
+    if (shotWatch || typeof MutationObserver === 'undefined') return;
+    const img = document.querySelector('#resultViewer > img');
+    if (!img) return;
+    const repos = () => {
+      if (!panelContext) return;
+      positionPopup();
+      positionAside();
+      positionFastFloat();
+      syncPopupShift();
+    };
+    // ⚠️ **`class` 를 같이 봐야 한다.** 가시성을 정하는 것은 `src` 가 아니라
+    // `#preview.show` 다(`#preview` 는 기본이 `display: none`). `src` 와 `load` 만
+    // 보면, 앱이 그림을 넣고 **나중에** `.show` 를 붙이는 경로에서 팝업이 넓은 채로
+    // 남아 그림을 덮는다 - 실측으로 이 구멍을 확인했다.
+    //
+    // `src` 는 **비우는 경우만** 잡는다. 새 src 가 들어오는 순간에는 아직
+    // `naturalWidth` 가 0(디코딩 전)이라, 그때 재면 "그림 없음" 으로 한 번 넓어졌다가
+    // `load` 에 다시 좁아져 깜빡인다.
+    shotWatch = new MutationObserver(muts => {
+      for (const m of muts) {
+        if (m.attributeName === 'class') return repos();
+        if (m.attributeName === 'src' && !img.getAttribute('src')) return repos();
+      }
+    });
+    shotWatch.observe(img, { attributes: true, attributeFilter: ['src', 'class'] });
+    img.addEventListener('load', repos);
+    img.addEventListener('error', repos);
   }
 
   // ── 하단 글로벌 편집기 ─────────────────────────────────────────────────
@@ -6316,7 +6365,12 @@ export function createInteractivePanel({
       // 작아지므로 `Math.max` 로 예전 폭을 지킨다(그때는 아무것도 안 바뀐다).
       const viewer = document.getElementById('resultViewer');
       const right = viewer ? viewer.getBoundingClientRect().right : vw;
-      const spare = right - left - 12 - (ASIDE_W + 10) - PANEL_IMG_MIN;
+      // **없는 그림의 자리는 예약하지 않는다.** 이 360px 이 사용자 화면에서 열이
+      // 안 늘어난 진짜 이유였다 - 논리 1,707px(물리 2,560 · 배율 150%)에서
+      // spare 는 493 인데 4열에 584 가 필요했다. 그런데 그 360 이 지키던 그림은
+      // **애초에 없었다**(뷰어 우측이 통째로 빈 화면, 사용자가 붉게 표시한 구역).
+      // 그림이 오면 다시 좁아진다 - `watchViewerShot` 이 그때 다시 재게 한다.
+      const spare = right - left - 12 - (ASIDE_W + 10) - (viewerHasShot() ? PANEL_IMG_MIN : 0);
       // **열 단위로 스냅한다.** 남는 폭을 그대로 주면 열 수는 그대로인 채 `1fr` 이
       // 칸만 늘린다(실측 1,750px: 팝업 536 인데 3열, 칸이 113 -> 136). 사용자가
       // 원한 것은 칸이 커지는 것이 아니라 **한 줄에 더 많이 들어가는 것**이다.

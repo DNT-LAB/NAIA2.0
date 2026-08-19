@@ -6373,6 +6373,21 @@ export function createInteractivePanel({
       // 슬롯 팝업만 빠져 있었다 — 같은 모양을 두 곳에 두면 한 곳만 고치게 된다.
       panelMount.style.top = panelMount.style.left = panelMount.style.width =
         panelMount.style.bottom = panelMount.style.maxHeight = '';
+      // **밀어내기는 모바일에서 의미가 없으니 지운다.** 팝업이 하단 시트라 그림
+      // 왼쪽에 서지 않는다. 그런데 `syncPopupShift` 는 데스크톱 꼬리(6438줄)에서만
+      // 불리고 여기서 반환해 버려, `--ia-shift` 가 데스크톱 값으로 남아 있었다.
+      // 그 값을 미디어쿼리 **밖에서** 쓰는 곳이 있어(frozen wildcard 바,
+      // style.css:4593) 바가 화면 밖으로 밀린다(Codex 4차).
+      //
+      // ⚠️ 처음엔 여기서 `syncPopupShift()` 를 부르게 했는데 **안 통했다.** 모바일에서도
+      // 뷰어 상자가 넓어 "75% 넘으면 포기" 가드를 통과해 415px 이 그대로 들어갔다
+      // (실측 420x820: 바 left 425px > 뷰포트 420). 다시 재는 게 아니라 지워야 한다.
+      const viewer = document.getElementById('resultViewer');
+      if (viewer) {
+        viewer.style.removeProperty('--ia-shift');
+        viewer.style.removeProperty('--ia-shift-top');
+        viewer.classList.remove('is-ia-noroom');
+      }
       return;
     }
     // **그리드를 안 그리는 상태에서는 좁은 띠다.** 카테고리 미선택이면 카테고리

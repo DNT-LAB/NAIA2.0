@@ -22069,7 +22069,12 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
 
 /* 3x3 — 셀을 키워 썸네일이 잘 보이게. 3줄까지 보이고 나머지는 박스 안에서 스크롤. */
 .ia-cell-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+  /* **열 수는 폭이 정한다**(사용자 요청 2026-08-19: "공간이 남아도는 상황에서는
+     행당 item 수를 늘릴 수 있나"). 3열 고정이던 시절엔 창이 2,000px 이어도 팝업
+     오른쪽에 988px 이 놀았다(실측). 칸 크기는 그대로 두고(약 113px) 남는 만큼
+     열이 늘어난다 - 484px 팝업에서는 예전과 같은 3열이다.
+     폭을 늘리는 쪽은 JS(positionPopup)가 이미지·추천 패널 몫을 뺀 나머지로 정한다. */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 6px;
   /* 행 높이를 내용 기준으로 고정한다. 안 하면 max-height 안에 전 행을 밀어넣으려고
      행이 압축돼 셀이 납작해진다(22행 x 12px). align-content:start 로 분배도 막는다. */
   grid-auto-rows: max-content; align-content: start;

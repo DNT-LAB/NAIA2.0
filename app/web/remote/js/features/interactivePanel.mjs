@@ -1494,6 +1494,16 @@ export function createInteractivePanel({
   // 380 -> 484: 축 탭이 왼쪽 세로 열(96)로 내려오면서 그만큼 넓힌다 — 안 넓히면
   // 그리드가 3열에서 2열로 준다(사용자 결정: 열 폭 유지 + 팝업을 넓혀 그리드 보존).
   const PANEL_W = 484;
+  // **자리가 남으면 넓힌다**(사용자 요청 2026-08-19). 484 는 3열이 들어가는 **하한**
+  // 이지 상한이 아니다 - 창이 2,000px 이어도 팝업 오른쪽에 988px 이 놀고 있었다
+  // (실측). 넓힌 만큼 CSS 가 열을 늘린다(`repeat(auto-fill, minmax(108px, 1fr))`).
+  //
+  // 상한을 두는 이유: 열이 너무 많으면 눈이 가로로 멀리 이동해 훑기가 오히려
+  // 느려지고, 팝업이 화면 절반을 넘으면 "그림을 가린다" 는 원래 불만으로 돌아간다.
+  const PANEL_W_MAX = 1040;
+  // 넓힐 때 **이미지에 남겨 둘 최소 폭**. 이것과 추천 패널 몫을 뺀 나머지만 쓴다 -
+  // 안 그러면 넓히기가 곧 가리기가 된다(테스터가 두 번 지적한 그것).
+  const PANEL_IMG_MIN = 360;
   // 카테고리를 고르기 전(그리드를 안 그릴 때)의 폭. 카테고리 열(96) + 검색창만
   // 담는 좁은 띠다. 484 -> 168 이면 결과 영역에서 316px 를 돌려준다.
   //
@@ -6284,9 +6294,19 @@ export function createInteractivePanel({
     // 열 + 검색창밖에 없으므로 484px 를 쥐고 있을 이유가 없다. 검색 중에는 결과를
     // 오른쪽 반투명 패널이 받으므로 역시 좁다(사용자 결정 2026-08-17).
     const wide = !!openThumbAxis;
-    const W = Math.min(wide ? PANEL_W : PANEL_W_IDLE, vw - 32);
     const host = blocksMount.getBoundingClientRect();
     let left = Math.max(host.right + 12, PANEL_LEFT);
+    let W = Math.min(wide ? PANEL_W : PANEL_W_IDLE, vw - 32);
+    if (wide) {
+      // 그리드를 펼친 상태에서만 넓힌다. 남는 자리 = 뷰어 오른쪽 끝까지에서
+      // **추천 패널 + 이미지 최소폭**을 뺀 것. 좁은 창에서는 이 값이 484 보다
+      // 작아지므로 `Math.max` 로 예전 폭을 지킨다(그때는 아무것도 안 바뀐다).
+      const viewer = document.getElementById('resultViewer');
+      const right = viewer ? viewer.getBoundingClientRect().right : vw;
+      const spare = right - left - 12 - (ASIDE_W + 10) - PANEL_IMG_MIN;
+      W = Math.max(W, Math.min(PANEL_W_MAX, Math.round(spare)));
+      W = Math.min(W, vw - 32);
+    }
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
     panelMount.style.width = W + 'px';
     panelMount.style.left = left + 'px';

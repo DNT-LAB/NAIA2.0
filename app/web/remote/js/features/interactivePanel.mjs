@@ -4667,6 +4667,14 @@ export function createInteractivePanel({
   function openCharSub(cid, sub, neg) {
     const meta = CHAR_SUBS.find(s => s.key === sub);
     if (!meta) return;
+    // **같은 슬롯에서 극성(포지티브<->네거티브)만 바꾸는 경우인가.**
+    // `enterEditing` 은 슬롯이 바뀐 줄 알고 펼친 축·검색어·스크롤을 전부 초기화한다.
+    // 그래서 네거티브를 누르는 순간 보던 그리드가 통째로 접혀 사용자에게는 "팝업이
+    // 닫혔다" 로 보였다(사용자 지적 2026-08-19 · 실측: 팝업 698 / 42셀 -> 168 / 그리드 없음).
+    // 슬롯이 같으면 보던 화면을 지킨다.
+    const polaritySwap = !!panelContext && panelContext.kind === 'char'
+      && panelContext.cid === cid && panelContext.sub === sub
+      && !!panelContext.neg !== !!neg;
     // 표시 라벨은 C1..Cn (내부 id 는 c1/c2.. 안정 고유값이라 사용자에게 보여주지 않는다).
     const index = state.chars.findIndex(c => c.id === cid);
     const label = index >= 0 ? 'C' + (index + 1) : cid;
@@ -4684,7 +4692,7 @@ export function createInteractivePanel({
       // 옆 팝업 없이 인라인 입력창만 여는 슬롯(캐릭터). CHAR_TAG_SLOT 주석 참조.
       noPanel: !!meta.noPanel,
     };
-    enterEditing();
+    enterEditing({ keepBrowse: polaritySwap });
   }
 
   /** 검색창을 붙일까. 계층 탐색과 **따로** 판단한다 — 둘은 성격이 다른 도구다.
@@ -4698,7 +4706,10 @@ export function createInteractivePanel({
 
 
   /** 슬롯을 텍스트 입력으로 펼치고, 그 옆에 검색+탐색 팝업을 띄운다. */
-  function enterEditing() {
+  /** @param opts.keepBrowse 같은 슬롯에서 극성만 바꾼 경우 - 보던 그리드를 지킨다.
+   *  기본값(false)이면 예전대로 축·검색어·스크롤을 전부 초기화한다. */
+  function enterEditing(opts) {
+    const keepBrowse = !!(opts && opts.keepBrowse);
     // 가중치·시드 같은 작은 창도 함께 닫는다. 슬롯을 편집하기 시작하면 그 창이
     // 가리키던 대상(칩·버튼)이 다시 그려지므로, 남겨 두면 엉뚱한 것을 가리킨다
     // (사용자 지적 2026-08-11: 캐릭터 슬롯에서도 같은 일이 난다).
@@ -4734,19 +4745,23 @@ export function createInteractivePanel({
       focusEditingInput();       // 자동완성은 bindSlotInput 의 bindTagAssist 가 붙인다
       return;
     }
-    thumbScroll.clear();       // 슬롯을 바꾸면 썸네일 스크롤을 처음으로
-    thumbFilter = '';          // 검색어도 슬롯 단위다 — 남기면 다음 슬롯이 걸러진 채 열린다
-    // **아무 축도 펼치지 않고 연다.**
-    //
-    // 예전엔 `firstThumbAxis()` 로 첫 축을 곧바로 펼쳤다. 그래서 슬롯을 누르는
-    // 순간 150칸 그리드가 떠 결과 영역의 81.4% 를 덮었다(실측 팝업 455px +
-    // 조언 패널 484px / 결과 1,184px). 테스터가 두 번 지적한 것이 이것이다.
-    //
-    // 이제 처음에는 **카테고리 열 + 검색창만** 보인다(좁은 띠). 사용자가
-    // 카테고리를 고르거나 검색을 하면 그때 그리드가 펼쳐진다(사용자 결정
-    // 2026-08-17). 선택 상태는 `openThumbAxis` 하나로 표현된다 - null 이면
-    // 접힌 상태다.
-    openThumbAxis = null;
+    // 아래 셋은 **슬롯 단위** 상태다. 같은 슬롯의 극성 전환에서는 건드리지 않는다 -
+    // 건드리면 보던 그리드가 접혀 "팝업이 닫혔다" 가 된다(`keepBrowse` 주석 참조).
+    if (!keepBrowse) {
+      thumbScroll.clear();     // 슬롯을 바꾸면 썸네일 스크롤을 처음으로
+      thumbFilter = '';        // 검색어도 슬롯 단위다 — 남기면 다음 슬롯이 걸러진 채 열린다
+      // **아무 축도 펼치지 않고 연다.**
+      //
+      // 예전엔 `firstThumbAxis()` 로 첫 축을 곧바로 펼쳤다. 그래서 슬롯을 누르는
+      // 순간 150칸 그리드가 떠 결과 영역의 81.4% 를 덮었다(실측 팝업 455px +
+      // 조언 패널 484px / 결과 1,184px). 테스터가 두 번 지적한 것이 이것이다.
+      //
+      // 이제 처음에는 **카테고리 열 + 검색창만** 보인다(좁은 띠). 사용자가
+      // 카테고리를 고르거나 검색을 하면 그때 그리드가 펼쳐진다(사용자 결정
+      // 2026-08-17). 선택 상태는 `openThumbAxis` 하나로 표현된다 - null 이면
+      // 접힌 상태다.
+      openThumbAxis = null;
+    }
     // 팩 인덱스는 한 번만 받고, 도착하면 축 영역만 다시 그린다(이미지 셀로 승격).
     void loadThumbIndex().then(() => { if (panelContext) refreshAxisSections(); });
     openId = panelContext.kind === 'scene' ? panelContext.slotId : 'character';

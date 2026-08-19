@@ -6078,7 +6078,10 @@ export function createInteractivePanel({
     panelMount.classList.remove('open', 'is-neg');
     panelMount.innerHTML = '';
     if (asideMount) { asideMount.classList.remove('open'); asideMount.innerHTML = ''; }
-    panelMount.style.top = panelMount.style.left = panelMount.style.width = '';
+    // `maxHeight`·`bottom` 도 같이 지운다 - 셋만 지우면 옛 높이가 남아, 다음에 여는
+    // 팝업이 **그때의 세로 기하**를 물려받는다(Codex 2차 지적).
+    panelMount.style.top = panelMount.style.left = panelMount.style.width =
+      panelMount.style.maxHeight = panelMount.style.bottom = '';
     renderBlocks();            // 편집 중이던 슬롯을 칩으로 되돌린다
   }
 
@@ -6365,17 +6368,6 @@ export function createInteractivePanel({
       panelMount.style.top = panelMount.style.left = panelMount.style.width = panelMount.style.bottom = '';
       return;
     }
-    // ⚠️ **레이아웃이 없는 동안에는 재지 않는다.** 다른 탭(Metadata·Studio…)이 떠
-    // 있으면 결과 판이 `display:none` 이라 뷰어 폭이 0 이다. 그 0 으로 `spare` 를
-    // 구하면 항상 음수라 484 하한이 구워지고, 탭으로 돌아와도 그대로 묶인다.
-    //
-    // 예전에는 이 경로로 들어올 일이 드물었는데, 그림 도착을 지켜보게 되면서
-    // (`watchViewerShot` 의 `load`) **숨은 동안 생성이 끝나면** 바로 여기로 온다.
-    // 실측 재현: 812(6열) -> 탭 이동 중 그림 도착 -> 484(2열) -> 복귀해도 484,
-    // 창을 흔들어야 풀렸다. 잴 수 없을 때는 아무것도 안 하고, 복귀 시점에
-    // `watchResultTab` 이 다시 부른다.
-    const viewerBox = document.getElementById('resultViewer')?.getBoundingClientRect();
-    if (!viewerBox || viewerBox.width <= 0) return;
     // **그리드를 안 그리는 상태에서는 좁은 띠다.** 카테고리 미선택이면 카테고리
     // 열 + 검색창밖에 없으므로 484px 를 쥐고 있을 이유가 없다. 검색 중에는 결과를
     // 오른쪽 반투명 패널이 받으므로 역시 좁다(사용자 결정 2026-08-17).
@@ -6383,11 +6375,21 @@ export function createInteractivePanel({
     const host = blocksMount.getBoundingClientRect();
     let left = Math.max(host.right + 12, PANEL_LEFT);
     let W = Math.min(wide ? PANEL_W : PANEL_W_IDLE, vw - 32);
-    if (wide) {
+    // ⚠️ **잴 수 없으면 넓히기'만' 건너뛴다.** 다른 탭(Metadata·Studio…)이 떠 있으면
+    // 결과 판이 `display:none` 이라 뷰어 폭이 0 이다. 그 0 으로 `spare` 를 구하면 항상
+    // 음수라 484 하한이 구워지고, 돌아와도 그대로 묶인다(실측: 812/6열 -> 탭 이동 중
+    // 그림 도착 -> 484/2열 -> 복귀해도 484). 복귀 재측정은 `watchResultTab` 이 한다.
+    //
+    // ⚠️ 처음엔 함수 전체를 막았는데 **그게 새 결함이었다**(Codex 2차). 팝업은 결과 판
+    // **밖**에 있어 다른 탭에서도 보이고, 기본 폭(168)·좌표·높이는 뷰어를 잴 필요가
+    // 없다. 전체를 막으니 Metadata 에서 슬롯을 열면 인라인 폭이 안 붙어 CSS 폴백
+    // 380px 로 떴다(실측). 막아야 할 것은 뷰어를 쓰는 계산 하나뿐이다.
+    const viewerBox = document.getElementById('resultViewer')?.getBoundingClientRect();
+    if (wide && viewerBox && viewerBox.width > 0) {
       // 그리드를 펼친 상태에서만 넓힌다. 남는 자리 = 뷰어 오른쪽 끝까지에서
       // **추천 패널 + 이미지 최소폭**을 뺀 것. 좁은 창에서는 이 값이 484 보다
       // 작아지므로 `Math.max` 로 예전 폭을 지킨다(그때는 아무것도 안 바뀐다).
-      const right = viewerBox.right;   // 위 가드에서 이미 잰 것을 쓴다
+      const right = viewerBox.right;
       // **그림에는 딱 구석 자리만 남긴다.** 없으면 한 픽셀도 안 남긴다.
       //   그림 없음 - 0   (뷰어 우측이 통째로 빈 화면이었다. 사용자가 붉게 표시한 구역)
       //   그림 있음 - 200 (구석에 처박히는 크기. 가려지지만 않으면 된다는 판정)

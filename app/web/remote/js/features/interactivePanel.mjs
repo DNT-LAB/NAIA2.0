@@ -1581,7 +1581,14 @@ export function createInteractivePanel({
     if (sceneTabWatch) return;
     const pane = document.getElementById('rightTabResult');
     if (!pane) return;
-    sceneTabWatch = new MutationObserver(() => { positionSceneFloat(); syncGlobalEditor(); });
+    sceneTabWatch = new MutationObserver(() => {
+      positionSceneFloat();
+      syncGlobalEditor();
+      // **돌아왔으면 다시 잰다.** 숨은 동안은 결과 판이 `display:none` 이라 폭이 0 이고,
+      // `positionPopup` 의 가드가 그 시점 측정을 통째로 버린다. 그래서 복귀 시점에
+      // 한 번은 반드시 재야 팝업이 옛 폭에 묶이지 않는다(Codex 지적 · 실측 재현).
+      if (panelContext) { positionPopup(); positionAside(); positionFastFloat(); syncPopupShift(); }
+    });
     sceneTabWatch.observe(pane, { attributes: true, attributeFilter: ['class', 'hidden'] });
     watchHistoryRail();
   }
@@ -6358,6 +6365,17 @@ export function createInteractivePanel({
       panelMount.style.top = panelMount.style.left = panelMount.style.width = panelMount.style.bottom = '';
       return;
     }
+    // ⚠️ **레이아웃이 없는 동안에는 재지 않는다.** 다른 탭(Metadata·Studio…)이 떠
+    // 있으면 결과 판이 `display:none` 이라 뷰어 폭이 0 이다. 그 0 으로 `spare` 를
+    // 구하면 항상 음수라 484 하한이 구워지고, 탭으로 돌아와도 그대로 묶인다.
+    //
+    // 예전에는 이 경로로 들어올 일이 드물었는데, 그림 도착을 지켜보게 되면서
+    // (`watchViewerShot` 의 `load`) **숨은 동안 생성이 끝나면** 바로 여기로 온다.
+    // 실측 재현: 812(6열) -> 탭 이동 중 그림 도착 -> 484(2열) -> 복귀해도 484,
+    // 창을 흔들어야 풀렸다. 잴 수 없을 때는 아무것도 안 하고, 복귀 시점에
+    // `watchResultTab` 이 다시 부른다.
+    const viewerBox = document.getElementById('resultViewer')?.getBoundingClientRect();
+    if (!viewerBox || viewerBox.width <= 0) return;
     // **그리드를 안 그리는 상태에서는 좁은 띠다.** 카테고리 미선택이면 카테고리
     // 열 + 검색창밖에 없으므로 484px 를 쥐고 있을 이유가 없다. 검색 중에는 결과를
     // 오른쪽 반투명 패널이 받으므로 역시 좁다(사용자 결정 2026-08-17).
@@ -6369,8 +6387,7 @@ export function createInteractivePanel({
       // 그리드를 펼친 상태에서만 넓힌다. 남는 자리 = 뷰어 오른쪽 끝까지에서
       // **추천 패널 + 이미지 최소폭**을 뺀 것. 좁은 창에서는 이 값이 484 보다
       // 작아지므로 `Math.max` 로 예전 폭을 지킨다(그때는 아무것도 안 바뀐다).
-      const viewer = document.getElementById('resultViewer');
-      const right = viewer ? viewer.getBoundingClientRect().right : vw;
+      const right = viewerBox.right;   // 위 가드에서 이미 잰 것을 쓴다
       // **그림에는 딱 구석 자리만 남긴다.** 없으면 한 픽셀도 안 남긴다.
       //   그림 없음 - 0   (뷰어 우측이 통째로 빈 화면이었다. 사용자가 붉게 표시한 구역)
       //   그림 있음 - 200 (구석에 처박히는 크기. 가려지지만 않으면 된다는 판정)

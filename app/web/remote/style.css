@@ -22074,7 +22074,13 @@ body.ia-preset-open .ia-scene-float .ia-reactive { display: none !important; }
      오른쪽에 988px 이 놀았다(실측). 칸 크기는 그대로 두고(약 113px) 남는 만큼
      열이 늘어난다 - 484px 팝업에서는 예전과 같은 3열이다.
      폭을 늘리는 쪽은 JS(positionPopup)가 이미지·추천 패널 몫을 뺀 나머지로 정한다. */
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 6px;
+  /* ⚠️ **최소값(104)은 JS 의 스냅 단위(108)보다 작아야 한다.** 같은 값으로 두면
+     서브픽셀 반올림 한 번에 열이 하나 준다 - 팝업을 7열 폭으로 넓혔는데 내용폭이
+     0.4px 모자라 6열이 되고 칸만 125px 로 늘어났다(포터블 실측 2026-08-19,
+     같은 폭에서 dev 는 7열이라 기기·배율에 따라 갈렸다). 4px 의 여유를 두면
+     반올림이 어느 쪽으로 가도 의도한 열 수가 나오고, 트랙은 어차피 1fr 로
+     늘어나 결과 칸 크기는 108 근처로 같다. */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px;
   /* 행 높이를 내용 기준으로 고정한다. 안 하면 max-height 안에 전 행을 밀어넣으려고
      행이 압축돼 셀이 납작해진다(22행 x 12px). align-content:start 로 분배도 막는다. */
   grid-auto-rows: max-content; align-content: start;

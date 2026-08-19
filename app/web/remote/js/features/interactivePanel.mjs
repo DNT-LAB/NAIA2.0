@@ -6365,7 +6365,14 @@ export function createInteractivePanel({
     const vw = window.innerWidth;
     if (vw <= 767) {
       // 모바일: 하단 시트(CSS 미디어쿼리)에 맡긴다. 인라인 앵커 좌표를 비운다.
-      panelMount.style.top = panelMount.style.left = panelMount.style.width = panelMount.style.bottom = '';
+      // **`maxHeight` 도 반드시 같이 비운다** — 데스크톱에서 넣어 둔 인라인 값(6430줄)이
+      // 남으면 모바일 시트의 `max-height:55dvh`(style.css:21023)를 이겨서 판이 화면
+      // 위로 삐져나간다. 닫고 여는 경로는 `closePanel` 이 막지만, **열어 둔 채 창을
+      // 줄이거나 돌리면** 여기로만 온다(Codex 3차).
+      // 프리셋 팝업(`positionPresetPanel`)에는 같은 교훈이 이미 주석까지 달려 있었는데
+      // 슬롯 팝업만 빠져 있었다 — 같은 모양을 두 곳에 두면 한 곳만 고치게 된다.
+      panelMount.style.top = panelMount.style.left = panelMount.style.width =
+        panelMount.style.bottom = panelMount.style.maxHeight = '';
       return;
     }
     // **그리드를 안 그리는 상태에서는 좁은 띠다.** 카테고리 미선택이면 카테고리

@@ -1504,6 +1504,19 @@ export function createInteractivePanel({
   // 넓힐 때 **이미지에 남겨 둘 최소 폭**. 이것과 추천 패널 몫을 뺀 나머지만 쓴다 -
   // 안 그러면 넓히기가 곧 가리기가 된다(테스터가 두 번 지적한 그것).
   const PANEL_IMG_MIN = 360;
+  // 열 하나가 차지하는 값. CSS 의 `minmax(108px, 1fr)` · `gap: 6px` 과 **짝이다** -
+  // 한쪽만 고치면 스냅이 어긋나 칸이 늘어지거나 열이 한 칸 모자란다.
+  const CELL_MIN = 108;
+  const CELL_GAP = 6;
+  // 팝업 폭에서 그리드 **내용폭**이 아닌 부분. 실측 내역(2026-08-19):
+  //   카테고리 열 96 + 열/판 사이 8 + 판 안쪽 여백 7x2 + 테두리 = 130 (팝업 - 그리드)
+  //   + 그리드 자신의 `padding-right: 4`(스크롤바 자리) = 134
+  // ⚠️ 마지막 4px 를 빼먹어 한 칸이 모자랐다 - 팝업을 580(=4열) 로 넓혔는데
+  // 내용폭이 446 이라 auto-fill 이 3열만 잡았다(450 필요). 열 수는 **내용폭**이
+  // 정한다 - 테두리 상자가 아니다.
+  const GRID_OVERHEAD = 134;
+  // 열 상한. 더 늘리면 눈이 가로로 멀리 이동해 훑기가 오히려 느려진다.
+  const GRID_COLS_MAX = 7;
   // 카테고리를 고르기 전(그리드를 안 그릴 때)의 폭. 카테고리 열(96) + 검색창만
   // 담는 좁은 띠다. 484 -> 168 이면 결과 영역에서 316px 를 돌려준다.
   //
@@ -6304,8 +6317,16 @@ export function createInteractivePanel({
       const viewer = document.getElementById('resultViewer');
       const right = viewer ? viewer.getBoundingClientRect().right : vw;
       const spare = right - left - 12 - (ASIDE_W + 10) - PANEL_IMG_MIN;
-      W = Math.max(W, Math.min(PANEL_W_MAX, Math.round(spare)));
-      W = Math.min(W, vw - 32);
+      // **열 단위로 스냅한다.** 남는 폭을 그대로 주면 열 수는 그대로인 채 `1fr` 이
+      // 칸만 늘린다(실측 1,750px: 팝업 536 인데 3열, 칸이 113 -> 136). 사용자가
+      // 원한 것은 칸이 커지는 것이 아니라 **한 줄에 더 많이 들어가는 것**이다.
+      // 그래서 딱 N열이 들어가는 폭만 쓰고 나머지는 이미지에 돌려준다.
+      const fit = Math.floor((spare - GRID_OVERHEAD + CELL_GAP) / (CELL_MIN + CELL_GAP));
+      if (fit > 3) {
+        const cols = Math.min(fit, GRID_COLS_MAX);
+        W = Math.max(W, GRID_OVERHEAD + cols * CELL_MIN + (cols - 1) * CELL_GAP);
+      }
+      W = Math.min(W, PANEL_W_MAX, vw - 32);
     }
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
     panelMount.style.width = W + 'px';

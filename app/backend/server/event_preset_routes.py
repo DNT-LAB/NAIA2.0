@@ -95,7 +95,19 @@ def _generate_event_preset_prompt(
     *,
     overrides: dict[str, Any],
     request_id: str,
+    source: str = "event_preset",
 ):
+    """프리셋이 만든 source_row 를 **메인과 같은 프롬프트 파이프라인**에 태운다.
+
+    ⚠️ 이걸 안 태우면 프롬프트 엔지니어링(pre_prompt/post_prompt·auto hide·
+    remove_* ·닫힌눈 동기화·e621 부스트·Danbooru 자동 가중치·해상도 자동 맞춤·
+    인물 태그 정렬)이 통째로 빠진다. 예전에는 **이벤트만** 고른 요청만 여기를
+    지나고, 의상이나 표정을 하나라도 얹으면 다른 라우트로 빠져 파이프라인을 건너뛰었다
+    (사용자 지적 2026-08-21). 같은 Generate 버튼인데 고른 것에 따라 프롬프트 의미가
+    달라졌다.
+
+    `source` 는 파이프라인이 요청 출처를 구분하는 데만 쓴다.
+    """
     # update_context=False restores the four primary prompt fields, but character
     # preparation mutates the live context before that snapshot. Preserve those
     # pre-pipeline fields as well so this route cannot erase main-tab runtime state.
@@ -132,7 +144,7 @@ def _generate_event_preset_prompt(
                 source_row,
                 overrides=overrides,
                 random_request_id=request_id,
-                source="event_preset",
+                source=source,
                 update_context=False,
             )
         finally:
@@ -198,7 +210,11 @@ def _preset_source_to_generation_command(
         raise ValueError("Preset prompt source is empty.")
     request_id = str(result.get("requestId") or uuid.uuid4().hex)
     result["requestId"] = request_id
-    use_prompt_override = source == "event_preset" and prompt_override is not None
+    # ⚠️ 예전에는 `source == "event_preset"` 만 파이프라인 산출물을 썼다. 의상/표정이
+    # 섞인 요청은 `source == "preset"` 이라 여기서 걸러져 **조립된 원문**이 그대로
+    # 나갔고, 그래서 프롬프트 엔지니어링이 통째로 빠졌다(사용자 지적 2026-08-21).
+    # 이제 출처와 무관하게 "파이프라인을 돌렸으면 그 결과를 쓴다".
+    use_prompt_override = prompt_override is not None
     prompt = (
         str(prompt_override)
         if use_prompt_override
@@ -545,11 +561,32 @@ def register_event_preset_routes(
             payload = {}
         try:
             result = await run_in_thread(preset_composer_service(session_context).generation_source, payload)
+            request_id = str(result.get("requestId") or uuid.uuid4().hex)
+            result["requestId"] = request_id
+            source_row_data = result.get("sourceRow") if isinstance(result.get("sourceRow"), dict) else {}
+            pipeline_overrides = payload.get("overrides") if isinstance(payload.get("overrides"), dict) else {}
+            # 이벤트 전용 라우트와 **같은 파이프라인**을 탄다. 안 그러면 의상/표정을
+            # 하나만 얹어도 프롬프트 엔지니어링이 통째로 빠진다(위 주석 참조).
+            processed = await run_in_thread(
+                _generate_event_preset_prompt,
+                session_context,
+                source_row_data,
+                overrides=pipeline_overrides,
+                request_id=request_id,
+                source="preset",
+            )
+            if not processed.success:
+                return JSONResponse(
+                    {"error": processed.error or "Preset prompt processing failed."},
+                    status_code=400,
+                )
             command = _preset_source_to_generation_command(
                 session_context,
                 result,
                 source="preset",
-                overrides=payload.get("overrides") if isinstance(payload.get("overrides"), dict) else {},
+                overrides=pipeline_overrides,
+                prompt_override=processed.prompt,
+                prompt_run_id_override=processed.prompt_run_id,
             )
             dispatch = await run_in_thread(_generation_service(session_context).enqueue_remote_request, command)
         except RuntimeError as exc:

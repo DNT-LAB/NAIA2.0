@@ -18489,6 +18489,14 @@ select.setup-input { cursor: pointer; }
   font-size: 10px; letter-spacing: 0.10em; color: #8a8aa0;
 }
 .nai-acct-total { font-size: 13px; font-weight: 700; margin-left: auto; }
+/* 이번 세션 요약 — 퍼센트 게이지를 대신한다. */
+.nai-acct-session {
+  display: flex; align-items: baseline; gap: 8px;
+  margin: -2px 0 8px; font-size: 10.5px; color: #9a9ab2;
+  font-variant-numeric: tabular-nums;
+}
+.nai-acct-session b { color: #cdd2ff; font-weight: 700; font-size: 12px; }
+.nai-acct-session em { font-style: normal; margin-left: auto; color: #6d6d85; }
 /* 핀 — 켜면 바깥을 눌러도 안 닫힌다(생성 중에 계정 회전을 계속 보려고). */
 .nai-acct-pin {
   margin-left: 6px; padding: 1px 4px;

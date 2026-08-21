@@ -75,6 +75,8 @@ export function createNaiAccountPanel({
   // 어긋난 순간에 행 수가 틀렸다(실측: 사용량엔 2개인데 화면엔 1줄).
   let usageRows = [];
   let totalPercent = null;
+  // 이번 세션 요약(무료 생성 수 · 실행 시간). 퍼센트 게이지를 대신한다.
+  let session = { free: 0, elapsed: 0, onV5: true };
   let popOpen = false;
   // 핀. 켜면 바깥을 눌러도 안 닫힌다 - 생성하는 동안 어느 계정이 도는지 계속
   // 보려고 둔 것이다(테스트용, 사용자 요청 2026-08-21). 세션 안에서만 기억한다.
@@ -144,6 +146,11 @@ export function createNaiAccountPanel({
       return;
     }
     totalPercent = Number.isFinite(message.percent) ? message.percent : null;
+    session = {
+      free: Number(message.free_generations) || 0,
+      elapsed: Number(message.elapsed_seconds) || 0,
+      onV5: message.uses_usage_limit !== false,
+    };
     const rows = Array.isArray(message.accounts) ? message.accounts : [];
     if (rows.length) {
       usageRows = rows.filter(row => row && row.id);
@@ -190,9 +197,14 @@ export function createNaiAccountPanel({
     else openPopover();
   }
 
-  function barHtml(percent, isOut) {
-    const width = Math.max(0, Math.min(100, Number(percent) || 0));
-    return `<span class="nai-acct-bar${isOut ? ' is-out' : ''}"><i style="width:${width}%"></i></span>`;
+  /** 초 -> `1시간 23분` / `12분` / `48초`. 세션이 얼마나 돌았는지 한눈에. */
+  function formatElapsed(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    if (h) return `${h}시간 ${m}분`;
+    if (m) return `${m}분`;
+    return `${total}초`;
   }
 
   // 막대와 헤더 합계가 **같은 목록**을 봐야 한다 - 갈라 두면 언젠가 어긋난다.
@@ -221,10 +233,11 @@ export function createNaiAccountPanel({
       const remain = known && !row.is_negative
         ? `~${formatImages(row.percent)}`
         : (row.is_negative ? '소진' : '—');
+      // ⚠️ 게이지(막대)는 뺐다(사용자 지시 2026-08-21). 퍼센트가 정수라 눈금이
+      // 거의 안 움직여서, 막대가 있으면 "안 줄어든다" 로 보였다. 숫자만 남긴다.
       return `<div class="nai-acct-row${row.is_next ? ' is-next' : ''}">`
         + '<div class="nai-acct-line">'
         + `<span class="nai-acct-name">${esc(name)}</span>`
-        + barHtml(known ? row.percent : 0, known && row.is_negative)
         + `<span class="nai-acct-pct">${esc(pct)}</span>`
         + '</div>'
         + '<div class="nai-acct-sub">'
@@ -253,9 +266,8 @@ export function createNaiAccountPanel({
   function renderPopover() {
     const el = popEl();
     if (!el || !popOpen) return;
-    const total = totalPercent == null ? '—' : `${totalPercent}%`;
-    // 배지 숫자는 **평균**인데(계정마다 자기 한도가 있으니 평균이 맞다), 실제로
-    // 몇 장 뽑을 수 있는지는 **합**이다. 그 합을 헤더 아래 줄에 적는다.
+    // 머리말은 **이번 세션**을 말한다 - 퍼센트 통합값은 눈금이 안 움직여 쓸모가
+    // 적었다(사용자 지시 2026-08-21). 계정별 잔량은 아래 행이 그대로 보여 준다.
     const live = accountUsageRows().filter(r => r.available && !r.is_negative);
     const sumImages = live.reduce((s, r) => s + imageCount(r.percent), 0);
     const sumAnlas = accountUsageRows()
@@ -266,8 +278,14 @@ export function createNaiAccountPanel({
       + `<button type="button" class="nai-acct-pin${pinned ? ' on' : ''}" data-act="pin"`
       + ` aria-pressed="${pinned ? 'true' : 'false'}"`
       + ` title="${pinned ? '고정 해제' : '열어 둔 채 고정'}">${pinned ? '📌' : '📍'}</button>`
-      + `<span class="nai-acct-total">통합 ${esc(total)}</span>`
+      + `<span class="nai-acct-total">${session.free.toLocaleString()}장</span>`
       + '</div>'
+      + '<div class="nai-acct-session">'
+      + `<span>이번 세션 무료 생성 <b>${session.free.toLocaleString()}</b>장</span>`
+      + `<em>실행 ${esc(formatElapsed(session.elapsed))}</em>`
+      + '</div>'
+      + (session.onV5 ? ''
+        : '<div class="nai-acct-note">V5 가 아닌 모델은 무료 사용량을 쓰지 않습니다.</div>')
       + (live.length > 1
         ? '<div class="nai-acct-sum">'
           + `<span>Anlas ${sumAnlas.toLocaleString()}</span><i>|</i>`

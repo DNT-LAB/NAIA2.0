@@ -7068,8 +7068,12 @@ function onNaiUsageUpdate(m) {
   if (nextAccount) lastUsageAccount = nextAccount;
   const accounts = Array.isArray(m.accounts) ? m.accounts : [];
   const multi = accounts.length > 1;
-  value.textContent = `${pct}%`;
-  pill.classList.toggle('is-out', !!m.is_negative);
+  // 배지는 **이번 세션에 무료로 뽑은 장수**를 보여 준다(사용자 지시 2026-08-21).
+  // 퍼센트는 정수라 1% 가 약 17장이어서 한 장 뽑아도 눈금이 안 움직였다 - 생성하고
+  // 배지를 봐도 아무 일도 안 일어난 것처럼 보였다.
+  value.textContent = String(Number(m.free_generations) || 0);
+  // 소진 표시는 V5 를 고른 동안에만 뜻이 있다(V4.5 는 이 무료 풀을 안 쓴다).
+  pill.classList.toggle('is-out', !!m.is_negative && m.uses_usage_limit !== false);
   pill.classList.toggle('is-multi', multi);
   // ⚠️ `seconds_until_next_percent` 는 이름과 달리 **카운트다운이 아니다.**
   // 실측(2026-08-21): 계정 두 개가 잔량이 다른데도 같은 값(7888)이고, 15분이 지나도
@@ -7079,12 +7083,13 @@ function onNaiUsageUpdate(m) {
   const secs = Number(m.seconds_until_next_percent) || 0;
   const perDay = secs > 0 ? Math.round((86400 / secs) * 10) / 10 : 0;
   const rate = perDay > 0 ? `하루 약 ${perDay}% 회복` : '';
-  const base = m.is_negative
-    ? 'V5 무료 사용량 소진 — 이후 생성은 Anlas 를 씁니다'
-    : `NovelAI Diffusion V5 Opus 사용량${rate ? ` · ${rate}` : ''}`;
-  pill.title = multi
-    ? `${base}\n계정 ${accounts.length}개 평균 · 눌러서 계정별 보기`
-    : `${base}\n눌러서 계정 관리`;
+  const onV5 = m.uses_usage_limit !== false;
+  const base = !onV5
+    ? '이번 세션 무료 생성 수 (V5 를 고르면 잔량도 함께 표시됩니다)'
+    : m.is_negative
+      ? 'V5 무료 사용량 소진 — 이후 생성은 Anlas 를 씁니다'
+      : `이번 세션 무료 생성 수 · V5 Opus 잔량 ${pct}%${rate ? ` · ${rate}` : ''}`;
+  pill.title = `${base}\n${multi ? `계정 ${accounts.length}개 · ` : ''}눌러서 계정 관리`;
   pill.classList.remove('hidden');
 }
 

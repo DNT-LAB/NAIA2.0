@@ -553,6 +553,14 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # Anlas와 무관해 불필요한 브로드캐스트만 낸다. build_anlas_payload가 NAI+토큰일 때만
             # 실측 조회하고, 프런트는 값이 감소했을 때만 pill을 점멸시킨다(소비 시각 피드백).
             if str(context.get_api_mode() or "").upper() == "NAI":
+                # 이번 세션에 **무료로** 나간 장수. 배지가 퍼센트 대신 이 값을 쓴다 -
+                # 퍼센트는 정수라 1% 가 약 17장이어서 한 장 뽑아도 안 움직인다.
+                try:
+                    from core.nai_free_usage import note_generation
+
+                    note_generation(context, params)
+                except Exception as exc:  # noqa: BLE001 - 집계 실패가 생성을 막으면 안 된다
+                    print(f"[warn] free-usage count failed: {exc}", flush=True)
                 if usage_badge_active(context):
                     # V5 는 Anlas 가 아니라 **별도 사용량 풀**을 쓴다. 생성해도 배지가
                     # 안 줄어든다는 지적(2026-08-21) — 사용량 조회를 세션 시작·모델

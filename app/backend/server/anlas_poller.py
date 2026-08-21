@@ -346,19 +346,26 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
     usage_by_id = refresh_account_pool(context, summary)
     combine_anlas(anlas_payload, usage_by_id)
 
-    usage_payload = usage_off
-    usage = summary.get("usage")
-    # 사용량 **배지**(퍼센트·막대)는 V5 를 고른 동안에만 뜬다 - V4.5 는 이 무료 풀을
-    # 안 쓰므로 퍼센트를 띄우면 거짓말이 된다. Anlas 합산과는 별개의 판단이다.
-    if usage and _current_model_uses_usage_limit(context):
-        usage_payload = {
-            "type": "nai_usage_update", "available": True,
-            "percent": int(usage.get("percent", 0)),
-            "is_negative": bool(usage.get("is_negative", False)),
-            "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
-            "fetched_at": now,
-        }
-        _attach_accounts(context, usage_payload)
+    # 배지는 **NAI 모드면 늘 뜬다**(사용자 지시 2026-08-21). 모델을 V5 <-> V4.5 로
+    # 오갈 때마다 사라졌다 나타나면 자리도 흔들리고, 배지가 보여 주는 값이 이제
+    # 퍼센트가 아니라 **이번 세션 무료 생성 수**라 모델과 무관하게 의미가 있다.
+    #
+    # `uses_usage_limit` 는 "지금 모델이 V5 인가" 다 - 퍼센트/잔량 숫자는 V5 에서만
+    # 뜻이 있으므로 화면이 이 값을 보고 그 부분만 흐리거나 감춘다.
+    from core.nai_free_usage import session_payload
+
+    usage = summary.get("usage") or {}
+    usage_payload = {
+        "type": "nai_usage_update",
+        "available": True,
+        "uses_usage_limit": _current_model_uses_usage_limit(context),
+        "percent": int(usage.get("percent", 0)),
+        "is_negative": bool(usage.get("is_negative", False)),
+        "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
+        "fetched_at": now,
+        **session_payload(context),
+    }
+    _attach_accounts(context, usage_payload)
     return [anlas_payload, usage_payload]
 
 
@@ -465,11 +472,13 @@ def _cached_pair(context: Any) -> tuple[dict[str, Any], dict[str, Any]] | None:
 
 def _usage_hidden_payload() -> dict[str, Any]:
     # `accounts` 를 빈 목록으로 같이 보낸다 - 배지가 숨어도 열려 있던 패널이
-    # 옛 계정 막대를 그대로 들고 있으면 안 된다.
+    # 옛 계정 행을 그대로 들고 있으면 안 된다.
+    # (NAI 모드가 아니거나 토큰이 없을 때만 쓰인다 - 모델 때문에 숨지는 않는다.)
     return {
         "type": "nai_usage_update", "available": False, "percent": 0,
         "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
-        "accounts": [], "balancing_effective": False,
+        "accounts": [], "balancing_effective": False, "uses_usage_limit": False,
+        "free_generations": 0, "elapsed_seconds": 0,
     }
 
 
@@ -520,10 +529,15 @@ def schedule_subscription_refresh(context: Any, clients: set, *, force: bool = F
 
     cached = _cached_pair(context)
     if cached is not None:
-        # 캐시는 Anlas 기준으로 잡는다. 사용량은 모델에 따라 붙였다 뗐다 하므로
-        # **지금 모델 기준으로 다시 판정**한다 - 안 그러면 V5 에서 V4.5 로 바꿔도
-        # 배지가 캐시 때문에 남는다.
-        usage = cached[1] if _current_model_uses_usage_limit(context) else _usage_hidden_payload()
+        # 배지는 이제 모델과 무관하게 뜨므로 캐시를 그대로 쓴다. 다만 **모델에 딸린
+        # 값들은 지금 기준으로 다시 채운다** - 캐시는 V5 일 때 잡혔을 수 있고,
+        # 세션 카운터는 그 사이에 늘었을 수 있다.
+        from core.nai_free_usage import session_payload
+
+        usage = dict(cached[1])
+        if usage.get("available"):
+            usage["uses_usage_limit"] = _current_model_uses_usage_limit(context)
+            usage.update(session_payload(context))
         asyncio.create_task(_send_pair(clients, cached[0], usage))
         return
 

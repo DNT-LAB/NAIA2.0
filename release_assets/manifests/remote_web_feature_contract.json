@@ -651,6 +651,7 @@
         {"method": "POST", "path": "/api/interactive-assets/scene/delete", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/interactive-assets/scene/save", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/interactive-assets/scene/update", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/interactive-assets/scene/lookup", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/interactive-assets/scene/folders", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/interactive-assets/scene/folders", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/interactive-assets/favorite", "smoke": "state_mutation"},

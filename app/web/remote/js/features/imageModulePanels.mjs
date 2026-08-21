@@ -561,7 +561,8 @@ export function createImageModulePanels({
 
   function renderCharacterReference(message) {
     if (!message.is_naid45) {
-      moduleBody.innerHTML = '<div class="mod-notice">Character Reference requires NAID4.5F/C model</div>';
+      // V5 도 여기로 온다 - 스키마엔 필드가 있으나 라이브 미검증이라 계약에서 껐다.
+      moduleBody.innerHTML = '<div class="mod-notice">Character Reference는 NAID4.5 모델에서만 사용할 수 있습니다</div>';
       return;
     }
     const frames = (message.frames || []).map((frame, index) => `
@@ -615,6 +616,13 @@ export function createImageModulePanels({
   }
 
   function renderVibeTransfer(message) {
+    // 이 모델이 Vibe 를 아예 안 쓰면(V5) 목록을 그리지 않는다. 켜 둔 프레임을 그대로
+    // 보여 주면 생성에 적용되는 줄 알지만, 페이로드 게이트가 빼 버려 **조용히
+    // 무시된다**(사용자 지시 2026-08-21: V5 에서 Vibe/CR 비활성).
+    if (message.model_supports_vibe === false) {
+      moduleBody.innerHTML = '<div class="mod-notice">Vibe Transfer는 NAID4/4.5 모델에서만 사용할 수 있습니다</div>';
+      return;
+    }
     vibeClusterCanWrite = message.can_write_clusters !== false;
     // stale IE draft 정리: 해당 index에 프레임이 없거나(제거) 다른 프레임이 와 있으면(제거로 시프트)
     // 폐기. 메모리는 동시 프레임 수(≤MAX)로 bounded.

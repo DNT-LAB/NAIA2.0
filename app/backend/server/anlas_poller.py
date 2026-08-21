@@ -38,19 +38,29 @@ def build_anlas_payload(context: Any) -> dict[str, Any]:
         token = ""
     if mode != "NAI" or not token:
         return _unavailable_payload()
+    # ⚠️ 계정이 둘 이상이면 **합계**를 보여야 하므로 계정별 Anlas 가 필요하다. 그래서
+    # `fetch_nai_anlas`(Anlas 만) 대신 summary 를 쓴다 - 같은 엔드포인트 한 번이고
+    # 메인 응답을 계정 풀에 그대로 재사용할 수 있다.
+    #
+    # 이 경로는 **V5 가 아닌 생성 직후**에도 쓰인다. 메시지를 정확히 **1장**
+    # (`anlas_update`)만 내보내야 릴리즈 웹 스모크의 생성 커맨드 계약이 안 어긋난다 -
+    # 그래서 여기서 사용량 배지를 같이 보내지 않는다.
     try:
-        value = api_verification.fetch_nai_anlas(token)
+        summary = api_verification.fetch_nai_subscription_summary(token)
     except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
         print(f"⚠️ Anlas 조회 실패: {exc}", flush=True)
-        value = None
+        summary = {}
+    value = (summary or {}).get("anlas")
     if value is None:
         return _unavailable_payload()
-    return {
+    payload = {
         "type": "anlas_update",
         "available": True,
         "anlas": int(value),
         "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+    combine_anlas(payload, refresh_account_pool(context, summary))
+    return payload
 
 
 async def broadcast_anlas(context: Any, clients: set) -> None:
@@ -243,6 +253,59 @@ def _account_rows(context: Any, usage_by_id: dict[str, Any],
     return rows
 
 
+def refresh_account_pool(context: Any, main_summary: dict[str, Any] | None) -> dict[str, Any]:
+    """활성 계정 전체의 `{id: {percent, is_negative, anlas}}` 를 만들어 캐시한다.
+
+    **V5 와 무관하다.** 예전에는 이 조회가 사용량 배지(V5 전용) 안에만 있어서,
+    V4.5 에서는 계정이 둘이어도 Anlas 가 메인 것만 나왔다 - 모델을 바꾸면 좌상단
+    숫자가 튀었다(사용자 지시 2026-08-21: "1개일 땐 Mute, 2개 이상이면 Show" 정책을
+    NAID5 이외 버전에도 전파).
+
+    `main_summary` 는 호출자가 이미 받아 둔 메인 계정 구독 응답(있으면 재사용해서
+    같은 걸 두 번 묻지 않는다). 계정이 하나뿐이면 빈 dict 를 돌려주고 아무것도 안 한다.
+    """
+    from core.nai_account_service import (
+        MAIN_ACCOUNT_ID,
+        NaiAccountService,
+        cached_account_usage,
+    )
+
+    try:
+        active = NaiAccountService(context).active_accounts()
+        if len(active) < 2:
+            return {}
+
+        usage_by_id: dict[str, Any] = {}
+        if main_summary is not None and any(a == MAIN_ACCOUNT_ID for a, _ in active):
+            main_usage = main_summary.get("usage") or {}
+            usage_by_id[MAIN_ACCOUNT_ID] = {
+                "percent": int(main_usage.get("percent", 0)),
+                "is_negative": bool(main_usage.get("is_negative", False)),
+                "anlas": main_summary.get("anlas"),
+            }
+        extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
+        usage_by_id.update(_fetch_extra_account_usage(_narrow_targets(context, extras)))
+        # 좁혀 물었으면 안 물어본 계정은 캐시 값을 그대로 이어 쓴다.
+        for account_id, cached in cached_account_usage(context).items():
+            usage_by_id.setdefault(account_id, cached)
+        _cache_account_usage(context, usage_by_id)
+        return usage_by_id
+    except Exception as exc:  # noqa: BLE001 - 배지 하나 때문에 세션이 죽으면 안 된다
+        print(f"[warn] account pool refresh failed: {exc}", flush=True)
+        return {}
+
+
+def combine_anlas(anlas_payload: dict[str, Any], usage_by_id: dict[str, Any]) -> None:
+    """계정이 둘 이상이면 Anlas pill 값을 **합계**로 바꾼다(제자리 수정)."""
+    if not anlas_payload.get("available"):
+        return
+    known = [u.get("anlas") for u in usage_by_id.values()]
+    known = [a for a in known if isinstance(a, int)]
+    if len(known) >= 2:
+        anlas_payload["anlas"] = sum(known)
+        anlas_payload["account_count"] = len(known)
+
+
 def _cache_account_usage(context: Any, usage_by_id: dict[str, Any]) -> None:
     """생성 경로가 읽어 갈 자리에 놓는다(`core.nai_account_service` 계약).
 
@@ -278,9 +341,15 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
             "type": "anlas_update", "available": True,
             "anlas": int(summary["anlas"]), "fetched_at": now,
         }
+    # 계정 조회는 **모델과 무관하다.** V4.5 에서도 계정이 둘이면 Anlas 를 합쳐 준다
+    # (사용자 지시 2026-08-21). 하나뿐이면 이 함수가 빈 dict 를 주고 요청도 안 낸다.
+    usage_by_id = refresh_account_pool(context, summary)
+    combine_anlas(anlas_payload, usage_by_id)
+
     usage_payload = usage_off
     usage = summary.get("usage")
-    # 사용량 배지는 **V5 를 고른 동안에만** 뜬다.
+    # 사용량 **배지**(퍼센트·막대)는 V5 를 고른 동안에만 뜬다 - V4.5 는 이 무료 풀을
+    # 안 쓰므로 퍼센트를 띄우면 거짓말이 된다. Anlas 합산과는 별개의 판단이다.
     if usage and _current_model_uses_usage_limit(context):
         usage_payload = {
             "type": "nai_usage_update", "available": True,
@@ -289,14 +358,11 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
             "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
             "fetched_at": now,
         }
-        _attach_accounts(context, usage_payload, usage, summary.get("anlas"),
-                         anlas_payload=anlas_payload)
+        _attach_accounts(context, usage_payload)
     return [anlas_payload, usage_payload]
 
 
-def _attach_accounts(context: Any, usage_payload: dict[str, Any],
-                     main_usage: dict[str, Any], main_anlas: Any = None,
-                     *, anlas_payload: dict[str, Any] | None = None) -> None:
+def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
     """다중 계정이면 계정별 사용량을 붙이고 배지 값을 **평균**으로 바꾼다.
 
     계정이 하나뿐이면 아무것도 하지 않는다 - 요청도 안 나가고, 배지는 지금까지와
@@ -315,20 +381,11 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any],
         active = service.active_accounts()
         if len(active) < 2:
             return
-
-        usage_by_id: dict[str, Any] = {}
-        if any(account_id == MAIN_ACCOUNT_ID for account_id, _ in active):
-            usage_by_id[MAIN_ACCOUNT_ID] = {
-                "percent": int(main_usage.get("percent", 0)),
-                "is_negative": bool(main_usage.get("is_negative", False)),
-                "anlas": main_anlas,
-            }
-        extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
-        usage_by_id.update(_fetch_extra_account_usage(_narrow_targets(context, extras)))
-        # 좁혀 물었으면 안 물어본 계정은 캐시 값을 그대로 이어 쓴다.
-        for account_id, cached in cached_account_usage(context).items():
-            usage_by_id.setdefault(account_id, cached)
-        _cache_account_usage(context, usage_by_id)
+        # 조회·캐시는 공용 함수가 한다(V5 밖에서도 같은 걸 쓴다). 이미 받아 둔
+        # 계정별 값을 그대로 읽는다 - 여기서 다시 물으면 요청이 두 배가 된다.
+        usage_by_id = dict(cached_account_usage(context))
+        if not usage_by_id:
+            return
 
         snapshot = service.snapshot()
         # 이번 라운드에 생성할 계정. ⚠️ **peek 이다** - 여기서 카운터를 올리면
@@ -350,20 +407,6 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any],
         usage_payload["is_negative"] = all(
             bool(u.get("is_negative")) for u in usage_by_id.values()
         ) if usage_by_id else False
-
-        # 계정이 둘 이상이면 좌상단 Anlas pill 도 **통합값**을 보여 준다(사용자 지정
-        # 2026-08-21). 한 계정 잔량만 띄우면 생성이 다른 계정에서 나갈 때 숫자가
-        # 안 움직여 "Anlas 가 안 준다" 로 보인다.
-        #
-        # 📌 남은 일(기록): 이 '1개면 숨김 / 2개 이상이면 표시' 정책을 **NAID5 이외
-        # 버전에도** 전파해야 한다(사용자 지정). 지금은 계정별 조회가 V5 경로에만
-        # 붙어 있어 V4.5 등에서는 통합 Anlas 를 만들 재료가 없다.
-        if anlas_payload is not None and anlas_payload.get("available"):
-            known = [u.get("anlas") for u in usage_by_id.values()]
-            known = [a for a in known if isinstance(a, int)]
-            if len(known) >= 2:
-                anlas_payload["anlas"] = sum(known)
-                anlas_payload["account_count"] = len(known)
     except Exception as exc:  # noqa: BLE001 - 배지 하나 때문에 세션이 죽으면 안 된다
         print(f"[warn] multi-token usage attach failed: {exc}", flush=True)
 

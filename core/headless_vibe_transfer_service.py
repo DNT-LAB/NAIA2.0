@@ -307,6 +307,20 @@ class HeadlessVibeTransferService:
                 "storage_type": "",
             }
 
+    def _model_supports_vibe(self) -> bool:
+        """지금 고른 모델이 Vibe Transfer 를 쓰는가(= 생성 페이로드에 실리는가).
+
+        NAI 모드가 아니면 판단 대상이 아니므로 True 로 둔다 - 여기서 False 를 주면
+        WEBUI/ComfyUI 에서 패널이 "이 모델은 Vibe 미지원" 이라고 잘못 말한다.
+        """
+        if str(self.context.get_api_mode() or "").upper() != "NAI":
+            return True
+        supports = getattr(self.context, "_nai_model_supports_vibe", None)
+        try:
+            return bool(supports()) if callable(supports) else True
+        except Exception:
+            return True
+
     # ----- Vibe 인코딩 (NAI /ai/encode-vibe 포팅, 2 Anlas/회) -----
     def _runtime_can_encode(self) -> bool:
         context = self.context
@@ -815,6 +829,14 @@ class HeadlessVibeTransferService:
         if not runtime_can_encode:
             unavailable_actions.insert(0, "encode")
         return context._module_state_payload("vibe_transfer", {
+            # 이 모델이 Vibe 자체를 지원하는가. `can_encode` 와 **다른 질문**이다 -
+            # can_encode 는 토큰/소스 유무까지 보는 '지금 인코딩 가능한가' 이고,
+            # 이건 '이 모델에서 Vibe 가 쓰이기는 하는가' 다.
+            #
+            # ⚠️ 이 값이 없으면 V5 에서 **조용히 무시된다**: 인코딩된 Vibe 를 켜 둔 채
+            # 생성하면 페이로드 게이트(`supports_vibe`)가 빼 버리는데 화면은 켜진
+            # 그대로라 사용자는 적용된 줄 안다.
+            "model_supports_vibe": self._model_supports_vibe(),
             "can_encode": runtime_can_encode,
             "can_write_clusters": False,
             "can_restore_metadata": True,

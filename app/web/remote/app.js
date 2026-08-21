@@ -7053,14 +7053,17 @@ function onNaiUsageUpdate(m) {
   value.textContent = `${pct}%`;
   pill.classList.toggle('is-out', !!m.is_negative);
   pill.classList.toggle('is-multi', multi);
+  // ⚠️ `seconds_until_next_percent` 는 이름과 달리 **카운트다운이 아니다.**
+  // 실측(2026-08-21): 계정 두 개가 잔량이 다른데도 같은 값(7888)이고, 15분이 지나도
+  // 줄지 않는다. 즉 "다음 1% 까지 남은 시간" 이 아니라 **1% 당 걸리는 주기**다.
+  // 그래서 "+1% 까지 N분" 이라고 쓰면 거짓말이 된다 - 회복 **속도**로 적는다.
+  // (86400/7888 = 하루 10.95% → NAI 자신도 "11% per day" 로 표시한다.)
   const secs = Number(m.seconds_until_next_percent) || 0;
-  const mins = Math.round(secs / 60);
-  const nextIn = secs > 0
-    ? (mins >= 60 ? `${Math.floor(mins / 60)}시간 ${mins % 60}분` : `${mins}분`)
-    : '';
+  const perDay = secs > 0 ? Math.round((86400 / secs) * 10) / 10 : 0;
+  const rate = perDay > 0 ? `하루 약 ${perDay}% 회복` : '';
   const base = m.is_negative
     ? 'V5 무료 사용량 소진 — 이후 생성은 Anlas 를 씁니다'
-    : `NovelAI Diffusion V5 Opus 사용량${nextIn ? ` · +1% 까지 ${nextIn}` : ''}`;
+    : `NovelAI Diffusion V5 Opus 사용량${rate ? ` · ${rate}` : ''}`;
   pill.title = multi
     ? `${base}\n계정 ${accounts.length}개 평균 · 눌러서 계정별 보기`
     : `${base}\n눌러서 계정 관리`;

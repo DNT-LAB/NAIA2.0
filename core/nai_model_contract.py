@@ -42,14 +42,25 @@ class NaiModelSpec:
 
     @property
     def supports_vibe(self) -> bool:
-        # NAIA의 현재 encode/apply 계약은 V4/V4.5 경로만 검증돼 있다.
-        # V5는 페이로드 구조가 같아 함께 열어 두지만 **라이브 검증은 아직 없다**.
-        return self.uses_v4_payload
+        """Vibe Transfer 를 쓸 수 있는 모델인가.
+
+        ⚠️ **V5 는 뺀다**(사용자 지시 2026-08-21, v2.0.34 최초 설치 테스트 후).
+        페이로드 구조가 같아 스키마상 필드는 남아 있지만 **V5 가 실제로 받는지
+        확인된 바가 없다**. 열어 두면 사용자가 Vibe 를 켜고 생성 -> Anlas 를 태우고
+        실패한다. 게다가 Vibe **인코딩**은 그 자체로 Anlas 를 쓴다(2 Anlas).
+
+        `uses_v4_payload` 에서 파생시키면 안 된다 - V5 는 `v4_prompt` 를 그대로 쓰므로
+        그 property 는 V5 에서도 True 다. 둘은 다른 질문이다.
+        """
+        return self.payload_profile in {"v4", "v4.5"}
 
     @property
     def supports_character_reference(self) -> bool:
-        # V5도 `director_reference_*` 를 그대로 받는다(스키마 확인). 라이브 미검증.
-        return self.payload_profile in {"v4.5", "v5"}
+        """Character Reference 를 쓸 수 있는 모델인가.
+
+        ⚠️ V5 는 뺀다 - 위 `supports_vibe` 와 같은 이유(스키마엔 있으나 라이브 미검증).
+        """
+        return self.payload_profile == "v4.5"
 
     @property
     def uses_legacy_smea(self) -> bool:

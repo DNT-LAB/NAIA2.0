@@ -18441,6 +18441,23 @@ select.setup-input { cursor: pointer; }
   content: '••'; margin-left: 4px; letter-spacing: -1px; color: #6f8cff;
 }
 .nai-usage-pill.hidden { display: none; }
+/* 테두리 점멸 두 종(사용자 지정 2026-08-21).
+   계정 전환 = 노랑 1회 / 사용량 1% 차감 = 연보라 2회.
+   빈도가 다른 사건이라 색과 횟수를 둘 다 다르게 해서 곁눈으로도 구분되게 한다. */
+@keyframes usage-flash-switch-kf {
+  0%, 100% { border-color: rgba(255,255,255,0.06); box-shadow: 0 0 0 0 rgba(242,224,138,0); }
+  30%      { border-color: #f2e08a; box-shadow: 0 0 10px 2px rgba(242,224,138,0.55); }
+}
+@keyframes usage-flash-spend-kf {
+  0%, 100% { border-color: rgba(255,255,255,0.06); box-shadow: 0 0 0 0 rgba(186,160,255,0); }
+  30%      { border-color: #baa0ff; box-shadow: 0 0 10px 2px rgba(186,160,255,0.6); }
+}
+.nai-usage-pill.usage-flash-switch { animation: usage-flash-switch-kf 0.7s ease-out 1; }
+.nai-usage-pill.usage-flash-spend  { animation: usage-flash-spend-kf 0.68s ease-out 2; }
+@media (prefers-reduced-motion: reduce) {
+  .nai-usage-pill.usage-flash-switch,
+  .nai-usage-pill.usage-flash-spend { animation: none; }
+}
 
 /* ---- 다중 계정(Multi Token) 팝오버 ---------------------------------------
    배지 바로 아래에 붙는다. 배지와 같은 컨테이너(.viewer-content)에 있어야
@@ -18627,6 +18644,10 @@ select.setup-input { cursor: pointer; }
   100% { box-shadow: 0 0 0 0 rgba(255,196,72,0); transform: scale(1); }
 }
 .anlas-pill.anlas-flash { animation: anlas-flash-kf 0.7s ease-out; }
+/* 여러 계정의 Anlas 를 합쳐 보여 주는 중 — USAGE 배지의 `••` 와 같은 표식을 쓴다. */
+.anlas-pill.is-combined .anlas-label::after {
+  content: '••'; margin-left: 4px; letter-spacing: -1px; color: #6f8cff;
+}
 .shell-toolbar .anlas-pill {
   position: static;
   z-index: auto;

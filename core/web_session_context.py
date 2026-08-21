@@ -587,6 +587,9 @@ class WebSessionContext:
     def _set_prompt_engineering_param(self, key: str, value: Any) -> dict[str, Any] | None:
         return self._prompt_engineering_service().set_param(key, value)
 
+    def sync_param_into_current_preset(self, key: str) -> str:
+        return self._prompt_engineering_service().sync_param_into_current_preset(key)
+
     def _conditional_prompt_module_state(self) -> dict[str, Any]:
         return self._conditional_prompt_service().state()
 

@@ -167,6 +167,13 @@ async def handle_session_command(
     if command_type == "set_param":
         key = str(command.get("key") or "")
         context.set_param(key, command.get("value"))
+        # 선택된 프리셋에 **즉시 반영**한다(사용자 지정 2026-08-21). 프리셋을 열어
+        # 둔 채 모델을 바꾸면 그 프리셋이 곧 새 모델의 프리셋이 된다.
+        #
+        # 프리셋을 **적용하는 중**에는 저절로 건너뛴다 - 그때 들어오는 값은 방금
+        # 프리셋에서 읽어 온 값이라 저장된 것과 같고, sync 쪽이 "값이 그대로면 쓰지
+        # 않는다" 로 걸러 낸다. 별도 플래그를 두지 않는 이유다.
+        synced_preset = context.sync_param_into_current_preset(key)
         recommended_applied = False
         if key.strip() in RECOMMENDED_PRESET_PARAM_TRIGGERS:
             recommended_applied = await broadcast_first_run_recommended_preset_payloads(
@@ -176,6 +183,13 @@ async def handle_session_command(
             )
         if not recommended_applied:
             await broadcast_json(clients, context.generation_param_schema_payload())
+        # 프리셋이 바뀌었으면 목록도 다시 보낸다 - 안 그러면 `[NAI5.0C]` 배지가
+        # 옛 모델을 계속 달고 있어 "반영 안 됐다" 로 보인다(제보의 원래 증상).
+        if synced_preset:
+            try:
+                await broadcast_json(clients, context.module_state_payload("prompt_engineering"))
+            except Exception as exc:  # pragma: no cover - 배지 갱신 실패가 세션을 막으면 안 됨
+                print(f"[warn] preset badge refresh failed: {exc}", flush=True)
         # 모델이 바뀌면 사용량 배지를 갱신한다. **절대 여기서 기다리지 않는다** -
         # 프리셋 적용이 이 경로를 타는데, await 하면 조회가 끝날 때까지 이 세션이
         # 다음 메시지를 못 받아 백엔드가 죽은 것처럼 보인다(사용자 지적 2026-08-21:

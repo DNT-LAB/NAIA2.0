@@ -249,12 +249,14 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
             "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
             "fetched_at": now,
         }
-        _attach_accounts(context, usage_payload, usage, summary.get("anlas"))
+        _attach_accounts(context, usage_payload, usage, summary.get("anlas"),
+                         anlas_payload=anlas_payload)
     return [anlas_payload, usage_payload]
 
 
 def _attach_accounts(context: Any, usage_payload: dict[str, Any],
-                     main_usage: dict[str, Any], main_anlas: Any = None) -> None:
+                     main_usage: dict[str, Any], main_anlas: Any = None,
+                     *, anlas_payload: dict[str, Any] | None = None) -> None:
     """다중 계정이면 계정별 사용량을 붙이고 배지 값을 **평균**으로 바꾼다.
 
     계정이 하나뿐이면 아무것도 하지 않는다 - 요청도 안 나가고, 배지는 지금까지와
@@ -304,6 +306,20 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any],
         usage_payload["is_negative"] = all(
             bool(u.get("is_negative")) for u in usage_by_id.values()
         ) if usage_by_id else False
+
+        # 계정이 둘 이상이면 좌상단 Anlas pill 도 **통합값**을 보여 준다(사용자 지정
+        # 2026-08-21). 한 계정 잔량만 띄우면 생성이 다른 계정에서 나갈 때 숫자가
+        # 안 움직여 "Anlas 가 안 준다" 로 보인다.
+        #
+        # 📌 남은 일(기록): 이 '1개면 숨김 / 2개 이상이면 표시' 정책을 **NAID5 이외
+        # 버전에도** 전파해야 한다(사용자 지정). 지금은 계정별 조회가 V5 경로에만
+        # 붙어 있어 V4.5 등에서는 통합 Anlas 를 만들 재료가 없다.
+        if anlas_payload is not None and anlas_payload.get("available"):
+            known = [u.get("anlas") for u in usage_by_id.values()]
+            known = [a for a in known if isinstance(a, int)]
+            if len(known) >= 2:
+                anlas_payload["anlas"] = sum(known)
+                anlas_payload["account_count"] = len(known)
     except Exception as exc:  # noqa: BLE001 - 배지 하나 때문에 세션이 죽으면 안 된다
         print(f"[warn] multi-token usage attach failed: {exc}", flush=True)
 

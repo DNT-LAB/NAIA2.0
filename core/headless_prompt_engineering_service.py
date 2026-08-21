@@ -459,6 +459,66 @@ class HeadlessPromptEngineeringService:
             captured[key] = value
         return captured
 
+    def sync_param_into_current_preset(self, key: str) -> str:
+        """방금 바꾼 생성 파라미터를 **선택된 프리셋에 즉시 반영**한다.
+
+        사용자 지정(2026-08-21): "원래 수정할 때마다 바로 반영되어야 합니다."
+        프리셋을 열어 둔 채 모델을 바꾸면 그 프리셋이 곧 새 모델의 프리셋이 된다.
+
+        ⚠️ **스냅샷이 아니라 병합이다.** `_capture_main_settings()` 를 그대로 쓰면
+        지금 프롬프트 상자에 있는 글까지 같이 저장된다 - 프리셋을 고르고 Random 을
+        몇 번 돌린 뒤 steps 를 만지면, 그 프리셋의 프롬프트가 마지막 랜덤 결과로
+        덮어써진다. 바꾼 키 하나만 얹어 나머지(프롬프트 포함)는 건드리지 않는다.
+        프롬프트까지 통째로 넣고 싶으면 명시적 저장을 쓴다.
+
+        ⚠️ 디스크 쓰기지 네트워크가 아니다. 예전 프리셋 사고(밀린 쓰기가 앞 프리셋
+        값을 덮어씀)는 이 경로에 **구독 조회를 await** 해서 생긴 것이지 저장 자체가
+        원인이 아니었다(사용자 확인). 그 조회는 이미 비차단으로 바뀌었다.
+
+        반환: 반영한 프리셋 이름. 반영할 게 없으면 빈 문자열.
+        """
+        key = str(key or "").strip()
+        if not key or key.startswith("_"):
+            return ""
+        from core.headless_remote_state_service import RUNTIME_REMOTE_PARAM_KEYS
+        from core.prompt_engineering_settings import (
+            PRESET_RUNTIME_STATE_KEYS,
+            get_prompt_engineering_store,
+        )
+
+        # 세션 전역으로 두는 값은 프리셋에 싣지 않는다. ⚠️ 목록이 **둘**이다 -
+        # 저장 시 `normalize_preset_main_settings` 가 `PRESET_RUNTIME_STATE_KEYS`
+        # (랜덤 해상도 등)를 어차피 벗겨 내므로, 그 키로 여기까지 오면 파일은 안
+        # 바뀌는데 "반영했다" 고 답하고 쓸데없이 쓰기까지 한다.
+        if key in RUNTIME_REMOTE_PARAM_KEYS or key in PRESET_RUNTIME_STATE_KEYS:
+            return ""
+        try:
+            context = self.context
+            store = get_prompt_engineering_store(context)
+            mode_key = context.get_api_mode()
+            state = store.state(mode_key)
+            name = str(state.get("current_preset") or "")
+            # 고른 프리셋이 없거나 '랜덤' 자리면 반영할 대상이 없다.
+            if name in {"", "(프리셋 없음)", "*randomized"}:
+                return ""
+            if key not in dict(context.remote_params or {}):
+                return ""
+
+            data = store.read_preset_data(name, mode_key)
+            if not data:
+                return ""
+            main_settings = data.get("main_settings")
+            main_settings = dict(main_settings) if isinstance(main_settings, dict) else {}
+            new_value = dict(context.remote_params)[key]
+            if main_settings.get(key) == new_value:
+                return ""                       # 값이 그대로면 쓰지 않는다
+            main_settings[key] = new_value
+            ok, _message = store.save_current_preset(mode_key, main_settings=main_settings)
+            return name if ok else ""
+        except Exception as exc:  # noqa: BLE001 - 프리셋 반영 실패가 파라미터 변경을 막으면 안 된다
+            print(f"[warn] preset param sync failed for {key}: {exc}", flush=True)
+            return ""
+
     def _apply_preset_main_settings_response(self, store: Any, preset_name: str):
         """On a preset swap, restore the preset's generation params + prompt and
         surface params/prompt_sync so the client UI updates."""

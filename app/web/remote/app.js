@@ -7006,13 +7006,48 @@ function setLauncherConn(on) {
 // 세밀한 표시는 하지 않고, 회복까지 남은 시간만 툴팁에 얹는다.
 // 다중 계정이면 `percent` 는 **평균**으로 온다(사용자 명세: "통합 SUM -> AVG").
 // 계정별 값은 배지를 눌러 여는 팝오버가 그린다 - naiAccountPanel.mjs.
+// 배지 테두리 점멸 — 두 가지를 **다른 색·다른 횟수**로 구분한다(사용자 지정
+// 2026-08-21). 퍼센트는 정수라 1% 가 움직이는 건 17장쯤에 한 번뿐이라, 계정이
+// 바뀌는 것과 사용량이 실제로 닳는 것은 빈도가 전혀 다른 사건이다.
+//   계정 전환   노랑   1회
+//   1% 차감     연보라 2회
+let lastUsagePercent = null;
+let lastUsageAccount = null;
+let usageFlashTimer = null;
+function flashUsagePill(kind) {
+  const pill = $('naiUsagePill');
+  if (!pill) return;
+  pill.classList.remove('usage-flash-switch', 'usage-flash-spend');
+  void pill.offsetWidth;          // reflow — 연속 발생 시 매번 다시 재생된다.
+  pill.classList.add(kind === 'spend' ? 'usage-flash-spend' : 'usage-flash-switch');
+  if (usageFlashTimer) clearTimeout(usageFlashTimer);
+  usageFlashTimer = setTimeout(() => {
+    pill.classList.remove('usage-flash-switch', 'usage-flash-spend');
+  }, kind === 'spend' ? 1500 : 800);
+}
+
 function onNaiUsageUpdate(m) {
   const pill = $('naiUsagePill');
   const value = $('naiUsageValue');
   if (naiAccountPanel) naiAccountPanel.onUsageUpdate(m);
   if (!pill || !value) return;
-  if (!m || !m.available) { pill.classList.add('hidden'); return; }
+  if (!m || !m.available) {
+    pill.classList.add('hidden');
+    // 숨김 시 기준을 지운다 - 재표시 첫 값에 오점멸이 나지 않게.
+    lastUsagePercent = null;
+    lastUsageAccount = null;
+    return;
+  }
   const pct = Number.isFinite(m.percent) ? m.percent : 0;
+  // 차감이 우선이다. 한 번에 둘 다 일어나면 드문 쪽(1% 차감)을 보여 준다.
+  const nextAccount = m.next_account_id || null;
+  if (lastUsagePercent !== null && pct < lastUsagePercent) {
+    flashUsagePill('spend');
+  } else if (lastUsageAccount !== null && nextAccount && nextAccount !== lastUsageAccount) {
+    flashUsagePill('switch');
+  }
+  lastUsagePercent = pct;
+  if (nextAccount) lastUsageAccount = nextAccount;
   const accounts = Array.isArray(m.accounts) ? m.accounts : [];
   const multi = accounts.length > 1;
   value.textContent = `${pct}%`;
@@ -7059,6 +7094,14 @@ function onAnlasUpdate(m) {
   const n = Number(m.anlas || 0);
   anlasPill.classList.toggle('low', n > 0 && n < 100);
   anlasValue.textContent = n.toLocaleString();
+  // 계정이 둘 이상이면 서버가 **합계**를 보낸다(사용자 지정 2026-08-21). 한 계정
+  // 잔량만 띄우면 생성이 다른 계정에서 나갈 때 숫자가 안 움직여 "Anlas 가 안 준다"
+  // 로 보인다. 합계라는 것을 툴팁과 표식으로 알린다.
+  const accounts = Number(m.account_count) || 0;
+  anlasPill.classList.toggle('is-combined', accounts > 1);
+  anlasPill.title = accounts > 1
+    ? `NAI Anlas — 계정 ${accounts}개 합계`
+    : 'NAI subscription';
   // 잔량이 줄었을 때만(=소비) pill을 짧게 점멸. 초기 로드(기준 없음)·충전(증가)은 제외.
   if (lastAnlasValue !== null && n < lastAnlasValue) flashAnlasPill();
   lastAnlasValue = n;

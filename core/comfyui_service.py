@@ -6,6 +6,9 @@ from typing import Dict, Any, Optional, Callable, List
 from PIL import Image
 from io import BytesIO
 
+# combo 선택지 추출은 legacy/V3 두 스키마를 아는 이 헬퍼 하나로 모은다.
+from core.headless_api_option_service import extract_combo_options
+
 class ComfyUIService:
     """
     ComfyUI API 통신을 담당하는 서비스 클래스
@@ -357,25 +360,25 @@ class ComfyUIService:
                 object_info = response.json()
                 all_models = set()  # 중복 제거를 위한 set
 
-                # 1. CheckpointLoaderSimple 모델 수집
-                checkpoint_loader = object_info.get('CheckpointLoaderSimple', {})
-                ckpt_input = checkpoint_loader.get('input', {}).get('required', {})
-                ckpt_info = ckpt_input.get('ckpt_name', [])
-
-                if isinstance(ckpt_info, list) and len(ckpt_info) > 0:
-                    checkpoint_models = ckpt_info[0]
-                    all_models.update(checkpoint_models)
-                    print(f"🔍 CheckpointLoader: {len(checkpoint_models)}개 모델 발견")
-
-                # 2. UNETLoader 모델 수집
-                unet_loader = object_info.get('UNETLoader', {})
-                unet_input = unet_loader.get('input', {}).get('required', {})
-                unet_info = unet_input.get('unet_name', [])
-
-                if isinstance(unet_info, list) and len(unet_info) > 0:
-                    unet_models = unet_info[0]
-                    all_models.update(unet_models)
-                    print(f"🔍 UNETLoader: {len(unet_models)}개 모델 발견")
+                # CheckpointLoaderSimple + UNETLoader 모델 수집.
+                # 선택지 추출은 legacy/V3 스키마를 모두 아는 단일 헬퍼에 위임한다.
+                #
+                # ⚠️ 예전에는 `spec[0]` 을 그대로 `set.update()` 에 넣었다. V3 스펙에서는
+                # 그게 문자열 "COMBO" 라, set 이 **글자 단위로 쪼개** 모델 이름 C/O/M/B
+                # 를 만들었다(같은 버그의 더 나쁜 형태).
+                for node_name, key in (
+                    ('CheckpointLoaderSimple', 'ckpt_name'),
+                    ('UNETLoader', 'unet_name'),
+                ):
+                    node = object_info.get(node_name) or {}
+                    spec = (node.get('input') or {}).get('required', {}).get(key)
+                    found = [
+                        str(value).strip()
+                        for value in extract_combo_options(spec)
+                        if not isinstance(value, (dict, list)) and str(value or "").strip()
+                    ]
+                    all_models.update(found)
+                    print(f"[ComfyUI] {node_name}: {len(found)} models")
 
                 # 3. 정렬하여 반환
                 if all_models:

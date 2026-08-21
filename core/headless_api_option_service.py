@@ -90,7 +90,11 @@ class HeadlessApiOptionService:
             response = requests.get(f"{normalized_url}/object_info", timeout=10)
             response.raise_for_status()
             object_info = response.json() or {}
-        except Exception:
+        except Exception as exc:
+            # 통째로 삼키면 프런트가 하드코딩 폴백(["ComfyUI Workflow"])으로 조용히
+            # 되돌아가, 사용자에게는 "연결은 됐는데 모델이 안 뜬다" 로만 보인다.
+            # (백엔드 print 는 cp949 콘솔에서 깨지므로 ASCII 만 쓴다.)
+            print(f"[ComfyUI] option refresh failed: {exc}", flush=True)
             return {}
         return extract_comfyui_options(object_info)
 
@@ -141,11 +145,36 @@ def extract_comfyui_options(object_info: dict[str, Any]) -> dict[str, list[str]]
     })
 
 
-def _extract_option_list(spec: Any) -> list[str]:
+def extract_combo_options(spec: Any) -> list[Any]:
+    """ComfyUI combo 입력 스펙에서 선택지 목록을 꺼낸다.
+
+    ComfyUI 가 combo 스키마를 V3 로 이관하는 중이라 `/object_info` 응답에 **두 형식이
+    공존한다.** 한쪽만 파싱하면 다른 쪽 노드의 선택지가 통째로 유실된다.
+
+      legacy : [["a", "b"], {...}]              -> spec[0]
+      V3     : ["COMBO", {"options": ["a","b"]}] -> spec[1]["options"]
+      bare   : ["enable", "disable"]            -> spec 자체
+
+    ⚠️ V3 를 legacy 로 읽으면 `spec[0]` 이 타입명 문자열 `"COMBO"` 라, 그게 **선택지인 척
+    목록에 섞인다.** 실측(733노드 인스턴스)에서 `LTXVAudioVAELoader` ·
+    `LTXAVTextEncoderLoader` · `BasicScheduler` · `KSamplerSelect` 가 이미 V3 라
+    모델/샘플러/스케줄러 목록에 `COMBO` 유령이 하나씩 들어와 있었다.
+    """
     if not isinstance(spec, list) or not spec:
         return []
     first = spec[0]
-    values = first if isinstance(first, list) else spec
+    if isinstance(first, list):
+        return first
+    # V3: spec[0] 은 타입명("COMBO"/"INT"...), 선택지는 spec[1]["options"].
+    # 타입명을 값으로 오인해 "COMBO" 유령을 만들던 자리다.
+    if isinstance(first, str) and len(spec) > 1 and isinstance(spec[1], dict):
+        options = spec[1].get("options")
+        return options if isinstance(options, list) else []
+    return spec
+
+
+def _extract_option_list(spec: Any) -> list[str]:
+    values = extract_combo_options(spec)
     if not isinstance(values, list):
         return []
     return [

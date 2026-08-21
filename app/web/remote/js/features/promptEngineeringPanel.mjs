@@ -208,7 +208,14 @@ export function createPromptEngineeringPanel({
    *  커스텀 위젯으로 대체되는데(customSelects.mjs) 그 메뉴는 `select.options` 를
    *  통째로 훑고 `hidden` 을 보지 않는다. 대신 select 를 MutationObserver 로
    *  지켜보고 있어서, 자식을 갈아 끼우면 메뉴가 알아서 다시 그려진다. */
-  function applyPresetFilter() {
+  /** @param opts.syncOpen 검색어 변화에 맞춰 목록을 열고 닫을까.
+   *
+   *  ⚠️ **검색 경로에서만 true 다.** 예전에는 이 함수가 끝에서 무조건 열림 상태를
+   *  건드렸는데, 갈래 필터(ALL/NAI5/…)도 이 함수를 부르므로 **버튼을 누를 때마다
+   *  목록이 닫혔다**(사용자 지적 2026-08-21: "버튼을 클릭할 때 콤보박스에서 포커스가
+   *  빠진다"). 필터는 목록 안에 있는 버튼이라 닫히면 연달아 못 누른다. */
+  function applyPresetFilter(opts) {
+    const syncOpen = !!(opts && opts.syncOpen);
     const select = document.getElementById('modPreset');
     if (!select) return;
     if (!presetAllOptions) presetAllOptions = Array.from(select.options);
@@ -271,8 +278,10 @@ export function createPromptEngineeringPanel({
     // **검색하면 목록이 저절로 열린다.** 따로 눌러야 결과가 보이면 걸렀는지조차
     // 알 수 없다(사용자 지정 2026-08-08). 여는 쪽은 포커스를 옮기지 않으므로
     // 검색창에서 계속 칠 수 있다. 검색어를 지우면 닫는다.
-    select.dispatchEvent(new CustomEvent(
-      terms.length ? 'naia:select-open' : 'naia:select-close'));
+    if (syncOpen) {
+      select.dispatchEvent(new CustomEvent(
+        terms.length ? 'naia:select-open' : 'naia:select-close'));
+    }
   }
 
   // 갈래 필터의 마지막 선택. 세션이 아니라 **다음 실행까지** 기억한다(사용자 지정).
@@ -304,12 +313,12 @@ export function createPromptEngineeringPanel({
     input.dataset.bound = '1';
     input.addEventListener('input', () => {
       presetQuery = input.value;
-      applyPresetFilter();
+      applyPresetFilter({ syncOpen: true });
     });
     // 검색어를 지우는 것은 '전체로 되돌리기'다 — search 입력의 ✕ 도 여기로 온다.
     input.addEventListener('search', () => {
       presetQuery = input.value;
-      applyPresetFilter();
+      applyPresetFilter({ syncOpen: true });
     });
   }
 

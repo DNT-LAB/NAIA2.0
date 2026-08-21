@@ -7308,7 +7308,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260821-presetfilter')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260821-presetfilter2')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

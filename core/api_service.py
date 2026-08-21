@@ -414,9 +414,12 @@ class APIService:
                     after_check.remove(fix_check[i])
                 elif v.startswith("sampler:"):
                     val = v[8:]
-                    valid_samplers = ["k_euler", "k_euler_ancestral", "k_dpmpp_2m",
-                                      "k_dpmpp_2s_ancestral", "k_dpmpp_sde", "k_dpmpp_2m_sde", "ddim_v3"]
-                    if val in valid_samplers:
+                    # 목록은 계약이 갖고 있다(UI 목록과 어긋나지 않게).
+                    # 예전 하드코딩은 `ddim` 을 빠뜨려 UI 가 낼 수 있는 값을 되레
+                    # 거부했다 - 계약의 집합은 UI 전체 + V3 옛 이름(`ddim_v3`)이다.
+                    from core.nai_model_contract import NAI_VALID_SAMPLERS
+
+                    if val in NAI_VALID_SAMPLERS:
                         parameters['sampler'] = val
                     after_check.remove(fix_check[i])
                 elif v.startswith("scheduler:"):

@@ -7,7 +7,7 @@ from typing import Any
 import re
 
 from core.headless_remote_state_service import HeadlessRemoteStateService
-from core.nai_model_contract import NAI_REMOTE_MODEL_KEYS
+from core.nai_model_contract import NAI_REMOTE_MODEL_KEYS, NAI_SAMPLER_OPTIONS
 
 # 해상도 매니저가 저장하는 모드 키 (params_workflow_routes.REMOTE_RESOLUTION_MODES와 동일).
 _RESOLUTION_MODES = ("NAI", "WEBUI", "COMFYUI")
@@ -338,7 +338,7 @@ class HeadlessSessionStateService:
             return ["Euler a", "Euler", "DPM++ 2M", "DPM++ 2M Karras"]
         if mode == "COMFYUI":
             return ["euler", "euler_ancestral", "dpmpp_2m", "dpmpp_sde"]
-        return ["k_euler_ancestral", "k_euler", "k_dpmpp_2m", "ddim"]
+        return list(NAI_SAMPLER_OPTIONS)
 
     @staticmethod
     def scheduler_options_for_mode(mode: str) -> list[str]:

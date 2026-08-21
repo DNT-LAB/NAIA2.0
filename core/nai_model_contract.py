@@ -229,6 +229,35 @@ NAI_API_MODEL_BY_KEY = {
 }
 
 
+# ---- 샘플러 -----------------------------------------------------------------
+#
+# NAI 공식 UI 가 내놓는 순서 그대로다(2026-08-21 사용자 제보 화면 기준):
+#     Euler Ancestral(권장) · Euler · DPM++ 2S Ancestral · DPM++ 2M SDE ·
+#     DPM++ 2M · DPM++ SDE
+# 여기에 NAIA 가 예전부터 제공하던 `ddim`(V3 계열)을 뒤에 붙인다.
+#
+# ⚠️ **목록이 세 곳에 복제돼 있었다** - 여기(백엔드) 말고 프런트의
+# `characterCreationBench.mjs` / `characterAssetTab.mjs` 에도 같은 배열이 있다.
+# 그래서 넷만 있는 채로 오래 방치됐다(사용자: "2M SDE 는 빠져있네요?").
+# `tests/test_nai_sampler_options.py` 가 세 목록이 어긋나면 잡는다.
+#
+# ⚠️ Swagger 로는 확인이 안 된다 - NAI OpenAPI 는 스키마가 3개뿐이고 샘플러를
+# 열거하지 않는다(실측: `euler` 문자열조차 없음). 이름의 근거는 공식 UI 와
+# `api_service` 가 예전부터 갖고 있던 검증 목록이다.
+NAI_SAMPLER_OPTIONS: tuple[str, ...] = (
+    "k_euler_ancestral",
+    "k_euler",
+    "k_dpmpp_2s_ancestral",
+    "k_dpmpp_2m_sde",
+    "k_dpmpp_2m",
+    "k_dpmpp_sde",
+    "ddim",
+)
+
+# 메타데이터/자동수정 경로가 받아들이는 값. UI 가 낼 수 있는 것 전부 + V3 의 옛 이름.
+NAI_VALID_SAMPLERS: frozenset[str] = frozenset(NAI_SAMPLER_OPTIONS) | {"ddim_v3"}
+
+
 # ---- 프리셋 목록에 붙는 모델 배지 -------------------------------------------
 #
 # Quick Preset 목록에서 프리셋 이름 앞에 `[NAI4.5C]` 처럼 붙는 짧은 라벨과, 그 위

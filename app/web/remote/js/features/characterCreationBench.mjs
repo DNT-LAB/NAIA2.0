@@ -119,7 +119,9 @@ export function createCharacterCreationBench({
     return profiles.current;
   }
 
-  const NAI_SAMPLER_OPTIONS = ['k_euler_ancestral', 'k_euler', 'k_dpmpp_2m', 'ddim'];
+  // NAI 공식 UI 순서. ⚠️ 백엔드 core/nai_model_contract.NAI_SAMPLER_OPTIONS 와
+  // **같은 목록이어야 한다** - tests/test_nai_sampler_options.py 가 어긋나면 잡는다.
+  const NAI_SAMPLER_OPTIONS = ['k_euler_ancestral', 'k_euler', 'k_dpmpp_2s_ancestral', 'k_dpmpp_2m_sde', 'k_dpmpp_2m', 'k_dpmpp_sde', 'ddim'];
   const NAI_SCHEDULER_OPTIONS = ['karras', 'native', 'exponential', 'polyexponential'];
 
   function openCustomPanel() {

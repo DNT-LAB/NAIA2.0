@@ -176,6 +176,46 @@ def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
     return out
 
 
+# 좁혀 묻기를 멈추고 전 계정을 다시 훑는 주기. 생성하지 않은 계정도 시간당 0.46%씩
+# 회복되므로, 오래 안 물으면 캐시가 실제보다 **낮게** 남아 동적 할당이 그 계정을
+# 계속 뒤로 미룬다. 이 주기가 그 편차의 상한이다.
+ACCOUNT_USAGE_FULL_REFRESH_SECONDS = 300
+
+
+def _narrow_targets(context: Any, extras: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """이번에 실제로 물어볼 계정만 골라 준다.
+
+    생성 직후에는 **방금 생성한 계정 하나**로 좁힌다. 이번 생성으로 값이 변할 수
+    있는 계정은 그것뿐이고, 나머지를 매번 같이 묻는 것은 계정 수만큼 요청이 늘 뿐이다
+    (사용자 지적 2026-08-21: "동적 할당에서 매 생성마다 두 계정이 동시에 조회").
+
+    좁히지 않는 경우:
+      - 생성 맥락이 아니다(접속 / 모델 변경 / 계정 추가·삭제) -> 전부
+      - 캐시가 없거나 빠진 계정이 있다                        -> 전부
+      - 캐시가 5분 넘게 묵었다                                -> 전부(회복분 반영)
+    """
+    from core.nai_account_service import (
+        LAST_GENERATION_ACCOUNT_ATTR,
+        account_usage_cache_age,
+        cached_account_usage,
+    )
+
+    # **한 번 쓰고 지운다.** 안 지우면 생성 이후의 모든 갱신(모델 변경 · 계정 추가 ·
+    # 재접속)이 계속 그 계정 하나만 물어, 나머지가 영영 안 새로워진다.
+    target = str(getattr(context, LAST_GENERATION_ACCOUNT_ATTR, "") or "")
+    if target:
+        setattr(context, LAST_GENERATION_ACCOUNT_ATTR, "")
+    if not target:
+        return extras
+    cached = cached_account_usage(context)
+    if not cached or any(account_id not in cached for account_id, _ in extras):
+        return extras
+    if account_usage_cache_age(context) >= ACCOUNT_USAGE_FULL_REFRESH_SECONDS:
+        return extras
+    # 메인이 생성했으면 추가 계정은 하나도 안 묻는다 - 메인 구독은 위에서 이미 받았다.
+    return [(a, t) for a, t in extras if a == target]
+
+
 def _account_rows(context: Any, usage_by_id: dict[str, Any],
                   next_account_id: str) -> list[dict[str, Any]]:
     """패널이 그릴 계정 행. **토큰 전문은 넣지 않는다**(앞 7자 미리보기만)."""
@@ -266,6 +306,7 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any],
     from core.nai_account_service import (
         MAIN_ACCOUNT_ID,
         NaiAccountService,
+        cached_account_usage,
         peek_rotation_counter,
     )
 
@@ -283,7 +324,10 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any],
                 "anlas": main_anlas,
             }
         extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
-        usage_by_id.update(_fetch_extra_account_usage(extras))
+        usage_by_id.update(_fetch_extra_account_usage(_narrow_targets(context, extras)))
+        # 좁혀 물었으면 안 물어본 계정은 캐시 값을 그대로 이어 쓴다.
+        for account_id, cached in cached_account_usage(context).items():
+            usage_by_id.setdefault(account_id, cached)
         _cache_account_usage(context, usage_by_id)
 
         snapshot = service.snapshot()

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,21 @@ def token_preview(token: str | None) -> str:
 # 때리게 되고, 그 조회는 실측 8초까지 걸린다. 그래서 "있으면 쓰고 없으면 모른다"
 # 로 둔다. 모르면 balancer 가 전부 미소진·동률로 보고 라운드 로빈으로 눕는다.
 ACCOUNT_USAGE_CACHE_ATTR = "headless_account_usage_cache"
+
+# 직전 생성이 어느 계정으로 나갔는지. 생성 직후 재조회가 **그 계정만** 묻기 위해
+# 쓴다 - 나머지 계정은 이번 생성으로 값이 변할 수가 없다.
+LAST_GENERATION_ACCOUNT_ATTR = "nai_last_generation_account"
+
+
+def account_usage_cache_age(context: Any) -> float:
+    """계정별 사용량 캐시가 얼마나 묵었는가(초). 없으면 무한대."""
+    cached = getattr(context, ACCOUNT_USAGE_CACHE_ATTR, None)
+    if isinstance(cached, tuple) and len(cached) == 2:
+        try:
+            return max(0.0, time.monotonic() - float(cached[0]))
+        except (TypeError, ValueError):
+            return float("inf")
+    return float("inf")
 
 
 def cached_account_usage(context: Any) -> dict[str, Any]:

@@ -601,6 +601,7 @@ class APIService:
         try:
             from core.nai_account_balancer import select_account
             from core.nai_account_service import (
+                LAST_GENERATION_ACCOUNT_ATTR,
                 NaiAccountService,
                 cached_account_usage,
                 next_rotation_counter,
@@ -628,7 +629,11 @@ class APIService:
             if not token:
                 # 정책이 목록 밖의 id 를 돌려줄 일은 없지만, 그렇게 되면 토큰 없이
                 # 생성을 시도하다 인증 오류가 난다. 첫 계정으로 눕힌다.
-                return active[0][1]
+                selected_id, token = active[0]
+            # 생성 직후 재조회가 **이 계정만** 묻도록 남긴다. 이번 생성으로 값이
+            # 변할 수 있는 계정은 여기 하나뿐이고, 나머지를 매번 같이 묻는 것은
+            # 계정 수만큼 요청이 늘 뿐이다(사용자 지적 2026-08-21).
+            setattr(self.app_context, LAST_GENERATION_ACCOUNT_ATTR, selected_id)
             print(f"[multi-token] policy={policy} counter={counter} "
                   f"picked={selected_id} of {len(active)}", flush=True)
             return token

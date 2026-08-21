@@ -5262,9 +5262,26 @@ function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
 function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh(); }
 
+// 결과 화면의 [Upscale] — 우클릭 메뉴의 'NAI 2x 업스케일' 과 **같은 경로**다
+// (`result_upscale` 커맨드). 자주 쓰는 것을 메뉴 두 단계 안쪽에 두지 않으려고
+// Director 와 Enhance 사이에 버튼을 뒀다(사용자 지시 2026-08-21).
+//
+// 업스케일은 모델을 안 받는 별도 엔드포인트(`/ai/upscale`)라 V5 에서도 그냥 된다 -
+// img2img 계열처럼 4.5 로 대체할 필요가 없다.
+function requestResultUpscale() {
+  callResultImageAction('upscaleFromContext', {source: 'current'});
+}
+
 // NAI Director Tools (제거 가능) — NAI 계정이 등록돼 있으면(api_status.nai_configured) 모드 무관 활성.
 function updateNaiDirectorButton() {
   if (naiDirectorBtn) naiDirectorBtn.disabled = !naiConfigured;
+  // Upscale 은 **NAI 모드에서만** 뜻이 있다(엔드포인트가 NAI 전용). Director 는
+  // 모드 무관이라 조건이 다르다 - 같이 묶지 않는다.
+  const upscaleBtn = $('resultUpscaleBtn');
+  if (upscaleBtn) {
+    upscaleBtn.disabled = !naiConfigured
+      || (currentMode || modeSelect?.value || '') !== 'NAI';
+  }
 }
 async function openNaiDirector(presetContext = null) {
   if (!naiConfigured) { showToast('NAI 계정이 등록되어 있지 않습니다 (API 설정 → NAI).', 'error'); return; }
@@ -6677,6 +6694,9 @@ function syncMode(mode) {
   updatePromptTokenEstimate();
   updateRandomPromptWeightRow(mode);
   applyComfyUiFreeParamLock(mode);
+  // Upscale 은 NAI 전용이라 모드가 바뀌면 다시 판정해야 한다(Director 는 모드 무관이라
+  // 지금까지 이 자리에서 갱신할 이유가 없었다).
+  updateNaiDirectorButton();
   if (moduleBadges) moduleBadges.updateModeState();
   // 모드 전용 모듈 상태 갱신 (NAI 전용 도구는 비NAI에서 숨김)
   const isNai = mode === 'NAI';

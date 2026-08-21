@@ -34,6 +34,7 @@ from core.character_settings import (
 from core.nai_model_contract import (
     DEFAULT_NAI_MODEL_SPEC,
     NaiModelSpec,
+    nai_img2img_fallback_key,
     normalize_nai_model_key,
     resolve_nai_model_for_context,
 )
@@ -691,6 +692,22 @@ class APIService:
             action_type = "generate"
             if is_img2img:
                 action_type = "infill" if params.get('type') == 'inpaint' else "img2img"
+                # V5 는 인페인트/img2img 를 제공하지 않는다 - 같은 계열의 V4.5 로
+                # 자동 대체한다(사용자 지시 2026-08-21). Enhance 도 image_bytes 를
+                # 싣고 오므로 이 분기를 그대로 탄다.
+                #
+                # ⚠️ 대체를 안 하면 스펙의 **추정** V5 인페인트 모델명이 그대로 나가
+                # 서버가 거부한다 - 그때는 이미 Anlas 를 문 뒤다.
+                fallback_key = nai_img2img_fallback_key(model_spec.key)
+                if fallback_key:
+                    model_spec = resolve_nai_model_for_context(self.app_context, fallback_key)
+                    model_name = model_spec.api_model
+                    params["_nai_img2img_fallback_model"] = model_spec.key
+                    print(
+                        f"↪️ [NAI] {selected_model_spec.key} 는 {action_type} 미지원: "
+                        f"{model_spec.key} ({model_name}) 로 대체",
+                        flush=True,
+                    )
             if params.get('type') == 'inpaint':
                 if not model_spec.inpainting_api_model:
                     if model_spec.source != "user":

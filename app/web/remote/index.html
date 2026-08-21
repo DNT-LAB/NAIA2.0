@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260821-usagecount">
+<link rel="stylesheet" href="style.css?v=20260821-upscale">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -853,6 +853,7 @@
             <div class="ia-ge-groups" id="iaGlobalGroups" hidden></div>
             <div class="result-enhance-controls">
               <button class="result-enhance-btn nai-director-btn" id="naiDirectorBtn" onclick="openNaiDirector()" title="NAI Director Tools (현재 결과 변형)" disabled>Director</button>
+              <button class="result-enhance-btn" id="resultUpscaleBtn" onclick="requestResultUpscale()" title="NAI 2x 업스케일 (현재 결과) — Anlas 를 씁니다" disabled>Upscale</button>
               <button class="result-enhance-btn" id="resultEnhanceBtn" onclick="requestResultEnhance()" disabled>Enhance</button>
               <button class="result-enhance-settings-btn" id="resultEnhanceSettingsBtn" title="Enhance settings" aria-label="Enhance settings">⚙</button>
             </div>
@@ -1270,6 +1271,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260821-usagecount"></script>
+<script src="app.js?v=20260821-upscale"></script>
 </body>
 </html>

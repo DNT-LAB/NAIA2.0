@@ -229,6 +229,28 @@ NAI_API_MODEL_BY_KEY = {
 }
 
 
+# ---- img2img 계열 대체 모델 --------------------------------------------------
+#
+# **V5 는 인페인트/img2img 를 아직 제공하지 않는다**(사용자 확인 2026-08-21).
+# 그 액션에서는 같은 계열의 V4.5 로 자동 대체한다 - Full 은 Full 로, Curated 는
+# Curated 로.
+#
+# ⚠️ 스펙의 `inpainting_api_model`(`nai-diffusion-5-*-inpainting`)은 웹 번들 스키마에서
+# 따온 **추정치**이고 라이브로 확인된 적이 없다. 그대로 보내면 서버가 거부하거나
+# 조용히 실패하는데, 그 장은 이미 Anlas 를 문 뒤다. 검증된 4.5 로 보내는 편이 낫다.
+#
+# Upscale 은 여기 없다 - `/ai/upscale` 은 모델을 안 받는다(그래서 V5 에서도 그냥 된다).
+NAI_IMG2IMG_FALLBACK_KEYS: dict[str, str] = {
+    "NAID5F": "NAID4.5F",
+    "NAID5C": "NAID4.5C",
+}
+
+
+def nai_img2img_fallback_key(model_key: Any) -> str:
+    """img2img/인페인트/Enhance 에서 대신 쓸 모델 키. 대체가 필요 없으면 빈 문자열."""
+    return NAI_IMG2IMG_FALLBACK_KEYS.get(normalize_nai_model_key(model_key), "")
+
+
 # ---- 샘플러 -----------------------------------------------------------------
 #
 # NAI 공식 UI 가 내놓는 순서 그대로다(2026-08-21 사용자 제보 화면 기준):

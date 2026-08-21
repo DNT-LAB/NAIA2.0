@@ -246,6 +246,68 @@ def fetch_nai_anlas(token: str) -> Optional[int]:
         return None
 
 
+def fetch_nai_subscription_summary(token: str) -> dict:
+    """Anlas 와 V5 사용량 한도를 **한 번의 요청**으로 함께 가져온다.
+
+    ⚠️ 예전에는 `fetch_nai_anlas()` 와 `fetch_nai_usage_limit()` 를 연달아 불렀다.
+    같은 엔드포인트를 두 번 때리는 데다, 이 API 는 산발적으로 read timeout 이
+    나서(실측: 10초 타임아웃 만료) **둘 중 하나만 실패하는 일이 잦았다** —
+    Anlas 는 떴는데 사용량 배지만 안 뜨는 식이다. 한 번만 부르면 그 비대칭이 없다.
+
+    반환: `{"anlas": int|None, "usage": dict|None}` (실패한 쪽은 None).
+    타임아웃은 5초가 아니라 8초 — 5초는 이 엔드포인트에 빠듯하다(실측).
+    """
+    out: dict = {"anlas": None, "usage": None}
+    token = (token or "").strip()
+    if not token:
+        return out
+
+    # **한 번 실패했다고 포기하지 않는다.** 이 엔드포인트는 산발적으로 read timeout
+    # 이 난다(실측). 사용량 배지는 폴링이 없어서, 여기서 놓치면 다음 모델/모드 변경
+    # 때까지 배지가 계속 비어 있다 - 사용자에겐 "고장" 으로 보인다. 2회까지 시도한다.
+    data = None
+    for attempt in range(2):
+        try:
+            res = requests.get(
+                NAI_SUBSCRIPTION_URL,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=8,
+            )
+            if res.status_code != 200:
+                return out
+            data = res.json() or {}
+            break
+        except requests.exceptions.RequestException:
+            if attempt == 0:
+                continue
+            return out
+        except Exception:  # pragma: no cover
+            return out
+    if data is None:
+        return out
+
+    training = data.get("trainingStepsLeft") or {}
+    try:
+        out["anlas"] = (
+            int(training.get("fixedTrainingStepsLeft", 0) or 0)
+            + int(training.get("purchasedTrainingSteps", 0) or 0)
+        )
+    except Exception:  # pragma: no cover - 형식이 바뀌면 Anlas 만 포기
+        out["anlas"] = None
+
+    usage = data.get("usage")
+    if isinstance(usage, dict):
+        try:
+            out["usage"] = {
+                "percent": int(usage.get("percent", 0) or 0),
+                "is_negative": bool(usage.get("isNegative", False)),
+                "seconds_until_next_percent": int(usage.get("timeUntilNextPercent", 0) or 0),
+            }
+        except Exception:  # pragma: no cover
+            out["usage"] = None
+    return out
+
+
 def fetch_nai_usage_limit(token: str) -> Optional[dict]:
     """NAI Diffusion V5 의 **Opus 사용량 한도** 조회.
 

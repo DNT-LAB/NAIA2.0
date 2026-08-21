@@ -73,13 +73,19 @@ async def broadcast_anlas_if_vibe_encoded(context: Any, clients: set) -> None:
 
 
 def _current_model_uses_usage_limit(context: Any) -> bool:
-    """지금 고른 NAI 모델이 별도 사용량 한도를 쓰는가(= V5)."""
+    """지금 고른 NAI 모델이 별도 사용량 한도를 쓰는가(= V5).
+
+    ⚠️ 모델 키는 `context._current_model_key()` 로 읽는다. 처음엔 있지도 않은
+    `get_generation_params()` 를 불렀는데, 아래 `except` 가 그 AttributeError 를
+    삼켜 **항상 False** 가 됐다 - 배지가 영영 안 뜨는데 오류도 안 보였다(실측).
+    """
     try:
         from core.nai_model_contract import resolve_nai_model_for_context
 
-        key = context.get_generation_params().get("model")
+        key = context._current_model_key()
         return bool(resolve_nai_model_for_context(context, key).uses_opus_usage_limit)
-    except Exception:
+    except Exception as exc:  # pragma: no cover - 조회 실패가 생성 흐름을 막으면 안 됨
+        print(f"[warn] NAI usage-limit model check failed: {exc}")
         return False
 
 
@@ -119,6 +125,57 @@ def build_nai_usage_payload(context: Any) -> dict[str, Any]:
         "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
         "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+
+def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
+    """Anlas + V5 사용량을 **구독 조회 1회**로 만들어 둘 다 돌려준다."""
+    anlas_off = _unavailable_payload()
+    usage_off = {
+        "type": "nai_usage_update", "available": False, "percent": 0,
+        "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
+    }
+    mode = str(context.get_api_mode() or "").upper()
+    try:
+        token = str(context.secure_token_manager.get_token("nai_token") or "").strip()
+    except Exception:
+        token = ""
+    if mode != "NAI" or not token:
+        return [anlas_off, usage_off]
+
+    try:
+        summary = api_verification.fetch_nai_subscription_summary(token)
+    except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
+        print(f"[warn] NAI subscription fetch failed: {exc}")
+        return [anlas_off, usage_off]
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    anlas_payload = anlas_off
+    if summary.get("anlas") is not None:
+        anlas_payload = {
+            "type": "anlas_update", "available": True,
+            "anlas": int(summary["anlas"]), "fetched_at": now,
+        }
+    usage_payload = usage_off
+    usage = summary.get("usage")
+    # 사용량 배지는 **V5 를 고른 동안에만** 뜬다.
+    if usage and _current_model_uses_usage_limit(context):
+        usage_payload = {
+            "type": "nai_usage_update", "available": True,
+            "percent": int(usage.get("percent", 0)),
+            "is_negative": bool(usage.get("is_negative", False)),
+            "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
+            "fetched_at": now,
+        }
+    return [anlas_payload, usage_payload]
+
+
+async def broadcast_anlas_and_usage(context: Any, clients: set) -> None:
+    """세션 시작 · 모델/모드 변경 시 쓰는 경로. 요청 1회로 두 배지를 갱신한다."""
+    if not clients:
+        return
+    payloads = await asyncio.to_thread(_build_both_payloads, context)
+    for payload in payloads:
+        await broadcast_json(clients, payload)
 
 
 async def broadcast_nai_usage(context: Any, clients: set) -> None:

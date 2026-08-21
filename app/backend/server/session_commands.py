@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket
 
-from app.backend.server.anlas_poller import broadcast_anlas, broadcast_nai_usage
+from app.backend.server.anlas_poller import broadcast_anlas_and_usage
 from core.web_session_context import WebSessionContext
 
 
@@ -176,11 +176,11 @@ async def handle_session_command(
             )
         if not recommended_applied:
             await broadcast_json(clients, context.generation_param_schema_payload())
-        # 모델을 V5 로 바꾼 순간 사용량 한도를 1회 조회한다(폴링하지 않는다).
-        # V5 가 아니면 `build_nai_usage_payload` 가 네트워크를 안 타고
-        # available=False 만 보내므로, 다른 모델로 바꾸면 배지가 사라진다.
+        # 모델을 바꾼 순간 사용량 한도를 1회 조회한다(폴링하지 않는다). V5 가 아니면
+        # available=False 가 가서 배지가 걷힌다. Anlas 와 **한 요청**으로 받는다 -
+        # 따로 부르면 이 API 의 산발적 read timeout 에 한쪽만 걸린다(실측).
         if key.strip() == "model":
-            await broadcast_nai_usage(context, clients)
+            await broadcast_anlas_and_usage(context, clients)
         return True
     return False
 
@@ -288,7 +288,5 @@ async def _handle_set_mode(
     await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
     # 모드 전환 시 Anlas pill 갱신: NAI 진입 시 다시 표시, 비-NAI 진입 시 숨김.
     # (없으면 한 번 숨겨진 pill이 5분 폴링/재연결 전까지 NAI 복귀해도 안 나타남)
-    await broadcast_anlas(context, clients)
-    # 같은 이유로 V5 사용량 배지도 여기서 1회. 모드가 NAI 가 아니거나 모델이 V5 가
-    # 아니면 네트워크 없이 available=False 만 가서 배지가 걷힌다.
-    await broadcast_nai_usage(context, clients)
+    # V5 사용량 배지도 같은 요청으로 함께 갱신한다(둘로 나누면 한쪽만 실패한다).
+    await broadcast_anlas_and_usage(context, clients)

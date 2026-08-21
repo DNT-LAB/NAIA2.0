@@ -173,11 +173,38 @@ class HeadlessConditionalRuleEngine:
         frames = settings.get("character_frames") if isinstance(settings, dict) else []
         return frames if isinstance(frames, list) else []
 
-    def _character_scope(self, index: int) -> list[str]:
+    def _character_scope(self, index: int, context=None) -> list[str]:
+        """`char_in(N, ...)` 이 볼 캐릭터 프롬프트 태그들.
+
+        ⚠️ **전개 후 값을 봐야 한다.** 예전에는 `_character_frames()`(= 사용자가
+        타이핑한 원문)만 읽어서, 캐릭터 칸에 `__charname__` 을 넣으면 조건이 토큰
+        문자열을 보고 절대 안 맞았다. 정작 동작(`char_replace`)은 전개본을 보므로
+        **조건만 원문을 보는 비대칭**이 생겼다(실측: 직접 입력 `B` 는 발화,
+        `__wc__`->`B` 는 미발화).
+
+        `_character_active(index, context)` 가 이미 쓰는 것과 같은 방식이다 -
+        context 의 조건부 슬롯을 우선하고, 없으면 pristine 프레임으로 폴백.
+
+        ⚠️ **여기서 와일드카드를 새로 전개하지 마라.** 이 함수는 순수 읽기다.
+        전개 책임은 `_store_character_overrides` 의 `_expand_slot_field` 에 있고,
+        조건 평가 시점에 또 전개하면 순차(`__*wc__`)·옵저버(`$m:s`) 카운터를
+        헛소비한다(트랩 문서 불변식 3).
+
+        비활성 슬롯은 `_character_slots` 가 프레임 원문 그대로 두므로 폴백 경로와
+        결과가 같다 - 비활성은 페이로드에 안 나가니 전개하면 안 되는 게 맞다.
+        """
+        tags: list[str] = []
+        if context is not None:
+            try:
+                slots = self._character_slots(context)
+            except Exception:
+                slots = []
+            if 0 <= index < len(slots) and isinstance(slots[index], dict):
+                self._append_condition_tag_value(tags, slots[index].get("prompt"))
+                return tags
         frames = self._character_frames()
         if index < 0 or index >= len(frames) or not isinstance(frames[index], dict):
             return []
-        tags: list[str] = []
         self._append_condition_tag_value(tags, frames[index].get("prompt"))
         return tags
 
@@ -523,7 +550,8 @@ class HeadlessConditionalRuleEngine:
         if char_in_match:
             negated = char_in_match.group(1) == "~"
             index = int(char_in_match.group(2)) - 1
-            matched = self._evaluate_logical_expression(char_in_match.group(3), self._character_scope(index), context)
+            matched = self._evaluate_logical_expression(
+                char_in_match.group(3), self._character_scope(index, context), context)
             return not matched if negated else matched
         char_on_match = _CHAR_ON_RE.match(condition)
         if char_on_match:

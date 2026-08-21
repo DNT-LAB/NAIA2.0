@@ -467,14 +467,19 @@
       <tbody>
         <tr><td><code>main+=tag</code></td><td>본문에 태그 추가</td></tr>
         <tr><td><code>prefix+=tag</code> · <code>postfix+=tag</code></td><td>앞/뒤 영역에 태그 추가</td></tr>
-        <tr><td><code>old=new</code></td><td>태그 교체</td></tr>
+        <tr><td><code>old=new</code></td><td>태그 교체 — <strong>본문·앞·뒤 영역만</strong> 대상입니다. 캐릭터 프롬프트는 바뀌지 않습니다(아래 <code>char_replace</code> 사용).</td></tr>
         <tr><td><code>char:1+=tag</code></td><td>1번 캐릭터 프롬프트에 추가</td></tr>
+        <tr><td><code>char_replace(1, old, new)</code></td><td>1번 캐릭터 프롬프트에서 태그 교체</td></tr>
         <tr><td><code>uc:1=value</code> · <code>global_uc</code> · <code>neg</code></td><td>네거티브 프롬프트 조작</td></tr>
         <tr><td><code>char_set(1, enabled)</code></td><td>캐릭터 슬롯 켜기/끄기</td></tr>
       </tbody>
     </table>
     <p style="margin-top:10px">
       태그를 여러 개 붙이려면 쉼표로 나열하세요 — <code>(1girl):main+=solo, looking at viewer</code>
+    </p>
+    <p style="margin-top:10px">
+      <code>char_replace</code> 는 캐릭터 번호를 직접 받습니다 — <code>char:*</code> 같은 전체 지정은
+      쓸 수 없습니다. 캐릭터 N명 × 교체 M건이면 규칙도 N×M줄이 됩니다.
     </p>
   </section>
 
@@ -493,6 +498,16 @@
         </tr>
       </thead>
       <tbody>
+        <tr>
+          <td><code>(char_in(1, B)):char_replace(1, B, …)</code></td>
+          <td class="no">불필요하게 깁니다</td>
+          <td><code>(swimsuit):char_replace(1, B, …)</code></td>
+        </tr>
+        <tr>
+          <td><code>(…):B=B \(swimsuit\)</code></td>
+          <td class="no">캐릭터에는 안 먹습니다</td>
+          <td><code>char_replace(1, B, B \(swimsuit\))</code></td>
+        </tr>
         <tr>
           <td><code>~*tag</code></td>
           <td class="no">항상 참</td>
@@ -531,6 +546,12 @@
       <li><strong>대소문자를 구분합니다.</strong> <code>From Behind</code> 는 <code>from behind</code> 로 잡히지 않습니다.</li>
       <li><strong>가중치 표기는 형태에 따라 다릅니다.</strong> 괄호가 있는 <code>(from behind:1.2)</code> 는 <code>*from behind</code> 로 잡히지만, 괄호 없는 <code>from behind:1.3</code> 은 잡히지 않습니다. 이 경우 “포함”(<code>from behind</code>)을 쓰세요.</li>
       <li><code>~</code> 와 태그 사이에 <strong>공백을 넣지 마세요.</strong> <code>~ tag</code> 는 <code>~tag</code> 와 다르게 동작합니다.</li>
+      <li><strong><code>char_replace</code> 앞에 <code>char_in</code> 을 덧붙일 필요가 없습니다.</strong>
+        <code>char_replace</code> 는 그 슬롯에 바꿀 태그가 있을 때만 동작하므로,
+        <code>(swimsuit):char_replace(1, B, B \(swimsuit\))</code> 만으로 충분합니다.
+        캐릭터가 B가 아니면 아무 일도 일어나지 않습니다.</li>
+      <li><strong>캐릭터 프롬프트 교체는 <code>old=new</code> 가 아니라 <code>char_replace</code> 입니다.</strong>
+        <code>old=new</code> 는 본문·앞·뒤 영역만 바꿉니다.</li>
     </ul>
 
     <div class="callout good">

@@ -15,6 +15,17 @@ import pandas as pd
 from core.headless_search_state_service import DEFAULT_ACTIVE_RATINGS
 from core.prompt_generation_service import PromptGenerationService
 from core.safe_console import safe_print
+
+# 조건부 캐릭터 스킵 중 **경고를 띄우지 않는** 사유.
+#
+# 다른 사유(`no character slots` / `no active character slots` / `slot N inactive` /
+# `index N missing`)는 전부 설정이 잘못됐다는 신호지만, `tag missing` 은
+# **정상적인 비매칭**이다 - `char_replace(N, old, new)` 는 그 슬롯에 `old` 가 있을
+# 때만 발화하므로, 캐릭터 A/B/C 에 규칙 3줄을 걸면 매 생성마다 2줄은 당연히 빗나간다.
+# 이걸 경고로 올리면 정상 동작인데 오류처럼 보인다(사용자 지적 2026-08-21).
+#
+# 기록 자체는 남긴다 - 디버깅에 쓰이고, 여기서 표시만 거른다.
+_QUIET_CHARACTER_SKIP_REASONS = frozenset({"tag missing"})
 from core.search_result_model import SearchResultModel
 from core.web_session_context import WebSessionContext
 
@@ -250,7 +261,9 @@ class HeadlessRandomPromptService:
         targets = [
             str(skip.get("target"))
             for skip in skips
-            if isinstance(skip, dict) and skip.get("target")
+            if isinstance(skip, dict)
+            and skip.get("target")
+            and str(skip.get("reason") or "") not in _QUIET_CHARACTER_SKIP_REASONS
         ]
         if not targets:
             return None

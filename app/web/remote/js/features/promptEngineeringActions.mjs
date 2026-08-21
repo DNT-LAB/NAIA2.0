@@ -46,6 +46,25 @@ export function createPromptEngineeringActions({
       showToast('추천 설정 적용은 NAI, WEBUI 또는 COMFYUI ANIMA 모드에서만 사용할 수 있습니다.', 'error');
       return;
     }
+    // NAI 는 세대마다 추천 묶음이 다르다 - V5 와 V4.5 는 같은 프롬프트에 다르게
+    // 반응해서 하나로 뭉뚱그리면 어느 쪽에서도 추천이 아니게 된다(사용자 지시
+    // 2026-08-21). 그래서 **어느 모델의 추천인지 먼저 묻는다.**
+    if (mode === 'NAI') {
+      const picked = await Promise.resolve(confirmDialog(
+        '어느 모델의 추천 설정을 적용할까요? 새 프리셋으로 만들고 즉시 적용합니다.',
+        {
+          title: '추천 설정 적용',
+          choices: [
+            { key: 'NAID5F', label: 'NAID5F' },
+            { key: 'NAID4.5F', label: 'NAID4.5F' },
+          ],
+        }));
+      // 취소는 false/null 로 온다. 모델 키만 통과시킨다.
+      if (typeof picked !== 'string' || !picked) return;
+      flushPresetSaveState();
+      setModuleParam('prompt_engineering', 'preset_apply_recommended', picked);
+      return;
+    }
     if (!await Promise.resolve(confirmDialog('추천 설정을 새 프리셋으로 만들고 즉시 적용하시겠습니까?'))) return;
     flushPresetSaveState();
     setModuleParam('prompt_engineering', 'preset_apply_recommended', 'true');

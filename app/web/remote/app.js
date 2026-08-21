@@ -6801,6 +6801,14 @@ function showAppDialog(message, options = {}) {
   // `message` arg. messageHtml must be sanitized by the caller — the only user,
   // freeWorkflowNoticeHtml, escHtml()s each line before joining with <br>.
   const messageMarkup = options.messageHtml != null ? String(options.messageHtml) : escHtml(message);
+  // 선택지 다이얼로그: `choices: [{key, label}]` 를 주면 확인 버튼 대신 그 버튼들을
+  // 그리고 **고른 key 로 resolve** 한다. 취소는 그대로 false/null.
+  // 안 주면 지금까지와 완전히 같다(확인/취소 두 버튼) - 이 함수는 앱 전체가 쓴다.
+  const choices = Array.isArray(options.choices) ? options.choices.filter(c => c && c.key) : [];
+  const choiceHtml = choices.map(c =>
+    `<button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="choice"`
+    + ` data-choice-key="${escHtml(c.key)}" type="button">${escHtml(c.label || c.key)}</button>`
+  ).join('');
 
   return new Promise(resolve => {
     const overlay = document.createElement('div');
@@ -6814,7 +6822,7 @@ function showAppDialog(message, options = {}) {
           ${inputHtml}
         </div>
         <div class="app-confirm-actions">
-          <button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="ok" type="button">${escHtml(okText)}</button>
+          ${choiceHtml || `<button class="app-confirm-btn app-confirm-btn-primary" data-confirm-action="ok" type="button">${escHtml(okText)}</button>`}
           <button class="app-confirm-btn" data-confirm-action="cancel" type="button">${escHtml(cancelText)}</button>
         </div>
       </section>
@@ -6828,6 +6836,11 @@ function showAppDialog(message, options = {}) {
       resolve(result);
     };
     const finishOk = () => {
+      // 선택지 모드에는 '확인' 버튼이 없다 - Enter 는 첫 선택지를 고른다.
+      if (choices.length) {
+        cleanup(String(choices[0].key));
+        return;
+      }
       const input = overlay.querySelector('[data-dialog-input]');
       cleanup(isPrompt ? (input?.value ?? '') : true);
     };
@@ -6849,7 +6862,9 @@ function showAppDialog(message, options = {}) {
       }
       const button = event.target.closest('[data-confirm-action]');
       if (!button) return;
-      if (button.dataset.confirmAction === 'ok') finishOk();
+      const action = button.dataset.confirmAction;
+      if (action === 'choice') cleanup(String(button.dataset.choiceKey || ''));
+      else if (action === 'ok') finishOk();
       else cancel();
     });
 
@@ -6859,7 +6874,8 @@ function showAppDialog(message, options = {}) {
     requestAnimationFrame(() => {
       overlay.classList.add('open');
       const initialFocus = overlay.querySelector('[data-dialog-input]')
-        || overlay.querySelector('[data-confirm-action="ok"]');
+        || overlay.querySelector('[data-confirm-action="ok"]')
+        || overlay.querySelector('[data-confirm-action="choice"]');
       initialFocus?.focus();
       if (initialFocus?.select) initialFocus.select();
     });

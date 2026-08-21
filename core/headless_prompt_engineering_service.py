@@ -242,7 +242,9 @@ class HeadlessPromptEngineeringService:
             if not ok:
                 return context._toast(message, level="error")
         elif key == "preset_apply_recommended":
-            ok, message = self.create_and_apply_recommended_preset()
+            # 값은 고른 모델 키(`NAID5F` / `NAID4.5F`). 예전 클라이언트는 `"true"` 를
+            # 보내는데, 그건 모델 키가 아니라 아래 판정에서 자연히 V4.5 로 떨어진다.
+            ok, message = self.create_and_apply_recommended_preset(model_key=text_value)
             if not ok:
                 return context._toast(message, level="error")
             return [
@@ -363,7 +365,16 @@ class HeadlessPromptEngineeringService:
             return None
         return self.state()
 
-    def create_and_apply_recommended_preset(self, *, save_current: bool = True) -> tuple[bool, str]:
+    def create_and_apply_recommended_preset(
+        self, *, save_current: bool = True, model_key: str = "",
+    ) -> tuple[bool, str]:
+        """추천 프리셋을 만들어 즉시 적용한다.
+
+        NAI 모드에서는 `model_key` 로 **어느 세대의 추천인지** 고른다(사용자 지시
+        2026-08-21). V5 와 V4.5 는 같은 프롬프트에 다르게 반응해서 추천 묶음 자체가
+        다르다 - 하나로 뭉뚱그리면 어느 쪽에서도 추천이 아니게 된다.
+        빈 값이면 지금까지처럼 V4.5 추천을 쓴다(기존 동작 유지).
+        """
         from core.prompt_engineering_settings import get_prompt_engineering_store
 
         context = self.context
@@ -380,10 +391,25 @@ class HeadlessPromptEngineeringService:
             module_settings = self._webui_recommended_module_settings()
             main_settings = self._webui_recommended_main_settings()
         elif mode == "NAI":
+            from core.nai_model_contract import resolve_nai_model_for_context
+
+            # V5 냐 아니냐로만 가른다 - 키 문자열을 잘라 판정하지 않는다(`NAID4.5`
+            # 처럼 접미사 없는 키가 있어 규칙이 한 줄로 안 떨어진다).
+            wants_v5 = False
+            if str(model_key or "").strip():
+                try:
+                    wants_v5 = bool(
+                        resolve_nai_model_for_context(context, model_key).uses_opus_usage_limit)
+                except Exception:
+                    wants_v5 = False
             preset_name = self._unique_preset_name(store, "recommend", mode)
             module_settings = store.collect_settings(mode)
-            module_settings.update(self._nai_recommended_module_settings())
-            main_settings = self._nai_recommended_main_settings()
+            module_settings.update(
+                self._nai_v5_recommended_module_settings() if wants_v5
+                else self._nai_recommended_module_settings())
+            main_settings = (
+                self._nai_v5_recommended_main_settings() if wants_v5
+                else self._nai_recommended_main_settings())
         else:
             return False, "추천 설정 적용은 현재 NAI, WEBUI 또는 COMFYUI ANIMA 모드에서만 지원됩니다."
 
@@ -857,6 +883,108 @@ class HeadlessPromptEngineeringService:
                 "danbooru_auto_weight": False,
                 "tag_implication_compression": True,
             },
+        }
+
+    @staticmethod
+    def _nai_v5_recommended_module_settings() -> dict[str, Any]:
+        """NAI Diffusion V5 용 추천 프롬프트 묶음.
+
+        사용자가 직접 튜닝해 쓰던 `test_v5` 프리셋의 값을 그대로 기준선으로 삼았다
+        (지시 2026-08-21). V4.5 추천과 **작가 구성부터 다르다** - V5 는 같은 프롬프트에
+        다르게 반응해서, 4.5 것을 그대로 쓰면 추천이라 부를 수 없다.
+        """
+        return {
+            "pre_prompt": (
+                "1.2::artist:utatanecocoa ::, artist:nasuuni, 0.55::epi zero, artist:e-note ::, "
+                "0.35::artist:sushispin ::, -0.85::artist collaboration ::"
+            ),
+            "post_prompt": (
+                "0.35::crosshatching ::, 0.8::perspective, low-angle view ::, "
+                "0.15::light particles ::, 0.33::oekaki, cel shading, hatching (texture), "
+                "graphite (medium), thin jaggy lines ::, 0.03::hong (white spider) ::, "
+                "0.15::artist:yonchan, channel (caststation), dino (dinoartforame) ::, "
+                "0.5::depth of field, foreshortening ::, sharpening, amazing quality, "
+                "great quality, absurdly detailed composition, incredibly absurdres, "
+                "very aesthetic, year 2024, highly aesthetic Pixiv style illustration, "
+                "clean composition, very thin lineart, high contrast, beautiful background, "
+                "high-quality digital art"
+            ),
+            "auto_hide_prompt": (
+                "monochrome, doujin cover, bad source, __censor__, uncensored, female pubic hair, "
+                "bad id, _logo, bad twitter id, comic, __background__, ~blurry background, "
+                "~sky background, character doll, stuffed animal, stuffed toy, speech bubble, cyclops, "
+                "pov, 3d, glasses, mole, text focus, thought bubble, watermark, web address, "
+                "body writing, fake screenshot, facing away, |_|, __piercing__, tattoo, _tattoo, "
+                "_text, sound effects, greyscale, multiple views, __pubic hair__, peeing, rabbit, "
+                "__censor__, pregnant, __chess__, trading card, __(medium)__, __theme__, child on child, "
+                "covered clitoris, _gag, sketch, poke_, __pokemon__, recording, viewfinder, multiple boys, "
+                "__measuring__, multiple views, big belly, curvy, doll joints, dark-skinned male, "
+                "looking at viewer, timestamp, battery indicator, tan, fake phone screenshot, "
+                "stomach bulge, __beach__, __shower__, on table, huge penis, __bug__, giant insect, "
+                "belly, eye mask, circle cut, dark nipples, signature, alternate race, alternate species, "
+                "dark nipples, livestream, slap mark, x-ray, armpit hair, health bar, snapchat, "
+                "facial mark, emoji, command spell, dark areolae, __piercing__, __bed__, __pillow__, "
+                "__sheet__, body markings, obese, __long tongue__, toddlercon, __name__, handprint, "
+                "__pasties__, mini person, __butt plug__, __eyepatch__, oppai loli, sex toy, loli, "
+                "chibi, chibi inset, makeup, mascara, large breasts, runny makeup, third eye, "
+                "anal hair, __halo__, __(style)__, __(cosplay)__"
+            ),
+            "preprocessing_options": {
+                "remove_author": True,
+                "remove_work_title": True,
+                "remove_character_name": True,
+                "remove_character_features": False,
+                "remove_clothes": False,
+                "remove_clothing_event": False,
+                "remove_color": True,
+                "remove_location_and_background_color": False,
+                "remove_expression": False,
+                "remove_pose_action": False,
+                "remove_meta_tags": True,
+                "remove_object_tags": True,
+                "remove_noise_tags": False,
+                "closed_eyes_sync": True,
+                "e621_auto_boost": False,
+                "danbooru_auto_weight": False,
+                "tag_implication_compression": False,
+            },
+        }
+
+    @staticmethod
+    def _nai_v5_recommended_main_settings() -> dict[str, Any]:
+        """V5 추천 생성 파라미터(`test_v5` 기준).
+
+        ⚠️ `random_resolution` / `auto_fit_resolution` 은 **프리셋에 저장되지 않는
+        세션 전역 키**라 `test_v5` 파일에는 없다(`PRESET_RUNTIME_STATE_KEYS`).
+        화면에서 켜져 있던 상태(Rnd Res 켬 / Auto Res 끔)를 그대로 적었다.
+        """
+        return {
+            "model": "NAID5F",
+            "sampler": "k_euler_ancestral",
+            "scheduler": "karras",
+            "resolution": "1024 x 1024",
+            # V5 는 28 이 아니라 23 이다. 무료 구간(28 이하)에 그대로 들어간다.
+            "steps": 23,
+            "cfg_scale": 6.5,
+            "cfg_rescale": 0.28,
+            "negative": (
+                "lowres, bad quality, normal quality, very displeasing, abstract, mutated, "
+                "monochrome, bleed through, gif artifacts, jpeg artifacts, scan artifacts, "
+                "bad hands, artistic error, bad anatomy, extra digits, glitch, "
+                "chromatic aberration abuse, distortion, haze, anaglyph, faded, 1.5::moire ::, "
+                "high contrast, flipnote studio (medium), ink (medium), cubism, saturated, "
+                "outline, retro artstyle, partially colored, flat color, blending, ukiyo-e, "
+                "sumi-e, minimalism, ai-generated, 1980s (style), bkub (style), "
+                "yasuhiko yoshikazu (style), blender (medium), 1.15::multiple views ::"
+            ),
+            "seed": "883731701",
+            "seed_fixed": False,
+            "random_resolution": True,
+            "auto_fit_resolution": False,
+            "SMEA": False,
+            "DYN": False,
+            "VAR+": False,
+            "DECRISP": True,
         }
 
     @staticmethod

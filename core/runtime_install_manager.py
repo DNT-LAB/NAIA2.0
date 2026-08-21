@@ -333,7 +333,7 @@ class RuntimeInstallManager:
         temp_zip.parent.mkdir(parents=True, exist_ok=True)
         request = urllib.request.Request(
             spec.url,
-            headers={"User-Agent": "NAIA/2.0.33 RuntimeInstallManager"},
+            headers={"User-Agent": "NAIA/2.0.34 RuntimeInstallManager"},
         )
         self._set_state(percent=5, message=f"{spec.label} 다운로드 연결 중...")
         open_kwargs = {"timeout": 30}

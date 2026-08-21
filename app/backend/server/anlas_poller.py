@@ -41,7 +41,7 @@ def build_anlas_payload(context: Any) -> dict[str, Any]:
     try:
         value = api_verification.fetch_nai_anlas(token)
     except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
-        print(f"⚠️ Anlas 조회 실패: {exc}")
+        print(f"⚠️ Anlas 조회 실패: {exc}", flush=True)
         value = None
     if value is None:
         return _unavailable_payload()
@@ -71,7 +71,7 @@ async def broadcast_anlas_if_vibe_encoded(context: Any, clients: set) -> None:
         if callable(consume) and consume():
             await broadcast_anlas(context, clients)
     except Exception as exc:  # pragma: no cover - 잔액 갱신 실패가 생성 흐름을 막으면 안 됨
-        print(f"⚠️ Use Vibe Anlas 갱신 실패: {exc}")
+        print(f"⚠️ Use Vibe Anlas 갱신 실패: {exc}", flush=True)
 
 
 def _current_model_uses_usage_limit(context: Any) -> bool:
@@ -87,7 +87,7 @@ def _current_model_uses_usage_limit(context: Any) -> bool:
         key = context._current_model_key()
         return bool(resolve_nai_model_for_context(context, key).uses_opus_usage_limit)
     except Exception as exc:  # pragma: no cover - 조회 실패가 생성 흐름을 막으면 안 됨
-        print(f"[warn] NAI usage-limit model check failed: {exc}")
+        print(f"[warn] NAI usage-limit model check failed: {exc}", flush=True)
         return False
 
 
@@ -115,7 +115,7 @@ def build_nai_usage_payload(context: Any) -> dict[str, Any]:
     try:
         usage = api_verification.fetch_nai_usage_limit(token)
     except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
-        print(f"[warn] NAI usage limit fetch failed: {exc}")
+        print(f"[warn] NAI usage limit fetch failed: {exc}", flush=True)
         usage = None
     if not usage:
         return unavailable
@@ -155,7 +155,7 @@ def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
             try:
                 usage = future.result()
             except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
-                print(f"[warn] account usage fetch failed for {account_id}: {exc}")
+                print(f"[warn] account usage fetch failed for {account_id}: {exc}", flush=True)
                 usage = None
             if usage:
                 out[account_id] = {
@@ -211,7 +211,7 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
     try:
         summary = api_verification.fetch_nai_subscription_summary(token)
     except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
-        print(f"[warn] NAI subscription fetch failed: {exc}")
+        print(f"[warn] NAI subscription fetch failed: {exc}", flush=True)
         return [anlas_off, usage_off]
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -274,7 +274,7 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any],
             bool(u.get("is_negative")) for u in usage_by_id.values()
         ) if usage_by_id else False
     except Exception as exc:  # noqa: BLE001 - 배지 하나 때문에 세션이 죽으면 안 된다
-        print(f"[warn] multi-token usage attach failed: {exc}")
+        print(f"[warn] multi-token usage attach failed: {exc}", flush=True)
 
 
 async def broadcast_anlas_and_usage(context: Any, clients: set) -> None:
@@ -407,7 +407,7 @@ async def _send_pair(clients: set, anlas_payload: dict[str, Any],
         await broadcast_json(clients, anlas_payload)
         await broadcast_json(clients, usage_payload)
     except Exception as exc:  # pragma: no cover - 배지 전송 실패가 세션을 막으면 안 됨
-        print(f"[warn] subscription badge broadcast failed: {exc}")
+        print(f"[warn] subscription badge broadcast failed: {exc}", flush=True)
 
 
 def _log_refresh_failure(task: "asyncio.Task[Any]") -> None:
@@ -415,7 +415,7 @@ def _log_refresh_failure(task: "asyncio.Task[Any]") -> None:
         return
     exc = task.exception()
     if exc is not None:
-        print(f"[warn] NAI subscription refresh failed: {exc}")
+        print(f"[warn] NAI subscription refresh failed: {exc}", flush=True)
 
 
 async def broadcast_nai_usage(context: Any, clients: set) -> None:

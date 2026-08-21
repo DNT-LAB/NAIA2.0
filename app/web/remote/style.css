@@ -7287,6 +7287,10 @@ body.resizing-result-info {
   .stats-island {
     display: flex;
   }
+  /* 여기서만 세대 카운터 섬이 뜬다 — 그 아래로 비킨다(데스크톱은 top:10 그대로). */
+  .nai-usage-pill {
+    top: 42px;
+  }
   .viewer-content {
     position: relative;
   }
@@ -18348,11 +18352,15 @@ select.setup-input { cursor: pointer; }
 .anlas-pill.hidden { display: none; }
 
 /* V5 Opus 사용량 한도 배지. 히스토리 레일 **왼쪽**, 결과 뷰어 우상단(사용자가
-   지정한 자리). `.stats-island` 와 같은 모서리를 쓰므로 그 아래로 내려 겹치지
-   않게 한다 — 둘 다 `top:10px` 이면 세대 카운터를 덮는다. */
+   지정한 자리).
+   `.stats-island`(세대 카운터)와 같은 모서리를 쓰는데, **그 섬은 767px 이하에서만
+   보인다**(style.css 의 모바일 미디어쿼리). 그래서 데스크톱에서는 위가 통째로
+   비어 있는데도 42px 를 내려놨었고, 그 자리가 히스토리 레일의 `‹` 토글과 같은
+   높이라 붙어 보였다(사용자 지적 · 실측: 배지 93~117 vs 토글 94~120).
+   데스크톱은 맨 위로 올리고, 섬이 실제로 뜨는 모바일에서만 아래로 비킨다. */
 .nai-usage-pill {
   position: absolute;
-  top: 42px; right: 10px;
+  top: 10px; right: 10px;
   z-index: 15;
   display: flex; align-items: center; gap: 7px;
   padding: 4px 11px;

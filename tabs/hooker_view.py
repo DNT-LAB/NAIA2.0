@@ -15,6 +15,7 @@ from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size
 from interfaces.base_tab_module import BaseTabModule
 import copy
+from core import nai_model_profile as nai_profile
 
 class HookerTabModule(BaseTabModule):
     """'Hooker' 탭을 위한 모듈"""
@@ -793,8 +794,14 @@ class HookerView(QWidget):
 
                 # ⬇️ NAI D4 모드 체크 및 캐릭터 모듈 참조 저장 (1회 실행)
                 try:
-                    self.is_naid4_mode = (self.app_context.get_api_mode() == "NAI" and 
-                                          "NAID4" in self.app_context.main_window.model_combo.currentText())
+                    # V5 도 `v4_prompt` 의 char_captions 를 그대로 쓴다 - 문자열로
+                    # `"NAID4" in ...` 을 보면 `NAID5.0F` 가 빠져 캐릭터 모듈 연결이
+                    # 조용히 끊긴다.
+                    self.is_naid4_mode = (
+                        self.app_context.get_api_mode() == "NAI"
+                        and nai_profile.uses_v4_prompt_payload(
+                            self.app_context.main_window.model_combo.currentText())
+                    )
                     
                     if self.is_naid4_mode:
                         self.char_module = self.app_context.middle_section_controller.get_module_instance("CharacterModule")

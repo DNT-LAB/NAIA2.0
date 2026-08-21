@@ -1,6 +1,7 @@
 import json
 import os
 from typing import Dict, Any, TYPE_CHECKING
+from core import nai_model_profile as nai_profile
 
 if TYPE_CHECKING:
     from NAIA_cold_v4 import NAIAColdV4  # 순환 import 방지
@@ -888,7 +889,7 @@ class GenerationParamsManager:
 
             # 4. NAI 고정 옵션들 복원
             if hasattr(mw, 'model_combo'):
-                nai_models = ["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"]
+                nai_models = list(nai_profile.NAI_MODEL_KEYS)
                 mw.model_combo.clear()
                 mw.model_combo.addItems(nai_models)
             
@@ -968,7 +969,7 @@ class GenerationParamsManager:
             # 🔧 수정: NAI 고정 옵션들 복원 시 현재 선택값 보존
             if hasattr(mw, 'model_combo'):
                 current_model = mw.model_combo.currentText()
-                nai_models = ["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"]
+                nai_models = list(nai_profile.NAI_MODEL_KEYS)
                 mw.model_combo.clear()
                 mw.model_combo.addItems(nai_models)
                 
@@ -978,8 +979,10 @@ class GenerationParamsManager:
                     mw.model_combo.setCurrentIndex(index)
                     print(f"✅ NAI 모델 복원: {current_model}")
                 else:
-                    # 기본값 설정
-                    mw.model_combo.setCurrentIndex(0)
+                    # 기본값 설정 — ⚠️ 인덱스 0 을 쓰면 안 된다. 목록 맨 위는 V5 이고
+                    # V5 는 Anlas 가 아닌 별도 사용량 한도를 태운다. 다른 모드에서
+                    # 돌아왔다는 이유만으로 사용자가 고르지 않은 과금 풀로 가면 안 된다.
+                    mw.model_combo.setCurrentText(nai_profile.DEFAULT_NAI_MODEL_KEY)
                     print(f"✅ NAI 모델을 기본값으로 설정: {mw.model_combo.currentText()}")
             
             if hasattr(mw, 'sampler_combo'):

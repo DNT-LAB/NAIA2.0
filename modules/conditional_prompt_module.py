@@ -14,6 +14,7 @@ from ui.scaling_manager import get_scaled_font_size, get_scaled_size
 from ui.modern_menu import setModernStyle
 from typing import Dict, Any, List, Optional
 import re
+from core import nai_model_profile as nai_profile
 
 # NAI: '1.05::tag ::' → 'tag'
 _WEIGHT_NAI_RE = re.compile(r'^([\d.]+)::(.+?)\s*::$')
@@ -1353,7 +1354,10 @@ class PromptListModifierModule(BaseMiddleModule, ModeAwareModule):
         if model_combo is None:
             return False
         try:
-            return "NAID4" in model_combo.currentText()
+            # ⚠️ `"NAID4" in ...` 로 보면 V5 가 빠진다 - `NAID5.0F` 에는 그 문자열이
+            # 없다. V5 도 `v4_prompt` 의 char_captions 를 그대로 쓰므로 char:/uc:
+            # 대상 지정은 켜져 있어야 한다.
+            return nai_profile.uses_v4_prompt_payload(model_combo.currentText())
         except Exception:
             return False
 

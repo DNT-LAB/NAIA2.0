@@ -12,6 +12,7 @@ from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtCore import QCoreApplication, QThreadPool
 from core.comfyui_service import ComfyUIService
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
+from core import nai_model_profile as nai_profile
 
 if TYPE_CHECKING:
     from core.context import AppContext
@@ -307,6 +308,37 @@ class APIService:
             main_token = self.app_context.secure_token_manager.get_token('nai_token')
             return main_token if main_token else ""
 
+    @staticmethod
+    def _nai_request_body_kwargs(payload: Dict[str, Any], multipart: bool) -> Dict[str, Any]:
+        """NAI 요청 바디를 모델 프로필에 맞는 `requests` 인자로 만든다.
+
+        V4 이하: `json=payload` 그대로.
+        V5: `multipart/form-data` 의 **`request` 파트 하나**에 JSON 을 담는다.
+            파일명은 웹과 같은 `blob`, MIME 은 `application/json` 이다.
+        """
+        if not multipart:
+            return {"json": payload}
+        body = json.dumps(payload, ensure_ascii=False)
+        return {"files": {"request": ("blob", body, "application/json")}}
+
+    def _nai_vibe_payload_pending(self, params: Dict[str, Any]) -> bool:
+        """이번 요청에 실릴 뻔한 Vibe Transfer 데이터가 있는가 (V5 안내 전용).
+
+        V5 에서 참조가 조용히 빠지면 "왜 안 먹지"가 되므로, 실을 것이 실제로
+        있었을 때만 한 줄 알리기 위한 판정이다. 페이로드에는 영향을 주지 않는다.
+        """
+        generation_request = params.get('_generation_request')
+        if generation_request and getattr(generation_request, 'nai_vibe_transfer', None):
+            return True
+        try:
+            vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
+            if vibe_module:
+                vibe_data = vibe_module.get_vibe_transfer_multiple_data()
+                return bool(vibe_data and vibe_data.get('reference_image_multiple'))
+        except Exception as exc:
+            print(f"⚠️ Vibe Transfer 보류 여부 확인 실패: {exc}")
+        return False
+
     def _call_nai_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다."""
         try:
@@ -315,17 +347,9 @@ class APIService:
             if not token:
                 raise ValueError("NAI 토큰이 제공되지 않았습니다.")
 
-            model_mapping = {
-                "NAID4.5F": 'nai-diffusion-4-5-full',
-                "NAID4.5C": 'nai-diffusion-4-5-curated',
-                "NAID4.0F": 'nai-diffusion-4-full',
-                "NAID4.0C": 'nai-diffusion-4-curated-preview',
-                "NAID3": 'nai-diffusion-3'
-            }
-            
-            # 모델 이름 가져오기 및 매핑
-            model_key = params.get('model', 'NAID4.5F')
-            model_name = model_mapping.get(model_key, 'nai-diffusion-4-5-full')
+            # 모델 이름 가져오기 및 매핑 (키 -> API 모델 문자열은 core/nai_model_profile.py 가 SSOT)
+            model_key = params.get('model', nai_profile.DEFAULT_NAI_MODEL_KEY)
+            model_name = nai_profile.resolve_api_model(model_key)
 
             # ✅ Img2Img 분기 처리
             is_img2img = 'image_bytes' in params and params['image_bytes'] is not None
@@ -360,17 +384,11 @@ class APIService:
             }
             
             # skip_cfg_above_sigma 처리 (VAR+ 파라미터에 따라)
+            # V5 는 웹 페이로드에 이 키가 아예 없다(기본값도 null) — VAR+ 를 켜도 넣지 않는다.
             if params.get('VAR+', False):
-                # VAR+가 True일 때 모델에 따라 다른 값 설정
-                if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated']:
-                    api_parameters["skip_cfg_above_sigma"] = 58
-                elif model_name in ['nai-diffusion-4-full', 'nai-diffusion-4-curated', 'nai-diffusion-3']:
-                    api_parameters["skip_cfg_above_sigma"] = 19
-                # inpainting 모델도 동일하게 처리
-                elif model_name in ['nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']:
-                    api_parameters["skip_cfg_above_sigma"] = 58
-                elif model_name in ['nai-diffusion-4-full-inpainting', 'nai-diffusion-4-curated-inpainting', 'nai-diffusion-3-inpainting']:
-                    api_parameters["skip_cfg_above_sigma"] = 19
+                skip_cfg = nai_profile.skip_cfg_above_sigma_for(model_name)
+                if skip_cfg is not None:
+                    api_parameters["skip_cfg_above_sigma"] = skip_cfg
             else:
                 # VAR+가 False일 때는 null (Python에서는 None이지만 JSON 전송 시 제외됨)
                 api_parameters["skip_cfg_above_sigma"] = None
@@ -412,7 +430,11 @@ class APIService:
                 print(f"⚠️ reference inset 삽입 실패: {exc}")
 
             # V4 특화 설정 (기존과 동일)
-            if 'nai-diffusion-4' in model_name:
+            # ⚠️ V5 도 여기에 들어온다 — `v5_prompt` 는 존재하지 않고 `v4_prompt` /
+            # `v4_negative_prompt` 를 그대로 쓴다(2026-08-19 실측). 문자열로
+            # `'nai-diffusion-4' in model_name` 을 보면 V5 가 통째로 빠져 캐릭터
+            # 프롬프트가 조용히 사라진다.
+            if nai_profile.uses_v4_prompt_payload(model_name):
                 main_prompt = params.get('input', '')
                 negative_prompt = params.get('negative_prompt', '')
                 
@@ -522,8 +544,13 @@ class APIService:
                           f"{' (positions: ' + str(character_positions) + ')' if character_positions else ''}")
             
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Vibe Transfer 데이터 가져오기
+            #
+            # ⛔ V5 는 Vibe Transfer 를 싣지 않는다(사용자 지정). 스키마상으로는 열려
+            # 있지만 라이브 검증이 없는 경로라, 참조가 조용히 무시되는 유료 요청을
+            # 만드는 대신 여기서 끊는다. 실릴 것이 있었을 때만 한 줄 알린다.
+            vibe_allowed = nai_profile.supports_vibe_transfer(model_name)
             generation_request = params.get('_generation_request')
-            if generation_request and generation_request.nai_vibe_transfer:
+            if vibe_allowed and generation_request and generation_request.nai_vibe_transfer:
                 print("✅ [EarlyBinding] Vibe Transfer Data from GenerationRequest")
                 nai_vibe_data = generation_request.nai_vibe_transfer
 
@@ -540,7 +567,7 @@ class APIService:
                 print(f"  - {len(nai_vibe_data.reference_image_multiple)} vibe(s) added")
                 print(f"  - Normalization: {nai_vibe_data.normalize}")
                 print(f"  - Strengths: {nai_vibe_data.reference_strength_multiple}")
-            else:
+            elif vibe_allowed:
                 # 🔄 Late Binding fallback for direct generation (non-queue)
                 vibe_module = self.app_context.middle_section_controller.get_module_instance("VibeTransferModule")
                 if vibe_module:
@@ -558,9 +585,13 @@ class APIService:
                             api_parameters['reference_information_extracted_multiple'] = vibe_data['reference_information_extracted_multiple']
 
                         print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
+            elif self._nai_vibe_payload_pending(params):
+                print(f"⏭️ [{model_key}] Vibe Transfer 비활성화 - "
+                      f"등록된 참조 이미지는 이번 요청에 실리지 않습니다.")
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 전용
-            if model_name in ['nai-diffusion-4-5-full', 'nai-diffusion-4-5-curated', 'nai-diffusion-4-5-full-inpainting', 'nai-diffusion-4-5-curated-inpainting']: # 다음 모델 제외: 
+            # ⛔ V5 는 여기에 들어오지 않는다(사용자 지정) — Director 파라미터를 보내지 않는다.
+            if nai_profile.supports_character_reference(model_name):
                 generation_request = params.get('_generation_request')
                 if generation_request and generation_request.nai_character_reference:
                     print("✅ [EarlyBinding] Character Reference Data from GenerationRequest")
@@ -611,7 +642,11 @@ class APIService:
                         api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
 
                     print(f"  - Director images: {len(params['director_reference_images'])}")
-            
+            elif ((generation_request and getattr(generation_request, 'nai_character_reference', None))
+                  or params.get('director_reference_descriptions')):
+                print(f"⏭️ [{model_key}] Character Reference 비활성화 - "
+                      f"등록된 레퍼런스는 이번 요청에 실리지 않습니다.")
+
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):
                 self._apply_custom_nai_params(api_parameters, params)
@@ -624,10 +659,14 @@ class APIService:
                 "parameters": api_parameters
             }
 
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
+            # ⚠️ **V5 는 JSON 을 그대로 POST 하지 않는다.** `multipart/form-data` 의
+            # `request` 파트에 JSON Blob 으로 감싸 보낸다(2026-08-19 웹 프론트 실측).
+            # 이때 Content-Type 을 직접 넣으면 안 된다 - boundary 는 requests 가 붙여
+            # 만들어야 하고, 직접 넣은 헤더가 이기면 서버가 파싱에 실패한다.
+            nai_multipart = nai_profile.uses_multipart_request(model_name)
+            headers = {"Authorization": f"Bearer {token}"}
+            if not nai_multipart:
+                headers["Content-Type"] = "application/json"
             
             # print("📤 NAI API 요청 페이로드:", payload)
             
@@ -639,8 +678,8 @@ class APIService:
                 response = session.post(
                     self.NAI_V3_API_URL,
                     headers=headers,
-                    json=payload,
-                    timeout=180
+                    timeout=180,
+                    **self._nai_request_body_kwargs(payload, nai_multipart)
                 )
                 # 세션 정리
                 session.close()

@@ -21,6 +21,7 @@ from interfaces.mode_aware_module import ModeAwareModule
 from core.context import AppContext
 from ui.theme import get_dynamic_styles
 from ui.scaling_manager import get_scaled_font_size, get_scaled_size
+from core import nai_model_profile as nai_profile
 
 
 def _get_current_model_from_context(app_context) -> str:
@@ -1867,6 +1868,20 @@ class VibeTransferModule(BaseMiddleModule, ModeAwareModule):
             
     def _on_encoding_requested(self, frame: VibeTransferFrame, info_extracted: float):
         """Handle encoding request from frame"""
+        # V5 요청에는 Vibe Transfer 를 싣지 않는다(사용자 지정). 인코딩은 Anlas 를
+        # 태우므로, 어차피 안 실릴 값을 위해 돈을 쓰기 전에 여기서 막는다.
+        # MODEL_API_MAP 에 V5 가 없어 그냥 두면 4.5 로 인코딩되는 조용한 오작동도 된다.
+        current_model = self._get_current_model()
+        if nai_profile.is_v5_model(current_model):
+            QMessageBox.information(
+                self.widget,
+                "Vibe Transfer 미지원",
+                f"{current_model} 요청에는 Vibe Transfer 가 포함되지 않습니다.\n"
+                f"인코딩은 Anlas 를 소모하므로 진행하지 않습니다.\n\n"
+                f"NAID4.5F / NAID4.5C / NAID4.0F / NAID4.0C / NAID3 에서 사용하세요."
+            )
+            return
+
         if not self.app_context.secure_token_manager.get_token('nai_token'):
             QMessageBox.warning(self.widget, "Error", "Access token not available")
             return

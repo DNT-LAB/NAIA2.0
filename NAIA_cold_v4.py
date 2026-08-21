@@ -27,6 +27,7 @@ from core.middle_section_controller import MiddleSectionController
 from core.context import AppContext
 from core.generation_controller import GenerationController
 from core.wildcard_processor import split_tags_smart
+from core import nai_model_profile as nai_profile
 from ui.theme import DARK_COLORS, DARK_STYLES, CUSTOM, get_dynamic_styles
 from ui.scaling_manager import get_scaling_manager, get_scaled_font_size, get_scaled_size
 from ui.scaling_settings_dialog import ScalingSettingsDialog
@@ -862,7 +863,7 @@ class ModernMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         # 기본 타이틀 설정 (Git 정보 없을 때 사용)
-        self.base_title = "NAIA v2.0.0 Dev 175e"
+        self.base_title = "NAIA v2.0.0 Dev0714 ES1"
         self.setWindowTitle(self.base_title + " - 260426")  # 기존 형식 유지
         
         # 스케일링 매니저 초기화 (UI 생성 전에 먼저 초기화)
@@ -1737,7 +1738,7 @@ class ModernMainWindow(QMainWindow):
         params_grid.addWidget(model_label, 0, 0)
 
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
+        self.model_combo.addItems(list(nai_profile.NAI_MODEL_KEYS))
         self.model_combo.setStyleSheet(DARK_STYLES['compact_combobox'])
         self.disable_wheel_event(self.model_combo)
         self.model_combo.currentTextChanged.connect(self.update_naid_checkbox_colors)
@@ -2817,14 +2818,17 @@ class ModernMainWindow(QMainWindow):
         
         # NAID3일 때는 모든 체크박스 흰색, 그 외에는 SMEA, DYN, DECRISP를 회색으로
         is_naid3 = (model_text == "NAID3")
-        
+        # V5 는 `skip_cfg_above_sigma` 키 자체를 안 보낸다 - VAR+ 를 켜도 페이로드가
+        # 그대로라, 흰색으로 두면 "켰는데 왜 그대로냐"가 된다.
+        is_v5 = nai_profile.is_v5_model(model_text)
+
         for option_name, checkbox in self.advanced_checkboxes.items():
             if is_naid3:
                 # NAID3: 모든 체크박스 흰색
                 checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
             else:
-                # 다른 모델: VAR+만 흰색, 나머지는 회색
-                if option_name == "VAR+":
+                # 다른 모델: VAR+만 흰색, 나머지는 회색 (V5 는 VAR+ 도 회색)
+                if option_name == "VAR+" and not is_v5:
                     checkbox.setStyleSheet(DARK_STYLES['dark_checkbox'])
                 else:
                     # SMEA, DYN, DECRISP는 회색으로
@@ -4169,9 +4173,15 @@ class ModernMainWindow(QMainWindow):
             # NAI 기본 모델로 복원
             self.model_combo.blockSignals(True)
             self.model_combo.clear()
-            self.model_combo.addItems(["NAID4.5F", "NAID4.5C", "NAID4.0F", "NAID4.0C", "NAID3"])
+            self.model_combo.addItems(list(nai_profile.NAI_MODEL_KEYS))
+            # ⚠️ 인덱스 0 을 그냥 쓰면 안 된다 - 목록 맨 위는 V5 이고, V5 는 Anlas 가
+            # 아닌 별도 사용량 한도를 태운다. 모드를 오갔다는 이유만으로 사용자가
+            # 고르지 않은 과금 풀로 옮겨 가면 안 되므로, 알던 NAI 키면 되살리고
+            # 아니면 기존 기본값(NAID4.5F)으로 간다.
+            restored = nai_profile.normalize_model_key(current_model)
+            self.model_combo.setCurrentText(restored or nai_profile.DEFAULT_NAI_MODEL_KEY)
             self.model_combo.blockSignals(False)
-            print("✅ 모델 리스트: NAI 기본 모델로 복원")
+            print(f"✅ 모델 리스트: NAI 기본 모델로 복원 (선택: {self.model_combo.currentText()})")
             return
 
         elif current_mode == "WEBUI":

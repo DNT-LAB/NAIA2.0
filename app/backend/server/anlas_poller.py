@@ -72,6 +72,67 @@ async def broadcast_anlas_if_vibe_encoded(context: Any, clients: set) -> None:
         print(f"⚠️ Use Vibe Anlas 갱신 실패: {exc}")
 
 
+def _current_model_uses_usage_limit(context: Any) -> bool:
+    """지금 고른 NAI 모델이 별도 사용량 한도를 쓰는가(= V5)."""
+    try:
+        from core.nai_model_contract import resolve_nai_model_for_context
+
+        key = context.get_generation_params().get("model")
+        return bool(resolve_nai_model_for_context(context, key).uses_opus_usage_limit)
+    except Exception:
+        return False
+
+
+def build_nai_usage_payload(context: Any) -> dict[str, Any]:
+    """V5 Opus 사용량 한도 페이로드 (blocking — 스레드에서 호출).
+
+    **V5 가 아니면 조회하지 않는다.** 배지는 V5 를 고른 동안에만 뜬다(사용자 지정
+    2026-08-19). 계약:
+    `{"type":"nai_usage_update","available":bool,"percent":int,
+      "is_negative":bool,"seconds_until_next_percent":int,"fetched_at":str}`
+    """
+    unavailable = {
+        "type": "nai_usage_update", "available": False, "percent": 0,
+        "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
+    }
+    mode = str(context.get_api_mode() or "").upper()
+    if mode != "NAI" or not _current_model_uses_usage_limit(context):
+        return unavailable
+    try:
+        token = str(context.secure_token_manager.get_token("nai_token") or "").strip()
+    except Exception:
+        token = ""
+    if not token:
+        return unavailable
+    try:
+        usage = api_verification.fetch_nai_usage_limit(token)
+    except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
+        print(f"[warn] NAI usage limit fetch failed: {exc}")
+        usage = None
+    if not usage:
+        return unavailable
+    return {
+        "type": "nai_usage_update",
+        "available": True,
+        "percent": int(usage.get("percent", 0)),
+        "is_negative": bool(usage.get("is_negative", False)),
+        "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
+        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+async def broadcast_nai_usage(context: Any, clients: set) -> None:
+    """V5 사용량 한도를 1회 조회해 브로드캐스트.
+
+    **폴링하지 않는다** - 모델/모드가 V5 로 바뀌는 순간과 세션 시작 시 각 1회만
+    부른다(사용자 지정). V5 가 아니면 네트워크를 타지 않고 available=False 만 간다.
+    """
+    if not clients:
+        return
+    payload = await asyncio.to_thread(build_nai_usage_payload, context)
+    await broadcast_json(clients, payload)
+
+
 def ensure_anlas_poller(context: Any, clients: set) -> None:
     """5분 주기 Anlas 폴링 태스크를 보장 (중복 생성 방지)."""
     task = getattr(context, "headless_anlas_poll_task", None)

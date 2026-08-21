@@ -1004,7 +1004,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260819-neg1')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260819-naiv5')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -1013,7 +1013,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveAutocomplete} =
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260819-neg1');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260819-naiv5');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -1027,7 +1027,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     });
     // 씬(이벤트) 기록. Assets 바의 **반대쪽**(우하단)에 선다(사용자 지정).
     const {createInteractiveScenePanel} =
-      await import('./js/features/interactiveScenePanel.mjs?v=20260819-neg1');
+      await import('./js/features/interactiveScenePanel.mjs?v=20260819-naiv5');
     interactiveScenePanel = createInteractiveScenePanel({
       document, escHtml, showToast, showAppDialog,
       getPanel: () => interactivePanel,
@@ -3272,6 +3272,7 @@ const wsMessageHandlers = {
   setup_blocked: onSetupBlocked,
   probe_result: onProbeResult,
   anlas_update: onAnlasUpdate,
+  nai_usage_update: onNaiUsageUpdate,
   module_state: onModuleState,
   hires_preset_overlay: _applyHiresOverlayResponse,
   prompt_engineering_preset_thumbnail_updated: onPromptEngineeringPresetThumbnailUpdated,
@@ -4123,11 +4124,20 @@ function updateParams(m) {
       if (key) naiModelMetaByKey.set(key, item);
     });
   }
+  // 콤보 라벨은 기본적으로 키 그대로(NAID4.5F …)를 쓴다. 두 경우만 갈아 끼운다:
+  //   - 사용자 등록 모델: 등록할 때 준 이름
+  //   - V5: `NAID5F (Opus Limit)` — Anlas 가 아니라 **별도 사용량 풀**을 쓴다는
+  //     것을 고르는 자리에서 바로 알려 준다(사용자 지정 2026-08-19).
   const modelLabels = mode === 'NAI'
     ? new Map(
       Array.from(naiModelMetaByKey.entries())
-        .filter(([, item]) => item?.source === 'user')
-        .map(([key, item]) => [key, String(item?.label || key)])
+        .filter(([, item]) => item?.source === 'user' || item?.family === 'v5')
+        .map(([key, item]) => [
+          key,
+          item?.source === 'user'
+            ? String(item?.label || key)
+            : `${key} (Opus Limit)`,
+        ])
     )
     : null;
   populateSelect(paramEls.model, m.options_model, m.model, modelLabels);
@@ -6958,6 +6968,33 @@ function setLauncherConn(on) {
   if (setupController) setupController.setLauncherConn(on);
 }
 
+// ---- NAI Diffusion V5 Opus usage-limit pill (viewer top-right) ----
+//
+// Anlas 와 **다른 풀**이다. V5 는 무료 범위(캐릭터 레퍼런스 없이 1MP 이하 ·
+// steps 28 이하)에서 Anlas 를 안 쓰는 대신 이 한도를 쓰고, 시간당 0.5% 회복한다.
+// 서버는 폴링하지 않는다 — 세션 시작 · 모델/모드가 V5 로 바뀔 때만 1회 보낸다.
+//
+// ⚠️ `percent` 는 정수라 한 장 생성으로는 눈금이 안 움직인다. 값을 못 믿을 만큼
+// 세밀한 표시는 하지 않고, 회복까지 남은 시간만 툴팁에 얹는다.
+function onNaiUsageUpdate(m) {
+  const pill = $('naiUsagePill');
+  const value = $('naiUsageValue');
+  if (!pill || !value) return;
+  if (!m || !m.available) { pill.classList.add('hidden'); return; }
+  const pct = Number.isFinite(m.percent) ? m.percent : 0;
+  value.textContent = `${pct}%`;
+  pill.classList.toggle('is-out', !!m.is_negative);
+  const secs = Number(m.seconds_until_next_percent) || 0;
+  const mins = Math.round(secs / 60);
+  const nextIn = secs > 0
+    ? (mins >= 60 ? `${Math.floor(mins / 60)}시간 ${mins % 60}분` : `${mins}분`)
+    : '';
+  pill.title = m.is_negative
+    ? 'V5 무료 사용량 소진 — 이후 생성은 Anlas 를 씁니다'
+    : `NovelAI Diffusion V5 Opus 사용량${nextIn ? ` · +1% 까지 ${nextIn}` : ''}`;
+  pill.classList.remove('hidden');
+}
+
 // ---- NAI Anlas pill (viewer bottom-left) ----
 // Desktop fetches subscription every 5 min + on every NAI generation,
 // then broadcasts `anlas_update`. Web is read-only.
@@ -9334,7 +9371,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260819-neg1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260819-naiv5')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

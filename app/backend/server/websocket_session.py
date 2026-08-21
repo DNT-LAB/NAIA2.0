@@ -10,7 +10,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) WS-command 계측
 
-from app.backend.server.anlas_poller import broadcast_anlas, ensure_anlas_poller
+from app.backend.server.anlas_poller import (
+    broadcast_anlas,
+    broadcast_nai_usage,
+    ensure_anlas_poller,
+)
 from app.backend.server.api_control_commands import (
     API_CONTROL_COMMAND_TYPES,
     handle_api_control_command,
@@ -174,6 +178,10 @@ def register_websocket_session(
             )
             ensure_anlas_poller(context, clients)
             await broadcast_anlas(context, clients)
+            # **V5 사용량 한도는 폴링하지 않는다.** 프로그램을 켠 첫 상태가 V5 면
+            # 여기서 1회, 그 뒤로는 모델/모드가 V5 로 바뀔 때만 조회한다(사용자 지정
+            # 2026-08-19). V5 가 아니면 네트워크를 타지 않는다.
+            await broadcast_nai_usage(context, clients)
             while True:
                 data = await ws.receive_text()
                 if data.startswith("{"):

@@ -18346,6 +18346,34 @@ select.setup-input { cursor: pointer; }
   user-select: none;
 }
 .anlas-pill.hidden { display: none; }
+
+/* V5 Opus 사용량 한도 배지. 히스토리 레일 **왼쪽**, 결과 뷰어 우상단(사용자가
+   지정한 자리). `.stats-island` 와 같은 모서리를 쓰므로 그 아래로 내려 겹치지
+   않게 한다 — 둘 다 `top:10px` 이면 세대 카운터를 덮는다. */
+.nai-usage-pill {
+  position: absolute;
+  top: 42px; right: 10px;
+  z-index: 15;
+  display: flex; align-items: center; gap: 7px;
+  padding: 4px 11px;
+  border-radius: 12px;
+  background: rgba(18,18,26,0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-family: var(--font-mono);
+  border: 1px solid rgba(255,255,255,0.06);
+  pointer-events: none;
+  user-select: none;
+}
+.nai-usage-pill.hidden { display: none; }
+.nai-usage-label {
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #8a8aa0;
+}
+.nai-usage-value { font-size: 12px; font-weight: 700; color: #d8d8e8; }
+/* 소진(isNegative) 이면 붉게 — 이때는 Anlas 를 쓰기 시작한다. */
+.nai-usage-pill.is-out { border-color: rgba(255,96,96,0.45); }
+.nai-usage-pill.is-out .nai-usage-value { color: #ff8080; }
 /* Anlas 소비(잔량 감소) 시 짧게 점멸 — 상단/뷰어 pill 공통. */
 @keyframes anlas-flash-kf {
   0%   { box-shadow: 0 0 0 0 rgba(255,196,72,0); }

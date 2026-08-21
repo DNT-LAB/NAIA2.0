@@ -641,6 +641,19 @@ class APIService:
             main_token = self.app_context.secure_token_manager.get_token('nai_token')
             return main_token if main_token else ""
 
+    @staticmethod
+    def _nai_request_body_kwargs(payload: Dict[str, Any], multipart: bool) -> Dict[str, Any]:
+        """NAI 요청 바디를 프로필에 맞는 `requests` 인자로 만든다.
+
+        V4 이하: `json=payload` 그대로.
+        V5: `multipart/form-data` 의 **`request` 파트 하나**에 JSON 을 담는다.
+            파일명은 웹과 같은 `blob`, MIME 은 `application/json` 이다.
+        """
+        if not multipart:
+            return {"json": payload}
+        body = json.dumps(payload, ensure_ascii=False)
+        return {"files": {"request": ("blob", body, "application/json")}}
+
     def _call_nai_api(self, params: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다.
 
@@ -1198,10 +1211,14 @@ class APIService:
                 "parameters": api_parameters
             }
 
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
+            # ⚠️ **V5 는 JSON 을 그대로 POST 하지 않는다.** `multipart/form-data` 의
+            # `request` 파트에 JSON Blob 으로 감싸 보낸다(2026-08-19 웹 프론트 실측).
+            # 이때 Content-Type 은 직접 넣으면 안 된다 - requests 가 boundary 를 붙여
+            # 만들어야 한다. 넣어 두면 boundary 없는 헤더가 이겨서 서버가 파싱에 실패한다.
+            nai_multipart = bool(getattr(model_spec, 'uses_multipart_request', False))
+            headers = {"Authorization": f"Bearer {token}"}
+            if not nai_multipart:
+                headers["Content-Type"] = "application/json"
 
             # print("📤 NAI API 요청 페이로드:", payload)
 
@@ -1215,6 +1232,7 @@ class APIService:
                     payload, headers, steps_for_progress,
                     progress_callback=progress_callback,
                     preview_callback=preview_callback,
+                    multipart=nai_multipart,
                 )
                 self._cleanup_http_threads()
                 if not image_bytes:
@@ -1231,8 +1249,8 @@ class APIService:
                 response = session.post(
                     self.NAI_V3_API_URL,
                     headers=headers,
-                    json=payload,
-                    timeout=180
+                    timeout=180,
+                    **self._nai_request_body_kwargs(payload, nai_multipart)
                 )
                 # 세션 정리
                 session.close()
@@ -1639,7 +1657,8 @@ class APIService:
                 print(f"   - {key}: {value}")
 
     def _stream_nai_request(self, payload: Dict[str, Any], headers: Dict[str, str], steps: int,
-                            progress_callback=None, preview_callback=None) -> bytes | None:
+                            progress_callback=None, preview_callback=None,
+                            multipart: bool = False) -> bytes | None:
         """
         NovelAI generate-image-stream(SSE) 엔드포인트를 호출합니다.
 
@@ -1665,9 +1684,9 @@ class APIService:
             response = session.post(
                 stream_url,
                 headers=stream_headers,
-                json=payload,
                 stream=True,
                 timeout=(30, 300),
+                **self._nai_request_body_kwargs(payload, multipart),
             )
             try:
                 # 오류 응답은 본문을 읽어 예외로 처리 (재시도/에러 표시 일관성)

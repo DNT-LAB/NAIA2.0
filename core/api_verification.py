@@ -246,6 +246,44 @@ def fetch_nai_anlas(token: str) -> Optional[int]:
         return None
 
 
+def fetch_nai_usage_limit(token: str) -> Optional[dict]:
+    """NAI Diffusion V5 의 **Opus 사용량 한도** 조회.
+
+    V5 는 Anlas 가 아니라 별도 사용량 풀을 쓴다(무료 범위: 캐릭터 레퍼런스 없이
+    1MP 이하 · steps 28 이하). 잔량은 **생성 응답에 실리지 않고** 구독 응답의
+    `usage` 로만 온다(2026-08-19 실측):
+
+        usage = {"percent": 100, "isNegative": false, "timeUntilNextPercent": 7888}
+
+    `percent` 는 정수라 한 장 생성으로는 눈금이 안 움직인다 - 회복까지 남은 시간은
+    `timeUntilNextPercent`(초), 소진 판정은 `isNegative` 로 본다.
+    실패하거나 서버가 `usage` 를 안 주면 None(= 표시하지 않음).
+    """
+    token = (token or "").strip()
+    if not token:
+        return None
+    try:
+        res = requests.get(
+            NAI_SUBSCRIPTION_URL,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=5,
+        )
+        if res.status_code != 200:
+            return None
+        usage = (res.json() or {}).get("usage")
+        if not isinstance(usage, dict):
+            return None
+        return {
+            "percent": int(usage.get("percent", 0) or 0),
+            "is_negative": bool(usage.get("isNegative", False)),
+            "seconds_until_next_percent": int(usage.get("timeUntilNextPercent", 0) or 0),
+        }
+    except requests.exceptions.RequestException:
+        return None
+    except Exception:  # pragma: no cover
+        return None
+
+
 def test_comfyui_connection(url: str) -> bool:
     """빠른 boolean 판정 (내부 유틸)."""
     if not (url or "").strip():

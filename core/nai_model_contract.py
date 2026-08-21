@@ -16,7 +16,7 @@ from typing import Any, Mapping
 DEFAULT_NAI_MODEL_KEY = "NAID4.5F"
 DEFAULT_NAI_API_MODEL = "nai-diffusion-4-5-full"
 
-NAI_PAYLOAD_PROFILES = frozenset({"v3", "v4", "v4.5", "passthrough"})
+NAI_PAYLOAD_PROFILES = frozenset({"v3", "v4", "v4.5", "v5", "passthrough"})
 
 
 @dataclass(frozen=True)
@@ -36,20 +36,41 @@ class NaiModelSpec:
 
     @property
     def uses_v4_payload(self) -> bool:
-        return self.payload_profile in {"v4", "v4.5"}
+        # V5도 `v4_prompt`/`v4_negative_prompt` 를 **그대로** 쓴다 — 웹 번들에
+        # `v5_prompt` 는 존재하지 않고 `params_version` 도 4 그대로다(2026-08-19 실측).
+        return self.payload_profile in {"v4", "v4.5", "v5"}
 
     @property
     def supports_vibe(self) -> bool:
         # NAIA의 현재 encode/apply 계약은 V4/V4.5 경로만 검증돼 있다.
+        # V5는 페이로드 구조가 같아 함께 열어 두지만 **라이브 검증은 아직 없다**.
         return self.uses_v4_payload
 
     @property
     def supports_character_reference(self) -> bool:
-        return self.payload_profile == "v4.5"
+        # V5도 `director_reference_*` 를 그대로 받는다(스키마 확인). 라이브 미검증.
+        return self.payload_profile in {"v4.5", "v5"}
 
     @property
     def uses_legacy_smea(self) -> bool:
         return self.payload_profile == "v3"
+
+    @property
+    def uses_multipart_request(self) -> bool:
+        """V5는 JSON 을 그대로 POST 하지 않는다.
+
+        `multipart/form-data` 의 **`request` 파트에 JSON Blob** 으로 감싸 보낸다
+        (2026-08-19 웹 프론트 실측). 이 래핑을 안 맞추면 요청 자체가 성립하지 않는다.
+        """
+        return self.payload_profile == "v5"
+
+    @property
+    def uses_opus_usage_limit(self) -> bool:
+        """Anlas 가 아닌 **별도 사용량 한도**(0.5%/h 회복)를 쓰는 모델인가.
+
+        잔량은 `GET /user/subscription` 의 `usage` 로만 오고 생성 응답에는 없다.
+        """
+        return self.payload_profile == "v5"
 
     @property
     def skip_cfg_above_sigma(self) -> int | None:
@@ -57,6 +78,7 @@ class NaiModelSpec:
             return 58
         if self.payload_profile in {"v3", "v4"}:
             return 19
+        # V5: 웹이 보내는 페이로드에 이 키가 아예 없다(기본값도 null) — 넣지 않는다.
         return None
 
     def to_payload(self) -> dict[str, Any]:
@@ -105,6 +127,25 @@ def _builtin(
 
 # 숨은 F/C canonical key도 메타데이터/프리셋 복원에서 사용하므로 resolver에는 유지한다.
 BUILTIN_NAI_MODEL_SPECS: dict[str, NaiModelSpec] = {
+    # V5 (2026-08 출시). 키에 점을 쓰지 않는다 — 마이너 버전이 없다(사용자 지정).
+    # 모델 문자열은 **웹 번들에서만** 얻을 수 있다: OpenAPI 의 `model` 은 enum 이
+    # 아니라 자유 문자열이라 문서에는 목록이 없다.
+    "NAID5F": _builtin(
+        "NAID5F",
+        "NovelAI Diffusion V5 Full",
+        "nai-diffusion-5-full",
+        "v5",
+        inpainting_api_model="nai-diffusion-5-full-inpainting",
+        family="v5",
+    ),
+    "NAID5C": _builtin(
+        "NAID5C",
+        "NovelAI Diffusion V5 Curated",
+        "nai-diffusion-5-curated",
+        "v5",
+        inpainting_api_model="nai-diffusion-5-curated-inpainting",
+        family="v5",
+    ),
     "NAID4.5F": _builtin(
         "NAID4.5F",
         "NovelAI Diffusion V4.5 Full",

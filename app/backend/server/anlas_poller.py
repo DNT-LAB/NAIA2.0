@@ -580,6 +580,15 @@ async def _run_anlas_poll(context: Any, clients: set) -> None:
         while True:
             # 연결 시점에 1회 즉시 브로드캐스트하므로, 폴러는 sleep 후 갱신부터 시작.
             await asyncio.sleep(ANLAS_POLL_INTERVAL_SECONDS)
-            await broadcast_anlas(context, clients)
+            # V5 를 고른 동안에는 **사용량도 같이** 갱신한다. 예전에는 Anlas 만 돌아서,
+            # 생성 없이 놀고 있으면 회복분(시간당 0.46%)이 배지에 영영 안 나타났다 -
+            # 모델을 다시 만지기 전까지 숫자가 굳어 있었다.
+            #
+            # 이 경로는 접속 후 5분이 지나야 처음 도므로 릴리즈 웹 스모크의 메시지
+            # 개수 계약과 무관하다(스모크는 그 전에 끝난다).
+            if usage_badge_active(context):
+                await broadcast_anlas_and_usage(context, clients)
+            else:
+                await broadcast_anlas(context, clients)
     finally:
         context.headless_anlas_poll_active = False

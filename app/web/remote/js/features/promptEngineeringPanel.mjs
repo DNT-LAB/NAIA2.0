@@ -199,6 +199,9 @@ export function createPromptEngineeringPanel({
   let presetQuery = '';
   let presetHaystack = new Map();     // 프리셋 이름 -> 검색 대상 문자열(소문자)
   let presetAllOptions = null;        // 필터 전 원본 <option> 들
+  // 마지막으로 갈래를 맞춰 준 프리셋. 같은 프리셋에 두 번 맞추지 않는다 -
+  // 그래야 사용자가 누른 필터가 그대로 남는다(alignPresetGroupToSelection 주석).
+  let lastAlignedPreset = null;
 
   function presetTerms(raw) {
     return String(raw || '').split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
@@ -214,11 +217,35 @@ export function createPromptEngineeringPanel({
    *  건드렸는데, 갈래 필터(ALL/NAI5/…)도 이 함수를 부르므로 **버튼을 누를 때마다
    *  목록이 닫혔다**(사용자 지적 2026-08-21: "버튼을 클릭할 때 콤보박스에서 포커스가
    *  빠진다"). 필터는 목록 안에 있는 버튼이라 닫히면 연달아 못 누른다. */
+  /** 고른 프리셋이 지금 갈래에 없으면 갈래를 그쪽으로 옮긴다.
+   *
+   *  제보(2026-08-21): "Add 로 v5 모델 기반 프리셋을 만들었는데 콤보박스에 바로
+   *  반영되지 않았다." 필터가 NAI4.5 에 있으면 새로 만든 NAI5 프리셋이 걸러져
+   *  목록에서 안 보인다 - 방금 만든 것이 안 보이니 실패한 줄 안다.
+   *
+   *  ⚠️ **프리셋이 바뀐 순간에만** 한다. 필터를 누른 직후에도 맞추면 사용자가 고른
+   *  갈래가 곧바로 되돌려져 버튼이 안 먹는 것처럼 보인다(필터 클릭은 select.value 를
+   *  안 바꾸므로 아래 조기 반환에 걸린다). ALL 일 때는 어차피 다 보이니 건드리지 않는다. */
+  function alignPresetGroupToSelection(select) {
+    const current = select.value;
+    if (!current || current === lastAlignedPreset) return;
+    lastAlignedPreset = current;
+    const group = String(select.dataset.optionFilterActive || 'all');
+    if (group === 'all') return;
+    const source = presetAllOptions || Array.from(select.options);
+    const option = source.find(opt => opt.value === current);
+    const own = String((option && option.dataset.modelGroup) || 'etc');
+    if (own === group) return;
+    select.dataset.optionFilterActive = own;
+    writePresetGroup(own);
+  }
+
   function applyPresetFilter(opts) {
     const syncOpen = !!(opts && opts.syncOpen);
     const select = document.getElementById('modPreset');
     if (!select) return;
     if (!presetAllOptions) presetAllOptions = Array.from(select.options);
+    alignPresetGroupToSelection(select);
     const terms = presetTerms(presetQuery);
     const current = select.value;
     // 갈래 필터(ALL/NAI5/NAI4.5/ETC)는 검색과 **AND** 로 걸린다 — 좁혀 가는 도구

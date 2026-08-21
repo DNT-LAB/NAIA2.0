@@ -60,6 +60,14 @@ except Exception:  # pragma: no cover - platform fallback
     SSL_CONTEXT = ssl.create_default_context()
 
 
+# 태그 아카이브는 1.2GB 다. 느린 회선에서 한 번 멎으면 처음부터 다시 받아야 했고,
+# 실제로 "태그 데이터 설치 실패: The read operation timed out" 으로 설치가 깨졌다
+# (v2.0.34 빌드 중 실측). 소켓 타임아웃을 늘리고, 끊기면 **이어받는다**.
+_DOWNLOAD_TIMEOUT_SECONDS = 60
+_DOWNLOAD_ATTEMPTS = 5
+_DOWNLOAD_BACKOFF_CAP = 8      # 재시도 대기 상한(초). 테스트는 0 으로 낮춘다.
+
+
 class RuntimeInstallManager:
     """Initialize and install runtime-owned data for headless/Electron runs."""
 
@@ -330,45 +338,111 @@ class RuntimeInstallManager:
                 pass
 
     def _download_archive(self, spec: ArchiveSpec, temp_zip: Path) -> None:
+        """아카이브를 받는다. **끊기면 이어받는다.**
+
+        ⚠️ 예전에는 시도 한 번에 이어받기가 없었다. 태그 아카이브는 1.2GB 라
+        느린 회선에서는 중간에 한 번만 멎어도(소켓 read 타임아웃) **처음부터** 다시
+        받아야 했고, 실제로 "태그 데이터 설치 실패: The read operation timed out"
+        으로 설치가 깨졌다(v2.0.34 빌드 중 실측).
+
+        받아 둔 바이트는 파일에 그대로 두고 `Range: bytes=N-` 로 이어 붙인다.
+        Range 를 무시하고 200 을 주는 서버면 그때만 처음부터 다시 받는다.
+        """
         temp_zip.parent.mkdir(parents=True, exist_ok=True)
-        request = urllib.request.Request(
-            spec.url,
-            headers={"User-Agent": "NAIA/2.0.34 RuntimeInstallManager"},
-        )
-        self._set_state(percent=5, message=f"{spec.label} 다운로드 연결 중...")
-        open_kwargs = {"timeout": 30}
+        open_kwargs: dict[str, Any] = {"timeout": _DOWNLOAD_TIMEOUT_SECONDS}
         if spec.url.startswith("https://"):
             open_kwargs["context"] = SSL_CONTEXT
-        with urllib.request.urlopen(request, **open_kwargs) as response:
-            total_size = int(response.headers.get("content-length", 0) or 0)
-            total_mb = round(total_size / (1024 * 1024), 1) if total_size else 0.0
-            downloaded = 0
-            last_update = 0.0
-            with temp_zip.open("wb") as output:
-                while True:
-                    if self._cancel.is_set():
-                        raise InterruptedError("태그 데이터 다운로드가 취소되었습니다.")
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    output.write(chunk)
-                    downloaded += len(chunk)
-                    now = time.time()
-                    if now - last_update >= 0.25:
-                        percent = min(85, 10 + int((downloaded * 75) / total_size)) if total_size else 10
-                        downloaded_mb = round(downloaded / (1024 * 1024), 1)
-                        self._set_state(
-                            percent=percent,
-                            downloaded_mb=downloaded_mb,
-                            total_mb=total_mb,
-                            message=(
-                                f"{spec.label} 다운로드 중... {percent}% ({downloaded_mb}/{total_mb} MB)"
-                                if total_size else f"{spec.label} 다운로드 중... {downloaded_mb} MB"
-                            ),
-                        )
-                        last_update = now
-        if temp_zip.stat().st_size < 1024:
+
+        downloaded = temp_zip.stat().st_size if temp_zip.exists() else 0
+        total_size = 0
+        last_error: Exception | None = None
+
+        for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+            if self._cancel.is_set():
+                raise InterruptedError("태그 데이터 다운로드가 취소되었습니다.")
+            headers = {"User-Agent": "NAIA/2.0.34 RuntimeInstallManager"}
+            if downloaded > 0:
+                headers["Range"] = f"bytes={downloaded}-"
+            # ⚠️ `_set_state` 는 dict.update 라 None 을 넣으면 그 값이 None 이 된다.
+            # 진행률은 첫 연결일 때만 건드린다(이어받는 중에 5% 로 되돌리면 안 된다).
+            progress: dict[str, Any] = {"percent": 5} if downloaded == 0 else {}
+            self._set_state(
+                message=(
+                    f"{spec.label} 다운로드 연결 중..." if attempt == 1 and downloaded == 0
+                    else f"{spec.label} 이어받는 중... (시도 {attempt}/{_DOWNLOAD_ATTEMPTS})"
+                ),
+                **progress,
+            )
+            try:
+                request = urllib.request.Request(spec.url, headers=headers)
+                with urllib.request.urlopen(request, **open_kwargs) as response:
+                    # Range 를 보냈는데 200 이 오면 서버가 무시한 것 - 이어붙이면
+                    # 파일이 깨지므로 그때만 처음부터 다시 받는다.
+                    resuming = downloaded > 0 and response.status == 206
+                    if downloaded > 0 and not resuming:
+                        downloaded = 0
+                    body_size = int(response.headers.get("content-length", 0) or 0)
+                    total_size = (downloaded + body_size) if body_size else total_size
+                    mode = "ab" if resuming else "wb"
+                    downloaded = self._stream_to_file(
+                        spec, response, temp_zip, mode, downloaded, total_size)
+                last_error = None
+                break
+            except InterruptedError:
+                raise
+            except urllib.error.HTTPError as exc:
+                # 416 = 이미 다 받아 둔 상태에서 그 뒤를 또 달라고 한 것.
+                if exc.code == 416 and downloaded > 0:
+                    last_error = None
+                    break
+                raise
+            except Exception as exc:  # noqa: BLE001 - 끊김/타임아웃은 재시도 대상이다
+                last_error = exc
+                # ⚠️ **디스크에서 다시 잰다.** `_stream_to_file` 이 도중에 예외를
+                # 던지면 반환값을 못 받아 `downloaded` 가 0 인 채로 남는다 - 그러면
+                # Range 를 안 보내 이어받기가 통째로 무력화된다(테스트가 잡았다).
+                # 실제로 몇 바이트가 들어갔는지는 파일만이 안다.
+                downloaded = temp_zip.stat().st_size if temp_zip.exists() else 0
+                if attempt >= _DOWNLOAD_ATTEMPTS:
+                    break
+                # 취소에 즉시 반응해야 하므로 sleep 대신 이벤트 대기를 쓴다.
+                if self._cancel.wait(min(_DOWNLOAD_BACKOFF_CAP, 2 ** (attempt - 1))):
+                    raise InterruptedError("태그 데이터 다운로드가 취소되었습니다.")
+
+        if last_error is not None:
+            raise last_error
+        if not temp_zip.exists() or temp_zip.stat().st_size < 1024:
             raise ValueError(f"다운로드된 {spec.label} ZIP 파일이 너무 작습니다.")
+
+    def _stream_to_file(self, spec: ArchiveSpec, response: Any, temp_zip: Path,
+                        mode: str, downloaded: int, total_size: int) -> int:
+        """응답 본문을 파일에 흘려 넣고 지금까지 받은 총 바이트를 돌려준다."""
+        total_mb = round(total_size / (1024 * 1024), 1) if total_size else 0.0
+        last_update = 0.0
+        with temp_zip.open(mode) as output:
+            while True:
+                if self._cancel.is_set():
+                    raise InterruptedError("태그 데이터 다운로드가 취소되었습니다.")
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                output.write(chunk)
+                downloaded += len(chunk)
+                now = time.time()
+                if now - last_update >= 0.25:
+                    percent = min(85, 10 + int((downloaded * 75) / total_size)) if total_size else 10
+                    downloaded_mb = round(downloaded / (1024 * 1024), 1)
+                    self._set_state(
+                        percent=percent,
+                        downloaded_mb=downloaded_mb,
+                        total_mb=total_mb,
+                        message=(
+                            f"{spec.label} 다운로드 중... {percent}% ({downloaded_mb}/{total_mb} MB)"
+                            if total_size else f"{spec.label} 다운로드 중... {downloaded_mb} MB"
+                        ),
+                    )
+                    last_update = now
+        return downloaded
 
     def _extract_archive(self, spec: ArchiveSpec, temp_zip: Path) -> int:
         self._set_state(percent=90, message=f"{spec.label} 압축 해제 중...")

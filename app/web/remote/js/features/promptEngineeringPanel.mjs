@@ -214,6 +214,11 @@ export function createPromptEngineeringPanel({
     if (!presetAllOptions) presetAllOptions = Array.from(select.options);
     const terms = presetTerms(presetQuery);
     const current = select.value;
+    // 갈래 필터(ALL/NAI5/NAI4.5/ETC)는 검색과 **AND** 로 걸린다 — 좁혀 가는 도구
+    // 둘이니 서로를 무르면 안 된다.
+    const group = String(select.dataset.optionFilterActive || 'all');
+    const inGroup = opt => group === 'all'
+      || String(opt.dataset.modelGroup || 'etc') === group;
     const hits = opt => {
       if (!terms.length) return false;
       const hay = presetHaystack.get(opt.value);
@@ -228,6 +233,7 @@ export function createPromptEngineeringPanel({
       // 지금 고른 프리셋은 **항상 남긴다.** 지워 버리면 select 의 값이 조용히
       // 다른 프리셋으로 바뀌고, 검색만 했는데 적용된 프리셋이 갈린다.
       if (opt.value === current) return true;
+      if (!inGroup(opt)) return false;
       if (!terms.length) return true;
       return hit;
     });
@@ -235,16 +241,20 @@ export function createPromptEngineeringPanel({
     // 보여주므로(늘 남기는 규칙), 드롭다운을 열기 전에는 걸렸는지조차 알 수 없다 —
     // 아무 일도 안 일어난 것처럼 보인다(사용자 지적 2026-08-08).
     // 세는 것은 **실제로 걸린 것**이다: 늘 남기는 현재 프리셋은 안 맞으면 빼고 센다.
+    // 갈래 필터를 먹인 뒤를 모수로 센다 — ALL 이 아닌데 전체 개수를 보이면
+    // "걸렀는데 숫자가 안 준다" 로 보인다.
+    const pool = presetAllOptions.filter(inGroup);
     const matched = terms.length
-      ? presetAllOptions.filter(opt => {
+      ? pool.filter(opt => {
           const hay = presetHaystack.get(opt.value);
           return hay !== undefined && terms.every(t => hay.includes(t));
         }).length
-      : presetAllOptions.length;
+      : pool.length;
     const badge = document.getElementById('modPresetCount');
     if (badge) {
-      badge.textContent = terms.length ? `${matched} / ${presetAllOptions.length}` : '';
-      badge.classList.toggle('is-none', terms.length > 0 && matched === 0);
+      const narrowed = terms.length > 0 || group !== 'all';
+      badge.textContent = narrowed ? `${matched} / ${presetAllOptions.length}` : '';
+      badge.classList.toggle('is-none', narrowed && matched === 0);
     }
 
     // 미리보기에서 형광펜으로 칠할 말들. 줄바꿈으로 넘긴다(검색어에 쉼표가
@@ -263,6 +273,29 @@ export function createPromptEngineeringPanel({
     // 검색창에서 계속 칠 수 있다. 검색어를 지우면 닫는다.
     select.dispatchEvent(new CustomEvent(
       terms.length ? 'naia:select-open' : 'naia:select-close'));
+  }
+
+  // 갈래 필터의 마지막 선택. 세션이 아니라 **다음 실행까지** 기억한다(사용자 지정).
+  const PRESET_GROUP_KEY = 'naia.pe.presetGroup';
+
+  function readPresetGroup() {
+    try { return String(localStorage.getItem(PRESET_GROUP_KEY) || 'all'); }
+    catch (_) { return 'all'; }        // 프라이빗 모드 등 - 기본값으로 조용히 산다
+  }
+
+  function writePresetGroup(key) {
+    try { localStorage.setItem(PRESET_GROUP_KEY, String(key || 'all')); } catch (_) {}
+  }
+
+  function bindPresetGroupFilter() {
+    const select = document.getElementById('modPreset');
+    if (!select || select.dataset.groupBound === '1') return;
+    select.dataset.groupBound = '1';
+    // customSelects 가 목록 맨 위 바에서 쏜다. 무엇을 거를지는 여기서 정한다.
+    select.addEventListener('naia:option-filter', event => {
+      writePresetGroup(event.detail?.key);
+      applyPresetFilter();
+    });
   }
 
   function bindPresetSearch() {
@@ -365,7 +398,15 @@ export function createPromptEngineeringPanel({
           `data-preview-description="${escHtml(compactPreviewText(summary.description, 300))}"`,
           `data-preview-thumbnail="${escHtml(summary.thumbnail_url || '')}"`,
         ].join(' ') : '';
-        return `<option value="${escHtml(preset)}"${preset === m.preset ? ' selected' : ''}${title ? ` title="${escHtml(title)}"` : ''} ${previewAttrs}>${escHtml(preset)}</option>`;
+        // 모델 배지(`[NAI4.5C]`)와 갈래. customSelects 가 이 둘로 라벨을 색칠하고,
+        // 아래 필터가 `modelGroup` 으로 목록을 좁힌다. 옵션 **텍스트에는 넣지 않는다** -
+        // 넣으면 프리셋 검색(본문 부분 문자열)이 배지까지 훑어 무뎌진다.
+        const badgeAttrs = summary && summary.model_label ? [
+          `data-model-label="${escHtml(summary.model_label)}"`,
+          `data-model-family="${escHtml(summary.model_family || '')}"`,
+        ].join(' ') : '';
+        const groupAttr = summary ? ` data-model-group="${escHtml(summary.model_group || 'etc')}"` : '';
+        return `<option value="${escHtml(preset)}"${preset === m.preset ? ' selected' : ''}${title ? ` title="${escHtml(title)}"` : ''}${groupAttr} ${previewAttrs} ${badgeAttrs}>${escHtml(preset)}</option>`;
       })
       .join('');
 
@@ -394,11 +435,23 @@ export function createPromptEngineeringPanel({
       <span class="mod-checkbox-label">Ollama Auto Boost <span id="peOllamaBoostHint" style="margin-left:6px;color:var(--text-dim)${ollamaReady ? ';display:none' : ''}">(Ollama 실행·모델 준비 시 활성화)</span></span>
     </label>`;
 
+    // 갈래 필터 바는 **NAI 모드에서만** 뜬다 — 백엔드가 그때만 목록을 준다.
+    // 마지막 선택은 기억한다(사용자 지정 2026-08-21). 저장된 갈래가 이번 목록에
+    // 없으면(모드가 바뀌었다든지) 조용히 ALL 로 되돌린다 - 안 그러면 아무것도
+    // 안 걸리는 필터가 켜진 채 "프리셋이 사라졌다" 가 된다.
+    const filterGroups = Array.isArray(m.preset_filter_groups) ? m.preset_filter_groups : [];
+    let activeGroup = readPresetGroup();
+    if (!filterGroups.some(g => g && g.key === activeGroup)) activeGroup = 'all';
+    const presetFilterAttrs = filterGroups.length >= 2
+      ? ` data-option-filters="${escHtml(JSON.stringify(filterGroups))}"`
+        + ` data-option-filter-active="${escHtml(activeGroup)}"`
+      : '';
+
     const presetControlHtml = `
     <div>
       <div class="mod-section-label has-actions"><span>Quick Preset<input type="search" class="pe-preset-search" id="modPresetSearch" placeholder="검색 — 쉼표로 여러 개" value="${escHtml(presetQuery)}" autocomplete="off" spellcheck="false"><span class="pe-preset-count" id="modPresetCount"></span></span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_QUICK_PRESET_GUIDE)}">ⓘ 가이드</button></span></div>
       <div class="mod-preset-toolbar">
-        <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset" onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
+        <select class="mod-select mod-preset-select" id="modPreset" data-preview-kind="prompt-preset"${presetFilterAttrs} onchange="onPromptPresetChange(this.value)">${presetOpts}</select>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetAddPanel()">Add</button>
         <button class="mod-btn-secondary mod-btn-compact" onclick="openPePresetManagePanel()">Manage</button>
       </div>
@@ -447,6 +500,7 @@ export function createPromptEngineeringPanel({
       if (el) bindTagAssist(el);
     });
     bindPresetSearch();
+    bindPresetGroupFilter();
     applyPresetFilter();
     restoreTextareaHeights(textareaHeights);
     restoreFocus(focusSnap);

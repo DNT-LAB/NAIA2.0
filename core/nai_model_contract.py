@@ -218,6 +218,67 @@ NAI_API_MODEL_BY_KEY = {
 }
 
 
+# ---- 프리셋 목록에 붙는 모델 배지 -------------------------------------------
+#
+# Quick Preset 목록에서 프리셋 이름 앞에 `[NAI4.5C]` 처럼 붙는 짧은 라벨과, 그 위
+# 필터 바(ALL / NAI5 / NAI4.5 / ETC)가 쓰는 분류. **키 문자열을 잘라 만들지 않는다** -
+# `NAID4.5` 처럼 접미사가 없는 키가 있어 규칙이 한 줄로 안 떨어진다.
+NAI_MODEL_SHORT_LABELS: dict[str, str] = {
+    "NAID5F": "NAI5.0F",
+    "NAID5C": "NAI5.0C",
+    "NAID4.5F": "NAI4.5F",
+    "NAID4.5C": "NAI4.5C",
+    "NAID4.5": "NAI4.5",
+    "NAID4.0F": "NAI4.0F",
+    "NAID4.0C": "NAI4.0C",
+    "NAID4": "NAI4.0",
+    "NAID3": "NAI3.0",
+}
+
+# 필터 바의 갈래. 4.0 과 3.0 은 ETC 로 묶는다(사용자 지정 2026-08-21).
+NAI_PRESET_FILTER_GROUPS: tuple[tuple[str, str], ...] = (
+    ("all", "ALL"),
+    ("v5", "NAI5"),
+    ("v4.5", "NAI4.5"),
+    ("etc", "ETC"),
+)
+
+
+def nai_model_badge(model_key: Any, context: Any = None) -> dict[str, str]:
+    """프리셋 배지 정보. 모델을 모르면 라벨 없이 ETC 로 보낸다.
+
+    반환: `{"key", "label", "family", "group"}`.
+    `family` 는 색을 정하고(v5=루비 / v4.5=연노랑 / v4.0=연두 / v3=하늘),
+    `group` 은 필터 바가 쓴다.
+    """
+    key = normalize_nai_model_key(model_key)
+    if not key:
+        # 모델을 안 적고 저장된 옛 프리셋. 숨기면 ALL 에만 보이고 다른 갈래에서
+        # 사라져 "프리셋이 없어졌다" 가 된다 - ETC 에 넣어 어디서든 닿게 한다.
+        return {"key": "", "label": "", "family": "", "group": "etc"}
+    # ⚠️ **여기서는 `resolve_*` 의 폴백을 쓰면 안 된다.** 모르는 키를 기본 모델
+    # (NAID4.5F)로 되돌려 주므로, 옛 프리셋의 오타 하나가 화면에 `NAI4.5` 배지로
+    # 둔갑한다 - 배지는 "저장된 것"을 보여야지 "대신 쓸 것"을 보이면 안 된다.
+    spec = BUILTIN_NAI_MODEL_SPECS.get(key)
+    if spec is None and context is not None:
+        getter = getattr(context, "_nai_model_registry", None)
+        if callable(getter):
+            try:
+                custom = getter().resolve(key)
+                # 레지스트리도 모르는 키는 기본값을 줄 수 있다 - 키가 같을 때만 믿는다.
+                if normalize_nai_model_key(getattr(custom, "key", "")) == key:
+                    spec = custom
+            except Exception:
+                spec = None
+    if spec is None:
+        return {"key": key, "label": key, "family": "", "group": "etc"}
+    family = str(spec.family or "")
+    group = family if family in {"v5", "v4.5"} else "etc"
+    # 사용자 등록 모델은 짧은 라벨이 없다 - 키를 그대로 쓴다.
+    label = NAI_MODEL_SHORT_LABELS.get(key, key)
+    return {"key": key, "label": label, "family": family, "group": group}
+
+
 def normalize_nai_model_key(value: Any) -> str:
     return str(value or "").strip().upper()
 

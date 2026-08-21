@@ -690,7 +690,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260808t-fix')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260821-presetfilter')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -1004,7 +1004,7 @@ const interactiveReferenceReady = import('./js/features/interactiveReferencePane
     return interactiveReferencePanel.refresh();
   })
   .catch(error => console.error('Failed to init interactive reference panel', error));
-const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260819-naiv5b')
+const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260821-presetfilter')
   .then(async ({createInteractivePanel}) => {
     const {
       requestEventCorpusQuery, requestEventCorpusStatus,
@@ -1013,7 +1013,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     const {createInteractiveAutocomplete} =
       await import('./js/features/interactiveAutocomplete.mjs?v=20260724-iac1');
     const {createInteractiveAssetsPanel} =
-      await import('./js/features/interactiveAssetsPanel.mjs?v=20260819-naiv5b');
+      await import('./js/features/interactiveAssetsPanel.mjs?v=20260821-presetfilter');
     eventCorpusHandlers = {onStatus: onEventCorpusStatusResult, onQuery: onEventCorpusQueryResult};
     resetEventCorpus = resetEventCorpusClient;
     const wsSend = payload => {
@@ -1027,7 +1027,7 @@ const interactivePanelReady = import('./js/features/interactivePanel.mjs?v=20260
     });
     // 씬(이벤트) 기록. Assets 바의 **반대쪽**(우하단)에 선다(사용자 지정).
     const {createInteractiveScenePanel} =
-      await import('./js/features/interactiveScenePanel.mjs?v=20260819-naiv5b');
+      await import('./js/features/interactiveScenePanel.mjs?v=20260821-presetfilter');
     interactiveScenePanel = createInteractiveScenePanel({
       document, escHtml, showToast, showAppDialog,
       getPanel: () => interactivePanel,
@@ -7308,7 +7308,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260704-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260808t-fix')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20260821-presetfilter')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -9371,7 +9371,7 @@ function _fireModuleOninput(el) {
   el.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260819-naiv5b')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20260821-presetfilter')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

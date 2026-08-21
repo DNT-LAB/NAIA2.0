@@ -18351,6 +18351,57 @@ select.setup-input { cursor: pointer; }
 }
 .anlas-pill.hidden { display: none; }
 
+/* ---- Quick Preset 모델 배지 + 갈래 필터 바 (2026-08-21 사용자 지정) ----
+   프리셋 이름 앞의 `[NAI4.5C]` 에 **라벨 부분에만** 색을 준다. 이름 쪽은 기본
+   색 그대로 - 이름까지 물들이면 목록이 알록달록해져 읽기가 더 나빠진다. */
+.custom-select-model-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  opacity: 0.95;
+}
+.custom-select-model-tag[data-family="v5"]   { color: #ff5c7a; }  /* 밝은 루비 */
+.custom-select-model-tag[data-family="v4.5"] { color: #ffe07a; }  /* 연노랑 */
+.custom-select-model-tag[data-family="v4.0"] { color: #a6ef7d; }  /* 밝은 연두 */
+.custom-select-model-tag[data-family="v3"]   { color: #7fd4ff; }  /* 밝은 하늘 */
+/* 모델을 안 적고 저장된 옛 프리셋(라벨은 키 그대로) — 눈에 안 띄게 둔다. */
+.custom-select-model-tag:not([data-family="v5"]):not([data-family="v4.5"]):not([data-family="v4.0"]):not([data-family="v3"]) {
+  color: var(--text-dim);
+}
+
+/* 목록 **맨 위**에 붙어 스크롤과 무관하게 남는다 — 아래로 내려가서 갈래를 바꾸려고
+   다시 올라오는 일이 없게 한다. */
+.custom-select-filterbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-elevated, #16161f);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.custom-select-filter-btn {
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.custom-select-filter-btn:hover { border-color: rgba(255,255,255,0.24); color: var(--text); }
+.custom-select-filter-btn.is-active {
+  background: rgba(120,140,255,0.20);
+  border-color: rgba(120,140,255,0.55);
+  color: #dfe4ff;
+}
+
 /* V5 Opus 사용량 한도 배지. 히스토리 레일 **왼쪽**, 결과 뷰어 우상단(사용자가
    지정한 자리).
    `.stats-island`(세대 카운터)와 같은 모서리를 쓰는데, **그 섬은 767px 이하에서만

@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.nai_model_contract import NAI_PRESET_FILTER_GROUPS, nai_model_badge
+
 HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "(프리셋 없음)"}
 
 
@@ -97,9 +99,22 @@ class HeadlessPromptEngineeringService:
             module_settings = data.get("module_settings") if isinstance(data, dict) else {}
             module_settings = module_settings if isinstance(module_settings, dict) else {}
             api_mode = str(data.get("api_mode") or mode or context.get_api_mode())
+            # 프리셋이 어느 모델로 저장됐는지. Quick Preset 목록의 `[NAI4.5C]` 배지와
+            # 그 위 필터 바(ALL/NAI5/NAI4.5/ETC)가 이 값을 쓴다. NAI 프리셋만 의미가
+            # 있고(다른 모드는 모델 개념이 다르다), 모델을 안 적고 저장된 옛 프리셋은
+            # 라벨 없이 ETC 로 간다 - 숨기면 다른 갈래에서 사라져 버린다.
+            badge = {"key": "", "label": "", "family": "", "group": "etc"}
+            if api_mode.upper() == "NAI":
+                main_settings = data.get("main_settings") if isinstance(data, dict) else {}
+                main_settings = main_settings if isinstance(main_settings, dict) else {}
+                badge = nai_model_badge(main_settings.get("model"), context)
             return {
                 "name": name,
                 "api_mode": api_mode,
+                "model_key": badge["key"],
+                "model_label": badge["label"],
+                "model_family": badge["family"],
+                "model_group": badge["group"],
                 "description": str(data.get("description") or ""),
                 "pre_prompt_preview": str(module_settings.get("pre_prompt") or ""),
                 # 프리셋 검색이 볼 나머지 본문. prefix 만 실으면 postfix 에만 있는
@@ -124,6 +139,12 @@ class HeadlessPromptEngineeringService:
             "preset": state["current_preset"],
             "preset_options": preset_options,
             "preset_summaries": [preset_summary(name, thumbnails=current_thumbs) for name in preset_options],
+            # Quick Preset 위 필터 바의 갈래. 프론트가 이름을 박지 않도록 계약에서 준다.
+            # NAI 모드에서만 의미가 있으므로 다른 모드에서는 빈 목록을 보낸다.
+            "preset_filter_groups": (
+                [{"key": k, "label": lbl} for k, lbl in NAI_PRESET_FILTER_GROUPS]
+                if current_mode_key == "NAI" else []
+            ),
             "webui_preset_options": webui_presets,
             "webui_preset_summaries": [
                 preset_summary(name, "WEBUI", thumbnails=webui_thumbs) for name in webui_presets

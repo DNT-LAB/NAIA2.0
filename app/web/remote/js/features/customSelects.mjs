@@ -145,9 +145,15 @@ export function createCustomSelectController({
     }
 
     const selectedOption = select.selectedOptions?.[0] || select.options[select.selectedIndex] || select.options[0];
-    const displayLabel = String(select.dataset.customSelectLabel || '').trim()
-      || (selectedOption ? selectedOption.textContent : '');
-    label.textContent = displayLabel;
+    const forcedLabel = String(select.dataset.customSelectLabel || '').trim();
+    const displayLabel = forcedLabel || (selectedOption ? selectedOption.textContent : '');
+    // 접힌 버튼에도 배지를 그린다 — 목록을 닫으면 어느 모델의 프리셋인지 알 수
+    // 없어지면 배지의 의미가 반으로 준다. 강제 라벨이 있으면 그쪽이 이긴다.
+    if (!forcedLabel && selectedOption && selectedOption.dataset.modelLabel) {
+      paintOptionText(label, selectedOption);
+    } else {
+      label.textContent = displayLabel;
+    }
     button.title = String(select.dataset.customSelectTitle || '').trim() || displayLabel;
     button.disabled = select.disabled;
     wrapper.classList.toggle('is-disabled', select.disabled);
@@ -166,15 +172,68 @@ export function createCustomSelectController({
     }
   }
 
+  /** 옵션 텍스트를 `[배지] 이름` 으로 그린다.
+   *
+   *  ⚠️ **`data-model-label` 이 있는 옵션에만** 적용한다 — 이 함수는 앱의 모든
+   *  커스텀 셀렉트가 지나가는 길이라, 조건 없이 손대면 관계없는 드롭다운이 같이
+   *  바뀐다. 배지 색은 CSS 가 `data-family` 로 정한다(라벨 부분에만 색).
+   *  innerHTML 은 쓰지 않는다 — 프리셋 이름은 사용자가 적은 것이다. */
+  function paintOptionText(host, option) {
+    host.textContent = '';
+    const badge = String(option.dataset.modelLabel || '').trim();
+    if (!badge) { host.textContent = option.textContent; return; }
+    const tag = document.createElement('span');
+    tag.className = 'custom-select-model-tag';
+    tag.dataset.family = String(option.dataset.modelFamily || '');
+    tag.textContent = `[${badge}]`;
+    host.appendChild(tag);
+    host.appendChild(document.createTextNode(' ' + option.textContent));
+  }
+
+  /** 목록 **맨 위**에 붙는 갈래 필터 바(`[ ALL | NAI5 | NAI4.5 | ETC ]`).
+   *
+   *  `data-option-filters` 가 있는 셀렉트에만 그린다. 누르면 셀렉트에
+   *  `naia:option-filter` 를 쏘고, 무엇을 걸러낼지는 **소유자가 정한다** —
+   *  이 파일은 목록을 그릴 뿐 프리셋을 모른다. */
+  function renderFilterBar(state, menu) {
+    const { select } = state;
+    let groups;
+    try { groups = JSON.parse(select.dataset.optionFilters || '[]'); } catch (_) { groups = []; }
+    if (!Array.isArray(groups) || groups.length < 2) return;
+    const active = String(select.dataset.optionFilterActive || groups[0]?.key || '');
+    const bar = document.createElement('div');
+    bar.className = 'custom-select-filterbar';
+    groups.forEach(g => {
+      if (!g || !g.key) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'custom-select-filter-btn';
+      b.textContent = String(g.label || g.key);
+      b.classList.toggle('is-active', String(g.key) === active);
+      b.addEventListener('mousedown', event => event.preventDefault());
+      b.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();          // 항목 선택으로 번지면 드롭다운이 닫힌다
+        select.dataset.optionFilterActive = String(g.key);
+        select.dispatchEvent(new CustomEvent('naia:option-filter', {
+          bubbles: true, detail: { key: String(g.key) },
+        }));
+      });
+      bar.appendChild(b);
+    });
+    menu.appendChild(bar);
+  }
+
   function renderMenu(state) {
     const { select, menu } = state;
     hidePreview(state);
     menu.textContent = '';
+    renderFilterBar(state, menu);
     Array.from(select.options).forEach((option, index) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'custom-select-option';
-      item.textContent = option.textContent;
+      paintOptionText(item, option);
       item.dataset.index = String(index);
       item.setAttribute('role', 'option');
       item.setAttribute('aria-selected', option.selected ? 'true' : 'false');

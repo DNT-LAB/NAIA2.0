@@ -690,7 +690,7 @@ const studioTabReady = import('./js/features/studioTab.mjs?v=20260713-frame-cfg1
   .catch(error => {
     console.error('Failed to initialize Studio tab module', error);
   });
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20260821-presetfilter')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20260821-presetfilter3')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,

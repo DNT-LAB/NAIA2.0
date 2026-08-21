@@ -731,7 +731,17 @@ export function createCustomSelectController({
     const rect = state.button.getBoundingClientRect();
     const viewportGap = 8;
     const menuMaxHeight = Math.min(420, Math.max(160, window.innerHeight - viewportGap * 2));
-    const desiredHeight = Math.min(menuMaxHeight, Math.max(44, state.select.options.length * 36 + 8));
+    // ⚠️ **머리말 높이를 더한다.** 이 추정은 원래 옵션 개수만 봤는데(개당 36px),
+    // 목록 맨 위에 고정 필터 바가 붙으면서 그 높이가 빠졌다. 항목이 적을 때 바로
+    // 드러난다 - 2개면 `2*36+8 = 80px` 로 잡히는데 실제 내용은 바 37 + 항목 56 +
+    // 여백 8 = 101px 이라, 메뉴가 잘리고 스크롤이 생겼다(실측, 사용자 지적).
+    // 항목이 많을 때는 상한(420)에 먼저 걸려 안 보였다.
+    const header = state.menu.querySelector('.custom-select-filterbar');
+    const headerHeight = header ? header.offsetHeight : 0;
+    const desiredHeight = Math.min(
+      menuMaxHeight,
+      Math.max(44, state.select.options.length * 36 + 8 + headerHeight),
+    );
     const below = window.innerHeight - rect.bottom - viewportGap;
     const above = rect.top - viewportGap;
     const preferBelow = state.wrapper.classList.contains('custom-studio-select') && below >= 64;

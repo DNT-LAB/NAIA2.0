@@ -10,6 +10,7 @@ export function createPromptEngineeringActions({
   closePresetManagePanel,
   getLastPromptEngineeringState,
   isComfyUiAnimaMode,
+  onPresetCreated = null,
 }) {
   function flushPresetSaveState() {
     flushPromptEngineeringEdits();
@@ -35,6 +36,13 @@ export function createPromptEngineeringActions({
     }
     flushPresetSaveState();
     setModuleParam('prompt_engineering', 'preset_create', name);
+    // 모델 변경을 '복제' 로 미뤄 뒀다면 **여기서** 보낸다.
+    //
+    // ⚠️ 순서가 전부다. 한 소켓에서 순서대로 처리되므로 `preset_create` 가 끝나
+    // 새 프리셋이 현재 프리셋이 된 뒤에 `set_param model` 이 도착한다 - 그래서
+    // 모델은 **새 프리셋**에 들어가고 원본은 그대로 남는다. 순서가 뒤집히면
+    // 원본이 고쳐진다(복제한 의미가 없어진다).
+    if (typeof onPresetCreated === 'function') onPresetCreated();
     if (input) input.value = '';
     closePresetAddPanel();
   }

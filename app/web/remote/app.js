@@ -4169,6 +4169,8 @@ function updateParams(m) {
     )
     : null;
   populateSelect(paramEls.model, m.options_model, m.model, modelLabels);
+  // 백엔드가 들고 있는 모델. 모델 변경을 취소했을 때 콤보를 여기로 되돌린다.
+  if (m.model !== undefined) lastBackendModel = String(m.model || '');
   populateSelect(paramEls.sampler, m.options_sampler, m.sampler);
   populateSelect(paramEls.scheduler, m.options_scheduler, m.scheduler);
   if (Array.isArray(m.options_resolution) && m.options_resolution.length) {
@@ -7437,6 +7439,7 @@ const promptEngineeringActionsReady = import('./js/features/promptEngineeringAct
       closePresetManagePanel: closePePresetManagePanel,
       getLastPromptEngineeringState: () => lastPromptEngineeringState,
       isComfyUiAnimaMode,
+      onPresetCreated: flushPendingModelForNewPreset,
     });
   })
   .catch(error => {
@@ -7812,11 +7815,91 @@ function closeNaiModelManager() {
   if (naiModelManagerPanel) naiModelManagerPanel.close();
 }
 
+// ---- 모델 변경 시 프리셋 보호 ----------------------------------------------
+//
+// 파라미터를 바꾸면 선택된 프리셋에 **즉시 반영된다**(A안). 모델은 그 중에서도
+// 프리셋의 성격을 통째로 바꾸는 값이라, 바꾸기 전에 한 번 묻는다(사용자 지시
+// 2026-08-21): 이 프리셋을 그대로 고칠지, 아니면 복제해서 새 프리셋에 적용할지.
+let lastBackendModel = '';
+let modelRevertInFlight = false;
+// '복제' 를 고르면 새 프리셋이 만들어진 **뒤에** 이 모델을 적용한다.
+let pendingModelForNewPreset = '';
+
+function currentPresetNameForModelGuard() {
+  const select = document.getElementById('modPreset');
+  const name = select ? String(select.value || '') : '';
+  // 실제 프리셋일 때만 묻는다 - 랜덤 슬롯/미선택은 고칠 대상이 없다.
+  if (!name || name === '*randomized' || name === '(프리셋 없음)') return '';
+  return name;
+}
+
+function revertModelSelect() {
+  const select = paramEls.model;
+  if (!select || !lastBackendModel) return;
+  // change 를 다시 쏴야 커스텀 셀렉트의 접힌 라벨이 따라온다. 그 이벤트가 이
+  // 핸들러를 또 부르므로 재진입 가드를 둔다.
+  modelRevertInFlight = true;
+  try {
+    select.value = lastBackendModel;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  } finally {
+    modelRevertInFlight = false;
+  }
+}
+
+async function onModelSelectChange(value) {
+  if (modelRevertInFlight) return;
+  const mode = currentMode || modeSelect?.value || '';
+  const preset = currentPresetNameForModelGuard();
+  if (mode !== 'NAI' || !preset || String(value) === lastBackendModel) {
+    setParam('model', value);
+    return;
+  }
+  const picked = await showConfirmDialog(
+    `현재 프리셋 "${preset}" 의 모델이 ${value} 로 바뀝니다. 어떻게 할까요?`,
+    {
+      title: '프리셋 모델 변경',
+      choices: [
+        { key: 'keep', label: '프리셋을 유지한채로 모델 변경' },
+        { key: 'duplicate', label: '현재 프리셋을 복제' },
+      ],
+    });
+  if (picked === 'keep') {
+    setParam('model', value);
+    return;
+  }
+  if (picked === 'duplicate') {
+    // ⚠️ 모델을 **지금 보내면 안 된다.** 보내는 순간 원본 프리셋이 고쳐진다.
+    // 새 프리셋이 만들어져 현재 프리셋이 된 다음에 보낸다(createPreset 참조).
+    pendingModelForNewPreset = String(value);
+    revertModelSelect();
+    openPePresetAddPanel();
+    return;
+  }
+  revertModelSelect();                 // 취소
+}
+
+/** 프리셋 복제가 끝난 직후 호출된다. 보류해 둔 모델 변경을 **새 프리셋에** 적용한다. */
+function flushPendingModelForNewPreset() {
+  if (!pendingModelForNewPreset) return;
+  const value = pendingModelForNewPreset;
+  pendingModelForNewPreset = '';
+  setParam('model', value);
+}
+
+function cancelPendingModelForNewPreset() {
+  pendingModelForNewPreset = '';
+}
+
 function openPePresetAddPanel() {
   if (promptEngineeringPopups) promptEngineeringPopups.openPresetAdd();
 }
 
 function closePePresetAddPanel() {
+  // 복제를 하려다 팝업을 그냥 닫으면 보류해 둔 모델 변경도 버린다. 안 버리면
+  // 나중에 아무 프리셋이나 만들 때 엉뚱한 모델이 딸려 들어간다.
+  // (만들기로 끝난 경우엔 createPreset 이 이미 비워 놓고 여기로 온다.)
+  cancelPendingModelForNewPreset();
   if (promptEngineeringPopups) promptEngineeringPopups.closePresetAdd();
 }
 

@@ -1,0 +1,226 @@
+"""NAI 다중 계정(Multi Token) 저장소.
+
+배경
+----
+생성 경로의 다중 계정 지원은 **한 번도 사라진 적이 없다** —
+`APIService._get_active_nai_token()` 이 지금도 `save/nai_accounts.json` 을 읽어
+라운드 로빈으로 토큰을 고른다. 사라진 것은 그 파일을 **사람이 편집할 UI** 뿐이다
+(PyQt `legacy_desktop/tabs/api_management_window.py`, 커밋 `cf6f8dc9` 에서 제거).
+
+이 모듈은 그 UI 가 쓰던 것과 **똑같은 스키마**를 다룬다. 다르게 쓰면 생성 경로가
+읽지 못한다.
+
+    {
+      "accounts": [
+        {"id": "nai_token_1", "label": "계정2", "enabled": false, "last_verified": null}
+      ],
+      "round_robin_enabled": false,
+      "main_account_enabled": true
+    }
+
+토큰 값 자체는 이 파일에 넣지 않는다. `secure_token_manager` 에 **계정 id 를 키로**
+암호화 저장한다(메인 계정 키는 `nai_token`). 파일에는 앞 7자 미리보기만 만들어 준다.
+
+⚠️ 파일 경로는 반드시 `runtime_paths.save_dir` 를 쓴다. `APIService._save_file_path`
+와 같은 자리를 가리켜야 하며, 저장소 트리에 쓰면 안 된다(런타임 쓰기 정책).
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+ACCOUNTS_FILENAME = "nai_accounts.json"
+MAIN_ACCOUNT_ID = "nai_token"
+MAIN_ACCOUNT_LABEL = "메인 계정"
+
+# 계정을 무한정 늘릴 이유가 없다. 라운드 로빈은 카운터 % N 이라 N 이 커질수록
+# 한 계정이 다시 쓰이기까지의 간격만 늘어난다.
+MAX_ACCOUNTS = 9
+
+
+def _default_data() -> dict[str, Any]:
+    return {"accounts": [], "round_robin_enabled": False, "main_account_enabled": True}
+
+
+def account_label(account_id: str) -> str:
+    """`nai_token_1` -> `계정2`. 메인은 `메인 계정`.
+
+    레거시 UI 의 규칙 그대로다 - 인덱스에 1 을 더해 사람이 세는 번호로 만든다
+    (메인이 1번이므로 첫 추가 계정이 2번).
+    """
+    if account_id == MAIN_ACCOUNT_ID:
+        return MAIN_ACCOUNT_LABEL
+    try:
+        return f"계정{int(str(account_id).split('_')[-1]) + 1}"
+    except (ValueError, TypeError):
+        return str(account_id)
+
+
+def token_preview(token: str | None) -> str:
+    """앞 7자만. 토큰 전문은 어떤 경로로도 프런트에 보내지 않는다."""
+    t = str(token or "")
+    return t[:7] if t else ""
+
+
+class NaiAccountService:
+    """`nai_accounts.json` 읽기/쓰기와 토큰 저장소 연동."""
+
+    def __init__(self, context: Any):
+        self.context = context
+
+    # ---- 파일 ----------------------------------------------------------
+
+    def _path(self) -> Path:
+        runtime_paths = getattr(self.context, "runtime_paths", None)
+        if runtime_paths is not None:
+            return Path(runtime_paths.save_dir) / ACCOUNTS_FILENAME
+        return Path("save") / ACCOUNTS_FILENAME
+
+    def load(self) -> dict[str, Any]:
+        path = self._path()
+        if not path.is_file():
+            return _default_data()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")) or {}
+        except Exception as exc:  # noqa: BLE001 - 깨진 파일이 앱을 막으면 안 된다
+            print(f"[warn] nai_accounts.json read failed: {exc}", flush=True)
+            return _default_data()
+        base = _default_data()
+        accounts = data.get("accounts")
+        base["accounts"] = [a for a in accounts if isinstance(a, dict) and a.get("id")] \
+            if isinstance(accounts, list) else []
+        base["round_robin_enabled"] = bool(data.get("round_robin_enabled", False))
+        # 옛 파일에는 이 키가 없다. 없으면 메인을 켜 둔 것으로 본다 - 끄면 토큰이
+        # 하나도 안 남아 생성이 통째로 막힌다.
+        base["main_account_enabled"] = bool(data.get("main_account_enabled", True))
+        return base
+
+    def save(self, data: dict[str, Any]) -> None:
+        path = self._path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(path)
+
+    # ---- 토큰 ----------------------------------------------------------
+
+    def _get_token(self, account_id: str) -> str:
+        try:
+            return str(self.context.secure_token_manager.get_token(account_id) or "").strip()
+        except Exception:
+            return ""
+
+    def _set_token(self, account_id: str, token: str) -> None:
+        self.context.secure_token_manager.save_token(account_id, token)
+
+    def _delete_token(self, account_id: str) -> None:
+        try:
+            self.context.secure_token_manager.delete_token(account_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[warn] token delete failed for {account_id}: {exc}", flush=True)
+
+    # ---- 조회 ----------------------------------------------------------
+
+    def snapshot(self) -> dict[str, Any]:
+        """프런트가 그릴 수 있는 형태. **토큰 전문은 절대 넣지 않는다.**"""
+        data = self.load()
+        main_token = self._get_token(MAIN_ACCOUNT_ID)
+        rows = [{
+            "id": MAIN_ACCOUNT_ID,
+            "label": MAIN_ACCOUNT_LABEL,
+            "enabled": bool(data["main_account_enabled"]),
+            "has_token": bool(main_token),
+            "token_preview": token_preview(main_token),
+            "is_main": True,
+        }]
+        for acc in data["accounts"]:
+            token = self._get_token(str(acc["id"]))
+            rows.append({
+                "id": str(acc["id"]),
+                "label": str(acc.get("label") or account_label(str(acc["id"]))),
+                "enabled": bool(acc.get("enabled", False)),
+                "has_token": bool(token),
+                "token_preview": token_preview(token),
+                "is_main": False,
+            })
+        active = [r for r in rows if r["enabled"] and r["has_token"]]
+        return {
+            "accounts": rows,
+            "round_robin_enabled": bool(data["round_robin_enabled"]),
+            "active_count": len(active),
+            "can_add": len(data["accounts"]) < MAX_ACCOUNTS,
+            "max_accounts": MAX_ACCOUNTS,
+        }
+
+    # ---- 변경 ----------------------------------------------------------
+
+    def next_account_id(self, data: dict[str, Any]) -> str:
+        existing = {str(a.get("id")) for a in data["accounts"]}
+        index = 1
+        while f"{MAIN_ACCOUNT_ID}_{index}" in existing:
+            index += 1
+        return f"{MAIN_ACCOUNT_ID}_{index}"
+
+    def add_account(self) -> dict[str, Any]:
+        data = self.load()
+        if len(data["accounts"]) >= MAX_ACCOUNTS:
+            return {"ok": False, "message": f"계정은 최대 {MAX_ACCOUNTS}개까지 추가할 수 있습니다."}
+        account_id = self.next_account_id(data)
+        data["accounts"].append({
+            "id": account_id,
+            "label": account_label(account_id),
+            # 토큰이 없는 채로 켜 두면 라운드 로빈이 빈 계정을 세지는 않지만
+            # 사용자에게는 "켰는데 안 쓰인다" 로 보인다. 꺼진 채로 만든다.
+            "enabled": False,
+            "last_verified": None,
+        })
+        self.save(data)
+        return {"ok": True, "account_id": account_id}
+
+    def delete_account(self, account_id: str) -> dict[str, Any]:
+        if account_id == MAIN_ACCOUNT_ID:
+            return {"ok": False, "message": "메인 계정은 삭제할 수 없습니다."}
+        data = self.load()
+        before = len(data["accounts"])
+        data["accounts"] = [a for a in data["accounts"] if str(a.get("id")) != account_id]
+        if len(data["accounts"]) == before:
+            return {"ok": False, "message": "계정을 찾을 수 없습니다."}
+        self.save(data)
+        self._delete_token(account_id)
+        return {"ok": True}
+
+    def set_enabled(self, account_id: str, enabled: bool) -> dict[str, Any]:
+        data = self.load()
+        if account_id == MAIN_ACCOUNT_ID:
+            data["main_account_enabled"] = bool(enabled)
+        else:
+            found = False
+            for acc in data["accounts"]:
+                if str(acc.get("id")) == account_id:
+                    acc["enabled"] = bool(enabled)
+                    found = True
+                    break
+            if not found:
+                return {"ok": False, "message": "계정을 찾을 수 없습니다."}
+        self.save(data)
+        return {"ok": True}
+
+    def set_token(self, account_id: str, token: str) -> dict[str, Any]:
+        """사용자가 입력한 토큰을 저장한다. 메인 계정도 이 경로를 쓸 수 있다."""
+        token = str(token or "").strip()
+        if not token:
+            return {"ok": False, "message": "토큰이 비어 있습니다."}
+        if account_id != MAIN_ACCOUNT_ID:
+            data = self.load()
+            if not any(str(a.get("id")) == account_id for a in data["accounts"]):
+                return {"ok": False, "message": "계정을 찾을 수 없습니다."}
+        self._set_token(account_id, token)
+        return {"ok": True, "token_preview": token_preview(token)}
+
+    def set_round_robin(self, enabled: bool) -> dict[str, Any]:
+        data = self.load()
+        data["round_robin_enabled"] = bool(enabled)
+        self.save(data)
+        return {"ok": True}

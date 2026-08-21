@@ -18,6 +18,36 @@ const POLICY_FALLBACK = [
   { key: 'round_robin', label: '라운드 로빈', desc: '1장씩 번갈아가며 생성합니다.' },
 ];
 
+// 퍼센트를 장수로 옮기는 상수.
+//
+// ⚠️ **API 는 장수를 보내지 않는다.** 구독 응답의 usage 는 정확히 세 값뿐이다
+// (실측 2026-08-21, 두 계정 응답 전수 확인):
+//     {"percent": 97, "isNegative": false, "timeUntilNextPercent": 7888}
+// NAI 웹이 보여 주는 "~1730 images" 는 저쪽 프런트가 상수를 곱해 만든 값이다.
+// 그 상수를 NAI 자신의 표시에서 역산했다:
+//     86400 / 7888        = 10.95 %/일   -> NAI 표시 "11% per day"      (일치)
+//     190 / 10.95         = 17.3 장/1%
+//     17.3 x 100          = 1730 장      -> NAI 표시 "~1730 images"     (일치)
+// 반올림 자리까지 맞으므로 상수는 17.3 으로 본다.
+//
+// ⚠️ 이 장수는 **무료 기준 생성에서만** 맞다 - NAI 안내문 그대로 "normal
+// resolutions and up to 28 steps"(1MP 이하 · 28스텝 이하). 해상도나 스텝을 올리면
+// 같은 예산을 더 빨리 먹으므로 **상한**으로만 읽어야 한다. 그래서 어디서나 `≈` 를
+// 붙이고 기준을 함께 적는다.
+//
+// NAI 가 이 상수를 바꾸면 어긋난다. 그때는 회복률(86400/timeUntilNextPercent)과
+// NAI 표시 장수를 다시 나눠 보면 새 값이 나온다.
+const IMAGES_PER_PERCENT = 17.3;
+const IMAGE_BASIS_NOTE = '1MP · 28스텝 기준';
+
+function imageCount(percent) {
+  return Math.round(Math.max(0, Number(percent) || 0) * IMAGES_PER_PERCENT);
+}
+
+function formatImages(percent) {
+  return imageCount(percent).toLocaleString();
+}
+
 export function createNaiAccountPanel({
   document,
   getWs,
@@ -46,6 +76,9 @@ export function createNaiAccountPanel({
   let usageRows = [];
   let totalPercent = null;
   let popOpen = false;
+  // 핀. 켜면 바깥을 눌러도 안 닫힌다 - 생성하는 동안 어느 계정이 도는지 계속
+  // 보려고 둔 것이다(테스트용, 사용자 요청 2026-08-21). 세션 안에서만 기억한다.
+  let pinned = false;
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -162,13 +195,18 @@ export function createNaiAccountPanel({
     return `<span class="nai-acct-bar${isOut ? ' is-out' : ''}"><i style="width:${width}%"></i></span>`;
   }
 
-  function accountRowsHtml() {
+  // 막대와 헤더 합계가 **같은 목록**을 봐야 한다 - 갈라 두면 언젠가 어긋난다.
+  function accountUsageRows() {
     // 사용량이 왔으면 그걸 쓰고, 아직이면 명부의 활성 계정을 '—' 로 미리 그린다
     // (계정을 막 켠 직후 다음 조회까지의 공백을 빈 화면으로 두지 않는다).
-    const rows = usageRows.length
+    return usageRows.length
       ? usageRows
       : state.accounts.filter(a => a.enabled && a.has_token)
           .map(a => ({ ...a, available: false, percent: 0 }));
+  }
+
+  function accountRowsHtml() {
+    const rows = accountUsageRows();
     if (!rows.length) {
       return '<div class="nai-acct-empty">활성 계정이 없습니다.</div>';
     }
@@ -177,10 +215,23 @@ export function createNaiAccountPanel({
       // 사용자 표기(명세)는 토큰 앞자리 — 어느 계정인지 한눈에 구분되는 값이다.
       const name = (row.token_preview || row.label || '').toUpperCase();
       const pct = known ? `${Number(row.percent) || 0}%` : '—';
-      return `<div class="nai-acct-row" title="${esc(row.label || '')}">`
+      // ⚠️ 툴팁은 쓰지 않는다. 계정 이름을 띄웠더니 바로 옆 칸이 이미 같은 말을
+      // 하고 있어 순수 낭비였다(사용자 지적). 숫자는 게이지 **아래에 직접** 적는다.
+      const anlas = Number.isFinite(row.anlas) ? row.anlas.toLocaleString() : '—';
+      const remain = known && !row.is_negative
+        ? `~${formatImages(row.percent)}`
+        : (row.is_negative ? '소진' : '—');
+      return `<div class="nai-acct-row${row.is_next ? ' is-next' : ''}">`
+        + '<div class="nai-acct-line">'
         + `<span class="nai-acct-name">${esc(name)}</span>`
         + barHtml(known ? row.percent : 0, known && row.is_negative)
         + `<span class="nai-acct-pct">${esc(pct)}</span>`
+        + '</div>'
+        + '<div class="nai-acct-sub">'
+        + `<span>Anlas ${esc(anlas)}</span>`
+        + '<i>|</i>'
+        + `<span>NAID5 Remain : ${esc(remain)}</span>`
+        + '</div>'
         + '</div>';
     }).join('');
   }
@@ -203,11 +254,26 @@ export function createNaiAccountPanel({
     const el = popEl();
     if (!el || !popOpen) return;
     const total = totalPercent == null ? '—' : `${totalPercent}%`;
+    // 배지 숫자는 **평균**인데(계정마다 자기 한도가 있으니 평균이 맞다), 실제로
+    // 몇 장 뽑을 수 있는지는 **합**이다. 그 합을 헤더 아래 줄에 적는다.
+    const live = accountUsageRows().filter(r => r.available && !r.is_negative);
+    const sumImages = live.reduce((s, r) => s + imageCount(r.percent), 0);
+    const sumAnlas = accountUsageRows()
+      .reduce((s, r) => s + (Number.isFinite(r.anlas) ? r.anlas : 0), 0);
     el.innerHTML = ''
       + '<div class="nai-acct-head">'
       + '<span class="nai-acct-title">USAGE</span>'
+      + `<button type="button" class="nai-acct-pin${pinned ? ' on' : ''}" data-act="pin"`
+      + ` aria-pressed="${pinned ? 'true' : 'false'}"`
+      + ` title="${pinned ? '고정 해제' : '열어 둔 채 고정'}">${pinned ? '📌' : '📍'}</button>`
       + `<span class="nai-acct-total">통합 ${esc(total)}</span>`
       + '</div>'
+      + (live.length > 1
+        ? '<div class="nai-acct-sum">'
+          + `<span>Anlas ${sumAnlas.toLocaleString()}</span><i>|</i>`
+          + `<span>NAID5 Remain : ~${sumImages.toLocaleString()}</span>`
+          + `<em>${esc(IMAGE_BASIS_NOTE)}</em></div>`
+        : '')
       + `<div class="nai-acct-rows">${accountRowsHtml()}</div>`
       + '<button type="button" class="nai-acct-manage" data-act="manage">'
       + '<span>＋</span> Manage Account</button>'
@@ -218,6 +284,12 @@ export function createNaiAccountPanel({
   }
 
   function onPopoverClick(event) {
+    const pin = event.target.closest('[data-act="pin"]');
+    if (pin) {
+      pinned = !pinned;
+      renderPopover();
+      return;
+    }
     const manage = event.target.closest('[data-act="manage"]');
     if (manage) {
       closePopover();
@@ -235,8 +307,9 @@ export function createNaiAccountPanel({
   }
 
   // 바깥을 누르면 닫힌다. 배지 자신은 토글이므로 제외해야 **열자마자 닫히지 않는다.**
+  // 핀이 켜져 있으면 바깥 클릭으로는 안 닫는다(배지를 다시 누르면 닫힌다).
   function onDocumentPointerDown(event) {
-    if (!popOpen) return;
+    if (!popOpen || pinned) return;
     const el = popEl();
     const pill = byId('naiUsagePill');
     if (!el) return;

@@ -583,6 +583,12 @@ class APIService:
         API 를 계정 수만큼 때리게 되고(실측 최악 8초), 그만큼 생성이 늦어진다.
         캐시가 비어 있으면 '모른다' 로 넘어가 라운드 로빈처럼 돈다 - 안전한 쪽이다.
 
+        ⚠️⚠️ 회전 번호는 `next_rotation_counter()` 로 센다. 예전에는
+        `image_crud_controller.get_counter()` 를 썼는데 **헤드리스 컨텍스트에는 그
+        컨트롤러가 없어서** 매번 AttributeError 가 났고, 아래 except 가 그걸 삼켜
+        항상 메인 토큰이 나갔다 - 다중 계정이 조용히 죽어 있었다(실측 2026-08-21:
+        라운드 로빈으로 4장 생성 -> 4장 전부 메인 계정).
+
         어떤 이유로든 실패하면 **메인 토큰으로 떨어진다.** 계정 고르기가 생성을
         막는 일은 없어야 한다.
         """
@@ -594,7 +600,11 @@ class APIService:
 
         try:
             from core.nai_account_balancer import select_account
-            from core.nai_account_service import NaiAccountService, cached_account_usage
+            from core.nai_account_service import (
+                NaiAccountService,
+                cached_account_usage,
+                next_rotation_counter,
+            )
 
             service = NaiAccountService(self.app_context)
             active = service.active_accounts()
@@ -606,7 +616,7 @@ class APIService:
                 return active[0][1]
 
             policy = service.policy()
-            counter = self.app_context.image_crud_controller.get_counter()
+            counter = next_rotation_counter(self.app_context)
             usage_by_id = cached_account_usage(self.app_context)
             selected_id = select_account(
                 [account_id for account_id, _ in active],

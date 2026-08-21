@@ -18468,13 +18468,54 @@ select.setup-input { cursor: pointer; }
 .nai-acct-title {
   font-size: 10px; letter-spacing: 0.10em; color: #8a8aa0;
 }
-.nai-acct-total { font-size: 13px; font-weight: 700; }
-.nai-acct-rows { display: flex; flex-direction: column; gap: 6px; }
-.nai-acct-row { display: flex; align-items: center; gap: 8px; }
+.nai-acct-total { font-size: 13px; font-weight: 700; margin-left: auto; }
+/* 핀 — 켜면 바깥을 눌러도 안 닫힌다(생성 중에 계정 회전을 계속 보려고). */
+.nai-acct-pin {
+  margin-left: 6px; padding: 1px 4px;
+  background: none; border: 1px solid transparent; border-radius: 6px;
+  font-size: 11px; line-height: 1; cursor: pointer; opacity: 0.5;
+}
+.nai-acct-pin:hover { opacity: 0.9; background: rgba(255,255,255,0.06); }
+.nai-acct-pin.on {
+  opacity: 1; border-color: rgba(242,224,138,0.45); background: rgba(242,224,138,0.12);
+}
+/* 계정 합계 줄 — 배지는 평균이지만 실제로 뽑을 수 있는 장수는 합이다. */
+.nai-acct-sum {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  margin: -2px 0 8px; font-size: 9.5px; color: #71718a;
+  font-variant-numeric: tabular-nums;
+}
+.nai-acct-sum i { font-style: normal; color: #45455a; }
+.nai-acct-sum em { font-style: normal; margin-left: auto; color: #55556b; }
+.nai-acct-rows { display: flex; flex-direction: column; gap: 9px; }
+.nai-acct-row { display: flex; flex-direction: column; gap: 2px; }
+.nai-acct-line { display: flex; align-items: center; gap: 8px; }
+/* 게이지 아래 작은 숫자 줄 — 잔여 Anlas | NAID5 Remain.
+   툴팁을 없애고 여기로 옮겼다(사용자 지정 2026-08-21): 툴팁은 가리키기 전엔 안
+   보이는데, 이 값들은 생성 중에 계속 보고 싶은 값이다. */
+.nai-acct-sub {
+  display: flex; align-items: center; gap: 6px;
+  /* ⚠️ 막대에 맞춰 70px 들여썼더니 남는 폭이 모자라 **두 줄로 접혔다**(실측).
+     이 줄은 한 줄로 읽혀야 의미가 있으니 들여쓰기를 버리고 폭을 준다. */
+  padding-left: 2px;
+  white-space: nowrap;
+  font-size: 9.5px; color: #71718a; letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.nai-acct-sub i { font-style: normal; color: #45455a; }
 .nai-acct-name {
   flex: 0 0 62px; font-size: 11px; color: #b6b6cc;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* 이번 라운드에 생성할 계정. 라운드 로빈이 실제로 도는지 눈으로 보려고 둔 표시다
+   (사용자 지정: 연노랑). 색만으로 구분하지 않도록 왼쪽에 표식도 같이 준다. */
+.nai-acct-row.is-next .nai-acct-name {
+  color: #f2e08a; font-weight: 700;
+}
+.nai-acct-row.is-next .nai-acct-name::before {
+  content: '▸'; margin-right: 3px; color: #f2e08a;
+}
+.nai-acct-row.is-next .nai-acct-bar { box-shadow: 0 0 0 1px rgba(242,224,138,0.35); }
 .nai-acct-bar {
   flex: 1 1 auto; height: 8px; border-radius: 4px;
   background: rgba(255,255,255,0.08); overflow: hidden;

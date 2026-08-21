@@ -139,33 +139,40 @@ def build_nai_usage_payload(context: Any) -> dict[str, Any]:
 
 
 def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
-    """메인을 뺀 나머지 계정의 사용량을 **동시에** 조회한다.
+    """메인을 뺀 나머지 계정의 **Anlas + 사용량**을 동시에 조회한다.
 
-    순차로 돌리면 계정 수 x 5초가 그대로 지연이 된다(최대 9계정 = 45초). 어차피
-    스레드에서 도는 blocking 함수라 풀 하나면 충분하다.
+    순차로 돌리면 계정 수 x 8초가 그대로 지연이 된다(최대 9계정). 어차피 스레드에서
+    도는 blocking 함수라 풀 하나면 충분하다.
+
+    `fetch_nai_usage_limit` 이 아니라 `fetch_nai_subscription_summary` 를 쓴다 -
+    같은 엔드포인트 한 번으로 Anlas 까지 같이 온다. 패널이 계정마다 잔여 Anlas 를
+    보여 주므로 어차피 둘 다 필요하다.
     """
     if not rows:
         return {}
     out: dict[str, Any] = {}
     with ThreadPoolExecutor(max_workers=min(len(rows), 8)) as pool:
-        futures = {pool.submit(api_verification.fetch_nai_usage_limit, tok): aid
+        futures = {pool.submit(api_verification.fetch_nai_subscription_summary, tok): aid
                    for aid, tok in rows}
         for future in as_completed(futures):
             account_id = futures[future]
             try:
-                usage = future.result()
+                summary = future.result() or {}
             except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
                 print(f"[warn] account usage fetch failed for {account_id}: {exc}", flush=True)
-                usage = None
+                summary = {}
+            usage = summary.get("usage")
             if usage:
                 out[account_id] = {
                     "percent": int(usage.get("percent", 0)),
                     "is_negative": bool(usage.get("is_negative", False)),
+                    "anlas": summary.get("anlas"),
                 }
     return out
 
 
-def _account_rows(context: Any, usage_by_id: dict[str, Any]) -> list[dict[str, Any]]:
+def _account_rows(context: Any, usage_by_id: dict[str, Any],
+                  next_account_id: str) -> list[dict[str, Any]]:
     """패널이 그릴 계정 행. **토큰 전문은 넣지 않는다**(앞 7자 미리보기만)."""
     from core.nai_account_service import NaiAccountService
 
@@ -175,13 +182,18 @@ def _account_rows(context: Any, usage_by_id: dict[str, Any]) -> list[dict[str, A
         if not (row["enabled"] and row["has_token"]):
             continue
         usage = usage_by_id.get(row["id"])
+        known = isinstance(usage, dict)
+        anlas = usage.get("anlas") if known else None
         rows.append({
             "id": row["id"],
             "label": row["label"],
             "token_preview": row["token_preview"],
-            "available": isinstance(usage, dict),
-            "percent": int(usage.get("percent", 0)) if isinstance(usage, dict) else 0,
-            "is_negative": bool(usage.get("is_negative")) if isinstance(usage, dict) else False,
+            "available": known,
+            "percent": int(usage.get("percent", 0)) if known else 0,
+            "is_negative": bool(usage.get("is_negative")) if known else False,
+            "anlas": int(anlas) if isinstance(anlas, int) else None,
+            # 이번 라운드에 생성할 계정. 화면이 여기를 강조한다.
+            "is_next": row["id"] == next_account_id,
         })
     return rows
 
@@ -232,19 +244,23 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
             "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
             "fetched_at": now,
         }
-        _attach_accounts(context, usage_payload, usage)
+        _attach_accounts(context, usage_payload, usage, summary.get("anlas"))
     return [anlas_payload, usage_payload]
 
 
 def _attach_accounts(context: Any, usage_payload: dict[str, Any],
-                     main_usage: dict[str, Any]) -> None:
+                     main_usage: dict[str, Any], main_anlas: Any = None) -> None:
     """다중 계정이면 계정별 사용량을 붙이고 배지 값을 **평균**으로 바꾼다.
 
     계정이 하나뿐이면 아무것도 하지 않는다 - 요청도 안 나가고, 배지는 지금까지와
     똑같이 그 계정의 값을 보여 준다.
     """
-    from core.nai_account_balancer import average_percent
-    from core.nai_account_service import MAIN_ACCOUNT_ID, NaiAccountService
+    from core.nai_account_balancer import average_percent, select_account
+    from core.nai_account_service import (
+        MAIN_ACCOUNT_ID,
+        NaiAccountService,
+        peek_rotation_counter,
+    )
 
     try:
         service = NaiAccountService(context)
@@ -257,13 +273,23 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any],
             usage_by_id[MAIN_ACCOUNT_ID] = {
                 "percent": int(main_usage.get("percent", 0)),
                 "is_negative": bool(main_usage.get("is_negative", False)),
+                "anlas": main_anlas,
             }
         extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
         usage_by_id.update(_fetch_extra_account_usage(extras))
         _cache_account_usage(context, usage_by_id)
 
         snapshot = service.snapshot()
-        usage_payload["accounts"] = _account_rows(context, usage_by_id)
+        # 이번 라운드에 생성할 계정. ⚠️ **peek 이다** - 여기서 카운터를 올리면
+        # 화면을 그릴 때마다 회전이 어긋나 실제 생성이 계정을 건너뛴다.
+        next_account_id = select_account(
+            [a for a, _ in active],
+            policy=snapshot["policy"],
+            counter=peek_rotation_counter(context),
+            usage_by_id=usage_by_id,
+        )
+        usage_payload["accounts"] = _account_rows(context, usage_by_id, next_account_id)
+        usage_payload["next_account_id"] = next_account_id
         usage_payload["policy"] = snapshot["policy"]
         usage_payload["balancing_effective"] = snapshot["balancing_effective"]
         # 배지는 합이 아니라 **평균**이다(사용자 명세). 못 받은 계정은 평균에서 뺀다.

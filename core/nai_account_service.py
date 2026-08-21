@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,51 @@ def cached_account_usage(context: Any) -> dict[str, Any]:
     if isinstance(cached, tuple) and len(cached) == 2 and isinstance(cached[1], dict):
         return cached[1]
     return {}
+
+
+# 계정 회전용 카운터.
+#
+# ⚠️⚠️ **여기가 다중 계정을 조용히 죽여 온 자리다.** 옛 구현과 내 첫 구현 모두
+# `app_context.image_crud_controller.get_counter()` 를 썼는데, 헤드리스 컨텍스트
+# (`WebSessionContext`)에는 **그 컨트롤러가 아예 없다.** 그래서 계정 선택이 매번
+# AttributeError 를 냈고, 넓은 `except` 가 그걸 삼켜 **항상 메인 토큰**이 나갔다.
+# 실측(2026-08-21): 라운드 로빈으로 4장을 생성했는데 4장 전부 메인 계정.
+# 오류도 안 보이고 그림도 잘 나오니 "되는 줄 알았다".
+#
+# 그래서 회전은 **자기 카운터**로 센다. 남의 카운터에 얹으면 그 카운터가 어느 날
+# 사라져도 이렇게 조용히 꺼진다.
+_ROTATION_ATTR = "nai_account_rotation_counter"
+_ROTATION_LOCK = threading.Lock()
+
+
+def next_rotation_counter(context: Any) -> int:
+    """이번 생성에 쓸 회전 번호. 부를 때마다 1 증가한다(스레드 안전).
+
+    프로세스 수명 동안만 센다 - 재시작하면 0 부터다. 회전에서 중요한 건 절대값이
+    아니라 **연속 호출이 서로 다른 값을 받는 것**이라 그걸로 충분하다.
+    """
+    with _ROTATION_LOCK:
+        current = _read_rotation(context)
+        setattr(context, _ROTATION_ATTR, current + 1)
+        return current
+
+
+def peek_rotation_counter(context: Any) -> int:
+    """**소비하지 않고** 다음 회전 번호만 본다.
+
+    화면이 "이번 라운드는 이 계정" 을 표시할 때 쓴다. 여기서 카운터를 올리면
+    화면을 그릴 때마다 회전이 어긋나 실제 생성이 계정을 건너뛴다.
+    """
+    with _ROTATION_LOCK:
+        return _read_rotation(context)
+
+
+def _read_rotation(context: Any) -> int:
+    current = getattr(context, _ROTATION_ATTR, 0)
+    try:
+        return int(current)
+    except (TypeError, ValueError):
+        return 0
 
 
 class NaiAccountService:

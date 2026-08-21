@@ -36,6 +36,7 @@
 from __future__ import annotations
 
 import json
+import random
 import threading
 import time
 from pathlib import Path
@@ -138,6 +139,22 @@ def next_rotation_counter(context: Any) -> int:
         current = _read_rotation(context)
         setattr(context, _ROTATION_ATTR, current + 1)
         return current
+
+
+_ROTATION_SEED_ATTR = "nai_account_rotation_seed"
+
+
+def rotation_seed(context: Any) -> int:
+    """구간형 정책(80~120 등)이 묶음 크기를 뽑을 때 쓰는 **세션 씨앗**.
+
+    세션마다 다르되 세션 안에서는 고정이어야 한다 - 고정이 아니면 화면이 "이번
+    라운드는 이 계정" 을 그릴 때마다 묶음 경계가 달라져 실제 생성과 어긋난다.
+    """
+    seed = getattr(context, _ROTATION_SEED_ATTR, None)
+    if not isinstance(seed, int):
+        seed = random.getrandbits(31) or 1
+        setattr(context, _ROTATION_SEED_ATTR, seed)
+    return seed
 
 
 def peek_rotation_counter(context: Any) -> int:

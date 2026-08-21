@@ -374,6 +374,7 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
         NaiAccountService,
         cached_account_usage,
         peek_rotation_counter,
+        rotation_seed,
     )
 
     try:
@@ -395,6 +396,7 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
             policy=snapshot["policy"],
             counter=peek_rotation_counter(context),
             usage_by_id=usage_by_id,
+            seed=rotation_seed(context),
         )
         usage_payload["accounts"] = _account_rows(context, usage_by_id, next_account_id)
         usage_payload["next_account_id"] = next_account_id

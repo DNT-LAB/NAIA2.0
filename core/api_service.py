@@ -605,6 +605,7 @@ class APIService:
                 NaiAccountService,
                 cached_account_usage,
                 next_rotation_counter,
+                rotation_seed,
             )
 
             service = NaiAccountService(self.app_context)
@@ -624,6 +625,7 @@ class APIService:
                 policy=policy,
                 counter=counter,
                 usage_by_id=usage_by_id,
+                seed=rotation_seed(self.app_context),
             )
             token = tokens_by_id.get(selected_id, "")
             if not token:

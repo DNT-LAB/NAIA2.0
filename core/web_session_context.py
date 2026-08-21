@@ -590,6 +590,9 @@ class WebSessionContext:
     def sync_param_into_current_preset(self, key: str) -> str:
         return self._prompt_engineering_service().sync_param_into_current_preset(key)
 
+    def sync_negative_into_current_preset(self) -> str:
+        return self._prompt_engineering_service().sync_negative_into_current_preset()
+
     def _conditional_prompt_module_state(self) -> dict[str, Any]:
         return self._conditional_prompt_service().state()
 

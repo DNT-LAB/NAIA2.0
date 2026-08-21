@@ -145,6 +145,16 @@ async def handle_session_command(
         context.prompt_text = str(command.get("prompt") or "")
         context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
         context.save_remote_ui_state()
+        # 네거티브는 **선택된 프리셋에도** 즉시 반영한다. 안 하면 편집분이 세션에만
+        # 남아 프리셋을 옮기는 순간 사라진다(사용자 지적 2026-08-21).
+        #
+        # ⚠️ `origin == "edit"` 일 때만 한다. 서버가 밀어 준 값을 클라이언트가
+        # 되돌려 보내는 에코 경로가 여럿이라(프리셋 적용·메타데이터 적용·재동기),
+        # 아무 `set_prompt` 에서나 반영하면 파이프라인이 만든 네거티브가 프리셋에
+        # 굳는다. 메인 프롬프트는 어느 경로에서도 저장하지 않는다 - Random 이 매번
+        # 덮어쓰기 때문이다.
+        if str(command.get("origin") or "") == "edit":
+            context.sync_negative_into_current_preset()
         await ws.send_text(json.dumps({
             "type": "prompt_sync",
             "prompt": context.prompt_text,
@@ -190,12 +200,18 @@ async def handle_session_command(
                 await broadcast_json(clients, context.module_state_payload("prompt_engineering"))
             except Exception as exc:  # pragma: no cover - 배지 갱신 실패가 세션을 막으면 안 됨
                 print(f"[warn] preset badge refresh failed: {exc}", flush=True)
-        # 모델이 바뀌면 사용량 배지를 갱신한다. **절대 여기서 기다리지 않는다** -
-        # 프리셋 적용이 이 경로를 타는데, await 하면 조회가 끝날 때까지 이 세션이
-        # 다음 메시지를 못 받아 백엔드가 죽은 것처럼 보인다(사용자 지적 2026-08-21:
-        # 프리셋 연타 -> 랜덤 버튼 무반응 -> 밀린 쓰기가 앞 프리셋 값을 덮어씀).
-        if key.strip() == "model":
-            schedule_subscription_refresh(context, clients)
+        # 모델이 바뀌면 사용량 배지를 갱신한다 - 그 일은 수신 루프의
+        # `refresh_usage_if_model_changed()` 가 커맨드 처리 직후에 한다.
+        #
+        # ⚠️ 예전에는 여기서 `key == "model"` 일 때만 걸었다. 그런데 **프리셋 적용은
+        # 이 핸들러를 안 거친다** - `_apply_main_settings` 가 `context.set_param()` 을
+        # 직접 부른다. 그래서 프리셋으로 모델을 바꾸면 드롭다운만 바뀌고 배지와 정책
+        # 목록은 옛 모델인 채였다(사용자 지적 2026-08-21). 커맨드가 아니라 **결과**를
+        # 보도록 한 곳으로 옮겼다.
+        #
+        # 어느 쪽이든 **절대 await 하지 않는다** - 조회가 끝날 때까지 이 세션이 다음
+        # 메시지를 못 받아 백엔드가 죽은 것처럼 보인다(프리셋 연타 -> 랜덤 버튼
+        # 무반응 -> 밀린 쓰기가 앞 프리셋 값을 덮어씀).
         return True
     return False
 

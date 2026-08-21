@@ -4745,6 +4745,11 @@ function onPromptEdit() {
         prompt: (interactivePanel?.isActive?.() && promptBeforeInteractive !== null)
           ? promptBeforeInteractive : promptEdit.value,
         negative_prompt: negEdit.value,
+        // ⚠️ **사용자가 직접 친 것**이라는 표시. 서버는 이때만 네거티브를 선택된
+        // 프리셋에 반영한다. 서버가 밀어 준 값을 되돌려 보내는 에코 경로가 여럿이라
+        // (프리셋 적용·메타데이터 적용·재동기), 구분이 없으면 파이프라인이 만든
+        // 네거티브가 프리셋에 굳는다.
+        origin: 'edit',
       }));
     }
     promptSendTimer = null;
@@ -8268,6 +8273,10 @@ function flushPromptEngineeringEdits() {
 }
 
 function flushMainPromptAndParams() {
+  // 아직 안 나간 사용자 편집이 있었는가. ⚠️ **`_localPromptDirty` 를 지우기 전에**
+  // 읽어야 한다 - 이 경로는 디바운스 타이머를 취소하고 대신 보내는 자리라, 여기서
+  // 표시를 잃으면 방금 친 네거티브가 프리셋에 반영되지 않는다.
+  const wasUserEdit = !!promptSendTimer || _localPromptDirty;
   if (promptSendTimer) {
     clearTimeout(promptSendTimer);
     promptSendTimer = null;
@@ -8278,6 +8287,7 @@ function flushMainPromptAndParams() {
       type: 'set_prompt',
       prompt: promptEdit.value,
       negative_prompt: negEdit.value,
+      ...(wasUserEdit ? {origin: 'edit'} : {}),
     }));
     const params = _collectCurrentParams();
     Object.entries(params).forEach(([key, value]) => {

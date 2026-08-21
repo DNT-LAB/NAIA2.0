@@ -12,6 +12,8 @@ from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) WS-com
 
 from app.backend.server.anlas_poller import (
     ensure_anlas_poller,
+    note_usage_badge_model,
+    refresh_usage_if_model_changed,
     schedule_subscription_refresh,
 )
 from app.backend.server.api_control_commands import (
@@ -188,6 +190,7 @@ def register_websocket_session(
             # 여기서도 기다리지 않는다 - 기다리면 아래 수신 루프 진입이 늦어져
             # 접속 직후 사용자가 누른 것들이 최대 16초 동안 먹히지 않는다.
             schedule_subscription_refresh(context, clients)
+            note_usage_badge_model(context)
             while True:
                 data = await ws.receive_text()
                 if data.startswith("{"):
@@ -240,6 +243,11 @@ def register_websocket_session(
                                 broadcast_json=broadcast_json,
                                 start_generation_runner=start_generation_runner,
                             )
+                            # 이 커맨드가 모델을 바꿨으면 사용량 배지를 갱신한다.
+                            # ⚠️ 모델을 바꾸는 길이 여럿이라(프리셋 적용은 핸들러를
+                            # 안 거치고 set_param 을 직접 부른다) 커맨드별로 걸지 않고
+                            # **결과**를 본다. 안 바뀌었으면 비용은 조회 한 번이다.
+                            refresh_usage_if_model_changed(context, clients)
                     else:
                         await handle_text_command(
                             ws,

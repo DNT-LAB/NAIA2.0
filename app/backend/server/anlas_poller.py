@@ -515,6 +515,44 @@ def _usage_hidden_payload() -> dict[str, Any]:
     }
 
 
+# 배지를 마지막으로 그렸을 때의 모델 키.
+#
+# ⚠️ **모델을 바꾸는 길이 하나가 아니다.** `set_param(model)` 커맨드만 갱신을 걸어
+# 뒀는데, 프리셋 적용은 `_apply_main_settings` 가 `context.set_param()` 을 **직접**
+# 불러 그 핸들러를 안 거친다. 그래서 프리셋으로 NAID5 -> NAID4.5 로 가면 드롭다운은
+# 바뀌는데 배지/정책 목록은 V5 인 채였다(사용자 지적 2026-08-21).
+#
+# 호출처를 하나하나 쫓는 대신 **결과(모델 키)가 변했는가**를 본다. 새 경로가
+# 생겨도 자동으로 걸린다.
+_BADGE_MODEL_ATTR = "headless_usage_badge_model_key"
+
+
+def _current_model_key(context: Any) -> str:
+    try:
+        return str(context._current_model_key() or "")
+    except Exception:
+        return ""
+
+
+def note_usage_badge_model(context: Any) -> None:
+    """지금 모델을 '배지가 아는 모델' 로 기록한다(갱신을 직접 건 직후에 쓴다)."""
+    setattr(context, _BADGE_MODEL_ATTR, _current_model_key(context))
+
+
+def refresh_usage_if_model_changed(context: Any, clients: set) -> bool:
+    """마지막으로 그린 뒤 모델이 바뀌었으면 배지를 갱신한다.
+
+    커맨드 처리 **직후**에 부른다. 안 바뀌었으면 아무 일도 하지 않으므로 수신
+    루프에 얹어도 비용은 dict 조회 한 번이다.
+    """
+    key = _current_model_key(context)
+    if key == getattr(context, _BADGE_MODEL_ATTR, None):
+        return False
+    setattr(context, _BADGE_MODEL_ATTR, key)
+    schedule_subscription_refresh(context, clients)
+    return True
+
+
 def usage_badge_active(context: Any) -> bool:
     """지금 사용량 배지가 떠 있는 상태인가(= NAI 모드 + V5 모델).
 

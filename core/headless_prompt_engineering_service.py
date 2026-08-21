@@ -545,6 +545,59 @@ class HeadlessPromptEngineeringService:
             print(f"[warn] preset param sync failed for {key}: {exc}", flush=True)
             return ""
 
+    def sync_negative_into_current_preset(self) -> str:
+        """네거티브 프롬프트를 **선택된 프리셋에 즉시 반영**한다.
+
+        ⚠️ 사용자 지적(2026-08-21): "네거티브 프롬프트가 프리셋 이동 과정에서 자꾸
+        유실되는 것 같습니다". `set_prompt` 커맨드가 컨텍스트에만 쓰고 프리셋은 안
+        건드려서, 편집분이 세션에만 남아 있다가 프리셋을 옮기는 순간 사라졌다
+        (돌아와도 저장된 옛 값이 다시 실린다). 생성 파라미터는 즉시 반영되는데
+        네거티브만 아니었다.
+
+        ⚠️ **메인 프롬프트는 여기서 절대 저장하지 않는다.** Random 이 매번 덮어쓰므로
+        프리셋의 프롬프트가 마지막 랜덤 결과로 굳어 버린다(`sync_param_into_current_preset`
+        주석의 사고와 같은 뿌리). 네거티브는 사용자가 직접 두는 값이라 사정이 다르다.
+
+        ⚠️ 호출은 **사용자가 직접 편집한 경로에서만** 한다(`origin="edit"`).
+        서버가 밀어 준 값을 클라이언트가 되돌려 보내는 에코 경로가 여럿이라, 아무
+        `set_prompt` 에서나 반영하면 파이프라인이 만든 네거티브가 프리셋에 굳는다.
+
+        반환: 반영한 프리셋 이름. 반영할 게 없으면 빈 문자열.
+        """
+        from core.prompt_engineering_settings import get_prompt_engineering_store
+
+        try:
+            context = self.context
+            store = get_prompt_engineering_store(context)
+            mode_key = context.get_api_mode()
+            state = store.state(mode_key)
+            name = str(state.get("current_preset") or "")
+            if name in {"", "(프리셋 없음)", "*randomized"}:
+                return ""
+
+            data = store.read_preset_data(name, mode_key)
+            if not data:
+                return ""
+            main_settings = data.get("main_settings")
+            main_settings = dict(main_settings) if isinstance(main_settings, dict) else {}
+            new_value = str(context.negative_prompt_text or "")
+            # 저장 키는 `negative` 다(`_capture_main_settings` 와 같은 이름). 옛 파일에
+            # `negative_prompt` 가 함께 있으면 그쪽도 맞춰 둔다 - 한쪽만 고치면
+            # `_apply_main_settings` 가 어느 것을 나중에 읽느냐에 따라 값이 갈린다.
+            if main_settings.get("negative") == new_value and (
+                "negative_prompt" not in main_settings
+                or main_settings.get("negative_prompt") == new_value
+            ):
+                return ""                       # 값이 그대로면 쓰지 않는다
+            main_settings["negative"] = new_value
+            if "negative_prompt" in main_settings:
+                main_settings["negative_prompt"] = new_value
+            ok, _message = store.save_current_preset(mode_key, main_settings=main_settings)
+            return name if ok else ""
+        except Exception as exc:  # noqa: BLE001 - 반영 실패가 프롬프트 편집을 막으면 안 된다
+            print(f"[warn] preset negative sync failed: {exc}", flush=True)
+            return ""
+
     def _apply_preset_main_settings_response(self, store: Any, preset_name: str):
         """On a preset swap, restore the preset's generation params + prompt and
         surface params/prompt_sync so the client UI updates."""

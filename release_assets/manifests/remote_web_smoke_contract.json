@@ -406,7 +406,8 @@
         "api_status",
         "init_complete",
         "lazy_indices_ready",
-        "anlas_update"
+        "anlas_update",
+        "nai_usage_update"
       ],
       "sync_message": "sync",
       "expected_sync_type": "mode"
@@ -423,7 +424,8 @@
         "api_status",
         "init_complete",
         "lazy_indices_ready",
-        "anlas_update"
+        "anlas_update",
+        "nai_usage_update"
       ],
       "commands": [
         {
@@ -544,7 +546,8 @@
         "api_status",
         "init_complete",
         "lazy_indices_ready",
-        "anlas_update"
+        "anlas_update",
+        "nai_usage_update"
       ],
       "commands": [
         {

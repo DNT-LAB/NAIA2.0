@@ -137,6 +137,20 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/tag_cooccurrence.json",
     "data/character_presets.json",
     "data/character_preview_thumbs.json",
+    # v2.0.34 검토: Interactive 확장이 런타임에 읽는 정적 표 5개(합 3.8MB).
+    # include 패턴에는 이미 있었는데 이 예외 목록에서 빠져 게이트가 막았다.
+    # 공개 미러에 올린 것이 아니라 페이로드로 실어야 한다 — 안 실으면 배포판에서
+    # 해당 기능이 **조용히** 죽는다(clothing_harmony 가 실제로 그랬다).
+    #   interactive_axis_tags        축/서브그룹 어휘 (없으면 그리드가 빈다)
+    #   interactive_adult_tags       성인 축 분류
+    #   interactive_clothing_harmony 의상 '함께 쓰는 것'/'같이 안 쓰는 것'
+    #   interactive_tag_harmony      의상 밖 어휘까지 넓힌 추천 표
+    #   interactive_preset_facts     프리셋 근거 표
+    "data/interactive_axis_tags.json",
+    "data/interactive_adult_tags.json",
+    "data/interactive_clothing_harmony.json",
+    "data/interactive_tag_harmony.json",
+    "data/interactive_preset_facts.json",
     # NOTE: Sequence dataset (data/sequence_preset/events_v1.parquet) is NOT shipped —
     # it is downloaded on demand from HuggingFace (core/sequence_download_service.py),
     # mirroring Event Preset. So it is intentionally absent from this allowlist.
@@ -154,6 +168,13 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/tag_cooccurrence.json",
     "*/data/character_presets.json",
     "*/data/character_preview_thumbs.json",
+    # v2.0.34 Interactive 확장분(위 bare 패턴과 짝) — 스테이징 경로는
+    # `resources/naia-backend/data/...` 라 `*/data/...` 형태가 따로 필요하다.
+    "*/data/interactive_axis_tags.json",
+    "*/data/interactive_adult_tags.json",
+    "*/data/interactive_clothing_harmony.json",
+    "*/data/interactive_tag_harmony.json",
+    "*/data/interactive_preset_facts.json",
     # 캐릭터 생성 벤치 랜덤 슬롯 풀(2.0.33) - 없으면 클린 설치에서 랜덤생성이
     # 404로 죽는다. SOURCE_BOOTSTRAP_PATHS/release_include_exclude_draft/
     # runtime_asset_classification과 함께 4곳 등록 세트.

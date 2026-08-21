@@ -9,6 +9,31 @@
   ],
   "required_runtime_download_owners": [
     {
+      "_note": "확장 설치: GitHub codeload zip 을 받아 extensions_root 아래에만 푼다. 저장소 트리에 쓰지 않는다.",
+      "feature": "extension_github_install",
+      "source": "core/extension_install_service.py",
+      "must_contain": [
+        "self.extensions_root = Path(extensions_root)",
+        "with urllib.request.urlopen(request, timeout=30, context=SSL_CONTEXT) as response"
+      ],
+      "must_not_contain": [
+        "Path(\"data\")",
+        "Path(\"ui\")"
+      ]
+    },
+    {
+      "_note": "시퀀스 이벤트 parquet: 검증 후 runtime data_root 아래 sequence_preset/ 에만 설치한다.",
+      "feature": "sequence_events_download",
+      "source": "core/sequence_download_service.py",
+      "must_contain": [
+        "TARGET_RELPATH = Path(\"sequence_preset\") / \"events_v1.parquet\"",
+        "with urllib.request.urlopen(request, timeout=30, context=SSL_CONTEXT) as response"
+      ],
+      "must_not_contain": [
+        "Path(\"ui\")"
+      ]
+    },
+    {
       "feature": "cloudflared_download_implementation",
       "source": "utils/cloudflared.py",
       "must_contain": [
@@ -84,7 +109,7 @@
       "source": "core/runtime_install_manager.py",
       "must_contain": [
         "return self.runtime_paths.data_dir / \"tags\"",
-        "temp_zip = self.runtime_paths.downloads_dir / \"naia_tags.zip.download_tmp\"",
+        "temp_zip = self.runtime_paths.downloads_dir / spec.temp_name",
         "with urllib.request.urlopen(request, **open_kwargs) as response",
         "temp_target.replace(target)"
       ],

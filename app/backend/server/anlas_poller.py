@@ -181,7 +181,7 @@ async def broadcast_anlas_and_usage(context: Any, clients: set) -> None:
     payloads = await asyncio.to_thread(_build_both_payloads, context)
     for payload in payloads:
         await broadcast_json(clients, payload)
-    _cache_usage_payload(context, payloads[1] if len(payloads) > 1 else None)
+    _cache_pair(context, payloads)
 
 
 # ---- 비차단 갱신 ------------------------------------------------------------
@@ -199,19 +199,25 @@ async def broadcast_anlas_and_usage(context: Any, clients: set) -> None:
 _USAGE_CACHE_TTL_SECONDS = 60
 
 
-def _cache_usage_payload(context: Any, payload: dict[str, Any] | None) -> None:
-    if isinstance(payload, dict) and payload.get("available"):
-        context.headless_usage_cache = (time.monotonic(), payload)
+def _cache_pair(context: Any, payloads: list[dict[str, Any]]) -> None:
+    """Anlas + 사용량을 **쌍으로** 캐시한다.
+
+    ⚠️ 예전에는 사용량만 캐시했다. 그러면 캐시 적중 시 `anlas_update` 가 안 나가
+    Anlas pill 이 비어 버린다 - 아래 `schedule_subscription_refresh` 주석의 사고와
+    같은 뿌리다. 둘은 한 요청에서 나온 값이니 함께 보관하고 함께 내보낸다.
+    """
+    if len(payloads) == 2 and payloads[0].get("available"):
+        context.headless_subscription_cache = (time.monotonic(), payloads[0], payloads[1])
 
 
-def _cached_usage_payload(context: Any) -> dict[str, Any] | None:
-    cached = getattr(context, "headless_usage_cache", None)
+def _cached_pair(context: Any) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    cached = getattr(context, "headless_subscription_cache", None)
     if not cached:
         return None
-    stamped, payload = cached
+    stamped, anlas_payload, usage_payload = cached
     if time.monotonic() - stamped > _USAGE_CACHE_TTL_SECONDS:
         return None
-    return payload
+    return anlas_payload, usage_payload
 
 
 def _usage_hidden_payload() -> dict[str, Any]:
@@ -224,11 +230,16 @@ def _usage_hidden_payload() -> dict[str, Any]:
 def schedule_subscription_refresh(context: Any, clients: set) -> None:
     """구독 조회를 **기다리지 않고** 예약한다. 호출자는 절대 막히지 않는다.
 
-    네트워크를 타지 않고 끝나는 경우가 대부분이다:
-      - V5 가 아니다        -> 숨김 페이로드만 즉시 보낸다(조회 불필요)
-      - 방금 받아 둔 값이 있다 -> 캐시(60초)를 그대로 다시 보낸다
-    프리셋을 바꿔도 모델이 V5 안에서만 오가면 사용량 값은 그대로이므로,
-    이 두 갈래가 프리셋 연타의 대부분을 네트워크 없이 흡수한다.
+    ⚠️ **항상 두 장(`anlas_update` + `nai_usage_update`)을 같은 순서로 내보낸다.**
+    처음엔 "V5 가 아니면 사용량 숨김만 보내고 끝" 으로 짰는데, 그러면 그 경우에
+    `anlas_update` 가 **아예 안 나가** Anlas pill 이 5분(폴러 주기) 동안 비었다.
+    릴리즈 웹 스모크 계약이 이걸 잡았다(기대 `...anlas_update` vs 관측
+    `...nai_usage_update`). 사용량 배지만 V5 전용이지 Anlas 는 NAI 모드면 늘 필요하다.
+
+    네트워크를 타지 않고 끝나는 경우:
+      - NAI 모드가 아니거나 토큰이 없다 -> 둘 다 '없음' 으로 즉시(조회 불필요)
+      - 방금 받아 둔 값이 있다          -> 캐시(60초) 쌍을 그대로 다시 보낸다
+    프리셋을 바꿔도 값이 안 변하는 구간은 이 두 갈래가 네트워크 없이 흡수한다.
 
     실제 조회가 필요할 때만 태스크를 띄우고, **이미 떠 있으면 새로 만들지 않는다**
     (프리셋 하나가 모델 신호를 여러 번 쏴도 요청은 한 번).
@@ -236,17 +247,22 @@ def schedule_subscription_refresh(context: Any, clients: set) -> None:
     if not clients:
         return
 
-    needs_usage = (
-        str(context.get_api_mode() or "").upper() == "NAI"
-        and _current_model_uses_usage_limit(context)
-    )
-    if not needs_usage:
-        asyncio.create_task(_send_only(clients, _usage_hidden_payload()))
+    try:
+        token = str(context.secure_token_manager.get_token("nai_token") or "").strip()
+    except Exception:
+        token = ""
+    if str(context.get_api_mode() or "").upper() != "NAI" or not token:
+        asyncio.create_task(
+            _send_pair(clients, _unavailable_payload(), _usage_hidden_payload()))
         return
 
-    cached = _cached_usage_payload(context)
+    cached = _cached_pair(context)
     if cached is not None:
-        asyncio.create_task(_send_only(clients, cached))
+        # 캐시는 Anlas 기준으로 잡는다. 사용량은 모델에 따라 붙였다 뗐다 하므로
+        # **지금 모델 기준으로 다시 판정**한다 - 안 그러면 V5 에서 V4.5 로 바꿔도
+        # 배지가 캐시 때문에 남는다.
+        usage = cached[1] if _current_model_uses_usage_limit(context) else _usage_hidden_payload()
+        asyncio.create_task(_send_pair(clients, cached[0], usage))
         return
 
     task = getattr(context, "headless_subscription_refresh_task", None)
@@ -258,11 +274,14 @@ def schedule_subscription_refresh(context: Any, clients: set) -> None:
     context.headless_subscription_refresh_task = new_task
 
 
-async def _send_only(clients: set, payload: dict[str, Any]) -> None:
+async def _send_pair(clients: set, anlas_payload: dict[str, Any],
+                     usage_payload: dict[str, Any]) -> None:
+    """순서가 계약이다 - `anlas_update` 먼저, `nai_usage_update` 다음."""
     try:
-        await broadcast_json(clients, payload)
+        await broadcast_json(clients, anlas_payload)
+        await broadcast_json(clients, usage_payload)
     except Exception as exc:  # pragma: no cover - 배지 전송 실패가 세션을 막으면 안 됨
-        print(f"[warn] usage badge broadcast failed: {exc}")
+        print(f"[warn] subscription badge broadcast failed: {exc}")
 
 
 def _log_refresh_failure(task: "asyncio.Task[Any]") -> None:

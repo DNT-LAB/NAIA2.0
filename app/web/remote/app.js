@@ -1335,7 +1335,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026071
     });
     window.__naiaSetupControllerReady = true;
     // 계정 패널은 설정 대화상자를 열 수 있어야 해서 setupController 뒤에 만든다.
-    return import('./js/features/naiAccountPanel.mjs?v=20260821-multitoken6')
+    return import('./js/features/naiAccountPanel.mjs?v=20260821-multitoken7')
       .then(({createNaiAccountPanel}) => {
         naiAccountPanel = createNaiAccountPanel({
           document,
@@ -7105,8 +7105,8 @@ function onNaiUsageUpdate(m) {
   //   비V5 : 퍼센트가 뜻이 없으므로(그 풀을 안 쓴다) **이번 세션 생성 장수**.
   // 배지 자체는 두 경우 다 뜬다 - 모델을 오갈 때마다 사라졌다 나타나면 자리가 흔들린다.
   //
-  // ⚠️ 비V5 값은 '무료' 가 아니라 **전체** 장수다. 무료 장수를 띄웠더니 V4.5 생성은
-  // 정의상 무료가 아니라 숫자가 영영 안 움직였다(사용자 지적 2026-08-21).
+  // ⚠️ 배지는 **총** 장수다. 팝오버 헤더가 '무료 / 총' 을 말하므로 여기서 또 무료를
+  // 쓰면 같은 숫자가 나란히 두 번 나온다(사용자 지적 2026-08-21).
   const onV5 = m.uses_usage_limit !== false;
   value.textContent = onV5 ? `${pct}%` : String(Number(m.session_generations) || 0);
   // 소진 표시는 V5 를 고른 동안에만 뜻이 있다(V4.5 는 이 무료 풀을 안 쓴다).
@@ -7121,7 +7121,7 @@ function onNaiUsageUpdate(m) {
   const perDay = secs > 0 ? Math.round((86400 / secs) * 10) / 10 : 0;
   const rate = perDay > 0 ? `하루 약 ${perDay}% 회복` : '';
   const base = !onV5
-    ? '이번 세션에 뽑은 장수 (V5 가 아니면 무료 사용량을 쓰지 않습니다)'
+    ? '이번 세션에 뽑은 장수 (1MP · 28스텝 이하는 Anlas 를 쓰지 않습니다)'
     : m.is_negative
       ? 'V5 무료 사용량 소진 — 이후 생성은 Anlas 를 씁니다'
       : `NovelAI Diffusion V5 Opus 사용량${rate ? ` · ${rate}` : ''}`;

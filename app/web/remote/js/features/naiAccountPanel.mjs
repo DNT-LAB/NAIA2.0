@@ -132,8 +132,11 @@ export function createNaiAccountPanel({
 
   function onAccountResult(message) {
     if (!message) return;
-    if (!message.ok && message.message) showToast(message.message, 'error');
-    else if (message.ok && message.message) showToast(message.message, 'info');
+    // 성공이어도 경고할 게 있을 수 있다(계정은 지웠는데 토큰이 남은 경우).
+    // 서버가 `level` 을 주면 그걸 따른다.
+    if (message.message) {
+      showToast(message.message, message.level || (message.ok ? 'info' : 'error'));
+    }
     setSetupBusy(false);
   }
 
@@ -214,6 +217,11 @@ export function createNaiAccountPanel({
   function barHtml(percent, isOut) {
     const width = Math.max(0, Math.min(100, Number(percent) || 0));
     return `<span class="nai-acct-bar${isOut ? ' is-out' : ''}"><i style="width:${width}%"></i></span>`;
+  }
+
+  /** Anlas 로 나간 장수. 서버가 따로 안 보내므로 두 카운터의 차로 구한다. */
+  function paidCount() {
+    return Math.max(0, session.total - session.free);
   }
 
   /** 지금 묶음의 진행 게이지(연노랑). 사용자 요청 2026-08-21. */
@@ -334,20 +342,20 @@ export function createNaiAccountPanel({
       + `<button type="button" class="nai-acct-pin${pinned ? ' on' : ''}" data-act="pin"`
       + ` aria-pressed="${pinned ? 'true' : 'false'}"`
       + ` title="${pinned ? '고정 해제' : '열어 둔 채 고정'}">${pinned ? '📌' : '📍'}</button>`
+      // ⚠️ 세 자리가 **같은 숫자를 세 번** 말하면 안 된다(사용자 지적 2026-08-21:
+      // "USAGE 137, USAGE 137장, 이번 세션 생성 137장 이렇게 3번 연달아 나온다").
+      // 배지 = 총 장수 · 헤더 = 무료/총 · 세션 줄 = Anlas 로 나간 장수. 각자 다른
+      // 사실을 말한다.
       + (session.onV5
         ? `<span class="nai-acct-total">통합 ${esc(total)}</span>`
-        : `<span class="nai-acct-total">${session.total.toLocaleString()}장</span>`)
+        : `<span class="nai-acct-total">무료 ${session.free.toLocaleString()}`
+          + `<i> / ${session.total.toLocaleString()}장</i></span>`)
       + '</div>'
-      // ⚠️ 비V5 에서는 **전체 생성 장수**를 센다. 무료 장수를 띄웠더니 V4.5 생성은
-      // 정의상 무료가 아니라 숫자가 영영 안 움직였다(사용자 지적 2026-08-21).
-      // 무료 장수는 그래도 궁금할 수 있으니 아래 줄에 함께 적는다.
       + (session.onV5 ? ''
         : '<div class="nai-acct-session">'
-          + `<span>이번 세션 생성 <b>${session.total.toLocaleString()}</b>장</span>`
+          + `<span>Anlas 소비 <b>${paidCount().toLocaleString()}</b>장</span>`
           + `<em>실행 ${esc(formatElapsed(session.elapsed))}</em></div>`
-          + '<div class="nai-acct-note">'
-          + `V5 가 아닌 모델은 무료 사용량을 쓰지 않습니다 (무료 ${session.free.toLocaleString()}장).`
-          + '</div>')
+          + '<div class="nai-acct-note">1MP · 28스텝 이하는 Anlas 를 쓰지 않습니다.</div>')
       + (rows.length > 1
         ? '<div class="nai-acct-sum">'
           + `<span>Anlas ${sumAnlas.toLocaleString()}</span>`

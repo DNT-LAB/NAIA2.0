@@ -8,8 +8,16 @@ V5 사용량 배지는 퍼센트를 보여 줬는데, 그 값이 정수라 **1% 
 
 무료 판정
 --------
-NAI 안내문 그대로 **V5 모델 · 28스텝 이하 · 1MP 이하**. 이 셋을 다 만족한 생성만
-Opus 무료 사용량에서 나간다. 하나라도 넘으면 Anlas 로 청구되므로 세지 않는다.
+**28스텝 이하 · 1MP 이하** 두 가지다. 모델은 안 본다.
+
+⚠️ 처음엔 V5 만 무료로 셌는데 **틀렸다**(사용자 지적 2026-08-21). Opus 구독의
+무료 생성은 V4.5 이하에도 여태 적용돼 왔다 - 그래서 V4.5 화면의 무료 카운터가 영영
+0 이었다("NAID4.5에서 이번 세션 무료 생성 카운트가 업데이트 되지 않습니다").
+
+계열 차이는 **무료냐** 가 아니라 **무엇을 깎느냐** 다:
+    V4.5 이하  무료 생성은 아무것도 깎지 않는다(무제한).
+    V5        무료 생성이 Opus 사용량 %(약 1730장)에서 깎인다.
+어느 쪽이든 1MP·28스텝을 넘으면 Anlas 로 청구된다.
 
 ⚠️ 여기서 넉넉하게 세면 사용자가 "무료로 N장 썼다" 고 믿는 숫자가 실제와 어긋난다.
 경계는 **이하(<=)** 다 - NAI 가 "up to 28 steps" 라고 쓴 그대로.
@@ -49,18 +57,16 @@ def _as_int(value: Any, default: int = 0) -> int:
 
 
 def is_free_generation(context: Any, params: dict[str, Any] | None) -> bool:
-    """이 생성이 V5 무료 범위 안에서 나갔는가.
+    """이 생성이 Anlas 를 안 물고 나갔는가(= 1MP·28스텝 이하 txt2img).
 
-    ⚠️ **고른 모델이 아니라 실제로 나간 것을 봐야 한다.** V5 를 골라도
-    img2img/인페인트/Enhance 는 V4.5 로 대체돼 나가고, 그건 Anlas 로 청구된다
-    (Codex 리뷰 2026-08-21 지적, 실측으로 확인). 대체를 카운터보다 나중에 넣고
-    카운터를 다시 안 봐서 **유료 작업이 무료로 집계되고 있었다.**
+    ⚠️ **고른 모델이 아니라 실제로 나간 것을 봐야 한다.** img2img/인페인트/Enhance 는
+    해상도·스텝이 아무리 작아도 Anlas 로 청구된다(Codex 리뷰 2026-08-21 지적,
+    실측 확인). 대체(V5->4.5)를 카운터보다 나중에 넣고 카운터를 다시 안 봐서
+    **유료 작업이 무료로 집계되고 있었다.**
     """
     params = params or {}
 
     # 이미지를 싣고 온 요청(img2img · 인페인트 · Enhance)은 무료가 아니다.
-    # V5 는 이 액션을 제공하지 않아 V4.5 로 나가고, V4.5 는 아래 모델 게이트에서
-    # 어차피 걸린다 - 어느 쪽이든 무료 풀에서 빠지지 않는다.
     if params.get("image_bytes") is not None or params.get("init_image_bytes") is not None:
         return False
     # 대체가 실제로 일어났다는 표식이 있으면 그것도 유료다(경로가 늘어나도 안전하게).
@@ -69,17 +75,6 @@ def is_free_generation(context: Any, params: dict[str, Any] | None) -> bool:
     # 사용자가 payload 를 직접 덮어썼으면 우리가 아는 steps/해상도가 실제와 다를 수
     # 있다 - 모르면 무료로 치지 않는다.
     if params.get("use_custom_api_params"):
-        return False
-
-    try:
-        from core.nai_model_contract import resolve_nai_model_for_context
-
-        model_key = str(params.get("model") or "")
-        if not model_key:
-            model_key = str(context._current_model_key() or "")
-        if not resolve_nai_model_for_context(context, model_key).uses_opus_usage_limit:
-            return False
-    except Exception:
         return False
 
     if _as_int(params.get("steps"), 9999) > FREE_STEPS_MAX:

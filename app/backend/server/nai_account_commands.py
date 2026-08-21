@@ -140,6 +140,9 @@ async def handle_nai_account_command(
         "command": command_type,
         "ok": bool(result.get("ok")),
         "message": result.get("message", ""),
+        # 성공했는데도 경고할 게 있는 경우가 있다 - 계정은 지웠지만 토큰이 남았다든지.
+        # 그걸 조용한 info 토스트로 흘리면 자격 증명이 남은 걸 아무도 모른다.
+        "level": str(result.get("level") or ""),
     })
     await _send_json(ws, _snapshot_payload(context))
 

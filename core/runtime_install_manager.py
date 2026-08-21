@@ -68,6 +68,26 @@ _DOWNLOAD_ATTEMPTS = 5
 _DOWNLOAD_BACKOFF_CAP = 8      # 재시도 대기 상한(초). 테스트는 0 으로 낮춘다.
 
 
+def _content_range_starts_at(header: Any, expected_start: int) -> bool:
+    """206 응답이 **우리가 기대한 지점부터** 보내 주는가.
+
+    `Content-Range: bytes 1234-5678/9999` 의 첫 숫자가 지금 갖고 있는 바이트 수와
+    같아야 이어붙일 수 있다. 다르면 구멍이나 중복이 생기고, 그 손상은 한참 뒤
+    압축 해제에서 CRC 오류로 튀어나와 원인 모를 "설치 실패" 가 된다.
+
+    헤더가 없거나 못 읽으면 **False**(= 처음부터 다시 받는다). 다시 받는 비용은
+    시간뿐이지만, 잘못 이어붙이는 비용은 사용자가 원인을 못 찾는 실패다.
+    """
+    raw = str(header or "").strip()
+    if not raw.lower().startswith("bytes"):
+        return False
+    try:
+        span = raw.split(None, 1)[1].split("/", 1)[0]
+        return int(span.split("-", 1)[0]) == int(expected_start)
+    except (IndexError, ValueError):
+        return False
+
+
 class RuntimeInstallManager:
     """Initialize and install runtime-owned data for headless/Electron runs."""
 
@@ -378,7 +398,18 @@ class RuntimeInstallManager:
                 with urllib.request.urlopen(request, **open_kwargs) as response:
                     # Range 를 보냈는데 200 이 오면 서버가 무시한 것 - 이어붙이면
                     # 파일이 깨지므로 그때만 처음부터 다시 받는다.
-                    resuming = downloaded > 0 and response.status == 206
+                    #
+                    # ⚠️ 206 만 보고 이어붙이면 안 된다. **어디서부터** 보냈는지는
+                    # `Content-Range` 에만 있고, 그게 우리가 가진 바이트 수와 다르면
+                    # 이어붙인 파일에 구멍이나 중복이 생긴다(Codex 리뷰 2026-08-21).
+                    # 그 손상은 여기서 안 잡히고 한참 뒤 압축 해제에서 CRC 오류로
+                    # 튀어나와, 사용자에겐 원인 모를 "설치 실패" 로 보인다.
+                    resuming = (
+                        downloaded > 0
+                        and response.status == 206
+                        and _content_range_starts_at(response.headers.get("content-range"),
+                                                     downloaded)
+                    )
                     if downloaded > 0 and not resuming:
                         downloaded = 0
                     body_size = int(response.headers.get("content-length", 0) or 0)

@@ -18562,6 +18562,10 @@ select.setup-input { cursor: pointer; }
 }
 /* 묶음 진행은 `37/100` 이라 34px 로는 잘린다. */
 .nai-acct-line:has(.is-block) .nai-acct-pct { flex: 0 0 54px; }
+/* 헤더의 `무료 130 / 137장` - 뒷쪽(총)은 한 단계 죽여 무료 숫자가 먼저 읽히게. */
+.nai-acct-total > i {
+  font-style: normal; font-weight: 500; opacity: 0.55; font-size: 0.86em;
+}
 /* 비V5 에서는 게이지/퍼센트를 안 그린다 - 이름만 남으면 줄이 무너지므로 자리를 채운다. */
 .nai-acct-spacer { flex: 1 1 auto; }
 .nai-acct-empty, .nai-acct-note {

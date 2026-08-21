@@ -279,11 +279,22 @@ class NaiAccountService:
     def _set_token(self, account_id: str, token: str) -> None:
         self.context.secure_token_manager.save_token(account_id, token)
 
-    def _delete_token(self, account_id: str) -> None:
+    def _delete_token(self, account_id: str) -> bool:
+        """자격 증명을 지웠는가. **예외도 `False` 도 실패다.**
+
+        저장소 구현이 `False` 를 돌려주는 경우(키 없음/권한)가 있어 반환값도 본다 -
+        예외만 보면 그 실패가 조용히 성공으로 보고된다.
+        """
         try:
-            self.context.secure_token_manager.delete_token(account_id)
+            result = self.context.secure_token_manager.delete_token(account_id)
         except Exception as exc:  # noqa: BLE001
             print(f"[warn] token delete failed for {account_id}: {exc}", flush=True)
+            return False
+        # 옛 저장소는 `None` 을 돌려주고 성공이다 - 명시적 `False` 만 실패로 본다.
+        if result is False:
+            print(f"[warn] token delete returned false for {account_id}", flush=True)
+            return False
+        return True
 
     # ---- 조회 ----------------------------------------------------------
 
@@ -422,7 +433,14 @@ class NaiAccountService:
         if len(data["accounts"]) == before:
             return {"ok": False, "message": "계정을 찾을 수 없습니다."}
         self.save(data)
-        self._delete_token(account_id)
+        # ⚠️ 토큰 삭제 실패를 삼키면 **지운 계정의 자격 증명이 저장소에 남는다.**
+        # 명부에서 빠져 회전에는 안 들어가므로 생성은 멀쩡하지만, 사용자는 "지웠다"
+        # 고 믿는데 토큰은 그대로다. 목록에서 사라지는 것과 자격 증명이 사라지는 것은
+        # 다른 이야기라, 후자가 실패하면 반드시 말해 준다(Codex 리뷰 2026-08-21).
+        if not self._delete_token(account_id):
+            return {"ok": True, "level": "warning",
+                    "message": "계정은 삭제했지만 저장된 토큰을 지우지 못했습니다. "
+                               "자격 증명이 남아 있으니 확인해 주세요."}
         return {"ok": True}
 
     def set_enabled(self, account_id: str, enabled: bool) -> dict[str, Any]:

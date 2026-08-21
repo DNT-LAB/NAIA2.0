@@ -18370,6 +18370,9 @@ select.setup-input { cursor: pointer; }
 .custom-select-model-tag[data-family="v4.5"] { color: #ffe07a; }  /* 연노랑 */
 .custom-select-model-tag[data-family="v4.0"] { color: #a6ef7d; }  /* 밝은 연두 */
 .custom-select-model-tag[data-family="v3"]   { color: #7fd4ff; }  /* 밝은 하늘 */
+/* Full / Curated 구분(사용자 지정 2026-08-21). **색상(갈래)은 건드리지 않고 밝기만**
+   올린다 - 세대별 색 구분이 F/C 구분에 먹히면 안 된다. F 는 위 색 그대로. */
+.custom-select-model-tag[data-variant="curated"] { filter: brightness(1.28) saturate(0.82); }
 /* 모델을 안 적고 저장된 옛 프리셋(라벨은 키 그대로) — 눈에 안 띄게 둔다. */
 .custom-select-model-tag:not([data-family="v5"]):not([data-family="v4.5"]):not([data-family="v4.0"]):not([data-family="v3"]) {
   color: var(--text-dim);
@@ -18590,6 +18593,12 @@ select.setup-input { cursor: pointer; }
 .setup-account-toggle input[disabled] { cursor: not-allowed; }
 .setup-account-preview {
   font-family: var(--font-mono); font-size: 11px; color: #8a8aa0;
+}
+/* 같은 토큰이 두 계정에 들어가 있다 - 계정 수만 늘고 한도는 그대로다. */
+.setup-account-dupe {
+  flex: 0 0 auto; padding: 1px 5px; border-radius: 5px;
+  background: rgba(255,180,80,0.16); border: 1px solid rgba(255,180,80,0.4);
+  color: #ffc27a; font-size: 9.5px; letter-spacing: 0.04em; cursor: help;
 }
 .setup-account-del {
   flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px;

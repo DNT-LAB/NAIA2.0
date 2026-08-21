@@ -185,6 +185,9 @@ export function createCustomSelectController({
     const tag = document.createElement('span');
     tag.className = 'custom-select-model-tag';
     tag.dataset.family = String(option.dataset.modelFamily || '');
+    // Full / Curated 를 색 밝기로 가른다. 같은 세대(family)라 색상은 같고 밝기만
+    // 다르다 - 갈래 구분은 그대로 두면서 F/C 만 눈에 띄게 하려는 것이다.
+    tag.dataset.variant = String(option.dataset.modelVariant || '');
     tag.textContent = `[${badge}]`;
     host.appendChild(tag);
     host.appendChild(document.createTextNode(' ' + option.textContent));

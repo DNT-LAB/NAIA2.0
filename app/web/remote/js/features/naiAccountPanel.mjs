@@ -345,6 +345,11 @@ export function createNaiAccountPanel({
         + `<input type="checkbox" data-act="toggle" ${account.enabled ? 'checked' : ''}`
         + `${account.has_token ? '' : ' disabled'}>`
         + `<span>${esc(account.label)}</span></label>`
+        // 중복은 입력 단계에서 막지만, 메인 토큰은 위쪽 '영구 토큰' 칸으로도
+        // 바뀌므로 이미 겹쳐 있는 상태가 생길 수 있다. 그때는 말이라도 해 준다.
+        + (account.duplicate_of
+          ? `<span class="setup-account-dupe" data-naia-title="${esc(account.duplicate_of)}와(과) 같은 토큰입니다 - 사용량 한도는 늘지 않습니다">중복</span>`
+          : '')
         + `<span class="setup-account-preview">${preview}</span>`
         + (own ? '<button type="button" class="setup-account-del" data-act="delete"'
           + ' title="계정 삭제">✕</button>' : '')

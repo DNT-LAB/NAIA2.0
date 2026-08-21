@@ -103,7 +103,7 @@ class HeadlessPromptEngineeringService:
             # 그 위 필터 바(ALL/NAI5/NAI4.5/ETC)가 이 값을 쓴다. NAI 프리셋만 의미가
             # 있고(다른 모드는 모델 개념이 다르다), 모델을 안 적고 저장된 옛 프리셋은
             # 라벨 없이 ETC 로 간다 - 숨기면 다른 갈래에서 사라져 버린다.
-            badge = {"key": "", "label": "", "family": "", "group": "etc"}
+            badge = {"key": "", "label": "", "family": "", "group": "etc", "variant": ""}
             if api_mode.upper() == "NAI":
                 main_settings = data.get("main_settings") if isinstance(data, dict) else {}
                 main_settings = main_settings if isinstance(main_settings, dict) else {}
@@ -115,6 +115,7 @@ class HeadlessPromptEngineeringService:
                 "model_label": badge["label"],
                 "model_family": badge["family"],
                 "model_group": badge["group"],
+                "model_variant": badge.get("variant", ""),
                 "description": str(data.get("description") or ""),
                 "pre_prompt_preview": str(module_settings.get("pre_prompt") or ""),
                 # 프리셋 검색이 볼 나머지 본문. prefix 만 실으면 postfix 에만 있는

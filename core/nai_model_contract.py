@@ -255,7 +255,7 @@ def nai_model_badge(model_key: Any, context: Any = None) -> dict[str, str]:
     if not key:
         # 모델을 안 적고 저장된 옛 프리셋. 숨기면 ALL 에만 보이고 다른 갈래에서
         # 사라져 "프리셋이 없어졌다" 가 된다 - ETC 에 넣어 어디서든 닿게 한다.
-        return {"key": "", "label": "", "family": "", "group": "etc"}
+        return {"key": "", "label": "", "family": "", "group": "etc", "variant": ""}
     # ⚠️ **여기서는 `resolve_*` 의 폴백을 쓰면 안 된다.** 모르는 키를 기본 모델
     # (NAID4.5F)로 되돌려 주므로, 옛 프리셋의 오타 하나가 화면에 `NAI4.5` 배지로
     # 둔갑한다 - 배지는 "저장된 것"을 보여야지 "대신 쓸 것"을 보이면 안 된다.
@@ -271,12 +271,28 @@ def nai_model_badge(model_key: Any, context: Any = None) -> dict[str, str]:
             except Exception:
                 spec = None
     if spec is None:
-        return {"key": key, "label": key, "family": "", "group": "etc"}
+        return {"key": key, "label": key, "family": "", "group": "etc", "variant": ""}
     family = str(spec.family or "")
     group = family if family in {"v5", "v4.5"} else "etc"
     # 사용자 등록 모델은 짧은 라벨이 없다 - 키를 그대로 쓴다.
     label = NAI_MODEL_SHORT_LABELS.get(key, key)
-    return {"key": key, "label": label, "family": family, "group": group}
+    return {"key": key, "label": label, "family": family, "group": group,
+            "variant": nai_model_variant(spec)}
+
+
+def nai_model_variant(spec: Any) -> str:
+    """Full / Curated 판정. 화면이 같은 세대 안에서 둘을 색으로 가른다.
+
+    ⚠️ **키나 짧은 라벨의 끝 글자로 자르지 않는다.** `NAID4.5` 처럼 접미사가 없는
+    키가 있고, 사용자 등록 모델은 이름을 마음대로 짓는다. 실제 구분은 API 모델
+    이름에 있다(`nai-diffusion-5-full` / `nai-diffusion-5-curated`).
+    """
+    api_model = str(getattr(spec, "api_model", "") or "").lower()
+    if "curated" in api_model:
+        return "curated"
+    if "full" in api_model:
+        return "full"
+    return ""
 
 
 def normalize_nai_model_key(value: Any) -> str:

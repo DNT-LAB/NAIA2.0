@@ -413,6 +413,9 @@ export function createPromptEngineeringPanel({
         const badgeAttrs = summary && summary.model_label ? [
           `data-model-label="${escHtml(summary.model_label)}"`,
           `data-model-family="${escHtml(summary.model_family || '')}"`,
+          // Full / Curated. 같은 세대 안에서 둘을 색 밝기로 가른다(사용자 지정
+          // 2026-08-21: F 는 지금 색, C 는 조금 더 밝게).
+          `data-model-variant="${escHtml(summary.model_variant || '')}"`,
         ].join(' ') : '';
         const groupAttr = summary ? ` data-model-group="${escHtml(summary.model_group || 'etc')}"` : '';
         return `<option value="${escHtml(preset)}"${preset === m.preset ? ' selected' : ''}${title ? ` title="${escHtml(title)}"` : ''}${groupAttr} ${previewAttrs} ${badgeAttrs}>${escHtml(preset)}</option>`;

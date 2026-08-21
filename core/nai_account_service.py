@@ -231,6 +231,29 @@ class NaiAccountService:
     def policy(self) -> str:
         return normalize_policy(self.load().get("load_balancing_policy"))
 
+    def all_account_ids(self, data: dict[str, Any] | None = None) -> list[str]:
+        data = data if data is not None else self.load()
+        return [MAIN_ACCOUNT_ID] + [str(a.get("id")) for a in data.get("accounts", [])
+                                    if a.get("id")]
+
+    def find_token_owner(self, token: str, *, exclude: str = "") -> str:
+        """이 토큰을 **이미** 갖고 있는 계정 id. 없으면 빈 문자열.
+
+        같은 토큰을 두 계정에 넣으면 계정 수만 늘고 한도는 그대로다 - 사용자는
+        두 배로 쓸 수 있다고 믿는데 실제로는 아니다. 게다가 패널 합계가 같은
+        계정을 두 번 세어 **없는 잔량을 있다고 표시한다**(실측: Anlas 19,896 인데
+        실제 9,948). 조용히 손해 보는 구성이라 입력 단계에서 걸러야 한다.
+        """
+        token = str(token or "").strip()
+        if not token:
+            return ""
+        for account_id in self.all_account_ids():
+            if account_id == exclude:
+                continue
+            if self._get_token(account_id) == token:
+                return account_id
+        return ""
+
     def snapshot(self) -> dict[str, Any]:
         """프런트가 그릴 수 있는 형태. **토큰 전문은 절대 넣지 않는다.**"""
         data = self.load()
@@ -253,6 +276,15 @@ class NaiAccountService:
                 "token_preview": token_preview(token),
                 "is_main": False,
             })
+        # 중복 표시. 입력 단계에서 막지만, **메인 토큰은 위쪽 '영구 토큰' 칸으로도
+        # 바뀌므로**(이 서비스를 안 거친다) 이미 겹쳐 있는 상태가 생길 수 있다.
+        # 그때는 막을 수 없으니 최소한 화면이 말해 줘야 한다.
+        seen: dict[str, str] = {}
+        for row in rows:
+            token = self._get_token(row["id"])
+            row["duplicate_of"] = seen.get(token, "") if token else ""
+            if token and token not in seen:
+                seen[token] = row["label"]
         active = [r for r in rows if r["enabled"] and r["has_token"]]
         return {
             "accounts": rows,

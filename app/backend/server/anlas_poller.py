@@ -151,7 +151,12 @@ def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
     if not rows:
         return {}
     out: dict[str, Any] = {}
-    with ThreadPoolExecutor(max_workers=min(len(rows), 8)) as pool:
+    # ⚠️ 동시 4개까지만. 계정 상한이 9라 그냥 두면 한 번에 8~9개 요청이 같은
+    # 엔드포인트로 몰린다. 429 를 맞으면 그 계정이 `usage_by_id` 에서 빠지고,
+    # 동적 할당은 **모르는 계정을 100% 로 본다** - 실제로는 소진된 계정에 생성을
+    # 보내 Anlas 를 태울 수 있다. 화면만 비는 게 아니라 돈이 걸린 문제라 아낀다.
+    # 9계정이어도 3파도면 끝나므로 체감 지연은 없다.
+    with ThreadPoolExecutor(max_workers=min(len(rows), 4)) as pool:
         futures = {pool.submit(api_verification.fetch_nai_subscription_summary, tok): aid
                    for aid, tok in rows}
         for future in as_completed(futures):

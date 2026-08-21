@@ -56,11 +56,26 @@ def _snapshot_payload(context: Any) -> dict[str, Any]:
 
 
 def _set_token(context: Any, account_id: str, token: str) -> dict[str, Any]:
-    """검증 -> 저장 -> 켜기. 검증에 실패하면 저장하지 않는다(위 주석의 이유)."""
+    """중복 확인 -> 검증 -> 저장 -> 켜기. 어느 단계든 실패하면 저장하지 않는다."""
+    service = NaiAccountService(context)
+
+    # ⚠️ 중복은 **검증보다 먼저** 막는다. 검증은 네트워크 왕복 10초까지 가는데,
+    # 어차피 거절할 입력에 그 시간을 쓸 이유가 없다.
+    #
+    # 같은 토큰을 두 계정에 넣으면 계정 수만 늘고 한도는 그대로다. 사용자는 두 배로
+    # 쓸 수 있다고 믿는데 아니고, 패널 합계가 같은 계정을 두 번 세어 **없는 잔량을
+    # 있다고 표시한다**(실측: Anlas 19,896 인데 실제 9,948). 조용한 손해라 막는다.
+    owner = service.find_token_owner(token, exclude=account_id)
+    if owner:
+        label = next((r["label"] for r in service.snapshot()["accounts"]
+                      if r["id"] == owner), owner)
+        return {"ok": False,
+                "message": f"이미 {label}에 등록된 토큰입니다. 같은 계정을 두 번 넣어도 "
+                           f"사용량 한도는 늘지 않습니다."}
+
     result = api_verification.verify_nai_token(token)
     if not result.success:
         return {"ok": False, "message": result.message}
-    service = NaiAccountService(context)
     saved = service.set_token(account_id, result.value or token)
     if not saved.get("ok"):
         return saved

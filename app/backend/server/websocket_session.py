@@ -18,6 +18,10 @@ from app.backend.server.api_control_commands import (
     API_CONTROL_COMMAND_TYPES,
     handle_api_control_command,
 )
+from app.backend.server.nai_account_commands import (
+    NAI_ACCOUNT_COMMAND_TYPES,
+    handle_nai_account_command,
+)
 from app.backend.server.autocomplete_commands import (
     AUTOCOMPLETE_COMMAND_TYPES,
     handle_autocomplete_command,
@@ -345,6 +349,15 @@ async def handle_json_command(
             client_host,
             command,
             run_in_thread=run_in_thread,
+        )
+    elif command_type in NAI_ACCOUNT_COMMAND_TYPES:
+        await handle_nai_account_command(
+            ws,
+            context,
+            client_host,
+            command,
+            run_in_thread=run_in_thread,
+            clients=clients,
         )
     elif command_type in AUTOCOMPLETE_COMMAND_TYPES:
         await handle_autocomplete_command(

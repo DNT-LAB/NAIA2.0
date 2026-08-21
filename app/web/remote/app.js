@@ -179,6 +179,7 @@ let comfyuiFreeWorkflowFileInput = null;
 let cloudflaredControls = null;
 let generationProgress = null;
 let setupController = null;
+let naiAccountPanel = null;
 window.__naiaSetupControllerReady = false;
 let promptDrawerControl = null;
 let eventPresetPanel = null;
@@ -1333,6 +1334,24 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026071
       confirmDialog: showConfirmDialog,
     });
     window.__naiaSetupControllerReady = true;
+    // 계정 패널은 설정 대화상자를 열 수 있어야 해서 setupController 뒤에 만든다.
+    return import('./js/features/naiAccountPanel.mjs?v=20260821-multitoken4')
+      .then(({createNaiAccountPanel}) => {
+        naiAccountPanel = createNaiAccountPanel({
+          document,
+          getWs: () => ws,
+          WebSocket,
+          showToast,
+          confirmDialog: showConfirmDialog,
+          openAccountSettings: () => {
+            if (!setupController) return;
+            setupController.openApiPopup();
+            setupController.switchSetupTab('nai');
+          },
+        });
+        naiAccountPanel.requestAccounts();
+      })
+      .catch(error => console.error('Failed to initialize NAI account panel', error));
   })
   .catch(error => {
     window.__naiaSetupControllerReady = false;
@@ -3075,6 +3094,10 @@ function onInitComplete() {
   if (currentModuleId !== 'wildcard') requestModuleState('wildcard');
   // Extensions 퀵 버튼(Tools/Fn)은 탭을 열지 않아도 부팅 직후 나타나야 한다.
   requestModuleState('extensions');
+  // 다중 계정 명부. 패널 생성 시점에는 소켓이 아직 안 열려 있을 수 있어(모듈은
+  // 비동기 import 라) 여기서 한 번 더 청한다 - 안 그러면 설정 화면의 계정 목록이
+  // '불러오는 중' 에서 영영 안 벗어난다.
+  if (naiAccountPanel) naiAccountPanel.requestAccounts();
   scheduleInitialHistoryRefresh();
   scheduleInitialStateRefresh();
   const cachedPe = moduleStateCache.get('prompt_engineering');
@@ -3273,6 +3296,8 @@ const wsMessageHandlers = {
   probe_result: onProbeResult,
   anlas_update: onAnlasUpdate,
   nai_usage_update: onNaiUsageUpdate,
+  nai_accounts: m => { if (naiAccountPanel) naiAccountPanel.onAccounts(m); },
+  nai_account_result: m => { if (naiAccountPanel) naiAccountPanel.onAccountResult(m); },
   module_state: onModuleState,
   hires_preset_overlay: _applyHiresOverlayResponse,
   prompt_engineering_preset_thumbnail_updated: onPromptEngineeringPresetThumbnailUpdated,
@@ -3345,6 +3370,9 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs')
         if (setupController) setupController.resetInitialProbe();
         setLauncherConn(true);
         scheduleInitialStateRefresh();
+        // 다중 계정 명부는 소켓이 열리는 이 시점이 가장 이르다. 모듈이 아직
+        // 안 만들어졌으면 모듈 쪽이 스스로 되묻는다(naiAccountPanel.requestAccounts).
+        if (naiAccountPanel) naiAccountPanel.requestAccounts();
         // probe 는 api_status 첫 수신 시점에 1회 실행 (updateApiStatus 내부에서 트리거).
       },
       onClose: () => {
@@ -6976,22 +7004,31 @@ function setLauncherConn(on) {
 //
 // ⚠️ `percent` 는 정수라 한 장 생성으로는 눈금이 안 움직인다. 값을 못 믿을 만큼
 // 세밀한 표시는 하지 않고, 회복까지 남은 시간만 툴팁에 얹는다.
+// 다중 계정이면 `percent` 는 **평균**으로 온다(사용자 명세: "통합 SUM -> AVG").
+// 계정별 값은 배지를 눌러 여는 팝오버가 그린다 - naiAccountPanel.mjs.
 function onNaiUsageUpdate(m) {
   const pill = $('naiUsagePill');
   const value = $('naiUsageValue');
+  if (naiAccountPanel) naiAccountPanel.onUsageUpdate(m);
   if (!pill || !value) return;
   if (!m || !m.available) { pill.classList.add('hidden'); return; }
   const pct = Number.isFinite(m.percent) ? m.percent : 0;
+  const accounts = Array.isArray(m.accounts) ? m.accounts : [];
+  const multi = accounts.length > 1;
   value.textContent = `${pct}%`;
   pill.classList.toggle('is-out', !!m.is_negative);
+  pill.classList.toggle('is-multi', multi);
   const secs = Number(m.seconds_until_next_percent) || 0;
   const mins = Math.round(secs / 60);
   const nextIn = secs > 0
     ? (mins >= 60 ? `${Math.floor(mins / 60)}시간 ${mins % 60}분` : `${mins}분`)
     : '';
-  pill.title = m.is_negative
+  const base = m.is_negative
     ? 'V5 무료 사용량 소진 — 이후 생성은 Anlas 를 씁니다'
     : `NovelAI Diffusion V5 Opus 사용량${nextIn ? ` · +1% 까지 ${nextIn}` : ''}`;
+  pill.title = multi
+    ? `${base}\n계정 ${accounts.length}개 평균 · 눌러서 계정별 보기`
+    : `${base}\n눌러서 계정 관리`;
   pill.classList.remove('hidden');
 }
 

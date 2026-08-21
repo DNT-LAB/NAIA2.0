@@ -573,73 +573,59 @@ class APIService:
 
 
     def _get_active_nai_token(self) -> str:
-        """
-        🆕 멀티 계정 지원: 라운드 로빈 모드에 따라 활성 NAI 토큰을 반환합니다.
+        """멀티 계정(Multi Token): 이번 생성에 쓸 NAI 토큰 하나.
 
-        Returns:
-            str: 활성 NAI 토큰 (메인 또는 추가 계정)
+        선택 규칙은 `core.nai_account_balancer` 가 갖고 있다(라운드 로빈 / 라운드
+        로빈-10 / 동적 할당 / 동적 할당-10). 여기서는 재료만 모아 넘긴다.
+
+        ⚠️ **이 함수는 네트워크를 타지 않는다.** 동적 할당이 보는 계정별 사용량은
+        서버 폴러가 채워 둔 캐시에서만 읽는다. 여기서 조회하면 생성 한 장마다 구독
+        API 를 계정 수만큼 때리게 되고(실측 최악 8초), 그만큼 생성이 늦어진다.
+        캐시가 비어 있으면 '모른다' 로 넘어가 라운드 로빈처럼 돈다 - 안전한 쪽이다.
+
+        어떤 이유로든 실패하면 **메인 토큰으로 떨어진다.** 계정 고르기가 생성을
+        막는 일은 없어야 한다.
         """
+        main_token = ""
         try:
-            import json
-            from pathlib import Path
+            main_token = self.app_context.secure_token_manager.get_token('nai_token') or ""
+        except Exception:
+            main_token = ""
 
-            # save/nai_accounts.json 로드
-            accounts_file = self._save_file_path("nai_accounts.json")
+        try:
+            from core.nai_account_balancer import select_account
+            from core.nai_account_service import NaiAccountService, cached_account_usage
 
-            if not accounts_file.exists():
-                # 계정 파일이 없으면 메인 토큰 반환
-                main_token = self.app_context.secure_token_manager.get_token('nai_token')
+            service = NaiAccountService(self.app_context)
+            active = service.active_accounts()
+            if not active:
                 return main_token
 
-            with open(accounts_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            tokens_by_id = dict(active)
+            if len(active) == 1:
+                return active[0][1]
 
-            accounts = data.get('accounts', [])
-            round_robin_enabled = data.get('round_robin_enabled', False)
-            main_account_enabled = data.get('main_account_enabled', True)  # 🆕 메인 계정 활성화 여부
+            policy = service.policy()
+            counter = self.app_context.image_crud_controller.get_counter()
+            usage_by_id = cached_account_usage(self.app_context)
+            selected_id = select_account(
+                [account_id for account_id, _ in active],
+                policy=policy,
+                counter=counter,
+                usage_by_id=usage_by_id,
+            )
+            token = tokens_by_id.get(selected_id, "")
+            if not token:
+                # 정책이 목록 밖의 id 를 돌려줄 일은 없지만, 그렇게 되면 토큰 없이
+                # 생성을 시도하다 인증 오류가 난다. 첫 계정으로 눕힌다.
+                return active[0][1]
+            print(f"[multi-token] policy={policy} counter={counter} "
+                  f"picked={selected_id} of {len(active)}", flush=True)
+            return token
 
-            # 활성화된 계정 목록 생성 (메인 + 추가 계정)
-            active_tokens = []
-
-            # 1. 메인 토큰 추가 (활성화된 경우만)
-            main_token = self.app_context.secure_token_manager.get_token('nai_token')
-            if main_token and main_account_enabled:
-                active_tokens.append(('nai_token', main_token))
-
-            # 2. 활성화된 추가 계정 추가
-            for account in accounts:
-                if account.get('enabled', False):
-                    account_id = account.get('id')
-                    token = self.app_context.secure_token_manager.get_token(account_id)
-                    if token:
-                        active_tokens.append((account_id, token))
-
-            # 활성화된 토큰이 없으면 메인 토큰 반환
-            if not active_tokens:
-                return main_token if main_token else ""
-
-            # 라운드 로빈 모드 확인
-            if round_robin_enabled and len(active_tokens) > 1:
-                # 카운터 기반 라운드 로빈
-                counter = self.app_context.image_crud_controller.get_counter()
-                index = counter % len(active_tokens)
-
-                selected_id, selected_token = active_tokens[index]
-                print(f"🔄 [Round-Robin] 카운터: {counter}, 계정 인덱스: {index}/{len(active_tokens)}, 선택된 계정: {selected_id}")
-
-                return selected_token
-            else:
-                # 라운드 로빈 비활성화: 첫 번째 활성 토큰 사용
-                first_id, first_token = active_tokens[0]
-                print(f"✅ [Single Account] 선택된 계정: {first_id}")
-
-                return first_token
-
-        except Exception as e:
-            print(f"⚠️ 멀티 계정 토큰 선택 오류: {e}. 메인 토큰으로 폴백합니다.")
-            # 에러 발생 시 메인 토큰으로 폴백
-            main_token = self.app_context.secure_token_manager.get_token('nai_token')
-            return main_token if main_token else ""
+        except Exception as exc:  # noqa: BLE001 - 계정 선택 실패가 생성을 막으면 안 된다
+            print(f"[warn] multi-token account select failed: {exc}", flush=True)
+            return main_token
 
     @staticmethod
     def _nai_request_body_kwargs(payload: Dict[str, Any], multipart: bool) -> Dict[str, Any]:

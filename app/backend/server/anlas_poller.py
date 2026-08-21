@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
@@ -128,13 +129,77 @@ def build_nai_usage_payload(context: Any) -> dict[str, Any]:
     }
 
 
+# ---- 계정별 사용량 (Multi Token) --------------------------------------------
+#
+# 배지는 **평균**을 보여 주고(사용자 명세: "통합 (SUM -> AVG)"), 패널은 계정마다
+# 막대를 그린다. 그러려면 계정 수만큼 구독 조회가 필요하다.
+#
+# ⚠️ 그래서 이 조회는 **활성 계정이 2개 이상이고 V5 를 고른 동안에만** 한다.
+# 계정이 하나면 아래 메인 조회 한 번으로 이미 끝난 이야기다.
+
+
+def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
+    """메인을 뺀 나머지 계정의 사용량을 **동시에** 조회한다.
+
+    순차로 돌리면 계정 수 x 5초가 그대로 지연이 된다(최대 9계정 = 45초). 어차피
+    스레드에서 도는 blocking 함수라 풀 하나면 충분하다.
+    """
+    if not rows:
+        return {}
+    out: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=min(len(rows), 8)) as pool:
+        futures = {pool.submit(api_verification.fetch_nai_usage_limit, tok): aid
+                   for aid, tok in rows}
+        for future in as_completed(futures):
+            account_id = futures[future]
+            try:
+                usage = future.result()
+            except Exception as exc:  # pragma: no cover - 네트워크/응답 오류
+                print(f"[warn] account usage fetch failed for {account_id}: {exc}")
+                usage = None
+            if usage:
+                out[account_id] = {
+                    "percent": int(usage.get("percent", 0)),
+                    "is_negative": bool(usage.get("is_negative", False)),
+                }
+    return out
+
+
+def _account_rows(context: Any, usage_by_id: dict[str, Any]) -> list[dict[str, Any]]:
+    """패널이 그릴 계정 행. **토큰 전문은 넣지 않는다**(앞 7자 미리보기만)."""
+    from core.nai_account_service import NaiAccountService
+
+    service = NaiAccountService(context)
+    rows = []
+    for row in service.snapshot()["accounts"]:
+        if not (row["enabled"] and row["has_token"]):
+            continue
+        usage = usage_by_id.get(row["id"])
+        rows.append({
+            "id": row["id"],
+            "label": row["label"],
+            "token_preview": row["token_preview"],
+            "available": isinstance(usage, dict),
+            "percent": int(usage.get("percent", 0)) if isinstance(usage, dict) else 0,
+            "is_negative": bool(usage.get("is_negative")) if isinstance(usage, dict) else False,
+        })
+    return rows
+
+
+def _cache_account_usage(context: Any, usage_by_id: dict[str, Any]) -> None:
+    """생성 경로가 읽어 갈 자리에 놓는다(`core.nai_account_service` 계약).
+
+    **빈 dict 는 캐시하지 않는다.** 그러면 '모른다' 가 '전부 100%' 로 보일 일이
+    없다 - balancer 쪽에서 모르는 값은 어차피 미소진으로 처리한다.
+    """
+    if usage_by_id:
+        context.headless_account_usage_cache = (time.monotonic(), usage_by_id)
+
+
 def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
-    """Anlas + V5 사용량을 **구독 조회 1회**로 만들어 둘 다 돌려준다."""
+    """Anlas + V5 사용량을 **구독 조회 1회**(+ 추가 계정분)로 만들어 둘 다 돌려준다."""
     anlas_off = _unavailable_payload()
-    usage_off = {
-        "type": "nai_usage_update", "available": False, "percent": 0,
-        "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
-    }
+    usage_off = _usage_hidden_payload()
     mode = str(context.get_api_mode() or "").upper()
     try:
         token = str(context.secure_token_manager.get_token("nai_token") or "").strip()
@@ -167,7 +232,49 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
             "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
             "fetched_at": now,
         }
+        _attach_accounts(context, usage_payload, usage)
     return [anlas_payload, usage_payload]
+
+
+def _attach_accounts(context: Any, usage_payload: dict[str, Any],
+                     main_usage: dict[str, Any]) -> None:
+    """다중 계정이면 계정별 사용량을 붙이고 배지 값을 **평균**으로 바꾼다.
+
+    계정이 하나뿐이면 아무것도 하지 않는다 - 요청도 안 나가고, 배지는 지금까지와
+    똑같이 그 계정의 값을 보여 준다.
+    """
+    from core.nai_account_balancer import average_percent
+    from core.nai_account_service import MAIN_ACCOUNT_ID, NaiAccountService
+
+    try:
+        service = NaiAccountService(context)
+        active = service.active_accounts()
+        if len(active) < 2:
+            return
+
+        usage_by_id: dict[str, Any] = {}
+        if any(account_id == MAIN_ACCOUNT_ID for account_id, _ in active):
+            usage_by_id[MAIN_ACCOUNT_ID] = {
+                "percent": int(main_usage.get("percent", 0)),
+                "is_negative": bool(main_usage.get("is_negative", False)),
+            }
+        extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
+        usage_by_id.update(_fetch_extra_account_usage(extras))
+        _cache_account_usage(context, usage_by_id)
+
+        snapshot = service.snapshot()
+        usage_payload["accounts"] = _account_rows(context, usage_by_id)
+        usage_payload["policy"] = snapshot["policy"]
+        usage_payload["balancing_effective"] = snapshot["balancing_effective"]
+        # 배지는 합이 아니라 **평균**이다(사용자 명세). 못 받은 계정은 평균에서 뺀다.
+        avg = average_percent(usage_by_id, [a for a, _ in active])
+        if avg is not None:
+            usage_payload["percent"] = avg
+        usage_payload["is_negative"] = all(
+            bool(u.get("is_negative")) for u in usage_by_id.values()
+        ) if usage_by_id else False
+    except Exception as exc:  # noqa: BLE001 - 배지 하나 때문에 세션이 죽으면 안 된다
+        print(f"[warn] multi-token usage attach failed: {exc}")
 
 
 async def broadcast_anlas_and_usage(context: Any, clients: set) -> None:
@@ -221,9 +328,12 @@ def _cached_pair(context: Any) -> tuple[dict[str, Any], dict[str, Any]] | None:
 
 
 def _usage_hidden_payload() -> dict[str, Any]:
+    # `accounts` 를 빈 목록으로 같이 보낸다 - 배지가 숨어도 열려 있던 패널이
+    # 옛 계정 막대를 그대로 들고 있으면 안 된다.
     return {
         "type": "nai_usage_update", "available": False, "percent": 0,
         "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
+        "accounts": [], "balancing_effective": False,
     }
 
 

@@ -15,11 +15,19 @@
         {"id": "nai_token_1", "label": "계정2", "enabled": false, "last_verified": null}
       ],
       "round_robin_enabled": false,
-      "main_account_enabled": true
+      "main_account_enabled": true,
+      "load_balancing_policy": "round_robin"     // 신규 (아래 참조)
     }
 
 토큰 값 자체는 이 파일에 넣지 않는다. `secure_token_manager` 에 **계정 id 를 키로**
 암호화 저장한다(메인 계정 키는 `nai_token`). 파일에는 앞 7자 미리보기만 만들어 준다.
+
+`round_robin_enabled` 는 이제 **파생값**이다
+--------------------------------------------
+레거시 UI 에서는 이게 "번갈아 쓸까 말까" 토글이었다. 새 명세(2026-08-21)의 라디오는
+정책 4종뿐이고 '끄기' 가 없다 - 한 계정만 쓰고 싶으면 나머지를 **비활성**하면 된다.
+그래서 이 키는 `저장할 때마다 활성 계정 2개 이상인가` 로 다시 계산해 써 둔다.
+사람이 고르는 값이 아니라, 이 파일을 읽는 옛 코드가 오해하지 않게 두는 흔적이다.
 
 ⚠️ 파일 경로는 반드시 `runtime_paths.save_dir` 를 쓴다. `APIService._save_file_path`
 와 같은 자리를 가리켜야 하며, 저장소 트리에 쓰면 안 된다(런타임 쓰기 정책).
@@ -31,6 +39,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.nai_account_balancer import DEFAULT_POLICY, normalize_policy
+
 ACCOUNTS_FILENAME = "nai_accounts.json"
 MAIN_ACCOUNT_ID = "nai_token"
 MAIN_ACCOUNT_LABEL = "메인 계정"
@@ -41,7 +51,12 @@ MAX_ACCOUNTS = 9
 
 
 def _default_data() -> dict[str, Any]:
-    return {"accounts": [], "round_robin_enabled": False, "main_account_enabled": True}
+    return {
+        "accounts": [],
+        "round_robin_enabled": False,
+        "main_account_enabled": True,
+        "load_balancing_policy": DEFAULT_POLICY,
+    }
 
 
 def account_label(account_id: str) -> str:
@@ -62,6 +77,23 @@ def token_preview(token: str | None) -> str:
     """앞 7자만. 토큰 전문은 어떤 경로로도 프런트에 보내지 않는다."""
     t = str(token or "")
     return t[:7] if t else ""
+
+
+# 계정별 V5 사용량 캐시가 앉는 자리. 채우는 쪽은 서버의 구독 폴러이고,
+# 읽는 쪽은 **생성 경로**다.
+#
+# ⚠️ 생성 경로는 계정을 고르려고 네트워크를 타면 안 된다 - 매 장마다 구독 API 를
+# 때리게 되고, 그 조회는 실측 8초까지 걸린다. 그래서 "있으면 쓰고 없으면 모른다"
+# 로 둔다. 모르면 balancer 가 전부 미소진·동률로 보고 라운드 로빈으로 눕는다.
+ACCOUNT_USAGE_CACHE_ATTR = "headless_account_usage_cache"
+
+
+def cached_account_usage(context: Any) -> dict[str, Any]:
+    """폴러가 채워 둔 `{계정 id: {"percent":int,"is_negative":bool}}`. 없으면 `{}`."""
+    cached = getattr(context, ACCOUNT_USAGE_CACHE_ATTR, None)
+    if isinstance(cached, tuple) and len(cached) == 2 and isinstance(cached[1], dict):
+        return cached[1]
+    return {}
 
 
 class NaiAccountService:
@@ -95,9 +127,13 @@ class NaiAccountService:
         # 옛 파일에는 이 키가 없다. 없으면 메인을 켜 둔 것으로 본다 - 끄면 토큰이
         # 하나도 안 남아 생성이 통째로 막힌다.
         base["main_account_enabled"] = bool(data.get("main_account_enabled", True))
+        base["load_balancing_policy"] = normalize_policy(data.get("load_balancing_policy"))
         return base
 
     def save(self, data: dict[str, Any]) -> None:
+        # 레거시 파생값을 여기서 한 번에 맞춘다 - 각 변경 메서드가 따로 챙기면
+        # 언젠가 한 곳이 빠진다.
+        data["round_robin_enabled"] = len(self._active_rows(data)) >= 2
         path = self._path()
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
@@ -122,6 +158,32 @@ class NaiAccountService:
             print(f"[warn] token delete failed for {account_id}: {exc}", flush=True)
 
     # ---- 조회 ----------------------------------------------------------
+
+    def _active_rows(self, data: dict[str, Any]) -> list[tuple[str, str]]:
+        """생성에 실제로 쓸 수 있는 `(계정 id, 토큰)` 목록.
+
+        **순서가 계약이다** - 메인 먼저, 그 다음 파일에 적힌 순서. 레거시 리더가
+        쓰던 순서 그대로여야 라운드 로빈이 사용자가 보던 것과 같이 돈다.
+        """
+        rows: list[tuple[str, str]] = []
+        main_token = self._get_token(MAIN_ACCOUNT_ID)
+        if main_token and data.get("main_account_enabled", True):
+            rows.append((MAIN_ACCOUNT_ID, main_token))
+        for acc in data.get("accounts", []):
+            if not acc.get("enabled"):
+                continue
+            account_id = str(acc.get("id") or "")
+            token = self._get_token(account_id)
+            if account_id and token:
+                rows.append((account_id, token))
+        return rows
+
+    def active_accounts(self) -> list[tuple[str, str]]:
+        """생성 경로와 사용량 조회가 함께 쓰는 활성 계정 목록."""
+        return self._active_rows(self.load())
+
+    def policy(self) -> str:
+        return normalize_policy(self.load().get("load_balancing_policy"))
 
     def snapshot(self) -> dict[str, Any]:
         """프런트가 그릴 수 있는 형태. **토큰 전문은 절대 넣지 않는다.**"""
@@ -148,8 +210,11 @@ class NaiAccountService:
         active = [r for r in rows if r["enabled"] and r["has_token"]]
         return {
             "accounts": rows,
-            "round_robin_enabled": bool(data["round_robin_enabled"]),
+            "policy": normalize_policy(data.get("load_balancing_policy")),
             "active_count": len(active),
+            # 활성 계정이 2개 미만이면 정책이 아무 일도 안 한다. 프런트가 라디오를
+            # 흐리게 만들어 "골랐는데 안 바뀐다" 를 없앤다.
+            "balancing_effective": len(active) >= 2,
             "can_add": len(data["accounts"]) < MAX_ACCOUNTS,
             "max_accounts": MAX_ACCOUNTS,
         }
@@ -219,8 +284,9 @@ class NaiAccountService:
         self._set_token(account_id, token)
         return {"ok": True, "token_preview": token_preview(token)}
 
-    def set_round_robin(self, enabled: bool) -> dict[str, Any]:
+    def set_policy(self, policy: str) -> dict[str, Any]:
+        """부하 분산 정책 선택. 모르는 값은 기본(라운드 로빈)으로 눕힌다."""
         data = self.load()
-        data["round_robin_enabled"] = bool(enabled)
+        data["load_balancing_policy"] = normalize_policy(policy)
         self.save(data)
-        return {"ok": True}
+        return {"ok": True, "policy": data["load_balancing_policy"]}

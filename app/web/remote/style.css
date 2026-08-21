@@ -7291,6 +7291,11 @@ body.resizing-result-info {
   .nai-usage-pill {
     top: 42px;
   }
+  /* 배지가 내려가면 그 아래 붙는 팝오버도 같이 내려가야 앵커가 안 어긋난다. */
+  .nai-acct-pop {
+    top: 74px;
+    width: min(288px, calc(100vw - 24px));
+  }
   .viewer-content {
     position: relative;
   }
@@ -18421,10 +18426,142 @@ select.setup-input { cursor: pointer; }
   -webkit-backdrop-filter: blur(8px);
   font-family: var(--font-mono);
   border: 1px solid rgba(255,255,255,0.06);
-  pointer-events: none;
+  /* 배지는 **버튼이다** — 누르면 다중 계정 팝오버가 열린다(2026-08-21).
+     예전에는 표시 전용이라 `pointer-events: none` 이었다. */
+  cursor: pointer;
   user-select: none;
 }
+.nai-usage-pill:hover { border-color: rgba(255,255,255,0.18); }
+.nai-usage-pill:focus-visible { outline: 2px solid var(--accent, #6f8cff); outline-offset: 2px; }
+/* 다중 계정일 때 값이 평균임을 눈으로 구분 — 라벨 옆 점. */
+.nai-usage-pill.is-multi .nai-usage-label::after {
+  content: '••'; margin-left: 4px; letter-spacing: -1px; color: #6f8cff;
+}
 .nai-usage-pill.hidden { display: none; }
+
+/* ---- 다중 계정(Multi Token) 팝오버 ---------------------------------------
+   배지 바로 아래에 붙는다. 배지와 같은 컨테이너(.viewer-content)에 있어야
+   앵커가 어긋나지 않는다. */
+.nai-acct-pop {
+  position: absolute;
+  top: 42px; right: 10px;
+  z-index: 24;                     /* 배지(15)보다 위 */
+  width: 288px;
+  max-height: calc(100% - 60px);
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(18,18,26,0.97);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  font-family: var(--font-mono);
+  color: #d8d8e8;
+}
+.nai-acct-pop.hidden { display: none; }
+.nai-acct-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 8px; margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.nai-acct-title {
+  font-size: 10px; letter-spacing: 0.10em; color: #8a8aa0;
+}
+.nai-acct-total { font-size: 13px; font-weight: 700; }
+.nai-acct-rows { display: flex; flex-direction: column; gap: 6px; }
+.nai-acct-row { display: flex; align-items: center; gap: 8px; }
+.nai-acct-name {
+  flex: 0 0 62px; font-size: 11px; color: #b6b6cc;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nai-acct-bar {
+  flex: 1 1 auto; height: 8px; border-radius: 4px;
+  background: rgba(255,255,255,0.08); overflow: hidden;
+}
+.nai-acct-bar > i {
+  display: block; height: 100%; border-radius: 4px;
+  background: linear-gradient(90deg, #6f8cff, #9d7bff);
+}
+.nai-acct-bar.is-out > i { background: #ff6060; }
+.nai-acct-pct {
+  flex: 0 0 34px; text-align: right;
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.nai-acct-empty, .nai-acct-note {
+  font-size: 11px; color: #7c7c92; padding: 4px 0;
+}
+.nai-acct-manage {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; margin: 10px 0 4px;
+  padding: 7px; border-radius: 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: #cdd2ff; font-family: inherit; font-size: 11px; cursor: pointer;
+}
+.nai-acct-manage:hover { background: rgba(255,255,255,0.09); }
+.nai-acct-sec {
+  margin: 10px 0 6px; padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  font-size: 10px; letter-spacing: 0.10em; color: #8a8aa0;
+}
+.nai-acct-policies { display: flex; flex-direction: column; gap: 2px; }
+.nai-acct-policy {
+  display: flex; align-items: flex-start; gap: 7px; width: 100%;
+  padding: 6px; border-radius: 8px;
+  background: none; border: 1px solid transparent;
+  color: #c3c3d6; font-family: inherit; text-align: left; cursor: pointer;
+}
+.nai-acct-policy:hover { background: rgba(255,255,255,0.05); }
+.nai-acct-policy.on { border-color: rgba(111,140,255,0.45); background: rgba(111,140,255,0.10); }
+/* 활성 계정이 1개면 정책이 아무 일도 안 한다 — 흐리게 두되 누를 수는 있게 한다
+   (계정을 켜기 전에 미리 골라 둘 수 있다). */
+.nai-acct-policy.is-idle { opacity: 0.55; }
+.nai-acct-radio { flex: 0 0 auto; font-size: 10px; line-height: 1.5; color: #6f8cff; }
+.nai-acct-policy-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nai-acct-policy-text b { font-size: 11px; font-weight: 700; }
+.nai-acct-policy-text em {
+  font-style: normal; font-size: 10px; line-height: 1.45; color: #83839b;
+}
+
+/* ---- 설정 대화상자의 계정 관리 ------------------------------------------ */
+.setup-accounts {
+  margin-top: 16px; padding-top: 14px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+.setup-accounts.is-busy { opacity: 0.6; pointer-events: none; }
+.setup-accounts-hint {
+  font-size: 11px; line-height: 1.5; color: #7c7c92; margin: 2px 0 10px;
+}
+.setup-accounts-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.setup-account {
+  padding: 9px 10px; border-radius: 9px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.setup-account-top {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 7px;
+}
+.setup-account-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; cursor: pointer; flex: 1 1 auto; min-width: 0;
+}
+.setup-account-toggle input[disabled] { cursor: not-allowed; }
+.setup-account-preview {
+  font-family: var(--font-mono); font-size: 11px; color: #8a8aa0;
+}
+.setup-account-del {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px;
+  background: none; border: 1px solid rgba(255,255,255,0.12);
+  color: #b06060; cursor: pointer; line-height: 1;
+}
+.setup-account-del:hover { background: rgba(255,96,96,0.14); color: #ff8080; }
+.setup-account-row { display: flex; gap: 6px; }
+.setup-account-row .setup-input { flex: 1 1 auto; min-width: 0; }
+.setup-account-save { flex: 0 0 auto; white-space: nowrap; }
+.setup-account-note { font-size: 11px; color: #7c7c92; }
+.setup-account-note b { color: #a6a6c0; font-weight: 600; }
+.setup-account-empty { font-size: 11px; color: #7c7c92; }
 .nai-usage-label {
   font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
   color: #8a8aa0;

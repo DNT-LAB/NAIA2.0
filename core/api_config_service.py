@@ -271,6 +271,17 @@ class ApiConfigService:
             return False, "Cloudflared 제어는 로컬(127.0.0.1) 접속에서만 가능합니다."
         return True, ""
 
+    def account_gate(self, client_host: str) -> tuple[bool, str]:
+        """다중 계정(Multi Token)의 **켬/끔·정책** 변경 게이트.
+
+        `setup_gate` 와 달리 터널이 떠 있어도 통과시킨다 - 이건 자격 증명이 아니라
+        생성 설정이고, LAN 링크를 켠 채로도 바꿀 수 있어야 한다. 토큰을 넣거나
+        계정을 더하고 지우는 쪽은 그대로 `setup_gate` 를 쓴다.
+        """
+        if not self._is_loopback_host(client_host):
+            return False, "계정 설정 변경은 로컬(127.0.0.1) 접속에서만 가능합니다."
+        return True, ""
+
     def probe(self) -> dict[str, bool | None]:
         checks = (
             ("NAI", "nai_token", self._verify_nai_token),

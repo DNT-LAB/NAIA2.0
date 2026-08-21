@@ -924,6 +924,9 @@ class WebSessionContext:
     def cloudflared_gate(self, client_host: str) -> tuple[bool, str]:
         return self._api_control_service().cloudflared_gate(client_host)
 
+    def account_gate(self, client_host: str) -> tuple[bool, str]:
+        return self.api_config_service.account_gate(client_host)
+
     def verify_api(self, mode: str, value: str) -> dict[str, Any]:
         return self._api_control_service().verify_api(mode, value)
 

@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20260821-presetfilter">
+<link rel="stylesheet" href="style.css?v=20260821-multitoken">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -120,6 +120,13 @@
           <div class="setup-actions">
             <button class="setup-btn-primary" id="setupBtnVerifyNai" onclick="verifyNai()">확인 후 저장</button>
             <button class="setup-btn-ghost" id="setupBtnClearNai" onclick="clearApi('NAI')" disabled>연결 해제</button>
+          </div>
+          <!-- 다중 계정(Multi Token). 목록/행은 js/features/naiAccountPanel.mjs 가 그린다. -->
+          <div class="setup-accounts" id="setupAccounts">
+            <div class="setup-field-label">다중 계정 (Multi Token)</div>
+            <div class="setup-accounts-hint">여러 NovelAI 계정을 번갈아 써서 생성합니다. 분배 방식은 결과 화면의 USAGE 배지를 눌러 고릅니다.</div>
+            <div class="setup-accounts-list" id="setupAccountsList"></div>
+            <button class="setup-btn-ghost" id="setupAccountAdd" type="button">＋ 계정 추가</button>
           </div>
           <div class="setup-result" id="setupResultNai"></div>
         </div>
@@ -806,6 +813,10 @@
           <!-- V5 Opus 사용량 한도. Anlas 와 다른 풀이라 pill 을 따로 둔다 —
                V5 를 고른 동안에만 뜬다(사용자 지정 2026-08-19). -->
           <div class="nai-usage-pill hidden" id="naiUsagePill" title="NovelAI Diffusion V5 Opus usage limit"><span class="nai-usage-label">Usage</span><span class="nai-usage-value" id="naiUsageValue">--</span></div>
+          <!-- 배지를 누르면 열리는 다중 계정(Multi Token) 팝오버. 내용은
+               js/features/naiAccountPanel.mjs 가 그린다. 배지와 **같은 컨테이너**에
+               둬야 앵커가 어긋나지 않는다. -->
+          <div class="nai-acct-pop hidden" id="naiAcctPop" role="dialog" aria-label="NAI 계정 사용량"></div>
           <div class="result-unsaved-actions" id="resultUnsavedActions" hidden>
             <button type="button" class="result-unsaved-btn save" id="resultUnsavedSaveBtn" onclick="saveDisplayedHistoryImage()"><span>저장</span></button>
             <button type="button" class="result-unsaved-btn delete" id="resultUnsavedDeleteBtn" onclick="deleteDisplayedHistoryImage()"><span>삭제</span></button>
@@ -1259,6 +1270,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20260821-presetfilter"></script>
+<script src="app.js?v=20260821-multitoken"></script>
 </body>
 </html>

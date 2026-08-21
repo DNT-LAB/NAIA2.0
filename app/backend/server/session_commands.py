@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import WebSocket
 
-from app.backend.server.anlas_poller import broadcast_anlas_and_usage
+from app.backend.server.anlas_poller import schedule_subscription_refresh
 from core.web_session_context import WebSessionContext
 
 
@@ -176,11 +176,12 @@ async def handle_session_command(
             )
         if not recommended_applied:
             await broadcast_json(clients, context.generation_param_schema_payload())
-        # 모델을 바꾼 순간 사용량 한도를 1회 조회한다(폴링하지 않는다). V5 가 아니면
-        # available=False 가 가서 배지가 걷힌다. Anlas 와 **한 요청**으로 받는다 -
-        # 따로 부르면 이 API 의 산발적 read timeout 에 한쪽만 걸린다(실측).
+        # 모델이 바뀌면 사용량 배지를 갱신한다. **절대 여기서 기다리지 않는다** -
+        # 프리셋 적용이 이 경로를 타는데, await 하면 조회가 끝날 때까지 이 세션이
+        # 다음 메시지를 못 받아 백엔드가 죽은 것처럼 보인다(사용자 지적 2026-08-21:
+        # 프리셋 연타 -> 랜덤 버튼 무반응 -> 밀린 쓰기가 앞 프리셋 값을 덮어씀).
         if key.strip() == "model":
-            await broadcast_anlas_and_usage(context, clients)
+            schedule_subscription_refresh(context, clients)
         return True
     return False
 
@@ -289,4 +290,5 @@ async def _handle_set_mode(
     # 모드 전환 시 Anlas pill 갱신: NAI 진입 시 다시 표시, 비-NAI 진입 시 숨김.
     # (없으면 한 번 숨겨진 pill이 5분 폴링/재연결 전까지 NAI 복귀해도 안 나타남)
     # V5 사용량 배지도 같은 요청으로 함께 갱신한다(둘로 나누면 한쪽만 실패한다).
-    await broadcast_anlas_and_usage(context, clients)
+    # 모드 전환도 사용자 조작이라 기다리게 하지 않는다.
+    schedule_subscription_refresh(context, clients)

@@ -11,8 +11,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) WS-command 계측
 
 from app.backend.server.anlas_poller import (
-    broadcast_anlas_and_usage,
     ensure_anlas_poller,
+    schedule_subscription_refresh,
 )
 from app.backend.server.api_control_commands import (
     API_CONTROL_COMMAND_TYPES,
@@ -180,7 +180,10 @@ def register_websocket_session(
             # 그 뒤로는 모델/모드가 바뀔 때만 조회한다(사용자 지정 2026-08-19).
             # Anlas 와 **같은 요청 하나**로 받는다 - 따로 부르면 이 API 의 산발적
             # read timeout 때문에 한쪽만 실패한다(실측: Anlas 는 떴는데 배지만 없음).
-            await broadcast_anlas_and_usage(context, clients)
+            #
+            # 여기서도 기다리지 않는다 - 기다리면 아래 수신 루프 진입이 늦어져
+            # 접속 직후 사용자가 누른 것들이 최대 16초 동안 먹히지 않는다.
+            schedule_subscription_refresh(context, clients)
             while True:
                 data = await ws.receive_text()
                 if data.startswith("{"):

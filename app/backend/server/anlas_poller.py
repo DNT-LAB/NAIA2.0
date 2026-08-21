@@ -13,6 +13,7 @@ sentinel은 쓰지 않고 `fixedTrainingStepsLeft + purchasedTrainingSteps` 숫�
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime
 from typing import Any
 
@@ -170,12 +171,106 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
 
 
 async def broadcast_anlas_and_usage(context: Any, clients: set) -> None:
-    """세션 시작 · 모델/모드 변경 시 쓰는 경로. 요청 1회로 두 배지를 갱신한다."""
+    """세션 시작 · 모델/모드 변경 시 쓰는 경로. 요청 1회로 두 배지를 갱신한다.
+
+    ⚠️ **커맨드 처리 경로에서 이걸 직접 await 하지 마라.** 아래
+    `schedule_subscription_refresh()` 를 써야 한다 — 이유는 그쪽 주석 참조.
+    """
     if not clients:
         return
     payloads = await asyncio.to_thread(_build_both_payloads, context)
     for payload in payloads:
         await broadcast_json(clients, payload)
+    _cache_usage_payload(context, payloads[1] if len(payloads) > 1 else None)
+
+
+# ---- 비차단 갱신 ------------------------------------------------------------
+#
+# 배지 하나 때문에 세션을 멈추면 안 된다(사용자 지적 2026-08-21).
+#
+# 사고 경위: `set_param(model)` 핸들러가 구독 조회를 **await** 했다. 그 await 동안
+# 그 세션의 `while True: await ws.receive_text()` 루프가 다음 메시지를 못 받는다.
+# 조회는 타임아웃 8초 x 재시도 2회 = 최악 **16초**. 그래서 프리셋을 연달아 바꾸면
+# 백엔드가 죽은 것처럼 보이고(랜덤 버튼 무반응), 밀려 있던 프리셋 쓰기가 뒤늦게
+# 도착해 **앞 프리셋 값이 뒤 프리셋에 덮어씌워졌다**.
+#
+# 프리셋 적용은 모델 파라미터를 건드리므로 이 경로를 그대로 탄다.
+
+_USAGE_CACHE_TTL_SECONDS = 60
+
+
+def _cache_usage_payload(context: Any, payload: dict[str, Any] | None) -> None:
+    if isinstance(payload, dict) and payload.get("available"):
+        context.headless_usage_cache = (time.monotonic(), payload)
+
+
+def _cached_usage_payload(context: Any) -> dict[str, Any] | None:
+    cached = getattr(context, "headless_usage_cache", None)
+    if not cached:
+        return None
+    stamped, payload = cached
+    if time.monotonic() - stamped > _USAGE_CACHE_TTL_SECONDS:
+        return None
+    return payload
+
+
+def _usage_hidden_payload() -> dict[str, Any]:
+    return {
+        "type": "nai_usage_update", "available": False, "percent": 0,
+        "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
+    }
+
+
+def schedule_subscription_refresh(context: Any, clients: set) -> None:
+    """구독 조회를 **기다리지 않고** 예약한다. 호출자는 절대 막히지 않는다.
+
+    네트워크를 타지 않고 끝나는 경우가 대부분이다:
+      - V5 가 아니다        -> 숨김 페이로드만 즉시 보낸다(조회 불필요)
+      - 방금 받아 둔 값이 있다 -> 캐시(60초)를 그대로 다시 보낸다
+    프리셋을 바꿔도 모델이 V5 안에서만 오가면 사용량 값은 그대로이므로,
+    이 두 갈래가 프리셋 연타의 대부분을 네트워크 없이 흡수한다.
+
+    실제 조회가 필요할 때만 태스크를 띄우고, **이미 떠 있으면 새로 만들지 않는다**
+    (프리셋 하나가 모델 신호를 여러 번 쏴도 요청은 한 번).
+    """
+    if not clients:
+        return
+
+    needs_usage = (
+        str(context.get_api_mode() or "").upper() == "NAI"
+        and _current_model_uses_usage_limit(context)
+    )
+    if not needs_usage:
+        asyncio.create_task(_send_only(clients, _usage_hidden_payload()))
+        return
+
+    cached = _cached_usage_payload(context)
+    if cached is not None:
+        asyncio.create_task(_send_only(clients, cached))
+        return
+
+    task = getattr(context, "headless_subscription_refresh_task", None)
+    if task is not None and not task.done():
+        return
+    new_task = asyncio.create_task(broadcast_anlas_and_usage(context, clients))
+    # 예외를 회수하지 않으면 "Task exception was never retrieved" 로 로그만 더럽힌다.
+    new_task.add_done_callback(_log_refresh_failure)
+    context.headless_subscription_refresh_task = new_task
+
+
+async def _send_only(clients: set, payload: dict[str, Any]) -> None:
+    try:
+        await broadcast_json(clients, payload)
+    except Exception as exc:  # pragma: no cover - 배지 전송 실패가 세션을 막으면 안 됨
+        print(f"[warn] usage badge broadcast failed: {exc}")
+
+
+def _log_refresh_failure(task: "asyncio.Task[Any]") -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        print(f"[warn] NAI subscription refresh failed: {exc}")
 
 
 async def broadcast_nai_usage(context: Any, clients: set) -> None:

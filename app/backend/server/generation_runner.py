@@ -13,7 +13,12 @@ from app.backend.server.generation_commands import (
     persist_prompt_engineering_settings,
     random_service,
 )
-from app.backend.server.anlas_poller import broadcast_anlas, broadcast_anlas_if_vibe_encoded
+from app.backend.server.anlas_poller import (
+    broadcast_anlas,
+    broadcast_anlas_if_vibe_encoded,
+    schedule_subscription_refresh,
+    usage_badge_active,
+)
 from app.backend.server.prompt_tools_routes import save_prompt_engineering_thumbnail_bytes
 from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json, broadcast_preview_image
 from core import result_image_payload_service as result_images
@@ -548,10 +553,20 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # Anlas와 무관해 불필요한 브로드캐스트만 낸다. build_anlas_payload가 NAI+토큰일 때만
             # 실측 조회하고, 프런트는 값이 감소했을 때만 pill을 점멸시킨다(소비 시각 피드백).
             if str(context.get_api_mode() or "").upper() == "NAI":
-                try:
-                    await broadcast_anlas(context, clients)
-                except Exception:
-                    pass
+                if usage_badge_active(context):
+                    # V5 는 Anlas 가 아니라 **별도 사용량 풀**을 쓴다. 생성해도 배지가
+                    # 안 줄어든다는 지적(2026-08-21) — 사용량 조회를 세션 시작·모델
+                    # 변경에만 걸어 두고 생성 경로에는 안 걸어 뒀다.
+                    # 캐시를 버리고(force) 한 요청으로 Anlas·사용량을 함께 갱신한다.
+                    # **기다리지 않는다** - 생성 완료 처리를 조회가 붙잡으면 안 된다.
+                    schedule_subscription_refresh(context, clients, force=True)
+                else:
+                    # V5 가 아니면 예전 그대로 Anlas 만. 메시지 수가 바뀌지 않아야
+                    # 릴리즈 웹 스모크의 생성 커맨드 계약이 어긋나지 않는다.
+                    try:
+                        await broadcast_anlas(context, clients)
+                    except Exception:
+                        pass
             # 직전 생성에 사용된 와일드카드(순차/종속 카운터 + Used)를 라이브 반영.
             # auto-continue 가 다음 프롬프트로 context 를 덮어쓰기 전에 push 한다.
             await _broadcast_wildcard_state(context, clients)

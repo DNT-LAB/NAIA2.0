@@ -227,7 +227,18 @@ def _usage_hidden_payload() -> dict[str, Any]:
     }
 
 
-def schedule_subscription_refresh(context: Any, clients: set) -> None:
+def usage_badge_active(context: Any) -> bool:
+    """지금 사용량 배지가 떠 있는 상태인가(= NAI 모드 + V5 모델).
+
+    생성 완료 경로가 "이번엔 사용량도 갱신해야 하나" 를 판단할 때 쓴다.
+    """
+    return (
+        str(context.get_api_mode() or "").upper() == "NAI"
+        and _current_model_uses_usage_limit(context)
+    )
+
+
+def schedule_subscription_refresh(context: Any, clients: set, *, force: bool = False) -> None:
     """구독 조회를 **기다리지 않고** 예약한다. 호출자는 절대 막히지 않는다.
 
     ⚠️ **항상 두 장(`anlas_update` + `nai_usage_update`)을 같은 순서로 내보낸다.**
@@ -246,6 +257,11 @@ def schedule_subscription_refresh(context: Any, clients: set) -> None:
     """
     if not clients:
         return
+
+    # 생성 직후처럼 **값이 방금 변했다고 아는** 경우에는 캐시를 버린다. 안 버리면
+    # 60초 캐시가 옛 값을 그대로 다시 보내, 생성해도 배지가 안 움직인다.
+    if force:
+        context.headless_subscription_cache = None
 
     try:
         token = str(context.secure_token_manager.get_token("nai_token") or "").strip()

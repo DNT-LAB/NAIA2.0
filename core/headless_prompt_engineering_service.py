@@ -902,7 +902,9 @@ class HeadlessPromptEngineeringService:
                 "0.35::crosshatching ::, 0.8::perspective, low-angle view ::, "
                 "0.15::light particles ::, 0.33::oekaki, cel shading, hatching (texture), "
                 "graphite (medium), thin jaggy lines ::, 0.03::hong (white spider) ::, "
-                "0.15::artist:yonchan, channel (caststation), dino (dinoartforame) ::, "
+                # 사용자 보정(2026-08-21): 이 묶음에서 `artist:yonchan, channel
+                # (caststation)` 을 빼고 `dino (dinoartforame)` 만 남긴다.
+                "0.15::dino (dinoartforame) ::, "
                 "0.5::depth of field, foreshortening ::, sharpening, amazing quality, "
                 "great quality, absurdly detailed composition, incredibly absurdres, "
                 "very aesthetic, year 2024, highly aesthetic Pixiv style illustration, "

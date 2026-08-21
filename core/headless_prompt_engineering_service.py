@@ -977,7 +977,8 @@ class HeadlessPromptEngineeringService:
                 "high contrast, flipnote studio (medium), ink (medium), cubism, saturated, "
                 "outline, retro artstyle, partially colored, flat color, blending, ukiyo-e, "
                 "sumi-e, minimalism, ai-generated, 1980s (style), bkub (style), "
-                "yasuhiko yoshikazu (style), blender (medium), 1.15::multiple views ::"
+                "yasuhiko yoshikazu (style), blender (medium), 1.15::multiple views ::, "
+                "muted color, 0.5::low contrast ::"
             ),
             "seed": "883731701",
             "seed_fixed": False,

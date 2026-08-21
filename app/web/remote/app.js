@@ -1335,7 +1335,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026071
     });
     window.__naiaSetupControllerReady = true;
     // 계정 패널은 설정 대화상자를 열 수 있어야 해서 setupController 뒤에 만든다.
-    return import('./js/features/naiAccountPanel.mjs?v=20260821-multitoken7')
+    return import('./js/features/naiAccountPanel.mjs?v=20260821-multitoken8')
       .then(({createNaiAccountPanel}) => {
         naiAccountPanel = createNaiAccountPanel({
           document,

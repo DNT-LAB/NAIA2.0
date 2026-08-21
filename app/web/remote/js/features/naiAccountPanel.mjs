@@ -219,11 +219,6 @@ export function createNaiAccountPanel({
     return `<span class="nai-acct-bar${isOut ? ' is-out' : ''}"><i style="width:${width}%"></i></span>`;
   }
 
-  /** Anlas 로 나간 장수. 서버가 따로 안 보내므로 두 카운터의 차로 구한다. */
-  function paidCount() {
-    return Math.max(0, session.total - session.free);
-  }
-
   /** 지금 묶음의 진행 게이지(연노랑). 사용자 요청 2026-08-21. */
   function blockBarHtml() {
     const width = Math.max(0, Math.min(100, (rotation.current / rotation.target) * 100));
@@ -351,11 +346,12 @@ export function createNaiAccountPanel({
         : `<span class="nai-acct-total">무료 ${session.free.toLocaleString()}`
           + `<i> / ${session.total.toLocaleString()}장</i></span>`)
       + '</div>'
+      // ⚠️ 'Anlas 소비 N장' 과 무료 조건 안내는 뺐다(사용자 지시 2026-08-21:
+      // "정보량이 과다하게 많아 그냥 치웁시다"). 헤더의 `무료 130 / 137장` 이
+      // 이미 같은 것을 말하고, 조건 안내는 배지 툴팁에 남아 있다.
       + (session.onV5 ? ''
         : '<div class="nai-acct-session">'
-          + `<span>Anlas 소비 <b>${paidCount().toLocaleString()}</b>장</span>`
-          + `<em>실행 ${esc(formatElapsed(session.elapsed))}</em></div>`
-          + '<div class="nai-acct-note">1MP · 28스텝 이하는 Anlas 를 쓰지 않습니다.</div>')
+          + `<em>실행 ${esc(formatElapsed(session.elapsed))}</em></div>`)
       + (rows.length > 1
         ? '<div class="nai-acct-sum">'
           + `<span>Anlas ${sumAnlas.toLocaleString()}</span>`

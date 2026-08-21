@@ -89,6 +89,17 @@ let _initDone = false;  // init_complete 수신 후 true → 초기 시딩 제�
 let syncingOptions = false, syncingPrompt = false, promptSendTimer = null;
 // 사용자가 로컬 편집을 했지만 아직 서버로 flush되지 않은 상태 — 서버 브로드캐스트 덮어쓰기 차단
 let _localPromptDirty = false;
+// **네거티브 입력창에 사용자가 직접 친 것**이 아직 프리셋에 안 들어간 상태.
+//
+// ⚠️ `_localPromptDirty` 로 대신하면 안 된다. 그건 두 입력창을 합쳐 보는 값이라,
+// **메인 프롬프트만 고쳐도** 화면에 떠 있던 남의 네거티브(메타데이터에서 불러온 것
+// 등)가 `origin:"edit"` 로 나가 현재 프리셋에 굳는다(Codex 리뷰 2026-08-21, 실측
+// 확인). 그래서 네거티브 전용 표시를 따로 둔다.
+//
+// ⚠️ 이 표시는 **보낼 때만** 지운다. Random 응답 등이 `promptSendTimer` 를 취소하며
+// `_localPromptDirty` 를 지우는 자리가 여럿인데, 거기서 같이 지우면 500ms 안에
+// Generate/Random 을 누른 사용자의 네거티브 편집이 조용히 사라진다.
+let _negativeUserDirty = false;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let pendingRandomRequestId = '';
 let initialStateRefreshTimer = null;
@@ -4745,12 +4756,13 @@ function onPromptEdit() {
         prompt: (interactivePanel?.isActive?.() && promptBeforeInteractive !== null)
           ? promptBeforeInteractive : promptEdit.value,
         negative_prompt: negEdit.value,
-        // ⚠️ **사용자가 직접 친 것**이라는 표시. 서버는 이때만 네거티브를 선택된
-        // 프리셋에 반영한다. 서버가 밀어 준 값을 되돌려 보내는 에코 경로가 여럿이라
-        // (프리셋 적용·메타데이터 적용·재동기), 구분이 없으면 파이프라인이 만든
-        // 네거티브가 프리셋에 굳는다.
-        origin: 'edit',
+        // ⚠️ **네거티브 입력창을 직접 친 경우에만** 표시를 단다. 서버는 이때만
+        // 네거티브를 선택된 프리셋에 반영한다. 이 함수는 메인 프롬프트 편집과
+        // Interactive 블록 변경에서도 불리므로, 무조건 달면 화면에 떠 있던 남의
+        // 네거티브가 프리셋에 굳는다(Codex 리뷰 2026-08-21).
+        ...(_negativeUserDirty ? {origin: 'edit'} : {}),
       }));
+      _negativeUserDirty = false;             // 실제로 나갔을 때만 지운다
     }
     promptSendTimer = null;
     _localPromptDirty = false;
@@ -4788,6 +4800,9 @@ function applyPromptFields(prompt, negative) {
   negEdit.value = String(negative || '');
   syncingPrompt = false;
   _localPromptDirty = false;
+  // 서버 값이 네거티브를 덮었다 - 사용자가 치던 것은 더 이상 화면에 없으므로
+  // 표시도 내린다(안 내리면 남의 값이 사용자 편집인 척 프리셋에 들어간다).
+  _negativeUserDirty = false;
   deferredPromptSync = null;
   updatePromptHighlight();
   applyPromptHighlightState();
@@ -5395,7 +5410,11 @@ function bindMetadataImageDropTarget() {
 function applyMetadataPrompt(payload) {
   if (!payload) return;
   if (promptEdit && payload.prompt != null) promptEdit.value = payload.prompt || '';
-  if (negEdit && payload.negative != null) negEdit.value = payload.negative || '';
+  if (negEdit && payload.negative != null) {
+    negEdit.value = payload.negative || '';
+    // 이미지에서 불러온 값이지 사용자가 친 것이 아니다 - 프리셋에 넣지 않는다.
+    _negativeUserDirty = false;
+  }
   if (promptSendTimer) {
     clearTimeout(promptSendTimer);
     promptSendTimer = null;
@@ -8273,10 +8292,9 @@ function flushPromptEngineeringEdits() {
 }
 
 function flushMainPromptAndParams() {
-  // 아직 안 나간 사용자 편집이 있었는가. ⚠️ **`_localPromptDirty` 를 지우기 전에**
-  // 읽어야 한다 - 이 경로는 디바운스 타이머를 취소하고 대신 보내는 자리라, 여기서
-  // 표시를 잃으면 방금 친 네거티브가 프리셋에 반영되지 않는다.
-  const wasUserEdit = !!promptSendTimer || _localPromptDirty;
+  // 아직 안 나간 **네거티브** 편집이 있었는가. 이 경로는 디바운스 타이머를 취소하고
+  // 대신 보내는 자리라, 표시를 잃으면 방금 친 네거티브가 프리셋에 반영되지 않는다.
+  const negativeWasEdited = _negativeUserDirty;
   if (promptSendTimer) {
     clearTimeout(promptSendTimer);
     promptSendTimer = null;
@@ -8287,8 +8305,9 @@ function flushMainPromptAndParams() {
       type: 'set_prompt',
       prompt: promptEdit.value,
       negative_prompt: negEdit.value,
-      ...(wasUserEdit ? {origin: 'edit'} : {}),
+      ...(negativeWasEdited ? {origin: 'edit'} : {}),
     }));
+    _negativeUserDirty = false;
     const params = _collectCurrentParams();
     Object.entries(params).forEach(([key, value]) => {
       ws.send(JSON.stringify({type: 'set_param', key, value}));
@@ -9730,7 +9749,10 @@ document.addEventListener('keydown', e => {
 });
 
 // ---- Init ----
-negEdit.addEventListener('input', onPromptEdit);
+// ⚠️ **여기가 유일하게 `_negativeUserDirty` 를 세우는 자리다.** 네거티브 입력창에
+// 사람이 친 것만 프리셋에 반영한다 - `onPromptEdit` 자체는 메인 프롬프트 편집과
+// Interactive 블록 변경에서도 불리므로 그 안에서 세우면 안 된다.
+negEdit.addEventListener('input', () => { _negativeUserDirty = true; onPromptEdit(); });
 
 // ---- Tag Filter ----
 function toggleTagFilter() { if (quickFilter) quickFilter.toggle(); }

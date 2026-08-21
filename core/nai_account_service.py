@@ -140,6 +140,22 @@ _ROTATION_ATTR = "nai_account_rotation_counter"
 _ROTATION_LOCK = threading.Lock()
 
 
+def reset_rotation_counter(context: Any) -> None:
+    """회전 카운터를 0 으로 되돌린다. **정책을 바꿀 때** 부른다.
+
+    ⚠️ 안 되돌리면 새 정책이 옛 카운터를 자기 방식으로 다시 해석한다. 80~120 으로
+    37장 뽑고 400~500 으로 바꾸면 화면이 `37/478` 이 되고(0 부터가 아니다), 라운드
+    로빈으로 바꾸면 `37 % 2 = 1` 이라 **계정이 즉시 상대편으로 넘어간다**. 사용자에게
+    "정책을 골랐더니 왜 갑자기 계정이 바뀌지" 로 보인다(사용자 지시 2026-08-21:
+    "리셋으로 바꿔주세요").
+
+    씨앗은 건드리지 않는다 - 세션 안에서 묶음 크기가 흔들리면 화면이 그릴 때마다
+    (peek) 경계가 달라져 실제 생성과 어긋난다.
+    """
+    with _ROTATION_LOCK:
+        setattr(context, _ROTATION_ATTR, 0)
+
+
 def next_rotation_counter(context: Any) -> int:
     """이번 생성에 쓸 회전 번호. 부를 때마다 1 증가한다(스레드 안전).
 
@@ -480,6 +496,11 @@ class NaiAccountService:
             uses_usage_limit = context_uses_usage_limit(self.context)
         key = POLICY_KEY_USAGE if uses_usage_limit else POLICY_KEY_ANLAS
         data = self.load()
+        previous = normalize_policy(data.get(key), uses_usage_limit)
         data[key] = normalize_policy(policy, uses_usage_limit)
         self.save(data)
+        # 정책이 실제로 바뀌었으면 회전을 **처음부터** 다시 센다(사용자 지시
+        # 2026-08-21). 이유는 `reset_rotation_counter` 주석 참조.
+        if data[key] != previous:
+            reset_rotation_counter(self.context)
         return {"ok": True, "policy": data[key]}

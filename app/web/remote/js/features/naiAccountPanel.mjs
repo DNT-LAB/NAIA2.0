@@ -197,6 +197,11 @@ export function createNaiAccountPanel({
     else openPopover();
   }
 
+  function barHtml(percent, isOut) {
+    const width = Math.max(0, Math.min(100, Number(percent) || 0));
+    return `<span class="nai-acct-bar${isOut ? ' is-out' : ''}"><i style="width:${width}%"></i></span>`;
+  }
+
   /** 초 -> `1시간 23분` / `12분` / `48초`. 세션이 얼마나 돌았는지 한눈에. */
   function formatElapsed(seconds) {
     const total = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -233,17 +238,20 @@ export function createNaiAccountPanel({
       const remain = known && !row.is_negative
         ? `~${formatImages(row.percent)}`
         : (row.is_negative ? '소진' : '—');
-      // ⚠️ 게이지(막대)는 뺐다(사용자 지시 2026-08-21). 퍼센트가 정수라 눈금이
-      // 거의 안 움직여서, 막대가 있으면 "안 줄어든다" 로 보였다. 숫자만 남긴다.
+      // ⚠️ **게이지와 퍼센트는 V5 에서만 그린다**(사용자 지시 2026-08-21).
+      // V4.5 이하는 이 무료 풀을 쓰지 않으므로 퍼센트를 띄우면 거짓말이 된다 -
+      // 그 자리는 세션 요약(무료 생성 수 · 실행 시간)이 대신한다.
       return `<div class="nai-acct-row${row.is_next ? ' is-next' : ''}">`
         + '<div class="nai-acct-line">'
         + `<span class="nai-acct-name">${esc(name)}</span>`
-        + `<span class="nai-acct-pct">${esc(pct)}</span>`
+        + (session.onV5
+          ? barHtml(known ? row.percent : 0, known && row.is_negative)
+            + `<span class="nai-acct-pct">${esc(pct)}</span>`
+          : '<span class="nai-acct-spacer"></span>')
         + '</div>'
         + '<div class="nai-acct-sub">'
         + `<span>Anlas ${esc(anlas)}</span>`
-        + '<i>|</i>'
-        + `<span>NAID5 Remain : ${esc(remain)}</span>`
+        + (session.onV5 ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}</span>` : '')
         + '</div>'
         + '</div>';
     }).join('');
@@ -266,31 +274,39 @@ export function createNaiAccountPanel({
   function renderPopover() {
     const el = popEl();
     if (!el || !popOpen) return;
-    // 머리말은 **이번 세션**을 말한다 - 퍼센트 통합값은 눈금이 안 움직여 쓸모가
-    // 적었다(사용자 지시 2026-08-21). 계정별 잔량은 아래 행이 그대로 보여 준다.
-    const live = accountUsageRows().filter(r => r.available && !r.is_negative);
+    // ⚠️ **V5 와 비V5 는 다른 화면이다**(사용자 지시 2026-08-21).
+    //   V5   : 퍼센트/게이지 그대로 - 그 무료 풀을 실제로 쓰고 있으니 잔량이 답이다.
+    //   비V5 : 퍼센트가 뜻이 없다(그 풀을 안 쓴다). 대신 **이번 세션 무료 생성 수 +
+    //          실행 시간** 을 보여 준다. V5 에서는 이 값이 가치가 없다 - 잔량이 이미
+    //          같은 질문에 더 정확히 답한다.
+    const rows = accountUsageRows();
+    const live = rows.filter(r => r.available && !r.is_negative);
     const sumImages = live.reduce((s, r) => s + imageCount(r.percent), 0);
-    const sumAnlas = accountUsageRows()
-      .reduce((s, r) => s + (Number.isFinite(r.anlas) ? r.anlas : 0), 0);
+    const sumAnlas = rows.reduce((s, r) => s + (Number.isFinite(r.anlas) ? r.anlas : 0), 0);
+    const total = totalPercent == null ? '—' : `${totalPercent}%`;
     el.innerHTML = ''
       + '<div class="nai-acct-head">'
       + '<span class="nai-acct-title">USAGE</span>'
       + `<button type="button" class="nai-acct-pin${pinned ? ' on' : ''}" data-act="pin"`
       + ` aria-pressed="${pinned ? 'true' : 'false'}"`
       + ` title="${pinned ? '고정 해제' : '열어 둔 채 고정'}">${pinned ? '📌' : '📍'}</button>`
-      + `<span class="nai-acct-total">${session.free.toLocaleString()}장</span>`
-      + '</div>'
-      + '<div class="nai-acct-session">'
-      + `<span>이번 세션 무료 생성 <b>${session.free.toLocaleString()}</b>장</span>`
-      + `<em>실행 ${esc(formatElapsed(session.elapsed))}</em>`
+      + (session.onV5
+        ? `<span class="nai-acct-total">통합 ${esc(total)}</span>`
+        : `<span class="nai-acct-total">${session.free.toLocaleString()}장</span>`)
       + '</div>'
       + (session.onV5 ? ''
-        : '<div class="nai-acct-note">V5 가 아닌 모델은 무료 사용량을 쓰지 않습니다.</div>')
-      + (live.length > 1
+        : '<div class="nai-acct-session">'
+          + `<span>이번 세션 무료 생성 <b>${session.free.toLocaleString()}</b>장</span>`
+          + `<em>실행 ${esc(formatElapsed(session.elapsed))}</em></div>`
+          + '<div class="nai-acct-note">V5 가 아닌 모델은 무료 사용량을 쓰지 않습니다.</div>')
+      + (rows.length > 1
         ? '<div class="nai-acct-sum">'
-          + `<span>Anlas ${sumAnlas.toLocaleString()}</span><i>|</i>`
-          + `<span>NAID5 Remain : ~${sumImages.toLocaleString()}</span>`
-          + `<em>${esc(IMAGE_BASIS_NOTE)}</em></div>`
+          + `<span>Anlas ${sumAnlas.toLocaleString()}</span>`
+          + (session.onV5
+            ? `<i>|</i><span>NAID5 Remain : ~${sumImages.toLocaleString()}</span>`
+              + `<em>${esc(IMAGE_BASIS_NOTE)}</em>`
+            : '')
+          + '</div>'
         : '')
       + `<div class="nai-acct-rows">${accountRowsHtml()}</div>`
       + '<button type="button" class="nai-acct-manage" data-act="manage">'

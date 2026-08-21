@@ -18557,6 +18557,8 @@ select.setup-input { cursor: pointer; }
   flex: 0 0 34px; text-align: right;
   font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
+/* 비V5 에서는 게이지/퍼센트를 안 그린다 - 이름만 남으면 줄이 무너지므로 자리를 채운다. */
+.nai-acct-spacer { flex: 1 1 auto; }
 .nai-acct-empty, .nai-acct-note {
   font-size: 11px; color: #7c7c92; padding: 4px 0;
 }

@@ -199,7 +199,7 @@ export function createPromptEngineeringPanel({
   let presetQuery = '';
   let presetHaystack = new Map();     // 프리셋 이름 -> 검색 대상 문자열(소문자)
   let presetAllOptions = null;        // 필터 전 원본 <option> 들
-  // 마지막으로 갈래를 맞춰 준 프리셋. 같은 프리셋에 두 번 맞추지 않는다 -
+  // 마지막으로 갈래를 맞춘 `프리셋 갈래` 쌍. 같은 쌍에 두 번 맞추지 않는다 -
   // 그래야 사용자가 누른 필터가 그대로 남는다(alignPresetGroupToSelection 주석).
   let lastAlignedPreset = null;
 
@@ -228,14 +228,20 @@ export function createPromptEngineeringPanel({
    *  안 바꾸므로 아래 조기 반환에 걸린다). ALL 일 때는 어차피 다 보이니 건드리지 않는다. */
   function alignPresetGroupToSelection(select) {
     const current = select.value;
-    if (!current || current === lastAlignedPreset) return;
-    lastAlignedPreset = current;
-    const group = String(select.dataset.optionFilterActive || 'all');
-    if (group === 'all') return;
+    if (!current) return;
     const source = presetAllOptions || Array.from(select.options);
     const option = source.find(opt => opt.value === current);
     const own = String((option && option.dataset.modelGroup) || 'etc');
-    if (own === group) return;
+    // ⚠️ **프리셋 이름만 기억하면 안 된다.** 파라미터 자동 반영이 프리셋의 모델을
+    // 바꾸면 같은 프리셋의 **갈래가 달라진다** - 이름만 보면 그 변화를 놓친다.
+    // 실측(사용자 제보 2026-08-21): 4.5 프리셋을 고른 상태에서 모델을 5.0 으로
+    // 바꿨다가 되돌리면, 중간에 v5 로 옮겨 간 필터가 그대로 남아 4.5 프리셋인데
+    // 목록은 NAI5 를 보여 줬다.
+    const key = `${current} ${own}`;
+    if (key === lastAlignedPreset) return;
+    lastAlignedPreset = key;
+    const group = String(select.dataset.optionFilterActive || 'all');
+    if (group === 'all' || own === group) return;
     select.dataset.optionFilterActive = own;
     writePresetGroup(own);
   }

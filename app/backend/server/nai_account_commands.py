@@ -56,13 +56,17 @@ def _snapshot_payload(context: Any) -> dict[str, Any]:
 
 
 def _set_token(context: Any, account_id: str, token: str) -> dict[str, Any]:
-    """검증 -> 저장. 실패하면 저장하지 않는다(위 주석의 이유)."""
+    """검증 -> 저장 -> 켜기. 검증에 실패하면 저장하지 않는다(위 주석의 이유)."""
     result = api_verification.verify_nai_token(token)
     if not result.success:
         return {"ok": False, "message": result.message}
-    saved = NaiAccountService(context).set_token(account_id, result.value or token)
+    service = NaiAccountService(context)
+    saved = service.set_token(account_id, result.value or token)
     if not saved.get("ok"):
         return saved
+    # 토큰을 넣었다는 건 그 계정을 쓰겠다는 뜻이다. 꺼 둔 채로 두면 "넣었는데 왜
+    # 안 쓰이지" 가 된다 - 계정은 토큰이 없을 때만 꺼진 채로 만든다.
+    service.set_enabled(account_id, True)
     return {"ok": True, "message": result.message}
 
 
